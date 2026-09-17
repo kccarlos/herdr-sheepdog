@@ -30,3 +30,16 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# Claude Code project state
+.claude/
+
+# macOS
+.DS_Store
+
+# Build outputs
+/bin/
+/dist/
+
+# local test audio
+*.wav
