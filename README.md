@@ -2,17 +2,18 @@
 
 A voice supervisor for a herdr agent fleet, built on Gemini Live.
 
-**Status:** pre-alpha. WP1–WP3 and WP5 of
+**Status:** pre-alpha. WP1–WP5 of
 [`sheepdog-v1-plan.md`](sheepdog-v1-plan.md) are in: the herdr socket
 client, the debounced/deduplicated agent state watcher and the persisted
 state table (`sheepdog herdr watch`), the Gemini Live voice session with
 tool plumbing, push queue and resumption (`sheepdog voice-test`), the
-supervisor with the five voice tools and the cheap-LLM templates, and the
-daemon itself (`sheepdog serve`): JSONL event log, web server with the
-`/debug` page, SSE tail, fake-event injection and the server side of the
-browser WebSocket contract ([`docs/ws-contract.md`](docs/ws-contract.md)).
-The real `/voice` page (WP6), the CLI query tool (WP4) and packaging (WP7)
-are still to come.
+supervisor with the five voice tools and the cheap-LLM templates, the
+read-only CLI query tool that backs `ask()`'s deep path (codex/claude,
+`sheepdog ask-test`, see [`docs/cli-query-tools.md`](docs/cli-query-tools.md)),
+and the daemon itself (`sheepdog serve`): JSONL event log, web server with
+the `/debug` page, SSE tail, fake-event injection and the server side of
+the browser WebSocket contract ([`docs/ws-contract.md`](docs/ws-contract.md)).
+The real `/voice` page (WP6) and packaging (WP7) are still to come.
 
 ## Usage (so far)
 
@@ -20,6 +21,7 @@ are still to come.
 sheepdog serve                              # the daemon: http://127.0.0.1:7777/debug
 sheepdog serve --voice=off --herdr=mock     # no Gemini, no herdr: drive it from /debug
 sheepdog serve --verbose --port 8080        # echo every event to stderr
+sheepdog serve --cli=off                    # disable the CLI query tool; ask() answers from the screen only
 
 sheepdog herdr watch            # JSONL transitions on stdout, herdr.* events on stderr
 sheepdog herdr watch --once     # print the persisted state table and exit
@@ -28,6 +30,11 @@ sheepdog herdr watch --once     # print the persisted state table and exit
 sheepdog voice-test --in testdata/audio/question.wav --out reply.wav
 sheepdog voice-test --text "yes go ahead"                       # simulated utterance
 sheepdog voice-test --in q.wav --push "Auth is blocked" --push-after 9s --drop-after 15s
+
+# run codex or claude read-only against a workspace, then the spoken_answer pass
+sheepdog ask-test --workspace ~/proj --question "why did the tests fail"
+sheepdog ask-test --workspace ~/proj --question "what changed" --backend claude
+sheepdog ask-test --workspace ~/proj --question "why" --backend codex --raw   # skip spoken_answer
 ```
 
 Configuration lives in `~/.config/sheepdog/config.toml` (optional) with
@@ -36,8 +43,15 @@ Configuration lives in `~/.config/sheepdog/config.toml` (optional) with
 `snapshot_interval_s`, `pending_ttl_s`, an `[aliases]` table mapping pane
 ids to spoken names, e.g. `"w9:p1" = "auth"`, `[gemini]` with `api_keys`,
 `model` and `voice`, `[llm]` with `base_url`, `model` and `api_key` (any
-OpenAI-compatible endpoint; `http://localhost:11434/v1` for Ollama), and
-`[web]` with `port` (default 7777, `SHEEPDOG_WEB_PORT`). The Gemini key pool is also read from `GEMINI_API_KEY` and
+OpenAI-compatible endpoint; `http://localhost:11434/v1` for Ollama),
+`[web]` with `port` (default 7777, `SHEEPDOG_WEB_PORT`), and `[cli]` with
+`prefer` (`codex` | `claude` | `auto`, default `auto`), `codex_bin`,
+`claude_bin`, `codex_cmd` / `claude_cmd` (argv templates with `{question}`,
+`{cwd}`, `{model}`, `{reasoning}`; TOML-only), `claude_model` (default a
+Haiku id), `codex_reasoning` (default `low`), `timeout_s` (default 60) and
+`max_output_kb` (default 16) — see
+[`docs/cli-query-tools.md`](docs/cli-query-tools.md) for why each default
+flag is there. The Gemini key pool is also read from `GEMINI_API_KEY` and
 `GEMINI_API_KEY_1` … `GEMINI_API_KEY_9` (rotated on rate limits).
 
 > **⚠️ Worker agents must NOT run in fully auto-approve mode.**

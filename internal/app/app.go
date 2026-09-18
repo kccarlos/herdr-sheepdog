@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kccarlos/herdr-sheepdog/internal/cli"
 	"github.com/kccarlos/herdr-sheepdog/internal/config"
 	"github.com/kccarlos/herdr-sheepdog/internal/eventlog"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
@@ -25,12 +26,14 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/web"
 )
 
-// Modes for Options.Voice and Options.Herdr.
+// Modes for Options.Voice, Options.Herdr and Options.CLI.
 const (
 	VoiceGemini = "gemini"
 	VoiceOff    = "off"
 	HerdrSocket = "socket"
 	HerdrMock   = "mock"
+	CLIOn       = "on"
+	CLIOff      = "off"
 )
 
 // Options select the daemon's mode; zero values take the defaults noted.
@@ -39,6 +42,9 @@ type Options struct {
 	Voice string
 	// Herdr is HerdrSocket (default) or HerdrMock.
 	Herdr string
+	// CLI is CLIOn (default) or CLIOff (`--cli=off` disables the deep-ask
+	// path; ask() then answers from the screen alone).
+	CLI string
 	// Port overrides config web.port when > 0; 0 with an empty config
 	// port picks a free port (tests).
 	Port int
@@ -61,6 +67,9 @@ func (o Options) withDefaults() Options {
 	}
 	if o.Herdr == "" {
 		o.Herdr = HerdrSocket
+	}
+	if o.CLI == "" {
+		o.CLI = CLIOn
 	}
 	if o.Stderr == nil {
 		o.Stderr = os.Stderr
@@ -92,6 +101,8 @@ type App struct {
 	voice voice.Session // nil when off
 	web   *web.Server
 	port  int
+
+	queryLazy *lazyQuerier // nil when --cli=off; filled in by Run after daemon.start
 }
 
 // Build validates the options and wires every component. Nothing is
@@ -103,6 +114,9 @@ func Build(cfg config.Config, opts Options) (*App, error) {
 	}
 	if opts.Herdr != HerdrSocket && opts.Herdr != HerdrMock {
 		return nil, fmt.Errorf("app: --herdr must be %s or %s", HerdrSocket, HerdrMock)
+	}
+	if opts.CLI != CLIOn && opts.CLI != CLIOff {
+		return nil, fmt.Errorf("app: --cli must be %s or %s", CLIOn, CLIOff)
 	}
 	if opts.Voice == VoiceGemini && len(cfg.Gemini.APIKeys) == 0 {
 		return nil, errors.New("app: --voice=gemini needs GEMINI_API_KEY (or gemini.api_keys); use --voice=off to run without it")
@@ -158,9 +172,18 @@ func (a *App) wire() error {
 	}
 
 	// The supervisor is built before the voice session (its Handler is the
-	// session's tool handler); the pusher is filled in below.
+	// session's tool handler); the pusher is filled in below. The querier
+	// (WP4) is detected and built in Run, after daemon.start is logged, so
+	// cli.detected never races ahead of it; a nil *lazyQuerier still
+	// satisfies supervisor.Querier so ask() can route to it once ready.
 	pusher := &lazyPusher{}
-	sup, err := supervisor.New(store, a.herdr, llmClient, nil, pusher, a.log, supervisor.Config{
+	lazyQ := &lazyQuerier{}
+	var querier supervisor.Querier // nil (not lazyQ) when --cli=off, so ask() skips the deep path entirely
+	if opts.CLI == CLIOn {
+		querier = lazyQ
+		a.queryLazy = lazyQ
+	}
+	sup, err := supervisor.New(store, a.herdr, llmClient, querier, pusher, a.log, supervisor.Config{
 		PendingTTL: time.Duration(cfg.PendingTTLS) * time.Second,
 		DataDir:    cfg.DataDir,
 	})
@@ -217,6 +240,35 @@ func (a *App) wire() error {
 	return nil
 }
 
+// buildQuerier detects codex/claude on PATH (logging cli.detected) and, if
+// either is found, builds the Runner that backs ask()'s deep path. Called
+// from Run, once, right after daemon.start. Neither found returns
+// (nil, nil): the deep path is simply unavailable, per plan §3.5 ("if
+// absent, ask() still works with the cheap LLM alone").
+func (a *App) buildQuerier() (*cli.Runner, error) {
+	cfg := cli.Config{
+		Prefer:         a.cfg.CLI.Prefer,
+		CodexBin:       a.cfg.CLI.CodexBin,
+		ClaudeBin:      a.cfg.CLI.ClaudeBin,
+		CodexCmd:       a.cfg.CLI.CodexCmd,
+		ClaudeCmd:      a.cfg.CLI.ClaudeCmd,
+		ClaudeModel:    a.cfg.CLI.ClaudeModel,
+		CodexReasoning: a.cfg.CLI.CodexReasoning,
+		Timeout:        time.Duration(a.cfg.CLI.TimeoutS) * time.Second,
+		MaxOutputBytes: a.cfg.CLI.MaxOutputKB << 10,
+		Log:            a.log,
+	}
+	det := cli.Detect(cfg, a.log)
+	if !det.Codex && !det.Claude {
+		return nil, nil
+	}
+	runner, err := cli.NewRunner(cfg, det)
+	if err != nil {
+		return nil, fmt.Errorf("app: cli: %w", err)
+	}
+	return runner, nil
+}
+
 // aliases returns the spoken names known at start (config + state table)
 // for the voice model's vocabulary.
 func (a *App) aliases() []string {
@@ -264,9 +316,16 @@ func (a *App) Run(ctx context.Context) (err error) {
 		}
 	}
 	a.log.Log("daemon", "daemon.start", "", map[string]any{
-		"version": a.opts.Version, "voice": a.opts.Voice, "herdr": a.opts.Herdr, "url": a.URL(),
+		"version": a.opts.Version, "voice": a.opts.Voice, "herdr": a.opts.Herdr, "cli": a.opts.CLI, "url": a.URL(),
 		"data_dir": a.cfg.DataDir, "llm_model": a.cfg.LLM.Model, "llm_base_url": a.cfg.LLM.BaseURL,
 	})
+	if a.queryLazy != nil {
+		if runner, err := a.buildQuerier(); err != nil {
+			a.log.Log("daemon", "daemon.cli_error", "", map[string]any{"error": err.Error()})
+		} else if runner != nil {
+			a.queryLazy.set(runner)
+		}
+	}
 	start := time.Now()
 	defer func() {
 		a.log.Log("daemon", "daemon.stop", "", map[string]any{"version": a.opts.Version, "uptime_s": int(time.Since(start).Seconds()), "error": errString(err)})
@@ -439,6 +498,32 @@ func (l *lazyPusher) Push(text string, u voice.Urgency) error {
 		return errors.New("app: no pusher")
 	}
 	return p.Push(text, u)
+}
+
+// lazyQuerier lets the supervisor be built (with a non-nil Querier, so
+// ask()'s deep path is enabled) before CLI detection has run: detection
+// happens in Run, after daemon.start is logged, so cli.detected/cli.run
+// never precede it in the event log.
+type lazyQuerier struct {
+	mu sync.Mutex
+	q  supervisor.Querier
+}
+
+func (l *lazyQuerier) set(q supervisor.Querier) {
+	l.mu.Lock()
+	l.q = q
+	l.mu.Unlock()
+}
+
+// Query implements supervisor.Querier.
+func (l *lazyQuerier) Query(ctx context.Context, workspace, question string) (string, error) {
+	l.mu.Lock()
+	q := l.q
+	l.mu.Unlock()
+	if q == nil {
+		return "", cli.ErrUnavailable
+	}
+	return q.Query(ctx, workspace, question)
 }
 
 // teeLogger writes every event to both loggers.
