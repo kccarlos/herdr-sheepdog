@@ -32,24 +32,33 @@ var (
 // Kind of a turn: what the assistant asked for.
 type Kind string
 
-// The turn kinds. Ask and propose are CEO turns; summarize and
-// keep_promise are event turns the supervisor runs after a worker's
-// blocked/done announcement (docs/roles.md "Delivery" 2).
+// The turn kinds. Ask and propose are CEO turns; announce is the event
+// turn the supervisor runs on a worker's block or finish (docs/roles.md
+// "Push judgment").
 const (
 	KindAsk     Kind = "ask"
 	KindPropose Kind = "propose"
-	// KindSummarize enriches a template announcement with context: what
-	// the CEO asked for, what is still open. An empty Spoken means the
-	// template sentence was sufficient.
-	KindSummarize Kind = "summarize"
-	// KindKeepPromise turns a kept promise plus the fresh template
-	// sentence into one spoken line.
-	KindKeepPromise Kind = "keep_promise"
+	// KindAnnounce decides what the assistant says about a worker event
+	// and how urgently: one line that replaces the template sentence
+	// (and keeps the promises the event fulfils), or an addition when
+	// the template was already spoken (a question is never delayed).
+	// The reply's Urgency may be skip or silent; an empty Spoken is a
+	// skip. The chattiness ceiling is applied by the supervisor.
+	KindAnnounce Kind = "announce"
 )
 
 // IsEvent reports whether k is an event-triggered kind: read-only tools,
 // the enrich timeout, and an empty Spoken allowed.
-func (k Kind) IsEvent() bool { return k == KindSummarize || k == KindKeepPromise }
+func (k Kind) IsEvent() bool { return k == KindAnnounce }
+
+// The urgencies an announce reply may ask for (Reply.Urgency); the
+// supervisor caps them under the chattiness ceiling.
+const (
+	UrgencyInterrupt = "interrupt"
+	UrgencyIdle      = "idle"
+	UrgencySilent    = "silent"
+	UrgencySkip      = "skip"
+)
 
 // Trigger of a turn: a CEO utterance (a voice tool call) or an event.
 type Trigger string
@@ -75,15 +84,20 @@ type Request struct {
 	Agent string
 	// Event is the worker event of an event turn (done, blocked).
 	Event string
-	// Template is the sentence the template path already pushed for the
-	// event (the brain adds to it, never repeats it).
+	// Template is the template path's sentence for the event: what the
+	// brain's Spoken replaces, or (TemplateSpoken) what was already said.
 	Template string
+	// TemplateSpoken reports that the supervisor already pushed Template
+	// before the turn (a block: a question is never delayed), so Spoken
+	// is an addition, not a replacement.
+	TemplateSpoken bool
 	// Screen is the pane read the supervisor already took for the event;
 	// it is put in the window (wrapped as worker output, pruned like a
 	// tool result) so the turn need not read again.
 	Screen string
-	// Promise is the promise a keep_promise turn keeps.
-	Promise *PromiseInfo
+	// Promises are the promises this event keeps (already marked kept by
+	// the supervisor): the CEO asked to be told, so Spoken says so.
+	Promises []PromiseInfo
 }
 
 // Reply is the answer contract (docs/roles.md): what the assistant says,
@@ -95,8 +109,16 @@ type Reply struct {
 	Options   []string `json:"options,omitempty"`
 	Clarify   bool     `json:"clarify"`
 	// RelatesTo names the CEO's request the event fulfils, when an
-	// enrichment found one ("the rerun you asked for").
+	// announce turn found one ("the rerun you asked for").
 	RelatesTo string `json:"relates_to,omitempty"`
+	// Urgency is what an announce turn asks for: interrupt, idle, silent
+	// or skip (see the Urgency constants); "" means idle when Spoken is
+	// set and skip when it is not.
+	Urgency string `json:"urgency,omitempty"`
+	// KeepsPromiseIDs lists the ids of the request's promises the
+	// announce turn's Spoken keeps (informational: the supervisor keeps
+	// every matching promise regardless).
+	KeepsPromiseIDs []string `json:"keeps_promise_ids,omitempty"`
 }
 
 // Promise events and statuses (state.Promise mirrors them; the brain

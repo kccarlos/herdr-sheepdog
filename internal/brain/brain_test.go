@@ -690,7 +690,7 @@ func TestSystemPromptSections(t *testing.T) {
 			t.Errorf("section %s is empty", s["name"])
 		}
 	}
-	if strings.Join(names, " ") != "role tools record promises rail fallback contract user roster ledger time" {
+	if strings.Join(names, " ") != "role tools record promises announcing rail fallback contract user roster ledger time" {
 		t.Errorf("sections = %v", names)
 	}
 	sys := h.model.Calls()[0].System()
@@ -722,7 +722,7 @@ func TestEventTurnYieldsToCEO(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		_, eventErr = h.brain.Turn(context.Background(), Request{Kind: KindSummarize, Agent: "auth", Event: "done", Template: "auth finished."})
+		_, eventErr = h.brain.Turn(context.Background(), Request{Kind: KindAnnounce, Agent: "auth", Event: "done", Template: "auth finished."})
 		mu.Lock()
 		order = append(order, "event")
 		mu.Unlock()
@@ -773,7 +773,7 @@ func TestEventTurnYieldsToCEO(t *testing.T) {
 	}
 	// Without a CEO turn waiting, the same event turn completes.
 	m.Add(braintest.Step{Calls: []*genai.FunctionCall{braintest.FC(ToolRecall, map[string]any{"query": "auth"})}})
-	if rep, err := h.brain.Turn(context.Background(), Request{Kind: KindSummarize, Agent: "auth", Event: "done", Template: "auth finished."}); err != nil || rep.Spoken != "done" {
+	if rep, err := h.brain.Turn(context.Background(), Request{Kind: KindAnnounce, Agent: "auth", Event: "done", Template: "auth finished."}); err != nil || rep.Spoken != "done" {
 		t.Errorf("event turn alone = %+v %v", rep, err)
 	}
 }
@@ -795,22 +795,22 @@ func TestEventTurnsCoalesce(t *testing.T) {
 	}
 	wg.Add(1)
 	first := make(chan error, 1)
-	go run(KindSummarize, "auth", "blocked", first)
+	go run(KindAnnounce, "auth", "blocked", first)
 	deadline := time.Now().Add(2 * time.Second)
 	for len(h.model.Calls()) == 0 && time.Now().Before(deadline) {
 		time.Sleep(time.Millisecond)
 	}
 	wg.Add(1)
 	queued := make(chan error, 1)
-	go run(KindSummarize, "auth", "working", queued)
+	go run(KindAnnounce, "auth", "working", queued)
 	waitQueued(t, h.brain, 1)
 	wg.Add(1)
 	docs := make(chan error, 1)
-	go run(KindSummarize, "docs", "done", docs)
+	go run(KindAnnounce, "docs", "done", docs)
 	waitQueued(t, h.brain, 2)
 	wg.Add(1)
 	newer := make(chan error, 1)
-	go run(KindSummarize, "auth", "done", newer)
+	go run(KindAnnounce, "auth", "done", newer)
 	// The queued auth turn is dropped at once, before the lock is free.
 	if err := <-queued; !errors.Is(err, ErrCoalesced) || !errors.Is(err, ErrFallback) {
 		t.Errorf("queued auth turn err = %v", err)
@@ -827,7 +827,7 @@ func TestEventTurnsCoalesce(t *testing.T) {
 		}
 	}
 	co := h.log.ofType("brain.event_coalesced")
-	if len(co) != 1 || payload(co[0])["agent"] != "auth" || payload(co[0])["event"] != "done" || payload(co[0])["kind"] != "summarize" {
+	if len(co) != 1 || payload(co[0])["agent"] != "auth" || payload(co[0])["event"] != "done" || payload(co[0])["kind"] != "announce" {
 		t.Errorf("brain.event_coalesced = %v", co)
 	}
 	if fb := h.log.ofType("brain.fallback"); len(fb) != 1 || payload(fb[0])["reason"] != "coalesced" || payload(fb[0])["agent"] != "auth" || payload(fb[0])["turn"] != nil {
@@ -943,10 +943,10 @@ func TestWindowAndTranscriptAccessors(t *testing.T) {
 			t.Errorf("section %s empty", s.Name)
 		}
 	}
-	if strings.Join(names, " ") != "role tools record promises rail fallback contract user roster ledger time" {
+	if strings.Join(names, " ") != "role tools record promises announcing rail fallback contract user roster ledger time" {
 		t.Errorf("sections = %v", names)
 	}
-	if strings.Join(sources, " ") != "embedded embedded embedded embedded embedded embedded embedded embedded dynamic dynamic dynamic" {
+	if strings.Join(sources, " ") != "embedded embedded embedded embedded embedded embedded embedded embedded embedded dynamic dynamic dynamic" {
 		t.Errorf("sources = %v", sources)
 	}
 }

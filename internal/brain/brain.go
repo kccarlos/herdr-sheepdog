@@ -229,6 +229,13 @@ func (b *Brain) Engine() ContextEngine { return b.engine }
 // Config returns the effective configuration (defaults applied).
 func (b *Brain) Config() Config { return b.cfg }
 
+// Queued returns how many turns wait for the turn lock, CEO turns and
+// event turns separately.
+func (b *Brain) Queued() (ceo, event int) {
+	ceo = b.lock.ceoWaiting()
+	return ceo, b.lock.waiting() - ceo
+}
+
 // Turns returns how many turns have started.
 func (b *Brain) Turns() int {
 	b.mu.Lock()

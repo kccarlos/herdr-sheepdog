@@ -14,9 +14,10 @@ import (
 // Promised work (docs/roles.md "Promises"): "tell me when it's done" is
 // recorded by the brain's promise tool (brainHost.Promise → createPromise),
 // persisted in the state file's session so a restart keeps it, and kept
-// here at the matching worker event with a push that bypasses the
-// chattiness ceiling — a promise is the user's explicit request. Expiry
-// (Config.PromiseTTL) and cancel are the only other ways out.
+// at the matching worker event by the announcement (announce.go) with a
+// line that bypasses the chattiness ceiling — a promise is the user's
+// explicit request. Expiry (Config.PromiseTTL) and cancel are the only
+// other ways out.
 
 // createPromise records an open promise for paneID and logs
 // promise.created. turn is the brain turn that made it (0 outside one).
@@ -102,40 +103,44 @@ func promiseMatches(p state.Promise, paneID, event string) bool {
 	return p.Status == state.PromiseOpen && p.PaneID == paneID && (p.Event == event || p.Event == brain.PromiseEventAnyChange)
 }
 
-// keepPromises keeps every open promise of paneID that waits for event:
-// one spoken line each — through the brain when one is attached (a
-// keep_promise event turn with the promise and the fresh template
-// sentence), else "As you asked: <sentence>" — pushed whatever the
-// chattiness level, at idle urgency, or interrupt when the promise is
-// past its due time. The promise is marked kept first (promise.kept), so
-// nothing is said twice.
+// keepPromises keeps the open promises of row that wait for event (a
+// working or idle change, which is otherwise never announced): when any
+// matches, the event is announced with sentence as a promise-only
+// announcement — one line through the brain, or "As you asked:
+// <sentence>" — at every chattiness level. Blocks and finishes keep
+// their promises inside their own announce call.
 func (s *Supervisor) keepPromises(ctx context.Context, row state.Agent, event, sentence string) {
 	for _, p := range s.openPromises() {
-		if !promiseMatches(p, row.PaneID, event) {
+		if promiseMatches(p, row.PaneID, event) {
+			s.announce(ctx, announcement{row: row, kind: pushPromiseOnly, event: event, sentence: sentence})
+			return
+		}
+	}
+}
+
+// keepMatching marks every open promise of paneID that waits for event
+// as kept (the brain sees the record before the announce turn) and
+// returns them, oldest first. Marking first means nothing is said twice.
+func (s *Supervisor) keepMatching(paneID, event string) []state.Promise {
+	var kept []state.Promise
+	for _, p := range s.openPromises() {
+		if !promiseMatches(p, paneID, event) {
 			continue
 		}
 		s.mu.Lock()
-		kept, ok := s.resolvePromise(p.ID, state.PromiseKept)
+		k, ok := s.resolvePromise(p.ID, state.PromiseKept)
 		s.mu.Unlock()
-		if !ok {
-			continue
+		if ok {
+			kept = append(kept, k)
 		}
-		spoken, via := "As you asked: "+sentence, "template"
-		if s.brain != nil {
-			info := promiseInfo(kept)
-			rep, err := s.brain.Turn(ctx, brain.Request{Kind: brain.KindKeepPromise, Trigger: brain.TriggerEvent, Agent: aliasOr(row.Alias), Event: event, Template: sentence, Promise: &info})
-			if err == nil {
-				if line := spokenLine(rep.Spoken); line != "" {
-					spoken, via = line, "brain"
-				}
-			}
-		}
-		urgency := voice.UrgencyIdle
-		if kept.Due != nil && !s.cfg.Now().Before(*kept.Due) {
-			urgency = voice.UrgencyInterrupt
-		}
-		s.log.Log(logSource, "promise.kept", row.PaneID, map[string]any{"id": kept.ID, "text": kept.Text, "agent": aliasOr(kept.Alias), "event": event, "spoken": spoken, "urgency": urgency.String(), "via": via, "chattiness": string(s.chattiness())})
-		s.push(row.PaneID, spoken, urgency)
+	}
+	return kept
+}
+
+// logKept emits promise.kept for every promise the spoken line keeps.
+func (s *Supervisor) logKept(kept []state.Promise, event, spoken string, u voice.Urgency, via string) {
+	for _, p := range kept {
+		s.log.Log(logSource, "promise.kept", p.PaneID, map[string]any{"id": p.ID, "text": p.Text, "agent": aliasOr(p.Alias), "event": event, "spoken": spoken, "urgency": u.String(), "via": via, "chattiness": string(s.chattiness())})
 	}
 }
 

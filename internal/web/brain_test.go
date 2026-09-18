@@ -110,7 +110,7 @@ func TestBrainEndpointsWithFakeBrain(t *testing.T) {
 	if sum != cx.EstimatedTokens {
 		t.Errorf("window sum %d != estimated %d", sum, cx.EstimatedTokens)
 	}
-	if n := len(cx.SystemPrompt.Sections); n != 11 || cx.SystemPrompt.Sections[0].Source != "embedded" || cx.SystemPrompt.Sections[n-1].Source != "dynamic" || cx.SystemPrompt.TotalChars == 0 || cx.SystemPrompt.Sections[0].Text != "" {
+	if n := len(cx.SystemPrompt.Sections); n != 12 || cx.SystemPrompt.Sections[0].Source != "embedded" || cx.SystemPrompt.Sections[n-1].Source != "dynamic" || cx.SystemPrompt.TotalChars == 0 || cx.SystemPrompt.Sections[0].Text != "" {
 		t.Errorf("system prompt summary = %+v", cx.SystemPrompt)
 	}
 
@@ -148,7 +148,7 @@ func TestBrainEndpointsWithFakeBrain(t *testing.T) {
 	}
 
 	var sp PromptInfo
-	if code := h.getJSON("/api/brain/system_prompt", &sp); code != http.StatusOK || len(sp.Sections) != 11 || !strings.Contains(sp.Sections[0].Text, "SVP") || !strings.Contains(sp.Text, "## Agents") || !strings.Contains(sp.Text, "auth") {
+	if code := h.getJSON("/api/brain/system_prompt", &sp); code != http.StatusOK || len(sp.Sections) != 12 || !strings.Contains(sp.Sections[0].Text, "SVP") || !strings.Contains(sp.Text, "## Agents") || !strings.Contains(sp.Text, "auth") {
 		t.Errorf("/api/brain/system_prompt = %d %+v", code, sp)
 	}
 

@@ -71,6 +71,11 @@ type Config struct {
 	// PromiseTTL is how long an open promise waits for its event before
 	// it expires silently (default 2 h).
 	PromiseTTL time.Duration
+	// AnnounceWait is how long the first audible announcement of a
+	// finish waits for the brain's announce turn before the template
+	// sentence is spoken (default 2 s; the brain's line may still follow
+	// as an addition). Negative waits for the turn's own timeout.
+	AnnounceWait time.Duration
 	// Brain, when set, answers ask and propose first (docs/roles.md); the
 	// template path below is its fallback. New attaches the Supervisor
 	// as its Host.
@@ -105,6 +110,9 @@ func (c Config) withDefaults() Config {
 	}
 	if c.PromiseTTL == 0 {
 		c.PromiseTTL = 2 * time.Hour
+	}
+	if c.AnnounceWait == 0 {
+		c.AnnounceWait = 2 * time.Second
 	}
 	if c.Now == nil {
 		c.Now = time.Now

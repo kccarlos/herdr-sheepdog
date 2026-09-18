@@ -237,7 +237,7 @@ func TestBrainIngestsSupervisorEvents(t *testing.T) {
 		kinds = append(kinds, string(msg.Kind))
 		contents = append(contents, msg.Content)
 	}
-	// The block also ran a summarize event turn (request, the screen,
+	// The block also ran an announce event turn (request, the screen,
 	// the "nothing to add" reply).
 	want := "worker_event worker_event push request event_screen reply assistant_said note"
 	if got := strings.Join(kinds, " "); got != want {
@@ -246,8 +246,8 @@ func TestBrainIngestsSupervisorEvents(t *testing.T) {
 	if contents[1] != "auth: working -> blocked" || !strings.Contains(contents[2], "(idle) auth is asking") || contents[6] != "Auth is asking whether it can create hello.txt." || contents[7] != "keep hello.txt small" {
 		t.Errorf("contents = %v", contents)
 	}
-	if h.log.count("brain.enrichment_skipped") != 1 || payload(h.log.ofType("brain.enrichment_skipped")[0])["reason"] != "sufficient" {
-		t.Errorf("enrichment_skipped = %v", h.log.ofType("brain.enrichment_skipped"))
+	if d := h.log.ofType("brain.push_decision"); len(d) != 1 || payload(d[0])["urgency_requested"] != "skip" || payload(d[0])["urgency_applied"] != "skip" || payload(d[0])["reason"] != "brain" {
+		t.Errorf("push_decision = %v", d)
 	}
 }
 

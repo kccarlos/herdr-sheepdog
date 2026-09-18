@@ -3,6 +3,7 @@ package supervisor
 import (
 	"context"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -18,8 +19,8 @@ import (
 
 // promiseModel scripts one CEO turn that sends an instruction and
 // records a promise (the combined "run the tests and let me know when
-// it's done"), and answers keep_promise event turns with one line and
-// summarize turns with nothing to add.
+// it's done"), and answers announce turns that keep a promise with one
+// line (idle, the promise's id) and the others with nothing to add.
 func promiseModel() *braintest.Model {
 	m := braintest.NewModel(
 		braintest.Step{Calls: []*genai.FunctionCall{
@@ -29,8 +30,8 @@ func promiseModel() *braintest.Model {
 		braintest.Step{Text: braintest.Reply("Telling auth to run the tests. Sent; I will tell you when auth finishes.", "")},
 	)
 	m.EventDefault = &braintest.Step{Fn: func(call braintest.Call) (*genai.GenerateContentResponse, error) {
-		if strings.Contains(call.Text(), "Event from the supervisor (keep_promise)") {
-			return braintest.Response(braintest.Step{Text: braintest.Reply("You asked me to tell you when auth was done: it created hello.txt with the requested line, see /tmp/out.", "")}), nil
+		if strings.Contains(call.Text(), "Promises this event keeps") {
+			return braintest.Response(braintest.Step{Text: `{"spoken": "You asked me to tell you when auth was done: it created hello.txt with the requested line, see /tmp/out.", "urgency": "idle", "keeps_promise_ids": ["pr-x"]}`}), nil
 		}
 		return braintest.Response(*braintest.NothingToAdd()), nil
 	}}
@@ -92,12 +93,14 @@ func TestPromiseCreatedFromCEOTurn(t *testing.T) {
 }
 
 // The promise is kept at the finish whatever the chattiness level: the
-// brain's keep_promise line (D9-scrubbed), idle urgency, marked kept,
-// logged; the enrichment stays subject to the level.
+// brain's announce line (D9-scrubbed) is the one line spoken for the
+// finish — the template sentence is not spoken as well — at idle
+// urgency, marked kept, logged.
 func TestPromiseKeptAtEveryLevel(t *testing.T) {
 	for _, level := range Levels {
 		t.Run(string(level), func(t *testing.T) {
-			h := newBrainHarness(t, promiseModel(), func(c *Config) { c.Chattiness = string(level) })
+			m := promiseModel()
+			h := newBrainHarness(t, m, func(c *Config) { c.Chattiness = string(level) })
 			h.addAgent("w5:p1", "auth", "codex", herdr.StateIdle)
 			p := combined(h)
 			h.transition("w5:p1", herdr.StateIdle, herdr.StateWorking)
@@ -109,19 +112,33 @@ func TestPromiseKeptAtEveryLevel(t *testing.T) {
 			if last.Text != want || last.Urgency != voice.UrgencyIdle {
 				t.Errorf("promise push = %+v", last)
 			}
-			// quiet: the finish itself was not announced (push_quiet), the
-			// promise was; normal/chatty: the finish first, then the promise.
+			// One line per finish: the template sentence is never spoken
+			// next to the promise line. quiet/normal: only the promise line
+			// ("started on" is chatty); chatty: "started on", then it.
 			texts := h.pushTexts()
-			if level == Quiet {
-				if len(texts) != 1 || h.log.count("supervisor.push_quiet") != 2 { // "started on" and the finish
-					t.Errorf("quiet pushes = %v, push_quiet=%d", texts, h.log.count("supervisor.push_quiet"))
-				}
-			} else if texts[len(texts)-2] != doneSentence {
-				t.Errorf("pushes = %v", texts)
+			wantN := 1
+			if level == Chatty {
+				wantN = 2
+			}
+			if len(texts) != wantN || slices.Contains(texts, doneSentence) {
+				t.Errorf("%s pushes = %v", level, texts)
+			}
+			if n := h.log.count("supervisor.push_quiet"); n != map[Chattiness]int{Quiet: 1, Normal: 1, Chatty: 0}[level] { // "started on"
+				t.Errorf("push_quiet = %d", n)
 			}
 			kept := h.log.ofType("promise.kept")
-			if len(kept) != 1 || payload(kept[0])["id"] != p.ID || payload(kept[0])["via"] != "brain" || payload(kept[0])["urgency"] != "idle" || payload(kept[0])["chattiness"] != string(level) {
+			if len(kept) != 1 || payload(kept[0])["id"] != p.ID || payload(kept[0])["via"] != "brain" || payload(kept[0])["urgency"] != "idle" || payload(kept[0])["chattiness"] != string(level) || payload(kept[0])["spoken"] != want {
 				t.Errorf("promise.kept = %v", kept)
+			}
+			d := h.log.ofType("brain.push_decision")
+			if len(d) != 1 || payload(d[0])["urgency_requested"] != "idle" || payload(d[0])["urgency_applied"] != "idle" || payload(d[0])["reason"] != "brain" || payload(d[0])["ceiling"] != string(level) || payload(d[0])["spoken"] != want {
+				t.Errorf("push_decision = %v", d)
+			}
+			// The promise was already kept when the brain saw it, with
+			// its id in the request.
+			calls := m.Calls()
+			if text := calls[len(calls)-1].Text(); !strings.Contains(text, `Promise (kept): "let me know when it's done", when auth finishes`) || !strings.Contains(text, "- "+p.ID+`: "let me know when it's done" (when auth finishes)`) {
+				t.Errorf("announce request:\n%s", text)
 			}
 			if open := h.sup.openPromises(); len(open) != 0 {
 				t.Errorf("still open: %+v", open)
@@ -130,16 +147,12 @@ func TestPromiseKeptAtEveryLevel(t *testing.T) {
 			if len(all) != 1 || all[0].Status != state.PromiseKept || all[0].ResolvedAt == nil {
 				t.Errorf("record = %+v", all)
 			}
-			// brain.turn kinds: propose, then (summarize unless quiet), then keep_promise.
+			// brain.turn kinds: propose, then one announce for the finish.
 			var kinds []string
 			for _, ev := range h.log.ofType("brain.turn") {
 				kinds = append(kinds, payload(ev)["kind"].(string))
 			}
-			wantKinds := "propose summarize keep_promise"
-			if level == Quiet {
-				wantKinds = "propose keep_promise"
-			}
-			if strings.Join(kinds, " ") != wantKinds {
+			if strings.Join(kinds, " ") != "propose announce" {
 				t.Errorf("brain.turn kinds = %v", kinds)
 			}
 			// The transcript has the kept record after the made one.
@@ -156,7 +169,7 @@ func TestPromiseKeptAtEveryLevel(t *testing.T) {
 	}
 }
 
-// Without a brain (or when its keep_promise turn fails) the template
+// Without a brain (or when its announce turn fails) the template
 // sentence is spoken with "As you asked:", still at every level.
 func TestPromiseKeptByTemplateWithoutBrain(t *testing.T) {
 	h := newHarness(t, func(c *Config) { c.Chattiness = string(Quiet) })
@@ -171,7 +184,7 @@ func TestPromiseKeptByTemplateWithoutBrain(t *testing.T) {
 	if kept := h.log.ofType("promise.kept"); len(kept) != 1 || payload(kept[0])["via"] != "template" {
 		t.Errorf("promise.kept = %v", kept)
 	}
-	// A brain that falls back on the keep_promise turn: same line.
+	// A brain that falls back on the announce turn: same line.
 	m := braintest.NewModel()
 	m.EventDefault = &braintest.Step{Err: braintest.ErrBoom}
 	h = newBrainHarness(t, m, func(c *Config) { c.Chattiness = string(Quiet) })
@@ -418,9 +431,12 @@ func TestPromiseWithReflexModel(t *testing.T) {
 	}
 	h.transition("w5:p1", herdr.StateIdle, herdr.StateWorking)
 	doneAuth(h)
-	texts := h.pushTexts()
-	if len(texts) != 3 || texts[0] != doneSentence || texts[1] != `That was the "run the tests" you asked for.` || texts[2] != "As you asked: "+doneSentence {
+	// One line for the finish: the reflex keeps the promise with it.
+	if texts := h.pushTexts(); len(texts) != 1 || texts[0] != "As you asked: "+doneSentence {
 		t.Errorf("pushes = %v", texts)
+	}
+	if kept := h.log.ofType("promise.kept"); len(kept) != 1 || payload(kept[0])["via"] != "brain" {
+		t.Errorf("promise.kept = %v", kept)
 	}
 	// A bare promise with no instruction text at all still reaches the
 	// brain, which reads the CEO's words from the transcript.

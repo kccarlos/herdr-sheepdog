@@ -30,16 +30,19 @@
 //
 // # Event turns
 //
-// The supervisor runs two kinds of turn on a worker event, after its
-// template path already announced it (docs/roles.md "Delivery" 2):
-// KindSummarize enriches the announcement with context (which request of
-// the CEO's it fulfils, what is still open) and answers with an empty
-// Spoken when the template sentence was sufficient; KindKeepPromise turns
-// a kept promise and the fresh template sentence into one spoken line.
-// Both are TriggerEvent, bounded by Config.EnrichTimeout, declared only
-// the read tools (the executor refuses prompt, send_keys, interrupt and
-// promise in any event turn), and get the supervisor's own pane read in
-// the window as a KindEventScreen message instead of reading again.
+// The supervisor runs one KindAnnounce turn on a worker event (docs/roles.md
+// "Push judgment"): the request carries the template sentence its fast
+// path would speak, whether that sentence was already pushed (a block's
+// question is never delayed), the pane read as a KindEventScreen message
+// instead of reading again, and the promises the event keeps. The reply
+// adds Urgency — interrupt, idle, silent or skip — and KeepsPromiseIDs to
+// the answer contract; an empty Spoken is a skip. The brain decides
+// whether and how urgently; the supervisor applies the chattiness
+// ceiling and decides nothing about the moment (the push queue does).
+// Announce turns are TriggerEvent, bounded by Config.EnrichTimeout,
+// declared only the read tools (the executor refuses prompt, send_keys,
+// interrupt and promise in any event turn), and yield to a waiting CEO
+// turn.
 //
 // # Promises
 //

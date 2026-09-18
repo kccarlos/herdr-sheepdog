@@ -79,7 +79,8 @@ func Template() string {
 # prune_after_turns = %[30]d   # turns a screen/CLI dump stays verbatim in the window
 # step_reserve_s = %[31]d   # 0: default; below this much time left, the next step is answer-only
 # final_grace_s = %[32]d   # 0: default; how far past the timeout the answer-only step may run
-# enrich_timeout_s = %[35]d   # budget of the brain's event turns (enriching a block/finish announcement, a kept promise)
+# enrich_timeout_s = %[35]d   # budget of the brain's announce turn on a block or finish
+# announce_wait_s = %[37]d   # how long a finish waits for the brain's line before the template sentence is spoken
 
 [prompts]
 # dir = %[33]q   # ~/.config/sheepdog/prompts/<name> overrides the matching embedded prompt file
@@ -98,6 +99,6 @@ func Template() string {
 		d.Brain.StepReserveS, d.Brain.FinalGraceS,
 		d.Prompts.Dir,
 		d.Supervisor.PromiseTTLS, d.Brain.EnrichTimeoutS,
-		d.Supervisor.SummaryTimeoutS,
+		d.Supervisor.SummaryTimeoutS, d.Brain.AnnounceWaitS,
 	)
 }

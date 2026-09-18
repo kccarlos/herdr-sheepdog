@@ -106,11 +106,11 @@ func TestPromiseToolErrors(t *testing.T) {
 	}
 }
 
-// An event turn (summarize) is read-only: only the four read tools are
+// An event turn (announce) is read-only: only the four read tools are
 // declared, every action tool is refused by the executor (brain.rail_blocked),
 // the enrich timeout applies, the supervisor's screen is in the window as
 // an event_screen message (pruned later like a tool result), and an empty
-// spoken is a valid "nothing to add".
+// spoken is a valid "say nothing".
 func TestEventTurnIsReadOnly(t *testing.T) {
 	m := braintest.NewModel(
 		braintest.Step{Calls: []*genai.FunctionCall{
@@ -120,16 +120,16 @@ func TestEventTurnIsReadOnly(t *testing.T) {
 			braintest.FC(ToolInterrupt, map[string]any{"agent": "auth"}),
 			braintest.FC(ToolRecall, map[string]any{"query": "tests"}),
 		}},
-		braintest.Step{Text: `{"spoken": "", "detail": "The template was sufficient.", "relates_to": "the rerun"}`},
+		braintest.Step{Text: `{"spoken": "", "detail": "The template was sufficient.", "relates_to": "the rerun", "urgency": "skip"}`},
 	)
 	h := newHarness(t, m, func(c *Config) { c.EnrichTimeout = 6 * time.Second; c.PruneAfterTurns = 1 })
 	h.host.SetPending("w5:p1", approvalPrompt())
 	h.brain.Heard("rerun the tests", true)
-	rep, err := h.brain.Turn(context.Background(), Request{Kind: KindSummarize, Trigger: TriggerCEO, Agent: "auth", Event: "done", Template: "auth finished: ran the tests, 1 failed.", Screen: "$ go test ./...\n--- FAIL: TestLoginRateLimit\nFAIL"})
+	rep, err := h.brain.Turn(context.Background(), Request{Kind: KindAnnounce, Trigger: TriggerCEO, Agent: "auth", Event: "done", Template: "auth finished: ran the tests, 1 failed.", Screen: "$ go test ./...\n--- FAIL: TestLoginRateLimit\nFAIL"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rep.Spoken != "" || rep.Detail != "The template was sufficient." || rep.RelatesTo != "the rerun" {
+	if rep.Spoken != "" || rep.Detail != "The template was sufficient." || rep.RelatesTo != "the rerun" || rep.Urgency != UrgencySkip {
 		t.Errorf("reply = %+v", rep)
 	}
 	if len(h.host.Prompts)+len(h.host.Keys)+len(h.host.Promised)+len(h.host.Interrupts) != 0 {
@@ -155,11 +155,11 @@ func TestEventTurnIsReadOnly(t *testing.T) {
 		}
 	}
 	text := call.Text()
-	if !strings.Contains(text, `Event from the supervisor (summarize): agent="auth" event="done" template="auth finished: ran the tests, 1 failed."`) || !strings.Contains(text, "The screen the supervisor read for this event:\n<<<BEGIN_WORKER_OUTPUT agent=auth source=screen>>>\n$ go test") {
+	if !strings.Contains(text, `Event from the supervisor (announce): agent="auth" event="done" template="auth finished: ran the tests, 1 failed."`) || !strings.Contains(text, "Nothing has been said about this yet.") || !strings.Contains(text, "The screen the supervisor read for this event:\n<<<BEGIN_WORKER_OUTPUT agent=auth source=screen>>>\n$ go test") {
 		t.Errorf("model saw:\n%s", text)
 	}
 	turn := payload(h.log.ofType("brain.turn")[0])
-	if turn["trigger"] != "event" || turn["kind"] != "summarize" || turn["fallback"] != false || turn["acted"] != 0 {
+	if turn["trigger"] != "event" || turn["kind"] != "announce" || turn["fallback"] != false || turn["acted"] != 0 {
 		t.Errorf("brain.turn = %v", turn)
 	}
 	if got := joinKinds(h.kinds()); got != "ceo_utterance request event_screen brain_tool_call brain_tool_result brain_tool_call brain_tool_result brain_tool_call brain_tool_result brain_tool_call brain_tool_result brain_tool_call brain_tool_result reply" {
@@ -194,15 +194,15 @@ func TestEventTurnTimeout(t *testing.T) {
 	m := braintest.NewModel(braintest.Step{Block: block})
 	h := newHarness(t, m, func(c *Config) { c.EnrichTimeout = 50 * time.Millisecond; c.FinalGrace = -1 })
 	start := time.Now()
-	_, err := h.brain.Turn(context.Background(), Request{Kind: KindKeepPromise, Agent: "auth", Event: "done", Template: "auth finished.", Promise: &PromiseInfo{ID: "pr-1", Text: "tell me", Agent: "auth", Event: "done"}})
+	_, err := h.brain.Turn(context.Background(), Request{Kind: KindAnnounce, Agent: "auth", Event: "done", Template: "auth finished.", TemplateSpoken: true, Promises: []PromiseInfo{{ID: "pr-1", Text: "tell me", Agent: "auth", Event: "done"}}})
 	if err == nil || time.Since(start) > 2*time.Second {
 		t.Fatalf("err = %v after %s", err, time.Since(start))
 	}
 	fb := payload(h.log.ofType("brain.fallback")[0])
-	if fb["reason"] != "timeout" || fb["kind"] != "keep_promise" || fb["trigger"] != "event" {
+	if fb["reason"] != "timeout" || fb["kind"] != "announce" || fb["trigger"] != "event" {
 		t.Errorf("fallback = %v", fb)
 	}
-	if text := h.model.Calls()[0].Text(); !strings.Contains(text, `Event from the supervisor (keep_promise): agent="auth" event="done" template="auth finished." promise="tell me" condition="when auth finishes"`) {
+	if text := h.model.Calls()[0].Text(); !strings.Contains(text, "Event from the supervisor (announce): agent=\"auth\" event=\"done\" template=\"auth finished.\"\nPromises this event keeps (the CEO asked to be told; your line says so, with the result):\n- pr-1: \"tell me\" (when auth finishes)\nThe assistant already said the sentence") {
 		t.Errorf("request = %s", text)
 	}
 }
@@ -259,20 +259,37 @@ func TestReflexPromisesAndEvents(t *testing.T) {
 	if err != nil || rep.Spoken != "I will tell you when docs asks something." || len(h.host.Prompts) != 1 || len(h.host.Promised) != 2 || h.host.Promised[1].Event != PromiseEventBlocked {
 		t.Errorf("bare promise = %+v %v prompts=%v promised=%+v", rep, err, h.host.Prompts, h.host.Promised)
 	}
-	// summarize relates the finish to the ledger's last task.
+	// announce (a finish): one recall round, then the template related
+	// to the ledger's last task, at idle urgency.
 	h.host.SetAgent(AgentInfo{PaneID: "w5:p1", Alias: "auth", Kind: "codex", State: "done", LastTask: "run the tests", LastResult: "ran the tests, 1 failed (failed)"})
-	rep, err = h.brain.Turn(context.Background(), Request{Kind: KindSummarize, Agent: "auth", Event: "done", Template: "auth finished: ran the tests, 1 failed.", Screen: "FAIL"})
-	if err != nil || rep.Spoken != `That was the "run the tests" you asked for.` || rep.RelatesTo != "run the tests" {
-		t.Errorf("summarize = %+v %v", rep, err)
+	rep, err = h.brain.Turn(context.Background(), Request{Kind: KindAnnounce, Agent: "auth", Event: "done", Template: "auth finished: ran the tests, 1 failed.", Screen: "FAIL"})
+	if err != nil || rep.Spoken != `auth finished: ran the tests, 1 failed. That was the "run the tests" you asked for.` || rep.RelatesTo != "run the tests" || rep.Urgency != UrgencyIdle {
+		t.Errorf("announce = %+v %v", rep, err)
 	}
-	// Nothing to relate: empty spoken.
-	rep, err = h.brain.Turn(context.Background(), Request{Kind: KindSummarize, Agent: "docs", Event: "blocked", Template: "docs is asking something."})
-	if err != nil || rep.Spoken != "" {
-		t.Errorf("summarize with nothing to add = %+v %v", rep, err)
+	if turn := payload(h.log.ofType("brain.turn")[2]); turn["kind"] != "announce" || turn["model_calls"] != 2 {
+		t.Errorf("announce turn = %v", turn)
 	}
-	rep, err = h.brain.Turn(context.Background(), Request{Kind: KindKeepPromise, Agent: "auth", Event: "done", Template: "auth finished: ran the tests, 1 failed.", Promise: &h.host.Promised[0]})
-	if err != nil || rep.Spoken != "As you asked: auth finished: ran the tests, 1 failed." {
-		t.Errorf("keep_promise = %+v %v", rep, err)
+	if calls := h.log.ofType("brain.tool_call"); payload(calls[len(calls)-1])["name"] != ToolRecall {
+		t.Errorf("announce did not recall first: %v", payload(calls[len(calls)-1]))
+	}
+	// The template already spoken (a block), nothing kept: skip, no tools.
+	rep, err = h.brain.Turn(context.Background(), Request{Kind: KindAnnounce, Agent: "docs", Event: "blocked", Template: "docs is asking something.", TemplateSpoken: true})
+	if err != nil || rep.Spoken != "" || rep.Urgency != UrgencySkip {
+		t.Errorf("announce with nothing to add = %+v %v", rep, err)
+	}
+	if turn := payload(h.log.ofType("brain.turn")[3]); turn["model_calls"] != 1 {
+		t.Errorf("block announce = %v", turn)
+	}
+	// A kept promise: one line, its id.
+	rep, err = h.brain.Turn(context.Background(), Request{Kind: KindAnnounce, Agent: "auth", Event: "done", Template: "auth finished: ran the tests, 1 failed.", Promises: []PromiseInfo{h.host.Promised[0]}})
+	if err != nil || rep.Spoken != "As you asked: auth finished: ran the tests, 1 failed." || rep.Urgency != UrgencyIdle || strings.Join(rep.KeepsPromiseIDs, ",") != "pr-1" {
+		t.Errorf("announce keeping a promise = %+v %v", rep, err)
+	}
+	// The sentence already pushed to the assistant: skip.
+	h.brain.Pushed("auth", "auth finished: ran the tests, 1 failed.", "idle")
+	rep, err = h.brain.Turn(context.Background(), Request{Kind: KindAnnounce, Agent: "auth", Event: "done", Template: "auth finished: ran the tests, 1 failed."})
+	if err != nil || rep.Spoken != "" || rep.Urgency != UrgencySkip {
+		t.Errorf("announce of a pushed sentence = %+v %v", rep, err)
 	}
 	if n := len(h.host.Prompts) + len(h.host.Keys) + len(h.host.Interrupts); n != 1 || len(h.host.Promised) != 2 {
 		t.Errorf("event turns acted: %d actions, %d promises", n, len(h.host.Promised))
