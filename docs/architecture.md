@@ -60,7 +60,7 @@ exist.
 | `internal/web` | The HTTP surface on `127.0.0.1`: `/voice` and `/debug` (embedded static pages), `/events` (SSE), the audio+control WebSocket, and the small JSON API (state, inject, `/api/herdr/event`). |
 | `internal/inject` | The debug-only fake event path: lets `/debug` (and tests) drive the whole supervisor chain without a real herdr or a microphone. |
 | `internal/logging` | The tiny structured-event `Logger` interface every component logs through. |
-| `web/voice`, `web/debug` | Vanilla JS + AudioWorklet pages served by `internal/web`; `web/debug/conversation.js` is the pure event→chat grouping behind the Conversation tab (`node --test`). |
+| `web/voice`, `web/debug` | Vanilla JS + AudioWorklet pages served by `internal/web`; `web/debug/conversation.js` is the pure event→chat grouping behind the Conversation tab and `web/debug/swimlane.js` the event→lanes/arrows/chains layout behind the Swimlane tab, both over `web/debug/grouping.js` (tool call/result pairing generic over any `<prefix>.tool_call`/`<prefix>.tool_result` family, fragments, dividers; `node --test`). |
 | `prompts/` | Embedded prompt templates for the cheap LLM. |
 | `plugin/` | The herdr plugin shim: manifest, hook script, install/uninstall, launchd plist template. See [`docs/herdr-protocol.md`](herdr-protocol.md) §8. |
 

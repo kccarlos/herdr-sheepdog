@@ -200,6 +200,18 @@ func TestToolCallRoundTrip(t *testing.T) {
 	if !h.log.has("voice.tool_call") || !h.log.has("voice.tool_result") {
 		t.Error("tool events not logged")
 	}
+	// The result carries the handler time and the wait for the turn so the
+	// /debug swimlane can label the hop.
+	results := h.log.payloads("voice.tool_result")
+	if len(results) != 1 {
+		t.Fatalf("tool_result payloads = %d, want 1", len(results))
+	}
+	for _, k := range []string{"dur_ms", "wait_ms"} {
+		v, ok := results[0][k].(int64)
+		if !ok || v < 0 {
+			t.Errorf("tool_result %s = %v (%T), want a non-negative int64", k, results[0][k], results[0][k])
+		}
+	}
 }
 
 func TestToolResponseWaitTimesOut(t *testing.T) {

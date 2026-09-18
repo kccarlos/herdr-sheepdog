@@ -2,7 +2,8 @@
 // as a chat transcript (user bubbles right, the dog left, tool calls and
 // supervisor pushes as collapsible rows between them, session dividers).
 // Vanilla DOM, no framework (decision D11).
-import { Grouper, fmtMs } from './conversation.js';
+import { Grouper } from './conversation.js';
+import { fmtMs, eventSummary, Dedupe } from './grouping.js';
 
 const MAX_ITEMS = 1500;
 const STALL_MS = 10000;
@@ -21,38 +22,11 @@ function fmtTime(ts) {
   return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
-/** Short one-line summary of a nested supervisor-side event. */
-function nestedSummary(ev) {
-  const p = ev.payload || {};
-  const parts = [];
-  switch (true) {
-    case ev.type === 'llm.call':
-      parts.push(p.template, p.model, p.dur_ms != null ? `${p.dur_ms} ms` : '', p.attempts > 1 ? `${p.attempts} attempts` : '');
-      break;
-    case ev.type === 'cli.run':
-      parts.push(p.backend, p.dur_ms != null ? `${p.dur_ms} ms` : '', p.exit != null ? `exit ${p.exit}` : '', p.killed ? 'killed' : '');
-      break;
-    case ev.type === 'herdr.read':
-      parts.push(p.source, p.lines != null ? `${p.lines} lines` : '', p.error ? `error: ${p.error}` : '');
-      break;
-    case ev.type === 'herdr.send':
-      parts.push(p.kind, p.keys ? `keys ${JSON.stringify(p.keys)}` : '', p.text ? JSON.stringify(p.text) : '', p.error ? `error: ${p.error}` : '');
-      break;
-    case ev.type.startsWith('pending.'):
-      parts.push(p.kind, p.id, p.reason, p.question);
-      break;
-    default:
-      parts.push(JSON.stringify(p).slice(0, 120));
-  }
-  return parts.filter((x) => x != null && x !== '').join(' · ');
-}
-
 export class ConversationView {
   constructor(root) {
     this.root = root; // the scrolling container
     this.grouper = new Grouper();
-    this.seen = new Set(); // encoded events already folded (dedupes backfill vs. SSE replay)
-    this.seenQueue = [];
+    this.seen = new Dedupe(); // encoded events already folded (backfill vs. SSE replay)
     this.expandAll = false;
     this.toggled = new Set(); // item / nested keys whose open state differs from expandAll
     this.hideSilent = true;
@@ -68,11 +42,7 @@ export class ConversationView {
 
   /** Feeds one log event; duplicates (same encoded line) are ignored. */
   add(ev, encoded) {
-    const key = encoded || JSON.stringify(ev);
-    if (this.seen.has(key)) return false;
-    this.seen.add(key);
-    this.seenQueue.push(key);
-    if (this.seenQueue.length > 4000) this.seen.delete(this.seenQueue.shift());
+    if (!this.seen.add(encoded || JSON.stringify(ev))) return false;
     this.grouper.add(ev);
     this.dirty = true;
     return true;
@@ -125,6 +95,7 @@ export class ConversationView {
     for (const it of items) {
       const node = this.renderItem(it);
       if (!node) continue;
+      node.dataset.ts = it.ts || '';
       frag.appendChild(node);
       shown++;
     }
@@ -270,18 +241,35 @@ export class ConversationView {
     return box;
   }
 
+  // renderNested lists the supervisor-side events of a call or push. A
+  // nested tool call (brain.tool_call, see Grouper.innerCall) carries its
+  // own `children` (what ran between call and result) and `result`, shown
+  // one level deeper.
   renderNested(parentKey, events) {
     const list = el('div', 'nested');
     events.forEach((ev, i) => {
       const key = `${parentKey}:n${i}`;
-      const row = el('div', `nested-row ${ev.source || ''}`);
+      const inner = Array.isArray(ev.children);
+      const row = el('div', `nested-row ${ev.source || ''}${inner ? ' inner-call' : ''}`);
       const { h, open } = this.header(key, 'nested-head', (h) => {
         h.appendChild(el('span', 'type', ev.type));
-        h.appendChild(el('span', 'summary', nestedSummary(ev)));
+        h.appendChild(el('span', 'summary', eventSummary(ev)));
+        if (inner) {
+          const r = ev.result && ev.result.payload ? ev.result.payload : null;
+          const bits = ev.pending ? ['pending'] : [fmtMs(ev.durMs), r && r.error ? `error: ${r.error}` : ''];
+          h.appendChild(el('span', `badge ${ev.pending ? 'pending' : (r && r.error ? 'error' : 'ok')}`, bits.filter(Boolean).join(' · ')));
+        }
         h.appendChild(el('span', 'meta', ` · ${fmtTime(ev.ts)}`));
       });
       row.appendChild(h);
-      if (open) row.appendChild(el('pre', 'detail', JSON.stringify(ev.payload, null, 2)));
+      if (open) {
+        row.appendChild(el('pre', 'detail', JSON.stringify(ev.payload, null, 2)));
+        if (inner && ev.children.length) row.appendChild(this.renderNested(key, ev.children));
+        if (inner && ev.result) {
+          row.appendChild(el('div', 'label', `${ev.result.type} · ${fmtTime(ev.result.ts)}`));
+          row.appendChild(el('pre', 'detail', JSON.stringify(ev.result.payload, null, 2)));
+        }
+      }
       list.appendChild(row);
     });
     return list;

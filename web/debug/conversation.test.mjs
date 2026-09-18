@@ -205,3 +205,45 @@ test('helpers: argSummary, fmtMs, estimateTokens', () => {
   assert.equal(fmtMs(null), '');
   assert.equal(estimateTokens('a'.repeat(400)), 100);
 });
+
+test('brain.* inside an ask call: nested under the call, reads/CLI nested under the brain call', () => {
+  const items = groupEvents([
+    ev('voice.text', { text: 'why did that one fail?' }),
+    ev('voice.tool_call', { id: 'c1', name: 'ask', args: { question: 'why did that one fail?' } }, 400),
+    ev('brain.step', { template: 'agent', model: 'gemini-3.5-flash-lite', dur_ms: 700, tool_calls: 1 }, 700, 'brain'),
+    ev('brain.tool_call', { id: 'b1', name: 'read_screen', args: { agent: 'auth' } }, 1, 'brain'),
+    ev('herdr.read', { source: 'recent_unwrapped', lines: 80, dur_ms: 2 }, 3),
+    ev('brain.tool_result', { id: 'b1', name: 'read_screen', dur_ms: 4, result: '80 lines' }, 2, 'brain'),
+    ev('brain.tool_call', { id: 'b2', name: 'run_cli', args: { backend: 'codex' } }, 1, 'brain'),
+    ev('cli.run', { backend: 'codex', dur_ms: 6000, exit: 0 }, 6000),
+    ev('brain.tool_result', { id: 'b2', name: 'run_cli', result: 'the clamp test asserts the wrong bound' }, 3, 'brain'),
+    ev('brain.compaction', { before_tokens: 9000, after_tokens: 3000 }, 5, 'brain'),
+    ev('brain.step', { template: 'agent', model: 'gemini-3.5-flash-lite', dur_ms: 600, tool_calls: 0 }, 600, 'brain'),
+    ev('voice.tool_result', { id: 'c1', name: 'ask', spoken: 'The clamp test asserts the wrong bound.', scheduling: 'interrupt', dur_ms: 9100 }, 2),
+    ev('voice.transcript.out', { text: 'The clamp test asserts the wrong bound.', final: false }, 600),
+  ]);
+  assert.deepEqual(kinds(items), ['user', 'tool', 'assistant']);
+  const ask = items[1];
+  assert.equal(ask.pending, false);
+  assert.deepEqual(ask.nested.map((e) => e.type), ['brain.step', 'brain.tool_call', 'brain.tool_call', 'brain.compaction', 'brain.step']);
+  const [, read, cli] = ask.nested;
+  assert.equal(read.name, 'read_screen');
+  assert.equal(read.pending, false);
+  assert.deepEqual(read.children.map((e) => e.type), ['herdr.read']);
+  assert.equal(read.result.type, 'brain.tool_result');
+  assert.equal(read.durMs, 4, 'dur_ms from the result');
+  assert.deepEqual(cli.children.map((e) => e.type), ['cli.run']);
+  assert.equal(cli.durMs, 6003, 'no dur_ms: wall-clock distance to the call');
+  assert.equal(cli.result.payload.result, 'the clamp test asserts the wrong bound');
+  // The wrapped call is a copy: the log event itself is untouched.
+  assert.equal(Object.hasOwn(read, 'children'), true);
+  const g = new Grouper();
+  const raw = ev('brain.tool_call', { id: 'b9', name: 'list_agents', args: {} }, 1, 'brain');
+  g.add(raw);
+  assert.equal(raw.children, undefined);
+  assert.equal(g.loose[0].children.length, 0);
+  // An orphan result (unknown id, no open call of that name) is a plain nested row.
+  g.add(ev('brain.tool_result', { id: 'nope', name: 'recall', dur_ms: 1 }, 1, 'brain'));
+  assert.deepEqual(g.loose.map((e) => e.type), ['brain.tool_call', 'brain.tool_result']);
+  assert.equal(g.loose[0].pending, true);
+});

@@ -2,6 +2,9 @@
   --bg: #fafafa; --fg: #1d1d1f; --muted: #6b6b70; --line: #e2e2e6; --card: #fff;
   --herdr: #2b6cb0; --voice: #b7791f; --supervisor: #2f855a; --llm: #805ad5; --cli: #718096; --web: #c05621; --eventlog: #a0aec0;
   --blocked: #c53030; --working: #2b6cb0; --done: #2f855a; --idle: #718096; --unknown: #a0aec0;
+  /* swimlane: one hue per lane (You = the web client's colour, the rest match their sources), a push accent, the latency ramp */
+  --lane-you: #c05621; --lane-voice: #b7791f; --lane-sup: #2f855a; --lane-herdr: #2b6cb0; --push: #d53f8c;
+  --lat-ok: #2f855a; --lat-warn: #d69e2e; --lat-slow: #c53030;
 }
 * { box-sizing: border-box; }
 body { margin: 0; font: 13px/1.45 system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--fg); }
@@ -123,6 +126,10 @@ td.task, td.block, td.result { max-width: 18em; overflow: hidden; text-overflow:
 .nested-head .type { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-weight: 600; }
 .nested-head .summary { color: #333; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 44em; }
 .nested-row .detail { margin: 0 .4rem .3rem 1.4rem; }
+.nested-row.brain { border-left-color: var(--supervisor); }
+.nested-row.inner-call > .nested { margin: 0 .4rem .3rem 1.4rem; }
+.nested-row.inner-call > .label { margin: .2rem .4rem 0 1.4rem; }
+.badge.pending { background: var(--voice); } .badge.ok { background: var(--done); } .badge.error { background: var(--blocked); }
 
 .item.push { border-left: 3px solid var(--supervisor); background: #f4faf6; }
 .item.push.silent { background: #fafafa; border-left-color: var(--idle); color: var(--muted); }
@@ -145,6 +152,147 @@ td.task, td.block, td.result { max-width: 18em; overflow: hidden; text-overflow:
 .divider.stalled { color: var(--voice); } .divider.stalled .line { border-color: #ead8a8; }
 .divider.recycle { color: var(--llm); }
 .divider.connect, .divider.resume { color: var(--done); }
+
+/* ------------------------------------------------------------- swimlane */
+/* One CSS grid template (--sw-cols, set by swimlane-view.js: the time
+   gutter plus one equal column per visible lane) shared by the sticky
+   lane header and every row, so cards line up under their lane. A row is
+   two grid rows: the card, and the arrow beneath it. */
+.sw-wrap { position: relative; --sw-gutter: 6.4em; }
+.sw-header { display: grid; grid-template-columns: var(--sw-cols); background: var(--card); border: 1px solid var(--line); border-bottom: none; border-radius: 6px 6px 0 0; }
+.sw-gutter-head { padding: .3rem .5rem; color: var(--muted); font-size: .8em; text-align: right; align-self: end; }
+.sw-lane-head { --lane: var(--unknown); padding: .3rem .5rem; border-top: 4px solid var(--lane); color: var(--lane); font-weight: 600; text-align: center; }
+.lane-you { --lane: var(--lane-you); } .lane-voice { --lane: var(--lane-voice); } .lane-sup { --lane: var(--lane-sup); } .lane-herdr { --lane: var(--lane-herdr); }
+.sw-lane-toggles { display: inline-flex; gap: .4rem; flex-wrap: wrap; }
+.sw-lane-toggles label { border-left: 3px solid var(--lane); padding-left: .3rem; }
+.swimlane { background: var(--card); border: 1px solid var(--line); border-radius: 0 0 6px 6px; height: calc(100vh - 262px); min-height: 300px; overflow: auto; }
+.swimlane .empty { margin: 2rem auto; text-align: center; }
+.sw-row { display: grid; grid-template-columns: var(--sw-cols); align-items: start; border-bottom: 1px solid #f3f3f6; padding: 1px 0; }
+.sw-row.sw-dim { opacity: .28; }
+.sw-row.sw-lit .sw-card { box-shadow: 0 0 0 2px var(--lane); }
+.sw-row.pane-hit .sw-card { box-shadow: 0 0 0 2px #90cdf4; background: #ebf8ff; }
+.sw-row.sw-flash .sw-card, .sw-row.sw-flash .sw-divider { animation: sw-flash 1.5s ease-out; }
+@keyframes sw-flash { from { background: #fefcbf; } to { background: inherit; } }
+.sw-time { grid-column: 1; grid-row: 1 / span 2; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10.5px; color: var(--muted); text-align: right; padding: .45rem .5rem 0 0; white-space: nowrap; }
+.sw-time.minute { color: var(--fg); font-weight: 600; }
+.sw-row:has(.sw-time.minute) { border-top: 1px dashed var(--line); }
+
+.sw-card { grid-row: 1; margin: 2px 6px; border: 1px solid var(--line); border-left: 3px solid var(--lane); border-radius: 5px; background: #fbfbfd; cursor: pointer; font-size: .95em; min-width: 0; }
+.sw-card:hover { background: #f4f4f8; }
+.sw-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: .3rem; padding: .25rem .5rem .1rem; }
+.sw-head .chev { color: var(--muted); width: .8em; }
+.sw-title { font-weight: 600; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.sw-meta { color: var(--muted); font-size: .8em; }
+.sw-pane { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.sw-lane-badge { display: none; font-size: .75em; color: var(--lane); border: 1px solid var(--lane); border-radius: 9px; padding: 0 .4em; }
+.sw-chain-btn { margin-left: auto; padding: 0 .3em; font-size: .8em; border-color: transparent; background: transparent; color: var(--muted); }
+.sw-chain-btn:hover { color: var(--fg); background: #e8e8ee; }
+.sw-text { padding: 0 .5rem .3rem 1.4rem; white-space: pre-wrap; word-break: break-word; }
+.sw-text.clamp { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.sw-latency { padding: 0 .5rem .3rem 1.4rem; font-size: .85em; color: var(--lat-ok); }
+.sw-latency.slow { color: var(--lat-slow); font-weight: 600; }
+.sw-json-row { grid-column: 2 / -1; grid-row: 3; margin: 0 6px 4px; border-left: 3px solid var(--lane); max-height: 60vh; overflow: auto; }
+.sw-json { margin: .15rem .5rem .4rem; padding: .3rem .5rem; background: #f6f6f8; border-radius: 4px; white-space: pre-wrap; word-break: break-word; font-size: 11px; cursor: text; }
+.sw-card.minor { font-size: .82em; background: transparent; border-color: transparent; border-left-color: var(--lane); color: var(--muted); }
+.sw-card.minor .sw-title { font-weight: 500; }
+.sw-card.minor .sw-head { padding-top: .1rem; padding-bottom: 0; }
+.sw-card.tool { border-left-color: var(--lane-voice); background: #fffaf0; }
+.sw-card.result { border-left-style: dashed; }
+.sw-card.error, .sw-card.minor.error { border-color: #f5c2c2; border-left-color: var(--blocked); background: #fff5f5; color: var(--blocked); }
+.sw-card.push { background: #fdf2f8; border-left-color: var(--push); }
+.sw-card.push.push-silent { background: #fafafa; border-left-color: var(--idle); color: var(--muted); }
+.sw-card.push.skipped { border-left-style: dashed; }
+.sw-card.synthetic { background: #f3f1e8; }
+.sw-card.pending { background: #f4faf6; }
+.sw-card.pending-cancelled, .sw-card.pending-expired { background: #fff5f5; border-left-color: var(--blocked); }
+.sw-card.pending-confirmed { border-left-color: var(--done); }
+.sw-card.state-blocked { border-left-color: var(--blocked); background: #fff5f5; }
+.sw-card.state-working { border-left-color: var(--working); background: #ebf4ff; }
+.sw-card.state-done { border-left-color: var(--done); background: #f0fff4; }
+.sw-card.state-idle { border-left-color: var(--idle); }
+.sw-card.state-unknown { border-left-color: var(--unknown); }
+.sw-card.minor.state-blocked, .sw-card.minor.state-working, .sw-card.minor.state-done { background: transparent; }
+.sw-card.minor.state-blocked { color: var(--blocked); }
+.sw-card.nested { margin-left: 1.4em; }
+.sw-card.inner { border-left-color: var(--lane-sup); background: #f4faf6; }
+.sw-card.inner.result { background: #fbfbfd; }
+.sw-nest { color: var(--muted); font-size: .8em; }
+.sw-lat { font-size: .8em; font-weight: 600; color: var(--lat-ok); } .sw-lat.lvl-warn { color: var(--lat-warn); } .sw-lat.lvl-slow, .sw-lat.lvl-error { color: var(--lat-slow); }
+.sw-card.root .sw-title::before { content: '● '; font-size: .6em; vertical-align: middle; margin-right: .3em; color: var(--lane); }
+.sw-card.transition .sw-title::before { color: var(--lane-herdr); }
+
+/* Arrows: the element spans from the source column to the target column
+   (inclusive) on the row under the card. Lane columns are equal, so the
+   centre of the first spanned column is at 50%/--span of the element's
+   width, and the centre of the last is the same distance from the right
+   edge: the line runs centre to centre and the head sits at the target
+   centre. A stub spans one column and runs from its centre to the edge on
+   the side of the hidden lane. */
+.sw-arrow { grid-row: 2; position: relative; height: 1.45em; margin-bottom: 2px; --arrow: var(--unknown); }
+.sw-arrow.from-you { --arrow: var(--lane-you); } .sw-arrow.from-voice { --arrow: var(--lane-voice); } .sw-arrow.from-sup { --arrow: var(--lane-sup); } .sw-arrow.from-herdr { --arrow: var(--lane-herdr); }
+.sw-arrow.kind-result { --arrow: var(--lane-voice); }
+.sw-arrow.kind-push { --arrow: var(--push); }
+.sw-arrow.kind-push.dashed { --arrow: var(--idle); }
+.sw-arrow.kind-state.state-blocked { --arrow: var(--blocked); } .sw-arrow.kind-state.state-working { --arrow: var(--working); }
+.sw-arrow.kind-state.state-done { --arrow: var(--done); } .sw-arrow.kind-state.state-idle { --arrow: var(--idle); } .sw-arrow.kind-state.state-unknown { --arrow: var(--unknown); }
+.sw-arrow.lvl-error { --arrow: var(--blocked); }
+.sw-line { position: absolute; top: 50%; left: calc(50% / var(--span)); right: calc(50% / var(--span)); border-top: 2px solid var(--arrow); }
+.sw-arrow.dashed .sw-line { border-top-style: dashed; }
+.sw-arrow.stub-left .sw-line { left: 0; right: 50%; }
+.sw-arrow.stub-right .sw-line { left: 50%; right: 0; }
+.sw-head-mark { position: absolute; top: 50%; width: 0; height: 0; border: 5px solid transparent; transform: translateY(-50%); }
+.sw-arrow.dir-right .sw-head-mark { right: calc(50% / var(--span)); border-left: 8px solid var(--arrow); border-right: 0; margin-right: -1px; }
+.sw-arrow.dir-left .sw-head-mark { left: calc(50% / var(--span)); border-right: 8px solid var(--arrow); border-left: 0; margin-left: -1px; }
+.sw-arrow.dir-right.stub-right .sw-head-mark { right: 0; }
+.sw-arrow.dir-left.stub-left .sw-head-mark { left: 0; }
+.sw-arrow.stub .sw-head-mark { opacity: .6; }
+.sw-label { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); max-width: calc(100% - 1.5em); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: var(--card); border: 1px solid var(--arrow); color: var(--arrow); border-radius: 9px; padding: 0 .5em; font-size: .78em; line-height: 1.5; }
+.sw-arrow.stub-left .sw-label { left: 25%; } .sw-arrow.stub-right .sw-label { left: 75%; }
+.sw-arrow.stub .sw-label { max-width: calc(50% - 1em); }
+.sw-arrow.chained .sw-label { cursor: pointer; }
+.sw-arrow.chained .sw-label:hover { background: #f0f0f3; }
+.sw-arrow.lvl-ok .sw-label { color: var(--lat-ok); border-color: var(--lat-ok); }
+.sw-arrow.lvl-warn .sw-label { color: var(--lat-warn); border-color: var(--lat-warn); font-weight: 600; }
+.sw-arrow.lvl-slow .sw-label, .sw-arrow.lvl-error .sw-label { color: var(--lat-slow); border-color: var(--lat-slow); font-weight: 600; }
+.sw-narrow { display: none; }
+
+.sw-row.sw-gap { display: block; }
+.sw-gap-marker { display: flex; align-items: center; gap: .6rem; padding: .15rem 1rem; color: var(--muted); font-size: .78em; }
+.sw-gap-line { flex: 1; border-top: 1px dotted var(--line); }
+.sw-gap-text { border: 1px solid var(--line); border-radius: 9px; padding: 0 .6em; background: #f6f6f8; }
+.sw-divider-row .sw-divider { grid-column: 2 / -1; grid-row: 1; display: flex; align-items: center; gap: .6rem; margin: .35rem .5rem; color: var(--muted); font-size: .82em; text-align: center; cursor: pointer; }
+.sw-divider .line { flex: 1; border-top: 1px solid var(--line); }
+.sw-divider .chev { margin-right: .3em; }
+.sw-divider.lost { color: var(--blocked); } .sw-divider.lost .line { border-color: #f5c2c2; }
+.sw-divider.stalled { color: var(--blocked); font-weight: 600; } .sw-divider.stalled .line { border-color: #f5c2c2; }
+.sw-divider.recycle { color: var(--llm); }
+.sw-divider.connect, .sw-divider.resume { color: var(--done); } .sw-divider.connect .line, .sw-divider.resume .line { border-color: #c6f6d5; }
+.sw-divider.prompt { color: var(--llm); } .sw-divider.prompt .line { border-color: #e9d8fd; }
+.sw-divider.daemon { color: var(--fg); } .sw-divider.daemon .line { border-top-width: 2px; }
+.sw-divider-body { grid-column: 2 / -1; grid-row: 2; margin: 0 .5rem .4rem; border-left: 3px solid var(--llm); }
+.sw-divider-body .prompt-text { margin: .2rem .5rem; }
+.sw-chain-info { color: var(--muted); }
+.sw-chain-info b { color: var(--fg); }
+
+@media (max-width: 700px) {
+  /* Phone: one column, the lane on a badge, the arrow as a text line. */
+  .sw-wrap { --sw-gutter: 3.6em; }
+  .sw-header { grid-template-columns: var(--sw-gutter) 1fr !important; }
+  .sw-lane-head { display: none; }
+  .sw-header::after { content: 'all lanes (badge on each card)'; grid-column: 2; padding: .3rem .5rem; color: var(--muted); font-size: .8em; }
+  .sw-row { grid-template-columns: var(--sw-gutter) 1fr !important; }
+  .sw-time { font-size: 9.5px; padding-right: .3rem; }
+  .sw-time.minute { font-size: 8.5px; }
+  .sw-card, .sw-arrow { grid-column: 2 !important; }
+  .sw-lane-badge { display: inline-block; }
+  .sw-arrow { height: auto; margin: 0 6px 4px; }
+  .sw-line, .sw-head-mark { display: none; }
+  .sw-label { position: static; transform: none; display: inline-block; max-width: 100%; }
+  .sw-narrow { display: inline; font-weight: 600; }
+  .sw-divider-row .sw-divider { grid-column: 2; }
+  .sw-divider-body, .sw-json-row { grid-column: 2; }
+  .swimlane { height: calc(100vh - 300px); }
+}
 
 @media (max-width: 900px) {
   .state-grid { grid-template-columns: 1fr; }

@@ -16,50 +16,11 @@
 //   push           voice.push (supervisor → model), with the supervisor-side
 //                  events that led to it nested
 
-/** Supervisor-side event types nested under the tool call or push they belong to. */
-export const NESTED_TYPES = /^(llm\.|cli\.run|herdr\.read|herdr\.send|pending\.|note\.created|supervisor\.)/;
+import { NESTED_TYPES, DIVIDERS, fmtMs, estimateTokens, argSummary, ToolPairer, Fragments, toolFamily } from './grouping.js';
 
-/** Session boundary events and how they read. */
-const DIVIDERS = {
-  'voice.connect': (p) => ({ label: p.resumed ? 'session resumed' : 'new session', detail: `key ${p.key_index}${p.dur_ms != null ? ` · connect ${p.dur_ms} ms` : ''}`, cls: p.resumed ? 'resume' : 'connect' }),
-  'voice.resume': (p) => (p.resumed
-    ? { label: 'reconnected, context kept', detail: `${p.replayed_chunks || 0} audio chunks replayed`, cls: 'resume' }
-    : { label: 'reconnected, context lost', detail: 'fresh session; the briefing is re-pushed', cls: 'lost' }),
-  'voice.handle_dropped': (p) => ({ label: 'context lost', detail: `resumption handle dropped: ${p.reason || ''}`, cls: 'lost' }),
-  'voice.recycle': (p) => ({ label: 'connection recycled', detail: `${p.reason}${p.handle ? ', with handle' : ', no handle'}`, cls: 'recycle' }),
-  'voice.stalled': (p) => ({ label: 'stalled', detail: `no reply ${fmtMs(p.waited_ms)} after the last input (stall ${p.stalls})`, cls: 'stalled' }),
-  'voice.disconnected': (p) => ({ label: 'disconnected', detail: p.error || '', cls: 'lost' }),
-  'voice.closed': (p) => ({ label: 'session closed', detail: p.reason || '', cls: 'lost' }),
-  'voice.goaway': (p) => ({ label: 'GoAway', detail: `${fmtMs(p.time_left_ms)} left`, cls: 'recycle' }),
-};
-
-/** Rough token estimate for the prompt header (4 chars per token). */
-export function estimateTokens(text) {
-  return Math.round((text || '').length / 4);
-}
-
-/** Milliseconds as "1.3 s" / "420 ms". */
-export function fmtMs(ms) {
-  if (ms == null || Number.isNaN(Number(ms))) return '';
-  const n = Number(ms);
-  return n >= 1000 ? `${(n / 1000).toFixed(1)} s` : `${Math.round(n)} ms`;
-}
-
-/**
- * One-line summary of a tool call's arguments for the collapsed row:
- * `propose(agent="auth", instruction="skip the flaky test…")`.
- */
-export function argSummary(args, max = 60) {
-  if (!args || typeof args !== 'object') return '';
-  const parts = [];
-  for (const [k, v] of Object.entries(args)) {
-    if (v == null || v === '') continue;
-    let s = typeof v === 'string' ? v : JSON.stringify(v);
-    if (s.length > max) s = s.slice(0, max - 1) + '…';
-    parts.push(`${k}=${typeof v === 'string' ? JSON.stringify(s) : s}`);
-  }
-  return parts.join(', ');
-}
+// Re-exported for the tests and older importers; the definitions live in
+// grouping.js, shared with the swimlane.
+export { NESTED_TYPES, fmtMs, estimateTokens, argSummary };
 
 /**
  * Grouper folds events one at a time (the page feeds the SSE stream into
@@ -70,11 +31,11 @@ export class Grouper {
   constructor() {
     this.items = [];
     this.seq = 0;
-    this.openTools = new Map(); // id → tool item (result not seen yet)
-    this.toolStack = []; // open tool items, most recent last
+    this.tools = new ToolPairer(); // voice tool calls waiting for their result
+    this.inner = new Map(); // prefix → ToolPairer for nested families (brain.*)
     this.loose = []; // nested-type events with no open tool, for the next push
-    this.user = null; // in-progress user item
-    this.assistant = null; // in-progress assistant item
+    this.userFrag = new Fragments((ts) => this.push({ kind: 'user', ts, typed: false }));
+    this.assistantFrag = new Fragments((ts) => this.push({ kind: 'assistant', ts }));
     this.turn = null; // { user, first } — first response item of the current turn
   }
 
@@ -136,8 +97,8 @@ export class Grouper {
         this.applyTurn(p);
         return;
       case 'voice.interrupted':
-        if (this.assistant) {
-          this.assistant.interrupted = true;
+        if (this.assistantFrag.open) {
+          this.assistantFrag.open.interrupted = true;
           this.closeAssistant();
         }
         return;
@@ -146,8 +107,15 @@ export class Grouper {
         if (last) last.usage = { prompt: p.prompt, response: p.response, total: p.total };
         return;
       }
-      default:
+      default: {
+        // Any other `<prefix>.tool_call` / `<prefix>.tool_result` family
+        // (the supervisor's agent loop, brain.*) nests under the voice
+        // call in flight, with what happened between call and result
+        // nested one level deeper.
+        const fam = toolFamily(type);
+        if (fam) return fam.phase === 'call' ? this.innerCall(ev, p, fam.prefix) : this.innerResult(ev, p, fam.prefix);
         if (NESTED_TYPES.test(type)) this.nest(ev);
+      }
     }
   }
 
@@ -165,38 +133,24 @@ export class Grouper {
   }
 
   userFragment(ts, text, final, typed) {
-    if (!this.user) {
-      this.user = this.push({ kind: 'user', ts, text: '', typed, fragments: 0, final: false });
-      this.turn = { user: this.user, first: null };
-    }
-    this.user.text += text;
-    this.user.fragments++;
-    this.user.typed = this.user.typed || typed;
-    if (final) this.closeUser();
+    const fresh = !this.userFrag.open;
+    const item = this.userFrag.add(ts, text, final);
+    if (fresh) this.turn = { user: item, first: null };
+    item.typed = item.typed || typed;
   }
 
   closeUser() {
-    if (this.user) {
-      this.user.final = true;
-      this.user = null;
-    }
+    this.userFrag.close();
   }
 
   assistantFragment(ts, text, final) {
-    if (!this.assistant) {
-      this.assistant = this.push({ kind: 'assistant', ts, text: '', fragments: 0, final: false });
-      this.firstResponse(this.assistant);
-    }
-    this.assistant.text += text;
-    this.assistant.fragments++;
-    if (final) this.closeAssistant();
+    const fresh = !this.assistantFrag.open;
+    const item = this.assistantFrag.add(ts, text, final);
+    if (fresh) this.firstResponse(item);
   }
 
   closeAssistant() {
-    if (this.assistant) {
-      this.assistant.final = true;
-      this.assistant = null;
-    }
+    this.assistantFrag.close();
   }
 
   closeAll() {
@@ -228,18 +182,12 @@ export class Grouper {
       summary: argSummary(p.args), nested: [], result: null, pending: true, expandable: true,
     });
     this.firstResponse(item);
-    if (item.id) this.openTools.set(item.id, item);
-    this.toolStack.push(item);
+    this.tools.open(item.id, item);
   }
 
   toolResult(ev, p) {
-    let item = p.id ? this.openTools.get(p.id) : null;
-    if (!item) {
-      // Unmatched id: take the most recent open call with the same name.
-      for (let i = this.toolStack.length - 1; i >= 0; i--) {
-        if (this.toolStack[i].pending && this.toolStack[i].name === p.name) { item = this.toolStack[i]; break; }
-      }
-    }
+    // By id, else the most recent open call with the same name.
+    let item = this.tools.close(p.id, p.name);
     if (!item) {
       item = this.push({ kind: 'tool', ts: ev.ts, id: p.id || '', name: p.name || '?', args: {}, via: p.via || '', summary: '', nested: [], result: null, pending: true, expandable: true, orphan: true });
     }
@@ -249,8 +197,6 @@ export class Grouper {
       error: p.error || '', cancelled: !!p.cancelled, sendError: p.send_error || '',
     };
     item.resultTs = ev.ts;
-    if (item.id) this.openTools.delete(item.id);
-    this.toolStack = this.toolStack.filter((t) => t !== item);
     // Without a voice model the daemon speaks the result itself (the /voice
     // page shows it as an out transcript): render it as the assistant.
     if (item.via && item.via !== 'voice' && !p.cancelled && item.result.spoken) {
@@ -260,10 +206,37 @@ export class Grouper {
     }
   }
 
-  nest(ev) {
-    const open = this.toolStack.length ? this.toolStack[this.toolStack.length - 1] : null;
+  /** Files a supervisor-side event under the innermost open call (an inner brain call, else the voice call), or the loose list. */
+  nest(ev, inner = true) {
+    if (inner) {
+      for (const pairer of this.inner.values()) {
+        if (pairer.last) { pairer.last.children.push(ev); return; }
+      }
+    }
+    const open = this.tools.last;
     if (open) open.nested.push(ev);
     else this.loose.push(ev);
+  }
+
+  innerPairer(prefix) {
+    let pairer = this.inner.get(prefix);
+    if (!pairer) { pairer = new ToolPairer(); this.inner.set(prefix, pairer); }
+    return pairer;
+  }
+
+  /** A nested tool call: a copy of the event with its children and result. */
+  innerCall(ev, p, prefix) {
+    const node = { ...ev, id: p.id || '', name: p.name || '?', children: [], result: null, pending: true };
+    this.nest(node);
+    this.innerPairer(prefix).open(node.id, node);
+  }
+
+  innerResult(ev, p, prefix) {
+    const node = this.innerPairer(prefix).close(p.id, p.name);
+    if (!node) { this.nest(ev, false); return; } // orphan: a plain row at the outer level
+    node.result = ev;
+    node.pending = false;
+    node.durMs = p.dur_ms != null ? Number(p.dur_ms) : Date.parse(ev.ts) - Date.parse(node.ts);
   }
 }
 
