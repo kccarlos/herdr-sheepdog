@@ -147,7 +147,7 @@ func Build(cfg config.Config, opts Options) (*App, error) {
 
 func (a *App) wire() error {
 	cfg, opts := a.cfg, a.opts
-	store, err := state.Open(cfg.State.Path, state.Options{Aliases: cfg.Aliases, Warn: opts.Stderr})
+	store, err := state.Open(cfg.State.Path, state.Options{Aliases: cfg.Aliases, Warn: opts.Stderr, FullFsync: cfg.State.FullFsync})
 	if err != nil {
 		return err
 	}
@@ -338,6 +338,9 @@ func (a *App) Run(ctx context.Context) (err error) {
 	start := time.Now()
 	defer func() {
 		a.log.Log("daemon", "daemon.stop", "", map[string]any{"version": a.opts.Version, "uptime_s": int(time.Since(start).Seconds()), "error": errString(err)})
+		// Flush any debounced hardware-durable fsync (state.full_fsync)
+		// before the event log closes; harmless no-op otherwise.
+		_ = a.store.Close()
 		if cerr := a.elog.Close(); cerr != nil && err == nil {
 			err = cerr
 		}
