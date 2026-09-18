@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/config"
@@ -175,6 +176,7 @@ func runVoiceTest(ctx context.Context, args []string, stdout, stderr io.Writer) 
 	t := &voiceTest{o: o, sess: sess, out: outW, stderr: stderr, start: time.Now(), urgency: urgency}
 	code = t.run(ctx, pcmIn)
 	cancel()
+	t.streamWG.Wait() // stop feeding audio before the session goes away
 	_ = sess.Close()
 	if outW != nil {
 		if err := outW.Close(); err != nil {
@@ -215,6 +217,9 @@ type voiceTest struct {
 	start   time.Time
 	urgency voice.Urgency
 
+	streamWG sync.WaitGroup
+	errMu    sync.Mutex // errs is appended from the stream goroutine too
+
 	// statistics for the summary
 	audioBytes    int64
 	transcriptIn  []string
@@ -226,11 +231,18 @@ type voiceTest struct {
 	exitReason    string
 }
 
+func (t *voiceTest) addErr(msg string) {
+	t.errMu.Lock()
+	defer t.errMu.Unlock()
+	t.errs = append(t.errs, msg)
+}
+
 func (t *voiceTest) run(ctx context.Context, pcmIn []byte) int {
 	events := t.sess.Events()
 	audio := t.sess.Audio()
 	streamDone := make(chan struct{})
-	go t.stream(ctx, pcmIn, streamDone)
+	t.streamWG.Add(1)
+	go func() { defer t.streamWG.Done(); t.stream(ctx, pcmIn, streamDone) }()
 
 	tick := time.NewTicker(250 * time.Millisecond)
 	defer tick.Stop()
@@ -257,7 +269,7 @@ func (t *voiceTest) run(ctx context.Context, pcmIn []byte) int {
 			if t.out != nil {
 				if _, err := t.out.Write(chunk); err != nil {
 					t.exitReason = "write error"
-					t.errs = append(t.errs, err.Error())
+					t.addErr(err.Error())
 					return 1
 				}
 			}
@@ -282,13 +294,13 @@ func (t *voiceTest) run(ctx context.Context, pcmIn []byte) int {
 			if t.o.text != "" && !textSent && el >= t.o.textAfter {
 				textSent = true
 				if err := t.sess.SendText(t.o.text); err != nil {
-					t.errs = append(t.errs, "text: "+err.Error())
+					t.addErr("text: " + err.Error())
 				}
 			}
 			if t.o.push != "" && !pushSent && el >= t.o.pushAfter {
 				pushSent = true
 				if err := t.sess.Push(t.o.push, t.urgency); err != nil {
-					t.errs = append(t.errs, "push: "+err.Error())
+					t.addErr("push: " + err.Error())
 				}
 			}
 			if t.o.dropAfter > 0 && !dropDone && el >= t.o.dropAfter {
@@ -329,7 +341,9 @@ func (t *voiceTest) stream(ctx context.Context, pcm []byte, done chan<- struct{}
 			close(done)
 		}
 		if err := t.sess.SendAudio(frame); err != nil {
-			t.errs = append(t.errs, "audio: "+err.Error())
+			if ctx.Err() == nil {
+				t.addErr("audio: " + err.Error())
+			}
 			return
 		}
 	}
@@ -368,7 +382,7 @@ func (t *voiceTest) printEvent(ev voice.Event) {
 		t.resumed++
 	case voice.EventError:
 		line["event"], line["error"] = "error", e.Err.Error()
-		t.errs = append(t.errs, e.Err.Error())
+		t.addErr(e.Err.Error())
 	default:
 		line["event"] = fmt.Sprintf("%T", ev)
 	}
@@ -380,6 +394,8 @@ func (t *voiceTest) printEvent(ev voice.Event) {
 }
 
 func (t *voiceTest) summary(w io.Writer) {
+	t.errMu.Lock()
+	defer t.errMu.Unlock()
 	sum := map[string]any{
 		"exit_reason":    t.exitReason,
 		"elapsed_s":      time.Since(t.start).Seconds(),
