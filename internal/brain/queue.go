@@ -81,3 +81,11 @@ func (l *turnLock) release() {
 		l.busy = false
 	}
 }
+
+// waiting reports how many turns are queued behind the current one
+// (both priorities). Used by tests to synchronise without sleeping.
+func (l *turnLock) waiting() int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return len(l.ceo) + len(l.event)
+}

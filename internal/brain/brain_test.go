@@ -483,13 +483,13 @@ func TestTurnSerialisation(t *testing.T) {
 		_, _ = h.brain.Turn(context.Background(), Request{Trigger: TriggerEvent, Question: "event two"})
 		done("event2")
 	}()
-	time.Sleep(10 * time.Millisecond) // event two is queued first...
+	waitQueued(t, h.brain, 1) // event two is queued first...
 	go func() {
 		defer wg.Done()
 		_, _ = h.brain.Ask(context.Background(), Request{Question: "ceo question"})
 		done("ceo")
 	}()
-	time.Sleep(10 * time.Millisecond) // ...the CEO turn after it
+	waitQueued(t, h.brain, 2) // ...the CEO turn after it
 	close(release)
 	wg.Wait()
 	h.brain.Quiesce()
@@ -701,5 +701,18 @@ func TestSystemPromptSections(t *testing.T) {
 	}
 	if i, j := strings.Index(sys, "## Answer contract"), strings.Index(sys, "## Agents"); i > j {
 		t.Error("dynamic sections must come after the stable ones")
+	}
+}
+
+// waitQueued blocks until n turns are waiting on the brain's turn lock, so
+// the serialisation test does not depend on goroutine scheduling speed.
+func waitQueued(t *testing.T, b *Brain, n int) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for b.QueuedTurns() < n {
+		if time.Now().After(deadline) {
+			t.Fatalf("only %d turns queued, want %d", b.QueuedTurns(), n)
+		}
+		time.Sleep(time.Millisecond)
 	}
 }
