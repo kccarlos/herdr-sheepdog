@@ -31,8 +31,10 @@ type Options struct {
 }
 
 // fsyncDebounce is how long a burst of Apply/Update calls coalesces into
-// a single hardware-durable fsync pass when Options.FullFsync is set.
-const fsyncDebounce = 100 * time.Millisecond
+// a single hardware-durable fsync pass when Options.FullFsync is set. A
+// var (not a const) only so tests can shorten/lengthen it; production
+// code never changes it.
+var fsyncDebounce = 100 * time.Millisecond
 
 // Store is the state table with atomic JSON persistence: every mutation
 // writes a temp file next to path, syncs it and renames it over path —

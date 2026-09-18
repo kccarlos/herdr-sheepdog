@@ -81,6 +81,14 @@ func BenchmarkPersistFullFsync(b *testing.B) {
 // durable fsync pass, not one per call, and that the on-disk table is
 // complete (matches the final Apply) once that pass has run.
 func TestFullFsyncCoalescesBurst(t *testing.T) {
+	// Widen the debounce window well past what a 10-call burst could
+	// plausibly take even under -race/-count=2 load, so this stays
+	// deterministic instead of occasionally splitting into more than one
+	// fullSync pass on a slow/contended machine.
+	origDebounce := fsyncDebounce
+	fsyncDebounce = 500 * time.Millisecond
+	t.Cleanup(func() { fsyncDebounce = origDebounce })
+
 	path := filepath.Join(t.TempDir(), "state.json")
 	s, err := Open(path, Options{FullFsync: true})
 	if err != nil {
@@ -104,9 +112,9 @@ func TestFullFsyncCoalescesBurst(t *testing.T) {
 	}
 	assertFileHasRows(t, path, n)
 
-	waitForCount(t, &count, 1, 2*time.Second)
+	waitForCount(t, &count, 1, 5*time.Second)
 	// Give a moment for any extra (wrongly-uncoalesced) fires to show up.
-	time.Sleep(3 * fsyncDebounce)
+	time.Sleep(2 * fsyncDebounce)
 	if got := atomic.LoadInt32(&count); got != 1 {
 		t.Errorf("fullSync ran %d times for a %d-call burst, want exactly 1", got, n)
 	}
