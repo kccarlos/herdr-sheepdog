@@ -234,3 +234,85 @@ func TestWebPort(t *testing.T) {
 		t.Error("bad SHEEPDOG_WEB_PORT should fail")
 	}
 }
+
+func TestCLIConfig(t *testing.T) {
+	cfg, err := load(filepath.Join(t.TempDir(), "missing.toml"), envFrom(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.CLI.Prefer != "auto" || cfg.CLI.CodexBin != "codex" || cfg.CLI.ClaudeBin != "claude" {
+		t.Errorf("cli defaults = %+v", cfg.CLI)
+	}
+	if cfg.CLI.TimeoutS != 60 || cfg.CLI.MaxOutputKB != 16 {
+		t.Errorf("cli timeout/cap defaults = %d/%d", cfg.CLI.TimeoutS, cfg.CLI.MaxOutputKB)
+	}
+	if cfg.CLI.ClaudeModel == "" || cfg.CLI.CodexReasoning == "" {
+		t.Errorf("cli model/reasoning defaults = %+v", cfg.CLI)
+	}
+	if len(cfg.CLI.CodexCmd) == 0 || len(cfg.CLI.ClaudeCmd) == 0 {
+		t.Error("default argv templates should not be empty")
+	}
+	for _, want := range []string{"{question}", "{cwd}", "{reasoning}"} {
+		if !strings.Contains(strings.Join(cfg.CLI.CodexCmd, " "), want) {
+			t.Errorf("codex_cmd missing %s placeholder: %v", want, cfg.CLI.CodexCmd)
+		}
+	}
+	for _, want := range []string{"{question}", "{model}"} {
+		if !strings.Contains(strings.Join(cfg.CLI.ClaudeCmd, " "), want) {
+			t.Errorf("claude_cmd missing %s placeholder: %v", want, cfg.CLI.ClaudeCmd)
+		}
+	}
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	body := `
+[cli]
+prefer = "codex"
+codex_bin = "/usr/local/bin/codex"
+codex_cmd = ["codex", "exec", "{question}"]
+`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = load(path, envFrom(nil))
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.CLI.Prefer != "codex" || cfg.CLI.CodexBin != "/usr/local/bin/codex" {
+		t.Errorf("file cli values not applied: %+v", cfg.CLI)
+	}
+	if len(cfg.CLI.CodexCmd) != 3 {
+		t.Errorf("file codex_cmd not applied: %v", cfg.CLI.CodexCmd)
+	}
+	if cfg.CLI.ClaudeBin != "claude" {
+		t.Errorf("unset cli key should keep default, got %q", cfg.CLI.ClaudeBin)
+	}
+
+	cfg, err = load(path, envFrom(map[string]string{
+		"SHEEPDOG_CLI_PREFER":          "claude",
+		"SHEEPDOG_CLI_CLAUDE_BIN":      "/opt/claude",
+		"SHEEPDOG_CLI_CLAUDE_MODEL":    "claude-haiku-test",
+		"SHEEPDOG_CLI_CODEX_REASONING": "high",
+		"SHEEPDOG_CLI_TIMEOUT_S":       "10",
+		"SHEEPDOG_CLI_MAX_OUTPUT_KB":   "4",
+	}))
+	if err != nil {
+		t.Fatalf("load with env: %v", err)
+	}
+	if cfg.CLI.Prefer != "claude" || cfg.CLI.ClaudeBin != "/opt/claude" || cfg.CLI.ClaudeModel != "claude-haiku-test" {
+		t.Errorf("env cli values not applied: %+v", cfg.CLI)
+	}
+	if cfg.CLI.CodexReasoning != "high" || cfg.CLI.TimeoutS != 10 || cfg.CLI.MaxOutputKB != 4 {
+		t.Errorf("env cli values not applied: %+v", cfg.CLI)
+	}
+	if !strings.Contains(cfg.String(), "cli.prefer=claude") {
+		t.Errorf("String lacks cli.prefer: %s", cfg)
+	}
+
+	if _, err := load(path, envFrom(map[string]string{"SHEEPDOG_CLI_TIMEOUT_S": "0"})); err == nil {
+		t.Error("zero SHEEPDOG_CLI_TIMEOUT_S should fail")
+	}
+	if _, err := load(path, envFrom(map[string]string{"SHEEPDOG_CLI_MAX_OUTPUT_KB": "nope"})); err == nil {
+		t.Error("non-numeric SHEEPDOG_CLI_MAX_OUTPUT_KB should fail")
+	}
+}
