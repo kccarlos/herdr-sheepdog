@@ -1,0 +1,666 @@
+// sheepdog /voice: the browser side of the audio pipe (plan §3.8, decisions
+// D2 and D11). Microphone → capture worklet (16 kHz PCM16 frames) → /ws;
+// /ws (24 kHz PCM16) → playback worklet (ring buffer) → speaker. No model
+// logic lives here: the page only moves audio and a few control messages
+// (docs/ws-contract.md). Vanilla JS module, no build step.
+
+const $ = (id) => document.getElementById(id);
+
+const PING_EVERY_MS = 15000;
+const PONG_TIMEOUT_MS = 10000;
+const RECONNECT_MIN_MS = 1000;
+const RECONNECT_MAX_MS = 10000;
+const MAX_WS_BUFFERED = 1 << 20; // drop mic frames if the socket backs up this far
+const TRANSCRIPT_LINES = 8;
+const BUNDLED_FIXTURE = '/testdata/question.wav';
+
+const state = {
+  ctx: null,
+  captureNode: null,
+  playbackNode: null,
+  micStream: null,
+  micSource: null,
+  fileBuffer: null,
+  fileSource: null,
+  fileName: '',
+  source: 'mic',
+
+  ws: null,
+  wsState: 'idle', // idle | connecting | open | closed
+  userDisconnected: true,
+  reconnectDelay: RECONNECT_MIN_MS,
+  reconnectTimer: 0,
+  reconnects: 0,
+  pingTimer: 0,
+  pingSentAt: 0,
+  pingOutstanding: false,
+  pongMs: null,
+
+  muted: false,
+  daemonMuted: false,
+  voice: '…',
+  voiceReason: '',
+
+  framesSent: 0,
+  bytesOut: 0,
+  bytesIn: 0,
+  framesDropped: 0,
+  level: { peak: 0, rms: 0, muted: false },
+  playback: { speaking: false, state: 'idle', bufferedMs: 0, underruns: 0, drains: 0, dropped: 0, flushes: 0, playedMs: 0 },
+  lastUnderruns: 0,
+  flushSeq: 0,
+  pendingFlushes: new Map(), // id → { kind, t0 }
+  lastStopMs: null,
+  lastFlushMs: null,
+
+  transcript: [], // { dir, text, final }
+  errorTimer: 0,
+};
+
+// ---------------------------------------------------------------- audio
+
+function audioContextClass() {
+  return window.AudioContext || window.webkitAudioContext;
+}
+
+// ensureAudio creates the AudioContext and both worklet nodes once. Call it
+// from a user gesture the first time (autoplay policy: Chrome and Safari
+// only start a context that was created or resumed inside a gesture).
+async function ensureAudio() {
+  if (state.ctx) {
+    // Never await resume(): outside a gesture Chrome leaves the promise
+    // pending until one happens, and the caller would hang with it.
+    if (state.ctx.state !== 'running') state.ctx.resume().catch(() => {});
+    return state.ctx;
+  }
+  const AC = audioContextClass();
+  if (!AC) throw new Error('Web Audio is not available in this browser');
+  // Native device rate (48 kHz on most Macs, 44.1 kHz elsewhere): the
+  // worklets resample. Forcing 16 kHz here is rejected by Safari.
+  const ctx = new AC({ latencyHint: 'interactive' });
+  state.ctx = ctx;
+  ctx.resume().catch(() => {}); // synchronously inside the gesture (see above)
+  if (!ctx.audioWorklet) throw new Error('AudioWorklet is not available (Safari 14.1+, Chrome 66+ required)');
+  await ctx.audioWorklet.addModule('/voice/audio-capture.worklet.js');
+  await ctx.audioWorklet.addModule('/voice/audio-playback.worklet.js');
+
+  const playback = new AudioWorkletNode(ctx, 'sheepdog-playback', {
+    numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [1],
+  });
+  playback.port.onmessage = (e) => onPlaybackMessage(e.data);
+  playback.connect(ctx.destination);
+  state.playbackNode = playback;
+
+  const capture = new AudioWorkletNode(ctx, 'sheepdog-capture', {
+    numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1],
+    processorOptions: { muted: state.muted },
+  });
+  capture.port.onmessage = (e) => onCaptureMessage(e.data);
+  // A worklet is only rendered while it is connected to the destination;
+  // its output is unused, so route it through a zero gain.
+  const sink = ctx.createGain();
+  sink.gain.value = 0;
+  capture.connect(sink).connect(ctx.destination);
+  state.captureNode = capture;
+
+  ctx.onstatechange = () => render();
+  console.log(`[voice] audio context ${ctx.sampleRate} Hz, base latency ${Math.round((ctx.baseLatency || 0) * 1000)} ms`);
+  return ctx;
+}
+
+function onCaptureMessage(m) {
+  if (m.type === 'level') {
+    state.level = m;
+    return;
+  }
+  if (m.type !== 'frame') return;
+  if (state.muted) return; // the worklet already stops; belt and braces
+  const ws = state.ws;
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  if (ws.bufferedAmount > MAX_WS_BUFFERED) {
+    state.framesDropped++;
+    return;
+  }
+  ws.send(m.data);
+  state.framesSent++;
+  state.bytesOut += m.data.byteLength;
+}
+
+function onPlaybackMessage(m) {
+  if (m.type === 'stats') {
+    state.playback = m;
+    if (m.underruns !== state.lastUnderruns) {
+      console.log(`[voice] playback underruns=${m.underruns} drains=${m.drains} buffered=${m.bufferedMs}ms`);
+      state.lastUnderruns = m.underruns;
+    }
+    return;
+  }
+  if (m.type === 'flushed') {
+    const p = state.pendingFlushes.get(m.id);
+    if (!p) return;
+    state.pendingFlushes.delete(m.id);
+    const ms = performance.now() - p.t0;
+    const lat = state.ctx ? Math.round(((state.ctx.baseLatency || 0) + (state.ctx.outputLatency || 0)) * 1000) : 0;
+    if (p.kind === 'stop') {
+      state.lastStopMs = ms;
+      console.log(`[voice] stop: click → ring buffer empty ${ms.toFixed(1)} ms (+ ${lat} ms output latency to silence)`);
+    } else {
+      state.lastFlushMs = ms;
+      console.log(`[voice] flush: receipt → ring buffer empty ${ms.toFixed(1)} ms (+ ${lat} ms output latency to silence)`);
+    }
+    render();
+  }
+}
+
+// localFlush drops the playback buffer now and measures how long it took.
+function localFlush(kind) {
+  if (!state.playbackNode) return;
+  const id = ++state.flushSeq;
+  state.pendingFlushes.set(id, { kind, t0: performance.now() });
+  state.playbackNode.port.postMessage({ type: 'flush', id });
+}
+
+function onAudio(buf) {
+  state.bytesIn += buf.byteLength;
+  if (state.playbackNode) state.playbackNode.port.postMessage({ type: 'audio', data: buf }, [buf]);
+}
+
+// ---------------------------------------------------------------- sources
+
+async function startSource() {
+  stopSource();
+  const ctx = await ensureAudio();
+  if (state.source === 'mic') {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      throw new Error('getUserMedia is not available (open the page over http://localhost or https)');
+    }
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+    });
+    state.micStream = stream;
+    state.micSource = ctx.createMediaStreamSource(stream);
+    state.micSource.connect(state.captureNode);
+    const track = stream.getAudioTracks()[0];
+    console.log(`[voice] microphone: ${track ? track.label : '?'}`);
+  } else if (state.fileBuffer) {
+    playFile();
+  }
+}
+
+function stopSource() {
+  if (state.micSource) {
+    try { state.micSource.disconnect(); } catch (_) { /* already gone */ }
+    state.micSource = null;
+  }
+  if (state.micStream) {
+    for (const t of state.micStream.getTracks()) t.stop();
+    state.micStream = null;
+  }
+  stopFile();
+}
+
+// playFile feeds the decoded file through the capture worklet at real-time
+// pace, exactly like a microphone; when it ends the worklet sees silence.
+function playFile() {
+  stopFile();
+  if (!state.fileBuffer || !state.ctx) return;
+  const src = state.ctx.createBufferSource();
+  src.buffer = state.fileBuffer;
+  src.loop = $('file-loop').checked;
+  src.connect(state.captureNode);
+  src.onended = () => {
+    if (state.fileSource === src) state.fileSource = null;
+    render();
+  };
+  src.start();
+  state.fileSource = src;
+  render();
+}
+
+function stopFile() {
+  if (!state.fileSource) return;
+  try { state.fileSource.stop(); } catch (_) { /* not started */ }
+  try { state.fileSource.disconnect(); } catch (_) { /* fine */ }
+  state.fileSource = null;
+}
+
+async function loadFileBytes(bytes, name) {
+  // Decode with a throwaway offline context so loading a file (possibly
+  // outside a user gesture, e.g. ?src=file at page load) never creates the
+  // real AudioContext; that stays a Connect-click job (autoplay policy).
+  const decoder = new (window.OfflineAudioContext || window.webkitOfflineAudioContext)(1, 1, 48000);
+  // Old Safari only offers the callback form of decodeAudioData.
+  const buffer = await new Promise((resolve, reject) => {
+    const p = decoder.decodeAudioData(bytes, resolve, reject);
+    if (p && p.then) p.then(resolve, reject);
+  });
+  state.fileBuffer = buffer;
+  state.fileName = name;
+  console.log(`[voice] loaded ${name}: ${buffer.duration.toFixed(2)} s, ${buffer.sampleRate} Hz, ${buffer.numberOfChannels} ch`);
+  render();
+}
+
+async function loadBundledFixture(quiet) {
+  const resp = await fetch(BUNDLED_FIXTURE, { cache: 'no-cache' });
+  if (!resp.ok) {
+    if (!quiet) showError(`${BUNDLED_FIXTURE} → ${resp.status}: start the daemon with --dev (or set web.dev) to serve the fixtures, or pick a .wav file.`);
+    return false;
+  }
+  await loadFileBytes(await resp.arrayBuffer(), 'question.wav');
+  return true;
+}
+
+// ---------------------------------------------------------------- websocket
+
+function wsURL() {
+  const proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
+  return proto + location.host + '/ws';
+}
+
+function openWS() {
+  clearTimeout(state.reconnectTimer);
+  state.reconnectTimer = 0;
+  const ws = new WebSocket(wsURL());
+  ws.binaryType = 'arraybuffer';
+  state.ws = ws;
+  state.wsState = 'connecting';
+  render();
+  ws.onopen = () => {
+    if (state.ws !== ws) return;
+    state.wsState = 'open';
+    state.reconnectDelay = RECONNECT_MIN_MS;
+    // Reconnecting clients start unmuted on the daemon (contract).
+    if (state.muted) send({ type: 'mute', on: true });
+    startPing();
+    render();
+  };
+  ws.onmessage = (e) => {
+    if (state.ws !== ws) return;
+    if (e.data instanceof ArrayBuffer) {
+      onAudio(e.data);
+      return;
+    }
+    let m;
+    try { m = JSON.parse(e.data); } catch (_) { return; }
+    onControl(m);
+  };
+  ws.onclose = (e) => {
+    if (state.ws !== ws) return;
+    state.ws = null;
+    state.wsState = 'closed';
+    stopPing();
+    console.log(`[voice] ws closed code=${e.code} reason=${JSON.stringify(e.reason)}`);
+    if (!state.userDisconnected) scheduleReconnect();
+    render();
+  };
+  ws.onerror = () => { /* onclose follows */ };
+}
+
+function scheduleReconnect() {
+  const delay = state.reconnectDelay;
+  state.reconnectDelay = Math.min(state.reconnectDelay * 2, RECONNECT_MAX_MS);
+  console.log(`[voice] reconnecting in ${delay} ms`);
+  state.reconnectTimer = setTimeout(() => {
+    if (state.userDisconnected) return;
+    state.reconnects++;
+    openWS();
+  }, delay);
+}
+
+function send(m) {
+  const ws = state.ws;
+  if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+  ws.send(JSON.stringify(m));
+  return true;
+}
+
+function startPing() {
+  stopPing();
+  state.pingOutstanding = false;
+  state.pingTimer = setInterval(() => {
+    if (state.pingOutstanding && performance.now() - state.pingSentAt > PONG_TIMEOUT_MS) {
+      console.log('[voice] pong timeout; closing socket');
+      if (state.ws) state.ws.close(4000, 'pong timeout');
+      return;
+    }
+    state.pingSentAt = performance.now();
+    state.pingOutstanding = send({ type: 'ping' });
+  }, PING_EVERY_MS);
+}
+
+function stopPing() {
+  clearInterval(state.pingTimer);
+  state.pingTimer = 0;
+  state.pingOutstanding = false;
+}
+
+function onControl(m) {
+  switch (m.type) {
+    case 'status':
+      state.voice = m.voice;
+      state.voiceReason = m.reason || '';
+      state.daemonMuted = !!m.muted;
+      if (m.voice === 'closed' && m.reason && m.reason !== 'voice_off') showError(`voice session closed: ${m.reason}`);
+      break;
+    case 'flush':
+      // Everything received before this is stale: drop it now, measure it.
+      localFlush('flush');
+      closeTranscript('out');
+      break;
+    case 'transcript':
+      addTranscript(m.dir, m.text, !!m.final);
+      break;
+    case 'error':
+      showError(m.message || 'error');
+      break;
+    case 'pong':
+      state.pongMs = performance.now() - state.pingSentAt;
+      state.pingOutstanding = false;
+      break;
+    default:
+      break;
+  }
+  render();
+}
+
+// ---------------------------------------------------------------- transcript
+
+function addTranscript(dir, text, final) {
+  const last = state.transcript[state.transcript.length - 1];
+  // A typed utterance is echoed locally; --voice=off sends it back as an
+  // `in` transcript, so skip that duplicate.
+  if (dir === 'in' && final && last && last.dir === 'in' && last.local && last.text === text) {
+    last.local = false;
+    return;
+  }
+  // Output fragments may never carry final (contract): the other
+  // direction starting is the boundary, and so is a flush.
+  closeTranscript(dir === 'in' ? 'out' : 'in');
+  if (last && last.dir === dir && !last.final) {
+    last.text += text;
+    last.final = final;
+  } else {
+    state.transcript.push({ dir, text, final });
+  }
+  while (state.transcript.length > TRANSCRIPT_LINES) state.transcript.shift();
+}
+
+function closeTranscript(dir) {
+  const last = state.transcript[state.transcript.length - 1];
+  if (last && last.dir === dir) last.final = true;
+}
+
+// ---------------------------------------------------------------- actions
+
+async function connect() {
+  state.userDisconnected = false;
+  hideError();
+  try {
+    await startSource();
+  } catch (err) {
+    showError(`audio: ${err.message || err}`);
+    state.userDisconnected = true;
+    render();
+    return;
+  }
+  openWS();
+}
+
+function disconnect() {
+  state.userDisconnected = true;
+  clearTimeout(state.reconnectTimer);
+  state.reconnectTimer = 0;
+  stopPing();
+  if (state.ws) {
+    const ws = state.ws;
+    state.ws = null;
+    ws.close(1000, 'user disconnect');
+  }
+  state.wsState = 'idle';
+  stopSource();
+  localFlush('stop');
+  if (state.ctx && state.ctx.state === 'running') state.ctx.suspend().catch(() => {});
+  state.voice = '…';
+  render();
+}
+
+function setMuted(on) {
+  if (state.muted === on) return;
+  state.muted = on;
+  const port = state.captureNode && state.captureNode.port;
+  if (on) {
+    // Stop the source first so no frame can follow the mute message.
+    if (port) port.postMessage({ type: 'mute', on: true });
+    send({ type: 'mute', on: true });
+  } else {
+    // Tell the daemon first so it does not drop the first frames.
+    send({ type: 'mute', on: false });
+    if (port) port.postMessage({ type: 'mute', on: false });
+  }
+  console.log(`[voice] mute ${on ? 'on' : 'off'} (frames sent so far: ${state.framesSent})`);
+  render();
+}
+
+// stop is the "stop" button: silence now, and ask the daemon to cancel
+// (it answers with flush, which we measure separately).
+function stop() {
+  localFlush('stop');
+  closeTranscript('out');
+  send({ type: 'cancel' });
+  render();
+}
+
+function sendText() {
+  const input = $('text-input');
+  const text = input.value.trim();
+  if (!text) return;
+  if (!send({ type: 'text', text })) {
+    showError('not connected');
+    return;
+  }
+  input.value = '';
+  // The voice session does not transcribe typed input; show it ourselves.
+  closeTranscript('out');
+  state.transcript.push({ dir: 'in', text, final: true, local: true });
+  while (state.transcript.length > TRANSCRIPT_LINES) state.transcript.shift();
+}
+
+function showError(msg) {
+  const el = $('error');
+  el.textContent = msg;
+  el.classList.remove('hidden');
+  clearTimeout(state.errorTimer);
+  state.errorTimer = setTimeout(hideError, 12000);
+  console.warn(`[voice] ${msg}`);
+}
+
+function hideError() {
+  $('error').classList.add('hidden');
+}
+
+// ---------------------------------------------------------------- render
+
+function fmtBytes(n) {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KiB`;
+  return `${(n / 1024 / 1024).toFixed(2)} MiB`;
+}
+
+function setDot(id, cls, text) {
+  $(id + '-dot').className = `dot ${cls}`;
+  $(id + '-text').textContent = text;
+}
+
+function render() {
+  const connected = !state.userDisconnected;
+  const open = state.wsState === 'open';
+  setDot('ws', open ? 'open' : state.wsState === 'connecting' ? 'connecting' : state.wsState === 'closed' ? 'closed' : 'idle',
+    `ws: ${state.wsState}${state.wsState === 'closed' && connected ? ' (reconnecting)' : ''}`);
+  const v = connected ? state.voice : '…';
+  setDot('voice', v === '…' ? 'idle' : v, `voice: ${v}${state.voiceReason && v === 'closed' ? ` (${state.voiceReason})` : ''}${state.daemonMuted && open ? ' · muted' : ''}`);
+
+  const btnConnect = $('btn-connect');
+  btnConnect.textContent = connected ? 'Disconnect' : 'Connect';
+  btnConnect.classList.toggle('primary', !connected);
+  $('btn-mute').disabled = !connected;
+  $('btn-mute').textContent = state.muted ? 'Unmute' : 'Mute';
+  $('btn-mute').classList.toggle('active', state.muted);
+  $('btn-stop').disabled = !open;
+  $('btn-text').disabled = !open;
+  $('mute-flag').classList.toggle('hidden', !state.muted);
+  $('speaking-flag').classList.toggle('hidden', !state.playback.speaking);
+
+  const meter = document.querySelector('.meter');
+  meter.classList.toggle('muted', state.muted);
+  const lv = state.muted ? { peak: 0, rms: 0 } : state.level;
+  $('level-bar').style.width = `${Math.min(100, Math.round(lv.rms * 300))}%`;
+  $('level-peak').style.left = `${Math.min(100, Math.round(lv.peak * 100))}%`;
+  $('meter-text').textContent = state.muted ? 'muted' : lv.peak > 0 ? `peak ${(20 * Math.log10(lv.peak)).toFixed(0)} dBFS` : '';
+
+  $('file-controls').classList.toggle('hidden', state.source !== 'file');
+  $('file-play').disabled = !state.fileBuffer;
+  $('file-play').textContent = state.fileSource ? 'restart file' : 'play into mic';
+  $('file-text').textContent = state.fileBuffer
+    ? `${state.fileName} (${state.fileBuffer.duration.toFixed(1)} s)${state.fileSource ? ' · playing' : ''}`
+    : 'no file loaded';
+
+  const ctx = state.ctx;
+  $('st-ctx').textContent = ctx ? `${ctx.state}, ${ctx.sampleRate} Hz, out latency ${Math.round(((ctx.baseLatency || 0) + (ctx.outputLatency || 0)) * 1000)} ms` : '–';
+  $('st-frames').textContent = `${state.framesSent}${state.framesDropped ? ` (dropped ${state.framesDropped})` : ''}`;
+  $('st-bytes-out').textContent = fmtBytes(state.bytesOut);
+  $('st-bytes-in').textContent = fmtBytes(state.bytesIn);
+  const p = state.playback;
+  $('st-play').textContent = `${p.state}, buffered ${p.bufferedMs} ms, played ${(p.playedMs / 1000).toFixed(1)} s, flushes ${p.flushes}${p.dropped ? `, dropped ${p.dropped}` : ''}`;
+  $('st-underruns').textContent = `${p.underruns} (drains ${p.drains})`;
+  $('st-stop').textContent = state.lastStopMs == null ? '–' : `click → buffer empty ${state.lastStopMs.toFixed(1)} ms`;
+  $('st-flush').textContent = state.lastFlushMs == null ? '–' : `flush → buffer empty ${state.lastFlushMs.toFixed(1)} ms`;
+  $('st-reconnects').textContent = String(state.reconnects);
+  $('st-ping').textContent = state.pongMs == null ? '–' : `${state.pongMs.toFixed(0)} ms rtt`;
+
+  renderTranscript();
+}
+
+function renderTranscript() {
+  const box = $('transcript');
+  const key = JSON.stringify(state.transcript);
+  if (box.dataset.key === key) return;
+  box.dataset.key = key;
+  box.textContent = '';
+  if (state.transcript.length === 0) {
+    const p = document.createElement('p');
+    p.className = 'muted';
+    p.textContent = 'Nothing yet.';
+    box.appendChild(p);
+    return;
+  }
+  for (const t of state.transcript) {
+    const line = document.createElement('div');
+    line.className = `line ${t.dir}${t.final ? '' : ' partial'}`;
+    const dir = document.createElement('span');
+    dir.className = 'dir';
+    dir.textContent = t.dir === 'in' ? 'you' : 'dog';
+    const text = document.createElement('span');
+    text.className = 'text';
+    text.textContent = t.text + (t.final ? '' : ' …');
+    line.append(dir, text);
+    box.appendChild(line);
+  }
+  box.scrollTop = box.scrollHeight;
+}
+
+// ---------------------------------------------------------------- wiring
+
+function resumeIfSuspended() {
+  const ctx = state.ctx;
+  if (ctx && !state.userDisconnected && ctx.state !== 'running' && ctx.state !== 'closed') {
+    ctx.resume().catch(() => {});
+  }
+}
+
+function init() {
+  const params = new URLSearchParams(location.search);
+  if (params.get('src') === 'file') {
+    state.source = 'file';
+    $('source').value = 'file';
+    loadBundledFixture(true).catch(() => {});
+  }
+
+  $('btn-connect').addEventListener('click', () => (state.userDisconnected ? connect() : disconnect()));
+  $('btn-mute').addEventListener('click', () => setMuted(!state.muted));
+  $('btn-stop').addEventListener('click', stop);
+  $('btn-text').addEventListener('click', sendText);
+  $('text-input').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      sendText();
+    }
+  });
+  $('source').addEventListener('change', async (e) => {
+    state.source = e.target.value;
+    if (!state.userDisconnected) {
+      try { await startSource(); } catch (err) { showError(`audio: ${err.message || err}`); }
+    }
+    render();
+  });
+  $('file-input').addEventListener('change', async (e) => {
+    const f = e.target.files && e.target.files[0];
+    if (!f) return;
+    try {
+      await loadFileBytes(await f.arrayBuffer(), f.name);
+      if (!state.userDisconnected) playFile();
+    } catch (err) {
+      showError(`decode ${f.name}: ${err.message || err}`);
+    }
+  });
+  $('file-bundled').addEventListener('click', async () => {
+    try {
+      if (await loadBundledFixture(false) && !state.userDisconnected) playFile();
+    } catch (err) {
+      showError(`fetch ${BUNDLED_FIXTURE}: ${err.message || err}`);
+    }
+  });
+  $('file-play').addEventListener('click', async () => {
+    try {
+      await ensureAudio();
+      playFile();
+    } catch (err) {
+      showError(`audio: ${err.message || err}`);
+    }
+  });
+  $('file-loop').addEventListener('change', (e) => {
+    if (state.fileSource) state.fileSource.loop = e.target.checked;
+  });
+
+  document.addEventListener('keydown', (e) => {
+    const inField = e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT');
+    if (e.key === 'Escape') {
+      if (!$('btn-stop').disabled) stop();
+      return;
+    }
+    if (inField || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.key === ' ') {
+      e.preventDefault();
+      if (!$('btn-stop').disabled) stop();
+    } else if (e.key === 'm' || e.key === 'M') {
+      if (!$('btn-mute').disabled) setMuted(!state.muted);
+    }
+  });
+
+  // Tab hidden / phone locked: keep the socket; if the browser suspended
+  // the context, resume it when we are visible again or on the next gesture.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') resumeIfSuspended();
+  });
+  window.addEventListener('pageshow', resumeIfSuspended);
+  window.addEventListener('pagehide', () => { /* nothing: the daemon keeps the session (D2) */ });
+  document.addEventListener('pointerdown', resumeIfSuspended, { capture: true });
+
+  setInterval(render, 100);
+  render();
+
+  // Debug handle (console only): inspect state, inject 24 kHz PCM16 into
+  // the playback path without a model, or flush it.
+  window.sheepdogVoice = { state, injectAudio: onAudio, flush: () => localFlush('stop') };
+}
+
+init();
