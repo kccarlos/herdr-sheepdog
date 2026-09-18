@@ -28,7 +28,7 @@ func twoAgents(t *testing.T) *harness {
 func TestScenario1BriefingNoModelCall(t *testing.T) {
 	h := twoAgents(t)
 	res := h.call(ToolBriefing, nil)
-	want := "Two agents: auth is working and docs is idle."
+	want := "Two agents: auth is working on something and docs is idle."
 	if res.Spoken != want || res.Scheduling != voice.UrgencyInterrupt {
 		t.Errorf("briefing = %+v, want %q", res, want)
 	}
@@ -63,12 +63,12 @@ func TestBriefingCacheInvalidation(t *testing.T) {
 		t.Error("cache not stable")
 	}
 	h.transition("w6:p1", herdr.StateIdle, herdr.StateWorking)
-	if got := h.call(ToolBriefing, nil).Spoken; got != "Two agents: auth is working and docs is working." {
+	if got := h.call(ToolBriefing, nil).Spoken; got != "Two agents: auth is working on something and docs is working on something." {
 		t.Errorf("after transition: %q", got)
 	}
 	h.block("w5:p1", "codex-approval-prompt.screen.txt")
 	got := h.call(ToolBriefing, nil).Spoken
-	if got != "Two agents: auth is blocked, asking whether it can create hello.txt and waiting for your answer, and docs is working." {
+	if got != "Two agents: auth is asking whether it can create hello.txt and docs is working on something. Auth is waiting for your answer." {
 		t.Errorf("after block: %q", got)
 	}
 	h.call(ToolConfirm, map[string]any{"answer": "yes"})
@@ -81,7 +81,7 @@ func TestBriefingCacheInvalidation(t *testing.T) {
 	}
 	h.transition("w5:p1", herdr.StateBlocked, herdr.StateUnknown)
 	h.transition("w6:p1", herdr.StateWorking, herdr.StateUnknown)
-	if got := h.call(ToolBriefing, nil).Spoken; got != "Two agents: auth is not running and docs is not running." {
+	if got := h.call(ToolBriefing, nil).Spoken; got != "Two agents: auth has exited and docs has exited." {
 		t.Errorf("after exits: %q", got)
 	}
 	h.sup.HandleTransition(context.Background(), herdr.Transition{PaneID: "w5:p1", Closed: true, To: herdr.StateUnknown})
@@ -115,7 +115,7 @@ func TestScenario2BlockedPushesAndCreatesPending(t *testing.T) {
 		t.Errorf("pending.created=%d summarize=%d", h.log.count("pending.created"), h.llm.count("summarize_block"))
 	}
 	reads := h.srv.RequestsFor("pane.read")
-	if len(reads) != 1 || !strings.Contains(string(reads[0].Params), `"recent_unwrapped"`) || !strings.Contains(string(reads[0].Params), `"lines":80`) {
+	if len(reads) != 1 || !strings.Contains(string(reads[0].Params), `"recent_unwrapped"`) || !strings.Contains(string(reads[0].Params), `"lines":200`) {
 		t.Errorf("pane.read = %+v", reads)
 	}
 	row, _ := h.store.Get("w5:p1")
@@ -213,13 +213,22 @@ func TestScenario4ProposeSendsAndEchoes(t *testing.T) {
 	if h.log.count("herdr.send") != 1 || h.log.count("pending.created") != 1 {
 		t.Errorf("events: send=%d created=%d", h.log.count("herdr.send"), h.log.count("pending.created"))
 	}
-	// The turn finishing clears the in-flight action.
+	// The turn finishing clears the in-flight action, moves the task to
+	// last_task and announces the result read from the screen.
+	h.srv.SetScreen("w5:p1", fixture(t, "codex-after-approval.screen.txt"))
 	h.transition("w5:p1", herdr.StateWorking, herdr.StateDone)
 	if _, ok := h.pending(); ok {
 		t.Error("send_instruction survived done")
 	}
-	if got := h.pusher.last(t); got.Text != "auth finished." || got.Urgency != voice.UrgencyIdle {
+	if got := h.pusher.last(t); got.Text != "auth finished: created hello.txt with the requested line." || got.Urgency != voice.UrgencyIdle {
 		t.Errorf("done push = %+v", got)
+	}
+	row, _ = h.store.Get("w5:p1")
+	if row.CurrentTask != "" || row.LastTask != "skip the flaky test and rerun" {
+		t.Errorf("after done: current_task=%q last_task=%q", row.CurrentTask, row.LastTask)
+	}
+	if row.LastResult == nil || row.LastResult.Spoken != "created hello.txt with the requested line" || row.LastResult.Outcome != "success" || !row.LastResult.At.Equal(h.clock.Now()) {
+		t.Errorf("last_result = %+v", row.LastResult)
 	}
 }
 
@@ -297,7 +306,7 @@ func TestCancelSuppressesFinishedPush(t *testing.T) {
 	// The next real completion is announced again.
 	h.transition("w6:p1", herdr.StateDone, herdr.StateWorking)
 	h.transition("w6:p1", herdr.StateWorking, herdr.StateDone)
-	if got := h.pusher.last(t); got.Text != "docs finished." {
+	if got := h.pusher.last(t); !strings.HasPrefix(got.Text, "docs finished") {
 		t.Errorf("later done push = %+v", got)
 	}
 }
@@ -498,7 +507,7 @@ func TestResumePushesSilentBriefing(t *testing.T) {
 	h := twoAgents(t)
 	h.sup.OnVoiceEvent(voice.EventResumed{Handle: "h", ContextLost: true})
 	push := h.pusher.last(t)
-	if push.Urgency != voice.UrgencySilent || push.Text != "Two agents: auth is working and docs is idle." {
+	if push.Urgency != voice.UrgencySilent || push.Text != "Two agents: auth is working on something and docs is idle." {
 		t.Errorf("push = %+v", push)
 	}
 	sess := h.store.Snapshot().Session
@@ -530,7 +539,7 @@ func TestPeriodicBriefingPush(t *testing.T) {
 	}
 	cancel()
 	<-done
-	if p := h.pusher.all()[0]; p.Urgency != voice.UrgencySilent || p.Text != "One agent: auth is working." {
+	if p := h.pusher.all()[0]; p.Urgency != voice.UrgencySilent || p.Text != "One agent: auth is working on something." {
 		t.Errorf("push = %+v", p)
 	}
 }

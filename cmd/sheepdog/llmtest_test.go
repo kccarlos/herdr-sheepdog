@@ -22,6 +22,7 @@ func TestLLMTestFlagsAndValidation(t *testing.T) {
 		{[]string{"--template", "bogus"}, 2, "unknown or missing --template"},
 		{[]string{"--template", "summarize_block"}, 2, "needs --screen"},
 		{[]string{"--template", "spoken_answer", "--screen", "x"}, 2, "needs --text"},
+		{[]string{"--template", "summarize_done"}, 2, "needs --screen"},
 		{[]string{"--template", "resolve_instruction", "--text", "hi"}, 2, "needs --text and --agents"},
 		{[]string{"--help"}, 0, "usage: sheepdog llm-test"},
 	}
@@ -35,6 +36,9 @@ func TestLLMTestFlagsAndValidation(t *testing.T) {
 	o, code, run := parseLLMTestFlags([]string{"--template", "resolve_instruction", "--text", "yes", "--agents", "auth:blocked:whether to write", "--agent", "auth"}, &bytes.Buffer{})
 	if !run || code != 0 || o.agent != "auth" {
 		t.Errorf("valid flags: run=%v code=%d opts=%+v", run, code, o)
+	}
+	if o, code, run := parseLLMTestFlags([]string{"--template", "summarize_done", "--screen", "x"}, &bytes.Buffer{}); !run || code != 0 || o.template != "summarize_done" {
+		t.Errorf("summarize_done flags: run=%v code=%d opts=%+v", run, code, o)
 	}
 }
 

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
-	"sort"
 	"strings"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
@@ -53,8 +52,18 @@ func (s *Supervisor) Handler() voice.ToolHandler {
 
 // Briefing returns the one-sentence status from the state table. It never
 // calls a model and is served from a cache invalidated on every change.
+// The agents it names count as dealt with (the normal level then
+// announces their finish); that is kept in memory, not persisted, so the
+// briefing never waits on the state file.
 func (s *Supervisor) Briefing(context.Context) (voice.ToolResult, error) {
-	return voice.ToolResult{Spoken: s.briefingText(), Scheduling: voice.UrgencyInterrupt}, nil
+	text, panes := s.briefingText()
+	now := s.cfg.Now()
+	s.mu.Lock()
+	for _, id := range panes {
+		s.mentioned[id] = now
+	}
+	s.mu.Unlock()
+	return voice.ToolResult{Spoken: text, Scheduling: voice.UrgencyInterrupt}, nil
 }
 
 // deepQuestion matches questions that need the repository, not the
@@ -73,6 +82,8 @@ func (s *Supervisor) Ask(ctx context.Context, question, agent string) (voice.Too
 	if !ok {
 		return res, nil
 	}
+	s.touch(row.PaneID)
+	s.setSubject(row.PaneID)
 	alias := aliasOr(row.Alias)
 	var ans llm.Answer
 	var err error
@@ -146,6 +157,7 @@ func (s *Supervisor) Propose(ctx context.Context, instruction, agent string) (vo
 	alias := aliasOr(row.Alias)
 
 	s.mu.Lock()
+	s.lastSubject = row.PaneID
 	if pending, has := s.store.Pending(); res.IsAnswer && has && pending.Kind == state.PendingAnswerPrompt && pending.PaneID == row.PaneID {
 		out := s.answerPending(ctx, pending, res.Answer, "Telling "+alias+" %s. Sent.")
 		s.mu.Unlock()
@@ -159,7 +171,8 @@ func (s *Supervisor) Propose(ctx context.Context, instruction, agent string) (vo
 	if err != nil {
 		s.clearPending(p, "send_failed")
 	} else {
-		if _, uerr := s.store.Update(row.PaneID, func(a *state.Agent) { a.CurrentTask = res.InstructionText }); uerr != nil {
+		now := s.cfg.Now()
+		if _, uerr := s.store.Update(row.PaneID, func(a *state.Agent) { a.CurrentTask, a.LastInteraction = res.InstructionText, &now }); uerr != nil {
 			s.log.Log(logSource, "supervisor.state_error", row.PaneID, map[string]any{"error": uerr.Error()})
 		}
 		s.briefing = ""
@@ -223,7 +236,9 @@ func (s *Supervisor) confirmExpired(answer string) voice.ToolResult {
 		return none
 	}
 	row, ok := s.store.Get(e.PaneID)
-	if !ok || row.State != herdr.StateBlocked {
+	if !ok || row.State == herdr.StateWorking || row.State == herdr.StateUnknown {
+		// Moved on (or gone): the prompt is no longer there to answer. A
+		// done row may still be at a prompt herdr did not flag (agy).
 		s.expired = nil
 		return none
 	}
@@ -267,15 +282,18 @@ func (s *Supervisor) answerPending(ctx context.Context, p state.PendingAction, a
 	if err := s.store.ClearPending(); err != nil {
 		s.log.Log(logSource, "supervisor.state_error", p.PaneID, map[string]any{"error": err.Error()})
 	}
+	now := s.cfg.Now()
 	if _, err := s.store.Update(p.PaneID, func(a *state.Agent) {
 		if a.LastBlock != nil {
 			a.LastBlock.Answered = true
 		}
+		a.LastInteraction = &now
 	}); err != nil {
 		s.log.Log(logSource, "supervisor.state_error", p.PaneID, map[string]any{"error": err.Error()})
 	}
 	s.expired = nil
 	s.briefing = ""
+	s.lastSubject = p.PaneID
 	s.log.Log(logSource, "pending.confirmed", p.PaneID, map[string]any{"id": p.ID, "answer": label, "keys": keys})
 	return voice.ToolResult{Spoken: fmt.Sprintf(format, label), Scheduling: voice.UrgencyInterrupt}
 }
@@ -338,9 +356,9 @@ func (s *Supervisor) agentSummaries() []llm.AgentSummary {
 }
 
 // target picks the agent for ask: the named alias, else the only agent,
-// else the most relevant one (pending question, then most recently
-// blocked, then most recently changed). The ToolResult is what to say
-// when no agent fits.
+// else the one most recently discussed (the last push subject or tool
+// target), else a clarify question. The ToolResult is what to say when no
+// agent fits.
 func (s *Supervisor) target(agent string) (state.Agent, voice.ToolResult, bool) {
 	rows := s.store.List()
 	if len(rows) == 0 {
@@ -361,19 +379,18 @@ func (s *Supervisor) target(agent string) (state.Agent, voice.ToolResult, bool) 
 	if len(rows) == 1 {
 		return rows[0], voice.ToolResult{}, true
 	}
-	if p, has := s.store.Pending(); has {
-		if row, ok := s.store.Get(p.PaneID); ok {
-			return row, voice.ToolResult{}, true
-		}
+	s.mu.Lock()
+	subject := s.lastSubject
+	s.mu.Unlock()
+	if row, ok := s.store.Get(subject); ok {
+		return row, voice.ToolResult{}, true
 	}
-	sort.SliceStable(rows, func(i, j int) bool {
-		ri, rj := stateRank(rows[i].State), stateRank(rows[j].State)
-		if ri != rj {
-			return ri < rj
-		}
-		return rows[i].StateSince.After(rows[j].StateSince)
-	})
-	return rows[0], voice.ToolResult{}, true
+	names := make([]string, 0, len(rows))
+	for _, r := range rows {
+		names = append(names, r.Alias)
+	}
+	choice := strings.Join(names[:len(names)-1], ", ") + " or " + names[len(names)-1]
+	return state.Agent{}, voice.ToolResult{Spoken: "Which agent do you mean, " + choice + "?", Clarify: true, Scheduling: voice.UrgencyInterrupt}, false
 }
 
 // findAlias matches an alias exactly, then by slug, then by prefix or

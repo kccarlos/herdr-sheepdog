@@ -360,3 +360,50 @@ codex_cmd = ["codex", "exec", "{question}"]
 		t.Error("non-numeric SHEEPDOG_CLI_MAX_OUTPUT_KB should fail")
 	}
 }
+
+func TestSupervisorConfig(t *testing.T) {
+	cfg, err := load(filepath.Join(t.TempDir(), "missing.toml"), noEnv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Supervisor.Chattiness != "normal" || cfg.Supervisor.RecentMinutes != 30 {
+		t.Errorf("supervisor defaults = %+v", cfg.Supervisor)
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(path, []byte("[supervisor]\nchattiness = \"quiet\"\nrecent_minutes = 5\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = load(path, noEnv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Supervisor.Chattiness != "quiet" || cfg.Supervisor.RecentMinutes != 5 {
+		t.Errorf("from file = %+v", cfg.Supervisor)
+	}
+	cfg, err = load(path, envFrom(map[string]string{"SHEEPDOG_SUPERVISOR_CHATTINESS": " Chatty ", "SHEEPDOG_SUPERVISOR_RECENT_MINUTES": "45"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Supervisor.Chattiness != "chatty" || cfg.Supervisor.RecentMinutes != 45 {
+		t.Errorf("env override = %+v", cfg.Supervisor)
+	}
+	if !strings.Contains(cfg.String(), "supervisor.chattiness=chatty supervisor.recent_minutes=45") {
+		t.Errorf("String() = %q", cfg.String())
+	}
+	for _, env := range []map[string]string{
+		{"SHEEPDOG_SUPERVISOR_CHATTINESS": "loud"},
+		{"SHEEPDOG_SUPERVISOR_RECENT_MINUTES": "0"},
+		{"SHEEPDOG_SUPERVISOR_RECENT_MINUTES": "soon"},
+	} {
+		if _, err := load(path, envFrom(env)); err == nil {
+			t.Errorf("%v should fail", env)
+		}
+	}
+	if err := os.WriteFile(path, []byte("[supervisor]\nchattiness = \"LOUD\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := load(path, noEnv); err == nil || !strings.Contains(err.Error(), "supervisor.chattiness") {
+		t.Errorf("bad level in file: %v", err)
+	}
+}

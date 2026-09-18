@@ -305,6 +305,9 @@ func TestUpdateRowAndPendingRoundTrip(t *testing.T) {
 	row, err := s.Update("w5:p1", func(a *Agent) {
 		a.CurrentTask = "create hello.txt"
 		a.LastBlock.Question = "whether it can create hello.txt"
+		a.LastResult = &Result{Spoken: "created hello.txt", Outcome: "success", At: t0}
+		at := t0
+		a.LastInteraction = &at
 	})
 	if err != nil || row.CurrentTask != "create hello.txt" || row.LastBlock.Question == "" {
 		t.Fatalf("Update: %+v %v", row, err)
@@ -315,7 +318,10 @@ func TestUpdateRowAndPendingRoundTrip(t *testing.T) {
 	if err := s.SetPending(p); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.UpdateSession(func(ss *Session) { ss.Notes = append(ss.Notes, Note{Text: "no migrations today", At: t0}) }); err != nil {
+	if err := s.UpdateSession(func(ss *Session) {
+		ss.Notes = append(ss.Notes, Note{Text: "no migrations today", At: t0})
+		ss.Chattiness = "chatty"
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -333,6 +339,15 @@ func TestUpdateRowAndPendingRoundTrip(t *testing.T) {
 	}
 	if snap.Agents["w5:p1"].LastBlock.Question != "whether it can create hello.txt" {
 		t.Errorf("last_block after reload: %+v", snap.Agents["w5:p1"].LastBlock)
+	}
+	if r := snap.Agents["w5:p1"].LastResult; r == nil || r.Spoken != "created hello.txt" || r.Outcome != "success" || !r.At.Equal(t0) {
+		t.Errorf("last_result after reload: %+v", r)
+	}
+	if li := snap.Agents["w5:p1"].LastInteraction; li == nil || !li.Equal(t0) {
+		t.Errorf("last_interaction after reload: %v", li)
+	}
+	if snap.Session.Chattiness != "chatty" {
+		t.Errorf("session.chattiness after reload: %q", snap.Session.Chattiness)
 	}
 	// Snapshot is a deep copy.
 	snap.PendingAction.Options[0].Keys[0] = "mutated"
@@ -356,6 +371,19 @@ func TestRowsDoNotAliasStore(t *testing.T) {
 	list[0].LastBlock.Question = "mutated"
 	if got, _ := s.Get("w5:p1"); got.LastBlock.Question != "" {
 		t.Error("List aliases last_block")
+	}
+	if _, err := s.Update("w5:p1", func(a *Agent) {
+		a.LastResult = &Result{Spoken: "did a thing"}
+		at := t0
+		a.LastInteraction = &at
+	}); err != nil {
+		t.Fatal(err)
+	}
+	row, _ = s.Get("w5:p1")
+	row.LastResult.Spoken = "mutated"
+	*row.LastInteraction = t0.Add(time.Hour)
+	if got, _ := s.Get("w5:p1"); got.LastResult.Spoken != "did a thing" || !got.LastInteraction.Equal(t0) {
+		t.Error("Get aliases last_result or last_interaction")
 	}
 }
 

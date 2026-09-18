@@ -19,6 +19,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/inject"
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
+	"github.com/kccarlos/herdr-sheepdog/internal/supervisor"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 	static "github.com/kccarlos/herdr-sheepdog/web"
 )
@@ -27,9 +28,12 @@ import (
 const logSource = "web"
 
 // Supervisor is what the web layer needs from the supervisor: the tool
-// handler (cancel goes through it like every other tool).
+// handler (cancel goes through it like every other tool) and the runtime
+// settings behind /api/settings.
 type Supervisor interface {
 	Handler() voice.ToolHandler
+	Settings() supervisor.Settings
+	SetSettings(supervisor.Settings) error
 }
 
 // EventInjector is the Watcher's second input channel (plugin shim).
@@ -156,6 +160,8 @@ func (s *Server) routes() error {
 	s.mux.HandleFunc("GET /api/agents", s.handleAgents)
 	s.mux.HandleFunc("GET /api/events", s.handleEventsTail)
 	s.mux.HandleFunc("GET /api/voice/system_prompt", s.handleSystemPrompt)
+	s.mux.HandleFunc("GET /api/settings", s.handleGetSettings)
+	s.mux.HandleFunc("PUT /api/settings", s.handlePutSettings)
 	s.mux.HandleFunc("POST /api/pending/cancel", s.handleCancel)
 	s.mux.HandleFunc("POST /api/inject/blocked", s.handleInjectBlocked)
 	s.mux.HandleFunc("POST /api/inject/done", s.handleInjectDone)

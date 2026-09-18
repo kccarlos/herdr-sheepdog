@@ -28,9 +28,21 @@ type Agent struct {
 
 	// CurrentTask is the last instruction given (by the user via propose,
 	// or read from the pane).
-	CurrentTask        string `json:"current_task,omitempty"`
-	LastBlock          *Block `json:"last_block,omitempty"`
-	LastSeenScreenHash string `json:"last_seen_screen_hash,omitempty"`
+	CurrentTask string `json:"current_task,omitempty"`
+	// LastTask is the instruction the agent last finished (CurrentTask
+	// moves here on done).
+	LastTask  string `json:"last_task,omitempty"`
+	LastBlock *Block `json:"last_block,omitempty"`
+	// LastResult is what the agent last did, summarised for the ear when
+	// it finished (the summarize_done pass).
+	LastResult         *Result `json:"last_result,omitempty"`
+	LastSeenScreenHash string  `json:"last_seen_screen_hash,omitempty"`
+	// LastInteraction is when the user last dealt with this agent: it was
+	// blocked and announced, was sent an answer or an instruction, was
+	// asked about, or was named in a spoken briefing. The "normal"
+	// chattiness level announces a finish only for agents interacted with
+	// recently.
+	LastInteraction *time.Time `json:"last_interaction,omitempty"`
 
 	// Synthetic marks a pane injected by the /debug page rather than seen
 	// through herdr. A herdr snapshot never lists it, so a Closed
@@ -48,6 +60,15 @@ type Block struct {
 	Question string    `json:"question"`
 	SeenAt   time.Time `json:"seen_at"`
 	Answered bool      `json:"answered"`
+}
+
+// Result is the summary of an agent's finished turn.
+type Result struct {
+	// Spoken is the past-tense phrase completing "<alias> finished: …".
+	Spoken string `json:"spoken"`
+	// Outcome is success, failed, partial or unknown.
+	Outcome string    `json:"outcome"`
+	At      time.Time `json:"at"`
 }
 
 // PendingKind is the kind of a PendingAction.
@@ -100,6 +121,9 @@ type Session struct {
 	LastBriefingAt *time.Time `json:"last_briefing_at,omitempty"`
 	// Notes are the note-tool entries of this session, newest last.
 	Notes []Note `json:"notes,omitempty"`
+	// Chattiness is the push policy chosen at runtime (quiet | normal |
+	// chatty); empty means "use the configured initial value".
+	Chattiness string `json:"chattiness,omitempty"`
 }
 
 // Table is the persisted document.
@@ -118,6 +142,14 @@ func (a Agent) clone() Agent {
 	if a.LastBlock != nil {
 		b := *a.LastBlock
 		a.LastBlock = &b
+	}
+	if a.LastResult != nil {
+		r := *a.LastResult
+		a.LastResult = &r
+	}
+	if a.LastInteraction != nil {
+		t := *a.LastInteraction
+		a.LastInteraction = &t
 	}
 	return a
 }

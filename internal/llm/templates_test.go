@@ -9,7 +9,7 @@ import (
 )
 
 func TestTemplatesRender(t *testing.T) {
-	for _, name := range []string{TemplateSummarizeBlock, TemplateResolveInstruction, TemplateSpokenAnswer} {
+	for _, name := range []string{TemplateSummarizeBlock, TemplateResolveInstruction, TemplateSpokenAnswer, TemplateSummarizeDone} {
 		s, err := prompts.Render(name, map[string]string{"alias": "auth", "screen": "S", "user_text": "U", "agents": "A", "hint": "", "question": "Q", "raw": "R"})
 		if strings.Contains(s, "{") && strings.Contains(s[strings.Index(s, "{"):], "{alias}") {
 			t.Errorf("%s: alias not rendered", name)
@@ -162,5 +162,75 @@ func TestSpokenAnswerTwoSentencesNoPaths(t *testing.T) {
 	}
 	if got.Spoken != "The tests in a file failed on a nil pointer. Auth is retrying now." || !got.CanAnswer {
 		t.Errorf("got %+v", got)
+	}
+	// The prompt asks for the answer to the question, keeps the last 16 KB
+	// of the material and carries the question and the alias.
+	big := strings.Repeat("old line that should be dropped\n", 1000) + "NEWEST LINE\n"
+	f = newFake(t, ok(`{"spoken":"It added a Quota section.","can_answer":true}`))
+	c = newClient(t, f, []string{"k"}, nil)
+	if _, err := c.SpokenAnswer(context.Background(), big, `what is the new "section"`, "docs"); err != nil {
+		t.Fatal(err)
+	}
+	user := f.Requests()[0].user
+	if !strings.Contains(user, "NEWEST LINE") || len(user) < DefaultScreenBytes+4000 || len(user) > DefaultResultBytes+4000 {
+		t.Errorf("prompt is %d bytes; want ~%d with the newest line", len(user), DefaultResultBytes)
+	}
+	for _, want := range []string{`Question: "what is the new 'section'"`, `"docs"`, "Answer what was asked", "final message", "Do not restate what state the agent is in"} {
+		if !strings.Contains(user, want) {
+			t.Errorf("prompt lacks %q", want)
+		}
+	}
+}
+
+// TestSummarizeDoneParsesAndNormalises runs the captured "after" screens
+// through a fake model: the spoken phrase loses the alias the model
+// repeats, paths are scrubbed, unknown outcomes are normalised and the
+// prompt carries the tail of the screen (more than summarize_block's).
+func TestSummarizeDoneParsesAndNormalises(t *testing.T) {
+	cases := []struct {
+		screen, reply, wantSpoken, wantOutcome string
+		wantAsked                              bool
+	}{
+		{"codex-after-approval.screen.txt", `{"spoken":"auth created hello.txt with the requested line in /tmp/x/repo.","outcome":"success","asked_question":false}`, "created hello.txt with the requested line in a file", "success", false},
+		{"claude-after-approval.screen.txt", "```json\n" + `{"spoken":"It created claude.txt containing hello from claude.","outcome":"Success","asked_question":false}` + "\n```", "created claude.txt containing hello from claude", "success", false},
+		{"codex-after-ctrl-c.screen.txt", `{"spoken":"was interrupted while running the sleep command","outcome":"failed","asked_question":false}`, "was interrupted while running the sleep command", "failed", false},
+		{"codex-declined-esc.screen.txt", `{"spoken":"auth finished: stopped after you cancelled the append command. Then it waited.","outcome":"cancelled","asked_question":false}`, "stopped after you cancelled the append command", "unknown", false},
+		{"agy-approval-prompt.screen.txt", `{"spoken":"is asking whether it can run go test","outcome":"partial","asked_question":true}`, "is asking whether it can run go test", "partial", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.screen, func(t *testing.T) {
+			f := newFake(t, ok(tc.reply))
+			c := newClient(t, f, []string{"k"}, nil)
+			got, err := c.SummarizeDone(context.Background(), fixture(t, tc.screen), "auth")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Spoken != tc.wantSpoken || got.Outcome != tc.wantOutcome || got.AskedQuestion != tc.wantAsked {
+				t.Errorf("got %+v, want %q %q %v", got, tc.wantSpoken, tc.wantOutcome, tc.wantAsked)
+			}
+			req := f.Requests()[0]
+			if !strings.Contains(req.user, `"auth"`) || !strings.Contains(req.user, "asked_question") {
+				t.Errorf("prompt missing alias or contract: %q", req.user[:200])
+			}
+		})
+	}
+	// The screen keeps its last 16 KB, not 8.
+	big := strings.Repeat("old line that should be dropped\n", 1000) + "NEWEST LINE\n"
+	f := newFake(t, ok(`{"spoken":"did things","outcome":"success"}`))
+	c := newClient(t, f, []string{"k"}, nil)
+	if _, err := c.SummarizeDone(context.Background(), big, "auth"); err != nil {
+		t.Fatal(err)
+	}
+	user := f.Requests()[0].user
+	if !strings.Contains(user, "NEWEST LINE") || len(user) < DefaultScreenBytes+4000 || len(user) > DefaultResultBytes+4000 {
+		t.Errorf("prompt is %d bytes; want ~%d", len(user), DefaultResultBytes)
+	}
+	// Bad replies surface as errors so the supervisor can fall back.
+	for _, reply := range []string{`no json here`, `{"spoken":"","outcome":"success"}`, `{"spoken":"auth.","outcome":"success"}`} {
+		f := newFake(t, ok(reply))
+		c := newClient(t, f, []string{"k"}, nil)
+		if _, err := c.SummarizeDone(context.Background(), "screen", "auth"); err == nil {
+			t.Errorf("reply %q accepted", reply)
+		}
 	}
 }

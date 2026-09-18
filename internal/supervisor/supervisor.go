@@ -51,13 +51,26 @@ type Config struct {
 	// BriefingInterval is how often Run re-pushes the briefing silently as
 	// a fallback for context compression (default 10 min; < 0 disables).
 	BriefingInterval time.Duration
-	// ReadLines is how many recent lines a pane read asks for (default 80).
+	// ReadLines is how many recent lines a pane read asks for (default
+	// 200: enough to see an agent's final message above its status bar).
 	ReadLines int
+	// SummaryTimeout bounds the summarize_done call on a finish (default
+	// 15 s); on expiry the plain "finished" push is spoken instead.
+	SummaryTimeout time.Duration
 	// DataDir is where notes.jsonl is appended; empty keeps notes in the
 	// state table only.
 	DataDir string
+	// Chattiness is the initial push policy ("quiet" | "normal" | "chatty",
+	// default normal); the session's runtime choice, when one was made,
+	// wins over it.
+	Chattiness string
+	// RecentWindow is how recently the user must have dealt with an agent
+	// for the normal level to announce its finish (default 30 min).
+	RecentWindow time.Duration
 	// Now overrides the clock (tests).
 	Now func() time.Time
+
+	chattiness Chattiness // parsed Chattiness
 }
 
 func (c Config) withDefaults() Config {
@@ -71,7 +84,16 @@ func (c Config) withDefaults() Config {
 		c.BriefingInterval = 10 * time.Minute
 	}
 	if c.ReadLines == 0 {
-		c.ReadLines = 80
+		c.ReadLines = 200
+	}
+	if c.SummaryTimeout == 0 {
+		c.SummaryTimeout = 15 * time.Second
+	}
+	if c.Chattiness == "" {
+		c.Chattiness = string(Normal)
+	}
+	if c.RecentWindow == 0 {
+		c.RecentWindow = 30 * time.Minute
 	}
 	if c.Now == nil {
 		c.Now = time.Now
@@ -93,11 +115,15 @@ type Supervisor struct {
 	log     logging.Logger
 	cfg     Config
 
-	mu          sync.Mutex
-	briefing    string               // cached sentence; "" means recompute
-	expired     *state.PendingAction // last expired answer_prompt (scenario 8)
-	seq         uint64               // pending action ids
-	interrupted map[string]time.Time // pane -> when cancel sent Ctrl-C (suppresses the next "finished")
+	mu            sync.Mutex
+	briefing      string               // cached sentence; "" means recompute
+	briefingPanes []string             // panes the cached sentence names
+	briefingAt    time.Time            // when the cached sentence was composed
+	expired       *state.PendingAction // last expired answer_prompt (scenario 8)
+	seq           uint64               // pending action ids
+	interrupted   map[string]time.Time // pane -> when cancel sent Ctrl-C (suppresses the next "finished")
+	lastSubject   string               // pane most recently spoken about (last push subject or tool target)
+	mentioned     map[string]time.Time // pane -> when a spoken briefing last named it
 }
 
 // interruptGrace is how long after a user cancel a pane's working -> done
@@ -114,7 +140,13 @@ func New(store *state.Store, h Herdr, templates llm.Templates, querier Querier, 
 	if log == nil {
 		log = logging.NopLogger{}
 	}
-	return &Supervisor{store: store, herdr: h, llm: templates, querier: querier, pusher: pusher, log: log, cfg: cfg.withDefaults(), interrupted: map[string]time.Time{}}, nil
+	cfg = cfg.withDefaults()
+	level, err := ParseChattiness(cfg.Chattiness)
+	if err != nil {
+		return nil, err
+	}
+	cfg.chattiness = level
+	return &Supervisor{store: store, herdr: h, llm: templates, querier: querier, pusher: pusher, log: log, cfg: cfg, interrupted: map[string]time.Time{}, mentioned: map[string]time.Time{}}, nil
 }
 
 // Run drives pending-action expiry and the periodic silent briefing until
@@ -162,10 +194,15 @@ func (s *Supervisor) voiceConnected() bool {
 	return s.store.Snapshot().Session.VoiceConnected
 }
 
-// push delivers text to the voice session when one is connected.
+// push delivers text to the voice session when one is connected. A
+// spoken push about a pane makes that pane the current subject (what
+// "it" means in the next ask).
 func (s *Supervisor) push(paneID, text string, u voice.Urgency) {
 	if text == "" {
 		return
+	}
+	if paneID != "" && u != voice.UrgencySilent {
+		s.setSubject(paneID)
 	}
 	if s.pusher == nil || !s.voiceConnected() {
 		s.log.Log(logSource, "supervisor.push_skipped", paneID, map[string]any{"text": text, "urgency": u.String()})
@@ -176,13 +213,33 @@ func (s *Supervisor) push(paneID, text string, u voice.Urgency) {
 	}
 }
 
+// pushIf pushes text at idle urgency when the current chattiness level
+// speaks pushes of kind k (every policy-gated push is a low-priority one;
+// questions and exits bypass it); otherwise it logs supervisor.push_quiet
+// so the decision stays visible in the event log.
+func (s *Supervisor) pushIf(k pushKind, paneID, text string) {
+	level := s.chattiness()
+	if !level.allows(k) {
+		s.log.Log(logSource, "supervisor.push_quiet", paneID, map[string]any{"text": text, "chattiness": string(level)})
+		return
+	}
+	s.push(paneID, text, voice.UrgencyIdle)
+}
+
 // pushBriefing pushes the current briefing as silent context and records
 // it in the session.
 func (s *Supervisor) pushBriefing() {
-	text := s.briefingText()
+	text, _ := s.briefingText()
 	now := s.cfg.Now()
 	_ = s.store.UpdateSession(func(ss *state.Session) { ss.LastBriefing, ss.LastBriefingAt = text, &now })
 	s.push("", text, voice.UrgencySilent)
+}
+
+// setSubject records the pane the conversation is about.
+func (s *Supervisor) setSubject(paneID string) {
+	s.mu.Lock()
+	s.lastSubject = paneID
+	s.mu.Unlock()
 }
 
 func (s *Supervisor) nextID(prefix string) string {

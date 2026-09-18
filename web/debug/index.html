@@ -18,6 +18,13 @@
     <span id="sse-text">events: connecting</span>
   </div>
   <div class="muted" id="daemon-info"></div>
+  <label class="indicator" title="how much the supervisor volunteers: quiet = questions and exits; normal = plus finishes of agents you dealt with; chatty = every finish and every pick-up">chattiness
+    <select id="chattiness">
+      <option value="quiet">quiet</option>
+      <option value="normal" selected>normal</option>
+      <option value="chatty">chatty</option>
+    </select>
+  </label>
   <a href="/voice">voice page</a>
 </header>
 
@@ -67,7 +74,7 @@
     <h2>State table <span class="muted" id="state-updated"></span></h2>
     <table id="state-table">
       <thead>
-        <tr><th>alias</th><th>pane</th><th>kind</th><th>workspace</th><th>state</th><th>since</th><th>current task</th><th>last block</th><th></th></tr>
+        <tr><th>alias</th><th>pane</th><th>kind</th><th>workspace</th><th>state</th><th>since</th><th>current task</th><th>last block</th><th>last result</th><th></th></tr>
       </thead>
       <tbody></tbody>
     </table>

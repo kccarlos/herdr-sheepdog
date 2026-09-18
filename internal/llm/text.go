@@ -9,8 +9,14 @@ import (
 	"unicode"
 )
 
-// DefaultScreenBytes is the input truncation limit for screen tails.
+// DefaultScreenBytes is the input truncation limit for screen tails read
+// to find a prompt (summarize_block: the prompt is at the bottom).
 const DefaultScreenBytes = 8 << 10
+
+// DefaultResultBytes is the limit for screen tails read to find what an
+// agent did or said (spoken_answer, summarize_done): the answer may sit
+// above a status bar or banner, so more of the pane is kept (~200 lines).
+const DefaultResultBytes = 16 << 10
 
 // ErrNoJSON is returned when no JSON object can be found in a reply.
 var ErrNoJSON = errors.New("llm: no JSON object in reply")

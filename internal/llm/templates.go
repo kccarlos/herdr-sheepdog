@@ -14,9 +14,10 @@ const (
 	TemplateSummarizeBlock     = "summarize_block.txt"
 	TemplateResolveInstruction = "resolve_instruction.txt"
 	TemplateSpokenAnswer       = "spoken_answer.txt"
+	TemplateSummarizeDone      = "summarize_done.txt"
 )
 
-// systemPrompt is shared by all three templates; the instructions live in
+// systemPrompt is shared by all templates; the instructions live in
 // the user message so the templates are self-contained.
 const systemPrompt = "You are a precise assistant inside a voice supervisor for coding agents. Reply with a single JSON object only: no prose, no markdown fences."
 
@@ -80,12 +81,28 @@ type Answer struct {
 	CanAnswer bool   `json:"can_answer"`
 }
 
+// DoneSummary is the summarize_done contract: what a finished agent did,
+// for the ear.
+type DoneSummary struct {
+	// Spoken is a past-tense phrase completing "<alias> finished: …".
+	Spoken string `json:"spoken"`
+	// Outcome is one of Outcomes.
+	Outcome string `json:"outcome"`
+	// AskedQuestion is true when the screen ends in a question for the
+	// operator that herdr did not report as blocked.
+	AskedQuestion bool `json:"asked_question"`
+}
+
+// Outcomes are the accepted DoneSummary.Outcome values.
+var Outcomes = []string{"success", "failed", "partial", "unknown"}
+
 // Templates is the model-call surface the Supervisor depends on; *Client
 // implements it and tests fake it.
 type Templates interface {
 	SummarizeBlock(ctx context.Context, screenTail, alias string) (BlockSummary, error)
 	ResolveInstruction(ctx context.Context, userText string, agents []AgentSummary, hint string) (Resolution, error)
 	SpokenAnswer(ctx context.Context, raw, question, alias string) (Answer, error)
+	SummarizeDone(ctx context.Context, screenTail, alias string) (DoneSummary, error)
 }
 
 var _ Templates = (*Client)(nil)
@@ -328,14 +345,16 @@ func orUnknown(s string) string {
 
 // SpokenAnswer turns raw material (a screen tail or a CLI tool's output)
 // about the agent called alias into an answer for the ear: at most two
-// sentences, no paths, hashes or URLs (D9), enforced in Go after the model.
+// sentences, no paths, hashes or URLs (D9), enforced in Go after the
+// model. The material keeps its last DefaultResultBytes (~200 lines) so
+// an agent's final message above its status bar is still in view.
 func (c *Client) SpokenAnswer(ctx context.Context, raw, question, alias string) (Answer, error) {
 	if alias = strings.TrimSpace(alias); alias == "" {
 		alias = "the agent"
 	}
 	user, err := prompts.Render(TemplateSpokenAnswer, map[string]string{
 		"question": strings.ReplaceAll(strings.TrimSpace(question), `"`, "'"),
-		"raw":      TailBytes(raw, DefaultScreenBytes),
+		"raw":      TailBytes(raw, DefaultResultBytes),
 		"alias":    alias,
 	})
 	if err != nil {
@@ -354,4 +373,73 @@ func (c *Client) SpokenAnswer(ctx context.Context, raw, question, alias string) 
 		return Answer{}, errors.New("llm: spoken_answer: empty spoken")
 	}
 	return out, nil
+}
+
+// SummarizeDone describes what an agent did in the turn that just ended.
+// The screen tail is truncated to its last DefaultResultBytes (more than
+// SummarizeBlock's, since the result may sit above a banner); the spoken
+// phrase is scrubbed per D9 and trimmed to one clause.
+func (c *Client) SummarizeDone(ctx context.Context, screenTail, alias string) (DoneSummary, error) {
+	alias = strings.TrimSpace(alias)
+	if alias == "" {
+		alias = "the agent"
+	}
+	user, err := prompts.Render(TemplateSummarizeDone, map[string]string{
+		"alias":  alias,
+		"screen": TailBytes(screenTail, DefaultResultBytes),
+	})
+	if err != nil {
+		return DoneSummary{}, err
+	}
+	reply, err := c.Chat(ctx, "summarize_done", systemPrompt, user)
+	if err != nil {
+		return DoneSummary{}, err
+	}
+	var out DoneSummary
+	if err := decode(reply.Text, &out); err != nil {
+		return DoneSummary{}, err
+	}
+	return normalizeDone(out, alias)
+}
+
+// normalizeDone validates and cleans a DoneSummary: the phrase loses a
+// leading "<alias>"/"it" the model sometimes adds and its final period,
+// and the outcome is forced onto the known set.
+func normalizeDone(out DoneSummary, alias string) (DoneSummary, error) {
+	out.Spoken = resultPhrase(out.Spoken, alias)
+	if out.Spoken == "" {
+		return out, errors.New("llm: summarize_done: empty spoken")
+	}
+	out.Outcome = strings.ToLower(strings.TrimSpace(out.Outcome))
+	known := false
+	for _, o := range Outcomes {
+		if out.Outcome == o {
+			known = true
+		}
+	}
+	if !known {
+		out.Outcome = "unknown"
+	}
+	return out, nil
+}
+
+// resultPhrase turns the model's sentence into the bare past-tense phrase
+// that completes "<alias> finished: …".
+func resultPhrase(s, alias string) string {
+	s = strings.TrimSpace(Spoken(s, 1))
+	s = strings.TrimRight(s, ".!")
+	lower := strings.ToLower(s)
+	if lower == strings.ToLower(alias) || lower == "it" {
+		return ""
+	}
+	for _, prefix := range []string{alias + " finished: ", alias + " finished ", alias + " has ", alias + " ", "the agent has ", "the agent ", "it has ", "it "} {
+		if strings.HasPrefix(lower, strings.ToLower(prefix)) {
+			s = strings.TrimSpace(s[len(prefix):])
+			break
+		}
+	}
+	if s == "" {
+		return ""
+	}
+	return strings.ToLower(s[:1]) + s[1:]
 }

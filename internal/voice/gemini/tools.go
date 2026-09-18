@@ -18,16 +18,16 @@ func toolDeclarations() []*genai.Tool {
 	}
 	return []*genai.Tool{{FunctionDeclarations: []*genai.FunctionDeclaration{
 		{Name: "briefing", Behavior: genai.BehaviorNonBlocking,
-			Description: "Current status of all agents in one spoken sentence. Call when the user asks what's happening, how things are going, or for a status.",
+			Description: "Current status of all agents in one or two spoken sentences: what each is doing, asking or last did. Call when the user asks what's happening, how things are going, or for a status.",
 			Parameters:  obj(map[string]*genai.Schema{}, nil)},
 		{Name: "ask", Behavior: genai.BehaviorNonBlocking,
-			Description: "Ask a question that needs looking at an agent's screen, diff, logs, or the repo. Use for 'why', 'what did it change', 'is it stuck'. Tell the user you're checking, then relay the answer when it arrives.",
+			Description: "Answer something the user wants to KNOW by looking at an agent's screen, output, diff, logs or repo: 'what did it say', 'what did it do', 'what does that mean', 'explain the new section', 'ask you to explain …', 'is it stuck', 'why …', 'what changed'. Nothing is sent to the agent. Tell the user you're checking, then relay the answer when it arrives. When unsure between ask and propose, use ask.",
 			Parameters: obj(map[string]*genai.Schema{
-				"question": {Type: genai.TypeString},
-				"agent":    {Type: genai.TypeString, Description: "alias only if the user said one; empty for 'it' / 'that one'"},
+				"question": {Type: genai.TypeString, Description: "the user's question, in their words"},
+				"agent":    {Type: genai.TypeString, Description: "alias only if the user said one; empty for 'it' / 'that one' (the supervisor uses the agent discussed last)"},
 			}, []string{"question"})},
 		{Name: "propose", Behavior: genai.BehaviorNonBlocking,
-			Description: "Send an instruction or an answer to an agent. Use when the user tells an agent to do, stop, or answer something. The system will echo what it will send; the user can say stop to cancel.",
+			Description: "Send an instruction or an answer TO an agent: only when the user tells an agent to do, stop or answer something ('tell auth to rerun the tests', 'ask docs to add a section', 'answer no'). Not for questions the user asks you. The system will echo what it will send; the user can say stop to cancel.",
 			Parameters: obj(map[string]*genai.Schema{
 				"agent":       {Type: genai.TypeString, Description: "alias only if the user said one; empty for 'it' / 'that one' (never guessed)"},
 				"instruction": {Type: genai.TypeString, Description: "what the user said, in their words"},
