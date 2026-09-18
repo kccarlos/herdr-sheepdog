@@ -28,13 +28,15 @@ func printServeUsage(w io.Writer) {
 	fprintln(w, "                    then answers from the screen alone)")
 	fprintln(w, "  --data-dir PATH   data directory for the event log and state (default from config)")
 	fprintln(w, "  --verbose         also print every event to stderr as JSON lines")
+	fprintln(w, "  --dev             serve testdata/audio/*.wav at /testdata/ so the voice page")
+	fprintln(w, "                    can use a fixture as its microphone (config: web.dev)")
 }
 
 // serveOpts are the parsed flags.
 type serveOpts struct {
 	configPath, voice, herdr, cli, dataDir string
 	port                                   int
-	verbose                                bool
+	verbose, dev                           bool
 }
 
 func parseServeFlags(args []string, stderr io.Writer) (serveOpts, int, bool) {
@@ -49,6 +51,7 @@ func parseServeFlags(args []string, stderr io.Writer) (serveOpts, int, bool) {
 	fs.StringVar(&o.cli, "cli", app.CLIOn, "cli query tool mode")
 	fs.StringVar(&o.dataDir, "data-dir", "", "data directory")
 	fs.BoolVar(&o.verbose, "verbose", false, "echo events to stderr")
+	fs.BoolVar(&o.dev, "dev", false, "developer routes")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return o, 0, false
@@ -76,7 +79,7 @@ func runServe(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 		}
 		cfg.DataDir = o.dataDir
 	}
-	opts := app.Options{Voice: o.voice, Herdr: o.herdr, CLI: o.cli, Port: o.port, Version: version, Stderr: stderr}
+	opts := app.Options{Voice: o.voice, Herdr: o.herdr, CLI: o.cli, Port: o.port, Dev: o.dev, Version: version, Stderr: stderr}
 	if o.verbose {
 		opts.Echo = logging.NewJSONLLogger(stderr)
 	}

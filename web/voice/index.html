@@ -4,15 +4,82 @@
 <meta charset="utf-8">
 <title>sheepdog voice</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<style>
-  body { font: 16px/1.5 system-ui, sans-serif; margin: 3rem auto; max-width: 40rem; padding: 0 1rem; color: #222; }
-  code { background: #eee; padding: 0 .3em; }
-</style>
+<meta name="color-scheme" content="light dark">
+<link rel="stylesheet" href="/voice/style.css">
 </head>
 <body>
-<h1>sheepdog voice</h1>
-<p>The voice page (microphone capture and playback over <code>/ws</code>) lands in <strong>WP6</strong>.</p>
-<p>The daemon is running. Until then use the <a href="/debug">debug page</a> to watch the event log,
-inspect the state table and inject fake events.</p>
+<header>
+  <h1>sheepdog <span class="muted">voice</span></h1>
+  <div class="indicator" title="WebSocket to the daemon"><span class="dot" id="ws-dot"></span><span id="ws-text">ws: idle</span></div>
+  <div class="indicator" title="voice session in the daemon"><span class="dot" id="voice-dot"></span><span id="voice-text">voice: …</span></div>
+  <a href="/debug">debug page</a>
+</header>
+
+<main>
+  <section class="card controls">
+    <div class="row buttons">
+      <button id="btn-connect" class="primary">Connect</button>
+      <button id="btn-mute" disabled title="M">Mute</button>
+      <button id="btn-stop" class="danger" disabled title="Space / Esc">Stop</button>
+      <span id="mute-flag" class="pill hidden">muted</span>
+      <span id="speaking-flag" class="pill speaking hidden">speaking</span>
+    </div>
+    <div class="row">
+      <label class="meter-label">mic
+        <span class="meter" title="input level"><span id="level-bar"></span><span id="level-peak"></span></span>
+      </label>
+      <span class="muted small" id="meter-text"></span>
+    </div>
+    <div class="row">
+      <label>source
+        <select id="source">
+          <option value="mic">microphone</option>
+          <option value="file">test file</option>
+        </select>
+      </label>
+      <span id="file-controls" class="row hidden">
+        <input type="file" id="file-input" accept=".wav,audio/wav,audio/x-wav,audio/*">
+        <button id="file-bundled" title="GET /testdata/question.wav (daemon started with --dev)">use bundled question.wav</button>
+        <button id="file-play" disabled>play into mic</button>
+        <label><input type="checkbox" id="file-loop"> loop</label>
+        <span class="muted small" id="file-text">no file loaded</span>
+      </span>
+    </div>
+    <p id="error" class="error hidden"></p>
+  </section>
+
+  <section class="card">
+    <div class="row">
+      <input id="text-input" placeholder="type an utterance (Enter to send)" autocomplete="off">
+      <button id="btn-text" disabled>Send</button>
+    </div>
+    <p class="muted small">Sent as <code>{"type":"text"}</code>: with <code>--voice=off</code> the daemon's text router answers; with a voice session it is a typed utterance to the model.</p>
+  </section>
+
+  <section class="card">
+    <h2>Transcript</h2>
+    <div id="transcript" class="transcript"><p class="muted">Nothing yet.</p></div>
+  </section>
+
+  <section class="card stats">
+    <h2>Stats</h2>
+    <dl>
+      <dt>audio context</dt><dd id="st-ctx">–</dd>
+      <dt>frames sent</dt><dd id="st-frames">0</dd>
+      <dt>bytes sent</dt><dd id="st-bytes-out">0</dd>
+      <dt>bytes received</dt><dd id="st-bytes-in">0</dd>
+      <dt>playback</dt><dd id="st-play">idle</dd>
+      <dt>underruns</dt><dd id="st-underruns">0</dd>
+      <dt>last stop</dt><dd id="st-stop">–</dd>
+      <dt>last flush</dt><dd id="st-flush">–</dd>
+      <dt>reconnects</dt><dd id="st-reconnects">0</dd>
+      <dt>ping</dt><dd id="st-ping">–</dd>
+    </dl>
+  </section>
+
+  <p class="muted small">Keys: <kbd>M</kbd> mute · <kbd>Space</kbd>/<kbd>Esc</kbd> stop. Open this page on the exact host:port the daemon prints (same-origin WebSocket). <code>?src=file</code> preselects the test file source.</p>
+</main>
+
+<script type="module" src="/voice/app.js"></script>
 </body>
 </html>

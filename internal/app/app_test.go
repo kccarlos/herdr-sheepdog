@@ -86,7 +86,8 @@ func TestRunMockVoiceOffFullChain(t *testing.T) {
 	llm := fakeLLM(t)
 	cfg := testConfig(t, llm.URL)
 	var stderr bytes.Buffer
-	a, err := Build(cfg, Options{Voice: VoiceOff, Herdr: HerdrMock, Version: "t1", Stderr: &stderr, Drain: time.Second})
+	cfg.Web.DevTestdataDir = filepath.Join("..", "..", "testdata", "audio")
+	a, err := Build(cfg, Options{Voice: VoiceOff, Herdr: HerdrMock, Dev: true, Version: "t1", Stderr: &stderr, Drain: time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,6 +107,15 @@ func TestRunMockVoiceOffFullChain(t *testing.T) {
 	getJSON(t, url+"/api/state", &st)
 	if st["herdr"] != "mock" || st["version"] != "t1" {
 		t.Fatalf("state = %v", st)
+	}
+	// --dev serves the audio fixtures for the /voice page's file source.
+	resp0, err := http.Get(url + "/testdata/question.wav")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp0.Body.Close()
+	if resp0.StatusCode != http.StatusOK || resp0.Header.Get("Content-Type") != "audio/wav" {
+		t.Fatalf("GET /testdata/question.wav = %d %s", resp0.StatusCode, resp0.Header.Get("Content-Type"))
 	}
 	if v := st["voice"].(map[string]any); v["mode"] != "off" {
 		t.Fatalf("voice = %v", v)

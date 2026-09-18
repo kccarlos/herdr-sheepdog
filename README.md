@@ -13,7 +13,10 @@ read-only CLI query tool that backs `ask()`'s deep path (codex/claude,
 and the daemon itself (`sheepdog serve`): JSONL event log, web server with
 the `/debug` page, SSE tail, fake-event injection and the server side of
 the browser WebSocket contract ([`docs/ws-contract.md`](docs/ws-contract.md)).
-The real `/voice` page (WP6) and packaging (WP7) are still to come.
+The `/voice` page (WP6): microphone → AudioWorklet → 16 kHz PCM16 frames
+over the WebSocket, gapless 24 kHz playback through a ring-buffer worklet,
+mute, stop, auto-reconnect and a file-source test mode (`/voice?src=file`
+with `serve --dev`). Packaging (WP7) is still to come.
 
 ## Usage (so far)
 
@@ -22,6 +25,7 @@ sheepdog serve                              # the daemon: http://127.0.0.1:7777/
 sheepdog serve --voice=off --herdr=mock     # no Gemini, no herdr: drive it from /debug
 sheepdog serve --verbose --port 8080        # echo every event to stderr
 sheepdog serve --cli=off                    # disable the CLI query tool; ask() answers from the screen only
+sheepdog serve --voice=off --herdr=mock --dev  # also serve testdata/audio/*.wav at /testdata/ for /voice?src=file
 
 sheepdog herdr watch            # JSONL transitions on stdout, herdr.* events on stderr
 sheepdog herdr watch --once     # print the persisted state table and exit

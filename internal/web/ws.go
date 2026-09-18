@@ -87,6 +87,7 @@ func (h *hub) handle(w http.ResponseWriter, r *http.Request) {
 	// The contract: a status message before any binary frame.
 	c.enqueue(controlFrame(h.statusMsg()))
 	go c.writeLoop()
+	go c.statsLoop(h.s.deps.StatsInterval)
 	reason := c.readLoop(r.Context())
 	c.finish(reason)
 
@@ -413,18 +414,50 @@ func (c *client) onControl(data []byte) {
 			}
 			return
 		}
+		// Echo the utterance first so the page shows it before the reply.
+		c.enqueue(controlFrame(wsproto.Transcript(wsproto.DirIn, m.Text, true)))
 		ctx, cancel := h.s.toolCtx()
-		_, res, err := h.s.routeUtterance(ctx, m.Text)
+		call, res, err := h.s.routeUtterance(ctx, m.Text)
 		cancel()
 		if err != nil {
 			c.enqueue(controlFrame(wsproto.Error(err.Error())))
 			return
 		}
-		c.enqueue(controlFrame(wsproto.Transcript(wsproto.DirIn, m.Text, true)))
+		if call.Name == supervisor.ToolCancel {
+			return // afterCancel already flushed and spoke the result
+		}
 		c.enqueue(controlFrame(wsproto.Transcript(wsproto.DirOut, res.Spoken, true)))
 	default:
 		// Server→client types arriving from the client.
 		c.enqueue(controlFrame(wsproto.Error("unexpected message type " + m.Type)))
+	}
+}
+
+// statsLoop logs web.client.stats with the counters every interval while
+// the client is attached, so "muting sends zero frames" can be read off
+// the event log without disconnecting (plan §9 WP6).
+func (c *client) statsLoop(every time.Duration) {
+	t := time.NewTicker(every)
+	defer t.Stop()
+	for {
+		select {
+		case <-c.done:
+			return
+		case <-t.C:
+			c.h.s.log.Log(logSource, "web.client.stats", "", c.counters())
+		}
+	}
+}
+
+// counters snapshots the frame counters for an event payload.
+func (c *client) counters() map[string]any {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return map[string]any{
+		"client_id": c.id,
+		"frames_in": c.framesIn, "bytes_in": c.bytesIn, "frames_out": c.framesOut, "bytes_out": c.bytesOut,
+		"dropped_audio": c.droppedAudio, "muted_drops": c.mutedDrops, "queued": len(c.queue),
+		"dur_ms": c.h.s.deps.Now().Sub(c.start).Milliseconds(),
 	}
 }
 
@@ -433,14 +466,9 @@ func (c *client) finish(reason string) {
 	c.once.Do(func() {
 		close(c.done)
 		_ = c.conn.CloseNow()
-		c.mu.Lock()
-		payload := map[string]any{
-			"client_id": c.id, "remote": c.remote, "reason": reason,
-			"frames_in": c.framesIn, "bytes_in": c.bytesIn, "frames_out": c.framesOut, "bytes_out": c.bytesOut,
-			"dropped_audio": c.droppedAudio, "muted_drops": c.mutedDrops,
-			"dur_ms": c.h.s.deps.Now().Sub(c.start).Milliseconds(),
-		}
-		c.mu.Unlock()
+		payload := c.counters()
+		payload["remote"] = c.remote
+		payload["reason"] = reason
 		c.h.s.log.Log(logSource, "web.client.disconnect", "", payload)
 	})
 }

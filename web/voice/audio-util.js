@@ -1,0 +1,437 @@
+// Pure audio helpers shared by the /voice page's worklets and unit-tested
+// with `make test-web` (node --test, no build step, decision D11). Nothing in
+// here touches the DOM or the Web Audio API, so the same code runs in an
+// AudioWorkletGlobalScope, the page and node.
+
+/** Sample rate of client→server PCM16 (docs/ws-contract.md). */
+export const CAPTURE_RATE = 16000;
+/** Sample rate of server→client PCM16. */
+export const PLAYBACK_RATE = 24000;
+/** One capture frame: 20 ms at 16 kHz = 320 samples = 640 bytes. */
+export const FRAME_SAMPLES = 320;
+
+/**
+ * Windowed-sinc low-pass FIR coefficients (Hamming window), normalised
+ * to unity DC gain. Used before down-sampling so content above the target
+ * Nyquist does not alias into the speech band.
+ * @param {number} taps odd number of taps
+ * @param {number} cutoffHz
+ * @param {number} sampleRate
+ * @returns {Float32Array}
+ */
+export function lowpassCoefficients(taps, cutoffHz, sampleRate) {
+  if (taps % 2 === 0) taps += 1;
+  const fc = cutoffHz / sampleRate; // cycles per sample
+  const mid = (taps - 1) / 2;
+  const h = new Float32Array(taps);
+  let sum = 0;
+  for (let i = 0; i < taps; i++) {
+    const n = i - mid;
+    const sinc = n === 0 ? 2 * fc : Math.sin(2 * Math.PI * fc * n) / (Math.PI * n);
+    const w = 0.54 - 0.46 * Math.cos((2 * Math.PI * i) / (taps - 1));
+    h[i] = sinc * w;
+    sum += h[i];
+  }
+  for (let i = 0; i < taps; i++) h[i] /= sum;
+  return h;
+}
+
+/** Streaming FIR filter: keeps the last taps-1 input samples between calls. */
+export class FIRFilter {
+  /** @param {Float32Array} coeffs */
+  constructor(coeffs) {
+    this.h = coeffs;
+    this.hist = new Float32Array(coeffs.length - 1); // previous inputs, oldest first
+  }
+
+  /**
+   * Filters one block. Output has the same length as the input; the
+   * filter delay is (taps-1)/2 samples, irrelevant for speech.
+   * @param {Float32Array} input
+   * @returns {Float32Array}
+   */
+  process(input) {
+    const h = this.h;
+    const taps = h.length;
+    const nh = taps - 1;
+    const n = input.length;
+    const out = new Float32Array(n);
+    // Work on hist ++ input so the window can reach back across calls.
+    const buf = new Float32Array(nh + n);
+    buf.set(this.hist, 0);
+    buf.set(input, nh);
+    for (let i = 0; i < n; i++) {
+      let acc = 0;
+      // y[i] = sum_k h[k] * x[i - k]; x index i-k maps to buf[nh + i - k].
+      const base = nh + i;
+      for (let k = 0; k < taps; k++) acc += h[k] * buf[base - k];
+      out[i] = acc;
+    }
+    if (n >= nh) {
+      this.hist.set(input.subarray(n - nh));
+    } else {
+      this.hist.set(buf.subarray(n, n + nh));
+    }
+    return out;
+  }
+}
+
+/**
+ * Linear-interpolation resampler that keeps its phase across calls, so a
+ * stream chopped into arbitrary blocks (128-frame worklet quanta) produces
+ * exactly the same samples as one big call. Pair with a FIRFilter when
+ * down-sampling; on its own it is fine for up-sampling.
+ */
+export class Resampler {
+  constructor(inRate, outRate) {
+    this.step = inRate / outRate; // input samples per output sample
+    this.pos = 0; // fractional read position relative to `prev`
+    this.prev = 0; // last input sample of the previous block
+    this.primed = false; // false until the first input sample is seen
+  }
+
+  /**
+   * @param {Float32Array} input
+   * @returns {Float32Array} resampled samples (length varies by ±1 per call)
+   */
+  process(input) {
+    const n = input.length;
+    if (n === 0) return new Float32Array(0);
+    if (!this.primed) {
+      // Start on the first real sample instead of interpolating from 0.
+      this.prev = input[0];
+      this.primed = true;
+      this.pos = 1; // position 1 == input[0] in the "prev ++ input" frame
+    }
+    // Virtual buffer: index 0 = prev, index k+1 = input[k]. Output while
+    // the interpolation window [i, i+1] stays inside it.
+    const out = new Float32Array(Math.ceil(n / this.step) + 1);
+    let count = 0;
+    let pos = this.pos;
+    while (pos < n) {
+      const i = Math.floor(pos);
+      const frac = pos - i;
+      const a = i === 0 ? this.prev : input[i - 1];
+      const b = input[i];
+      out[count++] = a + (b - a) * frac;
+      pos += this.step;
+    }
+    this.pos = pos - n; // carry the phase into the next block
+    this.prev = input[n - 1];
+    return out.subarray(0, count);
+  }
+}
+
+/** Float32 [-1,1] → Int16 little-endian (the platform is LE everywhere we run). */
+export function floatToInt16(input) {
+  const out = new Int16Array(input.length);
+  for (let i = 0; i < input.length; i++) {
+    let s = input[i];
+    if (s > 1) s = 1;
+    else if (s < -1) s = -1;
+    out[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+  }
+  return out;
+}
+
+/** Int16 → Float32 [-1,1). */
+export function int16ToFloat(input) {
+  const out = new Float32Array(input.length);
+  for (let i = 0; i < input.length; i++) out[i] = input[i] / 0x8000;
+  return out;
+}
+
+/** Peak and RMS of a block, for the level meter. */
+export function levelOf(input) {
+  let peak = 0;
+  let sq = 0;
+  for (let i = 0; i < input.length; i++) {
+    const a = Math.abs(input[i]);
+    if (a > peak) peak = a;
+    sq += input[i] * input[i];
+  }
+  return { peak, rms: input.length ? Math.sqrt(sq / input.length) : 0 };
+}
+
+/** Re-chunks a stream of samples into fixed-size frames. */
+export class FrameChunker {
+  constructor(frameSamples = FRAME_SAMPLES) {
+    this.size = frameSamples;
+    this.pending = new Int16Array(frameSamples);
+    this.fill = 0;
+  }
+
+  /**
+   * @param {Int16Array} samples
+   * @returns {Int16Array[]} every complete frame; the remainder is kept
+   */
+  push(samples) {
+    const frames = [];
+    let off = 0;
+    while (off < samples.length) {
+      const take = Math.min(this.size - this.fill, samples.length - off);
+      this.pending.set(samples.subarray(off, off + take), this.fill);
+      this.fill += take;
+      off += take;
+      if (this.fill === this.size) {
+        frames.push(this.pending);
+        this.pending = new Int16Array(this.size);
+        this.fill = 0;
+      }
+    }
+    return frames;
+  }
+
+  /** Samples waiting for the next frame. */
+  get buffered() {
+    return this.fill;
+  }
+}
+
+/**
+ * Single-producer single-consumer ring buffer of Float32 samples. Both
+ * sides live on the audio thread here (messages arrive on the worklet's
+ * port, which runs on the rendering thread), so no atomics are needed.
+ */
+export class RingBuffer {
+  constructor(capacity) {
+    this.buf = new Float32Array(capacity);
+    this.cap = capacity;
+    this.r = 0;
+    this.w = 0;
+    this.len = 0;
+  }
+
+  get available() {
+    return this.len;
+  }
+
+  get free() {
+    return this.cap - this.len;
+  }
+
+  /**
+   * Appends samples; when full the oldest are overwritten (we would
+   * rather lose the start of a very long utterance than stall).
+   * @param {Float32Array} samples
+   * @returns {number} samples overwritten
+   */
+  write(samples) {
+    let src = samples;
+    let dropped = 0;
+    if (src.length > this.cap) {
+      dropped += src.length - this.cap;
+      src = src.subarray(src.length - this.cap);
+    }
+    const overflow = src.length - this.free;
+    if (overflow > 0) {
+      // Discard the oldest `overflow` samples to make room.
+      this.r = (this.r + overflow) % this.cap;
+      this.len -= overflow;
+      dropped += overflow;
+    }
+    const first = Math.min(src.length, this.cap - this.w);
+    this.buf.set(src.subarray(0, first), this.w);
+    if (first < src.length) this.buf.set(src.subarray(first), 0);
+    this.w = (this.w + src.length) % this.cap;
+    this.len += src.length;
+    return dropped;
+  }
+
+  /** Reads one sample; caller checks `available` first. */
+  readOne() {
+    const v = this.buf[this.r];
+    this.r = (this.r + 1) % this.cap;
+    this.len--;
+    return v;
+  }
+
+  /**
+   * Reads up to out.length samples into out.
+   * @param {Float32Array} out
+   * @returns {number} samples read
+   */
+  read(out) {
+    const n = Math.min(out.length, this.len);
+    const first = Math.min(n, this.cap - this.r);
+    out.set(this.buf.subarray(this.r, this.r + first), 0);
+    if (first < n) out.set(this.buf.subarray(0, n - first), first);
+    this.r = (this.r + n) % this.cap;
+    this.len -= n;
+    return n;
+  }
+
+  clear() {
+    this.r = 0;
+    this.w = 0;
+    this.len = 0;
+  }
+}
+
+/**
+ * Gapless player state machine: pulls 24 kHz samples from a RingBuffer,
+ * resamples them to the output rate and fills output blocks. It waits for
+ * `prebuffer` samples (a jitter buffer) before starting, or `maxWait`
+ * output blocks if the utterance is shorter than that, then plays until
+ * the ring runs dry. A dry ring closely followed by more audio counts as
+ * an underrun; one followed by nothing is simply the end of the utterance.
+ */
+export class Player {
+  /**
+   * @param {object} o
+   * @param {number} o.inRate ring buffer sample rate (24000)
+   * @param {number} o.outRate audio context sample rate
+   * @param {number} [o.capacity] ring capacity in samples (default 30 s)
+   * @param {number} [o.prebuffer] samples to wait for before starting (100 ms)
+   * @param {number} [o.maxWaitBlocks] blocks to wait for prebuffer before starting anyway
+   * @param {number} [o.underrunWindow] output samples after a drain within which new data means underrun
+   */
+  constructor(o) {
+    this.inRate = o.inRate;
+    this.outRate = o.outRate;
+    this.ring = new RingBuffer(o.capacity || o.inRate * 30);
+    // 150 ms of jitter buffer: the model's chunks arrive in bursts with
+    // gaps of up to ~100 ms between them (observed in WP6 live runs).
+    this.prebuffer = o.prebuffer == null ? Math.round(o.inRate * 0.15) : o.prebuffer;
+    // A lone short chunk still starts after 400 ms rather than never.
+    this.maxWaitBlocks = o.maxWaitBlocks == null ? Math.round((o.outRate * 0.4) / 128) : o.maxWaitBlocks;
+    this.underrunWindow = o.underrunWindow == null ? Math.round(o.outRate * 0.3) : o.underrunWindow;
+    this.step = o.inRate / o.outRate;
+    this.state = 'idle'; // idle | buffering | playing
+    this.waited = 0;
+    this.frac = 0;
+    this.cur = 0;
+    this.next = 0;
+    this.last = 0; // last output sample, for the fade after a flush
+    this.fade = 0; // samples of fade-out left
+    this.fadeLen = Math.round(o.outRate * 0.002);
+    this.outSince = 0; // output samples rendered since the last drain
+    this.stats = { underruns: 0, drains: 0, dropped: 0, played: 0, flushes: 0 };
+  }
+
+  get buffered() {
+    return this.ring.available;
+  }
+
+  get speaking() {
+    return this.state === 'playing';
+  }
+
+  /** @param {Float32Array} samples at inRate */
+  push(samples) {
+    if (samples.length === 0) return;
+    this.stats.dropped += this.ring.write(samples);
+    if (this.state === 'idle') {
+      if (this.stats.drains > 0 && this.outSince < this.underrunWindow) this.stats.underruns++;
+      this.state = 'buffering';
+      this.waited = 0;
+    }
+  }
+
+  /** Drop everything now; the next block fades the last sample to zero. */
+  flush() {
+    this.ring.clear();
+    if (this.state === 'playing') this.fade = this.fadeLen;
+    this.state = 'idle';
+    this.frac = 0;
+    this.cur = 0;
+    this.next = 0;
+    this.waited = 0;
+    this.outSince = this.underrunWindow; // audio after a flush is a new utterance, not an underrun
+    this.stats.flushes++;
+  }
+
+  // Starts playing: seeds the interpolation pair from the ring.
+  _start() {
+    this.cur = this.ring.readOne();
+    this.next = this.ring.available ? this.ring.readOne() : this.cur;
+    this.frac = 0;
+    this.state = 'playing';
+  }
+
+  /**
+   * Fills `out` (at outRate). Returns true when audible samples were
+   * written.
+   * @param {Float32Array} out
+   */
+  render(out) {
+    const n = out.length;
+    if (this.state === 'buffering') {
+      this.waited++;
+      if (this.ring.available >= this.prebuffer || this.waited >= this.maxWaitBlocks) {
+        if (this.ring.available > 0) this._start();
+        else this.state = 'idle';
+      }
+    }
+    if (this.state !== 'playing') {
+      out.fill(0);
+      if (this.fade > 0) this._renderFade(out);
+      this.outSince += n;
+      return false;
+    }
+    let i = 0;
+    for (; i < n; i++) {
+      out[i] = this.cur + (this.next - this.cur) * this.frac;
+      this.frac += this.step;
+      while (this.frac >= 1) {
+        this.frac -= 1;
+        this.cur = this.next;
+        if (this.ring.available === 0) {
+          // Ran dry: finish this sample, then go idle.
+          this.next = this.cur;
+          this.state = 'idle';
+          this.stats.drains++;
+          this.outSince = 0;
+          this.last = out[i];
+          this.fade = this.fadeLen;
+          i++;
+          out.fill(0, i);
+          this._renderFade(out, i);
+          this.stats.played += i;
+          this.frac = 0;
+          return true;
+        }
+        this.next = this.ring.readOne();
+      }
+    }
+    this.last = out[n - 1];
+    this.stats.played += n;
+    return true;
+  }
+
+  // Short linear fade from `last` to 0 so a flush or drain does not click.
+  _renderFade(out, from = 0) {
+    for (let i = from; i < out.length && this.fade > 0; i++, this.fade--) {
+      out[i] = this.last * (this.fade / this.fadeLen);
+    }
+  }
+}
+
+/**
+ * Capture pipeline: context-rate float blocks in, 16 kHz Int16 frames out.
+ * Anti-alias low-pass (when down-sampling) → linear resample → Int16 →
+ * fixed frames. Same code for the microphone and the file test source.
+ */
+export class CapturePipeline {
+  constructor(inRate, outRate = CAPTURE_RATE, frameSamples = FRAME_SAMPLES) {
+    this.filter = null;
+    if (inRate > outRate) {
+      // Cutoff at 90 % of the target Nyquist, 31 taps: ~ -40 dB in the stop
+      // band for 44.1/48 kHz inputs, cheap enough for the audio thread.
+      this.filter = new FIRFilter(lowpassCoefficients(31, outRate * 0.45, inRate));
+    }
+    this.resampler = inRate === outRate ? null : new Resampler(inRate, outRate);
+    this.chunker = new FrameChunker(frameSamples);
+  }
+
+  /**
+   * @param {Float32Array} block samples at inRate
+   * @returns {Int16Array[]} complete 16 kHz frames
+   */
+  process(block) {
+    let x = block;
+    if (this.filter) x = this.filter.process(x);
+    if (this.resampler) x = this.resampler.process(x);
+    return this.chunker.push(floatToInt16(x));
+  }
+}

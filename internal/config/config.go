@@ -78,7 +78,18 @@ type CLI struct {
 type Web struct {
 	// Port is the TCP port on localhost (default 7777).
 	Port int `toml:"port"`
+	// Dev enables developer-only routes: /testdata/<name>.wav serves the
+	// audio fixtures so the /voice page can use one as a fake microphone
+	// (WP6 file-source test mode). Off by default; `serve --dev` sets it.
+	Dev bool `toml:"dev"`
+	// DevTestdataDir is where /testdata/ reads from when Dev is on
+	// (default testdata/audio relative to the working directory).
+	DevTestdataDir string `toml:"dev_testdata_dir"`
 }
+
+// DefaultDevTestdataDir is the directory /testdata/ serves in dev mode
+// when web.dev_testdata_dir is empty: the repo's audio fixtures.
+const DefaultDevTestdataDir = "testdata/audio"
 
 // DefaultWebPort is the port the web server listens on by default.
 const DefaultWebPort = 7777

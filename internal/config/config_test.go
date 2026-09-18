@@ -214,14 +214,20 @@ func TestWebPort(t *testing.T) {
 	if cfg.Web.Port != DefaultWebPort {
 		t.Errorf("default web.port = %d", cfg.Web.Port)
 	}
+	if cfg.Web.Dev || cfg.Web.DevTestdataDir != "" {
+		t.Errorf("web.dev on by default: %+v", cfg.Web)
+	}
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")
-	if err := os.WriteFile(path, []byte("[web]\nport = 8080\n"), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte("[web]\nport = 8080\ndev = true\ndev_testdata_dir = \"/tmp/fixtures\"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	cfg, err = load(path, envFrom(nil))
 	if err != nil || cfg.Web.Port != 8080 {
 		t.Errorf("file web.port = %d err=%v", cfg.Web.Port, err)
+	}
+	if !cfg.Web.Dev || cfg.Web.DevTestdataDir != "/tmp/fixtures" {
+		t.Errorf("file web.dev = %+v", cfg.Web)
 	}
 	cfg, err = load(path, envFrom(map[string]string{"SHEEPDOG_WEB_PORT": "9090"}))
 	if err != nil || cfg.Web.Port != 9090 {

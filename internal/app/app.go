@@ -48,6 +48,9 @@ type Options struct {
 	// Port overrides config web.port when > 0; 0 with an empty config
 	// port picks a free port (tests).
 	Port int
+	// Dev turns on the developer-only web routes (config web.dev; the
+	// `serve --dev` flag). See config.Web.
+	Dev bool
 	// Version is reported in daemon.start and /api/state.
 	Version string
 	// Stderr receives one-line warnings; nil means os.Stderr.
@@ -225,6 +228,12 @@ func (a *App) wire() error {
 		Version:    opts.Version,
 		HerdrMode:  opts.Herdr,
 		VoiceMode:  opts.Voice,
+	}
+	if opts.Dev || a.cfg.Web.Dev {
+		deps.DevTestdataDir = a.cfg.Web.DevTestdataDir
+		if deps.DevTestdataDir == "" {
+			deps.DevTestdataDir = config.DefaultDevTestdataDir
+		}
 	}
 	if a.voice != nil {
 		deps.Voice = a.voice
