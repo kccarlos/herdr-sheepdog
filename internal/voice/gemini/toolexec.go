@@ -79,6 +79,12 @@ func (s *Session) execTool(ctx context.Context, gen int, call voice.ToolCall, tu
 	if res.Clarify {
 		resp["clarify"] = true
 	}
+	if res.Detail != "" {
+		resp["detail"] = res.Detail
+	}
+	if len(res.Options) > 0 {
+		resp["options"] = res.Options
+	}
 	sendErr := s.sendOn(gen, func(c Conn) error {
 		return c.SendToolResponse(genai.LiveToolResponseInput{FunctionResponses: []*genai.FunctionResponse{{
 			ID: call.ID, Name: call.Name, Response: resp, Scheduling: scheduling(res.Scheduling),
@@ -95,6 +101,12 @@ func (s *Session) execTool(ctx context.Context, gen int, call voice.ToolCall, tu
 		"id": call.ID, "name": call.Name, "spoken": res.Spoken, "clarify": res.Clarify,
 		"scheduling": res.Scheduling.String(), "dur_ms": handlerMS,
 		"wait_ms": s.now().Sub(started).Milliseconds() - handlerMS,
+	}
+	if res.Detail != "" {
+		payload["detail"] = res.Detail
+	}
+	if len(res.Options) > 0 {
+		payload["options"] = res.Options
 	}
 	if err != nil {
 		payload["error"] = err.Error()

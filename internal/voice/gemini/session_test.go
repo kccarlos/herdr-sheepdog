@@ -170,7 +170,7 @@ func TestToolCallRoundTrip(t *testing.T) {
 	var gotCall voice.ToolCall
 	handler := func(_ context.Context, call voice.ToolCall) (voice.ToolResult, error) {
 		gotCall = call
-		return voice.ToolResult{Spoken: "briefing called with no arguments", Scheduling: voice.UrgencyInterrupt}, nil
+		return voice.ToolResult{Spoken: "briefing called with no arguments", Detail: "two agents, both idle", Options: []string{"a", "b"}, Scheduling: voice.UrgencyInterrupt}, nil
 	}
 	h := newHarness(t, Config{Handler: handler}, &fakeDialer{results: []func() (Conn, error){ok(c)}})
 
@@ -186,8 +186,11 @@ func TestToolCallRoundTrip(t *testing.T) {
 	if fr.ID != "call_1" || fr.Name != "briefing" || fr.Scheduling != genai.FunctionResponseSchedulingInterrupt {
 		t.Fatalf("response = %+v", fr)
 	}
-	if fr.Response["spoken"] != "briefing called with no arguments" {
-		t.Fatalf("spoken = %v", fr.Response["spoken"])
+	if fr.Response["spoken"] != "briefing called with no arguments" || fr.Response["detail"] != "two agents, both idle" {
+		t.Fatalf("response = %v", fr.Response)
+	}
+	if opts, _ := fr.Response["options"].([]string); len(opts) != 2 {
+		t.Fatalf("options = %v", fr.Response["options"])
 	}
 	if gotCall.Name != "briefing" || gotCall.Args == nil {
 		t.Fatalf("handler saw %+v", gotCall)

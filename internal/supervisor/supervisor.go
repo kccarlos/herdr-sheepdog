@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kccarlos/herdr-sheepdog/internal/brain"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/llm"
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
@@ -67,6 +68,10 @@ type Config struct {
 	// RecentWindow is how recently the user must have dealt with an agent
 	// for the normal level to announce its finish (default 30 min).
 	RecentWindow time.Duration
+	// Brain, when set, answers ask and propose first (docs/roles.md); the
+	// template path below is its fallback. New attaches the Supervisor
+	// as its Host.
+	Brain *brain.Brain
 	// Now overrides the clock (tests).
 	Now func() time.Time
 
@@ -114,6 +119,7 @@ type Supervisor struct {
 	pusher  Pusher
 	log     logging.Logger
 	cfg     Config
+	brain   *brain.Brain // nil: template path only
 
 	mu            sync.Mutex
 	briefing      string               // cached sentence; "" means recompute
@@ -146,8 +152,15 @@ func New(store *state.Store, h Herdr, templates llm.Templates, querier Querier, 
 		return nil, err
 	}
 	cfg.chattiness = level
-	return &Supervisor{store: store, herdr: h, llm: templates, querier: querier, pusher: pusher, log: log, cfg: cfg, interrupted: map[string]time.Time{}, mentioned: map[string]time.Time{}}, nil
+	s := &Supervisor{store: store, herdr: h, llm: templates, querier: querier, pusher: pusher, log: log, cfg: cfg, brain: cfg.Brain, interrupted: map[string]time.Time{}, mentioned: map[string]time.Time{}}
+	if s.brain != nil {
+		s.brain.SetHost(brainHost{s})
+	}
+	return s, nil
 }
+
+// Brain returns the attached brain, or nil.
+func (s *Supervisor) Brain() *brain.Brain { return s.brain }
 
 // Run drives pending-action expiry and the periodic silent briefing until
 // ctx ends. It is optional for tests that call ExpirePending directly.
@@ -179,14 +192,28 @@ func (s *Supervisor) SetVoiceConnected(connected bool) {
 }
 
 // OnVoiceEvent feeds voice session events: connection status maintains
-// session.voice_connected, and a resumed connection gets the briefing
-// pushed silently so the model re-learns the situation (plan §6).
+// session.voice_connected, a resumed connection gets the briefing pushed
+// silently so the model re-learns the situation (plan §6), and the
+// transcripts (the CEO's verbatim words, what the assistant said) go into
+// the brain's transcript.
 func (s *Supervisor) OnVoiceEvent(ev voice.Event) {
 	switch e := ev.(type) {
 	case voice.EventStatus:
 		s.SetVoiceConnected(e.Status == voice.StatusConnected)
 	case voice.EventResumed:
 		s.pushBriefing()
+	case voice.EventTranscript:
+		if s.brain != nil {
+			if e.Dir == voice.DirIn {
+				s.brain.Heard(e.Text, e.Final)
+			} else {
+				s.brain.Said(e.Text, e.Final)
+			}
+		}
+	case voice.EventTurnComplete:
+		if s.brain != nil {
+			s.brain.TurnComplete()
+		}
 	}
 }
 
@@ -210,6 +237,10 @@ func (s *Supervisor) push(paneID, text string, u voice.Urgency) {
 	}
 	if err := s.pusher.Push(text, u); err != nil {
 		s.log.Log(logSource, "supervisor.push_error", paneID, map[string]any{"text": text, "urgency": u.String(), "error": err.Error()})
+		return
+	}
+	if s.brain != nil && u != voice.UrgencySilent {
+		s.brain.Pushed(s.aliasOf(paneID), text, u.String())
 	}
 }
 

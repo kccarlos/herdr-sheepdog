@@ -37,5 +37,8 @@ func (s *Supervisor) appendNote(text string) error {
 		}
 	}
 	s.log.Log(logSource, "note.created", "", map[string]any{"text": text})
+	if s.brain != nil {
+		s.brain.Noted(text)
+	}
 	return nil
 }

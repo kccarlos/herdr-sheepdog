@@ -26,6 +26,13 @@ func (s *Supervisor) HandleTransition(ctx context.Context, t herdr.Transition) {
 		from = prev.State
 	}
 	wasBusy := from == herdr.StateWorking || from == herdr.StateBlocked
+	if s.brain != nil {
+		alias := row.Alias
+		if alias == "" {
+			alias = prev.Alias
+		}
+		s.brain.WorkerEvent(alias, string(from), string(t.To), t.Closed)
+	}
 
 	if t.Closed {
 		s.mu.Lock()

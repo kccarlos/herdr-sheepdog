@@ -13,9 +13,16 @@
 // The five voice tools (briefing, ask, propose, confirm, cancel, note) are
 // methods returning voice.ToolResult with the scheduling the Supervisor
 // chose; Handler adapts them to voice.ToolHandler. briefing never calls a
-// model: it is a cached sentence built from the state table. propose echoes
-// and sends immediately (D4) unless the target is ambiguous (D6); cancel
-// sends Ctrl-C to the pane of the in-flight instruction.
+// model: it is a cached sentence built from the state table. ask and
+// propose go through the brain (internal/brain, docs/roles.md) when one
+// is attached through Config.Brain — the Supervisor is its Host: roster,
+// ledger, screen and CLI reads, and the actions prompt / send_keys /
+// interrupt over the same pending-action paths — and fall back to the
+// template path here when the brain errors or runs out of budget.
+// propose echoes and sends immediately (D4) unless the target is
+// ambiguous (D6); cancel sends Ctrl-C to the pane of the in-flight
+// instruction. The brain's transcript is fed from here too: voice
+// transcripts, pushes, transitions and notes.
 //
 // Pending actions expire after a TTL (Run's ticker); an expired question
 // that the user later confirms is revived and asked again before anything
