@@ -117,6 +117,9 @@ keeping one transcript per daemon run at `<data_dir>/brain/<run-id>.jsonl`.
 When it errors or runs out of budget, the supervisor answers from the
 template path instead. `sheepdog serve --brain=off` disables it for one
 run; it is also off, silently, when no Gemini key is configured.
+`--brain=fake` (a developer mode, like `--herdr=mock`) runs the same loop
+over a scripted reflex model that needs no key and makes no network call,
+so `/debug`'s Supervisor tab has something to show.
 
 | Key | Env override | Default | Meaning |
 |---|---|---|---|
