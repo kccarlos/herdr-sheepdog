@@ -1,0 +1,42 @@
+=== 17:01:18 event=pane.agent_detected cwd=/private/tmp/claude-501/-Users-kc-Documents-herdr-sheepdog/c16b97d4-acf1-42bb-9044-59d5182b5982/scratchpad/plugin-test
+=== 17:01:18 event=pane.agent_status_changed cwd=/private/tmp/claude-501/-Users-kc-Documents-herdr-sheepdog/c16b97d4-acf1-42bb-9044-59d5182b5982/scratchpad/plugin-test
+HERDR_BIN_PATH=/Users/kc/.local/bin/herdr
+HERDR_ENV=1
+HERDR_PANE_ID=w7:p1
+HERDR_PLUGIN_CONFIG_DIR=/Users/kc/.config/herdr/plugins/config/sheepdog.recon-hook-test
+HERDR_PLUGIN_CONTEXT_JSON={"workspace_id":"w7","workspace_label":"recon-hook-test","workspace_cwd":"/private/tmp/claude-501/-Users-kc-Documents-herdr-sheepdog/c16b97d4-acf1-42bb-9044-59d5182b5982/scratchpad/repo","tab_id":"w7:t1","tab_label":"1","focused_pane_id":"w7:p1","focused_pane_cwd":"/private/tmp/claude-501/-Users-kc-Documents-herdr-sheepdog/c16b97d4-acf1-42bb-9044-59d5182b5982/scratchpad/repo","focused_pane_agent":"codex","focused_pane_status":"working","invocation_source":"api","correlation_id":"pane.agent_detected"}
+HERDR_PLUGIN_EVENT_JSON={"event":"pane_agent_detected","data":{"type":"pane_agent_detected","pane_id":"w7:p1","workspace_id":"w7","agent":"codex"}}
+HERDR_PLUGIN_EVENT=pane.agent_detected
+HERDR_PLUGIN_ID=sheepdog.recon-hook-test
+HERDR_PLUGIN_ROOT=/private/tmp/claude-501/-Users-kc-Documents-herdr-sheepdog/c16b97d4-acf1-42bb-9044-59d5182b5982/scratchpad/plugin-test
+HERDR_PLUGIN_STATE_DIR=/Users/kc/.local/state/herdr/plugins/sheepdog.recon-hook-test
+HERDR_SOCKET_PATH=/Users/kc/.config/herdr/herdr.sock
+HERDR_TAB_ID=w7:t1
+HERDR_WORKSPACE_ID=w7
+HERDR_BIN_PATH=/Users/kc/.local/bin/herdr
+HERDR_ENV=1
+HERDR_PANE_ID=w7:p1
+HERDR_PLUGIN_CONFIG_DIR=/Users/kc/.config/herdr/plugins/config/sheepdog.recon-hook-test
+HERDR_PLUGIN_CONTEXT_JSON={"workspace_id":"w7","workspace_label":"recon-hook-test","workspace_cwd":"/private/tmp/claude-501/-Users-kc-Documents-herdr-sheepdog/c16b97d4-acf1-42bb-9044-59d5182b5982/scratchpad/repo","tab_id":"w7:t1","tab_label":"1","focused_pane_id":"w7:p1","focused_pane_cwd":"/private/tmp/claude-501/-Users-kc-Documents-herdr-sheepdog/c16b97d4-acf1-42bb-9044-59d5182b5982/scratchpad/repo","focused_pane_agent":"codex","focused_pane_status":"working","invocation_source":"api","correlation_id":"pane.agent_status_changed"}
+HERDR_PLUGIN_EVENT_JSON={"event":"pane_agent_status_changed","data":{"type":"pane_agent_status_changed","pane_id":"w7:p1","workspace_id":"w7","agent_status":"working","agent":"codex"}}
+HERDR_PLUGIN_EVENT=pane.agent_status_changed
+HERDR_PLUGIN_ID=sheepdog.recon-hook-test
+HERDR_PLUGIN_ROOT=/private/tmp/claude-501/-Users-kc-Documents-herdr-sheepdog/c16b97d4-acf1-42bb-9044-59d5182b5982/scratchpad/plugin-test
+HERDR_PLUGIN_STATE_DIR=/Users/kc/.local/state/herdr/plugins/sheepdog.recon-hook-test
+HERDR_SOCKET_PATH=/Users/kc/.config/herdr/herdr.sock
+HERDR_TAB_ID=w7:t1
+HERDR_WORKSPACE_ID=w7
+=== 17:01:20 event=pane.agent_status_changed cwd=/private/tmp/claude-501/-Users-kc-Documents-herdr-sheepdog/c16b97d4-acf1-42bb-9044-59d5182b5982/scratchpad/plugin-test
+HERDR_BIN_PATH=/Users/kc/.local/bin/herdr
+HERDR_ENV=1
+HERDR_PANE_ID=w7:p1
+HERDR_PLUGIN_CONFIG_DIR=/Users/kc/.config/herdr/plugins/config/sheepdog.recon-hook-test
+HERDR_PLUGIN_CONTEXT_JSON={"workspace_id":"w7","workspace_label":"recon-hook-test","workspace_cwd":"/private/tmp/claude-501/-Users-kc-Documents-herdr-sheepdog/c16b97d4-acf1-42bb-9044-59d5182b5982/scratchpad/repo","tab_id":"w7:t1","tab_label":"1","focused_pane_id":"w7:p1","focused_pane_cwd":"/private/tmp/claude-501/-Users-kc-Documents-herdr-sheepdog/c16b97d4-acf1-42bb-9044-59d5182b5982/scratchpad/repo","focused_pane_agent":"codex","focused_pane_status":"blocked","invocation_source":"api","correlation_id":"pane.agent_status_changed"}
+HERDR_PLUGIN_EVENT_JSON={"event":"pane_agent_status_changed","data":{"type":"pane_agent_status_changed","pane_id":"w7:p1","workspace_id":"w7","agent_status":"blocked","agent":"codex"}}
+HERDR_PLUGIN_EVENT=pane.agent_status_changed
+HERDR_PLUGIN_ID=sheepdog.recon-hook-test
+HERDR_PLUGIN_ROOT=/private/tmp/claude-501/-Users-kc-Documents-herdr-sheepdog/c16b97d4-acf1-42bb-9044-59d5182b5982/scratchpad/plugin-test
+HERDR_PLUGIN_STATE_DIR=/Users/kc/.local/state/herdr/plugins/sheepdog.recon-hook-test
+HERDR_SOCKET_PATH=/Users/kc/.config/herdr/herdr.sock
+HERDR_TAB_ID=w7:t1
+HERDR_WORKSPACE_ID=w7
