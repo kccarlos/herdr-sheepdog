@@ -143,9 +143,9 @@ func (s *Store) Apply(t herdr.Transition) (Agent, bool, error) {
 		}
 	}
 	if !changed {
-		return *a, false, nil
+		return a.clone(), false, nil
 	}
-	return *a, true, s.persist()
+	return a.clone(), true, s.persist()
 }
 
 // defaultAlias returns the config alias for the pane (pinned) or a derived
@@ -198,6 +198,21 @@ func (s *Store) SetAlias(paneID, alias string) error {
 	return s.persist()
 }
 
+// Update mutates the row for paneID under the lock and persists. It is
+// how the supervisor records the block question, the current task and
+// the answered flag. A missing pane is an error; fn must not change
+// PaneID or Alias.
+func (s *Store) Update(paneID string, fn func(*Agent)) (Agent, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	a, ok := s.table.Agents[paneID]
+	if !ok {
+		return Agent{}, fmt.Errorf("state: no agent in pane %s", paneID)
+	}
+	fn(a)
+	return a.clone(), s.persist()
+}
+
 // Get returns the row for paneID.
 func (s *Store) Get(paneID string) (Agent, bool) {
 	s.mu.Lock()
@@ -206,7 +221,7 @@ func (s *Store) Get(paneID string) (Agent, bool) {
 	if !ok {
 		return Agent{}, false
 	}
-	return *a, true
+	return a.clone(), true
 }
 
 // ByAlias returns the row whose alias matches.
@@ -215,7 +230,7 @@ func (s *Store) ByAlias(alias string) (Agent, bool) {
 	defer s.mu.Unlock()
 	for _, a := range s.table.Agents {
 		if a.Alias == alias {
-			return *a, true
+			return a.clone(), true
 		}
 	}
 	return Agent{}, false
@@ -227,7 +242,7 @@ func (s *Store) List() []Agent {
 	defer s.mu.Unlock()
 	out := make([]Agent, 0, len(s.table.Agents))
 	for _, a := range s.table.Agents {
-		out = append(out, *a)
+		out = append(out, a.clone())
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].PaneID < out[j].PaneID })
 	return out
@@ -240,13 +255,14 @@ func (s *Store) Pending() (PendingAction, bool) {
 	if s.table.PendingAction == nil {
 		return PendingAction{}, false
 	}
-	return *s.table.PendingAction, true
+	return s.table.PendingAction.clone(), true
 }
 
 // SetPending replaces the pending action (one at a time) and persists.
 func (s *Store) SetPending(p PendingAction) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	p = p.clone()
 	s.table.PendingAction = &p
 	return s.persist()
 }

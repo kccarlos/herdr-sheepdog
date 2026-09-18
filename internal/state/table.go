@@ -60,6 +60,27 @@ type PendingAction struct {
 	PayloadText   string      `json:"payload_text"`
 	CreatedAt     time.Time   `json:"created_at"`
 	ExpiresAt     time.Time   `json:"expires_at"`
+
+	// Question is the short phrase completing "<alias> is asking …" for an
+	// answer_prompt action.
+	Question string `json:"question,omitempty"`
+	// Options are the choices on screen for an answer_prompt action.
+	Options []Option `json:"options,omitempty"`
+	// YesKeys / NoKeys are the keystrokes for a plain yes / no.
+	YesKeys []string `json:"yes_keys,omitempty"`
+	NoKeys  []string `json:"no_keys,omitempty"`
+}
+
+// Option is one selectable choice of an answer_prompt action.
+type Option struct {
+	Label string   `json:"label"`
+	Keys  []string `json:"keys"`
+}
+
+// Note is one thing the user asked to be remembered (the note tool).
+type Note struct {
+	Text string    `json:"text"`
+	At   time.Time `json:"at"`
 }
 
 // Session is the voice-session bookkeeping.
@@ -67,6 +88,8 @@ type Session struct {
 	VoiceConnected bool       `json:"voice_connected"`
 	LastBriefing   string     `json:"last_briefing,omitempty"`
 	LastBriefingAt *time.Time `json:"last_briefing_at,omitempty"`
+	// Notes are the note-tool entries of this session, newest last.
+	Notes []Note `json:"notes,omitempty"`
 }
 
 // Table is the persisted document.
@@ -81,19 +104,36 @@ func newTable() Table {
 }
 
 // clone returns a deep copy so callers never alias the store's data.
+func (a Agent) clone() Agent {
+	if a.LastBlock != nil {
+		b := *a.LastBlock
+		a.LastBlock = &b
+	}
+	return a
+}
+
+// clone returns a deep copy so callers never alias the store's data.
 func (t Table) clone() Table {
 	out := Table{Agents: make(map[string]*Agent, len(t.Agents)), Session: t.Session}
 	for k, a := range t.Agents {
-		c := *a
-		if a.LastBlock != nil {
-			b := *a.LastBlock
-			c.LastBlock = &b
-		}
+		c := a.clone()
 		out.Agents[k] = &c
 	}
 	if t.PendingAction != nil {
-		p := *t.PendingAction
+		p := t.PendingAction.clone()
 		out.PendingAction = &p
 	}
+	out.Session.Notes = append([]Note(nil), t.Session.Notes...)
 	return out
+}
+
+// clone returns a deep copy of the action.
+func (p PendingAction) clone() PendingAction {
+	p.Options = append([]Option(nil), p.Options...)
+	for i := range p.Options {
+		p.Options[i].Keys = append([]string(nil), p.Options[i].Keys...)
+	}
+	p.YesKeys = append([]string(nil), p.YesKeys...)
+	p.NoKeys = append([]string(nil), p.NoKeys...)
+	return p
 }
