@@ -108,7 +108,7 @@ func TestPersistenceRoundTrip(t *testing.T) {
 	if err := s.SetPending(PendingAction{ID: "p1", PaneID: "w5:p1", Kind: PendingAnswerPrompt, SpokenSummary: "auth asks to create hello.txt", CreatedAt: t0, ExpiresAt: t0.Add(2 * time.Minute)}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.UpdateSession(func(ss *Session) { ss.VoiceConnected = true; ss.LastBriefing = "one agent" }); err != nil {
+	if err := s.UpdateSession(func(ss *Session) { ss.VoiceConnected = true; ss.LastBriefing = "one agent"; ss.LastBriefingAt = &t0 }); err != nil {
 		t.Fatal(err)
 	}
 
@@ -137,7 +137,7 @@ func TestPersistenceRoundTrip(t *testing.T) {
 	if !ok || p.ID != "p1" || p.SpokenSummary != "auth asks to create hello.txt" || !p.ExpiresAt.Equal(t0.Add(2*time.Minute)) {
 		t.Errorf("pending restored = %+v, %v", p, ok)
 	}
-	if ss := s2.Snapshot().Session; !ss.VoiceConnected || ss.LastBriefing != "one agent" {
+	if ss := s2.Snapshot().Session; !ss.VoiceConnected || ss.LastBriefing != "one agent" || ss.LastBriefingAt == nil || !ss.LastBriefingAt.Equal(t0) {
 		t.Errorf("session restored = %+v", ss)
 	}
 	// Re-applying the restart bootstrap transition keeps state_since.

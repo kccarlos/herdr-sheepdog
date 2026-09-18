@@ -64,9 +64,9 @@ type PendingAction struct {
 
 // Session is the voice-session bookkeeping.
 type Session struct {
-	VoiceConnected bool      `json:"voice_connected"`
-	LastBriefing   string    `json:"last_briefing,omitempty"`
-	LastBriefingAt time.Time `json:"last_briefing_at,omitempty"`
+	VoiceConnected bool       `json:"voice_connected"`
+	LastBriefing   string     `json:"last_briefing,omitempty"`
+	LastBriefingAt *time.Time `json:"last_briefing_at,omitempty"`
 }
 
 // Table is the persisted document.
