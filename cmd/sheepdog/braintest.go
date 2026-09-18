@@ -24,6 +24,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 	"github.com/kccarlos/herdr-sheepdog/internal/supervisor"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
+	"github.com/kccarlos/herdr-sheepdog/prompts"
 )
 
 func printBrainTestUsage(w io.Writer) {
@@ -50,6 +51,7 @@ func printBrainTestUsage(w io.Writer) {
 	fprintln(w, "  --say TEXT          a CEO utterance heard before the request (repeatable)")
 	fprintln(w, "  --model NAME        brain model (default config brain.model)")
 	fprintln(w, "  --thinking LEVEL    minimal | low | medium | high (default low)")
+	fprintln(w, "  --prompts-dir PATH  prompt override directory (default config prompts.dir)")
 	fprintln(w, "  --timeout D         turn budget (default from config)")
 	fprintln(w, "  --fake              use a scripted model (read_screen, then an answer): no network")
 }
@@ -58,10 +60,10 @@ func printBrainTestUsage(w io.Writer) {
 const brainTestPane = "w1:p1"
 
 type brainTestOpts struct {
-	configPath, envFile, question, kind, agent, alias, agentKind, st, fixture, transcript, model, thinking string
-	say                                                                                                    multiFlag
-	timeout                                                                                                time.Duration
-	fake                                                                                                   bool
+	configPath, envFile, question, kind, agent, alias, agentKind, st, fixture, transcript, model, thinking, promptsDir string
+	say                                                                                                                multiFlag
+	timeout                                                                                                            time.Duration
+	fake                                                                                                               bool
 }
 
 // multiFlag collects a repeatable string flag.
@@ -88,6 +90,7 @@ func parseBrainTestFlags(args []string, stderr io.Writer) (brainTestOpts, int, b
 	fs.Var(&o.say, "say", "CEO utterance (repeatable)")
 	fs.StringVar(&o.model, "model", "", "brain model")
 	fs.StringVar(&o.thinking, "thinking", "", "thinking level")
+	fs.StringVar(&o.promptsDir, "prompts-dir", "", "prompt override directory (default config prompts.dir)")
 	fs.DurationVar(&o.timeout, "timeout", 0, "turn budget")
 	fs.BoolVar(&o.fake, "fake", false, "scripted model")
 	if err := fs.Parse(args); err != nil {
@@ -159,6 +162,11 @@ func runBrainTest(ctx context.Context, args []string, stdout, stderr io.Writer) 
 		bcfg.Model = o.model
 	}
 	bcfg.ThinkingLevel = o.thinking
+	promptsDir := o.promptsDir
+	if promptsDir == "" {
+		promptsDir = cfg.Prompts.Dir
+	}
+	bcfg.Prompts = prompts.NewLoader(promptsDir, log)
 	if o.timeout > 0 {
 		bcfg.AskTimeout, bcfg.ProposeTimeout = o.timeout, o.timeout
 	}

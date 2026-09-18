@@ -75,6 +75,11 @@ func Template() string {
 # propose_timeout_s = %[28]d
 # window_tokens = %[29]d   # compact the oldest half of the window above this (estimated tokens)
 # prune_after_turns = %[30]d   # turns a screen/CLI dump stays verbatim in the window
+# step_reserve_s = %[31]d   # 0: default; below this much time left, the next step is answer-only
+# final_grace_s = %[32]d   # 0: default; how far past the timeout the answer-only step may run
+
+[prompts]
+# dir = %[33]q   # ~/.config/sheepdog/prompts/<name> overrides the matching embedded prompt file
 `,
 		d.DataDir, d.DebounceMS, d.SnapshotIntervalS, d.PendingTTLS,
 		d.Herdr.Socket,
@@ -87,5 +92,7 @@ func Template() string {
 		d.Supervisor.Chattiness, d.Supervisor.RecentMinutes,
 		d.LLM.TimeoutS,
 		d.Brain.Enabled, d.Brain.Model, d.Brain.MaxSteps, d.Brain.AskTimeoutS, d.Brain.ProposeTimeoutS, d.Brain.WindowTokens, d.Brain.PruneAfterTurns,
+		d.Brain.StepReserveS, d.Brain.FinalGraceS,
+		d.Prompts.Dir,
 	)
 }

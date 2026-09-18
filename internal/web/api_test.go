@@ -13,7 +13,49 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/eventlog"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
+	"github.com/kccarlos/herdr-sheepdog/prompts"
 )
+
+func TestReloadPrompts(t *testing.T) {
+	h := newHarness(t, harnessOpts{})
+	var got int
+	if code := postNoBody(t, h.http.URL+"/api/prompts/reload"); code != http.StatusServiceUnavailable {
+		t.Fatalf("reload with no callback = %d, want 503", code)
+	}
+
+	h2 := newHarness(t, harnessOpts{reloadPrompts: func() []prompts.File {
+		got++
+		return []prompts.File{{Name: prompts.Assistant, Source: prompts.SourceEmbedded, Chars: 10, SHA8: "abcd1234"}}
+	}})
+	var resp ReloadPromptsResponse
+	code, body := h2.postJSON("/api/prompts/reload", map[string]any{}, &resp)
+	if code != http.StatusOK {
+		t.Fatalf("reload = %d %s", code, body)
+	}
+	if got != 1 || len(resp.Files) != 1 || resp.Files[0].Name != prompts.Assistant {
+		t.Fatalf("reload response = %+v (called %d times)", resp, got)
+	}
+	found := false
+	for _, ev := range h2.log.Tail(0) {
+		if ev.Type == "prompts.reloaded" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("prompts.reloaded not logged")
+	}
+}
+
+// postNoBody posts an empty body (the reload endpoint takes none).
+func postNoBody(t *testing.T, url string) int {
+	t.Helper()
+	resp, err := http.Post(url, "application/json", strings.NewReader("{}"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	return resp.StatusCode
+}
 
 func TestStaticPages(t *testing.T) {
 	h := newHarness(t, harnessOpts{})
