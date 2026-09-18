@@ -25,6 +25,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice/gemini"
 	"github.com/kccarlos/herdr-sheepdog/internal/web"
+	"github.com/kccarlos/herdr-sheepdog/prompts"
 )
 
 // Modes for Options.Voice, Options.Herdr and Options.CLI.
@@ -104,17 +105,18 @@ type App struct {
 	cfg  config.Config
 	opts Options
 
-	elog  *eventlog.Log
-	log   logging.Logger
-	store *state.Store
-	herdr *inject.Herdr
-	hc    *herdr.Client // nil in mock mode
-	wref  *watcherRef   // nil in mock mode
-	sup   *supervisor.Supervisor
-	brain *brain.Brain  // nil when off
-	voice voice.Session // nil when off
-	web   *web.Server
-	port  int
+	elog    *eventlog.Log
+	log     logging.Logger
+	store   *state.Store
+	herdr   *inject.Herdr
+	hc      *herdr.Client // nil in mock mode
+	wref    *watcherRef   // nil in mock mode
+	sup     *supervisor.Supervisor
+	brain   *brain.Brain  // nil when off
+	voice   voice.Session // nil when off
+	web     *web.Server
+	prompts *prompts.Loader
+	port    int
 
 	queryLazy *lazyQuerier // nil when --cli=off; filled in by Run after daemon.start
 }
@@ -161,6 +163,7 @@ func Build(cfg config.Config, opts Options) (*App, error) {
 
 func (a *App) wire() error {
 	cfg, opts := a.cfg, a.opts
+	a.prompts = prompts.NewLoader(cfg.Prompts.Dir, a.log)
 	store, err := state.Open(cfg.State.Path, state.Options{Aliases: cfg.Aliases, Warn: opts.Stderr, FullFsync: cfg.State.FullFsync})
 	if err != nil {
 		return err
@@ -201,7 +204,7 @@ func (a *App) wire() error {
 		a.queryLazy = lazyQ
 	}
 	if opts.Brain == BrainOn && cfg.Brain.Enabled && len(cfg.Gemini.APIKeys) > 0 {
-		b, err := buildBrain(cfg, a.log)
+		b, err := buildBrain(cfg, a.prompts, a.log)
 		if err != nil {
 			return err
 		}
@@ -228,11 +231,11 @@ func (a *App) wire() error {
 		Voice:   cfg.Gemini.Voice,
 		Aliases: a.aliases(),
 		Handler: sup.Handler(),
+		Prompts: a.prompts,
 
 		StallAfter: time.Duration(cfg.Gemini.StallAfterS) * time.Second,
 	}
-	systemPrompt, err := gemini.SystemPrompt(gcfg)
-	if err != nil {
+	if _, err := gemini.SystemPrompt(gcfg); err != nil {
 		return err
 	}
 	if opts.Voice == VoiceGemini {
@@ -263,8 +266,9 @@ func (a *App) wire() error {
 		HerdrMode:  opts.Herdr,
 		VoiceMode:  opts.Voice,
 
-		SystemPrompt: systemPrompt,
-		Aliases:      gcfg.Aliases,
+		SystemPrompt:  func() string { s, _ := gemini.SystemPrompt(gcfg); return s },
+		Aliases:       gcfg.Aliases,
+		ReloadPrompts: a.ReloadPrompts,
 	}
 	if opts.Dev || a.cfg.Web.Dev {
 		deps.DevTestdataDir = a.cfg.Web.DevTestdataDir
@@ -288,12 +292,14 @@ func (a *App) wire() error {
 
 // buildBrain builds the supervisor brain over the Gemini key pool with
 // the [brain] config (BrainConfig) and a transcript under the data dir.
-func buildBrain(cfg config.Config, log logging.Logger) (*brain.Brain, error) {
+func buildBrain(cfg config.Config, pl *prompts.Loader, log logging.Logger) (*brain.Brain, error) {
 	model, err := brain.NewGenaiModel(cfg.Gemini.APIKeys, log)
 	if err != nil {
 		return nil, fmt.Errorf("app: brain: %w", err)
 	}
-	b, err := brain.New(BrainConfig(cfg), model, log)
+	bcfg := BrainConfig(cfg)
+	bcfg.Prompts = pl
+	b, err := brain.New(bcfg, model, log)
 	if err != nil {
 		return nil, fmt.Errorf("app: brain: %w", err)
 	}
@@ -310,12 +316,24 @@ func BrainConfig(cfg config.Config) brain.Config {
 		ProposeTimeout:  time.Duration(cfg.Brain.ProposeTimeoutS) * time.Second,
 		WindowTokens:    cfg.Brain.WindowTokens,
 		PruneAfterTurns: cfg.Brain.PruneAfterTurns,
+		StepReserve:     time.Duration(cfg.Brain.StepReserveS) * time.Second,
+		FinalGrace:      time.Duration(cfg.Brain.FinalGraceS) * time.Second,
 		DataDir:         cfg.DataDir,
 	}
 }
 
 // Brain returns the attached brain, or nil when it is off.
 func (a *App) Brain() *brain.Brain { return a.brain }
+
+// Prompts returns the prompt workspace loader.
+func (a *App) Prompts() *prompts.Loader { return a.prompts }
+
+// ReloadPrompts rescans the prompt override directory (SIGHUP, POST
+// /api/prompts/reload). The brain and the voice session share this
+// Loader, so both pick up the change: the brain on its next turn, the
+// voice session on its next (re)connect. Callers log prompts.reloaded
+// themselves (the "via" differs: sighup vs api).
+func (a *App) ReloadPrompts() []prompts.File { return a.prompts.Reload() }
 
 // buildQuerier detects codex/claude on PATH (logging cli.detected) and, if
 // either is found, builds the Runner that backs ask()'s deep path. Called
@@ -400,6 +418,10 @@ func (a *App) Run(ctx context.Context) (err error) {
 		"version": a.opts.Version, "voice": a.opts.Voice, "herdr": a.opts.Herdr, "cli": a.opts.CLI, "brain": brainMode, "url": a.URL(),
 		"data_dir": a.cfg.DataDir, "llm_model": a.cfg.LLM.Model, "llm_base_url": a.cfg.LLM.BaseURL, "brain_model": a.cfg.Brain.Model,
 	})
+	// Logged here, not in wire(), so it never precedes daemon.start (the
+	// Loader itself is built in wire(), since the brain and the voice
+	// session need it before Run).
+	a.log.Log("daemon", "prompts.loaded", "", map[string]any{"dir": a.cfg.Prompts.Dir, "files": a.prompts.Files()})
 	if a.queryLazy != nil {
 		if runner, err := a.buildQuerier(); err != nil {
 			a.log.Log("daemon", "daemon.cli_error", "", map[string]any{"error": err.Error()})

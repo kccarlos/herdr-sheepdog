@@ -265,8 +265,11 @@ func (b *Brain) systemPrompt() string {
 	host := b.host
 	logged := b.promptLogged
 	b.promptLogged = true
+	userVars := b.userVars
 	b.mu.Unlock()
-	secs := append(append([]section(nil), b.stable...), dynamicSections(host.Agents(), host.Notes(), b.cfg.Now())...)
+	agents := host.Agents()
+	secs := append(append([]section(nil), stableSections(b.cfg.Prompts)...), userSection(b.cfg.Prompts, mergeUserVars(agents, userVars)))
+	secs = append(secs, dynamicSections(agents, host.Notes(), b.cfg.Now())...)
 	text := joinSections(secs)
 	if !logged {
 		var report []map[string]any

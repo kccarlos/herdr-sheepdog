@@ -51,6 +51,22 @@ func toolDeclarations() []*genai.Tool {
 // no session exists).
 func SystemPrompt(cfg Config) (string, error) { return systemPrompt(cfg) }
 
+// TextToolDeclarations returns the same six tool declarations as the
+// voice session's, without the Live-only Behavior field (a plain
+// GenerateContent call, unlike LiveConnect, may reject a non-zero
+// Behavior). Used by `sheepdog eval --set assistant --live`, which runs
+// the assistant prompt through gemini-3.5-flash in text mode.
+func TextToolDeclarations() []*genai.Tool {
+	live := toolDeclarations()
+	decls := make([]*genai.FunctionDeclaration, len(live[0].FunctionDeclarations))
+	for i, d := range live[0].FunctionDeclarations {
+		cp := *d
+		cp.Behavior = ""
+		decls[i] = &cp
+	}
+	return []*genai.Tool{{FunctionDeclarations: decls}}
+}
+
 // systemPrompt renders the voice system prompt with the aliases.
 func systemPrompt(cfg Config) (string, error) {
 	aliases := strings.Join(cfg.Aliases, ", ")
@@ -60,7 +76,8 @@ func systemPrompt(cfg Config) (string, error) {
 	if cfg.SystemPrompt != "" {
 		return strings.ReplaceAll(cfg.SystemPrompt, "{aliases}", aliases), nil
 	}
-	return prompts.Render(prompts.VoiceSystem, map[string]string{"aliases": aliases})
+	text, _ := cfg.Prompts.Render(prompts.Assistant, map[string]string{"aliases": aliases})
+	return text, nil
 }
 
 // liveConfig builds the LiveConnectConfig for one connection (plan §6).

@@ -18,18 +18,15 @@ type section struct {
 
 // stableSections loads SOUL.md as the role section and splits RULES.md
 // into one section per "## " heading (tools, the one rail, the answer
-// contract).
-func stableSections() ([]section, error) {
-	soul, err := prompts.SVP.ReadFile(prompts.SVPSoul)
-	if err != nil {
-		return nil, fmt.Errorf("brain: %w", err)
-	}
-	rules, err := prompts.SVP.ReadFile(prompts.SVPRules)
-	if err != nil {
-		return nil, fmt.Errorf("brain: %w", err)
-	}
-	out := []section{{Name: "role", Text: strings.TrimSpace(string(soul))}}
-	for _, chunk := range strings.Split("\n"+string(rules), "\n## ") {
+// contract). pl resolves each file against its override, if any
+// (docs/roles.md "Prompt files"); a nil pl uses the embedded defaults.
+// Recomputed on every turn (systemPrompt) so a reloaded override takes
+// effect without a restart.
+func stableSections(pl *prompts.Loader) []section {
+	soul, _ := pl.Load(prompts.SVPSoul)
+	rules, _ := pl.Load(prompts.SVPRules)
+	out := []section{{Name: "role", Text: strings.TrimSpace(soul)}}
+	for _, chunk := range strings.Split("\n"+rules, "\n## ") {
 		chunk = strings.TrimSpace(chunk)
 		if chunk == "" {
 			continue
@@ -37,7 +34,39 @@ func stableSections() ([]section, error) {
 		name, body, _ := strings.Cut(chunk, "\n")
 		out = append(out, section{Name: slug(name), Text: "## " + strings.TrimSpace(name) + "\n\n" + strings.TrimSpace(body)})
 	}
-	return out, nil
+	return out
+}
+
+// userSection renders USER.md (the CEO's profile: aliases, chattiness,
+// timezone, and anything the CEO added by hand) with vars, which
+// SetUserVars sets and aliases (always freshly derived from the roster)
+// extends.
+func userSection(pl *prompts.Loader, vars map[string]string) section {
+	text, _ := pl.Render(prompts.User, vars)
+	return section{Name: "user", Text: text}
+}
+
+// mergeUserVars derives {aliases} from the current roster and overlays
+// extra (SetUserVars: {chattiness}, {tz}), so aliases are always current
+// even when SetUserVars has not been called yet.
+func mergeUserVars(agents []AgentInfo, extra map[string]string) map[string]string {
+	seen := map[string]bool{}
+	var names []string
+	for _, a := range agents {
+		if a.Alias != "" && !seen[a.Alias] {
+			seen[a.Alias] = true
+			names = append(names, a.Alias)
+		}
+	}
+	aliases := "none configured yet"
+	if len(names) > 0 {
+		aliases = strings.Join(names, ", ")
+	}
+	vars := map[string]string{"aliases": aliases, "chattiness": "normal", "tz": "local"}
+	for k, v := range extra {
+		vars[k] = v
+	}
+	return vars
 }
 
 // slug lowercases a heading into a section name ("The one rail" -> "rail").

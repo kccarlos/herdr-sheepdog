@@ -127,3 +127,14 @@ run; it is also off, silently, when no Gemini key is configured.
 | `brain.propose_timeout_s` | `SHEEPDOG_BRAIN_PROPOSE_TIMEOUT_S` | `12` | Same for `propose`. |
 | `brain.window_tokens` | `SHEEPDOG_BRAIN_WINDOW_TOKENS` | `24000` | Context window target in estimated tokens; above it the oldest half of the window is compacted into one summary message (`brain.compaction`). |
 | `brain.prune_after_turns` | `SHEEPDOG_BRAIN_PRUNE_AFTER_TURNS` | `3` | Turns a tool result (screen, CLI output) stays verbatim in the window before it becomes a one-line stub; the disk transcript keeps the full text. |
+| `brain.step_reserve_s` | `SHEEPDOG_BRAIN_STEP_RESERVE_S` | `0` (default `3`) | When less of the turn's timeout remains after a tool round than this, the next model call is answer-only (no more tools), so the turn ends with an answer instead of another read. `0` takes the package default (3s); negative is rejected. |
+| `brain.final_grace_s` | `SHEEPDOG_BRAIN_FINAL_GRACE_S` | `0` (default `3`) | How far past the turn's timeout that one forced answer-only call may still run before the turn falls back to the template path. `0` takes the package default (3s); negative disables the grace entirely (fall back right at the timeout). |
+
+## `[prompts]`
+
+The prompt workspace (docs/roles.md "Prompt files"): user overrides of
+the embedded `assistant.md`, `USER.md` and `svp/{SOUL,RULES}.md`.
+
+| Key | Env override | Default | Meaning |
+|---|---|---|---|
+| `prompts.dir` | `SHEEPDOG_PROMPTS_DIR` | `~/.config/sheepdog/prompts` | Override directory: `<dir>/<name>` (the same relative path as under `prompts/` in the repo, e.g. `assistant.md`, `svp/RULES.md`) replaces the matching embedded file when present; a missing file or directory is not an error. Re-read on `SIGHUP` and `POST /api/prompts/reload`, not just at daemon start. An override of `svp/RULES.md` that drops the rail or the provenance sentence is rejected (`prompts.override_rejected`) and the embedded file is used instead — the one rail cannot be removed by a prompt edit. `sheepdog prompts export [dir]` seeds this directory from the embedded defaults; `sheepdog prompts show <name>` prints the effective text and its source. |

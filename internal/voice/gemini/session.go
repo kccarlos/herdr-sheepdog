@@ -20,11 +20,10 @@ const (
 // Session implements voice.Session for Gemini Live. Create with New, then
 // Start; see the package documentation for the goroutine layout.
 type Session struct {
-	cfg    Config
-	dial   Dialer
-	log    logging.Logger
-	prompt string
-	now    func() time.Time
+	cfg  Config
+	dial Dialer
+	log  logging.Logger
+	now  func() time.Time
 
 	audio  chan []byte
 	events chan voice.Event
@@ -92,15 +91,16 @@ func newSession(cfg Config, log logging.Logger, dial Dialer) (*Session, error) {
 	if log == nil {
 		log = logging.NopLogger{}
 	}
-	prompt, err := systemPrompt(cfg)
-	if err != nil {
+	// Fail fast on a bad prompt (e.g. a malformed cfg.SystemPrompt
+	// override); the per-connect render below cannot normally fail once
+	// this one has succeeded.
+	if _, err := systemPrompt(cfg); err != nil {
 		return nil, err
 	}
 	return &Session{
 		cfg:        cfg,
 		dial:       dial,
 		log:        log,
-		prompt:     prompt,
 		now:        time.Now,
 		audio:      make(chan []byte),
 		events:     make(chan voice.Event, cfg.EventBuffer),

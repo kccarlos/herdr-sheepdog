@@ -6,7 +6,9 @@ import (
 	"flag"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/app"
 	"github.com/kccarlos/herdr-sheepdog/internal/config"
@@ -143,6 +145,27 @@ func runServe(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 	fprintf(stdout, "  voice page  %s/voice\n", a.URL())
 	fprintf(stdout, "  debug page  %s/debug\n", a.URL())
 	fprintf(stdout, "  events      %s/events\n", a.URL())
+
+	// SIGHUP re-reads the prompt override directory (docs/roles.md
+	// "Prompt files") so the CEO's prompt edits take effect without a
+	// restart: the brain picks it up on its next turn, the voice session
+	// on its next (re)connect. Separate from the INT/TERM context so a
+	// HUP never triggers shutdown.
+	hup := make(chan os.Signal, 1)
+	signal.Notify(hup, syscall.SIGHUP)
+	defer signal.Stop(hup)
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-hup:
+				files := a.ReloadPrompts()
+				a.Log().Log("daemon", "prompts.reloaded", "", map[string]any{"files": files, "via": "sighup"})
+			}
+		}
+	}()
+
 	if err := a.Run(ctx); err != nil {
 		fprintf(stderr, "sheepdog serve: %v\n", err)
 		if errors.Is(err, gemini.ErrAllKeysExhausted) {

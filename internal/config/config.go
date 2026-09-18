@@ -45,6 +45,17 @@ type Config struct {
 	CLI        CLI        `toml:"cli"`
 	Supervisor Supervisor `toml:"supervisor"`
 	Brain      Brain      `toml:"brain"`
+	Prompts    Prompts    `toml:"prompts"`
+}
+
+// Prompts configures the prompt workspace (docs/roles.md "Prompt files"):
+// user overrides of the embedded assistant/SVP/USER prompt files.
+type Prompts struct {
+	// Dir is the override directory: <dir>/<same relative path as in the
+	// prompts/ package> overrides the matching embedded file; a missing
+	// file or directory is not an error, the embedded default is used.
+	// Re-read on SIGHUP and POST /api/prompts/reload, not just at start.
+	Dir string `toml:"dir"`
 }
 
 // Brain configures the supervisor brain (plan D7-revised, docs/roles.md):
@@ -72,6 +83,14 @@ type Brain struct {
 	// stays verbatim in the window before it is replaced by a one-line
 	// stub; the disk transcript keeps it (default 3).
 	PruneAfterTurns int `toml:"prune_after_turns"`
+	// StepReserveS: when less of the turn's timeout remains after a tool
+	// round than this, the next step is answer-only (no more tools), so
+	// the turn ends with an answer rather than another read (0: default
+	// 3s).
+	StepReserveS int `toml:"step_reserve_s"`
+	// FinalGraceS is how far past the timeout that one answer-only call
+	// may run before the turn falls back (0: default 3s; negative: none).
+	FinalGraceS int `toml:"final_grace_s"`
 }
 
 // Supervisor tunes how proactive the voice side is (README "How chatty
@@ -251,7 +270,19 @@ func Default() Config {
 		CLI:               defaultCLI(),
 		Supervisor:        Supervisor{Chattiness: DefaultChattiness, RecentMinutes: 30},
 		Brain:             defaultBrain(),
+		Prompts:           Prompts{Dir: filepath.Join(home, ".config", "sheepdog", "prompts")},
 	}
+}
+
+// DefaultPromptsDir returns the default prompts.dir, resolved against the
+// current user's home directory (mirrors Default()'s use for other
+// per-user paths).
+func DefaultPromptsDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = "."
+	}
+	return filepath.Join(home, ".config", "sheepdog", "prompts")
 }
 
 // DefaultBrainModel is the built-in brain.model.
@@ -364,6 +395,9 @@ func validateBrain(b Brain) error {
 	if b.Model == "" {
 		return errors.New("config: brain.model must not be empty")
 	}
+	if b.StepReserveS < 0 {
+		return fmt.Errorf("config: brain.step_reserve_s=%d: want 0 (default) or a positive integer", b.StepReserveS)
+	}
 	return nil
 }
 
@@ -381,7 +415,9 @@ func validateBrain(b Brain) error {
 //	SHEEPDOG_SUPERVISOR_CHATTINESS, SHEEPDOG_SUPERVISOR_RECENT_MINUTES,
 //	SHEEPDOG_BRAIN_ENABLED, SHEEPDOG_BRAIN_MODEL, SHEEPDOG_BRAIN_MAX_STEPS,
 //	SHEEPDOG_BRAIN_ASK_TIMEOUT_S, SHEEPDOG_BRAIN_PROPOSE_TIMEOUT_S,
-//	SHEEPDOG_BRAIN_WINDOW_TOKENS, SHEEPDOG_BRAIN_PRUNE_AFTER_TURNS.
+//	SHEEPDOG_BRAIN_WINDOW_TOKENS, SHEEPDOG_BRAIN_PRUNE_AFTER_TURNS,
+//	SHEEPDOG_BRAIN_STEP_RESERVE_S, SHEEPDOG_BRAIN_FINAL_GRACE_S,
+//	SHEEPDOG_PROMPTS_DIR.
 //	The [cli] argv templates (codex_cmd, claude_cmd) are TOML-only, like
 //	[aliases].
 //
@@ -479,6 +515,9 @@ func applyEnv(cfg *Config, lookup func(string) (string, bool)) error {
 		}
 		cfg.Supervisor.RecentMinutes = n
 	}
+	if v, ok := lookup("SHEEPDOG_PROMPTS_DIR"); ok {
+		cfg.Prompts.Dir = v
+	}
 	return applyBrainEnv(cfg, lookup)
 }
 
@@ -513,6 +552,20 @@ func applyBrainEnv(cfg *Config, lookup func(string) (string, bool)) error {
 			return fmt.Errorf("config: %s=%q: want a positive integer", f.env, v)
 		}
 		*f.dst = n
+	}
+	if v, ok := lookup("SHEEPDOG_BRAIN_STEP_RESERVE_S"); ok {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 {
+			return fmt.Errorf("config: SHEEPDOG_BRAIN_STEP_RESERVE_S=%q: want 0 (default) or a positive integer", v)
+		}
+		cfg.Brain.StepReserveS = n
+	}
+	if v, ok := lookup("SHEEPDOG_BRAIN_FINAL_GRACE_S"); ok {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("config: SHEEPDOG_BRAIN_FINAL_GRACE_S=%q: want an integer", v)
+		}
+		cfg.Brain.FinalGraceS = n
 	}
 	return nil
 }
@@ -570,6 +623,6 @@ func geminiKeysFromEnv(lookup func(string) (string, bool)) []string {
 // String renders the configuration for logs. Secrets are rendered as
 // counts only; keep it that way when secret-bearing fields are added.
 func (c Config) String() string {
-	return fmt.Sprintf("data_dir=%s herdr.socket=%s state.path=%s state.full_fsync=%t debounce_ms=%d snapshot_interval_s=%d pending_ttl_s=%d aliases=%d gemini.model=%s gemini.voice=%s gemini.stall_after_s=%d gemini.api_keys=%d llm.base_url=%s llm.model=%s llm.timeout_s=%d llm.api_keys=%d web.port=%d cli.prefer=%s cli.timeout_s=%d cli.max_output_kb=%d supervisor.chattiness=%s supervisor.recent_minutes=%d brain.enabled=%t brain.model=%s brain.max_steps=%d brain.ask_timeout_s=%d brain.propose_timeout_s=%d brain.window_tokens=%d brain.prune_after_turns=%d",
-		c.DataDir, c.Herdr.Socket, c.State.Path, c.State.FullFsync, c.DebounceMS, c.SnapshotIntervalS, c.PendingTTLS, len(c.Aliases), c.Gemini.Model, c.Gemini.Voice, c.Gemini.StallAfterS, len(c.Gemini.APIKeys), c.LLM.BaseURL, c.LLM.Model, c.LLM.TimeoutS, len(c.LLMKeys()), c.Web.Port, c.CLI.Prefer, c.CLI.TimeoutS, c.CLI.MaxOutputKB, c.Supervisor.Chattiness, c.Supervisor.RecentMinutes, c.Brain.Enabled, c.Brain.Model, c.Brain.MaxSteps, c.Brain.AskTimeoutS, c.Brain.ProposeTimeoutS, c.Brain.WindowTokens, c.Brain.PruneAfterTurns)
+	return fmt.Sprintf("data_dir=%s herdr.socket=%s state.path=%s state.full_fsync=%t debounce_ms=%d snapshot_interval_s=%d pending_ttl_s=%d aliases=%d gemini.model=%s gemini.voice=%s gemini.stall_after_s=%d gemini.api_keys=%d llm.base_url=%s llm.model=%s llm.timeout_s=%d llm.api_keys=%d web.port=%d cli.prefer=%s cli.timeout_s=%d cli.max_output_kb=%d supervisor.chattiness=%s supervisor.recent_minutes=%d brain.enabled=%t brain.model=%s brain.max_steps=%d brain.ask_timeout_s=%d brain.propose_timeout_s=%d brain.window_tokens=%d brain.prune_after_turns=%d brain.step_reserve_s=%d brain.final_grace_s=%d prompts.dir=%s",
+		c.DataDir, c.Herdr.Socket, c.State.Path, c.State.FullFsync, c.DebounceMS, c.SnapshotIntervalS, c.PendingTTLS, len(c.Aliases), c.Gemini.Model, c.Gemini.Voice, c.Gemini.StallAfterS, len(c.Gemini.APIKeys), c.LLM.BaseURL, c.LLM.Model, c.LLM.TimeoutS, len(c.LLMKeys()), c.Web.Port, c.CLI.Prefer, c.CLI.TimeoutS, c.CLI.MaxOutputKB, c.Supervisor.Chattiness, c.Supervisor.RecentMinutes, c.Brain.Enabled, c.Brain.Model, c.Brain.MaxSteps, c.Brain.AskTimeoutS, c.Brain.ProposeTimeoutS, c.Brain.WindowTokens, c.Brain.PruneAfterTurns, c.Brain.StepReserveS, c.Brain.FinalGraceS, c.Prompts.Dir)
 }

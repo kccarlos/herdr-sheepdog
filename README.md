@@ -92,6 +92,8 @@ sheepdog serve --voice=off --herdr=mock --dev  # also serve testdata/audio/*.wav
 | `sheepdog llm-test` | Run one cheap-LLM template (`summarize_block`, `resolve_instruction`, `spoken_answer`, `summarize_done`) against a screen or instruction. |
 | `sheepdog ask-test` | Run the CLI query tool (codex/claude) plus the `spoken_answer` pass once. |
 | `sheepdog brain-test` | Run one supervisor-brain turn (`--question`, `--kind ask\|propose`) against a mock herdr with a screen fixture, an optional seed transcript and `--say` utterances; prints the reply and the transcript, `brain.*` events on stderr (`--fake` needs no network). |
+| `sheepdog prompts export\|show` | Seed `prompts.dir` from the embedded defaults, or print one file's effective text and its source (embedded/override). |
+| `sheepdog eval --set assistant\|svp` | Run the conversation eval set against the assistant prompt or the brain; offline by default (validates + prints "skipped"), `--live` calls the model. |
 | `sheepdog version` \| `help` | Version/commit/build date \| this table. |
 
 `/voice`: mic → AudioWorklet → 16 kHz PCM16 → WebSocket, gapless 24 kHz
@@ -133,6 +135,15 @@ without a Gemini key. Try it without a daemon: `sheepdog brain-test
 codex-after-approval.screen.txt`. The transcript lives at
 `<data_dir>/brain/<run-id>.jsonl`; every step is a `brain.*` event on
 `/debug`.
+
+## Tuning the prompts
+
+`sheepdog prompts export` seeds `~/.config/sheepdog/prompts/` (config
+`prompts.dir`) with the embedded `assistant.md`, `USER.md` and
+`svp/{SOUL,RULES}.md`; edit any of them and `sheepdog prompts show <name>`
+or a `SIGHUP` / `POST /api/prompts/reload` picks it up without a restart.
+See [`docs/roles.md`](docs/roles.md) "Prompt files" for what each file
+holds and what an override cannot remove.
 
 ## How chatty is it?
 

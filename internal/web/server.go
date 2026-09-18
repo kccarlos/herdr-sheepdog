@@ -21,6 +21,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 	"github.com/kccarlos/herdr-sheepdog/internal/supervisor"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
+	"github.com/kccarlos/herdr-sheepdog/prompts"
 	static "github.com/kccarlos/herdr-sheepdog/web"
 )
 
@@ -64,10 +65,17 @@ type Deps struct {
 	HerdrMode, VoiceMode string
 	// SystemPrompt and Aliases are what GET /api/voice/system_prompt
 	// answers: the voice system prompt the session runs with (or would,
-	// with --voice=off) and the aliases rendered into it.
-	SystemPrompt string
+	// with --voice=off) and the aliases rendered into it. SystemPrompt is
+	// a func, not a string, so a prompts.Loader reload (SIGHUP, POST
+	// /api/prompts/reload) is reflected without rebuilding Deps; nil
+	// means no system prompt configured (404).
+	SystemPrompt func() string
 	Aliases      []string
 	Version      string
+	// ReloadPrompts, when set, backs POST /api/prompts/reload: it
+	// rescans the prompt override directory and returns the resulting
+	// file list for the response and the prompts.reloaded log line.
+	ReloadPrompts func() []prompts.File
 	// DevTestdataDir, when set, serves GET /testdata/<name>.wav from that
 	// directory (the /voice page's file-source test mode). Empty (the
 	// default) registers no route: this is a developer feature.
@@ -169,6 +177,7 @@ func (s *Server) routes() error {
 	s.mux.HandleFunc("POST /api/inject/remove", s.handleInjectRemove)
 	s.mux.HandleFunc("POST /api/inject/utterance", s.handleUtterance)
 	s.mux.HandleFunc("POST /api/herdr/event", s.handleHerdrEvent)
+	s.mux.HandleFunc("POST /api/prompts/reload", s.handleReloadPrompts)
 	if s.deps.DevTestdataDir != "" {
 		s.mux.HandleFunc("GET /testdata/{name}", s.handleTestdata)
 	}

@@ -13,6 +13,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 	"github.com/kccarlos/herdr-sheepdog/internal/supervisor"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
+	"github.com/kccarlos/herdr-sheepdog/prompts"
 )
 
 // StateResponse is the body of GET /api/state.
@@ -103,9 +104,11 @@ type SystemPromptResponse struct {
 }
 
 // handleSystemPrompt answers the current voice system prompt (404 when
-// the daemon was built without one).
+// the daemon was built without one). Computed on every request (not
+// cached) so a prompts.Loader reload shows up immediately, even though
+// the running voice session only picks it up on its next reconnect.
 func (s *Server) handleSystemPrompt(w http.ResponseWriter, r *http.Request) {
-	if s.deps.SystemPrompt == "" {
+	if s.deps.SystemPrompt == nil {
 		writeError(w, http.StatusNotFound, "no system prompt configured")
 		return
 	}
@@ -113,7 +116,24 @@ func (s *Server) handleSystemPrompt(w http.ResponseWriter, r *http.Request) {
 	if aliases == nil {
 		aliases = []string{}
 	}
-	writeJSON(w, http.StatusOK, SystemPromptResponse{Text: s.deps.SystemPrompt, Aliases: aliases, Mode: s.deps.VoiceMode})
+	writeJSON(w, http.StatusOK, SystemPromptResponse{Text: s.deps.SystemPrompt(), Aliases: aliases, Mode: s.deps.VoiceMode})
+}
+
+// ReloadPromptsResponse is the body of POST /api/prompts/reload.
+type ReloadPromptsResponse struct {
+	Files []prompts.File `json:"files"`
+}
+
+// handleReloadPrompts rescans the prompt override directory (mirrors
+// SIGHUP) and reports the resulting file list.
+func (s *Server) handleReloadPrompts(w http.ResponseWriter, r *http.Request) {
+	if s.deps.ReloadPrompts == nil {
+		writeError(w, http.StatusServiceUnavailable, "no prompt workspace configured")
+		return
+	}
+	files := s.deps.ReloadPrompts()
+	s.log.Log(logSource, "prompts.reloaded", "", map[string]any{"files": files, "via": "api"})
+	writeJSON(w, http.StatusOK, ReloadPromptsResponse{Files: files})
 }
 
 func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
