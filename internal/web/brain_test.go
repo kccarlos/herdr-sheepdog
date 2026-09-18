@@ -129,6 +129,24 @@ func TestBrainEndpointsWithFakeBrain(t *testing.T) {
 		t.Errorf("transcript lost the full result: %+v", full)
 	}
 
+	// A promise made through the text router ("let me know when …" is a
+	// propose; the reflex records it) is served with its record.
+	if code, body := h.postJSON("/api/inject/utterance", map[string]any{"text": "let me know when auth is done"}, &tr); code != http.StatusOK || tr.Tool != "propose" || tr.Spoken != "I will tell you when auth finishes." {
+		t.Fatalf("promise utterance = %d %s (%+v)", code, body, tr)
+	}
+	h.srv.deps.Brain.Quiesce()
+	var withPromise []TranscriptMessage
+	h.getJSON("/api/brain/transcript?since=17", &withPromise)
+	var pm *TranscriptMessage
+	for i := range withPromise {
+		if withPromise[i].Kind == brain.KindPromise {
+			pm = &withPromise[i]
+		}
+	}
+	if pm == nil || pm.Promise == nil || pm.Promise.Status != brain.PromiseOpen || pm.Promise.Agent != "auth" || pm.Promise.Event != brain.PromiseEventDone || pm.Turn != 4 {
+		t.Errorf("promise message = %+v", pm)
+	}
+
 	var sp PromptInfo
 	if code := h.getJSON("/api/brain/system_prompt", &sp); code != http.StatusOK || len(sp.Sections) != 11 || !strings.Contains(sp.Sections[0].Text, "SVP") || !strings.Contains(sp.Text, "## Agents") || !strings.Contains(sp.Text, "auth") {
 		t.Errorf("/api/brain/system_prompt = %d %+v", code, sp)
@@ -137,7 +155,7 @@ func TestBrainEndpointsWithFakeBrain(t *testing.T) {
 	// The SSE stream carried a brain.transcript per message.
 	got := 0
 	deadline := time.After(3 * time.Second)
-	for got < 17 {
+	for got < 22 {
 		select {
 		case line := <-seen:
 			if !strings.Contains(line, `"type":"brain.transcript"`) || !strings.Contains(line, `"seq":`) {
