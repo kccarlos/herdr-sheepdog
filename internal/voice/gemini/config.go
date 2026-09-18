@@ -34,6 +34,10 @@ type Config struct {
 	// TurnTimeout bounds how long an idle push waits for a turn that never
 	// completes (default 30 s).
 	TurnTimeout time.Duration
+	// ResumeAttempts is how many consecutive reconnects may fail while
+	// presenting a resumption handle before the handle is dropped and the
+	// next connect starts a fresh session (default 2).
+	ResumeAttempts int
 	// ReconnectBuffer is the maximum number of audio-in bytes kept while
 	// reconnecting; oldest are dropped (default 5 s = 160 000).
 	ReconnectBuffer int
@@ -77,6 +81,9 @@ func (c Config) withDefaults() Config {
 	}
 	if c.TurnTimeout == 0 {
 		c.TurnTimeout = 30 * time.Second
+	}
+	if c.ResumeAttempts == 0 {
+		c.ResumeAttempts = 2
 	}
 	if c.ReconnectBuffer == 0 {
 		c.ReconnectBuffer = 5 * 16000 * 2

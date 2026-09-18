@@ -31,6 +31,9 @@ func (s *Session) connect(ctx context.Context) (conn Conn, resumed bool, err err
 		if ctx.Err() != nil {
 			return nil, false, ctx.Err()
 		}
+		s.log.Log(logSource, "voice.connect_error", "", map[string]any{
+			"key_index": idx, "resumed": handle != "", "dur_ms": s.now().Sub(started).Milliseconds(), "error": err.Error(),
+		})
 		if !isRotatable(err) {
 			return nil, false, err
 		}
@@ -40,6 +43,22 @@ func (s *Session) connect(ctx context.Context) (conn Conn, resumed bool, err err
 		}
 		s.rotateKey(err.Error())
 	}
+}
+
+// hasHandle reports whether a resumption handle would be presented.
+func (s *Session) hasHandle() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.handle != ""
+}
+
+// dropHandle forgets the resumption handle so the next connect starts a
+// fresh session (context lost), logging voice.handle_dropped.
+func (s *Session) dropHandle(reason string) {
+	s.mu.Lock()
+	s.handle = ""
+	s.mu.Unlock()
+	s.log.Log(logSource, "voice.handle_dropped", "", map[string]any{"reason": reason})
 }
 
 // rotateKey moves to the next key. A resumption handle belongs to the
@@ -143,6 +162,7 @@ func (s *Session) run(ctx context.Context) {
 			}
 		}
 
+		resumeFailures := 0
 		for {
 			conn, resumed, err := s.connect(ctx)
 			if err == nil {
@@ -154,6 +174,18 @@ func (s *Session) run(ctx context.Context) {
 				return
 			}
 			s.emit(voice.EventError{Err: err})
+			// A resumption handle the server keeps rejecting is dead (seen
+			// live: every attempt failed at setup with "Internal error
+			// encountered", ~30 s each, forever). Drop it after a couple of
+			// tries and reconnect fresh: the supervisor re-pushes the
+			// briefing on EventResumed{ContextLost:true}.
+			if s.hasHandle() && !isRateLimited(err) && !errors.Is(err, ErrAllKeysExhausted) {
+				resumeFailures++
+				if resumeFailures >= s.cfg.ResumeAttempts {
+					s.dropHandle(err.Error())
+					resumeFailures = 0
+				}
+			}
 			wait := backoff
 			if errors.Is(err, ErrAllKeysExhausted) || isRateLimited(err) {
 				wait = s.rateLimitWait(err)
