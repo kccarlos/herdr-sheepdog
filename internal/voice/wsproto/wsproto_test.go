@@ -12,6 +12,7 @@ func TestRoundTrip(t *testing.T) {
 		want string // substrings that must appear on the wire
 	}{
 		{"mute", Mute(true), `"type":"mute","on":true`},
+		{"silence", Silence(true), `"type":"silence","on":true`},
 		{"cancel", Cancel(), `{"type":"cancel"}`},
 		{"text", SimulateText("yes go ahead"), `"text":"yes go ahead"`},
 		{"ping", Ping(), `{"type":"ping"}`},
@@ -46,6 +47,7 @@ func TestParseRejects(t *testing.T) {
 	bad := []string{
 		`{}`,
 		`{"type":"mute"}`,
+		`{"type":"silence"}`,
 		`{"type":"text"}`,
 		`{"type":"status","voice":"weird"}`,
 		`{"type":"transcript","dir":"sideways"}`,

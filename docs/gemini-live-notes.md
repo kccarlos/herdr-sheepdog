@@ -562,7 +562,8 @@ See `docs/e2e-results.md` for the full run. Session-level observations:
   connection with `close 1011 (internal server error): Internal error
   encountered.` at 13.1 min, and every reconnect that presented the
   resumption handle failed at setup with the same error after ~30 s. The
-  session now drops the handle after `Config.ResumeAttempts` (2) such
+  session now drops the handle after `Config.ResumeAttempts` (1: the
+  second try failed exactly like the first in both observed closes) such
   failures and reconnects fresh (`voice.handle_dropped`; the supervisor
   re-pushes the briefing on `EventResumed{ContextLost:true}`).
 - **Zero-valued audio degrades turn handling.** With all-zero PCM frames
@@ -572,7 +573,9 @@ See `docs/e2e-results.md` for the full run. Session-level observations:
   (`SendClientContent` with `turnComplete`) produced no response at all.
   A ±8 LSB noise floor, like a real microphone, behaved normally
   (0.9–1.0 s). Clients should send nothing while muted (the WS contract
-  already says so) rather than zeros.
+  already says so) rather than zeros. The browser now gates near-zero
+  frames itself (`docs/ws-contract.md`, "Silence gate") and the daemon
+  sends `audioStreamEnd` when the gate closes.
 - **The model sometimes answers a push with nothing.** An idle push whose
   turn never gets `turnComplete` used to hold every later idle push
   until an unrelated event; `pushReady` now re-checks after
@@ -583,3 +586,47 @@ See `docs/e2e-results.md` for the full run. Session-level observations:
   silent/near-silent audio did not raise the count.
 - Free tier, 4 keys: ~20 minutes connected across 4 sessions, no 429.
 
+
+## 13. Turn health: stalls and recycling (first headset session, 2026-09-18)
+
+In the first real headset session the model was fine for four minutes
+(tool calls < 1 s after the utterance), then degraded on the same
+connection: a `propose` call came 13 s after the utterance, an idle push
+waited 18 s, three utterances in a row got no reaction at all, and after
+~21 minutes the server closed with `1011 Internal error`; the resumption
+handle was rejected and a fresh session lost the context. Prompt tokens
+were only 6.4k, so this was not compression or a full window; the mic had
+streamed near-silence for long stretches (§12, now gated client-side).
+
+The session now measures every input turn and acts on the pattern:
+
+- **`voice.turn`** is logged when a turn completes: `input_to_response_ms`
+  (last input transcription fragment or typed text → first tool call or
+  first output audio), `tool_calls`, `pushes_spoken`, `responded`,
+  `stalled`, `end` (`complete` | `superseded` by new input after the model
+  answered | `reconnect`). A tool call keeps the turn open until the
+  result's own generation ends (`turnComplete` with no tool response owed),
+  so the number covers the whole exchange.
+- **`voice.stalled`** fires `Config.StallAfter` (`gemini.stall_after_s`,
+  10 s) after the last input when the model has neither called a tool nor
+  produced audio; `EventStatus{Stalled:true}` is emitted (the `/voice` dot
+  turns red with "stalled (no reply)", `/debug` shows STALLED, `/api/state`
+  has `voice.stalled`) and cleared by the model's next reaction. A
+  `turnComplete` with no audio and no tool call closes the turn without
+  counting as a stall (an empty answer is still an answer).
+- **`voice.push_timeout`** counts idle pushes that outwaited `TurnTimeout`
+  (§12: the model answered the push with nothing).
+- **`voice.recycle {reason: stalled | push_timeout, handle}`**: the second
+  stall, or the second push timeout, on one connection triggers a
+  proactive reconnect with the current resumption handle while it is still
+  valid — the GoAway path: dial, swap, close the old socket, replay any
+  buffered audio — so the conversation survives instead of ending in a
+  1011 whose handle is dead. Counters reset per connection. If the
+  proactive dial fails the old connection is kept and the ordinary
+  disconnect path runs later.
+- The 1011 path presents the handle **once** before dropping it
+  (`ResumeAttempts` default 1).
+
+Whether the recycle actually prevents the 1011 is untested live (it needs
+another degraded session); the numbers in `voice.turn` are what to look at
+first when it happens again.

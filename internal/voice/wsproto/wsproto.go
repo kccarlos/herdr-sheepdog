@@ -19,10 +19,11 @@ const (
 	ServerSampleRate = 24000
 )
 
-// Message types. Client→server: mute, cancel, text, ping. Server→client:
-// flush, status, transcript, error, pong.
+// Message types. Client→server: mute, silence, cancel, text, ping.
+// Server→client: flush, status, transcript, error, pong.
 const (
 	TypeMute       = "mute"
+	TypeSilence    = "silence"
 	TypeCancel     = "cancel"
 	TypeText       = "text"
 	TypePing       = "ping"
@@ -52,16 +53,21 @@ const (
 type Message struct {
 	Type string `json:"type"`
 
-	// mute
+	// mute and silence
 	On *bool `json:"on,omitempty"`
+
+	// ping (optional client counters, mirrored into web.client.stats)
+	GatedFrames *int `json:"gated_frames,omitempty"`
+	Peak        *int `json:"peak,omitempty"`
 
 	// text (client→server: simulated utterance) and transcript (server→client)
 	Text string `json:"text,omitempty"`
 
 	// status
-	Voice  string `json:"voice,omitempty"`
-	Muted  *bool  `json:"muted,omitempty"`
-	Reason string `json:"reason,omitempty"`
+	Voice   string `json:"voice,omitempty"`
+	Muted   *bool  `json:"muted,omitempty"`
+	Reason  string `json:"reason,omitempty"`
+	Stalled bool   `json:"stalled,omitempty"`
 
 	// transcript
 	Dir   string `json:"dir,omitempty"`
@@ -73,6 +79,11 @@ type Message struct {
 
 // Mute builds a client→server mute message.
 func Mute(on bool) Message { return Message{Type: TypeMute, On: &on} }
+
+// Silence builds a client→server silence-gate message: on means the
+// client's capture gate closed (near-zero input, no frames follow until
+// off). See docs/ws-contract.md, "Silence gate".
+func Silence(on bool) Message { return Message{Type: TypeSilence, On: &on} }
 
 // Cancel builds the client→server "stop" message.
 func Cancel() Message { return Message{Type: TypeCancel} }
@@ -117,9 +128,9 @@ func Parse(data []byte) (Message, error) {
 // Validate checks that the fields required by m.Type are present.
 func (m Message) Validate() error {
 	switch m.Type {
-	case TypeMute:
+	case TypeMute, TypeSilence:
 		if m.On == nil {
-			return fmt.Errorf("wsproto: mute: missing \"on\"")
+			return fmt.Errorf("wsproto: %s: missing \"on\"", m.Type)
 		}
 	case TypeText:
 		if m.Text == "" {

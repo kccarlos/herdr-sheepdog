@@ -69,16 +69,20 @@ func (s *Session) handleServerContent(sc *genai.LiveServerContent) {
 			if p != nil && p.InlineData != nil && len(p.InlineData.Data) > 0 {
 				s.mu.Lock()
 				s.openTurnLocked()
+				s.noteResponseLocked(s.now())
 				s.mu.Unlock()
+				s.clearStalled()
 				s.out.Push(p.InlineData.Data)
 			}
 		}
 	}
 	if t := sc.InputTranscription; t != nil && t.Text != "" {
+		now := s.now()
 		s.mu.Lock()
-		s.lastInput = s.now()
+		s.lastInput = now
 		s.inputDone = t.Finished
 		s.mu.Unlock()
+		s.logTurn(s.noteInput(now))
 		s.log.Log(logSource, "voice.transcript.in", "", map[string]any{"text": t.Text, "final": t.Finished})
 		s.emit(voice.EventTranscript{Dir: voice.DirIn, Text: t.Text, Final: t.Finished})
 		s.poke()
@@ -86,7 +90,9 @@ func (s *Session) handleServerContent(sc *genai.LiveServerContent) {
 	if t := sc.OutputTranscription; t != nil && t.Text != "" {
 		s.mu.Lock()
 		s.openTurnLocked()
+		s.noteResponseLocked(s.now())
 		s.mu.Unlock()
+		s.clearStalled()
 		s.log.Log(logSource, "voice.transcript.out", "", map[string]any{"text": t.Text, "final": t.Finished})
 		s.emit(voice.EventTranscript{Dir: voice.DirOut, Text: t.Text, Final: t.Finished})
 	}
@@ -95,7 +101,9 @@ func (s *Session) handleServerContent(sc *genai.LiveServerContent) {
 		s.turnOpen = false
 		close(s.turnDone)
 		s.turnDone = make(chan struct{})
+		turn := s.noteTurnCompleteLocked()
 		s.mu.Unlock()
+		s.logTurn(turn)
 		s.emit(voice.EventTurnComplete{})
 		s.poke()
 	}

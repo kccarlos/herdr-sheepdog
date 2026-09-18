@@ -21,7 +21,48 @@
   <a href="/voice">voice page</a>
 </header>
 
+<nav class="tabs" id="tabs">
+  <button data-tab="conversation">Conversation</button>
+  <button data-tab="events">Events</button>
+  <button data-tab="state">State</button>
+</nav>
+
 <main>
+  <section id="tab-conversation" class="tab hidden">
+    <div class="toolbar">
+      <button id="conv-expand">Expand all</button>
+      <button id="conv-collapse">Collapse all</button>
+      <label><input type="checkbox" id="conv-hide-silent" checked> hide silent pushes</label>
+      <label><input type="checkbox" id="conv-hide-stats"> hide stats</label>
+      <span class="muted" id="conv-count"></span>
+    </div>
+    <div class="conv-wrap">
+      <div id="conversation" class="conversation"></div>
+      <button id="conv-new" class="new-pill hidden">new messages ↓</button>
+    </div>
+    <div class="row chat-input">
+      <input id="conv-text" placeholder="type an utterance (Enter to send)" autocomplete="off">
+      <button id="conv-send" class="primary">Send</button>
+      <span id="conv-result" class="muted small"></span>
+    </div>
+  </section>
+
+  <section id="tab-events" class="tab hidden">
+    <h2>Events</h2>
+    <div class="toolbar">
+      <span id="source-filters"></span>
+      <label>pane <input id="filter-pane" size="8" placeholder="any"></label>
+      <label>search <input id="filter-search" size="20" placeholder="substring"></label>
+      <button id="events-pause">Pause</button>
+      <button id="events-clear">Clear</button>
+      <label><input type="checkbox" id="events-follow" checked> follow</label>
+      <span class="muted" id="events-count"></span>
+    </div>
+    <div id="events"></div>
+  </section>
+
+  <section id="tab-state" class="tab hidden">
+  <div class="state-grid">
   <section id="state-section">
     <h2>State table <span class="muted" id="state-updated"></span></h2>
     <table id="state-table">
@@ -85,23 +126,11 @@
       <p class="muted small">With <code>--voice=off</code> the text goes through the debug-only text router (yes / no / stop / what's going on / tell … / ask …). With a voice session it is sent to the model as a typed utterance.</p>
     </div>
   </section>
-
-  <section id="events-section">
-    <h2>Events</h2>
-    <div class="toolbar">
-      <span id="source-filters"></span>
-      <label>pane <input id="filter-pane" size="8" placeholder="any"></label>
-      <label>search <input id="filter-search" size="20" placeholder="substring"></label>
-      <button id="events-pause">Pause</button>
-      <button id="events-clear">Clear</button>
-      <label><input type="checkbox" id="events-follow" checked> follow</label>
-      <span class="muted" id="events-count"></span>
-    </div>
-    <div id="events"></div>
+  </div>
   </section>
 </main>
 
 <script src="/debug/presets.js"></script>
-<script src="/debug/app.js"></script>
+<script type="module" src="/debug/app.js"></script>
 </body>
 </html>

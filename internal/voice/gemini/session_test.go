@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -32,6 +33,9 @@ func TestStartEmitsStatusAndUsesFirstKey(t *testing.T) {
 	}
 	if !h.log.has("voice.connect") {
 		t.Error("voice.connect not logged")
+	}
+	if p := h.log.payloads("voice.system_prompt"); len(p) != 1 || !strings.Contains(p[0]["text"].(string), "aliases: auth, docs.") {
+		t.Errorf("voice.system_prompt = %v", p)
 	}
 	if h.s.Status() != voice.StatusConnected {
 		t.Errorf("status = %v", h.s.Status())
@@ -109,6 +113,28 @@ func TestAudioInAndMute(t *testing.T) {
 	if !h.log.has("voice.muted") {
 		t.Error("voice.muted not logged")
 	}
+}
+
+// TestAudioStreamEnd: the silence gate's "stream paused" signal reaches
+// the server as audioStreamEnd, but not while muted (mute already sent
+// it) and never before a connection exists.
+func TestAudioStreamEnd(t *testing.T) {
+	c := newFakeConn("c1")
+	h := newHarness(t, Config{}, &fakeDialer{results: []func() (Conn, error){ok(c)}})
+	h.s.AudioStreamEnd()
+	c.waitSent(t, "audioStreamEnd", func(m sent) bool { return m.kind == "audioEnd" })
+	h.s.SetMuted(true)
+	c.waitSent(t, "audioStreamEnd on mute", func(m sent) bool { return m.kind == "audioEnd" })
+	h.s.AudioStreamEnd()
+	time.Sleep(20 * time.Millisecond)
+	if n := c.count("audioEnd"); n != 2 {
+		t.Fatalf("audioEnd sent %d times, want 2 (gate, mute; not gate-while-muted)", n)
+	}
+	h.s.SetMuted(false)
+	if err := h.s.SendAudio([]byte{1, 2}); err != nil {
+		t.Fatal(err)
+	}
+	c.waitSent(t, "audio reopens the stream", func(m sent) bool { return m.kind == "audio" })
 }
 
 func TestOutputQueueFlushOnInterrupted(t *testing.T) {
@@ -725,8 +751,8 @@ func TestPushIdleReleasedAfterTurnTimeout(t *testing.T) {
 func TestDeadResumptionHandleIsDropped(t *testing.T) {
 	c1, c2 := newFakeConn("c1"), newFakeConn("c2")
 	setupErr := errors.New("failed to receive setup complete: websocket: close 1011 (internal server error): Internal error encountered.")
-	d := &fakeDialer{results: []func() (Conn, error){ok(c1), fail(setupErr), fail(setupErr), ok(c2)}}
-	h := newHarness(t, Config{ReconnectBackoff: 5 * time.Millisecond, ResumeAttempts: 2}, d)
+	d := &fakeDialer{results: []func() (Conn, error){ok(c1), fail(setupErr), ok(c2)}}
+	h := newHarness(t, Config{ReconnectBackoff: 5 * time.Millisecond}, d) // default ResumeAttempts (1)
 
 	c1.serve(handleMsg("handle-A"))
 	time.Sleep(20 * time.Millisecond)
@@ -737,13 +763,142 @@ func TestDeadResumptionHandleIsDropped(t *testing.T) {
 		t.Fatalf("resumed = %+v, want a fresh session (context lost)", r)
 	}
 	recs := d.records()
-	if len(recs) != 4 || recs[1].handle != "handle-A" || recs[2].handle != "handle-A" || recs[3].handle != "" {
-		t.Fatalf("dials = %+v, want two resume attempts then a fresh dial", recs)
+	if len(recs) != 3 || recs[1].handle != "handle-A" || recs[2].handle != "" {
+		t.Fatalf("dials = %+v, want one resume attempt then a fresh dial", recs)
 	}
 	if p := h.log.payloads("voice.handle_dropped"); len(p) != 1 {
 		t.Errorf("voice.handle_dropped payloads = %v, want 1", p)
 	}
-	if p := h.log.payloads("voice.connect_error"); len(p) != 2 {
-		t.Errorf("voice.connect_error payloads = %d, want 2", len(p))
+	if p := h.log.payloads("voice.connect_error"); len(p) != 1 {
+		t.Errorf("voice.connect_error payloads = %d, want 1", len(p))
+	}
+}
+
+// TestTurnLogged: voice.turn carries the input → first response time and
+// the tool call count, and is written only once the tool's result turn
+// completed.
+func TestTurnLogged(t *testing.T) {
+	c := newFakeConn("c1")
+	handler := func(context.Context, voice.ToolCall) (voice.ToolResult, error) {
+		return voice.ToolResult{Spoken: "One agent, idle.", Scheduling: voice.UrgencyIdle}, nil
+	}
+	h := newHarness(t, Config{Handler: handler}, &fakeDialer{results: []func() (Conn, error){ok(c)}})
+
+	c.serve(inputTranscriptMsg("what's going on", false))
+	h.waitEvent("in transcript", func(ev voice.Event) bool { tr, ok := ev.(voice.EventTranscript); return ok && tr.Dir == voice.DirIn })
+	time.Sleep(30 * time.Millisecond)
+	c.serve(toolCallMsg("call_1", "briefing", nil))
+	c.serve(turnCompleteMsg()) // ends the calling turn; the tool response is still owed
+	c.waitSent(t, "tool response", func(m sent) bool { return m.kind == "tool" })
+	if h.log.has("voice.turn") {
+		t.Fatal("voice.turn logged before the result was spoken")
+	}
+	c.serve(audioMsg([]byte("spoken")))
+	c.serve(turnCompleteMsg())
+	deadline := time.Now().Add(2 * time.Second)
+	for !h.log.has("voice.turn") && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	turns := h.log.payloads("voice.turn")
+	if len(turns) != 1 {
+		t.Fatalf("voice.turn = %v, want 1", turns)
+	}
+	p := turns[0]
+	ms, _ := p["input_to_response_ms"].(int64)
+	if p["responded"] != true || p["tool_calls"] != 1 || p["end"] != "complete" || p["stalled"] != false || ms < 25 || ms > 1500 {
+		t.Fatalf("voice.turn = %v", p)
+	}
+
+	// A turn the model answers with nothing (turnComplete, no audio, no
+	// tool) is closed without counting as a stall.
+	c.serve(inputTranscriptMsg("hm", false))
+	c.serve(turnCompleteMsg())
+	deadline = time.Now().Add(2 * time.Second)
+	for len(h.log.payloads("voice.turn")) < 2 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if turns = h.log.payloads("voice.turn"); len(turns) != 2 || turns[1]["responded"] != false {
+		t.Fatalf("voice.turn = %v", turns)
+	}
+	if h.log.has("voice.stalled") {
+		t.Error("voice.stalled logged for an answered turn")
+	}
+}
+
+// TestStallDetectionAndRecycle: an utterance the model ignores for
+// StallAfter logs voice.stalled and flags the status; the model reacting
+// clears the flag; a second stall on the same connection recycles it with
+// the current resumption handle (voice.recycle → voice.resume).
+func TestStallDetectionAndRecycle(t *testing.T) {
+	c1, c2 := newFakeConn("c1"), newFakeConn("c2")
+	d := &fakeDialer{results: []func() (Conn, error){ok(c1), ok(c2)}}
+	h := newHarness(t, Config{StallAfter: 40 * time.Millisecond}, d)
+	c1.serve(handleMsg("handle-A"))
+
+	c1.serve(inputTranscriptMsg("hello?", false))
+	h.waitEvent("stalled", func(ev voice.Event) bool { st, ok := ev.(voice.EventStatus); return ok && st.Stalled })
+	if p := h.log.payloads("voice.stalled"); len(p) != 1 || p[0]["stalls"] != 1 {
+		t.Fatalf("voice.stalled = %v", p)
+	}
+	if h.log.has("voice.recycle") {
+		t.Fatal("recycled after one stall")
+	}
+	c1.serve(audioMsg([]byte("late answer")))
+	h.waitEvent("stall cleared", func(ev voice.Event) bool {
+		st, ok := ev.(voice.EventStatus)
+		return ok && st.Status == voice.StatusConnected && !st.Stalled
+	})
+	c1.serve(turnCompleteMsg())
+
+	c1.serve(inputTranscriptMsg("anyone there?", false))
+	h.waitEvent("resumed", func(ev voice.Event) bool { _, ok := ev.(voice.EventResumed); return ok })
+	if p := h.log.payloads("voice.recycle"); len(p) != 1 || p[0]["reason"] != "stalled" || p[0]["handle"] != true {
+		t.Fatalf("voice.recycle = %v", p)
+	}
+	recs := d.records()
+	if len(recs) != 2 || recs[1].handle != "handle-A" {
+		t.Fatalf("dials = %+v, want a reconnect with the handle", recs)
+	}
+	if h.s.Status() != voice.StatusConnected {
+		t.Fatalf("status = %v", h.s.Status())
+	}
+	// The turn that was open at the swap is closed, and the counters
+	// start over: a third stall alone does not recycle again.
+	turns := h.log.payloads("voice.turn")
+	if len(turns) == 0 || turns[len(turns)-1]["end"] != "reconnect" {
+		t.Fatalf("voice.turn = %v, want the last one ended by the reconnect", turns)
+	}
+	c2.serve(inputTranscriptMsg("still there?", false))
+	time.Sleep(120 * time.Millisecond)
+	if n := len(h.log.payloads("voice.stalled")); n != 3 {
+		t.Fatalf("voice.stalled count = %d, want 3", n)
+	}
+	if n := len(h.log.payloads("voice.recycle")); n != 1 {
+		t.Fatalf("voice.recycle count = %d, want 1 (counters reset on reconnect)", n)
+	}
+}
+
+// TestPushTimeoutsRecycle: two idle pushes that each outwait TurnTimeout
+// (the model answered them with nothing) recycle the connection.
+func TestPushTimeoutsRecycle(t *testing.T) {
+	c1, c2 := newFakeConn("c1"), newFakeConn("c2")
+	d := &fakeDialer{results: []func() (Conn, error){ok(c1), ok(c2)}}
+	h := newHarness(t, Config{PushGap: 5 * time.Millisecond, TurnTimeout: 40 * time.Millisecond}, d)
+	c1.serve(handleMsg("handle-B"))
+
+	for _, text := range []string{"first", "second", "third"} {
+		if err := h.s.Push(text, voice.UrgencyIdle); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h.waitEvent("resumed", func(ev voice.Event) bool { _, ok := ev.(voice.EventResumed); return ok })
+	if p := h.log.payloads("voice.push_timeout"); len(p) != 2 {
+		t.Fatalf("voice.push_timeout = %v, want 2", p)
+	}
+	if p := h.log.payloads("voice.recycle"); len(p) != 1 || p[0]["reason"] != "push_timeout" {
+		t.Fatalf("voice.recycle = %v", p)
+	}
+	if recs := d.records(); len(recs) != 2 || recs[1].handle != "handle-B" {
+		t.Fatalf("dials = %+v", recs)
 	}
 }

@@ -58,9 +58,17 @@ type Session struct {
 	pendingBytes int
 	inflight     map[string]context.CancelFunc
 	pushQ        []pushItem
+	// turn health (turn.go): the open input turn, and per-connection
+	// stall / push-timeout counters that decide a recycle
+	turn         *turnStats
+	turnSeq      int
+	stalls       int
+	pushTimeouts int
+	stalledNow   bool
 
 	readerExit chan readerResult
 	goAway     chan struct{}
+	recycle    chan string
 	kick       chan struct{}
 	dropReq    chan struct{}
 }
@@ -102,6 +110,7 @@ func newSession(cfg Config, log logging.Logger, dial Dialer) (*Session, error) {
 		turnDone:   make(chan struct{}),
 		readerExit: make(chan readerResult, 4),
 		goAway:     make(chan struct{}, 1),
+		recycle:    make(chan string, 1),
 		kick:       make(chan struct{}, 1),
 		dropReq:    make(chan struct{}, 1),
 	}, nil
@@ -166,6 +175,9 @@ func (s *Session) finish(reason string) {
 		for _, cancel := range s.inflight {
 			cancel()
 		}
+		if s.turn != nil && s.turn.stallTimer != nil {
+			s.turn.stallTimer.Stop()
+		}
 		s.mu.Unlock()
 		s.emit(voice.EventStatus{Status: voice.StatusClosed, Reason: reason})
 		s.log.Log(logSource, "voice.closed", "", map[string]any{"reason": reason})
@@ -190,14 +202,34 @@ func (s *Session) SetMuted(muted bool) {
 	s.muted = muted
 	conn := s.conn
 	s.mu.Unlock()
-	if changed && muted && conn != nil {
-		s.sendMu.Lock()
-		_ = conn.SendRealtimeInput(genai.LiveRealtimeInput{AudioStreamEnd: true})
-		s.sendMu.Unlock()
+	if changed && muted {
+		s.audioStreamEnd(conn)
 	}
 	if changed {
 		s.log.Log(logSource, "voice.muted", "", map[string]any{"muted": muted})
 	}
+}
+
+// AudioStreamEnd tells the server the microphone stream paused (the
+// client's silence gate closed) so its VAD finalises the current utterance
+// instead of waiting for frames that will not come. The next SendAudio
+// reopens the stream. No-op while muted or disconnected.
+func (s *Session) AudioStreamEnd() {
+	s.mu.Lock()
+	conn, muted := s.conn, s.muted
+	s.mu.Unlock()
+	if !muted {
+		s.audioStreamEnd(conn)
+	}
+}
+
+func (s *Session) audioStreamEnd(conn Conn) {
+	if conn == nil {
+		return
+	}
+	s.sendMu.Lock()
+	_ = conn.SendRealtimeInput(genai.LiveRealtimeInput{AudioStreamEnd: true})
+	s.sendMu.Unlock()
 }
 
 // Muted reports the current mute state.
@@ -280,8 +312,16 @@ func (s *Session) SendText(text string) error {
 	s.mu.Lock()
 	s.openTurnLocked()
 	s.mu.Unlock()
+	s.logTurn(s.noteInput(s.now()))
 	s.log.Log(logSource, "voice.text", "", map[string]any{"text": text})
 	return nil
+}
+
+// logTurn writes a finished turn's voice.turn line (nil payload: nothing).
+func (s *Session) logTurn(payload map[string]any) {
+	if payload != nil {
+		s.log.Log(logSource, "voice.turn", "", payload)
+	}
 }
 
 // Push implements voice.Session by enqueuing; see push.go for the policy.

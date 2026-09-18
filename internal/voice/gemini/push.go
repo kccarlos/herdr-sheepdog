@@ -37,7 +37,10 @@ func (s *Session) pushLoop(ctx context.Context) {
 			if !ok {
 				break
 			}
-			wait := s.pushReady(item)
+			wait, timedOut := s.pushReady(item)
+			if timedOut {
+				s.notePushTimeout()
+			}
 			if wait == 0 {
 				s.popPush()
 				s.doPush(ctx, item)
@@ -75,22 +78,23 @@ func (s *Session) popPush() {
 
 // pushReady returns 0 when item may be sent now, waitState when it must
 // wait for a state change (connection, turn, speech) or a duration when
-// only time stands in the way.
-func (s *Session) pushReady(item pushItem) time.Duration {
+// only time stands in the way. timedOut reports that an open turn was
+// given up on because TurnTimeout elapsed (the caller logs and counts it).
+func (s *Session) pushReady(item pushItem) (wait time.Duration, timedOut bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.conn == nil {
-		return waitState
+		return waitState, false
 	}
 	if item.urgency == voice.UrgencySilent {
-		return 0
+		return 0, false
 	}
 	now := s.now()
 	if until := s.speakingUntilLocked(now); until > 0 {
-		return until
+		return until, false
 	}
 	if item.urgency == voice.UrgencyInterrupt {
-		return 0
+		return 0, false
 	}
 	if s.turnOpen {
 		// Wait for turnComplete, but re-check when TurnTimeout elapses:
@@ -98,14 +102,15 @@ func (s *Session) pushReady(item pushItem) time.Duration {
 		// live), and waitState would then hold every later push until the
 		// next unrelated event.
 		if left := s.cfg.TurnTimeout - now.Sub(s.turnOpenedAt); left > 0 {
-			return left
+			return left, false
 		}
 		s.turnOpen = false // the turn never completed; do not wait forever
+		timedOut = true
 	}
 	if gap := s.cfg.PushGap - now.Sub(s.lastSpoken); gap > 0 {
-		return gap
+		return gap, timedOut
 	}
-	return 0
+	return 0, timedOut
 }
 
 // speakingUntilLocked returns how long the user still counts as speaking
@@ -152,6 +157,9 @@ func (s *Session) doPush(ctx context.Context, item pushItem) {
 	if turnComplete {
 		s.lastSpoken = s.now()
 		s.openTurnLocked()
+		if s.turn != nil {
+			s.turn.pushesSpoken++
+		}
 	}
 	s.mu.Unlock()
 	s.log.Log(logSource, "voice.push", "", map[string]any{"text": item.text, "urgency": item.urgency.String()})

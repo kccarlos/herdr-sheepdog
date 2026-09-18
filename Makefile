@@ -35,11 +35,12 @@ changelog:
 test:
 	go test -race ./...
 
-# Browser-side unit tests (web/voice/*.test.mjs, plain node --test; no
-# npm). Skipped when node is not on PATH so `make test` stays Go-only.
+# Browser-side unit tests (web/voice/*.test.mjs, web/debug/*.test.mjs; plain
+# node --test, no npm). Skipped when node is not on PATH so `make test`
+# stays Go-only.
 test-web:
 	@if command -v node >/dev/null 2>&1; then \
-		node --test 'web/voice/*.test.mjs'; \
+		node --test 'web/voice/*.test.mjs' 'web/debug/*.test.mjs'; \
 	else \
 		echo "test-web: node not found, skipping"; \
 	fi

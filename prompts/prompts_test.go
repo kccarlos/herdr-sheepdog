@@ -25,6 +25,24 @@ func TestRenderVoiceSystem(t *testing.T) {
 			t.Errorf("prompt does not explain the push prefix %q", prefix)
 		}
 	}
+	// Rules from the first headset session (cheap guard against the prompt
+	// drifting): status questions always go through a tool, and propose /
+	// ask never guess the agent.
+	for _, rule := range []string{
+		"MUST start with a tool call",
+		"Never answer such a question from memory",
+		"if a tool has not answered yet, say you are still waiting",
+		"fill agent only when the user actually said an alias",
+		"leave agent empty",
+		"Do not guess the agent",
+	} {
+		if !strings.Contains(s, rule) {
+			t.Errorf("prompt lost the rule %q", rule)
+		}
+	}
+	if words := len(strings.Fields(s)); words > 420 {
+		t.Errorf("prompt is %d words; keep it short (< 420)", words)
+	}
 	if _, err := Render("missing.txt", nil); err == nil {
 		t.Error("missing template accepted")
 	}

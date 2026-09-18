@@ -435,3 +435,82 @@ export class CapturePipeline {
     return this.chunker.push(floatToInt16(x));
   }
 }
+
+/**
+ * Silence gate for capture frames (docs/ws-contract.md, "Silence gate").
+ * Near-zero PCM streamed continuously degrades the Gemini session
+ * (docs/e2e-results.md, "zero-valued audio frames"), so frames whose peak
+ * stays below `floor` (Int16 LSB) for `holdMs` are not sent at all. The
+ * last `prerollMs` of gated frames are kept in a ring and released with
+ * the first loud frame so the first syllable is not clipped.
+ *
+ * Pure: `push(frame)` returns what to send and whether the gate flipped.
+ */
+export class SilenceGate {
+  /**
+   * @param {object} [o]
+   * @param {number} [o.floor] peak below this (Int16 LSB) counts as silent (default 8)
+   * @param {number} [o.holdMs] silence needed before gating (default 300)
+   * @param {number} [o.prerollMs] gated audio replayed when speech resumes (default 100)
+   * @param {number} [o.frameMs] duration of one frame (default 20)
+   */
+  constructor(o = {}) {
+    this.floor = o.floor == null ? 8 : o.floor;
+    this.holdMs = o.holdMs == null ? 300 : o.holdMs;
+    this.frameMs = o.frameMs == null ? 20 : o.frameMs;
+    this.prerollFrames = Math.max(0, Math.round((o.prerollMs == null ? 100 : o.prerollMs) / this.frameMs));
+    this.gated = false; // true while frames are being withheld
+    this.quietMs = 0; // consecutive silent time seen so far
+    this.preroll = []; // withheld frames, oldest first, at most prerollFrames
+    this.gatedFrames = 0; // frames withheld in total
+    this.peak = 0; // peak of the last frame, in LSB
+  }
+
+  /**
+   * @param {Int16Array} frame
+   * @returns {{send: Int16Array[], transition: ('on'|'off'|null)}} frames to
+   *   send now (possibly including pre-roll) and whether the gate switched
+   *   on (silence started) or off (speech resumed) on this frame.
+   */
+  push(frame) {
+    const peak = peakInt16(frame);
+    this.peak = peak;
+    if (peak >= this.floor) {
+      this.quietMs = 0;
+      if (this.gated) {
+        this.gated = false;
+        const send = this.preroll;
+        this.preroll = [];
+        send.push(frame);
+        return { send, transition: 'off' };
+      }
+      return { send: [frame], transition: null };
+    }
+    this.quietMs += this.frameMs;
+    if (!this.gated) {
+      if (this.quietMs < this.holdMs) return { send: [frame], transition: null };
+      this.gated = true;
+      this.withhold(frame);
+      return { send: [], transition: 'on' };
+    }
+    this.withhold(frame);
+    return { send: [], transition: null };
+  }
+
+  withhold(frame) {
+    this.gatedFrames++;
+    if (this.prerollFrames === 0) return;
+    this.preroll.push(frame);
+    if (this.preroll.length > this.prerollFrames) this.preroll.shift();
+  }
+}
+
+/** Peak absolute sample of an Int16 frame, in LSB. */
+export function peakInt16(frame) {
+  let peak = 0;
+  for (let i = 0; i < frame.length; i++) {
+    const a = frame[i] < 0 ? -frame[i] : frame[i];
+    if (a > peak) peak = a;
+  }
+  return peak;
+}

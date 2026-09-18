@@ -51,9 +51,13 @@ type Event interface{ isEvent() }
 
 // EventStatus reports a connection state change. Reason is set for
 // StatusClosed and for StatusReconnecting (why the connection was lost).
+// Stalled is set on a StatusConnected event when the model has not
+// reacted to the user's last utterance for the configured time, and
+// cleared by the next StatusConnected event once it does.
 type EventStatus struct {
-	Status Status
-	Reason string
+	Status  Status
+	Reason  string
+	Stalled bool
 }
 
 // EventTranscript is an incremental transcript fragment.

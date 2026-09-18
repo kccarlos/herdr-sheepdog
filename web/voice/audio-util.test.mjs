@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import {
   CAPTURE_RATE, PLAYBACK_RATE, FRAME_SAMPLES,
   lowpassCoefficients, FIRFilter, Resampler, floatToInt16, int16ToFloat,
-  levelOf, FrameChunker, RingBuffer, Player, CapturePipeline,
+  levelOf, FrameChunker, RingBuffer, Player, CapturePipeline, SilenceGate, peakInt16,
 } from './audio-util.js';
 
 function sine(freq, rate, n, amp = 0.5) {
@@ -210,4 +210,79 @@ test('CapturePipeline turns 48 kHz float blocks into 20 ms Int16 frames', () => 
   assert.equal(same.filter, null);
   assert.equal(same.resampler, null);
   assert.equal(same.process(new Float32Array(320)).length, 1);
+});
+
+// ---------------------------------------------------------------- silence gate
+
+function int16Frame(peak, n = FRAME_SAMPLES) {
+  const f = new Int16Array(n);
+  if (peak) f[n >> 1] = peak;
+  return f;
+}
+
+test('peakInt16 reports the largest absolute sample', () => {
+  const f = new Int16Array([3, -20, 7]);
+  assert.equal(peakInt16(f), 20);
+  assert.equal(peakInt16(new Int16Array(4)), 0);
+});
+
+test('SilenceGate closes after holdMs of near-zero frames and counts them', () => {
+  const g = new SilenceGate({ floor: 8, holdMs: 300, prerollMs: 100, frameMs: 20 });
+  // 14 quiet frames (280 ms) still pass through.
+  for (let i = 0; i < 14; i++) {
+    const r = g.push(int16Frame(3));
+    assert.equal(r.send.length, 1, `frame ${i} sent`);
+    assert.equal(r.transition, null);
+  }
+  // The 15th (300 ms) closes the gate and is withheld.
+  let r = g.push(int16Frame(0));
+  assert.equal(r.transition, 'on');
+  assert.equal(r.send.length, 0);
+  assert.equal(g.gated, true);
+  for (let i = 0; i < 50; i++) {
+    r = g.push(int16Frame(7));
+    assert.equal(r.send.length, 0);
+    assert.equal(r.transition, null);
+  }
+  assert.equal(g.gatedFrames, 51);
+});
+
+test('SilenceGate reopens on the first loud frame with the pre-roll in front', () => {
+  const g = new SilenceGate({ floor: 20, holdMs: 300, prerollMs: 100, frameMs: 20 });
+  for (let i = 0; i < 40; i++) g.push(int16Frame(0));
+  assert.equal(g.gated, true);
+  // Tag the withheld frames (all below the floor) so the pre-roll order can be checked.
+  for (let i = 1; i <= 9; i++) g.push(int16Frame(i));
+  const loud = int16Frame(500);
+  const r = g.push(loud);
+  assert.equal(r.transition, 'off');
+  assert.equal(g.gated, false);
+  // 100 ms / 20 ms = 5 pre-roll frames, the most recent five, then the loud one.
+  assert.equal(r.send.length, 6);
+  assert.deepEqual(r.send.slice(0, 5).map(peakInt16), [5, 6, 7, 8, 9]);
+  assert.equal(r.send[5], loud);
+  // Loud audio keeps flowing one frame at a time and resets the quiet timer.
+  assert.deepEqual(g.push(int16Frame(300)).send.length, 1);
+  assert.equal(g.quietMs, 0);
+});
+
+test('SilenceGate: a short pause below holdMs never gates', () => {
+  const g = new SilenceGate({ floor: 8, holdMs: 300, frameMs: 20 });
+  let transitions = 0;
+  for (let round = 0; round < 5; round++) {
+    for (let i = 0; i < 10; i++) if (g.push(int16Frame(0)).transition) transitions++; // 200 ms quiet
+    if (g.push(int16Frame(1000)).transition) transitions++;
+  }
+  assert.equal(transitions, 0);
+  assert.equal(g.gatedFrames, 0);
+});
+
+test('SilenceGate: floor is inclusive-exclusive at the configured LSB and prerollMs=0 sends nothing old', () => {
+  const g = new SilenceGate({ floor: 8, holdMs: 40, prerollMs: 0, frameMs: 20 });
+  assert.equal(g.push(int16Frame(8)).send.length, 1); // at the floor counts as sound
+  g.push(int16Frame(7));
+  assert.equal(g.push(int16Frame(7)).transition, 'on');
+  const r = g.push(int16Frame(-9)); // negative peaks count too
+  assert.equal(r.transition, 'off');
+  assert.equal(r.send.length, 1);
 });

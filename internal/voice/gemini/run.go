@@ -26,6 +26,9 @@ func (s *Session) connect(ctx context.Context) (conn Conn, resumed bool, err err
 			s.log.Log(logSource, "voice.connect", "", map[string]any{
 				"key_index": idx, "resumed": handle != "", "dur_ms": s.now().Sub(started).Milliseconds(),
 			})
+			// The prompt this connection runs with, so /debug can show it
+			// per session straight from the log (D10).
+			s.log.Log(logSource, "voice.system_prompt", "", map[string]any{"text": s.prompt, "aliases": s.cfg.Aliases, "model": s.cfg.Model})
 			return conn, handle != "", nil
 		}
 		if ctx.Err() != nil {
@@ -88,7 +91,11 @@ func (s *Session) install(conn Conn, resumed, reconnect bool) {
 	s.pending, s.pendingBytes = nil, 0
 	handle := s.handle
 	s.turnOpen = false
+	s.stalls, s.pushTimeouts = 0, 0
+	s.stalledNow = false // the connected status below clears it on the page
+	turn := s.finishTurnLocked("reconnect")
 	s.mu.Unlock()
+	s.logTurn(turn)
 
 	s.wg.Add(1)
 	go func() { defer s.wg.Done(); s.readLoop(conn, gen) }()
@@ -126,7 +133,17 @@ func (s *Session) run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-s.goAway:
-			s.proactiveReconnect(ctx)
+			s.proactiveReconnect(ctx, "goaway")
+			continue
+		case reason := <-s.recycle:
+			// The connection looks sick (repeated stalls or pushes the
+			// model never answered): swap it for a fresh one while the
+			// resumption handle is still valid, as on GoAway.
+			s.mu.Lock()
+			handle := s.handle != ""
+			s.mu.Unlock()
+			s.log.Log(logSource, "voice.recycle", "", map[string]any{"reason": reason, "handle": handle})
+			s.proactiveReconnect(ctx, "recycle")
 			continue
 		case r := <-s.readerExit:
 			s.mu.Lock()
@@ -217,12 +234,13 @@ func (s *Session) rateLimitWait(err error) time.Duration {
 }
 
 // proactiveReconnect opens a new connection with the current handle while
-// the old one is still alive (GoAway), then swaps them. On failure the old
-// connection is kept until the server closes it and the normal path runs.
-func (s *Session) proactiveReconnect(ctx context.Context) {
+// the old one is still alive (GoAway, recycle), then swaps them. On
+// failure the old connection is kept until the server closes it and the
+// normal path runs.
+func (s *Session) proactiveReconnect(ctx context.Context, why string) {
 	conn, resumed, err := s.connect(ctx)
 	if err != nil {
-		s.emit(voice.EventError{Err: fmt.Errorf("goaway reconnect: %w", err)})
+		s.emit(voice.EventError{Err: fmt.Errorf("%s reconnect: %w", why, err)})
 		return
 	}
 	s.mu.Lock()

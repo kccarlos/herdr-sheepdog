@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -152,6 +153,19 @@ func TestWSAudioAndControlWithVoice(t *testing.T) {
 	if st = c.expect(wsproto.TypeStatus); st.Voice != wsproto.VoiceReconnecting || st.Reason != "goaway" {
 		t.Fatalf("reconnecting status = %+v", st)
 	}
+	h.session.emit(voice.EventStatus{Status: voice.StatusConnected, Stalled: true})
+	if st = c.expect(wsproto.TypeStatus); st.Voice != wsproto.VoiceConnected || !st.Stalled {
+		t.Fatalf("stalled status = %+v", st)
+	}
+	var state StateResponse
+	h.getJSON("/api/state", &state)
+	if !state.Voice.Stalled {
+		t.Fatalf("/api/state voice = %+v, want stalled", state.Voice)
+	}
+	h.session.emit(voice.EventStatus{Status: voice.StatusConnected})
+	if st = c.expect(wsproto.TypeStatus); st.Stalled {
+		t.Fatalf("status still stalled: %+v", st)
+	}
 
 	// text → session.SendText.
 	c.send(wsproto.SimulateText("what's going on"))
@@ -179,6 +193,62 @@ func TestWSAudioAndControlWithVoice(t *testing.T) {
 	}
 	c.send(wsproto.Ping())
 	c.expect(wsproto.TypePong)
+}
+
+// TestWSSilenceGate: a silence message is logged, closing the gate tells
+// the session the audio stream paused, and the counters carried by the
+// ping show up in web.client.stats.
+func TestWSSilenceGate(t *testing.T) {
+	h := newHarness(t, harnessOpts{voice: true, statsInterval: 50 * time.Millisecond})
+	c := dialWS(t, h)
+	c.expect(wsproto.TypeStatus)
+
+	c.send(wsproto.Silence(true))
+	waitFor(t, time.Second, func() bool { return h.session.streamEnds() == 1 }, "audio stream end sent to session")
+	c.send(wsproto.Silence(false))
+	c.sendAudio([]byte{1, 2})
+	waitFor(t, time.Second, func() bool { return h.session.sentFrames() == 1 }, "audio after the gate reopened")
+	if h.session.streamEnds() != 1 {
+		t.Fatalf("stream ends = %d, want 1 (only on gate close)", h.session.streamEnds())
+	}
+
+	gated, peak := 42, 5
+	c.send(wsproto.Message{Type: wsproto.TypePing, GatedFrames: &gated, Peak: &peak})
+	c.expect(wsproto.TypePong)
+	c.sendRaw(`{"type":"silence"}`)
+	if e := c.expect(wsproto.TypeError); !strings.Contains(e.Message, "silence") {
+		t.Fatalf("error = %+v", e)
+	}
+
+	var silence []map[string]any
+	var stats map[string]any
+	waitFor(t, 2*time.Second, func() bool {
+		for _, ev := range h.log.Tail(0) {
+			if ev.Type == "web.client.stats" && strings.Contains(string(ev.Payload), `"gated_frames":42`) {
+				return true
+			}
+		}
+		return false
+	}, "stats with the ping counters")
+	for _, ev := range h.log.Tail(0) {
+		var p map[string]any
+		_ = json.Unmarshal(ev.Payload, &p)
+		switch ev.Type {
+		case "web.client.silence":
+			silence = append(silence, p)
+		case "web.client.stats":
+			stats = p
+		}
+	}
+	if len(silence) != 2 || silence[0]["on"] != true || silence[1]["on"] != false {
+		t.Fatalf("web.client.silence = %v", silence)
+	}
+	if stats == nil {
+		t.Fatal("no web.client.stats logged")
+	}
+	if stats["gated_frames"] != float64(42) || stats["peak"] != float64(5) || stats["silent"] != false || stats["silence_transitions"] != float64(2) {
+		t.Fatalf("stats = %v", stats)
+	}
 }
 
 func TestWSSingleClientReplacement(t *testing.T) {

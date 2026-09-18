@@ -140,6 +140,10 @@ type Gemini struct {
 	Model string `toml:"model"`
 	// Voice is the prebuilt voice name.
 	Voice string `toml:"voice"`
+	// StallAfterS is how many seconds an utterance may go without any
+	// model response (tool call or audio) before the session logs
+	// voice.stalled; two stalls on one connection recycle it.
+	StallAfterS int `toml:"stall_after_s"`
 }
 
 // Herdr configures the herdr socket client.
@@ -177,7 +181,7 @@ func Default() Config {
 		Herdr:             Herdr{Socket: filepath.Join(home, ".config", "herdr", "herdr.sock")},
 		State:             State{Path: filepath.Join(dataDir, "state.json")},
 		PendingTTLS:       120,
-		Gemini:            Gemini{Model: "gemini-3.8-live", Voice: "Puck"},
+		Gemini:            Gemini{Model: "gemini-3.8-live", Voice: "Puck", StallAfterS: 10},
 		LLM:               LLM{BaseURL: GeminiOpenAIBaseURL, Model: "gemini-3.5-flash-lite"},
 		Web:               Web{Port: DefaultWebPort},
 		CLI:               defaultCLI(),
@@ -267,7 +271,8 @@ func load(path string, lookup func(string) (string, bool)) (Config, error) {
 //	SHEEPDOG_DATA_DIR, SHEEPDOG_DEBOUNCE_MS, SHEEPDOG_SNAPSHOT_INTERVAL_S,
 //	SHEEPDOG_HERDR_SOCKET, SHEEPDOG_STATE_PATH, SHEEPDOG_STATE_FULL_FSYNC,
 //	SHEEPDOG_GEMINI_MODEL,
-//	SHEEPDOG_GEMINI_VOICE, SHEEPDOG_LLM_BASE_URL, SHEEPDOG_LLM_MODEL,
+//	SHEEPDOG_GEMINI_VOICE, SHEEPDOG_GEMINI_STALL_AFTER_S,
+//	SHEEPDOG_LLM_BASE_URL, SHEEPDOG_LLM_MODEL,
 //	SHEEPDOG_LLM_API_KEY, SHEEPDOG_PENDING_TTL_S, SHEEPDOG_WEB_PORT,
 //	SHEEPDOG_CLI_PREFER, SHEEPDOG_CLI_CODEX_BIN, SHEEPDOG_CLI_CLAUDE_BIN,
 //	SHEEPDOG_CLI_CLAUDE_MODEL, SHEEPDOG_CLI_CODEX_REASONING,
@@ -284,6 +289,13 @@ func applyEnv(cfg *Config, lookup func(string) (string, bool)) error {
 	}
 	if v, ok := lookup("SHEEPDOG_GEMINI_VOICE"); ok {
 		cfg.Gemini.Voice = v
+	}
+	if v, ok := lookup("SHEEPDOG_GEMINI_STALL_AFTER_S"); ok {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return fmt.Errorf("config: SHEEPDOG_GEMINI_STALL_AFTER_S=%q: want a positive integer", v)
+		}
+		cfg.Gemini.StallAfterS = n
 	}
 	if keys := geminiKeysFromEnv(lookup); len(keys) > 0 {
 		cfg.Gemini.APIKeys = keys
@@ -400,6 +412,6 @@ func geminiKeysFromEnv(lookup func(string) (string, bool)) []string {
 // String renders the configuration for logs. Secrets are rendered as
 // counts only; keep it that way when secret-bearing fields are added.
 func (c Config) String() string {
-	return fmt.Sprintf("data_dir=%s herdr.socket=%s state.path=%s state.full_fsync=%t debounce_ms=%d snapshot_interval_s=%d pending_ttl_s=%d aliases=%d gemini.model=%s gemini.voice=%s gemini.api_keys=%d llm.base_url=%s llm.model=%s llm.api_keys=%d web.port=%d cli.prefer=%s cli.timeout_s=%d cli.max_output_kb=%d",
-		c.DataDir, c.Herdr.Socket, c.State.Path, c.State.FullFsync, c.DebounceMS, c.SnapshotIntervalS, c.PendingTTLS, len(c.Aliases), c.Gemini.Model, c.Gemini.Voice, len(c.Gemini.APIKeys), c.LLM.BaseURL, c.LLM.Model, len(c.LLMKeys()), c.Web.Port, c.CLI.Prefer, c.CLI.TimeoutS, c.CLI.MaxOutputKB)
+	return fmt.Sprintf("data_dir=%s herdr.socket=%s state.path=%s state.full_fsync=%t debounce_ms=%d snapshot_interval_s=%d pending_ttl_s=%d aliases=%d gemini.model=%s gemini.voice=%s gemini.stall_after_s=%d gemini.api_keys=%d llm.base_url=%s llm.model=%s llm.api_keys=%d web.port=%d cli.prefer=%s cli.timeout_s=%d cli.max_output_kb=%d",
+		c.DataDir, c.Herdr.Socket, c.State.Path, c.State.FullFsync, c.DebounceMS, c.SnapshotIntervalS, c.PendingTTLS, len(c.Aliases), c.Gemini.Model, c.Gemini.Voice, c.Gemini.StallAfterS, len(c.Gemini.APIKeys), c.LLM.BaseURL, c.LLM.Model, len(c.LLMKeys()), c.Web.Port, c.CLI.Prefer, c.CLI.TimeoutS, c.CLI.MaxOutputKB)
 }

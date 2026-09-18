@@ -54,6 +54,7 @@ Voice session (plan §6).
 | `gemini.api_keys` | `GEMINI_API_KEY`, `GEMINI_API_KEY_1`…`GEMINI_API_KEY_9` | `[]` | The Gemini Live key pool; the voice session binds one key per connection and rotates to the next on a rate-limit error. Normally left out of the TOML file and set via the environment (or `--env-file`) so keys never sit in a checked-in file; any env key found replaces the whole pool from the file. Also the fallback key source for `[llm]` when `llm.api_key` is empty and `llm.base_url` is Gemini's. |
 | `gemini.model` | `SHEEPDOG_GEMINI_MODEL` | `gemini-3.8-live` | The Live API model name. |
 | `gemini.voice` | `SHEEPDOG_GEMINI_VOICE` | `Puck` | The prebuilt voice name. |
+| `gemini.stall_after_s` | `SHEEPDOG_GEMINI_STALL_AFTER_S` | `10` | Seconds an utterance may go without any model response (tool call or audio) before `voice.stalled` is logged and the pages show "stalled". The second stall on one connection (or the second idle push that outwaits the 30 s turn timeout) recycles the connection: a reconnect with the still-valid resumption handle (`voice.recycle`), keeping the conversation. |
 
 ## `[llm]`
 

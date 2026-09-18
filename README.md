@@ -86,10 +86,16 @@ sheepdog serve --voice=off --herdr=mock --dev  # also serve testdata/audio/*.wav
 | `sheepdog version` \| `help` | Version/commit/build date \| this table. |
 
 `/voice`: mic → AudioWorklet → 16 kHz PCM16 → WebSocket, gapless 24 kHz
-playback, mute/stop, auto-reconnect. `/debug`: a live event log with
-filters, the current state table, the pending action, and fake-event
-injection so the tool path is testable without a mic or herdr — see
-[`docs/ws-contract.md`](docs/ws-contract.md).
+playback, mute/stop, auto-reconnect, a silence gate for quiet mics.
+`/debug`: three tabs — **Conversation** (the voice session as a chat:
+system prompt, your utterances, the dog's replies, tool calls that expand
+to their arguments, result and the supervisor events behind them,
+supervisor pushes, session dividers, per-turn response times), **Events**
+(the live event log with filters) and **State** (state table, pending
+action, fake-event injection so the tool path is testable without a mic or
+herdr) — see [`docs/ws-contract.md`](docs/ws-contract.md). Everything on
+`/debug` is read off the event log (D10); `GET /api/voice/system_prompt`
+returns the prompt the session runs with.
 
 ## ⚠️ Worker agents must not run fully auto-approve
 
@@ -105,7 +111,7 @@ with one of these:**
 
 | Agent | Flags to avoid |
 |---|---|
-| Codex | `--full-auto`, `-a never` (or any config setting that disables approval prompts) |
+| Codex | `--full-auto`, `-a never` (or any config setting that disables approval prompts). Start it as `codex --sandbox read-only -a on-request`: that is the mode that reliably prompts for file changes and commands. `--sandbox workspace-write -a on-request` runs workspace writes silently and never asked in the WP7b run or the first headset session, so nothing proactive ever happened. |
 | Claude Code | `--dangerously-skip-permissions`, `--permission-mode bypassPermissions` |
 | agy (Antigravity CLI) | `--dangerously-skip-permissions`, `--mode accept-edits` (verified on 1.2.5: the default mode prompts for commands and file edits) |
 | anything else herdr supports | check its own docs for the equivalent "skip all approvals" flag and avoid it too |

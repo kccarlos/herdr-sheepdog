@@ -39,6 +39,7 @@ func Template() string {
 # api_keys = ["AIza..."]
 # model = %[8]q
 # voice = %[9]q
+# stall_after_s = %[20]d   # no model response this long after an utterance logs voice.stalled; twice recycles the connection
 
 [llm]
 # base_url = %[10]q
@@ -68,5 +69,6 @@ func Template() string {
 		d.LLM.BaseURL, d.LLM.Model,
 		d.Web.Port,
 		d.CLI.Prefer, d.CLI.CodexBin, d.CLI.ClaudeBin, d.CLI.ClaudeModel, d.CLI.CodexReasoning, d.CLI.TimeoutS, d.CLI.MaxOutputKB,
+		d.Gemini.StallAfterS,
 	)
 }

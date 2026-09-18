@@ -64,6 +64,7 @@ type fakeSession struct {
 	pushes []string
 	muted  bool
 	status voice.Status
+	ends   int // AudioStreamEnd calls
 }
 
 func newFakeSession() *fakeSession {
@@ -106,6 +107,8 @@ func (f *fakeSession) pushed() []string {
 	return append([]string(nil), f.pushes...)
 }
 func (f *fakeSession) isMuted() bool       { f.mu.Lock(); defer f.mu.Unlock(); return f.muted }
+func (f *fakeSession) AudioStreamEnd()     { f.mu.Lock(); f.ends++; f.mu.Unlock() }
+func (f *fakeSession) streamEnds() int     { f.mu.Lock(); defer f.mu.Unlock(); return f.ends }
 func (f *fakeSession) emit(ev voice.Event) { f.events <- ev }
 
 // fakeWatcher records injected status events.
@@ -171,7 +174,8 @@ func newHarness(t *testing.T, o harnessOpts) *harness {
 	}
 	sup.SetVoiceConnected(true)
 	injector := inject.NewInjector(store, h, sup, log, nil)
-	deps := Deps{Log: log, Store: store, Supervisor: sup, Injector: injector, Router: &inject.Router{}, Version: "test", Heartbeat: 200 * time.Millisecond, OutQueue: 8, DevTestdataDir: o.devTestdata, StatsInterval: o.statsInterval}
+	deps := Deps{Log: log, Store: store, Supervisor: sup, Injector: injector, Router: &inject.Router{}, Version: "test", Heartbeat: 200 * time.Millisecond, OutQueue: 8, DevTestdataDir: o.devTestdata, StatsInterval: o.statsInterval,
+		SystemPrompt: "You are the voice. Aliases: auth.", Aliases: []string{"auth"}}
 	if session != nil {
 		deps.Voice = session
 	}

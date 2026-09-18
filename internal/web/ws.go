@@ -22,17 +22,23 @@ const (
 	backpressureEvery = 100
 )
 
+// audioEnder is implemented by sessions that can tell the model the
+// microphone stream paused (Gemini: audioStreamEnd), so its VAD closes the
+// user's turn when the browser's silence gate stops sending frames.
+type audioEnder interface{ AudioStreamEnd() }
+
 // hub owns the single browser client and the daemon's view of the voice
 // state (docs/ws-contract.md).
 type hub struct {
 	s *Server
 
-	mu     sync.Mutex
-	client *client
-	seq    int
-	status voice.Status
-	reason string
-	muted  bool
+	mu      sync.Mutex
+	client  *client
+	seq     int
+	status  voice.Status
+	reason  string
+	stalled bool
+	muted   bool
 }
 
 func newHub(s *Server) *hub {
@@ -45,18 +51,29 @@ func newHub(s *Server) *hub {
 	return h
 }
 
-// state returns the voice status, its reason, the mute flag and whether a
-// browser client is attached.
-func (h *hub) state() (voice.Status, string, bool, bool) {
+// hubState is the daemon's view of the voice side for /api/state.
+type hubState struct {
+	status  voice.Status
+	reason  string
+	muted   bool
+	stalled bool
+	client  bool
+}
+
+// state returns the voice status, its reason, the mute and stalled flags
+// and whether a browser client is attached.
+func (h *hub) state() hubState {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return h.status, h.reason, h.muted, h.client != nil
+	return hubState{status: h.status, reason: h.reason, muted: h.muted, stalled: h.stalled, client: h.client != nil}
 }
 
 func (h *hub) statusMsg() wsproto.Message {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return wsproto.Status(h.status.String(), h.muted, h.reason)
+	m := wsproto.Status(h.status.String(), h.muted, h.reason)
+	m.Stalled = h.stalled
+	return m
 }
 
 // handle upgrades the request and serves the client until it goes away.
@@ -126,7 +143,7 @@ func (h *hub) onVoiceEvent(ev voice.Event) {
 	switch e := ev.(type) {
 	case voice.EventStatus:
 		h.mu.Lock()
-		h.status, h.reason = e.Status, e.Reason
+		h.status, h.reason, h.stalled = e.Status, e.Reason, e.Stalled
 		h.mu.Unlock()
 		h.send(h.statusMsg())
 	case voice.EventInterrupted:
@@ -179,6 +196,21 @@ func (h *hub) setMuted(on bool) {
 	h.send(h.statusMsg())
 }
 
+// setSilence records a silence-gate transition reported by the client and,
+// when the gate closed, tells the session the audio stream paused.
+func (h *hub) setSilence(c *client, on bool) {
+	c.mu.Lock()
+	c.silent = on
+	c.silenceTransitions++
+	c.mu.Unlock()
+	h.s.log.Log(logSource, "web.client.silence", "", map[string]any{"client_id": c.id, "on": on})
+	if on {
+		if v, ok := h.s.deps.Voice.(audioEnder); ok {
+			v.AudioStreamEnd()
+		}
+	}
+}
+
 // shutdown closes the client with a final status (daemon stopping).
 func (h *hub) shutdown(reason string) {
 	c := h.current()
@@ -229,6 +261,12 @@ type client struct {
 	bytesIn, bytesOut     int
 	droppedAudio, dropped int // dropped = total drops, for throttling
 	mutedDrops            int
+	// silence gate, as reported by the client (silence messages and the
+	// counters carried by its pings)
+	silent             bool
+	silenceTransitions int
+	gatedFrames        int
+	peak               int
 }
 
 func newClient(h *hub, conn *websocket.Conn, remote string, maxQueue int) *client {
@@ -394,9 +432,19 @@ func (c *client) onControl(data []byte) {
 	}
 	switch m.Type {
 	case wsproto.TypePing:
+		c.mu.Lock()
+		if m.GatedFrames != nil {
+			c.gatedFrames = *m.GatedFrames
+		}
+		if m.Peak != nil {
+			c.peak = *m.Peak
+		}
+		c.mu.Unlock()
 		c.enqueue(controlFrame(wsproto.Pong()))
 	case wsproto.TypeMute:
 		h.setMuted(*m.On)
+	case wsproto.TypeSilence:
+		h.setSilence(c, *m.On)
 	case wsproto.TypeCancel:
 		ctx, cancel := h.s.toolCtx()
 		res, err := h.s.runTool(ctx, voice.ToolCall{ID: "ws-cancel", Name: supervisor.ToolCancel}, "ws")
@@ -457,6 +505,7 @@ func (c *client) counters() map[string]any {
 		"client_id": c.id,
 		"frames_in": c.framesIn, "bytes_in": c.bytesIn, "frames_out": c.framesOut, "bytes_out": c.bytesOut,
 		"dropped_audio": c.droppedAudio, "muted_drops": c.mutedDrops, "queued": len(c.queue),
+		"silent": c.silent, "silence_transitions": c.silenceTransitions, "gated_frames": c.gatedFrames, "peak": c.peak,
 		"dur_ms": c.h.s.deps.Now().Sub(c.start).Milliseconds(),
 	}
 }

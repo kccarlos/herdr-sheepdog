@@ -8,7 +8,7 @@ this is a short orientation for the code as built.
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │  Browser  /voice   (mic → 16 kHz PCM → WS)  (WS → 24 kHz PCM → speaker)
-│           /debug   (SSE tail of the event log, fake-event buttons)
+│           /debug   (conversation view, SSE tail of the event log, fake-event buttons)
 └───────────────┬─────────────────────────────────────────────┘
                 │ WebSocket (audio bytes + a few control JSON msgs)
 ┌───────────────▼─────────────────────────────────────────────┐
@@ -60,7 +60,7 @@ exist.
 | `internal/web` | The HTTP surface on `127.0.0.1`: `/voice` and `/debug` (embedded static pages), `/events` (SSE), the audio+control WebSocket, and the small JSON API (state, inject, `/api/herdr/event`). |
 | `internal/inject` | The debug-only fake event path: lets `/debug` (and tests) drive the whole supervisor chain without a real herdr or a microphone. |
 | `internal/logging` | The tiny structured-event `Logger` interface every component logs through. |
-| `web/voice`, `web/debug` | Vanilla JS + AudioWorklet pages served by `internal/web`. |
+| `web/voice`, `web/debug` | Vanilla JS + AudioWorklet pages served by `internal/web`; `web/debug/conversation.js` is the pure event→chat grouping behind the Conversation tab (`node --test`). |
 | `prompts/` | Embedded prompt templates for the cheap LLM. |
 | `plugin/` | The herdr plugin shim: manifest, hook script, install/uninstall, launchd plist template. See [`docs/herdr-protocol.md`](herdr-protocol.md) §8. |
 
@@ -77,5 +77,5 @@ only a viewer of it.
 - **herdr**: `herdr.state`, `herdr.transition`, `herdr.debounce_cancelled`, `herdr.dedup`, `herdr.fleet`, `herdr.list_error`, `herdr.read`, `herdr.send`, `herdr.snapshot_error`
 - **llm**: `llm.call`, `llm.rate_limited`
 - **supervisor**: `note.created`, `pending.cancelled`, `pending.confirmed`, `pending.created`, `pending.expired`, `pending.replaced`, `pending.revived`, `supervisor.ask_error`, `supervisor.block_error`, `supervisor.blocked_no_question`, `supervisor.cancel_error`, `supervisor.confirm_error`, `supervisor.note_error`, `supervisor.propose_ambiguous`, `supervisor.propose_error`, `supervisor.push_error`, `supervisor.push_skipped`, `supervisor.query_error`, `supervisor.state_error`
-- **voice**: `voice.closed`, `voice.connect`, `voice.disconnected`, `voice.drop`, `voice.event_dropped`, `voice.goaway`, `voice.interrupted`, `voice.key_rotated`, `voice.muted`, `voice.push`, `voice.rate_limited`, `voice.resume`, `voice.text`, `voice.tool_call`, `voice.tool_cancelled`, `voice.tool_result`, `voice.usage`
-- **web**: `web.herdr_event`, `web.inject`, `web.push_error`, `web.utterance`, `web.utterance_unrouted`
+- **voice**: `voice.closed`, `voice.connect`, `voice.connect_error`, `voice.disconnected`, `voice.drop`, `voice.event_dropped`, `voice.goaway`, `voice.handle_dropped`, `voice.interrupted`, `voice.key_rotated`, `voice.muted`, `voice.push`, `voice.push_timeout`, `voice.rate_limited`, `voice.recycle`, `voice.resume`, `voice.stalled`, `voice.text`, `voice.tool_call`, `voice.tool_cancelled`, `voice.tool_result`, `voice.transcript.in`, `voice.transcript.out`, `voice.turn`, `voice.usage`
+- **web**: `web.client.backpressure`, `web.client.connect`, `web.client.disconnect`, `web.client.flush`, `web.client.mute`, `web.client.reject`, `web.client.silence`, `web.client.stats`, `web.herdr_event`, `web.inject`, `web.push_error`, `web.utterance`, `web.utterance_unrouted`

@@ -32,22 +32,44 @@ type VoiceInfo struct {
 	Status          string `json:"status"`
 	Reason          string `json:"reason,omitempty"`
 	Muted           bool   `json:"muted"`
+	Stalled         bool   `json:"stalled"`
 	ClientConnected bool   `json:"client_connected"`
 }
 
 func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 	snap := s.deps.Store.Snapshot()
 	agents := s.deps.Store.List()
-	status, reason, muted, client := s.hub.state()
+	hs := s.hub.state()
 	writeJSON(w, http.StatusOK, StateResponse{
 		Agents:        agents,
 		PendingAction: snap.PendingAction,
 		Session:       snap.Session,
-		Voice:         VoiceInfo{Mode: s.deps.VoiceMode, Status: status.String(), Reason: reason, Muted: muted, ClientConnected: client},
+		Voice:         VoiceInfo{Mode: s.deps.VoiceMode, Status: hs.status.String(), Reason: hs.reason, Muted: hs.muted, Stalled: hs.stalled, ClientConnected: hs.client},
 		Herdr:         s.deps.HerdrMode,
 		Version:       s.deps.Version,
 		Now:           s.deps.Now().UTC(),
 	})
+}
+
+// SystemPromptResponse is the body of GET /api/voice/system_prompt.
+type SystemPromptResponse struct {
+	Text    string   `json:"text"`
+	Aliases []string `json:"aliases"`
+	Mode    string   `json:"mode"`
+}
+
+// handleSystemPrompt answers the current voice system prompt (404 when
+// the daemon was built without one).
+func (s *Server) handleSystemPrompt(w http.ResponseWriter, r *http.Request) {
+	if s.deps.SystemPrompt == "" {
+		writeError(w, http.StatusNotFound, "no system prompt configured")
+		return
+	}
+	aliases := s.deps.Aliases
+	if aliases == nil {
+		aliases = []string{}
+	}
+	writeJSON(w, http.StatusOK, SystemPromptResponse{Text: s.deps.SystemPrompt, Aliases: aliases, Mode: s.deps.VoiceMode})
 }
 
 func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {

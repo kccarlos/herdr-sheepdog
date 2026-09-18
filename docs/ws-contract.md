@@ -36,9 +36,10 @@ scheduling each frame at "now".
 | Message                              | Meaning                                                                                                   |
 |--------------------------------------|-----------------------------------------------------------------------------------------------------------|
 | `{"type":"mute","on":true\|false}`   | Mute state changed. See *Mute semantics*.                                                                 |
+| `{"type":"silence","on":true\|false}` | The client's silence gate closed (`on:true`, no binary frames follow) or reopened (`on:false`). See *Silence gate*. |
 | `{"type":"cancel"}`                  | The "stop" button. The daemon stops current playback (it will send `flush`) and invokes the `cancel` tool path in the supervisor. Equivalent to the user saying "stop". |
 | `{"type":"text","text":"…"}`         | Simulate an utterance: the text is fed to the voice session as if the user had spoken it (`/debug` and the `/voice` text box use this). Without a voice session (`--voice=off`) the daemon echoes it as an `in` transcript and answers through its text router with one `out` transcript (a text routed to `cancel` yields `flush` then the `out`), or with an `error` when the text cannot be routed. |
-| `{"type":"ping"}`                    | Liveness probe; the daemon answers `pong`. Clients should send one every 15–30 s while idle.               |
+| `{"type":"ping","gated_frames":N?,"peak":N?}` | Liveness probe; the daemon answers `pong`. Clients should send one every 15–30 s while idle. The optional counters (frames withheld by the silence gate so far; last input peak in Int16 LSB) are copied into the next `web.client.stats` event. |
 
 Unknown `type` values are answered with an `error` message and otherwise
 ignored; the connection stays open.
@@ -48,7 +49,7 @@ ignored; the connection stays open.
 | Message                                                                  | Meaning                                                                                                         |
 |--------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------|
 | `{"type":"flush"}`                                                       | **Drop the playback buffer now.** Sent when the model was interrupted (barge-in, `cancel`, an interrupting push). Audio frames received before this message must not be played; frames received after it start a new utterance. |
-| `{"type":"status","voice":"connecting\|connected\|reconnecting\|closed","muted":bool,"reason":"…"?}` | Voice session state. Sent once on connect and on every change. `reason` is set for `closed` (e.g. `"replaced"`, `"shutdown"`, `"error"`). `muted` echoes the daemon's view of the mute state. |
+| `{"type":"status","voice":"connecting\|connected\|reconnecting\|closed","muted":bool,"reason":"…"?,"stalled":true?}` | Voice session state. Sent once on connect and on every change. `reason` is set for `closed` (e.g. `"replaced"`, `"shutdown"`, `"error"`). `muted` echoes the daemon's view of the mute state. `stalled` is present (true) while the model has not reacted to the user's last utterance for `gemini.stall_after_s`; the next status without it means the model answered or the connection was recycled. |
 | `{"type":"transcript","dir":"in\|out","text":"…","final":bool}`          | Incremental transcription. `in` = what the model heard from the user, `out` = what the model is saying. Fragments of one utterance arrive in order; `final:true` closes it. Output fragments may never carry `final:true`; treat the next `in` transcript or a `flush` as the boundary. |
 | `{"type":"error","message":"…"}`                                         | A non-fatal problem the user should see (e.g. rate limited, bad control message). The connection stays open.  |
 | `{"type":"pong"}`                                                        | Reply to `ping`.                                                                                                |
@@ -66,6 +67,36 @@ ignored; the connection stays open.
   still delivered. There is no barge-in from a muted mic (plan §6).
 - Reconnecting clients start **unmuted**; a client that wants to stay muted
   sends `mute` right after connecting.
+
+## Silence gate
+
+Near-zero PCM streamed continuously degrades the model session (WP7b,
+`docs/e2e-results.md`: turns answered only after 4–35 s, idle pushes
+swallowed), and a hardware-muted or very quiet microphone produces exactly
+that. The client therefore gates its capture:
+
+- A frame whose peak is below **8 LSB** (Int16) counts as silent. After
+  **300 ms** of consecutive silent frames the gate closes: the client sends
+  `{"type":"silence","on":true}` and then **no binary frames** until the
+  input rises again.
+- The first frame at or above the floor reopens the gate: the client sends
+  `{"type":"silence","on":false}`, then the last **100 ms** of withheld
+  frames (pre-roll, so the first syllable is not clipped), then the live
+  frames.
+- The daemon logs each transition as `web.client.silence {on}`; on
+  `on:true` it tells the model the audio stream paused (Gemini
+  `audioStreamEnd`, the same signal `mute` sends) so the server VAD closes
+  the user's turn instead of waiting for frames that will not come. The next
+  binary frame reopens the stream on the model side.
+- `web.client.stats` reports `silent` (gate closed right now),
+  `silence_transitions`, and the ping-carried `gated_frames` and `peak`.
+- The thresholds are the client's; `/voice` takes `?gate=off` and
+  `?gate_floor=LSB&gate_hold=ms&gate_preroll=ms`. A client that never sends
+  `silence` is treated as always open, and a reconnecting client starts
+  open (send `silence` right after connecting if the gate is closed).
+
+`mute` and `silence` are independent: a muted client sends neither frames
+nor `silence` transitions; the gate resumes its own bookkeeping on unmute.
 
 ## Ordering guarantees
 
