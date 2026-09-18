@@ -94,13 +94,19 @@ sheepdog serve --voice=off --herdr=mock --dev  # also serve testdata/audio/*.wav
 
 `/voice`: mic → AudioWorklet → 16 kHz PCM16 → WebSocket, gapless 24 kHz
 playback, mute/stop, auto-reconnect, a silence gate for quiet mics.
-`/debug`: three tabs — **Conversation** (the voice session as a chat:
-system prompt, your utterances, the dog's replies, tool calls that expand
-to their arguments, result and the supervisor events behind them,
-supervisor pushes, session dividers, per-turn response times), **Events**
-(the live event log with filters) and **State** (state table, pending
-action, fake-event injection so the tool path is testable without a mic or
-herdr) — see [`docs/ws-contract.md`](docs/ws-contract.md). Everything on
+`/debug`: four tabs — **Swimlane** (the default: a sequence diagram with
+four lanes, You · Voice model · Supervisor · herdr / LLM / CLI, one card
+per event and arrows for every hop with its latency, chains that light up
+across lanes when you click a tool call or an arrow, compressed quiet time,
+lane toggles and the Events-tab filters; a card click shows its raw JSON;
+under 700 px it becomes one column with a lane badge on each card),
+**Conversation** (the voice session as a chat: system prompt, your
+utterances, the dog's replies, tool calls that expand to their arguments,
+result and the supervisor events behind them, supervisor pushes, session
+dividers, per-turn response times), **Events** (the live event log with
+filters) and **State** (state table, pending action, fake-event injection
+so the tool path is testable without a mic or herdr) — see
+[`docs/ws-contract.md`](docs/ws-contract.md). Everything on
 `/debug` is read off the event log (D10); `GET /api/voice/system_prompt`
 returns the prompt the session runs with, and the header's chattiness
 dropdown switches the push policy at runtime (see below).

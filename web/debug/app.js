@@ -1,7 +1,10 @@
 // sheepdog /debug: a viewer of the event log plus the fake-injection
 // controls (plan §3.8, decision D10). Vanilla JS module, no build step.
-// Tabs: Conversation (conversation-view.js), Events (the raw list), State.
+// Tabs: Swimlane (swimlane-view.js), Conversation (conversation-view.js),
+// Events (the raw list), State.
 import { ConversationView } from './conversation-view.js';
+import { SwimlaneView } from './swimlane-view.js';
+import { LANES } from './swimlane.js';
 
 const $ = (id) => document.getElementById(id);
 const BACKFILL = 2000;
@@ -74,6 +77,7 @@ function renderEvent(ev) {
   row.dataset.source = src;
   row.dataset.pane = ev.pane_id || '';
   row.dataset.text = JSON.stringify(ev).toLowerCase();
+  row.dataset.ts = ev.ts || '';
   const cell = (cls, text) => {
     const s = document.createElement('span');
     s.className = cls;
@@ -87,6 +91,7 @@ function renderEvent(ev) {
   const cost = ev.payload && ev.payload.total_cost_usd != null ? `$${Number(ev.payload.total_cost_usd).toFixed(4)}  ` : '';
   cell('summary', (ev.dur_ms != null ? `${ev.dur_ms}ms  ` : '') + cost + summarize(ev.payload));
   row.addEventListener('click', () => {
+    selectTime(ev.ts);
     const next = row.nextElementSibling;
     if (next && next.classList.contains('ev-detail')) {
       next.remove();
@@ -108,6 +113,7 @@ function renderEvent(ev) {
 function onEvent(ev, encoded) {
   events.count++;
   conversation.add(ev, encoded);
+  swimlane.add(ev, encoded);
   scheduleConvRender();
   if (events.paused) {
     events.buffer.push(ev);
@@ -397,7 +403,14 @@ function scheduleConvRender() {
     convTimer = 0;
     conversation.render(false);
     $('conv-count').textContent = `${conversation.grouper.items.length} items`;
+    renderSwimlane(false);
   }, 50);
+}
+
+function renderSwimlane(force) {
+  if ($('tab-swimlane').classList.contains('hidden') && !force) return; // stays dirty until shown
+  const built = swimlane.render(force);
+  if (built) $('sw-count').textContent = `${built.shown} of ${built.total} rows · ${swimlane.events.length} events`;
 }
 
 // backfillConversation feeds the log tail into the grouper before the SSE
@@ -407,7 +420,11 @@ async function backfillConversation() {
   try {
     const r = await fetch(`/api/events?n=${BACKFILL}`, { cache: 'no-store' });
     const list = await r.json();
-    for (const ev of list) conversation.add(ev, JSON.stringify(ev));
+    for (const ev of list) {
+      const enc = JSON.stringify(ev);
+      conversation.add(ev, enc);
+      swimlane.add(ev, enc);
+    }
   } catch (err) {
     console.error('backfill', err);
   }
@@ -436,30 +453,117 @@ function setupConversation() {
   $('conv-text').addEventListener('keydown', (e) => { if (e.key === 'Enter') sendChat(); });
 }
 
+// -------------------------------------------------------------- swimlane
+
+const swimlane = new SwimlaneView($('swimlane'), $('sw-header'));
+
+function setupSwimlane() {
+  const lanes = $('sw-lanes');
+  for (const lane of LANES) {
+    const label = document.createElement('label');
+    label.className = `lane-${lane.id}`;
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = true;
+    cb.addEventListener('change', () => swimlane.toggleLane(lane.id, cb.checked));
+    label.appendChild(cb);
+    label.appendChild(document.createTextNode(lane.label));
+    lanes.appendChild(label);
+  }
+  // Source filter as a hidden set: a source the page does not know (a
+  // future brain.* family) stays visible until it gets its own box.
+  const holder = $('sw-source-filters');
+  const hidden = new Set();
+  for (const src of SOURCES) {
+    const label = document.createElement('label');
+    label.className = `src ${src}`;
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = true;
+    cb.addEventListener('change', () => {
+      if (cb.checked) hidden.delete(src); else hidden.add(src);
+      swimlane.setOption('hiddenSources', new Set(hidden));
+    });
+    label.appendChild(cb);
+    label.appendChild(document.createTextNode(src));
+    holder.appendChild(label);
+  }
+  $('sw-pane').addEventListener('input', (e) => swimlane.setOption('pane', e.target.value.trim()));
+  $('sw-search').addEventListener('input', (e) => swimlane.setOption('search', e.target.value.trim().toLowerCase()));
+  $('sw-hide-stats').addEventListener('change', (e) => swimlane.setOption('hideStats', e.target.checked));
+  $('sw-hide-silent').addEventListener('change', (e) => swimlane.setOption('hideSilent', e.target.checked));
+  $('sw-collapse').addEventListener('click', () => { swimlane.expanded.clear(); swimlane.render(true); });
+  const pill = $('sw-new');
+  swimlane.onNewEvents = (show) => pill.classList.toggle('hidden', !show);
+  pill.addEventListener('click', () => swimlane.scrollToBottom());
+  swimlane.onSelect = selectTime;
+  swimlane.onHighlight = (chain) => {
+    const info = $('sw-chain');
+    info.replaceChildren();
+    if (!chain) return;
+    const b = document.createElement('b');
+    b.textContent = chain;
+    info.append('chain ', b, ' — click again to clear');
+  };
+  const sendChat = () => {
+    const text = $('sw-text').value.trim();
+    if (!text) return;
+    $('sw-text').value = '';
+    showResult('sw-result', post('/api/inject/utterance', { text }));
+  };
+  $('sw-send').addEventListener('click', sendChat);
+  $('sw-text').addEventListener('keydown', (e) => { if (e.key === 'Enter') sendChat(); });
+}
+
 // ------------------------------------------------------------------ tabs
 
 function showTab(name) {
   for (const b of document.querySelectorAll('#tabs button')) b.classList.toggle('active', b.dataset.tab === name);
   for (const sec of document.querySelectorAll('main > .tab')) sec.classList.toggle('hidden', sec.id !== `tab-${name}`);
   if (name === 'conversation') conversation.render(true);
+  if (name === 'swimlane') renderSwimlane(true);
   if (name === 'events' && $('events-follow').checked) $('events').scrollTop = $('events').scrollHeight;
   try { localStorage.setItem('sheepdog-debug-tab', name); } catch (_) { /* private mode */ }
+  const ts = selectedTime();
+  if (ts) setTimeout(() => scrollTabTo(name, ts), 0);
 }
 
-// pickTab: ?tab= wins, then the last choice, else Conversation when a voice
-// session exists and Events otherwise.
-async function pickTab() {
+// ---- shared time selection: a clicked card/row stores its timestamp in
+// the URL hash (#t=…) and the other tabs scroll to it when shown.
+function selectedTime() {
+  const m = /[#&]t=([^&]+)/.exec(location.hash);
+  return m ? decodeURIComponent(m[1]) : '';
+}
+
+function selectTime(ts) {
+  if (!ts) return;
+  history.replaceState(null, '', `#t=${encodeURIComponent(ts)}`);
+}
+
+function scrollTabTo(name, ts) {
+  const t = Date.parse(ts);
+  if (Number.isNaN(t)) return;
+  if (name === 'swimlane') { swimlane.scrollToTs(ts); return; }
+  const list = name === 'events' ? $('events') : (name === 'conversation' ? $('conversation') : null);
+  if (!list) return;
+  for (const row of list.children) {
+    const rts = Date.parse(row.dataset.ts || '');
+    if (!Number.isNaN(rts) && rts >= t && !row.classList.contains('hidden-by-filter')) {
+      row.scrollIntoView({ block: 'center' });
+      row.classList.add('sw-flash');
+      setTimeout(() => row.classList.remove('sw-flash'), 1600);
+      return;
+    }
+  }
+}
+
+// pickTab: ?tab= wins, then the last choice, else the Swimlane.
+function pickTab() {
   const param = new URLSearchParams(location.search).get('tab');
   if (param) return showTab(param);
   let saved = null;
   try { saved = localStorage.getItem('sheepdog-debug-tab'); } catch (_) { /* fine */ }
-  if (saved) return showTab(saved);
-  try {
-    const st = await (await fetch('/api/state', { cache: 'no-store' })).json();
-    return showTab(st.voice && st.voice.mode !== 'off' ? 'conversation' : 'events');
-  } catch (_) {
-    return showTab('events');
-  }
+  return showTab(saved || 'swimlane');
 }
 
 function setupTabs() {
@@ -473,6 +577,7 @@ setupEventControls();
 setupSettings();
 setupInject();
 setupConversation();
+setupSwimlane();
 pickTab();
 backfillConversation().then(connectEvents);
 refreshState();
@@ -480,4 +585,8 @@ setInterval(refreshState, STATE_POLL_MS);
 
 // Console handle: feed extra log lines into the conversation view (e.g.
 // paste a voice-test run) or inspect its items.
-window.sheepdogDebug = { conversation, addEvents: (list) => { for (const ev of list) conversation.add(ev); scheduleConvRender(); } };
+window.sheepdogDebug = {
+  conversation, swimlane,
+  addEvents: (list) => { for (const ev of list) { conversation.add(ev); swimlane.add(ev); } scheduleConvRender(); },
+  clearEvents: () => { swimlane.clear(); renderSwimlane(true); },
+};

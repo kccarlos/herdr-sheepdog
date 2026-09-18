@@ -31,12 +31,37 @@
 </header>
 
 <nav class="tabs" id="tabs">
+  <button data-tab="swimlane">Swimlane</button>
   <button data-tab="conversation">Conversation</button>
   <button data-tab="events">Events</button>
   <button data-tab="state">State</button>
 </nav>
 
 <main>
+  <section id="tab-swimlane" class="tab hidden">
+    <div class="toolbar">
+      <span class="sw-lane-toggles" id="sw-lanes" title="hide a lane: its column collapses and arrows to it become stubs"></span>
+      <span id="sw-source-filters"></span>
+      <label>pane <input id="sw-pane" size="8" placeholder="highlight" title="highlight the cards of this pane"></label>
+      <label>search <input id="sw-search" size="16" placeholder="substring"></label>
+      <label><input type="checkbox" id="sw-hide-stats" checked> hide stats</label>
+      <label><input type="checkbox" id="sw-hide-silent" checked> hide silent pushes</label>
+      <button id="sw-collapse">Collapse all</button>
+      <span class="sw-chain-info" id="sw-chain"></span>
+      <span class="muted" id="sw-count"></span>
+    </div>
+    <div class="sw-wrap">
+      <div id="sw-header" class="sw-header"></div>
+      <div id="swimlane" class="swimlane"></div>
+      <button id="sw-new" class="new-pill hidden">new events ↓</button>
+    </div>
+    <div class="row chat-input">
+      <input id="sw-text" placeholder="type an utterance (Enter to send)" autocomplete="off">
+      <button id="sw-send" class="primary">Send</button>
+      <span id="sw-result" class="muted small"></span>
+    </div>
+  </section>
+
   <section id="tab-conversation" class="tab hidden">
     <div class="toolbar">
       <button id="conv-expand">Expand all</button>
