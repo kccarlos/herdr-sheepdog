@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kccarlos/herdr-sheepdog/internal/brain"
 	"github.com/kccarlos/herdr-sheepdog/internal/cli"
 	"github.com/kccarlos/herdr-sheepdog/internal/config"
 	"github.com/kccarlos/herdr-sheepdog/internal/eventlog"
@@ -34,6 +35,8 @@ const (
 	HerdrMock   = "mock"
 	CLIOn       = "on"
 	CLIOff      = "off"
+	BrainOn     = "on"
+	BrainOff    = "off"
 )
 
 // Options select the daemon's mode; zero values take the defaults noted.
@@ -45,6 +48,10 @@ type Options struct {
 	// CLI is CLIOn (default) or CLIOff (`--cli=off` disables the deep-ask
 	// path; ask() then answers from the screen alone).
 	CLI string
+	// Brain is BrainOn (default) or BrainOff (`--brain=off` keeps ask and
+	// propose on the template path). On needs config brain.enabled and a
+	// Gemini key; without a key the brain is silently off.
+	Brain string
 	// Port overrides config web.port when > 0; 0 with an empty config
 	// port picks a free port (tests).
 	Port int
@@ -74,6 +81,9 @@ func (o Options) withDefaults() Options {
 	if o.CLI == "" {
 		o.CLI = CLIOn
 	}
+	if o.Brain == "" {
+		o.Brain = BrainOn
+	}
 	if o.Stderr == nil {
 		o.Stderr = os.Stderr
 	}
@@ -101,6 +111,7 @@ type App struct {
 	hc    *herdr.Client // nil in mock mode
 	wref  *watcherRef   // nil in mock mode
 	sup   *supervisor.Supervisor
+	brain *brain.Brain  // nil when off
 	voice voice.Session // nil when off
 	web   *web.Server
 	port  int
@@ -120,6 +131,9 @@ func Build(cfg config.Config, opts Options) (*App, error) {
 	}
 	if opts.CLI != CLIOn && opts.CLI != CLIOff {
 		return nil, fmt.Errorf("app: --cli must be %s or %s", CLIOn, CLIOff)
+	}
+	if opts.Brain != BrainOn && opts.Brain != BrainOff {
+		return nil, fmt.Errorf("app: --brain must be %s or %s", BrainOn, BrainOff)
 	}
 	if opts.Voice == VoiceGemini && len(cfg.Gemini.APIKeys) == 0 {
 		return nil, errors.New("app: --voice=gemini needs GEMINI_API_KEY (or gemini.api_keys); use --voice=off to run without it")
@@ -169,7 +183,7 @@ func (a *App) wire() error {
 		}
 		keys = []string{"local"} // local endpoints (Ollama) ignore the key
 	}
-	llmClient, err := llm.New(llm.Config{BaseURL: cfg.LLM.BaseURL, Model: cfg.LLM.Model, APIKeys: keys, Log: a.log})
+	llmClient, err := llm.New(llm.Config{BaseURL: cfg.LLM.BaseURL, Model: cfg.LLM.Model, APIKeys: keys, Timeout: time.Duration(cfg.LLM.TimeoutS) * time.Second, Log: a.log})
 	if err != nil {
 		return err
 	}
@@ -186,13 +200,24 @@ func (a *App) wire() error {
 		querier = lazyQ
 		a.queryLazy = lazyQ
 	}
+	if opts.Brain == BrainOn && cfg.Brain.Enabled && len(cfg.Gemini.APIKeys) > 0 {
+		b, err := buildBrain(cfg, a.log)
+		if err != nil {
+			return err
+		}
+		a.brain = b
+	}
 	sup, err := supervisor.New(store, a.herdr, llmClient, querier, pusher, a.log, supervisor.Config{
 		PendingTTL:   time.Duration(cfg.PendingTTLS) * time.Second,
 		DataDir:      cfg.DataDir,
 		Chattiness:   cfg.Supervisor.Chattiness,
 		RecentWindow: time.Duration(cfg.Supervisor.RecentMinutes) * time.Minute,
+		Brain:        a.brain,
 	})
 	if err != nil {
+		if a.brain != nil {
+			_ = a.brain.Close()
+		}
 		return err
 	}
 	a.sup = sup
@@ -260,6 +285,37 @@ func (a *App) wire() error {
 	a.web = srv
 	return nil
 }
+
+// buildBrain builds the supervisor brain over the Gemini key pool with
+// the [brain] config (BrainConfig) and a transcript under the data dir.
+func buildBrain(cfg config.Config, log logging.Logger) (*brain.Brain, error) {
+	model, err := brain.NewGenaiModel(cfg.Gemini.APIKeys, log)
+	if err != nil {
+		return nil, fmt.Errorf("app: brain: %w", err)
+	}
+	b, err := brain.New(BrainConfig(cfg), model, log)
+	if err != nil {
+		return nil, fmt.Errorf("app: brain: %w", err)
+	}
+	return b, nil
+}
+
+// BrainConfig maps the [brain] config onto brain.Config (shared with
+// `sheepdog brain-test`).
+func BrainConfig(cfg config.Config) brain.Config {
+	return brain.Config{
+		Model:           cfg.Brain.Model,
+		MaxSteps:        cfg.Brain.MaxSteps,
+		AskTimeout:      time.Duration(cfg.Brain.AskTimeoutS) * time.Second,
+		ProposeTimeout:  time.Duration(cfg.Brain.ProposeTimeoutS) * time.Second,
+		WindowTokens:    cfg.Brain.WindowTokens,
+		PruneAfterTurns: cfg.Brain.PruneAfterTurns,
+		DataDir:         cfg.DataDir,
+	}
+}
+
+// Brain returns the attached brain, or nil when it is off.
+func (a *App) Brain() *brain.Brain { return a.brain }
 
 // buildQuerier detects codex/claude on PATH (logging cli.detected) and, if
 // either is found, builds the Runner that backs ask()'s deep path. Called
@@ -336,9 +392,13 @@ func (a *App) Run(ctx context.Context) (err error) {
 			return err
 		}
 	}
+	brainMode := BrainOff
+	if a.brain != nil {
+		brainMode = BrainOn
+	}
 	a.log.Log("daemon", "daemon.start", "", map[string]any{
-		"version": a.opts.Version, "voice": a.opts.Voice, "herdr": a.opts.Herdr, "cli": a.opts.CLI, "url": a.URL(),
-		"data_dir": a.cfg.DataDir, "llm_model": a.cfg.LLM.Model, "llm_base_url": a.cfg.LLM.BaseURL,
+		"version": a.opts.Version, "voice": a.opts.Voice, "herdr": a.opts.Herdr, "cli": a.opts.CLI, "brain": brainMode, "url": a.URL(),
+		"data_dir": a.cfg.DataDir, "llm_model": a.cfg.LLM.Model, "llm_base_url": a.cfg.LLM.BaseURL, "brain_model": a.cfg.Brain.Model,
 	})
 	if a.queryLazy != nil {
 		if runner, err := a.buildQuerier(); err != nil {
@@ -353,6 +413,9 @@ func (a *App) Run(ctx context.Context) (err error) {
 		// Flush any debounced hardware-durable fsync (state.full_fsync)
 		// before the event log closes; harmless no-op otherwise.
 		_ = a.store.Close()
+		if a.brain != nil {
+			_ = a.brain.Close()
+		}
 		if cerr := a.elog.Close(); cerr != nil && err == nil {
 			err = cerr
 		}

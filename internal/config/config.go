@@ -44,6 +44,34 @@ type Config struct {
 	Web        Web        `toml:"web"`
 	CLI        CLI        `toml:"cli"`
 	Supervisor Supervisor `toml:"supervisor"`
+	Brain      Brain      `toml:"brain"`
+}
+
+// Brain configures the supervisor brain (plan D7-revised, docs/roles.md):
+// the stateful agent that answers ask/propose with tools over a
+// function-calling Gemini model, keeping one transcript per daemon run
+// under <data_dir>/brain/. When it errors or runs out of budget the
+// supervisor falls back to the template path.
+type Brain struct {
+	// Enabled turns the brain on (default true). `serve --brain=off`
+	// overrides it; it is also silently off when no Gemini key exists.
+	Enabled bool `toml:"enabled"`
+	// Model is the function-calling model (default gemini-3.5-flash).
+	Model string `toml:"model"`
+	// MaxSteps bounds the model calls in one turn (default 6); beyond it
+	// the turn falls back to the template path.
+	MaxSteps int `toml:"max_steps"`
+	// AskTimeoutS / ProposeTimeoutS bound one ask / propose turn including
+	// its tool calls (defaults 8 / 12).
+	AskTimeoutS     int `toml:"ask_timeout_s"`
+	ProposeTimeoutS int `toml:"propose_timeout_s"`
+	// WindowTokens is the context window target (estimated tokens); above
+	// it the oldest half is compacted into a summary (default 24000).
+	WindowTokens int `toml:"window_tokens"`
+	// PruneAfterTurns is how many turns a tool result (screen, CLI output)
+	// stays verbatim in the window before it is replaced by a one-line
+	// stub; the disk transcript keeps it (default 3).
+	PruneAfterTurns int `toml:"prune_after_turns"`
 }
 
 // Supervisor tunes how proactive the voice side is (README "How chatty
@@ -138,6 +166,9 @@ type LLM struct {
 	// APIKey authenticates requests. When empty and BaseURL is the Gemini
 	// endpoint, the Gemini key pool is used instead. Never logged.
 	APIKey string `toml:"api_key"`
+	// TimeoutS bounds one attempt (default 15; raise it for a slow local
+	// model such as Ollama gemma4).
+	TimeoutS int `toml:"timeout_s"`
 }
 
 // GeminiOpenAIBaseURL is Gemini's OpenAI-compatible endpoint, the default
@@ -215,11 +246,19 @@ func Default() Config {
 		State:             State{Path: filepath.Join(dataDir, "state.json")},
 		PendingTTLS:       120,
 		Gemini:            Gemini{Model: "gemini-3.8-live", Voice: "Puck", StallAfterS: 10},
-		LLM:               LLM{BaseURL: GeminiOpenAIBaseURL, Model: "gemini-3.5-flash-lite"},
+		LLM:               LLM{BaseURL: GeminiOpenAIBaseURL, Model: "gemini-3.5-flash-lite", TimeoutS: 15},
 		Web:               Web{Port: DefaultWebPort},
 		CLI:               defaultCLI(),
 		Supervisor:        Supervisor{Chattiness: DefaultChattiness, RecentMinutes: 30},
+		Brain:             defaultBrain(),
 	}
+}
+
+// DefaultBrainModel is the built-in brain.model.
+const DefaultBrainModel = "gemini-3.5-flash"
+
+func defaultBrain() Brain {
+	return Brain{Enabled: true, Model: DefaultBrainModel, MaxSteps: 6, AskTimeoutS: 8, ProposeTimeoutS: 12, WindowTokens: 24000, PruneAfterTurns: 3}
 }
 
 // defaultCLI mirrors the argv templates verified in
@@ -303,7 +342,29 @@ func load(path string, lookup func(string) (string, bool)) (Config, error) {
 	if cfg.Supervisor.RecentMinutes <= 0 {
 		return Config{}, fmt.Errorf("config: supervisor.recent_minutes=%d: want a positive integer", cfg.Supervisor.RecentMinutes)
 	}
+	if cfg.LLM.TimeoutS <= 0 {
+		return Config{}, fmt.Errorf("config: llm.timeout_s=%d: want a positive integer", cfg.LLM.TimeoutS)
+	}
+	if err := validateBrain(cfg.Brain); err != nil {
+		return Config{}, err
+	}
 	return cfg, nil
+}
+
+// validateBrain checks the [brain] integers.
+func validateBrain(b Brain) error {
+	for _, f := range []struct {
+		name string
+		v    int
+	}{{"max_steps", b.MaxSteps}, {"ask_timeout_s", b.AskTimeoutS}, {"propose_timeout_s", b.ProposeTimeoutS}, {"window_tokens", b.WindowTokens}, {"prune_after_turns", b.PruneAfterTurns}} {
+		if f.v <= 0 {
+			return fmt.Errorf("config: brain.%s=%d: want a positive integer", f.name, f.v)
+		}
+	}
+	if b.Model == "" {
+		return errors.New("config: brain.model must not be empty")
+	}
+	return nil
 }
 
 // applyEnv overrides cfg from SHEEPDOG_* variables. Recognised names:
@@ -312,12 +373,15 @@ func load(path string, lookup func(string) (string, bool)) (Config, error) {
 //	SHEEPDOG_HERDR_SOCKET, SHEEPDOG_STATE_PATH, SHEEPDOG_STATE_FULL_FSYNC,
 //	SHEEPDOG_GEMINI_MODEL,
 //	SHEEPDOG_GEMINI_VOICE, SHEEPDOG_GEMINI_STALL_AFTER_S,
-//	SHEEPDOG_LLM_BASE_URL, SHEEPDOG_LLM_MODEL,
+//	SHEEPDOG_LLM_BASE_URL, SHEEPDOG_LLM_MODEL, SHEEPDOG_LLM_TIMEOUT_S,
 //	SHEEPDOG_LLM_API_KEY, SHEEPDOG_PENDING_TTL_S, SHEEPDOG_WEB_PORT,
 //	SHEEPDOG_CLI_PREFER, SHEEPDOG_CLI_CODEX_BIN, SHEEPDOG_CLI_CLAUDE_BIN,
 //	SHEEPDOG_CLI_CLAUDE_MODEL, SHEEPDOG_CLI_CODEX_REASONING,
 //	SHEEPDOG_CLI_TIMEOUT_S, SHEEPDOG_CLI_MAX_OUTPUT_KB,
-//	SHEEPDOG_SUPERVISOR_CHATTINESS, SHEEPDOG_SUPERVISOR_RECENT_MINUTES.
+//	SHEEPDOG_SUPERVISOR_CHATTINESS, SHEEPDOG_SUPERVISOR_RECENT_MINUTES,
+//	SHEEPDOG_BRAIN_ENABLED, SHEEPDOG_BRAIN_MODEL, SHEEPDOG_BRAIN_MAX_STEPS,
+//	SHEEPDOG_BRAIN_ASK_TIMEOUT_S, SHEEPDOG_BRAIN_PROPOSE_TIMEOUT_S,
+//	SHEEPDOG_BRAIN_WINDOW_TOKENS, SHEEPDOG_BRAIN_PRUNE_AFTER_TURNS.
 //	The [cli] argv templates (codex_cmd, claude_cmd) are TOML-only, like
 //	[aliases].
 //
@@ -350,6 +414,13 @@ func applyEnv(cfg *Config, lookup func(string) (string, bool)) error {
 	}
 	if v, ok := lookup("SHEEPDOG_LLM_API_KEY"); ok {
 		cfg.LLM.APIKey = v
+	}
+	if v, ok := lookup("SHEEPDOG_LLM_TIMEOUT_S"); ok {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return fmt.Errorf("config: SHEEPDOG_LLM_TIMEOUT_S=%q: want a positive integer", v)
+		}
+		cfg.LLM.TimeoutS = n
 	}
 	if v, ok := lookup("SHEEPDOG_DATA_DIR"); ok {
 		cfg.DataDir = v
@@ -408,6 +479,41 @@ func applyEnv(cfg *Config, lookup func(string) (string, bool)) error {
 		}
 		cfg.Supervisor.RecentMinutes = n
 	}
+	return applyBrainEnv(cfg, lookup)
+}
+
+// applyBrainEnv overrides the [brain] keys from SHEEPDOG_BRAIN_*.
+func applyBrainEnv(cfg *Config, lookup func(string) (string, bool)) error {
+	if v, ok := lookup("SHEEPDOG_BRAIN_ENABLED"); ok {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return fmt.Errorf("config: SHEEPDOG_BRAIN_ENABLED=%q: want true or false", v)
+		}
+		cfg.Brain.Enabled = b
+	}
+	if v, ok := lookup("SHEEPDOG_BRAIN_MODEL"); ok {
+		cfg.Brain.Model = v
+	}
+	for _, f := range []struct {
+		env string
+		dst *int
+	}{
+		{"SHEEPDOG_BRAIN_MAX_STEPS", &cfg.Brain.MaxSteps},
+		{"SHEEPDOG_BRAIN_ASK_TIMEOUT_S", &cfg.Brain.AskTimeoutS},
+		{"SHEEPDOG_BRAIN_PROPOSE_TIMEOUT_S", &cfg.Brain.ProposeTimeoutS},
+		{"SHEEPDOG_BRAIN_WINDOW_TOKENS", &cfg.Brain.WindowTokens},
+		{"SHEEPDOG_BRAIN_PRUNE_AFTER_TURNS", &cfg.Brain.PruneAfterTurns},
+	} {
+		v, ok := lookup(f.env)
+		if !ok {
+			continue
+		}
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return fmt.Errorf("config: %s=%q: want a positive integer", f.env, v)
+		}
+		*f.dst = n
+	}
 	return nil
 }
 
@@ -464,6 +570,6 @@ func geminiKeysFromEnv(lookup func(string) (string, bool)) []string {
 // String renders the configuration for logs. Secrets are rendered as
 // counts only; keep it that way when secret-bearing fields are added.
 func (c Config) String() string {
-	return fmt.Sprintf("data_dir=%s herdr.socket=%s state.path=%s state.full_fsync=%t debounce_ms=%d snapshot_interval_s=%d pending_ttl_s=%d aliases=%d gemini.model=%s gemini.voice=%s gemini.stall_after_s=%d gemini.api_keys=%d llm.base_url=%s llm.model=%s llm.api_keys=%d web.port=%d cli.prefer=%s cli.timeout_s=%d cli.max_output_kb=%d supervisor.chattiness=%s supervisor.recent_minutes=%d",
-		c.DataDir, c.Herdr.Socket, c.State.Path, c.State.FullFsync, c.DebounceMS, c.SnapshotIntervalS, c.PendingTTLS, len(c.Aliases), c.Gemini.Model, c.Gemini.Voice, c.Gemini.StallAfterS, len(c.Gemini.APIKeys), c.LLM.BaseURL, c.LLM.Model, len(c.LLMKeys()), c.Web.Port, c.CLI.Prefer, c.CLI.TimeoutS, c.CLI.MaxOutputKB, c.Supervisor.Chattiness, c.Supervisor.RecentMinutes)
+	return fmt.Sprintf("data_dir=%s herdr.socket=%s state.path=%s state.full_fsync=%t debounce_ms=%d snapshot_interval_s=%d pending_ttl_s=%d aliases=%d gemini.model=%s gemini.voice=%s gemini.stall_after_s=%d gemini.api_keys=%d llm.base_url=%s llm.model=%s llm.timeout_s=%d llm.api_keys=%d web.port=%d cli.prefer=%s cli.timeout_s=%d cli.max_output_kb=%d supervisor.chattiness=%s supervisor.recent_minutes=%d brain.enabled=%t brain.model=%s brain.max_steps=%d brain.ask_timeout_s=%d brain.propose_timeout_s=%d brain.window_tokens=%d brain.prune_after_turns=%d",
+		c.DataDir, c.Herdr.Socket, c.State.Path, c.State.FullFsync, c.DebounceMS, c.SnapshotIntervalS, c.PendingTTLS, len(c.Aliases), c.Gemini.Model, c.Gemini.Voice, c.Gemini.StallAfterS, len(c.Gemini.APIKeys), c.LLM.BaseURL, c.LLM.Model, c.LLM.TimeoutS, len(c.LLMKeys()), c.Web.Port, c.CLI.Prefer, c.CLI.TimeoutS, c.CLI.MaxOutputKB, c.Supervisor.Chattiness, c.Supervisor.RecentMinutes, c.Brain.Enabled, c.Brain.Model, c.Brain.MaxSteps, c.Brain.AskTimeoutS, c.Brain.ProposeTimeoutS, c.Brain.WindowTokens, c.Brain.PruneAfterTurns)
 }

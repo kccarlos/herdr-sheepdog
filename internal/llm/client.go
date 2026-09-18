@@ -380,11 +380,13 @@ func sleepCtx(ctx context.Context, d time.Duration) error {
 	}
 }
 
-// truncateRunes cuts s to at most n runes, appending "…" when it did.
-func truncateRunes(s string, n int) string {
+// TruncateRunes cuts s to at most n runes, appending "…" when it did.
+func TruncateRunes(s string, n int) string {
 	r := []rune(s)
 	if len(r) <= n {
 		return s
 	}
 	return string(r[:n]) + "…"
 }
+
+func truncateRunes(s string, n int) string { return TruncateRunes(s, n) }

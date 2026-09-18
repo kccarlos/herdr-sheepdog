@@ -1,0 +1,248 @@
+package supervisor
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+
+	"github.com/kccarlos/herdr-sheepdog/internal/brain"
+	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
+	"github.com/kccarlos/herdr-sheepdog/internal/llm"
+	"github.com/kccarlos/herdr-sheepdog/internal/state"
+	"github.com/kccarlos/herdr-sheepdog/internal/voice"
+)
+
+// brainHost implements brain.Host over the Supervisor: the roster and the
+// ledger come from the state table, reads go through herdr and the CLI
+// query tool, and the actions reuse the propose / confirm / cancel paths
+// so the pending-action bookkeeping (and cancel) keep working.
+type brainHost struct{ s *Supervisor }
+
+var _ brain.Host = brainHost{}
+
+// Agents implements brain.Host.
+func (h brainHost) Agents() []brain.AgentInfo {
+	pending, has := h.s.store.Pending()
+	rows := h.s.store.List()
+	out := make([]brain.AgentInfo, 0, len(rows))
+	for _, a := range rows {
+		out = append(out, h.info(a, pending, has))
+	}
+	return out
+}
+
+// info converts one row.
+func (h brainHost) info(a state.Agent, pending state.PendingAction, has bool) brain.AgentInfo {
+	info := brain.AgentInfo{PaneID: a.PaneID, Alias: a.Alias, Kind: a.Kind, State: string(a.State), StateSince: a.StateSince, Task: a.CurrentTask, LastTask: a.LastTask}
+	if a.LastResult != nil && a.LastResult.Spoken != "" {
+		info.LastResult = a.LastResult.Spoken
+		if a.LastResult.Outcome != "" {
+			info.LastResult += " (" + a.LastResult.Outcome + ")"
+		}
+	}
+	if a.LastBlock != nil && a.LastBlock.Question != "" {
+		info.LastBlock = a.LastBlock.Question
+		if a.LastBlock.Answered {
+			info.LastBlock += " (answered)"
+		}
+	}
+	if a.LastInteraction != nil {
+		info.LastInteraction = *a.LastInteraction
+	}
+	if has && pending.Kind == state.PendingAnswerPrompt && pending.PaneID == a.PaneID {
+		p := &brain.PendingPrompt{ID: pending.ID, Question: pending.Question, YesKeys: pending.YesKeys, NoKeys: pending.NoKeys}
+		for _, o := range pending.Options {
+			p.Options = append(p.Options, brain.Option{Label: o.Label, Keys: o.Keys})
+		}
+		info.Pending = p
+	}
+	return info
+}
+
+// Resolve implements brain.Host.
+func (h brainHost) Resolve(name string) (brain.AgentInfo, bool) {
+	row, ok := findAlias(h.s.store.List(), name)
+	if !ok {
+		return brain.AgentInfo{}, false
+	}
+	pending, has := h.s.store.Pending()
+	return h.info(row, pending, has), true
+}
+
+// Notes implements brain.Host.
+func (h brainHost) Notes() []string {
+	notes := h.s.store.Snapshot().Session.Notes
+	out := make([]string, 0, len(notes))
+	for _, n := range notes {
+		out = append(out, n.Text)
+	}
+	return out
+}
+
+// ReadScreen implements brain.Host. Like ask's screen read, it counts as
+// dealing with the agent and makes it the current subject (the fallback
+// path's "it").
+func (h brainHost) ReadScreen(ctx context.Context, paneID string, lines int) (string, error) {
+	if lines <= 0 {
+		lines = h.s.cfg.ReadLines
+	}
+	read, err := h.s.herdr.Read(ctx, paneID, herdr.SourceRecentUnwrapped, lines)
+	if err != nil {
+		return "", err
+	}
+	h.s.touch(paneID)
+	h.s.setSubject(paneID)
+	return read.Text, nil
+}
+
+// RunCLI implements brain.Host.
+func (h brainHost) RunCLI(ctx context.Context, paneID, question string) (string, error) {
+	if h.s.querier == nil {
+		return "", brain.ErrNoCLI
+	}
+	row, ok := h.s.store.Get(paneID)
+	if !ok {
+		return "", errors.New("that agent is gone")
+	}
+	h.s.touch(paneID)
+	h.s.setSubject(paneID)
+	out, err := h.s.querier.Query(ctx, h.s.workspaceDir(ctx, row), question)
+	if err != nil {
+		h.s.log.Log(logSource, "supervisor.query_error", paneID, map[string]any{"error": err.Error()})
+		return "", err
+	}
+	return out, nil
+}
+
+// Prompt implements brain.Host: the propose send path (D4), so cancel can
+// still interrupt it.
+func (h brainHost) Prompt(ctx context.Context, paneID, text string) (string, error) {
+	row, ok := h.s.store.Get(paneID)
+	if !ok {
+		return "", errors.New("that agent is gone")
+	}
+	echo := "Telling " + aliasOr(row.Alias) + " to " + lowerFirst(strings.TrimRight(strings.TrimSpace(text), ".")) + "."
+	res, err := h.s.sendInstruction(ctx, row, text, echo)
+	if err != nil {
+		return "", fmt.Errorf("%s (%w)", strings.TrimRight(res.Spoken, "."), err)
+	}
+	return res.Spoken, nil
+}
+
+// AnswerPrompt implements brain.Host: the rail's atomic re-check under
+// the supervisor's lock, then the confirm send path.
+func (h brainHost) AnswerPrompt(ctx context.Context, paneID string, keys []string) (string, error) {
+	s := h.s
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	p, has := s.store.Pending()
+	if !has || p.Kind != state.PendingAnswerPrompt || p.PaneID != paneID {
+		return "", fmt.Errorf("%w: %s has no pending approval prompt now", brain.ErrNotPermitted, s.aliasOf(paneID))
+	}
+	allowed := allowedKeys(p)
+	for _, k := range keys {
+		if !allowed[k] {
+			return "", fmt.Errorf("%w: key %q is not in the prompt's option set", brain.ErrNotPermitted, k)
+		}
+	}
+	if len(keys) == 0 {
+		return "", fmt.Errorf("%w: no keys", brain.ErrNotPermitted)
+	}
+	res := s.answerWithKeys(ctx, p, keys, keysLabel(p, keys), "Told "+s.aliasOf(paneID)+" %s.")
+	if res.Clarify {
+		return "", errors.New(res.Spoken)
+	}
+	return res.Spoken, nil
+}
+
+// allowedKeys is the option set of a pending prompt.
+func allowedKeys(p state.PendingAction) map[string]bool {
+	out := map[string]bool{}
+	for _, o := range p.Options {
+		for _, k := range o.Keys {
+			out[k] = true
+		}
+	}
+	for _, k := range append(append([]string(nil), p.YesKeys...), p.NoKeys...) {
+		out[k] = true
+	}
+	return out
+}
+
+// keysLabel names the answer the keys select ("yes", "no", the option's
+// label, or the keys themselves).
+func keysLabel(p state.PendingAction, keys []string) string {
+	joined := strings.Join(keys, " ")
+	switch {
+	case len(p.YesKeys) > 0 && strings.Join(p.YesKeys, " ") == joined:
+		return "yes"
+	case len(p.NoKeys) > 0 && strings.Join(p.NoKeys, " ") == joined:
+		return "no"
+	}
+	for _, o := range p.Options {
+		if strings.Join(o.Keys, " ") == joined {
+			return o.Label
+		}
+	}
+	return joined
+}
+
+// Interrupt implements brain.Host: Ctrl-C to the pane, its pending action
+// dropped, the next "done" treated as interrupted (like cancel).
+func (h brainHost) Interrupt(ctx context.Context, paneID string) (string, error) {
+	s := h.s
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	alias := s.aliasOf(paneID)
+	if err := s.herdr.Interrupt(ctx, paneID); err != nil {
+		s.log.Log(logSource, "supervisor.cancel_error", paneID, map[string]any{"error": err.Error(), "via": "brain"})
+		return "", fmt.Errorf("could not interrupt %s: %w", alias, err)
+	}
+	s.interrupted[paneID] = s.cfg.Now()
+	s.dropPendingFor(paneID, "brain_interrupt")
+	s.lastSubject = paneID
+	return "Interrupted " + alias + ".", nil
+}
+
+// brainTurn routes one ask / propose through the brain. ok is false when
+// the supervisor should answer from its template path instead.
+func (s *Supervisor) brainTurn(ctx context.Context, kind brain.Kind, text, agent string) (voice.ToolResult, bool) {
+	if s.brain == nil {
+		return voice.ToolResult{}, false
+	}
+	rep, err := s.brain.Turn(ctx, brain.Request{Kind: kind, Trigger: brain.TriggerCEO, Question: text, Agent: agent})
+	if err != nil {
+		return voice.ToolResult{}, false
+	}
+	res := toolResultFrom(kind, rep)
+	if res.Spoken == "" {
+		return voice.ToolResult{}, false
+	}
+	return res, true
+}
+
+// toolResultFrom enforces D9 on a brain reply: spoken cut to two
+// sentences and scrubbed, detail and options scrubbed; a propose always
+// interrupts (it is the echo), an ask only when the CEO must act.
+func toolResultFrom(kind brain.Kind, rep brain.Reply) voice.ToolResult {
+	res := voice.ToolResult{Spoken: sentence(llm.Spoken(rep.Spoken, 2)), Detail: llm.Spoken(rep.Detail, 0), Clarify: rep.Clarify, Scheduling: voice.UrgencyIdle}
+	for _, o := range rep.Options {
+		if o = strings.TrimSpace(llm.Spoken(o, 1)); o != "" {
+			res.Options = append(res.Options, o)
+		}
+	}
+	if kind == brain.KindPropose || rep.NeedsUser || rep.Clarify {
+		res.Scheduling = voice.UrgencyInterrupt
+	}
+	return res
+}
+
+// sentence makes sure s ends with terminal punctuation.
+func sentence(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" || strings.ContainsRune(".!?\"')]", rune(s[len(s)-1])) {
+		return s
+	}
+	return s + "."
+}

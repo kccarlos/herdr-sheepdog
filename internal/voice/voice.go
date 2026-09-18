@@ -49,10 +49,14 @@ type ToolCall struct {
 }
 
 // ToolResult is what the Supervisor returns for a ToolCall. Spoken is read
-// aloud verbatim (decision D9); Clarify marks a clarifying question;
-// Scheduling is the urgency of the spoken result.
+// aloud verbatim (decision D9); Detail is for the voice model's follow-up
+// answers, not read aloud (also D9-scrubbed); Options lists the choices
+// when there are some; Clarify marks a clarifying question; Scheduling is
+// the urgency of the spoken result.
 type ToolResult struct {
 	Spoken     string
+	Detail     string
+	Options    []string
 	Clarify    bool
 	Scheduling Urgency
 }

@@ -407,3 +407,56 @@ func TestSupervisorConfig(t *testing.T) {
 		t.Errorf("bad level in file: %v", err)
 	}
 }
+
+func TestBrainConfig(t *testing.T) {
+	cfg, err := load(filepath.Join(t.TempDir(), "missing.toml"), noEnv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Brain.Enabled || cfg.Brain.Model != DefaultBrainModel || cfg.Brain.MaxSteps != 6 || cfg.Brain.AskTimeoutS != 8 || cfg.Brain.ProposeTimeoutS != 12 || cfg.Brain.WindowTokens != 24000 || cfg.Brain.PruneAfterTurns != 3 {
+		t.Errorf("brain defaults = %+v", cfg.Brain)
+	}
+	if cfg.LLM.TimeoutS != 15 {
+		t.Errorf("llm.timeout_s default = %d", cfg.LLM.TimeoutS)
+	}
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	body := "[llm]\ntimeout_s = 40\n[brain]\nenabled = false\nmodel = \"file-model\"\nmax_steps = 3\nwindow_tokens = 1000\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = load(path, envFrom(map[string]string{
+		"SHEEPDOG_BRAIN_ENABLED": "true", "SHEEPDOG_BRAIN_MODEL": "env-model", "SHEEPDOG_BRAIN_ASK_TIMEOUT_S": "4",
+		"SHEEPDOG_BRAIN_PROPOSE_TIMEOUT_S": "9", "SHEEPDOG_BRAIN_PRUNE_AFTER_TURNS": "1", "SHEEPDOG_LLM_TIMEOUT_S": "60",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Brain.Enabled || cfg.Brain.Model != "env-model" || cfg.Brain.MaxSteps != 3 || cfg.Brain.AskTimeoutS != 4 || cfg.Brain.ProposeTimeoutS != 9 || cfg.Brain.WindowTokens != 1000 || cfg.Brain.PruneAfterTurns != 1 {
+		t.Errorf("brain = %+v", cfg.Brain)
+	}
+	if cfg.LLM.TimeoutS != 60 {
+		t.Errorf("llm.timeout_s = %d", cfg.LLM.TimeoutS)
+	}
+	if !strings.Contains(cfg.String(), "brain.model=env-model") || !strings.Contains(cfg.String(), "llm.timeout_s=60") {
+		t.Errorf("String() = %s", cfg.String())
+	}
+
+	for name, env := range map[string]map[string]string{
+		"enabled":   {"SHEEPDOG_BRAIN_ENABLED": "maybe"},
+		"max_steps": {"SHEEPDOG_BRAIN_MAX_STEPS": "0"},
+		"window":    {"SHEEPDOG_BRAIN_WINDOW_TOKENS": "-1"},
+		"llm":       {"SHEEPDOG_LLM_TIMEOUT_S": "x"},
+	} {
+		if _, err := load(filepath.Join(t.TempDir(), "missing.toml"), envFrom(env)); err == nil {
+			t.Errorf("%s: bad value accepted", name)
+		}
+	}
+	if err := os.WriteFile(path, []byte("[brain]\nmodel = \"\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := load(path, noEnv); err == nil {
+		t.Error("empty brain.model accepted")
+	}
+}

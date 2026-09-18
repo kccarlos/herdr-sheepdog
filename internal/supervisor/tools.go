@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/kccarlos/herdr-sheepdog/internal/brain"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/llm"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
@@ -70,13 +71,17 @@ func (s *Supervisor) Briefing(context.Context) (voice.ToolResult, error) {
 // screen (plan WP4 routing rule).
 var deepQuestion = regexp.MustCompile(`(?i)\b(why|diff|log|logs|fail|failed|failing|failure|changed|changes|broke|broken)\b`)
 
-// Ask answers a question about an agent from its screen tail, or — when a
+// Ask answers a question about an agent: through the brain when one is
+// attached, else (or on its fallback) from the screen tail, or — when a
 // Querier is wired and the question needs the repo (or the screen was not
 // enough) — from the read-only CLI tool's output.
 func (s *Supervisor) Ask(ctx context.Context, question, agent string) (voice.ToolResult, error) {
 	question = strings.TrimSpace(question)
 	if question == "" {
 		return voice.ToolResult{Spoken: "What would you like to know?", Clarify: true, Scheduling: voice.UrgencyInterrupt}, nil
+	}
+	if res, ok := s.brainTurn(ctx, brain.KindAsk, question, agent); ok {
+		return res, nil
 	}
 	row, res, ok := s.target(agent)
 	if !ok {
@@ -129,13 +134,18 @@ func (s *Supervisor) workspaceDir(ctx context.Context, row state.Agent) string {
 }
 
 // Propose resolves the user's words onto one agent and sends them (D4:
-// echo, then send, then cancellable). Ambiguity returns a clarify question
-// and sends nothing (D6). An answer to a pending question goes through
-// send_keys; anything else through agent.prompt.
+// echo, then send, then cancellable): through the brain when one is
+// attached, else (or on its fallback) with resolve_instruction. Ambiguity
+// returns a clarify question and sends nothing (D6). An answer to a
+// pending question goes through send_keys; anything else through
+// agent.prompt.
 func (s *Supervisor) Propose(ctx context.Context, instruction, agent string) (voice.ToolResult, error) {
 	instruction = strings.TrimSpace(instruction)
 	if instruction == "" {
 		return voice.ToolResult{Spoken: "What should I tell it?", Clarify: true, Scheduling: voice.UrgencyInterrupt}, nil
+	}
+	if res, ok := s.brainTurn(ctx, brain.KindPropose, instruction, agent); ok {
+		return res, nil
 	}
 	summaries := s.agentSummaries()
 	if len(summaries) == 0 {
@@ -157,22 +167,34 @@ func (s *Supervisor) Propose(ctx context.Context, instruction, agent string) (vo
 	alias := aliasOr(row.Alias)
 
 	s.mu.Lock()
-	s.lastSubject = row.PaneID
 	if pending, has := s.store.Pending(); res.IsAnswer && has && pending.Kind == state.PendingAnswerPrompt && pending.PaneID == row.PaneID {
+		s.lastSubject = row.PaneID
 		out := s.answerPending(ctx, pending, res.Answer, "Telling "+alias+" %s. Sent.")
 		s.mu.Unlock()
 		return out, nil
 	}
-	// Create the in-flight action before sending so a cancel racing the
-	// send still interrupts the pane.
-	p := s.newSendInstruction(row.PaneID, res.InstructionText, res.Echo)
+	s.mu.Unlock()
+	out, _ := s.sendInstruction(ctx, row, res.InstructionText, res.Echo)
+	return out, nil
+}
+
+// sendInstruction creates the in-flight send_instruction action and
+// sends text to the pane as typed input (D4: echo, send, cancellable);
+// the action is created before the send so a cancel racing it still
+// interrupts the pane. It returns what to say and, on failure, the send
+// error (an agent at a prompt is reported through reportBlocked).
+func (s *Supervisor) sendInstruction(ctx context.Context, row state.Agent, text, echo string) (voice.ToolResult, error) {
+	alias := aliasOr(row.Alias)
+	s.mu.Lock()
+	s.lastSubject = row.PaneID
+	p := s.newSendInstruction(row.PaneID, text, echo)
 	s.setPending(p)
-	_, err = s.herdr.Prompt(ctx, row.PaneID, res.InstructionText)
+	_, err := s.herdr.Prompt(ctx, row.PaneID, text)
 	if err != nil {
 		s.clearPending(p, "send_failed")
 	} else {
 		now := s.cfg.Now()
-		if _, uerr := s.store.Update(row.PaneID, func(a *state.Agent) { a.CurrentTask, a.LastInteraction = res.InstructionText, &now }); uerr != nil {
+		if _, uerr := s.store.Update(row.PaneID, func(a *state.Agent) { a.CurrentTask, a.LastInteraction = text, &now }); uerr != nil {
 			s.log.Log(logSource, "supervisor.state_error", row.PaneID, map[string]any{"error": uerr.Error()})
 		}
 		s.briefing = ""
@@ -181,12 +203,12 @@ func (s *Supervisor) Propose(ctx context.Context, instruction, agent string) (vo
 
 	if err != nil {
 		if errors.Is(err, herdr.ErrAgentBlocked) {
-			return s.reportBlocked(ctx, row), nil
+			return s.reportBlocked(ctx, row), err
 		}
 		s.log.Log(logSource, "supervisor.propose_error", row.PaneID, map[string]any{"stage": "send", "error": err.Error()})
-		return voice.ToolResult{Spoken: "I could not send that to " + alias + ".", Scheduling: voice.UrgencyInterrupt}, nil
+		return voice.ToolResult{Spoken: "I could not send that to " + alias + ".", Scheduling: voice.UrgencyInterrupt}, err
 	}
-	return voice.ToolResult{Spoken: res.Echo + " Sent.", Scheduling: voice.UrgencyInterrupt}, nil
+	return voice.ToolResult{Spoken: echo + " Sent.", Scheduling: voice.UrgencyInterrupt}, nil
 }
 
 // reportBlocked handles agent.prompt being refused with agent_blocked: the
@@ -275,6 +297,13 @@ func (s *Supervisor) answerPending(ctx context.Context, p state.PendingAction, a
 		}
 		return voice.ToolResult{Spoken: spoken, Clarify: true, Scheduling: voice.UrgencyInterrupt}
 	}
+	return s.answerWithKeys(ctx, p, keys, label, format)
+}
+
+// answerWithKeys sends keys to the pending prompt's pane and clears the
+// slot (pending.confirmed). Caller holds s.mu.
+func (s *Supervisor) answerWithKeys(ctx context.Context, p state.PendingAction, keys []string, label, format string) voice.ToolResult {
+	alias := s.aliasOf(p.PaneID)
 	if err := s.herdr.SendKeys(ctx, p.PaneID, keys...); err != nil {
 		s.log.Log(logSource, "supervisor.confirm_error", p.PaneID, map[string]any{"id": p.ID, "keys": keys, "error": err.Error()})
 		return voice.ToolResult{Spoken: "I could not send that to " + alias + ".", Scheduling: voice.UrgencyInterrupt}
