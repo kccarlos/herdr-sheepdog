@@ -1,6 +1,26 @@
-// Package web implements the daemon's HTTP surface: the /voice and /debug
-// static pages served from the binary (embedded), one WebSocket endpoint
-// for audio and control messages, one SSE endpoint that tails the event
-// log, and a small HTTP API for the debug page (list agents, inject a fake
-// event, cancel the pending action).
+// Package web implements the daemon's HTTP surface (plan §3.8), bound to
+// 127.0.0.1 only in v1:
+//
+//   - GET /voice and GET /debug: the embedded static pages (root web/).
+//   - GET /events: an SSE tail of the event log (`event: log`, one JSON
+//     line per event, `id:` = sequence number) with ?since=<n> to replay
+//     the last n events from the ring and ?source= / ?pane= / ?type=
+//     filters; a keepalive comment every 15 s.
+//   - GET /api/state, GET /api/agents, GET /api/events?n=: the state
+//     table, pending action, session and voice status as JSON.
+//   - POST /api/pending/cancel, POST /api/inject/{blocked,done,state,
+//     remove,utterance}: the debug page's controls, all routed through the
+//     same supervisor paths real events take (internal/inject).
+//   - POST /api/herdr/event: the plugin-shim channel (WP7): the body is the
+//     HERDR_PLUGIN_EVENT_JSON object and status events are fed to the
+//     Watcher through Inject.
+//   - GET /ws: the browser audio pipe of docs/ws-contract.md, server side.
+//     Binary frames go to the voice session, JSON control messages are
+//     routed to the session or the supervisor, model audio and events come
+//     back as frames. One client at a time; a bounded outbound queue drops
+//     the oldest audio when the browser cannot keep up.
+//
+// The page is a viewer of the log (decision D10): nothing here is a second
+// source of truth, and every action the page can take produces the same
+// events the real path would.
 package web
