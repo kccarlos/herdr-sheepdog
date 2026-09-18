@@ -25,6 +25,10 @@ var (
 	reAsk      = regexp.MustCompile(`^(ask|why|what|how|is|are|did|does|has|have|where|which|who)\b`)
 	reNote     = regexp.MustCompile(`^(note that|note|remember that|remember)\b`)
 	rePropose  = regexp.MustCompile(`^(tell|say to|instruct|have)\b`)
+	// rePromise: promised work anywhere in the words ("run the tests and
+	// let me know when it's done") is a propose too: the brain records
+	// the promise (and sends the instruction, when there is one).
+	rePromise = regexp.MustCompile(`\b(let me know|tell me (when|if|once)|remind me|ping me|notify me)\b`)
 )
 
 // Route returns the tool call for text, or false when the text is not one
@@ -46,7 +50,7 @@ func (r *Router) Route(text string) (voice.ToolCall, bool) {
 	case reNote.MatchString(norm):
 		call.Name = supervisor.ToolNote
 		call.Args["text"] = strings.TrimSpace(reNote.ReplaceAllString(strings.TrimSpace(text), ""))
-	case rePropose.MatchString(norm):
+	case rePropose.MatchString(norm), rePromise.MatchString(norm):
 		call.Name = supervisor.ToolPropose
 		call.Args["instruction"] = strings.TrimSpace(text)
 	case reAsk.MatchString(norm):

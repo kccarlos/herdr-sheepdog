@@ -21,7 +21,7 @@ func TestPromiseToolRecordsAPromise(t *testing.T) {
 			braintest.FC(ToolPrompt, map[string]any{"agent": "auth", "text": "run the tests"}),
 			braintest.FC(ToolPromise, map[string]any{"agent": "auth", "text": "let me know when it's done", "event": "done"}),
 		}},
-		braintest.Step{Text: braintest.Reply("Telling auth to run the tests. Sent. I will tell you when auth finishes.", "")},
+		braintest.Step{Text: braintest.Reply("Telling auth to run the tests. Sent; I will tell you when auth finishes.", "")},
 		braintest.Step{Text: braintest.Reply("ok", "")},
 	)
 	h := newHarness(t, m, nil)
@@ -245,7 +245,7 @@ func TestReflexPromisesAndEvents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rep.Spoken != "Telling auth to run the tests. Sent. I will tell you when auth finishes." {
+	if rep.Spoken != "Telling auth to run the tests. Sent; I will tell you when auth finishes." {
 		t.Errorf("combined propose = %+v", rep)
 	}
 	if got := joinKinds(h.kinds()); got != "request brain_tool_call brain_tool_result brain_tool_call brain_tool_result brain_tool_call brain_tool_result promise reply" {

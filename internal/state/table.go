@@ -69,7 +69,45 @@ type Result struct {
 	// Outcome is success, failed, partial or unknown.
 	Outcome string    `json:"outcome"`
 	At      time.Time `json:"at"`
+	// Detail is the brain's enrichment of the finish, when it produced
+	// one: what the finish related to and what was still open (for
+	// recall and the ledger).
+	Detail string `json:"detail,omitempty"`
 }
+
+// Promise is promised work (docs/roles.md "Promises"): the user asked to
+// be told when something happens to an agent, and the supervisor keeps
+// it at the matching event whatever the chattiness level. Kept in the
+// session so it survives a restart.
+type Promise struct {
+	ID     string `json:"id"`
+	PaneID string `json:"pane_id"`
+	// Alias is the agent's alias when the promise was made (the pane
+	// may be gone by the time it is read back).
+	Alias string `json:"alias"`
+	// Text is what the user asked to be told, in their words.
+	Text string `json:"text"`
+	// Event is the condition: done, blocked, idle or any_change.
+	Event string `json:"event"`
+	// Status is open, kept, expired or cancelled.
+	Status string `json:"status"`
+	// CreatedTurn is the brain turn that recorded it (0 outside one).
+	CreatedTurn int       `json:"created_turn,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+	// Due, when set, is when the user wanted it by: kept past it, the
+	// push interrupts instead of waiting for a pause.
+	Due *time.Time `json:"due,omitempty"`
+	// ResolvedAt is when it was kept, expired or cancelled.
+	ResolvedAt *time.Time `json:"resolved_at,omitempty"`
+}
+
+// The promise statuses.
+const (
+	PromiseOpen      = "open"
+	PromiseKept      = "kept"
+	PromiseExpired   = "expired"
+	PromiseCancelled = "cancelled"
+)
 
 // PendingKind is the kind of a PendingAction.
 type PendingKind string
@@ -124,6 +162,8 @@ type Session struct {
 	// Chattiness is the push policy chosen at runtime (quiet | normal |
 	// chatty); empty means "use the configured initial value".
 	Chattiness string `json:"chattiness,omitempty"`
+	// Promises are the session's promises, oldest first, every status.
+	Promises []Promise `json:"promises,omitempty"`
 }
 
 // Table is the persisted document.
@@ -166,7 +206,27 @@ func (t Table) clone() Table {
 		out.PendingAction = &p
 	}
 	out.Session.Notes = append([]Note(nil), t.Session.Notes...)
+	out.Session.Promises = make([]Promise, len(t.Session.Promises))
+	for i, p := range t.Session.Promises {
+		out.Session.Promises[i] = p.clone()
+	}
+	if len(out.Session.Promises) == 0 {
+		out.Session.Promises = nil
+	}
 	return out
+}
+
+// clone returns a deep copy of the promise.
+func (p Promise) clone() Promise {
+	if p.Due != nil {
+		d := *p.Due
+		p.Due = &d
+	}
+	if p.ResolvedAt != nil {
+		r := *p.ResolvedAt
+		p.ResolvedAt = &r
+	}
+	return p
 }
 
 // clone returns a deep copy of the action.

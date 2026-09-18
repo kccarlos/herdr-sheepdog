@@ -66,6 +66,7 @@ func Template() string {
 [supervisor]
 # chattiness = %[21]q   # "quiet" | "normal" | "chatty"; the /debug switch overrides it at runtime
 # recent_minutes = %[22]d   # "normal" announces a finish only for agents you dealt with this recently
+# promise_ttl_s = %[34]d   # how long "tell me when it's done" waits for its event before it expires silently
 
 [brain]
 # enabled = %[24]t   # the stateful supervisor brain behind ask/propose; serve --brain=off overrides
@@ -77,6 +78,7 @@ func Template() string {
 # prune_after_turns = %[30]d   # turns a screen/CLI dump stays verbatim in the window
 # step_reserve_s = %[31]d   # 0: default; below this much time left, the next step is answer-only
 # final_grace_s = %[32]d   # 0: default; how far past the timeout the answer-only step may run
+# enrich_timeout_s = %[35]d   # budget of the brain's event turns (enriching a block/finish announcement, a kept promise)
 
 [prompts]
 # dir = %[33]q   # ~/.config/sheepdog/prompts/<name> overrides the matching embedded prompt file
@@ -94,5 +96,6 @@ func Template() string {
 		d.Brain.Enabled, d.Brain.Model, d.Brain.MaxSteps, d.Brain.AskTimeoutS, d.Brain.ProposeTimeoutS, d.Brain.WindowTokens, d.Brain.PruneAfterTurns,
 		d.Brain.StepReserveS, d.Brain.FinalGraceS,
 		d.Prompts.Dir,
+		d.Supervisor.PromiseTTLS, d.Brain.EnrichTimeoutS,
 	)
 }

@@ -141,11 +141,14 @@ func (s *Supervisor) workspaceDir(ctx context.Context, row state.Agent) string {
 // agent.prompt.
 func (s *Supervisor) Propose(ctx context.Context, instruction, agent string) (voice.ToolResult, error) {
 	instruction = strings.TrimSpace(instruction)
-	if instruction == "" {
-		return voice.ToolResult{Spoken: "What should I tell it?", Clarify: true, Scheduling: voice.UrgencyInterrupt}, nil
-	}
+	// The brain reads the CEO's own words from its transcript, so an
+	// empty instruction (a bare "let me know when it's done") still
+	// reaches it; only the template path needs the text.
 	if res, ok := s.brainTurn(ctx, brain.KindPropose, instruction, agent); ok {
 		return res, nil
+	}
+	if instruction == "" {
+		return voice.ToolResult{Spoken: "What should I tell it?", Clarify: true, Scheduling: voice.UrgencyInterrupt}, nil
 	}
 	summaries := s.agentSummaries()
 	if len(summaries) == 0 {
@@ -328,13 +331,17 @@ func (s *Supervisor) answerWithKeys(ctx context.Context, p state.PendingAction, 
 }
 
 // Cancel interrupts the in-flight instruction (Ctrl-C to its pane) or
-// drops the pending question.
+// drops the pending question; with nothing pending, it cancels the most
+// recently made open promise ("Cancelled the reminder.").
 func (s *Supervisor) Cancel(ctx context.Context) (voice.ToolResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	p, has := s.store.Pending()
 	if !has {
 		s.expired = nil
+		if _, ok := s.cancelLatestPromise(); ok {
+			return voice.ToolResult{Spoken: "Cancelled the reminder.", Scheduling: voice.UrgencyInterrupt}, nil
+		}
 		return voice.ToolResult{Spoken: "Nothing to cancel.", Scheduling: voice.UrgencyInterrupt}, nil
 	}
 	spoken := "Cancelled."

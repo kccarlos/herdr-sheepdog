@@ -68,6 +68,9 @@ type Config struct {
 	// RecentWindow is how recently the user must have dealt with an agent
 	// for the normal level to announce its finish (default 30 min).
 	RecentWindow time.Duration
+	// PromiseTTL is how long an open promise waits for its event before
+	// it expires silently (default 2 h).
+	PromiseTTL time.Duration
 	// Brain, when set, answers ask and propose first (docs/roles.md); the
 	// template path below is its fallback. New attaches the Supervisor
 	// as its Host.
@@ -99,6 +102,9 @@ func (c Config) withDefaults() Config {
 	}
 	if c.RecentWindow == 0 {
 		c.RecentWindow = 30 * time.Minute
+	}
+	if c.PromiseTTL == 0 {
+		c.PromiseTTL = 2 * time.Hour
 	}
 	if c.Now == nil {
 		c.Now = time.Now
@@ -155,6 +161,7 @@ func New(store *state.Store, h Herdr, templates llm.Templates, querier Querier, 
 	s := &Supervisor{store: store, herdr: h, llm: templates, querier: querier, pusher: pusher, log: log, cfg: cfg, brain: cfg.Brain, interrupted: map[string]time.Time{}, mentioned: map[string]time.Time{}}
 	if s.brain != nil {
 		s.brain.SetHost(brainHost{s})
+		s.restorePromises()
 	}
 	return s, nil
 }
@@ -162,8 +169,9 @@ func New(store *state.Store, h Herdr, templates llm.Templates, querier Querier, 
 // Brain returns the attached brain, or nil.
 func (s *Supervisor) Brain() *brain.Brain { return s.brain }
 
-// Run drives pending-action expiry and the periodic silent briefing until
-// ctx ends. It is optional for tests that call ExpirePending directly.
+// Run drives pending-action and promise expiry and the periodic silent
+// briefing until ctx ends. It is optional for tests that call
+// ExpirePending / ExpirePromises directly.
 func (s *Supervisor) Run(ctx context.Context) {
 	expiry := time.NewTicker(s.cfg.ExpiryTick)
 	defer expiry.Stop()
@@ -179,6 +187,7 @@ func (s *Supervisor) Run(ctx context.Context) {
 			return
 		case <-expiry.C:
 			s.ExpirePending()
+			s.ExpirePromises()
 		case <-briefing:
 			s.pushBriefing()
 		}

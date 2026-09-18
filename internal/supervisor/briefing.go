@@ -27,7 +27,9 @@ const (
 
 // briefingText returns the cached briefing, recomputing it from the state
 // table when a state change invalidated it (or it aged past
-// briefingCacheMaxAge), and the panes it names. No model is involved.
+// briefingCacheMaxAge), with the open promises appended ("You asked me
+// to tell you when auth finishes."), and the panes it names. No model is
+// involved.
 func (s *Supervisor) briefingText() (string, []string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -35,6 +37,9 @@ func (s *Supervisor) briefingText() (string, []string) {
 	if s.briefing == "" || now.Sub(s.briefingAt) > briefingCacheMaxAge {
 		pending, _ := s.store.Pending()
 		s.briefing, s.briefingPanes = composeBriefing(s.store.List(), pending, now)
+		if trailer := promiseTrailer(s.openPromises()); trailer != "" {
+			s.briefing += " " + trailer
+		}
 		s.briefingAt = now
 	}
 	return s.briefing, append([]string(nil), s.briefingPanes...)

@@ -47,6 +47,26 @@ func (c Call) Text() string {
 	return b.String()
 }
 
+// IsEvent reports whether the call belongs to an event turn (summarize,
+// keep_promise): the newest request line in its contents is an event's.
+func (c Call) IsEvent() bool {
+	for i := len(c.Contents) - 1; i >= 0; i-- {
+		var t string
+		for _, p := range c.Contents[i].Parts {
+			t += p.Text
+		}
+		reqs := reRequest.FindAllStringIndex(t, -1)
+		evs := reEvent.FindAllStringIndex(t, -1)
+		switch {
+		case len(evs) > 0 && (len(reqs) == 0 || evs[len(evs)-1][0] > reqs[len(reqs)-1][0]):
+			return true
+		case len(reqs) > 0:
+			return false
+		}
+	}
+	return false
+}
+
 // System returns the system instruction text.
 func (c Call) System() string {
 	if c.Config == nil || c.Config.SystemInstruction == nil {
@@ -76,11 +96,20 @@ type Step struct {
 
 // Model is a scripted brain.Model. Responses are consumed in order; when
 // the script runs out, Default answers (a plain JSON reply when nil).
+// EventDefault, when set, answers every event turn (summarize,
+// keep_promise) without consuming the script, so a scripted CEO turn is
+// not thrown off by the enrichment a block or finish triggers.
 type Model struct {
-	mu      sync.Mutex
-	script  []Step
-	calls   []Call
-	Default *Step
+	mu           sync.Mutex
+	script       []Step
+	calls        []Call
+	Default      *Step
+	EventDefault *Step
+}
+
+// NothingToAdd is the event-turn reply "the template was sufficient".
+func NothingToAdd() *Step {
+	return &Step{Text: `{"spoken": "", "detail": "Nothing to add.", "needs_user": false}`}
 }
 
 // NewModel returns a Model with the given script.
@@ -108,7 +137,9 @@ func (m *Model) Generate(ctx context.Context, model string, contents []*genai.Co
 	m.mu.Lock()
 	m.calls = append(m.calls, call)
 	var step Step
-	if len(m.script) > 0 {
+	if m.EventDefault != nil && call.IsEvent() {
+		step = *m.EventDefault
+	} else if len(m.script) > 0 {
 		step, m.script = m.script[0], m.script[1:]
 	} else if m.Default != nil {
 		step = *m.Default
@@ -413,6 +444,7 @@ var (
 	// know when it's done") into the instruction and the promise.
 	rePromise  = regexp.MustCompile(`(?i)^(.*?)\s*(?:,|;|\band\b|\bthen\b)?\s*\b((?:please\s+)?(?:let me know|tell me|remind me|ping me|notify me)\b.*)$`)
 	reLastTask = regexp.MustCompile(`(?m)^- ([^:\n]+): last task "((?:[^"\\]|\\.)*)"`)
+	reCEOSaid  = regexp.MustCompile(`CEO said: "((?:[^"\\]|\\.)*)"`)
 )
 
 // Reflex returns a Model that answers from what it sees instead of a
@@ -481,6 +513,11 @@ func reflex(call Call) (*genai.GenerateContentResponse, error) {
 	}
 	req := reRequest.FindStringSubmatch(text[reqs[len(reqs)-1][0]:])
 	kind, question, agent := req[1], unquote(req[2]), unquote(req[3])
+	if question == "" {
+		// The assistant passed no text: the CEO's own words are the
+		// request (a bare "let me know when it's done").
+		question = lastCEOUtterance(call)
+	}
 	if call.Config != nil && call.Config.ToolConfig != nil && call.Config.ToolConfig.FunctionCallingConfig != nil && call.Config.ToolConfig.FunctionCallingConfig.Mode == genai.FunctionCallingConfigModeNone {
 		return Response(Step{Text: Reply("I ran out of steps before reading anything.", "The fake model was asked to answer without tools."), Usage: usage}), nil
 	}
@@ -525,7 +562,9 @@ func respondToResult(call Call, fr *genai.FunctionResponse) *genai.GenerateConte
 		out, _ := fr.Response["output"].(string)
 		spoken := strings.TrimSpace(out)
 		if echo := promptEcho(call); echo != "" {
-			spoken = echo + " " + spoken
+			// Two sentences at most (D9): "Telling auth to run the
+			// tests. Sent; I will tell you when auth finishes."
+			spoken = strings.TrimSuffix(echo, ".") + "; " + spoken
 		}
 		return Response(Step{Text: Reply(spoken, "Recorded a promise through the promise tool."), Usage: usage})
 	}
@@ -684,7 +723,8 @@ func replyFromResult(fr *genai.FunctionResponse) string {
 	}
 }
 
-// lastRequest returns the newest request's kind and question in the call.
+// lastRequest returns the newest request's kind and question in the
+// call (the CEO's own words when the request carried no text).
 func lastRequest(call Call) (kind, question string) {
 	for _, c := range call.Contents {
 		for _, p := range c.Parts {
@@ -693,7 +733,23 @@ func lastRequest(call Call) (kind, question string) {
 			}
 		}
 	}
+	if question == "" {
+		question = lastCEOUtterance(call)
+	}
 	return kind, question
+}
+
+// lastCEOUtterance returns the newest "CEO said" line in the call.
+func lastCEOUtterance(call Call) string {
+	out := ""
+	for _, c := range call.Contents {
+		for _, p := range c.Parts {
+			for _, m := range reCEOSaid.FindAllStringSubmatch(p.Text, -1) {
+				out = unquote(m[1])
+			}
+		}
+	}
+	return out
 }
 
 // instructionFor strips a leading "tell <alias> to" from an instruction

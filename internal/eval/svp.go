@@ -321,6 +321,8 @@ func defaultArgsFor(tool, alias string) map[string]any {
 		return map[string]any{"agent": alias, "keys": []any{"1"}}
 	case brain.ToolInterrupt:
 		return map[string]any{"agent": alias}
+	case brain.ToolPromise:
+		return map[string]any{"agent": alias, "text": "let me know when it's done", "event": "done"}
 	default:
 		return map[string]any{"agent": alias}
 	}
