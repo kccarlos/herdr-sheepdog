@@ -362,3 +362,8 @@ func (s *Session) turnOpenNow() bool {
 	defer s.mu.Unlock()
 	return s.turnOpen
 }
+
+// TurnOpen reports whether the model is considered mid-turn: audio or a
+// transcript arrived, or a push/text/tool response was sent, and no
+// turnComplete has followed yet.
+func (s *Session) TurnOpen() bool { return s.turnOpenNow() }
