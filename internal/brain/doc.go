@@ -20,7 +20,13 @@
 //
 // Turns are serialised by a single writer with two priorities: a turn
 // triggered by a CEO utterance runs before one triggered by an event, and
-// a turn in progress is never interleaved.
+// a turn in progress is never interleaved. An event turn also gives way:
+// before each model call it checks for a waiting CEO turn and, when there
+// is one, stops with ErrYielded (brain.yielded, a fallback turn) so the
+// CEO turn runs next; the step in flight is never cut short. At most one
+// event turn waits per agent: a newer event about the same agent replaces
+// the queued one (brain.event_coalesced; the old turn fails with
+// ErrCoalesced before it starts).
 //
 // # Event turns
 //

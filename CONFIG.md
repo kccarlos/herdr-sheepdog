@@ -107,6 +107,7 @@ it?" for what each level announces.
 | `supervisor.chattiness` | `SHEEPDOG_SUPERVISOR_CHATTINESS` | `normal` | The initial push policy: `quiet` (agent questions and exits only), `normal` (plus the finish of any agent you dealt with recently, with a one-line result), or `chatty` (every finish, plus "started on …" when an instruction you sent is picked up). Changeable at runtime from the `/debug` header or `PUT /api/settings {"chattiness": …}`; the runtime choice is kept in the state file's `session.chattiness` and wins over this value on restart. |
 | `supervisor.recent_minutes` | `SHEEPDOG_SUPERVISOR_RECENT_MINUTES` | `30` | The `normal` level's window: a finish is announced when the agent was blocked, was sent an answer or an instruction, was asked about, or was named in a spoken briefing within this many minutes. |
 | `supervisor.promise_ttl_s` | `SHEEPDOG_SUPERVISOR_PROMISE_TTL_S` | `7200` | How long a promise ("tell me when it's done", README "Promises") waits for its event before it expires silently (`promise.expired`). Open promises live in the state file's `session.promises`, so a restart keeps them. |
+| `supervisor.summary_timeout_s` | `SHEEPDOG_SUPERVISOR_SUMMARY_TIMEOUT_S` | `15` | Bounds the `summarize_done` template call that turns a finished agent's screen into the one-line result; past it the bare "<alias> finished." is spoken (`supervisor.done_error {stage: summarize}`). Raise it for a slow local model (Ollama on a cold start). |
 
 ## `[brain]`
 

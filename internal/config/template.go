@@ -67,6 +67,7 @@ func Template() string {
 # chattiness = %[21]q   # "quiet" | "normal" | "chatty"; the /debug switch overrides it at runtime
 # recent_minutes = %[22]d   # "normal" announces a finish only for agents you dealt with this recently
 # promise_ttl_s = %[34]d   # how long "tell me when it's done" waits for its event before it expires silently
+# summary_timeout_s = %[36]d   # bounds the summarize_done call on a finish; past it the bare "finished." is spoken
 
 [brain]
 # enabled = %[24]t   # the stateful supervisor brain behind ask/propose; serve --brain=off overrides
@@ -97,5 +98,6 @@ func Template() string {
 		d.Brain.StepReserveS, d.Brain.FinalGraceS,
 		d.Prompts.Dir,
 		d.Supervisor.PromiseTTLS, d.Brain.EnrichTimeoutS,
+		d.Supervisor.SummaryTimeoutS,
 	)
 }

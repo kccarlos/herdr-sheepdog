@@ -706,6 +706,139 @@ func TestSystemPromptSections(t *testing.T) {
 
 // waitQueued blocks until n turns are waiting on the brain's turn lock, so
 // the serialisation test does not depend on goroutine scheduling speed.
+// (11b) An event turn yields to a CEO turn: when a CEO turn is waiting
+// for the lock, the event turn stops before its next model call
+// (ErrYielded wrapped in ErrFallback, brain.yielded, a fallback turn)
+// and the CEO turn runs next; the step in flight is not cut short.
+func TestEventTurnYieldsToCEO(t *testing.T) {
+	release := make(chan struct{})
+	m := braintest.NewModel(braintest.Step{Block: release, Calls: []*genai.FunctionCall{braintest.FC(ToolRecall, map[string]any{"query": "auth"})}})
+	m.Default = &braintest.Step{Text: braintest.Reply("done", "")}
+	h := newHarness(t, m, nil)
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var order []string
+	var eventErr error
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		_, eventErr = h.brain.Turn(context.Background(), Request{Kind: KindSummarize, Agent: "auth", Event: "done", Template: "auth finished."})
+		mu.Lock()
+		order = append(order, "event")
+		mu.Unlock()
+	}()
+	deadline := time.Now().Add(2 * time.Second)
+	for len(h.model.Calls()) == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		_, _ = h.brain.Ask(context.Background(), Request{Question: "is auth done?", Agent: "auth"})
+		mu.Lock()
+		order = append(order, "ceo")
+		mu.Unlock()
+	}()
+	waitQueued(t, h.brain, 1)
+	if h.brain.QueuedCEOTurns() != 1 {
+		t.Fatalf("ceo queued = %d", h.brain.QueuedCEOTurns())
+	}
+	close(release)
+	wg.Wait()
+	h.brain.Quiesce()
+	if !errors.Is(eventErr, ErrYielded) || !errors.Is(eventErr, ErrFallback) {
+		t.Errorf("event turn err = %v", eventErr)
+	}
+	mu.Lock()
+	got := strings.Join(order, " ")
+	mu.Unlock()
+	if got != "event ceo" {
+		t.Errorf("order = %s", got)
+	}
+	// The recall step ran (the step in flight finished), then the turn
+	// yielded before step 2.
+	y := h.log.ofType("brain.yielded")
+	if len(y) != 1 || payload(y[0])["turn"] != 1 || payload(y[0])["step"] != 2 || payload(y[0])["steps_done"] != 1 || payload(y[0])["ceo_waiting"] != 1 || payload(y[0])["agent"] != "auth" {
+		t.Errorf("brain.yielded = %v", y)
+	}
+	if fb := h.log.ofType("brain.fallback"); len(fb) != 1 || payload(fb[0])["reason"] != "yielded" || payload(fb[0])["turn"] != 1 {
+		t.Errorf("brain.fallback = %v", fb)
+	}
+	turns := h.log.ofType("brain.turn")
+	if len(turns) != 2 || payload(turns[0])["trigger"] != "event" || payload(turns[0])["fallback"] != true || payload(turns[0])["model_calls"] != 1 || payload(turns[1])["trigger"] != "ceo" || payload(turns[1])["fallback"] != false {
+		t.Errorf("brain.turn = %v", turns)
+	}
+	if h.log.count("brain.tool_result") != 1 || len(h.model.Calls()) != 2 {
+		t.Errorf("tool results = %d, model calls = %d", h.log.count("brain.tool_result"), len(h.model.Calls()))
+	}
+	// Without a CEO turn waiting, the same event turn completes.
+	m.Add(braintest.Step{Calls: []*genai.FunctionCall{braintest.FC(ToolRecall, map[string]any{"query": "auth"})}})
+	if rep, err := h.brain.Turn(context.Background(), Request{Kind: KindSummarize, Agent: "auth", Event: "done", Template: "auth finished."}); err != nil || rep.Spoken != "done" {
+		t.Errorf("event turn alone = %+v %v", rep, err)
+	}
+}
+
+// (11c) At most one event turn waits per agent: a newer event about the
+// same agent replaces the queued one (brain.event_coalesced; the old
+// turn fails with ErrCoalesced), while events about other agents and CEO
+// turns queue as before.
+func TestEventTurnsCoalesce(t *testing.T) {
+	release := make(chan struct{})
+	m := braintest.NewModel(braintest.Step{Block: release, Text: braintest.Reply("first", "")})
+	m.Default = &braintest.Step{Text: braintest.Reply("done", "")}
+	h := newHarness(t, m, nil)
+	var wg sync.WaitGroup
+	run := func(kind Kind, agent, event string, errc chan<- error) {
+		defer wg.Done()
+		_, err := h.brain.Turn(context.Background(), Request{Kind: kind, Agent: agent, Event: event, Template: agent + " " + event + "."})
+		errc <- err
+	}
+	wg.Add(1)
+	first := make(chan error, 1)
+	go run(KindSummarize, "auth", "blocked", first)
+	deadline := time.Now().Add(2 * time.Second)
+	for len(h.model.Calls()) == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	wg.Add(1)
+	queued := make(chan error, 1)
+	go run(KindSummarize, "auth", "working", queued)
+	waitQueued(t, h.brain, 1)
+	wg.Add(1)
+	docs := make(chan error, 1)
+	go run(KindSummarize, "docs", "done", docs)
+	waitQueued(t, h.brain, 2)
+	wg.Add(1)
+	newer := make(chan error, 1)
+	go run(KindSummarize, "auth", "done", newer)
+	// The queued auth turn is dropped at once, before the lock is free.
+	if err := <-queued; !errors.Is(err, ErrCoalesced) || !errors.Is(err, ErrFallback) {
+		t.Errorf("queued auth turn err = %v", err)
+	}
+	if h.brain.QueuedTurns() != 2 {
+		t.Errorf("queued = %d", h.brain.QueuedTurns())
+	}
+	close(release)
+	wg.Wait()
+	h.brain.Quiesce()
+	for name, c := range map[string]chan error{"first": first, "docs": docs, "newer": newer} {
+		if err := <-c; err != nil {
+			t.Errorf("%s turn err = %v", name, err)
+		}
+	}
+	co := h.log.ofType("brain.event_coalesced")
+	if len(co) != 1 || payload(co[0])["agent"] != "auth" || payload(co[0])["event"] != "done" || payload(co[0])["kind"] != "summarize" {
+		t.Errorf("brain.event_coalesced = %v", co)
+	}
+	if fb := h.log.ofType("brain.fallback"); len(fb) != 1 || payload(fb[0])["reason"] != "coalesced" || payload(fb[0])["agent"] != "auth" || payload(fb[0])["turn"] != nil {
+		t.Errorf("brain.fallback = %v", fb)
+	}
+	// Three turns ran (the coalesced one never started).
+	if n := h.log.count("brain.turn"); n != 3 || len(h.model.Calls()) != 3 {
+		t.Errorf("turns = %d, model calls = %d", n, len(h.model.Calls()))
+	}
+}
+
 func waitQueued(t *testing.T, b *Brain, n int) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)

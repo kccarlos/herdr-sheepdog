@@ -42,42 +42,98 @@ func payload(e logging.Line) map[string]any {
 	return m
 }
 
-// The turn lock hands over to CEO waiters first and survives a cancelled
-// waiter.
+// The turn lock hands over to CEO waiters first, survives a cancelled
+// waiter, and keeps at most one event waiter per key: a newer event turn
+// about the same agent replaces the queued one, which gets ErrCoalesced.
 func TestTurnLock(t *testing.T) {
 	var l turnLock
-	if err := l.acquire(context.Background(), false); err != nil {
+	acquire := func(ctx context.Context, ceo bool, key string) error {
+		_, err := l.acquire(ctx, ceo, key)
+		return err
+	}
+	if err := acquire(context.Background(), false, "auth"); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	errc := make(chan error, 1)
-	go func() { errc <- l.acquire(ctx, true) }()
+	go func() { errc <- acquire(ctx, true, "") }()
 	time.Sleep(5 * time.Millisecond)
 	cancel()
 	if err := <-errc; !errors.Is(err, context.Canceled) {
 		t.Errorf("cancelled waiter got %v", err)
 	}
-	got := make(chan string, 2)
+	got := make(chan string, 4)
 	go func() {
-		if err := l.acquire(context.Background(), false); err == nil {
-			got <- "event"
+		err := acquire(context.Background(), false, "auth")
+		switch {
+		case errors.Is(err, ErrCoalesced):
+			got <- "event1 coalesced"
+		case err == nil:
+			got <- "event1"
 			l.release()
 		}
 	}()
 	time.Sleep(5 * time.Millisecond)
 	go func() {
-		if err := l.acquire(context.Background(), true); err == nil {
+		if err := acquire(context.Background(), true, ""); err == nil {
 			got <- "ceo"
 			l.release()
 		}
 	}()
 	time.Sleep(5 * time.Millisecond)
-	l.release()
-	if a, b := <-got, <-got; a != "ceo" || b != "event" {
-		t.Errorf("order = %s %s", a, b)
+	if l.ceoWaiting() != 1 || l.waiting() != 2 {
+		t.Errorf("ceoWaiting=%d waiting=%d", l.ceoWaiting(), l.waiting())
 	}
-	if err := l.acquire(context.Background(), false); err != nil {
+	// A second event about auth replaces the queued first one at once;
+	// one about docs queues behind it.
+	go func() {
+		replaced, err := l.acquire(context.Background(), false, "auth")
+		if err == nil {
+			if replaced {
+				got <- "event2 (replaced one)"
+			} else {
+				got <- "event2"
+			}
+			l.release()
+		}
+	}()
+	if a := <-got; a != "event1 coalesced" {
+		t.Errorf("first = %s", a)
+	}
+	go func() {
+		if err := acquire(context.Background(), false, "docs"); err == nil {
+			got <- "docs"
+			l.release()
+		}
+	}()
+	time.Sleep(5 * time.Millisecond)
+	if l.waiting() != 3 {
+		t.Errorf("waiting = %d", l.waiting())
+	}
+	l.release()
+	if a, b, c := <-got, <-got, <-got; a != "ceo" || b != "event2 (replaced one)" || c != "docs" {
+		t.Errorf("order = %s, %s, %s", a, b, c)
+	}
+	if err := acquire(context.Background(), false, ""); err != nil {
 		t.Errorf("lock not free: %v", err)
+	}
+	l.release()
+	// A coalesced waiter whose context ends at the same time holds
+	// nothing: the lock stays with the holder.
+	if err := acquire(context.Background(), false, "x"); err != nil {
+		t.Fatal(err)
+	}
+	ctx2, cancel2 := context.WithCancel(context.Background())
+	errc2 := make(chan error, 1)
+	go func() { errc2 <- acquire(ctx2, false, "auth") }()
+	time.Sleep(5 * time.Millisecond)
+	l.mu.Lock()
+	w := l.event[0]
+	l.mu.Unlock()
+	cancel2()
+	<-errc2
+	if l.remove(w) {
+		t.Error("cancelled waiter still queued")
 	}
 	l.release()
 }

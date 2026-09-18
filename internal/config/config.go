@@ -114,6 +114,10 @@ type Supervisor struct {
 	// PromiseTTLS is how long a promise ("tell me when it's done") waits
 	// for its event before it expires silently (default 7200, 2 h).
 	PromiseTTLS int `toml:"promise_ttl_s"`
+	// SummaryTimeoutS bounds the summarize_done template call on a
+	// finish; on expiry the plain "<alias> finished." sentence is spoken
+	// instead (default 15).
+	SummaryTimeoutS int `toml:"summary_timeout_s"`
 }
 
 // ChattinessLevels are the accepted values of supervisor.chattiness.
@@ -275,7 +279,7 @@ func Default() Config {
 		LLM:               LLM{BaseURL: GeminiOpenAIBaseURL, Model: "gemini-3.5-flash-lite", TimeoutS: 15},
 		Web:               Web{Port: DefaultWebPort},
 		CLI:               defaultCLI(),
-		Supervisor:        Supervisor{Chattiness: DefaultChattiness, RecentMinutes: 30, PromiseTTLS: 7200},
+		Supervisor:        Supervisor{Chattiness: DefaultChattiness, RecentMinutes: 30, PromiseTTLS: 7200, SummaryTimeoutS: 15},
 		Brain:             defaultBrain(),
 		Prompts:           Prompts{Dir: filepath.Join(home, ".config", "sheepdog", "prompts")},
 	}
@@ -382,6 +386,9 @@ func load(path string, lookup func(string) (string, bool)) (Config, error) {
 	}
 	if cfg.Supervisor.PromiseTTLS <= 0 {
 		return Config{}, fmt.Errorf("config: supervisor.promise_ttl_s=%d: want a positive integer", cfg.Supervisor.PromiseTTLS)
+	}
+	if cfg.Supervisor.SummaryTimeoutS <= 0 {
+		return Config{}, fmt.Errorf("config: supervisor.summary_timeout_s=%d: want a positive integer", cfg.Supervisor.SummaryTimeoutS)
 	}
 	if cfg.LLM.TimeoutS <= 0 {
 		return Config{}, fmt.Errorf("config: llm.timeout_s=%d: want a positive integer", cfg.LLM.TimeoutS)
@@ -534,6 +541,13 @@ func applyEnv(cfg *Config, lookup func(string) (string, bool)) error {
 		}
 		cfg.Supervisor.PromiseTTLS = n
 	}
+	if v, ok := lookup("SHEEPDOG_SUPERVISOR_SUMMARY_TIMEOUT_S"); ok {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return fmt.Errorf("config: SHEEPDOG_SUPERVISOR_SUMMARY_TIMEOUT_S=%q: want a positive integer", v)
+		}
+		cfg.Supervisor.SummaryTimeoutS = n
+	}
 	if v, ok := lookup("SHEEPDOG_PROMPTS_DIR"); ok {
 		cfg.Prompts.Dir = v
 	}
@@ -643,6 +657,6 @@ func geminiKeysFromEnv(lookup func(string) (string, bool)) []string {
 // String renders the configuration for logs. Secrets are rendered as
 // counts only; keep it that way when secret-bearing fields are added.
 func (c Config) String() string {
-	return fmt.Sprintf("data_dir=%s herdr.socket=%s state.path=%s state.full_fsync=%t debounce_ms=%d snapshot_interval_s=%d pending_ttl_s=%d aliases=%d gemini.model=%s gemini.voice=%s gemini.stall_after_s=%d gemini.api_keys=%d llm.base_url=%s llm.model=%s llm.timeout_s=%d llm.api_keys=%d web.port=%d cli.prefer=%s cli.timeout_s=%d cli.max_output_kb=%d supervisor.chattiness=%s supervisor.recent_minutes=%d supervisor.promise_ttl_s=%d brain.enabled=%t brain.model=%s brain.max_steps=%d brain.ask_timeout_s=%d brain.propose_timeout_s=%d brain.window_tokens=%d brain.prune_after_turns=%d brain.step_reserve_s=%d brain.final_grace_s=%d brain.enrich_timeout_s=%d prompts.dir=%s",
-		c.DataDir, c.Herdr.Socket, c.State.Path, c.State.FullFsync, c.DebounceMS, c.SnapshotIntervalS, c.PendingTTLS, len(c.Aliases), c.Gemini.Model, c.Gemini.Voice, c.Gemini.StallAfterS, len(c.Gemini.APIKeys), c.LLM.BaseURL, c.LLM.Model, c.LLM.TimeoutS, len(c.LLMKeys()), c.Web.Port, c.CLI.Prefer, c.CLI.TimeoutS, c.CLI.MaxOutputKB, c.Supervisor.Chattiness, c.Supervisor.RecentMinutes, c.Supervisor.PromiseTTLS, c.Brain.Enabled, c.Brain.Model, c.Brain.MaxSteps, c.Brain.AskTimeoutS, c.Brain.ProposeTimeoutS, c.Brain.WindowTokens, c.Brain.PruneAfterTurns, c.Brain.StepReserveS, c.Brain.FinalGraceS, c.Brain.EnrichTimeoutS, c.Prompts.Dir)
+	return fmt.Sprintf("data_dir=%s herdr.socket=%s state.path=%s state.full_fsync=%t debounce_ms=%d snapshot_interval_s=%d pending_ttl_s=%d aliases=%d gemini.model=%s gemini.voice=%s gemini.stall_after_s=%d gemini.api_keys=%d llm.base_url=%s llm.model=%s llm.timeout_s=%d llm.api_keys=%d web.port=%d cli.prefer=%s cli.timeout_s=%d cli.max_output_kb=%d supervisor.chattiness=%s supervisor.recent_minutes=%d supervisor.promise_ttl_s=%d supervisor.summary_timeout_s=%d brain.enabled=%t brain.model=%s brain.max_steps=%d brain.ask_timeout_s=%d brain.propose_timeout_s=%d brain.window_tokens=%d brain.prune_after_turns=%d brain.step_reserve_s=%d brain.final_grace_s=%d brain.enrich_timeout_s=%d prompts.dir=%s",
+		c.DataDir, c.Herdr.Socket, c.State.Path, c.State.FullFsync, c.DebounceMS, c.SnapshotIntervalS, c.PendingTTLS, len(c.Aliases), c.Gemini.Model, c.Gemini.Voice, c.Gemini.StallAfterS, len(c.Gemini.APIKeys), c.LLM.BaseURL, c.LLM.Model, c.LLM.TimeoutS, len(c.LLMKeys()), c.Web.Port, c.CLI.Prefer, c.CLI.TimeoutS, c.CLI.MaxOutputKB, c.Supervisor.Chattiness, c.Supervisor.RecentMinutes, c.Supervisor.PromiseTTLS, c.Supervisor.SummaryTimeoutS, c.Brain.Enabled, c.Brain.Model, c.Brain.MaxSteps, c.Brain.AskTimeoutS, c.Brain.ProposeTimeoutS, c.Brain.WindowTokens, c.Brain.PruneAfterTurns, c.Brain.StepReserveS, c.Brain.FinalGraceS, c.Brain.EnrichTimeoutS, c.Prompts.Dir)
 }

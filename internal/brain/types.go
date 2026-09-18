@@ -19,6 +19,14 @@ var (
 	ErrNoCLI = errors.New("no CLI query tool is available")
 	// ErrNoHost is returned by a turn before SetHost was called.
 	ErrNoHost = errors.New("brain: no host")
+	// ErrYielded (wrapped in ErrFallback) is returned by an event turn
+	// that stopped before a model call because a CEO turn was waiting
+	// for the lock; the supervisor speaks its template sentence instead.
+	ErrYielded = errors.New("brain: yielded to a CEO turn")
+	// ErrCoalesced (wrapped in ErrFallback) is returned by a queued
+	// event turn that a newer event turn about the same agent replaced
+	// before it ran.
+	ErrCoalesced = errors.New("brain: coalesced into a newer event turn")
 )
 
 // Kind of a turn: what the assistant asked for.

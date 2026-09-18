@@ -241,12 +241,13 @@ func (a *App) wire() error {
 		a.brain = b
 	}
 	sup, err := supervisor.New(store, a.herdr, llmClient, querier, pusher, a.log, supervisor.Config{
-		PendingTTL:   time.Duration(cfg.PendingTTLS) * time.Second,
-		DataDir:      cfg.DataDir,
-		Chattiness:   cfg.Supervisor.Chattiness,
-		RecentWindow: time.Duration(cfg.Supervisor.RecentMinutes) * time.Minute,
-		PromiseTTL:   time.Duration(cfg.Supervisor.PromiseTTLS) * time.Second,
-		Brain:        a.brain,
+		PendingTTL:     time.Duration(cfg.PendingTTLS) * time.Second,
+		DataDir:        cfg.DataDir,
+		Chattiness:     cfg.Supervisor.Chattiness,
+		RecentWindow:   time.Duration(cfg.Supervisor.RecentMinutes) * time.Minute,
+		PromiseTTL:     time.Duration(cfg.Supervisor.PromiseTTLS) * time.Second,
+		SummaryTimeout: time.Duration(cfg.Supervisor.SummaryTimeoutS) * time.Second,
+		Brain:          a.brain,
 	})
 	if err != nil {
 		if a.brain != nil {
