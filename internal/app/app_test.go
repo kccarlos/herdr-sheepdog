@@ -73,13 +73,39 @@ func TestBuildValidation(t *testing.T) {
 	if _, err := Build(gem, Options{Voice: VoiceOff, Herdr: HerdrMock}); err == nil || !strings.Contains(err.Error(), "cheap LLM") {
 		t.Errorf("gemini llm without keys: %v", err)
 	}
-	// A Gemini key without a network: Build succeeds (nothing connects).
+	if _, err := Build(cfg, Options{Voice: VoiceOff, Herdr: HerdrMock, Brain: "maybe"}); err == nil || !strings.Contains(err.Error(), "--brain") {
+		t.Errorf("bad brain: %v", err)
+	}
+	// A Gemini key without a network: Build succeeds (nothing connects),
+	// and the brain is attached with its transcript under the data dir.
 	gem.Gemini.APIKeys = []string{"k"}
 	a, err := Build(gem, Options{Voice: VoiceGemini, Herdr: HerdrMock})
 	if err != nil {
 		t.Fatalf("build with keys: %v", err)
 	}
+	if a.Brain() == nil || a.sup.Brain() != a.Brain() || !strings.HasPrefix(a.Brain().TranscriptPath(), filepath.Join(gem.DataDir, "brain")) {
+		t.Errorf("brain not wired: %v", a.Brain())
+	}
+	_ = a.Brain().Close()
 	_ = a.elog.Close()
+	// --brain=off, brain.enabled=false and no key each leave it off.
+	for name, tc := range map[string]struct {
+		cfg  config.Config
+		opts Options
+	}{
+		"flag":    {gem, Options{Voice: VoiceOff, Herdr: HerdrMock, Brain: BrainOff}},
+		"config":  {func() config.Config { c := gem; c.Brain.Enabled = false; return c }(), Options{Voice: VoiceOff, Herdr: HerdrMock}},
+		"no-keys": {cfg, Options{Voice: VoiceOff, Herdr: HerdrMock}},
+	} {
+		a, err := Build(tc.cfg, tc.opts)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if a.Brain() != nil {
+			t.Errorf("%s: brain attached", name)
+		}
+		_ = a.elog.Close()
+	}
 }
 
 func TestRunMockVoiceOffFullChain(t *testing.T) {

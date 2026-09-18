@@ -1,0 +1,260 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"flag"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"google.golang.org/genai"
+
+	"github.com/kccarlos/herdr-sheepdog/internal/app"
+	"github.com/kccarlos/herdr-sheepdog/internal/brain"
+	"github.com/kccarlos/herdr-sheepdog/internal/brain/braintest"
+	"github.com/kccarlos/herdr-sheepdog/internal/config"
+	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
+	"github.com/kccarlos/herdr-sheepdog/internal/inject"
+	"github.com/kccarlos/herdr-sheepdog/internal/llm"
+	"github.com/kccarlos/herdr-sheepdog/internal/logging"
+	"github.com/kccarlos/herdr-sheepdog/internal/state"
+	"github.com/kccarlos/herdr-sheepdog/internal/supervisor"
+	"github.com/kccarlos/herdr-sheepdog/internal/voice"
+)
+
+func printBrainTestUsage(w io.Writer) {
+	fprintln(w, "usage: sheepdog brain-test --question \"Q\" [flags]")
+	fprintln(w, "")
+	fprintln(w, "Runs one supervisor-brain turn (ask by default) against a mock herdr with one")
+	fprintln(w, "agent whose screen is a testdata/herdr fixture, and prints the reply as JSON.")
+	fprintln(w, "Every event (brain.turn, brain.step, brain.tool_call/tool_result, herdr.read,")
+	fprintln(w, "llm.call, …) goes to stderr as JSON lines. Needs a Gemini key unless --fake.")
+	fprintln(w, "")
+	fprintln(w, "flags:")
+	fprintln(w, "  --config PATH       config file (default ~/.config/sheepdog/config.toml)")
+	fprintln(w, "  --env-file PATH     load KEY=VALUE lines into the environment first")
+	fprintln(w, "  --question TEXT     the assistant's question (ask) or instruction (propose)")
+	fprintln(w, "  --kind ask|propose  the turn kind (default ask)")
+	fprintln(w, "  --agent ALIAS       the agent hint, only if the CEO said a name")
+	fprintln(w, "  --alias NAME        the mock agent's alias (default auth)")
+	fprintln(w, "  --agent-kind KIND   the mock agent's kind (default codex)")
+	fprintln(w, "  --state STATE       working | idle | done | blocked (default idle; blocked runs")
+	fprintln(w, "                      the supervisor's block chain first, one cheap-LLM call)")
+	fprintln(w, "  --fixture NAME      screen fixture under testdata/herdr, or a path (default")
+	fprintln(w, "                      codex-after-approval.screen.txt)")
+	fprintln(w, "  --transcript PATH   a brain transcript (JSONL) to seed the run with")
+	fprintln(w, "  --say TEXT          a CEO utterance heard before the request (repeatable)")
+	fprintln(w, "  --model NAME        brain model (default config brain.model)")
+	fprintln(w, "  --timeout D         turn budget (default from config)")
+	fprintln(w, "  --fake              use a scripted model (read_screen, then an answer): no network")
+}
+
+type brainTestOpts struct {
+	configPath, envFile, question, kind, agent, alias, agentKind, st, fixture, transcript, model string
+	say                                                                                          multiFlag
+	timeout                                                                                      time.Duration
+	fake                                                                                         bool
+}
+
+// multiFlag collects a repeatable string flag.
+type multiFlag []string
+
+func (m *multiFlag) String() string     { return strings.Join(*m, "; ") }
+func (m *multiFlag) Set(v string) error { *m = append(*m, v); return nil }
+
+func parseBrainTestFlags(args []string, stderr io.Writer) (brainTestOpts, int, bool) {
+	fs := flag.NewFlagSet("brain-test", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.Usage = func() { printBrainTestUsage(stderr) }
+	var o brainTestOpts
+	fs.StringVar(&o.configPath, "config", "", "config file")
+	fs.StringVar(&o.envFile, "env-file", "", "env file")
+	fs.StringVar(&o.question, "question", "", "question or instruction")
+	fs.StringVar(&o.kind, "kind", "ask", "ask | propose")
+	fs.StringVar(&o.agent, "agent", "", "agent hint")
+	fs.StringVar(&o.alias, "alias", "auth", "mock agent alias")
+	fs.StringVar(&o.agentKind, "agent-kind", "codex", "mock agent kind")
+	fs.StringVar(&o.st, "state", "idle", "mock agent state")
+	fs.StringVar(&o.fixture, "fixture", "codex-after-approval.screen.txt", "screen fixture")
+	fs.StringVar(&o.transcript, "transcript", "", "transcript to seed")
+	fs.Var(&o.say, "say", "CEO utterance (repeatable)")
+	fs.StringVar(&o.model, "model", "", "brain model")
+	fs.DurationVar(&o.timeout, "timeout", 0, "turn budget")
+	fs.BoolVar(&o.fake, "fake", false, "scripted model")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return o, 0, false
+		}
+		return o, 2, false
+	}
+	if o.question == "" {
+		fprintln(stderr, "sheepdog brain-test: needs --question")
+		return o, 2, false
+	}
+	if o.kind != string(brain.KindAsk) && o.kind != string(brain.KindPropose) {
+		fprintln(stderr, "sheepdog brain-test: --kind must be ask or propose")
+		return o, 2, false
+	}
+	switch herdr.State(o.st) {
+	case herdr.StateWorking, herdr.StateIdle, herdr.StateDone, herdr.StateBlocked:
+	default:
+		fprintln(stderr, "sheepdog brain-test: --state must be working, idle, done or blocked")
+		return o, 2, false
+	}
+	return o, 0, true
+}
+
+// runBrainTest implements `sheepdog brain-test`.
+func runBrainTest(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	o, code, run := parseBrainTestFlags(args, stderr)
+	if !run {
+		return code
+	}
+	if o.envFile != "" {
+		if err := config.LoadEnvFile(o.envFile); err != nil {
+			fprintf(stderr, "sheepdog brain-test: %v\n", err)
+			return 1
+		}
+	}
+	cfg, err := config.Load(o.configPath)
+	if err != nil {
+		fprintf(stderr, "sheepdog: %v\n", err)
+		return 1
+	}
+	fixture := o.fixture
+	if !strings.ContainsRune(fixture, filepath.Separator) {
+		fixture = filepath.Join("testdata", "herdr", fixture)
+	}
+	screen, err := os.ReadFile(fixture)
+	if err != nil {
+		fprintf(stderr, "sheepdog brain-test: fixture: %v\n", err)
+		return 1
+	}
+	log := logging.NewJSONLLogger(stderr)
+
+	dir, err := os.MkdirTemp("", "brain-test")
+	if err != nil {
+		fprintf(stderr, "sheepdog brain-test: %v\n", err)
+		return 1
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
+
+	model, err := brainTestModel(o, cfg, log)
+	if err != nil {
+		fprintf(stderr, "sheepdog brain-test: %v\n", err)
+		return 1
+	}
+	bcfg := app.BrainConfig(cfg)
+	bcfg.DataDir = dir
+	if o.model != "" {
+		bcfg.Model = o.model
+	}
+	if o.timeout > 0 {
+		bcfg.AskTimeout, bcfg.ProposeTimeout = o.timeout, o.timeout
+	}
+	b, err := brain.New(bcfg, model, log)
+	if err != nil {
+		fprintf(stderr, "sheepdog brain-test: %v\n", err)
+		return 1
+	}
+	defer func() { _ = b.Close() }()
+
+	sup, mock, err := brainTestSupervisor(cfg, dir, b, log, stderr)
+	if err != nil {
+		fprintf(stderr, "sheepdog brain-test: %v\n", err)
+		return 1
+	}
+	const pane = "w1:p1"
+	mock.SetScreen(pane, o.agentKind, string(screen), herdr.State(o.st))
+	sup.SetVoiceConnected(true)
+	sup.HandleTransition(ctx, herdr.Transition{PaneID: pane, To: herdr.State(o.st), At: time.Now(), Agent: o.agentKind, WorkspaceID: "ws", WorkspaceLabel: o.alias, Source: state.SourceInject})
+	if o.transcript != "" {
+		msgs, err := brain.ReadTranscript(o.transcript)
+		if err != nil {
+			fprintf(stderr, "sheepdog brain-test: %v\n", err)
+			return 1
+		}
+		b.Seed(msgs)
+	}
+	for _, s := range o.say {
+		b.Heard(s, true)
+	}
+
+	start := time.Now()
+	var res voice.ToolResult
+	if o.kind == string(brain.KindPropose) {
+		res, err = sup.Propose(ctx, o.question, o.agent)
+	} else {
+		res, err = sup.Ask(ctx, o.question, o.agent)
+	}
+	b.Quiesce()
+	out := map[string]any{
+		"kind": o.kind, "question": o.question, "agent": o.agent, "dur_ms": time.Since(start).Milliseconds(),
+		"result":     map[string]any{"spoken": res.Spoken, "detail": res.Detail, "options": res.Options, "clarify": res.Clarify, "scheduling": res.Scheduling.String()},
+		"transcript": transcriptForReport(b.Transcript().Messages()),
+	}
+	if err != nil {
+		out["error"] = err.Error()
+	}
+	enc := json.NewEncoder(stdout)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(out); err != nil {
+		return 1
+	}
+	if err != nil {
+		return 1
+	}
+	return 0
+}
+
+// transcriptForReport drops the replayed model content (base64 thought
+// signatures) from the transcript so the report stays readable.
+func transcriptForReport(msgs []brain.Message) []brain.Message {
+	for i := range msgs {
+		msgs[i].Raw = nil
+	}
+	return msgs
+}
+
+// brainTestModel is the real Gemini model over the key pool, or the
+// scripted one with --fake.
+func brainTestModel(o brainTestOpts, cfg config.Config, log logging.Logger) (brain.Model, error) {
+	if o.fake {
+		m := braintest.NewModel(
+			braintest.Step{Calls: []*genai.FunctionCall{braintest.FC(brain.ToolReadScreen, map[string]any{"agent": o.alias})}},
+			braintest.Step{Text: braintest.Reply("The fake model read the screen of "+o.alias+".", "This is the scripted brain-test model; nothing was sent.")},
+		)
+		return m, nil
+	}
+	if len(cfg.Gemini.APIKeys) == 0 {
+		return nil, errors.New("no Gemini key (set GEMINI_API_KEY or use --fake)")
+	}
+	return brain.NewGenaiModel(cfg.Gemini.APIKeys, log)
+}
+
+// brainTestSupervisor builds a supervisor over a mock herdr, a fresh
+// state table under dir and the configured cheap LLM (its fallback path).
+func brainTestSupervisor(cfg config.Config, dir string, b *brain.Brain, log logging.Logger, stderr io.Writer) (*supervisor.Supervisor, *inject.Herdr, error) {
+	store, err := state.Open(filepath.Join(dir, "state.json"), state.Options{Aliases: map[string]string{}, Warn: stderr})
+	if err != nil {
+		return nil, nil, err
+	}
+	keys := cfg.LLMKeys()
+	if len(keys) == 0 {
+		keys = []string{"local"}
+	}
+	client, err := llm.New(llm.Config{BaseURL: cfg.LLM.BaseURL, Model: cfg.LLM.Model, APIKeys: keys, Timeout: time.Duration(cfg.LLM.TimeoutS) * time.Second, Log: log})
+	if err != nil {
+		return nil, nil, err
+	}
+	mock := inject.NewHerdr(nil, log)
+	sup, err := supervisor.New(store, mock, client, nil, inject.SkippedPusher{Log: log}, log, supervisor.Config{DataDir: dir, Brain: b, BriefingInterval: -1})
+	if err != nil {
+		return nil, nil, err
+	}
+	return sup, mock, nil
+}
