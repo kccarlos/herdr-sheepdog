@@ -78,6 +78,7 @@ sheepdog serve                              # the daemon: http://127.0.0.1:7777/
 sheepdog serve --voice=off --herdr=mock     # no Gemini, no herdr: drive it from /debug
 sheepdog serve --verbose --port 8080        # echo every event to stderr
 sheepdog serve --cli=off                    # disable the CLI query tool; ask() answers from the screen only
+sheepdog serve --brain=off                  # keep ask/propose on the template path (no supervisor brain)
 sheepdog serve --env-file path/to/.env      # load KEY=VALUE lines before config (default ./.env if present)
 sheepdog serve --voice=off --herdr=mock --dev  # also serve testdata/audio/*.wav at /testdata/ for /voice?src=file
 ```
@@ -90,6 +91,7 @@ sheepdog serve --voice=off --herdr=mock --dev  # also serve testdata/audio/*.wav
 | `sheepdog voice-test` | Stream a WAV (or `--text`) through a Gemini Live session with the echo tools; no daemon needed. |
 | `sheepdog llm-test` | Run one cheap-LLM template (`summarize_block`, `resolve_instruction`, `spoken_answer`, `summarize_done`) against a screen or instruction. |
 | `sheepdog ask-test` | Run the CLI query tool (codex/claude) plus the `spoken_answer` pass once. |
+| `sheepdog brain-test` | Run one supervisor-brain turn (`--question`, `--kind ask\|propose`) against a mock herdr with a screen fixture, an optional seed transcript and `--say` utterances; prints the reply and the transcript, `brain.*` events on stderr (`--fake` needs no network). |
 | `sheepdog version` \| `help` | Version/commit/build date \| this table. |
 
 `/voice`: mic → AudioWorklet → 16 kHz PCM16 → WebSocket, gapless 24 kHz
@@ -110,6 +112,27 @@ so the tool path is testable without a mic or herdr) — see
 `/debug` is read off the event log (D10); `GET /api/voice/system_prompt`
 returns the prompt the session runs with, and the header's chattiness
 dropdown switches the push policy at runtime (see below).
+
+## The supervisor brain
+
+Behind `ask` and `propose` sits the SVP of [`docs/roles.md`](docs/roles.md):
+a stateful agent (`internal/brain`, `gemini-3.5-flash` with function
+calling) that keeps one transcript per daemon run — your verbatim words,
+what the voice said, every push and worker state change, its own tool
+calls — so "why did *that one* fail?" still means something when it reads
+a screen. It reasons with `read_screen`, `run_cli`, `list_agents` and
+`recall`, acts with `prompt`, `send_keys` and `interrupt`, and treats
+everything read from a worker as data, never instructions. The one rail:
+it may answer a worker's approval prompt only on your words in that turn,
+with a key from the prompt's own options; the code enforces it, not the
+prompt. It falls back to the fast template path when it errors or runs out
+of budget (`brain.ask_timeout_s`, `brain.max_steps`), so the voice never
+waits on a loop. `sheepdog serve --brain=off` turns it off; it is also off
+without a Gemini key. Try it without a daemon: `sheepdog brain-test
+--question "what did it say?" --say "what did it say?" --fixture
+codex-after-approval.screen.txt`. The transcript lives at
+`<data_dir>/brain/<run-id>.jsonl`; every step is a `brain.*` event on
+`/debug`.
 
 ## How chatty is it?
 

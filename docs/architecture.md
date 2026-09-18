@@ -17,7 +17,8 @@ this is a short orientation for the code as built.
 │   VoiceSession ──── Gemini 3.8 Live (WebSocket, owned here)  │
 │        │ 5 tools + push                                      │
 │   Supervisor ── state table ── event log (JSONL) ── SSE      │
-│        │              │                                      │
+│        │  │           │                                      │
+│        │  └─ brain (gemini-3.5-flash + tools, transcript)    │
 │   herdr client   cheap LLM (OpenAI-compatible)                │
 │   (unix socket)  CLI query tool (codex exec / claude -p,     │
 │        │          read-only, timeout)                        │
@@ -33,7 +34,7 @@ Three layers, hard boundaries (plan §2):
 | Layer | Owns | Never does |
 |---|---|---|
 | Voice model (Gemini 3.8 Live) | hearing, speaking, turn-taking, deciding *whether* to call a tool | touch herdr, hold task state, plan multi-step work |
-| Supervisor (daemon) | state table, pending action, event routing, tool implementations, all model calls that are not voice | speak; make risk judgements beyond "did I understand the target" |
+| Supervisor (daemon) | state table, pending action, event routing, tool implementations, all model calls that are not voice; its brain (`internal/brain`, [`docs/roles.md`](roles.md)) reasons over the transcript with tools behind `ask`/`propose` | speak; bypass a worker's approval gate (the one rail: `send_keys` only on the CEO's words, from the prompt's option set) |
 | Workers (herdr panes) | actually changing code; their own approval prompts | — |
 
 The Gemini session lives in the daemon, not the browser; the browser is
@@ -47,21 +48,22 @@ exist.
 
 | Package | Owns |
 |---|---|
-| `cmd/sheepdog` | Flags, subcommands (`serve`, `config`, `herdr watch`, `voice-test`, `llm-test`, `ask-test`, `version`), wiring into `internal/app`. |
-| `internal/app` | Assembles the daemon: config → event log → state store → herdr client + `Watcher` (or `internal/inject`'s mock) → cheap LLM client → supervisor → voice session (or a no-op pusher with `--voice=off`) → web server; owns the run/shutdown lifecycle. |
+| `cmd/sheepdog` | Flags, subcommands (`serve`, `config`, `herdr watch`, `voice-test`, `llm-test`, `ask-test`, `brain-test`, `version`), wiring into `internal/app`. |
+| `internal/app` | Assembles the daemon: config → event log → state store → herdr client + `Watcher` (or `internal/inject`'s mock) → cheap LLM client → brain (`--brain`, needs a Gemini key) → supervisor → voice session (or a no-op pusher with `--voice=off`) → web server; owns the run/shutdown lifecycle. |
 | `internal/config` | Loads `~/.config/sheepdog/config.toml` + `SHEEPDOG_*` env overrides + `--env-file`; `config show`/`config init` support. See [`CONFIG.md`](../CONFIG.md). |
 | `internal/herdr` | The herdr unix socket client and the `Watcher` that turns its event streams into deduplicated, debounced `Transition`s. See [`docs/herdr-protocol.md`](herdr-protocol.md). |
 | `internal/state` | The persisted state table: per-pane rows (alias, kind, workspace, state, state_since, current task, last block), the single-slot pending action, session bookkeeping; atomic JSON persistence with a debounced hardware-durable fsync option. |
 | `internal/eventlog` | The append-only JSONL event log every component writes to (decision D10): one file per UTC day, an in-memory ring for late subscribers, SSE fan-out. |
 | `internal/llm` | The cheap-LLM adapter (decision D7, text-in/text-out only): an OpenAI-compatible `Client` plus the `prompts/*.txt` templates (`SummarizeBlock`, `ResolveInstruction`, `SpokenAnswer`) and the D9 scrubber (`Spoken`). |
 | `internal/cli` | The read-only CLI query tool: detects codex/claude on `PATH` and runs one non-interactively and read-only to back `ask()`'s deep path. See [`docs/cli-query-tools.md`](cli-query-tools.md). |
-| `internal/supervisor` | The daemon's brain: pure Go logic over the herdr client, the state table, the cheap LLM templates and the voice session's push channel — the only component that touches herdr (decision D1); implements the five voice tools and the pending-action lifecycle (decision D3). |
+| `internal/supervisor` | The daemon's coordinator: pure Go logic over the herdr client, the state table, the cheap LLM templates and the voice session's push channel — the only component that touches herdr (decision D1); implements the five voice tools and the pending-action lifecycle (decision D3), routes `ask`/`propose` through the brain when one is attached and is its `Host` (roster, ledger, reads, actions over the same pending paths), falling back to the template path on `ErrFallback`. |
+| `internal/brain` | The SVP (plan D7-revised, [`docs/roles.md`](roles.md)): a stateful agent loop over a function-calling model (`genai` `GenerateContent`, key pool rotating on 429) with `read_screen` / `run_cli` / `list_agents` / `recall` and the actions `prompt` / `send_keys` / `interrupt`; the one rail in the `send_keys` executor; provenance delimiters around worker output; one JSONL transcript per run under `<data_dir>/brain/`; the `ContextEngine` seam (ingest / assemble / compact / afterTurn, the memory plug point) with a default engine that prunes tool results to stubs and compacts the oldest half into a summary; two-priority turn serialisation; a sectioned system prompt from `prompts/svp/{SOUL,RULES}.md`. `braintest` holds the scripted model and in-memory host for tests. |
 | `internal/voice` | The model-agnostic `VoiceSession` contract (plan §3.7); `internal/voice/gemini` implements it for Gemini Live (session resumption, context compression, key rotation), `internal/voice/wav` and `internal/voice/wsproto` are its audio/framing helpers, `internal/voice/echotools` is a test double. |
 | `internal/web` | The HTTP surface on `127.0.0.1`: `/voice` and `/debug` (embedded static pages), `/events` (SSE), the audio+control WebSocket, and the small JSON API (state, inject, `/api/herdr/event`). |
 | `internal/inject` | The debug-only fake event path: lets `/debug` (and tests) drive the whole supervisor chain without a real herdr or a microphone. |
 | `internal/logging` | The tiny structured-event `Logger` interface every component logs through. |
 | `web/voice`, `web/debug` | Vanilla JS + AudioWorklet pages served by `internal/web`; `web/debug/conversation.js` is the pure event→chat grouping behind the Conversation tab and `web/debug/swimlane.js` the event→lanes/arrows/chains layout behind the Swimlane tab, both over `web/debug/grouping.js` (tool call/result pairing generic over any `<prefix>.tool_call`/`<prefix>.tool_result` family, fragments, dividers; `node --test`). |
-| `prompts/` | Embedded prompt templates for the cheap LLM. |
+| `prompts/` | Embedded prompt templates for the cheap LLM and the voice model; `prompts/svp/` holds the brain's SOUL.md and RULES.md. |
 | `plugin/` | The herdr plugin shim: manifest, hook script, install/uninstall, launchd plist template. See [`docs/herdr-protocol.md`](herdr-protocol.md) §8. |
 
 ## Event types
@@ -71,8 +73,9 @@ grepped from the source (`grep -rhoE '"[a-z_]+\.[a-z_]+"' internal cmd`)
 and grouped by source. This is decision D10's ground truth; `/debug` is
 only a viewer of it.
 
+- **brain**: `brain.turn` (`trigger` ceo\|event, `kind` ask\|propose, `steps`, `model_calls`, `dur_ms`, `fallback`, `tokens_in`, `tokens_out`, `window_tokens`, `acted`), `brain.step` (one model call: `step`, `model`, `dur_ms`, `prompt_tokens`, `completion_tokens`, `function_calls` names, `tool_calls` count, `forced` when answer-only, `template` = kind), `brain.tool_call` / `brain.tool_result` (paired by `id`; `name`, `args` / `dur_ms`, `result` truncated to 1 KB, `error`), `brain.rail_blocked` (a refused `send_keys`: `agent`, `keys`, `trigger`, `reason`), `brain.compaction` (`before_tokens`, `after_tokens`, `dropped`; its summary call is not counted in `brain.turn.model_calls`), `brain.fallback` (`reason`: timeout, step_budget, model_error, rate_limited, bad_reply, queue_timeout, cancelled; `acted`), `brain.system_prompt` (once per run: `sections` with `chars`, `total_chars`), `brain.rate_limited` (`key_index`, `keys`, `retry_after_ms`), `brain.transcript_error`
 - **cli**: `cli.detected`, `cli.run`
-- **daemon**: `daemon.start`, `daemon.stop`, `daemon.cli_error`, `daemon.drain_timeout`, `daemon.herdr_unavailable`, `daemon.voice_error`, `daemon.web_error`
+- **daemon**: `daemon.start` (`brain` on\|off, `brain_model`), `daemon.stop`, `daemon.cli_error`, `daemon.drain_timeout`, `daemon.herdr_unavailable`, `daemon.voice_error`, `daemon.web_error`
 - **eventlog**: `eventlog.subscriber_dropped`
 - **herdr**: `herdr.state`, `herdr.transition`, `herdr.debounce_cancelled`, `herdr.dedup`, `herdr.fleet`, `herdr.list_error`, `herdr.read`, `herdr.send`, `herdr.snapshot_error`
 - **llm**: `llm.call` (payload `template` is one of `summarize_block`, `resolve_instruction`, `spoken_answer`, `summarize_done`), `llm.rate_limited`
