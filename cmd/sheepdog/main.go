@@ -1,14 +1,17 @@
 // Command sheepdog is the sheepdog daemon entry point.
 //
-// This is a bootstrap skeleton: it only wires up the "version" and "help"
-// subcommands. Product logic (herdr client, supervisor, voice session, web
-// server) lands in later work packages per sheepdog-v1-plan.md.
+// Subcommands so far: "version", "help" and "herdr watch" (WP1). The
+// supervisor, voice session and web server land in later work packages per
+// sheepdog-v1-plan.md.
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
+	"syscall"
 )
 
 // version, commit, and date are injected at build time via:
@@ -24,19 +27,24 @@ var (
 )
 
 func main() {
-	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	os.Exit(run(ctx, os.Args[1:], os.Stdout, os.Stderr))
 }
 
 // run implements the CLI and returns the process exit code. It is
 // separated from main so it can be exercised by tests without calling
-// os.Exit.
-func run(args []string, stdout, stderr io.Writer) int {
+// os.Exit. ctx ends on SIGINT/SIGTERM; long-running subcommands return
+// cleanly when it does.
+func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if len(args) < 1 {
 		printUsage(stderr)
 		return 2
 	}
 
 	switch args[0] {
+	case "herdr":
+		return runHerdr(ctx, args[1:], stdout, stderr)
 	case "version":
 		fprintln(stdout, versionString(version, commit, date))
 		return 0
@@ -60,8 +68,9 @@ func printUsage(w io.Writer) {
 	fprintln(w, "usage: sheepdog <command>")
 	fprintln(w, "")
 	fprintln(w, "commands:")
-	fprintln(w, "  version   print version, commit, and build date")
-	fprintln(w, "  help      show this help message")
+	fprintln(w, "  herdr watch   print debounced agent state transitions, persist the table")
+	fprintln(w, "  version       print version, commit, and build date")
+	fprintln(w, "  help          show this help message")
 }
 
 // fprintln and fprintf write to w and intentionally discard the error:
