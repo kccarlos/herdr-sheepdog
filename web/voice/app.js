@@ -45,7 +45,8 @@ const state = {
   bytesOut: 0,
   bytesIn: 0,
   framesDropped: 0,
-  level: { peak: 0, rms: 0, muted: false },
+  level: { peak: 0, rms: 0, muted: false, gated: false, gatedFrames: 0 },
+  gate: { opts: {}, on: false, transitions: 0 }, // silence gate (docs/ws-contract.md)
   playback: { speaking: false, state: 'idle', bufferedMs: 0, underruns: 0, drains: 0, dropped: 0, flushes: 0, playedMs: 0 },
   lastUnderruns: 0,
   flushSeq: 0,
@@ -93,7 +94,7 @@ async function ensureAudio() {
 
   const capture = new AudioWorkletNode(ctx, 'sheepdog-capture', {
     numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1],
-    processorOptions: { muted: state.muted },
+    processorOptions: { muted: state.muted, gate: state.gate.opts },
   });
   capture.port.onmessage = (e) => onCaptureMessage(e.data);
   // A worklet is only rendered while it is connected to the destination;
@@ -111,6 +112,15 @@ async function ensureAudio() {
 function onCaptureMessage(m) {
   if (m.type === 'level') {
     state.level = m;
+    return;
+  }
+  if (m.type === 'silence') {
+    // The gate flipped: tell the daemon before (on) / after (off) the
+    // frames it affects, exactly like mute.
+    state.gate.on = m.on;
+    state.gate.transitions++;
+    send({ type: 'silence', on: m.on });
+    console.log(`[voice] silence gate ${m.on ? 'on' : 'off'} (peak ${Math.round(m.peak)} LSB, frames sent ${state.framesSent})`);
     return;
   }
   if (m.type !== 'frame') return;
@@ -269,8 +279,9 @@ function openWS() {
     if (state.ws !== ws) return;
     state.wsState = 'open';
     state.reconnectDelay = RECONNECT_MIN_MS;
-    // Reconnecting clients start unmuted on the daemon (contract).
+    // Reconnecting clients start unmuted and ungated on the daemon (contract).
     if (state.muted) send({ type: 'mute', on: true });
+    if (state.gate.on) send({ type: 'silence', on: true });
     startPing();
     render();
   };
@@ -324,7 +335,8 @@ function startPing() {
       return;
     }
     state.pingSentAt = performance.now();
-    state.pingOutstanding = send({ type: 'ping' });
+    // The ping carries the gate counters so web.client.stats can report them.
+    state.pingOutstanding = send({ type: 'ping', gated_frames: state.level.gatedFrames || 0, peak: Math.round((state.level.peak || 0) * 0x7fff) });
   }, PING_EVERY_MS);
 }
 
@@ -527,6 +539,9 @@ function render() {
   const ctx = state.ctx;
   $('st-ctx').textContent = ctx ? `${ctx.state}, ${ctx.sampleRate} Hz, out latency ${Math.round(((ctx.baseLatency || 0) + (ctx.outputLatency || 0)) * 1000)} ms` : '–';
   $('st-frames').textContent = `${state.framesSent}${state.framesDropped ? ` (dropped ${state.framesDropped})` : ''}`;
+  const g = state.gate;
+  $('st-gate').textContent = g.opts === false ? 'off (?gate=off)'
+    : `${state.level.gated && !state.muted ? 'silent (gated)' : 'open'} · ${state.level.gatedFrames || 0} frames gated · ${g.transitions} transitions`;
   $('st-bytes-out').textContent = fmtBytes(state.bytesOut);
   $('st-bytes-in').textContent = fmtBytes(state.bytesIn);
   const p = state.playback;
@@ -570,6 +585,22 @@ function renderTranscript() {
 
 // ---------------------------------------------------------------- wiring
 
+// gateOptions reads the silence gate knobs from the URL: ?gate=off disables
+// it, ?gate_floor=LSB, ?gate_hold=ms and ?gate_preroll=ms override the
+// defaults (8 LSB, 300 ms, 100 ms; see SilenceGate in audio-util.js).
+function gateOptions(params) {
+  if (params.get('gate') === 'off') return false;
+  const o = {};
+  const num = (key, field) => {
+    const v = Number(params.get(key));
+    if (params.has(key) && Number.isFinite(v) && v >= 0) o[field] = v;
+  };
+  num('gate_floor', 'floor');
+  num('gate_hold', 'holdMs');
+  num('gate_preroll', 'prerollMs');
+  return o;
+}
+
 function resumeIfSuspended() {
   const ctx = state.ctx;
   if (ctx && !state.userDisconnected && ctx.state !== 'running' && ctx.state !== 'closed') {
@@ -579,6 +610,7 @@ function resumeIfSuspended() {
 
 function init() {
   const params = new URLSearchParams(location.search);
+  state.gate.opts = gateOptions(params);
   if (params.get('src') === 'file') {
     state.source = 'file';
     $('source').value = 'file';

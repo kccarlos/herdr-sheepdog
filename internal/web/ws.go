@@ -22,6 +22,11 @@ const (
 	backpressureEvery = 100
 )
 
+// audioEnder is implemented by sessions that can tell the model the
+// microphone stream paused (Gemini: audioStreamEnd), so its VAD closes the
+// user's turn when the browser's silence gate stops sending frames.
+type audioEnder interface{ AudioStreamEnd() }
+
 // hub owns the single browser client and the daemon's view of the voice
 // state (docs/ws-contract.md).
 type hub struct {
@@ -179,6 +184,21 @@ func (h *hub) setMuted(on bool) {
 	h.send(h.statusMsg())
 }
 
+// setSilence records a silence-gate transition reported by the client and,
+// when the gate closed, tells the session the audio stream paused.
+func (h *hub) setSilence(c *client, on bool) {
+	c.mu.Lock()
+	c.silent = on
+	c.silenceTransitions++
+	c.mu.Unlock()
+	h.s.log.Log(logSource, "web.client.silence", "", map[string]any{"client_id": c.id, "on": on})
+	if on {
+		if v, ok := h.s.deps.Voice.(audioEnder); ok {
+			v.AudioStreamEnd()
+		}
+	}
+}
+
 // shutdown closes the client with a final status (daemon stopping).
 func (h *hub) shutdown(reason string) {
 	c := h.current()
@@ -229,6 +249,12 @@ type client struct {
 	bytesIn, bytesOut     int
 	droppedAudio, dropped int // dropped = total drops, for throttling
 	mutedDrops            int
+	// silence gate, as reported by the client (silence messages and the
+	// counters carried by its pings)
+	silent             bool
+	silenceTransitions int
+	gatedFrames        int
+	peak               int
 }
 
 func newClient(h *hub, conn *websocket.Conn, remote string, maxQueue int) *client {
@@ -394,9 +420,19 @@ func (c *client) onControl(data []byte) {
 	}
 	switch m.Type {
 	case wsproto.TypePing:
+		c.mu.Lock()
+		if m.GatedFrames != nil {
+			c.gatedFrames = *m.GatedFrames
+		}
+		if m.Peak != nil {
+			c.peak = *m.Peak
+		}
+		c.mu.Unlock()
 		c.enqueue(controlFrame(wsproto.Pong()))
 	case wsproto.TypeMute:
 		h.setMuted(*m.On)
+	case wsproto.TypeSilence:
+		h.setSilence(c, *m.On)
 	case wsproto.TypeCancel:
 		ctx, cancel := h.s.toolCtx()
 		res, err := h.s.runTool(ctx, voice.ToolCall{ID: "ws-cancel", Name: supervisor.ToolCancel}, "ws")
@@ -457,6 +493,7 @@ func (c *client) counters() map[string]any {
 		"client_id": c.id,
 		"frames_in": c.framesIn, "bytes_in": c.bytesIn, "frames_out": c.framesOut, "bytes_out": c.bytesOut,
 		"dropped_audio": c.droppedAudio, "muted_drops": c.mutedDrops, "queued": len(c.queue),
+		"silent": c.silent, "silence_transitions": c.silenceTransitions, "gated_frames": c.gatedFrames, "peak": c.peak,
 		"dur_ms": c.h.s.deps.Now().Sub(c.start).Milliseconds(),
 	}
 }

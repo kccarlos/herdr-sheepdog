@@ -190,14 +190,34 @@ func (s *Session) SetMuted(muted bool) {
 	s.muted = muted
 	conn := s.conn
 	s.mu.Unlock()
-	if changed && muted && conn != nil {
-		s.sendMu.Lock()
-		_ = conn.SendRealtimeInput(genai.LiveRealtimeInput{AudioStreamEnd: true})
-		s.sendMu.Unlock()
+	if changed && muted {
+		s.audioStreamEnd(conn)
 	}
 	if changed {
 		s.log.Log(logSource, "voice.muted", "", map[string]any{"muted": muted})
 	}
+}
+
+// AudioStreamEnd tells the server the microphone stream paused (the
+// client's silence gate closed) so its VAD finalises the current utterance
+// instead of waiting for frames that will not come. The next SendAudio
+// reopens the stream. No-op while muted or disconnected.
+func (s *Session) AudioStreamEnd() {
+	s.mu.Lock()
+	conn, muted := s.conn, s.muted
+	s.mu.Unlock()
+	if !muted {
+		s.audioStreamEnd(conn)
+	}
+}
+
+func (s *Session) audioStreamEnd(conn Conn) {
+	if conn == nil {
+		return
+	}
+	s.sendMu.Lock()
+	_ = conn.SendRealtimeInput(genai.LiveRealtimeInput{AudioStreamEnd: true})
+	s.sendMu.Unlock()
 }
 
 // Muted reports the current mute state.

@@ -111,6 +111,28 @@ func TestAudioInAndMute(t *testing.T) {
 	}
 }
 
+// TestAudioStreamEnd: the silence gate's "stream paused" signal reaches
+// the server as audioStreamEnd, but not while muted (mute already sent
+// it) and never before a connection exists.
+func TestAudioStreamEnd(t *testing.T) {
+	c := newFakeConn("c1")
+	h := newHarness(t, Config{}, &fakeDialer{results: []func() (Conn, error){ok(c)}})
+	h.s.AudioStreamEnd()
+	c.waitSent(t, "audioStreamEnd", func(m sent) bool { return m.kind == "audioEnd" })
+	h.s.SetMuted(true)
+	c.waitSent(t, "audioStreamEnd on mute", func(m sent) bool { return m.kind == "audioEnd" })
+	h.s.AudioStreamEnd()
+	time.Sleep(20 * time.Millisecond)
+	if n := c.count("audioEnd"); n != 2 {
+		t.Fatalf("audioEnd sent %d times, want 2 (gate, mute; not gate-while-muted)", n)
+	}
+	h.s.SetMuted(false)
+	if err := h.s.SendAudio([]byte{1, 2}); err != nil {
+		t.Fatal(err)
+	}
+	c.waitSent(t, "audio reopens the stream", func(m sent) bool { return m.kind == "audio" })
+}
+
 func TestOutputQueueFlushOnInterrupted(t *testing.T) {
 	c := newFakeConn("c1")
 	h := newHarness(t, Config{}, &fakeDialer{results: []func() (Conn, error){ok(c)}})
