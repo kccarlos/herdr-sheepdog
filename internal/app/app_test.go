@@ -90,22 +90,34 @@ func TestBuildValidation(t *testing.T) {
 	_ = a.elog.Close()
 	// --brain=off, brain.enabled=false and no key each leave it off.
 	for name, tc := range map[string]struct {
-		cfg  config.Config
-		opts Options
+		cfg    config.Config
+		opts   Options
+		reason string
 	}{
-		"flag":    {gem, Options{Voice: VoiceOff, Herdr: HerdrMock, Brain: BrainOff}},
-		"config":  {func() config.Config { c := gem; c.Brain.Enabled = false; return c }(), Options{Voice: VoiceOff, Herdr: HerdrMock}},
-		"no-keys": {cfg, Options{Voice: VoiceOff, Herdr: HerdrMock}},
+		"flag":    {gem, Options{Voice: VoiceOff, Herdr: HerdrMock, Brain: BrainOff}, "--brain=off"},
+		"config":  {func() config.Config { c := gem; c.Brain.Enabled = false; return c }(), Options{Voice: VoiceOff, Herdr: HerdrMock}, "brain.enabled=false"},
+		"no-keys": {cfg, Options{Voice: VoiceOff, Herdr: HerdrMock}, "no Gemini key"},
 	} {
 		a, err := Build(tc.cfg, tc.opts)
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
-		if a.Brain() != nil {
-			t.Errorf("%s: brain attached", name)
+		if a.Brain() != nil || a.BrainMode() != BrainOff || a.BrainOffReason() != tc.reason {
+			t.Errorf("%s: brain = %v, mode %s, reason %q", name, a.Brain(), a.BrainMode(), a.BrainOffReason())
 		}
 		_ = a.elog.Close()
 	}
+	// --brain=fake needs no key: the reflex model is attached and the
+	// brain endpoints answer.
+	a, err = Build(cfg, Options{Voice: VoiceOff, Herdr: HerdrMock, Brain: BrainFake})
+	if err != nil {
+		t.Fatalf("fake: %v", err)
+	}
+	if a.Brain() == nil || a.BrainMode() != BrainFake || a.BrainOffReason() != "" || a.sup.Brain() != a.Brain() || a.Brain().Config().Model != FakeBrainModel {
+		t.Errorf("fake brain not wired: %v %s %q", a.Brain(), a.BrainMode(), a.BrainOffReason())
+	}
+	_ = a.Brain().Close()
+	_ = a.elog.Close()
 }
 
 func TestRunMockVoiceOffFullChain(t *testing.T) {

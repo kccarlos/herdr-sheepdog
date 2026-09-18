@@ -9,6 +9,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -360,3 +362,183 @@ func (h *Host) aliasLocked(paneID string) string {
 
 // ErrBoom is a generic failure for tests.
 var ErrBoom = errors.New("boom")
+
+// Request line shapes the reflex model parses (see assemble.go
+// requestText and brain.summarize).
+var (
+	reRequest   = regexp.MustCompile(`Request from the assistant \((ask|propose)\): (?:question|instruction)="((?:[^"\\]|\\.)*)" agent=(?:"((?:[^"\\]|\\.)*)"|\(none)`)
+	reSummarise = regexp.MustCompile(`^Summarise the following`)
+)
+
+// Reflex returns a Model that answers from what it sees instead of a
+// script, so a whole daemon can run the brain loop without a network:
+// `sheepdog serve --brain=fake`. An ask reads the named agent's screen
+// and answers with its last line; a propose sends the instruction with
+// prompt and reports the echo. When no name was given it lists the
+// agents first and picks the one the words name (or the only one, or
+// the first blocked one): an ask then reads its screen, a propose
+// prompts it with "tell <alias> to" stripped; with no pick an ask
+// answers with the roster and a propose asks which agent. The compaction
+// summariser's prompt gets a one-line summary. Every answer is the JSON
+// of the answer contract, so the loop runs exactly as with a real model:
+// request → tool call → tool result → reply, with brain.* events and
+// transcript messages.
+func Reflex() *Model {
+	m := &Model{}
+	m.Default = &Step{Fn: reflex}
+	return m
+}
+
+// reflex computes one response from the call.
+func reflex(call Call) (*genai.GenerateContentResponse, error) {
+	if len(call.Contents) == 0 {
+		return Response(Step{Text: Reply("I have nothing to go on.", "")}), nil
+	}
+	last := call.Contents[len(call.Contents)-1]
+	var text string
+	for _, p := range last.Parts {
+		if p.FunctionResponse != nil {
+			usage := [2]int32{int32(len(call.Text()) / 4), 40}
+			if p.FunctionResponse.Name == brain.ToolListAgents {
+				kind, question := lastRequest(call)
+				if alias := pickAgent(p.FunctionResponse, question); alias != "" {
+					if kind == "propose" {
+						return Response(Step{Calls: []*genai.FunctionCall{FC(brain.ToolPrompt, map[string]any{"agent": alias, "text": instructionFor(alias, question)})}, Usage: usage}), nil
+					}
+					return Response(Step{Calls: []*genai.FunctionCall{FC(brain.ToolReadScreen, map[string]any{"agent": alias, "lines": float64(100)})}, Usage: usage}), nil
+				}
+				if kind == "propose" {
+					return Response(Step{Text: Reply("Which agent should I tell?", "The CEO did not say a name and the fake model does not guess."), Usage: usage}), nil
+				}
+			}
+			return Response(Step{Text: replyFromResult(p.FunctionResponse), Usage: usage}), nil
+		}
+		text += p.Text
+	}
+	if reSummarise.MatchString(strings.TrimSpace(text)) {
+		lines := strings.Count(strings.TrimSpace(text), "\n")
+		return Response(Step{Text: fmt.Sprintf("Summary by the fake model: %d transcript lines about the agents and what the CEO asked; nothing is still open.", lines)}), nil
+	}
+	// The newest request line decides.
+	reqs := reRequest.FindAllStringSubmatch(text, -1)
+	if len(reqs) == 0 {
+		return Response(Step{Text: Reply("The fake model has no request to answer.", "This is the reflex model (--brain=fake); it only answers ask and propose requests."), Usage: [2]int32{int32(len(call.Text()) / 4), 20}}), nil
+	}
+	req := reqs[len(reqs)-1]
+	kind, question, agent := req[1], unquote(req[2]), unquote(req[3])
+	usage := [2]int32{int32(len(call.Text()) / 4), 30}
+	if call.Config != nil && call.Config.ToolConfig != nil && call.Config.ToolConfig.FunctionCallingConfig != nil && call.Config.ToolConfig.FunctionCallingConfig.Mode == genai.FunctionCallingConfigModeNone {
+		return Response(Step{Text: Reply("I ran out of steps before reading anything.", "The fake model was asked to answer without tools."), Usage: usage}), nil
+	}
+	switch {
+	case kind == "propose" && agent != "":
+		return Response(Step{Calls: []*genai.FunctionCall{FC(brain.ToolPrompt, map[string]any{"agent": agent, "text": question})}, Usage: usage}), nil
+	case agent == "":
+		// No name given: the roster decides (the question may name one).
+		return Response(Step{Calls: []*genai.FunctionCall{FC(brain.ToolListAgents, nil)}, Usage: usage}), nil
+	default:
+		return Response(Step{Calls: []*genai.FunctionCall{FC(brain.ToolReadScreen, map[string]any{"agent": agent, "lines": float64(100)})}, Usage: usage}), nil
+	}
+}
+
+// replyFromResult renders the answer after one tool result: the echo of
+// an action, an error, or the first lines of a read.
+func replyFromResult(fr *genai.FunctionResponse) string {
+	if e, ok := fr.Response["error"].(string); ok && e != "" {
+		return Reply(fmt.Sprintf("I could not do that: %s.", firstLine(e)), "The tool "+fr.Name+" failed: "+e)
+	}
+	out, _ := fr.Response["output"].(string)
+	switch fr.Name {
+	case brain.ToolPrompt, brain.ToolSendKeys, brain.ToolInterrupt:
+		return Reply(strings.TrimSpace(out), "Sent through "+fr.Name+".")
+	case brain.ToolListAgents:
+		return Reply("Here is the roster.", llmTrim(out, 300))
+	default:
+		body := out
+		if i := strings.Index(body, ">>>\n"); i >= 0 {
+			body = body[i+4:]
+		}
+		body = strings.TrimSuffix(strings.TrimSpace(body), "<<<END_WORKER_OUTPUT>>>")
+		var lines []string
+		for _, l := range strings.Split(strings.TrimSpace(body), "\n") {
+			if l = strings.TrimSpace(l); l != "" {
+				lines = append(lines, l)
+			}
+		}
+		spoken := "The screen is empty."
+		if n := len(lines); n > 0 {
+			spoken = fmt.Sprintf("The screen ends with: %s", llmTrim(lines[n-1], 120))
+		}
+		return Reply(spoken, fmt.Sprintf("Read %d non-empty lines through %s; the fake model quotes the last one and reasons no further.", len(lines), fr.Name))
+	}
+}
+
+// lastRequest returns the newest request's kind and question in the call.
+func lastRequest(call Call) (kind, question string) {
+	for _, c := range call.Contents {
+		for _, p := range c.Parts {
+			for _, m := range reRequest.FindAllStringSubmatch(p.Text, -1) {
+				kind, question = m[1], unquote(m[2])
+			}
+		}
+	}
+	return kind, question
+}
+
+// instructionFor strips a leading "tell <alias> to" from an instruction
+// the text router passed through verbatim.
+func instructionFor(alias, instruction string) string {
+	re := regexp.MustCompile(`(?i)^(?:tell|ask|have|instruct)\s+` + regexp.QuoteMeta(alias) + `\s+(?:to\s+)?`)
+	if out := strings.TrimSpace(re.ReplaceAllString(instruction, "")); out != "" {
+		return out
+	}
+	return instruction
+}
+
+// pickAgent chooses the agent to read after a list_agents result: the
+// one the question names, else the only one, else the first blocked
+// one; "" when none applies.
+func pickAgent(fr *genai.FunctionResponse, question string) string {
+	out, _ := fr.Response["output"].(string)
+	var rows []struct {
+		Alias string `json:"alias"`
+		State string `json:"state"`
+	}
+	if err := json.Unmarshal([]byte(out), &rows); err != nil || len(rows) == 0 {
+		return ""
+	}
+	q := strings.ToLower(question)
+	for _, r := range rows {
+		if r.Alias != "" && strings.Contains(q, strings.ToLower(r.Alias)) {
+			return r.Alias
+		}
+	}
+	if len(rows) == 1 {
+		return rows[0].Alias
+	}
+	for _, r := range rows {
+		if r.State == "blocked" {
+			return r.Alias
+		}
+	}
+	return ""
+}
+
+func unquote(s string) string {
+	if u, err := strconv.Unquote(`"` + s + `"`); err == nil {
+		return u
+	}
+	return s
+}
+
+func firstLine(s string) string {
+	s, _, _ = strings.Cut(strings.TrimSpace(s), "\n")
+	return s
+}
+
+func llmTrim(s string, n int) string {
+	if len(s) > n {
+		return s[:n] + "…"
+	}
+	return s
+}

@@ -154,6 +154,11 @@ class Builder {
         return this.toolResult(ev, p);
       case 'brain.step':
         return this.brainStep(ev, p);
+      case 'brain.transcript':
+        // Bookkeeping ("message N was ingested"): a stats card, hidden
+        // with the other stats by default; the Supervisor tab shows the
+        // message itself.
+        return this.plain(ev, 'sup', { title: 'transcript', summary: `#${p.seq ?? '?'} ${p.kind || ''}${p.turn ? ` · turn ${p.turn}` : ''}`, cls: ['minor', 'stats', 'brain'], stats: true });
       case 'brain.compaction': {
         const card = this.plain(ev, 'sup', { title: 'compaction', cls: ['minor', 'brain'] });
         card.chain = this.workChain(card);

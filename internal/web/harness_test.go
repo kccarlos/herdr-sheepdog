@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kccarlos/herdr-sheepdog/internal/brain"
+	"github.com/kccarlos/herdr-sheepdog/internal/brain/braintest"
 	"github.com/kccarlos/herdr-sheepdog/internal/eventlog"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/inject"
@@ -147,13 +149,17 @@ type harness struct {
 type harnessOpts struct {
 	voice   bool
 	watcher bool
-	// devTestdata serves /testdata/ from this directory (dev mode).
-	devTestdata string
+	// devTestdata serves /testdata/ from this directory (dev mode);
+	// devBrain /testdata/brain/.
+	devTestdata, devBrain string
 	// statsInterval shortens the web.client.stats period.
 	statsInterval time.Duration
 	// reloadPrompts backs POST /api/prompts/reload; nil leaves it unset
 	// (503).
 	reloadPrompts func() []prompts.File
+	// brain attaches a brain over the reflex fake model (--brain=fake)
+	// to the supervisor and the server.
+	brain bool
 }
 
 func newHarness(t *testing.T, o harnessOpts) *harness {
@@ -178,14 +184,22 @@ func newHarness(t *testing.T, o harnessOpts) *harness {
 		session = newFakeSession()
 		pusher = session
 	}
-	sup, err := supervisor.New(store, h, client, nil, pusher, log, supervisor.Config{BriefingInterval: -1})
+	var b *brain.Brain
+	if o.brain {
+		b, err = brain.New(brain.Config{PruneAfterTurns: 1}, braintest.Reflex(), log)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = b.Close() })
+	}
+	sup, err := supervisor.New(store, h, client, nil, pusher, log, supervisor.Config{BriefingInterval: -1, Brain: b})
 	if err != nil {
 		t.Fatal(err)
 	}
 	sup.SetVoiceConnected(true)
 	injector := inject.NewInjector(store, h, sup, log, nil)
-	deps := Deps{Log: log, Store: store, Supervisor: sup, Injector: injector, Router: &inject.Router{}, Version: "test", Heartbeat: 200 * time.Millisecond, OutQueue: 8, DevTestdataDir: o.devTestdata, StatsInterval: o.statsInterval,
-		SystemPrompt: func() string { return "You are the voice. Aliases: auth." }, Aliases: []string{"auth"}, ReloadPrompts: o.reloadPrompts}
+	deps := Deps{Log: log, Store: store, Supervisor: sup, Injector: injector, Router: &inject.Router{}, Version: "test", Heartbeat: 200 * time.Millisecond, OutQueue: 8, DevTestdataDir: o.devTestdata, DevBrainDir: o.devBrain, StatsInterval: o.statsInterval,
+		SystemPrompt: func() string { return "You are the voice. Aliases: auth." }, Aliases: []string{"auth"}, ReloadPrompts: o.reloadPrompts, Brain: b, BrainOffReason: "--brain=off"}
 	if session != nil {
 		deps.Voice = session
 	}

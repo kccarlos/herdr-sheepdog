@@ -45,6 +45,27 @@ type Compaction struct {
 	Summary Message
 }
 
+// WindowEntry is one message of the window as the Supervisor tab sees
+// it: which transcript message (Seq), its size in the window, and whether
+// the window holds only a stub of it.
+type WindowEntry struct {
+	Seq    int         `json:"seq"`
+	Kind   MessageKind `json:"kind"`
+	Turn   int         `json:"turn"`
+	Tokens int         `json:"tokens"`
+	// Pruned means the window's copy is the one-line Stub, not the
+	// transcript's full content.
+	Pruned bool   `json:"pruned"`
+	Stub   string `json:"stub,omitempty"`
+}
+
+// WindowReporter is the optional view a ContextEngine may offer of its
+// window (the default engine does); Brain.Window derives one from
+// Assemble for engines that do not.
+type WindowReporter interface {
+	Window() []WindowEntry
+}
+
 // Summarizer turns a rendering of old messages into a summary: the
 // default engine's one model call per compaction.
 type Summarizer func(ctx context.Context, text string) (string, error)
@@ -94,6 +115,22 @@ func (e *DefaultEngine) Assemble(int) Assembly {
 		out = append(out, en.msg)
 	}
 	return Assembly{Messages: out}
+}
+
+// Window implements WindowReporter: the window in order, one entry per
+// message, pruned ones with their stub.
+func (e *DefaultEngine) Window() []WindowEntry {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	out := make([]WindowEntry, 0, len(e.window))
+	for _, en := range e.window {
+		w := WindowEntry{Seq: en.msg.Seq, Kind: en.msg.Kind, Turn: en.turn, Tokens: en.msg.Tokens, Pruned: en.pruned}
+		if en.pruned {
+			w.Stub = en.msg.Content
+		}
+		out = append(out, w)
+	}
+	return out
 }
 
 // Tokens implements ContextEngine.

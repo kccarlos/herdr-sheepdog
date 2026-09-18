@@ -106,7 +106,17 @@ func TestDevTestdataRoute(t *testing.T) {
 	})
 
 	t.Run("on", func(t *testing.T) {
-		h := newHarness(t, harnessOpts{devTestdata: dir})
+		brainDir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(brainDir, "sample-run.jsonl"), []byte("{\"kind\":\"note\"}\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		h := newHarness(t, harnessOpts{devTestdata: dir, devBrain: brainDir})
+		if code, ctype, body := get(h, "/testdata/brain/sample-run.jsonl"); code != http.StatusOK || ctype != "application/x-ndjson" || body != "{\"kind\":\"note\"}\n" {
+			t.Errorf("GET /testdata/brain/sample-run.jsonl = %d %q %q", code, ctype, body)
+		}
+		if code, _, _ := get(h, "/testdata/brain/question.wav"); code != http.StatusNotFound {
+			t.Errorf("brain route served a .wav: %d", code)
+		}
 		code, ctype, body := get(h, "/testdata/question.wav")
 		if code != http.StatusOK || body != "RIFFfake" {
 			t.Errorf("GET /testdata/question.wav = %d %q", code, body)

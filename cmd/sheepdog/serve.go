@@ -38,9 +38,11 @@ func printServeUsage(w io.Writer) {
 	fprintln(w, "  --herdr MODE      socket | mock (default socket; mock needs no running herdr)")
 	fprintln(w, "  --cli MODE        on | off (default on; off disables the CLI query tool, ask()")
 	fprintln(w, "                    then answers from the screen alone)")
-	fprintln(w, "  --brain MODE      on | off (default on; the supervisor brain behind ask/propose,")
-	fprintln(w, "                    needs a Gemini key and config brain.enabled; off keeps the")
-	fprintln(w, "                    template path)")
+	fprintln(w, "  --brain MODE      on | off | fake (default on; the supervisor brain behind")
+	fprintln(w, "                    ask/propose, needs a Gemini key and config brain.enabled; off")
+	fprintln(w, "                    keeps the template path; fake runs the loop over a scripted")
+	fprintln(w, "                    reflex model with no network call, for the /debug")
+	fprintln(w, "                    Supervisor tab — a developer mode like --herdr=mock)")
 	fprintln(w, "  --data-dir PATH   data directory for the event log and state (default from config)")
 	fprintln(w, "  --verbose         also print every event to stderr as JSON lines")
 	fprintln(w, "  --dev             serve testdata/audio/*.wav at /testdata/ so the voice page")
@@ -137,11 +139,7 @@ func runServe(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 		return 1
 	}
 	fprintf(stderr, "sheepdog serve %s: %s\n", version, cfg)
-	brainMode := app.BrainOff
-	if a.Brain() != nil {
-		brainMode = app.BrainOn
-	}
-	fprintf(stdout, "sheepdog %s listening on %s (voice=%s herdr=%s cli=%s brain=%s)\n", version, a.URL(), o.voice, o.herdr, o.cli, brainMode)
+	fprintf(stdout, "sheepdog %s listening on %s (voice=%s herdr=%s cli=%s brain=%s)\n", version, a.URL(), o.voice, o.herdr, o.cli, a.BrainMode())
 	fprintf(stdout, "  voice page  %s/voice\n", a.URL())
 	fprintf(stdout, "  debug page  %s/debug\n", a.URL())
 	fprintf(stdout, "  events      %s/events\n", a.URL())

@@ -79,6 +79,7 @@ sheepdog serve --voice=off --herdr=mock     # no Gemini, no herdr: drive it from
 sheepdog serve --verbose --port 8080        # echo every event to stderr
 sheepdog serve --cli=off                    # disable the CLI query tool; ask() answers from the screen only
 sheepdog serve --brain=off                  # keep ask/propose on the template path (no supervisor brain)
+sheepdog serve --brain=fake --voice=off --herdr=mock --dev   # the brain loop over a fake model, for /debug's Supervisor tab
 sheepdog serve --env-file path/to/.env      # load KEY=VALUE lines before config (default ./.env if present)
 sheepdog serve --voice=off --herdr=mock --dev  # also serve testdata/audio/*.wav at /testdata/ for /voice?src=file
 ```
@@ -98,7 +99,7 @@ sheepdog serve --voice=off --herdr=mock --dev  # also serve testdata/audio/*.wav
 
 `/voice`: mic → AudioWorklet → 16 kHz PCM16 → WebSocket, gapless 24 kHz
 playback, mute/stop, auto-reconnect, a silence gate for quiet mics.
-`/debug`: four tabs — **Swimlane** (the default: a sequence diagram with
+`/debug`: five tabs — **Swimlane** (the default: a sequence diagram with
 four lanes, You · Voice model · Supervisor · herdr / LLM / CLI, one card
 per event and arrows for every hop with its latency, chains that light up
 across lanes when you click a tool call or an arrow, compressed quiet time,
@@ -107,13 +108,32 @@ under 700 px it becomes one column with a lane badge on each card),
 **Conversation** (the voice session as a chat: system prompt, your
 utterances, the dog's replies, tool calls that expand to their arguments,
 result and the supervisor events behind them, supervisor pushes, session
-dividers, per-turn response times), **Events** (the live event log with
-filters) and **State** (state table, pending action, fake-event injection
-so the tool path is testable without a mic or herdr) — see
-[`docs/ws-contract.md`](docs/ws-contract.md). Everything on
-`/debug` is read off the event log (D10); `GET /api/voice/system_prompt`
+dividers, per-turn response times), **Supervisor** (the brain's own
+transcript as a chat — your verbatim words, the assistant's replies muted,
+the assistant's `ask`/`propose` requests, the SVP's tool calls collapsed
+to their arguments, result with the provenance delimiters and raw JSON,
+its replies with `needs_user`/`clarify` badges, pushes, worker events,
+compaction cards — under a prompt-budget meter: the system prompt's
+sections by source (embedded / override / dynamic) and the window's
+messages by kind against `brain.window_tokens`, with a marker where the
+on-disk transcript stops being what the model sees and pruned tool
+results shown as their stub but still expandable to the full text;
+"Brain off" with the reason when there is no brain), **Events** (the
+live event log with filters) and **State** (state table, pending action,
+fake-event injection so the tool path is testable without a mic or
+herdr) — see [`docs/ws-contract.md`](docs/ws-contract.md). Everything
+on `/debug` is read off the event log (D10), except the Supervisor tab,
+which reads the brain's own store through `GET /api/brain/transcript`,
+`/api/brain/context` and `/api/brain/system_prompt` (the `brain.transcript`
+event only tells it to fetch again); `GET /api/voice/system_prompt`
 returns the prompt the session runs with, and the header's chattiness
-dropdown switches the push policy at runtime (see below).
+dropdown switches the push policy at runtime (see below). To see the
+Supervisor tab without a Gemini key, `sheepdog serve --voice=off
+--herdr=mock --dev --brain=fake` runs the brain loop over a scripted
+reflex model (a developer mode: an ask reads the screen, a propose
+prompts; no network call), and
+`sheepdogDebug.loadTranscript('/testdata/brain/sample-run.jsonl')` in
+the console loads a sample run.
 
 ## The supervisor brain
 

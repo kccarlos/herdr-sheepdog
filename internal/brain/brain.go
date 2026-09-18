@@ -143,6 +143,18 @@ type Brain struct {
 	outBuf       []string
 	promptLogged bool
 	userVars     map[string]string // USER.md's {chattiness}/{tz}; SetUserVars
+	// lastCompaction is the most recent successful compaction (zero
+	// value when none), for the Supervisor tab.
+	lastCompaction CompactionInfo
+}
+
+// CompactionInfo describes one compaction for Brain.LastCompaction.
+type CompactionInfo struct {
+	BeforeTokens int       `json:"before_tokens"`
+	AfterTokens  int       `json:"after_tokens"`
+	Dropped      int       `json:"dropped"`
+	SummarySeq   int       `json:"summary_seq"`
+	At           time.Time `json:"at"`
 }
 
 // New builds a Brain over model. log may be nil. The Host is attached by
@@ -168,6 +180,12 @@ func New(cfg Config, model Model, log logging.Logger) (*Brain, error) {
 	if err != nil {
 		return nil, err
 	}
+	// brain.transcript is the lightweight "something was ingested" event
+	// the Supervisor tab fetches incrementally on (the message itself is
+	// served by the transcript API, not carried in the event).
+	b.transcript.OnAppend(func(m Message) {
+		log.Log(logSource, "brain.transcript", "", map[string]any{"seq": m.Seq, "kind": string(m.Kind), "turn": m.Turn})
+	})
 	b.engine = cfg.Engine
 	if b.engine == nil {
 		b.engine = NewDefaultEngine(cfg.PruneAfterTurns, b.summarize, func(m Message) Message { return b.transcript.Append(m) })
@@ -198,6 +216,45 @@ func (b *Brain) Transcript() *Transcript { return b.transcript }
 
 // Engine returns the context engine in use.
 func (b *Brain) Engine() ContextEngine { return b.engine }
+
+// Config returns the effective configuration (defaults applied).
+func (b *Brain) Config() Config { return b.cfg }
+
+// Turns returns how many turns have started.
+func (b *Brain) Turns() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.turns
+}
+
+// Window reports what the model would see on the next call, in order:
+// the engine's own view when it is a WindowReporter, else one derived
+// from Assemble, marking a message whose content differs from the
+// transcript's as pruned.
+func (b *Brain) Window() []WindowEntry {
+	if wr, ok := b.engine.(WindowReporter); ok {
+		return wr.Window()
+	}
+	full := b.transcript.Messages()
+	asm := b.engine.Assemble(b.cfg.WindowTokens)
+	out := make([]WindowEntry, 0, len(asm.Messages))
+	for _, m := range asm.Messages {
+		w := WindowEntry{Seq: m.Seq, Kind: m.Kind, Turn: m.Turn, Tokens: m.Tokens}
+		if m.Seq >= 1 && m.Seq <= len(full) && full[m.Seq-1].Content != m.Content {
+			w.Pruned, w.Stub = true, m.Content
+		}
+		out = append(out, w)
+	}
+	return out
+}
+
+// LastCompaction returns the most recent compaction, ok false when none
+// happened yet.
+func (b *Brain) LastCompaction() (CompactionInfo, bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.lastCompaction, !b.lastCompaction.At.IsZero()
+}
 
 // TranscriptPath returns the transcript file, or "" when in memory.
 func (b *Brain) TranscriptPath() string {

@@ -33,6 +33,7 @@
 <nav class="tabs" id="tabs">
   <button data-tab="swimlane">Swimlane</button>
   <button data-tab="conversation">Conversation</button>
+  <button data-tab="supervisor">Supervisor</button>
   <button data-tab="events">Events</button>
   <button data-tab="state">State</button>
 </nav>
@@ -78,6 +79,28 @@
       <input id="conv-text" placeholder="type an utterance (Enter to send)" autocomplete="off">
       <button id="conv-send" class="primary">Send</button>
       <span id="conv-result" class="muted small"></span>
+    </div>
+  </section>
+
+  <section id="tab-supervisor" class="tab hidden">
+    <div id="svp-meter" class="svp-meter" title="the prompt-budget meter: what the SVP's next model call carries"></div>
+    <div class="toolbar">
+      <button id="svp-expand">Expand all</button>
+      <button id="svp-collapse">Collapse all</button>
+      <label><input type="checkbox" id="svp-hide-worker"> hide worker events</label>
+      <label><input type="checkbox" id="svp-hide-assistant"> hide assistant replies</label>
+      <label><input type="checkbox" id="svp-window-only"> only the current window</label>
+      <button id="svp-refresh" title="re-fetch the transcript and the window">Refresh</button>
+      <span class="muted" id="svp-count"></span>
+    </div>
+    <div class="conv-wrap">
+      <div id="supervisor" class="conversation supervisor"></div>
+      <button id="svp-new" class="new-pill hidden">new messages ↓</button>
+    </div>
+    <div class="row chat-input">
+      <input id="svp-text" placeholder="type an utterance (Enter to send): ask … / what … / tell auth to …" autocomplete="off">
+      <button id="svp-send" class="primary">Send</button>
+      <span id="svp-result" class="muted small"></span>
     </div>
   </section>
 

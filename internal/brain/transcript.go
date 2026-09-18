@@ -52,6 +52,12 @@ const (
 
 // Message is one transcript line.
 type Message struct {
+	// Seq is the message's position in the run's transcript, 1-based and
+	// monotonically increasing; assigned by Transcript.Append and kept
+	// in memory only (the on-disk line order is the seq). The context
+	// window's copies carry it, which is how the Supervisor tab maps the
+	// window back onto the transcript.
+	Seq     int         `json:"-"`
 	TS      time.Time   `json:"ts"`
 	Role    Role        `json:"role"`
 	Kind    MessageKind `json:"kind"`
@@ -105,6 +111,9 @@ type Transcript struct {
 	// err is the first write error (reported once through onErr).
 	err   error
 	onErr func(error)
+	// onAppend, when set, receives every appended message after the
+	// lock is released (the brain logs brain.transcript from it).
+	onAppend func(Message)
 }
 
 // OpenTranscript creates (or appends to) path; "" keeps the transcript in
@@ -125,26 +134,35 @@ func OpenTranscript(path string, onErr func(error)) (*Transcript, error) {
 	return t, nil
 }
 
-// Append records m (Tokens is filled in when zero) and returns it.
+// OnAppend sets the hook that receives every appended message (with its
+// Seq), called outside the transcript lock. Not safe to call
+// concurrently with Append; the brain sets it once at construction.
+func (t *Transcript) OnAppend(fn func(Message)) { t.onAppend = fn }
+
+// Append records m (Tokens is filled in when zero, Seq always) and
+// returns it.
 func (t *Transcript) Append(m Message) Message {
 	if m.Tokens == 0 {
 		m.Tokens = EstimateTokens(m.Content)
 	}
 	t.mu.Lock()
-	defer t.mu.Unlock()
+	m.Seq = len(t.msgs) + 1
 	t.msgs = append(t.msgs, m)
-	if t.f == nil {
-		return m
-	}
-	line, err := json.Marshal(m)
-	if err == nil {
-		_, err = t.f.Write(append(line, '\n'))
-	}
-	if err != nil && t.err == nil {
-		t.err = err
-		if t.onErr != nil {
-			t.onErr(err)
+	if t.f != nil {
+		line, err := json.Marshal(m)
+		if err == nil {
+			_, err = t.f.Write(append(line, '\n'))
 		}
+		if err != nil && t.err == nil {
+			t.err = err
+			if t.onErr != nil {
+				t.onErr(err)
+			}
+		}
+	}
+	t.mu.Unlock()
+	if t.onAppend != nil {
+		t.onAppend(m)
 	}
 	return m
 }
@@ -154,6 +172,20 @@ func (t *Transcript) Messages() []Message {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return append([]Message(nil), t.msgs...)
+}
+
+// Since returns a copy of every message with Seq > seq, oldest first
+// (the Supervisor tab's incremental fetch); seq 0 is everything.
+func (t *Transcript) Since(seq int) []Message {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if seq < 0 {
+		seq = 0
+	}
+	if seq >= len(t.msgs) {
+		return nil
+	}
+	return append([]Message(nil), t.msgs[seq:]...)
 }
 
 // Len returns the number of messages.

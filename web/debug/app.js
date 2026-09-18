@@ -1,14 +1,17 @@
 // sheepdog /debug: a viewer of the event log plus the fake-injection
 // controls (plan §3.8, decision D10). Vanilla JS module, no build step.
 // Tabs: Swimlane (swimlane-view.js), Conversation (conversation-view.js),
-// Events (the raw list), State.
+// Supervisor (supervisor-view.js over the brain's transcript API), Events
+// (the raw list), State.
 import { ConversationView } from './conversation-view.js';
 import { SwimlaneView } from './swimlane-view.js';
+import { SupervisorView } from './supervisor-view.js';
 import { LANES } from './swimlane.js';
+import { offState, parseTranscriptJSONL } from './supervisor.js';
 
 const $ = (id) => document.getElementById(id);
 const BACKFILL = 2000;
-const SOURCES = ['herdr', 'voice', 'supervisor', 'llm', 'cli', 'web', 'eventlog', 'daemon'];
+const SOURCES = ['herdr', 'voice', 'supervisor', 'brain', 'llm', 'cli', 'web', 'eventlog', 'daemon'];
 const MAX_ROWS = 2000;
 const REPLAY = 300;
 const STATE_POLL_MS = 2000;
@@ -112,8 +115,11 @@ function renderEvent(ev) {
 
 function onEvent(ev, encoded) {
   events.count++;
-  conversation.add(ev, encoded);
+  // The backfill and the SSE replay overlap; the grouper's dedupe says
+  // whether this line is new, so the brain views count it once.
+  const fresh = conversation.add(ev, encoded);
   swimlane.add(ev, encoded);
+  if (fresh) onBrainEvent(ev);
   scheduleConvRender();
   if (events.paused) {
     events.buffer.push(ev);
@@ -413,17 +419,19 @@ function renderSwimlane(force) {
   if (built) $('sw-count').textContent = `${built.shown} of ${built.total} rows · ${swimlane.events.length} events`;
 }
 
-// backfillConversation feeds the log tail into the grouper before the SSE
-// replay (which only carries the last few hundred events); duplicates are
-// dropped by their encoded line.
+// backfillConversation feeds the log tail into the grouper, the swimlane
+// and the Supervisor tab's turn log before the SSE replay (which only
+// carries the last few hundred events); duplicates are dropped by their
+// encoded line.
 async function backfillConversation() {
   try {
     const r = await fetch(`/api/events?n=${BACKFILL}`, { cache: 'no-store' });
     const list = await r.json();
     for (const ev of list) {
       const enc = JSON.stringify(ev);
-      conversation.add(ev, enc);
+      const fresh = conversation.add(ev, enc);
       swimlane.add(ev, enc);
+      if (fresh) onBrainEvent(ev);
     }
   } catch (err) {
     console.error('backfill', err);
@@ -451,6 +459,119 @@ function setupConversation() {
   };
   $('conv-send').addEventListener('click', sendChat);
   $('conv-text').addEventListener('keydown', (e) => { if (e.key === 'Enter') sendChat(); });
+}
+
+// ------------------------------------------------------------ supervisor
+
+// The Supervisor tab reads the brain's own store (GET /api/brain/…), not
+// the event log (D10: one source of truth for the transcript); the
+// brain.transcript event only says "fetch again". Context (the window)
+// is re-fetched after any brain.* event, a little later than brain.turn
+// because pruning happens after that event is logged.
+const supervisor = new SupervisorView($('supervisor'), $('svp-meter'));
+const brainState = { off: null, transcriptTimer: 0, contextTimer: 0, fetching: false, promptAsked: false };
+
+async function getJSON(url) {
+  const r = await fetch(url, { cache: 'no-store' });
+  const text = await r.text();
+  let data;
+  try { data = JSON.parse(text); } catch { data = { error: text }; }
+  return { status: r.status, data };
+}
+
+async function fetchBrainTranscript(full) {
+  if (brainState.fetching) { brainState.transcriptTimer = 0; scheduleTranscriptFetch(200); return; }
+  brainState.fetching = true;
+  try {
+    const since = full ? 0 : supervisor.lastSeq;
+    const { status, data } = await getJSON(`/api/brain/transcript?since=${since}&n=2000`);
+    const off = offState(status, data);
+    if (off) { brainState.off = off; supervisor.setOff(off); }
+    else if (status !== 200) supervisor.setError(data.error || `${status}`);
+    else { brainState.off = null; supervisor.addMessages(data); supervisor.setError(''); }
+  } catch (err) {
+    supervisor.setError(String(err));
+  } finally {
+    brainState.fetching = false;
+  }
+  scheduleSupervisorRender();
+}
+
+async function fetchBrainContext() {
+  try {
+    const { status, data } = await getJSON('/api/brain/context');
+    const off = offState(status, data);
+    if (off) { brainState.off = off; supervisor.setOff(off); }
+    else if (status === 200) supervisor.setContext(data);
+  } catch (err) {
+    supervisor.setError(String(err));
+  }
+  scheduleSupervisorRender();
+}
+
+async function fetchBrainPrompt() {
+  try {
+    const { status, data } = await getJSON('/api/brain/system_prompt');
+    if (status === 200) supervisor.setPrompt(data);
+  } catch (_) { /* the sections stay collapsed */ }
+  scheduleSupervisorRender();
+}
+
+function scheduleTranscriptFetch(ms) {
+  if (brainState.transcriptTimer) return;
+  brainState.transcriptTimer = setTimeout(() => { brainState.transcriptTimer = 0; fetchBrainTranscript(false); }, ms);
+}
+
+function scheduleContextFetch(ms) {
+  if (brainState.contextTimer) clearTimeout(brainState.contextTimer);
+  brainState.contextTimer = setTimeout(() => { brainState.contextTimer = 0; fetchBrainContext(); }, ms);
+}
+
+function onBrainEvent(ev) {
+  const type = ev.type || '';
+  supervisor.addEvent(ev);
+  if (type === 'brain.transcript') { scheduleTranscriptFetch(150); scheduleContextFetch(600); }
+  else if (type === 'brain.turn' || type === 'brain.compaction') scheduleContextFetch(type === 'brain.turn' ? 700 : 200);
+  else if (type === 'daemon.start') {
+    // A new run restarts the seqs at 1: drop the old run and fetch
+    // afresh (debounced: the backfill replays every start of the day).
+    supervisor.reload();
+    if (brainState.transcriptTimer) clearTimeout(brainState.transcriptTimer);
+    brainState.transcriptTimer = setTimeout(() => { brainState.transcriptTimer = 0; fetchBrainTranscript(true).then(fetchBrainContext); }, 300);
+  }
+}
+
+let svpTimer = 0;
+function scheduleSupervisorRender() {
+  if (svpTimer) return;
+  svpTimer = setTimeout(() => {
+    svpTimer = 0;
+    if ($('tab-supervisor').classList.contains('hidden')) return; // stays dirty until shown
+    supervisor.render(false);
+    $('svp-count').textContent = `${supervisor.messages.size} messages`;
+  }, 50);
+}
+
+function setupSupervisor() {
+  $('svp-expand').addEventListener('click', () => supervisor.setExpandAll(true));
+  $('svp-collapse').addEventListener('click', () => supervisor.setExpandAll(false));
+  $('svp-hide-worker').addEventListener('change', (e) => supervisor.setFilter('hideWorker', e.target.checked));
+  $('svp-hide-assistant').addEventListener('change', (e) => supervisor.setFilter('hideAssistant', e.target.checked));
+  $('svp-window-only').addEventListener('change', (e) => supervisor.setFilter('windowOnly', e.target.checked));
+  $('svp-refresh').addEventListener('click', () => { supervisor.reload(); fetchBrainTranscript(true).then(fetchBrainContext); });
+  const pill = $('svp-new');
+  supervisor.onNewMessages = (show) => pill.classList.toggle('hidden', !show);
+  pill.addEventListener('click', () => supervisor.scrollToBottom());
+  supervisor.onNeedPrompt = () => { if (!brainState.promptAsked) { brainState.promptAsked = true; fetchBrainPrompt(); } };
+  const sendChat = () => {
+    const text = $('svp-text').value.trim();
+    if (!text) return;
+    $('svp-text').value = '';
+    showResult('svp-result', post('/api/inject/utterance', { text }));
+  };
+  $('svp-send').addEventListener('click', sendChat);
+  $('svp-text').addEventListener('keydown', (e) => { if (e.key === 'Enter') sendChat(); });
+  fetchBrainTranscript(true).then(fetchBrainContext);
 }
 
 // -------------------------------------------------------------- swimlane
@@ -521,6 +642,7 @@ function showTab(name) {
   for (const b of document.querySelectorAll('#tabs button')) b.classList.toggle('active', b.dataset.tab === name);
   for (const sec of document.querySelectorAll('main > .tab')) sec.classList.toggle('hidden', sec.id !== `tab-${name}`);
   if (name === 'conversation') conversation.render(true);
+  if (name === 'supervisor') { supervisor.render(true); $('svp-count').textContent = `${supervisor.messages.size} messages`; if (!brainState.off) fetchBrainContext(); }
   if (name === 'swimlane') renderSwimlane(true);
   if (name === 'events' && $('events-follow').checked) $('events').scrollTop = $('events').scrollHeight;
   try { localStorage.setItem('sheepdog-debug-tab', name); } catch (_) { /* private mode */ }
@@ -544,7 +666,7 @@ function scrollTabTo(name, ts) {
   const t = Date.parse(ts);
   if (Number.isNaN(t)) return;
   if (name === 'swimlane') { swimlane.scrollToTs(ts); return; }
-  const list = name === 'events' ? $('events') : (name === 'conversation' ? $('conversation') : null);
+  const list = name === 'events' ? $('events') : (name === 'conversation' ? $('conversation') : (name === 'supervisor' ? $('supervisor') : null));
   if (!list) return;
   for (const row of list.children) {
     const rts = Date.parse(row.dataset.ts || '');
@@ -577,6 +699,7 @@ setupEventControls();
 setupSettings();
 setupInject();
 setupConversation();
+setupSupervisor();
 setupSwimlane();
 pickTab();
 backfillConversation().then(connectEvents);
@@ -584,9 +707,20 @@ refreshState();
 setInterval(refreshState, STATE_POLL_MS);
 
 // Console handle: feed extra log lines into the conversation view (e.g.
-// paste a voice-test run) or inspect its items.
+// paste a voice-test run), inspect its items, or load a brain transcript
+// (a JSONL url such as /testdata/brain/sample-run.jsonl in --dev mode,
+// JSONL text, or an array of messages) into the Supervisor tab.
 window.sheepdogDebug = {
-  conversation, swimlane,
-  addEvents: (list) => { for (const ev of list) { conversation.add(ev); swimlane.add(ev); } scheduleConvRender(); },
+  conversation, swimlane, supervisor,
+  addEvents: (list) => { for (const ev of list) { conversation.add(ev); swimlane.add(ev); onBrainEvent(ev); } scheduleConvRender(); scheduleSupervisorRender(); },
   clearEvents: () => { swimlane.clear(); renderSwimlane(true); },
+  loadTranscript: async (src) => {
+    let messages;
+    if (Array.isArray(src)) messages = src.map((m, i) => ({ ...m, seq: typeof m.seq === 'number' ? m.seq : i + 1 }));
+    else if (typeof src === 'string' && /^\s*\{/.test(src)) messages = parseTranscriptJSONL(src);
+    else messages = parseTranscriptJSONL(await (await fetch(src, { cache: 'no-store' })).text());
+    supervisor.setMessages(messages);
+    showTab('supervisor');
+    return messages.length;
+  },
 };

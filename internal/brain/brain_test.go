@@ -716,3 +716,198 @@ func waitQueued(t *testing.T, b *Brain, n int) {
 		time.Sleep(time.Millisecond)
 	}
 }
+
+// (18) The Supervisor tab's accessors: every appended message gets a
+// monotonic Seq (in memory only) and a brain.transcript event; Window
+// maps the engine's window back onto seqs and marks pruned stubs while
+// the transcript keeps the full result; Since serves incremental fetches.
+func TestWindowAndTranscriptAccessors(t *testing.T) {
+	m := braintest.NewModel(
+		braintest.Step{Calls: []*genai.FunctionCall{braintest.FC(ToolReadScreen, map[string]any{"agent": "auth"})}},
+		braintest.Step{Text: braintest.Reply("Auth is asking to create hello.txt.", "")},
+		braintest.Step{Text: braintest.Reply("Still asking.", "")},
+	)
+	h := newHarness(t, m, func(c *Config) { c.PruneAfterTurns = 1 })
+	h.brain.Heard("what is auth doing?", true)
+	for i := 0; i < 2; i++ {
+		if _, err := h.ask("what is auth doing?", "auth"); err != nil {
+			t.Fatal(err)
+		}
+		h.brain.Quiesce()
+	}
+	msgs := h.brain.Transcript().Messages()
+	for i, msg := range msgs {
+		if msg.Seq != i+1 {
+			t.Errorf("msgs[%d].Seq = %d", i, msg.Seq)
+		}
+	}
+	if got := joinKinds(h.kinds()); got != "ceo_utterance request brain_tool_call brain_tool_result reply request reply" {
+		t.Fatalf("transcript = %s", got)
+	}
+	// Seq never reaches the disk.
+	data, err := os.ReadFile(h.brain.TranscriptPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), `"seq"`) {
+		t.Error("seq was written to disk")
+	}
+	if since := h.brain.Transcript().Since(5); len(since) != 2 || since[0].Seq != 6 || since[1].Kind != KindReply {
+		t.Errorf("Since(5) = %+v", since)
+	}
+	if since := h.brain.Transcript().Since(99); since != nil {
+		t.Errorf("Since(99) = %+v", since)
+	}
+	evs := h.log.ofType("brain.transcript")
+	if len(evs) != len(msgs) {
+		t.Fatalf("brain.transcript events = %d, messages = %d", len(evs), len(msgs))
+	}
+	if p := payload(evs[3]); p["seq"] != 4 || p["kind"] != "brain_tool_result" || p["turn"] != 1 {
+		t.Errorf("brain.transcript[3] = %v", p)
+	}
+	// The window: the tool result of turn 1 is a stub after turn 2, the
+	// transcript still has the screen.
+	win := h.brain.Window()
+	if len(win) != len(msgs) {
+		t.Fatalf("window = %d entries, want %d", len(win), len(msgs))
+	}
+	res := win[3]
+	if res.Seq != 4 || !res.Pruned || !strings.HasPrefix(res.Stub, "[screen of auth, ") || res.Kind != KindToolResult || res.Turn != 1 {
+		t.Errorf("window[3] = %+v", res)
+	}
+	if !strings.Contains(msgs[3].Content, "Would you like to run the following command?") {
+		t.Error("transcript lost the full result")
+	}
+	for i, w := range win {
+		if i != 3 && w.Pruned {
+			t.Errorf("window[%d] pruned: %+v", i, w)
+		}
+		if w.Seq != i+1 {
+			t.Errorf("window[%d].Seq = %d", i, w.Seq)
+		}
+	}
+	if sum := func() int {
+		n := 0
+		for _, w := range win {
+			n += w.Tokens
+		}
+		return n
+	}(); sum != h.brain.Engine().Tokens() {
+		t.Errorf("window token sum %d != engine %d", sum, h.brain.Engine().Tokens())
+	}
+	if _, ok := h.brain.LastCompaction(); ok {
+		t.Error("LastCompaction reported one without a compaction")
+	}
+	if h.brain.Turns() != 2 || h.brain.Config().WindowTokens != DefaultWindowTokens {
+		t.Errorf("turns = %d, window_tokens = %d", h.brain.Turns(), h.brain.Config().WindowTokens)
+	}
+	// The sections are live and carry their source.
+	var names, sources []string
+	for _, s := range h.brain.PromptSections() {
+		names = append(names, s.Name)
+		sources = append(sources, s.Source)
+		if s.Text == "" {
+			t.Errorf("section %s empty", s.Name)
+		}
+	}
+	if strings.Join(names, " ") != "role tools record promises rail fallback contract user roster ledger time" {
+		t.Errorf("sections = %v", names)
+	}
+	if strings.Join(sources, " ") != "embedded embedded embedded embedded embedded embedded embedded embedded dynamic dynamic dynamic" {
+		t.Errorf("sources = %v", sources)
+	}
+}
+
+// (19) Window derived from Assemble for an engine that is not a
+// WindowReporter: a stub is detected by content.
+func TestWindowFromAssemble(t *testing.T) {
+	inner := NewDefaultEngine(1, nil, nil)
+	h := newHarness(t, braintest.NewModel(
+		braintest.Step{Calls: []*genai.FunctionCall{braintest.FC(ToolReadScreen, map[string]any{"agent": "auth"})}},
+		braintest.Step{Text: braintest.Reply("ok", "")},
+		braintest.Step{Text: braintest.Reply("ok", "")},
+	), func(c *Config) { c.Engine = opaqueEngine{inner} })
+	for i := 0; i < 2; i++ {
+		if _, err := h.ask("?", "auth"); err != nil {
+			t.Fatal(err)
+		}
+		h.brain.Quiesce()
+	}
+	win := h.brain.Window()
+	if len(win) != 6 || !win[2].Pruned || win[2].Seq != 3 || !strings.HasSuffix(win[2].Stub, "pruned]") || win[1].Pruned {
+		t.Errorf("window = %+v", win)
+	}
+}
+
+// opaqueEngine hides the default engine's Window method.
+type opaqueEngine struct{ e *DefaultEngine }
+
+func (o opaqueEngine) Ingest(m Message, turn int) { o.e.Ingest(m, turn) }
+func (o opaqueEngine) Assemble(b int) Assembly    { return o.e.Assemble(b) }
+func (o opaqueEngine) AfterTurn(turn int)         { o.e.AfterTurn(turn) }
+func (o opaqueEngine) Tokens() int                { return o.e.Tokens() }
+func (o opaqueEngine) Compact(ctx context.Context, b int) (Compaction, bool, error) {
+	return o.e.Compact(ctx, b)
+}
+
+// (20) The reflex model (--brain=fake) runs the loop end to end without a
+// script: an ask reads the screen, a propose prompts, an unnamed ask
+// lists the agents, and a compaction summarises; LastCompaction records
+// it.
+func TestReflexModel(t *testing.T) {
+	m := braintest.Reflex()
+	h := newHarness(t, m, func(c *Config) { c.WindowTokens = 120 })
+	h.brain.Heard("what did auth say?", true)
+	rep, err := h.ask("what did it say?", "auth")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(rep.Spoken, "The screen ends with:") {
+		t.Errorf("ask reply = %+v", rep)
+	}
+	rep, err = h.brain.Propose(context.Background(), Request{Question: "skip the flaky test", Agent: "auth"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Spoken != "Telling auth to skip the flaky test. Sent." || len(h.host.Prompts) != 1 {
+		t.Errorf("propose reply = %+v, prompts = %v", rep, h.host.Prompts)
+	}
+	if rep, err = h.ask("what agents are there?", ""); err != nil || rep.Spoken != "Here is the roster." {
+		t.Errorf("unnamed ask = %+v, %v", rep, err)
+	}
+	// An unnamed propose resolves the alias from the words and strips
+	// the "tell auth to" the text router passes through.
+	if rep, err = h.brain.Propose(context.Background(), Request{Question: "tell auth to rerun the suite"}); err != nil || rep.Spoken != "Telling auth to rerun the suite. Sent." {
+		t.Errorf("unnamed propose = %+v, %v (prompts %v)", rep, err, h.host.Prompts)
+	}
+	if rep, err = h.brain.Propose(context.Background(), Request{Question: "tell someone to stop"}); err != nil || rep.Spoken != "Which agent should I tell?" {
+		t.Errorf("unresolvable propose = %+v, %v", rep, err)
+	}
+	h.brain.Quiesce()
+	if got := joinKinds(h.kinds()); !strings.Contains(got, "request brain_tool_call brain_tool_result reply request brain_tool_call brain_tool_result reply") {
+		t.Errorf("transcript = %s", got)
+	}
+	names := map[string]bool{}
+	for _, ev := range h.log.ofType("brain.tool_call") {
+		names[payload(ev)["name"].(string)] = true
+	}
+	if !names[ToolReadScreen] || !names[ToolPrompt] || !names[ToolListAgents] {
+		t.Errorf("tools called = %v", names)
+	}
+	// Over budget after the reads: the after-turn compaction used the
+	// reflex summariser.
+	c, ok := h.brain.LastCompaction()
+	if !ok || c.Dropped == 0 || c.BeforeTokens <= c.AfterTokens || c.SummarySeq == 0 || c.At.IsZero() {
+		t.Errorf("LastCompaction = %+v, %v (events %v)", c, ok, h.log.ofType("brain.compaction"))
+	}
+	msgs := h.brain.Transcript().Messages()
+	if sum := msgs[c.SummarySeq-1]; sum.Kind != KindCompaction || !strings.HasPrefix(sum.Content, "Summary by the fake model") || sum.Seq != c.SummarySeq {
+		t.Errorf("summary = %+v", sum)
+	}
+	// The window starts with the summary; the dropped messages are on
+	// disk only.
+	win := h.brain.Window()
+	if win[0].Seq != c.SummarySeq || win[0].Kind != KindCompaction || len(win) >= len(msgs) {
+		t.Errorf("window = %+v (dropped %d, transcript %d)", win, c.Dropped, len(msgs))
+	}
+}
