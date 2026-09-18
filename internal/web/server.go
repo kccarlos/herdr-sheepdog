@@ -58,7 +58,12 @@ type Deps struct {
 	// HerdrMode and VoiceMode are reported by /api/state ("socket"|"mock",
 	// "gemini"|"off").
 	HerdrMode, VoiceMode string
-	Version              string
+	// SystemPrompt and Aliases are what GET /api/voice/system_prompt
+	// answers: the voice system prompt the session runs with (or would,
+	// with --voice=off) and the aliases rendered into it.
+	SystemPrompt string
+	Aliases      []string
+	Version      string
 	// DevTestdataDir, when set, serves GET /testdata/<name>.wav from that
 	// directory (the /voice page's file-source test mode). Empty (the
 	// default) registers no route: this is a developer feature.
@@ -150,6 +155,7 @@ func (s *Server) routes() error {
 	s.mux.HandleFunc("GET /api/state", s.handleState)
 	s.mux.HandleFunc("GET /api/agents", s.handleAgents)
 	s.mux.HandleFunc("GET /api/events", s.handleEventsTail)
+	s.mux.HandleFunc("GET /api/voice/system_prompt", s.handleSystemPrompt)
 	s.mux.HandleFunc("POST /api/pending/cancel", s.handleCancel)
 	s.mux.HandleFunc("POST /api/inject/blocked", s.handleInjectBlocked)
 	s.mux.HandleFunc("POST /api/inject/done", s.handleInjectDone)

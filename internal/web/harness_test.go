@@ -174,7 +174,8 @@ func newHarness(t *testing.T, o harnessOpts) *harness {
 	}
 	sup.SetVoiceConnected(true)
 	injector := inject.NewInjector(store, h, sup, log, nil)
-	deps := Deps{Log: log, Store: store, Supervisor: sup, Injector: injector, Router: &inject.Router{}, Version: "test", Heartbeat: 200 * time.Millisecond, OutQueue: 8, DevTestdataDir: o.devTestdata, StatsInterval: o.statsInterval}
+	deps := Deps{Log: log, Store: store, Supervisor: sup, Injector: injector, Router: &inject.Router{}, Version: "test", Heartbeat: 200 * time.Millisecond, OutQueue: 8, DevTestdataDir: o.devTestdata, StatsInterval: o.statsInterval,
+		SystemPrompt: "You are the voice. Aliases: auth.", Aliases: []string{"auth"}}
 	if session != nil {
 		deps.Voice = session
 	}

@@ -82,6 +82,10 @@ func TestInjectBlockedChainAndConfirm(t *testing.T) {
 	if h.getJSON("/api/agents", &agents); len(agents) != 1 || agents[0].PaneID != "fake:1" {
 		t.Fatalf("agents = %+v", agents)
 	}
+	var sp SystemPromptResponse
+	if code := h.getJSON("/api/voice/system_prompt", &sp); code != http.StatusOK || sp.Text != "You are the voice. Aliases: auth." || len(sp.Aliases) != 1 || sp.Mode != "off" {
+		t.Fatalf("/api/voice/system_prompt = %d %+v", code, sp)
+	}
 
 	// "yes" → confirm → send_keys → pending.confirmed.
 	var tr ToolResponse

@@ -26,6 +26,9 @@ func (s *Session) connect(ctx context.Context) (conn Conn, resumed bool, err err
 			s.log.Log(logSource, "voice.connect", "", map[string]any{
 				"key_index": idx, "resumed": handle != "", "dur_ms": s.now().Sub(started).Milliseconds(),
 			})
+			// The prompt this connection runs with, so /debug can show it
+			// per session straight from the log (D10).
+			s.log.Log(logSource, "voice.system_prompt", "", map[string]any{"text": s.prompt, "aliases": s.cfg.Aliases, "model": s.cfg.Model})
 			return conn, handle != "", nil
 		}
 		if ctx.Err() != nil {

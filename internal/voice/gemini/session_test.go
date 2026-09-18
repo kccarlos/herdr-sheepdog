@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -32,6 +33,9 @@ func TestStartEmitsStatusAndUsesFirstKey(t *testing.T) {
 	}
 	if !h.log.has("voice.connect") {
 		t.Error("voice.connect not logged")
+	}
+	if p := h.log.payloads("voice.system_prompt"); len(p) != 1 || !strings.Contains(p[0]["text"].(string), "aliases: auth, docs.") {
+		t.Errorf("voice.system_prompt = %v", p)
 	}
 	if h.s.Status() != voice.StatusConnected {
 		t.Errorf("status = %v", h.s.Status())

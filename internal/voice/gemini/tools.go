@@ -46,6 +46,11 @@ func toolDeclarations() []*genai.Tool {
 	}}}
 }
 
+// SystemPrompt renders the voice system prompt a Session with cfg would
+// run with (the daemon serves it on /api/voice/system_prompt even when
+// no session exists).
+func SystemPrompt(cfg Config) (string, error) { return systemPrompt(cfg) }
+
 // systemPrompt renders the voice system prompt with the aliases.
 func systemPrompt(cfg Config) (string, error) {
 	aliases := strings.Join(cfg.Aliases, ", ")

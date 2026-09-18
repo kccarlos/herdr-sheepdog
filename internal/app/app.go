@@ -195,16 +195,21 @@ func (a *App) wire() error {
 	}
 	a.sup = sup
 
-	if opts.Voice == VoiceGemini {
-		sess, err := gemini.New(gemini.Config{
-			APIKeys: cfg.Gemini.APIKeys,
-			Model:   cfg.Gemini.Model,
-			Voice:   cfg.Gemini.Voice,
-			Aliases: a.aliases(),
-			Handler: sup.Handler(),
+	gcfg := gemini.Config{
+		APIKeys: cfg.Gemini.APIKeys,
+		Model:   cfg.Gemini.Model,
+		Voice:   cfg.Gemini.Voice,
+		Aliases: a.aliases(),
+		Handler: sup.Handler(),
 
-			StallAfter: time.Duration(cfg.Gemini.StallAfterS) * time.Second,
-		}, a.log)
+		StallAfter: time.Duration(cfg.Gemini.StallAfterS) * time.Second,
+	}
+	systemPrompt, err := gemini.SystemPrompt(gcfg)
+	if err != nil {
+		return err
+	}
+	if opts.Voice == VoiceGemini {
+		sess, err := gemini.New(gcfg, a.log)
 		if err != nil {
 			return err
 		}
@@ -230,6 +235,9 @@ func (a *App) wire() error {
 		Version:    opts.Version,
 		HerdrMode:  opts.Herdr,
 		VoiceMode:  opts.Voice,
+
+		SystemPrompt: systemPrompt,
+		Aliases:      gcfg.Aliases,
 	}
 	if opts.Dev || a.cfg.Web.Dev {
 		deps.DevTestdataDir = a.cfg.Web.DevTestdataDir

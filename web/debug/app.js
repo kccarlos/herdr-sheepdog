@@ -1,8 +1,10 @@
 // sheepdog /debug: a viewer of the event log plus the fake-injection
-// controls (plan §3.8, decision D10). Vanilla JS, no build step.
-'use strict';
+// controls (plan §3.8, decision D10). Vanilla JS module, no build step.
+// Tabs: Conversation (conversation-view.js), Events (the raw list), State.
+import { ConversationView } from './conversation-view.js';
 
 const $ = (id) => document.getElementById(id);
+const BACKFILL = 2000;
 const SOURCES = ['herdr', 'voice', 'supervisor', 'llm', 'cli', 'web', 'eventlog', 'daemon'];
 const MAX_ROWS = 2000;
 const REPLAY = 300;
@@ -103,8 +105,10 @@ function renderEvent(ev) {
   if ($('events-follow').checked) list.scrollTop = list.scrollHeight;
 }
 
-function onEvent(ev) {
+function onEvent(ev, encoded) {
   events.count++;
+  conversation.add(ev, encoded);
+  scheduleConvRender();
   if (events.paused) {
     events.buffer.push(ev);
     $('events-pause').textContent = `Resume (${events.buffer.length})`;
@@ -131,7 +135,7 @@ function connectEvents() {
   es.onerror = () => setSSE('reconnecting', 'reconnecting');
   es.addEventListener('log', (e) => {
     try {
-      onEvent(JSON.parse(e.data));
+      onEvent(JSON.parse(e.data), e.data);
     } catch (err) {
       console.error('bad event', e.data, err);
     }
@@ -352,10 +356,98 @@ function setupInject() {
   $('pending-cancel').addEventListener('click', () => showResult('pending-result', post('/api/pending/cancel', {})));
 }
 
+// ---------------------------------------------------------- conversation
+
+const conversation = new ConversationView($('conversation'));
+// A short timer, not requestAnimationFrame: background tabs pause rAF and
+// the view would fall behind the log until the tab is looked at.
+let convTimer = 0;
+function scheduleConvRender() {
+  if (convTimer) return;
+  convTimer = setTimeout(() => {
+    convTimer = 0;
+    conversation.render(false);
+    $('conv-count').textContent = `${conversation.grouper.items.length} items`;
+  }, 50);
+}
+
+// backfillConversation feeds the log tail into the grouper before the SSE
+// replay (which only carries the last few hundred events); duplicates are
+// dropped by their encoded line.
+async function backfillConversation() {
+  try {
+    const r = await fetch(`/api/events?n=${BACKFILL}`, { cache: 'no-store' });
+    const list = await r.json();
+    for (const ev of list) conversation.add(ev, JSON.stringify(ev));
+  } catch (err) {
+    console.error('backfill', err);
+  }
+  try {
+    const r = await fetch('/api/voice/system_prompt', { cache: 'no-store' });
+    if (r.ok) conversation.setCurrentPrompt(await r.json());
+  } catch (_) { /* no prompt to show */ }
+  scheduleConvRender();
+}
+
+function setupConversation() {
+  $('conv-expand').addEventListener('click', () => conversation.setExpandAll(true));
+  $('conv-collapse').addEventListener('click', () => conversation.setExpandAll(false));
+  $('conv-hide-silent').addEventListener('change', (e) => { conversation.hideSilent = e.target.checked; conversation.render(true); });
+  $('conv-hide-stats').addEventListener('change', (e) => { conversation.hideStats = e.target.checked; conversation.render(true); });
+  const pill = $('conv-new');
+  conversation.onNewMessages = (show) => pill.classList.toggle('hidden', !show);
+  pill.addEventListener('click', () => conversation.scrollToBottom());
+  const sendChat = () => {
+    const text = $('conv-text').value.trim();
+    if (!text) return;
+    $('conv-text').value = '';
+    showResult('conv-result', post('/api/inject/utterance', { text }));
+  };
+  $('conv-send').addEventListener('click', sendChat);
+  $('conv-text').addEventListener('keydown', (e) => { if (e.key === 'Enter') sendChat(); });
+}
+
+// ------------------------------------------------------------------ tabs
+
+function showTab(name) {
+  for (const b of document.querySelectorAll('#tabs button')) b.classList.toggle('active', b.dataset.tab === name);
+  for (const sec of document.querySelectorAll('main > .tab')) sec.classList.toggle('hidden', sec.id !== `tab-${name}`);
+  if (name === 'conversation') conversation.render(true);
+  if (name === 'events' && $('events-follow').checked) $('events').scrollTop = $('events').scrollHeight;
+  try { localStorage.setItem('sheepdog-debug-tab', name); } catch (_) { /* private mode */ }
+}
+
+// pickTab: ?tab= wins, then the last choice, else Conversation when a voice
+// session exists and Events otherwise.
+async function pickTab() {
+  const param = new URLSearchParams(location.search).get('tab');
+  if (param) return showTab(param);
+  let saved = null;
+  try { saved = localStorage.getItem('sheepdog-debug-tab'); } catch (_) { /* fine */ }
+  if (saved) return showTab(saved);
+  try {
+    const st = await (await fetch('/api/state', { cache: 'no-store' })).json();
+    return showTab(st.voice && st.voice.mode !== 'off' ? 'conversation' : 'events');
+  } catch (_) {
+    return showTab('events');
+  }
+}
+
+function setupTabs() {
+  for (const b of document.querySelectorAll('#tabs button')) b.addEventListener('click', () => showTab(b.dataset.tab));
+}
+
 // ------------------------------------------------------------------ main
 
+setupTabs();
 setupEventControls();
 setupInject();
-connectEvents();
+setupConversation();
+pickTab();
+backfillConversation().then(connectEvents);
 refreshState();
 setInterval(refreshState, STATE_POLL_MS);
+
+// Console handle: feed extra log lines into the conversation view (e.g.
+// paste a voice-test run) or inspect its items.
+window.sheepdogDebug = { conversation, addEvents: (list) => { for (const ev of list) conversation.add(ev); scheduleConvRender(); } };
