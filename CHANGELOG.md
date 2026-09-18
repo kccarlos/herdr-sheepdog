@@ -16,6 +16,7 @@
 
 ### Fixes
 
+- fix(state): de-flake the full_fsync coalescing test (50a26cc)
 - fix(llm): keep identifiers in spoken answers (31e51cc)
 
 ### Performance
@@ -24,7 +25,12 @@
 
 ### Documentation
 
+- docs: rewrite README for a fresh machine, add architecture.md (0cbc157)
 - docs(wp0): protocol reconnaissance — herdr socket, Gemini Live, CLI tools (#7) (36ea7e2)
+
+### Build & CI
+
+- build: changelog script, wire release notes, Makefile targets (2b6a487)
 
 ### Other
 
