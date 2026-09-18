@@ -149,8 +149,9 @@ type harness struct {
 type harnessOpts struct {
 	voice   bool
 	watcher bool
-	// devTestdata serves /testdata/ from this directory (dev mode).
-	devTestdata string
+	// devTestdata serves /testdata/ from this directory (dev mode);
+	// devBrain /testdata/brain/.
+	devTestdata, devBrain string
 	// statsInterval shortens the web.client.stats period.
 	statsInterval time.Duration
 	// reloadPrompts backs POST /api/prompts/reload; nil leaves it unset
@@ -197,7 +198,7 @@ func newHarness(t *testing.T, o harnessOpts) *harness {
 	}
 	sup.SetVoiceConnected(true)
 	injector := inject.NewInjector(store, h, sup, log, nil)
-	deps := Deps{Log: log, Store: store, Supervisor: sup, Injector: injector, Router: &inject.Router{}, Version: "test", Heartbeat: 200 * time.Millisecond, OutQueue: 8, DevTestdataDir: o.devTestdata, StatsInterval: o.statsInterval,
+	deps := Deps{Log: log, Store: store, Supervisor: sup, Injector: injector, Router: &inject.Router{}, Version: "test", Heartbeat: 200 * time.Millisecond, OutQueue: 8, DevTestdataDir: o.devTestdata, DevBrainDir: o.devBrain, StatsInterval: o.statsInterval,
 		SystemPrompt: func() string { return "You are the voice. Aliases: auth." }, Aliases: []string{"auth"}, ReloadPrompts: o.reloadPrompts, Brain: b, BrainOffReason: "--brain=off"}
 	if session != nil {
 		deps.Voice = session

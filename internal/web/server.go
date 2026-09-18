@@ -86,6 +86,10 @@ type Deps struct {
 	// directory (the /voice page's file-source test mode). Empty (the
 	// default) registers no route: this is a developer feature.
 	DevTestdataDir string
+	// DevBrainDir, when set with DevTestdataDir, serves GET
+	// /testdata/brain/<name>.jsonl from that directory: the sample brain
+	// transcripts the /debug Supervisor tab's console handle loads.
+	DevBrainDir string
 
 	// Heartbeat is the SSE keepalive period (default 15 s).
 	Heartbeat time.Duration
@@ -188,23 +192,30 @@ func (s *Server) routes() error {
 	s.mux.HandleFunc("GET /api/brain/context", s.handleBrainContext)
 	s.mux.HandleFunc("GET /api/brain/system_prompt", s.handleBrainSystemPrompt)
 	if s.deps.DevTestdataDir != "" {
-		s.mux.HandleFunc("GET /testdata/{name}", s.handleTestdata)
+		s.mux.HandleFunc("GET /testdata/{name}", func(w http.ResponseWriter, r *http.Request) {
+			s.serveFixture(w, r, s.deps.DevTestdataDir, ".wav", "audio/wav")
+		})
+		if s.deps.DevBrainDir != "" {
+			s.mux.HandleFunc("GET /testdata/brain/{name}", func(w http.ResponseWriter, r *http.Request) {
+				s.serveFixture(w, r, s.deps.DevBrainDir, ".jsonl", "application/x-ndjson")
+			})
+		}
 	}
 	return nil
 }
 
-// handleTestdata serves one .wav fixture by base name from DevTestdataDir
-// (dev mode only). Only plain names ending in .wav are accepted, so nothing
+// serveFixture serves one fixture by base name from dir (dev mode only).
+// Only plain names with the given extension are accepted, so nothing
 // outside the directory is reachable.
-func (s *Server) handleTestdata(w http.ResponseWriter, r *http.Request) {
+func (s *Server) serveFixture(w http.ResponseWriter, r *http.Request, dir, ext, ctype string) {
 	name := r.PathValue("name")
-	if name != filepath.Base(name) || !strings.HasSuffix(name, ".wav") || strings.HasPrefix(name, ".") {
+	if name != filepath.Base(name) || !strings.HasSuffix(name, ext) || strings.HasPrefix(name, ".") {
 		http.NotFound(w, r)
 		return
 	}
 	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Content-Type", "audio/wav")
-	http.ServeFile(w, r, filepath.Join(s.deps.DevTestdataDir, name))
+	w.Header().Set("Content-Type", ctype)
+	http.ServeFile(w, r, filepath.Join(dir, name))
 }
 
 // static serves /<name> (index.html) and /<name>/* from the embedded FS.

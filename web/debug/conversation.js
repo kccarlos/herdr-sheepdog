@@ -50,6 +50,10 @@ export class Grouper {
       return;
     }
     switch (type) {
+      case 'brain.transcript':
+        // Bookkeeping only ("message N was ingested"); the Supervisor
+        // tab fetches the message itself. Not a nested row here.
+        return;
       case 'voice.system_prompt':
         this.closeAll();
         this.push({ kind: 'system_prompt', ts: ev.ts, text: p.text || '', aliases: p.aliases || [], model: p.model || '', tokens: estimateTokens(p.text) });

@@ -113,7 +113,7 @@ func TestBuildValidation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fake: %v", err)
 	}
-	if a.Brain() == nil || a.BrainMode() != BrainFake || a.BrainOffReason() != "" || a.sup.Brain() != a.Brain() {
+	if a.Brain() == nil || a.BrainMode() != BrainFake || a.BrainOffReason() != "" || a.sup.Brain() != a.Brain() || a.Brain().Config().Model != FakeBrainModel {
 		t.Errorf("fake brain not wired: %v %s %q", a.Brain(), a.BrainMode(), a.BrainOffReason())
 	}
 	_ = a.Brain().Close()

@@ -373,10 +373,12 @@ var (
 // Reflex returns a Model that answers from what it sees instead of a
 // script, so a whole daemon can run the brain loop without a network:
 // `sheepdog serve --brain=fake`. An ask reads the named agent's screen
-// and answers with its last line; when no name was given it lists the
-// agents first and reads the one the question names (or the only one,
-// or the first blocked one), else answers with the roster. A propose
-// sends the instruction with prompt and reports the echo; the compaction
+// and answers with its last line; a propose sends the instruction with
+// prompt and reports the echo. When no name was given it lists the
+// agents first and picks the one the words name (or the only one, or
+// the first blocked one): an ask then reads its screen, a propose
+// prompts it with "tell <alias> to" stripped; with no pick an ask
+// answers with the roster and a propose asks which agent. The compaction
 // summariser's prompt gets a one-line summary. Every answer is the JSON
 // of the answer contract, so the loop runs exactly as with a real model:
 // request → tool call → tool result → reply, with brain.* events and
@@ -398,8 +400,15 @@ func reflex(call Call) (*genai.GenerateContentResponse, error) {
 		if p.FunctionResponse != nil {
 			usage := [2]int32{int32(len(call.Text()) / 4), 40}
 			if p.FunctionResponse.Name == brain.ToolListAgents {
-				if alias := pickAgent(p.FunctionResponse, lastQuestion(call)); alias != "" {
+				kind, question := lastRequest(call)
+				if alias := pickAgent(p.FunctionResponse, question); alias != "" {
+					if kind == "propose" {
+						return Response(Step{Calls: []*genai.FunctionCall{FC(brain.ToolPrompt, map[string]any{"agent": alias, "text": instructionFor(alias, question)})}, Usage: usage}), nil
+					}
 					return Response(Step{Calls: []*genai.FunctionCall{FC(brain.ToolReadScreen, map[string]any{"agent": alias, "lines": float64(100)})}, Usage: usage}), nil
+				}
+				if kind == "propose" {
+					return Response(Step{Text: Reply("Which agent should I tell?", "The CEO did not say a name and the fake model does not guess."), Usage: usage}), nil
 				}
 			}
 			return Response(Step{Text: replyFromResult(p.FunctionResponse), Usage: usage}), nil
@@ -424,9 +433,8 @@ func reflex(call Call) (*genai.GenerateContentResponse, error) {
 	switch {
 	case kind == "propose" && agent != "":
 		return Response(Step{Calls: []*genai.FunctionCall{FC(brain.ToolPrompt, map[string]any{"agent": agent, "text": question})}, Usage: usage}), nil
-	case kind == "propose":
-		return Response(Step{Text: Reply("Which agent should I tell?", "The CEO did not say a name and the fake model does not guess."), Usage: usage}), nil
 	case agent == "":
+		// No name given: the roster decides (the question may name one).
 		return Response(Step{Calls: []*genai.FunctionCall{FC(brain.ToolListAgents, nil)}, Usage: usage}), nil
 	default:
 		return Response(Step{Calls: []*genai.FunctionCall{FC(brain.ToolReadScreen, map[string]any{"agent": agent, "lines": float64(100)})}, Usage: usage}), nil
@@ -465,17 +473,26 @@ func replyFromResult(fr *genai.FunctionResponse) string {
 	}
 }
 
-// lastQuestion returns the newest request's question text in the call.
-func lastQuestion(call Call) string {
-	var q string
+// lastRequest returns the newest request's kind and question in the call.
+func lastRequest(call Call) (kind, question string) {
 	for _, c := range call.Contents {
 		for _, p := range c.Parts {
 			for _, m := range reRequest.FindAllStringSubmatch(p.Text, -1) {
-				q = unquote(m[2])
+				kind, question = m[1], unquote(m[2])
 			}
 		}
 	}
-	return q
+	return kind, question
+}
+
+// instructionFor strips a leading "tell <alias> to" from an instruction
+// the text router passed through verbatim.
+func instructionFor(alias, instruction string) string {
+	re := regexp.MustCompile(`(?i)^(?:tell|ask|have|instruct)\s+` + regexp.QuoteMeta(alias) + `\s+(?:to\s+)?`)
+	if out := strings.TrimSpace(re.ReplaceAllString(instruction, "")); out != "" {
+		return out
+	}
+	return instruction
 }
 
 // pickAgent chooses the agent to read after a list_agents result: the

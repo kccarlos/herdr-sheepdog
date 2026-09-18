@@ -4,41 +4,26 @@
 // Vanilla DOM, no framework (decision D11).
 import { Grouper } from './conversation.js';
 import { fmtMs, eventSummary, Dedupe } from './grouping.js';
+import { el, fmtTime, jsonPre, Openable, Follow } from './dom.js';
 
 const MAX_ITEMS = 1500;
 const STALL_MS = 10000;
-
-function el(tag, cls, text) {
-  const e = document.createElement(tag);
-  if (cls) e.className = cls;
-  if (text != null) e.textContent = text;
-  return e;
-}
-
-function fmtTime(ts) {
-  const d = new Date(ts);
-  if (Number.isNaN(d.getTime())) return String(ts || '');
-  const p = (n) => String(n).padStart(2, '0');
-  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
-}
 
 export class ConversationView {
   constructor(root) {
     this.root = root; // the scrolling container
     this.grouper = new Grouper();
     this.seen = new Dedupe(); // encoded events already folded (backfill vs. SSE replay)
-    this.expandAll = false;
-    this.toggled = new Set(); // item / nested keys whose open state differs from expandAll
+    this.open = new Openable(() => this.render(true)); // item / nested keys open state
+    this.follow = new Follow(root);
     this.hideSilent = true;
     this.hideStats = false;
     this.currentPrompt = null; // /api/voice/system_prompt when the log has none
     this.dirty = false;
-    this.rendered = 0;
-    this.onNewMessages = () => {};
-    root.addEventListener('scroll', () => {
-      if (this.atBottom()) this.onNewMessages(false);
-    });
   }
+
+  set onNewMessages(fn) { this.follow.onNew = fn; }
+  get onNewMessages() { return this.follow.onNew; }
 
   /** Feeds one log event; duplicates (same encoded line) are ignored. */
   add(ev, encoded) {
@@ -54,35 +39,30 @@ export class ConversationView {
   }
 
   isOpen(key) {
-    return this.expandAll !== this.toggled.has(key);
+    return this.open.isOpen(key);
   }
 
   toggle(key) {
-    if (this.toggled.has(key)) this.toggled.delete(key); else this.toggled.add(key);
-    this.render(true);
+    this.open.toggle(key);
   }
 
   setExpandAll(on) {
-    this.expandAll = on;
-    this.toggled.clear();
-    this.render(true);
+    this.open.setExpandAll(on);
   }
 
   atBottom() {
-    const r = this.root;
-    return r.scrollTop + r.clientHeight >= r.scrollHeight - 40;
+    return this.follow.atBottom();
   }
 
   scrollToBottom() {
-    this.root.scrollTop = this.root.scrollHeight;
-    this.onNewMessages(false);
+    this.follow.scrollToBottom();
   }
 
   /** Rebuilds the DOM when something changed (or when forced). */
   render(force) {
     if (!this.dirty && !force) return;
     this.dirty = false;
-    const wasAtBottom = this.atBottom() || this.rendered === 0;
+    const wasAtBottom = this.follow.begin();
     const items = this.grouper.items.slice(-MAX_ITEMS);
     const frag = document.createDocumentFragment();
     if (this.currentPrompt && !items.some((it) => it.kind === 'system_prompt')) {
@@ -101,11 +81,7 @@ export class ConversationView {
     }
     if (shown === 0 && !this.currentPrompt) frag.appendChild(el('p', 'muted empty', 'No conversation yet: connect /voice, or send an utterance below.'));
     this.root.replaceChildren(frag);
-    const grew = items.length > this.rendered;
-    this.rendered = items.length;
-    if (wasAtBottom) this.root.scrollTop = this.root.scrollHeight;
-    else if (grew) this.onNewMessages(true);
-    if (this.atBottom()) this.onNewMessages(false);
+    this.follow.end(wasAtBottom, items.length);
   }
 
   renderItem(it) {
@@ -122,15 +98,7 @@ export class ConversationView {
 
   // header builds a clickable summary line with a chevron for `key`.
   header(key, cls, build) {
-    const open = this.isOpen(key);
-    const h = el('div', `row-head ${cls}${open ? ' open' : ''}`);
-    h.appendChild(el('span', 'chev', open ? '▾' : '▸'));
-    build(h);
-    h.addEventListener('click', (e) => {
-      if (e.target.closest('a, button, input')) return;
-      this.toggle(key);
-    });
-    return { h, open };
+    return this.open.header(key, cls, build);
   }
 
   renderSystemPrompt(it) {
@@ -221,7 +189,7 @@ export class ConversationView {
     if (open) {
       const body = el('div', 'body');
       body.appendChild(el('div', 'label', 'args'));
-      body.appendChild(el('pre', null, JSON.stringify(it.args, null, 2)));
+      body.appendChild(jsonPre(it.args, null));
       body.appendChild(el('div', 'label', 'result'));
       if (it.pending) body.appendChild(el('div', 'muted', 'no result yet'));
       else if (it.result.cancelled) body.appendChild(el('div', 'muted', 'cancelled (the user barged in)'));
@@ -263,11 +231,11 @@ export class ConversationView {
       });
       row.appendChild(h);
       if (open) {
-        row.appendChild(el('pre', 'detail', JSON.stringify(ev.payload, null, 2)));
+        row.appendChild(jsonPre(ev.payload));
         if (inner && ev.children.length) row.appendChild(this.renderNested(key, ev.children));
         if (inner && ev.result) {
           row.appendChild(el('div', 'label', `${ev.result.type} · ${fmtTime(ev.result.ts)}`));
-          row.appendChild(el('pre', 'detail', JSON.stringify(ev.result.payload, null, 2)));
+          row.appendChild(jsonPre(ev.result.payload));
         }
       }
       list.appendChild(row);

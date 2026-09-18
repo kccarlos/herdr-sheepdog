@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"sync"
@@ -44,6 +45,9 @@ const (
 	// without any network call: a developer mode for the /debug
 	// Supervisor tab, like --herdr=mock. Needs no Gemini key.
 	BrainFake = "fake"
+	// FakeBrainModel is the model name --brain=fake reports in brain.step
+	// and /api/brain/context.
+	FakeBrainModel = "fake-reflex"
 )
 
 // Options select the daemon's mode; zero values take the defaults noted.
@@ -219,6 +223,7 @@ func (a *App) wire() error {
 	case opts.Brain == BrainFake:
 		bcfg := BrainConfig(cfg)
 		bcfg.Prompts = a.prompts
+		bcfg.Model = FakeBrainModel // so no brain.step ever claims a Gemini model
 		b, err := brain.New(bcfg, braintest.Reflex(), a.log)
 		if err != nil {
 			return fmt.Errorf("app: brain: %w", err)
@@ -300,6 +305,9 @@ func (a *App) wire() error {
 		if deps.DevTestdataDir == "" {
 			deps.DevTestdataDir = config.DefaultDevTestdataDir
 		}
+		// The sample brain transcript sits next to the audio fixtures
+		// (testdata/brain/), for the Supervisor tab's console handle.
+		deps.DevBrainDir = filepath.Join(filepath.Dir(deps.DevTestdataDir), "brain")
 	}
 	if a.voice != nil {
 		deps.Voice = a.voice

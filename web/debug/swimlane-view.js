@@ -5,16 +5,10 @@
 // arrow (or tool-call card) click highlights its chain and dims the rest.
 import { buildRows, LANES } from './swimlane.js';
 import { Dedupe, fmtMs } from './grouping.js';
+import { el, jsonPre } from './dom.js';
 
 /** Events kept in the view (the backfill is the same size). */
 const MAX_EVENTS = 2000;
-
-function el(tag, cls, text) {
-  const e = document.createElement(tag);
-  if (cls) e.className = cls;
-  if (text != null) e.textContent = text;
-  return e;
-}
 
 export class SwimlaneView {
   constructor(root, header) {
@@ -201,7 +195,7 @@ export class SwimlaneView {
     if (open) {
       const body = el('div', 'sw-divider-body');
       if (r.text) body.appendChild(el('pre', 'prompt-text', r.text));
-      body.appendChild(el('pre', 'sw-json', JSON.stringify(r.event, null, 2)));
+      body.appendChild(jsonPre(r.event, 'sw-json'));
       row.appendChild(body);
     }
     return row;
@@ -264,7 +258,7 @@ export class SwimlaneView {
     if (a) row.appendChild(this.renderArrow(a, r, lanes));
     // The raw JSON spans every lane on a third grid row so a narrow lane
     // does not turn one expanded card into a column of text.
-    if (open && !r.laneHidden) row.appendChild(el('pre', 'sw-json sw-json-row', JSON.stringify(r.events || r.event, null, 2)));
+    if (open && !r.laneHidden) row.appendChild(jsonPre(r.events || r.event, 'sw-json sw-json-row'));
     return row;
   }
 
