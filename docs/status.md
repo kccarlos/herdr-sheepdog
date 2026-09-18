@@ -60,6 +60,17 @@ with `--brain=fake` and its two fake providers.
    sequence in one daemon run, which needs Gemini quota.
 5. One voice session (ask the user; audio is the quota-hungry path): Codex in `--sandbox read-only -a on-request`; say "why did that one fail?" after a finish, "let me know when it's done", "stop" mid-echo.
 
+## Next: the 2026-09-18 redesign (not started)
+
+`docs/issues-2026-09-18.md` records what the headset sessions on
+2026-09-18 showed (the assistant answering approval prompts by itself,
+`blocked → blocked` invisible, pushes cutting speech) and the decisions
+agreed with the CEO: one decision-maker (the assistant keeps only
+`to_supervisor(text)` and `stop()`; the SVP owns intent behind the
+rail), stop as a per-phase code procedure, nothing interrupting the
+assistant mid-sentence, `blocked → blocked` detection. Work order is at
+the end of that file; the first PR is the D1-revised change.
+
 ## Known gaps and follow-ups
 
 - Found in the 18:44Z session on 2026-09-18: `working → idle` (a finish the
