@@ -169,7 +169,7 @@ func (a *App) wire() error {
 		}
 		keys = []string{"local"} // local endpoints (Ollama) ignore the key
 	}
-	llmClient, err := llm.New(llm.Config{BaseURL: cfg.LLM.BaseURL, Model: cfg.LLM.Model, APIKeys: keys, Log: a.log})
+	llmClient, err := llm.New(llm.Config{BaseURL: cfg.LLM.BaseURL, Model: cfg.LLM.Model, APIKeys: keys, Timeout: time.Duration(cfg.LLM.TimeoutS) * time.Second, Log: a.log})
 	if err != nil {
 		return err
 	}

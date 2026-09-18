@@ -45,6 +45,7 @@ func Template() string {
 # base_url = %[10]q
 # model = %[11]q
 # api_key = ""   # empty: falls back to the gemini key pool when base_url is Gemini's
+# timeout_s = %[23]d   # per-attempt timeout; raise it for a slow local model
 
 [web]
 # port = %[12]d
@@ -65,6 +66,15 @@ func Template() string {
 [supervisor]
 # chattiness = %[21]q   # "quiet" | "normal" | "chatty"; the /debug switch overrides it at runtime
 # recent_minutes = %[22]d   # "normal" announces a finish only for agents you dealt with this recently
+
+[brain]
+# enabled = %[24]t   # the stateful supervisor brain behind ask/propose; serve --brain=off overrides
+# model = %[25]q   # a function-calling Gemini model
+# max_steps = %[26]d   # model calls per turn before falling back to the template path
+# ask_timeout_s = %[27]d
+# propose_timeout_s = %[28]d
+# window_tokens = %[29]d   # compact the oldest half of the window above this (estimated tokens)
+# prune_after_turns = %[30]d   # turns a screen/CLI dump stays verbatim in the window
 `,
 		d.DataDir, d.DebounceMS, d.SnapshotIntervalS, d.PendingTTLS,
 		d.Herdr.Socket,
@@ -75,5 +85,7 @@ func Template() string {
 		d.CLI.Prefer, d.CLI.CodexBin, d.CLI.ClaudeBin, d.CLI.ClaudeModel, d.CLI.CodexReasoning, d.CLI.TimeoutS, d.CLI.MaxOutputKB,
 		d.Gemini.StallAfterS,
 		d.Supervisor.Chattiness, d.Supervisor.RecentMinutes,
+		d.LLM.TimeoutS,
+		d.Brain.Enabled, d.Brain.Model, d.Brain.MaxSteps, d.Brain.AskTimeoutS, d.Brain.ProposeTimeoutS, d.Brain.WindowTokens, d.Brain.PruneAfterTurns,
 	)
 }

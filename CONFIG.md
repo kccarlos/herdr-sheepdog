@@ -66,6 +66,7 @@ endpoint, including a local Ollama server.
 | `llm.base_url` | `SHEEPDOG_LLM_BASE_URL` | `https://generativelanguage.googleapis.com/v1beta/openai/` | API root. Use `http://localhost:11434/v1` for Ollama. |
 | `llm.model` | `SHEEPDOG_LLM_MODEL` | `gemini-3.5-flash-lite` | Model name passed on every request. |
 | `llm.api_key` | `SHEEPDOG_LLM_API_KEY` | `""` | Authenticates requests; never logged. Empty and `llm.base_url` is the Gemini endpoint → the `gemini.api_keys` pool is used instead. Empty and pointed elsewhere (e.g. Ollama) → any non-empty placeholder is sent, since local endpoints usually ignore it. |
+| `llm.timeout_s` | `SHEEPDOG_LLM_TIMEOUT_S` | `15` | Per-attempt timeout of one template call. Raise it for a slow local model (Ollama gemma4 needs more than the default on a cold start). |
 
 ## `[web]`
 
@@ -105,3 +106,24 @@ it?" for what each level announces.
 |---|---|---|---|
 | `supervisor.chattiness` | `SHEEPDOG_SUPERVISOR_CHATTINESS` | `normal` | The initial push policy: `quiet` (agent questions and exits only), `normal` (plus the finish of any agent you dealt with recently, with a one-line result), or `chatty` (every finish, plus "started on …" when an instruction you sent is picked up). Changeable at runtime from the `/debug` header or `PUT /api/settings {"chattiness": …}`; the runtime choice is kept in the state file's `session.chattiness` and wins over this value on restart. |
 | `supervisor.recent_minutes` | `SHEEPDOG_SUPERVISOR_RECENT_MINUTES` | `30` | The `normal` level's window: a finish is announced when the agent was blocked, was sent an answer or an instruction, was asked about, or was named in a spoken briefing within this many minutes. |
+
+## `[brain]`
+
+The supervisor brain (plan D7-revised, [`docs/roles.md`](docs/roles.md)):
+a stateful agent behind `ask` and `propose` that reasons with tools
+(`read_screen`, `run_cli`, `list_agents`, `recall`) and acts with
+`prompt`, `send_keys`, `interrupt` over a function-calling Gemini model,
+keeping one transcript per daemon run at `<data_dir>/brain/<run-id>.jsonl`.
+When it errors or runs out of budget, the supervisor answers from the
+template path instead. `sheepdog serve --brain=off` disables it for one
+run; it is also off, silently, when no Gemini key is configured.
+
+| Key | Env override | Default | Meaning |
+|---|---|---|---|
+| `brain.enabled` | `SHEEPDOG_BRAIN_ENABLED` | `true` | Route `ask`/`propose` through the brain (`serve --brain` overrides). |
+| `brain.model` | `SHEEPDOG_BRAIN_MODEL` | `gemini-3.5-flash` | The function-calling model; the Gemini key pool applies, rotating on a rate limit. |
+| `brain.max_steps` | `SHEEPDOG_BRAIN_MAX_STEPS` | `6` | Model calls one turn may make (each tool round is one); beyond it the turn falls back. |
+| `brain.ask_timeout_s` | `SHEEPDOG_BRAIN_ASK_TIMEOUT_S` | `8` | Wall-clock budget of one `ask` turn, tools included; on expiry the template path answers. |
+| `brain.propose_timeout_s` | `SHEEPDOG_BRAIN_PROPOSE_TIMEOUT_S` | `12` | Same for `propose`. |
+| `brain.window_tokens` | `SHEEPDOG_BRAIN_WINDOW_TOKENS` | `24000` | Context window target in estimated tokens; above it the oldest half of the window is compacted into one summary message (`brain.compaction`). |
+| `brain.prune_after_turns` | `SHEEPDOG_BRAIN_PRUNE_AFTER_TURNS` | `3` | Turns a tool result (screen, CLI output) stays verbatim in the window before it becomes a one-line stub; the disk transcript keeps the full text. |
