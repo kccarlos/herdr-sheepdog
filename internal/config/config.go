@@ -3,8 +3,8 @@
 // Configuration is read from ~/.config/sheepdog/config.toml when the file
 // exists, then overridden by SHEEPDOG_* environment variables (and, for the
 // Gemini key pool, GEMINI_API_KEY*). Only the keys needed by the herdr
-// client, state table and voice session are defined so far; later work
-// packages add their own sections (llm, cli, web) here.
+// client, state table, voice session, cheap LLM and supervisor are defined
+// so far; later work packages add their own sections (cli, web) here.
 //
 // String() must never print secrets: Gemini keys are rendered as a count.
 package config
@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 )
@@ -31,9 +32,50 @@ type Config struct {
 	// Aliases maps pane_id -> spoken alias, e.g. "w9:p1" = "auth".
 	Aliases map[string]string `toml:"aliases"`
 
+	// PendingTTLS is how long a pending action (an unanswered agent
+	// question or an in-flight instruction) stays confirmable/cancellable.
+	PendingTTLS int `toml:"pending_ttl_s"`
+
 	Herdr  Herdr  `toml:"herdr"`
 	State  State  `toml:"state"`
 	Gemini Gemini `toml:"gemini"`
+	LLM    LLM    `toml:"llm"`
+}
+
+// LLM configures the cheap text-in/text-out model (plan §3.4): any
+// OpenAI-compatible chat endpoint.
+type LLM struct {
+	// BaseURL is the API root, e.g. the Gemini OpenAI-compatible endpoint
+	// or http://localhost:11434/v1 for Ollama.
+	BaseURL string `toml:"base_url"`
+	// Model is the model name passed in every request.
+	Model string `toml:"model"`
+	// APIKey authenticates requests. When empty and BaseURL is the Gemini
+	// endpoint, the Gemini key pool is used instead. Never logged.
+	APIKey string `toml:"api_key"`
+}
+
+// GeminiOpenAIBaseURL is Gemini's OpenAI-compatible endpoint, the default
+// cheap-LLM backend.
+const GeminiOpenAIBaseURL = "https://generativelanguage.googleapis.com/v1beta/openai/"
+
+// LLMKeys returns the key pool the cheap LLM should use: the explicit
+// llm.api_key when set, otherwise the Gemini pool when the base URL is the
+// Gemini endpoint, otherwise nothing.
+func (c Config) LLMKeys() []string {
+	if c.LLM.APIKey != "" {
+		return []string{c.LLM.APIKey}
+	}
+	if IsGeminiBaseURL(c.LLM.BaseURL) {
+		return append([]string(nil), c.Gemini.APIKeys...)
+	}
+	return nil
+}
+
+// IsGeminiBaseURL reports whether u points at Google's generative language
+// API (where the Gemini key pool applies).
+func IsGeminiBaseURL(u string) bool {
+	return strings.Contains(u, "generativelanguage.googleapis.com")
 }
 
 // Gemini configures the voice session (plan §6).
@@ -76,7 +118,9 @@ func Default() Config {
 		Aliases:           map[string]string{},
 		Herdr:             Herdr{Socket: filepath.Join(home, ".config", "herdr", "herdr.sock")},
 		State:             State{Path: filepath.Join(dataDir, "state.json")},
+		PendingTTLS:       120,
 		Gemini:            Gemini{Model: "gemini-3.8-live", Voice: "Puck"},
+		LLM:               LLM{BaseURL: GeminiOpenAIBaseURL, Model: "gemini-3.5-flash-lite"},
 	}
 }
 
@@ -125,7 +169,8 @@ func load(path string, lookup func(string) (string, bool)) (Config, error) {
 //
 //	SHEEPDOG_DATA_DIR, SHEEPDOG_DEBOUNCE_MS, SHEEPDOG_SNAPSHOT_INTERVAL_S,
 //	SHEEPDOG_HERDR_SOCKET, SHEEPDOG_STATE_PATH, SHEEPDOG_GEMINI_MODEL,
-//	SHEEPDOG_GEMINI_VOICE.
+//	SHEEPDOG_GEMINI_VOICE, SHEEPDOG_LLM_BASE_URL, SHEEPDOG_LLM_MODEL,
+//	SHEEPDOG_LLM_API_KEY, SHEEPDOG_PENDING_TTL_S.
 //
 // The Gemini key pool is collected from GEMINI_API_KEY, then
 // GEMINI_API_KEY_1 … GEMINI_API_KEY_9, in that order; if any is set the
@@ -140,6 +185,15 @@ func applyEnv(cfg *Config, lookup func(string) (string, bool)) error {
 	}
 	if keys := geminiKeysFromEnv(lookup); len(keys) > 0 {
 		cfg.Gemini.APIKeys = keys
+	}
+	if v, ok := lookup("SHEEPDOG_LLM_BASE_URL"); ok {
+		cfg.LLM.BaseURL = v
+	}
+	if v, ok := lookup("SHEEPDOG_LLM_MODEL"); ok {
+		cfg.LLM.Model = v
+	}
+	if v, ok := lookup("SHEEPDOG_LLM_API_KEY"); ok {
+		cfg.LLM.APIKey = v
 	}
 	if v, ok := lookup("SHEEPDOG_DATA_DIR"); ok {
 		cfg.DataDir = v
@@ -164,6 +218,13 @@ func applyEnv(cfg *Config, lookup func(string) (string, bool)) error {
 		}
 		cfg.SnapshotIntervalS = n
 	}
+	if v, ok := lookup("SHEEPDOG_PENDING_TTL_S"); ok {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return fmt.Errorf("config: SHEEPDOG_PENDING_TTL_S=%q: want a positive integer", v)
+		}
+		cfg.PendingTTLS = n
+	}
 	return nil
 }
 
@@ -185,6 +246,6 @@ func geminiKeysFromEnv(lookup func(string) (string, bool)) []string {
 // String renders the configuration for logs. Secrets are rendered as
 // counts only; keep it that way when secret-bearing fields are added.
 func (c Config) String() string {
-	return fmt.Sprintf("data_dir=%s herdr.socket=%s state.path=%s debounce_ms=%d snapshot_interval_s=%d aliases=%d gemini.model=%s gemini.voice=%s gemini.api_keys=%d",
-		c.DataDir, c.Herdr.Socket, c.State.Path, c.DebounceMS, c.SnapshotIntervalS, len(c.Aliases), c.Gemini.Model, c.Gemini.Voice, len(c.Gemini.APIKeys))
+	return fmt.Sprintf("data_dir=%s herdr.socket=%s state.path=%s debounce_ms=%d snapshot_interval_s=%d pending_ttl_s=%d aliases=%d gemini.model=%s gemini.voice=%s gemini.api_keys=%d llm.base_url=%s llm.model=%s llm.api_keys=%d",
+		c.DataDir, c.Herdr.Socket, c.State.Path, c.DebounceMS, c.SnapshotIntervalS, c.PendingTTLS, len(c.Aliases), c.Gemini.Model, c.Gemini.Voice, len(c.Gemini.APIKeys), c.LLM.BaseURL, c.LLM.Model, len(c.LLMKeys()))
 }

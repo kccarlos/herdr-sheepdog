@@ -291,3 +291,70 @@ func TestCorruptFileStartsEmptyWithWarning(t *testing.T) {
 		t.Error("directory as state path should fail")
 	}
 }
+
+func TestUpdateRowAndPendingRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	s, err := Open(path, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustApply(t, s, tr("w5:p1", "", herdr.StateBlocked, t0))
+	if _, err := s.Update("w9:p9", func(*Agent) {}); err == nil {
+		t.Error("unknown pane accepted")
+	}
+	row, err := s.Update("w5:p1", func(a *Agent) {
+		a.CurrentTask = "create hello.txt"
+		a.LastBlock.Question = "whether it can create hello.txt"
+	})
+	if err != nil || row.CurrentTask != "create hello.txt" || row.LastBlock.Question == "" {
+		t.Fatalf("Update: %+v %v", row, err)
+	}
+	p := PendingAction{ID: "p1", PaneID: "w5:p1", Kind: PendingAnswerPrompt, Question: "whether it can create hello.txt",
+		Options: []Option{{Label: "Yes", Keys: []string{"enter"}}}, YesKeys: []string{"enter"}, NoKeys: []string{"esc"},
+		CreatedAt: t0, ExpiresAt: t0.Add(2 * time.Minute)}
+	if err := s.SetPending(p); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.UpdateSession(func(ss *Session) { ss.Notes = append(ss.Notes, Note{Text: "no migrations today", At: t0}) }); err != nil {
+		t.Fatal(err)
+	}
+
+	s2, err := Open(path, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, ok := s2.Pending()
+	if !ok || got.Question != p.Question || len(got.Options) != 1 || got.Options[0].Keys[0] != "enter" || got.NoKeys[0] != "esc" {
+		t.Errorf("pending after reload: %+v", got)
+	}
+	snap := s2.Snapshot()
+	if len(snap.Session.Notes) != 1 || snap.Session.Notes[0].Text != "no migrations today" {
+		t.Errorf("notes after reload: %+v", snap.Session.Notes)
+	}
+	if snap.Agents["w5:p1"].LastBlock.Question != "whether it can create hello.txt" {
+		t.Errorf("last_block after reload: %+v", snap.Agents["w5:p1"].LastBlock)
+	}
+	// Snapshot is a deep copy.
+	snap.PendingAction.Options[0].Keys[0] = "mutated"
+	if got, _ := s2.Pending(); got.Options[0].Keys[0] != "enter" {
+		t.Error("snapshot aliases store data")
+	}
+}
+
+func TestRowsDoNotAliasStore(t *testing.T) {
+	s, err := Open("", Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustApply(t, s, tr("w5:p1", "", herdr.StateBlocked, t0))
+	row, _ := s.Get("w5:p1")
+	row.LastBlock.Question = "mutated"
+	if got, _ := s.Get("w5:p1"); got.LastBlock.Question != "" {
+		t.Error("Get aliases last_block")
+	}
+	list := s.List()
+	list[0].LastBlock.Question = "mutated"
+	if got, _ := s.Get("w5:p1"); got.LastBlock.Question != "" {
+		t.Error("List aliases last_block")
+	}
+}

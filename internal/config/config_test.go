@@ -166,3 +166,42 @@ model = "gemini-file"
 		t.Errorf("String leaks or omits key count: %s", s)
 	}
 }
+
+func TestLLMConfig(t *testing.T) {
+	cfg, err := load(filepath.Join(t.TempDir(), "missing.toml"), envFrom(map[string]string{"GEMINI_API_KEY": "g0", "GEMINI_API_KEY_1": "g1"}))
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.LLM.BaseURL != GeminiOpenAIBaseURL || cfg.LLM.Model != "gemini-3.5-flash-lite" || cfg.PendingTTLS != 120 {
+		t.Errorf("llm defaults = %+v ttl=%d", cfg.LLM, cfg.PendingTTLS)
+	}
+	if keys := cfg.LLMKeys(); len(keys) != 2 || keys[0] != "g0" {
+		t.Errorf("Gemini pool should back the default llm endpoint, got %d keys", len(keys))
+	}
+
+	cfg, err = load(filepath.Join(t.TempDir(), "missing.toml"), envFrom(map[string]string{
+		"GEMINI_API_KEY":         "g0",
+		"SHEEPDOG_LLM_BASE_URL":  "http://localhost:11434/v1",
+		"SHEEPDOG_LLM_MODEL":     "gemma4:latest",
+		"SHEEPDOG_PENDING_TTL_S": "30",
+	}))
+	if err != nil {
+		t.Fatalf("load with env: %v", err)
+	}
+	if cfg.LLM.BaseURL != "http://localhost:11434/v1" || cfg.LLM.Model != "gemma4:latest" || cfg.PendingTTLS != 30 {
+		t.Errorf("env llm not applied: %+v ttl=%d", cfg.LLM, cfg.PendingTTLS)
+	}
+	if keys := cfg.LLMKeys(); len(keys) != 0 {
+		t.Errorf("non-Gemini endpoint must not borrow the Gemini pool, got %d keys", len(keys))
+	}
+	cfg.LLM.APIKey = "explicit"
+	if keys := cfg.LLMKeys(); len(keys) != 1 || keys[0] != "explicit" {
+		t.Errorf("explicit key should win, got %v", keys)
+	}
+	if strings.Contains(cfg.String(), "explicit") || strings.Contains(cfg.String(), "g0") {
+		t.Errorf("String leaks a key: %s", cfg)
+	}
+	if _, err := load(filepath.Join(t.TempDir(), "none.toml"), envFrom(map[string]string{"SHEEPDOG_PENDING_TTL_S": "0"})); err == nil {
+		t.Error("zero SHEEPDOG_PENDING_TTL_S should fail")
+	}
+}

@@ -1,0 +1,16 @@
+The operator supervises coding agents by voice and just said something that should be sent to one of them. Work out which agent and what to send. Answer with ONE JSON object and nothing else.
+
+Agents (alias, pane id, kind, state, what they are doing or asking):
+{agents}
+
+Operator said: "{user_text}"
+{hint}
+Rules:
+- Pick the agent only when the words clearly identify one: by alias (possibly mispronounced or partly said, "the auth one" = auth), by what it is doing ("the one running tests"), or because only one agent could sensibly receive this ("yes" when exactly one agent is asking a question, or when there is exactly one agent). Otherwise set ambiguous=true, pane_id=null and write a short clarify_question that names the candidates, e.g. "Do you mean auth or docs?".
+- "instruction_text": what to type into the agent, as a clear imperative in the operator's own meaning, first person removed ("skip the flaky test and rerun"). Keep it faithful; do not add steps.
+- "is_answer": true when the operator is answering the question the chosen agent is currently asking (yes, no, go ahead, option 2, the second one, keep the old one) rather than giving new work. Then put the answer in "answer" ("yes", "no", "2", or the option's words) and leave instruction_text as the same short answer.
+- "echo": one spoken sentence, ≤ 15 words, that tells the operator what will be sent, in the form "Telling <alias> to <instruction>." or "Telling <alias> yes." No paths, hashes or URLs.
+- "pane_id": the pane id of the chosen agent exactly as listed, or null.
+
+Return exactly:
+{"pane_id": null, "instruction_text": "", "is_answer": false, "answer": "", "echo": "", "ambiguous": false, "clarify_question": ""}

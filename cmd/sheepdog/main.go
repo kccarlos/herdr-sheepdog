@@ -1,8 +1,8 @@
 // Command sheepdog is the sheepdog daemon entry point.
 //
-// Subcommands so far: "version", "help", "herdr watch" (WP1) and
-// "voice-test" (WP2). The supervisor and web server land in later work
-// packages per sheepdog-v1-plan.md.
+// Subcommands so far: "version", "help", "herdr watch" (WP1), "voice-test"
+// (WP2) and "llm-test" (WP3). The daemon wiring and web server land in
+// later work packages per sheepdog-v1-plan.md.
 package main
 
 import (
@@ -47,6 +47,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return runHerdr(ctx, args[1:], stdout, stderr)
 	case "voice-test":
 		return runVoiceTest(ctx, args[1:], stdout, stderr)
+	case "llm-test":
+		return runLLMTest(ctx, args[1:], stdout, stderr)
 	case "version":
 		fprintln(stdout, versionString(version, commit, date))
 		return 0
@@ -72,6 +74,7 @@ func printUsage(w io.Writer) {
 	fprintln(w, "commands:")
 	fprintln(w, "  herdr watch   print debounced agent state transitions, persist the table")
 	fprintln(w, "  voice-test    stream a WAV through a Gemini Live session with echo tools")
+	fprintln(w, "  llm-test      run one cheap-LLM template against a screen or instruction")
 	fprintln(w, "  version       print version, commit, and build date")
 	fprintln(w, "  help          show this help message")
 }
