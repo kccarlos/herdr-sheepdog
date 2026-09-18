@@ -3,23 +3,34 @@ package web
 import (
 	"bufio"
 	"context"
+	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
+	"github.com/kccarlos/herdr-sheepdog/internal/brain/braintest"
 )
 
 // The brain endpoints answer 503 with the reason when no brain is
 // attached (the Supervisor tab's "Brain off" state).
 func TestBrainEndpointsOff(t *testing.T) {
 	h := newHarness(t, harnessOpts{})
-	for _, path := range []string{"/api/brain/transcript", "/api/brain/context", "/api/brain/system_prompt"} {
+	for _, path := range []string{"/api/brain/transcript", "/api/brain/context", "/api/brain/system_prompt", "/api/brain/models"} {
 		var body map[string]string
 		if code := h.getJSON(path, &body); code != http.StatusServiceUnavailable || !strings.Contains(body["error"], "brain is off (--brain=off)") {
 			t.Errorf("%s = %d %v", path, code, body)
 		}
+	}
+	var body map[string]string
+	if code, _ := h.putModel(map[string]any{"provider": "gemini", "model": "gemini-3.8-flash"}, &body); code != http.StatusServiceUnavailable || !strings.Contains(body["error"], "brain is off") {
+		t.Errorf("PUT /api/brain/model = %d %v", code, body)
+	}
+	var st StateResponse
+	if h.getJSON("/api/state", &st); st.Brain != nil {
+		t.Errorf("state.brain with the brain off = %+v", st.Brain)
 	}
 }
 
@@ -165,5 +176,105 @@ func TestBrainEndpointsWithFakeBrain(t *testing.T) {
 		case <-deadline:
 			t.Fatalf("brain.transcript events on SSE = %d", got)
 		}
+	}
+}
+
+// The model picker's endpoints: GET lists the discovered catalog with the
+// current model (recommended first; ?refresh=1 fetches again; a failed
+// fetch keeps the last list and reports the error, never a 5xx), PUT
+// switches the brain's model (validated; gemini is the only provider;
+// a well-formed name the catalog does not list is accepted), persists
+// it in the state file's session and logs brain.model_changed; /api/state
+// and /api/brain/context report the live model.
+func TestBrainModelEndpoints(t *testing.T) {
+	h := newHarness(t, harnessOpts{brain: true})
+	var got BrainModelsResponse
+	if code := h.getJSON("/api/brain/models", &got); code != http.StatusOK {
+		t.Fatalf("GET = %d", code)
+	}
+	if got.Provider != "gemini" || len(got.Providers) != 1 || got.Providers[0].ID != "gemini" || got.Model != brain.DefaultModel || got.Error != "" || got.Stale || got.FetchedAt == nil {
+		t.Fatalf("GET body = %+v", got)
+	}
+	if len(got.Models) != len(braintest.Catalog()) || got.Models[0].Name != "gemini-3.8-flash" || !got.Models[0].Recommended || got.Models[len(got.Models)-1].Name != braintest.FakeModel || got.Models[len(got.Models)-1].Recommended {
+		t.Fatalf("GET models = %+v", got.Models)
+	}
+	var st StateResponse
+	if code := h.getJSON("/api/state", &st); code != http.StatusOK || st.Brain == nil || st.Brain.Provider != "gemini" || st.Brain.Model != brain.DefaultModel || st.Session.BrainModel != "" {
+		t.Fatalf("state before = %d %+v", code, st.Brain)
+	}
+
+	// Set: a listed model.
+	var out BrainModelsResponse
+	if code, body := h.putModel(map[string]any{"provider": "gemini", "model": "gemini-3.8-flash"}, &out); code != http.StatusOK || out.Model != "gemini-3.8-flash" || len(out.Models) != len(braintest.Catalog()) || out.Provider != "gemini" {
+		t.Fatalf("PUT = %d %s", code, body)
+	}
+	if h.srv.deps.Brain.Model() != "gemini-3.8-flash" || h.store.Snapshot().Session.BrainModel != "gemini-3.8-flash" {
+		t.Errorf("brain = %q session = %q", h.srv.deps.Brain.Model(), h.store.Snapshot().Session.BrainModel)
+	}
+	if h.getJSON("/api/state", &st); st.Brain == nil || st.Brain.Model != "gemini-3.8-flash" || st.Session.BrainModel != "gemini-3.8-flash" {
+		t.Errorf("state after = %+v / %q", st.Brain, st.Session.BrainModel)
+	}
+	var cx ContextResponse
+	if h.getJSON("/api/brain/context", &cx); cx.Model != "gemini-3.8-flash" {
+		t.Errorf("context.model = %q", cx.Model)
+	}
+	var msgs []TranscriptMessage
+	if h.getJSON("/api/brain/transcript", &msgs); len(msgs) != 1 || msgs[0].Kind != brain.KindSystem || msgs[0].Content != "model switched from "+brain.DefaultModel+" to gemini-3.8-flash" {
+		t.Errorf("transcript marker = %+v", msgs)
+	}
+	// Unknown but well-formed (the catalog may be stale): accepted.
+	if code, body := h.putModel(map[string]any{"model": "models/gemini-4.0-pro-preview"}, &out); code != http.StatusOK || out.Model != "gemini-4.0-pro-preview" {
+		t.Fatalf("PUT unknown = %d %s", code, body)
+	}
+	// Bad requests: empty, odd characters, another provider, garbage.
+	for _, body := range []map[string]any{{"model": ""}, {"model": "gemini flash"}, {"provider": "openai", "model": "gpt-5"}} {
+		var e map[string]string
+		if code, raw := h.putModel(body, &e); code != http.StatusBadRequest || e["error"] == "" {
+			t.Errorf("PUT %v = %d %s", body, code, raw)
+		}
+		if body["provider"] == "openai" && !strings.Contains(e["error"], "only gemini") {
+			t.Errorf("provider error = %q", e["error"])
+		}
+	}
+	var e map[string]string
+	if code, _ := h.putModel("garbage", &e); code != http.StatusBadRequest {
+		t.Errorf("PUT garbage = %d", code)
+	}
+	if h.srv.deps.Brain.Model() != "gemini-4.0-pro-preview" || h.store.Snapshot().Session.BrainModel != "gemini-4.0-pro-preview" {
+		t.Errorf("bad requests changed the model: %q / %q", h.srv.deps.Brain.Model(), h.store.Snapshot().Session.BrainModel)
+	}
+	var changed []string
+	for _, ev := range h.log.Tail(0) {
+		if ev.Type == "brain.model_changed" {
+			var p struct{ From, To, Via string }
+			_ = json.Unmarshal(ev.Payload, &p)
+			changed = append(changed, p.From+">"+p.To+"/"+p.Via)
+		}
+	}
+	if strings.Join(changed, " ") != brain.DefaultModel+">gemini-3.8-flash/debug gemini-3.8-flash>gemini-4.0-pro-preview/debug" {
+		t.Errorf("brain.model_changed = %v", changed)
+	}
+
+	// Discovery failure: refresh keeps the last list and says why.
+	h.model.ListErr = errors.New("catalog down")
+	if code := h.getJSON("/api/brain/models?refresh=1", &got); code != http.StatusOK || got.Error != "catalog down" || !got.Stale || len(got.Models) != len(braintest.Catalog()) || got.Model != "gemini-4.0-pro-preview" {
+		t.Errorf("failed refresh = %d %+v", code, got)
+	}
+	// Without a refresh the cache is served, no error.
+	var cached BrainModelsResponse
+	if code := h.getJSON("/api/brain/models", &cached); code != http.StatusOK || cached.Error != "" || cached.Stale || len(cached.Models) != len(braintest.Catalog()) {
+		t.Errorf("cached = %d %+v", code, cached)
+	}
+}
+
+// With no catalog fetched yet and discovery failing, GET is still a 200
+// with an empty list and the error, so the picker can show the current
+// model.
+func TestBrainModelsNoCache(t *testing.T) {
+	h := newHarness(t, harnessOpts{brain: true})
+	h.model.ListErr = errors.New("no network")
+	var got BrainModelsResponse
+	if code := h.getJSON("/api/brain/models", &got); code != http.StatusOK || got.Error != "no network" || got.Stale || len(got.Models) != 0 || got.Models == nil || got.Model != brain.DefaultModel || got.FetchedAt != nil {
+		t.Errorf("GET = %d %+v", code, got)
 	}
 }

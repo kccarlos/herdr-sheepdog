@@ -91,6 +91,9 @@ export function eventSummary(ev) {
     case type === 'brain.event_coalesced':
       parts.push(p.agent ? `${p.agent} ${p.event || ''}`.trim() : '', 'replaced the queued turn');
       break;
+    case type === 'brain.model_changed':
+      parts.push(`${p.from || '?'} → ${p.to || '?'}`, p.via ? `via ${p.via}` : '');
+      break;
     case type.endsWith('.tool_call'):
       parts.push(p.name, argSummary(p.args), p.via ? `via ${p.via}` : '');
       break;

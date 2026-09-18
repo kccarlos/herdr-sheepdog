@@ -8,14 +8,15 @@ import (
 	"google.golang.org/genai"
 )
 
-// toContents renders the window as model contents. Context messages
-// (utterances, replies of the assistant, pushes, worker events, notes,
-// requests, summaries) become user text lines; consecutive ones merge into
-// one content. A step's tool calls become the model content the provider
-// returned (Raw, with its thought signatures) or, without Raw, function
-// call parts; their results become function response parts. Replies are
-// model text.
-func toContents(msgs []Message) []*genai.Content {
+// toContents renders the window as model contents for model. Context
+// messages (utterances, replies of the assistant, pushes, worker events,
+// notes, requests, summaries) become user text lines; consecutive ones
+// merge into one content. A step's tool calls become the model content
+// the provider returned (Raw, with its thought signatures) or, without
+// Raw or when another model made the call (its signatures would not be
+// accepted), function call parts; their results become function
+// response parts. Replies are model text.
+func toContents(msgs []Message, model string) []*genai.Content {
 	var out []*genai.Content
 	var text []string // pending user lines
 	flushText := func() {
@@ -48,7 +49,7 @@ func toContents(msgs []Message) []*genai.Content {
 		case KindToolCall:
 			flushText()
 			flushResults()
-			if len(m.Raw) > 0 {
+			if len(m.Raw) > 0 && (m.Model == "" || m.Model == model) {
 				flushCalls()
 				var c genai.Content
 				if err := json.Unmarshal(m.Raw, &c); err == nil && len(c.Parts) > 0 {
@@ -107,6 +108,8 @@ func contextLine(m Message) string {
 		return fmt.Sprintf("[%s] %s", ts, m.Content)
 	case KindEventScreen:
 		return fmt.Sprintf("[%s] The screen the supervisor read for this event:\n%s", ts, m.Content)
+	case KindSystem:
+		return fmt.Sprintf("[%s] Note from the daemon: %s", ts, m.Content)
 	default:
 		return fmt.Sprintf("[%s] %s: %s", ts, m.Kind, m.Content)
 	}

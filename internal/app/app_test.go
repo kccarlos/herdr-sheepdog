@@ -412,3 +412,100 @@ func waitFor(t *testing.T, d time.Duration, cond func() bool, msg string) {
 	}
 	t.Fatalf("timeout: %s", msg)
 }
+
+// A model chosen at runtime (PUT /api/brain/model) is kept in the state
+// file and applied on the next start over the configured initial value,
+// after daemon.start (brain.model_changed {via: state}); daemon.start
+// reports the live model.
+func TestBrainModelPersistsAcrossRestart(t *testing.T) {
+	llm := fakeLLM(t)
+	cfg := testConfig(t, llm.URL)
+	run := func(check func(url string)) (types []string, models []string) {
+		t.Helper()
+		a, err := Build(cfg, Options{Voice: VoiceOff, Herdr: HerdrMock, Brain: BrainFake, Drain: time.Second})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := a.Listen(); err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan error, 1)
+		go func() { done <- a.Run(ctx) }()
+		check(a.URL())
+		cancel()
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatal("Run did not return")
+		}
+		f, err := os.Open(a.elog.Path(time.Now()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = f.Close() }()
+		evs, err := eventlog.Replay(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// The log file is per day: both runs land in it, so only this
+		// run's events (from the last daemon.start) are returned.
+		for _, ev := range evs {
+			if ev.Type == "daemon.start" {
+				types, models = nil, nil
+				var p struct {
+					BrainModel string `json:"brain_model"`
+				}
+				_ = json.Unmarshal(ev.Payload, &p)
+				models = append(models, p.BrainModel)
+			}
+			types = append(types, ev.Type)
+		}
+		return types, models
+	}
+
+	types, models := run(func(url string) {
+		var st map[string]any
+		getJSON(t, url+"/api/state", &st)
+		if b, _ := st["brain"].(map[string]any); b["model"] != FakeBrainModel || b["provider"] != "gemini" {
+			t.Fatalf("state.brain = %v", st["brain"])
+		}
+		body, _ := json.Marshal(map[string]any{"provider": "gemini", "model": "gemini-3.8-flash"})
+		req, _ := http.NewRequest(http.MethodPut, url+"/api/brain/model", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("PUT /api/brain/model = %d", resp.StatusCode)
+		}
+	})
+	if !subsequence(types, []string{"daemon.start", "brain.model_changed", "daemon.stop"}) || strings.Join(models, ",") != FakeBrainModel {
+		t.Fatalf("first run: types = %v models = %v", types, models)
+	}
+	data, err := os.ReadFile(cfg.State.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"brain_model": "gemini-3.8-flash"`) {
+		t.Fatalf("state file lacks brain_model: %s", data)
+	}
+
+	types, models = run(func(url string) {
+		var st map[string]any
+		getJSON(t, url+"/api/state", &st)
+		if b, _ := st["brain"].(map[string]any); b["model"] != "gemini-3.8-flash" {
+			t.Fatalf("state.brain after restart = %v", st["brain"])
+		}
+	})
+	// The switch is applied after daemon.start (which still names the
+	// initial model), as brain.model_changed {via: state}.
+	if !subsequence(types, []string{"daemon.start", "brain.model_changed"}) || strings.Join(models, ",") != FakeBrainModel {
+		t.Fatalf("second run: types = %v models = %v", types, models)
+	}
+}

@@ -49,6 +49,7 @@ export const KIND_GROUPS = {
   compaction_summary: { id: 'compaction', label: 'summaries' },
   promise: { id: 'promise', label: 'promises' },
   event_screen: { id: 'result', label: 'tool results' },
+  system: { id: 'note', label: 'notes' },
 };
 
 /** Meter group order (transcript side), then the pruned stubs. */
@@ -122,6 +123,12 @@ export function parseReply(content) {
 export function parsePush(content) {
   const m = /^\((\w+)\) ([\s\S]*)$/.exec(content || '');
   return m ? { urgency: m[1], text: m[2] } : { urgency: '', text: content || '' };
+}
+
+/** Parses the model-switch note "model switched from X to Y" ({from, to}, empty when it is another note). */
+export function parseModelSwitch(content) {
+  const m = /^model switched from (\S+) to (\S+)$/.exec(content || '');
+  return m ? { from: m[1], to: m[2] } : { from: '', to: '' };
 }
 
 /** Parses a worker event "alias: from -> to" / "alias: pane closed". */
@@ -375,6 +382,9 @@ export function buildTranscriptView(messages, context, turns, opts = {}) {
         break;
       case 'note':
         items.push({ ...base, kind: 'note', text: m.content || '' });
+        break;
+      case 'system':
+        items.push({ ...base, kind: 'system', text: m.content || '', ...parseModelSwitch(m.content) });
         break;
       case 'promise': {
         const p = parsePromise(m);

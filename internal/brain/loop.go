@@ -18,8 +18,11 @@ const logResultBytes = 1024
 
 // turn is the bookkeeping of one Turn call.
 type turn struct {
-	n     int
-	req   Request
+	n   int
+	req Request
+	// model is the model name snapshotted when the turn started: a
+	// SetModel during the turn never lands between its tool rounds.
+	model string
 	start time.Time
 	// soft is when the budget for tool rounds ends; the hard deadline is
 	// FinalGrace later.
@@ -76,7 +79,7 @@ func (b *Brain) Turn(ctx context.Context, req Request) (Reply, error) {
 		b.log.Log(logSource, "brain.fallback", "", map[string]any{"reason": reason, "kind": string(req.Kind), "trigger": string(req.Trigger), "agent": req.Agent, "error": err.Error()})
 		return Reply{}, fmt.Errorf("%w: waiting for the turn lock: %w", ErrFallback, err)
 	}
-	t := &turn{req: req, start: start, soft: start.Add(timeout)}
+	t := &turn{req: req, model: b.Model(), start: start, soft: start.Add(timeout)}
 	reply, err := b.run(tctx, t)
 	b.after.Add(1)
 	go b.afterTurn(t)
@@ -146,9 +149,9 @@ func (b *Brain) run(ctx context.Context, t *turn) (Reply, error) {
 		config.SystemInstruction = &genai.Content{Parts: []*genai.Part{{Text: text}}}
 
 		t0 := b.cfg.Now()
-		resp, err := b.model.Generate(ctx, b.cfg.Model, toContents(asm.Messages), &config)
+		resp, err := b.model.Generate(ctx, t.model, toContents(asm.Messages, t.model), &config)
 		t.calls++
-		payload := map[string]any{"turn": t.n, "step": step, "model": b.cfg.Model, "template": string(t.req.Kind), "dur_ms": b.cfg.Now().Sub(t0).Milliseconds(), "forced": forced}
+		payload := map[string]any{"turn": t.n, "step": step, "model": t.model, "template": string(t.req.Kind), "dur_ms": b.cfg.Now().Sub(t0).Milliseconds(), "forced": forced}
 		var calls []*genai.FunctionCall
 		if err != nil {
 			payload["error"] = err.Error()
@@ -208,7 +211,7 @@ func (b *Brain) execCalls(ctx context.Context, t *turn, resp *genai.GenerateCont
 	modelText := strings.TrimSpace(textOf(resp))
 	for i, fc := range calls {
 		id := b.nextToolID(t.n)
-		m := Message{Role: RoleAssistant, Kind: KindToolCall, ToolCall: &ToolCall{ID: id, Name: fc.Name, Args: fc.Args}}
+		m := Message{Role: RoleAssistant, Kind: KindToolCall, Model: t.model, ToolCall: &ToolCall{ID: id, Name: fc.Name, Args: fc.Args}}
 		if i == 0 {
 			m.Raw, m.Content = raw, modelText
 		}
@@ -315,7 +318,7 @@ func (b *Brain) systemPrompt() string {
 		for _, s := range secs {
 			report = append(report, map[string]any{"name": s.Name, "chars": len(s.Text)})
 		}
-		b.log.Log(logSource, "brain.system_prompt", "", map[string]any{"sections": report, "total_chars": len(text), "model": b.cfg.Model, "tools": len(b.tools[0].FunctionDeclarations)})
+		b.log.Log(logSource, "brain.system_prompt", "", map[string]any{"sections": report, "total_chars": len(text), "model": b.Model(), "tools": len(b.tools[0].FunctionDeclarations)})
 	}
 	return text
 }

@@ -56,6 +56,10 @@ const (
 	// an event turn is about, put in the window so the turn need not read
 	// again; pruned to a stub like a tool result.
 	KindEventScreen MessageKind = "event_screen"
+	// KindSystem is a note from the daemon about the run itself, not the
+	// work: today the model switch ("model switched from X to Y"), so
+	// the Supervisor tab shows where the model flipped.
+	KindSystem MessageKind = "system"
 )
 
 // Message is one transcript line.
@@ -85,6 +89,9 @@ type Message struct {
 	// (function call parts with their thought signatures), replayed
 	// verbatim so the provider accepts the follow-up.
 	Raw json.RawMessage `json:"raw,omitempty"`
+	// Model is the model that made a tool call: after a model switch
+	// its Raw (signed by another model) is not replayed.
+	Model string `json:"model,omitempty"`
 	// Tokens is the estimated size of the message.
 	Tokens int `json:"tokens,omitempty"`
 }

@@ -47,7 +47,7 @@ const (
 	BrainFake = "fake"
 	// FakeBrainModel is the model name --brain=fake reports in brain.step
 	// and /api/brain/context.
-	FakeBrainModel = "fake-reflex"
+	FakeBrainModel = braintest.FakeModel
 )
 
 // Options select the daemon's mode; zero values take the defaults noted.
@@ -223,7 +223,7 @@ func (a *App) wire() error {
 		// consulted.
 		bcfg := BrainConfig(cfg)
 		bcfg.Prompts = a.prompts
-		bcfg.Model = FakeBrainModel // so no brain.step ever claims a Gemini model
+		bcfg.Model = FakeBrainModel // so no brain.step claims a Gemini model (unless the state file's brain_model says so)
 		model := braintest.Reflex()
 		if v := os.Getenv("SHEEPDOG_FAKE_BRAIN_DELAY_MS"); v != "" {
 			// A dev knob for watching turns overlap (CONFIG.md [brain]):
@@ -390,6 +390,33 @@ func (a *App) BrainMode() string {
 // BrainOffReason says why the brain is off ("" when it is on).
 func (a *App) BrainOffReason() string { return a.brainOff }
 
+// BrainModel reports the brain's current model ("" when it is off): the
+// configured brain.model until a runtime switch.
+func (a *App) BrainModel() string {
+	if a.brain == nil {
+		return ""
+	}
+	return a.brain.Model()
+}
+
+// restoreBrainModel applies the model chosen at runtime in an earlier
+// run (the state file's session.brain_model, kept by PUT
+// /api/brain/model) over the configured initial value. Called from Run
+// right after daemon.start, before any turn: the brain.model_changed
+// {via: state} it logs belongs to this run, not before it.
+func (a *App) restoreBrainModel() {
+	if a.brain == nil {
+		return
+	}
+	v := a.store.Snapshot().Session.BrainModel
+	if v == "" {
+		return
+	}
+	if err := a.brain.SetModel(v, "state"); err != nil {
+		a.log.Log("daemon", "daemon.brain_model_error", "", map[string]any{"model": v, "error": err.Error()})
+	}
+}
+
 // Prompts returns the prompt workspace loader.
 func (a *App) Prompts() *prompts.Loader { return a.prompts }
 
@@ -478,8 +505,9 @@ func (a *App) Run(ctx context.Context) (err error) {
 	brainMode := a.BrainMode()
 	a.log.Log("daemon", "daemon.start", "", map[string]any{
 		"version": a.opts.Version, "voice": a.opts.Voice, "herdr": a.opts.Herdr, "cli": a.opts.CLI, "brain": brainMode, "url": a.URL(),
-		"data_dir": a.cfg.DataDir, "llm_model": a.cfg.LLM.Model, "llm_base_url": a.cfg.LLM.BaseURL, "brain_model": a.cfg.Brain.Model,
+		"data_dir": a.cfg.DataDir, "llm_model": a.cfg.LLM.Model, "llm_base_url": a.cfg.LLM.BaseURL, "brain_model": a.BrainModel(),
 	})
+	a.restoreBrainModel()
 	// Logged here, not in wire(), so it never precedes daemon.start (the
 	// Loader itself is built in wire(), since the brain and the voice
 	// session need it before Run).

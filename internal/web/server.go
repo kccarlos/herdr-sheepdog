@@ -61,9 +61,11 @@ type Deps struct {
 	Voice voice.Session
 	// Watcher receives plugin-shim events; nil means --herdr=mock.
 	Watcher EventInjector
-	// Brain backs GET /api/brain/{transcript,context,system_prompt}; nil
-	// means the brain is off and those answer 503 with BrainOffReason
-	// ("--brain=off", "brain.enabled=false", "no Gemini key").
+	// Brain backs GET /api/brain/{transcript,context,system_prompt,models}
+	// and PUT /api/brain/model (the runtime model switch, persisted in
+	// Store's session.brain_model); nil means the brain is off and those
+	// answer 503 with BrainOffReason ("--brain=off", "brain.enabled=false",
+	// "no Gemini key").
 	Brain          *brain.Brain
 	BrainOffReason string
 	// HerdrMode and VoiceMode are reported by /api/state ("socket"|"mock",
@@ -191,6 +193,8 @@ func (s *Server) routes() error {
 	s.mux.HandleFunc("GET /api/brain/transcript", s.handleBrainTranscript)
 	s.mux.HandleFunc("GET /api/brain/context", s.handleBrainContext)
 	s.mux.HandleFunc("GET /api/brain/system_prompt", s.handleBrainSystemPrompt)
+	s.mux.HandleFunc("GET /api/brain/models", s.handleBrainModels)
+	s.mux.HandleFunc("PUT /api/brain/model", s.handleSetBrainModel)
 	if s.deps.DevTestdataDir != "" {
 		s.mux.HandleFunc("GET /testdata/{name}", func(w http.ResponseWriter, r *http.Request) {
 			s.serveFixture(w, r, s.deps.DevTestdataDir, ".wav", "audio/wav")

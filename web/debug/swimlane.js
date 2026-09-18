@@ -487,6 +487,9 @@ class Builder {
       } else if (type === 'brain.yielded' || type === 'brain.event_coalesced') {
         card.title = type === 'brain.yielded' ? 'yielded to a CEO turn' : 'event turn coalesced';
         card.cls.push('brain');
+      } else if (type === 'brain.model_changed') {
+        card.title = 'model switched';
+        card.cls.push('brain');
       }
       return card;
     }

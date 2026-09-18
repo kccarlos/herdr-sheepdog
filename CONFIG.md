@@ -117,7 +117,20 @@ a stateful agent behind `ask` and `propose` that reasons with tools
 `prompt`, `send_keys`, `interrupt` over a function-calling Gemini model,
 keeping one transcript per daemon run at `<data_dir>/brain/<run-id>.jsonl`.
 When it errors or runs out of budget, the supervisor answers from the
-template path instead. `sheepdog serve --brain=off` disables it for one
+template path instead. Its model can be switched while the daemon runs,
+from the `/debug` header's model picker (which discovers the choices
+from Gemini's model list) or `PUT /api/brain/model {"provider":
+"gemini", "model": "gemini-3.8-flash"}`: the switch takes effect at the
+next turn (a turn in flight finishes on the model it started with), is
+logged as `brain.model_changed` and marked in the transcript, and is
+kept in the state file's `session.brain_model`, which wins over
+`brain.model` on restart. To follow the config value again, delete
+`session.brain_model` from the state file (or pick that model — the
+picker always records the choice). Whether a model supports function
+calling is not in the list, so a bad pick shows up as a `brain.step`
+error and the template path answers until you switch back. The free
+tier's daily cap is per model, so switching models also switches quota
+buckets. `sheepdog serve --brain=off` disables it for one
 run; it is also off, silently, when no Gemini key is configured.
 `--brain=fake` (a developer mode, like `--herdr=mock`) runs the same loop
 over a scripted reflex model that needs no key and makes no network call,
@@ -129,7 +142,7 @@ announce wait elapse.
 | Key | Env override | Default | Meaning |
 |---|---|---|---|
 | `brain.enabled` | `SHEEPDOG_BRAIN_ENABLED` | `true` | Route `ask`/`propose` through the brain (`serve --brain` overrides). |
-| `brain.model` | `SHEEPDOG_BRAIN_MODEL` | `gemini-3.5-flash` | The function-calling model; the Gemini key pool applies, rotating on a rate limit. |
+| `brain.model` | `SHEEPDOG_BRAIN_MODEL` | `gemini-3.5-flash` | The function-calling model the brain starts on; the Gemini key pool applies, rotating on a rate limit. The initial value only: a model picked at runtime (`/debug`, `PUT /api/brain/model`) is kept in the state file's `session.brain_model` and wins over this on restart. |
 | `brain.max_steps` | `SHEEPDOG_BRAIN_MAX_STEPS` | `6` | Model calls one turn may make (each tool round is one); beyond it the turn falls back. |
 | `brain.ask_timeout_s` | `SHEEPDOG_BRAIN_ASK_TIMEOUT_S` | `8` | Wall-clock budget of one `ask` turn for tool rounds. When less than 3 s of it remain after a tool round (or at the last step) the next model call is answer-only (tools disabled, "time is up") and may run up to 3 s past the budget; only then does the template path answer. |
 | `brain.propose_timeout_s` | `SHEEPDOG_BRAIN_PROPOSE_TIMEOUT_S` | `12` | Same for `propose`. |

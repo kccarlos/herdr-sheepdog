@@ -23,6 +23,11 @@ No open PRs, no worktrees, `bin/sheepdog` built from main.
 | Enrichment + promises; push judgment under the chattiness ceiling | done (#23, #24) |
 | Logo (README picture, both pages, favicons) | done (#18) |
 
+Brain model switch at runtime (`/debug` picker over the discovered
+Gemini model list, `GET /api/brain/models`, `PUT /api/brain/model`,
+persisted in `session.brain_model`): in review; verified with
+`--brain=fake` and one live model-list call (free endpoint).
+
 ## Verified live vs. verified with the fake model only
 
 Live (real Gemini) so far: WP0–WP7b, #16, #17, brain 1a (4 turns, 2.75
@@ -41,7 +46,11 @@ with `--brain=fake`; the real model's behaviour on it is not yet observed.
 2. Phase 2/3 sequence, real brain, no voice (~10 calls):
    `SHEEPDOG_DATA_DIR=/tmp/sheepdog-live bin/sheepdog serve --env-file .env --brain=on --herdr=mock --voice=off --dev --port 7799`, then on `/debug`: inject Codex approval preset → utterance "yes" → "tell auth to run the tests and let me know when it's done" → state working → inject done (after-approval screen). Expect: question pushed before the first `brain.step`; one `voice.push` per finish carrying the promise line; `brain.push_decision {via: brain}`; repeat at `quiet` (only the promise line); a second untouched pane at `normal` → `urgency_applied: skip, reason: ceiling`, no turn.
 3. `make eval-live` — a full day's budget on one key; run deliberately, once.
-4. One voice session (ask the user; audio is the quota-hungry path): Codex in `--sandbox read-only -a on-request`; say "why did that one fail?" after a finish, "let me know when it's done", "stop" mid-echo.
+4. Model switch, real brain (~3 calls): switch to another model on
+   `/debug` after a turn that used a tool, then ask something that
+   reads a screen; expect the new model's `brain.step`s to succeed (the
+   earlier tool call is replayed without its thought signature).
+5. One voice session (ask the user; audio is the quota-hungry path): Codex in `--sandbox read-only -a on-request`; say "why did that one fail?" after a finish, "let me know when it's done", "stop" mid-echo.
 
 ## Known gaps and follow-ups
 

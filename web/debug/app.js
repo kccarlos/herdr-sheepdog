@@ -128,7 +128,7 @@ function onEvent(ev, encoded) {
   }
   renderEvent(ev);
   $('events-count').textContent = `${$('events').querySelectorAll('.ev:not(.hidden-by-filter)').length} shown / ${events.count} received`;
-  if (/^(herdr\.transition|pending\.|supervisor\.|daemon\.|voice\.connect|voice\.closed|web\.inject)/.test(ev.type)) {
+  if (/^(herdr\.transition|pending\.|supervisor\.|daemon\.|voice\.connect|voice\.closed|web\.inject|brain\.model_changed)/.test(ev.type)) {
     scheduleStateRefresh();
   }
 }
@@ -289,7 +289,8 @@ function renderVoice(v, st) {
   text += v.client_connected ? ' · browser attached' : ' · no browser';
   $('voice-indicator').classList.toggle('stalled', !!v.stalled);
   $('voice-text').textContent = text;
-  $('daemon-info').textContent = `v${st.version || '?'} · herdr=${st.herdr} · voice_connected=${st.session && st.session.voice_connected}`;
+  const brain = st.brain && st.brain.model ? ` · brain=${st.brain.model}` : '';
+  $('daemon-info').textContent = `v${st.version || '?'} · herdr=${st.herdr}${brain} · voice_connected=${st.session && st.session.voice_connected}`;
 }
 
 // renderSettings keeps the header's chattiness switch in step with the
@@ -316,6 +317,120 @@ function setupSettings() {
   });
 }
 
+// ---- the brain's model picker: the options come from GET
+// /api/brain/models (once at start, and on ↻ with ?refresh=1); the
+// selection is re-synced from /api/state (polled, and refreshed on a
+// brain.model_changed event), so a switch made elsewhere shows up
+// without rebuilding the list under the mouse. Hidden while the brain
+// is off (503).
+const modelState = { current: '', provider: 'gemini', models: [], error: '', stale: false, showAll: false, off: true };
+
+function renderModelControl() {
+  const box = $('model-control');
+  box.classList.toggle('hidden', modelState.off);
+  if (modelState.off) return;
+  const sel = $('model-select');
+  if (document.activeElement === sel) return;
+  const recommendedOnly = !modelState.showAll;
+  const listed = modelState.models.filter((m) => !recommendedOnly || m.recommended || m.name === modelState.current);
+  // The current model is always an option, even when the catalog does
+  // not (yet, or any more) list it.
+  if (modelState.current && !listed.some((m) => m.name === modelState.current)) {
+    listed.unshift({ name: modelState.current, display_name: 'not in the discovered list', recommended: false, unknown: true });
+  }
+  sel.replaceChildren();
+  for (const m of listed) {
+    const o = document.createElement('option');
+    o.value = m.name;
+    o.textContent = m.unknown ? `${m.name} (?)` : m.name;
+    const bits = [m.display_name || m.name];
+    if (m.input_token_limit) bits.push(`in ${m.input_token_limit.toLocaleString()}`);
+    if (!m.recommended && !m.unknown) bits.push('not a text model the brain is known to run');
+    o.title = bits.join(' · ');
+    sel.appendChild(o);
+  }
+  sel.value = modelState.current;
+  const note = $('model-note');
+  if (modelState.error) {
+    sel.title = `model list: ${modelState.error}`;
+    note.textContent = modelState.stale ? 'list may be stale' : 'no model list';
+    note.title = modelState.error;
+    note.classList.add('error');
+  } else {
+    sel.title = `${modelState.models.length} models discovered · ${listed.length} shown`;
+    note.textContent = '';
+    note.title = '';
+    note.classList.remove('error');
+  }
+}
+
+// applyModels takes a GET /api/brain/models or PUT /api/brain/model body.
+function applyModels(status, data) {
+  if (status === 503) { modelState.off = true; renderModelControl(); return; }
+  if (status !== 200) { modelState.error = (data && data.error) || `${status}`; renderModelControl(); return; }
+  modelState.off = false;
+  modelState.current = data.model || '';
+  modelState.provider = data.provider || 'gemini';
+  modelState.models = Array.isArray(data.models) ? data.models : [];
+  modelState.error = data.error || '';
+  modelState.stale = !!data.stale;
+  renderModelControl();
+}
+
+async function fetchBrainModels(refresh) {
+  try {
+    const { status, data } = await getJSON(`/api/brain/models${refresh ? '?refresh=1' : ''}`);
+    applyModels(status, data);
+  } catch (err) {
+    modelState.error = String(err);
+    renderModelControl();
+  }
+}
+
+// renderBrainModel keeps the selection in step with the daemon (the model
+// can change through PUT /api/brain/model elsewhere, or a restart).
+function renderBrainModel(brain) {
+  const off = !brain || !brain.model;
+  if (off !== modelState.off) {
+    modelState.off = off;
+    if (!off) { fetchBrainModels(false); return; }
+    renderModelControl();
+    return;
+  }
+  if (off || brain.model === modelState.current) return;
+  modelState.current = brain.model;
+  renderModelControl();
+}
+
+function setupModelControl() {
+  const sel = $('model-select');
+  const box = $('model-control');
+  sel.addEventListener('change', async () => {
+    const model = sel.value;
+    box.classList.add('saving');
+    try {
+      const r = await fetch('/api/brain/model', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider: modelState.provider, model }) });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || `${r.status}`);
+      sel.blur();
+      applyModels(r.status, data);
+      $('model-note').textContent = `switched to ${data.model}`;
+      $('model-note').classList.remove('error');
+    } catch (err) {
+      console.error('model', err);
+      sel.blur();
+      $('model-note').textContent = `error: ${err.message}`;
+      $('model-note').classList.add('error');
+      fetchBrainModels(false);
+    } finally {
+      box.classList.remove('saving');
+    }
+  });
+  $('model-refresh').addEventListener('click', () => fetchBrainModels(true));
+  $('model-all').addEventListener('change', (e) => { modelState.showAll = e.target.checked; renderModelControl(); });
+  fetchBrainModels(false);
+}
+
 async function refreshState() {
   try {
     const r = await fetch('/api/state', { cache: 'no-store' });
@@ -324,6 +439,7 @@ async function refreshState() {
     renderPending(st.pending_action);
     renderVoice(st.voice || {}, st);
     renderSettings(st.settings);
+    renderBrainModel(st.brain);
     $('state-updated').textContent = `updated ${new Date().toLocaleTimeString()}`;
   } catch (err) {
     $('state-updated').textContent = `error: ${err}`;
@@ -697,6 +813,7 @@ function setupTabs() {
 setupTabs();
 setupEventControls();
 setupSettings();
+setupModelControl();
 setupInject();
 setupConversation();
 setupSupervisor();

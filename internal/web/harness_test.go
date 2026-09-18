@@ -143,7 +143,9 @@ type harness struct {
 	http    *httptest.Server
 	session *fakeSession
 	watcher *fakeWatcher
-	cancel  context.CancelFunc
+	// model is the brain's scripted model when harnessOpts.brain is set.
+	model  *braintest.Model
+	cancel context.CancelFunc
 }
 
 type harnessOpts struct {
@@ -185,8 +187,10 @@ func newHarness(t *testing.T, o harnessOpts) *harness {
 		pusher = session
 	}
 	var b *brain.Brain
+	var model *braintest.Model
 	if o.brain {
-		b, err = brain.New(brain.Config{PruneAfterTurns: 1}, braintest.Reflex(), log)
+		model = braintest.Reflex()
+		b, err = brain.New(brain.Config{PruneAfterTurns: 1}, model, log)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -223,7 +227,7 @@ func newHarness(t *testing.T, o harnessOpts) *harness {
 		}()
 	}
 	hs := httptest.NewServer(srv.Handler())
-	hh := &harness{t: t, log: log, store: store, herdr: h, sup: sup, srv: srv, http: hs, session: session, watcher: watcher, cancel: cancel}
+	hh := &harness{t: t, log: log, store: store, herdr: h, sup: sup, srv: srv, http: hs, session: session, watcher: watcher, model: model, cancel: cancel}
 	t.Cleanup(func() {
 		hs.Close()
 		cancel()
@@ -252,10 +256,26 @@ func screenFixture(t *testing.T, name string) string {
 // postJSON posts v and decodes the reply into out (may be nil).
 func (h *harness) postJSON(path string, v any, out any) (int, string) {
 	h.t.Helper()
+	return h.sendJSON(http.MethodPost, path, v, out)
+}
+
+// putModel PUTs v to /api/brain/model and decodes the reply into out.
+func (h *harness) putModel(v any, out any) (int, string) {
+	h.t.Helper()
+	return h.sendJSON(http.MethodPut, "/api/brain/model", v, out)
+}
+
+func (h *harness) sendJSON(method, path string, v any, out any) (int, string) {
+	h.t.Helper()
 	body, _ := json.Marshal(v)
-	resp, err := http.Post(h.http.URL+path, "application/json", strings.NewReader(string(body)))
+	req, err := http.NewRequest(method, h.http.URL+path, strings.NewReader(string(body)))
 	if err != nil {
-		h.t.Fatalf("POST %s: %v", path, err)
+		h.t.Fatalf("%s %s: %v", method, path, err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		h.t.Fatalf("%s %s: %v", method, path, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	var buf strings.Builder

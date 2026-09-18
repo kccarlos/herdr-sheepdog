@@ -139,7 +139,9 @@ the console loads a sample run.
 
 Behind `ask` and `propose` sits the SVP of [`docs/roles.md`](docs/roles.md):
 a stateful agent (`internal/brain`, `gemini-3.5-flash` with function
-calling) that keeps one transcript per daemon run — your verbatim words,
+calling by default; the `/debug` header's model picker switches it at
+runtime from the discovered model list, and the choice survives a
+restart) that keeps one transcript per daemon run — your verbatim words,
 what the voice said, every push and worker state change, its own tool
 calls — so "why did *that one* fail?" still means something when it reads
 a screen. It reasons with `read_screen`, `run_cli`, `list_agents` and

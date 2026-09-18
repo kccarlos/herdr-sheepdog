@@ -50,6 +50,12 @@ textarea { width: 100%; font-family: ui-monospace, SFMono-Regular, Menlo, monosp
 .dot.closed { background: var(--blocked); }
 .dot.off { background: var(--idle); }
 .indicator.stalled { color: var(--blocked); font-weight: 600; }
+.model-control select { max-width: 16em; }
+.model-control #model-provider { color: var(--muted); }
+.model-control button.icon { padding: .1rem .4rem; }
+.model-control label { display: inline-flex; align-items: center; gap: .2rem; }
+.model-control .error { color: var(--blocked); }
+.model-control.saving select { opacity: .6; }
 
 table { border-collapse: collapse; width: 100%; background: var(--card); border: 1px solid var(--line); }
 th, td { text-align: left; padding: .3rem .5rem; border-bottom: 1px solid var(--line); vertical-align: top; }
@@ -260,6 +266,8 @@ td.task, td.block, td.result { max-width: 18em; overflow: hidden; text-overflow:
 .svp-marker { display: flex; flex-direction: column; align-items: center; gap: .1rem; margin: .5rem 0; padding: .3rem; border-top: 2px dashed var(--svp); border-bottom: 2px dashed var(--svp); font-size: .8em; align-self: stretch; text-align: center; }
 .svp-marker .above { color: var(--muted); }
 .svp-marker .below { color: var(--svp); font-weight: 600; }
+.svp-system { justify-content: center; margin: .3rem 0; padding: .15rem .4rem; border-top: 1px dashed var(--k-compaction); border-bottom: 1px dashed var(--k-compaction); }
+.svp-system .text { color: var(--k-compaction); font-family: inherit; font-weight: 600; }
 
 /* ------------------------------------------------------------- swimlane */
 /* One CSS grid template (--sw-cols, set by swimlane-view.js: the time

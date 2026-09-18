@@ -9,7 +9,7 @@ still apply.
 |---|---|---|---|
 | **CEO** | the operator, by voice | — | intent, decisions |
 | **Assistant** | the voice model | `gemini-3.8-live` | hearing, speaking, turn-taking, *understanding what the CEO meant* |
-| **SVP** | the supervisor brain (`internal/brain`) | `gemini-3.5-flash`, tools | the workers, the record, reasoning, promises |
+| **SVP** | the supervisor brain (`internal/brain`) | `gemini-3.5-flash` by default, switchable at runtime (`/debug` model picker), tools | the workers, the record, reasoning, promises |
 | **Workers** | herdr panes (Codex, Claude Code, agy…) | their own | changing code, under their own approval gates |
 
 ## Assistant — do / don't
