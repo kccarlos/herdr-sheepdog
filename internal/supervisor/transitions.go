@@ -51,11 +51,15 @@ func (s *Supervisor) HandleTransition(ctx context.Context, t herdr.Transition) {
 			s.push(t.PaneID, alias+" has exited while it was busy.", voice.UrgencyInterrupt)
 		}
 	case herdr.StateWorking:
-		if from == herdr.StateBlocked {
-			s.mu.Lock()
-			s.dropPendingFor(t.PaneID, "prompt_gone", state.PendingAnswerPrompt)
-			s.forgetExpired(t.PaneID)
-			s.mu.Unlock()
+		s.mu.Lock()
+		// Whatever the previous state, a working pane is no longer at a
+		// prompt (agy reports done, not blocked, around its prompts).
+		s.dropPendingFor(t.PaneID, "prompt_gone", state.PendingAnswerPrompt)
+		s.forgetExpired(t.PaneID)
+		started := s.startedInstruction(t.PaneID, from)
+		s.mu.Unlock()
+		if started != "" {
+			s.pushIf(pushStarted, t.PaneID, alias+" started on "+started+".", voice.UrgencyIdle)
 		}
 	case herdr.StateDone, herdr.StateIdle:
 		s.mu.Lock()
@@ -65,16 +69,56 @@ func (s *Supervisor) HandleTransition(ctx context.Context, t herdr.Transition) {
 		}
 		s.dropPendingFor(t.PaneID, "finished", state.PendingSendInstruction)
 		s.mu.Unlock()
+		s.finishTask(t.PaneID)
 		if from == herdr.StateWorking && t.To == herdr.StateDone {
 			if s.recentlyInterrupted(t.PaneID) {
 				// The user's cancel sent Ctrl-C: this "done" is the
 				// interrupted turn settling, not work finishing.
 				s.log.Log(logSource, "supervisor.finished_suppressed", t.PaneID, map[string]any{"reason": "interrupted"})
 			} else {
-				s.push(t.PaneID, alias+" finished.", voice.UrgencyIdle)
+				s.onDone(ctx, row)
 			}
 		}
+		// done -> idle ("idle again") is never announced.
 	}
+}
+
+// startedInstruction returns the spoken form of the instruction the user
+// sent to paneID when its move to working means the agent picked it up
+// (a send_instruction is pending for it and it did not just leave a
+// prompt), else "". Caller holds s.mu.
+func (s *Supervisor) startedInstruction(paneID string, from herdr.State) string {
+	if from == herdr.StateBlocked {
+		return ""
+	}
+	p, has := s.store.Pending()
+	if !has || p.Kind != state.PendingSendInstruction || p.PaneID != paneID {
+		return ""
+	}
+	if t := shortTask(p.PayloadText); t != "" {
+		return t
+	}
+	return "the instruction"
+}
+
+// finishTask moves the row's current task to last_task.
+func (s *Supervisor) finishTask(paneID string) {
+	_, err := s.store.Update(paneID, func(a *state.Agent) {
+		if a.CurrentTask != "" {
+			a.LastTask, a.CurrentTask = a.CurrentTask, ""
+		}
+	})
+	if err != nil {
+		s.log.Log(logSource, "supervisor.state_error", paneID, map[string]any{"error": err.Error()})
+	}
+	s.invalidateBriefing()
+}
+
+// onDone announces a finished agent when the chattiness level allows it
+// for this agent (every finish at chatty; at normal only agents the user
+// dealt with within RecentWindow; never at quiet).
+func (s *Supervisor) onDone(_ context.Context, row state.Agent) {
+	s.pushIf(s.doneKind(row), row.PaneID, aliasOr(row.Alias)+" finished.", voice.UrgencyIdle)
 }
 
 // onBlocked reads the pane, summarises the prompt, records the question
@@ -82,9 +126,11 @@ func (s *Supervisor) HandleTransition(ctx context.Context, t herdr.Transition) {
 // announces it.
 func (s *Supervisor) onBlocked(ctx context.Context, row state.Agent) {
 	alias := aliasOr(row.Alias)
+	s.touch(row.PaneID)
 	read, err := s.herdr.Read(ctx, row.PaneID, herdr.SourceRecentUnwrapped, s.cfg.ReadLines)
 	if err != nil {
 		s.log.Log(logSource, "supervisor.block_error", row.PaneID, map[string]any{"stage": "read", "error": err.Error()})
+		// It may well be a question: every level hears this.
 		s.push(row.PaneID, alias+" is blocked, but I could not read its screen.", voice.UrgencyIdle)
 		return
 	}
@@ -97,7 +143,7 @@ func (s *Supervisor) onBlocked(ctx context.Context, row state.Agent) {
 	s.recordBlock(row.PaneID, sum)
 	if !sum.IsQuestion {
 		s.log.Log(logSource, "supervisor.blocked_no_question", row.PaneID, map[string]any{"spoken": sum.Spoken})
-		s.push(row.PaneID, sum.Spoken, voice.UrgencyIdle)
+		s.pushIf(pushBlockedInfo, row.PaneID, sum.Spoken, voice.UrgencyIdle)
 		return
 	}
 	s.mu.Lock()

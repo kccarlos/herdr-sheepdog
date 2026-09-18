@@ -187,8 +187,10 @@ func (a *App) wire() error {
 		a.queryLazy = lazyQ
 	}
 	sup, err := supervisor.New(store, a.herdr, llmClient, querier, pusher, a.log, supervisor.Config{
-		PendingTTL: time.Duration(cfg.PendingTTLS) * time.Second,
-		DataDir:    cfg.DataDir,
+		PendingTTL:   time.Duration(cfg.PendingTTLS) * time.Second,
+		DataDir:      cfg.DataDir,
+		Chattiness:   cfg.Supervisor.Chattiness,
+		RecentWindow: time.Duration(cfg.Supervisor.RecentMinutes) * time.Minute,
 	})
 	if err != nil {
 		return err

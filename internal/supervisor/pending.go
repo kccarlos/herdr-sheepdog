@@ -56,7 +56,7 @@ func (s *Supervisor) setPending(p state.PendingAction) string {
 		s.log.Log(logSource, "pending.replaced", p.PaneID, map[string]any{
 			"old_id": old.ID, "old_kind": old.Kind, "old_pane_id": old.PaneID, "new_id": p.ID, "new_kind": p.Kind,
 		})
-		if old.Kind == state.PendingAnswerPrompt && p.Kind == state.PendingAnswerPrompt && old.PaneID != p.PaneID {
+		if old.Kind == state.PendingAnswerPrompt && p.Kind == state.PendingAnswerPrompt && old.PaneID != p.PaneID && s.allows(pushReplacement) {
 			spoken = fmt.Sprintf("Dropping the earlier question from %s; now %s.", s.aliasOf(old.PaneID), lowerFirst(strings.TrimRight(p.SpokenSummary, ".")))
 		}
 	}

@@ -21,9 +21,52 @@ type StateResponse struct {
 	PendingAction *state.PendingAction `json:"pending_action"`
 	Session       state.Session        `json:"session"`
 	Voice         VoiceInfo            `json:"voice"`
+	Settings      *SettingsResponse    `json:"settings,omitempty"`
 	Herdr         string               `json:"herdr"`
 	Version       string               `json:"version"`
 	Now           time.Time            `json:"now"`
+}
+
+// SettingsResponse is the body of GET/PUT /api/settings (and the
+// settings field of /api/state).
+type SettingsResponse struct {
+	Chattiness supervisor.Chattiness   `json:"chattiness"`
+	Levels     []supervisor.Chattiness `json:"levels"`
+}
+
+func (s *Server) settings() *SettingsResponse {
+	if s.deps.Supervisor == nil {
+		return nil
+	}
+	return &SettingsResponse{Chattiness: s.deps.Supervisor.Settings().Chattiness, Levels: supervisor.Levels}
+}
+
+func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
+	st := s.settings()
+	if st == nil {
+		writeError(w, http.StatusServiceUnavailable, "no supervisor")
+		return
+	}
+	writeJSON(w, http.StatusOK, st)
+}
+
+// handlePutSettings changes the runtime settings ({"chattiness": …});
+// the supervisor validates, persists and logs the change.
+func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
+	if s.deps.Supervisor == nil {
+		writeError(w, http.StatusServiceUnavailable, "no supervisor")
+		return
+	}
+	var req supervisor.Settings
+	if err := readJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "bad body: "+err.Error())
+		return
+	}
+	if err := s.deps.Supervisor.SetSettings(req); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, s.settings())
 }
 
 // VoiceInfo is the daemon's view of the voice side.
@@ -45,6 +88,7 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 		PendingAction: snap.PendingAction,
 		Session:       snap.Session,
 		Voice:         VoiceInfo{Mode: s.deps.VoiceMode, Status: hs.status.String(), Reason: hs.reason, Muted: hs.muted, Stalled: hs.stalled, ClientConnected: hs.client},
+		Settings:      s.settings(),
 		Herdr:         s.deps.HerdrMode,
 		Version:       s.deps.Version,
 		Now:           s.deps.Now().UTC(),

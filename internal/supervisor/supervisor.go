@@ -56,8 +56,17 @@ type Config struct {
 	// DataDir is where notes.jsonl is appended; empty keeps notes in the
 	// state table only.
 	DataDir string
+	// Chattiness is the initial push policy ("quiet" | "normal" | "chatty",
+	// default normal); the session's runtime choice, when one was made,
+	// wins over it.
+	Chattiness string
+	// RecentWindow is how recently the user must have dealt with an agent
+	// for the normal level to announce its finish (default 30 min).
+	RecentWindow time.Duration
 	// Now overrides the clock (tests).
 	Now func() time.Time
+
+	chattiness Chattiness // parsed Chattiness
 }
 
 func (c Config) withDefaults() Config {
@@ -72,6 +81,12 @@ func (c Config) withDefaults() Config {
 	}
 	if c.ReadLines == 0 {
 		c.ReadLines = 80
+	}
+	if c.Chattiness == "" {
+		c.Chattiness = string(Normal)
+	}
+	if c.RecentWindow == 0 {
+		c.RecentWindow = 30 * time.Minute
 	}
 	if c.Now == nil {
 		c.Now = time.Now
@@ -93,11 +108,12 @@ type Supervisor struct {
 	log     logging.Logger
 	cfg     Config
 
-	mu          sync.Mutex
-	briefing    string               // cached sentence; "" means recompute
-	expired     *state.PendingAction // last expired answer_prompt (scenario 8)
-	seq         uint64               // pending action ids
-	interrupted map[string]time.Time // pane -> when cancel sent Ctrl-C (suppresses the next "finished")
+	mu            sync.Mutex
+	briefing      string               // cached sentence; "" means recompute
+	briefingPanes []string             // panes the cached sentence names
+	expired       *state.PendingAction // last expired answer_prompt (scenario 8)
+	seq           uint64               // pending action ids
+	interrupted   map[string]time.Time // pane -> when cancel sent Ctrl-C (suppresses the next "finished")
 }
 
 // interruptGrace is how long after a user cancel a pane's working -> done
@@ -114,7 +130,13 @@ func New(store *state.Store, h Herdr, templates llm.Templates, querier Querier, 
 	if log == nil {
 		log = logging.NopLogger{}
 	}
-	return &Supervisor{store: store, herdr: h, llm: templates, querier: querier, pusher: pusher, log: log, cfg: cfg.withDefaults(), interrupted: map[string]time.Time{}}, nil
+	cfg = cfg.withDefaults()
+	level, err := ParseChattiness(cfg.Chattiness)
+	if err != nil {
+		return nil, err
+	}
+	cfg.chattiness = level
+	return &Supervisor{store: store, herdr: h, llm: templates, querier: querier, pusher: pusher, log: log, cfg: cfg, interrupted: map[string]time.Time{}}, nil
 }
 
 // Run drives pending-action expiry and the periodic silent briefing until
@@ -176,10 +198,22 @@ func (s *Supervisor) push(paneID, text string, u voice.Urgency) {
 	}
 }
 
+// pushIf pushes text when the current chattiness level speaks pushes of
+// kind k; otherwise it logs supervisor.push_quiet so the decision stays
+// visible in the event log.
+func (s *Supervisor) pushIf(k pushKind, paneID, text string, u voice.Urgency) {
+	level := s.chattiness()
+	if !level.allows(k) {
+		s.log.Log(logSource, "supervisor.push_quiet", paneID, map[string]any{"text": text, "chattiness": string(level)})
+		return
+	}
+	s.push(paneID, text, u)
+}
+
 // pushBriefing pushes the current briefing as silent context and records
 // it in the session.
 func (s *Supervisor) pushBriefing() {
-	text := s.briefingText()
+	text, _ := s.briefingText()
 	now := s.cfg.Now()
 	_ = s.store.UpdateSession(func(ss *state.Session) { ss.LastBriefing, ss.LastBriefingAt = text, &now })
 	s.push("", text, voice.UrgencySilent)

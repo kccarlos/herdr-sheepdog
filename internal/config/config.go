@@ -37,12 +37,45 @@ type Config struct {
 	// question or an in-flight instruction) stays confirmable/cancellable.
 	PendingTTLS int `toml:"pending_ttl_s"`
 
-	Herdr  Herdr  `toml:"herdr"`
-	State  State  `toml:"state"`
-	Gemini Gemini `toml:"gemini"`
-	LLM    LLM    `toml:"llm"`
-	Web    Web    `toml:"web"`
-	CLI    CLI    `toml:"cli"`
+	Herdr      Herdr      `toml:"herdr"`
+	State      State      `toml:"state"`
+	Gemini     Gemini     `toml:"gemini"`
+	LLM        LLM        `toml:"llm"`
+	Web        Web        `toml:"web"`
+	CLI        CLI        `toml:"cli"`
+	Supervisor Supervisor `toml:"supervisor"`
+}
+
+// Supervisor tunes how proactive the voice side is (README "How chatty
+// is it?").
+type Supervisor struct {
+	// Chattiness is the initial push policy: "quiet" (agent questions and
+	// exits only), "normal" (plus finishes of agents you dealt with
+	// recently) or "chatty" (every finish and every pick-up of an
+	// instruction). It can be changed at runtime from /debug or
+	// PUT /api/settings; that choice is kept in the state file and wins
+	// over this value on restart.
+	Chattiness string `toml:"chattiness"`
+	// RecentMinutes is the "normal" level's window: a finish is announced
+	// when the agent was blocked, was sent something, was asked about or
+	// was named in a spoken briefing within this many minutes.
+	RecentMinutes int `toml:"recent_minutes"`
+}
+
+// ChattinessLevels are the accepted values of supervisor.chattiness.
+var ChattinessLevels = []string{"quiet", "normal", "chatty"}
+
+// DefaultChattiness is the built-in supervisor.chattiness.
+const DefaultChattiness = "normal"
+
+// validChattiness reports whether v is one of ChattinessLevels.
+func validChattiness(v string) bool {
+	for _, l := range ChattinessLevels {
+		if v == l {
+			return true
+		}
+	}
+	return false
 }
 
 // CLI configures the read-only CLI query tool (plan §3.5, WP4): codex
@@ -185,6 +218,7 @@ func Default() Config {
 		LLM:               LLM{BaseURL: GeminiOpenAIBaseURL, Model: "gemini-3.5-flash-lite"},
 		Web:               Web{Port: DefaultWebPort},
 		CLI:               defaultCLI(),
+		Supervisor:        Supervisor{Chattiness: DefaultChattiness, RecentMinutes: 30},
 	}
 }
 
@@ -263,6 +297,12 @@ func load(path string, lookup func(string) (string, bool)) (Config, error) {
 	if err := applyEnv(&cfg, lookup); err != nil {
 		return Config{}, err
 	}
+	if !validChattiness(cfg.Supervisor.Chattiness) {
+		return Config{}, fmt.Errorf("config: supervisor.chattiness=%q: want one of %s", cfg.Supervisor.Chattiness, strings.Join(ChattinessLevels, ", "))
+	}
+	if cfg.Supervisor.RecentMinutes <= 0 {
+		return Config{}, fmt.Errorf("config: supervisor.recent_minutes=%d: want a positive integer", cfg.Supervisor.RecentMinutes)
+	}
 	return cfg, nil
 }
 
@@ -276,8 +316,10 @@ func load(path string, lookup func(string) (string, bool)) (Config, error) {
 //	SHEEPDOG_LLM_API_KEY, SHEEPDOG_PENDING_TTL_S, SHEEPDOG_WEB_PORT,
 //	SHEEPDOG_CLI_PREFER, SHEEPDOG_CLI_CODEX_BIN, SHEEPDOG_CLI_CLAUDE_BIN,
 //	SHEEPDOG_CLI_CLAUDE_MODEL, SHEEPDOG_CLI_CODEX_REASONING,
-//	SHEEPDOG_CLI_TIMEOUT_S, SHEEPDOG_CLI_MAX_OUTPUT_KB. The [cli] argv
-//	templates (codex_cmd, claude_cmd) are TOML-only, like [aliases].
+//	SHEEPDOG_CLI_TIMEOUT_S, SHEEPDOG_CLI_MAX_OUTPUT_KB,
+//	SHEEPDOG_SUPERVISOR_CHATTINESS, SHEEPDOG_SUPERVISOR_RECENT_MINUTES.
+//	The [cli] argv templates (codex_cmd, claude_cmd) are TOML-only, like
+//	[aliases].
 //
 // The Gemini key pool is collected from GEMINI_API_KEY, then
 // GEMINI_API_KEY_1 … GEMINI_API_KEY_9, in that order; if any is set the
@@ -356,6 +398,16 @@ func applyEnv(cfg *Config, lookup func(string) (string, bool)) error {
 	if err := applyCLIEnv(cfg, lookup); err != nil {
 		return err
 	}
+	if v, ok := lookup("SHEEPDOG_SUPERVISOR_CHATTINESS"); ok {
+		cfg.Supervisor.Chattiness = strings.ToLower(strings.TrimSpace(v))
+	}
+	if v, ok := lookup("SHEEPDOG_SUPERVISOR_RECENT_MINUTES"); ok {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return fmt.Errorf("config: SHEEPDOG_SUPERVISOR_RECENT_MINUTES=%q: want a positive integer", v)
+		}
+		cfg.Supervisor.RecentMinutes = n
+	}
 	return nil
 }
 
@@ -412,6 +464,6 @@ func geminiKeysFromEnv(lookup func(string) (string, bool)) []string {
 // String renders the configuration for logs. Secrets are rendered as
 // counts only; keep it that way when secret-bearing fields are added.
 func (c Config) String() string {
-	return fmt.Sprintf("data_dir=%s herdr.socket=%s state.path=%s state.full_fsync=%t debounce_ms=%d snapshot_interval_s=%d pending_ttl_s=%d aliases=%d gemini.model=%s gemini.voice=%s gemini.stall_after_s=%d gemini.api_keys=%d llm.base_url=%s llm.model=%s llm.api_keys=%d web.port=%d cli.prefer=%s cli.timeout_s=%d cli.max_output_kb=%d",
-		c.DataDir, c.Herdr.Socket, c.State.Path, c.State.FullFsync, c.DebounceMS, c.SnapshotIntervalS, c.PendingTTLS, len(c.Aliases), c.Gemini.Model, c.Gemini.Voice, c.Gemini.StallAfterS, len(c.Gemini.APIKeys), c.LLM.BaseURL, c.LLM.Model, len(c.LLMKeys()), c.Web.Port, c.CLI.Prefer, c.CLI.TimeoutS, c.CLI.MaxOutputKB)
+	return fmt.Sprintf("data_dir=%s herdr.socket=%s state.path=%s state.full_fsync=%t debounce_ms=%d snapshot_interval_s=%d pending_ttl_s=%d aliases=%d gemini.model=%s gemini.voice=%s gemini.stall_after_s=%d gemini.api_keys=%d llm.base_url=%s llm.model=%s llm.api_keys=%d web.port=%d cli.prefer=%s cli.timeout_s=%d cli.max_output_kb=%d supervisor.chattiness=%s supervisor.recent_minutes=%d",
+		c.DataDir, c.Herdr.Socket, c.State.Path, c.State.FullFsync, c.DebounceMS, c.SnapshotIntervalS, c.PendingTTLS, len(c.Aliases), c.Gemini.Model, c.Gemini.Voice, c.Gemini.StallAfterS, len(c.Gemini.APIKeys), c.LLM.BaseURL, c.LLM.Model, len(c.LLMKeys()), c.Web.Port, c.CLI.Prefer, c.CLI.TimeoutS, c.CLI.MaxOutputKB, c.Supervisor.Chattiness, c.Supervisor.RecentMinutes)
 }

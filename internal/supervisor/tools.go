@@ -53,8 +53,14 @@ func (s *Supervisor) Handler() voice.ToolHandler {
 
 // Briefing returns the one-sentence status from the state table. It never
 // calls a model and is served from a cache invalidated on every change.
+// The agents it names count as dealt with (the normal level then
+// announces their finish).
 func (s *Supervisor) Briefing(context.Context) (voice.ToolResult, error) {
-	return voice.ToolResult{Spoken: s.briefingText(), Scheduling: voice.UrgencyInterrupt}, nil
+	text, panes := s.briefingText()
+	for _, id := range panes {
+		s.touch(id)
+	}
+	return voice.ToolResult{Spoken: text, Scheduling: voice.UrgencyInterrupt}, nil
 }
 
 // deepQuestion matches questions that need the repository, not the
@@ -73,6 +79,7 @@ func (s *Supervisor) Ask(ctx context.Context, question, agent string) (voice.Too
 	if !ok {
 		return res, nil
 	}
+	s.touch(row.PaneID)
 	alias := aliasOr(row.Alias)
 	var ans llm.Answer
 	var err error
@@ -159,7 +166,8 @@ func (s *Supervisor) Propose(ctx context.Context, instruction, agent string) (vo
 	if err != nil {
 		s.clearPending(p, "send_failed")
 	} else {
-		if _, uerr := s.store.Update(row.PaneID, func(a *state.Agent) { a.CurrentTask = res.InstructionText }); uerr != nil {
+		now := s.cfg.Now()
+		if _, uerr := s.store.Update(row.PaneID, func(a *state.Agent) { a.CurrentTask, a.LastInteraction = res.InstructionText, &now }); uerr != nil {
 			s.log.Log(logSource, "supervisor.state_error", row.PaneID, map[string]any{"error": uerr.Error()})
 		}
 		s.briefing = ""
@@ -267,10 +275,12 @@ func (s *Supervisor) answerPending(ctx context.Context, p state.PendingAction, a
 	if err := s.store.ClearPending(); err != nil {
 		s.log.Log(logSource, "supervisor.state_error", p.PaneID, map[string]any{"error": err.Error()})
 	}
+	now := s.cfg.Now()
 	if _, err := s.store.Update(p.PaneID, func(a *state.Agent) {
 		if a.LastBlock != nil {
 			a.LastBlock.Answered = true
 		}
+		a.LastInteraction = &now
 	}); err != nil {
 		s.log.Log(logSource, "supervisor.state_error", p.PaneID, map[string]any{"error": err.Error()})
 	}

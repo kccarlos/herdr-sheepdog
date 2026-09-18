@@ -383,3 +383,49 @@ func TestHerdrEventEndpoint(t *testing.T) {
 		t.Fatalf("mock mode = %d", resp.StatusCode)
 	}
 }
+
+// TestSettingsEndpoint: GET reports the level and the choices, PUT
+// changes it (validated, logged as supervisor.settings, visible in
+// /api/state), and a bad level is a 400.
+func TestSettingsEndpoint(t *testing.T) {
+	h := newHarness(t, harnessOpts{})
+	var got SettingsResponse
+	if code := h.getJSON("/api/settings", &got); code != http.StatusOK {
+		t.Fatalf("GET = %d", code)
+	}
+	if got.Chattiness != "normal" || len(got.Levels) != 3 || got.Levels[0] != "quiet" || got.Levels[2] != "chatty" {
+		t.Fatalf("GET body = %+v", got)
+	}
+	put := func(body string) (int, SettingsResponse) {
+		t.Helper()
+		req, err := http.NewRequest(http.MethodPut, h.http.URL+"/api/settings", strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		var out SettingsResponse
+		_ = json.NewDecoder(resp.Body).Decode(&out)
+		return resp.StatusCode, out
+	}
+	if code, out := put(`{"chattiness":"quiet"}`); code != http.StatusOK || out.Chattiness != "quiet" {
+		t.Fatalf("PUT quiet = %d %+v", code, out)
+	}
+	if code, _ := put(`{"chattiness":"loud"}`); code != http.StatusBadRequest {
+		t.Fatalf("PUT loud = %d", code)
+	}
+	if code, _ := put(`not json`); code != http.StatusBadRequest {
+		t.Fatalf("PUT garbage = %d", code)
+	}
+	var st StateResponse
+	if code := h.getJSON("/api/state", &st); code != http.StatusOK || st.Settings == nil || st.Settings.Chattiness != "quiet" || st.Session.Chattiness != "quiet" {
+		t.Fatalf("state after PUT = %d %+v", code, st.Settings)
+	}
+	if !subsequence(h.types(), []string{"supervisor.settings"}) {
+		t.Fatalf("supervisor.settings not logged: %v", h.types())
+	}
+}

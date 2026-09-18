@@ -278,6 +278,30 @@ function renderVoice(v, st) {
   $('daemon-info').textContent = `v${st.version || '?'} · herdr=${st.herdr} · voice_connected=${st.session && st.session.voice_connected}`;
 }
 
+// renderSettings keeps the header's chattiness switch in step with the
+// daemon (the level can also change through PUT /api/settings elsewhere).
+function renderSettings(settings) {
+  const sel = $('chattiness');
+  if (!settings || !settings.chattiness || document.activeElement === sel) return;
+  if (sel.value !== settings.chattiness) sel.value = settings.chattiness;
+}
+
+function setupSettings() {
+  const sel = $('chattiness');
+  sel.addEventListener('change', async () => {
+    const level = sel.value;
+    try {
+      const r = await fetch('/api/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chattiness: level }) });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || `${r.status}`);
+      renderSettings(data);
+    } catch (err) {
+      console.error('settings', err);
+      refreshState();
+    }
+  });
+}
+
 async function refreshState() {
   try {
     const r = await fetch('/api/state', { cache: 'no-store' });
@@ -285,6 +309,7 @@ async function refreshState() {
     renderAgents(st.agents || []);
     renderPending(st.pending_action);
     renderVoice(st.voice || {}, st);
+    renderSettings(st.settings);
     $('state-updated').textContent = `updated ${new Date().toLocaleTimeString()}`;
   } catch (err) {
     $('state-updated').textContent = `error: ${err}`;
@@ -441,6 +466,7 @@ function setupTabs() {
 
 setupTabs();
 setupEventControls();
+setupSettings();
 setupInject();
 setupConversation();
 pickTab();

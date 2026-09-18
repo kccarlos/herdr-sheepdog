@@ -61,6 +61,10 @@ func Template() string {
 # max_output_kb = %[19]d
 # codex_cmd / claude_cmd (argv templates; TOML-only, see CONFIG.md) keep
 # their built-in defaults unless set here.
+
+[supervisor]
+# chattiness = %[21]q   # "quiet" | "normal" | "chatty"; the /debug switch overrides it at runtime
+# recent_minutes = %[22]d   # "normal" announces a finish only for agents you dealt with this recently
 `,
 		d.DataDir, d.DebounceMS, d.SnapshotIntervalS, d.PendingTTLS,
 		d.Herdr.Socket,
@@ -70,5 +74,6 @@ func Template() string {
 		d.Web.Port,
 		d.CLI.Prefer, d.CLI.CodexBin, d.CLI.ClaudeBin, d.CLI.ClaudeModel, d.CLI.CodexReasoning, d.CLI.TimeoutS, d.CLI.MaxOutputKB,
 		d.Gemini.StallAfterS,
+		d.Supervisor.Chattiness, d.Supervisor.RecentMinutes,
 	)
 }

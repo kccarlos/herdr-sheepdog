@@ -10,15 +10,16 @@ import (
 )
 
 // briefingText returns the cached briefing, recomputing it from the state
-// table when a state change invalidated it. No model is involved.
-func (s *Supervisor) briefingText() string {
+// table when a state change invalidated it, and the panes it names. No
+// model is involved.
+func (s *Supervisor) briefingText() (string, []string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.briefing == "" {
 		pending, _ := s.store.Pending()
-		s.briefing = composeBriefing(s.store.List(), pending)
+		s.briefing, s.briefingPanes = composeBriefing(s.store.List(), pending)
 	}
-	return s.briefing
+	return s.briefing, append([]string(nil), s.briefingPanes...)
 }
 
 // invalidateBriefing forces the next briefing to be recomputed.
@@ -47,9 +48,9 @@ func stateRank(st herdr.State) int {
 // "Three agents: auth is blocked, asking whether it can create hello.txt
 // and waiting for your answer, docs is working on the readme, and vps is
 // idle."
-func composeBriefing(agents []state.Agent, pending state.PendingAction) string {
+func composeBriefing(agents []state.Agent, pending state.PendingAction) (string, []string) {
 	if len(agents) == 0 {
-		return "No agents are running."
+		return "No agents are running.", nil
 	}
 	sort.SliceStable(agents, func(i, j int) bool {
 		ri, rj := stateRank(agents[i].State), stateRank(agents[j].State)
@@ -59,14 +60,16 @@ func composeBriefing(agents []state.Agent, pending state.PendingAction) string {
 		return agents[i].Alias < agents[j].Alias
 	})
 	parts := make([]string, 0, len(agents))
+	panes := make([]string, 0, len(agents))
 	for _, a := range agents {
 		parts = append(parts, describeAgent(a, pending))
+		panes = append(panes, a.PaneID)
 	}
 	head := "One agent: "
 	if len(agents) > 1 {
 		head = countWord(len(agents)) + " agents: "
 	}
-	return head + joinSpoken(parts) + "."
+	return head + joinSpoken(parts) + ".", panes
 }
 
 func describeAgent(a state.Agent, pending state.PendingAction) string {
