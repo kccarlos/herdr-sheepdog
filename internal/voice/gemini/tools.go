@@ -24,12 +24,12 @@ func toolDeclarations() []*genai.Tool {
 			Description: "Ask a question that needs looking at an agent's screen, diff, logs, or the repo. Use for 'why', 'what did it change', 'is it stuck'. Tell the user you're checking, then relay the answer when it arrives.",
 			Parameters: obj(map[string]*genai.Schema{
 				"question": {Type: genai.TypeString},
-				"agent":    {Type: genai.TypeString, Description: "alias if the user named one"},
+				"agent":    {Type: genai.TypeString, Description: "alias only if the user said one; empty for 'it' / 'that one'"},
 			}, []string{"question"})},
 		{Name: "propose", Behavior: genai.BehaviorNonBlocking,
 			Description: "Send an instruction or an answer to an agent. Use when the user tells an agent to do, stop, or answer something. The system will echo what it will send; the user can say stop to cancel.",
 			Parameters: obj(map[string]*genai.Schema{
-				"agent":       {Type: genai.TypeString},
+				"agent":       {Type: genai.TypeString, Description: "alias only if the user said one; empty for 'it' / 'that one' (never guessed)"},
 				"instruction": {Type: genai.TypeString, Description: "what the user said, in their words"},
 			}, []string{"instruction"})},
 		{Name: "confirm", Behavior: genai.BehaviorNonBlocking,
