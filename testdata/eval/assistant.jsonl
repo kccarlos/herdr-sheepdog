@@ -46,3 +46,7 @@
 {"id": "none-how-say-repo-name", "utterance": "How do you say the name of this repo?", "expect": {"tool": "none"}}
 {"id": "none-okay-use-that", "utterance": "Okay, let's use that then.", "expect": {"tool": "none"}}
 {"id": "none-hello-can-you-respond", "utterance": "Hello, can you respond?", "expect": {"tool": "none"}}
+{"id": "ask-doubt-check-again", "utterance": "Are you sure it's still not done? Please check again.", "expect": {"tool": "ask"}}
+{"id": "ask-doubt-i-think-completed", "utterance": "I think it's completed.", "expect": {"tool": "ask"}}
+{"id": "propose-go-with-option", "utterance": "Go with option two.", "expect": {"tool": "propose"}}
+{"id": "propose-yes-do-that", "utterance": "Yes, do that.", "expect": {"tool": "propose"}}

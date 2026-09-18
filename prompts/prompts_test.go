@@ -26,33 +26,36 @@ func TestRenderAssistant(t *testing.T) {
 	}
 	// Rules from the headset sessions and docs/roles.md §Assistant (cheap
 	// guard against the prompt drifting): status questions always go
-	// through a tool, propose / ask never guess the agent, questions for
-	// the dog are ask (never sent to the worker as propose), only the
-	// latest tool result may be reused for a follow-up, and a mis-heard
-	// utterance is repeated back rather than guessed.
+	// through a tool, propose / ask never guess the agent, doubts about a
+	// status are ask (a fresh screen read, never the cached briefing
+	// again), "idle" is never inflated into "not finished", only the
+	// latest tool result may be reused for a follow-up, a mis-heard
+	// utterance is repeated back rather than guessed, and the copilot
+	// manner (offer the next step, read options as a choice) is present.
 	for _, rule := range []string{
 		"MUST start with a tool call",
-		"Never answer such a question from memory",
-		"if a tool has not answered yet, say you are still waiting",
-		"Fill agent only when the user actually said an alias",
-		"leave agent empty",
-		"Do not guess the agent",
-		`"ask you to explain …"`,
+		"never answer it from memory",
+		"If a tool has not answered yet, say so",
+		`"Idle" means ready for input`,
+		"Fill agent only when the user said an alias",
+		"leave it empty, never guess",
 		`"what did it say"`,
-		"only when the user tells an agent to DO something",
-		"never a question for you",
-		"If unsure whether it is a question or an instruction, use ask",
-		"most recent tool result",
-		"anything older needs a new call",
-		"repeat it and ask instead of guessing",
+		`"check again"`,
+		"tells an agent to DO something",
+		"Unsure whether it's a question or an instruction: ask",
+		"uses the latest spoken, detail and options",
+		"Repeat it and ask",
+		"offer the next step",
+		"read them as a choice",
+		"invent nothing",
 		"CEO's register",
 	} {
 		if !strings.Contains(s, rule) {
 			t.Errorf("prompt lost the rule %q", rule)
 		}
 	}
-	if words := len(strings.Fields(s)); words > 350 {
-		t.Errorf("prompt is %d words; keep it short (<= 350)", words)
+	if words := len(strings.Fields(s)); words > 400 {
+		t.Errorf("prompt is %d words; keep it short (<= 400)", words)
 	}
 	if _, err := Render("missing.txt", nil); err == nil {
 		t.Error("missing template accepted")
