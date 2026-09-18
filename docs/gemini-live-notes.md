@@ -553,3 +553,33 @@ free-tier, no 429 seen.
   silence the tool call arrived ~1.3 s after the end of speech.
 - `voice-test` timings: connect 330–430 ms; first output audio 0.6–0.7 s
   after the tool response; idle push spoken ~0.9 s after `SendClientContent`.
+
+## 12. WP7b findings (live daemon run, 2026-09-17)
+
+See `docs/e2e-results.md` for the full run. Session-level observations:
+
+- **No `GoAway` in a 13-minute session.** The server instead closed the
+  connection with `close 1011 (internal server error): Internal error
+  encountered.` at 13.1 min, and every reconnect that presented the
+  resumption handle failed at setup with the same error after ~30 s. The
+  session now drops the handle after `Config.ResumeAttempts` (2) such
+  failures and reconnects fresh (`voice.handle_dropped`; the supervisor
+  re-pushes the briefing on `EventResumed{ContextLost:true}`).
+- **Zero-valued audio degrades turn handling.** With all-zero PCM frames
+  streamed continuously (a hardware-muted mic, or a test client),
+  `SendRealtimeInput{Text}` turns were answered only after 3.9–34.7 s (as
+  soon as the stream stopped) and two of three idle pushes
+  (`SendClientContent` with `turnComplete`) produced no response at all.
+  A ±8 LSB noise floor, like a real microphone, behaved normally
+  (0.9–1.0 s). Clients should send nothing while muted (the WS contract
+  already says so) rather than zeros.
+- **The model sometimes answers a push with nothing.** An idle push whose
+  turn never gets `turnComplete` used to hold every later idle push
+  until an unrelated event; `pushReady` now re-checks after
+  `TurnTimeout`. Pushes are also paraphrased unless the system prompt
+  explains the `[system event …]` prefix (it does now).
+- **Compression did not trigger** in 12 minutes of text-driven chatter:
+  prompt tokens peaked at 4 277 against a 16 000 trigger; continuous
+  silent/near-silent audio did not raise the count.
+- Free tier, 4 keys: ~20 minutes connected across 4 sessions, no 429.
+

@@ -27,7 +27,7 @@ Four daemon runs (line ranges are 1-based line numbers in the JSONL):
 | 1–5 | smoke start/stop while workers were set up | 7db2ee6 |
 | 6–334 | **Phase A**: scenarios 1, 4, 2/3 (agy), 5, 6 (first attempt), 7, 9 | 7db2ee6 |
 | 335–834 | **Phase D**: scenario 6, 2/3 with Codex, 3 with Claude, 8, chatter, server-side disconnect (scenario 10 material) | 7db2ee6 |
-| 835–982 | **Phase E**: re-verification after the fixes (stale row, cancel, push prompt, agy "no") | c7e12b2 |
+| 835–982 | **Phase E**: re-verification after the fixes (stale row, cancel, push prompt, agy "no") | c7e12b2 (= 5a68474 after a subject reword) |
 
 ## Scenario ↔ line index
 
@@ -38,7 +38,7 @@ Four daemon runs (line ranges are 1-based line numbers in the JSONL):
 | 4 | Instruction with echo | 79–103 | `propose` → `llm.call` resolve_instruction → `pending.created send_instruction` → `herdr.send kind=prompt` → echo transcript; 99/103 show the herdr misclassification of agy's edit prompt as `done` |
 | 2 | Proactive block, agy (hook-shaped event) | 116–134 | `herdr.state source=http blocked` → 3 s debounce → `herdr.transition` → `herdr.read` → `llm.call summarize_block` → `pending.created` → `voice.push` → spoken; 134 = dropped by the 30 s snapshot tick (herdr says `done`) |
 | 2/3 | Proactive block + "Yes." (agy, retry timed after the snapshot tick) | 159–191 | 161 transition, 164/165 pending + push, 171 "Yes." → 177 `herdr.send keys=["1"]` → 178 `pending.confirmed` → 191 finished |
-| 5 | Cancel in time | 203–232 | 209/210 send, 217 "Stop." → 224 `herdr.send keys=["ctrl+c"]` → 225 `pending.cancelled reason=user`; 232 the spurious "finished" push (fixed in c7e12b2, see 905) |
+| 5 | Cancel in time | 203–232 | 209/210 send, 217 "Stop." → 224 `herdr.send keys=["ctrl+c"]` → 225 `pending.cancelled reason=user`; 232 the spurious "finished" push (fixed in 5a68474, see 905) |
 | 6 | Ambiguity, first attempt (FAIL) | 251–269 | the voice model passed `agent:"auth-one"` for "tell it to continue" and it was sent |
 | 7 | Deep ask | 290–312 | "Checking" transcript first, `voice.tool_call ask`, 304 `cli.run backend=codex 24.1 s`, `llm.call spoken_answer`, ≤ 2 sentences |
 | 9 | Reconnect | 322–331 | client disconnect → connect (`client_id` 2) → "What did I just ask you?" answered from context |
