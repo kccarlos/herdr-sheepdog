@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"io"
+	"os"
 	"path/filepath"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/app"
@@ -12,6 +13,11 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice/gemini"
 )
+
+// defaultEnvFile is what `serve --env-file` loads when the flag is not
+// given: a .env in the working directory, if there is one. It is not an
+// error for it to be absent (a production/launchd run has no .env).
+const defaultEnvFile = ".env"
 
 func printServeUsage(w io.Writer) {
 	fprintln(w, "usage: sheepdog serve [flags]")
@@ -21,6 +27,10 @@ func printServeUsage(w io.Writer) {
 	fprintln(w, "")
 	fprintln(w, "flags:")
 	fprintln(w, "  --config PATH     config file (default ~/.config/sheepdog/config.toml)")
+	fprintln(w, "  --env-file PATH   load KEY=VALUE lines into the environment before config is")
+	fprintln(w, "                    read (default ./.env if it exists; no error if it does not;")
+	fprintln(w, "                    an explicitly given path that is missing is an error). Real")
+	fprintln(w, "                    env vars always win over the file; values are never logged.")
 	fprintln(w, "  --port N          web port (default from config: web.port / SHEEPDOG_WEB_PORT, 7777)")
 	fprintln(w, "  --voice MODE      gemini | off (default gemini; off logs pushes as skipped)")
 	fprintln(w, "  --herdr MODE      socket | mock (default socket; mock needs no running herdr)")
@@ -34,9 +44,9 @@ func printServeUsage(w io.Writer) {
 
 // serveOpts are the parsed flags.
 type serveOpts struct {
-	configPath, voice, herdr, cli, dataDir string
-	port                                   int
-	verbose, dev                           bool
+	configPath, envFile, voice, herdr, cli, dataDir string
+	port                                            int
+	verbose, dev                                    bool
 }
 
 func parseServeFlags(args []string, stderr io.Writer) (serveOpts, int, bool) {
@@ -45,6 +55,7 @@ func parseServeFlags(args []string, stderr io.Writer) (serveOpts, int, bool) {
 	fs.Usage = func() { printServeUsage(stderr) }
 	var o serveOpts
 	fs.StringVar(&o.configPath, "config", "", "config file")
+	fs.StringVar(&o.envFile, "env-file", "", "load KEY=VALUE lines into the environment before config (default ./.env if present)")
 	fs.IntVar(&o.port, "port", 0, "web port")
 	fs.StringVar(&o.voice, "voice", app.VoiceGemini, "voice mode")
 	fs.StringVar(&o.herdr, "herdr", app.HerdrSocket, "herdr mode")
@@ -61,10 +72,37 @@ func parseServeFlags(args []string, stderr io.Writer) (serveOpts, int, bool) {
 	return o, 0, true
 }
 
+// loadServeEnvFile implements --env-file: an explicitly given path must
+// exist; the implicit default (./.env) is silently skipped when absent,
+// since most runs (production, launchd) have no .env at all. Values are
+// loaded before config.Load so SHEEPDOG_*/GEMINI_API_KEY* from the file
+// take effect, and are never logged (see config.LoadEnvFile).
+func loadServeEnvFile(path string, stderr io.Writer) (code int, ok bool) {
+	explicit := path != ""
+	if !explicit {
+		path = defaultEnvFile
+	}
+	if _, err := os.Stat(path); err != nil {
+		if explicit {
+			fprintf(stderr, "sheepdog serve: --env-file %s: %v\n", path, err)
+			return 1, false
+		}
+		return 0, true // no default .env: not an error
+	}
+	if err := config.LoadEnvFile(path); err != nil {
+		fprintf(stderr, "sheepdog serve: %v\n", err)
+		return 1, false
+	}
+	return 0, true
+}
+
 // runServe implements `sheepdog serve`.
 func runServe(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	o, code, run := parseServeFlags(args, stderr)
 	if !run {
+		return code
+	}
+	if code, ok := loadServeEnvFile(o.envFile, stderr); !ok {
 		return code
 	}
 	cfg, err := config.Load(o.configPath)

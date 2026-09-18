@@ -99,9 +99,9 @@ func TailBytes(text string, max int) string {
 }
 
 var (
-	reURL      = regexp.MustCompile(`(?i)\b(?:https?|ftp|ws|wss)://\S+`)
-	reWWW      = regexp.MustCompile(`(?i)\bwww\.\S+`)
-	reHash     = regexp.MustCompile(`\b[0-9a-f]{7,64}\b`)
+	reURL  = regexp.MustCompile(`(?i)\b(?:https?|ftp|ws|wss)://\S+`)
+	reWWW  = regexp.MustCompile(`(?i)\bwww\.\S+`)
+	reHash = regexp.MustCompile(`\b[0-9a-f]{7,64}\b`)
 	// rePath matches file paths for scrubbing: an absolute/home/dotted
 	// path ("/Users/kc/x.go", "~/repo/x.go", "./a/b.go") or a bare
 	// relative path with a leading word ("internal/x/calc_test.go"). It
