@@ -22,7 +22,7 @@ far, every one squash-merged on green CI after independent verification.
 | Enrichment + promises; push judgment under the chattiness ceiling | done (#23, #24) |
 | Logo (README picture, both pages, favicons) | done (#18) |
 | Brain model switch at runtime (`/debug` picker, `GET /api/brain/models`, `PUT /api/brain/model`, `session.brain_model`) | done (#25); verified with `--brain=fake` and one live model-list call |
-| DeepSeek as a second brain provider (`[deepseek]`, `brain.provider`, `OpenAICompatModel`, provider select on `/debug`, `session.brain_provider`) | in review; verified live: 10 DeepSeek calls (model list, two tool-using asks at `low`/`high`, a `prompt`+`promise` propose, a seeded second turn without earlier reasoning) |
+| DeepSeek as a second brain provider (`[deepseek]`, `brain.provider`, `OpenAICompatModel`, provider select on `/debug`, `session.brain_provider`) | in review; verified live: 11 DeepSeek calls (model list, tool-using asks at `low` and twice at `high`, a `prompt`+`promise` propose, a seeded second turn without earlier reasoning) |
 
 ## Verified live vs. verified with the fake model only
 

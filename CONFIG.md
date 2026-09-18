@@ -68,12 +68,15 @@ Measured on 2026-09-18 with `brain-test` (`what is auth doing?` on the
 `codex-working` fixture, two model calls each: a `read_screen`, then the
 answer; ~3 100 prompt tokens per call): `reasoning_effort = "low"` took
 2.84 s wall (1.30 s + 1.54 s, 213 completion tokens), `"high"` 2.92 s
-(1.53 s + 1.39 s, 176 tokens) — no latency penalty on a screen question
-either way, and no visible gain; a propose that sent `prompt` and
-`promise` in one step took 3.31 s at `low` (53 + 33 reasoning tokens).
-Both fit the 8 s `brain.ask_timeout_s` with room for a second tool
-round; `low` is the default because it is the cheaper of two equals on
-this work, and `max` is untested.
+and 2.91 s on two runs (1.31 s + 1.60 s, 269 completion tokens of which
+21 + 98 reasoning) — thinking is on (the `reasoning_tokens` are there)
+but a screen question draws little of it at either effort, so no latency
+penalty and no visible gain; a propose that sent `prompt` and `promise`
+in one step took 3.31 s at `low` (53 + 33 reasoning tokens), a seeded
+follow-up ask 3.04 s (4 + 147). Both efforts fit the 8 s
+`brain.ask_timeout_s` with room for a second tool round; `low` is the
+default because it is the cheaper of two equals on this work, and `max`
+is untested.
 
 **The reasoning replay trade-off.** DeepSeek's thinking mode returns a
 `reasoning_content` with every assistant message and, while tools are
