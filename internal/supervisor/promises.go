@@ -98,17 +98,32 @@ func (s *Supervisor) resolvePromise(id, status string) (state.Promise, bool) {
 	return out, ok
 }
 
-// promiseMatches reports whether an open promise waits for event.
-func promiseMatches(p state.Promise, paneID, event string) bool {
-	return p.Status == state.PromiseOpen && p.PaneID == paneID && (p.Event == event || p.Event == brain.PromiseEventAnyChange)
+// promiseMatches reports whether an open promise waits for any of
+// events (any_change always matches).
+func promiseMatches(p state.Promise, paneID string, events ...string) bool {
+	if p.Status != state.PromiseOpen || p.PaneID != paneID {
+		return false
+	}
+	if p.Event == brain.PromiseEventAnyChange {
+		return true
+	}
+	for _, e := range events {
+		if p.Event == e {
+			return true
+		}
+	}
+	return false
 }
 
-// keepPromises keeps the open promises of row that wait for event (a
-// working or idle change, which is otherwise never announced): when any
-// matches, the event is announced with sentence as a promise-only
-// announcement — one line through the brain, or "As you asked:
-// <sentence>" — at every chattiness level. Blocks and finishes keep
-// their promises inside their own announce call.
+// keepPromises keeps the open promises of row that wait for event: a
+// working change (never a finish) or an idle change that is not itself
+// a finish (done -> idle, blocked -> idle; working -> idle goes through
+// onDone instead, which keeps an "idle" promise as part of its own
+// announce call). When any matches, the event is announced with
+// sentence as a promise-only announcement — one line through the
+// brain, or "As you asked: <sentence>" — at every chattiness level.
+// Blocks and finishes keep their promises inside their own announce
+// call.
 func (s *Supervisor) keepPromises(ctx context.Context, row state.Agent, event, sentence string) {
 	for _, p := range s.openPromises() {
 		if promiseMatches(p, row.PaneID, event) {
@@ -118,13 +133,14 @@ func (s *Supervisor) keepPromises(ctx context.Context, row state.Agent, event, s
 	}
 }
 
-// keepMatching marks every open promise of paneID that waits for event
-// as kept (the brain sees the record before the announce turn) and
-// returns them, oldest first. Marking first means nothing is said twice.
-func (s *Supervisor) keepMatching(paneID, event string) []state.Promise {
+// keepMatching marks every open promise of paneID that waits for any of
+// events as kept (the brain sees the record before the announce turn)
+// and returns them, oldest first. Marking first means nothing is said
+// twice.
+func (s *Supervisor) keepMatching(paneID string, events ...string) []state.Promise {
 	var kept []state.Promise
 	for _, p := range s.openPromises() {
-		if !promiseMatches(p, paneID, event) {
+		if !promiseMatches(p, paneID, events...) {
 			continue
 		}
 		s.mu.Lock()

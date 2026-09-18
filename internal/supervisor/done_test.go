@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kccarlos/herdr-sheepdog/internal/brain"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/llm"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
@@ -142,6 +143,82 @@ func TestDoneEndingInQuestionBecomesBlock(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestFinishEdges: herdr reports a finish as "done" when the user was
+// not looking at the pane and "idle" when it was focused
+// (herdr/src/pane/state.rs's "seen" bit), so working -> done and
+// working -> idle are both a finish, and either keeps whichever "done"
+// and "idle" promises are open in the same line; done -> idle ("idle
+// again") is never a finish; a finish suppressed by a recent Ctrl-C
+// stays silent whichever state it lands on.
+func TestFinishEdges(t *testing.T) {
+	t.Run("working_to_done_unchanged", func(t *testing.T) {
+		h := newHarness(t, func(c *Config) { c.Chattiness = string(Chatty) })
+		h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
+		h.srv.SetScreen("w5:p1", fixture(t, "codex-after-approval.screen.txt"))
+		h.transition("w5:p1", herdr.StateWorking, herdr.StateDone)
+		if push := h.pusher.last(t); push.Text != doneSentence {
+			t.Errorf("push = %+v", push)
+		}
+	})
+
+	t.Run("working_to_idle_announces_and_keeps_both_promises", func(t *testing.T) {
+		h := newHarness(t, func(c *Config) { c.Chattiness = string(Chatty) })
+		h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
+		donePromise, err := h.sup.createPromise("w5:p1", brain.PromiseRequest{Text: "tell me when it's done", Event: "done"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		idlePromise, err := h.sup.createPromise("w5:p1", brain.PromiseRequest{Text: "tell me when it goes idle", Event: "idle"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		h.srv.SetScreen("w5:p1", fixture(t, "codex-after-approval.screen.txt"))
+		h.transition("w5:p1", herdr.StateWorking, herdr.StateIdle)
+		if push := h.pusher.last(t); push.Text != "As you asked: "+doneSentence || push.Urgency != voice.UrgencyIdle {
+			t.Errorf("push = %+v", push)
+		}
+		status := map[string]string{}
+		for _, p := range h.store.Snapshot().Session.Promises {
+			status[p.ID] = p.Status
+		}
+		if status[donePromise.ID] != state.PromiseKept || status[idlePromise.ID] != state.PromiseKept {
+			t.Errorf("statuses = %v", status)
+		}
+		if h.log.count("promise.kept") != 2 {
+			t.Errorf("promise.kept = %d", h.log.count("promise.kept"))
+		}
+	})
+
+	t.Run("done_to_idle_not_a_finish", func(t *testing.T) {
+		h := newHarness(t, func(c *Config) { c.Chattiness = string(Chatty) })
+		h.addAgent("w5:p1", "auth", "codex", herdr.StateDone)
+		before := len(h.pusher.all())
+		h.transition("w5:p1", herdr.StateDone, herdr.StateIdle)
+		if len(h.pusher.all()) != before {
+			t.Errorf("done -> idle pushed %+v", h.pusher.all()[before:])
+		}
+	})
+
+	t.Run("working_to_idle_after_ctrl_c_suppressed", func(t *testing.T) {
+		h := newHarness(t)
+		h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
+		h.call(ToolPropose, map[string]any{"instruction": "tell auth to run the tests"})
+		if _, err := h.sup.createPromise("w5:p1", brain.PromiseRequest{Text: "tell me when it's done", Event: "done"}); err != nil {
+			t.Fatal(err)
+		}
+		h.call(ToolCancel, nil)
+		h.srv.SetScreen("w5:p1", fixture(t, "codex-after-ctrl-c.screen.txt"))
+		before := len(h.pusher.all())
+		h.transition("w5:p1", herdr.StateWorking, herdr.StateIdle)
+		if len(h.pusher.all()) != before {
+			t.Errorf("suppressed finish pushed %+v", h.pusher.all()[before:])
+		}
+		if h.log.count("supervisor.finished_suppressed") != 1 || h.log.count("promise.kept") != 0 || len(h.sup.openPromises()) != 1 {
+			t.Errorf("suppressed=%d kept=%d open=%d", h.log.count("supervisor.finished_suppressed"), h.log.count("promise.kept"), len(h.sup.openPromises()))
+		}
+	})
 }
 
 // slowDone delays SummarizeDone until ctx ends or delay elapses.

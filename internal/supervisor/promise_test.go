@@ -200,7 +200,9 @@ func TestPromiseKeptByTemplateWithoutBrain(t *testing.T) {
 
 // A promise past its due time interrupts; one for a block is kept on the
 // question; any_change is kept on the first change; a promise for
-// another agent or event is left alone.
+// another agent is left alone. working -> idle is a finish (herdr
+// reports idle instead of done when the pane was focused), so it keeps
+// a "done" promise for that agent too, in the same line.
 func TestPromiseMatchingAndUrgency(t *testing.T) {
 	h := newHarness(t)
 	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
@@ -232,17 +234,17 @@ func TestPromiseMatchingAndUrgency(t *testing.T) {
 	}
 	h.transition("w6:p1", herdr.StateWorking, herdr.StateIdle)
 	got = h.pusher.all()
-	if last := got[len(got)-1]; last.Text != "As you asked: docs is idle now." {
-		t.Errorf("any_change push = %+v", last)
+	if last := got[len(got)-1]; last.Text != "As you asked: docs finished: did something the screen does not show." {
+		t.Errorf("finish push = %+v", last)
 	}
 	status := map[string]string{}
 	for _, p := range h.store.Snapshot().Session.Promises {
 		status[p.ID] = p.Status
 	}
-	if status[urgent.ID] != state.PromiseKept || status[blocked.ID] != state.PromiseKept || status[any.ID] != state.PromiseKept || status[other.ID] != state.PromiseOpen {
+	if status[urgent.ID] != state.PromiseKept || status[blocked.ID] != state.PromiseKept || status[any.ID] != state.PromiseKept || status[other.ID] != state.PromiseKept {
 		t.Errorf("statuses = %v", status)
 	}
-	if h.log.count("promise.kept") != 3 {
+	if h.log.count("promise.kept") != 4 {
 		t.Errorf("promise.kept = %d", h.log.count("promise.kept"))
 	}
 }

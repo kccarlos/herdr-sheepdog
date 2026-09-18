@@ -41,6 +41,10 @@ type announcement struct {
 	kind pushKind
 	// event is the worker event (brain.PromiseEventDone, …).
 	event string
+	// alsoIdle: the finish landed on idle rather than done (the user
+	// had the pane focused), so an open "idle" promise is kept by this
+	// announcement too, alongside event and any_change.
+	alsoIdle bool
 	// sentence is the template sentence.
 	sentence string
 	// screen is the pane read taken for the event, when one was.
@@ -61,7 +65,11 @@ type turnResult struct {
 // ceiling when one is attached and the level leaves anything to decide,
 // else exactly as the template path did before the brain existed.
 func (s *Supervisor) announce(ctx context.Context, a announcement) {
-	kept := s.keepMatching(a.row.PaneID, a.event)
+	events := []string{a.event}
+	if a.alsoIdle {
+		events = append(events, brain.PromiseEventIdle)
+	}
+	kept := s.keepMatching(a.row.PaneID, events...)
 	level := s.chattiness()
 	if s.brain == nil {
 		s.templatePath(a, kept, level, "no_brain", false)

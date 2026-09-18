@@ -657,30 +657,36 @@ func TestAnnounceTurnCannotAct(t *testing.T) {
 
 // A working/idle promise is kept through an announce turn too (one
 // line; the sentence itself is never announced), and by the template
-// when the brain skips.
+// when the brain skips. done -> idle ("idle again") is the non-finish
+// path this exercises; working -> idle is a finish (TestFinishEdges)
+// and goes through onDone instead.
 func TestAnnouncePromiseOnlyEvents(t *testing.T) {
 	m := braintest.NewModel()
 	m.EventDefault = announceReply("Docs is idle now, as you asked.", "idle", "", "", false)
 	h := newBrainHarness(t, m, func(c *Config) { c.Chattiness = string(Quiet) })
-	h.addAgent("w6:p1", "docs", "claude", herdr.StateWorking)
+	h.addAgent("w6:p1", "docs", "claude", herdr.StateDone)
 	if _, err := h.sup.createPromise("w6:p1", brain.PromiseRequest{Text: "tell me when docs is idle", Event: "idle"}); err != nil {
 		t.Fatal(err)
 	}
-	h.transition("w6:p1", herdr.StateWorking, herdr.StateIdle)
+	h.transition("w6:p1", herdr.StateDone, herdr.StateIdle)
 	if got := h.pushTexts(); len(got) != 1 || got[0] != "Docs is idle now, as you asked." {
 		t.Errorf("pushes = %v", got)
 	}
 	if h.log.count("supervisor.push_quiet") != 0 {
 		t.Error("push_quiet for a promise-only sentence")
 	}
-	// No promise: no turn at all.
+	// No promise: working -> idle now goes through announce() as a
+	// finish (it is no longer the promise-only path above), but at
+	// quiet with nothing kept it logs one push_decision via the
+	// ceiling and never calls the model.
 	h.transition("w6:p1", herdr.StateIdle, herdr.StateWorking)
 	h.transition("w6:p1", herdr.StateWorking, herdr.StateIdle)
-	if len(m.Calls()) != 1 || len(h.decisions()) != 1 {
+	if len(m.Calls()) != 1 || len(h.decisions()) != 2 {
 		t.Errorf("calls=%d decisions=%d", len(m.Calls()), len(h.decisions()))
 	}
-	row, _ := h.store.Get("w6:p1")
-	_ = row
+	if d := h.decisions()[1]; d["via"] != "ceiling" || d["reason"] != "ceiling" {
+		t.Errorf("second decision = %v", d)
+	}
 	if st := h.store.Snapshot().Session.Promises; len(st) != 1 || st[0].Status != state.PromiseKept {
 		t.Errorf("promises = %+v", st)
 	}

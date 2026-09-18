@@ -62,6 +62,9 @@ with `--brain=fake` and its two fake providers.
 
 ## Known gaps and follow-ups
 
+- Found in the 18:44Z session on 2026-09-18: `working → idle` (a finish the
+  user was looking at) was never announced, only `working → done` was —
+  fixed in `transitions.go`/`onDone` (see PR for the promise-matching fix).
 - herdr 0.9.0 does not detect Antigravity CLI prompts as `blocked` (needs a local `~/.config/herdr/agent-detection/agy.toml` override or an upstream manifest fix); user chose to skip agy for now.
 - Eval: "Okay, let's use that then." still routes to `confirm` (left rather than over-fit).
 - Ollama `gemma4` is too slow for the default 15 s summary timeout on cold prompts (`supervisor.summary_timeout_s`, `llm.timeout_s` are configurable) and drifts off the JSON contract for the brain — not a brain backend.

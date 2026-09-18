@@ -103,8 +103,11 @@ CLI wrappers print server errors as JSON on stderr with exit status 1.
 - **`AgentStatus` enum (exact):** `"idle" | "working" | "blocked" | "done" | "unknown"`.
   - `done` = idle **and not yet "seen"** by any client/CLI focus command; `idle`
     = idle and seen. Both mean "ready for input". Reads do not mark seen;
-    `agent.focus` does. For sheepdog, treat `done` and `idle` as the same bucket
-    but use the `working → done` edge as the "finished a turn" signal.
+    `agent.focus` does. For sheepdog, a finish is the `working → {done|idle}`
+    edge: herdr reports `done` when the user was not looking at the pane and
+    `idle` when they had it focused when the agent finished
+    (`herdr/src/pane/state.rs`'s "seen" bit) — `done` vs `idle` only encodes
+    whether the user was looking, not whether the agent is finished.
   - `blocked` = herdr recognised an approval/question UI.
   - `unknown` = agent present but unclassifiable (also emitted when an agent
     exits and the pane returns to a shell).
