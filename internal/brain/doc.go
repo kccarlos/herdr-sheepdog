@@ -92,6 +92,7 @@
 // Everything is observable through brain.* events on the logging.Logger:
 // brain.turn, brain.step, brain.tool_call / brain.tool_result (paired by
 // id), brain.rail_blocked (a refused send_keys, or an action tool named
-// in an event turn), brain.compaction, brain.fallback,
-// brain.system_prompt and brain.rate_limited (decision D10).
+// in an event turn), brain.compaction, brain.fallback, brain.yielded,
+// brain.event_coalesced, brain.system_prompt and brain.rate_limited
+// (decision D10).
 package brain

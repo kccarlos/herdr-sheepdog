@@ -231,8 +231,9 @@ func (b *Brain) Config() Config { return b.cfg }
 // Queued returns how many turns wait for the turn lock, CEO turns and
 // event turns separately.
 func (b *Brain) Queued() (ceo, event int) {
-	ceo = b.lock.ceoWaiting()
-	return ceo, b.lock.waiting() - ceo
+	b.lock.mu.Lock()
+	defer b.lock.mu.Unlock()
+	return len(b.lock.ceo), len(b.lock.event)
 }
 
 // Turns returns how many turns have started.

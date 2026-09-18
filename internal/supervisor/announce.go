@@ -75,13 +75,16 @@ func (s *Supervisor) announce(ctx context.Context, a announcement) {
 		}
 		return
 	}
+	infos := make([]brain.PromiseInfo, 0, len(kept))
+	for _, p := range kept {
+		infos = append(infos, promiseInfo(p))
+	}
+	// The request is built before the goroutine: the wait branch below
+	// flips a.spoken once the template is out.
+	req := brain.Request{Kind: brain.KindAnnounce, Trigger: brain.TriggerEvent, Agent: aliasOr(a.row.Alias), Event: a.event, Template: a.sentence, TemplateSpoken: a.spoken, Screen: a.screen, Promises: infos}
 	res := make(chan turnResult, 1)
 	go func() {
-		infos := make([]brain.PromiseInfo, 0, len(kept))
-		for _, p := range kept {
-			infos = append(infos, promiseInfo(p))
-		}
-		rep, err := s.brain.Turn(ctx, brain.Request{Kind: brain.KindAnnounce, Trigger: brain.TriggerEvent, Agent: aliasOr(a.row.Alias), Event: a.event, Template: a.sentence, TemplateSpoken: a.spoken, Screen: a.screen, Promises: infos})
+		rep, err := s.brain.Turn(ctx, req)
 		res <- turnResult{rep: rep, err: err}
 	}()
 	if a.spoken {
