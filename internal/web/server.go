@@ -39,7 +39,11 @@ type EventInjector interface {
 // Deps are the components the server exposes. Log and Store are
 // required; the rest may be nil (the matching endpoints then answer 503).
 type Deps struct {
-	Log        *eventlog.Log
+	// Log is the event log the SSE endpoint tails.
+	Log *eventlog.Log
+	// Logger is where this package writes its own events (default Log;
+	// the daemon passes a tee when --verbose echoes events to stderr).
+	Logger     logging.Logger
 	Store      *state.Store
 	Supervisor Supervisor
 	Injector   *inject.Injector
@@ -110,7 +114,10 @@ func New(deps Deps) (*Server, error) {
 			deps.VoiceMode = "off"
 		}
 	}
-	s := &Server{deps: deps, log: deps.Log, mux: http.NewServeMux(), closing: make(chan struct{})}
+	if deps.Logger == nil {
+		deps.Logger = deps.Log
+	}
+	s := &Server{deps: deps, log: deps.Logger, mux: http.NewServeMux(), closing: make(chan struct{})}
 	s.hub = newHub(s)
 	if err := s.routes(); err != nil {
 		return nil, err
