@@ -1,0 +1,227 @@
+package brain
+
+import (
+	"context"
+	"fmt"
+	"strings"
+	"sync"
+)
+
+// ContextEngine decides what part of the transcript the model sees. The
+// names are OpenClaw's; this is the seam the memory system (plan P6)
+// plugs into (see the package doc).
+type ContextEngine interface {
+	// Ingest receives every transcript message right after it was
+	// appended (turn is the current turn number, 0 outside a turn).
+	Ingest(m Message, turn int)
+	// Assemble returns the window for the next model call: the messages
+	// in order, and an optional addition to the system prompt (a
+	// memory-backed engine puts recalled facts there).
+	Assemble(budget int) Assembly
+	// Compact shrinks the window when it exceeds budget (estimated
+	// tokens); ok is false when nothing was done. The default engine
+	// summarises the oldest half with one model call.
+	Compact(ctx context.Context, budget int) (Compaction, bool, error)
+	// AfterTurn runs bookkeeping at the end of turn (the default engine
+	// prunes tool results older than PruneAfterTurns turns).
+	AfterTurn(turn int)
+	// Tokens is the estimated size of the window.
+	Tokens() int
+}
+
+// Assembly is what Assemble returns.
+type Assembly struct {
+	Messages []Message
+	// SystemAddition is appended to the system prompt when non-empty.
+	SystemAddition string
+}
+
+// Compaction reports one compaction for brain.compaction.
+type Compaction struct {
+	BeforeTokens, AfterTokens int
+	// Dropped is how many messages the summary replaced.
+	Dropped int
+	// Summary is the message that replaced them.
+	Summary Message
+}
+
+// Summarizer turns a rendering of old messages into a summary: the
+// default engine's one model call per compaction.
+type Summarizer func(ctx context.Context, text string) (string, error)
+
+// DefaultEngine keeps the run's messages in memory, prunes tool results
+// to stubs after pruneAfter turns and compacts the oldest half into one
+// summary when over budget. Safe for concurrent use.
+type DefaultEngine struct {
+	pruneAfter int
+	summarize  Summarizer
+	// record receives the compaction summary so the transcript on disk
+	// has it too.
+	record func(Message) Message
+
+	mu     sync.Mutex
+	window []entry
+}
+
+type entry struct {
+	msg    Message
+	turn   int
+	pruned bool
+}
+
+// NewDefaultEngine builds the default engine. summarize is required for
+// Compact (nil makes it a no-op); record may be nil.
+func NewDefaultEngine(pruneAfter int, summarize Summarizer, record func(Message) Message) *DefaultEngine {
+	if pruneAfter <= 0 {
+		pruneAfter = 3
+	}
+	return &DefaultEngine{pruneAfter: pruneAfter, summarize: summarize, record: record}
+}
+
+// Ingest implements ContextEngine.
+func (e *DefaultEngine) Ingest(m Message, turn int) {
+	e.mu.Lock()
+	e.window = append(e.window, entry{msg: m, turn: turn})
+	e.mu.Unlock()
+}
+
+// Assemble implements ContextEngine.
+func (e *DefaultEngine) Assemble(int) Assembly {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	out := make([]Message, 0, len(e.window))
+	for _, en := range e.window {
+		out = append(out, en.msg)
+	}
+	return Assembly{Messages: out}
+}
+
+// Tokens implements ContextEngine.
+func (e *DefaultEngine) Tokens() int {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.tokensLocked()
+}
+
+func (e *DefaultEngine) tokensLocked() int {
+	n := 0
+	for _, en := range e.window {
+		n += en.msg.Tokens
+	}
+	return n
+}
+
+// AfterTurn implements ContextEngine: tool results ingested pruneAfter or
+// more turns ago are replaced by their one-line stub.
+func (e *DefaultEngine) AfterTurn(turn int) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	for i := range e.window {
+		en := &e.window[i]
+		if en.pruned || en.msg.Kind != KindToolResult || turn-en.turn < e.pruneAfter {
+			continue
+		}
+		en.msg.Content = stubFor(en.msg)
+		en.msg.Tokens = EstimateTokens(en.msg.Content)
+		en.pruned = true
+	}
+}
+
+// stubFor is the one-line replacement of a pruned tool result.
+func stubFor(m Message) string {
+	if m.ToolResult != nil && m.ToolResult.Summary != "" {
+		return "[" + m.ToolResult.Summary + ", pruned]"
+	}
+	name := "tool result"
+	if m.ToolResult != nil {
+		name = m.ToolResult.Name + " result"
+	}
+	return "[" + name + ", pruned]"
+}
+
+// Compact implements ContextEngine: when the window is over budget, the
+// oldest half (cut at a message boundary that keeps every tool call with
+// its result) is rendered, summarised and replaced by one
+// compaction_summary message.
+func (e *DefaultEngine) Compact(ctx context.Context, budget int) (Compaction, bool, error) {
+	e.mu.Lock()
+	before := e.tokensLocked()
+	if before <= budget || e.summarize == nil || len(e.window) < 2 {
+		e.mu.Unlock()
+		return Compaction{}, false, nil
+	}
+	cut := cutPoint(e.window, before/2)
+	if cut <= 0 {
+		e.mu.Unlock()
+		return Compaction{}, false, nil
+	}
+	old := append([]entry(nil), e.window[:cut]...)
+	e.mu.Unlock()
+
+	text := renderForSummary(old)
+	summary, err := e.summarize(ctx, text)
+	if err != nil {
+		return Compaction{}, false, err
+	}
+	m := Message{TS: old[len(old)-1].msg.TS, Role: RoleUser, Kind: KindCompaction, Content: summary}
+	if e.record != nil {
+		m = e.record(m)
+	} else {
+		m.Tokens = EstimateTokens(m.Content)
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	// Messages ingested during the model call stay; only the ones
+	// summarised go.
+	rest := append([]entry(nil), e.window[cut:]...)
+	e.window = append([]entry{{msg: m, turn: old[len(old)-1].turn}}, rest...)
+	return Compaction{BeforeTokens: before, AfterTokens: e.tokensLocked(), Dropped: cut, Summary: m}, true, nil
+}
+
+// cutPoint returns the index of the first message kept: the smallest
+// boundary at or past half the tokens where the next message starts a
+// fresh exchange (never between a tool call and its result, never right
+// before a reply).
+func cutPoint(window []entry, half int) int {
+	acc := 0
+	for i, en := range window {
+		acc += en.msg.Tokens
+		if acc < half {
+			continue
+		}
+		for j := i + 1; j < len(window); j++ {
+			if boundary(window[j].msg.Kind) {
+				return j
+			}
+		}
+		return 0
+	}
+	return 0
+}
+
+// boundary reports whether a message of kind k may open the window.
+func boundary(k MessageKind) bool {
+	switch k {
+	case KindCEOUtterance, KindAssistantSaid, KindPush, KindWorkerEvent, KindNote, KindRequest, KindCompaction:
+		return true
+	default:
+		return false
+	}
+}
+
+// renderForSummary is the text the summariser reads.
+func renderForSummary(old []entry) string {
+	var b strings.Builder
+	for _, en := range old {
+		m := en.msg
+		line := m.Content
+		if m.Kind == KindToolCall && m.ToolCall != nil {
+			line = fmt.Sprintf("%s(%v)", m.ToolCall.Name, m.ToolCall.Args)
+		}
+		if len(line) > 600 {
+			line = line[:600] + "…"
+		}
+		fmt.Fprintf(&b, "[%s] %s: %s\n", m.TS.Format("15:04"), m.Kind, line)
+	}
+	return b.String()
+}

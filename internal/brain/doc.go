@@ -1,0 +1,64 @@
+// Package brain is the supervisor brain, the SVP of docs/roles.md (plan
+// D7-revised): a stateful agent that answers the supervisor's ask and
+// propose requests by reasoning with tools over a function-calling model,
+// instead of the stateless template calls that lost the conversational
+// referent at the tool boundary.
+//
+// # Turn
+//
+// Brain.Ask / Brain.Propose run one turn: the request is appended to the
+// transcript after the CEO's verbatim words, the context window is
+// assembled into model contents, and the loop calls the Model; every
+// function call it returns is executed (read_screen, run_cli, list_agents,
+// recall; prompt, send_keys, interrupt) through the Host, the responses are
+// appended, and the loop repeats until the model answers with the JSON
+// reply of the answer contract. A turn has a step budget and a wall clock;
+// exceeding either, or any model error, returns ErrFallback so the
+// supervisor answers from its template path (voice never hangs on a loop),
+// unless an action was already sent, in which case the reply reports it so
+// nothing is sent twice.
+//
+// Turns are serialised by a single writer with two priorities: a turn
+// triggered by a CEO utterance runs before one triggered by an event, and
+// a turn in progress is never interleaved.
+//
+// # The one rail
+//
+// send_keys answers a worker's approval prompt, which is bypassing its
+// gate. The executor permits it only when the turn was triggered by a CEO
+// utterance, the supervisor has a pending answer_prompt for that pane, and
+// every key belongs to that prompt's option set; the Host re-checks the
+// pending action atomically at send time. Anything else is refused with an
+// error the model sees and a brain.rail_blocked event. Everything read from
+// a worker pane or produced by the CLI tool is wrapped in provenance
+// delimiters and declared data, not instructions, in the system prompt.
+//
+// # Transcript and context engine
+//
+// One Transcript per daemon run is appended to <data_dir>/brain/<run-id>.jsonl,
+// one JSON Message per line, complete: CEO utterances and assistant replies
+// (from the voice transcript events), pushes, worker state changes, notes,
+// requests, the brain's own tool calls and results, replies and compaction
+// summaries. The ContextEngine decides what of it the model sees: the
+// default engine keeps an in-memory window, prunes bulky tool results to a
+// one-line stub after Config.PruneAfterTurns turns, and compacts the
+// oldest half into one summary message when the window exceeds
+// Config.WindowTokens (estimated). The seam for the memory system (plan
+// P6) is that interface: Ingest / Assemble / Compact / AfterTurn, borrowed
+// from OpenClaw. A memory-backed engine plugs in through Config.Engine and
+// may return a system-prompt addition from Assemble (recalled facts) and
+// serve recall() from durable storage instead of the run's transcript;
+// the disk transcript is its ingestion source.
+//
+// # Prompt
+//
+// The system prompt is sectioned, stable content first so a provider's
+// prefix cache applies: role (prompts/svp/SOUL.md), tool guidance with the
+// provenance rule, the one rail and the answer contract (prompts/svp/RULES.md),
+// then the dynamic agent roster, the ledger excerpt and the time.
+//
+// Everything is observable through brain.* events on the logging.Logger:
+// brain.turn, brain.step, brain.tool_call / brain.tool_result (paired by
+// id), brain.rail_blocked, brain.compaction, brain.fallback,
+// brain.system_prompt and brain.rate_limited (decision D10).
+package brain
