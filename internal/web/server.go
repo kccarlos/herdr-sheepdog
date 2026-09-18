@@ -149,7 +149,7 @@ func (s *Server) routes() error {
 	s.mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/voice", http.StatusFound)
 	})
-	for _, name := range []string{"voice", "debug"} {
+	for _, name := range []string{"voice", "debug", "static"} {
 		if err := s.static(name); err != nil {
 			return err
 		}

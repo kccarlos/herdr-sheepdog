@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo-transparent.svg">
+    <img src="assets/logo-solid.svg" alt="sheepdog logo" width="160" height="160">
+  </picture>
+</p>
+
 # herdr-sheepdog
 
 A voice supervisor for a herdr agent fleet, built on Gemini Live: ask
