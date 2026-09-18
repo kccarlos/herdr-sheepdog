@@ -1,15 +1,14 @@
 package prompts
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
 
-func TestRenderVoiceSystem(t *testing.T) {
-	s, err := Render(VoiceSystem, map[string]string{"aliases": "auth, docs"})
-	if err != nil {
-		t.Fatal(err)
-	}
+func TestRenderAssistant(t *testing.T) {
+	s, _ := (*Loader)(nil).Render(Assistant, map[string]string{"aliases": "auth, docs"})
 	if !strings.Contains(s, "aliases: auth, docs.") || strings.Contains(s, "{aliases}") {
 		t.Errorf("aliases not substituted: %q", s)
 	}
@@ -25,27 +24,29 @@ func TestRenderVoiceSystem(t *testing.T) {
 			t.Errorf("prompt does not explain the push prefix %q", prefix)
 		}
 	}
-	// Rules from the headset sessions (cheap guard against the prompt
-	// drifting): status questions always go through a tool, propose / ask
-	// never guess the agent, questions for the dog are ask (never sent to
-	// the worker as propose), and only the latest tool result may be
-	// reused for a follow-up.
+	// Rules from the headset sessions and docs/roles.md §Assistant (cheap
+	// guard against the prompt drifting): status questions always go
+	// through a tool, propose / ask never guess the agent, questions for
+	// the dog are ask (never sent to the worker as propose), only the
+	// latest tool result may be reused for a follow-up, and a mis-heard
+	// utterance is repeated back rather than guessed.
 	for _, rule := range []string{
 		"MUST start with a tool call",
 		"Never answer such a question from memory",
 		"if a tool has not answered yet, say you are still waiting",
-		"fill agent only when the user actually said an alias",
+		"Fill agent only when the user actually said an alias",
 		"leave agent empty",
 		"Do not guess the agent",
 		`"ask you to explain …"`,
 		`"what did it say"`,
 		`"what does that mean"`,
-		`"explain …"`,
 		"only when the user tells an agent to DO something",
 		"never a question for you",
 		"If unsure whether it is a question or an instruction, use ask",
 		"most recent tool result",
 		"anything older needs a new call",
+		"repeat it and ask instead of guessing",
+		"CEO's register",
 	} {
 		if !strings.Contains(s, rule) {
 			t.Errorf("prompt lost the rule %q", rule)
@@ -58,3 +59,129 @@ func TestRenderVoiceSystem(t *testing.T) {
 		t.Error("missing template accepted")
 	}
 }
+
+func TestRenderMissingTemplate(t *testing.T) {
+	if _, err := Render("missing.txt", nil); err == nil {
+		t.Error("missing template accepted")
+	}
+}
+
+// TestRULESProtectedSentences guards against the rail or the provenance
+// rule silently drifting out of the embedded RULES.md.
+func TestRULESProtectedSentences(t *testing.T) {
+	text, err := embeddedText(SVPRules)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(text, RailSentence) {
+		t.Errorf("RULES.md lost the rail sentence %q", RailSentence)
+	}
+	if !strings.Contains(text, ProvenanceSentence) {
+		t.Errorf("RULES.md lost the provenance sentence %q", ProvenanceSentence)
+	}
+}
+
+func TestLoaderEmbeddedOnly(t *testing.T) {
+	l := NewLoader("", nil)
+	for _, name := range WorkspaceFiles {
+		text, source := l.Load(name)
+		if source != SourceEmbedded {
+			t.Errorf("%s: source = %q, want embedded", name, source)
+		}
+		if text == "" {
+			t.Errorf("%s: empty text", name)
+		}
+	}
+}
+
+func TestLoaderNilBehavesEmbedded(t *testing.T) {
+	var l *Loader
+	text, source := l.Load(Assistant)
+	if source != SourceEmbedded || text == "" {
+		t.Errorf("nil loader: got (%q, %q)", text, source)
+	}
+}
+
+func TestLoaderOverridePartial(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, Assistant), []byte("custom assistant text"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	l := NewLoader(dir, nil)
+	text, source := l.Load(Assistant)
+	if source != SourceOverride || text != "custom assistant text" {
+		t.Errorf("assistant.md: got (%q, %q)", text, source)
+	}
+	// USER.md was not overridden: still embedded.
+	_, source = l.Load(User)
+	if source != SourceEmbedded {
+		t.Errorf("USER.md: source = %q, want embedded (no override present)", source)
+	}
+}
+
+func TestLoaderRejectsRulesOverrideMissingRail(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "svp"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	bad := "## Tools\n\nSome replacement text with no rail sentence at all.\n"
+	if err := os.WriteFile(filepath.Join(dir, SVPRules), []byte(bad), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var rejected []map[string]any
+	log := recorderFunc(func(source, typ, paneID string, payload any) {
+		if typ == "prompts.override_rejected" {
+			m, _ := payload.(map[string]any)
+			rejected = append(rejected, m)
+		}
+	})
+	l := NewLoader(dir, log)
+	text, source := l.Load(SVPRules)
+	if source != SourceEmbedded {
+		t.Errorf("rejected override: source = %q, want embedded", source)
+	}
+	if !hasProtectedSentences(text) {
+		t.Error("fallback text lacks the protected sentences")
+	}
+	if len(rejected) != 1 {
+		t.Fatalf("got %d prompts.override_rejected events, want 1", len(rejected))
+	}
+}
+
+func TestLoaderReload(t *testing.T) {
+	dir := t.TempDir()
+	l := NewLoader(dir, nil)
+	if _, source := l.Load(Assistant); source != SourceEmbedded {
+		t.Fatalf("expected embedded before the override file exists")
+	}
+	if err := os.WriteFile(filepath.Join(dir, Assistant), []byte("reloaded text"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	files := l.Reload()
+	text, source := l.Load(Assistant)
+	if source != SourceOverride || text != "reloaded text" {
+		t.Errorf("after reload: got (%q, %q)", text, source)
+	}
+	if len(files) != len(WorkspaceFiles) {
+		t.Errorf("Reload() returned %d files, want %d", len(files), len(WorkspaceFiles))
+	}
+}
+
+func TestExportRefusesWithoutForce(t *testing.T) {
+	dir := t.TempDir()
+	if _, _, err := Export(dir, false); err != nil {
+		t.Fatalf("first export: %v", err)
+	}
+	if _, _, err := Export(dir, false); err == nil {
+		t.Error("second export without --force should refuse")
+	}
+	if _, _, err := Export(dir, true); err != nil {
+		t.Errorf("export --force: %v", err)
+	}
+}
+
+// recorderFunc adapts a func to logging.Logger without importing the
+// logging package's test helpers.
+type recorderFunc func(source, typ, paneID string, payload any)
+
+func (f recorderFunc) Log(source, typ, paneID string, payload any) { f(source, typ, paneID, payload) }

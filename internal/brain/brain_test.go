@@ -690,11 +690,11 @@ func TestSystemPromptSections(t *testing.T) {
 			t.Errorf("section %s is empty", s["name"])
 		}
 	}
-	if strings.Join(names, " ") != "role tools rail contract roster ledger time" {
+	if strings.Join(names, " ") != "role tools record promises rail fallback contract user roster ledger time" {
 		t.Errorf("sections = %v", names)
 	}
 	sys := h.model.Calls()[0].System()
-	for _, want := range []string{"You are the SVP", "## Tools", "## The one rail", "## Answer contract", "## Agents", "WAITING FOR AN ANSWER: whether it can create hello.txt", `1 "Yes, proceed" -> keys [enter]`, "## Ledger", "keep the migrations", "## Now"} {
+	for _, want := range []string{"You are the SVP", "## Tools", "## The one rail", "## Answer contract", "## Agents", "WAITING FOR AN ANSWER: whether it can create hello.txt", `1 "Yes, proceed" -> keys [enter]`, "## Ledger", "keep the migrations", "## Now", "## About the CEO"} {
 		if !strings.Contains(sys, want) {
 			t.Errorf("system prompt lacks %q", want)
 		}

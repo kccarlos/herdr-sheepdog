@@ -60,7 +60,8 @@ func systemPrompt(cfg Config) (string, error) {
 	if cfg.SystemPrompt != "" {
 		return strings.ReplaceAll(cfg.SystemPrompt, "{aliases}", aliases), nil
 	}
-	return prompts.Render(prompts.VoiceSystem, map[string]string{"aliases": aliases})
+	text, _ := cfg.Prompts.Render(prompts.Assistant, map[string]string{"aliases": aliases})
+	return text, nil
 }
 
 // liveConfig builds the LiveConnectConfig for one connection (plan §6).

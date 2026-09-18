@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
+	"github.com/kccarlos/herdr-sheepdog/prompts"
 )
 
 // Config for a Session. Zero values are replaced by the defaults below;
@@ -20,9 +21,14 @@ type Config struct {
 	// Aliases are the spoken agent names, put in the system prompt and in
 	// the input transcription CustomVocabulary.
 	Aliases []string
-	// SystemPrompt overrides the embedded prompts/voice_system.txt when
-	// non-empty. {aliases} is substituted in both.
+	// SystemPrompt overrides prompts/assistant.md (and any override of
+	// it) entirely when non-empty. {aliases} is substituted in both.
 	SystemPrompt string
+	// Prompts resolves prompts/assistant.md against its override
+	// (docs/roles.md "Prompt files"); nil uses the embedded default.
+	// Re-rendered on every (re)connect, so a Reload takes effect on the
+	// next reconnect, not mid-session.
+	Prompts *prompts.Loader
 	// Handler executes tool calls. nil means every call fails.
 	Handler voice.ToolHandler
 

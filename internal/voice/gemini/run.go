@@ -20,15 +20,22 @@ func (s *Session) connect(ctx context.Context) (conn Conn, resumed bool, err err
 		key, idx, handle := s.cfg.APIKeys[s.keyIdx], s.keyIdx, s.handle
 		s.mu.Unlock()
 
+		// Rendered fresh on every connect (not cached at New) so a
+		// prompts.Loader.Reload() between reconnects takes effect without
+		// restarting the daemon (docs/roles.md "Prompt files").
+		prompt, perr := systemPrompt(s.cfg)
+		if perr != nil {
+			return nil, false, perr
+		}
 		started := s.now()
-		conn, err = s.dial.Dial(ctx, key, s.cfg.Model, liveConfig(s.cfg, s.prompt, handle))
+		conn, err = s.dial.Dial(ctx, key, s.cfg.Model, liveConfig(s.cfg, prompt, handle))
 		if err == nil {
 			s.log.Log(logSource, "voice.connect", "", map[string]any{
 				"key_index": idx, "resumed": handle != "", "dur_ms": s.now().Sub(started).Milliseconds(),
 			})
 			// The prompt this connection runs with, so /debug can show it
 			// per session straight from the log (D10).
-			s.log.Log(logSource, "voice.system_prompt", "", map[string]any{"text": s.prompt, "aliases": s.cfg.Aliases, "model": s.cfg.Model})
+			s.log.Log(logSource, "voice.system_prompt", "", map[string]any{"text": prompt, "aliases": s.cfg.Aliases, "model": s.cfg.Model})
 			return conn, handle != "", nil
 		}
 		if ctx.Err() != nil {

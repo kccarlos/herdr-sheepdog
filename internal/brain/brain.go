@@ -12,6 +12,7 @@ import (
 	"google.golang.org/genai"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
+	"github.com/kccarlos/herdr-sheepdog/prompts"
 )
 
 // logSource is the source field of every brain.* event.
@@ -69,6 +70,10 @@ type Config struct {
 	RunID string
 	// Engine overrides the default context engine (the memory seam).
 	Engine ContextEngine
+	// Prompts resolves SOUL.md, RULES.md and USER.md against their
+	// overrides (docs/roles.md "Prompt files"); nil uses the embedded
+	// defaults. Recomputed every turn, so a reload takes effect at once.
+	Prompts *prompts.Loader
 	// Now overrides the clock (tests).
 	Now func() time.Time
 }
@@ -123,7 +128,6 @@ type Brain struct {
 	log        logging.Logger
 	transcript *Transcript
 	engine     ContextEngine
-	stable     []section
 	tools      []*genai.Tool
 
 	lock  turnLock
@@ -138,6 +142,7 @@ type Brain struct {
 	inBuf        []string // voice transcript fragments not yet final
 	outBuf       []string
 	promptLogged bool
+	userVars     map[string]string // USER.md's {chattiness}/{tz}; SetUserVars
 }
 
 // New builds a Brain over model. log may be nil. The Host is attached by
@@ -150,16 +155,13 @@ func New(cfg Config, model Model, log logging.Logger) (*Brain, error) {
 		log = logging.NopLogger{}
 	}
 	cfg = cfg.withDefaults()
-	stable, err := stableSections()
-	if err != nil {
-		return nil, err
-	}
-	b := &Brain{cfg: cfg, model: model, log: log, stable: stable, tools: toolDeclarations()}
+	b := &Brain{cfg: cfg, model: model, log: log, tools: toolDeclarations()}
 	b.ctx, b.stop = context.WithCancel(context.Background())
 	path := ""
 	if cfg.DataDir != "" {
 		path = filepath.Join(cfg.DataDir, TranscriptDir, cfg.RunID+".jsonl")
 	}
+	var err error
 	b.transcript, err = OpenTranscript(path, func(err error) {
 		log.Log(logSource, "brain.transcript_error", "", map[string]any{"path": path, "error": err.Error()})
 	})
@@ -178,6 +180,16 @@ func New(cfg Config, model Model, log logging.Logger) (*Brain, error) {
 func (b *Brain) SetHost(h Host) {
 	b.mu.Lock()
 	b.host = h
+	b.mu.Unlock()
+}
+
+// SetUserVars sets USER.md's {chattiness}/{tz} placeholders; the brain has
+// no view of the supervisor's runtime settings on its own. {aliases} is
+// always derived fresh from the roster, so it need not be included. Safe
+// to call at any time, including before SetHost.
+func (b *Brain) SetUserVars(vars map[string]string) {
+	b.mu.Lock()
+	b.userVars = vars
 	b.mu.Unlock()
 }
 
