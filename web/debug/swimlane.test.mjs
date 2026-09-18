@@ -509,6 +509,7 @@ test('push judgment: brain.push_decision rides on the voice.push it produced; a 
   assert.equal(decisions.length, 3, 'every decision is a card too');
   assert.equal(decisions[0].title, 'push judgment');
   assert.equal(decisions[1].summary, 'skip → skip · brain · ceiling normal · via brain · done · docs finished: wrote the readme.');
+  assert.ok(decisions[0].summary.includes('via brain · done ·'));
   assert.equal(c.find((r) => r.type === 'brain.yielded').title, 'yielded to a CEO turn');
   assert.equal(c.find((r) => r.type === 'brain.yielded').summary, 'turn 4 · before step 2 · auth done · 1 CEO turn waiting');
   assert.equal(c.find((r) => r.type === 'brain.event_coalesced').summary, 'auth done · replaced the queued turn');

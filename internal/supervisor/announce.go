@@ -69,7 +69,7 @@ func (s *Supervisor) announce(ctx context.Context, a announcement) {
 	}
 	if ceilingForbidsAll(level, a, kept) {
 		// Nothing the brain could say would be spoken: no model call.
-		s.logDecision(a, level, decision{via: "brain", requested: "", applied: brain.UrgencySkip, reason: "ceiling"}, brain.Reply{}, kept, false)
+		s.logDecision(a, level, decision{via: "ceiling", requested: "", applied: brain.UrgencySkip, reason: "ceiling"}, brain.Reply{}, kept, false)
 		if !a.spoken && a.kind != pushPromiseOnly {
 			s.log.Log(logSource, "supervisor.push_quiet", a.row.PaneID, map[string]any{"text": a.sentence, "chattiness": string(level)})
 		}
@@ -190,7 +190,7 @@ func (s *Supervisor) templatePath(a announcement, kept []state.Promise, level Ch
 
 // decision is one push judgment as logged (brain.push_decision).
 type decision struct {
-	via       string // brain | template
+	via       string // brain | template | ceiling (skipped before any turn)
 	requested string // what the brain asked for ("" on the template path)
 	applied   string // what was done: interrupt, idle, silent, skip
 	reason    string // brain, ceiling, duplicate, promise, promise_due, wait, timeout, fallback, yielded, coalesced
@@ -200,7 +200,7 @@ type decision struct {
 
 // logDecision emits brain.push_decision.
 func (s *Supervisor) logDecision(a announcement, level Chattiness, d decision, rep brain.Reply, kept []state.Promise, withSpoken bool) {
-	payload := map[string]any{"via": d.via, "urgency_requested": d.requested, "urgency_applied": d.applied, "ceiling": string(level), "reason": d.reason, "event": a.event, "template": a.sentence, "template_spoken": a.spoken, "late": d.late}
+	payload := map[string]any{"via": d.via, "urgency_requested": d.requested, "urgency_applied": d.applied, "ceiling": string(level), "reason": d.reason, "agent": aliasOr(a.row.Alias), "event": a.event, "template": a.sentence, "template_spoken": a.spoken, "late": d.late}
 	if withSpoken {
 		payload["spoken"] = spokenLine(rep.Spoken)
 		payload["detail"] = strings.TrimSpace(llm.Spoken(rep.Detail, 0))

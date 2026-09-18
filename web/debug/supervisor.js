@@ -178,7 +178,7 @@ export class TurnLog {
         return true;
       case 'brain.push_decision':
         this.decisions.push({
-          ts: ev.ts, tms: Date.parse(ev.ts) || 0, pane: ev.pane_id || '', via: p.via || '', requested: p.urgency_requested || '', applied: p.urgency_applied || '', reason: p.reason || '', ceiling: p.ceiling || '',
+          ts: ev.ts, tms: Date.parse(ev.ts) || 0, pane: ev.pane_id || '', agent: p.agent || '', via: p.via || '', requested: p.urgency_requested || '', applied: p.urgency_applied || '', reason: p.reason || '', ceiling: p.ceiling || '',
           late: !!p.late, event: p.event || '', template: p.template || '', templateSpoken: !!p.template_spoken, spoken: p.spoken || '', detail: p.detail || '', relatesTo: p.relates_to || '', needsUser: !!p.needs_user,
           kept: Array.isArray(p.kept) ? p.kept : [], error: p.error || '', raw: ev,
         });

@@ -228,7 +228,7 @@ func TestAnnounceCeilingApplied(t *testing.T) {
 		t.Errorf("pushes=%d calls=%d", len(h.pusher.all()), len(m.Calls()))
 	}
 	d = h.decisions()
-	if len(d) != 2 || d[1]["urgency_applied"] != "skip" || d[1]["reason"] != "ceiling" || d[1]["ceiling"] != "normal" || d[1]["urgency_requested"] != "" {
+	if len(d) != 2 || d[1]["urgency_applied"] != "skip" || d[1]["reason"] != "ceiling" || d[1]["ceiling"] != "normal" || d[1]["urgency_requested"] != "" || d[1]["via"] != "ceiling" {
 		t.Errorf("push_decision = %v", d)
 	}
 	if pq := h.log.ofType("supervisor.push_quiet"); len(pq) != 1 || payload(pq[0])["chattiness"] != "normal" || !strings.HasPrefix(payload(pq[0])["text"].(string), "docs finished:") {
