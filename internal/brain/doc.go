@@ -22,6 +22,29 @@
 // triggered by a CEO utterance runs before one triggered by an event, and
 // a turn in progress is never interleaved.
 //
+// # Event turns
+//
+// The supervisor runs two kinds of turn on a worker event, after its
+// template path already announced it (docs/roles.md "Delivery" 2):
+// KindSummarize enriches the announcement with context (which request of
+// the CEO's it fulfils, what is still open) and answers with an empty
+// Spoken when the template sentence was sufficient; KindKeepPromise turns
+// a kept promise and the fresh template sentence into one spoken line.
+// Both are TriggerEvent, bounded by Config.EnrichTimeout, declared only
+// the read tools (the executor refuses prompt, send_keys, interrupt and
+// promise in any event turn), and get the supervisor's own pane read in
+// the window as a KindEventScreen message instead of reading again.
+//
+// # Promises
+//
+// "Tell me when it's done" is promised work: in a CEO turn the model
+// calls promise(agent, text, event) and the Host records it (the
+// supervisor keeps it in the state file and pushes it at the matching
+// event whatever the chattiness level). The transcript gets a
+// KindPromise message when it is made and, through Brain.PromiseEvent,
+// when it is kept, expired or cancelled; the ledger section lists the
+// open ones and recall searches them.
+//
 // # The one rail
 //
 // send_keys answers a worker's approval prompt, which is bypassing its
@@ -59,6 +82,7 @@
 //
 // Everything is observable through brain.* events on the logging.Logger:
 // brain.turn, brain.step, brain.tool_call / brain.tool_result (paired by
-// id), brain.rail_blocked, brain.compaction, brain.fallback,
+// id), brain.rail_blocked (a refused send_keys, or an action tool named
+// in an event turn), brain.compaction, brain.fallback,
 // brain.system_prompt and brain.rate_limited (decision D10).
 package brain

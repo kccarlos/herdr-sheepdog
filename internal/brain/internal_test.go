@@ -111,12 +111,16 @@ func TestCutPoint(t *testing.T) {
 }
 
 func TestParseReplyAndHelpers(t *testing.T) {
-	r, err := parseReply(`Here you go: {"spoken": "Hi.", "detail": "d", "needs_user": true, "options": ["a", "b"], "clarify": false}`)
+	r, err := parseReply(`Here you go: {"spoken": "Hi.", "detail": "d", "needs_user": true, "options": ["a", "b"], "clarify": false}`, false)
 	if err != nil || r.Spoken != "Hi." || !r.NeedsUser || len(r.Options) != 2 {
 		t.Errorf("parse = %+v %v", r, err)
 	}
-	if _, err := parseReply(`{"spoken": ""}`); err == nil {
+	if _, err := parseReply(`{"spoken": ""}`, false); err == nil {
 		t.Error("empty spoken accepted")
+	}
+	// An event turn may answer "nothing to add".
+	if r, err := parseReply(`{"spoken": "", "detail": "sufficient", "relates_to": "the rerun"}`, true); err != nil || r.Spoken != "" || r.RelatesTo != "the rerun" {
+		t.Errorf("empty spoken for an event turn = %+v %v", r, err)
 	}
 	if got := keysArg([]any{"Down", "enter"}); strings.Join(got, ",") != "down,enter" {
 		t.Errorf("keysArg = %v", got)

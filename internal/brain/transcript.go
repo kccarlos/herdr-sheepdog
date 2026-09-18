@@ -48,6 +48,14 @@ const (
 	// KindCompaction is a summary that replaced older messages in the
 	// window.
 	KindCompaction MessageKind = "compaction_summary"
+	// KindPromise is a promise's record: made by the promise tool in a
+	// CEO turn, then kept, expired or cancelled by the supervisor (one
+	// message per transition; Promise carries the status).
+	KindPromise MessageKind = "promise"
+	// KindEventScreen is the pane read the supervisor took for the event
+	// an event turn is about, put in the window so the turn need not read
+	// again; pruned to a stub like a tool result.
+	KindEventScreen MessageKind = "event_screen"
 )
 
 // Message is one transcript line.
@@ -66,9 +74,13 @@ type Message struct {
 	Agent string `json:"agent,omitempty"`
 	// Turn is the brain turn that produced the message; 0 for ingested
 	// context.
-	Turn       int         `json:"turn,omitempty"`
-	ToolCall   *ToolCall   `json:"tool_call,omitempty"`
+	Turn     int       `json:"turn,omitempty"`
+	ToolCall *ToolCall `json:"tool_call,omitempty"`
+	// ToolResult describes a function result; a KindEventScreen message
+	// carries one too (its Summary is the pruning stub).
 	ToolResult *ToolResult `json:"tool_result,omitempty"`
+	// Promise is the record a KindPromise message is about.
+	Promise *PromiseInfo `json:"promise,omitempty"`
 	// Raw is the model's own content for the first tool call of a step
 	// (function call parts with their thought signatures), replayed
 	// verbatim so the provider accepts the follow-up.

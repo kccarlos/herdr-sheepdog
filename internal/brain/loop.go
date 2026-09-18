@@ -50,8 +50,12 @@ func (b *Brain) Turn(ctx context.Context, req Request) (Reply, error) {
 		return Reply{}, fmt.Errorf("%w: %w", ErrFallback, ErrNoHost)
 	}
 	timeout := b.cfg.AskTimeout
-	if req.Kind == KindPropose {
+	switch {
+	case req.Kind == KindPropose:
 		timeout = b.cfg.ProposeTimeout
+	case req.Kind.IsEvent():
+		timeout = b.cfg.EnrichTimeout
+		req.Trigger = TriggerEvent
 	}
 	tctx, cancel := context.WithTimeout(ctx, timeout+b.cfg.FinalGrace)
 	defer cancel()
@@ -80,9 +84,20 @@ func (b *Brain) run(ctx context.Context, t *turn) (Reply, error) {
 	}
 	b.mu.Unlock()
 	b.ingest(Message{Role: RoleUser, Kind: KindRequest, Content: requestText(t.req), Agent: t.req.Agent}, t.n)
+	if t.req.Screen != "" {
+		// The supervisor's own read for this event: in the window like a
+		// read_screen result (wrapped, pruned to a stub later).
+		text := llm.TailBytes(t.req.Screen, maxResultBytes)
+		b.ingest(Message{Role: RoleUser, Kind: KindEventScreen, Content: wrapWorker(t.req.Agent, "screen", text), Agent: t.req.Agent,
+			ToolResult: &ToolResult{Name: ToolReadScreen, Summary: fmt.Sprintf("screen of %s at %s, %d lines", aliasOr(t.req.Agent), t.req.Event, strings.Count(text, "\n")+1)}}, t.n)
+	}
 
 	system := b.systemPrompt()
-	base := genai.GenerateContentConfig{Tools: b.tools}
+	tools := b.tools
+	if t.req.Kind.IsEvent() {
+		tools = b.readTools
+	}
+	base := genai.GenerateContentConfig{Tools: tools}
 	if lvl := thinkingLevel(b.cfg.ThinkingLevel); lvl != "" {
 		base.ThinkingConfig = &genai.ThinkingConfig{ThinkingLevel: lvl}
 	}
@@ -142,7 +157,7 @@ func (b *Brain) run(ctx context.Context, t *turn) (Reply, error) {
 		}
 		if len(calls) == 0 {
 			answer := strings.TrimSpace(textOf(resp))
-			reply, perr := parseReply(answer)
+			reply, perr := parseReply(answer, t.req.Kind.IsEvent())
 			if perr != nil {
 				if !corrected && answer != "" {
 					corrected = true
@@ -179,7 +194,7 @@ func (b *Brain) execCalls(ctx context.Context, t *turn, resp *genai.GenerateCont
 		b.log.Log(logSource, "brain.tool_call", "", map[string]any{"id": id, "name": fc.Name, "args": fc.Args, "turn": t.n})
 
 		t0 := b.cfg.Now()
-		out := b.execTool(ctx, t.req.Trigger, fc)
+		out := b.execTool(ctx, t.req.Trigger, t.n, fc)
 		dur := b.cfg.Now().Sub(t0).Milliseconds()
 		if out.railBlocked != "" {
 			b.log.Log(logSource, "brain.rail_blocked", "", map[string]any{"id": id, "agent": out.agent, "keys": keysArg(fc.Args["keys"]), "trigger": string(t.req.Trigger), "reason": out.railBlocked, "turn": t.n})
@@ -197,6 +212,9 @@ func (b *Brain) execCalls(ctx context.Context, t *turn, resp *genai.GenerateCont
 		}
 		b.ingest(Message{Role: RoleTool, Kind: KindToolResult, Content: out.result, Agent: out.agent, ToolResult: res}, t.n)
 		b.log.Log(logSource, "brain.tool_result", "", payload)
+		if p := out.promise; p != nil {
+			b.ingest(Message{Role: RoleUser, Kind: KindPromise, Content: promiseLine(*p), Agent: p.Agent, Promise: p}, t.n)
+		}
 	}
 }
 
@@ -289,11 +307,12 @@ func (b *Brain) sections() []PromptSection {
 	b.mu.Unlock()
 	var agents []AgentInfo
 	var notes []string
+	var promises []PromiseInfo
 	if host != nil {
-		agents, notes = host.Agents(), host.Notes()
+		agents, notes, promises = host.Agents(), host.Notes(), host.Promises()
 	}
 	secs := append(append([]PromptSection(nil), stableSections(b.cfg.Prompts)...), userSection(b.cfg.Prompts, mergeUserVars(agents, userVars)))
-	return append(secs, dynamicSections(agents, notes, b.cfg.Now())...)
+	return append(secs, dynamicSections(agents, notes, promises, b.cfg.Now())...)
 }
 
 // PromptSections returns the system prompt as it would be assembled for
@@ -325,8 +344,10 @@ func textOf(resp *genai.GenerateContentResponse) string {
 	return b.String()
 }
 
-// parseReply decodes the answer contract from the model's text.
-func parseReply(text string) (Reply, error) {
+// parseReply decodes the answer contract from the model's text. An
+// empty spoken is an error except when allowEmpty (an event turn: "the
+// template was sufficient").
+func parseReply(text string, allowEmpty bool) (Reply, error) {
 	raw, err := llm.ExtractJSON(text)
 	if err != nil {
 		return Reply{}, err
@@ -336,7 +357,7 @@ func parseReply(text string) (Reply, error) {
 		return Reply{}, fmt.Errorf("brain: decode reply: %w", err)
 	}
 	r.Spoken = strings.TrimSpace(r.Spoken)
-	if r.Spoken == "" {
+	if r.Spoken == "" && !allowEmpty {
 		return Reply{}, errors.New("brain: reply without spoken text")
 	}
 	return r, nil

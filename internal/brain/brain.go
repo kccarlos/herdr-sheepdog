@@ -20,10 +20,14 @@ const logSource = "brain"
 
 // Defaults for Config zero values.
 const (
-	DefaultModel           = "gemini-3.5-flash"
-	DefaultMaxSteps        = 6
-	DefaultAskTimeout      = 8 * time.Second
-	DefaultProposeTimeout  = 12 * time.Second
+	DefaultModel          = "gemini-3.5-flash"
+	DefaultMaxSteps       = 6
+	DefaultAskTimeout     = 8 * time.Second
+	DefaultProposeTimeout = 12 * time.Second
+	// DefaultEnrichTimeout bounds an event turn (summarize, keep_promise):
+	// on expiry nothing extra is said (the template sentence was already
+	// pushed).
+	DefaultEnrichTimeout   = 6 * time.Second
 	DefaultWindowTokens    = 24000
 	DefaultPruneAfterTurns = 3
 	// DefaultCompactTimeout bounds the summary call of a compaction,
@@ -45,8 +49,9 @@ type Config struct {
 	Model string
 	// MaxSteps bounds the model calls in one turn.
 	MaxSteps int
-	// AskTimeout / ProposeTimeout bound one turn including its tools.
-	AskTimeout, ProposeTimeout time.Duration
+	// AskTimeout / ProposeTimeout bound one turn including its tools;
+	// EnrichTimeout bounds an event turn.
+	AskTimeout, ProposeTimeout, EnrichTimeout time.Duration
 	// WindowTokens is the estimated window size that triggers compaction.
 	WindowTokens int
 	// PruneAfterTurns is how many turns a tool result stays verbatim.
@@ -91,6 +96,9 @@ func (c Config) withDefaults() Config {
 	if c.ProposeTimeout <= 0 {
 		c.ProposeTimeout = DefaultProposeTimeout
 	}
+	if c.EnrichTimeout <= 0 {
+		c.EnrichTimeout = DefaultEnrichTimeout
+	}
 	if c.WindowTokens <= 0 {
 		c.WindowTokens = DefaultWindowTokens
 	}
@@ -128,7 +136,8 @@ type Brain struct {
 	log        logging.Logger
 	transcript *Transcript
 	engine     ContextEngine
-	tools      []*genai.Tool
+	tools      []*genai.Tool // the full surface (CEO turns)
+	readTools  []*genai.Tool // the read-only surface (event turns)
 
 	lock  turnLock
 	after sync.WaitGroup  // after-turn work in flight
@@ -167,7 +176,7 @@ func New(cfg Config, model Model, log logging.Logger) (*Brain, error) {
 		log = logging.NopLogger{}
 	}
 	cfg = cfg.withDefaults()
-	b := &Brain{cfg: cfg, model: model, log: log, tools: toolDeclarations()}
+	b := &Brain{cfg: cfg, model: model, log: log, tools: toolDeclarations(false), readTools: toolDeclarations(true)}
 	b.ctx, b.stop = context.WithCancel(context.Background())
 	path := ""
 	if cfg.DataDir != "" {
@@ -372,6 +381,18 @@ func (b *Brain) WorkerEvent(alias, from, to string, closed bool) {
 		content = fmt.Sprintf("%s: pane closed", aliasOr(alias))
 	}
 	b.ingest(Message{Role: RoleUser, Kind: KindWorkerEvent, Content: content, Agent: alias}, 0)
+}
+
+// PromiseEvent ingests a promise's record outside a turn: a promise
+// kept, expired or cancelled by the supervisor, or an open promise
+// carried over from an earlier run (the brain's transcript is per run,
+// the promise is not).
+func (b *Brain) PromiseEvent(p PromiseInfo) {
+	if p.ID == "" {
+		return
+	}
+	cp := p
+	b.ingest(Message{Role: RoleUser, Kind: KindPromise, Content: promiseLine(p), Agent: p.Agent, Promise: &cp}, 0)
 }
 
 // Noted ingests a note the CEO asked to be remembered.
