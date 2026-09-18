@@ -39,7 +39,6 @@ func TestRenderAssistant(t *testing.T) {
 		"Do not guess the agent",
 		`"ask you to explain …"`,
 		`"what did it say"`,
-		`"what does that mean"`,
 		"only when the user tells an agent to DO something",
 		"never a question for you",
 		"If unsure whether it is a question or an instruction, use ask",

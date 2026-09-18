@@ -136,13 +136,20 @@ func runSVPCase(ctx context.Context, c SVPCase, fixtureDir string, model brain.M
 	dur := time.Since(t0)
 	got := map[string]any{"tools_called": strings.Join(rec.names(), ","), "spoken": reply.Spoken}
 
+	if err != nil && errors.Is(err, brain.ErrAllKeysRateLimited) {
+		// brain.fail wraps a rate limit in ErrFallback (the supervisor
+		// tolerates it and answers from the template path); RunSVPLive
+		// needs to see it unwrapped to stop rather than hot-retry the
+		// remaining cases against the same exhausted key pool.
+		return Result{ID: c.ID, Status: StatusFail, Detail: firstLine(err.Error()), Err: err, Duration: dur, Got: got}
+	}
 	if err != nil && !errors.Is(err, brain.ErrFallback) {
-		return Result{ID: c.ID, Status: StatusFail, Detail: err.Error(), Err: err, Duration: dur, Got: got}
+		return Result{ID: c.ID, Status: StatusFail, Detail: firstLine(err.Error()), Err: err, Duration: dur, Got: got}
 	}
 	if err != nil {
 		// A clean fallback (no reply) still lets the harness checks below
 		// run against whatever the recorder captured before it happened.
-		got["fallback"] = errors.Unwrap(err).Error()
+		got["fallback"] = firstLine(err.Error())
 	}
 	reasons := checkSVPExpect(c.Expect, rec, reply, offline)
 	if offline {

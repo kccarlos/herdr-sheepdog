@@ -74,6 +74,19 @@ func summarizeGot(got map[string]any) string {
 	return strings.Join(parts, " ")
 }
 
+// firstLine truncates a (possibly multi-line, e.g. a 429's quota-failure
+// body) error message to its first line and 200 runes, for the table.
+func firstLine(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		s = s[:i]
+	}
+	r := []rune(s)
+	if len(r) > 200 {
+		s = string(r[:200]) + "…"
+	}
+	return s
+}
+
 // HasFailures reports whether any result failed.
 func HasFailures(results []Result) bool {
 	for _, r := range results {

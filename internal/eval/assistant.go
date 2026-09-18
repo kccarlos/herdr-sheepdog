@@ -26,16 +26,41 @@ var defaultAliases = []string{"auth", "docs"}
 
 // RunAssistant runs cases through model (nil: offline — files are only
 // validated). pl resolves prompts/assistant.md (nil: embedded default).
+// Cases after a rate-limited call are reported as skipped rather than
+// retried (the Gemini free tier needs a cool-down, not a hot loop).
 func RunAssistant(ctx context.Context, cases []AssistantCase, pl *prompts.Loader, model AssistantModel, modelName string) []Result {
 	out := make([]Result, 0, len(cases))
-	for _, c := range cases {
+	for i, c := range cases {
 		if model == nil {
 			out = append(out, Result{ID: c.ID, Status: StatusSkipped, Detail: "offline"})
 			continue
 		}
-		out = append(out, runAssistantCase(ctx, c, pl, model, modelName))
+		r := runAssistantCase(ctx, c, pl, model, modelName)
+		out = append(out, r)
+		if r.Err != nil && isRateLimited(r.Err) {
+			for _, rest := range cases[i+1:] {
+				out = append(out, Result{ID: rest.ID, Status: StatusSkipped, Detail: "rate limited (429); stopped rather than hot-retry"})
+			}
+			break
+		}
 	}
 	return out
+}
+
+// isRateLimited reports whether err looks like a 429 / RESOURCE_EXHAUSTED
+// from the Gemini API (brain.GenaiModel already rotates keys on this and
+// only returns it once every key was tried).
+func isRateLimited(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := strings.ToLower(err.Error())
+	for _, needle := range []string{"resource_exhausted", "429", "rate limited", "quota exceeded"} {
+		if strings.Contains(s, needle) {
+			return true
+		}
+	}
+	return false
 }
 
 func runAssistantCase(ctx context.Context, c AssistantCase, pl *prompts.Loader, model AssistantModel, modelName string) Result {
@@ -53,7 +78,7 @@ func runAssistantCase(ctx context.Context, c AssistantCase, pl *prompts.Loader, 
 	resp, err := model.Generate(ctx, modelName, contents, cfg)
 	dur := time.Since(t0)
 	if err != nil {
-		return Result{ID: c.ID, Status: StatusFail, Detail: err.Error(), Err: err, Duration: dur}
+		return Result{ID: c.ID, Status: StatusFail, Detail: firstLine(err.Error()), Err: err, Duration: dur}
 	}
 	calls := resp.FunctionCalls()
 	gotTool, gotAgent, gotText := "none", "", ""
