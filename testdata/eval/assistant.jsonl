@@ -1,0 +1,47 @@
+{"id": "status-whats-going-on", "utterance": "What's going on?", "expect": {"tool": "briefing"}}
+{"id": "status-what-agents-running", "utterance": "What agents are running?", "expect": {"tool": "briefing"}}
+{"id": "status-any-atm-running", "utterance": "Hey, any ATM running now?", "expect": {"tool": "briefing"}}
+{"id": "status-latest-state-for-agent", "utterance": "What's the latest state for the agent?", "expect": {"tool": "briefing"}}
+{"id": "status-latest-state", "utterance": "What's the latest state?", "expect": {"tool": "briefing"}}
+{"id": "status-any-agents-running", "utterance": "Any agents are running?", "expect": {"tool": "briefing"}}
+{"id": "status-you-said-hes-finished", "utterance": "You said he's finished, right?", "expect": {"tool": "briefing"}}
+{"id": "status-plain", "utterance": "How are things going with the agents?", "expect": {"tool": "briefing"}}
+{"id": "ask-check-agent-what-did-they-say", "utterance": "Check the agent, what did they say?", "expect": {"tool": "ask"}}
+{"id": "ask-what-did-agent-say", "utterance": "What did the agent say?", "expect": {"tool": "ask"}}
+{"id": "ask-explain-new-section", "utterance": "Ask you to explain what's the new section. What does that mean?", "expect": {"tool": "ask", "question_contains": ["explain", "section"]}}
+{"id": "ask-clarify-new-section", "utterance": "Yes, I know, but what does it say after I ask him what's the new section? What does that mean?", "expect": {"tool": "ask", "question_contains": ["section", "mean"]}}
+{"id": "ask-why-that-one-failed", "utterance": "Why that one failed?", "expect": {"tool": "ask", "question_contains": ["fail"]}, "context": ["[system event, not spoken by the user] auth finished: 122 passed, 1 failed test TestClampUpper.", "Dog: Auth finished: 122 passed, 1 failed."]}
+{"id": "ask-clarify-why-test-failed", "utterance": "I'm talking about why that test failed.", "expect": {"tool": "ask", "question_contains": ["fail", "test"]}, "context": ["[system event, not spoken by the user] auth finished: 122 passed, 1 failed test TestClampUpper.", "Dog: Auth finished: 122 passed, 1 failed.", "Why that one failed?", "Dog: I'm not sure which one you mean, could you say more?"]}
+{"id": "ask-latest-commit", "utterance": "Ask you to check what's the latest commit on the auth repo and when was that made.", "expect": {"tool": "ask", "question_contains": ["commit"]}}
+{"id": "ask-what-changed", "utterance": "What changed in that file?", "expect": {"tool": "ask", "question_contains": ["changed"]}}
+{"id": "ask-is-it-stuck", "utterance": "Is it stuck?", "expect": {"tool": "ask", "question_contains": ["stuck"]}}
+{"id": "ask-what-is-it-asking", "utterance": "What is docs asking?", "expect": {"tool": "ask", "agent": "docs", "question_contains": ["asking", "docs"]}}
+{"id": "ask-did-you-get-result", "utterance": "Did you get any result?", "expect": {"tool": "ask"}}
+{"id": "ask-whats-the-finding", "utterance": "What's the finding?", "expect": {"tool": "ask"}}
+{"id": "ask-test-isolation-issue", "utterance": "What's that test isolation issue?", "expect": {"tool": "ask", "question_contains": ["isolation"]}}
+{"id": "ask-reconnect-recall", "utterance": "What did I just ask you?", "expect": {"tool": "ask"}}
+{"id": "ask-deep-why-tests-failed", "utterance": "Why did auth's tests fail?", "expect": {"tool": "ask", "agent": "auth", "question_contains": ["auth", "fail"]}}
+{"id": "ask-named-agent-explain", "utterance": "Ask docs to explain what it just did.", "expect": {"tool": "ask", "agent": "docs"}}
+{"id": "propose-run-tests-tell-me", "utterance": "Okay, ask it to run tests. And tell me when it's done.", "expect": {"tool": "propose"}}
+{"id": "propose-ask-auth-run-tests", "utterance": "Ask auth to run some tests in that repo.", "expect": {"tool": "propose", "agent": "auth"}}
+{"id": "propose-tell-auth-skip-flaky", "utterance": "Tell the auth one to skip the flaky test and rerun.", "expect": {"tool": "propose", "agent": "auth"}}
+{"id": "propose-ambiguous-tell-it-continue", "utterance": "Tell it to continue.", "expect": {"tool": "propose", "agent": ""}, "context": ["Dog: Both auth and docs are idle right now."]}
+{"id": "propose-ask-it-to-fix-it", "utterance": "Ask it to fix it.", "expect": {"tool": "propose", "agent": ""}}
+{"id": "propose-start-new-codex-session", "utterance": "Can you start a new Codex session in the auth repo?", "expect": {"tool": "propose"}}
+{"id": "propose-terminate-session", "utterance": "Okay, can you ask it to terminate that session?", "expect": {"tool": "propose"}}
+{"id": "propose-ask-docs-add-section", "utterance": "Ask docs to add a section explaining the setup.", "expect": {"tool": "propose", "agent": "docs"}}
+{"id": "propose-answer-no", "utterance": "Tell it no, don't create that file.", "expect": {"tool": "propose"}}
+{"id": "propose-sorry-i-meant-continue", "utterance": "Sorry, I meant continue that.", "expect": {"tool": "propose", "agent": ""}, "context": ["Ask it to fix it.", "Dog: Which agent do you mean, auth or docs?", "So let's cancel it again.", "Dog: Cancelled."]}
+{"id": "confirm-yes-go-ahead", "utterance": "Yes, go ahead.", "expect": {"tool": "confirm"}, "context": ["[system event, not spoken by the user] auth is asking whether it can create hello.txt.", "Dog: Auth is asking whether it can create hello.txt. Should I say yes?"]}
+{"id": "confirm-plain-yes", "utterance": "Yes.", "expect": {"tool": "confirm"}, "context": ["[system event, not spoken by the user] docs is asking whether it can push to main.", "Dog: Docs is asking whether it can push to main."]}
+{"id": "confirm-no-to-question", "utterance": "No.", "expect": {"tool": "confirm"}, "context": ["[system event, not spoken by the user] auth is asking whether it can delete the file.", "Dog: Auth is asking whether it can delete the file."]}
+{"id": "cancel-stop", "utterance": "Stop.", "expect": {"tool": "cancel"}}
+{"id": "cancel-again", "utterance": "So let's cancel it again.", "expect": {"tool": "cancel"}}
+{"id": "cancel-wait", "utterance": "Wait, hold on.", "expect": {"tool": "cancel"}}
+{"id": "note-remember-migrations", "utterance": "Remember not to touch migrations today.", "expect": {"tool": "note"}}
+{"id": "note-remember-deploy-friday", "utterance": "Remember, don't deploy on a Friday.", "expect": {"tool": "note"}}
+{"id": "none-let-me-know-bare", "utterance": "Let me know when it's done.", "expect": {"tool": "none"}}
+{"id": "none-let-me-know-if-he-responds", "utterance": "Okay, please let me know if he responds.", "expect": {"tool": "none"}}
+{"id": "none-how-say-repo-name", "utterance": "How do you say the name of this repo?", "expect": {"tool": "none"}}
+{"id": "none-okay-use-that", "utterance": "Okay, let's use that then.", "expect": {"tool": "none"}}
+{"id": "none-hello-can-you-respond", "utterance": "Hello, can you respond?", "expect": {"tool": "none"}}

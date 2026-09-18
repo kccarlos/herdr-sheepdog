@@ -8,7 +8,7 @@ DATE       := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 
 LDFLAGS    := -X 'main.version=$(VERSION)' -X 'main.commit=$(COMMIT)' -X 'main.date=$(DATE)'
 
-.PHONY: build test test-web lint vet cross clean install plugin-install run-dev changelog
+.PHONY: build test test-web lint vet cross clean install plugin-install run-dev changelog eval eval-live
 
 build:
 	go build -ldflags "$(LDFLAGS)" -o bin/$(BINARY) $(CMD)
@@ -47,6 +47,21 @@ test-web:
 
 lint:
 	golangci-lint run
+
+# Conversation eval set (testdata/eval/*.jsonl): offline by default — the
+# assistant set is only validated, the SVP set runs through the brain
+# with a scripted fake model (internal/eval). See docs/roles.md.
+eval: build
+	./bin/$(BINARY) eval --set assistant
+	./bin/$(BINARY) eval --set svp
+
+# Same, but calls the real model (gemini-3.5-flash, plain text, never
+# Live audio): needs a Gemini key (GEMINI_API_KEY or --env-file) and
+# burns real quota (the free tier's, if that's what's configured) — run
+# it sparingly, it never hot-retries on a 429.
+eval-live: build
+	./bin/$(BINARY) eval --set assistant --live --env-file .env
+	./bin/$(BINARY) eval --set svp --live --env-file .env
 
 vet:
 	go vet ./...
