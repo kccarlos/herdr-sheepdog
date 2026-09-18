@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import {
-  buildTranscriptView, meterSegments, TurnLog, windowInfo, offState, parseRequest, parseReply, parsePush, parseWorkerEvent, parseTranscriptJSONL, fmtTokens,
+  buildTranscriptView, meterSegments, TurnLog, windowInfo, offState, parseRequest, parseReply, parsePush, parseWorkerEvent, parsePromise, parseTranscriptJSONL, fmtTokens,
 } from './supervisor.js';
 
 let t0 = Date.parse('2026-09-18T05:39:00.000Z');
@@ -220,4 +220,63 @@ test('the sample run fixture renders every kind, a pruned stub, a rail block and
   assert.ok(tools.some((it) => it.name === 'send_keys' && /not permitted/.test(it.result.error)), 'a rail-blocked send_keys');
   const comp = items.find((it) => it.kind === 'compaction');
   assert.match(comp.summary, /\S/);
+});
+
+test('promise cards: made in a turn, kept later; the promise.* events give the current status', () => {
+  seq = 0;
+  const promise = { id: 'pr-1', text: "let me know when it's done", agent: 'auth', event: 'done', status: 'open', created_turn: 1, created_at: '2026-09-18T05:40:00Z' };
+  const msgs = [
+    msg('ceo_utterance', { content: "run the tests and let me know when it's done" }),
+    msg('request', { turn: 1, content: 'Request from the assistant (propose): instruction="run the tests and let me know when it\'s done" agent=(none: the CEO did not say a name)' }),
+    msg('brain_tool_call', { turn: 1, tool_call: { id: 'bt-1-1', name: 'prompt', args: { agent: 'auth', text: 'run the tests' } } }),
+    msg('brain_tool_result', { turn: 1, content: 'Telling auth to run the tests. Sent.', tool_result: { id: 'bt-1-1', name: 'prompt', dur_ms: 3 }, agent: 'auth' }),
+    msg('brain_tool_call', { turn: 1, tool_call: { id: 'bt-1-2', name: 'promise', args: { agent: 'auth', text: "let me know when it's done", event: 'done' } } }),
+    msg('brain_tool_result', { turn: 1, content: 'I will tell you when auth finishes.', tool_result: { id: 'bt-1-2', name: 'promise', dur_ms: 1 }, agent: 'auth' }),
+    msg('promise', { turn: 1, content: 'Promise (open): "let me know when it\'s done", when auth finishes', agent: 'auth', promise }),
+    msg('reply', { turn: 1, content: reply('Telling auth to run the tests. Sent; I will tell you when auth finishes.') }),
+    msg('worker_event', { content: 'auth: working -> done', agent: 'auth' }),
+    msg('push', { content: '(idle) auth finished: ran the tests.', agent: 'auth' }),
+    msg('request', { turn: 2, content: 'Event from the supervisor (summarize): agent="auth" event="done" template="auth finished: ran the tests."\nThe assistant already said…' }),
+    msg('event_screen', { turn: 2, tokens: 200, content: '<<<BEGIN_WORKER_OUTPUT agent=auth source=screen>>>\nok\n<<<END_WORKER_OUTPUT>>>', tool_result: { name: 'read_screen', summary: 'screen of auth at done, 2 lines' }, agent: 'auth' }),
+    msg('reply', { turn: 2, content: '{"spoken": "", "detail": "Nothing to add."}' }),
+    msg('request', { turn: 3, content: 'Event from the supervisor (keep_promise): agent="auth" event="done" template="auth finished: ran the tests." promise="let me know when it\'s done" condition="when auth finishes"\nThe CEO asked…' }),
+    msg('reply', { turn: 3, content: reply('You asked me to tell you when auth was done: it ran the tests.') }),
+    msg('promise', { content: 'Promise (kept): "let me know when it\'s done", when auth finishes', agent: 'auth', promise: { ...promise, status: 'kept' } }),
+    msg('push', { content: '(idle) You asked me to tell you when auth was done: it ran the tests.', agent: 'auth' }),
+  ];
+  const log = new TurnLog();
+  log.add(ev('brain.turn', { turn: 1, trigger: 'ceo', kind: 'propose', steps: 2, model_calls: 2, dur_ms: 40, acted: 2 }));
+  log.add(ev('promise.created', { id: 'pr-1', text: "let me know when it's done", agent: 'auth', event: 'done', turn: 1 }));
+  log.add(ev('brain.turn', { turn: 2, trigger: 'event', kind: 'summarize', steps: 1, model_calls: 1, dur_ms: 30 }));
+  log.add(ev('brain.turn', { turn: 3, trigger: 'event', kind: 'keep_promise', steps: 1, model_calls: 1, dur_ms: 25 }));
+  assert.ok(log.add(ev('promise.kept', { id: 'pr-1', spoken: 'You asked me to tell you when auth was done: it ran the tests.', via: 'brain', urgency: 'idle', chattiness: 'quiet' })));
+  assert.deepEqual(log.promise('pr-1').status, 'kept');
+  assert.equal(log.add(ev('promise.created', { id: 'pr-1' })), true, 'a late created event is ours');
+  assert.equal(log.promise('pr-1').status, 'kept', 'created never overrides a resolution');
+  assert.equal(log.promise('nope'), null);
+
+  const items = buildTranscriptView(msgs, null, log);
+  assert.deepEqual(kinds(items), ['ceo', 'turn', 'request', 'tool', 'tool', 'promise', 'reply', 'worker', 'push', 'turn', 'request', 'screen', 'reply', 'turn', 'request', 'reply', 'promise', 'push']);
+  const [made, kept] = items.filter((it) => it.kind === 'promise');
+  assert.deepEqual({ id: made.id, text: made.text, agent: made.agent, event: made.event, status: made.status, now: made.now, condition: made.condition, createdTurn: made.createdTurn }, { id: 'pr-1', text: "let me know when it's done", agent: 'auth', event: 'done', status: 'open', now: 'kept', condition: 'when auth finishes', createdTurn: 1 });
+  assert.equal(made.latest.via, 'brain');
+  assert.deepEqual({ status: kept.status, now: kept.now, turn: kept.turn }, { status: 'kept', now: 'kept', turn: 0 });
+  const [t1, t2, t3] = items.filter((it) => it.kind === 'turn');
+  assert.deepEqual([t1.reqKind, t2.reqKind, t3.reqKind], ['propose', 'summarize', 'keep_promise']);
+  assert.deepEqual([t1.trigger, t2.trigger, t3.trigger], ['ceo', 'event', 'event']);
+  assert.equal(t1.acted, 2);
+  const [, sum, keep] = items.filter((it) => it.kind === 'request');
+  assert.deepEqual({ reqKind: sum.reqKind, agent: sum.agent, event: sum.event, question: sum.question, trigger: sum.trigger, nudge: sum.nudge }, { reqKind: 'summarize', agent: 'auth', event: 'done', question: 'auth finished: ran the tests.', trigger: 'event', nudge: false });
+  assert.equal(keep.promise, "let me know when it's done");
+  const screen = items.find((it) => it.kind === 'screen');
+  assert.deepEqual({ summary: screen.summary, pruned: screen.pruned, turn: screen.turn }, { summary: 'screen of auth at done, 2 lines', pruned: false, turn: 2 });
+  // The event screen is pruned like a tool result in the window.
+  const ctx = { window: msgs.map((m) => ({ seq: m.seq, kind: m.kind, turn: m.turn, tokens: m.tokens, pruned: m.kind === 'event_screen', stub: m.kind === 'event_screen' ? '[screen of auth at done, 2 lines, pruned]' : '' })), estimated_tokens: 100, window_tokens: 1000 };
+  const withCtx = buildTranscriptView(msgs, ctx, log).find((it) => it.kind === 'screen');
+  assert.deepEqual({ pruned: withCtx.pruned, stub: withCtx.stub }, { pruned: true, stub: '[screen of auth at done, 2 lines, pruned]' });
+  const meter = meterSegments(ctx);
+  assert.ok(meter.transcript.some((s) => s.kind === 'promise' && s.count === 2), 'promises are a meter group');
+  assert.ok(meter.transcript.some((s) => s.group === 'pruned' && s.count === 1), 'the pruned screen is a stub');
+  // A promise message without the record parses from its content line.
+  assert.deepEqual(parsePromise({ content: 'Promise (expired): "tell me if docs asks", when docs asks something', agent: 'docs' }), { id: '', text: 'tell me if docs asks', agent: 'docs', event: '', status: 'expired', condition: 'when docs asks something', createdTurn: 0, due: null });
 });
