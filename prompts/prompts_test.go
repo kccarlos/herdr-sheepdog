@@ -48,7 +48,7 @@ func TestRenderAssistant(t *testing.T) {
 		"offer the next step",
 		"read them as a choice",
 		"invent nothing",
-		"CEO's register",
+		"shepherd's register",
 	} {
 		if !strings.Contains(s, rule) {
 			t.Errorf("prompt lost the rule %q", rule)

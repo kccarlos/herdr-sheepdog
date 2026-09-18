@@ -69,7 +69,10 @@ agreed with the CEO: one decision-maker (the assistant keeps only
 `to_supervisor(text)` and `stop()`; the SVP owns intent behind the
 rail), stop as a per-phase code procedure, nothing interrupting the
 assistant mid-sentence, `blocked → blocked` detection. Work order is at
-the end of that file; the first PR is the D1-revised change.
+the end of that file; the first PR is the D1-revised change. Names from
+here on: shepherd (operator), the dog (voice + brain), the flock
+(workers); `docs/roles.md` is the contract and maps the old CEO / SVP /
+assistant terms still present in code.
 
 ## Known gaps and follow-ups
 

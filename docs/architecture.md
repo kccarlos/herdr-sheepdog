@@ -1,7 +1,13 @@
 # Architecture
 
-See [`sheepdog-v1-plan.md`](../sheepdog-v1-plan.md) for the full design;
-this is a short orientation for the code as built.
+This is a short orientation for the code **as built at `main`**. The
+design it implements is partly superseded: the agreed target (one
+decision-maker, no template LLM, investigations, the names shepherd /
+dog / flock) is in [`docs/roles.md`](roles.md) and the decisions and
+order of work in [`docs/issues-2026-09-18.md`](issues-2026-09-18.md).
+Where this page and `roles.md` differ, `roles.md` is the intent and this
+page is what runs today. [`sheepdog-v1-plan.md`](../sheepdog-v1-plan.md)
+is the original plan, kept for history.
 
 ## Diagram (plan §2)
 
