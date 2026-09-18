@@ -56,7 +56,9 @@ func (s *Session) execTool(ctx context.Context, gen int, call voice.ToolCall, tu
 			return voice.ToolResult{}, errors.New("no tool handler configured")
 		}
 	}
+	started := s.now()
 	res, err := handler(ctx, call)
+	handlerMS := s.now().Sub(started).Milliseconds()
 	if ctx.Err() != nil {
 		s.log.Log(logSource, "voice.tool_result", "", map[string]any{"id": call.ID, "name": call.Name, "cancelled": true})
 		s.emit(voice.EventToolResult{Call: call, Err: ctx.Err(), Cancelled: true})
@@ -87,9 +89,12 @@ func (s *Session) execTool(ctx context.Context, gen int, call voice.ToolCall, tu
 		s.openTurnLocked()
 		s.mu.Unlock()
 	}
+	// dur_ms is the handler's own time; wait_ms the pause for the model to
+	// close its turn (the /debug swimlane shows both as the hop latency).
 	payload := map[string]any{
 		"id": call.ID, "name": call.Name, "spoken": res.Spoken, "clarify": res.Clarify,
-		"scheduling": res.Scheduling.String(),
+		"scheduling": res.Scheduling.String(), "dur_ms": handlerMS,
+		"wait_ms": s.now().Sub(started).Milliseconds() - handlerMS,
 	}
 	if err != nil {
 		payload["error"] = err.Error()
