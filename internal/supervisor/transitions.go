@@ -79,9 +79,14 @@ func (s *Supervisor) HandleTransition(ctx context.Context, t herdr.Transition) {
 		s.dropPendingFor(t.PaneID, "finished", state.PendingSendInstruction)
 		s.mu.Unlock()
 		s.finishTask(t.PaneID)
-		if from == herdr.StateWorking && t.To == herdr.StateDone {
+		// working -> done and working -> idle are both a finish: herdr
+		// reports done when the user was not looking at the pane and
+		// idle when it was focused when the agent finished
+		// (herdr/src/pane/state.rs's "seen" bit), so either edge off
+		// working means the agent just finished a turn.
+		if from == herdr.StateWorking {
 			if s.recentlyInterrupted(t.PaneID) {
-				// The user's cancel sent Ctrl-C: this "done" is the
+				// The user's cancel sent Ctrl-C: this is the
 				// interrupted turn settling, not work finishing; a
 				// promise to tell when it is done stays open.
 				s.log.Log(logSource, "supervisor.finished_suppressed", t.PaneID, map[string]any{"reason": "interrupted"})
@@ -90,8 +95,9 @@ func (s *Supervisor) HandleTransition(ctx context.Context, t herdr.Transition) {
 			}
 			return
 		}
-		// done -> idle ("idle again") is never announced, but a promise
-		// for idle (or any change) is kept.
+		// done -> idle ("idle again") and blocked -> idle are never
+		// announced as a finish, but a promise for idle (or any change)
+		// is still kept.
 		if t.To == herdr.StateIdle {
 			s.keepPromises(ctx, row, string(t.To), alias+" is idle now.")
 		}
@@ -141,10 +147,14 @@ func (s *Supervisor) finishTask(paneID string) {
 func (s *Supervisor) onDone(ctx context.Context, row state.Agent) {
 	alias := aliasOr(row.Alias)
 	kind := s.doneKind(row)
+	// herdr reports the finish as idle rather than done when the user
+	// had the pane focused (herdr/src/pane/state.rs's "seen" bit): an
+	// "idle" promise is kept by this finish too, alongside "done".
+	alsoIdle := row.State == herdr.StateIdle
 	read, err := s.herdr.Read(ctx, row.PaneID, herdr.SourceRecentUnwrapped, s.cfg.ReadLines)
 	if err != nil {
 		s.log.Log(logSource, "supervisor.done_error", row.PaneID, map[string]any{"stage": "read", "error": err.Error()})
-		s.announce(ctx, announcement{row: row, kind: kind, event: brain.PromiseEventDone, sentence: alias + " finished."})
+		s.announce(ctx, announcement{row: row, kind: kind, event: brain.PromiseEventDone, alsoIdle: alsoIdle, sentence: alias + " finished."})
 		return
 	}
 	sctx, cancel := context.WithTimeout(ctx, s.cfg.SummaryTimeout)
@@ -152,7 +162,7 @@ func (s *Supervisor) onDone(ctx context.Context, row state.Agent) {
 	cancel()
 	if err != nil {
 		s.log.Log(logSource, "supervisor.done_error", row.PaneID, map[string]any{"stage": "summarize", "error": err.Error()})
-		s.announce(ctx, announcement{row: row, kind: kind, event: brain.PromiseEventDone, sentence: alias + " finished.", screen: read.Text})
+		s.announce(ctx, announcement{row: row, kind: kind, event: brain.PromiseEventDone, alsoIdle: alsoIdle, sentence: alias + " finished.", screen: read.Text})
 		return
 	}
 	s.recordResult(row.PaneID, sum)
@@ -162,7 +172,7 @@ func (s *Supervisor) onDone(ctx context.Context, row state.Agent) {
 		s.announceBlock(ctx, row, read.Text)
 		return
 	}
-	s.announce(ctx, announcement{row: row, kind: kind, event: brain.PromiseEventDone, sentence: alias + " finished: " + sum.Spoken + ".", screen: read.Text})
+	s.announce(ctx, announcement{row: row, kind: kind, event: brain.PromiseEventDone, alsoIdle: alsoIdle, sentence: alias + " finished: " + sum.Spoken + ".", screen: read.Text})
 }
 
 // recordResult stores the finish summary on the row's last_result.
