@@ -46,6 +46,11 @@ func testConfig(t *testing.T, llmURL string) config.Config {
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(sockDir) })
 	cfg.Herdr.Socket = filepath.Join(sockDir, "h.sock")
+	// App tests must never spawn a real codex/claude (cost, non-determinism
+	// across machines); point [cli] at binaries that do not exist so
+	// Detect always reports both absent.
+	cfg.CLI.CodexBin = filepath.Join(dir, "no-such-codex")
+	cfg.CLI.ClaudeBin = filepath.Join(dir, "no-such-claude")
 	return cfg
 }
 
@@ -56,6 +61,9 @@ func TestBuildValidation(t *testing.T) {
 	}
 	if _, err := Build(cfg, Options{Voice: VoiceOff, Herdr: "real"}); err == nil || !strings.Contains(err.Error(), "--herdr") {
 		t.Errorf("bad herdr: %v", err)
+	}
+	if _, err := Build(cfg, Options{Voice: VoiceOff, Herdr: HerdrMock, CLI: "sideways"}); err == nil || !strings.Contains(err.Error(), "--cli") {
+		t.Errorf("bad cli: %v", err)
 	}
 	if _, err := Build(cfg, Options{Voice: VoiceGemini, Herdr: HerdrMock}); err == nil || !strings.Contains(err.Error(), "GEMINI_API_KEY") {
 		t.Errorf("gemini without keys: %v", err)
@@ -244,6 +252,82 @@ func TestRunSocketModeRetriesWatcherAndAcceptsHookEvents(t *testing.T) {
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("Run did not return")
+	}
+}
+
+// TestRunCLIDetection proves cli.detected is logged after daemon.start
+// (WP4), that neither backend being found does not break ask(), and that
+// --cli=off skips detection entirely.
+func TestRunCLIDetection(t *testing.T) {
+	llm := fakeLLM(t)
+
+	runOnce := func(t *testing.T, cliMode string) []string {
+		t.Helper()
+		cfg := testConfig(t, llm.URL)
+		a, err := Build(cfg, Options{Voice: VoiceOff, Herdr: HerdrMock, CLI: cliMode, Drain: time.Second})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := a.Listen(); err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan error, 1)
+		go func() { done <- a.Run(ctx) }()
+		waitFor(t, 2*time.Second, func() bool {
+			_, err := os.Stat(a.elog.Path(time.Now()))
+			return err == nil
+		}, "event log file")
+		cancel()
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatal("Run did not return")
+		}
+		f, err := os.Open(a.elog.Path(time.Now()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = f.Close() }()
+		evs, err := eventlog.Replay(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		types := make([]string, 0, len(evs))
+		for _, ev := range evs {
+			types = append(types, ev.Type)
+		}
+		return types
+	}
+
+	on := runOnce(t, CLIOn)
+	if on[0] != "daemon.start" {
+		t.Fatalf("first event = %s, want daemon.start", on[0])
+	}
+	idxStart, idxDetected := -1, -1
+	for i, ty := range on {
+		switch ty {
+		case "daemon.start":
+			idxStart = i
+		case "cli.detected":
+			idxDetected = i
+		}
+	}
+	if idxDetected == -1 {
+		t.Fatal("cli.detected not logged with --cli=on (default)")
+	}
+	if idxDetected < idxStart {
+		t.Errorf("cli.detected (%d) logged before daemon.start (%d)", idxDetected, idxStart)
+	}
+
+	off := runOnce(t, CLIOff)
+	for _, ty := range off {
+		if ty == "cli.detected" {
+			t.Error("cli.detected should not be logged with --cli=off")
+		}
 	}
 }
 

@@ -24,15 +24,17 @@ func printServeUsage(w io.Writer) {
 	fprintln(w, "  --port N          web port (default from config: web.port / SHEEPDOG_WEB_PORT, 7777)")
 	fprintln(w, "  --voice MODE      gemini | off (default gemini; off logs pushes as skipped)")
 	fprintln(w, "  --herdr MODE      socket | mock (default socket; mock needs no running herdr)")
+	fprintln(w, "  --cli MODE        on | off (default on; off disables the CLI query tool, ask()")
+	fprintln(w, "                    then answers from the screen alone)")
 	fprintln(w, "  --data-dir PATH   data directory for the event log and state (default from config)")
 	fprintln(w, "  --verbose         also print every event to stderr as JSON lines")
 }
 
 // serveOpts are the parsed flags.
 type serveOpts struct {
-	configPath, voice, herdr, dataDir string
-	port                              int
-	verbose                           bool
+	configPath, voice, herdr, cli, dataDir string
+	port                                   int
+	verbose                                bool
 }
 
 func parseServeFlags(args []string, stderr io.Writer) (serveOpts, int, bool) {
@@ -44,6 +46,7 @@ func parseServeFlags(args []string, stderr io.Writer) (serveOpts, int, bool) {
 	fs.IntVar(&o.port, "port", 0, "web port")
 	fs.StringVar(&o.voice, "voice", app.VoiceGemini, "voice mode")
 	fs.StringVar(&o.herdr, "herdr", app.HerdrSocket, "herdr mode")
+	fs.StringVar(&o.cli, "cli", app.CLIOn, "cli query tool mode")
 	fs.StringVar(&o.dataDir, "data-dir", "", "data directory")
 	fs.BoolVar(&o.verbose, "verbose", false, "echo events to stderr")
 	if err := fs.Parse(args); err != nil {
@@ -73,7 +76,7 @@ func runServe(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 		}
 		cfg.DataDir = o.dataDir
 	}
-	opts := app.Options{Voice: o.voice, Herdr: o.herdr, Port: o.port, Version: version, Stderr: stderr}
+	opts := app.Options{Voice: o.voice, Herdr: o.herdr, CLI: o.cli, Port: o.port, Version: version, Stderr: stderr}
 	if o.verbose {
 		opts.Echo = logging.NewJSONLLogger(stderr)
 	}
@@ -87,7 +90,7 @@ func runServe(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 		return 1
 	}
 	fprintf(stderr, "sheepdog serve %s: %s\n", version, cfg)
-	fprintf(stdout, "sheepdog %s listening on %s (voice=%s herdr=%s)\n", version, a.URL(), o.voice, o.herdr)
+	fprintf(stdout, "sheepdog %s listening on %s (voice=%s herdr=%s cli=%s)\n", version, a.URL(), o.voice, o.herdr, o.cli)
 	fprintf(stdout, "  voice page  %s/voice\n", a.URL())
 	fprintf(stdout, "  debug page  %s/debug\n", a.URL())
 	fprintf(stdout, "  events      %s/events\n", a.URL())
