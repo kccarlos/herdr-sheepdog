@@ -115,9 +115,11 @@ function renderEvent(ev) {
 
 function onEvent(ev, encoded) {
   events.count++;
-  conversation.add(ev, encoded);
+  // The backfill and the SSE replay overlap; the grouper's dedupe says
+  // whether this line is new, so the brain views count it once.
+  const fresh = conversation.add(ev, encoded);
   swimlane.add(ev, encoded);
-  onBrainEvent(ev);
+  if (fresh) onBrainEvent(ev);
   scheduleConvRender();
   if (events.paused) {
     events.buffer.push(ev);
@@ -417,17 +419,19 @@ function renderSwimlane(force) {
   if (built) $('sw-count').textContent = `${built.shown} of ${built.total} rows · ${swimlane.events.length} events`;
 }
 
-// backfillConversation feeds the log tail into the grouper before the SSE
-// replay (which only carries the last few hundred events); duplicates are
-// dropped by their encoded line.
+// backfillConversation feeds the log tail into the grouper, the swimlane
+// and the Supervisor tab's turn log before the SSE replay (which only
+// carries the last few hundred events); duplicates are dropped by their
+// encoded line.
 async function backfillConversation() {
   try {
     const r = await fetch(`/api/events?n=${BACKFILL}`, { cache: 'no-store' });
     const list = await r.json();
     for (const ev of list) {
       const enc = JSON.stringify(ev);
-      conversation.add(ev, enc);
+      const fresh = conversation.add(ev, enc);
       swimlane.add(ev, enc);
+      if (fresh) onBrainEvent(ev);
     }
   } catch (err) {
     console.error('backfill', err);
@@ -528,7 +532,13 @@ function onBrainEvent(ev) {
   supervisor.addEvent(ev);
   if (type === 'brain.transcript') { scheduleTranscriptFetch(150); scheduleContextFetch(600); }
   else if (type === 'brain.turn' || type === 'brain.compaction') scheduleContextFetch(type === 'brain.turn' ? 700 : 200);
-  else if (type === 'daemon.start') { scheduleTranscriptFetch(300); scheduleContextFetch(500); }
+  else if (type === 'daemon.start') {
+    // A new run restarts the seqs at 1: drop the old run and fetch
+    // afresh (debounced: the backfill replays every start of the day).
+    supervisor.reload();
+    if (brainState.transcriptTimer) clearTimeout(brainState.transcriptTimer);
+    brainState.transcriptTimer = setTimeout(() => { brainState.transcriptTimer = 0; fetchBrainTranscript(true).then(fetchBrainContext); }, 300);
+  }
 }
 
 let svpTimer = 0;

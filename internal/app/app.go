@@ -218,9 +218,9 @@ func (a *App) wire() error {
 	switch {
 	case opts.Brain == BrainOff:
 		a.brainOff = "--brain=off"
-	case !cfg.Brain.Enabled:
-		a.brainOff = "brain.enabled=false"
 	case opts.Brain == BrainFake:
+		// An explicit dev flag, like --herdr=mock: brain.enabled is not
+		// consulted.
 		bcfg := BrainConfig(cfg)
 		bcfg.Prompts = a.prompts
 		bcfg.Model = FakeBrainModel // so no brain.step ever claims a Gemini model
@@ -229,6 +229,8 @@ func (a *App) wire() error {
 			return fmt.Errorf("app: brain: %w", err)
 		}
 		a.brain = b
+	case !cfg.Brain.Enabled:
+		a.brainOff = "brain.enabled=false"
 	case len(cfg.Gemini.APIKeys) == 0:
 		a.brainOff = "no Gemini key"
 	default:
