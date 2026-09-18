@@ -117,14 +117,20 @@ run (herdr's classification is already stable), so lowering
    The tool description says `agent` is "alias if the user named one"; a
    stronger instruction in `voice_system.txt` ("never fill `agent` unless
    the user said a name") may help; not attempted because prompt tuning
-   needs more sessions than the quota allowed.
+   needs more sessions than the quota allowed. *Follow-up (supervisor
+   proactivity branch): the prompt and tool descriptions now separate
+   "things you want to know" (`ask`) from "things an agent should do"
+   (`propose`), and `ask` without an alias goes to the agent discussed
+   last; the "tell it to continue" phrasing itself was not re-run.*
 4. **GoAway never observed**; the server closed with 1011 at 13.1 min
    instead. Scenario 10 (resume + compression) needs another ≥ 10-minute
    session on the fixed binary. Compression at 16 000 trigger tokens is
    unreachable in a 12-minute text-driven session (peak 4 277).
 5. **`spoken_answer` dropped the test name** in scenario 7 ("names the
    failing test" was not met); the raw codex output had it. A template hint
-   ("keep the failing test's name") would fix it.
+   ("keep the failing test's name") would fix it. *Follow-up: the template
+   now says naming a test, function, package or file is fine and asks for
+   the gist of the agent's final message; not re-run live on scenario 7.*
 6. **Filenames in spoken text**: `summarize_block` said "README.md" and
    "claude-notes2 txt"; D9 says no paths. Minor prompt tweak.
 7. **agy's "finished" bounce**: herdr reports agy `working → done → working`
