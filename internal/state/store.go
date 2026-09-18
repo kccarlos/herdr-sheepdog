@@ -22,17 +22,40 @@ type Options struct {
 	// Warn receives one line per recoverable problem (corrupt file, alias
 	// collision); nil discards.
 	Warn io.Writer
+	// FullFsync turns on the hardware-durable fsync pass (state.full_fsync
+	// in config), debounced to at most one per fsyncDebounce window (plus
+	// a final one on Close). Off by default: the plain per-write fsync
+	// (see sync_unix.go) is already crash-consistent and orders of
+	// magnitude cheaper on macOS, where the durable path is F_FULLFSYNC.
+	FullFsync bool
 }
 
+// fsyncDebounce is how long a burst of Apply/Update calls coalesces into
+// a single hardware-durable fsync pass when Options.FullFsync is set. A
+// var (not a const) only so tests can shorten/lengthen it; production
+// code never changes it.
+var fsyncDebounce = 100 * time.Millisecond
+
 // Store is the state table with atomic JSON persistence: every mutation
-// writes a temp file next to path, fsyncs it and renames it over path.
-// Store is safe for concurrent use.
+// writes a temp file next to path, syncs it and renames it over path —
+// synchronously, so the file on disk is always current. Store is safe
+// for concurrent use.
 type Store struct {
 	mu    sync.Mutex
 	path  string
 	table Table
 	opts  Options
 	now   func() time.Time
+
+	fsMu    sync.Mutex
+	fsTimer *time.Timer
+	fsDirty bool
+	fsDone  bool
+
+	// onFullSync, when set, is called every time fullSync runs (tests
+	// only, to count/observe debounce coalescing without racing on I/O
+	// timing).
+	onFullSync func()
 }
 
 // Open loads the table from path (an absent file starts empty; a corrupt
@@ -315,7 +338,11 @@ func (s *Store) Snapshot() Table {
 }
 
 // persist writes the table atomically: temp file in the same directory,
-// fsync, rename. Caller holds s.mu.
+// (plain, cheap) fsync, rename — always synchronous, so the file on disk
+// reflects this call by the time it returns. Caller holds s.mu. When
+// Options.FullFsync is set, it also schedules the debounced
+// hardware-durable pass (scheduleFullSync); that part, and only that
+// part, is coalesced across a burst of calls.
 func (s *Store) persist() error {
 	if s.path == "" {
 		return nil
@@ -339,7 +366,7 @@ func (s *Store) persist() error {
 		cleanup()
 		return fmt.Errorf("state: write: %w", err)
 	}
-	if err := tmp.Sync(); err != nil {
+	if err := syncFile(tmp); err != nil {
 		_ = tmp.Close()
 		cleanup()
 		return fmt.Errorf("state: fsync: %w", err)
@@ -355,6 +382,85 @@ func (s *Store) persist() error {
 	if err := os.Rename(tmpName, s.path); err != nil {
 		cleanup()
 		return fmt.Errorf("state: rename: %w", err)
+	}
+	if s.opts.FullFsync {
+		s.scheduleFullSync()
+	}
+	return nil
+}
+
+// scheduleFullSync coalesces the hardware-durable fsync pass into at
+// most one per fsyncDebounce window: a burst of persist() calls pays for
+// it once, not once per call. It never blocks persist(); the actual sync
+// runs later on its own goroutine (fireFullSync), or synchronously from
+// Close.
+func (s *Store) scheduleFullSync() {
+	s.fsMu.Lock()
+	defer s.fsMu.Unlock()
+	if s.fsDone {
+		return
+	}
+	s.fsDirty = true
+	if s.fsTimer == nil {
+		s.fsTimer = time.AfterFunc(fsyncDebounce, s.fireFullSync)
+	}
+}
+
+// fireFullSync is the debounce timer's callback: it performs the durable
+// sync (fullSync) once, for whatever is on disk at that moment — always
+// the latest table, since persist()'s write+rename is never itself
+// debounced.
+func (s *Store) fireFullSync() {
+	s.fsMu.Lock()
+	if !s.fsDirty {
+		s.fsMu.Unlock()
+		return
+	}
+	s.fsDirty = false
+	s.fsTimer = nil
+	s.fsMu.Unlock()
+	s.fullSync()
+}
+
+// fullSync fsyncs the state file and its directory for hardware
+// durability (F_FULLFSYNC on Darwin). Best-effort: errors are not
+// actionable here (the file itself is already correct; this only affects
+// how durable it is against a power loss).
+func (s *Store) fullSync() {
+	if s.onFullSync != nil {
+		s.onFullSync()
+	}
+	if f, err := os.Open(s.path); err == nil {
+		_ = fullSyncFile(f)
+		_ = f.Close()
+	}
+	if dir, err := os.Open(filepath.Dir(s.path)); err == nil {
+		_ = fullSyncFile(dir)
+		_ = dir.Close()
+	}
+}
+
+// Close flushes any pending debounced hardware-durable fsync
+// (Options.FullFsync) and stops the debounce timer. A no-op when
+// FullFsync is off or nothing is pending. Safe to call more than once
+// and from any goroutine; the daemon calls it during shutdown so a
+// full_fsync=true state file is durable even if the process is about to
+// exit right after the last mutation.
+func (s *Store) Close() error {
+	s.fsMu.Lock()
+	if s.fsDone {
+		s.fsMu.Unlock()
+		return nil
+	}
+	s.fsDone = true
+	timer, dirty := s.fsTimer, s.fsDirty
+	s.fsTimer, s.fsDirty = nil, false
+	s.fsMu.Unlock()
+	if timer != nil {
+		timer.Stop()
+	}
+	if dirty {
+		s.fullSync()
 	}
 	return nil
 }

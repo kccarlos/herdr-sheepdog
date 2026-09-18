@@ -89,6 +89,44 @@ path = "/data/s.json"
 	}
 }
 
+func TestStateFullFsync(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(path, []byte("[state]\nfull_fsync = true\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := load(path, noEnv)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if !cfg.State.FullFsync {
+		t.Error("state.full_fsync from file not applied")
+	}
+	if !strings.Contains(cfg.String(), "state.full_fsync=true") {
+		t.Errorf("String() = %q", cfg.String())
+	}
+
+	// Default is false, and the env override can turn it off again.
+	def, err := load(filepath.Join(dir, "missing.toml"), noEnv)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if def.State.FullFsync {
+		t.Error("state.full_fsync default should be false")
+	}
+	cfg, err = load(path, envFrom(map[string]string{"SHEEPDOG_STATE_FULL_FSYNC": "false"}))
+	if err != nil {
+		t.Fatalf("load with env: %v", err)
+	}
+	if cfg.State.FullFsync {
+		t.Error("SHEEPDOG_STATE_FULL_FSYNC=false should override the file")
+	}
+
+	if _, err := load(path, envFrom(map[string]string{"SHEEPDOG_STATE_FULL_FSYNC": "loud"})); err == nil {
+		t.Error("non-bool SHEEPDOG_STATE_FULL_FSYNC should be an error")
+	}
+}
+
 func TestLoadErrors(t *testing.T) {
 	dir := t.TempDir()
 	bad := filepath.Join(dir, "bad.toml")

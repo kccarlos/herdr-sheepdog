@@ -87,6 +87,8 @@ func TestSpokenEnforcesD9(t *testing.T) {
 		{"The word defaced is fine and 1234567 too.", "The word defaced is fine and 1234567 too."},
 		{"  spaced   out  ", "spaced out"},
 		{"Ran C:\\Users\\kc\\thing.exe now.", "Ran a file now."},
+		{"TestTotal in internal/x/calc_test.go:12 failed.", "TestTotal in a file:12 failed."},
+		{"Total() is wrong per calc_test.go.", "Total() is wrong per calc_test.go."},
 	}
 	for _, c := range cases {
 		if got := Spoken(c.in, 2); got != c.want {

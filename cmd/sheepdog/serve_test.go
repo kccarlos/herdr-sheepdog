@@ -37,6 +37,127 @@ func TestServeFlagsAndValidation(t *testing.T) {
 	}
 }
 
+// TestServeEnvFileFlagParses proves --env-file is a recognised flag.
+func TestServeEnvFileFlagParses(t *testing.T) {
+	var stderr bytes.Buffer
+	o, code, ok := parseServeFlags([]string{"--env-file", "/tmp/whatever.env"}, &stderr)
+	if !ok || code != 0 || o.envFile != "/tmp/whatever.env" {
+		t.Errorf("flags = %+v code=%d ok=%v", o, code, ok)
+	}
+}
+
+// TestLoadServeEnvFile covers loadServeEnvFile's three cases: an
+// explicit path that exists is loaded; an explicit path that is missing
+// is an error; the implicit default (./.env) missing is not an error.
+func TestLoadServeEnvFile(t *testing.T) {
+	dir := t.TempDir()
+	envPath := filepath.Join(dir, "custom.env")
+	if err := os.WriteFile(envPath, []byte("SHEEPDOG_ENVFILE_TEST_KEY=from-file\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Unsetenv("SHEEPDOG_ENVFILE_TEST_KEY") })
+
+	var stderr bytes.Buffer
+	if code, ok := loadServeEnvFile(envPath, &stderr); !ok || code != 0 {
+		t.Fatalf("explicit existing file: code=%d ok=%v stderr=%s", code, ok, stderr.String())
+	}
+	if v := os.Getenv("SHEEPDOG_ENVFILE_TEST_KEY"); v != "from-file" {
+		t.Errorf("SHEEPDOG_ENVFILE_TEST_KEY = %q, want it loaded", v)
+	}
+
+	stderr.Reset()
+	if code, ok := loadServeEnvFile(filepath.Join(dir, "missing.env"), &stderr); ok || code == 0 {
+		t.Errorf("explicit missing file should be an error: code=%d ok=%v", code, ok)
+	}
+
+	// The implicit default (no flag given) must not error when absent:
+	// most runs (production, launchd) have no .env at all. Run from an
+	// empty directory so a stray repo .env cannot leak into the test.
+	t.Chdir(t.TempDir())
+	stderr.Reset()
+	if code, ok := loadServeEnvFile("", &stderr); !ok || code != 0 {
+		t.Errorf("missing implicit ./.env should not be an error: code=%d stderr=%s", code, stderr.String())
+	}
+}
+
+// TestServeEnvFileLoadsAndNeverLogs proves `serve --env-file` actually
+// takes effect (a GEMINI_API_KEY only present in the file reaches
+// cfg.Gemini.APIKeys, visible as a count) and that the raw value never
+// appears anywhere in stdout/stderr, including the verbose config dump
+// and the daemon.start event.
+func TestServeEnvFileLoadsAndNeverLogs(t *testing.T) {
+	llm := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"choices": []map[string]any{{"message": map[string]any{"content": `{"spoken":"x","is_question":false}`}}}})
+	}))
+	defer llm.Close()
+
+	// Unset (not merely blank) any real GEMINI_API_KEY for the duration,
+	// so the file's value is the only source and LoadEnvFile does not
+	// see it as "already set".
+	orig, had := os.LookupEnv("GEMINI_API_KEY")
+	if err := os.Unsetenv("GEMINI_API_KEY"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if had {
+			_ = os.Setenv("GEMINI_API_KEY", orig)
+		} else {
+			_ = os.Unsetenv("GEMINI_API_KEY")
+		}
+	})
+
+	dir := t.TempDir()
+	envPath := filepath.Join(dir, "custom.env")
+	const secret = "AIzaEnvFileTestMarkerNotAReal"
+	body := "SHEEPDOG_LLM_BASE_URL=" + llm.URL + "/v1\n" +
+		"SHEEPDOG_LLM_MODEL=fake\n" +
+		"SHEEPDOG_WEB_PORT=0\n" +
+		"GEMINI_API_KEY=" + secret + "\n"
+	if err := os.WriteFile(envPath, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		for _, k := range []string{"SHEEPDOG_LLM_BASE_URL", "SHEEPDOG_LLM_MODEL", "SHEEPDOG_WEB_PORT"} {
+			_ = os.Unsetenv(k)
+		}
+	})
+
+	stdout, stderr := &syncBuffer{}, &syncBuffer{}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan int, 1)
+	go func() {
+		done <- run(ctx, []string{"serve", "--env-file", envPath, "--config", filepath.Join(dir, "none.toml"), "--voice", "off", "--herdr", "mock", "--data-dir", dir, "--verbose"}, stdout, stderr)
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	var url string
+	for time.Now().Before(deadline) && url == "" {
+		for _, line := range strings.Split(stdout.String(), "\n") {
+			if strings.Contains(line, "listening on ") {
+				url = strings.Fields(strings.SplitN(line, "listening on ", 2)[1])[0]
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("serve did not exit")
+	}
+	if url == "" {
+		t.Fatalf("no banner: %s / %s", stdout.String(), stderr.String())
+	}
+	if os.Getenv("GEMINI_API_KEY") != secret {
+		t.Errorf("--env-file value did not reach the environment: %q", os.Getenv("GEMINI_API_KEY"))
+	}
+	if strings.Contains(stderr.String(), secret) || strings.Contains(stdout.String(), secret) {
+		t.Errorf("the env-file secret leaked into output: stdout=%s stderr=%s", stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "gemini.api_keys=1") {
+		t.Errorf("expected the redacted key count in stderr, got: %s", stderr.String())
+	}
+}
+
 func TestServeMockVoiceOffSmoke(t *testing.T) {
 	llm := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"choices": []map[string]any{{"message": map[string]any{"content": `{"spoken":"x","is_question":false}`}}}})

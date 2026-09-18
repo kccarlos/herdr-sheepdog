@@ -15,6 +15,12 @@
 #                            {"result":"...","is_error":<FAKE_IS_ERROR>}
 #   FAKE_IS_ERROR            "true" or "false" (default "false")
 #   FAKE_STDERR              literal text printed to stderr
+#   FAKE_NUM_TURNS           when set (with FAKE_CLAUDE_JSON), adds
+#                            "num_turns":<value> to the JSON
+#   FAKE_DURATION_MS         when set (with FAKE_CLAUDE_JSON), adds
+#                            "duration_ms":<value> to the JSON
+#   FAKE_COST_USD             when set (with FAKE_CLAUDE_JSON), adds
+#                            "total_cost_usd":<value> to the JSON
 #
 # The plain-text answer (used when FAKE_BIG is unset) echoes argv, cwd and
 # whether HERDR_PANE_ID / CLAUDECODE / CLAUDE_CODE_FOO reached the child,
@@ -42,7 +48,11 @@ fi
 answer="ARGV:$*;CWD:$(pwd -P);HERDR:${HERDR_PANE_ID:-ABSENT};CLAUDECODE:${CLAUDECODE:-ABSENT};CCFOO:${CLAUDE_CODE_FOO:-ABSENT}"
 
 if [ -n "$FAKE_CLAUDE_JSON" ]; then
-  printf '{"result":"%s","is_error":%s}\n' "$answer" "${FAKE_IS_ERROR:-false}"
+  extra=""
+  [ -n "$FAKE_NUM_TURNS" ] && extra="$extra,\"num_turns\":$FAKE_NUM_TURNS"
+  [ -n "$FAKE_DURATION_MS" ] && extra="$extra,\"duration_ms\":$FAKE_DURATION_MS"
+  [ -n "$FAKE_COST_USD" ] && extra="$extra,\"total_cost_usd\":$FAKE_COST_USD"
+  printf '{"result":"%s","is_error":%s%s}\n' "$answer" "${FAKE_IS_ERROR:-false}" "$extra"
 else
   printf '%s\n' "$answer"
 fi

@@ -8,7 +8,7 @@ Raw material (newest at the bottom):
 >>>
 
 Fields:
-- "spoken": the answer for the ear, at most 2 short sentences, plain words. Call the agent "{alias}" (that is its name, not a topic). Never include file paths, commit hashes, URLs, pane ids or shell syntax; say "the test file" rather than its path. If the material does not answer the question, say what the screen does show and that you cannot tell the rest from it.
+- "spoken": the answer for the ear, at most 2 short sentences, plain words. Call the agent "{alias}" (that is its name, not a topic). Never include file paths, commit hashes, URLs, pane ids or shell syntax; say "the test file" rather than its path. Naming a specific test or function is fine and often helpful, e.g. "TestTotal is failing" or "Total() returns the wrong value" — just don't say where it lives. If the material does not answer the question, say what the screen does show and that you cannot tell the rest from it.
 - "can_answer": true when the material actually answers the question; false when it does not (the operator's tools may then look deeper).
 
 Return exactly:

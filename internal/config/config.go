@@ -152,6 +152,12 @@ type Herdr struct {
 type State struct {
 	// Path is the JSON file the state table is persisted to.
 	Path string `toml:"path"`
+	// FullFsync turns on the hardware-durable fsync pass after every
+	// persist (debounced; see internal/state). Off by default: on macOS
+	// the durable path is F_FULLFSYNC, which is dramatically slower than
+	// the plain fsync used otherwise. Turn it on only if you need the
+	// state file to survive a power loss, not just a process crash.
+	FullFsync bool `toml:"full_fsync"`
 }
 
 // Default returns the built-in defaults, resolved against the current user's
@@ -259,7 +265,8 @@ func load(path string, lookup func(string) (string, bool)) (Config, error) {
 // applyEnv overrides cfg from SHEEPDOG_* variables. Recognised names:
 //
 //	SHEEPDOG_DATA_DIR, SHEEPDOG_DEBOUNCE_MS, SHEEPDOG_SNAPSHOT_INTERVAL_S,
-//	SHEEPDOG_HERDR_SOCKET, SHEEPDOG_STATE_PATH, SHEEPDOG_GEMINI_MODEL,
+//	SHEEPDOG_HERDR_SOCKET, SHEEPDOG_STATE_PATH, SHEEPDOG_STATE_FULL_FSYNC,
+//	SHEEPDOG_GEMINI_MODEL,
 //	SHEEPDOG_GEMINI_VOICE, SHEEPDOG_LLM_BASE_URL, SHEEPDOG_LLM_MODEL,
 //	SHEEPDOG_LLM_API_KEY, SHEEPDOG_PENDING_TTL_S, SHEEPDOG_WEB_PORT,
 //	SHEEPDOG_CLI_PREFER, SHEEPDOG_CLI_CODEX_BIN, SHEEPDOG_CLI_CLAUDE_BIN,
@@ -298,6 +305,13 @@ func applyEnv(cfg *Config, lookup func(string) (string, bool)) error {
 	}
 	if v, ok := lookup("SHEEPDOG_STATE_PATH"); ok {
 		cfg.State.Path = v
+	}
+	if v, ok := lookup("SHEEPDOG_STATE_FULL_FSYNC"); ok {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return fmt.Errorf("config: SHEEPDOG_STATE_FULL_FSYNC=%q: want true or false", v)
+		}
+		cfg.State.FullFsync = b
 	}
 	if v, ok := lookup("SHEEPDOG_DEBOUNCE_MS"); ok {
 		n, err := strconv.Atoi(v)
@@ -386,6 +400,6 @@ func geminiKeysFromEnv(lookup func(string) (string, bool)) []string {
 // String renders the configuration for logs. Secrets are rendered as
 // counts only; keep it that way when secret-bearing fields are added.
 func (c Config) String() string {
-	return fmt.Sprintf("data_dir=%s herdr.socket=%s state.path=%s debounce_ms=%d snapshot_interval_s=%d pending_ttl_s=%d aliases=%d gemini.model=%s gemini.voice=%s gemini.api_keys=%d llm.base_url=%s llm.model=%s llm.api_keys=%d web.port=%d cli.prefer=%s cli.timeout_s=%d cli.max_output_kb=%d",
-		c.DataDir, c.Herdr.Socket, c.State.Path, c.DebounceMS, c.SnapshotIntervalS, c.PendingTTLS, len(c.Aliases), c.Gemini.Model, c.Gemini.Voice, len(c.Gemini.APIKeys), c.LLM.BaseURL, c.LLM.Model, len(c.LLMKeys()), c.Web.Port, c.CLI.Prefer, c.CLI.TimeoutS, c.CLI.MaxOutputKB)
+	return fmt.Sprintf("data_dir=%s herdr.socket=%s state.path=%s state.full_fsync=%t debounce_ms=%d snapshot_interval_s=%d pending_ttl_s=%d aliases=%d gemini.model=%s gemini.voice=%s gemini.api_keys=%d llm.base_url=%s llm.model=%s llm.api_keys=%d web.port=%d cli.prefer=%s cli.timeout_s=%d cli.max_output_kb=%d",
+		c.DataDir, c.Herdr.Socket, c.State.Path, c.State.FullFsync, c.DebounceMS, c.SnapshotIntervalS, c.PendingTTLS, len(c.Aliases), c.Gemini.Model, c.Gemini.Voice, len(c.Gemini.APIKeys), c.LLM.BaseURL, c.LLM.Model, len(c.LLMKeys()), c.Web.Port, c.CLI.Prefer, c.CLI.TimeoutS, c.CLI.MaxOutputKB)
 }

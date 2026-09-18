@@ -13,6 +13,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # full history + tags, for scripts/changelog.sh below
 
       - uses: actions/setup-go@v7
         with:
@@ -42,9 +44,16 @@ jobs:
 
           (cd release && sha256sum *.tar.gz > checksums.txt)
 
+      - name: Generate release notes
+        run: |
+          set -euo pipefail
+          PREV_TAG="$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)"
+          ./scripts/changelog.sh "${PREV_TAG:+${PREV_TAG}..}${GITHUB_REF_NAME}" "${GITHUB_REF_NAME}" > release/notes.md
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
+          body_path: release/notes.md
           files: |
             release/*.tar.gz
             release/checksums.txt

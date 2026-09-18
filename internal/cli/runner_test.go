@@ -237,6 +237,63 @@ func TestRunnerClaudeJSONExtraction(t *testing.T) {
 	}
 }
 
+// TestRunnerClaudeSurfacesCostAndTurns proves num_turns, duration_ms and
+// total_cost_usd from claude's own JSON land on Result and in the
+// cli.run log payload, and stay nil/absent for codex (whose stdout never
+// carries them).
+func TestRunnerClaudeSurfacesCostAndTurns(t *testing.T) {
+	bin := fakeBinPath(t)
+	log := &recLog{}
+	cfg := Config{ClaudeBin: bin, ClaudeCmd: []string{bin, "{question}"}, Log: log}
+	r := newTestRunner(t, cfg, Detection{Claude: true})
+
+	t.Setenv("FAKE_CLAUDE_JSON", "1")
+	t.Setenv("FAKE_NUM_TURNS", "7")
+	t.Setenv("FAKE_DURATION_MS", "15381")
+	t.Setenv("FAKE_COST_USD", "0.43")
+
+	res, err := r.RunBackend(context.Background(), Claude, t.TempDir(), "why")
+	if err != nil {
+		t.Fatalf("RunBackend: %v", err)
+	}
+	if res.NumTurns == nil || *res.NumTurns != 7 {
+		t.Errorf("NumTurns = %v, want 7", res.NumTurns)
+	}
+	if res.DurationMS == nil || *res.DurationMS != 15381 {
+		t.Errorf("DurationMS = %v, want 15381", res.DurationMS)
+	}
+	if res.TotalCostUSD == nil || *res.TotalCostUSD != 0.43 {
+		t.Errorf("TotalCostUSD = %v, want 0.43", res.TotalCostUSD)
+	}
+
+	payload := log.ofType("cli.run")[0].Payload.(map[string]any)
+	if payload["num_turns"] != 7 {
+		t.Errorf("payload num_turns = %v", payload["num_turns"])
+	}
+	if payload["duration_ms"] != int64(15381) {
+		t.Errorf("payload duration_ms = %v", payload["duration_ms"])
+	}
+	if payload["total_cost_usd"] != 0.43 {
+		t.Errorf("payload total_cost_usd = %v", payload["total_cost_usd"])
+	}
+}
+
+// TestRunnerCodexHasNoClaudeMeta proves codex results never carry claude's
+// cost/turns fields.
+func TestRunnerCodexHasNoClaudeMeta(t *testing.T) {
+	bin := fakeBinPath(t)
+	cfg := Config{CodexBin: bin, CodexCmd: []string{bin, "{question}"}}
+	r := newTestRunner(t, cfg, Detection{Codex: true})
+
+	res, err := r.RunBackend(context.Background(), Codex, t.TempDir(), "why")
+	if err != nil {
+		t.Fatalf("RunBackend: %v", err)
+	}
+	if res.NumTurns != nil || res.DurationMS != nil || res.TotalCostUSD != nil {
+		t.Errorf("codex result should have nil claude fields, got %+v", res)
+	}
+}
+
 // TestRunnerClaudeFallsBackToRawText proves non-JSON stdout from claude is
 // still returned (fallback per docs/cli-query-tools.md).
 func TestRunnerClaudeFallsBackToRawText(t *testing.T) {

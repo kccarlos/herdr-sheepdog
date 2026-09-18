@@ -99,10 +99,16 @@ func TailBytes(text string, max int) string {
 }
 
 var (
-	reURL      = regexp.MustCompile(`(?i)\b(?:https?|ftp|ws|wss)://\S+`)
-	reWWW      = regexp.MustCompile(`(?i)\bwww\.\S+`)
-	reHash     = regexp.MustCompile(`\b[0-9a-f]{7,64}\b`)
-	rePath     = regexp.MustCompile(`(?:~|\.{1,2})?(?:/[\w.@+\-]+){2,}/?`)
+	reURL  = regexp.MustCompile(`(?i)\b(?:https?|ftp|ws|wss)://\S+`)
+	reWWW  = regexp.MustCompile(`(?i)\bwww\.\S+`)
+	reHash = regexp.MustCompile(`\b[0-9a-f]{7,64}\b`)
+	// rePath matches file paths for scrubbing: an absolute/home/dotted
+	// path ("/Users/kc/x.go", "~/repo/x.go", "./a/b.go") or a bare
+	// relative path with a leading word ("internal/x/calc_test.go"). It
+	// requires at least two "/segment" groups so a lone identifier like
+	// "TestTotal" or a bare filename like "calc_test.go" is never
+	// matched (D9 keeps test/function names, only paths are scrubbed).
+	rePath     = regexp.MustCompile(`(?:(?:~|\.{1,2})?(?:/[\w.@+\-]+){2,}/?|\b[\w.@+\-]+(?:/[\w.@+\-]+){2,})`)
 	reWinPath  = regexp.MustCompile(`\b[A-Za-z]:\\[^\s"']+`)
 	rePaneID   = regexp.MustCompile(`\bw\d+:[pt]\d+\b`)
 	reSpaces   = regexp.MustCompile(`[ \t]+`)

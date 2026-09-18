@@ -20,7 +20,9 @@ func printAskTestUsage(w io.Writer) {
 	fprintln(w, "Runs the read-only CLI query tool (plan §3.5, WP4) once against workspace")
 	fprintln(w, "and question, then (unless --raw) the spoken_answer cheap-LLM pass, and")
 	fprintln(w, "prints one JSON object with backend, dur_ms, exit, killed, capped, raw and")
-	fprintln(w, "spoken. cli.detected / cli.run / llm.call events go to stderr as JSON lines.")
+	fprintln(w, "spoken, plus num_turns/duration_ms/total_cost_usd when the claude backend's")
+	fprintln(w, "own JSON reported them. cli.detected / cli.run / llm.call events go to")
+	fprintln(w, "stderr as JSON lines.")
 	fprintln(w, "")
 	fprintln(w, "flags:")
 	fprintln(w, "  --config PATH     config file (default ~/.config/sheepdog/config.toml)")
@@ -128,6 +130,17 @@ func runAskTest(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	}
 	if runErr != nil {
 		out["error"] = runErr.Error()
+	}
+	// claude's own accounting (docs/cli-query-tools.md §2); nil for codex
+	// or non-JSON claude stdout.
+	if result.NumTurns != nil {
+		out["num_turns"] = *result.NumTurns
+	}
+	if result.DurationMS != nil {
+		out["duration_ms"] = *result.DurationMS
+	}
+	if result.TotalCostUSD != nil {
+		out["total_cost_usd"] = *result.TotalCostUSD
 	}
 
 	if runErr == nil && !o.raw {
