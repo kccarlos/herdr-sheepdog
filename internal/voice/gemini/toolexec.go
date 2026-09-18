@@ -3,6 +3,7 @@ package gemini
 import (
 	"context"
 	"errors"
+	"time"
 
 	"google.golang.org/genai"
 
@@ -22,6 +23,7 @@ func (s *Session) startTool(gen int, fc *genai.FunctionCall) {
 	if call.ID != "" {
 		s.inflight[call.ID] = cancel
 	}
+	turnDone := s.turnDone
 	s.mu.Unlock()
 
 	s.log.Log(logSource, "voice.tool_call", "", map[string]any{"id": call.ID, "name": call.Name, "args": call.Args})
@@ -36,11 +38,15 @@ func (s *Session) startTool(gen int, fc *genai.FunctionCall) {
 			delete(s.inflight, call.ID)
 			s.mu.Unlock()
 		}()
-		s.execTool(ctx, gen, call)
+		s.execTool(ctx, gen, call, turnDone)
 	}()
 }
 
-func (s *Session) execTool(ctx context.Context, gen int, call voice.ToolCall) {
+// execTool runs the handler, then waits (bounded) for the model to close
+// the turn that issued the call before sending the response: a
+// NON_BLOCKING call ends the model's turn, and answering before that
+// turnComplete arrives makes the model discard the result.
+func (s *Session) execTool(ctx context.Context, gen int, call voice.ToolCall, turnDone <-chan struct{}) {
 	handler := s.cfg.Handler
 	if handler == nil {
 		handler = func(context.Context, voice.ToolCall) (voice.ToolResult, error) {
@@ -55,6 +61,14 @@ func (s *Session) execTool(ctx context.Context, gen int, call voice.ToolCall) {
 	}
 	if err != nil {
 		res = errorResult(call.Name)
+	}
+	select {
+	case <-turnDone:
+	case <-time.After(s.cfg.ToolResponseWait):
+	case <-ctx.Done():
+		s.log.Log(logSource, "voice.tool_result", "", map[string]any{"id": call.ID, "name": call.Name, "cancelled": true})
+		s.emit(voice.EventToolResult{Call: call, Err: ctx.Err(), Cancelled: true})
+		return
 	}
 	resp := map[string]any{"spoken": res.Spoken}
 	if res.Clarify {

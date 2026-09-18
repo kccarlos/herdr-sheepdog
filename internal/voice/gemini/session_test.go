@@ -149,6 +149,12 @@ func TestToolCallRoundTrip(t *testing.T) {
 	h := newHarness(t, Config{Handler: handler}, &fakeDialer{results: []func() (Conn, error){ok(c)}})
 
 	c.serve(toolCallMsg("call_1", "briefing", nil))
+	h.waitEvent("tool call", func(ev voice.Event) bool { tc, ok := ev.(voice.EventToolCall); return ok && tc.Call.ID == "call_1" })
+	time.Sleep(20 * time.Millisecond)
+	if c.count("tool") != 0 {
+		t.Fatal("tool response sent before the calling turn completed")
+	}
+	c.serve(turnCompleteMsg()) // the model ends its turn right after a NON_BLOCKING call
 	m := c.waitSent(t, "tool response", func(m sent) bool { return m.kind == "tool" })
 	fr := m.tool.FunctionResponses[0]
 	if fr.ID != "call_1" || fr.Name != "briefing" || fr.Scheduling != genai.FunctionResponseSchedulingInterrupt {
@@ -167,6 +173,24 @@ func TestToolCallRoundTrip(t *testing.T) {
 	})
 	if !h.log.has("voice.tool_call") || !h.log.has("voice.tool_result") {
 		t.Error("tool events not logged")
+	}
+}
+
+func TestToolResponseWaitTimesOut(t *testing.T) {
+	c := newFakeConn("c1")
+	handler := func(context.Context, voice.ToolCall) (voice.ToolResult, error) {
+		return voice.ToolResult{Spoken: "ok"}, nil
+	}
+	h := newHarness(t, Config{Handler: handler, ToolResponseWait: 40 * time.Millisecond}, &fakeDialer{results: []func() (Conn, error){ok(c)}})
+	t0 := time.Now()
+	c.serve(toolCallMsg("call_t", "note", map[string]any{"text": "x"}))
+	c.waitSent(t, "tool response after timeout", func(m sent) bool { return m.kind == "tool" })
+	if el := time.Since(t0); el < 35*time.Millisecond {
+		t.Errorf("response after %v, want >= ToolResponseWait", el)
+	}
+	h.waitEvent("result", func(ev voice.Event) bool { _, ok := ev.(voice.EventToolResult); return ok })
+	if !h.s.TurnOpen() {
+		t.Error("a spoken tool response should open a turn")
 	}
 }
 

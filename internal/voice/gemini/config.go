@@ -49,6 +49,11 @@ type Config struct {
 	CompressionTarget  int64
 	// EventBuffer is the capacity of the Events channel (default 1024).
 	EventBuffer int
+	// ToolResponseWait bounds how long a tool response is held back for
+	// the model to close the turn that issued the call (default 1.5 s).
+	// Responding before that turnComplete made the model treat the result
+	// as unavailable in WP2's first live run.
+	ToolResponseWait time.Duration
 }
 
 // DefaultModel is the Live model used when Config.Model is empty.
@@ -90,6 +95,9 @@ func (c Config) withDefaults() Config {
 	}
 	if c.EventBuffer == 0 {
 		c.EventBuffer = 1024
+	}
+	if c.ToolResponseWait == 0 {
+		c.ToolResponseWait = 1500 * time.Millisecond
 	}
 	return c
 }

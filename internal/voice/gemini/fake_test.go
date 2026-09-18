@@ -270,6 +270,9 @@ func newHarness(t *testing.T, cfg Config, dialer *fakeDialer) *harness {
 	if cfg.RateLimitBackoff == 0 {
 		cfg.RateLimitBackoff = 20 * time.Millisecond
 	}
+	if cfg.ToolResponseWait == 0 {
+		cfg.ToolResponseWait = 60 * time.Millisecond
+	}
 	log := &recLogger{}
 	s, err := newSession(cfg, log, dialer)
 	if err != nil {

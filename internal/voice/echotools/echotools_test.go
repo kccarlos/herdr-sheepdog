@@ -13,9 +13,9 @@ func TestHandler(t *testing.T) {
 		call voice.ToolCall
 		want string
 	}{
-		{voice.ToolCall{Name: "briefing"}, "briefing called with no arguments"},
-		{voice.ToolCall{Name: "propose", Args: map[string]any{"instruction": "rerun", "agent": "auth"}}, "propose called with agent auth, instruction rerun"},
-		{voice.ToolCall{Name: "confirm", Args: map[string]any{}}, "confirm called with no arguments"},
+		{voice.ToolCall{Name: "briefing"}, "Echo test: the briefing tool was called with no arguments."},
+		{voice.ToolCall{Name: "propose", Args: map[string]any{"instruction": "rerun", "agent": "auth"}}, "Echo test: the propose tool was called with agent auth, instruction rerun."},
+		{voice.ToolCall{Name: "confirm", Args: map[string]any{}}, "Echo test: the confirm tool was called with no arguments."},
 	}
 	for _, tc := range cases {
 		res, err := h(context.Background(), tc.call)

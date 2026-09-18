@@ -50,6 +50,7 @@ type Session struct {
 	keyIdx       int
 	turnOpen     bool
 	turnOpenedAt time.Time
+	turnDone     chan struct{} // closed and replaced on every turnComplete
 	lastInput    time.Time
 	inputDone    bool
 	lastSpoken   time.Time
@@ -98,6 +99,7 @@ func newSession(cfg Config, log logging.Logger, dial Dialer) (*Session, error) {
 		out:        newOutQueue(),
 		status:     voice.StatusConnecting,
 		inflight:   map[string]context.CancelFunc{},
+		turnDone:   make(chan struct{}),
 		readerExit: make(chan readerResult, 4),
 		goAway:     make(chan struct{}, 1),
 		kick:       make(chan struct{}, 1),

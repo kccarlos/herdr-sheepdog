@@ -93,6 +93,8 @@ func (s *Session) handleServerContent(sc *genai.LiveServerContent) {
 	if sc.TurnComplete {
 		s.mu.Lock()
 		s.turnOpen = false
+		close(s.turnDone)
+		s.turnDone = make(chan struct{})
 		s.mu.Unlock()
 		s.emit(voice.EventTurnComplete{})
 		s.poke()

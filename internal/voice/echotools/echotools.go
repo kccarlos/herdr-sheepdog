@@ -16,8 +16,13 @@ import (
 var Names = []string{"briefing", "ask", "propose", "confirm", "cancel", "note"}
 
 // Handler returns a ToolHandler whose result for every known tool is
-// "<name> called with <args>" scheduled at UrgencyInterrupt (so the test
-// hears it immediately). Unknown tools return an error.
+// "Echo test: the <name> tool was called with <args>." scheduled at
+// UrgencyInterrupt (so the test hears it immediately). Unknown tools
+// return an error.
+//
+// The sentence form matters: in WP2's live runs the model refused to read
+// the bare "briefing called with no arguments" aloud (it answered "this
+// function is not available"), while a natural sentence is read verbatim.
 func Handler() voice.ToolHandler {
 	known := map[string]bool{}
 	for _, n := range Names {
@@ -28,7 +33,7 @@ func Handler() voice.ToolHandler {
 			return voice.ToolResult{}, fmt.Errorf("echotools: unknown tool %q", call.Name)
 		}
 		return voice.ToolResult{
-			Spoken:     fmt.Sprintf("%s called with %s", call.Name, FormatArgs(call.Args)),
+			Spoken:     fmt.Sprintf("Echo test: the %s tool was called with %s.", call.Name, FormatArgs(call.Args)),
 			Scheduling: voice.UrgencyInterrupt,
 		}, nil
 	}
