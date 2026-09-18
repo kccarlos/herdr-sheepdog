@@ -40,6 +40,7 @@ const state = {
   daemonMuted: false,
   voice: '…',
   voiceReason: '',
+  voiceStalled: false,
 
   framesSent: 0,
   bytesOut: 0,
@@ -351,6 +352,7 @@ function onControl(m) {
     case 'status':
       state.voice = m.voice;
       state.voiceReason = m.reason || '';
+      state.voiceStalled = !!m.stalled;
       state.daemonMuted = !!m.muted;
       if (m.voice === 'closed' && m.reason && m.reason !== 'voice_off') showError(`voice session closed: ${m.reason}`);
       break;
@@ -509,7 +511,7 @@ function render() {
   setDot('ws', open ? 'open' : state.wsState === 'connecting' ? 'connecting' : state.wsState === 'closed' ? 'closed' : 'idle',
     `ws: ${state.wsState}${state.wsState === 'closed' && connected ? ' (reconnecting)' : ''}`);
   const v = connected ? state.voice : '…';
-  setDot('voice', v === '…' ? 'idle' : v, `voice: ${v}${state.voiceReason && v === 'closed' ? ` (${state.voiceReason})` : ''}${state.daemonMuted && open ? ' · muted' : ''}`);
+  setDot('voice', v === '…' ? 'idle' : state.voiceStalled ? 'stalled' : v, `voice: ${v}${state.voiceReason && v === 'closed' ? ` (${state.voiceReason})` : ''}${state.daemonMuted && open ? ' · muted' : ''}${state.voiceStalled && open ? ' · stalled (no reply)' : ''}`);
 
   const btnConnect = $('btn-connect');
   btnConnect.textContent = connected ? 'Disconnect' : 'Connect';

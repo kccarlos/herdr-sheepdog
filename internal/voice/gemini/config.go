@@ -36,8 +36,17 @@ type Config struct {
 	TurnTimeout time.Duration
 	// ResumeAttempts is how many consecutive reconnects may fail while
 	// presenting a resumption handle before the handle is dropped and the
-	// next connect starts a fresh session (default 2).
+	// next connect starts a fresh session (default 1: in both observed
+	// 1011 closes the second try failed exactly like the first).
 	ResumeAttempts int
+	// StallAfter is how long an utterance may go without any model
+	// reaction (tool call or audio) before voice.stalled is logged and
+	// EventStatus{Stalled:true} is emitted (default 10 s).
+	StallAfter time.Duration
+	// StallsBeforeRecycle is how many stalls, or idle pushes that outwait
+	// TurnTimeout, on one connection trigger a proactive reconnect with
+	// the current resumption handle (default 2).
+	StallsBeforeRecycle int
 	// ReconnectBuffer is the maximum number of audio-in bytes kept while
 	// reconnecting; oldest are dropped (default 5 s = 160 000).
 	ReconnectBuffer int
@@ -83,7 +92,13 @@ func (c Config) withDefaults() Config {
 		c.TurnTimeout = 30 * time.Second
 	}
 	if c.ResumeAttempts == 0 {
-		c.ResumeAttempts = 2
+		c.ResumeAttempts = 1
+	}
+	if c.StallAfter == 0 {
+		c.StallAfter = 10 * time.Second
+	}
+	if c.StallsBeforeRecycle == 0 {
+		c.StallsBeforeRecycle = 2
 	}
 	if c.ReconnectBuffer == 0 {
 		c.ReconnectBuffer = 5 * 16000 * 2

@@ -24,7 +24,9 @@ func (s *Session) startTool(gen int, fc *genai.FunctionCall) {
 		s.inflight[call.ID] = cancel
 	}
 	turnDone := s.turnDone
+	s.noteToolCallLocked(s.now())
 	s.mu.Unlock()
+	s.clearStalled()
 
 	s.log.Log(logSource, "voice.tool_call", "", map[string]any{"id": call.ID, "name": call.Name, "args": call.Args})
 	s.emit(voice.EventToolCall{Call: call})
@@ -36,6 +38,7 @@ func (s *Session) startTool(gen int, fc *genai.FunctionCall) {
 		defer func() {
 			s.mu.Lock()
 			delete(s.inflight, call.ID)
+			s.noteToolDoneLocked()
 			s.mu.Unlock()
 		}()
 		s.execTool(ctx, gen, call, turnDone)

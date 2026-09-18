@@ -32,12 +32,13 @@ type audioEnder interface{ AudioStreamEnd() }
 type hub struct {
 	s *Server
 
-	mu     sync.Mutex
-	client *client
-	seq    int
-	status voice.Status
-	reason string
-	muted  bool
+	mu      sync.Mutex
+	client  *client
+	seq     int
+	status  voice.Status
+	reason  string
+	stalled bool
+	muted   bool
 }
 
 func newHub(s *Server) *hub {
@@ -50,18 +51,29 @@ func newHub(s *Server) *hub {
 	return h
 }
 
-// state returns the voice status, its reason, the mute flag and whether a
-// browser client is attached.
-func (h *hub) state() (voice.Status, string, bool, bool) {
+// hubState is the daemon's view of the voice side for /api/state.
+type hubState struct {
+	status  voice.Status
+	reason  string
+	muted   bool
+	stalled bool
+	client  bool
+}
+
+// state returns the voice status, its reason, the mute and stalled flags
+// and whether a browser client is attached.
+func (h *hub) state() hubState {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return h.status, h.reason, h.muted, h.client != nil
+	return hubState{status: h.status, reason: h.reason, muted: h.muted, stalled: h.stalled, client: h.client != nil}
 }
 
 func (h *hub) statusMsg() wsproto.Message {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return wsproto.Status(h.status.String(), h.muted, h.reason)
+	m := wsproto.Status(h.status.String(), h.muted, h.reason)
+	m.Stalled = h.stalled
+	return m
 }
 
 // handle upgrades the request and serves the client until it goes away.
@@ -131,7 +143,7 @@ func (h *hub) onVoiceEvent(ev voice.Event) {
 	switch e := ev.(type) {
 	case voice.EventStatus:
 		h.mu.Lock()
-		h.status, h.reason = e.Status, e.Reason
+		h.status, h.reason, h.stalled = e.Status, e.Reason, e.Stalled
 		h.mu.Unlock()
 		h.send(h.statusMsg())
 	case voice.EventInterrupted:

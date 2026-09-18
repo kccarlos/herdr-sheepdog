@@ -32,18 +32,19 @@ type VoiceInfo struct {
 	Status          string `json:"status"`
 	Reason          string `json:"reason,omitempty"`
 	Muted           bool   `json:"muted"`
+	Stalled         bool   `json:"stalled"`
 	ClientConnected bool   `json:"client_connected"`
 }
 
 func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 	snap := s.deps.Store.Snapshot()
 	agents := s.deps.Store.List()
-	status, reason, muted, client := s.hub.state()
+	hs := s.hub.state()
 	writeJSON(w, http.StatusOK, StateResponse{
 		Agents:        agents,
 		PendingAction: snap.PendingAction,
 		Session:       snap.Session,
-		Voice:         VoiceInfo{Mode: s.deps.VoiceMode, Status: status.String(), Reason: reason, Muted: muted, ClientConnected: client},
+		Voice:         VoiceInfo{Mode: s.deps.VoiceMode, Status: hs.status.String(), Reason: hs.reason, Muted: hs.muted, Stalled: hs.stalled, ClientConnected: hs.client},
 		Herdr:         s.deps.HerdrMode,
 		Version:       s.deps.Version,
 		Now:           s.deps.Now().UTC(),

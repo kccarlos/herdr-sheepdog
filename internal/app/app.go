@@ -202,6 +202,8 @@ func (a *App) wire() error {
 			Voice:   cfg.Gemini.Voice,
 			Aliases: a.aliases(),
 			Handler: sup.Handler(),
+
+			StallAfter: time.Duration(cfg.Gemini.StallAfterS) * time.Second,
 		}, a.log)
 		if err != nil {
 			return err

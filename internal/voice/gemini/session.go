@@ -58,9 +58,17 @@ type Session struct {
 	pendingBytes int
 	inflight     map[string]context.CancelFunc
 	pushQ        []pushItem
+	// turn health (turn.go): the open input turn, and per-connection
+	// stall / push-timeout counters that decide a recycle
+	turn         *turnStats
+	turnSeq      int
+	stalls       int
+	pushTimeouts int
+	stalledNow   bool
 
 	readerExit chan readerResult
 	goAway     chan struct{}
+	recycle    chan string
 	kick       chan struct{}
 	dropReq    chan struct{}
 }
@@ -102,6 +110,7 @@ func newSession(cfg Config, log logging.Logger, dial Dialer) (*Session, error) {
 		turnDone:   make(chan struct{}),
 		readerExit: make(chan readerResult, 4),
 		goAway:     make(chan struct{}, 1),
+		recycle:    make(chan string, 1),
 		kick:       make(chan struct{}, 1),
 		dropReq:    make(chan struct{}, 1),
 	}, nil
@@ -165,6 +174,9 @@ func (s *Session) finish(reason string) {
 		s.status = voice.StatusClosed
 		for _, cancel := range s.inflight {
 			cancel()
+		}
+		if s.turn != nil && s.turn.stallTimer != nil {
+			s.turn.stallTimer.Stop()
 		}
 		s.mu.Unlock()
 		s.emit(voice.EventStatus{Status: voice.StatusClosed, Reason: reason})
@@ -300,8 +312,16 @@ func (s *Session) SendText(text string) error {
 	s.mu.Lock()
 	s.openTurnLocked()
 	s.mu.Unlock()
+	s.logTurn(s.noteInput(s.now()))
 	s.log.Log(logSource, "voice.text", "", map[string]any{"text": text})
 	return nil
+}
+
+// logTurn writes a finished turn's voice.turn line (nil payload: nothing).
+func (s *Session) logTurn(payload map[string]any) {
+	if payload != nil {
+		s.log.Log(logSource, "voice.turn", "", payload)
+	}
 }
 
 // Push implements voice.Session by enqueuing; see push.go for the policy.

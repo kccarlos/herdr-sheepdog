@@ -42,7 +42,7 @@ input[type=file] { max-width: 100%; }
 .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--unknown); display: inline-block; }
 .dot.connected, .dot.open { background: var(--ok); }
 .dot.connecting, .dot.reconnecting { background: var(--warn); }
-.dot.closed, .dot.error { background: var(--danger); }
+.dot.closed, .dot.error, .dot.stalled { background: var(--danger); }
 .dot.off, .dot.idle { background: var(--idle); }
 
 .pill { display: inline-block; padding: 0 .55em; border-radius: 9px; font-size: .85em; color: #fff; background: var(--warn); }

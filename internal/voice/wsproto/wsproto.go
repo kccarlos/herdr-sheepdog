@@ -64,9 +64,10 @@ type Message struct {
 	Text string `json:"text,omitempty"`
 
 	// status
-	Voice  string `json:"voice,omitempty"`
-	Muted  *bool  `json:"muted,omitempty"`
-	Reason string `json:"reason,omitempty"`
+	Voice   string `json:"voice,omitempty"`
+	Muted   *bool  `json:"muted,omitempty"`
+	Reason  string `json:"reason,omitempty"`
+	Stalled bool   `json:"stalled,omitempty"`
 
 	// transcript
 	Dir   string `json:"dir,omitempty"`

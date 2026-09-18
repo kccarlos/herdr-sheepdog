@@ -267,7 +267,9 @@ function renderVoice(v, st) {
   $('voice-dot').className = `dot ${status}`;
   let text = v.mode === 'off' ? 'voice: off' : `voice: ${v.status}${v.reason ? ` (${v.reason})` : ''}`;
   if (v.muted) text += ' · muted';
+  if (v.stalled) text += ' · STALLED';
   text += v.client_connected ? ' · browser attached' : ' · no browser';
+  $('voice-indicator').classList.toggle('stalled', !!v.stalled);
   $('voice-text').textContent = text;
   $('daemon-info').textContent = `v${st.version || '?'} · herdr=${st.herdr} · voice_connected=${st.session && st.session.voice_connected}`;
 }

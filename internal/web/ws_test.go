@@ -153,6 +153,19 @@ func TestWSAudioAndControlWithVoice(t *testing.T) {
 	if st = c.expect(wsproto.TypeStatus); st.Voice != wsproto.VoiceReconnecting || st.Reason != "goaway" {
 		t.Fatalf("reconnecting status = %+v", st)
 	}
+	h.session.emit(voice.EventStatus{Status: voice.StatusConnected, Stalled: true})
+	if st = c.expect(wsproto.TypeStatus); st.Voice != wsproto.VoiceConnected || !st.Stalled {
+		t.Fatalf("stalled status = %+v", st)
+	}
+	var state StateResponse
+	h.getJSON("/api/state", &state)
+	if !state.Voice.Stalled {
+		t.Fatalf("/api/state voice = %+v, want stalled", state.Voice)
+	}
+	h.session.emit(voice.EventStatus{Status: voice.StatusConnected})
+	if st = c.expect(wsproto.TypeStatus); st.Stalled {
+		t.Fatalf("status still stalled: %+v", st)
+	}
 
 	// text → session.SendText.
 	c.send(wsproto.SimulateText("what's going on"))

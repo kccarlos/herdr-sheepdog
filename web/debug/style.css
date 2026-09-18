@@ -32,6 +32,7 @@ textarea { width: 100%; font-family: ui-monospace, SFMono-Regular, Menlo, monosp
 .dot.connecting, .dot.reconnecting { background: var(--voice); }
 .dot.closed { background: var(--blocked); }
 .dot.off { background: var(--idle); }
+.indicator.stalled { color: var(--blocked); font-weight: 600; }
 
 table { border-collapse: collapse; width: 100%; background: var(--card); border: 1px solid var(--line); }
 th, td { text-align: left; padding: .3rem .5rem; border-bottom: 1px solid var(--line); vertical-align: top; }
