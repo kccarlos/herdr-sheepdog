@@ -152,6 +152,24 @@ func summarizeByScreen(screen, alias string) llm.BlockSummary {
 			Options:    []llm.Option{{Label: "Yes", Key: "1"}, {Label: "Yes, and switch to accept edits", Key: "2"}, {Label: "No", Key: "3"}},
 			AnswerKeys: llm.AnswerKeys{Yes: []string{"1"}, No: []string{"3"}},
 		}
+	case strings.Contains(screen, "Accept this file edit?"):
+		// Antigravity CLI 1.2.5 file-edit prompt (WP7b live summary): Esc is
+		// disabled there, so "no" must be the digit.
+		return llm.BlockSummary{
+			Spoken: alias + " is asking whether to accept the edit to the readme file.", Question: "whether to accept the edit to the readme file",
+			IsQuestion: true, NeedsDecision: true,
+			Options:    []llm.Option{{Label: "Yes, accept this change", Key: "1"}, {Label: "No, reject this change", Key: "2"}},
+			AnswerKeys: llm.AnswerKeys{Yes: []string{"1"}, No: []string{"2"}},
+		}
+	case strings.Contains(screen, "Run this command?"):
+		// Antigravity CLI 1.2.5 command-approval prompt (WP7b live summary).
+		return llm.BlockSummary{
+			Spoken: alias + " is asking for permission to run tests.", Question: "whether it can run tests",
+			IsQuestion: true, NeedsDecision: true,
+			Options: []llm.Option{{Label: "Yes, run command", Key: "1"}, {Label: "Yes, and always allow in this conversation", Key: "2"},
+				{Label: "Yes, and always allow (persist)", Key: "3"}, {Label: "No, cancel", Key: "4"}},
+			AnswerKeys: llm.AnswerKeys{Yes: []string{"1"}, No: []string{"4"}},
+		}
 	case strings.Contains(screen, "Do you trust the contents of this directory?"):
 		return llm.BlockSummary{Spoken: alias + " is showing its startup trust dialog."}
 	case strings.Contains(screen, "Conversation interrupted"):

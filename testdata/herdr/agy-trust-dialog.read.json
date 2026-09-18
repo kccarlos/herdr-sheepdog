@@ -1,0 +1,16 @@
+{
+  "id": "r",
+  "result": {
+    "type": "pane_read",
+    "read": {
+      "pane_id": "wA:p1",
+      "workspace_id": "wA",
+      "tab_id": "wA:t1",
+      "source": "visible",
+      "format": "text",
+      "text": "Accessing workspace:\n\n/private/tmp/claude-501/-Users-kc-Documents-herdr-sheepdog/c16b97d4-acf1-42bb-9044-59d5182b5982/scratchpad/wp7b/repo\n\nDo you trust the contents of this project?\n\nAntigravity CLI requires permission to read, edit, and execute files here.\n\n> Yes, I trust this folder\n  No, exit\n\n  ↑/↓ Navigate · enter Confirm\n                                                                                                 Gemini 3.8 Flash · high\n",
+      "revision": 0,
+      "truncated": false
+    }
+  }
+}

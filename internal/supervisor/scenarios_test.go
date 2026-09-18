@@ -223,6 +223,30 @@ func TestScenario4ProposeSendsAndEchoes(t *testing.T) {
 	}
 }
 
+// agy (Antigravity CLI 1.2.5) prompts, captured in WP7b: the edit prompt
+// disables Esc, so "no" must send "2"; the command prompt's "no" is "4".
+func TestAgyPromptsAnswerWithDigits(t *testing.T) {
+	h := twoAgents(t)
+	h.block("w5:p1", "agy-edit-prompt.screen.txt")
+	if p, ok := h.pending(); !ok || strings.Join(p.YesKeys, ",") != "1" || strings.Join(p.NoKeys, ",") != "2" {
+		t.Fatalf("edit prompt pending = %+v", p)
+	}
+	if res := h.call(ToolConfirm, map[string]any{"answer": "no"}); res.Spoken != "Told auth no." {
+		t.Errorf("confirm no = %+v", res)
+	}
+	if keys := h.sendKeysRequests(); len(keys) != 1 || keys[0] != [2]string{"w5:p1", "2"} {
+		t.Errorf("send_keys = %v, want exactly one \"2\" (not esc)", keys)
+	}
+	h.transition("w5:p1", herdr.StateBlocked, herdr.StateWorking)
+	h.block("w5:p1", "agy-approval-prompt.screen.txt")
+	if res := h.call(ToolConfirm, map[string]any{"answer": "yes"}); res.Spoken != "Told auth yes." {
+		t.Errorf("confirm yes = %+v", res)
+	}
+	if keys := h.sendKeysRequests(); len(keys) != 2 || keys[1] != [2]string{"w5:p1", "1"} {
+		t.Errorf("send_keys = %v, want \"1\" for the command prompt", keys)
+	}
+}
+
 // Scenario 5: cancel after propose sends Ctrl-C to that pane and nothing
 // else.
 func TestScenario5CancelInterruptsCorrectPane(t *testing.T) {

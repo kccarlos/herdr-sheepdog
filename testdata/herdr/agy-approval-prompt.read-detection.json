@@ -1,0 +1,16 @@
+{
+  "id": "d",
+  "result": {
+    "type": "pane_read",
+    "read": {
+      "pane_id": "wA:p1",
+      "workspace_id": "wA",
+      "tab_id": "wA:t1",
+      "source": "detection",
+      "format": "text",
+      "text": "\nrepo on  main via 🐹 v1.27.1\n❯ agy\n\n\n      ▄▀▀▄\n     ▀▀▀▀▀▀\n    ▀▀▀▀▀▀▀▀\n   ▄▀▀    ▀▀▄\n  ▄▀▀      ▀▀▄\n\n  Antigravity CLI 1.2.5\n  <email> (Antigravity Starter Quota)\n  Gemini 3.8 Flash (High)\n  /private/tmp/claude-501/-Users-kc-Documents-herdr-sheepdog/c16b97d4-acf1-42bb-9044-59d5182b5982/scratchpad/wp7b/repo\n\n────────────────────────────────────────────────────────────\n> Run go test ./... and tell me in one sentence which test fails and why.\n\n● Bash(go test ./...) (ctrl+o to expand)\n\nCommand\n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n\nRequesting permission for:\n   go test ./...\n\nRun this command?\n> 1. Yes, run command\n  2. Yes, and always allow in this conversation for commands that start with 'go test ./...'\n  3. Yes, and always allow for commands that start with 'go test ./...' (Persist to settings.json)\n  4. No, cancel\n\n  ↑/↓ Navigate · tab Amend · ctrl+g edit/expand command\nesc to cancel                                                                                    Gemini 3.8 Flash · high\n",
+      "revision": 0,
+      "truncated": false
+    }
+  }
+}
