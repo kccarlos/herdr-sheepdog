@@ -69,7 +69,7 @@ type Result struct {
 	// Outcome is success, failed, partial or unknown.
 	Outcome string    `json:"outcome"`
 	At      time.Time `json:"at"`
-	// Detail is the brain's enrichment of the finish, when it produced
+	// Detail is the brain's announce detail for the finish, when it produced
 	// one: what the finish related to and what was still open (for
 	// recall and the ledger).
 	Detail string `json:"detail,omitempty"`

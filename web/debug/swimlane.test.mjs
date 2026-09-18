@@ -484,3 +484,32 @@ test('e2e fixture, scenarios 2–5: the expected arrow sequence', () => {
   const gaps = rows.filter((r) => r.kind === 'gap').map((g) => g.label);
   assert.ok(gaps.includes('30 s') && gaps.includes('12.2 s'), `gaps: ${gaps.join(', ')}`);
 });
+
+test('push judgment: brain.push_decision rides on the voice.push it produced; a skip stays its own card', () => {
+  const rows = buildRows([
+    ev('herdr.transition', { from: 'working', to: 'done', agent: 'codex' }, 1, 'herdr', 'w5:p1'),
+    ev('brain.step', { template: 'announce', model: 'fake-reflex', dur_ms: 5, tool_calls: 0 }, 5, 'brain'),
+    ev('brain.push_decision', { via: 'brain', urgency_requested: 'interrupt', urgency_applied: 'idle', reason: 'ceiling', ceiling: 'normal', event: 'done', template: 'auth finished: ran the tests.', spoken: 'Auth finished the rerun you asked for.' }, 1, 'supervisor', 'w5:p1'),
+    ev('voice.push', { text: 'Auth finished the rerun you asked for.', urgency: 'idle' }, 1),
+    ev('brain.push_decision', { via: 'brain', urgency_requested: 'skip', urgency_applied: 'skip', reason: 'brain', ceiling: 'normal', event: 'done', template: 'docs finished: wrote the readme.' }, 200, 'supervisor', 'w6:p1'),
+    ev('brain.push_decision', { via: 'template', urgency_requested: '', urgency_applied: 'idle', reason: 'timeout', ceiling: 'chatty', event: 'done', template: 'docs finished.' }, 200, 'supervisor', 'w6:p1'),
+    ev('voice.push', { text: 'docs finished.', urgency: 'idle' }, 1),
+    ev('brain.yielded', { turn: 4, step: 2, agent: 'auth', event: 'done', ceo_waiting: 1 }, 1, 'brain'),
+    ev('brain.event_coalesced', { agent: 'auth', event: 'done', kind: 'announce' }, 1, 'brain'),
+  ]);
+  const c = cards(rows.rows);
+  const pushes = c.filter((r) => r.type === 'voice.push');
+  assert.equal(pushes.length, 2);
+  assert.deepEqual(pushes[0].decision, { via: 'brain', requested: 'interrupt', applied: 'idle', reason: 'ceiling', ceiling: 'normal', late: false });
+  assert.equal(pushes[0].title, 'push · idle · brain asked interrupt (ceiling)');
+  assert.ok(pushes[0].cls.includes('decided'));
+  assert.deepEqual(pushes[1].decision.via, 'template');
+  assert.equal(pushes[1].title, 'push · idle · template (timeout)');
+  const decisions = c.filter((r) => r.type === 'brain.push_decision');
+  assert.equal(decisions.length, 3, 'every decision is a card too');
+  assert.equal(decisions[0].title, 'push judgment');
+  assert.equal(decisions[1].summary, 'skip → skip · brain · ceiling normal · via brain · done · docs finished: wrote the readme.');
+  assert.equal(c.find((r) => r.type === 'brain.yielded').title, 'yielded to a CEO turn');
+  assert.equal(c.find((r) => r.type === 'brain.yielded').summary, 'turn 4 · before step 2 · auth done · 1 CEO turn waiting');
+  assert.equal(c.find((r) => r.type === 'brain.event_coalesced').summary, 'auth done · replaced the queued turn');
+});

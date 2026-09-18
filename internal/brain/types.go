@@ -184,7 +184,7 @@ type AgentInfo struct {
 	LastTask string
 	// LastResult is what the agent last did, spoken form with outcome.
 	LastResult string
-	// LastDetail is the enrichment detail stored with the last result
+	// LastDetail is the announce detail stored with the last result
 	// (what it related to, what was still open), when there is one.
 	LastDetail string
 	// LastBlock is the question the agent last asked (with whether it

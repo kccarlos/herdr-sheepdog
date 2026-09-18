@@ -283,6 +283,7 @@ export class SupervisorView {
       case 'worker': return this.renderLine(it, 'svp-worker', `${it.agent || '?'}: ${it.closed ? 'pane closed' : `${it.from} → ${it.to}`}${it.text ? it.text : ''}`);
       case 'note': return this.renderLine(it, 'svp-note', `note: ${it.text}`);
       case 'promise': return this.renderPromise(it);
+      case 'brainEvent': return this.renderBrainEvent(it);
       case 'screen': return this.renderScreen(it);
       case 'request': return this.renderRequest(it);
       case 'tool': return this.renderTool(it);
@@ -365,22 +366,56 @@ export class SupervisorView {
   }
 
   renderPush(it) {
-    const box = el('div', `item push ${it.urgency || 'idle'} svp-push`);
+    const d = it.decision;
+    const box = el('div', `item push ${it.urgency || 'idle'} svp-push${d ? ` decided via-${d.via}` : ''}`);
     const { h, open } = this.open.header(it.key, 'push-head', (h) => {
       h.appendChild(el('span', 'who', 'supervisor → assistant'));
       if (it.urgency) h.appendChild(el('span', `badge ${it.urgency}`, it.urgency));
       if (it.agent) h.appendChild(el('span', 'meta', it.agent));
       h.appendChild(el('span', 'text', it.text));
+      if (d) h.appendChild(el('span', `badge decision ${d.via === 'brain' ? (d.requested === d.applied ? 'as-asked' : 'capped') : 'template'}`, decisionLabel(d)));
       h.appendChild(el('span', 'meta', ` · ${fmtTime(it.ts)} · #${it.seq}${it.inWindow === false ? ' · on disk only' : ''}`));
     });
     box.appendChild(h);
     if (open) {
       const body = el('div', 'body');
+      if (d) {
+        body.appendChild(el('div', 'label', 'push judgment (brain.push_decision)'));
+        const bits = [`via ${d.via}`, d.requested ? `brain asked ${d.requested}` : 'no brain line', `applied ${d.applied}`, `reason ${d.reason}`, `ceiling ${d.ceiling}`, d.late ? 'late: the template was already spoken' : '', d.needsUser ? 'needs the CEO' : '', d.relatesTo ? `relates to "${d.relatesTo}"` : '', d.kept.length ? `keeps ${d.kept.join(', ')}` : '', d.error ? `error: ${d.error}` : ''];
+        body.appendChild(el('div', 'text', bits.filter(Boolean).join(' · ')));
+        if (d.template && d.template !== it.text) body.appendChild(el('div', 'muted small', `template: "${d.template}"`));
+        if (d.detail) body.appendChild(el('div', 'muted small', `detail: ${d.detail}`));
+        body.appendChild(el('div', 'label', 'decision event'));
+        body.appendChild(jsonPre(d.raw));
+      }
       body.appendChild(el('div', 'label', 'raw'));
       body.appendChild(jsonPre(it.raw));
       box.appendChild(body);
     }
     return box;
+  }
+
+  // A small line for a brain.* event without a message: a push judgment
+  // that spoke nothing, an event turn that yielded, a coalesced turn.
+  renderBrainEvent(it) {
+    let text;
+    switch (it.type) {
+      case 'yielded':
+        text = `yielded: turn ${it.turn} (${it.agent} ${it.event}) gave way to ${it.ceoWaiting === 1 ? 'a CEO turn' : `${it.ceoWaiting} CEO turns`} before step ${it.step}; the template spoke instead`;
+        break;
+      case 'coalesced':
+        text = `coalesced: a newer ${it.agent} ${it.event} event replaced the queued ${it.agent} turn; the template spoke instead`;
+        break;
+      default:
+        text = `push judgment: ${it.applied}${it.requested && it.requested !== it.applied ? ` (brain asked ${it.requested})` : ''} · ${it.reason}${it.reason === 'ceiling' ? ` ${it.ceiling}` : ''} · ${it.agent || it.pane || ''} ${it.event}${it.template ? ` · "${it.template}"` : ''}${it.late ? ' · late' : ''}`;
+    }
+    const row = el('div', `svp-line svp-brain-event ${it.type}${it.type === 'decision' ? ` reason-${it.reason}` : ''}`);
+    row.appendChild(el('span', 'text', text));
+    const meta = el('span', 'meta', ` · ${fmtTime(it.ts)}`);
+    const raw = this.rawToggle(it, meta);
+    row.appendChild(meta);
+    if (raw) row.appendChild(raw);
+    return row;
   }
 
   renderRequest(it) {
@@ -391,7 +426,8 @@ export class SupervisorView {
       h.appendChild(el('span', 'who', event ? 'supervisor → SVP' : 'assistant → SVP'));
       h.appendChild(el('span', `badge req-${it.reqKind}`, it.reqKind));
       if (event) {
-        h.appendChild(el('span', 'text', `${it.agent} ${it.event} · template "${it.question}"${it.promise ? ` · promise "${it.promise}"` : ''}`));
+        const n = it.promises ? it.promises.length : (it.promise ? 1 : 0);
+        h.appendChild(el('span', 'text', `${it.agent} ${it.event} · template "${it.question}"${it.templateSpoken ? ' (already spoken)' : ''}${n > 1 ? ` · keeps ${n} promises` : (it.promise ? ` · promise "${it.promise}"` : '')}`));
       } else {
         h.appendChild(el('span', 'text', `"${it.question}"`));
       }
@@ -543,7 +579,7 @@ export class SupervisorView {
 
   renderTurn(it) {
     const row = el('div', `svp-turn${it.fallback ? ' fallback' : ''}${it.complete ? '' : ' running'}`);
-    const bits = [`turn ${it.turn}`, it.trigger, it.reqKind];
+    const bits = [`turn ${it.turn}`, it.trigger, it.reqKind, it.agent ? `${it.agent} ${it.event}` : ''];
     if (it.modelCalls != null) bits.push(`${it.modelCalls} model call${it.modelCalls === 1 ? '' : 's'}`);
     if (it.durMs != null) bits.push(fmtMs(it.durMs));
     if (it.tokensIn) bits.push(`${fmtTokens(it.tokensIn)} in / ${fmtTokens(it.tokensOut)} out`);
@@ -563,6 +599,13 @@ export class SupervisorView {
     row.appendChild(el('div', 'below', `▼ in the context window · ${it.inWindow} message${it.inWindow === 1 ? '' : 's'} · ~${fmtTokens(it.tokens)} / ${fmtTokens(it.budget)} tokens ▼`));
     return row;
   }
+}
+
+/** The push card's badge: "brain: idle", "brain: interrupt → idle (ceiling)", "template (timeout)". */
+function decisionLabel(d) {
+  if (d.via !== 'brain') return `template${d.reason && d.reason !== 'brain' ? ` (${d.reason})` : ''}`;
+  if (d.requested === d.applied) return `brain: ${d.applied}${d.late ? ' · late' : ''}`;
+  return `brain: ${d.requested} → ${d.applied} (${d.reason})${d.late ? ' · late' : ''}`;
 }
 
 function chip(cls, text) {

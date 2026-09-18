@@ -82,6 +82,15 @@ export function eventSummary(ev) {
     case type === 'brain.compaction':
       parts.push(p.before_tokens != null || p.after_tokens != null ? `${p.before_tokens ?? '?'} → ${p.after_tokens ?? '?'} tokens` : '', p.dropped != null ? `${p.dropped} dropped` : '', p.reason);
       break;
+    case type === 'brain.push_decision':
+      parts.push(`${p.urgency_requested || 'no brain line'} → ${p.urgency_applied || '?'}`, p.reason, p.ceiling ? `ceiling ${p.ceiling}` : '', p.via ? `via ${p.via}` : '', p.late ? 'late' : '', p.event, p.spoken || p.template);
+      break;
+    case type === 'brain.yielded':
+      parts.push(p.turn != null ? `turn ${p.turn}` : '', p.step != null ? `before step ${p.step}` : '', p.agent ? `${p.agent} ${p.event || ''}`.trim() : '', p.ceo_waiting ? `${p.ceo_waiting} CEO turn${p.ceo_waiting === 1 ? '' : 's'} waiting` : '');
+      break;
+    case type === 'brain.event_coalesced':
+      parts.push(p.agent ? `${p.agent} ${p.event || ''}`.trim() : '', 'replaced the queued turn');
+      break;
     case type.endsWith('.tool_call'):
       parts.push(p.name, argSummary(p.args), p.via ? `via ${p.via}` : '');
       break;

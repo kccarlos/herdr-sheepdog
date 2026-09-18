@@ -57,17 +57,21 @@ Does:
   level (`idle` urgency; `interrupt` past its due time). It expires
   silently after `supervisor.promise_ttl_s`, and "cancel" with nothing
   pending cancels the latest one.
-- Adds context to the template path's block/done announcements: the
-  template speaks first at today's latency, then a `summarize` event turn
-  (read tools only, `brain.enrich_timeout_s`) may add what the sentence
-  lacked — which request it fulfils, what is still open — or answer with an
-  empty `spoken` when the sentence was sufficient. The enrichment is subject
-  to the same chattiness ceiling as the announcement (never at `quiet`).
+- Judges the pushes: on a worker's block or finish it runs one `announce`
+  event turn (read tools only, `brain.enrich_timeout_s`) with the template
+  sentence, the pane read, the promises the event keeps and its transcript,
+  and decides *whether* the assistant says anything (`skip`, `silent`) and
+  *how urgently* (`idle`, `interrupt`); its one line replaces the template
+  sentence and keeps the promises — see "Push judgment" below for the
+  ceiling code keeps.
 - Answers for the ear: `{spoken, detail, needs_user, options?}` — `spoken` ≤ 2
   sentences, `detail` for the assistant's follow-ups.
 - Falls back to the fast template path when it errors, exceeds its step budget,
   or exceeds ~8 s on a screen-answerable question. Voice never hangs on a loop.
-- Serialises turns: single writer, CEO turns before event-driven turns.
+- Serialises turns: single writer, CEO turns before event-driven turns; an
+  event turn gives way before its next model call when a CEO turn is
+  waiting, and a queued event turn is replaced by a newer one about the
+  same agent.
 
 Never:
 - Speaks directly to the CEO (only the assistant speaks) or bypasses a worker's
@@ -83,13 +87,46 @@ proactively. Enforced in the `send_keys` executor, not by prose. Everything
 else — instructions, Ctrl-C, questions — is the SVP's call (D4: workers'
 prompts are the safety gate).
 
+## Push judgment
+
+The SVP decides *whether* and *how urgently*; the assistant decides the
+*moment* (the push queue: one at a time, not while the CEO speaks, `idle`
+waits for a pause, `interrupt` does not). Code keeps the ceiling the SVP
+cannot lift:
+
+- The chattiness level: at `quiet` only questions, exits and kept promises
+  are spoken; at `normal` the SVP may not push a finish of an agent the CEO
+  has not dealt with within `supervisor.recent_minutes` unless a promise is
+  kept; at `chatty` anything it says. When the level would silence every
+  line and no promise is kept, no turn runs at all (so `silent` context is
+  only ever produced where a spoken line could have been).
+- Urgency: `interrupt` on a finish is kept only for a promise past its due
+  time or a decision the CEO must take (`needs_user`); on an addition to a
+  question, only while that question is still open. A due promise
+  interrupts whatever the SVP asked.
+- One line per finish: a kept promise is spoken through the SVP's line, and
+  a `skip` may not silence a promise (the template's "As you asked: …" is
+  spoken instead).
+- Latency: a block's question is pushed before the SVP is asked, and the
+  first audible announcement of a finish never waits beyond
+  `brain.announce_wait_s` (2 s) — past it the template sentence is spoken
+  and the SVP's line follows as an addition when it adds information.
+- Fallback: with the brain off, on timeout, fallback, yield (a CEO turn was
+  waiting) or coalescing (a newer event about the same agent), the template
+  path speaks exactly as before the brain existed.
+
+Every judgment is logged as `brain.push_decision` (`urgency_requested`,
+`urgency_applied`, `ceiling`, `reason`, `via`), with `supervisor.push_quiet`
+when the ceiling wins; the Supervisor tab shows it on the push card.
+
 ## Hot paths that stay code (latency, not safety)
 
 `briefing` from cache (sub-second success test; the SVP refreshes the cache in
 the background), `confirm`/`cancel` key mapping, debounce/dedup/TTL timers,
 chattiness as a hard ceiling on what the SVP may push — with one exception,
-kept promises, which the CEO asked for by name. The block/done template
-sentence stays code-first too: it is pushed before the SVP is consulted.
+kept promises, which the CEO asked for by name. A block's question stays
+code-first too: it is pushed before the SVP is consulted; a finish waits
+for the SVP's line at most `brain.announce_wait_s`.
 
 ## Borrowed from OpenClaw (concepts/system-prompt, context, context-engine, soul)
 
@@ -106,7 +143,7 @@ reasoning agent and its context is re-billed per turn.
 |---|---|
 | `prompts/assistant.md` | The assistant's whole system prompt (voice + rules, ≤ 350 words). |
 | `prompts/svp/SOUL.md` | The SVP's role: what it is, who it answers to, its bias to execution. |
-| `prompts/svp/RULES.md` | The SVP's tool guidance, one `## ` section per stable-prompt piece (tools, record, promises, the one rail, fallback, the answer contract). |
+| `prompts/svp/RULES.md` | The SVP's tool guidance, one `## ` section per stable-prompt piece (tools, record, promises, announcing, the one rail, fallback, the answer contract). |
 | `prompts/USER.md` | The CEO's profile in the SVP's prompt: `{aliases}` (from the roster), `{chattiness}`, `{tz}`, and a free-text section the CEO edits directly. |
 
 `~/.config/sheepdog/prompts/<same relative path>` (config `prompts.dir`,
@@ -135,6 +172,8 @@ text, and are never overridable.
 fallback, `brain.*` events → 1b prompt files, `USER.md` (aliases generated from
 config), `~/.config/sheepdog/prompts/` overrides → 1c Supervisor tab (transcript
 with window marker, prompt-budget meter) → 2 summaries with context + promises
-(done: `summarize` / `keep_promise` event turns, the `promise` tool,
-`session.promises`, promise cards in the Supervisor tab) → 3 push judgment.
-Measure model calls per CEO turn after 1a, before 2.
+(done: the `promise` tool, `session.promises`, promise cards in the
+Supervisor tab) → 3 push judgment (done: the `announce` event turn replaces
+the `summarize` / `keep_promise` turns; the code ceiling above;
+`brain.push_decision` on the push card; event turns yield to CEO turns and
+coalesce per agent). Measure model calls per CEO turn after 1a, before 2.

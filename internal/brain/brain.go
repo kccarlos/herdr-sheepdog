@@ -24,9 +24,8 @@ const (
 	DefaultMaxSteps       = 6
 	DefaultAskTimeout     = 8 * time.Second
 	DefaultProposeTimeout = 12 * time.Second
-	// DefaultEnrichTimeout bounds an event turn (summarize, keep_promise):
-	// on expiry nothing extra is said (the template sentence was already
-	// pushed).
+	// DefaultEnrichTimeout bounds an event turn (announce): on expiry the
+	// supervisor speaks its template sentence instead.
 	DefaultEnrichTimeout   = 6 * time.Second
 	DefaultWindowTokens    = 24000
 	DefaultPruneAfterTurns = 3

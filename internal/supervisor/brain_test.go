@@ -31,7 +31,7 @@ func newBrainHarness(t *testing.T, m *braintest.Model, opts ...func(*Config)) *h
 	t.Helper()
 	log := &recLog{}
 	dir := t.TempDir()
-	// Event turns (the enrichment a block or finish triggers) answer
+	// Event turns (the announce turn a block or finish triggers) answer
 	// "nothing to add" unless a test scripts them (or the model is the
 	// reflex, which answers them itself).
 	if m.EventDefault == nil && m.Default == nil {
@@ -165,7 +165,7 @@ func TestBrainSendKeysPassesTheRail(t *testing.T) {
 	if h.log.count("pending.confirmed") != 1 || h.log.count("brain.rail_blocked") != 0 {
 		t.Errorf("confirmed=%d rail_blocked=%d", h.log.count("pending.confirmed"), h.log.count("brain.rail_blocked"))
 	}
-	// Call 0 was the block's summarize event turn; the CEO turn is 1–2.
+	// Call 0 was the block's announce event turn; the CEO turn is 1–2.
 	if sys := m.Calls()[1].System(); !strings.Contains(sys, "WAITING FOR AN ANSWER: whether it can create hello.txt") || !strings.Contains(sys, `"Yes, proceed" -> keys [enter]`) {
 		t.Errorf("roster lacks the prompt:\n%s", sys)
 	}
