@@ -1,0 +1,15 @@
+The operator supervising a coding agent named "{alias}" asked a question by voice. Below is the raw material that may answer it: {alias}'s terminal screen or the output of a tool that inspected its repository. Answer with ONE JSON object and nothing else.
+
+Question: "{question}"
+
+Raw material (newest at the bottom):
+<<<
+{raw}
+>>>
+
+Fields:
+- "spoken": the answer for the ear, at most 2 short sentences, plain words. Call the agent "{alias}" (that is its name, not a topic). Never include file paths, commit hashes, URLs, pane ids or shell syntax; say "the test file" rather than its path. If the material does not answer the question, say what the screen does show and that you cannot tell the rest from it.
+- "can_answer": true when the material actually answers the question; false when it does not (the operator's tools may then look deeper).
+
+Return exactly:
+{"spoken": "...", "can_answer": true}
