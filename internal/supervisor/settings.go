@@ -118,9 +118,17 @@ func (s *Supervisor) chattiness() Chattiness {
 func (s *Supervisor) allows(k pushKind) bool { return s.chattiness().allows(k) }
 
 // doneKind classifies a finish: involved when the user dealt with the
-// agent within RecentWindow (see state.Agent.LastInteraction).
+// agent within RecentWindow (state.Agent.LastInteraction, or a spoken
+// briefing that named it).
 func (s *Supervisor) doneKind(row state.Agent) pushKind {
-	if row.LastInteraction != nil && s.cfg.Now().Sub(*row.LastInteraction) <= s.cfg.RecentWindow {
+	now := s.cfg.Now()
+	s.mu.Lock()
+	mentioned, ok := s.mentioned[row.PaneID]
+	s.mu.Unlock()
+	if ok && now.Sub(mentioned) <= s.cfg.RecentWindow {
+		return pushDoneInvolved
+	}
+	if row.LastInteraction != nil && now.Sub(*row.LastInteraction) <= s.cfg.RecentWindow {
 		return pushDoneInvolved
 	}
 	return pushDoneOther

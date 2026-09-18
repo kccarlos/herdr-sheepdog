@@ -122,6 +122,8 @@ type Supervisor struct {
 	expired       *state.PendingAction // last expired answer_prompt (scenario 8)
 	seq           uint64               // pending action ids
 	interrupted   map[string]time.Time // pane -> when cancel sent Ctrl-C (suppresses the next "finished")
+	lastSubject   string               // pane most recently spoken about (last push subject or tool target)
+	mentioned     map[string]time.Time // pane -> when a spoken briefing last named it
 }
 
 // interruptGrace is how long after a user cancel a pane's working -> done
@@ -144,7 +146,7 @@ func New(store *state.Store, h Herdr, templates llm.Templates, querier Querier, 
 		return nil, err
 	}
 	cfg.chattiness = level
-	return &Supervisor{store: store, herdr: h, llm: templates, querier: querier, pusher: pusher, log: log, cfg: cfg, interrupted: map[string]time.Time{}}, nil
+	return &Supervisor{store: store, herdr: h, llm: templates, querier: querier, pusher: pusher, log: log, cfg: cfg, interrupted: map[string]time.Time{}, mentioned: map[string]time.Time{}}, nil
 }
 
 // Run drives pending-action expiry and the periodic silent briefing until
@@ -192,10 +194,15 @@ func (s *Supervisor) voiceConnected() bool {
 	return s.store.Snapshot().Session.VoiceConnected
 }
 
-// push delivers text to the voice session when one is connected.
+// push delivers text to the voice session when one is connected. A
+// spoken push about a pane makes that pane the current subject (what
+// "it" means in the next ask).
 func (s *Supervisor) push(paneID, text string, u voice.Urgency) {
 	if text == "" {
 		return
+	}
+	if paneID != "" && u != voice.UrgencySilent {
+		s.setSubject(paneID)
 	}
 	if s.pusher == nil || !s.voiceConnected() {
 		s.log.Log(logSource, "supervisor.push_skipped", paneID, map[string]any{"text": text, "urgency": u.String()})
@@ -226,6 +233,13 @@ func (s *Supervisor) pushBriefing() {
 	now := s.cfg.Now()
 	_ = s.store.UpdateSession(func(ss *state.Session) { ss.LastBriefing, ss.LastBriefingAt = text, &now })
 	s.push("", text, voice.UrgencySilent)
+}
+
+// setSubject records the pane the conversation is about.
+func (s *Supervisor) setSubject(paneID string) {
+	s.mu.Lock()
+	s.lastSubject = paneID
+	s.mu.Unlock()
 }
 
 func (s *Supervisor) nextID(prefix string) string {

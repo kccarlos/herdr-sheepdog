@@ -163,6 +163,23 @@ func TestSpokenAnswerTwoSentencesNoPaths(t *testing.T) {
 	if got.Spoken != "The tests in a file failed on a nil pointer. Auth is retrying now." || !got.CanAnswer {
 		t.Errorf("got %+v", got)
 	}
+	// The prompt asks for the answer to the question, keeps the last 16 KB
+	// of the material and carries the question and the alias.
+	big := strings.Repeat("old line that should be dropped\n", 1000) + "NEWEST LINE\n"
+	f = newFake(t, ok(`{"spoken":"It added a Quota section.","can_answer":true}`))
+	c = newClient(t, f, []string{"k"}, nil)
+	if _, err := c.SpokenAnswer(context.Background(), big, `what is the new "section"`, "docs"); err != nil {
+		t.Fatal(err)
+	}
+	user := f.Requests()[0].user
+	if !strings.Contains(user, "NEWEST LINE") || len(user) < DefaultScreenBytes+4000 || len(user) > DefaultResultBytes+4000 {
+		t.Errorf("prompt is %d bytes; want ~%d with the newest line", len(user), DefaultResultBytes)
+	}
+	for _, want := range []string{`Question: "what is the new 'section'"`, `"docs"`, "Answer what was asked", "final message", "Do not restate what state the agent is in"} {
+		if !strings.Contains(user, want) {
+			t.Errorf("prompt lacks %q", want)
+		}
+	}
 }
 
 // TestSummarizeDoneParsesAndNormalises runs the captured "after" screens

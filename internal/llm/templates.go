@@ -345,14 +345,16 @@ func orUnknown(s string) string {
 
 // SpokenAnswer turns raw material (a screen tail or a CLI tool's output)
 // about the agent called alias into an answer for the ear: at most two
-// sentences, no paths, hashes or URLs (D9), enforced in Go after the model.
+// sentences, no paths, hashes or URLs (D9), enforced in Go after the
+// model. The material keeps its last DefaultResultBytes (~200 lines) so
+// an agent's final message above its status bar is still in view.
 func (c *Client) SpokenAnswer(ctx context.Context, raw, question, alias string) (Answer, error) {
 	if alias = strings.TrimSpace(alias); alias == "" {
 		alias = "the agent"
 	}
 	user, err := prompts.Render(TemplateSpokenAnswer, map[string]string{
 		"question": strings.ReplaceAll(strings.TrimSpace(question), `"`, "'"),
-		"raw":      TailBytes(raw, DefaultScreenBytes),
+		"raw":      TailBytes(raw, DefaultResultBytes),
 		"alias":    alias,
 	})
 	if err != nil {

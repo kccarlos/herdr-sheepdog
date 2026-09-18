@@ -123,10 +123,6 @@ func TestNormalDoneWindow(t *testing.T) {
 	// A spoken briefing names vps: its next finish is announced.
 	h.transition("w7:p1", herdr.StateDone, herdr.StateWorking)
 	h.call(ToolBriefing, nil)
-	row, _ := h.store.Get("w7:p1")
-	if row.LastInteraction == nil || !row.LastInteraction.Equal(h.clock.Now()) {
-		t.Fatalf("briefing did not touch vps: %+v", row.LastInteraction)
-	}
 	h.transition("w7:p1", herdr.StateWorking, herdr.StateDone)
 	if got := h.pushTexts(); len(got) != 1 || !strings.HasPrefix(got[0], "vps finished") {
 		t.Fatalf("finish after a spoken briefing pushed %q", got)

@@ -163,3 +163,44 @@ func (s *slowDone) SummarizeDone(ctx context.Context, screen, alias string) (llm
 }
 
 func (s *slowDone) lastErr() error { return s.err }
+
+// TestAskTargetsLastSubject: ask with no alias goes to the only agent, else
+// to the agent most recently discussed (last push subject or tool target),
+// else asks which one.
+func TestAskTargetsLastSubject(t *testing.T) {
+	h := twoAgents(t)
+	h.srv.SetScreen("w5:p1", fixture(t, "codex-working.screen.txt"))
+	h.srv.SetScreen("w6:p1", "nothing useful")
+	res := h.call(ToolAsk, map[string]any{"question": "what is it doing"})
+	if !res.Clarify || res.Spoken != "Which agent do you mean, auth or docs?" {
+		t.Fatalf("no subject yet = %+v", res)
+	}
+	if h.llm.count("spoken_answer") != 0 {
+		t.Fatal("clarify called the model")
+	}
+	// A propose makes its target the subject.
+	h.call(ToolPropose, map[string]any{"instruction": "tell docs to write the readme"})
+	if res := h.call(ToolAsk, map[string]any{"question": "what is it doing"}); res.Spoken != "The screen does not say." {
+		t.Errorf("after propose to docs = %+v", res)
+	}
+	// A push about auth (its question) makes auth the subject.
+	h.block("w5:p1", "codex-approval-prompt.screen.txt")
+	h.srv.SetScreen("w5:p1", fixture(t, "codex-working.screen.txt"))
+	if res := h.call(ToolAsk, map[string]any{"question": "is it stuck"}); res.Spoken != "auth is running a sleep command and waiting for it." {
+		t.Errorf("after a push about auth = %+v", res)
+	}
+	// A named alias wins and becomes the subject; the subject survives
+	// its own finish and is dropped when the pane goes away.
+	h.srv.SetScreen("w6:p1", "nothing useful")
+	if res := h.call(ToolAsk, map[string]any{"question": "what now", "agent": "docs"}); res.Spoken != "The screen does not say." {
+		t.Errorf("named docs = %+v", res)
+	}
+	if res := h.call(ToolAsk, map[string]any{"question": "and now"}); res.Spoken != "The screen does not say." {
+		t.Errorf("subject after naming docs = %+v", res)
+	}
+	h.sup.HandleTransition(context.Background(), herdr.Transition{PaneID: "w6:p1", From: herdr.StateIdle, To: herdr.StateUnknown, Closed: true, At: h.clock.Now()})
+	// One agent left: it is the target whatever the subject was.
+	if res := h.call(ToolAsk, map[string]any{"question": "is it stuck"}); res.Spoken != "auth is running a sleep command and waiting for it." {
+		t.Errorf("single agent = %+v", res)
+	}
+}
