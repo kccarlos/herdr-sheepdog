@@ -118,6 +118,7 @@ type Supervisor struct {
 	mu            sync.Mutex
 	briefing      string               // cached sentence; "" means recompute
 	briefingPanes []string             // panes the cached sentence names
+	briefingAt    time.Time            // when the cached sentence was composed
 	expired       *state.PendingAction // last expired answer_prompt (scenario 8)
 	seq           uint64               // pending action ids
 	interrupted   map[string]time.Time // pane -> when cancel sent Ctrl-C (suppresses the next "finished")
