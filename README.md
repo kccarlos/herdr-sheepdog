@@ -180,10 +180,19 @@ value comes from `supervisor.chattiness` in the config (default `normal`).
 | `chatty` | `normal`, plus every finish (agents you never touched too) and "docs started on 'write the readme'" when an instruction you sent is picked up. |
 
 The one thing that ignores the level is a **promise** you made it keep
-(next section). With the supervisor brain on, an announcement the level
-lets through may be followed by one more line of context from the brain
-("That was the rerun you asked for; the same test still fails."), never at
-`quiet`, and only when it adds something the sentence lacked.
+(next section). With the supervisor brain on, the level is a *ceiling*,
+not the sentence: for every block or finish the brain gets the template
+sentence, the screen and your recent words and decides whether to say
+anything and how urgently — one line that replaces the sentence ("Auth
+finished the rerun you asked for; the same test still fails."), or
+nothing when you already know, or silent context for the voice model —
+and the level caps what it asked for: never a finish at `quiet`, never
+an agent you have not dealt with at `normal`, `interrupt` only for a due
+promise or a decision you must take. A question is never delayed for the
+brain (it is spoken first; the brain may add the decision in context), and
+a finish waits for the brain's line at most `brain.announce_wait_s` (2 s)
+before the plain sentence is spoken. Every judgment is in the event log
+as `brain.push_decision` and on the push card in the Supervisor tab.
 
 "Dealt with recently" means that within the last `supervisor.recent_minutes`
 (default 30) the agent was blocked and announced, was sent an answer or an
@@ -208,10 +217,11 @@ it (`promise(agent, text, event)` — the condition is `done`, `blocked`,
 `idle` or `any_change`), the state file keeps it across restarts
 (`session.promises`), the briefing reminds you ("You asked me to tell you
 when auth finishes."), and at the matching event it is spoken **whatever
-the chattiness level** — the brain phrases it with the result ("You asked
-me to tell you when auth was done: the tests passed."), or, without the
-brain, "As you asked: auth finished: …". It waits for a pause unless you
-asked to be interrupted or the promise is past its due time. A promise
+the chattiness level** — the brain phrases it with the result in the one
+line it speaks for that finish ("You asked me to tell you when auth was
+done: the tests passed."), or, without the brain, "As you asked: auth
+finished: …". It waits for a pause unless you asked to be interrupted or
+the promise is past its due time. A promise
 expires silently after `supervisor.promise_ttl_s` (default two hours);
 "cancel" with nothing else pending cancels the latest one ("Cancelled the
 reminder."). The Supervisor tab shows every promise as a card with its

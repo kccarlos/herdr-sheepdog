@@ -93,6 +93,7 @@ class Builder {
     this.turn = null; // { chain, input } — the user turn tool calls adopt
     this.loose = null; // { chain, work } — supervisor work with no tool call open
     this.trigger = null; // { kind, chain, card } — what the next speech answers
+    this.decisions = []; // brain.push_decision payloads not yet matched to their voice.push
   }
 
   newChain(kind, root) {
@@ -295,6 +296,14 @@ class Builder {
       cls: ['push', `push-${urgency}`, ...(p.skipped ? ['skipped'] : [])], chainRoot: true,
     });
     card.summary = clip(p.text || '', 160);
+    // The brain.push_decision that produced this push (matched by text).
+    const di = this.decisions.findIndex((d) => (d.spoken && d.spoken === p.text) || (d.via === 'template' && (d.template === p.text || `As you asked: ${d.template}` === p.text)));
+    if (di >= 0) {
+      const d = this.decisions.splice(di, 1)[0];
+      card.decision = { via: d.via, requested: d.urgency_requested || '', applied: d.urgency_applied || '', reason: d.reason || '', ceiling: d.ceiling || '', late: !!d.late };
+      card.cls.push('decided');
+      card.title += d.via === 'brain' ? (d.urgency_requested && d.urgency_requested !== d.urgency_applied ? ` · brain asked ${d.urgency_requested} (${d.reason})` : ' · brain') : ` · template${d.reason && d.reason !== 'brain' ? ` (${d.reason})` : ''}`;
+    }
     if (this.loose) {
       card.chain = this.loose.chain;
       this.loose = null;
@@ -469,6 +478,16 @@ class Builder {
         card.cls.push('minor');
       }
       if (type === 'supervisor.push_quiet' || type === 'supervisor.push_skipped') card.silent = true;
+      if (type === 'brain.push_decision') {
+        card.title = 'push judgment';
+        card.cls.push('brain', 'decision');
+        // A decision that speaks nothing stays a card of its own; one
+        // that leads to a push is shown on that push (skip never does).
+        if (p.urgency_applied !== 'skip') this.decisions.push(p);
+      } else if (type === 'brain.yielded' || type === 'brain.event_coalesced') {
+        card.title = type === 'brain.yielded' ? 'yielded to a CEO turn' : 'event turn coalesced';
+        card.cls.push('brain');
+      }
       return card;
     }
     if (type.startsWith('web.client.') || type === 'web.inject' || type === 'web.utterance_unrouted' || type === 'web.push_error') {

@@ -130,22 +130,21 @@ func (s *Supervisor) finishTask(paneID string) {
 }
 
 // onDone reads the pane of a finished agent, summarises what it did
-// (summarize_done, stored as last_result whatever the level) and
-// announces it when the chattiness level allows it for this agent (every
-// finish at chatty; at normal only agents the user dealt with within
-// RecentWindow; never at quiet). A model failure falls back to the plain
-// "finished" push, never silence. A screen that ends in a question herdr
-// did not flag (agy) is treated as a block.
-// After the announcement the brain may enrich it (enrich) and open
-// promises for the finish are kept (keepPromises), in that order.
+// (summarize_done, stored as last_result whatever the level) and hands
+// the sentence to announce: spoken when the chattiness level allows it
+// for this agent (every finish at chatty; at normal only agents the user
+// dealt with within RecentWindow; never at quiet), phrased by the brain
+// when one is attached, with the finish's open promises kept in the same
+// line. A model failure falls back to the plain "finished" sentence,
+// never silence. A screen that ends in a question herdr did not flag
+// (agy) is treated as a block.
 func (s *Supervisor) onDone(ctx context.Context, row state.Agent) {
 	alias := aliasOr(row.Alias)
 	kind := s.doneKind(row)
 	read, err := s.herdr.Read(ctx, row.PaneID, herdr.SourceRecentUnwrapped, s.cfg.ReadLines)
 	if err != nil {
 		s.log.Log(logSource, "supervisor.done_error", row.PaneID, map[string]any{"stage": "read", "error": err.Error()})
-		s.pushIf(kind, row.PaneID, alias+" finished.")
-		s.keepPromises(ctx, row, brain.PromiseEventDone, alias+" finished.")
+		s.announce(ctx, announcement{row: row, kind: kind, event: brain.PromiseEventDone, sentence: alias + " finished."})
 		return
 	}
 	sctx, cancel := context.WithTimeout(ctx, s.cfg.SummaryTimeout)
@@ -153,9 +152,7 @@ func (s *Supervisor) onDone(ctx context.Context, row state.Agent) {
 	cancel()
 	if err != nil {
 		s.log.Log(logSource, "supervisor.done_error", row.PaneID, map[string]any{"stage": "summarize", "error": err.Error()})
-		s.pushIf(kind, row.PaneID, alias+" finished.")
-		s.enrich(ctx, row, kind, brain.PromiseEventDone, alias+" finished.", read.Text)
-		s.keepPromises(ctx, row, brain.PromiseEventDone, alias+" finished.")
+		s.announce(ctx, announcement{row: row, kind: kind, event: brain.PromiseEventDone, sentence: alias + " finished.", screen: read.Text})
 		return
 	}
 	s.recordResult(row.PaneID, sum)
@@ -165,10 +162,7 @@ func (s *Supervisor) onDone(ctx context.Context, row state.Agent) {
 		s.announceBlock(ctx, row, read.Text)
 		return
 	}
-	sentence := alias + " finished: " + sum.Spoken + "."
-	s.pushIf(kind, row.PaneID, sentence)
-	s.enrich(ctx, row, kind, brain.PromiseEventDone, sentence, read.Text)
-	s.keepPromises(ctx, row, brain.PromiseEventDone, sentence)
+	s.announce(ctx, announcement{row: row, kind: kind, event: brain.PromiseEventDone, sentence: alias + " finished: " + sum.Spoken + ".", screen: read.Text})
 }
 
 // recordResult stores the finish summary on the row's last_result.
@@ -201,32 +195,30 @@ func (s *Supervisor) onBlocked(ctx context.Context, row state.Agent) {
 
 // announceBlock summarises a prompt already read from the pane, records
 // the question and — when the agent is really asking — creates the
-// pending action and announces it.
-// After the announcement the brain may enrich it (enrich) and open
-// promises for the block are kept (keepPromises), in that order.
+// pending action and pushes the question at once (never delayed for the
+// brain). announce then keeps the block's promises and lets the brain
+// add a line in context.
 func (s *Supervisor) announceBlock(ctx context.Context, row state.Agent, screen string) {
 	alias := aliasOr(row.Alias)
 	sum, err := s.llm.SummarizeBlock(ctx, screen, alias)
 	if err != nil {
 		s.log.Log(logSource, "supervisor.block_error", row.PaneID, map[string]any{"stage": "summarize", "error": err.Error()})
 		s.push(row.PaneID, alias+" is waiting at a prompt.", voice.UrgencyIdle)
-		s.keepPromises(ctx, row, brain.PromiseEventBlocked, alias+" is waiting at a prompt.")
+		s.announce(ctx, announcement{row: row, kind: pushQuestion, event: brain.PromiseEventBlocked, sentence: alias + " is waiting at a prompt.", screen: screen, spoken: true})
 		return
 	}
 	s.recordBlock(row.PaneID, sum)
 	if !sum.IsQuestion {
 		s.log.Log(logSource, "supervisor.blocked_no_question", row.PaneID, map[string]any{"spoken": sum.Spoken})
 		s.pushIf(pushBlockedInfo, row.PaneID, sum.Spoken)
-		s.enrich(ctx, row, pushBlockedInfo, brain.PromiseEventBlocked, sum.Spoken, screen)
-		s.keepPromises(ctx, row, brain.PromiseEventBlocked, sum.Spoken)
+		s.announce(ctx, announcement{row: row, kind: pushBlockedInfo, event: brain.PromiseEventBlocked, sentence: sum.Spoken, screen: screen, spoken: true})
 		return
 	}
 	s.mu.Lock()
 	spoken := s.setPending(s.newAnswerPrompt(row.PaneID, sum))
 	s.mu.Unlock()
 	s.push(row.PaneID, spoken, voice.UrgencyIdle)
-	s.enrich(ctx, row, pushQuestion, brain.PromiseEventBlocked, spoken, screen)
-	s.keepPromises(ctx, row, brain.PromiseEventBlocked, spoken)
+	s.announce(ctx, announcement{row: row, kind: pushQuestion, event: brain.PromiseEventBlocked, sentence: spoken, screen: screen, spoken: true})
 }
 
 // recentlyInterrupted reports (and consumes) a cancel-sent Ctrl-C for the

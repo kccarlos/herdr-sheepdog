@@ -224,7 +224,17 @@ func (a *App) wire() error {
 		bcfg := BrainConfig(cfg)
 		bcfg.Prompts = a.prompts
 		bcfg.Model = FakeBrainModel // so no brain.step ever claims a Gemini model
-		b, err := brain.New(bcfg, braintest.Reflex(), a.log)
+		model := braintest.Reflex()
+		if v := os.Getenv("SHEEPDOG_FAKE_BRAIN_DELAY_MS"); v != "" {
+			// A dev knob for watching turns overlap (CONFIG.md [brain]):
+			// every fake model call takes this long.
+			ms, err := strconv.Atoi(v)
+			if err != nil || ms < 0 {
+				return fmt.Errorf("app: SHEEPDOG_FAKE_BRAIN_DELAY_MS=%q: want a non-negative integer", v)
+			}
+			model.Delay = time.Duration(ms) * time.Millisecond
+		}
+		b, err := brain.New(bcfg, model, a.log)
 		if err != nil {
 			return fmt.Errorf("app: brain: %w", err)
 		}
@@ -241,12 +251,14 @@ func (a *App) wire() error {
 		a.brain = b
 	}
 	sup, err := supervisor.New(store, a.herdr, llmClient, querier, pusher, a.log, supervisor.Config{
-		PendingTTL:   time.Duration(cfg.PendingTTLS) * time.Second,
-		DataDir:      cfg.DataDir,
-		Chattiness:   cfg.Supervisor.Chattiness,
-		RecentWindow: time.Duration(cfg.Supervisor.RecentMinutes) * time.Minute,
-		PromiseTTL:   time.Duration(cfg.Supervisor.PromiseTTLS) * time.Second,
-		Brain:        a.brain,
+		PendingTTL:     time.Duration(cfg.PendingTTLS) * time.Second,
+		DataDir:        cfg.DataDir,
+		Chattiness:     cfg.Supervisor.Chattiness,
+		RecentWindow:   time.Duration(cfg.Supervisor.RecentMinutes) * time.Minute,
+		PromiseTTL:     time.Duration(cfg.Supervisor.PromiseTTLS) * time.Second,
+		SummaryTimeout: time.Duration(cfg.Supervisor.SummaryTimeoutS) * time.Second,
+		AnnounceWait:   time.Duration(cfg.Brain.AnnounceWaitS) * time.Second,
+		Brain:          a.brain,
 	})
 	if err != nil {
 		if a.brain != nil {

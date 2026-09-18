@@ -60,6 +60,9 @@ const (
 	pushDoneOther
 	// pushStarted: an instruction the user sent was picked up.
 	pushStarted
+	// pushPromiseOnly: a working/idle sentence that is never announced
+	// on its own, only spoken as a kept promise.
+	pushPromiseOnly
 )
 
 // allows is the policy table: which pushes each level speaks. "idle

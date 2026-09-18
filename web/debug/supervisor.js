@@ -26,7 +26,13 @@
 //                the promise.* events report since
 //   screen       the pane read the supervisor handed an event turn
 //                (event_screen), pruned like a tool result
+//   brainEvent   a small line for a brain.* event that has no message of
+//                its own: a push judgment that spoke nothing (skip), an
+//                event turn that yielded to a CEO turn, a queued event
+//                turn a newer one replaced (placed by timestamp)
 //   other        any kind this file does not know yet
+// A push item carries `decision` (the brain.push_decision that produced
+// it: requested vs applied urgency, reason, via) when one matches.
 import { argSummary } from './grouping.js';
 
 /** The transcript kinds (internal/brain MessageKind) and their meter group. */
@@ -49,7 +55,10 @@ export const KIND_GROUPS = {
 export const GROUP_ORDER = ['compaction', 'ceo', 'assistant', 'push', 'worker', 'note', 'promise', 'request', 'tool', 'result', 'reply', 'other'];
 
 const reRequest = /^Request from the assistant \((ask|propose)\): (?:question|instruction)=("(?:[^"\\]|\\.)*")(?: agent=("(?:[^"\\]|\\.)*"|\(none[^)]*\)))?(?: \[triggered by an event[^\]]*\])?/;
-const reEvent = /^Event from the supervisor \((summarize|keep_promise)\): agent=("(?:[^"\\]|\\.)*") event=("(?:[^"\\]|\\.)*") template=("(?:[^"\\]|\\.)*")(?: promise=("(?:[^"\\]|\\.)*"))?/;
+// announce is the current event turn; summarize / keep_promise are kept
+// so transcripts of earlier runs still render.
+const reEvent = /^Event from the supervisor \((announce|summarize|keep_promise)\): agent=("(?:[^"\\]|\\.)*") event=("(?:[^"\\]|\\.)*") template=("(?:[^"\\]|\\.)*")(?: promise=("(?:[^"\\]|\\.)*"))?/;
+const rePromiseLine = /^- ([^:\s]+): ("(?:[^"\\]|\\.)*")(?: \(([^)]*)\))?$/gm;
 
 function unquote(s) {
   try { return JSON.parse(s); } catch (_) { return s; }
@@ -57,14 +66,23 @@ function unquote(s) {
 
 /**
  * Parses a request message (assemble.go requestText) into reqKind (ask /
- * propose), question, agent and trigger. A nudge ("Time is up…", "That
- * was not the JSON…") has reqKind null and `nudge: true`.
+ * propose / announce), question, agent and trigger. An event request
+ * (announce) carries the template sentence as `question`, the promises
+ * it keeps (`promises`, `promise` = the first one's text) and
+ * `templateSpoken` when the sentence was pushed before the turn. A nudge
+ * ("Time is up…", "That was not the JSON…") has reqKind null and
+ * `nudge: true`.
  */
 export function parseRequest(content) {
   const m = reRequest.exec(content || '');
   if (!m) {
     const e = reEvent.exec(content || '');
-    if (e) return { reqKind: e[1], question: unquote(e[4]), agent: unquote(e[2]), event: unquote(e[3]), promise: e[5] ? unquote(e[5]) : '', trigger: 'event', nudge: false };
+    if (e) {
+      const promises = [];
+      for (const pm of (content || '').matchAll(rePromiseLine)) promises.push({ id: pm[1], text: unquote(pm[2]), condition: pm[3] || '' });
+      const promise = e[5] ? unquote(e[5]) : (promises.length ? promises[0].text : '');
+      return { reqKind: e[1], question: unquote(e[4]), agent: unquote(e[2]), event: unquote(e[3]), promise, promises, templateSpoken: /already said the sentence/.test(content || ''), trigger: 'event', nudge: false };
+    }
     return { reqKind: null, question: content || '', agent: '', trigger: 'ceo', nudge: true };
   }
   const agent = m[3] && m[3].startsWith('"') ? unquote(m[3]) : '';
@@ -118,9 +136,12 @@ export function parseWorkerEvent(content) {
 /**
  * TurnLog collects the brain.* events the tab correlates with the
  * transcript: brain.turn and brain.fallback by turn number, brain.step
- * counts, brain.compaction in order, and the promise.* events by promise
- * id (the latest status of each promise, so a card made in one turn can
- * show it was kept later). A daemon.start resets the turns: the event
+ * counts, brain.compaction in order, the promise.* events by promise id
+ * (the latest status of each promise, so a card made in one turn can
+ * show it was kept later), the brain.push_decision events (matched to
+ * the push they produced by text, or shown as a line when nothing was
+ * spoken) and brain.yielded / brain.event_coalesced (lines). A
+ * daemon.start resets the turns, decisions and notes: the event
  * backfill spans the day, and turn numbers restart with the run; the
  * promises survive a restart, so their statuses are kept.
  */
@@ -129,6 +150,8 @@ export class TurnLog {
     this.turns = new Map(); // turn → info
     this.compactions = [];
     this.promises = new Map(); // promise id → { status, ts, spoken, via, urgency }
+    this.decisions = []; // brain.push_decision, in order
+    this.notes = []; // brain.yielded / brain.event_coalesced lines, in order
     this.runs = 0;
   }
 
@@ -149,7 +172,22 @@ export class TurnLog {
       case 'daemon.start':
         this.turns.clear();
         this.compactions = [];
+        this.decisions = [];
+        this.notes = [];
         this.runs++;
+        return true;
+      case 'brain.push_decision':
+        this.decisions.push({
+          ts: ev.ts, tms: Date.parse(ev.ts) || 0, pane: ev.pane_id || '', agent: p.agent || '', via: p.via || '', requested: p.urgency_requested || '', applied: p.urgency_applied || '', reason: p.reason || '', ceiling: p.ceiling || '',
+          late: !!p.late, event: p.event || '', template: p.template || '', templateSpoken: !!p.template_spoken, spoken: p.spoken || '', detail: p.detail || '', relatesTo: p.relates_to || '', needsUser: !!p.needs_user,
+          kept: Array.isArray(p.kept) ? p.kept : [], error: p.error || '', raw: ev,
+        });
+        return true;
+      case 'brain.yielded':
+        this.notes.push({ ts: ev.ts, tms: Date.parse(ev.ts) || 0, type: 'yielded', turn: p.turn || 0, step: p.step || 0, agent: p.agent || '', event: p.event || '', ceoWaiting: p.ceo_waiting || 0, raw: ev });
+        return true;
+      case 'brain.event_coalesced':
+        this.notes.push({ ts: ev.ts, tms: Date.parse(ev.ts) || 0, type: 'coalesced', agent: p.agent || '', event: p.event || '', raw: ev });
         return true;
       case 'brain.turn': {
         const t = this.info(p.turn);
@@ -201,10 +239,41 @@ export class TurnLog {
     return this.turns.get(n) || null;
   }
 
+  /**
+   * The lines to place among the messages: every yielded / coalesced
+   * note, and the decisions whose text no push carries (nothing was
+   * spoken: skip, or the ceiling won). `claimed` is the set of decisions
+   * a push item took.
+   */
+  lines(claimed) {
+    const out = [...this.notes];
+    for (const d of this.decisions) if (!claimed.has(d)) out.push({ ...d, type: 'decision' });
+    return out.sort((a, b) => a.tms - b.tms);
+  }
+
   /** The latest known state of promise id, or null. */
   promise(id) {
     return this.promises.get(id) || null;
   }
+}
+
+/**
+ * decisionFor finds the brain.push_decision that produced a push: the
+ * earliest unclaimed decision whose spoken line, template sentence or
+ * "As you asked: <template>" is the push's text (a template-path push
+ * has no spoken of its own). Pushes and decisions are both in time
+ * order, so the earliest unclaimed match is the right one.
+ */
+export function decisionFor(log, pushText, claimed) {
+  for (const d of log.decisions) {
+    if (claimed.has(d)) continue;
+    if (d.applied === 'skip') continue;
+    if ((d.spoken && d.spoken === pushText) || (d.via === 'template' && (d.template === pushText || `As you asked: ${d.template}` === pushText))) {
+      claimed.add(d);
+      return d;
+    }
+  }
+  return null;
 }
 
 /**
@@ -240,9 +309,28 @@ export function buildTranscriptView(messages, context, turns, opts = {}) {
   let onDisk = 0;
   let compactionIdx = 0;
   const lastComp = context && context.last_compaction ? context.last_compaction : null;
+  // Pushes claim their decisions first (in order), so the lines are the
+  // decisions that spoke nothing plus the yielded / coalesced notes.
+  const claimed = new Set();
+  const decisions = new Map(); // seq → decision
+  for (const m of messages) {
+    if (m && m.kind === 'push' && typeof m.seq === 'number') {
+      const d = decisionFor(log, parsePush(m.content).text, claimed);
+      if (d) decisions.set(m.seq, d);
+    }
+  }
+  const lines = log.lines(claimed);
+  let lineIdx = 0;
+  const flushLines = (upTo) => {
+    while (lineIdx < lines.length && (upTo == null || lines[lineIdx].tms <= upTo)) {
+      const l = lines[lineIdx++];
+      items.push({ kind: 'brainEvent', key: `ev:${l.type}:${l.tms}:${lineIdx}`, seq: 0, ts: l.ts, turn: l.turn || 0, ...l, raw: l.raw });
+    }
+  };
 
   for (const m of messages) {
     if (!m || typeof m.seq !== 'number') continue;
+    flushLines(Date.parse(m.ts) || 0);
     const inWindow = win.known ? win.seqs.has(m.seq) : undefined;
     if (win.known && !inWindow) onDisk++;
     if (opts.windowOnly && win.known && !inWindow) continue;
@@ -265,6 +353,7 @@ export function buildTranscriptView(messages, context, turns, opts = {}) {
       items.push({
         kind: 'turn', key: `turn:${m.turn}`, seq: m.seq, ts: m.ts, turn: m.turn,
         trigger: (info && info.trigger) || (req && req.trigger) || '', reqKind: (info && info.kind) || (req && req.reqKind) || '',
+        agent: req && req.trigger === 'event' ? req.agent : '', event: req && req.trigger === 'event' ? req.event : '',
         modelCalls: info ? info.modelCalls : null, durMs: info ? info.durMs : null, fallback: !!(info && info.fallback), reason: info ? info.reason : '',
         tokensIn: info ? info.tokensIn : 0, tokensOut: info ? info.tokensOut : 0, windowTokens: info ? info.windowTokens : null, acted: info ? info.acted : 0, complete: !!(info && info.complete),
       });
@@ -279,7 +368,7 @@ export function buildTranscriptView(messages, context, turns, opts = {}) {
         items.push({ ...base, kind: 'assistant', text: m.content || '' });
         break;
       case 'push':
-        items.push({ ...base, kind: 'push', ...parsePush(m.content) });
+        items.push({ ...base, kind: 'push', ...parsePush(m.content), decision: decisions.get(m.seq) || null });
         break;
       case 'worker_event':
         items.push({ ...base, kind: 'worker', ...parseWorkerEvent(m.content) });
@@ -341,6 +430,7 @@ export function buildTranscriptView(messages, context, turns, opts = {}) {
         items.push({ ...base, kind: 'other', text: m.content || '', rawKind: m.kind || '' });
     }
   }
+  flushLines(null);
   if (!markerDone && win.known && messages.length) {
     // Nothing in the window at all (everything compacted away): the
     // marker closes the list.

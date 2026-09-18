@@ -280,3 +280,64 @@ test('promise cards: made in a turn, kept later; the promise.* events give the c
   // A promise message without the record parses from its content line.
   assert.deepEqual(parsePromise({ content: 'Promise (expired): "tell me if docs asks", when docs asks something', agent: 'docs' }), { id: '', text: 'tell me if docs asks', agent: 'docs', event: '', status: 'expired', condition: 'when docs asks something', createdTurn: 0, due: null });
 });
+
+test('announce turns: the request parses promises and template_spoken; the push card carries its decision; skips, yields and coalesced turns are lines', () => {
+  seq = 0;
+  const req = parseRequest('Event from the supervisor (announce): agent="auth" event="done" template="auth finished: ran the tests."\nPromises this event keeps (the CEO asked to be told; your line says so, with the result):\n- pr-1: "let me know when it\'s done" (when auth finishes)\n- pr-2: "tell me if anything happens" (when auth changes state)\nNothing has been said about this yet. Decide…');
+  assert.deepEqual({ reqKind: req.reqKind, agent: req.agent, event: req.event, question: req.question, promise: req.promise, promises: req.promises, templateSpoken: req.templateSpoken, trigger: req.trigger }, {
+    reqKind: 'announce', agent: 'auth', event: 'done', question: 'auth finished: ran the tests.', promise: "let me know when it's done",
+    promises: [{ id: 'pr-1', text: "let me know when it's done", condition: 'when auth finishes' }, { id: 'pr-2', text: 'tell me if anything happens', condition: 'when auth changes state' }], templateSpoken: false, trigger: 'event',
+  });
+  const block = parseRequest('Event from the supervisor (announce): agent="auth" event="blocked" template="auth is asking whether it can create hello.txt."\nThe assistant already said the sentence in template (a question is never delayed). Decide…');
+  assert.deepEqual({ promises: block.promises, templateSpoken: block.templateSpoken }, { promises: [], templateSpoken: true });
+  // Earlier runs' transcripts still parse.
+  assert.equal(parseRequest('Event from the supervisor (keep_promise): agent="auth" event="done" template="x" promise="tell me" condition="when auth finishes"').promise, 'tell me');
+
+  const msgs = [
+    msg('worker_event', { content: 'auth: working -> blocked', agent: 'auth' }),
+    msg('push', { content: '(idle) auth is asking whether it can create hello.txt.', agent: 'auth' }),
+    msg('request', { turn: 1, content: 'Event from the supervisor (announce): agent="auth" event="blocked" template="auth is asking whether it can create hello.txt."\nThe assistant already said the sentence in template…' }),
+    msg('reply', { turn: 1, content: '{"spoken": "", "urgency": "skip", "detail": "Nothing to add."}' }),
+    msg('worker_event', { content: 'auth: blocked -> working', agent: 'auth' }),
+    msg('worker_event', { content: 'auth: working -> done', agent: 'auth' }),
+    msg('request', { turn: 2, content: 'Event from the supervisor (announce): agent="auth" event="done" template="auth finished: ran the tests."\n- pr-1: "let me know when it\'s done" (when auth finishes)\nNothing has been said…' }),
+    msg('reply', { turn: 2, content: '{"spoken": "You asked to be told: auth ran the tests and they pass.", "urgency": "interrupt", "keeps_promise_ids": ["pr-1"]}' }),
+    msg('push', { content: '(idle) You asked to be told: auth ran the tests and they pass.', agent: 'auth' }),
+    msg('worker_event', { content: 'docs: working -> done', agent: 'docs' }),
+    msg('push', { content: '(idle) docs finished: wrote the readme.', agent: 'docs' }),
+    msg('push', { content: '(idle) That was the readme you asked for.', agent: 'docs' }),
+  ];
+  const log = new TurnLog();
+  const at = (i) => msgs[i].ts;
+  const between = (i, j) => new Date((Date.parse(msgs[i].ts) + Date.parse(msgs[j].ts)) / 2).toISOString();
+  const dev = (ts, payload, pane) => ({ ts, source: 'supervisor', type: 'brain.push_decision', pane_id: pane, payload });
+  assert.ok(log.add(dev(between(3, 4), { via: 'brain', urgency_requested: 'skip', urgency_applied: 'skip', reason: 'brain', ceiling: 'normal', event: 'blocked', template: 'auth is asking whether it can create hello.txt.', template_spoken: true, spoken: '' }, 'w5:p1')));
+  log.add(dev(between(7, 8), { via: 'brain', urgency_requested: 'interrupt', urgency_applied: 'idle', reason: 'ceiling', ceiling: 'normal', event: 'done', template: 'auth finished: ran the tests.', spoken: 'You asked to be told: auth ran the tests and they pass.', kept: ['pr-1'], keeps_promise_ids: ['pr-1'] }, 'w5:p1'));
+  log.add(dev(between(9, 10), { via: 'template', urgency_requested: '', urgency_applied: 'idle', reason: 'wait', ceiling: 'chatty', event: 'done', template: 'docs finished: wrote the readme.' }, 'w6:p1'));
+  log.add(dev(between(10, 11), { via: 'brain', urgency_requested: 'idle', urgency_applied: 'idle', reason: 'brain', ceiling: 'chatty', event: 'done', late: true, template: 'docs finished: wrote the readme.', spoken: 'That was the readme you asked for.', relates_to: 'the readme' }, 'w6:p1'));
+  assert.ok(log.add({ ts: between(4, 5), source: 'brain', type: 'brain.yielded', payload: { turn: 9, step: 2, agent: 'auth', event: 'done', ceo_waiting: 1 } }));
+  assert.ok(log.add({ ts: between(5, 6), source: 'brain', type: 'brain.event_coalesced', payload: { agent: 'auth', event: 'done', kind: 'announce' } }));
+  log.add(ev('brain.turn', { turn: 1, trigger: 'event', kind: 'announce', steps: 1, model_calls: 1, dur_ms: 30 }));
+  log.add(ev('brain.turn', { turn: 2, trigger: 'event', kind: 'announce', steps: 2, model_calls: 2, dur_ms: 60 }));
+
+  const items = buildTranscriptView(msgs, null, log);
+  assert.deepEqual(kinds(items), ['worker', 'push', 'turn', 'request', 'reply', 'brainEvent', 'worker', 'brainEvent', 'worker', 'brainEvent', 'turn', 'request', 'reply', 'push', 'worker', 'push', 'push']);
+  const lines = items.filter((it) => it.kind === 'brainEvent');
+  assert.deepEqual(lines.map((l) => l.type), ['decision', 'yielded', 'coalesced']);
+  assert.deepEqual({ applied: lines[0].applied, reason: lines[0].reason, template: lines[0].template }, { applied: 'skip', reason: 'brain', template: 'auth is asking whether it can create hello.txt.' });
+  assert.deepEqual({ turn: lines[1].turn, step: lines[1].step, ceoWaiting: lines[1].ceoWaiting }, { turn: 9, step: 2, ceoWaiting: 1 });
+  const pushes = items.filter((it) => it.kind === 'push');
+  assert.equal(pushes[0].decision, null, 'the question itself is pushed before any decision');
+  assert.deepEqual({ via: pushes[1].decision.via, requested: pushes[1].decision.requested, applied: pushes[1].decision.applied, reason: pushes[1].decision.reason, kept: pushes[1].decision.kept }, { via: 'brain', requested: 'interrupt', applied: 'idle', reason: 'ceiling', kept: ['pr-1'] });
+  assert.deepEqual({ via: pushes[2].decision.via, reason: pushes[2].decision.reason }, { via: 'template', reason: 'wait' });
+  assert.deepEqual({ late: pushes[3].decision.late, relatesTo: pushes[3].decision.relatesTo }, { late: true, relatesTo: 'the readme' });
+  const turns = items.filter((it) => it.kind === 'turn');
+  assert.deepEqual(turns.map((t) => [t.reqKind, t.agent, t.event, t.modelCalls]), [['announce', 'auth', 'blocked', 1], ['announce', 'auth', 'done', 2]]);
+  const requests = items.filter((it) => it.kind === 'request');
+  assert.equal(requests[0].templateSpoken, true);
+  assert.deepEqual(requests[1].promises, [{ id: 'pr-1', text: "let me know when it's done", condition: 'when auth finishes' }]);
+  // daemon.start resets the decisions and notes with the turns.
+  log.add(ev('daemon.start', {}));
+  assert.deepEqual([log.decisions.length, log.notes.length], [0, 0]);
+  assert.equal(buildTranscriptView(msgs, null, log).filter((it) => it.kind === 'brainEvent').length, 0);
+});

@@ -47,8 +47,8 @@ func (c Call) Text() string {
 	return b.String()
 }
 
-// IsEvent reports whether the call belongs to an event turn (summarize,
-// keep_promise): the newest request line in its contents is an event's.
+// IsEvent reports whether the call belongs to an event turn (announce):
+// the newest request line in its contents is an event's.
 func (c Call) IsEvent() bool {
 	for i := len(c.Contents) - 1; i >= 0; i-- {
 		var t string
@@ -96,20 +96,23 @@ type Step struct {
 
 // Model is a scripted brain.Model. Responses are consumed in order; when
 // the script runs out, Default answers (a plain JSON reply when nil).
-// EventDefault, when set, answers every event turn (summarize,
-// keep_promise) without consuming the script, so a scripted CEO turn is
-// not thrown off by the enrichment a block or finish triggers.
+// EventDefault, when set, answers every event turn (announce) without
+// consuming the script, so a scripted CEO turn is not thrown off by the
+// announce turn a block or finish triggers. Delay, when set, is waited
+// before every response (a dev knob: `sheepdog serve --brain=fake` with
+// SHEEPDOG_FAKE_BRAIN_DELAY_MS, to watch turns overlap).
 type Model struct {
 	mu           sync.Mutex
 	script       []Step
 	calls        []Call
 	Default      *Step
 	EventDefault *Step
+	Delay        time.Duration
 }
 
-// NothingToAdd is the event-turn reply "the template was sufficient".
+// NothingToAdd is the announce reply "say nothing": an empty spoken.
 func NothingToAdd() *Step {
-	return &Step{Text: `{"spoken": "", "detail": "Nothing to add.", "needs_user": false}`}
+	return &Step{Text: `{"spoken": "", "detail": "Nothing to add.", "needs_user": false, "urgency": "skip"}`}
 }
 
 // NewModel returns a Model with the given script.
@@ -146,7 +149,15 @@ func (m *Model) Generate(ctx context.Context, model string, contents []*genai.Co
 	} else {
 		step = Step{Text: Reply("I do not know.", "")}
 	}
+	delay := m.Delay
 	m.mu.Unlock()
+	if delay > 0 {
+		select {
+		case <-time.After(delay):
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
 	if step.Block != nil {
 		select {
 		case <-step.Block:
@@ -438,8 +449,12 @@ var ErrBoom = errors.New("boom")
 // requestText and brain.summarize).
 var (
 	reRequest   = regexp.MustCompile(`Request from the assistant \((ask|propose)\): (?:question|instruction)="((?:[^"\\]|\\.)*)" agent=(?:"((?:[^"\\]|\\.)*)"|\(none)`)
-	reEvent     = regexp.MustCompile(`Event from the supervisor \((summarize|keep_promise)\): agent="((?:[^"\\]|\\.)*)" event="((?:[^"\\]|\\.)*)" template="((?:[^"\\]|\\.)*)"(?: promise="((?:[^"\\]|\\.)*)")?`)
+	reEvent     = regexp.MustCompile(`Event from the supervisor \((announce)\): agent="((?:[^"\\]|\\.)*)" event="((?:[^"\\]|\\.)*)" template="((?:[^"\\]|\\.)*)"`)
 	reSummarise = regexp.MustCompile(`^Summarise the following`)
+	// rePromiseLine is one promise of an announce request ("- pr-1: "text" (when auth finishes)").
+	rePromiseLine = regexp.MustCompile(`(?m)^- ([^:\s]+): "((?:[^"\\]|\\.)*)"`)
+	// rePushed is a push already in the window ("Pushed to the assistant: "(idle) text"").
+	rePushed = regexp.MustCompile(`Pushed to the assistant: "\((\w+)\) ((?:[^"\\]|\\.)*)"`)
 	// rePromise splits a combined utterance ("run the tests and let me
 	// know when it's done") into the instruction and the promise.
 	rePromise  = regexp.MustCompile(`(?i)^(.*?)\s*(?:,|;|\band\b|\bthen\b)?\s*\b((?:please\s+)?(?:let me know|tell me|remind me|ping me|notify me)\b.*)$`)
@@ -458,14 +473,18 @@ var (
 // answers with the roster and a propose asks which agent. A propose
 // with "let me know when …" / "tell me when …" / "remind me …" in it
 // also records a promise (after the instruction, when there is one);
-// a bare one records only the promise. An event turn answers without
-// tools: keep_promise with "As you asked: <template>", summarize with
-// "That was the "<last task>" you asked for." when the ledger shows a
-// last task for the agent, else with an empty spoken (the template was
-// sufficient). The compaction summariser's prompt gets a one-line
-// summary. Every answer is the JSON of the answer contract, so the loop
-// runs exactly as with a real model: request → tool call → tool result
-// → reply, with brain.* events and transcript messages.
+// a bare one records only the promise. An announce turn about a finish
+// first recalls the agent's record (one read tool round), then answers:
+// with one "As you asked: <template>" line when the event keeps
+// promises; with skip when the window shows the sentence was already
+// pushed; else with the template plus "That was the "<last task>" you
+// asked for." when the ledger shows a last task for the agent, at idle
+// urgency. An announce turn whose template was already spoken (a block)
+// answers at once: the promise line when promises are kept, else skip.
+// The compaction summariser's prompt gets a one-line summary. Every
+// answer is the JSON of the answer contract, so the loop runs exactly as
+// with a real model: request → tool call → tool result → reply, with
+// brain.* events and transcript messages.
 func Reflex() *Model {
 	m := &Model{}
 	m.Default = &Step{Fn: reflex}
@@ -502,11 +521,19 @@ func reflex(call Call) (*genai.GenerateContentResponse, error) {
 		return Response(Step{Text: fmt.Sprintf("Summary by the fake model: %d transcript lines about the agents and what the CEO asked; nothing is still open.", lines)}), nil
 	}
 	usage := [2]int32{int32(len(call.Text()) / 4), 30}
+	forced := call.Config != nil && call.Config.ToolConfig != nil && call.Config.ToolConfig.FunctionCallingConfig != nil && call.Config.ToolConfig.FunctionCallingConfig.Mode == genai.FunctionCallingConfigModeNone
 	// The newest request or event line decides.
 	reqs := reRequest.FindAllStringSubmatchIndex(text, -1)
 	evs := reEvent.FindAllStringSubmatchIndex(text, -1)
 	if len(evs) > 0 && (len(reqs) == 0 || evs[len(evs)-1][0] > reqs[len(reqs)-1][0]) {
-		return Response(Step{Text: eventReply(call, text, evs[len(evs)-1]), Usage: usage}), nil
+		m := evs[len(evs)-1]
+		ev := reEvent.FindStringSubmatch(text[m[0]:])
+		if !forced && !strings.Contains(text[m[0]:], "already said the sentence") && !calledSinceEvent(call, brain.ToolRecall) {
+			// A finish: look at the record for the agent first (what the
+			// CEO asked of it), then announce.
+			return Response(Step{Calls: []*genai.FunctionCall{FC(brain.ToolRecall, map[string]any{"query": unquote(ev[2])})}, Usage: usage}), nil
+		}
+		return Response(Step{Text: eventReply(call, text, m), Usage: usage}), nil
 	}
 	if len(reqs) == 0 {
 		return Response(Step{Text: Reply("The fake model has no request to answer.", "This is the reflex model (--brain=fake); it only answers ask and propose requests."), Usage: [2]int32{int32(len(call.Text()) / 4), 20}}), nil
@@ -518,7 +545,7 @@ func reflex(call Call) (*genai.GenerateContentResponse, error) {
 		// request (a bare "let me know when it's done").
 		question = lastCEOUtterance(call)
 	}
-	if call.Config != nil && call.Config.ToolConfig != nil && call.Config.ToolConfig.FunctionCallingConfig != nil && call.Config.ToolConfig.FunctionCallingConfig.Mode == genai.FunctionCallingConfigModeNone {
+	if forced {
 		return Response(Step{Text: Reply("I ran out of steps before reading anything.", "The fake model was asked to answer without tools."), Usage: usage}), nil
 	}
 	switch {
@@ -535,6 +562,10 @@ func reflex(call Call) (*genai.GenerateContentResponse, error) {
 // respondToResult is the reflex's next step after a tool result.
 func respondToResult(call Call, fr *genai.FunctionResponse) *genai.GenerateContentResponse {
 	usage := [2]int32{int32(len(call.Text()) / 4), 40}
+	if text, m := lastEvent(call); m != nil {
+		// An announce turn after its recall round: answer.
+		return Response(Step{Text: eventReply(call, text, m), Usage: usage})
+	}
 	kind, question := lastRequest(call)
 	switch fr.Name {
 	case brain.ToolListAgents:
@@ -571,29 +602,84 @@ func respondToResult(call Call, fr *genai.FunctionResponse) *genai.GenerateConte
 	return Response(Step{Text: replyFromResult(fr), Usage: usage})
 }
 
-// eventReply answers an event turn without tools. m is the submatch
-// index of the newest event line in text.
+// eventReply answers an announce turn. m is the submatch index of the
+// newest event line in text.
 func eventReply(call Call, text string, m []int) string {
 	ev := reEvent.FindStringSubmatch(text[m[0]:])
-	kind, agent, template := ev[1], unquote(ev[2]), unquote(ev[4])
-	promise := unquote(ev[5])
-	if kind == "keep_promise" {
-		spoken := "As you asked: " + template
-		if !strings.HasSuffix(spoken, ".") {
-			spoken += "."
-		}
-		return Reply(spoken, fmt.Sprintf("Kept the promise %q by the fake model.", promise))
+	agent, template := unquote(ev[2]), unquote(ev[4])
+	sentence := template
+	if sentence != "" && !strings.HasSuffix(sentence, ".") {
+		sentence += "."
 	}
-	// summarize: relate the finish to the last task the ledger shows for
-	// the agent; nothing to add otherwise.
+	var ids []string
+	for _, p := range rePromiseLine.FindAllStringSubmatch(text[m[0]:], -1) {
+		ids = append(ids, p[1])
+	}
+	if len(ids) > 0 {
+		// One line keeps every promise; nothing else is said about it.
+		return mustJSON(brain.Reply{Spoken: "As you asked: " + sentence, Detail: "The fake model kept the promise with the template sentence.", Urgency: brain.UrgencyIdle, KeepsPromiseIDs: ids})
+	}
+	if strings.Contains(text[m[0]:], "already said the sentence") {
+		return mustJSON(brain.Reply{Spoken: "", Detail: "The fake model has nothing to add to a sentence the assistant already said.", Urgency: brain.UrgencySkip})
+	}
+	for _, p := range rePushed.FindAllStringSubmatch(call.Text(), -1) {
+		if strings.Contains(unquote(p[2]), template) {
+			return mustJSON(brain.Reply{Spoken: "", Detail: "The fake model saw the sentence was already pushed to the assistant.", Urgency: brain.UrgencySkip})
+		}
+	}
+	// Relate the finish to the last task the ledger shows for the agent.
 	for _, lt := range reLastTask.FindAllStringSubmatch(call.System(), -1) {
 		if strings.EqualFold(lt[1], agent) {
 			task := unquote(lt[2])
-			b, _ := json.Marshal(brain.Reply{Spoken: fmt.Sprintf("That was the %q you asked for.", task), Detail: "The fake model related the event to the agent's last task from the ledger.", RelatesTo: task})
-			return string(b)
+			return mustJSON(brain.Reply{Spoken: fmt.Sprintf("%s That was the %q you asked for.", sentence, task), Detail: "The fake model related the event to the agent's last task from the ledger.", RelatesTo: task, Urgency: brain.UrgencyIdle})
 		}
 	}
-	b, _ := json.Marshal(brain.Reply{Spoken: "", Detail: "The fake model found nothing to add to the template sentence."})
+	return mustJSON(brain.Reply{Spoken: sentence, Detail: "The fake model found nothing to add to the template sentence.", Urgency: brain.UrgencyIdle})
+}
+
+// lastEvent returns the text part holding the newest event line and the
+// line's submatch index, or nil when a request line is newer (or there
+// is none).
+func lastEvent(call Call) (string, []int) {
+	var text string
+	var m []int
+	for _, c := range call.Contents {
+		for _, p := range c.Parts {
+			if p.Text == "" {
+				continue
+			}
+			reqs := reRequest.FindAllStringIndex(p.Text, -1)
+			evs := reEvent.FindAllStringSubmatchIndex(p.Text, -1)
+			switch {
+			case len(evs) > 0 && (len(reqs) == 0 || evs[len(evs)-1][0] > reqs[len(reqs)-1][0]):
+				text, m = p.Text, evs[len(evs)-1]
+			case len(reqs) > 0:
+				text, m = "", nil
+			}
+		}
+	}
+	return text, m
+}
+
+// calledSinceEvent reports whether a function call named tool was made
+// after the newest event line in the call's contents.
+func calledSinceEvent(call Call, tool string) bool {
+	called := false
+	for _, c := range call.Contents {
+		for _, p := range c.Parts {
+			if p.Text != "" && reEvent.MatchString(p.Text) {
+				called = false
+			}
+			if p.FunctionCall != nil && p.FunctionCall.Name == tool {
+				called = true
+			}
+		}
+	}
+	return called
+}
+
+func mustJSON(v any) string {
+	b, _ := json.Marshal(v)
 	return string(b)
 }
 

@@ -136,28 +136,30 @@ func requestText(req Request) string {
 	return s + "\nUse tools as needed, then reply with the JSON object of the answer contract."
 }
 
-// eventRequestText is the request message of an event turn (parsed by
-// braintest's reflex model and web/debug/supervisor.js; keep the shape).
+// eventRequestText is the request message of an announce turn (parsed by
+// braintest's reflex model and web/debug/supervisor.js; keep the shape of
+// the first line and of the promise lines).
 func eventRequestText(req Request) string {
 	agent := aliasOr(req.Agent)
 	event := req.Event
 	if event == "" {
 		event = "changed state"
 	}
-	switch req.Kind {
-	case KindKeepPromise:
-		text, cond := "", ""
-		if req.Promise != nil {
-			text, cond = req.Promise.Text, promiseCondition(*req.Promise)
+	var b strings.Builder
+	fmt.Fprintf(&b, "Event from the supervisor (announce): agent=%q event=%q template=%q\n", agent, event, req.Template)
+	if len(req.Promises) > 0 {
+		b.WriteString("Promises this event keeps (the CEO asked to be told; your line says so, with the result):\n")
+		for _, p := range req.Promises {
+			fmt.Fprintf(&b, "- %s: %q (%s)\n", p.ID, p.Text, promiseCondition(p))
 		}
-		return fmt.Sprintf("Event from the supervisor (keep_promise): agent=%q event=%q template=%q promise=%q condition=%q\n"+
-			"The CEO asked to be told this, and now it has happened; the sentence in template is what the announcement said (it may not have been spoken at the current chattiness level). "+
-			"Reply with the JSON object of the answer contract: spoken is one line that keeps the promise, saying what the CEO asked to be told together with the result, in the CEO's terms; needs_user true when they must act on it. No tools are needed unless the result is unclear.", agent, event, req.Template, text, cond)
-	default:
-		return fmt.Sprintf("Event from the supervisor (summarize): agent=%q event=%q template=%q\n"+
-			"The assistant already said the sentence in template. Add only what it lacks and the CEO would want to hear: which request of theirs this fulfils (relates_to), what changed against what they asked, what is still open, whether they must act now. "+
-			"Reply with the JSON object of the answer contract, spoken at most two short sentences that do not repeat the template; set spoken to \"\" when the template was sufficient, and relates_to to the CEO's request it fulfils when there is one.", agent, event, req.Template)
 	}
+	if req.TemplateSpoken {
+		b.WriteString("The assistant already said the sentence in template (a question is never delayed). Decide whether to add one line and how urgently: add only what it lacks and the CEO would want now — the decision named in context, which request of theirs this is about, what they said about it — and skip when the sentence was enough or they already know.")
+	} else {
+		b.WriteString("Nothing has been said about this yet. Decide whether the assistant says anything, what, and how urgently: your spoken replaces the template sentence, so carry its news (what the agent did, in the CEO's terms) plus what the sentence lacked — which request of theirs it fulfils, what changed against what they asked, what is still open. Skip when the CEO already knows (the assistant relayed it, or they just asked and heard it) or it is not worth their attention; silent when it is context the assistant should have but not say.")
+	}
+	b.WriteString(" Reply with the JSON object of the answer contract plus \"urgency\": one of interrupt (the CEO must act now), idle (at the next pause), silent (context only, not spoken) or skip (say nothing); \"keeps_promise_ids\" for the promise ids above your line keeps; \"relates_to\" for the CEO's request it fulfils; needs_user true when they must decide or act. One line, at most two short sentences. The screen the supervisor read is above; read tools only.")
+	return b.String()
 }
 
 // promiseLine renders a promise record for the window and recall.

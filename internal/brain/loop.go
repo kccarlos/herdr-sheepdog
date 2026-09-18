@@ -60,8 +60,20 @@ func (b *Brain) Turn(ctx context.Context, req Request) (Reply, error) {
 	tctx, cancel := context.WithTimeout(ctx, timeout+b.cfg.FinalGrace)
 	defer cancel()
 	start := b.cfg.Now()
-	if err := b.lock.acquire(tctx, req.Trigger == TriggerCEO); err != nil {
-		b.log.Log(logSource, "brain.fallback", "", map[string]any{"reason": "queue_timeout", "kind": string(req.Kind), "trigger": string(req.Trigger), "error": err.Error()})
+	key := ""
+	if req.Trigger == TriggerEvent {
+		key = req.Agent
+	}
+	replaced, err := b.lock.acquire(tctx, req.Trigger == TriggerCEO, key)
+	if replaced {
+		b.log.Log(logSource, "brain.event_coalesced", "", map[string]any{"agent": req.Agent, "event": req.Event, "kind": string(req.Kind)})
+	}
+	if err != nil {
+		reason := "queue_timeout"
+		if errors.Is(err, ErrCoalesced) {
+			reason = "coalesced"
+		}
+		b.log.Log(logSource, "brain.fallback", "", map[string]any{"reason": reason, "kind": string(req.Kind), "trigger": string(req.Trigger), "agent": req.Agent, "error": err.Error()})
 		return Reply{}, fmt.Errorf("%w: waiting for the turn lock: %w", ErrFallback, err)
 	}
 	t := &turn{req: req, start: start, soft: start.Add(timeout)}
@@ -105,6 +117,16 @@ func (b *Brain) run(ctx context.Context, t *turn) (Reply, error) {
 	for step := 1; step <= b.cfg.MaxSteps; step++ {
 		if err := ctx.Err(); err != nil {
 			return b.fail(t, reasonFor(err), err)
+		}
+		if t.req.Trigger == TriggerEvent {
+			// The CEO comes first: an event turn gives way before its
+			// next model call when a CEO turn is waiting for the lock
+			// (the step in flight is never cut short; a turn that
+			// answered in the step before returns its answer).
+			if n := b.lock.ceoWaiting(); n > 0 {
+				b.log.Log(logSource, "brain.yielded", "", map[string]any{"turn": t.n, "kind": string(t.req.Kind), "agent": t.req.Agent, "event": t.req.Event, "step": step, "steps_done": t.steps, "ceo_waiting": n})
+				return b.fail(t, "yielded", ErrYielded)
+			}
 		}
 		t.steps = step
 		// The last step, or one starting with too little budget left for

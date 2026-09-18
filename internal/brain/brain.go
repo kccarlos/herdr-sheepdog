@@ -24,9 +24,8 @@ const (
 	DefaultMaxSteps       = 6
 	DefaultAskTimeout     = 8 * time.Second
 	DefaultProposeTimeout = 12 * time.Second
-	// DefaultEnrichTimeout bounds an event turn (summarize, keep_promise):
-	// on expiry nothing extra is said (the template sentence was already
-	// pushed).
+	// DefaultEnrichTimeout bounds an event turn (announce): on expiry the
+	// supervisor speaks its template sentence instead.
 	DefaultEnrichTimeout   = 6 * time.Second
 	DefaultWindowTokens    = 24000
 	DefaultPruneAfterTurns = 3
@@ -228,6 +227,14 @@ func (b *Brain) Engine() ContextEngine { return b.engine }
 
 // Config returns the effective configuration (defaults applied).
 func (b *Brain) Config() Config { return b.cfg }
+
+// Queued returns how many turns wait for the turn lock, CEO turns and
+// event turns separately.
+func (b *Brain) Queued() (ceo, event int) {
+	b.lock.mu.Lock()
+	defer b.lock.mu.Unlock()
+	return len(b.lock.ceo), len(b.lock.event)
+}
 
 // Turns returns how many turns have started.
 func (b *Brain) Turns() int {

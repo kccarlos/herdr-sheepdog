@@ -213,7 +213,11 @@ td.task, td.block, td.result { max-width: 18em; overflow: hidden; text-overflow:
 .badge.needs-user { background: var(--blocked); } .badge.clarify { background: var(--voice); } .badge.options { background: var(--working); } .badge.error { background: var(--blocked); }
 .badge.pruned { background: transparent; color: var(--muted); border: 1px dashed var(--muted); }
 .badge.req-ask { background: var(--k-request); } .badge.req-propose { background: var(--web); }
-.badge.req-summarize, .badge.req-keep_promise { background: var(--svp); }
+.badge.req-summarize, .badge.req-keep_promise, .badge.req-announce { background: var(--svp); }
+.badge.decision { background: var(--svp); } .badge.decision.capped { background: var(--unknown); } .badge.decision.template { background: transparent; color: var(--muted); border: 1px dashed var(--muted); }
+.svp-brain-event .text { color: var(--muted); font-style: italic; }
+.svp-brain-event.yielded .text, .svp-brain-event.coalesced .text { color: var(--voice); }
+.svp-brain-event.reason-ceiling .text { color: var(--idle); }
 .item.svp-request.svp-event { border-left-color: var(--svp); background: #f4faf6; }
 .item.svp-promise { border-left: 3px solid var(--k-promise); background: #fff7ed; }
 .item.svp-promise.status-kept { border-left-color: var(--done); background: #f0fdf4; }

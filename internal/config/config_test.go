@@ -366,7 +366,7 @@ func TestSupervisorConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Supervisor.Chattiness != "normal" || cfg.Supervisor.RecentMinutes != 30 {
+	if cfg.Supervisor.Chattiness != "normal" || cfg.Supervisor.RecentMinutes != 30 || cfg.Supervisor.SummaryTimeoutS != 15 {
 		t.Errorf("supervisor defaults = %+v", cfg.Supervisor)
 	}
 	dir := t.TempDir()
@@ -381,20 +381,21 @@ func TestSupervisorConfig(t *testing.T) {
 	if cfg.Supervisor.Chattiness != "quiet" || cfg.Supervisor.RecentMinutes != 5 {
 		t.Errorf("from file = %+v", cfg.Supervisor)
 	}
-	cfg, err = load(path, envFrom(map[string]string{"SHEEPDOG_SUPERVISOR_CHATTINESS": " Chatty ", "SHEEPDOG_SUPERVISOR_RECENT_MINUTES": "45"}))
+	cfg, err = load(path, envFrom(map[string]string{"SHEEPDOG_SUPERVISOR_CHATTINESS": " Chatty ", "SHEEPDOG_SUPERVISOR_RECENT_MINUTES": "45", "SHEEPDOG_SUPERVISOR_SUMMARY_TIMEOUT_S": "40"}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Supervisor.Chattiness != "chatty" || cfg.Supervisor.RecentMinutes != 45 {
+	if cfg.Supervisor.Chattiness != "chatty" || cfg.Supervisor.RecentMinutes != 45 || cfg.Supervisor.SummaryTimeoutS != 40 {
 		t.Errorf("env override = %+v", cfg.Supervisor)
 	}
-	if !strings.Contains(cfg.String(), "supervisor.chattiness=chatty supervisor.recent_minutes=45") {
+	if !strings.Contains(cfg.String(), "supervisor.chattiness=chatty supervisor.recent_minutes=45 supervisor.promise_ttl_s=7200 supervisor.summary_timeout_s=40") {
 		t.Errorf("String() = %q", cfg.String())
 	}
 	for _, env := range []map[string]string{
 		{"SHEEPDOG_SUPERVISOR_CHATTINESS": "loud"},
 		{"SHEEPDOG_SUPERVISOR_RECENT_MINUTES": "0"},
 		{"SHEEPDOG_SUPERVISOR_RECENT_MINUTES": "soon"},
+		{"SHEEPDOG_SUPERVISOR_SUMMARY_TIMEOUT_S": "0"},
 	} {
 		if _, err := load(path, envFrom(env)); err == nil {
 			t.Errorf("%v should fail", env)
