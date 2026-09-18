@@ -26,6 +26,10 @@ Does, on its own:
   the answer it just received without going back.
 - Judges the *moment* to deliver what the SVP brings unprompted (interrupt now,
   or wait for a pause); the SVP sets urgency, the assistant sets timing.
+- Works like a copilot: after every result it offers the next step as one
+  short question, reads `options` as a choice, asks plainly for a decision
+  when it is the CEO's, and treats "yes" to its own offer as `propose`. It
+  sounds like a warm colleague, not a console.
 
 Never:
 - States anything factual about agents that did not come from the SVP in this
@@ -34,7 +38,7 @@ Never:
   aloud (D9).
 - Fills `agent` by guessing; "it" / "that one" → leave empty.
 
-Prompt: one short file (≤ 350 words), voice + rules together. Every turn re-bills
+Prompt: one short file (≤ 400 words), voice + rules + manner together. Every turn re-bills
 its whole context, so it stays small.
 
 ## SVP — do / don't
@@ -65,7 +69,11 @@ Does:
   sentence and keeps the promises — see "Push judgment" below for the
   ceiling code keeps.
 - Answers for the ear: `{spoken, detail, needs_user, options?}` — `spoken` ≤ 2
-  sentences, `detail` for the assistant's follow-ups.
+  sentences ending with the next move, `detail` for the assistant's
+  follow-ups, `options` the CEO's choices with the SVP's pick first.
+- Drives approved directions to their outcome without being asked again
+  (fix sent → tests run → result reported); proposes new directions rather
+  than taking them. A request is resolved when its outcome is known.
 - Falls back to the fast template path when it errors, exceeds its step budget,
   or exceeds ~8 s on a screen-answerable question. Voice never hangs on a loop.
 - Serialises turns: single writer, CEO turns before event-driven turns; an
@@ -141,8 +149,8 @@ reasoning agent and its context is re-billed per turn.
 
 | File | Holds |
 |---|---|
-| `prompts/assistant.md` | The assistant's whole system prompt (voice + rules, ≤ 350 words). |
-| `prompts/svp/SOUL.md` | The SVP's role: what it is, who it answers to, its bias to execution. |
+| `prompts/assistant.md` | The assistant's whole system prompt (voice + rules + copilot manner, ≤ 400 words). |
+| `prompts/svp/SOUL.md` | The SVP's role and manner: what it is, who it answers to, its bias to execution, the copilot manner (next move, options, driving approved work). |
 | `prompts/svp/RULES.md` | The SVP's tool guidance, one `## ` section per stable-prompt piece (tools, record, promises, announcing, the one rail, fallback, the answer contract). |
 | `prompts/USER.md` | The CEO's profile in the SVP's prompt: `{aliases}` (from the roster), `{chattiness}`, `{tz}`, and a free-text section the CEO edits directly. |
 
