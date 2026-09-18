@@ -518,3 +518,38 @@ connection) and real microphone audio.
 - **Concurrency:** the plan's "owns one WebSocket session" needs one reader
   goroutine plus a write mutex; the SDK session is not goroutine-safe.
 - **Version requirement:** the SDK needs Go ≥ 1.24 (module has `go 1.25`, fine).
+
+## 11. WP2 findings (live runs of `sheepdog voice-test`, 2026-09-17)
+
+Five short sessions against `gemini-3.8-live` with the echo tools; all
+free-tier, no 429 seen.
+
+- **Do not answer a NON_BLOCKING call before its `turnComplete`.** The
+  first run sent the function response < 1 ms after `toolCall` (before the
+  server's `generationComplete`/`turnComplete` for that turn) and the model
+  said "This function is not available at the moment." `internal/voice/gemini`
+  now holds the response until that `turnComplete` (bounded by
+  `Config.ToolResponseWait`, 1.5 s). With that, the result arrived as a new
+  generation ~0.6 s after the response, as in §5.
+- **The model judges the `spoken` text.** A bare `"briefing called with no
+  arguments"` was not read out ("Let me get that update for you."); the
+  sentence `"Echo test: the briefing tool was called with no arguments."`
+  was read verbatim in two runs and paraphrased once ("Confirmed,
+  proceedings will continue as planned." for `confirm`). Real Supervisor
+  results (plan D9) are full sentences, so this only affects stubs. In one
+  run the model called `briefing` twice back to back and then apologised
+  that it "couldn't retrieve the current status" — model-side
+  non-determinism worth watching once WP3 returns real briefings.
+- **Resumption after an abrupt close.** Closing the socket mid-session and
+  reconnecting immediately with the handle got
+  `failed to receive setup complete: websocket: close 1011 (internal server error): Internal error encountered.`
+  once; the retry 1 s later resumed (`resumed:true`) and the model answered
+  a follow-up from pre-drop context. Keep the reconnect backoff.
+- `SendRealtimeInput{Text}` produced no `inputTranscription` (only audio
+  is transcribed); the model still called the right tool (`confirm` for
+  "yes go ahead").
+- Realtime audio after the WAV: the daemon must keep streaming silence
+  frames after the utterance so the server VAD closes the turn; with
+  silence the tool call arrived ~1.3 s after the end of speech.
+- `voice-test` timings: connect 330–430 ms; first output audio 0.6–0.7 s
+  after the tool response; idle push spoken ~0.9 s after `SendClientContent`.

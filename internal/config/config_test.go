@@ -119,3 +119,50 @@ func TestLoadUsesRealEnv(t *testing.T) {
 		t.Errorf("String() = %q", s)
 	}
 }
+
+func TestGeminiKeyPool(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	body := `
+[gemini]
+api_keys = ["file-key-a", "file-key-b"]
+model = "gemini-file"
+`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := load(path, noEnv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Gemini.APIKeys) != 2 || cfg.Gemini.APIKeys[0] != "file-key-a" || cfg.Gemini.Model != "gemini-file" || cfg.Gemini.Voice != "Puck" {
+		t.Errorf("file gemini section = %+v", cfg.Gemini)
+	}
+
+	cfg, err = load(path, envFrom(map[string]string{
+		"GEMINI_API_KEY":        "env-0",
+		"GEMINI_API_KEY_1":      "env-1",
+		"GEMINI_API_KEY_2":      "",
+		"GEMINI_API_KEY_3":      "env-3",
+		"SHEEPDOG_GEMINI_MODEL": "gemini-env",
+		"SHEEPDOG_GEMINI_VOICE": "Kore",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"env-0", "env-1", "env-3"}
+	if len(cfg.Gemini.APIKeys) != len(want) {
+		t.Fatalf("keys = %d, want %d", len(cfg.Gemini.APIKeys), len(want))
+	}
+	for i := range want {
+		if cfg.Gemini.APIKeys[i] != want[i] {
+			t.Errorf("key[%d] = %q, want %q", i, cfg.Gemini.APIKeys[i], want[i])
+		}
+	}
+	if cfg.Gemini.Model != "gemini-env" || cfg.Gemini.Voice != "Kore" {
+		t.Errorf("env overrides not applied: %+v", cfg.Gemini)
+	}
+	if s := cfg.String(); strings.Contains(s, "env-0") || !strings.Contains(s, "gemini.api_keys=3") {
+		t.Errorf("String leaks or omits key count: %s", s)
+	}
+}
