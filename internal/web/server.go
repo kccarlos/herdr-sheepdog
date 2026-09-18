@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kccarlos/herdr-sheepdog/internal/brain"
 	"github.com/kccarlos/herdr-sheepdog/internal/eventlog"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/inject"
@@ -60,6 +61,11 @@ type Deps struct {
 	Voice voice.Session
 	// Watcher receives plugin-shim events; nil means --herdr=mock.
 	Watcher EventInjector
+	// Brain backs GET /api/brain/{transcript,context,system_prompt}; nil
+	// means the brain is off and those answer 503 with BrainOffReason
+	// ("--brain=off", "brain.enabled=false", "no Gemini key").
+	Brain          *brain.Brain
+	BrainOffReason string
 	// HerdrMode and VoiceMode are reported by /api/state ("socket"|"mock",
 	// "gemini"|"off").
 	HerdrMode, VoiceMode string
@@ -178,6 +184,9 @@ func (s *Server) routes() error {
 	s.mux.HandleFunc("POST /api/inject/utterance", s.handleUtterance)
 	s.mux.HandleFunc("POST /api/herdr/event", s.handleHerdrEvent)
 	s.mux.HandleFunc("POST /api/prompts/reload", s.handleReloadPrompts)
+	s.mux.HandleFunc("GET /api/brain/transcript", s.handleBrainTranscript)
+	s.mux.HandleFunc("GET /api/brain/context", s.handleBrainContext)
+	s.mux.HandleFunc("GET /api/brain/system_prompt", s.handleBrainSystemPrompt)
 	if s.deps.DevTestdataDir != "" {
 		s.mux.HandleFunc("GET /testdata/{name}", s.handleTestdata)
 	}

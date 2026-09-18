@@ -8,13 +8,21 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/prompts"
 )
 
-// section is one part of the system prompt; the stable ones come first
-// so a provider's prefix cache applies (docs/roles.md, borrowed from
-// OpenClaw).
-type section struct {
-	Name string
-	Text string
+// PromptSection is one part of the system prompt; the stable ones come
+// first so a provider's prefix cache applies (docs/roles.md, borrowed
+// from OpenClaw).
+type PromptSection struct {
+	Name string `json:"name"`
+	// Source is where the text came from: prompts.SourceEmbedded or
+	// prompts.SourceOverride for a prompt file, SourceDynamic for the
+	// roster, ledger and time rendered per call.
+	Source string `json:"source"`
+	Text   string `json:"text"`
 }
+
+// SourceDynamic is the Source of a section rendered per call (roster,
+// ledger, time), as opposed to a prompt file's.
+const SourceDynamic = "dynamic"
 
 // stableSections loads SOUL.md as the role section and splits RULES.md
 // into one section per "## " heading (tools, the one rail, the answer
@@ -22,17 +30,17 @@ type section struct {
 // (docs/roles.md "Prompt files"); a nil pl uses the embedded defaults.
 // Recomputed on every turn (systemPrompt) so a reloaded override takes
 // effect without a restart.
-func stableSections(pl *prompts.Loader) []section {
-	soul, _ := pl.Load(prompts.SVPSoul)
-	rules, _ := pl.Load(prompts.SVPRules)
-	out := []section{{Name: "role", Text: strings.TrimSpace(soul)}}
+func stableSections(pl *prompts.Loader) []PromptSection {
+	soul, soulSrc := pl.Load(prompts.SVPSoul)
+	rules, rulesSrc := pl.Load(prompts.SVPRules)
+	out := []PromptSection{{Name: "role", Source: soulSrc, Text: strings.TrimSpace(soul)}}
 	for _, chunk := range strings.Split("\n"+rules, "\n## ") {
 		chunk = strings.TrimSpace(chunk)
 		if chunk == "" {
 			continue
 		}
 		name, body, _ := strings.Cut(chunk, "\n")
-		out = append(out, section{Name: slug(name), Text: "## " + strings.TrimSpace(name) + "\n\n" + strings.TrimSpace(body)})
+		out = append(out, PromptSection{Name: slug(name), Source: rulesSrc, Text: "## " + strings.TrimSpace(name) + "\n\n" + strings.TrimSpace(body)})
 	}
 	return out
 }
@@ -41,9 +49,9 @@ func stableSections(pl *prompts.Loader) []section {
 // timezone, and anything the CEO added by hand) with vars, which
 // SetUserVars sets and aliases (always freshly derived from the roster)
 // extends.
-func userSection(pl *prompts.Loader, vars map[string]string) section {
-	text, _ := pl.Render(prompts.User, vars)
-	return section{Name: "user", Text: text}
+func userSection(pl *prompts.Loader, vars map[string]string) PromptSection {
+	text, src := pl.Render(prompts.User, vars)
+	return PromptSection{Name: "user", Source: src, Text: text}
 }
 
 // mergeUserVars derives {aliases} from the current roster and overlays
@@ -85,11 +93,11 @@ func slug(name string) string {
 }
 
 // dynamicSections renders the roster, the ledger excerpt and the time.
-func dynamicSections(agents []AgentInfo, notes []string, now time.Time) []section {
-	return []section{
-		{Name: "roster", Text: renderRoster(agents, now)},
-		{Name: "ledger", Text: renderLedger(agents, notes)},
-		{Name: "time", Text: "## Now\n\n" + now.Format("Mon 2006-01-02 15:04:05 MST")},
+func dynamicSections(agents []AgentInfo, notes []string, now time.Time) []PromptSection {
+	return []PromptSection{
+		{Name: "roster", Source: SourceDynamic, Text: renderRoster(agents, now)},
+		{Name: "ledger", Source: SourceDynamic, Text: renderLedger(agents, notes)},
+		{Name: "time", Source: SourceDynamic, Text: "## Now\n\n" + now.Format("Mon 2006-01-02 15:04:05 MST")},
 	}
 }
 
@@ -175,7 +183,7 @@ func renderLedger(agents []AgentInfo, notes []string) string {
 }
 
 // joinSections concatenates sections with blank lines between them.
-func joinSections(secs []section) string {
+func joinSections(secs []PromptSection) string {
 	parts := make([]string, 0, len(secs))
 	for _, s := range secs {
 		parts = append(parts, s.Text)

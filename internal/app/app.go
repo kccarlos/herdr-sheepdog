@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
+	"github.com/kccarlos/herdr-sheepdog/internal/brain/braintest"
 	"github.com/kccarlos/herdr-sheepdog/internal/cli"
 	"github.com/kccarlos/herdr-sheepdog/internal/config"
 	"github.com/kccarlos/herdr-sheepdog/internal/eventlog"
@@ -38,6 +39,11 @@ const (
 	CLIOff      = "off"
 	BrainOn     = "on"
 	BrainOff    = "off"
+	// BrainFake runs the brain loop over braintest.Reflex, a model that
+	// answers from what it sees (ask → read the screen, propose → prompt)
+	// without any network call: a developer mode for the /debug
+	// Supervisor tab, like --herdr=mock. Needs no Gemini key.
+	BrainFake = "fake"
 )
 
 // Options select the daemon's mode; zero values take the defaults noted.
@@ -49,9 +55,10 @@ type Options struct {
 	// CLI is CLIOn (default) or CLIOff (`--cli=off` disables the deep-ask
 	// path; ask() then answers from the screen alone).
 	CLI string
-	// Brain is BrainOn (default) or BrainOff (`--brain=off` keeps ask and
-	// propose on the template path). On needs config brain.enabled and a
-	// Gemini key; without a key the brain is silently off.
+	// Brain is BrainOn (default), BrainOff (`--brain=off` keeps ask and
+	// propose on the template path) or BrainFake (the reflex fake model,
+	// dev only). On needs config brain.enabled and a Gemini key; without
+	// a key the brain is silently off.
 	Brain string
 	// Port overrides config web.port when > 0; 0 with an empty config
 	// port picks a free port (tests).
@@ -105,18 +112,19 @@ type App struct {
 	cfg  config.Config
 	opts Options
 
-	elog    *eventlog.Log
-	log     logging.Logger
-	store   *state.Store
-	herdr   *inject.Herdr
-	hc      *herdr.Client // nil in mock mode
-	wref    *watcherRef   // nil in mock mode
-	sup     *supervisor.Supervisor
-	brain   *brain.Brain  // nil when off
-	voice   voice.Session // nil when off
-	web     *web.Server
-	prompts *prompts.Loader
-	port    int
+	elog     *eventlog.Log
+	log      logging.Logger
+	store    *state.Store
+	herdr    *inject.Herdr
+	hc       *herdr.Client // nil in mock mode
+	wref     *watcherRef   // nil in mock mode
+	sup      *supervisor.Supervisor
+	brain    *brain.Brain  // nil when off
+	brainOff string        // why the brain is off (web.Deps.BrainOffReason)
+	voice    voice.Session // nil when off
+	web      *web.Server
+	prompts  *prompts.Loader
+	port     int
 
 	queryLazy *lazyQuerier // nil when --cli=off; filled in by Run after daemon.start
 }
@@ -134,8 +142,8 @@ func Build(cfg config.Config, opts Options) (*App, error) {
 	if opts.CLI != CLIOn && opts.CLI != CLIOff {
 		return nil, fmt.Errorf("app: --cli must be %s or %s", CLIOn, CLIOff)
 	}
-	if opts.Brain != BrainOn && opts.Brain != BrainOff {
-		return nil, fmt.Errorf("app: --brain must be %s or %s", BrainOn, BrainOff)
+	if opts.Brain != BrainOn && opts.Brain != BrainOff && opts.Brain != BrainFake {
+		return nil, fmt.Errorf("app: --brain must be %s, %s or %s", BrainOn, BrainOff, BrainFake)
 	}
 	if opts.Voice == VoiceGemini && len(cfg.Gemini.APIKeys) == 0 {
 		return nil, errors.New("app: --voice=gemini needs GEMINI_API_KEY (or gemini.api_keys); use --voice=off to run without it")
@@ -203,7 +211,22 @@ func (a *App) wire() error {
 		querier = lazyQ
 		a.queryLazy = lazyQ
 	}
-	if opts.Brain == BrainOn && cfg.Brain.Enabled && len(cfg.Gemini.APIKeys) > 0 {
+	switch {
+	case opts.Brain == BrainOff:
+		a.brainOff = "--brain=off"
+	case !cfg.Brain.Enabled:
+		a.brainOff = "brain.enabled=false"
+	case opts.Brain == BrainFake:
+		bcfg := BrainConfig(cfg)
+		bcfg.Prompts = a.prompts
+		b, err := brain.New(bcfg, braintest.Reflex(), a.log)
+		if err != nil {
+			return fmt.Errorf("app: brain: %w", err)
+		}
+		a.brain = b
+	case len(cfg.Gemini.APIKeys) == 0:
+		a.brainOff = "no Gemini key"
+	default:
 		b, err := buildBrain(cfg, a.prompts, a.log)
 		if err != nil {
 			return err
@@ -266,9 +289,11 @@ func (a *App) wire() error {
 		HerdrMode:  opts.Herdr,
 		VoiceMode:  opts.Voice,
 
-		SystemPrompt:  func() string { s, _ := gemini.SystemPrompt(gcfg); return s },
-		Aliases:       gcfg.Aliases,
-		ReloadPrompts: a.ReloadPrompts,
+		SystemPrompt:   func() string { s, _ := gemini.SystemPrompt(gcfg); return s },
+		Aliases:        gcfg.Aliases,
+		ReloadPrompts:  a.ReloadPrompts,
+		Brain:          a.brain,
+		BrainOffReason: a.brainOff,
 	}
 	if opts.Dev || a.cfg.Web.Dev {
 		deps.DevTestdataDir = a.cfg.Web.DevTestdataDir
@@ -324,6 +349,22 @@ func BrainConfig(cfg config.Config) brain.Config {
 
 // Brain returns the attached brain, or nil when it is off.
 func (a *App) Brain() *brain.Brain { return a.brain }
+
+// BrainMode reports the effective brain mode: BrainOn, BrainFake, or
+// BrainOff (with BrainOffReason saying why).
+func (a *App) BrainMode() string {
+	switch {
+	case a.brain == nil:
+		return BrainOff
+	case a.opts.Brain == BrainFake:
+		return BrainFake
+	default:
+		return BrainOn
+	}
+}
+
+// BrainOffReason says why the brain is off ("" when it is on).
+func (a *App) BrainOffReason() string { return a.brainOff }
 
 // Prompts returns the prompt workspace loader.
 func (a *App) Prompts() *prompts.Loader { return a.prompts }
@@ -410,10 +451,7 @@ func (a *App) Run(ctx context.Context) (err error) {
 			return err
 		}
 	}
-	brainMode := BrainOff
-	if a.brain != nil {
-		brainMode = BrainOn
-	}
+	brainMode := a.BrainMode()
 	a.log.Log("daemon", "daemon.start", "", map[string]any{
 		"version": a.opts.Version, "voice": a.opts.Voice, "herdr": a.opts.Herdr, "cli": a.opts.CLI, "brain": brainMode, "url": a.URL(),
 		"data_dir": a.cfg.DataDir, "llm_model": a.cfg.LLM.Model, "llm_base_url": a.cfg.LLM.BaseURL, "brain_model": a.cfg.Brain.Model,

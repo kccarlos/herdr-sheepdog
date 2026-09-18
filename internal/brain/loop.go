@@ -251,6 +251,9 @@ func (b *Brain) afterTurn(t *turn) {
 		return
 	default:
 		payload["before_tokens"], payload["after_tokens"], payload["dropped"] = c.BeforeTokens, c.AfterTokens, c.Dropped
+		b.mu.Lock()
+		b.lastCompaction = CompactionInfo{BeforeTokens: c.BeforeTokens, AfterTokens: c.AfterTokens, Dropped: c.Dropped, SummarySeq: c.Summary.Seq, At: b.cfg.Now()}
+		b.mu.Unlock()
 	}
 	b.log.Log(logSource, "brain.compaction", "", payload)
 }
@@ -262,14 +265,10 @@ func (b *Brain) Quiesce() { b.after.Wait() }
 // per run.
 func (b *Brain) systemPrompt() string {
 	b.mu.Lock()
-	host := b.host
 	logged := b.promptLogged
 	b.promptLogged = true
-	userVars := b.userVars
 	b.mu.Unlock()
-	agents := host.Agents()
-	secs := append(append([]section(nil), stableSections(b.cfg.Prompts)...), userSection(b.cfg.Prompts, mergeUserVars(agents, userVars)))
-	secs = append(secs, dynamicSections(agents, host.Notes(), b.cfg.Now())...)
+	secs := b.sections()
 	text := joinSections(secs)
 	if !logged {
 		var report []map[string]any
@@ -280,6 +279,28 @@ func (b *Brain) systemPrompt() string {
 	}
 	return text
 }
+
+// sections assembles the system prompt's sections from the current
+// prompt files, roster and ledger (no host yet: an empty roster).
+func (b *Brain) sections() []PromptSection {
+	b.mu.Lock()
+	host := b.host
+	userVars := b.userVars
+	b.mu.Unlock()
+	var agents []AgentInfo
+	var notes []string
+	if host != nil {
+		agents, notes = host.Agents(), host.Notes()
+	}
+	secs := append(append([]PromptSection(nil), stableSections(b.cfg.Prompts)...), userSection(b.cfg.Prompts, mergeUserVars(agents, userVars)))
+	return append(secs, dynamicSections(agents, notes, b.cfg.Now())...)
+}
+
+// PromptSections returns the system prompt as it would be assembled for
+// the next model call: every section with its text and where it came
+// from (the Supervisor tab's prompt-budget meter). Computed live, so a
+// prompt reload shows at once.
+func (b *Brain) PromptSections() []PromptSection { return b.sections() }
 
 // nextToolID returns a call id unique within the run.
 func (b *Brain) nextToolID(turn int) string {
