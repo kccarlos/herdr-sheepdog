@@ -205,3 +205,32 @@ func TestLLMConfig(t *testing.T) {
 		t.Error("zero SHEEPDOG_PENDING_TTL_S should fail")
 	}
 }
+
+func TestWebPort(t *testing.T) {
+	cfg, err := load(filepath.Join(t.TempDir(), "missing.toml"), envFrom(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Web.Port != DefaultWebPort {
+		t.Errorf("default web.port = %d", cfg.Web.Port)
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(path, []byte("[web]\nport = 8080\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = load(path, envFrom(nil))
+	if err != nil || cfg.Web.Port != 8080 {
+		t.Errorf("file web.port = %d err=%v", cfg.Web.Port, err)
+	}
+	cfg, err = load(path, envFrom(map[string]string{"SHEEPDOG_WEB_PORT": "9090"}))
+	if err != nil || cfg.Web.Port != 9090 {
+		t.Errorf("env web.port = %d err=%v", cfg.Web.Port, err)
+	}
+	if !strings.Contains(cfg.String(), "web.port=9090") {
+		t.Errorf("String lacks web.port: %s", cfg)
+	}
+	if _, err := load(path, envFrom(map[string]string{"SHEEPDOG_WEB_PORT": "70000"})); err == nil {
+		t.Error("bad SHEEPDOG_WEB_PORT should fail")
+	}
+}

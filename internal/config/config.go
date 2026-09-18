@@ -4,7 +4,8 @@
 // exists, then overridden by SHEEPDOG_* environment variables (and, for the
 // Gemini key pool, GEMINI_API_KEY*). Only the keys needed by the herdr
 // client, state table, voice session, cheap LLM and supervisor are defined
-// so far; later work packages add their own sections (cli, web) here.
+// so far, plus the web server port; later work packages add their own
+// sections (cli) here.
 //
 // String() must never print secrets: Gemini keys are rendered as a count.
 package config
@@ -40,7 +41,17 @@ type Config struct {
 	State  State  `toml:"state"`
 	Gemini Gemini `toml:"gemini"`
 	LLM    LLM    `toml:"llm"`
+	Web    Web    `toml:"web"`
 }
+
+// Web configures the HTTP server (plan §3.8). v1 binds to 127.0.0.1 only.
+type Web struct {
+	// Port is the TCP port on localhost (default 7777).
+	Port int `toml:"port"`
+}
+
+// DefaultWebPort is the port the web server listens on by default.
+const DefaultWebPort = 7777
 
 // LLM configures the cheap text-in/text-out model (plan §3.4): any
 // OpenAI-compatible chat endpoint.
@@ -121,6 +132,7 @@ func Default() Config {
 		PendingTTLS:       120,
 		Gemini:            Gemini{Model: "gemini-3.8-live", Voice: "Puck"},
 		LLM:               LLM{BaseURL: GeminiOpenAIBaseURL, Model: "gemini-3.5-flash-lite"},
+		Web:               Web{Port: DefaultWebPort},
 	}
 }
 
@@ -170,7 +182,7 @@ func load(path string, lookup func(string) (string, bool)) (Config, error) {
 //	SHEEPDOG_DATA_DIR, SHEEPDOG_DEBOUNCE_MS, SHEEPDOG_SNAPSHOT_INTERVAL_S,
 //	SHEEPDOG_HERDR_SOCKET, SHEEPDOG_STATE_PATH, SHEEPDOG_GEMINI_MODEL,
 //	SHEEPDOG_GEMINI_VOICE, SHEEPDOG_LLM_BASE_URL, SHEEPDOG_LLM_MODEL,
-//	SHEEPDOG_LLM_API_KEY, SHEEPDOG_PENDING_TTL_S.
+//	SHEEPDOG_LLM_API_KEY, SHEEPDOG_PENDING_TTL_S, SHEEPDOG_WEB_PORT.
 //
 // The Gemini key pool is collected from GEMINI_API_KEY, then
 // GEMINI_API_KEY_1 … GEMINI_API_KEY_9, in that order; if any is set the
@@ -225,6 +237,13 @@ func applyEnv(cfg *Config, lookup func(string) (string, bool)) error {
 		}
 		cfg.PendingTTLS = n
 	}
+	if v, ok := lookup("SHEEPDOG_WEB_PORT"); ok {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 || n > 65535 {
+			return fmt.Errorf("config: SHEEPDOG_WEB_PORT=%q: want a port number", v)
+		}
+		cfg.Web.Port = n
+	}
 	return nil
 }
 
@@ -246,6 +265,6 @@ func geminiKeysFromEnv(lookup func(string) (string, bool)) []string {
 // String renders the configuration for logs. Secrets are rendered as
 // counts only; keep it that way when secret-bearing fields are added.
 func (c Config) String() string {
-	return fmt.Sprintf("data_dir=%s herdr.socket=%s state.path=%s debounce_ms=%d snapshot_interval_s=%d pending_ttl_s=%d aliases=%d gemini.model=%s gemini.voice=%s gemini.api_keys=%d llm.base_url=%s llm.model=%s llm.api_keys=%d",
-		c.DataDir, c.Herdr.Socket, c.State.Path, c.DebounceMS, c.SnapshotIntervalS, c.PendingTTLS, len(c.Aliases), c.Gemini.Model, c.Gemini.Voice, len(c.Gemini.APIKeys), c.LLM.BaseURL, c.LLM.Model, len(c.LLMKeys()))
+	return fmt.Sprintf("data_dir=%s herdr.socket=%s state.path=%s debounce_ms=%d snapshot_interval_s=%d pending_ttl_s=%d aliases=%d gemini.model=%s gemini.voice=%s gemini.api_keys=%d llm.base_url=%s llm.model=%s llm.api_keys=%d web.port=%d",
+		c.DataDir, c.Herdr.Socket, c.State.Path, c.DebounceMS, c.SnapshotIntervalS, c.PendingTTLS, len(c.Aliases), c.Gemini.Model, c.Gemini.Voice, len(c.Gemini.APIKeys), c.LLM.BaseURL, c.LLM.Model, len(c.LLMKeys()), c.Web.Port)
 }

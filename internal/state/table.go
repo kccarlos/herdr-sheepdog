@@ -31,7 +31,17 @@ type Agent struct {
 	CurrentTask        string `json:"current_task,omitempty"`
 	LastBlock          *Block `json:"last_block,omitempty"`
 	LastSeenScreenHash string `json:"last_seen_screen_hash,omitempty"`
+
+	// Synthetic marks a pane injected by the /debug page rather than seen
+	// through herdr. A herdr snapshot never lists it, so a Closed
+	// transition removes it only when it comes from the inject path
+	// (SourceInject); herdr-sourced removals are ignored.
+	Synthetic bool `json:"synthetic,omitempty"`
 }
+
+// SourceInject is the Transition.Source of fake events injected by the
+// debug page. It is the only source allowed to remove a synthetic pane.
+const SourceInject = "inject"
 
 // Block records the last time the agent was blocked.
 type Block struct {

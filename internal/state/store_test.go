@@ -358,3 +358,37 @@ func TestRowsDoNotAliasStore(t *testing.T) {
 		t.Error("List aliases last_block")
 	}
 }
+
+func TestSyntheticPaneSurvivesHerdrRemoval(t *testing.T) {
+	s, err := Open("", Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.Apply(herdr.Transition{PaneID: "fake:1", To: herdr.StateBlocked, Agent: "codex", Source: SourceInject}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.MarkSynthetic("fake:1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.MarkSynthetic("nope"); err == nil {
+		t.Fatal("MarkSynthetic of unknown pane must fail")
+	}
+	row, ok := s.Get("fake:1")
+	if !ok || !row.Synthetic {
+		t.Fatalf("row = %+v", row)
+	}
+	// A snapshot-diff removal from herdr must not touch it.
+	if _, changed, err := s.Apply(herdr.Transition{PaneID: "fake:1", To: herdr.StateUnknown, Closed: true, Source: "snapshot"}); err != nil || changed {
+		t.Fatalf("herdr removal: changed=%v err=%v", changed, err)
+	}
+	if _, ok := s.Get("fake:1"); !ok {
+		t.Fatal("synthetic pane removed by herdr-sourced close")
+	}
+	// The inject path may remove it.
+	if _, changed, err := s.Apply(herdr.Transition{PaneID: "fake:1", To: herdr.StateUnknown, Closed: true, Source: SourceInject}); err != nil || !changed {
+		t.Fatalf("inject removal: changed=%v err=%v", changed, err)
+	}
+	if _, ok := s.Get("fake:1"); ok {
+		t.Fatal("synthetic pane not removed by inject close")
+	}
+}

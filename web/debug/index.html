@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>sheepdog debug</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="/debug/style.css">
+</head>
+<body>
+<header>
+  <h1>sheepdog <span class="muted">debug</span></h1>
+  <div id="voice-indicator" class="indicator" title="voice session">
+    <span class="dot" id="voice-dot"></span>
+    <span id="voice-text">voice: …</span>
+  </div>
+  <div class="indicator" title="event stream">
+    <span class="dot" id="sse-dot"></span>
+    <span id="sse-text">events: connecting</span>
+  </div>
+  <div class="muted" id="daemon-info"></div>
+  <a href="/voice">voice page</a>
+</header>
+
+<main>
+  <section id="state-section">
+    <h2>State table <span class="muted" id="state-updated"></span></h2>
+    <table id="state-table">
+      <thead>
+        <tr><th>alias</th><th>pane</th><th>kind</th><th>workspace</th><th>state</th><th>since</th><th>current task</th><th>last block</th><th></th></tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+    <p class="muted" id="state-empty">No agents.</p>
+  </section>
+
+  <section id="pending-section">
+    <h2>Pending action</h2>
+    <div id="pending-card" class="card hidden">
+      <div class="row"><span class="label">id</span><code id="pending-id"></code> <span class="label">kind</span><span id="pending-kind" class="pill"></span> <span class="label">pane</span><code id="pending-pane"></code></div>
+      <div class="row"><span class="label">summary</span><span id="pending-summary"></span></div>
+      <div class="row"><span class="label">question</span><span id="pending-question"></span></div>
+      <div class="row"><span class="label">payload</span><span id="pending-payload"></span></div>
+      <div class="row"><span class="label">options</span><span id="pending-options"></span></div>
+      <div class="row"><span class="label">expires</span><span id="pending-expires"></span></div>
+      <div class="row"><button id="pending-cancel" class="danger">Cancel</button> <span id="pending-result" class="muted"></span></div>
+    </div>
+    <p class="muted" id="pending-empty">Nothing pending.</p>
+  </section>
+
+  <section id="inject-section">
+    <h2>Inject <span class="muted">(fake events; debug only)</span></h2>
+    <div class="card">
+      <div class="row">
+        <label>pane id <input id="inj-pane" value="fake:1" size="10"></label>
+        <label>alias <input id="inj-alias" value="auth" size="10"></label>
+        <label>kind
+          <select id="inj-kind">
+            <option value="codex">codex</option>
+            <option value="claude">claude</option>
+          </select>
+        </label>
+        <label>preset <select id="inj-preset"></select></label>
+      </div>
+      <textarea id="inj-screen" rows="12" spellcheck="false"></textarea>
+      <div class="row">
+        <button id="inj-blocked" class="primary">Make pane blocked</button>
+        <button id="inj-done">Make pane done</button>
+        <button id="inj-working">Make pane working</button>
+        <button id="inj-remove" class="danger">Remove pane</button>
+        <span id="inj-result" class="muted"></span>
+      </div>
+    </div>
+    <div class="card">
+      <div class="row">
+        <label>simulate utterance <input id="utt-text" size="40" placeholder="what's going on"></label>
+        <button id="utt-send" class="primary">Send</button>
+        <span class="muted">quick:</span>
+        <button class="utt-quick" data-text="what's going on">what's going on</button>
+        <button class="utt-quick" data-text="yes">yes</button>
+        <button class="utt-quick" data-text="no">no</button>
+        <button class="utt-quick" data-text="stop">stop</button>
+        <button class="utt-quick" data-text="tell auth to skip the flaky test and rerun">tell auth …</button>
+      </div>
+      <div class="row"><span id="utt-result" class="muted"></span></div>
+      <p class="muted small">With <code>--voice=off</code> the text goes through the debug-only text router (yes / no / stop / what's going on / tell … / ask …). With a voice session it is sent to the model as a typed utterance.</p>
+    </div>
+  </section>
+
+  <section id="events-section">
+    <h2>Events</h2>
+    <div class="toolbar">
+      <span id="source-filters"></span>
+      <label>pane <input id="filter-pane" size="8" placeholder="any"></label>
+      <label>search <input id="filter-search" size="20" placeholder="substring"></label>
+      <button id="events-pause">Pause</button>
+      <button id="events-clear">Clear</button>
+      <label><input type="checkbox" id="events-follow" checked> follow</label>
+      <span class="muted" id="events-count"></span>
+    </div>
+    <div id="events"></div>
+  </section>
+</main>
+
+<script src="/debug/presets.js"></script>
+<script src="/debug/app.js"></script>
+</body>
+</html>

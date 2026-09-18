@@ -94,8 +94,12 @@ func (s *Store) Apply(t herdr.Transition) (Agent, bool, error) {
 	defer s.mu.Unlock()
 
 	if t.Closed {
-		if _, ok := s.table.Agents[t.PaneID]; !ok {
+		a, ok := s.table.Agents[t.PaneID]
+		if !ok {
 			return Agent{}, false, nil
+		}
+		if a.Synthetic && t.Source != SourceInject {
+			return a.clone(), false, nil
 		}
 		delete(s.table.Agents, t.PaneID)
 		if s.table.PendingAction != nil && s.table.PendingAction.PaneID == t.PaneID {
@@ -211,6 +215,22 @@ func (s *Store) Update(paneID string, fn func(*Agent)) (Agent, error) {
 	}
 	fn(a)
 	return a.clone(), s.persist()
+}
+
+// MarkSynthetic flags the row for paneID as injected by the debug page
+// (see Agent.Synthetic) and persists.
+func (s *Store) MarkSynthetic(paneID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	a, ok := s.table.Agents[paneID]
+	if !ok {
+		return fmt.Errorf("state: no agent in pane %s", paneID)
+	}
+	if a.Synthetic {
+		return nil
+	}
+	a.Synthetic = true
+	return s.persist()
 }
 
 // Get returns the row for paneID.

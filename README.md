@@ -2,17 +2,25 @@
 
 A voice supervisor for a herdr agent fleet, built on Gemini Live.
 
-**Status:** pre-alpha. WP1 and WP2 of
+**Status:** pre-alpha. WP1–WP3 and WP5 of
 [`sheepdog-v1-plan.md`](sheepdog-v1-plan.md) are in: the herdr socket
 client, the debounced/deduplicated agent state watcher and the persisted
-state table (`sheepdog herdr watch`), and the Gemini Live voice session
-with tool plumbing, push queue and resumption (`sheepdog voice-test`,
-echo tools only). No supervisor or web layer yet; the browser ↔ daemon
-WebSocket contract is in [`docs/ws-contract.md`](docs/ws-contract.md).
+state table (`sheepdog herdr watch`), the Gemini Live voice session with
+tool plumbing, push queue and resumption (`sheepdog voice-test`), the
+supervisor with the five voice tools and the cheap-LLM templates, and the
+daemon itself (`sheepdog serve`): JSONL event log, web server with the
+`/debug` page, SSE tail, fake-event injection and the server side of the
+browser WebSocket contract ([`docs/ws-contract.md`](docs/ws-contract.md)).
+The real `/voice` page (WP6), the CLI query tool (WP4) and packaging (WP7)
+are still to come.
 
 ## Usage (so far)
 
 ```sh
+sheepdog serve                              # the daemon: http://127.0.0.1:7777/debug
+sheepdog serve --voice=off --herdr=mock     # no Gemini, no herdr: drive it from /debug
+sheepdog serve --verbose --port 8080        # echo every event to stderr
+
 sheepdog herdr watch            # JSONL transitions on stdout, herdr.* events on stderr
 sheepdog herdr watch --once     # print the persisted state table and exit
 
@@ -25,9 +33,11 @@ sheepdog voice-test --in q.wav --push "Auth is blocked" --push-after 9s --drop-a
 Configuration lives in `~/.config/sheepdog/config.toml` (optional) with
 `SHEEPDOG_*` environment overrides; see `internal/config`. Keys so far:
 `herdr.socket`, `state.path`, `data_dir`, `debounce_ms`,
-`snapshot_interval_s`, an `[aliases]` table mapping pane ids to spoken
-names, e.g. `"w9:p1" = "auth"`, and `[gemini]` with `api_keys`, `model`
-and `voice`. The Gemini key pool is also read from `GEMINI_API_KEY` and
+`snapshot_interval_s`, `pending_ttl_s`, an `[aliases]` table mapping pane
+ids to spoken names, e.g. `"w9:p1" = "auth"`, `[gemini]` with `api_keys`,
+`model` and `voice`, `[llm]` with `base_url`, `model` and `api_key` (any
+OpenAI-compatible endpoint; `http://localhost:11434/v1` for Ollama), and
+`[web]` with `port` (default 7777, `SHEEPDOG_WEB_PORT`). The Gemini key pool is also read from `GEMINI_API_KEY` and
 `GEMINI_API_KEY_1` … `GEMINI_API_KEY_9` (rotated on rate limits).
 
 > **⚠️ Worker agents must NOT run in fully auto-approve mode.**
