@@ -28,6 +28,15 @@ type Result struct {
 	Raw string
 	// Stderr is the truncated stderr, for diagnostics.
 	Stderr string
+
+	// NumTurns, DurationMS and TotalCostUSD come from claude's own JSON
+	// result object (docs/cli-query-tools.md §2) when present; nil for
+	// codex or when claude's stdout was not JSON. DurationMS is claude's
+	// self-reported wall time and is distinct from DurMS above, which
+	// Runner measures itself around the whole process.
+	NumTurns     *int
+	DurationMS   *int64
+	TotalCostUSD *float64
 }
 
 // Runner implements supervisor.Querier by shelling out to codex or claude
@@ -177,6 +186,9 @@ func (r *Runner) finish(result *Result, exec execResult, backend Backend) error 
 				return fmt.Errorf("cli: claude reported an error: %s", strings.TrimSpace(parsed.Result))
 			}
 			result.Raw = strings.TrimSpace(parsed.Result)
+			result.NumTurns = parsed.NumTurns
+			result.DurationMS = parsed.DurationMS
+			result.TotalCostUSD = parsed.TotalCostUSD
 		} else {
 			result.Raw = strings.TrimSpace(exec.Stdout) // not JSON: fall back to raw text
 		}
@@ -217,6 +229,17 @@ func (r *Runner) log(result Result, fullArgv []string, question string, resErr e
 	}
 	if resErr != nil {
 		payload["error"] = resErr.Error()
+	}
+	// claude's own accounting (docs/cli-query-tools.md §2), when its JSON
+	// output included it; nil (unset) for codex or non-JSON stdout.
+	if result.NumTurns != nil {
+		payload["num_turns"] = *result.NumTurns
+	}
+	if result.DurationMS != nil {
+		payload["duration_ms"] = *result.DurationMS
+	}
+	if result.TotalCostUSD != nil {
+		payload["total_cost_usd"] = *result.TotalCostUSD
 	}
 	r.cfg.Log.Log("cli", "cli.run", "", payload)
 }

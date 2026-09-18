@@ -82,7 +82,8 @@ function renderEvent(ev) {
   cell('src-name', src);
   cell('type', ev.type);
   cell('pane', ev.pane_id || '');
-  cell('summary', (ev.dur_ms != null ? `${ev.dur_ms}ms  ` : '') + summarize(ev.payload));
+  const cost = ev.payload && ev.payload.total_cost_usd != null ? `$${Number(ev.payload.total_cost_usd).toFixed(4)}  ` : '';
+  cell('summary', (ev.dur_ms != null ? `${ev.dur_ms}ms  ` : '') + cost + summarize(ev.payload));
   row.addEventListener('click', () => {
     const next = row.nextElementSibling;
     if (next && next.classList.contains('ev-detail')) {
