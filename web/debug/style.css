@@ -7,6 +7,8 @@
 body { margin: 0; font: 13px/1.45 system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--fg); }
 header { display: flex; align-items: center; gap: 1.2rem; padding: .6rem 1rem; border-bottom: 1px solid var(--line); background: var(--card); position: sticky; top: 0; z-index: 2; }
 header h1 { font-size: 1.1rem; margin: 0; }
+header .logo { display: inline-flex; margin-right: -.7rem; }
+header .logo img { width: 28px; height: 28px; border-radius: 6px; display: block; }
 header a { margin-left: auto; }
 main { padding: 1rem; }
 section { min-width: 0; }

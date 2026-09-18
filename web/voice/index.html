@@ -5,10 +5,15 @@
 <title>sheepdog voice</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
+<link rel="icon" type="image/svg+xml" href="/static/logo-solid.svg">
 <link rel="stylesheet" href="/voice/style.css">
 </head>
 <body>
 <header>
+  <picture class="logo">
+    <source srcset="/static/logo-transparent.svg" media="(prefers-color-scheme: dark)">
+    <img src="/static/logo-solid.svg" alt="" width="28" height="28">
+  </picture>
   <h1>sheepdog <span class="muted">voice</span></h1>
   <div class="indicator" title="WebSocket to the daemon"><span class="dot" id="ws-dot"></span><span id="ws-text">ws: idle</span></div>
   <div class="indicator" title="voice session in the daemon"><span class="dot" id="voice-dot"></span><span id="voice-text">voice: …</span></div>
