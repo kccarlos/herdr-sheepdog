@@ -140,6 +140,10 @@ func (w *Watcher) Inject(ev StatusEvent) {
 func (w *Watcher) Run(ctx context.Context) error {
 	defer close(w.done)
 	defer close(w.out)
+	// Everything Run starts (subscriptions, debounce timers) hangs off this
+	// context so an early error return does not leak goroutines.
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 
 	fleet := w.client.SubscribeFleet(ctx)
 
