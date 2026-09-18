@@ -162,10 +162,12 @@ type Session struct {
 	// Chattiness is the push policy chosen at runtime (quiet | normal |
 	// chatty); empty means "use the configured initial value".
 	Chattiness string `json:"chattiness,omitempty"`
-	// BrainModel is the supervisor brain's model chosen at runtime (the
-	// /debug picker, PUT /api/brain/model); empty means "use the
-	// configured brain.model".
-	BrainModel string `json:"brain_model,omitempty"`
+	// BrainProvider and BrainModel are the supervisor brain's provider
+	// and model chosen at runtime (the /debug picker, PUT
+	// /api/brain/model); empty means "use the configured brain.provider
+	// / brain.model".
+	BrainProvider string `json:"brain_provider,omitempty"`
+	BrainModel    string `json:"brain_model,omitempty"`
 	// Promises are the session's promises, oldest first, every status.
 	Promises []Promise `json:"promises,omitempty"`
 }

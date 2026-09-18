@@ -1,0 +1,52 @@
+{
+  "id": "0d8f1e2a-6b3c-4c1d-9e7f-1a2b3c4d5e6f",
+  "object": "chat.completion",
+  "created": 1789740000,
+  "model": "deepseek-flash",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": null,
+        "reasoning_content": "The CEO wants the tests run and to be told when they finish: prompt, then promise.",
+        "tool_calls": [
+          {
+            "index": 0,
+            "id": "call_0_9f1e",
+            "type": "function",
+            "function": {
+              "name": "prompt",
+              "arguments": "{\"agent\": \"auth\", \"text\": \"run the tests\"}"
+            }
+          },
+          {
+            "index": 1,
+            "id": "call_1_a2b3",
+            "type": "function",
+            "function": {
+              "name": "promise",
+              "arguments": "{\"agent\": \"auth\", \"text\": \"let me know when it's done\", \"event\": \"done\", \"due_in_minutes\": 0}"
+            }
+          }
+        ]
+      },
+      "logprobs": null,
+      "finish_reason": "tool_calls"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 2211,
+    "completion_tokens": 187,
+    "total_tokens": 2398,
+    "prompt_tokens_details": {
+      "cached_tokens": 2048
+    },
+    "prompt_cache_hit_tokens": 2048,
+    "prompt_cache_miss_tokens": 163,
+    "completion_tokens_details": {
+      "reasoning_tokens": 121
+    }
+  },
+  "system_fingerprint": "fp_test"
+}

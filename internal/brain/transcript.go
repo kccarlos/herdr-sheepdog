@@ -57,8 +57,8 @@ const (
 	// again; pruned to a stub like a tool result.
 	KindEventScreen MessageKind = "event_screen"
 	// KindSystem is a note from the daemon about the run itself, not the
-	// work: today the model switch ("model switched from X to Y"), so
-	// the Supervisor tab shows where the model flipped.
+	// work: today the model switch ("model switched from gemini/X to
+	// deepseek/Y"), so the Supervisor tab shows where the model flipped.
 	KindSystem MessageKind = "system"
 )
 
@@ -85,13 +85,20 @@ type Message struct {
 	ToolResult *ToolResult `json:"tool_result,omitempty"`
 	// Promise is the record a KindPromise message is about.
 	Promise *PromiseInfo `json:"promise,omitempty"`
-	// Raw is the model's own content for the first tool call of a step
-	// (function call parts with their thought signatures), replayed
-	// verbatim so the provider accepts the follow-up.
+	// Raw is the provider's own record of the model's message, in the
+	// provider's native shape: for Gemini the content of the first tool
+	// call of a step (function call parts with their thought signatures),
+	// for an OpenAI-compatible provider the assistant message (its
+	// reasoning_content and tool_calls). Each adapter parses it only when
+	// Provider and Model are its own and replays it so the provider
+	// accepts the follow-up; any other adapter rebuilds the message from
+	// the neutral fields (ToolCall, Content).
 	Raw json.RawMessage `json:"raw,omitempty"`
-	// Model is the model that made a tool call: after a model switch
-	// its Raw (signed by another model) is not replayed.
-	Model string `json:"model,omitempty"`
+	// Provider and Model name who produced Raw: after a switch to another
+	// provider or model it is not replayed (a signature or a reasoning
+	// blob of one model is not accepted by another).
+	Provider string `json:"provider,omitempty"`
+	Model    string `json:"model,omitempty"`
 	// Tokens is the estimated size of the message.
 	Tokens int `json:"tokens,omitempty"`
 }

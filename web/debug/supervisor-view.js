@@ -5,7 +5,7 @@
 // meter (the /context map). Renders the items of supervisor.js; the
 // fetching lives in app.js. Vanilla DOM, no framework (decision D11).
 import { buildTranscriptView, meterSegments, TurnLog, fmtTokens } from './supervisor.js';
-import { fmtMs } from './grouping.js';
+import { fmtMs, withProvider } from './grouping.js';
 import { el, fmtTime, jsonPre, Openable, Follow } from './dom.js';
 
 const MAX_ITEMS = 1500;
@@ -263,7 +263,7 @@ export class SupervisorView {
     table.appendChild(body);
     const details = el('details', 'svp-sections-wrap');
     details.open = this.open.isOpen('sections');
-    const model = this.context && this.context.model ? ` · model ${this.context.model}` : '';
+    const model = this.context && this.context.model ? ` · model ${withProvider(this.context.provider, this.context.model)}` : '';
     details.appendChild(el('summary', null, `${m.prompt.length} prompt sections${model}`));
     details.appendChild(table);
     details.addEventListener('toggle', () => this.open.set('sections', details.open));
@@ -580,7 +580,7 @@ export class SupervisorView {
 
   renderTurn(it) {
     const row = el('div', `svp-turn${it.fallback ? ' fallback' : ''}${it.complete ? '' : ' running'}`);
-    const bits = [`turn ${it.turn}`, it.trigger, it.reqKind, it.agent ? `${it.agent} ${it.event}` : ''];
+    const bits = [`turn ${it.turn}`, it.trigger, it.reqKind, it.agent ? `${it.agent} ${it.event}` : '', withProvider(it.provider, it.model)];
     if (it.modelCalls != null) bits.push(`${it.modelCalls} model call${it.modelCalls === 1 ? '' : 's'}`);
     if (it.durMs != null) bits.push(fmtMs(it.durMs));
     if (it.tokensIn) bits.push(`${fmtTokens(it.tokensIn)} in / ${fmtTokens(it.tokensOut)} out`);

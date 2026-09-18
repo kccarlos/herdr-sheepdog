@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -33,7 +34,7 @@ func printBrainTestUsage(w io.Writer) {
 	fprintln(w, "Runs one supervisor-brain turn (ask by default) against a mock herdr with one")
 	fprintln(w, "agent whose screen is a testdata/herdr fixture, and prints the reply as JSON.")
 	fprintln(w, "Every event (brain.turn, brain.step, brain.tool_call/tool_result, herdr.read,")
-	fprintln(w, "llm.call, …) goes to stderr as JSON lines. Needs a Gemini key unless --fake.")
+	fprintln(w, "llm.call, …) goes to stderr as JSON lines. Needs the provider's key unless --fake.")
 	fprintln(w, "")
 	fprintln(w, "flags:")
 	fprintln(w, "  --config PATH       config file (default ~/.config/sheepdog/config.toml)")
@@ -49,8 +50,10 @@ func printBrainTestUsage(w io.Writer) {
 	fprintln(w, "                      codex-after-approval.screen.txt)")
 	fprintln(w, "  --transcript PATH   a brain transcript (JSONL) to seed the run with")
 	fprintln(w, "  --say TEXT          a CEO utterance heard before the request (repeatable)")
+	fprintln(w, "  --provider ID       brain provider: gemini | deepseek (default config brain.provider)")
 	fprintln(w, "  --model NAME        brain model (default config brain.model)")
-	fprintln(w, "  --thinking LEVEL    minimal | low | medium | high (default low)")
+	fprintln(w, "  --thinking LEVEL    Gemini thinking level: minimal | low | medium | high (default low;")
+	fprintln(w, "                      DeepSeek's thinking comes from [deepseek])")
 	fprintln(w, "  --prompts-dir PATH  prompt override directory (default config prompts.dir)")
 	fprintln(w, "  --timeout D         turn budget (default from config)")
 	fprintln(w, "  --fake              use a scripted model (read_screen, then an answer): no network")
@@ -60,10 +63,10 @@ func printBrainTestUsage(w io.Writer) {
 const brainTestPane = "w1:p1"
 
 type brainTestOpts struct {
-	configPath, envFile, question, kind, agent, alias, agentKind, st, fixture, transcript, model, thinking, promptsDir string
-	say                                                                                                                multiFlag
-	timeout                                                                                                            time.Duration
-	fake                                                                                                               bool
+	configPath, envFile, question, kind, agent, alias, agentKind, st, fixture, transcript, provider, model, thinking, promptsDir string
+	say                                                                                                                          multiFlag
+	timeout                                                                                                                      time.Duration
+	fake                                                                                                                         bool
 }
 
 // multiFlag collects a repeatable string flag.
@@ -88,6 +91,7 @@ func parseBrainTestFlags(args []string, stderr io.Writer) (brainTestOpts, int, b
 	fs.StringVar(&o.fixture, "fixture", "codex-after-approval.screen.txt", "screen fixture")
 	fs.StringVar(&o.transcript, "transcript", "", "transcript to seed")
 	fs.Var(&o.say, "say", "CEO utterance (repeatable)")
+	fs.StringVar(&o.provider, "provider", "", "brain provider")
 	fs.StringVar(&o.model, "model", "", "brain model")
 	fs.StringVar(&o.thinking, "thinking", "", "thinking level")
 	fs.StringVar(&o.promptsDir, "prompts-dir", "", "prompt override directory (default config prompts.dir)")
@@ -158,6 +162,9 @@ func runBrainTest(ctx context.Context, args []string, stdout, stderr io.Writer) 
 	}
 	bcfg := app.BrainConfig(cfg)
 	bcfg.DataDir = dir
+	if o.provider != "" {
+		bcfg.Provider = o.provider
+	}
 	if o.model != "" {
 		bcfg.Model = o.model
 	}
@@ -225,7 +232,8 @@ func runBrainTest(ctx context.Context, args []string, stdout, stderr io.Writer) 
 }
 
 // transcriptForReport drops the replayed model content (base64 thought
-// signatures) from the transcript so the report stays readable.
+// signatures, reasoning blobs) from the transcript so the report stays
+// readable.
 func transcriptForReport(msgs []brain.Message) []brain.Message {
 	for i := range msgs {
 		msgs[i].Raw = nil
@@ -233,8 +241,8 @@ func transcriptForReport(msgs []brain.Message) []brain.Message {
 	return msgs
 }
 
-// brainTestModel is the real Gemini model over the key pool, or the
-// scripted one with --fake.
+// brainTestModel is the real model of the chosen provider (--provider,
+// default brain.provider) over its key, or the scripted one with --fake.
 func brainTestModel(o brainTestOpts, cfg config.Config, log logging.Logger) (brain.Model, error) {
 	if o.fake {
 		m := braintest.NewModel(
@@ -243,10 +251,25 @@ func brainTestModel(o brainTestOpts, cfg config.Config, log logging.Logger) (bra
 		)
 		return m, nil
 	}
-	if len(cfg.Gemini.APIKeys) == 0 {
-		return nil, errors.New("no Gemini key (set GEMINI_API_KEY or use --fake)")
+	provider := o.provider
+	if provider == "" {
+		provider = cfg.Brain.Provider
 	}
-	return brain.NewGenaiModel(cfg.Gemini.APIKeys, log)
+	models, err := app.BrainModels(cfg, log)
+	if err != nil {
+		return nil, err
+	}
+	m, ok := models[provider]
+	if !ok {
+		switch provider {
+		case brain.ProviderGemini:
+			return nil, errors.New("no Gemini key (set GEMINI_API_KEY or use --fake)")
+		case brain.ProviderDeepSeek:
+			return nil, errors.New("no DeepSeek key (set DEEPSEEK_API_KEY or use --fake)")
+		}
+		return nil, fmt.Errorf("unknown provider %q (gemini or deepseek)", provider)
+	}
+	return m, nil
 }
 
 // brainTestSupervisor builds a supervisor over a mock herdr, a fresh

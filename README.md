@@ -44,7 +44,7 @@ make build   # -> bin/sheepdog
 
 ```sh
 sheepdog config init            # writes ~/.config/sheepdog/config.toml (commented template)
-cp .env.example .env            # fill in GEMINI_API_KEY (Google AI Studio, free tier works)
+cp .env.example .env            # fill in GEMINI_API_KEY (Google AI Studio, free tier works); DEEPSEEK_API_KEY adds DeepSeek as a brain provider
 ```
 
 `sheepdog serve` loads `./.env` on its own (no `source` needed); see
@@ -139,9 +139,10 @@ the console loads a sample run.
 
 Behind `ask` and `propose` sits the SVP of [`docs/roles.md`](docs/roles.md):
 a stateful agent (`internal/brain`, `gemini-3.5-flash` with function
-calling by default; the `/debug` header's model picker switches it at
-runtime from the discovered model list, and the choice survives a
-restart) that keeps one transcript per daemon run — your verbatim words,
+calling by default, or DeepSeek's `deepseek-flash` with a
+`DEEPSEEK_API_KEY`; the `/debug` header's provider and model picker
+switches it at runtime from each provider's discovered model list, and
+the choice survives a restart) that keeps one transcript per daemon run — your verbatim words,
 what the voice said, every push and worker state change, its own tool
 calls — so "why did *that one* fail?" still means something when it reads
 a screen. It reasons with `read_screen`, `run_cli`, `list_agents` and

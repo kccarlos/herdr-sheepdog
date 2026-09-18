@@ -40,7 +40,7 @@ func TestPromiseToolRecordsAPromise(t *testing.T) {
 	if p.Text != "let me know when it's done" || p.Agent != "auth" || p.Event != PromiseEventDone || p.Status != PromiseOpen || p.CreatedTurn != 1 {
 		t.Errorf("promise = %+v", p)
 	}
-	if got := joinKinds(h.kinds()); got != "ceo_utterance request brain_tool_call brain_tool_result brain_tool_call brain_tool_result promise reply" {
+	if got := joinKinds(h.kinds()); got != "ceo_utterance request brain_tool_call brain_tool_call brain_tool_result brain_tool_result promise reply" {
 		t.Errorf("transcript = %s", got)
 	}
 	msgs := h.brain.Transcript().Messages()
@@ -162,7 +162,7 @@ func TestEventTurnIsReadOnly(t *testing.T) {
 	if turn["trigger"] != "event" || turn["kind"] != "announce" || turn["fallback"] != false || turn["acted"] != 0 {
 		t.Errorf("brain.turn = %v", turn)
 	}
-	if got := joinKinds(h.kinds()); got != "ceo_utterance request event_screen brain_tool_call brain_tool_result brain_tool_call brain_tool_result brain_tool_call brain_tool_result brain_tool_call brain_tool_result brain_tool_call brain_tool_result reply" {
+	if got := joinKinds(h.kinds()); got != "ceo_utterance request event_screen brain_tool_call brain_tool_call brain_tool_call brain_tool_call brain_tool_call brain_tool_result brain_tool_result brain_tool_result brain_tool_result brain_tool_result reply" {
 		t.Errorf("transcript = %s", got)
 	}
 	// The screen is pruned like a tool result; the transcript keeps it.

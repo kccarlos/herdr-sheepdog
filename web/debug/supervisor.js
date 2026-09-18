@@ -125,7 +125,7 @@ export function parsePush(content) {
   return m ? { urgency: m[1], text: m[2] } : { urgency: '', text: content || '' };
 }
 
-/** Parses the model-switch note "model switched from X to Y" ({from, to}, empty when it is another note). */
+/** Parses the model-switch note "model switched from X to Y" (X and Y are "provider/model" since providers exist; {from, to}, empty when it is another note). */
 export function parseModelSwitch(content) {
   const m = /^model switched from (\S+) to (\S+)$/.exec(content || '');
   return m ? { from: m[1], to: m[2] } : { from: '', to: '' };
@@ -165,7 +165,7 @@ export class TurnLog {
   info(n) {
     let t = this.turns.get(n);
     if (!t) {
-      t = { turn: n, steps: 0, modelCalls: 0, durMs: null, fallback: false, reason: '', trigger: '', kind: '', tokensIn: 0, tokensOut: 0, windowTokens: null, acted: 0, complete: false };
+      t = { turn: n, steps: 0, modelCalls: 0, durMs: null, fallback: false, reason: '', trigger: '', kind: '', provider: '', model: '', tokensIn: 0, tokensOut: 0, windowTokens: null, acted: 0, complete: false };
       this.turns.set(n, t);
     }
     return t;
@@ -200,6 +200,7 @@ export class TurnLog {
         const t = this.info(p.turn);
         Object.assign(t, {
           trigger: p.trigger || '', kind: p.kind || '', steps: p.steps ?? t.steps, modelCalls: p.model_calls ?? t.modelCalls, durMs: p.dur_ms ?? null,
+          provider: p.provider || t.provider, model: p.model || t.model,
           fallback: !!p.fallback, tokensIn: p.tokens_in || 0, tokensOut: p.tokens_out || 0, windowTokens: p.window_tokens ?? null, acted: p.acted || 0, complete: true, ts: ev.ts,
         });
         return true;
@@ -218,6 +219,10 @@ export class TurnLog {
           t.modelCalls++;
           t.steps = Math.max(t.steps, p.step || 0);
         }
+        // The provider and model the turn runs on (a switch mid-turn
+        // never lands between its steps, so the first step's are the
+        // turn's).
+        if (!t.model) { t.provider = p.provider || ''; t.model = p.model || ''; }
         return true;
       }
       case 'brain.compaction':
@@ -362,6 +367,7 @@ export function buildTranscriptView(messages, context, turns, opts = {}) {
         trigger: (info && info.trigger) || (req && req.trigger) || '', reqKind: (info && info.kind) || (req && req.reqKind) || '',
         agent: req && req.trigger === 'event' ? req.agent : '', event: req && req.trigger === 'event' ? req.event : '',
         modelCalls: info ? info.modelCalls : null, durMs: info ? info.durMs : null, fallback: !!(info && info.fallback), reason: info ? info.reason : '',
+        provider: info ? info.provider : '', model: info ? info.model : '',
         tokensIn: info ? info.tokensIn : 0, tokensOut: info ? info.tokensOut : 0, windowTokens: info ? info.windowTokens : null, acted: info ? info.acted : 0, complete: !!(info && info.complete),
       });
     }

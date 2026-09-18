@@ -470,10 +470,10 @@ func TestBrainModelPersistsAcrossRestart(t *testing.T) {
 	types, models := run(func(url string) {
 		var st map[string]any
 		getJSON(t, url+"/api/state", &st)
-		if b, _ := st["brain"].(map[string]any); b["model"] != FakeBrainModel || b["provider"] != "gemini" {
+		if b, _ := st["brain"].(map[string]any); b["model"] != FakeBrainModel || b["provider"] != FakeBrainProvider {
 			t.Fatalf("state.brain = %v", st["brain"])
 		}
-		body, _ := json.Marshal(map[string]any{"provider": "gemini", "model": "gemini-3.8-flash"})
+		body, _ := json.Marshal(map[string]any{"provider": FakeBrainProvider2, "model": "gemini-3.8-flash"})
 		req, _ := http.NewRequest(http.MethodPut, url+"/api/brain/model", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		resp, err := http.DefaultClient.Do(req)
@@ -492,14 +492,14 @@ func TestBrainModelPersistsAcrossRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(data), `"brain_model": "gemini-3.8-flash"`) {
-		t.Fatalf("state file lacks brain_model: %s", data)
+	if !strings.Contains(string(data), `"brain_provider": "fake2"`) || !strings.Contains(string(data), `"brain_model": "gemini-3.8-flash"`) {
+		t.Fatalf("state file lacks brain_provider / brain_model: %s", data)
 	}
 
 	types, models = run(func(url string) {
 		var st map[string]any
 		getJSON(t, url+"/api/state", &st)
-		if b, _ := st["brain"].(map[string]any); b["model"] != "gemini-3.8-flash" {
+		if b, _ := st["brain"].(map[string]any); b["model"] != "gemini-3.8-flash" || b["provider"] != FakeBrainProvider2 {
 			t.Fatalf("state.brain after restart = %v", st["brain"])
 		}
 	})
@@ -507,5 +507,74 @@ func TestBrainModelPersistsAcrossRestart(t *testing.T) {
 	// initial model), as brain.model_changed {via: state}.
 	if !subsequence(types, []string{"daemon.start", "brain.model_changed"}) || strings.Join(models, ",") != FakeBrainModel {
 		t.Fatalf("second run: types = %v models = %v", types, models)
+	}
+}
+
+// A persisted provider that is not registered in this run (its key is
+// gone; here "gemini" under --brain=fake, which registers fake and
+// fake2) is logged as daemon.brain_model_error and the configured pair
+// is kept; a persisted model without a provider (a state file from
+// before providers existed) is Gemini's, so under the fake it is
+// refused the same way rather than applied to the configured provider.
+func TestBrainProviderRestoreFallsBackToConfigured(t *testing.T) {
+	llm := fakeLLM(t)
+	cfg := testConfig(t, llm.URL)
+	run := func(session string, check func(url string)) []string {
+		t.Helper()
+		if err := os.WriteFile(cfg.State.Path, []byte(`{"agents":{},"session":`+session+`}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		a, err := Build(cfg, Options{Voice: VoiceOff, Herdr: HerdrMock, Brain: BrainFake, Drain: time.Second})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := a.Listen(); err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan error, 1)
+		go func() { done <- a.Run(ctx) }()
+		check(a.URL())
+		cancel()
+		if err := <-done; err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		f, err := os.Open(a.elog.Path(time.Now()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = f.Close() }()
+		evs, err := eventlog.Replay(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var types []string
+		for _, ev := range evs {
+			if ev.Type == "daemon.start" {
+				types = nil
+			}
+			types = append(types, ev.Type)
+		}
+		return types
+	}
+	types := run(`{"brain_provider":"gemini","brain_model":"gemini-3.8-flash"}`, func(url string) {
+		var st map[string]any
+		getJSON(t, url+"/api/state", &st)
+		if b, _ := st["brain"].(map[string]any); b["provider"] != FakeBrainProvider || b["model"] != FakeBrainModel {
+			t.Errorf("state.brain = %v", st["brain"])
+		}
+	})
+	if !subsequence(types, []string{"daemon.start", "daemon.brain_model_error"}) || subsequence(types, []string{"brain.model_changed"}) {
+		t.Errorf("unregistered provider: types = %v", types)
+	}
+	types = run(`{"brain_model":"gemini-3.8-flash"}`, func(url string) {
+		var st map[string]any
+		getJSON(t, url+"/api/state", &st)
+		if b, _ := st["brain"].(map[string]any); b["provider"] != FakeBrainProvider || b["model"] != FakeBrainModel {
+			t.Errorf("state.brain = %v", st["brain"])
+		}
+	})
+	if !subsequence(types, []string{"daemon.start", "daemon.brain_model_error"}) || subsequence(types, []string{"brain.model_changed"}) {
+		t.Errorf("model only: types = %v", types)
 	}
 }

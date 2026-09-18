@@ -41,6 +41,16 @@ func Template() string {
 # voice = %[9]q
 # stall_after_s = %[20]d   # no model response this long after an utterance logs voice.stalled; twice recycles the connection
 
+[deepseek]
+# The second supervisor-brain provider (paid per token). api_key is
+# normally left unset here: DEEPSEEK_API_KEY is read from the
+# environment instead. With a key, deepseek appears in the /debug model
+# picker whatever brain.provider says.
+# api_key = ""
+# base_url = %[38]q
+# thinking = %[39]t   # DeepSeek's thinking mode
+# reasoning_effort = %[40]q   # "low" | "high" | "max"; low fits the 8 s ask budget
+
 [llm]
 # base_url = %[10]q
 # model = %[11]q
@@ -71,7 +81,8 @@ func Template() string {
 
 [brain]
 # enabled = %[24]t   # the stateful supervisor brain behind ask/propose; serve --brain=off overrides
-# model = %[25]q   # a function-calling Gemini model
+# provider = %[41]q   # "gemini" | "deepseek": the provider the brain starts on; the /debug picker switches at runtime
+# model = %[25]q   # a function-calling model of that provider
 # max_steps = %[26]d   # model calls per turn before falling back to the template path
 # ask_timeout_s = %[27]d
 # propose_timeout_s = %[28]d
@@ -100,5 +111,7 @@ func Template() string {
 		d.Prompts.Dir,
 		d.Supervisor.PromiseTTLS, d.Brain.EnrichTimeoutS,
 		d.Supervisor.SummaryTimeoutS, d.Brain.AnnounceWaitS,
+		d.DeepSeek.BaseURL, d.DeepSeek.Thinking, d.DeepSeek.ReasoningEffort,
+		d.Brain.Provider,
 	)
 }

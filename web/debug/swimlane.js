@@ -26,7 +26,7 @@
 // loop, brain.*) is an inner call nested under the voice call in flight,
 // and the herdr.read / cli.run / llm.call cards between an inner call and
 // its result carry `parentKey` = that inner call.
-import { NESTED_TYPES, DIVIDERS, DAEMON_DIVIDERS, argSummary, eventSummary, fmtMs, ToolPairer, Fragments, toolFamily } from './grouping.js';
+import { NESTED_TYPES, DIVIDERS, DAEMON_DIVIDERS, argSummary, eventSummary, fmtMs, ToolPairer, Fragments, toolFamily, withProvider } from './grouping.js';
 
 export const LANES = [
   { id: 'you', label: 'You' },
@@ -135,7 +135,7 @@ class Builder {
     if (DAEMON_DIVIDERS[type]) return this.divider(ev, p, { ...DAEMON_DIVIDERS[type](p), lane: 'sup' });
     switch (type) {
       case 'voice.system_prompt':
-        return this.divider(ev, p, { lane: 'voice', label: 'system prompt', detail: `~${Math.round((p.text || '').length / 4)} tokens${p.model ? ` · ${p.model}` : ''}${p.aliases && p.aliases.length ? ` · aliases ${p.aliases.join(', ')}` : ''}`, cls: 'prompt', text: p.text || '' });
+        return this.divider(ev, p, { lane: 'voice', label: 'system prompt', detail: `~${Math.round((p.text || '').length / 4)} tokens${p.model ? ` · ${withProvider(p.provider, p.model)}` : ''}${p.aliases && p.aliases.length ? ` · aliases ${p.aliases.join(', ')}` : ''}`, cls: 'prompt', text: p.text || '' });
       case 'voice.transcript.in':
         return this.input(ev, p.text || '', !!p.final, false);
       case 'voice.text':
@@ -370,7 +370,7 @@ class Builder {
     card.chain = this.workChain(card);
     const inner = this.openInner;
     if (inner) card.parentKey = inner.key;
-    card.arrow = { from: 'sup', to: 'herdr', kind: 'call', label: [p.template, p.model, card.durMs != null ? fmtMs(card.durMs) : '', p.tool_calls ? `${p.tool_calls} tool call${p.tool_calls === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · '), dashed: false, level: isErr ? 'error' : latencyLevel(card.durMs) };
+    card.arrow = { from: 'sup', to: 'herdr', kind: 'call', label: [p.template, withProvider(p.provider, p.model), card.durMs != null ? fmtMs(card.durMs) : '', p.tool_calls ? `${p.tool_calls} tool call${p.tool_calls === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · '), dashed: false, level: isErr ? 'error' : latencyLevel(card.durMs) };
     return card;
   }
 
@@ -463,7 +463,7 @@ class Builder {
       if (inner) { card.parentKey = inner.key; inner.children.push(card.key); }
       if (type === 'llm.call') {
         card.title = `LLM ${p.template || ''}`.trim();
-        card.arrow = { from: 'sup', to: 'herdr', kind: 'call', label: [p.template, p.model, card.durMs != null ? fmtMs(card.durMs) : ''].filter(Boolean).join(' · '), dashed: false, level: isErr ? 'error' : latencyLevel(card.durMs) };
+        card.arrow = { from: 'sup', to: 'herdr', kind: 'call', label: [p.template, withProvider(p.provider, p.model), card.durMs != null ? fmtMs(card.durMs) : ''].filter(Boolean).join(' · '), dashed: false, level: isErr ? 'error' : latencyLevel(card.durMs) };
       } else if (type === 'cli.run') {
         card.title = `CLI ${p.backend || ''}`.trim();
         card.arrow = { from: 'sup', to: 'herdr', kind: 'call', label: [p.backend, card.durMs != null ? fmtMs(card.durMs) : '', p.exit != null && p.exit !== 0 ? `exit ${p.exit}` : '', p.killed ? 'killed' : ''].filter(Boolean).join(' · '), dashed: false, level: isErr ? 'error' : latencyLevel(card.durMs) };

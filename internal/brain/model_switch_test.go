@@ -23,28 +23,28 @@ func TestSetModel(t *testing.T) {
 		t.Fatalf("initial model = %q", got)
 	}
 	for _, bad := range []string{"", "   ", "models/", "gemini flash", "a;b", strings.Repeat("x", 129)} {
-		if err := h.brain.SetModel(bad, "test"); err == nil {
+		if err := h.brain.SetModel("", bad, "test"); err == nil {
 			t.Errorf("SetModel(%q) accepted", bad)
 		}
 	}
-	if err := h.brain.SetModel(" models/"+DefaultModel+" ", "test"); err != nil || h.brain.Model() != DefaultModel {
+	if err := h.brain.SetModel(" Gemini ", " models/"+DefaultModel+" ", "test"); err != nil || h.brain.Model() != DefaultModel {
 		t.Errorf("same model: err = %v model = %q", err, h.brain.Model())
 	}
 	if h.log.count("brain.model_changed") != 0 || h.brain.Transcript().Len() != 0 {
 		t.Errorf("no-op switch logged or marked: %d events, %d messages", h.log.count("brain.model_changed"), h.brain.Transcript().Len())
 	}
-	if err := h.brain.SetModel("models/gemini-3.8-flash", "debug"); err != nil {
+	if err := h.brain.SetModel("", "models/gemini-3.8-flash", "debug"); err != nil {
 		t.Fatal(err)
 	}
 	if got := h.brain.Model(); got != "gemini-3.8-flash" {
 		t.Errorf("model = %q", got)
 	}
 	ev := h.log.ofType("brain.model_changed")
-	if len(ev) != 1 || payload(ev[0])["from"] != DefaultModel || payload(ev[0])["to"] != "gemini-3.8-flash" || payload(ev[0])["via"] != "debug" {
+	if len(ev) != 1 || payload(ev[0])["from"] != DefaultModel || payload(ev[0])["to"] != "gemini-3.8-flash" || payload(ev[0])["via"] != "debug" || payload(ev[0])["from_provider"] != ProviderGemini || payload(ev[0])["provider"] != ProviderGemini {
 		t.Errorf("brain.model_changed = %v", ev)
 	}
 	msgs := h.brain.Transcript().Messages()
-	if len(msgs) != 1 || msgs[0].Kind != KindSystem || msgs[0].Role != RoleSystem || msgs[0].Content != "model switched from "+DefaultModel+" to gemini-3.8-flash" || msgs[0].Turn != 0 {
+	if len(msgs) != 1 || msgs[0].Kind != KindSystem || msgs[0].Role != RoleSystem || msgs[0].Content != "model switched from gemini/"+DefaultModel+" to gemini/gemini-3.8-flash" || msgs[0].Turn != 0 {
 		t.Errorf("marker = %+v", msgs)
 	}
 	if win := h.brain.Window(); len(win) != 1 || win[0].Kind != KindSystem {
@@ -86,7 +86,7 @@ func TestSetModelMidTurnKeepsSnapshot(t *testing.T) {
 	}
 	// The setter does not wait for the turn lock.
 	switched := make(chan error, 1)
-	go func() { switched <- h.brain.SetModel("gemini-3.8-flash", "debug") }()
+	go func() { switched <- h.brain.SetModel("", "gemini-3.8-flash", "debug") }()
 	select {
 	case err := <-switched:
 		if err != nil {
@@ -131,8 +131,8 @@ func TestSetModelMidTurnKeepsSnapshot(t *testing.T) {
 	if signed != 0 || plainCalls != 1 {
 		t.Errorf("turn 2 replay: %d function calls, %d signed", plainCalls, signed)
 	}
-	if msgs := h.brain.Transcript().Messages(); msgs[2].Kind != KindToolCall || msgs[2].Model != DefaultModel {
-		t.Errorf("tool call message model = %q", msgs[2].Model)
+	if msgs := h.brain.Transcript().Messages(); msgs[2].Kind != KindToolCall || msgs[2].Model != DefaultModel || msgs[2].Provider != ProviderGemini {
+		t.Errorf("tool call message origin = %q/%q", msgs[2].Provider, msgs[2].Model)
 	}
 	var stepModels []string
 	for _, e := range h.log.ofType("brain.step") {
@@ -166,23 +166,23 @@ func TestModelsCatalogCache(t *testing.T) {
 	h := newHarness(t, m, func(c *Config) { c.Now = func() time.Time { return now } })
 	ctx := context.Background()
 
-	if c := h.brain.CachedModels(); len(c.Models) != 0 || c.Err != nil || c.Stale || !c.FetchedAt.IsZero() {
+	if c := h.brain.CachedModels(""); len(c.Models) != 0 || c.Err != nil || c.Stale || !c.FetchedAt.IsZero() {
 		t.Errorf("empty cache = %+v", c)
 	}
-	c := h.brain.Models(ctx, false)
-	if c.Err != nil || len(c.Models) != len(braintest.Catalog()) || !c.FetchedAt.Equal(now) || c.Stale || c.Models[0].Name != "gemini-3.8-flash" {
+	c := h.brain.Models(ctx, "", false)
+	if c.Err != nil || c.Provider != ProviderGemini || len(c.Models) != len(braintest.Catalog()) || !c.FetchedAt.Equal(now) || c.Stale || c.Models[0].Name != "gemini-3.8-flash" {
 		t.Fatalf("first fetch = %+v", c)
 	}
 	// Within the TTL: served from the cache even though the source now
 	// fails.
 	m.ListErr = errors.New("boom")
 	now = now.Add(CatalogTTL - time.Second)
-	if c := h.brain.Models(ctx, false); c.Err != nil || c.Stale || len(c.Models) == 0 {
+	if c := h.brain.Models(ctx, "", false); c.Err != nil || c.Stale || len(c.Models) == 0 {
 		t.Errorf("cached = %+v", c)
 	}
 	// Refresh bypasses the cache: the failure is reported with the last
 	// list.
-	c = h.brain.Models(ctx, true)
+	c = h.brain.Models(ctx, "", true)
 	if c.Err == nil || !c.Stale || len(c.Models) != len(braintest.Catalog()) || c.Err.Error() != "boom" {
 		t.Errorf("failed refresh = %+v", c)
 	}
@@ -192,16 +192,16 @@ func TestModelsCatalogCache(t *testing.T) {
 	// Past the TTL a plain call fetches again; back to fresh once it
 	// works.
 	now = now.Add(2 * time.Second)
-	if c := h.brain.Models(ctx, false); c.Err == nil || !c.Stale {
+	if c := h.brain.Models(ctx, "", false); c.Err == nil || !c.Stale {
 		t.Errorf("expired, still failing = %+v", c)
 	}
 	m.ListErr = nil
 	m.Models = braintest.Catalog()[:2]
-	c = h.brain.Models(ctx, false)
+	c = h.brain.Models(ctx, "", false)
 	if c.Err != nil || c.Stale || len(c.Models) != 2 || !c.FetchedAt.Equal(now) {
 		t.Errorf("refetched = %+v", c)
 	}
-	if c := h.brain.CachedModels(); len(c.Models) != 2 || c.Err != nil {
+	if c := h.brain.CachedModels(""); len(c.Models) != 2 || c.Err != nil {
 		t.Errorf("CachedModels = %+v", c)
 	}
 }
@@ -220,7 +220,10 @@ func TestModelsWithoutCatalog(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = b.Close() }()
-	if c := b.Models(context.Background(), true); !errors.Is(c.Err, ErrNoCatalog) || len(c.Models) != 0 || c.Stale {
+	if c := b.Models(context.Background(), "", true); !errors.Is(c.Err, ErrNoCatalog) || len(c.Models) != 0 || c.Stale {
 		t.Errorf("no catalog = %+v", c)
+	}
+	if c := b.Models(context.Background(), "nope", true); !errors.Is(c.Err, ErrUnknownProvider) || len(c.Models) != 0 || c.Provider != "nope" {
+		t.Errorf("unknown provider = %+v", c)
 	}
 }

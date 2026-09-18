@@ -5,10 +5,9 @@ is done; it is what a fresh session reads first.
 
 ## Where main is
 
-`main` = `c34cc90`. Everything in `sheepdog-v1-plan.md` (WP0–WP7) and in
-`docs/roles.md` Delivery (1a, 1b, 1c, 2, 3) is merged. Twenty-four PRs so
+`main` = `3ccb9a4`. Everything in `sheepdog-v1-plan.md` (WP0–WP7) and in
+`docs/roles.md` Delivery (1a, 1b, 1c, 2, 3) is merged. Twenty-five PRs so
 far, every one squash-merged on green CI after independent verification.
-No open PRs, no worktrees, `bin/sheepdog` built from main.
 
 | Area | State |
 |---|---|
@@ -22,11 +21,8 @@ No open PRs, no worktrees, `bin/sheepdog` built from main.
 | Brain (stateful SVP), prompt workspace + overrides, evals | done (#20, #21) |
 | Enrichment + promises; push judgment under the chattiness ceiling | done (#23, #24) |
 | Logo (README picture, both pages, favicons) | done (#18) |
-
-Brain model switch at runtime (`/debug` picker over the discovered
-Gemini model list, `GET /api/brain/models`, `PUT /api/brain/model`,
-persisted in `session.brain_model`): in review; verified with
-`--brain=fake` and one live model-list call (free endpoint).
+| Brain model switch at runtime (`/debug` picker, `GET /api/brain/models`, `PUT /api/brain/model`, `session.brain_model`) | done (#25); verified with `--brain=fake` and one live model-list call |
+| DeepSeek as a second brain provider (`[deepseek]`, `brain.provider`, `OpenAICompatModel`, provider select on `/debug`, `session.brain_provider`) | in review; verified live: 10 DeepSeek calls (model list, two tool-using asks at `low`/`high`, a `prompt`+`promise` propose, a seeded second turn without earlier reasoning) |
 
 ## Verified live vs. verified with the fake model only
 
@@ -39,6 +35,15 @@ quota ran out).
 (push judgment, yield, coalescing). The logic is unit- and daemon-tested
 with `--brain=fake`; the real model's behaviour on it is not yet observed.
 
+Live on DeepSeek (`deepseek-flash`, 2026-09-18, `brain-test`): an ask
+that reads a screen (2 calls, 2.8–2.9 s at `low` and `high`), a propose
+that sends `prompt` and `promise` in one step (3.3 s; the
+`reasoning_content` replay was accepted on the second call), and a
+second turn seeded with a transcript whose reasoning had been stripped
+(accepted: the replay rule holds within a turn's tool loop only). The
+provider switch itself (`/debug` select, `PUT`, restart) was verified
+with `--brain=fake` and its two fake providers.
+
 ## Live checks to run when quota allows (text first, audio last)
 
 0. Key check (free): `set -a; source .env; set +a; curl -s -H "x-goog-api-key: $GEMINI_API_KEY" https://generativelanguage.googleapis.com/v1beta/models | head -c 200`
@@ -46,10 +51,13 @@ with `--brain=fake`; the real model's behaviour on it is not yet observed.
 2. Phase 2/3 sequence, real brain, no voice (~10 calls):
    `SHEEPDOG_DATA_DIR=/tmp/sheepdog-live bin/sheepdog serve --env-file .env --brain=on --herdr=mock --voice=off --dev --port 7799`, then on `/debug`: inject Codex approval preset → utterance "yes" → "tell auth to run the tests and let me know when it's done" → state working → inject done (after-approval screen). Expect: question pushed before the first `brain.step`; one `voice.push` per finish carrying the promise line; `brain.push_decision {via: brain}`; repeat at `quiet` (only the promise line); a second untouched pane at `normal` → `urgency_applied: skip, reason: ceiling`, no turn.
 3. `make eval-live` — a full day's budget on one key; run deliberately, once.
-4. Model switch, real brain (~3 calls): switch to another model on
-   `/debug` after a turn that used a tool, then ask something that
+4. Model switch, real brain (~3 calls): switch to another Gemini model
+   on `/debug` after a turn that used a tool, then ask something that
    reads a screen; expect the new model's `brain.step`s to succeed (the
-   earlier tool call is replayed without its thought signature).
+   earlier tool call is replayed without its thought signature). The
+   provider half — switch to deepseek, one tool-using question — is
+   done live (DeepSeek PR); what is left is a Gemini→DeepSeek→Gemini
+   sequence in one daemon run, which needs Gemini quota.
 5. One voice session (ask the user; audio is the quota-hungry path): Codex in `--sandbox read-only -a on-request`; say "why did that one fail?" after a finish, "let me know when it's done", "stop" mid-echo.
 
 ## Known gaps and follow-ups
@@ -59,7 +67,8 @@ with `--brain=fake`; the real model's behaviour on it is not yet observed.
 - Ollama `gemma4` is too slow for the default 15 s summary timeout on cold prompts (`supervisor.summary_timeout_s`, `llm.timeout_s` are configurable) and drifts off the JSON contract for the brain — not a brain backend.
 - Scenario 10 (GoAway/compression) never observed live; `voice.turn`/`voice.stalled`/`voice.recycle` are the signals.
 - The 10-minute silent briefing re-push re-bills the context each time; make it conditional on state change.
-- Consider a billed Gemini project for the brain (2–3 calls per CEO turn will exhaust the free daily cap quickly).
+- Consider a billed Gemini project for the brain (2–3 calls per CEO turn will exhaust the free daily cap quickly); DeepSeek is now the paid alternative for the brain only (`brain.provider = "deepseek"` or the `/debug` picker).
+- `SHEEPDOG_DATA_DIR` does not move `state.path` (it is resolved against the default data dir at `Default()` time): a second daemon started with only `SHEEPDOG_DATA_DIR` set shares the user's `state.json`. Always set `SHEEPDOG_STATE_PATH` too for a scratch daemon.
 - `v0.1.0` not tagged yet (release workflow is ready; user wanted a satisfying voice session first).
 
 ## How work is done here (see also the memory notes)

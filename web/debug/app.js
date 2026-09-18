@@ -289,7 +289,7 @@ function renderVoice(v, st) {
   text += v.client_connected ? ' · browser attached' : ' · no browser';
   $('voice-indicator').classList.toggle('stalled', !!v.stalled);
   $('voice-text').textContent = text;
-  const brain = st.brain && st.brain.model ? ` · brain=${st.brain.model}` : '';
+  const brain = st.brain && st.brain.model ? ` · brain=${st.brain.provider ? `${st.brain.provider}/` : ''}${st.brain.model}` : '';
   $('daemon-info').textContent = `v${st.version || '?'} · herdr=${st.herdr}${brain} · voice_connected=${st.session && st.session.voice_connected}`;
 }
 
@@ -317,28 +317,57 @@ function setupSettings() {
   });
 }
 
-// ---- the brain's model picker: the options come from GET
-// /api/brain/models (once at start, and on ↻ with ?refresh=1); the
-// selection is re-synced from /api/state (polled, and refreshed on a
-// brain.model_changed event), so a switch made elsewhere shows up
-// without rebuilding the list under the mouse. Hidden while the brain
-// is off (503).
-const modelState = { current: '', provider: 'gemini', models: [], error: '', stale: false, showAll: false, off: true };
+// ---- the brain's model picker: the providers and the options come
+// from GET /api/brain/models (once at start, on ↻ with ?refresh=1, and
+// with ?provider= when the provider select changes, which only
+// repopulates the model select — the switch happens when a model is
+// picked, as PUT {provider, model}); the selection is re-synced from
+// /api/state (polled, and refreshed on a brain.model_changed event), so
+// a switch made elsewhere shows up without rebuilding the list under
+// the mouse. An unavailable provider (no key) is listed greyed out with
+// the reason in its tooltip. Hidden while the brain is off (503).
+const modelState = { current: '', provider: '', providers: [], viewProvider: '', models: [], error: '', stale: false, showAll: false, off: true };
 
 function renderModelControl() {
   const box = $('model-control');
   box.classList.toggle('hidden', modelState.off);
   if (modelState.off) return;
+  const psel = $('model-provider');
+  if (document.activeElement !== psel) {
+    psel.replaceChildren();
+    const listed = modelState.providers.length ? modelState.providers : [{ id: modelState.provider, label: modelState.provider, available: true }];
+    for (const p of listed) {
+      const o = document.createElement('option');
+      o.value = p.id;
+      o.textContent = p.id;
+      o.disabled = !p.available;
+      o.title = p.available ? (p.label || p.id) : `${p.label || p.id}: ${p.reason || 'not configured'}`;
+      psel.appendChild(o);
+    }
+    psel.value = modelState.viewProvider || modelState.provider;
+  }
   const sel = $('model-select');
   if (document.activeElement === sel) return;
+  const viewing = modelState.viewProvider || modelState.provider;
+  const isCurrent = viewing === modelState.provider;
   const recommendedOnly = !modelState.showAll;
-  const listed = modelState.models.filter((m) => !recommendedOnly || m.recommended || m.name === modelState.current);
+  const listed = modelState.models.filter((m) => !recommendedOnly || m.recommended || (isCurrent && m.name === modelState.current));
   // The current model is always an option, even when the catalog does
   // not (yet, or any more) list it.
-  if (modelState.current && !listed.some((m) => m.name === modelState.current)) {
+  if (isCurrent && modelState.current && !listed.some((m) => m.name === modelState.current)) {
     listed.unshift({ name: modelState.current, display_name: 'not in the discovered list', recommended: false, unknown: true });
   }
   sel.replaceChildren();
+  if (!isCurrent) {
+    // Another provider's list: nothing is switched until a model is
+    // picked, so the select starts on a placeholder.
+    const o = document.createElement('option');
+    o.value = '';
+    o.textContent = `pick a ${viewing} model…`;
+    o.disabled = true;
+    o.selected = true;
+    sel.appendChild(o);
+  }
   for (const m of listed) {
     const o = document.createElement('option');
     o.value = m.name;
@@ -349,7 +378,7 @@ function renderModelControl() {
     o.title = bits.join(' · ');
     sel.appendChild(o);
   }
-  sel.value = modelState.current;
+  sel.value = isCurrent ? modelState.current : '';
   const note = $('model-note');
   if (modelState.error) {
     sel.title = `model list: ${modelState.error}`;
@@ -357,7 +386,7 @@ function renderModelControl() {
     note.title = modelState.error;
     note.classList.add('error');
   } else {
-    sel.title = `${modelState.models.length} models discovered · ${listed.length} shown`;
+    sel.title = `${modelState.models.length} ${viewing} models discovered · ${listed.length} shown`;
     note.textContent = '';
     note.title = '';
     note.classList.remove('error');
@@ -370,16 +399,23 @@ function applyModels(status, data) {
   if (status !== 200) { modelState.error = (data && data.error) || `${status}`; renderModelControl(); return; }
   modelState.off = false;
   modelState.current = data.model || '';
-  modelState.provider = data.provider || 'gemini';
+  modelState.provider = data.provider || '';
+  modelState.providers = Array.isArray(data.providers) ? data.providers : [];
+  modelState.viewProvider = data.models_provider || modelState.provider;
   modelState.models = Array.isArray(data.models) ? data.models : [];
   modelState.error = data.error || '';
   modelState.stale = !!data.stale;
   renderModelControl();
 }
 
-async function fetchBrainModels(refresh) {
+// fetchBrainModels fetches the catalog of provider (the current one when
+// empty), fetching again from the provider with refresh.
+async function fetchBrainModels(refresh, provider) {
+  const q = [];
+  if (refresh) q.push('refresh=1');
+  if (provider) q.push(`provider=${encodeURIComponent(provider)}`);
   try {
-    const { status, data } = await getJSON(`/api/brain/models${refresh ? '?refresh=1' : ''}`);
+    const { status, data } = await getJSON(`/api/brain/models${q.length ? `?${q.join('&')}` : ''}`);
     applyModels(status, data);
   } catch (err) {
     modelState.error = String(err);
@@ -387,8 +423,10 @@ async function fetchBrainModels(refresh) {
   }
 }
 
-// renderBrainModel keeps the selection in step with the daemon (the model
-// can change through PUT /api/brain/model elsewhere, or a restart).
+// renderBrainModel keeps the selection in step with the daemon (the
+// provider or model can change through PUT /api/brain/model elsewhere,
+// or a restart): a change of either refetches the current provider's
+// list.
 function renderBrainModel(brain) {
   const off = !brain || !brain.model;
   if (off !== modelState.off) {
@@ -397,24 +435,33 @@ function renderBrainModel(brain) {
     renderModelControl();
     return;
   }
-  if (off || brain.model === modelState.current) return;
+  if (off || (brain.model === modelState.current && (brain.provider || '') === modelState.provider)) return;
+  if ((brain.provider || '') !== modelState.provider) { fetchBrainModels(false); return; }
   modelState.current = brain.model;
   renderModelControl();
 }
 
 function setupModelControl() {
   const sel = $('model-select');
+  const psel = $('model-provider');
   const box = $('model-control');
+  psel.addEventListener('change', () => {
+    psel.blur();
+    modelState.viewProvider = psel.value;
+    fetchBrainModels(false, psel.value);
+  });
   sel.addEventListener('change', async () => {
     const model = sel.value;
+    const provider = modelState.viewProvider || modelState.provider;
+    if (!model) return;
     box.classList.add('saving');
     try {
-      const r = await fetch('/api/brain/model', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider: modelState.provider, model }) });
+      const r = await fetch('/api/brain/model', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider, model }) });
       const data = await r.json();
       if (!r.ok) throw new Error(data.error || `${r.status}`);
       sel.blur();
       applyModels(r.status, data);
-      $('model-note').textContent = `switched to ${data.model}`;
+      $('model-note').textContent = `switched to ${data.provider}/${data.model}`;
       $('model-note').classList.remove('error');
     } catch (err) {
       console.error('model', err);
@@ -426,7 +473,7 @@ function setupModelControl() {
       box.classList.remove('saving');
     }
   });
-  $('model-refresh').addEventListener('click', () => fetchBrainModels(true));
+  $('model-refresh').addEventListener('click', () => fetchBrainModels(true, modelState.viewProvider || modelState.provider));
   $('model-all').addEventListener('change', (e) => { modelState.showAll = e.target.checked; renderModelControl(); });
   fetchBrainModels(false);
 }

@@ -129,6 +129,18 @@ func Catalog() []brain.ModelInfo {
 	}
 }
 
+// Catalog2 is the static model list of the second fake provider
+// (`--brain=fake` registers fake and fake2, so the /debug picker's
+// provider switch can be exercised without a network): the fake's own
+// model plus DeepSeek-shaped names.
+func Catalog2() []brain.ModelInfo {
+	return []brain.ModelInfo{
+		{Name: "deepseek-flash", DisplayName: "deepseek-flash", Methods: []string{"chat/completions"}, Recommended: true},
+		{Name: "deepseek-v4-pro", DisplayName: "deepseek-v4-pro", Methods: []string{"chat/completions"}, Recommended: true},
+		{Name: FakeModel, DisplayName: "Scripted reflex (no network)", Methods: []string{"chat/completions"}},
+	}
+}
+
 // NothingToAdd is the announce reply "say nothing": an empty spoken.
 func NothingToAdd() *Step {
 	return &Step{Text: `{"spoken": "", "detail": "Nothing to add.", "needs_user": false, "urgency": "skip"}`}

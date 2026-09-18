@@ -1,0 +1,186 @@
+[
+  {
+    "function": {
+      "description": "Read the last lines of an agent's terminal pane: what it printed, asked or is doing right now.",
+      "name": "read_screen",
+      "parameters": {
+        "properties": {
+          "agent": {
+            "description": "the agent's alias",
+            "type": "string"
+          },
+          "lines": {
+            "description": "how many lines from the bottom (default 200)",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "agent"
+        ],
+        "type": "object"
+      }
+    },
+    "type": "function"
+  },
+  {
+    "function": {
+      "description": "Ask a read-only CLI agent a question about the agent's repository (diff, logs, why a test fails). Slow (tens of seconds). Phrase the question with full context: the CLI has not heard this conversation.",
+      "name": "run_cli",
+      "parameters": {
+        "properties": {
+          "agent": {
+            "description": "the agent's alias",
+            "type": "string"
+          },
+          "question": {
+            "description": "a self-contained question",
+            "type": "string"
+          }
+        },
+        "required": [
+          "agent",
+          "question"
+        ],
+        "type": "object"
+      }
+    },
+    "type": "function"
+  },
+  {
+    "function": {
+      "description": "The roster: every agent with its state, task and pending question.",
+      "name": "list_agents",
+      "parameters": {
+        "properties": {},
+        "type": "object"
+      }
+    },
+    "type": "function"
+  },
+  {
+    "function": {
+      "description": "Search the record: last results, last tasks, last questions, notes, promises and earlier transcript lines matching the query.",
+      "name": "recall",
+      "parameters": {
+        "properties": {
+          "query": {
+            "description": "words to look for; empty for the most recent record",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    },
+    "type": "function"
+  },
+  {
+    "function": {
+      "description": "Send an instruction to an agent as typed text. Its own approval prompts still apply. Use for anything the CEO tells an agent to do.",
+      "name": "prompt",
+      "parameters": {
+        "properties": {
+          "agent": {
+            "description": "the agent's alias",
+            "type": "string"
+          },
+          "text": {
+            "description": "the instruction, complete and self-contained",
+            "type": "string"
+          }
+        },
+        "required": [
+          "agent",
+          "text"
+        ],
+        "type": "object"
+      }
+    },
+    "type": "function"
+  },
+  {
+    "function": {
+      "description": "Answer an agent's approval prompt with the keys of one of its on-screen options (see the roster). Permitted only when the CEO authorised that answer in this turn.",
+      "name": "send_keys",
+      "parameters": {
+        "properties": {
+          "agent": {
+            "description": "the agent's alias",
+            "type": "string"
+          },
+          "keys": {
+            "description": "the option's keys, in order",
+            "items": {
+              "description": "one key name, e.g. enter, esc, y, 1",
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "agent",
+          "keys"
+        ],
+        "type": "object"
+      }
+    },
+    "type": "function"
+  },
+  {
+    "function": {
+      "description": "Send Ctrl-C to an agent to stop what it is doing.",
+      "name": "interrupt",
+      "parameters": {
+        "properties": {
+          "agent": {
+            "description": "the agent's alias",
+            "type": "string"
+          }
+        },
+        "required": [
+          "agent"
+        ],
+        "type": "object"
+      }
+    },
+    "type": "function"
+  },
+  {
+    "function": {
+      "description": "Record promised work: the CEO asked to be told when something happens to an agent (\"tell me when it's done\", \"let me know if it asks\", \"remind me\"). The supervisor keeps it: it tells the CEO at the next matching event, whatever the chattiness level. Use it in the same turn as any instruction that goes with it.",
+      "name": "promise",
+      "parameters": {
+        "properties": {
+          "agent": {
+            "description": "the agent's alias",
+            "type": "string"
+          },
+          "due_in_minutes": {
+            "description": "only when the CEO gave a deadline or asked to be interrupted at once (0); a promise kept past its due time interrupts instead of waiting for a pause",
+            "type": "integer"
+          },
+          "event": {
+            "description": "the condition: done (it finished), blocked (it asks something), idle, or any_change",
+            "enum": [
+              "done",
+              "blocked",
+              "idle",
+              "any_change"
+            ],
+            "type": "string"
+          },
+          "text": {
+            "description": "what the CEO asked to be told, in their words",
+            "type": "string"
+          }
+        },
+        "required": [
+          "agent",
+          "text",
+          "event"
+        ],
+        "type": "object"
+      }
+    },
+    "type": "function"
+  }
+]

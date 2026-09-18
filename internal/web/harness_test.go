@@ -160,8 +160,11 @@ type harnessOpts struct {
 	// (503).
 	reloadPrompts func() []prompts.File
 	// brain attaches a brain over the reflex fake model (--brain=fake)
-	// to the supervisor and the server.
-	brain bool
+	// to the supervisor and the server; providers, when set, registers
+	// a second reflex provider "deepseek" (Catalog2) and lists gemini,
+	// deepseek and an unavailable "openai" through Deps.BrainProviders.
+	brain     bool
+	providers bool
 }
 
 func newHarness(t *testing.T, o harnessOpts) *harness {
@@ -196,6 +199,15 @@ func newHarness(t *testing.T, o harnessOpts) *harness {
 		}
 		t.Cleanup(func() { _ = b.Close() })
 	}
+	var providers []ProviderInfo
+	if o.providers {
+		second := braintest.Reflex()
+		second.Models = braintest.Catalog2()
+		if err := b.AddProvider(brain.ProviderDeepSeek, second); err != nil {
+			t.Fatal(err)
+		}
+		providers = []ProviderInfo{{ID: "gemini", Label: "Gemini", Available: true}, {ID: "deepseek", Label: "DeepSeek", Available: true}, {ID: "openai", Label: "OpenAI", Available: false, Reason: "no OPENAI_API_KEY"}}
+	}
 	sup, err := supervisor.New(store, h, client, nil, pusher, log, supervisor.Config{BriefingInterval: -1, Brain: b})
 	if err != nil {
 		t.Fatal(err)
@@ -203,7 +215,7 @@ func newHarness(t *testing.T, o harnessOpts) *harness {
 	sup.SetVoiceConnected(true)
 	injector := inject.NewInjector(store, h, sup, log, nil)
 	deps := Deps{Log: log, Store: store, Supervisor: sup, Injector: injector, Router: &inject.Router{}, Version: "test", Heartbeat: 200 * time.Millisecond, OutQueue: 8, DevTestdataDir: o.devTestdata, DevBrainDir: o.devBrain, StatsInterval: o.statsInterval,
-		SystemPrompt: func() string { return "You are the voice. Aliases: auth." }, Aliases: []string{"auth"}, ReloadPrompts: o.reloadPrompts, Brain: b, BrainOffReason: "--brain=off"}
+		SystemPrompt: func() string { return "You are the voice. Aliases: auth." }, Aliases: []string{"auth"}, ReloadPrompts: o.reloadPrompts, Brain: b, BrainOffReason: "--brain=off", BrainProviders: providers}
 	if session != nil {
 		deps.Voice = session
 	}

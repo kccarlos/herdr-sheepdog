@@ -7,7 +7,8 @@
 // supervisor are defined so far, plus the web server port; later work
 // packages add their own sections here.
 //
-// String() must never print secrets: Gemini keys are rendered as a count.
+// String() must never print secrets: Gemini keys are rendered as a count,
+// the DeepSeek key as set or unset.
 package config
 
 import (
@@ -40,6 +41,7 @@ type Config struct {
 	Herdr      Herdr      `toml:"herdr"`
 	State      State      `toml:"state"`
 	Gemini     Gemini     `toml:"gemini"`
+	DeepSeek   DeepSeek   `toml:"deepseek"`
 	LLM        LLM        `toml:"llm"`
 	Web        Web        `toml:"web"`
 	CLI        CLI        `toml:"cli"`
@@ -60,14 +62,21 @@ type Prompts struct {
 
 // Brain configures the supervisor brain (plan D7-revised, docs/roles.md):
 // the stateful agent that answers ask/propose with tools over a
-// function-calling Gemini model, keeping one transcript per daemon run
-// under <data_dir>/brain/. When it errors or runs out of budget the
-// supervisor falls back to the template path.
+// function-calling model (Gemini or DeepSeek, switchable at runtime),
+// keeping one transcript per daemon run under <data_dir>/brain/. When
+// it errors or runs out of budget the supervisor falls back to the
+// template path.
 type Brain struct {
 	// Enabled turns the brain on (default true). `serve --brain=off`
-	// overrides it; it is also silently off when no Gemini key exists.
+	// overrides it; it is also silently off when the initial provider
+	// has no key.
 	Enabled bool `toml:"enabled"`
-	// Model is the function-calling model (default gemini-3.5-flash).
+	// Provider is the provider the brain starts on: gemini (the Gemini
+	// key pool) or deepseek ([deepseek]); the initial value only, like
+	// Model (default gemini).
+	Provider string `toml:"provider"`
+	// Model is the function-calling model (default gemini-3.5-flash; a
+	// model of Provider).
 	Model string `toml:"model"`
 	// MaxSteps bounds the model calls in one turn (default 6); beyond it
 	// the turn falls back to the template path.
@@ -100,6 +109,29 @@ type Brain struct {
 	// sentence is spoken; the brain's line may still follow (default 2).
 	AnnounceWaitS int `toml:"announce_wait_s"`
 }
+
+// BrainProviders are the accepted values of brain.provider.
+var BrainProviders = []string{"gemini", "deepseek"}
+
+// DeepSeek configures the second supervisor-brain provider: DeepSeek's
+// OpenAI-compatible chat completions API, paid per token. Registered
+// with the brain when APIKey is set; selectable at runtime from the
+// /debug model picker whatever brain.provider says.
+type DeepSeek struct {
+	// APIKey authenticates requests (env DEEPSEEK_API_KEY). Never logged.
+	APIKey string `toml:"api_key"`
+	// BaseURL is the API root (default https://api.deepseek.com).
+	BaseURL string `toml:"base_url"`
+	// Thinking turns DeepSeek's thinking mode on (default true).
+	Thinking bool `toml:"thinking"`
+	// ReasoningEffort is the thinking effort: low, high or max (default
+	// low, measured against the 8 s ask budget; see CONFIG.md).
+	ReasoningEffort string `toml:"reasoning_effort"`
+}
+
+// DeepSeekReasoningEfforts are the accepted values of
+// deepseek.reasoning_effort.
+var DeepSeekReasoningEfforts = []string{"low", "high", "max"}
 
 // Supervisor tunes how proactive the voice side is (README "How chatty
 // is it?").
@@ -280,6 +312,7 @@ func Default() Config {
 		State:             State{Path: filepath.Join(dataDir, "state.json")},
 		PendingTTLS:       120,
 		Gemini:            Gemini{Model: "gemini-3.8-live", Voice: "Puck", StallAfterS: 10},
+		DeepSeek:          DeepSeek{BaseURL: DefaultDeepSeekBaseURL, Thinking: true, ReasoningEffort: DefaultDeepSeekReasoningEffort},
 		LLM:               LLM{BaseURL: GeminiOpenAIBaseURL, Model: "gemini-3.5-flash-lite", TimeoutS: 15},
 		Web:               Web{Port: DefaultWebPort},
 		CLI:               defaultCLI(),
@@ -300,11 +333,21 @@ func DefaultPromptsDir() string {
 	return filepath.Join(home, ".config", "sheepdog", "prompts")
 }
 
-// DefaultBrainModel is the built-in brain.model.
-const DefaultBrainModel = "gemini-3.5-flash"
+// DefaultBrainModel is the built-in brain.model; DefaultBrainProvider the
+// built-in brain.provider.
+const (
+	DefaultBrainModel    = "gemini-3.5-flash"
+	DefaultBrainProvider = "gemini"
+)
+
+// The built-in [deepseek] defaults.
+const (
+	DefaultDeepSeekBaseURL         = "https://api.deepseek.com"
+	DefaultDeepSeekReasoningEffort = "low"
+)
 
 func defaultBrain() Brain {
-	return Brain{Enabled: true, Model: DefaultBrainModel, MaxSteps: 6, AskTimeoutS: 8, ProposeTimeoutS: 12, WindowTokens: 24000, PruneAfterTurns: 3, EnrichTimeoutS: 6, AnnounceWaitS: 2}
+	return Brain{Enabled: true, Provider: DefaultBrainProvider, Model: DefaultBrainModel, MaxSteps: 6, AskTimeoutS: 8, ProposeTimeoutS: 12, WindowTokens: 24000, PruneAfterTurns: 3, EnrichTimeoutS: 6, AnnounceWaitS: 2}
 }
 
 // defaultCLI mirrors the argv templates verified in
@@ -400,7 +443,31 @@ func load(path string, lookup func(string) (string, bool)) (Config, error) {
 	if err := validateBrain(cfg.Brain); err != nil {
 		return Config{}, err
 	}
+	if err := validateDeepSeek(cfg.DeepSeek); err != nil {
+		return Config{}, err
+	}
 	return cfg, nil
+}
+
+// validateDeepSeek checks the [deepseek] values.
+func validateDeepSeek(d DeepSeek) error {
+	if strings.TrimSpace(d.BaseURL) == "" {
+		return errors.New("config: deepseek.base_url must not be empty")
+	}
+	if !oneOf(d.ReasoningEffort, DeepSeekReasoningEfforts) {
+		return fmt.Errorf("config: deepseek.reasoning_effort=%q: want one of %s", d.ReasoningEffort, strings.Join(DeepSeekReasoningEfforts, ", "))
+	}
+	return nil
+}
+
+// oneOf reports whether v is in list.
+func oneOf(v string, list []string) bool {
+	for _, l := range list {
+		if v == l {
+			return true
+		}
+	}
+	return false
 }
 
 // validateBrain checks the [brain] integers.
@@ -416,6 +483,9 @@ func validateBrain(b Brain) error {
 	if b.Model == "" {
 		return errors.New("config: brain.model must not be empty")
 	}
+	if !oneOf(b.Provider, BrainProviders) {
+		return fmt.Errorf("config: brain.provider=%q: want one of %s", b.Provider, strings.Join(BrainProviders, ", "))
+	}
 	if b.StepReserveS < 0 {
 		return fmt.Errorf("config: brain.step_reserve_s=%d: want 0 (default) or a positive integer", b.StepReserveS)
 	}
@@ -428,6 +498,8 @@ func validateBrain(b Brain) error {
 //	SHEEPDOG_HERDR_SOCKET, SHEEPDOG_STATE_PATH, SHEEPDOG_STATE_FULL_FSYNC,
 //	SHEEPDOG_GEMINI_MODEL,
 //	SHEEPDOG_GEMINI_VOICE, SHEEPDOG_GEMINI_STALL_AFTER_S,
+//	DEEPSEEK_API_KEY, SHEEPDOG_DEEPSEEK_BASE_URL, SHEEPDOG_DEEPSEEK_THINKING,
+//	SHEEPDOG_DEEPSEEK_REASONING_EFFORT,
 //	SHEEPDOG_LLM_BASE_URL, SHEEPDOG_LLM_MODEL, SHEEPDOG_LLM_TIMEOUT_S,
 //	SHEEPDOG_LLM_API_KEY, SHEEPDOG_PENDING_TTL_S, SHEEPDOG_WEB_PORT,
 //	SHEEPDOG_CLI_PREFER, SHEEPDOG_CLI_CODEX_BIN, SHEEPDOG_CLI_CLAUDE_BIN,
@@ -435,7 +507,8 @@ func validateBrain(b Brain) error {
 //	SHEEPDOG_CLI_TIMEOUT_S, SHEEPDOG_CLI_MAX_OUTPUT_KB,
 //	SHEEPDOG_SUPERVISOR_CHATTINESS, SHEEPDOG_SUPERVISOR_RECENT_MINUTES,
 //	SHEEPDOG_SUPERVISOR_PROMISE_TTL_S,
-//	SHEEPDOG_BRAIN_ENABLED, SHEEPDOG_BRAIN_MODEL, SHEEPDOG_BRAIN_MAX_STEPS,
+//	SHEEPDOG_BRAIN_ENABLED, SHEEPDOG_BRAIN_PROVIDER, SHEEPDOG_BRAIN_MODEL,
+//	SHEEPDOG_BRAIN_MAX_STEPS,
 //	SHEEPDOG_BRAIN_ASK_TIMEOUT_S, SHEEPDOG_BRAIN_PROPOSE_TIMEOUT_S,
 //	SHEEPDOG_BRAIN_WINDOW_TOKENS, SHEEPDOG_BRAIN_PRUNE_AFTER_TURNS,
 //	SHEEPDOG_BRAIN_STEP_RESERVE_S, SHEEPDOG_BRAIN_FINAL_GRACE_S,
@@ -464,6 +537,9 @@ func applyEnv(cfg *Config, lookup func(string) (string, bool)) error {
 	}
 	if keys := geminiKeysFromEnv(lookup); len(keys) > 0 {
 		cfg.Gemini.APIKeys = keys
+	}
+	if err := applyDeepSeekEnv(cfg, lookup); err != nil {
+		return err
 	}
 	if v, ok := lookup("SHEEPDOG_LLM_BASE_URL"); ok {
 		cfg.LLM.BaseURL = v
@@ -558,6 +634,29 @@ func applyEnv(cfg *Config, lookup func(string) (string, bool)) error {
 	return applyBrainEnv(cfg, lookup)
 }
 
+// applyDeepSeekEnv overrides the [deepseek] keys: the key from
+// DEEPSEEK_API_KEY (like GEMINI_API_KEY, no SHEEPDOG_ prefix), the rest
+// from SHEEPDOG_DEEPSEEK_*.
+func applyDeepSeekEnv(cfg *Config, lookup func(string) (string, bool)) error {
+	if v, ok := lookup("DEEPSEEK_API_KEY"); ok && v != "" {
+		cfg.DeepSeek.APIKey = v
+	}
+	if v, ok := lookup("SHEEPDOG_DEEPSEEK_BASE_URL"); ok {
+		cfg.DeepSeek.BaseURL = v
+	}
+	if v, ok := lookup("SHEEPDOG_DEEPSEEK_THINKING"); ok {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return fmt.Errorf("config: SHEEPDOG_DEEPSEEK_THINKING=%q: want true or false", v)
+		}
+		cfg.DeepSeek.Thinking = b
+	}
+	if v, ok := lookup("SHEEPDOG_DEEPSEEK_REASONING_EFFORT"); ok {
+		cfg.DeepSeek.ReasoningEffort = strings.ToLower(strings.TrimSpace(v))
+	}
+	return nil
+}
+
 // applyBrainEnv overrides the [brain] keys from SHEEPDOG_BRAIN_*.
 func applyBrainEnv(cfg *Config, lookup func(string) (string, bool)) error {
 	if v, ok := lookup("SHEEPDOG_BRAIN_ENABLED"); ok {
@@ -566,6 +665,9 @@ func applyBrainEnv(cfg *Config, lookup func(string) (string, bool)) error {
 			return fmt.Errorf("config: SHEEPDOG_BRAIN_ENABLED=%q: want true or false", v)
 		}
 		cfg.Brain.Enabled = b
+	}
+	if v, ok := lookup("SHEEPDOG_BRAIN_PROVIDER"); ok {
+		cfg.Brain.Provider = strings.ToLower(strings.TrimSpace(v))
 	}
 	if v, ok := lookup("SHEEPDOG_BRAIN_MODEL"); ok {
 		cfg.Brain.Model = v
@@ -660,8 +762,17 @@ func geminiKeysFromEnv(lookup func(string) (string, bool)) []string {
 }
 
 // String renders the configuration for logs. Secrets are rendered as
-// counts only; keep it that way when secret-bearing fields are added.
+// counts (or set/unset) only; keep it that way when secret-bearing
+// fields are added.
 func (c Config) String() string {
-	return fmt.Sprintf("data_dir=%s herdr.socket=%s state.path=%s state.full_fsync=%t debounce_ms=%d snapshot_interval_s=%d pending_ttl_s=%d aliases=%d gemini.model=%s gemini.voice=%s gemini.stall_after_s=%d gemini.api_keys=%d llm.base_url=%s llm.model=%s llm.timeout_s=%d llm.api_keys=%d web.port=%d cli.prefer=%s cli.timeout_s=%d cli.max_output_kb=%d supervisor.chattiness=%s supervisor.recent_minutes=%d supervisor.promise_ttl_s=%d supervisor.summary_timeout_s=%d brain.enabled=%t brain.model=%s brain.max_steps=%d brain.ask_timeout_s=%d brain.propose_timeout_s=%d brain.window_tokens=%d brain.prune_after_turns=%d brain.step_reserve_s=%d brain.final_grace_s=%d brain.enrich_timeout_s=%d brain.announce_wait_s=%d prompts.dir=%s",
-		c.DataDir, c.Herdr.Socket, c.State.Path, c.State.FullFsync, c.DebounceMS, c.SnapshotIntervalS, c.PendingTTLS, len(c.Aliases), c.Gemini.Model, c.Gemini.Voice, c.Gemini.StallAfterS, len(c.Gemini.APIKeys), c.LLM.BaseURL, c.LLM.Model, c.LLM.TimeoutS, len(c.LLMKeys()), c.Web.Port, c.CLI.Prefer, c.CLI.TimeoutS, c.CLI.MaxOutputKB, c.Supervisor.Chattiness, c.Supervisor.RecentMinutes, c.Supervisor.PromiseTTLS, c.Supervisor.SummaryTimeoutS, c.Brain.Enabled, c.Brain.Model, c.Brain.MaxSteps, c.Brain.AskTimeoutS, c.Brain.ProposeTimeoutS, c.Brain.WindowTokens, c.Brain.PruneAfterTurns, c.Brain.StepReserveS, c.Brain.FinalGraceS, c.Brain.EnrichTimeoutS, c.Brain.AnnounceWaitS, c.Prompts.Dir)
+	return fmt.Sprintf("data_dir=%s herdr.socket=%s state.path=%s state.full_fsync=%t debounce_ms=%d snapshot_interval_s=%d pending_ttl_s=%d aliases=%d gemini.model=%s gemini.voice=%s gemini.stall_after_s=%d gemini.api_keys=%d deepseek.api_key=%s deepseek.base_url=%s deepseek.thinking=%t deepseek.reasoning_effort=%s llm.base_url=%s llm.model=%s llm.timeout_s=%d llm.api_keys=%d web.port=%d cli.prefer=%s cli.timeout_s=%d cli.max_output_kb=%d supervisor.chattiness=%s supervisor.recent_minutes=%d supervisor.promise_ttl_s=%d supervisor.summary_timeout_s=%d brain.enabled=%t brain.provider=%s brain.model=%s brain.max_steps=%d brain.ask_timeout_s=%d brain.propose_timeout_s=%d brain.window_tokens=%d brain.prune_after_turns=%d brain.step_reserve_s=%d brain.final_grace_s=%d brain.enrich_timeout_s=%d brain.announce_wait_s=%d prompts.dir=%s",
+		c.DataDir, c.Herdr.Socket, c.State.Path, c.State.FullFsync, c.DebounceMS, c.SnapshotIntervalS, c.PendingTTLS, len(c.Aliases), c.Gemini.Model, c.Gemini.Voice, c.Gemini.StallAfterS, len(c.Gemini.APIKeys), setOrUnset(c.DeepSeek.APIKey), c.DeepSeek.BaseURL, c.DeepSeek.Thinking, c.DeepSeek.ReasoningEffort, c.LLM.BaseURL, c.LLM.Model, c.LLM.TimeoutS, len(c.LLMKeys()), c.Web.Port, c.CLI.Prefer, c.CLI.TimeoutS, c.CLI.MaxOutputKB, c.Supervisor.Chattiness, c.Supervisor.RecentMinutes, c.Supervisor.PromiseTTLS, c.Supervisor.SummaryTimeoutS, c.Brain.Enabled, c.Brain.Provider, c.Brain.Model, c.Brain.MaxSteps, c.Brain.AskTimeoutS, c.Brain.ProposeTimeoutS, c.Brain.WindowTokens, c.Brain.PruneAfterTurns, c.Brain.StepReserveS, c.Brain.FinalGraceS, c.Brain.EnrichTimeoutS, c.Brain.AnnounceWaitS, c.Prompts.Dir)
+}
+
+// setOrUnset renders a secret's presence, never its value.
+func setOrUnset(secret string) string {
+	if secret == "" {
+		return "unset"
+	}
+	return "set"
 }
