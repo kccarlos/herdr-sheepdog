@@ -496,6 +496,7 @@ test('push judgment: brain.push_decision rides on the voice.push it produced; a 
     ev('voice.push', { text: 'docs finished.', urgency: 'idle' }, 1),
     ev('brain.yielded', { turn: 4, step: 2, agent: 'auth', event: 'done', ceo_waiting: 1 }, 1, 'brain'),
     ev('brain.event_coalesced', { agent: 'auth', event: 'done', kind: 'announce' }, 1, 'brain'),
+    ev('brain.model_changed', { from: 'gemini-3.5-flash', to: 'gemini-3.8-flash', via: 'debug' }, 1, 'brain'),
   ]);
   const c = cards(rows.rows);
   const pushes = c.filter((r) => r.type === 'voice.push');
@@ -513,4 +514,8 @@ test('push judgment: brain.push_decision rides on the voice.push it produced; a 
   assert.equal(c.find((r) => r.type === 'brain.yielded').title, 'yielded to a CEO turn');
   assert.equal(c.find((r) => r.type === 'brain.yielded').summary, 'turn 4 · before step 2 · auth done · 1 CEO turn waiting');
   assert.equal(c.find((r) => r.type === 'brain.event_coalesced').summary, 'auth done · replaced the queued turn');
+  const switched = c.find((r) => r.type === 'brain.model_changed');
+  assert.equal(switched.title, 'model switched');
+  assert.equal(switched.summary, 'gemini-3.5-flash → gemini-3.8-flash · via debug');
+  assert.ok(switched.cls.includes('brain') && switched.lane === 'sup');
 });

@@ -1,16 +1,23 @@
 package web
 
 import (
+	"context"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
+	"github.com/kccarlos/herdr-sheepdog/internal/state"
 )
 
 // defaultTranscriptN is how many transcript messages GET
 // /api/brain/transcript returns without ?n=.
 const defaultTranscriptN = 500
+
+// catalogTimeout bounds one model-list fetch behind GET /api/brain/models
+// so a hung provider cannot hang /debug.
+const catalogTimeout = 15 * time.Second
 
 // TranscriptMessage is one row of GET /api/brain/transcript: a
 // brain.Message with its in-memory Seq made explicit (the on-disk line
@@ -149,7 +156,7 @@ func (s *Server) handleBrainContext(w http.ResponseWriter, r *http.Request) {
 	}
 	resp := ContextResponse{
 		WindowTokens: b.Config().WindowTokens, EstimatedTokens: est, Window: win,
-		SystemPrompt: promptInfo(b.PromptSections(), false), Model: b.Config().Model,
+		SystemPrompt: promptInfo(b.PromptSections(), false), Model: b.Model(),
 		Turns: b.Turns(), TranscriptLen: b.Transcript().Len(), TranscriptPath: b.TranscriptPath(), Now: s.deps.Now().UTC(),
 	}
 	if c, ok := b.LastCompaction(); ok {
@@ -166,4 +173,108 @@ func (s *Server) handleBrainSystemPrompt(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	writeJSON(w, http.StatusOK, promptInfo(b.PromptSections(), true))
+}
+
+// ProviderInfo is one model provider the picker may offer.
+type ProviderInfo struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+}
+
+// providers lists the providers the brain can run on: Gemini only for
+// now; the API carries the id so more can be added without changing its
+// shape.
+var providers = []ProviderInfo{{ID: brain.ProviderGemini, Label: "Gemini"}}
+
+// BrainInfo is the brain field of GET /api/state: the provider and the
+// model the next turn runs on (omitted when the brain is off).
+type BrainInfo struct {
+	Provider string `json:"provider"`
+	Model    string `json:"model"`
+}
+
+func (s *Server) brainInfo() *BrainInfo {
+	if s.deps.Brain == nil {
+		return nil
+	}
+	return &BrainInfo{Provider: brain.ProviderGemini, Model: s.deps.Brain.Model()}
+}
+
+// BrainModelsResponse is the body of GET /api/brain/models and PUT
+// /api/brain/model: the current provider and model, the providers to
+// choose from, and the discovered catalog. A discovery failure is not
+// an HTTP error: Models is what is known (the last fetched list, or
+// empty) and Error says why it is not fresh, so the picker can still
+// show the current model.
+type BrainModelsResponse struct {
+	Provider  string            `json:"provider"`
+	Providers []ProviderInfo    `json:"providers"`
+	Model     string            `json:"model"`
+	Models    []brain.ModelInfo `json:"models"`
+	FetchedAt *time.Time        `json:"fetched_at,omitempty"`
+	Stale     bool              `json:"stale"`
+	Error     string            `json:"error,omitempty"`
+}
+
+func brainModelsResponse(b *brain.Brain, c brain.Catalog) BrainModelsResponse {
+	resp := BrainModelsResponse{Provider: brain.ProviderGemini, Providers: providers, Model: b.Model(), Models: c.Models, Stale: c.Stale}
+	if !c.FetchedAt.IsZero() {
+		at := c.FetchedAt.UTC()
+		resp.FetchedAt = &at
+	}
+	if c.Err != nil {
+		resp.Error = c.Err.Error()
+	}
+	return resp
+}
+
+// handleBrainModels answers the model catalog (cached for
+// brain.CatalogTTL; ?refresh=1 fetches again) with the current choice.
+func (s *Server) handleBrainModels(w http.ResponseWriter, r *http.Request) {
+	b, ok := s.brainOrUnavailable(w)
+	if !ok {
+		return
+	}
+	refresh := r.URL.Query().Get("refresh") == "1"
+	ctx, cancel := context.WithTimeout(r.Context(), catalogTimeout)
+	defer cancel()
+	writeJSON(w, http.StatusOK, brainModelsResponse(b, b.Models(ctx, refresh)))
+}
+
+// SetBrainModelRequest is the body of PUT /api/brain/model.
+type SetBrainModelRequest struct {
+	// Provider defaults to gemini, the only one so far.
+	Provider string `json:"provider"`
+	Model    string `json:"model"`
+}
+
+// handleSetBrainModel switches the brain's model for the next turn and
+// keeps the choice in the state file (session.brain_model), so a
+// restart uses it over the configured brain.model. A name the catalog
+// does not list is accepted (the list may be stale); the picker marks
+// it. Answers as GET /api/brain/models, from the cached catalog.
+func (s *Server) handleSetBrainModel(w http.ResponseWriter, r *http.Request) {
+	b, ok := s.brainOrUnavailable(w)
+	if !ok {
+		return
+	}
+	var req SetBrainModelRequest
+	if err := readJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "bad body: "+err.Error())
+		return
+	}
+	if p := strings.ToLower(strings.TrimSpace(req.Provider)); p != "" && p != brain.ProviderGemini {
+		writeError(w, http.StatusBadRequest, "provider "+strconv.Quote(req.Provider)+" is not supported: only gemini for now")
+		return
+	}
+	if err := b.SetModel(req.Model, "debug"); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	model := b.Model()
+	if err := s.deps.Store.UpdateSession(func(ss *state.Session) { ss.BrainModel = model }); err != nil {
+		writeError(w, http.StatusInternalServerError, "persist: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, brainModelsResponse(b, b.CachedModels()))
 }

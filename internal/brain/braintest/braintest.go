@@ -108,6 +108,25 @@ type Model struct {
 	Default      *Step
 	EventDefault *Step
 	Delay        time.Duration
+	// Models is what ListModels returns (brain.ModelCatalog); ListErr,
+	// when set, fails it instead (the /debug picker's error path).
+	Models  []brain.ModelInfo
+	ListErr error
+}
+
+// FakeModel is the model name of the fake catalog's own entry.
+const FakeModel = "fake-reflex"
+
+// Catalog is a static model list for --brain=fake: the fake's own model
+// plus a few Gemini-shaped names, recommended first like the real one.
+func Catalog() []brain.ModelInfo {
+	return []brain.ModelInfo{
+		{Name: "gemini-3.8-flash", DisplayName: "Gemini 3.8 Flash", InputTokenLimit: 1048576, OutputTokenLimit: 65536, Methods: []string{"generateContent"}, Recommended: true},
+		{Name: "gemini-3.5-flash", DisplayName: "Gemini 3.5 Flash", InputTokenLimit: 1048576, OutputTokenLimit: 65536, Methods: []string{"generateContent"}, Recommended: true},
+		{Name: "gemini-3.5-flash-lite", DisplayName: "Gemini 3.5 Flash-Lite", InputTokenLimit: 1048576, OutputTokenLimit: 65536, Methods: []string{"generateContent"}, Recommended: true},
+		{Name: "gemini-3.5-flash-tts", DisplayName: "Gemini 3.5 Flash TTS", InputTokenLimit: 8192, OutputTokenLimit: 16384, Methods: []string{"generateContent"}},
+		{Name: FakeModel, DisplayName: "Scripted reflex (no network)", Methods: []string{"generateContent"}},
+	}
 }
 
 // NothingToAdd is the announce reply "say nothing": an empty spoken.
@@ -125,6 +144,16 @@ func (m *Model) Add(steps ...Step) {
 	m.mu.Lock()
 	m.script = append(m.script, steps...)
 	m.mu.Unlock()
+}
+
+// ListModels implements brain.ModelCatalog: Models, or ListErr.
+func (m *Model) ListModels(context.Context) ([]brain.ModelInfo, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.ListErr != nil {
+		return nil, m.ListErr
+	}
+	return append([]brain.ModelInfo(nil), m.Models...), nil
 }
 
 // Calls returns every recorded call.
@@ -486,7 +515,7 @@ var (
 // with a real model: request → tool call → tool result → reply, with
 // brain.* events and transcript messages.
 func Reflex() *Model {
-	m := &Model{}
+	m := &Model{Models: Catalog()}
 	m.Default = &Step{Fn: reflex}
 	return m
 }

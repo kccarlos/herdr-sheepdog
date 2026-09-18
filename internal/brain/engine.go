@@ -246,7 +246,7 @@ func cutPoint(window []entry, half int) int {
 // boundary reports whether a message of kind k may open the window.
 func boundary(k MessageKind) bool {
 	switch k {
-	case KindCEOUtterance, KindAssistantSaid, KindPush, KindWorkerEvent, KindNote, KindRequest, KindCompaction, KindPromise:
+	case KindCEOUtterance, KindAssistantSaid, KindPush, KindWorkerEvent, KindNote, KindRequest, KindCompaction, KindPromise, KindSystem:
 		return true
 	default:
 		return false

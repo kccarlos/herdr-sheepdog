@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -44,7 +45,8 @@ const (
 
 // Config tunes a Brain; zero values take the defaults.
 type Config struct {
-	// Model is the model name passed to Model.Generate.
+	// Model is the initial model name passed to Model.Generate; SetModel
+	// changes it at runtime (Brain.Model reports the current one).
 	Model string
 	// MaxSteps bounds the model calls in one turn.
 	MaxSteps int
@@ -145,6 +147,7 @@ type Brain struct {
 
 	mu           sync.Mutex
 	host         Host
+	curModel     string // the model name of the next turn (Model / SetModel)
 	turns        int
 	toolSeq      int
 	inBuf        []string // voice transcript fragments not yet final
@@ -154,6 +157,9 @@ type Brain struct {
 	// lastCompaction is the most recent successful compaction (zero
 	// value when none), for the Supervisor tab.
 	lastCompaction CompactionInfo
+
+	// catalog is the cached model list (catalog.go).
+	catalog catalogCache
 }
 
 // CompactionInfo describes one compaction for Brain.LastCompaction.
@@ -175,7 +181,7 @@ func New(cfg Config, model Model, log logging.Logger) (*Brain, error) {
 		log = logging.NopLogger{}
 	}
 	cfg = cfg.withDefaults()
-	b := &Brain{cfg: cfg, model: model, log: log, tools: toolDeclarations(false), readTools: toolDeclarations(true)}
+	b := &Brain{cfg: cfg, model: model, log: log, curModel: cfg.Model, tools: toolDeclarations(false), readTools: toolDeclarations(true)}
 	b.ctx, b.stop = context.WithCancel(context.Background())
 	path := ""
 	if cfg.DataDir != "" {
@@ -221,6 +227,51 @@ func (b *Brain) SetUserVars(vars map[string]string) {
 
 // Transcript returns the run's transcript.
 func (b *Brain) Transcript() *Transcript { return b.transcript }
+
+// Model returns the model name the next turn will use (Config.Model
+// until SetModel changes it). A turn in flight keeps the name it started
+// with for every step.
+func (b *Brain) Model() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.curModel
+}
+
+// modelNameRE is the shape of a model id the switch accepts.
+var modelNameRE = regexp.MustCompile(`^[A-Za-z0-9._/-]+$`)
+
+// maxModelName bounds a model id.
+const maxModelName = 128
+
+// SetModel switches the model of the next turn ("models/" prefix
+// stripped; empty or odd names rejected) without waiting for a running
+// turn: that turn finishes on the model it started with. A change is
+// logged as brain.model_changed {from, to, via} and marked in the
+// transcript (KindSystem) so the Supervisor tab shows where it flipped;
+// the same name again is a no-op. Persisting the choice is the caller's
+// business (the daemon keeps it in the state file).
+func (b *Brain) SetModel(name, via string) error {
+	name = strings.TrimPrefix(strings.TrimSpace(name), "models/")
+	switch {
+	case name == "":
+		return errors.New("brain: model name required")
+	case len(name) > maxModelName:
+		return fmt.Errorf("brain: model name longer than %d characters", maxModelName)
+	case !modelNameRE.MatchString(name):
+		return fmt.Errorf("brain: model name %q: letters, digits, '.', '_', '-' and '/' only", name)
+	}
+	b.mu.Lock()
+	from := b.curModel
+	if from == name {
+		b.mu.Unlock()
+		return nil
+	}
+	b.curModel = name
+	b.mu.Unlock()
+	b.log.Log(logSource, "brain.model_changed", "", map[string]any{"from": from, "to": name, "via": via})
+	b.ingest(Message{Role: RoleSystem, Kind: KindSystem, Content: fmt.Sprintf("model switched from %s to %s", from, name)}, 0)
+	return nil
+}
 
 // Engine returns the context engine in use.
 func (b *Brain) Engine() ContextEngine { return b.engine }
@@ -421,7 +472,7 @@ func (b *Brain) Seed(msgs []Message) {
 // generation, no tools.
 func (b *Brain) summarize(ctx context.Context, text string) (string, error) {
 	prompt := "Summarise the following supervisor transcript in at most 12 short lines for your own later reference: what the CEO asked and decided, what each agent was told, did, asked and answered, and anything still open. Keep aliases; drop paths, hashes and ids.\n\n" + text
-	resp, err := b.model.Generate(ctx, b.cfg.Model, []*genai.Content{{Role: genai.RoleUser, Parts: []*genai.Part{{Text: prompt}}}}, &genai.GenerateContentConfig{})
+	resp, err := b.model.Generate(ctx, b.Model(), []*genai.Content{{Role: genai.RoleUser, Parts: []*genai.Part{{Text: prompt}}}}, &genai.GenerateContentConfig{})
 	if err != nil {
 		return "", err
 	}

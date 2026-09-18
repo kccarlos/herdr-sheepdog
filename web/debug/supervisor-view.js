@@ -282,6 +282,7 @@ export class SupervisorView {
       case 'push': return this.renderPush(it);
       case 'worker': return this.renderLine(it, 'svp-worker', `${it.agent || '?'}: ${it.closed ? 'pane closed' : `${it.from} → ${it.to}`}${it.text ? it.text : ''}`);
       case 'note': return this.renderLine(it, 'svp-note', `note: ${it.text}`);
+      case 'system': return this.renderLine(it, 'svp-system', it.to ? `model switched: ${it.from} → ${it.to}` : it.text);
       case 'promise': return this.renderPromise(it);
       case 'brainEvent': return this.renderBrainEvent(it);
       case 'screen': return this.renderScreen(it);

@@ -27,6 +27,15 @@
       <option value="chatty">chatty</option>
     </select>
   </label>
+  <span class="indicator model-control hidden" id="model-control" title="the supervisor brain's model: switched for the next turn, kept across restarts (session.brain_model in the state file)">model
+    <select id="model-provider" disabled title="the provider; more providers later">
+      <option value="gemini" selected>gemini</option>
+    </select>
+    <select id="model-select" title="the brain's model for the next turn"></select>
+    <button id="model-refresh" class="icon" title="fetch the model list again">↻</button>
+    <label class="small" title="list every model the provider serves generateContent for, not only the text models the brain can plausibly run"><input type="checkbox" id="model-all"> all</label>
+    <span class="muted small" id="model-note"></span>
+  </span>
   <a href="/voice">voice page</a>
 </header>
 

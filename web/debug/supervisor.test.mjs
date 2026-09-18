@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import {
-  buildTranscriptView, meterSegments, TurnLog, windowInfo, offState, parseRequest, parseReply, parsePush, parseWorkerEvent, parsePromise, parseTranscriptJSONL, fmtTokens,
+  buildTranscriptView, meterSegments, TurnLog, windowInfo, offState, parseRequest, parseReply, parsePush, parseWorkerEvent, parsePromise, parseModelSwitch, parseTranscriptJSONL, fmtTokens,
 } from './supervisor.js';
 
 let t0 = Date.parse('2026-09-18T05:39:00.000Z');
@@ -198,6 +198,8 @@ test('parsers and formatting', () => {
   assert.deepEqual(parsePush('(idle) auth finished.'), { urgency: 'idle', text: 'auth finished.' });
   assert.deepEqual(parsePush('no prefix'), { urgency: '', text: 'no prefix' });
   assert.deepEqual(parseWorkerEvent('auth: pane closed'), { agent: 'auth', from: '', to: '', closed: true });
+  assert.deepEqual(parseModelSwitch('model switched from gemini-3.5-flash to gemini-3.8-flash'), { from: 'gemini-3.5-flash', to: 'gemini-3.8-flash' });
+  assert.deepEqual(parseModelSwitch('something else'), { from: '', to: '' });
   assert.equal(fmtTokens(12400), '12.4k');
   assert.equal(fmtTokens(980), '980');
   const parsed = parseTranscriptJSONL('{"kind":"note","content":"a"}\n\nnot json\n{"kind":"note","content":"b"}\n');
@@ -340,4 +342,27 @@ test('announce turns: the request parses promises and template_spoken; the push 
   log.add(ev('daemon.start', {}));
   assert.deepEqual([log.decisions.length, log.notes.length], [0, 0]);
   assert.equal(buildTranscriptView(msgs, null, log).filter((it) => it.kind === 'brainEvent').length, 0);
+});
+
+test('a model switch is a system item between turns, on turn 0, in the window and in the notes meter group', () => {
+  seq = 0;
+  const messages = [
+    msg('request', { turn: 1, content: 'Request from the assistant (ask): question="what is auth doing?" agent="auth"' }),
+    msg('reply', { turn: 1, content: reply('Auth is working.') }),
+    msg('system', { role: 'system', content: 'model switched from gemini-3.5-flash to gemini-3.8-flash' }),
+    msg('request', { turn: 2, content: 'Request from the assistant (ask): question="and now?" agent="auth"' }),
+    msg('reply', { turn: 2, content: reply('Still working.') }),
+  ];
+  const context = { window: messages.map((m) => ({ seq: m.seq, kind: m.kind, turn: m.turn, tokens: m.tokens })), estimated_tokens: 50, window_tokens: 24000, transcript_len: 5 };
+  const items = buildTranscriptView(messages, context, new TurnLog());
+  assert.deepEqual(kinds(items), ['marker', 'turn', 'request', 'reply', 'system', 'turn', 'request', 'reply']);
+  const sys = items.find((it) => it.kind === 'system');
+  assert.equal(sys.from, 'gemini-3.5-flash');
+  assert.equal(sys.to, 'gemini-3.8-flash');
+  assert.equal(sys.turn, 0);
+  assert.equal(sys.inWindow, true);
+  assert.equal(sys.seq, 3);
+  const meter = meterSegments(context);
+  assert.deepEqual(meter.transcript.find((seg) => seg.id === 'kind:note'), { id: 'kind:note', label: 'notes', group: 'transcript', kind: 'note', tokens: 10, count: 1 }, 'system messages count under notes');
+  assert.ok(!items.some((it) => it.kind === 'other'));
 });

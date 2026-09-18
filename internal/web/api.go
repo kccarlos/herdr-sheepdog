@@ -23,9 +23,12 @@ type StateResponse struct {
 	Session       state.Session        `json:"session"`
 	Voice         VoiceInfo            `json:"voice"`
 	Settings      *SettingsResponse    `json:"settings,omitempty"`
-	Herdr         string               `json:"herdr"`
-	Version       string               `json:"version"`
-	Now           time.Time            `json:"now"`
+	// Brain is the supervisor brain's provider and current model; omitted
+	// when the brain is off.
+	Brain   *BrainInfo `json:"brain,omitempty"`
+	Herdr   string     `json:"herdr"`
+	Version string     `json:"version"`
+	Now     time.Time  `json:"now"`
 }
 
 // SettingsResponse is the body of GET/PUT /api/settings (and the
@@ -90,6 +93,7 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 		Session:       snap.Session,
 		Voice:         VoiceInfo{Mode: s.deps.VoiceMode, Status: hs.status.String(), Reason: hs.reason, Muted: hs.muted, Stalled: hs.stalled, ClientConnected: hs.client},
 		Settings:      s.settings(),
+		Brain:         s.brainInfo(),
 		Herdr:         s.deps.HerdrMode,
 		Version:       s.deps.Version,
 		Now:           s.deps.Now().UTC(),
