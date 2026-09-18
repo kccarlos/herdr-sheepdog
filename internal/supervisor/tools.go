@@ -231,7 +231,9 @@ func (s *Supervisor) confirmExpired(answer string) voice.ToolResult {
 		return none
 	}
 	row, ok := s.store.Get(e.PaneID)
-	if !ok || row.State != herdr.StateBlocked {
+	if !ok || row.State == herdr.StateWorking || row.State == herdr.StateUnknown {
+		// Moved on (or gone): the prompt is no longer there to answer. A
+		// done row may still be at a prompt herdr did not flag (agy).
 		s.expired = nil
 		return none
 	}

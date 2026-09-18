@@ -97,15 +97,18 @@ func (p *fakePusher) last(t *testing.T) voice.EventPush {
 	return all[len(all)-1]
 }
 
-// fakeLLM is a rule-based stand-in for the three templates, keyed on the
+// fakeLLM is a rule-based stand-in for the templates, keyed on the
 // captured screens, so scenarios do not need per-test scripting. Every
-// call is counted; failures can be injected.
+// call is counted; failures can be injected (fail for every template,
+// failDone for summarize_done only).
 type fakeLLM struct {
 	mu        sync.Mutex
 	calls     map[string]int
 	fail      error
+	failDone  error
 	summarize func(screen, alias string) llm.BlockSummary
 	resolve   func(text string, agents []llm.AgentSummary, hint string) llm.Resolution
+	done      func(screen, alias string) llm.DoneSummary
 }
 
 func newFakeLLM() *fakeLLM {
@@ -238,6 +241,41 @@ func resolveByRules(text string, agents []llm.AgentSummary, hint string) llm.Res
 		return llm.Resolution{PaneID: target.PaneID, InstructionText: word, IsAnswer: true, Answer: word, Echo: "Telling " + target.Alias + " " + word + "."}
 	}
 	return llm.Resolution{PaneID: target.PaneID, InstructionText: instr, Echo: "Telling " + target.Alias + " to " + instr + "."}
+}
+
+func (f *fakeLLM) SummarizeDone(_ context.Context, screen, alias string) (llm.DoneSummary, error) {
+	if err := f.bump("summarize_done"); err != nil {
+		return llm.DoneSummary{}, err
+	}
+	f.mu.Lock()
+	failDone, done := f.failDone, f.done
+	f.mu.Unlock()
+	if failDone != nil {
+		return llm.DoneSummary{}, failDone
+	}
+	if done != nil {
+		return done(screen, alias), nil
+	}
+	return doneByScreen(screen), nil
+}
+
+// doneByScreen mimics what the live model returned for the "after"
+// fixtures (WP7b screens).
+func doneByScreen(screen string) llm.DoneSummary {
+	switch {
+	case strings.Contains(screen, "You canceled the request"):
+		return llm.DoneSummary{Spoken: "stopped after you declined the append to hello.txt", Outcome: "failed"}
+	case strings.Contains(screen, "You approved codex to run"):
+		return llm.DoneSummary{Spoken: "created hello.txt with the requested line", Outcome: "success"}
+	case strings.Contains(screen, "Wrote 1 line to claude.txt"):
+		return llm.DoneSummary{Spoken: "created claude.txt with the line hello from claude", Outcome: "success"}
+	case strings.Contains(screen, "Conversation interrupted"):
+		return llm.DoneSummary{Spoken: "was interrupted before the sleep finished", Outcome: "failed"}
+	case strings.Contains(screen, "Run this command?"), strings.Contains(screen, "Accept this file edit?"):
+		return llm.DoneSummary{Spoken: "stopped to ask for permission", Outcome: "partial", AskedQuestion: true}
+	default:
+		return llm.DoneSummary{Spoken: "did something the screen does not show", Outcome: "unknown"}
+	}
 }
 
 func (f *fakeLLM) SpokenAnswer(_ context.Context, raw, question, alias string) (llm.Answer, error) {

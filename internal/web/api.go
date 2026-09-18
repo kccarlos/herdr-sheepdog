@@ -206,6 +206,9 @@ func (s *Server) handleInjectBlocked(w http.ResponseWriter, r *http.Request) {
 type paneRequest struct {
 	PaneID string `json:"pane_id"`
 	State  string `json:"state,omitempty"`
+	// Screen, when given, replaces the pane text before the transition
+	// (what the supervisor reads on a done).
+	Screen string `json:"screen,omitempty"`
 }
 
 func (s *Server) handleInjectDone(w http.ResponseWriter, r *http.Request) {
@@ -234,7 +237,7 @@ func (s *Server) injectState(w http.ResponseWriter, r *http.Request, to herdr.St
 	ctx, cancel := s.toolCtx()
 	defer cancel()
 	start := s.deps.Now()
-	row, err := s.deps.Injector.SetState(ctx, req.PaneID, to)
+	row, err := s.deps.Injector.SetState(ctx, req.PaneID, to, req.Screen)
 	if err != nil {
 		writeError(w, injectStatus(err), err.Error())
 		return

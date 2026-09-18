@@ -115,7 +115,7 @@ func TestScenario2BlockedPushesAndCreatesPending(t *testing.T) {
 		t.Errorf("pending.created=%d summarize=%d", h.log.count("pending.created"), h.llm.count("summarize_block"))
 	}
 	reads := h.srv.RequestsFor("pane.read")
-	if len(reads) != 1 || !strings.Contains(string(reads[0].Params), `"recent_unwrapped"`) || !strings.Contains(string(reads[0].Params), `"lines":80`) {
+	if len(reads) != 1 || !strings.Contains(string(reads[0].Params), `"recent_unwrapped"`) || !strings.Contains(string(reads[0].Params), `"lines":200`) {
 		t.Errorf("pane.read = %+v", reads)
 	}
 	row, _ := h.store.Get("w5:p1")
@@ -213,13 +213,22 @@ func TestScenario4ProposeSendsAndEchoes(t *testing.T) {
 	if h.log.count("herdr.send") != 1 || h.log.count("pending.created") != 1 {
 		t.Errorf("events: send=%d created=%d", h.log.count("herdr.send"), h.log.count("pending.created"))
 	}
-	// The turn finishing clears the in-flight action.
+	// The turn finishing clears the in-flight action, moves the task to
+	// last_task and announces the result read from the screen.
+	h.srv.SetScreen("w5:p1", fixture(t, "codex-after-approval.screen.txt"))
 	h.transition("w5:p1", herdr.StateWorking, herdr.StateDone)
 	if _, ok := h.pending(); ok {
 		t.Error("send_instruction survived done")
 	}
-	if got := h.pusher.last(t); got.Text != "auth finished." || got.Urgency != voice.UrgencyIdle {
+	if got := h.pusher.last(t); got.Text != "auth finished: created hello.txt with the requested line." || got.Urgency != voice.UrgencyIdle {
 		t.Errorf("done push = %+v", got)
+	}
+	row, _ = h.store.Get("w5:p1")
+	if row.CurrentTask != "" || row.LastTask != "skip the flaky test and rerun" {
+		t.Errorf("after done: current_task=%q last_task=%q", row.CurrentTask, row.LastTask)
+	}
+	if row.LastResult == nil || row.LastResult.Spoken != "created hello.txt with the requested line" || row.LastResult.Outcome != "success" || !row.LastResult.At.Equal(h.clock.Now()) {
+		t.Errorf("last_result = %+v", row.LastResult)
 	}
 }
 
@@ -297,7 +306,7 @@ func TestCancelSuppressesFinishedPush(t *testing.T) {
 	// The next real completion is announced again.
 	h.transition("w6:p1", herdr.StateDone, herdr.StateWorking)
 	h.transition("w6:p1", herdr.StateWorking, herdr.StateDone)
-	if got := h.pusher.last(t); got.Text != "docs finished." {
+	if got := h.pusher.last(t); !strings.HasPrefix(got.Text, "docs finished") {
 		t.Errorf("later done push = %+v", got)
 	}
 }

@@ -120,14 +120,31 @@ func TestInjectBlockedChainAndConfirm(t *testing.T) {
 		t.Fatalf("empty text = %d", code)
 	}
 
-	// done, working, remove.
-	code, body = h.postJSON("/api/inject/done", map[string]any{"pane_id": "fake:1"}, &res)
-	if code != http.StatusOK || res.Agent.State != herdr.StateDone {
-		t.Fatalf("done = %d %s", code, body)
-	}
+	// working, then done with the "after" screen: the finish is
+	// summarised through the real llm.Client (llm.call summarize_done),
+	// pushed with the result and stored as last_result.
 	code, body = h.postJSON("/api/inject/state", map[string]any{"pane_id": "fake:1", "state": "working"}, &res)
 	if code != http.StatusOK || res.Agent.State != herdr.StateWorking {
 		t.Fatalf("working = %d %s", code, body)
+	}
+	code, body = h.postJSON("/api/inject/done", map[string]any{"pane_id": "fake:1", "screen": screenFixture(t, "codex-after-approval.screen.txt")}, &res)
+	if code != http.StatusOK || res.Agent.State != herdr.StateDone {
+		t.Fatalf("done = %d %s", code, body)
+	}
+	if res.Agent.LastResult == nil || res.Agent.LastResult.Spoken != "created hello.txt with the requested line" || res.Agent.LastResult.Outcome != "success" {
+		t.Fatalf("last_result = %+v", res.Agent.LastResult)
+	}
+	if !subsequence(h.types(), []string{"web.inject", "herdr.read", "llm.call", "voice.push"}) {
+		t.Fatalf("done chain missing in %v", h.types())
+	}
+	donePushed := false
+	for _, ev := range h.log.Tail(0) {
+		if ev.Type == "voice.push" && strings.Contains(string(ev.Payload), "auth finished: created hello.txt with the requested line.") {
+			donePushed = true
+		}
+	}
+	if !donePushed {
+		t.Fatal("no voice.push with the finish result")
 	}
 	code, body = h.postJSON("/api/inject/state", map[string]any{"pane_id": "fake:1", "state": "weird"}, nil)
 	if code != http.StatusBadRequest {

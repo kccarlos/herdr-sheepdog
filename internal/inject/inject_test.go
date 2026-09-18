@@ -64,6 +64,13 @@ func (fakeLLM) ResolveInstruction(_ context.Context, text string, agents []llm.A
 	return llm.Resolution{Ambiguous: true, ClarifyQuestion: "Which agent?"}, nil
 }
 
+func (fakeLLM) SummarizeDone(_ context.Context, screen, _ string) (llm.DoneSummary, error) {
+	if strings.Contains(screen, "You approved codex to run") {
+		return llm.DoneSummary{Spoken: "created hello.txt", Outcome: "success"}, nil
+	}
+	return llm.DoneSummary{Spoken: "did something", Outcome: "unknown"}, nil
+}
+
 func (fakeLLM) SpokenAnswer(_ context.Context, raw, _, alias string) (llm.Answer, error) {
 	return llm.Answer{Spoken: alias + " says: " + strings.TrimSpace(raw)[:min(20, len(strings.TrimSpace(raw)))], CanAnswer: true}, nil
 }
@@ -187,7 +194,7 @@ func TestInjectorRejectsBadRequests(t *testing.T) {
 	if _, err := h.inj.Done(ctx, "nope"); !errors.Is(err, ErrNotSynthetic) {
 		t.Errorf("done of unknown pane: %v", err)
 	}
-	if _, err := h.inj.SetState(ctx, "p", "weird"); err == nil {
+	if _, err := h.inj.SetState(ctx, "p", "weird", ""); err == nil {
 		t.Error("invalid state accepted")
 	}
 	// A pane herdr owns cannot be faked.

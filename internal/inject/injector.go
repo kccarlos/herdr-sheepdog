@@ -84,8 +84,9 @@ func (i *Injector) Blocked(ctx context.Context, req BlockedRequest) (state.Agent
 }
 
 // SetState moves a synthetic pane to another state (done, working, idle,
-// unknown) through the supervisor.
-func (i *Injector) SetState(ctx context.Context, paneID string, to herdr.State) (state.Agent, error) {
+// unknown) through the supervisor. A non-empty screen replaces the pane
+// text first, so a "done" can show what the agent finished with.
+func (i *Injector) SetState(ctx context.Context, paneID string, to herdr.State, screen string) (state.Agent, error) {
 	paneID = strings.TrimSpace(paneID)
 	if !to.Valid() {
 		return state.Agent{}, fmt.Errorf("inject: invalid state %q", to)
@@ -94,16 +95,20 @@ func (i *Injector) SetState(ctx context.Context, paneID string, to herdr.State) 
 	if !ok || !row.Synthetic || !i.herdr.IsSynthetic(paneID) {
 		return state.Agent{}, fmt.Errorf("%w: %s", ErrNotSynthetic, paneID)
 	}
-	i.herdr.SetStatus(paneID, to)
-	i.log.Log("web", "web.inject", paneID, map[string]any{"kind": string(to)})
+	if strings.TrimSpace(screen) != "" {
+		i.herdr.SetScreen(paneID, "", screen, to)
+	} else {
+		i.herdr.SetStatus(paneID, to)
+	}
+	i.log.Log("web", "web.inject", paneID, map[string]any{"kind": string(to), "screen_bytes": len(screen)})
 	i.transition(ctx, paneID, row.Kind, row.State, to)
 	row, _ = i.store.Get(paneID)
 	return row, nil
 }
 
-// Done is SetState(done).
+// Done is SetState(done) with the pane text left as it is.
 func (i *Injector) Done(ctx context.Context, paneID string) (state.Agent, error) {
-	return i.SetState(ctx, paneID, herdr.StateDone)
+	return i.SetState(ctx, paneID, herdr.StateDone, "")
 }
 
 // Remove closes a synthetic pane: the supervisor sees a Closed transition

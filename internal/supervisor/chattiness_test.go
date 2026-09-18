@@ -46,8 +46,8 @@ func TestChattinessLevels(t *testing.T) {
 		authQ    = "auth is asking whether it can run a command to create hello.txt."
 		docsQ    = "docs is asking whether it can create claude.txt."
 		replaced = "Dropping the earlier question from auth; now docs is asking whether it can create claude.txt."
-		docsDone = "docs finished."
-		vpsDone  = "vps finished."
+		docsDone = "docs finished: created claude.txt with the line hello from claude."
+		vpsDone  = "vps finished: created hello.txt with the requested line."
 		started  = `vps started on "run the tests".`
 		trust    = "vps is showing its startup trust dialog."
 		exit     = "auth has exited while it was busy."
@@ -69,8 +69,10 @@ func TestChattinessLevels(t *testing.T) {
 			// 3. answered docs, docs works and finishes: dealt with.
 			h.call(ToolConfirm, map[string]any{"answer": "yes"})
 			h.transition("w6:p1", herdr.StateBlocked, herdr.StateWorking)
+			h.srv.SetScreen("w6:p1", fixture(t, "claude-after-approval.screen.txt"))
 			h.transition("w6:p1", herdr.StateWorking, herdr.StateDone)
 			// 4. vps finishes on its own: nobody dealt with it.
+			h.srv.SetScreen("w7:p1", fixture(t, "codex-after-approval.screen.txt"))
 			h.transition("w7:p1", herdr.StateWorking, herdr.StateDone)
 			// 5. an instruction to vps is picked up, done, then idle again.
 			h.call(ToolPropose, map[string]any{"instruction": "tell vps to run the tests"})
@@ -83,6 +85,10 @@ func TestChattinessLevels(t *testing.T) {
 
 			if got := h.pushTexts(); !reflect.DeepEqual(got, want[level]) {
 				t.Errorf("pushes at %s:\n got %q\nwant %q", level, got, want[level])
+			}
+			// last_result is recorded at every level, announced or not.
+			if row, _ := h.store.Get("w7:p1"); row.LastResult == nil || row.LastResult.Spoken != "created hello.txt with the requested line" {
+				t.Errorf("vps last_result at %s = %+v", level, row.LastResult)
 			}
 			// The suppressed pushes are visible in the log.
 			quiet := h.log.count("supervisor.push_quiet")
@@ -122,7 +128,7 @@ func TestNormalDoneWindow(t *testing.T) {
 		t.Fatalf("briefing did not touch vps: %+v", row.LastInteraction)
 	}
 	h.transition("w7:p1", herdr.StateWorking, herdr.StateDone)
-	if got := h.pushTexts(); len(got) != 1 || got[0] != "vps finished." {
+	if got := h.pushTexts(); len(got) != 1 || !strings.HasPrefix(got[0], "vps finished") {
 		t.Fatalf("finish after a spoken briefing pushed %q", got)
 	}
 	// Asking about an agent counts too, and the window is configurable.
@@ -131,7 +137,7 @@ func TestNormalDoneWindow(t *testing.T) {
 	h2.call(ToolAsk, map[string]any{"question": "what is vps doing", "agent": "vps"})
 	h2.clock.Advance(45 * time.Minute)
 	h2.transition("w7:p1", herdr.StateWorking, herdr.StateDone)
-	if got := h2.pushTexts(); len(got) != 1 || got[0] != "vps finished." {
+	if got := h2.pushTexts(); len(got) != 1 || !strings.HasPrefix(got[0], "vps finished") {
 		t.Fatalf("finish inside a 60 min window pushed %q", got)
 	}
 }
@@ -191,7 +197,7 @@ func TestSettingsRuntimeChangePersists(t *testing.T) {
 	}
 	// The uninvolved vps-style finish is now announced.
 	h.transition("w5:p1", herdr.StateWorking, herdr.StateDone)
-	if got := h.pushTexts(); len(got) != 1 || got[0] != "auth finished." {
+	if got := h.pushTexts(); len(got) != 1 || !strings.HasPrefix(got[0], "auth finished") {
 		t.Errorf("after switching to chatty: %q", got)
 	}
 

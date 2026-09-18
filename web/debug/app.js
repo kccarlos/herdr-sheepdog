@@ -233,9 +233,11 @@ function renderAgents(agents) {
     td(a.workspace_label || a.workspace || '');
     td(pill(a.state || 'unknown'));
     td(since(a.state_since));
-    td(a.current_task || '', 'task');
+    td(a.current_task || (a.last_task ? `(last: ${a.last_task})` : ''), 'task');
     const lb = a.last_block;
     td(lb ? `${lb.question || '(no question)'}${lb.answered ? ' ✓' : ''}` : '', 'block');
+    const lr = a.last_result;
+    td(lr ? `${lr.spoken} [${lr.outcome}, ${since(lr.at)} ago]` : '', 'result');
     const actions = document.createElement('td');
     if (a.synthetic) {
       const b = document.createElement('button');
@@ -365,8 +367,10 @@ function setupInject() {
   $('inj-blocked').addEventListener('click', () => showResult('inj-result', post('/api/inject/blocked', {
     pane_id: pane(), alias: $('inj-alias').value.trim(), kind: $('inj-kind').value, screen: $('inj-screen').value,
   })));
-  $('inj-done').addEventListener('click', () => showResult('inj-result', post('/api/inject/done', { pane_id: pane() })));
-  $('inj-working').addEventListener('click', () => showResult('inj-result', post('/api/inject/state', { pane_id: pane(), state: 'working' })));
+  // done / working send the textarea too (an "after" preset shows what the
+  // agent finished with; an empty textarea keeps the pane text as it is).
+  $('inj-done').addEventListener('click', () => showResult('inj-result', post('/api/inject/done', { pane_id: pane(), screen: $('inj-screen').value })));
+  $('inj-working').addEventListener('click', () => showResult('inj-result', post('/api/inject/state', { pane_id: pane(), state: 'working', screen: $('inj-screen').value })));
   $('inj-remove').addEventListener('click', () => showResult('inj-result', post('/api/inject/remove', { pane_id: pane() })));
 
   const sendUtterance = (text) => {

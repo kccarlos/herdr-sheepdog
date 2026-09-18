@@ -39,6 +39,12 @@ func fakeLLMServer(t *testing.T) *httptest.Server {
 		}
 		var content string
 		switch {
+		case strings.Contains(prompt, "asked_question"): // summarize_done
+			if strings.Contains(prompt, "You approved codex to run") {
+				content = `{"spoken":"created hello.txt with the requested line","outcome":"success","asked_question":false}`
+			} else {
+				content = `{"spoken":"did something the screen does not show","outcome":"unknown","asked_question":false}`
+			}
 		case strings.Contains(prompt, "Would you like to run the following command?"):
 			content = `{"spoken":"auth is asking whether it can run a command to create hello.txt.","question":"whether it can create hello.txt","is_question":true,"needs_decision":true,"options":[{"label":"Yes, proceed","key":"enter"},{"label":"No","key":"esc"}],"answer_keys":{"yes":["enter"],"no":["esc"]}}`
 		case strings.Contains(prompt, "Ask Codex to do anything"):
@@ -213,7 +219,12 @@ func newHarness(t *testing.T, o harnessOpts) *harness {
 
 func codexScreen(t *testing.T) string {
 	t.Helper()
-	b, err := os.ReadFile(filepath.Join("..", "..", "testdata", "herdr", "codex-approval-prompt.screen.txt"))
+	return screenFixture(t, "codex-approval-prompt.screen.txt")
+}
+
+func screenFixture(t *testing.T, name string) string {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join("..", "..", "testdata", "herdr", name))
 	if err != nil {
 		t.Fatal(err)
 	}

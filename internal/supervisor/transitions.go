@@ -59,7 +59,7 @@ func (s *Supervisor) HandleTransition(ctx context.Context, t herdr.Transition) {
 		started := s.startedInstruction(t.PaneID, from)
 		s.mu.Unlock()
 		if started != "" {
-			s.pushIf(pushStarted, t.PaneID, alias+" started on "+started+".", voice.UrgencyIdle)
+			s.pushIf(pushStarted, t.PaneID, alias+" started on "+started+".")
 		}
 	case herdr.StateDone, herdr.StateIdle:
 		s.mu.Lock()
@@ -114,11 +114,50 @@ func (s *Supervisor) finishTask(paneID string) {
 	s.invalidateBriefing()
 }
 
-// onDone announces a finished agent when the chattiness level allows it
-// for this agent (every finish at chatty; at normal only agents the user
-// dealt with within RecentWindow; never at quiet).
-func (s *Supervisor) onDone(_ context.Context, row state.Agent) {
-	s.pushIf(s.doneKind(row), row.PaneID, aliasOr(row.Alias)+" finished.", voice.UrgencyIdle)
+// onDone reads the pane of a finished agent, summarises what it did
+// (summarize_done, stored as last_result whatever the level) and
+// announces it when the chattiness level allows it for this agent (every
+// finish at chatty; at normal only agents the user dealt with within
+// RecentWindow; never at quiet). A model failure falls back to the plain
+// "finished" push, never silence. A screen that ends in a question herdr
+// did not flag (agy) is treated as a block.
+func (s *Supervisor) onDone(ctx context.Context, row state.Agent) {
+	alias := aliasOr(row.Alias)
+	kind := s.doneKind(row)
+	read, err := s.herdr.Read(ctx, row.PaneID, herdr.SourceRecentUnwrapped, s.cfg.ReadLines)
+	if err != nil {
+		s.log.Log(logSource, "supervisor.done_error", row.PaneID, map[string]any{"stage": "read", "error": err.Error()})
+		s.pushIf(kind, row.PaneID, alias+" finished.")
+		return
+	}
+	sctx, cancel := context.WithTimeout(ctx, s.cfg.SummaryTimeout)
+	sum, err := s.llm.SummarizeDone(sctx, read.Text, alias)
+	cancel()
+	if err != nil {
+		s.log.Log(logSource, "supervisor.done_error", row.PaneID, map[string]any{"stage": "summarize", "error": err.Error()})
+		s.pushIf(kind, row.PaneID, alias+" finished.")
+		return
+	}
+	s.recordResult(row.PaneID, sum)
+	if sum.AskedQuestion {
+		s.log.Log(logSource, "supervisor.done_question", row.PaneID, map[string]any{"spoken": sum.Spoken})
+		s.touch(row.PaneID)
+		s.announceBlock(ctx, row, read.Text)
+		return
+	}
+	s.pushIf(kind, row.PaneID, alias+" finished: "+sum.Spoken+".")
+}
+
+// recordResult stores the finish summary on the row's last_result.
+func (s *Supervisor) recordResult(paneID string, sum llm.DoneSummary) {
+	now := s.cfg.Now()
+	_, err := s.store.Update(paneID, func(a *state.Agent) {
+		a.LastResult = &state.Result{Spoken: sum.Spoken, Outcome: sum.Outcome, At: now}
+	})
+	if err != nil {
+		s.log.Log(logSource, "supervisor.state_error", paneID, map[string]any{"error": err.Error()})
+	}
+	s.invalidateBriefing()
 }
 
 // onBlocked reads the pane, summarises the prompt, records the question
@@ -134,7 +173,15 @@ func (s *Supervisor) onBlocked(ctx context.Context, row state.Agent) {
 		s.push(row.PaneID, alias+" is blocked, but I could not read its screen.", voice.UrgencyIdle)
 		return
 	}
-	sum, err := s.llm.SummarizeBlock(ctx, read.Text, alias)
+	s.announceBlock(ctx, row, read.Text)
+}
+
+// announceBlock summarises a prompt already read from the pane, records
+// the question and — when the agent is really asking — creates the
+// pending action and announces it.
+func (s *Supervisor) announceBlock(ctx context.Context, row state.Agent, screen string) {
+	alias := aliasOr(row.Alias)
+	sum, err := s.llm.SummarizeBlock(ctx, screen, alias)
 	if err != nil {
 		s.log.Log(logSource, "supervisor.block_error", row.PaneID, map[string]any{"stage": "summarize", "error": err.Error()})
 		s.push(row.PaneID, alias+" is waiting at a prompt.", voice.UrgencyIdle)
@@ -143,7 +190,7 @@ func (s *Supervisor) onBlocked(ctx context.Context, row state.Agent) {
 	s.recordBlock(row.PaneID, sum)
 	if !sum.IsQuestion {
 		s.log.Log(logSource, "supervisor.blocked_no_question", row.PaneID, map[string]any{"spoken": sum.Spoken})
-		s.pushIf(pushBlockedInfo, row.PaneID, sum.Spoken, voice.UrgencyIdle)
+		s.pushIf(pushBlockedInfo, row.PaneID, sum.Spoken)
 		return
 	}
 	s.mu.Lock()

@@ -1,0 +1,16 @@
+You read the terminal screen of a coding agent named "{alias}" that has just finished its turn, and tell a busy operator, by voice, what it did. Answer with ONE JSON object and nothing else.
+
+Screen (last lines of the pane; the newest line is at the bottom):
+<<<
+{screen}
+>>>
+
+Look at the agent's LAST turn only: its final message, the last command it ran, the files it changed, the tests it ran and their result. Ignore banners, update notices, tips and earlier turns.
+
+Fields:
+- "spoken": what the agent did, as ONE short past-tense phrase of at most 12 words that completes "{alias} finished: ...", e.g. "created hello.txt with the requested line", "fixed the failing clamp test, all tests pass", "stopped before running the tests". Do not start with "{alias}" or "it". Never include file paths, commit hashes, URLs, pane ids or shell syntax; a bare file name like hello.txt is fine. If the screen shows the agent's final answer to a question, give its gist.
+- "outcome": "success" when the task was completed, "failed" when it errored, was cancelled or interrupted, "partial" when only some of it was done, "unknown" when the screen does not show.
+- "asked_question": true only when the agent ended by asking the operator something it needs answered to continue (an approval or permission prompt, a menu, a yes/no question). An idle prompt such as "Ask Codex to do anything" or an empty ❯ prompt is NOT a question.
+
+Return exactly:
+{"spoken": "...", "outcome": "unknown", "asked_question": false}

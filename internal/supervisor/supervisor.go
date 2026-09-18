@@ -51,8 +51,12 @@ type Config struct {
 	// BriefingInterval is how often Run re-pushes the briefing silently as
 	// a fallback for context compression (default 10 min; < 0 disables).
 	BriefingInterval time.Duration
-	// ReadLines is how many recent lines a pane read asks for (default 80).
+	// ReadLines is how many recent lines a pane read asks for (default
+	// 200: enough to see an agent's final message above its status bar).
 	ReadLines int
+	// SummaryTimeout bounds the summarize_done call on a finish (default
+	// 15 s); on expiry the plain "finished" push is spoken instead.
+	SummaryTimeout time.Duration
 	// DataDir is where notes.jsonl is appended; empty keeps notes in the
 	// state table only.
 	DataDir string
@@ -80,7 +84,10 @@ func (c Config) withDefaults() Config {
 		c.BriefingInterval = 10 * time.Minute
 	}
 	if c.ReadLines == 0 {
-		c.ReadLines = 80
+		c.ReadLines = 200
+	}
+	if c.SummaryTimeout == 0 {
+		c.SummaryTimeout = 15 * time.Second
 	}
 	if c.Chattiness == "" {
 		c.Chattiness = string(Normal)
@@ -198,16 +205,17 @@ func (s *Supervisor) push(paneID, text string, u voice.Urgency) {
 	}
 }
 
-// pushIf pushes text when the current chattiness level speaks pushes of
-// kind k; otherwise it logs supervisor.push_quiet so the decision stays
-// visible in the event log.
-func (s *Supervisor) pushIf(k pushKind, paneID, text string, u voice.Urgency) {
+// pushIf pushes text at idle urgency when the current chattiness level
+// speaks pushes of kind k (every policy-gated push is a low-priority one;
+// questions and exits bypass it); otherwise it logs supervisor.push_quiet
+// so the decision stays visible in the event log.
+func (s *Supervisor) pushIf(k pushKind, paneID, text string) {
 	level := s.chattiness()
 	if !level.allows(k) {
 		s.log.Log(logSource, "supervisor.push_quiet", paneID, map[string]any{"text": text, "chattiness": string(level)})
 		return
 	}
-	s.push(paneID, text, u)
+	s.push(paneID, text, voice.UrgencyIdle)
 }
 
 // pushBriefing pushes the current briefing as silent context and records

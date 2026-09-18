@@ -43,7 +43,7 @@ textarea { width: 100%; font-family: ui-monospace, SFMono-Regular, Menlo, monosp
 table { border-collapse: collapse; width: 100%; background: var(--card); border: 1px solid var(--line); }
 th, td { text-align: left; padding: .3rem .5rem; border-bottom: 1px solid var(--line); vertical-align: top; }
 th { font-weight: 600; color: var(--muted); font-size: .85em; }
-td.task, td.block { max-width: 18em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+td.task, td.block, td.result { max-width: 18em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pill { display: inline-block; padding: 0 .45em; border-radius: 9px; font-size: .85em; color: #fff; background: var(--unknown); }
 .pill.blocked { background: var(--blocked); }
 .pill.working { background: var(--working); }

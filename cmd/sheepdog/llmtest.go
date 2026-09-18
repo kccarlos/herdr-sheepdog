@@ -29,6 +29,7 @@ func printLLMTestUsage(w io.Writer) {
 	fprintln(w, "  resolve_instruction  --text WORDS --agents LIST [--agent ALIAS]")
 	fprintln(w, "                       LIST = alias[:state[:task]],...  e.g. auth:working:run tests,docs:blocked:whether to write")
 	fprintln(w, "  spoken_answer        --text QUESTION --screen FILE [--alias NAME]")
+	fprintln(w, "  summarize_done       --screen FILE [--alias NAME]")
 	fprintln(w, "")
 	fprintln(w, "flags:")
 	fprintln(w, "  --config PATH   config file (default ~/.config/sheepdog/config.toml)")
@@ -67,7 +68,7 @@ func parseLLMTestFlags(args []string, stderr io.Writer) (llmTestOpts, int, bool)
 		return o, 2, false
 	}
 	switch o.template {
-	case "summarize_block", "spoken_answer":
+	case "summarize_block", "spoken_answer", "summarize_done":
 		if o.screen == "" {
 			fprintf(stderr, "sheepdog llm-test: %s needs --screen\n", o.template)
 			return o, 2, false
@@ -165,6 +166,8 @@ func runLLMTest(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		result, err = client.ResolveInstruction(ctx, o.text, parseAgentList(o.agents), o.agent)
 	case "spoken_answer":
 		result, err = client.SpokenAnswer(ctx, screen, o.text, o.alias)
+	case "summarize_done":
+		result, err = client.SummarizeDone(ctx, screen, o.alias)
 	}
 	if err != nil {
 		fprintf(stderr, "sheepdog llm-test: %v\n", err)
