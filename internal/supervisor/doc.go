@@ -1,7 +1,25 @@
-// Package supervisor is the daemon's brain: pure Go logic plus the herdr,
-// llm, cli, and voice adapters. It maintains the state table from herdr
-// events, implements the five voice tools (briefing, ask, propose, confirm/
-// cancel, note), manages the single-slot pending action with expiry, and
-// runs the push queue (one at a time, FIFO, never while the user is
-// speaking) that delivers spoken updates to the voice session.
+// Package supervisor is the daemon's brain (plan §3.6): pure Go logic over
+// the herdr client, the state table, the cheap LLM templates and the voice
+// session's push channel. It is the only component that touches herdr
+// (decision D1).
+//
+// Supervisor.HandleTransition folds every debounced herdr transition into
+// the state table and reacts: a `blocked` pane is read and summarised, the
+// spoken sentence is pushed to the voice session, and — when the agent is
+// really asking something — a single-slot answer_prompt PendingAction is
+// created (replacing and announcing any earlier one). `done` gets a
+// low-priority push; an agent that exits mid-work gets an interrupting one.
+//
+// The five voice tools (briefing, ask, propose, confirm, cancel, note) are
+// methods returning voice.ToolResult with the scheduling the Supervisor
+// chose; Handler adapts them to voice.ToolHandler. briefing never calls a
+// model: it is a cached sentence built from the state table. propose echoes
+// and sends immediately (D4) unless the target is ambiguous (D6); cancel
+// sends Ctrl-C to the pane of the in-flight instruction.
+//
+// Pending actions expire after a TTL (Run's ticker); an expired question
+// that the user later confirms is revived and asked again before anything
+// is sent (plan scenario 8). Everything is logged through logging.Logger
+// (pending.*, supervisor.*); llm.call and herdr.read/send come from the
+// adapters themselves.
 package supervisor
