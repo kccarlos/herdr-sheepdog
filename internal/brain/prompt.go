@@ -92,11 +92,12 @@ func slug(name string) string {
 	return name
 }
 
-// dynamicSections renders the roster, the ledger excerpt and the time.
-func dynamicSections(agents []AgentInfo, notes []string, now time.Time) []PromptSection {
+// dynamicSections renders the roster, the ledger excerpt (with the open
+// promises) and the time.
+func dynamicSections(agents []AgentInfo, notes []string, promises []PromiseInfo, now time.Time) []PromptSection {
 	return []PromptSection{
 		{Name: "roster", Source: SourceDynamic, Text: renderRoster(agents, now)},
-		{Name: "ledger", Source: SourceDynamic, Text: renderLedger(agents, notes)},
+		{Name: "ledger", Source: SourceDynamic, Text: renderLedger(agents, notes, promises, now)},
 		{Name: "time", Source: SourceDynamic, Text: "## Now\n\n" + now.Format("Mon 2006-01-02 15:04:05 MST")},
 	}
 }
@@ -139,8 +140,9 @@ func renderRoster(agents []AgentInfo, now time.Time) string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
-// renderLedger lists what each agent last did and asked, and the notes.
-func renderLedger(agents []AgentInfo, notes []string) string {
+// renderLedger lists what each agent last did and asked, the notes and
+// the open promises.
+func renderLedger(agents []AgentInfo, notes []string, promises []PromiseInfo, now time.Time) string {
 	var b strings.Builder
 	b.WriteString("## Ledger\n\n")
 	n := 0
@@ -150,7 +152,11 @@ func renderLedger(agents []AgentInfo, notes []string) string {
 			parts = append(parts, "last task "+fmt.Sprintf("%q", a.LastTask))
 		}
 		if a.LastResult != "" {
-			parts = append(parts, "last result: "+a.LastResult)
+			r := "last result: " + a.LastResult
+			if a.LastDetail != "" {
+				r += " (" + a.LastDetail + ")"
+			}
+			parts = append(parts, r)
 		}
 		if a.LastBlock != "" {
 			parts = append(parts, "last question: "+a.LastBlock)
@@ -174,6 +180,24 @@ func renderLedger(agents []AgentInfo, notes []string) string {
 			b.WriteString(note)
 		}
 		b.WriteString("\n")
+		n++
+	}
+	open := 0
+	for _, p := range promises {
+		if statusOr(p.Status) != PromiseOpen {
+			continue
+		}
+		if open == 0 {
+			b.WriteString("Open promises (the supervisor keeps them at the matching event; do not repeat them unasked):\n")
+		}
+		open++
+		fmt.Fprintf(&b, "- %q: %s", p.Text, promiseCondition(p))
+		if !p.CreatedAt.IsZero() {
+			fmt.Fprintf(&b, ", made %s ago", ago(now.Sub(p.CreatedAt)))
+		}
+		b.WriteString("\n")
+	}
+	if open > 0 {
 		n++
 	}
 	if n == 0 {

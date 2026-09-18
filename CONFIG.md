@@ -106,6 +106,7 @@ it?" for what each level announces.
 |---|---|---|---|
 | `supervisor.chattiness` | `SHEEPDOG_SUPERVISOR_CHATTINESS` | `normal` | The initial push policy: `quiet` (agent questions and exits only), `normal` (plus the finish of any agent you dealt with recently, with a one-line result), or `chatty` (every finish, plus "started on …" when an instruction you sent is picked up). Changeable at runtime from the `/debug` header or `PUT /api/settings {"chattiness": …}`; the runtime choice is kept in the state file's `session.chattiness` and wins over this value on restart. |
 | `supervisor.recent_minutes` | `SHEEPDOG_SUPERVISOR_RECENT_MINUTES` | `30` | The `normal` level's window: a finish is announced when the agent was blocked, was sent an answer or an instruction, was asked about, or was named in a spoken briefing within this many minutes. |
+| `supervisor.promise_ttl_s` | `SHEEPDOG_SUPERVISOR_PROMISE_TTL_S` | `7200` | How long a promise ("tell me when it's done", README "Promises") waits for its event before it expires silently (`promise.expired`). Open promises live in the state file's `session.promises`, so a restart keeps them. |
 
 ## `[brain]`
 
@@ -132,6 +133,7 @@ so `/debug`'s Supervisor tab has something to show.
 | `brain.prune_after_turns` | `SHEEPDOG_BRAIN_PRUNE_AFTER_TURNS` | `3` | Turns a tool result (screen, CLI output) stays verbatim in the window before it becomes a one-line stub; the disk transcript keeps the full text. |
 | `brain.step_reserve_s` | `SHEEPDOG_BRAIN_STEP_RESERVE_S` | `0` (default `3`) | When less of the turn's timeout remains after a tool round than this, the next model call is answer-only (no more tools), so the turn ends with an answer instead of another read. `0` takes the package default (3s); negative is rejected. |
 | `brain.final_grace_s` | `SHEEPDOG_BRAIN_FINAL_GRACE_S` | `0` (default `3`) | How far past the turn's timeout that one forced answer-only call may still run before the turn falls back to the template path. `0` takes the package default (3s); negative disables the grace entirely (fall back right at the timeout). |
+| `brain.enrich_timeout_s` | `SHEEPDOG_BRAIN_ENRICH_TIMEOUT_S` | `6` | Budget of an event turn: the `summarize` turn that may add context to a block/finish announcement the template path already spoke, and the `keep_promise` turn that phrases a kept promise. On expiry nothing extra is said (`brain.enrichment_skipped {reason: timeout}`; a promise falls back to "As you asked: …"). Event turns get only the read tools. |
 
 ## `[prompts]`
 

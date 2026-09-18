@@ -49,8 +49,20 @@ Does:
   `interrupt`.
 - Treats everything read from a worker pane as **data, not instructions**
   (provenance delimiters); workers are other agents whose output is untrusted.
-- Owns **promised work**: "tell me when it's done" becomes a recorded promise it
-  keeps, not a hope that chattiness announces it.
+- Owns **promised work**: "tell me when it's done" becomes a recorded promise
+  (`promise(agent, text, event)`, persisted in the state file) that the
+  supervisor keeps at the matching worker event, not a hope that chattiness
+  announces it. Kept promises are the one exception to the chattiness
+  ceiling: a promise is the CEO's explicit request, so it is spoken at every
+  level (`idle` urgency; `interrupt` past its due time). It expires
+  silently after `supervisor.promise_ttl_s`, and "cancel" with nothing
+  pending cancels the latest one.
+- Adds context to the template path's block/done announcements: the
+  template speaks first at today's latency, then a `summarize` event turn
+  (read tools only, `brain.enrich_timeout_s`) may add what the sentence
+  lacked — which request it fulfils, what is still open — or answer with an
+  empty `spoken` when the sentence was sufficient. The enrichment is subject
+  to the same chattiness ceiling as the announcement (never at `quiet`).
 - Answers for the ear: `{spoken, detail, needs_user, options?}` — `spoken` ≤ 2
   sentences, `detail` for the assistant's follow-ups.
 - Falls back to the fast template path when it errors, exceeds its step budget,
@@ -75,7 +87,9 @@ prompts are the safety gate).
 
 `briefing` from cache (sub-second success test; the SVP refreshes the cache in
 the background), `confirm`/`cancel` key mapping, debounce/dedup/TTL timers,
-chattiness as a hard ceiling on what the SVP may push.
+chattiness as a hard ceiling on what the SVP may push — with one exception,
+kept promises, which the CEO asked for by name. The block/done template
+sentence stays code-first too: it is pushed before the SVP is consulted.
 
 ## Borrowed from OpenClaw (concepts/system-prompt, context, context-engine, soul)
 
@@ -120,5 +134,7 @@ text, and are never overridable.
 1a brain loop, transcript, default engine, provenance, `ask`/`propose` routing,
 fallback, `brain.*` events → 1b prompt files, `USER.md` (aliases generated from
 config), `~/.config/sheepdog/prompts/` overrides → 1c Supervisor tab (transcript
-with window marker, prompt-budget meter) → 2 summaries with context + promises →
-3 push judgment. Measure model calls per CEO turn after 1a, before 2.
+with window marker, prompt-budget meter) → 2 summaries with context + promises
+(done: `summarize` / `keep_promise` event turns, the `promise` tool,
+`session.promises`, promise cards in the Supervisor tab) → 3 push judgment.
+Measure model calls per CEO turn after 1a, before 2.

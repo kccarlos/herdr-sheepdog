@@ -23,7 +23,18 @@ const (
 	ToolPrompt     = "prompt"
 	ToolSendKeys   = "send_keys"
 	ToolInterrupt  = "interrupt"
+	ToolPromise    = "promise"
 )
+
+// IsActionTool reports whether name sends something to a worker or
+// records a promise: permitted in CEO turns only.
+func IsActionTool(name string) bool {
+	switch name {
+	case ToolPrompt, ToolSendKeys, ToolInterrupt, ToolPromise:
+		return true
+	}
+	return false
+}
 
 // Provenance delimiters around everything read from a worker pane or
 // produced by the CLI tool (docs/roles.md: data, not instructions).
@@ -41,29 +52,39 @@ const (
 )
 
 // toolDeclarations is the function surface (plain GenerateContent
-// declarations; no Live-only behaviour field).
-func toolDeclarations() []*genai.Tool {
+// declarations; no Live-only behaviour field). readOnly is the surface
+// of an event turn: the read tools only, no actions and no promise.
+func toolDeclarations(readOnly bool) []*genai.Tool {
 	str := func(desc string) *genai.Schema { return &genai.Schema{Type: genai.TypeString, Description: desc} }
 	obj := func(props map[string]*genai.Schema, req []string) *genai.Schema {
 		return &genai.Schema{Type: genai.TypeObject, Properties: props, Required: req}
 	}
 	agent := str("the agent's alias")
-	return []*genai.Tool{{FunctionDeclarations: []*genai.FunctionDeclaration{
+	read := []*genai.FunctionDeclaration{
 		{Name: ToolReadScreen, Description: "Read the last lines of an agent's terminal pane: what it printed, asked or is doing right now.",
 			Parameters: obj(map[string]*genai.Schema{"agent": agent, "lines": {Type: genai.TypeInteger, Description: "how many lines from the bottom (default 200)"}}, []string{"agent"})},
 		{Name: ToolRunCLI, Description: "Ask a read-only CLI agent a question about the agent's repository (diff, logs, why a test fails). Slow (tens of seconds). Phrase the question with full context: the CLI has not heard this conversation.",
 			Parameters: obj(map[string]*genai.Schema{"agent": agent, "question": str("a self-contained question")}, []string{"agent", "question"})},
 		{Name: ToolListAgents, Description: "The roster: every agent with its state, task and pending question.",
 			Parameters: obj(map[string]*genai.Schema{}, nil)},
-		{Name: ToolRecall, Description: "Search the record: last results, last tasks, last questions, notes and earlier transcript lines matching the query.",
+		{Name: ToolRecall, Description: "Search the record: last results, last tasks, last questions, notes, promises and earlier transcript lines matching the query.",
 			Parameters: obj(map[string]*genai.Schema{"query": str("words to look for; empty for the most recent record")}, nil)},
+	}
+	if readOnly {
+		return []*genai.Tool{{FunctionDeclarations: read}}
+	}
+	act := []*genai.FunctionDeclaration{
 		{Name: ToolPrompt, Description: "Send an instruction to an agent as typed text. Its own approval prompts still apply. Use for anything the CEO tells an agent to do.",
 			Parameters: obj(map[string]*genai.Schema{"agent": agent, "text": str("the instruction, complete and self-contained")}, []string{"agent", "text"})},
 		{Name: ToolSendKeys, Description: "Answer an agent's approval prompt with the keys of one of its on-screen options (see the roster). Permitted only when the CEO authorised that answer in this turn.",
 			Parameters: obj(map[string]*genai.Schema{"agent": agent, "keys": {Type: genai.TypeArray, Items: str("one key name, e.g. enter, esc, y, 1"), Description: "the option's keys, in order"}}, []string{"agent", "keys"})},
 		{Name: ToolInterrupt, Description: "Send Ctrl-C to an agent to stop what it is doing.",
 			Parameters: obj(map[string]*genai.Schema{"agent": agent}, []string{"agent"})},
-	}}}
+		{Name: ToolPromise, Description: "Record promised work: the CEO asked to be told when something happens to an agent (\"tell me when it's done\", \"let me know if it asks\", \"remind me\"). The supervisor keeps it: it tells the CEO at the next matching event, whatever the chattiness level. Use it in the same turn as any instruction that goes with it.",
+			Parameters: obj(map[string]*genai.Schema{"agent": agent, "text": str("what the CEO asked to be told, in their words"), "event": {Type: genai.TypeString, Enum: PromiseEvents, Description: "the condition: done (it finished), blocked (it asks something), idle, or any_change"},
+				"due_in_minutes": {Type: genai.TypeInteger, Description: "only when the CEO gave a deadline or asked to be interrupted at once (0); a promise kept past its due time interrupts instead of waiting for a pause"}}, []string{"agent", "text", "event"})},
+	}
+	return []*genai.Tool{{FunctionDeclarations: append(read, act...)}}
 }
 
 // toolOutcome is what one executed call produced.
@@ -76,14 +97,17 @@ type toolOutcome struct {
 	summary string
 	// acted is the spoken echo when the call sent something to a worker.
 	acted string
-	// railBlocked marks a send_keys the rail refused.
+	// railBlocked marks a send_keys the rail refused, or any action tool
+	// called in an event-triggered turn.
 	railBlocked string
 	agent       string
+	// promise is the record a promise call created.
+	promise *PromiseInfo
 }
 
 // execTool runs one function call against the Host. trigger is the
-// turn's trigger (the rail needs it).
-func (b *Brain) execTool(ctx context.Context, trigger Trigger, call *genai.FunctionCall) toolOutcome {
+// turn's trigger (the rail needs it); turn is its number.
+func (b *Brain) execTool(ctx context.Context, trigger Trigger, turn int, call *genai.FunctionCall) toolOutcome {
 	arg := func(name string) string {
 		v, _ := call.Args[name].(string)
 		return strings.TrimSpace(v)
@@ -93,6 +117,13 @@ func (b *Brain) execTool(ctx context.Context, trigger Trigger, call *genai.Funct
 		return b.listAgents()
 	case ToolRecall:
 		return b.recall(arg("query"))
+	}
+	if trigger != TriggerCEO && IsActionTool(call.Name) {
+		// Event turns are read-only: they are not declared these tools,
+		// and the executor refuses them regardless (the model may still
+		// name one).
+		reason := call.Name + " is only permitted in a turn the CEO's own words triggered, never on an event"
+		return toolOutcome{railBlocked: reason, err: fmt.Errorf("%w: %s", ErrNotPermitted, reason)}
 	}
 	row, ok := b.host.Resolve(arg("agent"))
 	if !ok {
@@ -162,10 +193,43 @@ func (b *Brain) execTool(ctx context.Context, trigger Trigger, call *genai.Funct
 			return out
 		}
 		out.acted, out.result = echo, echo
+	case ToolPromise:
+		text, event := arg("text"), strings.ToLower(arg("event"))
+		if text == "" {
+			out.err = errors.New("promise needs the text of what the CEO asked to be told")
+			return out
+		}
+		if !validPromiseEvent(event) {
+			out.err = fmt.Errorf("promise event %q: want one of %s", event, strings.Join(PromiseEvents, ", "))
+			return out
+		}
+		req := PromiseRequest{Text: text, Event: event, Turn: turn}
+		if n, ok := call.Args["due_in_minutes"].(float64); ok && n >= 0 {
+			due := b.cfg.Now().Add(time.Duration(n * float64(time.Minute)))
+			req.Due = &due
+		}
+		p, err := b.host.Promise(ctx, row.PaneID, req)
+		if err != nil {
+			out.err = err
+			return out
+		}
+		out.promise = &p
+		echo := "I will tell you " + promiseCondition(p) + "."
+		out.acted, out.result = echo, echo
 	default:
 		out.err = fmt.Errorf("unknown tool %q", call.Name)
 	}
 	return out
+}
+
+// validPromiseEvent reports whether event is one of PromiseEvents.
+func validPromiseEvent(event string) bool {
+	for _, e := range PromiseEvents {
+		if e == event {
+			return true
+		}
+	}
+	return false
 }
 
 // rail is the one rail (docs/roles.md), checked before the Host re-checks
@@ -244,9 +308,9 @@ func (b *Brain) listAgents() toolOutcome {
 	return toolOutcome{result: string(out), summary: fmt.Sprintf("roster of %d agents", len(rows))}
 }
 
-// recall searches the ledger (roster fields, notes) and the transcript
-// for the query's words and returns the best matching lines, newest
-// first on ties; an empty query returns the most recent record.
+// recall searches the ledger (roster fields, notes, promises) and the
+// transcript for the query's words and returns the best matching lines,
+// newest first on ties; an empty query returns the most recent record.
 func (b *Brain) recall(query string) toolOutcome {
 	words := queryWords(query)
 	type hit struct {
@@ -270,7 +334,11 @@ func (b *Brain) recall(query string) toolOutcome {
 	for _, a := range b.host.Agents() {
 		alias := aliasOr(a.Alias)
 		if a.LastResult != "" {
-			add(a.LastInteraction, alias+" last result: "+a.LastResult)
+			line := alias + " last result: " + a.LastResult
+			if a.LastDetail != "" {
+				line += "; " + a.LastDetail
+			}
+			add(a.LastInteraction, line)
 		}
 		if a.LastTask != "" {
 			add(a.LastInteraction, alias+" last task: "+a.LastTask)
@@ -282,9 +350,14 @@ func (b *Brain) recall(query string) toolOutcome {
 	for _, n := range b.host.Notes() {
 		add(time.Time{}, "note: "+n)
 	}
+	for _, p := range b.host.Promises() {
+		add(p.CreatedAt, promiseLine(p))
+	}
 	for _, m := range b.transcript.Messages() {
 		switch m.Kind {
-		case KindToolResult, KindToolCall, KindRequest:
+		case KindToolResult, KindToolCall, KindRequest, KindEventScreen, KindPromise:
+			// Promises come from the Host (current status), not from
+			// their transcript lines.
 			continue
 		}
 		line := m.Content

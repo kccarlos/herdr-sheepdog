@@ -282,6 +282,8 @@ export class SupervisorView {
       case 'push': return this.renderPush(it);
       case 'worker': return this.renderLine(it, 'svp-worker', `${it.agent || '?'}: ${it.closed ? 'pane closed' : `${it.from} → ${it.to}`}${it.text ? it.text : ''}`);
       case 'note': return this.renderLine(it, 'svp-note', `note: ${it.text}`);
+      case 'promise': return this.renderPromise(it);
+      case 'screen': return this.renderScreen(it);
       case 'request': return this.renderRequest(it);
       case 'tool': return this.renderTool(it);
       case 'compaction': return this.renderCompaction(it);
@@ -383,12 +385,17 @@ export class SupervisorView {
 
   renderRequest(it) {
     if (it.nudge) return this.renderLine(it, 'svp-nudge', `→ SVP: ${it.question}`);
-    const box = el('div', 'item svp-request');
+    const event = it.trigger === 'event' && it.event;
+    const box = el('div', `item svp-request${event ? ' svp-event' : ''}`);
     const { h, open } = this.open.header(it.key, 'request-head', (h) => {
-      h.appendChild(el('span', 'who', 'assistant → SVP'));
+      h.appendChild(el('span', 'who', event ? 'supervisor → SVP' : 'assistant → SVP'));
       h.appendChild(el('span', `badge req-${it.reqKind}`, it.reqKind));
-      h.appendChild(el('span', 'text', `"${it.question}"`));
-      const bits = [it.agent ? `agent ${it.agent}` : 'no agent named', it.trigger === 'event' ? 'triggered by an event' : '', fmtTime(it.ts), `#${it.seq}`];
+      if (event) {
+        h.appendChild(el('span', 'text', `${it.agent} ${it.event} · template "${it.question}"${it.promise ? ` · promise "${it.promise}"` : ''}`));
+      } else {
+        h.appendChild(el('span', 'text', `"${it.question}"`));
+      }
+      const bits = [event ? '' : (it.agent ? `agent ${it.agent}` : 'no agent named'), it.trigger === 'event' ? 'triggered by an event' : '', fmtTime(it.ts), `#${it.seq}`];
       if (it.inWindow === false) bits.push('on disk only');
       h.appendChild(el('span', 'meta', ` · ${bits.filter(Boolean).join(' · ')}`));
     });
@@ -450,6 +457,65 @@ export class SupervisorView {
       if (r && r.summary) body.appendChild(el('div', 'meta', `stub when pruned: [${r.summary}, pruned]`));
       body.appendChild(el('div', 'label', 'raw'));
       body.appendChild(jsonPre(r ? { call: it.raw, result: r.raw } : it.raw));
+      box.appendChild(body);
+    }
+    return box;
+  }
+
+  // A promise card: the record's transition (made / kept / expired /
+  // cancelled) with the status it has now, from the promise.* events.
+  renderPromise(it) {
+    const box = el('div', `item svp-promise status-${it.now}`);
+    const { h, open } = this.open.header(it.key, 'promise-head', (h) => {
+      h.appendChild(el('span', 'who', 'promise'));
+      h.appendChild(el('span', `badge promise-${it.status}`, it.status));
+      if (it.now !== it.status) h.appendChild(el('span', `badge promise-${it.now}`, `now ${it.now}`));
+      h.appendChild(el('span', 'text', `"${it.text}"`));
+      const bits = [it.condition || (it.agent ? `${it.agent} · ${it.event}` : ''), it.createdTurn ? `made in turn ${it.createdTurn}` : '', it.due ? `due ${fmtTime(it.due)}` : '', fmtTime(it.ts), `#${it.seq}`];
+      if (it.inWindow === false) bits.push('on disk only');
+      h.appendChild(el('span', 'meta', ` · ${bits.filter(Boolean).join(' · ')}`));
+    });
+    box.appendChild(h);
+    if (open) {
+      const body = el('div', 'body');
+      if (it.latest) {
+        body.appendChild(el('div', 'label', 'from the promise.* events'));
+        const l = it.latest;
+        body.appendChild(el('div', 'text', `${l.status}${l.ts ? ` at ${fmtTime(l.ts)}` : ''}${l.spoken ? ` · spoken "${l.spoken}"` : ''}${l.via ? ` · via ${l.via}` : ''}${l.urgency ? ` · ${l.urgency}` : ''}`));
+      }
+      body.appendChild(el('div', 'label', 'raw'));
+      body.appendChild(jsonPre(it.raw));
+      box.appendChild(body);
+    }
+    return box;
+  }
+
+  // The screen the supervisor read for an event turn, collapsed like a
+  // tool result and marked when the window holds only its stub.
+  renderScreen(it) {
+    const box = el('div', `item tool svp-tool svp-screen`);
+    const { h, open } = this.open.header(it.key, 'tool', (h) => {
+      h.appendChild(el('span', 'icon', '⚙'));
+      h.appendChild(el('span', 'name', 'screen from the supervisor'));
+      if (it.summary) h.appendChild(el('span', 'args', `(${it.summary})`));
+      const bits = [];
+      if (it.pruned) bits.push('pruned from window');
+      bits.push(fmtTime(it.ts), `#${it.seq}`);
+      if (it.inWindow === false) bits.push('on disk only');
+      if (it.tokens) bits.push(`~${it.tokens} tok`);
+      h.appendChild(el('span', 'meta', ` · ${bits.join(' · ')}`));
+      if (it.pruned) h.appendChild(el('span', 'badge pruned', 'pruned'));
+    });
+    box.appendChild(h);
+    if (open) {
+      const body = el('div', 'body');
+      if (it.pruned) {
+        body.appendChild(el('div', 'svp-stub', `in the window now: ${it.stub}`));
+        body.appendChild(el('div', 'label', 'full screen (on disk)'));
+      } else body.appendChild(el('div', 'label', 'as the SVP sees it'));
+      body.appendChild(el('pre', 'svp-result', it.content || '(empty)'));
+      body.appendChild(el('div', 'label', 'raw'));
+      body.appendChild(jsonPre(it.raw));
       box.appendChild(body);
     }
     return box;

@@ -40,6 +40,7 @@ func (h brainHost) info(a state.Agent, pending state.PendingAction, has bool) br
 		if a.LastResult.Outcome != "" {
 			info.LastResult += " (" + a.LastResult.Outcome + ")"
 		}
+		info.LastDetail = a.LastResult.Detail
 	}
 	if a.LastBlock != nil && a.LastBlock.Question != "" {
 		info.LastBlock = a.LastBlock.Question
@@ -203,6 +204,26 @@ func (h brainHost) Interrupt(ctx context.Context, paneID string) (string, error)
 	s.dropPendingFor(paneID, "brain_interrupt")
 	s.lastSubject = paneID
 	return "Interrupted " + alias + ".", nil
+}
+
+// Promise implements brain.Host: the promise is recorded in the session
+// (promise.created) and kept by keepPromises at the matching event.
+func (h brainHost) Promise(_ context.Context, paneID string, req brain.PromiseRequest) (brain.PromiseInfo, error) {
+	p, err := h.s.createPromise(paneID, req)
+	if err != nil {
+		return brain.PromiseInfo{}, err
+	}
+	return promiseInfo(p), nil
+}
+
+// Promises implements brain.Host: open promises first.
+func (h brainHost) Promises() []brain.PromiseInfo {
+	all := h.s.promises()
+	out := make([]brain.PromiseInfo, 0, len(all))
+	for _, p := range all {
+		out = append(out, promiseInfo(p))
+	}
+	return out
 }
 
 // brainTurn routes one ask / propose through the brain. ok is false when

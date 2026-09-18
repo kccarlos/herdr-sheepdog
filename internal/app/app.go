@@ -245,6 +245,7 @@ func (a *App) wire() error {
 		DataDir:      cfg.DataDir,
 		Chattiness:   cfg.Supervisor.Chattiness,
 		RecentWindow: time.Duration(cfg.Supervisor.RecentMinutes) * time.Minute,
+		PromiseTTL:   time.Duration(cfg.Supervisor.PromiseTTLS) * time.Second,
 		Brain:        a.brain,
 	})
 	if err != nil {
@@ -353,6 +354,7 @@ func BrainConfig(cfg config.Config) brain.Config {
 		PruneAfterTurns: cfg.Brain.PruneAfterTurns,
 		StepReserve:     time.Duration(cfg.Brain.StepReserveS) * time.Second,
 		FinalGrace:      time.Duration(cfg.Brain.FinalGraceS) * time.Second,
+		EnrichTimeout:   time.Duration(cfg.Brain.EnrichTimeoutS) * time.Second,
 		DataDir:         cfg.DataDir,
 	}
 }

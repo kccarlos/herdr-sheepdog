@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"google.golang.org/genai"
 
@@ -46,6 +47,26 @@ func (c Call) Text() string {
 	return b.String()
 }
 
+// IsEvent reports whether the call belongs to an event turn (summarize,
+// keep_promise): the newest request line in its contents is an event's.
+func (c Call) IsEvent() bool {
+	for i := len(c.Contents) - 1; i >= 0; i-- {
+		var t string
+		for _, p := range c.Contents[i].Parts {
+			t += p.Text
+		}
+		reqs := reRequest.FindAllStringIndex(t, -1)
+		evs := reEvent.FindAllStringIndex(t, -1)
+		switch {
+		case len(evs) > 0 && (len(reqs) == 0 || evs[len(evs)-1][0] > reqs[len(reqs)-1][0]):
+			return true
+		case len(reqs) > 0:
+			return false
+		}
+	}
+	return false
+}
+
 // System returns the system instruction text.
 func (c Call) System() string {
 	if c.Config == nil || c.Config.SystemInstruction == nil {
@@ -75,11 +96,20 @@ type Step struct {
 
 // Model is a scripted brain.Model. Responses are consumed in order; when
 // the script runs out, Default answers (a plain JSON reply when nil).
+// EventDefault, when set, answers every event turn (summarize,
+// keep_promise) without consuming the script, so a scripted CEO turn is
+// not thrown off by the enrichment a block or finish triggers.
 type Model struct {
-	mu      sync.Mutex
-	script  []Step
-	calls   []Call
-	Default *Step
+	mu           sync.Mutex
+	script       []Step
+	calls        []Call
+	Default      *Step
+	EventDefault *Step
+}
+
+// NothingToAdd is the event-turn reply "the template was sufficient".
+func NothingToAdd() *Step {
+	return &Step{Text: `{"spoken": "", "detail": "Nothing to add.", "needs_user": false}`}
 }
 
 // NewModel returns a Model with the given script.
@@ -107,7 +137,9 @@ func (m *Model) Generate(ctx context.Context, model string, contents []*genai.Co
 	m.mu.Lock()
 	m.calls = append(m.calls, call)
 	var step Step
-	if len(m.script) > 0 {
+	if m.EventDefault != nil && call.IsEvent() {
+		step = *m.EventDefault
+	} else if len(m.script) > 0 {
 		step, m.script = m.script[0], m.script[1:]
 	} else if m.Default != nil {
 		step = *m.Default
@@ -182,6 +214,11 @@ type Host struct {
 	ReadErr error
 	// ReadDelay hooks a slow screen read.
 	ReadHook func(ctx context.Context) error
+	// PromiseErr fails Promise; Promised records every promise made.
+	PromiseErr error
+	Promised   []brain.PromiseInfo
+	// Now is the clock for promises (time.Now when nil).
+	Now func() time.Time
 }
 
 // NewHost returns an empty Host.
@@ -351,6 +388,40 @@ func (h *Host) Interrupt(_ context.Context, paneID string) (string, error) {
 	return "Interrupted " + h.aliasLocked(paneID) + ".", nil
 }
 
+// Promise implements brain.Host: the record is kept in Promised (open).
+func (h *Host) Promise(_ context.Context, paneID string, req brain.PromiseRequest) (brain.PromiseInfo, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.PromiseErr != nil {
+		return brain.PromiseInfo{}, h.PromiseErr
+	}
+	now := time.Now()
+	if h.Now != nil {
+		now = h.Now()
+	}
+	p := brain.PromiseInfo{ID: fmt.Sprintf("pr-%d", len(h.Promised)+1), Text: req.Text, Agent: h.aliasLocked(paneID), Event: req.Event, Status: brain.PromiseOpen, CreatedTurn: req.Turn, CreatedAt: now, Due: req.Due}
+	h.Promised = append(h.Promised, p)
+	return p, nil
+}
+
+// Promises implements brain.Host.
+func (h *Host) Promises() []brain.PromiseInfo {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return append([]brain.PromiseInfo(nil), h.Promised...)
+}
+
+// SetPromiseStatus changes a recorded promise's status (kept, expired…).
+func (h *Host) SetPromiseStatus(id, status string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for i := range h.Promised {
+		if h.Promised[i].ID == id {
+			h.Promised[i].Status = status
+		}
+	}
+}
+
 func (h *Host) aliasLocked(paneID string) string {
 	for _, a := range h.agents {
 		if a.PaneID == paneID {
@@ -367,7 +438,13 @@ var ErrBoom = errors.New("boom")
 // requestText and brain.summarize).
 var (
 	reRequest   = regexp.MustCompile(`Request from the assistant \((ask|propose)\): (?:question|instruction)="((?:[^"\\]|\\.)*)" agent=(?:"((?:[^"\\]|\\.)*)"|\(none)`)
+	reEvent     = regexp.MustCompile(`Event from the supervisor \((summarize|keep_promise)\): agent="((?:[^"\\]|\\.)*)" event="((?:[^"\\]|\\.)*)" template="((?:[^"\\]|\\.)*)"(?: promise="((?:[^"\\]|\\.)*)")?`)
 	reSummarise = regexp.MustCompile(`^Summarise the following`)
+	// rePromise splits a combined utterance ("run the tests and let me
+	// know when it's done") into the instruction and the promise.
+	rePromise  = regexp.MustCompile(`(?i)^(.*?)\s*(?:,|;|\band\b|\bthen\b)?\s*\b((?:please\s+)?(?:let me know|tell me|remind me|ping me|notify me)\b.*)$`)
+	reLastTask = regexp.MustCompile(`(?m)^- ([^:\n]+): last task "((?:[^"\\]|\\.)*)"`)
+	reCEOSaid  = regexp.MustCompile(`CEO said: "((?:[^"\\]|\\.)*)"`)
 )
 
 // Reflex returns a Model that answers from what it sees instead of a
@@ -378,11 +455,17 @@ var (
 // agents first and picks the one the words name (or the only one, or
 // the first blocked one): an ask then reads its screen, a propose
 // prompts it with "tell <alias> to" stripped; with no pick an ask
-// answers with the roster and a propose asks which agent. The compaction
-// summariser's prompt gets a one-line summary. Every answer is the JSON
-// of the answer contract, so the loop runs exactly as with a real model:
-// request → tool call → tool result → reply, with brain.* events and
-// transcript messages.
+// answers with the roster and a propose asks which agent. A propose
+// with "let me know when …" / "tell me when …" / "remind me …" in it
+// also records a promise (after the instruction, when there is one);
+// a bare one records only the promise. An event turn answers without
+// tools: keep_promise with "As you asked: <template>", summarize with
+// "That was the "<last task>" you asked for." when the ledger shows a
+// last task for the agent, else with an empty spoken (the template was
+// sufficient). The compaction summariser's prompt gets a one-line
+// summary. Every answer is the JSON of the answer contract, so the loop
+// runs exactly as with a real model: request → tool call → tool result
+// → reply, with brain.* events and transcript messages.
 func Reflex() *Model {
 	m := &Model{}
 	m.Default = &Step{Fn: reflex}
@@ -394,51 +477,218 @@ func reflex(call Call) (*genai.GenerateContentResponse, error) {
 	if len(call.Contents) == 0 {
 		return Response(Step{Text: Reply("I have nothing to go on.", "")}), nil
 	}
-	last := call.Contents[len(call.Contents)-1]
+	// The newest content that is a function response or holds a request
+	// / event line decides; bare context lines (a promise record after a
+	// tool result) are skipped.
 	var text string
-	for _, p := range last.Parts {
-		if p.FunctionResponse != nil {
-			usage := [2]int32{int32(len(call.Text()) / 4), 40}
-			if p.FunctionResponse.Name == brain.ToolListAgents {
-				kind, question := lastRequest(call)
-				if alias := pickAgent(p.FunctionResponse, question); alias != "" {
-					if kind == "propose" {
-						return Response(Step{Calls: []*genai.FunctionCall{FC(brain.ToolPrompt, map[string]any{"agent": alias, "text": instructionFor(alias, question)})}, Usage: usage}), nil
-					}
-					return Response(Step{Calls: []*genai.FunctionCall{FC(brain.ToolReadScreen, map[string]any{"agent": alias, "lines": float64(100)})}, Usage: usage}), nil
-				}
-				if kind == "propose" {
-					return Response(Step{Text: Reply("Which agent should I tell?", "The CEO did not say a name and the fake model does not guess."), Usage: usage}), nil
-				}
+	for i := len(call.Contents) - 1; i >= 0 && text == ""; i-- {
+		var fr *genai.FunctionResponse
+		var t string
+		for _, p := range call.Contents[i].Parts {
+			if p.FunctionResponse != nil {
+				fr = p.FunctionResponse
 			}
-			return Response(Step{Text: replyFromResult(p.FunctionResponse), Usage: usage}), nil
+			t += p.Text
 		}
-		text += p.Text
+		if fr != nil {
+			return respondToResult(call, fr), nil
+		}
+		if reRequest.MatchString(t) || reEvent.MatchString(t) || reSummarise.MatchString(strings.TrimSpace(t)) {
+			text = t
+		}
 	}
 	if reSummarise.MatchString(strings.TrimSpace(text)) {
 		lines := strings.Count(strings.TrimSpace(text), "\n")
 		return Response(Step{Text: fmt.Sprintf("Summary by the fake model: %d transcript lines about the agents and what the CEO asked; nothing is still open.", lines)}), nil
 	}
-	// The newest request line decides.
-	reqs := reRequest.FindAllStringSubmatch(text, -1)
+	usage := [2]int32{int32(len(call.Text()) / 4), 30}
+	// The newest request or event line decides.
+	reqs := reRequest.FindAllStringSubmatchIndex(text, -1)
+	evs := reEvent.FindAllStringSubmatchIndex(text, -1)
+	if len(evs) > 0 && (len(reqs) == 0 || evs[len(evs)-1][0] > reqs[len(reqs)-1][0]) {
+		return Response(Step{Text: eventReply(call, text, evs[len(evs)-1]), Usage: usage}), nil
+	}
 	if len(reqs) == 0 {
 		return Response(Step{Text: Reply("The fake model has no request to answer.", "This is the reflex model (--brain=fake); it only answers ask and propose requests."), Usage: [2]int32{int32(len(call.Text()) / 4), 20}}), nil
 	}
-	req := reqs[len(reqs)-1]
+	req := reRequest.FindStringSubmatch(text[reqs[len(reqs)-1][0]:])
 	kind, question, agent := req[1], unquote(req[2]), unquote(req[3])
-	usage := [2]int32{int32(len(call.Text()) / 4), 30}
+	if question == "" {
+		// The assistant passed no text: the CEO's own words are the
+		// request (a bare "let me know when it's done").
+		question = lastCEOUtterance(call)
+	}
 	if call.Config != nil && call.Config.ToolConfig != nil && call.Config.ToolConfig.FunctionCallingConfig != nil && call.Config.ToolConfig.FunctionCallingConfig.Mode == genai.FunctionCallingConfigModeNone {
 		return Response(Step{Text: Reply("I ran out of steps before reading anything.", "The fake model was asked to answer without tools."), Usage: usage}), nil
 	}
 	switch {
 	case kind == "propose" && agent != "":
-		return Response(Step{Calls: []*genai.FunctionCall{FC(brain.ToolPrompt, map[string]any{"agent": agent, "text": question})}, Usage: usage}), nil
+		return Response(Step{Calls: proposeCalls(agent, question), Usage: usage}), nil
 	case agent == "":
 		// No name given: the roster decides (the question may name one).
 		return Response(Step{Calls: []*genai.FunctionCall{FC(brain.ToolListAgents, nil)}, Usage: usage}), nil
 	default:
 		return Response(Step{Calls: []*genai.FunctionCall{FC(brain.ToolReadScreen, map[string]any{"agent": agent, "lines": float64(100)})}, Usage: usage}), nil
 	}
+}
+
+// respondToResult is the reflex's next step after a tool result.
+func respondToResult(call Call, fr *genai.FunctionResponse) *genai.GenerateContentResponse {
+	usage := [2]int32{int32(len(call.Text()) / 4), 40}
+	kind, question := lastRequest(call)
+	switch fr.Name {
+	case brain.ToolListAgents:
+		if alias := pickAgent(fr, question); alias != "" {
+			if kind == "propose" {
+				return Response(Step{Calls: proposeCalls(alias, question), Usage: usage})
+			}
+			return Response(Step{Calls: []*genai.FunctionCall{FC(brain.ToolReadScreen, map[string]any{"agent": alias, "lines": float64(100)})}, Usage: usage})
+		}
+		if kind == "propose" {
+			return Response(Step{Text: Reply("Which agent should I tell?", "The CEO did not say a name and the fake model does not guess."), Usage: usage})
+		}
+	case brain.ToolPrompt:
+		// The instruction went; a promise in the same words is still
+		// owed unless one was already made this turn.
+		if _, promise := splitPromise(question); promise != "" && !calledSinceRequest(call, brain.ToolPromise) {
+			if alias := agentOfCall(call, brain.ToolPrompt); alias != "" {
+				return Response(Step{Calls: []*genai.FunctionCall{promiseCall(alias, promise)}, Usage: usage})
+			}
+		}
+	case brain.ToolPromise:
+		if e, ok := fr.Response["error"].(string); ok && e != "" {
+			return Response(Step{Text: Reply("I could not record that: "+firstLine(e)+".", "The promise tool failed: "+e), Usage: usage})
+		}
+		out, _ := fr.Response["output"].(string)
+		spoken := strings.TrimSpace(out)
+		if echo := promptEcho(call); echo != "" {
+			// Two sentences at most (D9): "Telling auth to run the
+			// tests. Sent; I will tell you when auth finishes."
+			spoken = strings.TrimSuffix(echo, ".") + "; " + spoken
+		}
+		return Response(Step{Text: Reply(spoken, "Recorded a promise through the promise tool."), Usage: usage})
+	}
+	return Response(Step{Text: replyFromResult(fr), Usage: usage})
+}
+
+// eventReply answers an event turn without tools. m is the submatch
+// index of the newest event line in text.
+func eventReply(call Call, text string, m []int) string {
+	ev := reEvent.FindStringSubmatch(text[m[0]:])
+	kind, agent, template := ev[1], unquote(ev[2]), unquote(ev[4])
+	promise := unquote(ev[5])
+	if kind == "keep_promise" {
+		spoken := "As you asked: " + template
+		if !strings.HasSuffix(spoken, ".") {
+			spoken += "."
+		}
+		return Reply(spoken, fmt.Sprintf("Kept the promise %q by the fake model.", promise))
+	}
+	// summarize: relate the finish to the last task the ledger shows for
+	// the agent; nothing to add otherwise.
+	for _, lt := range reLastTask.FindAllStringSubmatch(call.System(), -1) {
+		if strings.EqualFold(lt[1], agent) {
+			task := unquote(lt[2])
+			b, _ := json.Marshal(brain.Reply{Spoken: fmt.Sprintf("That was the %q you asked for.", task), Detail: "The fake model related the event to the agent's last task from the ledger.", RelatesTo: task})
+			return string(b)
+		}
+	}
+	b, _ := json.Marshal(brain.Reply{Spoken: "", Detail: "The fake model found nothing to add to the template sentence."})
+	return string(b)
+}
+
+// proposeCalls is what a propose sends first: the instruction when the
+// words hold one (the promise, if any, follows after its result), else
+// the promise alone.
+func proposeCalls(alias, question string) []*genai.FunctionCall {
+	instruction, promise := splitPromise(question)
+	if instruction == "" && promise != "" {
+		return []*genai.FunctionCall{promiseCall(alias, promise)}
+	}
+	return []*genai.FunctionCall{FC(brain.ToolPrompt, map[string]any{"agent": alias, "text": instructionFor(alias, instruction)})}
+}
+
+// promiseCall builds the promise call for the promise clause.
+func promiseCall(alias, promise string) *genai.FunctionCall {
+	return FC(brain.ToolPromise, map[string]any{"agent": alias, "text": promise, "event": promiseEventFor(promise)})
+}
+
+// splitPromise separates "run the tests and let me know when it's done"
+// into the instruction ("run the tests") and the promise clause; the
+// instruction is the whole text when there is no promise clause.
+func splitPromise(text string) (instruction, promise string) {
+	text = strings.TrimSpace(text)
+	m := rePromise.FindStringSubmatch(text)
+	if m == nil {
+		return text, ""
+	}
+	return strings.TrimRight(strings.TrimSpace(m[1]), ",;"), strings.TrimSpace(m[2])
+}
+
+// promiseEventFor maps the promise clause's words onto a promise event.
+func promiseEventFor(promise string) string {
+	p := strings.ToLower(promise)
+	switch {
+	case strings.Contains(p, "ask") || strings.Contains(p, "block") || strings.Contains(p, "question") || strings.Contains(p, "need") || strings.Contains(p, "respond") || strings.Contains(p, "stuck"):
+		return brain.PromiseEventBlocked
+	case strings.Contains(p, "idle"):
+		return brain.PromiseEventIdle
+	case strings.Contains(p, "anything") || strings.Contains(p, "change"):
+		return brain.PromiseEventAnyChange
+	default:
+		return brain.PromiseEventDone
+	}
+}
+
+// calledSinceRequest reports whether a function call named tool was
+// made after the newest request line in the call's contents.
+func calledSinceRequest(call Call, tool string) bool {
+	called := false
+	for _, c := range call.Contents {
+		for _, p := range c.Parts {
+			if p.Text != "" && reRequest.MatchString(p.Text) {
+				called = false
+			}
+			if p.FunctionCall != nil && p.FunctionCall.Name == tool {
+				called = true
+			}
+		}
+	}
+	return called
+}
+
+// agentOfCall returns the agent argument of the newest call named tool.
+func agentOfCall(call Call, tool string) string {
+	alias := ""
+	for _, c := range call.Contents {
+		for _, p := range c.Parts {
+			if p.FunctionCall != nil && p.FunctionCall.Name == tool {
+				if a, ok := p.FunctionCall.Args["agent"].(string); ok {
+					alias = a
+				}
+			}
+		}
+	}
+	return alias
+}
+
+// promptEcho returns the newest prompt result's echo ("Telling auth to
+// run the tests. Sent.") after the newest request, or "".
+func promptEcho(call Call) string {
+	echo := ""
+	for _, c := range call.Contents {
+		for _, p := range c.Parts {
+			if p.Text != "" && reRequest.MatchString(p.Text) {
+				echo = ""
+			}
+			if p.FunctionResponse != nil && p.FunctionResponse.Name == brain.ToolPrompt {
+				if out, ok := p.FunctionResponse.Response["output"].(string); ok {
+					echo = strings.TrimSpace(out)
+				}
+			}
+		}
+	}
+	return echo
 }
 
 // replyFromResult renders the answer after one tool result: the echo of
@@ -473,7 +723,8 @@ func replyFromResult(fr *genai.FunctionResponse) string {
 	}
 }
 
-// lastRequest returns the newest request's kind and question in the call.
+// lastRequest returns the newest request's kind and question in the
+// call (the CEO's own words when the request carried no text).
 func lastRequest(call Call) (kind, question string) {
 	for _, c := range call.Contents {
 		for _, p := range c.Parts {
@@ -482,7 +733,23 @@ func lastRequest(call Call) (kind, question string) {
 			}
 		}
 	}
+	if question == "" {
+		question = lastCEOUtterance(call)
+	}
 	return kind, question
+}
+
+// lastCEOUtterance returns the newest "CEO said" line in the call.
+func lastCEOUtterance(call Call) string {
+	out := ""
+	for _, c := range call.Contents {
+		for _, p := range c.Parts {
+			for _, m := range reCEOSaid.FindAllStringSubmatch(p.Text, -1) {
+				out = unquote(m[1])
+			}
+		}
+	}
+	return out
 }
 
 // instructionFor strips a leading "tell <alias> to" from an instruction

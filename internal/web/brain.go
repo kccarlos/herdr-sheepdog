@@ -25,11 +25,14 @@ type TranscriptMessage struct {
 	Agent      string            `json:"agent,omitempty"`
 	ToolCall   *brain.ToolCall   `json:"tool_call,omitempty"`
 	ToolResult *brain.ToolResult `json:"tool_result,omitempty"`
-	Tokens     int               `json:"tokens,omitempty"`
+	// Promise is the record a promise message is about (the Supervisor
+	// tab's promise card).
+	Promise *brain.PromiseInfo `json:"promise,omitempty"`
+	Tokens  int                `json:"tokens,omitempty"`
 }
 
 func transcriptMessage(m brain.Message) TranscriptMessage {
-	return TranscriptMessage{Seq: m.Seq, TS: m.TS, Turn: m.Turn, Role: m.Role, Kind: m.Kind, Content: m.Content, Agent: m.Agent, ToolCall: m.ToolCall, ToolResult: m.ToolResult, Tokens: m.Tokens}
+	return TranscriptMessage{Seq: m.Seq, TS: m.TS, Turn: m.Turn, Role: m.Role, Kind: m.Kind, Content: m.Content, Agent: m.Agent, ToolCall: m.ToolCall, ToolResult: m.ToolResult, Promise: m.Promise, Tokens: m.Tokens}
 }
 
 // PromptSectionInfo is one system prompt section as GET /api/brain/context

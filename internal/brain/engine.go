@@ -148,20 +148,27 @@ func (e *DefaultEngine) tokensLocked() int {
 	return n
 }
 
-// AfterTurn implements ContextEngine: tool results ingested pruneAfter or
-// more turns ago are replaced by their one-line stub.
+// AfterTurn implements ContextEngine: tool results (and the screens
+// event turns were handed) ingested pruneAfter or more turns ago are
+// replaced by their one-line stub.
 func (e *DefaultEngine) AfterTurn(turn int) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	for i := range e.window {
 		en := &e.window[i]
-		if en.pruned || en.msg.Kind != KindToolResult || turn-en.turn < e.pruneAfter {
+		if en.pruned || !prunable(en.msg) || turn-en.turn < e.pruneAfter {
 			continue
 		}
 		en.msg.Content = stubFor(en.msg)
 		en.msg.Tokens = EstimateTokens(en.msg.Content)
 		en.pruned = true
 	}
+}
+
+// prunable reports whether m is bulky data a stub can stand in for: a
+// tool result, or an event turn's screen.
+func prunable(m Message) bool {
+	return m.Kind == KindToolResult || (m.Kind == KindEventScreen && m.ToolResult != nil)
 }
 
 // stubFor is the one-line replacement of a pruned tool result.
@@ -239,7 +246,7 @@ func cutPoint(window []entry, half int) int {
 // boundary reports whether a message of kind k may open the window.
 func boundary(k MessageKind) bool {
 	switch k {
-	case KindCEOUtterance, KindAssistantSaid, KindPush, KindWorkerEvent, KindNote, KindRequest, KindCompaction:
+	case KindCEOUtterance, KindAssistantSaid, KindPush, KindWorkerEvent, KindNote, KindRequest, KindCompaction, KindPromise:
 		return true
 	default:
 		return false

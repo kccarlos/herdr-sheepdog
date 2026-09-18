@@ -103,6 +103,10 @@ func contextLine(m Message) string {
 		return fmt.Sprintf("[summary of the conversation up to %s] %s", ts, m.Content)
 	case KindRequest:
 		return fmt.Sprintf("[%s] %s", ts, m.Content)
+	case KindPromise:
+		return fmt.Sprintf("[%s] %s", ts, m.Content)
+	case KindEventScreen:
+		return fmt.Sprintf("[%s] The screen the supervisor read for this event:\n%s", ts, m.Content)
 	default:
 		return fmt.Sprintf("[%s] %s: %s", ts, m.Kind, m.Content)
 	}
@@ -110,6 +114,9 @@ func contextLine(m Message) string {
 
 // requestText is the request message content for kind and req.
 func requestText(req Request) string {
+	if req.Kind.IsEvent() {
+		return eventRequestText(req)
+	}
 	what := "question"
 	if req.Kind == KindPropose {
 		what = "instruction"
@@ -123,5 +130,59 @@ func requestText(req Request) string {
 	if req.Trigger == TriggerEvent {
 		s += " [triggered by an event, not by the CEO]"
 	}
+	if req.Question == "" && req.Kind == KindPropose {
+		s += "\nThe assistant passed no instruction text: the CEO's own words above are the instruction (a bare \"let me know when …\" is a promise to record)."
+	}
 	return s + "\nUse tools as needed, then reply with the JSON object of the answer contract."
+}
+
+// eventRequestText is the request message of an event turn (parsed by
+// braintest's reflex model and web/debug/supervisor.js; keep the shape).
+func eventRequestText(req Request) string {
+	agent := aliasOr(req.Agent)
+	event := req.Event
+	if event == "" {
+		event = "changed state"
+	}
+	switch req.Kind {
+	case KindKeepPromise:
+		text, cond := "", ""
+		if req.Promise != nil {
+			text, cond = req.Promise.Text, promiseCondition(*req.Promise)
+		}
+		return fmt.Sprintf("Event from the supervisor (keep_promise): agent=%q event=%q template=%q promise=%q condition=%q\n"+
+			"The CEO asked to be told this, and now it has happened; the sentence in template is what the announcement said (it may not have been spoken at the current chattiness level). "+
+			"Reply with the JSON object of the answer contract: spoken is one line that keeps the promise, saying what the CEO asked to be told together with the result, in the CEO's terms; needs_user true when they must act on it. No tools are needed unless the result is unclear.", agent, event, req.Template, text, cond)
+	default:
+		return fmt.Sprintf("Event from the supervisor (summarize): agent=%q event=%q template=%q\n"+
+			"The assistant already said the sentence in template. Add only what it lacks and the CEO would want to hear: which request of theirs this fulfils (relates_to), what changed against what they asked, what is still open, whether they must act now. "+
+			"Reply with the JSON object of the answer contract, spoken at most two short sentences that do not repeat the template; set spoken to \"\" when the template was sufficient, and relates_to to the CEO's request it fulfils when there is one.", agent, event, req.Template)
+	}
+}
+
+// promiseLine renders a promise record for the window and recall.
+func promiseLine(p PromiseInfo) string {
+	return fmt.Sprintf("Promise (%s): %q, %s", statusOr(p.Status), p.Text, promiseCondition(p))
+}
+
+// promiseCondition is "when auth finishes" / "when auth asks something".
+func promiseCondition(p PromiseInfo) string {
+	alias := aliasOr(p.Agent)
+	switch p.Event {
+	case PromiseEventBlocked:
+		return "when " + alias + " asks something"
+	case PromiseEventIdle:
+		return "when " + alias + " goes idle"
+	case PromiseEventAnyChange:
+		return "when " + alias + " changes state"
+	default:
+		return "when " + alias + " finishes"
+	}
+}
+
+func statusOr(s string) string {
+	if s == "" {
+		return PromiseOpen
+	}
+	return s
 }

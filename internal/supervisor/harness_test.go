@@ -419,3 +419,9 @@ func (h *harness) call(name string, args map[string]any) voice.ToolResult {
 }
 
 var errBoom = errors.New("boom")
+
+// payload returns the event's payload map.
+func payload(e logging.Line) map[string]any {
+	m, _ := e.Payload.(map[string]any)
+	return m
+}

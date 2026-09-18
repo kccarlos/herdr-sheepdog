@@ -21,6 +21,11 @@
 //   reply        the SVP's answer-contract reply (parsed when it is JSON)
 //   compaction   a compaction_summary with the compaction's numbers
 //   note         a note the CEO asked to be remembered
+//   promise      a promise record (made by the promise tool, or kept /
+//                expired / cancelled by the supervisor), with the status
+//                the promise.* events report since
+//   screen       the pane read the supervisor handed an event turn
+//                (event_screen), pruned like a tool result
 //   other        any kind this file does not know yet
 import { argSummary } from './grouping.js';
 
@@ -36,12 +41,15 @@ export const KIND_GROUPS = {
   brain_tool_result: { id: 'result', label: 'tool results' },
   reply: { id: 'reply', label: 'SVP replies' },
   compaction_summary: { id: 'compaction', label: 'summaries' },
+  promise: { id: 'promise', label: 'promises' },
+  event_screen: { id: 'result', label: 'tool results' },
 };
 
 /** Meter group order (transcript side), then the pruned stubs. */
-export const GROUP_ORDER = ['compaction', 'ceo', 'assistant', 'push', 'worker', 'note', 'request', 'tool', 'result', 'reply', 'other'];
+export const GROUP_ORDER = ['compaction', 'ceo', 'assistant', 'push', 'worker', 'note', 'promise', 'request', 'tool', 'result', 'reply', 'other'];
 
 const reRequest = /^Request from the assistant \((ask|propose)\): (?:question|instruction)=("(?:[^"\\]|\\.)*")(?: agent=("(?:[^"\\]|\\.)*"|\(none[^)]*\)))?(?: \[triggered by an event[^\]]*\])?/;
+const reEvent = /^Event from the supervisor \((summarize|keep_promise)\): agent=("(?:[^"\\]|\\.)*") event=("(?:[^"\\]|\\.)*") template=("(?:[^"\\]|\\.)*")(?: promise=("(?:[^"\\]|\\.)*"))?/;
 
 function unquote(s) {
   try { return JSON.parse(s); } catch (_) { return s; }
@@ -54,9 +62,26 @@ function unquote(s) {
  */
 export function parseRequest(content) {
   const m = reRequest.exec(content || '');
-  if (!m) return { reqKind: null, question: content || '', agent: '', trigger: 'ceo', nudge: true };
+  if (!m) {
+    const e = reEvent.exec(content || '');
+    if (e) return { reqKind: e[1], question: unquote(e[4]), agent: unquote(e[2]), event: unquote(e[3]), promise: e[5] ? unquote(e[5]) : '', trigger: 'event', nudge: false };
+    return { reqKind: null, question: content || '', agent: '', trigger: 'ceo', nudge: true };
+  }
   const agent = m[3] && m[3].startsWith('"') ? unquote(m[3]) : '';
   return { reqKind: m[1], question: unquote(m[2]), agent, trigger: /\[triggered by an event/.test(content) ? 'event' : 'ceo', nudge: false };
+}
+
+/** The promise statuses in the order a promise moves through them. */
+export const PROMISE_STATUSES = ['open', 'kept', 'expired', 'cancelled'];
+
+/** Parses a promise message: the record on the message, or the content line. */
+export function parsePromise(m) {
+  const p = m && m.promise && typeof m.promise === 'object' ? m.promise : {};
+  const line = /^Promise \((\w+)\): ("(?:[^"\\]|\\.)*"), (.*)$/.exec((m && m.content) || '');
+  return {
+    id: p.id || '', text: p.text || (line ? unquote(line[2]) : (m && m.content) || ''), agent: p.agent || (m && m.agent) || '', event: p.event || '',
+    status: p.status || (line ? line[1] : 'open'), condition: line ? line[3] : '', createdTurn: p.created_turn || 0, due: p.due || null,
+  };
 }
 
 /** Parses a reply message: the answer contract JSON, or the raw text when it is not one (a corrected bad reply). */
@@ -93,13 +118,17 @@ export function parseWorkerEvent(content) {
 /**
  * TurnLog collects the brain.* events the tab correlates with the
  * transcript: brain.turn and brain.fallback by turn number, brain.step
- * counts, brain.compaction in order. A daemon.start resets it: the
- * event backfill spans the day, and turn numbers restart with the run.
+ * counts, brain.compaction in order, and the promise.* events by promise
+ * id (the latest status of each promise, so a card made in one turn can
+ * show it was kept later). A daemon.start resets the turns: the event
+ * backfill spans the day, and turn numbers restart with the run; the
+ * promises survive a restart, so their statuses are kept.
  */
 export class TurnLog {
   constructor() {
     this.turns = new Map(); // turn → info
     this.compactions = [];
+    this.promises = new Map(); // promise id → { status, ts, spoken, via, urgency }
     this.runs = 0;
   }
 
@@ -149,6 +178,20 @@ export class TurnLog {
       case 'brain.compaction':
         if (p.dropped != null) this.compactions.push({ ts: ev.ts, turn: p.turn, before: p.before_tokens, after: p.after_tokens, dropped: p.dropped, durMs: p.dur_ms });
         return true;
+      case 'promise.created':
+      case 'promise.kept':
+      case 'promise.expired':
+      case 'promise.cancelled': {
+        if (!p.id) return true;
+        const status = type.slice('promise.'.length);
+        const prev = this.promises.get(p.id);
+        // A later transition wins over an earlier one; created never
+        // overrides a resolution that was already seen (backfill order).
+        if (!prev || status !== 'created' || prev.status === 'open') {
+          this.promises.set(p.id, { status: status === 'created' ? 'open' : status, ts: ev.ts, spoken: p.spoken || '', via: p.via || '', urgency: p.urgency || '', text: p.text || (prev && prev.text) || '', agent: p.agent || (prev && prev.agent) || '', event: p.event || (prev && prev.event) || '' });
+        }
+        return true;
+      }
       default:
         return false;
     }
@@ -156,6 +199,11 @@ export class TurnLog {
 
   turn(n) {
     return this.turns.get(n) || null;
+  }
+
+  /** The latest known state of promise id, or null. */
+  promise(id) {
+    return this.promises.get(id) || null;
   }
 }
 
@@ -239,6 +287,20 @@ export function buildTranscriptView(messages, context, turns, opts = {}) {
       case 'note':
         items.push({ ...base, kind: 'note', text: m.content || '' });
         break;
+      case 'promise': {
+        const p = parsePromise(m);
+        const latest = p.id ? log.promise(p.id) : null;
+        // The message records one transition; the card also shows where
+        // the promise stands now (from the events), when that is later.
+        const now = latest && PROMISE_STATUSES.indexOf(latest.status) > PROMISE_STATUSES.indexOf(p.status) ? latest.status : p.status;
+        items.push({ ...base, kind: 'promise', ...p, now, latest });
+        break;
+      }
+      case 'event_screen': {
+        const tr = m.tool_result || {};
+        items.push({ ...base, kind: 'screen', content: m.content || '', summary: tr.summary || '', pruned: win.pruned.has(m.seq), stub: win.pruned.get(m.seq) || '' });
+        break;
+      }
       case 'request':
         items.push({ ...base, kind: 'request', ...parseRequest(m.content) });
         break;

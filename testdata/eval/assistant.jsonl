@@ -40,8 +40,9 @@
 {"id": "cancel-wait", "utterance": "Wait, hold on.", "expect": {"tool": "cancel"}}
 {"id": "note-remember-migrations", "utterance": "Remember not to touch migrations today.", "expect": {"tool": "note"}}
 {"id": "note-remember-deploy-friday", "utterance": "Remember, don't deploy on a Friday.", "expect": {"tool": "note"}}
-{"id": "none-let-me-know-bare", "utterance": "Let me know when it's done.", "expect": {"tool": "none"}}
-{"id": "none-let-me-know-if-he-responds", "utterance": "Okay, please let me know if he responds.", "expect": {"tool": "none"}}
+{"id": "none-let-me-know-bare", "utterance": "Let me know when it's done.", "expect": {"tool": "propose", "agent": ""}, "note": "phase 2: a bare promise is a propose so the SVP records it (prompts/assistant.md); was none before promises existed"}
+{"id": "none-let-me-know-if-he-responds", "utterance": "Okay, please let me know if he responds.", "expect": {"tool": "propose", "agent": ""}, "note": "phase 2: was none; now propose (a promise the SVP keeps), no agent named"}
+{"id": "propose-run-tests-and-tell-me", "utterance": "Tell auth to run the tests and let me know when it's done.", "expect": {"tool": "propose", "agent": "auth", "question_contains": ["let me know", "run the tests"]}}
 {"id": "none-how-say-repo-name", "utterance": "How do you say the name of this repo?", "expect": {"tool": "none"}}
 {"id": "none-okay-use-that", "utterance": "Okay, let's use that then.", "expect": {"tool": "none"}}
 {"id": "none-hello-can-you-respond", "utterance": "Hello, can you respond?", "expect": {"tool": "none"}}

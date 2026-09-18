@@ -69,20 +69,25 @@ func TestBrainEndpointsWithFakeBrain(t *testing.T) {
 			t.Errorf("msgs[%d].seq = %d", i, m.Seq)
 		}
 	}
-	// worker_event (blocked), push (the question), then the ask turn:
-	// the text router names no agent, so the reflex model lists the
-	// agents and reads the one the question names.
-	if got := strings.Join(kinds, " "); got != "worker_event push request brain_tool_call brain_tool_result brain_tool_call brain_tool_result reply" {
+	// worker_event (blocked), push (the question), the block's summarize
+	// event turn (request, the screen the supervisor read, the reflex
+	// model's "nothing to add" reply), then the ask turn: the text
+	// router names no agent, so the reflex model lists the agents and
+	// reads the one the question names.
+	if got := strings.Join(kinds, " "); got != "worker_event push request event_screen reply request brain_tool_call brain_tool_result brain_tool_call brain_tool_result reply" {
 		t.Fatalf("kinds = %s", got)
 	}
-	if msgs[3].ToolCall == nil || msgs[3].ToolCall.Name != brain.ToolListAgents || msgs[5].ToolCall == nil || msgs[5].ToolCall.Name != brain.ToolReadScreen || msgs[6].ToolResult == nil || !strings.Contains(msgs[6].Content, "BEGIN_WORKER_OUTPUT agent=auth source=screen") || msgs[6].Turn != 1 {
-		t.Errorf("tool messages = %+v / %+v / %+v", msgs[3], msgs[5], msgs[6])
+	if msgs[6].ToolCall == nil || msgs[6].ToolCall.Name != brain.ToolListAgents || msgs[8].ToolCall == nil || msgs[8].ToolCall.Name != brain.ToolReadScreen || msgs[9].ToolResult == nil || !strings.Contains(msgs[9].Content, "BEGIN_WORKER_OUTPUT agent=auth source=screen") || msgs[9].Turn != 2 {
+		t.Errorf("tool messages = %+v / %+v / %+v", msgs[6], msgs[8], msgs[9])
+	}
+	if msgs[3].Kind != brain.KindEventScreen || msgs[3].Turn != 1 || msgs[3].ToolResult == nil || !strings.Contains(msgs[3].Content, "BEGIN_WORKER_OUTPUT agent=auth source=screen") {
+		t.Errorf("event screen = %+v", msgs[3])
 	}
 	var tail []TranscriptMessage
-	if h.getJSON("/api/brain/transcript?since=6", &tail); len(tail) != 2 || tail[0].Seq != 7 {
-		t.Errorf("since=6 → %+v", tail)
+	if h.getJSON("/api/brain/transcript?since=9", &tail); len(tail) != 2 || tail[0].Seq != 10 {
+		t.Errorf("since=9 → %+v", tail)
 	}
-	if h.getJSON("/api/brain/transcript?n=2", &tail); len(tail) != 2 || tail[0].Seq != 7 {
+	if h.getJSON("/api/brain/transcript?n=2", &tail); len(tail) != 2 || tail[0].Seq != 10 {
 		t.Errorf("n=2 → %+v", tail)
 	}
 
@@ -90,14 +95,16 @@ func TestBrainEndpointsWithFakeBrain(t *testing.T) {
 	if code := h.getJSON("/api/brain/context", &cx); code != http.StatusOK {
 		t.Fatalf("/api/brain/context = %d", code)
 	}
-	if cx.WindowTokens != brain.DefaultWindowTokens || cx.EstimatedTokens <= 0 || len(cx.Window) != 8 || cx.Turns != 1 || cx.TranscriptLen != 8 || cx.LastCompaction != nil || cx.Model != brain.DefaultModel {
+	if cx.WindowTokens != brain.DefaultWindowTokens || cx.EstimatedTokens <= 0 || len(cx.Window) != 11 || cx.Turns != 2 || cx.TranscriptLen != 11 || cx.LastCompaction != nil || cx.Model != brain.DefaultModel {
 		t.Errorf("context = %+v", cx)
 	}
 	sum := 0
 	for _, w := range cx.Window {
 		sum += w.Tokens
-		if w.Pruned {
-			t.Errorf("pruned before the next turn: %+v", w)
+		// Turn 1's event screen is already a stub after turn 2; nothing
+		// of turn 2 is.
+		if w.Pruned != (w.Kind == brain.KindEventScreen) {
+			t.Errorf("pruning after turn 2: %+v", w)
 		}
 	}
 	if sum != cx.EstimatedTokens {
@@ -107,18 +114,37 @@ func TestBrainEndpointsWithFakeBrain(t *testing.T) {
 		t.Errorf("system prompt summary = %+v", cx.SystemPrompt)
 	}
 
-	// A second turn prunes the first turn's screen to a stub in the
-	// window; the transcript API still serves the full result.
+	// The next turn prunes the earlier turns' screens (the tool result
+	// and the event screen) to stubs in the window; the transcript API
+	// still serves the full result.
 	if code, body := h.postJSON("/api/inject/utterance", map[string]any{"text": "what did auth say"}, &tr); code != http.StatusOK {
 		t.Fatalf("utterance 2 = %d %s", code, body)
 	}
 	h.srv.deps.Brain.Quiesce()
-	if h.getJSON("/api/brain/context", &cx); len(cx.Window) != 14 || !cx.Window[6].Pruned || !strings.HasPrefix(cx.Window[6].Stub, "[screen of auth, ") || cx.Window[6].Seq != 7 || !cx.Window[4].Pruned || cx.Window[12].Pruned {
-		t.Errorf("window after turn 2 = %+v", cx.Window)
+	if h.getJSON("/api/brain/context", &cx); len(cx.Window) != 17 || !cx.Window[9].Pruned || !strings.HasPrefix(cx.Window[9].Stub, "[screen of auth, ") || cx.Window[9].Seq != 10 || !cx.Window[7].Pruned || !cx.Window[3].Pruned || !strings.HasPrefix(cx.Window[3].Stub, "[screen of auth at blocked, ") || cx.Window[15].Pruned {
+		t.Errorf("window after turn 3 = %+v", cx.Window)
 	}
 	var full []TranscriptMessage
-	if h.getJSON("/api/brain/transcript?since=6", &full); len(full) != 8 || full[0].Seq != 7 || !strings.Contains(full[0].Content, "BEGIN_WORKER_OUTPUT") || full[7].Kind != brain.KindReply || full[7].ToolResult != nil {
+	if h.getJSON("/api/brain/transcript?since=9", &full); len(full) != 8 || full[0].Seq != 10 || !strings.Contains(full[0].Content, "BEGIN_WORKER_OUTPUT") || full[7].Kind != brain.KindReply || full[7].ToolResult != nil {
 		t.Errorf("transcript lost the full result: %+v", full)
+	}
+
+	// A promise made through the text router ("let me know when …" is a
+	// propose; the reflex records it) is served with its record.
+	if code, body := h.postJSON("/api/inject/utterance", map[string]any{"text": "let me know when auth is done"}, &tr); code != http.StatusOK || tr.Tool != "propose" || tr.Spoken != "I will tell you when auth finishes." {
+		t.Fatalf("promise utterance = %d %s (%+v)", code, body, tr)
+	}
+	h.srv.deps.Brain.Quiesce()
+	var withPromise []TranscriptMessage
+	h.getJSON("/api/brain/transcript?since=17", &withPromise)
+	var pm *TranscriptMessage
+	for i := range withPromise {
+		if withPromise[i].Kind == brain.KindPromise {
+			pm = &withPromise[i]
+		}
+	}
+	if pm == nil || pm.Promise == nil || pm.Promise.Status != brain.PromiseOpen || pm.Promise.Agent != "auth" || pm.Promise.Event != brain.PromiseEventDone || pm.Turn != 4 {
+		t.Errorf("promise message = %+v", pm)
 	}
 
 	var sp PromptInfo
@@ -129,7 +155,7 @@ func TestBrainEndpointsWithFakeBrain(t *testing.T) {
 	// The SSE stream carried a brain.transcript per message.
 	got := 0
 	deadline := time.After(3 * time.Second)
-	for got < 14 {
+	for got < 22 {
 		select {
 		case line := <-seen:
 			if !strings.Contains(line, `"type":"brain.transcript"`) || !strings.Contains(line, `"seq":`) {

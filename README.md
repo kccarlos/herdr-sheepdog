@@ -179,6 +179,12 @@ value comes from `supervisor.chattiness` in the config (default `normal`).
 | `normal` | `quiet`, plus: informational blocks (a trust dialog, an idle prompt herdr flagged), the "dropping the earlier question from …" phrasing when a new question displaces one, and the finish of any agent you dealt with recently, with a one-line result: "auth finished: created hello.txt with the requested line." |
 | `chatty` | `normal`, plus every finish (agents you never touched too) and "docs started on 'write the readme'" when an instruction you sent is picked up. |
 
+The one thing that ignores the level is a **promise** you made it keep
+(next section). With the supervisor brain on, an announcement the level
+lets through may be followed by one more line of context from the brain
+("That was the rerun you asked for; the same test still fails."), never at
+`quiet`, and only when it adds something the sentence lacked.
+
 "Dealt with recently" means that within the last `supervisor.recent_minutes`
 (default 30) the agent was blocked and announced, was sent an answer or an
 instruction, was asked about, or was named in a briefing you asked for
@@ -193,6 +199,23 @@ created hello.txt with the requested line" without a model call. A
 finish whose screen ends in a question herdr did not flag as blocked
 (Antigravity CLI does this) is treated as the question it is, at every
 level.
+
+## Promises
+
+"Run the tests and let me know when it's done." "Tell me if docs asks
+anything." That is promised work, not a hope: the supervisor brain records
+it (`promise(agent, text, event)` — the condition is `done`, `blocked`,
+`idle` or `any_change`), the state file keeps it across restarts
+(`session.promises`), the briefing reminds you ("You asked me to tell you
+when auth finishes."), and at the matching event it is spoken **whatever
+the chattiness level** — the brain phrases it with the result ("You asked
+me to tell you when auth was done: the tests passed."), or, without the
+brain, "As you asked: auth finished: …". It waits for a pause unless you
+asked to be interrupted or the promise is past its due time. A promise
+expires silently after `supervisor.promise_ttl_s` (default two hours);
+"cancel" with nothing else pending cancels the latest one ("Cancelled the
+reminder."). The Supervisor tab shows every promise as a card with its
+status; the event log has `promise.created|kept|expired|cancelled`.
 
 ## ⚠️ Worker agents must not run fully auto-approve
 
