@@ -123,7 +123,7 @@ run; it is also off, silently, when no Gemini key is configured.
 | `brain.enabled` | `SHEEPDOG_BRAIN_ENABLED` | `true` | Route `ask`/`propose` through the brain (`serve --brain` overrides). |
 | `brain.model` | `SHEEPDOG_BRAIN_MODEL` | `gemini-3.5-flash` | The function-calling model; the Gemini key pool applies, rotating on a rate limit. |
 | `brain.max_steps` | `SHEEPDOG_BRAIN_MAX_STEPS` | `6` | Model calls one turn may make (each tool round is one); beyond it the turn falls back. |
-| `brain.ask_timeout_s` | `SHEEPDOG_BRAIN_ASK_TIMEOUT_S` | `8` | Wall-clock budget of one `ask` turn, tools included; on expiry the template path answers. |
+| `brain.ask_timeout_s` | `SHEEPDOG_BRAIN_ASK_TIMEOUT_S` | `8` | Wall-clock budget of one `ask` turn for tool rounds. When less than 3 s of it remain after a tool round (or at the last step) the next model call is answer-only (tools disabled, "time is up") and may run up to 3 s past the budget; only then does the template path answer. |
 | `brain.propose_timeout_s` | `SHEEPDOG_BRAIN_PROPOSE_TIMEOUT_S` | `12` | Same for `propose`. |
 | `brain.window_tokens` | `SHEEPDOG_BRAIN_WINDOW_TOKENS` | `24000` | Context window target in estimated tokens; above it the oldest half of the window is compacted into one summary message (`brain.compaction`). |
 | `brain.prune_after_turns` | `SHEEPDOG_BRAIN_PRUNE_AFTER_TURNS` | `3` | Turns a tool result (screen, CLI output) stays verbatim in the window before it becomes a one-line stub; the disk transcript keeps the full text. |

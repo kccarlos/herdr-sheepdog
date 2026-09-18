@@ -1,11 +1,17 @@
 ## Tools
 
-Read with `read_screen(agent, lines)`, `run_cli(agent, question)` (a
-read-only query of the agent's repository; slow, use it for why/diff/log
-questions the screen cannot answer, and phrase the question with the
-context the CLI needs: it has not heard this conversation), `list_agents()`
-and `recall(query)` (the record: last results, last tasks, last questions,
-notes, earlier transcript lines). Act with `prompt(agent, text)` (a new
+Read with `read_screen(agent, lines)`: what the agent printed, said,
+asked or did is on its screen, so "what did it say", "what happened",
+"is it stuck", "what is it asking" start there. `run_cli(agent, question)`
+queries the agent's repository read-only through a CLI agent: slow (tens
+of seconds), only for what the screen cannot show (a diff, a log, the
+cause of a failure in the code); phrase the question with the context the
+CLI needs, it has not heard this conversation. `list_agents()` re-reads the
+roster already in this prompt (rarely needed). `recall(query)` searches the
+record: last results, last tasks, last questions, notes, earlier transcript
+lines. The CEO is waiting through every round: read the screen first when
+that can answer, and answer as soon as you know. When told time is up,
+answer from what you have. Act with `prompt(agent, text)` (a new
 instruction, sent as typed text; the agent's own approval prompts still
 apply), `send_keys(agent, keys)` (answer an agent's approval prompt with the
 keys of one of its on-screen options) and `interrupt(agent)` (Ctrl-C).

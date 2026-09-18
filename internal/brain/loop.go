@@ -18,9 +18,12 @@ const logResultBytes = 1024
 
 // turn is the bookkeeping of one Turn call.
 type turn struct {
-	n      int
-	req    Request
-	start  time.Time
+	n     int
+	req   Request
+	start time.Time
+	// soft is when the budget for tool rounds ends; the hard deadline is
+	// FinalGrace later.
+	soft   time.Time
 	steps  int
 	calls  int // model calls
 	tokIn  int
@@ -50,14 +53,14 @@ func (b *Brain) Turn(ctx context.Context, req Request) (Reply, error) {
 	if req.Kind == KindPropose {
 		timeout = b.cfg.ProposeTimeout
 	}
-	tctx, cancel := context.WithTimeout(ctx, timeout)
+	tctx, cancel := context.WithTimeout(ctx, timeout+b.cfg.FinalGrace)
 	defer cancel()
 	start := b.cfg.Now()
 	if err := b.lock.acquire(tctx, req.Trigger == TriggerCEO); err != nil {
 		b.log.Log(logSource, "brain.fallback", "", map[string]any{"reason": "queue_timeout", "kind": string(req.Kind), "trigger": string(req.Trigger), "error": err.Error()})
 		return Reply{}, fmt.Errorf("%w: waiting for the turn lock: %w", ErrFallback, err)
 	}
-	t := &turn{req: req, start: start}
+	t := &turn{req: req, start: start, soft: start.Add(timeout)}
 	reply, err := b.run(tctx, t)
 	b.after.Add(1)
 	go b.afterTurn(t)
@@ -79,9 +82,9 @@ func (b *Brain) run(ctx context.Context, t *turn) (Reply, error) {
 	b.ingest(Message{Role: RoleUser, Kind: KindRequest, Content: requestText(t.req), Agent: t.req.Agent}, t.n)
 
 	system := b.systemPrompt()
-	config := &genai.GenerateContentConfig{Tools: b.tools}
+	base := genai.GenerateContentConfig{Tools: b.tools}
 	if lvl := thinkingLevel(b.cfg.ThinkingLevel); lvl != "" {
-		config.ThinkingConfig = &genai.ThinkingConfig{ThinkingLevel: lvl}
+		base.ThinkingConfig = &genai.ThinkingConfig{ThinkingLevel: lvl}
 	}
 	corrected := false
 	for step := 1; step <= b.cfg.MaxSteps; step++ {
@@ -89,6 +92,15 @@ func (b *Brain) run(ctx context.Context, t *turn) (Reply, error) {
 			return b.fail(t, reasonFor(err), err)
 		}
 		t.steps = step
+		// The last step, or one starting with too little budget left for
+		// another tool round, is answer-only: the model must reply from
+		// what it has.
+		forced := step == b.cfg.MaxSteps || (step > 1 && t.soft.Sub(b.cfg.Now()) < b.cfg.StepReserve)
+		config := base // one config per step: the fake model keeps the pointer
+		if forced {
+			config.ToolConfig = &genai.ToolConfig{FunctionCallingConfig: &genai.FunctionCallingConfig{Mode: genai.FunctionCallingConfigModeNone}}
+			b.ingest(Message{Role: RoleUser, Kind: KindRequest, Content: "Time is up: answer now with the JSON object of the answer contract from what you have, without further tool calls."}, t.n)
+		}
 		asm := b.engine.Assemble(b.cfg.WindowTokens)
 		text := system
 		if asm.SystemAddition != "" {
@@ -97,9 +109,9 @@ func (b *Brain) run(ctx context.Context, t *turn) (Reply, error) {
 		config.SystemInstruction = &genai.Content{Parts: []*genai.Part{{Text: text}}}
 
 		t0 := b.cfg.Now()
-		resp, err := b.model.Generate(ctx, b.cfg.Model, toContents(asm.Messages), config)
+		resp, err := b.model.Generate(ctx, b.cfg.Model, toContents(asm.Messages), &config)
 		t.calls++
-		payload := map[string]any{"turn": t.n, "step": step, "model": b.cfg.Model, "template": string(t.req.Kind), "dur_ms": b.cfg.Now().Sub(t0).Milliseconds()}
+		payload := map[string]any{"turn": t.n, "step": step, "model": b.cfg.Model, "template": string(t.req.Kind), "dur_ms": b.cfg.Now().Sub(t0).Milliseconds(), "forced": forced}
 		var calls []*genai.FunctionCall
 		if err != nil {
 			payload["error"] = err.Error()
@@ -125,6 +137,9 @@ func (b *Brain) run(ctx context.Context, t *turn) (Reply, error) {
 			return b.fail(t, reasonFor(err), err)
 		}
 
+		if forced && len(calls) > 0 {
+			return b.fail(t, "step_budget", errors.New("brain: tool calls in an answer-only step"))
+		}
 		if len(calls) == 0 {
 			answer := strings.TrimSpace(textOf(resp))
 			reply, perr := parseReply(answer)

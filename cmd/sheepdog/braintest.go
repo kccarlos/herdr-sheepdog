@@ -49,15 +49,19 @@ func printBrainTestUsage(w io.Writer) {
 	fprintln(w, "  --transcript PATH   a brain transcript (JSONL) to seed the run with")
 	fprintln(w, "  --say TEXT          a CEO utterance heard before the request (repeatable)")
 	fprintln(w, "  --model NAME        brain model (default config brain.model)")
+	fprintln(w, "  --thinking LEVEL    minimal | low | medium | high (default low)")
 	fprintln(w, "  --timeout D         turn budget (default from config)")
 	fprintln(w, "  --fake              use a scripted model (read_screen, then an answer): no network")
 }
 
+// brainTestPane is the mock agent's pane id.
+const brainTestPane = "w1:p1"
+
 type brainTestOpts struct {
-	configPath, envFile, question, kind, agent, alias, agentKind, st, fixture, transcript, model string
-	say                                                                                          multiFlag
-	timeout                                                                                      time.Duration
-	fake                                                                                         bool
+	configPath, envFile, question, kind, agent, alias, agentKind, st, fixture, transcript, model, thinking string
+	say                                                                                                    multiFlag
+	timeout                                                                                                time.Duration
+	fake                                                                                                   bool
 }
 
 // multiFlag collects a repeatable string flag.
@@ -83,6 +87,7 @@ func parseBrainTestFlags(args []string, stderr io.Writer) (brainTestOpts, int, b
 	fs.StringVar(&o.transcript, "transcript", "", "transcript to seed")
 	fs.Var(&o.say, "say", "CEO utterance (repeatable)")
 	fs.StringVar(&o.model, "model", "", "brain model")
+	fs.StringVar(&o.thinking, "thinking", "", "thinking level")
 	fs.DurationVar(&o.timeout, "timeout", 0, "turn budget")
 	fs.BoolVar(&o.fake, "fake", false, "scripted model")
 	if err := fs.Parse(args); err != nil {
@@ -153,6 +158,7 @@ func runBrainTest(ctx context.Context, args []string, stdout, stderr io.Writer) 
 	if o.model != "" {
 		bcfg.Model = o.model
 	}
+	bcfg.ThinkingLevel = o.thinking
 	if o.timeout > 0 {
 		bcfg.AskTimeout, bcfg.ProposeTimeout = o.timeout, o.timeout
 	}
@@ -163,15 +169,14 @@ func runBrainTest(ctx context.Context, args []string, stdout, stderr io.Writer) 
 	}
 	defer func() { _ = b.Close() }()
 
-	sup, mock, err := brainTestSupervisor(cfg, dir, b, log, stderr)
+	sup, mock, err := brainTestSupervisor(cfg, dir, o.alias, b, log, stderr)
 	if err != nil {
 		fprintf(stderr, "sheepdog brain-test: %v\n", err)
 		return 1
 	}
-	const pane = "w1:p1"
-	mock.SetScreen(pane, o.agentKind, string(screen), herdr.State(o.st))
+	mock.SetScreen(brainTestPane, o.agentKind, string(screen), herdr.State(o.st))
 	sup.SetVoiceConnected(true)
-	sup.HandleTransition(ctx, herdr.Transition{PaneID: pane, To: herdr.State(o.st), At: time.Now(), Agent: o.agentKind, WorkspaceID: "ws", WorkspaceLabel: o.alias, Source: state.SourceInject})
+	sup.HandleTransition(ctx, herdr.Transition{PaneID: brainTestPane, To: herdr.State(o.st), At: time.Now(), Agent: o.agentKind, WorkspaceID: "ws", WorkspaceLabel: o.alias, Source: state.SourceInject})
 	if o.transcript != "" {
 		msgs, err := brain.ReadTranscript(o.transcript)
 		if err != nil {
@@ -238,8 +243,8 @@ func brainTestModel(o brainTestOpts, cfg config.Config, log logging.Logger) (bra
 
 // brainTestSupervisor builds a supervisor over a mock herdr, a fresh
 // state table under dir and the configured cheap LLM (its fallback path).
-func brainTestSupervisor(cfg config.Config, dir string, b *brain.Brain, log logging.Logger, stderr io.Writer) (*supervisor.Supervisor, *inject.Herdr, error) {
-	store, err := state.Open(filepath.Join(dir, "state.json"), state.Options{Aliases: map[string]string{}, Warn: stderr})
+func brainTestSupervisor(cfg config.Config, dir, alias string, b *brain.Brain, log logging.Logger, stderr io.Writer) (*supervisor.Supervisor, *inject.Herdr, error) {
+	store, err := state.Open(filepath.Join(dir, "state.json"), state.Options{Aliases: map[string]string{brainTestPane: alias}, Warn: stderr})
 	if err != nil {
 		return nil, nil, err
 	}

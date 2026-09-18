@@ -28,6 +28,12 @@ const (
 	// DefaultCompactTimeout bounds the summary call of a compaction,
 	// which runs after the reply was returned.
 	DefaultCompactTimeout = 30 * time.Second
+	// DefaultStepReserve is how much of the budget a tool round must leave
+	// for the answer: below it the next step is answer-only (no tools).
+	DefaultStepReserve = 3 * time.Second
+	// DefaultFinalGrace is how far past the budget that one answer-only
+	// call may run before the turn falls back.
+	DefaultFinalGrace = 3 * time.Second
 	// TranscriptDir is the directory under the data dir.
 	TranscriptDir = "brain"
 )
@@ -46,6 +52,13 @@ type Config struct {
 	PruneAfterTurns int
 	// CompactTimeout bounds the compaction's model call.
 	CompactTimeout time.Duration
+	// StepReserve: when less of the budget remains after a tool round,
+	// the next step is answer-only (tools disabled) so the turn ends with
+	// an answer rather than another read.
+	StepReserve time.Duration
+	// FinalGrace is how far past the budget the answer-only call may run
+	// (negative: none).
+	FinalGrace time.Duration
 	// ThinkingLevel is the model's thinking level ("low" by default;
 	// "" leaves the model's default).
 	ThinkingLevel string
@@ -81,6 +94,14 @@ func (c Config) withDefaults() Config {
 	}
 	if c.CompactTimeout <= 0 {
 		c.CompactTimeout = DefaultCompactTimeout
+	}
+	if c.StepReserve <= 0 {
+		c.StepReserve = DefaultStepReserve
+	}
+	if c.FinalGrace < 0 {
+		c.FinalGrace = 0
+	} else if c.FinalGrace == 0 {
+		c.FinalGrace = DefaultFinalGrace
 	}
 	if c.ThinkingLevel == "" {
 		c.ThinkingLevel = "low"

@@ -233,7 +233,9 @@ func TestSendKeysBlocked(t *testing.T) {
 	}
 }
 
-// (6) Step budget exceeded: ErrFallback, nothing sent.
+// (6) Step budget: the last step is answer-only (tools disabled, the
+// model told time is up); a model that still calls tools there ends in
+// ErrFallback with nothing sent.
 func TestStepBudgetFallback(t *testing.T) {
 	read := braintest.Step{Calls: []*genai.FunctionCall{braintest.FC(ToolReadScreen, map[string]any{"agent": "auth"})}}
 	h := newHarness(t, braintest.NewModel(read, read, read, braintest.Step{Text: braintest.Reply("late", "")}), func(c *Config) { c.MaxSteps = 2 })
@@ -249,8 +251,22 @@ func TestStepBudgetFallback(t *testing.T) {
 	if p := payload(h.log.ofType("brain.turn")[0]); p["fallback"] != true || p["model_calls"] != 2 {
 		t.Errorf("brain.turn = %v", p)
 	}
-	if len(h.model.Calls()) != 2 {
-		t.Errorf("model calls = %d", len(h.model.Calls()))
+	calls := h.model.Calls()
+	if len(calls) != 2 {
+		t.Fatalf("model calls = %d", len(calls))
+	}
+	if calls[0].Config.ToolConfig != nil || calls[1].Config.ToolConfig == nil || calls[1].Config.ToolConfig.FunctionCallingConfig.Mode != genai.FunctionCallingConfigModeNone || !strings.Contains(calls[1].Text(), "Time is up") {
+		t.Errorf("last step not answer-only: %+v", calls[1].Config.ToolConfig)
+	}
+	steps := h.log.ofType("brain.step")
+	if payload(steps[0])["forced"] != false || payload(steps[1])["forced"] != true {
+		t.Errorf("forced flags = %v %v", payload(steps[0])["forced"], payload(steps[1])["forced"])
+	}
+	// A model that answers in the forced step succeeds within the budget.
+	h2 := newHarness(t, braintest.NewModel(read, read, braintest.Step{Text: braintest.Reply("Auth is at a prompt.", "")}), func(c *Config) { c.MaxSteps = 3 })
+	rep, err := h2.ask("what is it doing?", "auth")
+	if err != nil || rep.Spoken != "Auth is at a prompt." {
+		t.Errorf("reply = %+v %v", rep, err)
 	}
 }
 
@@ -260,13 +276,18 @@ func TestWallClockFallback(t *testing.T) {
 		time.Sleep(100 * time.Millisecond) // ignores ctx: the answer arrives past the budget
 		return braintest.Response(braintest.Step{Text: braintest.Reply("late", "")}), nil
 	}}
-	h := newHarness(t, braintest.NewModel(slow), func(c *Config) { c.AskTimeout = 30 * time.Millisecond })
+	h := newHarness(t, braintest.NewModel(slow), func(c *Config) { c.AskTimeout, c.FinalGrace = 30*time.Millisecond, -1 })
 	if _, err := h.ask("what?", "auth"); !errors.Is(err, ErrFallback) {
 		t.Fatalf("late answer accepted: err = %v", err)
 	}
+	// Within the grace it is accepted (the answer-only call may overrun).
+	h0 := newHarness(t, braintest.NewModel(slow), func(c *Config) { c.AskTimeout, c.FinalGrace = 30*time.Millisecond, 500*time.Millisecond })
+	if rep, err := h0.ask("what?", "auth"); err != nil || rep.Spoken != "late" {
+		t.Fatalf("answer within grace: %+v %v", rep, err)
+	}
 	// A model that honours ctx returns promptly.
 	block := make(chan struct{})
-	h1 := newHarness(t, braintest.NewModel(braintest.Step{Block: block, Text: braintest.Reply("late", "")}), func(c *Config) { c.AskTimeout = 30 * time.Millisecond })
+	h1 := newHarness(t, braintest.NewModel(braintest.Step{Block: block, Text: braintest.Reply("late", "")}), func(c *Config) { c.AskTimeout, c.FinalGrace = 30*time.Millisecond, -1 })
 	start := time.Now()
 	if _, err := h1.ask("what?", "auth"); !errors.Is(err, ErrFallback) {
 		t.Fatalf("err = %v", err)
@@ -279,7 +300,7 @@ func TestWallClockFallback(t *testing.T) {
 	h2 := newHarness(t, braintest.NewModel(
 		braintest.Step{Calls: []*genai.FunctionCall{braintest.FC(ToolReadScreen, map[string]any{"agent": "auth"})}},
 		braintest.Step{Text: braintest.Reply("late", "")},
-	), func(c *Config) { c.AskTimeout = 30 * time.Millisecond })
+	), func(c *Config) { c.AskTimeout, c.FinalGrace = 30*time.Millisecond, -1 })
 	h2.host.ReadHook = func(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
