@@ -223,6 +223,30 @@ func TestScenario4ProposeSendsAndEchoes(t *testing.T) {
 	}
 }
 
+// agy (Antigravity CLI 1.2.5) prompts, captured in WP7b: the edit prompt
+// disables Esc, so "no" must send "2"; the command prompt's "no" is "4".
+func TestAgyPromptsAnswerWithDigits(t *testing.T) {
+	h := twoAgents(t)
+	h.block("w5:p1", "agy-edit-prompt.screen.txt")
+	if p, ok := h.pending(); !ok || strings.Join(p.YesKeys, ",") != "1" || strings.Join(p.NoKeys, ",") != "2" {
+		t.Fatalf("edit prompt pending = %+v", p)
+	}
+	if res := h.call(ToolConfirm, map[string]any{"answer": "no"}); res.Spoken != "Told auth no." {
+		t.Errorf("confirm no = %+v", res)
+	}
+	if keys := h.sendKeysRequests(); len(keys) != 1 || keys[0] != [2]string{"w5:p1", "2"} {
+		t.Errorf("send_keys = %v, want exactly one \"2\" (not esc)", keys)
+	}
+	h.transition("w5:p1", herdr.StateBlocked, herdr.StateWorking)
+	h.block("w5:p1", "agy-approval-prompt.screen.txt")
+	if res := h.call(ToolConfirm, map[string]any{"answer": "yes"}); res.Spoken != "Told auth yes." {
+		t.Errorf("confirm yes = %+v", res)
+	}
+	if keys := h.sendKeysRequests(); len(keys) != 2 || keys[1] != [2]string{"w5:p1", "1"} {
+		t.Errorf("send_keys = %v, want \"1\" for the command prompt", keys)
+	}
+}
+
 // Scenario 5: cancel after propose sends Ctrl-C to that pane and nothing
 // else.
 func TestScenario5CancelInterruptsCorrectPane(t *testing.T) {
@@ -252,6 +276,29 @@ func TestScenario5CancelInterruptsCorrectPane(t *testing.T) {
 	}
 	if n := len(h.sendKeysRequests()); n != 1 {
 		t.Errorf("second cancel sent keys: %d", n)
+	}
+}
+
+// After a cancel's Ctrl-C the pane settles working -> done; that is not
+// "finished" (WP7b: sheepdog announced the cancelled turn as completed).
+func TestCancelSuppressesFinishedPush(t *testing.T) {
+	h := twoAgents(t)
+	h.call(ToolPropose, map[string]any{"instruction": "tell docs to write the readme"})
+	h.transition("w6:p1", herdr.StateIdle, herdr.StateWorking)
+	before := len(h.pusher.all())
+	h.call(ToolCancel, nil)
+	h.transition("w6:p1", herdr.StateWorking, herdr.StateDone)
+	if got := h.pusher.all(); len(got) != before {
+		t.Errorf("push after cancelled turn = %+v, want none", got[len(got)-1])
+	}
+	if h.log.count("supervisor.finished_suppressed") != 1 {
+		t.Error("no supervisor.finished_suppressed")
+	}
+	// The next real completion is announced again.
+	h.transition("w6:p1", herdr.StateDone, herdr.StateWorking)
+	h.transition("w6:p1", herdr.StateWorking, herdr.StateDone)
+	if got := h.pusher.last(t); got.Text != "docs finished." {
+		t.Errorf("later done push = %+v", got)
 	}
 }
 

@@ -414,9 +414,20 @@ func (a *App) runWatcher(ctx context.Context) {
 	var wg sync.WaitGroup
 	defer wg.Wait()
 	for {
+		// Seed the watcher with the persisted rows so the first snapshot
+		// closes panes that went away while the daemon was down (WP7b: a
+		// closed workspace's agent survived a restart and was offered in
+		// clarify questions).
+		known := map[string]herdr.State{}
+		for _, row := range a.store.List() {
+			if !row.Synthetic {
+				known[row.PaneID] = row.State
+			}
+		}
 		w := herdr.NewWatcher(a.hc, herdr.WatcherConfig{
 			Debounce:         time.Duration(a.cfg.DebounceMS) * time.Millisecond,
 			SnapshotInterval: time.Duration(a.cfg.SnapshotIntervalS) * time.Second,
+			Known:            known,
 		}, a.log)
 		a.wref.set(w)
 		errc := make(chan error, 1)

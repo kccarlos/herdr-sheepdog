@@ -1,0 +1,29 @@
+{
+  "id": "g",
+  "result": {
+    "type": "agent_info",
+    "agent": {
+      "terminal_id": "term_65bba0f0b44fc7",
+      "name": "one",
+      "agent": "agy",
+      "terminal_title": "agy",
+      "terminal_title_stripped": "agy",
+      "agent_status": "done",
+      "agent_session": {
+        "source": "herdr:antigravity_cli",
+        "agent": "agy",
+        "kind": "id",
+        "value": "70f9969a-d48c-40e4-8f30-5d6e6d0ffe7b"
+      },
+      "workspace_id": "wA",
+      "tab_id": "wA:t1",
+      "pane_id": "wA:p1",
+      "focused": false,
+      "interactive_ready": true,
+      "state_change_seq": 38,
+      "cwd": "/private/tmp/claude-501/-Users-kc-Documents-herdr-sheepdog/c16b97d4-acf1-42bb-9044-59d5182b5982/scratchpad/wp7b/repo",
+      "foreground_cwd": "/private/tmp/claude-501/-Users-kc-Documents-herdr-sheepdog/c16b97d4-acf1-42bb-9044-59d5182b5982/scratchpad/wp7b/repo",
+      "revision": 2
+    }
+  }
+}

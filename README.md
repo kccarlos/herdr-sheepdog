@@ -11,8 +11,10 @@ for a shorter orientation.
 Live voice session, the supervisor and its five voice tools, the CLI
 query tool behind `ask()`'s deep path, the daemon (`sheepdog serve`)
 with `/voice` and `/debug`, the herdr plugin shim, and packaging/docs.
-A recorded end-to-end run with real worker agents (WP7b) is still to
-come.
+WP7b ran the plan's scenarios against real agy, Codex and Claude Code
+panes and a live Gemini session: see [`docs/e2e-results.md`](docs/e2e-results.md)
+(scenario table, measured latencies, open issues) and the recorded event
+log in `testdata/e2e/`.
 
 ## Install in 3 steps
 
@@ -105,7 +107,8 @@ with one of these:**
 |---|---|
 | Codex | `--full-auto`, `-a never` (or any config setting that disables approval prompts) |
 | Claude Code | `--dangerously-skip-permissions`, `--permission-mode bypassPermissions` |
-| agy, or anything else herdr supports | check its own docs for the equivalent "skip all approvals" flag and avoid it too — this was not independently verified for agy |
+| agy (Antigravity CLI) | `--dangerously-skip-permissions`, `--mode accept-edits` (verified on 1.2.5: the default mode prompts for commands and file edits) |
+| anything else herdr supports | check its own docs for the equivalent "skip all approvals" flag and avoid it too |
 
 (The CLI query tool behind `ask()`'s deep path is a separate, intentionally
 read-only invocation of codex/claude — see
@@ -136,15 +139,21 @@ affected by this; this warning is about the worker panes herdr manages.)
 - **herdr detecting a blocked agent, end to end:** the plan's success
   test (§1) targets hearing sheepdog announce a blocked agent within
   ~5 s of it happening, without being asked. That budget is: herdr's own
-  screen-polling detection (not independently measured by this repo) +
-  sheepdog's `debounce_ms` (default 3000 ms, plan §3.1 — a `blocked`
-  state must hold for this long before it becomes a transition, so a
-  one-frame screen flicker doesn't fire early) + one cheap-LLM
-  `summarize_block` call. WP7b's recorded end-to-end run is where this
-  gets measured against real worker agents rather than assumed.
+  screen-polling detection (measured in WP7b at 3–4.6 s for Claude Code
+  and ~9 s for Codex after the prompt was submitted) + sheepdog's
+  `debounce_ms` (default 3000 ms, plan §3.1 — a `blocked` state must hold
+  for this long before it becomes a transition, so a one-frame screen
+  flicker doesn't fire early) + one cheap-LLM `summarize_block` call
+  (0.8–1.3 s) + the model's first audio (0.6–0.9 s). Measured: 4.6–5.0 s
+  from the `blocked` event to the first spoken audio
+  (`docs/e2e-results.md`). herdr 0.9.0's bundled/remote detection rules
+  do not recognise Antigravity CLI 1.2.5 prompts, so `agy` panes are
+  never reported `blocked` (see the same document).
 - **`briefing`:** answered from the in-memory state table cache, no
   model call — target under 1.2 s total added latency (utterance end to
-  audio start, plan §9 WP7 acceptance).
+  audio start, plan §9 WP7 acceptance). Measured in WP7b: 0.92–0.99 s for
+  a typed utterance, 1.6–1.9 s for spoken audio, of which ~1 s is the
+  Live API's end-of-speech detection and < 1 ms is sheepdog's handler.
 - **`ask`/`propose` with a deep CLI lookup:** dominated by the codex/claude
   invocation itself, typically several seconds to tens of seconds (see
   the "Observed" numbers in

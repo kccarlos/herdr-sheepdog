@@ -697,3 +697,53 @@ func TestRateLimitHelpers(t *testing.T) {
 		}
 	}
 }
+
+// A push whose turn the model never completes must not hold the next idle
+// push past TurnTimeout (WP7b: pushes were stuck until the next tool call).
+func TestPushIdleReleasedAfterTurnTimeout(t *testing.T) {
+	c := newFakeConn("c1")
+	h := newHarness(t, Config{PushGap: 10 * time.Millisecond, TurnTimeout: 80 * time.Millisecond}, &fakeDialer{results: []func() (Conn, error){ok(c)}})
+
+	if err := h.s.Push("first", voice.UrgencyIdle); err != nil {
+		t.Fatal(err)
+	}
+	c.waitSent(t, "first push", isContent("first"))
+	t1 := time.Now()
+	// No turnComplete ever arrives for "first".
+	if err := h.s.Push("second", voice.UrgencyIdle); err != nil {
+		t.Fatal(err)
+	}
+	c.waitSent(t, "second push", isContent("second"))
+	if el := time.Since(t1); el < 70*time.Millisecond || el > 2*time.Second {
+		t.Errorf("second push after %v, want ~TurnTimeout (80ms)", el)
+	}
+}
+
+// A resumption handle the server keeps rejecting is dropped after
+// ResumeAttempts failures so the session reconnects fresh (WP7b: the
+// daemon retried a dead handle forever, ~30 s per attempt).
+func TestDeadResumptionHandleIsDropped(t *testing.T) {
+	c1, c2 := newFakeConn("c1"), newFakeConn("c2")
+	setupErr := errors.New("failed to receive setup complete: websocket: close 1011 (internal server error): Internal error encountered.")
+	d := &fakeDialer{results: []func() (Conn, error){ok(c1), fail(setupErr), fail(setupErr), ok(c2)}}
+	h := newHarness(t, Config{ReconnectBackoff: 5 * time.Millisecond, ResumeAttempts: 2}, d)
+
+	c1.serve(handleMsg("handle-A"))
+	time.Sleep(20 * time.Millisecond)
+	c1.fail(errors.New("websocket: close 1011 (internal server error)"))
+
+	ev := h.waitEvent("resumed", func(ev voice.Event) bool { _, ok := ev.(voice.EventResumed); return ok })
+	if r := ev.(voice.EventResumed); !r.ContextLost || r.Handle != "" {
+		t.Fatalf("resumed = %+v, want a fresh session (context lost)", r)
+	}
+	recs := d.records()
+	if len(recs) != 4 || recs[1].handle != "handle-A" || recs[2].handle != "handle-A" || recs[3].handle != "" {
+		t.Fatalf("dials = %+v, want two resume attempts then a fresh dial", recs)
+	}
+	if p := h.log.payloads("voice.handle_dropped"); len(p) != 1 {
+		t.Errorf("voice.handle_dropped payloads = %v, want 1", p)
+	}
+	if p := h.log.payloads("voice.connect_error"); len(p) != 2 {
+		t.Errorf("voice.connect_error payloads = %d, want 2", len(p))
+	}
+}

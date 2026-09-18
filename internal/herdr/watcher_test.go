@@ -322,3 +322,34 @@ func TestWatcherInjectAfterStopDoesNotBlock(t *testing.T) {
 		w.Inject(herdr.StatusEvent{PaneID: "w1:p1", State: herdr.StateWorking})
 	}
 }
+
+// Known (persisted) panes: one that is gone is reported closed by the
+// first snapshot; one still alive with an unchanged state is not re-emitted
+// but does get its subscription; a changed state is a normal transition.
+func TestWatcherKnownPanesReconciledBySnapshot(t *testing.T) {
+	srv := herdrtest.New(t)
+	srv.SetWorkspace(herdr.WorkspaceInfo{WorkspaceID: "w5", Label: "sheepdog-recon"})
+	srv.SetAgent(codexAgent()) // w5:p1 idle
+	c, log := newClient(t, srv)
+	w := herdr.NewWatcher(c, herdr.WatcherConfig{
+		Debounce: debounce, SnapshotInterval: time.Hour, DedupWindow: dedupWin,
+		Known: map[string]herdr.State{"w5:p1": herdr.StateIdle, "w9:p1": herdr.StateWorking},
+	}, log)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = w.Run(ctx) }()
+	ch := w.Transitions()
+
+	tr := recvTransition(t, ch)
+	if tr.PaneID != "w9:p1" || !tr.Closed || tr.From != herdr.StateWorking || tr.Source != "snapshot" {
+		t.Fatalf("stale pane transition = %+v, want w9:p1 closed from working", tr)
+	}
+	// w5:p1 is unchanged (idle -> idle): no transition, but it is subscribed.
+	expectNoTransition(t, ch, 2*debounce)
+	waitSubs(t, srv, 2)
+	srv.EmitStatus("w5:p1", herdr.StateWorking)
+	tr = expectTransition(t, ch, herdr.StateIdle, herdr.StateWorking)
+	if tr.Source != "socket" {
+		t.Errorf("transition = %+v", tr)
+	}
+}

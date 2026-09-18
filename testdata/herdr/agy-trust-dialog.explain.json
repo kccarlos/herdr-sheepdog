@@ -1,0 +1,84 @@
+{
+  "id": "e",
+  "result": {
+    "type": "agent_explain",
+    "explain": {
+      "agent": "agy",
+      "cached_remote_version": "2026.06.24.1",
+      "evaluated_rules": [
+        {
+          "evidence": {
+            "all_count": 0,
+            "any_count": 2,
+            "contains": [
+              "requesting permission for:"
+            ],
+            "line_regex": [],
+            "not_count": 0,
+            "regex": [],
+            "region_bytes": 457,
+            "region_preview": "Accessing workspace:\n\n/private/tmp/claude-501/-Users-kc-Documents-herdr-sheepdog/c16b97d4-acf1-42bb-9044-59d5182b5982/scratchpad/wp7b/repo\n\nDo you trust the contents of this project?\n\nAntigravity CLI requires permission to read, edit, and e..."
+          },
+          "id": "permission_prompt",
+          "matched": false,
+          "priority": 300,
+          "region": "whole_recent",
+          "state": "blocked"
+        },
+        {
+          "evidence": {
+            "all_count": 0,
+            "any_count": 0,
+            "contains": [],
+            "line_regex": [
+              "^\\s*[\\u2800-\\u28FF]+\\s+\\p{Alphabetic}+\\w*ing\\b"
+            ],
+            "not_count": 0,
+            "regex": [],
+            "region_bytes": 457,
+            "region_preview": "Accessing workspace:\n\n/private/tmp/claude-501/-Users-kc-Documents-herdr-sheepdog/c16b97d4-acf1-42bb-9044-59d5182b5982/scratchpad/wp7b/repo\n\nDo you trust the contents of this project?\n\nAntigravity CLI requires permission to read, edit, and e..."
+          },
+          "id": "spinner_working",
+          "matched": false,
+          "priority": 100,
+          "region": "whole_recent",
+          "state": "working"
+        },
+        {
+          "evidence": {
+            "all_count": 0,
+            "any_count": 0,
+            "contains": [],
+            "line_regex": [
+              "(?i)·\\s*[1-9][0-9]*\\s+task"
+            ],
+            "not_count": 0,
+            "regex": [],
+            "region_bytes": 273,
+            "region_preview": "Antigravity CLI requires permission to read, edit, and execute files here.\n\n> Yes, I trust this folder\n  No, exit\n\n  ↑/↓ Navigate · enter Confirm\n                                                                                              ..."
+          },
+          "id": "background_tasks_working",
+          "matched": false,
+          "priority": 90,
+          "region": "bottom_non_empty_lines(5)",
+          "state": "working"
+        }
+      ],
+      "fallback_reason": "default_known_agent_idle_fallback",
+      "local_override_shadowing_remote": false,
+      "manifest_source": "remote:<home>/.local/state/herdr/agent-detection/remote/agy.toml",
+      "manifest_version": "2026.06.24.1",
+      "matched_rule": null,
+      "remote_update_error": null,
+      "remote_update_status": "current",
+      "screen_detection_skipped": false,
+      "skip_state_update": false,
+      "skipped_update_reason": null,
+      "state": "idle",
+      "visible_blocker": false,
+      "visible_idle": false,
+      "visible_working": false,
+      "warning": null
+    }
+  }
+}

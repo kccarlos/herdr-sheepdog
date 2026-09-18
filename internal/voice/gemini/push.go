@@ -93,8 +93,12 @@ func (s *Session) pushReady(item pushItem) time.Duration {
 		return 0
 	}
 	if s.turnOpen {
-		if now.Sub(s.turnOpenedAt) < s.cfg.TurnTimeout {
-			return waitState
+		// Wait for turnComplete, but re-check when TurnTimeout elapses:
+		// the model sometimes answers a push with nothing at all (seen
+		// live), and waitState would then hold every later push until the
+		// next unrelated event.
+		if left := s.cfg.TurnTimeout - now.Sub(s.turnOpenedAt); left > 0 {
+			return left
 		}
 		s.turnOpen = false // the turn never completed; do not wait forever
 	}

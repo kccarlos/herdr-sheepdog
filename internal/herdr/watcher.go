@@ -37,6 +37,12 @@ type WatcherConfig struct {
 	// DedupWindow is how long a repeated (pane, state) from another channel
 	// is considered the same event (default 2 s).
 	DedupWindow time.Duration
+	// Known seeds the pane set with panes the caller already has rows for
+	// (pane id -> last known state), typically the persisted state table.
+	// The first snapshot then reports any of them that no longer exist as
+	// closed, instead of leaving a stale row behind after a restart, and
+	// does not re-emit the ones whose state is unchanged.
+	Known map[string]State
 }
 
 func (c WatcherConfig) withDefaults() WatcherConfig {
@@ -86,6 +92,10 @@ type paneState struct {
 
 	pending *pendingBlock // debounce in flight
 	cancel  context.CancelFunc
+
+	// seeded marks a pane from WatcherConfig.Known that has not been seen
+	// alive yet (no subscription open).
+	seeded bool
 }
 
 type pendingBlock struct {
@@ -147,6 +157,13 @@ func (w *Watcher) Run(ctx context.Context) error {
 
 	fleet := w.client.SubscribeFleet(ctx)
 
+	// Seed persisted panes without a subscription: refreshSnapshot removes
+	// the ones that are gone and ensurePane subscribes the rest on sight.
+	for id, st := range w.cfg.Known {
+		if _, ok := w.panes[id]; !ok && id != "" {
+			w.panes[id] = &paneState{id: id, state: st, seeded: true}
+		}
+	}
 	if err := w.refreshSnapshot(ctx); err != nil {
 		return err
 	}
@@ -349,12 +366,26 @@ func (w *Watcher) emit(ctx context.Context, p *paneState, to State, at time.Time
 // ensurePane returns the pane record, creating it and opening its status
 // subscription on first sight.
 func (w *Watcher) ensurePane(ctx context.Context, id, workspace, agent string) *paneState {
-	if p, ok := w.panes[id]; ok {
+	p, ok := w.panes[id]
+	if ok && !p.seeded {
 		return p
 	}
 	subCtx, cancel := context.WithCancel(ctx)
-	p := &paneState{id: id, workspace: workspace, agent: agent, cancel: cancel}
-	w.panes[id] = p
+	if ok {
+		// A seeded (persisted) pane seen alive for the first time: keep its
+		// last known state so an unchanged state is not re-emitted, and
+		// open its subscription now.
+		p.seeded, p.cancel = false, cancel
+		if p.workspace == "" {
+			p.workspace = workspace
+		}
+		if p.agent == "" {
+			p.agent = agent
+		}
+	} else {
+		p = &paneState{id: id, workspace: workspace, agent: agent, cancel: cancel}
+		w.panes[id] = p
+	}
 	ch := w.client.Subscribe(subCtx, id)
 	go func() {
 		for ev := range ch {
@@ -382,5 +413,7 @@ func (w *Watcher) dropPane(p *paneState) {
 		p.pending.timer.Stop()
 		p.pending = nil
 	}
-	p.cancel()
+	if p.cancel != nil {
+		p.cancel()
+	}
 }

@@ -93,11 +93,16 @@ type Supervisor struct {
 	log     logging.Logger
 	cfg     Config
 
-	mu       sync.Mutex
-	briefing string               // cached sentence; "" means recompute
-	expired  *state.PendingAction // last expired answer_prompt (scenario 8)
-	seq      uint64               // pending action ids
+	mu          sync.Mutex
+	briefing    string               // cached sentence; "" means recompute
+	expired     *state.PendingAction // last expired answer_prompt (scenario 8)
+	seq         uint64               // pending action ids
+	interrupted map[string]time.Time // pane -> when cancel sent Ctrl-C (suppresses the next "finished")
 }
+
+// interruptGrace is how long after a user cancel a pane's working -> done
+// is treated as "interrupted", not "finished".
+const interruptGrace = 15 * time.Second
 
 // New wires a Supervisor. store, h and templates are required; querier,
 // pusher and log may be nil (nil pusher = no voice session; nil log
@@ -109,7 +114,7 @@ func New(store *state.Store, h Herdr, templates llm.Templates, querier Querier, 
 	if log == nil {
 		log = logging.NopLogger{}
 	}
-	return &Supervisor{store: store, herdr: h, llm: templates, querier: querier, pusher: pusher, log: log, cfg: cfg.withDefaults()}, nil
+	return &Supervisor{store: store, herdr: h, llm: templates, querier: querier, pusher: pusher, log: log, cfg: cfg.withDefaults(), interrupted: map[string]time.Time{}}, nil
 }
 
 // Run drives pending-action expiry and the periodic silent briefing until

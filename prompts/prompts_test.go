@@ -18,6 +18,13 @@ func TestRenderVoiceSystem(t *testing.T) {
 			t.Errorf("prompt does not mention %s", tool)
 		}
 	}
+	// The push prefixes of internal/voice/gemini (pushTurn) must be
+	// explained to the model: system events are spoken, context is not.
+	for _, prefix := range []string{"[system event, not spoken by the user]", "[system context, not spoken by the user]"} {
+		if !strings.Contains(s, prefix) {
+			t.Errorf("prompt does not explain the push prefix %q", prefix)
+		}
+	}
 	if _, err := Render("missing.txt", nil); err == nil {
 		t.Error("missing template accepted")
 	}
