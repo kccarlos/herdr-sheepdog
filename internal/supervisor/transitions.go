@@ -66,7 +66,13 @@ func (s *Supervisor) HandleTransition(ctx context.Context, t herdr.Transition) {
 		s.dropPendingFor(t.PaneID, "finished", state.PendingSendInstruction)
 		s.mu.Unlock()
 		if from == herdr.StateWorking && t.To == herdr.StateDone {
-			s.push(t.PaneID, alias+" finished.", voice.UrgencyIdle)
+			if s.recentlyInterrupted(t.PaneID) {
+				// The user's cancel sent Ctrl-C: this "done" is the
+				// interrupted turn settling, not work finishing.
+				s.log.Log(logSource, "supervisor.finished_suppressed", t.PaneID, map[string]any{"reason": "interrupted"})
+			} else {
+				s.push(t.PaneID, alias+" finished.", voice.UrgencyIdle)
+			}
 		}
 	}
 }
@@ -98,6 +104,19 @@ func (s *Supervisor) onBlocked(ctx context.Context, row state.Agent) {
 	spoken := s.setPending(s.newAnswerPrompt(row.PaneID, sum))
 	s.mu.Unlock()
 	s.push(row.PaneID, spoken, voice.UrgencyIdle)
+}
+
+// recentlyInterrupted reports (and consumes) a cancel-sent Ctrl-C for the
+// pane within interruptGrace.
+func (s *Supervisor) recentlyInterrupted(paneID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	at, ok := s.interrupted[paneID]
+	if !ok {
+		return false
+	}
+	delete(s.interrupted, paneID)
+	return s.cfg.Now().Sub(at) <= interruptGrace
 }
 
 // recordBlock stores the question on the row's last_block.

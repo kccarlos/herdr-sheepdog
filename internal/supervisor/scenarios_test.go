@@ -255,6 +255,29 @@ func TestScenario5CancelInterruptsCorrectPane(t *testing.T) {
 	}
 }
 
+// After a cancel's Ctrl-C the pane settles working -> done; that is not
+// "finished" (WP7b: sheepdog announced the cancelled turn as completed).
+func TestCancelSuppressesFinishedPush(t *testing.T) {
+	h := twoAgents(t)
+	h.call(ToolPropose, map[string]any{"instruction": "tell docs to write the readme"})
+	h.transition("w6:p1", herdr.StateIdle, herdr.StateWorking)
+	before := len(h.pusher.all())
+	h.call(ToolCancel, nil)
+	h.transition("w6:p1", herdr.StateWorking, herdr.StateDone)
+	if got := h.pusher.all(); len(got) != before {
+		t.Errorf("push after cancelled turn = %+v, want none", got[len(got)-1])
+	}
+	if h.log.count("supervisor.finished_suppressed") != 1 {
+		t.Error("no supervisor.finished_suppressed")
+	}
+	// The next real completion is announced again.
+	h.transition("w6:p1", herdr.StateDone, herdr.StateWorking)
+	h.transition("w6:p1", herdr.StateWorking, herdr.StateDone)
+	if got := h.pusher.last(t); got.Text != "docs finished." {
+		t.Errorf("later done push = %+v", got)
+	}
+}
+
 // Scenario 6: ambiguity returns a clarify question and sends nothing.
 func TestScenario6AmbiguousSendsNothing(t *testing.T) {
 	h := twoAgents(t)

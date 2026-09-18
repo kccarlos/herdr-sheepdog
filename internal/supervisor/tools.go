@@ -295,6 +295,8 @@ func (s *Supervisor) Cancel(ctx context.Context) (voice.ToolResult, error) {
 		if err := s.herdr.Interrupt(ctx, p.PaneID); err != nil {
 			s.log.Log(logSource, "supervisor.cancel_error", p.PaneID, map[string]any{"id": p.ID, "error": err.Error()})
 			spoken = "Cancelled, but I could not interrupt " + s.aliasOf(p.PaneID) + "."
+		} else {
+			s.interrupted[p.PaneID] = s.cfg.Now()
 		}
 	}
 	s.clearPending(p, "user")
