@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -58,11 +59,18 @@ type Deps struct {
 	// "gemini"|"off").
 	HerdrMode, VoiceMode string
 	Version              string
+	// DevTestdataDir, when set, serves GET /testdata/<name>.wav from that
+	// directory (the /voice page's file-source test mode). Empty (the
+	// default) registers no route: this is a developer feature.
+	DevTestdataDir string
 
 	// Heartbeat is the SSE keepalive period (default 15 s).
 	Heartbeat time.Duration
 	// OutQueue is the per-client outbound frame limit (default 256).
 	OutQueue int
+	// StatsInterval is how often a web.client.stats event reports the
+	// attached client's frame counters (default 5 s).
+	StatsInterval time.Duration
 	// ToolTimeout bounds one tool call or injected chain (default 90 s).
 	ToolTimeout time.Duration
 	// Now overrides the clock (tests).
@@ -95,6 +103,9 @@ func New(deps Deps) (*Server, error) {
 	}
 	if deps.OutQueue <= 0 {
 		deps.OutQueue = 256
+	}
+	if deps.StatsInterval <= 0 {
+		deps.StatsInterval = 5 * time.Second
 	}
 	if deps.ToolTimeout <= 0 {
 		deps.ToolTimeout = 90 * time.Second
@@ -146,7 +157,24 @@ func (s *Server) routes() error {
 	s.mux.HandleFunc("POST /api/inject/remove", s.handleInjectRemove)
 	s.mux.HandleFunc("POST /api/inject/utterance", s.handleUtterance)
 	s.mux.HandleFunc("POST /api/herdr/event", s.handleHerdrEvent)
+	if s.deps.DevTestdataDir != "" {
+		s.mux.HandleFunc("GET /testdata/{name}", s.handleTestdata)
+	}
 	return nil
+}
+
+// handleTestdata serves one .wav fixture by base name from DevTestdataDir
+// (dev mode only). Only plain names ending in .wav are accepted, so nothing
+// outside the directory is reachable.
+func (s *Server) handleTestdata(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if name != filepath.Base(name) || !strings.HasSuffix(name, ".wav") || strings.HasPrefix(name, ".") {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Content-Type", "audio/wav")
+	http.ServeFile(w, r, filepath.Join(s.deps.DevTestdataDir, name))
 }
 
 // static serves /<name> (index.html) and /<name>/* from the embedded FS.

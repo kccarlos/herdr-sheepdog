@@ -137,6 +137,10 @@ type harness struct {
 type harnessOpts struct {
 	voice   bool
 	watcher bool
+	// devTestdata serves /testdata/ from this directory (dev mode).
+	devTestdata string
+	// statsInterval shortens the web.client.stats period.
+	statsInterval time.Duration
 }
 
 func newHarness(t *testing.T, o harnessOpts) *harness {
@@ -167,7 +171,7 @@ func newHarness(t *testing.T, o harnessOpts) *harness {
 	}
 	sup.SetVoiceConnected(true)
 	injector := inject.NewInjector(store, h, sup, log, nil)
-	deps := Deps{Log: log, Store: store, Supervisor: sup, Injector: injector, Router: &inject.Router{}, Version: "test", Heartbeat: 200 * time.Millisecond, OutQueue: 8}
+	deps := Deps{Log: log, Store: store, Supervisor: sup, Injector: injector, Router: &inject.Router{}, Version: "test", Heartbeat: 200 * time.Millisecond, OutQueue: 8, DevTestdataDir: o.devTestdata, StatsInterval: o.statsInterval}
 	if session != nil {
 		deps.Voice = session
 	}

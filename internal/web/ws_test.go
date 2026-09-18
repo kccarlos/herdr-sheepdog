@@ -280,4 +280,26 @@ func TestWSWithoutVoice(t *testing.T) {
 	if tr := c.expect(wsproto.TypeTranscript); tr.Text != "Nothing to cancel." {
 		t.Fatalf("cancel transcript = %+v", tr)
 	}
+	// A typed "stop" is echoed, flushed and answered exactly once.
+	c.send(wsproto.SimulateText("stop"))
+	if in := c.expect(wsproto.TypeTranscript); in.Dir != "in" || in.Text != "stop" {
+		t.Fatalf("stop echo = %+v", in)
+	}
+	c.expect(wsproto.TypeFlush)
+	if tr := c.expect(wsproto.TypeTranscript); tr.Dir != "out" || tr.Text != "Nothing to cancel." {
+		t.Fatalf("stop transcript = %+v", tr)
+	}
+	c.send(wsproto.Ping())
+	for {
+		m, _, err := c.read(2 * time.Second)
+		if err != nil {
+			t.Fatalf("waiting for pong: %v", err)
+		}
+		if m.Type == wsproto.TypePong {
+			break
+		}
+		if m.Type == wsproto.TypeTranscript {
+			t.Fatalf("duplicate transcript after stop: %+v", m)
+		}
+	}
 }

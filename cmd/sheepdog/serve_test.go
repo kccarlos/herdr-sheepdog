@@ -21,8 +21,8 @@ func TestServeFlagsAndValidation(t *testing.T) {
 	if _, code, run := parseServeFlags([]string{"-h"}, &stderr); run || code != 0 {
 		t.Errorf("help: code=%d run=%v", code, run)
 	}
-	o, code, ok := parseServeFlags([]string{"--voice", "off", "--herdr", "mock", "--port", "1234", "--verbose"}, &stderr)
-	if !ok || code != 0 || o.voice != "off" || o.herdr != "mock" || o.port != 1234 || !o.verbose {
+	o, code, ok := parseServeFlags([]string{"--voice", "off", "--herdr", "mock", "--port", "1234", "--verbose", "--dev"}, &stderr)
+	if !ok || code != 0 || o.voice != "off" || o.herdr != "mock" || o.port != 1234 || !o.verbose || !o.dev {
 		t.Errorf("flags = %+v code=%d ok=%v", o, code, ok)
 	}
 	var stdout bytes.Buffer
