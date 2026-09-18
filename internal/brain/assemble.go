@@ -8,15 +8,19 @@ import (
 	"google.golang.org/genai"
 )
 
-// toContents renders the window as model contents for model. Context
-// messages (utterances, replies of the assistant, pushes, worker events,
-// notes, requests, summaries) become user text lines; consecutive ones
-// merge into one content. A step's tool calls become the model content
-// the provider returned (Raw, with its thought signatures) or, without
-// Raw or when another model made the call (its signatures would not be
-// accepted), function call parts; their results become function
-// response parts. Replies are model text.
-func toContents(msgs []Message, model string) []*genai.Content {
+// toContents renders the window as Gemini contents for provider/model.
+// Context messages (utterances, replies of the assistant, pushes, worker
+// events, notes, requests, summaries) become user text lines;
+// consecutive ones merge into one content. A step's tool calls become
+// the model content the provider returned (Raw, with its thought
+// signatures) when the same provider and model made them, else function
+// call parts rebuilt from the neutral fields (another model's signatures
+// would not be accepted); their results become function response parts.
+// A step that made several calls is one tool-call message with Raw
+// followed by Raw-less ones: Raw already holds every call of the step,
+// so those are skipped when it is replayed and merged into one model
+// content when it is not. Replies are model text.
+func toContents(msgs []Message, provider, model string) []*genai.Content {
 	var out []*genai.Content
 	var text []string // pending user lines
 	flushText := func() {
@@ -43,20 +47,32 @@ func toContents(msgs []Message, model string) []*genai.Content {
 		results = nil
 	}
 	flushAll := func() { flushText(); flushCalls(); flushResults() }
+	rawCovers := false // the step's Raw was replayed: its other calls are in it
 
 	for _, m := range msgs {
+		if m.Kind != KindToolCall {
+			rawCovers = false
+		}
 		switch m.Kind {
 		case KindToolCall:
 			flushText()
 			flushResults()
-			if len(m.Raw) > 0 && (m.Model == "" || m.Model == model) {
+			if len(m.Raw) > 0 && sameOrigin(m, provider, model) {
 				flushCalls()
 				var c genai.Content
 				if err := json.Unmarshal(m.Raw, &c); err == nil && len(c.Parts) > 0 {
 					c.Role = genai.RoleModel
 					out = append(out, &c)
+					rawCovers = true
 					continue
 				}
+			}
+			if len(m.Raw) > 0 {
+				// Another origin's Raw: this call starts a step of its own.
+				rawCovers = false
+			}
+			if rawCovers {
+				continue
 			}
 			if m.ToolCall != nil {
 				calls = append(calls, &genai.Part{FunctionCall: &genai.FunctionCall{Name: m.ToolCall.Name, Args: m.ToolCall.Args}})
@@ -84,6 +100,14 @@ func toContents(msgs []Message, model string) []*genai.Content {
 	}
 	flushAll()
 	return out
+}
+
+// sameOrigin reports whether m's Raw was produced by provider/model, so
+// the adapter may replay it. A message without a recorded provider or
+// model (a transcript from before they were recorded) is taken to be
+// the caller's.
+func sameOrigin(m Message, provider, model string) bool {
+	return (m.Provider == "" || m.Provider == provider) && (m.Model == "" || m.Model == model)
 }
 
 // contextLine renders one context message for the model.

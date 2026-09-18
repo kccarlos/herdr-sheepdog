@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -192,7 +193,7 @@ func TestBrainModelEndpoints(t *testing.T) {
 	if code := h.getJSON("/api/brain/models", &got); code != http.StatusOK {
 		t.Fatalf("GET = %d", code)
 	}
-	if got.Provider != "gemini" || len(got.Providers) != 1 || got.Providers[0].ID != "gemini" || got.Model != brain.DefaultModel || got.Error != "" || got.Stale || got.FetchedAt == nil {
+	if got.Provider != "gemini" || len(got.Providers) != 1 || got.Providers[0].ID != "gemini" || !got.Providers[0].Available || got.ModelsProvider != "gemini" || got.Model != brain.DefaultModel || got.Error != "" || got.Stale || got.FetchedAt == nil {
 		t.Fatalf("GET body = %+v", got)
 	}
 	if len(got.Models) != len(braintest.Catalog()) || got.Models[0].Name != "gemini-3.8-flash" || !got.Models[0].Recommended || got.Models[len(got.Models)-1].Name != braintest.FakeModel || got.Models[len(got.Models)-1].Recommended {
@@ -208,18 +209,18 @@ func TestBrainModelEndpoints(t *testing.T) {
 	if code, body := h.putModel(map[string]any{"provider": "gemini", "model": "gemini-3.8-flash"}, &out); code != http.StatusOK || out.Model != "gemini-3.8-flash" || len(out.Models) != len(braintest.Catalog()) || out.Provider != "gemini" {
 		t.Fatalf("PUT = %d %s", code, body)
 	}
-	if h.srv.deps.Brain.Model() != "gemini-3.8-flash" || h.store.Snapshot().Session.BrainModel != "gemini-3.8-flash" {
-		t.Errorf("brain = %q session = %q", h.srv.deps.Brain.Model(), h.store.Snapshot().Session.BrainModel)
+	if h.srv.deps.Brain.Model() != "gemini-3.8-flash" || h.store.Snapshot().Session.BrainModel != "gemini-3.8-flash" || h.store.Snapshot().Session.BrainProvider != "gemini" {
+		t.Errorf("brain = %q session = %q/%q", h.srv.deps.Brain.Model(), h.store.Snapshot().Session.BrainProvider, h.store.Snapshot().Session.BrainModel)
 	}
 	if h.getJSON("/api/state", &st); st.Brain == nil || st.Brain.Model != "gemini-3.8-flash" || st.Session.BrainModel != "gemini-3.8-flash" {
 		t.Errorf("state after = %+v / %q", st.Brain, st.Session.BrainModel)
 	}
 	var cx ContextResponse
-	if h.getJSON("/api/brain/context", &cx); cx.Model != "gemini-3.8-flash" {
-		t.Errorf("context.model = %q", cx.Model)
+	if h.getJSON("/api/brain/context", &cx); cx.Model != "gemini-3.8-flash" || cx.Provider != "gemini" {
+		t.Errorf("context.model = %q/%q", cx.Provider, cx.Model)
 	}
 	var msgs []TranscriptMessage
-	if h.getJSON("/api/brain/transcript", &msgs); len(msgs) != 1 || msgs[0].Kind != brain.KindSystem || msgs[0].Content != "model switched from "+brain.DefaultModel+" to gemini-3.8-flash" {
+	if h.getJSON("/api/brain/transcript", &msgs); len(msgs) != 1 || msgs[0].Kind != brain.KindSystem || msgs[0].Content != "model switched from gemini/"+brain.DefaultModel+" to gemini/gemini-3.8-flash" {
 		t.Errorf("transcript marker = %+v", msgs)
 	}
 	// Unknown but well-formed (the catalog may be stale): accepted.
@@ -232,7 +233,7 @@ func TestBrainModelEndpoints(t *testing.T) {
 		if code, raw := h.putModel(body, &e); code != http.StatusBadRequest || e["error"] == "" {
 			t.Errorf("PUT %v = %d %s", body, code, raw)
 		}
-		if body["provider"] == "openai" && !strings.Contains(e["error"], "only gemini") {
+		if body["provider"] == "openai" && !strings.Contains(e["error"], "unknown provider (registered: gemini)") {
 			t.Errorf("provider error = %q", e["error"])
 		}
 	}
@@ -264,6 +265,74 @@ func TestBrainModelEndpoints(t *testing.T) {
 	var cached BrainModelsResponse
 	if code := h.getJSON("/api/brain/models", &cached); code != http.StatusOK || cached.Error != "" || cached.Stale || len(cached.Models) != len(braintest.Catalog()) {
 		t.Errorf("cached = %d %+v", code, cached)
+	}
+}
+
+// Providers: GET lists every provider the daemon knows, unavailable
+// ones included with the reason (never omitted); ?provider= serves that
+// provider's own catalog (400 with the reason for an unavailable or
+// unknown one); PUT with an unavailable provider is a 400 naming the
+// reason, with a registered one switches provider and model together,
+// persists both and answers with the new provider's catalog; the
+// transcript marker and /api/state carry the provider.
+func TestBrainProviderEndpoints(t *testing.T) {
+	h := newHarness(t, harnessOpts{brain: true, providers: true})
+	var got BrainModelsResponse
+	if code := h.getJSON("/api/brain/models", &got); code != http.StatusOK || got.Provider != "gemini" || got.ModelsProvider != "gemini" || len(got.Models) != len(braintest.Catalog()) {
+		t.Fatalf("GET = %d %+v", code, got)
+	}
+	var ids []string
+	for _, p := range got.Providers {
+		ids = append(ids, fmt.Sprintf("%s:%t:%s", p.ID, p.Available, p.Reason))
+	}
+	if strings.Join(ids, " ") != "gemini:true: deepseek:true: openai:false:no OPENAI_API_KEY" {
+		t.Errorf("providers = %v", ids)
+	}
+	if code := h.getJSON("/api/brain/models?provider=deepseek", &got); code != http.StatusOK || got.Provider != "gemini" || got.Model != brain.DefaultModel || got.ModelsProvider != "deepseek" || len(got.Models) != len(braintest.Catalog2()) || got.Models[0].Name != "deepseek-flash" || !got.Models[0].Recommended {
+		t.Errorf("GET ?provider=deepseek = %d %+v", code, got)
+	}
+	var e map[string]string
+	if code := h.getJSON("/api/brain/models?provider=openai", &e); code != http.StatusBadRequest || !strings.Contains(e["error"], "no OPENAI_API_KEY") {
+		t.Errorf("GET ?provider=openai = %d %v", code, e)
+	}
+	if code := h.getJSON("/api/brain/models?provider=nope", &e); code != http.StatusBadRequest || !strings.Contains(e["error"], "unknown provider") {
+		t.Errorf("GET ?provider=nope = %d %v", code, e)
+	}
+	if code, raw := h.putModel(map[string]any{"provider": "openai", "model": "gpt-5"}, &e); code != http.StatusBadRequest || !strings.Contains(e["error"], `provider "openai": no OPENAI_API_KEY`) {
+		t.Errorf("PUT openai = %d %s", code, raw)
+	}
+	var out BrainModelsResponse
+	if code, raw := h.putModel(map[string]any{"provider": "DeepSeek", "model": "deepseek-flash"}, &out); code != http.StatusOK || out.Provider != "deepseek" || out.Model != "deepseek-flash" || out.ModelsProvider != "deepseek" || len(out.Models) != len(braintest.Catalog2()) {
+		t.Fatalf("PUT deepseek = %d %s", code, raw)
+	}
+	if ss := h.store.Snapshot().Session; ss.BrainProvider != "deepseek" || ss.BrainModel != "deepseek-flash" {
+		t.Errorf("session = %+v", ss)
+	}
+	var st StateResponse
+	if h.getJSON("/api/state", &st); st.Brain == nil || st.Brain.Provider != "deepseek" || st.Brain.Model != "deepseek-flash" || st.Session.BrainProvider != "deepseek" {
+		t.Errorf("state = %+v / %+v", st.Brain, st.Session)
+	}
+	var msgs []TranscriptMessage
+	if h.getJSON("/api/brain/transcript", &msgs); len(msgs) != 1 || msgs[0].Content != "model switched from gemini/"+brain.DefaultModel+" to deepseek/deepseek-flash" {
+		t.Errorf("marker = %+v", msgs)
+	}
+	// The current provider's catalog is now deepseek's by default.
+	if code := h.getJSON("/api/brain/models", &got); code != http.StatusOK || got.ModelsProvider != "deepseek" || got.Provider != "deepseek" {
+		t.Errorf("GET after switch = %d %+v", code, got)
+	}
+	var changed []string
+	for _, ev := range h.log.Tail(0) {
+		if ev.Type == "brain.model_changed" {
+			var p struct {
+				From, To, Via, Provider string
+				FromProvider            string `json:"from_provider"`
+			}
+			_ = json.Unmarshal(ev.Payload, &p)
+			changed = append(changed, p.FromProvider+"/"+p.From+">"+p.Provider+"/"+p.To+"/"+p.Via)
+		}
+	}
+	if strings.Join(changed, " ") != "gemini/"+brain.DefaultModel+">deepseek/deepseek-flash/debug" {
+		t.Errorf("brain.model_changed = %v", changed)
 	}
 }
 

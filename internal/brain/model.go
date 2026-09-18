@@ -2,6 +2,7 @@ package brain
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -16,15 +17,37 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
 )
 
-// Model is the one model call the brain makes; *GenaiModel implements it
-// over the Gemini API and tests inject a scripted fake (braintest).
+// Model is the one model call the brain makes, in Gemini's terms:
+// *GenaiModel implements it over the Gemini API, *OpenAICompatModel
+// translates it for an OpenAI-compatible endpoint, and tests inject a
+// scripted fake (braintest). The compaction summary and the eval harness
+// call it directly with plain contents.
 type Model interface {
 	Generate(ctx context.Context, model string, contents []*genai.Content, cfg *genai.GenerateContentConfig) (*genai.GenerateContentResponse, error)
 }
 
-// ProviderGemini is the one model provider today; the catalog and the
-// model switch carry a provider id so another one can be added later.
-const ProviderGemini = "gemini"
+// MessageModel is a Model that builds the provider's request from the
+// window's own messages instead of genai contents (the loop prefers it
+// when the Model implements it). It exists for provider-native data the
+// genai types cannot carry: DeepSeek's reasoning_content, which must be
+// passed back with every earlier assistant message while tools are
+// declared. The adapter re-attaches it from Message.Raw for the messages
+// whose Provider and Model are its own, and returns the assistant
+// message it got (raw) so the loop can store it on the reply's
+// transcript message for the same purpose; raw is nil when there is
+// nothing to replay. cfg carries the system instruction, the tools and
+// the answer-only tool config exactly as for Generate.
+type MessageModel interface {
+	GenerateMessages(ctx context.Context, model string, msgs []Message, cfg *genai.GenerateContentConfig) (resp *genai.GenerateContentResponse, raw json.RawMessage, err error)
+}
+
+// Provider ids: the key of the brain's provider map, the first half of
+// the /debug picker's choice, and Message.Provider on what a model
+// produced.
+const (
+	ProviderGemini   = "gemini"
+	ProviderDeepSeek = "deepseek"
+)
 
 // ModelInfo is one entry of a provider's model catalog, as the /debug
 // model picker shows it.
@@ -242,6 +265,10 @@ func isRateLimited(err error) bool {
 	var api genai.APIError
 	if errors.As(err, &api) && api.Code == 429 {
 		return true
+	}
+	var compat *APIError
+	if errors.As(err, &compat) {
+		return compat.Status == 429
 	}
 	s := strings.ToLower(err.Error())
 	for _, needle := range []string{"resource_exhausted", "429", "quota", "rate limit", "too many requests"} {

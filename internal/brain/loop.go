@@ -20,10 +20,11 @@ const logResultBytes = 1024
 type turn struct {
 	n   int
 	req Request
-	// model is the model name snapshotted when the turn started: a
+	// provider, model and impl are snapshotted when the turn started: a
 	// SetModel during the turn never lands between its tool rounds.
-	model string
-	start time.Time
+	provider, model string
+	impl            Model
+	start           time.Time
 	// soft is when the budget for tool rounds ends; the hard deadline is
 	// FinalGrace later.
 	soft   time.Time
@@ -79,7 +80,8 @@ func (b *Brain) Turn(ctx context.Context, req Request) (Reply, error) {
 		b.log.Log(logSource, "brain.fallback", "", map[string]any{"reason": reason, "kind": string(req.Kind), "trigger": string(req.Trigger), "agent": req.Agent, "error": err.Error()})
 		return Reply{}, fmt.Errorf("%w: waiting for the turn lock: %w", ErrFallback, err)
 	}
-	t := &turn{req: req, model: b.Model(), start: start, soft: start.Add(timeout)}
+	t := &turn{req: req, start: start, soft: start.Add(timeout)}
+	t.provider, t.model, t.impl = b.current()
 	reply, err := b.run(tctx, t)
 	b.after.Add(1)
 	go b.afterTurn(t)
@@ -149,15 +151,20 @@ func (b *Brain) run(ctx context.Context, t *turn) (Reply, error) {
 		config.SystemInstruction = &genai.Content{Parts: []*genai.Part{{Text: text}}}
 
 		t0 := b.cfg.Now()
-		resp, err := b.model.Generate(ctx, t.model, toContents(asm.Messages, t.model), &config)
+		resp, raw, err := b.generate(ctx, t, asm.Messages, &config)
 		t.calls++
-		payload := map[string]any{"turn": t.n, "step": step, "model": t.model, "template": string(t.req.Kind), "dur_ms": b.cfg.Now().Sub(t0).Milliseconds(), "forced": forced}
+		payload := map[string]any{"turn": t.n, "step": step, "provider": t.provider, "model": t.model, "template": string(t.req.Kind), "dur_ms": b.cfg.Now().Sub(t0).Milliseconds(), "forced": forced}
 		var calls []*genai.FunctionCall
 		if err != nil {
 			payload["error"] = err.Error()
 		} else {
 			if u := resp.UsageMetadata; u != nil {
 				payload["prompt_tokens"], payload["completion_tokens"] = u.PromptTokenCount, u.CandidatesTokenCount
+				if u.ThoughtsTokenCount > 0 {
+					// Reasoning is billed as output: DeepSeek counts it in
+					// completion_tokens, Gemini separately.
+					payload["reasoning_tokens"] = u.ThoughtsTokenCount
+				}
 				t.tokIn += int(u.PromptTokenCount)
 				t.tokOut += int(u.CandidatesTokenCount)
 			}
@@ -186,38 +193,79 @@ func (b *Brain) run(ctx context.Context, t *turn) (Reply, error) {
 			if perr != nil {
 				if !corrected && answer != "" {
 					corrected = true
-					b.ingest(Message{Role: RoleAssistant, Kind: KindReply, Content: answer}, t.n)
+					b.ingest(t.reply(answer, raw), t.n)
 					b.ingest(Message{Role: RoleUser, Kind: KindRequest, Content: "That was not the JSON object of the answer contract. Reply with the JSON object only."}, t.n)
 					continue
 				}
 				return b.fail(t, "bad_reply", perr)
 			}
-			b.ingest(Message{Role: RoleAssistant, Kind: KindReply, Content: answer}, t.n)
+			b.ingest(t.reply(answer, raw), t.n)
 			b.logTurn(t, false)
 			return reply, nil
 		}
-		b.execCalls(ctx, t, resp, calls)
+		b.execCalls(ctx, t, resp, raw, calls)
 	}
 	return b.fail(t, "step_budget", fmt.Errorf("brain: %d steps without an answer", b.cfg.MaxSteps))
 }
 
-// execCalls records the model's content, executes every call and records
-// the results.
-func (b *Brain) execCalls(ctx context.Context, t *turn, resp *genai.GenerateContentResponse, calls []*genai.FunctionCall) {
+// generate is one model call of the turn: through GenerateMessages when
+// the turn's Model builds its request from the window itself (it then
+// also returns the provider-native message to store), else through
+// Generate over Gemini contents, where the content to store is the
+// candidate's (the function call parts with their thought signatures).
+func (b *Brain) generate(ctx context.Context, t *turn, msgs []Message, cfg *genai.GenerateContentConfig) (*genai.GenerateContentResponse, json.RawMessage, error) {
+	if mm, ok := t.impl.(MessageModel); ok {
+		return mm.GenerateMessages(ctx, t.model, msgs, cfg)
+	}
+	resp, err := t.impl.Generate(ctx, t.model, toContents(msgs, t.provider, t.model), cfg)
+	if err != nil {
+		return nil, nil, err
+	}
 	var raw json.RawMessage
-	if len(resp.Candidates) > 0 && resp.Candidates[0].Content != nil {
+	if len(resp.Candidates) > 0 && resp.Candidates[0].Content != nil && len(resp.FunctionCalls()) > 0 {
 		raw, _ = json.Marshal(resp.Candidates[0].Content)
 	}
+	return resp, raw, nil
+}
+
+// reply is the transcript message of the model's answer text; raw (when
+// the provider returned something to replay, such as DeepSeek's
+// reasoning_content) travels with it under the turn's provider and
+// model.
+func (t *turn) reply(text string, raw json.RawMessage) Message {
+	m := Message{Role: RoleAssistant, Kind: KindReply, Content: text}
+	if len(raw) > 0 {
+		m.Raw, m.Provider, m.Model = raw, t.provider, t.model
+	}
+	return m
+}
+
+// execCalls records the model's content (every call first: the step is
+// one assistant message to the provider, whatever the number of calls),
+// executes every call and records the results; a promise a call made
+// is recorded after the last result, so nothing sits between a step's
+// results.
+func (b *Brain) execCalls(ctx context.Context, t *turn, resp *genai.GenerateContentResponse, raw json.RawMessage, calls []*genai.FunctionCall) {
 	modelText := strings.TrimSpace(textOf(resp))
+	ids := make([]string, len(calls))
 	for i, fc := range calls {
-		id := b.nextToolID(t.n)
-		m := Message{Role: RoleAssistant, Kind: KindToolCall, Model: t.model, ToolCall: &ToolCall{ID: id, Name: fc.Name, Args: fc.Args}}
+		// A provider that issues call ids (OpenAI-compatible) needs the
+		// same id on the result; Gemini issues none and gets the run's.
+		id := fc.ID
+		if id == "" {
+			id = b.nextToolID(t.n)
+		}
+		ids[i] = id
+		m := Message{Role: RoleAssistant, Kind: KindToolCall, Provider: t.provider, Model: t.model, ToolCall: &ToolCall{ID: id, Name: fc.Name, Args: fc.Args}}
 		if i == 0 {
 			m.Raw, m.Content = raw, modelText
 		}
 		b.ingest(m, t.n)
 		b.log.Log(logSource, "brain.tool_call", "", map[string]any{"id": id, "name": fc.Name, "args": fc.Args, "turn": t.n})
-
+	}
+	var promises []Message
+	for i, fc := range calls {
+		id := ids[i]
 		t0 := b.cfg.Now()
 		out := b.execTool(ctx, t.req.Trigger, t.n, fc)
 		dur := b.cfg.Now().Sub(t0).Milliseconds()
@@ -238,8 +286,11 @@ func (b *Brain) execCalls(ctx context.Context, t *turn, resp *genai.GenerateCont
 		b.ingest(Message{Role: RoleTool, Kind: KindToolResult, Content: out.result, Agent: out.agent, ToolResult: res}, t.n)
 		b.log.Log(logSource, "brain.tool_result", "", payload)
 		if p := out.promise; p != nil {
-			b.ingest(Message{Role: RoleUser, Kind: KindPromise, Content: promiseLine(*p), Agent: p.Agent, Promise: p}, t.n)
+			promises = append(promises, Message{Role: RoleUser, Kind: KindPromise, Content: promiseLine(*p), Agent: p.Agent, Promise: p})
 		}
+	}
+	for _, m := range promises {
+		b.ingest(m, t.n)
 	}
 }
 
@@ -268,7 +319,7 @@ func (b *Brain) fail(t *turn, reason string, cause error) (Reply, error) {
 // logTurn emits brain.turn.
 func (b *Brain) logTurn(t *turn, fallback bool) {
 	b.log.Log(logSource, "brain.turn", "", map[string]any{
-		"turn": t.n, "trigger": string(t.req.Trigger), "kind": string(t.req.Kind), "steps": t.steps, "model_calls": t.calls,
+		"turn": t.n, "trigger": string(t.req.Trigger), "kind": string(t.req.Kind), "provider": t.provider, "model": t.model, "steps": t.steps, "model_calls": t.calls,
 		"dur_ms": b.cfg.Now().Sub(t.start).Milliseconds(), "fallback": fallback, "tokens_in": t.tokIn, "tokens_out": t.tokOut,
 		"window_tokens": b.engine.Tokens(), "acted": len(t.acted),
 	})
@@ -318,7 +369,8 @@ func (b *Brain) systemPrompt() string {
 		for _, s := range secs {
 			report = append(report, map[string]any{"name": s.Name, "chars": len(s.Text)})
 		}
-		b.log.Log(logSource, "brain.system_prompt", "", map[string]any{"sections": report, "total_chars": len(text), "model": b.Model(), "tools": len(b.tools[0].FunctionDeclarations)})
+		provider, model, _ := b.current()
+		b.log.Log(logSource, "brain.system_prompt", "", map[string]any{"sections": report, "total_chars": len(text), "provider": provider, "model": model, "tools": len(b.tools[0].FunctionDeclarations)})
 	}
 	return text
 }

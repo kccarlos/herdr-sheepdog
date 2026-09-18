@@ -1,0 +1,87 @@
+{
+  "messages": [
+    {
+      "content": "You are the SVP.",
+      "role": "system"
+    },
+    {
+      "content": "[10:00:00] Worker event: auth: ? -\u003e working\n[10:00:00] CEO said: \"what is auth doing?\"\n[10:00:00] Request from the assistant (ask): question=\"what is auth doing?\" agent=\"auth\"",
+      "role": "user"
+    },
+    {
+      "content": "",
+      "reasoning_content": "I should look at the screen and the roster.",
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"agent\":\"auth\"}",
+            "name": "read_screen"
+          },
+          "id": "call_1",
+          "type": "function"
+        },
+        {
+          "function": {
+            "arguments": "{}",
+            "name": "list_agents"
+          },
+          "id": "call_2",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "\u003c\u003c\u003cBEGIN_WORKER_OUTPUT agent=auth source=screen\u003e\u003e\u003e\n$ go test ./...\n\u003c\u003c\u003cEND_WORKER_OUTPUT\u003e\u003e\u003e",
+      "role": "tool",
+      "tool_call_id": "call_1"
+    },
+    {
+      "content": "[{\"alias\":\"auth\",\"kind\":\"codex\",\"state\":\"working\"}]",
+      "role": "tool",
+      "tool_call_id": "call_2"
+    },
+    {
+      "content": "{\"spoken\":\"Auth is running the tests.\",\"detail\":\"\"}",
+      "reasoning_content": "The screen shows go test running.",
+      "role": "assistant"
+    },
+    {
+      "content": "[10:00:00] Note from the daemon: model switched from gemini/gemini-3.5-flash to deepseek/deepseek-flash\n[10:00:00] Request from the assistant (ask): question=\"did it pass?\" agent=\"auth\"",
+      "role": "user"
+    },
+    {
+      "content": "",
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "function": {
+            "arguments": "{\"query\":\"tests\"}",
+            "name": "recall"
+          },
+          "id": "bt-2-3",
+          "type": "function"
+        }
+      ]
+    },
+    {
+      "content": "Error: nothing in the record matches",
+      "role": "tool",
+      "tool_call_id": "bt-2-3"
+    },
+    {
+      "content": "{\"spoken\":\"Not yet.\",\"detail\":\"\"}",
+      "role": "assistant"
+    },
+    {
+      "content": "[10:00:00] Time is up: answer now.",
+      "role": "user"
+    }
+  ],
+  "model": "deepseek-flash",
+  "reasoning_effort": "low",
+  "stream": false,
+  "thinking": {
+    "type": "enabled"
+  }
+}

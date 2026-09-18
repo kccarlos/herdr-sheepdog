@@ -46,8 +46,12 @@ const (
 	// Supervisor tab, like --herdr=mock. Needs no Gemini key.
 	BrainFake = "fake"
 	// FakeBrainModel is the model name --brain=fake reports in brain.step
-	// and /api/brain/context.
-	FakeBrainModel = braintest.FakeModel
+	// and /api/brain/context; FakeBrainProvider and FakeBrainProvider2
+	// are its two providers (each a reflex model with a static catalog),
+	// so provider switching can be exercised without a network.
+	FakeBrainModel     = braintest.FakeModel
+	FakeBrainProvider  = "fake"
+	FakeBrainProvider2 = "fake2"
 )
 
 // Options select the daemon's mode; zero values take the defaults noted.
@@ -123,12 +127,15 @@ type App struct {
 	hc       *herdr.Client // nil in mock mode
 	wref     *watcherRef   // nil in mock mode
 	sup      *supervisor.Supervisor
-	brain    *brain.Brain  // nil when off
-	brainOff string        // why the brain is off (web.Deps.BrainOffReason)
-	voice    voice.Session // nil when off
-	web      *web.Server
-	prompts  *prompts.Loader
-	port     int
+	brain    *brain.Brain // nil when off
+	brainOff string       // why the brain is off (web.Deps.BrainOffReason)
+	// brainProviders lists the brain's providers for the picker,
+	// unavailable ones with the reason (web.Deps.BrainProviders).
+	brainProviders []web.ProviderInfo
+	voice          voice.Session // nil when off
+	web            *web.Server
+	prompts        *prompts.Loader
+	port           int
 
 	queryLazy *lazyQuerier // nil when --cli=off; filled in by Run after daemon.start
 }
@@ -223,8 +230,11 @@ func (a *App) wire() error {
 		// consulted.
 		bcfg := BrainConfig(cfg)
 		bcfg.Prompts = a.prompts
-		bcfg.Model = FakeBrainModel // so no brain.step claims a Gemini model (unless the state file's brain_model says so)
-		model := braintest.Reflex()
+		// So no brain.step claims a real provider or model (unless the
+		// state file's brain_provider / brain_model say so).
+		bcfg.Provider, bcfg.Model = FakeBrainProvider, FakeBrainModel
+		model, model2 := braintest.Reflex(), braintest.Reflex()
+		model2.Models = braintest.Catalog2()
 		if v := os.Getenv("SHEEPDOG_FAKE_BRAIN_DELAY_MS"); v != "" {
 			// A dev knob for watching turns overlap (CONFIG.md [brain]):
 			// every fake model call takes this long.
@@ -232,23 +242,30 @@ func (a *App) wire() error {
 			if err != nil || ms < 0 {
 				return fmt.Errorf("app: SHEEPDOG_FAKE_BRAIN_DELAY_MS=%q: want a non-negative integer", v)
 			}
-			model.Delay = time.Duration(ms) * time.Millisecond
+			model.Delay, model2.Delay = time.Duration(ms)*time.Millisecond, time.Duration(ms)*time.Millisecond
 		}
 		b, err := brain.New(bcfg, model, a.log)
 		if err != nil {
 			return fmt.Errorf("app: brain: %w", err)
 		}
+		if err := b.AddProvider(FakeBrainProvider2, model2); err != nil {
+			return fmt.Errorf("app: brain: %w", err)
+		}
 		a.brain = b
+		a.brainProviders = []web.ProviderInfo{{ID: FakeBrainProvider, Label: "Fake", Available: true}, {ID: FakeBrainProvider2, Label: "Fake 2", Available: true}}
 	case !cfg.Brain.Enabled:
 		a.brainOff = "brain.enabled=false"
-	case len(cfg.Gemini.APIKeys) == 0:
+	case cfg.Brain.Provider == brain.ProviderGemini && len(cfg.Gemini.APIKeys) == 0:
 		a.brainOff = "no Gemini key"
+	case cfg.Brain.Provider == brain.ProviderDeepSeek && cfg.DeepSeek.APIKey == "":
+		a.brainOff = "no DEEPSEEK_API_KEY"
 	default:
 		b, err := buildBrain(cfg, a.prompts, a.log)
 		if err != nil {
 			return err
 		}
 		a.brain = b
+		a.brainProviders = BrainProviders(cfg)
 	}
 	sup, err := supervisor.New(store, a.herdr, llmClient, querier, pusher, a.log, supervisor.Config{
 		PendingTTL:     time.Duration(cfg.PendingTTLS) * time.Second,
@@ -314,6 +331,7 @@ func (a *App) wire() error {
 		ReloadPrompts:  a.ReloadPrompts,
 		Brain:          a.brain,
 		BrainOffReason: a.brainOff,
+		BrainProviders: a.brainProviders,
 	}
 	if opts.Dev || a.cfg.Web.Dev {
 		deps.DevTestdataDir = a.cfg.Web.DevTestdataDir
@@ -338,26 +356,80 @@ func (a *App) wire() error {
 	return nil
 }
 
-// buildBrain builds the supervisor brain over the Gemini key pool with
-// the [brain] config (BrainConfig) and a transcript under the data dir.
+// buildBrain builds the supervisor brain with the [brain] config
+// (BrainConfig) and a transcript under the data dir, over every provider
+// that has a key: gemini (the key pool) and deepseek ([deepseek]),
+// starting on brain.provider. The caller has checked that the initial
+// provider has a key.
 func buildBrain(cfg config.Config, pl *prompts.Loader, log logging.Logger) (*brain.Brain, error) {
-	model, err := brain.NewGenaiModel(cfg.Gemini.APIKeys, log)
+	models, err := BrainModels(cfg, log)
 	if err != nil {
 		return nil, fmt.Errorf("app: brain: %w", err)
 	}
 	bcfg := BrainConfig(cfg)
 	bcfg.Prompts = pl
-	b, err := brain.New(bcfg, model, log)
+	initial, ok := models[cfg.Brain.Provider]
+	if !ok {
+		return nil, fmt.Errorf("app: brain: provider %q has no key", cfg.Brain.Provider)
+	}
+	b, err := brain.New(bcfg, initial, log)
 	if err != nil {
 		return nil, fmt.Errorf("app: brain: %w", err)
 	}
+	for id, m := range models {
+		if id == cfg.Brain.Provider {
+			continue
+		}
+		if err := b.AddProvider(id, m); err != nil {
+			return nil, fmt.Errorf("app: brain: %w", err)
+		}
+	}
 	return b, nil
+}
+
+// BrainModels builds the brain's Model of every provider the config
+// has a key for (shared with `sheepdog brain-test`): gemini over the
+// key pool, deepseek over the OpenAI-compatible adapter. An empty map
+// when there is no key at all.
+func BrainModels(cfg config.Config, log logging.Logger) (map[string]brain.Model, error) {
+	models := map[string]brain.Model{}
+	if len(cfg.Gemini.APIKeys) > 0 {
+		m, err := brain.NewGenaiModel(cfg.Gemini.APIKeys, log)
+		if err != nil {
+			return nil, err
+		}
+		models[brain.ProviderGemini] = m
+	}
+	if cfg.DeepSeek.APIKey != "" {
+		thinking := cfg.DeepSeek.Thinking
+		m, err := brain.NewOpenAICompatModel(brain.OpenAICompatConfig{Provider: brain.ProviderDeepSeek, BaseURL: cfg.DeepSeek.BaseURL, APIKey: cfg.DeepSeek.APIKey, Thinking: &thinking, ReasoningEffort: cfg.DeepSeek.ReasoningEffort, Log: log})
+		if err != nil {
+			return nil, err
+		}
+		models[brain.ProviderDeepSeek] = m
+	}
+	return models, nil
+}
+
+// BrainProviders lists every provider for the /debug picker, with why
+// the ones without a key are unavailable.
+func BrainProviders(cfg config.Config) []web.ProviderInfo {
+	gemini := web.ProviderInfo{ID: brain.ProviderGemini, Label: web.ProviderLabel(brain.ProviderGemini), Available: len(cfg.Gemini.APIKeys) > 0}
+	if !gemini.Available {
+		gemini.Reason = "no GEMINI_API_KEY"
+	}
+	deepseek := web.ProviderInfo{ID: brain.ProviderDeepSeek, Label: web.ProviderLabel(brain.ProviderDeepSeek), Available: cfg.DeepSeek.APIKey != ""}
+	if !deepseek.Available {
+		deepseek.Reason = "no DEEPSEEK_API_KEY"
+	}
+	return []web.ProviderInfo{gemini, deepseek}
 }
 
 // BrainConfig maps the [brain] config onto brain.Config (shared with
 // `sheepdog brain-test`).
 func BrainConfig(cfg config.Config) brain.Config {
 	return brain.Config{
+		Provider:        cfg.Brain.Provider,
 		Model:           cfg.Brain.Model,
 		MaxSteps:        cfg.Brain.MaxSteps,
 		AskTimeout:      time.Duration(cfg.Brain.AskTimeoutS) * time.Second,
@@ -391,7 +463,8 @@ func (a *App) BrainMode() string {
 func (a *App) BrainOffReason() string { return a.brainOff }
 
 // BrainModel reports the brain's current model ("" when it is off): the
-// configured brain.model until a runtime switch.
+// configured brain.model until a runtime switch. BrainProvider likewise
+// for the provider.
 func (a *App) BrainModel() string {
 	if a.brain == nil {
 		return ""
@@ -399,21 +472,39 @@ func (a *App) BrainModel() string {
 	return a.brain.Model()
 }
 
-// restoreBrainModel applies the model chosen at runtime in an earlier
-// run (the state file's session.brain_model, kept by PUT
-// /api/brain/model) over the configured initial value. Called from Run
-// right after daemon.start, before any turn: the brain.model_changed
-// {via: state} it logs belongs to this run, not before it.
+// BrainProvider reports the brain's current provider ("" when it is
+// off).
+func (a *App) BrainProvider() string {
+	if a.brain == nil {
+		return ""
+	}
+	return a.brain.Provider()
+}
+
+// restoreBrainModel applies the provider and model chosen at runtime in
+// an earlier run (the state file's session.brain_provider /
+// brain_model, kept by PUT /api/brain/model) over the configured
+// initial values; a provider that is not registered in this run (its
+// key is gone) is logged as daemon.brain_model_error and the configured
+// pair kept. A model without a provider was kept by a run from before
+// providers existed, when Gemini was the only one: it is Gemini's, never
+// the configured provider's. Called from Run right after daemon.start,
+// before any turn: the brain.model_changed {via: state} it logs belongs
+// to this run, not before it.
 func (a *App) restoreBrainModel() {
 	if a.brain == nil {
 		return
 	}
-	v := a.store.Snapshot().Session.BrainModel
-	if v == "" {
+	ss := a.store.Snapshot().Session
+	if ss.BrainModel == "" {
 		return
 	}
-	if err := a.brain.SetModel(v, "state"); err != nil {
-		a.log.Log("daemon", "daemon.brain_model_error", "", map[string]any{"model": v, "error": err.Error()})
+	provider := ss.BrainProvider
+	if provider == "" {
+		provider = brain.ProviderGemini
+	}
+	if err := a.brain.SetModel(provider, ss.BrainModel, "state"); err != nil {
+		a.log.Log("daemon", "daemon.brain_model_error", "", map[string]any{"provider": provider, "model": ss.BrainModel, "error": err.Error()})
 	}
 }
 
@@ -505,7 +596,7 @@ func (a *App) Run(ctx context.Context) (err error) {
 	brainMode := a.BrainMode()
 	a.log.Log("daemon", "daemon.start", "", map[string]any{
 		"version": a.opts.Version, "voice": a.opts.Voice, "herdr": a.opts.Herdr, "cli": a.opts.CLI, "brain": brainMode, "url": a.URL(),
-		"data_dir": a.cfg.DataDir, "llm_model": a.cfg.LLM.Model, "llm_base_url": a.cfg.LLM.BaseURL, "brain_model": a.BrainModel(),
+		"data_dir": a.cfg.DataDir, "llm_model": a.cfg.LLM.Model, "llm_base_url": a.cfg.LLM.BaseURL, "brain_provider": a.BrainProvider(), "brain_model": a.BrainModel(),
 	})
 	a.restoreBrainModel()
 	// Logged here, not in wire(), so it never precedes daemon.start (the

@@ -461,3 +461,58 @@ func TestBrainConfig(t *testing.T) {
 		t.Error("empty brain.model accepted")
 	}
 }
+
+// brain.provider and the [deepseek] section: defaults, file values, env
+// overrides (DEEPSEEK_API_KEY like GEMINI_API_KEY, SHEEPDOG_DEEPSEEK_*
+// for the rest), validation of the provider and the effort, and a
+// String() that says whether the key is set but never what it is.
+func TestDeepSeekConfig(t *testing.T) {
+	cfg, err := load(filepath.Join(t.TempDir(), "missing.toml"), noEnv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Brain.Provider != "gemini" || cfg.DeepSeek.APIKey != "" || cfg.DeepSeek.BaseURL != "https://api.deepseek.com" || !cfg.DeepSeek.Thinking || cfg.DeepSeek.ReasoningEffort != "low" {
+		t.Errorf("defaults = %+v / %q", cfg.DeepSeek, cfg.Brain.Provider)
+	}
+	if s := cfg.String(); !strings.Contains(s, "deepseek.api_key=unset") || !strings.Contains(s, "brain.provider=gemini") || !strings.Contains(s, "deepseek.reasoning_effort=low") {
+		t.Errorf("String() = %s", s)
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	body := "[brain]\nprovider = \"deepseek\"\n[deepseek]\napi_key = \"sk-file\"\nbase_url = \"http://file\"\nthinking = false\nreasoning_effort = \"high\"\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = load(path, noEnv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Brain.Provider != "deepseek" || cfg.DeepSeek.APIKey != "sk-file" || cfg.DeepSeek.BaseURL != "http://file" || cfg.DeepSeek.Thinking || cfg.DeepSeek.ReasoningEffort != "high" {
+		t.Errorf("file = %+v / %q", cfg.DeepSeek, cfg.Brain.Provider)
+	}
+	cfg, err = load(path, envFrom(map[string]string{"DEEPSEEK_API_KEY": "sk-env", "SHEEPDOG_DEEPSEEK_BASE_URL": "http://env", "SHEEPDOG_DEEPSEEK_THINKING": "true", "SHEEPDOG_DEEPSEEK_REASONING_EFFORT": " MAX ", "SHEEPDOG_BRAIN_PROVIDER": " Gemini "}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Brain.Provider != "gemini" || cfg.DeepSeek.APIKey != "sk-env" || cfg.DeepSeek.BaseURL != "http://env" || !cfg.DeepSeek.Thinking || cfg.DeepSeek.ReasoningEffort != "max" {
+		t.Errorf("env = %+v / %q", cfg.DeepSeek, cfg.Brain.Provider)
+	}
+	if s := cfg.String(); !strings.Contains(s, "deepseek.api_key=set") || strings.Contains(s, "sk-env") {
+		t.Errorf("String() leaks or misreports the key: %s", s)
+	}
+	// An empty DEEPSEEK_API_KEY does not clear a file key (like the
+	// Gemini pool).
+	if cfg, err := load(path, envFrom(map[string]string{"DEEPSEEK_API_KEY": ""})); err != nil || cfg.DeepSeek.APIKey != "sk-file" {
+		t.Errorf("empty env key: %v %q", err, cfg.DeepSeek.APIKey)
+	}
+	for name, env := range map[string]map[string]string{
+		"provider": {"SHEEPDOG_BRAIN_PROVIDER": "openai"},
+		"effort":   {"SHEEPDOG_DEEPSEEK_REASONING_EFFORT": "medium"},
+		"thinking": {"SHEEPDOG_DEEPSEEK_THINKING": "maybe"},
+		"base_url": {"SHEEPDOG_DEEPSEEK_BASE_URL": " "},
+	} {
+		if _, err := load(filepath.Join(t.TempDir(), "missing.toml"), envFrom(env)); err == nil {
+			t.Errorf("%s: bad value accepted", name)
+		}
+	}
+}

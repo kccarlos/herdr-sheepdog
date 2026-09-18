@@ -73,6 +73,7 @@ type ContextResponse struct {
 	Window          []brain.WindowEntry   `json:"window"`
 	LastCompaction  *brain.CompactionInfo `json:"last_compaction"`
 	SystemPrompt    PromptInfo            `json:"system_prompt"`
+	Provider        string                `json:"provider"`
 	Model           string                `json:"model"`
 	Turns           int                   `json:"turns"`
 	TranscriptLen   int                   `json:"transcript_len"`
@@ -156,7 +157,7 @@ func (s *Server) handleBrainContext(w http.ResponseWriter, r *http.Request) {
 	}
 	resp := ContextResponse{
 		WindowTokens: b.Config().WindowTokens, EstimatedTokens: est, Window: win,
-		SystemPrompt: promptInfo(b.PromptSections(), false), Model: b.Model(),
+		SystemPrompt: promptInfo(b.PromptSections(), false), Provider: b.Provider(), Model: b.Model(),
 		Turns: b.Turns(), TranscriptLen: b.Transcript().Len(), TranscriptPath: b.TranscriptPath(), Now: s.deps.Now().UTC(),
 	}
 	if c, ok := b.LastCompaction(); ok {
@@ -175,16 +176,56 @@ func (s *Server) handleBrainSystemPrompt(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, promptInfo(b.PromptSections(), true))
 }
 
-// ProviderInfo is one model provider the picker may offer.
+// ProviderInfo is one model provider the picker may offer: registered
+// with the brain (Available) or not, with the reason ("no
+// DEEPSEEK_API_KEY") so /debug can list it greyed out rather than hide
+// it.
 type ProviderInfo struct {
-	ID    string `json:"id"`
-	Label string `json:"label"`
+	ID        string `json:"id"`
+	Label     string `json:"label"`
+	Available bool   `json:"available"`
+	Reason    string `json:"reason,omitempty"`
 }
 
-// providers lists the providers the brain can run on: Gemini only for
-// now; the API carries the id so more can be added without changing its
-// shape.
-var providers = []ProviderInfo{{ID: brain.ProviderGemini, Label: "Gemini"}}
+// providerLabels are the display names of the known provider ids; an
+// unknown id is shown as itself.
+var providerLabels = map[string]string{brain.ProviderGemini: "Gemini", brain.ProviderDeepSeek: "DeepSeek"}
+
+// ProviderLabel returns the display name of a provider id.
+func ProviderLabel(id string) string {
+	if l, ok := providerLabels[id]; ok {
+		return l
+	}
+	return id
+}
+
+// providers lists the providers for the API: Deps.BrainProviders when
+// the daemon set it (it knows why a provider is missing), else every
+// provider registered with the brain, available.
+func (s *Server) providers(b *brain.Brain) []ProviderInfo {
+	if len(s.deps.BrainProviders) > 0 {
+		return append([]ProviderInfo(nil), s.deps.BrainProviders...)
+	}
+	var out []ProviderInfo
+	for _, id := range b.Providers() {
+		out = append(out, ProviderInfo{ID: id, Label: ProviderLabel(id), Available: true})
+	}
+	return out
+}
+
+// providerReason says why provider cannot be switched to: the reason
+// the daemon listed it with, or that it is unknown.
+func (s *Server) providerReason(b *brain.Brain, provider string) string {
+	for _, p := range s.providers(b) {
+		if p.ID == provider && !p.Available {
+			if p.Reason != "" {
+				return p.Reason
+			}
+			return "not configured"
+		}
+	}
+	return "unknown provider (registered: " + strings.Join(b.Providers(), ", ") + ")"
+}
 
 // BrainInfo is the brain field of GET /api/state: the provider and the
 // model the next turn runs on (omitted when the brain is off).
@@ -197,27 +238,33 @@ func (s *Server) brainInfo() *BrainInfo {
 	if s.deps.Brain == nil {
 		return nil
 	}
-	return &BrainInfo{Provider: brain.ProviderGemini, Model: s.deps.Brain.Model()}
+	return &BrainInfo{Provider: s.deps.Brain.Provider(), Model: s.deps.Brain.Model()}
 }
 
 // BrainModelsResponse is the body of GET /api/brain/models and PUT
 // /api/brain/model: the current provider and model, the providers to
-// choose from, and the discovered catalog. A discovery failure is not
-// an HTTP error: Models is what is known (the last fetched list, or
-// empty) and Error says why it is not fresh, so the picker can still
-// show the current model.
+// choose from (unavailable ones included, with the reason), and the
+// discovered catalog of ModelsProvider (the current provider, or the one
+// ?provider= asked for). A discovery failure is not an HTTP error:
+// Models is what is known (the last fetched list, or empty) and Error
+// says why it is not fresh, so the picker can still show the current
+// model.
 type BrainModelsResponse struct {
-	Provider  string            `json:"provider"`
-	Providers []ProviderInfo    `json:"providers"`
-	Model     string            `json:"model"`
-	Models    []brain.ModelInfo `json:"models"`
-	FetchedAt *time.Time        `json:"fetched_at,omitempty"`
-	Stale     bool              `json:"stale"`
-	Error     string            `json:"error,omitempty"`
+	Provider       string            `json:"provider"`
+	Providers      []ProviderInfo    `json:"providers"`
+	Model          string            `json:"model"`
+	ModelsProvider string            `json:"models_provider"`
+	Models         []brain.ModelInfo `json:"models"`
+	FetchedAt      *time.Time        `json:"fetched_at,omitempty"`
+	Stale          bool              `json:"stale"`
+	Error          string            `json:"error,omitempty"`
 }
 
-func brainModelsResponse(b *brain.Brain, c brain.Catalog) BrainModelsResponse {
-	resp := BrainModelsResponse{Provider: brain.ProviderGemini, Providers: providers, Model: b.Model(), Models: c.Models, Stale: c.Stale}
+func (s *Server) brainModelsResponse(b *brain.Brain, c brain.Catalog) BrainModelsResponse {
+	resp := BrainModelsResponse{Provider: b.Provider(), Providers: s.providers(b), Model: b.Model(), ModelsProvider: c.Provider, Models: c.Models, Stale: c.Stale}
+	if resp.Models == nil {
+		resp.Models = []brain.ModelInfo{}
+	}
 	if !c.FetchedAt.IsZero() {
 		at := c.FetchedAt.UTC()
 		resp.FetchedAt = &at
@@ -228,31 +275,51 @@ func brainModelsResponse(b *brain.Brain, c brain.Catalog) BrainModelsResponse {
 	return resp
 }
 
-// handleBrainModels answers the model catalog (cached for
-// brain.CatalogTTL; ?refresh=1 fetches again) with the current choice.
+// handleBrainModels answers the model catalog of ?provider= (default:
+// the current provider; 400 with the reason for one that is not
+// registered), cached for brain.CatalogTTL, ?refresh=1 fetching again,
+// with the current choice.
 func (s *Server) handleBrainModels(w http.ResponseWriter, r *http.Request) {
 	b, ok := s.brainOrUnavailable(w)
 	if !ok {
 		return
 	}
+	provider := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("provider")))
+	if provider != "" && !registered(b, provider) {
+		writeError(w, http.StatusBadRequest, "provider "+strconv.Quote(provider)+": "+s.providerReason(b, provider))
+		return
+	}
 	refresh := r.URL.Query().Get("refresh") == "1"
 	ctx, cancel := context.WithTimeout(r.Context(), catalogTimeout)
 	defer cancel()
-	writeJSON(w, http.StatusOK, brainModelsResponse(b, b.Models(ctx, refresh)))
+	writeJSON(w, http.StatusOK, s.brainModelsResponse(b, b.Models(ctx, provider, refresh)))
+}
+
+// registered reports whether provider is one the brain can run on.
+func registered(b *brain.Brain, provider string) bool {
+	for _, id := range b.Providers() {
+		if id == provider {
+			return true
+		}
+	}
+	return false
 }
 
 // SetBrainModelRequest is the body of PUT /api/brain/model.
 type SetBrainModelRequest struct {
-	// Provider defaults to gemini, the only one so far.
+	// Provider defaults to the current one.
 	Provider string `json:"provider"`
 	Model    string `json:"model"`
 }
 
-// handleSetBrainModel switches the brain's model for the next turn and
-// keeps the choice in the state file (session.brain_model), so a
-// restart uses it over the configured brain.model. A name the catalog
-// does not list is accepted (the list may be stale); the picker marks
-// it. Answers as GET /api/brain/models, from the cached catalog.
+// handleSetBrainModel switches the brain's provider and model for the
+// next turn and keeps the choice in the state file
+// (session.brain_provider, session.brain_model), so a restart uses it
+// over the configured brain.provider / brain.model. A provider that is
+// not registered is a 400 with the reason; a name the catalog does not
+// list is accepted (the list may be stale); the picker marks it.
+// Answers as GET /api/brain/models, from the new provider's cached
+// catalog.
 func (s *Server) handleSetBrainModel(w http.ResponseWriter, r *http.Request) {
 	b, ok := s.brainOrUnavailable(w)
 	if !ok {
@@ -263,18 +330,19 @@ func (s *Server) handleSetBrainModel(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad body: "+err.Error())
 		return
 	}
-	if p := strings.ToLower(strings.TrimSpace(req.Provider)); p != "" && p != brain.ProviderGemini {
-		writeError(w, http.StatusBadRequest, "provider "+strconv.Quote(req.Provider)+" is not supported: only gemini for now")
+	provider := strings.ToLower(strings.TrimSpace(req.Provider))
+	if provider != "" && !registered(b, provider) {
+		writeError(w, http.StatusBadRequest, "provider "+strconv.Quote(provider)+": "+s.providerReason(b, provider))
 		return
 	}
-	if err := b.SetModel(req.Model, "debug"); err != nil {
+	if err := b.SetModel(provider, req.Model, "debug"); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	model := b.Model()
-	if err := s.deps.Store.UpdateSession(func(ss *state.Session) { ss.BrainModel = model }); err != nil {
+	provider, model := b.Provider(), b.Model()
+	if err := s.deps.Store.UpdateSession(func(ss *state.Session) { ss.BrainProvider, ss.BrainModel = provider, model }); err != nil {
 		writeError(w, http.StatusInternalServerError, "persist: "+err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, brainModelsResponse(b, b.CachedModels()))
+	writeJSON(w, http.StatusOK, s.brainModelsResponse(b, b.CachedModels(provider)))
 }

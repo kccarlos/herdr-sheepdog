@@ -27,6 +27,9 @@ var (
 	// event turn that a newer event turn about the same agent replaced
 	// before it ran.
 	ErrCoalesced = errors.New("brain: coalesced into a newer event turn")
+	// ErrUnknownProvider is returned by SetModel and Models for a
+	// provider id nothing was registered under.
+	ErrUnknownProvider = errors.New("brain: unknown provider")
 )
 
 // Kind of a turn: what the assistant asked for.

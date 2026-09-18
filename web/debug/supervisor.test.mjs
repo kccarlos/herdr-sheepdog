@@ -135,10 +135,11 @@ test('turn headers correlate with brain.turn / brain.fallback and reset on daemo
   log.add(ev('brain.turn', { turn: 1, trigger: 'ceo', kind: 'ask', steps: 9, model_calls: 9, dur_ms: 99999, fallback: true }));
   log.add(ev('daemon.start', { version: 'new' }));
   assert.equal(log.turn(1), null, 'the old run\'s turn 1 is gone');
-  log.add(ev('brain.step', { turn: 1, step: 1, model: 'x' }));
-  log.add(ev('brain.step', { turn: 1, step: 2, model: 'x' }));
+  log.add(ev('brain.step', { turn: 1, step: 1, provider: 'deepseek', model: 'x' }));
+  log.add(ev('brain.step', { turn: 1, step: 2, provider: 'deepseek', model: 'x' }));
   assert.equal(log.turn(1).modelCalls, 2, 'steps count until the turn completes');
-  log.add(ev('brain.turn', { turn: 1, trigger: 'ceo', kind: 'ask', steps: 2, model_calls: 2, dur_ms: 5100, fallback: false, tokens_in: 4000, tokens_out: 60, window_tokens: 1200, acted: 0 }));
+  assert.equal(`${log.turn(1).provider}/${log.turn(1).model}`, 'deepseek/x', 'the first step names the turn\'s provider and model');
+  log.add(ev('brain.turn', { turn: 1, trigger: 'ceo', kind: 'ask', provider: 'deepseek', model: 'x', steps: 2, model_calls: 2, dur_ms: 5100, fallback: false, tokens_in: 4000, tokens_out: 60, window_tokens: 1200, acted: 0 }));
   log.add(ev('brain.step', { turn: 1, step: 3 }));
   assert.equal(log.turn(1).modelCalls, 2, 'a complete turn keeps the logged count');
   log.add(ev('brain.fallback', { turn: 2, reason: 'timeout', kind: 'propose', trigger: 'ceo', acted: false, error: 'deadline' }));
@@ -147,7 +148,7 @@ test('turn headers correlate with brain.turn / brain.fallback and reset on daemo
   const items = buildTranscriptView(sampleRun(), null, log);
   const turns = items.filter((it) => it.kind === 'turn');
   assert.equal(turns.length, 2);
-  assert.deepEqual({ modelCalls: turns[0].modelCalls, durMs: turns[0].durMs, fallback: turns[0].fallback, reqKind: turns[0].reqKind, trigger: turns[0].trigger, tokensIn: turns[0].tokensIn, windowTokens: turns[0].windowTokens }, { modelCalls: 2, durMs: 5100, fallback: false, reqKind: 'ask', trigger: 'ceo', tokensIn: 4000, windowTokens: 1200 });
+  assert.deepEqual({ modelCalls: turns[0].modelCalls, durMs: turns[0].durMs, fallback: turns[0].fallback, reqKind: turns[0].reqKind, trigger: turns[0].trigger, tokensIn: turns[0].tokensIn, windowTokens: turns[0].windowTokens, provider: turns[0].provider, model: turns[0].model }, { modelCalls: 2, durMs: 5100, fallback: false, reqKind: 'ask', trigger: 'ceo', tokensIn: 4000, windowTokens: 1200, provider: 'deepseek', model: 'x' });
   assert.deepEqual({ fallback: turns[1].fallback, reason: turns[1].reason, reqKind: turns[1].reqKind }, { fallback: true, reason: 'timeout', reqKind: 'propose' });
   const comp = items.find((it) => it.kind === 'compaction');
   assert.deepEqual({ before: comp.info.before, after: comp.info.after, dropped: comp.info.dropped }, { before: 900, after: 200, dropped: 8 }, 'the i-th compaction event when the context does not say');
@@ -199,6 +200,7 @@ test('parsers and formatting', () => {
   assert.deepEqual(parsePush('no prefix'), { urgency: '', text: 'no prefix' });
   assert.deepEqual(parseWorkerEvent('auth: pane closed'), { agent: 'auth', from: '', to: '', closed: true });
   assert.deepEqual(parseModelSwitch('model switched from gemini-3.5-flash to gemini-3.8-flash'), { from: 'gemini-3.5-flash', to: 'gemini-3.8-flash' });
+  assert.deepEqual(parseModelSwitch('model switched from gemini/gemini-3.8-flash to deepseek/deepseek-flash'), { from: 'gemini/gemini-3.8-flash', to: 'deepseek/deepseek-flash' });
   assert.deepEqual(parseModelSwitch('something else'), { from: '', to: '' });
   assert.equal(fmtTokens(12400), '12.4k');
   assert.equal(fmtTokens(980), '980');

@@ -62,12 +62,16 @@ type Deps struct {
 	// Watcher receives plugin-shim events; nil means --herdr=mock.
 	Watcher EventInjector
 	// Brain backs GET /api/brain/{transcript,context,system_prompt,models}
-	// and PUT /api/brain/model (the runtime model switch, persisted in
-	// Store's session.brain_model); nil means the brain is off and those
-	// answer 503 with BrainOffReason ("--brain=off", "brain.enabled=false",
-	// "no Gemini key").
+	// and PUT /api/brain/model (the runtime provider/model switch,
+	// persisted in Store's session.brain_provider / brain_model); nil
+	// means the brain is off and those answer 503 with BrainOffReason
+	// ("--brain=off", "brain.enabled=false", "no Gemini key").
 	Brain          *brain.Brain
 	BrainOffReason string
+	// BrainProviders lists the providers the picker offers, available
+	// or not (with the reason: "no DEEPSEEK_API_KEY"); nil lists the
+	// brain's registered providers, all available.
+	BrainProviders []ProviderInfo
 	// HerdrMode and VoiceMode are reported by /api/state ("socket"|"mock",
 	// "gemini"|"off").
 	HerdrMode, VoiceMode string

@@ -70,6 +70,12 @@ export function argSummary(args, max = 60) {
   return parts.join(', ');
 }
 
+/** Renders "provider/model" ("model" alone when the event carries no provider, as llm.call and older brain events do). */
+export function withProvider(provider, model) {
+  if (!model) return provider || '';
+  return provider ? `${provider}/${model}` : model;
+}
+
 /** Short one-line summary of a supervisor-side event (llm.call, herdr.read, pending.*, …). */
 export function eventSummary(ev) {
   const p = ev.payload && typeof ev.payload === 'object' ? ev.payload : {};
@@ -77,7 +83,7 @@ export function eventSummary(ev) {
   const parts = [];
   switch (true) {
     case type === 'llm.call' || type === 'brain.step':
-      parts.push(p.template, p.model, p.dur_ms != null ? `${p.dur_ms} ms` : '', p.attempts > 1 ? `${p.attempts} attempts` : '', p.tool_calls != null ? `${p.tool_calls} tool call${p.tool_calls === 1 ? '' : 's'}` : '', p.error ? `error: ${p.error}` : '');
+      parts.push(p.template, withProvider(p.provider, p.model), p.dur_ms != null ? `${p.dur_ms} ms` : '', p.attempts > 1 ? `${p.attempts} attempts` : '', p.tool_calls != null ? `${p.tool_calls} tool call${p.tool_calls === 1 ? '' : 's'}` : '', p.error ? `error: ${p.error}` : '');
       break;
     case type === 'brain.compaction':
       parts.push(p.before_tokens != null || p.after_tokens != null ? `${p.before_tokens ?? '?'} → ${p.after_tokens ?? '?'} tokens` : '', p.dropped != null ? `${p.dropped} dropped` : '', p.reason);
@@ -92,7 +98,7 @@ export function eventSummary(ev) {
       parts.push(p.agent ? `${p.agent} ${p.event || ''}`.trim() : '', 'replaced the queued turn');
       break;
     case type === 'brain.model_changed':
-      parts.push(`${p.from || '?'} → ${p.to || '?'}`, p.via ? `via ${p.via}` : '');
+      parts.push(`${withProvider(p.from_provider, p.from)} → ${withProvider(p.provider, p.to)}`, p.via ? `via ${p.via}` : '');
       break;
     case type.endsWith('.tool_call'):
       parts.push(p.name, argSummary(p.args), p.via ? `via ${p.via}` : '');

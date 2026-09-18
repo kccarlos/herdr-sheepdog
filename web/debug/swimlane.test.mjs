@@ -497,6 +497,8 @@ test('push judgment: brain.push_decision rides on the voice.push it produced; a 
     ev('brain.yielded', { turn: 4, step: 2, agent: 'auth', event: 'done', ceo_waiting: 1 }, 1, 'brain'),
     ev('brain.event_coalesced', { agent: 'auth', event: 'done', kind: 'announce' }, 1, 'brain'),
     ev('brain.model_changed', { from: 'gemini-3.5-flash', to: 'gemini-3.8-flash', via: 'debug' }, 1, 'brain'),
+    ev('brain.model_changed', { from_provider: 'gemini', from: 'gemini-3.8-flash', provider: 'deepseek', to: 'deepseek-flash', via: 'debug' }, 1, 'brain'),
+    ev('brain.step', { turn: 7, step: 1, template: 'ask', provider: 'deepseek', model: 'deepseek-flash', dur_ms: 1200, tool_calls: 2 }, 5, 'brain'),
   ]);
   const c = cards(rows.rows);
   const pushes = c.filter((r) => r.type === 'voice.push');
@@ -514,8 +516,12 @@ test('push judgment: brain.push_decision rides on the voice.push it produced; a 
   assert.equal(c.find((r) => r.type === 'brain.yielded').title, 'yielded to a CEO turn');
   assert.equal(c.find((r) => r.type === 'brain.yielded').summary, 'turn 4 · before step 2 · auth done · 1 CEO turn waiting');
   assert.equal(c.find((r) => r.type === 'brain.event_coalesced').summary, 'auth done · replaced the queued turn');
-  const switched = c.find((r) => r.type === 'brain.model_changed');
-  assert.equal(switched.title, 'model switched');
-  assert.equal(switched.summary, 'gemini-3.5-flash → gemini-3.8-flash · via debug');
-  assert.ok(switched.cls.includes('brain') && switched.lane === 'sup');
+  const switches = c.filter((r) => r.type === 'brain.model_changed');
+  assert.equal(switches[0].title, 'model switched');
+  assert.equal(switches[0].summary, 'gemini-3.5-flash → gemini-3.8-flash · via debug', 'an event without providers (older logs) reads as before');
+  assert.equal(switches[1].summary, 'gemini/gemini-3.8-flash → deepseek/deepseek-flash · via debug');
+  assert.ok(switches[0].cls.includes('brain') && switches[0].lane === 'sup');
+  const steps = c.filter((r) => r.type === 'brain.step');
+  assert.equal(steps[steps.length - 1].arrow.label, 'ask · deepseek/deepseek-flash · 1.2 s · 2 tool calls');
+  assert.equal(steps[0].arrow.label, 'announce · fake-reflex · 5 ms', 'a step without a provider shows the model alone');
 });

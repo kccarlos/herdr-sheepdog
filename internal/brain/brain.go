@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -45,6 +46,10 @@ const (
 
 // Config tunes a Brain; zero values take the defaults.
 type Config struct {
+	// Provider is the id the Model given to New is registered under and
+	// the provider of the first turn (default ProviderGemini); SetModel
+	// changes it at runtime (Brain.Provider reports the current one).
+	Provider string
 	// Model is the initial model name passed to Model.Generate; SetModel
 	// changes it at runtime (Brain.Model reports the current one).
 	Model string
@@ -85,6 +90,9 @@ type Config struct {
 }
 
 func (c Config) withDefaults() Config {
+	if c.Provider == "" {
+		c.Provider = ProviderGemini
+	}
 	if c.Model == "" {
 		c.Model = DefaultModel
 	}
@@ -133,7 +141,6 @@ func (c Config) withDefaults() Config {
 // are serialised by the turn lock; ingestion may happen at any time.
 type Brain struct {
 	cfg        Config
-	model      Model
 	log        logging.Logger
 	transcript *Transcript
 	engine     ContextEngine
@@ -145,21 +152,24 @@ type Brain struct {
 	ctx   context.Context // ends on Close (bounds after-turn work)
 	stop  context.CancelFunc
 
-	mu           sync.Mutex
-	host         Host
-	curModel     string // the model name of the next turn (Model / SetModel)
-	turns        int
-	toolSeq      int
-	inBuf        []string // voice transcript fragments not yet final
-	outBuf       []string
-	promptLogged bool
-	userVars     map[string]string // USER.md's {chattiness}/{tz}; SetUserVars
+	mu     sync.Mutex
+	host   Host
+	models map[string]Model // the registered providers (New, AddProvider)
+	// curProvider / curModel are the provider and model of the next turn
+	// (Provider, Model / SetModel).
+	curProvider, curModel string
+	turns                 int
+	toolSeq               int
+	inBuf                 []string // voice transcript fragments not yet final
+	outBuf                []string
+	promptLogged          bool
+	userVars              map[string]string // USER.md's {chattiness}/{tz}; SetUserVars
 	// lastCompaction is the most recent successful compaction (zero
 	// value when none), for the Supervisor tab.
 	lastCompaction CompactionInfo
 
-	// catalog is the cached model list (catalog.go).
-	catalog catalogCache
+	// catalogs are the cached model lists, one per provider (catalog.go).
+	catalogs catalogCaches
 }
 
 // CompactionInfo describes one compaction for Brain.LastCompaction.
@@ -171,7 +181,8 @@ type CompactionInfo struct {
 	At           time.Time `json:"at"`
 }
 
-// New builds a Brain over model. log may be nil. The Host is attached by
+// New builds a Brain over model, registered as provider cfg.Provider;
+// AddProvider registers more. log may be nil. The Host is attached by
 // the supervisor through SetHost.
 func New(cfg Config, model Model, log logging.Logger) (*Brain, error) {
 	if model == nil {
@@ -181,7 +192,7 @@ func New(cfg Config, model Model, log logging.Logger) (*Brain, error) {
 		log = logging.NopLogger{}
 	}
 	cfg = cfg.withDefaults()
-	b := &Brain{cfg: cfg, model: model, log: log, curModel: cfg.Model, tools: toolDeclarations(false), readTools: toolDeclarations(true)}
+	b := &Brain{cfg: cfg, log: log, models: map[string]Model{cfg.Provider: model}, curProvider: cfg.Provider, curModel: cfg.Model, tools: toolDeclarations(false), readTools: toolDeclarations(true)}
 	b.ctx, b.stop = context.WithCancel(context.Background())
 	path := ""
 	if cfg.DataDir != "" {
@@ -228,13 +239,65 @@ func (b *Brain) SetUserVars(vars map[string]string) {
 // Transcript returns the run's transcript.
 func (b *Brain) Transcript() *Transcript { return b.transcript }
 
+// AddProvider registers model under the provider id, so SetModel can
+// switch to it; an id already registered is replaced. Safe at any time
+// (a turn in flight keeps the Model it started with).
+func (b *Brain) AddProvider(id string, model Model) error {
+	id = strings.ToLower(strings.TrimSpace(id))
+	switch {
+	case id == "":
+		return errors.New("brain: provider id required")
+	case model == nil:
+		return fmt.Errorf("brain: provider %q: model required", id)
+	}
+	b.mu.Lock()
+	b.models[id] = model
+	b.mu.Unlock()
+	return nil
+}
+
+// Providers lists the registered provider ids, sorted.
+func (b *Brain) Providers() []string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.providersLocked()
+}
+
+// Provider returns the provider id the next turn will use
+// (Config.Provider until SetModel changes it).
+func (b *Brain) Provider() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.curProvider
+}
+
 // Model returns the model name the next turn will use (Config.Model
-// until SetModel changes it). A turn in flight keeps the name it started
-// with for every step.
+// until SetModel changes it). A turn in flight keeps the provider and
+// name it started with for every step.
 func (b *Brain) Model() string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.curModel
+}
+
+// current snapshots the next turn's provider, model name and Model
+// implementation.
+func (b *Brain) current() (provider, model string, impl Model) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.curProvider, b.curModel, b.models[b.curProvider]
+}
+
+// modelOf returns the Model registered under provider ("" for the
+// current one), ok false when there is none.
+func (b *Brain) modelOf(provider string) (id string, m Model, ok bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if provider == "" {
+		provider = b.curProvider
+	}
+	m, ok = b.models[provider]
+	return provider, m, ok
 }
 
 // modelNameRE is the shape of a model id the switch accepts.
@@ -243,14 +306,17 @@ var modelNameRE = regexp.MustCompile(`^[A-Za-z0-9._/-]+$`)
 // maxModelName bounds a model id.
 const maxModelName = 128
 
-// SetModel switches the model of the next turn ("models/" prefix
-// stripped; empty or odd names rejected) without waiting for a running
-// turn: that turn finishes on the model it started with. A change is
-// logged as brain.model_changed {from, to, via} and marked in the
-// transcript (KindSystem) so the Supervisor tab shows where it flipped;
-// the same name again is a no-op. Persisting the choice is the caller's
+// SetModel switches the provider (a registered id; "" keeps the current
+// one) and model of the next turn ("models/" prefix stripped; empty or
+// odd names rejected) without waiting for a running turn: that turn
+// finishes on the provider and model it started with. A change is
+// logged as brain.model_changed {from_provider, from, provider, to, via}
+// and marked in the transcript (KindSystem, "model switched from
+// gemini/X to deepseek/Y") so the Supervisor tab shows where it flipped;
+// the same pair again is a no-op. Persisting the choice is the caller's
 // business (the daemon keeps it in the state file).
-func (b *Brain) SetModel(name, via string) error {
+func (b *Brain) SetModel(provider, name, via string) error {
+	provider = strings.ToLower(strings.TrimSpace(provider))
 	name = strings.TrimPrefix(strings.TrimSpace(name), "models/")
 	switch {
 	case name == "":
@@ -261,16 +327,33 @@ func (b *Brain) SetModel(name, via string) error {
 		return fmt.Errorf("brain: model name %q: letters, digits, '.', '_', '-' and '/' only", name)
 	}
 	b.mu.Lock()
-	from := b.curModel
-	if from == name {
+	fromProvider, from := b.curProvider, b.curModel
+	if provider == "" {
+		provider = fromProvider
+	}
+	if _, ok := b.models[provider]; !ok {
+		b.mu.Unlock()
+		return fmt.Errorf("%w: %q (registered: %s)", ErrUnknownProvider, provider, strings.Join(b.providersLocked(), ", "))
+	}
+	if fromProvider == provider && from == name {
 		b.mu.Unlock()
 		return nil
 	}
-	b.curModel = name
+	b.curProvider, b.curModel = provider, name
 	b.mu.Unlock()
-	b.log.Log(logSource, "brain.model_changed", "", map[string]any{"from": from, "to": name, "via": via})
-	b.ingest(Message{Role: RoleSystem, Kind: KindSystem, Content: fmt.Sprintf("model switched from %s to %s", from, name)}, 0)
+	b.log.Log(logSource, "brain.model_changed", "", map[string]any{"from_provider": fromProvider, "from": from, "provider": provider, "to": name, "via": via})
+	b.ingest(Message{Role: RoleSystem, Kind: KindSystem, Content: fmt.Sprintf("model switched from %s/%s to %s/%s", fromProvider, from, provider, name)}, 0)
 	return nil
+}
+
+// providersLocked is Providers under b.mu.
+func (b *Brain) providersLocked() []string {
+	out := make([]string, 0, len(b.models))
+	for id := range b.models {
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // Engine returns the context engine in use.
@@ -469,10 +552,11 @@ func (b *Brain) Seed(msgs []Message) {
 }
 
 // summarize is the compaction's model call: one plain text-in/text-out
-// generation, no tools.
+// generation, no tools, on the current provider and model.
 func (b *Brain) summarize(ctx context.Context, text string) (string, error) {
 	prompt := "Summarise the following supervisor transcript in at most 12 short lines for your own later reference: what the CEO asked and decided, what each agent was told, did, asked and answered, and anything still open. Keep aliases; drop paths, hashes and ids.\n\n" + text
-	resp, err := b.model.Generate(ctx, b.Model(), []*genai.Content{{Role: genai.RoleUser, Parts: []*genai.Part{{Text: prompt}}}}, &genai.GenerateContentConfig{})
+	_, model, impl := b.current()
+	resp, err := impl.Generate(ctx, model, []*genai.Content{{Role: genai.RoleUser, Parts: []*genai.Part{{Text: prompt}}}}, &genai.GenerateContentConfig{})
 	if err != nil {
 		return "", err
 	}

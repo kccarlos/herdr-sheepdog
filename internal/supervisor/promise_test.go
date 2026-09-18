@@ -83,7 +83,7 @@ func TestPromiseCreatedFromCEOTurn(t *testing.T) {
 	for _, m := range h.sup.Brain().Transcript().Messages() {
 		kinds = append(kinds, string(m.Kind))
 	}
-	if got := strings.Join(kinds, " "); got != "worker_event ceo_utterance request brain_tool_call brain_tool_result brain_tool_call brain_tool_result promise reply" {
+	if got := strings.Join(kinds, " "); got != "worker_event ceo_utterance request brain_tool_call brain_tool_call brain_tool_result brain_tool_result promise reply" {
 		t.Errorf("transcript = %s", got)
 	}
 	// The ledger of the next turn lists it.

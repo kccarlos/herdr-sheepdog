@@ -2,9 +2,9 @@
 
 Configuration is read from `~/.config/sheepdog/config.toml` when it
 exists (create one with `sheepdog config init`), then overridden by
-`SHEEPDOG_*` environment variables (and, for the Gemini key pool,
-`GEMINI_API_KEY`/`GEMINI_API_KEY_1`…`GEMINI_API_KEY_9`). The environment
-always wins over the file. See `internal/config/config.go` for the
+`SHEEPDOG_*` environment variables (and, for the keys, `DEEPSEEK_API_KEY`
+and the Gemini pool `GEMINI_API_KEY`/`GEMINI_API_KEY_1`…`GEMINI_API_KEY_9`).
+The environment always wins over the file. See `internal/config/config.go` for the
 authoritative source; this file is checked against it in
 `internal/config/doc_test.go` — a struct field without a matching entry
 here fails the build.
@@ -55,6 +55,50 @@ Voice session (plan §6).
 | `gemini.model` | `SHEEPDOG_GEMINI_MODEL` | `gemini-3.8-live` | The Live API model name. |
 | `gemini.voice` | `SHEEPDOG_GEMINI_VOICE` | `Puck` | The prebuilt voice name. |
 | `gemini.stall_after_s` | `SHEEPDOG_GEMINI_STALL_AFTER_S` | `10` | Seconds an utterance may go without any model response (tool call or audio) before `voice.stalled` is logged and the pages show "stalled". The second stall on one connection (or the second idle push that outwaits the 30 s turn timeout) recycles the connection: a reconnect with the still-valid resumption handle (`voice.recycle`), keeping the conversation. |
+
+## `[deepseek]`
+
+The second supervisor-brain provider: DeepSeek's OpenAI-compatible chat
+completions API (`deepseek-flash`, `deepseek-v4-pro`), **paid per
+token**. With a key, `deepseek` is offered in the `/debug` model picker
+whatever `brain.provider` says, and `sheepdog brain-test --provider
+deepseek` runs a turn on it. The voice session and `[llm]` never use it.
+
+Measured on 2026-09-18 with `brain-test` (`what is auth doing?` on the
+`codex-working` fixture, two model calls each: a `read_screen`, then the
+answer; ~3 100 prompt tokens per call): `reasoning_effort = "low"` took
+2.84 s wall (1.30 s + 1.54 s, 213 completion tokens), `"high"` 2.92 s
+and 2.91 s on two runs (1.31 s + 1.60 s, 269 completion tokens of which
+21 + 98 reasoning) — thinking is on (the `reasoning_tokens` are there)
+but a screen question draws little of it at either effort, so no latency
+penalty and no visible gain; a propose that sent `prompt` and `promise`
+in one step took 3.31 s at `low` (53 + 33 reasoning tokens), a seeded
+follow-up ask 3.04 s (4 + 147). Both efforts fit the 8 s
+`brain.ask_timeout_s` with room for a second tool round; `low` is the
+default because it is the cheaper of two equals on this work, and `max`
+is untested.
+
+**The reasoning replay trade-off.** DeepSeek's thinking mode returns a
+`reasoning_content` with every assistant message and, while tools are
+declared, requires it back on the assistant messages of the current
+turn's tool loop (a missing one is a 400). The brain keeps it on the
+transcript message (`raw`, tagged with `provider` and `model`) and
+replays it only for messages the same provider and model produced; a
+Gemini step is rebuilt as a plain tool call for DeepSeek and vice
+versa. Older turns keep their reasoning for as long as they are in the
+window — the blobs are not counted in the window's token estimate
+(`brain.window_tokens` counts content only), so the real prompt is
+larger than the meter says — and lose it when compaction drops them,
+which the API accepts (verified live with a seeded transcript whose
+`raw` was stripped). Switch models mid-turn and the running turn still
+finishes on the pair it started with.
+
+| Key | Env override | Default | Meaning |
+|---|---|---|---|
+| `deepseek.api_key` | `DEEPSEEK_API_KEY` | `""` | The DeepSeek API key (Bearer). Like `GEMINI_API_KEY`, normally left out of the TOML file and set via the environment or `--env-file`; an empty env value does not clear a file value. Never logged: `config show` prints `set`/`unset`. Without it the provider is listed in the picker as unavailable ("no DEEPSEEK_API_KEY") and `brain.provider = "deepseek"` leaves the brain off. One key, no pool: a 429 fails the turn (`brain.rate_limited`, then the template path), it is not retried. |
+| `deepseek.base_url` | `SHEEPDOG_DEEPSEEK_BASE_URL` | `https://api.deepseek.com` | API root; `/chat/completions` and `/models` are appended. |
+| `deepseek.thinking` | `SHEEPDOG_DEEPSEEK_THINKING` | `true` | DeepSeek's thinking mode (`"thinking": {"type": "enabled"}`); `false` sends `disabled`. On, the brain replays `reasoning_content` as described above. |
+| `deepseek.reasoning_effort` | `SHEEPDOG_DEEPSEEK_REASONING_EFFORT` | `low` | `low`, `high` or `max`; sent only with thinking on. See the measurements above. |
 
 ## `[llm]`
 
@@ -114,24 +158,33 @@ it?" for what each level announces.
 The supervisor brain (plan D7-revised, [`docs/roles.md`](docs/roles.md)):
 a stateful agent behind `ask` and `propose` that reasons with tools
 (`read_screen`, `run_cli`, `list_agents`, `recall`) and acts with
-`prompt`, `send_keys`, `interrupt` over a function-calling Gemini model,
+`prompt`, `send_keys`, `interrupt` over a function-calling model — Gemini
+(the key pool) or DeepSeek (`[deepseek]`), switchable at runtime —
 keeping one transcript per daemon run at `<data_dir>/brain/<run-id>.jsonl`.
 When it errors or runs out of budget, the supervisor answers from the
-template path instead. Its model can be switched while the daemon runs,
-from the `/debug` header's model picker (which discovers the choices
-from Gemini's model list) or `PUT /api/brain/model {"provider":
-"gemini", "model": "gemini-3.8-flash"}`: the switch takes effect at the
-next turn (a turn in flight finishes on the model it started with), is
-logged as `brain.model_changed` and marked in the transcript, and is
-kept in the state file's `session.brain_model`, which wins over
-`brain.model` on restart. To follow the config value again, delete
-`session.brain_model` from the state file (or pick that model — the
-picker always records the choice). Whether a model supports function
-calling is not in the list, so a bad pick shows up as a `brain.step`
-error and the template path answers until you switch back. The free
-tier's daily cap is per model, so switching models also switches quota
-buckets. `sheepdog serve --brain=off` disables it for one
-run; it is also off, silently, when no Gemini key is configured.
+template path instead. Its provider and model can be switched while the
+daemon runs, from the `/debug` header's model picker (the provider
+select lists every provider, a keyless one greyed out with the reason;
+the model select shows that provider's discovered list — Gemini's model
+list, DeepSeek's `GET /models` — and the switch happens when a model is
+picked) or `PUT /api/brain/model {"provider": "deepseek", "model":
+"deepseek-flash"}`: the switch takes effect at the next turn (a turn in
+flight finishes on the provider and model it started with), is logged
+as `brain.model_changed` and marked in the transcript ("model switched
+from gemini/gemini-3.5-flash to deepseek/deepseek-flash"), and is kept
+in the state file's `session.brain_provider` / `session.brain_model`,
+which win over `brain.provider` / `brain.model` on restart (a persisted
+provider that has no key in the new run is logged as
+`daemon.brain_model_error` and the configured pair kept; a file from
+before providers existed names a Gemini model). To follow the config
+values again, delete both from the state file (or pick them — the
+picker always records the choice). Whether a Gemini model supports
+function calling is not in its list, so a bad pick shows up as a
+`brain.step` error and the template path answers until you switch back.
+The Gemini free tier's daily cap is per model, so switching models also
+switches quota buckets; DeepSeek is paid per token. `sheepdog serve
+--brain=off` disables it for one run; it is also off, silently, when the
+initial provider has no key.
 `--brain=fake` (a developer mode, like `--herdr=mock`) runs the same loop
 over a scripted reflex model that needs no key and makes no network call,
 so `/debug`'s Supervisor tab has something to show; `SHEEPDOG_FAKE_BRAIN_DELAY_MS`
@@ -142,7 +195,8 @@ announce wait elapse.
 | Key | Env override | Default | Meaning |
 |---|---|---|---|
 | `brain.enabled` | `SHEEPDOG_BRAIN_ENABLED` | `true` | Route `ask`/`propose` through the brain (`serve --brain` overrides). |
-| `brain.model` | `SHEEPDOG_BRAIN_MODEL` | `gemini-3.5-flash` | The function-calling model the brain starts on; the Gemini key pool applies, rotating on a rate limit. The initial value only: a model picked at runtime (`/debug`, `PUT /api/brain/model`) is kept in the state file's `session.brain_model` and wins over this on restart. |
+| `brain.provider` | `SHEEPDOG_BRAIN_PROVIDER` | `gemini` | The provider the brain starts on: `gemini` (the key pool, rotating on a rate limit) or `deepseek` (`[deepseek]`, one key). Every provider with a key is registered regardless, so the picker can switch to the other at runtime. The initial value only: the pair picked at runtime is kept in the state file's `session.brain_provider` / `session.brain_model` and wins over this on restart. Set `brain.model` to a model of this provider (`deepseek-flash` with `deepseek`; the default `gemini-3.5-flash` is Gemini's, and a mismatch shows as a `brain.step` error at the first turn). |
+| `brain.model` | `SHEEPDOG_BRAIN_MODEL` | `gemini-3.5-flash` | The function-calling model the brain starts on, a model of `brain.provider`. The initial value only: a model picked at runtime (`/debug`, `PUT /api/brain/model`) is kept in the state file's `session.brain_model` and wins over this on restart. |
 | `brain.max_steps` | `SHEEPDOG_BRAIN_MAX_STEPS` | `6` | Model calls one turn may make (each tool round is one); beyond it the turn falls back. |
 | `brain.ask_timeout_s` | `SHEEPDOG_BRAIN_ASK_TIMEOUT_S` | `8` | Wall-clock budget of one `ask` turn for tool rounds. When less than 3 s of it remain after a tool round (or at the last step) the next model call is answer-only (tools disabled, "time is up") and may run up to 3 s past the budget; only then does the template path answer. |
 | `brain.propose_timeout_s` | `SHEEPDOG_BRAIN_PROPOSE_TIMEOUT_S` | `12` | Same for `propose`. |
