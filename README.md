@@ -105,7 +105,7 @@ with one of these:**
 
 | Agent | Flags to avoid |
 |---|---|
-| Codex | `--full-auto`, `-a never` (or any config setting that disables approval prompts) |
+| Codex | `--full-auto`, `-a never` (or any config setting that disables approval prompts). Start it as `codex --sandbox read-only -a on-request`: that is the mode that reliably prompts for file changes and commands. `--sandbox workspace-write -a on-request` runs workspace writes silently and never asked in the WP7b run or the first headset session, so nothing proactive ever happened. |
 | Claude Code | `--dangerously-skip-permissions`, `--permission-mode bypassPermissions` |
 | agy (Antigravity CLI) | `--dangerously-skip-permissions`, `--mode accept-edits` (verified on 1.2.5: the default mode prompts for commands and file edits) |
 | anything else herdr supports | check its own docs for the equivalent "skip all approvals" flag and avoid it too |
