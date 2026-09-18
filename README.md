@@ -110,7 +110,7 @@ utterances, the dog's replies, tool calls that expand to their arguments,
 result and the supervisor events behind them, supervisor pushes, session
 dividers, per-turn response times), **Supervisor** (the brain's own
 transcript as a chat — your verbatim words, the assistant's replies muted,
-the assistant's `ask`/`propose` requests, the SVP's tool calls collapsed
+the assistant's `ask`/`propose` requests, the brain's tool calls collapsed
 to their arguments, result with the provenance delimiters and raw JSON,
 its replies with `needs_user`/`clarify` badges, pushes, worker events,
 compaction cards — under a prompt-budget meter: the system prompt's
@@ -137,7 +137,7 @@ the console loads a sample run.
 
 ## The supervisor brain
 
-Behind `ask` and `propose` sits the SVP of [`docs/roles.md`](docs/roles.md):
+Behind `ask` and `propose` sits the brain (the dog's thinking half) of [`docs/roles.md`](docs/roles.md):
 a stateful agent (`internal/brain`, `gemini-3.5-flash` with function
 calling by default, or DeepSeek's `deepseek-flash` with a
 `DEEPSEEK_API_KEY`; the `/debug` header's provider and model picker

@@ -1,5 +1,14 @@
 # sheepdog v1 — Implementation Plan
 
+> **Historical.** All work packages here are delivered. The design has since
+> been revised twice after real voice sessions: D7 (stateless supervisor) →
+> a stateful brain (see the D7-revised note below), and on 2026-09-18 D1
+> (voice tools that execute) → one decision-maker, plus removal of the
+> template LLM, investigations and the names shepherd / dog / flock. The
+> current contract is [`docs/roles.md`](docs/roles.md); the decisions and
+> the order of work are in [`docs/issues-2026-09-18.md`](docs/issues-2026-09-18.md).
+> Read those first; read this for the original reasoning and the herdr facts.
+
 > Working name: **sheepdog** (rename if taken). A voice supervisor for a herdr agent fleet.
 > Audience: an orchestration agent that will split this into worker tasks. Every work package below has inputs, deliverables, and acceptance criteria so it can be assigned and verified independently.
 
