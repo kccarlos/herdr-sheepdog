@@ -447,7 +447,7 @@ func (c *client) onControl(data []byte) {
 		h.setSilence(c, *m.On)
 	case wsproto.TypeCancel:
 		ctx, cancel := h.s.toolCtx()
-		res, err := h.s.runTool(ctx, voice.ToolCall{ID: "ws-cancel", Name: supervisor.ToolCancel}, "ws")
+		res, err := h.s.runTool(ctx, voice.ToolCall{ID: "ws-cancel", Name: supervisor.ToolStop}, "ws")
 		cancel()
 		if err != nil {
 			c.enqueue(controlFrame(wsproto.Error("cancel: " + err.Error())))
@@ -471,7 +471,7 @@ func (c *client) onControl(data []byte) {
 			c.enqueue(controlFrame(wsproto.Error(err.Error())))
 			return
 		}
-		if call.Name == supervisor.ToolCancel {
+		if call.Name == supervisor.ToolStop {
 			return // afterCancel already flushed and spoke the result
 		}
 		c.enqueue(controlFrame(wsproto.Transcript(wsproto.DirOut, res.Spoken, true)))

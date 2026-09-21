@@ -68,7 +68,7 @@ func runAssistantCase(ctx context.Context, c AssistantCase, pl *prompts.Loader, 
 	if len(aliases) == 0 {
 		aliases = defaultAliases
 	}
-	prompt, _ := pl.Render(prompts.Assistant, map[string]string{"aliases": strings.Join(aliases, ", ")})
+	prompt, _ := pl.Render(prompts.Assistant, prompts.AssistantVars("", aliases))
 	contents := buildAssistantContents(c.Context, c.Utterance)
 	cfg := &genai.GenerateContentConfig{
 		SystemInstruction: &genai.Content{Parts: []*genai.Part{{Text: prompt}}},

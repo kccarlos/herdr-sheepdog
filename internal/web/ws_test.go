@@ -171,11 +171,11 @@ func TestWSAudioAndControlWithVoice(t *testing.T) {
 	c.send(wsproto.SimulateText("what's going on"))
 	waitFor(t, time.Second, func() bool { return len(h.session.sentTexts()) == 1 }, "text reached session")
 
-	// cancel → cancel tool, flush, interrupting push of the result.
+	// cancel → stop tool, flush, interrupting push of the result.
 	c.send(wsproto.Cancel())
 	c.expect(wsproto.TypeFlush)
-	waitFor(t, 2*time.Second, func() bool { return len(h.session.pushed()) == 1 }, "cancel result pushed")
-	if p := h.session.pushed(); p[0] != "Nothing to cancel." {
+	waitFor(t, 2*time.Second, func() bool { return len(h.session.pushed()) == 1 }, "stop result pushed")
+	if p := h.session.pushed(); p[0] != "Nothing was in flight." {
 		t.Fatalf("pushed = %v", p)
 	}
 	if !subsequence(h.types(), []string{"web.client.connect", "voice.tool_call", "voice.tool_result", "web.client.flush"}) {
@@ -341,14 +341,14 @@ func TestWSWithoutVoice(t *testing.T) {
 	if in.Dir != "in" || in.Text != "yes" || out.Dir != "out" || !strings.Contains(out.Text, "Told auth yes") {
 		t.Fatalf("transcripts = %+v %+v", in, out)
 	}
+	// Anything the fast paths do not claim is relayed verbatim.
 	c.send(wsproto.SimulateText("reticulate"))
-	if e := c.expect(wsproto.TypeError); !strings.Contains(e.Message, "text router") {
-		t.Fatalf("error = %+v", e)
-	}
+	c.expect(wsproto.TypeTranscript)
+	c.expect(wsproto.TypeTranscript)
 	c.send(wsproto.Cancel())
 	c.expect(wsproto.TypeFlush)
-	if tr := c.expect(wsproto.TypeTranscript); tr.Text != "Nothing to cancel." {
-		t.Fatalf("cancel transcript = %+v", tr)
+	if tr := c.expect(wsproto.TypeTranscript); tr.Text != "Nothing was in flight." {
+		t.Fatalf("stop transcript = %+v", tr)
 	}
 	// A typed "stop" is echoed, flushed and answered exactly once.
 	c.send(wsproto.SimulateText("stop"))
@@ -356,7 +356,7 @@ func TestWSWithoutVoice(t *testing.T) {
 		t.Fatalf("stop echo = %+v", in)
 	}
 	c.expect(wsproto.TypeFlush)
-	if tr := c.expect(wsproto.TypeTranscript); tr.Dir != "out" || tr.Text != "Nothing to cancel." {
+	if tr := c.expect(wsproto.TypeTranscript); tr.Dir != "out" || tr.Text != "Nothing was in flight." {
 		t.Fatalf("stop transcript = %+v", tr)
 	}
 	c.send(wsproto.Ping())

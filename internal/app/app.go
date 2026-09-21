@@ -273,6 +273,7 @@ func (a *App) wire() error {
 		Chattiness:     cfg.Supervisor.Chattiness,
 		RecentWindow:   time.Duration(cfg.Supervisor.RecentMinutes) * time.Minute,
 		PromiseTTL:     time.Duration(cfg.Supervisor.PromiseTTLS) * time.Second,
+		CancelWindow:   time.Duration(cfg.Supervisor.CancelWindowS) * time.Second,
 		SummaryTimeout: time.Duration(cfg.Supervisor.SummaryTimeoutS) * time.Second,
 		AnnounceWait:   time.Duration(cfg.Brain.AnnounceWaitS) * time.Second,
 		Brain:          a.brain,
@@ -290,6 +291,7 @@ func (a *App) wire() error {
 		Model:   cfg.Gemini.Model,
 		Voice:   cfg.Gemini.Voice,
 		Aliases: a.aliases(),
+		Name:    cfg.Voice.Name,
 		Handler: sup.Handler(),
 		Prompts: a.prompts,
 

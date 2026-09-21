@@ -41,6 +41,17 @@ func (u Urgency) String() string {
 	}
 }
 
+// The two tools the voice model is declared (docs/roles.md "One
+// decision-maker"). They are named here, in the model-agnostic package,
+// because the adapters declare them and the Supervisor handles them.
+const (
+	// ToolToSupervisor carries the user's words verbatim; its one
+	// argument is "text".
+	ToolToSupervisor = "to_supervisor"
+	// ToolStop runs the daemon's stop procedure; it takes no arguments.
+	ToolStop = "stop"
+)
+
 // ToolCall is one function call requested by the voice model.
 type ToolCall struct {
 	ID   string
@@ -51,13 +62,15 @@ type ToolCall struct {
 // ToolResult is what the Supervisor returns for a ToolCall. Spoken is read
 // aloud verbatim (decision D9); Detail is for the voice model's follow-up
 // answers, not read aloud (also D9-scrubbed); Options lists the choices
-// when there are some; Clarify marks a clarifying question; Scheduling is
-// the urgency of the spoken result.
+// when there are some; Clarify marks a clarifying question; Pending marks
+// an answer whose real result follows on its own; Scheduling is the
+// urgency of the spoken result.
 type ToolResult struct {
 	Spoken     string
 	Detail     string
 	Options    []string
 	Clarify    bool
+	Pending    bool
 	Scheduling Urgency
 }
 

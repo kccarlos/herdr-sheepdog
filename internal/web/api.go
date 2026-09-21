@@ -156,6 +156,7 @@ type ToolResponse struct {
 	Args       map[string]any `json:"args,omitempty"`
 	Spoken     string         `json:"spoken"`
 	Clarify    bool           `json:"clarify"`
+	Pending    bool           `json:"pending,omitempty"`
 	Scheduling string         `json:"scheduling"`
 	Via        string         `json:"via"`
 }
@@ -182,14 +183,15 @@ func (s *Server) runTool(ctx context.Context, call voice.ToolCall, via string) (
 }
 
 func toolResponse(call voice.ToolCall, res voice.ToolResult, via string) ToolResponse {
-	return ToolResponse{Tool: call.Name, Args: call.Args, Spoken: res.Spoken, Clarify: res.Clarify, Scheduling: res.Scheduling.String(), Via: via}
+	return ToolResponse{Tool: call.Name, Args: call.Args, Spoken: res.Spoken, Clarify: res.Clarify, Pending: res.Pending, Scheduling: res.Scheduling.String(), Via: via}
 }
 
-// handleCancel runs the cancel tool (the debug page's Cancel button).
+// handleCancel runs the stop tool (the debug page's Cancel button; the
+// route keeps its name, the tool behind it is the stop procedure).
 func (s *Server) handleCancel(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := s.toolCtx()
 	defer cancel()
-	call := voice.ToolCall{ID: "web-cancel", Name: supervisor.ToolCancel}
+	call := voice.ToolCall{ID: "web-stop", Name: supervisor.ToolStop}
 	res, err := s.runTool(ctx, call, "api")
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -334,8 +336,9 @@ func (s *Server) handleUtterance(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, toolResponse(call, res, "text_router"))
 }
 
-// errUnrouted is returned when the text router does not understand.
-var errUnrouted = errors.New("text router (debug path, --voice=off) does not understand this; try yes / no / stop / what's going on / tell … / ask …")
+// errUnrouted is returned when the text router has nothing to relay
+// (only an empty utterance, since D1-revised).
+var errUnrouted = errors.New("text router (debug path, --voice=off): nothing to relay")
 
 // routeUtterance runs text through the text-only router and the tool it
 // picks. Callers hold no locks.
@@ -353,7 +356,7 @@ func (s *Server) routeUtterance(ctx context.Context, text string) (voice.ToolCal
 	if err != nil {
 		return call, res, err
 	}
-	if call.Name == supervisor.ToolCancel {
+	if call.Name == supervisor.ToolStop {
 		s.hub.afterCancel(res)
 	}
 	return call, res, nil

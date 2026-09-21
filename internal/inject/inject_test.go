@@ -296,21 +296,23 @@ func TestRouter(t *testing.T) {
 		in, tool string
 		arg      string // expected argument value (any key), "" to skip
 	}{
-		{"yes", supervisor.ToolConfirm, "yes"},
-		{"Yes, go ahead.", "", ""}, // not a bare confirm word: rejected
-		{"go ahead", supervisor.ToolConfirm, "go ahead"},
-		{"No!", supervisor.ToolConfirm, "no"},
-		{"option 2", supervisor.ToolConfirm, "option 2"},
-		{"stop", supervisor.ToolCancel, ""},
-		{"Cancel", supervisor.ToolCancel, ""},
-		{"what's going on?", supervisor.ToolBriefing, ""},
-		{"status", supervisor.ToolBriefing, ""},
-		{"tell auth to skip the flaky test", supervisor.ToolPropose, "tell auth to skip the flaky test"},
-		{"ask auth why the tests fail", supervisor.ToolAsk, "auth why the tests fail"},
-		{"why did auth fail?", supervisor.ToolAsk, "why did auth fail?"},
-		{"remember that docs is on hold", supervisor.ToolNote, "docs is on hold"},
+		// The router classifies nothing any more: the words go over
+		// verbatim, exactly as the voice model would relay them, and
+		// the supervisor's own fast paths and brain decide what they
+		// are. Only a bare stop word is routed, and only as a shortcut.
+		{"yes", voice.ToolToSupervisor, "yes"},
+		{"Yes, go ahead.", voice.ToolToSupervisor, "Yes, go ahead."},
+		{"option 2", voice.ToolToSupervisor, "option 2"},
+		{"stop", voice.ToolStop, ""},
+		{"Cancel", voice.ToolStop, ""},
+		{"no no", voice.ToolStop, ""},
+		{"No!", voice.ToolToSupervisor, "No!"}, // an answer, not a stop
+		{"what's going on?", voice.ToolToSupervisor, "what's going on?"},
+		{"tell auth to skip the flaky test", voice.ToolToSupervisor, "tell auth to skip the flaky test"},
+		{"remember that docs is on hold", voice.ToolToSupervisor, "remember that docs is on hold"},
+		{"blah blah", voice.ToolToSupervisor, "blah blah"},
 		{"", "", ""},
-		{"blah blah", "", ""},
+		{"   ", "", ""},
 	}
 	for _, tc := range cases {
 		call, ok := r.Route(tc.in)

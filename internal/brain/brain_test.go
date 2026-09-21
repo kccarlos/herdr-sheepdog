@@ -690,7 +690,7 @@ func TestSystemPromptSections(t *testing.T) {
 			t.Errorf("section %s is empty", s["name"])
 		}
 	}
-	if strings.Join(names, " ") != "role tools record promises announcing rail fallback contract user roster ledger time" {
+	if strings.Join(names, " ") != "role tools intent record promises announcing rail fallback contract user roster ledger time" {
 		t.Errorf("sections = %v", names)
 	}
 	sys := h.model.Calls()[0].System()
@@ -943,10 +943,10 @@ func TestWindowAndTranscriptAccessors(t *testing.T) {
 			t.Errorf("section %s empty", s.Name)
 		}
 	}
-	if strings.Join(names, " ") != "role tools record promises announcing rail fallback contract user roster ledger time" {
+	if strings.Join(names, " ") != "role tools intent record promises announcing rail fallback contract user roster ledger time" {
 		t.Errorf("sections = %v", names)
 	}
-	if strings.Join(sources, " ") != "embedded embedded embedded embedded embedded embedded embedded embedded embedded dynamic dynamic dynamic" {
+	if strings.Join(sources, " ") != "embedded embedded embedded embedded embedded embedded embedded embedded embedded embedded dynamic dynamic dynamic" {
 		t.Errorf("sources = %v", sources)
 	}
 }

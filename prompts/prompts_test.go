@@ -8,11 +8,17 @@ import (
 )
 
 func TestRenderAssistant(t *testing.T) {
-	s, _ := (*Loader)(nil).Render(Assistant, map[string]string{"aliases": "auth, docs"})
+	s, _ := (*Loader)(nil).Render(Assistant, AssistantVars("Rex", []string{"auth", "docs"}))
 	if !strings.Contains(s, "aliases: auth, docs.") || strings.Contains(s, "{aliases}") {
 		t.Errorf("aliases not substituted: %q", s)
 	}
-	for _, tool := range []string{"briefing", "ask", "propose", "confirm", "cancel", "note"} {
+	if !strings.HasPrefix(s, "You are Rex,") || strings.Contains(s, "{name}") {
+		t.Errorf("name not substituted: %q", firstWords(s))
+	}
+	// The voice has exactly two tools since D1-revised (docs/roles.md
+	// "One decision-maker"); the seven it used to classify into are
+	// gone, and no name of one may creep back in as an instruction.
+	for _, tool := range []string{"to_supervisor", "stop()"} {
 		if !strings.Contains(s, tool) {
 			t.Errorf("prompt does not mention %s", tool)
 		}
@@ -24,26 +30,19 @@ func TestRenderAssistant(t *testing.T) {
 			t.Errorf("prompt does not explain the push prefix %q", prefix)
 		}
 	}
-	// Rules from the headset sessions and docs/roles.md §Assistant (cheap
-	// guard against the prompt drifting): status questions always go
-	// through a tool, propose / ask never guess the agent, doubts about a
-	// status are ask (a fresh screen read, never the cached briefing
-	// again), "idle" is never inflated into "not finished", only the
-	// latest tool result may be reused for a follow-up, a mis-heard
-	// utterance is repeated back rather than guessed, and the copilot
-	// manner (offer the next step, read options as a choice) is present.
+	// Rules from the headset sessions and docs/roles.md "The voice — do
+	// / don't" (a cheap guard against the prompt drifting): the words go
+	// over verbatim, the voice never answers a push itself, "idle" is
+	// never inflated into "not finished", a follow-up uses only the
+	// latest reply, a mis-heard utterance is repeated back rather than
+	// guessed, and the copilot manner (offer the next step, read options
+	// as a choice) is present.
 	for _, rule := range []string{
-		"MUST start with a tool call",
-		"never answer it from memory",
-		"If a tool has not answered yet, say so",
+		"verbatim",
+		"Do not paraphrase",
+		"Never answer them yourself",
 		`"Idle" means ready for input`,
-		"Fill agent only when the user said an alias",
-		"leave it empty, never guess",
-		`"what did it say"`,
-		`"check again"`,
-		"tells an agent to DO something",
-		"Unsure whether it's a question or an instruction: ask",
-		"uses the latest spoken, detail and options",
+		"uses the latest spoken and detail",
 		"Repeat it and ask",
 		"offer the next step",
 		"read them as a choice",
@@ -60,6 +59,26 @@ func TestRenderAssistant(t *testing.T) {
 	if _, err := Render("missing.txt", nil); err == nil {
 		t.Error("missing template accepted")
 	}
+}
+
+// TestAssistantVarsDefaults covers the empty cases: no configured name
+// falls back to DefaultName, no agents to a spoken phrase.
+func TestAssistantVarsDefaults(t *testing.T) {
+	vars := AssistantVars("  ", nil)
+	if vars["name"] != DefaultName || vars["aliases"] != "none configured yet" {
+		t.Errorf("AssistantVars(\"\", nil) = %v", vars)
+	}
+	if vars := AssistantVars(" Rex ", []string{"auth"}); vars["name"] != "Rex" {
+		t.Errorf("name not trimmed: %q", vars["name"])
+	}
+}
+
+// firstWords is the head of s, for a readable failure message.
+func firstWords(s string) string {
+	if len(s) > 60 {
+		return s[:60] + "…"
+	}
+	return s
 }
 
 func TestRenderMissingTemplate(t *testing.T) {

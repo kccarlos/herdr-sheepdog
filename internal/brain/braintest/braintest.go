@@ -269,6 +269,9 @@ type Host struct {
 	// PromiseErr fails Promise; Promised records every promise made.
 	PromiseErr error
 	Promised   []brain.PromiseInfo
+	// NoteErr fails Note; Noted records every note the note tool made.
+	NoteErr error
+	Noted   []string
 	// Now is the clock for promises (time.Now when nil).
 	Now func() time.Time
 }
@@ -314,6 +317,19 @@ func (h *Host) AddNote(text string) {
 	h.mu.Lock()
 	h.notes = append(h.notes, text)
 	h.mu.Unlock()
+}
+
+// Note implements brain.Host: the note tool's write path. NoteErr fails
+// it; Noted records every note the tool made.
+func (h *Host) Note(text string) (string, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.NoteErr != nil {
+		return "", h.NoteErr
+	}
+	h.notes = append(h.notes, text)
+	h.Noted = append(h.Noted, text)
+	return "Noted.", nil
 }
 
 // Agents implements brain.Host.
@@ -489,7 +505,8 @@ var ErrBoom = errors.New("boom")
 // Request line shapes the reflex model parses (see assemble.go
 // requestText and brain.summarize).
 var (
-	reRequest   = regexp.MustCompile(`Request from the assistant \((ask|propose)\): (?:question|instruction)="((?:[^"\\]|\\.)*)" agent=(?:"((?:[^"\\]|\\.)*)"|\(none)`)
+	reRequest   = regexp.MustCompile(`Request from the assistant \((ask|propose|utterance)\): (?:question|instruction|utterance)="((?:[^"\\]|\\.)*)" agent=(?:"((?:[^"\\]|\\.)*)"|\(none)`)
+	reStop      = regexp.MustCompile(`Request from the assistant \(stop\): stopped="((?:[^"\\]|\\.)*)"`)
 	reEvent     = regexp.MustCompile(`Event from the supervisor \((announce)\): agent="((?:[^"\\]|\\.)*)" event="((?:[^"\\]|\\.)*)" template="((?:[^"\\]|\\.)*)"`)
 	reSummarise = regexp.MustCompile(`^Summarise the following`)
 	// rePromiseLine is one promise of an announce request ("- pr-1: "text" (when auth finishes)").
@@ -501,7 +518,31 @@ var (
 	rePromise  = regexp.MustCompile(`(?i)^(.*?)\s*(?:,|;|\band\b|\bthen\b)?\s*\b((?:please\s+)?(?:let me know|tell me|remind me|ping me|notify me)\b.*)$`)
 	reLastTask = regexp.MustCompile(`(?m)^- ([^:\n]+): last task "((?:[^"\\]|\\.)*)"`)
 	reCEOSaid  = regexp.MustCompile(`CEO said: "((?:[^"\\]|\\.)*)"`)
+	// The shapes an utterance takes for the reflex's own intent split
+	// (the real brain decides this with a model; this is a stand-in).
+	reNoteWords   = regexp.MustCompile(`(?i)^(?:please\s+)?(?:remember|note|keep in mind|don'?t forget)\b`)
+	reStatusWords = regexp.MustCompile(`(?i)^(?:what'?s going on|what is going on|how are things|how'?s it going|status|any(?:thing)? (?:news|update)|what'?s up|are (?:we|they) (?:ok|done)|is (?:it|everything) done)\b`)
+	reTellWords   = regexp.MustCompile(`(?i)^(?:tell|ask|have|instruct|get)\s+\S+\s`)
+	// reBriefingLine is the roster sentence the request carries.
+	reBriefingLine = regexp.MustCompile(`(?m)^Status as the daemon has it: (.*)$`)
 )
+
+// utteranceKind is the reflex's stand-in for the brain's intent
+// decision on a verbatim utterance: a note, a status question, an
+// instruction, or something to look up.
+func utteranceKind(question string) string {
+	q := strings.TrimSpace(question)
+	switch {
+	case reNoteWords.MatchString(q):
+		return "note"
+	case reStatusWords.MatchString(q):
+		return "status"
+	case reTellWords.MatchString(q) || rePromise.MatchString(q):
+		return "propose"
+	default:
+		return "ask"
+	}
+}
 
 // Reflex returns a Model that answers from what it sees instead of a
 // script, so a whole daemon can run the brain loop without a network:
@@ -553,6 +594,12 @@ func reflex(call Call) (*genai.GenerateContentResponse, error) {
 		if fr != nil {
 			return respondToResult(call, fr), nil
 		}
+		if reStop.MatchString(t) {
+			// The daemon already carried the stop out; the turn only
+			// says so (read tools only, so no call is made).
+			m := reStop.FindStringSubmatch(t)
+			return Response(Step{Text: Reply("Stopped "+unquote(m[1])+". Shall I tell it something else?", "The fake model reported what the stop procedure stopped.")}), nil
+		}
 		if reRequest.MatchString(t) || reEvent.MatchString(t) || reSummarise.MatchString(strings.TrimSpace(t)) {
 			text = t
 		}
@@ -588,6 +635,18 @@ func reflex(call Call) (*genai.GenerateContentResponse, error) {
 	}
 	if forced {
 		return Response(Step{Text: Reply("I ran out of steps before reading anything.", "The fake model was asked to answer without tools."), Usage: usage}), nil
+	}
+	if kind == "utterance" {
+		switch k := utteranceKind(question); k {
+		case "note":
+			return Response(Step{Calls: []*genai.FunctionCall{FC(brain.ToolNote, map[string]any{"text": question})}, Usage: usage}), nil
+		case "status":
+			// The roster line travels with the request, so a status
+			// question costs no tool call at all (D1-revised).
+			return Response(Step{Text: Reply(briefingLine(text), "The fake model answered from the roster line in the request."), Usage: usage}), nil
+		default:
+			kind = k
+		}
 	}
 	switch {
 	case kind == "propose" && agent != "":
@@ -826,7 +885,7 @@ func replyFromResult(fr *genai.FunctionResponse) string {
 	}
 	out, _ := fr.Response["output"].(string)
 	switch fr.Name {
-	case brain.ToolPrompt, brain.ToolSendKeys, brain.ToolInterrupt:
+	case brain.ToolPrompt, brain.ToolSendKeys, brain.ToolInterrupt, brain.ToolNote:
 		return Reply(strings.TrimSpace(out), "Sent through "+fr.Name+".")
 	case brain.ToolListAgents:
 		return Reply("Here is the roster.", llmTrim(out, 300))
@@ -863,7 +922,19 @@ func lastRequest(call Call) (kind, question string) {
 	if question == "" {
 		question = lastCEOUtterance(call)
 	}
+	if kind == "utterance" {
+		kind = utteranceKind(question)
+	}
 	return kind, question
+}
+
+// briefingLine is the roster sentence the request carries, or a stand-in
+// when it carried none.
+func briefingLine(text string) string {
+	if m := reBriefingLine.FindStringSubmatch(text); m != nil {
+		return strings.TrimSpace(m[1])
+	}
+	return "Nothing is running."
 }
 
 // lastCEOUtterance returns the newest "CEO said" line in the call.

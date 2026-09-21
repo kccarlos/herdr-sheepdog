@@ -24,13 +24,15 @@ const (
 	ToolSendKeys   = "send_keys"
 	ToolInterrupt  = "interrupt"
 	ToolPromise    = "promise"
+	ToolNote       = "note"
 )
 
 // IsActionTool reports whether name sends something to a worker or
-// records a promise: permitted in CEO turns only.
+// writes to the record (a promise, a note): permitted in CEO turns
+// only, and never in a read-only turn.
 func IsActionTool(name string) bool {
 	switch name {
-	case ToolPrompt, ToolSendKeys, ToolInterrupt, ToolPromise:
+	case ToolPrompt, ToolSendKeys, ToolInterrupt, ToolPromise, ToolNote:
 		return true
 	}
 	return false
@@ -53,7 +55,8 @@ const (
 
 // toolDeclarations is the function surface (plain GenerateContent
 // declarations; no Live-only behaviour field). readOnly is the surface
-// of an event turn: the read tools only, no actions and no promise.
+// of an event or stop turn: the read tools only, no actions, promise or
+// note.
 func toolDeclarations(readOnly bool) []*genai.Tool {
 	str := func(desc string) *genai.Schema { return &genai.Schema{Type: genai.TypeString, Description: desc} }
 	obj := func(props map[string]*genai.Schema, req []string) *genai.Schema {
@@ -105,9 +108,11 @@ type toolOutcome struct {
 	promise *PromiseInfo
 }
 
-// execTool runs one function call against the Host. trigger is the
-// turn's trigger (the rail needs it); turn is its number.
-func (b *Brain) execTool(ctx context.Context, trigger Trigger, turn int, call *genai.FunctionCall) toolOutcome {
+// execTool runs one function call against the Host. t is the turn: its
+// trigger and kind decide whether an action tool may run at all, and
+// its number stamps a promise.
+func (b *Brain) execTool(ctx context.Context, t *turn, call *genai.FunctionCall) toolOutcome {
+	trigger, turn := t.req.Trigger, t.n
 	arg := func(name string) string {
 		v, _ := call.Args[name].(string)
 		return strings.TrimSpace(v)
@@ -118,12 +123,30 @@ func (b *Brain) execTool(ctx context.Context, trigger Trigger, turn int, call *g
 	case ToolRecall:
 		return b.recall(arg("query"))
 	}
-	if trigger != TriggerCEO && IsActionTool(call.Name) {
-		// Event turns are read-only: they are not declared these tools,
-		// and the executor refuses them regardless (the model may still
-		// name one).
-		reason := call.Name + " is only permitted in a turn the CEO's own words triggered, never on an event"
-		return toolOutcome{railBlocked: reason, err: fmt.Errorf("%w: %s", ErrNotPermitted, reason)}
+	if IsActionTool(call.Name) {
+		if trigger != TriggerCEO || t.req.Kind.ReadOnly() {
+			// Event and stop turns are read-only: they are not declared
+			// these tools, and the executor refuses them regardless (the
+			// model may still name one).
+			reason := call.Name + " is only permitted in a turn the CEO's own words triggered, never on an event or a stop"
+			return toolOutcome{railBlocked: reason, err: fmt.Errorf("%w: %s", ErrNotPermitted, reason)}
+		}
+		if err := ctx.Err(); err != nil {
+			// The turn was cancelled (the CEO said stop) between the
+			// model answering and its calls running: nothing is sent.
+			return toolOutcome{err: fmt.Errorf("the turn was cancelled before %s ran: %w", call.Name, err)}
+		}
+	}
+	if call.Name == ToolNote {
+		text := arg("text")
+		if text == "" {
+			return toolOutcome{err: errors.New("note needs the text to remember")}
+		}
+		echo, err := b.host.Note(text)
+		if err != nil {
+			return toolOutcome{err: err}
+		}
+		return toolOutcome{acted: echo, result: echo}
 	}
 	row, ok := b.host.Resolve(arg("agent"))
 	if !ok {

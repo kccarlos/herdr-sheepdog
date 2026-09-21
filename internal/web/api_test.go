@@ -13,6 +13,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/eventlog"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
+	"github.com/kccarlos/herdr-sheepdog/internal/supervisor"
 	"github.com/kccarlos/herdr-sheepdog/prompts"
 )
 
@@ -129,10 +130,11 @@ func TestInjectBlockedChainAndConfirm(t *testing.T) {
 		t.Fatalf("/api/voice/system_prompt = %d %+v", code, sp)
 	}
 
-	// "yes" → confirm → send_keys → pending.confirmed.
+	// "yes" → to_supervisor → the bare-answer fast path → send_keys →
+	// pending.confirmed (no model involved at all).
 	var tr ToolResponse
 	code, body = h.postJSON("/api/inject/utterance", map[string]any{"text": "yes"}, &tr)
-	if code != http.StatusOK || tr.Tool != "confirm" || tr.Via != "text_router" || !strings.Contains(tr.Spoken, "Told auth yes") {
+	if code != http.StatusOK || tr.Tool != supervisor.ToolToSupervisor || tr.Via != "text_router" || !strings.Contains(tr.Spoken, "Told auth yes") {
 		t.Fatalf("utterance yes = %d %s", code, body)
 	}
 	want = []string{"voice.tool_call", "herdr.send", "pending.confirmed", "voice.tool_result"}
@@ -152,10 +154,11 @@ func TestInjectBlockedChainAndConfirm(t *testing.T) {
 		t.Fatalf("pending not cleared: %+v", st.PendingAction)
 	}
 
-	// Unroutable text is rejected without touching the supervisor.
-	code, body = h.postJSON("/api/inject/utterance", map[string]any{"text": "please reticulate splines"}, nil)
-	if code != http.StatusUnprocessableEntity {
-		t.Fatalf("unrouted = %d %s", code, body)
+	// Anything else is relayed verbatim: the router classifies nothing,
+	// so only empty text is rejected.
+	code, body = h.postJSON("/api/inject/utterance", map[string]any{"text": "please reticulate splines"}, &tr)
+	if code != http.StatusOK || tr.Tool != supervisor.ToolToSupervisor || tr.Args["text"] != "please reticulate splines" {
+		t.Fatalf("relay = %d %s", code, body)
 	}
 	code, _ = h.postJSON("/api/inject/utterance", map[string]any{"text": ""}, nil)
 	if code != http.StatusBadRequest {
@@ -212,30 +215,32 @@ func TestInjectBlockedChainAndConfirm(t *testing.T) {
 func TestPendingCancelAndProposeStop(t *testing.T) {
 	h := newHarness(t, harnessOpts{})
 	h.postJSON("/api/inject/blocked", map[string]any{"pane_id": "fake:1", "alias": "auth", "screen": codexScreen(t)}, nil)
+	// The Cancel button runs the stop tool. Stop is not "no": a worker's
+	// question is left open for the shepherd to answer.
 	var tr ToolResponse
 	code, body := h.postJSON("/api/pending/cancel", map[string]any{}, &tr)
-	if code != http.StatusOK || tr.Tool != "cancel" || tr.Spoken != "Cancelled." {
+	if code != http.StatusOK || tr.Tool != supervisor.ToolStop || !strings.Contains(tr.Spoken, "still waiting for your answer") {
 		t.Fatalf("cancel = %d %s", code, body)
 	}
-	if !subsequence(h.types(), []string{"pending.created", "voice.tool_call", "pending.cancelled", "voice.tool_result"}) {
-		t.Fatalf("cancel chain missing in %v", h.types())
+	if !subsequence(h.types(), []string{"pending.created", "voice.tool_call", "supervisor.stopped", "voice.tool_result"}) {
+		t.Fatalf("stop chain missing in %v", h.types())
 	}
 	var st StateResponse
-	if h.getJSON("/api/state", &st); st.PendingAction != nil {
-		t.Fatal("pending not cleared")
+	if h.getJSON("/api/state", &st); st.PendingAction == nil {
+		t.Fatal("stop dropped the open question")
 	}
 
 	// propose through the router → send_instruction pending → stop → ctrl+c.
 	h.postJSON("/api/inject/state", map[string]any{"pane_id": "fake:1", "state": "working"}, nil)
 	code, body = h.postJSON("/api/inject/utterance", map[string]any{"text": "tell auth to skip the flaky test and rerun"}, &tr)
-	if code != http.StatusOK || tr.Tool != "propose" || !strings.HasSuffix(tr.Spoken, "Sent.") {
+	if code != http.StatusOK || tr.Tool != supervisor.ToolToSupervisor || !strings.HasSuffix(tr.Spoken, "Sent.") {
 		t.Fatalf("propose = %d %s", code, body)
 	}
 	if h.getJSON("/api/state", &st); st.PendingAction == nil || st.PendingAction.Kind != state.PendingSendInstruction {
 		t.Fatalf("no send_instruction pending: %+v", st.PendingAction)
 	}
 	code, body = h.postJSON("/api/inject/utterance", map[string]any{"text": "stop"}, &tr)
-	if code != http.StatusOK || tr.Tool != "cancel" {
+	if code != http.StatusOK || tr.Tool != supervisor.ToolStop {
 		t.Fatalf("stop = %d %s", code, body)
 	}
 	sawCtrlC := false

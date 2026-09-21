@@ -15,7 +15,7 @@ func TestBrainTestFlagsAndValidation(t *testing.T) {
 		msg  string
 	}{
 		{[]string{}, 2, "needs --question"},
-		{[]string{"--question", "q", "--kind", "shout"}, 2, "--kind must be ask or propose"},
+		{[]string{"--question", "q", "--kind", "shout"}, 2, "--kind must be utterance, ask or propose"},
 		{[]string{"--question", "q", "--state", "asleep"}, 2, "--state must be"},
 		{[]string{"--help"}, 0, "usage: sheepdog brain-test"},
 	}

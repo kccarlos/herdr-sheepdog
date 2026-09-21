@@ -81,6 +81,17 @@ func (h brainHost) Notes() []string {
 	return out
 }
 
+// Note implements brain.Host: the notes store the voice's own note tool
+// used before D1-revised. The brain's tool result already carries the
+// note into the transcript, so it is not ingested a second time.
+func (h brainHost) Note(text string) (string, error) {
+	if err := h.s.appendNote(text, false); err != nil {
+		h.s.log.Log(logSource, "supervisor.note_error", "", map[string]any{"error": err.Error(), "via": "brain"})
+		return "", err
+	}
+	return "Noted.", nil
+}
+
 // ReadScreen implements brain.Host. Like ask's screen read, it counts as
 // dealing with the agent and makes it the current subject (the fallback
 // path's "it").
@@ -150,7 +161,7 @@ func (h brainHost) AnswerPrompt(ctx context.Context, paneID string, keys []strin
 	if len(keys) == 0 {
 		return "", fmt.Errorf("%w: no keys", brain.ErrNotPermitted)
 	}
-	res := s.answerWithKeys(ctx, p, keys, keysLabel(p, keys), "Told "+s.aliasOf(paneID)+" %s.")
+	res := s.answerWithKeys(ctx, p, keys, keysLabel(p, keys), "Told "+s.aliasOf(paneID)+" %s.", "brain")
 	if res.Clarify {
 		return "", errors.New(res.Spoken)
 	}
@@ -245,9 +256,12 @@ func (s *Supervisor) brainTurn(ctx context.Context, kind brain.Kind, text, agent
 
 // toolResultFrom enforces D9 on a brain reply: spoken cut to two
 // sentences and scrubbed, detail and options scrubbed; a propose always
-// interrupts (it is the echo), an ask only when the CEO must act.
+// interrupts (it is the echo), an ask or an utterance only when the CEO
+// must act. An utterance is not classified, so it cannot claim the echo
+// urgency a propose had; the voice reads the result after its own "on
+// it" either way (the tool is NON_BLOCKING).
 func toolResultFrom(kind brain.Kind, rep brain.Reply) voice.ToolResult {
-	res := voice.ToolResult{Spoken: sentence(llm.Spoken(rep.Spoken, 2)), Detail: llm.Spoken(rep.Detail, 0), Clarify: rep.Clarify, Scheduling: voice.UrgencyIdle}
+	res := voice.ToolResult{Spoken: sentence(llm.Spoken(rep.Spoken, 2)), Detail: llm.Spoken(rep.Detail, 0), Clarify: rep.Clarify, Pending: rep.Pending, Scheduling: voice.UrgencyIdle}
 	for _, o := range rep.Options {
 		if o = strings.TrimSpace(llm.Spoken(o, 1)); o != "" {
 			res.Options = append(res.Options, o)

@@ -41,6 +41,9 @@ func Template() string {
 # voice = %[9]q
 # stall_after_s = %[20]d   # no model response this long after an utterance logs voice.stalled; twice recycles the connection
 
+[voice]
+# name = %[42]q   # what the dog calls itself, substituted into the voice prompt as {name}
+
 [deepseek]
 # The second supervisor-brain provider (paid per token). api_key is
 # normally left unset here: DEEPSEEK_API_KEY is read from the
@@ -78,6 +81,7 @@ func Template() string {
 # recent_minutes = %[22]d   # "normal" announces a finish only for agents you dealt with this recently
 # promise_ttl_s = %[34]d   # how long "tell me when it's done" waits for its event before it expires silently
 # summary_timeout_s = %[36]d   # bounds the summarize_done call on a finish; past it the bare "finished." is spoken
+# cancel_window_s = %[43]d   # how soon after an instruction a "stop" still interrupts the agent with Ctrl-C
 
 [brain]
 # enabled = %[24]t   # the stateful supervisor brain behind ask/propose; serve --brain=off overrides
@@ -113,5 +117,6 @@ func Template() string {
 		d.Supervisor.SummaryTimeoutS, d.Brain.AnnounceWaitS,
 		d.DeepSeek.BaseURL, d.DeepSeek.Thinking, d.DeepSeek.ReasoningEffort,
 		d.Brain.Provider,
+		d.Voice.Name, d.Supervisor.CancelWindowS,
 	)
 }

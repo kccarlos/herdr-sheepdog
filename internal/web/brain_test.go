@@ -13,6 +13,7 @@ import (
 
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
 	"github.com/kccarlos/herdr-sheepdog/internal/brain/braintest"
+	"github.com/kccarlos/herdr-sheepdog/internal/supervisor"
 )
 
 // The brain endpoints answer 503 with the reason when no brain is
@@ -65,7 +66,7 @@ func TestBrainEndpointsWithFakeBrain(t *testing.T) {
 		t.Fatalf("inject blocked = %d %s", code, body)
 	}
 	var tr ToolResponse
-	if code, body := h.postJSON("/api/inject/utterance", map[string]any{"text": "what did auth say"}, &tr); code != http.StatusOK || tr.Tool != "ask" || !strings.HasPrefix(tr.Spoken, "The screen ends with:") {
+	if code, body := h.postJSON("/api/inject/utterance", map[string]any{"text": "what did auth say"}, &tr); code != http.StatusOK || tr.Tool != supervisor.ToolToSupervisor || !strings.HasPrefix(tr.Spoken, "The screen ends with:") {
 		t.Fatalf("utterance = %d %s", code, body)
 	}
 	h.srv.deps.Brain.Quiesce()
@@ -122,7 +123,7 @@ func TestBrainEndpointsWithFakeBrain(t *testing.T) {
 	if sum != cx.EstimatedTokens {
 		t.Errorf("window sum %d != estimated %d", sum, cx.EstimatedTokens)
 	}
-	if n := len(cx.SystemPrompt.Sections); n != 12 || cx.SystemPrompt.Sections[0].Source != "embedded" || cx.SystemPrompt.Sections[n-1].Source != "dynamic" || cx.SystemPrompt.TotalChars == 0 || cx.SystemPrompt.Sections[0].Text != "" {
+	if n := len(cx.SystemPrompt.Sections); n != 13 || cx.SystemPrompt.Sections[0].Source != "embedded" || cx.SystemPrompt.Sections[n-1].Source != "dynamic" || cx.SystemPrompt.TotalChars == 0 || cx.SystemPrompt.Sections[0].Text != "" {
 		t.Errorf("system prompt summary = %+v", cx.SystemPrompt)
 	}
 
@@ -141,9 +142,10 @@ func TestBrainEndpointsWithFakeBrain(t *testing.T) {
 		t.Errorf("transcript lost the full result: %+v", full)
 	}
 
-	// A promise made through the text router ("let me know when …" is a
-	// propose; the reflex records it) is served with its record.
-	if code, body := h.postJSON("/api/inject/utterance", map[string]any{"text": "let me know when auth is done"}, &tr); code != http.StatusOK || tr.Tool != "propose" || tr.Spoken != "I will tell you when auth finishes." {
+	// A promise relayed through the text router ("let me know when …":
+	// the brain reads it as promised work and records it) is served with
+	// its record.
+	if code, body := h.postJSON("/api/inject/utterance", map[string]any{"text": "let me know when auth is done"}, &tr); code != http.StatusOK || tr.Tool != supervisor.ToolToSupervisor || tr.Spoken != "I will tell you when auth finishes." {
 		t.Fatalf("promise utterance = %d %s (%+v)", code, body, tr)
 	}
 	h.srv.deps.Brain.Quiesce()
@@ -160,7 +162,7 @@ func TestBrainEndpointsWithFakeBrain(t *testing.T) {
 	}
 
 	var sp PromptInfo
-	if code := h.getJSON("/api/brain/system_prompt", &sp); code != http.StatusOK || len(sp.Sections) != 12 || !strings.Contains(sp.Sections[0].Text, "SVP") || !strings.Contains(sp.Text, "## Agents") || !strings.Contains(sp.Text, "auth") {
+	if code := h.getJSON("/api/brain/system_prompt", &sp); code != http.StatusOK || len(sp.Sections) != 13 || !strings.Contains(sp.Sections[0].Text, "the brain of Sheepdog") || !strings.Contains(sp.Text, "## Agents") || !strings.Contains(sp.Text, "auth") {
 		t.Errorf("/api/brain/system_prompt = %d %+v", code, sp)
 	}
 

@@ -139,14 +139,22 @@ func contextLine(m Message) string {
 	}
 }
 
-// requestText is the request message content for kind and req.
+// requestText is the request message content for kind and req. The
+// first line's shape is parsed by braintest's reflex model and by
+// web/debug/supervisor.js; keep it.
 func requestText(req Request) string {
-	if req.Kind.IsEvent() {
+	switch {
+	case req.Kind.IsEvent():
 		return eventRequestText(req)
+	case req.Kind == KindStop:
+		return stopRequestText(req)
 	}
 	what := "question"
-	if req.Kind == KindPropose {
+	switch req.Kind {
+	case KindPropose:
 		what = "instruction"
+	case KindUtterance:
+		what = "utterance"
 	}
 	s := fmt.Sprintf("Request from the assistant (%s): %s=%q", req.Kind, what, req.Question)
 	if req.Agent != "" {
@@ -157,10 +165,33 @@ func requestText(req Request) string {
 	if req.Trigger == TriggerEvent {
 		s += " [triggered by an event, not by the CEO]"
 	}
+	if req.Briefing != "" {
+		s += "\nStatus as the daemon has it: " + req.Briefing
+	}
+	if req.Kind == KindUtterance {
+		return s + "\nThose are the CEO's own words, relayed verbatim: decide what they are (a status question, something to find out, an instruction, an answer to a worker's prompt, a promise, a note, small talk) and act. Use tools as needed, then reply with the JSON object of the answer contract."
+	}
 	if req.Question == "" && req.Kind == KindPropose {
 		s += "\nThe assistant passed no instruction text: the CEO's own words above are the instruction (a bare \"let me know when …\" is a promise to record)."
 	}
 	return s + "\nUse tools as needed, then reply with the JSON object of the answer contract."
+}
+
+// stopRequestText is the request of the stop procedure's closing turn:
+// the code already resolved and carried out what to stop, so the turn
+// only says so and offers the correction (read tools only).
+func stopRequestText(req Request) string {
+	stopped := req.Stopped
+	if stopped == "" {
+		stopped = "nothing was in flight"
+	}
+	s := fmt.Sprintf("Request from the assistant (stop): stopped=%q", stopped)
+	if req.Agent != "" {
+		s += fmt.Sprintf(" agent=%q", req.Agent)
+	} else {
+		s += " agent=(none)"
+	}
+	return s + "\nThe CEO said stop and the daemon already carried the stop out; an open worker prompt is deliberately left open. Say in one short sentence what was stopped, then offer the correction as a question (\"shall I tell it something else?\"). Read tools only: send nothing."
 }
 
 // eventRequestText is the request message of an announce turn (parsed by

@@ -40,7 +40,8 @@ func printBrainTestUsage(w io.Writer) {
 	fprintln(w, "  --config PATH       config file (default ~/.config/sheepdog/config.toml)")
 	fprintln(w, "  --env-file PATH     load KEY=VALUE lines into the environment first")
 	fprintln(w, "  --question TEXT     the assistant's question (ask) or instruction (propose)")
-	fprintln(w, "  --kind ask|propose  the turn kind (default ask)")
+	fprintln(w, "  --kind KIND       utterance | ask | propose (default utterance: the shepherd's")
+	fprintln(w, "                    words verbatim, which the brain classifies itself)")
 	fprintln(w, "  --agent ALIAS       the agent hint, only if the CEO said a name")
 	fprintln(w, "  --alias NAME        the mock agent's alias (default auth)")
 	fprintln(w, "  --agent-kind KIND   the mock agent's kind (default codex)")
@@ -83,7 +84,7 @@ func parseBrainTestFlags(args []string, stderr io.Writer) (brainTestOpts, int, b
 	fs.StringVar(&o.configPath, "config", "", "config file")
 	fs.StringVar(&o.envFile, "env-file", "", "env file")
 	fs.StringVar(&o.question, "question", "", "question or instruction")
-	fs.StringVar(&o.kind, "kind", "ask", "ask | propose")
+	fs.StringVar(&o.kind, "kind", string(brain.KindUtterance), "utterance | ask | propose")
 	fs.StringVar(&o.agent, "agent", "", "agent hint")
 	fs.StringVar(&o.alias, "alias", "auth", "mock agent alias")
 	fs.StringVar(&o.agentKind, "agent-kind", "codex", "mock agent kind")
@@ -107,8 +108,10 @@ func parseBrainTestFlags(args []string, stderr io.Writer) (brainTestOpts, int, b
 		fprintln(stderr, "sheepdog brain-test: needs --question")
 		return o, 2, false
 	}
-	if o.kind != string(brain.KindAsk) && o.kind != string(brain.KindPropose) {
-		fprintln(stderr, "sheepdog brain-test: --kind must be ask or propose")
+	switch o.kind {
+	case string(brain.KindUtterance), string(brain.KindAsk), string(brain.KindPropose):
+	default:
+		fprintln(stderr, "sheepdog brain-test: --kind must be utterance, ask or propose")
 		return o, 2, false
 	}
 	switch herdr.State(o.st) {
@@ -206,15 +209,20 @@ func runBrainTest(ctx context.Context, args []string, stdout, stderr io.Writer) 
 
 	start := time.Now()
 	var res voice.ToolResult
-	if o.kind == string(brain.KindPropose) {
+	switch o.kind {
+	case string(brain.KindPropose):
 		res, err = sup.Propose(ctx, o.question, o.agent)
-	} else {
+	case string(brain.KindAsk):
 		res, err = sup.Ask(ctx, o.question, o.agent)
+	default:
+		// --agent is only a hint for the older kinds; an utterance
+		// reaches the brain exactly as the shepherd said it.
+		res, err = sup.ToSupervisor(ctx, o.question)
 	}
 	b.Quiesce()
 	out := map[string]any{
 		"kind": o.kind, "question": o.question, "agent": o.agent, "dur_ms": time.Since(start).Milliseconds(),
-		"result":     map[string]any{"spoken": res.Spoken, "detail": res.Detail, "options": res.Options, "clarify": res.Clarify, "scheduling": res.Scheduling.String()},
+		"result":     map[string]any{"spoken": res.Spoken, "detail": res.Detail, "options": res.Options, "clarify": res.Clarify, "pending": res.Pending, "scheduling": res.Scheduling.String()},
 		"transcript": transcriptForReport(b.Transcript().Messages()),
 	}
 	if err != nil {

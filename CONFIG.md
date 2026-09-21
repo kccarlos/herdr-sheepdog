@@ -56,6 +56,15 @@ Voice session (plan §6).
 | `gemini.voice` | `SHEEPDOG_GEMINI_VOICE` | `Puck` | The prebuilt voice name. |
 | `gemini.stall_after_s` | `SHEEPDOG_GEMINI_STALL_AFTER_S` | `10` | Seconds an utterance may go without any model response (tool call or audio) before `voice.stalled` is logged and the pages show "stalled". The second stall on one connection (or the second idle push that outwaits the 30 s turn timeout) recycles the connection: a reconnect with the still-valid resumption handle (`voice.recycle`), keeping the conversation. |
 
+## `[voice]`
+
+The dog's spoken half, as the operator meets it
+([`docs/roles.md`](docs/roles.md) "Names").
+
+| Key | Env override | Default | Meaning |
+|---|---|---|---|
+| `voice.name` | `SHEEPDOG_VOICE_NAME` | `Sheepdog` | What the dog calls itself. Substituted into `prompts/assistant.md` as `{name}`, so it is the name the voice model introduces itself by and answers to; the aliases of the agents it herds are separate (`[aliases]`). |
+
 ## `[deepseek]`
 
 The second supervisor-brain provider: DeepSeek's OpenAI-compatible chat
@@ -151,6 +160,7 @@ it?" for what each level announces.
 | `supervisor.chattiness` | `SHEEPDOG_SUPERVISOR_CHATTINESS` | `normal` | The initial push policy: `quiet` (agent questions and exits only), `normal` (plus the finish of any agent you dealt with recently, with a one-line result), or `chatty` (every finish, plus "started on …" when an instruction you sent is picked up). Changeable at runtime from the `/debug` header or `PUT /api/settings {"chattiness": …}`; the runtime choice is kept in the state file's `session.chattiness` and wins over this value on restart. |
 | `supervisor.recent_minutes` | `SHEEPDOG_SUPERVISOR_RECENT_MINUTES` | `30` | The `normal` level's window: a finish is announced when the agent was blocked, was sent an answer or an instruction, was asked about, or was named in a spoken briefing within this many minutes. |
 | `supervisor.promise_ttl_s` | `SHEEPDOG_SUPERVISOR_PROMISE_TTL_S` | `7200` | How long a promise ("tell me when it's done", README "Promises") waits for its event before it expires silently (`promise.expired`). Open promises live in the state file's `session.promises`, so a restart keeps them. |
+| `supervisor.cancel_window_s` | `SHEEPDOG_SUPERVISOR_CANCEL_WINDOW_S` | `30` | How soon after an instruction went to a *working* agent a "stop" still interrupts it with Ctrl-C (the stop procedure's phase 3, [`docs/roles.md`](docs/roles.md) "Stop"). Past it a stop no longer touches the agent: use an instruction ("tell it to revert that") instead. |
 | `supervisor.summary_timeout_s` | `SHEEPDOG_SUPERVISOR_SUMMARY_TIMEOUT_S` | `15` | Bounds the `summarize_done` template call that turns a finished agent's screen into the one-line result; past it the bare "<alias> finished." is spoken (`supervisor.done_error {stage: summarize}`). Raise it for a slow local model (Ollama on a cold start). |
 
 ## `[brain]`

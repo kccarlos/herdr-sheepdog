@@ -10,39 +10,24 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/prompts"
 )
 
-// toolDeclarations returns the plan §5 tool surface as NON_BLOCKING
-// function declarations (docs/gemini-live-notes.md §5).
+// toolDeclarations returns the voice's two tools as NON_BLOCKING
+// function declarations (docs/roles.md "One decision-maker";
+// docs/gemini-live-notes.md §5). The voice classifies nothing and
+// executes nothing: it hands the user's words to the supervisor and
+// says stop when they do.
 func toolDeclarations() []*genai.Tool {
 	obj := func(props map[string]*genai.Schema, req []string) *genai.Schema {
 		return &genai.Schema{Type: genai.TypeObject, Properties: props, Required: req}
 	}
 	return []*genai.Tool{{FunctionDeclarations: []*genai.FunctionDeclaration{
-		{Name: "briefing", Behavior: genai.BehaviorNonBlocking,
-			Description: "Current status of all agents in one or two spoken sentences: what each is doing, asking or last did. Call when the user asks what's happening, how things are going, or for a status.",
+		{Name: voice.ToolToSupervisor, Behavior: genai.BehaviorNonBlocking,
+			Description: "Hand the user's words to the supervisor, verbatim, whenever they are about the agents or the work: a status question, something to find out, an instruction, an answer to an agent's question ('yes', 'option two'), 'let me know when…', 'remember…', 'explain…', a doubt ('are you sure?'). The supervisor decides what they mean and what to do. Do not paraphrase and do not guess which agent is meant. Say 'on it' or 'checking' as you call it; the reply comes back as spoken, detail, options, clarify and pending.",
+			Parameters: obj(map[string]*genai.Schema{
+				"text": {Type: genai.TypeString, Description: "exactly what the user said, in their own words"},
+			}, []string{"text"})},
+		{Name: voice.ToolStop, Behavior: genai.BehaviorNonBlocking,
+			Description: "The user says stop, wait, cancel, never mind, no no. Call it at once, before anything else; the supervisor works out what to stop and tells you.",
 			Parameters:  obj(map[string]*genai.Schema{}, nil)},
-		{Name: "ask", Behavior: genai.BehaviorNonBlocking,
-			Description: "Answer something the user wants to KNOW by looking at an agent's screen, output, diff, logs or repo: 'what did it say', 'what did it do', 'what does that mean', 'explain the new section', 'ask you to explain …', 'is it stuck', 'why …', 'what changed'. Nothing is sent to the agent. Tell the user you're checking, then relay the answer when it arrives. When unsure between ask and propose, use ask.",
-			Parameters: obj(map[string]*genai.Schema{
-				"question": {Type: genai.TypeString, Description: "the user's question, in their words"},
-				"agent":    {Type: genai.TypeString, Description: "alias only if the user said one; empty for 'it' / 'that one' (the supervisor uses the agent discussed last)"},
-			}, []string{"question"})},
-		{Name: "propose", Behavior: genai.BehaviorNonBlocking,
-			Description: "Send an instruction or an answer TO an agent: only when the user tells an agent to do, stop or answer something ('tell auth to rerun the tests', 'ask docs to add a section', 'answer no'). Not for questions the user asks you. The system will echo what it will send; the user can say stop to cancel.",
-			Parameters: obj(map[string]*genai.Schema{
-				"agent":       {Type: genai.TypeString, Description: "alias only if the user said one; empty for 'it' / 'that one' (never guessed)"},
-				"instruction": {Type: genai.TypeString, Description: "what the user said, in their words"},
-			}, []string{"instruction"})},
-		{Name: "confirm", Behavior: genai.BehaviorNonBlocking,
-			Description: "User says yes / go ahead / do it to the most recent question from an agent.",
-			Parameters: obj(map[string]*genai.Schema{
-				"answer": {Type: genai.TypeString, Description: "the user's answer if it isn't a plain yes, e.g. 'no', 'option 2', 'keep the old one'"},
-			}, nil)},
-		{Name: "cancel", Behavior: genai.BehaviorNonBlocking,
-			Description: "User says stop, cancel, wait, or no. Cancels the in-flight action or the pending question.",
-			Parameters:  obj(map[string]*genai.Schema{}, nil)},
-		{Name: "note", Behavior: genai.BehaviorNonBlocking,
-			Description: "Remember something the user decided or wants kept in mind, e.g. 'don't touch the migrations today'.",
-			Parameters:  obj(map[string]*genai.Schema{"text": {Type: genai.TypeString}}, []string{"text"})},
 	}}}
 }
 
@@ -51,7 +36,7 @@ func toolDeclarations() []*genai.Tool {
 // no session exists).
 func SystemPrompt(cfg Config) (string, error) { return systemPrompt(cfg) }
 
-// TextToolDeclarations returns the same six tool declarations as the
+// TextToolDeclarations returns the same two tool declarations as the
 // voice session's, without the Live-only Behavior field (a plain
 // GenerateContent call, unlike LiveConnect, may reject a non-zero
 // Behavior). Used by `sheepdog eval --set assistant --live`, which runs
@@ -67,16 +52,18 @@ func TextToolDeclarations() []*genai.Tool {
 	return []*genai.Tool{{FunctionDeclarations: decls}}
 }
 
-// systemPrompt renders the voice system prompt with the aliases.
+// systemPrompt renders the voice system prompt with the dog's name and
+// the aliases.
 func systemPrompt(cfg Config) (string, error) {
-	aliases := strings.Join(cfg.Aliases, ", ")
-	if aliases == "" {
-		aliases = "none configured yet"
-	}
+	vars := prompts.AssistantVars(cfg.Name, cfg.Aliases)
 	if cfg.SystemPrompt != "" {
-		return strings.ReplaceAll(cfg.SystemPrompt, "{aliases}", aliases), nil
+		text := cfg.SystemPrompt
+		for k, v := range vars {
+			text = strings.ReplaceAll(text, "{"+k+"}", v)
+		}
+		return text, nil
 	}
-	text, _ := cfg.Prompts.Render(prompts.Assistant, map[string]string{"aliases": aliases})
+	text, _ := cfg.Prompts.Render(prompts.Assistant, vars)
 	return text, nil
 }
 

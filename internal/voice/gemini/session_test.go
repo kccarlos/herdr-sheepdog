@@ -72,10 +72,18 @@ func TestLiveConfigMatchesPlan(t *testing.T) {
 			t.Errorf("%s not NON_BLOCKING", fd.Name)
 		}
 	}
-	for _, n := range []string{"briefing", "ask", "propose", "confirm", "cancel", "note"} {
+	// The voice is declared exactly two tools (docs/roles.md "One
+	// decision-maker"): it relays and it stops, it never executes.
+	if len(decls) != 2 {
+		t.Errorf("%d tool declarations, want 2: %v", len(decls), names)
+	}
+	for _, n := range []string{voice.ToolToSupervisor, voice.ToolStop} {
 		if !names[n] {
 			t.Errorf("tool %s missing", n)
 		}
+	}
+	if !names[voice.ToolToSupervisor] || len(decls[0].Parameters.Required) != 1 || decls[0].Parameters.Required[0] != "text" {
+		t.Errorf("to_supervisor must require text: %+v", decls[0].Parameters)
 	}
 	if !bytes.Contains([]byte(lc.SystemInstruction.Parts[0].Text), []byte("aliases: auth.")) {
 		t.Errorf("prompt aliases not rendered: %q", lc.SystemInstruction.Parts[0].Text)

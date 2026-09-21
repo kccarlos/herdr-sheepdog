@@ -14,7 +14,18 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
 
-// Tool names (plan §5).
+// The voice's two tools (docs/roles.md "One decision-maker"):
+// to_supervisor carries the CEO's words verbatim, stop runs the stop
+// procedure. Nothing else is declared to the voice model.
+const (
+	ToolToSupervisor = voice.ToolToSupervisor
+	ToolStop         = voice.ToolStop
+)
+
+// The template path's own entry points. They were the voice's tools
+// until D1-revised and are no longer declared to any model: the
+// fallback (`--brain=off`, a brain error) and the tests drive the
+// matching methods directly.
 const (
 	ToolBriefing = "briefing"
 	ToolAsk      = "ask"
@@ -24,27 +35,16 @@ const (
 	ToolNote     = "note"
 )
 
-// Handler adapts the five tools to voice.ToolHandler. Unknown tools are an
-// error; missing arguments are treated as empty strings.
+// Handler adapts the two voice tools to voice.ToolHandler. Unknown tools
+// are an error; missing arguments are treated as empty strings.
 func (s *Supervisor) Handler() voice.ToolHandler {
 	return func(ctx context.Context, call voice.ToolCall) (voice.ToolResult, error) {
-		arg := func(name string) string {
-			v, _ := call.Args[name].(string)
-			return v
-		}
 		switch call.Name {
-		case ToolBriefing:
-			return s.Briefing(ctx)
-		case ToolAsk:
-			return s.Ask(ctx, arg("question"), arg("agent"))
-		case ToolPropose:
-			return s.Propose(ctx, arg("instruction"), arg("agent"))
-		case ToolConfirm:
-			return s.Confirm(ctx, arg("answer"))
-		case ToolCancel:
-			return s.Cancel(ctx)
-		case ToolNote:
-			return s.Note(ctx, arg("text"))
+		case ToolToSupervisor:
+			text, _ := call.Args["text"].(string)
+			return s.ToSupervisor(ctx, text)
+		case ToolStop:
+			return s.Stop(ctx, StopTriggerTool)
 		default:
 			return voice.ToolResult{}, fmt.Errorf("supervisor: unknown tool %q", call.Name)
 		}
@@ -76,12 +76,18 @@ var deepQuestion = regexp.MustCompile(`(?i)\b(why|diff|log|logs|fail|failed|fail
 // Querier is wired and the question needs the repo (or the screen was not
 // enough) — from the read-only CLI tool's output.
 func (s *Supervisor) Ask(ctx context.Context, question, agent string) (voice.ToolResult, error) {
+	if res, ok := s.brainTurn(ctx, brain.KindAsk, strings.TrimSpace(question), agent); ok {
+		return res, nil
+	}
+	return s.askTemplate(ctx, question, agent)
+}
+
+// askTemplate is ask without the brain: the screen tail through
+// spoken_answer, or the CLI tool when the question needs the repo.
+func (s *Supervisor) askTemplate(ctx context.Context, question, agent string) (voice.ToolResult, error) {
 	question = strings.TrimSpace(question)
 	if question == "" {
 		return voice.ToolResult{Spoken: "What would you like to know?", Clarify: true, Scheduling: voice.UrgencyInterrupt}, nil
-	}
-	if res, ok := s.brainTurn(ctx, brain.KindAsk, question, agent); ok {
-		return res, nil
 	}
 	row, res, ok := s.target(agent)
 	if !ok {
@@ -140,13 +146,20 @@ func (s *Supervisor) workspaceDir(ctx context.Context, row state.Agent) string {
 // pending question goes through send_keys; anything else through
 // agent.prompt.
 func (s *Supervisor) Propose(ctx context.Context, instruction, agent string) (voice.ToolResult, error) {
-	instruction = strings.TrimSpace(instruction)
 	// The brain reads the CEO's own words from its transcript, so an
 	// empty instruction (a bare "let me know when it's done") still
 	// reaches it; only the template path needs the text.
-	if res, ok := s.brainTurn(ctx, brain.KindPropose, instruction, agent); ok {
+	if res, ok := s.brainTurn(ctx, brain.KindPropose, strings.TrimSpace(instruction), agent); ok {
 		return res, nil
 	}
+	return s.proposeTemplate(ctx, instruction, agent)
+}
+
+// proposeTemplate is propose without the brain: resolve_instruction
+// picks the agent, then send_keys for an answer or agent.prompt for an
+// instruction.
+func (s *Supervisor) proposeTemplate(ctx context.Context, instruction, agent string) (voice.ToolResult, error) {
+	instruction = strings.TrimSpace(instruction)
 	if instruction == "" {
 		return voice.ToolResult{Spoken: "What should I tell it?", Clarify: true, Scheduling: voice.UrgencyInterrupt}, nil
 	}
@@ -172,7 +185,7 @@ func (s *Supervisor) Propose(ctx context.Context, instruction, agent string) (vo
 	s.mu.Lock()
 	if pending, has := s.store.Pending(); res.IsAnswer && has && pending.Kind == state.PendingAnswerPrompt && pending.PaneID == row.PaneID {
 		s.lastSubject = row.PaneID
-		out := s.answerPending(ctx, pending, res.Answer, "Telling "+alias+" %s. Sent.")
+		out := s.answerPending(ctx, pending, res.Answer, "Telling "+alias+" %s. Sent.", "template")
 		s.mu.Unlock()
 		return out, nil
 	}
@@ -249,7 +262,7 @@ func (s *Supervisor) Confirm(ctx context.Context, answer string) (voice.ToolResu
 	if p.Kind != state.PendingAnswerPrompt {
 		return voice.ToolResult{Spoken: "Nothing is waiting for an answer; the instruction to " + s.aliasOf(p.PaneID) + " was already sent.", Scheduling: voice.UrgencyInterrupt}, nil
 	}
-	return s.answerPending(ctx, p, answer, "Told "+s.aliasOf(p.PaneID)+" %s."), nil
+	return s.answerPending(ctx, p, answer, "Told "+s.aliasOf(p.PaneID)+" %s.", "confirm"), nil
 }
 
 // confirmExpired implements scenario 8: a confirm after the question
@@ -289,8 +302,9 @@ func (s *Supervisor) confirmExpired(answer string) voice.ToolResult {
 }
 
 // answerPending maps the answer onto keys, sends them and clears the slot.
-// format receives the spoken label ("yes", "option 2"). Caller holds s.mu.
-func (s *Supervisor) answerPending(ctx context.Context, p state.PendingAction, answer, format string) voice.ToolResult {
+// format receives the spoken label ("yes", "option 2"); via names the
+// path for pending.confirmed. Caller holds s.mu.
+func (s *Supervisor) answerPending(ctx context.Context, p state.PendingAction, answer, format, via string) voice.ToolResult {
 	alias := s.aliasOf(p.PaneID)
 	keys, label, err := mapAnswer(p, answer)
 	if err != nil {
@@ -300,12 +314,12 @@ func (s *Supervisor) answerPending(ctx context.Context, p state.PendingAction, a
 		}
 		return voice.ToolResult{Spoken: spoken, Clarify: true, Scheduling: voice.UrgencyInterrupt}
 	}
-	return s.answerWithKeys(ctx, p, keys, label, format)
+	return s.answerWithKeys(ctx, p, keys, label, format, via)
 }
 
 // answerWithKeys sends keys to the pending prompt's pane and clears the
-// slot (pending.confirmed). Caller holds s.mu.
-func (s *Supervisor) answerWithKeys(ctx context.Context, p state.PendingAction, keys []string, label, format string) voice.ToolResult {
+// slot (pending.confirmed {via}). Caller holds s.mu.
+func (s *Supervisor) answerWithKeys(ctx context.Context, p state.PendingAction, keys []string, label, format, via string) voice.ToolResult {
 	alias := s.aliasOf(p.PaneID)
 	if err := s.herdr.SendKeys(ctx, p.PaneID, keys...); err != nil {
 		s.log.Log(logSource, "supervisor.confirm_error", p.PaneID, map[string]any{"id": p.ID, "keys": keys, "error": err.Error()})
@@ -326,7 +340,7 @@ func (s *Supervisor) answerWithKeys(ctx context.Context, p state.PendingAction, 
 	s.expired = nil
 	s.briefing = ""
 	s.lastSubject = p.PaneID
-	s.log.Log(logSource, "pending.confirmed", p.PaneID, map[string]any{"id": p.ID, "answer": label, "keys": keys})
+	s.log.Log(logSource, "pending.confirmed", p.PaneID, map[string]any{"id": p.ID, "answer": label, "keys": keys, "via": via})
 	return voice.ToolResult{Spoken: fmt.Sprintf(format, label), Scheduling: voice.UrgencyInterrupt}
 }
 
@@ -363,7 +377,7 @@ func (s *Supervisor) Note(_ context.Context, text string) (voice.ToolResult, err
 	if text == "" {
 		return voice.ToolResult{Spoken: "What should I remember?", Clarify: true, Scheduling: voice.UrgencyInterrupt}, nil
 	}
-	if err := s.appendNote(text); err != nil {
+	if err := s.appendNote(text, true); err != nil {
 		s.log.Log(logSource, "supervisor.note_error", "", map[string]any{"error": err.Error()})
 		return voice.ToolResult{Spoken: "I could not save that note.", Scheduling: voice.UrgencyInterrupt}, nil
 	}
