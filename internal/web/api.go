@@ -75,7 +75,10 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 
 // VoiceInfo is the daemon's view of the voice side.
 type VoiceInfo struct {
-	Mode            string `json:"mode"` // gemini | off
+	Mode string `json:"mode"` // gemini | off
+	// Name is what the dog calls itself (config voice.name), so the
+	// /debug views can label its side of the conversation.
+	Name            string `json:"name,omitempty"`
 	Status          string `json:"status"`
 	Reason          string `json:"reason,omitempty"`
 	Muted           bool   `json:"muted"`
@@ -91,7 +94,7 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 		Agents:        agents,
 		PendingAction: snap.PendingAction,
 		Session:       snap.Session,
-		Voice:         VoiceInfo{Mode: s.deps.VoiceMode, Status: hs.status.String(), Reason: hs.reason, Muted: hs.muted, Stalled: hs.stalled, ClientConnected: hs.client},
+		Voice:         VoiceInfo{Mode: s.deps.VoiceMode, Name: s.deps.VoiceName, Status: hs.status.String(), Reason: hs.reason, Muted: hs.muted, Stalled: hs.stalled, ClientConnected: hs.client},
 		Settings:      s.settings(),
 		Brain:         s.brainInfo(),
 		Herdr:         s.deps.HerdrMode,
@@ -156,6 +159,7 @@ type ToolResponse struct {
 	Args       map[string]any `json:"args,omitempty"`
 	Spoken     string         `json:"spoken"`
 	Clarify    bool           `json:"clarify"`
+	Pending    bool           `json:"pending,omitempty"`
 	Scheduling string         `json:"scheduling"`
 	Via        string         `json:"via"`
 }
@@ -182,14 +186,15 @@ func (s *Server) runTool(ctx context.Context, call voice.ToolCall, via string) (
 }
 
 func toolResponse(call voice.ToolCall, res voice.ToolResult, via string) ToolResponse {
-	return ToolResponse{Tool: call.Name, Args: call.Args, Spoken: res.Spoken, Clarify: res.Clarify, Scheduling: res.Scheduling.String(), Via: via}
+	return ToolResponse{Tool: call.Name, Args: call.Args, Spoken: res.Spoken, Clarify: res.Clarify, Pending: res.Pending, Scheduling: res.Scheduling.String(), Via: via}
 }
 
-// handleCancel runs the cancel tool (the debug page's Cancel button).
+// handleCancel runs the stop tool (the debug page's Cancel button; the
+// route keeps its name, the tool behind it is the stop procedure).
 func (s *Server) handleCancel(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := s.toolCtx()
 	defer cancel()
-	call := voice.ToolCall{ID: "web-cancel", Name: supervisor.ToolCancel}
+	call := voice.ToolCall{ID: "web-stop", Name: supervisor.ToolStop}
 	res, err := s.runTool(ctx, call, "api")
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -334,8 +339,9 @@ func (s *Server) handleUtterance(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, toolResponse(call, res, "text_router"))
 }
 
-// errUnrouted is returned when the text router does not understand.
-var errUnrouted = errors.New("text router (debug path, --voice=off) does not understand this; try yes / no / stop / what's going on / tell … / ask …")
+// errUnrouted is returned when the text router has nothing to relay
+// (only an empty utterance, since D1-revised).
+var errUnrouted = errors.New("text router (debug path, --voice=off): nothing to relay")
 
 // routeUtterance runs text through the text-only router and the tool it
 // picks. Callers hold no locks.
@@ -353,7 +359,7 @@ func (s *Server) routeUtterance(ctx context.Context, text string) (voice.ToolCal
 	if err != nil {
 		return call, res, err
 	}
-	if call.Name == supervisor.ToolCancel {
+	if call.Name == supervisor.ToolStop {
 		s.hub.afterCancel(res)
 	}
 	return call, res, nil

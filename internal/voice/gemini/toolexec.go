@@ -85,6 +85,9 @@ func (s *Session) execTool(ctx context.Context, gen int, call voice.ToolCall, tu
 	if len(res.Options) > 0 {
 		resp["options"] = res.Options
 	}
+	if res.Pending {
+		resp["pending"] = true
+	}
 	sendErr := s.sendOn(gen, func(c Conn) error {
 		return c.SendToolResponse(genai.LiveToolResponseInput{FunctionResponses: []*genai.FunctionResponse{{
 			ID: call.ID, Name: call.Name, Response: resp, Scheduling: scheduling(res.Scheduling),
@@ -107,6 +110,9 @@ func (s *Session) execTool(ctx context.Context, gen int, call voice.ToolCall, tu
 	}
 	if len(res.Options) > 0 {
 		payload["options"] = res.Options
+	}
+	if res.Pending {
+		payload["pending"] = true
 	}
 	if err != nil {
 		payload["error"] = err.Error()

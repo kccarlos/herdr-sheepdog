@@ -57,6 +57,15 @@ func (b *Brain) Turn(ctx context.Context, req Request) (Reply, error) {
 	switch {
 	case req.Kind == KindPropose:
 		timeout = b.cfg.ProposeTimeout
+	case req.Kind == KindUtterance:
+		// An utterance may turn out to be an instruction, so it gets the
+		// longer budget: the brain decides what it is (docs/roles.md
+		// "One decision-maker").
+		timeout = b.cfg.ProposeTimeout
+	case req.Kind == KindStop:
+		// The CEO is waiting and the procedure already acted: one short
+		// read-only turn to say what was stopped.
+		timeout = b.cfg.StopTimeout
 	case req.Kind.IsEvent():
 		timeout = b.cfg.EnrichTimeout
 		req.Trigger = TriggerEvent
@@ -111,7 +120,7 @@ func (b *Brain) run(ctx context.Context, t *turn) (Reply, error) {
 
 	system := b.systemPrompt()
 	tools := b.tools
-	if t.req.Kind.IsEvent() {
+	if t.req.Kind.ReadOnly() {
 		tools = b.readTools
 	}
 	base := genai.GenerateContentConfig{Tools: tools}
@@ -267,7 +276,7 @@ func (b *Brain) execCalls(ctx context.Context, t *turn, resp *genai.GenerateCont
 	for i, fc := range calls {
 		id := ids[i]
 		t0 := b.cfg.Now()
-		out := b.execTool(ctx, t.req.Trigger, t.n, fc)
+		out := b.execTool(ctx, t, fc)
 		dur := b.cfg.Now().Sub(t0).Milliseconds()
 		if out.railBlocked != "" {
 			b.log.Log(logSource, "brain.rail_blocked", "", map[string]any{"id": id, "agent": out.agent, "keys": keysArg(fc.Args["keys"]), "trigger": string(t.req.Trigger), "reason": out.railBlocked, "turn": t.n})

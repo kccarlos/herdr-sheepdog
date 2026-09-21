@@ -3,7 +3,7 @@
 // Tabs: Swimlane (swimlane-view.js), Conversation (conversation-view.js),
 // Supervisor (supervisor-view.js over the brain's transcript API), Events
 // (the raw list), State.
-import { ConversationView } from './conversation-view.js';
+import { ConversationView, setDogName } from './conversation-view.js';
 import { SwimlaneView } from './swimlane-view.js';
 import { SupervisorView } from './supervisor-view.js';
 import { LANES } from './swimlane.js';
@@ -484,6 +484,7 @@ async function refreshState() {
     const st = await r.json();
     renderAgents(st.agents || []);
     renderPending(st.pending_action);
+    setDogName((st.voice || {}).name);
     renderVoice(st.voice || {}, st);
     renderSettings(st.settings);
     renderBrainModel(st.brain);

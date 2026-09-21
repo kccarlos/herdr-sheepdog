@@ -73,6 +73,24 @@ const (
 // logSource is the source field of prompts.* events.
 const logSource = "prompts"
 
+// DefaultName is the dog's name when config voice.name is empty
+// (docs/roles.md "Names"); it must match config.DefaultVoiceName.
+const DefaultName = "Sheepdog"
+
+// AssistantVars builds assistant.md's substitutions: {name}, the dog's
+// own name, and {aliases}, the agents it herds. Every renderer of the
+// voice prompt goes through this, so a new placeholder is added once.
+func AssistantVars(name string, aliases []string) map[string]string {
+	if name = strings.TrimSpace(name); name == "" {
+		name = DefaultName
+	}
+	list := strings.Join(aliases, ", ")
+	if list == "" {
+		list = "none configured yet"
+	}
+	return map[string]string{"name": name, "aliases": list}
+}
+
 // Render loads the named cheap-LLM template (embedded only) and replaces
 // each {key} with vars[key]. Unknown placeholders are left as-is so a
 // typo is visible in the output.

@@ -71,6 +71,10 @@ type Config struct {
 	// PromiseTTL is how long an open promise waits for its event before
 	// it expires silently (default 2 h).
 	PromiseTTL time.Duration
+	// CancelWindow is how soon after an instruction went to a working
+	// agent a stop still interrupts it (default 30 s, docs/roles.md
+	// "Stop" phase 3).
+	CancelWindow time.Duration
 	// AnnounceWait is how long the first audible announcement of a
 	// finish waits for the brain's announce turn before the template
 	// sentence is spoken (default 2 s; the brain's line may still follow
@@ -111,6 +115,9 @@ func (c Config) withDefaults() Config {
 	if c.PromiseTTL == 0 {
 		c.PromiseTTL = 2 * time.Hour
 	}
+	if c.CancelWindow == 0 {
+		c.CancelWindow = 30 * time.Second
+	}
 	if c.AnnounceWait == 0 {
 		c.AnnounceWait = 2 * time.Second
 	}
@@ -144,6 +151,7 @@ type Supervisor struct {
 	interrupted   map[string]time.Time // pane -> when cancel sent Ctrl-C (suppresses the next "finished")
 	lastSubject   string               // pane most recently spoken about (last push subject or tool target)
 	mentioned     map[string]time.Time // pane -> when a spoken briefing last named it
+	utterance     *inflightUtterance   // the to_supervisor call in flight (stop.go phases 1 and 2)
 }
 
 // interruptGrace is how long after a user cancel a pane's working -> done

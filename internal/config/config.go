@@ -41,6 +41,7 @@ type Config struct {
 	Herdr      Herdr      `toml:"herdr"`
 	State      State      `toml:"state"`
 	Gemini     Gemini     `toml:"gemini"`
+	Voice      Voice      `toml:"voice"`
 	DeepSeek   DeepSeek   `toml:"deepseek"`
 	LLM        LLM        `toml:"llm"`
 	Web        Web        `toml:"web"`
@@ -154,6 +155,17 @@ type Supervisor struct {
 	// finish; on expiry the plain "<alias> finished." sentence is spoken
 	// instead (default 15).
 	SummaryTimeoutS int `toml:"summary_timeout_s"`
+	// CancelWindowS is how soon after an instruction went to a working
+	// agent a "stop" still interrupts it with Ctrl-C (docs/roles.md
+	// "Stop", phase 3; default 30).
+	CancelWindowS int `toml:"cancel_window_s"`
+}
+
+// Voice is the dog's spoken half, as the operator meets it.
+type Voice struct {
+	// Name is what the dog calls itself, substituted into
+	// prompts/assistant.md as {name} (default "Sheepdog").
+	Name string `toml:"name"`
 }
 
 // ChattinessLevels are the accepted values of supervisor.chattiness.
@@ -161,6 +173,10 @@ var ChattinessLevels = []string{"quiet", "normal", "chatty"}
 
 // DefaultChattiness is the built-in supervisor.chattiness.
 const DefaultChattiness = "normal"
+
+// DefaultVoiceName is the built-in voice.name: what the dog calls
+// itself (docs/roles.md "Names").
+const DefaultVoiceName = "Sheepdog"
 
 // validChattiness reports whether v is one of ChattinessLevels.
 func validChattiness(v string) bool {
@@ -316,7 +332,8 @@ func Default() Config {
 		LLM:               LLM{BaseURL: GeminiOpenAIBaseURL, Model: "gemini-3.5-flash-lite", TimeoutS: 15},
 		Web:               Web{Port: DefaultWebPort},
 		CLI:               defaultCLI(),
-		Supervisor:        Supervisor{Chattiness: DefaultChattiness, RecentMinutes: 30, PromiseTTLS: 7200, SummaryTimeoutS: 15},
+		Voice:             Voice{Name: DefaultVoiceName},
+		Supervisor:        Supervisor{Chattiness: DefaultChattiness, RecentMinutes: 30, PromiseTTLS: 7200, SummaryTimeoutS: 15, CancelWindowS: 30},
 		Brain:             defaultBrain(),
 		Prompts:           Prompts{Dir: filepath.Join(home, ".config", "sheepdog", "prompts")},
 	}
@@ -506,7 +523,8 @@ func validateBrain(b Brain) error {
 //	SHEEPDOG_CLI_CLAUDE_MODEL, SHEEPDOG_CLI_CODEX_REASONING,
 //	SHEEPDOG_CLI_TIMEOUT_S, SHEEPDOG_CLI_MAX_OUTPUT_KB,
 //	SHEEPDOG_SUPERVISOR_CHATTINESS, SHEEPDOG_SUPERVISOR_RECENT_MINUTES,
-//	SHEEPDOG_SUPERVISOR_PROMISE_TTL_S,
+//	SHEEPDOG_SUPERVISOR_PROMISE_TTL_S, SHEEPDOG_SUPERVISOR_CANCEL_WINDOW_S,
+//	SHEEPDOG_VOICE_NAME,
 //	SHEEPDOG_BRAIN_ENABLED, SHEEPDOG_BRAIN_PROVIDER, SHEEPDOG_BRAIN_MODEL,
 //	SHEEPDOG_BRAIN_MAX_STEPS,
 //	SHEEPDOG_BRAIN_ASK_TIMEOUT_S, SHEEPDOG_BRAIN_PROPOSE_TIMEOUT_S,
@@ -627,6 +645,16 @@ func applyEnv(cfg *Config, lookup func(string) (string, bool)) error {
 			return fmt.Errorf("config: SHEEPDOG_SUPERVISOR_SUMMARY_TIMEOUT_S=%q: want a positive integer", v)
 		}
 		cfg.Supervisor.SummaryTimeoutS = n
+	}
+	if v, ok := lookup("SHEEPDOG_SUPERVISOR_CANCEL_WINDOW_S"); ok {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return fmt.Errorf("config: SHEEPDOG_SUPERVISOR_CANCEL_WINDOW_S=%q: want a positive integer", v)
+		}
+		cfg.Supervisor.CancelWindowS = n
+	}
+	if v, ok := lookup("SHEEPDOG_VOICE_NAME"); ok {
+		cfg.Voice.Name = strings.TrimSpace(v)
 	}
 	if v, ok := lookup("SHEEPDOG_PROMPTS_DIR"); ok {
 		cfg.Prompts.Dir = v
@@ -765,8 +793,8 @@ func geminiKeysFromEnv(lookup func(string) (string, bool)) []string {
 // counts (or set/unset) only; keep it that way when secret-bearing
 // fields are added.
 func (c Config) String() string {
-	return fmt.Sprintf("data_dir=%s herdr.socket=%s state.path=%s state.full_fsync=%t debounce_ms=%d snapshot_interval_s=%d pending_ttl_s=%d aliases=%d gemini.model=%s gemini.voice=%s gemini.stall_after_s=%d gemini.api_keys=%d deepseek.api_key=%s deepseek.base_url=%s deepseek.thinking=%t deepseek.reasoning_effort=%s llm.base_url=%s llm.model=%s llm.timeout_s=%d llm.api_keys=%d web.port=%d cli.prefer=%s cli.timeout_s=%d cli.max_output_kb=%d supervisor.chattiness=%s supervisor.recent_minutes=%d supervisor.promise_ttl_s=%d supervisor.summary_timeout_s=%d brain.enabled=%t brain.provider=%s brain.model=%s brain.max_steps=%d brain.ask_timeout_s=%d brain.propose_timeout_s=%d brain.window_tokens=%d brain.prune_after_turns=%d brain.step_reserve_s=%d brain.final_grace_s=%d brain.enrich_timeout_s=%d brain.announce_wait_s=%d prompts.dir=%s",
-		c.DataDir, c.Herdr.Socket, c.State.Path, c.State.FullFsync, c.DebounceMS, c.SnapshotIntervalS, c.PendingTTLS, len(c.Aliases), c.Gemini.Model, c.Gemini.Voice, c.Gemini.StallAfterS, len(c.Gemini.APIKeys), setOrUnset(c.DeepSeek.APIKey), c.DeepSeek.BaseURL, c.DeepSeek.Thinking, c.DeepSeek.ReasoningEffort, c.LLM.BaseURL, c.LLM.Model, c.LLM.TimeoutS, len(c.LLMKeys()), c.Web.Port, c.CLI.Prefer, c.CLI.TimeoutS, c.CLI.MaxOutputKB, c.Supervisor.Chattiness, c.Supervisor.RecentMinutes, c.Supervisor.PromiseTTLS, c.Supervisor.SummaryTimeoutS, c.Brain.Enabled, c.Brain.Provider, c.Brain.Model, c.Brain.MaxSteps, c.Brain.AskTimeoutS, c.Brain.ProposeTimeoutS, c.Brain.WindowTokens, c.Brain.PruneAfterTurns, c.Brain.StepReserveS, c.Brain.FinalGraceS, c.Brain.EnrichTimeoutS, c.Brain.AnnounceWaitS, c.Prompts.Dir)
+	return fmt.Sprintf("data_dir=%s herdr.socket=%s state.path=%s state.full_fsync=%t debounce_ms=%d snapshot_interval_s=%d pending_ttl_s=%d aliases=%d gemini.model=%s gemini.voice=%s gemini.stall_after_s=%d gemini.api_keys=%d voice.name=%s deepseek.api_key=%s deepseek.base_url=%s deepseek.thinking=%t deepseek.reasoning_effort=%s llm.base_url=%s llm.model=%s llm.timeout_s=%d llm.api_keys=%d web.port=%d cli.prefer=%s cli.timeout_s=%d cli.max_output_kb=%d supervisor.chattiness=%s supervisor.recent_minutes=%d supervisor.promise_ttl_s=%d supervisor.summary_timeout_s=%d supervisor.cancel_window_s=%d brain.enabled=%t brain.provider=%s brain.model=%s brain.max_steps=%d brain.ask_timeout_s=%d brain.propose_timeout_s=%d brain.window_tokens=%d brain.prune_after_turns=%d brain.step_reserve_s=%d brain.final_grace_s=%d brain.enrich_timeout_s=%d brain.announce_wait_s=%d prompts.dir=%s",
+		c.DataDir, c.Herdr.Socket, c.State.Path, c.State.FullFsync, c.DebounceMS, c.SnapshotIntervalS, c.PendingTTLS, len(c.Aliases), c.Gemini.Model, c.Gemini.Voice, c.Gemini.StallAfterS, len(c.Gemini.APIKeys), c.Voice.Name, setOrUnset(c.DeepSeek.APIKey), c.DeepSeek.BaseURL, c.DeepSeek.Thinking, c.DeepSeek.ReasoningEffort, c.LLM.BaseURL, c.LLM.Model, c.LLM.TimeoutS, len(c.LLMKeys()), c.Web.Port, c.CLI.Prefer, c.CLI.TimeoutS, c.CLI.MaxOutputKB, c.Supervisor.Chattiness, c.Supervisor.RecentMinutes, c.Supervisor.PromiseTTLS, c.Supervisor.SummaryTimeoutS, c.Supervisor.CancelWindowS, c.Brain.Enabled, c.Brain.Provider, c.Brain.Model, c.Brain.MaxSteps, c.Brain.AskTimeoutS, c.Brain.ProposeTimeoutS, c.Brain.WindowTokens, c.Brain.PruneAfterTurns, c.Brain.StepReserveS, c.Brain.FinalGraceS, c.Brain.EnrichTimeoutS, c.Brain.AnnounceWaitS, c.Prompts.Dir)
 }
 
 // setOrUnset renders a secret's presence, never its value.

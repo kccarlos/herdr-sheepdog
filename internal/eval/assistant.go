@@ -68,7 +68,7 @@ func runAssistantCase(ctx context.Context, c AssistantCase, pl *prompts.Loader, 
 	if len(aliases) == 0 {
 		aliases = defaultAliases
 	}
-	prompt, _ := pl.Render(prompts.Assistant, map[string]string{"aliases": strings.Join(aliases, ", ")})
+	prompt, _ := pl.Render(prompts.Assistant, prompts.AssistantVars("", aliases))
 	contents := buildAssistantContents(c.Context, c.Utterance)
 	cfg := &genai.GenerateContentConfig{
 		SystemInstruction: &genai.Content{Parts: []*genai.Part{{Text: prompt}}},
@@ -95,7 +95,7 @@ func runAssistantCase(ctx context.Context, c AssistantCase, pl *prompts.Loader, 
 			}
 		}
 	}
-	reasons := checkAssistantExpect(c.Expect, gotTool, gotAgent, gotText)
+	reasons := checkAssistantExpect(c.Expect, gotTool, gotAgent, gotText, c.Utterance)
 	if len(reasons) > 0 {
 		return Result{ID: c.ID, Status: StatusFail, Detail: strings.Join(reasons, "; "), Duration: dur,
 			Got: map[string]any{"tool": gotTool, "agent": gotAgent, "text": gotText}}
@@ -105,10 +105,13 @@ func runAssistantCase(ctx context.Context, c AssistantCase, pl *prompts.Loader, 
 
 // checkAssistantExpect compares what the model did against exp, returning
 // a failure reason per mismatch (empty: pass).
-func checkAssistantExpect(exp AssistantExpect, gotTool, gotAgent, gotText string) []string {
+func checkAssistantExpect(exp AssistantExpect, gotTool, gotAgent, gotText, utterance string) []string {
 	var reasons []string
 	if exp.Tool != "" && exp.Tool != gotTool {
 		reasons = append(reasons, "tool="+gotTool+", want "+exp.Tool)
+	}
+	if exp.Verbatim && strings.TrimSpace(gotText) != strings.TrimSpace(utterance) {
+		reasons = append(reasons, "text "+quoteOrEmpty(gotText)+" is not the utterance verbatim ("+quoteOrEmpty(utterance)+")")
 	}
 	if exp.Agent != nil && *exp.Agent != gotAgent {
 		reasons = append(reasons, "agent="+quoteOrEmpty(gotAgent)+", want "+quoteOrEmpty(*exp.Agent))

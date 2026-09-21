@@ -15,8 +15,9 @@ for the full design and [`docs/architecture.md`](docs/architecture.md)
 for a shorter orientation.
 
 **Status:** WP1–WP7a are in — herdr client, state table, the Gemini
-Live voice session, the supervisor and its five voice tools, the CLI
-query tool behind `ask()`'s deep path, the daemon (`sheepdog serve`)
+Live voice session, the supervisor and the voice's two tools
+(`to_supervisor`, `stop`), the CLI
+query tool behind the deep lookup path, the daemon (`sheepdog serve`)
 with `/voice` and `/debug`, the herdr plugin shim, and packaging/docs.
 WP7b ran the plan's scenarios against real agy, Codex and Claude Code
 panes and a live Gemini session: see [`docs/e2e-results.md`](docs/e2e-results.md)
@@ -100,7 +101,7 @@ sheepdog serve --voice=off --herdr=mock --dev  # also serve testdata/audio/*.wav
 `/voice`: mic → AudioWorklet → 16 kHz PCM16 → WebSocket, gapless 24 kHz
 playback, mute/stop, auto-reconnect, a silence gate for quiet mics.
 `/debug`: five tabs — **Swimlane** (the default: a sequence diagram with
-four lanes, You · Voice model · Supervisor · herdr / LLM / CLI, one card
+four lanes, Shepherd · Voice · Brain · Flock / CLI, one card
 per event and arrows for every hop with its latency, chains that light up
 across lanes when you click a tool call or an arrow, compressed quiet time,
 lane toggles and the Events-tab filters; a card click shows its raw JSON;
@@ -288,12 +289,13 @@ affected by this; this warning is about the worker panes herdr manages.)
   (`docs/e2e-results.md`). herdr 0.9.0's bundled/remote detection rules
   do not recognise Antigravity CLI 1.2.5 prompts, so `agy` panes are
   never reported `blocked` (see the same document).
-- **`briefing`:** answered from the in-memory state table cache, no
-  model call — target under 1.2 s total added latency (utterance end to
-  audio start, plan §9 WP7 acceptance). Measured in WP7b: 0.92–0.99 s for
-  a typed utterance, 1.6–1.9 s for spoken audio, of which ~1 s is the
+- **A status question:** one brain turn with no tool call — the roster
+  sentence travels with the request. The code fast paths (a bare "yes"
+  to an open prompt, a bare "stop") answer with no model at all; the
+  WP7b measurement of the old cached `briefing` tool was 0.92–0.99 s for
+  a typed utterance and 1.6–1.9 s for spoken audio, of which ~1 s is the
   Live API's end-of-speech detection and < 1 ms is sheepdog's handler.
-- **`ask`/`propose` with a deep CLI lookup:** dominated by the codex/claude
+- **A question that needs a deep CLI lookup:** dominated by the codex/claude
   invocation itself, typically several seconds to tens of seconds (see
   the "Observed" numbers in
   [`docs/cli-query-tools.md`](docs/cli-query-tools.md)); sheepdog tells

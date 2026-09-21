@@ -11,6 +11,7 @@ import (
 	"google.golang.org/genai"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
+	"github.com/kccarlos/herdr-sheepdog/prompts"
 )
 
 func TestNewRequiresKeys(t *testing.T) {
@@ -72,10 +73,18 @@ func TestLiveConfigMatchesPlan(t *testing.T) {
 			t.Errorf("%s not NON_BLOCKING", fd.Name)
 		}
 	}
-	for _, n := range []string{"briefing", "ask", "propose", "confirm", "cancel", "note"} {
+	// The voice is declared exactly two tools (docs/roles.md "One
+	// decision-maker"): it relays and it stops, it never executes.
+	if len(decls) != 2 {
+		t.Errorf("%d tool declarations, want 2: %v", len(decls), names)
+	}
+	for _, n := range []string{voice.ToolToSupervisor, voice.ToolStop} {
 		if !names[n] {
 			t.Errorf("tool %s missing", n)
 		}
+	}
+	if !names[voice.ToolToSupervisor] || len(decls[0].Parameters.Required) != 1 || decls[0].Parameters.Required[0] != "text" {
+		t.Errorf("to_supervisor must require text: %+v", decls[0].Parameters)
 	}
 	if !bytes.Contains([]byte(lc.SystemInstruction.Parts[0].Text), []byte("aliases: auth.")) {
 		t.Errorf("prompt aliases not rendered: %q", lc.SystemInstruction.Parts[0].Text)
@@ -170,11 +179,11 @@ func TestToolCallRoundTrip(t *testing.T) {
 	var gotCall voice.ToolCall
 	handler := func(_ context.Context, call voice.ToolCall) (voice.ToolResult, error) {
 		gotCall = call
-		return voice.ToolResult{Spoken: "briefing called with no arguments", Detail: "two agents, both idle", Options: []string{"a", "b"}, Scheduling: voice.UrgencyInterrupt}, nil
+		return voice.ToolResult{Spoken: "checking", Detail: "two agents, both idle", Options: []string{"a", "b"}, Pending: true, Scheduling: voice.UrgencyInterrupt}, nil
 	}
 	h := newHarness(t, Config{Handler: handler}, &fakeDialer{results: []func() (Conn, error){ok(c)}})
 
-	c.serve(toolCallMsg("call_1", "briefing", nil))
+	c.serve(toolCallMsg("call_1", voice.ToolToSupervisor, map[string]any{"text": "what's going on"}))
 	h.waitEvent("tool call", func(ev voice.Event) bool { tc, ok := ev.(voice.EventToolCall); return ok && tc.Call.ID == "call_1" })
 	time.Sleep(20 * time.Millisecond)
 	if c.count("tool") != 0 {
@@ -183,16 +192,21 @@ func TestToolCallRoundTrip(t *testing.T) {
 	c.serve(turnCompleteMsg()) // the model ends its turn right after a NON_BLOCKING call
 	m := c.waitSent(t, "tool response", func(m sent) bool { return m.kind == "tool" })
 	fr := m.tool.FunctionResponses[0]
-	if fr.ID != "call_1" || fr.Name != "briefing" || fr.Scheduling != genai.FunctionResponseSchedulingInterrupt {
+	if fr.ID != "call_1" || fr.Name != voice.ToolToSupervisor || fr.Scheduling != genai.FunctionResponseSchedulingInterrupt {
 		t.Fatalf("response = %+v", fr)
 	}
-	if fr.Response["spoken"] != "briefing called with no arguments" || fr.Response["detail"] != "two agents, both idle" {
+	if fr.Response["spoken"] != "checking" || fr.Response["detail"] != "two agents, both idle" {
 		t.Fatalf("response = %v", fr.Response)
 	}
 	if opts, _ := fr.Response["options"].([]string); len(opts) != 2 {
 		t.Fatalf("options = %v", fr.Response["options"])
 	}
-	if gotCall.Name != "briefing" || gotCall.Args == nil {
+	// pending travels with the reply: the voice says how long and carries
+	// on, and the answer arrives on its own.
+	if fr.Response["pending"] != true {
+		t.Fatalf("pending not passed on: %v", fr.Response)
+	}
+	if gotCall.Name != voice.ToolToSupervisor || gotCall.Args["text"] != "what's going on" {
 		t.Fatalf("handler saw %+v", gotCall)
 	}
 	h.waitEvent("tool call", func(ev voice.Event) bool { tc, ok := ev.(voice.EventToolCall); return ok && tc.Call.ID == "call_1" })
@@ -915,5 +929,25 @@ func TestPushTimeoutsRecycle(t *testing.T) {
 	}
 	if recs := d.records(); len(recs) != 2 || recs[1].handle != "handle-B" {
 		t.Fatalf("dials = %+v", recs)
+	}
+}
+
+// TestSystemPromptName substitutes the dog's own name (config
+// voice.name) and the aliases into the voice prompt, for the embedded
+// default and for a SystemPrompt override alike.
+func TestSystemPromptName(t *testing.T) {
+	got, err := SystemPrompt(Config{Name: "Rex", Aliases: []string{"auth", "docs"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(got, "You are Rex,") || strings.Contains(got, "{name}") || !strings.Contains(got, "aliases: auth, docs.") {
+		t.Errorf("prompt = %q", got[:min(80, len(got))])
+	}
+	// No configured name: the built-in one.
+	if got, _ = SystemPrompt(Config{Aliases: []string{"auth"}}); !strings.HasPrefix(got, "You are "+prompts.DefaultName+",") {
+		t.Errorf("default name: %q", got[:min(40, len(got))])
+	}
+	if got, _ = SystemPrompt(Config{Name: "Rex", SystemPrompt: "I am {name}; the agents are {aliases}."}); got != "I am Rex; the agents are none configured yet." {
+		t.Errorf("override = %q", got)
 	}
 }

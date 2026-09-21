@@ -22,6 +22,8 @@ const types = (rows) => rows.map((r) => (r.kind === 'card' ? r.type : r.kind));
 
 test('lanes and helpers', () => {
   assert.deepEqual(LANES.map((l) => l.id), ['you', 'voice', 'sup', 'herdr']);
+  // The names of docs/roles.md; the ids behind them do not change.
+  assert.deepEqual(LANES.map((l) => l.label), ['Shepherd', 'Voice', 'Brain', 'Flock / CLI']);
   assert.equal(latencyLevel(null), null);
   assert.equal(latencyLevel(200), 'ok');
   assert.equal(latencyLevel(1500), 'warn');
@@ -513,8 +515,8 @@ test('push judgment: brain.push_decision rides on the voice.push it produced; a 
   assert.equal(decisions[0].title, 'push judgment');
   assert.equal(decisions[1].summary, 'skip → skip · brain · ceiling normal · via brain · done · docs finished: wrote the readme.');
   assert.ok(decisions[0].summary.includes('via brain · done ·'));
-  assert.equal(c.find((r) => r.type === 'brain.yielded').title, 'yielded to a CEO turn');
-  assert.equal(c.find((r) => r.type === 'brain.yielded').summary, 'turn 4 · before step 2 · auth done · 1 CEO turn waiting');
+  assert.equal(c.find((r) => r.type === 'brain.yielded').title, 'yielded to a shepherd turn');
+  assert.equal(c.find((r) => r.type === 'brain.yielded').summary, 'turn 4 · before step 2 · auth done · 1 shepherd turn waiting');
   assert.equal(c.find((r) => r.type === 'brain.event_coalesced').summary, 'auth done · replaced the queued turn');
   const switches = c.filter((r) => r.type === 'brain.model_changed');
   assert.equal(switches[0].title, 'model switched');

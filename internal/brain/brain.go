@@ -28,7 +28,10 @@ const (
 	DefaultProposeTimeout = 12 * time.Second
 	// DefaultEnrichTimeout bounds an event turn (announce): on expiry the
 	// supervisor speaks its template sentence instead.
-	DefaultEnrichTimeout   = 6 * time.Second
+	DefaultEnrichTimeout = 6 * time.Second
+	// DefaultStopTimeout bounds the stop procedure's closing turn: on
+	// expiry the supervisor speaks its own "Stopped: …" sentence.
+	DefaultStopTimeout     = 5 * time.Second
 	DefaultWindowTokens    = 24000
 	DefaultPruneAfterTurns = 3
 	// DefaultCompactTimeout bounds the summary call of a compaction,
@@ -55,9 +58,10 @@ type Config struct {
 	Model string
 	// MaxSteps bounds the model calls in one turn.
 	MaxSteps int
-	// AskTimeout / ProposeTimeout bound one turn including its tools;
-	// EnrichTimeout bounds an event turn.
-	AskTimeout, ProposeTimeout, EnrichTimeout time.Duration
+	// AskTimeout / ProposeTimeout bound one turn including its tools (an
+	// utterance turn takes ProposeTimeout: it may be an instruction);
+	// EnrichTimeout bounds an event turn and StopTimeout a stop turn.
+	AskTimeout, ProposeTimeout, EnrichTimeout, StopTimeout time.Duration
 	// WindowTokens is the estimated window size that triggers compaction.
 	WindowTokens int
 	// PruneAfterTurns is how many turns a tool result stays verbatim.
@@ -107,6 +111,9 @@ func (c Config) withDefaults() Config {
 	}
 	if c.EnrichTimeout <= 0 {
 		c.EnrichTimeout = DefaultEnrichTimeout
+	}
+	if c.StopTimeout <= 0 {
+		c.StopTimeout = DefaultStopTimeout
 	}
 	if c.WindowTokens <= 0 {
 		c.WindowTokens = DefaultWindowTokens
@@ -431,6 +438,22 @@ func (b *Brain) Ask(ctx context.Context, req Request) (Reply, error) {
 func (b *Brain) Propose(ctx context.Context, req Request) (Reply, error) {
 	req.Kind = KindPropose
 	return b.Turn(ctx, req)
+}
+
+// Utterance runs one turn over the CEO's verbatim words (D1-revised):
+// the brain decides what they are and acts.
+func (b *Brain) Utterance(ctx context.Context, req Request) (Reply, error) {
+	req.Kind = KindUtterance
+	return b.Turn(ctx, req)
+}
+
+// Daemon ingests a line the daemon itself produced, so the transcript
+// shows what code did without a model (a fast path, a stop).
+func (b *Brain) Daemon(text string) {
+	if text == "" {
+		return
+	}
+	b.ingest(Message{Role: RoleUser, Kind: KindSystem, Content: text}, 0)
 }
 
 // ingest appends m to the transcript and the window.

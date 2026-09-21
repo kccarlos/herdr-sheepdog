@@ -21,8 +21,12 @@ type Config struct {
 	// Aliases are the spoken agent names, put in the system prompt and in
 	// the input transcription CustomVocabulary.
 	Aliases []string
+	// Name is what the dog calls itself (config voice.name, default
+	// "Sheepdog"), substituted into the system prompt as {name}.
+	Name string
 	// SystemPrompt overrides prompts/assistant.md (and any override of
-	// it) entirely when non-empty. {aliases} is substituted in both.
+	// it) entirely when non-empty. {aliases} and {name} are substituted
+	// in both.
 	SystemPrompt string
 	// Prompts resolves prompts/assistant.md against its override
 	// (docs/roles.md "Prompt files"); nil uses the embedded default.

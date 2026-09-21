@@ -6,63 +6,37 @@ import (
 	"strings"
 	"sync/atomic"
 
-	"github.com/kccarlos/herdr-sheepdog/internal/supervisor"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
 
-// Router maps trivial utterances onto voice tool calls without a model.
-// DEBUG ONLY: it stands in for the voice model when `sheepdog serve
-// --voice=off`, so the tool path can be exercised from the /debug page. It
-// is deliberately dumb; anything it does not recognise is rejected.
+// Router stands in for the voice model when `sheepdog serve
+// --voice=off`, so the tool path can be exercised from the /debug page.
+// Since D1-revised the voice has only two tools and classifies nothing,
+// so the router has almost nothing left to do: a bare stop word calls
+// stop, everything else goes to the supervisor verbatim, exactly as the
+// voice model would relay it.
 type Router struct {
 	seq atomic.Uint64
 }
 
-var (
-	reConfirm  = regexp.MustCompile(`^(yes|yeah|yep|yup|ok|okay|sure|go ahead|do it|proceed|approve|approved|confirm|accept|allow|fine|no|nope|nah|deny|decline|reject|option \d+|the (first|second|third|fourth|fifth) one|\d+)$`)
-	reCancel   = regexp.MustCompile(`^(stop|cancel|abort|never mind|nevermind|halt)$`)
-	reBriefing = regexp.MustCompile(`^(what'?s going on|what is going on|status|briefing|update|what'?s up|how are things|how's it going)\??$`)
-	reAsk      = regexp.MustCompile(`^(ask|why|what|how|is|are|did|does|has|have|where|which|who)\b`)
-	reNote     = regexp.MustCompile(`^(note that|note|remember that|remember)\b`)
-	rePropose  = regexp.MustCompile(`^(tell|say to|instruct|have)\b`)
-	// rePromise: promised work anywhere in the words ("run the tests and
-	// let me know when it's done") is a propose too: the brain records
-	// the promise (and sends the instruction, when there is one).
-	rePromise = regexp.MustCompile(`\b(let me know|tell me (when|if|once)|remind me|ping me|notify me)\b`)
-)
+// reStop is the whole-utterance stop shape (the supervisor runs the
+// same check on the relayed text, so this only saves a hop).
+var reStop = regexp.MustCompile(`^(stop|stop stop|wait|cancel|abort|never ?mind|halt|no no|hold on)$`)
 
-// Route returns the tool call for text, or false when the text is not one
-// of the recognised shapes.
+// Route returns the tool call for text, or false when there is nothing
+// to relay.
 func (r *Router) Route(text string) (voice.ToolCall, bool) {
 	norm := normalize(text)
 	if norm == "" {
 		return voice.ToolCall{}, false
 	}
 	call := voice.ToolCall{ID: "text-" + strconv.FormatUint(r.seq.Add(1), 10), Args: map[string]any{}}
-	switch {
-	case reCancel.MatchString(norm):
-		call.Name = supervisor.ToolCancel
-	case reConfirm.MatchString(norm):
-		call.Name = supervisor.ToolConfirm
-		call.Args["answer"] = norm
-	case reBriefing.MatchString(norm):
-		call.Name = supervisor.ToolBriefing
-	case reNote.MatchString(norm):
-		call.Name = supervisor.ToolNote
-		call.Args["text"] = strings.TrimSpace(reNote.ReplaceAllString(strings.TrimSpace(text), ""))
-	case rePropose.MatchString(norm), rePromise.MatchString(norm):
-		call.Name = supervisor.ToolPropose
-		call.Args["instruction"] = strings.TrimSpace(text)
-	case reAsk.MatchString(norm):
-		call.Name = supervisor.ToolAsk
-		q := strings.TrimSpace(text)
-		if strings.HasPrefix(norm, "ask ") {
-			q = strings.TrimSpace(q[4:])
-		}
-		call.Args["question"] = q
-	default:
-		return voice.ToolCall{}, false
+	if reStop.MatchString(norm) {
+		call.Name = voice.ToolStop
+		return call, true
 	}
+	call.Name = voice.ToolToSupervisor
+	call.Args["text"] = strings.TrimSpace(text)
 	return call, true
 }
 

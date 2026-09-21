@@ -125,13 +125,11 @@ func runSVPCase(ctx context.Context, c SVPCase, fixtureDir string, model brain.M
 	b.SetHost(host)
 	seedTranscript(b, c.Transcript)
 
-	req := brain.Request{Kind: brain.Kind(c.Request.Kind), Question: c.Request.Question, Agent: c.Request.Agent}
-	var reply brain.Reply
-	if req.Kind == brain.KindPropose {
-		reply, err = b.Propose(ctx, req)
-	} else {
-		reply, err = b.Ask(ctx, req)
+	req := brain.Request{Kind: brain.Kind(c.Request.Kind), Question: c.Request.Question, Agent: c.Request.Agent, Briefing: c.Request.Briefing}
+	if req.Kind == "" {
+		req.Kind = brain.KindUtterance
 	}
+	reply, err := b.Turn(ctx, req)
 	b.Quiesce()
 	dur := time.Since(t0)
 	got := map[string]any{"tools_called": strings.Join(rec.names(), ","), "spoken": reply.Spoken}
@@ -188,6 +186,9 @@ func checkSVPExpect(exp SVPExpect, rec *recorder, reply brain.Reply, offline boo
 	}
 	if exp.RailBlocked && rec.rail == 0 {
 		reasons = append(reasons, "expected the rail to block a call, but brain.rail_blocked never fired")
+	}
+	if exp.NoTool && len(rec.calls) > 0 {
+		reasons = append(reasons, "answered with tool calls ("+strings.Join(rec.names(), ",")+"), but the roster and ledger in the prompt are enough")
 	}
 	if !offline && len(exp.SpokenContainsAnyOf) > 0 {
 		lower := strings.ToLower(reply.Spoken)
@@ -285,6 +286,11 @@ func seedTranscript(b *brain.Brain, lines []string) {
 // else calls the first tool the case expects (or read_screen, absent a
 // hint), then answers.
 func scriptFor(c SVPCase, alias string) *braintest.Model {
+	if c.Expect.NoTool {
+		// A status case: the scripted model answers straight off, so the
+		// harness check is that nothing was called.
+		return braintest.NewModel(braintest.Step{Text: braintest.Reply("Offline scripted answer for "+c.ID+".", "")})
+	}
 	tool := brain.ToolReadScreen
 	switch {
 	case len(c.Expect.ToolsUsedAnyOf) > 0:
@@ -323,6 +329,8 @@ func defaultArgsFor(tool, alias string) map[string]any {
 		return map[string]any{"agent": alias}
 	case brain.ToolPromise:
 		return map[string]any{"agent": alias, "text": "let me know when it's done", "event": "done"}
+	case brain.ToolNote:
+		return map[string]any{"text": "remember the migrations"}
 	default:
 		return map[string]any{"agent": alias}
 	}

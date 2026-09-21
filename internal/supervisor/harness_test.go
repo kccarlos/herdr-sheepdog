@@ -409,13 +409,46 @@ func (h *harness) promptRequests() [][2]string {
 
 func (h *harness) pending() (state.PendingAction, bool) { return h.store.Pending() }
 
+// call runs one tool. The voice surface (to_supervisor, stop) goes
+// through Handler; the older names are the template path's own entry
+// points, no longer declared to any model, so they are called directly
+// and the fallback behaviour they cover stays tested.
 func (h *harness) call(name string, args map[string]any) voice.ToolResult {
 	h.t.Helper()
-	res, err := h.sup.Handler()(context.Background(), voice.ToolCall{ID: "c", Name: name, Args: args})
+	arg := func(k string) string {
+		v, _ := args[k].(string)
+		return v
+	}
+	ctx := context.Background()
+	var res voice.ToolResult
+	var err error
+	switch name {
+	case ToolBriefing:
+		res, err = h.sup.Briefing(ctx)
+	case ToolAsk:
+		res, err = h.sup.Ask(ctx, arg("question"), arg("agent"))
+	case ToolPropose:
+		res, err = h.sup.Propose(ctx, arg("instruction"), arg("agent"))
+	case ToolConfirm:
+		res, err = h.sup.Confirm(ctx, arg("answer"))
+	case ToolCancel:
+		res, err = h.sup.Cancel(ctx)
+	case ToolNote:
+		res, err = h.sup.Note(ctx, arg("text"))
+	default:
+		res, err = h.sup.Handler()(ctx, voice.ToolCall{ID: "c", Name: name, Args: args})
+	}
 	if err != nil {
 		h.t.Fatalf("%s: %v", name, err)
 	}
 	return res
+}
+
+// say relays one utterance exactly as the voice model would, through
+// to_supervisor (fast paths included).
+func (h *harness) say(text string) voice.ToolResult {
+	h.t.Helper()
+	return h.call(ToolToSupervisor, map[string]any{"text": text})
 }
 
 var errBoom = errors.New("boom")

@@ -35,12 +35,22 @@ var (
 // Kind of a turn: what the assistant asked for.
 type Kind string
 
-// The turn kinds. Ask and propose are CEO turns; announce is the event
-// turn the supervisor runs on a worker's block or finish (docs/roles.md
-// "Push judgment").
+// The turn kinds. Utterance is the CEO turn of D1-revised: the voice
+// relays what the CEO said verbatim and the brain decides what it is
+// (docs/roles.md "One decision-maker"). Ask and propose are the older
+// classified CEO turns, kept for the evals and `sheepdog brain-test`.
+// Stop is the short read-only turn the stop procedure runs to say what
+// it stopped; announce is the event turn the supervisor runs on a
+// worker's block or finish (docs/roles.md "Push judgment").
 const (
-	KindAsk     Kind = "ask"
-	KindPropose Kind = "propose"
+	// KindUtterance carries the CEO's words verbatim in Question, with
+	// no agent hint: the brain resolves intent, target and action.
+	KindUtterance Kind = "utterance"
+	KindAsk       Kind = "ask"
+	KindPropose   Kind = "propose"
+	// KindStop reports what the stop procedure stopped: read tools
+	// only, a short budget, still CEO-triggered (the CEO is waiting).
+	KindStop Kind = "stop"
 	// KindAnnounce decides what the assistant says about a worker event
 	// and how urgently: one line that replaces the template sentence
 	// (and keeps the promises the event fulfils), or an addition when
@@ -53,6 +63,11 @@ const (
 // IsEvent reports whether k is an event-triggered kind: read-only tools,
 // the enrich timeout, and an empty Spoken allowed.
 func (k Kind) IsEvent() bool { return k == KindAnnounce }
+
+// ReadOnly reports whether k's turn is declared (and allowed) the read
+// tools only: an event turn, and the stop turn, which reports on the
+// procedure code already carried out and must send nothing more.
+func (k Kind) ReadOnly() bool { return k.IsEvent() || k == KindStop }
 
 // The urgencies an announce reply may ask for (Reply.Urgency); the
 // supervisor caps them under the chattiness ceiling.
@@ -78,13 +93,21 @@ type Request struct {
 	Kind Kind
 	// Trigger defaults to TriggerCEO.
 	Trigger Trigger
-	// Question is the assistant's question (ask) or instruction (propose)
-	// as it put it in the tool call; the CEO's verbatim words are in the
-	// transcript.
+	// Question is the CEO's words verbatim (utterance), or the
+	// assistant's question (ask) / instruction (propose) as it put them
+	// in the tool call; the CEO's verbatim words are in the transcript
+	// either way.
 	Question string
-	// Agent is the alias hint, set only when the CEO said a name; for an
+	// Agent is the alias hint, set only when the CEO said a name (never
+	// for an utterance: the brain resolves the target itself); for an
 	// event turn, the alias the event is about.
 	Agent string
+	// Briefing is the supervisor's roster sentence (composeBriefing) for
+	// a CEO turn, so a status question needs no tool call.
+	Briefing string
+	// Stopped is what the stop procedure stopped, for a KindStop turn
+	// ("the instruction to auth was interrupted").
+	Stopped string
 	// Event is the worker event of an event turn (done, blocked).
 	Event string
 	// Template is the template path's sentence for the event: what the
@@ -111,6 +134,11 @@ type Reply struct {
 	NeedsUser bool     `json:"needs_user"`
 	Options   []string `json:"options,omitempty"`
 	Clarify   bool     `json:"clarify"`
+	// Pending marks an answer that is not the final one: the brain said
+	// how long it will take and the result follows on its own (the
+	// investigations work of docs/roles.md). Plumbed through to the
+	// voice's tool result; nothing produces it yet.
+	Pending bool `json:"pending,omitempty"`
 	// RelatesTo names the CEO's request the event fulfils, when an
 	// announce turn found one ("the rerun you asked for").
 	RelatesTo string `json:"relates_to,omitempty"`
@@ -237,6 +265,9 @@ type Host interface {
 	Resolve(name string) (AgentInfo, bool)
 	// Notes returns the CEO's notes, oldest first.
 	Notes() []string
+	// Note records something the CEO wants remembered ("don't touch the
+	// migrations today"); it returns the spoken echo.
+	Note(text string) (string, error)
 	// ReadScreen returns the last lines of the pane.
 	ReadScreen(ctx context.Context, paneID string, lines int) (string, error)
 	// RunCLI runs the read-only CLI query tool in the agent's workspace;

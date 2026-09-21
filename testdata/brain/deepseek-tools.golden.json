@@ -182,5 +182,24 @@
       }
     },
     "type": "function"
+  },
+  {
+    "function": {
+      "description": "Remember something the CEO decided or wants kept in mind (\"remember the migrations are off limits today\", \"we are on the release branch\"). Notes are in the ledger of every later turn. Not for promised work: that is promise.",
+      "name": "note",
+      "parameters": {
+        "properties": {
+          "text": {
+            "description": "what to remember, in the CEO's words",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "type": "object"
+      }
+    },
+    "type": "function"
   }
 ]

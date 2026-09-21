@@ -1,6 +1,7 @@
-// Package echotools provides a stub ToolHandler for the five voice tools
-// (plan §5) that just echoes the call back as spoken text, so the tool
-// round-trip can be verified without the Supervisor (WP3).
+// Package echotools provides a stub ToolHandler for the voice's two
+// tools (docs/roles.md "One decision-maker") that just echoes the call
+// back as spoken text, so the tool round-trip can be verified without
+// the Supervisor (WP3).
 package echotools
 
 import (
@@ -12,8 +13,8 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
 
-// Names are the five tools every handler must accept.
-var Names = []string{"briefing", "ask", "propose", "confirm", "cancel", "note"}
+// Names are the two tools every handler must accept.
+var Names = []string{voice.ToolToSupervisor, voice.ToolStop}
 
 // Handler returns a ToolHandler whose result for every known tool is
 // "Echo test: the <name> tool was called with <args>." scheduled at
@@ -21,7 +22,7 @@ var Names = []string{"briefing", "ask", "propose", "confirm", "cancel", "note"}
 // return an error.
 //
 // The sentence form matters: in WP2's live runs the model refused to read
-// the bare "briefing called with no arguments" aloud (it answered "this
+// a bare "briefing called with no arguments" aloud (it answered "this
 // function is not available"), while a natural sentence is read verbatim.
 func Handler() voice.ToolHandler {
 	known := map[string]bool{}

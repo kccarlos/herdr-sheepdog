@@ -21,20 +21,23 @@ import (
 )
 
 // AssistantExpect is what one assistant case requires of the model's tool
-// choice. Agent is a pointer so "must be empty" ("" said) is distinct from
-// "not checked" (nil, e.g. for briefing/cancel/note where the assistant's
-// tools take no agent argument).
+// choice. Since D1-revised the voice has two tools and decides nothing,
+// so most cases are "relayed verbatim": Tool to_supervisor with Verbatim.
 type AssistantExpect struct {
-	// Tool is one of briefing, ask, propose, confirm, cancel, note, or
-	// none (no function call: small talk, or a bare promise the SVP is
-	// expected to remember on its own).
+	// Tool is to_supervisor, stop, or none (no function call: small
+	// talk, or a follow-up the last reply already answers).
 	Tool string `json:"tool"`
+	// Verbatim requires the tool's text argument to be exactly the
+	// case's utterance, trimmed: the voice relays, it never paraphrases
+	// and never adds a guess about the agent.
+	Verbatim bool `json:"verbatim,omitempty"`
 	// Agent, when non-nil, is the exact agent/alias argument expected
-	// ("" means the model must leave it empty rather than guess).
+	// ("" means the model must leave it empty rather than guess). The
+	// two tools take no agent argument, so this is only for a case that
+	// checks the model does not invent one.
 	Agent *string `json:"agent,omitempty"`
-	// QuestionContains: the tool's question/instruction/text argument
-	// must contain at least one of these substrings (case-insensitive),
-	// when non-empty.
+	// QuestionContains: the tool's text argument must contain at least
+	// one of these substrings (case-insensitive), when non-empty.
 	QuestionContains []string `json:"question_contains,omitempty"`
 }
 
@@ -81,11 +84,17 @@ type SVPAgent struct {
 	Pending *SVPPending `json:"pending,omitempty"`
 }
 
-// SVPRequest is the assistant's ask/propose call as the brain sees it.
+// SVPRequest is the request the brain receives. Since D1-revised the
+// live kind is utterance — the shepherd's words verbatim, with no agent
+// hint — and the brain decides what they are; ask and propose are the
+// older classified kinds, kept for the cases written against them.
 type SVPRequest struct {
-	Kind     string `json:"kind"` // ask | propose
+	Kind     string `json:"kind"` // utterance | ask | propose
 	Question string `json:"question"`
 	Agent    string `json:"agent"`
+	// Briefing is the roster sentence composeBriefing puts in a live
+	// request, so a status case can be answered without a tool call.
+	Briefing string `json:"briefing,omitempty"`
 }
 
 // SVPExpect is what one SVP case requires.
@@ -102,6 +111,10 @@ type SVPExpect struct {
 	MustNotCall []string `json:"must_not_call,omitempty"`
 	// RailBlocked, when true, requires a brain.rail_blocked event.
 	RailBlocked bool `json:"rail_blocked,omitempty"`
+	// NoTool requires the turn to answer without calling anything: a
+	// status question is answered from the roster and ledger already in
+	// the prompt (docs/roles.md "One decision-maker").
+	NoTool bool `json:"no_tool,omitempty"`
 }
 
 // SVPCase is one line of testdata/eval/svp.jsonl.

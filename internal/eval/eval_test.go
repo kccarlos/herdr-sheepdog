@@ -9,6 +9,7 @@ import (
 	"google.golang.org/genai"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
+	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
 
 // erroringModel always fails (not a rate limit), forcing every turn to
@@ -72,10 +73,15 @@ func TestLoadAssistantCases(t *testing.T) {
 		if c.Utterance == "" {
 			t.Errorf("%s: empty utterance", c.ID)
 		}
+		// The voice has two tools and decides nothing, so every case
+		// expects a relay, a stop, or no call at all.
 		switch c.Expect.Tool {
-		case "briefing", "ask", "propose", "confirm", "cancel", "note", "none":
+		case voice.ToolToSupervisor, voice.ToolStop, "none":
 		default:
 			t.Errorf("%s: unknown expect.tool %q", c.ID, c.Expect.Tool)
+		}
+		if c.Expect.Verbatim && c.Expect.Tool != voice.ToolToSupervisor {
+			t.Errorf("%s: verbatim only applies to %s", c.ID, voice.ToolToSupervisor)
 		}
 	}
 }
@@ -92,7 +98,9 @@ func TestLoadSVPCases(t *testing.T) {
 		if c.ID == "" {
 			t.Error("case with empty id")
 		}
-		if c.Request.Kind != "ask" && c.Request.Kind != "propose" {
+		switch brain.Kind(c.Request.Kind) {
+		case brain.KindUtterance, brain.KindAsk, brain.KindPropose:
+		default:
 			t.Errorf("%s: bad request.kind %q", c.ID, c.Request.Kind)
 		}
 		if c.ScreenFixture == "" {
@@ -169,25 +177,30 @@ func TestRunAssistantOfflineSkips(t *testing.T) {
 func TestCheckAssistantExpect(t *testing.T) {
 	agentAuth := "auth"
 	agentEmpty := ""
+	relay := AssistantExpect{Tool: "to_supervisor", Verbatim: true}
 	tests := []struct {
-		name     string
-		exp      AssistantExpect
-		gotTool  string
-		gotAgent string
-		gotText  string
-		wantFail bool
+		name      string
+		exp       AssistantExpect
+		gotTool   string
+		gotAgent  string
+		gotText   string
+		utterance string
+		wantFail  bool
 	}{
-		{"tool match", AssistantExpect{Tool: "briefing"}, "briefing", "", "", false},
-		{"tool mismatch", AssistantExpect{Tool: "briefing"}, "ask", "", "", true},
-		{"agent must be empty, got empty", AssistantExpect{Tool: "propose", Agent: &agentEmpty}, "propose", "", "", false},
-		{"agent must be empty, got guessed", AssistantExpect{Tool: "propose", Agent: &agentEmpty}, "propose", "auth", "", true},
-		{"agent must equal auth", AssistantExpect{Tool: "propose", Agent: &agentAuth}, "propose", "auth", "", false},
-		{"question contains", AssistantExpect{Tool: "ask", QuestionContains: []string{"fail"}}, "ask", "", "why did it fail", false},
-		{"question missing", AssistantExpect{Tool: "ask", QuestionContains: []string{"fail"}}, "ask", "", "what happened", true},
+		{"tool match", AssistantExpect{Tool: "stop"}, "stop", "", "", "stop", false},
+		{"tool mismatch", AssistantExpect{Tool: "stop"}, "to_supervisor", "", "stop", "stop", true},
+		{"relayed verbatim", relay, "to_supervisor", "", "Why did it fail?", "Why did it fail?", false},
+		{"relayed with whitespace", relay, "to_supervisor", "", " Why did it fail? ", "Why did it fail?", false},
+		{"paraphrased", relay, "to_supervisor", "", "why auth failed", "Why did it fail?", true},
+		{"agent must be empty, got empty", AssistantExpect{Tool: "to_supervisor", Agent: &agentEmpty}, "to_supervisor", "", "", "", false},
+		{"agent must be empty, got guessed", AssistantExpect{Tool: "to_supervisor", Agent: &agentEmpty}, "to_supervisor", "auth", "", "", true},
+		{"agent must equal auth", AssistantExpect{Tool: "to_supervisor", Agent: &agentAuth}, "to_supervisor", "auth", "", "", false},
+		{"text contains", AssistantExpect{Tool: "to_supervisor", QuestionContains: []string{"fail"}}, "to_supervisor", "", "why did it fail", "", false},
+		{"text missing", AssistantExpect{Tool: "to_supervisor", QuestionContains: []string{"fail"}}, "to_supervisor", "", "what happened", "", true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			reasons := checkAssistantExpect(tt.exp, tt.gotTool, tt.gotAgent, tt.gotText)
+			reasons := checkAssistantExpect(tt.exp, tt.gotTool, tt.gotAgent, tt.gotText, tt.utterance)
 			if (len(reasons) > 0) != tt.wantFail {
 				t.Errorf("reasons=%v, wantFail=%v", reasons, tt.wantFail)
 			}

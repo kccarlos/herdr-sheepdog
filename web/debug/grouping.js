@@ -92,7 +92,7 @@ export function eventSummary(ev) {
       parts.push(`${p.urgency_requested || 'no brain line'} → ${p.urgency_applied || '?'}`, p.reason, p.ceiling ? `ceiling ${p.ceiling}` : '', p.via ? `via ${p.via}` : '', p.late ? 'late' : '', `${p.agent || ''} ${p.event || ''}`.trim(), p.spoken || p.template);
       break;
     case type === 'brain.yielded':
-      parts.push(p.turn != null ? `turn ${p.turn}` : '', p.step != null ? `before step ${p.step}` : '', p.agent ? `${p.agent} ${p.event || ''}`.trim() : '', p.ceo_waiting ? `${p.ceo_waiting} CEO turn${p.ceo_waiting === 1 ? '' : 's'} waiting` : '');
+      parts.push(p.turn != null ? `turn ${p.turn}` : '', p.step != null ? `before step ${p.step}` : '', p.agent ? `${p.agent} ${p.event || ''}`.trim() : '', p.ceo_waiting ? `${p.ceo_waiting} shepherd turn${p.ceo_waiting === 1 ? '' : 's'} waiting` : '');
       break;
     case type === 'brain.event_coalesced':
       parts.push(p.agent ? `${p.agent} ${p.event || ''}`.trim() : '', 'replaced the queued turn');
