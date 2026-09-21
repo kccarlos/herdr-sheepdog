@@ -259,6 +259,70 @@ func TestStopCancelsTheBrainTurnAndSendsNothing(t *testing.T) {
 	assertStopped(t, h, stopPhaseCancelTurn, StopTriggerTool)
 }
 
+// (7b) A stop that lands after the turn already sent something is not a
+// withdrawal: the worker gets the Ctrl-C of phase 3, and the log says so.
+func TestStopAfterTheTurnActedInterrupts(t *testing.T) {
+	release := make(chan struct{})
+	m := braintest.NewModel(
+		braintest.Step{Calls: []*genai.FunctionCall{braintest.FC(brain.ToolPrompt, map[string]any{"agent": "auth", "text": "add a readme"})}},
+		braintest.Step{Block: release, Text: braintest.Reply("Telling auth to add a readme. Sent.", "")},
+	)
+	m.Default = &braintest.Step{Text: braintest.Reply("Stopped auth.", "")}
+	h := newBrainHarness(t, m)
+	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
+
+	done := make(chan voice.ToolResult, 1)
+	go func() { done <- h.say("tell auth to add a readme") }()
+	waitFor(t, func() bool { return len(h.promptRequests()) == 1 }, "the instruction to be sent")
+
+	h.call(ToolStop, nil)
+	close(release)
+	<-done
+
+	assertStopped(t, h, stopPhaseInterrupt, StopTriggerTool)
+	ctrlC := 0
+	for _, r := range h.sendKeysRequests() {
+		if strings.Contains(r[1], "ctrl+c") {
+			ctrlC++
+		}
+	}
+	if ctrlC != 1 {
+		t.Errorf("%d ctrl+c sends, want 1: %v", ctrlC, h.sendKeysRequests())
+	}
+}
+
+// (7c) A second utterance while one is in flight must not push the
+// first one's words down the template path: the older turn keeps the
+// brain, and nothing is sent twice.
+func TestSecondUtteranceDoesNotFallBackToTheTemplatePath(t *testing.T) {
+	release := make(chan struct{})
+	m := braintest.NewModel(braintest.Step{Block: release, Text: braintest.Reply("auth is working.", "")})
+	m.Default = &braintest.Step{Text: braintest.Reply("auth is still working.", "")}
+	h := newBrainHarness(t, m)
+	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
+
+	first := make(chan voice.ToolResult, 1)
+	go func() { first <- h.say("tell auth to run the tests") }()
+	waitFor(t, func() bool {
+		h.sup.mu.Lock()
+		defer h.sup.mu.Unlock()
+		return h.sup.utterance != nil && h.sup.utterance.inBrain
+	}, "the first utterance to reach the brain")
+
+	second := make(chan voice.ToolResult, 1)
+	go func() { second <- h.say("what's going on") }()
+	close(release)
+	<-first
+	<-second
+
+	if h.llm.calls["resolve_instruction"] != 0 {
+		t.Errorf("the template path ran %d times; the brain answered both", h.llm.calls["resolve_instruction"])
+	}
+	if got := h.promptRequests(); len(got) != 0 {
+		t.Errorf("something was sent to auth: %v", got)
+	}
+}
+
 // (8) With the brain off the stop procedure speaks its own sentence.
 func TestStopSentenceWithoutBrain(t *testing.T) {
 	h := newHarness(t)

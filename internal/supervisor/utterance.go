@@ -47,13 +47,19 @@ func (s *Supervisor) ToSupervisor(ctx context.Context, text string) (voice.ToolR
 	if res, ok := s.fastAnswer(turnCtx, text); ok {
 		return res, nil
 	}
-	if res, ok := s.utteranceTurn(turnCtx, u, text); ok {
-		return res, nil
-	}
-	if u.stopped() {
+	res, ok := s.utteranceTurn(turnCtx, u, text)
+	if u.stopped() || turnCtx.Err() != nil {
+		// Stopped, or the voice cancelled the call: the stop procedure
+		// speaks, and neither the brain's reply nor — crucially — the
+		// template path may send these words after all.
 		return droppedResult(), nil
 	}
-	return s.fallbackUtterance(ctx, text)
+	if ok {
+		return res, nil
+	}
+	// The fallback runs under the turn's own context, so a stop landing
+	// mid-send still cancels it.
+	return s.fallbackUtterance(turnCtx, text)
 }
 
 // beginUtterance installs the in-flight slot and returns the turn's
@@ -62,11 +68,10 @@ func (s *Supervisor) beginUtterance(ctx context.Context, text string) (context.C
 	turnCtx, cancel := context.WithCancel(ctx)
 	u := &inflightUtterance{text: text, cancel: cancel}
 	s.mu.Lock()
-	if old := s.utterance; old != nil {
-		// A second utterance while one is in flight: the older one is
-		// stale, so let it finish but stop owning the slot.
-		old.cancel()
-	}
+	// A second utterance while one is in flight only takes the slot over:
+	// the older turn is left to finish (the brain's turn lock serialises
+	// them anyway), because cancelling it would make its words fall
+	// through to the template path instead.
 	s.utterance = u
 	s.mu.Unlock()
 	return turnCtx, u

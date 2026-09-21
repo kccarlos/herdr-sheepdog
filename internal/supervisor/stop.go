@@ -71,6 +71,7 @@ func (s *Supervisor) Stop(ctx context.Context, trigger string) (voice.ToolResult
 func (s *Supervisor) resolveStop(ctx context.Context) stopOutcome {
 	// Phases 1 and 2: the relayed words are in flight. Cancelling the
 	// turn's context stops its write tools before they execute.
+	var withdrawn stopOutcome
 	s.mu.Lock()
 	if u := s.utterance; u != nil {
 		u.dropped = true
@@ -79,13 +80,20 @@ func (s *Supervisor) resolveStop(ctx context.Context) stopOutcome {
 		if u.inBrain {
 			phase, when = stopPhaseCancelTurn, "before it acted"
 		}
-		text := u.text
+		withdrawn = stopOutcome{phase: phase, what: fmt.Sprintf("your request %q was withdrawn %s", u.text, when)}
+		cancel := u.cancel
 		s.mu.Unlock()
-		u.cancel()
-		return stopOutcome{phase: phase, what: fmt.Sprintf("your request %q was withdrawn %s", text, when)}
+		cancel()
+		// Re-take the lock behind whatever the cancelled turn was in the
+		// middle of: a send it had already started holds s.mu until its
+		// pending action exists, so phase 3 below sees it.
+		s.mu.Lock()
 	}
 
-	// Phase 3: an instruction went to a working agent a moment ago.
+	// Phase 3: an instruction went to a working agent a moment ago. This
+	// runs even after a withdrawal — the turn may have sent something
+	// before the cancel landed, and then "withdrawn before it acted"
+	// would be a lie and the worker would carry on.
 	p, has := s.store.Pending()
 	if has && p.Kind == state.PendingSendInstruction && s.cfg.Now().Sub(p.CreatedAt) <= s.cfg.CancelWindow {
 		if row, ok := s.store.Get(p.PaneID); ok && row.State == herdr.StateWorking {
@@ -102,6 +110,11 @@ func (s *Supervisor) resolveStop(ctx context.Context) stopOutcome {
 			s.mu.Unlock()
 			return out
 		}
+	}
+
+	if withdrawn.phase != "" {
+		s.mu.Unlock()
+		return withdrawn
 	}
 
 	// Phase 4: a question stays a question. Stop is not "no".
