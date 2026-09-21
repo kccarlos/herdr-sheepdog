@@ -331,6 +331,8 @@ func defaultArgsFor(tool, alias string) map[string]any {
 		return map[string]any{"agent": alias, "text": "let me know when it's done", "event": "done"}
 	case brain.ToolNote:
 		return map[string]any{"text": "remember the migrations"}
+	case brain.ToolInvestigate:
+		return map[string]any{"agent": alias, "question": "why did the failing test fail?"}
 	default:
 		return map[string]any{"agent": alias}
 	}

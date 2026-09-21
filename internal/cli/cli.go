@@ -40,16 +40,20 @@ const (
 
 // defaultCodexCmd and defaultClaudeCmd are the verified argv templates from
 // docs/cli-query-tools.md §3. {question}, {cwd}, {model} and {reasoning}
-// are substituted; nothing is ever passed through a shell.
+// are substituted; nothing is ever passed through a shell. Both backends
+// keep their session (codex writes it under ~/.codex/sessions, claude
+// under ~/.claude/projects), so an investigation's follow-up can resume
+// the same sub-agent through the resume templates below; the session id
+// comes out of the JSON output either way.
 var (
 	defaultCodexCmd = []string{
 		"codex", "exec",
 		"--sandbox", "read-only",
 		"--skip-git-repo-check",
-		"--ephemeral",
 		"--color", "never",
 		"-c", "model_reasoning_effort={reasoning}",
 		"-C", "{cwd}",
+		"--json",
 		"{question}",
 	}
 	defaultClaudeCmd = []string{
@@ -60,7 +64,29 @@ var (
 		"--strict-mcp-config",
 		"--permission-mode", "dontAsk",
 		"--permission-prompts", "none",
-		"--no-session-persistence",
+		"--output-format", "json",
+		"--max-budget-usd", "0.50",
+	}
+	// The resume templates take {session} as well. `codex exec resume`
+	// has no --sandbox, -C or --color of its own (verified 2026-09-21),
+	// so the sandbox is set through -c and the working directory by the
+	// child's cwd, which Runner sets anyway.
+	defaultCodexResumeCmd = []string{
+		"codex", "exec", "resume", "{session}", "{question}",
+		"-c", "sandbox_mode=read-only",
+		"-c", "model_reasoning_effort={reasoning}",
+		"--skip-git-repo-check",
+		"--json",
+	}
+	defaultClaudeResumeCmd = []string{
+		"claude", "-p", "{question}",
+		"--resume", "{session}",
+		"--model", "{model}",
+		"--tools", "Read,Grep,Glob,WebSearch",
+		"--allowedTools", "Read,Grep,Glob,WebSearch",
+		"--strict-mcp-config",
+		"--permission-mode", "dontAsk",
+		"--permission-prompts", "none",
 		"--output-format", "json",
 		"--max-budget-usd", "0.50",
 	}
@@ -77,6 +103,9 @@ type Config struct {
 	// CodexCmd / ClaudeCmd are argv templates; {question}, {cwd}, {model}
 	// and {reasoning} are substituted. No shell is invoked.
 	CodexCmd, ClaudeCmd []string
+	// CodexResumeCmd / ClaudeResumeCmd are the argv templates of a
+	// follow-up in an existing session; {session} is substituted as well.
+	CodexResumeCmd, ClaudeResumeCmd []string
 	// ClaudeModel fills {model} in ClaudeCmd.
 	ClaudeModel string
 	// CodexReasoning fills {reasoning} in CodexCmd.
@@ -105,6 +134,12 @@ func (c Config) withDefaults() Config {
 	}
 	if len(c.ClaudeCmd) == 0 {
 		c.ClaudeCmd = defaultClaudeCmd
+	}
+	if len(c.CodexResumeCmd) == 0 {
+		c.CodexResumeCmd = defaultCodexResumeCmd
+	}
+	if len(c.ClaudeResumeCmd) == 0 {
+		c.ClaudeResumeCmd = defaultClaudeResumeCmd
 	}
 	if c.ClaudeModel == "" {
 		c.ClaudeModel = DefaultClaudeModel

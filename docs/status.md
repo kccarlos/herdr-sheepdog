@@ -77,8 +77,17 @@ PR 2 (cleanup) removed the template LLM: approval prompts are parsed
 in code (`internal/herdr/prompt.go`), a finish is phrased by the brain
 or by the code sentence "<alias> finished.", every event gets exactly
 one push, and `[llm]`, `llm-test`/`ask-test` and the plugin shim are
-gone. Still open from that list: investigations (3), `blocked → blocked`
-(4), and no mid-sentence interruption (5). Names from
+gone. PR 3 (investigations) added the brain's `investigate` tool and the
+background job behind it: the read-only CLI sub-agent runs in the
+worker's repository with no time limit beyond `brain.investigate_max_s`,
+the brain acknowledges at once with `pending: true`, the answer comes
+back as a `KindInvestigation` event turn pushed `idle` and tagged
+`answers_job`, the ledger lives in `session.investigations` (so `recall`
+and follow-ups survive a restart), a follow-up resumes the same CLI
+session, and stop cancels a running look. Verified with a stub CLI
+backend on the fake daemon and four real CLI runs for the session/resume
+mechanics; `source: worker` is deliberately still open. Still open from
+that list: `blocked → blocked` (4) and no mid-sentence interruption (5). Names from
 here on: shepherd (operator), the dog (voice + brain), the flock
 (workers); `docs/roles.md` is the contract and maps the old CEO / SVP /
 assistant terms still present in code.

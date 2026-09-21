@@ -272,6 +272,10 @@ type Host struct {
 	// NoteErr fails Note; Noted records every note the note tool made.
 	NoteErr error
 	Noted   []string
+	// InvestigateErr fails Investigate; Investigated is the job ledger
+	// the investigate tool filled (running until SetInvestigation).
+	InvestigateErr error
+	Investigated   []brain.InvestigationInfo
 	// Now is the clock for promises (time.Now when nil).
 	Now func() time.Time
 }
@@ -396,6 +400,48 @@ func (h *Host) RunCLI(_ context.Context, paneID, question string) (string, error
 	return h.CLI(paneID, question)
 }
 
+// Investigate implements brain.Host: the job is recorded in
+// Investigated (running) and answered by hand with SetInvestigation.
+// InvestigateErr fails it; ErrNoCLI when the test set neither.
+func (h *Host) Investigate(_ context.Context, paneID string, req brain.InvestigationRequest) (brain.InvestigationStart, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.InvestigateErr != nil {
+		return brain.InvestigationStart{}, h.InvestigateErr
+	}
+	now := time.Now()
+	if h.Now != nil {
+		now = h.Now()
+	}
+	inv := brain.InvestigationInfo{
+		ID: fmt.Sprintf("inv-%d", len(h.Investigated)+1), Agent: h.aliasLocked(paneID), Question: req.Question,
+		Asked: req.Asked, FollowUpOf: req.FollowUpOf, Source: brain.InvestigationSourceCLI, Backend: "codex",
+		Status: brain.InvestigationRunning, Started: now,
+	}
+	h.Investigated = append(h.Investigated, inv)
+	return brain.InvestigationStart{Job: inv.ID, ETASeconds: 30}, nil
+}
+
+// Investigations implements brain.Host.
+func (h *Host) Investigations() []brain.InvestigationInfo {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return append([]brain.InvestigationInfo(nil), h.Investigated...)
+}
+
+// SetInvestigation replaces a recorded job (a test finishing one).
+func (h *Host) SetInvestigation(inv brain.InvestigationInfo) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for i := range h.Investigated {
+		if h.Investigated[i].ID == inv.ID {
+			h.Investigated[i] = inv
+			return
+		}
+	}
+	h.Investigated = append(h.Investigated, inv)
+}
+
 // Prompt implements brain.Host.
 func (h *Host) Prompt(_ context.Context, paneID, text string) (string, error) {
 	h.mu.Lock()
@@ -507,7 +553,7 @@ var ErrBoom = errors.New("boom")
 var (
 	reRequest   = regexp.MustCompile(`Request from the assistant \((ask|propose|utterance)\): (?:question|instruction|utterance)="((?:[^"\\]|\\.)*)" agent=(?:"((?:[^"\\]|\\.)*)"|\(none)`)
 	reStop      = regexp.MustCompile(`Request from the assistant \(stop\): stopped="((?:[^"\\]|\\.)*)"`)
-	reEvent     = regexp.MustCompile(`Event from the supervisor \((announce)\): agent="((?:[^"\\]|\\.)*)" event="((?:[^"\\]|\\.)*)" template="((?:[^"\\]|\\.)*)"`)
+	reEvent     = regexp.MustCompile(`Event from the supervisor \((announce|investigation)\): agent="((?:[^"\\]|\\.)*)" event="((?:[^"\\]|\\.)*)" template="((?:[^"\\]|\\.)*)"`)
 	reSummarise = regexp.MustCompile(`^Summarise the following`)
 	// rePromiseLine is one promise of an announce request ("- pr-1: "text" (when auth finishes)").
 	rePromiseLine = regexp.MustCompile(`(?m)^- ([^:\s]+): "((?:[^"\\]|\\.)*)"`)
@@ -520,16 +566,28 @@ var (
 	reCEOSaid  = regexp.MustCompile(`CEO said: "((?:[^"\\]|\\.)*)"`)
 	// The shapes an utterance takes for the reflex's own intent split
 	// (the real brain decides this with a model; this is a stand-in).
-	reNoteWords   = regexp.MustCompile(`(?i)^(?:please\s+)?(?:remember|note|keep in mind|don'?t forget)\b`)
-	reStatusWords = regexp.MustCompile(`(?i)^(?:what'?s going on|what is going on|how are things|how'?s it going|status|any(?:thing)? (?:news|update)|what'?s up|are (?:we|they) (?:ok|done)|is (?:it|everything) done)\b`)
-	reTellWords   = regexp.MustCompile(`(?i)^(?:tell|ask|have|instruct|get)\s+\S+\s`)
+	reNoteWords = regexp.MustCompile(`(?i)^(?:please\s+)?(?:remember|note|keep in mind|don'?t forget)\b`)
+	// reExplainWords is a question the screen is unlikely to answer: the
+	// reflex starts a background investigation for it.
+	reExplainWords = regexp.MustCompile(`(?i)\b(?:explain|why did|why does|why is|what went wrong|walk me through|dig into)\b`)
+	// reFollowUpWords is a question that continues the last one, so the
+	// reflex resumes the last investigation's session.
+	reFollowUpWords = regexp.MustCompile(`(?i)^(?:and|but|so|ok(?:ay)?,?)\b`)
+	// reLedgerInvestigation is a finished job in the prompt's
+	// Investigations section ("- investigation inv-1 (auth, 2 min ago): …").
+	reLedgerInvestigation = regexp.MustCompile(`investigation (\S+) \(`)
+	// reWorkerOutput is the provenance-wrapped body of a request (the
+	// investigation result the delivery turn is given).
+	reWorkerOutput = regexp.MustCompile(`(?s)<<<BEGIN_WORKER_OUTPUT[^>]*>>>\n(.*?)\n<<<END_WORKER_OUTPUT>>>`)
+	reStatusWords  = regexp.MustCompile(`(?i)^(?:what'?s going on|what is going on|how are things|how'?s it going|status|any(?:thing)? (?:news|update)|what'?s up|are (?:we|they) (?:ok|done)|is (?:it|everything) done)\b`)
+	reTellWords    = regexp.MustCompile(`(?i)^(?:tell|ask|have|instruct|get)\s+\S+\s`)
 	// reBriefingLine is the roster sentence the request carries.
 	reBriefingLine = regexp.MustCompile(`(?m)^Status as the daemon has it: (.*)$`)
 )
 
 // utteranceKind is the reflex's stand-in for the brain's intent
 // decision on a verbatim utterance: a note, a status question, an
-// instruction, or something to look up.
+// explanation to investigate, an instruction, or something to look up.
 func utteranceKind(question string) string {
 	q := strings.TrimSpace(question)
 	switch {
@@ -537,6 +595,9 @@ func utteranceKind(question string) string {
 		return "note"
 	case reStatusWords.MatchString(q):
 		return "status"
+	case reExplainWords.MatchString(q):
+		// The screen rarely holds the why: start a background look.
+		return "investigate"
 	case reTellWords.MatchString(q) || rePromise.MatchString(q):
 		return "propose"
 	default:
@@ -616,6 +677,11 @@ func reflex(call Call) (*genai.GenerateContentResponse, error) {
 	if len(evs) > 0 && (len(reqs) == 0 || evs[len(evs)-1][0] > reqs[len(reqs)-1][0]) {
 		m := evs[len(evs)-1]
 		ev := reEvent.FindStringSubmatch(text[m[0]:])
+		if ev[1] == "investigation" {
+			// The delivery turn: the answer is in the request, wrapped
+			// as worker output; compose the paragraph from it.
+			return Response(Step{Text: investigationReply(text[m[0]:], unquote(ev[2])), Usage: usage}), nil
+		}
 		if !forced && !calledSinceEvent(call, brain.ToolRecall) {
 			// A finish: look at the record for the agent first (what the
 			// CEO asked of it), then announce.
@@ -644,6 +710,16 @@ func reflex(call Call) (*genai.GenerateContentResponse, error) {
 			// The roster line travels with the request, so a status
 			// question costs no tool call at all (D1-revised).
 			return Response(Step{Text: Reply(briefingLine(text), "The fake model answered from the roster line in the request."), Usage: usage}), nil
+		case "investigate":
+			if running := runningInvestigation(call.System()); running != "" {
+				// A look is already going: say how it is going rather
+				// than start a second one.
+				return Response(Step{Text: Reply("Still looking; I will tell you the moment it comes back.", "The fake model saw an investigation running in its prompt."), Usage: usage}), nil
+			}
+			if agent != "" {
+				return Response(Step{Calls: []*genai.FunctionCall{investigateCall(agent, question, call.System())}, Usage: usage}), nil
+			}
+			kind = k
 		default:
 			kind = k
 		}
@@ -670,8 +746,11 @@ func respondToResult(call Call, fr *genai.FunctionResponse) *genai.GenerateConte
 	switch fr.Name {
 	case brain.ToolListAgents:
 		if alias := pickAgent(fr, question); alias != "" {
-			if kind == "propose" {
+			switch kind {
+			case "propose":
 				return Response(Step{Calls: proposeCalls(alias, question), Usage: usage})
+			case "investigate":
+				return Response(Step{Calls: []*genai.FunctionCall{investigateCall(alias, question, call.System())}, Usage: usage})
 			}
 			return Response(Step{Calls: []*genai.FunctionCall{FC(brain.ToolReadScreen, map[string]any{"agent": alias, "lines": float64(100)})}, Usage: usage})
 		}
@@ -686,6 +765,22 @@ func respondToResult(call Call, fr *genai.FunctionResponse) *genai.GenerateConte
 				return Response(Step{Calls: []*genai.FunctionCall{promiseCall(alias, promise)}, Usage: usage})
 			}
 		}
+	case brain.ToolInvestigate:
+		if e, ok := fr.Response["error"].(string); ok && e != "" {
+			return Response(Step{Text: Reply("I could not start that: "+firstLine(e)+".", "The investigate tool failed: "+e), Usage: usage})
+		}
+		out, _ := fr.Response["output"].(string)
+		var start brain.InvestigationStart
+		_ = json.Unmarshal([]byte(out), &start)
+		eta := "about half a minute"
+		if start.ETASeconds >= 60 {
+			eta = fmt.Sprintf("about %d minutes", (start.ETASeconds+59)/60)
+		}
+		// The acknowledgement: pending true, and what it is doing.
+		return Response(Step{Text: mustJSON(brain.Reply{
+			Spoken: "Looking into it now — " + eta + ".", Pending: true,
+			Detail: "The fake model started investigation " + start.Job + "; its answer comes back on its own.",
+		}), Usage: usage})
 	case brain.ToolPromise:
 		if e, ok := fr.Response["error"].(string); ok && e != "" {
 			return Response(Step{Text: Reply("I could not record that: "+firstLine(e)+".", "The promise tool failed: "+e), Usage: usage})
@@ -732,6 +827,75 @@ func eventReply(call Call, text string, m []int) string {
 		}
 	}
 	return mustJSON(brain.Reply{Spoken: sentence, Detail: "The fake model found nothing to add to the template sentence.", Urgency: brain.UrgencyIdle})
+}
+
+// investigateCall is what an explanation asks for: a background look at
+// the agent, resuming the last finished one when the words continue it
+// ("and why does that guard exist?").
+func investigateCall(alias, question, system string) *genai.FunctionCall {
+	args := map[string]any{"agent": alias, "question": question}
+	if reFollowUpWords.MatchString(strings.TrimSpace(question)) {
+		if id := lastInvestigation(system); id != "" {
+			args["follow_up_of"] = id
+		}
+	}
+	return FC(brain.ToolInvestigate, args)
+}
+
+// lastInvestigation is the newest finished job in the prompt's
+// Investigations section, or "".
+func lastInvestigation(system string) string {
+	m := reLedgerInvestigation.FindAllStringSubmatch(investigationsSection(system), -1)
+	if len(m) == 0 {
+		return ""
+	}
+	return m[len(m)-1][1]
+}
+
+// runningInvestigation is the id of a job the prompt says is running, or
+// "".
+func runningInvestigation(system string) string {
+	sec := investigationsSection(system)
+	_, after, found := strings.Cut(sec, "Running now")
+	if !found {
+		return ""
+	}
+	if stop := strings.Index(after, "Already looked into"); stop >= 0 {
+		after = after[:stop]
+	}
+	for _, line := range strings.Split(after, "\n") {
+		if id, _, ok := strings.Cut(strings.TrimPrefix(strings.TrimSpace(line), "- "), " "); ok && strings.HasPrefix(id, "inv-") {
+			return id
+		}
+	}
+	return ""
+}
+
+// investigationsSection is the "## Investigations" section of the system
+// prompt.
+func investigationsSection(system string) string {
+	_, after, found := strings.Cut(system, "## Investigations")
+	if !found {
+		return ""
+	}
+	if stop := strings.Index(after, "\n## "); stop >= 0 {
+		after = after[:stop]
+	}
+	return after
+}
+
+// investigationReply answers a delivery turn from the result the request
+// carries: a short paragraph, pushed at the next pause.
+func investigationReply(text, agent string) string {
+	found := "it came back with nothing"
+	if m := reWorkerOutput.FindStringSubmatch(text); m != nil {
+		found = strings.TrimSpace(m[1])
+	}
+	return mustJSON(brain.Reply{
+		Spoken:  fmt.Sprintf("Here is what the look into %s found. %s", agent, found),
+		Detail:  "The fake model relayed the investigation's answer.",
+		Urgency: brain.UrgencyIdle,
+	})
 }
 
 // lastEvent returns the text part holding the newest event line and the

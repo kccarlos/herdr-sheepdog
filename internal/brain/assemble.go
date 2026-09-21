@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"google.golang.org/genai"
 )
@@ -144,6 +145,8 @@ func contextLine(m Message) string {
 // web/debug/supervisor.js; keep it.
 func requestText(req Request) string {
 	switch {
+	case req.Kind == KindInvestigation:
+		return investigationRequestText(req)
 	case req.Kind.IsEvent():
 		return eventRequestText(req)
 	case req.Kind == KindStop:
@@ -194,6 +197,46 @@ func stopRequestText(req Request) string {
 	return s + "\nThe CEO said stop and the daemon already carried the stop out; an open worker prompt is deliberately left open. Say in one short sentence what was stopped, then offer the correction as a question (\"shall I tell it something else?\"). Read tools only: send nothing."
 }
 
+// investigationRequestText is the request of a delivery turn: the job
+// the CEO is owed an answer to, what they asked in their own words, and
+// the sub-agent's answer wrapped as worker output (data, not
+// instructions). The first line keeps the event shape braintest's reflex
+// model and web/debug/supervisor.js parse.
+func investigationRequestText(req Request) string {
+	inv := req.Investigation
+	if inv == nil {
+		inv = &InvestigationInfo{}
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "Event from the supervisor (investigation): agent=%q event=%q template=%q\n", aliasOr(req.Agent), "investigation.done", req.Template)
+	fmt.Fprintf(&b, "The look you started (%s, through %s) came back. You asked it: %q\n", inv.ID, sourceOr(inv.Source, inv.Backend), inv.Question)
+	if inv.Asked != "" {
+		fmt.Fprintf(&b, "What the CEO actually said: %q\n", inv.Asked)
+	}
+	if inv.FollowUpOf != "" {
+		fmt.Fprintf(&b, "It digs deeper into investigation %s, so they already heard that answer: do not repeat it.\n", inv.FollowUpOf)
+	}
+	if req.Result != "" {
+		b.WriteString("What it found:\n")
+		b.WriteString(wrapWorker(req.Agent, "investigation", req.Result))
+		b.WriteString("\n")
+	}
+	b.WriteString("Answer the CEO now, from this and the conversation: a short paragraph ordered for the ear — what happened, why, what it means for them, the next move — in plain words, no paths, hashes or ids, jargon only if they used it first. If the agent has worked since, say the answer is as of when the look ran. Reply with the JSON object of the answer contract; read tools only, and say nothing about how the look was run.")
+	return b.String()
+}
+
+// sourceOr names how an investigation ran, for the request line.
+func sourceOr(source, backend string) string {
+	switch {
+	case source == InvestigationSourceWorker:
+		return "the agent itself"
+	case backend != "":
+		return backend
+	default:
+		return "a read-only CLI agent"
+	}
+}
+
 // eventRequestText is the request message of an announce turn (parsed by
 // braintest's reflex model and web/debug/supervisor.js; keep the shape of
 // the first line and of the promise lines).
@@ -219,6 +262,30 @@ func eventRequestText(req Request) string {
 // promiseLine renders a promise record for the window and recall.
 func promiseLine(p PromiseInfo) string {
 	return fmt.Sprintf("Promise (%s): %q, %s", statusOr(p.Status), p.Text, promiseCondition(p))
+}
+
+// investigationLine renders one job of the ledger for the prompt's
+// Investigations section and for recall.
+func investigationLine(inv InvestigationInfo, now time.Time) string {
+	when := "just now"
+	if !inv.Started.IsZero() {
+		when = ago(now.Sub(inv.Started)) + " ago"
+	}
+	line := fmt.Sprintf("investigation %s (%s, %s): %q", inv.ID, aliasOr(inv.Agent), when, inv.Question)
+	switch inv.Status {
+	case InvestigationRunning:
+		return line + " → still running"
+	case InvestigationCancelled:
+		return line + " → cancelled"
+	case InvestigationError:
+		return line + " → failed: " + inv.Err
+	default:
+		summary := inv.Summary
+		if summary == "" {
+			summary = "no answer"
+		}
+		return line + " → " + summary
+	}
 }
 
 // promiseCondition is "when auth finishes" / "when auth asks something".

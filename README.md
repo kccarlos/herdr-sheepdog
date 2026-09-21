@@ -138,7 +138,12 @@ the choice survives a restart) that keeps one transcript per daemon run — your
 what the voice said, every push and worker state change, its own tool
 calls — so "why did *that one* fail?" still means something when it reads
 a screen. It reasons with `read_screen`, `run_cli`, `list_agents` and
-`recall`, acts with `prompt`, `send_keys` and `interrupt`, and treats
+`recall`, acts with `prompt`, `send_keys` and `interrupt`, and for
+anything the screen cannot answer it starts a background **investigation**
+(`investigate`): a read-only CLI agent in the worker's own repository
+that takes as long as it takes, acknowledged at once ("reading the diff,
+about half a minute") and delivered on its own at the next pause, with a
+follow-up resuming the same sub-agent session. It treats
 everything read from a worker as data, never instructions. The one rail:
 it may answer a worker's approval prompt only on your words in that turn,
 with a key from the prompt's own options; the code enforces it, not the

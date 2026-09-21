@@ -190,6 +190,11 @@ export class ConversationView {
       }
       if (it.orphan) bits.push('result without a call');
       if (it.nested.length) bits.push(`${it.nested.length} event${it.nested.length > 1 ? 's' : ''}`);
+      if (it.result && it.result.pendingAnswer) {
+        // The acknowledgement of an investigation: the real answer is a
+        // push further down, when the job lands.
+        bits.push(it.answeredBy ? `answered below (${it.job || 'investigation'})` : 'answer still to come');
+      }
       const meta = el('span', 'meta', ` · ${bits.join(' · ')}`);
       this.turnMeta(meta, it);
       h.appendChild(meta);
@@ -260,6 +265,8 @@ export class ConversationView {
       h.appendChild(el('span', 'who', 'supervisor → model'));
       h.appendChild(el('span', `badge ${it.urgency}`, it.urgency));
       if (it.skipped) h.appendChild(el('span', 'badge skipped', 'not sent (voice off)'));
+      // The answer to a look the shepherd was told was coming.
+      if (it.answersJob) h.appendChild(el('span', 'badge', `answers ${it.answersJob}`));
       h.appendChild(el('span', silent ? 'text one-line' : 'text', it.text));
       h.appendChild(el('span', 'meta', ` · ${fmtTime(it.ts)}${it.nested.length ? ` · ${it.nested.length} event${it.nested.length > 1 ? 's' : ''}` : ''}`));
     };

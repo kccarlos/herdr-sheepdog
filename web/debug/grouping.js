@@ -5,7 +5,7 @@
 // Pure functions, no DOM (decision D10: the page is a viewer of the log).
 
 /** Supervisor-side event types that belong to the tool call or push in flight. */
-export const NESTED_TYPES = /^(llm\.|cli\.run|herdr\.read|herdr\.send|pending\.|note\.created|supervisor\.|brain\.)/;
+export const NESTED_TYPES = /^(llm\.|cli\.run|herdr\.read|herdr\.send|pending\.|note\.created|supervisor\.|brain\.|investigation\.)/;
 
 /**
  * Tool call/result families: any `<prefix>.tool_call` / `<prefix>.tool_result`
@@ -107,7 +107,11 @@ export function eventSummary(ev) {
       parts.push(p.name, p.dur_ms != null ? `${p.dur_ms} ms` : '', p.scheduling, p.cancelled ? 'cancelled' : '', p.error ? `error: ${p.error}` : '', typeof p.result === 'string' ? p.result : (p.result != null ? JSON.stringify(p.result) : ''), p.spoken);
       break;
     case type === 'cli.run':
-      parts.push(p.backend, p.dur_ms != null ? `${p.dur_ms} ms` : '', p.exit != null ? `exit ${p.exit}` : '', p.killed ? 'killed' : '', p.capped ? 'capped' : '');
+      parts.push(p.backend, p.dur_ms != null ? `${p.dur_ms} ms` : '', p.exit != null ? `exit ${p.exit}` : '', p.killed ? 'killed' : '', p.capped ? 'capped' : '', p.resumed ? 'resumed' : '', p.session ? 'session kept' : '');
+      break;
+    case type.startsWith('investigation.'):
+      parts.push(p.id, p.agent, p.backend, p.dur_ms != null ? fmtMs(p.dur_ms) : '', p.follow_up_of ? `follows ${p.follow_up_of}` : '',
+        p.bytes != null ? `${p.bytes} bytes` : '', p.session_id_present ? 'session kept' : '', p.reason, p.error ? `error: ${p.error}` : '', p.question);
       break;
     case type === 'herdr.read':
       parts.push(p.source, p.lines != null ? `${p.lines} lines` : '', p.error ? `error: ${p.error}` : '');

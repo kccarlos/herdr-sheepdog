@@ -124,6 +124,23 @@ func (h brainHost) RunCLI(ctx context.Context, paneID, question string) (string,
 	return out, nil
 }
 
+// Investigate implements brain.Host: the background job of
+// investigate.go. It returns as soon as the job is recorded and running;
+// the answer comes back later as its own event turn.
+func (h brainHost) Investigate(ctx context.Context, paneID string, req brain.InvestigationRequest) (brain.InvestigationStart, error) {
+	return h.s.startInvestigation(ctx, paneID, req)
+}
+
+// Investigations implements brain.Host: the ledger, oldest first.
+func (h brainHost) Investigations() []brain.InvestigationInfo {
+	all := h.s.investigations()
+	out := make([]brain.InvestigationInfo, 0, len(all))
+	for _, inv := range all {
+		out = append(out, investigationInfo(inv, h.s.resumable(inv)))
+	}
+	return out
+}
+
 // Prompt implements brain.Host: the propose send path (D4), so cancel can
 // still interrupt it.
 func (h brainHost) Prompt(ctx context.Context, paneID, text string) (string, error) {

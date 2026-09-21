@@ -67,17 +67,35 @@ func (l *recLog) count(typ string) int { return len(l.ofType(typ)) }
 type fakePusher struct {
 	mu     sync.Mutex
 	pushes []voice.EventPush
+	tags   []map[string]any
 	err    error
 }
 
 func (p *fakePusher) Push(text string, u voice.Urgency) error {
+	return p.PushTagged(text, u, nil)
+}
+
+// PushTagged implements TagPusher: the tags of each push are kept
+// alongside it (answers_job).
+func (p *fakePusher) PushTagged(text string, u voice.Urgency, tags map[string]any) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.err != nil {
 		return p.err
 	}
 	p.pushes = append(p.pushes, voice.EventPush{Text: text, Urgency: u})
+	p.tags = append(p.tags, tags)
 	return nil
+}
+
+// tagsOf returns the tags of the i-th push.
+func (p *fakePusher) tagsOf(i int) map[string]any {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if i < 0 || i >= len(p.tags) {
+		return nil
+	}
+	return p.tags[i]
 }
 
 func (p *fakePusher) all() []voice.EventPush {

@@ -7,8 +7,11 @@ import "encoding/json"
 // and TotalCostUSD are pointers so a field claude's JSON omitted stays
 // distinguishable from a reported zero.
 type claudeResult struct {
-	Result       string   `json:"result"`
-	IsError      bool     `json:"is_error"`
+	Result  string `json:"result"`
+	IsError bool   `json:"is_error"`
+	// SessionID is what `claude -p --resume <id>` takes for a follow-up
+	// (the same id comes back from a resumed run).
+	SessionID    string   `json:"session_id"`
 	NumTurns     *int     `json:"num_turns"`
 	DurationMS   *int64   `json:"duration_ms"`
 	TotalCostUSD *float64 `json:"total_cost_usd"`

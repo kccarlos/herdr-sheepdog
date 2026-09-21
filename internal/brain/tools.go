@@ -16,23 +16,24 @@ import (
 
 // Tool names.
 const (
-	ToolReadScreen = "read_screen"
-	ToolRunCLI     = "run_cli"
-	ToolListAgents = "list_agents"
-	ToolRecall     = "recall"
-	ToolPrompt     = "prompt"
-	ToolSendKeys   = "send_keys"
-	ToolInterrupt  = "interrupt"
-	ToolPromise    = "promise"
-	ToolNote       = "note"
+	ToolReadScreen  = "read_screen"
+	ToolRunCLI      = "run_cli"
+	ToolListAgents  = "list_agents"
+	ToolRecall      = "recall"
+	ToolPrompt      = "prompt"
+	ToolSendKeys    = "send_keys"
+	ToolInterrupt   = "interrupt"
+	ToolPromise     = "promise"
+	ToolNote        = "note"
+	ToolInvestigate = "investigate"
 )
 
 // IsActionTool reports whether name sends something to a worker or
-// writes to the record (a promise, a note): permitted in CEO turns
-// only, and never in a read-only turn.
+// writes to the record (a promise, a note, a background job): permitted
+// in CEO turns only, and never in a read-only turn.
 func IsActionTool(name string) bool {
 	switch name {
-	case ToolPrompt, ToolSendKeys, ToolInterrupt, ToolPromise, ToolNote:
+	case ToolPrompt, ToolSendKeys, ToolInterrupt, ToolPromise, ToolNote, ToolInvestigate:
 		return true
 	}
 	return false
@@ -86,6 +87,8 @@ func toolDeclarations(readOnly bool) []*genai.Tool {
 		{Name: ToolPromise, Description: "Record promised work: the CEO asked to be told when something happens to an agent (\"tell me when it's done\", \"let me know if it asks\", \"remind me\"). The supervisor keeps it: it tells the CEO at the next matching event, whatever the chattiness level. Use it in the same turn as any instruction that goes with it.",
 			Parameters: obj(map[string]*genai.Schema{"agent": agent, "text": str("what the CEO asked to be told, in their words"), "event": {Type: genai.TypeString, Enum: PromiseEvents, Description: "the condition: done (it finished), blocked (it asks something), idle, or any_change"},
 				"due_in_minutes": {Type: genai.TypeInteger, Description: "only when the CEO gave a deadline or asked to be interrupted at once (0); a promise kept past its due time interrupts instead of waiting for a pause"}}, []string{"agent", "text", "event"})},
+		{Name: ToolInvestigate, Description: "Start a background look into something the screen cannot answer and that may take more than a few seconds: a read-only CLI agent in the agent's repository (or the idle worker itself). It returns at once with a job id; the answer reaches the CEO on its own when the job returns, so acknowledge with pending true and say roughly how long. Phrase the question with full context: the sub-agent has not heard this conversation. One live investigation per agent.",
+			Parameters: obj(map[string]*genai.Schema{"agent": agent, "question": str("a self-contained question"), "follow_up_of": str("the id of the investigation this digs deeper into, to resume the same session")}, []string{"agent", "question"})},
 		{Name: ToolNote, Description: "Remember something the CEO decided or wants kept in mind (\"remember the migrations are off limits today\", \"we are on the release branch\"). Notes are in the ledger of every later turn. Not for promised work: that is promise.",
 			Parameters: obj(map[string]*genai.Schema{"text": str("what to remember, in the CEO's words")}, []string{"text"})},
 	}
@@ -183,6 +186,23 @@ func (b *Brain) execTool(ctx context.Context, t *turn, call *genai.FunctionCall)
 		text = prose.TailBytes(text, maxResultBytes)
 		out.result = wrapWorker(row.Alias, "cli", text)
 		out.summary = fmt.Sprintf("cli output for %s, %d bytes", row.Alias, len(text))
+	case ToolInvestigate:
+		q := arg("question")
+		if q == "" {
+			out.err = errors.New("investigate needs a question")
+			return out
+		}
+		start, err := b.host.Investigate(ctx, row.PaneID, InvestigationRequest{Question: q, FollowUpOf: arg("follow_up_of"), Asked: t.req.Question, Turn: turn})
+		if err != nil {
+			out.err = err
+			return out
+		}
+		out.result = mustJSON(start)
+		out.summary = fmt.Sprintf("investigation %s of %s started", start.Job, row.Alias)
+		// The job is running whatever happens to the rest of this turn,
+		// so the fallback path must say so rather than report the roster
+		// as if nothing were under way.
+		out.acted = "Looking into " + aliasOr(row.Alias) + " now; the answer comes on its own."
 	case ToolPrompt:
 		text := arg("text")
 		if text == "" {
@@ -377,6 +397,9 @@ func (b *Brain) recall(query string) toolOutcome {
 	}
 	for _, p := range b.host.Promises() {
 		add(p.CreatedAt, promiseLine(p))
+	}
+	for _, inv := range b.host.Investigations() {
+		add(inv.Started, investigationLine(inv, b.cfg.Now()))
 	}
 	for _, m := range b.transcript.Messages() {
 		switch m.Kind {

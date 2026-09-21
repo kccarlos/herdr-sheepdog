@@ -93,13 +93,48 @@ func slug(name string) string {
 }
 
 // dynamicSections renders the roster, the ledger excerpt (with the open
-// promises) and the time.
-func dynamicSections(agents []AgentInfo, notes []string, promises []PromiseInfo, now time.Time) []PromptSection {
+// promises), the investigations and the time.
+func dynamicSections(agents []AgentInfo, notes []string, promises []PromiseInfo, investigations []InvestigationInfo, now time.Time) []PromptSection {
 	return []PromptSection{
 		{Name: "roster", Source: SourceDynamic, Text: renderRoster(agents, now)},
 		{Name: "ledger", Source: SourceDynamic, Text: renderLedger(agents, notes, promises, now)},
+		{Name: "investigations", Source: SourceDynamic, Text: renderInvestigations(investigations, now)},
 		{Name: "time", Source: SourceDynamic, Text: "## Now\n\n" + now.Format("Mon 2006-01-02 15:04:05 MST")},
 	}
+}
+
+// renderInvestigations is the Investigations section: the jobs running
+// now with how long they have been going (so "anything yet?" is answered
+// from the prompt, without a second job), then what the finished ones
+// found — the same shape as the open promises in the ledger.
+func renderInvestigations(investigations []InvestigationInfo, now time.Time) string {
+	var b strings.Builder
+	b.WriteString("## Investigations\n\n")
+	var running, done []InvestigationInfo
+	for _, inv := range investigations {
+		if inv.Status == InvestigationRunning {
+			running = append(running, inv)
+			continue
+		}
+		done = append(done, inv)
+	}
+	if len(running) == 0 && len(done) == 0 {
+		b.WriteString("Nothing has been looked into yet.")
+		return b.String()
+	}
+	if len(running) > 0 {
+		b.WriteString("Running now (the answer reaches the CEO on its own when it lands; say how it is going, do not start it again):\n")
+		for _, inv := range running {
+			fmt.Fprintf(&b, "- %s (%s): %q, %s so far\n", inv.ID, aliasOr(inv.Agent), inv.Question, ago(now.Sub(inv.Started)))
+		}
+	}
+	if len(done) > 0 {
+		b.WriteString("Already looked into (follow_up_of resumes the same session for a deeper question):\n")
+		for _, inv := range done {
+			fmt.Fprintf(&b, "- %s\n", investigationLine(inv, now))
+		}
+	}
+	return strings.TrimRight(b.String(), "\n")
 }
 
 // renderRoster is one line per agent: alias, kind, state and how long,

@@ -14,6 +14,9 @@ type pushItem struct {
 	text    string
 	urgency voice.Urgency
 	retries int
+	// tags travel onto the item's voice.push event (answers_job: the
+	// investigation whose answer this push is).
+	tags map[string]any
 }
 
 // Push policy (plan §3.6): one at a time, FIFO. UrgencySilent goes as
@@ -162,6 +165,10 @@ func (s *Session) doPush(ctx context.Context, item pushItem) {
 		}
 	}
 	s.mu.Unlock()
-	s.log.Log(logSource, "voice.push", "", map[string]any{"text": item.text, "urgency": item.urgency.String()})
+	payload := map[string]any{"text": item.text, "urgency": item.urgency.String()}
+	for k, v := range item.tags {
+		payload[k] = v
+	}
+	s.log.Log(logSource, "voice.push", "", payload)
 	s.emit(voice.EventPush{Text: item.text, Urgency: item.urgency})
 }

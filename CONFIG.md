@@ -19,8 +19,9 @@ commented template of every key below to `~/.config/sheepdog/config.toml`
 (or `--path`), refusing to overwrite an existing file without `--force`.
 
 Two keys — `[aliases]` and the `[cli]` argv templates (`codex_cmd`,
-`claude_cmd`) — are TOML-only: they are not simple scalars an environment
-variable could sanely hold, so they have no `SHEEPDOG_*` override.
+`claude_cmd`, `codex_resume_cmd`, `claude_resume_cmd`) — are TOML-only:
+they are not simple scalars an environment variable could sanely hold,
+so they have no `SHEEPDOG_*` override.
 
 ## Top level
 
@@ -131,11 +132,13 @@ flag in the argv templates is there.
 | `cli.prefer` | `SHEEPDOG_CLI_PREFER` | `auto` | Picks the backend: `codex`, `claude`, or `auto` (codex if detected on `PATH`, else claude, else the brain simply has no `run_cli` tool). |
 | `cli.codex_bin` | `SHEEPDOG_CLI_CODEX_BIN` | `codex` | Looked up on `PATH`, or an absolute path; also becomes `argv[0]` of `cli.codex_cmd`. |
 | `cli.claude_bin` | `SHEEPDOG_CLI_CLAUDE_BIN` | `claude` | Same, for the claude backend and `cli.claude_cmd`. |
-| `cli.codex_cmd` | *(TOML only)* | see `internal/config/config.go`'s `defaultCLI` | Argv template for the codex invocation; `{question}`, `{cwd}`, `{model}`, `{reasoning}` are substituted. No shell is invoked. |
-| `cli.claude_cmd` | *(TOML only)* | see `internal/config/config.go`'s `defaultCLI` | Same, for claude. |
+| `cli.codex_cmd` | *(TOML only)* | see `internal/config/config.go`'s `defaultCLI` | Argv template for the codex invocation; `{question}`, `{cwd}`, `{model}`, `{reasoning}` are substituted. No shell is invoked. It asks for `--json`, so the sub-agent's thread id is captured and an investigation's follow-up can resume it. |
+| `cli.claude_cmd` | *(TOML only)* | see `internal/config/config.go`'s `defaultCLI` | Same, for claude; its `session_id` comes from the JSON result. |
+| `cli.codex_resume_cmd` | *(TOML only)* | see `internal/config/config.go`'s `defaultCLI` | Argv template of a follow-up in an existing codex session (`codex exec resume`): `{session}` is substituted as well. `resume` has no `--sandbox`, `-C` or `--color` of its own, so the sandbox is set with `-c sandbox_mode=read-only` and the directory by the child's cwd. |
+| `cli.claude_resume_cmd` | *(TOML only)* | see `internal/config/config.go`'s `defaultCLI` | Same, for claude (`claude -p --resume {session}`), with the same read-only flags as `cli.claude_cmd`. |
 | `cli.claude_model` | `SHEEPDOG_CLI_CLAUDE_MODEL` | `claude-haiku-4-5-20251001` | Fills `{model}` in `cli.claude_cmd`. |
 | `cli.codex_reasoning` | `SHEEPDOG_CLI_CODEX_REASONING` | `low` | Fills `{reasoning}` in `cli.codex_cmd`. |
-| `cli.timeout_s` | `SHEEPDOG_CLI_TIMEOUT_S` | `60` | Bounds one invocation; the process group is killed on expiry. |
+| `cli.timeout_s` | `SHEEPDOG_CLI_TIMEOUT_S` | `60` | Bounds one invocation of the brain's `run_cli` lookup; the process group is killed on expiry. It does **not** bound a background investigation, which has `brain.investigate_max_s` instead. |
 | `cli.max_output_kb` | `SHEEPDOG_CLI_MAX_OUTPUT_KB` | `16` | Caps captured stdout; the tail is kept. |
 
 ## `[supervisor]`
@@ -203,6 +206,8 @@ announce wait elapse.
 | `brain.final_grace_s` | `SHEEPDOG_BRAIN_FINAL_GRACE_S` | `0` (default `3`) | How far past the turn's timeout that one forced answer-only call may still run before the turn falls back to the code sentence. `0` takes the package default (3s); negative disables the grace entirely (fall back right at the timeout). |
 | `brain.enrich_timeout_s` | `SHEEPDOG_BRAIN_ENRICH_TIMEOUT_S` | `6` | Budget of an event turn: the `announce` turn that decides what the assistant says about a block or finish and how urgently (README "How chatty is it?"). On expiry the daemon's own sentence is spoken instead (`brain.push_decision {via: template, reason: timeout}`; a promise falls back to "As you asked: …"). Event turns get only the read tools. |
 | `brain.announce_wait_s` | `SHEEPDOG_BRAIN_ANNOUNCE_WAIT_S` | `2` | How long a worker event — a block *or* a finish — waits for the brain's announce turn before the daemon speaks its own code sentence (the parsed prompt, or "<alias> finished."; `brain.push_decision {via: template, reason: wait}`). One line per event: a brain line that lands after the wait is dropped (`brain.push_late`), except a `needs_user` line about a prompt that is still open, which is added at idle. A line about a prompt that was answered meanwhile is dropped too (`brain.push_stale`). |
+| `brain.investigate_max_s` | `SHEEPDOG_BRAIN_INVESTIGATE_MAX_S` | `600` | Sanity ceiling of one background investigation (`investigate`, docs/roles.md "Investigations and explanations") — the only limit on how long its answer may take, so a stuck job dies. What is bounded tightly is the acknowledgement, which is an ordinary brain turn. A job past the ceiling is killed and logged as `investigation.error`. |
+| `brain.investigate_session_ttl_s` | `SHEEPDOG_BRAIN_INVESTIGATE_SESSION_TTL_S` | `3600` | How long a finished investigation's sub-agent session stays resumable: within it, `investigate(follow_up_of: …)` continues the same CLI session (`cli.codex_resume_cmd` / `cli.claude_resume_cmd`); past it the follow-up starts a fresh sub-agent with the previous answer prepended to the question. The ledger row itself stays either way (`session.investigations`, the last 20). |
 
 ## `[prompts]`
 

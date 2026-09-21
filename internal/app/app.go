@@ -262,7 +262,10 @@ func (a *App) wire() error {
 		PromiseTTL:   time.Duration(cfg.Supervisor.PromiseTTLS) * time.Second,
 		CancelWindow: time.Duration(cfg.Supervisor.CancelWindowS) * time.Second,
 		AnnounceWait: time.Duration(cfg.Brain.AnnounceWaitS) * time.Second,
-		Brain:        a.brain,
+
+		InvestigateMax:        time.Duration(cfg.Brain.InvestigateMaxS) * time.Second,
+		InvestigateSessionTTL: time.Duration(cfg.Brain.InvestigateSessionTTLS) * time.Second,
+		Brain:                 a.brain,
 	})
 	if err != nil {
 		if a.brain != nil {
@@ -781,11 +784,21 @@ func (l *lazyPusher) set(p supervisor.Pusher) {
 
 // Push implements supervisor.Pusher.
 func (l *lazyPusher) Push(text string, u voice.Urgency) error {
+	return l.PushTagged(text, u, nil)
+}
+
+// PushTagged implements supervisor.TagPusher, so a tagged push
+// (answers_job) keeps its tag through the lazy indirection — both the
+// voice session and the --voice=off pusher take them.
+func (l *lazyPusher) PushTagged(text string, u voice.Urgency, tags map[string]any) error {
 	l.mu.Lock()
 	p := l.p
 	l.mu.Unlock()
 	if p == nil {
 		return errors.New("app: no pusher")
+	}
+	if tp, ok := p.(supervisor.TagPusher); ok && len(tags) > 0 {
+		return tp.PushTagged(text, u, tags)
 	}
 	return p.Push(text, u)
 }
@@ -797,11 +810,17 @@ func (l *lazyPusher) Push(text string, u voice.Urgency) error {
 type lazyQuerier struct {
 	mu sync.Mutex
 	q  supervisor.Querier
+	// runner is the same object when the querier is the real Runner: it
+	// also backs the investigate tool (supervisor.Investigator).
+	runner *cli.Runner
 }
 
 func (l *lazyQuerier) set(q supervisor.Querier) {
 	l.mu.Lock()
 	l.q = q
+	if r, ok := q.(*cli.Runner); ok {
+		l.runner = r
+	}
 	l.mu.Unlock()
 }
 
@@ -814,6 +833,36 @@ func (l *lazyQuerier) Query(ctx context.Context, workspace, question string) (st
 		return "", cli.ErrUnavailable
 	}
 	return q.Query(ctx, workspace, question)
+}
+
+// Investigate implements supervisor.Investigator: the same runner, with
+// the investigation's own ceiling and slot and the sub-agent's session
+// kept so a follow-up can resume it.
+func (l *lazyQuerier) Investigate(ctx context.Context, q supervisor.InvestigationQuery) (supervisor.InvestigationResult, error) {
+	l.mu.Lock()
+	runner := l.runner
+	l.mu.Unlock()
+	if runner == nil {
+		return supervisor.InvestigationResult{}, cli.ErrUnavailable
+	}
+	res, err := runner.Run(ctx, cli.Query{Workspace: q.Workspace, Question: q.Question, Session: q.Session, Timeout: q.Timeout, Slot: q.Slot})
+	if err != nil {
+		return supervisor.InvestigationResult{}, err
+	}
+	return supervisor.InvestigationResult{Backend: string(res.Backend), Answer: res.Raw, SessionID: res.SessionID}, nil
+}
+
+// ResolveBackend names the backend investigations will use ("" before
+// detection ran), for the investigation.started event.
+func (l *lazyQuerier) ResolveBackend() (string, error) {
+	l.mu.Lock()
+	runner := l.runner
+	l.mu.Unlock()
+	if runner == nil {
+		return "", cli.ErrUnavailable
+	}
+	b, err := runner.ResolveBackend()
+	return string(b), err
 }
 
 // teeLogger writes every event to both loggers.

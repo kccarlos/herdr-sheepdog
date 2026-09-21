@@ -18,8 +18,19 @@ var _ supervisor.Pusher = SkippedPusher{}
 
 // Push implements supervisor.Pusher.
 func (p SkippedPusher) Push(text string, u voice.Urgency) error {
+	return p.PushTagged(text, u, nil)
+}
+
+// PushTagged implements supervisor.TagPusher: the same skipped push,
+// with its tags (answers_job) on the event, so the /debug views link an
+// investigation's answer to its acknowledgement with --voice=off too.
+func (p SkippedPusher) PushTagged(text string, u voice.Urgency, tags map[string]any) error {
 	if p.Log != nil {
-		p.Log.Log("voice", "voice.push", "", map[string]any{"text": text, "urgency": u.String(), "skipped": true})
+		payload := map[string]any{"text": text, "urgency": u.String(), "skipped": true}
+		for k, v := range tags {
+			payload[k] = v
+		}
+		p.Log.Log("voice", "voice.push", "", payload)
 	}
 	return nil
 }

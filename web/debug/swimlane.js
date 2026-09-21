@@ -473,6 +473,18 @@ class Builder {
       } else if (type === 'herdr.read' || type === 'herdr.send') {
         card.title = type === 'herdr.read' ? 'read pane' : `send ${p.kind || ''}`.trim();
         card.arrow = { from: 'sup', to: 'herdr', kind: 'call', label: eventSummary(ev), dashed: type === 'herdr.read', level: isErr ? 'error' : null };
+      } else if (type.startsWith('investigation.')) {
+        // A background look runs a CLI sub-agent in the worker's
+        // repository, so it belongs in the Flock / CLI lane with the
+        // cli.run it will make, not in the Brain lane it was started from.
+        card.lane = 'herdr';
+        card.title = `investigation ${type.slice('investigation.'.length)}`;
+        card.cls.push('investigation');
+        card.arrow = {
+          from: 'sup', to: 'herdr', kind: 'call',
+          label: [p.id, p.backend, card.durMs != null ? fmtMs(card.durMs) : '', p.reason].filter(Boolean).join(' · '),
+          dashed: type !== 'investigation.started', level: isErr ? 'error' : latencyLevel(card.durMs),
+        };
       } else if (type.startsWith('pending.')) {
         card.title = type.slice('pending.'.length);
         card.cls.push('pending', `pending-${card.title}`);

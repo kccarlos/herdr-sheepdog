@@ -10,7 +10,10 @@
 #                            process group, not just this process)
 #   FAKE_BIG                when set, print this many 'A' bytes followed by
 #                            a "TAIL_MARKER" line, to exercise output
-#                            truncation (the tail must survive)
+#                            truncation (the tail must survive); with
+#                            FAKE_CODEX_JSONL it pads a command_execution
+#                            item instead, so the thread id falls out of
+#                            the tail
 #   FAKE_CLAUDE_JSON        when set, wrap the answer as
 #                            {"result":"...","is_error":<FAKE_IS_ERROR>}
 #   FAKE_IS_ERROR            "true" or "false" (default "false")
@@ -21,6 +24,13 @@
 #                            "duration_ms":<value> to the JSON
 #   FAKE_COST_USD             when set (with FAKE_CLAUDE_JSON), adds
 #                            "total_cost_usd":<value> to the JSON
+#   FAKE_SESSION             when set (with FAKE_CLAUDE_JSON or
+#                            FAKE_CODEX_JSONL), reports this session id
+#                            the way the real backend does, so a
+#                            follow-up can resume it
+#   FAKE_CODEX_JSONL          when set, print `codex exec --json` JSONL:
+#                            thread.started, an agent_message item with
+#                            the answer, and turn.completed
 #
 # The plain-text answer (used when FAKE_BIG is unset) echoes argv, cwd and
 # whether HERDR_PANE_ID / CLAUDECODE / CLAUDE_CODE_FOO reached the child,
@@ -39,7 +49,7 @@ if [ -n "$FAKE_SLEEP" ]; then
   sleep "$FAKE_SLEEP"
 fi
 
-if [ -n "$FAKE_BIG" ]; then
+if [ -n "$FAKE_BIG" ] && [ -z "$FAKE_CODEX_JSONL" ]; then
   head -c "$FAKE_BIG" /dev/zero | tr '\0' 'A'
   printf 'TAIL_MARKER\n'
   exit "${FAKE_EXIT:-0}"
@@ -47,11 +57,29 @@ fi
 
 answer="ARGV:$*;CWD:$(pwd -P);HERDR:${HERDR_PANE_ID:-ABSENT};CLAUDECODE:${CLAUDECODE:-ABSENT};CCFOO:${CLAUDE_CODE_FOO:-ABSENT}"
 
+if [ -n "$FAKE_CODEX_JSONL" ]; then
+  if [ -n "$FAKE_SESSION" ]; then
+    printf '{"type":"thread.started","thread_id":"%s"}\n' "$FAKE_SESSION"
+  fi
+  printf '{"type":"turn.started"}\n'
+  if [ -n "$FAKE_BIG" ]; then
+    # A talkative run: one command_execution item big enough to push the
+    # thread id out of a small output cap.
+    printf '{"type":"item.completed","item":{"id":"item_x","type":"command_execution","aggregated_output":"'
+    head -c "$FAKE_BIG" /dev/zero | tr '\0' 'A'
+    printf '"}}\n'
+  fi
+  printf '{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"%s"}}\n' "$answer"
+  printf '{"type":"turn.completed","usage":{"input_tokens":10,"output_tokens":2}}\n'
+  exit "${FAKE_EXIT:-0}"
+fi
+
 if [ -n "$FAKE_CLAUDE_JSON" ]; then
   extra=""
   [ -n "$FAKE_NUM_TURNS" ] && extra="$extra,\"num_turns\":$FAKE_NUM_TURNS"
   [ -n "$FAKE_DURATION_MS" ] && extra="$extra,\"duration_ms\":$FAKE_DURATION_MS"
   [ -n "$FAKE_COST_USD" ] && extra="$extra,\"total_cost_usd\":$FAKE_COST_USD"
+  [ -n "$FAKE_SESSION" ] && extra="$extra,\"session_id\":\"$FAKE_SESSION\""
   printf '{"result":"%s","is_error":%s%s}\n' "$answer" "${FAKE_IS_ERROR:-false}" "$extra"
 else
   printf '%s\n' "$answer"

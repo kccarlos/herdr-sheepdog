@@ -108,6 +108,14 @@ type Brain struct {
 	// finish waits for the brain's announce turn before the template
 	// sentence is spoken; the brain's line may still follow (default 2).
 	AnnounceWaitS int `toml:"announce_wait_s"`
+	// InvestigateMaxS is the sanity ceiling of one background
+	// investigation — the only time limit on its answer; a job still
+	// running after it is killed and reported as an error (default 600).
+	InvestigateMaxS int `toml:"investigate_max_s"`
+	// InvestigateSessionTTLS is how long an investigation's sub-agent
+	// session stays resumable: a follow-up past it starts a fresh
+	// session with the previous answer prepended (default 3600).
+	InvestigateSessionTTLS int `toml:"investigate_session_ttl_s"`
 }
 
 // BrainProviders are the accepted values of brain.provider.
@@ -185,10 +193,12 @@ func validChattiness(v string) bool {
 
 // CLI configures the read-only CLI query tool (plan §3.5, WP4): codex
 // and/or claude, invoked non-interactively and read-only to answer
-// questions the brain cannot answer from a screen alone. CodexCmd and
+// questions the brain cannot answer from a screen alone, and to run a
+// background investigation in a worker's repository. CodexCmd and
 // ClaudeCmd are argv templates ({question}, {cwd}, {model} and
-// {reasoning} are substituted); no shell is invoked. See
-// docs/cli-query-tools.md for why each flag is there.
+// {reasoning} are substituted), the *ResumeCmd ones take {session} too;
+// no shell is invoked. See docs/cli-query-tools.md for why each flag is
+// there.
 type CLI struct {
 	// Prefer picks the backend: "codex", "claude" or "auto" (codex if
 	// detected on PATH, else claude, else the deep-ask path is skipped).
@@ -201,6 +211,12 @@ type CLI struct {
 	// [aliases], not a single scalar an env var could sanely hold).
 	CodexCmd  []string `toml:"codex_cmd"`
 	ClaudeCmd []string `toml:"claude_cmd"`
+	// CodexResumeCmd / ClaudeResumeCmd are the argv templates of an
+	// investigation's follow-up: the same read-only invocation with
+	// {session} — the session id the first run reported — substituted as
+	// well (docs/cli-query-tools.md §3).
+	CodexResumeCmd  []string `toml:"codex_resume_cmd"`
+	ClaudeResumeCmd []string `toml:"claude_resume_cmd"`
 	// ClaudeModel fills {model} in ClaudeCmd (default a cheap Haiku id).
 	ClaudeModel string `toml:"claude_model"`
 	// CodexReasoning fills {reasoning} in CodexCmd (default "low").
@@ -319,7 +335,7 @@ const (
 )
 
 func defaultBrain() Brain {
-	return Brain{Enabled: true, Provider: DefaultBrainProvider, Model: DefaultBrainModel, MaxSteps: 6, AskTimeoutS: 8, ProposeTimeoutS: 12, WindowTokens: 24000, PruneAfterTurns: 3, EnrichTimeoutS: 6, AnnounceWaitS: 2}
+	return Brain{Enabled: true, Provider: DefaultBrainProvider, Model: DefaultBrainModel, MaxSteps: 6, AskTimeoutS: 8, ProposeTimeoutS: 12, WindowTokens: 24000, PruneAfterTurns: 3, EnrichTimeoutS: 6, AnnounceWaitS: 2, InvestigateMaxS: 600, InvestigateSessionTTLS: 3600}
 }
 
 // defaultCLI mirrors the argv templates verified in
@@ -334,10 +350,10 @@ func defaultCLI() CLI {
 			"codex", "exec",
 			"--sandbox", "read-only",
 			"--skip-git-repo-check",
-			"--ephemeral",
 			"--color", "never",
 			"-c", "model_reasoning_effort={reasoning}",
 			"-C", "{cwd}",
+			"--json",
 			"{question}",
 		},
 		ClaudeCmd: []string{
@@ -348,7 +364,25 @@ func defaultCLI() CLI {
 			"--strict-mcp-config",
 			"--permission-mode", "dontAsk",
 			"--permission-prompts", "none",
-			"--no-session-persistence",
+			"--output-format", "json",
+			"--max-budget-usd", "0.50",
+		},
+		CodexResumeCmd: []string{
+			"codex", "exec", "resume", "{session}", "{question}",
+			"-c", "sandbox_mode=read-only",
+			"-c", "model_reasoning_effort={reasoning}",
+			"--skip-git-repo-check",
+			"--json",
+		},
+		ClaudeResumeCmd: []string{
+			"claude", "-p", "{question}",
+			"--resume", "{session}",
+			"--model", "{model}",
+			"--tools", "Read,Grep,Glob,WebSearch",
+			"--allowedTools", "Read,Grep,Glob,WebSearch",
+			"--strict-mcp-config",
+			"--permission-mode", "dontAsk",
+			"--permission-prompts", "none",
 			"--output-format", "json",
 			"--max-budget-usd", "0.50",
 		},
@@ -441,7 +475,7 @@ func validateBrain(b Brain) error {
 	for _, f := range []struct {
 		name string
 		v    int
-	}{{"max_steps", b.MaxSteps}, {"ask_timeout_s", b.AskTimeoutS}, {"propose_timeout_s", b.ProposeTimeoutS}, {"window_tokens", b.WindowTokens}, {"prune_after_turns", b.PruneAfterTurns}, {"enrich_timeout_s", b.EnrichTimeoutS}, {"announce_wait_s", b.AnnounceWaitS}} {
+	}{{"max_steps", b.MaxSteps}, {"ask_timeout_s", b.AskTimeoutS}, {"propose_timeout_s", b.ProposeTimeoutS}, {"window_tokens", b.WindowTokens}, {"prune_after_turns", b.PruneAfterTurns}, {"enrich_timeout_s", b.EnrichTimeoutS}, {"announce_wait_s", b.AnnounceWaitS}, {"investigate_max_s", b.InvestigateMaxS}, {"investigate_session_ttl_s", b.InvestigateSessionTTLS}} {
 		if f.v <= 0 {
 			return fmt.Errorf("config: brain.%s=%d: want a positive integer", f.name, f.v)
 		}
@@ -636,6 +670,8 @@ func applyBrainEnv(cfg *Config, lookup func(string) (string, bool)) error {
 		{"SHEEPDOG_BRAIN_PRUNE_AFTER_TURNS", &cfg.Brain.PruneAfterTurns},
 		{"SHEEPDOG_BRAIN_ENRICH_TIMEOUT_S", &cfg.Brain.EnrichTimeoutS},
 		{"SHEEPDOG_BRAIN_ANNOUNCE_WAIT_S", &cfg.Brain.AnnounceWaitS},
+		{"SHEEPDOG_BRAIN_INVESTIGATE_MAX_S", &cfg.Brain.InvestigateMaxS},
+		{"SHEEPDOG_BRAIN_INVESTIGATE_SESSION_TTL_S", &cfg.Brain.InvestigateSessionTTLS},
 	} {
 		v, ok := lookup(f.env)
 		if !ok {
@@ -718,8 +754,8 @@ func geminiKeysFromEnv(lookup func(string) (string, bool)) []string {
 // counts (or set/unset) only; keep it that way when secret-bearing
 // fields are added.
 func (c Config) String() string {
-	return fmt.Sprintf("data_dir=%s herdr.socket=%s state.path=%s state.full_fsync=%t debounce_ms=%d snapshot_interval_s=%d pending_ttl_s=%d aliases=%d gemini.model=%s gemini.voice=%s gemini.stall_after_s=%d gemini.api_keys=%d voice.name=%s deepseek.api_key=%s deepseek.base_url=%s deepseek.thinking=%t deepseek.reasoning_effort=%s web.port=%d cli.prefer=%s cli.timeout_s=%d cli.max_output_kb=%d supervisor.chattiness=%s supervisor.recent_minutes=%d supervisor.promise_ttl_s=%d supervisor.cancel_window_s=%d brain.enabled=%t brain.provider=%s brain.model=%s brain.max_steps=%d brain.ask_timeout_s=%d brain.propose_timeout_s=%d brain.window_tokens=%d brain.prune_after_turns=%d brain.step_reserve_s=%d brain.final_grace_s=%d brain.enrich_timeout_s=%d brain.announce_wait_s=%d prompts.dir=%s",
-		c.DataDir, c.Herdr.Socket, c.State.Path, c.State.FullFsync, c.DebounceMS, c.SnapshotIntervalS, c.PendingTTLS, len(c.Aliases), c.Gemini.Model, c.Gemini.Voice, c.Gemini.StallAfterS, len(c.Gemini.APIKeys), c.Voice.Name, setOrUnset(c.DeepSeek.APIKey), c.DeepSeek.BaseURL, c.DeepSeek.Thinking, c.DeepSeek.ReasoningEffort, c.Web.Port, c.CLI.Prefer, c.CLI.TimeoutS, c.CLI.MaxOutputKB, c.Supervisor.Chattiness, c.Supervisor.RecentMinutes, c.Supervisor.PromiseTTLS, c.Supervisor.CancelWindowS, c.Brain.Enabled, c.Brain.Provider, c.Brain.Model, c.Brain.MaxSteps, c.Brain.AskTimeoutS, c.Brain.ProposeTimeoutS, c.Brain.WindowTokens, c.Brain.PruneAfterTurns, c.Brain.StepReserveS, c.Brain.FinalGraceS, c.Brain.EnrichTimeoutS, c.Brain.AnnounceWaitS, c.Prompts.Dir)
+	return fmt.Sprintf("data_dir=%s herdr.socket=%s state.path=%s state.full_fsync=%t debounce_ms=%d snapshot_interval_s=%d pending_ttl_s=%d aliases=%d gemini.model=%s gemini.voice=%s gemini.stall_after_s=%d gemini.api_keys=%d voice.name=%s deepseek.api_key=%s deepseek.base_url=%s deepseek.thinking=%t deepseek.reasoning_effort=%s web.port=%d cli.prefer=%s cli.timeout_s=%d cli.max_output_kb=%d supervisor.chattiness=%s supervisor.recent_minutes=%d supervisor.promise_ttl_s=%d supervisor.cancel_window_s=%d brain.enabled=%t brain.provider=%s brain.model=%s brain.max_steps=%d brain.ask_timeout_s=%d brain.propose_timeout_s=%d brain.window_tokens=%d brain.prune_after_turns=%d brain.step_reserve_s=%d brain.final_grace_s=%d brain.enrich_timeout_s=%d brain.announce_wait_s=%d brain.investigate_max_s=%d brain.investigate_session_ttl_s=%d prompts.dir=%s",
+		c.DataDir, c.Herdr.Socket, c.State.Path, c.State.FullFsync, c.DebounceMS, c.SnapshotIntervalS, c.PendingTTLS, len(c.Aliases), c.Gemini.Model, c.Gemini.Voice, c.Gemini.StallAfterS, len(c.Gemini.APIKeys), c.Voice.Name, setOrUnset(c.DeepSeek.APIKey), c.DeepSeek.BaseURL, c.DeepSeek.Thinking, c.DeepSeek.ReasoningEffort, c.Web.Port, c.CLI.Prefer, c.CLI.TimeoutS, c.CLI.MaxOutputKB, c.Supervisor.Chattiness, c.Supervisor.RecentMinutes, c.Supervisor.PromiseTTLS, c.Supervisor.CancelWindowS, c.Brain.Enabled, c.Brain.Provider, c.Brain.Model, c.Brain.MaxSteps, c.Brain.AskTimeoutS, c.Brain.ProposeTimeoutS, c.Brain.WindowTokens, c.Brain.PruneAfterTurns, c.Brain.StepReserveS, c.Brain.FinalGraceS, c.Brain.EnrichTimeoutS, c.Brain.AnnounceWaitS, c.Brain.InvestigateMaxS, c.Brain.InvestigateSessionTTLS, c.Prompts.Dir)
 }
 
 // setOrUnset renders a secret's presence, never its value.
