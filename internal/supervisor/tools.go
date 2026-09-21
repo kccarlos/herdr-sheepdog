@@ -101,10 +101,15 @@ func (s *Supervisor) Propose(ctx context.Context, instruction, agent string) (vo
 // noBrain is everything the daemon can say without one: the roster
 // sentence composeBriefing already keeps, and why that is all. Nothing
 // is sent to a worker — instructions are the brain's judgment
-// (docs/roles.md "One decision-maker").
+// (docs/roles.md "One decision-maker"). Within supervisor.repeat_window_s
+// of an identical roster, the sentence is prefixed "No change since I
+// last checked: …" — there is no brain here to add a note to instead.
 func (s *Supervisor) noBrain() voice.ToolResult {
 	text, panes := s.briefingText()
 	s.markMentioned(panes)
+	if _, repeat := s.briefingRepeat(text); repeat {
+		text = "No change since I last checked: " + text
+	}
 	return voice.ToolResult{Spoken: text + " " + noBrainTrailer, Scheduling: voice.UrgencyInterrupt}
 }
 
@@ -158,7 +163,7 @@ func (s *Supervisor) sendInstruction(ctx context.Context, row state.Agent, text,
 		if _, uerr := s.store.Update(row.PaneID, func(a *state.Agent) { a.CurrentTask, a.LastInteraction = text, &now }); uerr != nil {
 			s.log.Log(logSource, "supervisor.state_error", row.PaneID, map[string]any{"error": uerr.Error()})
 		}
-		s.briefing = ""
+		s.invalidateBriefingLocked()
 	}
 	s.mu.Unlock()
 
@@ -282,7 +287,7 @@ func (s *Supervisor) answerWithKeys(ctx context.Context, p state.PendingAction, 
 		s.log.Log(logSource, "supervisor.state_error", p.PaneID, map[string]any{"error": err.Error()})
 	}
 	s.expired = nil
-	s.briefing = ""
+	s.invalidateBriefingLocked()
 	s.lastSubject = p.PaneID
 	s.log.Log(logSource, "pending.confirmed", p.PaneID, map[string]any{"id": p.ID, "answer": label, "keys": keys, "via": via})
 	s.startReprompt(p.PaneID)

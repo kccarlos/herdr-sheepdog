@@ -139,6 +139,10 @@ func (s *Supervisor) startInvestigation(ctx context.Context, paneID string, req 
 		"id": inv.ID, "agent": aliasOr(row.Alias), "source": inv.Source, "backend": backend,
 		"question": inv.Question, "follow_up_of": inv.FollowUpOf, "resumed": session != "",
 	})
+	// An investigation event resets the "delivered" mark of
+	// supervisor.repeat_window_s too: what the shepherd was last told
+	// has moved on, even though the roster's own wording has not.
+	s.invalidateBriefing()
 	go s.runInvestigation(jobCtx, live, inv)
 	return brain.InvestigationStart{Job: inv.ID, ETASeconds: int(s.investigateETA(backend).Seconds())}, nil
 }
@@ -203,6 +207,7 @@ func (s *Supervisor) runInvestigation(ctx context.Context, live *liveInvestigati
 		inv.Status, inv.Err, inv.Finished = state.InvestigationError, err.Error(), &now
 		s.saveInvestigation(inv)
 		s.log.Log(logSource, "investigation.error", inv.PaneID, map[string]any{"id": inv.ID, "agent": aliasOr(inv.Alias), "dur_ms": dur.Milliseconds(), "error": err.Error()})
+		s.invalidateBriefing()
 		s.pushInvestigation(inv, "The look into "+aliasOr(inv.Alias)+" did not get through; ask me to try again.")
 		return
 	}
@@ -217,6 +222,7 @@ func (s *Supervisor) runInvestigation(ctx context.Context, live *liveInvestigati
 		"id": inv.ID, "agent": aliasOr(inv.Alias), "backend": inv.Backend, "dur_ms": dur.Milliseconds(),
 		"bytes": len(inv.Result), "session_id_present": inv.SessionID != "",
 	})
+	s.invalidateBriefing()
 	s.deliverInvestigation(inv)
 }
 
@@ -314,6 +320,7 @@ func (s *Supervisor) finishCancelled(live *liveInvestigation, reason string) (st
 	inv.Status, inv.Err, inv.Finished = state.InvestigationCancelled, reason, &now
 	s.saveInvestigation(inv)
 	s.log.Log(logSource, "investigation.cancelled", inv.PaneID, map[string]any{"id": inv.ID, "agent": aliasOr(inv.Alias), "reason": reason, "dur_ms": now.Sub(inv.Started).Milliseconds()})
+	s.invalidateBriefing()
 	return inv, true
 }
 

@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kccarlos/herdr-sheepdog/internal/brain/braintest"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 )
@@ -104,5 +105,97 @@ func TestBriefingReflectsResultsAndAges(t *testing.T) {
 	h.clock.Advance(31 * time.Minute)
 	if got := h.call(ToolBriefing, nil).Spoken; got != "Two agents: auth is idle and docs is idle." {
 		t.Errorf("briefing after 31 min = %q", got)
+	}
+}
+
+// TestBriefingRepeatNoteWithBrain covers supervisor.repeat_window_s
+// (docs/issues-2026-09-18.md "Smaller items"): an identical roster
+// delivered again within the window gets a context note the brain can
+// act on ("no change since I last checked") and a
+// supervisor.briefing_repeat log with the age; a worker transition, or
+// falling outside the window, clears it again.
+func TestBriefingRepeatNoteWithBrain(t *testing.T) {
+	m := braintest.NewModel(
+		braintest.Step{Text: braintest.Reply("auth is working.", "")},
+		braintest.Step{Text: braintest.Reply("auth is working.", "")},
+		braintest.Step{Text: braintest.Reply("auth is asking something.", "")},
+		braintest.Step{Text: braintest.Reply("auth is working.", "")},
+	)
+	h := newBrainHarness(t, m)
+	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
+	// Call.Text() is the whole growing window, so an old turn's request
+	// (with its own note) never leaves it; lastText narrows to the most
+	// recent "Request from the assistant" block, the only one this
+	// turn's model call could have acted on.
+	lastText := func() string {
+		calls := m.Calls()
+		text := calls[len(calls)-1].Text()
+		if i := strings.LastIndex(text, "Request from the assistant (utterance)"); i >= 0 {
+			return text[i:]
+		}
+		return text
+	}
+
+	h.say("what's going on")
+	if n := h.log.count("supervisor.briefing_repeat"); n != 0 {
+		t.Fatalf("first turn logged a repeat: %d", n)
+	}
+	if strings.Contains(lastText(), "unchanged since you last reported") {
+		t.Error("first turn's request claims a repeat")
+	}
+
+	h.clock.Advance(10 * time.Second)
+	h.say("still going?")
+	if n := h.log.count("supervisor.briefing_repeat"); n != 1 {
+		t.Fatalf("supervisor.briefing_repeat = %d, want 1", n)
+	}
+	if ev := h.log.ofType("supervisor.briefing_repeat"); payload(ev[0])["age_s"] != 10 {
+		t.Errorf("age_s = %v, want 10", payload(ev[0])["age_s"])
+	}
+	if !strings.Contains(lastText(), "The roster is unchanged since you last reported it 10 s ago") {
+		t.Errorf("second turn's request:\n%s", lastText())
+	}
+
+	// A worker transition invalidates the "delivered" mark: the very
+	// next question, whatever it is, carries no note.
+	h.block("w5:p1", "codex-approval-prompt.screen.txt")
+	h.say("what now")
+	if n := h.log.count("supervisor.briefing_repeat"); n != 1 {
+		t.Errorf("supervisor.briefing_repeat after a transition = %d, want still 1", n)
+	}
+	if strings.Contains(lastText(), "unchanged since you last reported") {
+		t.Errorf("request after a transition:\n%s", lastText())
+	}
+
+	// Past the window (default 60 s), a question about the same roster
+	// carries no note either.
+	h.clock.Advance(61 * time.Second)
+	h.say("what now")
+	if n := h.log.count("supervisor.briefing_repeat"); n != 1 {
+		t.Errorf("supervisor.briefing_repeat past the window = %d, want still 1", n)
+	}
+	if strings.Contains(lastText(), "unchanged since you last reported") {
+		t.Errorf("request past the window:\n%s", lastText())
+	}
+}
+
+// TestNoBrainRepeatFallback covers the code fallback's own "no change"
+// prefix, used when there is no brain to hand the note to: present
+// within supervisor.repeat_window_s, and cleared by a transition even
+// though the next question is unrelated to it (proving the reset drives
+// this, not a coincidence of wording).
+func TestNoBrainRepeatFallback(t *testing.T) {
+	h := newHarness(t)
+	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
+
+	h.say("what's going on")
+	res := h.say("still?")
+	if !strings.HasPrefix(res.Spoken, "No change since I last checked: ") {
+		t.Fatalf("within the window = %+v", res)
+	}
+	h.block("w5:p1", "codex-approval-prompt.screen.txt")
+	res = h.say("now?")
+	if strings.HasPrefix(res.Spoken, "No change since I last checked: ") {
+		t.Fatalf("after a transition = %+v", res)
 	}
 }

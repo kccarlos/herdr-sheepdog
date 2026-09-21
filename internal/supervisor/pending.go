@@ -72,7 +72,7 @@ func (s *Supervisor) setPending(p state.PendingAction) string {
 		s.log.Log(logSource, "supervisor.state_error", p.PaneID, map[string]any{"error": err.Error()})
 	}
 	s.expired = nil
-	s.briefing = ""
+	s.invalidateBriefingLocked()
 	s.log.Log(logSource, "pending.created", p.PaneID, map[string]any{
 		"id": p.ID, "kind": p.Kind, "summary": p.SpokenSummary, "question": p.Question, "expires_at": p.ExpiresAt,
 		"options": len(p.Options), "yes_keys": p.YesKeys, "no_keys": p.NoKeys,
@@ -86,7 +86,7 @@ func (s *Supervisor) clearPending(p state.PendingAction, reason string) {
 	if err := s.store.ClearPending(); err != nil {
 		s.log.Log(logSource, "supervisor.state_error", p.PaneID, map[string]any{"error": err.Error()})
 	}
-	s.briefing = ""
+	s.invalidateBriefingLocked()
 	s.log.Log(logSource, "pending.cancelled", p.PaneID, map[string]any{"id": p.ID, "kind": p.Kind, "reason": reason})
 }
 
@@ -124,7 +124,7 @@ func (s *Supervisor) ExpirePending() {
 	if err := s.store.ClearPending(); err != nil {
 		s.log.Log(logSource, "supervisor.state_error", p.PaneID, map[string]any{"error": err.Error()})
 	}
-	s.briefing = ""
+	s.invalidateBriefingLocked()
 	if p.Kind == state.PendingAnswerPrompt {
 		s.expired = &p
 	}

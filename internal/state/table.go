@@ -98,6 +98,12 @@ type Promise struct {
 	Due *time.Time `json:"due,omitempty"`
 	// ResolvedAt is when it was kept, expired or cancelled.
 	ResolvedAt *time.Time `json:"resolved_at,omitempty"`
+	// CarriedOver marks a promise made before the daemon's current run
+	// that was announced once at startup ("Still watching for …",
+	// docs/roles.md "Status"): the briefing trailer never repeats it
+	// again, and it is never re-announced, even across another restart.
+	// It is still kept normally at its matching event.
+	CarriedOver bool `json:"carried_over,omitempty"`
 }
 
 // The promise statuses.

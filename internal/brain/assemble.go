@@ -171,6 +171,9 @@ func requestText(req Request) string {
 	if req.Briefing != "" {
 		s += "\nStatus as the daemon has it: " + req.Briefing
 	}
+	if req.RosterUnchangedFor > 0 {
+		s += fmt.Sprintf("\nThe roster is unchanged since you last reported it %d s ago; if the shepherd is only asking for status again, say there has been no change since you last checked, briefly.", int(req.RosterUnchangedFor.Seconds()))
+	}
 	if req.Kind == KindUtterance {
 		return s + "\nThose are the CEO's own words, relayed verbatim: decide what they are (a status question, something to find out, an instruction, an answer to a worker's prompt, a promise, a note, small talk) and act. Use tools as needed, then reply with the JSON object of the answer contract."
 	}

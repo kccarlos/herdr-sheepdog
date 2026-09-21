@@ -113,10 +113,19 @@ func (s *Supervisor) utteranceTurn(ctx context.Context, u *inflightUtterance, te
 	// option keys and the open promises are in the brain's own roster
 	// and ledger sections.
 	brief, _ := s.briefingText()
+	req := brain.Request{Kind: brain.KindUtterance, Trigger: brain.TriggerCEO, Question: text, Briefing: brief}
+	// supervisor.repeat_window_s: an identical roster delivered again
+	// inside the window is noise over voice, so the brain gets a note it
+	// can act on ("no change since I last checked") instead of the
+	// shepherd hearing the same sentence twice.
+	if age, repeat := s.briefingRepeat(brief); repeat {
+		req.RosterUnchangedFor = age
+		s.log.Log(logSource, "supervisor.briefing_repeat", "", map[string]any{"roster": brief, "age_s": int(age.Seconds())})
+	}
 	s.mu.Lock()
 	u.inBrain = true
 	s.mu.Unlock()
-	rep, err := s.brain.Turn(ctx, brain.Request{Kind: brain.KindUtterance, Trigger: brain.TriggerCEO, Question: text, Briefing: brief})
+	rep, err := s.brain.Turn(ctx, req)
 	if err != nil {
 		return voice.ToolResult{}, false
 	}

@@ -95,7 +95,9 @@ func TestBrainFallbackReportsStatusAndSendsNothing(t *testing.T) {
 	}
 	m.Add(braintest.Step{Err: braintest.ErrBoom})
 	res = h.call(ToolPropose, map[string]any{"instruction": "tell auth to rerun the tests"})
-	if res.Spoken != "One agent: auth is working on something. "+noBrainTrailer {
+	// The second fallback within supervisor.repeat_window_s hears the
+	// same roster again, so it is flagged as unchanged.
+	if res.Spoken != "No change since I last checked: One agent: auth is working on something. "+noBrainTrailer {
 		t.Errorf("propose fallback = %+v", res)
 	}
 	if len(h.promptRequests()) != 0 || len(h.sendKeysRequests()) != 0 {
