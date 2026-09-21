@@ -51,7 +51,7 @@ Voice session (plan §6).
 
 | Key | Env override | Default | Meaning |
 |---|---|---|---|
-| `gemini.api_keys` | `GEMINI_API_KEY`, `GEMINI_API_KEY_1`…`GEMINI_API_KEY_9` | `[]` | The Gemini Live key pool; the voice session binds one key per connection and rotates to the next on a rate-limit error. Normally left out of the TOML file and set via the environment (or `--env-file`) so keys never sit in a checked-in file; any env key found replaces the whole pool from the file. Also the fallback key source for `[llm]` when `llm.api_key` is empty and `llm.base_url` is Gemini's. |
+| `gemini.api_keys` | `GEMINI_API_KEY`, `GEMINI_API_KEY_1`…`GEMINI_API_KEY_9` | `[]` | The Gemini Live key pool; the voice session binds one key per connection and rotates to the next on a rate-limit error. Normally left out of the TOML file and set via the environment (or `--env-file`) so keys never sit in a checked-in file; any env key found replaces the whole pool from the file. |
 | `gemini.model` | `SHEEPDOG_GEMINI_MODEL` | `gemini-3.8-live` | The Live API model name. |
 | `gemini.voice` | `SHEEPDOG_GEMINI_VOICE` | `Puck` | The prebuilt voice name. |
 | `gemini.stall_after_s` | `SHEEPDOG_GEMINI_STALL_AFTER_S` | `10` | Seconds an utterance may go without any model response (tool call or audio) before `voice.stalled` is logged and the pages show "stalled". The second stall on one connection (or the second idle push that outwaits the 30 s turn timeout) recycles the connection: a reconnect with the still-valid resumption handle (`voice.recycle`), keeping the conversation. |
@@ -71,7 +71,7 @@ The second supervisor-brain provider: DeepSeek's OpenAI-compatible chat
 completions API (`deepseek-flash`, `deepseek-v4-pro`), **paid per
 token**. With a key, `deepseek` is offered in the `/debug` model picker
 whatever `brain.provider` says, and `sheepdog brain-test --provider
-deepseek` runs a turn on it. The voice session and `[llm]` never use it.
+deepseek` runs a turn on it. The voice session never uses it.
 
 Measured on 2026-09-18 with `brain-test` (`what is auth doing?` on the
 `codex-working` fixture, two model calls each: a `read_screen`, then the
@@ -104,22 +104,10 @@ finishes on the pair it started with.
 
 | Key | Env override | Default | Meaning |
 |---|---|---|---|
-| `deepseek.api_key` | `DEEPSEEK_API_KEY` | `""` | The DeepSeek API key (Bearer). Like `GEMINI_API_KEY`, normally left out of the TOML file and set via the environment or `--env-file`; an empty env value does not clear a file value. Never logged: `config show` prints `set`/`unset`. Without it the provider is listed in the picker as unavailable ("no DEEPSEEK_API_KEY") and `brain.provider = "deepseek"` leaves the brain off. One key, no pool: a 429 fails the turn (`brain.rate_limited`, then the template path), it is not retried. |
+| `deepseek.api_key` | `DEEPSEEK_API_KEY` | `""` | The DeepSeek API key (Bearer). Like `GEMINI_API_KEY`, normally left out of the TOML file and set via the environment or `--env-file`; an empty env value does not clear a file value. Never logged: `config show` prints `set`/`unset`. Without it the provider is listed in the picker as unavailable ("no DEEPSEEK_API_KEY") and `brain.provider = "deepseek"` leaves the brain off. One key, no pool: a 429 fails the turn (`brain.rate_limited`, then the daemon's own sentence), it is not retried. |
 | `deepseek.base_url` | `SHEEPDOG_DEEPSEEK_BASE_URL` | `https://api.deepseek.com` | API root; `/chat/completions` and `/models` are appended. |
 | `deepseek.thinking` | `SHEEPDOG_DEEPSEEK_THINKING` | `true` | DeepSeek's thinking mode (`"thinking": {"type": "enabled"}`); `false` sends `disabled`. On, the brain replays `reasoning_content` as described above. |
 | `deepseek.reasoning_effort` | `SHEEPDOG_DEEPSEEK_REASONING_EFFORT` | `low` | `low`, `high` or `max`; sent only with thinking on. See the measurements above. |
-
-## `[llm]`
-
-The cheap text-in/text-out model (plan §3.4): any OpenAI-compatible chat
-endpoint, including a local Ollama server.
-
-| Key | Env override | Default | Meaning |
-|---|---|---|---|
-| `llm.base_url` | `SHEEPDOG_LLM_BASE_URL` | `https://generativelanguage.googleapis.com/v1beta/openai/` | API root. Use `http://localhost:11434/v1` for Ollama. |
-| `llm.model` | `SHEEPDOG_LLM_MODEL` | `gemini-3.5-flash-lite` | Model name passed on every request. |
-| `llm.api_key` | `SHEEPDOG_LLM_API_KEY` | `""` | Authenticates requests; never logged. Empty and `llm.base_url` is the Gemini endpoint → the `gemini.api_keys` pool is used instead. Empty and pointed elsewhere (e.g. Ollama) → any non-empty placeholder is sent, since local endpoints usually ignore it. |
-| `llm.timeout_s` | `SHEEPDOG_LLM_TIMEOUT_S` | `15` | Per-attempt timeout of one template call. Raise it for a slow local model (Ollama gemma4 needs more than the default on a cold start). |
 
 ## `[web]`
 
@@ -134,13 +122,13 @@ The HTTP server (plan §3.8); binds to `127.0.0.1` only.
 ## `[cli]`
 
 The read-only CLI query tool (plan §3.5, WP4): codex and/or claude,
-invoked non-interactively and read-only to answer questions the cheap LLM
-cannot from the screen alone. See `docs/cli-query-tools.md` for why each
+invoked non-interactively and read-only to answer questions the brain
+cannot answer from a screen alone (its `run_cli` tool). See `docs/cli-query-tools.md` for why each
 flag in the argv templates is there.
 
 | Key | Env override | Default | Meaning |
 |---|---|---|---|
-| `cli.prefer` | `SHEEPDOG_CLI_PREFER` | `auto` | Picks the backend: `codex`, `claude`, or `auto` (codex if detected on `PATH`, else claude, else the deep-ask path is skipped). |
+| `cli.prefer` | `SHEEPDOG_CLI_PREFER` | `auto` | Picks the backend: `codex`, `claude`, or `auto` (codex if detected on `PATH`, else claude, else the brain simply has no `run_cli` tool). |
 | `cli.codex_bin` | `SHEEPDOG_CLI_CODEX_BIN` | `codex` | Looked up on `PATH`, or an absolute path; also becomes `argv[0]` of `cli.codex_cmd`. |
 | `cli.claude_bin` | `SHEEPDOG_CLI_CLAUDE_BIN` | `claude` | Same, for the claude backend and `cli.claude_cmd`. |
 | `cli.codex_cmd` | *(TOML only)* | see `internal/config/config.go`'s `defaultCLI` | Argv template for the codex invocation; `{question}`, `{cwd}`, `{model}`, `{reasoning}` are substituted. No shell is invoked. |
@@ -161,7 +149,6 @@ it?" for what each level announces.
 | `supervisor.recent_minutes` | `SHEEPDOG_SUPERVISOR_RECENT_MINUTES` | `30` | The `normal` level's window: a finish is announced when the agent was blocked, was sent an answer or an instruction, was asked about, or was named in a spoken briefing within this many minutes. |
 | `supervisor.promise_ttl_s` | `SHEEPDOG_SUPERVISOR_PROMISE_TTL_S` | `7200` | How long a promise ("tell me when it's done", README "Promises") waits for its event before it expires silently (`promise.expired`). Open promises live in the state file's `session.promises`, so a restart keeps them. |
 | `supervisor.cancel_window_s` | `SHEEPDOG_SUPERVISOR_CANCEL_WINDOW_S` | `30` | How soon after an instruction went to a *working* agent a "stop" still interrupts it with Ctrl-C (the stop procedure's phase 3, [`docs/roles.md`](docs/roles.md) "Stop"). Past it a stop no longer touches the agent: use an instruction ("tell it to revert that") instead. |
-| `supervisor.summary_timeout_s` | `SHEEPDOG_SUPERVISOR_SUMMARY_TIMEOUT_S` | `15` | Bounds the `summarize_done` template call that turns a finished agent's screen into the one-line result; past it the bare "<alias> finished." is spoken (`supervisor.done_error {stage: summarize}`). Raise it for a slow local model (Ollama on a cold start). |
 
 ## `[brain]`
 
@@ -171,8 +158,8 @@ a stateful agent behind `ask` and `propose` that reasons with tools
 `prompt`, `send_keys`, `interrupt` over a function-calling model — Gemini
 (the key pool) or DeepSeek (`[deepseek]`), switchable at runtime —
 keeping one transcript per daemon run at `<data_dir>/brain/<run-id>.jsonl`.
-When it errors or runs out of budget, the supervisor answers from the
-template path instead. Its provider and model can be switched while the
+When it errors or runs out of budget, the daemon speaks its own code
+sentence (a parsed prompt, "<alias> finished.") or reports the roster. Its provider and model can be switched while the
 daemon runs, from the `/debug` header's model picker (the provider
 select lists every provider, a keyless one greyed out with the reason;
 the model select shows that provider's discovered list — Gemini's model
@@ -190,7 +177,7 @@ before providers existed names a Gemini model). To follow the config
 values again, delete both from the state file (or pick them — the
 picker always records the choice). Whether a Gemini model supports
 function calling is not in its list, so a bad pick shows up as a
-`brain.step` error and the template path answers until you switch back.
+`brain.step` error and the daemon answers for itself until you switch back.
 The Gemini free tier's daily cap is per model, so switching models also
 switches quota buckets; DeepSeek is paid per token. `sheepdog serve
 --brain=off` disables it for one run; it is also off, silently, when the
@@ -208,14 +195,14 @@ announce wait elapse.
 | `brain.provider` | `SHEEPDOG_BRAIN_PROVIDER` | `gemini` | The provider the brain starts on: `gemini` (the key pool, rotating on a rate limit) or `deepseek` (`[deepseek]`, one key). Every provider with a key is registered regardless, so the picker can switch to the other at runtime. The initial value only: the pair picked at runtime is kept in the state file's `session.brain_provider` / `session.brain_model` and wins over this on restart. Set `brain.model` to a model of this provider (`deepseek-flash` with `deepseek`; the default `gemini-3.5-flash` is Gemini's, and a mismatch shows as a `brain.step` error at the first turn). |
 | `brain.model` | `SHEEPDOG_BRAIN_MODEL` | `gemini-3.5-flash` | The function-calling model the brain starts on, a model of `brain.provider`. The initial value only: a model picked at runtime (`/debug`, `PUT /api/brain/model`) is kept in the state file's `session.brain_model` and wins over this on restart. |
 | `brain.max_steps` | `SHEEPDOG_BRAIN_MAX_STEPS` | `6` | Model calls one turn may make (each tool round is one); beyond it the turn falls back. |
-| `brain.ask_timeout_s` | `SHEEPDOG_BRAIN_ASK_TIMEOUT_S` | `8` | Wall-clock budget of one `ask` turn for tool rounds. When less than 3 s of it remain after a tool round (or at the last step) the next model call is answer-only (tools disabled, "time is up") and may run up to 3 s past the budget; only then does the template path answer. |
+| `brain.ask_timeout_s` | `SHEEPDOG_BRAIN_ASK_TIMEOUT_S` | `8` | Wall-clock budget of one `ask` turn for tool rounds. When less than 3 s of it remain after a tool round (or at the last step) the next model call is answer-only (tools disabled, "time is up") and may run up to 3 s past the budget; only then does the daemon answer for itself. |
 | `brain.propose_timeout_s` | `SHEEPDOG_BRAIN_PROPOSE_TIMEOUT_S` | `12` | Same for `propose`. |
 | `brain.window_tokens` | `SHEEPDOG_BRAIN_WINDOW_TOKENS` | `24000` | Context window target in estimated tokens; above it the oldest half of the window is compacted into one summary message (`brain.compaction`). |
 | `brain.prune_after_turns` | `SHEEPDOG_BRAIN_PRUNE_AFTER_TURNS` | `3` | Turns a tool result (screen, CLI output) stays verbatim in the window before it becomes a one-line stub; the disk transcript keeps the full text. |
 | `brain.step_reserve_s` | `SHEEPDOG_BRAIN_STEP_RESERVE_S` | `0` (default `3`) | When less of the turn's timeout remains after a tool round than this, the next model call is answer-only (no more tools), so the turn ends with an answer instead of another read. `0` takes the package default (3s); negative is rejected. |
-| `brain.final_grace_s` | `SHEEPDOG_BRAIN_FINAL_GRACE_S` | `0` (default `3`) | How far past the turn's timeout that one forced answer-only call may still run before the turn falls back to the template path. `0` takes the package default (3s); negative disables the grace entirely (fall back right at the timeout). |
-| `brain.enrich_timeout_s` | `SHEEPDOG_BRAIN_ENRICH_TIMEOUT_S` | `6` | Budget of an event turn: the `announce` turn that decides what the assistant says about a block or finish and how urgently (README "How chatty is it?"). On expiry the template path speaks instead (`brain.push_decision {via: template, reason: timeout}`; a promise falls back to "As you asked: …"). Event turns get only the read tools. |
-| `brain.announce_wait_s` | `SHEEPDOG_BRAIN_ANNOUNCE_WAIT_S` | `2` | How long the first audible announcement of a finish waits for the brain's announce turn. Past it the template sentence is spoken as without the brain (`brain.push_decision {via: template, reason: wait}`), and the brain's line, if any and if it adds information, follows as an addition (`late: true`). A block's question never waits: it is pushed before the brain is asked. |
+| `brain.final_grace_s` | `SHEEPDOG_BRAIN_FINAL_GRACE_S` | `0` (default `3`) | How far past the turn's timeout that one forced answer-only call may still run before the turn falls back to the code sentence. `0` takes the package default (3s); negative disables the grace entirely (fall back right at the timeout). |
+| `brain.enrich_timeout_s` | `SHEEPDOG_BRAIN_ENRICH_TIMEOUT_S` | `6` | Budget of an event turn: the `announce` turn that decides what the assistant says about a block or finish and how urgently (README "How chatty is it?"). On expiry the daemon's own sentence is spoken instead (`brain.push_decision {via: template, reason: timeout}`; a promise falls back to "As you asked: …"). Event turns get only the read tools. |
+| `brain.announce_wait_s` | `SHEEPDOG_BRAIN_ANNOUNCE_WAIT_S` | `2` | How long a worker event — a block *or* a finish — waits for the brain's announce turn before the daemon speaks its own code sentence (the parsed prompt, or "<alias> finished."; `brain.push_decision {via: template, reason: wait}`). One line per event: a brain line that lands after the wait is dropped (`brain.push_late`), except a `needs_user` line about a prompt that is still open, which is added at idle. A line about a prompt that was answered meanwhile is dropped too (`brain.push_stale`). |
 
 ## `[prompts]`
 

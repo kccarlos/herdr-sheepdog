@@ -6,27 +6,30 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/kccarlos/herdr-sheepdog/internal/llm"
+	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
+	"github.com/kccarlos/herdr-sheepdog/internal/prose"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 )
 
-// newAnswerPrompt builds an answer_prompt action from a block summary.
-// Caller holds s.mu.
-func (s *Supervisor) newAnswerPrompt(paneID string, sum llm.BlockSummary) state.PendingAction {
+// newAnswerPrompt builds an answer_prompt action from a parsed approval
+// prompt. Caller holds s.mu.
+func (s *Supervisor) newAnswerPrompt(paneID string, prompt herdr.Prompt, alias string) state.PendingAction {
 	now := s.cfg.Now()
 	p := state.PendingAction{
-		ID:            s.nextID("ap"),
-		PaneID:        paneID,
-		Kind:          state.PendingAnswerPrompt,
-		SpokenSummary: sum.Spoken,
-		Question:      sum.Question,
-		YesKeys:       append([]string(nil), sum.AnswerKeys.Yes...),
-		NoKeys:        append([]string(nil), sum.AnswerKeys.No...),
+		ID:     s.nextID("ap"),
+		PaneID: paneID,
+		Kind:   state.PendingAnswerPrompt,
+		// The prompt's own words reach the ear, so D9 applies to them
+		// like any other text from a pane: no paths, hashes or URLs.
+		SpokenSummary: prose.Spoken(prompt.Summary(alias), 0),
+		Question:      prompt.Phrase(),
+		YesKeys:       append([]string(nil), prompt.YesKeys...),
+		NoKeys:        append([]string(nil), prompt.NoKeys...),
 		CreatedAt:     now,
 		ExpiresAt:     now.Add(s.cfg.PendingTTL),
 	}
-	for _, o := range sum.Options {
-		p.Options = append(p.Options, state.Option{Label: o.Label, Keys: o.Keys()})
+	for _, o := range prompt.Options {
+		p.Options = append(p.Options, state.Option{Label: o.Label, Keys: o.Keys})
 	}
 	return p
 }

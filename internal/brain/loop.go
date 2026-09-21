@@ -10,7 +10,7 @@ import (
 
 	"google.golang.org/genai"
 
-	"github.com/kccarlos/herdr-sheepdog/internal/llm"
+	"github.com/kccarlos/herdr-sheepdog/internal/prose"
 )
 
 // logResultBytes is how much of a tool result a brain.tool_result keeps.
@@ -39,7 +39,7 @@ type turn struct {
 // returned as soon as the model answers; pruning, compaction and the hand-
 // over to the next queued turn happen afterwards without blocking the
 // caller. ErrFallback (wrapping the cause) means the supervisor should
-// answer from its template path.
+// speak its own code sentence instead.
 func (b *Brain) Turn(ctx context.Context, req Request) (Reply, error) {
 	if req.Kind == "" {
 		req.Kind = KindAsk
@@ -113,7 +113,7 @@ func (b *Brain) run(ctx context.Context, t *turn) (Reply, error) {
 	if t.req.Screen != "" {
 		// The supervisor's own read for this event: in the window like a
 		// read_screen result (wrapped, pruned to a stub later).
-		text := llm.TailBytes(t.req.Screen, maxResultBytes)
+		text := prose.TailBytes(t.req.Screen, maxResultBytes)
 		b.ingest(Message{Role: RoleUser, Kind: KindEventScreen, Content: wrapWorker(t.req.Agent, "screen", text), Agent: t.req.Agent,
 			ToolResult: &ToolResult{Name: ToolReadScreen, Summary: fmt.Sprintf("screen of %s at %s, %d lines", aliasOr(t.req.Agent), t.req.Event, strings.Count(text, "\n")+1)}}, t.n)
 	}
@@ -210,6 +210,7 @@ func (b *Brain) run(ctx context.Context, t *turn) (Reply, error) {
 			}
 			b.ingest(t.reply(answer, raw), t.n)
 			b.logTurn(t, false)
+			reply.Turn = t.n
 			return reply, nil
 		}
 		b.execCalls(ctx, t, resp, raw, calls)
@@ -290,7 +291,7 @@ func (b *Brain) execCalls(ctx context.Context, t *turn, resp *genai.GenerateCont
 			res.Error = out.err.Error()
 			payload["error"] = res.Error
 		} else {
-			payload["result"] = llm.TruncateRunes(out.result, logResultBytes)
+			payload["result"] = prose.TruncateRunes(out.result, logResultBytes)
 		}
 		b.ingest(Message{Role: RoleTool, Kind: KindToolResult, Content: out.result, Agent: out.agent, ToolResult: res}, t.n)
 		b.log.Log(logSource, "brain.tool_result", "", payload)
@@ -432,9 +433,9 @@ func textOf(resp *genai.GenerateContentResponse) string {
 
 // parseReply decodes the answer contract from the model's text. An
 // empty spoken is an error except when allowEmpty (an event turn: "the
-// template was sufficient").
+// code sentence was enough").
 func parseReply(text string, allowEmpty bool) (Reply, error) {
-	raw, err := llm.ExtractJSON(text)
+	raw, err := prose.ExtractJSON(text)
 	if err != nil {
 		return Reply{}, err
 	}

@@ -16,9 +16,9 @@ for a shorter orientation.
 
 **Status:** WP1–WP7a are in — herdr client, state table, the Gemini
 Live voice session, the supervisor and the voice's two tools
-(`to_supervisor`, `stop`), the CLI
-query tool behind the deep lookup path, the daemon (`sheepdog serve`)
-with `/voice` and `/debug`, the herdr plugin shim, and packaging/docs.
+(`to_supervisor`, `stop`), the supervisor brain, the CLI query tool
+behind its `run_cli`, the daemon (`sheepdog serve`) with `/voice` and
+`/debug`, and packaging/docs.
 WP7b ran the plan's scenarios against real agy, Codex and Claude Code
 panes and a live Gemini session: see [`docs/e2e-results.md`](docs/e2e-results.md)
 (scenario table, measured latencies, open issues) and the recorded event
@@ -53,21 +53,14 @@ cp .env.example .env            # fill in GEMINI_API_KEY (Google AI Studio, free
 effective config with secrets redacted, so you can check what actually
 loaded.
 
-**3. Wire up herdr.** From the repo (or wherever you installed
-`plugin/`):
+**3. Run it.** Start herdr, then the daemon:
 
 ```sh
-plugin/install.sh
+sheepdog serve
 ```
 
-This links the herdr plugin shim (`herdr plugin link`) so herdr forwards
-every agent-state event to the daemon over HTTP, and on macOS also
-renders and (re)loads a launchd agent that runs `sheepdog serve` in the
-background and restarts it if it exits. On Linux (no launchd), or if you
-skip this step, just run `sheepdog serve` yourself. `make plugin-install`
-runs the same script; `SHEEPDOG_DRY_RUN=1 plugin/install.sh` shows what
-it would do without touching anything, and `plugin/uninstall.sh`
-reverses it.
+The daemon subscribes to herdr's event socket itself, so there is
+nothing to install on herdr's side.
 
 Then open **http://127.0.0.1:7777/voice** (or whatever `web.port` you
 configured) and hit Connect.
@@ -78,8 +71,8 @@ configured) and hit Connect.
 sheepdog serve                              # the daemon: http://127.0.0.1:7777/debug
 sheepdog serve --voice=off --herdr=mock     # no Gemini, no herdr: drive it from /debug
 sheepdog serve --verbose --port 8080        # echo every event to stderr
-sheepdog serve --cli=off                    # disable the CLI query tool; ask() answers from the screen only
-sheepdog serve --brain=off                  # keep ask/propose on the template path (no supervisor brain)
+sheepdog serve --cli=off                    # take the brain's run_cli tool away; it answers from the screen only
+sheepdog serve --brain=off                  # no brain: terse code sentences, nothing is sent to a worker
 sheepdog serve --brain=fake --voice=off --herdr=mock --dev   # the brain loop over a fake model, for /debug's Supervisor tab
 sheepdog serve --env-file path/to/.env      # load KEY=VALUE lines before config (default ./.env if present)
 sheepdog serve --voice=off --herdr=mock --dev  # also serve testdata/audio/*.wav at /testdata/ for /voice?src=file
@@ -91,8 +84,6 @@ sheepdog serve --voice=off --herdr=mock --dev  # also serve testdata/audio/*.wav
 | `sheepdog config show` \| `init` | Print the effective config (redacted) \| scaffold `config.toml`. |
 | `sheepdog herdr watch` | Print debounced agent state transitions as JSONL; `--once` prints the persisted state table and exits. |
 | `sheepdog voice-test` | Stream a WAV (or `--text`) through a Gemini Live session with the echo tools; no daemon needed. |
-| `sheepdog llm-test` | Run one cheap-LLM template (`summarize_block`, `resolve_instruction`, `spoken_answer`, `summarize_done`) against a screen or instruction. |
-| `sheepdog ask-test` | Run the CLI query tool (codex/claude) plus the `spoken_answer` pass once. |
 | `sheepdog brain-test` | Run one supervisor-brain turn (`--question`, `--kind ask\|propose`) against a mock herdr with a screen fixture, an optional seed transcript and `--say` utterances; prints the reply and the transcript, `brain.*` events on stderr (`--fake` needs no network). |
 | `sheepdog prompts export\|show` | Seed `prompts.dir` from the embedded defaults, or print one file's effective text and its source (embedded/override). |
 | `sheepdog eval --set assistant\|svp` | Run the conversation eval set against the assistant prompt or the brain; offline by default (validates + prints "skipped"), `--live` calls the model. |
@@ -151,10 +142,13 @@ a screen. It reasons with `read_screen`, `run_cli`, `list_agents` and
 everything read from a worker as data, never instructions. The one rail:
 it may answer a worker's approval prompt only on your words in that turn,
 with a key from the prompt's own options; the code enforces it, not the
-prompt. It falls back to the fast template path when it errors or runs out
-of budget (`brain.ask_timeout_s`, `brain.max_steps`), so the voice never
-waits on a loop. `sheepdog serve --brain=off` turns it off; it is also off
-without a Gemini key. Try it without a daemon: `sheepdog brain-test
+prompt. When it errors or runs out of budget
+(`brain.ask_timeout_s`, `brain.max_steps`) the daemon speaks its own code
+sentence instead, so the voice never waits on a loop.
+`sheepdog serve --brain=off` turns it off; it is also off without a
+Gemini key. With no brain sheepdog still watches the flock and announces
+questions and finishes — tersely, in code sentences — but sends nothing
+to a worker: judging what your words mean is the brain's work. Try it without a daemon: `sheepdog brain-test
 --question "what did it say?" --say "what did it say?" --fixture
 codex-after-approval.screen.txt`. The transcript lives at
 `<data_dir>/brain/<run-id>.jsonl`; every step is a `brain.*` event on
@@ -180,38 +174,39 @@ value comes from `supervisor.chattiness` in the config (default `normal`).
 | Level | Announced |
 |---|---|
 | `quiet` | An agent's question ("auth is asking whether it can create hello.txt") and an agent exiting or losing its pane while busy. Nothing else. |
-| `normal` | `quiet`, plus: informational blocks (a trust dialog, an idle prompt herdr flagged), the "dropping the earlier question from …" phrasing when a new question displaces one, and the finish of any agent you dealt with recently, with a one-line result: "auth finished: created hello.txt with the requested line." |
+| `normal` | `quiet`, plus: informational blocks (a prompt with nothing to answer), the "dropping the earlier question from …" phrasing when a new question displaces one, and the finish of any agent you dealt with recently. |
 | `chatty` | `normal`, plus every finish (agents you never touched too) and "docs started on 'write the readme'" when an instruction you sent is picked up. |
 
 The one thing that ignores the level is a **promise** you made it keep
 (next section). With the supervisor brain on, the level is a *ceiling*,
-not the sentence: for every block or finish the brain gets the template
+not the sentence: for every block or finish the brain gets the code
 sentence, the screen and your recent words and decides whether to say
 anything and how urgently — one line that replaces the sentence ("Auth
 finished the rerun you asked for; the same test still fails."), or
 nothing when you already know, or silent context for the voice model —
 and the level caps what it asked for: never a finish at `quiet`, never
 an agent you have not dealt with at `normal`, `interrupt` only for a due
-promise or a decision you must take. A question is never delayed for the
-brain (it is spoken first; the brain may add the decision in context), and
-a finish waits for the brain's line at most `brain.announce_wait_s` (2 s)
-before the plain sentence is spoken. Every judgment is in the event log
-as `brain.push_decision` and on the push card in the Supervisor tab.
+promise or a decision you must take. **One line per event, never two:**
+the event waits at most `brain.announce_wait_s` (2 s) for the brain, and
+past that the code sentence is spoken and the brain's line dropped
+(`brain.push_late`) — unless it says you must decide and the prompt is
+still open. Every judgment is in the event log as `brain.push_decision`
+and on the push card in the Supervisor tab.
 
 "Dealt with recently" means that within the last `supervisor.recent_minutes`
 (default 30) the agent was blocked and announced, was sent an answer or an
-instruction, was asked about, or was named in a briefing you asked for
-(the silent 10-minute context refresh does not count). An agent going
+instruction, was asked about, or was named in an answer you were given.
+An agent going
 from done to idle is never announced at any level; a finish that follows
 your own "stop" is not announced either.
 
-Every finish is summarised whatever the level (the `summarize_done`
-template reads the pane's last 200 lines) and stored as the agent's
+Whatever was announced about a finish is stored as the agent's
 `last_result`, so the next briefing can say "auth is idle; it last
-created hello.txt with the requested line" without a model call. A
-finish whose screen ends in a question herdr did not flag as blocked
-(Antigravity CLI does this) is treated as the question it is, at every
-level.
+finished the rerun you asked for" without a model call. A finish whose
+screen ends in a question herdr did not flag as blocked (Antigravity CLI
+does this) is treated as the question it is, at every level: sheepdog
+parses the prompt itself — the question, the command it is about and the
+keys of each option — in code, with no model in the way.
 
 ## Promises
 
@@ -283,7 +278,7 @@ affected by this; this warning is about the worker panes herdr manages.)
   and ~9 s for Codex after the prompt was submitted) + sheepdog's
   `debounce_ms` (default 3000 ms, plan §3.1 — a `blocked` state must hold
   for this long before it becomes a transition, so a one-frame screen
-  flicker doesn't fire early) + one cheap-LLM `summarize_block` call
+  flicker doesn't fire early) + the code that parses the prompt
   (0.8–1.3 s) + the model's first audio (0.6–0.9 s). Measured: 4.6–5.0 s
   from the `blocked` event to the first spoken audio
   (`docs/e2e-results.md`). herdr 0.9.0's bundled/remote detection rules
@@ -304,30 +299,13 @@ affected by this; this warning is about the worker panes herdr manages.)
 ## Quota notes
 
 - Gemini free-tier API keys work for both the voice session and the
-  default cheap-LLM backend, but rate-limit sooner than a paid key.
+  default backend, but rate-limit sooner than a paid key.
 - `gemini.api_keys` (or `GEMINI_API_KEY` / `GEMINI_API_KEY_1`…`_9`) is a
   **pool**: the voice session binds one key per connection and rotates
   to the next on a rate-limit error (`voice.key_rotated` in the event
-  log); the cheap-LLM client does the same per call
-  (`llm.rate_limited`). Add a few keys if you're hitting limits.
-- Watch `/debug` (source `voice` or `llm`) or `sheepdog serve --verbose`
+  log). Add a few keys if you're hitting limits.
+- Watch `/debug` (source `voice` or `brain`) or `sheepdog serve --verbose`
   for `rate_limited`/`key_rotated` events to see this happening.
-
-## Ollama fallback for the cheap LLM
-
-The cheap LLM (`[llm]`, plan §3.4) is any OpenAI-compatible chat
-endpoint, so a local Ollama server works without any API key:
-
-```sh
-SHEEPDOG_LLM_BASE_URL=http://localhost:11434/v1 \
-SHEEPDOG_LLM_MODEL=llama3.1 \
-SHEEPDOG_LLM_API_KEY=ollama \
-sheepdog serve
-```
-
-(`SHEEPDOG_LLM_API_KEY` can be any non-empty string; local endpoints
-usually ignore it.) The voice session itself still needs a real Gemini
-key — only `[llm]` is swappable.
 
 ## Development
 

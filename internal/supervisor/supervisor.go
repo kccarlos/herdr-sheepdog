@@ -9,7 +9,6 @@ import (
 
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
-	"github.com/kccarlos/herdr-sheepdog/internal/llm"
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
@@ -36,8 +35,8 @@ type Pusher interface {
 }
 
 // Querier is the read-only CLI query tool of plan §3.5 (WP4). workspace
-// is the agent's working directory; the result is raw text that goes
-// through SpokenAnswer. nil disables the deep path of ask.
+// is the agent's working directory; the result is raw text the brain
+// reads through its run_cli tool. nil means there is no such tool.
 type Querier interface {
 	Query(ctx context.Context, workspace, question string) (string, error)
 }
@@ -49,15 +48,9 @@ type Config struct {
 	PendingTTL time.Duration
 	// ExpiryTick is the period of the expiry check in Run (default 1 s).
 	ExpiryTick time.Duration
-	// BriefingInterval is how often Run re-pushes the briefing silently as
-	// a fallback for context compression (default 10 min; < 0 disables).
-	BriefingInterval time.Duration
 	// ReadLines is how many recent lines a pane read asks for (default
 	// 200: enough to see an agent's final message above its status bar).
 	ReadLines int
-	// SummaryTimeout bounds the summarize_done call on a finish (default
-	// 15 s); on expiry the plain "finished" push is spoken instead.
-	SummaryTimeout time.Duration
 	// DataDir is where notes.jsonl is appended; empty keeps notes in the
 	// state table only.
 	DataDir string
@@ -75,14 +68,14 @@ type Config struct {
 	// agent a stop still interrupts it (default 30 s, docs/roles.md
 	// "Stop" phase 3).
 	CancelWindow time.Duration
-	// AnnounceWait is how long the first audible announcement of a
-	// finish waits for the brain's announce turn before the template
-	// sentence is spoken (default 2 s; the brain's line may still follow
-	// as an addition). Negative waits for the turn's own timeout.
+	// AnnounceWait is how long a block or a finish waits for the brain's
+	// announce turn before the daemon's own code sentence is spoken
+	// (default 2 s). Past it the brain's line is dropped, never spoken
+	// after the sentence. Negative waits for the turn's own timeout.
 	AnnounceWait time.Duration
-	// Brain, when set, answers ask and propose first (docs/roles.md); the
-	// template path below is its fallback. New attaches the Supervisor
-	// as its Host.
+	// Brain, when set, is the one model that decides and phrases
+	// (docs/roles.md); without it the daemon speaks code sentences and
+	// sends nothing. New attaches the Supervisor as its Host.
 	Brain *brain.Brain
 	// Now overrides the clock (tests).
 	Now func() time.Time
@@ -97,14 +90,8 @@ func (c Config) withDefaults() Config {
 	if c.ExpiryTick == 0 {
 		c.ExpiryTick = time.Second
 	}
-	if c.BriefingInterval == 0 {
-		c.BriefingInterval = 10 * time.Minute
-	}
 	if c.ReadLines == 0 {
 		c.ReadLines = 200
-	}
-	if c.SummaryTimeout == 0 {
-		c.SummaryTimeout = 15 * time.Second
 	}
 	if c.Chattiness == "" {
 		c.Chattiness = string(Normal)
@@ -135,12 +122,11 @@ func (c Config) withDefaults() Config {
 type Supervisor struct {
 	store   *state.Store
 	herdr   Herdr
-	llm     llm.Templates
 	querier Querier
 	pusher  Pusher
 	log     logging.Logger
 	cfg     Config
-	brain   *brain.Brain // nil: template path only
+	brain   *brain.Brain // nil: code sentences only
 
 	mu            sync.Mutex
 	briefing      string               // cached sentence; "" means recompute
@@ -158,12 +144,12 @@ type Supervisor struct {
 // is treated as "interrupted", not "finished".
 const interruptGrace = 15 * time.Second
 
-// New wires a Supervisor. store, h and templates are required; querier,
-// pusher and log may be nil (nil pusher = no voice session; nil log
-// discards).
-func New(store *state.Store, h Herdr, templates llm.Templates, querier Querier, pusher Pusher, log logging.Logger, cfg Config) (*Supervisor, error) {
-	if store == nil || h == nil || templates == nil {
-		return nil, errors.New("supervisor: store, herdr client and llm templates are required")
+// New wires a Supervisor. store and h are required; brain (Config.Brain),
+// querier, pusher and log may be nil (nil brain = code sentences only,
+// nil pusher = no voice session, nil log discards).
+func New(store *state.Store, h Herdr, querier Querier, pusher Pusher, log logging.Logger, cfg Config) (*Supervisor, error) {
+	if store == nil || h == nil {
+		return nil, errors.New("supervisor: store and herdr client are required")
 	}
 	if log == nil {
 		log = logging.NopLogger{}
@@ -174,7 +160,7 @@ func New(store *state.Store, h Herdr, templates llm.Templates, querier Querier, 
 		return nil, err
 	}
 	cfg.chattiness = level
-	s := &Supervisor{store: store, herdr: h, llm: templates, querier: querier, pusher: pusher, log: log, cfg: cfg, brain: cfg.Brain, interrupted: map[string]time.Time{}, mentioned: map[string]time.Time{}}
+	s := &Supervisor{store: store, herdr: h, querier: querier, pusher: pusher, log: log, cfg: cfg, brain: cfg.Brain, interrupted: map[string]time.Time{}, mentioned: map[string]time.Time{}}
 	if s.brain != nil {
 		s.brain.SetHost(brainHost{s})
 		s.restorePromises()
@@ -185,18 +171,11 @@ func New(store *state.Store, h Herdr, templates llm.Templates, querier Querier, 
 // Brain returns the attached brain, or nil.
 func (s *Supervisor) Brain() *brain.Brain { return s.brain }
 
-// Run drives pending-action and promise expiry and the periodic silent
-// briefing until ctx ends. It is optional for tests that call
-// ExpirePending / ExpirePromises directly.
+// Run drives pending-action and promise expiry until ctx ends. It is
+// optional for tests that call ExpirePending / ExpirePromises directly.
 func (s *Supervisor) Run(ctx context.Context) {
 	expiry := time.NewTicker(s.cfg.ExpiryTick)
 	defer expiry.Stop()
-	var briefing <-chan time.Time
-	if s.cfg.BriefingInterval > 0 {
-		t := time.NewTicker(s.cfg.BriefingInterval)
-		defer t.Stop()
-		briefing = t.C
-	}
 	for {
 		select {
 		case <-ctx.Done():
@@ -204,8 +183,6 @@ func (s *Supervisor) Run(ctx context.Context) {
 		case <-expiry.C:
 			s.ExpirePending()
 			s.ExpirePromises()
-		case <-briefing:
-			s.pushBriefing()
 		}
 	}
 }

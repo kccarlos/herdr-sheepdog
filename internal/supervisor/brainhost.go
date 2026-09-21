@@ -8,7 +8,7 @@ import (
 
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
-	"github.com/kccarlos/herdr-sheepdog/internal/llm"
+	"github.com/kccarlos/herdr-sheepdog/internal/prose"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
@@ -37,9 +37,6 @@ func (h brainHost) info(a state.Agent, pending state.PendingAction, has bool) br
 	info := brain.AgentInfo{PaneID: a.PaneID, Alias: a.Alias, Kind: a.Kind, State: string(a.State), StateSince: a.StateSince, Task: a.CurrentTask, LastTask: a.LastTask}
 	if a.LastResult != nil && a.LastResult.Spoken != "" {
 		info.LastResult = a.LastResult.Spoken
-		if a.LastResult.Outcome != "" {
-			info.LastResult += " (" + a.LastResult.Outcome + ")"
-		}
 		info.LastDetail = a.LastResult.Detail
 	}
 	if a.LastBlock != nil && a.LastBlock.Question != "" {
@@ -261,9 +258,9 @@ func (s *Supervisor) brainTurn(ctx context.Context, kind brain.Kind, text, agent
 // urgency a propose had; the voice reads the result after its own "on
 // it" either way (the tool is NON_BLOCKING).
 func toolResultFrom(kind brain.Kind, rep brain.Reply) voice.ToolResult {
-	res := voice.ToolResult{Spoken: sentence(llm.Spoken(rep.Spoken, 2)), Detail: llm.Spoken(rep.Detail, 0), Clarify: rep.Clarify, Pending: rep.Pending, Scheduling: voice.UrgencyIdle}
+	res := voice.ToolResult{Spoken: sentence(prose.Spoken(rep.Spoken, 2)), Detail: prose.Spoken(rep.Detail, 0), Clarify: rep.Clarify, Pending: rep.Pending, Scheduling: voice.UrgencyIdle}
 	for _, o := range rep.Options {
-		if o = strings.TrimSpace(llm.Spoken(o, 1)); o != "" {
+		if o = strings.TrimSpace(prose.Spoken(o, 1)); o != "" {
 			res.Options = append(res.Options, o)
 		}
 	}

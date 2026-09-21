@@ -17,51 +17,11 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/eventlog"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/inject"
-	"github.com/kccarlos/herdr-sheepdog/internal/llm"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 	"github.com/kccarlos/herdr-sheepdog/internal/supervisor"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 	"github.com/kccarlos/herdr-sheepdog/prompts"
 )
-
-// fakeLLMServer is an OpenAI-compatible endpoint answering the three
-// templates from the prompt text, so the real llm.Client (and its
-// llm.call events) is exercised.
-func fakeLLMServer(t *testing.T) *httptest.Server {
-	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var req struct {
-			Messages []struct {
-				Role, Content string
-			} `json:"messages"`
-		}
-		_ = json.NewDecoder(r.Body).Decode(&req)
-		prompt := ""
-		for _, m := range req.Messages {
-			prompt += m.Content + "\n"
-		}
-		var content string
-		switch {
-		case strings.Contains(prompt, "asked_question"): // summarize_done
-			if strings.Contains(prompt, "You approved codex to run") {
-				content = `{"spoken":"created hello.txt with the requested line","outcome":"success","asked_question":false}`
-			} else {
-				content = `{"spoken":"did something the screen does not show","outcome":"unknown","asked_question":false}`
-			}
-		case strings.Contains(prompt, "Would you like to run the following command?"):
-			content = `{"spoken":"auth is asking whether it can run a command to create hello.txt.","question":"whether it can create hello.txt","is_question":true,"needs_decision":true,"options":[{"label":"Yes, proceed","key":"enter"},{"label":"No","key":"esc"}],"answer_keys":{"yes":["enter"],"no":["esc"]}}`
-		case strings.Contains(prompt, "Ask Codex to do anything"):
-			content = `{"spoken":"auth is idle at its prompt.","question":"","is_question":false,"needs_decision":false,"options":[],"answer_keys":{"yes":[],"no":[]}}`
-		case strings.Contains(prompt, "can_answer"):
-			content = `{"spoken":"auth is waiting at an approval prompt.","can_answer":true}`
-		default: // resolve_instruction
-			content = `{"pane_id":"fake:1","instruction_text":"skip the flaky test and rerun","is_answer":false,"answer":"","echo":"Telling auth to skip the flaky test and rerun.","ambiguous":false,"clarify_question":""}`
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"choices": []map[string]any{{"message": map[string]any{"content": content}}}})
-	}))
-	t.Cleanup(srv.Close)
-	return srv
-}
 
 // fakeSession is an in-memory voice.Session.
 type fakeSession struct {
@@ -177,11 +137,6 @@ func newHarness(t *testing.T, o harnessOpts) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	llmSrv := fakeLLMServer(t)
-	client, err := llm.New(llm.Config{BaseURL: llmSrv.URL + "/v1", Model: "fake", APIKeys: []string{"k"}, Log: log})
-	if err != nil {
-		t.Fatal(err)
-	}
 	h := inject.NewHerdr(nil, log)
 	var pusher supervisor.Pusher = inject.SkippedPusher{Log: log}
 	var session *fakeSession
@@ -208,7 +163,7 @@ func newHarness(t *testing.T, o harnessOpts) *harness {
 		}
 		providers = []ProviderInfo{{ID: "gemini", Label: "Gemini", Available: true}, {ID: "deepseek", Label: "DeepSeek", Available: true}, {ID: "openai", Label: "OpenAI", Available: false, Reason: "no OPENAI_API_KEY"}}
 	}
-	sup, err := supervisor.New(store, h, client, nil, pusher, log, supervisor.Config{BriefingInterval: -1, Brain: b})
+	sup, err := supervisor.New(store, h, nil, pusher, log, supervisor.Config{Brain: b})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -205,39 +205,23 @@ model = "gemini-file"
 	}
 }
 
-func TestLLMConfig(t *testing.T) {
-	cfg, err := load(filepath.Join(t.TempDir(), "missing.toml"), envFrom(map[string]string{"GEMINI_API_KEY": "g0", "GEMINI_API_KEY_1": "g1"}))
+// TestPendingTTL covers the one top-level knob the removed [llm] section
+// used to be tested alongside: the pending-action TTL and its env
+// override.
+func TestPendingTTL(t *testing.T) {
+	cfg, err := load(filepath.Join(t.TempDir(), "missing.toml"), noEnv)
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if cfg.LLM.BaseURL != GeminiOpenAIBaseURL || cfg.LLM.Model != "gemini-3.5-flash-lite" || cfg.PendingTTLS != 120 {
-		t.Errorf("llm defaults = %+v ttl=%d", cfg.LLM, cfg.PendingTTLS)
+	if cfg.PendingTTLS != 120 {
+		t.Errorf("pending_ttl_s default = %d", cfg.PendingTTLS)
 	}
-	if keys := cfg.LLMKeys(); len(keys) != 2 || keys[0] != "g0" {
-		t.Errorf("Gemini pool should back the default llm endpoint, got %d keys", len(keys))
-	}
-
-	cfg, err = load(filepath.Join(t.TempDir(), "missing.toml"), envFrom(map[string]string{
-		"GEMINI_API_KEY":         "g0",
-		"SHEEPDOG_LLM_BASE_URL":  "http://localhost:11434/v1",
-		"SHEEPDOG_LLM_MODEL":     "gemma4:latest",
-		"SHEEPDOG_PENDING_TTL_S": "30",
-	}))
+	cfg, err = load(filepath.Join(t.TempDir(), "missing.toml"), envFrom(map[string]string{"SHEEPDOG_PENDING_TTL_S": "30"}))
 	if err != nil {
 		t.Fatalf("load with env: %v", err)
 	}
-	if cfg.LLM.BaseURL != "http://localhost:11434/v1" || cfg.LLM.Model != "gemma4:latest" || cfg.PendingTTLS != 30 {
-		t.Errorf("env llm not applied: %+v ttl=%d", cfg.LLM, cfg.PendingTTLS)
-	}
-	if keys := cfg.LLMKeys(); len(keys) != 0 {
-		t.Errorf("non-Gemini endpoint must not borrow the Gemini pool, got %d keys", len(keys))
-	}
-	cfg.LLM.APIKey = "explicit"
-	if keys := cfg.LLMKeys(); len(keys) != 1 || keys[0] != "explicit" {
-		t.Errorf("explicit key should win, got %v", keys)
-	}
-	if strings.Contains(cfg.String(), "explicit") || strings.Contains(cfg.String(), "g0") {
-		t.Errorf("String leaks a key: %s", cfg)
+	if cfg.PendingTTLS != 30 {
+		t.Errorf("pending_ttl_s = %d", cfg.PendingTTLS)
 	}
 	if _, err := load(filepath.Join(t.TempDir(), "none.toml"), envFrom(map[string]string{"SHEEPDOG_PENDING_TTL_S": "0"})); err == nil {
 		t.Error("zero SHEEPDOG_PENDING_TTL_S should fail")
@@ -366,7 +350,7 @@ func TestSupervisorConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Supervisor.Chattiness != "normal" || cfg.Supervisor.RecentMinutes != 30 || cfg.Supervisor.SummaryTimeoutS != 15 {
+	if cfg.Supervisor.Chattiness != "normal" || cfg.Supervisor.RecentMinutes != 30 {
 		t.Errorf("supervisor defaults = %+v", cfg.Supervisor)
 	}
 	dir := t.TempDir()
@@ -381,21 +365,20 @@ func TestSupervisorConfig(t *testing.T) {
 	if cfg.Supervisor.Chattiness != "quiet" || cfg.Supervisor.RecentMinutes != 5 {
 		t.Errorf("from file = %+v", cfg.Supervisor)
 	}
-	cfg, err = load(path, envFrom(map[string]string{"SHEEPDOG_SUPERVISOR_CHATTINESS": " Chatty ", "SHEEPDOG_SUPERVISOR_RECENT_MINUTES": "45", "SHEEPDOG_SUPERVISOR_SUMMARY_TIMEOUT_S": "40"}))
+	cfg, err = load(path, envFrom(map[string]string{"SHEEPDOG_SUPERVISOR_CHATTINESS": " Chatty ", "SHEEPDOG_SUPERVISOR_RECENT_MINUTES": "45"}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Supervisor.Chattiness != "chatty" || cfg.Supervisor.RecentMinutes != 45 || cfg.Supervisor.SummaryTimeoutS != 40 {
+	if cfg.Supervisor.Chattiness != "chatty" || cfg.Supervisor.RecentMinutes != 45 {
 		t.Errorf("env override = %+v", cfg.Supervisor)
 	}
-	if !strings.Contains(cfg.String(), "supervisor.chattiness=chatty supervisor.recent_minutes=45 supervisor.promise_ttl_s=7200 supervisor.summary_timeout_s=40") {
+	if !strings.Contains(cfg.String(), "supervisor.chattiness=chatty supervisor.recent_minutes=45 supervisor.promise_ttl_s=7200") {
 		t.Errorf("String() = %q", cfg.String())
 	}
 	for _, env := range []map[string]string{
 		{"SHEEPDOG_SUPERVISOR_CHATTINESS": "loud"},
 		{"SHEEPDOG_SUPERVISOR_RECENT_MINUTES": "0"},
 		{"SHEEPDOG_SUPERVISOR_RECENT_MINUTES": "soon"},
-		{"SHEEPDOG_SUPERVISOR_SUMMARY_TIMEOUT_S": "0"},
 	} {
 		if _, err := load(path, envFrom(env)); err == nil {
 			t.Errorf("%v should fail", env)
@@ -417,19 +400,15 @@ func TestBrainConfig(t *testing.T) {
 	if !cfg.Brain.Enabled || cfg.Brain.Model != DefaultBrainModel || cfg.Brain.MaxSteps != 6 || cfg.Brain.AskTimeoutS != 8 || cfg.Brain.ProposeTimeoutS != 12 || cfg.Brain.WindowTokens != 24000 || cfg.Brain.PruneAfterTurns != 3 {
 		t.Errorf("brain defaults = %+v", cfg.Brain)
 	}
-	if cfg.LLM.TimeoutS != 15 {
-		t.Errorf("llm.timeout_s default = %d", cfg.LLM.TimeoutS)
-	}
-
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")
-	body := "[llm]\ntimeout_s = 40\n[brain]\nenabled = false\nmodel = \"file-model\"\nmax_steps = 3\nwindow_tokens = 1000\n"
+	body := "[brain]\nenabled = false\nmodel = \"file-model\"\nmax_steps = 3\nwindow_tokens = 1000\n"
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	cfg, err = load(path, envFrom(map[string]string{
 		"SHEEPDOG_BRAIN_ENABLED": "true", "SHEEPDOG_BRAIN_MODEL": "env-model", "SHEEPDOG_BRAIN_ASK_TIMEOUT_S": "4",
-		"SHEEPDOG_BRAIN_PROPOSE_TIMEOUT_S": "9", "SHEEPDOG_BRAIN_PRUNE_AFTER_TURNS": "1", "SHEEPDOG_LLM_TIMEOUT_S": "60",
+		"SHEEPDOG_BRAIN_PROPOSE_TIMEOUT_S": "9", "SHEEPDOG_BRAIN_PRUNE_AFTER_TURNS": "1",
 	}))
 	if err != nil {
 		t.Fatal(err)
@@ -437,10 +416,7 @@ func TestBrainConfig(t *testing.T) {
 	if !cfg.Brain.Enabled || cfg.Brain.Model != "env-model" || cfg.Brain.MaxSteps != 3 || cfg.Brain.AskTimeoutS != 4 || cfg.Brain.ProposeTimeoutS != 9 || cfg.Brain.WindowTokens != 1000 || cfg.Brain.PruneAfterTurns != 1 {
 		t.Errorf("brain = %+v", cfg.Brain)
 	}
-	if cfg.LLM.TimeoutS != 60 {
-		t.Errorf("llm.timeout_s = %d", cfg.LLM.TimeoutS)
-	}
-	if !strings.Contains(cfg.String(), "brain.model=env-model") || !strings.Contains(cfg.String(), "llm.timeout_s=60") {
+	if !strings.Contains(cfg.String(), "brain.model=env-model") {
 		t.Errorf("String() = %s", cfg.String())
 	}
 
@@ -448,7 +424,6 @@ func TestBrainConfig(t *testing.T) {
 		"enabled":   {"SHEEPDOG_BRAIN_ENABLED": "maybe"},
 		"max_steps": {"SHEEPDOG_BRAIN_MAX_STEPS": "0"},
 		"window":    {"SHEEPDOG_BRAIN_WINDOW_TOKENS": "-1"},
-		"llm":       {"SHEEPDOG_LLM_TIMEOUT_S": "x"},
 	} {
 		if _, err := load(filepath.Join(t.TempDir(), "missing.toml"), envFrom(env)); err == nil {
 			t.Errorf("%s: bad value accepted", name)

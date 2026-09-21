@@ -1,25 +1,20 @@
-package llm
+package prose
 
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"regexp"
 	"strings"
 	"unicode"
 )
 
-// DefaultScreenBytes is the input truncation limit for screen tails read
-// to find a prompt (summarize_block: the prompt is at the bottom).
-const DefaultScreenBytes = 8 << 10
-
-// DefaultResultBytes is the limit for screen tails read to find what an
-// agent did or said (spoken_answer, summarize_done): the answer may sit
-// above a status bar or banner, so more of the pane is kept (~200 lines).
+// DefaultResultBytes is the truncation limit for a screen tail put in a
+// model's window: what the agent did or said may sit above a status bar
+// or banner, so a generous ~200 lines of the pane are kept.
 const DefaultResultBytes = 16 << 10
 
 // ErrNoJSON is returned when no JSON object can be found in a reply.
-var ErrNoJSON = errors.New("llm: no JSON object in reply")
+var ErrNoJSON = errors.New("prose: no JSON object in reply")
 
 // ExtractJSON returns the first JSON object in text. It tolerates a bare
 // object, an object inside ``` fences (with or without a "json" tag), and
@@ -157,8 +152,8 @@ func firstSentences(s string, n int) string {
 	return strings.TrimSpace(s[:ends[n-1][1]])
 }
 
-// endSentence makes sure s ends with terminal punctuation.
-func endSentence(s string) string {
+// EndSentence makes sure s ends with terminal punctuation.
+func EndSentence(s string) string {
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return s
@@ -173,14 +168,11 @@ func endSentence(s string) string {
 	return s + "."
 }
 
-// decode unmarshals the first JSON object in text into v.
-func decode(text string, v any) error {
-	raw, err := ExtractJSON(text)
-	if err != nil {
-		return fmt.Errorf("%w: %q", err, truncateRunes(text, 120))
+// TruncateRunes cuts s to n runes, appending an ellipsis when it did.
+func TruncateRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
 	}
-	if err := json.Unmarshal(raw, v); err != nil {
-		return fmt.Errorf("llm: decode reply: %w", err)
-	}
-	return nil
+	return string(r[:n]) + "…"
 }

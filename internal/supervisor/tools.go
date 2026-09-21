@@ -4,12 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"regexp"
 	"strings"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
-	"github.com/kccarlos/herdr-sheepdog/internal/llm"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
@@ -22,10 +20,9 @@ const (
 	ToolStop         = voice.ToolStop
 )
 
-// The template path's own entry points. They were the voice's tools
-// until D1-revised and are no longer declared to any model: the
-// fallback (`--brain=off`, a brain error) and the tests drive the
-// matching methods directly.
+// The older entry points. They were the voice's tools until D1-revised
+// and are no longer declared to any model; `sheepdog brain-test` and the
+// tests drive the matching methods directly.
 const (
 	ToolBriefing = "briefing"
 	ToolAsk      = "ask"
@@ -58,71 +55,19 @@ func (s *Supervisor) Handler() voice.ToolHandler {
 // briefing never waits on the state file.
 func (s *Supervisor) Briefing(context.Context) (voice.ToolResult, error) {
 	text, panes := s.briefingText()
-	now := s.cfg.Now()
-	s.mu.Lock()
-	for _, id := range panes {
-		s.mentioned[id] = now
-	}
-	s.mu.Unlock()
+	s.markMentioned(panes)
 	return voice.ToolResult{Spoken: text, Scheduling: voice.UrgencyInterrupt}, nil
 }
 
-// deepQuestion matches questions that need the repository, not the
-// screen (plan WP4 routing rule).
-var deepQuestion = regexp.MustCompile(`(?i)\b(why|diff|log|logs|fail|failed|failing|failure|changed|changes|broke|broken)\b`)
-
-// Ask answers a question about an agent: through the brain when one is
-// attached, else (or on its fallback) from the screen tail, or — when a
-// Querier is wired and the question needs the repo (or the screen was not
-// enough) — from the read-only CLI tool's output.
+// Ask answers a question about an agent through the brain; with no brain
+// the daemon can only report the roster (noBrain). It is not declared to
+// any model since D1-revised: `sheepdog brain-test --kind ask` and the
+// evals drive it.
 func (s *Supervisor) Ask(ctx context.Context, question, agent string) (voice.ToolResult, error) {
 	if res, ok := s.brainTurn(ctx, brain.KindAsk, strings.TrimSpace(question), agent); ok {
 		return res, nil
 	}
-	return s.askTemplate(ctx, question, agent)
-}
-
-// askTemplate is ask without the brain: the screen tail through
-// spoken_answer, or the CLI tool when the question needs the repo.
-func (s *Supervisor) askTemplate(ctx context.Context, question, agent string) (voice.ToolResult, error) {
-	question = strings.TrimSpace(question)
-	if question == "" {
-		return voice.ToolResult{Spoken: "What would you like to know?", Clarify: true, Scheduling: voice.UrgencyInterrupt}, nil
-	}
-	row, res, ok := s.target(agent)
-	if !ok {
-		return res, nil
-	}
-	s.touch(row.PaneID)
-	s.setSubject(row.PaneID)
-	alias := aliasOr(row.Alias)
-	var ans llm.Answer
-	var err error
-	deep := s.querier != nil && deepQuestion.MatchString(question)
-	if !deep {
-		var read herdr.ReadResult
-		read, err = s.herdr.Read(ctx, row.PaneID, herdr.SourceRecentUnwrapped, s.cfg.ReadLines)
-		if err == nil {
-			ans, err = s.llm.SpokenAnswer(ctx, read.Text, question, alias)
-		}
-		deep = s.querier != nil && (err != nil || !ans.CanAnswer)
-	}
-	if deep {
-		if out, qerr := s.querier.Query(ctx, s.workspaceDir(ctx, row), question); qerr == nil {
-			if deepAns, aerr := s.llm.SpokenAnswer(ctx, out, question, alias); aerr == nil {
-				ans, err = deepAns, nil
-			} else if err == nil {
-				err = aerr
-			}
-		} else {
-			s.log.Log(logSource, "supervisor.query_error", row.PaneID, map[string]any{"error": qerr.Error()})
-		}
-	}
-	if err != nil {
-		s.log.Log(logSource, "supervisor.ask_error", row.PaneID, map[string]any{"error": err.Error()})
-		return voice.ToolResult{Spoken: "I could not read " + alias + "'s screen just now.", Scheduling: voice.UrgencyIdle}, nil
-	}
-	return voice.ToolResult{Spoken: ans.Spoken, Scheduling: voice.UrgencyIdle}, nil
+	return s.noBrain(), nil
 }
 
 // workspaceDir returns the pane's working directory from herdr, or "".
@@ -139,59 +84,59 @@ func (s *Supervisor) workspaceDir(ctx context.Context, row state.Agent) string {
 	return ""
 }
 
-// Propose resolves the user's words onto one agent and sends them (D4:
-// echo, then send, then cancellable): through the brain when one is
-// attached, else (or on its fallback) with resolve_instruction. Ambiguity
-// returns a clarify question and sends nothing (D6). An answer to a
-// pending question goes through send_keys; anything else through
-// agent.prompt.
+// Propose sends the user's words to one agent through the brain (D4:
+// echo, then send, then cancellable); with no brain nothing is sent and
+// the daemon says so. Like Ask, it is no longer declared to any model:
+// `sheepdog brain-test --kind propose` and the evals drive it.
 func (s *Supervisor) Propose(ctx context.Context, instruction, agent string) (voice.ToolResult, error) {
 	// The brain reads the CEO's own words from its transcript, so an
 	// empty instruction (a bare "let me know when it's done") still
-	// reaches it; only the template path needs the text.
+	// reaches it.
 	if res, ok := s.brainTurn(ctx, brain.KindPropose, strings.TrimSpace(instruction), agent); ok {
 		return res, nil
 	}
-	return s.proposeTemplate(ctx, instruction, agent)
+	return s.noBrain(), nil
 }
 
-// proposeTemplate is propose without the brain: resolve_instruction
-// picks the agent, then send_keys for an answer or agent.prompt for an
-// instruction.
-func (s *Supervisor) proposeTemplate(ctx context.Context, instruction, agent string) (voice.ToolResult, error) {
-	instruction = strings.TrimSpace(instruction)
-	if instruction == "" {
-		return voice.ToolResult{Spoken: "What should I tell it?", Clarify: true, Scheduling: voice.UrgencyInterrupt}, nil
-	}
-	summaries := s.agentSummaries()
-	if len(summaries) == 0 {
-		return voice.ToolResult{Spoken: "No agents are running, so there is nobody to tell.", Scheduling: voice.UrgencyInterrupt}, nil
-	}
-	res, err := s.llm.ResolveInstruction(ctx, instruction, summaries, agent)
-	if err != nil {
-		s.log.Log(logSource, "supervisor.propose_error", "", map[string]any{"stage": "resolve", "error": err.Error()})
-		return voice.ToolResult{Spoken: "I could not work out what to send; please say it again.", Clarify: true, Scheduling: voice.UrgencyInterrupt}, nil
-	}
-	if res.Ambiguous {
-		s.log.Log(logSource, "supervisor.propose_ambiguous", "", map[string]any{"instruction": instruction, "clarify": res.ClarifyQuestion})
-		return voice.ToolResult{Spoken: res.ClarifyQuestion, Clarify: true, Scheduling: voice.UrgencyInterrupt}, nil
-	}
-	row, ok := s.store.Get(res.PaneID)
-	if !ok {
-		return voice.ToolResult{Spoken: "That agent is gone.", Scheduling: voice.UrgencyInterrupt}, nil
-	}
-	alias := aliasOr(row.Alias)
+// noBrain is everything the daemon can say without one: the roster
+// sentence composeBriefing already keeps, and why that is all. Nothing
+// is sent to a worker — instructions are the brain's judgment
+// (docs/roles.md "One decision-maker").
+func (s *Supervisor) noBrain() voice.ToolResult {
+	text, panes := s.briefingText()
+	s.markMentioned(panes)
+	return voice.ToolResult{Spoken: text + " " + noBrainTrailer, Scheduling: voice.UrgencyInterrupt}
+}
 
+// noBrainTrailer says why the roster is the whole answer.
+const noBrainTrailer = "— the brain is off, I can only report status."
+
+// markMentioned records that the panes were just spoken about: the
+// normal level announces their finish for RecentWindow afterwards.
+func (s *Supervisor) markMentioned(panes []string) {
+	now := s.cfg.Now()
 	s.mu.Lock()
-	if pending, has := s.store.Pending(); res.IsAnswer && has && pending.Kind == state.PendingAnswerPrompt && pending.PaneID == row.PaneID {
-		s.lastSubject = row.PaneID
-		out := s.answerPending(ctx, pending, res.Answer, "Telling "+alias+" %s. Sent.", "template")
-		s.mu.Unlock()
-		return out, nil
+	for _, id := range panes {
+		s.mentioned[id] = now
 	}
 	s.mu.Unlock()
-	out, _ := s.sendInstruction(ctx, row, res.InstructionText, res.Echo)
-	return out, nil
+}
+
+// mentionedIn marks every agent the sentence names by alias, so a reply
+// that talked about an agent counts as dealing with it exactly as a
+// spoken briefing does.
+func (s *Supervisor) mentionedIn(spoken string) {
+	if spoken == "" {
+		return
+	}
+	lower := strings.ToLower(spoken)
+	var panes []string
+	for _, row := range s.store.List() {
+		if row.Alias != "" && strings.Contains(lower, strings.ToLower(row.Alias)) {
+			panes = append(panes, row.PaneID)
+		}
+	}
+	s.markMentioned(panes)
 }
 
 // sendInstruction creates the in-flight send_instruction action and
@@ -236,16 +181,13 @@ func (s *Supervisor) reportBlocked(ctx context.Context, row state.Agent) voice.T
 	if err != nil {
 		return voice.ToolResult{Spoken: alias + " is waiting at a prompt first, but I could not read it.", Scheduling: voice.UrgencyInterrupt}
 	}
-	sum, err := s.llm.SummarizeBlock(ctx, read.Text, alias)
-	if err != nil {
+	prompt, ok := herdr.ParsePrompt(read.Text)
+	if !ok {
 		return voice.ToolResult{Spoken: alias + " is waiting at a prompt first; answer that before a new instruction.", Scheduling: voice.UrgencyInterrupt}
 	}
-	s.recordBlock(row.PaneID, sum)
-	if !sum.IsQuestion {
-		return voice.ToolResult{Spoken: alias + " is waiting at a prompt first. " + sum.Spoken, Scheduling: voice.UrgencyInterrupt}
-	}
+	s.recordBlock(row.PaneID, prompt.Phrase(), false)
 	s.mu.Lock()
-	spoken := s.setPending(s.newAnswerPrompt(row.PaneID, sum))
+	spoken := s.setPending(s.newAnswerPrompt(row.PaneID, prompt, alias))
 	s.mu.Unlock()
 	return voice.ToolResult{Spoken: spoken + " Answer that first.", Clarify: true, Scheduling: voice.UrgencyInterrupt}
 }
@@ -382,65 +324,6 @@ func (s *Supervisor) Note(_ context.Context, text string) (voice.ToolResult, err
 		return voice.ToolResult{Spoken: "I could not save that note.", Scheduling: voice.UrgencyInterrupt}, nil
 	}
 	return voice.ToolResult{Spoken: "Noted.", Scheduling: voice.UrgencyInterrupt}, nil
-}
-
-// agentSummaries renders the state table for resolve_instruction.
-func (s *Supervisor) agentSummaries() []llm.AgentSummary {
-	pending, _ := s.store.Pending()
-	rows := s.store.List()
-	out := make([]llm.AgentSummary, 0, len(rows))
-	for _, a := range rows {
-		sum := llm.AgentSummary{Alias: a.Alias, PaneID: a.PaneID, Kind: a.Kind, State: string(a.State), Task: a.CurrentTask}
-		if a.State == herdr.StateBlocked {
-			if pending.Kind == state.PendingAnswerPrompt && pending.PaneID == a.PaneID && pending.Question != "" {
-				sum.Question = pending.Question
-			} else if a.LastBlock != nil && a.LastBlock.Question != "" {
-				sum.Question = a.LastBlock.Question
-			} else {
-				sum.Question = "something at a prompt"
-			}
-		}
-		out = append(out, sum)
-	}
-	return out
-}
-
-// target picks the agent for ask: the named alias, else the only agent,
-// else the one most recently discussed (the last push subject or tool
-// target), else a clarify question. The ToolResult is what to say when no
-// agent fits.
-func (s *Supervisor) target(agent string) (state.Agent, voice.ToolResult, bool) {
-	rows := s.store.List()
-	if len(rows) == 0 {
-		return state.Agent{}, voice.ToolResult{Spoken: "No agents are running.", Scheduling: voice.UrgencyInterrupt}, false
-	}
-	if agent = strings.TrimSpace(agent); agent != "" {
-		if row, ok := findAlias(rows, agent); ok {
-			return row, voice.ToolResult{}, true
-		}
-		if len(rows) > 1 {
-			names := make([]string, 0, len(rows))
-			for _, r := range rows {
-				names = append(names, r.Alias)
-			}
-			return state.Agent{}, voice.ToolResult{Spoken: fmt.Sprintf("I do not know an agent called %s. The agents are %s.", agent, joinSpoken(names)), Clarify: true, Scheduling: voice.UrgencyInterrupt}, false
-		}
-	}
-	if len(rows) == 1 {
-		return rows[0], voice.ToolResult{}, true
-	}
-	s.mu.Lock()
-	subject := s.lastSubject
-	s.mu.Unlock()
-	if row, ok := s.store.Get(subject); ok {
-		return row, voice.ToolResult{}, true
-	}
-	names := make([]string, 0, len(rows))
-	for _, r := range rows {
-		names = append(names, r.Alias)
-	}
-	choice := strings.Join(names[:len(names)-1], ", ") + " or " + names[len(names)-1]
-	return state.Agent{}, voice.ToolResult{Spoken: "Which agent do you mean, " + choice + "?", Clarify: true, Scheduling: voice.UrgencyInterrupt}, false
 }
 
 // findAlias matches an alias exactly, then by slug, then by prefix or

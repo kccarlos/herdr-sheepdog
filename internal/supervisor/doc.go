@@ -1,32 +1,36 @@
-// Package supervisor is the daemon's brain (plan §3.6): pure Go logic over
-// the herdr client, the state table, the cheap LLM templates and the voice
-// session's push channel. It is the only component that touches herdr
-// (decision D1).
+// Package supervisor is the daemon's coordinator (plan §3.6): pure Go
+// logic over the herdr client, the state table, the parsed approval
+// prompt and the voice session's push channel. It is the only component
+// that touches herdr (decision D1), and the only model it ever calls is
+// the brain (internal/brain).
 //
 // Supervisor.HandleTransition folds every debounced herdr transition into
-// the state table and reacts: a `blocked` pane is read and summarised, the
-// spoken sentence is pushed to the voice session, and — when the agent is
-// really asking something — a single-slot answer_prompt PendingAction is
-// created (replacing and announcing any earlier one). `done` gets a
-// low-priority push; an agent that exits mid-work gets an interrupting one.
+// the state table and reacts: a `blocked` pane is read and its prompt
+// parsed in code (herdr.ParsePrompt — the question, the command it is
+// about, each option's label and keys), which becomes the single-slot
+// answer_prompt PendingAction the fast path and the rail answer, and one
+// line is spoken about it; a finish is read for the brain and announced
+// as "<alias> finished." unless the brain phrases it; an agent that
+// exits mid-work gets an interrupting push.
 //
-// The five voice tools (briefing, ask, propose, confirm, cancel, note) are
-// methods returning voice.ToolResult with the scheduling the Supervisor
-// chose; Handler adapts them to voice.ToolHandler. briefing never calls a
-// model: it is a cached sentence built from the state table. ask and
-// propose go through the brain (internal/brain, docs/roles.md) when one
-// is attached through Config.Brain — the Supervisor is its Host: roster,
-// ledger, screen and CLI reads, and the actions prompt / send_keys /
-// interrupt over the same pending-action paths — and fall back to the
-// template path here when the brain errors or runs out of budget.
-// propose echoes and sends immediately (D4) unless the target is
-// ambiguous (D6); cancel sends Ctrl-C to the pane of the in-flight
-// instruction. The brain's transcript is fed from here too: voice
-// transcripts, pushes, transitions and notes.
+// The voice's two tools (docs/roles.md "One decision-maker") are
+// ToSupervisor and Stop; Handler adapts them to voice.ToolHandler.
+// to_supervisor runs the code fast paths — a bare answer to the one open
+// prompt, a bare stop word — and then one brain turn over the shepherd's
+// verbatim words. The Supervisor is the brain's Host: roster, ledger,
+// screen and CLI reads, and the actions prompt / send_keys / interrupt /
+// promise / note over the same pending-action paths. With no brain (or
+// when it errors) the daemon answers from the roster and sends nothing:
+// deciding what words mean is the brain's work.
+//
+// announce.go runs the brain's announce turn on every block and finish
+// and speaks the one line that event gets — the brain's when it lands
+// within Config.AnnounceWait, else the code sentence, never both — under
+// the chattiness ceiling.
 //
 // Pending actions expire after a TTL (Run's ticker); an expired question
 // that the user later confirms is revived and asked again before anything
 // is sent (plan scenario 8). Everything is logged through logging.Logger
-// (pending.*, supervisor.*); llm.call and herdr.read/send come from the
+// (pending.*, supervisor.*, brain.push_*); herdr.read/send come from the
 // adapters themselves.
 package supervisor

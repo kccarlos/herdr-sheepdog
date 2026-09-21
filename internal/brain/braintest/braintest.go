@@ -616,7 +616,7 @@ func reflex(call Call) (*genai.GenerateContentResponse, error) {
 	if len(evs) > 0 && (len(reqs) == 0 || evs[len(evs)-1][0] > reqs[len(reqs)-1][0]) {
 		m := evs[len(evs)-1]
 		ev := reEvent.FindStringSubmatch(text[m[0]:])
-		if !forced && !strings.Contains(text[m[0]:], "already said the sentence") && !calledSinceEvent(call, brain.ToolRecall) {
+		if !forced && !calledSinceEvent(call, brain.ToolRecall) {
 			// A finish: look at the record for the agent first (what the
 			// CEO asked of it), then announce.
 			return Response(Step{Calls: []*genai.FunctionCall{FC(brain.ToolRecall, map[string]any{"query": unquote(ev[2])})}, Usage: usage}), nil
@@ -718,9 +718,6 @@ func eventReply(call Call, text string, m []int) string {
 	if len(ids) > 0 {
 		// One line keeps every promise; nothing else is said about it.
 		return mustJSON(brain.Reply{Spoken: "As you asked: " + sentence, Detail: "The fake model kept the promise with the template sentence.", Urgency: brain.UrgencyIdle, KeepsPromiseIDs: ids})
-	}
-	if strings.Contains(text[m[0]:], "already said the sentence") {
-		return mustJSON(brain.Reply{Spoken: "", Detail: "The fake model has nothing to add to a sentence the assistant already said.", Urgency: brain.UrgencySkip})
 	}
 	for _, p := range rePushed.FindAllStringSubmatch(call.Text(), -1) {
 		if strings.Contains(unquote(p[2]), template) {

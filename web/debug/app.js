@@ -249,7 +249,7 @@ function renderAgents(agents) {
     const lb = a.last_block;
     td(lb ? `${lb.question || '(no question)'}${lb.answered ? ' ✓' : ''}` : '', 'block');
     const lr = a.last_result;
-    td(lr ? `${lr.spoken} [${lr.outcome}, ${since(lr.at)} ago]` : '', 'result');
+    td(lr ? `${lr.spoken} [${since(lr.at)} ago]` : '', 'result');
     const actions = document.createElement('td');
     if (a.synthetic) {
       const b = document.createElement('button');

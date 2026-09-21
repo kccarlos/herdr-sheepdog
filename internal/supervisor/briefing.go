@@ -139,12 +139,19 @@ func describeAgent(a state.Agent, now time.Time) string {
 }
 
 // recentResult returns the trimmed last result when it is fresh enough
-// to be worth saying, else "".
+// to be worth saying, else "". The result is the announcement the
+// shepherd heard about the finish, so it usually opens with the agent's
+// own name; that comes off here, since the clause already says it ("auth
+// is idle; it last finished the rerun you asked for").
 func recentResult(a state.Agent, now time.Time) string {
 	if a.LastResult == nil || a.LastResult.Spoken == "" || now.Sub(a.LastResult.At) > briefingResultMaxAge {
 		return ""
 	}
-	return trimWords(strings.TrimRight(a.LastResult.Spoken, ".!?"), briefingResultMaxWords)
+	spoken := strings.TrimRight(a.LastResult.Spoken, ".!?")
+	if a.Alias != "" && strings.HasPrefix(strings.ToLower(spoken), strings.ToLower(a.Alias)+" ") {
+		spoken = lowerFirst(strings.TrimSpace(spoken[len(a.Alias):]))
+	}
+	return trimWords(spoken, briefingResultMaxWords)
 }
 
 // describeRest tallies the agents that were not listed: "the other two

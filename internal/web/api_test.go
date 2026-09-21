@@ -96,7 +96,7 @@ func TestInjectBlockedChainAndConfirm(t *testing.T) {
 	if code != http.StatusOK || !res.OK || res.Agent.Alias != "auth" || res.Agent.State != herdr.StateBlocked || !res.Agent.Synthetic {
 		t.Fatalf("inject blocked = %d %s", code, body)
 	}
-	want := []string{"herdr.state", "herdr.read", "llm.call", "pending.created", "voice.push"}
+	want := []string{"herdr.state", "herdr.read", "pending.created", "voice.push"}
 	if got := h.types(); !subsequence(got, want) {
 		t.Fatalf("chain %v not in %v", want, got)
 	}
@@ -105,7 +105,7 @@ func TestInjectBlockedChainAndConfirm(t *testing.T) {
 		if ev.Type == "voice.push" {
 			var p map[string]any
 			_ = json.Unmarshal(ev.Payload, &p)
-			if p["skipped"] != true || !strings.Contains(p["text"].(string), "auth is asking") {
+			if p["skipped"] != true || !strings.Contains(p["text"].(string), "auth asks to run") {
 				t.Fatalf("voice.push payload = %s", ev.Payload)
 			}
 		}
@@ -165,9 +165,9 @@ func TestInjectBlockedChainAndConfirm(t *testing.T) {
 		t.Fatalf("empty text = %d", code)
 	}
 
-	// working, then done with the "after" screen: the finish is
-	// summarised through the real llm.Client (llm.call summarize_done),
-	// pushed with the result and stored as last_result.
+	// working, then done with the "after" screen: with no brain the
+	// daemon speaks its own code sentence, and the record keeps that the
+	// agent finished.
 	code, body = h.postJSON("/api/inject/state", map[string]any{"pane_id": "fake:1", "state": "working"}, &res)
 	if code != http.StatusOK || res.Agent.State != herdr.StateWorking {
 		t.Fatalf("working = %d %s", code, body)
@@ -176,15 +176,15 @@ func TestInjectBlockedChainAndConfirm(t *testing.T) {
 	if code != http.StatusOK || res.Agent.State != herdr.StateDone {
 		t.Fatalf("done = %d %s", code, body)
 	}
-	if res.Agent.LastResult == nil || res.Agent.LastResult.Spoken != "created hello.txt with the requested line" || res.Agent.LastResult.Outcome != "success" {
+	if res.Agent.LastResult == nil || res.Agent.LastResult.Spoken != "finished" {
 		t.Fatalf("last_result = %+v", res.Agent.LastResult)
 	}
-	if !subsequence(h.types(), []string{"web.inject", "herdr.read", "llm.call", "voice.push"}) {
+	if !subsequence(h.types(), []string{"web.inject", "herdr.read", "voice.push"}) {
 		t.Fatalf("done chain missing in %v", h.types())
 	}
 	donePushed := false
 	for _, ev := range h.log.Tail(0) {
-		if ev.Type == "voice.push" && strings.Contains(string(ev.Payload), "auth finished: created hello.txt with the requested line.") {
+		if ev.Type == "voice.push" && strings.Contains(string(ev.Payload), "auth finished.") {
 			donePushed = true
 		}
 	}
@@ -213,7 +213,9 @@ func TestInjectBlockedChainAndConfirm(t *testing.T) {
 }
 
 func TestPendingCancelAndProposeStop(t *testing.T) {
-	h := newHarness(t, harnessOpts{})
+	// With a brain (the reflex fake): an instruction is the brain's
+	// call, so the propose half of this chain needs one.
+	h := newHarness(t, harnessOpts{brain: true})
 	h.postJSON("/api/inject/blocked", map[string]any{"pane_id": "fake:1", "alias": "auth", "screen": codexScreen(t)}, nil)
 	// The Cancel button runs the stop tool. Stop is not "no": a worker's
 	// question is left open for the shepherd to answer.
@@ -375,7 +377,7 @@ loop:
 			t.Fatalf("out of order / duplicate seq at %d: %v", i, live)
 		}
 	}
-	if !subsequence(types, []string{"herdr.state", "llm.call", "pending.created", "voice.push"}) {
+	if !subsequence(types, []string{"herdr.state", "pending.created", "voice.push"}) {
 		t.Fatalf("live chain = %v", types)
 	}
 

@@ -352,7 +352,7 @@ on `blocked` alone will not catch it).
   screen never enter scrollback, so a larger `lines` cannot recover a long
   completed response. Codex and Claude Code both run in the alt screen; the
   approval prompt is always in the visible viewport, which is what sheepdog's
-  `summarize_block` needs. `recent_unwrapped` + `lines:120` still returned the
+  the prompt parser needs. `recent_unwrapped` + `lines:120` still returned the
   full visible content plus what was on screen before.
 
 For the captured Codex approval screen see
@@ -481,7 +481,7 @@ scratch directory or answer the dialog before prompting.
 
 ---
 
-## 8. Plugin system (feeds the §3.8 shim)
+## 8. Plugin system (herdr's own; sheepdog ships no plugin)
 
 **There is no `herdr plugin install <local path>` in the plan's sense.**
 `herdr plugin install` accepts only GitHub shorthand (`owner/repo[/subdir]`,
@@ -553,8 +553,10 @@ a `warnings` entry. `pane.updated`, `pane.output_changed` and
     (`~/.local/state/herdr/plugins/<id>`), `HERDR_WORKSPACE_ID`, `HERDR_TAB_ID`,
     `HERDR_PANE_ID` (= the event's pane).
   Full dump: `testdata/herdr/plugin-hook-env-dump.txt`.
-- Hooks fire for every pane (fleet-wide), so the shim is the cheap fleet-wide
-  channel the socket subscription lacks. Latency: the two hooks for a
+- Hooks fire for every pane (fleet-wide), so a hook script would be a cheap
+  fleet-wide channel; sheepdog does not use one (the socket subscription is
+  its only event source, and `POST /api/herdr/event` stays open for anything
+  that wants to feed the watcher). Latency: the two hooks for a
   `report-agent` call started within ~20 ms of the event.
 - Hooks are **only** invoked for events emitted through `emit_event`; the
   `message` passed to `pane.report_agent` is stored in the pane's

@@ -222,7 +222,8 @@ func TestPromiseMatchingAndUrgency(t *testing.T) {
 
 	h.block("w5:p1", "codex-approval-prompt.screen.txt")
 	got := h.pusher.all()
-	if len(got) != 2 || got[1].Text != "As you asked: auth is asking whether it can run a command to create hello.txt." || got[1].Urgency != voice.UrgencyIdle {
+	// One line for the block: the kept promise carries the question.
+	if len(got) != 1 || got[0].Text != `As you asked: auth asks to run printf '%s\n' 'hello from codex.' > hello.txt.` || got[0].Urgency != voice.UrgencyIdle {
 		t.Fatalf("block pushes = %+v", got)
 	}
 	h.transition("w5:p1", herdr.StateBlocked, herdr.StateWorking)
@@ -234,7 +235,7 @@ func TestPromiseMatchingAndUrgency(t *testing.T) {
 	}
 	h.transition("w6:p1", herdr.StateWorking, herdr.StateIdle)
 	got = h.pusher.all()
-	if last := got[len(got)-1]; last.Text != "As you asked: docs finished: did something the screen does not show." {
+	if last := got[len(got)-1]; last.Text != "As you asked: docs finished." {
 		t.Errorf("finish push = %+v", last)
 	}
 	status := map[string]string{}
@@ -253,7 +254,7 @@ func TestPromiseMatchingAndUrgency(t *testing.T) {
 func TestPromiseNotKeptOnInterruptedFinish(t *testing.T) {
 	h := newHarness(t)
 	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
-	h.call(ToolPropose, map[string]any{"instruction": "tell auth to run the tests"})
+	h.send("w5:p1", "run the tests")
 	if _, err := h.sup.createPromise("w5:p1", brain.PromiseRequest{Text: "tell me when it's done", Event: "done"}); err != nil {
 		t.Fatal(err)
 	}
@@ -285,7 +286,7 @@ func TestPromiseSurvivesRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = b.Close() })
-	sup, err := New(store, h.client, h.llm, nil, h.pusher, log, Config{Now: h.clock.Now, Brain: b, Chattiness: string(Quiet)})
+	sup, err := New(store, h.client, nil, h.pusher, log, Config{Now: h.clock.Now, Brain: b, Chattiness: string(Quiet)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -311,7 +312,7 @@ func TestPromiseSurvivesRestart(t *testing.T) {
 		t.Errorf("record = %+v", got)
 	}
 	res, _ = sup.Briefing(context.Background())
-	if strings.Contains(res.Spoken, "You asked me") {
+	if strings.Contains(res.Spoken, "You asked me to tell you when auth finishes.") {
 		t.Errorf("briefing still mentions the kept promise: %q", res.Spoken)
 	}
 }
@@ -404,9 +405,6 @@ func TestPromiseInBriefingAndRecall(t *testing.T) {
 	res := h.call(ToolBriefing, nil)
 	if !strings.HasSuffix(res.Spoken, " You asked me to tell you when auth finishes and when docs asks something.") {
 		t.Errorf("briefing = %q", res.Spoken)
-	}
-	if h.llm.count("summarize_done")+h.llm.count("spoken_answer") != 0 {
-		t.Error("briefing made a model call")
 	}
 	res = h.call(ToolAsk, map[string]any{"question": "did I ask you to tell me anything?"})
 	if res.Spoken != "You asked to be told when auth finishes." {

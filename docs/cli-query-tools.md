@@ -189,8 +189,8 @@ Runner notes for WP4:
 - Parse: Codex → stdout text (or the last `agent_message` item with `--json`);
   Claude → `json.result`, error if `is_error`.
 - Expect **15–20 s** per call with default reasoning settings and
-  **$0.03–0.45** per Claude call; the plan's 60 s timeout is adequate, the
-  `spoken_answer` step must add its own latency budget.
+  **$0.03–0.45** per Claude call; the plan's 60 s timeout is adequate, and
+  the brain turn that reads the output adds its own latency on top.
 
 ## 4. Deviations from sheepdog-v1-plan.md
 

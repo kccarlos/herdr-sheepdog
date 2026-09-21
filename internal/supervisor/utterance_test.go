@@ -292,9 +292,9 @@ func TestStopAfterTheTurnActedInterrupts(t *testing.T) {
 }
 
 // (7c) A second utterance while one is in flight must not push the
-// first one's words down the template path: the older turn keeps the
-// brain, and nothing is sent twice.
-func TestSecondUtteranceDoesNotFallBackToTheTemplatePath(t *testing.T) {
+// first one's words to be answered from the roster: the older turn
+// keeps the brain, and nothing is sent twice.
+func TestSecondUtteranceDoesNotDisplaceTheFirst(t *testing.T) {
 	release := make(chan struct{})
 	m := braintest.NewModel(braintest.Step{Block: release, Text: braintest.Reply("auth is working.", "")})
 	m.Default = &braintest.Step{Text: braintest.Reply("auth is still working.", "")}
@@ -315,9 +315,6 @@ func TestSecondUtteranceDoesNotFallBackToTheTemplatePath(t *testing.T) {
 	<-first
 	<-second
 
-	if h.llm.calls["resolve_instruction"] != 0 {
-		t.Errorf("the template path ran %d times; the brain answered both", h.llm.calls["resolve_instruction"])
-	}
 	if got := h.promptRequests(); len(got) != 0 {
 		t.Errorf("something was sent to auth: %v", got)
 	}
@@ -336,26 +333,38 @@ func TestStopSentenceWithoutBrain(t *testing.T) {
 	}
 }
 
-// (9) With the brain off an utterance still reaches the template path,
-// which splits it crudely: "tell …" is an instruction, the rest a
-// question.
-func TestUtteranceFallsBackToTheTemplatePath(t *testing.T) {
+// (9) With the brain off the daemon answers from the roster and sends
+// nothing: judging what the words mean is the brain's work, and there
+// is no second model to guess with.
+func TestUtteranceWithoutABrainReportsStatus(t *testing.T) {
 	h := newHarness(t)
 	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
 	h.srv.SetScreen("w5:p1", fixture(t, "codex-working.screen.txt"))
 
-	if res := h.say("tell auth to run the tests"); !strings.HasSuffix(res.Spoken, "Sent.") {
+	want := "One agent: auth is working on something. " + noBrainTrailer
+	if res := h.say("tell auth to run the tests"); res.Spoken != want || res.Clarify {
 		t.Fatalf("instruction = %+v", res)
 	}
-	if got := h.promptRequests(); len(got) != 1 {
-		t.Fatalf("agent.prompt = %v", got)
+	if got := h.promptRequests(); len(got) != 0 {
+		t.Fatalf("something was sent with no brain: %v", got)
 	}
-	if res := h.say("what is it doing"); res.Spoken == "" {
+	if res := h.say("what is it doing"); res.Spoken != want {
 		t.Fatalf("question = %+v", res)
 	}
-	if h.llm.calls["spoken_answer"] != 1 {
-		t.Errorf("spoken_answer calls = %d, want 1", h.llm.calls["spoken_answer"])
+	// The agents it named count as dealt with, like a spoken briefing.
+	if h.sup.doneKind(agentRow(t, h, "w5:p1")) != pushDoneInvolved {
+		t.Error("the roster sentence did not count as a mention")
 	}
+}
+
+// agentRow reads one row from the state table.
+func agentRow(t *testing.T, h *harness, pane string) state.Agent {
+	t.Helper()
+	row, ok := h.store.Get(pane)
+	if !ok {
+		t.Fatalf("no agent %s", pane)
+	}
+	return row
 }
 
 // (10) The brain's note tool writes through the supervisor's notes

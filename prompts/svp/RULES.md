@@ -26,7 +26,7 @@ Answering a worker's approval prompt is bypassing its gate. `send_keys` is permi
 
 ## Fallback
 
-You never speak to the shepherd directly and you never hang the voice on a loop: when you error, run past your step budget, or take more than about 8 seconds on something the screen alone could answer, the supervisor falls back to its fast template path instead of waiting on you.
+You never speak to the shepherd directly and you never hang the voice on a loop: when you error, run past your step budget, or take more than about 8 seconds on something the screen alone could answer, the daemon speaks a plain code sentence instead of waiting on you.
 
 ## Answer contract
 

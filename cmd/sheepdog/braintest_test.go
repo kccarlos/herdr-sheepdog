@@ -35,8 +35,7 @@ func TestBrainTestFlagsAndValidation(t *testing.T) {
 // The fake model runs the whole chain without a network: mock herdr,
 // screen fixture, brain turn, events on stderr, reply on stdout.
 func TestBrainTestFakeEndToEnd(t *testing.T) {
-	t.Setenv("SHEEPDOG_LLM_BASE_URL", "http://127.0.0.1:1/v1")
-	t.Setenv("SHEEPDOG_LLM_API_KEY", "x")
+	noKeys(t)
 	t.Setenv("SHEEPDOG_DATA_DIR", t.TempDir())
 	var stdout, stderr bytes.Buffer
 	code := run(context.Background(), []string{"brain-test", "--fake", "--question", "what did auth say?", "--agent", "auth", "--state", "working", "--fixture", "../../testdata/herdr/codex-working.screen.txt", "--say", "what did auth say?", "--config", "/nonexistent/config.toml"}, &stdout, &stderr)
@@ -67,9 +66,6 @@ func TestBrainTestFakeEndToEnd(t *testing.T) {
 		if !strings.Contains(stderr.String(), ev) {
 			t.Errorf("stderr lacks %s", ev)
 		}
-	}
-	if strings.Contains(stderr.String(), `"type":"llm.call"`) {
-		t.Error("the template path ran")
 	}
 	// Without a key and without --fake it refuses.
 	stdout.Reset()

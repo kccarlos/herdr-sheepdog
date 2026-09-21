@@ -43,17 +43,19 @@ func (h *harness) pushTexts() []string {
 // normal; every finish and "started on" at chatty; "idle again" never.
 func TestChattinessLevels(t *testing.T) {
 	const (
-		authQ    = "auth is asking whether it can run a command to create hello.txt."
-		docsQ    = "docs is asking whether it can create claude.txt."
-		replaced = "Dropping the earlier question from auth; now docs is asking whether it can create claude.txt."
-		docsDone = "docs finished: created claude.txt with the line hello from claude."
-		vpsDone  = "vps finished: created hello.txt with the requested line."
+		authQ    = `auth asks to run printf '%s\n' 'hello from codex.' > hello.txt.`
+		docsQ    = "docs is asking do you want to create claude.txt."
+		replaced = "Dropping the earlier question from auth; now docs is asking do you want to create claude.txt."
+		docsDone = "docs finished."
+		vpsDone  = "vps finished."
 		started  = `vps started on "run the tests".`
-		trust    = "vps is showing its startup trust dialog."
-		exit     = "auth has exited while it was busy."
+		// The trust dialog is a numbered prompt like any other, so it is
+		// a question at every level now that code parses it.
+		trust = "vps is asking do you trust the contents of this directory."
+		exit  = "auth has exited while it was busy."
 	)
 	want := map[Chattiness][]string{
-		Quiet:  {authQ, docsQ, exit},
+		Quiet:  {authQ, docsQ, trust, exit},
 		Normal: {authQ, replaced, docsDone, vpsDone, trust, exit},
 		Chatty: {authQ, replaced, docsDone, vpsDone, started, vpsDone, trust, exit},
 	}
@@ -75,7 +77,7 @@ func TestChattinessLevels(t *testing.T) {
 			h.srv.SetScreen("w7:p1", fixture(t, "codex-after-approval.screen.txt"))
 			h.transition("w7:p1", herdr.StateWorking, herdr.StateDone)
 			// 5. an instruction to vps is picked up, done, then idle again.
-			h.call(ToolPropose, map[string]any{"instruction": "tell vps to run the tests"})
+			h.send("w7:p1", "run the tests")
 			h.transition("w7:p1", herdr.StateDone, herdr.StateWorking)
 			h.transition("w7:p1", herdr.StateWorking, herdr.StateDone)
 			h.transition("w7:p1", herdr.StateDone, herdr.StateIdle)
@@ -87,7 +89,7 @@ func TestChattinessLevels(t *testing.T) {
 				t.Errorf("pushes at %s:\n got %q\nwant %q", level, got, want[level])
 			}
 			// last_result is recorded at every level, announced or not.
-			if row, _ := h.store.Get("w7:p1"); row.LastResult == nil || row.LastResult.Spoken != "created hello.txt with the requested line" {
+			if row, _ := h.store.Get("w7:p1"); row.LastResult == nil || row.LastResult.Spoken != doneResult {
 				t.Errorf("vps last_result at %s = %+v", level, row.LastResult)
 			}
 			// The suppressed pushes are visible in the log.
@@ -104,7 +106,7 @@ func TestChattinessLevels(t *testing.T) {
 // silent periodic one does not.
 func TestNormalDoneWindow(t *testing.T) {
 	h := threeAgents(t)
-	h.call(ToolPropose, map[string]any{"instruction": "tell vps to run the tests"})
+	h.send("w7:p1", "run the tests")
 	h.clock.Advance(31 * time.Minute)
 	h.transition("w7:p1", herdr.StateWorking, herdr.StateDone)
 	if got := h.pushTexts(); len(got) != 0 {
@@ -127,10 +129,10 @@ func TestNormalDoneWindow(t *testing.T) {
 	if got := h.pushTexts(); len(got) != 1 || !strings.HasPrefix(got[0], "vps finished") {
 		t.Fatalf("finish after a spoken briefing pushed %q", got)
 	}
-	// Asking about an agent counts too, and the window is configurable.
+	// Reading an agent's screen counts too, and the window is configurable.
 	h2 := threeAgents(t, func(c *Config) { c.RecentWindow = time.Hour })
 	h2.srv.SetScreen("w7:p1", "working away")
-	h2.call(ToolAsk, map[string]any{"question": "what is vps doing", "agent": "vps"})
+	h2.sup.touch("w7:p1")
 	h2.clock.Advance(45 * time.Minute)
 	h2.transition("w7:p1", herdr.StateWorking, herdr.StateDone)
 	if got := h2.pushTexts(); len(got) != 1 || !strings.HasPrefix(got[0], "vps finished") {
@@ -147,7 +149,7 @@ func TestStartedOnlyForOurInstruction(t *testing.T) {
 	if got := h.pushTexts(); len(got) != 0 {
 		t.Fatalf("spontaneous working pushed %q", got)
 	}
-	h.call(ToolPropose, map[string]any{"instruction": "tell auth to write the readme"})
+	h.send("w5:p1", "write the readme")
 	// auth's approval prompt displaces the in-flight instruction; leaving
 	// the prompt after the answer is not a start.
 	h.block("w5:p1", "codex-approval-prompt.screen.txt")
@@ -201,14 +203,14 @@ func TestSettingsRuntimeChangePersists(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sup2, err := New(store2, h.client, h.llm, nil, h.pusher, h.log, Config{Now: h.clock.Now, Chattiness: "quiet"})
+	sup2, err := New(store2, h.client, nil, h.pusher, h.log, Config{Now: h.clock.Now, Chattiness: "quiet"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if sup2.Settings().Chattiness != Chatty {
 		t.Errorf("after restart = %s, want the session's chatty over the configured quiet", sup2.Settings().Chattiness)
 	}
-	if _, err := New(store2, h.client, h.llm, nil, h.pusher, h.log, Config{Chattiness: "loud"}); err == nil {
+	if _, err := New(store2, h.client, nil, h.pusher, h.log, Config{Chattiness: "loud"}); err == nil {
 		t.Error("New accepted an invalid configured level")
 	}
 	// A fresh session takes the configured value.
@@ -216,7 +218,7 @@ func TestSettingsRuntimeChangePersists(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sup3, err := New(store3, h.client, h.llm, nil, h.pusher, h.log, Config{Chattiness: "quiet"})
+	sup3, err := New(store3, h.client, nil, h.pusher, h.log, Config{Chattiness: "quiet"})
 	if err != nil {
 		t.Fatal(err)
 	}

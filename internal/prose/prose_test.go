@@ -1,4 +1,4 @@
-package llm
+package prose
 
 import (
 	"strings"
@@ -98,7 +98,7 @@ func TestSpokenEnforcesD9(t *testing.T) {
 	if got := Spoken("a. b. c.", 0); got != "a. b. c." {
 		t.Errorf("no limit: %q", got)
 	}
-	if endSentence("Hello") != "Hello." || endSentence("Hi!") != "Hi!" || endSentence("") != "" || endSentence(`say "no"`) != `say "no"` {
-		t.Error("endSentence")
+	if EndSentence("Hello") != "Hello." || EndSentence("Hi!") != "Hi!" || EndSentence("") != "" || EndSentence(`say "no"`) != `say "no"` {
+		t.Error("EndSentence")
 	}
 }

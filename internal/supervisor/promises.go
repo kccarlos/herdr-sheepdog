@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
-	"github.com/kccarlos/herdr-sheepdog/internal/llm"
+	"github.com/kccarlos/herdr-sheepdog/internal/prose"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
@@ -246,5 +246,5 @@ func promiseCondition(p state.Promise) string {
 // spokenLine applies D9 to a brain line for the ear: two sentences at
 // most, scrubbed, terminated.
 func spokenLine(text string) string {
-	return sentence(strings.TrimSpace(llm.Spoken(text, 2)))
+	return sentence(strings.TrimSpace(prose.Spoken(text, 2)))
 }

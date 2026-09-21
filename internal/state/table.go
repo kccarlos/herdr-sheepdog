@@ -34,7 +34,7 @@ type Agent struct {
 	LastTask  string `json:"last_task,omitempty"`
 	LastBlock *Block `json:"last_block,omitempty"`
 	// LastResult is what the agent last did, summarised for the ear when
-	// it finished (the summarize_done pass).
+	// it finished.
 	LastResult         *Result `json:"last_result,omitempty"`
 	LastSeenScreenHash string  `json:"last_seen_screen_hash,omitempty"`
 	// LastInteraction is when the user last dealt with this agent: it was
@@ -62,13 +62,12 @@ type Block struct {
 	Answered bool      `json:"answered"`
 }
 
-// Result is the summary of an agent's finished turn.
+// Result is what the agent last finished, as the shepherd heard it.
 type Result struct {
-	// Spoken is the past-tense phrase completing "<alias> finished: …".
-	Spoken string `json:"spoken"`
-	// Outcome is success, failed, partial or unknown.
-	Outcome string    `json:"outcome"`
-	At      time.Time `json:"at"`
+	// Spoken is the announcement made about the finish: the brain's line
+	// when it phrased one, else the daemon's "finished".
+	Spoken string    `json:"spoken"`
+	At     time.Time `json:"at"`
 	// Detail is the brain's announce detail for the finish, when it produced
 	// one: what the finish related to and what was still open (for
 	// recall and the ledger).
