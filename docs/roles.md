@@ -113,7 +113,8 @@ received an instruction within `supervisor.cancel_window_s` (30 s) →
 leave an open worker prompt open (stop is not "no") → one short brain
 turn saying what was stopped and offering the correction. Undoing a
 worker's edits is an instruction to the worker, not a stop. Event turns
-are not cancelled by stop. Logged as `supervisor.stopped {phase, what}`.
+are not cancelled by stop. Logged as `supervisor.stopped {phase, what,
+trigger}` (`stop_tool` or the bare-word fast path).
 
 ## Pushes
 
@@ -169,13 +170,23 @@ are Go, never prompt text.
 
 ## Status (which parts of this page the code has)
 
-As of `main` after #28 (`b731d92`): the brain, its transcript and
-engine, provenance, promises, push judgment with the ceiling, the rail
-on `send_keys`, prompt overrides, the model/provider switch — all in.
-**Not yet:** the voice still has seven tools (`briefing`, `ask`,
-`propose`, `confirm`, `cancel`, `note`, `none`) that execute; the
-template LLM (`[llm]`, `summarize_*` templates) still produces the fast
-block/finish sentences and the fallback; `investigate`, the stop
-procedure, the no-interruption rule and `blocked → blocked` detection
-do not exist. The order in which they land is in
-`docs/issues-2026-09-18.md`.
+In, as of the D1-revised PR: the brain, its transcript and engine,
+provenance, promises, push judgment with the ceiling, the rail on
+`send_keys`, prompt overrides, the model/provider switch; the voice's
+**two tools** (`to_supervisor`, `stop`) and nothing else; brain-side
+intent (`KindUtterance`, with the roster sentence, the pending prompt's
+option set and the open promises in the request, so a status question
+costs no tool call); the brain's `note` tool; `pending` plumbed from the
+reply to the voice's tool result; both **code fast paths** (a bare
+answer to the one open prompt, a bare stop word); the **stop procedure**
+(`internal/supervisor/stop.go`, `supervisor.cancel_window_s`, logged as
+`supervisor.stopped {phase, what, trigger}`); `voice.name` and the
+user-facing names on `/debug`.
+
+**Not yet:** the template LLM (`[llm]`, `summarize_*` templates) still
+produces the fast block/finish sentences and is still the fallback when
+the brain is off or fails; `investigate` (so nothing sets `pending`
+yet); the no-interruption rule (INTERRUPT is not downgraded while the
+voice is speaking, and an announce addition to a block is not dropped
+when the block is resolved); `blocked → blocked` detection. The order in
+which they land is in `docs/issues-2026-09-18.md`.

@@ -60,7 +60,7 @@ with `--brain=fake` and its two fake providers.
    sequence in one daemon run, which needs Gemini quota.
 5. One voice session (ask the user; audio is the quota-hungry path): Codex in `--sandbox read-only -a on-request`; say "why did that one fail?" after a finish, "let me know when it's done", "stop" mid-echo.
 
-## Next: the 2026-09-18 redesign (not started)
+## Next: the 2026-09-18 redesign (PR 1 of 7 in review)
 
 `docs/issues-2026-09-18.md` records what the headset sessions on
 2026-09-18 showed (the assistant answering approval prompts by itself,
@@ -69,7 +69,13 @@ agreed with the CEO: one decision-maker (the assistant keeps only
 `to_supervisor(text)` and `stop()`; the SVP owns intent behind the
 rail), stop as a per-phase code procedure, nothing interrupting the
 assistant mid-sentence, `blocked → blocked` detection. Work order is at
-the end of that file; the first PR is the D1-revised change. Names from
+the end of that file. PR 1 (D1-revised) is in review: the voice's two
+tools, `brain.KindUtterance` with the roster sentence in the request,
+the `note` tool on the brain, the code fast paths, the stop procedure
+(`supervisor.cancel_window_s`), `voice.name` and the `/debug` labels.
+Still open from that list: the template-LLM removal (2),
+investigations (3), `blocked → blocked` (4), and no mid-sentence
+interruption (5), which this PR deliberately left alone. Names from
 here on: shepherd (operator), the dog (voice + brain), the flock
 (workers); `docs/roles.md` is the contract and maps the old CEO / SVP /
 assistant terms still present in code.

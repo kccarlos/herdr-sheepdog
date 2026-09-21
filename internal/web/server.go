@@ -83,7 +83,10 @@ type Deps struct {
 	// means no system prompt configured (404).
 	SystemPrompt func() string
 	Aliases      []string
-	Version      string
+	// VoiceName is the dog's own name (config voice.name), served on
+	// /api/state so the pages can label its side of the conversation.
+	VoiceName string
+	Version   string
 	// ReloadPrompts, when set, backs POST /api/prompts/reload: it
 	// rescans the prompt override directory and returns the resulting
 	// file list for the response and the prompts.reloaded log line.

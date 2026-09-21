@@ -1,4 +1,4 @@
-// Supervisor tab of /debug: the SVP's transcript as a chat (the CEO's
+// Supervisor tab of /debug: the brain's transcript as a chat (the shepherd's
 // words right, the assistant's replies muted left, the SVP's replies
 // left in its own hue, tool calls collapsed between them, pushes, worker
 // events, the window marker and per-turn headers) under the prompt-budget
@@ -159,7 +159,7 @@ export class SupervisorView {
       frag.appendChild(node);
       shown++;
     }
-    if (shown === 0 && !this.off && !this.error) frag.appendChild(el('p', 'muted empty', 'No transcript yet: the brain records the CEO\'s words, pushes and worker events as they happen, and its own turns when the assistant asks it something.'));
+    if (shown === 0 && !this.off && !this.error) frag.appendChild(el('p', 'muted empty', 'No transcript yet: the brain records the shepherd\'s words, pushes and worker events as they happen, and its own turns when the assistant asks it something.'));
     this.root.replaceChildren(frag);
     this.follow.end(wasAtBottom, items.length);
   }
@@ -276,7 +276,7 @@ export class SupervisorView {
     switch (it.kind) {
       case 'turn': return this.renderTurn(it);
       case 'marker': return this.renderMarker(it);
-      case 'ceo': return this.renderBubble(it, 'user', 'CEO', it.text);
+      case 'ceo': return this.renderBubble(it, 'user', 'shepherd', it.text);
       case 'assistant': return this.renderBubble(it, 'assistant svp-assistant', 'assistant', it.text);
       case 'reply': return this.renderReply(it);
       case 'push': return this.renderPush(it);
@@ -332,7 +332,7 @@ export class SupervisorView {
     bubble.appendChild(el('span', 'text', it.spoken));
     const badges = el('span', 'badges');
     if (!it.json) badges.appendChild(el('span', 'badge error', 'not the answer contract'));
-    if (it.needsUser) badges.appendChild(el('span', 'badge needs-user', 'needs the CEO'));
+    if (it.needsUser) badges.appendChild(el('span', 'badge needs-user', 'needs the shepherd'));
     if (it.clarify) badges.appendChild(el('span', 'badge clarify', 'clarify'));
     if (it.options.length) badges.appendChild(el('span', 'badge options', `${it.options.length} option${it.options.length === 1 ? '' : 's'}`));
     if (badges.childNodes.length) bubble.appendChild(badges);
@@ -382,7 +382,7 @@ export class SupervisorView {
       const body = el('div', 'body');
       if (d) {
         body.appendChild(el('div', 'label', 'push judgment (brain.push_decision)'));
-        const bits = [`via ${d.via}`, d.requested ? `brain asked ${d.requested}` : 'no brain line', `applied ${d.applied}`, `reason ${d.reason}`, `ceiling ${d.ceiling}`, d.late ? 'late: the template was already spoken' : '', d.needsUser ? 'needs the CEO' : '', d.relatesTo ? `relates to "${d.relatesTo}"` : '', d.kept.length ? `keeps ${d.kept.join(', ')}` : '', d.error ? `error: ${d.error}` : ''];
+        const bits = [`via ${d.via}`, d.requested ? `brain asked ${d.requested}` : 'no brain line', `applied ${d.applied}`, `reason ${d.reason}`, `ceiling ${d.ceiling}`, d.late ? 'late: the template was already spoken' : '', d.needsUser ? 'needs the shepherd' : '', d.relatesTo ? `relates to "${d.relatesTo}"` : '', d.kept.length ? `keeps ${d.kept.join(', ')}` : '', d.error ? `error: ${d.error}` : ''];
         body.appendChild(el('div', 'text', bits.filter(Boolean).join(' · ')));
         if (d.template && d.template !== it.text) body.appendChild(el('div', 'muted small', `template: "${d.template}"`));
         if (d.detail) body.appendChild(el('div', 'muted small', `detail: ${d.detail}`));
@@ -402,7 +402,7 @@ export class SupervisorView {
     let text;
     switch (it.type) {
       case 'yielded':
-        text = `yielded: turn ${it.turn} (${it.agent} ${it.event}) gave way to ${it.ceoWaiting === 1 ? 'a CEO turn' : `${it.ceoWaiting} CEO turns`} before step ${it.step}; the template spoke instead`;
+        text = `yielded: turn ${it.turn} (${it.agent} ${it.event}) gave way to ${it.ceoWaiting === 1 ? 'a shepherd turn' : `${it.ceoWaiting} shepherd turns`} before step ${it.step}; the template spoke instead`;
         break;
       case 'coalesced':
         text = `coalesced: a newer ${it.agent} ${it.event} event replaced the queued ${it.agent} turn; the template spoke instead`;

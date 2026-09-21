@@ -1,5 +1,5 @@
 // Swimlane (sequence) layout for /debug: turns the flat event log into
-// time-ordered rows across four lanes — You · Voice model · Supervisor ·
+// time-ordered rows across four lanes — Shepherd · Voice · Brain · Flock /
 // herdr / LLM / CLI — with arrows for the interactions between them.
 // Pure functions, unit-tested with `make test-web`; the DOM rendering is
 // swimlane-view.js. Decision D10: the page is a viewer of the log.
@@ -28,11 +28,14 @@
 // its result carry `parentKey` = that inner call.
 import { NESTED_TYPES, DIVIDERS, DAEMON_DIVIDERS, argSummary, eventSummary, fmtMs, ToolPairer, Fragments, toolFamily, withProvider } from './grouping.js';
 
+// The names of docs/roles.md: the shepherd operates, the dog's two
+// halves are its voice and its brain, the flock are the herdr workers.
+// Lane ids stay as they are: they key the event routing, not the label.
 export const LANES = [
-  { id: 'you', label: 'You' },
-  { id: 'voice', label: 'Voice model' },
-  { id: 'sup', label: 'Supervisor' },
-  { id: 'herdr', label: 'herdr / LLM / CLI' },
+  { id: 'you', label: 'Shepherd' },
+  { id: 'voice', label: 'Voice' },
+  { id: 'sup', label: 'Brain' },
+  { id: 'herdr', label: 'Flock / CLI' },
 ];
 const LANE_INDEX = Object.fromEntries(LANES.map((l, i) => [l.id, i]));
 
@@ -88,7 +91,7 @@ class Builder {
     this.chainSeq = 0;
     this.tools = new ToolPairer(); // voice tool calls waiting for their result
     this.inner = new Map(); // prefix → ToolPairer for nested families (brain.*)
-    this.inFrag = new Fragments((ts) => this.card({ ts, lane: 'you', type: 'voice.transcript.in', source: 'voice', title: 'you said', events: [], merged: true }));
+    this.inFrag = new Fragments((ts) => this.card({ ts, lane: 'you', type: 'voice.transcript.in', source: 'voice', title: 'the shepherd said', events: [], merged: true }));
     this.outFrag = new Fragments((ts) => this.card({ ts, lane: 'voice', type: 'voice.transcript.out', source: 'voice', title: '🔊 spoke', events: [], merged: true }));
     this.turn = null; // { chain, input } — the user turn tool calls adopt
     this.loose = null; // { chain, work } — supervisor work with no tool call open
@@ -485,7 +488,7 @@ class Builder {
         // that leads to a push is shown on that push (skip never does).
         if (p.urgency_applied !== 'skip') this.decisions.push(p);
       } else if (type === 'brain.yielded' || type === 'brain.event_coalesced') {
-        card.title = type === 'brain.yielded' ? 'yielded to a CEO turn' : 'event turn coalesced';
+        card.title = type === 'brain.yielded' ? 'yielded to a shepherd turn' : 'event turn coalesced';
         card.cls.push('brain');
       } else if (type === 'brain.model_changed') {
         card.title = 'model switched';

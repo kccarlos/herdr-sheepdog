@@ -11,7 +11,7 @@
 //                with the matching brain.turn / brain.fallback data
 //   marker       the window boundary: everything before it is on disk
 //                only (compacted away or never in the window)
-//   ceo          the CEO's verbatim words (ceo_utterance)
+//   ceo          the shepherd's verbatim words (ceo_utterance)
 //   assistant    what the assistant said (assistant_said)
 //   push         a push the supervisor sent, with its urgency
 //   worker       a herdr transition ("auth: working → done")
@@ -20,7 +20,7 @@
 //   tool         brain_tool_call paired with its brain_tool_result by id
 //   reply        the SVP's answer-contract reply (parsed when it is JSON)
 //   compaction   a compaction_summary with the compaction's numbers
-//   note         a note the CEO asked to be remembered
+//   note         a note the shepherd asked to be remembered
 //   promise      a promise record (made by the promise tool, or kept /
 //                expired / cancelled by the supervisor), with the status
 //                the promise.* events report since
@@ -28,7 +28,7 @@
 //                (event_screen), pruned like a tool result
 //   brainEvent   a small line for a brain.* event that has no message of
 //                its own: a push judgment that spoke nothing (skip), an
-//                event turn that yielded to a CEO turn, a queued event
+//                event turn that yielded to a shepherd turn, a queued event
 //                turn a newer one replaced (placed by timestamp)
 //   other        any kind this file does not know yet
 // A push item carries `decision` (the brain.push_decision that produced
@@ -37,7 +37,7 @@ import { argSummary } from './grouping.js';
 
 /** The transcript kinds (internal/brain MessageKind) and their meter group. */
 export const KIND_GROUPS = {
-  ceo_utterance: { id: 'ceo', label: 'CEO' },
+  ceo_utterance: { id: 'ceo', label: 'shepherd' },
   assistant_said: { id: 'assistant', label: 'assistant' },
   push: { id: 'push', label: 'pushes' },
   worker_event: { id: 'worker', label: 'worker events' },

@@ -53,7 +53,7 @@ func TestDirectAnswer(t *testing.T) {
 	if call.Config.ThinkingConfig == nil || call.Config.ThinkingConfig.ThinkingLevel != genai.ThinkingLevelLow {
 		t.Errorf("thinking config = %+v", call.Config.ThinkingConfig)
 	}
-	if len(call.Config.Tools) != 1 || len(call.Config.Tools[0].FunctionDeclarations) != 8 {
+	if len(call.Config.Tools) != 1 || len(call.Config.Tools[0].FunctionDeclarations) != 9 {
 		t.Errorf("tools = %+v", call.Config.Tools)
 	}
 }

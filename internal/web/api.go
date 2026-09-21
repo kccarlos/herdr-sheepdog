@@ -75,7 +75,10 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 
 // VoiceInfo is the daemon's view of the voice side.
 type VoiceInfo struct {
-	Mode            string `json:"mode"` // gemini | off
+	Mode string `json:"mode"` // gemini | off
+	// Name is what the dog calls itself (config voice.name), so the
+	// /debug views can label its side of the conversation.
+	Name            string `json:"name,omitempty"`
 	Status          string `json:"status"`
 	Reason          string `json:"reason,omitempty"`
 	Muted           bool   `json:"muted"`
@@ -91,7 +94,7 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 		Agents:        agents,
 		PendingAction: snap.PendingAction,
 		Session:       snap.Session,
-		Voice:         VoiceInfo{Mode: s.deps.VoiceMode, Status: hs.status.String(), Reason: hs.reason, Muted: hs.muted, Stalled: hs.stalled, ClientConnected: hs.client},
+		Voice:         VoiceInfo{Mode: s.deps.VoiceMode, Name: s.deps.VoiceName, Status: hs.status.String(), Reason: hs.reason, Muted: hs.muted, Stalled: hs.stalled, ClientConnected: hs.client},
 		Settings:      s.settings(),
 		Brain:         s.brainInfo(),
 		Herdr:         s.deps.HerdrMode,

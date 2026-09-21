@@ -1,5 +1,5 @@
 // Conversation tab of /debug: renders the items produced by conversation.js
-// as a chat transcript (user bubbles right, the dog left, tool calls and
+// as a chat transcript (shepherd bubbles right, the dog left, tool calls and
 // supervisor pushes as collapsible rows between them, session dividers).
 // Vanilla DOM, no framework (decision D11).
 import { Grouper } from './conversation.js';
@@ -8,6 +8,15 @@ import { el, fmtTime, jsonPre, Openable, Follow } from './dom.js';
 
 const MAX_ITEMS = 1500;
 const STALL_MS = 10000;
+
+// What the dog calls itself (config voice.name), for its own bubbles;
+// setDogName is called with /api/state's voice.name.
+let dogName = 'Sheepdog';
+
+/** Sets the label used for the dog's bubbles (no-op for an empty name). */
+export function setDogName(name) {
+  if (name) dogName = name;
+}
 
 export class ConversationView {
   constructor(root) {
@@ -132,7 +141,7 @@ export class ConversationView {
   renderMessage(it, who) {
     const wrap = el('div', `msg ${who}${it.final ? '' : ' partial'}${it.synthetic ? ' synthetic' : ''}`);
     const bubble = el('div', 'bubble');
-    bubble.appendChild(el('span', 'who', who === 'user' ? 'you' : 'dog'));
+    bubble.appendChild(el('span', 'who', who === 'user' ? 'shepherd' : dogName));
     bubble.appendChild(el('span', 'text', it.text + (it.final ? '' : ' …')));
     wrap.appendChild(bubble);
     const meta = el('div', 'meta');
