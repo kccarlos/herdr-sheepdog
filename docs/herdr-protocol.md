@@ -108,7 +108,14 @@ CLI wrappers print server errors as JSON on stderr with exit status 1.
     `idle` when they had it focused when the agent finished
     (`herdr/src/pane/state.rs`'s "seen" bit) — `done` vs `idle` only encodes
     whether the user was looking, not whether the agent is finished.
-  - `blocked` = herdr recognised an approval/question UI.
+  - `blocked` = herdr recognised an approval/question UI. herdr reports
+    this only on change: a worker that answers one prompt and is already
+    showing the next within herdr's own poll window never leaves
+    `blocked`, so no `pane.agent_status_changed` event exists for it —
+    sheepdog fills the gap itself with a post-answer poll and a periodic
+    reconciler that read the pane directly and raise a synthetic
+    `blocked → blocked` transition (`docs/roles.md` "blocked → blocked is
+    a block").
   - `unknown` = agent present but unclassifiable (also emitted when an agent
     exits and the pane returns to a shell).
 - The state a hook may *report* (`pane.report_agent`) is the narrower

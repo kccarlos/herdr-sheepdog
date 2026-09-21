@@ -212,6 +212,37 @@ func TestInjectBlockedChainAndConfirm(t *testing.T) {
 	}
 }
 
+// TestInjectScreenEndpoint: /api/inject/screen swaps a synthetic pane's
+// text without a transition — no new pending action, no push — the mock
+// counterpart of a worker showing a new prompt with herdr's own status
+// report unchanged (docs/roles.md "blocked -> blocked is a block").
+func TestInjectScreenEndpoint(t *testing.T) {
+	h := newHarness(t, harnessOpts{})
+	h.postJSON("/api/inject/blocked", map[string]any{"pane_id": "fake:1", "alias": "auth", "screen": codexScreen(t)}, nil)
+	before := len(h.types())
+
+	var res injectResponse
+	code, body := h.postJSON("/api/inject/screen", map[string]any{"pane_id": "fake:1", "screen": "a different screen entirely"}, &res)
+	if code != http.StatusOK || !res.OK || res.Agent.State != herdr.StateBlocked {
+		t.Fatalf("inject screen = %d %s", code, body)
+	}
+	if got := h.types(); len(got) != before+1 || got[len(got)-1] != "web.inject" {
+		t.Fatalf("screen swap logged more than web.inject: %v", got[before:])
+	}
+	var st StateResponse
+	if code := h.getJSON("/api/state", &st); code != http.StatusOK || st.PendingAction == nil {
+		t.Fatalf("the earlier pending action was dropped: %+v", st)
+	}
+	code, _ = h.postJSON("/api/inject/screen", map[string]any{"pane_id": "fake:1"}, nil)
+	if code != http.StatusBadRequest {
+		t.Fatalf("missing screen = %d", code)
+	}
+	code, _ = h.postJSON("/api/inject/screen", map[string]any{"pane_id": "nope", "screen": "x"}, nil)
+	if code != http.StatusConflict {
+		t.Fatalf("unknown pane = %d", code)
+	}
+}
+
 func TestPendingCancelAndProposeStop(t *testing.T) {
 	// With a brain (the reflex fake): an instruction is the brain's
 	// call, so the propose half of this chain needs one.

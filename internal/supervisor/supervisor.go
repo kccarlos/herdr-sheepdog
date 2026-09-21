@@ -77,6 +77,23 @@ type Config struct {
 	// agent a stop still interrupts it (default 30 s, docs/roles.md
 	// "Stop" phase 3).
 	CancelWindow time.Duration
+	// RepromptPoll is how long the post-answer poll watches a pane after
+	// keys go to it, in case it is already showing a different prompt
+	// within herdr's own poll window with no state change in between
+	// (docs/roles.md "blocked -> blocked is a block", reprompt.go). Zero
+	// (the default) turns the poll off: production always sets
+	// supervisor.reprompt_poll_s (10 s); a test that does not exercise
+	// this feature never spawns its goroutine.
+	RepromptPoll time.Duration
+	// RepromptPollInterval is the poll's cadence (default 1 s; tests
+	// only — not in CONFIG.md, the design fixes it at 1 s).
+	RepromptPollInterval time.Duration
+	// SnapshotInterval is how often the reconciler (reprompt.go) sweeps
+	// every blocked pane for a prompt the poll's window closed on or one
+	// that appeared while the daemon was down (default 30 s: the same
+	// cadence as the herdr Watcher's own session.snapshot diff, config
+	// snapshot_interval_s, though the two loops are not the same one).
+	SnapshotInterval time.Duration
 	// InvestigateMax is the sanity ceiling of one background
 	// investigation — the only time limit on its answer (default 600 s,
 	// docs/roles.md "Investigations and explanations").
@@ -122,6 +139,12 @@ func (c Config) withDefaults() Config {
 	if c.CancelWindow == 0 {
 		c.CancelWindow = 30 * time.Second
 	}
+	if c.RepromptPollInterval == 0 {
+		c.RepromptPollInterval = defaultRepromptPollInterval
+	}
+	if c.SnapshotInterval == 0 {
+		c.SnapshotInterval = 30 * time.Second
+	}
 	if c.AnnounceWait == 0 {
 		c.AnnounceWait = 2 * time.Second
 	}
@@ -163,6 +186,7 @@ type Supervisor struct {
 	interrupted   map[string]time.Time // pane -> when cancel sent Ctrl-C (suppresses the next "finished")
 	lastSubject   string               // pane most recently spoken about (last push subject or tool target)
 	mentioned     map[string]time.Time // pane -> when a spoken briefing last named it
+	lastPrompt    map[string]string    // pane -> signature of the last answer_prompt built for it (reprompt.go)
 	utterance     *inflightUtterance   // the to_supervisor call in flight (stop.go phases 1 and 2)
 	// investigating is the one running background job per pane
 	// (investigate.go).
@@ -190,7 +214,7 @@ func New(store *state.Store, h Herdr, querier Querier, pusher Pusher, log loggin
 	}
 	cfg.chattiness = level
 	s := &Supervisor{store: store, herdr: h, querier: querier, pusher: pusher, log: log, cfg: cfg, brain: cfg.Brain,
-		interrupted: map[string]time.Time{}, mentioned: map[string]time.Time{}, investigating: map[string]*liveInvestigation{}}
+		interrupted: map[string]time.Time{}, mentioned: map[string]time.Time{}, lastPrompt: map[string]string{}, investigating: map[string]*liveInvestigation{}}
 	// A querier that can keep a sub-agent session backs the investigate
 	// tool as well (investigate.go); one that cannot still answers
 	// run_cli.
@@ -208,14 +232,21 @@ func New(store *state.Store, h Herdr, querier Querier, pusher Pusher, log loggin
 // Brain returns the attached brain, or nil.
 func (s *Supervisor) Brain() *brain.Brain { return s.brain }
 
-// Run drives pending-action and promise expiry until ctx ends. It is
-// optional for tests that call ExpirePending / ExpirePromises directly.
+// Run drives pending-action and promise expiry, and the reprompt
+// reconciler, until ctx ends. It is optional for tests that call
+// ExpirePending / ExpirePromises / reconcileReprompts directly.
 func (s *Supervisor) Run(ctx context.Context) {
 	expiry := time.NewTicker(s.cfg.ExpiryTick)
 	defer expiry.Stop()
+	reconcile := time.NewTicker(s.cfg.SnapshotInterval)
+	defer reconcile.Stop()
 	// The sub-agent of a running investigation dies with the daemon, so
 	// nothing is left claiming an agent's one live slot.
 	defer s.cancelInvestigations("shutdown")
+	// Once at startup, the roster is already loaded (state.Open ran
+	// before New): catches a pane whose prompt changed while the daemon
+	// was down, which no post-answer poll ever ran for.
+	s.reconcileReprompts(ctx)
 	for {
 		select {
 		case <-ctx.Done():
@@ -223,6 +254,8 @@ func (s *Supervisor) Run(ctx context.Context) {
 		case <-expiry.C:
 			s.ExpirePending()
 			s.ExpirePromises()
+		case <-reconcile.C:
+			s.reconcileReprompts(ctx)
 		}
 	}
 }

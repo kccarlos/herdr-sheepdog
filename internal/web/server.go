@@ -193,6 +193,7 @@ func (s *Server) routes() error {
 	s.mux.HandleFunc("POST /api/inject/blocked", s.handleInjectBlocked)
 	s.mux.HandleFunc("POST /api/inject/done", s.handleInjectDone)
 	s.mux.HandleFunc("POST /api/inject/state", s.handleInjectState)
+	s.mux.HandleFunc("POST /api/inject/screen", s.handleInjectScreen)
 	s.mux.HandleFunc("POST /api/inject/remove", s.handleInjectRemove)
 	s.mux.HandleFunc("POST /api/inject/utterance", s.handleUtterance)
 	s.mux.HandleFunc("POST /api/herdr/event", s.handleHerdrEvent)

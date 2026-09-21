@@ -48,6 +48,14 @@ func (s *Supervisor) HandleTransition(ctx context.Context, t herdr.Transition) {
 	alias := aliasOr(row.Alias)
 	switch t.To {
 	case herdr.StateBlocked:
+		// From is not consulted: a synthetic blocked -> blocked
+		// transition (reprompt.go) takes the same path as a real
+		// working -> blocked one. onBlocked always re-reads and
+		// re-announces, so a new prompt gets its own pending action and
+		// push; state_since does not move (Store.Apply is a no-op when
+		// the state does not change), so nothing is recorded as a
+		// "started on" or a finish (docs/roles.md "blocked -> blocked is
+		// a block").
 		s.onBlocked(ctx, row)
 	case herdr.StateUnknown:
 		s.mu.Lock()

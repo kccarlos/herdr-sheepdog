@@ -279,6 +279,28 @@ func (s *Server) injectState(w http.ResponseWriter, r *http.Request, to herdr.St
 	writeJSON(w, http.StatusOK, injectResponse{OK: true, Agent: row, DurMS: s.deps.Now().Sub(start).Milliseconds()})
 }
 
+// handleInjectScreen replaces a synthetic pane's screen text without
+// moving its state (the counterpart of the mock herdr's own screen
+// update): what the post-answer poll and the reconciler see next,
+// without a transition to trigger them itself.
+func (s *Server) handleInjectScreen(w http.ResponseWriter, r *http.Request) {
+	if s.deps.Injector == nil {
+		writeError(w, http.StatusServiceUnavailable, "injection not available")
+		return
+	}
+	var req paneRequest
+	if err := readJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "bad body: "+err.Error())
+		return
+	}
+	row, err := s.deps.Injector.Screen(req.PaneID, req.Screen)
+	if err != nil {
+		writeError(w, injectStatus(err), err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, injectResponse{OK: true, Agent: row})
+}
+
 func (s *Server) handleInjectRemove(w http.ResponseWriter, r *http.Request) {
 	if s.deps.Injector == nil {
 		writeError(w, http.StatusServiceUnavailable, "injection not available")

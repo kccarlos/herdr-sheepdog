@@ -31,6 +31,11 @@ func (s *Supervisor) newAnswerPrompt(paneID string, prompt herdr.Prompt, alias s
 	for _, o := range prompt.Options {
 		p.Options = append(p.Options, state.Option{Label: o.Label, Keys: o.Keys})
 	}
+	// Remembered so the post-answer poll and the reconciler can tell a
+	// new prompt from this one (docs/roles.md "blocked -> blocked is a
+	// block", reprompt.go): every answer_prompt pending action is built
+	// here, whether the block is real or synthetic.
+	s.lastPrompt[paneID] = promptSignature(prompt)
 	return p
 }
 

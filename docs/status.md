@@ -86,8 +86,12 @@ back as a `KindInvestigation` event turn pushed `idle` and tagged
 and follow-ups survive a restart), a follow-up resumes the same CLI
 session, and stop cancels a running look. Verified with a stub CLI
 backend on the fake daemon and four real CLI runs for the session/resume
-mechanics; `source: worker` is deliberately still open. Still open from
-that list: `blocked → blocked` (4) and no mid-sentence interruption (5). Names from
+mechanics; `source: worker` is deliberately still open. PR 4
+(`blocked → blocked`) added the post-answer poll and the periodic/startup
+reconciler (`internal/supervisor/reprompt.go`, `supervisor.reprompt_poll_s`),
+both raising a synthetic `blocked → blocked` transition through the
+normal `HandleTransition` path. Still open from that list: no
+mid-sentence interruption (5). Names from
 here on: shepherd (operator), the dog (voice + brain), the flock
 (workers); `docs/roles.md` is the contract and maps the old CEO / SVP /
 assistant terms still present in code.

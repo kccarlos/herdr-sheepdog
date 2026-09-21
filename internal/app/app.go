@@ -255,13 +255,15 @@ func (a *App) wire() error {
 		a.brainProviders = BrainProviders(cfg)
 	}
 	sup, err := supervisor.New(store, a.herdr, querier, pusher, a.log, supervisor.Config{
-		PendingTTL:   time.Duration(cfg.PendingTTLS) * time.Second,
-		DataDir:      cfg.DataDir,
-		Chattiness:   cfg.Supervisor.Chattiness,
-		RecentWindow: time.Duration(cfg.Supervisor.RecentMinutes) * time.Minute,
-		PromiseTTL:   time.Duration(cfg.Supervisor.PromiseTTLS) * time.Second,
-		CancelWindow: time.Duration(cfg.Supervisor.CancelWindowS) * time.Second,
-		AnnounceWait: time.Duration(cfg.Brain.AnnounceWaitS) * time.Second,
+		PendingTTL:       time.Duration(cfg.PendingTTLS) * time.Second,
+		DataDir:          cfg.DataDir,
+		Chattiness:       cfg.Supervisor.Chattiness,
+		RecentWindow:     time.Duration(cfg.Supervisor.RecentMinutes) * time.Minute,
+		PromiseTTL:       time.Duration(cfg.Supervisor.PromiseTTLS) * time.Second,
+		CancelWindow:     time.Duration(cfg.Supervisor.CancelWindowS) * time.Second,
+		RepromptPoll:     time.Duration(cfg.Supervisor.RepromptPollS) * time.Second,
+		SnapshotInterval: time.Duration(cfg.SnapshotIntervalS) * time.Second,
+		AnnounceWait:     time.Duration(cfg.Brain.AnnounceWaitS) * time.Second,
 
 		InvestigateMax:        time.Duration(cfg.Brain.InvestigateMaxS) * time.Second,
 		InvestigateSessionTTL: time.Duration(cfg.Brain.InvestigateSessionTTLS) * time.Second,

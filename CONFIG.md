@@ -152,6 +152,7 @@ it?" for what each level announces.
 | `supervisor.recent_minutes` | `SHEEPDOG_SUPERVISOR_RECENT_MINUTES` | `30` | The `normal` level's window: a finish is announced when the agent was blocked, was sent an answer or an instruction, was asked about, or was named in a spoken briefing within this many minutes. |
 | `supervisor.promise_ttl_s` | `SHEEPDOG_SUPERVISOR_PROMISE_TTL_S` | `7200` | How long a promise ("tell me when it's done", README "Promises") waits for its event before it expires silently (`promise.expired`). Open promises live in the state file's `session.promises`, so a restart keeps them. |
 | `supervisor.cancel_window_s` | `SHEEPDOG_SUPERVISOR_CANCEL_WINDOW_S` | `30` | How soon after an instruction went to a *working* agent a "stop" still interrupts it with Ctrl-C (the stop procedure's phase 3, [`docs/roles.md`](docs/roles.md) "Stop"). Past it a stop no longer touches the agent: use an instruction ("tell it to revert that") instead. |
+| `supervisor.reprompt_poll_s` | `SHEEPDOG_SUPERVISOR_REPROMPT_POLL_S` | `10` | How long the post-answer poll watches a pane, once every second, after keys go to it: herdr reports a pane's status only on change, so a worker that answers one prompt and is already showing the next within herdr's own poll window never leaves `blocked` ([`docs/roles.md`](docs/roles.md) "blocked → blocked is a block"). A periodic reconciler (the `snapshot_interval_s` cadence) and a startup sweep catch what the poll's window missed. |
 
 ## `[brain]`
 
