@@ -249,6 +249,71 @@ func TestToolResponseWaitTimesOut(t *testing.T) {
 	}
 }
 
+// TestToolResultDeferredWhileSpeaking: a tool result asking to INTERRUPT
+// is downgraded to WHEN_IDLE, at send time, when the model has started
+// speaking a new generation while the handler was still working — the
+// same rule as a push (docs/roles.md "Pushes").
+func TestToolResultDeferredWhileSpeaking(t *testing.T) {
+	c := newFakeConn("c1")
+	gate := make(chan struct{})
+	handler := func(ctx context.Context, _ voice.ToolCall) (voice.ToolResult, error) {
+		<-gate
+		return voice.ToolResult{Spoken: "checking", Scheduling: voice.UrgencyInterrupt}, nil
+	}
+	h := newHarness(t, Config{Handler: handler}, &fakeDialer{results: []func() (Conn, error){ok(c)}})
+
+	c.serve(toolCallMsg("call_1", voice.ToolToSupervisor, map[string]any{"text": "what's going on"}))
+	h.waitEvent("tool call", func(ev voice.Event) bool { tc, ok := ev.(voice.EventToolCall); return ok && tc.Call.ID == "call_1" })
+	c.serve(turnCompleteMsg()) // the model ends its turn right after the NON_BLOCKING call
+	// A new generation starts speaking before the handler returns.
+	c.serve(outputTranscriptMsg("Auth is also "))
+	h.waitEvent("speaking", func(ev voice.Event) bool { return h.s.Speaking() })
+	close(gate)
+
+	m := c.waitSent(t, "tool response", func(m sent) bool { return m.kind == "tool" })
+	fr := m.tool.FunctionResponses[0]
+	if fr.Scheduling != genai.FunctionResponseSchedulingWhenIdle {
+		t.Errorf("scheduling sent = %v, want WHEN_IDLE (deferred while speaking)", fr.Scheduling)
+	}
+	p := h.log.payloads("voice.push_deferred")
+	if len(p) != 1 || p[0]["kind"] != "tool_result" || p[0]["name"] != voice.ToolToSupervisor || p[0]["reason"] != "speaking" || p[0]["urgency_requested"] != "interrupt" {
+		t.Errorf("voice.push_deferred = %v", p)
+	}
+	results := h.log.payloads("voice.tool_result")
+	if len(results) != 1 || results[0]["scheduling"] != "interrupt" || results[0]["scheduling_sent"] != "when_idle" {
+		t.Errorf("voice.tool_result = %v, want scheduling interrupt, scheduling_sent when_idle", results)
+	}
+}
+
+// TestStopToolStaysInterruptWhileSpeaking: stop() is the one tool result
+// the shepherd is always owed at once (docs/roles.md "Pushes"), so it
+// keeps INTERRUPT scheduling even while the model is speaking.
+func TestStopToolStaysInterruptWhileSpeaking(t *testing.T) {
+	c := newFakeConn("c1")
+	gate := make(chan struct{})
+	handler := func(ctx context.Context, _ voice.ToolCall) (voice.ToolResult, error) {
+		<-gate
+		return voice.ToolResult{Spoken: "Stopped.", Scheduling: voice.UrgencyInterrupt}, nil
+	}
+	h := newHarness(t, Config{Handler: handler}, &fakeDialer{results: []func() (Conn, error){ok(c)}})
+
+	c.serve(toolCallMsg("call_1", voice.ToolStop, map[string]any{}))
+	h.waitEvent("tool call", func(ev voice.Event) bool { tc, ok := ev.(voice.EventToolCall); return ok && tc.Call.ID == "call_1" })
+	c.serve(turnCompleteMsg())
+	c.serve(outputTranscriptMsg("Auth is also "))
+	h.waitEvent("speaking", func(ev voice.Event) bool { return h.s.Speaking() })
+	close(gate)
+
+	m := c.waitSent(t, "tool response", func(m sent) bool { return m.kind == "tool" })
+	fr := m.tool.FunctionResponses[0]
+	if fr.Scheduling != genai.FunctionResponseSchedulingInterrupt {
+		t.Errorf("scheduling sent = %v, want INTERRUPT even while speaking", fr.Scheduling)
+	}
+	if h.log.has("voice.push_deferred") {
+		t.Error("stop() must never be deferred")
+	}
+}
+
 func TestToolSchedulingMapping(t *testing.T) {
 	cases := []struct {
 		u    voice.Urgency
@@ -327,10 +392,11 @@ func TestPushSilentAndInterrupt(t *testing.T) {
 		t.Error("push role must be user")
 	}
 
-	// Model is mid-turn: an interrupt push flushes and goes out immediately.
-	c.serve(audioMsg([]byte("x")))
-	c.serve(audioMsg([]byte("y")))
-	h.waitEvent("turn open", func(ev voice.Event) bool { return h.s.turnOpenNow() })
+	// Nobody is speaking: an interrupt push flushes and goes out at once
+	// (docs/roles.md "Pushes" only defers while the model is speaking).
+	if h.s.Speaking() {
+		t.Fatal("not speaking yet")
+	}
 	if err := h.s.Push("auth crashed", voice.UrgencyInterrupt); err != nil {
 		t.Fatal(err)
 	}
@@ -343,8 +409,122 @@ func TestPushSilentAndInterrupt(t *testing.T) {
 		p, ok := ev.(voice.EventPush)
 		return ok && p.Urgency == voice.UrgencyInterrupt
 	})
-	if n := len(h.log.payloads("voice.push")); n != 2 {
-		t.Errorf("voice.push logged %d times, want 2", n)
+	payloads := h.log.payloads("voice.push")
+	if n := len(payloads); n != 2 {
+		t.Fatalf("voice.push logged %d times, want 2", n)
+	}
+	if payloads[1]["urgency"] != "interrupt" || payloads[1]["scheduling_sent"] != "interrupt" {
+		t.Errorf("voice.push = %v, want urgency and scheduling_sent both interrupt", payloads[1])
+	}
+	if h.log.has("voice.push_deferred") {
+		t.Error("nothing to defer: the model was not speaking")
+	}
+}
+
+// TestSpeakingLifecycle: Speaking() is narrower than TurnOpen() — false
+// until the model actually produces output, true from the first
+// fragment or audio chunk of a turn, false again on turnComplete.
+func TestSpeakingLifecycle(t *testing.T) {
+	c := newFakeConn("c1")
+	h := newHarness(t, Config{}, &fakeDialer{results: []func() (Conn, error){ok(c)}})
+
+	// Sending text opens a turn (waiting for a reply) but is not speech.
+	if err := h.s.SendText("what's going on"); err != nil {
+		t.Fatal(err)
+	}
+	h.waitEvent("turn open", func(ev voice.Event) bool { return h.s.TurnOpen() })
+	if h.s.Speaking() {
+		t.Fatal("sending text is not the model speaking")
+	}
+
+	c.serve(outputTranscriptMsg("Auth is "))
+	h.waitEvent("out transcript", func(ev voice.Event) bool {
+		tr, ok := ev.(voice.EventTranscript)
+		return ok && tr.Dir == voice.DirOut
+	})
+	if !h.s.Speaking() {
+		t.Fatal("the first output fragment must start speaking")
+	}
+
+	c.serve(turnCompleteMsg())
+	h.waitEvent("turn complete", func(ev voice.Event) bool { _, ok := ev.(voice.EventTurnComplete); return ok })
+	if h.s.Speaking() {
+		t.Fatal("turnComplete must end speaking")
+	}
+
+	// An audio chunk starts speaking too.
+	c.serve(audioMsg([]byte("a")))
+	h.waitEvent("audio", func(ev voice.Event) bool { return h.s.Speaking() })
+
+	// An interruption — the server's report, or the client's own flush —
+	// ends speaking without waiting for turnComplete.
+	c.serve(interruptedMsg())
+	h.waitEvent("interrupted ends speaking", func(ev voice.Event) bool { return !h.s.Speaking() })
+}
+
+// TestPushInterruptDeferredWhileSpeaking: an untagged INTERRUPT push
+// asked for while the model is speaking is deferred to WHEN_IDLE
+// (docs/roles.md "Pushes": nothing interrupts the model mid-sentence
+// except the shepherd) — it waits like any idle push and is not the
+// local flush an immediate interrupt would be.
+func TestPushInterruptDeferredWhileSpeaking(t *testing.T) {
+	c := newFakeConn("c1")
+	h := newHarness(t, Config{}, &fakeDialer{results: []func() (Conn, error){ok(c)}})
+
+	c.serve(outputTranscriptMsg("Auth is running the tests"))
+	h.waitEvent("speaking", func(ev voice.Event) bool { return h.s.Speaking() })
+
+	if err := h.s.Push("auth crashed", voice.UrgencyInterrupt); err != nil {
+		t.Fatal(err)
+	}
+	h.waitEvent("push deferred", func(ev voice.Event) bool { return h.log.has("voice.push_deferred") })
+	if p := h.log.payloads("voice.push_deferred"); len(p) != 1 || p[0]["kind"] != "push" || p[0]["reason"] != "speaking" || p[0]["urgency_requested"] != "interrupt" {
+		t.Errorf("voice.push_deferred = %v", p)
+	}
+	time.Sleep(30 * time.Millisecond)
+	if c.count("content") != 0 {
+		t.Fatalf("deferred push sent while the model was still speaking: %s", describe(c.sentMsgs()))
+	}
+	if n := h.countEvents(func(ev voice.Event) bool { _, ok := ev.(voice.EventInterrupted); return ok }); n != 0 {
+		t.Error("a deferred push must not flush the model's output")
+	}
+
+	c.serve(turnCompleteMsg())
+	m := c.waitSent(t, "deferred push, now idle", isContent("auth crashed"))
+	if !*m.content.TurnComplete {
+		t.Error("push must still complete the turn")
+	}
+	p := h.log.payloads("voice.push")
+	if len(p) != 1 || p[0]["urgency"] != "interrupt" || p[0]["scheduling_sent"] != "when_idle" {
+		t.Errorf("voice.push = %v, want urgency interrupt, scheduling_sent when_idle", p)
+	}
+}
+
+// TestPushExemptTagsStayInterruptWhileSpeaking: due_promise and
+// needs_user are the two exceptions (docs/roles.md "Pushes") that keep
+// INTERRUPT scheduling even while the model is speaking.
+func TestPushExemptTagsStayInterruptWhileSpeaking(t *testing.T) {
+	for _, tag := range []string{"due_promise", "needs_user"} {
+		t.Run(tag, func(t *testing.T) {
+			c := newFakeConn("c1")
+			h := newHarness(t, Config{}, &fakeDialer{results: []func() (Conn, error){ok(c)}})
+
+			c.serve(outputTranscriptMsg("Auth is running the tests"))
+			h.waitEvent("speaking", func(ev voice.Event) bool { return h.s.Speaking() })
+
+			if err := h.s.PushTagged("interrupt me when it's done", voice.UrgencyInterrupt, map[string]any{tag: true}); err != nil {
+				t.Fatal(err)
+			}
+			c.waitSent(t, "exempt push sent at once", isContent("interrupt me when it's done"))
+			h.waitEvent("flush", func(ev voice.Event) bool { _, ok := ev.(voice.EventInterrupted); return ok })
+			if h.log.has("voice.push_deferred") {
+				t.Errorf("%s must not be deferred", tag)
+			}
+			p := h.log.payloads("voice.push")
+			if len(p) != 1 || p[0]["urgency"] != "interrupt" || p[0]["scheduling_sent"] != "interrupt" || p[0][tag] != true {
+				t.Errorf("voice.push = %v", p)
+			}
+		})
 	}
 }
 

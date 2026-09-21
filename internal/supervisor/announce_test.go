@@ -265,6 +265,12 @@ func TestAnnounceCeilingApplied(t *testing.T) {
 	if d = h.decisions(); d[3]["urgency_applied"] != "interrupt" || d[3]["reason"] != "promise_due" {
 		t.Errorf("push_decision = %v", d[3])
 	}
+	// A due promise is the exception that keeps INTERRUPT scheduling
+	// even while the model is speaking (docs/roles.md "Pushes"); the
+	// gemini session reads this tag off the voice.push event.
+	if tags := h.pusher.tagsOf(2); tags["due_promise"] != true {
+		t.Errorf("tags = %v, want due_promise: true", tags)
+	}
 	if kept := h.log.ofType("promise.kept"); len(kept) != 2 || payload(kept[1])["urgency"] != "interrupt" || payload(kept[1])["via"] != "brain" {
 		t.Errorf("promise.kept = %v", kept)
 	}
@@ -456,6 +462,12 @@ func TestAnnounceBlockOneLineAndStale(t *testing.T) {
 	got := h.pusher.all()
 	if len(got) != 1 || got[0].Text != "Auth wants to write hello.txt; that is the file you said to keep small." || got[0].Urgency != voice.UrgencyInterrupt {
 		t.Fatalf("pushes = %+v", got)
+	}
+	// A decision on a block whose pending action this event created is
+	// the other exception that keeps INTERRUPT while the model is
+	// speaking, so the gemini session must see needs_user on it.
+	if tags := h.pusher.tagsOf(0); tags["needs_user"] != true {
+		t.Errorf("tags = %v, want needs_user: true", tags)
 	}
 	if p, has := h.pending(); !has || p.PaneID != "w5:p1" {
 		t.Errorf("the prompt is not pending: %+v %v", p, has)

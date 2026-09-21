@@ -90,8 +90,15 @@ mechanics; `source: worker` is deliberately still open. PR 4
 (`blocked → blocked`) added the post-answer poll and the periodic/startup
 reconciler (`internal/supervisor/reprompt.go`, `supervisor.reprompt_poll_s`),
 both raising a synthetic `blocked → blocked` transition through the
-normal `HandleTransition` path. Still open from that list: no
-mid-sentence interruption (5). Names from
+normal `HandleTransition` path. PR 5 (no mid-sentence interruption) added
+`Speaking()` to the gemini session (narrower than `TurnOpen()`: true only
+once output is actually flowing) and downgrades an INTERRUPT push or
+tool result to WHEN_IDLE while it is true, at send time (`peekPush`,
+`execTool`), except a due promise, a decision on a brand new block
+(`due_promise`/`needs_user` tags from the supervisor's announce path) or
+`stop()`; `voice.push`/`voice.tool_result` gain `scheduling_sent` and
+`/debug` marks a downgraded one "deferred". Still open from that list:
+promise-at-startup and the "no change" briefing (6). Names from
 here on: shepherd (operator), the dog (voice + brain), the flock
 (workers); `docs/roles.md` is the contract and maps the old CEO / SVP /
 assistant terms still present in code.

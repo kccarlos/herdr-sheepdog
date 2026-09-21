@@ -298,6 +298,28 @@ test('a silent push does not claim the speech that follows; a skipped push is da
   assert.equal(skipped.arrowOut.label, 'push · idle · not sent');
 });
 
+test('a push or tool result the model was speaking through is a minor deferred card plus a marked push/result card, coloured like any other', () => {
+  const { rows } = buildRows([
+    ev('voice.transcript.out', { text: 'Auth is ', final: false }),
+    ev('voice.push_deferred', { kind: 'push', reason: 'speaking', urgency_requested: 'interrupt' }, 5),
+    ev('voice.push', { text: 'auth crashed.', urgency: 'interrupt', scheduling_sent: 'when_idle' }, 1),
+    ev('voice.tool_call', { id: 'c1', name: 'to_supervisor', args: { text: 'stop' } }, 100),
+    ev('voice.push_deferred', { kind: 'tool_result', name: 'to_supervisor', reason: 'speaking', urgency_requested: 'interrupt' }, 5),
+    ev('voice.tool_result', { id: 'c1', name: 'to_supervisor', spoken: 'checking', scheduling: 'interrupt', scheduling_sent: 'when_idle' }, 1),
+  ]);
+  const c = cards(rows);
+  assert.deepEqual(types(rows), ['voice.transcript.out', 'voice.push_deferred', 'voice.push', 'voice.tool_call', 'voice.push_deferred', 'voice.tool_result']);
+  const minor = c.find((r) => r.type === 'voice.push_deferred');
+  assert.ok(minor.cls.includes('minor'), 'a minor card, not its own lane colour');
+  const push = c.find((r) => r.type === 'voice.push');
+  assert.equal(push.deferred, true);
+  assert.ok(push.cls.includes('push-interrupt'), 'still coloured push-interrupt like any other push card');
+  assert.equal(push.arrowOut.label, 'push · interrupt · deferred');
+  const result = c.find((r) => r.type === 'voice.tool_result');
+  assert.equal(result.deferred, true);
+  assert.match(result.arrowOut.label, /deferred/);
+});
+
 test('dividers: session lifecycle, system prompt (expandable text), daemon start', () => {
   const { rows } = buildRows([
     ev('daemon.start', { version: 'v0.9', herdr: 'mock', voice: 'off' }, 1, 'daemon'),

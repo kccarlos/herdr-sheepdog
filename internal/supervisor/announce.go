@@ -133,7 +133,8 @@ func (s *Supervisor) applyResult(a announcement, kept []state.Promise, level Cha
 		s.codePath(a, kept, level, "promise")
 		return
 	}
-	d := applyCeiling(level, a.kind, requested, ceilingInput{kept: len(kept) > 0, duePassed: s.duePassed(kept), needsUser: rep.NeedsUser})
+	duePassed := s.duePassed(kept)
+	d := applyCeiling(level, a.kind, requested, ceilingInput{kept: len(kept) > 0, duePassed: duePassed, needsUser: rep.NeedsUser})
 	d.via = "brain"
 	s.logDecision(a, level, d, rep, kept, true)
 	// Whatever the ceiling does with it, the brain's line is what the
@@ -148,7 +149,29 @@ func (s *Supervisor) applyResult(a announcement, kept []state.Promise, level Cha
 	}
 	u := voiceUrgency(d.applied)
 	s.logKept(kept, a.event, spoken, u, "brain")
-	s.push(a.row.PaneID, spoken, u)
+	s.pushTagged(a.row.PaneID, spoken, u, announceTags(u, duePassed, rep.NeedsUser, a.pending))
+}
+
+// announceTags marks a push as one of the exceptions that keep INTERRUPT
+// scheduling even while the model is speaking (docs/roles.md "Pushes"):
+// a kept promise past its due time, or a decision on a block whose
+// pending action this event created — not an addition to one already
+// spoken. nil when u is not interrupt, or neither applies.
+func announceTags(u voice.Urgency, duePassed, needsUser bool, pending string) map[string]any {
+	if u != voice.UrgencyInterrupt {
+		return nil
+	}
+	tags := map[string]any{}
+	if duePassed {
+		tags["due_promise"] = true
+	}
+	if needsUser && pending != "" {
+		tags["needs_user"] = true
+	}
+	if len(tags) == 0 {
+		return nil
+	}
+	return tags
 }
 
 // dropLate handles the brain's line arriving after the code sentence was
@@ -238,12 +261,13 @@ func (s *Supervisor) codePath(a announcement, kept []state.Promise, level Chatti
 		return
 	}
 	line := "As you asked: " + a.sentence
+	duePassed := s.duePassed(kept)
 	u := voice.UrgencyIdle
-	if s.duePassed(kept) {
+	if duePassed {
 		u = voice.UrgencyInterrupt
 	}
 	s.logKept(kept, a.event, line, u, "template")
-	s.push(a.row.PaneID, line, u)
+	s.pushTagged(a.row.PaneID, line, u, announceTags(u, duePassed, false, ""))
 }
 
 // recordAnnounceDetail stores an announce turn's detail alongside the

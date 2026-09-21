@@ -187,6 +187,7 @@ export class ConversationView {
         else if (it.result.error) bits.push('error');
         if (it.result.durMs != null) bits.push(`${it.result.durMs} ms`);
         if (it.result.scheduling) bits.push(it.result.scheduling);
+        if (it.result.deferred) bits.push('deferred (model was speaking)');
       }
       if (it.orphan) bits.push('result without a call');
       if (it.nested.length) bits.push(`${it.nested.length} event${it.nested.length > 1 ? 's' : ''}`);
@@ -265,6 +266,9 @@ export class ConversationView {
       h.appendChild(el('span', 'who', 'supervisor → model'));
       h.appendChild(el('span', `badge ${it.urgency}`, it.urgency));
       if (it.skipped) h.appendChild(el('span', 'badge skipped', 'not sent (voice off)'));
+      // Asked to interrupt, sent when idle: the model was mid-sentence
+      // (docs/roles.md "Pushes").
+      if (it.deferred) h.appendChild(el('span', 'badge deferred', 'deferred: model was speaking'));
       // The answer to a look the shepherd was told was coming.
       if (it.answersJob) h.appendChild(el('span', 'badge', `answers ${it.answersJob}`));
       h.appendChild(el('span', silent ? 'text one-line' : 'text', it.text));

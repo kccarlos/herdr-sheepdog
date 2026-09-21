@@ -125,9 +125,28 @@ test('pushes render as supervisor messages with their urgency and the events tha
   assert.deepEqual(kinds(items), ['push', 'push', 'push']);
   assert.equal(items[0].urgency, 'idle');
   assert.deepEqual(items[0].nested.map((e) => e.type), ['herdr.read', 'llm.call', 'pending.created']);
+  assert.equal(items[0].deferred, false);
   assert.equal(items[1].urgency, 'silent');
   assert.deepEqual(items[1].nested, []);
   assert.equal(items[2].skipped, true);
+});
+
+test('a push the model was speaking through is marked deferred; a tool result the same way', () => {
+  const items = groupEvents([
+    // Requested interrupt, actually sent when_idle: the model was
+    // speaking (docs/roles.md "Pushes"); voice.push_deferred precedes it.
+    ev('voice.push_deferred', { kind: 'push', reason: 'speaking', urgency_requested: 'interrupt' }),
+    ev('voice.push', { text: 'auth crashed.', urgency: 'interrupt', scheduling_sent: 'when_idle' }),
+    // An ordinary interrupt push (not speaking) is not marked.
+    ev('voice.push', { text: 'auth exited.', urgency: 'interrupt', scheduling_sent: 'interrupt' }),
+    ev('voice.tool_call', { id: 'c1', name: 'to_supervisor', args: {} }),
+    ev('voice.push_deferred', { kind: 'tool_result', name: 'to_supervisor', reason: 'speaking', urgency_requested: 'interrupt' }),
+    ev('voice.tool_result', { id: 'c1', name: 'to_supervisor', spoken: 'checking', scheduling: 'interrupt', scheduling_sent: 'when_idle' }),
+  ]);
+  assert.deepEqual(kinds(items), ['push', 'push', 'tool']);
+  assert.equal(items[0].deferred, true);
+  assert.equal(items[1].deferred, false);
+  assert.equal(items[2].result.deferred, true);
 });
 
 test('session dividers: connect, resume, handle dropped, recycle, stalled', () => {

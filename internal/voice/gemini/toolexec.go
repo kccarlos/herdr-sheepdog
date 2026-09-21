@@ -75,6 +75,18 @@ func (s *Session) execTool(ctx context.Context, gen int, call voice.ToolCall, tu
 		s.emit(voice.EventToolResult{Call: call, Err: ctx.Err(), Cancelled: true})
 		return
 	}
+	// An INTERRUPT result is downgraded to WHEN_IDLE at send time, now
+	// that turnDone (or ToolResponseWait) has settled Speaking(), while
+	// the model is speaking — except stop(), the one tool result the
+	// shepherd is always owed at once (docs/roles.md "Pushes").
+	sched := res.Scheduling
+	deferred := sched == voice.UrgencyInterrupt && call.Name != voice.ToolStop && s.Speaking()
+	if deferred {
+		sched = voice.UrgencyIdle
+		s.log.Log(logSource, "voice.push_deferred", "", map[string]any{
+			"kind": "tool_result", "name": call.Name, "reason": "speaking", "urgency_requested": voice.UrgencyInterrupt.String(),
+		})
+	}
 	resp := map[string]any{"spoken": res.Spoken}
 	if res.Clarify {
 		resp["clarify"] = true
@@ -90,10 +102,10 @@ func (s *Session) execTool(ctx context.Context, gen int, call voice.ToolCall, tu
 	}
 	sendErr := s.sendOn(gen, func(c Conn) error {
 		return c.SendToolResponse(genai.LiveToolResponseInput{FunctionResponses: []*genai.FunctionResponse{{
-			ID: call.ID, Name: call.Name, Response: resp, Scheduling: scheduling(res.Scheduling),
+			ID: call.ID, Name: call.Name, Response: resp, Scheduling: scheduling(sched),
 		}}})
 	})
-	if sendErr == nil && res.Scheduling != voice.UrgencySilent {
+	if sendErr == nil && sched != voice.UrgencySilent {
 		s.mu.Lock()
 		s.openTurnLocked()
 		s.mu.Unlock()
@@ -102,7 +114,7 @@ func (s *Session) execTool(ctx context.Context, gen int, call voice.ToolCall, tu
 	// close its turn (the /debug swimlane shows both as the hop latency).
 	payload := map[string]any{
 		"id": call.ID, "name": call.Name, "spoken": res.Spoken, "clarify": res.Clarify,
-		"scheduling": res.Scheduling.String(), "dur_ms": handlerMS,
+		"scheduling": res.Scheduling.String(), "scheduling_sent": sched.SchedulingName(), "dur_ms": handlerMS,
 		"wait_ms": s.now().Sub(started).Milliseconds() - handlerMS,
 	}
 	if res.Detail != "" {

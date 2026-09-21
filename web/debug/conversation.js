@@ -16,7 +16,10 @@
 //   push           voice.push (supervisor → model), with the supervisor-side
 //                  events that led to it nested; a push answering an
 //                  investigation (answers_job) links back to the
-//                  acknowledgement card that started the job
+//                  acknowledgement card that started the job; `deferred`
+//                  marks a requested INTERRUPT the model was speaking
+//                  through and so was sent WHEN_IDLE instead (a tool
+//                  result's `deferred` is the same, on its `result`)
 
 import { NESTED_TYPES, DIVIDERS, fmtMs, estimateTokens, argSummary, ToolPairer, Fragments, toolFamily } from './grouping.js';
 
@@ -92,9 +95,13 @@ export class Grouper {
       case 'voice.push': {
         this.closeUser();
         this.closeAssistant();
+        // scheduling_sent differs from the requested urgency only when a
+        // speaking model deferred an INTERRUPT to WHEN_IDLE
+        // (docs/roles.md "Pushes"); voice.push_deferred carries the reason.
+        const deferred = p.urgency === 'interrupt' && p.scheduling_sent === 'when_idle';
         const item = this.push({
           kind: 'push', ts: ev.ts, text: p.text || '', urgency: p.urgency || 'idle', skipped: !!p.skipped,
-          answersJob: p.answers_job || '', nested: this.loose.splice(0), expandable: true,
+          deferred, answersJob: p.answers_job || '', nested: this.loose.splice(0), expandable: true,
         });
         // An investigation's answer: link it to the acknowledgement the
         // shepherd heard when the job started, and that card back to it.
@@ -221,6 +228,9 @@ export class Grouper {
       error: p.error || '', cancelled: !!p.cancelled, sendError: p.send_error || '',
       // The real answer follows on its own (an investigation).
       pendingAnswer: !!p.pending,
+      // A speaking model deferred an INTERRUPT result to WHEN_IDLE
+      // (docs/roles.md "Pushes"); voice.push_deferred carries the reason.
+      deferred: p.scheduling === 'interrupt' && p.scheduling_sent === 'when_idle',
     };
     item.resultTs = ev.ts;
     // Without a voice model the daemon speaks the result itself (the /voice

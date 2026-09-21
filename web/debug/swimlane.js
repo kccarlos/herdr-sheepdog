@@ -175,6 +175,11 @@ class Builder {
       case 'voice.interrupted':
         this.outFrag.close();
         return this.plain(ev, 'voice', { title: 'interrupted', summary: `by ${p.by || '?'}${p.dropped_chunks ? ` · ${p.dropped_chunks} chunks dropped` : ''}`, cls: ['minor'] });
+      case 'voice.push_deferred':
+        // The model was speaking: the push or tool result right after
+        // this carries scheduling_sent when_idle instead of the
+        // interrupt it asked for (docs/roles.md "Pushes").
+        return this.plain(ev, 'voice', { title: 'push deferred', summary: `${p.kind || '?'}${p.name ? ` ${p.name}` : ''} · interrupt → when_idle · ${p.reason || ''}`, cls: ['minor'] });
       case 'voice.usage':
         return this.plain(ev, 'voice', { title: 'usage', summary: `${p.prompt ?? '?'} prompt · ${p.response ?? '?'} response · ${p.total ?? '?'} total`, cls: ['minor', 'stats'], stats: true });
       case 'web.client.stats':
@@ -262,10 +267,13 @@ class Builder {
   toolResult(ev, p) {
     const call = this.tools.close(p.id, p.name);
     const failed = !!(p.error || p.cancelled || p.send_error);
+    // Asked to interrupt, sent when idle: the model was mid-sentence
+    // (docs/roles.md "Pushes").
+    const deferred = p.scheduling === 'interrupt' && p.scheduling_sent === 'when_idle';
     const card = this.plain(ev, 'sup', {
-      title: `${p.cancelled ? 'cancelled' : 'result'} ${p.name || '?'}`, name: p.name || '?', id: p.id || '',
+      title: `${p.cancelled ? 'cancelled' : 'result'} ${p.name || '?'}${deferred ? ' · deferred' : ''}`, name: p.name || '?', id: p.id || '',
       summary: p.cancelled ? 'cancelled (the user barged in)' : (p.error ? `error: ${p.error}` : clip(p.spoken || '', 160)),
-      cls: ['result', ...(failed ? ['error'] : [])], orphan: !call,
+      cls: ['result', ...(failed ? ['error'] : []), ...(deferred ? ['deferred'] : [])], deferred, orphan: !call,
     });
     card.chain = call ? call.chain : this.newChain('tool', card);
     // Latency: dur_ms is the handler time when the emitter recorded it;
@@ -279,7 +287,7 @@ class Builder {
       latLabel = `Δ ${fmtMs(lat)}`;
     }
     card.latencyMs = lat;
-    const bits = [p.name || '?', latLabel, p.scheduling, p.clarify ? 'clarify' : '', p.cancelled ? 'cancelled' : '', p.error ? 'error' : ''].filter(Boolean);
+    const bits = [p.name || '?', latLabel, p.scheduling, deferred ? 'deferred' : '', p.clarify ? 'clarify' : '', p.cancelled ? 'cancelled' : '', p.error ? 'error' : ''].filter(Boolean);
     card.arrow = { from: 'sup', to: 'voice', kind: 'result', label: bits.join(' · '), dashed: true, level: failed ? 'error' : latencyLevel(lat) };
     if (call) call.resultKey = card.key;
     this.trigger = { kind: 'result', chain: card.chain, card };
@@ -294,9 +302,13 @@ class Builder {
   push(ev, p) {
     this.closeFragments();
     const urgency = p.urgency || 'idle';
+    // Asked to interrupt, sent when idle: the model was mid-sentence
+    // (docs/roles.md "Pushes"); coloured the same as any other push,
+    // just marked.
+    const deferred = urgency === 'interrupt' && p.scheduling_sent === 'when_idle';
     const card = this.plain(ev, 'sup', {
-      title: `push · ${urgency}`, text: p.text || '', urgency, skipped: !!p.skipped, silent: urgency === 'silent',
-      cls: ['push', `push-${urgency}`, ...(p.skipped ? ['skipped'] : [])], chainRoot: true,
+      title: `push · ${urgency}${deferred ? ' · deferred' : ''}`, text: p.text || '', urgency, skipped: !!p.skipped, silent: urgency === 'silent', deferred,
+      cls: ['push', `push-${urgency}`, ...(p.skipped ? ['skipped'] : []), ...(deferred ? ['deferred'] : [])], chainRoot: true,
     });
     card.summary = clip(p.text || '', 160);
     // The brain.push_decision that produced this push (matched by text).
@@ -313,7 +325,7 @@ class Builder {
     } else {
       card.chain = this.newChain('push', card);
     }
-    card.arrow = { from: 'sup', to: 'voice', kind: 'push', label: `push · ${urgency}${p.skipped ? ' · not sent' : ''}`, dashed: urgency === 'silent' || !!p.skipped };
+    card.arrow = { from: 'sup', to: 'voice', kind: 'push', label: `push · ${urgency}${deferred ? ' · deferred' : ''}${p.skipped ? ' · not sent' : ''}`, dashed: urgency === 'silent' || !!p.skipped };
     // The user turn stays open (a silent briefing push can land mid-turn
     // and voice.turn still has to reach the input card); voice.turn closes
     // it. A silent or unsent push causes no speech, so it does not claim

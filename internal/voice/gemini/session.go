@@ -49,6 +49,12 @@ type Session struct {
 	keyIdx       int
 	turnOpen     bool
 	turnOpenedAt time.Time
+	// speaking is narrower than turnOpen: true only once the model has
+	// actually started producing output (audio or an output transcript
+	// fragment) for the open turn, false again on turnComplete or an
+	// interruption. turnOpen alone also covers "waiting for a reply"
+	// (SendText, a sent push, a tool response), which is not speech.
+	speaking     bool
 	turnDone     chan struct{} // closed and replaced on every turnComplete
 	lastInput    time.Time
 	inputDone    bool
@@ -330,7 +336,11 @@ func (s *Session) Push(text string, u voice.Urgency) error {
 }
 
 // PushTagged implements supervisor.TagPusher: the same push, with tags
-// (answers_job) carried onto its voice.push event.
+// (answers_job, due_promise, needs_user) carried onto its voice.push
+// event. An INTERRUPT item is downgraded to WHEN_IDLE in the queue
+// (push.go's peekPush) while the model is speaking, unless a tag
+// exempts it; queueing it here at the requested urgency lets that
+// decision be made at send time, when Speaking() is current.
 func (s *Session) PushTagged(text string, u voice.Urgency, tags map[string]any) error {
 	s.mu.Lock()
 	if !s.started {
@@ -341,7 +351,7 @@ func (s *Session) PushTagged(text string, u voice.Urgency, tags map[string]any) 
 		s.mu.Unlock()
 		return ErrClosed
 	}
-	s.pushQ = append(s.pushQ, pushItem{text: text, urgency: u, tags: tags})
+	s.pushQ = append(s.pushQ, pushItem{text: text, urgency: u, requested: u, tags: tags})
 	s.mu.Unlock()
 	s.poke()
 	return nil
@@ -415,3 +425,11 @@ func (s *Session) turnOpenNow() bool {
 // transcript arrived, or a push/text/tool response was sent, and no
 // turnComplete has followed yet.
 func (s *Session) TurnOpen() bool { return s.turnOpenNow() }
+
+// Speaking implements voice.Session: true once the model has actually
+// started producing output for the open turn (see the speaking field).
+func (s *Session) Speaking() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.speaking
+}
