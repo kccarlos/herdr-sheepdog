@@ -598,7 +598,7 @@ func reflex(call Call) (*genai.GenerateContentResponse, error) {
 			// The daemon already carried the stop out; the turn only
 			// says so (read tools only, so no call is made).
 			m := reStop.FindStringSubmatch(t)
-			return Response(Step{Text: Reply("Stopped "+unquote(m[1])+". Shall I tell it something else?", "The fake model reported what the stop procedure stopped.")}), nil
+			return Response(Step{Text: Reply("Stopped: "+unquote(m[1])+". Shall I tell it something else?", "The fake model reported what the stop procedure stopped.")}), nil
 		}
 		if reRequest.MatchString(t) || reEvent.MatchString(t) || reSummarise.MatchString(strings.TrimSpace(t)) {
 			text = t
