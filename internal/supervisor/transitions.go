@@ -5,7 +5,6 @@ import (
 
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
-	"github.com/kccarlos/herdr-sheepdog/internal/llm"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
@@ -135,14 +134,13 @@ func (s *Supervisor) finishTask(paneID string) {
 	s.invalidateBriefing()
 }
 
-// onDone reads the pane of a finished agent, summarises what it did
-// (summarize_done, stored as last_result whatever the level) and hands
-// the sentence to announce: spoken when the chattiness level allows it
-// for this agent (every finish at chatty; at normal only agents the user
-// dealt with within RecentWindow; never at quiet), phrased by the brain
-// when one is attached, with the finish's open promises kept in the same
-// line. A model failure falls back to the plain "finished" sentence,
-// never silence. A screen that ends in a question herdr did not flag
+// onDone reads the pane of a finished agent and hands "<alias> finished."
+// to announce: the brain's line replaces it when one lands within
+// AnnounceWait, and whichever is spoken becomes last_result. It is
+// spoken when the chattiness level allows it for this agent (every finish
+// at chatty; at normal only agents the user dealt with within
+// RecentWindow; never at quiet), with the finish's open promises kept in
+// the same line. A screen that ends in a question herdr did not flag
 // (agy) is treated as a block.
 func (s *Supervisor) onDone(ctx context.Context, row state.Agent) {
 	alias := aliasOr(row.Alias)
@@ -157,29 +155,25 @@ func (s *Supervisor) onDone(ctx context.Context, row state.Agent) {
 		s.announce(ctx, announcement{row: row, kind: kind, event: brain.PromiseEventDone, alsoIdle: alsoIdle, sentence: alias + " finished."})
 		return
 	}
-	sctx, cancel := context.WithTimeout(ctx, s.cfg.SummaryTimeout)
-	sum, err := s.llm.SummarizeDone(sctx, read.Text, alias)
-	cancel()
-	if err != nil {
-		s.log.Log(logSource, "supervisor.done_error", row.PaneID, map[string]any{"stage": "summarize", "error": err.Error()})
-		s.announce(ctx, announcement{row: row, kind: kind, event: brain.PromiseEventDone, alsoIdle: alsoIdle, sentence: alias + " finished.", screen: read.Text})
-		return
-	}
-	s.recordResult(row.PaneID, sum)
-	if sum.AskedQuestion {
-		s.log.Log(logSource, "supervisor.done_question", row.PaneID, map[string]any{"spoken": sum.Spoken})
+	if herdr.EndsInQuestion(read.Text) {
+		s.log.Log(logSource, "supervisor.done_question", row.PaneID, map[string]any{"alias": alias})
 		s.touch(row.PaneID)
 		s.announceBlock(ctx, row, read.Text)
 		return
 	}
-	s.announce(ctx, announcement{row: row, kind: kind, event: brain.PromiseEventDone, alsoIdle: alsoIdle, sentence: alias + " finished: " + sum.Spoken + ".", screen: read.Text})
+	s.announce(ctx, announcement{row: row, kind: kind, event: brain.PromiseEventDone, alsoIdle: alsoIdle, sentence: alias + " finished.", screen: read.Text})
 }
 
-// recordResult stores the finish summary on the row's last_result.
-func (s *Supervisor) recordResult(paneID string, sum llm.DoneSummary) {
+// doneResult is what the record keeps of a finish the brain did not
+// phrase (state.Result.Spoken completes "it last …").
+const doneResult = "finished"
+
+// recordResult stores what was announced about the finish as the row's
+// last_result.
+func (s *Supervisor) recordResult(paneID, spoken string) {
 	now := s.cfg.Now()
 	_, err := s.store.Update(paneID, func(a *state.Agent) {
-		a.LastResult = &state.Result{Spoken: sum.Spoken, Outcome: sum.Outcome, At: now}
+		a.LastResult = &state.Result{Spoken: spoken, At: now}
 	})
 	if err != nil {
 		s.log.Log(logSource, "supervisor.state_error", paneID, map[string]any{"error": err.Error()})
@@ -187,7 +181,7 @@ func (s *Supervisor) recordResult(paneID string, sum llm.DoneSummary) {
 	s.invalidateBriefing()
 }
 
-// onBlocked reads the pane, summarises the prompt, records the question
+// onBlocked reads the pane, parses the prompt, records the question
 // and — when the agent is really asking — creates the pending action and
 // announces it.
 func (s *Supervisor) onBlocked(ctx context.Context, row state.Agent) {
@@ -203,32 +197,28 @@ func (s *Supervisor) onBlocked(ctx context.Context, row state.Agent) {
 	s.announceBlock(ctx, row, read.Text)
 }
 
-// announceBlock summarises a prompt already read from the pane, records
-// the question and — when the agent is really asking — creates the
-// pending action and pushes the question at once (never delayed for the
-// brain). announce then keeps the block's promises and lets the brain
-// add a line in context.
+// announceBlock parses the prompt already read from the pane, records the
+// question and — when the screen really is an approval prompt — creates
+// the pending action whose keys the fast path and the rail answer.
+// announce then keeps the block's promises and speaks the one line the
+// block gets: the brain's, or the parsed prompt's own sentence.
 func (s *Supervisor) announceBlock(ctx context.Context, row state.Agent, screen string) {
 	alias := aliasOr(row.Alias)
-	sum, err := s.llm.SummarizeBlock(ctx, screen, alias)
-	if err != nil {
-		s.log.Log(logSource, "supervisor.block_error", row.PaneID, map[string]any{"stage": "summarize", "error": err.Error()})
-		s.push(row.PaneID, alias+" is waiting at a prompt.", voice.UrgencyIdle)
-		s.announce(ctx, announcement{row: row, kind: pushQuestion, event: brain.PromiseEventBlocked, sentence: alias + " is waiting at a prompt.", screen: screen, spoken: true})
+	prompt, ok := herdr.ParsePrompt(screen)
+	if !ok {
+		// Blocked at something with no options to send: the user has to
+		// look. Nothing is pending, so nothing can be answered for them.
+		s.log.Log(logSource, "supervisor.blocked_no_question", row.PaneID, map[string]any{"alias": alias})
+		s.recordBlock(row.PaneID, "", true)
+		s.announce(ctx, announcement{row: row, kind: pushQuestion, event: brain.PromiseEventBlocked, sentence: alias + " is waiting at a prompt.", screen: screen})
 		return
 	}
-	s.recordBlock(row.PaneID, sum)
-	if !sum.IsQuestion {
-		s.log.Log(logSource, "supervisor.blocked_no_question", row.PaneID, map[string]any{"spoken": sum.Spoken})
-		s.pushIf(pushBlockedInfo, row.PaneID, sum.Spoken)
-		s.announce(ctx, announcement{row: row, kind: pushBlockedInfo, event: brain.PromiseEventBlocked, sentence: sum.Spoken, screen: screen, spoken: true})
-		return
-	}
+	s.recordBlock(row.PaneID, prompt.Phrase(), false)
 	s.mu.Lock()
-	spoken := s.setPending(s.newAnswerPrompt(row.PaneID, sum))
+	p := s.newAnswerPrompt(row.PaneID, prompt, alias)
+	sentence := s.setPending(p)
 	s.mu.Unlock()
-	s.push(row.PaneID, spoken, voice.UrgencyIdle)
-	s.announce(ctx, announcement{row: row, kind: pushQuestion, event: brain.PromiseEventBlocked, sentence: spoken, screen: screen, spoken: true})
+	s.announce(ctx, announcement{row: row, kind: pushQuestion, event: brain.PromiseEventBlocked, sentence: sentence, screen: screen, pending: p.ID})
 }
 
 // recentlyInterrupted reports (and consumes) a cancel-sent Ctrl-C for the
@@ -244,14 +234,16 @@ func (s *Supervisor) recentlyInterrupted(paneID string) bool {
 	return s.cfg.Now().Sub(at) <= interruptGrace
 }
 
-// recordBlock stores the question on the row's last_block.
-func (s *Supervisor) recordBlock(paneID string, sum llm.BlockSummary) {
+// recordBlock stores the question on the row's last_block; answered is
+// set for a block with nothing to answer, so the roster does not claim
+// the agent is waiting on the shepherd.
+func (s *Supervisor) recordBlock(paneID, question string, answered bool) {
 	_, err := s.store.Update(paneID, func(a *state.Agent) {
 		if a.LastBlock == nil {
 			a.LastBlock = &state.Block{SeenAt: s.cfg.Now()}
 		}
-		a.LastBlock.Question = sum.Question
-		a.LastBlock.Answered = !sum.IsQuestion
+		a.LastBlock.Question = question
+		a.LastBlock.Answered = answered
 	})
 	if err != nil {
 		s.log.Log(logSource, "supervisor.state_error", paneID, map[string]any{"error": err.Error()})

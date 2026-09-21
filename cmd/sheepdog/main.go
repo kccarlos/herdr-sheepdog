@@ -1,8 +1,7 @@
 // Command sheepdog is the sheepdog daemon entry point.
 //
 // Subcommands: "serve" (the daemon, WP5), "herdr watch" (WP1),
-// "voice-test" (WP2), "llm-test" (WP3), "ask-test" (WP4), "brain-test"
-// (phase 1a), "version" and "help".
+// "voice-test" (WP2), "brain-test" (phase 1a), "version" and "help".
 package main
 
 import (
@@ -51,10 +50,6 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return runHerdr(ctx, args[1:], stdout, stderr)
 	case "voice-test":
 		return runVoiceTest(ctx, args[1:], stdout, stderr)
-	case "llm-test":
-		return runLLMTest(ctx, args[1:], stdout, stderr)
-	case "ask-test":
-		return runAskTest(ctx, args[1:], stdout, stderr)
 	case "brain-test":
 		return runBrainTest(ctx, args[1:], stdout, stderr)
 	case "prompts":
@@ -88,8 +83,6 @@ func printUsage(w io.Writer) {
 	fprintln(w, "  config        show|init: inspect or scaffold config.toml")
 	fprintln(w, "  herdr watch   print debounced agent state transitions, persist the table")
 	fprintln(w, "  voice-test    stream a WAV through a Gemini Live session with echo tools")
-	fprintln(w, "  llm-test      run one cheap-LLM template against a screen or instruction")
-	fprintln(w, "  ask-test      run the CLI query tool (codex/claude) plus spoken_answer once")
 	fprintln(w, "  brain-test    run one supervisor-brain turn against a mock herdr and a fixture")
 	fprintln(w, "  prompts       export|show: inspect or scaffold the prompt override directory")
 	fprintln(w, "  eval          run the conversation eval set (--set assistant|svp [--live])")

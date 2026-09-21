@@ -3,7 +3,6 @@ package supervisor
 import (
 	"context"
 	"fmt"
-	"regexp"
 	"strings"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
@@ -15,8 +14,9 @@ import (
 // said verbatim and decides nothing. Two deterministic fast paths run
 // here, in code, before any model — a bare stop, and a bare answer to
 // the one open prompt — and everything else is one brain turn over the
-// words, which resolves what they are and acts. The template path is
-// the fallback while the brain is off or failing.
+// words, which resolves what they are and acts. With no brain the
+// daemon answers from the roster and sends nothing: judging what words
+// mean is the brain's work, and there is no second model for it.
 
 // inflightUtterance is the one to_supervisor call being handled, under
 // s.mu: what the CEO said, how to cancel the turn it is (or is about to
@@ -27,8 +27,7 @@ type inflightUtterance struct {
 	cancel  context.CancelFunc
 	inBrain bool
 	// dropped is set by the stop procedure: the reply is discarded
-	// rather than falling through to the template path, which could
-	// still send something.
+	// rather than answered, so these words reach no worker after all.
 	dropped bool
 }
 
@@ -50,16 +49,16 @@ func (s *Supervisor) ToSupervisor(ctx context.Context, text string) (voice.ToolR
 	res, ok := s.utteranceTurn(turnCtx, u, text)
 	if u.stopped() || turnCtx.Err() != nil {
 		// Stopped, or the voice cancelled the call: the stop procedure
-		// speaks, and neither the brain's reply nor — crucially — the
-		// template path may send these words after all.
+		// speaks, and the brain's reply is discarded.
 		return droppedResult(), nil
 	}
 	if ok {
+		// A reply that named an agent counts as dealing with it, like a
+		// spoken briefing does (the normal level's chattiness rule).
+		s.mentionedIn(res.Spoken)
 		return res, nil
 	}
-	// The fallback runs under the turn's own context, so a stop landing
-	// mid-send still cancels it.
-	return s.fallbackUtterance(turnCtx, text)
+	return s.noBrain(), nil
 }
 
 // beginUtterance installs the in-flight slot and returns the turn's
@@ -70,8 +69,7 @@ func (s *Supervisor) beginUtterance(ctx context.Context, text string) (context.C
 	s.mu.Lock()
 	// A second utterance while one is in flight only takes the slot over:
 	// the older turn is left to finish (the brain's turn lock serialises
-	// them anyway), because cancelling it would make its words fall
-	// through to the template path instead.
+	// them anyway); cancelling it would lose what it was doing.
 	s.utterance = u
 	s.mu.Unlock()
 	return turnCtx, u
@@ -103,9 +101,9 @@ func droppedResult() voice.ToolResult {
 }
 
 // utteranceTurn runs one brain turn over the CEO's words. ok is false
-// when the supervisor should answer from its template path instead; a
-// turn the stop procedure cancelled never returns ok, and the caller
-// checks u.stopped() rather than falling through.
+// when there was no brain, or it could not answer, and the daemon must
+// speak for itself; a turn the stop procedure cancelled never returns
+// ok, and the caller checks u.stopped() rather than falling through.
 func (s *Supervisor) utteranceTurn(ctx context.Context, u *inflightUtterance, text string) (voice.ToolResult, bool) {
 	if s.brain == nil {
 		return voice.ToolResult{}, false
@@ -120,9 +118,6 @@ func (s *Supervisor) utteranceTurn(ctx context.Context, u *inflightUtterance, te
 	s.mu.Unlock()
 	rep, err := s.brain.Turn(ctx, brain.Request{Kind: brain.KindUtterance, Trigger: brain.TriggerCEO, Question: text, Briefing: brief})
 	if err != nil {
-		// A turn the stop procedure cancelled must not fall through to
-		// the template path, which could still send the words after
-		// all; the caller checks u.stopped() for that.
 		return voice.ToolResult{}, false
 	}
 	res := toolResultFrom(brain.KindUtterance, rep)
@@ -130,22 +125,6 @@ func (s *Supervisor) utteranceTurn(ctx context.Context, u *inflightUtterance, te
 		return voice.ToolResult{}, false
 	}
 	return res, true
-}
-
-// reFallbackInstruction is the crude split the template fallback needs
-// now that the voice no longer classifies: only an explicit "tell …" /
-// "ask …" / "have …" is treated as an instruction, everything else as a
-// question. It is deliberately dumb — this path exists only while the
-// brain is unavailable, and the template LLM goes away with it.
-var reFallbackInstruction = regexp.MustCompile(`(?i)^(tell|ask|have)\s`)
-
-// fallbackUtterance answers from the template path (--brain=off, or the
-// brain erred).
-func (s *Supervisor) fallbackUtterance(ctx context.Context, text string) (voice.ToolResult, error) {
-	if reFallbackInstruction.MatchString(text) {
-		return s.proposeTemplate(ctx, text, "")
-	}
-	return s.askTemplate(ctx, text, "")
 }
 
 // The bare fast-path words (docs/roles.md "One decision-maker"). *Bare*

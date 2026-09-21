@@ -20,7 +20,6 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/config"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/inject"
-	"github.com/kccarlos/herdr-sheepdog/internal/llm"
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 	"github.com/kccarlos/herdr-sheepdog/internal/supervisor"
@@ -34,7 +33,7 @@ func printBrainTestUsage(w io.Writer) {
 	fprintln(w, "Runs one supervisor-brain turn (ask by default) against a mock herdr with one")
 	fprintln(w, "agent whose screen is a testdata/herdr fixture, and prints the reply as JSON.")
 	fprintln(w, "Every event (brain.turn, brain.step, brain.tool_call/tool_result, herdr.read,")
-	fprintln(w, "llm.call, …) goes to stderr as JSON lines. Needs the provider's key unless --fake.")
+	fprintln(w, "…) goes to stderr as JSON lines. Needs the provider's key unless --fake.")
 	fprintln(w, "")
 	fprintln(w, "flags:")
 	fprintln(w, "  --config PATH       config file (default ~/.config/sheepdog/config.toml)")
@@ -46,7 +45,7 @@ func printBrainTestUsage(w io.Writer) {
 	fprintln(w, "  --alias NAME        the mock agent's alias (default auth)")
 	fprintln(w, "  --agent-kind KIND   the mock agent's kind (default codex)")
 	fprintln(w, "  --state STATE       working | idle | done | blocked (default idle; blocked runs")
-	fprintln(w, "                      the supervisor's block chain first, one cheap-LLM call)")
+	fprintln(w, "                      the supervisor's block chain first)")
 	fprintln(w, "  --fixture NAME      screen fixture under testdata/herdr, or a path (default")
 	fprintln(w, "                      codex-after-approval.screen.txt)")
 	fprintln(w, "  --transcript PATH   a brain transcript (JSONL) to seed the run with")
@@ -187,7 +186,7 @@ func runBrainTest(ctx context.Context, args []string, stdout, stderr io.Writer) 
 	}
 	defer func() { _ = b.Close() }()
 
-	sup, mock, err := brainTestSupervisor(cfg, dir, o.alias, b, log, stderr)
+	sup, mock, err := brainTestSupervisor(dir, o.alias, b, log, stderr)
 	if err != nil {
 		fprintf(stderr, "sheepdog brain-test: %v\n", err)
 		return 1
@@ -280,23 +279,15 @@ func brainTestModel(o brainTestOpts, cfg config.Config, log logging.Logger) (bra
 	return m, nil
 }
 
-// brainTestSupervisor builds a supervisor over a mock herdr, a fresh
-// state table under dir and the configured cheap LLM (its fallback path).
-func brainTestSupervisor(cfg config.Config, dir, alias string, b *brain.Brain, log logging.Logger, stderr io.Writer) (*supervisor.Supervisor, *inject.Herdr, error) {
+// brainTestSupervisor builds a supervisor over a mock herdr and a fresh
+// state table under dir, with b as its brain.
+func brainTestSupervisor(dir, alias string, b *brain.Brain, log logging.Logger, stderr io.Writer) (*supervisor.Supervisor, *inject.Herdr, error) {
 	store, err := state.Open(filepath.Join(dir, "state.json"), state.Options{Aliases: map[string]string{brainTestPane: alias}, Warn: stderr})
 	if err != nil {
 		return nil, nil, err
 	}
-	keys := cfg.LLMKeys()
-	if len(keys) == 0 {
-		keys = []string{"local"}
-	}
-	client, err := llm.New(llm.Config{BaseURL: cfg.LLM.BaseURL, Model: cfg.LLM.Model, APIKeys: keys, Timeout: time.Duration(cfg.LLM.TimeoutS) * time.Second, Log: log})
-	if err != nil {
-		return nil, nil, err
-	}
 	mock := inject.NewHerdr(nil, log)
-	sup, err := supervisor.New(store, mock, client, nil, inject.SkippedPusher{Log: log}, log, supervisor.Config{DataDir: dir, Brain: b, BriefingInterval: -1})
+	sup, err := supervisor.New(store, mock, nil, inject.SkippedPusher{Log: log}, log, supervisor.Config{DataDir: dir, Brain: b})
 	if err != nil {
 		return nil, nil, err
 	}

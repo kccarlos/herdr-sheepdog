@@ -170,7 +170,7 @@ are Go, never prompt text.
 
 ## Status (which parts of this page the code has)
 
-In, as of the D1-revised PR: the brain, its transcript and engine,
+In, as of the cleanup PR: the brain, its transcript and engine,
 provenance, promises, push judgment with the ceiling, the rail on
 `send_keys`, prompt overrides, the model/provider switch; the voice's
 **two tools** (`to_supervisor`, `stop`) and nothing else; brain-side
@@ -183,10 +183,21 @@ answer to the one open prompt, a bare stop word); the **stop procedure**
 `supervisor.stopped {phase, what, trigger}`); `voice.name` and the
 user-facing names on `/debug`.
 
-**Not yet:** the template LLM (`[llm]`, `summarize_*` templates) still
-produces the fast block/finish sentences and is still the fallback when
-the brain is off or fails; `investigate` (so nothing sets `pending`
-yet); the no-interruption rule (INTERRUPT is not downgraded while the
-voice is speaking, and an announce addition to a block is not dropped
-when the block is resolved); `blocked → blocked` detection. The order in
-which they land is in `docs/issues-2026-09-18.md`.
+Also in, from the cleanup PR: the **template LLM is gone** (`internal/llm`,
+`[llm]`, the `summarize_*` / `resolve_instruction` / `spoken_answer`
+templates, `llm-test` and `ask-test`). Approval prompts are parsed by
+code (`internal/herdr/prompt.go`: the question, the command a Codex
+prompt is about, each option's label and keys, the yes/no keys), a
+finish is "<alias> finished." with `last_result` the brain's own line,
+and an utterance with no brain gets the roster sentence and nothing is
+sent. **One push mode** is in: a block or a finish waits up to
+`brain.announce_wait_s` for the brain's line and speaks it alone, else
+the code sentence — a late line is dropped (`brain.push_late`) unless it
+says the shepherd must act on a prompt that is still open, and a line
+about a resolved block is dropped (`brain.push_stale`). The 10-minute
+silent briefing re-push and the plugin shim are gone too.
+
+**Not yet:** `investigate` (so nothing sets `pending` yet); the
+no-interruption rule (INTERRUPT is not downgraded while the voice is
+speaking); `blocked → blocked` detection. The order in which they land
+is in `docs/issues-2026-09-18.md`.

@@ -15,8 +15,8 @@ import (
 
 	"google.golang.org/genai"
 
-	"github.com/kccarlos/herdr-sheepdog/internal/llm"
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
+	"github.com/kccarlos/herdr-sheepdog/internal/prose"
 )
 
 // DeepSeekBaseURL is DeepSeek's API root (OpenAICompatConfig.BaseURL).
@@ -55,7 +55,7 @@ type OpenAICompatConfig struct {
 // OpenAICompatModel is a Model over an OpenAI-compatible chat
 // completions endpoint (DeepSeek), one key, no rotation: a 429 fails the
 // call (logged as brain.rate_limited) and is never retried here — the
-// turn falls back to the template path. It implements MessageModel, so
+// turn falls back to the code sentence. It implements MessageModel, so
 // the loop hands it the window's messages and it re-attaches the
 // reasoning_content DeepSeek requires on every earlier assistant
 // message while tools are declared, from Message.Raw of the messages it
@@ -385,7 +385,7 @@ func errorMessage(body []byte, status string) string {
 		return e.Error.Message
 	}
 	line, _, _ := strings.Cut(strings.TrimSpace(string(body)), "\n")
-	if line = llm.TruncateRunes(line, 300); line != "" {
+	if line = prose.TruncateRunes(line, 300); line != "" {
 		return line
 	}
 	return status

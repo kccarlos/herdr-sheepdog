@@ -10,6 +10,7 @@ import (
 )
 
 func TestConfigInitWritesTemplateAndRefusesOverwrite(t *testing.T) {
+	noKeys(t)
 	dir := t.TempDir()
 	path := filepath.Join(dir, "nested", "config.toml")
 
@@ -60,6 +61,7 @@ func TestConfigInitWritesTemplateAndRefusesOverwrite(t *testing.T) {
 // config (file values applied) without ever printing the actual Gemini
 // key.
 func TestConfigShowRedactsSecrets(t *testing.T) {
+	noKeys(t)
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")
 	body := "[web]\nport = 9191\n\n[gemini]\napi_keys = [\"AIzaNotARealKeyJustForTesting\"]\n"

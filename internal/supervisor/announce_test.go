@@ -37,7 +37,9 @@ func doneAuth(h *harness) {
 	h.transition("w5:p1", herdr.StateWorking, herdr.StateDone)
 }
 
-const doneSentence = "auth finished: created hello.txt with the requested line."
+// doneSentence is the daemon's own sentence for a finish: with the
+// template LLM gone, nothing but the brain phrases anything more.
+const doneSentence = "auth finished."
 
 // decisions returns the brain.push_decision payloads.
 func (h *harness) decisions() []map[string]any {
@@ -71,7 +73,7 @@ func TestAnnounceReplacesTemplate(t *testing.T) {
 		t.Errorf("brain.turn = %v", turns)
 	}
 	d := h.decisions()
-	if len(d) != 1 || d[0]["via"] != "brain" || d[0]["urgency_requested"] != "idle" || d[0]["urgency_applied"] != "idle" || d[0]["reason"] != "brain" || d[0]["ceiling"] != "normal" || d[0]["relates_to"] != "the rerun" || d[0]["template"] != doneSentence || d[0]["template_spoken"] != false || d[0]["late"] != false {
+	if len(d) != 1 || d[0]["via"] != "brain" || d[0]["urgency_requested"] != "idle" || d[0]["urgency_applied"] != "idle" || d[0]["reason"] != "brain" || d[0]["ceiling"] != "normal" || d[0]["relates_to"] != "the rerun" || d[0]["template"] != doneSentence || d[0]["late"] != false {
 		t.Errorf("push_decision = %v", d)
 	}
 	// The model saw the template and the screen the supervisor read; it
@@ -177,15 +179,12 @@ func TestApplyCeilingTable(t *testing.T) {
 		{Normal, pushDoneOther, "interrupt", ceilingInput{kept: true, duePassed: true}, "interrupt", "brain"},
 		{Normal, pushDoneOther, "interrupt", ceilingInput{kept: true, needsUser: true}, "interrupt", "brain"},
 		{Chatty, pushPromiseOnly, "idle", ceilingInput{kept: true}, "idle", "brain"},
-		// an addition to a question: never at quiet; interrupt only for
-		// a decision while the question is still open.
-		{Quiet, pushQuestion, "idle", ceilingInput{addition: true}, "skip", "ceiling"},
-		{Normal, pushQuestion, "idle", ceilingInput{addition: true}, "idle", "brain"},
-		{Normal, pushQuestion, "interrupt", ceilingInput{addition: true, needsUser: true, pendingOpen: true}, "interrupt", "brain"},
-		{Normal, pushQuestion, "interrupt", ceilingInput{addition: true, needsUser: true}, "idle", "ceiling"},
-		{Chatty, pushQuestion, "interrupt", ceilingInput{addition: true, pendingOpen: true}, "idle", "ceiling"},
-		{Quiet, pushBlockedInfo, "idle", ceilingInput{addition: true}, "skip", "ceiling"},
-		{Normal, pushBlockedInfo, "idle", ceilingInput{addition: true}, "idle", "brain"},
+		// a question is spoken at every level; interrupt only for a
+		// decision the shepherd must take.
+		{Quiet, pushQuestion, "idle", ceilingInput{}, "idle", "brain"},
+		{Quiet, pushQuestion, "interrupt", ceilingInput{needsUser: true}, "interrupt", "brain"},
+		{Quiet, pushBlockedInfo, "idle", ceilingInput{}, "skip", "ceiling"},
+		{Normal, pushBlockedInfo, "idle", ceilingInput{}, "idle", "brain"},
 	}
 	for _, c := range cases {
 		d := applyCeiling(c.level, c.kind, c.requested, c.in)
@@ -231,7 +230,7 @@ func TestAnnounceCeilingApplied(t *testing.T) {
 	if len(d) != 2 || d[1]["urgency_applied"] != "skip" || d[1]["reason"] != "ceiling" || d[1]["ceiling"] != "normal" || d[1]["urgency_requested"] != "" || d[1]["via"] != "ceiling" {
 		t.Errorf("push_decision = %v", d)
 	}
-	if pq := h.log.ofType("supervisor.push_quiet"); len(pq) != 1 || payload(pq[0])["chattiness"] != "normal" || !strings.HasPrefix(payload(pq[0])["text"].(string), "docs finished:") {
+	if pq := h.log.ofType("supervisor.push_quiet"); len(pq) != 1 || payload(pq[0])["chattiness"] != "normal" || payload(pq[0])["text"] != "docs finished." {
 		t.Errorf("push_quiet = %v", pq)
 	}
 	// quiet, a kept promise: spoken at idle although the brain asked to
@@ -295,17 +294,17 @@ func TestAnnounceSkipCannotSilencePromise(t *testing.T) {
 	}
 }
 
-// The first audible announcement never waits for the brain beyond
-// AnnounceWait: the template is spoken when the wait elapses (with the
-// promise line as before), and the brain's line follows as an addition
-// when it adds something — or is dropped as a duplicate.
-func TestAnnounceWaitElapses(t *testing.T) {
+// One push per event: past AnnounceWait the daemon's own sentence is
+// spoken and the brain's line, whenever it lands, is dropped
+// (brain.push_late) — the two-lines-per-event collision of 2026-09-18 is
+// gone. A kept promise still gets its one line.
+func TestAnnounceWaitElapsesAndDropsTheLateLine(t *testing.T) {
 	release := make(chan struct{})
 	m := braintest.NewModel()
 	var pusher *fakePusher
 	m.EventDefault = &braintest.Step{Fn: func(call braintest.Call) (*genai.GenerateContentResponse, error) {
 		<-release
-		return braintest.Response(*announceReply("That was the rerun you asked for; the same test still fails.", "idle", "", "the rerun", false)), nil
+		return braintest.Response(*announceReply("That was the rerun you asked for; the same test still fails.", "idle", "the detail", "the rerun", false)), nil
 	}}
 	h := newBrainHarness(t, m, func(c *Config) { c.AnnounceWait = 30 * time.Millisecond })
 	pusher = h.pusher
@@ -314,53 +313,70 @@ func TestAnnounceWaitElapses(t *testing.T) {
 	if _, err := h.sup.createPromise("w5:p1", brain.PromiseRequest{Text: "tell me when it's done", Event: "done"}); err != nil {
 		t.Fatal(err)
 	}
-	// Release the model once the template has been spoken.
+	// Release the model once the code sentence has been spoken.
 	go func() {
 		deadline := time.Now().Add(5 * time.Second)
-		for len(pusher.all()) < 2 && time.Now().Before(deadline) {
+		for len(pusher.all()) < 1 && time.Now().Before(deadline) {
 			time.Sleep(time.Millisecond)
 		}
 		close(release)
 	}()
 	doneAuth(h)
-	got := h.pushTexts()
-	if len(got) != 3 || got[0] != doneSentence || got[1] != "As you asked: "+doneSentence || got[2] != "That was the rerun you asked for; the same test still fails." {
+	if got := h.pushTexts(); len(got) != 1 || got[0] != "As you asked: "+doneSentence {
 		t.Fatalf("pushes = %v", got)
 	}
 	d := h.decisions()
-	if len(d) != 2 || d[0]["via"] != "template" || d[0]["reason"] != "wait" || d[0]["urgency_applied"] != "idle" || d[1]["via"] != "brain" || d[1]["late"] != true || d[1]["urgency_applied"] != "idle" || d[1]["reason"] != "brain" {
+	if len(d) != 2 || d[0]["via"] != "template" || d[0]["reason"] != "wait" || d[0]["urgency_applied"] != "idle" || d[1]["via"] != "brain" || d[1]["late"] != true || d[1]["urgency_applied"] != "skip" || d[1]["reason"] != "late" {
 		t.Errorf("push_decision = %v", d)
+	}
+	late := h.log.ofType("brain.push_late")
+	if len(late) != 1 || payload(late[0])["added"] != false || payload(late[0])["turn"] != 1 {
+		t.Errorf("brain.push_late = %v", late)
 	}
 	if kept := h.log.ofType("promise.kept"); len(kept) != 1 || payload(kept[0])["via"] != "template" {
 		t.Errorf("promise.kept = %v", kept)
 	}
-	// A late line that repeats the sentence is dropped.
-	release2 := make(chan struct{})
-	m.EventDefault = &braintest.Step{Fn: func(call braintest.Call) (*genai.GenerateContentResponse, error) {
-		<-release2
-		return braintest.Response(*announceReply("Auth finished and created hello.txt with the requested line!", "idle", "", "", false)), nil
-	}}
-	go func() {
-		deadline := time.Now().Add(5 * time.Second)
-		for len(pusher.all()) < 4 && time.Now().Before(deadline) {
-			time.Sleep(time.Millisecond)
-		}
-		close(release2)
-	}()
-	h.transition("w5:p1", herdr.StateDone, herdr.StateWorking)
-	doneAuth(h)
-	if got := h.pushTexts(); len(got) != 4 || got[3] != doneSentence {
-		t.Fatalf("pushes = %v", got)
-	}
-	if d := h.decisions(); len(d) != 4 || d[3]["urgency_applied"] != "skip" || d[3]["reason"] != "duplicate" || d[3]["late"] != true {
-		t.Errorf("push_decision = %v", d)
+	// The line nobody heard is still what the record keeps of the finish.
+	if row, _ := h.store.Get("w5:p1"); row.LastResult == nil || row.LastResult.Spoken != "That was the rerun you asked for; the same test still fails." || row.LastResult.Detail != "the detail" {
+		t.Errorf("last_result = %+v", row.LastResult)
 	}
 }
 
-// Brain off, timing out, or falling back: exactly the phase-2 template
-// path — the sentence when the level allows it, "As you asked: …" for a
-// promise at every level, nothing else.
-func TestAnnounceFallsBackToTemplate(t *testing.T) {
+// The one exception to dropping a late line: it says the shepherd must
+// act and the block is still open, so it is pushed idle as the only
+// addition.
+func TestAnnounceLateNeedsUserIsAdded(t *testing.T) {
+	release := make(chan struct{})
+	m := braintest.NewModel()
+	var pusher *fakePusher
+	m.EventDefault = &braintest.Step{Fn: func(call braintest.Call) (*genai.GenerateContentResponse, error) {
+		<-release
+		return braintest.Response(*announceReply("Auth wants to write hello.txt; that is the file you said to keep small.", "interrupt", "", "", true)), nil
+	}}
+	h := newBrainHarness(t, m, func(c *Config) { c.AnnounceWait = 30 * time.Millisecond })
+	pusher = h.pusher
+	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
+	go func() {
+		deadline := time.Now().Add(5 * time.Second)
+		for len(pusher.all()) < 1 && time.Now().Before(deadline) {
+			time.Sleep(time.Millisecond)
+		}
+		close(release)
+	}()
+	h.block("w5:p1", "codex-approval-prompt.screen.txt")
+	got := h.pusher.all()
+	if len(got) != 2 || !strings.HasPrefix(got[0].Text, "auth asks to run") || got[1].Text != "Auth wants to write hello.txt; that is the file you said to keep small." || got[1].Urgency != voice.UrgencyIdle {
+		t.Fatalf("pushes = %+v", got)
+	}
+	if late := h.log.ofType("brain.push_late"); len(late) != 1 || payload(late[0])["added"] != true {
+		t.Errorf("brain.push_late = %v", late)
+	}
+}
+
+// Brain off, timing out, or falling back: the daemon's own sentence
+// when the level allows it, "As you asked: …" for a promise at every
+// level, nothing else.
+func TestAnnounceFallsBackToTheCodeSentence(t *testing.T) {
 	// Off.
 	h := newHarness(t, func(c *Config) { c.Chattiness = string(Chatty) })
 	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
@@ -368,7 +384,8 @@ func TestAnnounceFallsBackToTemplate(t *testing.T) {
 		t.Fatal(err)
 	}
 	doneAuth(h)
-	if got := h.pushTexts(); len(got) != 2 || got[0] != doneSentence || got[1] != "As you asked: "+doneSentence {
+	// One line for the event: the kept promise carries the news.
+	if got := h.pushTexts(); len(got) != 1 || got[0] != "As you asked: "+doneSentence {
 		t.Errorf("no brain: pushes = %v", got)
 	}
 	if h.log.count("brain.push_decision") != 0 || h.log.count("brain.turn") != 0 {
@@ -425,68 +442,62 @@ func TestAnnounceFallsBackToTemplate(t *testing.T) {
 	}
 }
 
-// A question is never delayed: its push precedes the brain's first
-// step, and the brain's line is an addition — interrupt only while the
-// question is still pending and the brain says the CEO must decide.
-func TestAnnounceBlockNeverDelayed(t *testing.T) {
+// A block waits for the brain like a finish does and speaks one line:
+// the brain's when it lands in time, the parsed prompt's sentence when
+// it does not. A line about a prompt that was answered meanwhile is
+// dropped (brain.push_stale), which is what made the assistant tell the
+// CEO to approve a prompt already gone (2026-09-18).
+func TestAnnounceBlockOneLineAndStale(t *testing.T) {
 	m := braintest.NewModel()
-	var pusher *fakePusher
-	var mu sync.Mutex
-	pushesAtStep := -1
-	m.EventDefault = &braintest.Step{Fn: func(call braintest.Call) (*genai.GenerateContentResponse, error) {
-		mu.Lock()
-		pushesAtStep = len(pusher.all())
-		mu.Unlock()
-		return braintest.Response(*announceReply("Auth wants to write hello.txt; that is the file you said to keep small.", "interrupt", "", "", true)), nil
-	}}
+	m.EventDefault = announceReply("Auth wants to write hello.txt; that is the file you said to keep small.", "interrupt", "", "", true)
 	h := newBrainHarness(t, m)
-	pusher = h.pusher
 	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
 	h.block("w5:p1", "codex-approval-prompt.screen.txt")
 	got := h.pusher.all()
-	if len(got) != 2 || !strings.HasPrefix(got[0].Text, "auth is asking") || got[0].Urgency != voice.UrgencyIdle || got[1].Text != "Auth wants to write hello.txt; that is the file you said to keep small." || got[1].Urgency != voice.UrgencyInterrupt {
+	if len(got) != 1 || got[0].Text != "Auth wants to write hello.txt; that is the file you said to keep small." || got[0].Urgency != voice.UrgencyInterrupt {
 		t.Fatalf("pushes = %+v", got)
 	}
-	mu.Lock()
-	n := pushesAtStep
-	mu.Unlock()
-	if n != 1 {
-		t.Errorf("the brain's first step saw %d pushes; the question must be out first", n)
+	if p, has := h.pending(); !has || p.PaneID != "w5:p1" {
+		t.Errorf("the prompt is not pending: %+v %v", p, has)
 	}
 	d := h.decisions()
-	if len(d) != 1 || d[0]["template_spoken"] != true || d[0]["urgency_applied"] != "interrupt" || d[0]["needs_user"] != true {
+	if len(d) != 1 || d[0]["urgency_applied"] != "interrupt" || d[0]["needs_user"] != true || d[0]["template"] == "" {
 		t.Errorf("push_decision = %v", d)
 	}
-	// The question answered before the brain spoke: interrupt is capped.
+	// The question answered before the brain spoke: nothing is said
+	// about a prompt that is gone.
 	m.EventDefault = &braintest.Step{Fn: func(call braintest.Call) (*genai.GenerateContentResponse, error) {
 		h.call(ToolConfirm, map[string]any{"answer": "yes"})
-		return braintest.Response(*announceReply("Auth wants to write hello.txt; that is the file you said to keep small.", "interrupt", "", "", true)), nil
+		return braintest.Response(*announceReply("Auth wants to write hello.txt; say yes and it will.", "interrupt", "", "", true)), nil
 	}}
 	h.transition("w5:p1", herdr.StateBlocked, herdr.StateWorking)
 	h.block("w5:p1", "codex-approval-prompt.screen.txt")
-	got = h.pusher.all()
-	if last := got[len(got)-1]; last.Urgency != voice.UrgencyIdle {
-		t.Errorf("addition after the answer = %+v", last)
+	if got := h.pusher.all(); len(got) != 1 {
+		t.Errorf("a stale line was spoken: %+v", got[1:])
 	}
-	if d := h.decisions(); d[len(d)-1]["reason"] != "ceiling" {
+	if stale := h.log.ofType("brain.push_stale"); len(stale) != 1 {
+		t.Errorf("brain.push_stale = %v", stale)
+	}
+	if d := h.decisions(); d[len(d)-1]["reason"] != "stale" {
 		t.Errorf("push_decision = %v", d[len(d)-1])
 	}
 }
 
-// Quiet never adds to a question (no model call); normal does not run a
-// turn for a finish it would not announce; chatty announces and lets the
-// brain phrase it.
+// Quiet speaks a question but never enriches a finish (no model call);
+// normal does not run a turn for a finish it would not announce; chatty
+// announces and lets the brain phrase it.
 func TestAnnounceFollowsChattiness(t *testing.T) {
 	m := braintest.NewModel()
 	m.EventDefault = announceReply("Docs finished the readme you asked for.", "idle", "", "the readme", false)
 	h := newBrainHarness(t, m, func(c *Config) { c.Chattiness = string(Quiet) })
 	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
+	// A question is spoken at every level, so the brain phrases it.
 	h.block("w5:p1", "codex-approval-prompt.screen.txt")
-	if got := h.pushTexts(); len(got) != 1 || !strings.HasPrefix(got[0], "auth is asking") {
+	if got := h.pushTexts(); len(got) != 1 || got[0] != "Docs finished the readme you asked for." {
 		t.Fatalf("pushes = %v", got)
 	}
 	d := h.decisions()
-	if len(d) != 1 || d[0]["reason"] != "ceiling" || d[0]["ceiling"] != "quiet" || d[0]["urgency_applied"] != "skip" || len(m.Calls()) != 0 {
+	if len(d) != 1 || d[0]["reason"] != "brain" || d[0]["ceiling"] != "quiet" || d[0]["urgency_applied"] != "idle" || len(m.Calls()) != 1 {
 		t.Errorf("push_decision = %v (model calls %d)", d, len(m.Calls()))
 	}
 	if err := h.sup.SetSettings(Settings{Chattiness: Normal}); err != nil {
@@ -495,7 +506,7 @@ func TestAnnounceFollowsChattiness(t *testing.T) {
 	h.addAgent("w6:p1", "docs", "claude", herdr.StateWorking)
 	h.srv.SetScreen("w6:p1", fixture(t, "claude-after-approval.screen.txt"))
 	h.transition("w6:p1", herdr.StateWorking, herdr.StateDone)
-	if h.log.count("supervisor.push_quiet") != 1 || len(h.decisions()) != 2 || len(m.Calls()) != 0 {
+	if h.log.count("supervisor.push_quiet") != 1 || len(h.decisions()) != 2 || len(m.Calls()) != 1 {
 		t.Errorf("push_quiet=%d decisions=%d calls=%d", h.log.count("supervisor.push_quiet"), len(h.decisions()), len(m.Calls()))
 	}
 	if err := h.sup.SetSettings(Settings{Chattiness: Chatty}); err != nil {
@@ -506,7 +517,7 @@ func TestAnnounceFollowsChattiness(t *testing.T) {
 	if got := h.pushTexts(); len(got) != 2 || got[1] != "Docs finished the readme you asked for." {
 		t.Errorf("pushes = %v", got)
 	}
-	if len(m.Calls()) != 1 {
+	if len(m.Calls()) != 2 {
 		t.Errorf("model calls = %d", len(m.Calls()))
 	}
 }
@@ -689,31 +700,5 @@ func TestAnnouncePromiseOnlyEvents(t *testing.T) {
 	}
 	if st := h.store.Snapshot().Session.Promises; len(st) != 1 || st[0].Status != state.PromiseKept {
 		t.Errorf("promises = %+v", st)
-	}
-}
-
-func TestTokenOverlap(t *testing.T) {
-	template := "auth finished: created hello.txt with the requested line."
-	// The template has 9 distinct tokens ("hello.txt" splits in two).
-	cases := []struct {
-		line string
-		want float64
-		dup  bool
-	}{
-		{"Auth finished and created hello.txt with the requested line!", 0.9, true},          // "and" is new: 9 of 10
-		{"Auth created hello.txt with the requested line, as you asked.", 8.0 / 11.0, false}, // "as", "you", "asked" are new
-		{"That was the rerun you asked for; the same test still fails.", 1.0 / 11.0, false},  // only "the"
-		{"auth finished: created hello.txt with the requested line.", 1, true},               // verbatim
-		{"the requested line was created in hello.txt auth finished", 0.8, false},            // exactly 0.8 is not "> 0.8"
-		{"the requested line was created in hello.txt auth finished, txt, TXT", 0.8, false},  // distinct tokens only
-		{"", 0, false},
-	}
-	for _, tc := range cases {
-		if got := tokenOverlap(tc.line, template); got < tc.want-1e-9 || got > tc.want+1e-9 {
-			t.Errorf("tokenOverlap(%q) = %v, want %v", tc.line, got, tc.want)
-		}
-		if got := nearDuplicate(tc.line, template); got != tc.dup {
-			t.Errorf("nearDuplicate(%q) = %v", tc.line, got)
-		}
 	}
 }

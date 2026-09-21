@@ -1,7 +1,7 @@
 // Package brain is the supervisor brain, the SVP of docs/roles.md (plan
 // D7-revised): a stateful agent that answers the supervisor's ask and
 // propose requests by reasoning with tools over a function-calling model,
-// instead of the stateless template calls that lost the conversational
+// instead of the stateless one-shot calls that lost the conversational
 // referent at the tool boundary.
 //
 // # Turn
@@ -14,7 +14,7 @@
 // appended, and the loop repeats until the model answers with the JSON
 // reply of the answer contract. A turn has a step budget and a wall clock;
 // exceeding either, or any model error, returns ErrFallback so the
-// supervisor answers from its template path (voice never hangs on a loop),
+// supervisor answers for itself (the voice never hangs on a loop),
 // unless an action was already sent, in which case the reply reports it so
 // nothing is sent twice.
 //
@@ -31,10 +31,9 @@
 // # Event turns
 //
 // The supervisor runs one KindAnnounce turn on a worker event (docs/roles.md
-// "Push judgment"): the request carries the template sentence its fast
-// path would speak, whether that sentence was already pushed (a block's
-// question is never delayed), the pane read as a KindEventScreen message
-// instead of reading again, and the promises the event keeps. The reply
+// "Pushes"): the request carries the code sentence the daemon speaks when
+// the brain does not answer in time, the pane read as a KindEventScreen
+// message instead of reading again, and the promises the event keeps. The reply
 // adds Urgency — interrupt, idle, silent or skip — and KeepsPromiseIDs to
 // the answer contract; an empty Spoken is a skip. The brain decides
 // whether and how urgently; the supervisor applies the chattiness

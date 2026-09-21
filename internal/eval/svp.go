@@ -136,7 +136,7 @@ func runSVPCase(ctx context.Context, c SVPCase, fixtureDir string, model brain.M
 
 	if err != nil && errors.Is(err, brain.ErrAllKeysRateLimited) {
 		// brain.fail wraps a rate limit in ErrFallback (the supervisor
-		// tolerates it and answers from the template path); RunSVPLive
+		// tolerates it and answers for itself); RunSVPLive
 		// needs to see it unwrapped to stop rather than hot-retry the
 		// remaining cases against the same exhausted key pool.
 		return Result{ID: c.ID, Status: StatusFail, Detail: firstLine(err.Error()), Err: err, Duration: dur, Got: got}

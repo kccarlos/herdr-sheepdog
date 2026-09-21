@@ -8,7 +8,7 @@ DATE       := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 
 LDFLAGS    := -X 'main.version=$(VERSION)' -X 'main.commit=$(COMMIT)' -X 'main.date=$(DATE)'
 
-.PHONY: build test test-web lint vet cross clean install plugin-install run-dev changelog eval eval-live
+.PHONY: build test test-web lint vet cross clean install run-dev changelog eval eval-live
 
 build:
 	go build -ldflags "$(LDFLAGS)" -o bin/$(BINARY) $(CMD)
@@ -17,11 +17,6 @@ build:
 install: build
 	mkdir -p $(HOME)/.local/bin
 	cp bin/$(BINARY) $(HOME)/.local/bin/$(BINARY)
-
-# Links the herdr plugin shim and (on macOS) installs the launchd agent;
-# see plugin/install.sh. Not run as part of any other target.
-plugin-install:
-	./plugin/install.sh
 
 # A daemon you can poke from /debug without a mic, herdr, or a Gemini key.
 run-dev: build

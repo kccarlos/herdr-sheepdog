@@ -27,7 +27,7 @@ const (
 	DefaultAskTimeout     = 8 * time.Second
 	DefaultProposeTimeout = 12 * time.Second
 	// DefaultEnrichTimeout bounds an event turn (announce): on expiry the
-	// supervisor speaks its template sentence instead.
+	// supervisor speaks its code sentence instead.
 	DefaultEnrichTimeout = 6 * time.Second
 	// DefaultStopTimeout bounds the stop procedure's closing turn: on
 	// expiry the supervisor speaks its own "Stopped: …" sentence.

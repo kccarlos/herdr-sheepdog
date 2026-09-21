@@ -427,7 +427,7 @@ class Builder {
   herdrChain(card) {
     const open = this.tools.last;
     if (open) return open.chain;
-    // Work that led to no push (a summarize_done the chattiness level
+    // Work that led to no push (a finish the chattiness level
     // silenced) ends its story here: the next ping starts a new one.
     if (this.loose && this.loose.work) this.loose = null;
     return this.looseChain(false, card);

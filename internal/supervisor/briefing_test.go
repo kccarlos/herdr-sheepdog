@@ -18,8 +18,8 @@ func agent(pane, alias string, st herdr.State) state.Agent {
 // count plus the interesting ones beyond that, the pending question last.
 func TestComposeBriefingShapes(t *testing.T) {
 	now := t0.Add(10 * time.Minute)
-	fresh := &state.Result{Spoken: "created hello.txt with the requested line", Outcome: "success", At: now.Add(-5 * time.Minute)}
-	stale := &state.Result{Spoken: "wrote the readme", Outcome: "success", At: now.Add(-31 * time.Minute)}
+	fresh := &state.Result{Spoken: "created hello.txt with the requested line", At: now.Add(-5 * time.Minute)}
+	stale := &state.Result{Spoken: "wrote the readme", At: now.Add(-31 * time.Minute)}
 	long := &state.Result{Spoken: "one two three four five six seven eight nine ten eleven twelve thirteen fourteen.", At: now}
 	working := agent("w1:p1", "auth", herdr.StateWorking)
 	working.CurrentTask = "run the auth tests and fix whatever fails in the login package today"
@@ -31,6 +31,9 @@ func TestComposeBriefingShapes(t *testing.T) {
 	doneStale.LastResult = stale
 	doneLong := agent("w5:p1", "api", herdr.StateDone)
 	doneLong.LastResult = long
+	// The brain's own line names the agent; the clause says it already.
+	brainLine := agent("w7:p1", "auth", herdr.StateIdle)
+	brainLine.LastResult = &state.Result{Spoken: "Auth finished the rerun you asked for.", At: now}
 	pending := state.PendingAction{Kind: state.PendingAnswerPrompt, PaneID: "w2:p1", Question: "whether it can create claude.txt"}
 
 	cases := []struct {
@@ -49,6 +52,7 @@ func TestComposeBriefingShapes(t *testing.T) {
 		{"idle fresh result", []state.Agent{idleFresh}, state.PendingAction{}, "One agent: vps is idle; it last created hello.txt with the requested line.", 1},
 		{"done stale result", []state.Agent{doneStale}, state.PendingAction{}, "One agent: web is idle.", 1},
 		{"done long result trimmed", []state.Agent{doneLong}, state.PendingAction{}, "One agent: api is idle; it last one two three four five six seven eight nine ten eleven twelve.", 1},
+		{"result naming the agent", []state.Agent{brainLine}, state.PendingAction{}, "One agent: auth is idle; it last finished the rerun you asked for.", 1},
 		{"exited", []state.Agent{agent("w1:p1", "auth", herdr.StateUnknown)}, state.PendingAction{}, "One agent: auth has exited.", 1},
 		{"three agents blocked first", []state.Agent{working, idleFresh, askingQ}, pending,
 			`Three agents: docs is asking whether it can create claude.txt, auth is working on "run the auth tests and fix whatever fails in the…", and vps is idle; it last created hello.txt with the requested line. Docs is waiting for your answer.`, 3},
@@ -86,23 +90,19 @@ func TestComposeBriefingShapes(t *testing.T) {
 }
 
 // TestBriefingReflectsResultsAndAges: through the supervisor, a finish
-// puts its result in the briefing (no model call) and the result drops
+// puts what was announced about it in the briefing and the result drops
 // out of the sentence once it is older than 30 minutes, even without a
 // state change.
 func TestBriefingReflectsResultsAndAges(t *testing.T) {
 	h := twoAgents(t)
 	h.srv.SetScreen("w5:p1", fixture(t, "codex-after-approval.screen.txt"))
 	h.transition("w5:p1", herdr.StateWorking, herdr.StateDone)
-	calls := h.llm.count("summarize_done")
-	want := "Two agents: auth is idle; it last created hello.txt with the requested line, and docs is idle."
+	want := "Two agents: auth is idle; it last finished, and docs is idle."
 	if got := h.call(ToolBriefing, nil).Spoken; got != want {
 		t.Errorf("briefing = %q, want %q", got, want)
 	}
 	h.clock.Advance(31 * time.Minute)
 	if got := h.call(ToolBriefing, nil).Spoken; got != "Two agents: auth is idle and docs is idle." {
 		t.Errorf("briefing after 31 min = %q", got)
-	}
-	if h.llm.count("summarize_done") != calls || h.llm.count("spoken_answer") != 0 {
-		t.Error("briefing called the model")
 	}
 }

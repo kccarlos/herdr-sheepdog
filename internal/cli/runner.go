@@ -13,7 +13,7 @@ import (
 const logQuestionChars = 80
 
 // Result is one CLI invocation's outcome, returned by RunBackend and used
-// by `sheepdog ask-test` for its JSON report.
+// for its JSON report.
 type Result struct {
 	Backend Backend
 	Argv    []string
@@ -75,7 +75,7 @@ func (r *Runner) Query(ctx context.Context, workspace, question string) (string,
 }
 
 // ResolveBackend applies cli.prefer and returns the backend Query would
-// use (`sheepdog ask-test` uses it when --backend is not given).
+// use.
 func (r *Runner) ResolveBackend() (Backend, error) {
 	return r.resolveBackend(r.cfg.Prefer)
 }
@@ -107,7 +107,7 @@ func (r *Runner) resolveBackend(prefer string) (Backend, error) {
 }
 
 // RunBackend runs a specific backend regardless of cli.prefer (used by
-// `sheepdog ask-test --backend`). At most one call per workspace runs at
+// the configured preference). At most one call per workspace runs at
 // a time; a concurrent call for the same workspace returns ErrBusy
 // immediately rather than queueing.
 func (r *Runner) RunBackend(ctx context.Context, backend Backend, workspace, question string) (Result, error) {

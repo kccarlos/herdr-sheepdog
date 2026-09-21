@@ -56,7 +56,7 @@ var ErrNotSynthetic = errors.New("inject: pane is not synthetic")
 
 // Blocked registers (or updates) the synthetic pane, stores its screen and
 // runs the supervisor's blocked path synchronously: the pane read, the
-// summarize_block call, the pending action and the push all happen before
+// prompt parse, the pending action and the push all happen before
 // it returns. The returned row is the state after the chain.
 func (i *Injector) Blocked(ctx context.Context, req BlockedRequest) (state.Agent, error) {
 	req.PaneID = strings.TrimSpace(req.PaneID)

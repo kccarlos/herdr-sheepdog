@@ -9,8 +9,8 @@ import (
 // Errors callers branch on.
 var (
 	// ErrFallback is returned by a turn that could not produce a reply
-	// (model error, budget exceeded, no model); the supervisor answers
-	// from its template path.
+	// (model error, budget exceeded, no model); the supervisor then
+	// speaks its own code sentence, or reports the roster.
 	ErrFallback = errors.New("brain: fallback")
 	// ErrNotPermitted is the rail refusing a send_keys; the Host returns
 	// it (wrapped) when the pending action does not match at send time.
@@ -21,7 +21,7 @@ var (
 	ErrNoHost = errors.New("brain: no host")
 	// ErrYielded (wrapped in ErrFallback) is returned by an event turn
 	// that stopped before a model call because a CEO turn was waiting
-	// for the lock; the supervisor speaks its template sentence instead.
+	// for the lock; the supervisor speaks its code sentence instead.
 	ErrYielded = errors.New("brain: yielded to a CEO turn")
 	// ErrCoalesced (wrapped in ErrFallback) is returned by a queued
 	// event turn that a newer event turn about the same agent replaced
@@ -52,9 +52,8 @@ const (
 	// only, a short budget, still CEO-triggered (the CEO is waiting).
 	KindStop Kind = "stop"
 	// KindAnnounce decides what the assistant says about a worker event
-	// and how urgently: one line that replaces the template sentence
-	// (and keeps the promises the event fulfils), or an addition when
-	// the template was already spoken (a question is never delayed).
+	// and how urgently: the one line for that event, which replaces the
+	// daemon's own sentence and keeps the promises the event fulfils.
 	// The reply's Urgency may be skip or silent; an empty Spoken is a
 	// skip. The chattiness ceiling is applied by the supervisor.
 	KindAnnounce Kind = "announce"
@@ -110,13 +109,9 @@ type Request struct {
 	Stopped string
 	// Event is the worker event of an event turn (done, blocked).
 	Event string
-	// Template is the template path's sentence for the event: what the
-	// brain's Spoken replaces, or (TemplateSpoken) what was already said.
+	// Template is the sentence the daemon speaks for the event when the
+	// brain does not answer in time: what the brain's Spoken replaces.
 	Template string
-	// TemplateSpoken reports that the supervisor already pushed Template
-	// before the turn (a block: a question is never delayed), so Spoken
-	// is an addition, not a replacement.
-	TemplateSpoken bool
 	// Screen is the pane read the supervisor already took for the event;
 	// it is put in the window (wrapped as worker output, pruned like a
 	// tool result) so the turn need not read again.
@@ -150,6 +145,10 @@ type Reply struct {
 	// announce turn's Spoken keeps (informational: the supervisor keeps
 	// every matching promise regardless).
 	KeepsPromiseIDs []string `json:"keeps_promise_ids,omitempty"`
+	// Turn is the turn that produced the reply, filled in by the brain
+	// and never by the model: the supervisor names it when it drops a
+	// line that came too late (brain.push_late).
+	Turn int `json:"-"`
 }
 
 // Promise events and statuses (state.Promise mirrors them; the brain

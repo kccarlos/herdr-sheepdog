@@ -1,0 +1,15 @@
+• Running git diff --stat; git status --short
+
+  Would you like to run the following command?
+
+  Environment: local
+
+  Reason: Do you want to allow Git to verify which unrelated changes remain unstaged?
+
+  $ git diff --stat; git status --short
+
+› 1. Yes, proceed (y)
+  2. Yes, and don't ask again for commands that start with `git diff --stat` (p)
+  3. No, and tell Codex what to do differently (esc)
+
+  Press enter to confirm or esc to cancel

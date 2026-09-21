@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,26 +17,24 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr/herdrtest"
 )
 
-// fakeLLM answers summarize_block for the Codex fixture.
-func fakeLLM(t *testing.T) *httptest.Server {
+// noKeys clears every provider key for the test: a developer's .env
+// must never make an app test reach a real API (or hang on one).
+func noKeys(t *testing.T) {
 	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{"choices": []map[string]any{{"message": map[string]any{
-			"content": `{"spoken":"auth is asking whether it can create hello.txt.","question":"whether it can create hello.txt","is_question":true,"needs_decision":true,"options":[{"label":"Yes","key":"enter"}],"answer_keys":{"yes":["enter"],"no":["esc"]}}`,
-		}}}})
-	}))
-	t.Cleanup(srv.Close)
-	return srv
+	for _, k := range []string{"GEMINI_API_KEY", "GEMINI_API_KEY_1", "GEMINI_API_KEY_2", "GEMINI_API_KEY_3", "DEEPSEEK_API_KEY"} {
+		t.Setenv(k, "")
+	}
 }
 
-func testConfig(t *testing.T, llmURL string) config.Config {
+// testConfig is a daemon config with everything pointed at temporary
+// files, no keys in the environment and no CLI binary in reach.
+func testConfig(t *testing.T) config.Config {
 	t.Helper()
+	noKeys(t)
 	dir := t.TempDir()
 	cfg := config.Default()
 	cfg.DataDir = dir
 	cfg.State.Path = filepath.Join(dir, "state.json")
-	cfg.LLM.BaseURL = llmURL + "/v1"
-	cfg.LLM.Model = "fake"
 	cfg.Web.Port = 0
 	// macOS limits unix socket paths to 104 bytes; t.TempDir() is longer.
 	sockDir, err := os.MkdirTemp("", "sd")
@@ -55,7 +52,7 @@ func testConfig(t *testing.T, llmURL string) config.Config {
 }
 
 func TestBuildValidation(t *testing.T) {
-	cfg := testConfig(t, "http://127.0.0.1:1")
+	cfg := testConfig(t)
 	if _, err := Build(cfg, Options{Voice: "loud"}); err == nil || !strings.Contains(err.Error(), "--voice") {
 		t.Errorf("bad voice: %v", err)
 	}
@@ -68,16 +65,12 @@ func TestBuildValidation(t *testing.T) {
 	if _, err := Build(cfg, Options{Voice: VoiceGemini, Herdr: HerdrMock}); err == nil || !strings.Contains(err.Error(), "GEMINI_API_KEY") {
 		t.Errorf("gemini without keys: %v", err)
 	}
-	gem := cfg
-	gem.LLM.BaseURL = config.GeminiOpenAIBaseURL
-	if _, err := Build(gem, Options{Voice: VoiceOff, Herdr: HerdrMock}); err == nil || !strings.Contains(err.Error(), "cheap LLM") {
-		t.Errorf("gemini llm without keys: %v", err)
-	}
 	if _, err := Build(cfg, Options{Voice: VoiceOff, Herdr: HerdrMock, Brain: "maybe"}); err == nil || !strings.Contains(err.Error(), "--brain") {
 		t.Errorf("bad brain: %v", err)
 	}
 	// A Gemini key without a network: Build succeeds (nothing connects),
 	// and the brain is attached with its transcript under the data dir.
+	gem := cfg
 	gem.Gemini.APIKeys = []string{"k"}
 	a, err := Build(gem, Options{Voice: VoiceGemini, Herdr: HerdrMock})
 	if err != nil {
@@ -121,8 +114,7 @@ func TestBuildValidation(t *testing.T) {
 }
 
 func TestRunMockVoiceOffFullChain(t *testing.T) {
-	llm := fakeLLM(t)
-	cfg := testConfig(t, llm.URL)
+	cfg := testConfig(t)
 	var stderr bytes.Buffer
 	cfg.Web.DevTestdataDir = filepath.Join("..", "..", "testdata", "audio")
 	a, err := Build(cfg, Options{Voice: VoiceOff, Herdr: HerdrMock, Dev: true, Version: "t1", Stderr: &stderr, Drain: time.Second})
@@ -210,7 +202,7 @@ func TestRunMockVoiceOffFullChain(t *testing.T) {
 		t.Fatalf("first/last = %s / %s", types[0], types[len(types)-1])
 	}
 	for _, chain := range [][]string{
-		{"herdr.state", "llm.call", "pending.created", "voice.push"},
+		{"herdr.state", "pending.created", "voice.push"},
 		{"voice.tool_call", "herdr.send", "pending.confirmed"},
 	} {
 		if !subsequence(types, chain) {
@@ -229,9 +221,8 @@ func TestRunMockVoiceOffFullChain(t *testing.T) {
 	}
 }
 
-func TestRunSocketModeRetriesWatcherAndAcceptsHookEvents(t *testing.T) {
-	llm := fakeLLM(t)
-	cfg := testConfig(t, llm.URL)
+func TestRunSocketModeRetriesWatcherAndAcceptsHTTPEvents(t *testing.T) {
+	cfg := testConfig(t)
 	cfg.DebounceMS = 50
 	// herdr not running yet: the watcher must retry, not kill the daemon.
 	a, err := Build(cfg, Options{Voice: VoiceOff, Herdr: HerdrSocket, Drain: time.Second, WatcherRetry: 100 * time.Millisecond})
@@ -256,15 +247,15 @@ func TestRunSocketModeRetriesWatcherAndAcceptsHookEvents(t *testing.T) {
 	}, "herdr_unavailable logged")
 
 	// Now start a fake herdr on the configured socket; the retry picks it
-	// up and a hook-channel event flows through the watcher into the
-	// supervisor.
+	// up and an event posted to the HTTP channel flows through the
+	// watcher into the supervisor.
 	srv := herdrtest.New(t)
 	// herdrtest picks its own path; point a symlink at it.
 	if err := os.Symlink(srv.Path, cfg.Herdr.Socket); err != nil {
 		t.Fatal(err)
 	}
 	srv.SetAgent(herdr.AgentInfo{PaneID: "w1:p1", WorkspaceID: "w1", Agent: "codex", Status: herdr.StateWorking})
-	srv.SetScreen("w1:p1", "Would you like to run the following command?\n")
+	srv.SetScreen("w1:p1", "  Would you like to run the following command?\n\n  $ ls\n\n› 1. Yes, proceed (y)\n  2. No, and tell Codex what to do differently (esc)\n")
 	waitFor(t, 5*time.Second, func() bool {
 		for _, ev := range a.elog.Tail(0) {
 			if ev.Type == "herdr.transition" && ev.PaneID == "w1:p1" {
@@ -274,14 +265,14 @@ func TestRunSocketModeRetriesWatcherAndAcceptsHookEvents(t *testing.T) {
 		return false
 	}, "watcher discovered the pane after retry")
 
-	hook := `{"event":"pane_agent_status_changed","data":{"type":"pane_agent_status_changed","pane_id":"w1:p1","workspace_id":"w1","agent_status":"blocked","agent":"codex"}}`
-	resp, err := http.Post(url+"/api/herdr/event", "application/json", strings.NewReader(hook))
+	posted := `{"event":"pane_agent_status_changed","data":{"type":"pane_agent_status_changed","pane_id":"w1:p1","workspace_id":"w1","agent_status":"blocked","agent":"codex"}}`
+	resp, err := http.Post(url+"/api/herdr/event", "application/json", strings.NewReader(posted))
 	if err != nil {
 		t.Fatal(err)
 	}
 	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusAccepted {
-		t.Fatalf("hook = %d", resp.StatusCode)
+		t.Fatalf("posted event = %d", resp.StatusCode)
 	}
 	waitFor(t, 5*time.Second, func() bool {
 		for _, ev := range a.elog.Tail(0) {
@@ -290,7 +281,7 @@ func TestRunSocketModeRetriesWatcherAndAcceptsHookEvents(t *testing.T) {
 			}
 		}
 		return false
-	}, "hook event reached the supervisor")
+	}, "posted event reached the supervisor")
 
 	cancel()
 	select {
@@ -307,11 +298,9 @@ func TestRunSocketModeRetriesWatcherAndAcceptsHookEvents(t *testing.T) {
 // (WP4), that neither backend being found does not break ask(), and that
 // --cli=off skips detection entirely.
 func TestRunCLIDetection(t *testing.T) {
-	llm := fakeLLM(t)
-
 	runOnce := func(t *testing.T, cliMode string) []string {
 		t.Helper()
-		cfg := testConfig(t, llm.URL)
+		cfg := testConfig(t)
 		a, err := Build(cfg, Options{Voice: VoiceOff, Herdr: HerdrMock, CLI: cliMode, Drain: time.Second})
 		if err != nil {
 			t.Fatal(err)
@@ -418,8 +407,7 @@ func waitFor(t *testing.T, d time.Duration, cond func() bool, msg string) {
 // after daemon.start (brain.model_changed {via: state}); daemon.start
 // reports the live model.
 func TestBrainModelPersistsAcrossRestart(t *testing.T) {
-	llm := fakeLLM(t)
-	cfg := testConfig(t, llm.URL)
+	cfg := testConfig(t)
 	run := func(check func(url string)) (types []string, models []string) {
 		t.Helper()
 		a, err := Build(cfg, Options{Voice: VoiceOff, Herdr: HerdrMock, Brain: BrainFake, Drain: time.Second})
@@ -517,8 +505,7 @@ func TestBrainModelPersistsAcrossRestart(t *testing.T) {
 // before providers existed) is Gemini's, so under the fake it is
 // refused the same way rather than applied to the configured provider.
 func TestBrainProviderRestoreFallsBackToConfigured(t *testing.T) {
-	llm := fakeLLM(t)
-	cfg := testConfig(t, llm.URL)
+	cfg := testConfig(t)
 	run := func(session string, check func(url string)) []string {
 		t.Helper()
 		if err := os.WriteFile(cfg.State.Path, []byte(`{"agents":{},"session":`+session+`}`), 0o600); err != nil {

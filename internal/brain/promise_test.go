@@ -194,7 +194,7 @@ func TestEventTurnTimeout(t *testing.T) {
 	m := braintest.NewModel(braintest.Step{Block: block})
 	h := newHarness(t, m, func(c *Config) { c.EnrichTimeout = 50 * time.Millisecond; c.FinalGrace = -1 })
 	start := time.Now()
-	_, err := h.brain.Turn(context.Background(), Request{Kind: KindAnnounce, Agent: "auth", Event: "done", Template: "auth finished.", TemplateSpoken: true, Promises: []PromiseInfo{{ID: "pr-1", Text: "tell me", Agent: "auth", Event: "done"}}})
+	_, err := h.brain.Turn(context.Background(), Request{Kind: KindAnnounce, Agent: "auth", Event: "done", Template: "auth finished.", Promises: []PromiseInfo{{ID: "pr-1", Text: "tell me", Agent: "auth", Event: "done"}}})
 	if err == nil || time.Since(start) > 2*time.Second {
 		t.Fatalf("err = %v after %s", err, time.Since(start))
 	}
@@ -202,7 +202,7 @@ func TestEventTurnTimeout(t *testing.T) {
 	if fb["reason"] != "timeout" || fb["kind"] != "announce" || fb["trigger"] != "event" {
 		t.Errorf("fallback = %v", fb)
 	}
-	if text := h.model.Calls()[0].Text(); !strings.Contains(text, "Event from the supervisor (announce): agent=\"auth\" event=\"done\" template=\"auth finished.\"\nPromises this event keeps (the CEO asked to be told; your line says so, with the result):\n- pr-1: \"tell me\" (when auth finishes)\nThe assistant already said the sentence") {
+	if text := h.model.Calls()[0].Text(); !strings.Contains(text, "Event from the supervisor (announce): agent=\"auth\" event=\"done\" template=\"auth finished.\"\nPromises this event keeps (the CEO asked to be told; your line says so, with the result):\n- pr-1: \"tell me\" (when auth finishes)\nNothing has been said about this yet.") {
 		t.Errorf("request = %s", text)
 	}
 }
@@ -272,13 +272,13 @@ func TestReflexPromisesAndEvents(t *testing.T) {
 	if calls := h.log.ofType("brain.tool_call"); payload(calls[len(calls)-1])["name"] != ToolRecall {
 		t.Errorf("announce did not recall first: %v", payload(calls[len(calls)-1]))
 	}
-	// The template already spoken (a block), nothing kept: skip, no tools.
-	rep, err = h.brain.Turn(context.Background(), Request{Kind: KindAnnounce, Agent: "docs", Event: "blocked", Template: "docs is asking something.", TemplateSpoken: true})
-	if err != nil || rep.Spoken != "" || rep.Urgency != UrgencySkip {
-		t.Errorf("announce with nothing to add = %+v %v", rep, err)
+	// A block, nothing kept: the recall round, then its own line.
+	rep, err = h.brain.Turn(context.Background(), Request{Kind: KindAnnounce, Agent: "docs", Event: "blocked", Template: "docs is asking something."})
+	if err != nil || rep.Spoken != "docs is asking something." || rep.Urgency != UrgencyIdle {
+		t.Errorf("block announce = %+v %v", rep, err)
 	}
-	if turn := payload(h.log.ofType("brain.turn")[3]); turn["model_calls"] != 1 {
-		t.Errorf("block announce = %v", turn)
+	if turn := payload(h.log.ofType("brain.turn")[3]); turn["model_calls"] != 2 {
+		t.Errorf("block announce turn = %v", turn)
 	}
 	// A kept promise: one line, its id.
 	rep, err = h.brain.Turn(context.Background(), Request{Kind: KindAnnounce, Agent: "auth", Event: "done", Template: "auth finished: ran the tests, 1 failed.", Promises: []PromiseInfo{h.host.Promised[0]}})

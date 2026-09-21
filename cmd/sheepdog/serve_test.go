@@ -3,9 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,7 +11,17 @@ import (
 	"time"
 )
 
+// noKeys clears every provider key for the test: a developer's .env
+// must never make a test here reach a real API (or hang on one).
+func noKeys(t *testing.T) {
+	t.Helper()
+	for _, k := range []string{"GEMINI_API_KEY", "GEMINI_API_KEY_1", "GEMINI_API_KEY_2", "GEMINI_API_KEY_3", "DEEPSEEK_API_KEY"} {
+		t.Setenv(k, "")
+	}
+}
+
 func TestServeFlagsAndValidation(t *testing.T) {
+	noKeys(t)
 	var stderr bytes.Buffer
 	if _, code, run := parseServeFlags([]string{"--nope"}, &stderr); run || code != 2 {
 		t.Errorf("bad flag: code=%d run=%v", code, run)
@@ -27,7 +35,6 @@ func TestServeFlagsAndValidation(t *testing.T) {
 	}
 	var stdout bytes.Buffer
 	dir := t.TempDir()
-	t.Setenv("GEMINI_API_KEY", "")
 	if code := run(context.Background(), []string{"serve", "--config", filepath.Join(dir, "none.toml"), "--voice", "loud"}, &stdout, &stderr); code != 2 {
 		t.Errorf("bad voice mode exit = %d: %s", code, stderr.String())
 	}
@@ -86,10 +93,7 @@ func TestLoadServeEnvFile(t *testing.T) {
 // appears anywhere in stdout/stderr, including the verbose config dump
 // and the daemon.start event.
 func TestServeEnvFileLoadsAndNeverLogs(t *testing.T) {
-	llm := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{"choices": []map[string]any{{"message": map[string]any{"content": `{"spoken":"x","is_question":false}`}}}})
-	}))
-	defer llm.Close()
+	noKeys(t)
 
 	// Unset (not merely blank) any real GEMINI_API_KEY for the duration,
 	// so the file's value is the only source and LoadEnvFile does not
@@ -109,18 +113,12 @@ func TestServeEnvFileLoadsAndNeverLogs(t *testing.T) {
 	dir := t.TempDir()
 	envPath := filepath.Join(dir, "custom.env")
 	const secret = "AIzaEnvFileTestMarkerNotAReal"
-	body := "SHEEPDOG_LLM_BASE_URL=" + llm.URL + "/v1\n" +
-		"SHEEPDOG_LLM_MODEL=fake\n" +
-		"SHEEPDOG_WEB_PORT=0\n" +
+	body := "SHEEPDOG_WEB_PORT=0\n" +
 		"GEMINI_API_KEY=" + secret + "\n"
 	if err := os.WriteFile(envPath, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		for _, k := range []string{"SHEEPDOG_LLM_BASE_URL", "SHEEPDOG_LLM_MODEL", "SHEEPDOG_WEB_PORT"} {
-			_ = os.Unsetenv(k)
-		}
-	})
+	t.Cleanup(func() { _ = os.Unsetenv("SHEEPDOG_WEB_PORT") })
 
 	stdout, stderr := &syncBuffer{}, &syncBuffer{}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -159,15 +157,9 @@ func TestServeEnvFileLoadsAndNeverLogs(t *testing.T) {
 }
 
 func TestServeMockVoiceOffSmoke(t *testing.T) {
-	llm := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{"choices": []map[string]any{{"message": map[string]any{"content": `{"spoken":"x","is_question":false}`}}}})
-	}))
-	defer llm.Close()
+	noKeys(t)
 	dir := t.TempDir()
-	t.Setenv("SHEEPDOG_LLM_BASE_URL", llm.URL+"/v1")
-	t.Setenv("SHEEPDOG_LLM_MODEL", "fake")
 	t.Setenv("SHEEPDOG_WEB_PORT", "0")
-	t.Setenv("GEMINI_API_KEY", "")
 
 	stdout, stderr := &syncBuffer{}, &syncBuffer{}
 	ctx, cancel := context.WithCancel(context.Background())

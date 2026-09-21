@@ -211,11 +211,7 @@ func eventRequestText(req Request) string {
 			fmt.Fprintf(&b, "- %s: %q (%s)\n", p.ID, p.Text, promiseCondition(p))
 		}
 	}
-	if req.TemplateSpoken {
-		b.WriteString("The assistant already said the sentence in template (a question is never delayed). Decide whether to add one line and how urgently: add only what it lacks and the CEO would want now — the decision named in context, which request of theirs this is about, what they said about it — and skip when the sentence was enough or they already know.")
-	} else {
-		b.WriteString("Nothing has been said about this yet. Decide whether the assistant says anything, what, and how urgently: your spoken replaces the template sentence, so carry its news (what the agent did, in the CEO's terms) plus what the sentence lacked — which request of theirs it fulfils, what changed against what they asked, what is still open. Skip when the CEO already knows (the assistant relayed it, or they just asked and heard it) or it is not worth their attention; silent when it is context the assistant should have but not say.")
-	}
+	b.WriteString("Nothing has been said about this yet. Decide whether the assistant says anything, what, and how urgently: your spoken replaces the template sentence, so carry its news (what the agent did, in the CEO's terms) plus what the sentence lacked — which request of theirs it fulfils, what changed against what they asked, what is still open. Skip when the CEO already knows (the assistant relayed it, or they just asked and heard it) or it is not worth their attention; silent when it is context the assistant should have but not say.")
 	b.WriteString(" Reply with the JSON object of the answer contract plus \"urgency\": one of interrupt (the CEO must act now), idle (at the next pause), silent (context only, not spoken) or skip (say nothing); \"keeps_promise_ids\" for the promise ids above your line keeps; \"relates_to\" for the CEO's request it fulfils; needs_user true when they must decide or act. One line, at most two short sentences. The screen the supervisor read is above; read tools only.")
 	return b.String()
 }

@@ -3,7 +3,7 @@
 // Configuration is read from ~/.config/sheepdog/config.toml when the file
 // exists, then overridden by SHEEPDOG_* environment variables (and, for the
 // Gemini key pool, GEMINI_API_KEY*). Only the keys needed by the herdr
-// client, state table, voice session, cheap LLM, CLI query tool and
+// client, state table, voice session, brain, CLI query tool and
 // supervisor are defined so far, plus the web server port; later work
 // packages add their own sections here.
 //
@@ -43,7 +43,6 @@ type Config struct {
 	Gemini     Gemini     `toml:"gemini"`
 	Voice      Voice      `toml:"voice"`
 	DeepSeek   DeepSeek   `toml:"deepseek"`
-	LLM        LLM        `toml:"llm"`
 	Web        Web        `toml:"web"`
 	CLI        CLI        `toml:"cli"`
 	Supervisor Supervisor `toml:"supervisor"`
@@ -66,7 +65,7 @@ type Prompts struct {
 // function-calling model (Gemini or DeepSeek, switchable at runtime),
 // keeping one transcript per daemon run under <data_dir>/brain/. When
 // it errors or runs out of budget the supervisor falls back to the
-// template path.
+// daemon's own code sentence.
 type Brain struct {
 	// Enabled turns the brain on (default true). `serve --brain=off`
 	// overrides it; it is also silently off when the initial provider
@@ -80,7 +79,7 @@ type Brain struct {
 	// model of Provider).
 	Model string `toml:"model"`
 	// MaxSteps bounds the model calls in one turn (default 6); beyond it
-	// the turn falls back to the template path.
+	// the turn falls back to the code sentence.
 	MaxSteps int `toml:"max_steps"`
 	// AskTimeoutS / ProposeTimeoutS bound one ask / propose turn including
 	// its tool calls (defaults 8 / 12).
@@ -151,10 +150,6 @@ type Supervisor struct {
 	// PromiseTTLS is how long a promise ("tell me when it's done") waits
 	// for its event before it expires silently (default 7200, 2 h).
 	PromiseTTLS int `toml:"promise_ttl_s"`
-	// SummaryTimeoutS bounds the summarize_done template call on a
-	// finish; on expiry the plain "<alias> finished." sentence is spoken
-	// instead (default 15).
-	SummaryTimeoutS int `toml:"summary_timeout_s"`
 	// CancelWindowS is how soon after an instruction went to a working
 	// agent a "stop" still interrupts it with Ctrl-C (docs/roles.md
 	// "Stop", phase 3; default 30).
@@ -190,7 +185,7 @@ func validChattiness(v string) bool {
 
 // CLI configures the read-only CLI query tool (plan §3.5, WP4): codex
 // and/or claude, invoked non-interactively and read-only to answer
-// questions the cheap LLM cannot from the screen alone. CodexCmd and
+// questions the brain cannot answer from a screen alone. CodexCmd and
 // ClaudeCmd are argv templates ({question}, {cwd}, {model} and
 // {reasoning} are substituted); no shell is invoked. See
 // docs/cli-query-tools.md for why each flag is there.
@@ -236,45 +231,6 @@ const DefaultDevTestdataDir = "testdata/audio"
 
 // DefaultWebPort is the port the web server listens on by default.
 const DefaultWebPort = 7777
-
-// LLM configures the cheap text-in/text-out model (plan §3.4): any
-// OpenAI-compatible chat endpoint.
-type LLM struct {
-	// BaseURL is the API root, e.g. the Gemini OpenAI-compatible endpoint
-	// or http://localhost:11434/v1 for Ollama.
-	BaseURL string `toml:"base_url"`
-	// Model is the model name passed in every request.
-	Model string `toml:"model"`
-	// APIKey authenticates requests. When empty and BaseURL is the Gemini
-	// endpoint, the Gemini key pool is used instead. Never logged.
-	APIKey string `toml:"api_key"`
-	// TimeoutS bounds one attempt (default 15; raise it for a slow local
-	// model such as Ollama gemma4).
-	TimeoutS int `toml:"timeout_s"`
-}
-
-// GeminiOpenAIBaseURL is Gemini's OpenAI-compatible endpoint, the default
-// cheap-LLM backend.
-const GeminiOpenAIBaseURL = "https://generativelanguage.googleapis.com/v1beta/openai/"
-
-// LLMKeys returns the key pool the cheap LLM should use: the explicit
-// llm.api_key when set, otherwise the Gemini pool when the base URL is the
-// Gemini endpoint, otherwise nothing.
-func (c Config) LLMKeys() []string {
-	if c.LLM.APIKey != "" {
-		return []string{c.LLM.APIKey}
-	}
-	if IsGeminiBaseURL(c.LLM.BaseURL) {
-		return append([]string(nil), c.Gemini.APIKeys...)
-	}
-	return nil
-}
-
-// IsGeminiBaseURL reports whether u points at Google's generative language
-// API (where the Gemini key pool applies).
-func IsGeminiBaseURL(u string) bool {
-	return strings.Contains(u, "generativelanguage.googleapis.com")
-}
 
 // Gemini configures the voice session (plan §6).
 type Gemini struct {
@@ -329,11 +285,10 @@ func Default() Config {
 		PendingTTLS:       120,
 		Gemini:            Gemini{Model: "gemini-3.8-live", Voice: "Puck", StallAfterS: 10},
 		DeepSeek:          DeepSeek{BaseURL: DefaultDeepSeekBaseURL, Thinking: true, ReasoningEffort: DefaultDeepSeekReasoningEffort},
-		LLM:               LLM{BaseURL: GeminiOpenAIBaseURL, Model: "gemini-3.5-flash-lite", TimeoutS: 15},
 		Web:               Web{Port: DefaultWebPort},
 		CLI:               defaultCLI(),
 		Voice:             Voice{Name: DefaultVoiceName},
-		Supervisor:        Supervisor{Chattiness: DefaultChattiness, RecentMinutes: 30, PromiseTTLS: 7200, SummaryTimeoutS: 15, CancelWindowS: 30},
+		Supervisor:        Supervisor{Chattiness: DefaultChattiness, RecentMinutes: 30, PromiseTTLS: 7200, CancelWindowS: 30},
 		Brain:             defaultBrain(),
 		Prompts:           Prompts{Dir: filepath.Join(home, ".config", "sheepdog", "prompts")},
 	}
@@ -451,12 +406,6 @@ func load(path string, lookup func(string) (string, bool)) (Config, error) {
 	if cfg.Supervisor.PromiseTTLS <= 0 {
 		return Config{}, fmt.Errorf("config: supervisor.promise_ttl_s=%d: want a positive integer", cfg.Supervisor.PromiseTTLS)
 	}
-	if cfg.Supervisor.SummaryTimeoutS <= 0 {
-		return Config{}, fmt.Errorf("config: supervisor.summary_timeout_s=%d: want a positive integer", cfg.Supervisor.SummaryTimeoutS)
-	}
-	if cfg.LLM.TimeoutS <= 0 {
-		return Config{}, fmt.Errorf("config: llm.timeout_s=%d: want a positive integer", cfg.LLM.TimeoutS)
-	}
 	if err := validateBrain(cfg.Brain); err != nil {
 		return Config{}, err
 	}
@@ -517,8 +466,7 @@ func validateBrain(b Brain) error {
 //	SHEEPDOG_GEMINI_VOICE, SHEEPDOG_GEMINI_STALL_AFTER_S,
 //	DEEPSEEK_API_KEY, SHEEPDOG_DEEPSEEK_BASE_URL, SHEEPDOG_DEEPSEEK_THINKING,
 //	SHEEPDOG_DEEPSEEK_REASONING_EFFORT,
-//	SHEEPDOG_LLM_BASE_URL, SHEEPDOG_LLM_MODEL, SHEEPDOG_LLM_TIMEOUT_S,
-//	SHEEPDOG_LLM_API_KEY, SHEEPDOG_PENDING_TTL_S, SHEEPDOG_WEB_PORT,
+//	SHEEPDOG_PENDING_TTL_S, SHEEPDOG_WEB_PORT,
 //	SHEEPDOG_CLI_PREFER, SHEEPDOG_CLI_CODEX_BIN, SHEEPDOG_CLI_CLAUDE_BIN,
 //	SHEEPDOG_CLI_CLAUDE_MODEL, SHEEPDOG_CLI_CODEX_REASONING,
 //	SHEEPDOG_CLI_TIMEOUT_S, SHEEPDOG_CLI_MAX_OUTPUT_KB,
@@ -558,22 +506,6 @@ func applyEnv(cfg *Config, lookup func(string) (string, bool)) error {
 	}
 	if err := applyDeepSeekEnv(cfg, lookup); err != nil {
 		return err
-	}
-	if v, ok := lookup("SHEEPDOG_LLM_BASE_URL"); ok {
-		cfg.LLM.BaseURL = v
-	}
-	if v, ok := lookup("SHEEPDOG_LLM_MODEL"); ok {
-		cfg.LLM.Model = v
-	}
-	if v, ok := lookup("SHEEPDOG_LLM_API_KEY"); ok {
-		cfg.LLM.APIKey = v
-	}
-	if v, ok := lookup("SHEEPDOG_LLM_TIMEOUT_S"); ok {
-		n, err := strconv.Atoi(v)
-		if err != nil || n <= 0 {
-			return fmt.Errorf("config: SHEEPDOG_LLM_TIMEOUT_S=%q: want a positive integer", v)
-		}
-		cfg.LLM.TimeoutS = n
 	}
 	if v, ok := lookup("SHEEPDOG_DATA_DIR"); ok {
 		cfg.DataDir = v
@@ -638,13 +570,6 @@ func applyEnv(cfg *Config, lookup func(string) (string, bool)) error {
 			return fmt.Errorf("config: SHEEPDOG_SUPERVISOR_PROMISE_TTL_S=%q: want a positive integer", v)
 		}
 		cfg.Supervisor.PromiseTTLS = n
-	}
-	if v, ok := lookup("SHEEPDOG_SUPERVISOR_SUMMARY_TIMEOUT_S"); ok {
-		n, err := strconv.Atoi(v)
-		if err != nil || n <= 0 {
-			return fmt.Errorf("config: SHEEPDOG_SUPERVISOR_SUMMARY_TIMEOUT_S=%q: want a positive integer", v)
-		}
-		cfg.Supervisor.SummaryTimeoutS = n
 	}
 	if v, ok := lookup("SHEEPDOG_SUPERVISOR_CANCEL_WINDOW_S"); ok {
 		n, err := strconv.Atoi(v)
@@ -793,8 +718,8 @@ func geminiKeysFromEnv(lookup func(string) (string, bool)) []string {
 // counts (or set/unset) only; keep it that way when secret-bearing
 // fields are added.
 func (c Config) String() string {
-	return fmt.Sprintf("data_dir=%s herdr.socket=%s state.path=%s state.full_fsync=%t debounce_ms=%d snapshot_interval_s=%d pending_ttl_s=%d aliases=%d gemini.model=%s gemini.voice=%s gemini.stall_after_s=%d gemini.api_keys=%d voice.name=%s deepseek.api_key=%s deepseek.base_url=%s deepseek.thinking=%t deepseek.reasoning_effort=%s llm.base_url=%s llm.model=%s llm.timeout_s=%d llm.api_keys=%d web.port=%d cli.prefer=%s cli.timeout_s=%d cli.max_output_kb=%d supervisor.chattiness=%s supervisor.recent_minutes=%d supervisor.promise_ttl_s=%d supervisor.summary_timeout_s=%d supervisor.cancel_window_s=%d brain.enabled=%t brain.provider=%s brain.model=%s brain.max_steps=%d brain.ask_timeout_s=%d brain.propose_timeout_s=%d brain.window_tokens=%d brain.prune_after_turns=%d brain.step_reserve_s=%d brain.final_grace_s=%d brain.enrich_timeout_s=%d brain.announce_wait_s=%d prompts.dir=%s",
-		c.DataDir, c.Herdr.Socket, c.State.Path, c.State.FullFsync, c.DebounceMS, c.SnapshotIntervalS, c.PendingTTLS, len(c.Aliases), c.Gemini.Model, c.Gemini.Voice, c.Gemini.StallAfterS, len(c.Gemini.APIKeys), c.Voice.Name, setOrUnset(c.DeepSeek.APIKey), c.DeepSeek.BaseURL, c.DeepSeek.Thinking, c.DeepSeek.ReasoningEffort, c.LLM.BaseURL, c.LLM.Model, c.LLM.TimeoutS, len(c.LLMKeys()), c.Web.Port, c.CLI.Prefer, c.CLI.TimeoutS, c.CLI.MaxOutputKB, c.Supervisor.Chattiness, c.Supervisor.RecentMinutes, c.Supervisor.PromiseTTLS, c.Supervisor.SummaryTimeoutS, c.Supervisor.CancelWindowS, c.Brain.Enabled, c.Brain.Provider, c.Brain.Model, c.Brain.MaxSteps, c.Brain.AskTimeoutS, c.Brain.ProposeTimeoutS, c.Brain.WindowTokens, c.Brain.PruneAfterTurns, c.Brain.StepReserveS, c.Brain.FinalGraceS, c.Brain.EnrichTimeoutS, c.Brain.AnnounceWaitS, c.Prompts.Dir)
+	return fmt.Sprintf("data_dir=%s herdr.socket=%s state.path=%s state.full_fsync=%t debounce_ms=%d snapshot_interval_s=%d pending_ttl_s=%d aliases=%d gemini.model=%s gemini.voice=%s gemini.stall_after_s=%d gemini.api_keys=%d voice.name=%s deepseek.api_key=%s deepseek.base_url=%s deepseek.thinking=%t deepseek.reasoning_effort=%s web.port=%d cli.prefer=%s cli.timeout_s=%d cli.max_output_kb=%d supervisor.chattiness=%s supervisor.recent_minutes=%d supervisor.promise_ttl_s=%d supervisor.cancel_window_s=%d brain.enabled=%t brain.provider=%s brain.model=%s brain.max_steps=%d brain.ask_timeout_s=%d brain.propose_timeout_s=%d brain.window_tokens=%d brain.prune_after_turns=%d brain.step_reserve_s=%d brain.final_grace_s=%d brain.enrich_timeout_s=%d brain.announce_wait_s=%d prompts.dir=%s",
+		c.DataDir, c.Herdr.Socket, c.State.Path, c.State.FullFsync, c.DebounceMS, c.SnapshotIntervalS, c.PendingTTLS, len(c.Aliases), c.Gemini.Model, c.Gemini.Voice, c.Gemini.StallAfterS, len(c.Gemini.APIKeys), c.Voice.Name, setOrUnset(c.DeepSeek.APIKey), c.DeepSeek.BaseURL, c.DeepSeek.Thinking, c.DeepSeek.ReasoningEffort, c.Web.Port, c.CLI.Prefer, c.CLI.TimeoutS, c.CLI.MaxOutputKB, c.Supervisor.Chattiness, c.Supervisor.RecentMinutes, c.Supervisor.PromiseTTLS, c.Supervisor.CancelWindowS, c.Brain.Enabled, c.Brain.Provider, c.Brain.Model, c.Brain.MaxSteps, c.Brain.AskTimeoutS, c.Brain.ProposeTimeoutS, c.Brain.WindowTokens, c.Brain.PruneAfterTurns, c.Brain.StepReserveS, c.Brain.FinalGraceS, c.Brain.EnrichTimeoutS, c.Brain.AnnounceWaitS, c.Prompts.Dir)
 }
 
 // setOrUnset renders a secret's presence, never its value.

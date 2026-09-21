@@ -1,15 +1,10 @@
-// Package prompts embeds the prompt templates shipped in the binary (plan
-// §7, §8; docs/roles.md "Prompt files"). Templates use {name} placeholders;
-// Render substitutes them.
-//
-// Two kinds of file live here. The four *.txt templates
-// (resolve_instruction, spoken_answer, summarize_block, summarize_done)
-// are the cheap LLM's one-shot calls (internal/llm): fixed, embedded only,
-// loaded with the package-level Render.
+// Package prompts embeds the prompt files shipped in the binary (plan
+// §7, §8; docs/roles.md "Prompt files"). They use {name} placeholders;
+// Loader.Render substitutes them.
 //
 // assistant.md, USER.md and svp/{SOUL,RULES}.md are the "prompt
 // workspace": the assistant's system prompt and the SVP's stable prompt
-// sections. These support a user override under
+// sections. They support a user override under
 // ~/.config/sheepdog/prompts/<same relative path> (config prompts.dir,
 // env SHEEPDOG_PROMPTS_DIR) through the Loader type, re-read on demand so
 // a running daemon can pick up an edit without a restart (SIGHUP, POST
@@ -30,11 +25,6 @@ import (
 
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
 )
-
-// FS holds the cheap LLM's *.txt templates.
-//
-//go:embed *.txt
-var FS embed.FS
 
 // Workspace holds the assistant/SVP/USER prompt workspace files (the ones
 // a Loader may override).
@@ -89,17 +79,6 @@ func AssistantVars(name string, aliases []string) map[string]string {
 		list = "none configured yet"
 	}
 	return map[string]string{"name": name, "aliases": list}
-}
-
-// Render loads the named cheap-LLM template (embedded only) and replaces
-// each {key} with vars[key]. Unknown placeholders are left as-is so a
-// typo is visible in the output.
-func Render(name string, vars map[string]string) (string, error) {
-	b, err := FS.ReadFile(name)
-	if err != nil {
-		return "", fmt.Errorf("prompts: %w", err)
-	}
-	return substitute(string(b), vars), nil
 }
 
 // substitute replaces every {key} in s with vars[key] and trims.
@@ -212,9 +191,8 @@ func (l *Loader) Reload() []File {
 	return l.Files()
 }
 
-// Load returns name's effective text and source. Unknown names return the
-// embedded template unchanged (Render below handles *.txt names too, so
-// callers can use one Loader for everything if they want).
+// Load returns name's effective text and source; an unknown name returns
+// the empty string.
 func (l *Loader) Load(name string) (text, source string) {
 	if l != nil {
 		l.mu.RLock()
@@ -225,10 +203,7 @@ func (l *Loader) Load(name string) (text, source string) {
 			return t, s
 		}
 	}
-	if t, err := embeddedText(name); err == nil {
-		return t, SourceEmbedded
-	}
-	t, _ := Render(name, nil)
+	t, _ := embeddedText(name)
 	return t, SourceEmbedded
 }
 

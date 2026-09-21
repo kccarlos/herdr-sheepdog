@@ -15,7 +15,7 @@ far, every one squash-merged on green CI after independent verification.
 | Gemini Live session, `/voice` page, silence gate, stall recycle | done (WP2, WP6, #16) |
 | Supervisor tools, pending action, chattiness levels | done (WP3, #17) |
 | CLI query tool (`codex exec` / `claude -p`, read-only) | done (WP4) |
-| Packaging: plugin shim, launchd template, config init, changelog | done (WP7a); launchd never installed (user runs the daemon by hand) |
+| Packaging: config init, changelog | done (WP7a); the plugin shim and launchd template were deleted in PR 2 — the socket subscription is the only event source and the daemon is run by hand |
 | Live e2e against real panes | done (WP7b): scenarios 1–9 pass, 10 partial |
 | `/debug`: Swimlane, Conversation, Supervisor, Events, State tabs | done (#16, #19, #22) |
 | Brain (stateful SVP), prompt workspace + overrides, evals | done (#20, #21) |
@@ -73,9 +73,12 @@ the end of that file. PR 1 (D1-revised) is in review: the voice's two
 tools, `brain.KindUtterance` with the roster sentence in the request,
 the `note` tool on the brain, the code fast paths, the stop procedure
 (`supervisor.cancel_window_s`), `voice.name` and the `/debug` labels.
-Still open from that list: the template-LLM removal (2),
-investigations (3), `blocked → blocked` (4), and no mid-sentence
-interruption (5), which this PR deliberately left alone. Names from
+PR 2 (cleanup) removed the template LLM: approval prompts are parsed
+in code (`internal/herdr/prompt.go`), a finish is phrased by the brain
+or by the code sentence "<alias> finished.", every event gets exactly
+one push, and `[llm]`, `llm-test`/`ask-test` and the plugin shim are
+gone. Still open from that list: investigations (3), `blocked → blocked`
+(4), and no mid-sentence interruption (5). Names from
 here on: shepherd (operator), the dog (voice + brain), the flock
 (workers); `docs/roles.md` is the contract and maps the old CEO / SVP /
 assistant terms still present in code.
@@ -87,9 +90,7 @@ assistant terms still present in code.
   fixed in `transitions.go`/`onDone` (see PR for the promise-matching fix).
 - herdr 0.9.0 does not detect Antigravity CLI prompts as `blocked` (needs a local `~/.config/herdr/agent-detection/agy.toml` override or an upstream manifest fix); user chose to skip agy for now.
 - Eval: "Okay, let's use that then." still routes to `confirm` (left rather than over-fit).
-- Ollama `gemma4` is too slow for the default 15 s summary timeout on cold prompts (`supervisor.summary_timeout_s`, `llm.timeout_s` are configurable) and drifts off the JSON contract for the brain — not a brain backend.
 - Scenario 10 (GoAway/compression) never observed live; `voice.turn`/`voice.stalled`/`voice.recycle` are the signals.
-- The 10-minute silent briefing re-push re-bills the context each time; make it conditional on state change.
 - Consider a billed Gemini project for the brain (2–3 calls per CEO turn will exhaust the free daily cap quickly); DeepSeek is now the paid alternative for the brain only (`brain.provider = "deepseek"` or the `/debug` picker).
 - `SHEEPDOG_DATA_DIR` does not move `state.path` (it is resolved against the default data dir at `Default()` time): a second daemon started with only `SHEEPDOG_DATA_DIR` set shares the user's `state.json`. Always set `SHEEPDOG_STATE_PATH` too for a scratch daemon.
 - `v0.1.0` not tagged yet (release workflow is ready; user wanted a satisfying voice session first).

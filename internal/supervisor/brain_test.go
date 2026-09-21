@@ -62,9 +62,6 @@ func TestBrainAnswersAskWithTools(t *testing.T) {
 	if res.Scheduling != voice.UrgencyIdle {
 		t.Errorf("scheduling = %v", res.Scheduling)
 	}
-	if h.llm.count("spoken_answer") != 0 {
-		t.Error("template path ran although the brain answered")
-	}
 	if len(h.srv.RequestsFor("pane.read")) != 1 {
 		t.Errorf("pane reads = %d", len(h.srv.RequestsFor("pane.read")))
 	}
@@ -72,11 +69,7 @@ func TestBrainAnswersAskWithTools(t *testing.T) {
 	if !strings.Contains(calls[0].Text(), `CEO said: "why did that one fail?"`) || !strings.Contains(calls[1].Text(), "source=screen>>>") {
 		t.Errorf("model saw:\n%s\n---\n%s", calls[0].Text(), calls[1].Text())
 	}
-	// The read made auth the subject for the fallback path and counted as
-	// dealing with it.
-	if h.sup.lastSubject != "w5:p1" {
-		t.Errorf("lastSubject = %q", h.sup.lastSubject)
-	}
+	// The read counted as dealing with the agent.
 	if row, _ := h.store.Get("w5:p1"); row.LastInteraction == nil {
 		t.Error("read did not touch the agent")
 	}
@@ -85,23 +78,28 @@ func TestBrainAnswersAskWithTools(t *testing.T) {
 	}
 }
 
-func TestBrainFallsBackToTemplatePath(t *testing.T) {
+// A brain that cannot answer leaves the daemon with the roster and
+// nothing else: no second model phrases anything, and an instruction is
+// never sent on a guess (docs/roles.md "Hot paths that stay code").
+func TestBrainFallbackReportsStatusAndSendsNothing(t *testing.T) {
 	m := braintest.NewModel(braintest.Step{Err: braintest.ErrBoom})
 	h := newBrainHarness(t, m)
 	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
 	h.srv.SetScreen("w5:p1", fixture(t, "codex-working.screen.txt"))
 	res := h.call(ToolAsk, map[string]any{"question": "what is it doing?", "agent": "auth"})
-	if !strings.Contains(res.Spoken, "sleep command") {
-		t.Errorf("template path did not answer: %+v", res)
+	if res.Spoken != "One agent: auth is working on something. "+noBrainTrailer || res.Clarify {
+		t.Errorf("fallback = %+v", res)
 	}
-	if h.llm.count("spoken_answer") != 1 || h.log.count("brain.fallback") != 1 {
-		t.Errorf("spoken_answer=%d brain.fallback=%d", h.llm.count("spoken_answer"), h.log.count("brain.fallback"))
+	if h.log.count("brain.fallback") != 1 {
+		t.Errorf("brain.fallback = %d", h.log.count("brain.fallback"))
 	}
-	// propose falls back to resolve_instruction the same way.
 	m.Add(braintest.Step{Err: braintest.ErrBoom})
 	res = h.call(ToolPropose, map[string]any{"instruction": "tell auth to rerun the tests"})
-	if res.Spoken != "Telling auth to rerun the tests. Sent." || h.llm.count("resolve_instruction") != 1 {
-		t.Errorf("propose fallback = %+v (resolve calls %d)", res, h.llm.count("resolve_instruction"))
+	if res.Spoken != "One agent: auth is working on something. "+noBrainTrailer {
+		t.Errorf("propose fallback = %+v", res)
+	}
+	if len(h.promptRequests()) != 0 || len(h.sendKeysRequests()) != 0 {
+		t.Errorf("the fallback sent something: prompts=%v keys=%v", h.promptRequests(), h.sendKeysRequests())
 	}
 }
 
@@ -142,7 +140,7 @@ func TestBrainProposeSendsPromptAndCancelInterrupts(t *testing.T) {
 
 func TestBrainSendKeysPassesTheRail(t *testing.T) {
 	m := braintest.NewModel(
-		braintest.Step{Calls: []*genai.FunctionCall{braintest.FC(brain.ToolSendKeys, map[string]any{"agent": "auth", "keys": []any{"enter"}})}},
+		braintest.Step{Calls: []*genai.FunctionCall{braintest.FC(brain.ToolSendKeys, map[string]any{"agent": "auth", "keys": []any{"y"}})}},
 		braintest.Step{Text: braintest.Reply("Told auth yes.", "")},
 	)
 	h := newBrainHarness(t, m)
@@ -156,7 +154,7 @@ func TestBrainSendKeysPassesTheRail(t *testing.T) {
 	if res.Spoken != "Told auth yes." {
 		t.Errorf("result = %+v", res)
 	}
-	if got := h.sendKeysRequests(); len(got) != 1 || got[0] != [2]string{"w5:p1", "enter"} {
+	if got := h.sendKeysRequests(); len(got) != 1 || got[0] != [2]string{"w5:p1", "y"} {
 		t.Errorf("keys = %v", got)
 	}
 	if _, has := h.pending(); has {
@@ -166,7 +164,7 @@ func TestBrainSendKeysPassesTheRail(t *testing.T) {
 		t.Errorf("confirmed=%d rail_blocked=%d", h.log.count("pending.confirmed"), h.log.count("brain.rail_blocked"))
 	}
 	// Call 0 was the block's announce event turn; the CEO turn is 1–2.
-	if sys := m.Calls()[1].System(); !strings.Contains(sys, "WAITING FOR AN ANSWER: whether it can create hello.txt") || !strings.Contains(sys, `"Yes, proceed" -> keys [enter]`) {
+	if sys := m.Calls()[1].System(); !strings.Contains(sys, "WAITING FOR AN ANSWER: would you like to run the following command") || !strings.Contains(sys, `"Yes, proceed" -> keys [y]`) {
 		t.Errorf("roster lacks the prompt:\n%s", sys)
 	}
 	if second := m.Calls()[2].Text(); !strings.Contains(second, "Told auth yes.") {
@@ -181,7 +179,7 @@ func TestBrainSendKeysBlockedByTheRail(t *testing.T) {
 	m := braintest.NewModel(
 		braintest.Step{Calls: []*genai.FunctionCall{braintest.FC(brain.ToolSendKeys, map[string]any{"agent": "auth", "keys": []any{"ctrl-c"}})}},
 		braintest.Step{Text: braintest.Reply("I may not send that key.", "")},
-		braintest.Step{Calls: []*genai.FunctionCall{braintest.FC(brain.ToolSendKeys, map[string]any{"agent": "auth", "keys": []any{"enter"}})}},
+		braintest.Step{Calls: []*genai.FunctionCall{braintest.FC(brain.ToolSendKeys, map[string]any{"agent": "auth", "keys": []any{"y"}})}},
 		braintest.Step{Text: braintest.Reply("Nothing is waiting.", "")},
 	)
 	h := newBrainHarness(t, m)
@@ -222,6 +220,37 @@ func TestBrainInterruptSuppressesFinished(t *testing.T) {
 	}
 }
 
+// run_cli is the only way to the CLI query tool now: the brain asks,
+// the supervisor runs it in the agent's workspace and wraps the output
+// as worker data.
+func TestBrainRunCLIUsesTheQuerier(t *testing.T) {
+	m := braintest.NewModel(
+		braintest.Step{Calls: []*genai.FunctionCall{braintest.FC(brain.ToolRunCLI, map[string]any{"agent": "auth", "question": "why did the login test fail?"})}},
+		braintest.Step{Text: braintest.Reply("The login test fails on a stale fixture.", "")},
+	)
+	h := newBrainHarness(t, m)
+	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
+	q := &fakeQuerier{}
+	h.sup.querier = q
+	res := h.call(ToolAsk, map[string]any{"question": "why did the login test fail?", "agent": "auth"})
+	if res.Spoken != "The login test fails on a stale fixture." {
+		t.Errorf("ask = %+v", res)
+	}
+	if len(q.calls) != 1 || q.calls[0] != "why did the login test fail?" || q.dirs[0] != "/work/w5:p1" {
+		t.Errorf("querier calls=%v dirs=%v", q.calls, q.dirs)
+	}
+	if out := m.Calls()[1].Text(); !strings.Contains(out, "BEGIN_WORKER_OUTPUT agent=auth source=cli") || !strings.Contains(out, "QUERY:why did the login test fail?") {
+		t.Errorf("the CLI output did not reach the brain:\n%s", out)
+	}
+	// With no CLI tool the brain is told so rather than left waiting.
+	h.sup.querier = nil
+	m.Add(braintest.Step{Calls: []*genai.FunctionCall{braintest.FC(brain.ToolRunCLI, map[string]any{"agent": "auth", "question": "why?"})}})
+	m.Add(braintest.Step{Text: braintest.Reply("I cannot look into the repository here.", "")})
+	if res := h.call(ToolAsk, map[string]any{"question": "why?", "agent": "auth"}); res.Spoken != "I cannot look into the repository here." {
+		t.Errorf("without a querier = %+v", res)
+	}
+}
+
 func TestBrainIngestsSupervisorEvents(t *testing.T) {
 	m := braintest.NewModel()
 	h := newBrainHarness(t, m)
@@ -237,13 +266,14 @@ func TestBrainIngestsSupervisorEvents(t *testing.T) {
 		kinds = append(kinds, string(msg.Kind))
 		contents = append(contents, msg.Content)
 	}
-	// The block also ran an announce event turn (request, the screen,
-	// the "nothing to add" reply).
-	want := "worker_event worker_event push request event_screen reply assistant_said note"
+	// The block runs its announce turn (request, the screen, the reply)
+	// before anything is said: the line it decides on is the only one,
+	// and the "nothing to add" reply means nothing is pushed at all.
+	want := "worker_event worker_event request event_screen reply assistant_said note"
 	if got := strings.Join(kinds, " "); got != want {
 		t.Errorf("kinds = %s\nwant %s\n%v", got, want, contents)
 	}
-	if contents[1] != "auth: working -> blocked" || !strings.Contains(contents[2], "(idle) auth is asking") || contents[6] != "Auth is asking whether it can create hello.txt." || contents[7] != "keep hello.txt small" {
+	if contents[1] != "auth: working -> blocked" || !strings.Contains(contents[2], `event="blocked"`) || contents[5] != "Auth is asking whether it can create hello.txt." || contents[6] != "keep hello.txt small" {
 		t.Errorf("contents = %v", contents)
 	}
 	if d := h.log.ofType("brain.push_decision"); len(d) != 1 || payload(d[0])["urgency_requested"] != "skip" || payload(d[0])["urgency_applied"] != "skip" || payload(d[0])["reason"] != "brain" {

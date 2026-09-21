@@ -3,7 +3,6 @@ package supervisor
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,7 +12,6 @@ import (
 
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr/herdrtest"
-	"github.com/kccarlos/herdr-sheepdog/internal/llm"
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
@@ -97,200 +95,6 @@ func (p *fakePusher) last(t *testing.T) voice.EventPush {
 	return all[len(all)-1]
 }
 
-// fakeLLM is a rule-based stand-in for the templates, keyed on the
-// captured screens, so scenarios do not need per-test scripting. Every
-// call is counted; failures can be injected (fail for every template,
-// failDone for summarize_done only).
-type fakeLLM struct {
-	mu        sync.Mutex
-	calls     map[string]int
-	fail      error
-	failDone  error
-	summarize func(screen, alias string) llm.BlockSummary
-	resolve   func(text string, agents []llm.AgentSummary, hint string) llm.Resolution
-	done      func(screen, alias string) llm.DoneSummary
-}
-
-func newFakeLLM() *fakeLLM {
-	return &fakeLLM{calls: map[string]int{}}
-}
-
-func (f *fakeLLM) bump(name string) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.calls[name]++
-	return f.fail
-}
-
-func (f *fakeLLM) count(name string) int {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.calls[name]
-}
-
-func (f *fakeLLM) SummarizeBlock(_ context.Context, screen, alias string) (llm.BlockSummary, error) {
-	if err := f.bump("summarize_block"); err != nil {
-		return llm.BlockSummary{}, err
-	}
-	if f.summarize != nil {
-		return f.summarize(screen, alias), nil
-	}
-	return summarizeByScreen(screen, alias), nil
-}
-
-// summarizeByScreen mimics what the live model returned for the fixtures.
-func summarizeByScreen(screen, alias string) llm.BlockSummary {
-	switch {
-	case strings.Contains(screen, "Would you like to run the following command?"):
-		return llm.BlockSummary{
-			Spoken: alias + " is asking whether it can run a command to create hello.txt.", Question: "whether it can create hello.txt",
-			IsQuestion: true, NeedsDecision: true,
-			Options:    []llm.Option{{Label: "Yes, proceed", Key: "enter"}, {Label: "Yes, and don't ask again", Key: "p"}, {Label: "No, and tell Codex what to do differently", Key: "esc"}},
-			AnswerKeys: llm.AnswerKeys{Yes: []string{"enter"}, No: []string{"esc"}},
-		}
-	case strings.Contains(screen, "Do you want to create claude.txt?"):
-		return llm.BlockSummary{
-			Spoken: alias + " is asking whether it can create claude.txt.", Question: "whether it can create claude.txt",
-			IsQuestion: true, NeedsDecision: true,
-			Options:    []llm.Option{{Label: "Yes", Key: "1"}, {Label: "Yes, and switch to accept edits", Key: "2"}, {Label: "No", Key: "3"}},
-			AnswerKeys: llm.AnswerKeys{Yes: []string{"1"}, No: []string{"3"}},
-		}
-	case strings.Contains(screen, "Accept this file edit?"):
-		// Antigravity CLI 1.2.5 file-edit prompt (WP7b live summary): Esc is
-		// disabled there, so "no" must be the digit.
-		return llm.BlockSummary{
-			Spoken: alias + " is asking whether to accept the edit to the readme file.", Question: "whether to accept the edit to the readme file",
-			IsQuestion: true, NeedsDecision: true,
-			Options:    []llm.Option{{Label: "Yes, accept this change", Key: "1"}, {Label: "No, reject this change", Key: "2"}},
-			AnswerKeys: llm.AnswerKeys{Yes: []string{"1"}, No: []string{"2"}},
-		}
-	case strings.Contains(screen, "Run this command?"):
-		// Antigravity CLI 1.2.5 command-approval prompt (WP7b live summary).
-		return llm.BlockSummary{
-			Spoken: alias + " is asking for permission to run tests.", Question: "whether it can run tests",
-			IsQuestion: true, NeedsDecision: true,
-			Options: []llm.Option{{Label: "Yes, run command", Key: "1"}, {Label: "Yes, and always allow in this conversation", Key: "2"},
-				{Label: "Yes, and always allow (persist)", Key: "3"}, {Label: "No, cancel", Key: "4"}},
-			AnswerKeys: llm.AnswerKeys{Yes: []string{"1"}, No: []string{"4"}},
-		}
-	case strings.Contains(screen, "Do you trust the contents of this directory?"):
-		return llm.BlockSummary{Spoken: alias + " is showing its startup trust dialog."}
-	case strings.Contains(screen, "Conversation interrupted"):
-		return llm.BlockSummary{Spoken: alias + " was interrupted and is idle at its prompt."}
-	case strings.Contains(screen, "Update available!"):
-		return llm.BlockSummary{Spoken: alias + " is idle at its prompt with an update notice."}
-	default:
-		return llm.BlockSummary{Spoken: alias + " is idle."}
-	}
-}
-
-func (f *fakeLLM) ResolveInstruction(_ context.Context, text string, agents []llm.AgentSummary, hint string) (llm.Resolution, error) {
-	if err := f.bump("resolve_instruction"); err != nil {
-		return llm.Resolution{}, err
-	}
-	if f.resolve != nil {
-		return f.resolve(text, agents, hint), nil
-	}
-	return resolveByRules(text, agents, hint), nil
-}
-
-// resolveByRules: an alias in the hint or the text picks that agent; a
-// plain yes/no picks the single blocked agent; "it" with several agents is
-// ambiguous.
-func resolveByRules(text string, agents []llm.AgentSummary, hint string) llm.Resolution {
-	lower := strings.ToLower(text)
-	var target *llm.AgentSummary
-	for i := range agents {
-		a := &agents[i]
-		if hint == a.Alias || strings.Contains(lower, a.Alias) {
-			target = a
-			break
-		}
-	}
-	isAnswer := strings.HasPrefix(lower, "yes") || strings.HasPrefix(lower, "no") || strings.HasPrefix(lower, "option")
-	if target == nil && isAnswer {
-		var blocked []*llm.AgentSummary
-		for i := range agents {
-			if agents[i].State == "blocked" {
-				blocked = append(blocked, &agents[i])
-			}
-		}
-		if len(blocked) == 1 {
-			target = blocked[0]
-		}
-	}
-	if target == nil && len(agents) == 1 {
-		target = &agents[0]
-	}
-	if target == nil {
-		names := make([]string, 0, len(agents))
-		for _, a := range agents {
-			names = append(names, a.Alias)
-		}
-		return llm.Resolution{Ambiguous: true, ClarifyQuestion: "Do you mean " + strings.Join(names, " or ") + "?"}
-	}
-	instr := lower
-	for _, prefix := range []string{"tell the " + target.Alias + " one to ", "tell " + target.Alias + " to ", "tell it to "} {
-		instr = strings.TrimPrefix(instr, prefix)
-	}
-	if isAnswer {
-		word := strings.Fields(lower)[0]
-		if strings.HasPrefix(lower, "option") {
-			word = strings.Join(strings.Fields(lower)[:2], " ")
-		}
-		return llm.Resolution{PaneID: target.PaneID, InstructionText: word, IsAnswer: true, Answer: word, Echo: "Telling " + target.Alias + " " + word + "."}
-	}
-	return llm.Resolution{PaneID: target.PaneID, InstructionText: instr, Echo: "Telling " + target.Alias + " to " + instr + "."}
-}
-
-func (f *fakeLLM) SummarizeDone(_ context.Context, screen, alias string) (llm.DoneSummary, error) {
-	if err := f.bump("summarize_done"); err != nil {
-		return llm.DoneSummary{}, err
-	}
-	f.mu.Lock()
-	failDone, done := f.failDone, f.done
-	f.mu.Unlock()
-	if failDone != nil {
-		return llm.DoneSummary{}, failDone
-	}
-	if done != nil {
-		return done(screen, alias), nil
-	}
-	return doneByScreen(screen), nil
-}
-
-// doneByScreen mimics what the live model returned for the "after"
-// fixtures (WP7b screens).
-func doneByScreen(screen string) llm.DoneSummary {
-	switch {
-	case strings.Contains(screen, "You canceled the request"):
-		return llm.DoneSummary{Spoken: "stopped after you declined the append to hello.txt", Outcome: "failed"}
-	case strings.Contains(screen, "You approved codex to run"):
-		return llm.DoneSummary{Spoken: "created hello.txt with the requested line", Outcome: "success"}
-	case strings.Contains(screen, "Wrote 1 line to claude.txt"):
-		return llm.DoneSummary{Spoken: "created claude.txt with the line hello from claude", Outcome: "success"}
-	case strings.Contains(screen, "Conversation interrupted"):
-		return llm.DoneSummary{Spoken: "was interrupted before the sleep finished", Outcome: "failed"}
-	case strings.Contains(screen, "Run this command?"), strings.Contains(screen, "Accept this file edit?"):
-		return llm.DoneSummary{Spoken: "stopped to ask for permission", Outcome: "partial", AskedQuestion: true}
-	default:
-		return llm.DoneSummary{Spoken: "did something the screen does not show", Outcome: "unknown"}
-	}
-}
-
-func (f *fakeLLM) SpokenAnswer(_ context.Context, raw, question, alias string) (llm.Answer, error) {
-	if err := f.bump("spoken_answer"); err != nil {
-		return llm.Answer{}, err
-	}
-	if strings.Contains(raw, "sleep 90") {
-		return llm.Answer{Spoken: alias + " is running a sleep command and waiting for it.", CanAnswer: true}, nil
-	}
-	if strings.HasPrefix(raw, "QUERY:") {
-		return llm.Answer{Spoken: "The deep tool says: " + strings.TrimPrefix(raw, "QUERY:") + ".", CanAnswer: true}, nil
-	}
-	return llm.Answer{Spoken: "The screen does not say.", CanAnswer: false}, nil
-}
-
 // fakeQuerier is a WP4 stand-in.
 type fakeQuerier struct {
 	mu    sync.Mutex
@@ -316,7 +120,6 @@ type harness struct {
 	srv    *herdrtest.Server
 	client *herdr.Client
 	store  *state.Store
-	llm    *fakeLLM
 	pusher *fakePusher
 	log    *recLog
 	clock  *clock
@@ -326,7 +129,7 @@ type harness struct {
 
 func newHarness(t *testing.T, opts ...func(*Config)) *harness {
 	t.Helper()
-	h := &harness{t: t, srv: herdrtest.New(t), llm: newFakeLLM(), pusher: &fakePusher{}, log: &recLog{}, clock: &clock{now: t0}, dir: t.TempDir()}
+	h := &harness{t: t, srv: herdrtest.New(t), pusher: &fakePusher{}, log: &recLog{}, clock: &clock{now: t0}, dir: t.TempDir()}
 	h.client = herdr.NewClient(h.srv.Path)
 	h.client.Log = h.log
 	var err error
@@ -338,7 +141,7 @@ func newHarness(t *testing.T, opts ...func(*Config)) *harness {
 	for _, o := range opts {
 		o(&cfg)
 	}
-	h.sup, err = New(h.store, h.client, h.llm, nil, h.pusher, h.log, cfg)
+	h.sup, err = New(h.store, h.client, nil, h.pusher, h.log, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -410,9 +213,8 @@ func (h *harness) promptRequests() [][2]string {
 func (h *harness) pending() (state.PendingAction, bool) { return h.store.Pending() }
 
 // call runs one tool. The voice surface (to_supervisor, stop) goes
-// through Handler; the older names are the template path's own entry
-// points, no longer declared to any model, so they are called directly
-// and the fallback behaviour they cover stays tested.
+// through Handler; the older names are no longer declared to any model,
+// so they are called directly.
 func (h *harness) call(name string, args map[string]any) voice.ToolResult {
 	h.t.Helper()
 	arg := func(k string) string {
@@ -444,14 +246,25 @@ func (h *harness) call(name string, args map[string]any) voice.ToolResult {
 	return res
 }
 
+// send is what the brain's prompt tool does: an instruction typed into
+// the pane, with the send_instruction pending action around it (the
+// template path used to reach this through propose).
+func (h *harness) send(pane, text string) voice.ToolResult {
+	h.t.Helper()
+	row, ok := h.store.Get(pane)
+	if !ok {
+		h.t.Fatalf("no agent %s", pane)
+	}
+	res, _ := h.sup.sendInstruction(context.Background(), row, text, "Telling "+row.Alias+" to "+text+".")
+	return res
+}
+
 // say relays one utterance exactly as the voice model would, through
 // to_supervisor (fast paths included).
 func (h *harness) say(text string) voice.ToolResult {
 	h.t.Helper()
 	return h.call(ToolToSupervisor, map[string]any{"text": text})
 }
-
-var errBoom = errors.New("boom")
 
 // payload returns the event's payload map.
 func payload(e logging.Line) map[string]any {

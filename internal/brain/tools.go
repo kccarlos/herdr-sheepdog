@@ -11,7 +11,7 @@ import (
 
 	"google.golang.org/genai"
 
-	"github.com/kccarlos/herdr-sheepdog/internal/llm"
+	"github.com/kccarlos/herdr-sheepdog/internal/prose"
 )
 
 // Tool names.
@@ -49,7 +49,7 @@ const (
 const (
 	defaultScreenLines = 200
 	maxScreenLines     = 1000
-	maxResultBytes     = llm.DefaultResultBytes
+	maxResultBytes     = prose.DefaultResultBytes
 	recallMax          = 8
 )
 
@@ -166,7 +166,7 @@ func (b *Brain) execTool(ctx context.Context, t *turn, call *genai.FunctionCall)
 			out.err = err
 			return out
 		}
-		text = llm.TailBytes(text, maxResultBytes)
+		text = prose.TailBytes(text, maxResultBytes)
 		out.result = wrapWorker(row.Alias, "screen", text)
 		out.summary = fmt.Sprintf("screen of %s, %d lines", row.Alias, strings.Count(text, "\n")+1)
 	case ToolRunCLI:
@@ -180,7 +180,7 @@ func (b *Brain) execTool(ctx context.Context, t *turn, call *genai.FunctionCall)
 			out.err = err
 			return out
 		}
-		text = llm.TailBytes(text, maxResultBytes)
+		text = prose.TailBytes(text, maxResultBytes)
 		out.result = wrapWorker(row.Alias, "cli", text)
 		out.summary = fmt.Sprintf("cli output for %s, %d bytes", row.Alias, len(text))
 	case ToolPrompt:

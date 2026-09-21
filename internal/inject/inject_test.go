@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
-	"github.com/kccarlos/herdr-sheepdog/internal/llm"
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 	"github.com/kccarlos/herdr-sheepdog/internal/supervisor"
@@ -38,41 +37,6 @@ func (l *recLog) types() []string {
 		out = append(out, e.Type)
 	}
 	return out
-}
-
-// fakeLLM answers summarize_block for the Codex fixture and resolves
-// instructions by alias.
-type fakeLLM struct{}
-
-func (fakeLLM) SummarizeBlock(_ context.Context, screen, alias string) (llm.BlockSummary, error) {
-	if strings.Contains(screen, "Would you like to run the following command?") {
-		return llm.BlockSummary{Spoken: alias + " is asking whether it can run a command.", Question: "whether it can run a command", IsQuestion: true, NeedsDecision: true,
-			Options: []llm.Option{{Label: "Yes, proceed", Key: "enter"}, {Label: "No", Key: "esc"}}, AnswerKeys: llm.AnswerKeys{Yes: []string{"enter"}, No: []string{"esc"}}}, nil
-	}
-	return llm.BlockSummary{Spoken: alias + " is idle."}, nil
-}
-
-func (fakeLLM) ResolveInstruction(_ context.Context, text string, agents []llm.AgentSummary, hint string) (llm.Resolution, error) {
-	for _, a := range agents {
-		if strings.Contains(strings.ToLower(text), a.Alias) || hint == a.Alias {
-			return llm.Resolution{PaneID: a.PaneID, InstructionText: text, Echo: "Telling " + a.Alias + " to do it."}, nil
-		}
-	}
-	if len(agents) == 1 {
-		return llm.Resolution{PaneID: agents[0].PaneID, InstructionText: text, Echo: "Telling " + agents[0].Alias + " to do it."}, nil
-	}
-	return llm.Resolution{Ambiguous: true, ClarifyQuestion: "Which agent?"}, nil
-}
-
-func (fakeLLM) SummarizeDone(_ context.Context, screen, _ string) (llm.DoneSummary, error) {
-	if strings.Contains(screen, "You approved codex to run") {
-		return llm.DoneSummary{Spoken: "created hello.txt", Outcome: "success"}, nil
-	}
-	return llm.DoneSummary{Spoken: "did something", Outcome: "unknown"}, nil
-}
-
-func (fakeLLM) SpokenAnswer(_ context.Context, raw, _, alias string) (llm.Answer, error) {
-	return llm.Answer{Spoken: alias + " says: " + strings.TrimSpace(raw)[:min(20, len(strings.TrimSpace(raw)))], CanAnswer: true}, nil
 }
 
 type fakePusher struct {
@@ -114,7 +78,7 @@ func newHarness(t *testing.T) *harness {
 	}
 	h := NewHerdr(nil, log)
 	push := &fakePusher{}
-	sup, err := supervisor.New(store, h, fakeLLM{}, nil, push, log, supervisor.Config{BriefingInterval: -1})
+	sup, err := supervisor.New(store, h, nil, push, log, supervisor.Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +106,7 @@ func TestBlockedRunsFullChain(t *testing.T) {
 	if p, ok := h.store.Pending(); !ok || p.PaneID != "fake:1" || p.Kind != state.PendingAnswerPrompt {
 		t.Fatalf("pending = %+v ok=%v", p, ok)
 	}
-	if len(h.push.pushes) != 1 || !strings.Contains(h.push.pushes[0], "auth is asking") {
+	if len(h.push.pushes) != 1 || !strings.Contains(h.push.pushes[0], "auth asks to run") {
 		t.Fatalf("pushes = %v", h.push.pushes)
 	}
 

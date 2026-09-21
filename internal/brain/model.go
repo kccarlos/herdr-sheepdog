@@ -68,7 +68,7 @@ type ModelInfo struct {
 	// gemini / gemma families that is not a speech, image, video, music,
 	// embedding, robotics or live variant. Whether it supports function
 	// calling is not discoverable from the list: a bad pick surfaces as a
-	// brain.step error and the template path answers.
+	// brain.step error and the daemon answers for itself.
 	Recommended bool `json:"recommended"`
 }
 

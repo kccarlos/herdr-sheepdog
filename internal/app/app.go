@@ -20,7 +20,6 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/eventlog"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/inject"
-	"github.com/kccarlos/herdr-sheepdog/internal/llm"
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 	"github.com/kccarlos/herdr-sheepdog/internal/supervisor"
@@ -60,13 +59,13 @@ type Options struct {
 	Voice string
 	// Herdr is HerdrSocket (default) or HerdrMock.
 	Herdr string
-	// CLI is CLIOn (default) or CLIOff (`--cli=off` disables the deep-ask
-	// path; ask() then answers from the screen alone).
+	// CLI is CLIOn (default) or CLIOff (`--cli=off` takes the brain's
+	// run_cli tool away; it then answers from the screen alone).
 	CLI string
-	// Brain is BrainOn (default), BrainOff (`--brain=off` keeps ask and
-	// propose on the template path) or BrainFake (the reflex fake model,
-	// dev only). On needs config brain.enabled and a Gemini key; without
-	// a key the brain is silently off.
+	// Brain is BrainOn (default), BrainOff (`--brain=off`: the daemon
+	// speaks its code sentences and sends nothing) or BrainFake (the
+	// reflex fake model, dev only). On needs config brain.enabled and a
+	// Gemini key; without a key the brain is silently off.
 	Brain string
 	// Port overrides config web.port when > 0; 0 with an empty config
 	// port picks a free port (tests).
@@ -198,18 +197,6 @@ func (a *App) wire() error {
 	}
 	a.herdr = inject.NewHerdr(inner, a.log)
 
-	keys := cfg.LLMKeys()
-	if len(keys) == 0 {
-		if config.IsGeminiBaseURL(cfg.LLM.BaseURL) {
-			return errors.New("app: the cheap LLM needs a key (GEMINI_API_KEY or SHEEPDOG_LLM_API_KEY), or point SHEEPDOG_LLM_BASE_URL at a local endpoint")
-		}
-		keys = []string{"local"} // local endpoints (Ollama) ignore the key
-	}
-	llmClient, err := llm.New(llm.Config{BaseURL: cfg.LLM.BaseURL, Model: cfg.LLM.Model, APIKeys: keys, Timeout: time.Duration(cfg.LLM.TimeoutS) * time.Second, Log: a.log})
-	if err != nil {
-		return err
-	}
-
 	// The supervisor is built before the voice session (its Handler is the
 	// session's tool handler); the pusher is filled in below. The querier
 	// (WP4) is detected and built in Run, after daemon.start is logged, so
@@ -267,16 +254,15 @@ func (a *App) wire() error {
 		a.brain = b
 		a.brainProviders = BrainProviders(cfg)
 	}
-	sup, err := supervisor.New(store, a.herdr, llmClient, querier, pusher, a.log, supervisor.Config{
-		PendingTTL:     time.Duration(cfg.PendingTTLS) * time.Second,
-		DataDir:        cfg.DataDir,
-		Chattiness:     cfg.Supervisor.Chattiness,
-		RecentWindow:   time.Duration(cfg.Supervisor.RecentMinutes) * time.Minute,
-		PromiseTTL:     time.Duration(cfg.Supervisor.PromiseTTLS) * time.Second,
-		CancelWindow:   time.Duration(cfg.Supervisor.CancelWindowS) * time.Second,
-		SummaryTimeout: time.Duration(cfg.Supervisor.SummaryTimeoutS) * time.Second,
-		AnnounceWait:   time.Duration(cfg.Brain.AnnounceWaitS) * time.Second,
-		Brain:          a.brain,
+	sup, err := supervisor.New(store, a.herdr, querier, pusher, a.log, supervisor.Config{
+		PendingTTL:   time.Duration(cfg.PendingTTLS) * time.Second,
+		DataDir:      cfg.DataDir,
+		Chattiness:   cfg.Supervisor.Chattiness,
+		RecentWindow: time.Duration(cfg.Supervisor.RecentMinutes) * time.Minute,
+		PromiseTTL:   time.Duration(cfg.Supervisor.PromiseTTLS) * time.Second,
+		CancelWindow: time.Duration(cfg.Supervisor.CancelWindowS) * time.Second,
+		AnnounceWait: time.Duration(cfg.Brain.AnnounceWaitS) * time.Second,
+		Brain:        a.brain,
 	})
 	if err != nil {
 		if a.brain != nil {
@@ -525,7 +511,7 @@ func (a *App) ReloadPrompts() []prompts.File { return a.prompts.Reload() }
 // either is found, builds the Runner that backs ask()'s deep path. Called
 // from Run, once, right after daemon.start. Neither found returns
 // (nil, nil): the deep path is simply unavailable, per plan §3.5 ("if
-// absent, ask() still works with the cheap LLM alone").
+// absent, the brain simply has no run_cli tool).
 func (a *App) buildQuerier() (*cli.Runner, error) {
 	cfg := cli.Config{
 		Prefer:         a.cfg.CLI.Prefer,
@@ -599,7 +585,7 @@ func (a *App) Run(ctx context.Context) (err error) {
 	brainMode := a.BrainMode()
 	a.log.Log("daemon", "daemon.start", "", map[string]any{
 		"version": a.opts.Version, "voice": a.opts.Voice, "herdr": a.opts.Herdr, "cli": a.opts.CLI, "brain": brainMode, "url": a.URL(),
-		"data_dir": a.cfg.DataDir, "llm_model": a.cfg.LLM.Model, "llm_base_url": a.cfg.LLM.BaseURL, "brain_provider": a.BrainProvider(), "brain_model": a.BrainModel(),
+		"data_dir": a.cfg.DataDir, "brain_provider": a.BrainProvider(), "brain_model": a.BrainModel(),
 	})
 	a.restoreBrainModel()
 	// Logged here, not in wire(), so it never precedes daemon.start (the

@@ -305,7 +305,7 @@ func TestUpdateRowAndPendingRoundTrip(t *testing.T) {
 	row, err := s.Update("w5:p1", func(a *Agent) {
 		a.CurrentTask = "create hello.txt"
 		a.LastBlock.Question = "whether it can create hello.txt"
-		a.LastResult = &Result{Spoken: "created hello.txt", Outcome: "success", At: t0}
+		a.LastResult = &Result{Spoken: "created hello.txt", At: t0}
 		at := t0
 		a.LastInteraction = &at
 	})
@@ -340,7 +340,7 @@ func TestUpdateRowAndPendingRoundTrip(t *testing.T) {
 	if snap.Agents["w5:p1"].LastBlock.Question != "whether it can create hello.txt" {
 		t.Errorf("last_block after reload: %+v", snap.Agents["w5:p1"].LastBlock)
 	}
-	if r := snap.Agents["w5:p1"].LastResult; r == nil || r.Spoken != "created hello.txt" || r.Outcome != "success" || !r.At.Equal(t0) {
+	if r := snap.Agents["w5:p1"].LastResult; r == nil || r.Spoken != "created hello.txt" || !r.At.Equal(t0) {
 		t.Errorf("last_result after reload: %+v", r)
 	}
 	if li := snap.Agents["w5:p1"].LastInteraction; li == nil || !li.Equal(t0) {
