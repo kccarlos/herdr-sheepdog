@@ -630,3 +630,23 @@ The session now measures every input turn and acts on the pattern:
 Whether the recycle actually prevents the 1011 is untested live (it needs
 another degraded session); the numbers in `voice.turn` are what to look at
 first when it happens again.
+
+## 14. No mid-sentence interruption: `Speaking()` and the downgrade rule
+
+`turnOpen` (§13) is "waiting for a reply" — it opens on a sent push, a
+typed utterance or a tool response too, none of which is the model
+talking. The narrower `speaking` field is set only where output
+actually starts flowing (a `ModelTurn.InlineData` chunk or the first
+`OutputTranscription` fragment) and cleared on `TurnComplete` or any
+`interrupt()` (the server's `Interrupted` report or the client's own
+pre-send flush), so it is exactly docs/roles.md "Pushes"'s "the voice is
+speaking". There is no API-level "queue this INTERRUPT for later" (§4):
+the daemon downgrades in its own queue instead — `peekPush` mutates the
+head item from INTERRUPT to WHEN_IDLE, in place, the moment it is
+speaking-and-not-exempt, so the item then runs the ordinary WHEN_IDLE
+wait with no other change to the push policy; `execTool` makes the same
+call at send time (after the `turnDone`/`ToolResponseWait` wait, so
+`Speaking()` is current), since a NON_BLOCKING tool result is sent on
+its own schedule. Both log `voice.push_deferred` once. The `stop()` tool
+result is checked by name and never downgraded — Ctrl-C-equivalent, the
+shepherd is owed it immediately.

@@ -41,6 +41,22 @@ func (u Urgency) String() string {
 	}
 }
 
+// SchedulingName renders u as the Gemini function-response scheduling
+// name (docs/gemini-live-notes.md §5): interrupt, when_idle or silent.
+// voice.push and voice.tool_result log this beside the requested
+// urgency as scheduling_sent, the urgency actually used once a
+// speaking model has downgraded an INTERRUPT (docs/roles.md "Pushes").
+func (u Urgency) SchedulingName() string {
+	switch u {
+	case UrgencyInterrupt:
+		return "interrupt"
+	case UrgencySilent:
+		return "silent"
+	default:
+		return "when_idle"
+	}
+}
+
 // The two tools the voice model is declared (docs/roles.md "One
 // decision-maker"). They are named here, in the model-agnostic package,
 // because the adapters declare them and the Supervisor handles them.
@@ -98,6 +114,17 @@ type Session interface {
 	// Push makes the model speak (UrgencyInterrupt, UrgencyIdle) or adds
 	// context silently (UrgencySilent).
 	Push(text string, u Urgency) error
+
+	// Speaking reports whether the model is currently producing spoken
+	// output (audio or an output transcript fragment) for the open turn:
+	// true from the first fragment until the turn completes or the
+	// model is interrupted. Nothing interrupts the model mid-sentence
+	// except the shepherd (docs/roles.md "Pushes"): an implementation
+	// downgrades INTERRUPT scheduling to WHEN_IDLE while this is true,
+	// with a due promise or a decision on a brand new block the only
+	// exceptions. A session with no live model (--voice=off) reports
+	// false.
+	Speaking() bool
 
 	// Audio yields 24 kHz PCM16 LE mono chunks in order. Closed on Close.
 	Audio() <-chan []byte

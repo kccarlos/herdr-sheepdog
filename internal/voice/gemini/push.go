@@ -11,12 +11,27 @@ import (
 
 // pushItem is one queued Push.
 type pushItem struct {
-	text    string
+	text string
+	// urgency is what will actually be sent: peekPush downgrades it from
+	// INTERRUPT to WHEN_IDLE, in place, while the model is speaking.
 	urgency voice.Urgency
-	retries int
+	// requested is what the caller asked for, untouched by the
+	// downgrade; the voice.push log keeps it as "urgency" so the record
+	// shows the request even when scheduling_sent shows what happened.
+	requested voice.Urgency
+	retries   int
 	// tags travel onto the item's voice.push event (answers_job: the
-	// investigation whose answer this push is).
+	// investigation whose answer this push is; due_promise, needs_user:
+	// the exceptions that keep INTERRUPT while the model is speaking).
 	tags map[string]any
+}
+
+// exempt reports whether tags mark this push as one of the two
+// exceptions that keep INTERRUPT scheduling even while the model is
+// speaking: a due promise, or a decision on a block whose pending
+// action this event created (docs/roles.md "Pushes").
+func exempt(tags map[string]any) bool {
+	return tags["due_promise"] == true || tags["needs_user"] == true
 }
 
 // Push policy (plan §3.6): one at a time, FIFO. UrgencySilent goes as
@@ -62,13 +77,32 @@ func (s *Session) pushLoop(ctx context.Context) {
 	}
 }
 
+// peekPush returns the head of the queue, downgrading it from INTERRUPT
+// to WHEN_IDLE in place — once, since the mutation makes the condition
+// below false on every later peek — while the model is speaking and the
+// item is not exempt (docs/roles.md "Pushes": nothing interrupts the
+// model mid-sentence except the shepherd). The downgraded item then
+// runs the ordinary WHEN_IDLE wait below; voice.push_deferred is logged
+// outside the lock.
 func (s *Session) peekPush() (pushItem, bool) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if len(s.pushQ) == 0 {
+		s.mu.Unlock()
 		return pushItem{}, false
 	}
-	return s.pushQ[0], true
+	head := &s.pushQ[0]
+	deferNow := head.urgency == voice.UrgencyInterrupt && s.speaking && !exempt(head.tags)
+	if deferNow {
+		head.urgency = voice.UrgencyIdle
+	}
+	item := *head
+	s.mu.Unlock()
+	if deferNow {
+		s.log.Log(logSource, "voice.push_deferred", "", map[string]any{
+			"kind": "push", "reason": "speaking", "urgency_requested": voice.UrgencyInterrupt.String(),
+		})
+	}
+	return item, true
 }
 
 func (s *Session) popPush() {
@@ -108,6 +142,7 @@ func (s *Session) pushReady(item pushItem) (wait time.Duration, timedOut bool) {
 			return left, false
 		}
 		s.turnOpen = false // the turn never completed; do not wait forever
+		s.speaking = false
 		timedOut = true
 	}
 	if gap := s.cfg.PushGap - now.Sub(s.lastSpoken); gap > 0 {
@@ -165,7 +200,7 @@ func (s *Session) doPush(ctx context.Context, item pushItem) {
 		}
 	}
 	s.mu.Unlock()
-	payload := map[string]any{"text": item.text, "urgency": item.urgency.String()}
+	payload := map[string]any{"text": item.text, "urgency": item.requested.String(), "scheduling_sent": item.urgency.SchedulingName()}
 	for k, v := range item.tags {
 		payload[k] = v
 	}

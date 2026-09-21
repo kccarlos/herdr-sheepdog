@@ -24,9 +24,11 @@ func (p SkippedPusher) Push(text string, u voice.Urgency) error {
 // PushTagged implements supervisor.TagPusher: the same skipped push,
 // with its tags (answers_job) on the event, so the /debug views link an
 // investigation's answer to its acknowledgement with --voice=off too.
+// There is no live model to speak while, so scheduling_sent always
+// matches the requested urgency.
 func (p SkippedPusher) PushTagged(text string, u voice.Urgency, tags map[string]any) error {
 	if p.Log != nil {
-		payload := map[string]any{"text": text, "urgency": u.String(), "skipped": true}
+		payload := map[string]any{"text": text, "urgency": u.String(), "scheduling_sent": u.SchedulingName(), "skipped": true}
 		for k, v := range tags {
 			payload[k] = v
 		}

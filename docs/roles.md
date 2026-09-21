@@ -235,9 +235,26 @@ prompt twice for a pane. `composeBriefing` already read the live pending
 action, so "asking …" is right after a reprompt with no change of its
 own.
 
+Also in, from the no-interruption PR: the gemini session tracks
+**`Speaking()`**, narrower than the existing `TurnOpen()` — true only
+from the model's first output fragment or audio chunk of a turn, false
+again on `turnComplete` or an interruption (`voice.Session` carries it;
+`--voice=off` has no live model, so nothing needs it downgraded). An
+INTERRUPT push or tool result is downgraded to WHEN_IDLE, at send time,
+while `Speaking()` is true — the push queue (`peekPush`) and the tool
+executor (`execTool`) each make the call, logging `voice.push_deferred
+{kind: push\|tool_result, name?, reason: speaking, urgency_requested}`.
+The two exceptions that keep INTERRUPT are tagged by the supervisor's
+announce path: `due_promise` (a kept promise past its due time) and
+`needs_user` (a decision on a block whose pending action this event
+created, never an addition to one already spoken); `stop()`'s result is
+the third, checked by tool name, since the shepherd is always owed it
+at once. `voice.push` gains `scheduling_sent` beside the requested
+`urgency`; `/debug` marks a downgraded push or tool result "deferred".
+
 **Not yet:** `source: worker` (asking the idle worker in its own pane —
 its finish would produce both the announce line and the delivery line
 for one event, which the one-push-per-event rule forbids; the ledger
-already carries the field); the no-interruption rule (INTERRUPT is not
-downgraded while the voice is speaking).
+already carries the field); promise-at-startup and the "no change since
+I last checked" briefing repeat.
 The order in which they land is in `docs/issues-2026-09-18.md`.

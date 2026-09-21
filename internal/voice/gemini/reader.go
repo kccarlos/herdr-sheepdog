@@ -69,6 +69,7 @@ func (s *Session) handleServerContent(sc *genai.LiveServerContent) {
 			if p != nil && p.InlineData != nil && len(p.InlineData.Data) > 0 {
 				s.mu.Lock()
 				s.openTurnLocked()
+				s.speaking = true
 				s.noteResponseLocked(s.now())
 				s.mu.Unlock()
 				s.clearStalled()
@@ -90,6 +91,7 @@ func (s *Session) handleServerContent(sc *genai.LiveServerContent) {
 	if t := sc.OutputTranscription; t != nil && t.Text != "" {
 		s.mu.Lock()
 		s.openTurnLocked()
+		s.speaking = true
 		s.noteResponseLocked(s.now())
 		s.mu.Unlock()
 		s.clearStalled()
@@ -99,6 +101,7 @@ func (s *Session) handleServerContent(sc *genai.LiveServerContent) {
 	if sc.TurnComplete {
 		s.mu.Lock()
 		s.turnOpen = false
+		s.speaking = false
 		close(s.turnDone)
 		s.turnDone = make(chan struct{})
 		turn := s.noteTurnCompleteLocked()
@@ -109,8 +112,14 @@ func (s *Session) handleServerContent(sc *genai.LiveServerContent) {
 	}
 }
 
-// interrupt drops queued output audio and tells the consumer to flush.
+// interrupt drops queued output audio and tells the consumer to flush;
+// the model is no longer speaking once its output is cut off, whether
+// the server reported it ("model") or a push flushed ahead of sending
+// ("push").
 func (s *Session) interrupt(by string) {
+	s.mu.Lock()
+	s.speaking = false
+	s.mu.Unlock()
 	dropped := s.out.Flush()
 	s.log.Log(logSource, "voice.interrupted", "", map[string]any{"by": by, "dropped_chunks": dropped})
 	s.emit(voice.EventInterrupted{})

@@ -98,6 +98,7 @@ func (s *Session) install(conn Conn, resumed, reconnect bool) {
 	s.pending, s.pendingBytes = nil, 0
 	handle := s.handle
 	s.turnOpen = false
+	s.speaking = false
 	s.stalls, s.pushTimeouts = 0, 0
 	s.stalledNow = false // the connected status below clears it on the page
 	turn := s.finishTurnLocked("reconnect")

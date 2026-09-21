@@ -154,6 +154,7 @@ td.task, td.block, td.result { max-width: 18em; overflow: hidden; text-overflow:
 .badge { display: inline-block; padding: 0 .45em; border-radius: 9px; font-size: .78em; color: #fff; background: var(--unknown); }
 .badge.interrupt { background: var(--blocked); } .badge.idle { background: var(--working); } .badge.silent { background: var(--idle); }
 .badge.skipped { background: transparent; color: var(--muted); border: 1px dashed var(--muted); }
+.badge.deferred { background: transparent; color: var(--blocked); border: 1px dashed var(--blocked); }
 
 .system-prompt { border-left: 3px solid var(--llm); background: #faf8fe; }
 .system-prompt.current { border-left-style: dashed; }
@@ -318,6 +319,7 @@ td.task, td.block, td.result { max-width: 18em; overflow: hidden; text-overflow:
 .sw-card.push { background: #fdf2f8; border-left-color: var(--push); }
 .sw-card.push.push-silent { background: #fafafa; border-left-color: var(--idle); color: var(--muted); }
 .sw-card.push.skipped { border-left-style: dashed; }
+.sw-card.deferred { border-left-style: dashed; }
 .sw-card.synthetic { background: #f3f1e8; }
 .sw-card.pending { background: #f4faf6; }
 .sw-card.pending-cancelled, .sw-card.pending-expired { background: #fff5f5; border-left-color: var(--blocked); }
