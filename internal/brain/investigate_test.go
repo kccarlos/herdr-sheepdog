@@ -71,8 +71,11 @@ func TestInvestigateRefusedOnAReadOnlyTurn(t *testing.T) {
 		t.Fatalf("an event turn started a job: %+v", h.host.Investigated)
 	}
 	blocked := h.log.ofType("brain.rail_blocked")
-	if len(blocked) != 1 || payload(blocked[0])["name"] != nil && payload(blocked[0])["trigger"] != "event" {
+	if len(blocked) != 1 || payload(blocked[0])["trigger"] != string(TriggerEvent) {
 		t.Fatalf("brain.rail_blocked = %v", blocked)
+	}
+	if reason, _ := payload(blocked[0])["reason"].(string); !strings.Contains(reason, ToolInvestigate) {
+		t.Errorf("rail_blocked reason = %q", reason)
 	}
 	// The read-only surface does not even declare it.
 	for _, fd := range h.model.Calls()[0].Config.Tools[0].FunctionDeclarations {

@@ -256,6 +256,12 @@ func (r *Runner) finish(result *Result, exec execResult, backend Backend, timeou
 	default:
 		if answer, thread, ok := parseCodexJSONL(exec.Stdout); ok {
 			result.Raw = answer
+			if thread == "" && exec.StdoutCapped {
+				// A talkative run (codex streams every command's output)
+				// pushed thread.started out of the tail; it is on the
+				// first line, which the head kept.
+				_, thread, _ = parseCodexJSONL(exec.StdoutHead)
+			}
 			if thread != "" {
 				result.SessionID = thread
 			}

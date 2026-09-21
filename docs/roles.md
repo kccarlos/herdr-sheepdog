@@ -108,7 +108,9 @@ the brain's call.
 
 A procedure in code, resolved from what is in flight: drop a call not
 yet handed over → cancel the brain's in-flight shepherd turn (write
-tools run under its context and never execute) → Ctrl-C a worker that
+tools run under its context and never execute) → cancel the running
+investigation the withdrawn request was about, or, with nothing in
+flight, the most recent one → Ctrl-C a worker that
 received an instruction within `supervisor.cancel_window_s` (30 s) →
 leave an open worker prompt open (stop is not "no") → one short brain
 turn saying what was stopped and offering the correction. Undoing a

@@ -199,8 +199,10 @@ func (b *Brain) execTool(ctx context.Context, t *turn, call *genai.FunctionCall)
 		}
 		out.result = mustJSON(start)
 		out.summary = fmt.Sprintf("investigation %s of %s started", start.Job, row.Alias)
-		// Nothing was sent to a worker, so this is no "acted" echo: the
-		// job is running and the brain answers with pending true.
+		// The job is running whatever happens to the rest of this turn,
+		// so the fallback path must say so rather than report the roster
+		// as if nothing were under way.
+		out.acted = "Looking into " + aliasOr(row.Alias) + " now; the answer comes on its own."
 	case ToolPrompt:
 		text := arg("text")
 		if text == "" {

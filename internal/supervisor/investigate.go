@@ -134,12 +134,13 @@ func (s *Supervisor) startInvestigation(ctx context.Context, paneID string, req 
 	s.investigating[paneID] = live
 	s.mu.Unlock()
 	s.touch(paneID)
+	backend := s.investigatorBackend()
 	s.log.Log(logSource, "investigation.started", paneID, map[string]any{
-		"id": inv.ID, "agent": aliasOr(row.Alias), "source": inv.Source, "backend": s.investigatorBackend(),
+		"id": inv.ID, "agent": aliasOr(row.Alias), "source": inv.Source, "backend": backend,
 		"question": inv.Question, "follow_up_of": inv.FollowUpOf, "resumed": session != "",
 	})
 	go s.runInvestigation(jobCtx, live, inv)
-	return brain.InvestigationStart{Job: inv.ID, ETASeconds: int(s.investigateETA().Seconds())}, nil
+	return brain.InvestigationStart{Job: inv.ID, ETASeconds: int(s.investigateETA(backend).Seconds())}, nil
 }
 
 // resumeFor resolves follow_up_of: the session of the earlier job when
@@ -230,11 +231,18 @@ func (s *Supervisor) deliverInvestigation(inv state.Investigation) {
 		return
 	}
 	info := investigationInfo(inv, s.resumable(inv))
-	rep, err := s.brain.Turn(context.Background(), brain.Request{
+	req := brain.Request{
 		Kind: brain.KindInvestigation, Trigger: brain.TriggerEvent, Agent: aliasOr(inv.Alias),
 		Event: "investigation.done", Question: inv.Question, Template: fallback,
 		Result: inv.Result, Investigation: &info,
-	})
+	}
+	rep, err := s.brain.Turn(context.Background(), req)
+	if errors.Is(err, brain.ErrYielded) {
+		// The shepherd spoke while the answer was being composed: an
+		// event turn gives way, but this one is the answer they are
+		// waiting for, so ask once more behind their turn.
+		rep, err = s.brain.Turn(context.Background(), req)
+	}
 	if err != nil {
 		s.pushInvestigation(inv, fallback)
 		return
@@ -393,12 +401,13 @@ func (s *Supervisor) restoreInvestigations() {
 }
 
 // investigateETA is the estimate the acknowledgement carries: the median
-// of the finished jobs' durations, or defaultInvestigateETA before there
-// are any.
-func (s *Supervisor) investigateETA() time.Duration {
+// of that backend's finished jobs, or defaultInvestigateETA before there
+// are any (backends differ enough that one's history says little about
+// the other's).
+func (s *Supervisor) investigateETA(backend string) time.Duration {
 	var durs []time.Duration
 	for _, inv := range s.investigations() {
-		if inv.Status == state.InvestigationDone && inv.Finished != nil {
+		if inv.Status == state.InvestigationDone && inv.Finished != nil && (backend == "" || inv.Backend == backend) {
 			durs = append(durs, inv.Finished.Sub(inv.Started))
 		}
 	}

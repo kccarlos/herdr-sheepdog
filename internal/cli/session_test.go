@@ -87,6 +87,33 @@ func TestCodexJSONLParsing(t *testing.T) {
 	}
 }
 
+// TestCodexSessionSurvivesTheOutputCap: codex streams every command's
+// output, so a real investigation's stdout is far past cli.max_output_kb
+// and the tail no longer holds the first line. The session id must still
+// come back, or every follow-up would silently start cold.
+func TestCodexSessionSurvivesTheOutputCap(t *testing.T) {
+	bin := fakeBinPath(t)
+	cfg := Config{CodexBin: bin, CodexCmd: []string{bin, "{question}"}, MaxOutputBytes: 2 << 10}
+	r := newTestRunner(t, cfg, Detection{Codex: true})
+	t.Setenv("FAKE_CODEX_JSONL", "1")
+	t.Setenv("FAKE_SESSION", "thread-42")
+	t.Setenv("FAKE_BIG", "8000") // one noisy command, past the 2 KiB cap
+
+	res, err := r.Run(context.Background(), Query{Backend: Codex, Workspace: t.TempDir(), Question: "why did it fail?"})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if !res.Capped {
+		t.Fatal("the test did not actually exceed the cap")
+	}
+	if res.SessionID != "thread-42" {
+		t.Errorf("session = %q, want it recovered from the kept head", res.SessionID)
+	}
+	if !strings.Contains(res.Raw, "why did it fail?") {
+		t.Errorf("answer = %q, want the agent_message from the kept tail", res.Raw)
+	}
+}
+
 // TestRunSlotAndTimeout proves a background investigation does not lock
 // the brain out of a short lookup in the same repository, and that its
 // own timeout is what bounds it.

@@ -189,6 +189,12 @@ layer: sheepdog stores only the id.
   optional value and would otherwise swallow a following positional.
 - Both runs were made with `HERDR_*`, `CLAUDECODE` and `CLAUDE_CODE_*`
   scrubbed, as the runner does.
+- **The output cap must not eat the thread id.** Codex streams every
+  command's `aggregated_output` into the JSONL, so a real investigation
+  is far past `cli.max_output_kb` and the kept tail no longer holds line
+  one. The runner therefore keeps the first 4 KB of stdout as well and
+  reads the thread id from there when the tail has none; the answer
+  still comes from the tail, where the final `agent_message` is.
 - Consequence for `run_cli`: the shared templates now persist a session
   for every invocation, not only for investigations (codex writes one
   under `~/.codex/sessions`, claude under `~/.claude/projects`). That is

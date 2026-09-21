@@ -12,10 +12,20 @@ import (
 // independent of the (usually much larger) stdout cap.
 const stderrCapBytes = 4 << 10
 
+// stdoutHeadBytes is how much of the *start* of stdout is kept besides
+// the tail. Codex announces the session on its first line and then
+// streams every command's output, so a talkative run pushes
+// thread.started out of the tail: without the head a follow-up could
+// never resume the session (docs/cli-query-tools.md §2b).
+const stdoutHeadBytes = 4 << 10
+
 // execResult is the raw outcome of one child process, before any
 // backend-specific parsing.
 type execResult struct {
-	Stdout       string
+	Stdout string
+	// StdoutHead is the first stdoutHeadBytes of stdout, kept even when
+	// the tail dropped them.
+	StdoutHead   string
 	StdoutCapped bool
 	Stderr       string
 	StderrCapped bool
@@ -35,7 +45,7 @@ func runCommand(ctx context.Context, argv []string, dir string, maxStdoutBytes i
 	cmd.Stdin = nil // exec.Cmd connects a nil Stdin to the null device
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
-	out := &tailBuffer{max: maxStdoutBytes}
+	out := &tailBuffer{max: maxStdoutBytes, headMax: stdoutHeadBytes}
 	errOut := &tailBuffer{max: stderrCapBytes}
 	cmd.Stdout = out
 	cmd.Stderr = errOut
@@ -61,6 +71,7 @@ func runCommand(ctx context.Context, argv []string, dir string, maxStdoutBytes i
 
 	res := execResult{
 		Stdout:       out.String(),
+		StdoutHead:   out.Head(),
 		StdoutCapped: out.capped,
 		Stderr:       errOut.String(),
 		StderrCapped: errOut.capped,
@@ -119,15 +130,22 @@ func renderArgv(tmpl []string, vars map[string]string) []string {
 
 // tailBuffer keeps the last max bytes written to it (newest data wins),
 // so an unbounded child process cannot grow the daemon's memory and the
-// most relevant (most recent) output survives truncation.
+// most relevant (most recent) output survives truncation. With headMax
+// set it also keeps the first headMax bytes, for the lines a backend
+// only prints once, at the start (codex's thread id).
 type tailBuffer struct {
-	max    int
-	buf    []byte
-	capped bool
+	max     int
+	headMax int
+	head    []byte
+	buf     []byte
+	capped  bool
 }
 
 func (t *tailBuffer) Write(p []byte) (int, error) {
 	n := len(p)
+	if room := t.headMax - len(t.head); room > 0 {
+		t.head = append(t.head, p[:min(room, n)]...)
+	}
 	t.buf = append(t.buf, p...)
 	if t.max > 0 && len(t.buf) > t.max {
 		t.capped = true
@@ -137,6 +155,10 @@ func (t *tailBuffer) Write(p []byte) (int, error) {
 }
 
 func (t *tailBuffer) String() string { return string(t.buf) }
+
+// Head returns the first headMax bytes written, whether or not the tail
+// still holds them.
+func (t *tailBuffer) Head() string { return string(t.head) }
 
 // elideRunes truncates s to at most n runes, appending "…" when it did
 // (used to keep the logged question short — plan: "question elided to 80

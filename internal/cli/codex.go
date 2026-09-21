@@ -21,8 +21,9 @@ type codexEvent struct {
 // parseCodexJSONL extracts the answer and the thread id from codex's
 // JSONL stdout. ok is false when no line parsed as an event, in which
 // case the caller falls back to the raw text (a template without
-// --json). A truncated first line (the output cap keeps the tail) simply
-// yields no thread id.
+// --json). Lines that do not parse — a boundary the output cap cut in
+// half — are skipped, so the same function reads the kept head and the
+// kept tail.
 func parseCodexJSONL(stdout string) (answer, threadID string, ok bool) {
 	for _, line := range strings.Split(stdout, "\n") {
 		line = strings.TrimSpace(line)
