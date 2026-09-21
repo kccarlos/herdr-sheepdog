@@ -14,7 +14,9 @@
 //   tool           voice.tool_call paired with its voice.tool_result by id,
 //                  with the supervisor-side events in between nested
 //   push           voice.push (supervisor → model), with the supervisor-side
-//                  events that led to it nested
+//                  events that led to it nested; a push answering an
+//                  investigation (answers_job) links back to the
+//                  acknowledgement card that started the job
 
 import { NESTED_TYPES, DIVIDERS, fmtMs, estimateTokens, argSummary, ToolPairer, Fragments, toolFamily } from './grouping.js';
 
@@ -87,14 +89,24 @@ export class Grouper {
       case 'voice.tool_result':
         this.toolResult(ev, p);
         return;
-      case 'voice.push':
+      case 'voice.push': {
         this.closeUser();
         this.closeAssistant();
-        this.push({
+        const item = this.push({
           kind: 'push', ts: ev.ts, text: p.text || '', urgency: p.urgency || 'idle', skipped: !!p.skipped,
-          nested: this.loose.splice(0), expandable: true,
+          answersJob: p.answers_job || '', nested: this.loose.splice(0), expandable: true,
         });
+        // An investigation's answer: link it to the acknowledgement the
+        // shepherd heard when the job started, and that card back to it.
+        if (item.answersJob) {
+          const ack = this.lastOf((x) => x.kind === 'tool' && x.job === item.answersJob);
+          if (ack) {
+            ack.answeredBy = item.key;
+            item.answers = ack.key;
+          }
+        }
         return;
+      }
       case 'voice.turn':
         this.closeUser();
         this.closeAssistant();
@@ -109,6 +121,14 @@ export class Grouper {
       case 'voice.usage': {
         const last = this.lastOf((it) => it.kind === 'assistant' || it.kind === 'tool');
         if (last) last.usage = { prompt: p.prompt, response: p.response, total: p.total };
+        return;
+      }
+      case 'investigation.started': {
+        // The job a pending acknowledgement is about: its id is what the
+        // answering push carries (answers_job).
+        const open = this.tools.last;
+        if (open && p.id) open.job = p.id;
+        this.nest(ev);
         return;
       }
       default: {
@@ -199,6 +219,8 @@ export class Grouper {
     item.result = {
       spoken: p.spoken || '', clarify: !!p.clarify, scheduling: p.scheduling || '', durMs: p.dur_ms,
       error: p.error || '', cancelled: !!p.cancelled, sendError: p.send_error || '',
+      // The real answer follows on its own (an investigation).
+      pendingAnswer: !!p.pending,
     };
     item.resultTs = ev.ts;
     // Without a voice model the daemon speaks the result itself (the /voice

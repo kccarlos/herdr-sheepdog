@@ -178,6 +178,11 @@ func (s *Server) runTool(ctx context.Context, call voice.ToolCall, via string) (
 	start := s.deps.Now()
 	res, err := s.deps.Supervisor.Handler()(ctx, call)
 	payload := map[string]any{"id": call.ID, "name": call.Name, "spoken": res.Spoken, "clarify": res.Clarify, "scheduling": res.Scheduling.String(), "via": via, "dur_ms": s.deps.Now().Sub(start).Milliseconds()}
+	if res.Pending {
+		// An answer whose real result follows on its own (an
+		// investigation): the Conversation view links it to the push.
+		payload["pending"] = true
+	}
 	if err != nil {
 		payload["error"] = err.Error()
 	}

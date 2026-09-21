@@ -326,6 +326,12 @@ func (s *Session) logTurn(payload map[string]any) {
 
 // Push implements voice.Session by enqueuing; see push.go for the policy.
 func (s *Session) Push(text string, u voice.Urgency) error {
+	return s.PushTagged(text, u, nil)
+}
+
+// PushTagged implements supervisor.TagPusher: the same push, with tags
+// (answers_job) carried onto its voice.push event.
+func (s *Session) PushTagged(text string, u voice.Urgency, tags map[string]any) error {
 	s.mu.Lock()
 	if !s.started {
 		s.mu.Unlock()
@@ -335,7 +341,7 @@ func (s *Session) Push(text string, u voice.Urgency) error {
 		s.mu.Unlock()
 		return ErrClosed
 	}
-	s.pushQ = append(s.pushQ, pushItem{text: text, urgency: u})
+	s.pushQ = append(s.pushQ, pushItem{text: text, urgency: u, tags: tags})
 	s.mu.Unlock()
 	s.poke()
 	return nil

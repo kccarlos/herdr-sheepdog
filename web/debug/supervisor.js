@@ -56,9 +56,9 @@ export const KIND_GROUPS = {
 export const GROUP_ORDER = ['compaction', 'ceo', 'assistant', 'push', 'worker', 'note', 'promise', 'request', 'tool', 'result', 'reply', 'other'];
 
 const reRequest = /^Request from the assistant \((ask|propose)\): (?:question|instruction)=("(?:[^"\\]|\\.)*")(?: agent=("(?:[^"\\]|\\.)*"|\(none[^)]*\)))?(?: \[triggered by an event[^\]]*\])?/;
-// announce is the current event turn; summarize / keep_promise are kept
-// so transcripts of earlier runs still render.
-const reEvent = /^Event from the supervisor \((announce|summarize|keep_promise)\): agent=("(?:[^"\\]|\\.)*") event=("(?:[^"\\]|\\.)*") template=("(?:[^"\\]|\\.)*")(?: promise=("(?:[^"\\]|\\.)*"))?/;
+// announce and investigation are the current event turns; summarize /
+// keep_promise are kept so transcripts of earlier runs still render.
+const reEvent = /^Event from the supervisor \((announce|investigation|summarize|keep_promise)\): agent=("(?:[^"\\]|\\.)*") event=("(?:[^"\\]|\\.)*") template=("(?:[^"\\]|\\.)*")(?: promise=("(?:[^"\\]|\\.)*"))?/;
 const rePromiseLine = /^- ([^:\s]+): ("(?:[^"\\]|\\.)*")(?: \(([^)]*)\))?$/gm;
 
 function unquote(s) {
@@ -67,8 +67,8 @@ function unquote(s) {
 
 /**
  * Parses a request message (assemble.go requestText) into reqKind (ask /
- * propose / announce), question, agent and trigger. An event request
- * (announce) carries the template sentence as `question`, the promises
+ * propose / announce / investigation), question, agent and trigger. An
+ * event request carries the template sentence as `question`, the promises
  * it keeps (`promises`, `promise` = the first one's text) and
  * `templateSpoken` when the sentence was pushed before the turn. A nudge
  * ("Time is up…", "That was not the JSON…") has reqKind null and

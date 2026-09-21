@@ -3,6 +3,7 @@ package supervisor
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
@@ -33,6 +34,10 @@ const (
 	// stopPhaseCancelTurn: a brain CEO turn was in flight; its context
 	// is cancelled, so its write tools never execute.
 	stopPhaseCancelTurn = "cancel_turn"
+	// stopPhaseInvestigation: a background look the withdrawn request
+	// was about (or the most recent one, with nothing in flight) is
+	// cancelled, so its answer never arrives.
+	stopPhaseInvestigation = "investigation"
 	// stopPhaseInterrupt: an instruction went to a working agent within
 	// the cancel window, so it gets a Ctrl-C.
 	stopPhaseInterrupt = "interrupt"
@@ -86,11 +91,19 @@ func (s *Supervisor) resolveStop(ctx context.Context) stopOutcome {
 		cancel()
 		// Re-take the lock behind whatever the cancelled turn was in the
 		// middle of: a send it had already started holds s.mu until its
-		// pending action exists, so phase 3 below sees it.
+		// pending action exists, so phase 4 below sees it.
 		s.mu.Lock()
 	}
+	// The later phases take the lock themselves; the investigation phase
+	// must not hold it while it stops a child process.
+	s.mu.Unlock()
 
-	// Phase 3: an instruction went to a working agent a moment ago. This
+	// Phase 3: a background look is running. The one the withdrawn
+	// request was about, or — with nothing in flight — the most recent.
+	investigated, cancelled := s.stopInvestigation(withdrawn)
+
+	s.mu.Lock()
+	// Phase 4: an instruction went to a working agent a moment ago. This
 	// runs even after a withdrawal — the turn may have sent something
 	// before the cancel landed, and then "withdrawn before it acted"
 	// would be a lie and the worker would carry on.
@@ -112,12 +125,16 @@ func (s *Supervisor) resolveStop(ctx context.Context) stopOutcome {
 		}
 	}
 
+	if cancelled {
+		s.mu.Unlock()
+		return investigated
+	}
 	if withdrawn.phase != "" {
 		s.mu.Unlock()
 		return withdrawn
 	}
 
-	// Phase 4: a question stays a question. Stop is not "no".
+	// Phase 5: a question stays a question. Stop is not "no".
 	if has && p.Kind == state.PendingAnswerPrompt {
 		alias := s.aliasOf(p.PaneID)
 		s.mu.Unlock()
@@ -125,6 +142,45 @@ func (s *Supervisor) resolveStop(ctx context.Context) stopOutcome {
 	}
 	s.mu.Unlock()
 	return stopOutcome{phase: stopPhaseNone, what: "nothing was in flight"}
+}
+
+// stopInvestigation cancels the running background look a stop applies
+// to: the one about the agent the withdrawn request named, else — when
+// nothing was in flight — the most recent one. A look the shepherd did
+// not just withdraw a request about is left alone unless it is the only
+// thing to stop.
+func (s *Supervisor) stopInvestigation(withdrawn stopOutcome) (stopOutcome, bool) {
+	var inv state.Investigation
+	var ok bool
+	if withdrawn.phase != "" {
+		if paneID, found := s.investigationAbout(withdrawn.what); found {
+			inv, ok = s.cancelInvestigationFor(paneID, "stop")
+		}
+	} else {
+		inv, ok = s.cancelLatestInvestigation("stop")
+	}
+	if !ok {
+		return stopOutcome{}, false
+	}
+	alias := aliasOr(inv.Alias)
+	return stopOutcome{phase: stopPhaseInvestigation, paneID: inv.PaneID, alias: alias, what: "the look into " + alias + " was called off"}, true
+}
+
+// investigationAbout picks the running look the withdrawn words are
+// about: the agent they name, else the one the conversation is on.
+func (s *Supervisor) investigationAbout(text string) (string, bool) {
+	lower := strings.ToLower(text)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for paneID, live := range s.investigating {
+		if live.alias != "" && strings.Contains(lower, strings.ToLower(live.alias)) {
+			return paneID, true
+		}
+	}
+	if live, has := s.investigating[s.lastSubject]; has && live != nil {
+		return s.lastSubject, true
+	}
+	return "", false
 }
 
 // stopTurn runs the closing brain turn: read tools only, a short

@@ -57,11 +57,17 @@ const (
 	// The reply's Urgency may be skip or silent; an empty Spoken is a
 	// skip. The chattiness ceiling is applied by the supervisor.
 	KindAnnounce Kind = "announce"
+	// KindInvestigation delivers a finished investigation: the job's
+	// question, the shepherd's own words and the sub-agent's answer come
+	// back as an event turn that composes the explanation (docs/roles.md
+	// "Investigations and explanations"). Read tools only; the shepherd
+	// is expecting it, so its line is pushed at the next pause.
+	KindInvestigation Kind = "investigation"
 )
 
 // IsEvent reports whether k is an event-triggered kind: read-only tools,
-// the enrich timeout, and an empty Spoken allowed.
-func (k Kind) IsEvent() bool { return k == KindAnnounce }
+// an event budget, and an empty Spoken allowed.
+func (k Kind) IsEvent() bool { return k == KindAnnounce || k == KindInvestigation }
 
 // ReadOnly reports whether k's turn is declared (and allowed) the read
 // tools only: an event turn, and the stop turn, which reports on the
@@ -112,6 +118,9 @@ type Request struct {
 	// Template is the sentence the daemon speaks for the event when the
 	// brain does not answer in time: what the brain's Spoken replaces.
 	Template string
+	// Result is a finished investigation's answer, put in the window
+	// wrapped as worker output by a KindInvestigation turn.
+	Result string
 	// Screen is the pane read the supervisor already took for the event;
 	// it is put in the window (wrapped as worker output, pruned like a
 	// tool result) so the turn need not read again.
@@ -119,6 +128,10 @@ type Request struct {
 	// Promises are the promises this event keeps (already marked kept by
 	// the supervisor): the CEO asked to be told, so Spoken says so.
 	Promises []PromiseInfo
+	// Investigation is the finished job a KindInvestigation turn
+	// delivers: its question, the CEO's own words, the sub-agent's
+	// answer and what it follows up on.
+	Investigation *InvestigationInfo
 }
 
 // Reply is the answer contract (docs/roles.md): what the assistant says,
@@ -200,6 +213,80 @@ type PromiseInfo struct {
 	Due *time.Time `json:"due,omitempty"`
 }
 
+// Investigation statuses (state.Investigation mirrors them; the brain
+// sees jobs only through the Host).
+const (
+	InvestigationRunning   = "running"
+	InvestigationDone      = "done"
+	InvestigationCancelled = "cancelled"
+	InvestigationError     = "error"
+)
+
+// The sources an investigation can run through.
+const (
+	// InvestigationSourceCLI is the read-only CLI sub-agent in the
+	// worker's repository.
+	InvestigationSourceCLI = "cli"
+	// InvestigationSourceWorker is the idle worker itself, asked in its
+	// own pane. Not implemented yet (docs/roles.md "Status").
+	InvestigationSourceWorker = "worker"
+)
+
+// InvestigationRequest is what the investigate tool asks the Host to
+// start: a question about an agent, optionally continuing an earlier
+// job's session.
+type InvestigationRequest struct {
+	// Question is what the sub-agent is asked, self-contained (it has
+	// not heard this conversation).
+	Question string
+	// FollowUpOf is the id of the job to continue, when the CEO is
+	// digging deeper into an answer they already had.
+	FollowUpOf string
+	// Asked is what the CEO said that started it, in their words (the
+	// delivery turn says what they wanted, not what the tool asked).
+	Asked string
+	// Turn is the brain turn that started it.
+	Turn int
+}
+
+// InvestigationStart is what the investigate tool returns at once: the
+// job is running in the background and its answer arrives later as an
+// event turn.
+type InvestigationStart struct {
+	// Job is the job's id, which a follow-up names.
+	Job string `json:"job"`
+	// ETASeconds is a rough estimate from the backend's recorded
+	// durations, for the acknowledgement ("about half a minute").
+	ETASeconds int `json:"eta_s"`
+}
+
+// InvestigationInfo is one job of the ledger as the Host records it.
+type InvestigationInfo struct {
+	ID    string `json:"id"`
+	Agent string `json:"agent"`
+	// Question is what the sub-agent was asked; Asked what the CEO said.
+	Question string `json:"question"`
+	Asked    string `json:"asked,omitempty"`
+	// FollowUpOf is the earlier job this one continues.
+	FollowUpOf string `json:"follow_up_of,omitempty"`
+	// Source is cli or worker; Backend the CLI backend that ran it.
+	Source  string `json:"source"`
+	Backend string `json:"backend,omitempty"`
+	// Status is running, done, cancelled or error.
+	Status   string     `json:"status"`
+	Started  time.Time  `json:"started"`
+	Finished *time.Time `json:"finished,omitempty"`
+	// Result is the sub-agent's answer verbatim (wrapped in provenance
+	// delimiters wherever it enters the window); Summary the one line
+	// the ledger and recall keep.
+	Result  string `json:"result,omitempty"`
+	Summary string `json:"summary,omitempty"`
+	Err     string `json:"err,omitempty"`
+	// Resumable reports that a follow-up can continue this job's
+	// sub-agent session (it reported one and the TTL has not passed).
+	Resumable bool `json:"resumable,omitempty"`
+}
+
 // AgentInfo is one row of the roster the Host serves: the state table's
 // view of a pane, for the ear (alias, never pane id, in prompts).
 type AgentInfo struct {
@@ -272,6 +359,13 @@ type Host interface {
 	// RunCLI runs the read-only CLI query tool in the agent's workspace;
 	// ErrNoCLI when there is none.
 	RunCLI(ctx context.Context, paneID, question string) (string, error)
+	// Investigate starts a background job about the pane and returns at
+	// once; its answer comes back later as a KindInvestigation turn.
+	// ErrNoCLI when there is no query tool to run it with.
+	Investigate(ctx context.Context, paneID string, req InvestigationRequest) (InvestigationStart, error)
+	// Investigations returns the job ledger, oldest first, running jobs
+	// included.
+	Investigations() []InvestigationInfo
 	// Prompt sends an instruction as typed text, creating the
 	// send_instruction pending action exactly as propose does; it returns
 	// the spoken echo.

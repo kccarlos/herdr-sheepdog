@@ -247,3 +247,26 @@ test('brain.* inside an ask call: nested under the call, reads/CLI nested under 
   assert.deepEqual(g.loose.map((e) => e.type), ['brain.tool_call', 'brain.tool_result']);
   assert.equal(g.loose[0].pending, true);
 });
+
+test('an investigation acknowledgement links to the push that answers it', () => {
+  const items = groupEvents([
+    ev('voice.transcript.in', { text: 'explain why the tests failed', final: true }),
+    ev('voice.tool_call', { id: 'c1', name: 'to_supervisor', args: { text: 'explain why the tests failed' } }),
+    ev('brain.tool_call', { id: 'b1', name: 'investigate', args: { agent: 'auth', question: 'why did the tests fail?' } }, 100, 'brain'),
+    ev('investigation.started', { id: 'inv-1', agent: 'auth', source: 'cli', backend: 'codex' }, 5, 'supervisor'),
+    ev('brain.tool_result', { id: 'b1', name: 'investigate', dur_ms: 6, result: '{"job":"inv-1","eta_s":30}' }, 5, 'brain'),
+    ev('voice.tool_result', { id: 'c1', name: 'to_supervisor', spoken: 'Looking into it now.', pending: true, scheduling: 'idle', dur_ms: 120 }),
+    ev('investigation.done', { id: 'inv-1', agent: 'auth', dur_ms: 3000, bytes: 42, session_id_present: true }, 3000, 'supervisor'),
+    ev('voice.push', { text: 'The clamp test asserts the wrong bound.', urgency: 'idle', answers_job: 'inv-1' }),
+  ]);
+  assert.deepEqual(kinds(items), ['user', 'tool', 'push']);
+  const [, ack, answer] = items;
+  assert.equal(ack.result.pendingAnswer, true, 'the acknowledgement is pending');
+  assert.equal(ack.job, 'inv-1', 'investigation.started named the job');
+  assert.equal(ack.answeredBy, answer.key);
+  assert.equal(answer.answersJob, 'inv-1');
+  assert.equal(answer.answers, ack.key);
+  // investigation.done lands after the tool result, so it is filed with
+  // the push that explains it.
+  assert.deepEqual(answer.nested.map((e) => e.type), ['investigation.done']);
+});

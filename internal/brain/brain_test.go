@@ -53,7 +53,7 @@ func TestDirectAnswer(t *testing.T) {
 	if call.Config.ThinkingConfig == nil || call.Config.ThinkingConfig.ThinkingLevel != genai.ThinkingLevelLow {
 		t.Errorf("thinking config = %+v", call.Config.ThinkingConfig)
 	}
-	if len(call.Config.Tools) != 1 || len(call.Config.Tools[0].FunctionDeclarations) != 9 {
+	if len(call.Config.Tools) != 1 || len(call.Config.Tools[0].FunctionDeclarations) != 10 {
 		t.Errorf("tools = %+v", call.Config.Tools)
 	}
 }
@@ -690,7 +690,7 @@ func TestSystemPromptSections(t *testing.T) {
 			t.Errorf("section %s is empty", s["name"])
 		}
 	}
-	if strings.Join(names, " ") != "role tools intent record promises announcing rail fallback contract user roster ledger time" {
+	if strings.Join(names, " ") != "role tools intent record promises announcing rail fallback contract user roster ledger investigations time" {
 		t.Errorf("sections = %v", names)
 	}
 	sys := h.model.Calls()[0].System()
@@ -943,10 +943,10 @@ func TestWindowAndTranscriptAccessors(t *testing.T) {
 			t.Errorf("section %s empty", s.Name)
 		}
 	}
-	if strings.Join(names, " ") != "role tools intent record promises announcing rail fallback contract user roster ledger time" {
+	if strings.Join(names, " ") != "role tools intent record promises announcing rail fallback contract user roster ledger investigations time" {
 		t.Errorf("sections = %v", names)
 	}
-	if strings.Join(sources, " ") != "embedded embedded embedded embedded embedded embedded embedded embedded embedded embedded dynamic dynamic dynamic" {
+	if strings.Join(sources, " ") != "embedded embedded embedded embedded embedded embedded embedded embedded embedded embedded dynamic dynamic dynamic dynamic" {
 		t.Errorf("sources = %v", sources)
 	}
 }

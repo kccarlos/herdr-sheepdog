@@ -157,25 +157,80 @@ Stdin must be `/dev/null` (with `-p`, a piped stdin is read as additional prompt
 - Tool inventory check with `--strict-mcp-config`: 2.8 s, `result` =
   `Glob, Grep, Read, WebSearch`.
 
-## 3. Proposed config defaults
+## 2b. Sessions and resume (investigations)
+
+Verified 2026-09-21 in this repository, one run each (same versions as
+above). A background investigation (`docs/roles.md` "Investigations and
+explanations") keeps the sub-agent's session so a follow-up
+(`investigate(..., follow_up_of)`) continues the same conversation
+instead of re-reading the repository. The backend is the persistence
+layer: sheepdog stores only the id.
+
+- **Codex.** Drop `--ephemeral` (it is what suppresses the session file)
+  and add `--json`; the first stdout line is
+  `{"type":"thread.started","thread_id":"01a0c540-…"}`, the answer is the
+  `text` of the last `{"type":"item.completed","item":{"type":"agent_message"}}`,
+  and `turn.completed` carries the usage. Resume with
+  `codex exec resume <thread_id> "<question>"`: it re-emits the same
+  `thread.started` id and answered from the earlier turn's context
+  without re-reading the file. **`codex exec resume` has no `--sandbox`,
+  `-C` or `--color`** of its own (checked with `--help`), so the sandbox
+  goes through `-c sandbox_mode=read-only` — accepted under
+  `--strict-config`, so it is a real key, not a silently ignored one —
+  and the directory through the child's cwd, which the runner sets
+  anyway. Sessions live under `~/.codex/sessions` and `resume` filters by
+  cwd unless `--all` is passed.
+- **Claude.** Drop `--no-session-persistence`; the JSON result carries
+  `session_id` ("401669a7-…"). Resume with `claude -p "<question>"
+  --resume <session_id>` and the same read-only flags: the same
+  `session_id` comes back, `permission_denials` is still `[]`, and the
+  answer used the earlier turn's context. Keep `-p "{question}"` first
+  and `--resume {session}` after it — `--resume [value]` takes an
+  optional value and would otherwise swallow a following positional.
+- Both runs were made with `HERDR_*`, `CLAUDECODE` and `CLAUDE_CODE_*`
+  scrubbed, as the runner does.
+- Consequence for `run_cli`: the shared templates now persist a session
+  for every invocation, not only for investigations (codex writes one
+  under `~/.codex/sessions`, claude under `~/.claude/projects`). That is
+  the price of being able to follow up; nothing reads those files but
+  the CLIs themselves.
+
+## 3. Config defaults
 
 ```toml
 [cli]
-# {cwd} and {question} are substituted by sheepdog; argv arrays, no shell.
+# {cwd}, {question}, {model}, {reasoning} and (resume only) {session}
+# are substituted by sheepdog; argv arrays, no shell.
 codex_cmd  = ["codex", "exec", "--sandbox", "read-only", "--skip-git-repo-check",
-              "--ephemeral", "--color", "never", "-c", "model_reasoning_effort=low",
-              "-C", "{cwd}", "{question}"]
-claude_cmd = ["claude", "-p", "{question}",
+              "--color", "never", "-c", "model_reasoning_effort=low",
+              "-C", "{cwd}", "--json", "{question}"]
+claude_cmd = ["claude", "-p", "{question}", "--model", "{model}",
               "--tools", "Read,Grep,Glob,WebSearch",
               "--allowedTools", "Read,Grep,Glob,WebSearch",
               "--strict-mcp-config",
               "--permission-mode", "dontAsk", "--permission-prompts", "none",
-              "--no-session-persistence", "--output-format", "json",
+              "--output-format", "json",
               "--max-budget-usd", "0.50"]
-timeout_s     = 60      # kill the process group on expiry (plan §3.5)
+codex_resume_cmd  = ["codex", "exec", "resume", "{session}", "{question}",
+                     "-c", "sandbox_mode=read-only",
+                     "-c", "model_reasoning_effort={reasoning}",
+                     "--skip-git-repo-check", "--json"]
+claude_resume_cmd = ["claude", "-p", "{question}", "--resume", "{session}",
+                     "--model", "{model}",
+                     "--tools", "Read,Grep,Glob,WebSearch",
+                     "--allowedTools", "Read,Grep,Glob,WebSearch",
+                     "--strict-mcp-config",
+                     "--permission-mode", "dontAsk", "--permission-prompts", "none",
+                     "--output-format", "json",
+                     "--max-budget-usd", "0.50"]
+timeout_s     = 60      # kill the process group on expiry (plan §3.5); run_cli only
 output_cap_kb = 16
 prefer        = "codex" # first detected wins; both tools took ~17 s on a trivial question at default effort
 ```
+
+An investigation is not bounded by `timeout_s` but by
+`brain.investigate_max_s` (600 s), which is a sanity ceiling, not a
+budget: the answer may take as long as it takes (CONFIG.md).
 
 Runner notes for WP4:
 
@@ -186,8 +241,10 @@ Runner notes for WP4:
   auth env untouched. Node for Claude is installed via nvm; `claude` resolved on
   `PATH` in this shell, but a launchd-started daemon needs an explicit `PATH`
   containing `~/.nvm/versions/node/*/bin` and `~/.local/bin` (herdr).
-- Parse: Codex → stdout text (or the last `agent_message` item with `--json`);
-  Claude → `json.result`, error if `is_error`.
+- Parse: Codex → the last `agent_message` item of the `--json` stream
+  (plain stdout when a template asks for no `--json`); Claude →
+  `json.result`, error if `is_error`. The session id comes from the same
+  output (§2b).
 - Expect **15–20 s** per call with default reasoning settings and
   **$0.03–0.45** per Claude call; the plan's 60 s timeout is adequate, and
   the brain turn that reads the output adds its own latency on top.

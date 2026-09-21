@@ -66,6 +66,12 @@ func (b *Brain) Turn(ctx context.Context, req Request) (Reply, error) {
 		// The CEO is waiting and the procedure already acted: one short
 		// read-only turn to say what was stopped.
 		timeout = b.cfg.StopTimeout
+	case req.Kind == KindInvestigation:
+		// The answer the CEO is owed, composed from a result that took
+		// minutes to get: it gets the longer budget, not the announce
+		// turn's, which exists to beat the code sentence.
+		timeout = b.cfg.ProposeTimeout
+		req.Trigger = TriggerEvent
 	case req.Kind.IsEvent():
 		timeout = b.cfg.EnrichTimeout
 		req.Trigger = TriggerEvent
@@ -75,7 +81,14 @@ func (b *Brain) Turn(ctx context.Context, req Request) (Reply, error) {
 	start := b.cfg.Now()
 	key := ""
 	if req.Trigger == TriggerEvent {
+		// Event turns about the same agent coalesce — but a delivery
+		// turn is not a worker event: an answer the CEO waited minutes
+		// for must not be dropped because the same agent printed a line
+		// meanwhile, so it coalesces only with a newer delivery.
 		key = req.Agent
+		if req.Kind == KindInvestigation {
+			key = string(KindInvestigation) + ":" + req.Agent
+		}
 	}
 	replaced, err := b.lock.acquire(tctx, req.Trigger == TriggerCEO, key)
 	if replaced {
@@ -395,11 +408,12 @@ func (b *Brain) sections() []PromptSection {
 	var agents []AgentInfo
 	var notes []string
 	var promises []PromiseInfo
+	var investigations []InvestigationInfo
 	if host != nil {
-		agents, notes, promises = host.Agents(), host.Notes(), host.Promises()
+		agents, notes, promises, investigations = host.Agents(), host.Notes(), host.Promises(), host.Investigations()
 	}
 	secs := append(append([]PromptSection(nil), stableSections(b.cfg.Prompts)...), userSection(b.cfg.Prompts, mergeUserVars(agents, userVars)))
-	return append(secs, dynamicSections(agents, notes, promises, b.cfg.Now())...)
+	return append(secs, dynamicSections(agents, notes, promises, investigations, b.cfg.Now())...)
 }
 
 // PromptSections returns the system prompt as it would be assembled for

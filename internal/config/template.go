@@ -67,8 +67,9 @@ func Template() string {
 # codex_reasoning = %[15]q
 # timeout_s = %[16]d
 # max_output_kb = %[17]d
-# codex_cmd / claude_cmd (argv templates; TOML-only, see CONFIG.md) keep
-# their built-in defaults unless set here.
+# codex_cmd / claude_cmd and codex_resume_cmd / claude_resume_cmd (argv
+# templates; TOML-only, see CONFIG.md) keep their built-in defaults
+# unless set here.
 
 [supervisor]
 # chattiness = %[19]q   # "quiet" | "normal" | "chatty"; the /debug switch overrides it at runtime
@@ -89,6 +90,8 @@ func Template() string {
 # final_grace_s = %[29]d   # 0: default; how far past the timeout the answer-only step may run
 # enrich_timeout_s = %[32]d   # budget of the brain's announce turn on a block or finish
 # announce_wait_s = %[33]d   # how long a finish waits for the brain's line before the template sentence is spoken
+# investigate_max_s = %[40]d   # sanity ceiling of a background investigation: the only limit on how long its answer may take
+# investigate_session_ttl_s = %[41]d   # how long a finished investigation's sub-agent session stays resumable for a follow-up
 
 [prompts]
 # dir = %[30]q   # ~/.config/sheepdog/prompts/<name> overrides the matching embedded prompt file
@@ -109,5 +112,6 @@ func Template() string {
 		d.DeepSeek.BaseURL, d.DeepSeek.Thinking, d.DeepSeek.ReasoningEffort,
 		d.Brain.Provider,
 		d.Voice.Name, d.Supervisor.CancelWindowS,
+		d.Brain.InvestigateMaxS, d.Brain.InvestigateSessionTTLS,
 	)
 }

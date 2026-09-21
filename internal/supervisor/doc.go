@@ -23,6 +23,13 @@
 // when it errors) the daemon answers from the roster and sends nothing:
 // deciding what words mean is the brain's work.
 //
+// investigate.go owns the background jobs the brain's investigate tool
+// starts (docs/roles.md "Investigations and explanations"): one live job
+// per agent, the read-only CLI sub-agent in the worker's repository with
+// its own ceiling, the ledger in the state file's session, the delivery
+// event turn whose line is pushed at the next pause, and cancellation
+// from the stop procedure.
+//
 // announce.go runs the brain's announce turn on every block and finish
 // and speaks the one line that event gets — the brain's when it lands
 // within Config.AnnounceWait, else the code sentence, never both — under

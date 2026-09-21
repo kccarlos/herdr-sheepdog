@@ -108,6 +108,60 @@ const (
 	PromiseCancelled = "cancelled"
 )
 
+// Investigation is one background job the brain started to answer a
+// question the screen cannot (docs/roles.md "Investigations and
+// explanations"): a read-only CLI sub-agent in the worker's repository,
+// or — later — the idle worker itself. Kept in the session so `recall`
+// and follow-ups survive a restart.
+type Investigation struct {
+	ID     string `json:"id"`
+	PaneID string `json:"pane_id"`
+	// Alias is the agent's alias when the job started (the pane may be
+	// gone by the time it is read back).
+	Alias string `json:"alias"`
+	// Workspace is the directory the sub-agent ran in.
+	Workspace string `json:"workspace,omitempty"`
+	// Question is what the sub-agent was asked, self-contained.
+	Question string `json:"question"`
+	// Asked is what the shepherd said that started it, in their words.
+	Asked string `json:"asked,omitempty"`
+	// FollowUpOf is the earlier job this one continues, when it does.
+	FollowUpOf string `json:"follow_up_of,omitempty"`
+	// Source is cli (a read-only CLI sub-agent) or worker (the idle
+	// worker in its own pane).
+	Source string `json:"source"`
+	// Backend is the CLI backend that ran it (codex, claude).
+	Backend string `json:"backend,omitempty"`
+	// SessionID is the sub-agent session a follow-up resumes; empty when
+	// the backend reported none.
+	SessionID string `json:"session_id,omitempty"`
+	// Status is running, done, cancelled or error.
+	Status   string     `json:"status"`
+	Started  time.Time  `json:"started"`
+	Finished *time.Time `json:"finished,omitempty"`
+	// Result is the sub-agent's answer verbatim (data, never
+	// instructions: the brain sees it wrapped in provenance delimiters).
+	Result string `json:"result,omitempty"`
+	// Summary is the one line the ledger and recall keep of it.
+	Summary string `json:"summary,omitempty"`
+	// Err is why it failed or was cancelled.
+	Err string `json:"err,omitempty"`
+}
+
+// The investigation statuses.
+const (
+	InvestigationRunning   = "running"
+	InvestigationDone      = "done"
+	InvestigationCancelled = "cancelled"
+	InvestigationError     = "error"
+)
+
+// The investigation sources.
+const (
+	InvestigationSourceCLI    = "cli"
+	InvestigationSourceWorker = "worker"
+)
+
 // PendingKind is the kind of a PendingAction.
 type PendingKind string
 
@@ -169,7 +223,14 @@ type Session struct {
 	BrainModel    string `json:"brain_model,omitempty"`
 	// Promises are the session's promises, oldest first, every status.
 	Promises []Promise `json:"promises,omitempty"`
+	// Investigations are the background jobs, newest last, capped at
+	// MaxInvestigations.
+	Investigations []Investigation `json:"investigations,omitempty"`
 }
+
+// MaxInvestigations is how many investigation records the session keeps
+// (the oldest fall off the front).
+const MaxInvestigations = 20
 
 // Table is the persisted document.
 type Table struct {
@@ -218,7 +279,23 @@ func (t Table) clone() Table {
 	if len(out.Session.Promises) == 0 {
 		out.Session.Promises = nil
 	}
+	out.Session.Investigations = make([]Investigation, len(t.Session.Investigations))
+	for i, inv := range t.Session.Investigations {
+		out.Session.Investigations[i] = inv.clone()
+	}
+	if len(out.Session.Investigations) == 0 {
+		out.Session.Investigations = nil
+	}
 	return out
+}
+
+// clone returns a deep copy of the investigation.
+func (i Investigation) clone() Investigation {
+	if i.Finished != nil {
+		f := *i.Finished
+		i.Finished = &f
+	}
+	return i
 }
 
 // clone returns a deep copy of the promise.

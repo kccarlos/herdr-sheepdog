@@ -185,6 +185,34 @@
   },
   {
     "function": {
+      "description": "Start a background look into something the screen cannot answer and that may take more than a few seconds: a read-only CLI agent in the agent's repository (or the idle worker itself). It returns at once with a job id; the answer reaches the CEO on its own when the job returns, so acknowledge with pending true and say roughly how long. Phrase the question with full context: the sub-agent has not heard this conversation. One live investigation per agent.",
+      "name": "investigate",
+      "parameters": {
+        "properties": {
+          "agent": {
+            "description": "the agent's alias",
+            "type": "string"
+          },
+          "follow_up_of": {
+            "description": "the id of the investigation this digs deeper into, to resume the same session",
+            "type": "string"
+          },
+          "question": {
+            "description": "a self-contained question",
+            "type": "string"
+          }
+        },
+        "required": [
+          "agent",
+          "question"
+        ],
+        "type": "object"
+      }
+    },
+    "type": "function"
+  },
+  {
+    "function": {
       "description": "Remember something the CEO decided or wants kept in mind (\"remember the migrations are off limits today\", \"we are on the release branch\"). Notes are in the ledger of every later turn. Not for promised work: that is promise.",
       "name": "note",
       "parameters": {

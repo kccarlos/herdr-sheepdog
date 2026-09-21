@@ -296,6 +296,11 @@ test('announce turns: the request parses promises and template_spoken; the push 
   assert.deepEqual({ promises: block.promises, templateSpoken: block.templateSpoken }, { promises: [], templateSpoken: true });
   // Earlier runs' transcripts still parse.
   assert.equal(parseRequest('Event from the supervisor (keep_promise): agent="auth" event="done" template="x" promise="tell me" condition="when auth finishes"').promise, 'tell me');
+  // A delivered investigation is an event turn like an announce.
+  const inv = parseRequest('Event from the supervisor (investigation): agent="auth" event="investigation.done" template="The look into auth is done; ask me what it found."\nThe look you started (inv-1, through codex) came back. You asked it: "why did the tests fail?"\nWhat it found:\n<<<BEGIN_WORKER_OUTPUT agent=auth source=investigation>>>\nThe clamp test asserts the wrong bound.\n<<<END_WORKER_OUTPUT>>>\nAnswer the CEO now…');
+  assert.deepEqual({ reqKind: inv.reqKind, agent: inv.agent, event: inv.event, trigger: inv.trigger, promises: inv.promises }, {
+    reqKind: 'investigation', agent: 'auth', event: 'investigation.done', trigger: 'event', promises: [],
+  });
 
   const msgs = [
     msg('worker_event', { content: 'auth: working -> blocked', agent: 'auth' }),

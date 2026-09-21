@@ -10,7 +10,8 @@
 // transcript after the CEO's verbatim words, the context window is
 // assembled into model contents, and the loop calls the Model; every
 // function call it returns is executed (read_screen, run_cli, list_agents,
-// recall; prompt, send_keys, interrupt) through the Host, the responses are
+// recall; prompt, send_keys, interrupt, promise, note, investigate)
+// through the Host, the responses are
 // appended, and the loop repeats until the model answers with the JSON
 // reply of the answer contract. A turn has a step budget and a wall clock;
 // exceeding either, or any model error, returns ErrFallback so the
@@ -40,8 +41,18 @@
 // ceiling and decides nothing about the moment (the push queue does).
 // Announce turns are TriggerEvent, bounded by Config.EnrichTimeout,
 // declared only the read tools (the executor refuses prompt, send_keys,
-// interrupt and promise in any event turn), and yield to a waiting CEO
-// turn.
+// interrupt, promise and investigate in any event turn), and yield to a
+// waiting CEO turn.
+//
+// A KindInvestigation turn is the other event turn: it delivers a
+// finished background job (the investigate tool, docs/roles.md
+// "Investigations and explanations"). Its request carries the job's
+// question, the CEO's own words and the sub-agent's answer wrapped as
+// worker output, and its reply is the explanation the supervisor pushes
+// at the next pause. It takes the propose budget rather than the
+// announce one — the answer is what the CEO has been waiting for, not a
+// line racing a code sentence — and it coalesces only with a newer
+// delivery about the same agent, never with a worker event.
 //
 // # Promises
 //

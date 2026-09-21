@@ -527,3 +527,20 @@ test('push judgment: brain.push_decision rides on the voice.push it produced; a 
   assert.equal(steps[steps.length - 1].arrow.label, 'ask · deepseek/deepseek-flash · 1.2 s · 2 tool calls');
   assert.equal(steps[0].arrow.label, 'announce · fake-reflex · 5 ms', 'a step without a provider shows the model alone');
 });
+
+test('investigation events are Flock / CLI cards with their duration', () => {
+  const { rows } = buildRows([
+    ev('investigation.started', { id: 'inv-1', agent: 'auth', source: 'cli', backend: 'codex', question: 'why did the tests fail?' }, 100, 'supervisor', 'p1'),
+    ev('cli.run', { backend: 'codex', dur_ms: 2900, exit: 0, session: true, resumed: false }, 2900, 'cli'),
+    ev('investigation.done', { id: 'inv-1', agent: 'auth', backend: 'codex', dur_ms: 3000, bytes: 42, session_id_present: true }, 100, 'supervisor', 'p1'),
+    ev('investigation.cancelled', { id: 'inv-2', agent: 'docs', reason: 'stop', dur_ms: 800 }, 100, 'supervisor', 'p2'),
+  ]);
+  const c = cards(rows).filter((r) => r.type.startsWith('investigation.'));
+  assert.deepEqual(c.map((r) => r.lane), ['herdr', 'herdr', 'herdr'], 'the look runs in the flock, not in the brain');
+  assert.deepEqual(c.map((r) => r.title), ['investigation started', 'investigation done', 'investigation cancelled']);
+  assert.equal(c[1].durMs, 3000);
+  assert.equal(c[1].summary, 'inv-1 · auth · codex · 3.0 s · 42 bytes · session kept');
+  assert.equal(c[1].arrow.label, 'inv-1 · codex · 3.0 s');
+  assert.equal(c[2].summary, 'inv-2 · docs · 800 ms · stop');
+  assert.equal(cards(rows).find((r) => r.type === 'cli.run').summary, 'codex · 2900 ms · exit 0 · session kept');
+});

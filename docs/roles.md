@@ -197,7 +197,25 @@ says the shepherd must act on a prompt that is still open, and a line
 about a resolved block is dropped (`brain.push_stale`). The 10-minute
 silent briefing re-push and the plugin shim are gone too.
 
-**Not yet:** `investigate` (so nothing sets `pending` yet); the
-no-interruption rule (INTERRUPT is not downgraded while the voice is
-speaking); `blocked → blocked` detection. The order in which they land
-is in `docs/issues-2026-09-18.md`.
+Also in, from the investigations PR: **`investigate(agent, question,
+follow_up_of?)`** as an action tool (refused on a read-only turn), the
+background job with its ledger in the state file
+(`session.investigations`, the last 20, `investigation.started/done/
+cancelled/error`), one live job per agent (a newer one supersedes),
+`brain.investigate_max_s` as the only time limit, delivery as a
+`KindInvestigation` event turn pushed `idle` and tagged `answers_job`
+on `voice.push` (the code sentence "The look into <alias> is done; ask
+me what it found." with the brain off or failing), the `## Investigations`
+prompt section and `recall` over the same ledger, session resume for
+follow-ups (`cli.codex_resume_cmd` / `cli.claude_resume_cmd`, TTL
+`brain.investigate_session_ttl_s`; past it the follow-up starts cold
+with the previous answer prepended), and the stop procedure's
+**investigation phase** between `cancel_turn` and `interrupt`. `pending`
+now has something that sets it.
+
+**Not yet:** `source: worker` (asking the idle worker in its own pane —
+its finish would produce both the announce line and the delivery line
+for one event, which the one-push-per-event rule forbids; the ledger
+already carries the field); the no-interruption rule (INTERRUPT is not
+downgraded while the voice is speaking); `blocked → blocked` detection.
+The order in which they land is in `docs/issues-2026-09-18.md`.

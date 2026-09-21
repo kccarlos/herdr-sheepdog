@@ -34,6 +34,15 @@ type Pusher interface {
 	Push(text string, u voice.Urgency) error
 }
 
+// TagPusher is a Pusher that carries a tag onto the voice.push event it
+// logs — answers_job, the investigation whose answer this push is, which
+// the Conversation view links back to the acknowledgement. A Pusher
+// without it still speaks the line; only the tag is lost.
+type TagPusher interface {
+	Pusher
+	PushTagged(text string, u voice.Urgency, tags map[string]any) error
+}
+
 // Querier is the read-only CLI query tool of plan §3.5 (WP4). workspace
 // is the agent's working directory; the result is raw text the brain
 // reads through its run_cli tool. nil means there is no such tool.
@@ -68,6 +77,14 @@ type Config struct {
 	// agent a stop still interrupts it (default 30 s, docs/roles.md
 	// "Stop" phase 3).
 	CancelWindow time.Duration
+	// InvestigateMax is the sanity ceiling of one background
+	// investigation — the only time limit on its answer (default 600 s,
+	// docs/roles.md "Investigations and explanations").
+	InvestigateMax time.Duration
+	// InvestigateSessionTTL is how long a finished investigation's
+	// sub-agent session stays resumable; a follow-up past it starts cold
+	// with the previous answer prepended (default 1 h).
+	InvestigateSessionTTL time.Duration
 	// AnnounceWait is how long a block or a finish waits for the brain's
 	// announce turn before the daemon's own code sentence is spoken
 	// (default 2 s). Past it the brain's line is dropped, never spoken
@@ -108,6 +125,12 @@ func (c Config) withDefaults() Config {
 	if c.AnnounceWait == 0 {
 		c.AnnounceWait = 2 * time.Second
 	}
+	if c.InvestigateMax == 0 {
+		c.InvestigateMax = 600 * time.Second
+	}
+	if c.InvestigateSessionTTL == 0 {
+		c.InvestigateSessionTTL = time.Hour
+	}
 	if c.Now == nil {
 		c.Now = time.Now
 	}
@@ -123,10 +146,13 @@ type Supervisor struct {
 	store   *state.Store
 	herdr   Herdr
 	querier Querier
-	pusher  Pusher
-	log     logging.Logger
-	cfg     Config
-	brain   *brain.Brain // nil: code sentences only
+	// investigator is the querier's background half, when it has one
+	// (investigate.go); nil refuses investigations.
+	investigator Investigator
+	pusher       Pusher
+	log          logging.Logger
+	cfg          Config
+	brain        *brain.Brain // nil: code sentences only
 
 	mu            sync.Mutex
 	briefing      string               // cached sentence; "" means recompute
@@ -138,6 +164,9 @@ type Supervisor struct {
 	lastSubject   string               // pane most recently spoken about (last push subject or tool target)
 	mentioned     map[string]time.Time // pane -> when a spoken briefing last named it
 	utterance     *inflightUtterance   // the to_supervisor call in flight (stop.go phases 1 and 2)
+	// investigating is the one running background job per pane
+	// (investigate.go).
+	investigating map[string]*liveInvestigation
 }
 
 // interruptGrace is how long after a user cancel a pane's working -> done
@@ -160,7 +189,15 @@ func New(store *state.Store, h Herdr, querier Querier, pusher Pusher, log loggin
 		return nil, err
 	}
 	cfg.chattiness = level
-	s := &Supervisor{store: store, herdr: h, querier: querier, pusher: pusher, log: log, cfg: cfg, brain: cfg.Brain, interrupted: map[string]time.Time{}, mentioned: map[string]time.Time{}}
+	s := &Supervisor{store: store, herdr: h, querier: querier, pusher: pusher, log: log, cfg: cfg, brain: cfg.Brain,
+		interrupted: map[string]time.Time{}, mentioned: map[string]time.Time{}, investigating: map[string]*liveInvestigation{}}
+	// A querier that can keep a sub-agent session backs the investigate
+	// tool as well (investigate.go); one that cannot still answers
+	// run_cli.
+	if inv, ok := querier.(Investigator); ok {
+		s.investigator = inv
+	}
+	s.restoreInvestigations()
 	if s.brain != nil {
 		s.brain.SetHost(brainHost{s})
 		s.restorePromises()
@@ -176,6 +213,9 @@ func (s *Supervisor) Brain() *brain.Brain { return s.brain }
 func (s *Supervisor) Run(ctx context.Context) {
 	expiry := time.NewTicker(s.cfg.ExpiryTick)
 	defer expiry.Stop()
+	// The sub-agent of a running investigation dies with the daemon, so
+	// nothing is left claiming an agent's one live slot.
+	defer s.cancelInvestigations("shutdown")
 	for {
 		select {
 		case <-ctx.Done():
@@ -227,6 +267,11 @@ func (s *Supervisor) voiceConnected() bool {
 // spoken push about a pane makes that pane the current subject (what
 // "it" means in the next ask).
 func (s *Supervisor) push(paneID, text string, u voice.Urgency) {
+	s.pushTagged(paneID, text, u, nil)
+}
+
+// pushTagged is push with tags for the voice.push event (answers_job).
+func (s *Supervisor) pushTagged(paneID, text string, u voice.Urgency, tags map[string]any) {
 	if text == "" {
 		return
 	}
@@ -234,16 +279,30 @@ func (s *Supervisor) push(paneID, text string, u voice.Urgency) {
 		s.setSubject(paneID)
 	}
 	if s.pusher == nil || !s.voiceConnected() {
-		s.log.Log(logSource, "supervisor.push_skipped", paneID, map[string]any{"text": text, "urgency": u.String()})
+		payload := map[string]any{"text": text, "urgency": u.String()}
+		for k, v := range tags {
+			payload[k] = v
+		}
+		s.log.Log(logSource, "supervisor.push_skipped", paneID, payload)
 		return
 	}
-	if err := s.pusher.Push(text, u); err != nil {
+	if err := s.pushTo(text, u, tags); err != nil {
 		s.log.Log(logSource, "supervisor.push_error", paneID, map[string]any{"text": text, "urgency": u.String(), "error": err.Error()})
 		return
 	}
 	if s.brain != nil && u != voice.UrgencySilent {
 		s.brain.Pushed(s.aliasOf(paneID), text, u.String())
 	}
+}
+
+// pushTo hands the line to the pusher, with the tags when it takes them.
+func (s *Supervisor) pushTo(text string, u voice.Urgency, tags map[string]any) error {
+	if len(tags) > 0 {
+		if tp, ok := s.pusher.(TagPusher); ok {
+			return tp.PushTagged(text, u, tags)
+		}
+	}
+	return s.pusher.Push(text, u)
 }
 
 // pushIf pushes text at idle urgency when the current chattiness level
