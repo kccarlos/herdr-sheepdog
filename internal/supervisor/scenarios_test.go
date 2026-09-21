@@ -15,9 +15,9 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
 
-func twoAgents(t *testing.T) *harness {
+func twoAgents(t *testing.T, opts ...func(*Config)) *harness {
 	t.Helper()
-	h := newHarness(t)
+	h := newHarness(t, opts...)
 	h.addAgent("w5:p1", "w5", "codex", herdr.StateWorking)
 	h.addAgent("w6:p1", "w6", "claude", herdr.StateIdle)
 	return h

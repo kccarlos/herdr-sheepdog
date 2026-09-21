@@ -215,9 +215,29 @@ with the previous answer prepended), and the stop procedure's
 **investigation phase** between `cancel_turn` and `interrupt`. `pending`
 now has something that sets it.
 
+Also in, from the blocked → blocked PR: herdr reports a pane's status
+only on change, so a worker that answers one approval prompt and is
+already showing the next within herdr's own poll window never leaves
+`blocked` — no transition exists for the shepherd to hear about. Two
+mechanisms close the gap (`internal/supervisor/reprompt.go`), both
+raising a synthetic `blocked → blocked` transition through the normal
+`HandleTransition` path (`source: reprompt` or `reconcile`), so the new
+prompt gets its own pending action and is pushed exactly like a real
+block: the **post-answer poll**, which watches a pane for
+`supervisor.reprompt_poll_s` (1 s cadence, default 10 s) after keys go
+to it, whichever path sent them (the brain's `send_keys`, the
+bare-answer fast path, or confirm); and the **reconciler**, which sweeps
+every blocked pane with nothing pending and an already-answered (or
+never recorded) question on every periodic herdr snapshot and once at
+startup — this also covers a prompt that appeared while the daemon was
+down, which no poll ever ran for. Neither ever raises the same parsed
+prompt twice for a pane. `composeBriefing` already read the live pending
+action, so "asking …" is right after a reprompt with no change of its
+own.
+
 **Not yet:** `source: worker` (asking the idle worker in its own pane —
 its finish would produce both the announce line and the delivery line
 for one event, which the one-push-per-event rule forbids; the ledger
 already carries the field); the no-interruption rule (INTERRUPT is not
-downgraded while the voice is speaking); `blocked → blocked` detection.
+downgraded while the voice is speaking).
 The order in which they land is in `docs/issues-2026-09-18.md`.

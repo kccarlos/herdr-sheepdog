@@ -259,8 +259,10 @@ func (s *Supervisor) answerPending(ctx context.Context, p state.PendingAction, a
 	return s.answerWithKeys(ctx, p, keys, label, format, via)
 }
 
-// answerWithKeys sends keys to the pending prompt's pane and clears the
-// slot (pending.confirmed {via}). Caller holds s.mu.
+// answerWithKeys sends keys to the pending prompt's pane, clears the
+// slot (pending.confirmed {via}) and starts the post-answer poll
+// (reprompt.go): herdr may already be showing the next prompt within its
+// own poll window with no state change in between. Caller holds s.mu.
 func (s *Supervisor) answerWithKeys(ctx context.Context, p state.PendingAction, keys []string, label, format, via string) voice.ToolResult {
 	alias := s.aliasOf(p.PaneID)
 	if err := s.herdr.SendKeys(ctx, p.PaneID, keys...); err != nil {
@@ -283,6 +285,7 @@ func (s *Supervisor) answerWithKeys(ctx context.Context, p state.PendingAction, 
 	s.briefing = ""
 	s.lastSubject = p.PaneID
 	s.log.Log(logSource, "pending.confirmed", p.PaneID, map[string]any{"id": p.ID, "answer": label, "keys": keys, "via": via})
+	s.startReprompt(p.PaneID)
 	return voice.ToolResult{Spoken: fmt.Sprintf(format, label), Scheduling: voice.UrgencyInterrupt}
 }
 

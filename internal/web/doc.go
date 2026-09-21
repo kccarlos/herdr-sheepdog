@@ -9,8 +9,13 @@
 //   - GET /api/state, GET /api/agents, GET /api/events?n=: the state
 //     table, pending action, session and voice status as JSON.
 //   - POST /api/pending/cancel, POST /api/inject/{blocked,done,state,
-//     remove,utterance}: the debug page's controls, all routed through the
-//     same supervisor paths real events take (internal/inject).
+//     screen,remove,utterance}: the debug page's controls, all routed
+//     through the same supervisor paths real events take
+//     (internal/inject). /api/inject/screen replaces a synthetic pane's
+//     text without moving its state or touching the supervisor — the
+//     mock counterpart of a worker showing a new prompt with no herdr
+//     status change in between, for exercising the post-answer poll and
+//     the reconciler (docs/roles.md "blocked -> blocked is a block").
 //   - POST /api/herdr/event: the plugin-shim channel (WP7): the body is the
 //     HERDR_PLUGIN_EVENT_JSON object and status events are fed to the
 //     Watcher through Inject.

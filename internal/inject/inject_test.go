@@ -146,6 +146,41 @@ func TestBlockedRunsFullChain(t *testing.T) {
 	}
 }
 
+// TestScreenReplacesTextWithoutTransition: Screen swaps a synthetic
+// pane's text but never touches the supervisor — no pending action, no
+// push, and Read serves the new text — the mock counterpart of a worker
+// showing a new prompt with herdr's own status report unchanged
+// (docs/roles.md "blocked -> blocked is a block").
+func TestScreenReplacesTextWithoutTransition(t *testing.T) {
+	h := newHarness(t)
+	if _, err := h.inj.Blocked(context.Background(), BlockedRequest{PaneID: "fake:1", Alias: "auth", Screen: codexScreen(t)}); err != nil {
+		t.Fatal(err)
+	}
+	before := len(h.push.pushes)
+
+	row, err := h.inj.Screen("fake:1", "a different screen entirely")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row.State != herdr.StateBlocked {
+		t.Errorf("Screen moved the state: %+v", row)
+	}
+	if len(h.push.pushes) != before {
+		t.Errorf("Screen pushed something: %v", h.push.pushes)
+	}
+	read, err := h.herdr.Read(context.Background(), "fake:1", herdr.SourceRecentUnwrapped, 0)
+	if err != nil || read.Text != "a different screen entirely" {
+		t.Fatalf("read = %+v err=%v", read, err)
+	}
+
+	if _, err := h.inj.Screen("fake:1", ""); err == nil {
+		t.Error("empty screen accepted")
+	}
+	if _, err := h.inj.Screen("nope", "x"); !errors.Is(err, ErrNotSynthetic) {
+		t.Errorf("unknown pane: %v", err)
+	}
+}
+
 func TestInjectorRejectsBadRequests(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()

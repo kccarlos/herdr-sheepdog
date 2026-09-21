@@ -76,6 +76,7 @@ func Template() string {
 # recent_minutes = %[20]d   # "normal" announces a finish only for agents you dealt with this recently
 # promise_ttl_s = %[31]d   # how long "tell me when it's done" waits for its event before it expires silently
 # cancel_window_s = %[39]d   # how soon after an instruction a "stop" still interrupts the agent with Ctrl-C
+# reprompt_poll_s = %[42]d   # how long the post-answer poll watches a pane for a different prompt after keys go to it
 
 [brain]
 # enabled = %[21]t   # the stateful supervisor brain behind ask/propose; serve --brain=off overrides
@@ -113,5 +114,6 @@ func Template() string {
 		d.Brain.Provider,
 		d.Voice.Name, d.Supervisor.CancelWindowS,
 		d.Brain.InvestigateMaxS, d.Brain.InvestigateSessionTTLS,
+		d.Supervisor.RepromptPollS,
 	)
 }

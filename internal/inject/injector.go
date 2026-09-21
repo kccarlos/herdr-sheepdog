@@ -111,6 +111,25 @@ func (i *Injector) Done(ctx context.Context, paneID string) (state.Agent, error)
 	return i.SetState(ctx, paneID, herdr.StateDone, "")
 }
 
+// Screen replaces a synthetic pane's screen text without moving its
+// state or touching the supervisor: the mock's counterpart to a worker
+// showing a new prompt while herdr's own status report stays unchanged
+// (docs/roles.md "blocked -> blocked is a block") — the post-answer
+// poll or the reconciler is what is meant to notice it, not this call.
+func (i *Injector) Screen(paneID, screen string) (state.Agent, error) {
+	paneID = strings.TrimSpace(paneID)
+	if strings.TrimSpace(screen) == "" {
+		return state.Agent{}, errors.New("inject: screen is required")
+	}
+	row, ok := i.store.Get(paneID)
+	if !ok || !row.Synthetic || !i.herdr.IsSynthetic(paneID) {
+		return state.Agent{}, fmt.Errorf("%w: %s", ErrNotSynthetic, paneID)
+	}
+	i.herdr.SetScreen(paneID, "", screen, row.State)
+	i.log.Log("web", "web.inject", paneID, map[string]any{"kind": "screen", "screen_bytes": len(screen)})
+	return row, nil
+}
+
 // Remove closes a synthetic pane: the supervisor sees a Closed transition
 // and the row and screen are dropped.
 func (i *Injector) Remove(ctx context.Context, paneID string) error {
