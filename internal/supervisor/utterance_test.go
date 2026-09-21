@@ -348,7 +348,10 @@ func TestUtteranceWithoutABrainReportsStatus(t *testing.T) {
 	if got := h.promptRequests(); len(got) != 0 {
 		t.Fatalf("something was sent with no brain: %v", got)
 	}
-	if res := h.say("what is it doing"); res.Spoken != want {
+	// Within supervisor.repeat_window_s the second identical roster is
+	// flagged unchanged.
+	want2 := "No change since I last checked: " + want
+	if res := h.say("what is it doing"); res.Spoken != want2 {
 		t.Fatalf("question = %+v", res)
 	}
 	// The agents it named count as dealt with, like a spoken briefing.

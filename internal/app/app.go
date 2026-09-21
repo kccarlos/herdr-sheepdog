@@ -264,6 +264,7 @@ func (a *App) wire() error {
 		RepromptPoll:     time.Duration(cfg.Supervisor.RepromptPollS) * time.Second,
 		SnapshotInterval: time.Duration(cfg.SnapshotIntervalS) * time.Second,
 		AnnounceWait:     time.Duration(cfg.Brain.AnnounceWaitS) * time.Second,
+		RepeatWindow:     time.Duration(cfg.Supervisor.RepeatWindowS) * time.Second,
 
 		InvestigateMax:        time.Duration(cfg.Brain.InvestigateMaxS) * time.Second,
 		InvestigateSessionTTL: time.Duration(cfg.Brain.InvestigateSessionTTLS) * time.Second,

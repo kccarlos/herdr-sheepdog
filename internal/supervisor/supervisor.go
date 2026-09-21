@@ -107,6 +107,13 @@ type Config struct {
 	// (default 2 s). Past it the brain's line is dropped, never spoken
 	// after the sentence. Negative waits for the turn's own timeout.
 	AnnounceWait time.Duration
+	// RepeatWindow is how long an unchanged roster sentence counts as
+	// "already reported" (default 60 s, supervisor.repeat_window_s,
+	// docs/issues-2026-09-18.md "Smaller items"): a status question
+	// inside it gets a context note the brain can use to say "no change
+	// since I last checked" instead of repeating the roster; with no
+	// brain, the code fallback sentence itself is prefixed that way.
+	RepeatWindow time.Duration
 	// Brain, when set, is the one model that decides and phrases
 	// (docs/roles.md); without it the daemon speaks code sentences and
 	// sends nothing. New attaches the Supervisor as its Host.
@@ -147,6 +154,9 @@ func (c Config) withDefaults() Config {
 	}
 	if c.AnnounceWait == 0 {
 		c.AnnounceWait = 2 * time.Second
+	}
+	if c.RepeatWindow == 0 {
+		c.RepeatWindow = 60 * time.Second
 	}
 	if c.InvestigateMax == 0 {
 		c.InvestigateMax = 600 * time.Second
@@ -191,6 +201,21 @@ type Supervisor struct {
 	// investigating is the one running background job per pane
 	// (investigate.go).
 	investigating map[string]*liveInvestigation
+
+	// startedAt is when this run's Supervisor was built: openPromises
+	// created before it are from an earlier run (promises.go,
+	// announceStartupPromises).
+	startedAt time.Time
+	// startupAnnounced guards announceStartupPromises: it runs once, the
+	// first time SetVoiceConnected(true) fires.
+	startupAnnounced bool
+	// lastBriefingText / lastBriefingAt are the roster sentence last
+	// delivered to the shepherd in a KindUtterance request, and when
+	// (briefing.go's briefingRepeat, supervisor.repeat_window_s); reset
+	// on any worker transition, pending change, promise change or
+	// investigation event (invalidateBriefing and its callers).
+	lastBriefingText string
+	lastBriefingAt   time.Time
 }
 
 // interruptGrace is how long after a user cancel a pane's working -> done
@@ -213,7 +238,7 @@ func New(store *state.Store, h Herdr, querier Querier, pusher Pusher, log loggin
 		return nil, err
 	}
 	cfg.chattiness = level
-	s := &Supervisor{store: store, herdr: h, querier: querier, pusher: pusher, log: log, cfg: cfg, brain: cfg.Brain,
+	s := &Supervisor{store: store, herdr: h, querier: querier, pusher: pusher, log: log, cfg: cfg, brain: cfg.Brain, startedAt: cfg.Now(),
 		interrupted: map[string]time.Time{}, mentioned: map[string]time.Time{}, lastPrompt: map[string]string{}, investigating: map[string]*liveInvestigation{}}
 	// A querier that can keep a sub-agent session backs the investigate
 	// tool as well (investigate.go); one that cannot still answers
@@ -262,8 +287,21 @@ func (s *Supervisor) Run(ctx context.Context) {
 
 // SetVoiceConnected records whether a voice session is attached; pushes
 // are skipped (and logged as supervisor.push_skipped) while it is not.
+// The first time it turns on — a live connect event, or at once for
+// --voice=off (docs/roles.md "Status") — it also runs
+// announceStartupPromises, once per daemon run.
 func (s *Supervisor) SetVoiceConnected(connected bool) {
 	_ = s.store.UpdateSession(func(ss *state.Session) { ss.VoiceConnected = connected })
+	if !connected {
+		return
+	}
+	s.mu.Lock()
+	already := s.startupAnnounced
+	s.startupAnnounced = true
+	s.mu.Unlock()
+	if !already {
+		s.announceStartupPromises()
+	}
 }
 
 // OnVoiceEvent feeds voice session events: connection status maintains

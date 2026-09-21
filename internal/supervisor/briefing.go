@@ -48,8 +48,37 @@ func (s *Supervisor) briefingText() (string, []string) {
 // invalidateBriefing forces the next briefing to be recomputed.
 func (s *Supervisor) invalidateBriefing() {
 	s.mu.Lock()
-	s.briefing = ""
+	s.invalidateBriefingLocked()
 	s.mu.Unlock()
+}
+
+// invalidateBriefingLocked is invalidateBriefing for a caller that
+// already holds s.mu. Clearing lastBriefingText alongside the cache
+// means a worker transition, a pending change or a promise change never
+// leaves a stale "delivered" mark behind: supervisor.repeat_window_s
+// (briefingRepeat) only ever compares against wording the state that
+// produced it has not since moved on from.
+func (s *Supervisor) invalidateBriefingLocked() {
+	s.briefing = ""
+	s.lastBriefingText, s.lastBriefingAt = "", time.Time{}
+}
+
+// briefingRepeat reports how long ago text was last delivered to the
+// shepherd in a KindUtterance request, when that was within
+// Config.RepeatWindow (supervisor.repeat_window_s), and records this
+// call as the new "last delivered" mark either way — so the next
+// question in turn has something to compare against.
+func (s *Supervisor) briefingRepeat(text string) (time.Duration, bool) {
+	now := s.cfg.Now()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var age time.Duration
+	repeat := s.lastBriefingText != "" && s.lastBriefingText == text && now.Sub(s.lastBriefingAt) <= s.cfg.RepeatWindow
+	if repeat {
+		age = now.Sub(s.lastBriefingAt)
+	}
+	s.lastBriefingText, s.lastBriefingAt = text, now
+	return age, repeat
 }
 
 // stateRank orders agents for the ear: blocked first, then working, then

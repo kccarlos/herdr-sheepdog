@@ -252,9 +252,26 @@ the third, checked by tool name, since the shepherd is always owed it
 at once. `voice.push` gains `scheduling_sent` beside the requested
 `urgency`; `/debug` marks a downgraded push or tool result "deferred".
 
+Also in, from the polish PR: a promise made before the daemon's current
+run (`state.Promise.CarriedOver`, `state.Session.Promises`) is spoken
+once, at startup, as "Still watching for: …" (up to three named, the
+rest tallied), pushed `idle` and tagged `startup_promises`, logged
+`promise.carried_over {ids}` (`internal/supervisor/promises.go`'s
+`announceStartupPromises`, run once from `SetVoiceConnected(true)` — the
+first live connect, or at once for `--voice=off`); it is then left out
+of the briefing trailer but still listed in the brain's ledger section,
+noted "(from an earlier run)", and still kept normally at its matching
+event. And **supervisor.repeat_window_s** (default 60 s): a `KindUtterance`
+request whose roster sentence is byte-identical to the one last
+delivered within the window carries a note the brain can act on ("say
+there has been no change since you last checked"), logged
+`supervisor.briefing_repeat`; with no brain, the code fallback sentence
+is itself prefixed "No change since I last checked: …". The "delivered"
+mark resets on any worker transition, pending change, promise change or
+investigation event, alongside the existing briefing cache invalidation.
+
 **Not yet:** `source: worker` (asking the idle worker in its own pane —
 its finish would produce both the announce line and the delivery line
 for one event, which the one-push-per-event rule forbids; the ledger
-already carries the field); promise-at-startup and the "no change since
-I last checked" briefing repeat.
+already carries the field).
 The order in which they land is in `docs/issues-2026-09-18.md`.

@@ -97,8 +97,13 @@ tool result to WHEN_IDLE while it is true, at send time (`peekPush`,
 `execTool`), except a due promise, a decision on a brand new block
 (`due_promise`/`needs_user` tags from the supervisor's announce path) or
 `stop()`; `voice.push`/`voice.tool_result` gain `scheduling_sent` and
-`/debug` marks a downgraded one "deferred". Still open from that list:
-promise-at-startup and the "no change" briefing (6). Names from
+`/debug` marks a downgraded one "deferred". PR 6 (polish) closed the last
+item on that list: a promise from an earlier daemon run is announced
+once at startup ("Still watching for: …", `promise.carried_over`) and
+left out of the briefing trailer afterwards, and a status question whose
+roster has not changed within `supervisor.repeat_window_s` (default
+60 s) gets a "no change since I last checked" note instead of the
+roster repeated in full. Names from
 here on: shepherd (operator), the dog (voice + brain), the flock
 (workers); `docs/roles.md` is the contract and maps the old CEO / SVP /
 assistant terms still present in code.

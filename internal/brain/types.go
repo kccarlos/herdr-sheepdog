@@ -110,6 +110,12 @@ type Request struct {
 	// Briefing is the supervisor's roster sentence (composeBriefing) for
 	// a CEO turn, so a status question needs no tool call.
 	Briefing string
+	// RosterUnchangedFor is set (a KindUtterance turn only) when Briefing
+	// is byte-identical to the one last delivered, within
+	// supervisor.repeat_window_s: requestText adds a note so the brain
+	// can say "no change since I last checked" itself rather than
+	// repeat the roster (docs/issues-2026-09-18.md "Smaller items").
+	RosterUnchangedFor time.Duration
 	// Stopped is what the stop procedure stopped, for a KindStop turn
 	// ("the instruction to auth was interrupted").
 	Stopped string
@@ -211,6 +217,11 @@ type PromiseInfo struct {
 	// Due, when set, is when the CEO wanted it by: a promise kept past
 	// it interrupts.
 	Due *time.Time `json:"due,omitempty"`
+	// CarriedOver marks a promise made before the daemon's current run,
+	// announced once at startup: the ledger section still lists it
+	// (renderLedger notes "from an earlier run"), but the briefing
+	// trailer does not repeat it.
+	CarriedOver bool `json:"carried_over,omitempty"`
 }
 
 // Investigation statuses (state.Investigation mirrors them; the brain

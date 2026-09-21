@@ -3,6 +3,7 @@ package supervisor
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
@@ -33,7 +34,7 @@ func (s *Supervisor) createPromise(paneID string, req brain.PromiseRequest) (sta
 	if err := s.store.UpdateSession(func(ss *state.Session) { ss.Promises = append(ss.Promises, p) }); err != nil {
 		return state.Promise{}, err
 	}
-	s.briefing = ""
+	s.invalidateBriefingLocked()
 	payload := map[string]any{"id": p.ID, "text": p.Text, "agent": aliasOr(p.Alias), "event": p.Event, "turn": p.CreatedTurn}
 	if p.Due != nil {
 		payload["due"] = *p.Due
@@ -90,7 +91,7 @@ func (s *Supervisor) resolvePromise(id, status string) (state.Promise, bool) {
 		s.log.Log(logSource, "supervisor.state_error", "", map[string]any{"error": err.Error()})
 	}
 	if ok {
-		s.briefing = ""
+		s.invalidateBriefingLocked()
 		if s.brain != nil {
 			s.brain.PromiseEvent(promiseInfo(out))
 		}
@@ -206,18 +207,21 @@ func (s *Supervisor) restorePromises() {
 
 // promiseInfo converts a record for the brain.
 func promiseInfo(p state.Promise) brain.PromiseInfo {
-	return brain.PromiseInfo{ID: p.ID, Text: p.Text, Agent: p.Alias, Event: p.Event, Status: p.Status, CreatedTurn: p.CreatedTurn, CreatedAt: p.CreatedAt, Due: p.Due}
+	return brain.PromiseInfo{ID: p.ID, Text: p.Text, Agent: p.Alias, Event: p.Event, Status: p.Status, CreatedTurn: p.CreatedTurn, CreatedAt: p.CreatedAt, Due: p.Due, CarriedOver: p.CarriedOver}
 }
 
 // promiseTrailer is the briefing's reminder of open promises: "You asked
-// me to tell you when auth finishes." (cache-only: no model).
+// me to tell you when auth finishes." (cache-only: no model). A promise
+// carried over from an earlier run was already announced once at
+// startup, so it is left out here (announceStartupPromises); the brain
+// still sees it in the ledger section, noted "(from an earlier run)".
 func promiseTrailer(open []state.Promise) string {
-	if len(open) == 0 {
-		return ""
-	}
 	seen := map[string]bool{}
 	var parts []string
 	for _, p := range open {
+		if p.CarriedOver {
+			continue
+		}
 		c := promiseCondition(p)
 		if seen[c] {
 			continue
@@ -225,7 +229,71 @@ func promiseTrailer(open []state.Promise) string {
 		seen[c] = true
 		parts = append(parts, c)
 	}
+	if len(parts) == 0 {
+		return ""
+	}
 	return "You asked me to tell you " + joinSpoken(parts) + "."
+}
+
+// announceStartupPromises speaks, once per daemon run, the open promises
+// an earlier run left behind (docs/roles.md "Status",
+// docs/issues-2026-09-18.md "Smaller items"): this run's transcript has
+// no memory of making them, so the brain's announce turns cannot be
+// trusted to bring them up, and the shepherd is still owed an answer.
+// Called once, the first time SetVoiceConnected(true) fires (a live
+// connect, or at once for --voice=off). No model is involved: the
+// sentence is composed in code, like every other fallback the daemon can
+// say on its own. Marked carried_over (promise.carried_over) so the
+// briefing trailer never repeats them and they are never announced
+// again, even across another restart.
+func (s *Supervisor) announceStartupPromises() {
+	var carried []state.Promise
+	for _, p := range s.openPromises() {
+		if !p.CarriedOver && p.CreatedAt.Before(s.startedAt) {
+			carried = append(carried, p)
+		}
+	}
+	if len(carried) == 0 {
+		return
+	}
+	ids := make([]string, 0, len(carried))
+	for _, p := range carried {
+		ids = append(ids, p.ID)
+	}
+	if err := s.store.UpdateSession(func(ss *state.Session) {
+		for i := range ss.Promises {
+			for _, id := range ids {
+				if ss.Promises[i].ID == id {
+					ss.Promises[i].CarriedOver = true
+				}
+			}
+		}
+	}); err != nil {
+		s.log.Log(logSource, "supervisor.state_error", "", map[string]any{"error": err.Error(), "via": "carried_over"})
+	}
+	s.invalidateBriefing()
+	s.log.Log(logSource, "promise.carried_over", "", map[string]any{"ids": ids})
+	s.pushTagged("", startupPromiseSentence(carried), voice.UrgencyIdle, map[string]any{"startup_promises": true})
+}
+
+// startupPromiseSentence is announceStartupPromises' one line: "Still
+// watching for: <text> (<alias>), <text> (<alias>), and <text>
+// (<alias>), and N more." — up to three named, the rest tallied. promises
+// is oldest first (openPromises).
+func startupPromiseSentence(promises []state.Promise) string {
+	n := len(promises)
+	if n > briefingListMax {
+		n = briefingListMax
+	}
+	parts := make([]string, 0, n)
+	for _, p := range promises[:n] {
+		parts = append(parts, p.Text+" ("+aliasOr(p.Alias)+")")
+	}
+	sentence := "Still watching for: " + joinSpoken(parts)
+	if rest := len(promises) - n; rest > 0 {
+		sentence += fmt.Sprintf(", and %d more", rest)
+	}
+	return sentence + "."
 }
 
 // promiseCondition is "when auth finishes" for the ear.

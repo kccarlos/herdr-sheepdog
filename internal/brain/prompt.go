@@ -230,6 +230,9 @@ func renderLedger(agents []AgentInfo, notes []string, promises []PromiseInfo, no
 		if !p.CreatedAt.IsZero() {
 			fmt.Fprintf(&b, ", made %s ago", ago(now.Sub(p.CreatedAt)))
 		}
+		if p.CarriedOver {
+			b.WriteString(" (from an earlier run)")
+		}
 		b.WriteString("\n")
 	}
 	if open > 0 {

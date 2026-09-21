@@ -2,6 +2,7 @@ package supervisor
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -444,5 +445,184 @@ func TestPromiseWithReflexModel(t *testing.T) {
 	res = h.call(ToolPropose, map[string]any{"instruction": ""})
 	if res.Spoken != "I will tell you when auth finishes." || len(h.promptRequests()) != 1 {
 		t.Errorf("bare promise = %+v (prompts %v)", res, h.promptRequests())
+	}
+}
+
+// restartOver builds a second Supervisor over h's own state file, as if
+// the daemon had just restarted: the same herdr client and fake server
+// (so a pane h already registered still reads), a fresh log and pusher.
+// cfg.Now is always h.clock.Now; set the rest (Brain, Chattiness, …) as
+// a test needs.
+func restartOver(t *testing.T, h *harness, cfg Config) (*Supervisor, *recLog, *fakePusher) {
+	t.Helper()
+	store, err := state.Open(filepath.Join(h.dir, "state.json"), state.Options{Aliases: map[string]string{"w5:p1": "auth", "w6:p1": "docs"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	log := &recLog{}
+	pusher := &fakePusher{}
+	cfg.Now = h.clock.Now
+	sup, err := New(store, h.client, nil, pusher, log, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return sup, log, pusher
+}
+
+// TestStartupPromisesAnnounced covers announceStartupPromises (the
+// "Smaller items" of docs/issues-2026-09-18.md): 0 old promises say
+// nothing; 1 or 4 are spoken once as "Still watching for: …" (up to
+// three named, the rest tallied), pushed idle and tagged
+// startup_promises, logged as promise.carried_over, flagged
+// carried_over in the state file, and never announced again on a second
+// start over the same file.
+func TestStartupPromisesAnnounced(t *testing.T) {
+	for _, n := range []int{0, 1, 4} {
+		t.Run(fmt.Sprintf("%d old promises", n), func(t *testing.T) {
+			h := newHarness(t)
+			h.addAgent("w5:p1", "auth", "codex", herdr.StateIdle)
+			for i := 0; i < n; i++ {
+				if _, err := h.sup.createPromise("w5:p1", brain.PromiseRequest{Text: fmt.Sprintf("thing %d is done", i), Event: brain.PromiseEventDone}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			h.clock.Advance(time.Hour) // the next daemon run starts later
+
+			sup, log, pusher := restartOver(t, h, Config{})
+			sup.SetVoiceConnected(true)
+
+			carried := log.ofType("promise.carried_over")
+			pushes := pusher.all()
+			if n == 0 {
+				if len(carried) != 0 || len(pushes) != 0 {
+					t.Fatalf("0 promises: carried=%v pushes=%v", carried, pushes)
+				}
+				return
+			}
+			if len(carried) != 1 {
+				t.Fatalf("promise.carried_over = %d, want 1", len(carried))
+			}
+			ids, _ := payload(carried[0])["ids"].([]string)
+			if len(ids) != n {
+				t.Errorf("carried ids = %v, want %d", ids, n)
+			}
+			if len(pushes) != 1 || pushes[0].Urgency != voice.UrgencyIdle {
+				t.Fatalf("pushes = %+v", pushes)
+			}
+			if !strings.HasPrefix(pushes[0].Text, "Still watching for: ") {
+				t.Errorf("text = %q", pushes[0].Text)
+			}
+			if tags := pusher.tagsOf(0); tags["startup_promises"] != true {
+				t.Errorf("tags = %v", tags)
+			}
+			named := n
+			if named > briefingListMax {
+				named = briefingListMax
+			}
+			for i := 0; i < named; i++ {
+				if !strings.Contains(pushes[0].Text, fmt.Sprintf("thing %d is done (auth)", i)) {
+					t.Errorf("text missing item %d: %q", i, pushes[0].Text)
+				}
+			}
+			if n > briefingListMax {
+				want := fmt.Sprintf("and %d more.", n-briefingListMax)
+				if !strings.HasSuffix(pushes[0].Text, want) {
+					t.Errorf("text = %q, want suffix %q", pushes[0].Text, want)
+				}
+			}
+			for _, p := range store2Promises(t, h) {
+				if !p.CarriedOver {
+					t.Errorf("promise %s not flagged carried_over", p.ID)
+				}
+			}
+
+			// A second daemon over the same file never announces again.
+			sup2, log2, pusher2 := restartOver(t, h, Config{})
+			sup2.SetVoiceConnected(true)
+			if len(pusher2.all()) != 0 || log2.count("promise.carried_over") != 0 {
+				t.Errorf("re-announced on restart: pushes=%v carried=%d", pusher2.all(), log2.count("promise.carried_over"))
+			}
+			if open := sup2.openPromises(); len(open) != n {
+				t.Errorf("open after restart = %d, want %d", len(open), n)
+			}
+		})
+	}
+}
+
+// store2Promises reads the promises straight off h's state file (a fresh
+// state.Open, so it reflects a later Supervisor's writes rather than h's
+// own in-memory copy).
+func store2Promises(t *testing.T, h *harness) []state.Promise {
+	t.Helper()
+	store, err := state.Open(filepath.Join(h.dir, "state.json"), state.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return store.Snapshot().Session.Promises
+}
+
+// A carried-over promise is still kept normally at its matching event
+// (docs/roles.md "Promises"): the startup announcement only replaces the
+// briefing trailer, not the promise mechanism.
+func TestStartupPromiseStillKeptAtItsEvent(t *testing.T) {
+	h := newHarness(t, func(c *Config) { c.Chattiness = string(Quiet) })
+	h.addAgent("w5:p1", "auth", "codex", herdr.StateIdle)
+	p, err := h.sup.createPromise("w5:p1", brain.PromiseRequest{Text: "tell me when it's done", Event: brain.PromiseEventDone})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.clock.Advance(time.Hour)
+
+	sup, log, _ := restartOver(t, h, Config{Chattiness: string(Quiet)})
+	sup.SetVoiceConnected(true)
+	if n := log.count("promise.carried_over"); n != 1 {
+		t.Fatalf("promise.carried_over = %d, want 1", n)
+	}
+
+	h.srv.SetScreen("w5:p1", fixture(t, "codex-after-approval.screen.txt"))
+	sup.HandleTransition(context.Background(), herdr.Transition{PaneID: "w5:p1", From: herdr.StateIdle, To: herdr.StateWorking, At: h.clock.Now(), Agent: "codex"})
+	sup.HandleTransition(context.Background(), herdr.Transition{PaneID: "w5:p1", From: herdr.StateWorking, To: herdr.StateDone, At: h.clock.Now(), Agent: "codex"})
+
+	kept := log.ofType("promise.kept")
+	if len(kept) != 1 || payload(kept[0])["id"] != p.ID {
+		t.Errorf("promise.kept = %v", kept)
+	}
+	if all := store2Promises(t, h); len(all) != 1 || all[0].Status != state.PromiseKept || !all[0].CarriedOver {
+		t.Errorf("record = %+v", all)
+	}
+}
+
+// The carried-over promise is left out of the briefing trailer (the
+// startup announcement already said it) but still listed in the brain's
+// ledger section, noted "(from an earlier run)".
+func TestCarriedOverPromiseInLedgerNotBriefing(t *testing.T) {
+	h := newHarness(t)
+	h.addAgent("w5:p1", "auth", "codex", herdr.StateIdle)
+	if _, err := h.sup.createPromise("w5:p1", brain.PromiseRequest{Text: "let me know when it's done", Event: brain.PromiseEventDone}); err != nil {
+		t.Fatal(err)
+	}
+	h.clock.Advance(time.Hour)
+
+	m := braintest.NewModel(braintest.Step{Text: braintest.Reply("auth is idle.", "")})
+	b, err := brain.New(brain.Config{DataDir: h.dir, RunID: "run2"}, m, &recLog{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = b.Close() })
+	sup, _, _ := restartOver(t, h, Config{Brain: b})
+	sup.SetVoiceConnected(true)
+
+	res, _ := sup.Briefing(context.Background())
+	if strings.Contains(res.Spoken, "let me know") {
+		t.Errorf("briefing still mentions the carried-over promise: %q", res.Spoken)
+	}
+
+	if _, err := sup.Handler()(context.Background(), voice.ToolCall{ID: "c", Name: ToolToSupervisor, Args: map[string]any{"text": "what's going on"}}); err != nil {
+		t.Fatal(err)
+	}
+	calls := m.Calls()
+	sys := calls[len(calls)-1].System()
+	if !strings.Contains(sys, `"let me know when it's done": when auth finishes`) || !strings.Contains(sys, "(from an earlier run)") {
+		t.Errorf("ledger:\n%s", sys)
 	}
 }
