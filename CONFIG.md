@@ -112,11 +112,16 @@ finishes on the pair it started with.
 
 ## `[web]`
 
-The HTTP server (plan §3.8); binds to `127.0.0.1` only.
+The HTTP server (plan §3.8). Binds to `web.bind:web.port`, loopback
+only by default; a phone on the LAN or over Tailscale can reach it once
+`web.bind` is a non-loopback address and `web.token` is set (README
+"From your phone").
 
 | Key | Env override | Default | Meaning |
 |---|---|---|---|
-| `web.port` | `SHEEPDOG_WEB_PORT` | `7777` | TCP port on localhost. `0` with an empty config picks a free port (used by tests). |
+| `web.bind` | `SHEEPDOG_WEB_BIND` | `127.0.0.1` | The listen address. `127.0.0.1` (or `localhost`, `::1`) is loopback: reachable only from this machine, and `web.token` is not required. Any other address — a LAN IP, a Tailscale IP, or `0.0.0.0` for every interface — needs `web.token` set; without one the daemon refuses to start (exit 2, "web.token is required when web.bind is not loopback"). With a non-loopback bind, `daemon.start`'s `urls` and the startup banner list every non-loopback IPv4 address of the host, so you can read the LAN URL off the log instead of guessing which interface it is. |
+| `web.port` | `SHEEPDOG_WEB_PORT` | `7777` | TCP port. `0` with an empty config picks a free port (used by tests). |
+| `web.token` | `SHEEPDOG_WEB_TOKEN` | `""` (unset) | The bearer token every request to `/ws`, `/events` and `/api/*` must present once this is set: `Authorization: Bearer <token>`, `?token=<token>` for `/ws` and `/events` (a browser cannot set a header on a WebSocket or EventSource request), or the cookie `POST /api/login {"token": "…"}` sets so it is typed once — `/voice` and `/debug` show an inline prompt and do this themselves the first time a request answers 401. Missing or wrong: `401 {"error":"unauthorized"}`, logged as `web.unauthorized {path, remote}` (never the token itself). The static pages (`/`, `/voice`, `/debug`, assets) and `GET /api/hello` stay public — they hold no data. Never logged: `config show` prints `set`/`unset`, like the LLM keys. Like `DEEPSEEK_API_KEY`, normally left out of the TOML file and set via the environment or `--env-file` so it never sits in a checked-in file; an empty env value does not clear a file value. |
 | `web.dev` | *(flag only: `serve --dev`)* | `false` | Turns on developer-only routes: `/testdata/<name>.wav` serves the audio fixtures so `/voice?src=file` can use one as a fake microphone. |
 | `web.dev_testdata_dir` | *(TOML only)* | `testdata/audio` (relative to the working directory) | Where `/testdata/` serves from when `web.dev` is on and this is empty. |
 

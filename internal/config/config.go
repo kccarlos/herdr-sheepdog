@@ -14,6 +14,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -238,10 +239,24 @@ type CLI struct {
 	MaxOutputKB int `toml:"max_output_kb"`
 }
 
-// Web configures the HTTP server (plan §3.8). v1 binds to 127.0.0.1 only.
+// Web configures the HTTP server (plan §3.8). It binds to Bind:Port,
+// loopback only by default; a non-loopback Bind (a LAN or Tailscale
+// address, or 0.0.0.0 for every interface) is how a phone reaches the
+// daemon, and needs Token set (app.Build refuses to start without one —
+// see IsLoopback and CONFIG.md "web.token").
 type Web struct {
-	// Port is the TCP port on localhost (default 7777).
+	// Bind is the listen address (default 127.0.0.1).
+	Bind string `toml:"bind"`
+	// Port is the TCP port (default 7777).
 	Port int `toml:"port"`
+	// Token, when non-empty, is the bearer token every request to /ws,
+	// /events and /api/* must present: Authorization: Bearer <token>,
+	// ?token=<token> for /ws and /events (a browser cannot set a header
+	// on a WebSocket or EventSource request), or the cookie POST
+	// /api/login sets so it is typed once. Required when Bind is not
+	// loopback. Never logged: config show prints set/unset, like the LLM
+	// keys.
+	Token string `toml:"token"`
 	// Dev enables developer-only routes: /testdata/<name>.wav serves the
 	// audio fixtures so the /voice page can use one as a fake microphone
 	// (WP6 file-source test mode). Off by default; `serve --dev` sets it.
@@ -251,12 +266,26 @@ type Web struct {
 	DevTestdataDir string `toml:"dev_testdata_dir"`
 }
 
+// IsLoopback reports whether Bind reaches only this machine (127.0.0.1,
+// ::1, or the hostname "localhost") — the one case that needs no Token,
+// since nothing off-host can reach it.
+func (w Web) IsLoopback() bool {
+	if w.Bind == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(w.Bind)
+	return ip != nil && ip.IsLoopback()
+}
+
 // DefaultDevTestdataDir is the directory /testdata/ serves in dev mode
 // when web.dev_testdata_dir is empty: the repo's audio fixtures.
 const DefaultDevTestdataDir = "testdata/audio"
 
 // DefaultWebPort is the port the web server listens on by default.
 const DefaultWebPort = 7777
+
+// DefaultWebBind is the web.bind built-in: loopback only.
+const DefaultWebBind = "127.0.0.1"
 
 // Gemini configures the voice session (plan §6).
 type Gemini struct {
@@ -311,7 +340,7 @@ func Default() Config {
 		PendingTTLS:       120,
 		Gemini:            Gemini{Model: "gemini-3.8-live", Voice: "Puck", StallAfterS: 10},
 		DeepSeek:          DeepSeek{BaseURL: DefaultDeepSeekBaseURL, Thinking: true, ReasoningEffort: DefaultDeepSeekReasoningEffort},
-		Web:               Web{Port: DefaultWebPort},
+		Web:               Web{Bind: DefaultWebBind, Port: DefaultWebPort},
 		CLI:               defaultCLI(),
 		Voice:             Voice{Name: DefaultVoiceName},
 		Supervisor:        Supervisor{Chattiness: DefaultChattiness, RecentMinutes: 30, PromiseTTLS: 7200, CancelWindowS: 30, RepromptPollS: 10, RepeatWindowS: 60},
@@ -516,7 +545,7 @@ func validateBrain(b Brain) error {
 //	SHEEPDOG_GEMINI_VOICE, SHEEPDOG_GEMINI_STALL_AFTER_S,
 //	DEEPSEEK_API_KEY, SHEEPDOG_DEEPSEEK_BASE_URL, SHEEPDOG_DEEPSEEK_THINKING,
 //	SHEEPDOG_DEEPSEEK_REASONING_EFFORT,
-//	SHEEPDOG_PENDING_TTL_S, SHEEPDOG_WEB_PORT,
+//	SHEEPDOG_PENDING_TTL_S, SHEEPDOG_WEB_BIND, SHEEPDOG_WEB_PORT, SHEEPDOG_WEB_TOKEN,
 //	SHEEPDOG_CLI_PREFER, SHEEPDOG_CLI_CODEX_BIN, SHEEPDOG_CLI_CLAUDE_BIN,
 //	SHEEPDOG_CLI_CLAUDE_MODEL, SHEEPDOG_CLI_CODEX_REASONING,
 //	SHEEPDOG_CLI_TIMEOUT_S, SHEEPDOG_CLI_MAX_OUTPUT_KB,
@@ -595,12 +624,20 @@ func applyEnv(cfg *Config, lookup func(string) (string, bool)) error {
 		}
 		cfg.PendingTTLS = n
 	}
+	if v, ok := lookup("SHEEPDOG_WEB_BIND"); ok {
+		cfg.Web.Bind = v
+	}
 	if v, ok := lookup("SHEEPDOG_WEB_PORT"); ok {
 		n, err := strconv.Atoi(v)
 		if err != nil || n < 0 || n > 65535 {
 			return fmt.Errorf("config: SHEEPDOG_WEB_PORT=%q: want a port number", v)
 		}
 		cfg.Web.Port = n
+	}
+	// Like DEEPSEEK_API_KEY: an empty env value does not clear a file
+	// value (never logged).
+	if v, ok := lookup("SHEEPDOG_WEB_TOKEN"); ok && v != "" {
+		cfg.Web.Token = v
 	}
 	if err := applyCLIEnv(cfg, lookup); err != nil {
 		return err
@@ -785,8 +822,8 @@ func geminiKeysFromEnv(lookup func(string) (string, bool)) []string {
 // counts (or set/unset) only; keep it that way when secret-bearing
 // fields are added.
 func (c Config) String() string {
-	return fmt.Sprintf("data_dir=%s herdr.socket=%s state.path=%s state.full_fsync=%t debounce_ms=%d snapshot_interval_s=%d pending_ttl_s=%d aliases=%d gemini.model=%s gemini.voice=%s gemini.stall_after_s=%d gemini.api_keys=%d voice.name=%s deepseek.api_key=%s deepseek.base_url=%s deepseek.thinking=%t deepseek.reasoning_effort=%s web.port=%d cli.prefer=%s cli.timeout_s=%d cli.max_output_kb=%d supervisor.chattiness=%s supervisor.recent_minutes=%d supervisor.promise_ttl_s=%d supervisor.cancel_window_s=%d supervisor.reprompt_poll_s=%d supervisor.repeat_window_s=%d brain.enabled=%t brain.provider=%s brain.model=%s brain.max_steps=%d brain.ask_timeout_s=%d brain.propose_timeout_s=%d brain.window_tokens=%d brain.prune_after_turns=%d brain.step_reserve_s=%d brain.final_grace_s=%d brain.enrich_timeout_s=%d brain.announce_wait_s=%d brain.investigate_max_s=%d brain.investigate_session_ttl_s=%d prompts.dir=%s",
-		c.DataDir, c.Herdr.Socket, c.State.Path, c.State.FullFsync, c.DebounceMS, c.SnapshotIntervalS, c.PendingTTLS, len(c.Aliases), c.Gemini.Model, c.Gemini.Voice, c.Gemini.StallAfterS, len(c.Gemini.APIKeys), c.Voice.Name, setOrUnset(c.DeepSeek.APIKey), c.DeepSeek.BaseURL, c.DeepSeek.Thinking, c.DeepSeek.ReasoningEffort, c.Web.Port, c.CLI.Prefer, c.CLI.TimeoutS, c.CLI.MaxOutputKB, c.Supervisor.Chattiness, c.Supervisor.RecentMinutes, c.Supervisor.PromiseTTLS, c.Supervisor.CancelWindowS, c.Supervisor.RepromptPollS, c.Supervisor.RepeatWindowS, c.Brain.Enabled, c.Brain.Provider, c.Brain.Model, c.Brain.MaxSteps, c.Brain.AskTimeoutS, c.Brain.ProposeTimeoutS, c.Brain.WindowTokens, c.Brain.PruneAfterTurns, c.Brain.StepReserveS, c.Brain.FinalGraceS, c.Brain.EnrichTimeoutS, c.Brain.AnnounceWaitS, c.Brain.InvestigateMaxS, c.Brain.InvestigateSessionTTLS, c.Prompts.Dir)
+	return fmt.Sprintf("data_dir=%s herdr.socket=%s state.path=%s state.full_fsync=%t debounce_ms=%d snapshot_interval_s=%d pending_ttl_s=%d aliases=%d gemini.model=%s gemini.voice=%s gemini.stall_after_s=%d gemini.api_keys=%d voice.name=%s deepseek.api_key=%s deepseek.base_url=%s deepseek.thinking=%t deepseek.reasoning_effort=%s web.bind=%s web.port=%d web.token=%s cli.prefer=%s cli.timeout_s=%d cli.max_output_kb=%d supervisor.chattiness=%s supervisor.recent_minutes=%d supervisor.promise_ttl_s=%d supervisor.cancel_window_s=%d supervisor.reprompt_poll_s=%d supervisor.repeat_window_s=%d brain.enabled=%t brain.provider=%s brain.model=%s brain.max_steps=%d brain.ask_timeout_s=%d brain.propose_timeout_s=%d brain.window_tokens=%d brain.prune_after_turns=%d brain.step_reserve_s=%d brain.final_grace_s=%d brain.enrich_timeout_s=%d brain.announce_wait_s=%d brain.investigate_max_s=%d brain.investigate_session_ttl_s=%d prompts.dir=%s",
+		c.DataDir, c.Herdr.Socket, c.State.Path, c.State.FullFsync, c.DebounceMS, c.SnapshotIntervalS, c.PendingTTLS, len(c.Aliases), c.Gemini.Model, c.Gemini.Voice, c.Gemini.StallAfterS, len(c.Gemini.APIKeys), c.Voice.Name, setOrUnset(c.DeepSeek.APIKey), c.DeepSeek.BaseURL, c.DeepSeek.Thinking, c.DeepSeek.ReasoningEffort, c.Web.Bind, c.Web.Port, setOrUnset(c.Web.Token), c.CLI.Prefer, c.CLI.TimeoutS, c.CLI.MaxOutputKB, c.Supervisor.Chattiness, c.Supervisor.RecentMinutes, c.Supervisor.PromiseTTLS, c.Supervisor.CancelWindowS, c.Supervisor.RepromptPollS, c.Supervisor.RepeatWindowS, c.Brain.Enabled, c.Brain.Provider, c.Brain.Model, c.Brain.MaxSteps, c.Brain.AskTimeoutS, c.Brain.ProposeTimeoutS, c.Brain.WindowTokens, c.Brain.PruneAfterTurns, c.Brain.StepReserveS, c.Brain.FinalGraceS, c.Brain.EnrichTimeoutS, c.Brain.AnnounceWaitS, c.Brain.InvestigateMaxS, c.Brain.InvestigateSessionTTLS, c.Prompts.Dir)
 }
 
 // setOrUnset renders a secret's presence, never its value.

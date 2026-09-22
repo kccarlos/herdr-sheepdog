@@ -126,6 +126,9 @@ type harnessOpts struct {
 	// deepseek and an unavailable "openai" through Deps.BrainProviders.
 	brain     bool
 	providers bool
+	// token, when set, becomes Deps.Token (config web.token): every
+	// protected route then needs it.
+	token string
 }
 
 func newHarness(t *testing.T, o harnessOpts) *harness {
@@ -171,7 +174,7 @@ func newHarness(t *testing.T, o harnessOpts) *harness {
 	sup.SetVoiceConnected(true)
 	injector := inject.NewInjector(store, h, sup, log, nil)
 	deps := Deps{Log: log, Store: store, Supervisor: sup, Injector: injector, Router: &inject.Router{}, Version: "test", Heartbeat: 200 * time.Millisecond, OutQueue: 8, DevTestdataDir: o.devTestdata, DevBrainDir: o.devBrain, StatsInterval: o.statsInterval,
-		SystemPrompt: func() string { return "You are the voice. Aliases: auth." }, Aliases: []string{"auth"}, ReloadPrompts: o.reloadPrompts, Brain: b, BrainOffReason: "--brain=off", BrainProviders: providers}
+		SystemPrompt: func() string { return "You are the voice. Aliases: auth." }, Aliases: []string{"auth"}, ReloadPrompts: o.reloadPrompts, Brain: b, BrainOffReason: "--brain=off", BrainProviders: providers, Token: o.token}
 	if session != nil {
 		deps.Voice = session
 	}
@@ -270,6 +273,49 @@ func (h *harness) getJSON(path string, out any) int {
 		}
 	}
 	return resp.StatusCode
+}
+
+// authedRequest builds a GET or POST request against path, optionally
+// carrying a bearer token, a cookie, or a request body (POST only) — the
+// web.token auth tests exercise every combination.
+func (h *harness) authedRequest(method, path, bearer string, cookies []*http.Cookie, body any) *http.Request {
+	h.t.Helper()
+	var r *http.Request
+	var err error
+	if body != nil {
+		b, _ := json.Marshal(body)
+		r, err = http.NewRequest(method, h.http.URL+path, strings.NewReader(string(b)))
+		if err == nil {
+			r.Header.Set("Content-Type", "application/json")
+		}
+	} else {
+		r, err = http.NewRequest(method, h.http.URL+path, nil)
+	}
+	if err != nil {
+		h.t.Fatalf("%s %s: %v", method, path, err)
+	}
+	if bearer != "" {
+		r.Header.Set("Authorization", "Bearer "+bearer)
+	}
+	for _, c := range cookies {
+		r.AddCookie(c)
+	}
+	return r
+}
+
+// do sends req and returns the status, the decoded body (when out is
+// not nil) and the response's own Set-Cookie headers.
+func (h *harness) do(req *http.Request, out any) (int, []*http.Cookie) {
+	h.t.Helper()
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		h.t.Fatalf("%s %s: %v", req.Method, req.URL.Path, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if out != nil {
+		_ = json.NewDecoder(resp.Body).Decode(out)
+	}
+	return resp.StatusCode, resp.Cookies()
 }
 
 // types returns the logged event types in order.

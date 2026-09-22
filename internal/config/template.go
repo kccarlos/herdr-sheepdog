@@ -55,7 +55,9 @@ func Template() string {
 # reasoning_effort = %[36]q   # "low" | "high" | "max"; low fits the 8 s ask budget
 
 [web]
+# bind = %[44]q   # loopback only by default; a LAN or Tailscale address needs token set too (CONFIG.md "web.token")
 # port = %[10]d
+# token = ""   # required once bind is not loopback: Authorization: Bearer, ?token= for /ws and /events, or POST /api/login sets a cookie
 # dev = false
 # dev_testdata_dir = ""   # default: testdata/audio relative to the working directory
 
@@ -117,5 +119,6 @@ func Template() string {
 		d.Brain.InvestigateMaxS, d.Brain.InvestigateSessionTTLS,
 		d.Supervisor.RepromptPollS,
 		d.Supervisor.RepeatWindowS,
+		d.Web.Bind,
 	)
 }
