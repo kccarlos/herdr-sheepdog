@@ -1,0 +1,170 @@
+import XCTest
+@testable import SheepdogKit
+
+final class DaemonEndpointTests: XCTestCase {
+    func testParsesWhatSomeoneActuallyTypes() {
+        XCTAssertEqual(DaemonEndpoint(text: "192.168.8.141:7777")?.display, "192.168.8.141:7777")
+        XCTAssertEqual(DaemonEndpoint(text: "http://mac.local:7799")?.display, "mac.local:7799")
+        XCTAssertEqual(DaemonEndpoint(text: "  mac.local  ")?.display, "mac.local:7777")
+        XCTAssertEqual(DaemonEndpoint(text: "http://100.101.102.103:7777/voice")?.display, "100.101.102.103:7777")
+        XCTAssertEqual(DaemonEndpoint(text: "[fd7a::1]:7777")?.display, "fd7a::1:7777")
+    }
+
+    func testRejectsNonsense() {
+        XCTAssertNil(DaemonEndpoint(text: ""))
+        XCTAssertNil(DaemonEndpoint(text: "   "))
+        XCTAssertNil(DaemonEndpoint(text: "http://"))
+        XCTAssertNil(DaemonEndpoint(text: "host:99999"))
+    }
+
+    func testBuildsTheURLsTheContractNames() {
+        let endpoint = DaemonEndpoint(text: "127.0.0.1:7799")!
+        XCTAssertEqual(endpoint.url(path: "/api/hello")?.absoluteString, "http://127.0.0.1:7799/api/hello")
+        XCTAssertEqual(endpoint.webSocketURL?.absoluteString, "ws://127.0.0.1:7799/ws")
+        XCTAssertEqual(
+            endpoint.url(path: "/events", query: [URLQueryItem(name: "since", value: "12")])?.absoluteString,
+            "http://127.0.0.1:7799/events?since=12"
+        )
+    }
+
+    func testAnIPv6LiteralIsBracketedInTheURL() {
+        let endpoint = DaemonEndpoint(text: "[fd7a::1]:7777")!
+        XCTAssertEqual(endpoint.webSocketURL?.absoluteString, "ws://[fd7a::1]:7777/ws")
+    }
+
+    func testHTTPSIsHonouredIfItIsTyped() {
+        let endpoint = DaemonEndpoint(text: "https://sheepdog.example:443")!
+        XCTAssertTrue(endpoint.secure)
+        XCTAssertEqual(endpoint.webSocketURL?.absoluteString, "wss://sheepdog.example:443/ws")
+    }
+
+    func testTheTokenGoesOnEveryRequestAsABearerHeader() throws {
+        let client = DaemonClient(endpoint: DaemonEndpoint(text: "127.0.0.1:7799", token: "devtoken")!)
+        let request = try client.request(path: "/api/state")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer devtoken")
+        // Never in the query string: a header is readable and a URL is logged.
+        XCTAssertFalse(request.url!.absoluteString.contains("devtoken"))
+    }
+
+    func testNoTokenMeansNoHeaderAtAll() throws {
+        let client = DaemonClient(endpoint: DaemonEndpoint(text: "127.0.0.1:7799")!)
+        XCTAssertNil(try client.request(path: "/api/hello").value(forHTTPHeaderField: "Authorization"))
+    }
+}
+
+final class DaemonModelTests: XCTestCase {
+    func testDecodesTheHelloPayloadFromTheContract() throws {
+        let json = #"{"name":"sheepdog","version":"0.9.1","voice_name":"Rex","auth":"token","ws":"/ws","audio":{"in_hz":16000,"out_hz":24000,"format":"pcm16le mono"}}"#
+        let hello = try DaemonClient.decoder.decode(Hello.self, from: Data(json.utf8))
+        XCTAssertEqual(hello.name, "sheepdog")
+        XCTAssertEqual(hello.voiceName, "Rex")
+        XCTAssertTrue(hello.needsToken)
+        XCTAssertEqual(hello.audio.inHz, 16_000)
+        XCTAssertEqual(hello.audio.outHz, 24_000)
+        XCTAssertEqual(hello.displayName, "Rex")
+    }
+
+    func testAHelloWithoutAVoiceNameFallsBackToSheepdog() throws {
+        let json = #"{"name":"sheepdog","version":"0.9.1","auth":"none","ws":"/ws","audio":{"in_hz":16000,"out_hz":24000,"format":"pcm16le mono"}}"#
+        let hello = try DaemonClient.decoder.decode(Hello.self, from: Data(json.utf8))
+        XCTAssertFalse(hello.needsToken)
+        XCTAssertEqual(hello.displayName, "Sheepdog")
+    }
+
+    func testDecodesStateWithAgentsAndAPendingAction() throws {
+        let json = """
+        {"agents":[{"pane_id":"w1:p1","alias":"auth","kind":"codex","state":"blocked","state_since":"2026-09-22T00:10:00.5Z",
+        "current_task":"add the migration","last_block":{"question":"run the migration?"},"last_result":{"summary":"wrote hello.txt"}}],
+        "pending_action":{"id":"p1","pane_id":"w1:p1","kind":"answer_prompt","spoken_summary":"auth is asking",
+        "question":"whether to run the migration","options":[{"label":"Yes, proceed"}]},
+        "session":{},"voice":{"mode":"off","name":"Rex","status":"closed","reason":"voice_off","muted":false,"stalled":false,"client_connected":true},
+        "herdr":"mock","version":"0.9.1","now":"2026-09-22T00:10:01Z"}
+        """
+        let state = try DaemonClient.decoder.decode(DaemonState.self, from: Data(json.utf8))
+        XCTAssertEqual(state.agents.count, 1)
+        XCTAssertEqual(state.agents[0].alias, "auth")
+        XCTAssertEqual(state.agents[0].state, .blocked)
+        XCTAssertNotNil(state.agents[0].stateSince)
+        XCTAssertTrue(state.voice.isOff)
+        XCTAssertEqual(state.pendingQuestion(for: "w1:p1"), "whether to run the migration")
+        XCTAssertNil(state.pendingQuestion(for: "w9:p9"))
+        XCTAssertEqual(state.herdr, "mock")
+    }
+
+    func testAnUnknownAgentStateDoesNotFailTheWholeResponse() throws {
+        let json = #"{"agents":[{"pane_id":"a","alias":"a","state":"dreaming"}],"voice":{"mode":"gemini","status":"connected","muted":false,"stalled":false,"client_connected":false}}"#
+        let state = try DaemonClient.decoder.decode(DaemonState.self, from: Data(json.utf8))
+        XCTAssertEqual(state.agents[0].state, .unknown)
+    }
+
+    func testTheChipSubtitlePrefersThePendingQuestion() {
+        let agent = Agent(
+            paneID: "w1:p1", alias: "auth", state: .blocked,
+            currentTask: "add the migration",
+            lastBlock: .init(question: "run the migration?"),
+            lastResult: .init(summary: "wrote hello.txt")
+        )
+        XCTAssertEqual(agent.subtitle(pendingQuestion: "whether to run it"), "whether to run it")
+        XCTAssertEqual(agent.subtitle(pendingQuestion: nil), "run the migration?")
+
+        let working = Agent(paneID: "w1:p2", alias: "docs", state: .working, currentTask: "write the README", lastResult: .init(summary: "done earlier"))
+        XCTAssertEqual(working.subtitle(pendingQuestion: nil), "done earlier")
+
+        let fresh = Agent(paneID: "w1:p3", alias: "new", state: .working, currentTask: "write the README")
+        XCTAssertEqual(fresh.subtitle(pendingQuestion: nil), "write the README")
+        XCTAssertNil(Agent(paneID: "w1:p4", alias: "quiet", state: .idle).subtitle(pendingQuestion: nil))
+    }
+
+    func testEveryErrorReadsLikeASentenceAndNamesTheDaemon() {
+        XCTAssertEqual(
+            DaemonError.unreachable(endpoint: "192.168.8.141:7777", detail: "").message,
+            "Can't reach the daemon at 192.168.8.141:7777 — is it running?"
+        )
+        XCTAssertTrue(DaemonError.unauthorized(endpoint: "mac:7777").message.contains("token"))
+        XCTAssertTrue(DaemonError.notSheepdog(endpoint: "mac:80").message.contains("isn't a sheepdog daemon"))
+        for error: DaemonError in [
+            .unreachable(endpoint: "a", detail: ""), .unauthorized(endpoint: "a"),
+            .notSheepdog(endpoint: "a"), .http(status: 500, endpoint: "a"), .malformed("x"),
+        ] {
+            XCTAssertFalse(error.message.isEmpty)
+            XCTAssertFalse(error.message.contains("Error Domain"), "no raw errors in front of the user")
+        }
+    }
+}
+
+final class SettingsStoreTests: XCTestCase {
+    private func store() -> (SettingsStore, InMemorySecretStore) {
+        let defaults = UserDefaults(suiteName: "sheepdog.tests.\(UUID().uuidString)")!
+        let secrets = InMemorySecretStore()
+        return (SettingsStore(defaults: defaults, secrets: secrets), secrets)
+    }
+
+    func testTheTokenLivesInTheSecretStoreAndNotInDefaults() {
+        let (settings, secrets) = store()
+        settings.token = "devtoken"
+        XCTAssertEqual(secrets.values.values.first, "devtoken")
+        XCTAssertEqual(settings.token, "devtoken")
+        settings.token = ""
+        XCTAssertTrue(secrets.values.isEmpty)
+        XCTAssertEqual(settings.token, "")
+    }
+
+    func testTheEndpointComesFromTheAddressAndTheToken() {
+        let (settings, _) = store()
+        XCTAssertNil(settings.endpoint)
+        settings.address = "127.0.0.1:7799"
+        settings.token = "devtoken"
+        XCTAssertEqual(settings.endpoint?.display, "127.0.0.1:7799")
+        XCTAssertEqual(settings.endpoint?.token, "devtoken")
+    }
+
+    func testFirstLaunchIsUnconfiguredAndBackgroundListeningIsOnByDefault() {
+        let (settings, _) = store()
+        XCTAssertFalse(settings.hasBeenConfigured)
+        XCTAssertTrue(settings.keepListeningWhenLocked)
+        settings.hasBeenConfigured = true
+        settings.keepListeningWhenLocked = false
+        XCTAssertTrue(settings.hasBeenConfigured)
+        XCTAssertFalse(settings.keepListeningWhenLocked)
+    }
+}

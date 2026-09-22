@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    name: Build and test
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install xcodegen
+        run: brew install xcodegen
+
+      - name: Generate the Xcode project
+        run: xcodegen generate
+
+      - name: Cache DerivedData
+        uses: actions/cache@v4
+        with:
+          path: DerivedData
+          key: deriveddata-${{ runner.os }}-${{ hashFiles('project.yml', 'Sources/**/*.swift', 'Tests/**/*.swift') }}
+          restore-keys: deriveddata-${{ runner.os }}-
+
+      - name: Choose a simulator that exists on this runner
+        id: simulator
+        run: |
+          name=$(xcrun simctl list devices available --json | python3 -c '
+          import json, sys
+          devices = json.load(sys.stdin)["devices"]
+          best = None
+          for runtime, entries in devices.items():
+              if "iOS" not in runtime:
+                  continue
+              for device in entries:
+                  if not device.get("isAvailable") or not device["name"].startswith("iPhone"):
+                      continue
+                  if best is None or "Pro" in device["name"]:
+                      best = device["name"]
+          print(best or "")
+          ')
+          if [ -z "$name" ]; then
+            echo "no iOS simulator on this runner" >&2
+            xcrun simctl list devices available >&2
+            exit 1
+          fi
+          echo "Using $name"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+
+      # SheepdogKitTests runs in the simulator; LiveDaemonTests skips itself
+      # when no sheepdog daemon answers on 127.0.0.1:7799, which is always
+      # the case here. SheepdogUITests is a separate scheme and needs one,
+      # so CI does not run it.
+      - name: Build and test
+        run: |
+          set -o pipefail
+          command="xcodebuild -scheme Sheepdog \
+            -destination 'platform=iOS Simulator,name=${{ steps.simulator.outputs.name }}' \
+            -derivedDataPath DerivedData \
+            -skipPackagePluginValidation \
+            build test"
+          if command -v xcpretty >/dev/null 2>&1; then
+            eval "$command" | xcpretty
+          else
+            eval "$command"
+          fi
