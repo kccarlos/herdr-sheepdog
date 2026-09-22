@@ -67,11 +67,14 @@ targets:
           local network or Tailscale.
         # The daemon speaks plain HTTP on a private network by design
         # (docs/ws-contract.md "Non-goals": no TLS in v1), so arbitrary loads
-        # have to be allowed. NSAllowsLocalNetworking alone does not cover a
-        # Tailscale 100.64/10 address.
+        # have to be allowed. Only this key: ATS ignores
+        # NSAllowsArbitraryLoads whenever NSAllowsLocalNetworking (or the
+        # media/web-content variants) is also present, and local networking
+        # does not cover a Tailscale 100.64/10 address — with both keys the
+        # app got NSURLErrorAppTransportSecurityRequiresSecureConnection
+        # against the Mac's Tailscale IP.
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
-          NSAllowsLocalNetworking: true
 
   SheepdogUITests:
     type: bundle.ui-testing

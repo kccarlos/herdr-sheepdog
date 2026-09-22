@@ -24,8 +24,6 @@
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>
 		<true/>
-		<key>NSAllowsLocalNetworking</key>
-		<true/>
 	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Sheepdog talks to the sheepdog daemon running on your Mac, over your local network or Tailscale.</string>
