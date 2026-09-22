@@ -343,6 +343,56 @@ func TestScenario8ExpiryThenConfirm(t *testing.T) {
 	}
 }
 
+// The prompt's pending expired while nobody answered, but it is still on
+// the pane's screen: a later bare "yes" revives it and answers
+// (docs/issues-2026-09-18.md "an expired approval prompt can never be
+// approved"). Unlike scenario 8's Confirm path, the fast path never
+// asks first — the CEO's own bare word this turn is the authorisation.
+func TestExpiredPromptRevivedByFastPath(t *testing.T) {
+	h := twoAgents(t)
+	h.block("w5:p1", "codex-approval-prompt.screen.txt")
+	h.clock.Advance(121 * time.Second)
+	h.sup.ExpirePending()
+	if _, ok := h.pending(); ok {
+		t.Fatal("pending did not expire")
+	}
+	res := h.say("yes")
+	if res.Spoken != "Told auth yes." {
+		t.Fatalf("result = %+v", res)
+	}
+	if keys := h.sendKeysRequests(); len(keys) != 1 || keys[0] != [2]string{"w5:p1", "y"} {
+		t.Errorf("send_keys = %v", keys)
+	}
+	revived := h.log.ofType("pending.revived")
+	if len(revived) != 1 {
+		t.Fatalf("pending.revived = %d", len(revived))
+	}
+	if p := payload(revived[0]); p["source"] != "fast_path" {
+		t.Errorf("pending.revived source = %v, want fast_path", p["source"])
+	}
+	if _, ok := h.pending(); ok {
+		t.Error("pending not cleared after the revived answer")
+	}
+}
+
+// Revival never invents a prompt: once the pane no longer shows one (it
+// moved on, even though herdr has not reported the transition), a bare
+// "yes" past the expiry still finds nothing to answer.
+func TestExpiredPromptWithUnparseableScreenStaysRefused(t *testing.T) {
+	h := twoAgents(t)
+	h.block("w5:p1", "codex-approval-prompt.screen.txt")
+	h.clock.Advance(121 * time.Second)
+	h.sup.ExpirePending()
+	h.srv.SetScreen("w5:p1", fixture(t, "codex-working.screen.txt"))
+	h.say("yes")
+	if got := h.sendKeysRequests(); len(got) != 0 {
+		t.Errorf("send_keys = %v, want none", got)
+	}
+	if h.log.count("pending.revived") != 0 {
+		t.Error("revived a prompt that is not on screen")
+	}
+}
+
 func TestExpiredQuestionForgottenWhenAgentMovesOn(t *testing.T) {
 	h := twoAgents(t)
 	h.block("w5:p1", "codex-approval-prompt.screen.txt")

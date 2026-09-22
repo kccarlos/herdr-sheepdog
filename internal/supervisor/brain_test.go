@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"google.golang.org/genai"
 
@@ -175,14 +176,10 @@ func TestBrainSendKeysPassesTheRail(t *testing.T) {
 }
 
 func TestBrainSendKeysBlockedByTheRail(t *testing.T) {
-	// A key outside the option set is refused; once cancel dropped the
-	// question there is nothing to answer (the host's atomic re-check is
-	// covered in internal/brain with a host that refuses).
+	// A key outside the option set is refused.
 	m := braintest.NewModel(
 		braintest.Step{Calls: []*genai.FunctionCall{braintest.FC(brain.ToolSendKeys, map[string]any{"agent": "auth", "keys": []any{"ctrl-c"}})}},
 		braintest.Step{Text: braintest.Reply("I may not send that key.", "")},
-		braintest.Step{Calls: []*genai.FunctionCall{braintest.FC(brain.ToolSendKeys, map[string]any{"agent": "auth", "keys": []any{"y"}})}},
-		braintest.Step{Text: braintest.Reply("Nothing is waiting.", "")},
 	)
 	h := newBrainHarness(t, m)
 	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
@@ -191,7 +188,19 @@ func TestBrainSendKeysBlockedByTheRail(t *testing.T) {
 	if res.Spoken != "I may not send that key." || len(h.sendKeysRequests()) != 0 {
 		t.Errorf("result = %+v sends=%v", res, h.sendKeysRequests())
 	}
-	h.call(ToolCancel, nil) // drops the question
+	if h.log.count("brain.rail_blocked") != 1 {
+		t.Errorf("rail_blocked = %d", h.log.count("brain.rail_blocked"))
+	}
+	// Cancel drops the question, but the prompt stays on the pane's
+	// screen unanswered; when it no longer does (the agent moved on),
+	// there is nothing left to revive and the host's atomic re-check
+	// refuses outright (a host that refuses is covered in internal/brain).
+	h.call(ToolCancel, nil)
+	h.srv.SetScreen("w5:p1", fixture(t, "codex-working.screen.txt"))
+	m.Add(
+		braintest.Step{Calls: []*genai.FunctionCall{braintest.FC(brain.ToolSendKeys, map[string]any{"agent": "auth", "keys": []any{"y"}})}},
+		braintest.Step{Text: braintest.Reply("Nothing is waiting.", "")},
+	)
 	res = h.call(ToolPropose, map[string]any{"instruction": "yes", "agent": "auth"})
 	if res.Spoken != "Nothing is waiting." || len(h.sendKeysRequests()) != 0 {
 		t.Errorf("result = %+v sends=%v", res, h.sendKeysRequests())
@@ -199,8 +208,74 @@ func TestBrainSendKeysBlockedByTheRail(t *testing.T) {
 	if h.log.count("brain.rail_blocked") != 2 {
 		t.Errorf("rail_blocked = %d", h.log.count("brain.rail_blocked"))
 	}
-	if fourth := m.Calls()[4].Text(); !strings.Contains(fourth, "has no recorded approval prompt") {
-		t.Errorf("host refusal not seen:\n%s", fourth)
+	if last := m.Calls()[len(m.Calls())-1].Text(); !strings.Contains(last, "has no pending approval prompt now") {
+		t.Errorf("host refusal not seen:\n%s", last)
+	}
+}
+
+// Once a pending answer_prompt expires (or is otherwise dropped) while
+// the prompt is still on the pane's screen, a later send_keys revives it
+// from the screen and the rail's normal checks apply to what is actually
+// there (docs/issues-2026-09-18.md "an expired approval prompt can never
+// be approved").
+func TestBrainSendKeysRevivesAnExpiredPrompt(t *testing.T) {
+	m := braintest.NewModel(
+		braintest.Step{Calls: []*genai.FunctionCall{braintest.FC(brain.ToolSendKeys, map[string]any{"agent": "auth", "keys": []any{"y"}})}},
+		braintest.Step{Text: braintest.Reply("Told auth yes.", "")},
+	)
+	h := newBrainHarness(t, m)
+	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
+	h.block("w5:p1", "codex-approval-prompt.screen.txt")
+	h.clock.Advance(121 * time.Second)
+	h.sup.ExpirePending()
+	if _, has := h.pending(); has {
+		t.Fatal("pending did not expire")
+	}
+	res := h.call(ToolPropose, map[string]any{"instruction": "please approve it", "agent": "auth"})
+	if res.Spoken != "Told auth yes." {
+		t.Errorf("result = %+v", res)
+	}
+	if got := h.sendKeysRequests(); len(got) != 1 || got[0] != [2]string{"w5:p1", "y"} {
+		t.Errorf("keys = %v", got)
+	}
+	if h.log.count("brain.rail_blocked") != 0 {
+		t.Errorf("rail_blocked = %d, want 0 (an authorised, revived answer)", h.log.count("brain.rail_blocked"))
+	}
+	revived := h.log.ofType("pending.revived")
+	if len(revived) != 1 {
+		t.Fatalf("pending.revived = %d", len(revived))
+	}
+	if p := payload(revived[0]); p["source"] != "send_keys" {
+		t.Errorf("pending.revived source = %v, want send_keys", p["source"])
+	}
+}
+
+// A key sequence that mixes more than one option's keys is refused even
+// though every key is individually valid: "y" is this prompt's yes, "p"
+// its "don't ask again" — sending both must never risk confirming
+// whatever the pane asks next.
+func TestBrainSendKeysRejectsMixedOptionKeys(t *testing.T) {
+	m := braintest.NewModel(
+		braintest.Step{Calls: []*genai.FunctionCall{braintest.FC(brain.ToolSendKeys, map[string]any{"agent": "auth", "keys": []any{"y", "p"}})}},
+		braintest.Step{Text: braintest.Reply("I may not send that.", "")},
+	)
+	h := newBrainHarness(t, m)
+	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
+	h.block("w5:p1", "codex-approval-prompt.screen.txt")
+	res := h.call(ToolPropose, map[string]any{"instruction": "yes and don't ask again", "agent": "auth"})
+	if res.Spoken != "I may not send that." {
+		t.Errorf("result = %+v", res)
+	}
+	if got := h.sendKeysRequests(); len(got) != 0 {
+		t.Errorf("keys sent = %v, want none", got)
+	}
+	if h.log.count("brain.rail_blocked") != 1 {
+		t.Errorf("rail_blocked = %d", h.log.count("brain.rail_blocked"))
+	}
+	if blocked := h.log.ofType("brain.rail_blocked"); len(blocked) == 1 {
+		if reason, _ := payload(blocked[0])["reason"].(string); !strings.Contains(reason, "mix more than one option") {
+			t.Errorf("reason = %q", reason)
+		}
 	}
 }
 

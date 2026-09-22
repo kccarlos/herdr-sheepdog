@@ -1,6 +1,7 @@
 package supervisor
 
 import (
+	"context"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -129,6 +130,37 @@ func (s *Supervisor) ExpirePending() {
 		s.expired = &p
 	}
 	s.log.Log(logSource, "pending.expired", p.PaneID, map[string]any{"id": p.ID, "kind": p.Kind, "question": p.Question})
+}
+
+// revivePrompt re-reads paneID's screen and, when it is still showing an
+// approval prompt, records it as a fresh answer_prompt pending action:
+// the send_keys path (brainHost.AnswerPrompt) and the bare-answer fast
+// path (fastAnswer) call this when no pending is recorded but the pane
+// is still blocked — its answer_prompt pending expired unanswered while
+// nobody was watching, was dropped without being answered, or was never
+// recorded at all — so the prompt still on screen can still be answered
+// (docs/issues-2026-09-18.md "an expired approval prompt can never be
+// approved"). Revival always re-reads the screen rather than trusting
+// what expired or was dropped: the pane may already be asking something
+// else. Caller holds s.mu; ok is false when the pane is gone, not
+// blocked, or its screen does not parse as a prompt.
+func (s *Supervisor) revivePrompt(ctx context.Context, paneID, source string) (state.PendingAction, bool) {
+	row, ok := s.store.Get(paneID)
+	if !ok || row.State != herdr.StateBlocked {
+		return state.PendingAction{}, false
+	}
+	read, err := s.herdr.Read(ctx, paneID, herdr.SourceRecentUnwrapped, s.cfg.ReadLines)
+	if err != nil {
+		return state.PendingAction{}, false
+	}
+	prompt, ok := herdr.ParsePrompt(read.Text)
+	if !ok {
+		return state.PendingAction{}, false
+	}
+	p := s.newAnswerPrompt(paneID, prompt, aliasOr(row.Alias))
+	s.setPending(p)
+	s.log.Log(logSource, "pending.revived", paneID, map[string]any{"id": p.ID, "source": source})
+	return p, true
 }
 
 var (

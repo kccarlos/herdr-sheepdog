@@ -157,14 +157,21 @@ func (h brainHost) Prompt(ctx context.Context, paneID, text string) (string, err
 }
 
 // AnswerPrompt implements brain.Host: the rail's atomic re-check under
-// the supervisor's lock, then the confirm send path.
+// the supervisor's lock — reviving the pending action from the screen
+// first when none is recorded but the pane is still blocked
+// (docs/issues-2026-09-18.md "an expired approval prompt can never be
+// approved") — then the confirm send path.
 func (h brainHost) AnswerPrompt(ctx context.Context, paneID string, keys []string) (string, error) {
 	s := h.s
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	p, has := s.store.Pending()
 	if !has || p.Kind != state.PendingAnswerPrompt || p.PaneID != paneID {
-		return "", fmt.Errorf("%w: %s has no pending approval prompt now", brain.ErrNotPermitted, s.aliasOf(paneID))
+		revived, ok := s.revivePrompt(ctx, paneID, "send_keys")
+		if !ok {
+			return "", fmt.Errorf("%w: %s has no pending approval prompt now", brain.ErrNotPermitted, s.aliasOf(paneID))
+		}
+		p = revived
 	}
 	allowed := allowedKeys(p)
 	for _, k := range keys {
@@ -174,6 +181,9 @@ func (h brainHost) AnswerPrompt(ctx context.Context, paneID string, keys []strin
 	}
 	if len(keys) == 0 {
 		return "", fmt.Errorf("%w: no keys", brain.ErrNotPermitted)
+	}
+	if !selectedBy(p, keys) {
+		return "", fmt.Errorf("%w: keys %v mix more than one option", brain.ErrNotPermitted, keys)
 	}
 	res := s.answerWithKeys(ctx, p, keys, keysLabel(p, keys), "Told "+s.aliasOf(paneID)+" %s.", "brain")
 	if res.Clarify {
@@ -194,6 +204,34 @@ func allowedKeys(p state.PendingAction) map[string]bool {
 		out[k] = true
 	}
 	return out
+}
+
+// selectedBy reports whether keys, as a whole sequence, exactly matches
+// one of p's options (or its yes/no shorthand): allowedKeys's per-key
+// membership check is not enough on its own — "y" and "enter" can each
+// belong to a different option, and sending both could answer this
+// prompt and then confirm whatever the pane asks next.
+func selectedBy(p state.PendingAction, keys []string) bool {
+	same := func(a []string) bool {
+		if len(a) != len(keys) {
+			return false
+		}
+		for i := range a {
+			if a[i] != keys[i] {
+				return false
+			}
+		}
+		return true
+	}
+	if same(p.YesKeys) || same(p.NoKeys) {
+		return true
+	}
+	for _, o := range p.Options {
+		if same(o.Keys) {
+			return true
+		}
+	}
+	return false
 }
 
 // keysLabel names the answer the keys select ("yes", "no", the option's

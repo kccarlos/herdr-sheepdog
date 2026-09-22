@@ -351,6 +351,35 @@ func (p PendingPrompt) AllowedKeys() []string {
 	return out
 }
 
+// SelectedBy reports whether keys, as a whole sequence, is exactly one
+// of the prompt's options (or its yes/no shorthand). AllowedKeys alone
+// is not enough to validate a call: "y" and "enter" can each belong to
+// a different option, and sending both could answer this prompt and
+// then confirm whatever the pane asks next (docs/roles.md "the one
+// rail").
+func (p PendingPrompt) SelectedBy(keys []string) bool {
+	same := func(a []string) bool {
+		if len(a) != len(keys) {
+			return false
+		}
+		for i := range a {
+			if a[i] != keys[i] {
+				return false
+			}
+		}
+		return true
+	}
+	if same(p.YesKeys) || same(p.NoKeys) {
+		return true
+	}
+	for _, o := range p.Options {
+		if same(o.Keys) {
+			return true
+		}
+	}
+	return false
+}
+
 // Host is what the brain needs from the supervisor: the roster and the
 // ledger, the read tools, and the actions (which go through the
 // supervisor's existing herdr paths and pending-action bookkeeping).
