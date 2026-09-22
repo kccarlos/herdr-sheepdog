@@ -141,6 +141,15 @@ func runServe(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 	}
 	fprintf(stderr, "sheepdog serve %s: %s\n", version, cfg)
 	fprintf(stdout, "sheepdog %s listening on %s (voice=%s herdr=%s cli=%s brain=%s)\n", version, a.URL(), o.voice, o.herdr, o.cli, a.BrainMode())
+	if !cfg.Web.IsLoopback() {
+		// web.bind is not loopback: print every non-loopback IPv4 of the
+		// host, so the operator can read the LAN or Tailscale URL off the
+		// log instead of guessing which interface it is (CONFIG.md
+		// "web.bind").
+		for _, u := range a.URLs() {
+			fprintf(stdout, "  lan url     %s\n", u)
+		}
+	}
 	fprintf(stdout, "  voice page  %s/voice\n", a.URL())
 	fprintf(stdout, "  debug page  %s/debug\n", a.URL())
 	fprintf(stdout, "  events      %s/events\n", a.URL())

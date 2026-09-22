@@ -585,6 +585,48 @@ function renderTranscript() {
   box.scrollTop = box.scrollHeight;
 }
 
+// ---------------------------------------------------------------- auth
+
+// authGate probes an endpoint that needs the daemon's token (config
+// web.token) before anything else runs. No token configured, or the
+// token cookie from an earlier POST /api/login already covers it: the
+// probe answers normally and the rest of init() proceeds. A 401 means
+// the daemon wants a token: show the inline prompt and hide the rest of
+// the page instead of wiring up a Connect button that would only 401
+// itself on /ws. Submitting POSTs /api/login, which sets the cookie
+// every later request on this origin then carries automatically —
+// including the WebSocket one this page cannot attach a header to — and
+// reloads the page. Returns false while the gate is up.
+async function authGate() {
+  let res;
+  try {
+    res = await fetch('/api/state', { cache: 'no-store' });
+  } catch (_) {
+    return true; // offline: let the rest of the page surface the error
+  }
+  if (res.status !== 401) return true;
+  $('auth-gate').classList.remove('hidden');
+  $('app-main').classList.add('hidden');
+  const submit = async () => {
+    const token = $('auth-token').value.trim();
+    if (!token) return;
+    $('auth-submit').disabled = true;
+    try {
+      const r = await fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token }) });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.error || `${r.status}`);
+      location.reload();
+    } catch (err) {
+      $('auth-error').textContent = `error: ${err.message}`;
+      $('auth-error').classList.remove('hidden');
+      $('auth-submit').disabled = false;
+    }
+  };
+  $('auth-submit').addEventListener('click', submit);
+  $('auth-token').addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
+  return false;
+}
+
 // ---------------------------------------------------------------- wiring
 
 // gateOptions reads the silence gate knobs from the URL: ?gate=off disables
@@ -610,7 +652,8 @@ function resumeIfSuspended() {
   }
 }
 
-function init() {
+async function init() {
+  if (!(await authGate())) return; // token prompt is up; wiring resumes after the reload
   const params = new URLSearchParams(location.search);
   state.gate.opts = gateOptions(params);
   if (params.get('src') === 'file') {

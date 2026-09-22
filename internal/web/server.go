@@ -111,6 +111,13 @@ type Deps struct {
 	ToolTimeout time.Duration
 	// Now overrides the clock (tests).
 	Now func() time.Time
+
+	// Token, when non-empty, is the bearer token (config web.token) every
+	// request to /ws, /events and /api/* must present (docs/ws-contract.md
+	// "Auth"): Authorization: Bearer <token>, ?token=<token> for /ws and
+	// /events, or the sheepdog_token cookie POST /api/login sets. Empty
+	// means no auth: every route is public, as in v1.
+	Token string
 }
 
 // Server is the HTTP server. Create with New, then either Handler() for
@@ -181,28 +188,36 @@ func (s *Server) routes() error {
 			return err
 		}
 	}
-	s.mux.HandleFunc("GET /events", s.handleEvents)
-	s.mux.HandleFunc("GET /ws", s.hub.handle)
-	s.mux.HandleFunc("GET /api/state", s.handleState)
-	s.mux.HandleFunc("GET /api/agents", s.handleAgents)
-	s.mux.HandleFunc("GET /api/events", s.handleEventsTail)
-	s.mux.HandleFunc("GET /api/voice/system_prompt", s.handleSystemPrompt)
-	s.mux.HandleFunc("GET /api/settings", s.handleGetSettings)
-	s.mux.HandleFunc("PUT /api/settings", s.handlePutSettings)
-	s.mux.HandleFunc("POST /api/pending/cancel", s.handleCancel)
-	s.mux.HandleFunc("POST /api/inject/blocked", s.handleInjectBlocked)
-	s.mux.HandleFunc("POST /api/inject/done", s.handleInjectDone)
-	s.mux.HandleFunc("POST /api/inject/state", s.handleInjectState)
-	s.mux.HandleFunc("POST /api/inject/screen", s.handleInjectScreen)
-	s.mux.HandleFunc("POST /api/inject/remove", s.handleInjectRemove)
-	s.mux.HandleFunc("POST /api/inject/utterance", s.handleUtterance)
-	s.mux.HandleFunc("POST /api/herdr/event", s.handleHerdrEvent)
-	s.mux.HandleFunc("POST /api/prompts/reload", s.handleReloadPrompts)
-	s.mux.HandleFunc("GET /api/brain/transcript", s.handleBrainTranscript)
-	s.mux.HandleFunc("GET /api/brain/context", s.handleBrainContext)
-	s.mux.HandleFunc("GET /api/brain/system_prompt", s.handleBrainSystemPrompt)
-	s.mux.HandleFunc("GET /api/brain/models", s.handleBrainModels)
-	s.mux.HandleFunc("PUT /api/brain/model", s.handleSetBrainModel)
+	// GET /api/hello and POST /api/login stay public (docs/ws-contract.md
+	// "Auth"): a client has to reach them to learn it found a sheepdog
+	// daemon and to trade a token for the cookie in the first place.
+	// Everything else that reads or acts on daemon state goes through
+	// s.authFunc. /ws and /events also accept ?token=: a browser cannot
+	// set a header on a WebSocket or EventSource request.
+	s.mux.HandleFunc("GET /api/hello", s.handleHello)
+	s.mux.HandleFunc("POST /api/login", s.handleLogin)
+	s.mux.HandleFunc("GET /events", s.authFunc(s.handleEvents, true))
+	s.mux.HandleFunc("GET /ws", s.authFunc(s.hub.handle, true))
+	s.mux.HandleFunc("GET /api/state", s.authFunc(s.handleState, false))
+	s.mux.HandleFunc("GET /api/agents", s.authFunc(s.handleAgents, false))
+	s.mux.HandleFunc("GET /api/events", s.authFunc(s.handleEventsTail, false))
+	s.mux.HandleFunc("GET /api/voice/system_prompt", s.authFunc(s.handleSystemPrompt, false))
+	s.mux.HandleFunc("GET /api/settings", s.authFunc(s.handleGetSettings, false))
+	s.mux.HandleFunc("PUT /api/settings", s.authFunc(s.handlePutSettings, false))
+	s.mux.HandleFunc("POST /api/pending/cancel", s.authFunc(s.handleCancel, false))
+	s.mux.HandleFunc("POST /api/inject/blocked", s.authFunc(s.handleInjectBlocked, false))
+	s.mux.HandleFunc("POST /api/inject/done", s.authFunc(s.handleInjectDone, false))
+	s.mux.HandleFunc("POST /api/inject/state", s.authFunc(s.handleInjectState, false))
+	s.mux.HandleFunc("POST /api/inject/screen", s.authFunc(s.handleInjectScreen, false))
+	s.mux.HandleFunc("POST /api/inject/remove", s.authFunc(s.handleInjectRemove, false))
+	s.mux.HandleFunc("POST /api/inject/utterance", s.authFunc(s.handleUtterance, false))
+	s.mux.HandleFunc("POST /api/herdr/event", s.authFunc(s.handleHerdrEvent, false))
+	s.mux.HandleFunc("POST /api/prompts/reload", s.authFunc(s.handleReloadPrompts, false))
+	s.mux.HandleFunc("GET /api/brain/transcript", s.authFunc(s.handleBrainTranscript, false))
+	s.mux.HandleFunc("GET /api/brain/context", s.authFunc(s.handleBrainContext, false))
+	s.mux.HandleFunc("GET /api/brain/system_prompt", s.authFunc(s.handleBrainSystemPrompt, false))
+	s.mux.HandleFunc("GET /api/brain/models", s.authFunc(s.handleBrainModels, false))
+	s.mux.HandleFunc("PUT /api/brain/model", s.authFunc(s.handleSetBrainModel, false))
 	if s.deps.DevTestdataDir != "" {
 		s.mux.HandleFunc("GET /testdata/{name}", func(w http.ResponseWriter, r *http.Request) {
 			s.serveFixture(w, r, s.deps.DevTestdataDir, ".wav", "audio/wav")

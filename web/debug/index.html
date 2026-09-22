@@ -37,6 +37,16 @@
   <a href="/voice">voice page</a>
 </header>
 
+<section class="card hidden" id="auth-gate">
+  <h2>Token required</h2>
+  <p class="muted small">This daemon requires a token (config <code>web.token</code>). Enter it once; the browser remembers it.</p>
+  <div class="row">
+    <input id="auth-token" type="password" placeholder="token" autocomplete="off">
+    <button id="auth-submit" class="primary">Unlock</button>
+  </div>
+  <p id="auth-error" class="error hidden"></p>
+</section>
+
 <nav class="tabs" id="tabs">
   <button data-tab="swimlane">Swimlane</button>
   <button data-tab="conversation">Conversation</button>
@@ -45,7 +55,7 @@
   <button data-tab="state">State</button>
 </nav>
 
-<main>
+<main id="app-main">
   <section id="tab-swimlane" class="tab hidden">
     <div class="toolbar">
       <span class="sw-lane-toggles" id="sw-lanes" title="hide a lane: its column collapses and arrows to it become stubs"></span>

@@ -856,20 +856,65 @@ function setupTabs() {
   for (const b of document.querySelectorAll('#tabs button')) b.addEventListener('click', () => showTab(b.dataset.tab));
 }
 
+// ---------------------------------------------------------------- auth
+
+// authGate probes an endpoint that needs the daemon's token (config
+// web.token) before anything else runs; see web/voice/app.js's copy of
+// this function for the full rationale (no token configured, or the
+// cookie an earlier POST /api/login left already covers it: the rest of
+// boot() proceeds; a 401 shows the inline prompt and hides the tabs
+// instead of wiring up controls that would only 401 themselves).
+// Submitting POSTs /api/login and reloads the page on success.
+async function authGate() {
+  let res;
+  try {
+    res = await fetch('/api/state', { cache: 'no-store' });
+  } catch (_) {
+    return true; // offline: let the rest of the page surface the error
+  }
+  if (res.status !== 401) return true;
+  $('auth-gate').classList.remove('hidden');
+  $('tabs').classList.add('hidden');
+  $('app-main').classList.add('hidden');
+  const submit = async () => {
+    const token = $('auth-token').value.trim();
+    if (!token) return;
+    $('auth-submit').disabled = true;
+    try {
+      const r = await fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token }) });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.error || `${r.status}`);
+      location.reload();
+    } catch (err) {
+      $('auth-error').textContent = `error: ${err.message}`;
+      $('auth-error').classList.remove('hidden');
+      $('auth-submit').disabled = false;
+    }
+  };
+  $('auth-submit').addEventListener('click', submit);
+  $('auth-token').addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
+  return false;
+}
+
 // ------------------------------------------------------------------ main
 
-setupTabs();
-setupEventControls();
-setupSettings();
-setupModelControl();
-setupInject();
-setupConversation();
-setupSupervisor();
-setupSwimlane();
-pickTab();
-backfillConversation().then(connectEvents);
-refreshState();
-setInterval(refreshState, STATE_POLL_MS);
+async function boot() {
+  if (!(await authGate())) return; // token prompt is up; the rest resumes after a reload
+  setupTabs();
+  setupEventControls();
+  setupSettings();
+  setupModelControl();
+  setupInject();
+  setupConversation();
+  setupSupervisor();
+  setupSwimlane();
+  pickTab();
+  backfillConversation().then(connectEvents);
+  refreshState();
+  setInterval(refreshState, STATE_POLL_MS);
+}
+
+boot();
 
 // Console handle: feed extra log lines into the conversation view (e.g.
 // paste a voice-test run), inspect its items, or load a brain transcript

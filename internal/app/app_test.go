@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -68,6 +69,19 @@ func TestBuildValidation(t *testing.T) {
 	if _, err := Build(cfg, Options{Voice: VoiceOff, Herdr: HerdrMock, Brain: "maybe"}); err == nil || !strings.Contains(err.Error(), "--brain") {
 		t.Errorf("bad brain: %v", err)
 	}
+	// A non-loopback web.bind needs web.token set (CONFIG.md "web.token");
+	// exit 2 like the missing-key error above.
+	lan := cfg
+	lan.Web.Bind = "0.0.0.0"
+	if _, err := Build(lan, Options{Voice: VoiceOff, Herdr: HerdrMock}); err == nil || !strings.Contains(err.Error(), "web.token is required when web.bind is not loopback") {
+		t.Errorf("non-loopback bind without a token: %v", err)
+	}
+	lan.Web.Token = "s3cr3t"
+	lanApp, err := Build(lan, Options{Voice: VoiceOff, Herdr: HerdrMock})
+	if err != nil {
+		t.Fatalf("non-loopback bind with a token: %v", err)
+	}
+	_ = lanApp.elog.Close()
 	// A Gemini key without a network: Build succeeds (nothing connects),
 	// and the brain is attached with its transcript under the data dir.
 	gem := cfg
@@ -563,5 +577,133 @@ func TestBrainProviderRestoreFallsBackToConfigured(t *testing.T) {
 	})
 	if !subsequence(types, []string{"daemon.start", "daemon.brain_model_error"}) || subsequence(types, []string{"brain.model_changed"}) {
 		t.Errorf("model only: types = %v", types)
+	}
+}
+
+// TestWebTokenProtectsAPI proves cfg.Web.Token reaches web.Deps.Token:
+// /api/hello stays public, /api/state 401s without the token and 200s
+// with the Authorization header, and daemon.start carries urls.
+func TestWebTokenProtectsAPI(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.Web.Token = "s3cr3t"
+	a, err := Build(cfg, Options{Voice: VoiceOff, Herdr: HerdrMock, Drain: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Listen(); err != nil {
+		t.Fatal(err)
+	}
+	url := a.URL()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- a.Run(ctx) }()
+
+	var hello map[string]any
+	getJSON(t, url+"/api/hello", &hello)
+	if hello["auth"] != "token" || hello["ws"] != "/ws" {
+		t.Fatalf("hello = %v", hello)
+	}
+
+	resp, err := http.Get(url + "/api/state")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("GET /api/state without a token = %d, want 401", resp.StatusCode)
+	}
+
+	req, _ := http.NewRequest(http.MethodGet, url+"/api/state", nil)
+	req.Header.Set("Authorization", "Bearer s3cr3t")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /api/state with the token = %d, want 200", resp.StatusCode)
+	}
+
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Run did not return")
+	}
+	found := false
+	for _, ev := range a.elog.Tail(0) {
+		if ev.Type != "daemon.start" {
+			continue
+		}
+		found = true
+		var p map[string]any
+		if err := json.Unmarshal(ev.Payload, &p); err != nil {
+			t.Fatal(err)
+		}
+		urls, _ := p["urls"].([]any)
+		if len(urls) != 1 || urls[0] != url {
+			t.Errorf("daemon.start.urls = %v, want [%s]", urls, url)
+		}
+	}
+	if !found {
+		t.Error("daemon.start not logged")
+	}
+}
+
+// TestAppURLsNonLoopbackBind proves App.URLs() falls back to URL() alone
+// when web.bind is loopback (unchanged from before web.bind existed)
+// and returns at least one well-formed http:// URL for a non-loopback
+// bind (CONFIG.md "web.bind": the LAN URL a phone reads off the log).
+func TestAppURLsNonLoopbackBind(t *testing.T) {
+	cfg := testConfig(t)
+	a, err := Build(cfg, Options{Voice: VoiceOff, Herdr: HerdrMock})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = a.elog.Close() }()
+	if err := a.Listen(); err != nil {
+		t.Fatal(err)
+	}
+	if urls := a.URLs(); len(urls) != 1 || urls[0] != a.URL() {
+		t.Errorf("loopback URLs() = %v, want [%s]", urls, a.URL())
+	}
+
+	lan := cfg
+	lan.Web.Bind, lan.Web.Token = "0.0.0.0", "s3cr3t"
+	a2, err := Build(lan, Options{Voice: VoiceOff, Herdr: HerdrMock})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = a2.elog.Close() }()
+	if err := a2.Listen(); err != nil {
+		t.Fatal(err)
+	}
+	urls := a2.URLs()
+	if len(urls) == 0 {
+		t.Fatal("non-loopback URLs() is empty")
+	}
+	for _, u := range urls {
+		if !strings.HasPrefix(u, "http://") {
+			t.Errorf("url %q does not start with http://", u)
+		}
+	}
+}
+
+// TestLanURLsShape proves lanURLs never returns a loopback address and
+// always sorted, well-formed "http://<ip>:<port>" strings — the
+// enumeration itself is environment-dependent (a sandbox may have no
+// non-loopback interface at all), so this only checks shape.
+func TestLanURLsShape(t *testing.T) {
+	urls := lanURLs("1234")
+	if !sort.StringsAreSorted(urls) {
+		t.Errorf("lanURLs not sorted: %v", urls)
+	}
+	for _, u := range urls {
+		if !strings.HasPrefix(u, "http://") || !strings.HasSuffix(u, ":1234") || strings.Contains(u, "127.0.0.1") {
+			t.Errorf("lanURLs entry %q malformed or loopback", u)
+		}
 	}
 }

@@ -7,7 +7,9 @@ are both built from this document. Change the doc and the Go types together.
 ## Endpoint
 
 - `GET /ws` on the daemon's HTTP port, upgraded to a WebSocket. Same origin as
-  `/voice`; no auth in v1 (localhost only, plan §1).
+  `/voice`. Public (no token needed) when `web.bind` is loopback and
+  `web.token` is unset, the default; see "Auth" below for a non-loopback
+  bind (a phone on the LAN or over Tailscale).
 - **One client at a time.** A second connection replaces the first: the
   daemon sends the first client `{"type":"status","voice":"closed","reason":"replaced"}`
   and closes it with WebSocket code 1000, then serves the new one.
@@ -127,7 +129,40 @@ nor `silence` transitions; the gate resumes its own bookkeeping on unmute.
   should stop capturing and show the reason. It may retry `/ws` after a few
   seconds; a `connecting` status means the daemon is trying again.
 
+## Auth
+
+Added when `web.bind`/`web.token` (CONFIG.md "web.token") let the daemon
+be reached from a phone on the LAN or over Tailscale, not just
+localhost. With `web.token` unset (the loopback default) every endpoint
+below is open, as in the original v1 contract. With it set:
+
+- `GET /`, `/voice`, `/debug` and their assets, and `GET /api/hello`
+  stay public — they hold no data, and a client has to be able to reach
+  `/api/hello` before it knows the daemon needs a token at all.
+- Every other endpoint — `GET /ws`, `GET /events`, every `/api/*` route —
+  requires the token, presented one of three ways: the header
+  `Authorization: Bearer <token>`; the query parameter `?token=<token>`,
+  accepted only on `/ws` and `/events` (a browser cannot set a header on
+  a WebSocket or `EventSource` request); or the cookie `sheepdog_token`,
+  set by `POST /api/login {"token": "…"}` so the token is typed once —
+  `/voice` and `/debug` do this themselves, showing an inline prompt the
+  first time a request answers 401.
+- Missing or wrong: `401` with a JSON body `{"error":"unauthorized"}`,
+  logged as `web.unauthorized {path, remote}` (never the token itself).
+  A WebSocket upgrade or an SSE stream refused this way never reaches
+  the contract below it — the client sees an ordinary HTTP 401, not a
+  `status`/`error` frame.
+- `GET /api/hello` answers `{"name":"sheepdog","version":"…","voice_name":"…","auth":"token"|"none","ws":"/ws","audio":{"in_hz":16000,"out_hz":24000,"format":"pcm16le mono"}}`
+  so a client can confirm it found a sheepdog daemon, whether it needs a
+  token, and this contract's audio format before it ever opens `/ws`.
+
+Every comparison is constant-time (`crypto/subtle.ConstantTimeCompare`);
+there is no rate limiting or lockout on a wrong token.
+
 ## Non-goals (v1)
 
-No authentication, no compression, no multiple clients, no client-side
-resampling contract beyond "send 16 kHz PCM16 mono", no timestamps in frames.
+No compression, no multiple clients, no client-side resampling contract
+beyond "send 16 kHz PCM16 mono", no timestamps in frames. No TLS: the
+`Secure` cookie flag stays off and the token travels in the clear, so a
+non-loopback bind should be a private network (a LAN you trust, or a
+Tailscale address) rather than an open one.

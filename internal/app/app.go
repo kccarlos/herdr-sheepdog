@@ -158,6 +158,9 @@ func Build(cfg config.Config, opts Options) (*App, error) {
 	if opts.Voice == VoiceGemini && len(cfg.Gemini.APIKeys) == 0 {
 		return nil, errors.New("app: --voice=gemini needs GEMINI_API_KEY (or gemini.api_keys); use --voice=off to run without it")
 	}
+	if !cfg.Web.IsLoopback() && cfg.Web.Token == "" {
+		return nil, errors.New("app: web.token is required when web.bind is not loopback")
+	}
 	port := cfg.Web.Port
 	if opts.Port > 0 {
 		port = opts.Port
@@ -327,6 +330,7 @@ func (a *App) wire() error {
 		Brain:          a.brain,
 		BrainOffReason: a.brainOff,
 		BrainProviders: a.brainProviders,
+		Token:          cfg.Web.Token,
 	}
 	if opts.Dev || a.cfg.Web.Dev {
 		deps.DevTestdataDir = a.cfg.Web.DevTestdataDir
@@ -562,9 +566,10 @@ func (a *App) aliases() []string {
 	return out
 }
 
-// Listen binds 127.0.0.1:<port>. URL is valid afterwards.
+// Listen binds web.bind:<port> (web.bind defaults to 127.0.0.1). URL is
+// valid afterwards.
 func (a *App) Listen() error {
-	return a.web.Listen(net.JoinHostPort("127.0.0.1", strconv.Itoa(a.port)))
+	return a.web.Listen(net.JoinHostPort(a.cfg.Web.Bind, strconv.Itoa(a.port)))
 }
 
 // URL returns the base URL of the web server ("" before Listen).
@@ -574,6 +579,56 @@ func (a *App) URL() string {
 		return ""
 	}
 	return "http://" + addr
+}
+
+// URLs returns every URL the daemon can be reached on: just URL() for a
+// loopback bind (unchanged); for a non-loopback bind (CONFIG.md
+// "web.bind"), "http://<ip>:<port>" for every non-loopback IPv4 address
+// of the host, so the operator can read the LAN or Tailscale URL off the
+// log instead of guessing which interface it is — falling back to
+// URL() alone when none was found (no network, or interface enumeration
+// failed).
+func (a *App) URLs() []string {
+	addr := a.web.Addr()
+	if addr == "" {
+		return nil
+	}
+	if a.cfg.Web.IsLoopback() {
+		return []string{a.URL()}
+	}
+	_, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return []string{a.URL()}
+	}
+	if urls := lanURLs(port); len(urls) > 0 {
+		return urls
+	}
+	return []string{a.URL()}
+}
+
+// lanURLs returns "http://<ip>:<port>" for every non-loopback IPv4
+// address of the host, sorted. Best-effort: a failure to enumerate
+// interfaces yields nil, never an error (the caller falls back to
+// URL()).
+func lanURLs(port string) []string {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, a := range addrs {
+		ipnet, ok := a.(*net.IPNet)
+		if !ok || ipnet.IP.IsLoopback() {
+			continue
+		}
+		ip4 := ipnet.IP.To4()
+		if ip4 == nil {
+			continue
+		}
+		out = append(out, "http://"+net.JoinHostPort(ip4.String(), port))
+	}
+	sort.Strings(out)
+	return out
 }
 
 // Log returns the daemon's logger (the event log, plus the echo).
@@ -590,7 +645,7 @@ func (a *App) Run(ctx context.Context) (err error) {
 	}
 	brainMode := a.BrainMode()
 	a.log.Log("daemon", "daemon.start", "", map[string]any{
-		"version": a.opts.Version, "voice": a.opts.Voice, "herdr": a.opts.Herdr, "cli": a.opts.CLI, "brain": brainMode, "url": a.URL(),
+		"version": a.opts.Version, "voice": a.opts.Voice, "herdr": a.opts.Herdr, "cli": a.opts.CLI, "brain": brainMode, "url": a.URL(), "urls": a.URLs(),
 		"data_dir": a.cfg.DataDir, "brain_provider": a.BrainProvider(), "brain_model": a.BrainModel(),
 	})
 	a.restoreBrainModel()

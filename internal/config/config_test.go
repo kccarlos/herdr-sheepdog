@@ -538,3 +538,56 @@ func TestDeepSeekConfig(t *testing.T) {
 		}
 	}
 }
+
+// TestWebBindAndToken covers the web.bind / web.token defaults, file and
+// env overrides, and IsLoopback's loopback/non-loopback classification
+// (app.Build's "web.token is required when web.bind is not loopback"
+// check depends on it).
+func TestWebBindAndToken(t *testing.T) {
+	def := Default()
+	if def.Web.Bind != "127.0.0.1" || def.Web.Token != "" || !def.Web.IsLoopback() {
+		t.Errorf("defaults = %+v", def.Web)
+	}
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	body := "[web]\nbind = \"0.0.0.0\"\ntoken = \"file-token\"\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := load(path, noEnv)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Web.Bind != "0.0.0.0" || cfg.Web.Token != "file-token" || cfg.Web.IsLoopback() {
+		t.Errorf("file values = %+v", cfg.Web)
+	}
+	if s := cfg.String(); !strings.Contains(s, "web.token=set") || strings.Contains(s, "file-token") {
+		t.Errorf("String() leaks or misreports web.token: %s", s)
+	}
+
+	cfg, err = load(path, envFrom(map[string]string{"SHEEPDOG_WEB_BIND": "192.168.1.5", "SHEEPDOG_WEB_TOKEN": "env-token"}))
+	if err != nil {
+		t.Fatalf("load with env: %v", err)
+	}
+	if cfg.Web.Bind != "192.168.1.5" || cfg.Web.Token != "env-token" || cfg.Web.IsLoopback() {
+		t.Errorf("env values = %+v", cfg.Web)
+	}
+
+	// An empty SHEEPDOG_WEB_TOKEN does not clear a file token (like
+	// DEEPSEEK_API_KEY).
+	if cfg, err := load(path, envFrom(map[string]string{"SHEEPDOG_WEB_TOKEN": ""})); err != nil || cfg.Web.Token != "file-token" {
+		t.Errorf("empty env token: %v %q", err, cfg.Web.Token)
+	}
+
+	for _, bind := range []string{"127.0.0.1", "localhost", "::1"} {
+		if w := (Web{Bind: bind}); !w.IsLoopback() {
+			t.Errorf("IsLoopback(%q) = false, want true", bind)
+		}
+	}
+	for _, bind := range []string{"0.0.0.0", "192.168.1.5", "100.64.0.1", "", "not-an-ip"} {
+		if w := (Web{Bind: bind}); w.IsLoopback() {
+			t.Errorf("IsLoopback(%q) = true, want false", bind)
+		}
+	}
+}

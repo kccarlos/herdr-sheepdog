@@ -65,6 +65,28 @@ nothing to install on herdr's side.
 Then open **http://127.0.0.1:7777/voice** (or whatever `web.port` you
 configured) and hit Connect.
 
+**From your phone.** The daemon binds to `127.0.0.1` (loopback) by
+default, so it is only reachable from the machine it runs on. To reach
+it from a phone on the same LAN, or over Tailscale, set `web.bind` to a
+non-loopback address and `web.token` to a secret the daemon will require
+(`config.toml` or `SHEEPDOG_WEB_BIND`/`SHEEPDOG_WEB_TOKEN`):
+
+```toml
+[web]
+bind = "0.0.0.0"       # every interface; a specific LAN or Tailscale IP also works
+token = "pick-something-long-and-random"
+```
+
+`sheepdog serve` refuses to start with a non-loopback `web.bind` and no
+`web.token` set. Once it starts, the banner prints a `lan url` line for
+every non-loopback IPv4 address of the host — read the right one (LAN or
+`100.x.x.x` Tailscale) off the log and open `<that url>/voice` on the
+phone. The page shows an inline token prompt the first time it needs
+one; typing the token once sets a cookie so it is not asked again. There
+is no TLS in v1, so treat this as a private-network feature (a LAN you
+trust, or Tailscale), not something to expose to the open internet — see
+[`CONFIG.md`](CONFIG.md) "web.token" and `docs/ws-contract.md` "Auth".
+
 ## Usage
 
 ```sh

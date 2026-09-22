@@ -23,6 +23,7 @@ far, every one squash-merged on green CI after independent verification.
 | Logo (README picture, both pages, favicons) | done (#18) |
 | Brain model switch at runtime (`/debug` picker, `GET /api/brain/models`, `PUT /api/brain/model`, `session.brain_model`) | done (#25); verified with `--brain=fake` and one live model-list call |
 | DeepSeek as a second brain provider (`[deepseek]`, `brain.provider`, `OpenAICompatModel`, provider select on `/debug`, `session.brain_provider`) | in review; verified live: 11 DeepSeek calls (model list, tool-using asks at `low` and twice at `high`, a `prompt`+`promise` propose, a seeded second turn without earlier reasoning) |
+| Phone/LAN access: `web.bind`/`web.token`, bearer/query/cookie auth on `/ws`, `/events` and `/api/*`, `POST /api/login`, public `GET /api/hello`, inline token prompt on `/voice`/`/debug`, LAN URLs in the startup banner | in review; verified with the fake daemon (`--brain=fake --herdr=mock`), not yet on a real phone |
 
 ## Verified live vs. verified with the fake model only
 
