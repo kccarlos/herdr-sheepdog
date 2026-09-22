@@ -198,6 +198,10 @@ type Supervisor struct {
 	mentioned     map[string]time.Time // pane -> when a spoken briefing last named it
 	lastPrompt    map[string]string    // pane -> signature of the last answer_prompt built for it (reprompt.go)
 	utterance     *inflightUtterance   // the to_supervisor call in flight (stop.go phases 1 and 2)
+	// recentPushes are the pushes spoken within echoWindow, so
+	// ToSupervisor can tell the voice echoing an announcement back apart
+	// from a genuine shepherd utterance (utterance.go's isEcho).
+	recentPushes []pushRecord
 	// investigating is the one running background job per pane
 	// (investigate.go).
 	investigating map[string]*liveInvestigation
@@ -361,9 +365,42 @@ func (s *Supervisor) pushTagged(paneID, text string, u voice.Urgency, tags map[s
 		s.log.Log(logSource, "supervisor.push_error", paneID, map[string]any{"text": text, "urgency": u.String(), "error": err.Error()})
 		return
 	}
-	if s.brain != nil && u != voice.UrgencySilent {
-		s.brain.Pushed(s.aliasOf(paneID), text, u.String())
+	if u != voice.UrgencySilent {
+		// A silent push is context the voice never speaks, so it cannot be
+		// echoed back as something heard.
+		s.recordPush(text)
+		if s.brain != nil {
+			s.brain.Pushed(s.aliasOf(paneID), text, u.String())
+		}
 	}
+}
+
+// pushRecord is one push spoken to the voice, kept for echoWindow so
+// ToSupervisor can recognise the voice relaying it back as if the
+// shepherd had said it (utterance.go's isEcho, docs/issues-2026-09-18.md
+// Bug 2).
+type pushRecord struct {
+	text string
+	at   time.Time
+}
+
+// echoWindow is how long a push counts as "just spoken" for isEcho.
+const echoWindow = 30 * time.Second
+
+// recordPush remembers text as spoken just now, dropping entries older
+// than echoWindow.
+func (s *Supervisor) recordPush(text string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := s.cfg.Now()
+	cutoff := now.Add(-echoWindow)
+	kept := s.recentPushes[:0]
+	for _, p := range s.recentPushes {
+		if p.at.After(cutoff) {
+			kept = append(kept, p)
+		}
+	}
+	s.recentPushes = append(kept, pushRecord{text: text, at: now})
 }
 
 // pushTo hands the line to the pusher, with the tags when it takes them.

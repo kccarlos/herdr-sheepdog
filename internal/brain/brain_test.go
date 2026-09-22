@@ -187,6 +187,10 @@ func TestSendKeysBlocked(t *testing.T) {
 		{"event", TriggerEvent, approvalPrompt(), []any{"enter"}, "never on an event"},
 		{"key", TriggerCEO, approvalPrompt(), []any{"ctrl-c"}, `key "ctrl-c" is not in the prompt's option set`},
 		{"nopending", TriggerCEO, nil, []any{"enter"}, "no recorded approval prompt"},
+		// "enter" (yes) and "p" (the other option) are each individually
+		// in the option set, but never together: a mixed sequence must
+		// never answer this prompt and risk confirming the next one.
+		{"mixed", TriggerCEO, approvalPrompt(), []any{"enter", "p"}, "mix more than one option"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -230,6 +234,32 @@ func TestSendKeysBlocked(t *testing.T) {
 	}
 	if h.log.count("brain.rail_blocked") != 1 || len(h.host.Keys) != 0 {
 		t.Errorf("host refusal not logged as rail_blocked (%d) or keys sent (%v)", h.log.count("brain.rail_blocked"), h.host.Keys)
+	}
+}
+
+// (5b) A blocked agent with nothing recorded is not refused by the rail
+// itself: the Host may still revive the prompt from the screen
+// (docs/issues-2026-09-18.md "an expired approval prompt can never be
+// approved"), so the rail defers to it. A plain test Host has no
+// revival logic and still refuses, but with its own reason, not the
+// rail's "has no recorded approval prompt".
+func TestSendKeysDefersToHostWhenBlockedWithNoPending(t *testing.T) {
+	h := newHarness(t, braintest.NewModel(
+		braintest.Step{Calls: []*genai.FunctionCall{braintest.FC(ToolSendKeys, map[string]any{"agent": "auth", "keys": []any{"enter"}})}},
+		braintest.Step{Text: braintest.Reply("I cannot answer that prompt myself.", "")},
+	), nil)
+	h.host.SetAgent(AgentInfo{PaneID: "w5:p1", Alias: "auth", Kind: "codex", State: "blocked"})
+	h.host.SetPending("w5:p1", nil)
+	rep, err := h.brain.Turn(context.Background(), Request{Kind: KindPropose, Trigger: TriggerCEO, Question: "answer yes", Agent: "auth"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Spoken != "I cannot answer that prompt myself." {
+		t.Errorf("reply = %+v", rep)
+	}
+	blocked := h.log.ofType("brain.rail_blocked")
+	if len(blocked) != 1 || !strings.Contains(payload(blocked[0])["reason"].(string), "no pending prompt") {
+		t.Errorf("brain.rail_blocked = %v", blocked)
 	}
 }
 

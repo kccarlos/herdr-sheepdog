@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"unicode"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
@@ -36,6 +37,15 @@ func (s *Supervisor) ToSupervisor(ctx context.Context, text string) (voice.ToolR
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return voice.ToolResult{Spoken: "Sorry, what was that?", Clarify: true, Scheduling: voice.UrgencyInterrupt}, nil
+	}
+	if s.isEcho(text) {
+		// The voice relayed a push back through to_supervisor as if the
+		// CEO had said it (a wasted turn at best; with different phrasing
+		// it could look like authorisation). Nothing was said: no fast
+		// path, no brain turn, and the rail never sees these words as the
+		// CEO's own (docs/issues-2026-09-18.md Bug 2).
+		s.log.Log(logSource, "supervisor.echo_ignored", "", map[string]any{"text": text})
+		return voice.ToolResult{Scheduling: voice.UrgencySilent}, nil
 	}
 	// Bare stop first: "no" is an answer, "no no" is a stop.
 	if bareStop(text) {
@@ -155,6 +165,49 @@ func bareWord(text string) string {
 // bareStop reports whether the whole utterance is one of the stop words.
 func bareStop(text string) bool { return bareStopWords[bareWord(text)] }
 
+// isEcho reports whether text equals, or is contained in, a push spoken
+// within echoWindow (case/punctuation-insensitive): the voice relaying
+// its own announcement back through to_supervisor rather than something
+// the CEO said (docs/issues-2026-09-18.md Bug 2).
+func (s *Supervisor) isEcho(text string) bool {
+	norm := normalizeEcho(text)
+	if norm == "" {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cutoff := s.cfg.Now().Add(-echoWindow)
+	for _, p := range s.recentPushes {
+		if p.at.Before(cutoff) {
+			continue
+		}
+		if pn := normalizeEcho(p.text); pn != "" && strings.Contains(pn, norm) {
+			return true
+		}
+	}
+	return false
+}
+
+// normalizeEcho lower-cases text and collapses every run of non-letter,
+// non-digit characters to a single space, so the echo comparison ignores
+// case and punctuation.
+func normalizeEcho(text string) string {
+	var b strings.Builder
+	space := true // trims the leading run too
+	for _, r := range strings.ToLower(text) {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			b.WriteRune(r)
+			space = false
+			continue
+		}
+		if !space {
+			b.WriteByte(' ')
+			space = true
+		}
+	}
+	return strings.TrimSpace(b.String())
+}
+
 // fastAnswer is the bare-answer fast path: the whole utterance answers
 // the one open answer_prompt, so the keys go straight to the pane
 // without a model (the CEO's verbatim word is what the rail asks for).
@@ -163,7 +216,21 @@ func (s *Supervisor) fastAnswer(ctx context.Context, text string) (voice.ToolRes
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	p, has := s.store.Pending()
-	if !has || p.Kind != state.PendingAnswerPrompt || !s.cfg.Now().Before(p.ExpiresAt) {
+	switch {
+	case has && p.Kind == state.PendingAnswerPrompt && s.cfg.Now().Before(p.ExpiresAt):
+		// Live and unexpired: the ordinary case.
+	case !has && s.expired != nil:
+		// The pane's answer_prompt pending expired while nobody answered,
+		// but the prompt may still be on screen: revive it before mapping
+		// the bare word onto its keys (docs/issues-2026-09-18.md "an
+		// expired approval prompt can never be approved"). s.expired only
+		// says which pane; revival always re-reads the screen.
+		revived, ok := s.revivePrompt(ctx, s.expired.PaneID, "fast_path")
+		if !ok {
+			return voice.ToolResult{}, false
+		}
+		p = revived
+	default:
 		return voice.ToolResult{}, false
 	}
 	keys, label, ok := bareAnswer(p, text)

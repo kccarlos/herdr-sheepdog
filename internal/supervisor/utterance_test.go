@@ -151,6 +151,65 @@ func TestFastPathBoundaries(t *testing.T) {
 	})
 }
 
+// (3b) The voice relaying a push back through to_supervisor — verbatim,
+// or differing only in case or trailing punctuation — is never treated
+// as the CEO's words: no fast path, no brain turn (docs/issues-
+// 2026-09-18.md Bug 2, "the voice relayed an announcement as if the
+// shepherd said it").
+func TestEchoedPushIsIgnored(t *testing.T) {
+	m := braintest.NewModel(braintest.Step{Text: braintest.Reply("not the shepherd", "")})
+	h := newBrainHarness(t, m)
+	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
+	const pushText = "auth asks to run git status --short."
+	h.sup.push("w5:p1", pushText, voice.UrgencyIdle)
+	before := len(m.Calls())
+
+	for _, text := range []string{pushText, strings.ToUpper(pushText), strings.TrimSuffix(pushText, ".")} {
+		res := h.say(text)
+		if res.Scheduling != voice.UrgencySilent || res.Spoken != "" {
+			t.Errorf("say(%q) = %+v", text, res)
+		}
+	}
+	if n := len(m.Calls()) - before; n != 0 {
+		t.Errorf("%d model calls, want none for an echoed push", n)
+	}
+	if h.log.count("supervisor.echo_ignored") != 3 {
+		t.Errorf("echo_ignored = %d, want 3", h.log.count("supervisor.echo_ignored"))
+	}
+	if got := h.sendKeysRequests(); len(got) != 0 {
+		t.Errorf("send_keys = %v, want none", got)
+	}
+
+	// Genuinely new words are never mistaken for an echo, even sharing
+	// most of the push's own text.
+	res := h.say("yes, " + pushText)
+	if res.Scheduling == voice.UrgencySilent {
+		t.Errorf("a real instruction containing the push text was ignored: %+v", res)
+	}
+	if got := len(m.Calls()) - before; got != 1 {
+		t.Errorf("%d model calls, want one for the non-echo utterance", got)
+	}
+}
+
+// (3c) Past echoWindow a push's own text is no longer treated as an
+// echo: it reaches the brain like anything else.
+func TestEchoWindowExpires(t *testing.T) {
+	m := braintest.NewModel(braintest.Step{Text: braintest.Reply("heard you", "")})
+	h := newBrainHarness(t, m)
+	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
+	const pushText = "auth asks to run git status --short."
+	h.sup.push("w5:p1", pushText, voice.UrgencyIdle)
+	h.clock.Advance(31 * time.Second)
+
+	res := h.say(pushText)
+	if res.Scheduling == voice.UrgencySilent {
+		t.Errorf("a stale push was still treated as an echo: %+v", res)
+	}
+	if h.log.count("supervisor.echo_ignored") != 0 {
+		t.Error("echo_ignored logged past echoWindow")
+	}
+}
+
 // (4) A bare stop word never reaches a model and never becomes an
 // answer: phase 4 leaves the worker's question open.
 func TestStopLeavesAnOpenPromptOpen(t *testing.T) {

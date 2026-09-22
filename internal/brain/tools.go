@@ -286,7 +286,16 @@ func (b *Brain) rail(trigger Trigger, row AgentInfo, keys []string) string {
 		return "send_keys is only permitted in a turn the CEO's own words triggered, never on an event"
 	}
 	if row.Pending == nil {
-		return fmt.Sprintf("%s has no recorded approval prompt to answer", aliasOr(row.Alias))
+		if row.State != "blocked" {
+			return fmt.Sprintf("%s has no recorded approval prompt to answer", aliasOr(row.Alias))
+		}
+		// Blocked with nothing recorded: its answer_prompt pending expired
+		// unanswered while nobody was watching, or the daemon never caught
+		// it. Deferred to the Host, which re-reads the screen and revives
+		// the pending action before its own atomic check
+		// (docs/issues-2026-09-18.md "an expired approval prompt can never
+		// be approved").
+		return ""
 	}
 	if len(keys) == 0 {
 		return "send_keys needs the keys of one of the prompt's options"
@@ -303,6 +312,9 @@ func (b *Brain) rail(trigger Trigger, row AgentInfo, keys []string) string {
 		if !found {
 			return fmt.Sprintf("key %q is not in the prompt's option set %v", k, allowed)
 		}
+	}
+	if !row.Pending.SelectedBy(keys) {
+		return fmt.Sprintf("keys %v mix more than one option; send just the one option's key(s), from %v", keys, allowed)
 	}
 	return ""
 }
