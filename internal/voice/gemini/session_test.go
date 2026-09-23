@@ -166,6 +166,46 @@ func TestAudioStreamEnd(t *testing.T) {
 	c.waitSent(t, "audio reopens the stream", func(m sent) bool { return m.kind == "audio" })
 }
 
+// TestAudioStreamEndSendsComfortNoiseFirst: a gate close sends GateTail
+// of a low noise floor (never digital zeros, never loud) before
+// audioStreamEnd, so Live's activity detection hears the pause after the
+// last word (the audio-e2e harness found utterances followed by the
+// gate's zeros and a stream end were never transcribed).
+func TestAudioStreamEndSendsComfortNoiseFirst(t *testing.T) {
+	c := newFakeConn("c1")
+	h := newHarness(t, Config{GateTail: 500 * time.Millisecond}, &fakeDialer{results: []func() (Conn, error){ok(c)}})
+	h.s.AudioStreamEnd()
+	c.waitSent(t, "audioStreamEnd", func(m sent) bool { return m.kind == "audioEnd" })
+	var tail []byte
+	for _, m := range c.sentMsgs() {
+		if m.kind == "audioEnd" {
+			break
+		}
+		if m.kind == "audio" {
+			tail = append(tail, m.audio...)
+		}
+	}
+	if len(tail) != 16000 { // 500 ms of 16 kHz PCM16
+		t.Fatalf("tail %d bytes, want 16000", len(tail))
+	}
+	nonzero := 0
+	for i := 0; i+1 < len(tail); i += 2 {
+		v := int16(uint16(tail[i]) | uint16(tail[i+1])<<8)
+		if v > 8 || v < -8 {
+			t.Fatalf("tail sample %d out of the ±8 floor", v)
+		}
+		if v != 0 {
+			nonzero++
+		}
+	}
+	if nonzero < len(tail)/4 {
+		t.Errorf("tail is mostly zeros (%d non-zero samples)", nonzero)
+	}
+	if comfortNoise(-time.Second) != nil {
+		t.Error("a negative GateTail must disable the tail")
+	}
+}
+
 func TestOutputQueueFlushOnInterrupted(t *testing.T) {
 	c := newFakeConn("c1")
 	h := newHarness(t, Config{}, &fakeDialer{results: []func() (Conn, error){ok(c)}})

@@ -32,6 +32,8 @@ func printAudioE2EUsage(w io.Writer) {
 	fprintln(w, "  --cache DIR        rendered speech cache (default $TMPDIR/sheepdog-audio-e2e)")
 	fprintln(w, "  --save DIR         also write <scenario>.in.wav / .out.wav there")
 	fprintln(w, "  --json FILE        write the full results (timelines, events) as JSON")
+	fprintln(w, "  --floor-dbfs DB    add a microphone noise floor (e.g. -72) to every frame; 0 (the")
+	fprintln(w, "                     default) streams digital silence, so the silence gate closes")
 	fprintln(w, "")
 	fprintln(w, "Prints a Markdown table; exits 1 when a scenario failed.")
 }
@@ -47,6 +49,7 @@ func runAudioE2E(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	cache := fs.String("cache", filepath.Join(os.TempDir(), "sheepdog-audio-e2e"), "speech cache")
 	save := fs.String("save", "", "save audio here")
 	jsonOut := fs.String("json", "", "results JSON")
+	floor := fs.Float64("floor-dbfs", 0, "microphone noise floor")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -76,7 +79,7 @@ func runAudioE2E(ctx context.Context, args []string, stdout, stderr io.Writer) i
 		}
 	}
 	opts := audioe2e.Options{BaseURL: url, Token: *token, CacheDir: *cache, FixtureDir: filepath.Join(filepath.Dir(filepath.Dir(*scen)), "herdr"),
-		Provider: provider, DefaultVoice: file.Voice, Save: *save, Log: stderr}
+		Provider: provider, DefaultVoice: file.Voice, Save: *save, Log: stderr, FloorDBFS: *floor}
 	var results []audioe2e.Result
 	failed := false
 	for _, sc := range file.Scenarios {

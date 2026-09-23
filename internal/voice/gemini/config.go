@@ -77,6 +77,11 @@ type Config struct {
 	CompressionTarget  int64
 	// EventBuffer is the capacity of the Events channel (default 1024).
 	EventBuffer int
+	// GateTail is the comfort noise sent before audioStreamEnd when the
+	// client's silence gate closes (default 1 s; negative disables), so
+	// Live's activity detection hears the speech end (session.go
+	// AudioStreamEnd).
+	GateTail time.Duration
 	// ToolResponseWait bounds how long a tool response is held back for
 	// the model to close the turn that issued the call (default 1.5 s).
 	// Responding before that turnComplete made the model treat the result
@@ -132,6 +137,9 @@ func (c Config) withDefaults() Config {
 	}
 	if c.EventBuffer == 0 {
 		c.EventBuffer = 1024
+	}
+	if c.GateTail == 0 {
+		c.GateTail = time.Second
 	}
 	if c.ToolResponseWait == 0 {
 		c.ToolResponseWait = 1500 * time.Millisecond

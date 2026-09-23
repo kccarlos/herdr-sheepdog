@@ -220,13 +220,48 @@ func (s *Session) SetMuted(muted bool) {
 // client's silence gate closed) so its VAD finalises the current utterance
 // instead of waiting for frames that will not come. The next SendAudio
 // reopens the stream. No-op while muted or disconnected.
+//
+// Before the stream end it sends Config.GateTail of comfort noise (a ±8
+// LSB floor, like a real microphone's): found by the audio-e2e harness
+// (2026-09-23), an utterance followed only by the client's 300 ms of
+// digital silence and audioStreamEnd was never transcribed — Live's
+// activity detection did not see the speech end, and the audio was
+// only heard, twice over, once a later stream carried a real noise
+// floor. The tail gives it the pause it listens for.
 func (s *Session) AudioStreamEnd() {
 	s.mu.Lock()
 	conn, muted := s.conn, s.muted
 	s.mu.Unlock()
-	if !muted {
-		s.audioStreamEnd(conn)
+	if muted || conn == nil {
+		return
 	}
+	if tail := comfortNoise(s.cfg.GateTail); len(tail) > 0 {
+		const chunk = 16000 * 2 / 10 // 100 ms
+		for i := 0; i < len(tail); i += chunk {
+			if err := s.sendAudio(conn, tail[i:min(i+chunk, len(tail))]); err != nil {
+				return
+			}
+		}
+	}
+	s.audioStreamEnd(conn)
+}
+
+// comfortNoise returns d of 16 kHz PCM16 low-level noise (±8 LSB).
+func comfortNoise(d time.Duration) []byte {
+	n := int(d.Seconds() * 16000)
+	if n <= 0 {
+		return nil
+	}
+	b := make([]byte, n*2)
+	x := uint32(2463534242)
+	for i := 0; i < n; i++ {
+		x ^= x << 13
+		x ^= x >> 17
+		x ^= x << 5
+		v := int16(int32(x%17) - 8)
+		b[2*i], b[2*i+1] = byte(v), byte(uint16(v)>>8)
+	}
+	return b
 }
 
 func (s *Session) audioStreamEnd(conn Conn) {

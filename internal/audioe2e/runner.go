@@ -50,6 +50,10 @@ type Options struct {
 	Save string
 	// Log receives progress lines.
 	Log io.Writer
+	// FloorDBFS adds a white-noise floor at this level to every frame,
+	// like a real microphone's self-noise (0 = digital silence, which
+	// makes the apps' silence gate close between utterances).
+	FloorDBFS float64
 }
 
 // Timed is one recorded item at an offset from the scenario start.
@@ -172,9 +176,13 @@ func Run(ctx context.Context, sc Scenario, o Options) (Result, error) {
 	var speechStart time.Time
 	tick := time.NewTicker(frameDur)
 	defer tick.Stop()
+	spoke := false
 	play := func(c chunk) error {
+		// A transcript before any speech is a hallucination (after
+		// speech, transcripts legitimately trail it).
+		spoke = spoke || c.speech
 		rec.mu.Lock()
-		rec.streamingNoise = !c.speech
+		rec.streamingNoise = !spoke
 		rec.mu.Unlock()
 		for i := 0; i < len(c.samples); i += FrameSamples {
 			j := min(i+FrameSamples, len(c.samples))
@@ -211,6 +219,23 @@ func Run(ctx context.Context, sc Scenario, o Options) (Result, error) {
 		return play(chunk{samples: samples})
 	}
 
+	if o.FloorDBFS < 0 {
+		for i := range chunks {
+			n, _ := NoiseSamples("white", len(chunks[i].samples), int64(i)+500)
+			chunks[i].samples = Mix(chunks[i].samples, n, dbfsToRMS(o.FloorDBFS))
+		}
+		inner := bed
+		floorSeed := int64(900)
+		bed = func(n int) []int16 {
+			base := make([]int16, n)
+			if inner != nil {
+				base = inner(n)
+			}
+			floorSeed++
+			fl, _ := NoiseSamples("white", n, floorSeed)
+			return Mix(base, fl, dbfsToRMS(o.FloorDBFS))
+		}
+	}
 	var cancelOnce sync.Once
 	for _, c := range chunks {
 		if c.afterReply {
