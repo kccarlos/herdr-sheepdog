@@ -2,7 +2,7 @@
 
 ## Verified
 
-**Unit tests: 129, all passing** (`SheepdogKitTests`, iPhone 17 Pro simulator,
+**Unit tests: 144, all passing** (`SheepdogKitTests`, iPhone 17 Pro simulator,
 iOS 26, Xcode 27).
 
 ```sh
@@ -33,6 +33,13 @@ They cover:
   cards, the voice-off mirroring, the cap;
 - the orb's state machine: every rule in the priority order, and that
   `capturing` is exactly the set of states where something can hear you;
+- the voice bar's pure mapping (`VoiceBarModel`): the orb's tap action
+  (connect / stop / none), Mute's availability and End's visibility, for
+  every `SessionState`;
+- the connection chip's status (`ConnectionChip`): every combination of the
+  socket's and the `/events` stream's life plus a refused token, and the
+  priority among them (a refused token outranks a failure, a failure
+  outranks "still connecting");
 - the SSE parser: one record, several records, keepalive comments, the
   `closed` record, multi-line `data`, undecodable payloads, the `since`
   sequence;
@@ -105,12 +112,33 @@ file, so no personal bind or token is read), after a few
 | ![](screenshots/11-approval-card.png) | Connected, then `/api/inject/blocked` with the daemon's `codex-approval-prompt.screen.txt`: the card arrives over `/events` with the summary, the command, and three options — the default prominent, the "No…" red. The same question sits in the conversation above it. |
 | ![](screenshots/12-approval-answered.png) | Tapping **Yes, proceed**: the daemon logged `pending.confirmed {"answer":"Yes, proceed","option":1,"via":"tap"}` and answered "Told billing Yes, proceed.", which the card shows. |
 | ![](screenshots/13-approval-answered-inline.png) | 3.5 s later the card steps aside; the conversation keeps the approval as answered. |
-| ![](screenshots/14-offline-cached.png) | The app killed and relaunched **with the daemon stopped**: the cached conversation is on screen at once. |
+| ![](screenshots/14-relaunch-cached.png) | The app killed and relaunched (daemon still up): the cached conversation is on screen at once, from the local cache, before any network round trip lands. |
 
 The test also terminates and relaunches the app mid-stream (daemon up) and
 finds the answered approval within 3 s. VoiceOver labels checked by the
 test: "Approve: Yes, proceed", "Decline: No, and tell Codex what to do
 differently".
+
+### The compact voice bar and the connection chip (simulator, 2026-09-22)
+
+The old 168 pt display-only orb and the Connect pill are gone, replaced by a
+72 pt bar — **[Mute] [orb] [✕ end]** — and a small status line above it; the
+top-left dot became a **connection chip** (dot + word) driven only by the
+daemon connection itself (the `/ws` socket and the `/events` stream, plus
+the token check), never by the voice state, so it no longer reads grey
+while happily connected and quiet. Screenshots, from `WalkthroughUITests`
+against the same 7799 fixture daemon:
+
+| | What |
+|---|---|
+| ![](screenshots/15-voicebar-not-connected.png) | Before Connect: Mute and End are hidden (fixed slots, so the orb never shifts), the orb is a Connect button, and the chip reads grey "Not connected". |
+| ![](screenshots/16-voicebar-connected-voice-off.png) | Connected, voice off: the chip turns green "Connected" — a separate question from the orb's honest "Voice is off on the daemon" — and Mute/End are enabled. |
+| ![](screenshots/17-voicebar-chip-popover.png) | Tapping the chip: full address, round-trip time (a timed `GET /api/hello`), daemon version, voice name and status, the supervisor's `brain` from `/api/state` (`fake · fake-reflex` here), Reconnect and Open Settings — all on one `.large`-detent sheet, no scrolling needed. |
+| ![](screenshots/18-voicebar-offline.png) | Pointed at a dead port: the chip turns red "Offline" (a failed attempt, not the grey of a session that was never opened), alongside the usual plain-words banner. |
+
+The approval card (`11-approval-card.png` above) now sits above the bar
+rather than replacing it — the bar's controls (mute, stop-via-orb, end) stay
+reachable while a worker is waiting on an answer.
 
 ## Not verified
 
@@ -189,3 +217,20 @@ while, wake it, and check nothing is missing or doubled.
 - `SheepdogUITests` occasionally fails with "Timed out while evaluating UI
   query" when the app is busy reconnecting; re-running it passes. The app is
   fine; XCUITest's idle detection is not.
+- **Fixed while building the voice bar:** giving `ConversationView` more of
+  the screen (the old 168 pt orb is gone) made its "am I scrolled to the
+  bottom" tracking — a `Color.clear` sentinel's `onAppear`/`onDisappear`
+  toggling a `@State var atBottom`, `.onChange(of: atBottom)` reacting to
+  it — reliably deadlock the main thread on connect or on a sheet dismiss
+  with a long-enough conversation already on screen (`log show` names it:
+  `[com.apple.SwiftUI:Invalid Configuration] onChange(of: Bool) action
+  tried to update multiple times per frame`). The mechanism itself
+  predates this change; a `git stash` back to before it, run against the
+  same daemon history, connected instantly with no hang — so it took the
+  taller, more-often-full-height conversation this bar makes room for to
+  trigger it. Fixed by folding the `onChange` into the sentinel and
+  deferring its state write a run-loop turn with
+  `DispatchQueue.main.async` (`Sources/Sheepdog/ConversationView.swift`) —
+  confirmed gone across several clean `WalkthroughUITests` and
+  `HistoryApprovalUITests` runs after the fix, where it had reproduced
+  every time before it.

@@ -42,8 +42,30 @@ struct ConversationView: View {
                     Color.clear
                         .frame(height: 1)
                         .id(Self.bottomAnchor)
-                        .onAppear { atBottom = true }
-                        .onDisappear { atBottom = false }
+                        // Folded into the sentinel rather than a separate
+                        // `.onChange(of: atBottom)`: a relayout burst (a
+                        // connect, or a sheet dismissing) can make this view
+                        // appear and disappear within one frame, and a Bool
+                        // `onChange` firing twice in that frame is a
+                        // reproducible SwiftUI "action tried to update
+                        // multiple times per frame" fault that hangs the
+                        // main thread on this iOS build. The write is
+                        // pushed to the next run-loop turn, not made
+                        // in-line, because `onAppear`/`onDisappear` firing
+                        // *during* the same relayout that triggered them
+                        // (a taller, more-often-full-height conversation
+                        // makes that common) re-enters SwiftUI's update
+                        // while it is still settling and reproduced as an
+                        // indefinite main-thread hang with a longer history.
+                        .onAppear {
+                            DispatchQueue.main.async {
+                                atBottom = true
+                                lastSeenID = rows.last?.id
+                            }
+                        }
+                        .onDisappear {
+                            DispatchQueue.main.async { atBottom = false }
+                        }
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
@@ -69,19 +91,18 @@ struct ConversationView: View {
                     .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
             }
-            .onChange(of: rows.last?.id) { _, newest in
-                guard let newest else { return }
-                if atBottom {
-                    lastSeenID = newest
-                    withAnimation(.easeOut(duration: 0.18)) {
-                        proxy.scrollTo(Self.bottomAnchor, anchor: .bottom)
-                    }
+            // One handler, not two: `rows.last?.id` and `rows.last` change
+            // together on every new message, and two separate `onChange`s
+            // each calling `proxy.scrollTo` inside the same SwiftUI
+            // transaction — cheap on a short list — became a reliable
+            // main-thread hang once the conversation was long enough (seen
+            // while testing this bar with a pre-populated history).
+            .onChange(of: rows.last) { _, newest in
+                guard atBottom else { return }
+                if let id = newest?.id, id != lastSeenID { lastSeenID = id }
+                withAnimation(.easeOut(duration: 0.18)) {
+                    proxy.scrollTo(Self.bottomAnchor, anchor: .bottom)
                 }
-            }
-            .onChange(of: rows.last) { _, _ in
-                // An item updated in place (an approval answered) keeps
-                // the same id; follow it too while at the bottom.
-                if atBottom { proxy.scrollTo(Self.bottomAnchor, anchor: .bottom) }
             }
             .onChange(of: activePendingID) { _, _ in
                 // The pinned card appearing or leaving resizes the list:
@@ -92,9 +113,6 @@ struct ConversationView: View {
                         proxy.scrollTo(Self.bottomAnchor, anchor: .bottom)
                     }
                 }
-            }
-            .onChange(of: atBottom) { _, isBottom in
-                if isBottom { lastSeenID = rows.last?.id }
             }
         }
     }

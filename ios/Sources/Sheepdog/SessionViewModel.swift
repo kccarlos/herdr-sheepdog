@@ -39,6 +39,13 @@ final class SessionViewModel: ObservableObject {
     @Published private(set) var hello: Hello?
     @Published private(set) var micLevel: Float = 0
     @Published private(set) var metrics = AudioMetrics()
+    /// The daemon connection's own health — the `/ws` socket, the `/events`
+    /// stream and the token — independent of the voice state. Drives the
+    /// top-left chip.
+    @Published private(set) var connectionChip = ConnectionChip(.init())
+    /// The supervisor's model, from `/api/state`'s `brain`, when the
+    /// daemon reports one.
+    @Published private(set) var brain: BrainInfo?
     @Published var banner: Banner?
     @Published var isMuted = false
     /// True from the moment Connect is tapped until Disconnect.
@@ -86,6 +93,15 @@ final class SessionViewModel: ObservableObject {
     /// The "voice is off" notice is said once per session, not per status.
     private var saidVoiceIsOff = false
     private var socketLife: SessionState.Inputs.Socket = .closed
+    /// The `/events` stream's own life, for the connection chip — separate
+    /// from the voice socket, since either can be up while the other isn't.
+    private var eventsLife: ConnectionChip.Inputs.State = .idle
+    /// A connection attempt ended in a failure `VoiceSocket` will not retry
+    /// by itself (set in `fail(_:)`, cleared on the next attempt or once
+    /// the socket opens).
+    private var connectionFailed = false
+    /// The daemon refused the token.
+    private var tokenRefused = false
 
     init(settings: SettingsStore = SettingsStore(), cache: ConversationCache = .standard()) {
         self.settings = settings
@@ -167,6 +183,9 @@ final class SessionViewModel: ObservableObject {
         banner = nil
         wantsConnection = true
         socketLife = .connecting
+        eventsLife = .connecting
+        connectionFailed = false
+        tokenRefused = false
         refresh()
         Task { await openSession() }
     }
@@ -215,6 +234,9 @@ final class SessionViewModel: ObservableObject {
         refreshTask?.cancel(); refreshTask = nil
         ticker?.cancel(); ticker = nil
         socketLife = .closed
+        eventsLife = .idle
+        connectionFailed = false
+        tokenRefused = false
         voiceStatus = nil
         saidVoiceIsOff = false
         closedReason = nil
@@ -228,6 +250,13 @@ final class SessionViewModel: ObservableObject {
 
     func toggleConnection() {
         wantsConnection ? disconnect() : connect()
+    }
+
+    /// The chip popover's Reconnect button: a clean disconnect (if one is
+    /// needed) followed by a fresh connect, whatever state we are in now.
+    func reconnect() {
+        if wantsConnection { disconnect() }
+        connect()
     }
 
     // MARK: - Controls
@@ -321,6 +350,8 @@ final class SessionViewModel: ObservableObject {
         switch event {
         case .opened:
             socketLife = .open
+            connectionFailed = false
+            tokenRefused = false
             banner = nil
             Haptics.connected()
         case let .control(message):
@@ -425,9 +456,15 @@ final class SessionViewModel: ObservableObject {
                 // Every (re)open: what the stream missed is in the history
                 // too, and a page is cheaper than a long replay to read.
                 Task { await self.syncHistory() }
+                self.eventsLife = .connecting
+                self.refresh()
                 do {
                     for try await output in self.client.events(since: self.resumeID) {
                         if Task.isCancelled { return }
+                        if self.eventsLife != .open {
+                            self.eventsLife = .open
+                            self.refresh()
+                        }
                         self.handle(event: output)
                     }
                 } catch {
@@ -438,6 +475,8 @@ final class SessionViewModel: ObservableObject {
                         self.conversationChanged()
                     }
                     #endif
+                    self.eventsLife = .reconnecting
+                    self.refresh()
                 }
                 try? await Task.sleep(nanoseconds: 2_000_000_000)
             }
@@ -566,8 +605,14 @@ final class SessionViewModel: ObservableObject {
             return true
         } catch let error as DaemonError {
             if !quiet { fail(error) }
+            SheepdogLog.session.error("state: \(String(describing: error), privacy: .public)")
             return false
         } catch {
+            // Quiet even on a decode failure: the periodic and
+            // event-debounced refreshes retry on their own, and a banner
+            // for a transient bad payload would be more alarming than
+            // useful. Still logged, so a persistent failure is visible.
+            SheepdogLog.session.error("state: \(String(describing: error), privacy: .public)")
             return false
         }
     }
@@ -581,6 +626,7 @@ final class SessionViewModel: ObservableObject {
         pendingAction = state.pendingAction
         applyApproval(approvalFlow.present(state.pendingAction), haptic: true)
         daemonVoiceOff = state.voice.isOff || state.voice.status == "closed"
+        brain = state.brain
     }
 
     // MARK: - Conversation history
@@ -744,9 +790,14 @@ final class SessionViewModel: ObservableObject {
 
     private func fail(_ error: DaemonError) {
         show(Banner(tone: .error, message: error.message, hint: error.hint, retryTitle: "Try again"))
-        if case .unauthorized = error { showSettingsForToken() }
+        connectionFailed = true
+        if case .unauthorized = error {
+            tokenRefused = true
+            showSettingsForToken()
+        }
         wantsConnection = false
         socketLife = .closed
+        eventsLife = .idle
         socket.disconnect()
         audio.stop()
         refresh()
@@ -780,6 +831,40 @@ final class SessionViewModel: ObservableObject {
         )
         let next = SessionState.resolve(inputs)
         if next != state { state = next }
+        refreshConnectionChip()
+    }
+
+    private func refreshConnectionChip() {
+        let inputs = ConnectionChip.Inputs(
+            socket: chipSocketState,
+            events: eventsLife,
+            failed: connectionFailed,
+            tokenRefused: tokenRefused
+        )
+        let chip = ConnectionChip(inputs)
+        if chip != connectionChip { connectionChip = chip }
+    }
+
+    private var chipSocketState: ConnectionChip.Inputs.State {
+        switch socketLife {
+        case .closed: return .idle
+        case .connecting: return .connecting
+        case .open: return .open
+        case .reconnecting: return .reconnecting
+        }
+    }
+
+    /// Times a `GET /api/hello` round trip for the connection chip's
+    /// popover. `nil` when there is nowhere to ask or it did not answer.
+    func pingRoundTrip() async -> TimeInterval? {
+        guard settings.endpoint != nil else { return nil }
+        let start = Date()
+        do {
+            _ = try await client.hello()
+            return Date().timeIntervalSince(start)
+        } catch {
+            return nil
+        }
     }
 
     // MARK: - Test connection (Settings)

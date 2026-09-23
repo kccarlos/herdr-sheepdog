@@ -39,7 +39,7 @@ final class HistoryApprovalUITests: XCTestCase {
         shot(app, "10-history-restart-divider")
 
         // 2. Connect, then a worker asks for approval.
-        app.buttons["controls.connect"].tap()
+        app.buttons["controls.orb"].tap()
         app.tap() // lets the interruption monitor answer a microphone prompt
         XCTAssertEqual(post("/api/inject/blocked", [
             "pane_id": "p-billing", "alias": "billing", "kind": "codex", "screen": Fixtures.codexApproval,

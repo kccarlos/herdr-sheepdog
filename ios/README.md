@@ -24,6 +24,10 @@ page at `/voice` does (`docs/ws-contract.md`): PCM16 mono, 16 kHz up,
 |---|---|---|
 | ![History with a restart divider](docs/screenshots/10-history-restart-divider.png) | ![Approval card](docs/screenshots/11-approval-card.png) | ![Answered approval](docs/screenshots/12-approval-answered.png) |
 
+| The voice bar | The connection chip |
+|---|---|
+| ![Mute, orb, End](docs/screenshots/16-voicebar-connected-voice-off.png) | ![Connection chip popover](docs/screenshots/17-voicebar-chip-popover.png) |
+
 ## Build it
 
 No third-party dependencies. The Xcode project is generated, not committed.
@@ -107,10 +111,23 @@ non-goal), so keep this to a network you trust — your LAN, or Tailscale.
 - **Nothing missed across drops.** The `/events` stream resumes from the
   last event id (`Last-Event-ID`, and `?since=` as the fallback), across
   reconnects and relaunches; replayed events change nothing twice.
-- **A presence orb** that says what is happening — listening, quiet,
-  thinking, speaking, muted, stalled, reconnecting — with VoiceOver labels
-  for every state. It never pretends: against a daemon started with
-  `--voice=off` it says so.
+- **A compact voice bar** — Mute, the orb, End (✕) — 72 pt at the bottom,
+  with a small status line above it, so the conversation and the approval
+  card get the rest of the screen. The orb says what is happening —
+  listening, quiet, thinking, speaking, muted, stalled, reconnecting — with
+  VoiceOver labels for every state; it never pretends, saying so against a
+  daemon started with `--voice=off`. Its tap does the one thing that makes
+  sense right now: Connect when disconnected, Stop while the dog is
+  thinking or speaking, nothing otherwise. Mute and End sit in fixed slots
+  so a hidden or disabled control never shifts the orb.
+- **A connection chip**, top left: a dot and one word for the daemon
+  connection itself — the `/ws` socket, the `/events` stream, and the token
+  — never the voice state, so it does not read grey while happily connected
+  and quiet. Green "Connected", amber "Reconnecting…", red "Offline" or
+  "Token refused", grey "Not connected". Tapping it opens the full address,
+  a timed round trip, the daemon's version and voice name, the supervisor's
+  model (`brain` on `/api/state`, when the daemon reports one), and
+  Reconnect / Open Settings.
 - **Reconnects** with backoff after a drop. If another client takes the
   session (the daemon serves one at a time) the app says so and waits for
   you rather than fighting for it.

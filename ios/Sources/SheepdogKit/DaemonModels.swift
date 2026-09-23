@@ -293,6 +293,24 @@ public struct PendingAction: Codable, Equatable, Sendable {
     }
 }
 
+/// The supervisor's model, from `/api/state`'s `brain`, when the daemon
+/// sends one. Optional throughout: an older daemon simply omits the key.
+public struct BrainInfo: Codable, Equatable, Sendable {
+    public var provider: String?
+    public var model: String?
+
+    public init(provider: String? = nil, model: String? = nil) {
+        self.provider = provider
+        self.model = model
+    }
+
+    /// "gemini · gemini-3.5-flash", or just whichever half is there.
+    public var display: String? {
+        let parts = [provider, model].compactMap { $0?.trimmed }.filter { !$0.isEmpty }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+}
+
 /// `GET /api/state`, trimmed to what the app shows.
 public struct DaemonState: Codable, Equatable, Sendable {
     public struct VoiceInfo: Codable, Equatable, Sendable {
@@ -328,18 +346,21 @@ public struct DaemonState: Codable, Equatable, Sendable {
     public var voice: VoiceInfo
     public var herdr: String?
     public var version: String?
+    /// The supervisor's current model, when the daemon reports one.
+    public var brain: BrainInfo?
 
     enum CodingKeys: String, CodingKey {
-        case agents, voice, herdr, version
+        case agents, voice, herdr, version, brain
         case pendingAction = "pending_action"
     }
 
-    public init(agents: [Agent], pendingAction: PendingAction? = nil, voice: VoiceInfo, herdr: String? = nil, version: String? = nil) {
+    public init(agents: [Agent], pendingAction: PendingAction? = nil, voice: VoiceInfo, herdr: String? = nil, version: String? = nil, brain: BrainInfo? = nil) {
         self.agents = agents
         self.pendingAction = pendingAction
         self.voice = voice
         self.herdr = herdr
         self.version = version
+        self.brain = brain
     }
 
     /// The question waiting on a given pane, if the pending action is one.

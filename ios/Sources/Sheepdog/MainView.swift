@@ -2,7 +2,8 @@ import SheepdogKit
 import SwiftUI
 
 /// One screen: the flock across the top, the conversation in the middle,
-/// the orb and three buttons at the bottom — everything in thumb reach.
+/// a status line and the compact voice bar (Mute, orb, End) at the
+/// bottom — everything in thumb reach.
 struct MainView: View {
     @EnvironmentObject private var model: SessionViewModel
     @State private var selectedAgent: Agent?
@@ -53,9 +54,6 @@ struct MainView: View {
                     .onAppear {
                         AccessibilityNotification.Announcement("\(card.pending.agent ?? "An agent") needs your answer. \(card.pending.displaySummary)").post()
                     }
-                } else {
-                    PresenceOrb(state: model.state, level: model.micLevel, voiceName: model.voiceName)
-                        .padding(.top, 4)
                 }
 
                 if model.showMuteHint {
@@ -70,13 +68,32 @@ struct MainView: View {
                         .accessibilityIdentifier("controls.muteHint")
                 }
 
-                ControlBar(
-                    connected: model.wantsConnection,
+                // Fixed height regardless of which state string is showing:
+                // a status line that grows or shrinks the VStack every time
+                // the state changes (e.g. wrapping to two lines) resizes
+                // the ConversationView above it on every transition, which
+                // thrashes its "am I scrolled to the bottom" tracking badly
+                // enough to lock up the main thread (a genuine SwiftUI
+                // "onChange … multiple times per frame" fault, reproduced
+                // while testing this bar).
+                Text(model.state.title)
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                    .frame(height: 16)
+                    .padding(.top, 6)
+                    .accessibilityIdentifier("controls.statusLine")
+
+                VoiceBarView(
+                    state: model.state,
+                    level: model.micLevel,
                     muted: model.isMuted,
-                    canStop: model.state.capturing || model.state == .speaking,
-                    onConnect: { model.toggleConnection() },
+                    voiceName: model.voiceName,
+                    onConnect: { model.connect() },
+                    onStop: { model.stop() },
                     onMute: { model.toggleMute() },
-                    onStop: { model.stop() }
+                    onEnd: { model.disconnect() }
                 )
             }
             .animation(.easeInOut(duration: 0.2), value: model.banner)
@@ -86,15 +103,7 @@ struct MainView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    HStack(spacing: 6) {
-                        Circle()
-                            .fill(Theme.color(for: model.state))
-                            .frame(width: 8, height: 8)
-                        Text(model.endpointDisplay)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                    .accessibilityLabel("Daemon \(model.endpointDisplay), \(model.state.title)")
+                    ConnectionChipView()
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
@@ -123,80 +132,6 @@ struct MainView: View {
                 }
             }
         }
-    }
-}
-
-/// Connect is the primary action; Mute and Stop sit either side of it, all
-/// with 56-point targets.
-struct ControlBar: View {
-    let connected: Bool
-    let muted: Bool
-    let canStop: Bool
-    let onConnect: () -> Void
-    let onMute: () -> Void
-    let onStop: () -> Void
-
-    var body: some View {
-        HStack(spacing: 12) {
-            CircleButton(
-                systemImage: muted ? "mic.slash.fill" : "mic.fill",
-                title: muted ? "Unmute" : "Mute",
-                hint: SessionViewModel.muteHint,
-                tint: muted ? Color(.systemRed) : Color(.label),
-                filled: muted,
-                enabled: connected,
-                action: onMute
-            )
-
-            Button(action: onConnect) {
-                Label(connected ? "Disconnect" : "Connect", systemImage: connected ? "stop.circle" : "waveform.circle.fill")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity, minHeight: 56)
-            }
-            .buttonStyle(.borderedProminent)
-            .accessibilityIdentifier("controls.connect")
-            .tint(connected ? Color(.systemGray) : .accentColor)
-            .accessibilityHint(connected ? "Closes the connection to the daemon" : "Opens the voice session")
-
-            CircleButton(
-                systemImage: "hand.raised.fill",
-                title: "Stop",
-                tint: Color(.systemRed),
-                filled: false,
-                enabled: connected && canStop,
-                action: onStop
-            )
-        }
-        .padding(.horizontal, 16)
-        .padding(.top, 12)
-        .padding(.bottom, 8)
-        .background(.bar)
-    }
-}
-
-struct CircleButton: View {
-    let systemImage: String
-    let title: String
-    var hint: String? = nil
-    let tint: Color
-    let filled: Bool
-    let enabled: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: systemImage)
-                .font(.system(size: 20, weight: .medium))
-                .frame(width: 56, height: 56)
-                .background(
-                    Circle().fill(filled ? tint.opacity(0.18) : Color(.secondarySystemBackground))
-                )
-                .overlay(Circle().strokeBorder(filled ? tint.opacity(0.6) : .clear, lineWidth: 1.5))
-                .foregroundStyle(enabled ? tint : Color(.tertiaryLabel))
-        }
-        .disabled(!enabled)
-        .accessibilityLabel(title)
-        .accessibilityHint(hint ?? "")
     }
 }
 

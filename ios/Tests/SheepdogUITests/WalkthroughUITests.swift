@@ -60,11 +60,27 @@ final class WalkthroughUITests: XCTestCase {
         // The daemon's history (if this one has any) now fills the
         // conversation; a fresh data dir leaves it empty.
         shot(app, "03-main-empty")
+        // The voice bar before Connect: Mute and End hidden, the orb is a
+        // Connect button, and the top-left chip reads the daemon connection
+        // itself (grey "Not connected"), never the voice state.
+        XCTAssertEqual(app.buttons["chip.connection"].label, "Connection: Not connected")
+        shot(app, "15-voicebar-not-connected")
 
         // 4. Connect. The daemon runs without a voice session and says so
         //    rather than pretending to listen.
-        tapWhenReady(app.buttons["controls.connect"], "Connect")
+        tapWhenReady(app.buttons["controls.orb"], "Connect")
         XCTAssertTrue(app.staticTexts["Voice is off on the daemon"].waitForExistence(timeout: 15), "the orb must be honest about --voice=off")
+        shot(app, "16-voicebar-connected-voice-off")
+
+        // The chip's own sheet: address, round trip, daemon/voice info,
+        // Reconnect and Open Settings.
+        tapWhenReady(app.buttons["chip.connection"], "the connection chip")
+        XCTAssertTrue(app.navigationBars["Connection"].waitForExistence(timeout: 10), "the chip should open its sheet")
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "chip.address").firstMatch.waitForExistence(timeout: 5), "the sheet should show the full address")
+        XCTAssertTrue(app.buttons["chip.reconnect"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["chip.openSettings"].exists)
+        shot(app, "17-voicebar-chip-popover")
+        tapWhenReady(app.buttons["Done"], "Done")
 
         // 5. A blocked agent appears through /events, then an utterance.
         try inject("/api/inject/blocked", [
@@ -116,7 +132,7 @@ final class WalkthroughUITests: XCTestCase {
 
         // 8. Point it at a port with nothing behind it: a plain sentence,
         //    not a raw error.
-        tapWhenReady(app.buttons["controls.connect"], "Disconnect")
+        tapWhenReady(app.buttons["controls.end"], "Disconnect")
         tapWhenReady(app.buttons["toolbar.settings"], "the settings button")
         let field = app.textFields["settings.address"]
         XCTAssertTrue(field.waitForExistence(timeout: 10))
@@ -125,9 +141,13 @@ final class WalkthroughUITests: XCTestCase {
         if app.menuItems["Select All"].waitForExistence(timeout: 3) { app.menuItems["Select All"].tap() }
         field.typeText("127.0.0.1:7791")
         tapWhenReady(app.buttons["settings.save"], "Save")
-        tapWhenReady(app.buttons["controls.connect"], "Connect")
+        tapWhenReady(app.buttons["controls.orb"], "Connect")
         XCTAssertTrue(app.staticTexts["Can't reach the daemon at 127.0.0.1:7791 — is it running?"].waitForExistence(timeout: 20))
         shot(app, "07-error-banner")
+        // The failed attempt reads as red "Offline" on the chip — not the
+        // grey "Not connected" of a session that was never opened.
+        XCTAssertEqual(app.buttons["chip.connection"].label, "Connection: Offline")
+        shot(app, "18-voicebar-offline")
     }
 
     /// The token path, against a second daemon started with
@@ -164,10 +184,10 @@ final class WalkthroughUITests: XCTestCase {
         shot(app, "09-settings-token-accepted")
         tapWhenReady(app.buttons["settings.save"], "Save")
         dismissPasswordPrompt(app)
-        if !app.buttons["controls.connect"].isHittable {
+        if !app.buttons["controls.orb"].isHittable {
             shot(app, "debug-after-token-save")
         }
-        tapWhenReady(app.buttons["controls.connect"], "Connect")
+        tapWhenReady(app.buttons["controls.orb"], "Connect")
         if !app.staticTexts["Voice is off on the daemon"].waitForExistence(timeout: 15) {
             shot(app, "debug-token-connect")
             XCTFail("connecting with the right token should reach the daemon")
@@ -194,7 +214,7 @@ final class WalkthroughUITests: XCTestCase {
         // Poking the app lets the interruption monitor run.
         app.tap()
         usleep(400_000)
-        guard !app.buttons["controls.connect"].isHittable else { return }
+        guard !app.buttons["controls.orb"].isHittable else { return }
         // Last resort: the dialog's "Not Now" sits at a fixed place, and a
         // coordinate tap hits whatever is topmost on screen.
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.315, dy: 0.625)).tap()
@@ -205,11 +225,16 @@ final class WalkthroughUITests: XCTestCase {
     /// an `other` or a `staticText` depending on what it merged, so look in
     /// both — and by identifier, because a `.any` query over a growing
     /// conversation times out.
+    /// `.firstMatch`, not the exact-one subscript: a push identifier can
+    /// legitimately match more than one bubble (e.g. the supervisor's own
+    /// "dropping the earlier question" notice alongside the one this step
+    /// is looking for), and either reads fine for what the caller checks.
     private func bubble(_ app: XCUIApplication, _ identifier: String, timeout: TimeInterval = 15) -> XCUIElement? {
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
-            for candidate in [app.otherElements[identifier], app.staticTexts[identifier], app.buttons[identifier]] where candidate.exists {
-                return candidate
+            for query in [app.otherElements, app.staticTexts, app.buttons] {
+                let first = query.matching(identifier: identifier).firstMatch
+                if first.exists { return first }
             }
             usleep(250_000)
         } while Date() < deadline

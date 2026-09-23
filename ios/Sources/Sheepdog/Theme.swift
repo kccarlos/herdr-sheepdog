@@ -43,7 +43,9 @@ enum Theme {
         case .voiceOff: return unknown
         case .idle: return done
         case .connecting, .reconnecting: return blocked
-        case .disconnected: return unknown
+        // The voice bar's orb is a Connect button here, so it wears the
+        // app's own primary tint rather than reading as "broken".
+        case .disconnected: return .accentColor
         }
     }
 
@@ -51,14 +53,16 @@ enum Theme {
         switch session {
         case .listening: return "waveform"
         case .silent: return "waveform.badge.minus"
-        case .speaking: return "speaker.wave.2.fill"
+        // A waveform, not a speaker: the bar's small stop badge already
+        // says "tap to interrupt", the icon just needs to say "audio".
+        case .speaking: return "waveform"
         case .thinking: return "ellipsis"
         case .muted: return "mic.slash.fill"
         case .stalled: return "hourglass"
-        case .voiceOff: return "mic.badge.xmark"
+        case .voiceOff: return "mic.slash"
         case .idle: return "checkmark"
         case .connecting, .reconnecting: return "arrow.triangle.2.circlepath"
-        case .disconnected: return "bolt.horizontal.circle"
+        case .disconnected: return "waveform"
         }
     }
 }
