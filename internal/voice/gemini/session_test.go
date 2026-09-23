@@ -542,6 +542,36 @@ func TestSpeakingLifecycle(t *testing.T) {
 	h.waitEvent("interrupted ends speaking", func(ev voice.Event) bool { return !h.s.Speaking() })
 }
 
+// TestAudioTimingLoggedPerTurn: two output-audio chunks in one turn log a
+// single voice.audio_timing line on turnComplete with the expected shape
+// (WP: audible gaps investigation, docs/audio-e2e-results.md).
+func TestAudioTimingLoggedPerTurn(t *testing.T) {
+	c := newFakeConn("c1")
+	h := newHarness(t, Config{}, &fakeDialer{results: []func() (Conn, error){ok(c)}})
+
+	c.serve(audioMsg(make([]byte, 1920)))
+	c.serve(audioMsg(make([]byte, 1920)))
+	c.serve(turnCompleteMsg())
+	h.waitEvent("turn complete", func(ev voice.Event) bool { _, ok := ev.(voice.EventTurnComplete); return ok })
+
+	payloads := h.log.payloads("voice.audio_timing")
+	if n := len(payloads); n != 1 {
+		t.Fatalf("voice.audio_timing logged %d times, want 1", n)
+	}
+	p := payloads[0]
+	if p["chunks"] != 2 {
+		t.Fatalf("chunks = %v, want 2", p["chunks"])
+	}
+	if p["bytes"] != 3840 {
+		t.Fatalf("bytes = %v, want 3840", p["bytes"])
+	}
+	for _, k := range []string{"turn", "audio_ms", "wall_ms", "max_gap_ms", "p95_gap_ms"} {
+		if _, ok := p[k]; !ok {
+			t.Errorf("missing %s in %v", k, p)
+		}
+	}
+}
+
 // TestPushInterruptDeferredWhileSpeaking: an untagged INTERRUPT push
 // asked for while the model is speaking is deferred to WHEN_IDLE
 // (docs/roles.md "Pushes": nothing interrupts the model mid-sentence

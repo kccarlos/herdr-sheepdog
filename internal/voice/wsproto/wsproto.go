@@ -59,6 +59,13 @@ type Message struct {
 	// ping (optional client counters, mirrored into web.client.stats)
 	GatedFrames *int `json:"gated_frames,omitempty"`
 	Peak        *int `json:"peak,omitempty"`
+	// Underruns, Drains and BufferMs are the playback worklet's jitter
+	// buffer stats (audio-util.js Player), reported so the daemon's
+	// web.client.stats carries the browser's underrun count and current
+	// buffer target/level without a separate channel.
+	Underruns *int `json:"underruns,omitempty"`
+	Drains    *int `json:"drains,omitempty"`
+	BufferMs  *int `json:"buffer_ms,omitempty"`
 
 	// text (client→server: simulated utterance) and transcript (server→client)
 	Text string `json:"text,omitempty"`

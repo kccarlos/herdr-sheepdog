@@ -10,6 +10,7 @@ import (
 
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
+	"github.com/kccarlos/herdr-sheepdog/internal/voice/audiotiming"
 )
 
 const (
@@ -73,6 +74,11 @@ type Session struct {
 	// tailGen is bumped by every gate close and every client frame, so a
 	// comfort-noise tail stops when the gate reopens (AudioStreamEnd).
 	tailGen int
+	// audioTiming follows the open model turn's output-audio arrivals
+	// (voice.audio_timing, WP: audible gaps investigation); nil between
+	// turns. audioTurnSeq numbers turns across the session's lifetime.
+	audioTiming  *audiotiming.Tracker
+	audioTurnSeq int
 
 	readerExit chan readerResult
 	goAway     chan struct{}
@@ -399,6 +405,25 @@ func (s *Session) SendText(text string) error {
 func (s *Session) logTurn(payload map[string]any) {
 	if payload != nil {
 		s.log.Log(logSource, "voice.turn", "", payload)
+	}
+}
+
+// finishAudioTimingLocked closes the in-progress audio-timing tracker (if
+// any) and returns its voice.audio_timing payload. Caller holds s.mu.
+func (s *Session) finishAudioTimingLocked() map[string]any {
+	t := s.audioTiming
+	s.audioTiming = nil
+	if t == nil {
+		return nil
+	}
+	return t.Finish()
+}
+
+// logAudioTiming writes a finished turn's voice.audio_timing line (nil
+// payload: nothing).
+func (s *Session) logAudioTiming(payload map[string]any) {
+	if payload != nil {
+		s.log.Log(logSource, "voice.audio_timing", "", payload)
 	}
 }
 

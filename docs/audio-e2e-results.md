@@ -20,6 +20,9 @@ SHEEPDOG_DATA_DIR=/tmp/sd-e2e SHEEPDOG_STATE_PATH=/tmp/sd-e2e/state.json \
 SHEEPDOG_VOICE_OPENAI_IDLE_CLOSE_S=5 \
   sheepdog serve --config /tmp/sd-empty.toml --port 7799 --herdr=mock --cli=off --brain=fake --voice=gemini   # or --voice=openai
 sheepdog audio-e2e --url http://127.0.0.1:7799 --json results.json --save audio/
+# --audio-timeline additionally records every server→client audio frame's
+# arrival offset and size in results.json (audio_chunks), for an offline
+# jitter-buffer replay (see "Audible gaps in GPT-Live playback" below).
 ```
 
 The audio fixtures are not committed: the harness renders and caches
@@ -32,6 +35,104 @@ never, not measurable (the audio started before the speech, as with an
 announcement), or — in these runs, before the harness printed negative
 values — negative: the streaming transcript arrived before the speech
 ended.
+
+## Audible gaps in GPT-Live playback (fix, 2026-09-23)
+
+**Symptom:** the shepherd heard tiny gaps mid-sentence, even mid-word, in
+the browser `/voice` page on GPT-Live (`internal/voice/gptlive`), with
+`dropped_audio: 0` in the daemon logs (so nothing was being discarded)
+and no network involved (`localhost`).
+
+**Measured, before guessing at a fix.** Instrumentation was added first:
+`voice.audio_timing` (per model turn: `chunks`, `bytes`, `audio_ms`,
+`wall_ms`, `max_gap_ms`, `p95_gap_ms`, `realtime_ratio`) in both
+`internal/voice/gptlive` and `internal/voice/gemini`'s read loops
+(`internal/voice/audiotiming`, shared by both), and `send_wait_max_ms` /
+`send_wait_p95_ms` in `web.client.stats` for how long an audio frame
+waits in the per-client WS queue (`internal/web/ws.go`) before it is
+written. The browser's playback worklet now reports `underruns`,
+`drains` and `buffer_ms` on its `ping` too (`docs/ws-contract.md`).
+
+A live run against a scratch daemon (port 7799, never 7777) with
+`sheepdog audio-e2e --audio-timeline` (new flag: records every
+server→client binary frame's arrival offset and byte length, the exact
+input to the jitter-buffer simulation below) gave:
+
+| Provider | Scenario | Turn | chunks | audio_ms | wall_ms | max_gap_ms | p95_gap_ms | realtime_ratio |
+|---|---|---|---|---|---|---|---|---|
+| GPT-Live | status-question | 1 | 38 | 3800 | 5121 | 1463.7 | 1421.1 | 0.74 |
+| GPT-Live | status-question | 2 | 32 | 3200 | 4133 | 1032.6 | 1032.5 | 0.77 |
+| GPT-Live | instruction-promise | 3 | 36 | 3600 | 4126 | 626.4 | 574.1 | 0.87 |
+| GPT-Live | instruction-promise | 4 | 21 | 2100 | 2823 | 822.7 | 777.1 | 0.74 |
+| GPT-Live | instruction-promise | 5 | 33 | 3300 | 4194 | 994.2 | 913.7 | 0.79 |
+| Gemini Live | status-question | 1 | 5 | 1440 | 350 | 72.9 | 72.9 | 4.12 |
+| Gemini Live | status-question | 2 | 9 | 1630 | 349 | 0 | 0 | 4.67 |
+
+Every GPT-Live turn ran **behind** real time (`realtime_ratio` 0.74–0.87:
+the model delivers less audio than the playback clock consumes) with
+gaps up to **1.46 s**; Gemini ran **ahead** (ratio ~4×, gaps under 73 ms)
+on the same harness. `send_wait_max_ms`/`send_wait_p95_ms` were **0 ms**
+in every `web.client.stats` line of both runs: the daemon's forwarding
+path (`internal/web/ws.go`'s per-client queue, the `gptlive`/`gemini`
+read loops → unbuffered `out` channel → `Server.Run` → `hub.sendAudio` →
+`enqueue`) adds no measurable delay — audio frames are never queued
+behind control traffic and are written as soon as they arrive. **Root
+cause: GPT-Live's own audio generation, not the daemon.** The browser's
+fixed 150 ms prebuffer cannot absorb a source that is, on sustained
+average, slower than real time; no daemon-side fix changes that.
+
+**Live-call ledger** (scratch daemon, port 7799; keys from the main
+checkout's `.env`; every session confirmed closed by the daemon, none
+left open):
+
+| Provider | Scenarios | Sessions | Billed |
+|---|---|---|---|
+| GPT-Live (`gpt-live-1`, `idle_close_s=5`) | status-question, instruction-promise | 2 (both `reason: idle`, `confirmed: true`) | 16 s (budget: ≤ 60 s) |
+| Gemini Live (`gemini-3.8-live`) | status-question | 1 | not billed per-second the same way; 1 of the budgeted ≤ 3 sessions |
+
+**Fix: an adaptive jitter buffer with a cross-fade, in the browser**
+(`web/voice/audio-util.js`'s `Player`, per `docs/ws-contract.md`
+"Playback jitter buffer"): starts at 150 ms; a mid-utterance underrun
+raises the target by 100 ms (capped 500 ms) and the next resume waits
+for the *raised* target to refill rather than playing the first new
+chunk; a clean utterance (no underrun) decays the target by 20 ms back
+toward the 150 ms floor; every start or resume ramps in over 8 ms so a
+seam never clicks. No daemon change was needed (send-wait was already
+~0 ms) beyond the new instrumentation.
+
+**Offline replay, real recordings.** The two GPT-Live timelines above
+were committed as fixtures (`web/voice/testdata/gptlive-*.json`) and
+replayed through the real `Player` in Node
+(`web/voice/playback-timeline.test.mjs`), chained into one session (a
+real conversation does not reset the buffer between utterances):
+
+| Buffer policy | Underruns (57 chunks, both utterances chained) |
+|---|---|
+| Fixed 150 ms (the old default) | 10 |
+| Fixed 250 ms | 6 |
+| Fixed 400 ms | 3 |
+| **Adaptive 150→500 ms (shipped)** | **4** |
+
+The adaptive policy cuts underruns by more than half versus the old
+fixed 150 ms buffer, and every remaining one is cross-faded instead of
+clicking (`audio-util.test.mjs`, "ramps in over crossFadeLen samples").
+It does **not** reach zero on this recording: honestly, a fixed 400 ms
+buffer alone did slightly better here (3 vs. 4), because a few GPT-Live
+gaps (up to 1.46 s) and the sustained sub-real-time delivery on longer
+replies outrun even the 500 ms cap. Recommendation, if this remains
+audible in practice: raise `maxTarget` (the 500 ms cap) and/or
+`adaptStep` (the 100 ms-per-underrun rise) for the GPT-Live provider
+specifically — the shipped numbers match the cross-platform contract
+another agent is implementing for the iOS app in parallel
+(`docs/ws-contract.md`), so this PR does not change the default; a
+provider-aware override would be a follow-up. The cross-fade is the part
+that reliably removes the *audible click*; the buffer size only trades
+off *how often* a brief pause happens against added latency.
+
+Added latency: none in the common case (the target only rises after an
+underrun already happened, and decays back down when it is not needed);
+worst case with the target pinned at the 500 ms cap, first-audio latency
+is 500 ms − 150 ms = 350 ms more than the old fixed buffer.
 
 ## Gemini Live (`gemini-3.8-live`, fake brain)
 

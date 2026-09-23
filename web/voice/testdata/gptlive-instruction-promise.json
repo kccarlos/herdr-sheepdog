@@ -1,0 +1,129 @@
+{
+  "provider": "openai",
+  "model": "gpt-live-1",
+  "scenario": "instruction-promise",
+  "recorded": "2026-09-23",
+  "note": "Real /ws binary-frame arrival timeline from sheepdog audio-e2e --audio-timeline against a live GPT-Live session (scratch daemon, port 7799); see docs/audio-e2e-results.md.",
+  "chunks": [
+    {
+      "at_ms": 0,
+      "bytes": 4800
+    },
+    {
+      "at_ms": 98,
+      "bytes": 4800
+    },
+    {
+      "at_ms": 197,
+      "bytes": 4800
+    },
+    {
+      "at_ms": 384,
+      "bytes": 4800
+    },
+    {
+      "at_ms": 446,
+      "bytes": 4800
+    },
+    {
+      "at_ms": 546,
+      "bytes": 4800
+    },
+    {
+      "at_ms": 756,
+      "bytes": 4800
+    },
+    {
+      "at_ms": 909,
+      "bytes": 4800
+    },
+    {
+      "at_ms": 1061,
+      "bytes": 4800
+    },
+    {
+      "at_ms": 1161,
+      "bytes": 4800
+    },
+    {
+      "at_ms": 1764,
+      "bytes": 4800
+    },
+    {
+      "at_ms": 1975,
+      "bytes": 4800
+    },
+    {
+      "at_ms": 2077,
+      "bytes": 4800
+    },
+    {
+      "at_ms": 2351,
+      "bytes": 4800
+    },
+    {
+      "at_ms": 2482,
+      "bytes": 4800
+    },
+    {
+      "at_ms": 2551,
+      "bytes": 4800
+    },
+    {
+      "at_ms": 2652,
+      "bytes": 4800
+    },
+    {
+      "at_ms": 2859,
+      "bytes": 4800
+    },
+    {
+      "at_ms": 3005,
+      "bytes": 4800
+    },
+    {
+      "at_ms": 3137,
+      "bytes": 4800
+    },
+    {
+      "at_ms": 3238,
+      "bytes": 4800
+    },
+    {
+      "at_ms": 3365,
+      "bytes": 4800
+    },
+    {
+      "at_ms": 3530,
+      "bytes": 4800
+    },
+    {
+      "at_ms": 3635,
+      "bytes": 4800
+    },
+    {
+      "at_ms": 3738,
+      "bytes": 4800
+    },
+    {
+      "at_ms": 3884,
+      "bytes": 4800
+    },
+    {
+      "at_ms": 4054,
+      "bytes": 4800
+    },
+    {
+      "at_ms": 4086,
+      "bytes": 4800
+    },
+    {
+      "at_ms": 4185,
+      "bytes": 4800
+    },
+    {
+      "at_ms": 4359,
+      "bytes": 4800
+    }
+  ]
+}

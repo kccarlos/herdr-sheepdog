@@ -102,8 +102,10 @@ func (s *Session) install(conn Conn, resumed, reconnect bool) {
 	s.stalls, s.pushTimeouts = 0, 0
 	s.stalledNow = false // the connected status below clears it on the page
 	turn := s.finishTurnLocked("reconnect")
+	timing := s.finishAudioTimingLocked()
 	s.mu.Unlock()
 	s.logTurn(turn)
+	s.logAudioTiming(timing)
 
 	s.wg.Add(1)
 	go func() { defer s.wg.Done(); s.readLoop(conn, gen) }()

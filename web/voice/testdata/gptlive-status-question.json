@@ -1,0 +1,117 @@
+{
+  "provider": "openai",
+  "model": "gpt-live-1",
+  "scenario": "status-question",
+  "recorded": "2026-09-23",
+  "note": "Real /ws binary-frame arrival timeline from sheepdog audio-e2e --audio-timeline against a live GPT-Live session (scratch daemon, port 7799); see docs/audio-e2e-results.md.",
+  "chunks": [
+    {
+      "at_ms": 0,
+      "bytes": 4800
+    },
+    {
+      "at_ms": 186,
+      "bytes": 4800
+    },
+    {
+      "at_ms": 274,
+      "bytes": 4800
+    },
+    {
+      "at_ms": 392,
+      "bytes": 4800
+    },
+    {
+      "at_ms": 493,
+      "bytes": 4800
+    },
+    {
+      "at_ms": 713,
+      "bytes": 4800
+    },
+    {
+      "at_ms": 813,
+      "bytes": 4800
+    },
+    {
+      "at_ms": 943,
+      "bytes": 4800
+    },
+    {
+      "at_ms": 1042,
+      "bytes": 4800
+    },
+    {
+      "at_ms": 1234,
+      "bytes": 4800
+    },
+    {
+      "at_ms": 1293,
+      "bytes": 4800
+    },
+    {
+      "at_ms": 1430,
+      "bytes": 4800
+    },
+    {
+      "at_ms": 1531,
+      "bytes": 4800
+    },
+    {
+      "at_ms": 1758,
+      "bytes": 4800
+    },
+    {
+      "at_ms": 1824,
+      "bytes": 4800
+    },
+    {
+      "at_ms": 2008,
+      "bytes": 4800
+    },
+    {
+      "at_ms": 2107,
+      "bytes": 4800
+    },
+    {
+      "at_ms": 2327,
+      "bytes": 4800
+    },
+    {
+      "at_ms": 2426,
+      "bytes": 4800
+    },
+    {
+      "at_ms": 2633,
+      "bytes": 4800
+    },
+    {
+      "at_ms": 2807,
+      "bytes": 4800
+    },
+    {
+      "at_ms": 2865,
+      "bytes": 4800
+    },
+    {
+      "at_ms": 2964,
+      "bytes": 4800
+    },
+    {
+      "at_ms": 3136,
+      "bytes": 4800
+    },
+    {
+      "at_ms": 3239,
+      "bytes": 4800
+    },
+    {
+      "at_ms": 3367,
+      "bytes": 4800
+    },
+    {
+      "at_ms": 3464,
+      "bytes": 4800
+    }
+  ]
+}

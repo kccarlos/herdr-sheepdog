@@ -101,14 +101,20 @@ func (s *Session) speechEnd(now time.Time) {
 	}
 	s.speakingNow = false
 	s.flushReplyLocked()
-	if s.inputOpen {
+	timing := s.finishAudioTimingLocked()
+	owed := s.inputOpen
+	if owed {
 		// The shepherd is talking: closing the turn now would close their
 		// input mid-utterance; settle emits it.
 		s.turnDoneOwed = true
-		s.mu.Unlock()
-		return
 	}
 	s.mu.Unlock()
+	if timing != nil {
+		s.log.Log(logSource, "voice.audio_timing", "", timing)
+	}
+	if owed {
+		return
+	}
 	s.emit(voice.EventTurnComplete{})
 }
 

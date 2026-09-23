@@ -196,6 +196,94 @@ test('Player.flush empties the ring immediately and fades the tail', () => {
   assert.equal(p.stats.flushes, 1);
 });
 
+// ---------------------------------------------------------------- adaptive jitter buffer
+
+test('Player raises its jitter buffer target on mid-utterance underruns (capped) and decays after a clean utterance', () => {
+  const p = new Player({ inRate: 1000, outRate: 1000, maxWaitBlocks: 1 });
+  const block = new Float32Array(16);
+  assert.equal(p.targetMs, 150);
+
+  const tiny = () => new Float32Array(4).fill(0.25); // well under any target
+  p.push(tiny());
+  p.render(block); // forced start (maxWaitBlocks override = 1)
+  while (p.render(block)) { /* drain */ }
+  assert.equal(p.stats.drains, 1);
+  assert.equal(p.stats.underruns, 0, 'the very first utterance is not an underrun');
+
+  // Three underruns in a row: +100 ms each (150 → 250 → 350 → 450).
+  for (let i = 0; i < 3; i++) {
+    p.push(tiny());
+    p.render(block);
+    while (p.render(block)) { /* drain */ }
+  }
+  assert.equal(p.stats.underruns, 3);
+  assert.equal(p.targetMs, 450);
+
+  // A fourth underrun would exceed 500 ms: capped at maxTarget.
+  p.push(tiny());
+  p.render(block);
+  while (p.render(block)) { /* drain */ }
+  assert.equal(p.stats.underruns, 4);
+  assert.equal(p.targetMs, 500);
+
+  // Silence past underrunWindow (300 output samples): the next push is a
+  // new utterance, not an underrun, and it plays through cleanly.
+  for (let i = 0; i < 400; i++) p.render(block);
+  p.push(tiny());
+  p.render(block);
+  while (p.render(block)) { /* drain */ }
+  assert.equal(p.stats.underruns, 4, 'no new underrun after the long silence');
+  assert.equal(p.targetMs, 500, 'not decayed yet: scored only when the utterance ends');
+
+  // Another clean utterance (also past the underrun window): decays by
+  // 20 ms.
+  for (let i = 0; i < 400; i++) p.render(block);
+  p.push(tiny());
+  assert.equal(p.targetMs, 480, 'decayed by 20 ms after a clean utterance');
+});
+
+test('Player target never decays below the 150 ms floor', () => {
+  const p = new Player({ inRate: 1000, outRate: 1000, maxWaitBlocks: 1 });
+  const block = new Float32Array(16);
+  for (let i = 0; i < 5; i++) {
+    p.push(new Float32Array(4).fill(0.25));
+    p.render(block);
+    while (p.render(block)) { /* drain */ }
+    for (let j = 0; j < 400; j++) p.render(block); // clean end, past the window
+  }
+  assert.equal(p.targetMs, 150);
+});
+
+test('after an underrun, resume waits for the raised target to refill instead of the first chunk', () => {
+  const p = new Player({ inRate: 1000, outRate: 1000 }); // no override: dynamic wait ceiling
+  const block = new Float32Array(16);
+  p.push(new Float32Array(200).fill(0.25)); // well over the initial 150-sample target
+  assert.equal(p.render(block), true);
+  while (p.render(block)) { /* drain */ }
+  assert.equal(p.stats.drains, 1);
+
+  // Right after the drain: an underrun raises the target to 250. Less
+  // than that must not resume playback.
+  p.push(new Float32Array(200).fill(0.25));
+  assert.equal(p.targetMs, 250);
+  assert.equal(p.state, 'buffering');
+  assert.equal(p.render(block), false, 'must not resume on the first new chunk');
+
+  // Topping it up past the (raised) target starts it.
+  p.push(new Float32Array(100).fill(0.25));
+  assert.equal(p.render(block), true);
+});
+
+test('a start or resume ramps in over crossFadeLen samples so the seam does not click', () => {
+  const p = new Player({ inRate: 1000, outRate: 1000, crossFadeLen: 4 });
+  const block = new Float32Array(4);
+  p.push(new Float32Array(200).fill(0.8));
+  p.render(block);
+  assert.ok(Math.abs(block[0]) < 0.01, `block[0] = ${block[0]}, want ~0`);
+  assert.ok(block[1] < block[2] && block[2] < block[3], 'monotonic ramp');
+  assert.ok(block[3] > 0.5, `block[3] = ${block[3]}, want close to 0.8`);
+});
+
 test('CapturePipeline turns 48 kHz float blocks into 20 ms Int16 frames', () => {
   const c = new CapturePipeline(48000, CAPTURE_RATE, FRAME_SAMPLES);
   const x = sine(1000, 48000, 48000); // one second
