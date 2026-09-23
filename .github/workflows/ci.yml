@@ -43,7 +43,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - run: node --test 'web/voice/*.test.mjs'
+      - run: node --test 'web/voice/*.test.mjs' 'web/debug/*.test.mjs'
 
   cross:
     runs-on: ubuntu-latest

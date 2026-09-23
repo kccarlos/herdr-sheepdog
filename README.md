@@ -7,7 +7,7 @@
 
 # herdr-sheepdog
 
-A voice supervisor for a herdr agent fleet, built on Gemini Live: ask
+A voice supervisor for a herdr agent fleet, built on Gemini Live (or GPT-Live, switchable at runtime): ask
 what is happening, get told proactively when an agent is blocked,
 answer its question, give new instructions, and interrupt — without
 touching a keyboard. See [`sheepdog-v1-plan.md`](sheepdog-v1-plan.md)
