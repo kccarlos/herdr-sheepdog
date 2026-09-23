@@ -294,10 +294,15 @@ type sseClient struct {
 	cancel context.CancelFunc
 }
 
-func openSSE(t *testing.T, url string) *sseClient {
+// openSSE opens url as an SSE stream; kv are header name/value pairs
+// (Last-Event-ID).
+func openSSE(t *testing.T, url string, kv ...string) *sseClient {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	for i := 0; i+1 < len(kv); i += 2 {
+		req.Header.Set(kv[i], kv[i+1])
+	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		cancel()
@@ -361,7 +366,7 @@ func TestSSEStreamsFilteredEvents(t *testing.T) {
 	if !ok || first.Type != "herdr.state" {
 		t.Fatalf("replay first = %+v ok=%v", first, ok)
 	}
-	if second, ok := all.next(t, time.Second); !ok || second.Type != "supervisor.note" || second.Seq != first.Seq+1 {
+	if second, ok := all.next(t, time.Second); !ok || second.Type != "supervisor.note" || second.Seq <= first.Seq || second.ID != int64(second.Seq) {
 		t.Fatalf("replay second = %+v", second)
 	}
 

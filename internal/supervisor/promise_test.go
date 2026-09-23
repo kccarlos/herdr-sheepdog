@@ -617,6 +617,7 @@ func TestCarriedOverPromiseInLedgerNotBriefing(t *testing.T) {
 		t.Errorf("briefing still mentions the carried-over promise: %q", res.Spoken)
 	}
 
+	sup.ShepherdInput(InputTyped, "what's going on")
 	if _, err := sup.Handler()(context.Background(), voice.ToolCall{ID: "c", Name: ToolToSupervisor, Args: map[string]any{"text": "what's going on"}}); err != nil {
 		t.Fatal(err)
 	}

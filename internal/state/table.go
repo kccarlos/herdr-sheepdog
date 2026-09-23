@@ -192,6 +192,9 @@ type PendingAction struct {
 	// Question is the short phrase completing "<alias> is asking …" for an
 	// answer_prompt action.
 	Question string `json:"question,omitempty"`
+	// Command is the command an answer_prompt action is about, when the
+	// prompt shows one (Codex's "$ git diff --stat" line).
+	Command string `json:"command,omitempty"`
 	// Options are the choices on screen for an answer_prompt action.
 	Options []Option `json:"options,omitempty"`
 	// YesKeys / NoKeys are the keystrokes for a plain yes / no.
@@ -203,6 +206,9 @@ type PendingAction struct {
 type Option struct {
 	Label string   `json:"label"`
 	Keys  []string `json:"keys"`
+	// Default marks the option the prompt's cursor is on (what enter
+	// selects).
+	Default bool `json:"default,omitempty"`
 }
 
 // Note is one thing the user asked to be remembered (the note tool).

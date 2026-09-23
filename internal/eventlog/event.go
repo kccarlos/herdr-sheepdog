@@ -8,9 +8,15 @@ import (
 	"time"
 )
 
-// Event is one logged line. Seq is a process-local monotonic counter (not
-// written to disk) that subscribers use to resume without duplicates.
+// Event is one logged line. ID is its stable id, written to disk:
+// strictly increasing across day files and daemon restarts, and close to
+// the event's time in Unix microseconds (the log takes max(now, last+1)),
+// so it sorts, pages and resumes an SSE stream (Last-Event-ID). A line
+// written before ids existed gets one derived the same way from its ts
+// when it is read back (Replay). Seq is a process-local monotonic counter
+// (not written to disk).
 type Event struct {
+	ID      int64           `json:"id,omitempty"`
 	TS      time.Time       `json:"ts"`
 	Source  string          `json:"source"`
 	Type    string          `json:"type"`
@@ -38,8 +44,8 @@ func (e Event) Encoded() []byte {
 
 // newEvent builds an Event from a Log call: the payload is marshalled now,
 // dur_ms is lifted out of it, and the whole line is encoded once.
-func newEvent(seq uint64, ts time.Time, source, typ, paneID string, payload any) Event {
-	ev := Event{TS: ts.UTC(), Source: source, Type: typ, PaneID: paneID, Seq: seq}
+func newEvent(seq uint64, id int64, ts time.Time, source, typ, paneID string, payload any) Event {
+	ev := Event{ID: id, TS: ts.UTC(), Source: source, Type: typ, PaneID: paneID, Seq: seq}
 	if payload != nil {
 		raw, err := json.Marshal(payload)
 		if err != nil {
@@ -71,11 +77,19 @@ func durFromPayload(raw json.RawMessage) *int64 {
 	return &n
 }
 
+// nextID is the id after last for an event at ts: its time in Unix
+// microseconds, or last+1 when that would not be greater.
+func nextID(last int64, ts time.Time) int64 {
+	return max(ts.UnixMicro(), last+1)
+}
+
 // Replay reads a JSONL event file back. Blank lines are skipped; a
 // malformed line is an error naming its number. Seq is assigned in file
-// order starting at 1.
+// order starting at 1; a line with no id (written before ids existed)
+// gets nextID of the previous line's.
 func Replay(r io.Reader) ([]Event, error) {
 	var out []Event
+	var last int64
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 64<<10), 8<<20)
 	n := 0
@@ -90,7 +104,13 @@ func Replay(r io.Reader) ([]Event, error) {
 			return out, fmt.Errorf("eventlog: line %d: %w", n, err)
 		}
 		ev.Seq = uint64(len(out) + 1)
-		ev.encoded = append([]byte(nil), line...)
+		if ev.ID == 0 {
+			ev.ID = nextID(last, ev.TS)
+			ev.encoded = nil // re-encoded with the derived id
+		} else {
+			ev.encoded = append([]byte(nil), line...)
+		}
+		last = ev.ID
 		out = append(out, ev)
 	}
 	if err := sc.Err(); err != nil {

@@ -18,11 +18,11 @@ import (
 
 // StateResponse is the body of GET /api/state.
 type StateResponse struct {
-	Agents        []state.Agent        `json:"agents"`
-	PendingAction *state.PendingAction `json:"pending_action"`
-	Session       state.Session        `json:"session"`
-	Voice         VoiceInfo            `json:"voice"`
-	Settings      *SettingsResponse    `json:"settings,omitempty"`
+	Agents        []state.Agent     `json:"agents"`
+	PendingAction *PendingView      `json:"pending_action"`
+	Session       state.Session     `json:"session"`
+	Voice         VoiceInfo         `json:"voice"`
+	Settings      *SettingsResponse `json:"settings,omitempty"`
 	// Brain is the supervisor brain's provider and current model; omitted
 	// when the brain is off.
 	Brain   *BrainInfo `json:"brain,omitempty"`
@@ -92,7 +92,7 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 	hs := s.hub.state()
 	writeJSON(w, http.StatusOK, StateResponse{
 		Agents:        agents,
-		PendingAction: snap.PendingAction,
+		PendingAction: s.pendingView(snap.PendingAction),
 		Session:       snap.Session,
 		Voice:         VoiceInfo{Mode: s.deps.VoiceMode, Name: s.deps.VoiceName, Status: hs.status.String(), Reason: hs.reason, Muted: hs.muted, Stalled: hs.stalled, ClientConnected: hs.client},
 		Settings:      s.settings(),
@@ -101,6 +101,75 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 		Version:       s.deps.Version,
 		Now:           s.deps.Now().UTC(),
 	})
+}
+
+// PendingView is /api/state's pending action: the stored action plus
+// what a page needs to show it and answer it by tap — the agent's alias,
+// the summary, and each option with its 1-based index (what
+// POST /api/pending/answer takes) and whether it is the prompt's
+// default. question and command come from the action itself.
+type PendingView struct {
+	state.PendingAction
+	Agent   string                     `json:"agent,omitempty"`
+	Summary string                     `json:"summary,omitempty"`
+	Options []supervisor.PendingOption `json:"options,omitempty"`
+}
+
+// pendingView builds the view of p (nil when there is none).
+func (s *Server) pendingView(p *state.PendingAction) *PendingView {
+	if p == nil {
+		return nil
+	}
+	v := &PendingView{PendingAction: *p, Summary: p.SpokenSummary, Options: supervisor.PendingOptions(*p)}
+	if row, ok := s.deps.Store.Get(p.PaneID); ok {
+		v.Agent = row.Alias
+	}
+	return v
+}
+
+// pendingAnswerRequest is the body of POST /api/pending/answer.
+type pendingAnswerRequest struct {
+	ID     string `json:"id"`
+	Option int    `json:"option"`
+}
+
+// handlePendingAnswer answers the open question with the option the
+// shepherd tapped: {"id", "option"} (1-based, the index /api/state and
+// pending.created list). It is a shepherd input like a spoken answer and
+// passes the same rail; a question that is no longer open is 409, keys
+// that could not be sent 502.
+func (s *Server) handlePendingAnswer(w http.ResponseWriter, r *http.Request) {
+	if s.deps.Supervisor == nil {
+		writeError(w, http.StatusServiceUnavailable, "no supervisor")
+		return
+	}
+	var req pendingAnswerRequest
+	if err := readJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "bad body: "+err.Error())
+		return
+	}
+	if strings.TrimSpace(req.ID) == "" || req.Option < 1 {
+		writeError(w, http.StatusBadRequest, "id and a 1-based option are required")
+		return
+	}
+	ctx, cancel := s.toolCtx()
+	defer cancel()
+	res, err := s.deps.Supervisor.AnswerTap(ctx, req.ID, req.Option)
+	switch {
+	case errors.Is(err, supervisor.ErrPendingGone):
+		writeError(w, http.StatusConflict, supervisor.ErrPendingGone.Error())
+		return
+	case errors.Is(err, supervisor.ErrNoSuchOption):
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	case errors.Is(err, supervisor.ErrNotSent):
+		writeError(w, http.StatusBadGateway, res.Spoken)
+		return
+	case err != nil:
+		writeError(w, http.StatusForbidden, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "spoken": res.Spoken})
 }
 
 // SystemPromptResponse is the body of GET /api/voice/system_prompt.
@@ -349,6 +418,7 @@ func (s *Server) handleUtterance(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.deps.Voice != nil {
 		s.log.Log(logSource, "web.utterance", "", map[string]any{"text": text, "via": "voice"})
+		s.typed(text)
 		if err := s.deps.Voice.SendText(text); err != nil {
 			writeError(w, http.StatusBadGateway, "voice: "+err.Error())
 			return
@@ -366,6 +436,16 @@ func (s *Server) handleUtterance(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, toolResponse(call, res, "text_router"))
 }
 
+// typed records text as something the shepherd typed, before it reaches
+// the voice model or the text router: the one rail reads these inputs,
+// never the tool argument the model relays (docs/roles.md "The one
+// rail").
+func (s *Server) typed(text string) {
+	if s.deps.Supervisor != nil {
+		s.deps.Supervisor.ShepherdInput(supervisor.InputTyped, text)
+	}
+}
+
 // errUnrouted is returned when the text router has nothing to relay
 // (only an empty utterance, since D1-revised).
 var errUnrouted = errors.New("text router (debug path, --voice=off): nothing to relay")
@@ -377,6 +457,7 @@ func (s *Server) routeUtterance(ctx context.Context, text string) (voice.ToolCal
 		return voice.ToolCall{}, voice.ToolResult{}, errors.New("no text router")
 	}
 	s.log.Log(logSource, "web.utterance", "", map[string]any{"text": text, "via": "text_router"})
+	s.typed(text)
 	call, ok := s.deps.Router.Route(text)
 	if !ok {
 		s.log.Log(logSource, "web.utterance_unrouted", "", map[string]any{"text": text})

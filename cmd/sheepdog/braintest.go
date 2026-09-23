@@ -216,6 +216,9 @@ func runBrainTest(ctx context.Context, args []string, stdout, stderr io.Writer) 
 	default:
 		// --agent is only a hint for the older kinds; an utterance
 		// reaches the brain exactly as the shepherd said it.
+		// Typed, as far as the one rail is concerned: the question is
+		// the shepherd's own words.
+		sup.ShepherdInput(supervisor.InputTyped, o.question)
 		res, err = sup.ToSupervisor(ctx, o.question)
 	}
 	b.Quiesce()

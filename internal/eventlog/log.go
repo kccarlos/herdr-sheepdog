@@ -65,6 +65,7 @@ type Log struct {
 
 	mu       sync.Mutex
 	seq      uint64
+	lastID   int64 // the last event id handed out (or found on disk at Open)
 	file     *os.File
 	w        *bufio.Writer
 	fileDay  string
@@ -96,6 +97,9 @@ func Open(dataDir string, opts Options) (*Log, error) {
 		if err := os.MkdirAll(l.dir, 0o700); err != nil {
 			return nil, fmt.Errorf("eventlog: mkdir %s: %w", l.dir, err)
 		}
+		// Ids keep increasing across restarts, even when the clock went
+		// back: the next one is after the last line on disk.
+		l.lastID = lastIDOnDisk(l.dir)
 	}
 	go l.flushLoop()
 	return l, nil
@@ -123,7 +127,9 @@ func (l *Log) Log(source, typ, paneID string, payload any) {
 		return
 	}
 	l.seq++
-	ev := newEvent(l.seq, l.opts.Now(), source, typ, paneID, payload)
+	now := l.opts.Now()
+	l.lastID = nextID(l.lastID, now)
+	ev := newEvent(l.seq, l.lastID, now, source, typ, paneID, payload)
 	l.writeLocked(ev)
 	l.pushRingLocked(ev)
 	dropped := l.fanOutLocked(ev)

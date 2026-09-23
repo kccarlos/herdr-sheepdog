@@ -114,6 +114,17 @@ type Config struct {
 	// since I last checked" instead of repeating the roster; with no
 	// brain, the code fallback sentence itself is prefixed that way.
 	RepeatWindow time.Duration
+	// AuthoriseWindow is how recent a shepherd input must be to authorise
+	// answering a worker's approval prompt (default 30 s,
+	// supervisor.authorise_window_s, docs/roles.md "The one rail";
+	// inputs.go).
+	AuthoriseWindow time.Duration
+	// InputGrace is how long a to_supervisor call with no fresh shepherd
+	// input waits for one before it is treated as the voice model's own
+	// initiative: Gemini's input transcription can trail the tool call
+	// by a moment (default 1.5 s; negative does not wait; tests only —
+	// not in CONFIG.md).
+	InputGrace time.Duration
 	// Brain, when set, is the one model that decides and phrases
 	// (docs/roles.md); without it the daemon speaks code sentences and
 	// sends nothing. New attaches the Supervisor as its Host.
@@ -157,6 +168,12 @@ func (c Config) withDefaults() Config {
 	}
 	if c.RepeatWindow == 0 {
 		c.RepeatWindow = 60 * time.Second
+	}
+	if c.AuthoriseWindow == 0 {
+		c.AuthoriseWindow = 30 * time.Second
+	}
+	if c.InputGrace == 0 {
+		c.InputGrace = 1500 * time.Millisecond
 	}
 	if c.InvestigateMax == 0 {
 		c.InvestigateMax = 600 * time.Second
@@ -220,6 +237,25 @@ type Supervisor struct {
 	// investigation event (invalidateBriefing and its callers).
 	lastBriefingText string
 	lastBriefingAt   time.Time
+
+	// inputs is what the shepherd actually said, typed or tapped, newest
+	// last (inputs.go): the one rail reads these, never the voice model's
+	// tool argument.
+	inputs []*shepherdInput
+	// inputSeq numbers every input (each voice fragment bumps it);
+	// relayedSeq is its value when the last to_supervisor call was
+	// accepted and pushSeq its value when the last spoken push went out,
+	// so a call with no input newer than both is the model's own.
+	inputSeq   uint64
+	relayedSeq uint64
+	pushSeq    uint64
+	// inputWake is closed and replaced whenever an input arrives, for a
+	// call waiting out InputGrace.
+	inputWake chan struct{}
+	// promptSeenAt is when each pane's current prompt (lastPrompt's
+	// signature) was first recorded, so a revived pending action keeps
+	// the time the prompt really appeared (inputs.go).
+	promptSeenAt map[string]time.Time
 }
 
 // interruptGrace is how long after a user cancel a pane's working -> done
@@ -243,7 +279,7 @@ func New(store *state.Store, h Herdr, querier Querier, pusher Pusher, log loggin
 	}
 	cfg.chattiness = level
 	s := &Supervisor{store: store, herdr: h, querier: querier, pusher: pusher, log: log, cfg: cfg, brain: cfg.Brain, startedAt: cfg.Now(),
-		interrupted: map[string]time.Time{}, mentioned: map[string]time.Time{}, lastPrompt: map[string]string{}, investigating: map[string]*liveInvestigation{}}
+		interrupted: map[string]time.Time{}, mentioned: map[string]time.Time{}, lastPrompt: map[string]string{}, promptSeenAt: map[string]time.Time{}, inputWake: make(chan struct{}), investigating: map[string]*liveInvestigation{}}
 	// A querier that can keep a sub-agent session backs the investigate
 	// tool as well (investigate.go); one that cannot still answers
 	// run_cli.
@@ -320,6 +356,11 @@ func (s *Supervisor) OnVoiceEvent(ev voice.Event) {
 	case voice.EventResumed:
 		s.pushBriefing()
 	case voice.EventTranscript:
+		if e.Dir == voice.DirIn {
+			s.heard(e.Text, e.Final)
+		} else {
+			s.closeVoiceInput()
+		}
 		if s.brain != nil {
 			if e.Dir == voice.DirIn {
 				s.brain.Heard(e.Text, e.Final)
@@ -328,6 +369,7 @@ func (s *Supervisor) OnVoiceEvent(ev voice.Event) {
 			}
 		}
 	case voice.EventTurnComplete:
+		s.closeVoiceInput()
 		if s.brain != nil {
 			s.brain.TurnComplete()
 		}
@@ -353,6 +395,15 @@ func (s *Supervisor) pushTagged(paneID, text string, u voice.Urgency, tags map[s
 	if paneID != "" && u != voice.UrgencySilent {
 		s.setSubject(paneID)
 	}
+	if row, ok := s.store.Get(paneID); ok && row.Alias != "" && tags["agent"] == nil {
+		// The agent a push is about, on its voice.push event: the
+		// conversation history (GET /api/conversation) labels it.
+		tagged := map[string]any{"agent": row.Alias}
+		for k, v := range tags {
+			tagged[k] = v
+		}
+		tags = tagged
+	}
 	if s.pusher == nil || !s.voiceConnected() {
 		payload := map[string]any{"text": text, "urgency": u.String()}
 		for k, v := range tags {
@@ -369,6 +420,7 @@ func (s *Supervisor) pushTagged(paneID, text string, u voice.Urgency, tags map[s
 		// A silent push is context the voice never speaks, so it cannot be
 		// echoed back as something heard.
 		s.recordPush(text)
+		s.markPushed()
 		if s.brain != nil {
 			s.brain.Pushed(s.aliasOf(paneID), text, u.String())
 		}

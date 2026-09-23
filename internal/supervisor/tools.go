@@ -269,10 +269,17 @@ func (s *Supervisor) answerPending(ctx context.Context, p state.PendingAction, a
 // (reprompt.go): herdr may already be showing the next prompt within its
 // own poll window with no state change in between. Caller holds s.mu.
 func (s *Supervisor) answerWithKeys(ctx context.Context, p state.PendingAction, keys []string, label, format, via string) voice.ToolResult {
+	res, _ := s.answerKeys(ctx, p, keys, label, format, via, nil)
+	return res
+}
+
+// answerKeys is answerWithKeys reporting whether the keys were sent, with
+// extra fields for pending.confirmed (a tap's option). Caller holds s.mu.
+func (s *Supervisor) answerKeys(ctx context.Context, p state.PendingAction, keys []string, label, format, via string, extra map[string]any) (voice.ToolResult, bool) {
 	alias := s.aliasOf(p.PaneID)
 	if err := s.herdr.SendKeys(ctx, p.PaneID, keys...); err != nil {
 		s.log.Log(logSource, "supervisor.confirm_error", p.PaneID, map[string]any{"id": p.ID, "keys": keys, "error": err.Error()})
-		return voice.ToolResult{Spoken: "I could not send that to " + alias + ".", Scheduling: voice.UrgencyInterrupt}
+		return voice.ToolResult{Spoken: "I could not send that to " + alias + ".", Scheduling: voice.UrgencyInterrupt}, false
 	}
 	if err := s.store.ClearPending(); err != nil {
 		s.log.Log(logSource, "supervisor.state_error", p.PaneID, map[string]any{"error": err.Error()})
@@ -287,11 +294,18 @@ func (s *Supervisor) answerWithKeys(ctx context.Context, p state.PendingAction, 
 		s.log.Log(logSource, "supervisor.state_error", p.PaneID, map[string]any{"error": err.Error()})
 	}
 	s.expired = nil
+	// Answered: the next prompt on this pane appeared after now, even if
+	// it reads the same (inputs.go's promptSinceLocked).
+	delete(s.promptSeenAt, p.PaneID)
 	s.invalidateBriefingLocked()
 	s.lastSubject = p.PaneID
-	s.log.Log(logSource, "pending.confirmed", p.PaneID, map[string]any{"id": p.ID, "answer": label, "keys": keys, "via": via})
+	confirmed := map[string]any{"id": p.ID, "answer": label, "keys": keys, "via": via}
+	for k, v := range extra {
+		confirmed[k] = v
+	}
+	s.log.Log(logSource, "pending.confirmed", p.PaneID, confirmed)
 	s.startReprompt(p.PaneID)
-	return voice.ToolResult{Spoken: fmt.Sprintf(format, label), Scheduling: voice.UrgencyInterrupt}
+	return voice.ToolResult{Spoken: fmt.Sprintf(format, label), Scheduling: voice.UrgencyInterrupt}, true
 }
 
 // Cancel interrupts the in-flight instruction (Ctrl-C to its pane) or

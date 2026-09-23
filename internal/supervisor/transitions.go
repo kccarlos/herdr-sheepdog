@@ -259,12 +259,15 @@ func (s *Supervisor) recordBlock(paneID, question string, answered bool) {
 	s.invalidateBriefing()
 }
 
-// forgetExpired drops the remembered expired question of paneID. Caller
-// holds s.mu.
+// forgetExpired drops the remembered expired question of paneID, and when
+// its prompt first appeared. Caller holds s.mu.
 func (s *Supervisor) forgetExpired(paneID string) {
 	if s.expired != nil && s.expired.PaneID == paneID {
 		s.expired = nil
 	}
+	// The pane left its prompt (answered in the terminal, say): a prompt
+	// that reads the same later appeared then, not now (inputs.go).
+	delete(s.promptSeenAt, paneID)
 }
 
 // aliasOf returns the alias of a pane, or "another agent" when unknown

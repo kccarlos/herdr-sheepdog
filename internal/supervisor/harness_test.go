@@ -155,7 +155,9 @@ func newHarness(t *testing.T, opts ...func(*Config)) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg := Config{PendingTTL: 120 * time.Second, Now: h.clock.Now, DataDir: h.dir}
+	// InputGrace off: a relay with no shepherd input is refused at once
+	// rather than after waiting for a transcript that will not come.
+	cfg := Config{PendingTTL: 120 * time.Second, Now: h.clock.Now, DataDir: h.dir, InputGrace: -1}
 	for _, o := range opts {
 		o(&cfg)
 	}
@@ -277,9 +279,24 @@ func (h *harness) send(pane, text string) voice.ToolResult {
 	return res
 }
 
-// say relays one utterance exactly as the voice model would, through
-// to_supervisor (fast paths included).
+// say is the shepherd saying text: the voice's input transcription of
+// it, then the voice model relaying it verbatim through to_supervisor
+// (fast paths included).
 func (h *harness) say(text string) voice.ToolResult {
+	h.t.Helper()
+	h.hear(text)
+	return h.relay(text)
+}
+
+// hear is the voice's input transcription of the shepherd saying text,
+// with nothing relayed yet.
+func (h *harness) hear(text string) {
+	h.sup.OnVoiceEvent(voice.EventTranscript{Dir: voice.DirIn, Text: text, Final: true})
+}
+
+// relay is the voice model calling to_supervisor with text, whether or
+// not the shepherd said anything.
+func (h *harness) relay(text string) voice.ToolResult {
 	h.t.Helper()
 	return h.call(ToolToSupervisor, map[string]any{"text": text})
 }

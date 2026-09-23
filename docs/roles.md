@@ -99,7 +99,14 @@ tokens).
 Answering a worker's approval prompt *is* bypassing its gate.
 `send_keys` executes only when a shepherd utterance in the current turn
 authorises that answer, the worker is at a prompt the daemon has
-recorded, and every key is from that prompt's option set. Enforced in
+recorded, and every key is from that prompt's option set. "A shepherd
+utterance" means one the daemon itself recorded — the voice's input
+transcription, typed text, or a tap on the question — that arrived after
+the prompt appeared and within `supervisor.authorise_window_s`, and whose
+own words (never the voice model's `to_supervisor` argument) answer it:
+never empty, and a "no" never approves. A `to_supervisor` call with no
+such input since the previous call and the last push is the voice
+model's own initiative and does nothing. Enforced in
 the executor, not by prose; the voice has no tool that can answer a
 prompt at all. Everything else — instructions, Ctrl-C, questions — is
 the brain's call.
@@ -269,6 +276,29 @@ there has been no change since you last checked"), logged
 is itself prefixed "No change since I last checked: …". The "delivered"
 mark resets on any worker transition, pending change, promise change or
 investigation event, alongside the existing briefing cache invalidation.
+
+Also in, from the shepherd-input PR: the rail reads the shepherd's
+**real input** (`internal/supervisor/inputs.go`). The daemon records
+every shepherd input with its time — the voice's input transcription
+(`voice.transcript.in` fragments merged per user turn), typed text
+(`/api/inject/utterance`, the `/voice` text box, the only input with
+`--voice=off`) and a tap (`POST /api/pending/answer`); a muted client
+sends no audio, so nothing can be authorised by voice while muted. A
+`to_supervisor` call with no input newer than both the previous accepted
+call and the last spoken push runs nothing and says nothing
+(`supervisor.voice_initiative_ignored {text}`; the echo guard stays in
+front of it). `send_keys`, the bare-answer fast path and a tap run only
+on an input that arrived after the prompt appeared (a revived prompt
+keeps the time it was first seen) and within
+`supervisor.authorise_window_s` (30 s), not already spent on an answer;
+the fast path maps that input's text, and the brain's keys are refused
+when the input is empty or a "no" and the keys approve
+(`brain.rail_blocked {reason}`). The regression it closes: on
+2026-09-23 the voice model said "yes" to a pushed line on its own while
+the shepherd's microphone was muted. The pending question also carries
+its options (`index`, `label`, `keys`, `default`), `question`,
+`summary`, `command` and `agent` on `/api/state` and `pending.created`,
+so a page can answer it by tap.
 
 **Not yet:** `source: worker` (asking the idle worker in its own pane —
 its finish would produce both the announce line and the delivery line

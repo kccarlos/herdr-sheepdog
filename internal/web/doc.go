@@ -3,11 +3,19 @@
 //
 //   - GET /voice and GET /debug: the embedded static pages (root web/).
 //   - GET /events: an SSE tail of the event log (`event: log`, one JSON
-//     line per event, `id:` = sequence number) with ?since=<n> to replay
-//     the last n events from the ring and ?source= / ?pane= / ?type=
-//     filters; a keepalive comment every 15 s.
+//     line per event, `id:` = the event's stable id). Last-Event-ID or
+//     ?since=<id> replays what came after that id from the log (across
+//     day files and restarts, at most 2 000 events), ?n=<count> the last
+//     count events of the ring; ?source= / ?pane= / ?type= filter; a
+//     keepalive comment every 15 s.
 //   - GET /api/state, GET /api/agents, GET /api/events?n=: the state
-//     table, pending action, session and voice status as JSON.
+//     table, pending action (with its options for a tap), session and
+//     voice status as JSON.
+//   - GET /api/conversation?limit=&before=: the shepherd/dog conversation
+//     rebuilt from the log across days and restarts, newest last, paged
+//     backwards by event id (conversation.go).
+//   - POST /api/pending/answer {id, option}: answer the open question by
+//     tap, a shepherd input through the one rail.
 //   - POST /api/pending/cancel, POST /api/inject/{blocked,done,state,
 //     screen,remove,utterance}: the debug page's controls, all routed
 //     through the same supervisor paths real events take

@@ -140,7 +140,7 @@ function setSSE(status, text) {
 
 function connectEvents() {
   if (events.es) events.es.close();
-  const es = new EventSource(`/events?since=${REPLAY}`);
+  const es = new EventSource(`/events?n=${REPLAY}`);
   events.es = es;
   setSSE('connecting', 'connecting');
   es.onopen = () => setSSE('connected', 'live');
