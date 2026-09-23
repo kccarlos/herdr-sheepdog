@@ -2,7 +2,7 @@
 
 ## Verified
 
-**Unit tests: 190 (188 run, 2 live-daemon tests skip without one), all passing** (`SheepdogKitTests`, iPhone 17 Pro simulator,
+**Unit tests: 198 (196 run, 2 live-daemon tests skip without one), all passing** (`SheepdogKitTests`, iPhone 17 Pro simulator,
 iOS 26, Xcode 27).
 
 ```sh
@@ -49,6 +49,18 @@ They cover:
   re-buffering mid-utterance, the maximum-wait path for a short utterance,
   depth accounting, flush emptying everything including chunks already with
   the player;
+- the **adaptive jitter buffer** (`PlaybackQueueAdaptiveTests`), replayed
+  through a synthetic playback clock: steady real-time arrival never
+  underruns; repeated 300 ms mid-utterance stalls raise the target and stop
+  underrunning once it covers the stall; one underrun steps the target up
+  100 ms and clean utterances afterward decay it 20 ms back to the 150 ms
+  floor; a post-underrun refill holds every chunk until the new target is
+  met and releases them as one batch; the refill's first chunk gets an 8 ms
+  fade-in whose head ramps from true zero while a cold start and steady
+  mid-utterance chunks stay untouched; a GPT-Live-shaped fast-start-then-
+  slower-than-real-time timeline stays underrun-free on its banked runway; a
+  flush mid-utterance counts as neither a drain nor a target move; a long,
+  ordinary silence between utterances is a drain but never an underrun;
 - the conversation reducer: fragment merging, the other direction closing an
   output that never carried `final`, `flush` as a boundary, pushes as system
   cards, the voice-off mirroring, the cap;

@@ -7,7 +7,8 @@ import Foundation
 /// docs/ws-contract.md:
 ///
 /// * the `ping` is the contract's **JSON** message (it carries the gate
-///   counters the daemon logs), not `URLSessionWebSocketTask.sendPing`;
+///   counters the daemon logs, plus the jitter buffer's `underruns` and
+///   `buffer_ms`), not `URLSessionWebSocketTask.sendPing`;
 /// * `status: closed` with `reason: replaced` means another client took the
 ///   session — reconnecting would start a fight, so the socket stays down
 ///   and the user decides;
@@ -45,6 +46,10 @@ public final class VoiceSocket {
     /// Counters copied onto the `ping`.
     public var gatedFrames = 0
     public var inputPeak = 0
+    /// The adaptive jitter buffer's audible-gap count and current target
+    /// (ms), also copied onto the `ping`.
+    public var underruns = 0
+    public var bufferMs = 0
 
     public var onEvent: ((Event) -> Void)?
 
@@ -262,7 +267,7 @@ public final class VoiceSocket {
             return
         }
         pingSentAt = Date()
-        if !send(.ping(gatedFrames: gatedFrames, peak: inputPeak)) {
+        if !send(.ping(gatedFrames: gatedFrames, peak: inputPeak, underruns: underruns, bufferMs: bufferMs)) {
             pingSentAt = nil
         }
     }

@@ -9,7 +9,27 @@ import Foundation
 /// `AVAudioPlayerNode.scheduleBuffer` each, so the node itself concatenates
 /// them sample-accurately.
 ///
-/// `flush` (server) and the Stop button drop everything at once.
+/// The jitter buffer's target is **adaptive**, not fixed. It starts at
+/// `prebufferMilliseconds` (150 ms in production). The queue tracks its own
+/// playhead — when the audio it has handed to the player should run out —
+/// rather than waiting on `AVAudioPlayerNode`'s completion callbacks, which
+/// land late and jittery on iOS: `completed(_:)` stays for depth/`isSpeaking`
+/// bookkeeping, but drain detection happens in `push`/`tick` against
+/// `playheadEndsAt`. A drain followed by more audio of the *same* utterance
+/// within 300 ms is an **underrun** — a gap the user actually heard — and
+/// raises the target by 100 ms (capped at 500 ms) for the rest of the
+/// session; a target increase persists, but decays 20 ms for every
+/// utterance that completes without one, down to the floor. After an
+/// underrun the queue refills to the (now higher) target before handing
+/// anything back out, rather than resuming on a single chunk. The first
+/// chunk of that refill gets an 8 ms fade-in so the resumption doesn't
+/// click; there is no matching fade-out at the drain side — by the time the
+/// queue learns a chunk was the last one, its PCM is already with the
+/// player (or already played), so nothing is left to fade.
+///
+/// `flush` (server) and the Stop button drop everything at once. A flush is
+/// not a drain and not a finished utterance: it does not move the adaptive
+/// target either way.
 public struct PlaybackQueue: Sendable {
     /// One chunk ready to be scheduled, in arrival order.
     public struct Chunk: Equatable, Identifiable, Sendable {
@@ -31,11 +51,21 @@ public struct PlaybackQueue: Sendable {
         case playing
     }
 
+    /// A drain counts as an underrun only if more audio of the same
+    /// utterance shows up within this long.
+    private static let underrunWindow: TimeInterval = 0.3
+    private static let targetStepMilliseconds = 100
+    private static let targetDecayMilliseconds = 20
+    private static let targetCeilingMilliseconds = 500
+    private static let fadeMilliseconds = 8.0
+
     public let sampleRate: Double
-    /// Samples to collect before the first chunk is released.
-    public let prebufferSamples: Int
     /// A lone short utterance still starts after this long rather than never.
+    /// Also the ceiling on how long a post-underrun refill will wait before
+    /// giving up and playing what it has.
     public let maximumWait: TimeInterval
+    /// The initial adaptive target, and the floor it decays back down to.
+    public let targetFloorMilliseconds: Int
 
     public private(set) var phase: Phase = .idle
     /// Samples held back, not yet handed to the player.
@@ -45,10 +75,39 @@ public struct PlaybackQueue: Sendable {
     public private(set) var flushes = 0
     public private(set) var chunksDropped = 0
 
+    /// The jitter-buffer target right now, in milliseconds: 150–500 ms,
+    /// growing on underruns and decaying by a clean utterance at a time.
+    public private(set) var targetMilliseconds: Int
+    /// Drains that turned out to be audible gaps (more of the same
+    /// utterance arrived within `underrunWindow`).
+    public private(set) var underruns = 0
+    /// Every time the player ran out of scheduled audio, underrun or not
+    /// (the ordinary silence between utterances is a drain too).
+    public private(set) var drains = 0
+    /// The longest gap seen between chunk arrivals while a gap was worth
+    /// caring about (mid-utterance, or still inside the underrun window of
+    /// a drain) — a long pause between utterances does not count.
+    public private(set) var largestArrivalGapMilliseconds = 0
+
     private var pending: [Chunk] = []
     private var nextID = 1
     private var bufferingSince: TimeInterval = 0
     private var live: Set<Int> = []
+    private var scheduledLengths: [Int: Int] = [:]
+
+    /// When the audio already handed to the player is predicted to run
+    /// out. This is the authoritative "is the node dry" clock — computed
+    /// from chunk durations, not from completion callbacks, which are late
+    /// enough on iOS to make a poor detector.
+    private var playheadEndsAt: TimeInterval?
+    private var lastPushAt: TimeInterval?
+    /// Set when a drain is observed; cleared once the following gap (or
+    /// lack of one) has been folded into the underrun/decay bookkeeping.
+    private var drainedAt: TimeInterval?
+    private var utteranceHadUnderrun = false
+    /// True while the next chunk released from buffering should carry a
+    /// fade-in because it is resuming after an underrun.
+    private var fadeInNextRelease = false
 
     public init(
         sampleRate: Double = AudioContract.playbackRate,
@@ -56,12 +115,19 @@ public struct PlaybackQueue: Sendable {
         maximumWait: TimeInterval = 0.4
     ) {
         self.sampleRate = sampleRate
-        self.prebufferSamples = Int(sampleRate * Double(prebufferMilliseconds) / 1000.0)
+        self.targetFloorMilliseconds = prebufferMilliseconds
+        self.targetMilliseconds = prebufferMilliseconds
         self.maximumWait = maximumWait
     }
 
     /// True while the player has audio to play — what the orb calls "speaking".
     public var isSpeaking: Bool { scheduledSamples > 0 }
+
+    /// Samples to collect before the next chunk is released, from the
+    /// current adaptive target.
+    public var prebufferSamples: Int {
+        Int(sampleRate * Double(targetMilliseconds) / 1000.0)
+    }
 
     /// How much audio is waiting to be heard, in milliseconds. Logged so the
     /// user can see the conversion is not the bottleneck.
@@ -73,36 +139,42 @@ public struct PlaybackQueue: Sendable {
     /// while the jitter buffer fills, then everything held plus this one.
     public mutating func push(_ samples: [Int16], now: TimeInterval) -> [Chunk] {
         guard !samples.isEmpty else { return [] }
-        let chunk = Chunk(id: nextID, samples: samples)
-        nextID += 1
+        trackArrivalGap(now: now)
+        observeDrain(now: now)
+
         if phase == .playing {
-            live.insert(chunk.id)
-            scheduledLengths[chunk.id] = chunk.frameCount
-            scheduledSamples += chunk.frameCount
-            return [chunk]
+            return appendLive(samples, now: now)
         }
+
         if phase == .idle {
+            resolveDrainBookkeeping(now: now)
             phase = .buffering
             bufferingSince = now
         }
-        pending.append(chunk)
-        bufferedSamples += chunk.frameCount
-        if bufferedSamples >= prebufferSamples { return release() }
-        return []
+
+        return bufferAndMaybeRelease(samples, now: now)
     }
 
-    /// Releases a short utterance that never reached the jitter buffer.
-    /// Call it from the same timer that refreshes the UI.
+    /// Releases a short utterance that never reached the jitter buffer, and
+    /// notices a drain even when nothing has been pushed since. Call it
+    /// from the same timer that refreshes the UI.
     public mutating func tick(now: TimeInterval) -> [Chunk] {
+        observeDrain(now: now)
+        if phase == .idle, let drainedAt, now - drainedAt > Self.underrunWindow {
+            finalizeCleanUtterance()
+            self.drainedAt = nil
+        }
         guard phase == .buffering, now - bufferingSince >= maximumWait else { return [] }
-        return release()
+        return release(now: now)
     }
 
-    /// Reports that the player finished a chunk.
+    /// Reports that the player finished a chunk. This is bookkeeping for
+    /// the queue depth and `isSpeaking` only: drain *detection* for the
+    /// adaptive target happens in `push`/`tick` against the playhead, which
+    /// usually notices first. A completion for a chunk the playhead already
+    /// wrote off (dropped by a predicted drain, or by `flush`) is a no-op.
     public mutating func completed(_ id: Int) {
         guard live.remove(id) != nil else { return }
-        // The chunk's own length leaves the depth; a queue that has drained
-        // goes back to idle so the next utterance re-buffers.
         if let index = scheduledLengths.index(forKey: id) {
             scheduledSamples -= scheduledLengths[index].value
             scheduledLengths.remove(at: index)
@@ -111,12 +183,16 @@ public struct PlaybackQueue: Sendable {
         if live.isEmpty && pending.isEmpty {
             scheduledSamples = 0
             phase = .idle
+            playheadEndsAt = nil
         }
     }
 
     /// Drop everything now: the queued chunks and the ones already with the
     /// player (the caller stops the node). Returns true when there was
-    /// anything to drop, i.e. the node needs stopping.
+    /// anything to drop, i.e. the node needs stopping. A flush is a reset,
+    /// not a drain: it does not count toward underruns or move the
+    /// adaptive target, and the next utterance buffers at whatever target
+    /// the queue already had.
     @discardableResult
     public mutating func flush() -> Bool {
         let hadAudio = !pending.isEmpty || !live.isEmpty
@@ -128,21 +204,126 @@ public struct PlaybackQueue: Sendable {
         scheduledSamples = 0
         phase = .idle
         flushes += 1
+        playheadEndsAt = nil
+        drainedAt = nil
+        utteranceHadUnderrun = false
+        fadeInNextRelease = false
         return hadAudio
     }
 
-    private var scheduledLengths: [Int: Int] = [:]
+    // MARK: - Drain / underrun detection
 
-    private mutating func release() -> [Chunk] {
+    /// If the node's predicted playhead has passed `now` while chunks are
+    /// still marked live, the player has run dry. Move to `.idle`
+    /// preemptively (a late `completed` for one of those chunks then finds
+    /// it already gone from `live` and no-ops) and remember when, so the
+    /// next arrival can be judged against the underrun window.
+    private mutating func observeDrain(now: TimeInterval) {
+        guard phase == .playing, let endsAt = playheadEndsAt, now >= endsAt else { return }
+        drains += 1
+        phase = .idle
+        live.removeAll()
+        scheduledLengths.removeAll()
+        scheduledSamples = 0
+        playheadEndsAt = nil
+        drainedAt = endsAt
+    }
+
+    /// Called once, right before re-entering `.buffering` from `.idle`:
+    /// decides whether the gap since the last drain (if any) was short
+    /// enough to be the underrun that caused it, or long enough that the
+    /// utterance which just finished was clean.
+    private mutating func resolveDrainBookkeeping(now: TimeInterval) {
+        guard let drainedAt else { return }
+        if now - drainedAt <= Self.underrunWindow {
+            registerUnderrun()
+        } else {
+            finalizeCleanUtterance()
+        }
+        self.drainedAt = nil
+    }
+
+    private mutating func registerUnderrun() {
+        underruns += 1
+        utteranceHadUnderrun = true
+        targetMilliseconds = min(targetMilliseconds + Self.targetStepMilliseconds, Self.targetCeilingMilliseconds)
+        fadeInNextRelease = true
+    }
+
+    private mutating func finalizeCleanUtterance() {
+        if !utteranceHadUnderrun {
+            targetMilliseconds = max(targetMilliseconds - Self.targetDecayMilliseconds, targetFloorMilliseconds)
+        }
+        utteranceHadUnderrun = false
+    }
+
+    private mutating func trackArrivalGap(now: TimeInterval) {
+        defer { lastPushAt = now }
+        guard let last = lastPushAt else { return }
+        let midUtterance = phase != .idle || (drainedAt.map { now - $0 <= Self.underrunWindow } ?? false)
+        guard midUtterance else { return }
+        largestArrivalGapMilliseconds = max(largestArrivalGapMilliseconds, Int((now - last) * 1000))
+    }
+
+    // MARK: - Scheduling
+
+    /// Phase is `.playing` and the playhead has not run dry: the chunk goes
+    /// straight to the player and extends the predicted playhead.
+    private mutating func appendLive(_ samples: [Int16], now: TimeInterval) -> [Chunk] {
+        let chunk = Chunk(id: nextID, samples: samples)
+        nextID += 1
+        live.insert(chunk.id)
+        scheduledLengths[chunk.id] = chunk.frameCount
+        scheduledSamples += chunk.frameCount
+        let start = max(playheadEndsAt ?? now, now)
+        playheadEndsAt = start + duration(of: chunk.frameCount)
+        return [chunk]
+    }
+
+    private mutating func bufferAndMaybeRelease(_ samples: [Int16], now: TimeInterval) -> [Chunk] {
+        var chunk = Chunk(id: nextID, samples: samples)
+        nextID += 1
+        if fadeInNextRelease, pending.isEmpty {
+            chunk = fadedIn(chunk)
+            fadeInNextRelease = false
+        }
+        pending.append(chunk)
+        bufferedSamples += chunk.frameCount
+        if bufferedSamples >= prebufferSamples { return release(now: now) }
+        return []
+    }
+
+    private mutating func release(now: TimeInterval) -> [Chunk] {
         let out = pending
         pending.removeAll()
         bufferedSamples = 0
         phase = .playing
+        var playhead = now
         for chunk in out {
             live.insert(chunk.id)
             scheduledLengths[chunk.id] = chunk.frameCount
             scheduledSamples += chunk.frameCount
+            playhead += duration(of: chunk.frameCount)
         }
+        playheadEndsAt = playhead
         return out
+    }
+
+    private func duration(of frameCount: Int) -> TimeInterval {
+        Double(frameCount) / sampleRate
+    }
+
+    /// An 8 ms linear ramp from zero, applied to the PCM before it is ever
+    /// handed out — the queue owns the samples up to that point, so the
+    /// fade is real, not a flag for the caller to interpret.
+    private func fadedIn(_ chunk: Chunk) -> Chunk {
+        let fadeSamples = min(chunk.samples.count, Int(sampleRate * Self.fadeMilliseconds / 1000.0))
+        guard fadeSamples > 1 else { return chunk }
+        var samples = chunk.samples
+        for index in 0..<fadeSamples {
+            let gain = Double(index) / Double(fadeSamples)
+            samples[index] = Int16((Double(samples[index]) * gain).rounded())
+        }
+        return Chunk(id: chunk.id, samples: samples)
     }
 }

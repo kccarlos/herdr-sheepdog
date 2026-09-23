@@ -147,10 +147,46 @@ microphone ─▶ AVAudioEngine input tap (hardware format, ~4 096 frames)
                              the old SilenceGate behind a diagnostics toggle)
            ─▶ VoiceSocket   (one binary frame each)
 
-/ws binary ─▶ PlaybackQueue (150 ms jitter buffer, then chunks in order)
+/ws binary ─▶ PlaybackQueue (adaptive jitter buffer, then chunks in order)
            ─▶ AVAudioPlayerNode.scheduleBuffer (no `at:`; the node concatenates)
            ─▶ 24 kHz mono Float32 ─▶ main mixer ─▶ speaker
 ```
+
+### The adaptive jitter buffer
+
+`PlaybackQueue` used to hold a fixed 150 ms jitter buffer. Bursty arrival —
+especially from the GPT-Live provider, which front-loads a reply and then
+sends slower than real time — could still run the player dry mid-sentence:
+audible gaps, sometimes mid-word. The buffer's target is now adaptive:
+
+- It starts at 150 ms and tracks its own **playhead** (when the audio
+  already handed to the player should run out), computed from chunk
+  durations rather than from `AVAudioPlayerNode`'s completion callbacks,
+  which land late and jittery on iOS and made a poor drain detector.
+  `completed(_:)` still exists, for the queue depth and `isSpeaking`.
+- A drain is an **underrun** — a gap the user actually heard — only if more
+  audio of the *same* utterance arrives within 300 ms of it. Each underrun
+  raises the target by 100 ms, capped at 500 ms, and the raised target is
+  kept for the rest of the session.
+- After an underrun the queue **refills before resuming**: it holds new
+  chunks until the (now higher) target is buffered again, rather than
+  scheduling the first one alone and risking another gap right behind it.
+- A clean utterance (no underrun) decays the target 20 ms, down to the
+  150 ms floor. A `flush` is a reset, not a drain: it does not move the
+  target either way.
+- The first chunk of a post-underrun refill gets an 8 ms linear fade-in, so
+  the resumption doesn't click. There is deliberately **no matching
+  fade-out** at the drain side: by the time the queue learns a chunk was
+  the last one, that PCM is already with the player (or already played),
+  so there is nothing left to fade without a lookahead buffer, which is out
+  of scope here. The browser page hits the identical constraint with
+  `AudioBufferSourceNode`.
+- `AudioMetrics` and Settings ▸ About report `underruns`, the current
+  target, `drains` (every time the node ran dry, underrun or not — the
+  ordinary silence between utterances is a drain too) and the largest
+  arrival gap seen while one was worth caring about. `underruns` and the
+  target (`buffer_ms`) also ride the existing 15 s `ping`, mirrored into
+  the daemon's `web.client.stats`; older daemons ignore the extra fields.
 
 The session is `.playAndRecord` with mode `.voiceChat` and options
 `.allowBluetooth`, `.allowBluetoothA2DP`, `.defaultToSpeaker`. `.voiceChat`
@@ -276,8 +312,8 @@ On the iOS 26 simulator on an Apple-silicon Mac, over 117 tap buffers of
   bottleneck and will not be on a device either.
 - **Playback queue depth**, driven with the chunk sizes the model actually
   produces (40–730 ms): **730 ms worst case**, which is one long chunk — the
-  queue adds a 150 ms jitter buffer on top of whatever the model sends and
-  nothing more.
+  queue adds a jitter buffer (150–500 ms, adaptive — see above) on top of
+  whatever the model sends and nothing more.
 
 The same two numbers are live in the app under Settings ▸ About, and go to
 `os_log` under the subsystem `com.kccarlos.sheepdog`, categories `audio`,

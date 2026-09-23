@@ -13,7 +13,9 @@ import SheepdogKit
 ///
 /// Playback: one `AVAudioPlayerNode` fed 24 kHz chunks back to back through
 /// `PlaybackQueue`, so the node concatenates them itself — gapless, and
-/// never "play this now".
+/// never "play this now". `PlaybackQueue` also owns the adaptive jitter
+/// buffer: it grows its target on a real underrun and reports the counters
+/// through `AudioMetrics`.
 ///
 /// The session is `.playAndRecord` / `.voiceChat`, which turns on the
 /// system's echo canceller: without it the dog hears itself out of the
@@ -356,6 +358,7 @@ final class AudioEngine {
         }
         schedule(queue.tick(now: CFAbsoluteTimeGetCurrent()))
         metrics.recordPlayback(depthMilliseconds: queue.queueDepthMilliseconds)
+        recordJitterBufferMetrics()
         setSpeaking(queue.isSpeaking)
     }
 
@@ -389,7 +392,17 @@ final class AudioEngine {
         }
         if isRunning, !player.isPlaying { player.play() }
         metrics.recordPlayback(depthMilliseconds: queue.queueDepthMilliseconds)
+        recordJitterBufferMetrics()
         setSpeaking(queue.isSpeaking)
+    }
+
+    private func recordJitterBufferMetrics() {
+        metrics.recordJitterBuffer(
+            underruns: queue.underruns,
+            targetMilliseconds: queue.targetMilliseconds,
+            drains: queue.drains,
+            largestArrivalGapMilliseconds: queue.largestArrivalGapMilliseconds
+        )
     }
 
     private func setSpeaking(_ speaking: Bool) {

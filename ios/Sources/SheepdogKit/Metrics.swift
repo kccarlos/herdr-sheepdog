@@ -24,6 +24,14 @@ public struct AudioMetrics: Equatable, Sendable {
     public var scheduledChunks = 0
     public var playedChunks = 0
 
+    /// The adaptive jitter buffer (`PlaybackQueue`): audible gaps, the
+    /// current target, every time the node ran dry (underrun or not), and
+    /// the worst arrival gap seen while one was worth caring about.
+    public var underruns = 0
+    public var bufferTargetMilliseconds = 0
+    public var drains = 0
+    public var largestArrivalGapMilliseconds = 0
+
     public init() {}
 
     public mutating func recordCapture(latency: TimeInterval, frames: Int) {
@@ -37,6 +45,13 @@ public struct AudioMetrics: Equatable, Sendable {
         peakPlaybackDepthMilliseconds = max(peakPlaybackDepthMilliseconds, depthMilliseconds)
     }
 
+    public mutating func recordJitterBuffer(underruns: Int, targetMilliseconds: Int, drains: Int, largestArrivalGapMilliseconds: Int) {
+        self.underruns = underruns
+        self.bufferTargetMilliseconds = targetMilliseconds
+        self.drains = drains
+        self.largestArrivalGapMilliseconds = largestArrivalGapMilliseconds
+    }
+
     /// The one-line summary under Settings ▸ About.
     public var summary: String {
         String(
@@ -47,6 +62,17 @@ public struct AudioMetrics: Equatable, Sendable {
             peakPlaybackDepthMilliseconds,
             captureFrames,
             gatedFrames
+        )
+    }
+
+    /// The jitter-buffer line under Settings ▸ About.
+    public var jitterSummary: String {
+        String(
+            format: "jitter target %d ms · %d underruns, %d drains · worst gap %d ms",
+            bufferTargetMilliseconds,
+            underruns,
+            drains,
+            largestArrivalGapMilliseconds
         )
     }
 }

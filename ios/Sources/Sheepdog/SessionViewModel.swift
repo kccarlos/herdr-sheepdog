@@ -840,6 +840,8 @@ final class SessionViewModel: ObservableObject {
                 self.metrics = self.audio.metrics
                 self.socket.gatedFrames = self.audio.gatedFrames
                 self.socket.inputPeak = self.audio.inputPeak
+                self.socket.underruns = self.metrics.underruns
+                self.socket.bufferMs = self.metrics.bufferTargetMilliseconds
                 self.updateDiagnostics()
                 if let expiry = self.thinkingExpiry, expiry < Date() { self.thinkingExpiry = nil }
                 self.refresh()

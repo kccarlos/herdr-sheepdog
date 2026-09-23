@@ -32,6 +32,11 @@ public struct WSMessage: Codable, Equatable, Sendable {
     /// `ping` counters, mirrored into the daemon's `web.client.stats`.
     public var gatedFrames: Int?
     public var peak: Int?
+    /// `ping`: the adaptive jitter buffer's audible-gap count and its
+    /// current target, in milliseconds. `nil` on older builds' pings —
+    /// omitted from the wire, not sent as zero.
+    public var underruns: Int?
+    public var bufferMs: Int?
     /// `text` (client → server) and `transcript` (server → client).
     public var text: String?
     /// `status`.
@@ -49,8 +54,9 @@ public struct WSMessage: Codable, Equatable, Sendable {
     public var message: String?
 
     enum CodingKeys: String, CodingKey {
-        case type, on, text, voice, muted, reason, stalled, dir, final, message, peak, provider
+        case type, on, text, voice, muted, reason, stalled, dir, final, message, peak, provider, underruns
         case gatedFrames = "gated_frames"
+        case bufferMs = "buffer_ms"
     }
 
     public init(
@@ -58,6 +64,8 @@ public struct WSMessage: Codable, Equatable, Sendable {
         on: Bool? = nil,
         gatedFrames: Int? = nil,
         peak: Int? = nil,
+        underruns: Int? = nil,
+        bufferMs: Int? = nil,
         text: String? = nil,
         voice: Voice? = nil,
         muted: Bool? = nil,
@@ -72,6 +80,8 @@ public struct WSMessage: Codable, Equatable, Sendable {
         self.on = on
         self.gatedFrames = gatedFrames
         self.peak = peak
+        self.underruns = underruns
+        self.bufferMs = bufferMs
         self.text = text
         self.voice = voice
         self.muted = muted
@@ -89,8 +99,8 @@ public struct WSMessage: Codable, Equatable, Sendable {
     public static func silence(_ on: Bool) -> WSMessage { WSMessage(type: .silence, on: on) }
     public static let cancel = WSMessage(type: .cancel)
     public static func simulateText(_ text: String) -> WSMessage { WSMessage(type: .text, text: text) }
-    public static func ping(gatedFrames: Int = 0, peak: Int = 0) -> WSMessage {
-        WSMessage(type: .ping, gatedFrames: gatedFrames, peak: peak)
+    public static func ping(gatedFrames: Int = 0, peak: Int = 0, underruns: Int? = nil, bufferMs: Int? = nil) -> WSMessage {
+        WSMessage(type: .ping, gatedFrames: gatedFrames, peak: peak, underruns: underruns, bufferMs: bufferMs)
     }
 
     // MARK: - Server → client constructors (tests and fakes)
