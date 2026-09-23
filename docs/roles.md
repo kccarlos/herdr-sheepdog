@@ -14,7 +14,7 @@ paths, hashes, ids aloud) still apply; D1 and D7 are superseded here.
 |---|---|---|
 | **Shepherd** | The operator, by voice. Owns intent and decisions. | `ceo_*` message kinds, "CEO" in comments — legacy, to be renamed |
 | **Sheepdog** ("the dog") | The one agent the shepherd talks to. It has two halves that are one character to the shepherd. | |
-| — its **voice** | Hears, speaks, keeps the turn-taking; Gemini Live. Two tools: `to_supervisor(text)` and `stop()`. | `internal/voice`, "assistant" |
+| — its **voice** | Hears, speaks, keeps the turn-taking; Gemini Live (two tools: `to_supervisor(text)` and `stop()`) or GPT-Live (client delegation, mapped onto the same two calls; `docs/gpt-live-notes.md`). | `internal/voice`, "assistant" |
 | — its **brain** | Decides, remembers, works the flock. One stateful agent with tools. | `internal/brain`, "SVP", "supervisor brain" |
 | **Flock** | The coding agents in herdr panes (Codex, Claude Code, agy). They change code under their own approval prompts. | `internal/herdr`, "workers" |
 | **Investigations** | Read-only sub-agents the brain starts for questions the screen cannot answer (`codex exec` / `claude -p` in the worker's repo). | `internal/cli` |

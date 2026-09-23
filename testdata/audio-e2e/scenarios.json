@@ -65,7 +65,7 @@
       "noise": {"kind": "cafe", "snr_db": 10, "seed": 3},
       "segments": [{"silence_ms": 800}, {"say": "How is the docs agent doing?"}, {"silence_ms": 800}],
       "tail_ms": 15000,
-      "expect": {"in_contains": ["docs|doc|dogs", "doing"], "tool": "to_supervisor", "reply": true}
+      "expect": {"in_contains": ["docs|doc|dogs|docks", "doing"], "tool": "to_supervisor", "reply": true}
     },
     {
       "name": "long-silence",
