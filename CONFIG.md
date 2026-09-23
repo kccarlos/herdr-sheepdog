@@ -56,6 +56,8 @@ Voice session (plan §6).
 | `gemini.model` | `SHEEPDOG_GEMINI_MODEL` | `gemini-3.8-live` | The Live API model name. |
 | `gemini.voice` | `SHEEPDOG_GEMINI_VOICE` | `Puck` | The prebuilt voice name. |
 | `gemini.stall_after_s` | `SHEEPDOG_GEMINI_STALL_AFTER_S` | `10` | Seconds an utterance may go without any model response (tool call or audio) before `voice.stalled` is logged and the pages show "stalled". The second stall on one connection (or the second idle push that outwaits the 30 s turn timeout) recycles the connection: a reconnect with the still-valid resumption handle (`voice.recycle`), keeping the conversation. |
+| `gemini.start_sensitivity` | `SHEEPDOG_GEMINI_START_SENSITIVITY` | `low` | Live's automatic activity detection, start of speech: `low`, `high` or `default` (the server's own). `low` needs clearer speech before a turn starts, so room noise is not transcribed as words ("fishing", "Discord" were heard from noise at the default). |
+| `gemini.end_sensitivity` | `SHEEPDOG_GEMINI_END_SENSITIVITY` | `default` | End of speech: `low` (waits longer before closing the turn), `high` (closes sooner) or `default`. |
 
 ## `[voice]`
 
@@ -64,7 +66,33 @@ The dog's spoken half, as the operator meets it
 
 | Key | Env override | Default | Meaning |
 |---|---|---|---|
-| `voice.name` | `SHEEPDOG_VOICE_NAME` | `Sheepdog` | What the dog calls itself. Substituted into `prompts/assistant.md` as `{name}`, so it is the name the voice model introduces itself by and answers to; the aliases of the agents it herds are separate (`[aliases]`). |
+| `voice.name` | `SHEEPDOG_VOICE_NAME` | `Sheepdog` | What the dog calls itself. Substituted into `prompts/assistant.md` (and `prompts/assistant-gptlive.md`) as `{name}`, so it is the name the voice model introduces itself by and answers to; the aliases of the agents it herds are separate (`[aliases]`). |
+| `voice.provider` | `SHEEPDOG_VOICE_PROVIDER` | `gemini` | The voice model the daemon starts on: `gemini` (Gemini Live, `[gemini]`; idle costs nothing, the session stays open) or `openai` (GPT-Live, `[voice.openai]`; **billed $0.05 per minute of open session**, so it is opened only for speech or a push and closed when idle). The initial value only: `PUT /api/voice/provider {"provider": "openai"}` or the `/debug` voice picker switches at runtime (the current voice session closes, the new provider opens on the next need; `voice.provider_changed {from, to, via}`), and the pick is kept in the state file's `session.voice_provider`, which wins over this on restart. `serve --voice=gemini` / `--voice=openai` force the initial provider for one run; `--voice=on` (the default) uses this. |
+
+### `[voice.openai]`
+
+GPT-Live (`gpt-live-1`) over the Live WebSocket in **client
+delegation** mode: when the model hands work off
+(`session.delegation.created`) the daemon relays the shepherd's
+transcribed words to the supervisor as a `to_supervisor` call — the
+brain answers exactly as with Gemini — and the result goes back with
+`session.commentary.append`. Pushes become `session.commentary.append`
+(spoken), `session.thinking.append` (silent) or
+`session.instructions.append` (interrupt). The session is lazy: it opens
+(`voice.session_open {reason: audio|push}`) only while a `/ws` client is
+attached and unmuted and there is speech (a frame loud enough) or a push
+to say, and closes (`voice.session_close {reason, dur_ms, billed_s}`)
+after `voice.openai.idle_close_s` without a transcript, a reply, a
+delegation or a push. A reopened session gets the last few turns as text
+history. `voice.billed_seconds {total_s}` is logged at every close and
+`web.client.stats` carries `voice_billed_seconds`.
+
+| Key | Env override | Default | Meaning |
+|---|---|---|---|
+| `voice.openai.api_key` | `OPENAI_API_KEY` | `""` | The OpenAI API key for GPT-Live. The voice only: the brain never uses it. Normally left out of the TOML file and set via the environment or `--env-file`; an empty env value does not clear a file value. Never logged: `config show` prints `set`/`unset`. Without it `openai` is listed by `GET /api/voice/providers` as unavailable ("no OPENAI_API_KEY"). |
+| `voice.openai.model` | `SHEEPDOG_VOICE_OPENAI_MODEL` | `gpt-live-1` | The Live model. |
+| `voice.openai.voice` | `SHEEPDOG_VOICE_OPENAI_VOICE` | `marin` | The output voice (`marin`, `cedar`, `quartz`, `vesper`, …; fixed per session). |
+| `voice.openai.idle_close_s` | `SHEEPDOG_VOICE_OPENAI_IDLE_CLOSE_S` | `45` | Close the live GPT-Live session after this many seconds with no input transcript, no model speech, no delegation or push in flight. A client that disconnects, mutes or goes silent stops all of those, so this is also how long a forgotten session keeps billing. After an idle close the same room noise does not reopen it: the next opening needs the client's silence gate to close first, a quiet second, an unmute or a reconnect. |
 
 ## `[deepseek]`
 

@@ -91,6 +91,26 @@ func TestLiveConfigMatchesPlan(t *testing.T) {
 	}
 }
 
+// TestActivityDetectionSensitivity: config gemini.start_sensitivity /
+// end_sensitivity reach Live's automatic activity detection; "default"
+// (or unset) leaves the server's own setting alone.
+func TestActivityDetectionSensitivity(t *testing.T) {
+	cfg := Config{APIKeys: []string{"k"}}.withDefaults()
+	if lc := liveConfig(cfg, "p", ""); lc.RealtimeInputConfig != nil {
+		t.Errorf("unset sensitivities sent %+v", lc.RealtimeInputConfig)
+	}
+	cfg.StartSensitivity, cfg.EndSensitivity = "low", "default"
+	aad := liveConfig(cfg, "p", "").RealtimeInputConfig.AutomaticActivityDetection
+	if aad.StartOfSpeechSensitivity != genai.StartSensitivityLow || aad.EndOfSpeechSensitivity != "" {
+		t.Errorf("low/default → %+v", aad)
+	}
+	cfg.StartSensitivity, cfg.EndSensitivity = "high", "low"
+	aad = liveConfig(cfg, "p", "").RealtimeInputConfig.AutomaticActivityDetection
+	if aad.StartOfSpeechSensitivity != genai.StartSensitivityHigh || aad.EndOfSpeechSensitivity != genai.EndSensitivityLow {
+		t.Errorf("high/low → %+v", aad)
+	}
+}
+
 func TestAudioInAndMute(t *testing.T) {
 	c := newFakeConn("c1")
 	h := newHarness(t, Config{}, &fakeDialer{results: []func() (Conn, error){ok(c)}})

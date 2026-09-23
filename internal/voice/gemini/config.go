@@ -35,6 +35,11 @@ type Config struct {
 	Prompts *prompts.Loader
 	// Handler executes tool calls. nil means every call fails.
 	Handler voice.ToolHandler
+	// StartSensitivity / EndSensitivity are Live's automatic activity
+	// detection sensitivities: "low", "high", or ""/"default" for the
+	// server's own (config gemini.start_sensitivity / end_sensitivity).
+	StartSensitivity string
+	EndSensitivity   string
 
 	// PushGap is the minimum gap between two spoken pushes (default 2 s).
 	PushGap time.Duration
