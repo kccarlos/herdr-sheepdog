@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://github.com/kccarlos/herdr-sheepdog-ios/raw/main/assets/logo-transparent.svg">
+    <img src="https://github.com/kccarlos/herdr-sheepdog-ios/raw/main/assets/logo-solid.svg" alt="Sheepdog logo" width="160" height="160">
+  </picture>
+</p>
+
 # Sheepdog for iOS
 
 A phone-sized front end for the [herdr-sheepdog](https://github.com/kccarlos/herdr-sheepdog)

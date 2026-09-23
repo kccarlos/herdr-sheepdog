@@ -49,6 +49,7 @@ targets:
         PRODUCT_NAME: Sheepdog
         TARGETED_DEVICE_FAMILY: "1"
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
     info:
       path: Sources/Sheepdog/Info.plist
