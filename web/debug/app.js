@@ -321,6 +321,28 @@ function setupSettings() {
   });
 }
 
+// "New conversation" (docs/roles.md): resets the brain's transcript
+// window and the voice session's memory. A confirm() guards it since it
+// is destructive to the shown conversation so far (the roster, promises,
+// notes and pending prompts are unaffected either way).
+function setupNewConversation() {
+  const btn = $('new-conversation');
+  const result = $('new-conversation-result');
+  btn.addEventListener('click', async () => {
+    if (!confirm('Start a new conversation? This clears the shepherd/dog conversation so far; the agents, promises, notes and pending prompts are kept.')) return;
+    btn.disabled = true;
+    result.textContent = '…';
+    try {
+      const data = await post('/api/conversation/reset', { via: 'debug' });
+      result.textContent = `reset ${data.reset_id} at ${data.at}`;
+    } catch (err) {
+      result.textContent = `error: ${err.message}`;
+    } finally {
+      btn.disabled = false;
+    }
+  });
+}
+
 // ---- the brain's model picker: the providers and the options come
 // from GET /api/brain/models (once at start, on ↻ with ?refresh=1, and
 // with ?provider= when the provider select changes, which only
@@ -765,8 +787,9 @@ function onBrainEvent(ev) {
   supervisor.addEvent(ev);
   if (type === 'brain.transcript') { scheduleTranscriptFetch(150); scheduleContextFetch(600); }
   else if (type === 'brain.turn' || type === 'brain.compaction') scheduleContextFetch(type === 'brain.turn' ? 700 : 200);
-  else if (type === 'daemon.start') {
-    // A new run restarts the seqs at 1: drop the old run and fetch
+  else if (type === 'daemon.start' || type === 'brain.reset') {
+    // A new run, or a "New conversation" reset, restarts the transcript
+    // seqs at 1 (a fresh segment): drop what the tab has and fetch
     // afresh (debounced: the backfill replays every start of the day).
     supervisor.reload();
     if (brainState.transcriptTimer) clearTimeout(brainState.transcriptTimer);
@@ -972,6 +995,7 @@ async function boot() {
   setupTabs();
   setupEventControls();
   setupSettings();
+  setupNewConversation();
   setupModelControl();
   setupVoiceControl();
   setupInject();

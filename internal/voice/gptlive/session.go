@@ -307,6 +307,30 @@ func (s *Session) ClientAttached(attached bool) {
 	}
 }
 
+// Reset implements the optional voice.Session Reset: the recap and any
+// silent context held for the next session are dropped, so a session
+// that reopens later (on the next speech or push) starts with no memory
+// of the conversation so far ("New conversation", docs/roles.md). An
+// open billed session is closed now (session.close, no recap); a
+// standby one simply loses its recap. No-op before Start or after
+// Close.
+func (s *Session) Reset(reason string) error {
+	s.mu.Lock()
+	if !s.started || s.closed {
+		s.mu.Unlock()
+		return nil
+	}
+	s.recap, s.held = nil, nil
+	s.inText, s.outText = "", ""
+	lc := s.live
+	s.mu.Unlock()
+	if lc != nil {
+		s.closeLive(lc, "reset")
+	}
+	s.log.Log(logSource, "voice.reset", "", map[string]any{"reason": reason, "had_session": lc != nil})
+	return nil
+}
+
 // Speaking implements voice.Session.
 func (s *Session) Speaking() bool {
 	s.mu.Lock()

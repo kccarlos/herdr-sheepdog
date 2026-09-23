@@ -36,6 +36,8 @@ type fakeSession struct {
 	ends   int // AudioStreamEnd calls
 	// attached is the last ClientAttached value.
 	attached bool
+	// resets records every Reset(reason) call.
+	resets []string
 }
 
 func newFakeSession() *fakeSession {
@@ -88,6 +90,22 @@ func (f *fakeSession) ClientAttached(a bool) {
 func (f *fakeSession) isAttached() bool    { f.mu.Lock(); defer f.mu.Unlock(); return f.attached }
 func (f *fakeSession) streamEnds() int     { f.mu.Lock(); defer f.mu.Unlock(); return f.ends }
 func (f *fakeSession) emit(ev voice.Event) { f.events <- ev }
+
+// Reset implements the optional voice.Session Reset ("New conversation")
+// so tests can see a reset reach the voice side through the pusher
+// indirection (fakeSession doubles as supervisor.Pusher when it is
+// Deps.Voice directly, not behind a Switcher).
+func (f *fakeSession) Reset(reason string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.resets = append(f.resets, reason)
+	return nil
+}
+func (f *fakeSession) resetReasons() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.resets...)
+}
 
 // fakeWatcher records injected status events.
 type fakeWatcher struct {

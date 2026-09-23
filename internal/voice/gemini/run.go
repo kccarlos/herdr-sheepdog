@@ -145,6 +145,12 @@ func (s *Session) run(ctx context.Context) {
 		case <-s.goAway:
 			s.proactiveReconnect(ctx, "goaway")
 			continue
+		case <-s.dropReq:
+			// Reset already dropped the handle: proactiveReconnect's
+			// connect() finds none and comes back fresh.
+			s.log.Log(logSource, "voice.reset", "", nil)
+			s.proactiveReconnect(ctx, "reset")
+			continue
 		case reason := <-s.recycle:
 			// The connection looks sick (repeated stalls or pushes the
 			// model never answered): swap it for a fresh one while the

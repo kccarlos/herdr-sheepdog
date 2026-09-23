@@ -220,7 +220,9 @@ control messages; the daemon resamples for GPT-Live (which runs at
   answers with the GET shape; `400 {"error":"provider \"x\": …"}` for an
   unknown or unavailable provider (the reason is in the message), `503`
   with `--voice=off`.
-- `GET /api/state` has top-level `voice_provider` and `voice_model`.
+- `GET /api/state` has top-level `voice_provider` and `voice_model`, and
+  `conversation_started_at`: when the current conversation began (the
+  last "New conversation" reset, below, or daemon start).
 - **GPT-Live is billed per second of open session**, so the daemon opens
   one only while a client is attached (`/ws` connected) and unmuted and
   there is speech (a frame loud enough) or a push to say, and closes it
@@ -277,9 +279,30 @@ answer a question by tap. All three need the token under "Auth".
     answered, `resolution` `open` | `confirmed` | `expired` |
     `cancelled` | `replaced`;
   - `notice` — a divider: the daemon started, the voice reconnected (with
-    or without its context), the voice session closed.
+    or without its context), the voice session closed, or (`subkind:
+    "reset"`, `text: "New conversation"`) a "New conversation" reset.
+
   `id` is the first event's id, so items sort and page with the SSE
   stream's ids.
+- **New conversation.** `POST /api/conversation/reset {"via":"app"|
+  "debug"|"voice_page"}` resets the brain's transcript window (a fresh
+  segment; the compaction summary is gone) and the voice model's own
+  session (Gemini: a fresh reconnect with no resumption handle;
+  GPT-Live: an open billed session closes now, no recap, and reopens
+  later) — the roster, its ledger, open approval prompts, promises,
+  notes, investigations and the event log itself are untouched
+  (docs/roles.md "New conversation"). It answers `{"ok":true,
+  "reset_id":"<id>","at":"<RFC3339>"}`, logs `conversation.reset {via,
+  reset_id, at}` (so the SSE stream and a reconnecting client's replay
+  both carry it), and adds the `notice`/`reset` item above to
+  `GET /api/conversation`. The same reset is reachable by a bare voice
+  phrase ("start over", "new conversation", "start from scratch", "reset
+  the conversation", "clear the conversation"): the dog asks "Start a
+  new conversation? Say \"yes, start over\" to confirm.", and only the
+  exact confirm phrase ("yes, start over" / "confirm reset"), from real
+  shepherd input, within 20 s, carries it out — a bare "yes" keeps its
+  ordinary approval-prompt meaning, and the fresh session then says one
+  short line ("Fresh start. What's next?").
 - **Approve by tap.** `GET /api/state`'s `pending_action` (and the
   `pending.created` event) carries `agent`, `summary`, `question`,
   `command` and `options: [{index, label, keys, default}]`.

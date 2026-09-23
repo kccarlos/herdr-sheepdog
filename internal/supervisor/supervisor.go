@@ -256,6 +256,13 @@ type Supervisor struct {
 	// signature) was first recorded, so a revived pending action keeps
 	// the time the prompt really appeared (inputs.go).
 	promptSeenAt map[string]time.Time
+
+	// conversationStartedAt is when the current conversation began: the
+	// last reset, or startedAt (reset.go, GET /api/state).
+	conversationStartedAt time.Time
+	// resetConfirm is the "start a new conversation?" question waiting
+	// for its confirm phrase (reset.go), nil when none is open.
+	resetConfirm *resetConfirmState
 }
 
 // interruptGrace is how long after a user cancel a pane's working -> done
@@ -278,7 +285,7 @@ func New(store *state.Store, h Herdr, querier Querier, pusher Pusher, log loggin
 		return nil, err
 	}
 	cfg.chattiness = level
-	s := &Supervisor{store: store, herdr: h, querier: querier, pusher: pusher, log: log, cfg: cfg, brain: cfg.Brain, startedAt: cfg.Now(),
+	s := &Supervisor{store: store, herdr: h, querier: querier, pusher: pusher, log: log, cfg: cfg, brain: cfg.Brain, startedAt: cfg.Now(), conversationStartedAt: cfg.Now(),
 		interrupted: map[string]time.Time{}, mentioned: map[string]time.Time{}, lastPrompt: map[string]string{}, promptSeenAt: map[string]time.Time{}, inputWake: make(chan struct{}), investigating: map[string]*liveInvestigation{}}
 	// A querier that can keep a sub-agent session backs the investigate
 	// tool as well (investigate.go); one that cannot still answers

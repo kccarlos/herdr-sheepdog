@@ -33,6 +33,9 @@ type StateResponse struct {
 	// ("off" and "" with --voice=off).
 	VoiceProvider string `json:"voice_provider"`
 	VoiceModel    string `json:"voice_model"`
+	// ConversationStartedAt is when the current conversation began: the
+	// last "New conversation" reset, or daemon start.
+	ConversationStartedAt time.Time `json:"conversation_started_at"`
 }
 
 // SettingsResponse is the body of GET/PUT /api/settings (and the
@@ -95,18 +98,28 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 	agents := s.deps.Store.List()
 	hs := s.hub.state()
 	writeJSON(w, http.StatusOK, StateResponse{
-		Agents:        agents,
-		PendingAction: s.pendingView(snap.PendingAction),
-		Session:       snap.Session,
-		Voice:         VoiceInfo{Mode: s.deps.VoiceMode, Name: s.deps.VoiceName, Status: hs.status.String(), Reason: hs.reason, Muted: hs.muted, Stalled: hs.stalled, ClientConnected: hs.client},
-		Settings:      s.settings(),
-		Brain:         s.brainInfo(),
-		Herdr:         s.deps.HerdrMode,
-		Version:       s.deps.Version,
-		Now:           s.deps.Now().UTC(),
-		VoiceProvider: s.voiceProvider(),
-		VoiceModel:    s.voiceModel(),
+		Agents:                agents,
+		PendingAction:         s.pendingView(snap.PendingAction),
+		Session:               snap.Session,
+		Voice:                 VoiceInfo{Mode: s.deps.VoiceMode, Name: s.deps.VoiceName, Status: hs.status.String(), Reason: hs.reason, Muted: hs.muted, Stalled: hs.stalled, ClientConnected: hs.client},
+		Settings:              s.settings(),
+		Brain:                 s.brainInfo(),
+		Herdr:                 s.deps.HerdrMode,
+		Version:               s.deps.Version,
+		Now:                   s.deps.Now().UTC(),
+		VoiceProvider:         s.voiceProvider(),
+		VoiceModel:            s.voiceModel(),
+		ConversationStartedAt: s.conversationStartedAt(),
 	})
+}
+
+// conversationStartedAt is StateResponse's conversation_started_at (the
+// zero time when there is no supervisor).
+func (s *Server) conversationStartedAt() time.Time {
+	if s.deps.Supervisor == nil {
+		return time.Time{}
+	}
+	return s.deps.Supervisor.ConversationStartedAt()
 }
 
 // PendingView is /api/state's pending action: the stored action plus

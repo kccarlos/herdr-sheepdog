@@ -166,6 +166,7 @@ td.task, td.block, td.result { max-width: 18em; overflow: hidden; text-overflow:
 .divider.stalled { color: var(--voice); } .divider.stalled .line { border-color: #ead8a8; }
 .divider.recycle { color: var(--llm); }
 .divider.connect, .divider.resume { color: var(--done); }
+.divider.reset { color: var(--fg); font-weight: 600; } .divider.reset .line { border-top-width: 2px; }
 
 /* ----------------------------------------------------------- supervisor */
 .supervisor { height: calc(100vh - 330px); }
@@ -387,6 +388,7 @@ td.task, td.block, td.result { max-width: 18em; overflow: hidden; text-overflow:
 .sw-divider.connect, .sw-divider.resume { color: var(--done); } .sw-divider.connect .line, .sw-divider.resume .line { border-color: #c6f6d5; }
 .sw-divider.prompt { color: var(--llm); } .sw-divider.prompt .line { border-color: #e9d8fd; }
 .sw-divider.daemon { color: var(--fg); } .sw-divider.daemon .line { border-top-width: 2px; }
+.sw-divider.reset { color: var(--fg); font-weight: 600; } .sw-divider.reset .line { border-top-width: 2px; }
 .sw-divider-body { grid-column: 2 / -1; grid-row: 2; margin: 0 .5rem .4rem; border-left: 3px solid var(--llm); }
 .sw-divider-body .prompt-text { margin: .2rem .5rem; }
 .sw-chain-info { color: var(--muted); }
