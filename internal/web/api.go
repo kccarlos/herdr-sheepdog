@@ -136,7 +136,8 @@ type pendingAnswerRequest struct {
 // handlePendingAnswer answers the open question with the option the
 // shepherd tapped: {"id", "option"} (1-based, the index /api/state and
 // pending.created list). It is a shepherd input like a spoken answer and
-// passes the same rail; a question that is no longer open is 409.
+// passes the same rail; a question that is no longer open is 409, keys
+// that could not be sent 502.
 func (s *Server) handlePendingAnswer(w http.ResponseWriter, r *http.Request) {
 	if s.deps.Supervisor == nil {
 		writeError(w, http.StatusServiceUnavailable, "no supervisor")
@@ -161,11 +162,14 @@ func (s *Server) handlePendingAnswer(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, supervisor.ErrNoSuchOption):
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
+	case errors.Is(err, supervisor.ErrNotSent):
+		writeError(w, http.StatusBadGateway, res.Spoken)
+		return
 	case err != nil:
 		writeError(w, http.StatusForbidden, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": !strings.HasPrefix(res.Spoken, "I could not"), "spoken": res.Spoken})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "spoken": res.Spoken})
 }
 
 // SystemPromptResponse is the body of GET /api/voice/system_prompt.

@@ -289,6 +289,65 @@ func TestTapAnswersThePendingQuestion(t *testing.T) {
 	}
 }
 
+// A tap is answered at once: the voice relaying the silent "tapped" line
+// back finds no fresh input.
+func TestTapIsNotFreshInputForTheRelay(t *testing.T) {
+	m := braintest.NewModel()
+	h := newBrainHarness(t, m)
+	blockedAuth(t, h)
+	p, _ := h.pending()
+	calls := len(m.Calls())
+	if _, err := h.sup.AnswerTap(context.Background(), p.ID, 1); err != nil {
+		t.Fatal(err)
+	}
+	h.relay(h.pusher.last(t).Text)
+	if n := h.log.count("supervisor.voice_initiative_ignored"); n != 1 {
+		t.Errorf("voice_initiative_ignored = %d, want 1", n)
+	}
+	if len(m.Calls()) != calls {
+		t.Errorf("a brain turn ran on the relayed tap line")
+	}
+}
+
+// Input transcription that trails the accepted call belongs to it: a
+// second, model-initiated relay after it is ignored.
+func TestTrailingFragmentIsNotFreshInput(t *testing.T) {
+	h := newHarness(t)
+	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
+	h.sup.OnVoiceEvent(voice.EventTranscript{Dir: voice.DirIn, Text: " what is"})
+	h.sup.OnVoiceEvent(voice.EventTranscript{Dir: voice.DirIn, Text: " auth doing"})
+	h.relay("what is auth doing")
+	h.sup.OnVoiceEvent(voice.EventTranscript{Dir: voice.DirIn, Text: " right now"})
+	h.relay("yes")
+	if n := h.log.count("supervisor.voice_initiative_ignored"); n != 1 {
+		t.Errorf("voice_initiative_ignored = %d, want 1", n)
+	}
+	// The next user turn (after the dog spoke) is fresh again.
+	h.sup.OnVoiceEvent(voice.EventTranscript{Dir: voice.DirOut, Text: "Auth is working."})
+	h.hear("thanks")
+	h.relay("thanks")
+	if n := h.log.count("supervisor.voice_initiative_ignored"); n != 1 {
+		t.Errorf("voice_initiative_ignored = %d after a new turn, want 1", n)
+	}
+}
+
+// A prompt answered in the terminal and shown again later appeared then:
+// words spoken in between cannot answer it.
+func TestPromptSeenAtResetsWhenThePaneLeavesItsPrompt(t *testing.T) {
+	h := newHarness(t)
+	blockedAuth(t, h)
+	h.clock.Advance(time.Second)
+	h.transition("w5:p1", herdr.StateBlocked, herdr.StateWorking) // answered at the terminal
+	h.hear("yes")
+	h.clock.Advance(time.Second)
+	h.sup.SetVoiceConnected(false) // no announce push between
+	h.block("w5:p1", "codex-approval-prompt.screen.txt")
+	h.relay("yes")
+	if got := h.sendKeysRequests(); len(got) != 0 {
+		t.Errorf("keys sent: %v", got)
+	}
+}
+
 func TestTapRejectsStaleIDsAndBadOptions(t *testing.T) {
 	h := newHarness(t)
 	blockedAuth(t, h)

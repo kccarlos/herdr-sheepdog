@@ -56,6 +56,10 @@ type shepherdInput struct {
 	at   time.Time
 	// open is a voice input still collecting transcript fragments.
 	open bool
+	// claimed is set once a to_supervisor call was accepted on it: a
+	// fragment that trails the call belongs to that call, not to a new
+	// one.
+	claimed bool
 	// used is set once the input authorised an answer to a prompt: one
 	// "yes" answers one prompt.
 	used bool
@@ -71,6 +75,10 @@ var ErrPendingGone = errors.New("that question is no longer open")
 // ErrNoSuchOption is AnswerTap's answer for an option index the question
 // does not have.
 var ErrNoSuchOption = errors.New("no such option")
+
+// ErrNotSent is AnswerTap's answer when the keys could not be sent to the
+// worker; the question stays open.
+var ErrNotSent = errors.New("the answer could not be sent")
 
 // ShepherdInput records something the shepherd typed (or, for tests and
 // the tap path, any other kind): the web layer calls it before a typed
@@ -96,6 +104,11 @@ func (s *Supervisor) heard(text string, final bool) {
 		s.inputSeq++
 		last.text += text
 		last.seq, last.at, last.open = s.inputSeq, s.cfg.Now(), !final
+		if last.claimed {
+			// The input transcription trails the tool call: these words
+			// are the relay already made, not fresh input for another.
+			s.relayedSeq = s.inputSeq
+		}
 		s.wakeLocked()
 		return
 	}
@@ -160,8 +173,9 @@ func (s *Supervisor) claimInput(ctx context.Context) (*shepherdInput, bool) {
 		s.mu.Lock()
 		if last := s.lastInputLocked(); last != nil && last.seq > s.relayedSeq && last.seq > s.pushSeq {
 			s.relayedSeq = s.inputSeq
-			// Words after this call are a new input.
-			last.open = false
+			// Fragments still arriving for this turn stay with this call
+			// (heard); the next turn is a new input.
+			last.claimed = true
 			s.mu.Unlock()
 			return last, true
 		}
@@ -306,6 +320,10 @@ func (s *Supervisor) AnswerTap(ctx context.Context, id string, option int) (voic
 	o := p.Options[option-1]
 	s.closeVoiceLocked()
 	s.addInputLocked(&shepherdInput{kind: InputTap, text: o.Label})
+	// The tap is answered here and now: it is not fresh input for a
+	// later to_supervisor call (the voice relaying the silent line below
+	// back, say).
+	s.relayedSeq = s.inputSeq
 	in, reason := s.railInputLocked(p, o.Keys)
 	if reason != "" {
 		s.railBlockedLocked(p, o.Keys, "tap", reason)
@@ -319,7 +337,7 @@ func (s *Supervisor) AnswerTap(ctx context.Context, id string, option int) (voic
 	}
 	s.mu.Unlock()
 	if !sent {
-		return res, nil
+		return res, ErrNotSent
 	}
 	s.push(p.PaneID, fmt.Sprintf("The shepherd tapped %s on %s's question.", strings.TrimRight(o.Label, "."), alias), voice.UrgencySilent)
 	if s.brain != nil {

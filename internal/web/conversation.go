@@ -166,7 +166,7 @@ func pageItems(items []ConversationItem, before int64, limit int, moreDays bool)
 
 // conversationTypes are the event types the builder reads.
 var conversationTypes = map[string]bool{
-	"daemon.start": true, "web.utterance": true, "brain.push_decision": true,
+	"daemon.start": true, "web.utterance": true,
 	"pending.created": true, "pending.confirmed": true, "pending.expired": true, "pending.cancelled": true, "pending.replaced": true,
 }
 
