@@ -400,6 +400,54 @@ func TestYesToAnExpiredPromptStillAuthorises(t *testing.T) {
 	}
 }
 
+// The regression of 2026-09-23 06:30: send_keys revived auth's prompt
+// (it had never been recorded this run, though the pane had been
+// blocked at it for a while) and the rail measured "the prompt
+// appeared" from the revival itself, so the shepherd's "yes, please" —
+// said before the revival, after the pane actually went blocked — read
+// as too old. newAnswerPrompt now keeps the pane's row.StateSince (the
+// real blocked-since time) for a prompt recorded for the first time
+// while the pane was already blocked, not the moment of recording.
+// Sequence: pane blocked at t-30s (never announced this run) -> input at
+// t -> revival at t+4s -> must be allowed.
+func TestRevivedPromptKeepsWhenThePaneActuallyBlocked(t *testing.T) {
+	h := newHarness(t)
+	h.srv.SetWorkspace(herdr.WorkspaceInfo{WorkspaceID: "auth", Label: "auth"})
+	h.srv.SetAgent(herdr.AgentInfo{PaneID: "w5:p1", WorkspaceID: "auth", TabID: "auth:t1", Agent: "codex", Status: herdr.StateBlocked, Cwd: "/work/w5:p1"})
+	h.srv.SetScreen("w5:p1", fixture(t, "codex-approval-prompt.screen.txt"))
+	// The pane is already blocked as far as the store is concerned, but
+	// nothing went through the Supervisor's onBlocked (a restart with the
+	// pane already at this prompt, say): no pending action, no
+	// promptSeenAt, this run's first sight of it. state_since is now.
+	if _, _, err := h.store.Apply(herdr.Transition{PaneID: "w5:p1", To: herdr.StateBlocked, At: h.clock.Now(), Agent: "codex", WorkspaceID: "auth", WorkspaceLabel: "auth"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, has := h.pending(); has {
+		t.Fatal("nothing should be pending yet: onBlocked never ran")
+	}
+
+	h.clock.Advance(30 * time.Second) // t: the pane has been blocked 30s
+	h.sup.ShepherdInput(InputTyped, "yes please")
+
+	h.clock.Advance(4 * time.Second) // t+4s: send_keys revives the prompt
+	res, err := (brainHost{s: h.sup}).AnswerPrompt(context.Background(), "w5:p1", []string{"y"})
+	if err != nil {
+		t.Fatalf("AnswerPrompt: %v", err)
+	}
+	if !strings.HasPrefix(res, "Told auth") {
+		t.Errorf("result = %q", res)
+	}
+	if got := h.sendKeysRequests(); len(got) != 1 || got[0][1] != "y" {
+		t.Errorf("keys = %v", got)
+	}
+	if h.log.count("pending.revived") != 1 {
+		t.Errorf("pending.revived = %d", h.log.count("pending.revived"))
+	}
+	if h.log.count("brain.rail_blocked") != 0 {
+		t.Errorf("rail_blocked = %d, want 0", h.log.count("brain.rail_blocked"))
+	}
+}
+
 func TestNegativeInput(t *testing.T) {
 	for text, want := range map[string]bool{
 		"no": true, "No.": true, "nope": true, "don't": true, "don't run it": true, "do not do that": true,

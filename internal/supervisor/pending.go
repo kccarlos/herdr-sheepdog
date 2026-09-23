@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/prose"
@@ -13,8 +14,13 @@ import (
 )
 
 // newAnswerPrompt builds an answer_prompt action from a parsed approval
-// prompt. Caller holds s.mu.
-func (s *Supervisor) newAnswerPrompt(paneID string, prompt herdr.Prompt, alias string) state.PendingAction {
+// prompt. blockedSince is the pane's row.StateSince (when it entered
+// blocked), for the one rail's reading of when a first-recorded or
+// revived prompt really appeared (inputs.go's promptSinceLocked): a
+// synthetic blocked -> blocked transition never moves state_since
+// (docs/roles.md "blocked -> blocked is a block"), so this is the true
+// time even for a reprompt or a reconcile. Caller holds s.mu.
+func (s *Supervisor) newAnswerPrompt(paneID string, prompt herdr.Prompt, alias string, blockedSince time.Time) state.PendingAction {
 	now := s.cfg.Now()
 	p := state.PendingAction{
 		ID:     s.nextID("ap"),
@@ -40,8 +46,16 @@ func (s *Supervisor) newAnswerPrompt(paneID string, prompt herdr.Prompt, alias s
 	sig := promptSignature(prompt)
 	if _, seen := s.promptSeenAt[paneID]; !seen || s.lastPrompt[paneID] != sig {
 		// When the prompt appeared, for the one rail (inputs.go): a
-		// revival of the same prompt keeps the first time it was seen.
-		s.promptSeenAt[paneID] = now
+		// revival of the same prompt keeps the first time it was seen; a
+		// prompt recorded here for the first time, with the pane already
+		// blocked (a revival, a reconcile at startup, or any first sight
+		// of a pane that was already at a prompt), appeared when the pane
+		// actually went blocked, not at this moment's recording of it.
+		seenAt := now
+		if !blockedSince.IsZero() && blockedSince.Before(now) {
+			seenAt = blockedSince
+		}
+		s.promptSeenAt[paneID] = seenAt
 	}
 	s.lastPrompt[paneID] = sig
 	return p
@@ -168,7 +182,7 @@ func (s *Supervisor) revivePrompt(ctx context.Context, paneID, source string) (s
 	if !ok {
 		return state.PendingAction{}, false
 	}
-	p := s.newAnswerPrompt(paneID, prompt, aliasOr(row.Alias))
+	p := s.newAnswerPrompt(paneID, prompt, aliasOr(row.Alias), row.StateSince)
 	s.setPending(p)
 	s.log.Log(logSource, "pending.revived", paneID, map[string]any{"id": p.ID, "source": source})
 	return p, true
@@ -176,9 +190,20 @@ func (s *Supervisor) revivePrompt(ctx context.Context, paneID, source string) (s
 
 var (
 	reOptionNumber = regexp.MustCompile(`^(?:option|number|choice|the)?\s*(\d+)(?:st|nd|rd|th)?$`)
-	ordinals       = map[string]int{"first": 1, "second": 2, "third": 3, "fourth": 4, "fifth": 5, "sixth": 6, "seventh": 7, "eighth": 8, "ninth": 9}
-	yesWords       = map[string]bool{"": true, "yes": true, "y": true, "yeah": true, "yep": true, "yup": true, "ok": true, "okay": true, "sure": true, "go": true, "go ahead": true, "do it": true, "proceed": true, "approve": true, "approved": true, "confirm": true, "accept": true, "allow": true, "fine": true, "please": true, "yes please": true}
-	noWords        = map[string]bool{"no": true, "n": true, "nope": true, "nah": true, "deny": true, "decline": true, "reject": true, "don't": true, "do not": true, "dont": true, "cancel": true, "stop": true, "skip": true, "negative": true}
+	// ordinals covers both the ordinal ("second") and cardinal ("two")
+	// word forms of an option pick, so "option two" and "the second one"
+	// both resolve (optionNumber).
+	ordinals = map[string]int{
+		"first": 1, "second": 2, "third": 3, "fourth": 4, "fifth": 5, "sixth": 6, "seventh": 7, "eighth": 8, "ninth": 9,
+		"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9,
+	}
+	yesWords = map[string]bool{
+		"": true, "yes": true, "y": true, "yeah": true, "yep": true, "yup": true, "ok": true, "okay": true, "sure": true,
+		"go": true, "go ahead": true, "yeah go ahead": true, "yes go ahead": true, "do it": true, "proceed": true,
+		"approve": true, "approved": true, "approve it": true, "please approve": true, "confirm": true, "accept": true,
+		"allow": true, "fine": true, "please": true, "yes please": true, "yes continue": true,
+	}
+	noWords = map[string]bool{"no": true, "n": true, "nope": true, "nah": true, "no thanks": true, "deny": true, "decline": true, "reject": true, "don't": true, "do not": true, "dont": true, "cancel": true, "stop": true, "skip": true, "negative": true}
 )
 
 // mapAnswer turns the user's answer into keystrokes for the pending
