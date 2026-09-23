@@ -22,6 +22,14 @@ const (
 	backpressureEvery = 100
 )
 
+// clientAttacher is implemented by sessions that care whether a client
+// is listening (GPT-Live opens a billed session only for one).
+type clientAttacher interface{ ClientAttached(bool) }
+
+// voiceStatser is implemented by sessions with counters for
+// web.client.stats (GPT-Live's billed seconds).
+type voiceStatser interface{ VoiceStats() map[string]any }
+
 // audioEnder is implemented by sessions that can tell the model the
 // microphone stream paused (Gemini: audioStreamEnd), so its VAD closes the
 // user's turn when the browser's silence gate stops sending frames.
@@ -73,6 +81,9 @@ func (h *hub) statusMsg() wsproto.Message {
 	defer h.mu.Unlock()
 	m := wsproto.Status(h.status.String(), h.muted, h.reason)
 	m.Stalled = h.stalled
+	if p := h.s.voiceProvider(); p != "off" {
+		m.Provider = p
+	}
 	return m
 }
 
@@ -100,6 +111,9 @@ func (h *hub) handle(w http.ResponseWriter, r *http.Request) {
 		old.closeAfterFlush(websocket.StatusNormalClosure, "replaced")
 	}
 	h.s.log.Log(logSource, "web.client.connect", "", map[string]any{"client_id": c.id, "remote": c.remote, "replaced": replaced})
+	if ca, ok := h.s.deps.Voice.(clientAttacher); ok {
+		ca.ClientAttached(true)
+	}
 
 	// The contract: a status message before any binary frame.
 	c.enqueue(controlFrame(h.statusMsg()))
@@ -109,10 +123,14 @@ func (h *hub) handle(w http.ResponseWriter, r *http.Request) {
 	c.finish(reason)
 
 	h.mu.Lock()
-	if h.client == c {
+	last := h.client == c
+	if last {
 		h.client = nil
 	}
 	h.mu.Unlock()
+	if ca, ok := h.s.deps.Voice.(clientAttacher); ok && last {
+		ca.ClientAttached(false)
+	}
 }
 
 // current returns the attached client, if any.
@@ -493,7 +511,13 @@ func (c *client) statsLoop(every time.Duration) {
 		case <-c.done:
 			return
 		case <-t.C:
-			c.h.s.log.Log(logSource, "web.client.stats", "", c.counters())
+			payload := c.counters()
+			if vs, ok := c.h.s.deps.Voice.(voiceStatser); ok {
+				for k, v := range vs.VoiceStats() {
+					payload[k] = v
+				}
+			}
+			c.h.s.log.Log(logSource, "web.client.stats", "", payload)
 		}
 	}
 }

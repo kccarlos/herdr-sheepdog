@@ -94,6 +94,28 @@ func TestFastPathBareYesSendsKeys(t *testing.T) {
 	}
 }
 
+// The GPT-Live order of events (audio-e2e, 2026-09-23): the model's
+// speech ends (turn complete, which closes the voice input) just after
+// the shepherd's "Yes" fragment arrived, and the utterance's end then
+// comes as an empty final fragment. The empty fragment must not become
+// an input of its own: it made the newest input "" and the fast path
+// silently refused the yes.
+func TestEmptyFinalFragmentIsNotAnInput(t *testing.T) {
+	m := braintest.NewModel()
+	h := newBrainHarness(t, m)
+	blockedAuth(t, h)
+	h.sup.OnVoiceEvent(voice.EventTranscript{Dir: voice.DirIn, Text: " Yes"})
+	h.sup.OnVoiceEvent(voice.EventTurnComplete{})
+	h.sup.OnVoiceEvent(voice.EventTranscript{Dir: voice.DirIn, Final: true})
+	res := h.relay("Yes")
+	if res.Spoken != "Told auth yes." {
+		t.Fatalf("result = %+v", res)
+	}
+	if got := h.sendKeysRequests(); len(got) != 1 {
+		t.Errorf("send_keys = %v", got)
+	}
+}
+
 // (3) Everything the fast path does not claim goes to the brain: "yes"
 // with nothing pending, a "yes" with more words, and an option label.
 func TestFastPathBoundaries(t *testing.T) {

@@ -1,0 +1,79 @@
+{
+  "voice": "Samantha",
+  "scenarios": [
+    {
+      "name": "status-question",
+      "note": "A plain status question: relayed to the supervisor, answered aloud.",
+      "segments": [{"silence_ms": 600}, {"say": "What's going on with my agents?"}, {"silence_ms": 400}],
+      "tail_ms": 15000,
+      "expect": {"in_contains": ["going on|agents"], "tool": "to_supervisor", "reply": true}
+    },
+    {
+      "name": "approval-yes",
+      "note": "A mock herdr block (codex approval prompt) is announced; a bare 'yes' authorises it by transcript.",
+      "setup": [{"inject_blocked": {"pane_id": "w1:p1", "alias": "auth", "kind": "codex", "screen_fixture": "codex-approval-prompt.screen.txt"}}],
+      "segments": [{"silence_ms": 6000}, {"say": "Yes."}, {"silence_ms": 400}],
+      "tail_ms": 12000,
+      "expect": {"in_contains": ["yes|yeah|yep"], "tool": "to_supervisor", "keys_sent": true, "reply": true}
+    },
+    {
+      "name": "instruction-promise",
+      "note": "An instruction plus a promise to report back.",
+      "segments": [{"silence_ms": 400}, {"say": "Tell auth to run the tests, and let me know when it's done."}, {"silence_ms": 400}],
+      "tail_ms": 15000,
+      "expect": {"in_contains": ["auth|off", "tests|test"], "tool": "to_supervisor", "reply": true}
+    },
+    {
+      "name": "follow-up",
+      "note": "A follow-up question that leans on the previous turn.",
+      "segments": [{"silence_ms": 400}, {"say": "Which agent was that about?"}, {"silence_ms": 400}],
+      "tail_ms": 15000,
+      "expect": {"in_contains": ["agent|which"], "reply": true}
+    },
+    {
+      "name": "stop-mid-reply",
+      "note": "A question, then 'stop' spoken while the reply plays (barge-in).",
+      "speak_after_reply_ms": 900,
+      "segments": [
+        {"silence_ms": 400},
+        {"say": "Give me a full rundown of every agent and what each one is doing."},
+        {"say": "Stop.", "after_reply": true},
+        {"silence_ms": 300}
+      ],
+      "tail_ms": 10000,
+      "expect": {"in_contains": ["stop"], "tool": "stop"}
+    },
+    {
+      "name": "stop-button",
+      "note": "A question, then the stop button (cancel) while the reply plays.",
+      "cancel_after_ms": 700,
+      "segments": [{"silence_ms": 300}, {"say": "How is auth doing?"}, {"silence_ms": 300}],
+      "tail_ms": 12000,
+      "expect": {"flush": true, "tool": "to_supervisor"}
+    },
+    {
+      "name": "room-noise-only",
+      "note": "10 s of cafe noise at -45 dBFS and no speech: nothing may be heard.",
+      "segments": [{"noise_ms": 10000, "noise_kind": "cafe", "noise_dbfs": -45}],
+      "tail_ms": 3000,
+      "full_tail": true,
+      "expect": {"no_in_transcript": true, "no_tool": true}
+    },
+    {
+      "name": "speech-snr-10db",
+      "note": "A question under a cafe noise bed 10 dB below the speech.",
+      "noise": {"kind": "cafe", "snr_db": 10, "seed": 3},
+      "segments": [{"silence_ms": 800}, {"say": "How is the docs agent doing?"}, {"silence_ms": 800}],
+      "tail_ms": 15000,
+      "expect": {"in_contains": ["docs|doc|dogs|docks", "doing"], "tool": "to_supervisor", "reply": true}
+    },
+    {
+      "name": "long-silence",
+      "note": "Nothing said for longer than voice.openai.idle_close_s: GPT-Live must close its session (billing stops).",
+      "segments": [{"silence_ms": 1000}],
+      "tail_ms": 14000,
+      "full_tail": true,
+      "expect": {"no_tool": true, "events": [{"type": "voice.session_close", "payload": {"reason": "idle"}, "providers": ["openai"]}]}
+    }
+  ]
+}

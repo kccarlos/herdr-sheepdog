@@ -22,7 +22,7 @@ import (
 // must never make an app test reach a real API (or hang on one).
 func noKeys(t *testing.T) {
 	t.Helper()
-	for _, k := range []string{"GEMINI_API_KEY", "GEMINI_API_KEY_1", "GEMINI_API_KEY_2", "GEMINI_API_KEY_3", "DEEPSEEK_API_KEY"} {
+	for _, k := range []string{"GEMINI_API_KEY", "GEMINI_API_KEY_1", "GEMINI_API_KEY_2", "GEMINI_API_KEY_3", "DEEPSEEK_API_KEY", "OPENAI_API_KEY"} {
 		t.Setenv(k, "")
 	}
 }

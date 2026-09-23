@@ -83,8 +83,32 @@ func liveConfig(cfg Config, prompt, handle string) *genai.LiveConnectConfig {
 			TriggerTokens: genai.Ptr(cfg.CompressionTrigger),
 			SlidingWindow: &genai.SlidingWindow{TargetTokens: genai.Ptr(cfg.CompressionTarget)},
 		},
-		SessionResumption: &genai.SessionResumptionConfig{Handle: handle},
+		SessionResumption:   &genai.SessionResumptionConfig{Handle: handle},
+		RealtimeInputConfig: realtimeInput(cfg),
 	}
+}
+
+// realtimeInput maps the configured activity-detection sensitivities
+// (config gemini.start_sensitivity / end_sensitivity) onto Live's
+// automatic activity detection; nil when both are "default" or unset.
+func realtimeInput(cfg Config) *genai.RealtimeInputConfig {
+	var aad genai.AutomaticActivityDetection
+	switch cfg.StartSensitivity {
+	case "low":
+		aad.StartOfSpeechSensitivity = genai.StartSensitivityLow
+	case "high":
+		aad.StartOfSpeechSensitivity = genai.StartSensitivityHigh
+	}
+	switch cfg.EndSensitivity {
+	case "low":
+		aad.EndOfSpeechSensitivity = genai.EndSensitivityLow
+	case "high":
+		aad.EndOfSpeechSensitivity = genai.EndSensitivityHigh
+	}
+	if aad.StartOfSpeechSensitivity == "" && aad.EndOfSpeechSensitivity == "" {
+		return nil
+	}
+	return &genai.RealtimeInputConfig{AutomaticActivityDetection: &aad}
 }
 
 // scheduling maps an Urgency to the function response scheduling hint.

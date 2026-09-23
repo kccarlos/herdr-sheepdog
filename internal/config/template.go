@@ -40,9 +40,21 @@ func Template() string {
 # model = %[8]q
 # voice = %[9]q
 # stall_after_s = %[18]d   # no model response this long after an utterance logs voice.stalled; twice recycles the connection
+# start_sensitivity = "low"   # Live speech-start detection: "low" | "high" | "default"; low keeps room noise from being transcribed
+# end_sensitivity = "default"   # Live speech-end detection: "low" | "high" | "default"
 
 [voice]
 # name = %[38]q   # what the dog calls itself, substituted into the voice prompt as {name}
+# provider = "gemini"   # "gemini" (Gemini Live) | "openai" (GPT-Live, billed per minute); the runtime pick in the state file wins
+
+[voice.openai]
+# GPT-Live (billed per second of open session; closed when idle).
+# api_key is normally left unset here: OPENAI_API_KEY is read from the
+# environment instead. The voice only: the brain never uses it.
+# api_key = ""
+# model = "gpt-live-1"
+# voice = "marin"
+# idle_close_s = 45   # close the GPT-Live session after this long without speech, a reply or a push
 
 [deepseek]
 # The second supervisor-brain provider (paid per token). api_key is

@@ -100,6 +100,17 @@ func (s *Supervisor) ShepherdInput(kind InputKind, text string) {
 func (s *Supervisor) heard(text string, final bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if text == "" {
+		// An empty fragment carries no words: it can only close the input
+		// being collected (GPT-Live marks an utterance's end this way). It
+		// must never become an input of its own — an empty newest input
+		// made the rail refuse the "yes" just before it (audio-e2e,
+		// 2026-09-23).
+		if last := s.lastInputLocked(); last != nil && last.open && final {
+			last.open = false
+		}
+		return
+	}
 	if last := s.lastInputLocked(); last != nil && last.open {
 		s.inputSeq++
 		last.text += text

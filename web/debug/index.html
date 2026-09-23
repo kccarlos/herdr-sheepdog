@@ -34,6 +34,10 @@
     <label class="small" title="list every model the provider serves generateContent for, not only the text models the brain can plausibly run"><input type="checkbox" id="model-all"> all</label>
     <span class="muted small" id="model-note"></span>
   </span>
+  <span class="indicator model-control hidden" id="voice-control" title="the voice model behind /ws: switching closes the current voice session and opens the new provider on the next need; kept across restarts (session.voice_provider in the state file)">voice
+    <select id="voice-provider" title="the voice provider; a greyed-out one has no key (see its tooltip)"></select>
+    <span class="muted small" id="voice-note"></span>
+  </span>
   <a href="/voice">voice page</a>
 </header>
 

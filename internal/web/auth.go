@@ -69,6 +69,11 @@ type HelloResponse struct {
 	Auth  string     `json:"auth"`
 	WS    string     `json:"ws"`
 	Audio HelloAudio `json:"audio"`
+	// VoiceProvider and VoiceModel are the voice model behind /ws right
+	// now ("gemini"/"gemini-3.8-live", "openai"/"gpt-live-1"; "off" and
+	// "" with --voice=off).
+	VoiceProvider string `json:"voice_provider"`
+	VoiceModel    string `json:"voice_model"`
 }
 
 // HelloAudio is the /ws audio contract (docs/ws-contract.md): what a
@@ -86,7 +91,8 @@ func (s *Server) handleHello(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, HelloResponse{
 		Name: "sheepdog", Version: s.deps.Version, VoiceName: s.deps.VoiceName, Auth: auth, WS: "/ws",
-		Audio: HelloAudio{InHz: 16000, OutHz: 24000, Format: "pcm16le mono"},
+		Audio:         HelloAudio{InHz: 16000, OutHz: 24000, Format: "pcm16le mono"},
+		VoiceProvider: s.voiceProvider(), VoiceModel: s.voiceModel(),
 	})
 }
 

@@ -68,6 +68,9 @@ type Message struct {
 	Muted   *bool  `json:"muted,omitempty"`
 	Reason  string `json:"reason,omitempty"`
 	Stalled bool   `json:"stalled,omitempty"`
+	// Provider is the voice provider behind the session ("gemini",
+	// "openai"); set on status messages when a voice is configured.
+	Provider string `json:"provider,omitempty"`
 
 	// transcript
 	Dir   string `json:"dir,omitempty"`

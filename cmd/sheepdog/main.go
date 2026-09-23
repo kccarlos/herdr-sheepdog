@@ -56,6 +56,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return runPrompts(ctx, args[1:], stdout, stderr)
 	case "eval":
 		return runEval(ctx, args[1:], stdout, stderr)
+	case "audio-e2e":
+		return runAudioE2E(ctx, args[1:], stdout, stderr)
 	case "version":
 		fprintln(stdout, versionString(version, commit, date))
 		return 0
@@ -86,6 +88,7 @@ func printUsage(w io.Writer) {
 	fprintln(w, "  brain-test    run one supervisor-brain turn against a mock herdr and a fixture")
 	fprintln(w, "  prompts       export|show: inspect or scaffold the prompt override directory")
 	fprintln(w, "  eval          run the conversation eval set (--set assistant|svp [--live])")
+	fprintln(w, "  audio-e2e     speak scenarios (macOS say + noise) into a running daemon's /ws")
 	fprintln(w, "  version       print version, commit, and build date")
 	fprintln(w, "  help          show this help message")
 }

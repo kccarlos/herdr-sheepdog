@@ -51,8 +51,8 @@ ignored; the connection stays open.
 | Message                                                                  | Meaning                                                                                                         |
 |--------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------|
 | `{"type":"flush"}`                                                       | **Drop the playback buffer now.** Sent when the model was interrupted (barge-in, `cancel`, an interrupting push). Audio frames received before this message must not be played; frames received after it start a new utterance. |
-| `{"type":"status","voice":"connecting\|connected\|reconnecting\|closed","muted":bool,"reason":"…"?,"stalled":true?}` | Voice session state. Sent once on connect and on every change. `reason` is set for `closed` (e.g. `"replaced"`, `"shutdown"`, `"error"`). `muted` echoes the daemon's view of the mute state. `stalled` is present (true) while the model has not reacted to the user's last utterance for `gemini.stall_after_s`; the next status without it means the model answered or the connection was recycled. |
-| `{"type":"transcript","dir":"in\|out","text":"…","final":bool}`          | Incremental transcription. `in` = what the model heard from the user, `out` = what the model is saying. Fragments of one utterance arrive in order; `final:true` closes it. Output fragments may never carry `final:true`; treat the next `in` transcript or a `flush` as the boundary. |
+| `{"type":"status","voice":"connecting\|connected\|reconnecting\|closed","muted":bool,"reason":"…"?,"stalled":true?,"provider":"gemini\|openai"?}` | Voice session state. Sent once on connect and on every change. `reason` is set for `closed` (e.g. `"replaced"`, `"shutdown"`, `"error"`); with GPT-Live, `connected` carries `reason:"standby"` while no billed session is open (it opens on the next speech or push) and no reason while one is. `muted` echoes the daemon's view of the mute state. `stalled` is present (true) while the model has not reacted to the user's last utterance for `gemini.stall_after_s`; the next status without it means the model answered or the connection was recycled. `provider` is the voice provider behind the session (absent with `--voice=off`); a provider switch sends `flush` then a fresh `status` with the new provider. |
+| `{"type":"transcript","dir":"in\|out","text":"…","final":bool}`          | Incremental transcription. `in` = what the model heard from the user, `out` = what the model is saying. Fragments of one utterance arrive in order; `final:true` closes it. Output fragments may never carry `final:true`; treat the next `in` transcript or a `flush` as the boundary. GPT-Live has no end-of-utterance event: the daemon closes an `in` utterance with an **empty** fragment (`"text":"","final":true`) once the words stop; a client appends nothing and starts a new bubble for the next `in` text. |
 | `{"type":"error","message":"…"}`                                         | A non-fatal problem the user should see (e.g. rate limited, bad control message). The connection stays open.  |
 | `{"type":"pong"}`                                                        | Reply to `ping`.                                                                                                |
 
@@ -86,10 +86,15 @@ that. The client therefore gates its capture:
   frames (pre-roll, so the first syllable is not clipped), then the live
   frames.
 - The daemon logs each transition as `web.client.silence {on}`; on
-  `on:true` it tells the model the audio stream paused (Gemini
-  `audioStreamEnd`, the same signal `mute` sends) so the server VAD closes
-  the user's turn instead of waiting for frames that will not come. The next
-  binary frame reopens the stream on the model side.
+  `on:true` it tells the model the audio stream paused (Gemini: 1 s of a
+  ±8 LSB comfort-noise floor at real-time pace, then `audioStreamEnd`,
+  the same signal `mute` sends) so the server VAD closes the user's turn
+  instead of waiting for frames that will not come — without the tail an
+  utterance followed by digital silence was never transcribed (the
+  audio-e2e harness, `docs/audio-e2e-results.md`). The next binary frame
+  cancels a tail still running and reopens the stream on the model side.
+  GPT-Live instead gets silence frames from the daemon while the gate is
+  closed, since its session timeline advances with input audio.
 - `web.client.stats` reports `silent` (gate closed right now),
   `silence_transitions`, and the ping-carried `gated_frames` and `peak`.
 - The thresholds are the client's; `/voice` takes `?gate=off` and
@@ -152,9 +157,46 @@ below is open, as in the original v1 contract. With it set:
   A WebSocket upgrade or an SSE stream refused this way never reaches
   the contract below it — the client sees an ordinary HTTP 401, not a
   `status`/`error` frame.
-- `GET /api/hello` answers `{"name":"sheepdog","version":"…","voice_name":"…","auth":"token"|"none","ws":"/ws","audio":{"in_hz":16000,"out_hz":24000,"format":"pcm16le mono"}}`
+- `GET /api/hello` answers `{"name":"sheepdog","version":"…","voice_name":"…","auth":"token"|"none","ws":"/ws","audio":{"in_hz":16000,"out_hz":24000,"format":"pcm16le mono"},"voice_provider":"gemini"|"openai"|"off","voice_model":"…"}`
   so a client can confirm it found a sheepdog daemon, whether it needs a
-  token, and this contract's audio format before it ever opens `/ws`.
+  token, this contract's audio format and the voice model behind it
+  before it ever opens `/ws`.
+
+## Voice provider
+
+The voice behind `/ws` is Gemini Live (`gemini`) or GPT-Live
+(`openai`), switchable at runtime. **The `/ws` contract does not change
+with the provider**: 16 kHz PCM16 in, 24 kHz PCM16 out, the same
+control messages; the daemon resamples for GPT-Live (which runs at
+24 kHz both ways).
+
+- `GET /api/voice/providers` (token-protected) →
+  `{"provider":"gemini","model":"gemini-3.8-live","providers":[{"id":"gemini","label":"Gemini Live","model":"gemini-3.8-live","available":true},{"id":"openai","label":"GPT-Live","model":"gpt-live-1","available":false,"reason":"no OPENAI_API_KEY","billing":"per_minute"}]}`.
+  `reason` appears only on an unavailable provider, `billing:"per_minute"`
+  only on one billed by session time (GPT-Live, $0.05/min). With
+  `--voice=off`: `{"provider":"off","model":"","providers":[]}`.
+- `PUT /api/voice/provider {"provider":"openai"}` switches: the current
+  voice session closes, the new provider's starts (GPT-Live: in standby,
+  opening on the next speech or push), the choice is kept in the state
+  file (`session.voice_provider`, it wins over `voice.provider` on
+  restart) and `voice.provider_changed {from, to, via}` is logged. It
+  answers with the GET shape; `400 {"error":"provider \"x\": …"}` for an
+  unknown or unavailable provider (the reason is in the message), `503`
+  with `--voice=off`.
+- `GET /api/state` has top-level `voice_provider` and `voice_model`.
+- **GPT-Live is billed per second of open session**, so the daemon opens
+  one only while a client is attached (`/ws` connected) and unmuted and
+  there is speech (a frame loud enough) or a push to say, and closes it
+  after `voice.openai.idle_close_s` (default 45 s) without a transcript,
+  a reply, a delegation or a push (`voice.session_open {reason}` /
+  `voice.session_close {reason, dur_ms, billed_s}`;
+  `web.client.stats` carries `voice_billed_seconds` and
+  `voice_session_open`). The first words after a standby are buffered
+  (about 0.5 s of pre-roll plus the ~0.6–0.9 s the session takes to
+  open) and replayed, so nothing the shepherd says is lost; a client
+  needs no special handling beyond showing `standby` as "ready".
+  Disconnecting, muting or letting the silence gate close all let the
+  idle timer run.
 
 Every comparison is constant-time (`crypto/subtle.ConstantTimeCompare`);
 there is no rate limiting or lockout on a wrong token.

@@ -7,7 +7,7 @@
 
 # herdr-sheepdog
 
-A voice supervisor for a herdr agent fleet, built on Gemini Live: ask
+A voice supervisor for a herdr agent fleet, built on Gemini Live (or GPT-Live, switchable at runtime): ask
 what is happening, get told proactively when an agent is blocked,
 answer its question, give new instructions, and interrupt — without
 touching a keyboard. See [`sheepdog-v1-plan.md`](sheepdog-v1-plan.md)
@@ -106,6 +106,7 @@ sheepdog serve --voice=off --herdr=mock --dev  # also serve testdata/audio/*.wav
 | `sheepdog config show` \| `init` | Print the effective config (redacted) \| scaffold `config.toml`. |
 | `sheepdog herdr watch` | Print debounced agent state transitions as JSONL; `--once` prints the persisted state table and exits. |
 | `sheepdog voice-test` | Stream a WAV (or `--text`) through a Gemini Live session with the echo tools; no daemon needed. |
+| `sheepdog audio-e2e` | Speak the scenarios in `testdata/audio-e2e/` (macOS `say` + a generated noise bed) into a running daemon's `/ws` and check transcripts, tool calls, replies and latencies (`docs/audio-e2e-results.md`). |
 | `sheepdog brain-test` | Run one supervisor-brain turn (`--question`, `--kind ask\|propose`) against a mock herdr with a screen fixture, an optional seed transcript and `--say` utterances; prints the reply and the transcript, `brain.*` events on stderr (`--fake` needs no network). |
 | `sheepdog prompts export\|show` | Seed `prompts.dir` from the embedded defaults, or print one file's effective text and its source (embedded/override). |
 | `sheepdog eval --set assistant\|svp` | Run the conversation eval set against the assistant prompt or the brain; offline by default (validates + prints "skipped"), `--live` calls the model. |

@@ -8,7 +8,7 @@
 // packages add their own sections here.
 //
 // String() must never print secrets: Gemini keys are rendered as a count,
-// the DeepSeek key as set or unset.
+// the DeepSeek and OpenAI keys as set or unset.
 package config
 
 import (
@@ -184,7 +184,37 @@ type Voice struct {
 	// Name is what the dog calls itself, substituted into
 	// prompts/assistant.md as {name} (default "Sheepdog").
 	Name string `toml:"name"`
+	// Provider is the voice model the daemon starts on: "gemini" (Gemini
+	// Live, [gemini]) or "openai" (GPT-Live, [voice.openai]). The initial
+	// value only: the provider picked at runtime (PUT
+	// /api/voice/provider, /debug) is kept in the state file's
+	// session.voice_provider and wins over this on restart.
+	Provider string `toml:"provider"`
+	// OpenAI configures the GPT-Live provider.
+	OpenAI VoiceOpenAI `toml:"openai"`
 }
+
+// VoiceOpenAI configures the GPT-Live voice provider (billed per second
+// of open session, so the daemon closes it when idle).
+type VoiceOpenAI struct {
+	// APIKey authenticates GPT-Live (env OPENAI_API_KEY). Never logged.
+	// The voice only: the brain never uses it.
+	APIKey string `toml:"api_key"`
+	// Model is the Live model (default gpt-live-1).
+	Model string `toml:"model"`
+	// Voice is the output voice (default marin).
+	Voice string `toml:"voice"`
+	// IdleCloseS closes a live GPT-Live session after this many seconds
+	// without speech, a reply, a delegation or a push (default 45).
+	IdleCloseS int `toml:"idle_close_s"`
+}
+
+// VoiceProviders are the accepted values of voice.provider.
+var VoiceProviders = []string{"gemini", "openai"}
+
+// GeminiSensitivities are the accepted values of
+// gemini.start_sensitivity / gemini.end_sensitivity.
+var GeminiSensitivities = []string{"low", "high", "default"}
 
 // ChattinessLevels are the accepted values of supervisor.chattiness.
 var ChattinessLevels = []string{"quiet", "normal", "chatty"}
@@ -305,6 +335,12 @@ type Gemini struct {
 	// model response (tool call or audio) before the session logs
 	// voice.stalled; two stalls on one connection recycle it.
 	StallAfterS int `toml:"stall_after_s"`
+	// StartSensitivity / EndSensitivity tune Live's automatic activity
+	// detection: "low", "high" or "default" (the server's own). Start
+	// defaults to low: room noise was transcribed as speech ("fishing",
+	// "Discord") at the default.
+	StartSensitivity string `toml:"start_sensitivity"`
+	EndSensitivity   string `toml:"end_sensitivity"`
 }
 
 // Herdr configures the herdr socket client.
@@ -342,11 +378,11 @@ func Default() Config {
 		Herdr:             Herdr{Socket: filepath.Join(home, ".config", "herdr", "herdr.sock")},
 		State:             State{Path: filepath.Join(dataDir, "state.json")},
 		PendingTTLS:       120,
-		Gemini:            Gemini{Model: "gemini-3.8-live", Voice: "Puck", StallAfterS: 10},
+		Gemini:            Gemini{Model: "gemini-3.8-live", Voice: "Puck", StallAfterS: 10, StartSensitivity: "low", EndSensitivity: "default"},
 		DeepSeek:          DeepSeek{BaseURL: DefaultDeepSeekBaseURL, Thinking: true, ReasoningEffort: DefaultDeepSeekReasoningEffort},
 		Web:               Web{Bind: DefaultWebBind, Port: DefaultWebPort},
 		CLI:               defaultCLI(),
-		Voice:             Voice{Name: DefaultVoiceName},
+		Voice:             Voice{Name: DefaultVoiceName, Provider: "gemini", OpenAI: VoiceOpenAI{Model: "gpt-live-1", Voice: "marin", IdleCloseS: 45}},
 		Supervisor:        Supervisor{Chattiness: DefaultChattiness, RecentMinutes: 30, PromiseTTLS: 7200, CancelWindowS: 30, RepromptPollS: 10, RepeatWindowS: 60, AuthoriseWindowS: 30},
 		Brain:             defaultBrain(),
 		Prompts:           Prompts{Dir: filepath.Join(home, ".config", "sheepdog", "prompts")},
@@ -498,7 +534,30 @@ func load(path string, lookup func(string) (string, bool)) (Config, error) {
 	if err := validateDeepSeek(cfg.DeepSeek); err != nil {
 		return Config{}, err
 	}
+	if err := validateVoice(cfg); err != nil {
+		return Config{}, err
+	}
 	return cfg, nil
+}
+
+// validateVoice checks [voice], [voice.openai] and the [gemini]
+// sensitivities.
+func validateVoice(cfg Config) error {
+	if !oneOf(cfg.Voice.Provider, VoiceProviders) {
+		return fmt.Errorf("config: voice.provider=%q: want one of %s", cfg.Voice.Provider, strings.Join(VoiceProviders, ", "))
+	}
+	if cfg.Voice.OpenAI.IdleCloseS <= 0 {
+		return fmt.Errorf("config: voice.openai.idle_close_s=%d: want a positive integer", cfg.Voice.OpenAI.IdleCloseS)
+	}
+	if strings.TrimSpace(cfg.Voice.OpenAI.Model) == "" {
+		return errors.New("config: voice.openai.model must not be empty")
+	}
+	for _, f := range []struct{ name, v string }{{"start_sensitivity", cfg.Gemini.StartSensitivity}, {"end_sensitivity", cfg.Gemini.EndSensitivity}} {
+		if !oneOf(f.v, GeminiSensitivities) {
+			return fmt.Errorf("config: gemini.%s=%q: want one of %s", f.name, f.v, strings.Join(GeminiSensitivities, ", "))
+		}
+	}
+	return nil
 }
 
 // validateDeepSeek checks the [deepseek] values.
@@ -560,7 +619,10 @@ func validateBrain(b Brain) error {
 //	SHEEPDOG_SUPERVISOR_PROMISE_TTL_S, SHEEPDOG_SUPERVISOR_CANCEL_WINDOW_S,
 //	SHEEPDOG_SUPERVISOR_REPROMPT_POLL_S, SHEEPDOG_SUPERVISOR_REPEAT_WINDOW_S,
 //	SHEEPDOG_SUPERVISOR_AUTHORISE_WINDOW_S,
-//	SHEEPDOG_VOICE_NAME,
+//	SHEEPDOG_VOICE_NAME, SHEEPDOG_VOICE_PROVIDER, OPENAI_API_KEY,
+//	SHEEPDOG_VOICE_OPENAI_MODEL, SHEEPDOG_VOICE_OPENAI_VOICE,
+//	SHEEPDOG_VOICE_OPENAI_IDLE_CLOSE_S,
+//	SHEEPDOG_GEMINI_START_SENSITIVITY, SHEEPDOG_GEMINI_END_SENSITIVITY,
 //	SHEEPDOG_BRAIN_ENABLED, SHEEPDOG_BRAIN_PROVIDER, SHEEPDOG_BRAIN_MODEL,
 //	SHEEPDOG_BRAIN_MAX_STEPS,
 //	SHEEPDOG_BRAIN_ASK_TIMEOUT_S, SHEEPDOG_BRAIN_PROPOSE_TIMEOUT_S,
@@ -698,10 +760,45 @@ func applyEnv(cfg *Config, lookup func(string) (string, bool)) error {
 	if v, ok := lookup("SHEEPDOG_VOICE_NAME"); ok {
 		cfg.Voice.Name = strings.TrimSpace(v)
 	}
+	if err := applyVoiceEnv(cfg, lookup); err != nil {
+		return err
+	}
 	if v, ok := lookup("SHEEPDOG_PROMPTS_DIR"); ok {
 		cfg.Prompts.Dir = v
 	}
 	return applyBrainEnv(cfg, lookup)
+}
+
+// applyVoiceEnv overrides [voice] and [voice.openai] (the key from
+// OPENAI_API_KEY, like the other provider keys) and the [gemini]
+// sensitivities.
+func applyVoiceEnv(cfg *Config, lookup func(string) (string, bool)) error {
+	if v, ok := lookup("SHEEPDOG_VOICE_PROVIDER"); ok {
+		cfg.Voice.Provider = strings.ToLower(strings.TrimSpace(v))
+	}
+	if v, ok := lookup("OPENAI_API_KEY"); ok && v != "" {
+		cfg.Voice.OpenAI.APIKey = v
+	}
+	if v, ok := lookup("SHEEPDOG_VOICE_OPENAI_MODEL"); ok {
+		cfg.Voice.OpenAI.Model = strings.TrimSpace(v)
+	}
+	if v, ok := lookup("SHEEPDOG_VOICE_OPENAI_VOICE"); ok {
+		cfg.Voice.OpenAI.Voice = strings.TrimSpace(v)
+	}
+	if v, ok := lookup("SHEEPDOG_VOICE_OPENAI_IDLE_CLOSE_S"); ok {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return fmt.Errorf("config: SHEEPDOG_VOICE_OPENAI_IDLE_CLOSE_S=%q: want a positive integer", v)
+		}
+		cfg.Voice.OpenAI.IdleCloseS = n
+	}
+	if v, ok := lookup("SHEEPDOG_GEMINI_START_SENSITIVITY"); ok {
+		cfg.Gemini.StartSensitivity = strings.ToLower(strings.TrimSpace(v))
+	}
+	if v, ok := lookup("SHEEPDOG_GEMINI_END_SENSITIVITY"); ok {
+		cfg.Gemini.EndSensitivity = strings.ToLower(strings.TrimSpace(v))
+	}
+	return nil
 }
 
 // applyDeepSeekEnv overrides the [deepseek] keys: the key from
@@ -837,8 +934,8 @@ func geminiKeysFromEnv(lookup func(string) (string, bool)) []string {
 // counts (or set/unset) only; keep it that way when secret-bearing
 // fields are added.
 func (c Config) String() string {
-	return fmt.Sprintf("data_dir=%s herdr.socket=%s state.path=%s state.full_fsync=%t debounce_ms=%d snapshot_interval_s=%d pending_ttl_s=%d aliases=%d gemini.model=%s gemini.voice=%s gemini.stall_after_s=%d gemini.api_keys=%d voice.name=%s deepseek.api_key=%s deepseek.base_url=%s deepseek.thinking=%t deepseek.reasoning_effort=%s web.bind=%s web.port=%d web.token=%s cli.prefer=%s cli.timeout_s=%d cli.max_output_kb=%d supervisor.chattiness=%s supervisor.recent_minutes=%d supervisor.promise_ttl_s=%d supervisor.cancel_window_s=%d supervisor.reprompt_poll_s=%d supervisor.repeat_window_s=%d supervisor.authorise_window_s=%d brain.enabled=%t brain.provider=%s brain.model=%s brain.max_steps=%d brain.ask_timeout_s=%d brain.propose_timeout_s=%d brain.window_tokens=%d brain.prune_after_turns=%d brain.step_reserve_s=%d brain.final_grace_s=%d brain.enrich_timeout_s=%d brain.announce_wait_s=%d brain.investigate_max_s=%d brain.investigate_session_ttl_s=%d prompts.dir=%s",
-		c.DataDir, c.Herdr.Socket, c.State.Path, c.State.FullFsync, c.DebounceMS, c.SnapshotIntervalS, c.PendingTTLS, len(c.Aliases), c.Gemini.Model, c.Gemini.Voice, c.Gemini.StallAfterS, len(c.Gemini.APIKeys), c.Voice.Name, setOrUnset(c.DeepSeek.APIKey), c.DeepSeek.BaseURL, c.DeepSeek.Thinking, c.DeepSeek.ReasoningEffort, c.Web.Bind, c.Web.Port, setOrUnset(c.Web.Token), c.CLI.Prefer, c.CLI.TimeoutS, c.CLI.MaxOutputKB, c.Supervisor.Chattiness, c.Supervisor.RecentMinutes, c.Supervisor.PromiseTTLS, c.Supervisor.CancelWindowS, c.Supervisor.RepromptPollS, c.Supervisor.RepeatWindowS, c.Supervisor.AuthoriseWindowS, c.Brain.Enabled, c.Brain.Provider, c.Brain.Model, c.Brain.MaxSteps, c.Brain.AskTimeoutS, c.Brain.ProposeTimeoutS, c.Brain.WindowTokens, c.Brain.PruneAfterTurns, c.Brain.StepReserveS, c.Brain.FinalGraceS, c.Brain.EnrichTimeoutS, c.Brain.AnnounceWaitS, c.Brain.InvestigateMaxS, c.Brain.InvestigateSessionTTLS, c.Prompts.Dir)
+	return fmt.Sprintf("data_dir=%s herdr.socket=%s state.path=%s state.full_fsync=%t debounce_ms=%d snapshot_interval_s=%d pending_ttl_s=%d aliases=%d gemini.model=%s gemini.voice=%s gemini.stall_after_s=%d gemini.start_sensitivity=%s gemini.end_sensitivity=%s gemini.api_keys=%d voice.name=%s voice.provider=%s voice.openai.api_key=%s voice.openai.model=%s voice.openai.voice=%s voice.openai.idle_close_s=%d deepseek.api_key=%s deepseek.base_url=%s deepseek.thinking=%t deepseek.reasoning_effort=%s web.bind=%s web.port=%d web.token=%s cli.prefer=%s cli.timeout_s=%d cli.max_output_kb=%d supervisor.chattiness=%s supervisor.recent_minutes=%d supervisor.promise_ttl_s=%d supervisor.cancel_window_s=%d supervisor.reprompt_poll_s=%d supervisor.repeat_window_s=%d supervisor.authorise_window_s=%d brain.enabled=%t brain.provider=%s brain.model=%s brain.max_steps=%d brain.ask_timeout_s=%d brain.propose_timeout_s=%d brain.window_tokens=%d brain.prune_after_turns=%d brain.step_reserve_s=%d brain.final_grace_s=%d brain.enrich_timeout_s=%d brain.announce_wait_s=%d brain.investigate_max_s=%d brain.investigate_session_ttl_s=%d prompts.dir=%s",
+		c.DataDir, c.Herdr.Socket, c.State.Path, c.State.FullFsync, c.DebounceMS, c.SnapshotIntervalS, c.PendingTTLS, len(c.Aliases), c.Gemini.Model, c.Gemini.Voice, c.Gemini.StallAfterS, c.Gemini.StartSensitivity, c.Gemini.EndSensitivity, len(c.Gemini.APIKeys), c.Voice.Name, c.Voice.Provider, setOrUnset(c.Voice.OpenAI.APIKey), c.Voice.OpenAI.Model, c.Voice.OpenAI.Voice, c.Voice.OpenAI.IdleCloseS, setOrUnset(c.DeepSeek.APIKey), c.DeepSeek.BaseURL, c.DeepSeek.Thinking, c.DeepSeek.ReasoningEffort, c.Web.Bind, c.Web.Port, setOrUnset(c.Web.Token), c.CLI.Prefer, c.CLI.TimeoutS, c.CLI.MaxOutputKB, c.Supervisor.Chattiness, c.Supervisor.RecentMinutes, c.Supervisor.PromiseTTLS, c.Supervisor.CancelWindowS, c.Supervisor.RepromptPollS, c.Supervisor.RepeatWindowS, c.Supervisor.AuthoriseWindowS, c.Brain.Enabled, c.Brain.Provider, c.Brain.Model, c.Brain.MaxSteps, c.Brain.AskTimeoutS, c.Brain.ProposeTimeoutS, c.Brain.WindowTokens, c.Brain.PruneAfterTurns, c.Brain.StepReserveS, c.Brain.FinalGraceS, c.Brain.EnrichTimeoutS, c.Brain.AnnounceWaitS, c.Brain.InvestigateMaxS, c.Brain.InvestigateSessionTTLS, c.Prompts.Dir)
 }
 
 // setOrUnset renders a secret's presence, never its value.
