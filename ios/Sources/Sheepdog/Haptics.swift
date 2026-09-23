@@ -1,7 +1,7 @@
 import UIKit
 
-/// The three moments worth feeling: a session opening, something that needs
-/// a decision, and stopping the dog mid-sentence.
+/// The moments worth feeling: a session opening, something that needs a
+/// decision (and its answer landing), and stopping the dog mid-sentence.
 @MainActor
 enum Haptics {
     static func connected() {
@@ -18,6 +18,21 @@ enum Haptics {
 
     static func stop() {
         UIImpactFeedbackGenerator(style: .rigid).impactOccurred()
+    }
+
+    /// A worker is waiting on an approval.
+    static func approvalAppeared() {
+        UINotificationFeedbackGenerator().notificationOccurred(.warning)
+    }
+
+    /// The daemon took the tapped answer.
+    static func answered() {
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+    }
+
+    /// The answer did not land (gone, or refused).
+    static func answerFailed() {
+        UINotificationFeedbackGenerator().notificationOccurred(.error)
     }
 
     static func tap() {

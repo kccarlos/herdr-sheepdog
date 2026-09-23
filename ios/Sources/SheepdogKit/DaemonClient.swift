@@ -81,6 +81,10 @@ public enum DaemonError: Error, Equatable, Sendable {
     case notSheepdog(endpoint: String)
     case http(status: Int, endpoint: String)
     case malformed(String)
+    /// 409 from `POST /api/pending/answer`: the question is no longer open.
+    case pendingGone
+    /// Another refusal with the daemon's own words (`{"error": "…"}`).
+    case rejected(status: Int, message: String)
 
     /// The banner headline.
     public var message: String {
@@ -95,6 +99,10 @@ public enum DaemonError: Error, Equatable, Sendable {
             return "\(endpoint) answered \(status). Check the daemon's log."
         case let .malformed(what):
             return "The daemon sent something the app could not read (\(what))."
+        case .pendingGone:
+            return ApprovalFlow.goneMessage
+        case let .rejected(status, message):
+            return message.isEmpty ? "The daemon refused (\(status))." : "The daemon refused: \(message)"
         }
     }
 
@@ -107,7 +115,7 @@ public enum DaemonError: Error, Equatable, Sendable {
             return "The daemon prints nothing about the token; it is the `web.token` from its config."
         case .notSheepdog:
             return "Check the port — the daemon serves /api/hello."
-        case .http, .malformed:
+        case .http, .malformed, .pendingGone, .rejected:
             return nil
         }
     }
@@ -197,8 +205,39 @@ public final class DaemonClient: @unchecked Sendable {
         return true
     }
 
-    private func get<T: Decodable>(_ type: T.Type, path: String) async throws -> T {
-        let request = try request(path: path)
+    /// `GET /api/conversation?limit=&before=` — the conversation the daemon
+    /// rebuilt from its log, newest last. Omit `before` for the newest page;
+    /// pass the page's `nextBefore` to page back.
+    public func conversation(limit: Int = 200, before: Int64? = nil) async throws -> ConversationPage {
+        var query = [URLQueryItem(name: "limit", value: String(limit))]
+        if let before { query.append(URLQueryItem(name: "before", value: String(before))) }
+        return try await get(ConversationPage.self, path: "/api/conversation", query: query)
+    }
+
+    /// `POST /api/pending/answer {id, option}` — answers the open question
+    /// with the option the shepherd tapped (its 1-based `index`). Returns
+    /// the daemon's `spoken` line ("Told auth Yes, proceed."). A question
+    /// that is no longer open throws `.pendingGone`.
+    public func answerPending(id: String, option: Int) async throws -> String {
+        let body = try JSONSerialization.data(withJSONObject: ["id": id, "option": option] as [String: Any])
+        let request = try request(path: "/api/pending/answer", method: "POST", body: body)
+        let (data, response) = try await perform(request)
+        guard let http = response as? HTTPURLResponse else { throw DaemonError.malformed("no HTTP response") }
+        let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        switch http.statusCode {
+        case 200 ..< 300:
+            return (object?["spoken"] as? String) ?? ""
+        case 401:
+            throw DaemonError.unauthorized(endpoint: endpoint.display)
+        case 409:
+            throw DaemonError.pendingGone
+        default:
+            throw DaemonError.rejected(status: http.statusCode, message: (object?["error"] as? String) ?? "")
+        }
+    }
+
+    private func get<T: Decodable>(_ type: T.Type, path: String, query: [URLQueryItem] = []) async throws -> T {
+        let request = try request(path: path, query: query)
         let (data, response) = try await perform(request)
         guard let http = response as? HTTPURLResponse else { throw DaemonError.malformed("no HTTP response") }
         switch http.statusCode {
@@ -248,17 +287,28 @@ public final class DaemonClient: @unchecked Sendable {
 
     // MARK: - Events
 
+    /// The `/events` request that resumes after event id `since`: the
+    /// `Last-Event-ID` header a reconnecting `EventSource` would send, and
+    /// `?since=` as the fallback (the header wins on the daemon). With no
+    /// id, neither — the daemon reads a small `?since=` as a count.
+    public func eventsRequest(since: UInt64) throws -> URLRequest {
+        var query: [URLQueryItem] = []
+        if since > 0 { query.append(URLQueryItem(name: "since", value: String(since))) }
+        var request = try self.request(path: "/events", query: query)
+        request.timeoutInterval = DaemonClient.eventKeepalive * 4
+        request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+        if since > 0 { request.setValue(String(since), forHTTPHeaderField: "Last-Event-ID") }
+        return request
+    }
+
     /// `GET /events` as an async stream. Reconnecting is the caller's job;
-    /// pass the last `seq` back as `since` so nothing is missed.
+    /// pass the last event id back as `since` so nothing is missed — the
+    /// daemon replays what came after it, across restarts.
     public func events(since: UInt64 = 0) -> AsyncThrowingStream<SSEParser.Output, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
-                    var query: [URLQueryItem] = []
-                    if since > 0 { query.append(URLQueryItem(name: "since", value: String(since))) }
-                    var request = try self.request(path: "/events", query: query)
-                    request.timeoutInterval = DaemonClient.eventKeepalive * 4
-                    request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+                    let request = try self.eventsRequest(since: since)
                     let (bytes, response) = try await self.streamSession.bytes(for: request)
                     if let http = response as? HTTPURLResponse, http.statusCode == 401 {
                         throw DaemonError.unauthorized(endpoint: self.endpoint.display)

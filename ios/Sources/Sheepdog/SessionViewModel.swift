@@ -25,6 +25,15 @@ final class SessionViewModel: ObservableObject {
 
     @Published private(set) var state: SessionState = .disconnected
     @Published private(set) var bubbles: [ConversationReducer.Bubble] = []
+    /// The conversation as the screen lists it: history, live bubbles and
+    /// the dividers between them.
+    @Published private(set) var rows: [TimelineRow] = []
+    /// The approval card pinned above the controls, if a worker is asking.
+    @Published private(set) var approval: ApprovalFlow.Card?
+    @Published private(set) var canLoadOlder = false
+    @Published private(set) var loadingOlder = false
+    /// The one-time caption under the controls the first time Mute is used.
+    @Published private(set) var showMuteHint = false
     @Published private(set) var agents: [Agent] = []
     @Published private(set) var pendingAction: PendingAction?
     @Published private(set) var hello: Hello?
@@ -56,6 +65,12 @@ final class SessionViewModel: ObservableObject {
     private var socket: VoiceSocket
     private let audio = AudioEngine()
     private var reducer = ConversationReducer()
+    private var history = ConversationHistory()
+    private var approvalFlow = ApprovalFlow()
+    private let cache: ConversationCache
+    private var saveTask: Task<Void, Never>?
+    private var historySyncTask: Task<Void, Never>?
+    private var syncingHistory = false
 
     private var eventTask: Task<Void, Never>?
     private var refreshTask: Task<Void, Never>?
@@ -72,13 +87,16 @@ final class SessionViewModel: ObservableObject {
     private var saidVoiceIsOff = false
     private var socketLife: SessionState.Inputs.Socket = .closed
 
-    init(settings: SettingsStore = SettingsStore()) {
+    init(settings: SettingsStore = SettingsStore(), cache: ConversationCache = .standard()) {
         self.settings = settings
+        self.cache = cache
         let endpoint = settings.endpoint ?? DaemonEndpoint(host: "127.0.0.1")
         self.client = DaemonClient(endpoint: endpoint)
         self.socket = VoiceSocket(endpoint: endpoint)
         wire()
-        bubbles = reducer.bubbles
+        // The last conversation, at once: before the network, or without it.
+        loadCache()
+        conversationChanged(save: false)
     }
 
     /// Called once from the first `onAppear`: an unconfigured app opens
@@ -87,22 +105,53 @@ final class SessionViewModel: ObservableObject {
         if !isConfigured || !settings.hasBeenConfigured {
             showSettings = true
         } else {
-            Task { await refreshState(quiet: true) }
+            Task {
+                await refreshState(quiet: true)
+                await syncHistory()
+            }
         }
+    }
+
+    /// The app came back to the foreground: what happened while it was
+    /// away is on the daemon.
+    func becameActive() {
+        guard isConfigured, settings.hasBeenConfigured else { return }
+        Task {
+            await refreshState(quiet: true)
+            await syncHistory()
+        }
+    }
+
+    /// The app is going to the background: write the cache now, not later.
+    func willResignActive() {
+        saveCache(now: true)
     }
 
     /// Settings were saved: repoint everything without losing the conversation.
     func endpointChanged() {
         guard let endpoint = settings.endpoint else { return }
+        let sameDaemon = ConversationCache.key(for: endpoint) == ConversationCache.key(for: client.endpoint)
+        if !sameDaemon { saveCache(now: true) }
         client.update(endpoint: endpoint)
         socket.update(endpoint: endpoint)
         banner = nil
         hello = nil
+        if !sameDaemon {
+            // Another daemon, another conversation.
+            reducer.clear()
+            approvalFlow.reset()
+            approval = nil
+            loadCache()
+            conversationChanged(save: false)
+        }
         if wantsConnection {
             disconnect()
             connect()
         } else {
-            Task { await refreshState(quiet: true) }
+            Task {
+                await refreshState(quiet: true)
+                await syncHistory()
+            }
         }
     }
 
@@ -189,6 +238,7 @@ final class SessionViewModel: ObservableObject {
 
     private func setMuted(_ muted: Bool) {
         guard muted != isMuted else { return }
+        if muted { offerMuteHint() }
         isMuted = muted
         socket.muted = muted
         if muted {
@@ -206,12 +256,30 @@ final class SessionViewModel: ObservableObject {
         refresh()
     }
 
+    static let muteHint = "Mute stops your microphone; Sheepdog can still talk."
+    private static let muteHintShownKey = "hint.mute.shown"
+
+    /// Once per install: what Mute does and does not do.
+    private func offerMuteHint() {
+        guard !UserDefaults.standard.bool(forKey: Self.muteHintShownKey) else { return }
+        UserDefaults.standard.set(true, forKey: Self.muteHintShownKey)
+        showMuteHint = true
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 6_000_000_000)
+            self?.showMuteHint = false
+        }
+    }
+
+    func dismissMuteHint() {
+        showMuteHint = false
+    }
+
     /// The Stop button: silence now, and ask the daemon to cancel. It
     /// answers with a `flush`, which we also honour.
     func stop() {
         audio.flushPlayback()
         reducer.apply(.flush)
-        bubbles = reducer.bubbles
+        conversationChanged()
         socket.send(.cancel)
         speaking = false
         Haptics.stop()
@@ -245,7 +313,7 @@ final class SessionViewModel: ObservableObject {
         audio.onNotice = { [weak self] notice in
             guard let self else { return }
             self.reducer.apply(.notice(notice))
-            self.bubbles = self.reducer.bubbles
+            self.conversationChanged()
         }
     }
 
@@ -297,11 +365,13 @@ final class SessionViewModel: ObservableObject {
         case .transcript:
             guard let dir = message.dir, let text = message.text else { break }
             reducer.apply(.transcript(dir, text: text, final: message.final ?? false))
-            bubbles = reducer.bubbles
+            conversationChanged()
+            if message.final == true { scheduleHistorySync() }
         case .flush:
             audio.flushPlayback()
             reducer.apply(.flush)
-            bubbles = reducer.bubbles
+            conversationChanged()
+            scheduleHistorySync()
             speaking = false
         case .error:
             if let text = message.message {
@@ -325,7 +395,7 @@ final class SessionViewModel: ObservableObject {
                     ? "Voice is off on the daemon (`--voice=off`), so it cannot hear the microphone. Status, transcripts and pushes still work."
                     : "The daemon's voice session closed (\(closedReason ?? "no reason given"))."
                 reducer.apply(.notice(why))
-                bubbles = reducer.bubbles
+                conversationChanged()
             }
             return
         }
@@ -352,8 +422,11 @@ final class SessionViewModel: ObservableObject {
         eventTask = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self, self.wantsConnection else { return }
+                // Every (re)open: what the stream missed is in the history
+                // too, and a page is cheaper than a long replay to read.
+                Task { await self.syncHistory() }
                 do {
-                    for try await output in self.client.events(since: self.lastSeq) {
+                    for try await output in self.client.events(since: self.resumeID) {
                         if Task.isCancelled { return }
                         self.handle(event: output)
                     }
@@ -362,7 +435,7 @@ final class SessionViewModel: ObservableObject {
                     #if DEBUG
                     if ProcessInfo.processInfo.arguments.contains("-sheepdogShowStreamErrors") {
                         self.reducer.apply(.notice("event stream: \(error)"))
-                        self.bubbles = self.reducer.bubbles
+                        self.conversationChanged()
                     }
                     #endif
                 }
@@ -371,9 +444,20 @@ final class SessionViewModel: ObservableObject {
         }
     }
 
+    /// Where `/events` resumes: the last id seen (kept in the cache across
+    /// launches), else the newest history item's.
+    private var resumeID: UInt64 {
+        if lastSeq > 0 { return lastSeq }
+        if let newest = history.newestID, newest > 0 { return UInt64(newest) }
+        return 0
+    }
+
     private func handle(event output: SSEParser.Output) {
         switch output {
         case let .event(event):
+            // A replay after a reconnect starts after our id, but an event
+            // seen twice must still change nothing.
+            if event.seq > 0, event.seq <= lastSeq { return }
             lastSeq = max(lastSeq, event.seq)
             apply(event: event)
         case .closed, .undecodable:
@@ -381,35 +465,43 @@ final class SessionViewModel: ObservableObject {
         }
     }
 
+    /// An event is news, worth a haptic, only when it is recent — not when
+    /// a reconnect replays the last hour.
+    private func isFresh(_ event: DaemonEvent) -> Bool {
+        guard let ts = event.ts else { return true }
+        return Date().timeIntervalSince(ts) < 60
+    }
+
     private func apply(event: DaemonEvent) {
+        if history.fold(event) != nil {
+            conversationChanged()
+        }
         switch event.type {
         case "voice.push":
-            guard let text = event.string("text"), !text.isEmpty else { break }
+            guard let text = event.string("text"), !text.isEmpty, event.string("urgency") != "silent" else { break }
             let needsUser = event.bool("needs_user") ?? (event.string("urgency") == "interrupt")
-            reducer.apply(.push(text: text, needsUser: needsUser))
-            bubbles = reducer.bubbles
-            Haptics.push(needsUser: needsUser)
+            if isFresh(event) { Haptics.push(needsUser: needsUser) }
             refreshSoon()
         case "voice.tool_call":
             thinkingExpiry = Date().addingTimeInterval(30)
         case "voice.tool_result":
             thinkingExpiry = nil
-            // With `--voice=off` there are no transcript frames: the event log
-            // is the only place the conversation exists.
-            if daemonVoiceOff, let spoken = event.string("spoken"), !spoken.isEmpty {
-                reducer.apply(.mirroredReply(spoken))
-                bubbles = reducer.bubbles
+            refreshSoon()
+        case "pending.created":
+            if let pending = PendingAction(event: event) {
+                applyApproval(approvalFlow.present(pending), haptic: isFresh(event))
             }
             refreshSoon()
-        case "web.utterance":
-            if daemonVoiceOff, let text = event.string("text"), !text.isEmpty {
-                reducer.apply(.mirroredUtterance(text))
-                bubbles = reducer.bubbles
+        case "pending.confirmed", "pending.expired", "pending.cancelled", "pending.replaced":
+            let resolution = ConversationItem.Resolution(rawValue: String(event.type.dropFirst("pending.".count))) ?? .unknown
+            let id = event.type == "pending.replaced" ? event.string("old_id") : event.string("id")
+            if let id {
+                applyApproval(approvalFlow.resolved(pendingID: id, as: resolution, answer: event.string("answer"), via: event.string("via")), haptic: false)
             }
+            refreshSoon()
         default:
-            if event.type.hasPrefix("herdr.") || event.type.hasPrefix("pending.")
-                || event.type.hasPrefix("supervisor.") || event.type.hasPrefix("web.inject")
-                || event.type.hasPrefix("investigation.") || event.type.hasPrefix("promise.") {
+            if event.type.hasPrefix("herdr.") || event.type.hasPrefix("supervisor.") || event.type.hasPrefix("web.inject")
+                || event.type.hasPrefix("investigation.") || event.type.hasPrefix("promise.") || event.type == "daemon.start" {
                 refreshSoon()
             }
         }
@@ -487,7 +579,165 @@ final class SessionViewModel: ObservableObject {
             return lhs.alias.localizedCaseInsensitiveCompare(rhs.alias) == .orderedAscending
         }
         pendingAction = state.pendingAction
+        applyApproval(approvalFlow.present(state.pendingAction), haptic: true)
         daemonVoiceOff = state.voice.isOff || state.voice.status == "closed"
+    }
+
+    // MARK: - Conversation history
+
+    private func conversationChanged(save: Bool = true) {
+        bubbles = reducer.bubbles
+        rows = ConversationTimeline.rows(history: history.items, live: reducer.bubbles)
+        canLoadOlder = history.canLoadOlder
+        if save { saveCache(now: false) }
+    }
+
+    /// Loads the newest page and merges it: the server's copy wins, and the
+    /// finished transcript bubbles it now has stop showing twice.
+    func syncHistory() async {
+        guard settings.endpoint != nil, !syncingHistory else { return }
+        // A bubble still growing on /ws is already an item on the server
+        // (from its first fragment); swapping now would show it twice. The
+        // dog's `out` bubble often closes only when the next turn starts.
+        guard reducer.openBubble == nil else {
+            scheduleHistorySync()
+            return
+        }
+        syncingHistory = true
+        defer { syncingHistory = false }
+        let sent = Date()
+        do {
+            let page = try await client.conversation(limit: 200)
+            history.applyNewest(page, requestedAt: sent)
+            reducer.dropSettledSpeech(before: sent)
+            conversationChanged()
+        } catch {
+            // Quiet: the cache and the live stream still show something,
+            // and the state probe reports what is wrong in plain words.
+            SheepdogLog.socket.error("history: \(String(describing: error), privacy: .public)")
+        }
+    }
+
+    /// A voice turn just ended: once the daemon has logged it, the newest
+    /// page has it as server items, which is what the cache keeps.
+    private func scheduleHistorySync() {
+        historySyncTask?.cancel()
+        historySyncTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 2_500_000_000)
+            guard !Task.isCancelled, let self else { return }
+            await self.syncHistory()
+        }
+    }
+
+    /// Pull-to-load-older: the page before the oldest item shown.
+    func loadOlder() async {
+        guard let before = history.nextBefore, !loadingOlder else { return }
+        loadingOlder = true
+        defer { loadingOlder = false }
+        do {
+            let page = try await client.conversation(limit: 100, before: before)
+            history.applyOlder(page)
+            conversationChanged()
+        } catch let error as DaemonError {
+            show(Banner(tone: .warning, message: "Couldn't load the earlier conversation.", hint: error.message, retryTitle: nil))
+        } catch {}
+    }
+
+    /// Settings ▸ Clear conversation on this phone.
+    func clearConversation() {
+        if let endpoint = settings.endpoint { cache.clear(for: endpoint) }
+        history.clear()
+        reducer.clear()
+        conversationChanged(save: false)
+    }
+
+    private func loadCache() {
+        guard let endpoint = settings.endpoint, let snapshot = cache.load(for: endpoint) else {
+            history = ConversationHistory()
+            lastSeq = 0
+            return
+        }
+        history = snapshot.history
+        lastSeq = UInt64(max(0, snapshot.lastEventID ?? 0))
+    }
+
+    private func saveCache(now: Bool) {
+        guard let endpoint = settings.endpoint else { return }
+        saveTask?.cancel()
+        let snapshot = ConversationSnapshot(endpoint: endpoint, history: history, lastEventID: lastSeq > 0 ? Int64(clamping: lastSeq) : nil)
+        let cache = self.cache
+        let write = {
+            do { try cache.save(snapshot, for: endpoint) } catch {
+                SheepdogLog.socket.error("cache: \(String(describing: error), privacy: .public)")
+            }
+        }
+        if now {
+            write()
+            return
+        }
+        saveTask = Task.detached(priority: .utility) {
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            guard !Task.isCancelled else { return }
+            write()
+        }
+    }
+
+    // MARK: - Approvals
+
+    private func applyApproval(_ effect: ApprovalFlow.Effect, haptic: Bool) {
+        approval = approvalFlow.card
+        switch effect {
+        case .appeared:
+            if haptic { Haptics.approvalAppeared() }
+        case .settled:
+            scheduleApprovalDismiss()
+        case .dismissed, .none:
+            break
+        }
+    }
+
+    private func scheduleApprovalDismiss() {
+        guard let id = approvalFlow.card?.pending.id else { return }
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 3_500_000_000)
+            guard let self else { return }
+            self.approvalFlow.dismiss(pendingID: id)
+            // A newer question may be waiting behind the settled card.
+            if self.approvalFlow.card == nil, let pending = self.pendingAction, pending.id != id {
+                self.applyApproval(self.approvalFlow.present(pending), haptic: true)
+            } else {
+                self.approval = self.approvalFlow.card
+            }
+        }
+    }
+
+    /// The shepherd tapped an option on the approval card.
+    func answer(option index: Int) {
+        guard let pendingID = approvalFlow.card?.pending.id, let option = approvalFlow.tap(index: index) else { return }
+        approval = approvalFlow.card
+        Haptics.tap()
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let spoken = try await self.client.answerPending(id: pendingID, option: option.index)
+                self.applyApproval(self.approvalFlow.succeeded(pendingID: pendingID, spoken: spoken), haptic: false)
+                Haptics.answered()
+            } catch DaemonError.pendingGone {
+                self.applyApproval(self.approvalFlow.gone(pendingID: pendingID), haptic: false)
+                Haptics.answerFailed()
+            } catch let error as DaemonError {
+                self.approvalFlow.failed(pendingID: pendingID, message: error.message)
+                self.approval = self.approvalFlow.card
+                Haptics.answerFailed()
+            } catch {
+                self.approvalFlow.failed(pendingID: pendingID, message: error.localizedDescription)
+                self.approval = self.approvalFlow.card
+            }
+            await self.refreshState(quiet: true)
+            // Without the event stream (not connected), the answered
+            // approval item comes from the server.
+            if !self.wantsConnection { await self.syncHistory() }
+        }
     }
 
     // MARK: - Banners

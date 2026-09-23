@@ -154,28 +154,142 @@ public struct Agent: Codable, Equatable, Identifiable, Sendable {
     }
 }
 
-/// The single-slot pending action from `GET /api/state`.
+/// One choice of an approval prompt: `options[]` of `/api/state`'s pending
+/// action, of the `pending.created` event and of an `approval` item.
+/// `index` is 1-based and is what `POST /api/pending/answer` takes.
+public struct PendingOption: Codable, Equatable, Hashable, Sendable {
+    public var index: Int
+    public var label: String
+    public var keys: [String]
+    /// The option the prompt's cursor is on (what enter selects).
+    public var isDefault: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case index, label, keys
+        case isDefault = "default"
+    }
+
+    public init(index: Int, label: String, keys: [String] = [], isDefault: Bool = false) {
+        self.index = index
+        self.label = label
+        self.keys = keys
+        self.isDefault = isDefault
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        index = try c.decodeIfPresent(Int.self, forKey: .index) ?? 0
+        label = try c.decodeIfPresent(String.self, forKey: .label) ?? ""
+        keys = try c.decodeIfPresent([String].self, forKey: .keys) ?? []
+        isDefault = try c.decodeIfPresent(Bool.self, forKey: .isDefault) ?? false
+    }
+
+    /// "No, and tell Codex what to do differently" — the one to style as
+    /// destructive.
+    public var isNegative: Bool {
+        let l = label.trimmed.lowercased()
+        return l == "no" || l.hasPrefix("no,") || l.hasPrefix("no ") || l.hasPrefix("no.") || l.hasPrefix("deny") || l.hasPrefix("reject")
+    }
+
+    /// What VoiceOver reads on the button: "Approve: Yes, proceed".
+    public var accessibilityLabel: String {
+        "\(isNegative ? "Decline" : "Approve"): \(label)"
+    }
+
+    /// Older daemons (and older log lines) send options without an index:
+    /// number them by position, 1-based, the way the daemon does.
+    static func normalised(_ options: [PendingOption]?) -> [PendingOption]? {
+        guard let options else { return nil }
+        return options.enumerated().map { offset, option in
+            var o = option
+            if o.index <= 0 { o.index = offset + 1 }
+            return o
+        }
+    }
+}
+
+/// The single-slot pending action from `GET /api/state` (and the payload
+/// of a `pending.created` event).
 public struct PendingAction: Codable, Equatable, Sendable {
     public var id: String
     public var paneID: String
     public var kind: String
     public var spokenSummary: String?
     public var question: String?
-    public var options: [Agent.Block.Option]?
+    public var options: [PendingOption]?
+    /// The agent's alias (`/api/state` and `pending.created` only).
+    public var agent: String?
+    /// The plain-words summary (`summary`; `/api/state` also sends it as
+    /// `spoken_summary`).
+    public var summary: String?
+    /// The command the prompt is about, when it shows one.
+    public var command: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, kind, question, options
+        case id, kind, question, options, agent, summary, command
         case paneID = "pane_id"
         case spokenSummary = "spoken_summary"
     }
 
-    public init(id: String, paneID: String, kind: String, spokenSummary: String? = nil, question: String? = nil, options: [Agent.Block.Option]? = nil) {
+    public init(
+        id: String,
+        paneID: String,
+        kind: String,
+        spokenSummary: String? = nil,
+        question: String? = nil,
+        options: [PendingOption]? = nil,
+        agent: String? = nil,
+        summary: String? = nil,
+        command: String? = nil
+    ) {
         self.id = id
         self.paneID = paneID
         self.kind = kind
         self.spokenSummary = spokenSummary
         self.question = question
-        self.options = options
+        self.options = PendingOption.normalised(options)
+        self.agent = agent
+        self.summary = summary
+        self.command = command
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        paneID = try c.decodeIfPresent(String.self, forKey: .paneID) ?? ""
+        kind = try c.decodeIfPresent(String.self, forKey: .kind) ?? ""
+        spokenSummary = try c.decodeIfPresent(String.self, forKey: .spokenSummary)
+        question = try c.decodeIfPresent(String.self, forKey: .question)
+        // Older lines carry a count here, not the options.
+        options = PendingOption.normalised(try? c.decodeIfPresent([PendingOption].self, forKey: .options))
+        agent = try c.decodeIfPresent(String.self, forKey: .agent)
+        summary = try c.decodeIfPresent(String.self, forKey: .summary)
+        command = try c.decodeIfPresent(String.self, forKey: .command)
+    }
+
+    /// A worker's approval prompt the shepherd can answer by tap.
+    public var isAnswerPrompt: Bool { kind == "answer_prompt" && !(options ?? []).isEmpty }
+
+    /// What the card says, in plain words.
+    public var displaySummary: String {
+        for candidate in [summary, spokenSummary, question] {
+            if let s = candidate?.trimmed, !s.isEmpty { return s }
+        }
+        return "An agent is waiting for your answer."
+    }
+
+    /// The option the prompt's cursor is on, if the daemon marked one.
+    public var defaultOption: PendingOption? { options?.first { $0.isDefault } }
+
+    /// Builds the action from a `pending.created` event (its payload is the
+    /// pending view; the pane comes from the event).
+    public init?(event: DaemonEvent) {
+        guard event.type == "pending.created",
+              let data = try? JSONEncoder().encode(event.payload),
+              var action = try? JSONDecoder().decode(PendingAction.self, from: data)
+        else { return nil }
+        if action.paneID.isEmpty { action.paneID = event.paneID ?? "" }
+        self = action
     }
 }
 

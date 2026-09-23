@@ -67,8 +67,11 @@ final class AudioEngine {
     private var observers: [NSObjectProtocol] = []
 
     init() {
+        // Attach only. The player is connected in `start()`, after the
+        // `.playAndRecord` session is active and voice processing is on:
+        // a graph wired against the launch-time session (`.soloAmbient`,
+        // output only) played nothing once the session changed under it.
         engine.attach(player)
-        engine.connect(player, to: engine.mainMixerNode, format: playbackFormat)
         observe()
     }
 
@@ -98,6 +101,19 @@ final class AudioEngine {
         try configureSession(background: background)
 
         let input = engine.inputNode
+        // `.voiceChat` alone does not cancel echo for AVAudioEngine; the
+        // voice-processing I/O unit does, and it has to be on before the
+        // engine starts. Without it the dog hears itself from the speaker.
+        if !input.isVoiceProcessingEnabled {
+            do {
+                try input.setVoiceProcessingEnabled(true)
+            } catch {
+                SheepdogLog.audio.error("voice processing unavailable: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+        engine.disconnectNodeOutput(player)
+        engine.connect(player, to: engine.mainMixerNode, format: playbackFormat)
+        engine.mainMixerNode.outputVolume = 1
         let format = input.inputFormat(forBus: 0)
         guard format.channelCount > 0, format.sampleRate > 0 else {
             // The simulator does this while a route settles; so does a device
@@ -125,7 +141,9 @@ final class AudioEngine {
         }
         player.play()
         isRunning = true
-        SheepdogLog.audio.info("audio started: input \(format.sampleRate, privacy: .public) Hz, \(format.channelCount, privacy: .public) ch")
+        let route = AVAudioSession.sharedInstance().currentRoute.outputs.map(\.portName).joined(separator: ", ")
+        metrics.outputRoute = route
+        SheepdogLog.audio.info("audio started: input \(format.sampleRate, privacy: .public) Hz, \(format.channelCount, privacy: .public) ch, output \(route, privacy: .public), voice processing \(input.isVoiceProcessingEnabled, privacy: .public)")
     }
 
     func stop() {
@@ -273,12 +291,14 @@ final class AudioEngine {
         guard !chunks.isEmpty else { return }
         for chunk in chunks {
             guard let buffer = AudioEngine.buffer(chunk.samples, format: playbackFormat) else { continue }
+            metrics.scheduledChunks += 1
             // No `at:`: each buffer starts where the last one ended, which is
             // what "gapless" means here.
             player.scheduleBuffer(buffer, completionCallbackType: .dataPlayedBack) { [weak self] _ in
                 Task { @MainActor in
                     guard let self else { return }
                     self.queue.completed(chunk.id)
+                    self.metrics.playedChunks += 1
                     self.setSpeaking(self.queue.isSpeaking)
                 }
             }
@@ -313,6 +333,11 @@ final class AudioEngine {
         })
         observers.append(center.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { [weak self] note in
             MainActor.assumeIsolated { self?.handleRouteChange(note) }
+        })
+        // The engine stops itself when the hardware format changes under it
+        // (a route or sample-rate change); pick playback back up.
+        observers.append(center.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.restartCapture() }
         })
         observers.append(center.addObserver(forName: AVAudioSession.mediaServicesWereResetNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.onNotice?("Audio was reset by iOS — reconnect to start listening again.") }
@@ -388,6 +413,8 @@ final class AudioEngine {
         input.installTap(onBus: 0, bufferSize: 4_096, format: format) { [weak self] buffer, _ in
             self?.handleCaptured(buffer)
         }
+        engine.disconnectNodeOutput(player)
+        engine.connect(player, to: engine.mainMixerNode, format: playbackFormat)
         do {
             try engine.start()
             player.play()

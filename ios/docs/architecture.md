@@ -6,14 +6,16 @@ lives in `SheepdogKit`, and the app target is SwiftUI views plus
 
 ```
 ┌──────────────────────────── Sheepdog (app target) ────────────────────────────┐
-│  MainView ── AgentStrip ── ConversationView ── PresenceOrb ── ControlBar       │
-│  SettingsView                                                                 │
+│  MainView ── AgentStrip ── ConversationView ── ApprovalCardView ── ControlBar  │
+│  SettingsView                                 (or PresenceOrb)                │
 │        │                                                                      │
 │  SessionViewModel (@MainActor): the only place that decides anything          │
 │        │                     │                    │                           │
 │  AudioEngine            VoiceSocket          DaemonClient                     │
 │  (AVAudioEngine,        (/ws)                (/api/hello, /api/state,         │
-│   AVAudioSession)                             /api/login, /events)            │
+│   AVAudioSession)                             /api/login, /events,            │
+│                                               /api/conversation,              │
+│                                               /api/pending/answer)            │
 └───────┼─────────────────────┼─────────────────────┼───────────────────────────┘
         │                     │                     │
 ┌───────┼─────────────────────┼─────────────────────┼─── SheepdogKit ───────────┐
@@ -21,7 +23,9 @@ lives in `SheepdogKit`, and the app target is SwiftUI views plus
 │  FrameChunker          (wsproto mirror)      Hello / DaemonState / Agent      │
 │  SilenceGate                                 DaemonError                      │
 │  PlaybackQueue         ConversationReducer   SettingsStore / SecretStore      │
-│  AudioMetrics          SessionState                                           │
+│  AudioMetrics          SessionState          ConversationHistory / Item       │
+│                        ApprovalFlow          ConversationTimeline             │
+│                                              ConversationCache (JSON file)    │
 └───────────────────────────────────────────────────────────────────────────────┘
                                    │
                         sheepdog daemon on your Mac
@@ -63,12 +67,62 @@ plain status code; a refused upgrade is far harder to read back.
 `voice.tool_call` / `voice.tool_result` (the orb's *thinking* state, with a
 30 s timeout so a missed result cannot stick).
 
-Against a daemon running `--voice=off` there are no transcript frames at
-all, so the conversation is mirrored from the event log instead:
-`web.utterance` becomes the shepherd's bubble and `voice.tool_result`'s
-`spoken` becomes the dog's. In a normal Gemini session the WebSocket
-transcripts are the only source and no mirroring happens, so nothing is
-duplicated.
+Every event that is a conversation item of its own — a typed utterance
+(`web.utterance` not via voice, `voice.text`), a reply spoken without a
+voice model (`voice.tool_result` with a `via` other than `voice`), a push
+that is not silent, an `answer_prompt`'s `pending.created` and its
+resolution, `daemon.start` and the voice session's reconnects — is folded
+into `ConversationHistory` by the daemon's own rules
+(`internal/web/conversation.go`), keyed by its event id. That is the id
+`/api/conversation` gives the same item later, so the two merge instead of
+showing twice. Transcript fragments are the exception: `/ws` delivers them
+sooner, so they stay id-less bubbles in `ConversationReducer` until a
+newest-page sync (2.5 s after a turn ends) replaces them with the server's
+items.
+
+**Resume.** The client tracks the last SSE `id:` and reconnects with
+`Last-Event-ID` and `?since=` (never `?since=0`: a small number is a count
+to the daemon). The id is kept in the cache, so a relaunch resumes too. An
+event at or below the last id is dropped, and folding is idempotent anyway:
+a replayed `pending.created` cannot reopen an approval that was answered
+since. Haptics fire only for events less than a minute old, so a replay
+after a long sleep is silent.
+
+## History and the cache
+
+`GET /api/conversation` (newest page, 200 items) is fetched at launch when
+an address is configured — before, and without, Connect — on every
+(re)open of the event stream, on returning to the foreground, and shortly
+after each voice turn. The merge rule (`ConversationHistory.applyNewest`):
+the server is the record for the id range its page covers, so a local
+item in that range that the server does not have is dropped; live items
+newer than the page survive it; older ones (the cache, earlier pages) are
+kept unless the page says there is nothing older. Older pages come from
+`before=<next_before>` and merge by id.
+
+`ConversationCache` writes the newest 300 items, `next_before` and the last
+event id to `Application Support/Conversations/<host>_<port>.json`, one
+file per daemon, excluded from backups, debounced by a second and written
+at once when the app goes to the background. The token is not in the file
+or its name. The screen is `ConversationTimeline.rows`: history and live
+bubbles merged by time, a date divider where the day changes, `notice`
+items as dividers, and the push that repeats a new approval's words folded
+into the approval card.
+
+## Approvals
+
+`ApprovalFlow` is the pinned card's state machine: *open* → *sending* (one
+option; further taps ignored) → *answered* (the daemon's `spoken`) or
+*gone* (409, "That question was already answered or has gone.") or back to
+*open* with the error under the buttons. `pending.confirmed` from somewhere
+else settles an open card as answered (by voice); `expired`, `cancelled`,
+`replaced`, or a state refresh without the question dismisses it. Our own
+`pending.confirmed` can arrive before the HTTP reply; the reply settles the
+card. A settled card stays 3.5 s, then the orb comes back — or the next
+question, if one is waiting. `/api/state`'s `pending_action` is the source
+of truth (refreshed every 5 s and on every `pending.*` event); the event is
+the fast path. Only `answer_prompt` actions with options get a card; the
+POST sends the option's 1-based `index`.
 
 Two things about `/events` that cost a day to find, and that any other
 client of this daemon will hit:

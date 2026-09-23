@@ -17,6 +17,12 @@ public struct AudioMetrics: Equatable, Sendable {
     public var silenceTransitions = 0
     public var droppedFrames = 0
     public var hardwareSampleRate: Double = 0
+    /// Where playback goes ("Speaker", "Receiver", AirPods…), for Settings ▸ About.
+    public var outputRoute = ""
+    /// Chunks handed to the player and chunks it reported played back:
+    /// received-but-silent audio shows up as scheduled ≫ played.
+    public var scheduledChunks = 0
+    public var playedChunks = 0
 
     public init() {}
 

@@ -97,6 +97,14 @@ public struct ConversationReducer: Sendable {
         bubbles.removeAll()
     }
 
+    /// Drops the finished speech bubbles from before `date`: a newest page
+    /// of `/api/conversation` fetched after them has them as server items
+    /// (the daemon logs every transcript fragment), so showing both would
+    /// say everything twice. The open bubble and the notices stay.
+    public mutating func dropSettledSpeech(before date: Date) {
+        bubbles.removeAll { $0.kind == .speech && $0.isFinal && $0.at < date }
+    }
+
     /// The last bubble that is still growing, if any — what the view
     /// animates with a caret.
     public var openBubble: Bubble? {

@@ -57,7 +57,8 @@ final class WalkthroughUITests: XCTestCase {
         // 3. Save: the main screen with an empty flock.
         tapWhenReady(app.buttons["settings.save"], "Save")
         XCTAssertTrue(app.staticTexts["No agents in the flock yet — start one in herdr."].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.staticTexts["Nothing said yet"].exists)
+        // The daemon's history (if this one has any) now fills the
+        // conversation; a fresh data dir leaves it empty.
         shot(app, "03-main-empty")
 
         // 4. Connect. The daemon runs without a voice session and says so

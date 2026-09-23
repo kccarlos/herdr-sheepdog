@@ -20,6 +20,10 @@ page at `/voice` does (`docs/ws-contract.md`): PCM16 mono, 16 kHz up,
 |---|---|---|
 | ![Settings on first launch](docs/screenshots/01-first-launch-settings.png) | ![Agents and conversation](docs/screenshots/04-main-agents-conversation.png) | ![Agent sheet](docs/screenshots/05-agent-sheet.png) |
 
+| History, across a restart | An approval | Answered by tap |
+|---|---|---|
+| ![History with a restart divider](docs/screenshots/10-history-restart-divider.png) | ![Approval card](docs/screenshots/11-approval-card.png) | ![Answered approval](docs/screenshots/12-approval-answered.png) |
+
 ## Build it
 
 No third-party dependencies. The Xcode project is generated, not committed.
@@ -80,9 +84,29 @@ non-goal), so keep this to a network you trust — your LAN, or Tailscale.
   agent with a state dot, the pending question as its subtitle, and a
   highlight when it is blocked. Tap one for its task, its last result and
   the question it is waiting on.
-- **The conversation**, built from the daemon's transcript fragments the way
-  `/voice` builds it, with the daemon's pushes as system cards and a haptic
-  when one needs a decision.
+- **The conversation, with its history.** The app opens on the last
+  conversation at once — it keeps the newest 300 messages per daemon in a
+  small file on the phone (no token in it) — then loads the daemon's own
+  record from `GET /api/conversation` and merges the two by event id, the
+  daemon's copy winning. Restarts and voice reconnects show as quiet
+  dividers ("Sheepdog restarted · 6:52 PM"), days get a date divider, and
+  pulling down at the top (or tapping *Earlier conversation*) loads the page
+  before. Live, it is built from the daemon's transcript fragments the way
+  `/voice` builds it, with pushes as system cards and a haptic when one
+  needs a decision. *Settings ▸ Clear conversation on this phone* forgets the
+  local copy.
+- **Approve by tap.** When a worker stops at an approval prompt, a card
+  pinned above the controls shows who is asking, the summary in plain words,
+  the command, and one button per option — the prompt's default prominent,
+  the "No…" option in red. A tap answers through
+  `POST /api/pending/answer`, the same rail as a spoken answer; the card
+  shows the daemon's reply ("You approved — Yes, proceed · by tap"), or
+  "That question was already answered or has gone." if the voice or the Mac
+  got there first. The conversation keeps each approval and how it ended.
+  VoiceOver reads the buttons as "Approve: Yes, proceed" / "Decline: No, …".
+- **Nothing missed across drops.** The `/events` stream resumes from the
+  last event id (`Last-Event-ID`, and `?since=` as the fallback), across
+  reconnects and relaunches; replayed events change nothing twice.
 - **A presence orb** that says what is happening — listening, quiet,
   thinking, speaking, muted, stalled, reconnecting — with VoiceOver labels
   for every state. It never pretends: against a daemon started with
@@ -92,12 +116,13 @@ non-goal), so keep this to a network you trust — your LAN, or Tailscale.
   you rather than fighting for it.
 - **Background audio**, optional: a toggle in Settings keeps the session
   alive with the screen locked.
+- **Mute is only the microphone.** "Mute stops your microphone; Sheepdog can
+  still talk." — the button's VoiceOver hint, and a one-time caption the
+  first time it is used.
 
 ## What v1 does not do
 
 - No text input: this is a voice client. Use `/debug` on the Mac to type.
-- No answering a worker's approval prompt directly from the app — that is
-  the dog's job, under its own rails (`docs/roles.md`).
 - No settings beyond the daemon address, the token and the lock-screen
   toggle. No chattiness control, no model picker, no event log viewer.
 - No push notifications: the app has to be open (or holding the audio

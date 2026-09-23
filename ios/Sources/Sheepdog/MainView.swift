@@ -7,6 +7,7 @@ struct MainView: View {
     @EnvironmentObject private var model: SessionViewModel
     @State private var selectedAgent: Agent?
     @State private var started = false
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         NavigationStack {
@@ -31,11 +32,43 @@ struct MainView: View {
 
                 Divider()
 
-                ConversationView(bubbles: model.bubbles, voiceName: model.voiceName)
-                    .frame(maxHeight: .infinity)
+                ConversationView(
+                    rows: model.rows,
+                    voiceName: model.voiceName,
+                    canLoadOlder: model.canLoadOlder,
+                    loadingOlder: model.loadingOlder,
+                    activePendingID: model.approval?.pending.id,
+                    loadOlder: { await model.loadOlder() }
+                )
+                .frame(maxHeight: .infinity)
 
-                PresenceOrb(state: model.state, level: model.micLevel, voiceName: model.voiceName)
-                    .padding(.top, 4)
+                if let card = model.approval {
+                    ApprovalCardView(card: card) { index in
+                        model.answer(option: index)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.top, 8)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .id(card.pending.id)
+                    .onAppear {
+                        AccessibilityNotification.Announcement("\(card.pending.agent ?? "An agent") needs your answer. \(card.pending.displaySummary)").post()
+                    }
+                } else {
+                    PresenceOrb(state: model.state, level: model.micLevel, voiceName: model.voiceName)
+                        .padding(.top, 4)
+                }
+
+                if model.showMuteHint {
+                    Text(SessionViewModel.muteHint)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 24)
+                        .padding(.top, 6)
+                        .transition(.opacity)
+                        .onTapGesture { model.dismissMuteHint() }
+                        .accessibilityIdentifier("controls.muteHint")
+                }
 
                 ControlBar(
                     connected: model.wantsConnection,
@@ -47,6 +80,8 @@ struct MainView: View {
                 )
             }
             .animation(.easeInOut(duration: 0.2), value: model.banner)
+            .animation(.spring(duration: 0.3), value: model.approval)
+            .animation(.easeInOut(duration: 0.2), value: model.showMuteHint)
             .navigationTitle(model.voiceName)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -80,6 +115,13 @@ struct MainView: View {
                 started = true
                 model.start()
             }
+            .onChange(of: scenePhase) { _, phase in
+                switch phase {
+                case .active where started: model.becameActive()
+                case .background: model.willResignActive()
+                default: break
+                }
+            }
         }
     }
 }
@@ -99,6 +141,7 @@ struct ControlBar: View {
             CircleButton(
                 systemImage: muted ? "mic.slash.fill" : "mic.fill",
                 title: muted ? "Unmute" : "Mute",
+                hint: SessionViewModel.muteHint,
                 tint: muted ? Color(.systemRed) : Color(.label),
                 filled: muted,
                 enabled: connected,
@@ -134,6 +177,7 @@ struct ControlBar: View {
 struct CircleButton: View {
     let systemImage: String
     let title: String
+    var hint: String? = nil
     let tint: Color
     let filled: Bool
     let enabled: Bool
@@ -152,6 +196,7 @@ struct CircleButton: View {
         }
         .disabled(!enabled)
         .accessibilityLabel(title)
+        .accessibilityHint(hint ?? "")
     }
 }
 

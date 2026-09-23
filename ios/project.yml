@@ -46,6 +46,7 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.kccarlos.sheepdog.app
+        DEVELOPMENT_TEAM: 3J5KY49N69
         PRODUCT_NAME: Sheepdog
         TARGETED_DEVICE_FAMILY: "1"
         INFOPLIST_KEY_UILaunchScreen_Generation: YES

@@ -12,6 +12,7 @@ struct SettingsView: View {
     @State private var keepListening = true
     @State private var probing = false
     @State private var probe: SessionViewModel.Probe?
+    @State private var confirmClear = false
     @FocusState private var addressFocused: Bool
 
     private var firstRun: Bool { !model.settings.hasBeenConfigured }
@@ -94,6 +95,22 @@ struct SettingsView: View {
                     Text("Uses the audio background mode, so a session survives the lock screen. Turn it off to have iOS stop the microphone when you put the phone down.")
                 }
 
+                Section {
+                    Button("Clear conversation on this phone", role: .destructive) {
+                        confirmClear = true
+                    }
+                    .accessibilityIdentifier("settings.clearConversation")
+                    .confirmationDialog("Clear the conversation on this phone?", isPresented: $confirmClear, titleVisibility: .visible) {
+                        Button("Clear conversation", role: .destructive) { model.clearConversation() }
+                    } message: {
+                        Text("The daemon keeps its own record, so the latest conversation comes back the next time the app reaches it.")
+                    }
+                } header: {
+                    Text("Conversation")
+                } footer: {
+                    Text("The app keeps the last \(ConversationHistory.cacheCapacity) messages for each daemon so it opens on your conversation straight away, even offline. No token is stored with them.")
+                }
+
                 Section("About") {
                     LabeledContent("App", value: Bundle.appVersion)
                     LabeledContent("Daemon", value: model.daemonVersion ?? "not connected")
@@ -109,6 +126,9 @@ struct SettingsView: View {
                             .foregroundStyle(.secondary)
                         if model.metrics.hardwareSampleRate > 0 {
                             Text("Microphone hardware: \(Int(model.metrics.hardwareSampleRate)) Hz")
+                                .font(.caption.monospaced())
+                                .foregroundStyle(.secondary)
+                            Text("Output: \(model.metrics.outputRoute.isEmpty ? "—" : model.metrics.outputRoute) · played \(model.metrics.playedChunks)/\(model.metrics.scheduledChunks) chunks")
                                 .font(.caption.monospaced())
                                 .foregroundStyle(.secondary)
                         }
