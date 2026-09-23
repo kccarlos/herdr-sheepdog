@@ -157,7 +157,8 @@ func (h brainHost) Prompt(ctx context.Context, paneID, text string) (string, err
 }
 
 // AnswerPrompt implements brain.Host: the rail's atomic re-check under
-// the supervisor's lock — reviving the pending action from the screen
+// the supervisor's lock — the shepherd's own recorded input must
+// authorise these keys (inputs.go) — reviving the pending action from the screen
 // first when none is recorded but the pane is still blocked
 // (docs/issues-2026-09-18.md "an expired approval prompt can never be
 // approved") — then the confirm send path.
@@ -185,7 +186,16 @@ func (h brainHost) AnswerPrompt(ctx context.Context, paneID string, keys []strin
 	if !selectedBy(p, keys) {
 		return "", fmt.Errorf("%w: keys %v mix more than one option", brain.ErrNotPermitted, keys)
 	}
-	res := s.answerWithKeys(ctx, p, keys, keysLabel(p, keys), "Told "+s.aliasOf(paneID)+" %s.", "brain")
+	// The one rail reads the shepherd's own recorded words, never what the
+	// model says they were (inputs.go).
+	in, reason := s.railInputLocked(p, keys)
+	if reason != "" {
+		return "", fmt.Errorf("%w: %s", brain.ErrNotPermitted, reason)
+	}
+	res, sent := s.answerKeys(ctx, p, keys, keysLabel(p, keys), "Told "+s.aliasOf(paneID)+" %s.", "brain", nil)
+	if sent {
+		in.used = true
+	}
 	if res.Clarify {
 		return "", errors.New(res.Spoken)
 	}

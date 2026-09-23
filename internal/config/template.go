@@ -80,6 +80,7 @@ func Template() string {
 # cancel_window_s = %[39]d   # how soon after an instruction a "stop" still interrupts the agent with Ctrl-C
 # reprompt_poll_s = %[42]d   # how long the post-answer poll watches a pane for a different prompt after keys go to it
 # repeat_window_s = %[43]d   # how long an unchanged roster sentence counts as "already reported"; a status question inside it gets a "no change" note instead of the roster repeated in full
+# authorise_window_s = %[45]d   # how recent your own words (voice, typed or a tap) must be to answer a worker's approval prompt
 
 [brain]
 # enabled = %[21]t   # the stateful supervisor brain behind ask/propose; serve --brain=off overrides
@@ -120,5 +121,6 @@ func Template() string {
 		d.Supervisor.RepromptPollS,
 		d.Supervisor.RepeatWindowS,
 		d.Web.Bind,
+		d.Supervisor.AuthoriseWindowS,
 	)
 }

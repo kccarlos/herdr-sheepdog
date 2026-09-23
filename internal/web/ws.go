@@ -457,6 +457,7 @@ func (c *client) onControl(data []byte) {
 	case wsproto.TypeText:
 		if h.s.deps.Voice != nil {
 			h.s.log.Log(logSource, "web.utterance", "", map[string]any{"text": m.Text, "via": "voice", "client_id": c.id})
+			h.s.typed(m.Text)
 			if err := h.s.deps.Voice.SendText(m.Text); err != nil {
 				c.enqueue(controlFrame(wsproto.Error("text: " + err.Error())))
 			}

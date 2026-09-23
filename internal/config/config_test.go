@@ -439,6 +439,53 @@ func TestSupervisorRepeatWindowConfig(t *testing.T) {
 	}
 }
 
+// TestSupervisorAuthoriseWindowConfig covers authorise_window_s on its own:
+// default, file, env override, and validation (default() and validate()
+// live outside TestSupervisorConfig above so a missing/bad file there
+// cannot mask it).
+func TestSupervisorAuthoriseWindowConfig(t *testing.T) {
+	cfg, err := load(filepath.Join(t.TempDir(), "missing.toml"), noEnv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Supervisor.AuthoriseWindowS != 30 {
+		t.Errorf("default authorise_window_s = %d, want 30", cfg.Supervisor.AuthoriseWindowS)
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(path, []byte("[supervisor]\nauthorise_window_s = 20\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = load(path, noEnv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Supervisor.AuthoriseWindowS != 20 {
+		t.Errorf("from file = %d, want 20", cfg.Supervisor.AuthoriseWindowS)
+	}
+	cfg, err = load(path, envFrom(map[string]string{"SHEEPDOG_SUPERVISOR_AUTHORISE_WINDOW_S": "90"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Supervisor.AuthoriseWindowS != 90 {
+		t.Errorf("env override = %d, want 90", cfg.Supervisor.AuthoriseWindowS)
+	}
+	for _, env := range []map[string]string{
+		{"SHEEPDOG_SUPERVISOR_AUTHORISE_WINDOW_S": "0"},
+		{"SHEEPDOG_SUPERVISOR_AUTHORISE_WINDOW_S": "soon"},
+	} {
+		if _, err := load(path, envFrom(env)); err == nil {
+			t.Errorf("%v should fail", env)
+		}
+	}
+	if err := os.WriteFile(path, []byte("[supervisor]\nauthorise_window_s = 0\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := load(path, noEnv); err == nil || !strings.Contains(err.Error(), "supervisor.authorise_window_s") {
+		t.Errorf("zero in file: %v", err)
+	}
+}
+
 func TestBrainConfig(t *testing.T) {
 	cfg, err := load(filepath.Join(t.TempDir(), "missing.toml"), noEnv)
 	if err != nil {

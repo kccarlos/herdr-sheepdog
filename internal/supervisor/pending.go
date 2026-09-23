@@ -24,19 +24,26 @@ func (s *Supervisor) newAnswerPrompt(paneID string, prompt herdr.Prompt, alias s
 		// like any other text from a pane: no paths, hashes or URLs.
 		SpokenSummary: prose.Spoken(prompt.Summary(alias), 0),
 		Question:      prompt.Phrase(),
+		Command:       prompt.Command,
 		YesKeys:       append([]string(nil), prompt.YesKeys...),
 		NoKeys:        append([]string(nil), prompt.NoKeys...),
 		CreatedAt:     now,
 		ExpiresAt:     now.Add(s.cfg.PendingTTL),
 	}
-	for _, o := range prompt.Options {
-		p.Options = append(p.Options, state.Option{Label: o.Label, Keys: o.Keys})
+	for i, o := range prompt.Options {
+		p.Options = append(p.Options, state.Option{Label: o.Label, Keys: o.Keys, Default: i == prompt.Default})
 	}
 	// Remembered so the post-answer poll and the reconciler can tell a
 	// new prompt from this one (docs/roles.md "blocked -> blocked is a
 	// block", reprompt.go): every answer_prompt pending action is built
 	// here, whether the block is real or synthetic.
-	s.lastPrompt[paneID] = promptSignature(prompt)
+	sig := promptSignature(prompt)
+	if _, seen := s.promptSeenAt[paneID]; !seen || s.lastPrompt[paneID] != sig {
+		// When the prompt appeared, for the one rail (inputs.go): a
+		// revival of the same prompt keeps the first time it was seen.
+		s.promptSeenAt[paneID] = now
+	}
+	s.lastPrompt[paneID] = sig
 	return p
 }
 
@@ -74,10 +81,14 @@ func (s *Supervisor) setPending(p state.PendingAction) string {
 	}
 	s.expired = nil
 	s.invalidateBriefingLocked()
-	s.log.Log(logSource, "pending.created", p.PaneID, map[string]any{
+	created := map[string]any{
 		"id": p.ID, "kind": p.Kind, "summary": p.SpokenSummary, "question": p.Question, "expires_at": p.ExpiresAt,
-		"options": len(p.Options), "yes_keys": p.YesKeys, "no_keys": p.NoKeys,
-	})
+		"options": PendingOptions(p), "yes_keys": p.YesKeys, "no_keys": p.NoKeys, "agent": s.aliasOf(p.PaneID),
+	}
+	if p.Command != "" {
+		created["command"] = p.Command
+	}
+	s.log.Log(logSource, "pending.created", p.PaneID, created)
 	return spoken
 }
 

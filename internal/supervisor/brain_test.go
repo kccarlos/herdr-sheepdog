@@ -231,6 +231,7 @@ func TestBrainSendKeysRevivesAnExpiredPrompt(t *testing.T) {
 	if _, has := h.pending(); has {
 		t.Fatal("pending did not expire")
 	}
+	h.hear("please approve it")
 	res := h.call(ToolPropose, map[string]any{"instruction": "please approve it", "agent": "auth"})
 	if res.Spoken != "Told auth yes." {
 		t.Errorf("result = %+v", res)

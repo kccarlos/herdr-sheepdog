@@ -30,12 +30,16 @@ import (
 const logSource = "web"
 
 // Supervisor is what the web layer needs from the supervisor: the tool
-// handler (cancel goes through it like every other tool) and the runtime
-// settings behind /api/settings.
+// handler (cancel goes through it like every other tool), the runtime
+// settings behind /api/settings, the shepherd's typed inputs the one rail
+// reads (docs/roles.md "The one rail") and the tap behind
+// POST /api/pending/answer.
 type Supervisor interface {
 	Handler() voice.ToolHandler
 	Settings() supervisor.Settings
 	SetSettings(supervisor.Settings) error
+	ShepherdInput(kind supervisor.InputKind, text string)
+	AnswerTap(ctx context.Context, id string, option int) (voice.ToolResult, error)
 }
 
 // EventInjector is the Watcher's second input channel (plugin shim).
@@ -205,6 +209,7 @@ func (s *Server) routes() error {
 	s.mux.HandleFunc("GET /api/settings", s.authFunc(s.handleGetSettings, false))
 	s.mux.HandleFunc("PUT /api/settings", s.authFunc(s.handlePutSettings, false))
 	s.mux.HandleFunc("POST /api/pending/cancel", s.authFunc(s.handleCancel, false))
+	s.mux.HandleFunc("POST /api/pending/answer", s.authFunc(s.handlePendingAnswer, false))
 	s.mux.HandleFunc("POST /api/inject/blocked", s.authFunc(s.handleInjectBlocked, false))
 	s.mux.HandleFunc("POST /api/inject/done", s.authFunc(s.handleInjectDone, false))
 	s.mux.HandleFunc("POST /api/inject/state", s.authFunc(s.handleInjectState, false))

@@ -47,13 +47,22 @@ func (s *Supervisor) ToSupervisor(ctx context.Context, text string) (voice.ToolR
 		s.log.Log(logSource, "supervisor.echo_ignored", "", map[string]any{"text": text})
 		return voice.ToolResult{Scheduling: voice.UrgencySilent}, nil
 	}
+	in, fresh := s.claimInput(ctx)
+	if !fresh {
+		// Nothing the shepherd said, typed or tapped since the previous
+		// relay or the last push: the voice model is acting on its own
+		// (2026-09-23: "yes" right after a push, with the mic muted).
+		// Nothing happens and nothing is said (inputs.go).
+		s.log.Log(logSource, "supervisor.voice_initiative_ignored", "", map[string]any{"text": text})
+		return voice.ToolResult{Scheduling: voice.UrgencySilent}, nil
+	}
 	// Bare stop first: "no" is an answer, "no no" is a stop.
 	if bareStop(text) {
 		return s.Stop(ctx, StopTriggerBareWord)
 	}
 	turnCtx, u := s.beginUtterance(ctx, text)
 	defer s.endUtterance(u)
-	if res, ok := s.fastAnswer(turnCtx, text); ok {
+	if res, ok := s.fastAnswer(turnCtx, in); ok {
 		return res, nil
 	}
 	res, ok := s.utteranceTurn(turnCtx, u, text)
@@ -208,13 +217,15 @@ func normalizeEcho(text string) string {
 	return strings.TrimSpace(b.String())
 }
 
-// fastAnswer is the bare-answer fast path: the whole utterance answers
+// fastAnswer is the bare-answer fast path: the shepherd's whole input
+// (what was heard, typed or tapped — never the tool argument) answers
 // the one open answer_prompt, so the keys go straight to the pane
-// without a model (the CEO's verbatim word is what the rail asks for).
-// ok is false for anything else, which goes to the brain.
-func (s *Supervisor) fastAnswer(ctx context.Context, text string) (voice.ToolResult, bool) {
+// without a model, when the one rail's reading of that input allows it
+// (inputs.go). ok is false for anything else, which goes to the brain.
+func (s *Supervisor) fastAnswer(ctx context.Context, in *shepherdInput) (voice.ToolResult, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	text := strings.TrimSpace(in.text)
 	p, has := s.store.Pending()
 	switch {
 	case has && p.Kind == state.PendingAnswerPrompt && s.cfg.Now().Before(p.ExpiresAt):
@@ -237,9 +248,19 @@ func (s *Supervisor) fastAnswer(ctx context.Context, text string) (voice.ToolRes
 	if !ok {
 		return voice.ToolResult{}, false
 	}
+	if rin, reason := s.railInputLocked(p, keys); reason != "" || rin != in {
+		if reason == "" {
+			reason = "the shepherd said something newer than the words being answered"
+		}
+		s.railBlockedLocked(p, keys, "fast_path", reason)
+		return voice.ToolResult{}, false
+	}
 	alias := s.aliasOf(p.PaneID)
-	s.log.Log(logSource, "supervisor.fast_path", p.PaneID, map[string]any{"path": "answer", "text": text, "answer": label, "id": p.ID})
-	res := s.answerWithKeys(ctx, p, keys, label, "Told "+alias+" %s.", "fast_path")
+	s.log.Log(logSource, "supervisor.fast_path", p.PaneID, map[string]any{"path": "answer", "text": text, "answer": label, "id": p.ID, "input": string(in.kind)})
+	res, sent := s.answerKeys(ctx, p, keys, label, "Told "+alias+" %s.", "fast_path", nil)
+	if sent {
+		in.used = true
+	}
 	if s.brain != nil {
 		// No model saw this, so the transcript would otherwise lose it.
 		s.brain.Daemon(fmt.Sprintf("fast path: the CEO said %q; %s", text, lowerFirst(res.Spoken)))
