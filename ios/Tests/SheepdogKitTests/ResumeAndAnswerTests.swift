@@ -126,4 +126,42 @@ final class ConversationAndAnswerClientTests: XCTestCase {
             XCTAssertEqual(error as? DaemonError, .rejected(status: 400, message: "no option 7"))
         }
     }
+
+    func testResetConversationPostsViaAndDecodesTheReply() async throws {
+        StubProtocol.handler = { _ in (200, Data(#"{"ok":true,"reset_id":"rs-abc123","at":"2026-09-23T01:40:29.425157Z"}"#.utf8)) }
+        let reset = try await StubProtocol.client().resetConversation(via: "app")
+        XCTAssertEqual(reset?.resetID, "rs-abc123")
+        let request = try XCTUnwrap(StubProtocol.seen.first)
+        XCTAssertEqual(request.httpMethod, "POST")
+        XCTAssertEqual(request.url?.path, "/api/conversation/reset")
+        let body = try XCTUnwrap(JSONSerialization.jsonObject(with: request.httpBody ?? Data()) as? [String: Any])
+        XCTAssertEqual(body["via"] as? String, "app")
+    }
+
+    func testResetConversation404MeansTheDaemonDoesNotHaveIt() async throws {
+        StubProtocol.handler = { _ in (404, Data()) }
+        let reset = try await StubProtocol.client().resetConversation(via: "app")
+        XCTAssertNil(reset)
+        XCTAssertFalse(ConversationResetAvailability(response: reset).showsAction)
+    }
+
+    func testResetConversation401IsUnauthorized() async {
+        StubProtocol.handler = { _ in (401, Data()) }
+        do {
+            _ = try await StubProtocol.client().resetConversation(via: "app")
+            XCTFail("expected unauthorized")
+        } catch {
+            XCTAssertEqual(error as? DaemonError, .unauthorized(endpoint: "127.0.0.1:7799"))
+        }
+    }
+
+    func testResetConversationOtherFailureCarriesTheDaemonsWords() async {
+        StubProtocol.handler = { _ in (500, Data(#"{"error":"could not reset"}"#.utf8)) }
+        do {
+            _ = try await StubProtocol.client().resetConversation(via: "app")
+            XCTFail("expected rejected")
+        } catch {
+            XCTAssertEqual(error as? DaemonError, .rejected(status: 500, message: "could not reset"))
+        }
+    }
 }

@@ -319,6 +319,46 @@ public struct BrainInfo: Codable, Equatable, Sendable {
     }
 }
 
+/// `POST /api/conversation/reset {"via": "app"}` — forgets the supervisor's
+/// and the voice model's short-term conversation; the roster, open
+/// approvals, promises and notes, and the scrollback itself, are kept (see
+/// docs/architecture.md "New conversation"). `DaemonClient.resetConversation`
+/// answers `nil` for a 404, the same convention as `voiceProviders()`: an
+/// older daemon simply does not have the route yet.
+public struct ConversationReset: Codable, Equatable, Sendable {
+    public var ok: Bool
+    public var resetID: String
+    public var at: Date
+
+    enum CodingKeys: String, CodingKey {
+        case ok
+        case resetID = "reset_id"
+        case at
+    }
+
+    public init(ok: Bool, resetID: String, at: Date) {
+        self.ok = ok
+        self.resetID = resetID
+        self.at = at
+    }
+}
+
+/// Whether the "New conversation" action is worth offering, learned from
+/// the daemon's own answer rather than assumed. `nil` (a 404) is the only
+/// thing that hides it; any real response — success or a thrown
+/// `DaemonError` — leaves the previous answer alone, since neither tells
+/// the app the route does not exist.
+public enum ConversationResetAvailability: Equatable, Sendable {
+    case supported
+    case unsupported
+
+    public init(response: ConversationReset?) {
+        self = response == nil ? .unsupported : .supported
+    }
+
+    public var showsAction: Bool { self == .supported }
+}
+
 /// `GET /api/state`, trimmed to what the app shows.
 public struct DaemonState: Codable, Equatable, Sendable {
     public struct VoiceInfo: Codable, Equatable, Sendable {
@@ -360,15 +400,20 @@ public struct DaemonState: Codable, Equatable, Sendable {
     /// switch provider (`GET /api/voice/providers`).
     public var voiceProvider: String?
     public var voiceModel: String?
+    /// When the current conversation started — the last reset, or the
+    /// daemon's own start if there has not been one. Absent on a daemon
+    /// that predates "New conversation".
+    public var conversationStartedAt: Date?
 
     enum CodingKeys: String, CodingKey {
         case agents, voice, herdr, version, brain
         case pendingAction = "pending_action"
         case voiceProvider = "voice_provider"
         case voiceModel = "voice_model"
+        case conversationStartedAt = "conversation_started_at"
     }
 
-    public init(agents: [Agent], pendingAction: PendingAction? = nil, voice: VoiceInfo, herdr: String? = nil, version: String? = nil, brain: BrainInfo? = nil, voiceProvider: String? = nil, voiceModel: String? = nil) {
+    public init(agents: [Agent], pendingAction: PendingAction? = nil, voice: VoiceInfo, herdr: String? = nil, version: String? = nil, brain: BrainInfo? = nil, voiceProvider: String? = nil, voiceModel: String? = nil, conversationStartedAt: Date? = nil) {
         self.agents = agents
         self.pendingAction = pendingAction
         self.voice = voice
@@ -377,6 +422,7 @@ public struct DaemonState: Codable, Equatable, Sendable {
         self.brain = brain
         self.voiceProvider = voiceProvider
         self.voiceModel = voiceModel
+        self.conversationStartedAt = conversationStartedAt
     }
 
     /// The question waiting on a given pane, if the pending action is one.

@@ -52,10 +52,19 @@ public struct ConversationItem: Codable, Equatable, Identifiable, Sendable {
     public var answered: Bool?
     public var answer: String?
     public var resolution: Resolution?
+    /// A finer tag on a `notice`: `"reset"` for "New conversation". Absent
+    /// on every other notice (a restart, a voice reconnect).
+    public var subkind: String?
+    /// The reset's own id (`POST /api/conversation/reset`'s `reset_id`, and
+    /// the `conversation.reset` event's), when the item came from one of
+    /// those rather than a plain `/api/conversation` page — a second key
+    /// `fold` dedupes by, alongside the event id every item already has.
+    public var resetID: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, ts, kind, text, via, agent, urgency, options, answered, answer, resolution
+        case id, ts, kind, text, via, agent, urgency, options, answered, answer, resolution, subkind
         case pendingID = "pending_id"
+        case resetID = "reset_id"
     }
 
     public init(
@@ -70,7 +79,9 @@ public struct ConversationItem: Codable, Equatable, Identifiable, Sendable {
         options: [PendingOption]? = nil,
         answered: Bool? = nil,
         answer: String? = nil,
-        resolution: Resolution? = nil
+        resolution: Resolution? = nil,
+        subkind: String? = nil,
+        resetID: String? = nil
     ) {
         self.id = id
         self.ts = ts
@@ -84,6 +95,8 @@ public struct ConversationItem: Codable, Equatable, Identifiable, Sendable {
         self.answered = answered
         self.answer = answer
         self.resolution = resolution
+        self.subkind = subkind
+        self.resetID = resetID
     }
 
     public init(from decoder: Decoder) throws {
@@ -100,10 +113,15 @@ public struct ConversationItem: Codable, Equatable, Identifiable, Sendable {
         answered = try c.decodeIfPresent(Bool.self, forKey: .answered)
         answer = try c.decodeIfPresent(String.self, forKey: .answer)
         resolution = try c.decodeIfPresent(Resolution.self, forKey: .resolution)
+        subkind = try c.decodeIfPresent(String.self, forKey: .subkind)
+        resetID = try c.decodeIfPresent(String.self, forKey: .resetID)
     }
 
     /// A push that interrupts is the one that must stand out.
     public var needsUser: Bool { kind == .push && urgency == "interrupt" }
+
+    /// A "New conversation" divider.
+    public var isResetNotice: Bool { kind == .notice && subkind == "reset" }
 
     /// An approval's answered state in plain words: "You approved — Yes,
     /// proceed · by tap". Nil while it is open.
@@ -281,6 +299,15 @@ public struct ConversationHistory: Equatable, Sendable {
         case "voice.closed":
             let reason = text("reason")
             made = ConversationItem(id: id, ts: ts, kind: .notice, text: reason.isEmpty ? "Voice session closed." : "Voice session closed: \(reason).")
+        case "conversation.reset":
+            // Fires for every reset, including our own (the app already
+            // reset its reducer on the POST reply) and ones started
+            // elsewhere (the browser, voice). `reset_id` is a second key
+            // to dedupe by, alongside the event id every item already has
+            // — belt and suspenders if a replay ever carried a different id.
+            let resetID = event.string("reset_id")
+            if let resetID, items.contains(where: { $0.resetID == resetID }) { return nil }
+            made = ConversationItem(id: id, ts: ts, kind: .notice, text: "New conversation", subkind: "reset", resetID: resetID)
         case "voice.text":
             made = ConversationItem(id: id, ts: ts, kind: .shepherd, text: text("text"), via: "typed")
         case "web.utterance":

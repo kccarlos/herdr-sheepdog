@@ -279,6 +279,30 @@ public final class DaemonClient: @unchecked Sendable {
         }
     }
 
+    /// `POST /api/conversation/reset {"via": <via>}` — the gear/⋯ menu's
+    /// "New conversation". `nil` when the daemon predates the feature
+    /// (404): the caller hides the action instead of showing an error, the
+    /// same convention as `voiceProviders()`.
+    public func resetConversation(via: String) async throws -> ConversationReset? {
+        let body = try JSONSerialization.data(withJSONObject: ["via": via])
+        let request = try request(path: "/api/conversation/reset", method: "POST", body: body)
+        let (data, response) = try await perform(request)
+        guard let http = response as? HTTPURLResponse else { throw DaemonError.malformed("no HTTP response") }
+        switch http.statusCode {
+        case 200 ..< 300: break
+        case 404: return nil
+        case 401: throw DaemonError.unauthorized(endpoint: endpoint.display)
+        default:
+            let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+            throw DaemonError.rejected(status: http.statusCode, message: (object?["error"] as? String) ?? "")
+        }
+        do {
+            return try DaemonClient.decoder.decode(ConversationReset.self, from: data)
+        } catch {
+            throw DaemonError.malformed("the reset reply did not decode")
+        }
+    }
+
     private func get<T: Decodable>(_ type: T.Type, path: String, query: [URLQueryItem] = []) async throws -> T {
         let request = try request(path: path, query: query)
         let (data, response) = try await perform(request)

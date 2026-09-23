@@ -61,6 +61,12 @@ public struct ConversationReducer: Sendable {
         case mirroredReply(String)
         /// A local notice ("voice is off on the daemon", "reconnected").
         case notice(String)
+        /// "New conversation": the daemon forgot the short-term context.
+        /// Closes whatever bubble is still open — the scrollback stays,
+        /// only the in-flight turn is not worth continuing — and adds
+        /// nothing itself; the divider comes from history (`kind: .notice,
+        /// subkind: "reset"`).
+        case reset
     }
 
     /// How many bubbles are kept. Far more than a phone screen shows; the
@@ -90,6 +96,9 @@ public struct ConversationReducer: Sendable {
             append(speaker: .sheepdog, text: text, final: true, merge: false)
         case let .notice(text):
             push(Bubble(id: takeID(), speaker: .system, kind: .notice, text: text, isFinal: true, at: now()))
+        case .reset:
+            closeOpen(.shepherd)
+            closeOpen(.sheepdog)
         }
     }
 

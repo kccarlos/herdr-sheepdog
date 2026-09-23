@@ -51,6 +51,13 @@ final class SessionViewModel: ObservableObject {
     /// The supervisor's model, from `/api/state`'s `brain`, when the
     /// daemon reports one.
     @Published private(set) var brain: BrainInfo?
+    /// Whether the ⋯ menu offers "New conversation" — learned from the
+    /// daemon's own answer to `POST /api/conversation/reset` (a 404 hides
+    /// it), optimistic (shown) until then.
+    @Published private(set) var conversationResetSupported = true
+    /// When the current conversation started (`/api/state`'s
+    /// `conversation_started_at`), on a daemon that reports it.
+    @Published private(set) var conversationStartedAt: Date?
     @Published var banner: Banner?
     @Published var isMuted = false
 
@@ -215,6 +222,9 @@ final class SessionViewModel: ObservableObject {
             approval = nil
             loadCache()
             conversationChanged(save: false)
+            // Learned per daemon: a different one gets the benefit of the
+            // doubt again rather than staying hidden from the last one's 404.
+            conversationResetSupported = true
         }
         if wantsConnection {
             disconnect()
@@ -782,6 +792,14 @@ final class SessionViewModel: ObservableObject {
                 applyApproval(approvalFlow.present(pending), haptic: isFresh(event))
             }
             refreshSoon()
+        case "conversation.reset":
+            // Fires for every reset, including our own (the app resets its
+            // own reducer immediately on the POST reply too, so a replay
+            // here is a no-op) and ones started elsewhere (the browser,
+            // voice "start over"). The divider itself came from `fold`
+            // above; this only closes whatever bubble was still open.
+            reducer.apply(.reset)
+            conversationChanged()
         case "pending.confirmed", "pending.expired", "pending.cancelled", "pending.replaced":
             let resolution = ConversationItem.Resolution(rawValue: String(event.type.dropFirst("pending.".count))) ?? .unknown
             let id = event.type == "pending.replaced" ? event.string("old_id") : event.string("id")
@@ -883,6 +901,7 @@ final class SessionViewModel: ObservableObject {
         brain = state.brain
         stateVoiceProvider = state.voiceProvider
         stateVoiceModel = state.voiceModel
+        conversationStartedAt = state.conversationStartedAt
     }
 
     // MARK: - Conversation history
@@ -952,6 +971,66 @@ final class SessionViewModel: ObservableObject {
         reducer.clear()
         conversationChanged(save: false)
     }
+
+    // MARK: - New conversation
+
+    /// The ⋯ menu's "New conversation", after the confirmation dialog.
+    /// Unlike `clearConversation()` this keeps the scrollback — it only
+    /// resets the supervisor's and the voice model's short-term context on
+    /// the daemon, which then logs a `subkind: reset` notice we pick up
+    /// the normal way (live, from `/events`, or from the next history
+    /// sync), the same as any other notice.
+    func startNewConversation() {
+        guard settings.endpoint != nil else { return }
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let response = try await self.client.resetConversation(via: "app")
+                self.conversationResetSupported = ConversationResetAvailability(response: response).showsAction
+                guard response != nil else {
+                    #if DEBUG
+                    if ProcessInfo.processInfo.arguments.contains("-sheepdogFakeReset") {
+                        self.applyFakeReset()
+                        return
+                    }
+                    #endif
+                    self.show(Banner(tone: .info, message: "This daemon doesn't have New conversation yet.", hint: nil, retryTitle: nil))
+                    return
+                }
+                // No optimistic local divider: the daemon already logged
+                // the reset before answering, so the next history sync (or
+                // the `conversation.reset` event, on the same event loop
+                // that closes the reducer's open bubble) has it with a
+                // real id — the same id-based merge every other notice
+                // uses, so it cannot show twice.
+                reducer.apply(.reset)
+                conversationChanged()
+                Haptics.newConversation()
+                await self.syncHistory()
+            } catch let error as DaemonError {
+                self.show(Banner(tone: .warning, message: "Couldn't start a new conversation.", hint: error.hint ?? error.message, retryTitle: nil))
+            } catch {
+                self.show(Banner(tone: .warning, message: "Couldn't start a new conversation.", hint: error.localizedDescription, retryTitle: nil))
+            }
+        }
+    }
+
+    #if DEBUG
+    /// `-sheepdogFakeReset`: screenshots and manual checks against a daemon
+    /// that does not serve `/api/conversation/reset` yet (the daemon side
+    /// was built in parallel). Runs the same `fold` the real event would,
+    /// rather than a second code path, with a synthetic id in the event
+    /// log's own scheme (microseconds since the epoch).
+    private func applyFakeReset() {
+        let seq = UInt64(Date().timeIntervalSince1970 * 1_000_000)
+        let event = DaemonEvent(seq: seq, ts: Date(), source: "app", type: "conversation.reset", payload: ["reset_id": .string("fake-\(seq)"), "via": .string("app")])
+        if history.fold(event) != nil { conversationChanged() }
+        reducer.apply(.reset)
+        conversationChanged()
+        conversationResetSupported = true
+        Haptics.newConversation()
+    }
+    #endif
 
     private func loadCache() {
         guard let endpoint = settings.endpoint, let snapshot = cache.load(for: endpoint) else {

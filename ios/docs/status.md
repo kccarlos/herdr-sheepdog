@@ -2,7 +2,7 @@
 
 ## Verified
 
-**Unit tests: 198 (196 run, 2 live-daemon tests skip without one), all passing** (`SheepdogKitTests`, iPhone 17 Pro simulator,
+**Unit tests: 216 (214 run, 2 live-daemon tests skip without one), all passing** (`SheepdogKitTests`, iPhone 17 Pro simulator,
 iOS 26, Xcode 27).
 
 ```sh
@@ -82,6 +82,19 @@ They cover:
   has the app as its test host: a hostless XCTest bundle has no keychain
   access group and every `SecItemAdd` fails);
 - the measured audio numbers in `docs/architecture.md`;
+- **New conversation**: `subkind`/`reset_id` decoding on a conversation
+  item and `conversation_started_at` on state (both absent on an older
+  daemon), the `ConversationReset` reply, `resetConversation` through the
+  stubbed `URLProtocol` (200, 404 → `nil`, 401, and another status carrying
+  the daemon's words), `ConversationResetAvailability` (only a `nil`
+  response hides the action), folding a `conversation.reset` event into a
+  `subkind: reset` notice, idempotently and deduped by `reset_id` even
+  under a different event id, merging cleanly with the same item from a
+  `/api/conversation` sync, the timeline's divider for it, and the
+  reducer's `.reset` (closes an open bubble without adding one, a no-op
+  with nothing open) — end to end against the fixture daemon in
+  `NewConversationUITests` (screenshots below), with a `-sheepdogFakeReset`
+  fallback for a daemon that does not have the route yet;
 - history and approvals, against JSON captured from the daemon at
   `7a192e9` (`Tests/SheepdogKitTests/Fixtures.swift`): decoding every
   conversation item kind, `/api/state`'s pending view and a real
@@ -192,6 +205,21 @@ contract's example, since the daemon on `main` does not serve
 | ![](screenshots/24-hold-to-talk.png) | Hold to talk on: no mic button, "Hold the orb to talk"; the Voice Isolation tip banner shown once after listening. |
 | ![](screenshots/25-chip-voice-provider.png) | The connection sheet names the voice provider and model. |
 
+### New conversation (simulator, 2026-09-23)
+
+`NewConversationUITests` against the fixture daemon on 7799, with an
+utterance already logged so there is scrollback to keep. The daemon on
+`main` does not serve `POST /api/conversation/reset` yet, so the app is
+launched with `-sheepdogFakeReset` (DEBUG only): it folds a synthetic
+`conversation.reset` event through the real `ConversationHistory.fold` the
+moment the daemon answers 404, rather than a second, untested code path —
+the same convention `-sheepdogFakeProviders` uses above.
+
+| | What |
+|---|---|
+| ![](screenshots/26-new-conversation-confirm.png) | The ⋯ menu ▸ New conversation: the confirmation dialog, word for word. |
+| ![](screenshots/27-new-conversation-divider.png) | After Start fresh: the scrollback stays, with "New conversation · 10:34 AM" marking the point. |
+
 ## Not verified
 
 - **Real device audio.** Nothing has run on an iPhone. The microphone, the
@@ -233,8 +261,19 @@ contract's example, since the daemon on `main` does not serve
 - **The provider picker against a real daemon**: built to the contract
   while the daemon side was being written; screenshots use the contract's
   example.
+- **New conversation against a real daemon**: same story —
+  `POST /api/conversation/reset` was not on `main` yet when this was built,
+  confirmed with a live `curl` against the fixture daemon (404). Built to
+  the contract; screenshots use `-sheepdogFakeReset`.
 
 ## For the morning
+
+For New conversation, once the daemon side (`POST /api/conversation/reset`,
+the `conversation.reset` event) is on `main`: check the ⋯ menu actually
+shows up against a real daemon (it is hidden until a non-404 reply proves
+the route exists), tap through the real confirmation, and watch the
+divider land — including one started from the browser pages or by voice,
+to see it arrive over `/events` without the app having asked for it.
 
 For the voice-robustness change, on the phone: connect in a normal room and
 watch Settings ▸ Voice detection — the gate should read "Closed — room

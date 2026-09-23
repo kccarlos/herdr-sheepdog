@@ -32,6 +32,23 @@ final class ConversationItemDecodingTests: XCTestCase {
         XCTAssertEqual(push.ts.timeIntervalSince1970, 1_790_127_629.5, accuracy: 0.001)
     }
 
+    func testDecodesTheResetSubkindAndResetID() throws {
+        let json = #"{"items":[{"id":100,"ts":"2026-09-23T01:40:29.425157Z","kind":"notice","subkind":"reset","text":"New conversation","reset_id":"rs-abc123"}],"next_before":null}"#
+        let page = try DaemonClient.decoder.decode(ConversationPage.self, from: Data(json.utf8))
+        let item = try XCTUnwrap(page.items.first)
+        XCTAssertEqual(item.subkind, "reset")
+        XCTAssertEqual(item.resetID, "rs-abc123")
+        XCTAssertTrue(item.isResetNotice)
+    }
+
+    func testAPlainNoticeHasNoSubkindOrResetID() throws {
+        let page = try DaemonClient.decoder.decode(ConversationPage.self, from: Data(Fixtures.conversationPage.utf8))
+        let notice = try XCTUnwrap(page.items.first { $0.kind == .notice })
+        XCTAssertNil(notice.subkind)
+        XCTAssertNil(notice.resetID)
+        XCTAssertFalse(notice.isResetNotice)
+    }
+
     func testAnUnknownKindAndResolutionDoNotFailThePage() throws {
         let json = #"{"items":[{"id":5,"ts":"2026-09-23T01:40:29.425157Z","kind":"hologram","text":"x","resolution":"vaporised"}],"next_before":null}"#
         let page = try DaemonClient.decoder.decode(ConversationPage.self, from: Data(json.utf8))
@@ -201,6 +218,49 @@ final class ConversationHistoryTests: XCTestCase {
         history.fold(DaemonEvent(seq: 4, source: "s", type: "pending.expired", payload: ["id": .string("p2")]))
         XCTAssertEqual(history.approval(pendingID: "p2")?.resolution, .confirmed)
     }
+
+    func testConversationResetFoldsIntoASubkindResetNotice() {
+        var history = ConversationHistory()
+        let made = history.fold(DaemonEvent(seq: 100, ts: Date(timeIntervalSince1970: 100), source: "web", type: "conversation.reset", payload: ["reset_id": .string("r1"), "via": .string("app")]))
+        let item = try! XCTUnwrap(made)
+        XCTAssertEqual(item.id, 100)
+        XCTAssertEqual(item.kind, .notice)
+        XCTAssertEqual(item.subkind, "reset")
+        XCTAssertTrue(item.isResetNotice)
+        XCTAssertEqual(item.text, "New conversation")
+        XCTAssertEqual(item.resetID, "r1")
+        XCTAssertEqual(history.items.map(\.id), [100])
+    }
+
+    func testAReplayedResetEventChangesNothing() {
+        var history = ConversationHistory()
+        let event = DaemonEvent(seq: 100, source: "web", type: "conversation.reset", payload: ["reset_id": .string("r1")])
+        XCTAssertNotNil(history.fold(event))
+        XCTAssertNil(history.fold(event), "the same event id again is a no-op")
+        XCTAssertEqual(history.items.count, 1)
+    }
+
+    func testTwoResetsWithTheSameResetIDButDifferentEventIDsCollapseToOne() {
+        // Belt and suspenders alongside the id-based merge every item
+        // already gets: a live fold and a later `/api/conversation` sync
+        // of the *same* reset should not appear twice even if something
+        // ever assigned them different event ids.
+        var history = ConversationHistory()
+        history.fold(DaemonEvent(seq: 100, source: "web", type: "conversation.reset", payload: ["reset_id": .string("r1")]))
+        let again = history.fold(DaemonEvent(seq: 101, source: "web", type: "conversation.reset", payload: ["reset_id": .string("r1")]))
+        XCTAssertNil(again, "the same reset_id is a no-op even under a new event id")
+        XCTAssertEqual(history.items.map(\.id), [100])
+    }
+
+    func testTheNewestPageMergesAResetWithTheSameIDItsLiveFoldAlreadyMade() throws {
+        var history = ConversationHistory()
+        history.fold(DaemonEvent(seq: 100, ts: Date(timeIntervalSince1970: 100), source: "web", type: "conversation.reset", payload: ["reset_id": .string("r1")]))
+        let serverItem = ConversationItem(id: 100, ts: Date(timeIntervalSince1970: 100), kind: .notice, text: "New conversation", subkind: "reset")
+        history.applyNewest(ConversationPage(items: [serverItem], nextBefore: nil))
+        XCTAssertEqual(history.items.count, 1, "the live-folded item and the server's page item share an id and merge")
+        let item = try XCTUnwrap(history.items.first)
+        XCTAssertTrue(item.isResetNotice)
+    }
 }
 
 final class ConversationTimelineTests: XCTestCase {
@@ -262,5 +322,41 @@ final class ConversationTimelineTests: XCTestCase {
         reducer.apply(.transcript(.outgoing, text: "still talk", final: false))
         reducer.dropSettledSpeech(before: Date(timeIntervalSince1970: 200))
         XCTAssertEqual(reducer.bubbles.map(\.text), ["local notice", "still talk"])
+    }
+
+    func testAResetNoticeRendersAsADividerWithTheSameWordsAsAnyOther() {
+        let items = [ConversationItem(id: 100, ts: Date(timeIntervalSince1970: 1_790_127_700), kind: .notice, text: "New conversation", subkind: "reset")]
+        let rows = ConversationTimeline.rows(history: items, live: [], calendar: calendar, timeFormatter: formatter)
+        let dividers = rows.compactMap { if case let .divider(item, title) = $0 { return (item.isResetNotice, title) } else { return nil } }
+        XCTAssertEqual(dividers.map(\.0), [true])
+        XCTAssertEqual(dividers.map(\.1), ["New conversation · 6:41 PM"])
+    }
+}
+
+final class ConversationResetTests: XCTestCase {
+    func testResetClosesBothOpenSpeakersButAddsNothing() {
+        var reducer = ConversationReducer()
+        reducer.apply(.transcript(.incoming, text: "still talking", final: false))
+        XCTAssertNotNil(reducer.openBubble)
+        let countBefore = reducer.bubbles.count
+        reducer.apply(.reset)
+        XCTAssertNil(reducer.openBubble, "the in-flight turn is closed, not deleted")
+        XCTAssertEqual(reducer.bubbles.count, countBefore, "reset adds no bubble of its own")
+        XCTAssertEqual(reducer.bubbles.last?.text, "still talking")
+        XCTAssertTrue(reducer.bubbles.last?.isFinal ?? false)
+    }
+
+    func testResetWithNothingOpenChangesNothing() {
+        var reducer = ConversationReducer()
+        reducer.apply(.transcript(.incoming, text: "done already", final: true))
+        let before = reducer.bubbles
+        reducer.apply(.reset)
+        XCTAssertEqual(reducer.bubbles, before)
+    }
+
+    func testAvailabilityIsHiddenOnlyByANilResponse() {
+        XCTAssertFalse(ConversationResetAvailability(response: nil).showsAction)
+        let reset = ConversationReset(ok: true, resetID: "r1", at: Date())
+        XCTAssertTrue(ConversationResetAvailability(response: reset).showsAction)
     }
 }

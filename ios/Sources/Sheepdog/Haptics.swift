@@ -38,4 +38,9 @@ enum Haptics {
     static func tap() {
         UISelectionFeedbackGenerator().selectionChanged()
     }
+
+    /// A new conversation started.
+    static func newConversation() {
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    }
 }

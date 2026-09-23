@@ -15,7 +15,8 @@ lives in `SheepdogKit`, and the app target is SwiftUI views plus
 │  (AVAudioEngine,        (/ws)                (/api/hello, /api/state,         │
 │   AVAudioSession)                             /api/login, /events,            │
 │                                               /api/conversation,              │
-│                                               /api/pending/answer)            │
+│                                               /api/pending/answer,            │
+│                                               /api/conversation/reset)        │
 └───────┼─────────────────────┼─────────────────────┼───────────────────────────┘
         │                     │                     │
 ┌───────┼─────────────────────┼─────────────────────┼─── SheepdogKit ───────────┐
@@ -123,6 +124,31 @@ question, if one is waiting. `/api/state`'s `pending_action` is the source
 of truth (refreshed every 5 s and on every `pending.*` event); the event is
 the fast path. Only `answer_prompt` actions with options get a card; the
 POST sends the option's 1-based `index`.
+
+## New conversation
+
+The ⋯ menu's "New conversation" is `POST /api/conversation/reset
+{"via":"app"}`, which forgets only the supervisor's and the voice model's
+*short-term* context — the roster, open approvals, promises and notes, and
+the scrollback itself all stay, so it is a much smaller thing than *Settings
+▸ Clear conversation on this phone* (`clearConversation()`, which drops the
+local copy of the scrollback too). `DaemonClient.resetConversation` returns
+`nil` on a 404, the `voiceProviders()` convention: `conversationResetSupported`
+starts `true` (optimistic) and only a real 404 hides the action, learned per
+daemon (`endpointChanged()` resets it when the daemon itself changes).
+
+There is deliberately no optimistic local divider. The daemon logs the
+reset (and assigns it its event id) before answering the POST, so by the
+time the app acts on either the reply or the `conversation.reset` SSE event
+that follows, `history.fold` or the next `/api/conversation` sync already
+has an item with that id — the same id-based merge every other notice
+(`daemon.start`, `pending.created`, …) already relies on to survive being
+seen twice, live and then from history. The event's `reset_id` rides along
+as a second key `fold` also dedupes by, for the same belt-and-suspenders
+reason `pending.*` events use their pending id rather than trusting event
+ids alone. `ConversationReducer.apply(.reset)` only closes whatever bubble
+was still open (the in-flight turn is stale, not worth continuing) — it adds
+nothing itself, since the divider is the notice item, not a reducer bubble.
 
 Two things about `/events` that cost a day to find, and that any other
 client of this daemon will hit:

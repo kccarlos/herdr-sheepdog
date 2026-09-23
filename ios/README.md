@@ -28,6 +28,10 @@ page at `/voice` does (`docs/ws-contract.md`): PCM16 mono, 16 kHz up,
 |---|---|
 | ![Mute, orb, End](docs/screenshots/16-voicebar-connected-voice-off.png) | ![Connection chip popover](docs/screenshots/17-voicebar-chip-popover.png) |
 
+| New conversation | The divider it leaves |
+|---|---|
+| ![New conversation confirmation](docs/screenshots/26-new-conversation-confirm.png) | ![New conversation divider](docs/screenshots/27-new-conversation-divider.png) |
+
 | Just talk | Muted | Voice and microphone | Voice detection |
 |---|---|---|---|
 | ![Coach mark](docs/screenshots/19-coach-mark.png) | ![Muted](docs/screenshots/21-mic-muted.png) | ![Settings: voice provider and microphone](docs/screenshots/22-settings-voice-microphone.png) | ![Settings: voice detection](docs/screenshots/23-settings-voice-detection.png) |
@@ -128,6 +132,12 @@ non-goal), so keep this to a network you trust — your LAN, or Tailscale.
   "That question was already answered or has gone." if the voice or the Mac
   got there first. The conversation keeps each approval and how it ended.
   VoiceOver reads the buttons as "Approve: Yes, proceed" / "Decline: No, …".
+- **New conversation**, from the ⋯ menu: resets the supervisor's and the
+  voice model's short-term context — the agent roster, open approvals,
+  promises and notes, and the scrollback itself, all stay. A quiet divider
+  ("New conversation · 5:42 PM") marks the point, whether it was started
+  here, from the browser pages, or by voice. Hidden on a daemon that
+  predates the feature.
 - **Nothing missed across drops.** The `/events` stream resumes from the
   last event id (`Last-Event-ID`, and `?since=` as the fallback), across
   reconnects and relaunches; replayed events change nothing twice.

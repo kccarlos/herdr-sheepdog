@@ -8,6 +8,7 @@ struct MainView: View {
     @EnvironmentObject private var model: SessionViewModel
     @State private var selectedAgent: Agent?
     @State private var started = false
+    @State private var confirmNewConversation = false
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
@@ -126,6 +127,22 @@ struct MainView: View {
                 ToolbarItem(placement: .topBarLeading) {
                     ConnectionChipView()
                 }
+                if model.conversationResetSupported {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Menu {
+                            Button {
+                                confirmNewConversation = true
+                            } label: {
+                                Label("New conversation", systemImage: "arrow.counterclockwise")
+                            }
+                            .accessibilityIdentifier("toolbar.newConversation")
+                        } label: {
+                            Image(systemName: "ellipsis.circle")
+                        }
+                        .accessibilityLabel("More")
+                        .accessibilityIdentifier("toolbar.more")
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         model.showSettings = true
@@ -135,6 +152,16 @@ struct MainView: View {
                     .accessibilityLabel("Settings")
                     .accessibilityIdentifier("toolbar.settings")
                 }
+            }
+            .confirmationDialog(
+                "Start a new conversation?",
+                isPresented: $confirmNewConversation,
+                titleVisibility: .visible
+            ) {
+                Button("Start fresh") { model.startNewConversation() }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Sheepdog and the brain forget this conversation; your agents, open questions and 'tell me when…' reminders stay.")
             }
             .sheet(isPresented: $model.showSettings) {
                 SettingsView()

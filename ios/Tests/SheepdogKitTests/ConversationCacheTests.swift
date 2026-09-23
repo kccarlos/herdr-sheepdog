@@ -37,6 +37,19 @@ final class ConversationCacheTests: XCTestCase {
         }
     }
 
+    func testRoundTripKeepsTheResetSubkindAndID() throws {
+        let cache = ConversationCache(directory: directory)
+        let endpoint = DaemonEndpoint(text: "mac.local:7777")!
+        let resetItem = ConversationItem(id: 100, ts: Date(timeIntervalSince1970: 1_790_000_000), kind: .notice, text: "New conversation", subkind: "reset", resetID: "rs-abc123")
+        try cache.save(ConversationSnapshot(endpoint: endpoint, history: ConversationHistory(items: [item(1), resetItem]), lastEventID: 100), for: endpoint)
+
+        let loaded = try XCTUnwrap(cache.load(for: endpoint))
+        let loadedReset = try XCTUnwrap(loaded.items.first { $0.id == 100 })
+        XCTAssertEqual(loadedReset.subkind, "reset")
+        XCTAssertEqual(loadedReset.resetID, "rs-abc123")
+        XCTAssertTrue(loadedReset.isResetNotice)
+    }
+
     func testTheTokenNeverReachesTheFile() throws {
         let cache = ConversationCache(directory: directory)
         let endpoint = DaemonEndpoint(text: "mac.local:7777", token: "tok-DO-NOT-STORE")!

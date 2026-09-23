@@ -91,6 +91,25 @@ final class DaemonModelTests: XCTestCase {
         XCTAssertEqual(state.herdr, "mock")
     }
 
+    func testDecodesConversationStartedAtWhenTheDaemonReportsIt() throws {
+        let json = #"{"agents":[],"voice":{"mode":"off","status":"closed","muted":false,"stalled":false,"client_connected":false},"conversation_started_at":"2026-09-23T01:40:29.425157Z"}"#
+        let state = try DaemonClient.decoder.decode(DaemonState.self, from: Data(json.utf8))
+        XCTAssertNotNil(state.conversationStartedAt)
+    }
+
+    func testAnOlderStateWithoutConversationStartedAtDecodesAsNil() throws {
+        let json = #"{"agents":[],"voice":{"mode":"off","status":"closed","muted":false,"stalled":false,"client_connected":false}}"#
+        let state = try DaemonClient.decoder.decode(DaemonState.self, from: Data(json.utf8))
+        XCTAssertNil(state.conversationStartedAt)
+    }
+
+    func testDecodesTheConversationResetReply() throws {
+        let json = #"{"ok":true,"reset_id":"rs-abc123","at":"2026-09-23T01:40:29.425157Z"}"#
+        let reset = try DaemonClient.decoder.decode(ConversationReset.self, from: Data(json.utf8))
+        XCTAssertTrue(reset.ok)
+        XCTAssertEqual(reset.resetID, "rs-abc123")
+    }
+
     func testAnUnknownAgentStateDoesNotFailTheWholeResponse() throws {
         let json = #"{"agents":[{"pane_id":"a","alias":"a","state":"dreaming"}],"voice":{"mode":"gemini","status":"connected","muted":false,"stalled":false,"client_connected":false}}"#
         let state = try DaemonClient.decoder.decode(DaemonState.self, from: Data(json.utf8))
