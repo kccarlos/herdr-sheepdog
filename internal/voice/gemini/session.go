@@ -70,6 +70,9 @@ type Session struct {
 	stalls       int
 	pushTimeouts int
 	stalledNow   bool
+	// tailGen is bumped by every gate close and every client frame, so a
+	// comfort-noise tail stops when the gate reopens (AudioStreamEnd).
+	tailGen int
 
 	readerExit chan readerResult
 	goAway     chan struct{}
@@ -221,29 +224,62 @@ func (s *Session) SetMuted(muted bool) {
 // instead of waiting for frames that will not come. The next SendAudio
 // reopens the stream. No-op while muted or disconnected.
 //
-// Before the stream end it sends Config.GateTail of comfort noise (a ±8
-// LSB floor, like a real microphone's): found by the audio-e2e harness
-// (2026-09-23), an utterance followed only by the client's 300 ms of
-// digital silence and audioStreamEnd was never transcribed — Live's
-// activity detection did not see the speech end, and the audio was
-// only heard, twice over, once a later stream carried a real noise
-// floor. The tail gives it the pause it listens for.
+// Before the stream end it streams Config.GateTail of comfort noise (a
+// ±8 LSB floor, like a real microphone's) at real-time pace: found by
+// the audio-e2e harness (2026-09-23), an utterance followed only by the
+// client's 300 ms of digital silence and audioStreamEnd was never
+// transcribed — Live's activity detection did not see the speech end,
+// and the audio was only heard, twice over, once a later stream carried
+// a real noise floor. The same tail sent as one burst still left a
+// short "stop" unheard while a tool response was pending: the detector
+// wants the pause in real time. A frame from the client (the gate
+// reopened) cancels the tail and the stream end.
 func (s *Session) AudioStreamEnd() {
 	s.mu.Lock()
 	conn, muted := s.conn, s.muted
+	s.tailGen++
+	gen := s.tailGen
+	live := s.started && s.status != voice.StatusClosed && s.ctx.Err() == nil
 	s.mu.Unlock()
-	if muted || conn == nil {
+	if muted || conn == nil || !live {
 		return
 	}
-	if tail := comfortNoise(s.cfg.GateTail); len(tail) > 0 {
+	tail := comfortNoise(s.cfg.GateTail)
+	if len(tail) == 0 {
+		s.audioStreamEnd(conn)
+		return
+	}
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
 		const chunk = 16000 * 2 / 10 // 100 ms
+		tick := time.NewTicker(100 * time.Millisecond)
+		defer tick.Stop()
 		for i := 0; i < len(tail); i += chunk {
+			if !s.tailCurrent(gen) {
+				return
+			}
 			if err := s.sendAudio(conn, tail[i:min(i+chunk, len(tail))]); err != nil {
 				return
 			}
+			select {
+			case <-s.ctx.Done():
+				return
+			case <-tick.C:
+			}
 		}
-	}
-	s.audioStreamEnd(conn)
+		if s.tailCurrent(gen) {
+			s.audioStreamEnd(conn)
+		}
+	}()
+}
+
+// tailCurrent reports whether the comfort-noise tail gen is still wanted
+// (no client frame, mute or newer gate close since).
+func (s *Session) tailCurrent(gen int) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.tailGen == gen && !s.muted
 }
 
 // comfortNoise returns d of 16 kHz PCM16 low-level noise (±8 LSB).
@@ -306,6 +342,7 @@ func (s *Session) SendAudio(pcm16 []byte) error {
 		s.mu.Unlock()
 		return nil
 	}
+	s.tailGen++ // the gate reopened: no comfort tail, no stream end
 	conn := s.conn
 	if conn == nil {
 		s.bufferLocked(pcm16)

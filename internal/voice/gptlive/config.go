@@ -73,6 +73,10 @@ type Config struct {
 	// VoicedPeak is the peak level above which an output chunk is speech
 	// (default 200).
 	VoicedPeak int
+	// NoiseRun is how long a run of loud microphone frames may hold off
+	// the idle close (the shepherd may be mid-sentence before a
+	// transcript arrives); a longer run is room noise (default 8 s).
+	NoiseRun time.Duration
 	// StartTimeout bounds dial + session.started (default 15 s).
 	StartTimeout time.Duration
 	// CloseTimeout bounds the wait for session.closed (default 5 s).
@@ -122,6 +126,7 @@ func (c Config) withDefaults() Config {
 	def(&c.OpenBackoff, 5*time.Second)
 	def(&c.RateLimitBackoff, 30*time.Second)
 	def(&c.Tick, 40*time.Millisecond)
+	def(&c.NoiseRun, 8*time.Second)
 	if c.OpenRMS <= 0 {
 		c.OpenRMS = 300
 	}

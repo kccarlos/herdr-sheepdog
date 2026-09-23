@@ -72,7 +72,19 @@ func (s *Session) settle(now time.Time) {
 			stop = &call
 		}
 	}
+	if s.unclaimed != "" {
+		// Not claimed (yet): a delegation that follows shortly takes it;
+		// otherwise the model answered on its own and the words must not
+		// be glued to the next utterance.
+		s.settledText, s.settledAt = s.unclaimed, now
+		s.unclaimed = ""
+	}
+	owed := s.turnDoneOwed
+	s.turnDoneOwed = false
 	s.mu.Unlock()
+	if owed {
+		s.emit(voice.EventTurnComplete{})
+	}
 	s.emit(voice.EventTranscript{Dir: voice.DirIn, Final: true})
 	if stop != nil {
 		s.interrupt("stop")
@@ -89,6 +101,13 @@ func (s *Session) speechEnd(now time.Time) {
 	}
 	s.speakingNow = false
 	s.flushReplyLocked()
+	if s.inputOpen {
+		// The shepherd is talking: closing the turn now would close their
+		// input mid-utterance; settle emits it.
+		s.turnDoneOwed = true
+		s.mu.Unlock()
+		return
+	}
 	s.mu.Unlock()
 	s.emit(voice.EventTurnComplete{})
 }
@@ -100,12 +119,21 @@ func (s *Session) speechEnd(now time.Time) {
 func (s *Session) idleCheck(now time.Time) {
 	s.mu.Lock()
 	lc := s.live
-	if lc == nil || len(s.inflight) > 0 || len(s.pushQ) > 0 || s.inputOpen || s.speakingLocked(now) ||
+	// Loud frames right now may be the start of a sentence whose first
+	// transcript has not arrived yet (seen live: the idle close fired
+	// 0.7 s into an utterance and lost it). Only a run of loud frames
+	// long past any sentence counts as room noise and does not hold the
+	// session open.
+	talking := !s.lastLoud.IsZero() && now.Sub(s.lastLoud) < 1500*time.Millisecond && now.Sub(s.loudSince) < s.cfg.NoiseRun
+	if lc == nil || len(s.inflight) > 0 || len(s.pushQ) > 0 || s.inputOpen || talking || s.speakingLocked(now) ||
 		now.Sub(s.lastActivity) < s.cfg.IdleClose {
 		s.mu.Unlock()
 		return
 	}
-	s.armed = false
+	// Disarm only while loud frames keep coming (a noisy room would
+	// reopen the session at once); a closed gate stays armed for the
+	// next utterance.
+	s.armed = s.lastLoud.IsZero() || now.Sub(s.lastLoud) > time.Second
 	s.quietSince = time.Time{}
 	s.mu.Unlock()
 	s.closeLive(lc, "idle")

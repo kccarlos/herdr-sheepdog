@@ -137,12 +137,6 @@ func Run(ctx context.Context, sc Scenario, o Options) (Result, error) {
 	if err != nil {
 		return res, err
 	}
-	for _, st := range sc.Setup {
-		if err := setup(ctx, st, o); err != nil {
-			return res, fmt.Errorf("setup: %w", err)
-		}
-	}
-
 	rec := &recorder{t0: time.Now()}
 	sctx, stopSSE := context.WithCancel(ctx)
 	defer stopSSE()
@@ -168,9 +162,44 @@ func Run(ctx context.Context, sc Scenario, o Options) (Result, error) {
 	if err := send(wsproto.Mute(false)); err != nil {
 		return res, err
 	}
+	// Let whatever the previous scenario left in flight finish (a late
+	// reply would otherwise be scored here): wait until the daemon has
+	// been quiet for 1.5 s (at most 12 s), with the client gate closed.
+	if err := send(wsproto.Silence(true)); err != nil {
+		return res, err
+	}
+	settleEnd := time.Now().Add(12 * time.Second)
+	for time.Now().Before(settleEnd) {
+		rec.mu.Lock()
+		last := rec.lastAudio
+		if rec.lastOut.After(last) {
+			last = rec.lastOut
+		}
+		rec.mu.Unlock()
+		if time.Since(last) >= 1500*time.Millisecond && time.Since(rec.t0) >= 1500*time.Millisecond {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	// The scenario starts now: drop what the settle saw.
+	rec.mu.Lock()
+	rec.t0 = time.Now()
+	rec.timeline, rec.events = nil, nil
+	rec.audio, rec.outAudio, rec.flushes = 0, nil, 0
+	rec.firstAt, rec.lastAudio, rec.lastOut = time.Time{}, time.Time{}, time.Time{}
+	rec.inText.Reset()
+	rec.outText.Reset()
+	rec.noiseTranscripts = nil
+	rec.mu.Unlock()
+	for _, st := range sc.Setup {
+		if err := setup(ctx, st, o); err != nil {
+			return res, fmt.Errorf("setup: %w", err)
+		}
+	}
+	g0 := true
 
 	// The client's capture pipeline: the silence gate in front of /ws.
-	g := &gate{send: send, write: func(pcm []byte) error { return conn.Write(ctx, websocket.MessageBinary, pcm) }}
+	g := &gate{closed: g0, send: send, write: func(pcm []byte) error { return conn.Write(ctx, websocket.MessageBinary, pcm) }}
 	var inWAV []int16
 	var eos time.Time
 	var speechStart time.Time

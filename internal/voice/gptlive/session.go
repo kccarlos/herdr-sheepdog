@@ -59,7 +59,13 @@ type Session struct {
 	// (re)attaching re-arms it.
 	armed      bool
 	quietSince time.Time
-	up         upsampler
+	// lastLoud / loudSince bound the current run of loud microphone
+	// frames: the shepherd may be mid-sentence before any transcript
+	// arrives, so the idle close waits for it (unless the "speech" has
+	// gone on too long to be anything but room noise).
+	lastLoud  time.Time
+	loudSince time.Time
+	up        upsampler
 
 	live     *liveConn // the open, started session; nil in standby
 	opening  bool
@@ -75,6 +81,15 @@ type Session struct {
 	lastInput    time.Time
 	inputOpen    bool
 	unclaimed    string // input text no delegation has claimed yet
+	// settledText is the last finished utterance no delegation claimed,
+	// kept briefly for a delegation that arrives after it settled.
+	settledText string
+	settledAt   time.Time
+	// turnDoneOwed: the model's speech ended while the shepherd was
+	// talking; EventTurnComplete is emitted when the utterance settles
+	// (it closes the supervisor's voice input, which must not split the
+	// shepherd's words).
+	turnDoneOwed bool
 	inText       string // the current input utterance (recap)
 	outText      string // the current reply (recap)
 	recap        []recapEntry
@@ -332,6 +347,10 @@ func (s *Session) SendAudio(pcm16 []byte) error {
 		}
 	} else {
 		s.quietSince = time.Time{}
+		if s.lastLoud.IsZero() || now.Sub(s.lastLoud) > time.Second {
+			s.loudSince = now
+		}
+		s.lastLoud = now
 	}
 	lc := s.live
 	if lc == nil {

@@ -206,6 +206,26 @@ func TestAudioStreamEndSendsComfortNoiseFirst(t *testing.T) {
 	}
 }
 
+// TestGateReopenCancelsComfortTail: a client frame during the tail (the
+// gate reopened: the shepherd kept talking) stops it, and no
+// audioStreamEnd follows.
+func TestGateReopenCancelsComfortTail(t *testing.T) {
+	c := newFakeConn("c1")
+	h := newHarness(t, Config{GateTail: 2 * time.Second}, &fakeDialer{results: []func() (Conn, error){ok(c)}})
+	h.s.AudioStreamEnd()
+	c.waitSent(t, "first tail chunk", func(m sent) bool { return m.kind == "audio" })
+	if err := h.s.SendAudio([]byte{9, 9}); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(2500 * time.Millisecond)
+	if n := c.count("audioEnd"); n != 0 {
+		t.Fatalf("audioStreamEnd sent %d times after the gate reopened", n)
+	}
+	if n := c.count("audio"); n > 4 {
+		t.Errorf("tail kept streaming: %d audio messages", n)
+	}
+}
+
 func TestOutputQueueFlushOnInterrupted(t *testing.T) {
 	c := newFakeConn("c1")
 	h := newHarness(t, Config{}, &fakeDialer{results: []func() (Conn, error){ok(c)}})

@@ -318,7 +318,7 @@ func TestDelegationRelaysUtteranceAndAnswersWithCommentary(t *testing.T) {
 	})
 }
 
-func TestIdleCloseBillsAndDisarms(t *testing.T) {
+func TestIdleCloseBillsAndStaysArmedForTheNextUtterance(t *testing.T) {
 	s, d, l := startSession(t, testConfig())
 	s.ClientAttached(true)
 	_ = s.SendAudio(tone(3000, 640))
@@ -335,17 +335,72 @@ func TestIdleCloseBillsAndDisarms(t *testing.T) {
 	if s.Live() || s.BilledSeconds() != 7 {
 		t.Fatalf("live %v billed %v", s.Live(), s.BilledSeconds())
 	}
-	// Disarmed: the same loud room does not reopen it at once.
-	_ = s.SendAudio(tone(3000, 640))
-	time.Sleep(30 * time.Millisecond)
-	if d.count() != 1 {
-		t.Fatal("reopened right after an idle close")
-	}
-	// The gate closing re-arms it; the next utterance opens a new session
-	// with the recap as history.
-	s.AudioStreamEnd()
+	// The gate had closed (no frames): the next utterance opens a new
+	// session at once, with the recap as history.
 	_ = s.SendAudio(tone(3000, 640))
 	waitFor(t, "reopen", func() bool { return d.count() == 2 && s.Live() })
+}
+
+// TestIdleCloseWaitsForSpeechInProgress: loud frames without a
+// transcript yet (the shepherd's first words) hold the idle close off
+// (seen live: the close fired 0.7 s into an utterance and lost it).
+func TestIdleCloseWaitsForSpeechInProgress(t *testing.T) {
+	cfg := testConfig()
+	cfg.IdleClose = 100 * time.Millisecond
+	cfg.NoiseRun = 10 * time.Second
+	s, _, l := startSession(t, cfg)
+	s.ClientAttached(true)
+	stop := make(chan struct{})
+	defer close(stop)
+	go func() {
+		for {
+			select {
+			case <-stop:
+				return
+			case <-time.After(20 * time.Millisecond):
+				_ = s.SendAudio(tone(3000, 320))
+			}
+		}
+	}()
+	waitFor(t, "open", s.Live)
+	time.Sleep(500 * time.Millisecond)
+	if len(l.find("voice.session_close")) != 0 || !s.Live() {
+		t.Fatal("idle close fired while the shepherd was talking")
+	}
+}
+
+// TestNoisyRoomClosesAndDisarms: loud frames that go on past NoiseRun
+// with nothing transcribed are room noise: the session closes, and the
+// same noise does not reopen it until the gate closes.
+func TestNoisyRoomClosesAndDisarms(t *testing.T) {
+	cfg := testConfig()
+	cfg.IdleClose = 100 * time.Millisecond
+	cfg.NoiseRun = 150 * time.Millisecond
+	s, d, l := startSession(t, cfg)
+	s.ClientAttached(true)
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			select {
+			case <-stop:
+				return
+			case <-time.After(20 * time.Millisecond):
+				_ = s.SendAudio(tone(3000, 320))
+			}
+		}
+	}()
+	waitFor(t, "idle close", func() bool { return len(l.find("voice.session_close")) == 1 })
+	time.Sleep(200 * time.Millisecond)
+	if d.count() != 1 {
+		t.Fatalf("the noise reopened the session (%d dials)", d.count())
+	}
+	close(stop)
+	<-done
+	s.AudioStreamEnd()
+	_ = s.SendAudio(tone(3000, 640))
+	waitFor(t, "reopen after the gate closed", func() bool { return d.count() == 2 })
 }
 
 func TestKeepAliveSendsSilenceWhileGateClosed(t *testing.T) {

@@ -176,6 +176,7 @@ func (s *Session) finalize(lc *liveConn, serverReason string, confirmed bool) {
 	}
 	wasSpeaking := s.speakingNow
 	s.speakingNow = false
+	s.unclaimed, s.settledText, s.turnDoneOwed = "", "", false
 	s.lastVoiced, s.lastOutText = time.Time{}, time.Time{}
 	s.flushReplyLocked()
 	closing := s.closed

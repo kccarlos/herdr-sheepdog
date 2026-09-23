@@ -15,6 +15,10 @@ import (
 // last fragment, and the docs warn it can precede the full transcript).
 const delegationSettle = 400 * time.Millisecond
 
+// settledKeep is how long a settled, unclaimed utterance stays available
+// to a delegation that arrives after it.
+const settledKeep = 4 * time.Second
+
 // onDelegation starts handling a client delegation: once the input
 // transcript settles, the unclaimed utterance becomes the tool call.
 func (s *Session) onDelegation(lc *liveConn, id string, offsetMS int64) {
@@ -56,7 +60,10 @@ func (s *Session) awaitUtterance(ctx context.Context) string {
 		quiet := !s.inputOpen || s.now().Sub(s.lastInput) >= delegationSettle
 		if quiet || !s.now().Before(deadline) {
 			text := strings.TrimSpace(s.unclaimed)
-			s.unclaimed = ""
+			if s.settledText != "" && s.now().Sub(s.settledAt) < settledKeep {
+				text = strings.TrimSpace(s.settledText + " " + text)
+			}
+			s.unclaimed, s.settledText = "", ""
 			s.mu.Unlock()
 			return text
 		}
