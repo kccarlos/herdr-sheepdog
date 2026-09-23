@@ -54,6 +54,10 @@ type Options struct {
 	// like a real microphone's self-noise (0 = digital silence, which
 	// makes the apps' silence gate close between utterances).
 	FloorDBFS float64
+	// RecordAudioTimeline, when set, fills Result.AudioChunks with every
+	// server→client binary frame's arrival offset and size — the raw
+	// input for an offline jitter-buffer replay (docs/audio-e2e-results.md).
+	RecordAudioTimeline bool
 }
 
 // Timed is one recorded item at an offset from the scenario start.
@@ -61,6 +65,17 @@ type Timed struct {
 	AtMS int64  `json:"at_ms"`
 	Kind string `json:"kind"`
 	Text string `json:"text,omitempty"`
+}
+
+// AudioChunk is one binary /ws frame's arrival, as seen by the browser: the
+// offset from the scenario start and its byte length. Captured for every
+// frame (not just burst starts, unlike Timeline's "audio" entries) so the
+// sequence can be replayed offline against the page's jitter-buffer code
+// to count underruns at a given prebuffer (docs/audio-e2e-results.md,
+// the audible-gaps investigation).
+type AudioChunk struct {
+	AtMS  int64 `json:"at_ms"`
+	Bytes int   `json:"bytes"`
 }
 
 // Event is one daemon event seen on /events during the scenario.
@@ -100,6 +115,10 @@ type Result struct {
 	DurMS    int64   `json:"dur_ms"`
 	Timeline []Timed `json:"timeline"`
 	Events   []Event `json:"events"`
+	// AudioChunks is the full per-frame arrival timeline of server→client
+	// binary frames (see AudioChunk); only populated when the caller asks
+	// (Options.RecordAudioTimeline), since it can be large.
+	AudioChunks []AudioChunk `json:"audio_chunks,omitempty"`
 }
 
 // chunk is a rendered segment.
@@ -111,21 +130,24 @@ type chunk struct {
 
 // recorder collects what the daemon sends.
 type recorder struct {
-	mu        sync.Mutex
-	t0        time.Time
-	timeline  []Timed
-	audio     int
-	outAudio  []byte
-	firstAt   time.Time // first reply audio
-	lastAudio time.Time
-	lastOut   time.Time
-	flushes   int
-	events    []Event
-	inText    strings.Builder
-	outText   strings.Builder
+	mu          sync.Mutex
+	t0          time.Time
+	timeline    []Timed
+	audioChunks []AudioChunk // only appended to when recordTimeline is set
+	audio       int
+	outAudio    []byte
+	firstAt     time.Time // first reply audio
+	lastAudio   time.Time
+	lastOut     time.Time
+	flushes     int
+	events      []Event
+	inText      strings.Builder
+	outText     strings.Builder
 	// streamingNoise is true while only noise/silence is streamed.
 	streamingNoise   bool
 	noiseTranscripts []string
+	// recordTimeline mirrors Options.RecordAudioTimeline.
+	recordTimeline bool
 }
 
 func (r *recorder) at(t time.Time) int64 { return t.Sub(r.t0).Milliseconds() }
@@ -137,7 +159,7 @@ func Run(ctx context.Context, sc Scenario, o Options) (Result, error) {
 	if err != nil {
 		return res, err
 	}
-	rec := &recorder{t0: time.Now()}
+	rec := &recorder{t0: time.Now(), recordTimeline: o.RecordAudioTimeline}
 	sctx, stopSSE := context.WithCancel(ctx)
 	defer stopSSE()
 	sseReady := make(chan struct{})
@@ -197,6 +219,7 @@ func Run(ctx context.Context, sc Scenario, o Options) (Result, error) {
 	}
 	rec.timeline, rec.events = nil, kept
 	rec.audio, rec.outAudio, rec.flushes = 0, nil, 0
+	rec.audioChunks = nil
 	rec.firstAt, rec.lastAudio, rec.lastOut = time.Time{}, time.Time{}, time.Time{}
 	rec.inText.Reset()
 	rec.outText.Reset()
@@ -344,6 +367,7 @@ func Run(ctx context.Context, sc Scenario, o Options) (Result, error) {
 	res.NoiseTranscripts = rec.noiseTranscripts
 	res.Timeline = rec.timeline
 	res.Events = rec.events
+	res.AudioChunks = rec.audioChunks
 	if eos.IsZero() {
 		eos = time.Now() // no speech: latencies stay -1 below
 	}
@@ -561,6 +585,9 @@ func readWS(ctx context.Context, conn *websocket.Conn, rec *recorder, done chan 
 		if typ == websocket.MessageBinary {
 			if rec.audio == 0 || now.Sub(rec.lastAudio) > 1500*time.Millisecond {
 				rec.timeline = append(rec.timeline, Timed{AtMS: rec.at(now), Kind: "audio"})
+			}
+			if rec.recordTimeline {
+				rec.audioChunks = append(rec.audioChunks, AudioChunk{AtMS: rec.at(now), Bytes: len(data)})
 			}
 			if rec.firstAt.IsZero() {
 				rec.firstAt = now

@@ -3,7 +3,9 @@ package web
 import (
 	"context"
 	"errors"
+	"math"
 	"net/http"
+	"sort"
 	"sync"
 	"time"
 
@@ -247,6 +249,10 @@ type frame struct {
 	close  bool
 	code   websocket.StatusCode
 	reason string
+	// at is when the frame was enqueued (set by enqueue if zero), used to
+	// measure how long an audio frame waited in the per-client queue
+	// before writeLoop sent it (web.client.stats send_wait_*).
+	at time.Time
 }
 
 func controlFrame(m wsproto.Message) frame {
@@ -285,6 +291,51 @@ type client struct {
 	silenceTransitions int
 	gatedFrames        int
 	peak               int
+	// playback stats reported by the browser's jitter buffer (Player in
+	// audio-util.js), carried on ping messages.
+	underruns int
+	drains    int
+	bufferMs  int
+	// sendWaits is a bounded rolling window of how long recent audio
+	// frames waited in the outbound queue before writeLoop sent them
+	// (ms), for web.client.stats send_wait_p95_ms / send_wait_max_ms.
+	sendWaits []float64
+}
+
+// sendWaitWindow bounds the rolling window of recorded audio send-wait
+// samples (recent behaviour matters more than the whole connection's).
+const sendWaitWindow = 200
+
+// recordSendWait appends one audio frame's queue-wait duration (ms).
+func (c *client) recordSendWait(ms float64) {
+	c.mu.Lock()
+	c.sendWaits = append(c.sendWaits, ms)
+	if len(c.sendWaits) > sendWaitWindow {
+		c.sendWaits = c.sendWaits[len(c.sendWaits)-sendWaitWindow:]
+	}
+	c.mu.Unlock()
+}
+
+// sendWaitStats returns the max and p95 (nearest-rank) of the current
+// rolling window, or (0, 0) if empty. Caller must not hold c.mu.
+func (c *client) sendWaitStats() (maxMS, p95MS float64) {
+	c.mu.Lock()
+	n := len(c.sendWaits)
+	if n == 0 {
+		c.mu.Unlock()
+		return 0, 0
+	}
+	sorted := make([]float64, n)
+	copy(sorted, c.sendWaits)
+	c.mu.Unlock()
+	sort.Float64s(sorted)
+	maxMS = sorted[n-1]
+	idx := int(math.Ceil(0.95*float64(n))) - 1
+	if idx < 0 {
+		idx = 0
+	}
+	p95MS = sorted[idx]
+	return maxMS, p95MS
 }
 
 func newClient(h *hub, conn *websocket.Conn, remote string, maxQueue int) *client {
@@ -294,6 +345,9 @@ func newClient(h *hub, conn *websocket.Conn, remote string, maxQueue int) *clien
 // enqueue adds f to the outbound queue, dropping the oldest audio frame
 // (or the oldest frame of any kind) when the queue is full.
 func (c *client) enqueue(f frame) {
+	if f.at.IsZero() {
+		f.at = c.h.s.deps.Now()
+	}
 	c.mu.Lock()
 	if c.closing && !f.close {
 		c.mu.Unlock()
@@ -376,6 +430,13 @@ func (c *client) writeLoop() {
 			typ := websocket.MessageText
 			if f.binary {
 				typ = websocket.MessageBinary
+				if !f.at.IsZero() {
+					wait := float64(c.h.s.deps.Now().Sub(f.at)) / float64(time.Millisecond)
+					if wait < 0 {
+						wait = 0
+					}
+					c.recordSendWait(wait)
+				}
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), wsWriteTimeout)
 			err := c.conn.Write(ctx, typ, f.data)
@@ -457,6 +518,15 @@ func (c *client) onControl(data []byte) {
 		if m.Peak != nil {
 			c.peak = *m.Peak
 		}
+		if m.Underruns != nil {
+			c.underruns = *m.Underruns
+		}
+		if m.Drains != nil {
+			c.drains = *m.Drains
+		}
+		if m.BufferMs != nil {
+			c.bufferMs = *m.BufferMs
+		}
 		c.mu.Unlock()
 		c.enqueue(controlFrame(wsproto.Pong()))
 	case wsproto.TypeMute:
@@ -524,6 +594,7 @@ func (c *client) statsLoop(every time.Duration) {
 
 // counters snapshots the frame counters for an event payload.
 func (c *client) counters() map[string]any {
+	maxWait, p95Wait := c.sendWaitStats()
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return map[string]any{
@@ -531,9 +602,13 @@ func (c *client) counters() map[string]any {
 		"frames_in": c.framesIn, "bytes_in": c.bytesIn, "frames_out": c.framesOut, "bytes_out": c.bytesOut,
 		"dropped_audio": c.droppedAudio, "muted_drops": c.mutedDrops, "queued": len(c.queue),
 		"silent": c.silent, "silence_transitions": c.silenceTransitions, "gated_frames": c.gatedFrames, "peak": c.peak,
+		"underruns": c.underruns, "drains": c.drains, "buffer_ms": c.bufferMs,
+		"send_wait_max_ms": round1(maxWait), "send_wait_p95_ms": round1(p95Wait),
 		"dur_ms": c.h.s.deps.Now().Sub(c.start).Milliseconds(),
 	}
 }
+
+func round1(v float64) float64 { return math.Round(v*10) / 10 }
 
 // finish logs the disconnect and stops the writer. Safe to call twice.
 func (c *client) finish(reason string) {

@@ -41,7 +41,7 @@ scheduling each frame at "now".
 | `{"type":"silence","on":true\|false}` | The client's silence gate closed (`on:true`, no binary frames follow) or reopened (`on:false`). See *Silence gate*. |
 | `{"type":"cancel"}`                  | The "stop" button. The daemon stops current playback (it will send `flush`) and invokes the `cancel` tool path in the supervisor. Equivalent to the user saying "stop". |
 | `{"type":"text","text":"…"}`         | Simulate an utterance: the text is fed to the voice session as if the user had spoken it (`/debug` and the `/voice` text box use this). It is recorded as a typed shepherd input, which the one rail accepts like a transcript (docs/roles.md "The one rail"). Without a voice session (`--voice=off`) the daemon echoes it as an `in` transcript and answers through its text router with one `out` transcript (a text routed to `cancel` yields `flush` then the `out`), or with an `error` when the text cannot be routed. |
-| `{"type":"ping","gated_frames":N?,"peak":N?}` | Liveness probe; the daemon answers `pong`. Clients should send one every 15–30 s while idle. The optional counters (frames withheld by the silence gate so far; last input peak in Int16 LSB) are copied into the next `web.client.stats` event. |
+| `{"type":"ping","gated_frames":N?,"peak":N?,"underruns":N?,"drains":N?,"buffer_ms":N?}` | Liveness probe; the daemon answers `pong`. Clients should send one every 15–30 s while idle. The optional counters (frames withheld by the silence gate so far; last input peak in Int16 LSB; the playback jitter buffer's underrun and drain counts and its current buffered level in ms — see "Playback jitter buffer" below) are copied into the next `web.client.stats` event, which also carries `send_wait_max_ms`/`send_wait_p95_ms` (how long a recent audio frame waited in the daemon's per-client send queue; near 0 in normal operation). |
 
 Unknown `type` values are answered with an `error` message and otherwise
 ignored; the connection stays open.
@@ -104,6 +104,43 @@ that. The client therefore gates its capture:
 
 `mute` and `silence` are independent: a muted client sends neither frames
 nor `silence` transitions; the gate resumes its own bookkeeping on unmute.
+
+## Playback jitter buffer
+
+Server audio frames arrive in bursts (observed 40–730 ms per frame, and
+on GPT-Live, gaps up to ~1.5 s within one reply — `docs/audio-e2e-results.md`,
+"Audible gaps in GPT-Live playback"). A client that starts playing a
+frame the instant it arrives, or that buffers a fixed small amount,
+underruns audibly mid-sentence. Every client (the web page's
+`audio-util.js` `Player`; the iOS app matches this policy) should run an
+**adaptive jitter buffer**:
+
+- Start with a **150 ms** target: buffer that much audio before playing
+  the first frame of an utterance (or of a resume after running dry).
+- **On a mid-utterance underrun** (the buffer ran dry and more audio
+  arrives soon after — not the natural end of the reply): raise the
+  target by **100 ms**, capped at **500 ms**, and do **not** resume
+  playback on the first new chunk — wait until the buffer refills to the
+  (now higher) target, exactly as the initial buffering does. The raised
+  target persists for the rest of the session (it is not per-utterance),
+  since a session that has seen bad bursts once is likely to see them
+  again.
+- **After an utterance that played all the way through without an
+  underrun**, decay the target by **20 ms**, floored at 150 ms. This
+  keeps latency low once the network/provider is behaving.
+- **Cross-fade every start or resume over ~8 ms** (ramp in from silence)
+  so a fresh utterance or a post-underrun resume never clicks; likewise
+  fade out to silence on a drain or a `flush`.
+- Report `underruns`, `drains` and the current buffered level (`buffer_ms`)
+  on the `ping` message (above) so `web.client.stats` can see them.
+
+This substantially cuts underruns versus a fixed small buffer but does
+not guarantee zero: a reply whose audio arrives slower than real time on
+sustained average (`realtime_ratio` in the daemon's `voice.audio_timing`
+log) will eventually underrun no matter how large the buffer, since the
+buffer can only smooth bursts, not manufacture missing audio. What the
+policy above reliably removes is the *click* — the underrun becomes a
+brief, faded pause instead of a discontinuity.
 
 ## Ordering guarantees
 

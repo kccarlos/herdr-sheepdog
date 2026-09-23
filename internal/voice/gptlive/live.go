@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
+	"github.com/kccarlos/herdr-sheepdog/internal/voice/audiotiming"
 )
 
 // startOpenLocked opens a live session in the background. Caller holds
@@ -179,9 +180,13 @@ func (s *Session) finalize(lc *liveConn, serverReason string, confirmed bool) {
 	s.unclaimed, s.settledText, s.turnDoneOwed = "", "", false
 	s.lastVoiced, s.lastOutText = time.Time{}, time.Time{}
 	s.flushReplyLocked()
+	timing := s.finishAudioTimingLocked()
 	closing := s.closed
 	s.mu.Unlock()
 	s.out.Flush()
+	if timing != nil {
+		s.log.Log(logSource, "voice.audio_timing", "", timing)
+	}
 	s.log.Log(logSource, "voice.session_close", "", map[string]any{
 		"reason": why, "server_reason": serverReason, "session_id": lc.id, "dur_ms": now.Sub(lc.openedAt).Milliseconds(),
 		"billed_s": secs, "confirmed": confirmed, "billed_total_s": total,
@@ -277,6 +282,11 @@ func (s *Session) onOutputAudio(chunk []byte) {
 	now := s.now()
 	voiced := peak(chunk) >= s.cfg.VoicedPeak
 	s.mu.Lock()
+	if s.audioTiming == nil {
+		s.audioTurnSeq++
+		s.audioTiming = audiotiming.New(s.audioTurnSeq, SampleRate)
+	}
+	s.audioTiming.Chunk(now, len(chunk))
 	if voiced {
 		s.lastVoiced = now
 		s.lastActivity = now

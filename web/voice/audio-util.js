@@ -271,10 +271,21 @@ export class RingBuffer {
 /**
  * Gapless player state machine: pulls 24 kHz samples from a RingBuffer,
  * resamples them to the output rate and fills output blocks. It waits for
- * `prebuffer` samples (a jitter buffer) before starting, or `maxWait`
- * output blocks if the utterance is shorter than that, then plays until
- * the ring runs dry. A dry ring closely followed by more audio counts as
- * an underrun; one followed by nothing is simply the end of the utterance.
+ * `target` samples (an adaptive jitter buffer) before starting, or a
+ * bounded number of output blocks if the utterance is shorter than that,
+ * then plays until the ring runs dry. A dry ring closely followed by more
+ * audio counts as an underrun; one followed by nothing is simply the end
+ * of the utterance.
+ *
+ * The jitter buffer target adapts within a session (docs/ws-contract.md,
+ * "Playback jitter buffer"): it starts at `prebuffer` (150 ms), rises by
+ * `adaptStep` (100 ms) on every mid-utterance underrun up to `maxTarget`
+ * (500 ms), and decays by `decayStep` (20 ms) after every utterance that
+ * played all the way through without one, down to `prebuffer` again. A
+ * post-underrun resume waits for the (now higher) target to refill before
+ * playing again — it does not resume on the first new chunk — and every
+ * `_start()` ramps in over `crossFadeLen` samples so a resumption or a
+ * fresh utterance's first samples never click.
  */
 export class Player {
   /**
@@ -282,20 +293,33 @@ export class Player {
    * @param {number} o.inRate ring buffer sample rate (24000)
    * @param {number} o.outRate audio context sample rate
    * @param {number} [o.capacity] ring capacity in samples (default 30 s)
-   * @param {number} [o.prebuffer] samples to wait for before starting (100 ms)
-   * @param {number} [o.maxWaitBlocks] blocks to wait for prebuffer before starting anyway
+   * @param {number} [o.prebuffer] initial/floor jitter buffer target, samples at inRate (150 ms)
+   * @param {number} [o.maxTarget] the jitter buffer target's ceiling, samples at inRate (500 ms)
+   * @param {number} [o.adaptStep] target increase per mid-utterance underrun, samples at inRate (100 ms)
+   * @param {number} [o.decayStep] target decrease per clean utterance, samples at inRate (20 ms)
+   * @param {number} [o.maxWaitBlocks] fixed override for the "start anyway" ceiling (blocks); unset scales with the target
+   * @param {number} [o.crossFadeLen] fade-in length on every start/resume, output samples (8 ms)
    * @param {number} [o.underrunWindow] output samples after a drain within which new data means underrun
    */
   constructor(o) {
     this.inRate = o.inRate;
     this.outRate = o.outRate;
     this.ring = new RingBuffer(o.capacity || o.inRate * 30);
-    // 150 ms of jitter buffer: the model's chunks arrive in bursts with
-    // gaps of up to ~100 ms between them (observed in WP6 live runs).
-    this.prebuffer = o.prebuffer == null ? Math.round(o.inRate * 0.15) : o.prebuffer;
-    // A lone short chunk still starts after 400 ms rather than never.
-    this.maxWaitBlocks = o.maxWaitBlocks == null ? Math.round((o.outRate * 0.4) / 128) : o.maxWaitBlocks;
+    // 150 ms floor: the model's chunks arrive in bursts with gaps of up
+    // to ~100 ms between them in the common case (observed in WP6 live
+    // runs); a session that sees worse bursts adapts upward (below).
+    this.basePrebuffer = o.prebuffer == null ? Math.round(o.inRate * 0.15) : o.prebuffer;
+    this.maxTarget = o.maxTarget == null ? Math.round(o.inRate * 0.5) : o.maxTarget;
+    this.adaptStep = o.adaptStep == null ? Math.round(o.inRate * 0.1) : o.adaptStep;
+    this.decayStep = o.decayStep == null ? Math.round(o.inRate * 0.02) : o.decayStep;
+    this.target = this.basePrebuffer;
+    // A lone short chunk still starts rather than waiting forever: the
+    // ceiling scales with the current target (plus headroom) unless a
+    // fixed override is given (tests; a caller with its own policy).
+    this.fixedMaxWaitBlocks = o.maxWaitBlocks;
+    this.waitCeilingPadMs = 250;
     this.underrunWindow = o.underrunWindow == null ? Math.round(o.outRate * 0.3) : o.underrunWindow;
+    this.crossFadeLen = o.crossFadeLen == null ? Math.round(o.outRate * 0.008) : o.crossFadeLen;
     this.step = o.inRate / o.outRate;
     this.state = 'idle'; // idle | buffering | playing
     this.waited = 0;
@@ -305,7 +329,12 @@ export class Player {
     this.last = 0; // last output sample, for the fade after a flush
     this.fade = 0; // samples of fade-out left
     this.fadeLen = Math.round(o.outRate * 0.002);
+    this.fadeIn = 0; // samples of fade-in left after a start/resume
     this.outSince = 0; // output samples rendered since the last drain
+    // Per-utterance bookkeeping for the adaptive target (see class doc).
+    this.playedThisUtterance = false;
+    this.utteranceHadUnderrun = false;
+    this.flushedThisUtterance = false;
     this.stats = { underruns: 0, drains: 0, dropped: 0, played: 0, flushes: 0 };
   }
 
@@ -317,12 +346,31 @@ export class Player {
     return this.state === 'playing';
   }
 
+  /** Current adaptive jitter buffer target, in ms (for the stats line). */
+  get targetMs() {
+    return Math.round((this.target / this.inRate) * 1000);
+  }
+
   /** @param {Float32Array} samples at inRate */
   push(samples) {
     if (samples.length === 0) return;
     this.stats.dropped += this.ring.write(samples);
     if (this.state === 'idle') {
-      if (this.stats.drains > 0 && this.outSince < this.underrunWindow) this.stats.underruns++;
+      const resumingUnderrun = this.stats.drains > 0 && this.outSince < this.underrunWindow;
+      if (resumingUnderrun) {
+        this.stats.underruns++;
+        this.utteranceHadUnderrun = true;
+        this.target = Math.min(this.maxTarget, this.target + this.adaptStep);
+      } else {
+        // The previous utterance (if any) truly ended, or was flushed:
+        // score it for decay, then reset the per-utterance bookkeeping.
+        if (this.playedThisUtterance && !this.utteranceHadUnderrun && !this.flushedThisUtterance) {
+          this.target = Math.max(this.basePrebuffer, this.target - this.decayStep);
+        }
+        this.playedThisUtterance = false;
+        this.utteranceHadUnderrun = false;
+        this.flushedThisUtterance = false;
+      }
       this.state = 'buffering';
       this.waited = 0;
     }
@@ -332,6 +380,7 @@ export class Player {
   flush() {
     this.ring.clear();
     if (this.state === 'playing') this.fade = this.fadeLen;
+    if (this.state !== 'idle') this.flushedThisUtterance = true;
     this.state = 'idle';
     this.frac = 0;
     this.cur = 0;
@@ -341,12 +390,24 @@ export class Player {
     this.stats.flushes++;
   }
 
-  // Starts playing: seeds the interpolation pair from the ring.
+  // The "start anyway" ceiling in render() calls (~128-sample blocks),
+  // scaling with the current target unless a fixed override was given.
+  _maxWaitBlocks() {
+    if (this.fixedMaxWaitBlocks != null) return this.fixedMaxWaitBlocks;
+    const targetMs = (this.target / this.inRate) * 1000;
+    return Math.round(((targetMs + this.waitCeilingPadMs) / 1000 * this.outRate) / 128);
+  }
+
+  // Starts playing: seeds the interpolation pair from the ring and arms
+  // the fade-in so the seam (a fresh utterance or a post-underrun resume)
+  // does not click.
   _start() {
     this.cur = this.ring.readOne();
     this.next = this.ring.available ? this.ring.readOne() : this.cur;
     this.frac = 0;
     this.state = 'playing';
+    this.fadeIn = this.crossFadeLen;
+    this.playedThisUtterance = true;
   }
 
   /**
@@ -358,7 +419,7 @@ export class Player {
     const n = out.length;
     if (this.state === 'buffering') {
       this.waited++;
-      if (this.ring.available >= this.prebuffer || this.waited >= this.maxWaitBlocks) {
+      if (this.ring.available >= this.target || this.waited >= this._maxWaitBlocks()) {
         if (this.ring.available > 0) this._start();
         else this.state = 'idle';
       }
@@ -371,7 +432,12 @@ export class Player {
     }
     let i = 0;
     for (; i < n; i++) {
-      out[i] = this.cur + (this.next - this.cur) * this.frac;
+      let s = this.cur + (this.next - this.cur) * this.frac;
+      if (this.fadeIn > 0) {
+        s *= 1 - this.fadeIn / this.crossFadeLen;
+        this.fadeIn--;
+      }
+      out[i] = s;
       this.frac += this.step;
       while (this.frac >= 1) {
         this.frac -= 1;

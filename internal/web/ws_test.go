@@ -251,6 +251,50 @@ func TestWSSilenceGate(t *testing.T) {
 	}
 }
 
+// TestWSPlaybackStatsAndSendWait: the client's ping carries the jitter
+// buffer's underruns/drains/buffer_ms into web.client.stats, and an audio
+// chunk sent to the client shows up as a send_wait sample (WP: audible
+// gaps investigation, docs/ws-contract.md "ping").
+func TestWSPlaybackStatsAndSendWait(t *testing.T) {
+	h := newHarness(t, harnessOpts{voice: true, statsInterval: 50 * time.Millisecond})
+	c := dialWS(t, h)
+	c.expect(wsproto.TypeStatus)
+
+	h.session.audio <- []byte{1, 2, 3, 4}
+	if _, _, err := c.read(2 * time.Second); err != nil {
+		t.Fatalf("read audio: %v", err)
+	}
+
+	underruns, drains, bufferMs := 2, 5, 230
+	c.send(wsproto.Message{Type: wsproto.TypePing, Underruns: &underruns, Drains: &drains, BufferMs: &bufferMs})
+	c.expect(wsproto.TypePong)
+
+	var stats map[string]any
+	waitFor(t, 2*time.Second, func() bool {
+		for _, ev := range h.log.Tail(0) {
+			if ev.Type != "web.client.stats" {
+				continue
+			}
+			var p map[string]any
+			_ = json.Unmarshal(ev.Payload, &p)
+			if p["underruns"] == float64(2) {
+				stats = p
+				return true
+			}
+		}
+		return false
+	}, "stats with the ping's playback counters")
+	if stats["underruns"] != float64(2) || stats["drains"] != float64(5) || stats["buffer_ms"] != float64(230) {
+		t.Fatalf("stats = %v", stats)
+	}
+	if _, ok := stats["send_wait_max_ms"]; !ok {
+		t.Errorf("send_wait_max_ms missing: %v", stats)
+	}
+	if _, ok := stats["send_wait_p95_ms"]; !ok {
+		t.Errorf("send_wait_p95_ms missing: %v", stats)
+	}
+}
+
 func TestWSSingleClientReplacement(t *testing.T) {
 	h := newHarness(t, harnessOpts{voice: true})
 	first := dialWS(t, h)

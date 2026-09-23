@@ -48,7 +48,7 @@ const state = {
   framesDropped: 0,
   level: { peak: 0, rms: 0, muted: false, gated: false, gatedFrames: 0 },
   gate: { opts: {}, on: false, transitions: 0 }, // silence gate (docs/ws-contract.md)
-  playback: { speaking: false, state: 'idle', bufferedMs: 0, underruns: 0, drains: 0, dropped: 0, flushes: 0, playedMs: 0 },
+  playback: { speaking: false, state: 'idle', bufferedMs: 0, targetMs: 150, underruns: 0, drains: 0, dropped: 0, flushes: 0, playedMs: 0 },
   lastUnderruns: 0,
   flushSeq: 0,
   pendingFlushes: new Map(), // id → { kind, t0 }
@@ -336,8 +336,16 @@ function startPing() {
       return;
     }
     state.pingSentAt = performance.now();
-    // The ping carries the gate counters so web.client.stats can report them.
-    state.pingOutstanding = send({ type: 'ping', gated_frames: state.level.gatedFrames || 0, peak: Math.round((state.level.peak || 0) * 0x7fff) });
+    // The ping carries the gate counters and the jitter buffer's playback
+    // stats so web.client.stats can report them (docs/ws-contract.md).
+    state.pingOutstanding = send({
+      type: 'ping',
+      gated_frames: state.level.gatedFrames || 0,
+      peak: Math.round((state.level.peak || 0) * 0x7fff),
+      underruns: state.playback.underruns || 0,
+      drains: state.playback.drains || 0,
+      buffer_ms: state.playback.bufferedMs || 0,
+    });
   }, PING_EVERY_MS);
 }
 
@@ -548,7 +556,7 @@ function render() {
   $('st-bytes-in').textContent = fmtBytes(state.bytesIn);
   const p = state.playback;
   $('st-play').textContent = `${p.state}, buffered ${p.bufferedMs} ms, played ${(p.playedMs / 1000).toFixed(1)} s, flushes ${p.flushes}${p.dropped ? `, dropped ${p.dropped}` : ''}`;
-  $('st-underruns').textContent = `${p.underruns} (drains ${p.drains})`;
+  $('st-underruns').textContent = `${p.underruns} (drains ${p.drains}, target ${p.targetMs != null ? p.targetMs : 150} ms)`;
   $('st-stop').textContent = state.lastStopMs == null ? '–' : `click → buffer empty ${state.lastStopMs.toFixed(1)} ms`;
   $('st-flush').textContent = state.lastFlushMs == null ? '–' : `flush → buffer empty ${state.lastFlushMs.toFixed(1)} ms`;
   $('st-reconnects').textContent = String(state.reconnects);

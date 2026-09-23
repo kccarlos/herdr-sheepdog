@@ -55,6 +55,7 @@ class PlaybackProcessor extends AudioWorkletProcessor {
       speaking,
       state: p.state,
       bufferedMs: Math.round((p.buffered / p.inRate) * 1000),
+      targetMs: p.targetMs,
       underruns: p.stats.underruns,
       drains: p.stats.drains,
       dropped: p.stats.dropped,

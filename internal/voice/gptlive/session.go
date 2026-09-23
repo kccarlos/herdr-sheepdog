@@ -11,6 +11,7 @@ import (
 
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
+	"github.com/kccarlos/herdr-sheepdog/internal/voice/audiotiming"
 )
 
 const logSource = "voice"
@@ -101,6 +102,11 @@ type Session struct {
 	billed       float64 // seconds of closed sessions
 	sessions     int
 	outBytes     int64
+	// audioTiming follows the open model turn's output-audio arrivals
+	// (voice.audio_timing, WP: audible gaps investigation); nil between
+	// turns. audioTurnSeq numbers turns across the session's lifetime.
+	audioTiming  *audiotiming.Tracker
+	audioTurnSeq int
 }
 
 // liveConn is one GPT-Live session (one WebSocket).
@@ -459,6 +465,17 @@ func (s *Session) emit(ev voice.Event) {
 	default:
 		s.log.Log(logSource, "voice.event_dropped", "", map[string]any{"event": fmt.Sprintf("%T", ev)})
 	}
+}
+
+// finishAudioTimingLocked closes the in-progress audio-timing tracker (if
+// any) and returns its voice.audio_timing payload. Caller holds s.mu.
+func (s *Session) finishAudioTimingLocked() map[string]any {
+	t := s.audioTiming
+	s.audioTiming = nil
+	if t == nil {
+		return nil
+	}
+	return t.Finish()
 }
 
 // interrupt drops queued model audio and tells the client to flush.

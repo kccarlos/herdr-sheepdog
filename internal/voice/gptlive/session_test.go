@@ -540,6 +540,30 @@ func TestOutputAudioSilenceDroppedAndTurnComplete(t *testing.T) {
 	}
 }
 
+func TestAudioTimingLoggedPerTurn(t *testing.T) {
+	s, d, l := startSession(t, testConfig())
+	s.ClientAttached(true)
+	_ = s.SendAudio(tone(3000, 640))
+	waitFor(t, "open", s.Live)
+	c := d.last()
+	c.server(map[string]any{"type": evOutputAudioDelta, "delta": b64(tone(4000, 960))})
+	time.Sleep(5 * time.Millisecond)
+	c.server(map[string]any{"type": evOutputAudioDelta, "delta": b64(tone(4000, 960))})
+	waitFor(t, "voice.audio_timing logged", func() bool { return len(l.find("voice.audio_timing")) == 1 })
+	p := l.find("voice.audio_timing")[0]
+	if p["chunks"] != 2 {
+		t.Fatalf("chunks = %v, want 2", p["chunks"])
+	}
+	if p["bytes"] != 3840 {
+		t.Fatalf("bytes = %v, want 3840", p["bytes"])
+	}
+	for _, k := range []string{"turn", "audio_ms", "wall_ms", "max_gap_ms", "p95_gap_ms"} {
+		if _, ok := p[k]; !ok {
+			t.Errorf("missing %s in %v", k, p)
+		}
+	}
+}
+
 func TestBareStopWithoutDelegationRunsStop(t *testing.T) {
 	cfg := testConfig()
 	calls := make(chan voice.ToolCall, 4)

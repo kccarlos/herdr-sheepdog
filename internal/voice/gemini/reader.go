@@ -4,6 +4,8 @@ import (
 	"google.golang.org/genai"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
+	"github.com/kccarlos/herdr-sheepdog/internal/voice/audiotiming"
+	"github.com/kccarlos/herdr-sheepdog/internal/voice/wsproto"
 )
 
 // readLoop is the single Receive caller for one connection. It returns
@@ -67,10 +69,16 @@ func (s *Session) handleServerContent(sc *genai.LiveServerContent) {
 	if sc.ModelTurn != nil {
 		for _, p := range sc.ModelTurn.Parts {
 			if p != nil && p.InlineData != nil && len(p.InlineData.Data) > 0 {
+				now := s.now()
 				s.mu.Lock()
 				s.openTurnLocked()
 				s.speaking = true
-				s.noteResponseLocked(s.now())
+				s.noteResponseLocked(now)
+				if s.audioTiming == nil {
+					s.audioTurnSeq++
+					s.audioTiming = audiotiming.New(s.audioTurnSeq, wsproto.ServerSampleRate)
+				}
+				s.audioTiming.Chunk(now, len(p.InlineData.Data))
 				s.mu.Unlock()
 				s.clearStalled()
 				s.out.Push(p.InlineData.Data)
@@ -105,8 +113,10 @@ func (s *Session) handleServerContent(sc *genai.LiveServerContent) {
 		close(s.turnDone)
 		s.turnDone = make(chan struct{})
 		turn := s.noteTurnCompleteLocked()
+		timing := s.finishAudioTimingLocked()
 		s.mu.Unlock()
 		s.logTurn(turn)
+		s.logAudioTiming(timing)
 		s.emit(voice.EventTurnComplete{})
 		s.poke()
 	}
@@ -119,8 +129,10 @@ func (s *Session) handleServerContent(sc *genai.LiveServerContent) {
 func (s *Session) interrupt(by string) {
 	s.mu.Lock()
 	s.speaking = false
+	timing := s.finishAudioTimingLocked()
 	s.mu.Unlock()
 	dropped := s.out.Flush()
 	s.log.Log(logSource, "voice.interrupted", "", map[string]any{"by": by, "dropped_chunks": dropped})
+	s.logAudioTiming(timing)
 	s.emit(voice.EventInterrupted{})
 }
