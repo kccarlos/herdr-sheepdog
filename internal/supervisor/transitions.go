@@ -223,7 +223,7 @@ func (s *Supervisor) announceBlock(ctx context.Context, row state.Agent, screen 
 	}
 	s.recordBlock(row.PaneID, prompt.Phrase(), false)
 	s.mu.Lock()
-	p := s.newAnswerPrompt(row.PaneID, prompt, alias)
+	p := s.newAnswerPrompt(row.PaneID, prompt, alias, row.StateSince)
 	sentence := s.setPending(p)
 	s.mu.Unlock()
 	s.announce(ctx, announcement{row: row, kind: pushQuestion, event: brain.PromiseEventBlocked, sentence: sentence, screen: screen, pending: p.ID})

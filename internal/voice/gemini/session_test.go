@@ -618,7 +618,10 @@ func TestReconnectOnDropResumesAndReplaysAudio(t *testing.T) {
 	c1.serve(handleMsg("handle-A"))
 	c1.serve(handleMsg("handle-B"))
 	time.Sleep(20 * time.Millisecond)
-	c1.fail(errors.New("websocket: close 1011 (internal server error)"))
+	// A network drop (not the 1011 the server itself closes with) still
+	// tries to resume first: isServerInternalError's skip-resume fix only
+	// covers the server's own internal-error close (errors_test.go).
+	c1.fail(errors.New("websocket: close 1006 (abnormal closure)"))
 
 	h.waitEvent("reconnecting", func(ev voice.Event) bool {
 		st, ok := ev.(voice.EventStatus)
@@ -933,6 +936,27 @@ func TestRateLimitHelpers(t *testing.T) {
 	}
 }
 
+func TestIsServerInternalError(t *testing.T) {
+	cases := map[string]bool{
+		"websocket: close 1011 (internal server error)":                                                                true,
+		"websocket: close 1011 (internal server error): Internal error encountered.":                                   true,
+		"failed to receive setup complete: websocket: close 1011 (internal server error): Internal error encountered.": true,
+		"websocket: close 1006 (abnormal closure)":                                                                     false,
+		"websocket: close 1008 (policy violation): RESOURCE_EXHAUSTED":                                                 false,
+		"eof": false,
+		"":    false,
+	}
+	for msg, want := range cases {
+		var err error
+		if msg != "" {
+			err = errors.New(msg)
+		}
+		if got := isServerInternalError(err); got != want {
+			t.Errorf("isServerInternalError(%q) = %v, want %v", msg, got, want)
+		}
+	}
+}
+
 // A push whose turn the model never completes must not hold the next idle
 // push past TurnTimeout (WP7b: pushes were stuck until the next tool call).
 func TestPushIdleReleasedAfterTurnTimeout(t *testing.T) {
@@ -956,16 +980,19 @@ func TestPushIdleReleasedAfterTurnTimeout(t *testing.T) {
 
 // A resumption handle the server keeps rejecting is dropped after
 // ResumeAttempts failures so the session reconnects fresh (WP7b: the
-// daemon retried a dead handle forever, ~30 s per attempt).
+// daemon retried a dead handle forever, ~30 s per attempt). The initial
+// drop is a network one (not the 1011 that skips straight to a fresh
+// connect, TestServerInternalErrorSkipsResume) so a resume is attempted
+// at all; it is the resume itself that keeps failing here.
 func TestDeadResumptionHandleIsDropped(t *testing.T) {
 	c1, c2 := newFakeConn("c1"), newFakeConn("c2")
-	setupErr := errors.New("failed to receive setup complete: websocket: close 1011 (internal server error): Internal error encountered.")
+	setupErr := errors.New("failed to receive setup complete: websocket: close 1008 (policy violation): session expired")
 	d := &fakeDialer{results: []func() (Conn, error){ok(c1), fail(setupErr), ok(c2)}}
 	h := newHarness(t, Config{ReconnectBackoff: 5 * time.Millisecond}, d) // default ResumeAttempts (1)
 
 	c1.serve(handleMsg("handle-A"))
 	time.Sleep(20 * time.Millisecond)
-	c1.fail(errors.New("websocket: close 1011 (internal server error)"))
+	c1.fail(errors.New("websocket: close 1006 (abnormal closure)"))
 
 	ev := h.waitEvent("resumed", func(ev voice.Event) bool { _, ok := ev.(voice.EventResumed); return ok })
 	if r := ev.(voice.EventResumed); !r.ContextLost || r.Handle != "" {
@@ -980,6 +1007,37 @@ func TestDeadResumptionHandleIsDropped(t *testing.T) {
 	}
 	if p := h.log.payloads("voice.connect_error"); len(p) != 1 {
 		t.Errorf("voice.connect_error payloads = %d, want 1", len(p))
+	}
+}
+
+// The server's own 1011 (internal error) drops the resumption handle at
+// once and reconnects fresh, skipping the resume attempt entirely:
+// 2026-09-23 06:31 and 06:33, every resume across a 1011 close itself
+// failed with the same 1011, ~30 s each, forever, before a fresh connect
+// finally went through. A network drop still tries to resume first
+// (TestDeadResumptionHandleIsDropped).
+func TestServerInternalErrorSkipsResume(t *testing.T) {
+	c1, c2 := newFakeConn("c1"), newFakeConn("c2")
+	d := &fakeDialer{results: []func() (Conn, error){ok(c1), ok(c2)}}
+	h := newHarness(t, Config{ReconnectBackoff: 5 * time.Millisecond}, d)
+
+	c1.serve(handleMsg("handle-A"))
+	time.Sleep(20 * time.Millisecond)
+	c1.fail(errors.New("websocket: close 1011 (internal server error): Internal error encountered."))
+
+	ev := h.waitEvent("resumed", func(ev voice.Event) bool { _, ok := ev.(voice.EventResumed); return ok })
+	if r := ev.(voice.EventResumed); !r.ContextLost || r.Handle != "" {
+		t.Fatalf("resumed = %+v, want a fresh session (context lost)", r)
+	}
+	recs := d.records()
+	if len(recs) != 2 || recs[1].handle != "" {
+		t.Fatalf("dials = %+v, want the fresh dial straight away, no resume attempt with handle-A", recs)
+	}
+	if p := h.log.payloads("voice.handle_dropped"); len(p) != 1 || p[0]["reason"] != "server_internal_error" {
+		t.Errorf("voice.handle_dropped payloads = %v, want one with reason server_internal_error", p)
+	}
+	if h.log.has("voice.connect_error") {
+		t.Error("no resume attempt should have run to fail")
 	}
 }
 

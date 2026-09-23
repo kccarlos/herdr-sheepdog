@@ -151,6 +151,109 @@ func TestFastPathBoundaries(t *testing.T) {
 	})
 }
 
+// (3c) The fast path knows the shepherd's polite phrasings, not just a
+// terse "yes": each of these, said whole, answers the one open prompt
+// with no model call.
+func TestFastPathPoliteYesPhrases(t *testing.T) {
+	for _, text := range []string{
+		"yes please", "yes, please", "yeah go ahead", "yes continue", "yes, continue",
+		"go ahead", "approve", "approve it", "please approve", "do it", "ok", "okay", "sure",
+	} {
+		t.Run(text, func(t *testing.T) {
+			m := braintest.NewModel()
+			h := newBrainHarness(t, m)
+			blockedAuth(t, h)
+			p, _ := h.pending()
+			before := len(m.Calls())
+
+			res := h.say(text)
+			if !strings.HasPrefix(res.Spoken, "Told auth yes") {
+				t.Fatalf("result = %+v", res)
+			}
+			want := [2]string{"w5:p1", strings.Join(p.YesKeys, " ")}
+			if got := h.sendKeysRequests(); len(got) != 1 || got[0] != want {
+				t.Errorf("send_keys = %v, want %v", got, want)
+			}
+			if n := len(m.Calls()) - before; n != 0 {
+				t.Errorf("%d model calls, want none on the fast path", n)
+			}
+		})
+	}
+}
+
+// (3d) Likewise for a decline: "no", its polite forms, and a bare
+// "don't" all reach the No option, never the Yes one.
+func TestFastPathPoliteNoPhrases(t *testing.T) {
+	for _, text := range []string{"no", "no thanks", "don't"} {
+		t.Run(text, func(t *testing.T) {
+			m := braintest.NewModel()
+			h := newBrainHarness(t, m)
+			blockedAuth(t, h)
+			p, _ := h.pending()
+
+			res := h.say(text)
+			if !strings.HasPrefix(res.Spoken, "Told auth no") {
+				t.Fatalf("result = %+v", res)
+			}
+			want := [2]string{"w5:p1", strings.Join(p.NoKeys, " ")}
+			if got := h.sendKeysRequests(); len(got) != 1 || got[0] != want {
+				t.Errorf("send_keys = %v, want %v", got, want)
+			}
+		})
+	}
+}
+
+// (3e) Option phrases in numeral, word and ordinal form all pick the
+// same option a plain "option N" would.
+func TestFastPathOptionPhrases(t *testing.T) {
+	cases := map[string]int{"option two": 2, "the second one": 2, "first one": 1}
+	for text, n := range cases {
+		t.Run(text, func(t *testing.T) {
+			m := braintest.NewModel()
+			h := newBrainHarness(t, m)
+			blockedAuth(t, h)
+			p, _ := h.pending()
+			if n > len(p.Options) {
+				t.Fatalf("the fixture has only %d options", len(p.Options))
+			}
+
+			res := h.say(text)
+			if !strings.HasPrefix(res.Spoken, "Told auth ") {
+				t.Fatalf("result = %+v", res)
+			}
+			want := [2]string{"w5:p1", strings.Join(p.Options[n-1].Keys, " ")}
+			if got := h.sendKeysRequests(); len(got) != 1 || got[0] != want {
+				t.Errorf("send_keys = %v, want %v (option %d)", got, want, n)
+			}
+		})
+	}
+}
+
+// (3f) A phrase with extra content is not a bare answer, however it
+// starts: "yes but only the tests" is a hedge, not an approval, and
+// "don't approve it yet" is not the bare "don't" — both go to the
+// brain, which the fast path never claims for them.
+func TestFastPathRejectsPhrasesWithExtraContent(t *testing.T) {
+	for _, text := range []string{"yes but only the tests", "don't approve it yet"} {
+		t.Run(text, func(t *testing.T) {
+			m := braintest.NewModel(braintest.Step{Text: braintest.Reply("Which one?", "")})
+			h := newBrainHarness(t, m)
+			blockedAuth(t, h)
+
+			res := h.say(text)
+			if got := h.sendKeysRequests(); len(got) != 0 {
+				t.Errorf("send_keys = %v, want none (the brain decides)", got)
+			}
+			if h.log.count("supervisor.fast_path") != 0 {
+				t.Error("the fast path claimed a phrase with extra content")
+			}
+			if res.Spoken != "Which one?" {
+				t.Errorf("result = %+v", res)
+			}
+		})
+	}
+}
+
 // (3b) The voice relaying a push back through to_supervisor — verbatim,
 // or differing only in case or trailing punctuation — is never treated
 // as the CEO's words: no fast path, no brain turn (docs/issues-

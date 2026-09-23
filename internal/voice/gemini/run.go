@@ -185,6 +185,15 @@ func (s *Session) run(ctx context.Context) {
 			if len(s.cfg.APIKeys) > 1 {
 				s.rotateKey(readErr.Error())
 			}
+		} else if isServerInternalError(readErr) && s.hasHandle() {
+			// The server itself closed on an internal error (1011): a
+			// resumption handle across one is usually dead too, and paying
+			// for a resume attempt that will just fail with the same 1011
+			// only delays getting the shepherd back a working connection
+			// (evidence 2026-09-23 06:31/06:33). Skip straight to a fresh
+			// connect; other close codes (GoAway, a network drop) still try
+			// to resume first.
+			s.dropHandle("server_internal_error")
 		}
 
 		resumeFailures := 0

@@ -45,6 +45,24 @@ func isRotatable(err error) bool {
 	return isRateLimited(err) || (err != nil && strings.Contains(err.Error(), "bad handshake"))
 }
 
+// isServerInternalError reports whether err looks like the server closed
+// the connection with WebSocket close code 1011 (internal server error):
+// seen live 2026-09-23, every attempt to resume a session across one
+// itself failed with the same 1011, ~30 s each, forever, until the
+// resumption handle was dropped and a fresh connect went through.
+func isServerInternalError(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := strings.ToLower(err.Error())
+	for _, needle := range []string{"close 1011", "internal server error", "internal error encountered"} {
+		if strings.Contains(s, needle) {
+			return true
+		}
+	}
+	return false
+}
+
 var retryDelayRE = regexp.MustCompile(`(?i)(?:retrydelay"?\s*:\s*"?|retry (?:in|after)\s+)(\d+(?:\.\d+)?)\s*s`)
 
 // retryDelay extracts RetryInfo.retryDelay ("30s") or "retry in 12.5s"

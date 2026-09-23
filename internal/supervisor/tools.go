@@ -192,7 +192,7 @@ func (s *Supervisor) reportBlocked(ctx context.Context, row state.Agent) voice.T
 	}
 	s.recordBlock(row.PaneID, prompt.Phrase(), false)
 	s.mu.Lock()
-	spoken := s.setPending(s.newAnswerPrompt(row.PaneID, prompt, alias))
+	spoken := s.setPending(s.newAnswerPrompt(row.PaneID, prompt, alias, row.StateSince))
 	s.mu.Unlock()
 	return voice.ToolResult{Spoken: spoken + " Answer that first.", Clarify: true, Scheduling: voice.UrgencyInterrupt}
 }

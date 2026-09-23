@@ -157,18 +157,43 @@ func (s *Supervisor) utteranceTurn(ctx context.Context, u *inflightUtterance, te
 
 // The bare fast-path words (docs/roles.md "One decision-maker"). *Bare*
 // means the whole utterance, so "don't stop the tests" never matches a
-// stop and "yes please run it" never answers a prompt.
+// stop and "yes please run it" never answers a prompt — only these exact
+// (normalised) phrasings do, including the shepherd's polite ones.
 var (
-	bareStopWords   = map[string]bool{"stop": true, "stop stop": true, "wait": true, "cancel": true, "never mind": true, "nevermind": true, "no no": true, "hold on": true}
-	bareYesWords    = map[string]bool{"yes": true, "yeah": true, "yep": true, "approve": true, "go ahead": true}
-	bareNoWords     = map[string]bool{"no": true, "nope": true}
-	bareOptionWords = map[string]int{"option one": 1, "option two": 2, "option three": 3, "option 1": 1, "option 2": 2, "option 3": 3}
+	bareStopWords = map[string]bool{"stop": true, "stop stop": true, "wait": true, "cancel": true, "never mind": true, "nevermind": true, "no no": true, "hold on": true}
+	bareYesWords  = map[string]bool{
+		"yes": true, "yeah": true, "yep": true, "yup": true, "sure": true, "ok": true, "okay": true,
+		"approve": true, "approve it": true, "please approve": true, "do it": true,
+		"go ahead": true, "yeah go ahead": true, "yes go ahead": true,
+		"yes please": true, "yes continue": true,
+	}
+	bareNoWords = map[string]bool{"no": true, "nope": true, "no thanks": true, "don't": true}
+	// bareOptionWords covers the numeral, word and ordinal forms of a
+	// pick; bareAnswer only gates on membership here, mapAnswer resolves
+	// the actual option (pending.go's extended ordinals).
+	bareOptionWords = map[string]int{
+		"option one": 1, "option two": 2, "option three": 3,
+		"option 1": 1, "option 2": 2, "option 3": 3,
+		"first": 1, "second": 2, "third": 3,
+		"first one": 1, "second one": 2, "third one": 3,
+		"the first": 1, "the second": 2, "the third": 3,
+		"the first one": 1, "the second one": 2, "the third one": 3,
+	}
 )
 
-// bareWord lower-cases the utterance and strips punctuation, so the
-// fast paths compare whole utterances only.
+// bareWord lower-cases the utterance and strips punctuation from each
+// word, so "yes, please" and "yes please" are the same bare word — but
+// the fast paths still only match a whole utterance: an extra word (a
+// comma-free "but", say) makes it a different one.
 func bareWord(text string) string {
-	return strings.Trim(strings.ToLower(strings.Join(strings.Fields(text), " ")), ".!?,;: ")
+	fields := strings.Fields(text)
+	words := make([]string, 0, len(fields))
+	for _, f := range fields {
+		if w := strings.Trim(strings.ToLower(f), ".,!?;:"); w != "" {
+			words = append(words, w)
+		}
+	}
+	return strings.Join(words, " ")
 }
 
 // bareStop reports whether the whole utterance is one of the stop words.
@@ -282,11 +307,12 @@ func bareAnswer(p state.PendingAction, text string) (keys []string, label string
 			return nil, "", false
 		}
 	default:
-		// A label match here is exact, never the fuzzy overlap confirm
-		// uses: "let me know when auth is done" must not answer a
-		// prompt because "know" contains a "No" option's label.
+		// A label match here is exact (both sides normalised the same
+		// way), never the fuzzy overlap confirm uses: "let me know when
+		// auth is done" must not answer a prompt because "know" contains
+		// a "No" option's label.
 		for _, o := range p.Options {
-			if strings.ToLower(strings.Trim(o.Label, ".!?, ")) == word {
+			if bareWord(o.Label) == word {
 				return o.Keys, o.Label, true
 			}
 		}
