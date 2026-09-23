@@ -184,7 +184,18 @@ func Run(ctx context.Context, sc Scenario, o Options) (Result, error) {
 	// The scenario starts now: drop what the settle saw.
 	rec.mu.Lock()
 	rec.t0 = time.Now()
-	rec.timeline, rec.events = nil, nil
+	// Keep the voice session's own open/close from the settle window:
+	// a GPT-Live idle close that lands while the scenario settles is
+	// still this scenario's to observe. Everything else belongs to the
+	// previous one.
+	var kept []Event
+	for _, ev := range rec.events {
+		if strings.HasPrefix(ev.Type, "voice.session_") {
+			ev.AtMS = -1 // seen while settling
+			kept = append(kept, ev)
+		}
+	}
+	rec.timeline, rec.events = nil, kept
 	rec.audio, rec.outAudio, rec.flushes = 0, nil, 0
 	rec.firstAt, rec.lastAudio, rec.lastOut = time.Time{}, time.Time{}, time.Time{}
 	rec.inText.Reset()
@@ -567,6 +578,13 @@ func readWS(ctx context.Context, conn *websocket.Conn, rec *recorder, done chan 
 		}
 		switch m.Type {
 		case wsproto.TypeTranscript:
+			if m.Text == "" && m.Dir == wsproto.DirIn && m.Final != nil && *m.Final {
+				// An utterance ended (GPT-Live's empty final): keep the
+				// next one's words apart.
+				if rec.inText.Len() > 0 {
+					rec.inText.WriteString(" ")
+				}
+			}
 			if m.Text != "" {
 				rec.timeline = append(rec.timeline, Timed{AtMS: rec.at(now), Kind: m.Dir, Text: m.Text})
 				if m.Dir == wsproto.DirIn {

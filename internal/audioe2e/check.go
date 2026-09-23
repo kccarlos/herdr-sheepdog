@@ -169,8 +169,10 @@ func Table(w io.Writer, results []Result) {
 	}
 }
 
+// ms renders a latency; -1 is "never" (a negative value is real: the
+// streaming transcript arrived before the speech ended).
 func ms(v int64) string {
-	if v < 0 {
+	if v == -1 {
 		return "–"
 	}
 	return fmt.Sprint(v)
