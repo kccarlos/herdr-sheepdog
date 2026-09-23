@@ -155,6 +155,30 @@ resume the same CLI session (the harness persists it); the brain keeps
 an investigation ledger `recall` can search. One live investigation per
 agent; stop cancels it.
 
+## New conversation
+
+"New conversation" resets the brain's transcript window (a fresh
+segment; the compaction summary is gone — nothing said before the reset
+is in the next prompt) and the voice model's own session (Gemini: drop
+the resumption handle and reconnect fresh; GPT-Live: close the billed
+session if one is open, no recap, and reopen later on the next speech
+or push). **Kept**, because none of it ever lived in the window or the
+voice session's memory: the agent roster and its ledger, open approval
+prompts, promises and notes (still in the fresh brain's ledger section),
+running investigations, the event log on disk, and the conversation
+history API's older items (a `notice`/`reset` divider is added, not a
+truncation). Two triggers reach the same reset: `POST
+/api/conversation/reset` (`/debug`, `/voice` and the app, each with a
+confirm on the button), and a bare voice phrase ("start over", "new
+conversation", "start from scratch", "reset the conversation", "clear
+the conversation") — a code fast path, like the bare stop word, that
+asks a confirming question rather than acting at once (this is
+destructive to the conversation so far); only the exact confirm phrase
+("yes, start over" / "confirm reset"), from real shepherd input, within
+20 s, carries it out — a bare "yes" keeps its ordinary approval-prompt
+meaning. The fresh voice session then says one short line ("Fresh
+start. What's next?").
+
 ## Hot paths that stay code
 
 Debounce, dedup and TTL timers; the chattiness ceiling; the rail; the
@@ -299,6 +323,14 @@ the shepherd's microphone was muted. The pending question also carries
 its options (`index`, `label`, `keys`, `default`), `question`,
 `summary`, `command` and `agent` on `/api/state` and `pending.created`,
 so a page can answer it by tap.
+
+Also in, from the new-conversation PR: **"New conversation"**
+(`Brain.Reset`, `voice.Switcher.Reset`, `Supervisor.ResetConversation`,
+`internal/supervisor/reset.go`) as described above — `POST
+/api/conversation/reset`, the voice bare-phrase confirm
+(`supervisor.reset_confirm {phase}`), `conversation.reset {via,
+reset_id, at}` on the event log (the `GET /api/conversation` divider and
+the SSE stream) and `GET /api/state`'s `conversation_started_at`.
 
 **Not yet:** `source: worker` (asking the idle worker in its own pane —
 its finish would produce both the announce line and the delivery line

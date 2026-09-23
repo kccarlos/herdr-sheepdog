@@ -193,6 +193,35 @@ func (t *Transcript) Append(m Message) Message {
 	return m
 }
 
+// Reset closes the current file (if any) and starts a fresh, empty
+// transcript at newPath ("" keeps it in memory only): a "New
+// conversation" (Brain.Reset, docs/roles.md). The old file on disk is
+// left as is — it is simply no longer appended to. Safe for concurrent
+// use, though the caller (Brain.Reset) holds the turn lock across it so
+// no turn's messages land on the wrong side of the reset.
+func (t *Transcript) Reset(newPath string) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.f != nil {
+		_ = t.f.Close()
+		t.f = nil
+	}
+	t.msgs = nil
+	t.err = nil
+	if newPath == "" {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(newPath), 0o700); err != nil {
+		return fmt.Errorf("brain: transcript: %w", err)
+	}
+	f, err := os.OpenFile(newPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return fmt.Errorf("brain: transcript: %w", err)
+	}
+	t.f = f
+	return nil
+}
+
 // Messages returns a copy of every message, oldest first.
 func (t *Transcript) Messages() []Message {
 	t.mu.Lock()

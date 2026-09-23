@@ -472,6 +472,30 @@ function stop() {
   render();
 }
 
+// resetConversation is the "New conversation" button: it resets the
+// brain's transcript window and the voice session's memory
+// (docs/roles.md) through POST /api/conversation/reset {via:
+// "voice_page"}; a confirm() guards it since it clears the shown
+// conversation (the agents, promises, notes and pending prompts are
+// unaffected).
+async function resetConversation() {
+  if (!confirm('Start a new conversation? This clears the shepherd/dog conversation so far; the agents, promises, notes and pending prompts are kept.')) return;
+  const btn = $('btn-new-conversation');
+  const result = $('new-conversation-result');
+  btn.disabled = true;
+  result.textContent = '…';
+  try {
+    const r = await fetch('/api/conversation/reset', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ via: 'voice_page' }) });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || `${r.status}`);
+    result.textContent = `reset ${data.reset_id} at ${data.at}`;
+  } catch (err) {
+    result.textContent = `error: ${err.message}`;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 function sendText() {
   const input = $('text-input');
   const text = input.value.trim();
@@ -673,6 +697,7 @@ async function init() {
   $('btn-connect').addEventListener('click', () => (state.userDisconnected ? connect() : disconnect()));
   $('btn-mute').addEventListener('click', () => setMuted(!state.muted));
   $('btn-stop').addEventListener('click', stop);
+  $('btn-new-conversation').addEventListener('click', resetConversation);
   $('btn-text').addEventListener('click', sendText);
   $('text-input').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {

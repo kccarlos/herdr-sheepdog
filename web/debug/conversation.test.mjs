@@ -181,6 +181,19 @@ test('session dividers: connect, resume, handle dropped, recycle, stalled', () =
   assert.equal(items[11].label, 'reconnected, context lost');
 });
 
+test('"New conversation" divider: conversation.reset closes an in-progress message', () => {
+  const items = groupEvents([
+    ev('voice.transcript.in', { text: 'start over', final: false }),
+    ev('conversation.reset', { via: 'voice', reset_id: 'r1' }),
+    ev('voice.transcript.out', { text: 'Fresh start. What is next?', final: true }),
+  ]);
+  assert.deepEqual(kinds(items), ['user', 'divider', 'assistant']);
+  assert.equal(items[0].final, true, 'the reset divider closes the in-progress message');
+  assert.equal(items[1].label, 'new conversation');
+  assert.equal(items[1].detail, 'via voice');
+  assert.equal(items[1].cls, 'reset');
+});
+
 test('typed utterances: voice.text and the text-router path without a voice model', () => {
   const items = groupEvents([
     ev('web.utterance', { text: 'yes', via: 'voice' }), // followed by voice.text: not doubled

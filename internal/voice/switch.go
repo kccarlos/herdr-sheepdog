@@ -341,6 +341,20 @@ func (sw *Switcher) PushTagged(text string, u Urgency, tags map[string]any) erro
 	return s.Push(text, u)
 }
 
+// Reset drops the current session's conversational memory and starts it
+// over fresh, on the same provider ("New conversation",
+// docs/roles.md): for Gemini, the resumption handle is dropped and the
+// session reconnects with none; for GPT-Live, an open billed session is
+// closed (no recap) and reopens later on the next speech or push. A
+// no-op before Start, after Close, or when the current provider's
+// session does not implement it.
+func (sw *Switcher) Reset(reason string) error {
+	if s, ok := sw.cur().(interface{ Reset(string) error }); ok {
+		return s.Reset(reason)
+	}
+	return nil
+}
+
 // Speaking implements Session.
 func (sw *Switcher) Speaking() bool {
 	if s := sw.cur(); s != nil {

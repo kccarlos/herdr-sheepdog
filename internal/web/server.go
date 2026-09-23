@@ -40,6 +40,11 @@ type Supervisor interface {
 	SetSettings(supervisor.Settings) error
 	ShepherdInput(kind supervisor.InputKind, text string)
 	AnswerTap(ctx context.Context, id string, option int) (voice.ToolResult, error)
+	// ConversationStartedAt and ResetConversation back GET /api/state's
+	// conversation_started_at and POST /api/conversation/reset ("New
+	// conversation", docs/roles.md).
+	ConversationStartedAt() time.Time
+	ResetConversation(ctx context.Context, via string) (id string, at time.Time, err error)
 }
 
 // EventInjector is the Watcher's second input channel (plugin shim).
@@ -211,6 +216,7 @@ func (s *Server) routes() error {
 	s.mux.HandleFunc("GET /api/agents", s.authFunc(s.handleAgents, false))
 	s.mux.HandleFunc("GET /api/events", s.authFunc(s.handleEventsTail, false))
 	s.mux.HandleFunc("GET /api/conversation", s.authFunc(s.handleConversation, false))
+	s.mux.HandleFunc("POST /api/conversation/reset", s.authFunc(s.handleConversationReset, false))
 	s.mux.HandleFunc("GET /api/voice/system_prompt", s.authFunc(s.handleSystemPrompt, false))
 	s.mux.HandleFunc("GET /api/voice/providers", s.authFunc(s.handleVoiceProviders, false))
 	s.mux.HandleFunc("PUT /api/voice/provider", s.authFunc(s.handleSetVoiceProvider, false))

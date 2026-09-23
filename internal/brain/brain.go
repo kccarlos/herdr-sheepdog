@@ -165,12 +165,17 @@ type Brain struct {
 	// curProvider / curModel are the provider and model of the next turn
 	// (Provider, Model / SetModel).
 	curProvider, curModel string
-	turns                 int
-	toolSeq               int
-	inBuf                 []string // voice transcript fragments not yet final
-	outBuf                []string
-	promptLogged          bool
-	userVars              map[string]string // USER.md's {chattiness}/{tz}; SetUserVars
+	// curRunID names the transcript segment currently open: cfg.RunID
+	// until Reset opens a fresh one (TranscriptPath, brain.reset).
+	curRunID string
+	// resetSeq counts conversation resets, for the fresh segment's name.
+	resetSeq     int
+	turns        int
+	toolSeq      int
+	inBuf        []string // voice transcript fragments not yet final
+	outBuf       []string
+	promptLogged bool
+	userVars     map[string]string // USER.md's {chattiness}/{tz}; SetUserVars
 	// lastCompaction is the most recent successful compaction (zero
 	// value when none), for the Supervisor tab.
 	lastCompaction CompactionInfo
@@ -199,7 +204,7 @@ func New(cfg Config, model Model, log logging.Logger) (*Brain, error) {
 		log = logging.NopLogger{}
 	}
 	cfg = cfg.withDefaults()
-	b := &Brain{cfg: cfg, log: log, models: map[string]Model{cfg.Provider: model}, curProvider: cfg.Provider, curModel: cfg.Model, tools: toolDeclarations(false), readTools: toolDeclarations(true)}
+	b := &Brain{cfg: cfg, log: log, models: map[string]Model{cfg.Provider: model}, curProvider: cfg.Provider, curModel: cfg.Model, curRunID: cfg.RunID, tools: toolDeclarations(false), readTools: toolDeclarations(true)}
 	b.ctx, b.stop = context.WithCancel(context.Background())
 	path := ""
 	if cfg.DataDir != "" {
@@ -413,12 +418,16 @@ func (b *Brain) LastCompaction() (CompactionInfo, bool) {
 	return b.lastCompaction, !b.lastCompaction.At.IsZero()
 }
 
-// TranscriptPath returns the transcript file, or "" when in memory.
+// TranscriptPath returns the current transcript segment's file, or ""
+// when in memory: cfg.RunID's until Reset opens a fresh one.
 func (b *Brain) TranscriptPath() string {
 	if b.cfg.DataDir == "" {
 		return ""
 	}
-	return filepath.Join(b.cfg.DataDir, TranscriptDir, b.cfg.RunID+".jsonl")
+	b.mu.Lock()
+	id := b.curRunID
+	b.mu.Unlock()
+	return filepath.Join(b.cfg.DataDir, TranscriptDir, id+".jsonl")
 }
 
 // Close ends after-turn work, waits for it and closes the transcript.
@@ -572,6 +581,48 @@ func (b *Brain) Seed(msgs []Message) {
 	for _, m := range msgs {
 		b.ingest(m, 0)
 	}
+}
+
+// Reset is the brain's half of "New conversation" (docs/roles.md): the
+// context window is emptied — a fresh transcript segment starts (the
+// on-disk file so far is left alone, just no longer appended to) and the
+// compaction summary is gone — so the next turn's prompt carries none of
+// what was said before. The roster, the ledger (promises, notes,
+// investigations) and the pending prompt are not in the window at all
+// (sections() renders them fresh from the Host every turn), so they are
+// unaffected. It waits for any turn in flight, and that turn's
+// after-turn pruning/compaction, to finish first (the turn lock), so
+// nothing from the old conversation lands in the new segment; ctx
+// bounds that wait. via is logged and carried nowhere else. The
+// returned id also names the new transcript segment (TranscriptPath).
+func (b *Brain) Reset(ctx context.Context, via string) (string, error) {
+	if _, err := b.lock.acquire(ctx, true, ""); err != nil {
+		return "", fmt.Errorf("brain: reset: waiting for the turn lock: %w", err)
+	}
+	defer b.lock.release()
+
+	b.mu.Lock()
+	b.resetSeq++
+	n := b.resetSeq
+	b.mu.Unlock()
+	id := fmt.Sprintf("%s-reset%d", b.cfg.RunID, n)
+
+	path := ""
+	if b.cfg.DataDir != "" {
+		path = filepath.Join(b.cfg.DataDir, TranscriptDir, id+".jsonl")
+	}
+	if err := b.transcript.Reset(path); err != nil {
+		return "", err
+	}
+	if r, ok := b.engine.(Resettable); ok {
+		r.Reset()
+	}
+	b.mu.Lock()
+	b.curRunID = id
+	b.lastCompaction = CompactionInfo{}
+	b.mu.Unlock()
+	b.log.Log(logSource, "brain.reset", "", map[string]any{"via": via, "reset_id": id})
+	return id, nil
 }
 
 // summarize is the compaction's model call: one plain text-in/text-out

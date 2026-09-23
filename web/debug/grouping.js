@@ -46,6 +46,11 @@ export const DIVIDERS = {
   'voice.disconnected': (p) => ({ label: 'disconnected', detail: p.error || '', cls: 'lost' }),
   'voice.closed': (p) => ({ label: 'session closed', detail: p.reason || '', cls: 'lost' }),
   'voice.goaway': (p) => ({ label: 'GoAway', detail: `${fmtMs(p.time_left_ms)} left`, cls: 'recycle' }),
+  // "New conversation" (docs/roles.md): the brain's transcript window
+  // and the voice session both started fresh; conversation.reset is the
+  // event both the SSE-fed live views and GET /api/conversation key off
+  // (internal/web/conversation.go renders the same divider server-side).
+  'conversation.reset': (p) => ({ label: 'new conversation', detail: p.via ? `via ${p.via}` : '', cls: 'reset' }),
 };
 
 /** Daemon lifecycle, shown as dividers by the swimlane only. */

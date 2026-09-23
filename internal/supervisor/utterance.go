@@ -60,6 +60,13 @@ func (s *Supervisor) ToSupervisor(ctx context.Context, text string) (voice.ToolR
 	if bareStop(text) {
 		return s.Stop(ctx, StopTriggerBareWord)
 	}
+	// The "New conversation" bare-phrase trigger and its confirm
+	// (docs/roles.md "Triggers" (b)): a fast path, like the stop word
+	// above — no model, and only this claimed shepherd input can ask or
+	// confirm it.
+	if res, ok := s.resetConfirmFastPath(ctx, text); ok {
+		return res, nil
+	}
 	turnCtx, u := s.beginUtterance(ctx, text)
 	defer s.endUtterance(u)
 	if res, ok := s.fastAnswer(turnCtx, in); ok {

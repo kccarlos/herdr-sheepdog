@@ -66,6 +66,15 @@ type WindowReporter interface {
 	Window() []WindowEntry
 }
 
+// Resettable is the optional part of a ContextEngine that empties the
+// window for a "New conversation" (docs/roles.md, Brain.Reset): the
+// default engine implements it. An engine that does not (a future
+// memory-backed one, plan P6) is simply left as is — Brain.Reset always
+// starts a fresh transcript segment regardless.
+type Resettable interface {
+	Reset()
+}
+
 // Summarizer turns a rendering of old messages into a summary: the
 // default engine's one model call per compaction.
 type Summarizer func(ctx context.Context, text string) (string, error)
@@ -131,6 +140,14 @@ func (e *DefaultEngine) Window() []WindowEntry {
 		out = append(out, w)
 	}
 	return out
+}
+
+// Reset implements Resettable: the window is emptied (the compaction
+// summary included), so the next Assemble starts from nothing.
+func (e *DefaultEngine) Reset() {
+	e.mu.Lock()
+	e.window = nil
+	e.mu.Unlock()
 }
 
 // Tokens implements ContextEngine.

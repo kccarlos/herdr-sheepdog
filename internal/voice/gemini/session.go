@@ -454,6 +454,27 @@ func (s *Session) PushTagged(text string, u voice.Urgency, tags map[string]any) 
 	return nil
 }
 
+// Reset implements the optional voice.Session Reset: it drops the
+// resumption handle and reconnects, so the fresh connection starts with
+// no memory of the conversation so far ("New conversation",
+// docs/roles.md). The supervisor re-learns the roster on the resulting
+// EventResumed{ContextLost:true} the same way it does after any other
+// context-losing reconnect. No-op before Start or after Close.
+func (s *Session) Reset(reason string) error {
+	s.mu.Lock()
+	live := s.started && s.status != voice.StatusClosed
+	s.mu.Unlock()
+	if !live {
+		return nil
+	}
+	s.dropHandle(reason)
+	select {
+	case s.dropReq <- struct{}{}:
+	default:
+	}
+	return nil
+}
+
 // DropConnection forcibly closes the current connection without ending
 // the session, to exercise the resumption path (voice-test --drop-after).
 func (s *Session) DropConnection() {

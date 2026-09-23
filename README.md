@@ -150,6 +150,11 @@ prompts; no network call), and
 `sheepdogDebug.loadTranscript('/testdata/brain/sample-run.jsonl')` in
 the console loads a sample run.
 
+Both `/debug` and `/voice` have a **New conversation** button (confirm
+first): it resets the brain's transcript and the voice model's own
+memory while keeping the roster, promises, notes and pending prompts —
+say "start over" (then "yes, start over") works the same way by voice.
+
 ## The supervisor brain
 
 Behind `ask` and `propose` sits the brain (the dog's thinking half) of [`docs/roles.md`](docs/roles.md):

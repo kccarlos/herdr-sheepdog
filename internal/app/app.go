@@ -957,6 +957,20 @@ func (l *lazyPusher) PushTagged(text string, u voice.Urgency, tags map[string]an
 	return p.Push(text, u)
 }
 
+// Reset forwards to the voice session's Reset ("New conversation",
+// supervisor.ResetConversation) once one is attached (the voice.Switcher
+// implements it); a no-op before then or with --voice=off, where there
+// is nothing for a reset to touch.
+func (l *lazyPusher) Reset(reason string) error {
+	l.mu.Lock()
+	p := l.p
+	l.mu.Unlock()
+	if r, ok := p.(interface{ Reset(string) error }); ok {
+		return r.Reset(reason)
+	}
+	return nil
+}
+
 // lazyQuerier lets the supervisor be built (with a non-nil Querier, so
 // ask()'s deep path is enabled) before CLI detection has run: detection
 // happens in Run, after daemon.start is logged, so cli.detected/cli.run

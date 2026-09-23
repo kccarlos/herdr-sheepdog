@@ -63,12 +63,28 @@ func (l *recLog) ofType(typ string) []logging.Line {
 
 func (l *recLog) count(typ string) int { return len(l.ofType(typ)) }
 
-// fakePusher records pushes.
+// fakePusher records pushes and implements voiceResetter (reset.go) so
+// tests can see a "New conversation" reach the voice side.
 type fakePusher struct {
 	mu     sync.Mutex
 	pushes []voice.EventPush
 	tags   []map[string]any
 	err    error
+	resets []string
+}
+
+// Reset implements voiceResetter.
+func (p *fakePusher) Reset(reason string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.resets = append(p.resets, reason)
+	return nil
+}
+
+func (p *fakePusher) allResets() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]string(nil), p.resets...)
 }
 
 func (p *fakePusher) Push(text string, u voice.Urgency) error {

@@ -38,7 +38,11 @@ type ConversationItem struct {
 	ID   int64     `json:"id"`
 	TS   time.Time `json:"ts"`
 	Kind string    `json:"kind"`
-	Text string    `json:"text"`
+	// Subkind narrows a notice: "reset" for a New-conversation divider
+	// (conversation.reset), "" for the others (daemon start, voice
+	// reconnects/closes).
+	Subkind string `json:"subkind,omitempty"`
+	Text    string `json:"text"`
 	// Via is how the shepherd spoke (voice | typed) or how an approval
 	// was answered (tap | fast_path | brain | confirm).
 	Via     string `json:"via,omitempty"`
@@ -166,7 +170,7 @@ func pageItems(items []ConversationItem, before int64, limit int, moreDays bool)
 
 // conversationTypes are the event types the builder reads.
 var conversationTypes = map[string]bool{
-	"daemon.start": true, "web.utterance": true,
+	"daemon.start": true, "web.utterance": true, "conversation.reset": true,
 	"pending.created": true, "pending.confirmed": true, "pending.expired": true, "pending.cancelled": true, "pending.replaced": true,
 }
 
@@ -238,6 +242,9 @@ func (b *convoBuilder) add(ev eventlog.Event) {
 	case "daemon.start":
 		b.closeAll()
 		b.push(ev, "notice", "Sheepdog started.")
+	case "conversation.reset":
+		b.closeAll()
+		b.push(ev, "notice", "New conversation").Subkind = "reset"
 	case "voice.resume":
 		b.closeAll()
 		if p.Resumed {
@@ -344,3 +351,41 @@ func (b *convoBuilder) push(ev eventlog.Event, kind, text string) *ConversationI
 }
 
 func (b *convoBuilder) closeAll() { b.user, b.dog = nil, nil }
+
+// conversationResetRequest is the body of POST /api/conversation/reset.
+type conversationResetRequest struct {
+	Via string `json:"via"`
+}
+
+// conversationResetVias are the accepted "via" values.
+var conversationResetVias = map[string]bool{"app": true, "debug": true, "voice_page": true}
+
+// handleConversationReset resets the brain's transcript window and the
+// voice session's memory ("New conversation", docs/roles.md): body
+// {"via":"app"|"debug"|"voice_page"} → {"ok":true,"reset_id":"…",
+// "at":"…"}. Logs conversation.reset (supervisor.ResetConversation);
+// GET /api/conversation shows a "New conversation" divider at this
+// point and the SSE stream carries the event live.
+func (s *Server) handleConversationReset(w http.ResponseWriter, r *http.Request) {
+	if s.deps.Supervisor == nil {
+		writeError(w, http.StatusServiceUnavailable, "no supervisor")
+		return
+	}
+	var req conversationResetRequest
+	if err := readJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "bad body: "+err.Error())
+		return
+	}
+	if !conversationResetVias[req.Via] {
+		writeError(w, http.StatusBadRequest, `via must be "app", "debug" or "voice_page"`)
+		return
+	}
+	ctx, cancel := s.toolCtx()
+	defer cancel()
+	id, at, err := s.deps.Supervisor.ResetConversation(ctx, req.Via)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "reset_id": id, "at": at.UTC().Format(time.RFC3339)})
+}
