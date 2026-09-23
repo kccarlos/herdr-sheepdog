@@ -63,6 +63,11 @@ type Deps struct {
 	Router *inject.Router
 	// Voice is the live voice session; nil means --voice=off.
 	Voice voice.Session
+	// VoiceSwitch backs GET /api/voice/providers and PUT
+	// /api/voice/provider (the runtime voice provider switch, persisted
+	// in Store's session.voice_provider); nil (--voice=off) answers the
+	// GET with provider "off" and the PUT with 503.
+	VoiceSwitch VoiceSwitcher
 	// Watcher receives plugin-shim events; nil means --herdr=mock.
 	Watcher EventInjector
 	// Brain backs GET /api/brain/{transcript,context,system_prompt,models}
@@ -207,6 +212,8 @@ func (s *Server) routes() error {
 	s.mux.HandleFunc("GET /api/events", s.authFunc(s.handleEventsTail, false))
 	s.mux.HandleFunc("GET /api/conversation", s.authFunc(s.handleConversation, false))
 	s.mux.HandleFunc("GET /api/voice/system_prompt", s.authFunc(s.handleSystemPrompt, false))
+	s.mux.HandleFunc("GET /api/voice/providers", s.authFunc(s.handleVoiceProviders, false))
+	s.mux.HandleFunc("PUT /api/voice/provider", s.authFunc(s.handleSetVoiceProvider, false))
 	s.mux.HandleFunc("GET /api/settings", s.authFunc(s.handleGetSettings, false))
 	s.mux.HandleFunc("PUT /api/settings", s.authFunc(s.handlePutSettings, false))
 	s.mux.HandleFunc("POST /api/pending/cancel", s.authFunc(s.handleCancel, false))

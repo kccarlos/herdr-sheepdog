@@ -159,7 +159,7 @@ func testConfig() Config {
 		APIKey: "sk-test", Tick: 5 * time.Millisecond, IdleClose: 300 * time.Millisecond,
 		SettleWait: 60 * time.Millisecond, SettleMax: 300 * time.Millisecond, SpeechHold: 60 * time.Millisecond,
 		PauseHold: 80 * time.Millisecond, PushGap: time.Millisecond, CloseTimeout: 500 * time.Millisecond,
-		OpenBackoff: 50 * time.Millisecond,
+		OpenBackoff:  50 * time.Millisecond,
 		Instructions: func() (string, error) { return "be brief", nil },
 	}
 }
@@ -443,7 +443,7 @@ func TestOutputAudioSilenceDroppedAndTurnComplete(t *testing.T) {
 	if err := s.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 	var mu sync.Mutex
 	got := 0
 	go func() {

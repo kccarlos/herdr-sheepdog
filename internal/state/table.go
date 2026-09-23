@@ -233,6 +233,10 @@ type Session struct {
 	// / brain.model".
 	BrainProvider string `json:"brain_provider,omitempty"`
 	BrainModel    string `json:"brain_model,omitempty"`
+	// VoiceProvider is the voice provider chosen at runtime (PUT
+	// /api/voice/provider, the /debug picker); empty means "use the
+	// configured voice.provider".
+	VoiceProvider string `json:"voice_provider,omitempty"`
 	// Promises are the session's promises, oldest first, every status.
 	Promises []Promise `json:"promises,omitempty"`
 	// Investigations are the background jobs, newest last, capped at

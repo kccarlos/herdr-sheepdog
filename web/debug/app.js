@@ -8,6 +8,7 @@ import { SwimlaneView } from './swimlane-view.js';
 import { SupervisorView } from './supervisor-view.js';
 import { LANES } from './swimlane.js';
 import { offState, parseTranscriptJSONL } from './supervisor.js';
+import { voiceOptions, voiceHint, billedText } from './voicepicker.js';
 
 const $ = (id) => document.getElementById(id);
 const BACKFILL = 2000;
@@ -131,6 +132,9 @@ function onEvent(ev, encoded) {
   if (/^(herdr\.transition|pending\.|supervisor\.|daemon\.|voice\.connect|voice\.closed|web\.inject|brain\.model_changed)/.test(ev.type)) {
     scheduleStateRefresh();
   }
+  if (ev.type === 'voice.provider_changed') fetchVoiceProviders();
+  if (ev.type === 'web.client.stats') voiceState.billed = billedText(ev.payload);
+  if (/^voice\.(session_open|session_close|provider_changed)$/.test(ev.type) || ev.type === 'web.client.stats') renderVoiceControl();
 }
 
 function setSSE(status, text) {
@@ -478,6 +482,70 @@ function setupModelControl() {
   fetchBrainModels(false);
 }
 
+// ---- the voice-provider picker (GET /api/voice/providers, PUT
+// /api/voice/provider): unavailable providers disabled with the reason,
+// the per-minute one (GPT-Live) marked, and its running billed seconds
+// from web.client.stats. Hidden with --voice=off.
+const voiceState = { data: null, billed: '' };
+
+function renderVoiceControl() {
+  const box = $('voice-control');
+  const data = voiceState.data;
+  const off = !data || data.provider === 'off';
+  box.classList.toggle('hidden', off);
+  if (off) return;
+  const sel = $('voice-provider');
+  if (document.activeElement !== sel) {
+    sel.replaceChildren();
+    for (const o of voiceOptions(data)) {
+      const el = document.createElement('option');
+      el.value = o.value;
+      el.textContent = o.text;
+      el.disabled = o.disabled;
+      el.title = o.title;
+      sel.appendChild(el);
+    }
+    sel.value = data.provider;
+  }
+  const hint = voiceHint(data);
+  $('voice-note').textContent = voiceState.billed ? `${hint} · ${voiceState.billed}` : hint;
+}
+
+async function fetchVoiceProviders() {
+  try {
+    const { status, data } = await getJSON('/api/voice/providers');
+    if (status === 200) voiceState.data = data;
+  } catch (err) {
+    console.error('voice providers', err);
+  }
+  renderVoiceControl();
+}
+
+function setupVoiceControl() {
+  const sel = $('voice-provider');
+  const box = $('voice-control');
+  sel.addEventListener('change', async () => {
+    const provider = sel.value;
+    box.classList.add('saving');
+    try {
+      const r = await fetch('/api/voice/provider', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider }) });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || `${r.status}`);
+      sel.blur();
+      voiceState.data = data;
+      renderVoiceControl();
+    } catch (err) {
+      console.error('voice provider', err);
+      sel.blur();
+      $('voice-note').textContent = `error: ${err.message}`;
+      fetchVoiceProviders();
+    } finally {
+      box.classList.remove('saving');
+    }
+  });
+  fetchVoiceProviders();
+}
+
 async function refreshState() {
   try {
     const r = await fetch('/api/state', { cache: 'no-store' });
@@ -488,6 +556,7 @@ async function refreshState() {
     renderVoice(st.voice || {}, st);
     renderSettings(st.settings);
     renderBrainModel(st.brain);
+    if (st.voice_provider !== voiceState.data?.provider) fetchVoiceProviders();
     $('state-updated').textContent = `updated ${new Date().toLocaleTimeString()}`;
   } catch (err) {
     $('state-updated').textContent = `error: ${err}`;
@@ -904,6 +973,7 @@ async function boot() {
   setupEventControls();
   setupSettings();
   setupModelControl();
+  setupVoiceControl();
   setupInject();
   setupConversation();
   setupSupervisor();

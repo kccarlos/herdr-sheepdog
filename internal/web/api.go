@@ -29,6 +29,10 @@ type StateResponse struct {
 	Herdr   string     `json:"herdr"`
 	Version string     `json:"version"`
 	Now     time.Time  `json:"now"`
+	// VoiceProvider and VoiceModel are the voice model behind /ws
+	// ("off" and "" with --voice=off).
+	VoiceProvider string `json:"voice_provider"`
+	VoiceModel    string `json:"voice_model"`
 }
 
 // SettingsResponse is the body of GET/PUT /api/settings (and the
@@ -100,6 +104,8 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 		Herdr:         s.deps.HerdrMode,
 		Version:       s.deps.Version,
 		Now:           s.deps.Now().UTC(),
+		VoiceProvider: s.voiceProvider(),
+		VoiceModel:    s.voiceModel(),
 	})
 }
 

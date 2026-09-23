@@ -25,13 +25,19 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/supervisor"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice/gemini"
+	"github.com/kccarlos/herdr-sheepdog/internal/voice/gptlive"
 	"github.com/kccarlos/herdr-sheepdog/internal/web"
 	"github.com/kccarlos/herdr-sheepdog/prompts"
 )
 
 // Modes for Options.Voice, Options.Herdr and Options.CLI.
 const (
+	// VoiceOn (the default) runs the voice on the provider the state file
+	// or voice.provider names; VoiceGemini and VoiceOpenAI force the
+	// initial provider for this run; VoiceOff runs without a voice model.
+	VoiceOn     = "on"
 	VoiceGemini = "gemini"
+	VoiceOpenAI = "openai"
 	VoiceOff    = "off"
 	HerdrSocket = "socket"
 	HerdrMock   = "mock"
@@ -55,7 +61,7 @@ const (
 
 // Options select the daemon's mode; zero values take the defaults noted.
 type Options struct {
-	// Voice is VoiceGemini (default) or VoiceOff.
+	// Voice is VoiceOn (default), VoiceGemini, VoiceOpenAI or VoiceOff.
 	Voice string
 	// Herdr is HerdrSocket (default) or HerdrMock.
 	Herdr string
@@ -88,7 +94,7 @@ type Options struct {
 
 func (o Options) withDefaults() Options {
 	if o.Voice == "" {
-		o.Voice = VoiceGemini
+		o.Voice = VoiceOn
 	}
 	if o.Herdr == "" {
 		o.Herdr = HerdrSocket
@@ -132,6 +138,7 @@ type App struct {
 	// unavailable ones with the reason (web.Deps.BrainProviders).
 	brainProviders []web.ProviderInfo
 	voice          voice.Session // nil when off
+	voiceSwitch    *voice.Switcher
 	web            *web.Server
 	prompts        *prompts.Loader
 	port           int
@@ -143,8 +150,10 @@ type App struct {
 // started; the state table is loaded and the event log opened.
 func Build(cfg config.Config, opts Options) (*App, error) {
 	opts = opts.withDefaults()
-	if opts.Voice != VoiceGemini && opts.Voice != VoiceOff {
-		return nil, fmt.Errorf("app: --voice must be %s or %s", VoiceGemini, VoiceOff)
+	switch opts.Voice {
+	case VoiceOn, VoiceGemini, VoiceOpenAI, VoiceOff:
+	default:
+		return nil, fmt.Errorf("app: --voice must be %s, %s, %s or %s", VoiceOn, VoiceGemini, VoiceOpenAI, VoiceOff)
 	}
 	if opts.Herdr != HerdrSocket && opts.Herdr != HerdrMock {
 		return nil, fmt.Errorf("app: --herdr must be %s or %s", HerdrSocket, HerdrMock)
@@ -155,8 +164,17 @@ func Build(cfg config.Config, opts Options) (*App, error) {
 	if opts.Brain != BrainOn && opts.Brain != BrainOff && opts.Brain != BrainFake {
 		return nil, fmt.Errorf("app: --brain must be %s, %s or %s", BrainOn, BrainOff, BrainFake)
 	}
-	if opts.Voice == VoiceGemini && len(cfg.Gemini.APIKeys) == 0 {
-		return nil, errors.New("app: --voice=gemini needs GEMINI_API_KEY (or gemini.api_keys); use --voice=off to run without it")
+	if opts.Voice != VoiceOff {
+		switch initialVoiceProvider(cfg, opts) {
+		case VoiceGemini:
+			if len(cfg.Gemini.APIKeys) == 0 {
+				return nil, errors.New("app: the gemini voice needs GEMINI_API_KEY (or gemini.api_keys); use --voice=off to run without it")
+			}
+		case VoiceOpenAI:
+			if cfg.Voice.OpenAI.APIKey == "" {
+				return nil, errors.New("app: the openai voice needs OPENAI_API_KEY (or voice.openai.api_key); use --voice=off to run without it")
+			}
+		}
 	}
 	if !cfg.Web.IsLoopback() && cfg.Web.Token == "" {
 		return nil, errors.New("app: web.token is required when web.bind is not loopback")
@@ -291,18 +309,21 @@ func (a *App) wire() error {
 		Handler: sup.Handler(),
 		Prompts: a.prompts,
 
-		StallAfter: time.Duration(cfg.Gemini.StallAfterS) * time.Second,
+		StallAfter:       time.Duration(cfg.Gemini.StallAfterS) * time.Second,
+		StartSensitivity: cfg.Gemini.StartSensitivity,
+		EndSensitivity:   cfg.Gemini.EndSensitivity,
 	}
 	if _, err := gemini.SystemPrompt(gcfg); err != nil {
 		return err
 	}
-	if opts.Voice == VoiceGemini {
-		sess, err := gemini.New(gcfg, a.log)
+	if opts.Voice != VoiceOff {
+		sw, err := voice.NewSwitcher(a.voiceProviders(gcfg, sup.Handler()), initialVoiceProvider(cfg, opts), a.log)
 		if err != nil {
-			return err
+			return fmt.Errorf("app: voice: %w", err)
 		}
-		a.voice = sess
-		pusher.set(sess)
+		a.voice = sw
+		a.voiceSwitch = sw
+		pusher.set(sw)
 		sup.SetVoiceConnected(false) // the session's status events maintain it
 	} else {
 		// No voice model: pushes are logged as skipped so the blocked chain
@@ -344,6 +365,7 @@ func (a *App) wire() error {
 	}
 	if a.voice != nil {
 		deps.Voice = a.voice
+		deps.VoiceSwitch = a.voiceSwitch
 	}
 	if a.wref != nil {
 		deps.Watcher = a.wref
@@ -354,6 +376,78 @@ func (a *App) wire() error {
 	}
 	a.web = srv
 	return nil
+}
+
+// initialVoiceProvider is the provider the voice starts on before the
+// state file is consulted: the --voice flag when it names one, else
+// voice.provider.
+func initialVoiceProvider(cfg config.Config, opts Options) string {
+	if opts.Voice == VoiceGemini || opts.Voice == VoiceOpenAI {
+		return opts.Voice
+	}
+	return cfg.Voice.Provider
+}
+
+// voiceProviders lists both voice providers for the switcher, the one
+// without a key unavailable with the reason.
+func (a *App) voiceProviders(gcfg gemini.Config, handler voice.ToolHandler) []voice.Provider {
+	cfg := a.cfg
+	g := voice.Provider{ProviderInfo: voice.ProviderInfo{ID: VoiceGemini, Label: "Gemini Live", Model: gcfg.Model, Available: len(cfg.Gemini.APIKeys) > 0}}
+	if gcfg.Model == "" {
+		g.Model = gemini.DefaultModel
+	}
+	if g.Available {
+		g.New = func() (voice.Session, error) { return gemini.New(gcfg, a.log) }
+	} else {
+		g.Reason = "no GEMINI_API_KEY"
+	}
+	oc := cfg.Voice.OpenAI
+	o := voice.Provider{ProviderInfo: voice.ProviderInfo{ID: VoiceOpenAI, Label: "GPT-Live", Model: oc.Model, Available: oc.APIKey != "", Billing: voice.BillingPerMinute}}
+	if o.Available {
+		router := &inject.Router{}
+		name, aliases, pl := cfg.Voice.Name, gcfg.Aliases, a.prompts
+		ocfg := gptlive.Config{
+			APIKey: oc.APIKey, Model: oc.Model, Voice: oc.Voice,
+			IdleClose: time.Duration(oc.IdleCloseS) * time.Second,
+			Handler:   handler,
+			Classify:  router.Route,
+			Instructions: func() (string, error) {
+				text, _ := pl.Render(prompts.AssistantGPTLive, prompts.AssistantVars(name, aliases))
+				return text, nil
+			},
+		}
+		o.New = func() (voice.Session, error) { return gptlive.New(ocfg, a.log) }
+	} else {
+		o.Reason = "no OPENAI_API_KEY"
+	}
+	return []voice.Provider{g, o}
+}
+
+// restoreVoiceProvider applies the provider picked at runtime in an
+// earlier run (the state file's session.voice_provider, kept by PUT
+// /api/voice/provider) over the configured one, unless --voice named a
+// provider for this run. One that is unavailable now (its key is gone)
+// is logged as daemon.voice_provider_error and the configured one kept.
+// Called from Run before the voice starts.
+func (a *App) restoreVoiceProvider() {
+	if a.voiceSwitch == nil || a.opts.Voice != VoiceOn {
+		return
+	}
+	id := a.store.Snapshot().Session.VoiceProvider
+	if id == "" {
+		return
+	}
+	if err := a.voiceSwitch.SetProvider(id, "state"); err != nil {
+		a.log.Log("daemon", "daemon.voice_provider_error", "", map[string]any{"provider": id, "error": err.Error()})
+	}
+}
+
+// VoiceProvider reports the voice provider ("off" without a voice).
+func (a *App) VoiceProvider() string {
+	if a.voiceSwitch == nil {
+		return VoiceOff
+	}
+	return a.voiceSwitch.Provider()
 }
 
 // buildBrain builds the supervisor brain with the [brain] config
@@ -647,9 +741,10 @@ func (a *App) Run(ctx context.Context) (err error) {
 	brainMode := a.BrainMode()
 	a.log.Log("daemon", "daemon.start", "", map[string]any{
 		"version": a.opts.Version, "voice": a.opts.Voice, "herdr": a.opts.Herdr, "cli": a.opts.CLI, "brain": brainMode, "url": a.URL(), "urls": a.URLs(),
-		"data_dir": a.cfg.DataDir, "brain_provider": a.BrainProvider(), "brain_model": a.BrainModel(),
+		"data_dir": a.cfg.DataDir, "brain_provider": a.BrainProvider(), "brain_model": a.BrainModel(), "voice_provider": a.VoiceProvider(),
 	})
 	a.restoreBrainModel()
+	a.restoreVoiceProvider()
 	// Logged here, not in wire(), so it never precedes daemon.start (the
 	// Loader itself is built in wire(), since the brain and the voice
 	// session need it before Run).

@@ -34,6 +34,8 @@ type fakeSession struct {
 	muted  bool
 	status voice.Status
 	ends   int // AudioStreamEnd calls
+	// attached is the last ClientAttached value.
+	attached bool
 }
 
 func newFakeSession() *fakeSession {
@@ -76,8 +78,14 @@ func (f *fakeSession) pushed() []string {
 	defer f.mu.Unlock()
 	return append([]string(nil), f.pushes...)
 }
-func (f *fakeSession) isMuted() bool       { f.mu.Lock(); defer f.mu.Unlock(); return f.muted }
-func (f *fakeSession) AudioStreamEnd()     { f.mu.Lock(); f.ends++; f.mu.Unlock() }
+func (f *fakeSession) isMuted() bool   { f.mu.Lock(); defer f.mu.Unlock(); return f.muted }
+func (f *fakeSession) AudioStreamEnd() { f.mu.Lock(); f.ends++; f.mu.Unlock() }
+func (f *fakeSession) ClientAttached(a bool) {
+	f.mu.Lock()
+	f.attached = a
+	f.mu.Unlock()
+}
+func (f *fakeSession) isAttached() bool    { f.mu.Lock(); defer f.mu.Unlock(); return f.attached }
 func (f *fakeSession) streamEnds() int     { f.mu.Lock(); defer f.mu.Unlock(); return f.ends }
 func (f *fakeSession) emit(ev voice.Event) { f.events <- ev }
 
@@ -103,7 +111,10 @@ type harness struct {
 	srv     *Server
 	http    *httptest.Server
 	session *fakeSession
-	watcher *fakeWatcher
+	// session2 is the "openai" provider's session (harnessOpts.switcher).
+	session2 *fakeSession
+	sw       *voice.Switcher
+	watcher  *fakeWatcher
 	// model is the brain's scripted model when harnessOpts.brain is set.
 	model  *braintest.Model
 	cancel context.CancelFunc
@@ -129,6 +140,10 @@ type harnessOpts struct {
 	// token, when set, becomes Deps.Token (config web.token): every
 	// protected route then needs it.
 	token string
+	// switcher runs the fake session behind a voice.Switcher with a
+	// second fake provider "openai" (h.session2) and an unavailable
+	// "other", as Deps.Voice and Deps.VoiceSwitch.
+	switcher bool
 }
 
 func newHarness(t *testing.T, o harnessOpts) *harness {
@@ -175,8 +190,25 @@ func newHarness(t *testing.T, o harnessOpts) *harness {
 	injector := inject.NewInjector(store, h, sup, log, nil)
 	deps := Deps{Log: log, Store: store, Supervisor: sup, Injector: injector, Router: &inject.Router{}, Version: "test", Heartbeat: 200 * time.Millisecond, OutQueue: 8, DevTestdataDir: o.devTestdata, DevBrainDir: o.devBrain, StatsInterval: o.statsInterval,
 		SystemPrompt: func() string { return "You are the voice. Aliases: auth." }, Aliases: []string{"auth"}, ReloadPrompts: o.reloadPrompts, Brain: b, BrainOffReason: "--brain=off", BrainProviders: providers, Token: o.token}
+	var sw *voice.Switcher
+	var session2 *fakeSession
 	if session != nil {
 		deps.Voice = session
+		if o.switcher {
+			session2 = newFakeSession()
+			sw, err = voice.NewSwitcher([]voice.Provider{
+				{ProviderInfo: voice.ProviderInfo{ID: "gemini", Label: "Gemini Live", Model: "gemini-3.8-live", Available: true}, New: func() (voice.Session, error) { return session, nil }},
+				{ProviderInfo: voice.ProviderInfo{ID: "openai", Label: "GPT-Live", Model: "gpt-live-1", Available: true, Billing: voice.BillingPerMinute}, New: func() (voice.Session, error) { return session2, nil }},
+				{ProviderInfo: voice.ProviderInfo{ID: "other", Label: "Other", Model: "x", Available: false, Reason: "no OTHER_KEY"}},
+			}, "gemini", log)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := sw.Start(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			deps.Voice, deps.VoiceSwitch = sw, sw
+		}
 	}
 	var watcher *fakeWatcher
 	if o.watcher {
@@ -190,19 +222,26 @@ func newHarness(t *testing.T, o harnessOpts) *harness {
 	ctx, cancel := context.WithCancel(context.Background())
 	go srv.Run(ctx)
 	if session != nil {
+		var events <-chan voice.Event = session.events
+		if sw != nil {
+			events = sw.Events()
+		}
 		go func() {
-			for ev := range session.events {
+			for ev := range events {
 				sup.OnVoiceEvent(ev)
 				srv.OnVoiceEvent(ev)
 			}
 		}()
 	}
 	hs := httptest.NewServer(srv.Handler())
-	hh := &harness{t: t, log: log, store: store, herdr: h, sup: sup, srv: srv, http: hs, session: session, watcher: watcher, model: model, cancel: cancel}
+	hh := &harness{t: t, log: log, store: store, herdr: h, sup: sup, srv: srv, http: hs, session: session, session2: session2, sw: sw, watcher: watcher, model: model, cancel: cancel}
 	t.Cleanup(func() {
 		hs.Close()
 		cancel()
-		if session != nil {
+		switch {
+		case sw != nil:
+			_ = sw.Close()
+		case session != nil:
 			_ = session.Close()
 		}
 		_ = log.Close()

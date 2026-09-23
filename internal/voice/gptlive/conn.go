@@ -37,7 +37,9 @@ type HTTPError struct {
 	Err    error
 }
 
-func (e *HTTPError) Error() string { return fmt.Sprintf("gptlive: handshake: HTTP %d: %v", e.Status, e.Err) }
+func (e *HTTPError) Error() string {
+	return fmt.Sprintf("gptlive: handshake: HTTP %d: %v", e.Status, e.Err)
+}
 func (e *HTTPError) Unwrap() error { return e.Err }
 
 func (wsDialer) Dial(ctx context.Context, url, apiKey string) (Conn, error) {

@@ -29,21 +29,26 @@ import (
 // Workspace holds the assistant/SVP/USER prompt workspace files (the ones
 // a Loader may override).
 //
-//go:embed assistant.md USER.md svp/*.md
+//go:embed assistant.md assistant-gptlive.md USER.md svp/*.md
 var Workspace embed.FS
 
 // Workspace file names.
 const (
 	Assistant = "assistant.md"
-	User      = "USER.md"
-	SVPSoul   = "svp/SOUL.md"
-	SVPRules  = "svp/RULES.md"
+	// AssistantGPTLive is the voice prompt for the GPT-Live provider,
+	// which has no function tools (it delegates) and whose prompting
+	// guide asks for the Backchannel / Interruption / Delegation policy
+	// headings.
+	AssistantGPTLive = "assistant-gptlive.md"
+	User             = "USER.md"
+	SVPSoul          = "svp/SOUL.md"
+	SVPRules         = "svp/RULES.md"
 )
 
 // WorkspaceFiles lists every overridable prompt file, in a stable order
 // (used by Loader.Files, `sheepdog prompts export` and the
 // prompts.loaded/prompts.reloaded event payloads).
-var WorkspaceFiles = []string{Assistant, User, SVPSoul, SVPRules}
+var WorkspaceFiles = []string{Assistant, AssistantGPTLive, User, SVPSoul, SVPRules}
 
 // Sources a Loader reports for a file.
 const (

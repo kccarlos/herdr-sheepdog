@@ -34,7 +34,9 @@ func printServeUsage(w io.Writer) {
 	fprintln(w, "                    an explicitly given path that is missing is an error). Real")
 	fprintln(w, "                    env vars always win over the file; values are never logged.")
 	fprintln(w, "  --port N          web port (default from config: web.port / SHEEPDOG_WEB_PORT, 7777)")
-	fprintln(w, "  --voice MODE      gemini | off (default gemini; off logs pushes as skipped)")
+	fprintln(w, "  --voice MODE      on | gemini | openai | off (default on: the provider in the state")
+	fprintln(w, "                    file or voice.provider; gemini/openai force it for this run;")
+	fprintln(w, "                    off logs pushes as skipped)")
 	fprintln(w, "  --herdr MODE      socket | mock (default socket; mock needs no running herdr)")
 	fprintln(w, "  --cli MODE        on | off (default on; off takes the brain's run_cli tool")
 	fprintln(w, "                    away, so it answers from the screen alone)")
@@ -65,7 +67,7 @@ func parseServeFlags(args []string, stderr io.Writer) (serveOpts, int, bool) {
 	fs.StringVar(&o.configPath, "config", "", "config file")
 	fs.StringVar(&o.envFile, "env-file", "", "load KEY=VALUE lines into the environment before config (default ./.env if present)")
 	fs.IntVar(&o.port, "port", 0, "web port")
-	fs.StringVar(&o.voice, "voice", app.VoiceGemini, "voice mode")
+	fs.StringVar(&o.voice, "voice", app.VoiceOn, "voice mode")
 	fs.StringVar(&o.herdr, "herdr", app.HerdrSocket, "herdr mode")
 	fs.StringVar(&o.cli, "cli", app.CLIOn, "cli query tool mode")
 	fs.StringVar(&o.brain, "brain", app.BrainOn, "supervisor brain mode")
@@ -140,7 +142,7 @@ func runServe(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 		return 1
 	}
 	fprintf(stderr, "sheepdog serve %s: %s\n", version, cfg)
-	fprintf(stdout, "sheepdog %s listening on %s (voice=%s herdr=%s cli=%s brain=%s)\n", version, a.URL(), o.voice, o.herdr, o.cli, a.BrainMode())
+	fprintf(stdout, "sheepdog %s listening on %s (voice=%s herdr=%s cli=%s brain=%s)\n", version, a.URL(), a.VoiceProvider(), o.herdr, o.cli, a.BrainMode())
 	if !cfg.Web.IsLoopback() {
 		// web.bind is not loopback: print every non-loopback IPv4 of the
 		// host, so the operator can read the LAN or Tailscale URL off the
