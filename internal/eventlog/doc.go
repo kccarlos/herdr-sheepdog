@@ -13,8 +13,12 @@
 // and never panic; a payload that cannot be marshalled is replaced by an
 // {"encode_error": …} payload so the line is still written.
 //
-// The line shape is exactly {ts, source, type, pane_id?, payload, dur_ms?}
-// with dur_ms copied from payload.dur_ms when present. The event log is
+// The line shape is exactly {id, ts, source, type, pane_id?, payload,
+// dur_ms?} with dur_ms copied from payload.dur_ms when present. id is
+// stable and strictly increasing across day files and restarts (the
+// event's Unix microseconds, or the last id + 1): SSE frames carry it,
+// Since resumes after it, and the web layer pages the conversation
+// history by it (history.go). The event log is
 // the single source of truth for what happened; the /debug page is only a
 // viewer, and Replay reads a recorded file back for tests.
 package eventlog

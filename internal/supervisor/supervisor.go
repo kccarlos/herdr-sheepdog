@@ -395,6 +395,15 @@ func (s *Supervisor) pushTagged(paneID, text string, u voice.Urgency, tags map[s
 	if paneID != "" && u != voice.UrgencySilent {
 		s.setSubject(paneID)
 	}
+	if row, ok := s.store.Get(paneID); ok && row.Alias != "" && tags["agent"] == nil {
+		// The agent a push is about, on its voice.push event: the
+		// conversation history (GET /api/conversation) labels it.
+		tagged := map[string]any{"agent": row.Alias}
+		for k, v := range tags {
+			tagged[k] = v
+		}
+		tags = tagged
+	}
 	if s.pusher == nil || !s.voiceConnected() {
 		payload := map[string]any{"text": text, "urgency": u.String()}
 		for k, v := range tags {

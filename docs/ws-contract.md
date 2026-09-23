@@ -40,7 +40,7 @@ scheduling each frame at "now".
 | `{"type":"mute","on":true\|false}`   | Mute state changed. See *Mute semantics*.                                                                 |
 | `{"type":"silence","on":true\|false}` | The client's silence gate closed (`on:true`, no binary frames follow) or reopened (`on:false`). See *Silence gate*. |
 | `{"type":"cancel"}`                  | The "stop" button. The daemon stops current playback (it will send `flush`) and invokes the `cancel` tool path in the supervisor. Equivalent to the user saying "stop". |
-| `{"type":"text","text":"…"}`         | Simulate an utterance: the text is fed to the voice session as if the user had spoken it (`/debug` and the `/voice` text box use this). Without a voice session (`--voice=off`) the daemon echoes it as an `in` transcript and answers through its text router with one `out` transcript (a text routed to `cancel` yields `flush` then the `out`), or with an `error` when the text cannot be routed. |
+| `{"type":"text","text":"…"}`         | Simulate an utterance: the text is fed to the voice session as if the user had spoken it (`/debug` and the `/voice` text box use this). It is recorded as a typed shepherd input, which the one rail accepts like a transcript (docs/roles.md "The one rail"). Without a voice session (`--voice=off`) the daemon echoes it as an `in` transcript and answers through its text router with one `out` transcript (a text routed to `cancel` yields `flush` then the `out`), or with an `error` when the text cannot be routed. |
 | `{"type":"ping","gated_frames":N?,"peak":N?}` | Liveness probe; the daemon answers `pong`. Clients should send one every 15–30 s while idle. The optional counters (frames withheld by the silence gate so far; last input peak in Int16 LSB) are copied into the next `web.client.stats` event. |
 
 Unknown `type` values are answered with an `error` message and otherwise
@@ -158,6 +158,61 @@ below is open, as in the original v1 contract. With it set:
 
 Every comparison is constant-time (`crypto/subtle.ConstantTimeCompare`);
 there is no rate limiting or lockout on a wrong token.
+
+## History and resume
+
+Added so a client that was away (a phone asleep, a browser tab
+reloaded, the daemon restarted) can show the conversation it missed and
+answer a question by tap. All three need the token under "Auth".
+
+- **Event ids.** Every event-log line carries `id`: an integer, strictly
+  increasing across day files and daemon restarts, close to the event's
+  time in Unix microseconds (the log takes max(now, last + 1)). Lines
+  written before ids existed get one derived the same way when read
+  back.
+- **`GET /events` resumes.** Every SSE frame is `id: <event id>`,
+  `event: log`, `data: <the JSON line>`. A reconnecting `EventSource`
+  sends `Last-Event-ID` itself; `?since=<id>` does the same by hand
+  (the header wins). The daemon replays what came after that id from the
+  log — across days and restarts — then streams live, with no
+  duplicates. The replay is bounded to the newest 2 000 events after the
+  id (a `: replay truncated …` comment says so). `?n=<count>` replays the
+  last count events of the current run instead (what `/debug` does on a
+  fresh load; a `?since=` below 10¹² is read as a count, as before).
+- **`GET /api/conversation?limit=200&before=<id>`** answers
+  `{"items": [...], "next_before": <id>|null}`: the conversation rebuilt
+  from the log, newest last, at most `limit` items (default 200, at most
+  1 000) older than `before` (omit it for the newest page); pass
+  `next_before` as the next `before` to page back, until it is `null`.
+  Each item is `{id, ts, kind, text, via?, agent?, urgency?, pending_id?,
+  options?, answered?, answer?, resolution?}` with `kind`:
+  - `shepherd` — what the shepherd said (voice transcript fragments
+    merged per turn, `via: "voice"`) or typed (`via: "typed"`);
+  - `dog` — what the dog said (output transcript merged per turn, or the
+    spoken reply with `--voice=off`);
+  - `push` — a push the dog spoke (never a silent one), with `urgency`
+    and the `agent` it is about;
+  - `approval` — a worker's approval prompt: `text` its summary,
+    `agent`, `pending_id`, `options` `[{index, label, keys, default}]`,
+    `answered`, `answer` and `via` (`tap`, `fast_path`, `brain`) once
+    answered, `resolution` `open` | `confirmed` | `expired` |
+    `cancelled` | `replaced`;
+  - `notice` — a divider: the daemon started, the voice reconnected (with
+    or without its context), the voice session closed.
+  `id` is the first event's id, so items sort and page with the SSE
+  stream's ids.
+- **Approve by tap.** `GET /api/state`'s `pending_action` (and the
+  `pending.created` event) carries `agent`, `summary`, `question`,
+  `command` and `options: [{index, label, keys, default}]`.
+  `POST /api/pending/answer {"id": "<pending id>", "option": <index>}`
+  answers it: the tap is recorded as a shepherd input and passes the same
+  rail as a spoken answer (docs/roles.md "The one rail"), the option's
+  keys go to the worker, and the answer is `{"ok": true, "spoken":
+  "Told auth Yes."}`; the voice is told silently ("The shepherd tapped
+  Yes on auth's question"). A question that is no longer open (answered,
+  replaced, or expired and gone from the screen) is `409
+  {"error":"that question is no longer open"}`; an option the question
+  does not have is `400`.
 
 ## Non-goals (v1)
 

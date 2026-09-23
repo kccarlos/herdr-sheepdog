@@ -205,6 +205,7 @@ func (s *Server) routes() error {
 	s.mux.HandleFunc("GET /api/state", s.authFunc(s.handleState, false))
 	s.mux.HandleFunc("GET /api/agents", s.authFunc(s.handleAgents, false))
 	s.mux.HandleFunc("GET /api/events", s.authFunc(s.handleEventsTail, false))
+	s.mux.HandleFunc("GET /api/conversation", s.authFunc(s.handleConversation, false))
 	s.mux.HandleFunc("GET /api/voice/system_prompt", s.authFunc(s.handleSystemPrompt, false))
 	s.mux.HandleFunc("GET /api/settings", s.authFunc(s.handleGetSettings, false))
 	s.mux.HandleFunc("PUT /api/settings", s.authFunc(s.handlePutSettings, false))
