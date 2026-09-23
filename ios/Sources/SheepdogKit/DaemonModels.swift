@@ -29,22 +29,30 @@ public struct Hello: Codable, Equatable, Sendable {
     public var auth: String
     public var ws: String
     public var audio: Audio
+    /// The live session's provider and model (`gemini`, `gemini-3.8-live`),
+    /// on daemons that can switch provider. Absent on older ones.
+    public var voiceProvider: String?
+    public var voiceModel: String?
 
     enum CodingKeys: String, CodingKey {
         case name, version, auth, ws, audio
         case voiceName = "voice_name"
+        case voiceProvider = "voice_provider"
+        case voiceModel = "voice_model"
     }
 
     public var needsToken: Bool { auth == "token" }
     public var displayName: String { voiceName?.isEmpty == false ? voiceName! : "Sheepdog" }
 
-    public init(name: String, version: String, voiceName: String? = nil, auth: String, ws: String, audio: Audio) {
+    public init(name: String, version: String, voiceName: String? = nil, auth: String, ws: String, audio: Audio, voiceProvider: String? = nil, voiceModel: String? = nil) {
         self.name = name
         self.version = version
         self.voiceName = voiceName
         self.auth = auth
         self.ws = ws
         self.audio = audio
+        self.voiceProvider = voiceProvider
+        self.voiceModel = voiceModel
     }
 }
 
@@ -348,19 +356,27 @@ public struct DaemonState: Codable, Equatable, Sendable {
     public var version: String?
     /// The supervisor's current model, when the daemon reports one.
     public var brain: BrainInfo?
+    /// The live voice session's provider and model, when the daemon can
+    /// switch provider (`GET /api/voice/providers`).
+    public var voiceProvider: String?
+    public var voiceModel: String?
 
     enum CodingKeys: String, CodingKey {
         case agents, voice, herdr, version, brain
         case pendingAction = "pending_action"
+        case voiceProvider = "voice_provider"
+        case voiceModel = "voice_model"
     }
 
-    public init(agents: [Agent], pendingAction: PendingAction? = nil, voice: VoiceInfo, herdr: String? = nil, version: String? = nil, brain: BrainInfo? = nil) {
+    public init(agents: [Agent], pendingAction: PendingAction? = nil, voice: VoiceInfo, herdr: String? = nil, version: String? = nil, brain: BrainInfo? = nil, voiceProvider: String? = nil, voiceModel: String? = nil) {
         self.agents = agents
         self.pendingAction = pendingAction
         self.voice = voice
         self.herdr = herdr
         self.version = version
         self.brain = brain
+        self.voiceProvider = voiceProvider
+        self.voiceModel = voiceModel
     }
 
     /// The question waiting on a given pane, if the pending action is one.

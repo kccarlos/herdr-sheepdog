@@ -1,8 +1,8 @@
-# Status — 2026-09-22
+# Status — 2026-09-23
 
 ## Verified
 
-**Unit tests: 144, all passing** (`SheepdogKitTests`, iPhone 17 Pro simulator,
+**Unit tests: 190 (188 run, 2 live-daemon tests skip without one), all passing** (`SheepdogKitTests`, iPhone 17 Pro simulator,
 iOS 26, Xcode 27).
 
 ```sh
@@ -11,6 +11,27 @@ xcodebuild -scheme Sheepdog -destination 'platform=iOS Simulator,name=iPhone 17 
 ```
 
 They cover:
+
+- the **voice-activity detector** against macOS text-to-speech
+  (`scripts/make-fixtures.sh`, six voices) mixed with white, pink, brown,
+  babble and keyboard-click noise at 20/10/5 dB SNR: speech opens within
+  250 ms and reaches the socket whole in every cell but 5 dB babble
+  (asserted separately), noise alone never opens it (60 s × 5 kinds × 3
+  levels), clicks never open it, the floor follows a room 25 dB louder and
+  back, the margin widens for babble, digital silence does not make hiss
+  speech, the pre-roll and the spurious-open count; the old peak gate
+  sending 100 % of a −50 dBFS room where the detector sends 0 % (table in
+  `docs/architecture.md`);
+- the capture gate: detector switch and hold-to-talk transitions always
+  matching what the daemon was told, pre-roll on press, reset semantics;
+- the microphone-signal watchdog (3 s of digital zero or no buffers, cleared
+  by one real sample, disarmed while muted, re-timed on unmute);
+- the voice provider contract: the list, a minimal entry, 404 → hidden,
+  `PUT` and its 400 with the daemon's reason, `voice_provider`/`voice_model`
+  on hello and state, `status.provider`, and older payloads without any of
+  it; the microphone-mode names against AVFoundation's raw values;
+- the mute / hold-to-talk mapping and the status line's words for every
+  state, including "No microphone signal";
 
 - every `/ws` control message, decoded from the literal JSON the daemon's Go
   side writes and re-encoded to the same bytes (one test per message type,
@@ -140,6 +161,25 @@ The approval card (`11-approval-card.png` above) now sits above the bar
 rather than replacing it — the bar's controls (mute, stop-via-orb, end) stay
 reachable while a worker is waiting on an answer.
 
+### Voice robustness (simulator, 2026-09-23)
+
+`VoiceRobustnessUITests` (scheme `SheepdogUITests`) against the fixture
+daemon on 7799 (`--voice=off`, empty config), launched with
+`-sheepdogFakeVoice` (DEBUG only: pretends the live session is up, no
+microphone, synthetic level) and `-sheepdogFakeProviders` (the provider
+contract's example, since the daemon on `main` does not serve
+`/api/voice/providers` yet):
+
+| | What |
+|---|---|
+| ![](screenshots/19-coach-mark.png) | First time listening: the coach mark over the mic button, "Listening — just talk", and the mic button with its green level ring, labelled "Mute microphone". |
+| ![](screenshots/20-mic-live.png) | Live, coach mark dismissed. |
+| ![](screenshots/21-mic-muted.png) | Muted: red slashed mic ("Unmute microphone"), the orb muted, the status line "Muted — tap to unmute" in red, and the one-time Mute caption. |
+| ![](screenshots/22-settings-voice-microphone.png) | Settings ▸ Voice (Gemini Live selected; GPT-Live "Billed per minute" with the note) and Microphone (mode row, Hold to talk). |
+| ![](screenshots/23-settings-voice-detection.png) | Settings ▸ Voice detection: input level, noise floor, margin, gate state, opens / spurious, microphone signal, and the old peak gate toggle. (Values are the fake-voice ones here.) |
+| ![](screenshots/24-hold-to-talk.png) | Hold to talk on: no mic button, "Hold the orb to talk"; the Voice Isolation tip banner shown once after listening. |
+| ![](screenshots/25-chip-voice-provider.png) | The connection sheet names the voice provider and model. |
+
 ## Not verified
 
 - **Real device audio.** Nothing has run on an iPhone. The microphone, the
@@ -166,10 +206,34 @@ reachable while a worker is waiting on an answer.
   skew can misorder them until the next sync.
 - **Pull-to-load-older** is model-tested but not seen in the simulator: the
   fixture daemon's whole log fits in one page.
-- **Mute's one-time caption** has only been seen in code review; it needs a
-  connected voice session to be tappable.
+- **The detector on a real microphone.** It is tuned on TTS + synthetic
+  noise; a phone's voice-processed input (AGC, echo canceller, Voice
+  Isolation) is a different signal. The numbers to watch are in Settings ▸
+  Voice detection.
+- **The "no signal" cause.** The 25 s of digital zero after connecting was
+  not reproduced here (the simulator has no such path). Now: it is named on
+  screen after 3 s, logged with the input format, voice-processing state and
+  both input mutes (`log stream --predicate 'subsystem == "com.kccarlos.sheepdog"'`),
+  and capture is rebuilt once. The input-mute clearing at start and the
+  multi-channel downmix are the candidate fixes; neither is confirmed.
+- **The Mic Mode panel** (`showSystemUserInterface(.microphoneModes)`) does
+  nothing visible in the simulator; the mode reads "Standard" there.
+- **The provider picker against a real daemon**: built to the contract
+  while the daemon side was being written; screenshots use the contract's
+  example.
 
 ## For the morning
+
+For the voice-robustness change, on the phone: connect in a normal room and
+watch Settings ▸ Voice detection — the gate should read "Closed — room
+noise" while you are quiet and "Open — sending" only while you talk, with
+spurious opens staying near zero; say a few things and check nothing is
+clipped; turn on Voice Isolation from the Microphone mode row and see it
+reported; try Hold to talk; and if "No microphone signal" ever appears,
+capture the log line it writes. If the old symptom (nothing sent right after
+connecting) comes back, the status line should now say so within 3 s.
+
+Earlier:
 
 For this change, on the phone: open the app with the daemon running — the
 last conversation should be there before Connect; ask a worker for

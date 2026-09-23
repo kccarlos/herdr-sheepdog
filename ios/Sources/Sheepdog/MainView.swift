@@ -14,7 +14,7 @@ struct MainView: View {
         NavigationStack {
             VStack(spacing: 0) {
                 if let banner = model.banner {
-                    BannerView(banner: banner, retry: { model.retry() }, dismiss: { model.banner = nil })
+                    BannerView(banner: banner, retry: { model.bannerAction() }, dismiss: { model.banner = nil })
                         .padding(.horizontal, 16)
                         .padding(.bottom, 8)
                         .transition(.move(edge: .top).combined(with: .opacity))
@@ -56,6 +56,18 @@ struct MainView: View {
                     }
                 }
 
+                if model.showCoachMark {
+                    CoachMarkView(text: VoiceBarModel.coachMark(voiceName: model.voiceName)) {
+                        model.dismissCoachMark()
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .onAppear {
+                        AccessibilityNotification.Announcement(VoiceBarModel.coachMark(voiceName: model.voiceName)).post()
+                    }
+                }
+
                 if model.showMuteHint {
                     Text(SessionViewModel.muteHint)
                         .font(.footnote)
@@ -76,9 +88,9 @@ struct MainView: View {
                 // enough to lock up the main thread (a genuine SwiftUI
                 // "onChange … multiple times per frame" fault, reproduced
                 // while testing this bar).
-                Text(model.state.title)
+                Text(model.statusLine)
                     .font(.footnote.weight(.medium))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(model.noMicSignal ? Theme.blocked : (model.isMuted ? Color(.systemRed) : .secondary))
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
                     .frame(height: 16)
@@ -90,15 +102,24 @@ struct MainView: View {
                     level: model.micLevel,
                     muted: model.isMuted,
                     voiceName: model.voiceName,
+                    talkMode: model.talkMode,
+                    holding: model.holding,
+                    noSignal: model.noMicSignal,
                     onConnect: { model.connect() },
                     onStop: { model.stop() },
-                    onMute: { model.toggleMute() },
-                    onEnd: { model.disconnect() }
+                    onMute: {
+                        model.dismissCoachMark()
+                        model.toggleMute()
+                    },
+                    onEnd: { model.disconnect() },
+                    onPress: { model.pressToTalk() },
+                    onRelease: { model.releaseToTalk() }
                 )
             }
             .animation(.easeInOut(duration: 0.2), value: model.banner)
             .animation(.spring(duration: 0.3), value: model.approval)
             .animation(.easeInOut(duration: 0.2), value: model.showMuteHint)
+            .animation(.spring(duration: 0.35), value: model.showCoachMark)
             .navigationTitle(model.voiceName)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -132,6 +153,55 @@ struct MainView: View {
                 }
             }
         }
+    }
+}
+
+/// The first-run coach mark: a bubble pointing down at the mic button.
+struct CoachMarkView: View {
+    let text: String
+    let dismiss: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "waveform")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .padding(.top, 1)
+                Text(text)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.white)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+                Button("Got it", action: dismiss)
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.white)
+                    .buttonStyle(.plain)
+                    .padding(.top, 2)
+                    .accessibilityIdentifier("controls.coachMark.dismiss")
+            }
+            .padding(12)
+            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Theme.done))
+            // The pointer, over the mic button (the first slot of the bar).
+            Triangle()
+                .fill(Theme.done)
+                .frame(width: 18, height: 9)
+                .padding(.leading, 27)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("controls.coachMark")
+        .onTapGesture(perform: dismiss)
+    }
+}
+
+private struct Triangle: Shape {
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        p.move(to: CGPoint(x: rect.minX, y: rect.minY))
+        p.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
+        p.addLine(to: CGPoint(x: rect.midX, y: rect.maxY))
+        p.closeSubpath()
+        return p
     }
 }
 

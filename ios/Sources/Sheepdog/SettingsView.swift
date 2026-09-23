@@ -89,6 +89,10 @@ struct SettingsView: View {
                     }
                 }
 
+                voiceSection
+
+                microphoneSection
+
                 Section {
                     Toggle("Keep listening with the screen locked", isOn: $keepListening)
                 } footer: {
@@ -135,6 +139,8 @@ struct SettingsView: View {
                     }
                     .padding(.vertical, 2)
                 }
+
+                diagnosticsSection
             }
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
@@ -150,7 +156,164 @@ struct SettingsView: View {
                 }
             }
             .onAppear(perform: load)
+            .task { await model.loadVoiceProviders() }
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+                // Back from Control Center's Mic Mode panel.
+                model.refreshMicrophoneMode()
+            }
         }
+    }
+
+    // MARK: - Voice provider
+
+    @ViewBuilder
+    private var voiceSection: some View {
+        if let list = model.voiceProviders, !list.providers.isEmpty {
+            Section {
+                ForEach(list.providers) { option in
+                    Button {
+                        model.selectVoiceProvider(option.id)
+                    } label: {
+                        HStack(alignment: .firstTextBaseline) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(option.displayName)
+                                    .foregroundStyle(option.isAvailable ? Color(.label) : Color(.tertiaryLabel))
+                                if let detail = providerDetail(option) {
+                                    Text(detail)
+                                        .font(.caption)
+                                        .foregroundStyle(option.isAvailable ? Color(.secondaryLabel) : Color(.tertiaryLabel))
+                                }
+                            }
+                            Spacer()
+                            if option.id == list.provider {
+                                Image(systemName: "checkmark")
+                                    .font(.body.weight(.semibold))
+                                    .foregroundStyle(Color.accentColor)
+                            }
+                        }
+                    }
+                    .disabled(!option.isAvailable || model.switchingProvider)
+                    .accessibilityIdentifier("settings.voiceProvider.\(option.id)")
+                    .accessibilityAddTraits(option.id == list.provider ? .isSelected : [])
+                }
+                if model.switchingProvider {
+                    HStack {
+                        ProgressView()
+                        Text("Switching the live session…")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                if let error = model.providerError {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(Color(.systemRed))
+                }
+            } header: {
+                Text("Voice")
+            } footer: {
+                Text(voiceFooter(list))
+            }
+        }
+    }
+
+    private func providerDetail(_ option: VoiceProviderOption) -> String? {
+        var parts: [String] = []
+        if let model = option.model { parts.append(model) }
+        if !option.isAvailable {
+            parts.append(option.reason.map { "Unavailable — \($0)" } ?? "Unavailable")
+        } else if option.billedPerMinute {
+            parts.append("Billed per minute")
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    private func voiceFooter(_ list: VoiceProviders) -> String {
+        var text = "Which model \(model.voiceName) talks with. The daemon switches the live session; the conversation and the flock carry over."
+        if list.providers.contains(where: { $0.billedPerMinute }) {
+            text += " GPT-Live is billed per minute of open session, whether anyone is talking or not — End the session when you are done."
+        }
+        return text
+    }
+
+    // MARK: - Microphone
+
+    private var microphoneSection: some View {
+        Section {
+            Button {
+                model.showMicrophoneModes()
+            } label: {
+                LabeledContent("Microphone mode") {
+                    HStack(spacing: 4) {
+                        Text(model.microphoneMode.label)
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+            }
+            .foregroundStyle(Color(.label))
+            .accessibilityIdentifier("settings.microphoneMode")
+
+            Toggle("Hold to talk", isOn: Binding(
+                get: { model.talkMode == .holdToTalk },
+                set: { model.setTalkMode($0 ? .holdToTalk : .openMic) }
+            ))
+            .accessibilityIdentifier("settings.holdToTalk")
+        } header: {
+            Text("Microphone")
+        } footer: {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(model.microphoneMode.advice + (model.preferredMicrophoneMode != model.microphoneMode ? " (Chosen: \(model.preferredMicrophoneMode.label) — it applies while the microphone is running.)" : ""))
+                Text(model.talkMode == .holdToTalk
+                    ? "Hold to talk is on: hold the orb while you speak, let go to send. Nothing is sent otherwise."
+                    : "Off: just talk. \(model.voiceName) listens all the time and ignores the room; the mic button only mutes.")
+            }
+        }
+    }
+
+    // MARK: - Diagnostics
+
+    private var diagnosticsSection: some View {
+        let d = model.gateDiagnostics
+        return Section {
+            LabeledContent("Input level", value: CaptureGate.Diagnostics.format(dBFS: d.levelDBFS))
+                .accessibilityIdentifier("settings.diag.level")
+            if d.detector == .voiceActivity {
+                LabeledContent("Noise floor", value: CaptureGate.Diagnostics.format(dBFS: d.floorDBFS))
+                    .accessibilityIdentifier("settings.diag.floor")
+                if let margin = d.marginDB {
+                    LabeledContent("Opens at", value: String(format: "floor + %.0f dB", margin))
+                }
+            }
+            LabeledContent("Gate", value: gateWord(d))
+                .accessibilityIdentifier("settings.diag.gate")
+            LabeledContent("Opens", value: "\(d.opens) · \(d.spuriousOpens) spurious")
+                .accessibilityIdentifier("settings.diag.opens")
+            LabeledContent("Microphone signal", value: micSignalWord)
+                .accessibilityIdentifier("settings.diag.signal")
+            Toggle("Use the old peak gate", isOn: Binding(
+                get: { model.detector == .peak },
+                set: { model.setDetector($0 ? .peak : .voiceActivity) }
+            ))
+            .accessibilityIdentifier("settings.diag.peakGate")
+        } header: {
+            Text("Voice detection")
+        } footer: {
+            Text("Sheepdog sends audio only while the gate is open: when your voice is clearly above the room's noise floor (speech band, 300–3 400 Hz). A spurious open is one too short to be speech — a door, a cough. The old peak gate (the browser's) is here to compare; it lets almost any room noise through.")
+        }
+    }
+
+    private func gateWord(_ d: CaptureGate.Diagnostics) -> String {
+        guard model.state.capturing || model.state == .muted else { return "—" }
+        if model.isMuted { return "Muted" }
+        if let manual = d.manual { return manual ? "Open (holding)" : "Closed (hold to talk)" }
+        return d.isOpen ? "Open — sending" : "Closed — room noise"
+    }
+
+    private var micSignalWord: String {
+        if !model.state.capturing { return "—" }
+        return model.noMicSignal ? "None — digital silence" : "OK"
     }
 
     private func load() {

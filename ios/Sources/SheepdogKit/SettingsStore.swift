@@ -1,13 +1,15 @@
 import Foundation
 
 /// What the Settings sheet owns: where the daemon is, its token (in the
-/// keychain, never in defaults), and the two switches.
+/// keychain, never in defaults), and the switches.
 public final class SettingsStore {
     private enum Key {
         static let address = "daemon.address"
         static let keepListening = "daemon.keepListeningLocked"
         static let hasBeenConfigured = "daemon.configured"
         static let tokenAccount = "daemon.token"
+        static let talkMode = "voice.talkMode"
+        static let detector = "voice.detector"
     }
 
     private let defaults: UserDefaults
@@ -34,6 +36,19 @@ public final class SettingsStore {
     public var keepListeningWhenLocked: Bool {
         get { defaults.object(forKey: Key.keepListening) as? Bool ?? true }
         set { defaults.set(newValue, forKey: Key.keepListening) }
+    }
+
+    /// Open mic (the default) or hold-to-talk.
+    public var talkMode: TalkMode {
+        get { defaults.string(forKey: Key.talkMode).flatMap(TalkMode.init(rawValue:)) ?? .openMic }
+        set { defaults.set(newValue.rawValue, forKey: Key.talkMode) }
+    }
+
+    /// Which capture gate decides: the voice-activity detector (default) or
+    /// the browser's old peak gate, kept for comparison.
+    public var detector: CaptureGate.Detector {
+        get { defaults.string(forKey: Key.detector).flatMap(CaptureGate.Detector.init(rawValue:)) ?? .voiceActivity }
+        set { defaults.set(newValue.rawValue, forKey: Key.detector) }
     }
 
     /// False until the user has saved an address once; the first launch

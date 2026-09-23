@@ -6,8 +6,10 @@ import SheepdogKit
 ///
 /// Capture: an `AVAudioEngine` input tap at the hardware format →
 /// `PCMConverter` (16 kHz mono Int16) → `FrameChunker` (40 ms frames) →
-/// `SilenceGate` → the caller, which writes each frame to `/ws` as a binary
-/// frame.
+/// `CaptureGate` (the voice-activity detector, or hold-to-talk) → the
+/// caller, which writes each frame to `/ws` as a binary frame. A
+/// `MicSignalWatchdog` watches for a microphone that delivers only digital
+/// zero while unmuted.
 ///
 /// Playback: one `AVAudioPlayerNode` fed 24 kHz chunks back to back through
 /// `PlaybackQueue`, so the node concatenates them itself — gapless, and
@@ -48,6 +50,8 @@ final class AudioEngine {
     var onSpeakingChanged: ((Bool) -> Void)?
     /// An interruption (a call, Siri) or a route change the user should see.
     var onNotice: ((String) -> Void)?
+    /// The microphone stopped (true) or resumed (false) delivering signal.
+    var onMicSignal: ((Bool) -> Void)?
 
     private(set) var metrics = AudioMetrics()
     private(set) var isRunning = false
@@ -60,7 +64,8 @@ final class AudioEngine {
 
     private var converter: PCMConverter?
     private var chunker = FrameChunker()
-    private var gate = SilenceGate()
+    private var gate = CaptureGate()
+    private var watchdog = MicSignalWatchdog()
     private var queue = PlaybackQueue()
     private var wasSpeaking = false
     private var interrupted = false
@@ -111,6 +116,18 @@ final class AudioEngine {
                 SheepdogLog.audio.error("voice processing unavailable: \(error.localizedDescription, privacy: .public)")
             }
         }
+        // A voice-processing unit carries its own input mute, and iOS 17 an
+        // app-wide one (AirPods' press-to-mute drives it). Either left on
+        // gives exactly the symptom seen on the phone — unmuted in the app,
+        // digital zero from the tap — so start from "not muted" and log it.
+        if input.isVoiceProcessingEnabled, input.isVoiceProcessingInputMuted {
+            SheepdogLog.audio.error("voice processing input was muted; unmuting")
+            input.isVoiceProcessingInputMuted = false
+        }
+        if AVAudioApplication.shared.isInputMuted {
+            SheepdogLog.audio.error("app input was muted at the system level; unmuting")
+            try? AVAudioApplication.shared.setInputMuted(false)
+        }
         engine.disconnectNodeOutput(player)
         engine.connect(player, to: engine.mainMixerNode, format: playbackFormat)
         engine.mainMixerNode.outputVolume = 1
@@ -141,6 +158,8 @@ final class AudioEngine {
         }
         player.play()
         isRunning = true
+        restartedForSignal = false
+        if !isMuted { watchdog.arm(at: CFAbsoluteTimeGetCurrent()) }
         let route = AVAudioSession.sharedInstance().currentRoute.outputs.map(\.portName).joined(separator: ", ")
         metrics.outputRoute = route
         SheepdogLog.audio.info("audio started: input \(format.sampleRate, privacy: .public) Hz, \(format.channelCount, privacy: .public) ch, output \(route, privacy: .public), voice processing \(input.isVoiceProcessingEnabled, privacy: .public)")
@@ -157,6 +176,8 @@ final class AudioEngine {
         converter?.reset()
         isRunning = false
         isGateClosed = false
+        watchdog.disarm()
+        reportSignal()
         setSpeaking(false)
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
@@ -164,6 +185,8 @@ final class AudioEngine {
     func setMuted(_ muted: Bool) {
         isMuted = muted
         if muted {
+            watchdog.disarm()
+            reportSignal()
             // Muted means silence, not zeros: nothing leaves the mic at all,
             // and the gate starts its bookkeeping again on unmute.
             chunker.reset()
@@ -174,6 +197,61 @@ final class AudioEngine {
                 onGate?(false)
             }
             onLevel?(0)
+        } else if isRunning {
+            watchdog.arm(at: CFAbsoluteTimeGetCurrent())
+            restartedForSignal = false
+        }
+    }
+
+    // MARK: - The gate
+
+    /// Which detector decides (Settings ▸ Diagnostics).
+    func setDetector(_ detector: CaptureGate.Detector) {
+        gate.detector = detector
+    }
+
+    /// Hold-to-talk: `true` pressed, `false` released, `nil` open mic. The
+    /// transition reaches the caller through `onGate` with the next frame.
+    func setManualGate(_ manual: Bool?) {
+        gate.manual = manual
+    }
+
+    var gateDiagnostics: CaptureGate.Diagnostics { gate.diagnostics }
+
+    /// The gate's own state right now (after a start or a reset, before any
+    /// frame has told the caller).
+    var gateIsClosed: Bool { gate.isGated }
+
+    // MARK: - No signal
+
+    private var reportedNoSignal = false
+    private var restartedForSignal = false
+
+    var noSignal: Bool { watchdog.noSignal }
+
+    private func reportSignal() {
+        guard watchdog.noSignal != reportedNoSignal else { return }
+        reportedNoSignal = watchdog.noSignal
+        onMicSignal?(watchdog.noSignal)
+    }
+
+    private func signalChanged(_ noSignal: Bool) {
+        reportSignal()
+        guard noSignal else {
+            SheepdogLog.audio.info("microphone signal is back")
+            return
+        }
+        let input = engine.inputNode
+        let format = input.inputFormat(forBus: 0)
+        SheepdogLog.audio.error("no microphone signal for \(self.watchdog.threshold, privacy: .public) s: input \(format.sampleRate, privacy: .public) Hz \(format.channelCount, privacy: .public) ch, voice processing \(input.isVoiceProcessingEnabled, privacy: .public), vp input muted \(input.isVoiceProcessingInputMuted, privacy: .public), app input muted \(AVAudioApplication.shared.isInputMuted, privacy: .public), route \(AVAudioSession.sharedInstance().currentRoute.inputs.map(\.portName).joined(separator: ","), privacy: .public)")
+        // One automatic restart per arm: a capture chain that came up
+        // silent usually comes back when it is rebuilt.
+        if !restartedForSignal {
+            restartedForSignal = true
+            if input.isVoiceProcessingEnabled, input.isVoiceProcessingInputMuted { input.isVoiceProcessingInputMuted = false }
+            // The watchdog stays tripped until a real sample arrives, so the
+            // screen does not flicker back to "listening" on a guess.
+            restartCapture()
         }
     }
 
@@ -234,6 +312,9 @@ final class AudioEngine {
             return
         }
         guard !samples.isEmpty else { return }
+        if let change = watchdog.observe(peak: SilenceGate.peak(of: samples), at: CFAbsoluteTimeGetCurrent()) {
+            signalChanged(change)
+        }
 
         var level: Float = 0
         for frame in chunker.push(samples) {
@@ -270,6 +351,9 @@ final class AudioEngine {
     /// Releases a short utterance that never filled the jitter buffer. Call
     /// from the UI timer.
     func tick() {
+        if isRunning, !isMuted, let change = watchdog.tick(at: CFAbsoluteTimeGetCurrent()) {
+            signalChanged(change)
+        }
         schedule(queue.tick(now: CFAbsoluteTimeGetCurrent()))
         metrics.recordPlayback(depthMilliseconds: queue.queueDepthMilliseconds)
         setSpeaking(queue.isSpeaking)

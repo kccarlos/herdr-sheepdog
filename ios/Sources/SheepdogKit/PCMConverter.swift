@@ -48,6 +48,10 @@ public final class PCMConverter {
             throw Failure.converterUnavailable
         }
         converter.sampleRateConverterQuality = AVAudioQuality.high.rawValue
+        // More than one input channel (some routes, some voice-processing
+        // set-ups): mix them rather than keep only the first, which can be
+        // the silent one.
+        if inputFormat.channelCount > 1 { converter.downmix = true }
         self.inputFormat = inputFormat
         self.outputFormat = outputFormat
         self.converter = converter

@@ -236,6 +236,49 @@ public final class DaemonClient: @unchecked Sendable {
         }
     }
 
+    /// `GET /api/voice/providers` — the live session's provider and the
+    /// choices. `nil` when the daemon predates provider switching (404), so
+    /// the app hides the picker instead of showing an error.
+    public func voiceProviders() async throws -> VoiceProviders? {
+        let request = try request(path: "/api/voice/providers")
+        let (data, response) = try await perform(request)
+        guard let http = response as? HTTPURLResponse else { throw DaemonError.malformed("no HTTP response") }
+        switch http.statusCode {
+        case 200 ..< 300: break
+        case 404: return nil
+        case 401: throw DaemonError.unauthorized(endpoint: endpoint.display)
+        default: throw DaemonError.http(status: http.statusCode, endpoint: endpoint.display)
+        }
+        do {
+            return try DaemonClient.decoder.decode(VoiceProviders.self, from: data)
+        } catch {
+            throw DaemonError.malformed("the voice provider list did not decode")
+        }
+    }
+
+    /// `PUT /api/voice/provider {"provider": id}` — switches the live
+    /// session. The daemon answers with the same shape as the list; an
+    /// unknown or unavailable provider is a 400 with its reason.
+    public func setVoiceProvider(_ id: String) async throws -> VoiceProviders {
+        let body = try JSONSerialization.data(withJSONObject: ["provider": id])
+        let request = try request(path: "/api/voice/provider", method: "PUT", body: body)
+        let (data, response) = try await perform(request)
+        guard let http = response as? HTTPURLResponse else { throw DaemonError.malformed("no HTTP response") }
+        switch http.statusCode {
+        case 200 ..< 300:
+            do {
+                return try DaemonClient.decoder.decode(VoiceProviders.self, from: data)
+            } catch {
+                throw DaemonError.malformed("the voice provider reply did not decode")
+            }
+        case 401:
+            throw DaemonError.unauthorized(endpoint: endpoint.display)
+        default:
+            let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+            throw DaemonError.rejected(status: http.statusCode, message: (object?["error"] as? String) ?? "")
+        }
+    }
+
     private func get<T: Decodable>(_ type: T.Type, path: String, query: [URLQueryItem] = []) async throws -> T {
         let request = try request(path: path, query: query)
         let (data, response) = try await perform(request)

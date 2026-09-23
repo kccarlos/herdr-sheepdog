@@ -21,7 +21,7 @@ lives in `SheepdogKit`, and the app target is SwiftUI views plus
 ┌───────┼─────────────────────┼─────────────────────┼─── SheepdogKit ───────────┐
 │  PCMConverter          WSMessage             SSEParser                        │
 │  FrameChunker          (wsproto mirror)      Hello / DaemonState / Agent      │
-│  SilenceGate                                 DaemonError                      │
+│  VoiceActivityDetector / CaptureGate         DaemonError                      │
 │  PlaybackQueue         ConversationReducer   SettingsStore / SecretStore      │
 │  AudioMetrics          SessionState          ConversationHistory / Item       │
 │                        ApprovalFlow          ConversationTimeline             │
@@ -143,7 +143,8 @@ microphone ─▶ AVAudioEngine input tap (hardware format, ~4 096 frames)
            ─▶ copy off the render thread ─▶ main actor
            ─▶ PCMConverter  (AVAudioConverter: anti-alias + rate change → 16 kHz mono Int16)
            ─▶ FrameChunker  (640 samples = 40 ms = 1 280 bytes)
-           ─▶ SilenceGate   (peak < 8 LSB for 300 ms closes; 100 ms pre-roll on reopen)
+           ─▶ CaptureGate   (VoiceActivityDetector by default; hold-to-talk override;
+                             the old SilenceGate behind a diagnostics toggle)
            ─▶ VoiceSocket   (one binary frame each)
 
 /ws binary ─▶ PlaybackQueue (150 ms jitter buffer, then chunks in order)
@@ -163,6 +164,97 @@ The input tap runs on the audio render thread, so the buffer is copied there
 and the conversion happens on the main actor, which owns the converter, the
 chunker and the gate. One copy of ~85 ms of float samples, about twelve
 times a second, is far cheaper than making that state thread-safe.
+
+### Voice detection (what gets sent)
+
+The browser's gate — peak below 8 LSB (−72 dBFS) for 300 ms — was ported
+first, and on a phone it almost never closed: Chrome runs its own noise
+suppression in front of that gate, iOS did not, so room noise streamed to
+the model continuously and came back as words ("fishing", "Discord"). It
+is replaced by `VoiceActivityDetector` (`Sources/SheepdogKit`), per 40 ms
+frame:
+
+1. **Level in the speech band.** The frame goes through a 2nd-order
+   high-pass at 300 Hz and low-pass at 3.4 kHz (fans, HVAC, handling rumble
+   and hiss are mostly outside), is cut into four 10 ms sub-blocks, and its
+   level is the **second-quietest** sub-block's energy in dBFS — sustained
+   speech barely moves, a keyboard click (one or two sub-blocks) vanishes.
+2. **Adaptive noise floor**: the 15th percentile of those levels over the
+   last 4 s, never below −72 dBFS. The pauses between words set it, not the
+   words; it follows a louder room up within the window (~3.5 s) and a
+   quieter one down within about a second.
+3. **Adaptive margin**: the gate opens at floor + 6…10 dB. The margin is
+   `4 + 2 × spread`, where spread is the 15th minus the 2nd percentile of
+   the same history (speech never reaches down there): a steady fan gets
+   6 dB, a room of other voices ~10.
+4. **Attack and hangover**: open once 120 ms (3 frames) of the last 280 ms
+   are above the margin — a window, not a run, because speech dips between
+   syllables; close after 400 ms below the margin minus 3 dB of hysteresis.
+5. **Pre-roll**: on opening, the attack window plus 100 ms of withheld audio
+   is sent ahead of the opening frame (380 ms), so the first syllable — and
+   an initial "s" the band filter does not count — is never clipped.
+
+The `/ws` contract is unchanged: `{"type":"silence","on":…}` on every
+transition, frames only while open. `CaptureGate` wraps the detector, the
+old `SilenceGate` (Settings ▸ Voice detection ▸ *Use the old peak gate*, for
+comparison) and hold-to-talk's manual override, and emits a transition
+exactly when its visible state changes, so switching mid-session never
+leaves the daemon out of step. All tunables are in `VADTuning`.
+
+**Tested with macOS text-to-speech.** `scripts/make-fixtures.sh` renders six
+voices (Samantha, Daniel, Karen, Moira, Fred, Rishi) with `say` and
+`afconvert` to 16 kHz mono PCM16 (508 KB, committed). The tests generate
+white, pink and brown noise, **babble** (the other five voices at once) and
+a **keyboard** (3–8 ms bursts 80–350 ms apart), mix them under two
+utterances at 20/10/5 dB SNR (speech at −26 dBFS active level), and score
+three voice pairs per cell. Latency is from the first frame where the voice
+is 6 dB above the noise in the speech band; coverage is the share of
+frames where the voice is above the noise (full band) that reached the
+socket.
+
+| Noise | SNR | Open latency, median / worst | Coverage (worst) | Opens on the noise between utterances |
+|---|---|---|---|---|
+| white | 20 dB | 120 / 120 ms | 100 % | 0 |
+| white | 10 dB | 120 / 160 ms | 100 % | 0 |
+| white | 5 dB | 120 / 160 ms | 100 % | 0 |
+| pink | 20 dB | 120 / 160 ms | 100 % | 0 |
+| pink | 10 dB | 160 / 200 ms | 100 % | 0 |
+| pink | 5 dB | 120 / 160 ms | 100 % | 0 |
+| brown | 20 dB | 160 / 200 ms | 100 % | 0 |
+| brown | 10 dB | 120 / 120 ms | 100 % | 0 |
+| brown | 5 dB | 120 / 120 ms | 100 % | 0 |
+| babble | 20 dB | 120 / 160 ms | 100 % | 0 |
+| babble | 10 dB | 120 / 160 ms | 100 % | 0 |
+| babble | 5 dB | 160 / **1 120 ms** | **29 %** | 0 |
+| clicks | 20 dB | 160 / 200 ms | 100 % | 0 |
+| clicks | 10 dB | 160 / 200 ms | 100 % | 0 |
+| clicks | 5 dB | 160 / 200 ms | 100 % | 0 |
+
+Noise alone, 60 s of each kind at −31, −45 and −60 dBFS: **0 opens** in
+every one of the 15 runs (the brief's limit was 1 per 10 s). Loud clicks at
+−20 dBFS: 0. The one weak cell is **5 dB babble** — one voice barely above a
+room of others — where Fred's "Stop." is lost and the gate opens on the
+next words; it is asserted separately (at most two of six utterances late,
+mean coverage ≥ 80 %). Voice Isolation (below) is the answer for that room.
+The same room noise at −50 dBFS went through the old peak gate **100 %**
+and through the detector **0 %** (`testTheOldPeakGateStreamedTheRoomAndTheDetectorDoesNot`).
+
+**Voice Isolation.** iOS's microphone modes (Standard, Voice Isolation,
+Wide Spectrum) apply before the app sees a sample, to apps using voice
+processing. Settings ▸ Microphone mode shows `AVCaptureDevice.activeMicrophoneMode`
+and opens the system panel (`showSystemUserInterface(.microphoneModes)`);
+a one-time tip suggests it after the first listening session.
+
+**No microphone signal.** `MicSignalWatchdog`: unmuted, capturing, and every
+sample digital zero (or no buffers at all) for 3 s means the capture path is
+broken, not that the room is quiet — a real room is never exactly zero. The
+status line says "No microphone signal — check the mic", the mic button gets
+an amber badge, the engine logs the input format, voice-processing state and
+both input mutes, and rebuilds the capture chain once. At start the engine
+also clears the voice-processing unit's own input mute and iOS 17's app-wide
+input mute (AirPods' press-to-mute drives it) — either left on gives exactly
+the 25 s of zeros seen on the phone on 2026-09-22 — and a multi-channel
+input is downmixed rather than reduced to its first channel.
 
 ### Sample rates
 
@@ -190,6 +282,30 @@ On the iOS 26 simulator on an Apple-silicon Mac, over 117 tap buffers of
 The same two numbers are live in the app under Settings ▸ About, and go to
 `os_log` under the subsystem `com.kccarlos.sheepdog`, categories `audio`,
 `socket` and `session`.
+
+## The voice bar's words
+
+`VoiceBarModel` also owns what the bar *says*. The mic button is never a
+bare microphone: live, it shows the input level as a ring and reads "Mute
+microphone"; muted, it is a red slashed mic reading "Unmute microphone",
+and the status line says "Muted — tap to unmute". Connected and unmuted the
+status line says "Listening — just talk", and the first time that happens a
+coach mark says "Just talk — Sheepdog is listening. Tap the mic only to
+mute." (People had been muting to talk.) **Hold to talk** (Settings,
+off by default) turns the orb into a walkie-talkie — press opens the gate
+with its pre-roll, release closes it, pressing while the dog talks stops
+it — and hides Mute.
+
+## The voice provider
+
+`GET /api/voice/providers` lists what the daemon can run the live session on
+(Gemini Live, GPT-Live); `PUT /api/voice/provider {"provider":…}` switches.
+Settings ▸ Voice lists them, unavailable ones disabled with the daemon's
+reason, GPT-Live marked "Billed per minute". `/api/hello`, `/api/state`
+(`voice_provider`, `voice_model`) and the `/ws` `status` (`provider`) are
+decoded as optional, and a 404 on the list hides the section, so the app
+works unchanged against an older daemon. The connection sheet shows the
+provider and model.
 
 ## The orb
 

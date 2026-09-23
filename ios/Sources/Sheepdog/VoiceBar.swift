@@ -1,22 +1,30 @@
 import SheepdogKit
 import SwiftUI
 
-/// The bottom bar: Mute, the orb, and End (✕), each in a fixed 56–64 pt
-/// slot so a hidden or disabled control never shifts the orb. Replaces the
-/// old display-only orb and the Connect/Mute/Stop pill row — stopping now
-/// lives on the orb itself (`VoiceBarModel.orbAction`), so there is no
-/// separate Stop button any more.
+/// The bottom bar: the mic (mute) button, the orb, and End (✕), each in a
+/// fixed 56–64 pt slot so a hidden or disabled control never shifts the
+/// orb. Stopping the dog lives on the orb itself (`VoiceBarModel.orbAction`).
+///
+/// The mic button is never a bare microphone that invites "press to talk":
+/// while the mic is live it shows the input level as a ring and says
+/// "Mute microphone"; muted, it is a red slashed mic. In hold-to-talk the
+/// orb is the talk button and the mic button is gone.
 struct VoiceBarView: View {
     let state: SessionState
     let level: Float
     let muted: Bool
     let voiceName: String
+    var talkMode: TalkMode = .openMic
+    var holding = false
+    var noSignal = false
     let onConnect: () -> Void
     let onStop: () -> Void
     let onMute: () -> Void
     let onEnd: () -> Void
+    var onPress: () -> Void = {}
+    var onRelease: () -> Void = {}
 
-    private var model: VoiceBarModel { VoiceBarModel(state: state) }
+    private var model: VoiceBarModel { VoiceBarModel(state: state, talkMode: talkMode) }
 
     var body: some View {
         HStack(spacing: 20) {
@@ -31,17 +39,17 @@ struct VoiceBarView: View {
 
     private var muteButton: some View {
         let hidden = model.muteAvailability == .hidden
-        return CircleButton(
-            systemImage: muted ? "mic.slash.fill" : "mic.fill",
-            title: muted ? "Unmute" : "Mute",
-            hint: SessionViewModel.muteHint,
-            tint: muted ? Color(.systemRed) : Color(.label),
-            filled: muted,
-            enabled: model.muteAvailability == .enabled,
+        let enabled = model.muteAvailability == .enabled
+        return MicButton(
+            muted: muted,
+            level: enabled && !muted ? level : 0,
+            live: enabled && !muted,
+            noSignal: noSignal,
+            enabled: enabled,
             action: onMute
         )
         .opacity(hidden ? 0 : 1)
-        .allowsHitTesting(!hidden && model.muteAvailability == .enabled)
+        .allowsHitTesting(!hidden && enabled)
         .accessibilityHidden(hidden)
         .accessibilityIdentifier("controls.mute")
     }
@@ -62,25 +70,131 @@ struct VoiceBarView: View {
         .accessibilityIdentifier("controls.end")
     }
 
+    @ViewBuilder
     private var orbButton: some View {
-        Button(action: tapOrb) {
-            OrbGlyph(state: state, level: level, size: 64)
+        if model.orbAction == .holdToTalk {
+            HoldToTalkOrb(state: state, level: level, holding: holding, onPress: onPress, onRelease: onRelease)
+                .accessibilityIdentifier("controls.orb")
+        } else {
+            Button(action: tapOrb) {
+                OrbGlyph(state: state, level: level, size: 64)
+            }
+            .disabled(model.orbAction == .none)
+            .accessibilityLabel(orbAccessibilityLabel)
+            .accessibilityIdentifier("controls.orb")
         }
-        .disabled(model.orbAction == .none)
-        .accessibilityLabel(orbAccessibilityLabel)
-        .accessibilityIdentifier("controls.orb")
     }
 
     private func tapOrb() {
         switch model.orbAction {
         case .connect: onConnect()
         case .stop: onStop()
-        case .none: break
+        case .holdToTalk, .none: break
         }
     }
 
     private var orbAccessibilityLabel: String {
         state == .disconnected ? "Connect" : state.accessibilityLabel(voiceName: voiceName)
+    }
+}
+
+/// The mic button. Live: the microphone inside a ring that follows the
+/// input level, so it reads as "this is on and hearing you". Muted: a red,
+/// filled, slashed mic. No signal: an amber ring and a warning badge.
+struct MicButton: View {
+    let muted: Bool
+    let level: Float
+    let live: Bool
+    var noSignal = false
+    let enabled: Bool
+    let action: () -> Void
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var ringFraction: CGFloat {
+        guard live, !noSignal else { return 0 }
+        return CGFloat(min(1, sqrt(max(0, level)) * 1.8))
+    }
+
+    private var tint: Color {
+        if muted { return Color(.systemRed) }
+        if noSignal { return Theme.blocked }
+        return enabled ? Color(.label) : Color(.tertiaryLabel)
+    }
+
+    var body: some View {
+        Button(action: action) {
+            ZStack {
+                Circle()
+                    .fill(muted ? Color(.systemRed).opacity(0.18) : Color(.secondarySystemBackground))
+                if muted {
+                    Circle().strokeBorder(Color(.systemRed).opacity(0.6), lineWidth: 1.5)
+                } else if live {
+                    // The level ring: a faint track, and an arc that grows
+                    // with the voice.
+                    Circle()
+                        .strokeBorder(Theme.done.opacity(0.25), lineWidth: 3)
+                    Circle()
+                        .trim(from: 0, to: max(0.04, ringFraction))
+                        .stroke(noSignal ? Theme.blocked : Theme.done, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                        .rotationEffect(.degrees(-90))
+                        .padding(1.5)
+                        .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: ringFraction)
+                }
+                Image(systemName: muted ? "mic.slash.fill" : "mic.fill")
+                    .font(.system(size: 20, weight: .medium))
+                    .foregroundStyle(tint)
+                if noSignal, !muted {
+                    Image(systemName: "exclamationmark.circle.fill")
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundStyle(Theme.blocked)
+                        .background(Circle().fill(Color(.systemBackground)))
+                        .offset(x: 19, y: -19)
+                }
+            }
+            .frame(width: 56, height: 56)
+        }
+        .disabled(!enabled)
+        .accessibilityLabel(VoiceBarModel.muteLabel(muted: muted))
+        .accessibilityValue(muted ? "Muted" : (noSignal ? "No microphone signal" : "Listening"))
+        .accessibilityHint(SessionViewModel.muteHint)
+    }
+}
+
+/// The orb as a walkie-talkie button: press and hold to talk, release to
+/// send. VoiceOver gets a toggle instead of a hold.
+struct HoldToTalkOrb: View {
+    let state: SessionState
+    let level: Float
+    let holding: Bool
+    let onPress: () -> Void
+    let onRelease: () -> Void
+
+    @GestureState private var pressed = false
+
+    var body: some View {
+        OrbGlyph(state: holding ? .listening : state, level: holding ? level : 0, size: 64)
+            .overlay(
+                Circle()
+                    .strokeBorder(Theme.done, lineWidth: holding ? 3 : 0)
+                    .scaleEffect(holding ? 1.12 : 1)
+            )
+            .scaleEffect(holding ? 1.08 : 1)
+            .animation(.spring(duration: 0.2), value: holding)
+            .contentShape(Circle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .updating($pressed) { _, pressed, _ in pressed = true }
+            )
+            .onChange(of: pressed) { _, isPressed in
+                isPressed ? onPress() : onRelease()
+            }
+            .accessibilityElement()
+            .accessibilityAddTraits(.isButton)
+            .accessibilityLabel(holding ? "Talking. Double-tap to send" : "Hold to talk")
+            .accessibilityAction {
+                holding ? onRelease() : onPress()
+            }
     }
 }
 
@@ -172,31 +286,5 @@ struct OrbGlyph: View {
         withAnimation(.easeInOut(duration: 1.3).repeatForever(autoreverses: true)) {
             pulse = true
         }
-    }
-}
-
-struct CircleButton: View {
-    let systemImage: String
-    let title: String
-    var hint: String? = nil
-    let tint: Color
-    let filled: Bool
-    let enabled: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: systemImage)
-                .font(.system(size: 20, weight: .medium))
-                .frame(width: 56, height: 56)
-                .background(
-                    Circle().fill(filled ? tint.opacity(0.18) : Color(.secondarySystemBackground))
-                )
-                .overlay(Circle().strokeBorder(filled ? tint.opacity(0.6) : .clear, lineWidth: 1.5))
-                .foregroundStyle(enabled ? tint : Color(.tertiaryLabel))
-        }
-        .disabled(!enabled)
-        .accessibilityLabel(title)
-        .accessibilityHint(hint ?? "")
     }
 }

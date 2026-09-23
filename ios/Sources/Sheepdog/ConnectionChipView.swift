@@ -88,6 +88,10 @@ private struct ConnectionDetailView: View {
                         .accessibilityIdentifier("chip.voiceName")
                     LabeledContent("Voice status", value: model.state.title)
                         .accessibilityIdentifier("chip.voiceStatus")
+                    if let voice = model.voiceProviderDisplay {
+                        LabeledContent("Voice provider", value: voice)
+                            .accessibilityIdentifier("chip.voiceProvider")
+                    }
                     if let brain = model.brain?.display {
                         LabeledContent("Brain", value: brain)
                             .accessibilityIdentifier("chip.brain")
@@ -111,7 +115,11 @@ private struct ConnectionDetailView: View {
                     Button("Done") { dismiss() }
                 }
             }
-            .task { await ping() }
+            .task {
+                async let providers: Void = model.loadVoiceProviders()
+                await ping()
+                await providers
+            }
         }
     }
 

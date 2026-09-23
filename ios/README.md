@@ -28,6 +28,10 @@ page at `/voice` does (`docs/ws-contract.md`): PCM16 mono, 16 kHz up,
 |---|---|
 | ![Mute, orb, End](docs/screenshots/16-voicebar-connected-voice-off.png) | ![Connection chip popover](docs/screenshots/17-voicebar-chip-popover.png) |
 
+| Just talk | Muted | Voice and microphone | Voice detection |
+|---|---|---|---|
+| ![Coach mark](docs/screenshots/19-coach-mark.png) | ![Muted](docs/screenshots/21-mic-muted.png) | ![Settings: voice provider and microphone](docs/screenshots/22-settings-voice-microphone.png) | ![Settings: voice detection](docs/screenshots/23-settings-voice-detection.png) |
+
 ## Build it
 
 No third-party dependencies. The Xcode project is generated, not committed.
@@ -81,9 +85,25 @@ non-goal), so keep this to a network you trust — your LAN, or Tailscale.
   the dog says comes back at 24 kHz and is played gaplessly. Echo
   cancellation is on (`.playAndRecord` / `.voiceChat`), so the dog does not
   hear itself. Calls, Siri and AirPods going in or out are handled.
-- **A silence gate**, the same one the browser page uses (peak below 8 LSB
-  for 300 ms closes it, 100 ms of pre-roll when it reopens), so a quiet room
-  does not degrade the model session.
+- **A voice-activity detector**, not a silence gate: audio goes to the
+  daemon only while your voice is clearly above the room's noise floor
+  (speech band, adaptive floor and margin, 120 ms attack, 400 ms hangover,
+  380 ms of pre-roll so the first syllable is kept). Room noise, fans, other
+  voices and keyboards stay home instead of becoming words. Tested against
+  macOS text-to-speech in five kinds of noise — numbers in
+  [`docs/architecture.md`](docs/architecture.md#voice-detection-what-gets-sent).
+  Settings ▸ Voice detection shows the live level, noise floor, gate state
+  and spurious opens, with the browser's old peak gate there to compare.
+- **Just talk.** The status line says "Listening — just talk"; the mic
+  button shows your level and only mutes ("Muted — tap to unmute"); a
+  first-run coach mark says so. **Hold to talk** is an option in Settings.
+- **Microphone mode.** Settings shows Standard / Voice Isolation / Wide
+  Spectrum and opens iOS's panel; in a noisy room, choose Voice Isolation.
+- **No microphone signal** is said, not silently gated: 3 s of digital zero
+  while unmuted and the status line tells you, and capture restarts once.
+- **Voice provider.** Against a daemon that offers more than one (Gemini
+  Live, GPT-Live), Settings ▸ Voice switches between them; GPT-Live is
+  marked as billed per minute.
 - **The flock**, from `/api/state` and the `/events` stream: one chip per
   agent with a state dot, the pending question as its subtitle, and a
   highlight when it is blocked. Tap one for its task, its last result and
@@ -140,8 +160,7 @@ non-goal), so keep this to a network you trust — your LAN, or Tailscale.
 ## What v1 does not do
 
 - No text input: this is a voice client. Use `/debug` on the Mac to type.
-- No settings beyond the daemon address, the token and the lock-screen
-  toggle. No chattiness control, no model picker, no event log viewer.
+- No chattiness control, no supervisor-model picker, no event log viewer.
 - No push notifications: the app has to be open (or holding the audio
   session) to hear a push.
 - Nothing has run on a real device yet — see [`docs/status.md`](docs/status.md).
@@ -149,12 +168,15 @@ non-goal), so keep this to a network you trust — your LAN, or Tailscale.
 ## Layout
 
 - `Sources/SheepdogKit` — everything testable without hardware: the wsproto
-  mirror, the HTTP/SSE client, the WebSocket, the silence gate, the sample
+  mirror, the HTTP/SSE client, the WebSocket, the voice-activity detector
+  and the capture gate, the microphone-signal watchdog, the sample
   rate conversion, the playback scheduling, the conversation reducer, the
   orb's state machine, the keychain wrapper.
 - `Sources/Sheepdog` — SwiftUI views, `@MainActor` view models, the audio
   engine.
-- `Tests/SheepdogKitTests` — the unit suite (runs in CI).
+- `Tests/SheepdogKitTests` — the unit suite (runs in CI), with the TTS
+  speech fixtures in `Tests/SheepdogKitTests/Audio` (regenerate with
+  `scripts/make-fixtures.sh`).
 - `Tests/SheepdogUITests` — an end-to-end walkthrough against a real daemon;
   see `docs/status.md` for how to run it.
 

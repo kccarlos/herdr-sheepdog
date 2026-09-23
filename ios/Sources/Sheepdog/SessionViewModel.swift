@@ -19,6 +19,11 @@ final class SessionViewModel: ObservableObject {
         var hint: String?
         /// Shown as a button when the user can do something about it.
         var retryTitle: String?
+        /// What that button does: reconnect (the default) or open the
+        /// system's microphone-mode panel.
+        var action: Action = .retry
+
+        enum Action: Equatable { case retry, microphoneModes }
     }
 
     // MARK: - Published state
@@ -48,11 +53,51 @@ final class SessionViewModel: ObservableObject {
     @Published private(set) var brain: BrainInfo?
     @Published var banner: Banner?
     @Published var isMuted = false
+
+    // Voice robustness: talk mode, the gate's diagnostics, the microphone.
+    @Published private(set) var talkMode: TalkMode = .openMic
+    /// Hold-to-talk: the orb is being held.
+    @Published private(set) var holding = false
+    /// The microphone delivers only digital zero while unmuted.
+    @Published private(set) var noMicSignal = false
+    @Published private(set) var gateDiagnostics = CaptureGate.Diagnostics()
+    @Published private(set) var detector: CaptureGate.Detector = .voiceActivity
+    /// The first-run "just talk" coach mark.
+    @Published private(set) var showCoachMark = false
+    /// Control Center ▸ Mic Mode, as iOS reports it.
+    @Published private(set) var microphoneMode: MicrophoneModeName = .standard
+    @Published private(set) var preferredMicrophoneMode: MicrophoneModeName = .standard
+
+    // The voice provider (GET/PUT /api/voice/provider[s]).
+    /// nil until loaded, and when the daemon has no provider API (404).
+    @Published private(set) var voiceProviders: VoiceProviders?
+    @Published private(set) var switchingProvider = false
+    @Published var providerError: String?
+    /// From the `/ws` status message, `/api/state` and `/api/hello`.
+    @Published private(set) var liveVoiceProvider: String?
+    @Published private(set) var stateVoiceProvider: String?
+    @Published private(set) var stateVoiceModel: String?
     /// True from the moment Connect is tapped until Disconnect.
     @Published private(set) var wantsConnection = false
     @Published var showSettings = false
 
     var voiceName: String { hello?.displayName ?? "Sheepdog" }
+
+    /// The line above the voice bar: what to do, not only what is happening.
+    var statusLine: String {
+        VoiceBarModel.statusLine(state: state, talkMode: talkMode, holding: holding, noSignal: noMicSignal)
+    }
+
+    /// "Gemini Live · gemini-3.8-live", from whichever source knows.
+    var voiceProviderDisplay: String? {
+        let id = liveVoiceProvider ?? voiceProviders?.provider ?? stateVoiceProvider ?? hello?.voiceProvider
+        let option = voiceProviders?.providers.first { $0.id == id }
+        let model = (id == voiceProviders?.provider ? voiceProviders?.model : nil)
+            ?? (id == stateVoiceProvider ? stateVoiceModel : nil)
+            ?? (id == hello?.voiceProvider ? hello?.voiceModel : nil)
+            ?? option?.model
+        return VoiceProviders.display(provider: option?.displayName ?? id, model: model)
+    }
     var daemonVersion: String? { hello?.version }
     var endpointDisplay: String { settings.endpoint?.display ?? "not set" }
     var isConfigured: Bool { settings.endpoint != nil }
@@ -109,6 +154,17 @@ final class SessionViewModel: ObservableObject {
         let endpoint = settings.endpoint ?? DaemonEndpoint(host: "127.0.0.1")
         self.client = DaemonClient(endpoint: endpoint)
         self.socket = VoiceSocket(endpoint: endpoint)
+        talkMode = settings.talkMode
+        detector = settings.detector
+        audio.setDetector(detector)
+        if talkMode == .holdToTalk { audio.setManualGate(false) }
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-sheepdogResetHints") {
+            for key in [Self.muteHintShownKey, Self.coachShownKey, Self.micTipShownKey] {
+                UserDefaults.standard.removeObject(forKey: key)
+            }
+        }
+        #endif
         wire()
         // The last conversation, at once: before the network, or without it.
         loadCache()
@@ -197,6 +253,7 @@ final class SessionViewModel: ObservableObject {
             let state = try await client.state()
             apply(state)
             hello = try? await client.hello()
+            await loadVoiceProviders()
         } catch let error as DaemonError {
             fail(error)
             return
@@ -245,6 +302,10 @@ final class SessionViewModel: ObservableObject {
         speaking = false
         thinkingExpiry = nil
         micLevel = 0
+        holding = false
+        noMicSignal = false
+        liveVoiceProvider = nil
+        if talkMode == .holdToTalk { audio.setManualGate(false) }
         refresh()
     }
 
@@ -287,6 +348,168 @@ final class SessionViewModel: ObservableObject {
 
     static let muteHint = "Mute stops your microphone; Sheepdog can still talk."
     private static let muteHintShownKey = "hint.mute.shown"
+    private static let coachShownKey = "hint.coach.shown"
+    private static let micTipShownKey = "hint.micmode.shown"
+
+    // MARK: - Talk mode, hold to talk, the detector
+
+    func setTalkMode(_ mode: TalkMode) {
+        guard mode != talkMode else { return }
+        talkMode = mode
+        settings.talkMode = mode
+        holding = false
+        if mode == .holdToTalk {
+            // Not holding *is* muted in this mode; a real mute on top would
+            // make the orb do nothing.
+            if isMuted { setMuted(false) }
+            audio.setManualGate(false)
+        } else {
+            audio.setManualGate(nil)
+        }
+        refresh()
+    }
+
+    /// The orb went down in hold-to-talk. Talking over the dog stops it.
+    func pressToTalk() {
+        guard talkMode == .holdToTalk, !holding, VoiceBarModel(state: state, talkMode: talkMode).orbAction == .holdToTalk else { return }
+        if speaking || state == .thinking || state == .stalled { stop() }
+        holding = true
+        audio.setManualGate(true)
+        #if DEBUG
+        if fakeVoice { setFakeGate(closed: false) }
+        #endif
+        Haptics.tap()
+        refresh()
+    }
+
+    /// The orb came up: close the gate, the daemon hears the silence.
+    func releaseToTalk() {
+        guard holding else { return }
+        holding = false
+        audio.setManualGate(talkMode == .holdToTalk ? false : nil)
+        #if DEBUG
+        if fakeVoice { setFakeGate(closed: true) }
+        #endif
+        refresh()
+    }
+
+    func setDetector(_ detector: CaptureGate.Detector) {
+        guard detector != self.detector else { return }
+        self.detector = detector
+        settings.detector = detector
+        audio.setDetector(detector)
+    }
+
+    // MARK: - Coach mark and the microphone-mode tip
+
+    /// Once per install, the first time the dog is actually listening:
+    /// "just talk". After that (the next time), the Voice Isolation tip.
+    private func offerListeningHints() {
+        guard talkMode == .openMic, VoiceBarModel.isListening(state), wantsConnection else { return }
+        let defaults = UserDefaults.standard
+        if !defaults.bool(forKey: Self.coachShownKey) {
+            guard !showCoachMark else { return }
+            defaults.set(true, forKey: Self.coachShownKey)
+            showCoachMark = true
+            Task { [weak self] in
+                try? await Task.sleep(nanoseconds: 9_000_000_000)
+                self?.dismissCoachMark()
+            }
+            return
+        }
+        guard !showCoachMark, banner == nil, !defaults.bool(forKey: Self.micTipShownKey) else { return }
+        refreshMicrophoneMode()
+        guard microphoneMode != .voiceIsolation else { return }
+        defaults.set(true, forKey: Self.micTipShownKey)
+        show(Banner(
+            tone: .info,
+            message: "Noisy room? Turn on Voice Isolation.",
+            hint: "iOS filters out the room before \(voiceName) hears it. It is in Control Center ▸ Mic Mode, or Settings ▸ Microphone mode.",
+            retryTitle: "Microphone mode",
+            action: .microphoneModes
+        ))
+    }
+
+    func dismissCoachMark() {
+        guard showCoachMark else { return }
+        showCoachMark = false
+    }
+
+    func refreshMicrophoneMode() {
+        let active = MicrophoneModeName(rawValue: AVCaptureDevice.activeMicrophoneMode.rawValue)
+        let preferred = MicrophoneModeName(rawValue: AVCaptureDevice.preferredMicrophoneMode.rawValue)
+        if active != microphoneMode { microphoneMode = active }
+        if preferred != preferredMicrophoneMode { preferredMicrophoneMode = preferred }
+    }
+
+    /// Control Center's Mic Mode panel, on top of the app.
+    func showMicrophoneModes() {
+        AVCaptureDevice.showSystemUserInterface(.microphoneModes)
+    }
+
+    // MARK: - Voice provider
+
+    func loadVoiceProviders() async {
+        guard settings.endpoint != nil else { return }
+        do {
+            let list = try await client.voiceProviders()
+            #if DEBUG
+            if list == nil, ProcessInfo.processInfo.arguments.contains("-sheepdogFakeProviders") {
+                voiceProviders = Self.fakeProviders(current: voiceProviders?.provider ?? "gemini")
+                return
+            }
+            #endif
+            voiceProviders = list
+        } catch {
+            // Hidden rather than an error: the picker is a convenience, and
+            // the connection itself reports what is wrong.
+            SheepdogLog.session.error("voice providers: \(String(describing: error), privacy: .public)")
+            voiceProviders = nil
+        }
+    }
+
+    func selectVoiceProvider(_ id: String) {
+        guard id != voiceProviders?.provider, !switchingProvider else { return }
+        switchingProvider = true
+        providerError = nil
+        Task { [weak self] in
+            guard let self else { return }
+            defer { self.switchingProvider = false }
+            do {
+                let list = try await self.client.setVoiceProvider(id)
+                self.voiceProviders = list
+                self.liveVoiceProvider = list.provider
+                Haptics.tap()
+            } catch let error as DaemonError {
+                #if DEBUG
+                if ProcessInfo.processInfo.arguments.contains("-sheepdogFakeProviders") {
+                    self.voiceProviders = Self.fakeProviders(current: id)
+                    self.liveVoiceProvider = id
+                    return
+                }
+                #endif
+                self.providerError = error.message
+            } catch {
+                self.providerError = error.localizedDescription
+            }
+            await self.refreshState(quiet: true)
+        }
+    }
+
+    #if DEBUG
+    /// The contract's example, for screenshots against a daemon that does
+    /// not serve `/api/voice/providers` yet.
+    static func fakeProviders(current: String) -> VoiceProviders {
+        VoiceProviders(
+            provider: current,
+            model: current == "openai" ? "gpt-live-1" : "gemini-3.8-live",
+            providers: [
+                VoiceProviderOption(id: "gemini", label: "Gemini Live", model: "gemini-3.8-live", available: true),
+                VoiceProviderOption(id: "openai", label: "GPT-Live", model: "gpt-live-1", available: true, billing: "per_minute"),
+            ]
+        )
+    }
+    #endif
 
     /// Once per install: what Mute does and does not do.
     private func offerMuteHint() {
@@ -339,6 +562,11 @@ final class SessionViewModel: ObservableObject {
             self.speaking = speaking
             self.refresh()
         }
+        audio.onMicSignal = { [weak self] noSignal in
+            guard let self else { return }
+            self.noMicSignal = noSignal
+            if noSignal { Haptics.answerFailed() }
+        }
         audio.onNotice = { [weak self] notice in
             guard let self else { return }
             self.reducer.apply(.notice(notice))
@@ -384,6 +612,15 @@ final class SessionViewModel: ObservableObject {
             voiceStatus = message.voice
             closedReason = message.reason
             stalled = message.stalled ?? false
+            if let provider = message.provider { liveVoiceProvider = provider }
+            #if DEBUG
+            if fakeVoice {
+                // Screenshots against a `--voice=off` daemon: pretend the
+                // live session is up, without touching the microphone.
+                voiceStatus = .connected
+                closedReason = nil
+            }
+            #endif
             if let muted = message.muted, muted != isMuted {
                 // The daemon's view wins: it is the one dropping frames.
                 isMuted = muted
@@ -433,9 +670,23 @@ final class SessionViewModel: ObservableObject {
         daemonVoiceOff = false
         saidVoiceIsOff = false
         guard !audio.isRunning, !isMuted else { return }
+        #if DEBUG
+        if fakeVoice {
+            setFakeGate(closed: talkMode == .holdToTalk)
+            return
+        }
+        #endif
         do {
             try audio.start(background: settings.keepListeningWhenLocked)
             metrics = audio.metrics
+            // Hold-to-talk starts closed without a transition; tell the
+            // daemon, which treats a new client as ungated.
+            let closed = audio.gateIsClosed
+            if closed != gateClosed {
+                gateClosed = closed
+                socket.gateClosed = closed
+                socket.send(.silence(closed))
+            }
         } catch {
             show(Banner(
                 tone: .warning,
@@ -589,6 +840,7 @@ final class SessionViewModel: ObservableObject {
                 self.metrics = self.audio.metrics
                 self.socket.gatedFrames = self.audio.gatedFrames
                 self.socket.inputPeak = self.audio.inputPeak
+                self.updateDiagnostics()
                 if let expiry = self.thinkingExpiry, expiry < Date() { self.thinkingExpiry = nil }
                 self.refresh()
             }
@@ -627,6 +879,8 @@ final class SessionViewModel: ObservableObject {
         applyApproval(approvalFlow.present(state.pendingAction), haptic: true)
         daemonVoiceOff = state.voice.isOff || state.voice.status == "closed"
         brain = state.brain
+        stateVoiceProvider = state.voiceProvider
+        stateVoiceModel = state.voiceModel
     }
 
     // MARK: - Conversation history
@@ -816,6 +1070,66 @@ final class SessionViewModel: ObservableObject {
         connect()
     }
 
+    /// The banner's button.
+    func bannerAction() {
+        switch banner?.action ?? .retry {
+        case .retry:
+            retry()
+        case .microphoneModes:
+            banner = nil
+            showMicrophoneModes()
+        }
+    }
+
+    // MARK: - Diagnostics
+
+    private func updateDiagnostics() {
+        #if DEBUG
+        if fakeVoice {
+            fakeTick()
+            return
+        }
+        #endif
+        let next = audio.gateDiagnostics
+        if next != gateDiagnostics { gateDiagnostics = next }
+        if noMicSignal != audio.noSignal, !audio.isRunning { noMicSignal = false }
+        refreshMicrophoneMode()
+    }
+
+    #if DEBUG
+    /// `-sheepdogFakeVoice`: the voice states without a live session or a
+    /// microphone, for screenshots and UI tests against `--voice=off`.
+    let fakeVoice = ProcessInfo.processInfo.arguments.contains("-sheepdogFakeVoice")
+    private var fakePhase = 0.0
+
+    private func setFakeGate(closed: Bool) {
+        gateClosed = closed
+        socket.gateClosed = closed
+        refresh()
+    }
+
+    private func fakeTick() {
+        guard wantsConnection, voiceStatus == .connected else { return }
+        fakePhase += 0.35
+        let speakingNow = !isMuted && (talkMode == .openMic || holding)
+        let level = speakingNow ? Float(0.25 + 0.2 * sin(fakePhase)) : 0
+        micLevel = level
+        gateDiagnostics = CaptureGate.Diagnostics(
+            detector: detector,
+            levelDBFS: speakingNow ? -31 + 4 * sin(fakePhase) : -58,
+            floorDBFS: detector == .voiceActivity ? -62 : nil,
+            marginDB: detector == .voiceActivity ? 6 : nil,
+            isOpen: speakingNow,
+            opens: 4,
+            spuriousOpens: 0,
+            gatedFrames: 812,
+            peak: speakingNow ? 9_400 : 30,
+            manual: talkMode == .holdToTalk ? holding : nil
+        )
+        refreshMicrophoneMode()
+    }
+    #endif
+
     // MARK: - Derivation
 
     private func refresh() {
@@ -830,7 +1144,10 @@ final class SessionViewModel: ObservableObject {
             thinking: thinkingExpiry != nil
         )
         let next = SessionState.resolve(inputs)
-        if next != state { state = next }
+        if next != state {
+            state = next
+            offerListeningHints()
+        }
         refreshConnectionChip()
     }
 

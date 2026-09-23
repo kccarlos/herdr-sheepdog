@@ -50,4 +50,68 @@ final class VoiceBarModelTests: XCTestCase {
             _ = VoiceBarModel(state: state)
         }
     }
+
+    // MARK: - Hold to talk
+
+    func testHoldToTalkMakesTheOrbTheTalkButtonAndHidesMute() {
+        for state in [SessionState.idle, .listening, .silent, .muted, .thinking, .stalled, .speaking] {
+            let m = VoiceBarModel(state: state, talkMode: .holdToTalk)
+            XCTAssertEqual(m.orbAction, .holdToTalk, "\(state)")
+            XCTAssertEqual(m.muteAvailability, .hidden, "\(state): not holding is muted, so there is no Mute")
+            XCTAssertTrue(m.endVisible, "\(state)")
+        }
+    }
+
+    func testHoldToTalkLeavesConnectingAndDisconnectedAlone() {
+        XCTAssertEqual(VoiceBarModel(state: .disconnected, talkMode: .holdToTalk), VoiceBarModel(state: .disconnected))
+        for state in [SessionState.connecting, .reconnecting, .voiceOff] {
+            let m = VoiceBarModel(state: state, talkMode: .holdToTalk)
+            XCTAssertEqual(m.orbAction, .none, "\(state)")
+            XCTAssertEqual(m.muteAvailability, .hidden, "\(state)")
+        }
+    }
+
+    func testOpenMicIsTheDefaultAndUnchanged() {
+        for state in SessionState.allCases {
+            XCTAssertEqual(VoiceBarModel(state: state, talkMode: .openMic), VoiceBarModel(state: state))
+        }
+    }
+
+    // MARK: - Words
+
+    func testTheStatusLineSaysWhatToDo() {
+        XCTAssertEqual(VoiceBarModel.statusLine(state: .listening), "Listening — just talk")
+        XCTAssertEqual(VoiceBarModel.statusLine(state: .silent), "Listening — just talk", "a closed gate is still listening")
+        XCTAssertEqual(VoiceBarModel.statusLine(state: .muted), "Muted — tap to unmute")
+        XCTAssertEqual(VoiceBarModel.statusLine(state: .voiceOff), "Voice is off on the daemon")
+        XCTAssertEqual(VoiceBarModel.statusLine(state: .speaking), "Speaking")
+        XCTAssertEqual(VoiceBarModel.statusLine(state: .disconnected), "Not connected")
+    }
+
+    func testTheStatusLineInHoldToTalk() {
+        XCTAssertEqual(VoiceBarModel.statusLine(state: .silent, talkMode: .holdToTalk), "Hold the orb to talk")
+        XCTAssertEqual(VoiceBarModel.statusLine(state: .listening, talkMode: .holdToTalk, holding: true), "Talking — release to send")
+        XCTAssertEqual(VoiceBarModel.statusLine(state: .speaking, talkMode: .holdToTalk), "Speaking")
+        XCTAssertEqual(VoiceBarModel.statusLine(state: .speaking, talkMode: .holdToTalk, holding: true), "Talking — release to send")
+        XCTAssertEqual(VoiceBarModel.statusLine(state: .connecting, talkMode: .holdToTalk, holding: true), "Connecting…")
+    }
+
+    func testNoMicrophoneSignalOutranksListening() {
+        for state in [SessionState.listening, .silent, .idle] {
+            XCTAssertEqual(VoiceBarModel.statusLine(state: state, noSignal: true), "No microphone signal — check the mic", "\(state)")
+            XCTAssertEqual(VoiceBarModel.statusLine(state: state, talkMode: .holdToTalk, noSignal: true), "No microphone signal — check the mic", "\(state)")
+        }
+        XCTAssertEqual(VoiceBarModel.statusLine(state: .muted, noSignal: true), "Muted — tap to unmute", "muted: silence is expected")
+        XCTAssertEqual(VoiceBarModel.statusLine(state: .speaking, noSignal: true), "Speaking")
+    }
+
+    func testTheMicButtonAlwaysNamesItsAction() {
+        XCTAssertEqual(VoiceBarModel.muteLabel(muted: false), "Mute microphone")
+        XCTAssertEqual(VoiceBarModel.muteLabel(muted: true), "Unmute microphone")
+        XCTAssertEqual(VoiceBarModel.coachMark(voiceName: "Sheepdog"), "Just talk — Sheepdog is listening. Tap the mic only to mute.")
+        XCTAssertTrue(VoiceBarModel.isListening(.listening))
+        XCTAssertTrue(VoiceBarModel.isListening(.silent))
+        XCTAssertFalse(VoiceBarModel.isListening(.muted))
+        XCTAssertFalse(VoiceBarModel.isListening(.voiceOff))
+    }
 }

@@ -39,6 +39,9 @@ public struct WSMessage: Codable, Equatable, Sendable {
     public var muted: Bool?
     public var reason: String?
     public var stalled: Bool?
+    /// `status`: the live session's provider (`gemini`, `openai`), from
+    /// daemons that can switch provider.
+    public var provider: String?
     /// `transcript`.
     public var dir: Direction?
     public var final: Bool?
@@ -46,7 +49,7 @@ public struct WSMessage: Codable, Equatable, Sendable {
     public var message: String?
 
     enum CodingKeys: String, CodingKey {
-        case type, on, text, voice, muted, reason, stalled, dir, final, message, peak
+        case type, on, text, voice, muted, reason, stalled, dir, final, message, peak, provider
         case gatedFrames = "gated_frames"
     }
 
@@ -60,6 +63,7 @@ public struct WSMessage: Codable, Equatable, Sendable {
         muted: Bool? = nil,
         reason: String? = nil,
         stalled: Bool? = nil,
+        provider: String? = nil,
         dir: Direction? = nil,
         final: Bool? = nil,
         message: String? = nil
@@ -73,6 +77,7 @@ public struct WSMessage: Codable, Equatable, Sendable {
         self.muted = muted
         self.reason = reason
         self.stalled = stalled
+        self.provider = provider
         self.dir = dir
         self.final = final
         self.message = message
@@ -91,8 +96,8 @@ public struct WSMessage: Codable, Equatable, Sendable {
     // MARK: - Server → client constructors (tests and fakes)
 
     public static let flush = WSMessage(type: .flush)
-    public static func status(_ voice: Voice, muted: Bool = false, reason: String? = nil, stalled: Bool? = nil) -> WSMessage {
-        WSMessage(type: .status, voice: voice, muted: muted, reason: reason, stalled: stalled)
+    public static func status(_ voice: Voice, muted: Bool = false, reason: String? = nil, stalled: Bool? = nil, provider: String? = nil) -> WSMessage {
+        WSMessage(type: .status, voice: voice, muted: muted, reason: reason, stalled: stalled, provider: provider)
     }
     public static func transcript(_ dir: Direction, _ text: String, final: Bool) -> WSMessage {
         WSMessage(type: .transcript, text: text, dir: dir, final: final)
