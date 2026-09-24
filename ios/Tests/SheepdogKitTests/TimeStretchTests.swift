@@ -72,7 +72,7 @@ final class PlaybackRatePolicyTests: XCTestCase {
 
     func testProviderProfiles() {
         XCTAssertEqual(PlaybackProfile.forProvider("gemini"), PlaybackProfile(floorMilliseconds: 150, ceilingMilliseconds: 500))
-        XCTAssertEqual(PlaybackProfile.forProvider("openai"), PlaybackProfile(floorMilliseconds: 800, ceilingMilliseconds: 2_000))
+        XCTAssertEqual(PlaybackProfile.forProvider("openai"), PlaybackProfile(floorMilliseconds: 1_200, ceilingMilliseconds: 2_000))
         XCTAssertEqual(PlaybackProfile.forProvider(nil), .gemini, "older daemons without a provider field are Gemini")
         XCTAssertEqual(PlaybackProfile.forProvider("something-new"), .gemini)
     }
@@ -115,12 +115,12 @@ final class PlaybackQueueStretchTests: XCTestCase {
 
     func testSteerStretchesWhenTheBufferIsLowAndCountsStretchedTime() {
         var queue = PlaybackQueue(profile: .openAI)
-        // 800 ms banked at once: plays at 1.0, then the buffer runs down
+        // 1 200 ms banked at once: plays at 1.0, then the buffer runs down
         // and the rate falls.
-        XCTAssertFalse(queue.push(chunk(800), now: 0).isEmpty)
+        XCTAssertFalse(queue.push(chunk(1_200), now: 0).isEmpty)
         var t = 0.0
         var lowest = 1.0
-        while t < 0.7 {
+        while t < 1.1 {
             t += 0.02
             lowest = min(lowest, queue.steer(now: t))
         }
@@ -138,8 +138,8 @@ final class PlaybackQueueStretchTests: XCTestCase {
 
     func testFlushResetsTheRate() {
         var queue = PlaybackQueue(profile: .openAI)
-        _ = queue.push(chunk(800), now: 0)
-        for step in 1...30 { queue.steer(now: Double(step) * 0.02) }
+        _ = queue.push(chunk(1_200), now: 0)
+        for step in 1...50 { queue.steer(now: Double(step) * 0.02) }
         XCTAssertLessThan(queue.rate, 1.0)
         queue.flush()
         XCTAssertEqual(queue.rate, 1.0)
@@ -151,9 +151,9 @@ final class PlaybackQueueStretchTests: XCTestCase {
         XCTAssertEqual(queue.targetMilliseconds, 150)
         XCTAssertEqual(queue.maximumWait, 0.4, accuracy: 1e-9, "Gemini: 150 + 250 ms, as before")
         queue.setProfile(.openAI)
-        XCTAssertEqual(queue.targetMilliseconds, 800)
+        XCTAssertEqual(queue.targetMilliseconds, 1_200)
         XCTAssertEqual(queue.targetCeilingMilliseconds, 2_000)
-        XCTAssertEqual(queue.maximumWait, 1.05, accuracy: 1e-9, "the wait scales with the target")
+        XCTAssertEqual(queue.maximumWait, 1.45, accuracy: 1e-9, "the wait scales with the target")
     }
 
     func testCompletionThatBeatsThePredictionStillCountsADrain() {

@@ -234,10 +234,10 @@ and the mixer. The policy is pure (`PlaybackRatePolicy`, owned by
 
 - **Target T per provider** (`PlaybackProfile`, from `/ws`
   `status.provider`): Gemini starts at 150 ms, cap 500 ms (as before);
-  GPT-Live (`openai`) starts at 800 ms, cap 2 000 ms. The underrun step
+  GPT-Live (`openai`) starts at 1 200 ms, cap 2 000 ms. The underrun step
   (+100 ms), decay (−20 ms per clean reply) and refill-before-resume are
   unchanged on top. The "start anyway" wait for a short reply scales with
-  the target — T + 250 ms, as in the browser — so an 800 ms target is not
+  the target — T + 250 ms, as in the browser — so a 1 200 ms target is not
   cut short by the old fixed 400 ms.
 - **Rate r from buffered audio b**: 1.0 when b ≥ T; below T it falls
   linearly to 0.90 at b = T/2 and to the **0.85 floor** at b ≤ T/4; 1.05

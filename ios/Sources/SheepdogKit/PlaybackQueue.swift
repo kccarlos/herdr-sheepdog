@@ -35,7 +35,7 @@ import Foundation
 /// in wall-clock time and rescaled on every rate change: the drain
 /// prediction and `bufferedMilliseconds` both use the real rate. The target
 /// range comes from a `PlaybackProfile` per voice provider (Gemini
-/// 150–500 ms, GPT-Live 800–2000 ms), and the "start anyway" wait scales
+/// 150–500 ms, GPT-Live 1200–2000 ms), and the "start anyway" wait scales
 /// with the target (target + 250 ms, as in the browser page).
 ///
 /// `flush` (server) and the Stop button drop everything at once. A flush is
