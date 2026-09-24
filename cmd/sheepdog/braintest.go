@@ -290,7 +290,9 @@ func brainTestSupervisor(dir, alias string, b *brain.Brain, log logging.Logger, 
 		return nil, nil, err
 	}
 	mock := inject.NewHerdr(nil, log)
-	sup, err := supervisor.New(store, mock, nil, inject.SkippedPusher{Log: log}, log, supervisor.Config{DataDir: dir, Brain: b})
+	// ReplyWait negative: the command prints the one tool result it gets,
+	// so the reply must be that result however long the turn takes.
+	sup, err := supervisor.New(store, mock, nil, inject.SkippedPusher{Log: log}, log, supervisor.Config{DataDir: dir, Brain: b, ReplyWait: -1})
 	if err != nil {
 		return nil, nil, err
 	}

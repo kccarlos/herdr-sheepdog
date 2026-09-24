@@ -523,11 +523,27 @@ func TestTurnSerialisation(t *testing.T) {
 	close(release)
 	wg.Wait()
 	h.brain.Quiesce()
+	// The service order is what the brain recorded, not the order the
+	// goroutines above happened to append after Turn returned (on a slow
+	// runner "ceo" could land before "event1" there, a flake).
 	mu.Lock()
-	got := strings.Join(order, " ")
+	if len(order) != 3 {
+		t.Errorf("finished turns = %v", order)
+	}
 	mu.Unlock()
-	if got != "event1 ceo event2" {
-		t.Errorf("order = %s", got)
+	var served []string
+	for _, msg := range h.brain.Transcript().Messages() {
+		if msg.Kind != KindRequest {
+			continue
+		}
+		for _, q := range []string{"event one", "ceo question", "event two"} {
+			if strings.Contains(msg.Content, q) {
+				served = append(served, q)
+			}
+		}
+	}
+	if got := strings.Join(served, " | "); got != "event one | ceo question | event two" {
+		t.Errorf("served order = %s", got)
 	}
 	// Each turn's messages are contiguous in the transcript.
 	var turns []int
@@ -593,7 +609,7 @@ func TestActedThenBudgetIsNotFallback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
-	if rep.Spoken != "Telling auth to rerun the flaky test. Sent." {
+	if rep.Spoken != "Telling auth to rerun the flaky test. Sent." || !rep.Acted {
 		t.Errorf("reply = %+v", rep)
 	}
 	if len(h.host.Prompts) != 1 || h.host.Prompts[0] != [2]string{"w5:p1", "rerun the flaky test"} {

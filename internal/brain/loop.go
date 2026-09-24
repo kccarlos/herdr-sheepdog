@@ -234,7 +234,7 @@ func (b *Brain) run(ctx context.Context, t *turn) (Reply, error) {
 			}
 			b.ingest(t.reply(answer, raw), t.n)
 			b.logTurn(t, false)
-			reply.Turn = t.n
+			reply.Turn, reply.Acted = t.n, len(t.acted) > 0
 			return reply, nil
 		}
 		b.execCalls(ctx, t, resp, raw, calls)
@@ -341,6 +341,7 @@ func (b *Brain) fail(t *turn, reason string, cause error) (Reply, error) {
 		reply := Reply{Spoken: strings.Join(t.acted, " "), Detail: "The supervisor acted but ran out of budget before reporting in full."}
 		b.ingest(Message{Role: RoleAssistant, Kind: KindReply, Content: mustJSON(reply)}, t.n)
 		b.logTurn(t, false)
+		reply.Turn, reply.Acted = t.n, true
 		return reply, nil
 	}
 	b.logTurn(t, true)

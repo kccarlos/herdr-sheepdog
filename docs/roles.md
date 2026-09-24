@@ -346,6 +346,17 @@ Also in, from the new-conversation PR: **"New conversation"**
 reset_id, at}` on the event log (the `GET /api/conversation` divider and
 the SSE stream) and `GET /api/state`'s `conversation_started_at`.
 
+Also in, from the deliver-later PR: a `to_supervisor` call waits at most
+`brain.reply_wait_s` (2 s) for the brain. Past it the call returns a
+silent `pending` result (the voice already said "on it") and the turn
+runs on, detached from the call; its reply is pushed `idle` when it
+lands, tagged `answers_utterance`, prefixed with its subject ("About
+auth: …"). The in-flight slot stays until the turn ends, so stop still
+cancels it. A reply that lands after the shepherd's next request was
+accepted is stale: dropped if the turn did nothing, pushed silent if it
+acted (`brain.reply_pending`, `brain.reply_delivered`,
+`brain.reply_stale`). `--voice=off` stays synchronous.
+
 **Not yet:** `source: worker` (asking the idle worker in its own pane —
 its finish would produce both the announce line and the delivery line
 for one event, which the one-push-per-event rule forbids; the ledger

@@ -39,7 +39,7 @@ func (s *Supervisor) Handler() voice.ToolHandler {
 		switch call.Name {
 		case ToolToSupervisor:
 			text, _ := call.Args["text"].(string)
-			return s.ToSupervisor(ctx, text)
+			return s.ToSupervisor(withCallID(ctx, call.ID), text)
 		case ToolStop:
 			return s.Stop(ctx, StopTriggerTool)
 		default:

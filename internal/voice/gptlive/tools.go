@@ -143,6 +143,10 @@ func (s *Session) runTool(ctx context.Context, lc *liveConn, delegationID string
 			s.appendFor(lc, delegationID, evThinkingAppend, "Detail for follow-up questions (do not read it out): "+res.Detail)
 		}
 		switch {
+		case spoken == "" && res.Pending:
+			// The brain is still working: its reply comes later as a push
+			// (brain.reply_wait_s). Say nothing that would contradict it.
+			s.appendFor(lc, delegationID, evThinkingAppend, "The answer will come on its own; say nothing more for now.")
 		case spoken == "":
 			s.appendFor(lc, delegationID, evThinkingAppend, "The supervisor has nothing to add for this request.")
 		case res.Scheduling == voice.UrgencySilent:

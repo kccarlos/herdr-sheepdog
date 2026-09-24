@@ -126,3 +126,17 @@ func TestVoiceProviderSwitchPersists(t *testing.T) {
 	_ = c.store.Close()
 	_ = c.elog.Close()
 }
+
+// brain.reply_wait_s reaches the supervisor as configured, except with
+// --voice=off, where the reply is always the tool result (the /debug
+// text router shows it; no voice said "on it").
+func TestReplyWaitWiring(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.Brain.ReplyWaitS = 3
+	if got := replyWait(cfg, Options{Voice: VoiceOn}); got != 3*time.Second {
+		t.Errorf("voice on: %v, want 3s", got)
+	}
+	if got := replyWait(cfg, Options{Voice: VoiceOff}); got >= 0 {
+		t.Errorf("--voice=off: %v, want negative (synchronous)", got)
+	}
+}

@@ -108,6 +108,7 @@ func Template() string {
 # enrich_timeout_s = %[32]d   # budget of the brain's announce turn on a block or finish
 # announce_timeout_s = %[46]d   # the same, for a finish that keeps a promise or ends the shepherd's own request
 # announce_wait_s = %[33]d   # how long a finish waits for the brain's line before the template sentence is spoken
+# reply_wait_s = %[47]d   # 0: default; how long a request waits for the brain's reply before it comes later as a push; negative always waits
 # investigate_max_s = %[40]d   # sanity ceiling of a background investigation: the only limit on how long its answer may take
 # investigate_session_ttl_s = %[41]d   # how long a finished investigation's sub-agent session stays resumable for a follow-up
 
@@ -136,5 +137,6 @@ func Template() string {
 		d.Web.Bind,
 		d.Supervisor.AuthoriseWindowS,
 		d.Brain.AnnounceTimeoutS,
+		d.Brain.ReplyWaitS,
 	)
 }
