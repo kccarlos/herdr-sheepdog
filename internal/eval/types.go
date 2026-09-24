@@ -230,6 +230,13 @@ type SVPExpect struct {
 	// contain one of these, case-insensitive (live only; J1 "the item
 	// that needs the shepherd comes first").
 	FirstSentenceContainsAnyOf []string `json:"first_sentence_contains_any_of,omitempty"`
+	// NotStopWord requires the request's words not to be a bare stop
+	// word (supervisor.BareStopWords, which internal/inject's Router for
+	// GPT-Live reads too): a bare stop word never reaches the brain, the
+	// daemon runs the stop procedure, Ctrl-C included. Checked offline
+	// and live, since it is code, not judgement (regression
+	// never-mind-is-not-stop, iteration 2 WP1).
+	NotStopWord bool `json:"not_stop_word,omitempty"`
 	// NeedsUser, when set, is the reply's required needs_user (live
 	// only: the fake model cannot judge it).
 	NeedsUser *bool `json:"needs_user,omitempty"`

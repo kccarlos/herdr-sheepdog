@@ -783,7 +783,7 @@ func respondToResult(call Call, fr *genai.FunctionResponse) *genai.GenerateConte
 		}
 		// The acknowledgement: pending true, and what it is doing.
 		return Response(Step{Text: mustJSON(brain.Reply{
-			Spoken: "Looking into it now — " + eta + ".", Pending: true,
+			Spoken: "Looking into it now, " + eta + ".", Pending: true,
 			Detail: "The fake model started investigation " + start.Job + "; its answer comes back on its own.",
 		}), Usage: usage})
 	case brain.ToolPromise:
@@ -793,9 +793,10 @@ func respondToResult(call Call, fr *genai.FunctionResponse) *genai.GenerateConte
 		out, _ := fr.Response["output"].(string)
 		spoken := strings.TrimSpace(out)
 		if echo := promptEcho(call); echo != "" {
-			// Two sentences at most (D9): "Telling auth to run the
-			// tests. Sent; I will tell you when auth finishes."
-			spoken = strings.TrimSuffix(echo, ".") + "; " + spoken
+			// Two sentences at most, no semicolons (the ear
+			// contract): "Telling auth to run the tests. I will tell
+			// you when auth finishes."
+			spoken = strings.TrimSuffix(echo, " Sent.") + " " + spoken
 		}
 		return Response(Step{Text: Reply(spoken, "Recorded a promise through the promise tool."), Usage: usage})
 	}

@@ -33,28 +33,86 @@ func TestRenderAssistant(t *testing.T) {
 	// Rules from the headset sessions and docs/roles.md "The voice — do
 	// / don't" (a cheap guard against the prompt drifting): the words go
 	// over verbatim, the voice never answers a push itself, "idle" is
-	// never inflated into "not finished", a follow-up uses only the
-	// latest reply, a mis-heard utterance is repeated back rather than
-	// guessed, and the copilot manner (offer the next step, read options
-	// as a choice) is present.
+	// never inflated into "not finished", a mis-heard utterance is
+	// repeated back rather than guessed, options are read as a choice,
+	// and the ear contract (docs/iteration-2.md WP1): spoken is read as
+	// given and already ends with the one question, the voice adds none
+	// of its own, and "what does that mean" is answered from detail.
 	for _, rule := range []string{
 		"verbatim",
 		"Do not paraphrase",
 		"Never answer them yourself",
 		`"Idle" means ready for input`,
-		"uses the latest spoken and detail",
+		"read spoken exactly as given",
+		"Do not add a follow-up question of your own",
+		`"what does that mean"`,
+		"answer from detail",
+		"no new terms",
 		"Repeat it and ask",
-		"offer the next step",
 		"read them as a choice",
 		"invent nothing",
 		"shepherd's register",
+		`"Never mind" is not stop`,
 	} {
 		if !strings.Contains(s, rule) {
 			t.Errorf("prompt lost the rule %q", rule)
 		}
 	}
+	// The voice invents no follow-up question and "never mind" is not a
+	// stop word (eval cases never-mind-is-not-stop-voice and
+	// explain-simpler-second-time).
+	for _, gone := range []string{"offer the next step", `"never mind", "no no"`} {
+		if strings.Contains(s, gone) {
+			t.Errorf("prompt still says %q", gone)
+		}
+	}
 	if words := len(strings.Fields(s)); words > 400 {
 		t.Errorf("prompt is %d words; keep it short (<= 400)", words)
+	}
+}
+
+// TestRenderAssistantGPTLive holds the GPT-Live prompt to the same ear
+// contract: no invented follow-up question, follow-ups from the plain
+// explanation, and "never mind" delegated as ordinary speech.
+func TestRenderAssistantGPTLive(t *testing.T) {
+	s, _ := (*Loader)(nil).Render(AssistantGPTLive, AssistantVars("Rex", []string{"auth"}))
+	for _, rule := range []string{
+		"Do not add a follow-up question of your own",
+		`"what does that mean"`,
+		"no new terms",
+		`"Never mind" is ordinary speech`,
+	} {
+		if !strings.Contains(s, rule) {
+			t.Errorf("GPT-Live prompt lost the rule %q", rule)
+		}
+	}
+	for _, gone := range []string{"offer the next step", `"never mind" and "no no"`, "cancel or never mind"} {
+		if strings.Contains(s, gone) {
+			t.Errorf("GPT-Live prompt still says %q", gone)
+		}
+	}
+}
+
+// TestRULESEarContract guards the brain's ear rules (docs/iteration-2.md
+// WP1): the For the ear and Explaining sections and the ask field.
+func TestRULESEarContract(t *testing.T) {
+	text, err := embeddedText(SVPRules)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"## For the ear",
+		"thirty words or fewer",
+		"Put the one decision in `ask`",
+		"## Explaining",
+		"do not repeat yourself",
+		`End with "Clearer?" as the ` + "`ask`",
+		`"ask": ""`,
+		"Never more than one question per reply",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("RULES.md lacks %q", want)
+		}
 	}
 }
 

@@ -26,7 +26,7 @@ func toolDeclarations() []*genai.Tool {
 				"text": {Type: genai.TypeString, Description: "exactly what the user said, in their own words"},
 			}, []string{"text"})},
 		{Name: voice.ToolStop, Behavior: genai.BehaviorNonBlocking,
-			Description: "The user says stop, wait, cancel, never mind, no no. Call it at once, before anything else; the supervisor works out what to stop and tells you.",
+			Description: "The user says stop, wait, cancel, no no. Call it at once, before anything else; the supervisor works out what to stop and tells you. \"Never mind\" is not stop: hand it to to_supervisor.",
 			Parameters:  obj(map[string]*genai.Schema{}, nil)},
 	}}}
 }

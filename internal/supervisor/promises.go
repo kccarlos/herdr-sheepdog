@@ -4,10 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
-	"github.com/kccarlos/herdr-sheepdog/internal/prose"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
@@ -294,15 +292,4 @@ func promiseCondition(p state.Promise) string {
 	default:
 		return "when " + alias + " finishes"
 	}
-}
-
-// spokenLine applies D9 to a brain line for the ear: two sentences at
-// most, scrubbed, terminated. Every brain line an announcement speaks —
-// on time, after a finish's wait, or late (dropLate) — passes here.
-//
-// TODO(iteration-2 WP1): the ear contract's spoken cap (≤ 2 sentences,
-// ≤ 30 words, overflow to plain) applies here, where every announce line
-// already passes, if prose.Spoken does not enforce it itself.
-func spokenLine(text string) string {
-	return sentence(strings.TrimSpace(prose.Spoken(text, 2)))
 }

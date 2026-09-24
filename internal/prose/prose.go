@@ -108,19 +108,33 @@ var (
 	// requires at least two "/segment" groups so a lone identifier like
 	// "TestTotal" or a bare filename like "calc_test.go" is never
 	// matched (D9 keeps test/function names, only paths are scrubbed).
-	rePath     = regexp.MustCompile(`(?:(?:~|\.{1,2})?(?:/[\w.@+\-]+){2,}/?|\b[\w.@+\-]+(?:/[\w.@+\-]+){2,})`)
-	reWinPath  = regexp.MustCompile(`\b[A-Za-z]:\\[^\s"']+`)
-	rePaneID   = regexp.MustCompile(`\bw\d+:[pt]\d+\b`)
+	rePath    = regexp.MustCompile(`(?:(?:~|\.{1,2})?(?:/[\w.@+\-]+){2,}/?|\b[\w.@+\-]+(?:/[\w.@+\-]+){2,})`)
+	reWinPath = regexp.MustCompile(`\b[A-Za-z]:\\[^\s"']+`)
+	rePaneID  = regexp.MustCompile(`\bw\d+:[pt]\d+\b`)
+	// reIssue matches a PR or issue number ("#49", "PR #49", "PR 49"):
+	// the shepherd hears it and cannot use it.
+	reIssue    = regexp.MustCompile(`(?i)(?:\b(?:PR|pull request|issue)\s*#?\s*\d+\b|#\d+\b)`)
 	reSpaces   = regexp.MustCompile(`[ \t]+`)
 	reOrphan   = regexp.MustCompile(`\s+([,.;:!?])`)
 	reSentence = regexp.MustCompile(`[.!?]+(?:["')\]]*)(?:\s+|$)`)
 )
 
 // Spoken enforces decision D9 on model output: at most maxSentences
-// sentences, with URLs, hashes, file paths and pane ids removed and
+// sentences, with URLs, hashes, file paths, pane ids and PR or issue
+// numbers removed and
 // whitespace normalised. It never returns an empty string for non-empty
 // meaningful input; a result that would be empty comes back as "".
 func Spoken(s string, maxSentences int) string {
+	s = scrub(s)
+	if maxSentences > 0 {
+		s = firstSentences(s, maxSentences)
+	}
+	return strings.TrimSpace(s)
+}
+
+// scrub is D9 without the sentence cap: URLs, paths, hashes, pane ids
+// and PR or issue numbers removed, whitespace normalised.
+func scrub(s string) string {
 	s = strings.ReplaceAll(s, "\n", " ")
 	s = reURL.ReplaceAllString(s, "a link")
 	s = reWWW.ReplaceAllString(s, "a link")
@@ -133,12 +147,9 @@ func Spoken(s string, maxSentences int) string {
 		return m
 	})
 	s = rePaneID.ReplaceAllString(s, "")
+	s = reIssue.ReplaceAllString(s, "")
 	s = reSpaces.ReplaceAllString(s, " ")
 	s = reOrphan.ReplaceAllString(s, "$1")
-	s = strings.TrimSpace(s)
-	if maxSentences > 0 {
-		s = firstSentences(s, maxSentences)
-	}
 	return strings.TrimSpace(s)
 }
 

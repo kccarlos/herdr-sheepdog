@@ -32,6 +32,13 @@ of its work order) are merged; so is everything since.
 | Evals (`sheepdog eval --set svp\|assistant`, offline by default) | done (#21) |
 | iOS companion app (separate repo, `herdr-sheepdog-ios`, the `/ws` voice contract) | started |
 
+The ear contract (iteration 2, WP1): the brain's reply is a headline
+(`spoken`, capped in code at two sentences and thirty words with no
+dashes, PR numbers or hashes), one `ask` heard last, and a plain
+`detail` the voice explains from; the voice adds no question of its
+own, and "never mind" is no longer a stop word (voice prompts, the
+Gemini `stop` tool description, `supervisor.BareStopWords`).
+
 The pre-redesign surface is gone: the supervisor's old tool methods
 (`Briefing`, `Ask`, `Propose`, `Confirm`, `Cancel`, `Note`) and the
 brain's `ask` / `propose` request kinds. Production runs on the voice's

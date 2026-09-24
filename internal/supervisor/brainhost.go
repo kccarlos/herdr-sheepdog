@@ -299,13 +299,22 @@ func (h brainHost) Promises() []brain.PromiseInfo {
 	return out
 }
 
-// toolResultFrom enforces D9 on a brain reply: spoken cut to two
-// sentences and scrubbed, detail and options scrubbed; it interrupts only
-// when the CEO must act. An utterance is not classified, so it cannot
-// claim an echo's urgency; the voice reads the result after its own "on
-// it" either way (the tool is NON_BLOCKING).
+// toolResultFrom enforces the ear contract and D9 on a brain reply: the
+// headline cut to the ear caps (prose.EarLine: two sentences, thirty
+// words, no dashes, PR numbers or hashes), the ask appended as the last
+// sentence, whatever the cap cut moved to the end of detail (nothing the
+// brain wrote is lost, it is just not read aloud), detail and options
+// scrubbed; it interrupts only when the CEO must act. An utterance is
+// not classified, so it cannot claim an echo's urgency; the voice reads
+// the result after its own "on it" either way (the tool is
+// NON_BLOCKING).
 func toolResultFrom(rep brain.Reply) voice.ToolResult {
-	res := voice.ToolResult{Spoken: sentence(prose.Spoken(rep.Spoken, 2)), Detail: prose.Spoken(rep.Detail, 0), Clarify: rep.Clarify, Pending: rep.Pending, Scheduling: voice.UrgencyIdle}
+	spoken, overflow := earLine(rep)
+	detail := prose.Spoken(rep.Detail, 0)
+	if overflow != "" {
+		detail = strings.TrimSpace(detail + " " + overflow)
+	}
+	res := voice.ToolResult{Spoken: spoken, Detail: detail, Clarify: rep.Clarify, Pending: rep.Pending, Scheduling: voice.UrgencyIdle}
 	for _, o := range rep.Options {
 		if o = strings.TrimSpace(prose.Spoken(o, 1)); o != "" {
 			res.Options = append(res.Options, o)
@@ -315,6 +324,15 @@ func toolResultFrom(rep brain.Reply) voice.ToolResult {
 		res.Scheduling = voice.UrgencyInterrupt
 	}
 	return res
+}
+
+// earLine is a brain reply's line for the ear: the headline cut to the
+// ear caps, then the reply's ask as the last sentence (prose.EarLine),
+// terminated; overflow is what the cap cut. Every brain line bound for
+// the voice goes through it: replies, announcements and deliveries.
+func earLine(rep brain.Reply) (spoken, overflow string) {
+	spoken, overflow = prose.EarLine(rep.Spoken, rep.Ask)
+	return sentence(spoken), overflow
 }
 
 // sentence makes sure s ends with terminal punctuation.

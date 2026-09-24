@@ -10,6 +10,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
 	"github.com/kccarlos/herdr-sheepdog/internal/brain/braintest"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
+	"github.com/kccarlos/herdr-sheepdog/internal/prose"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
@@ -55,7 +56,7 @@ func TestBrainAnswersAskWithTools(t *testing.T) {
 	h.srv.SetScreen("w5:p1", fixture(t, "codex-approval-prompt.screen.txt"))
 
 	res := h.say("why did that one fail?")
-	if res.Spoken != "Auth is asking whether it can create hello.txt; see a file." || !strings.Contains(res.Detail, "a file") || strings.Contains(res.Detail, "/Users") {
+	if res.Spoken != "Auth is asking whether it can create hello.txt. See a file." || !strings.Contains(res.Detail, "a file") || strings.Contains(res.Detail, "/Users") {
 		t.Errorf("result = %+v", res)
 	}
 	if res.Scheduling != voice.UrgencyIdle {
@@ -390,8 +391,10 @@ func TestNoBrainIsInert(t *testing.T) {
 }
 
 func TestToolResultFromReply(t *testing.T) {
+	// The cap moves the third sentence to the end of detail: nothing the
+	// brain wrote is lost, it is just not read aloud.
 	res := toolResultFrom(brain.Reply{Spoken: "One. Two. Three.", Detail: "See /a/b/c.go and abc1234def5678", Options: []string{"keep /x/y/z", ""}, NeedsUser: true})
-	if res.Spoken != "One. Two." || res.Detail != "See a file and" || len(res.Options) != 1 || res.Options[0] != "keep a file" || res.Scheduling != voice.UrgencyInterrupt {
+	if res.Spoken != "One. Two." || res.Detail != "See a file and Three." || len(res.Options) != 1 || res.Options[0] != "keep a file" || res.Scheduling != voice.UrgencyInterrupt {
 		t.Errorf("result = %+v", res)
 	}
 	if res := toolResultFrom(brain.Reply{Spoken: "fine"}); res.Spoken != "fine." || res.Scheduling != voice.UrgencyIdle {
@@ -399,5 +402,39 @@ func TestToolResultFromReply(t *testing.T) {
 	}
 	if res := toolResultFrom(brain.Reply{Spoken: "Sent.", Clarify: true}); !res.Clarify || res.Scheduling != voice.UrgencyInterrupt {
 		t.Errorf("result = %+v", res)
+	}
+}
+
+// The ear contract (docs/iteration-2.md WP1): the 2026-09-24 line the
+// shepherd heard (101 words, dashes, two PR numbers) is cut to the ear
+// caps, the ask is heard last, and the overflow lands in detail after
+// the plain explanation.
+func TestToolResultFromEarContract(t *testing.T) {
+	const heard = "Both landed: the Context tab is merged as daemon #49 — a new /debug tab beside Supervisor showing the brain's exact request and the voice model's context side by side, linked, with a scrubber and diffs against the previous step — and the first app refactor went in as #12, dead code out and duplicated state merged, behaviour unchanged with 245 tests green. It's asking whether to carry on with the next two in parallel — the daemon's dead-code and docs cleanup then removing the legacy tool surface, and the app's testable SessionCore — and I'd say yes."
+	const plain = "A tab is a page of the debug screen."
+	res := toolResultFrom(brain.Reply{Spoken: heard, Ask: "Shall it carry on with both?", Detail: plain, NeedsUser: true})
+	head, ok := strings.CutSuffix(res.Spoken, " Shall it carry on with both?")
+	if !ok {
+		t.Fatalf("the ask is not the last sentence: %q", res.Spoken)
+	}
+	if n := len(strings.Fields(head)); n == 0 || n > prose.EarWords {
+		t.Errorf("headline is %d words: %q", n, head)
+	}
+	for _, bad := range []string{"—", "#49", "#12", ";"} {
+		if strings.Contains(res.Spoken, bad) {
+			t.Errorf("spoken contains %q: %q", bad, res.Spoken)
+		}
+	}
+	if !strings.HasPrefix(res.Detail, plain+" ") || !strings.Contains(res.Detail, "SessionCore") {
+		t.Errorf("overflow did not follow the plain detail: %q", res.Detail)
+	}
+	// An old-shape reply (no ask) keeps its own question.
+	if res := toolResultFrom(brain.Reply{Spoken: "Auth finished. Want the details?"}); res.Spoken != "Auth finished. Want the details?" || res.Detail != "" {
+		t.Errorf("old shape = %+v", res)
+	}
+	// With an ask, a question in the headline moves to detail: one
+	// question per reply, and it is the ask.
+	if res := toolResultFrom(brain.Reply{Spoken: "Auth finished. Want the details?", Ask: "Run the tests?"}); res.Spoken != "Auth finished. Run the tests?" || res.Detail != "Want the details?" {
+		t.Errorf("two questions = %+v", res)
 	}
 }

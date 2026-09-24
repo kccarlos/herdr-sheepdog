@@ -171,6 +171,17 @@ func TestParseReplyAndHelpers(t *testing.T) {
 	if err != nil || r.Spoken != "Hi." || !r.NeedsUser || len(r.Options) != 2 {
 		t.Errorf("parse = %+v %v", r, err)
 	}
+	// The ear contract: the old shape (no ask) parses with an empty Ask;
+	// the new one carries the question separately; a bare ask is the line.
+	if r, err := parseReply(`{"spoken": "Auth finished.", "detail": "d"}`, false); err != nil || r.Ask != "" || r.Spoken != "Auth finished." {
+		t.Errorf("old shape = %+v %v", r, err)
+	}
+	if r, err := parseReply(`{"spoken": "Auth finished. ", "ask": " Shall I run the tests? ", "detail": "Tests check the code still works."}`, false); err != nil || r.Ask != "Shall I run the tests?" || r.Spoken != "Auth finished." || r.Detail != "Tests check the code still works." {
+		t.Errorf("with ask = %+v %v", r, err)
+	}
+	if r, err := parseReply(`{"spoken": "", "ask": "Which agent do you mean?", "clarify": true}`, false); err != nil || r.Spoken != "Which agent do you mean?" || r.Ask != "" {
+		t.Errorf("ask only = %+v %v", r, err)
+	}
 	if _, err := parseReply(`{"spoken": ""}`, false); err == nil {
 		t.Error("empty spoken accepted")
 	}
@@ -187,7 +198,7 @@ func TestParseReplyAndHelpers(t *testing.T) {
 	if got := ago(90 * time.Second); got != "1 min" {
 		t.Errorf("ago = %s", got)
 	}
-	if slug("The one rail") != "rail" || slug("Answer contract") != "contract" || slug("Tools") != "tools" {
+	if slug("The one rail") != "rail" || slug("Answer contract") != "contract" || slug("Tools") != "tools" || slug("For the ear") != "ear" || slug("Explaining") != "explaining" {
 		t.Errorf("slug = %s %s %s", slug("The one rail"), slug("Answer contract"), slug("Tools"))
 	}
 	if d, ok := retryDelay(errors.New(`{"retryDelay": "12s"}`)); !ok || d != 12*time.Second {

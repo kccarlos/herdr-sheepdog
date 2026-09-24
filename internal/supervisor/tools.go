@@ -65,7 +65,7 @@ func (s *Supervisor) noBrain() voice.ToolResult {
 }
 
 // noBrainTrailer says why the roster is the whole answer.
-const noBrainTrailer = "— the brain is off, I can only report status."
+const noBrainTrailer = "The brain is off, so I can only report status."
 
 // markMentioned records that the panes were just spoken about: the
 // normal level announces their finish for RecentWindow afterwards.

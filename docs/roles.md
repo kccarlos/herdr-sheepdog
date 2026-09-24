@@ -48,25 +48,29 @@ shepherd says that is not small talk goes to the brain verbatim
 question to investigate, an instruction, an answer to a worker's prompt,
 a promise, a note — from the transcript, and acts. The voice speaks what
 the brain returns, answers a first follow-up from the reply's `detail`
-and `options` without going back, offers the next step, and judges the
-*moment* for anything the brain brings unprompted.
+and `options` without going back, and judges the *moment* for anything
+the brain brings unprompted.
 
 Code fast paths (deterministic, no model): a bare "yes" / "no" /
 "option two" while exactly one worker prompt is open → its keys (the
 shepherd's verbatim word, so the rail is satisfied); a bare "stop" /
-"wait" / "cancel" / "no no" → the stop procedure. *Bare* means the whole
-utterance.
+"wait" / "cancel" / "abort" / "halt" / "hold on" / "no no" → the stop
+procedure. *Bare* means the whole utterance. "Never mind" is not a stop
+word: it goes to the brain like any utterance.
 
 ## The voice — do / don't
 
 Does: hears and repeats back when unsure; says "on it" and hands the
-words over; reads `spoken` as given and offers the next step as one
-short question; reads `options` as a choice and asks which; asks
-plainly for the shepherd's decision when `needs_user`; says pushes at
-once, as given, and never acts on them; small talk.
+words over; reads `spoken` exactly as given (it already ends with the
+reply's one question, when there is one); reads `options` as a choice
+before that question; answers "what does that mean", "say again",
+"which one" from `detail` in one or two sentences in the same plain
+words, and hands the words to the brain when `detail` does not cover
+it; says pushes at once, as given, and never acts on them; small talk.
 
-Never: states anything about the flock a reply did not carry; decides
-anything; answers a worker's prompt; reads paths, hashes or ids aloud.
+Never: adds a follow-up question of its own; states anything about the
+flock a reply did not carry; decides anything; answers a worker's
+prompt; reads paths, hashes or ids aloud; treats "never mind" as stop.
 
 ## The brain — do / don't
 
@@ -85,10 +89,30 @@ Does:
 - Judges pushes: on a block or a finish it decides whether the voice says
   anything and how urgently, in one line that names the decision or the
   next move — never "say yes".
-- Answers for the ear: `{spoken, detail, needs_user, options?, pending?}`.
-  `spoken` is one sentence per agent for status, and for findings and
-  explanations the gist in at most two sentences plus an offer ("want
-  the details?"); the rest (why, evidence, next move) goes in `detail`.
+- Answers for the ear: `{spoken, ask?, detail, needs_user, options?,
+  pending?}` (`prompts/svp/RULES.md` "For the ear", "Explaining",
+  "Answer contract").
+  - `spoken` is the headline: at most two sentences and thirty words,
+    one idea each, no dashes or semicolons, the outcome first (done,
+    broken, needs you, still going), the task in the shepherd's words,
+    no PR numbers, ms values, hashes, file or component names.
+  - `ask` is the one question, when only the shepherd can decide (or
+    the next move the brain would take); the voice hears it last.
+  - `detail` is the plain explanation: one everyday sentence per term
+    the headline used, for a listener who is not a programmer, no
+    numbers or ids. The voice reads it for "what does that mean"; it is
+    not a place for extra facts.
+  - Asked again ("what does that mean?" a second time), the brain picks
+    the one concept, explains it in fewer words than before, and asks
+    "Clearer?".
+  - Code enforces the headline on every brain line bound for the voice
+    (`prose.EarLine`, via the supervisor's `earLine`: replies,
+    announcements on time or late, investigation deliveries):
+    dash- and semicolon-joined clauses become sentences, the first two
+    within thirty words are kept, PR numbers and hashes are scrubbed,
+    the ask is appended last (with an ask, a question in the headline
+    moves out), and whatever was cut is appended to `detail` (for an
+    announcement, the detail kept on the finish for recall).
 - Serialises turns: single writer; shepherd turns before event turns;
   an event turn yields before its next model call when a shepherd turn
   waits; queued event turns coalesce per agent.
@@ -124,7 +148,11 @@ flight, the most recent one → Ctrl-C a worker that
 received an instruction within `supervisor.cancel_window_s` (30 s) →
 leave an open worker prompt open (stop is not "no") → one short brain
 turn saying what was stopped and offering the correction. Undoing a
-worker's edits is an instruction to the worker, not a stop. Event turns
+worker's edits is an instruction to the worker, not a stop. The stop
+words are "stop", "wait", "cancel", "abort", "halt", "hold on" and "no
+no" (`supervisor.BareStopWords`, the voice's `stop` tool); "never mind"
+is not one: it is ordinary speech the brain reads, and it once sent
+Ctrl-C to a worker that had just been given a task. Event turns
 are not cancelled by stop. Logged as `supervisor.stopped {phase, what,
 trigger}` (`stop_tool` or the bare-word fast path).
 
@@ -242,9 +270,9 @@ none); the roster sentence is not logged.
 
 | File | Holds |
 |---|---|
-| `prompts/assistant.md` | The voice's whole system prompt: persona, hearing, the two tools, follow-ups, pushes (≤ 400 words; re-billed every turn). |
+| `prompts/assistant.md` | The voice's whole system prompt: persona, hearing, the two tools, reading a reply, follow-ups from `detail`, pushes (≤ 400 words; re-billed every turn). |
 | `prompts/svp/SOUL.md` | The brain's role and manner: who it serves, its bias to execution, the copilot manner. |
-| `prompts/svp/RULES.md` | The brain's tool guidance, one `## ` section per stable-prompt piece (tools, record, promises, announcing, the one rail, fallback, the answer contract). |
+| `prompts/svp/RULES.md` | The brain's tool guidance, one `## ` section per stable-prompt piece (tools, intent, record, promises, announcing, the one rail, fallback, for the ear, explaining, the answer contract). |
 | `prompts/USER.md` | The shepherd's profile: `{aliases}`, `{chattiness}`, `{tz}`, free text. |
 
 Overrides in `~/.config/sheepdog/prompts/` (config `prompts.dir`), re-read

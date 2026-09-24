@@ -154,25 +154,28 @@ func TestFinishWithATrailingPromptAnnouncesBoth(t *testing.T) {
 }
 
 // With the brain attached the one announce turn is told the finish also
-// asks, and its line — the finding, then the question — is the event's
-// one push, tagged as a decision the shepherd must take.
+// asks, and its line — the finding, then the question as the reply's ask,
+// heard last — is the event's one push, tagged as a decision the
+// shepherd must take.
 func TestFinishWithATrailingPromptBrainLineCoversBoth(t *testing.T) {
-	line := "Auth found only the phone was connected, so the flips were taps. It's also asking whether to teach auto mode about your environment — yes or not now?"
+	headline := "Auth found only the phone was connected, so the flips were taps. It's also asking whether to teach auto mode about your environment."
+	ask := "Yes or not now?"
+	line := headline + " " + ask
 	m := braintest.NewModel()
-	m.EventDefault = announceReply(line, "interrupt", "", "", true)
+	m.EventDefault = withAsk(announceReply(headline, "interrupt", "", "", true), ask)
 	h := newBrainHarness(t, m)
 	h.addAgent("w5:p1", "w5", "claude", herdr.StateWorking)
 	h.srv.SetScreen("w5:p1", fixture(t, "claude-result-then-prompt.screen.txt"))
 	h.transition("w5:p1", herdr.StateWorking, herdr.StateIdle)
 	got := h.pusher.all()
-	if len(got) != 1 || got[0].Text != spokenLine(line) || got[0].Urgency != voice.UrgencyInterrupt || h.pusher.tagsOf(0)["needs_user"] != true {
+	if len(got) != 1 || got[0].Text != line || got[0].Urgency != voice.UrgencyInterrupt || h.pusher.tagsOf(0)["needs_user"] != true {
 		t.Fatalf("pushes = %+v tags = %v", got, h.pusher.tagsOf(0))
 	}
 	calls := m.Calls()
 	if len(calls) != 1 || !strings.Contains(calls[0].Text(), `also showing a prompt of its own: "teach auto mode about your environment"`) || !strings.Contains(calls[0].Text(), `template="`+askingSentence+`"`) {
 		t.Errorf("announce request = %s", calls[0].Text())
 	}
-	if row, _ := h.store.Get("w5:p1"); row.LastResult == nil || row.LastResult.Spoken != spokenLine(line) {
+	if row, _ := h.store.Get("w5:p1"); row.LastResult == nil || row.LastResult.Spoken != line {
 		t.Errorf("last_result = %+v", row.LastResult)
 	}
 }

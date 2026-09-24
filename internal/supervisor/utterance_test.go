@@ -419,6 +419,46 @@ func TestBareStopWordsAgreeWithTheRouter(t *testing.T) {
 	}
 }
 
+// "Never mind" is ordinary speech, not a stop word (docs/iteration-2.md
+// J6, eval case never-mind-is-not-stop): on 2026-09-24 00:13:18 it sent
+// Ctrl-C to a worker 16 s after the brain gave it a task. It goes to the
+// brain like any utterance; the stop procedure does not run and nothing
+// is interrupted.
+func TestNeverMindIsNotStop(t *testing.T) {
+	for _, word := range []string{"never mind", "Never mind.", "nevermind", "Oh, never mind."} {
+		t.Run(word, func(t *testing.T) {
+			if bareStop(word) {
+				t.Fatalf("bareStop(%q) = true", word)
+			}
+			m := braintest.NewModel(
+				braintest.Step{Calls: []*genai.FunctionCall{braintest.FC(brain.ToolPrompt, map[string]any{"agent": "auth", "text": "review the code"})}},
+				braintest.Step{Text: braintest.Reply("Telling auth to review the code. Sent.", "")},
+				braintest.Step{Text: braintest.Reply("Okay. Auth carries on with the review.", "")},
+			)
+			h := newBrainHarness(t, m)
+			h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
+			h.say("tell auth to review the code")
+			h.clock.Advance(5 * time.Second)
+
+			res := h.say(word)
+			if res.Spoken != "Okay. Auth carries on with the review." {
+				t.Errorf("say(%q) = %+v, want the brain's reply", word, res)
+			}
+			if ev := h.log.ofType("supervisor.stopped"); len(ev) != 0 {
+				t.Errorf("the stop procedure ran: %v", ev)
+			}
+			for _, r := range h.sendKeysRequests() {
+				if strings.Contains(r[1], "ctrl+c") {
+					t.Errorf("Ctrl-C sent on %q: %v", word, r)
+				}
+			}
+			if got := len(m.Calls()); got != 3 {
+				t.Errorf("model calls = %d, want 3 (the instruction turn and an ordinary utterance turn)", got)
+			}
+		})
+	}
+}
+
 // (6) Phase 3: an instruction that went to a working agent within the
 // cancel window is interrupted; past the window it is not.
 func TestStopInterruptsARecentInstruction(t *testing.T) {

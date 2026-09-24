@@ -140,7 +140,7 @@ func (s *Session) runTool(ctx context.Context, lc *liveConn, delegationID string
 	case onDelegation:
 		how = "delegation"
 		if res.Detail != "" {
-			s.appendFor(lc, delegationID, evThinkingAppend, "Detail for follow-up questions (do not read it out): "+res.Detail)
+			s.appendFor(lc, delegationID, evThinkingAppend, "Plain explanation for follow-ups such as \"what does that mean\" (do not read it out): "+res.Detail)
 		}
 		switch {
 		case spoken == "" && res.Pending:
@@ -186,13 +186,22 @@ func (s *Session) runTool(ctx context.Context, lc *liveConn, delegationID string
 }
 
 // spokenText is what the model should say for a result: the spoken
-// sentence, then the options as a choice.
+// sentence with the options as a choice. The question is heard last (the
+// ear contract: the supervisor ends spoken with the reply's ask), so when
+// spoken ends with one the options go in before it.
 func spokenText(res voice.ToolResult) string {
 	text := strings.TrimSpace(res.Spoken)
-	if len(res.Options) > 0 {
-		text += " Options: " + strings.Join(res.Options, "; ") + "."
+	if len(res.Options) == 0 {
+		return text
 	}
-	return strings.TrimSpace(text)
+	opts := "Options: " + strings.Join(res.Options, "; ") + "."
+	if !strings.HasSuffix(text, "?") {
+		return strings.TrimSpace(text + " " + opts)
+	}
+	if i := strings.LastIndexAny(text[:len(text)-1], ".!?"); i >= 0 {
+		return text[:i+1] + " " + opts + " " + strings.TrimSpace(text[i+1:])
+	}
+	return opts + " " + text
 }
 
 // appendFor sends one append event tied to a client delegation.

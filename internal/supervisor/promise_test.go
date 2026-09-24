@@ -28,7 +28,7 @@ func promiseModel() *braintest.Model {
 			braintest.FC(brain.ToolPrompt, map[string]any{"agent": "auth", "text": "run the tests"}),
 			braintest.FC(brain.ToolPromise, map[string]any{"agent": "auth", "text": "let me know when it's done", "event": "done"}),
 		}},
-		braintest.Step{Text: braintest.Reply("Telling auth to run the tests. Sent; I will tell you when auth finishes.", "")},
+		braintest.Step{Text: braintest.Reply("Telling auth to run the tests. I will tell you when auth finishes.", "")},
 	)
 	m.EventDefault = &braintest.Step{Fn: func(call braintest.Call) (*genai.GenerateContentResponse, error) {
 		if strings.Contains(call.Text(), "Promises this event keeps") {
@@ -44,7 +44,7 @@ func promiseModel() *braintest.Model {
 func combined(h *harness) state.Promise {
 	h.t.Helper()
 	res := h.say("run the tests and let me know when it's done")
-	if res.Spoken != "Telling auth to run the tests. Sent; I will tell you when auth finishes." {
+	if res.Spoken != "Telling auth to run the tests. I will tell you when auth finishes." {
 		h.t.Fatalf("reply = %+v", res)
 	}
 	open := h.sup.openPromises()
@@ -400,7 +400,7 @@ func TestPromiseWithReflexModel(t *testing.T) {
 	h := newBrainHarness(t, braintest.Reflex())
 	h.addAgent("w5:p1", "auth", "codex", herdr.StateIdle)
 	res := h.say("run the tests and let me know when it's done")
-	if res.Spoken != "Telling auth to run the tests. Sent; I will tell you when auth finishes." {
+	if res.Spoken != "Telling auth to run the tests. I will tell you when auth finishes." {
 		t.Errorf("reply = %+v", res)
 	}
 	if len(h.sup.openPromises()) != 1 || len(h.promptRequests()) != 1 {

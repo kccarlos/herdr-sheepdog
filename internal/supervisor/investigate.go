@@ -253,9 +253,11 @@ func (s *Supervisor) deliverInvestigation(inv state.Investigation) {
 		s.pushInvestigation(inv, fallback)
 		return
 	}
-	// An explanation is a paragraph, not a status line: it is scrubbed
-	// (D9) but not cut to two sentences the way an announce line is.
-	spoken := sentence(strings.TrimSpace(prose.Spoken(rep.Spoken, 0)))
+	// The finding is heard once, like any line: the ear caps apply and
+	// the ask is the last sentence (prose.EarLine). What the cap cut
+	// stays in the brain's own transcript, where a follow-up and recall
+	// find it.
+	spoken, _ := earLine(rep)
 	if spoken == "" {
 		spoken = fallback
 	}

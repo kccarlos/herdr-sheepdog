@@ -27,6 +27,12 @@ func announceReply(spoken, urgency, detail, relatesTo string, needsUser bool) *b
 	return &braintest.Step{Text: `{"spoken": ` + quote(spoken) + `, "urgency": ` + quote(urgency) + `, "detail": ` + quote(detail) + `, "relates_to": ` + quote(relatesTo) + `, "needs_user": ` + nu + `}`}
 }
 
+// withAsk adds the ear contract's ask to an announce reply.
+func withAsk(step *braintest.Step, ask string) *braintest.Step {
+	step.Text = `{"ask": ` + quote(ask) + `, ` + strings.TrimPrefix(step.Text, "{")
+	return step
+}
+
 func quote(s string) string {
 	return `"` + strings.ReplaceAll(strings.ReplaceAll(s, `\`, `\\`), `"`, `\"`) + `"`
 }
@@ -56,13 +62,13 @@ func (h *harness) decisions() []map[string]any {
 // last_result.detail for the ledger and recall, one push_decision.
 func TestAnnounceReplacesTemplate(t *testing.T) {
 	m := braintest.NewModel()
-	m.EventDefault = announceReply("Auth finished the rerun you asked for; the same test, TestLoginRateLimit, still fails.", "idle", "The CEO asked for a rerun after the first failure; see /tmp/x.log.", "the rerun", false)
+	m.EventDefault = announceReply("Auth finished the rerun you asked for. The same test, TestLoginRateLimit, still fails.", "idle", "The CEO asked for a rerun after the first failure; see /tmp/x.log.", "the rerun", false)
 	h := newBrainHarness(t, m)
 	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
 	h.sup.touch("w5:p1")
 	doneAuth(h)
 	got := h.pusher.all()
-	if len(got) != 1 || got[0].Text != "Auth finished the rerun you asked for; the same test, TestLoginRateLimit, still fails." || got[0].Urgency != voice.UrgencyIdle {
+	if len(got) != 1 || got[0].Text != "Auth finished the rerun you asked for. The same test, TestLoginRateLimit, still fails." || got[0].Urgency != voice.UrgencyIdle {
 		t.Fatalf("pushes = %+v", got)
 	}
 	row, _ := h.store.Get("w5:p1")
@@ -126,11 +132,11 @@ func TestAnnounceSkipAndSilent(t *testing.T) {
 		t.Errorf("push_decision = %v", d)
 	}
 	// silent: context for the assistant, not speech.
-	m.EventDefault = announceReply("Auth is done; the CEO has not asked about it.", "silent", "", "", false)
+	m.EventDefault = announceReply("Auth is done. The CEO has not asked about it.", "silent", "", "", false)
 	h.transition("w5:p1", herdr.StateDone, herdr.StateWorking)
 	doneAuth(h)
 	got := h.pusher.all()
-	if len(got) != 1 || got[0].Urgency != voice.UrgencySilent || got[0].Text != "Auth is done; the CEO has not asked about it." {
+	if len(got) != 1 || got[0].Urgency != voice.UrgencySilent || got[0].Text != "Auth is done. The CEO has not asked about it." {
 		t.Fatalf("pushes = %+v", got)
 	}
 	if d := h.decisions(); len(d) != 3 || d[2]["urgency_applied"] != "silent" {
@@ -205,7 +211,7 @@ func TestApplyCeilingTable(t *testing.T) {
 // idle unless it is due.
 func TestAnnounceCeilingApplied(t *testing.T) {
 	m := braintest.NewModel()
-	m.EventDefault = announceReply("Auth is done with the tests; look now.", "interrupt", "", "", false)
+	m.EventDefault = announceReply("Auth is done with the tests. Look now.", "interrupt", "", "", false)
 	h := newBrainHarness(t, m, func(c *Config) { c.Chattiness = string(Chatty) })
 	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
 	h.addAgent("w6:p1", "docs", "claude", herdr.StateWorking)
@@ -311,6 +317,28 @@ func slowAnnounce(h **harness, took time.Duration, rep *braintest.Step) *brainte
 	}}
 }
 
+// The ear contract applies to announcements too (iteration 2 WP1): the
+// brain's finish line is cut to the ear caps (dash-joined clauses split,
+// two sentences, no PR number), its ask is heard last, and what the cap
+// cut is kept after the detail on last_result for recall.
+func TestAnnounceLineIsCappedForTheEar(t *testing.T) {
+	m := braintest.NewModel()
+	m.EventDefault = withAsk(announceReply("Auth merged the lag fix you asked for as #49 — the tests pass — and the docs are updated too.", "idle", "A merge puts the change into the shared code.", "", false), "Shall I have it start the next one?")
+	h := newBrainHarness(t, m)
+	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
+	h.sup.touch("w5:p1")
+	doneAuth(h)
+	got := h.pusher.all()
+	const want = "Auth merged the lag fix you asked for as. The tests pass. Shall I have it start the next one?"
+	if len(got) != 1 || got[0].Text != want {
+		t.Fatalf("pushes = %+v, want one line %q", got, want)
+	}
+	row, _ := h.store.Get("w5:p1")
+	if row.LastResult == nil || row.LastResult.Spoken != want || row.LastResult.Detail != "A merge puts the change into the shared code. And the docs are updated too." {
+		t.Errorf("last_result = %+v", row.LastResult)
+	}
+}
+
 // A finish waits for the brain's line (iteration 2 WP2; eval
 // finish-line-needs-user-spoken): at 2026-09-24 00:52:37 the shepherd
 // heard "discoursecopilot-claude has finished its task." and the brain's
@@ -327,18 +355,18 @@ func TestFinishWaitsForTheBrainsLine(t *testing.T) {
 		setup func(h *harness)
 		want  string
 	}{
-		{"nobody's, chatty", Chatty, func(*harness) {}, spokenLine(line)},
+		{"nobody's, chatty", Chatty, func(*harness) {}, line},
 		{"the shepherd's instruction, normal", Normal, func(h *harness) {
 			now := h.sup.cfg.Now()
 			if _, err := h.store.Update("w5:p1", func(a *state.Agent) { a.CurrentTask, a.LastInteraction = "cut the release", &now }); err != nil {
 				t.Fatal(err)
 			}
-		}, spokenLine(line)},
+		}, line},
 		{"a kept promise, quiet", Quiet, func(h *harness) {
 			if _, err := h.sup.createPromise("w5:p1", brain.PromiseRequest{Text: "tell me when the release is out", Event: "done"}); err != nil {
 				t.Fatal(err)
 			}
-		}, spokenLine(line)},
+		}, line},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -360,7 +388,7 @@ func TestFinishWaitsForTheBrainsLine(t *testing.T) {
 			if n := h.log.count("brain.push_late"); n != 0 {
 				t.Errorf("brain.push_late = %d", n)
 			}
-			if row, _ := h.store.Get("w5:p1"); row.LastResult == nil || row.LastResult.Spoken != spokenLine(line) {
+			if row, _ := h.store.Get("w5:p1"); row.LastResult == nil || row.LastResult.Spoken != line {
 				t.Errorf("last_result = %+v", row.LastResult)
 			}
 		})
@@ -436,7 +464,7 @@ func TestFinishTimeoutSpeaksTheCodeSentenceOnce(t *testing.T) {
 // prompt only"); a late line without needs_user is dropped; a late line
 // about a prompt answered meanwhile is dropped as stale.
 func TestAnnounceLateBlockLines(t *testing.T) {
-	const needs = "Auth wants to write hello.txt; that is the file you said to keep small."
+	const needs = "Auth wants to write hello.txt. That is the file you said to keep small."
 	cases := []struct {
 		name      string
 		screen    string
@@ -639,12 +667,13 @@ func TestAnnounceFallsBackToTheCodeSentence(t *testing.T) {
 // CEO to approve a prompt already gone (2026-09-18).
 func TestAnnounceBlockOneLineAndStale(t *testing.T) {
 	m := braintest.NewModel()
-	m.EventDefault = announceReply("Auth wants to write hello.txt; that is the file you said to keep small.", "interrupt", "", "", true)
+	// The ear contract: the decision is the reply's ask, heard last.
+	m.EventDefault = withAsk(announceReply("Auth wants to write hello.txt. That is the file you said to keep small.", "interrupt", "", "", true), "Approve?")
 	h := newBrainHarness(t, m)
 	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
 	h.block("w5:p1", "codex-approval-prompt.screen.txt")
 	got := h.pusher.all()
-	if len(got) != 1 || got[0].Text != "Auth wants to write hello.txt; that is the file you said to keep small." || got[0].Urgency != voice.UrgencyInterrupt {
+	if len(got) != 1 || got[0].Text != "Auth wants to write hello.txt. That is the file you said to keep small. Approve?" || got[0].Urgency != voice.UrgencyInterrupt {
 		t.Fatalf("pushes = %+v", got)
 	}
 	// A decision on a block whose pending action this event created is
@@ -791,7 +820,7 @@ func TestAnnounceYieldsToCEO(t *testing.T) {
 func TestAnnounceCoalesces(t *testing.T) {
 	release := make(chan struct{})
 	m := braintest.NewModel(braintest.Step{Block: release, Text: braintest.Reply("Docs is done.", "")})
-	m.EventDefault = announceReply("Auth finished; the tests pass now.", "idle", "", "", false)
+	m.EventDefault = announceReply("Auth finished. The tests pass now.", "idle", "", "", false)
 	// ReplyWait -1: the shepherd's turn is held on purpose; its reply is
 	// the tool result, not a later push.
 	h := newBrainHarness(t, m, func(c *Config) { c.AnnounceWait = -1; c.Chattiness = string(Chatty); c.ReplyWait = -1 })
@@ -828,7 +857,7 @@ func TestAnnounceCoalesces(t *testing.T) {
 	wg.Wait()
 	h.sup.Brain().Quiesce()
 	got := h.pushTexts()
-	if len(got) != 2 || got[0] != doneSentence || got[1] != "Auth finished; the tests pass now." {
+	if len(got) != 2 || got[0] != doneSentence || got[1] != "Auth finished. The tests pass now." {
 		t.Errorf("pushes = %v", got)
 	}
 	d := h.decisions()
