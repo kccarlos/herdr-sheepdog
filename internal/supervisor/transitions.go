@@ -158,7 +158,10 @@ func (s *Supervisor) finishTask(paneID string) {
 // A screen that ends at a prompt is one of two things. agy reports done
 // around its own approval prompts mid-task, so for agy it is a block and
 // nothing finished. Any other agent's real approval prompts arrive as
-// blocked, so a prompt on its finish is one it showed after its turn
+// blocked (testdata/herdr: claude-permission-prompt and
+// codex-approval-prompt report agent_status "blocked", agy's prompts
+// "done"), so a prompt on its finish is one it showed after its turn —
+// unless it shows a command to approve, which stays a block for anyone
 // (Claude Code's "teach auto mode about your environment?"): the finish
 // is announced — what it found — together with the question, in one line
 // (announceFinishAsking).
@@ -176,7 +179,7 @@ func (s *Supervisor) onDone(ctx context.Context, row state.Agent, instructed boo
 		return
 	}
 	if herdr.EndsInQuestion(read.Text) {
-		if prompt, ok := herdr.ParsePrompt(read.Text); ok && row.Kind != kindAgy {
+		if prompt, ok := herdr.ParsePrompt(read.Text); ok && row.Kind != kindAgy && prompt.Command == "" {
 			s.announceFinishAsking(ctx, row, prompt, read.Text, alsoIdle, instructed)
 			return
 		}

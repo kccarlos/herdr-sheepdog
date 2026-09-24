@@ -885,7 +885,7 @@ func investigationsSection(system string) string {
 }
 
 // investigationReply answers a delivery turn from the result the request
-// carries: a short paragraph, pushed at the next pause.
+// carries: the gist and an offer, pushed at the next pause.
 func investigationReply(text, agent string) string {
 	found := "it came back with nothing"
 	if m := reWorkerOutput.FindStringSubmatch(text); m != nil {

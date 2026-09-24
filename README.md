@@ -219,11 +219,16 @@ finished the rerun you asked for; the same test still fails."), or
 nothing when you already know, or silent context for the voice model —
 and the level caps what it asked for: never a finish at `quiet`, never
 an agent you have not dealt with at `normal`, `interrupt` only for a due
-promise or a decision you must take. **One line per event, never two:**
+promise or a decision you must take. **One line per event, as a rule:**
 the event waits at most `brain.announce_wait_s` (2 s) for the brain, and
 past that the code sentence is spoken and the brain's line dropped
 (`brain.push_late`) — unless it says you must decide and the prompt is
-still open. Every judgment is in the event log as `brain.push_decision`
+still open, or the finish is one you are waiting for (it keeps a promise,
+ends an instruction you gave, or the line says which request of yours it
+answers): then you hear "auth finished — here's what it found." and the
+finding follows as soon as the brain has it (`brain.announce_timeout_s`,
+15 s). A finish that leaves a question on screen (Claude Code's own
+post-turn prompt) is announced together with the question. Every judgment is in the event log as `brain.push_decision`
 and on the push card in the Supervisor tab.
 
 "Dealt with recently" means that within the last `supervisor.recent_minutes`

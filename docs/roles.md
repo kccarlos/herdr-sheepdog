@@ -239,7 +239,8 @@ and an utterance with no brain gets the roster sentence and nothing is
 sent. **One push mode** is in: a block or a finish waits up to
 `brain.announce_wait_s` for the brain's line and speaks it alone, else
 the code sentence — a late line is dropped (`brain.push_late`) unless it
-says the shepherd must act on a prompt that is still open, and a line
+says the shepherd must act on a prompt that is still open or the finish
+is owed to the shepherd ("Pushes" above), and a line
 about a resolved block is dropped (`brain.push_stale`). The 10-minute
 silent briefing re-push and the plugin shim are gone too.
 

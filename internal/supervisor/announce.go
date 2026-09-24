@@ -224,7 +224,9 @@ func (s *Supervisor) dropLate(a announcement, kept []state.Promise, level Chatti
 	audible := len(kept) > 0 || level.allows(a.kind)
 	if r.err != nil {
 		s.logDecision(a, level, decision{via: "template", requested: "", applied: brain.UrgencySkip, reason: fallbackReason(r.err), late: true, err: r.err}, brain.Reply{}, kept, false)
-		if owed && audible {
+		// Not for yielded or coalesced: a newer turn about the same agent
+		// is about to speak.
+		if reason := fallbackReason(r.err); owed && audible && (reason == "timeout" || reason == "fallback") {
 			s.push(a.row.PaneID, "I couldn't get "+aliasOr(a.row.Alias)+"'s findings in time — ask me and I'll read its screen.", voice.UrgencyIdle)
 		}
 		return

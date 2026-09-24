@@ -223,16 +223,16 @@ func TestOwedAnnounceGetsTheLongerBudget(t *testing.T) {
 		req      Request
 		min, max time.Duration
 	}{
-		{"plain", Request{Kind: KindAnnounce, Agent: "auth", Event: "done", Template: "auth finished."}, 0, 300 * time.Millisecond},
-		{"owed", Request{Kind: KindAnnounce, Agent: "auth", Event: "done", Template: "auth finished.", Owed: true}, 400 * time.Millisecond, 2 * time.Second},
-		{"promise", Request{Kind: KindAnnounce, Agent: "auth", Event: "done", Template: "auth finished.", Promises: promise}, 400 * time.Millisecond, 2 * time.Second},
+		{"plain", Request{Kind: KindAnnounce, Agent: "auth", Event: "done", Template: "auth finished."}, 0, time.Second},
+		{"owed", Request{Kind: KindAnnounce, Agent: "auth", Event: "done", Template: "auth finished.", Owed: true}, 1200 * time.Millisecond, 4 * time.Second},
+		{"promise", Request{Kind: KindAnnounce, Agent: "auth", Event: "done", Template: "auth finished.", Promises: promise}, 1200 * time.Millisecond, 4 * time.Second},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			block := make(chan struct{})
 			defer close(block)
 			m := braintest.NewModel(braintest.Step{Block: block})
 			h := newHarness(t, m, func(c *Config) {
-				c.EnrichTimeout, c.AnnounceTimeout = 50*time.Millisecond, 400*time.Millisecond
+				c.EnrichTimeout, c.AnnounceTimeout = 50*time.Millisecond, 1200*time.Millisecond
 				c.FinalGrace = -1
 			})
 			start := time.Now()
