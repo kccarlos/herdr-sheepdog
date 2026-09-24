@@ -305,22 +305,37 @@ func capSummary(s string) string {
 // cutPoint returns the index of the first message kept: the smallest
 // boundary at or past half the tokens where the next message starts a
 // fresh exchange (never between a tool call and its result, never right
-// before a reply).
+// before a reply). A context message ingested while a step's tools ran
+// (the assistant's "On it.") sits between the call and its result, so a
+// boundary kind is not enough: no call may still wait for its result.
 func cutPoint(window []entry, half int) int {
 	acc := 0
+	open := map[string]bool{} // calls before the cut still waiting for a result
 	for i, en := range window {
 		acc += en.msg.Tokens
+		trackCalls(open, en.msg)
 		if acc < half {
 			continue
 		}
 		for j := i + 1; j < len(window); j++ {
-			if boundary(window[j].msg.Kind) {
+			if len(open) == 0 && boundary(window[j].msg.Kind) {
 				return j
 			}
+			trackCalls(open, window[j].msg)
 		}
 		return 0
 	}
 	return 0
+}
+
+// trackCalls updates the set of calls waiting for a result with m.
+func trackCalls(open map[string]bool, m Message) {
+	switch m.Kind {
+	case KindToolCall:
+		open[callKey(m)] = true
+	case KindToolResult:
+		delete(open, resultKey(m))
+	}
 }
 
 // boundary reports whether a message of kind k may open the window.

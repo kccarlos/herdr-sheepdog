@@ -96,7 +96,12 @@
 // from OpenClaw. A memory-backed engine plugs in through Config.Engine and
 // may return a system-prompt addition from Assemble (recalled facts) and
 // serve recall() from durable storage instead of the run's transcript;
-// the disk transcript is its ingestion source.
+// the disk transcript is its ingestion source. The transcript is in
+// arrival order, so the assistant's speech can land between a step's
+// tool call and its result; both request renderers visit the window in
+// modelOrder, which keeps a step's calls and results adjacent and moves
+// such a line to just after them (a step left without its results is
+// dropped), and the compaction cut never falls inside a step.
 //
 // # Prompt
 //

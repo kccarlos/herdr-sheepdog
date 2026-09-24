@@ -10,8 +10,8 @@ import (
 	"google.golang.org/genai"
 )
 
-// toContents renders the window as Gemini contents for provider/model.
-// Context messages (utterances, replies of the assistant, pushes, worker
+// toContents renders the window as Gemini contents for provider/model,
+// in modelOrder (a step's calls and results adjacent). Context messages (utterances, replies of the assistant, pushes, worker
 // events, notes, requests, summaries) become user text lines;
 // consecutive ones merge into one content. A step's tool calls become
 // the model content the provider returned (Raw, with its thought
@@ -85,7 +85,8 @@ func toContentsTraced(msgs []Message, provider, model string, tr *[]origin) []*g
 	flushAll := func() { flushText(); flushCalls(); flushResults() }
 	rawCovers := false // the step's Raw was replayed: its other calls are in it
 
-	for mi, m := range msgs {
+	for _, mi := range modelOrder(msgs) {
+		m := msgs[mi]
 		if m.Kind != KindToolCall {
 			rawCovers = false
 		}
@@ -141,6 +142,106 @@ func toContentsTraced(msgs []Message, provider, model string, tr *[]origin) []*g
 	}
 	flushAll()
 	return out
+}
+
+// modelOrder is the order both renderers visit the window in, as
+// indices into msgs (so the origins they record still name the
+// transcript's messages): the transcript order, except that a step's
+// tool calls and their results stay adjacent. Every provider requires
+// it — an assistant message with tool_calls must be followed by a tool
+// message for each call (DeepSeek's HTTP 400 otherwise), a Gemini
+// function call by its function responses — but the transcript is
+// written by several goroutines: the assistant's speech (Brain.Said)
+// and pushes are ingested while a step's tools execute, so "On it."
+// lands between a read_screen call and its result (2026-09-24 18:16:43,
+// turn 6), and because that order stayed in the window, every later
+// call of the run failed until "New conversation". So a context message
+// (an utterance, the assistant's speech, a push, a worker event, a note,
+// a request…) that falls between a step's calls and the last of their
+// results is moved to just after those results, keeping the relative
+// order of everything moved. This also heals a transcript recorded
+// before the fix: the order is decided at assembly, not at ingestion.
+//
+// A step whose results never all arrived — the loop records one for
+// every call it executes (execCalls), so only a transcript cut short (a
+// daemon killed mid-step) or trimmed by an older compaction can hold one
+// — is dropped whole, calls and the results it has: a dangling call is
+// refused by the provider, and a Raw replay would re-list every call of
+// the step anyway. It counts as over at a reply, at a message of another
+// turn, at a call after its results began, or at the end of the window.
+// A result whose call is not in the window is dropped too.
+func modelOrder(msgs []Message) []int {
+	order := make([]int, 0, len(msgs))
+	var step, deferred []int // the open step's calls and results; context moved past it
+	pending := map[string]bool{}
+	stepTurn, results := 0, false
+	closeStep := func() {
+		if len(pending) == 0 {
+			order = append(order, step...)
+		}
+		order = append(order, deferred...)
+		step, deferred, results = nil, nil, false
+		clear(pending)
+	}
+	for i, m := range msgs {
+		switch m.Kind {
+		case KindToolCall:
+			if results {
+				// A new step while the last one still waits for a result.
+				closeStep()
+			}
+			if len(step) == 0 {
+				stepTurn = m.Turn
+			}
+			step = append(step, i)
+			pending[callKey(m)] = true
+		case KindToolResult:
+			k := resultKey(m)
+			if !pending[k] {
+				continue // its call is not in the window (or already answered)
+			}
+			delete(pending, k)
+			step, results = append(step, i), true
+			if len(pending) == 0 {
+				closeStep()
+			}
+		default:
+			if len(step) > 0 && (m.Kind == KindReply || (m.Turn != 0 && m.Turn != stepTurn)) {
+				closeStep()
+			}
+			if len(step) > 0 {
+				deferred = append(deferred, i)
+				continue
+			}
+			order = append(order, i)
+		}
+	}
+	if len(step) > 0 {
+		closeStep()
+	}
+	return order
+}
+
+// callKey and resultKey pair a tool call with its result: by id, or by
+// the tool's name when a message has none.
+func callKey(m Message) string {
+	if m.ToolCall == nil {
+		return "?"
+	}
+	if m.ToolCall.ID != "" {
+		return m.ToolCall.ID
+	}
+	return "name:" + m.ToolCall.Name
+}
+
+func resultKey(m Message) string {
+	if m.ToolResult == nil {
+		return "?"
+	}
+	if m.ToolResult.ID != "" {
+		return m.ToolResult.ID
+	}
+	return "name:" + m.ToolResult.Name
 }
 
 // sameOrigin reports whether m's Raw was produced by provider/model, so

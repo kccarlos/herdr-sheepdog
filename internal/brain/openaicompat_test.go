@@ -672,3 +672,74 @@ func TestMessageProviderRoundTrip(t *testing.T) {
 		t.Errorf("read back = %+v %v", msgs, err)
 	}
 }
+
+// TestVoiceLineDuringToolCall is the failure of 2026-09-24 18:16:43
+// through the real path: the voice speaks its filler ("On it.") while
+// the brain's read_screen runs, Brain.Said ingests it between the call
+// and its result, and the next request must still put the tool message
+// right after the assistant's tool_calls (DeepSeek answered HTTP 400
+// otherwise, and every later turn failed on the same window). The line
+// is kept, after the result; the next turn (the stop turn that failed
+// in the log) is valid too.
+func TestVoiceLineDuringToolCall(t *testing.T) {
+	srv := newCompatServer(t,
+		toolCalls("Read more of the screen.", [3]string{"call_00_Bk", ToolReadScreen, `{"agent":"auth","lines":200}`}),
+		ok(`{"spoken":"Two glitches: a stale listening state and a late error banner.","detail":""}`),
+		ok(`{"spoken":"Nothing was in flight.","detail":""}`),
+	)
+	ds := newCompat(t, srv.srv.URL, true, "low", nil)
+	h := newHarness(t, braintest.NewModel(), func(c *Config) { c.Provider = ProviderDeepSeek; c.Model = "deepseek-flash" })
+	if err := h.brain.AddProvider(ProviderDeepSeek, ds); err != nil {
+		t.Fatal(err)
+	}
+	h.host.ReadHook = func(context.Context) error {
+		h.brain.Said("On it.", true)
+		return nil
+	}
+	if _, err := h.ask("Um, I want to know the detail of the glitches", ""); err != nil {
+		t.Fatalf("turn with a voice line mid-step: %v", err)
+	}
+	if got := joinKinds(h.kinds()); got != "request brain_tool_call assistant_said brain_tool_result reply" {
+		t.Fatalf("transcript = %s (the test needs the line between the call and its result)", got)
+	}
+	h.brain.Quiesce()
+	if _, err := h.brain.Turn(context.Background(), Request{Kind: KindStop, Stopped: "nothing was in flight"}); err != nil {
+		t.Fatalf("next turn: %v", err)
+	}
+	for i := 1; i < srv.count(); i++ {
+		shape := requestShape(srv.request(i))
+		if !strings.Contains(shape, "assistant+call_00_Bk tool@call_00_Bk user") {
+			t.Errorf("request %d = %s", i, shape)
+		}
+	}
+	// The line is still there, after the result.
+	msgs := srv.request(1)["messages"].([]any)
+	for i, mm := range msgs {
+		if m := mm.(map[string]any); m["tool_call_id"] == "call_00_Bk" {
+			next, _ := msgs[i+1].(map[string]any)["content"].(string)
+			if !strings.Contains(next, `Assistant said: "On it."`) {
+				t.Errorf("message after the result = %q", next)
+			}
+		}
+	}
+}
+
+// requestShape is a chat request's roles with tool call ids ("+id") and
+// tool_call_ids ("@id").
+func requestShape(req map[string]any) string {
+	var shape []string
+	for _, mm := range req["messages"].([]any) {
+		m := mm.(map[string]any)
+		s := m["role"].(string)
+		if tcs, ok := m["tool_calls"].([]any); ok {
+			for _, tc := range tcs {
+				s += "+" + tc.(map[string]any)["id"].(string)
+			}
+		}
+		if id, ok := m["tool_call_id"].(string); ok {
+			s += "@" + id
+		}
+		shape = append(shape, s)
+	}
+	return strings.Join(shape, " ")
+}
