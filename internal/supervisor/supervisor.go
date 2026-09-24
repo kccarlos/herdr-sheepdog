@@ -102,10 +102,13 @@ type Config struct {
 	// sub-agent session stays resumable; a follow-up past it starts cold
 	// with the previous answer prepended (default 1 h).
 	InvestigateSessionTTL time.Duration
-	// AnnounceWait is how long a block or a finish waits for the brain's
-	// announce turn before the daemon's own code sentence is spoken
-	// (default 2 s). Past it the brain's line is dropped, never spoken
-	// after the sentence. Negative waits for the turn's own timeout.
+	// AnnounceWait is how long a block waits for the brain's announce turn
+	// before the daemon's own code sentence (the parsed prompt) is spoken
+	// (default 2 s, brain.announce_wait_s). Past it the brain's line is
+	// dropped unless it says the shepherd must act (docs/roles.md
+	// "Pushes"). A finish does not use it: a finish is not urgent and
+	// waits for the turn's own budget. Negative waits for the turn's own
+	// timeout on a block too.
 	AnnounceWait time.Duration
 	// ReplyWait is how long a to_supervisor call waits for the brain's
 	// reply before it returns a silent pending result and the reply is

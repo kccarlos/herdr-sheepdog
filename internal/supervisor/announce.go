@@ -22,19 +22,23 @@ import (
 // the one exception) and interrupt only for a due promise or a decision
 // the shepherd must take.
 //
-// One line per event, as a rule: the event waits up to
-// Config.AnnounceWait for the brain's line and speaks it alone; past the
-// wait the code sentence is spoken and the brain's line, whenever it
-// lands, is dropped (brain.push_late) — with two exceptions, each at most
-// one addition. A finish the shepherd is owed (it keeps a promise, or
-// ends an instruction they gave this run; or the late line itself says
-// which of their requests it fulfils, relates_to) is announced at the
-// wait as "<alias> finished — here's what it found." and the brain's
-// line with the finding follows whenever it lands, within the longer
-// brain.announce_timeout_s (the 2026-09-23 run dropped the one answer
-// the shepherd was waiting for). And a line that says the shepherd must
-// act on a block that is still open. A line about a block whose prompt is
-// already gone is dropped (brain.push_stale).
+// One line per event, and when it is spoken depends on the event
+// (iteration 2 WP2, the 2026-09-24 scorecard: 48 of 61 brain lines were
+// dropped for lateness, 30 of them needs_user):
+//   - A finish is not urgent: it waits for the brain's announce turn up to
+//     the turn's own budget (brain.announce_turn_timeout_s, or
+//     brain.announce_timeout_s when the shepherd is owed the line) and
+//     speaks the brain's line alone. Only when the turn fails, times out,
+//     yields or is coalesced is the code sentence spoken — once, then; an
+//     owed finish (a kept promise, the shepherd's own instruction) that got
+//     no line says so in the same sentence.
+//   - A block is urgent: the code sentence (the parsed prompt) is spoken
+//     at Config.AnnounceWait unless the brain's line lands first. A line
+//     that lands later is dropped (brain.push_late) unless it says the
+//     shepherd must act (needs_user) — spoken once, at idle — or it is the
+//     finding of an owed finish that also asked (announceFinishAsking).
+//     A line about a prompt that is no longer open is dropped
+//     (brain.push_stale on time, push_decision reason stale when late).
 
 // announcement is one worker event the supervisor announces: the code
 // sentence and what the brain gets.
@@ -73,6 +77,26 @@ type announcement struct {
 	// eventID is the worker event's id (links.go), set by announce: the
 	// turn's request and every push about the event carry it.
 	eventID string
+	// wait is how the event waited for the brain's line, set by announce
+	// for brain.push_decision: waitTurn (a finish, the turn's own budget),
+	// waitAnnounce (a block, Config.AnnounceWait), "" (no turn ran).
+	wait string
+	// waited is how long it waited before its line was decided.
+	waited time.Duration
+}
+
+// The two ways an announcement waits for the brain (brain.push_decision
+// "wait").
+const (
+	waitTurn     = "turn"
+	waitAnnounce = "announce_wait"
+)
+
+// urgent reports whether the event must be heard at once — a block, or a
+// finish that left a prompt open (announceFinishAsking) — rather than
+// waiting for the brain's line: only a prompt cannot wait.
+func (a announcement) urgent() bool {
+	return a.event == brain.PromiseEventBlocked || a.pending != ""
 }
 
 // turnResult is what the announce goroutine hands back.
@@ -82,8 +106,9 @@ type turnResult struct {
 }
 
 // announce keeps the promises the event fulfils and speaks the one line
-// the event gets: the brain's when it lands within Config.AnnounceWait,
-// else the code sentence.
+// the event gets: for a finish, the brain's line when its turn answers, or
+// the code sentence when it cannot; for a block, the brain's line when it
+// lands within Config.AnnounceWait, else the code sentence.
 func (s *Supervisor) announce(ctx context.Context, a announcement) {
 	a.eventID = s.eventIDOf(a.row.PaneID)
 	events := []string{a.event}
@@ -119,16 +144,32 @@ func (s *Supervisor) announce(ctx context.Context, a announcement) {
 		rep, err := s.brain.Turn(ctx, req)
 		res <- turnResult{rep: rep, err: err}
 	}()
+	if !a.urgent() {
+		// A finish is news, not an alarm: the brain's line (what it
+		// found) is worth the seconds its turn takes, and the turn's own
+		// budget bounds the wait (brain.Turn never outlives it).
+		r := <-res
+		a.wait, a.waited = waitTurn, s.cfg.Now().Sub(start)
+		if r.err != nil {
+			s.codePath(a, kept, level, fallbackReason(r.err))
+			return
+		}
+		s.applyResult(a, kept, level, r)
+		return
+	}
+	a.wait = waitAnnounce
 	var timer <-chan time.Time
 	if s.cfg.AnnounceWait > 0 {
 		timer = time.After(s.cfg.AnnounceWait)
 	}
 	select {
 	case r := <-res:
+		a.waited = s.cfg.Now().Sub(start)
 		s.applyResult(a, kept, level, r)
 	case <-timer:
-		// The shepherd hears the news now; the line the brain is still
-		// writing is too late to be this event's one line.
+		// The shepherd hears the prompt now; the line the brain is still
+		// writing is an addition at most.
+		a.waited = s.cfg.AnnounceWait
 		s.codePath(a, kept, level, "wait")
 		s.dropLate(a, kept, level, <-res, start)
 	}
@@ -140,10 +181,12 @@ func owedFinish(a announcement, kept []state.Promise) bool {
 	return a.event == brain.PromiseEventDone && (len(kept) > 0 || a.owed)
 }
 
-// foundSentence is the code sentence of an owed finish spoken before the
-// brain's line lands: it promises the finding that line carries.
-func foundSentence(a announcement) string {
-	return aliasOr(a.row.Alias) + " finished — here's what it found."
+// noFindingSentence is the code sentence of an owed finish whose brain
+// line never came (the turn timed out): the shepherd is waiting
+// for what it found, so the sentence says it could not be had and how to
+// get it.
+func noFindingSentence(a announcement) string {
+	return aliasOr(a.row.Alias) + " finished, but I couldn't get its findings in time. Ask me and I'll read its screen."
 }
 
 // applyResult turns the brain's answer (or failure) into the event's one
@@ -210,29 +253,21 @@ func announceTags(u voice.Urgency, duePassed, needsUser bool, pending string) ma
 	return tags
 }
 
-// dropLate handles the brain's line arriving after the code sentence was
-// spoken. As a rule it is not a second line about the same event
-// (brain.push_late); it is added, once, at idle when
+// dropLate handles the brain's line arriving after the code sentence of
+// an urgent event (a block, or a finish that asks) was spoken. As a rule
+// it is not a second line about the same event (brain.push_late); it is
+// added, once, at idle when
+//   - it says the shepherd must act (needs_user), whatever the event, and
+//     the prompt it is about is still open; or
 //   - the event is a finish the shepherd is owed (a kept promise, their
-//     own instruction) — the code sentence said "here's what it found"
-//     and this line is the finding — or the line relates the finish to a
-//     request of theirs (relates_to), which the code could not know; or
-//   - it says the shepherd must act and the block is still open.
-//
-// An owed finish whose line never comes (the turn failed or timed out)
-// gets a short closing sentence instead, so "here's what it found" is not
-// left hanging.
+//     own instruction) that also asked, so this line is the finding, or
+//     the line relates the finish to a request of theirs (relates_to),
+//     which the code could not know.
 func (s *Supervisor) dropLate(a announcement, kept []state.Promise, level Chattiness, r turnResult, start time.Time) {
 	dur := s.cfg.Now().Sub(start).Milliseconds()
-	owed := owedFinish(a, kept) && a.asking == ""
 	audible := len(kept) > 0 || level.allows(a.kind)
 	if r.err != nil {
 		s.logDecision(a, level, decision{via: "template", requested: "", applied: brain.UrgencySkip, reason: fallbackReason(r.err), late: true, err: r.err}, brain.Reply{}, kept, false)
-		// Not for yielded or coalesced: a newer turn about the same agent
-		// is about to speak.
-		if reason := fallbackReason(r.err); owed && audible && (reason == "timeout" || reason == "fallback") {
-			s.pushTagged(a.row.PaneID, "I couldn't get "+aliasOr(a.row.Alias)+"'s findings in time — ask me and I'll read its screen.", voice.UrgencyIdle, a.tags(nil))
-		}
 		return
 	}
 	open := s.pendingStillOpen(a)
@@ -248,13 +283,14 @@ func (s *Supervisor) dropLate(a announcement, kept []state.Promise, level Chatti
 	reason := lateReason(open)
 	var add bool
 	switch {
-	case spoken == "" || !open:
-	case (owedFinish(a, kept) || related) && audible && (len(kept) > 0 || requested != brain.UrgencySkip):
+	case spoken == "" || !open || !audible:
+	case rep.NeedsUser:
+		// A decision the shepherd must take is never lost to lateness.
+		add, reason = true, "needs_user"
+	case (owedFinish(a, kept) || related) && (len(kept) > 0 || requested != brain.UrgencySkip):
 		// The finding the shepherd is waiting for. The brain may skip an
 		// unpromised finish (they already heard it), never a promise.
 		add, reason = true, "owed"
-	case rep.NeedsUser && a.pending != "" && level.allows(a.kind):
-		add = true
 	}
 	s.logDecision(a, level, decision{via: "brain", requested: rep.Urgency, applied: appliedIf(add), reason: reason, late: true}, rep, kept, true)
 	s.log.Log(logSource, "brain.push_late", a.row.PaneID, map[string]any{"turn": rep.Turn, "dur_ms": dur, "spoken": spoken, "needs_user": rep.NeedsUser, "relates_to": strings.TrimSpace(rep.RelatesTo), "added": add})
@@ -309,7 +345,11 @@ func (s *Supervisor) pendingStillOpen(a announcement) bool {
 // prompt for a block, "<alias> finished." for a finish — when the level
 // allows it, or as "As you asked: <sentence>" for every kept promise at
 // every level (idle, or interrupt past a due time). It is the fallback
-// whenever the brain is off, late, or could not answer.
+// whenever the brain is off, late on a block, or could not answer. An
+// owed finish whose turn timed out says in the same sentence that its
+// findings could not be had in time (not after a yield or coalesce: a
+// newer turn about the same agent is about to speak; nor after a model
+// error, which is no matter of time).
 func (s *Supervisor) codePath(a announcement, kept []state.Promise, level Chattiness, reason string) {
 	s.recordFinish(a, doneResult)
 	if s.brain != nil && reason != "promise" {
@@ -320,10 +360,8 @@ func (s *Supervisor) codePath(a announcement, kept []state.Promise, level Chatti
 		s.logDecision(a, level, decision{via: "template", requested: "", applied: applied, reason: reason}, brain.Reply{}, kept, false)
 	}
 	sentence := a.sentence
-	if reason == "wait" && owedFinish(a, kept) && a.asking == "" {
-		// The brain is still writing the finding: say it is coming
-		// (dropLate adds it).
-		sentence = foundSentence(a)
+	if owedFinish(a, kept) && a.asking == "" && reason == "timeout" {
+		sentence = noFindingSentence(a)
 	}
 	if len(kept) == 0 {
 		if a.kind != pushPromiseOnly {
@@ -371,7 +409,7 @@ type decision struct {
 	via       string // brain | template | ceiling (skipped before any turn)
 	requested string // what the brain asked for ("" on the template path)
 	applied   string // what was done: interrupt, idle, silent, skip
-	reason    string // brain, ceiling, duplicate, promise, promise_due, wait, timeout, fallback, yielded, coalesced
+	reason    string // brain, ceiling, promise, promise_due, stale, late, owed, needs_user, wait, timeout, fallback, yielded, coalesced
 	late      bool   // the template was spoken before the brain answered
 	err       error
 }
@@ -379,6 +417,13 @@ type decision struct {
 // logDecision emits brain.push_decision.
 func (s *Supervisor) logDecision(a announcement, level Chattiness, d decision, rep brain.Reply, kept []state.Promise, withSpoken bool) {
 	payload := map[string]any{"via": d.via, "urgency_requested": d.requested, "urgency_applied": d.applied, "ceiling": string(level), "reason": d.reason, "agent": aliasOr(a.row.Alias), "event": a.event, "template": a.sentence, "late": d.late}
+	if a.wait != "" {
+		// How the event waited for the brain's line and for how long: the
+		// scorecard tells "brain line after the wait" (via brain) from
+		// "code sentence after the turn failed" (via template).
+		payload["wait"] = a.wait
+		payload["waited_ms"] = a.waited.Milliseconds()
+	}
 	if withSpoken {
 		payload["spoken"] = spokenLine(rep.Spoken)
 		payload["detail"] = strings.TrimSpace(prose.Spoken(rep.Detail, 0))

@@ -113,14 +113,11 @@ func TestPromiseKeptAtEveryLevel(t *testing.T) {
 				t.Errorf("promise push = %+v", last)
 			}
 			// One line per finish: the template sentence is never spoken
-			// next to the promise line. quiet/normal: only the promise line
-			// ("started on" is chatty); chatty: "started on", then it.
+			// next to the promise line. Only the promise line is spoken at
+			// every level ("started on" is chatty, and silent there: the
+			// instruction was just sent).
 			texts := h.pushTexts()
-			wantN := 1
-			if level == Chatty {
-				wantN = 2
-			}
-			if len(texts) != wantN || slices.Contains(texts, doneSentence) {
+			if len(texts) != 1 || slices.Contains(texts, doneSentence) {
 				t.Errorf("%s pushes = %v", level, texts)
 			}
 			if n := h.log.count("supervisor.push_quiet"); n != map[Chattiness]int{Quiet: 1, Normal: 1, Chatty: 0}[level] { // "started on"

@@ -106,16 +106,20 @@ type Brain struct {
 	// may run before the turn falls back (0: default 3s; negative: none).
 	FinalGraceS int `toml:"final_grace_s"`
 	// AnnounceTurnTimeoutS bounds an event turn (the announce turn on a
-	// block or finish); on expiry the template sentence is spoken instead
-	// (default 6; formerly enrich_timeout_s, still accepted).
+	// block or finish); on expiry the template sentence is spoken instead.
+	// A finish waits this long (plus final_grace_s) for the brain's line
+	// before anything is said (default 6; formerly enrich_timeout_s, still
+	// accepted).
 	AnnounceTurnTimeoutS int `toml:"announce_turn_timeout_s"`
 	// AnnounceTimeoutS bounds an announce turn the shepherd is owed: one
 	// that keeps a promise or reports the finish of an instruction they
-	// gave (default 15).
+	// gave; such a finish waits this long for the brain's line
+	// (default 15).
 	AnnounceTimeoutS int `toml:"announce_timeout_s"`
-	// AnnounceWaitS is how long the first audible announcement of a
-	// finish waits for the brain's announce turn before the template
-	// sentence is spoken; the brain's line may still follow (default 2).
+	// AnnounceWaitS is how long a block waits for the brain's announce
+	// turn before the parsed prompt is spoken; a late line follows only
+	// when it says the shepherd must act (default 2). A finish does not
+	// use it: it waits for the turn's own budget (docs/roles.md "Pushes").
 	AnnounceWaitS int `toml:"announce_wait_s"`
 	// ReplyWaitS is how long a to_supervisor call waits for the brain's
 	// reply before it returns a silent pending result and the reply is

@@ -71,10 +71,10 @@ func (s *Supervisor) HandleTransition(ctx context.Context, t herdr.Transition) {
 		// prompt (agy reports done, not blocked, around its prompts).
 		s.dropPendingFor(t.PaneID, "prompt_gone", state.PendingAnswerPrompt)
 		s.forgetExpired(t.PaneID)
-		started := s.startedInstruction(t.PaneID, from)
+		started, justSent := s.startedInstruction(t.PaneID, from)
 		s.mu.Unlock()
 		if started != "" {
-			s.pushIf(pushStarted, t.PaneID, alias+" started on "+started+".")
+			s.pushStarted(t.PaneID, alias+" started on "+started+".", justSent)
 		}
 		s.keepPromises(ctx, row, string(t.To), alias+" is working now.")
 	case herdr.StateDone, herdr.StateIdle:
@@ -117,19 +117,40 @@ func (s *Supervisor) HandleTransition(ctx context.Context, t herdr.Transition) {
 // startedInstruction returns the spoken form of the instruction the user
 // sent to paneID when its move to working means the agent picked it up
 // (a send_instruction is pending for it and it did not just leave a
-// prompt), else "". Caller holds s.mu.
-func (s *Supervisor) startedInstruction(paneID string, from herdr.State) string {
+// prompt), else "". justSent is set when that instruction went out
+// within Config.CancelWindow — the same "instructed at" the stop
+// procedure reads (stop.go). Caller holds s.mu.
+func (s *Supervisor) startedInstruction(paneID string, from herdr.State) (started string, justSent bool) {
 	if from == herdr.StateBlocked {
-		return ""
+		return "", false
 	}
 	p, has := s.store.Pending()
 	if !has || p.Kind != state.PendingSendInstruction || p.PaneID != paneID {
-		return ""
+		return "", false
 	}
+	justSent = s.cfg.Now().Sub(p.CreatedAt) <= s.cfg.CancelWindow
 	if t := shortTask(p.PayloadText); t != "" {
-		return t
+		return t, justSent
 	}
-	return "the instruction"
+	return "the instruction", justSent
+}
+
+// pushStarted pushes "<alias> started on …" under the chatty level
+// (docs/roles.md "Pushes"). When the brain's own prompt went out just now
+// the push is silent, context only: the tool result already told the
+// shepherd it was sent, and "started on" as well was the duplicate
+// speech of 2026-09-24 00:13:02. An instruction picked up long after it
+// was sent (the worker was busy) is news, spoken at idle as before.
+func (s *Supervisor) pushStarted(paneID, text string, justSent bool) {
+	if !justSent {
+		s.pushIf(pushStarted, paneID, text)
+		return
+	}
+	if level := s.chattiness(); !level.allows(pushStarted) {
+		s.log.Log(logSource, "supervisor.push_quiet", paneID, map[string]any{"text": text, "chattiness": string(level)})
+		return
+	}
+	s.pushTagged(paneID, text, voice.UrgencySilent, nil)
 }
 
 // finishTask moves the row's current task to last_task.
@@ -146,8 +167,8 @@ func (s *Supervisor) finishTask(paneID string) {
 }
 
 // onDone reads the pane of a finished agent and hands "<alias> finished."
-// to announce: the brain's line replaces it when one lands within
-// AnnounceWait, and whichever is spoken becomes last_result. It is
+// to announce: the finish waits for the brain's line, which replaces it
+// unless the turn fails, and whichever is spoken becomes last_result. It is
 // spoken when the chattiness level allows it for this agent (every finish
 // at chatty; at normal only agents the user dealt with within
 // RecentWindow; never at quiet), with the finish's open promises kept in

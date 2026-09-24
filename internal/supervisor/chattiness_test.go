@@ -40,7 +40,8 @@ func (h *harness) pushTexts() []string {
 // TestChattinessLevels runs one transition sequence at every level and
 // compares the pushes: questions and exits always; informational blocks,
 // replacement phrasing and finishes of agents the user dealt with at
-// normal; every finish and "started on" at chatty; "idle again" never.
+// normal; every finish at chatty, and "started on" there as silent
+// context (the brain's own prompt went out just now); "idle again" never.
 func TestChattinessLevels(t *testing.T) {
 	const (
 		authQ    = `auth asks to run printf '%s\n' 'hello from codex.' > hello.txt.`
@@ -57,7 +58,7 @@ func TestChattinessLevels(t *testing.T) {
 	want := map[Chattiness][]string{
 		Quiet:  {authQ, docsQ, trust, exit},
 		Normal: {authQ, replaced, docsDone, vpsDone, trust, exit},
-		Chatty: {authQ, replaced, docsDone, vpsDone, started, vpsDone, trust, exit},
+		Chatty: {authQ, replaced, docsDone, vpsDone, vpsDone, trust, exit},
 	}
 	for _, level := range Levels {
 		t.Run(string(level), func(t *testing.T) {
@@ -92,9 +93,23 @@ func TestChattinessLevels(t *testing.T) {
 			if row, _ := h.store.Get("w7:p1"); row.LastResult == nil || row.LastResult.Spoken != doneResult {
 				t.Errorf("vps last_result at %s = %+v", level, row.LastResult)
 			}
-			// The suppressed pushes are visible in the log.
+			// The instruction was just sent: "started on" is context the
+			// voice gets at chatty, never speech.
+			var silentStarted bool
+			for _, p := range h.pusher.all() {
+				silentStarted = silentStarted || (p.Text == started && p.Urgency == voice.UrgencySilent)
+			}
+			if silentStarted != (level == Chatty) {
+				t.Errorf("silent %q pushed at %s: %v", started, level, silentStarted)
+			}
+			// The suppressed pushes are visible in the log ("started on"
+			// among them below chatty).
 			quiet := h.log.count("supervisor.push_quiet")
-			if wantQuiet := len(want[Chatty]) - len(want[level]); quiet != wantQuiet {
+			wantQuiet := len(want[Chatty]) - len(want[level])
+			if level != Chatty {
+				wantQuiet++
+			}
+			if quiet != wantQuiet {
 				t.Errorf("supervisor.push_quiet = %d, want %d", quiet, wantQuiet)
 			}
 		})
