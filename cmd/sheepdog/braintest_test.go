@@ -15,7 +15,6 @@ func TestBrainTestFlagsAndValidation(t *testing.T) {
 		msg  string
 	}{
 		{[]string{}, 2, "needs --question"},
-		{[]string{"--question", "q", "--kind", "shout"}, 2, "--kind must be utterance, ask or propose"},
 		{[]string{"--question", "q", "--state", "asleep"}, 2, "--state must be"},
 		{[]string{"--help"}, 0, "usage: sheepdog brain-test"},
 	}
@@ -26,9 +25,20 @@ func TestBrainTestFlagsAndValidation(t *testing.T) {
 			t.Errorf("%v: run=%v code=%d stderr=%q", c.args, run, code, stderr.String())
 		}
 	}
-	o, code, run := parseBrainTestFlags([]string{"--question", "why?", "--kind", "propose", "--say", "a", "--say", "b", "--fake"}, &bytes.Buffer{})
-	if !run || code != 0 || o.kind != "propose" || len(o.say) != 2 || !o.fake {
+	o, code, run := parseBrainTestFlags([]string{"--question", "why?", "--say", "a", "--say", "b", "--fake"}, &bytes.Buffer{})
+	if !run || code != 0 || len(o.say) != 2 || !o.fake {
 		t.Errorf("valid flags: run=%v code=%d opts=%+v", run, code, o)
+	}
+	// --kind and --agent (the removed ask/propose kinds) are accepted and
+	// ignored, with a note, so old scripts keep working.
+	var stderr bytes.Buffer
+	if _, code, run := parseBrainTestFlags([]string{"--question", "q", "--kind", "propose", "--agent", "auth"}, &stderr); !run || code != 0 ||
+		!strings.Contains(stderr.String(), "--kind propose is ignored") || !strings.Contains(stderr.String(), "--agent is ignored") {
+		t.Errorf("--kind/--agent: run=%v code=%d stderr=%q", run, code, stderr.String())
+	}
+	stderr.Reset()
+	if _, _, run := parseBrainTestFlags([]string{"--question", "q", "--kind", "utterance"}, &stderr); !run || stderr.Len() != 0 {
+		t.Errorf("--kind utterance: run=%v stderr=%q", run, stderr.String())
 	}
 }
 
@@ -38,7 +48,7 @@ func TestBrainTestFakeEndToEnd(t *testing.T) {
 	noKeys(t)
 	t.Setenv("SHEEPDOG_DATA_DIR", t.TempDir())
 	var stdout, stderr bytes.Buffer
-	code := run(context.Background(), []string{"brain-test", "--fake", "--question", "what did auth say?", "--agent", "auth", "--state", "working", "--fixture", "../../testdata/herdr/codex-working.screen.txt", "--say", "what did auth say?", "--config", "/nonexistent/config.toml"}, &stdout, &stderr)
+	code := run(context.Background(), []string{"brain-test", "--fake", "--question", "what did auth say?", "--state", "working", "--fixture", "../../testdata/herdr/codex-working.screen.txt", "--say", "what did auth say?", "--config", "/nonexistent/config.toml"}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("exit %d\nstdout: %s\nstderr: %s", code, stdout.String(), stderr.String())
 	}

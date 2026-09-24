@@ -42,7 +42,7 @@ func TestPollRepromptRaisesOnDifferentPrompt(t *testing.T) {
 	h.block("w5:p1", "codex-approval-prompt.screen.txt")
 	first, _ := h.pending()
 
-	h.call(ToolConfirm, map[string]any{"answer": "yes"})
+	h.say("yes")
 	// The mock never moves the pane on its own; swap the screen in while
 	// it stays "blocked" the way a real worker's next prompt would.
 	h.srv.SetScreen("w5:p1", fixture(t, "codex-git-prompt.screen.txt"))
@@ -72,7 +72,7 @@ func TestPollRepromptRaisesOnDifferentPrompt(t *testing.T) {
 func TestPollRepromptSamePromptNotRaised(t *testing.T) {
 	h := twoAgents(t, pollOpts)
 	h.block("w5:p1", "codex-approval-prompt.screen.txt")
-	h.call(ToolConfirm, map[string]any{"answer": "yes"})
+	h.say("yes")
 
 	waitFor(t, func() bool { return h.log.count("supervisor.reprompt_poll") == 1 }, "the poll to end")
 	if outcome := h.lastPollOutcome(t); outcome != "same_prompt" {
@@ -92,7 +92,7 @@ func TestPollRepromptSamePromptNotRaised(t *testing.T) {
 func TestPollRepromptStopsWhenLeavesBlocked(t *testing.T) {
 	h := twoAgents(t, pollOpts)
 	h.block("w5:p1", "codex-approval-prompt.screen.txt")
-	h.call(ToolConfirm, map[string]any{"answer": "yes"})
+	h.say("yes")
 	h.transition("w5:p1", herdr.StateBlocked, herdr.StateWorking)
 
 	waitFor(t, func() bool { return h.log.count("supervisor.reprompt_poll") == 1 }, "the poll to end")
@@ -111,7 +111,7 @@ func TestPollRepromptStopsWhenLeavesBlocked(t *testing.T) {
 func TestPollRepromptTimesOut(t *testing.T) {
 	h := twoAgents(t, pollOpts)
 	h.block("w5:p1", "codex-approval-prompt.screen.txt")
-	h.call(ToolConfirm, map[string]any{"answer": "yes"})
+	h.say("yes")
 	h.srv.SetScreen("w5:p1", fixture(t, "codex-working.screen.txt"))
 
 	waitFor(t, func() bool { return h.log.count("supervisor.reprompt_poll") == 1 }, "the poll to end")
@@ -130,7 +130,7 @@ func TestPollRepromptTimesOut(t *testing.T) {
 func TestReconcileRaisesForAnsweredBlockedWithPrompt(t *testing.T) {
 	h := twoAgents(t) // no poll: isolates the reconciler
 	h.block("w5:p1", "codex-approval-prompt.screen.txt")
-	h.call(ToolConfirm, map[string]any{"answer": "yes"})
+	h.say("yes")
 	h.srv.SetScreen("w5:p1", fixture(t, "codex-git-prompt.screen.txt"))
 
 	h.sup.reconcileReprompts(context.Background())
@@ -173,14 +173,14 @@ func TestReconcileSkipsOpenPending(t *testing.T) {
 func TestReconcileNeverRaisesSamePromptTwice(t *testing.T) {
 	h := twoAgents(t)
 	h.block("w5:p1", "codex-approval-prompt.screen.txt")
-	h.call(ToolConfirm, map[string]any{"answer": "yes"})
+	h.say("yes")
 	h.srv.SetScreen("w5:p1", fixture(t, "codex-git-prompt.screen.txt"))
 
 	h.sup.reconcileReprompts(context.Background())
 	if n := h.log.count("supervisor.reprompt"); n != 1 {
 		t.Fatalf("first sweep: supervisor.reprompt = %d", n)
 	}
-	h.call(ToolConfirm, map[string]any{"answer": "yes"}) // answers the git prompt too
+	h.say("yes") // answers the git prompt too
 
 	h.sup.reconcileReprompts(context.Background()) // the screen never moved on
 	if n := h.log.count("supervisor.reprompt"); n != 1 {
@@ -189,7 +189,7 @@ func TestReconcileNeverRaisesSamePromptTwice(t *testing.T) {
 }
 
 // TestPollAndReconcileNeverDoubleRaiseTheSamePrompt races the post-answer
-// poll (started by ToolConfirm's send_keys) against concurrent reconciler
+// poll (started by the fast path's answer) against concurrent reconciler
 // sweeps on the same pane, both noticing the same new prompt on screen.
 // Before the fix, each checked promptSignature against s.lastPrompt,
 // released the lock, and only then raised — so both could read the same
@@ -200,7 +200,7 @@ func TestReconcileNeverRaisesSamePromptTwice(t *testing.T) {
 func TestPollAndReconcileNeverDoubleRaiseTheSamePrompt(t *testing.T) {
 	h := twoAgents(t, pollOpts)
 	h.block("w5:p1", "codex-approval-prompt.screen.txt")
-	h.call(ToolConfirm, map[string]any{"answer": "yes"}) // starts the post-answer poll
+	h.say("yes") // starts the post-answer poll
 	h.srv.SetScreen("w5:p1", fixture(t, "codex-git-prompt.screen.txt"))
 
 	var wg sync.WaitGroup

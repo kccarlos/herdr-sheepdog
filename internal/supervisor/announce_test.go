@@ -426,7 +426,7 @@ func TestAnnounceOwedFinishWithoutALineSaysSo(t *testing.T) {
 	m.EventDefault = &braintest.Step{Block: block}
 	log := &recLog{}
 	dir := t.TempDir()
-	b, err := brain.New(brain.Config{DataDir: dir, RunID: "t", EnrichTimeout: 30 * time.Millisecond, AnnounceTimeout: 60 * time.Millisecond, FinalGrace: -1}, m, log)
+	b, err := brain.New(brain.Config{DataDir: dir, RunID: "t", AnnounceTurnTimeout: 30 * time.Millisecond, AnnounceTimeout: 60 * time.Millisecond, FinalGrace: -1}, m, log)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -499,7 +499,7 @@ func TestAnnounceFallsBackToTheCodeSentence(t *testing.T) {
 	m.EventDefault = &braintest.Step{Block: block}
 	log := &recLog{}
 	dir := t.TempDir()
-	b, err := brain.New(brain.Config{DataDir: dir, RunID: "t", EnrichTimeout: 30 * time.Millisecond, FinalGrace: -1}, m, log)
+	b, err := brain.New(brain.Config{DataDir: dir, RunID: "t", AnnounceTurnTimeout: 30 * time.Millisecond, FinalGrace: -1}, m, log)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -574,7 +574,7 @@ func TestAnnounceBlockOneLineAndStale(t *testing.T) {
 	// The question answered before the brain spoke: nothing is said
 	// about a prompt that is gone.
 	m.EventDefault = &braintest.Step{Fn: func(call braintest.Call) (*genai.GenerateContentResponse, error) {
-		h.call(ToolConfirm, map[string]any{"answer": "yes"})
+		h.say("yes")
 		return braintest.Response(*announceReply("Auth wants to write hello.txt; say yes and it will.", "interrupt", "", "", true)), nil
 	}}
 	h.transition("w5:p1", herdr.StateBlocked, herdr.StateWorking)
@@ -648,7 +648,9 @@ func TestAnnounceYieldsToCEO(t *testing.T) {
 		return braintest.Response(*announceReply("Auth finished the rerun.", "idle", "", "", false)), nil
 	}}
 	m.Default = &braintest.Step{Text: braintest.Reply("Auth is done.", "")}
-	h := newBrainHarness(t, m, func(c *Config) { c.AnnounceWait = -1 })
+	// ReplyWait -1: the shepherd's turn waits behind the announce turn,
+	// and its reply must be the tool result however long that takes.
+	h := newBrainHarness(t, m, func(c *Config) { c.AnnounceWait = -1; c.ReplyWait = -1 })
 	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
 	h.sup.touch("w5:p1")
 	var wg sync.WaitGroup
@@ -665,7 +667,7 @@ func TestAnnounceYieldsToCEO(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		res = h.call(ToolAsk, map[string]any{"question": "is auth done?", "agent": "auth"})
+		res = h.say("is auth done?")
 	}()
 	for ceo, _ := h.sup.Brain().Queued(); ceo == 0 && time.Now().Before(deadline); ceo, _ = h.sup.Brain().Queued() {
 		time.Sleep(time.Millisecond)
@@ -674,7 +676,7 @@ func TestAnnounceYieldsToCEO(t *testing.T) {
 	wg.Wait()
 	h.sup.Brain().Quiesce()
 	if res.Spoken != "Auth is done." {
-		t.Errorf("ask = %+v", res)
+		t.Errorf("reply = %+v", res)
 	}
 	if got := h.pushTexts(); len(got) != 1 || got[0] != doneSentence {
 		t.Errorf("pushes = %v", got)
@@ -690,7 +692,7 @@ func TestAnnounceYieldsToCEO(t *testing.T) {
 	for _, ev := range h.log.ofType("brain.turn") {
 		trig = append(trig, payload(ev)["kind"].(string))
 	}
-	if strings.Join(trig, " ") != "announce ask" {
+	if strings.Join(trig, " ") != "announce utterance" {
 		t.Errorf("brain.turn kinds = %v", trig)
 	}
 }
@@ -701,14 +703,16 @@ func TestAnnounceCoalesces(t *testing.T) {
 	release := make(chan struct{})
 	m := braintest.NewModel(braintest.Step{Block: release, Text: braintest.Reply("Docs is done.", "")})
 	m.EventDefault = announceReply("Auth finished; the tests pass now.", "idle", "", "", false)
-	h := newBrainHarness(t, m, func(c *Config) { c.AnnounceWait = -1; c.Chattiness = string(Chatty) })
+	// ReplyWait -1: the shepherd's turn is held on purpose; its reply is
+	// the tool result, not a later push.
+	h := newBrainHarness(t, m, func(c *Config) { c.AnnounceWait = -1; c.Chattiness = string(Chatty); c.ReplyWait = -1 })
 	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
 	h.addAgent("w6:p1", "docs", "claude", herdr.StateIdle)
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		h.call(ToolAsk, map[string]any{"question": "is docs done?", "agent": "docs"})
+		h.say("is docs done?")
 	}()
 	deadline := time.Now().Add(2 * time.Second)
 	for len(m.Calls()) == 0 && time.Now().Before(deadline) {

@@ -47,7 +47,8 @@ const (
 	BrainOn     = "on"
 	BrainOff    = "off"
 	// BrainFake runs the brain loop over braintest.Reflex, a model that
-	// answers from what it sees (ask → read the screen, propose → prompt)
+	// answers from what it sees (a question → read the screen, an
+	// instruction → prompt)
 	// without any network call: a developer mode for the /debug
 	// Supervisor tab, like --herdr=mock. Needs no Gemini key.
 	BrainFake = "fake"
@@ -225,10 +226,11 @@ func (a *App) wire() error {
 	// session's tool handler); the pusher is filled in below. The querier
 	// (WP4) is detected and built in Run, after daemon.start is logged, so
 	// cli.detected never races ahead of it; a nil *lazyQuerier still
-	// satisfies supervisor.Querier so ask() can route to it once ready.
+	// satisfies supervisor.Querier so the brain's run_cli can route to it
+	// once ready.
 	pusher := &lazyPusher{}
 	lazyQ := &lazyQuerier{}
-	var querier supervisor.Querier // nil (not lazyQ) when --cli=off, so ask() skips the deep path entirely
+	var querier supervisor.Querier // nil (not lazyQ) when --cli=off, so run_cli is unavailable entirely
 	if opts.CLI == CLIOn {
 		querier = lazyQ
 		a.queryLazy = lazyQ
@@ -554,18 +556,17 @@ func BrainProviders(cfg config.Config) []web.ProviderInfo {
 // `sheepdog brain-test`).
 func BrainConfig(cfg config.Config) brain.Config {
 	return brain.Config{
-		Provider:        cfg.Brain.Provider,
-		Model:           cfg.Brain.Model,
-		MaxSteps:        cfg.Brain.MaxSteps,
-		AskTimeout:      time.Duration(cfg.Brain.AskTimeoutS) * time.Second,
-		ProposeTimeout:  time.Duration(cfg.Brain.ProposeTimeoutS) * time.Second,
-		WindowTokens:    cfg.Brain.WindowTokens,
-		PruneAfterTurns: cfg.Brain.PruneAfterTurns,
-		StepReserve:     time.Duration(cfg.Brain.StepReserveS) * time.Second,
-		FinalGrace:      time.Duration(cfg.Brain.FinalGraceS) * time.Second,
-		EnrichTimeout:   time.Duration(cfg.Brain.EnrichTimeoutS) * time.Second,
-		AnnounceTimeout: time.Duration(cfg.Brain.AnnounceTimeoutS) * time.Second,
-		DataDir:         cfg.DataDir,
+		Provider:            cfg.Brain.Provider,
+		Model:               cfg.Brain.Model,
+		MaxSteps:            cfg.Brain.MaxSteps,
+		UtteranceTimeout:    time.Duration(cfg.Brain.UtteranceTimeoutS) * time.Second,
+		WindowTokens:        cfg.Brain.WindowTokens,
+		PruneAfterTurns:     cfg.Brain.PruneAfterTurns,
+		StepReserve:         time.Duration(cfg.Brain.StepReserveS) * time.Second,
+		FinalGrace:          time.Duration(cfg.Brain.FinalGraceS) * time.Second,
+		AnnounceTurnTimeout: time.Duration(cfg.Brain.AnnounceTurnTimeoutS) * time.Second,
+		AnnounceTimeout:     time.Duration(cfg.Brain.AnnounceTimeoutS) * time.Second,
+		DataDir:             cfg.DataDir,
 	}
 }
 
@@ -636,7 +637,8 @@ func (a *App) restoreBrainModel() {
 func (a *App) ReloadPrompts() []prompts.File { return a.prompts.Reload() }
 
 // buildQuerier detects codex/claude on PATH (logging cli.detected) and, if
-// either is found, builds the Runner that backs ask()'s deep path. Called
+// either is found, builds the Runner that backs the brain's run_cli and
+// investigations. Called
 // from Run, once, right after daemon.start. Neither found returns
 // (nil, nil): the deep path is simply unavailable, per plan §3.5 ("if
 // absent, the brain simply has no run_cli tool).
@@ -768,6 +770,12 @@ func (a *App) Run(ctx context.Context) (err error) {
 		"version": a.opts.Version, "voice": a.opts.Voice, "herdr": a.opts.Herdr, "cli": a.opts.CLI, "brain": brainMode, "url": a.URL(), "urls": a.URLs(),
 		"data_dir": a.cfg.DataDir, "brain_provider": a.BrainProvider(), "brain_model": a.BrainModel(), "voice_provider": a.VoiceProvider(),
 	})
+	if notes := a.cfg.Deprecations(); len(notes) > 0 {
+		// Once per run, right after daemon.start: an old config file or
+		// environment still loads, but says what to rename (CONFIG.md
+		// "Deprecated keys").
+		a.log.Log("daemon", "daemon.config_deprecated", "", map[string]any{"notes": notes})
+	}
 	a.restoreBrainModel()
 	a.restoreVoiceProvider()
 	// Logged here, not in wire(), so it never precedes daemon.start (the
@@ -997,7 +1005,7 @@ func (l *lazyPusher) Reset(reason string) error {
 }
 
 // lazyQuerier lets the supervisor be built (with a non-nil Querier, so
-// ask()'s deep path is enabled) before CLI detection has run: detection
+// run_cli is enabled) before CLI detection has run: detection
 // happens in Run, after daemon.start is logged, so cli.detected/cli.run
 // never precede it in the event log.
 type lazyQuerier struct {

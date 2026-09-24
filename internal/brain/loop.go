@@ -35,14 +35,14 @@ type turn struct {
 	acted  []string // spoken echoes of actions sent
 }
 
-// Turn runs one turn (Ask and Propose set the kind). The reply is
+// Turn runs one turn (an empty kind is an utterance). The reply is
 // returned as soon as the model answers; pruning, compaction and the hand-
 // over to the next queued turn happen afterwards without blocking the
 // caller. ErrFallback (wrapping the cause) means the supervisor should
 // speak its own code sentence instead.
 func (b *Brain) Turn(ctx context.Context, req Request) (Reply, error) {
 	if req.Kind == "" {
-		req.Kind = KindAsk
+		req.Kind = KindUtterance
 	}
 	if req.Trigger == "" {
 		req.Trigger = TriggerCEO
@@ -53,15 +53,11 @@ func (b *Brain) Turn(ctx context.Context, req Request) (Reply, error) {
 	if host == nil {
 		return Reply{}, fmt.Errorf("%w: %w", ErrFallback, ErrNoHost)
 	}
-	timeout := b.cfg.AskTimeout
+	// An utterance may turn out to be an instruction, so it gets the
+	// longer budget: the brain decides what it is (docs/roles.md "One
+	// decision-maker").
+	timeout := b.cfg.UtteranceTimeout
 	switch {
-	case req.Kind == KindPropose:
-		timeout = b.cfg.ProposeTimeout
-	case req.Kind == KindUtterance:
-		// An utterance may turn out to be an instruction, so it gets the
-		// longer budget: the brain decides what it is (docs/roles.md
-		// "One decision-maker").
-		timeout = b.cfg.ProposeTimeout
 	case req.Kind == KindStop:
 		// The CEO is waiting and the procedure already acted: one short
 		// read-only turn to say what was stopped.
@@ -70,10 +66,10 @@ func (b *Brain) Turn(ctx context.Context, req Request) (Reply, error) {
 		// The answer the CEO is owed, composed from a result that took
 		// minutes to get: it gets the longer budget, not the announce
 		// turn's, which exists to beat the code sentence.
-		timeout = b.cfg.ProposeTimeout
+		timeout = b.cfg.UtteranceTimeout
 		req.Trigger = TriggerEvent
 	case req.Kind.IsEvent():
-		timeout = b.cfg.EnrichTimeout
+		timeout = b.cfg.AnnounceTurnTimeout
 		if req.Owed || len(req.Promises) > 0 {
 			// The shepherd is owed this line (docs/roles.md "Pushes"):
 			// it gets the longer budget.

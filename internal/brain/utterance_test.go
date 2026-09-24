@@ -19,7 +19,7 @@ func TestUtteranceTurnIsACEOTurn(t *testing.T) {
 		braintest.Step{Text: braintest.Reply("Telling auth to run the tests. Sent.", "")},
 	)
 	h := newHarness(t, m, nil)
-	rep, err := h.brain.Utterance(context.Background(), Request{Question: "tell auth to run the tests", Briefing: "One agent: auth is working."})
+	rep, err := h.brain.Turn(context.Background(), Request{Kind: KindUtterance, Question: "tell auth to run the tests", Briefing: "One agent: auth is working."})
 	if err != nil || rep.Spoken != "Telling auth to run the tests. Sent." {
 		t.Fatalf("reply = %+v err = %v", rep, err)
 	}
@@ -52,7 +52,7 @@ func TestNoteTool(t *testing.T) {
 		braintest.Step{Text: braintest.Reply("Noted.", "")},
 	)
 	h := newHarness(t, m, nil)
-	if _, err := h.brain.Utterance(context.Background(), Request{Question: "remember the migrations are off limits today"}); err != nil {
+	if _, err := h.brain.Turn(context.Background(), Request{Kind: KindUtterance, Question: "remember the migrations are off limits today"}); err != nil {
 		t.Fatal(err)
 	}
 	if got := h.host.Noted; len(got) != 1 || got[0] != "the migrations are off limits today" {
@@ -105,7 +105,7 @@ func TestActionToolRefusesAfterCancel(t *testing.T) {
 	}})
 	m.Default = &braintest.Step{Text: braintest.Reply("I sent nothing.", "")}
 	h := newHarness(t, m, nil)
-	if _, err := h.brain.Utterance(ctx, Request{Question: "tell auth to run the tests"}); err == nil {
+	if _, err := h.brain.Turn(ctx, Request{Kind: KindUtterance, Question: "tell auth to run the tests"}); err == nil {
 		t.Log("the turn answered after the cancel; what matters is that nothing was sent")
 	}
 	if len(h.host.Prompts) != 0 {
@@ -117,7 +117,7 @@ func TestActionToolRefusesAfterCancel(t *testing.T) {
 func TestReplyCarriesPending(t *testing.T) {
 	m := braintest.NewModel(braintest.Step{Text: `{"spoken": "Reading the diff, about half a minute.", "detail": "", "needs_user": false, "clarify": false, "pending": true}`})
 	h := newHarness(t, m, nil)
-	rep, err := h.brain.Utterance(context.Background(), Request{Question: "why did it fail?"})
+	rep, err := h.brain.Turn(context.Background(), Request{Kind: KindUtterance, Question: "why did it fail?"})
 	if err != nil || !rep.Pending {
 		t.Fatalf("reply = %+v err = %v", rep, err)
 	}

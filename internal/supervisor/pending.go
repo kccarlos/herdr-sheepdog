@@ -139,7 +139,8 @@ func (s *Supervisor) dropPendingFor(paneID, reason string, kinds ...state.Pendin
 
 // ExpirePending drops a pending action whose TTL has passed, logging
 // pending.expired. An expired answer_prompt is remembered so that a later
-// confirm can revive it (scenario 8). Run calls this on every tick.
+// bare answer, tap or send_keys can revive it from the screen. Run calls
+// this on every tick.
 func (s *Supervisor) ExpirePending() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -300,15 +301,6 @@ func matchLabel(opts []state.Option, a string) (state.Option, bool) {
 		return state.Option{}, false
 	}
 	return best, true
-}
-
-// optionList renders "1 Yes, 2 No" for a clarify sentence.
-func optionList(opts []state.Option) string {
-	parts := make([]string, 0, len(opts))
-	for i, o := range opts {
-		parts = append(parts, fmt.Sprintf("%d %s", i+1, o.Label))
-	}
-	return strings.Join(parts, ", ")
 }
 
 func lowerFirst(s string) string {

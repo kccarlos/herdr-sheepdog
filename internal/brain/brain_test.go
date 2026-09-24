@@ -33,7 +33,7 @@ func TestDirectAnswer(t *testing.T) {
 		t.Fatalf("brain.turn events = %d", len(turns))
 	}
 	p := payload(turns[0])
-	if p["model_calls"] != 1 || p["fallback"] != false || p["kind"] != "ask" || p["trigger"] != "ceo" || p["tokens_in"] != 500 {
+	if p["model_calls"] != 1 || p["fallback"] != false || p["kind"] != "utterance" || p["trigger"] != "ceo" || p["tokens_in"] != 500 {
 		t.Errorf("brain.turn = %v", p)
 	}
 	if got := joinKinds(h.kinds()); got != "request reply" {
@@ -44,7 +44,7 @@ func TestDirectAnswer(t *testing.T) {
 	}
 	// The request carries the assistant's hint and the model saw the roster.
 	call := h.model.Calls()[0]
-	if !strings.Contains(call.Text(), `question="what is auth doing?" agent="auth"`) {
+	if !strings.Contains(call.Text(), `utterance="what is auth doing?" agent="auth"`) {
 		t.Errorf("request line missing: %s", call.Text())
 	}
 	if sys := call.System(); !strings.Contains(sys, "auth (codex): working") || !strings.Contains(sys, "docs (claude): idle") || !strings.Contains(sys, "BEGIN_WORKER_OUTPUT") {
@@ -79,7 +79,7 @@ func TestReadScreenThenAnswer(t *testing.T) {
 		t.Fatalf("model calls = %d", len(calls))
 	}
 	first := calls[0].Text()
-	utter, req := strings.Index(first, `CEO said: "why did that one fail?"`), strings.Index(first, "Request from the assistant (ask)")
+	utter, req := strings.Index(first, `CEO said: "why did that one fail?"`), strings.Index(first, "Request from the assistant (utterance)")
 	if utter < 0 || req < 0 || utter > req {
 		t.Errorf("utterance must precede the request:\n%s", first)
 	}
@@ -155,7 +155,7 @@ func TestSendKeysAllowed(t *testing.T) {
 	), nil)
 	h.host.SetPending("w5:p1", approvalPrompt())
 	h.brain.Heard("tell auth yes, go ahead", true)
-	rep, err := h.brain.Propose(context.Background(), Request{Question: "yes, go ahead", Agent: "auth"})
+	rep, err := h.brain.Turn(context.Background(), Request{Kind: KindUtterance, Question: "yes, go ahead", Agent: "auth"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,7 +199,7 @@ func TestSendKeysBlocked(t *testing.T) {
 				braintest.Step{Text: braintest.Reply("I cannot answer that prompt myself.", "")},
 			), nil)
 			h.host.SetPending("w5:p1", tc.pending)
-			rep, err := h.brain.Turn(context.Background(), Request{Kind: KindPropose, Trigger: tc.trigger, Question: "answer yes", Agent: "auth"})
+			rep, err := h.brain.Turn(context.Background(), Request{Kind: KindUtterance, Trigger: tc.trigger, Question: "answer yes", Agent: "auth"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -229,7 +229,7 @@ func TestSendKeysBlocked(t *testing.T) {
 	), nil)
 	h.host.SetPending("w5:p1", approvalPrompt())
 	h.host.KeysErr = fmt.Errorf("%w: the prompt expired", ErrNotPermitted)
-	if _, err := h.brain.Propose(context.Background(), Request{Question: "yes", Agent: "auth"}); err != nil {
+	if _, err := h.brain.Turn(context.Background(), Request{Kind: KindUtterance, Question: "yes", Agent: "auth"}); err != nil {
 		t.Fatal(err)
 	}
 	if h.log.count("brain.rail_blocked") != 1 || len(h.host.Keys) != 0 {
@@ -250,7 +250,7 @@ func TestSendKeysDefersToHostWhenBlockedWithNoPending(t *testing.T) {
 	), nil)
 	h.host.SetAgent(AgentInfo{PaneID: "w5:p1", Alias: "auth", Kind: "codex", State: "blocked"})
 	h.host.SetPending("w5:p1", nil)
-	rep, err := h.brain.Turn(context.Background(), Request{Kind: KindPropose, Trigger: TriggerCEO, Question: "answer yes", Agent: "auth"})
+	rep, err := h.brain.Turn(context.Background(), Request{Kind: KindUtterance, Trigger: TriggerCEO, Question: "answer yes", Agent: "auth"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -306,18 +306,18 @@ func TestWallClockFallback(t *testing.T) {
 		time.Sleep(100 * time.Millisecond) // ignores ctx: the answer arrives past the budget
 		return braintest.Response(braintest.Step{Text: braintest.Reply("late", "")}), nil
 	}}
-	h := newHarness(t, braintest.NewModel(slow), func(c *Config) { c.AskTimeout, c.FinalGrace = 30*time.Millisecond, -1 })
+	h := newHarness(t, braintest.NewModel(slow), func(c *Config) { c.UtteranceTimeout, c.FinalGrace = 30*time.Millisecond, -1 })
 	if _, err := h.ask("what?", "auth"); !errors.Is(err, ErrFallback) {
 		t.Fatalf("late answer accepted: err = %v", err)
 	}
 	// Within the grace it is accepted (the answer-only call may overrun).
-	h0 := newHarness(t, braintest.NewModel(slow), func(c *Config) { c.AskTimeout, c.FinalGrace = 30*time.Millisecond, 500*time.Millisecond })
+	h0 := newHarness(t, braintest.NewModel(slow), func(c *Config) { c.UtteranceTimeout, c.FinalGrace = 30*time.Millisecond, 500*time.Millisecond })
 	if rep, err := h0.ask("what?", "auth"); err != nil || rep.Spoken != "late" {
 		t.Fatalf("answer within grace: %+v %v", rep, err)
 	}
 	// A model that honours ctx returns promptly.
 	block := make(chan struct{})
-	h1 := newHarness(t, braintest.NewModel(braintest.Step{Block: block, Text: braintest.Reply("late", "")}), func(c *Config) { c.AskTimeout, c.FinalGrace = 30*time.Millisecond, -1 })
+	h1 := newHarness(t, braintest.NewModel(braintest.Step{Block: block, Text: braintest.Reply("late", "")}), func(c *Config) { c.UtteranceTimeout, c.FinalGrace = 30*time.Millisecond, -1 })
 	start := time.Now()
 	if _, err := h1.ask("what?", "auth"); !errors.Is(err, ErrFallback) {
 		t.Fatalf("err = %v", err)
@@ -330,7 +330,7 @@ func TestWallClockFallback(t *testing.T) {
 	h2 := newHarness(t, braintest.NewModel(
 		braintest.Step{Calls: []*genai.FunctionCall{braintest.FC(ToolReadScreen, map[string]any{"agent": "auth"})}},
 		braintest.Step{Text: braintest.Reply("late", "")},
-	), func(c *Config) { c.AskTimeout, c.FinalGrace = 30*time.Millisecond, -1 })
+	), func(c *Config) { c.UtteranceTimeout, c.FinalGrace = 30*time.Millisecond, -1 })
 	h2.host.ReadHook = func(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
@@ -516,7 +516,7 @@ func TestTurnSerialisation(t *testing.T) {
 	waitQueued(t, h.brain, 1) // event two is queued first...
 	go func() {
 		defer wg.Done()
-		_, _ = h.brain.Ask(context.Background(), Request{Question: "ceo question"})
+		_, _ = h.brain.Turn(context.Background(), Request{Kind: KindUtterance, Question: "ceo question"})
 		done("ceo")
 	}()
 	waitQueued(t, h.brain, 2) // ...the CEO turn after it
@@ -605,7 +605,7 @@ func TestActedThenBudgetIsNotFallback(t *testing.T) {
 		braintest.Step{Calls: []*genai.FunctionCall{braintest.FC(ToolPrompt, map[string]any{"agent": "auth", "text": "rerun the flaky test"})}},
 		read, read,
 	), func(c *Config) { c.MaxSteps = 2 })
-	rep, err := h.brain.Propose(context.Background(), Request{Question: "tell auth to rerun the flaky test", Agent: "auth"})
+	rep, err := h.brain.Turn(context.Background(), Request{Kind: KindUtterance, Question: "tell auth to rerun the flaky test", Agent: "auth"})
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
@@ -653,7 +653,7 @@ func TestBadReplyCorrection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := b.Ask(context.Background(), Request{Question: "x"}); !errors.Is(err, ErrFallback) || !errors.Is(err, ErrNoHost) {
+	if _, err := b.Turn(context.Background(), Request{Kind: KindUtterance, Question: "x"}); !errors.Is(err, ErrFallback) || !errors.Is(err, ErrNoHost) {
 		t.Errorf("err = %v", err)
 	}
 }
@@ -665,7 +665,7 @@ func TestPromptAndInterrupt(t *testing.T) {
 		braintest.Step{Calls: []*genai.FunctionCall{braintest.FC(ToolInterrupt, map[string]any{"agent": "docs"}), braintest.FC(ToolPrompt, map[string]any{"agent": "nobody", "text": "hi"})}},
 		braintest.Step{Text: braintest.Reply("Interrupted docs.", "")},
 	), nil)
-	if _, err := h.brain.Propose(context.Background(), Request{Question: "stop docs", Agent: "docs"}); err != nil {
+	if _, err := h.brain.Turn(context.Background(), Request{Kind: KindUtterance, Question: "stop docs", Agent: "docs"}); err != nil {
 		t.Fatal(err)
 	}
 	if len(h.host.Interrupts) != 1 || h.host.Interrupts[0] != "w6:p1" {
@@ -780,7 +780,7 @@ func TestEventTurnYieldsToCEO(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		_, _ = h.brain.Ask(context.Background(), Request{Question: "is auth done?", Agent: "auth"})
+		_, _ = h.brain.Turn(context.Background(), Request{Kind: KindUtterance, Question: "is auth done?", Agent: "auth"})
 		mu.Lock()
 		order = append(order, "ceo")
 		mu.Unlock()
@@ -1030,9 +1030,9 @@ func (o opaqueEngine) Compact(ctx context.Context, b int) (Compaction, bool, err
 }
 
 // (20) The reflex model (--brain=fake) runs the loop end to end without a
-// script: an ask reads the screen, a propose prompts, an unnamed ask
-// lists the agents, and a compaction summarises; LastCompaction records
-// it.
+// script: a question reads the screen, an instruction prompts, an
+// unnamed question lists the agents, and a compaction summarises;
+// LastCompaction records it.
 func TestReflexModel(t *testing.T) {
 	m := braintest.Reflex()
 	h := newHarness(t, m, func(c *Config) { c.WindowTokens = 120 })
@@ -1044,7 +1044,7 @@ func TestReflexModel(t *testing.T) {
 	if !strings.HasPrefix(rep.Spoken, "The screen ends with:") {
 		t.Errorf("ask reply = %+v", rep)
 	}
-	rep, err = h.brain.Propose(context.Background(), Request{Question: "skip the flaky test", Agent: "auth"})
+	rep, err = h.brain.Turn(context.Background(), Request{Kind: KindUtterance, Question: "tell auth to skip the flaky test", Agent: "auth"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1056,10 +1056,10 @@ func TestReflexModel(t *testing.T) {
 	}
 	// An unnamed propose resolves the alias from the words and strips
 	// the "tell auth to" the text router passes through.
-	if rep, err = h.brain.Propose(context.Background(), Request{Question: "tell auth to rerun the suite"}); err != nil || rep.Spoken != "Telling auth to rerun the suite. Sent." {
+	if rep, err = h.brain.Turn(context.Background(), Request{Kind: KindUtterance, Question: "tell auth to rerun the suite"}); err != nil || rep.Spoken != "Telling auth to rerun the suite. Sent." {
 		t.Errorf("unnamed propose = %+v, %v (prompts %v)", rep, err, h.host.Prompts)
 	}
-	if rep, err = h.brain.Propose(context.Background(), Request{Question: "tell someone to stop"}); err != nil || rep.Spoken != "Which agent should I tell?" {
+	if rep, err = h.brain.Turn(context.Background(), Request{Kind: KindUtterance, Question: "tell someone to stop"}); err != nil || rep.Spoken != "Which agent should I tell?" {
 		t.Errorf("unresolvable propose = %+v, %v", rep, err)
 	}
 	h.brain.Quiesce()

@@ -23,14 +23,14 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 	"github.com/kccarlos/herdr-sheepdog/internal/supervisor"
-	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 	"github.com/kccarlos/herdr-sheepdog/prompts"
 )
 
 func printBrainTestUsage(w io.Writer) {
 	fprintln(w, "usage: sheepdog brain-test --question \"Q\" [flags]")
 	fprintln(w, "")
-	fprintln(w, "Runs one supervisor-brain turn (ask by default) against a mock herdr with one")
+	fprintln(w, "Runs one supervisor-brain utterance turn — the shepherd's words, relayed through")
+	fprintln(w, "to_supervisor exactly as the daemon does — against a mock herdr with one")
 	fprintln(w, "agent whose screen is a testdata/herdr fixture, and prints the reply as JSON.")
 	fprintln(w, "Every event (brain.turn, brain.step, brain.tool_call/tool_result, herdr.read,")
 	fprintln(w, "…) goes to stderr as JSON lines. Needs the provider's key unless --fake.")
@@ -38,10 +38,9 @@ func printBrainTestUsage(w io.Writer) {
 	fprintln(w, "flags:")
 	fprintln(w, "  --config PATH       config file (default ~/.config/sheepdog/config.toml)")
 	fprintln(w, "  --env-file PATH     load KEY=VALUE lines into the environment first")
-	fprintln(w, "  --question TEXT     the assistant's question (ask) or instruction (propose)")
-	fprintln(w, "  --kind KIND       utterance | ask | propose (default utterance: the shepherd's")
-	fprintln(w, "                    words verbatim, which the brain classifies itself)")
-	fprintln(w, "  --agent ALIAS       the agent hint, only if the CEO said a name")
+	fprintln(w, "  --question TEXT     the shepherd's words, verbatim (the brain decides what they are)")
+	fprintln(w, "  --kind KIND         accepted and ignored (every request is an utterance now)")
+	fprintln(w, "  --agent ALIAS       accepted and ignored (an utterance carries no agent hint)")
 	fprintln(w, "  --alias NAME        the mock agent's alias (default auth)")
 	fprintln(w, "  --agent-kind KIND   the mock agent's kind (default codex)")
 	fprintln(w, "  --state STATE       working | idle | done | blocked (default idle; blocked runs")
@@ -83,8 +82,8 @@ func parseBrainTestFlags(args []string, stderr io.Writer) (brainTestOpts, int, b
 	fs.StringVar(&o.configPath, "config", "", "config file")
 	fs.StringVar(&o.envFile, "env-file", "", "env file")
 	fs.StringVar(&o.question, "question", "", "question or instruction")
-	fs.StringVar(&o.kind, "kind", string(brain.KindUtterance), "utterance | ask | propose")
-	fs.StringVar(&o.agent, "agent", "", "agent hint")
+	fs.StringVar(&o.kind, "kind", "", "ignored (always utterance)")
+	fs.StringVar(&o.agent, "agent", "", "ignored (no agent hint)")
 	fs.StringVar(&o.alias, "alias", "auth", "mock agent alias")
 	fs.StringVar(&o.agentKind, "agent-kind", "codex", "mock agent kind")
 	fs.StringVar(&o.st, "state", "idle", "mock agent state")
@@ -107,11 +106,13 @@ func parseBrainTestFlags(args []string, stderr io.Writer) (brainTestOpts, int, b
 		fprintln(stderr, "sheepdog brain-test: needs --question")
 		return o, 2, false
 	}
-	switch o.kind {
-	case string(brain.KindUtterance), string(brain.KindAsk), string(brain.KindPropose):
-	default:
-		fprintln(stderr, "sheepdog brain-test: --kind must be utterance, ask or propose")
-		return o, 2, false
+	// --kind and --agent were for the ask/propose request kinds, which
+	// are gone; old scripts that still pass them keep working.
+	if o.kind != "" && o.kind != string(brain.KindUtterance) {
+		fprintf(stderr, "sheepdog brain-test: --kind %s is ignored: every request is an utterance now\n", o.kind)
+	}
+	if o.agent != "" {
+		fprintln(stderr, "sheepdog brain-test: --agent is ignored: an utterance carries no agent hint (name the agent in --question)")
 	}
 	switch herdr.State(o.st) {
 	case herdr.StateWorking, herdr.StateIdle, herdr.StateDone, herdr.StateBlocked:
@@ -177,7 +178,7 @@ func runBrainTest(ctx context.Context, args []string, stdout, stderr io.Writer) 
 	}
 	bcfg.Prompts = prompts.NewLoader(promptsDir, log)
 	if o.timeout > 0 {
-		bcfg.AskTimeout, bcfg.ProposeTimeout = o.timeout, o.timeout
+		bcfg.UtteranceTimeout = o.timeout
 	}
 	b, err := brain.New(bcfg, model, log)
 	if err != nil {
@@ -207,23 +208,13 @@ func runBrainTest(ctx context.Context, args []string, stdout, stderr io.Writer) 
 	}
 
 	start := time.Now()
-	var res voice.ToolResult
-	switch o.kind {
-	case string(brain.KindPropose):
-		res, err = sup.Propose(ctx, o.question, o.agent)
-	case string(brain.KindAsk):
-		res, err = sup.Ask(ctx, o.question, o.agent)
-	default:
-		// --agent is only a hint for the older kinds; an utterance
-		// reaches the brain exactly as the shepherd said it.
-		// Typed, as far as the one rail is concerned: the question is
-		// the shepherd's own words.
-		sup.ShepherdInput(supervisor.InputTyped, o.question)
-		res, err = sup.ToSupervisor(ctx, o.question)
-	}
+	// Typed, as far as the one rail is concerned: the question is the
+	// shepherd's own words, and it reaches the brain exactly as said.
+	sup.ShepherdInput(supervisor.InputTyped, o.question)
+	res, err := sup.ToSupervisor(ctx, o.question)
 	b.Quiesce()
 	out := map[string]any{
-		"kind": o.kind, "question": o.question, "agent": o.agent, "dur_ms": time.Since(start).Milliseconds(),
+		"kind": string(brain.KindUtterance), "question": o.question, "dur_ms": time.Since(start).Milliseconds(),
 		"result":     map[string]any{"spoken": res.Spoken, "detail": res.Detail, "options": res.Options, "clarify": res.Clarify, "pending": res.Pending, "scheduling": res.Scheduling.String()},
 		"transcript": transcriptForReport(b.Transcript().Messages()),
 	}

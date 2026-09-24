@@ -26,8 +26,8 @@ type Agent struct {
 	// StateSince changes only when State changes.
 	StateSince time.Time `json:"state_since"`
 
-	// CurrentTask is the last instruction given (by the user via propose,
-	// or read from the pane).
+	// CurrentTask is the last instruction given (by the brain's prompt
+	// tool, or read from the pane).
 	CurrentTask string `json:"current_task,omitempty"`
 	// LastTask is the instruction the agent last finished (CurrentTask
 	// moves here on done).
@@ -211,7 +211,8 @@ type Option struct {
 	Default bool `json:"default,omitempty"`
 }
 
-// Note is one thing the user asked to be remembered (the note tool).
+// Note is one thing the user asked to be remembered (the brain's note
+// tool).
 type Note struct {
 	Text string    `json:"text"`
 	At   time.Time `json:"at"`

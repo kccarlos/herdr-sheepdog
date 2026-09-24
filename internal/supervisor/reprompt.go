@@ -20,7 +20,7 @@ import (
 // (source tells the two apart: "reprompt" or "reconcile").
 //
 //   - pollReprompt watches one pane directly for Config.RepromptPoll
-//     after keys go to it (tools.go's answerWithKeys): the next prompt,
+//     after keys go to it (tools.go's answerKeys): the next prompt,
 //     if there is one, is usually seconds away.
 //   - reconcileReprompts sweeps every blocked pane with nothing pending
 //     and an already-answered (or never recorded) question, on every
@@ -40,9 +40,9 @@ import (
 const defaultRepromptPollInterval = time.Second
 
 // startReprompt launches the post-answer poll for paneID in the
-// background. answerWithKeys calls it right after keys went to a blocked
+// background. answerKeys calls it right after keys went to a blocked
 // pane, whichever path sent them (the brain's send_keys, the bare-answer
-// fast path, or confirm). Detached from the caller's context, which ends
+// fast path, or a tap). Detached from the caller's context, which ends
 // long before the poll should (a web request, a brain turn, a voice tool
 // call).
 func (s *Supervisor) startReprompt(paneID string) {

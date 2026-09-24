@@ -207,7 +207,7 @@ func (h *hub) flush() {
 	h.s.log.Log(logSource, "web.client.flush", "", map[string]any{"client_id": c.id, "dropped_audio": dropped})
 }
 
-// afterCancel is the cancel tool's effect on the audio pipe: stop what is
+// afterCancel is the stop tool's effect on the audio pipe: stop what is
 // playing now, and let the model say the result (an interrupting push,
 // which also makes the session emit Interrupted → flush for whatever it
 // was saying). Without a voice session the result is shown as a

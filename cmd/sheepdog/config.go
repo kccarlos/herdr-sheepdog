@@ -64,6 +64,9 @@ func runConfigShow(_ context.Context, args []string, stdout, stderr io.Writer) i
 		return 1
 	}
 	fprintln(stdout, cfg.String())
+	for _, note := range cfg.Deprecations() {
+		fprintf(stderr, "sheepdog config show: deprecated: %s\n", note)
+	}
 	return 0
 }
 

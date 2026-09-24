@@ -178,21 +178,6 @@ func (s *Supervisor) ExpirePromises() {
 	}
 }
 
-// cancelLatestPromise cancels the most recently made open promise
-// (promise.cancelled); ok is false when none is open. Caller holds s.mu.
-func (s *Supervisor) cancelLatestPromise() (state.Promise, bool) {
-	open := s.openPromises()
-	if len(open) == 0 {
-		return state.Promise{}, false
-	}
-	p := open[len(open)-1]
-	cancelled, ok := s.resolvePromise(p.ID, state.PromiseCancelled)
-	if ok {
-		s.log.Log(logSource, "promise.cancelled", cancelled.PaneID, map[string]any{"id": cancelled.ID, "text": cancelled.Text, "agent": aliasOr(cancelled.Alias), "event": cancelled.Event, "reason": "user"})
-	}
-	return cancelled, ok
-}
-
 // restorePromises puts the open promises of an earlier run into the
 // brain's transcript (which is per run) so they have a card and recall
 // finds them. Called once from New.

@@ -13,10 +13,10 @@ import (
 const NotesFile = "notes.jsonl"
 
 // appendNote records a note in the state session and, when a data dir is
-// configured, appends it to notes.jsonl. ingest is false for a note the
-// brain's own note tool made: its tool result is already in the
-// transcript, so a second line would double it.
-func (s *Supervisor) appendNote(text string, ingest bool) error {
+// configured, appends it to notes.jsonl. Notes come from the brain's own
+// note tool, whose result is already in the transcript, so the note is
+// not ingested a second time.
+func (s *Supervisor) appendNote(text string) error {
 	n := state.Note{Text: text, At: s.cfg.Now()}
 	if err := s.store.UpdateSession(func(ss *state.Session) { ss.Notes = append(ss.Notes, n) }); err != nil {
 		return err
@@ -39,8 +39,5 @@ func (s *Supervisor) appendNote(text string, ingest bool) error {
 		}
 	}
 	s.log.Log(logSource, "note.created", "", map[string]any{"text": text})
-	if s.brain != nil && ingest {
-		s.brain.Noted(text)
-	}
 	return nil
 }

@@ -191,14 +191,7 @@ func requestText(req Request) string {
 	case req.Kind == KindStop:
 		return stopRequestText(req)
 	}
-	what := "question"
-	switch req.Kind {
-	case KindPropose:
-		what = "instruction"
-	case KindUtterance:
-		what = "utterance"
-	}
-	s := fmt.Sprintf("Request from the assistant (%s): %s=%q", req.Kind, what, req.Question)
+	s := fmt.Sprintf("Request from the assistant (%s): utterance=%q", KindUtterance, req.Question)
 	if req.Agent != "" {
 		s += fmt.Sprintf(" agent=%q", req.Agent)
 	} else {
@@ -213,13 +206,7 @@ func requestText(req Request) string {
 	if req.RosterUnchangedFor > 0 {
 		s += fmt.Sprintf("\nThe roster is unchanged since you last reported it %d s ago; if the shepherd is only asking for status again, say there has been no change since you last checked, briefly.", int(req.RosterUnchangedFor.Seconds()))
 	}
-	if req.Kind == KindUtterance {
-		return s + "\nThose are the CEO's own words, relayed verbatim: decide what they are (a status question, something to find out, an instruction, an answer to a worker's prompt, a promise, a note, small talk) and act. Use tools as needed, then reply with the JSON object of the answer contract."
-	}
-	if req.Question == "" && req.Kind == KindPropose {
-		s += "\nThe assistant passed no instruction text: the CEO's own words above are the instruction (a bare \"let me know when …\" is a promise to record)."
-	}
-	return s + "\nUse tools as needed, then reply with the JSON object of the answer contract."
+	return s + "\nThose are the CEO's own words, relayed verbatim: decide what they are (a status question, something to find out, an instruction, an answer to a worker's prompt, a promise, a note, small talk) and act. Use tools as needed, then reply with the JSON object of the answer contract."
 }
 
 // stopRequestText is the request of the stop procedure's closing turn:

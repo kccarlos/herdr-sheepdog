@@ -69,7 +69,7 @@ func TestChattinessLevels(t *testing.T) {
 			h.block("w5:p1", "codex-approval-prompt.screen.txt")
 			h.block("w6:p1", "claude-permission-prompt.screen.txt")
 			// 3. answered docs, docs works and finishes: dealt with.
-			h.call(ToolConfirm, map[string]any{"answer": "yes"})
+			h.say("yes")
 			h.transition("w6:p1", herdr.StateBlocked, herdr.StateWorking)
 			h.srv.SetScreen("w6:p1", fixture(t, "claude-after-approval.screen.txt"))
 			h.transition("w6:p1", herdr.StateWorking, herdr.StateDone)
@@ -122,9 +122,9 @@ func TestNormalDoneWindow(t *testing.T) {
 	if got := h.pushTexts(); len(got) != 0 {
 		t.Fatalf("finish after a silent briefing pushed %q", got)
 	}
-	// A spoken briefing names vps: its next finish is announced.
+	// A spoken status answer names vps: its next finish is announced.
 	h.transition("w7:p1", herdr.StateDone, herdr.StateWorking)
-	h.call(ToolBriefing, nil)
+	h.say("what's going on")
 	h.transition("w7:p1", herdr.StateWorking, herdr.StateDone)
 	if got := h.pushTexts(); len(got) != 1 || !strings.HasPrefix(got[0], "vps finished") {
 		t.Fatalf("finish after a spoken briefing pushed %q", got)
@@ -153,7 +153,7 @@ func TestStartedOnlyForOurInstruction(t *testing.T) {
 	// auth's approval prompt displaces the in-flight instruction; leaving
 	// the prompt after the answer is not a start.
 	h.block("w5:p1", "codex-approval-prompt.screen.txt")
-	h.call(ToolConfirm, nil)
+	h.say("yes")
 	h.transition("w5:p1", herdr.StateBlocked, herdr.StateWorking)
 	for _, p := range h.pushTexts() {
 		if strings.Contains(p, "started on") {

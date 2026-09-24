@@ -1,12 +1,13 @@
 // Package brain is the supervisor brain, the SVP of docs/roles.md (plan
-// D7-revised): a stateful agent that answers the supervisor's ask and
-// propose requests by reasoning with tools over a function-calling model,
+// D7-revised): a stateful agent that answers the shepherd's relayed
+// utterances and the supervisor's event requests by reasoning with tools
+// over a function-calling model,
 // instead of the stateless one-shot calls that lost the conversational
 // referent at the tool boundary.
 //
 // # Turn
 //
-// Brain.Ask / Brain.Propose run one turn: the request is appended to the
+// Brain.Turn runs one turn: the request is appended to the
 // transcript after the CEO's verbatim words, the context window is
 // assembled into model contents, and the loop calls the Model; every
 // function call it returns is executed (read_screen, run_cli, list_agents,
@@ -39,7 +40,7 @@
 // the answer contract; an empty Spoken is a skip. The brain decides
 // whether and how urgently; the supervisor applies the chattiness
 // ceiling and decides nothing about the moment (the push queue does).
-// Announce turns are TriggerEvent, bounded by Config.EnrichTimeout
+// Announce turns are TriggerEvent, bounded by Config.AnnounceTurnTimeout
 // (Config.AnnounceTimeout when the shepherd is owed the line: it keeps a
 // promise, or Request.Owed),
 // declared only the read tools (the executor refuses prompt, send_keys,
@@ -51,7 +52,7 @@
 // "Investigations and explanations"). Its request carries the job's
 // question, the CEO's own words and the sub-agent's answer wrapped as
 // worker output, and its reply is the explanation the supervisor pushes
-// at the next pause. It takes the propose budget rather than the
+// at the next pause. It takes the utterance budget rather than the
 // announce one — the answer is what the CEO has been waiting for, not a
 // line racing a code sentence — and it coalesces only with a newer
 // delivery about the same agent, never with a worker event.

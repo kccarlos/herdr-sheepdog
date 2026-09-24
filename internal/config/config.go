@@ -49,6 +49,10 @@ type Config struct {
 	Supervisor Supervisor `toml:"supervisor"`
 	Brain      Brain      `toml:"brain"`
 	Prompts    Prompts    `toml:"prompts"`
+
+	// deprecations are the notes about deprecated keys Load read
+	// (Deprecations, deprecated.go).
+	deprecations []string
 }
 
 // Prompts configures the prompt workspace (docs/roles.md "Prompt files"):
@@ -62,8 +66,8 @@ type Prompts struct {
 }
 
 // Brain configures the supervisor brain (plan D7-revised, docs/roles.md):
-// the stateful agent that answers ask/propose with tools over a
-// function-calling model (Gemini or DeepSeek, switchable at runtime),
+// the stateful agent that answers the shepherd's relayed words and the
+// workers' events with tools over a function-calling model (Gemini or DeepSeek, switchable at runtime),
 // keeping one transcript per daemon run under <data_dir>/brain/. When
 // it errors or runs out of budget the supervisor falls back to the
 // daemon's own code sentence.
@@ -82,10 +86,10 @@ type Brain struct {
 	// MaxSteps bounds the model calls in one turn (default 6); beyond it
 	// the turn falls back to the code sentence.
 	MaxSteps int `toml:"max_steps"`
-	// AskTimeoutS / ProposeTimeoutS bound one ask / propose turn including
-	// its tool calls (defaults 8 / 12).
-	AskTimeoutS     int `toml:"ask_timeout_s"`
-	ProposeTimeoutS int `toml:"propose_timeout_s"`
+	// UtteranceTimeoutS bounds one utterance turn (the shepherd's relayed
+	// words) and an investigation delivery turn, including tool calls
+	// (default 12; formerly propose_timeout_s, still accepted).
+	UtteranceTimeoutS int `toml:"utterance_timeout_s"`
 	// WindowTokens is the context window target (estimated tokens); above
 	// it the oldest half is compacted into a summary (default 24000).
 	WindowTokens int `toml:"window_tokens"`
@@ -101,10 +105,10 @@ type Brain struct {
 	// FinalGraceS is how far past the timeout that one answer-only call
 	// may run before the turn falls back (0: default 3s; negative: none).
 	FinalGraceS int `toml:"final_grace_s"`
-	// EnrichTimeoutS bounds an event turn (the announce turn on a block
-	// or finish); on expiry the template sentence is spoken instead
-	// (default 6).
-	EnrichTimeoutS int `toml:"enrich_timeout_s"`
+	// AnnounceTurnTimeoutS bounds an event turn (the announce turn on a
+	// block or finish); on expiry the template sentence is spoken instead
+	// (default 6; formerly enrich_timeout_s, still accepted).
+	AnnounceTurnTimeoutS int `toml:"announce_turn_timeout_s"`
 	// AnnounceTimeoutS bounds an announce turn the shepherd is owed: one
 	// that keeps a promise or reports the finish of an instruction they
 	// gave (default 15).
@@ -423,7 +427,7 @@ const (
 )
 
 func defaultBrain() Brain {
-	return Brain{Enabled: true, Provider: DefaultBrainProvider, Model: DefaultBrainModel, MaxSteps: 6, AskTimeoutS: 8, ProposeTimeoutS: 12, WindowTokens: 24000, PruneAfterTurns: 3, EnrichTimeoutS: 6, AnnounceTimeoutS: 15, AnnounceWaitS: 2, ReplyWaitS: 2, InvestigateMaxS: 600, InvestigateSessionTTLS: 3600}
+	return Brain{Enabled: true, Provider: DefaultBrainProvider, Model: DefaultBrainModel, MaxSteps: 6, UtteranceTimeoutS: 12, WindowTokens: 24000, PruneAfterTurns: 3, AnnounceTurnTimeoutS: 6, AnnounceTimeoutS: 15, AnnounceWaitS: 2, ReplyWaitS: 2, InvestigateMaxS: 600, InvestigateSessionTTLS: 3600}
 }
 
 // defaultCLI mirrors the argv templates verified in
@@ -505,7 +509,11 @@ func load(path string, lookup func(string) (string, bool)) (Config, error) {
 	data, err := os.ReadFile(path)
 	switch {
 	case err == nil:
-		if _, err := toml.Decode(string(data), &cfg); err != nil {
+		md, err := toml.Decode(string(data), &cfg)
+		if err != nil {
+			return Config{}, fmt.Errorf("config: parse %s: %w", path, err)
+		}
+		if err := applyDeprecatedKeys(&cfg, data, md); err != nil {
 			return Config{}, fmt.Errorf("config: parse %s: %w", path, err)
 		}
 	case errors.Is(err, os.ErrNotExist):
@@ -515,6 +523,9 @@ func load(path string, lookup func(string) (string, bool)) (Config, error) {
 	}
 	if cfg.Aliases == nil {
 		cfg.Aliases = map[string]string{}
+	}
+	if err := applyDeprecatedEnv(&cfg, lookup); err != nil {
+		return Config{}, err
 	}
 	if err := applyEnv(&cfg, lookup); err != nil {
 		return Config{}, err
@@ -595,7 +606,7 @@ func validateBrain(b Brain) error {
 	for _, f := range []struct {
 		name string
 		v    int
-	}{{"max_steps", b.MaxSteps}, {"ask_timeout_s", b.AskTimeoutS}, {"propose_timeout_s", b.ProposeTimeoutS}, {"window_tokens", b.WindowTokens}, {"prune_after_turns", b.PruneAfterTurns}, {"enrich_timeout_s", b.EnrichTimeoutS}, {"announce_timeout_s", b.AnnounceTimeoutS}, {"announce_wait_s", b.AnnounceWaitS}, {"investigate_max_s", b.InvestigateMaxS}, {"investigate_session_ttl_s", b.InvestigateSessionTTLS}} {
+	}{{"max_steps", b.MaxSteps}, {"utterance_timeout_s", b.UtteranceTimeoutS}, {"window_tokens", b.WindowTokens}, {"prune_after_turns", b.PruneAfterTurns}, {"announce_turn_timeout_s", b.AnnounceTurnTimeoutS}, {"announce_timeout_s", b.AnnounceTimeoutS}, {"announce_wait_s", b.AnnounceWaitS}, {"investigate_max_s", b.InvestigateMaxS}, {"investigate_session_ttl_s", b.InvestigateSessionTTLS}} {
 		if f.v <= 0 {
 			return fmt.Errorf("config: brain.%s=%d: want a positive integer", f.name, f.v)
 		}
@@ -854,11 +865,10 @@ func applyBrainEnv(cfg *Config, lookup func(string) (string, bool)) error {
 		dst *int
 	}{
 		{"SHEEPDOG_BRAIN_MAX_STEPS", &cfg.Brain.MaxSteps},
-		{"SHEEPDOG_BRAIN_ASK_TIMEOUT_S", &cfg.Brain.AskTimeoutS},
-		{"SHEEPDOG_BRAIN_PROPOSE_TIMEOUT_S", &cfg.Brain.ProposeTimeoutS},
+		{"SHEEPDOG_BRAIN_UTTERANCE_TIMEOUT_S", &cfg.Brain.UtteranceTimeoutS},
 		{"SHEEPDOG_BRAIN_WINDOW_TOKENS", &cfg.Brain.WindowTokens},
 		{"SHEEPDOG_BRAIN_PRUNE_AFTER_TURNS", &cfg.Brain.PruneAfterTurns},
-		{"SHEEPDOG_BRAIN_ENRICH_TIMEOUT_S", &cfg.Brain.EnrichTimeoutS},
+		{"SHEEPDOG_BRAIN_ANNOUNCE_TURN_TIMEOUT_S", &cfg.Brain.AnnounceTurnTimeoutS},
 		{"SHEEPDOG_BRAIN_ANNOUNCE_TIMEOUT_S", &cfg.Brain.AnnounceTimeoutS},
 		{"SHEEPDOG_BRAIN_ANNOUNCE_WAIT_S", &cfg.Brain.AnnounceWaitS},
 		{"SHEEPDOG_BRAIN_INVESTIGATE_MAX_S", &cfg.Brain.InvestigateMaxS},
@@ -952,8 +962,8 @@ func geminiKeysFromEnv(lookup func(string) (string, bool)) []string {
 // counts (or set/unset) only; keep it that way when secret-bearing
 // fields are added.
 func (c Config) String() string {
-	return fmt.Sprintf("data_dir=%s herdr.socket=%s state.path=%s state.full_fsync=%t debounce_ms=%d snapshot_interval_s=%d pending_ttl_s=%d aliases=%d gemini.model=%s gemini.voice=%s gemini.stall_after_s=%d gemini.start_sensitivity=%s gemini.end_sensitivity=%s gemini.api_keys=%d voice.name=%s voice.provider=%s voice.openai.api_key=%s voice.openai.model=%s voice.openai.voice=%s voice.openai.idle_close_s=%d deepseek.api_key=%s deepseek.base_url=%s deepseek.thinking=%t deepseek.reasoning_effort=%s web.bind=%s web.port=%d web.token=%s cli.prefer=%s cli.timeout_s=%d cli.max_output_kb=%d supervisor.chattiness=%s supervisor.recent_minutes=%d supervisor.promise_ttl_s=%d supervisor.cancel_window_s=%d supervisor.reprompt_poll_s=%d supervisor.repeat_window_s=%d supervisor.authorise_window_s=%d brain.enabled=%t brain.provider=%s brain.model=%s brain.max_steps=%d brain.ask_timeout_s=%d brain.propose_timeout_s=%d brain.window_tokens=%d brain.prune_after_turns=%d brain.step_reserve_s=%d brain.final_grace_s=%d brain.enrich_timeout_s=%d brain.announce_timeout_s=%d brain.announce_wait_s=%d brain.reply_wait_s=%d brain.investigate_max_s=%d brain.investigate_session_ttl_s=%d prompts.dir=%s",
-		c.DataDir, c.Herdr.Socket, c.State.Path, c.State.FullFsync, c.DebounceMS, c.SnapshotIntervalS, c.PendingTTLS, len(c.Aliases), c.Gemini.Model, c.Gemini.Voice, c.Gemini.StallAfterS, c.Gemini.StartSensitivity, c.Gemini.EndSensitivity, len(c.Gemini.APIKeys), c.Voice.Name, c.Voice.Provider, setOrUnset(c.Voice.OpenAI.APIKey), c.Voice.OpenAI.Model, c.Voice.OpenAI.Voice, c.Voice.OpenAI.IdleCloseS, setOrUnset(c.DeepSeek.APIKey), c.DeepSeek.BaseURL, c.DeepSeek.Thinking, c.DeepSeek.ReasoningEffort, c.Web.Bind, c.Web.Port, setOrUnset(c.Web.Token), c.CLI.Prefer, c.CLI.TimeoutS, c.CLI.MaxOutputKB, c.Supervisor.Chattiness, c.Supervisor.RecentMinutes, c.Supervisor.PromiseTTLS, c.Supervisor.CancelWindowS, c.Supervisor.RepromptPollS, c.Supervisor.RepeatWindowS, c.Supervisor.AuthoriseWindowS, c.Brain.Enabled, c.Brain.Provider, c.Brain.Model, c.Brain.MaxSteps, c.Brain.AskTimeoutS, c.Brain.ProposeTimeoutS, c.Brain.WindowTokens, c.Brain.PruneAfterTurns, c.Brain.StepReserveS, c.Brain.FinalGraceS, c.Brain.EnrichTimeoutS, c.Brain.AnnounceTimeoutS, c.Brain.AnnounceWaitS, c.Brain.ReplyWaitS, c.Brain.InvestigateMaxS, c.Brain.InvestigateSessionTTLS, c.Prompts.Dir)
+	return fmt.Sprintf("data_dir=%s herdr.socket=%s state.path=%s state.full_fsync=%t debounce_ms=%d snapshot_interval_s=%d pending_ttl_s=%d aliases=%d gemini.model=%s gemini.voice=%s gemini.stall_after_s=%d gemini.start_sensitivity=%s gemini.end_sensitivity=%s gemini.api_keys=%d voice.name=%s voice.provider=%s voice.openai.api_key=%s voice.openai.model=%s voice.openai.voice=%s voice.openai.idle_close_s=%d deepseek.api_key=%s deepseek.base_url=%s deepseek.thinking=%t deepseek.reasoning_effort=%s web.bind=%s web.port=%d web.token=%s cli.prefer=%s cli.timeout_s=%d cli.max_output_kb=%d supervisor.chattiness=%s supervisor.recent_minutes=%d supervisor.promise_ttl_s=%d supervisor.cancel_window_s=%d supervisor.reprompt_poll_s=%d supervisor.repeat_window_s=%d supervisor.authorise_window_s=%d brain.enabled=%t brain.provider=%s brain.model=%s brain.max_steps=%d brain.utterance_timeout_s=%d brain.window_tokens=%d brain.prune_after_turns=%d brain.step_reserve_s=%d brain.final_grace_s=%d brain.announce_turn_timeout_s=%d brain.announce_timeout_s=%d brain.announce_wait_s=%d brain.reply_wait_s=%d brain.investigate_max_s=%d brain.investigate_session_ttl_s=%d prompts.dir=%s",
+		c.DataDir, c.Herdr.Socket, c.State.Path, c.State.FullFsync, c.DebounceMS, c.SnapshotIntervalS, c.PendingTTLS, len(c.Aliases), c.Gemini.Model, c.Gemini.Voice, c.Gemini.StallAfterS, c.Gemini.StartSensitivity, c.Gemini.EndSensitivity, len(c.Gemini.APIKeys), c.Voice.Name, c.Voice.Provider, setOrUnset(c.Voice.OpenAI.APIKey), c.Voice.OpenAI.Model, c.Voice.OpenAI.Voice, c.Voice.OpenAI.IdleCloseS, setOrUnset(c.DeepSeek.APIKey), c.DeepSeek.BaseURL, c.DeepSeek.Thinking, c.DeepSeek.ReasoningEffort, c.Web.Bind, c.Web.Port, setOrUnset(c.Web.Token), c.CLI.Prefer, c.CLI.TimeoutS, c.CLI.MaxOutputKB, c.Supervisor.Chattiness, c.Supervisor.RecentMinutes, c.Supervisor.PromiseTTLS, c.Supervisor.CancelWindowS, c.Supervisor.RepromptPollS, c.Supervisor.RepeatWindowS, c.Supervisor.AuthoriseWindowS, c.Brain.Enabled, c.Brain.Provider, c.Brain.Model, c.Brain.MaxSteps, c.Brain.UtteranceTimeoutS, c.Brain.WindowTokens, c.Brain.PruneAfterTurns, c.Brain.StepReserveS, c.Brain.FinalGraceS, c.Brain.AnnounceTurnTimeoutS, c.Brain.AnnounceTimeoutS, c.Brain.AnnounceWaitS, c.Brain.ReplyWaitS, c.Brain.InvestigateMaxS, c.Brain.InvestigateSessionTTLS, c.Prompts.Dir)
 }
 
 // setOrUnset renders a secret's presence, never its value.

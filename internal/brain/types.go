@@ -37,8 +37,9 @@ type Kind string
 
 // The turn kinds. Utterance is the CEO turn of D1-revised: the voice
 // relays what the CEO said verbatim and the brain decides what it is
-// (docs/roles.md "One decision-maker"). Ask and propose are the older
-// classified CEO turns, kept for the evals and `sheepdog brain-test`.
+// (docs/roles.md "One decision-maker"). (The older classified CEO
+// turns, ask and propose, are gone; their request lines still appear in
+// transcripts written before, and /debug still reads them.)
 // Stop is the short read-only turn the stop procedure runs to say what
 // it stopped; announce is the event turn the supervisor runs on a
 // worker's block or finish (docs/roles.md "Push judgment").
@@ -46,8 +47,6 @@ const (
 	// KindUtterance carries the CEO's words verbatim in Question, with
 	// no agent hint: the brain resolves intent, target and action.
 	KindUtterance Kind = "utterance"
-	KindAsk       Kind = "ask"
-	KindPropose   Kind = "propose"
 	// KindStop reports what the stop procedure stopped: read tools
 	// only, a short budget, still CEO-triggered (the CEO is waiting).
 	KindStop Kind = "stop"
@@ -92,16 +91,14 @@ const (
 	TriggerEvent Trigger = "event"
 )
 
-// Request is one ask or propose from the assistant.
+// Request is one turn's request: the shepherd's relayed words, the stop
+// procedure's closing turn, or a worker event.
 type Request struct {
-	// Kind defaults to KindAsk.
+	// Kind defaults to KindUtterance.
 	Kind Kind
 	// Trigger defaults to TriggerCEO.
 	Trigger Trigger
-	// Question is the CEO's words verbatim (utterance), or the
-	// assistant's question (ask) / instruction (propose) as it put them
-	// in the tool call; the CEO's verbatim words are in the transcript
-	// either way.
+	// Question is the CEO's words verbatim (utterance).
 	Question string
 	// Agent is the alias hint, set only when the CEO said a name (never
 	// for an utterance: the brain resolves the target itself); for an
@@ -136,7 +133,7 @@ type Request struct {
 	Promises []PromiseInfo
 	// Owed marks an announce turn the shepherd is waiting on: the event
 	// keeps a promise or finishes an instruction the shepherd gave this
-	// run. It gets Config.AnnounceTimeout instead of EnrichTimeout, since
+	// run. It gets Config.AnnounceTimeout instead of AnnounceTurnTimeout, since
 	// the code sentence already said "here's what it found".
 	Owed bool
 	// AlsoAsking is set on a finish whose screen ends at a prompt the
@@ -427,7 +424,7 @@ type Host interface {
 	// included.
 	Investigations() []InvestigationInfo
 	// Prompt sends an instruction as typed text, creating the
-	// send_instruction pending action exactly as propose does; it returns
+	// send_instruction pending action (echo, send, cancellable); it returns
 	// the spoken echo.
 	Prompt(ctx context.Context, paneID, text string) (string, error)
 	// AnswerPrompt sends keys to the pane's pending answer_prompt, after

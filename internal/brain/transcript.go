@@ -37,7 +37,8 @@ const (
 	KindWorkerEvent MessageKind = "worker_event"
 	// KindNote is a note the CEO asked to be remembered.
 	KindNote MessageKind = "note"
-	// KindRequest is the voice tool call as received (ask / propose).
+	// KindRequest is the request as received (utterance, stop or event;
+	// transcripts from before hold ask / propose ones too).
 	KindRequest MessageKind = "request"
 	// KindToolCall is one function call the model made.
 	KindToolCall MessageKind = "brain_tool_call"

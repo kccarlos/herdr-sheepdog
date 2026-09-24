@@ -116,10 +116,12 @@ func TestBlockedRunsFullChain(t *testing.T) {
 		t.Fatalf("read = %+v err=%v", read, err)
 	}
 
-	// confirm → send_keys to the synthetic pane → pending.confirmed.
-	res, err := h.sup.Confirm(context.Background(), "yes")
+	// A typed "yes" (the bare-answer fast path) → send_keys to the
+	// synthetic pane → pending.confirmed.
+	h.sup.ShepherdInput(supervisor.InputTyped, "yes")
+	res, err := h.sup.ToSupervisor(context.Background(), "yes")
 	if err != nil || !strings.Contains(res.Spoken, "Told auth yes") {
-		t.Fatalf("confirm = %+v err=%v", res, err)
+		t.Fatalf("answer = %+v err=%v", res, err)
 	}
 	if h.herdr.Sends("fake:1") != 1 {
 		t.Fatalf("sends = %d", h.herdr.Sends("fake:1"))
