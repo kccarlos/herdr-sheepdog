@@ -131,6 +131,24 @@ func TestLateLineKeepsAliasAndOptions(t *testing.T) {
 	}
 }
 
+// A late reply that says the shepherd must decide on an open prompt asks
+// for the floor, but without the needs_user tag: it is an addition to a
+// block already spoken, so the voice still finishes its own sentence.
+func TestLateNeedsUserOnOpenPromptInterrupts(t *testing.T) {
+	release := make(chan struct{})
+	m := braintest.NewModel(braintest.Step{Block: release, Text: `{"spoken": "Auth wants to create hello.txt; allow it?", "detail": "", "needs_user": true}`})
+	h := newBrainHarness(t, m, replyWait(20*time.Millisecond))
+	blockedAuth(t, h)
+
+	assertPending(t, h.say("what does auth want"))
+	close(release)
+	h.sup.replies.Wait()
+	pushes, tags := utterancePushes(h)
+	if len(pushes) != 1 || pushes[0].Urgency != voice.UrgencyInterrupt || tags[0]["needs_user"] != nil {
+		t.Errorf("pushes = %v %v, want one interrupt push without the needs_user tag", pushes, tags)
+	}
+}
+
 // The voice cancels the handler's context as soon as the handler returns
 // (gemini/toolexec.go); the detached turn must not be a child of it.
 func TestToolContextCancelDoesNotCancelTurn(t *testing.T) {

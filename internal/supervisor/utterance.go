@@ -192,7 +192,7 @@ func (s *Supervisor) awaitReply(ctx, turnCtx context.Context, u *inflightUtteran
 		defer s.endUtterance(u)
 		return s.inlineResult(turnCtx, u, out)
 	}
-	payload := map[string]any{"id": u.id, "waited_ms": s.cfg.Now().Sub(start).Milliseconds()}
+	payload := map[string]any{"id": u.id, "waited_ms": s.cfg.Now().Sub(start).Milliseconds(), "cancelled": ctx.Err() != nil}
 	if id, ok := ctx.Value(callIDKey{}).(string); ok {
 		payload["call_id"] = id
 	}
