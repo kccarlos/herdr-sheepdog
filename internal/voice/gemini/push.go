@@ -21,6 +21,10 @@ type pushItem struct {
 	// shows the request even when scheduling_sent shows what happened.
 	requested voice.Urgency
 	retries   int
+	// at is when the push was queued; heldAt when it was first held for
+	// want of a listener (zero: never held). See holdPush.
+	at     time.Time
+	heldAt time.Time
 	// tags travel onto the item's voice.push event (answers_job: the
 	// investigation whose answer this push is; due_promise, needs_user:
 	// the exceptions that keep INTERRUPT while the model is speaking).
@@ -55,6 +59,18 @@ func (s *Session) pushLoop(ctx context.Context) {
 			item, ok := s.peekPush()
 			if !ok {
 				break
+			}
+			if held, wait := s.holdPush(); held {
+				if wait == 0 {
+					continue // the head expired and was dropped
+				}
+				select {
+				case <-ctx.Done():
+					return
+				case <-s.kick:
+				case <-time.After(wait):
+				}
+				continue
 			}
 			wait, timedOut := s.pushReady(item)
 			if timedOut {
@@ -104,6 +120,67 @@ func (s *Session) peekPush() (pushItem, bool) {
 		})
 	}
 	return item, true
+}
+
+// heldPushTTL is how long a spoken push waits for a listener before it is
+// dropped (voice.push_dropped {reason: "no_listener"}): the same five
+// minutes GPT-Live's standby queue waits (gptlive Config.PushTTL's
+// default), so both providers treat an absent shepherd alike.
+const heldPushTTL = 5 * time.Minute
+
+// holdPush keeps a spoken push (idle or interrupt) queued while no /ws
+// client is attached, so the model does not speak it to nobody
+// (2026-09-24 18:22:04: a 12 s answer spoken with the page closed). It
+// guards the invariant "a spoken push is heard or recorded as unheard":
+// the session cannot make an absent listener unrepresentable, since the
+// browser can leave at any moment between the push and the speech. The
+// first hold of an item logs voice.push_held; an item held longer than
+// heldPushTTL is dropped with voice.push_dropped. held reports that the
+// head must not be sent now; wait is how long until the TTL (0 after a
+// drop: look at the new head at once). Silent pushes are context, not
+// speech, and are never held. ClientAttached(true) pokes the loop.
+func (s *Session) holdPush() (held bool, wait time.Duration) {
+	s.mu.Lock()
+	if !s.noClient || len(s.pushQ) == 0 || s.pushQ[0].urgency == voice.UrgencySilent {
+		s.mu.Unlock()
+		return false, 0
+	}
+	now := s.now()
+	head := &s.pushQ[0]
+	if age := now.Sub(head.at); age >= heldPushTTL {
+		item := *head
+		s.pushQ = s.pushQ[1:]
+		s.mu.Unlock()
+		s.log.Log(logSource, "voice.push_dropped", "", heldPayload(item, "no_listener", age))
+		return true, 0
+	}
+	first := head.heldAt.IsZero()
+	if first {
+		head.heldAt = now
+	}
+	item := *head
+	s.mu.Unlock()
+	if first {
+		s.log.Log(logSource, "voice.push_held", "", heldPayload(item, "no_listener", 0))
+	}
+	return true, heldPushTTL - now.Sub(item.at)
+}
+
+// heldPayload is the voice.push_held / voice.push_released /
+// voice.push_dropped payload: the push's text, urgency and tags (push_id,
+// answers_utterance), with reason and age when given.
+func heldPayload(item pushItem, reason string, age time.Duration) map[string]any {
+	p := map[string]any{"text": item.text, "urgency": item.requested.String()}
+	for k, v := range item.tags {
+		p[k] = v
+	}
+	if reason != "" {
+		p["reason"] = reason
+	}
+	if age > 0 {
+		p["age_ms"] = age.Milliseconds()
+	}
+	return p
 }
 
 func (s *Session) popPush() {
@@ -201,7 +278,13 @@ func (s *Session) doPush(ctx context.Context, item pushItem) {
 			s.turn.pushesSpoken++
 		}
 	}
+	now := s.now()
 	s.mu.Unlock()
+	if !item.heldAt.IsZero() {
+		p := heldPayload(item, "", 0)
+		p["held_ms"] = now.Sub(item.heldAt).Milliseconds()
+		s.log.Log(logSource, "voice.push_released", "", p)
+	}
 	payload := map[string]any{"text": item.text, "urgency": item.requested.String(), "scheduling_sent": item.urgency.SchedulingName()}
 	for k, v := range item.tags {
 		payload[k] = v

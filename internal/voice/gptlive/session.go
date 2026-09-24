@@ -144,6 +144,9 @@ type pushItem struct {
 	requested voice.Urgency
 	tags      map[string]any
 	at        time.Time
+	// heldAt is when the push was first held for want of a listener
+	// (zero: never held); see pumpPushes.
+	heldAt time.Time
 }
 
 // New builds a Session; it does not connect (see Start).

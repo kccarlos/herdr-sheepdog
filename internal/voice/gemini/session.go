@@ -44,11 +44,16 @@ type Session struct {
 
 	sendMu sync.Mutex // serialises every Send* on the current conn
 
-	mu           sync.Mutex // guards everything below
-	conn         Conn
-	connGen      int // bumped on every installed connection
-	status       voice.Status
-	muted        bool
+	mu      sync.Mutex // guards everything below
+	conn    Conn
+	connGen int // bumped on every installed connection
+	status  voice.Status
+	muted   bool
+	// noClient: the /ws hub said no browser is attached
+	// (ClientAttached(false)); spoken pushes are held until one is
+	// (push.go holdPush). The zero value — never told — does not hold,
+	// so a Session used without the hub (voice-test) speaks as before.
+	noClient     bool
 	handle       string // latest resumable handle
 	keyIdx       int
 	turnOpen     bool
@@ -227,6 +232,24 @@ func (s *Session) SetMuted(muted bool) {
 	}
 	if changed {
 		s.log.Log(logSource, "voice.muted", "", map[string]any{"muted": muted})
+	}
+}
+
+// ClientAttached is called (through the voice Switcher) by the /ws hub
+// when a browser client connects (true) or the last one goes away
+// (false). While none is attached, spoken pushes are held in the push
+// queue (push.go holdPush) and released, under the usual urgency rules,
+// when one attaches. Logs voice.client on a change.
+func (s *Session) ClientAttached(attached bool) {
+	s.mu.Lock()
+	changed := s.noClient == attached
+	s.noClient = !attached
+	s.mu.Unlock()
+	if changed {
+		s.log.Log(logSource, "voice.client", "", map[string]any{"attached": attached})
+	}
+	if attached {
+		s.poke()
 	}
 }
 
@@ -453,7 +476,7 @@ func (s *Session) PushTagged(text string, u voice.Urgency, tags map[string]any) 
 		s.mu.Unlock()
 		return ErrClosed
 	}
-	s.pushQ = append(s.pushQ, pushItem{text: text, urgency: u, requested: u, tags: tags})
+	s.pushQ = append(s.pushQ, pushItem{text: text, urgency: u, requested: u, tags: tags, at: s.now()})
 	s.mu.Unlock()
 	s.poke()
 	return nil
