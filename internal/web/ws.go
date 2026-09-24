@@ -89,6 +89,18 @@ func (h *hub) statusMsg() wsproto.Message {
 	return m
 }
 
+// closedStatus is a status message announcing the connection is closing
+// (a new client replaced it, or the daemon is shutting down). It carries
+// the hub's real current mute state rather than a hard-coded one, so a
+// status message never claims "unmuted" while the hub is actually muted,
+// or vice versa (audit B2).
+func (h *hub) closedStatus(reason string) wsproto.Message {
+	h.mu.Lock()
+	muted := h.muted
+	h.mu.Unlock()
+	return wsproto.Status(wsproto.VoiceClosed, muted, reason)
+}
+
 // handle upgrades the request and serves the client until it goes away.
 // A new client replaces the current one (contract: single client).
 func (h *hub) handle(w http.ResponseWriter, r *http.Request) {
@@ -105,11 +117,18 @@ func (h *hub) handle(w http.ResponseWriter, r *http.Request) {
 	c.id = h.seq
 	old := h.client
 	h.client = c
+	// docs/ws-contract.md: "reconnecting clients start unmuted" — a new
+	// client's mic is never silenced by whatever the previous client left
+	// behind (audit B2).
+	h.muted = false
 	h.mu.Unlock()
+	if h.s.deps.Voice != nil {
+		h.s.deps.Voice.SetMuted(false)
+	}
 
 	replaced := old != nil
 	if replaced {
-		old.enqueue(controlFrame(wsproto.Status(wsproto.VoiceClosed, false, "replaced")))
+		old.enqueue(controlFrame(h.closedStatus("replaced")))
 		old.closeAfterFlush(websocket.StatusNormalClosure, "replaced")
 	}
 	h.s.log.Log(logSource, "web.client.connect", "", map[string]any{"client_id": c.id, "remote": c.remote, "replaced": replaced})
@@ -237,7 +256,7 @@ func (h *hub) shutdown(reason string) {
 	if c == nil {
 		return
 	}
-	c.enqueue(controlFrame(wsproto.Status(wsproto.VoiceClosed, false, reason)))
+	c.enqueue(controlFrame(h.closedStatus(reason)))
 	c.closeAfterFlush(websocket.StatusGoingAway, reason)
 }
 
