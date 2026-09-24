@@ -162,3 +162,18 @@ func TestUrgencyNotSkipCoversEmptyLine(t *testing.T) {
 		t.Errorf("spoken reply: reasons = %v", r)
 	}
 }
+
+// not_stop_word checks the daemon's bare-stop list, offline: "never
+// mind" reaches the brain (iteration 2 WP1, regression
+// never-mind-is-not-stop), a real stop word never does.
+func TestNotStopWord(t *testing.T) {
+	for q, fails := range map[string]bool{"Never mind.": false, "never mind": false, "Oh, never mind.": false, "Stop.": true, "hold on": true} {
+		c := SVPCase{ID: "x", Request: SVPRequest{Kind: "utterance", Question: q}, Expect: SVPExpect{NotStopWord: true}}
+		if got := len(stopWordReasons(c)) > 0; got != fails {
+			t.Errorf("%q: failed = %v, want %v", q, got, fails)
+		}
+	}
+	if r := stopWordReasons(SVPCase{Request: SVPRequest{Question: "stop"}}); r != nil {
+		t.Errorf("without not_stop_word: %v", r)
+	}
+}

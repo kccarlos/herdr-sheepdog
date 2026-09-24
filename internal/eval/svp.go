@@ -15,6 +15,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
 	"github.com/kccarlos/herdr-sheepdog/internal/brain/braintest"
 	"github.com/kccarlos/herdr-sheepdog/internal/prose"
+	"github.com/kccarlos/herdr-sheepdog/internal/supervisor"
 )
 
 // recorder is a logging.Logger that captures the brain.* events grading
@@ -159,6 +160,7 @@ func runSVPCase(ctx context.Context, c SVPCase, fixtureDir string, model brain.M
 		got["fallback"] = firstLine(err.Error())
 	}
 	reasons, skipped := gradeSVP(c.Expect, rec, reply, offline)
+	reasons = append(reasons, stopWordReasons(c)...)
 	reasons = append(reasons, base.reasons...)
 	r := Result{ID: c.ID, Duration: dur, Got: got, SkippedChecks: skipped, Pending: c.PendingCheck, Baseline: base.summary}
 	switch {
@@ -177,6 +179,15 @@ func runSVPCase(ctx context.Context, c SVPCase, fixtureDir string, model brain.M
 		r.Status = StatusPass
 	}
 	return r
+}
+
+// stopWordReasons checks Expect.NotStopWord against the daemon's own
+// bare-stop list: words on it never reach the brain.
+func stopWordReasons(c SVPCase) []string {
+	if !c.Expect.NotStopWord || !supervisor.BareStopWords[supervisor.BareWord(c.Request.Question)] {
+		return nil
+	}
+	return []string{fmt.Sprintf("%q is a bare stop word: the daemon would run the stop procedure (Ctrl-C a recent instruction) before any brain turn", c.Request.Question)}
 }
 
 // baseline is a case's grade against the logged behaviour (Observed).

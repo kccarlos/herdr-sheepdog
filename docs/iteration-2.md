@@ -19,7 +19,7 @@ Nothing else gets investment until these hit their thresholds.
 | J2 | Approve / deny a worker's prompt | keys sent within 3 s of the bare word; never without a recorded shepherd input |
 | J3 | Give an instruction | one confirmation line, ≤ 20 words, spoken once (not twice) |
 | J4 | Hear a finish with its finding | the brain's line is spoken (not "X finished." alone) whenever it has one; needs_user lines always spoken |
-| J5 | "What does that mean?" | answered from `plain` without a brain turn (≤ 1 s), or by a brain turn that is *simpler* than the previous line, one concept at a time |
+| J5 | "What does that mean?" | answered from `detail` (the plain explanation) without a brain turn (≤ 1 s), or by a brain turn that is *simpler* than the previous line, one concept at a time |
 | J6 | "Stop" | stops what is in flight; never Ctrl-C on "never mind"; nothing killed without the shepherd naming it |
 
 ## Scorecard metrics (computed from `<data_dir>/events/*.jsonl`)
@@ -71,13 +71,19 @@ Phase 0 — measure first (no behaviour change)
 - **WP0c headset script** (appendix below).
 
 Phase 1 — the core loop, each PR under the rules above
-- **WP1 ear contract**: reply = `headline` / `ask` / `plain`;
-  `prose.Spoken` enforces ≤ 2 sentences, ≤ 30 words, no dashes /
-  semicolons / PR numbers / ms / versions (overflow moves to `plain`);
-  the voice reads headline + ask, answers "what does that mean" from
-  `plain`, never adds its own follow-up question, closes explicitly
-  when there is no ask; the brain's "explain simpler" rule; "never
-  mind" out of the stop words.
+- **WP1 ear contract**: reply = `spoken` (the headline) / `ask` (the
+  one question) / `detail` (the plain explanation). The existing
+  `spoken` and `detail` names are kept and redefined rather than
+  renamed to `headline` / `plain`: too many consumers (voice tool
+  results, the web API, the debug page, evals, the iOS app) read them,
+  and a rename would be churn with no change for the ear.
+  `prose.EarLine` enforces ≤ 2 sentences, ≤ 30 words, no dashes /
+  semicolons / PR numbers / hashes, the ask last (overflow moves to
+  `detail`); ms values and versions are left to the prompt, since
+  cutting them mid-sentence breaks the grammar. The voice reads spoken
+  (which ends with the ask), answers "what does that mean" from
+  `detail`, never adds its own follow-up question; the brain's
+  "explain simpler" rule; "never mind" out of the stop words.
 - **WP2 finish delivery**: a finish waits for the brain's line (up to
   ~10 s) before anything is spoken; only a block gets the code sentence
   at once; a late `needs_user` line is always spoken; the "started

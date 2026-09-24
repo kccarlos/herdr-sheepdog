@@ -105,11 +105,14 @@ Does:
   - Asked again ("what does that mean?" a second time), the brain picks
     the one concept, explains it in fewer words than before, and asks
     "Clearer?".
-  - Code enforces the headline (`prose.EarLine` in `toolResultFrom`):
+  - Code enforces the headline on every brain line bound for the voice
+    (`prose.EarLine`, via the supervisor's `earLine`: replies,
+    announcements on time or late, investigation deliveries):
     dash- and semicolon-joined clauses become sentences, the first two
     within thirty words are kept, PR numbers and hashes are scrubbed,
     the ask is appended last (with an ask, a question in the headline
-    moves out), and whatever was cut is appended to `detail`.
+    moves out), and whatever was cut is appended to `detail` (for an
+    announcement, the detail kept on the finish for recall).
 - Serialises turns: single writer; shepherd turns before event turns;
   an event turn yields before its next model call when a shepherd turn
   waits; queued event turns coalesce per agent.

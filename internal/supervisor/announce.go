@@ -197,7 +197,7 @@ func (s *Supervisor) applyResult(a announcement, kept []state.Promise, level Cha
 		return
 	}
 	rep := r.rep
-	spoken := spokenLine(rep.Spoken)
+	spoken, overflow := earLine(rep)
 	if !s.pendingStillOpen(a) {
 		// The prompt was answered or went away while the brain wrote
 		// about it: whatever it says now is about something gone.
@@ -219,7 +219,7 @@ func (s *Supervisor) applyResult(a announcement, kept []state.Promise, level Cha
 	// Whatever the ceiling does with it, the brain's line is what the
 	// record keeps of the finish.
 	s.recordFinish(a, spoken)
-	s.recordAnnounceDetail(a, rep)
+	s.recordAnnounceDetail(a, rep, overflow)
 	if d.applied == brain.UrgencySkip {
 		if d.reason == "ceiling" {
 			s.log.Log(logSource, "supervisor.push_quiet", a.row.PaneID, map[string]any{"text": spoken, "chattiness": string(level)})
@@ -272,11 +272,11 @@ func (s *Supervisor) dropLate(a announcement, kept []state.Promise, level Chatti
 	}
 	open := s.pendingStillOpen(a)
 	rep := r.rep
-	spoken := spokenLine(rep.Spoken)
+	spoken, overflow := earLine(rep)
 	if spoken != "" && open {
 		// The record keeps the fuller line even when nobody hears it.
 		s.recordFinish(a, spoken)
-		s.recordAnnounceDetail(a, rep)
+		s.recordAnnounceDetail(a, rep, overflow)
 	}
 	requested := requestedUrgency(rep.Urgency, spoken)
 	related := a.event == brain.PromiseEventDone && strings.TrimSpace(rep.RelatesTo) != ""
@@ -380,12 +380,14 @@ func (s *Supervisor) codePath(a announcement, kept []state.Promise, level Chatti
 }
 
 // recordAnnounceDetail stores an announce turn's detail alongside the
-// finish it phrased (for the ledger and recall).
-func (s *Supervisor) recordAnnounceDetail(a announcement, rep brain.Reply) {
+// finish it phrased (for the ledger and recall), followed by overflow:
+// whatever the ear cap cut from the spoken line (earLine), so nothing
+// the brain wrote is lost.
+func (s *Supervisor) recordAnnounceDetail(a announcement, rep brain.Reply, overflow string) {
 	if a.event != brain.PromiseEventDone {
 		return
 	}
-	if detail := strings.TrimSpace(prose.Spoken(rep.Detail, 0)); detail != "" {
+	if detail := strings.TrimSpace(prose.Spoken(rep.Detail, 0) + " " + overflow); detail != "" {
 		s.recordDetail(a.row.PaneID, detail)
 	}
 }
@@ -425,7 +427,7 @@ func (s *Supervisor) logDecision(a announcement, level Chattiness, d decision, r
 		payload["waited_ms"] = a.waited.Milliseconds()
 	}
 	if withSpoken {
-		payload["spoken"] = spokenLine(rep.Spoken)
+		payload["spoken"], _ = earLine(rep)
 		payload["detail"] = strings.TrimSpace(prose.Spoken(rep.Detail, 0))
 		payload["relates_to"] = strings.TrimSpace(prose.Spoken(rep.RelatesTo, 1))
 		payload["needs_user"] = rep.NeedsUser

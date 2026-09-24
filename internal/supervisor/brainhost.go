@@ -329,7 +329,7 @@ func toolResultFrom(rep brain.Reply) voice.ToolResult {
 // earLine is a brain reply's line for the ear: the headline cut to the
 // ear caps, then the reply's ask as the last sentence (prose.EarLine),
 // terminated; overflow is what the cap cut. Every brain line bound for
-// the voice goes through it (the announce path's spokenLine is next).
+// the voice goes through it: replies, announcements and deliveries.
 func earLine(rep brain.Reply) (spoken, overflow string) {
 	spoken, overflow = prose.EarLine(rep.Spoken, rep.Ask)
 	return sentence(spoken), overflow

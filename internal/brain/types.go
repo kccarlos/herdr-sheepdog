@@ -133,8 +133,9 @@ type Request struct {
 	Promises []PromiseInfo
 	// Owed marks an announce turn the shepherd is waiting on: the event
 	// keeps a promise or finishes an instruction the shepherd gave this
-	// run. It gets Config.AnnounceTimeout instead of AnnounceTurnTimeout, since
-	// the code sentence already said "here's what it found".
+	// run. It gets Config.AnnounceTimeout instead of AnnounceTurnTimeout:
+	// the finish waits for the brain's line, so that line (not a code
+	// sentence first) is what the shepherd hears.
 	Owed bool
 	// AlsoAsking is set on a finish whose screen ends at a prompt the
 	// agent showed after its turn (Claude Code's "teach auto mode…?"):
