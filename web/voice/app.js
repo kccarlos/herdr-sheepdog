@@ -48,7 +48,9 @@ const state = {
   framesDropped: 0,
   level: { peak: 0, rms: 0, muted: false, gated: false, gatedFrames: 0 },
   gate: { opts: {}, on: false, transitions: 0 }, // silence gate (docs/ws-contract.md)
-  playback: { speaking: false, state: 'idle', bufferedMs: 0, targetMs: 150, underruns: 0, drains: 0, dropped: 0, flushes: 0, playedMs: 0 },
+  playback: { speaking: false, state: 'idle', bufferedMs: 0, targetMs: 150, underruns: 0, drains: 0, dropped: 0, flushes: 0, playedMs: 0, rate: 1, stretchedMs: 0 },
+  // The voice provider the playback policy was last set for (status.provider).
+  playbackProvider: '',
   lastUnderruns: 0,
   flushSeq: 0,
   pendingFlushes: new Map(), // id → { kind, t0 }
@@ -92,6 +94,8 @@ async function ensureAudio() {
   playback.port.onmessage = (e) => onPlaybackMessage(e.data);
   playback.connect(ctx.destination);
   state.playbackNode = playback;
+  state.playbackPolicySent = false;
+  if (state.playbackProvider) setPlaybackPolicy(state.playbackProvider);
 
   const capture = new AudioWorkletNode(ctx, 'sheepdog-capture', {
     numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1],
@@ -135,6 +139,20 @@ function onCaptureMessage(m) {
   ws.send(m.data);
   state.framesSent++;
   state.bytesOut += m.data.byteLength;
+}
+
+// setPlaybackPolicy tells the playback worklet which provider's jitter
+// buffer policy to use (docs/ws-contract.md "Playback jitter buffer").
+// Remembered so a worklet created later (audio starts on a gesture) gets
+// it too.
+function setPlaybackPolicy(provider) {
+  if (provider === state.playbackProvider && state.playbackPolicySent) return;
+  state.playbackProvider = provider;
+  state.playbackPolicySent = false;
+  if (!state.playbackNode) return;
+  state.playbackNode.port.postMessage({ type: 'policy', provider });
+  state.playbackPolicySent = true;
+  console.log(`[voice] playback policy: ${provider}`);
 }
 
 function onPlaybackMessage(m) {
@@ -345,6 +363,8 @@ function startPing() {
       underruns: state.playback.underruns || 0,
       drains: state.playback.drains || 0,
       buffer_ms: state.playback.bufferedMs || 0,
+      rate: state.playback.rate || 1,
+      stretched_ms: state.playback.stretchedMs || 0,
     });
   }, PING_EVERY_MS);
 }
@@ -362,6 +382,7 @@ function onControl(m) {
       state.voiceReason = m.reason || '';
       state.voiceStalled = !!m.stalled;
       state.daemonMuted = !!m.muted;
+      if (m.provider) setPlaybackPolicy(m.provider);
       if (m.voice === 'closed' && m.reason && m.reason !== 'voice_off') showError(`voice session closed: ${m.reason}`);
       break;
     case 'flush':
@@ -580,7 +601,7 @@ function render() {
   $('st-bytes-in').textContent = fmtBytes(state.bytesIn);
   const p = state.playback;
   $('st-play').textContent = `${p.state}, buffered ${p.bufferedMs} ms, played ${(p.playedMs / 1000).toFixed(1)} s, flushes ${p.flushes}${p.dropped ? `, dropped ${p.dropped}` : ''}`;
-  $('st-underruns').textContent = `${p.underruns} (drains ${p.drains}, target ${p.targetMs != null ? p.targetMs : 150} ms)`;
+  $('st-underruns').textContent = `${p.underruns} (drains ${p.drains}, target ${p.targetMs != null ? p.targetMs : 150} ms) · rate ${(p.rate || 1).toFixed(2)}× · stretched ${((p.stretchedMs || 0) / 1000).toFixed(1)} s`;
   $('st-stop').textContent = state.lastStopMs == null ? '–' : `click → buffer empty ${state.lastStopMs.toFixed(1)} ms`;
   $('st-flush').textContent = state.lastFlushMs == null ? '–' : `flush → buffer empty ${state.lastFlushMs.toFixed(1)} ms`;
   $('st-reconnects').textContent = String(state.reconnects);

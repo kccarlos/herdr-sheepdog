@@ -266,7 +266,8 @@ func TestWSPlaybackStatsAndSendWait(t *testing.T) {
 	}
 
 	underruns, drains, bufferMs := 2, 5, 230
-	c.send(wsproto.Message{Type: wsproto.TypePing, Underruns: &underruns, Drains: &drains, BufferMs: &bufferMs})
+	rate, stretched := 0.92, 1830
+	c.send(wsproto.Message{Type: wsproto.TypePing, Underruns: &underruns, Drains: &drains, BufferMs: &bufferMs, Rate: &rate, StretchedMs: &stretched})
 	c.expect(wsproto.TypePong)
 
 	var stats map[string]any
@@ -284,7 +285,7 @@ func TestWSPlaybackStatsAndSendWait(t *testing.T) {
 		}
 		return false
 	}, "stats with the ping's playback counters")
-	if stats["underruns"] != float64(2) || stats["drains"] != float64(5) || stats["buffer_ms"] != float64(230) {
+	if stats["underruns"] != float64(2) || stats["drains"] != float64(5) || stats["buffer_ms"] != float64(230) || stats["rate"] != 0.92 || stats["stretched_ms"] != float64(1830) {
 		t.Fatalf("stats = %v", stats)
 	}
 	if _, ok := stats["send_wait_max_ms"]; !ok {

@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { Player } from './audio-util.js';
+import { Player, PLAYBACK_POLICY } from './audio-util.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -26,11 +26,12 @@ const BLOCK_MS = (BLOCK / RATE) * 1000;
  * offset and rendering at a fixed block cadence throughout, exactly the
  * pull/push shape audio-playback.worklet.js drives in the browser.
  */
-function replay(chunks, playerOpts) {
+function replay(chunks, playerOpts, policy) {
   const p = new Player({ inRate: RATE, outRate: RATE, ...playerOpts });
+  if (policy) p.setPolicy(policy);
   let idx = 0;
   let simMs = 0;
-  const endMs = chunks[chunks.length - 1].at_ms + 2000; // run past the last chunk to let it drain
+  const endMs = chunks[chunks.length - 1].at_ms + 6000; // run past the last chunk to let it drain (a refill can wait ~2 s)
   const block = new Float32Array(BLOCK);
   while (simMs < endMs) {
     while (idx < chunks.length && chunks[idx].at_ms <= simMs) {
@@ -72,8 +73,8 @@ test('recorded GPT-Live fixtures load and look like real bursty arrivals', () =>
 test('the adaptive jitter buffer cuts underruns well below the fixed 150 ms baseline on the recorded chained session', () => {
   const chunks = chainedSession();
 
-  const baseline = replay(chunks, { prebuffer: Math.round(RATE * 0.15), maxTarget: Math.round(RATE * 0.15), adaptStep: 0, decayStep: 0 });
-  const adaptive = replay(chunks, {}); // defaults: 150 ms start, adapts up to 500 ms
+  const baseline = replay(chunks, { prebuffer: Math.round(RATE * 0.15), maxTarget: Math.round(RATE * 0.15), adaptStep: 0, decayStep: 0, stretch: false });
+  const adaptive = replay(chunks, { stretch: false }); // defaults: 150 ms start, adapts up to 500 ms
 
   assert.ok(baseline.stats.underruns > 0, 'sanity: the recorded timeline does underrun a naive fixed 150 ms buffer');
   assert.ok(
@@ -92,6 +93,31 @@ test('the adaptive jitter buffer cuts underruns well below the fixed 150 ms base
 
 test('the adaptive target ratchets up on the recorded chained session and stays elevated into the second utterance', () => {
   const chunks = chainedSession();
-  const p = replay(chunks, {});
+  const p = replay(chunks, { stretch: false });
   assert.ok(p.targetMs > 150, `target should have adapted upward, got ${p.targetMs}ms`);
+});
+
+// Before (the adaptive jitter buffer alone, Gemini's 150/500 ms policy,
+// which is what every provider got until now) versus after (GPT-Live's
+// 800/2000 ms policy plus the adaptive time-stretch) on the recorded
+// GPT-Live timelines. These recordings arrive at 0.78x and 0.69x real
+// time; the time-stretch floor is 0.85x, so a long enough reply still
+// runs dry eventually — the recorded ones are short enough that it
+// (almost) does not.
+test('GPT-Live policy plus time-stretch: underruns before vs after on the recorded timelines', (t) => {
+  const cases = [
+    ['status-question', loadFixture('gptlive-status-question.json').chunks],
+    ['instruction-promise', loadFixture('gptlive-instruction-promise.json').chunks],
+    ['chained', chainedSession()],
+  ];
+  const after = {};
+  for (const [name, chunks] of cases) {
+    const b = replay(chunks, { stretch: false });
+    const a = replay(chunks, {}, PLAYBACK_POLICY.openai);
+    after[name] = a.stats.underruns;
+    t.diagnostic(`${name}: underruns before ${b.stats.underruns}, after ${a.stats.underruns} (time-stretched ${a.stretchedMs} ms)`);
+    assert.ok(a.stats.underruns < b.stats.underruns, `${name}: after ${a.stats.underruns} not below before ${b.stats.underruns}`);
+  }
+  assert.equal(after['status-question'], 0);
+  assert.ok(after['instruction-promise'] <= 1 && after.chained <= 1, `after = ${JSON.stringify(after)}`);
 });

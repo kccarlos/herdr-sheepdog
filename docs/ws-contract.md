@@ -41,7 +41,7 @@ scheduling each frame at "now".
 | `{"type":"silence","on":true\|false}` | The client's silence gate closed (`on:true`, no binary frames follow) or reopened (`on:false`). See *Silence gate*. |
 | `{"type":"cancel"}`                  | The "stop" button. The daemon stops current playback (it will send `flush`) and invokes the `cancel` tool path in the supervisor. Equivalent to the user saying "stop". |
 | `{"type":"text","text":"…"}`         | Simulate an utterance: the text is fed to the voice session as if the user had spoken it (`/debug` and the `/voice` text box use this). It is recorded as a typed shepherd input, which the one rail accepts like a transcript (docs/roles.md "The one rail"). Without a voice session (`--voice=off`) the daemon echoes it as an `in` transcript and answers through its text router with one `out` transcript (a text routed to `cancel` yields `flush` then the `out`), or with an `error` when the text cannot be routed. |
-| `{"type":"ping","gated_frames":N?,"peak":N?,"underruns":N?,"drains":N?,"buffer_ms":N?}` | Liveness probe; the daemon answers `pong`. Clients should send one every 15–30 s while idle. The optional counters (frames withheld by the silence gate so far; last input peak in Int16 LSB; the playback jitter buffer's underrun and drain counts and its current buffered level in ms — see "Playback jitter buffer" below) are copied into the next `web.client.stats` event, which also carries `send_wait_max_ms`/`send_wait_p95_ms` (how long a recent audio frame waited in the daemon's per-client send queue; near 0 in normal operation). |
+| `{"type":"ping","gated_frames":N?,"peak":N?,"underruns":N?,"drains":N?,"buffer_ms":N?,"rate":F?,"stretched_ms":N?}` | Liveness probe; the daemon answers `pong`. Clients should send one every 15–30 s while idle. The optional counters (frames withheld by the silence gate so far; last input peak in Int16 LSB; the playback jitter buffer's underrun and drain counts and its current buffered level in ms; the time-stretch's current playback rate and the net playback time it has added in ms, negative when catching up — see "Playback jitter buffer" below) are copied into the next `web.client.stats` event, which also carries `send_wait_max_ms`/`send_wait_p95_ms` (how long a recent audio frame waited in the daemon's per-client send queue; near 0 in normal operation). |
 
 Unknown `type` values are answered with an `error` message and otherwise
 ignored; the connection stays open.
@@ -109,38 +109,76 @@ nor `silence` transitions; the gate resumes its own bookkeeping on unmute.
 
 Server audio frames arrive in bursts (observed 40–730 ms per frame, and
 on GPT-Live, gaps up to ~1.5 s within one reply — `docs/audio-e2e-results.md`,
-"Audible gaps in GPT-Live playback"). A client that starts playing a
-frame the instant it arrives, or that buffers a fixed small amount,
-underruns audibly mid-sentence. Every client (the web page's
-`audio-util.js` `Player`; the iOS app matches this policy) should run an
-**adaptive jitter buffer**:
+"Audible gaps in GPT-Live playback"), and GPT-Live delivers its audio at
+only **0.72–0.86× real time** on sustained average. A client that starts
+playing a frame the instant it arrives, or that buffers a fixed small
+amount, underruns audibly mid-sentence. Every client (the web page's
+`audio-util.js` `Player` + `Wsola`; the iOS app implements the **same
+numbers**) runs an **adaptive jitter buffer with pitch-preserving
+adaptive time-stretch**:
 
-- Start with a **150 ms** target: buffer that much audio before playing
-  the first frame of an utterance (or of a resume after running dry).
+**Target per provider** (the client learns the provider from
+`status.provider`; until it knows, Gemini's):
+
+| Provider | Start target (and floor) | Cap |
+|---|---|---|
+| `gemini` | 150 ms | 500 ms |
+| `openai` (GPT-Live) | 800 ms | 2000 ms |
+
+- **Start**: buffer the target before playing the first frame of an
+  utterance (or of a resume after running dry); a short utterance that
+  never reaches it starts anyway after target + 250 ms of waiting.
 - **On a mid-utterance underrun** (the buffer ran dry and more audio
-  arrives soon after — not the natural end of the reply): raise the
-  target by **100 ms**, capped at **500 ms**, and do **not** resume
-  playback on the first new chunk — wait until the buffer refills to the
-  (now higher) target, exactly as the initial buffering does. The raised
-  target persists for the rest of the session (it is not per-utterance),
-  since a session that has seen bad bursts once is likely to see them
-  again.
-- **After an utterance that played all the way through without an
-  underrun**, decay the target by **20 ms**, floored at 150 ms. This
-  keeps latency low once the network/provider is behaving.
-- **Cross-fade every start or resume over ~8 ms** (ramp in from silence)
-  so a fresh utterance or a post-underrun resume never clicks; likewise
-  fade out to silence on a drain or a `flush`.
-- Report `underruns`, `drains` and the current buffered level (`buffer_ms`)
-  on the `ping` message (above) so `web.client.stats` can see them.
+  arrives within 300 ms — not the natural end of the reply): raise the
+  target by **100 ms**, up to the cap, and do **not** resume on the first
+  new chunk — wait until the buffer refills to the (now higher) target.
+  The raised target persists for the session.
+- **After an utterance that played through without an underrun**, decay
+  the target by **20 ms**, floored at the provider's start value.
+- **Playback rate** r is a function of the buffered audio b (everything
+  received and not yet played, including the stretcher's own lookahead)
+  against the current target T:
 
-This substantially cuts underruns versus a fixed small buffer but does
-not guarantee zero: a reply whose audio arrives slower than real time on
-sustained average (`realtime_ratio` in the daemon's `voice.audio_timing`
-log) will eventually underrun no matter how large the buffer, since the
-buffer can only smooth bursts, not manufacture missing audio. What the
-policy above reliably removes is the *click* — the underrun becomes a
-brief, faded pause instead of a discontinuity.
+  | b | r |
+  |---|---|
+  | b > 2T | 1.05 (catch up) |
+  | T ≤ b ≤ 2T | 1.00 |
+  | T/2 ≤ b < T | linear, 0.90 at T/2 → 1.00 at T |
+  | T/4 < b < T/2 | linear, 0.85 at T/4 → 0.90 at T/2 |
+  | b ≤ T/4 | 0.85 (floor) |
+
+  r < 1 plays slower than real time, so the buffer drains more slowly.
+  Rate changes are **slewed at most 0.02 per 20 ms** of output (re-evaluated
+  every 10 ms hop), so they are inaudible. r is only applied while playing.
+- **Time-stretch is pitch-preserving WSOLA** (waveform-similarity
+  overlap-add) on the 24 kHz mono stream, before resampling to the device
+  rate: frame **20 ms** (480 samples), overlap **10 ms** (50 %, periodic
+  Hann windows that sum to 1), similarity search **±8 ms** (±192 samples)
+  around the nominal input position, maximising the normalised
+  cross-correlation with the natural continuation of the previous frame
+  over the overlap. The output advances 10 ms per frame, the input
+  10 ms × r on average. At r = 1 every frame is the natural continuation,
+  which reconstructs the input exactly. With less lookahead than a frame
+  plus the search (the end of a reply, a nearly dry buffer) the stretcher
+  plays the continuation at r = 1, and with less than a frame it passes
+  the remaining samples through unchanged — it never holds audio back.
+- **Cross-fade every start or resume over ~8 ms** (ramp in from silence)
+  so a fresh utterance or a post-underrun resume never clicks; fade out
+  over ~2 ms on a drain or a `flush`, which also resets the rate to 1 and
+  empties the stretcher.
+- Report `underruns`, `drains`, the buffered level (`buffer_ms`), the
+  current `rate` and the net time-stretched `stretched_ms` on the `ping`
+  message (above) so `web.client.stats` can see them.
+
+This does not guarantee zero underruns: the floor is 0.85×, so a reply
+whose audio arrives slower than that on sustained average
+(`realtime_ratio` in the daemon's `voice.audio_timing` log) still runs dry
+once the buffer is spent. On the recorded GPT-Live timelines
+(`web/voice/testdata/gptlive-*.json`, 0.78× and 0.69×) underruns go from
+3 → 0, 2 → 1 and 4 → 1 (chained) versus the Gemini policy without
+stretch (`playback-timeline.test.mjs`); on a synthetic 60 s reply built
+from the same recorded gaps (0.73×) from 23 → 11. What the policy
+reliably removes is the *click* — an underrun is a faded pause.
 
 ## Ordering guarantees
 

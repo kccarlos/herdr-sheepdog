@@ -132,7 +132,7 @@ test('RingBuffer wraps, overwrites oldest when full, and clears', () => {
 });
 
 test('Player waits for the jitter buffer, then plays gaplessly at the context rate', () => {
-  const p = new Player({ inRate: PLAYBACK_RATE, outRate: 48000, prebuffer: 2400 });
+  const p = new Player({ inRate: PLAYBACK_RATE, outRate: 48000, prebuffer: 2400, stretch: false }); // exact sample counts: no time-stretch
   const block = new Float32Array(128);
   assert.equal(p.render(block), false);
   p.push(sine(600, PLAYBACK_RATE, 1200)); // 50 ms: below the prebuffer

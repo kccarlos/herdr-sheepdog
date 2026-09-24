@@ -269,6 +269,259 @@ export class RingBuffer {
 }
 
 /**
+ * Playback policy per voice provider (docs/ws-contract.md "Playback jitter
+ * buffer"; the iOS app uses the same numbers). `startMs` is the jitter
+ * buffer target a session starts with (and its floor), `capMs` the most it
+ * adapts up to on underruns. GPT-Live delivers audio at 0.72–0.86× real
+ * time, so it starts with a deep buffer and leans on time-stretch.
+ */
+export const PLAYBACK_POLICY = Object.freeze({
+  gemini: Object.freeze({ startMs: 150, capMs: 500 }),
+  openai: Object.freeze({ startMs: 800, capMs: 2000 }),
+});
+
+/** Time-stretch rate policy constants (shared with iOS). */
+export const STRETCH = Object.freeze({
+  minRate: 0.85, // floor, at b <= T/4
+  midRate: 0.90, // at b = T/2
+  catchUpRate: 1.05, // when b > 2T
+  slewPer20ms: 0.02, // max rate change per 20 ms of output
+  frameMs: 20, // WSOLA frame
+  overlapMs: 10, // WSOLA overlap (= hop: 50 %)
+  searchMs: 8, // WSOLA similarity search, ± around the nominal position
+});
+
+/**
+ * Target playback rate for `b` buffered samples against a jitter buffer
+ * target `T` (same unit): 1.0 at b >= T; below T it falls linearly to 0.90
+ * at b = T/2 and to 0.85 at b = T/4, floored there; above 2T it is 1.05 to
+ * catch up. Rates below 1 play slower than real time (the buffer drains
+ * slower than it would), pitch preserved by the WSOLA stretcher.
+ * @param {number} b
+ * @param {number} T
+ * @returns {number}
+ */
+export function stretchRate(b, T) {
+  if (!(T > 0)) return 1;
+  if (b > 2 * T) return STRETCH.catchUpRate;
+  if (b >= T) return 1;
+  if (b <= T / 4) return STRETCH.minRate;
+  if (b >= T / 2) return STRETCH.midRate + ((b - T / 2) / (T / 2)) * (1 - STRETCH.midRate);
+  return STRETCH.minRate + ((b - T / 4) / (T / 4)) * (STRETCH.midRate - STRETCH.minRate);
+}
+
+/**
+ * Moves `rate` toward `target` by at most STRETCH.slewPer20ms per 20 ms
+ * (`samples` of output at `sampleRate`), so a rate change is inaudible.
+ */
+export function slewRate(rate, target, samples, sampleRate) {
+  const max = STRETCH.slewPer20ms * (samples / (sampleRate * 0.02));
+  if (target > rate) return Math.min(target, rate + max);
+  return Math.max(target, rate - max);
+}
+
+/**
+ * WSOLA (waveform-similarity overlap-add) time-stretcher for mono audio:
+ * changes duration without changing pitch. Frames of `frame` samples are
+ * overlap-added with a periodic Hann window at 50 % overlap (hop H =
+ * frame/2, the windows sum to exactly 1). The output advances H per frame;
+ * the input advances H·rate on average, and each frame is taken from
+ * within ±`search` samples of its nominal position where it best matches
+ * the natural continuation of the previous frame (normalised
+ * cross-correlation over the overlap), so the seams are phase-aligned and
+ * do not click. At rate 1 every frame is that continuation, which
+ * reconstructs the input exactly.
+ *
+ * It pulls from a RingBuffer on demand and needs frame + hop + search
+ * samples of lookahead to stretch; with less (the end of an utterance, or a
+ * nearly dry buffer) it plays the continuation at rate 1, and with less
+ * than a frame it passes the remaining samples through unchanged, so it
+ * never holds audio back.
+ */
+export class Wsola {
+  /**
+   * @param {object} o
+   * @param {number} o.frame frame length in samples (even)
+   * @param {number} o.search search radius in samples
+   */
+  constructor(o) {
+    this.N = Math.max(4, o.frame & ~1);
+    this.H = this.N >> 1;
+    this.S = Math.max(0, Math.round(o.search));
+    this.win = new Float32Array(this.N);
+    for (let i = 0; i < this.N; i++) this.win[i] = 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / this.N);
+    this.cap = 8 * (this.N + this.S) + 64;
+    this.buf = new Float32Array(this.cap);
+    this.acc = new Float32Array(this.N);
+    this.out = new Float32Array(Math.max(this.N, 1024));
+    this.reset();
+  }
+
+  reset() {
+    this.base = 0; // absolute index of buf[0]
+    this.len = 0;
+    this.head = 0; // absolute index of the first input sample not yet played
+    this.started = false;
+    this.pos = 0; // absolute start of the last frame
+    this.nominal = 0;
+    this.acc.fill(0);
+    this.outLen = 0;
+    this.outPos = 0;
+  }
+
+  /** Input samples buffered here and not yet played. */
+  get pending() {
+    return this.base + this.len - this.head;
+  }
+
+  /** Output samples produced and not yet read. */
+  get ready() {
+    return this.outLen - this.outPos;
+  }
+
+  /** Reads one produced sample; caller checks `ready` first. */
+  readOne() {
+    return this.out[this.outPos++];
+  }
+
+  _x(abs) {
+    return this.buf[abs - this.base];
+  }
+
+  // Pulls from ring until the buffer reaches absolute index `upto` (or the
+  // ring is empty), first dropping history no future frame can reach.
+  _fill(ring, upto) {
+    const keep = Math.max(this.base, Math.min(this.head, Math.floor(this.nominal) - this.S) - 1);
+    if (keep > this.base) {
+      const drop = keep - this.base;
+      this.buf.copyWithin(0, drop, this.len);
+      this.len -= drop;
+      this.base = keep;
+    }
+    const want = Math.min(upto - (this.base + this.len), this.cap - this.len, ring.available);
+    if (want > 0) this.len += ring.read(this.buf.subarray(this.len, this.len + want));
+  }
+
+  // Emits acc[0..H) and shifts the overlap tail down.
+  _emitAcc() {
+    const H = this.H;
+    this.out.set(this.acc.subarray(0, H), 0);
+    this.outLen = H;
+    this.outPos = 0;
+    this.acc.copyWithin(0, H, this.N);
+    this.acc.fill(0, this.N - H);
+  }
+
+  // Emits the raw input [from, to) and ends the stretch run.
+  _passThrough(from, to) {
+    const n = Math.max(0, Math.min(to - from, this.out.length));
+    for (let i = 0; i < n; i++) this.out[i] = this._x(from + i);
+    this.outLen = n;
+    this.outPos = 0;
+    this.head = from + n;
+    this.started = false;
+    this.acc.fill(0);
+    return n;
+  }
+
+  /**
+   * Produces the next output samples at `rate` (call when `ready` is 0).
+   * @param {RingBuffer} ring
+   * @param {number} rate playback rate (<1 slower, >1 faster)
+   * @returns {{out: number, consumed: number}} samples produced and input
+   *   samples the nominal position advanced (their difference is the time
+   *   the stretch added)
+   */
+  produce(ring, rate) {
+    const N = this.N;
+    const H = this.H;
+    if (!this.started) {
+      this._fill(ring, this.head + N);
+      const end = this.base + this.len;
+      if (end - this.head < N) {
+        const n = this._passThrough(this.head, end);
+        return { out: n, consumed: n };
+      }
+      // First frame: its first half is played as is (nothing to overlap),
+      // its second half fades out under the next frame.
+      this.pos = this.head;
+      this.nominal = this.pos;
+      for (let i = 0; i < H; i++) this.acc[i] = this._x(this.pos + i);
+      for (let i = H; i < N; i++) this.acc[i] = this._x(this.pos + i) * this.win[i];
+      this._emitAcc();
+      this.head = this.pos + H;
+      this.started = true;
+      return { out: H, consumed: H };
+    }
+    const cont = this.pos + H; // the natural continuation
+    let next = rate === 1 ? cont : this.nominal + H * rate;
+    const c = Math.round(next);
+    this._fill(ring, Math.max(c + this.S + N, cont + N));
+    const end = this.base + this.len;
+    let p;
+    let consumed;
+    if (rate !== 1 && end >= c + this.S + N && c - this.S >= this.base) {
+      p = this._search(c, cont);
+      consumed = next - this.nominal;
+    } else if (end >= cont + N) {
+      p = cont;
+      next = cont;
+      consumed = H;
+    } else {
+      // Not a frame left: play the rest as it is. The overlap tail in acc
+      // faded that same input out, so the raw samples are its exact sum.
+      const n = this._passThrough(cont, end);
+      return { out: n, consumed: n };
+    }
+    for (let i = 0; i < N; i++) this.acc[i] += this._x(p + i) * this.win[i];
+    this._emitAcc();
+    this.nominal = next;
+    this.pos = p;
+    this.head = p + H;
+    return { out: H, consumed };
+  }
+
+  // Best frame start within ±S of c: the normalised cross-correlation of
+  // its first H samples with the continuation at `cont`. A coarse pass
+  // (every 4th lag, every 2nd sample) then a fine pass around the best.
+  _search(c, cont) {
+    const H = this.H;
+    const S = this.S;
+    const score = (p, step) => {
+      let xy = 0;
+      let yy = 1e-9;
+      for (let i = 0; i < H; i += step) {
+        const y = this._x(p + i);
+        xy += y * this._x(cont + i);
+        yy += y * y;
+      }
+      return xy / Math.sqrt(yy);
+    };
+    let best = c;
+    let bestScore = -Infinity;
+    for (let d = -S; d <= S; d += 4) {
+      const s = score(c + d, 2);
+      if (s > bestScore) {
+        bestScore = s;
+        best = c + d;
+      }
+    }
+    const lo = Math.max(c - S, best - 3);
+    const hi = Math.min(c + S, best + 3);
+    bestScore = -Infinity;
+    let fine = best;
+    for (let p = lo; p <= hi; p++) {
+      const s = score(p, 1);
+      if (s > bestScore) {
+        bestScore = s;
+        fine = p;
+      }
+    }
+    return fine;
+  }
+}
+
+/**
  * Gapless player state machine: pulls 24 kHz samples from a RingBuffer,
  * resamples them to the output rate and fills output blocks. It waits for
  * `target` samples (an adaptive jitter buffer) before starting, or a
@@ -285,7 +538,16 @@ export class RingBuffer {
  * post-underrun resume waits for the (now higher) target to refill before
  * playing again — it does not resume on the first new chunk — and every
  * `_start()` ramps in over `crossFadeLen` samples so a resumption or a
- * fresh utterance's first samples never click.
+ * fresh utterance's first samples never click. Those defaults are
+ * Gemini's; `setPolicy(PLAYBACK_POLICY.openai)` gives GPT-Live 800 ms /
+ * 2000 ms.
+ *
+ * Adaptive time-stretch (unless `stretch: false`): between the ring and
+ * the resampler a WSOLA stretcher plays at rate `stretchRate(buffered,
+ * target)`, slewed by `slewRate` — slower than real time (pitch kept) as
+ * the buffer falls below the target, 1.05× above twice the target — so a
+ * source that delivers slower than real time drains the buffer more
+ * slowly instead of running dry.
  */
 export class Player {
   /**
@@ -300,6 +562,7 @@ export class Player {
    * @param {number} [o.maxWaitBlocks] fixed override for the "start anyway" ceiling (blocks); unset scales with the target
    * @param {number} [o.crossFadeLen] fade-in length on every start/resume, output samples (8 ms)
    * @param {number} [o.underrunWindow] output samples after a drain within which new data means underrun
+   * @param {boolean} [o.stretch] adaptive time-stretch (default true); false plays the ring as is
    */
   constructor(o) {
     this.inRate = o.inRate;
@@ -335,11 +598,57 @@ export class Player {
     this.playedThisUtterance = false;
     this.utteranceHadUnderrun = false;
     this.flushedThisUtterance = false;
-    this.stats = { underruns: 0, drains: 0, dropped: 0, played: 0, flushes: 0 };
+    // Adaptive time-stretch (class doc): a WSOLA stretcher between the
+    // ring and the resampler, its rate a function of the buffered level.
+    this.wsola = o.stretch === false ? null : new Wsola({
+      frame: Math.round((o.inRate * STRETCH.frameMs) / 1000),
+      search: Math.round((o.inRate * STRETCH.searchMs) / 1000),
+    });
+    this.rate = 1;
+    // stretched: net input-rate samples the stretch added to playback
+    // (positive when it slowed down, negative when it caught up).
+    this.stats = { underruns: 0, drains: 0, dropped: 0, played: 0, flushes: 0, stretched: 0 };
   }
 
+  /**
+   * Applies a provider's playback policy (PLAYBACK_POLICY): the jitter
+   * buffer target starts (and floors) at startMs and adapts up to capMs.
+   * @param {{startMs: number, capMs: number}} policy
+   */
+  setPolicy(policy) {
+    if (!policy) return;
+    this.basePrebuffer = Math.round((this.inRate * policy.startMs) / 1000);
+    this.maxTarget = Math.round((this.inRate * policy.capMs) / 1000);
+    this.target = this.basePrebuffer;
+  }
+
+  /** Audio waiting to be played, in input samples: ring plus stretcher. */
   get buffered() {
-    return this.ring.available;
+    if (!this.wsola) return this.ring.available;
+    return this.ring.available + this.wsola.pending + this.wsola.ready;
+  }
+
+  /** Seconds of playback time the stretch has added so far (net). */
+  get stretchedMs() {
+    return Math.round((this.stats.stretched / this.inRate) * 1000);
+  }
+
+  // Samples the playback source can still give: the ring, or the ring
+  // through the stretcher.
+  _srcAvail() {
+    return this.buffered;
+  }
+
+  // Next source sample at inRate; caller checks _srcAvail() first.
+  _srcRead() {
+    const w = this.wsola;
+    if (!w) return this.ring.readOne();
+    if (w.ready === 0) {
+      this.rate = slewRate(this.rate, stretchRate(this.buffered, this.target), w.H, this.inRate);
+      const r = w.produce(this.ring, this.rate);
+      this.stats.stretched += r.out - r.consumed;
+    }
+    return w.readOne();
   }
 
   get speaking() {
@@ -379,6 +688,8 @@ export class Player {
   /** Drop everything now; the next block fades the last sample to zero. */
   flush() {
     this.ring.clear();
+    if (this.wsola) this.wsola.reset();
+    this.rate = 1;
     if (this.state === 'playing') this.fade = this.fadeLen;
     if (this.state !== 'idle') this.flushedThisUtterance = true;
     this.state = 'idle';
@@ -402,8 +713,8 @@ export class Player {
   // the fade-in so the seam (a fresh utterance or a post-underrun resume)
   // does not click.
   _start() {
-    this.cur = this.ring.readOne();
-    this.next = this.ring.available ? this.ring.readOne() : this.cur;
+    this.cur = this._srcRead();
+    this.next = this._srcAvail() ? this._srcRead() : this.cur;
     this.frac = 0;
     this.state = 'playing';
     this.fadeIn = this.crossFadeLen;
@@ -419,8 +730,8 @@ export class Player {
     const n = out.length;
     if (this.state === 'buffering') {
       this.waited++;
-      if (this.ring.available >= this.target || this.waited >= this._maxWaitBlocks()) {
-        if (this.ring.available > 0) this._start();
+      if (this.buffered >= this.target || this.waited >= this._maxWaitBlocks()) {
+        if (this._srcAvail() > 0) this._start();
         else this.state = 'idle';
       }
     }
@@ -442,7 +753,7 @@ export class Player {
       while (this.frac >= 1) {
         this.frac -= 1;
         this.cur = this.next;
-        if (this.ring.available === 0) {
+        if (this._srcAvail() === 0) {
           // Ran dry: finish this sample, then go idle.
           this.next = this.cur;
           this.state = 'idle';
@@ -457,7 +768,7 @@ export class Player {
           this.frac = 0;
           return true;
         }
-        this.next = this.ring.readOne();
+        this.next = this._srcRead();
       }
     }
     this.last = out[n - 1];

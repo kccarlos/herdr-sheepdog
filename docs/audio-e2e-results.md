@@ -134,6 +134,73 @@ underrun already happened, and decays back down when it is not needed);
 worst case with the target pinned at the 500 ms cap, first-audio latency
 is 500 ms − 150 ms = 350 ms more than the old fixed buffer.
 
+### Follow-up: provider policy and adaptive time-stretch (2026-09-24)
+
+In the field the phone hit 84 underruns in 8 minutes on GPT-Live with the
+buffer pinned at its 500 ms cap. The recommended follow-up shipped as a
+per-provider policy plus a pitch-preserving WSOLA time-stretch
+(`docs/ws-contract.md` "Playback jitter buffer" has the exact numbers the
+iOS app mirrors): GPT-Live starts at 800 ms and adapts up to 2000 ms;
+below the target the page plays slower than real time (down to 0.85×,
+pitch kept), and above twice the target it catches up at 1.05×. The
+stretcher costs about 0.2 % of one core (60 s of audio in 113 ms in Node).
+
+Offline replay through the real `Player`
+(`web/voice/playback-timeline.test.mjs`; "before" is the shipped
+Gemini-policy adaptive buffer, which every provider got until now):
+
+| Timeline (arrival ratio) | Before: 150→500 ms, no stretch | 800→2000 ms, no stretch | **After: 800→2000 ms + stretch** | Time-stretched |
+|---|---|---|---|---|
+| status-question (0.78×) | 3 | 0 | **0** | +0.25 s |
+| instruction-promise (0.69×) | 2 | 1 | **1** | +0.26 s |
+| both chained | 4 | 1 | **1** | +0.51 s |
+| synthetic 20 s reply from the same gaps (0.73×) | 9 | 5 | **4** | +2.4 s |
+| synthetic 60 s reply from the same gaps (0.73×) | 23 | 14 | **11** | +6.7 s |
+
+Near zero on the recorded replies, not on long ones: most of the gain is
+the deeper GPT-Live buffer, and the stretch adds a further cut. A reply
+that arrives at 0.69–0.73× outruns a 0.85× floor by 12–16 % for as long
+as it lasts, so a long reply still runs dry once the 2 s cap is spent;
+only a lower floor (audibly slow speech) or faster delivery from the
+provider removes that. Cost: first audio of a GPT-Live reply comes about
+0.8 s after its first chunk (was ~0.1–0.2 s).
+
+## GPT-Live settings check (2026-09-24): no pacing or turn-detection option
+
+Read for this check: the GPT-Live guide
+(https://developers.openai.com/api/docs/guides/live), the primary
+WebSocket reference
+(https://developers.openai.com/api/reference/resources/live/primary-websocket),
+the WebSocket connection guide
+(https://developers.openai.com/api/docs/guides/voice-websockets?api=live),
+the conversations guide
+(https://developers.openai.com/api/docs/guides/live-conversations), the
+server-controls guide
+(https://developers.openai.com/api/docs/guides/voice-server-controls?api=live)
+and the prompting guide
+(https://developers.openai.com/api/docs/guides/live-prompting).
+
+- **Output audio pacing: none.** `session.start`'s `session` takes only
+  `model`, `instructions`, `audio` (`format.type`/`format.rate`,
+  `output.voice`), `delegation`, `client`, `input` and `store`; the
+  WebSocket guide says the primary WebSocket "sends output audio without
+  timing fields or an output-audio-done event", and nothing documents
+  faster-than-real-time delivery or a buffering/speed control.
+- **Turn detection / end-of-turn eagerness: none.** There is no
+  `turn_detection`, VAD or eagerness field on `session.start`, and
+  `session.update` can change only `delegation` ("startup settings such
+  as the frontend model and audio configuration stay fixed"). The model
+  is full duplex; the only turn-taking lever documented is the prompt
+  (e.g. "For routine questions, give one or two short sentences").
+- Worth knowing: the client events include `session.input_audio.mute` /
+  `session.input_audio.unmute`; the daemon currently drops muted frames
+  and sends its own silence keep-alive instead. The docs do not say
+  whether a server-side mute changes billing.
+
+Nothing to wire into `internal/voice/gptlive`, so no before/after
+`audio-e2e` measurement was run. **GPT-Live seconds billed for this
+check: 0** (no live session opened).
+
 ## Gemini Live (`gemini-3.8-live`, fake brain)
 
 Final run (daemon session 6 of 8), after the comfort-noise fix below;
