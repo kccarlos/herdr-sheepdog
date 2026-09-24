@@ -84,7 +84,7 @@ token), and a diff against the previous point of the same pane.
 kind, provider/model, time, duration, the provider's usage when it
 returned, and the request. The body is the chat completions JSON exactly
 as sent for an OpenAI-compatible provider (DeepSeek, built by the same
-code path — `requestFor` — and compared byte for byte with the request
+code path — `requestFor` — and compared field for field with the request
 an httptest endpoint received), and `{model, contents, config}` as the
 daemon handed it to the SDK for Gemini (the SDK owns the wire bytes).
 The section map comes from tracing `toContents` / `messagesOf` (the one
@@ -100,7 +100,10 @@ daemon note, compaction summary, pruned stub), with worker output inside
 the provenance delimiters cut out as its own `untrusted` piece. DeepSeek's
 replayed `reasoning_content` is part of the body and of the pane's
 estimate, but not of the window estimate (`brain.window_tokens`), which
-counts message content only (CONFIG.md `[deepseek]`). The last 200 steps
+counts message content only (CONFIG.md `[deepseek]`). The tab's
+"messages / window" line counts the rendered text (timestamps, role
+headers, call JSON), so it runs a little higher than the Supervisor
+meter's window estimate. The last 200 steps
 stay in memory; every step is also appended to
 `<data_dir>/brain/<run>.requests.jsonl` (one file per daemon run, a
 `segment` field naming the transcript segment, which a "New
