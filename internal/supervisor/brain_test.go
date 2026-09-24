@@ -78,19 +78,17 @@ func TestBrainAnswersAskWithTools(t *testing.T) {
 	}
 }
 
-// A brain that cannot answer leaves the daemon with the roster and
-// nothing else: no second model phrases anything, and an instruction is
+// A brain that cannot answer leaves the daemon with one honest line and
+// nothing else: no second model phrases anything, no roster answers a
+// question that may not have been about status, and an instruction is
 // never sent on a guess (docs/roles.md "Hot paths that stay code").
-func TestBrainFallbackReportsStatusAndSendsNothing(t *testing.T) {
+func TestBrainFallbackSaysSoAndSendsNothing(t *testing.T) {
 	m := braintest.NewModel(braintest.Step{Err: braintest.ErrBoom})
 	h := newBrainHarness(t, m)
 	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
 	h.srv.SetScreen("w5:p1", fixture(t, "codex-working.screen.txt"))
 	res := h.say("what is auth doing?")
-	// HasSuffix: the failed turn already marked the roster delivered, so
-	// even this first fallback may say "No change since I last checked"
-	// (a pre-existing quirk of utteranceTurn, left as it is here).
-	if !strings.HasSuffix(res.Spoken, "One agent: auth is working on something. "+noBrainTrailer) || res.Clarify {
+	if res.Spoken != brainFailedLine || res.Clarify || res.Scheduling != voice.UrgencyInterrupt {
 		t.Errorf("fallback = %+v", res)
 	}
 	if h.log.count("brain.fallback") != 1 {
@@ -98,9 +96,9 @@ func TestBrainFallbackReportsStatusAndSendsNothing(t *testing.T) {
 	}
 	m.Add(braintest.Step{Err: braintest.ErrBoom})
 	res = h.say("tell auth to rerun the tests")
-	// The second fallback within supervisor.repeat_window_s hears the
-	// same roster again, so it is flagged as unchanged.
-	if res.Spoken != "No change since I last checked: One agent: auth is working on something. "+noBrainTrailer {
+	// A second failure within supervisor.repeat_window_s is the same
+	// line: nothing was delivered, so nothing is "unchanged".
+	if res.Spoken != brainFailedLine {
 		t.Errorf("instruction fallback = %+v", res)
 	}
 	if len(h.promptRequests()) != 0 || len(h.sendKeysRequests()) != 0 {

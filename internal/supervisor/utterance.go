@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
@@ -159,6 +160,9 @@ func (s *Supervisor) ToSupervisor(ctx context.Context, said string) (voice.ToolR
 // so its turn's reply is always pushed (deliverLate), and only a fast
 // path's result is returned, for the caller to push.
 func (s *Supervisor) handleUtterance(ctx context.Context, c claim, callID string, daemon bool) voice.ToolResult {
+	if s.echoDropped(c) {
+		return voice.ToolResult{Scheduling: voice.UrgencySilent}
+	}
 	text := c.text
 	// Bare stop first: "no" is an answer, "no no" is a stop.
 	if bareStop(text) {
@@ -296,7 +300,8 @@ func (s *Supervisor) awaitReply(ctx, turnCtx context.Context, u *inflightUtteran
 
 // inlineResult turns a finished turn into the tool result: dropped when
 // the stop procedure (or the voice) cancelled it, the reply when there
-// is one, else the roster sentence.
+// is one, else the fallback (the roster with no brain, else the line
+// that says it could not answer).
 func (s *Supervisor) inlineResult(turnCtx context.Context, u *inflightUtterance, out utteranceOutcome) voice.ToolResult {
 	if s.utteranceCoalesced(u) {
 		return coalescedResult()
@@ -312,7 +317,7 @@ func (s *Supervisor) inlineResult(turnCtx context.Context, u *inflightUtterance,
 		s.mentionedIn(out.res.Spoken)
 		return out.res
 	}
-	return s.noBrain()
+	return s.fallback()
 }
 
 // deliverLate pushes the reply of a turn that outlived its tool call,
@@ -323,7 +328,7 @@ func (s *Supervisor) inlineResult(turnCtx context.Context, u *inflightUtterance,
 // voice must still know what was done, but it is no longer the answer to
 // what is being discussed. Otherwise the reply is spoken at the next
 // pause, with its subject in front when it is about one agent, and a
-// failed turn gives the roster sentence exactly as the inline path does.
+// failed turn gives the fallback exactly as the inline path does.
 func (s *Supervisor) deliverLate(turnCtx context.Context, u *inflightUtterance, out utteranceOutcome, start time.Time) {
 	cancelled := turnCtx.Err() != nil
 	s.mu.Lock()
@@ -356,7 +361,7 @@ func (s *Supervisor) deliverLate(turnCtx context.Context, u *inflightUtterance, 
 			urgency = voice.UrgencyInterrupt
 		}
 	} else {
-		line = s.noBrain().Spoken
+		line = s.fallback().Spoken
 	}
 	if stale {
 		urgency = voice.UrgencySilent
@@ -517,7 +522,8 @@ func (s *Supervisor) utteranceTurn(ctx context.Context, u *inflightUtterance) ut
 	// supervisor.repeat_window_s: an identical roster delivered again
 	// inside the window is noise over voice, so the brain gets a note it
 	// can act on ("no change since I last checked") instead of the
-	// shepherd hearing the same sentence twice.
+	// shepherd hearing the same sentence twice. Delivered means answered:
+	// the mark is set below, after a reply, never for a failed turn.
 	if age, repeat := s.briefingRepeat(brief); repeat {
 		req.RosterUnchangedFor = age
 		s.log.Log(logSource, "supervisor.briefing_repeat", "", map[string]any{"roster": brief, "age_s": int(age.Seconds())})
@@ -540,6 +546,7 @@ func (s *Supervisor) utteranceTurn(ctx context.Context, u *inflightUtterance) ut
 	if res.Spoken == "" {
 		return utteranceOutcome{acted: rep.Acted}
 	}
+	s.markBriefingDelivered(brief)
 	return utteranceOutcome{res: res, ok: true, acted: rep.Acted, needsUser: rep.NeedsUser}
 }
 
@@ -680,4 +687,153 @@ func bareAnswer(p state.PendingAction, text string) (keys []string, label string
 		return nil, "", false
 	}
 	return keys, label, true
+}
+
+// The echo guard. Invariant it protects (docs/iteration-2.md rule 5):
+// an utterance is the shepherd's own words — the brain and the one rail
+// both stand on recorded shepherd input — and the assistant's speech
+// coming back through the phone's microphone is not. On 2026-09-24
+// 18:23:50 the iOS speaker played "No change, all four are idle…", the
+// mic picked it up, Gemini interrupted itself and transcribed "new
+// change" 1.7 s after its last output transcript, and the daemon relayed
+// that to the brain as the shepherd's question. The architecture cannot
+// make this unrepresentable from here: the client has no echo
+// cancellation and the voice model reports only text, so text and
+// timing are all the daemon has to tell the two apart. PR #58 removed
+// the old guard (a relay of a push) because every utterance now runs on
+// the recorded words; this one is narrower. A voice input is an echo
+// only when all of these hold:
+//
+//   - it began while the voice was speaking or within echoWindow of its
+//     last output (saidBefore, recorded when the input began: the voice
+//     often says "Checking." between the echo and its tool call);
+//   - it is one input, of at least two words, and not a fast-path phrase
+//     (a bare yes/no/stop word, an option pick, the reset phrases —
+//     those must keep working even when they repeat the assistant, as
+//     "yes, start over" does by design);
+//   - its normalised words line up with a run of what the voice just
+//     said, covering at least 80% of them, one differing short word
+//     forgiven (the ASR heard "new" for "no").
+//
+// An echo is logged (supervisor.echo_dropped, both texts) and not
+// relayed; the call gets a silent result, as a call with no shepherd
+// input does. The brain's transcript still holds the transcription as
+// heard: it is the record of what the microphone picked up.
+
+// echoWindow is how long after the voice's last output a new input may
+// still be its echo. The logged pair was 1.7 s apart: the transcript of
+// the voice's speech runs ahead of the audio the phone plays, and the
+// input transcription arrives after the echoed audio ends.
+const echoWindow = 2500 * time.Millisecond
+
+// echoWatch is what the voice is saying or last said, under s.mu.
+type echoWatch struct {
+	// said is the voice's output transcript since it last started
+	// speaking; speaking is true until its turn completes or is
+	// interrupted; at is when it last spoke (or stopped speaking).
+	said     string
+	speaking bool
+	at       time.Time
+}
+
+// echoSpokeLocked records a fragment of the voice's speech. Caller holds
+// s.mu.
+func (s *Supervisor) echoSpokeLocked(text string) {
+	if strings.TrimSpace(text) == "" {
+		return
+	}
+	if !s.echo.speaking {
+		s.echo.said = ""
+	}
+	s.echo.said += text
+	s.echo.speaking, s.echo.at = true, s.cfg.Now()
+}
+
+// voiceStopped records that the voice's turn completed or was
+// interrupted: the window for an echo of it starts now.
+func (s *Supervisor) voiceStopped() {
+	s.mu.Lock()
+	if s.echo.speaking {
+		s.echo.speaking, s.echo.at = false, s.cfg.Now()
+	}
+	s.mu.Unlock()
+}
+
+// echoCandidateLocked is what a voice input starting now may be an echo
+// of: the voice's speech while it speaks or within echoWindow after,
+// else "". Caller holds s.mu.
+func (s *Supervisor) echoCandidateLocked() string {
+	if s.echo.said == "" || (!s.echo.speaking && s.cfg.Now().Sub(s.echo.at) > echoWindow) {
+		return ""
+	}
+	return strings.TrimSpace(s.echo.said)
+}
+
+// echoDropped reports whether c is the voice's own speech picked up by
+// the microphone (see the echo guard above), logging
+// supervisor.echo_dropped when it is. The input is marked used, so it
+// can never authorise an answer to a worker's prompt either.
+func (s *Supervisor) echoDropped(c claim) bool {
+	if c.in == nil || c.n != 1 || c.in.kind != InputVoice || c.in.saidBefore == "" || fastPathPhrase(c.text) || !echoOf(c.text, c.in.saidBefore) {
+		return false
+	}
+	s.mu.Lock()
+	c.in.used = true
+	s.mu.Unlock()
+	s.log.Log(logSource, "supervisor.echo_dropped", "", map[string]any{"heard": c.text, "said": c.in.saidBefore})
+	return true
+}
+
+// fastPathPhrase reports whether text, as a whole, is one of the bare
+// phrases the fast paths answer: never taken for an echo.
+func fastPathPhrase(text string) bool {
+	w := BareWord(text)
+	_, option := bareOptionWords[w]
+	return BareStopWords[w] || bareYesWords[w] || bareNoWords[w] || option || bareResetTriggerWords[w] || bareResetConfirmWords[w]
+}
+
+// echoOf reports whether heard lines up with a run of said: at least two
+// words, at least 80% of them equal to said's at the same offsets, with
+// one more differing word forgiven when both words are short (≤ 4
+// letters: "new" heard for "no").
+func echoOf(heard, said string) bool {
+	in, out := echoWords(heard), echoWords(said)
+	n := len(in)
+	if n < 2 || n > len(out) {
+		return false
+	}
+	allowed := n / 5 // 80% covered
+	for p := 0; p+n <= len(out); p++ {
+		hard, soft := 0, 0
+		for k := range in {
+			switch {
+			case in[k] == out[p+k]:
+			case len([]rune(in[k])) <= 4 && len([]rune(out[p+k])) <= 4:
+				soft++
+			default:
+				hard++
+			}
+		}
+		if hard <= allowed && hard+soft <= allowed+1 {
+			return true
+		}
+	}
+	return false
+}
+
+// echoWords lower-cases s and keeps its words' letters and digits.
+func echoWords(s string) []string {
+	var out []string
+	for _, f := range strings.Fields(strings.ToLower(s)) {
+		w := strings.Map(func(r rune) rune {
+			if unicode.IsLetter(r) || unicode.IsDigit(r) {
+				return r
+			}
+			return -1
+		}, f)
+		if w != "" {
+			out = append(out, w)
+		}
+	}
+	return out
 }

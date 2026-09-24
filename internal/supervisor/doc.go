@@ -19,9 +19,12 @@
 // prompt, a bare stop word — and then one brain turn over the shepherd's
 // verbatim words. The Supervisor is the brain's Host: roster, ledger,
 // screen and CLI reads, and the actions prompt / send_keys / interrupt /
-// promise / note over the same pending-action paths. With no brain (or
-// when it errors) the daemon answers from the roster and sends nothing:
-// deciding what words mean is the brain's work.
+// promise / note over the same pending-action paths. With no brain the
+// daemon answers from the roster; when the brain errors it says it could
+// not answer and to ask again; either way it sends nothing: deciding
+// what words mean is the brain's work. A voice input that is the
+// assistant's own speech picked up by the microphone is dropped before
+// any of this (the echo guard, utterance.go).
 //
 // investigate.go owns the background jobs the brain's investigate tool
 // starts (docs/roles.md "Investigations and explanations"): one live job

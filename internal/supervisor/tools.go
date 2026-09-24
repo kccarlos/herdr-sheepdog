@@ -54,18 +54,42 @@ func (s *Supervisor) workspaceDir(ctx context.Context, row state.Agent) string {
 // is sent to a worker — instructions are the brain's judgment
 // (docs/roles.md "One decision-maker"). Within supervisor.repeat_window_s
 // of an identical roster, the sentence is prefixed "No change since I
-// last checked: …" — there is no brain here to add a note to instead.
+// last checked: …" — there is no brain here to add a note to instead,
+// and the roster is the whole answer, so it is delivered by saying it.
 func (s *Supervisor) noBrain() voice.ToolResult {
 	text, panes := s.briefingText()
 	s.markMentioned(panes)
+	roster := text
 	if _, repeat := s.briefingRepeat(text); repeat {
 		text = "No change since I last checked: " + text
 	}
+	s.markBriefingDelivered(roster)
 	return voice.ToolResult{Spoken: text + " " + noBrainTrailer, Scheduling: voice.UrgencyInterrupt}
 }
 
 // noBrainTrailer says why the roster is the whole answer.
 const noBrainTrailer = "The brain is off, so I can only report status."
+
+// fallback is what an utterance gets when its brain turn produced no
+// answer: noBrain when there is no brain at all, else brainFailedLine.
+func (s *Supervisor) fallback() voice.ToolResult {
+	if s.brain == nil {
+		return s.noBrain()
+	}
+	return voice.ToolResult{Spoken: brainFailedLine, Scheduling: voice.UrgencyInterrupt}
+}
+
+// brainFailedLine is the whole answer when the brain errored or timed
+// out on an utterance. The code cannot tell what the words asked for —
+// that is the brain's work — so it does not answer a question it may not
+// have been asked: no roster, no "no change" (2026-09-24 18:16:43, "I
+// want to know the detail of the glitches" got "No change since I last
+// checked: Four agents: …"), no "the brain is off" (the shepherd then
+// asked "do you mean the brain is off?"). One short sentence for the ear
+// (prose.EarLine's caps) that says so and offers the retry. The offer is
+// no yes/no question on purpose: a bare "yes" answers an open worker
+// prompt on the fast path, so "Shall I try again?" could approve one.
+const brainFailedLine = "Sorry, I couldn't get an answer just now, but ask me again and I'll try once more."
 
 // markMentioned records that the panes were just spoken about: the
 // normal level announces their finish for RecentWindow afterwards.

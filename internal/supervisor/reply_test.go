@@ -314,8 +314,8 @@ func TestNegativeReplyWaitIsSynchronous(t *testing.T) {
 	}
 }
 
-// A brain that fails after the wait falls back to the roster sentence,
-// pushed rather than returned.
+// A brain that fails after the wait falls back to the line that says
+// so, pushed rather than returned.
 func TestLateBrainErrorPushesFallback(t *testing.T) {
 	release := make(chan struct{})
 	m := braintest.NewModel(braintest.Step{Block: release, Err: braintest.ErrBoom})
@@ -326,10 +326,9 @@ func TestLateBrainErrorPushesFallback(t *testing.T) {
 	close(release)
 	h.sup.replies.Wait()
 	pushes, _ := utterancePushes(h)
-	// The utterance request already carried the roster, so the fallback
-	// flags it as unchanged, as the inline fallback does.
-	if len(pushes) != 1 || !strings.HasSuffix(pushes[0].Text, "One agent: auth is working on something. "+noBrainTrailer) || pushes[0].Urgency != voice.UrgencyIdle {
-		t.Errorf("pushes = %v, want the roster fallback", pushes)
+	// The same line as the inline fallback: no roster, no "no change".
+	if len(pushes) != 1 || !strings.HasSuffix(pushes[0].Text, brainFailedLine) || pushes[0].Urgency != voice.UrgencyIdle {
+		t.Errorf("pushes = %v, want the failed-brain fallback", pushes)
 	}
 	ev := h.log.ofType("brain.reply_delivered")
 	if len(ev) != 1 || payload(ev[0])["fallback"] != true {
