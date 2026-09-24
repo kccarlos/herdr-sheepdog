@@ -9,18 +9,18 @@ import XCTest
 /// microphone) and `-sheepdogFakeProviders` (the provider contract's
 /// example when the daemon has no `/api/voice/providers` yet). Not in CI.
 final class VoiceRobustnessUITests: XCTestCase {
-    private let daemon = "http://127.0.0.1:7799"
+    private let daemon = "http://\(Fixture.host)"
 
     override func setUpWithError() throws {
         continueAfterFailure = false
         guard reachable(daemon) else {
-            throw XCTSkip("no sheepdog daemon on 127.0.0.1:7799")
+            throw XCTSkip("no sheepdog daemon on \(Fixture.host)")
         }
     }
 
     func testVoiceRobustnessScreens() throws {
         let app = XCUIApplication()
-        app.launchArguments = ["-sheepdogResetState", "-sheepdogAddress", "127.0.0.1:7799", "-sheepdogFakeVoice", "-sheepdogFakeProviders", "-sheepdogResetHints"]
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogAddress", Fixture.host, "-sheepdogFakeVoice", "-sheepdogFakeProviders", "-sheepdogResetHints"]
         app.launch()
 
         // Connect: the first time the dog listens, the coach mark.

@@ -8,7 +8,7 @@ import XCTest
 /// Screenshots go to the runner's Documents directory, like the
 /// walkthrough's.
 final class HistoryApprovalUITests: XCTestCase {
-    private let daemon = "http://127.0.0.1:7799"
+    private let daemon = "http://\(Fixture.host)"
 
     override func setUpWithError() throws {
         continueAfterFailure = false
@@ -20,7 +20,7 @@ final class HistoryApprovalUITests: XCTestCase {
             return false
         }
         guard status("GET", "/api/hello") == 200 else {
-            throw XCTSkip("no sheepdog daemon on 127.0.0.1:7799")
+            throw XCTSkip("no sheepdog daemon on \(Fixture.host)")
         }
     }
 
@@ -41,7 +41,7 @@ final class HistoryApprovalUITests: XCTestCase {
 
         // A clean phone: nothing cached, then the daemon's address.
         let app = XCUIApplication()
-        app.launchArguments = ["-sheepdogResetState", "-sheepdogAddress", "127.0.0.1:7799"]
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogAddress", Fixture.host]
         app.launch()
 
         // 1. History on launch, without connecting: the earlier
@@ -79,7 +79,7 @@ final class HistoryApprovalUITests: XCTestCase {
         //    at once, from the cache.
         app.terminate()
         let again = XCUIApplication()
-        again.launchArguments = ["-sheepdogAddress", "127.0.0.1:7799"]
+        again.launchArguments = ["-sheepdogAddress", Fixture.host]
         again.launch()
         XCTAssertNotNil(find(again, "bubble.approval", labelContains: "You approved — Yes, proceed", timeout: 3), "the cached conversation shows straight away")
         shot(again, "14-relaunch-cached")

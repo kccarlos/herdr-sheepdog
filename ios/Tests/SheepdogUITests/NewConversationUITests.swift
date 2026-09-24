@@ -8,18 +8,18 @@ import XCTest
 /// divider comes from the daemon's own `conversation.reset` notice. Not in
 /// CI.
 final class NewConversationUITests: XCTestCase {
-    private let daemon = "http://127.0.0.1:7799"
+    private let daemon = "http://\(Fixture.host)"
 
     override func setUpWithError() throws {
         continueAfterFailure = false
         guard reachable(daemon) else {
-            throw XCTSkip("no sheepdog daemon on 127.0.0.1:7799")
+            throw XCTSkip("no sheepdog daemon on \(Fixture.host)")
         }
     }
 
     func testNewConversationMenuDialogAndDivider() throws {
         let app = XCUIApplication()
-        app.launchArguments = ["-sheepdogResetState", "-sheepdogAddress", "127.0.0.1:7799"]
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogAddress", Fixture.host]
         // Scrollback to keep and see a divider land under: an utterance
         // logged on the daemon ahead of time, so it is already on the
         // newest `/api/conversation` page the app fetches at launch —

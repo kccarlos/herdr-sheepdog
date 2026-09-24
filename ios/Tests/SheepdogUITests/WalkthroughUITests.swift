@@ -8,8 +8,8 @@ import XCTest
 /// It is deliberately **not** in the `Sheepdog` scheme: CI has no daemon.
 /// Run it with `-scheme SheepdogUITests` while the daemon is up.
 final class WalkthroughUITests: XCTestCase {
-    private let daemon = "http://127.0.0.1:7799"
-    private let tokenDaemon = "http://127.0.0.1:7798"
+    private let daemon = "http://\(Fixture.host)"
+    private let tokenDaemon = "http://\(Fixture.tokenHost)"
 
     override func setUpWithError() throws {
         continueAfterFailure = false
@@ -26,7 +26,7 @@ final class WalkthroughUITests: XCTestCase {
             return false
         }
         guard reachable(daemon) else {
-            throw XCTSkip("no sheepdog daemon on 127.0.0.1:7799 — start one with --voice=off --herdr=mock --brain=fake")
+            throw XCTSkip("no sheepdog daemon on \(Fixture.host) — start one with --voice=off --herdr=mock --brain=fake")
         }
     }
 
@@ -46,9 +46,9 @@ final class WalkthroughUITests: XCTestCase {
 
         // 2. Type the daemon's address and prove it.
         address.tap()
-        address.typeText("127.0.0.1:7799")
+        address.typeText(Fixture.host)
         app.buttons["settings.test"].tap()
-        XCTAssertTrue(app.staticTexts["Connected to 127.0.0.1:7799"].waitForExistence(timeout: 15), "Test connection should report the hello payload")
+        XCTAssertTrue(app.staticTexts["Connected to \(Fixture.host)"].waitForExistence(timeout: 15), "Test connection should report the hello payload")
         XCTAssertTrue(app.staticTexts["Voice name: Sheepdog"].exists)
         XCTAssertTrue(app.staticTexts["Auth: open (loopback)"].exists)
         XCTAssertTrue(app.staticTexts["Audio: 16000 Hz in / 24000 Hz out, pcm16le mono"].exists)
@@ -153,13 +153,13 @@ final class WalkthroughUITests: XCTestCase {
     /// The token path, against a second daemon started with
     /// `SHEEPDOG_WEB_BIND=0.0.0.0 SHEEPDOG_WEB_TOKEN=devtoken … --port 7798`.
     func testTokenIsCheckedBeforeAnythingElse() throws {
-        try XCTSkipUnless(reachable(tokenDaemon), "no token daemon on 127.0.0.1:7798")
+        try XCTSkipUnless(reachable(tokenDaemon), "no token daemon on \(Fixture.tokenHost)")
         let app = launch()
 
         let address = app.textFields["settings.address"]
         XCTAssertTrue(address.waitForExistence(timeout: 10))
         address.tap()
-        address.typeText("127.0.0.1:7798")
+        address.typeText(Fixture.tokenHost)
 
         // A wrong token still passes /api/hello (it is public), so the probe
         // has to go on to /api/state.
@@ -168,7 +168,7 @@ final class WalkthroughUITests: XCTestCase {
         token.typeText("wrong-token")
         app.buttons["settings.test"].tap()
         XCTAssertTrue(
-            app.staticTexts["127.0.0.1:7798 turned the token down. Check the token in Settings."].waitForExistence(timeout: 15),
+            app.staticTexts["\(Fixture.tokenHost) turned the token down. Check the token in Settings."].waitForExistence(timeout: 15),
             "a wrong token must be named as such"
         )
         shot(app, "08-settings-wrong-token")

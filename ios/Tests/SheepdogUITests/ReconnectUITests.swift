@@ -10,13 +10,13 @@ import XCTest
 /// kills the daemon and starts it again 3 s later. Skipped without either.
 /// Not in CI.
 final class ReconnectUITests: XCTestCase {
-    private let daemon = "http://127.0.0.1:7799"
-    private let control = URL(fileURLWithPath: "/tmp/sd-bugs/control")
+    private let daemon = "http://\(Fixture.host)"
+    private let control = URL(fileURLWithPath: Fixture.controlDir)
 
     override func setUpWithError() throws {
         continueAfterFailure = false
         guard reachable(daemon) else {
-            throw XCTSkip("no sheepdog daemon on 127.0.0.1:7799")
+            throw XCTSkip("no sheepdog daemon on \(Fixture.host)")
         }
         guard FileManager.default.fileExists(atPath: control.path) else {
             throw XCTSkip("scripts/fixture-daemon-restarter.sh is not running (no \(control.path))")
@@ -25,7 +25,7 @@ final class ReconnectUITests: XCTestCase {
 
     func testADaemonRestartReconnectsByItselfWithNoBanner() throws {
         let app = XCUIApplication()
-        app.launchArguments = ["-sheepdogResetState", "-sheepdogAddress", "127.0.0.1:7799", "-sheepdogFakeVoice"]
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogAddress", Fixture.host, "-sheepdogFakeVoice"]
         app.launch()
 
         let status = app.staticTexts["controls.statusLine"]

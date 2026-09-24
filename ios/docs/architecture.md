@@ -9,7 +9,7 @@ lives in `SheepdogKit`, and the app target is SwiftUI views plus
 │  MainView ── AgentStrip ── ConversationView ── ApprovalCardView ── ControlBar  │
 │  SettingsView                                 (or PresenceOrb)                │
 │        │                                                                      │
-│  SessionViewModel (@MainActor): the only place that decides anything          │
+│  SessionViewModel (@MainActor): adapts SessionCore, runs its effects          │
 │        │                     │                    │                           │
 │  AudioEngine            VoiceSocket          DaemonClient                     │
 │  (AVAudioEngine,        (/ws)                (/api/hello, /api/state,         │
@@ -24,7 +24,8 @@ lives in `SheepdogKit`, and the app target is SwiftUI views plus
 │  FrameChunker          (wsproto mirror)      Hello / DaemonState / Agent      │
 │  VoiceActivityDetector / CaptureGate         DaemonError                      │
 │  PlaybackQueue         ConversationReducer   SettingsStore / SecretStore      │
-│  AudioMetrics          SessionState          ConversationHistory / Item       │
+│  AudioMetrics          SessionCore           ConversationHistory / Item       │
+│                        SessionState          ReconnectPolicy / MuteSync       │
 │                        ApprovalFlow          ConversationTimeline             │
 │                                              ConversationCache (JSON file)    │
 └───────────────────────────────────────────────────────────────────────────────┘
@@ -446,13 +447,105 @@ decoded as optional, and a 404 on the list hides the section, so the app
 works unchanged against an older daemon. The connection sheet shows the
 provider and model.
 
+## The session core
+
+`SessionCore` (Kit) is every decision the voice session makes, as a value:
+connecting and reconnecting, who owns mute, when the audio engine runs,
+hold-to-talk, playback, the thinking timeout, the background pause and the
+"paused by iOS" state. `SessionViewModel` only adapts. Each callback — a tap,
+the `/ws` socket, the `/events` stream, the audio engine, the scene phase,
+the UI ticker — becomes a `SessionEvent`; `apply(_:now:)` updates the core
+and returns `[SessionEffect]`; the view model runs the effects in order,
+copies `socketMuted`/`socketGateClosed` onto `VoiceSocket` (which says them
+on every open), and publishes what the core derives. An effect may call
+back synchronously (`AudioEngine.setMuted` reports the gate), which just
+feeds the next event: `apply` has returned by then. `SessionCoreTests`
+pins the behaviour as event sequences with the exact effects.
+
+The core's fields, by concern:
+
+| Group | Fields |
+|---|---|
+| `connection` | `wantsConnection`, `socket` and `events` (`SocketLife`), `failed`, `tokenRefused`, `reconnect` (`ReconnectPolicy`), `muteSync` (`MuteSync`), `socketMuted`, `socketGateClosed` |
+| `voice` | `status`, `closedReason`, `stalled`, `provider`, `saidVoiceIsOff` |
+| `mic` | `talkMode`, `muted` (the user's intent), `holding`, `gateClosed`, `noSignal` |
+| `playback` | `speaking`, `hold` (`SpeakingHold`), `heldSpeaking` |
+| `thinkingExpiry` | a tool call's 30 s timeout |
+| `suspension` | `pausedByIOS`, `backgroundSuspended`, `keepListeningWhenLocked` |
+
+Derived, as pure computed properties: `sessionState` (the orb),
+`connectionChip`, `voiceBar` (`VoiceBarModel`), `statusLine`, `daemonMute`,
+`acceptsPlayback` (not while paused in the background) and `playbackBusy`
+(the ticker's fast cadence).
+
+**Events.** The user: `connectTapped`, `endTapped`, `muteTapped`,
+`holdBegan`, `holdEnded`, `talkModeChanged`, `resumeTapped`, `stopTapped`,
+`keepListeningLockedChanged`, `providerSelected`. Connecting:
+`probeSucceeded(micGranted:)`, `probeFailed`, `tokenRefused` (a 401 on
+`/events`), `eventsChanged(SocketLife)`. The socket: `socketOpened`,
+`socketClosed(reason:willRetry:)`, `socketFailed(_:willRetry:)`, `status`,
+`flush`, `daemonError`. The engine: `gateChanged`, `simulatedGate` (the
+fake-voice debug mode), `audioStarted(gateClosed:)`, `audioStartFailed`,
+`playbackChanged`, `micSignal(ok:)`, `interruption(paused:)`,
+`audioResumeFailed`. `/events`: `toolCall`, `toolResult`. The app:
+`scenePhase(active|background)`, `tick`.
+
+**Effects.** `probe` (the `/api/state` auth probe, then the microphone
+permission), `openSocket`, `closeSocket`, `startStreams`/`stopStreams`
+(`/events` and the 5 s state refresh), `send(WSMessage)`, `startAudio`
+(unless the engine runs), `stopAudio`, `suspendAudio`, `resumeAudio`,
+`setCaptureMuted`, `setManualGate`, `flushPlayback`, `flushTranscript`,
+`startTicker`/`stopTicker`, `showBanner(SessionBanner)`/`clearBanner`,
+`notice`, `haptic`, `openSettings`, `refreshState` (debounced),
+`syncHistory` (2.5 s later), `log`.
+
+The connection, as a state diagram (`connection.socket`, with
+`wantsConnection`):
+
+```
+            connectTapped                      probeSucceeded
+  idle ───────────────────▶ connecting ─────────────────────────▶ connecting
+   ▲  ▲   [clearBanner, probe]   │        [openSocket, startStreams,  (socket)
+   │  │                          │         startTicker]                 │
+   │  │ probeFailed / 401        │                                      │ socketOpened
+   │  └──────────────────────────┘                                      ▼ [clearBanner, haptic]
+   │     [showBanner, (openSettings), closeSocket, stopAudio,  ┌────── open ◀──────────┐
+   │      stopStreams, stopTicker]                              │        │              │
+   │                                                            │        │ socketClosed │ socketOpened
+   │  endTapped (from anywhere): [closeSocket, stopAudio,       │        │ willRetry    │
+   │   stopStreams, stopTicker, (setManualGate(false))]         │        ▼ [stopAudio]  │
+   │                                                            │   reconnecting ───────┘
+   │  socketClosed !willRetry: [stopAudio, stopStreams,         │        │ socketFailed: quiet for 30 s
+   └── stopTicker, (showBanner(.replaced))] ◀───────────────────┘        │ [log], then one banner
+                                                                         │ [showBanner(stillReconnecting)],
+      socketFailed 401 or !willRetry ─▶ idle (as probeFailed)            │ then quiet until End
+```
+
+Once open, the voice and the microphone:
+
+```
+  status(connected|connecting…) ─▶ [startAudio] ─▶ audioStarted(gateClosed) ─▶ [send(silence) if it differs]
+  status(closed)                ─▶ [stopAudio, notice once per session]
+  status(muted ≠ the app's)     ─▶ [log once, send(mute(app's))]      (never adopted)
+  muteTapped (open mic)         ─▶ mute:   [setCaptureMuted(true), send(mute(true)), haptic]
+                                   unmute: [send(mute(false)), setCaptureMuted(false), startAudio?, haptic]
+  talkModeChanged(hold)         ─▶ unmute first if muted, then [setManualGate(false)]; Mute is inert there
+  holdBegan / holdEnded         ─▶ [stop… if the dog is busy, setManualGate(true), haptic] / [setManualGate(false)]
+  scenePhase(background), lock toggle off ─▶ [suspendAudio, send(mute(true)), log]
+  scenePhase(active) after that           ─▶ [send(mute(user's)), startAudio?, log]
+  interruption(paused: true)    ─▶ orb "Audio paused by iOS"; resumeTapped ─▶ [resumeAudio]
+  toolCall ─▶ thinking until toolResult [refreshState], stopTapped, End, or a tick 30 s later
+  stopTapped ─▶ [flushPlayback, flushTranscript, send(cancel), haptic]; drops the speaking hold
+  flush      ─▶ [flushPlayback, flushTranscript, syncHistory]; drops the speaking hold
+```
+
 ## The orb
 
 `SessionState` is a pure function of eight inputs — socket life (`SocketLife`,
 shared with `ConnectionChip` and `VoiceSocket`'s own bookkeeping), voice
 status, stalled, muted, gate closed, speaking, a tool call in flight, and
 audio paused by iOS — resolved in one ordered list of rules, most urgent
-first. The views render it and nothing else, so the orb, the title and the
+first; `SessionCore.sessionState` feeds it from the core's fields. The views render it and nothing else, so the orb, the title and the
 buttons can never disagree. (The `closed` status's `reason` string is not
 one of the eight: it only feeds the notice text when voice goes off, never
 the state machine itself.)
