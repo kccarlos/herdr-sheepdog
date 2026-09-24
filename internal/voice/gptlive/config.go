@@ -4,6 +4,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/kccarlos/herdr-sheepdog/internal/ctxcap"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
 
@@ -39,6 +40,10 @@ type Config struct {
 	Instructions func() (string, error)
 	// Handler executes the delegated tool calls (to_supervisor, stop).
 	Handler voice.ToolHandler
+	// Context, when set, receives this session's voice context (the
+	// /debug Context tab), reconstructed from what the daemon sent
+	// (capture.go).
+	Context *ctxcap.VoiceLog
 	// Classify maps an utterance to the tool call it makes (stop for a
 	// bare stop word, to_supervisor otherwise). nil sends everything to
 	// to_supervisor, which runs the same stop check itself. A settled

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
+	"github.com/kccarlos/herdr-sheepdog/internal/ctxcap"
 	"github.com/kccarlos/herdr-sheepdog/internal/eventlog"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/inject"
@@ -113,6 +114,14 @@ type Deps struct {
 	// /testdata/brain/<name>.jsonl from that directory: the sample brain
 	// transcripts the /debug Supervisor tab's console handle loads.
 	DevBrainDir string
+
+	// VoiceContext backs GET /api/context/voice and the voice half of
+	// /api/context/timeline (the /debug Context tab); nil answers 503.
+	VoiceContext *ctxcap.VoiceLog
+	// RouterContext records the text router's utterances, tool calls and
+	// results into VoiceContext (--voice=off: the router stands in for
+	// the voice model); nil records nothing.
+	RouterContext *ctxcap.VoiceSession
 
 	// Heartbeat is the SSE keepalive period (default 15 s).
 	Heartbeat time.Duration
@@ -237,6 +246,9 @@ func (s *Server) routes() error {
 	s.mux.HandleFunc("GET /api/brain/system_prompt", s.authFunc(s.handleBrainSystemPrompt, false))
 	s.mux.HandleFunc("GET /api/brain/models", s.authFunc(s.handleBrainModels, false))
 	s.mux.HandleFunc("PUT /api/brain/model", s.authFunc(s.handleSetBrainModel, false))
+	s.mux.HandleFunc("GET /api/context/brain", s.authFunc(s.handleContextBrain, false))
+	s.mux.HandleFunc("GET /api/context/voice", s.authFunc(s.handleContextVoice, false))
+	s.mux.HandleFunc("GET /api/context/timeline", s.authFunc(s.handleContextTimeline, false))
 	if s.deps.DevTestdataDir != "" {
 		s.mux.HandleFunc("GET /testdata/{name}", func(w http.ResponseWriter, r *http.Request) {
 			s.serveFixture(w, r, s.deps.DevTestdataDir, ".wav", "audio/wav")

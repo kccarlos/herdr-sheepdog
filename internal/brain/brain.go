@@ -13,6 +13,7 @@ import (
 
 	"google.golang.org/genai"
 
+	"github.com/kccarlos/herdr-sheepdog/internal/ctxcap"
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
 	"github.com/kccarlos/herdr-sheepdog/prompts"
 )
@@ -160,9 +161,11 @@ type Brain struct {
 	cfg        Config
 	log        logging.Logger
 	transcript *Transcript
-	engine     ContextEngine
-	tools      []*genai.Tool // the full surface (CEO turns)
-	readTools  []*genai.Tool // the read-only surface (event turns)
+	// requests is the Context tab's log of every model call's request.
+	requests  *ctxcap.BrainLog
+	engine    ContextEngine
+	tools     []*genai.Tool // the full surface (CEO turns)
+	readTools []*genai.Tool // the read-only surface (event turns)
 
 	lock  turnLock
 	after sync.WaitGroup  // after-turn work in flight
@@ -233,6 +236,19 @@ func New(cfg Config, model Model, log logging.Logger) (*Brain, error) {
 	b.transcript.OnAppend(func(m Message) {
 		log.Log(logSource, "brain.transcript", "", map[string]any{"seq": m.Seq, "kind": string(m.Kind), "turn": m.Turn})
 	})
+	reqDir := ""
+	if cfg.DataDir != "" {
+		reqDir = filepath.Join(cfg.DataDir, TranscriptDir)
+	}
+	b.requests, err = ctxcap.OpenBrainLog(reqDir, cfg.RunID, func(s ctxcap.BrainStep) {
+		// The Context tab follows live on this (the step itself is served
+		// by GET /api/context/brain, not carried in the event).
+		log.Log(logSource, "context.step", "", map[string]any{"pane": "brain", "step": s.Step, "turn": s.Turn, "turn_step": s.TurnStep, "kind": s.Kind, "tokens": s.Tokens})
+	})
+	if err != nil {
+		_ = b.transcript.Close()
+		return nil, err
+	}
 	b.engine = cfg.Engine
 	if b.engine == nil {
 		b.engine = NewDefaultEngine(cfg.PruneAfterTurns, b.summarize, func(m Message) Message { return b.transcript.Append(m) })
@@ -378,6 +394,10 @@ func (b *Brain) providersLocked() []string {
 	return out
 }
 
+// Requests returns the log of every model call's request (the Context
+// tab).
+func (b *Brain) Requests() *ctxcap.BrainLog { return b.requests }
+
 // Engine returns the context engine in use.
 func (b *Brain) Engine() ContextEngine { return b.engine }
 
@@ -444,6 +464,7 @@ func (b *Brain) TranscriptPath() string {
 func (b *Brain) Close() error {
 	b.stop()
 	b.after.Wait()
+	_ = b.requests.Close()
 	return b.transcript.Close()
 }
 
@@ -543,7 +564,11 @@ func joinFragments(frags []string) string {
 }
 
 // Pushed ingests a push the supervisor sent to the assistant.
-func (b *Brain) Pushed(alias, text, urgency string) {
+func (b *Brain) Pushed(alias, text, urgency string) { b.PushedLinked(alias, text, urgency, "") }
+
+// PushedLinked is Pushed with the push's link to the voice context
+// ("push:<id>", the Context tab).
+func (b *Brain) PushedLinked(alias, text, urgency, link string) {
 	if text == "" {
 		return
 	}
@@ -551,11 +576,17 @@ func (b *Brain) Pushed(alias, text, urgency string) {
 	if urgency != "" {
 		content = fmt.Sprintf("(%s) %s", urgency, text)
 	}
-	b.ingest(Message{Role: RoleUser, Kind: KindPush, Content: content, Agent: alias}, 0)
+	b.ingest(Message{Role: RoleUser, Kind: KindPush, Content: content, Agent: alias, Link: link}, 0)
 }
 
 // WorkerEvent ingests a herdr transition.
 func (b *Brain) WorkerEvent(alias, from, to string, closed bool) {
+	b.WorkerEventLinked(alias, from, to, closed, "")
+}
+
+// WorkerEventLinked is WorkerEvent with the event's link ("evt:<id>",
+// shared with the announce turn and push about it; the Context tab).
+func (b *Brain) WorkerEventLinked(alias, from, to string, closed bool, link string) {
 	if from == "" {
 		from = "?"
 	}
@@ -563,7 +594,7 @@ func (b *Brain) WorkerEvent(alias, from, to string, closed bool) {
 	if closed {
 		content = fmt.Sprintf("%s: pane closed", aliasOr(alias))
 	}
-	b.ingest(Message{Role: RoleUser, Kind: KindWorkerEvent, Content: content, Agent: alias}, 0)
+	b.ingest(Message{Role: RoleUser, Kind: KindWorkerEvent, Content: content, Agent: alias, Link: link}, 0)
 }
 
 // PromiseEvent ingests a promise's record outside a turn: a promise

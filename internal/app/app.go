@@ -17,6 +17,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/brain/braintest"
 	"github.com/kccarlos/herdr-sheepdog/internal/cli"
 	"github.com/kccarlos/herdr-sheepdog/internal/config"
+	"github.com/kccarlos/herdr-sheepdog/internal/ctxcap"
 	"github.com/kccarlos/herdr-sheepdog/internal/eventlog"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/inject"
@@ -139,6 +140,8 @@ type App struct {
 	brainProviders []web.ProviderInfo
 	voice          voice.Session // nil when off
 	voiceSwitch    *voice.Switcher
+	voiceCtx       *ctxcap.VoiceLog     // the voice context log (/debug Context tab)
+	routerCtx      *ctxcap.VoiceSession // the text router's session in it (--voice=off)
 	web            *web.Server
 	prompts        *prompts.Loader
 	port           int
@@ -301,7 +304,13 @@ func (a *App) wire() error {
 	}
 	a.sup = sup
 
+	// The voice context log (the /debug Context tab): every voice session
+	// records what the daemon sent its model; context.step tells the tab.
+	a.voiceCtx = ctxcap.NewVoiceLog(func(t ctxcap.VoiceTurn, updated bool) {
+		a.log.Log("voice", "context.step", "", map[string]any{"pane": "voice", "turn": t.Turn, "kind": t.Kind, "session": t.Session, "updated": updated})
+	})
 	gcfg := gemini.Config{
+		Context: a.voiceCtx,
 		APIKeys: cfg.Gemini.APIKeys,
 		Model:   cfg.Gemini.Model,
 		Voice:   cfg.Gemini.Voice,
@@ -322,6 +331,7 @@ func (a *App) wire() error {
 		if err != nil {
 			return fmt.Errorf("app: voice: %w", err)
 		}
+		sw.SetContextLog(a.voiceCtx)
 		a.voice = sw
 		a.voiceSwitch = sw
 		pusher.set(sw)
@@ -330,7 +340,12 @@ func (a *App) wire() error {
 		// No voice model: pushes are logged as skipped so the blocked chain
 		// stays visible, and the session counts as connected so the
 		// supervisor produces them at all.
-		pusher.set(inject.SkippedPusher{Log: a.log})
+		// The text router stands in for the voice model: its session in
+		// the voice context log shows what it relayed and what would have
+		// been pushed.
+		a.routerCtx = a.voiceCtx.Session("text-router", "")
+		a.routerCtx.EpochOnFirstUse("text router (--voice=off)", "No voice model is running: the /debug text router stands in for it. Nothing here reaches a model; it shows what the router relayed and what a voice model would have been pushed.")
+		pusher.set(inject.SkippedPusher{Log: a.log, Context: a.routerCtx})
 		sup.SetVoiceConnected(true)
 	}
 
@@ -354,6 +369,8 @@ func (a *App) wire() error {
 		BrainOffReason: a.brainOff,
 		BrainProviders: a.brainProviders,
 		Token:          cfg.Web.Token,
+		VoiceContext:   a.voiceCtx,
+		RouterContext:  a.routerCtx,
 	}
 	if opts.Dev || a.cfg.Web.Dev {
 		deps.DevTestdataDir = a.cfg.Web.DevTestdataDir
@@ -424,6 +441,7 @@ func (a *App) voiceProviders(gcfg gemini.Config, handler voice.ToolHandler) []vo
 			IdleClose: time.Duration(oc.IdleCloseS) * time.Second,
 			Handler:   handler,
 			Classify:  router.Route,
+			Context:   a.voiceCtx,
 			Instructions: func() (string, error) {
 				text, _ := pl.Render(prompts.AssistantGPTLive, prompts.AssistantVars(name, aliases))
 				return text, nil

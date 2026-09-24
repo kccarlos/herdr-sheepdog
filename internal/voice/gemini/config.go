@@ -4,6 +4,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/kccarlos/herdr-sheepdog/internal/ctxcap"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 	"github.com/kccarlos/herdr-sheepdog/prompts"
 )
@@ -35,6 +36,10 @@ type Config struct {
 	Prompts *prompts.Loader
 	// Handler executes tool calls. nil means every call fails.
 	Handler voice.ToolHandler
+	// Context, when set, receives this session's voice context (the
+	// /debug Context tab): what the daemon sent the model and what it
+	// answered, reconstructed per connection (capture.go).
+	Context *ctxcap.VoiceLog
 	// StartSensitivity / EndSensitivity are Live's automatic activity
 	// detection sensitivities: "low", "high", or ""/"default" for the
 	// server's own (config gemini.start_sensitivity / end_sensitivity).

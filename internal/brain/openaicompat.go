@@ -214,11 +214,37 @@ func (m *OpenAICompatModel) GenerateMessages(ctx context.Context, model string, 
 	return m.call(ctx, model, m.messagesOf(msgs, model), cfg)
 }
 
+// requestFor is the exact request GenerateMessages sends for msgs and
+// cfg, with where each window message went (the Context tab's capture;
+// item indices count the system message).
+func (m *OpenAICompatModel) requestFor(model string, msgs []Message, cfg *genai.GenerateContentConfig) (chatRequest, []origin) {
+	var tr []origin
+	req := m.buildRequest(model, m.messagesOfTraced(msgs, model, &tr), cfg)
+	if len(req.Messages) > 0 && req.Messages[0].Role == "system" && cfg != nil && systemText(cfg.SystemInstruction) != "" {
+		for i := range tr {
+			tr[i].item++
+		}
+	}
+	return req, tr
+}
+
 // call is one chat completion: cfg's system instruction, tools and
 // answer-only tool config are translated, the response mapped onto a
 // GenerateContentResponse (text part, function call parts with the
 // API's ids, usage, finish reason).
 func (m *OpenAICompatModel) call(ctx context.Context, model string, msgs []chatMessage, cfg *genai.GenerateContentConfig) (*genai.GenerateContentResponse, json.RawMessage, error) {
+	req := m.buildRequest(model, msgs, cfg)
+	var out chatResponse
+	if err := m.post(ctx, model, "/chat/completions", req, &out); err != nil {
+		return nil, nil, err
+	}
+	return m.response(out)
+}
+
+// buildRequest is the chat completions request for msgs: cfg's system
+// instruction, tools and answer-only tool config translated, and the
+// thinking settings.
+func (m *OpenAICompatModel) buildRequest(model string, msgs []chatMessage, cfg *genai.GenerateContentConfig) chatRequest {
 	req := chatRequest{Model: model, Messages: msgs}
 	if cfg != nil {
 		if sys := systemText(cfg.SystemInstruction); sys != "" {
@@ -236,10 +262,12 @@ func (m *OpenAICompatModel) call(ctx context.Context, model string, msgs []chatM
 			req.ReasoningEffort = m.cfg.ReasoningEffort
 		}
 	}
-	var out chatResponse
-	if err := m.post(ctx, model, "/chat/completions", req, &out); err != nil {
-		return nil, nil, err
-	}
+	return req
+}
+
+// response maps the API's answer onto a GenerateContentResponse and the
+// assistant message to store (raw).
+func (m *OpenAICompatModel) response(out chatResponse) (*genai.GenerateContentResponse, json.RawMessage, error) {
 	if len(out.Choices) == 0 {
 		return nil, nil, fmt.Errorf("%s: response without choices", m.cfg.Provider)
 	}
@@ -482,28 +510,49 @@ func schemaOf(s *genai.Schema) map[string]any {
 // is a correct follow-up over a tight estimate; CONFIG.md [deepseek]
 // says so.
 func (m *OpenAICompatModel) messagesOf(msgs []Message, model string) []chatMessage {
+	return m.messagesOfTraced(msgs, model, nil)
+}
+
+// messagesOfTraced is messagesOf, recording where each message went into
+// tr when it is not nil.
+func (m *OpenAICompatModel) messagesOfTraced(msgs []Message, model string, tr *[]origin) []chatMessage {
 	var out []chatMessage
+	note := func(o origin) {
+		if tr != nil {
+			*tr = append(*tr, o)
+		}
+	}
 	var text []string // pending user lines
+	var textMsgs []int
 	flushText := func() {
 		if len(text) == 0 {
 			return
 		}
+		pos := 0
+		for i, line := range text {
+			note(origin{msg: textMsgs[i], item: len(out), part: 0, start: pos, end: pos + len(line)})
+			pos += len(line) + 1
+		}
 		out = append(out, chatMessage{Role: "user", Content: strings.Join(text, "\n")})
-		text = nil
+		text, textMsgs = nil, nil
 	}
 	var calls []chatToolCall // pending rebuilt tool calls (no Raw)
+	var callMsgs []int
 	callText := ""
 	flushCalls := func() {
 		if len(calls) == 0 {
 			return
 		}
+		for i, mi := range callMsgs {
+			note(origin{msg: mi, item: len(out), part: i, start: -1, end: -1})
+		}
 		out = append(out, chatMessage{Role: "assistant", Content: callText, ToolCalls: calls})
-		calls, callText = nil, ""
+		calls, callMsgs, callText = nil, nil, ""
 	}
 	rawCovers := false // the step's Raw was replayed: its other calls are in it
 	own := func(msg Message) bool { return msg.Provider == m.cfg.Provider && msg.Model == model }
 
-	for _, msg := range msgs {
+	for mi, msg := range msgs {
 		if msg.Kind != KindToolCall {
 			rawCovers = false
 		}
@@ -515,6 +564,7 @@ func (m *OpenAICompatModel) messagesOf(msgs []Message, model string) []chatMessa
 				var cm chatMessage
 				if err := json.Unmarshal(msg.Raw, &cm); err == nil && len(cm.ToolCalls) > 0 {
 					cm.Role, cm.ToolCallID = "assistant", ""
+					note(origin{msg: mi, item: len(out), part: -1, start: -1, end: -1})
 					out = append(out, cm)
 					rawCovers = true
 					continue
@@ -535,6 +585,7 @@ func (m *OpenAICompatModel) messagesOf(msgs []Message, model string) []chatMessa
 					}
 				}
 				calls = append(calls, chatToolCall{ID: msg.ToolCall.ID, Type: "function", Function: chatFunctionCall{Name: msg.ToolCall.Name, Arguments: args}})
+				callMsgs = append(callMsgs, mi)
 				if msg.Content != "" {
 					callText = msg.Content
 				}
@@ -549,6 +600,7 @@ func (m *OpenAICompatModel) messagesOf(msgs []Message, model string) []chatMessa
 					cm.Content = "Error: " + msg.ToolResult.Error
 				}
 			}
+			note(origin{msg: mi, item: len(out), part: -1, start: -1, end: -1})
 			out = append(out, cm)
 		case KindReply:
 			flushText()
@@ -560,10 +612,12 @@ func (m *OpenAICompatModel) messagesOf(msgs []Message, model string) []chatMessa
 					cm.ReasoningContent = r.ReasoningContent
 				}
 			}
+			note(origin{msg: mi, item: len(out), part: -1, start: -1, end: -1})
 			out = append(out, cm)
 		default:
 			flushCalls()
 			text = append(text, contextLine(msg))
+			textMsgs = append(textMsgs, mi)
 		}
 	}
 	flushText()

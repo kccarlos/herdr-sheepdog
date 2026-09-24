@@ -127,7 +127,7 @@ func (b *Brain) run(ctx context.Context, t *turn) (Reply, error) {
 		b.flushInLocked()
 	}
 	b.mu.Unlock()
-	b.ingest(Message{Role: RoleUser, Kind: KindRequest, Content: requestText(t.req), Agent: t.req.Agent}, t.n)
+	b.ingest(Message{Role: RoleUser, Kind: KindRequest, Content: requestText(t.req), Agent: t.req.Agent, Link: t.req.Link}, t.n)
 	if t.req.Screen != "" {
 		// The supervisor's own read for this event: in the window like a
 		// read_screen result (wrapped, pruned to a stub later).
@@ -136,7 +136,7 @@ func (b *Brain) run(ctx context.Context, t *turn) (Reply, error) {
 			ToolResult: &ToolResult{Name: ToolReadScreen, Summary: fmt.Sprintf("screen of %s at %s, %d lines", aliasOr(t.req.Agent), t.req.Event, strings.Count(text, "\n")+1)}}, t.n)
 	}
 
-	system := b.systemPrompt()
+	system, secs := b.systemPrompt()
 	tools := b.tools
 	if t.req.Kind.ReadOnly() {
 		tools = b.readTools
@@ -180,7 +180,9 @@ func (b *Brain) run(ctx context.Context, t *turn) (Reply, error) {
 		t0 := b.cfg.Now()
 		resp, raw, err := b.generate(ctx, t, asm.Messages, &config)
 		t.calls++
-		payload := map[string]any{"turn": t.n, "step": step, "provider": t.provider, "model": t.model, "template": string(t.req.Kind), "dur_ms": b.cfg.Now().Sub(t0).Milliseconds(), "forced": forced}
+		dur := b.cfg.Now().Sub(t0)
+		b.captureStep(t, step, forced, secs, asm.SystemAddition, asm.Messages, &config, t0, dur, resp, err)
+		payload := map[string]any{"turn": t.n, "step": step, "provider": t.provider, "model": t.model, "template": string(t.req.Kind), "dur_ms": dur.Milliseconds(), "forced": forced}
 		var calls []*genai.FunctionCall
 		if err != nil {
 			payload["error"] = err.Error()
@@ -391,8 +393,8 @@ func (b *Brain) afterTurn(t *turn) {
 func (b *Brain) Quiesce() { b.after.Wait() }
 
 // systemPrompt assembles the sections and logs brain.system_prompt once
-// per run.
-func (b *Brain) systemPrompt() string {
+// per run; it returns the text and the sections it was joined from.
+func (b *Brain) systemPrompt() (string, []PromptSection) {
 	b.mu.Lock()
 	logged := b.promptLogged
 	b.promptLogged = true
@@ -407,7 +409,7 @@ func (b *Brain) systemPrompt() string {
 		provider, model, _ := b.current()
 		b.log.Log(logSource, "brain.system_prompt", "", map[string]any{"sections": report, "total_chars": len(text), "provider": provider, "model": model, "tools": len(b.tools[0].FunctionDeclarations)})
 	}
-	return text
+	return text, secs
 }
 
 // sections assembles the system prompt's sections from the current

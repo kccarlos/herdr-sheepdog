@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/kccarlos/herdr-sheepdog/internal/ctxcap"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
 
@@ -85,6 +86,7 @@ func (s *Session) settle(now time.Time) {
 	if owed {
 		s.emit(voice.EventTurnComplete{})
 	}
+	s.rec.Heard("", true)
 	s.emit(voice.EventTranscript{Dir: voice.DirIn, Final: true})
 	if stop != nil {
 		s.interrupt("stop")
@@ -112,6 +114,7 @@ func (s *Session) speechEnd(now time.Time) {
 	if timing != nil {
 		s.log.Log(logSource, "voice.audio_timing", "", timing)
 	}
+	s.rec.ModelDone()
 	if owed {
 		return
 	}
@@ -245,6 +248,7 @@ func (s *Session) deliverPush(lc *liveConn, item pushItem) {
 	s.toolSeq++
 	ev.EventID = "push_" + strconv.Itoa(s.toolSeq)
 	s.mu.Unlock()
+	setPushLinks(lc, ctxcap.LinksFromTags(item.tags))
 	err := s.send(lc, ev)
 	payload := map[string]any{"text": item.text, "urgency": item.requested.String(), "scheduling_sent": item.urgency.SchedulingName(), "event": ev.Type}
 	for k, v := range item.tags {

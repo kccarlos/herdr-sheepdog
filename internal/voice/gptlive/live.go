@@ -75,6 +75,7 @@ func (s *Session) dialStart(reason string) (*liveConn, error) {
 	if err != nil {
 		return nil, err
 	}
+	conn = s.recordConn(conn)
 	instructions := ""
 	if s.cfg.Instructions != nil {
 		if instructions, err = s.cfg.Instructions(); err != nil {

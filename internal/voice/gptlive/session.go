@@ -5,10 +5,12 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/kccarlos/herdr-sheepdog/internal/ctxcap"
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice/audiotiming"
@@ -36,6 +38,8 @@ type Session struct {
 	dial Dialer
 	log  logging.Logger
 	now  func() time.Time
+	// rec records the voice context (capture.go); nil records nothing.
+	rec *ctxcap.VoiceSession
 
 	audio  chan []byte
 	events chan voice.Event
@@ -156,7 +160,7 @@ func newSession(cfg Config, log logging.Logger, dial Dialer) (*Session, error) {
 		log = logging.NopLogger{}
 	}
 	return &Session{
-		cfg: cfg, dial: dial, log: log, now: time.Now,
+		cfg: cfg, dial: dial, log: log, now: time.Now, rec: cfg.Context.Session("openai", cfg.Model),
 		audio:    make(chan []byte),
 		events:   make(chan voice.Event, cfg.EventBuffer),
 		out:      newOutQueue(),
@@ -213,6 +217,7 @@ func (s *Session) Close() error {
 	s.once.Do(func() {
 		s.emit(voice.EventStatus{Status: voice.StatusClosed, Reason: "shutdown"})
 		s.log.Log(logSource, "voice.closed", "", map[string]any{"reason": "shutdown", "billed_total_s": s.BilledSeconds()})
+		s.rec.Marker("voice closed", "The voice session ended (shutdown).", nil)
 		s.emitMu.Lock()
 		s.eventsClosed = true
 		close(s.events)
@@ -328,6 +333,7 @@ func (s *Session) Reset(reason string) error {
 		s.closeLive(lc, "reset")
 	}
 	s.log.Log(logSource, "voice.reset", "", map[string]any{"reason": reason, "had_session": lc != nil})
+	s.rec.Marker("conversation reset", "New conversation: the recap and the held context are dropped; the next session starts without the conversation so far.", nil)
 	return nil
 }
 
@@ -453,6 +459,7 @@ func (s *Session) SendText(text string) error {
 	s.lastActivity = s.now()
 	s.mu.Unlock()
 	s.log.Log(logSource, "voice.text", "", map[string]any{"text": text})
+	s.rec.Marker("typed text (not sent to the model)", "GPT-Live has no text input: "+strconv.Quote(text)+" goes straight to the supervisor, and its reply is pushed.", nil)
 	call := s.classify(text)
 	s.startTool(nil, "", call)
 	return nil

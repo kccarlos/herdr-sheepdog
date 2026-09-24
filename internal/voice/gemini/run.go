@@ -28,8 +28,10 @@ func (s *Session) connect(ctx context.Context) (conn Conn, resumed bool, err err
 			return nil, false, perr
 		}
 		started := s.now()
-		conn, err = s.dial.Dial(ctx, key, s.cfg.Model, liveConfig(s.cfg, prompt, handle))
+		lc := liveConfig(s.cfg, prompt, handle)
+		conn, err = s.dial.Dial(ctx, key, s.cfg.Model, lc)
 		if err == nil {
+			conn = s.record(conn, handle != "", prompt, lc)
 			s.log.Log(logSource, "voice.connect", "", map[string]any{
 				"key_index": idx, "resumed": handle != "", "dur_ms": s.now().Sub(started).Milliseconds(),
 			})

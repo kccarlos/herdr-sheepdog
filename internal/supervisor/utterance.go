@@ -37,6 +37,9 @@ type inflightUtterance struct {
 	// id names the utterance on brain.reply_* and on its late push
 	// (voice.push {answers_utterance}).
 	id string
+	// callID is the voice's tool call id that relayed the words: the
+	// brain request and the late push carry it (links.go).
+	callID string
 	// accepted is s.acceptedSeq once this call was accepted: when it has
 	// moved by the time a late reply lands, the shepherd asked for
 	// something else meanwhile and the reply is stale.
@@ -72,6 +75,12 @@ const replyPendingDetail = "Still working on it; the answer follows on its own."
 // callIDKey carries the voice's tool call id from Handler to
 // ToSupervisor, for brain.reply_pending.
 type callIDKey struct{}
+
+// callIDOf is the voice's tool call id ctx carries ("" when none).
+func callIDOf(ctx context.Context) string {
+	id, _ := ctx.Value(callIDKey{}).(string)
+	return id
+}
 
 // withCallID returns ctx carrying the voice's tool call id.
 func withCallID(ctx context.Context, id string) context.Context {
@@ -119,7 +128,7 @@ func (s *Supervisor) ToSupervisor(ctx context.Context, text string) (voice.ToolR
 	if s.cfg.ReplyWait < 0 {
 		// Synchronous: the turn runs under the tool call's own context
 		// and its reply is always the tool result.
-		turnCtx, u := s.beginUtterance(ctx, text)
+		turnCtx, u := s.beginUtterance(ctx, text, callIDOf(ctx))
 		defer s.endUtterance(u)
 		if res, ok := s.fastAnswer(turnCtx, in); ok {
 			return res, nil
@@ -131,7 +140,7 @@ func (s *Supervisor) ToSupervisor(ctx context.Context, text string) (voice.ToolR
 	// outlive it. Like an investigation job it runs on its own context,
 	// bounded by the brain's own turn timeout; the stop procedure cancels
 	// it through the slot.
-	turnCtx, u := s.beginUtterance(context.Background(), text)
+	turnCtx, u := s.beginUtterance(context.Background(), text, callIDOf(ctx))
 	if res, ok := s.fastAnswer(turnCtx, in); ok {
 		s.endUtterance(u)
 		return res, nil
@@ -266,7 +275,11 @@ func (s *Supervisor) deliverLate(turnCtx context.Context, u *inflightUtterance, 
 	} else if out.ok {
 		s.mentionedIn(out.res.Spoken)
 	}
-	s.pushTagged(paneID, line, urgency, map[string]any{"answers_utterance": u.id})
+	tags := map[string]any{"answers_utterance": u.id}
+	if u.callID != "" {
+		tags[tagCallID] = u.callID
+	}
+	s.pushTagged(paneID, line, urgency, tags)
 	s.log.Log(logSource, "brain.reply_delivered", paneID, map[string]any{
 		"id": u.id, "dur_ms": s.cfg.Now().Sub(start).Milliseconds(), "urgency": urgency.String(), "acted": out.acted, "fallback": !out.ok,
 	})
@@ -323,9 +336,9 @@ func (s *Supervisor) answerPromptOpen() bool {
 // beginUtterance installs the in-flight slot and returns the turn's
 // cancellable context, derived from parent (the stop procedure cancels
 // it).
-func (s *Supervisor) beginUtterance(parent context.Context, text string) (context.Context, *inflightUtterance) {
+func (s *Supervisor) beginUtterance(parent context.Context, text, callID string) (context.Context, *inflightUtterance) {
 	turnCtx, cancel := context.WithCancel(parent)
-	u := &inflightUtterance{text: text, cancel: cancel, finished: make(chan struct{})}
+	u := &inflightUtterance{text: text, cancel: cancel, finished: make(chan struct{}), callID: callID}
 	s.mu.Lock()
 	u.id = s.nextID("utt")
 	u.accepted = s.acceptedSeq
@@ -394,7 +407,7 @@ func (s *Supervisor) utteranceTurn(ctx context.Context, u *inflightUtterance, te
 	// option keys and the open promises are in the brain's own roster
 	// and ledger sections.
 	brief, _ := s.briefingText()
-	req := brain.Request{Kind: brain.KindUtterance, Trigger: brain.TriggerCEO, Question: text, Briefing: brief}
+	req := brain.Request{Kind: brain.KindUtterance, Trigger: brain.TriggerCEO, Question: text, Briefing: brief, Link: callLink(u.callID)}
 	// supervisor.repeat_window_s: an identical roster delivered again
 	// inside the window is noise over voice, so the brain gets a note it
 	// can act on ("no change since I last checked") instead of the
