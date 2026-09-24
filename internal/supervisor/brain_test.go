@@ -125,7 +125,7 @@ func TestBrainProposeSendsPromptAndCancelInterrupts(t *testing.T) {
 	if res.Spoken != "Telling auth to rerun the flaky test. Sent." || res.Scheduling != voice.UrgencyIdle {
 		t.Errorf("result = %+v", res)
 	}
-	if got := h.promptRequests(); len(got) != 1 || got[0] != [2]string{"w5:p1", "Rerun the flaky test in the auth package."} {
+	if got := h.promptRequests(); len(got) != 1 || got[0] != [2]string{"w5:p1", withSignOff("Rerun the flaky test in the auth package.")} {
 		t.Errorf("prompts = %v", got)
 	}
 	p, has := h.pending()

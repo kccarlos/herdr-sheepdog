@@ -207,6 +207,26 @@ resume the same CLI session (the harness persists it); the brain keeps
 an investigation ledger `recall` can search. One live investigation per
 agent; stop cancels it.
 
+**Worker history.** A screen is the worker's working notes; what it
+wrote for a human is in its own session transcript, which herdr names
+(`agent_session`: Codex's session id, Claude Code's session id or
+transcript path). On every finish or block the supervisor reads only
+what was appended since its last read (`internal/workerlog`) and adds
+one entry to the agent's work journal in the state file (the last 20):
+when, the event, the worker's last message (≤ 600 characters, D9
+scrubbed), the instruction it was on (≤ 200), the files it edited (base
+names, ≤ 10) and its tool counts. The finish's announce turn hears that
+message first, labelled as what the worker wrote, then the screen; the
+ledger shows each agent's last three entries in one short line each;
+`recall` searches them all. Every instruction the brain sends through
+`prompt` gets a fixed trailer from the supervisor, never the model —
+"When you finish, end with three short lines for someone who cannot see
+the screen: what changed; what needs a decision; what is next." — so
+that last message is written for the shepherd; the trailer is never
+counted as the shepherd's words (the echo, the pending action, the
+"started on" line and the journal use the instruction without it). agy
+keeps no transcript the daemon can read (`worker.session_missing`).
+
 ## New conversation
 
 "New conversation" resets the brain's transcript window (a fresh

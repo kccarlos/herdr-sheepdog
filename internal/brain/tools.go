@@ -365,9 +365,10 @@ func (b *Brain) listAgents() toolOutcome {
 	return toolOutcome{result: string(out), summary: fmt.Sprintf("roster of %d agents", len(rows))}
 }
 
-// recall searches the ledger (roster fields, notes, promises) and the
-// transcript for the query's words and returns the best matching lines,
-// newest first on ties; an empty query returns the most recent record.
+// recall searches the ledger (roster fields, work journals, notes,
+// promises, investigations) and the transcript for the query's words and
+// returns the best matching lines, newest first on ties; an empty query
+// returns the most recent record.
 func (b *Brain) recall(query string) toolOutcome {
 	words := queryWords(query)
 	type hit struct {
@@ -402,6 +403,9 @@ func (b *Brain) recall(query string) toolOutcome {
 		}
 		if a.LastBlock != "" {
 			add(a.LastInteraction, alias+" last question: "+a.LastBlock)
+		}
+		for _, e := range a.Journal {
+			add(e.At, journalRecallLine(alias, e))
 		}
 	}
 	for _, n := range b.host.Notes() {

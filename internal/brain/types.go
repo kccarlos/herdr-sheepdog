@@ -350,6 +350,26 @@ type AgentInfo struct {
 	// Pending is the supervisor's answer_prompt for this pane, when one is
 	// waiting: the only prompt send_keys may answer.
 	Pending *PendingPrompt
+	// Journal is the agent's work journal, oldest first: what the worker
+	// wrote at each finish or block, read from its own transcript
+	// (docs/roles.md "Worker history").
+	Journal []JournalEntry
+}
+
+// JournalEntry is one work journal entry (state.JournalEntry): capped
+// and D9-scrubbed by the supervisor before the brain sees it.
+type JournalEntry struct {
+	At time.Time
+	// Event is done, idle or blocked.
+	Event string
+	// LastAssistant is what the worker last wrote for a human.
+	LastAssistant string
+	// Instruction is the last instruction it received.
+	Instruction string
+	// Files are the base names of files it edited; Tools its tool calls
+	// by name.
+	Files []string
+	Tools map[string]int
 }
 
 // PendingPrompt is the recorded approval prompt of a pane.

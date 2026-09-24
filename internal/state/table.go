@@ -49,7 +49,44 @@ type Agent struct {
 	// transition removes it only when it comes from the inject path
 	// (SourceInject); herdr-sourced removals are ignored.
 	Synthetic bool `json:"synthetic,omitempty"`
+
+	// SessionSource, SessionKind and SessionValue are the agent_session
+	// herdr reports for the pane (herdr.AgentSession: the reporting
+	// integration, "id" or "path", and the session id or transcript
+	// path), and Cwd the pane's working directory: where the worker's own
+	// transcript is found (docs/iteration-2.md WP4, internal/workerlog).
+	SessionSource string `json:"session_source,omitempty"`
+	SessionKind   string `json:"session_kind,omitempty"`
+	SessionValue  string `json:"session_value,omitempty"`
+	Cwd           string `json:"cwd,omitempty"`
+	// Journal is the agent's work journal, oldest first, capped at
+	// MaxJournal: one entry per done, idle or blocked transition, read
+	// from the worker's own transcript (docs/roles.md "Worker history").
+	Journal []JournalEntry `json:"journal,omitempty"`
 }
+
+// JournalEntry is one line of an agent's work journal: what the worker
+// wrote for a human when it stopped, the instruction it was working on,
+// and which files and tools it used since the previous entry. Every
+// field is capped and scrubbed before it is stored (D9: no paths, no
+// hashes), so the ledger and recall can show it as is.
+type JournalEntry struct {
+	At time.Time `json:"at"`
+	// Event is the transition: done, idle or blocked.
+	Event string `json:"event"`
+	// LastAssistant is the worker's last message, ≤ 600 characters.
+	LastAssistant string `json:"last_assistant,omitempty"`
+	// Instruction is the last instruction it received, ≤ 200 characters.
+	Instruction string `json:"instruction,omitempty"`
+	// FilesTouched are the base names of the files it edited, ≤ 10.
+	FilesTouched []string `json:"files_touched,omitempty"`
+	// Tools counts its tool calls by name.
+	Tools map[string]int `json:"tools,omitempty"`
+}
+
+// MaxJournal is how many journal entries each agent keeps (the oldest
+// fall off the front).
+const MaxJournal = 20
 
 // SourceInject is the Transition.Source of fake events injected by the
 // debug page. It is the only source allowed to remove a synthetic pane.
@@ -275,7 +312,27 @@ func (a Agent) clone() Agent {
 		t := *a.LastInteraction
 		a.LastInteraction = &t
 	}
+	if a.Journal != nil {
+		j := make([]JournalEntry, len(a.Journal))
+		for i, e := range a.Journal {
+			j[i] = e.clone()
+		}
+		a.Journal = j
+	}
 	return a
+}
+
+// clone returns a deep copy of the entry.
+func (e JournalEntry) clone() JournalEntry {
+	e.FilesTouched = append([]string(nil), e.FilesTouched...)
+	if e.Tools != nil {
+		t := make(map[string]int, len(e.Tools))
+		for k, v := range e.Tools {
+			t[k] = v
+		}
+		e.Tools = t
+	}
+	return e
 }
 
 // clone returns a deep copy so callers never alias the store's data.

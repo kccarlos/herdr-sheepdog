@@ -35,7 +35,8 @@ func (h brainHost) Agents() []brain.AgentInfo {
 
 // info converts one row.
 func (h brainHost) info(a state.Agent, pending state.PendingAction, has bool) brain.AgentInfo {
-	info := brain.AgentInfo{PaneID: a.PaneID, Alias: a.Alias, Kind: a.Kind, State: string(a.State), StateSince: a.StateSince, Task: a.CurrentTask, LastTask: a.LastTask}
+	info := brain.AgentInfo{PaneID: a.PaneID, Alias: a.Alias, Kind: a.Kind, State: string(a.State), StateSince: a.StateSince, Task: withoutSignOff(a.CurrentTask), LastTask: withoutSignOff(a.LastTask)}
+	info.Journal = journalInfo(a.Journal)
 	if a.LastResult != nil && a.LastResult.Spoken != "" {
 		info.LastResult = a.LastResult.Spoken
 		info.LastDetail = a.LastResult.Detail
@@ -142,14 +143,21 @@ func (h brainHost) Investigations() []brain.InvestigationInfo {
 }
 
 // Prompt implements brain.Host: the instruction send path (D4:
-// sendInstruction), so the stop procedure can still interrupt it.
+// sendInstruction), so the stop procedure can still interrupt it. The
+// worker gets the instruction with the SignOff trailer (journal.go); the
+// echo and the row's current task are the instruction alone.
 func (h brainHost) Prompt(ctx context.Context, paneID, text string) (string, error) {
 	row, ok := h.s.store.Get(paneID)
 	if !ok {
 		return "", errors.New("that agent is gone")
 	}
+	text = withoutSignOff(text)
 	echo := "Telling " + aliasOr(row.Alias) + " to " + lowerFirst(strings.TrimRight(strings.TrimSpace(text), ".")) + "."
-	res, err := h.s.sendInstruction(ctx, row, text, echo)
+	h.s.journal.signOff.Do(func() { h.s.log.Log(logSource, "supervisor.signoff", "", map[string]any{"trailer": SignOff}) })
+	res, err := h.s.sendInstruction(ctx, row, withSignOff(text), echo)
+	if err == nil {
+		h.s.unsignTask(paneID)
+	}
 	if err != nil {
 		return "", fmt.Errorf("%s (%w)", strings.TrimRight(res.Spoken, "."), err)
 	}

@@ -124,6 +124,17 @@ func (b *Brain) run(ctx context.Context, t *turn) (Reply, error) {
 	}
 	b.mu.Unlock()
 	b.ingest(Message{Role: RoleUser, Kind: KindRequest, Content: requestText(t.req), Agent: t.req.Agent, Link: t.req.Link}, t.n)
+	if t.req.Kind == KindAnnounce && t.req.Agent != "" {
+		// What the worker itself wrote for a human, before its screen:
+		// the finding in its words, not its working notes
+		// (docs/iteration-2.md WP4).
+		if a, ok := b.host.Resolve(t.req.Agent); ok {
+			if text := workerWrote(a); text != "" {
+				b.ingest(Message{Role: RoleUser, Kind: KindEventScreen, Content: wrapWorker(t.req.Agent, "transcript", text), Agent: t.req.Agent,
+					ToolResult: &ToolResult{Name: toolWorkerLog, Summary: fmt.Sprintf("what %s wrote at %s", aliasOr(t.req.Agent), t.req.Event)}}, t.n)
+			}
+		}
+	}
 	if t.req.Screen != "" {
 		// The supervisor's own read for this event: in the window like a
 		// read_screen result (wrapped, pruned to a stub later).

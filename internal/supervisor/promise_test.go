@@ -64,7 +64,7 @@ func TestPromiseCreatedFromCEOTurn(t *testing.T) {
 	if p.PaneID != "w5:p1" || p.Alias != "auth" || p.Text != "let me know when it's done" || p.Event != "done" || p.Status != state.PromiseOpen || p.CreatedTurn != 1 || !p.CreatedAt.Equal(t0) {
 		t.Errorf("promise = %+v", p)
 	}
-	if got := h.promptRequests(); len(got) != 1 || got[0][1] != "run the tests" {
+	if got := h.promptRequests(); len(got) != 1 || got[0][1] != withSignOff("run the tests") {
 		t.Errorf("prompts = %v", got)
 	}
 	ev := h.log.ofType("promise.created")

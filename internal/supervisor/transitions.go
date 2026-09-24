@@ -39,6 +39,8 @@ func (s *Supervisor) HandleTransition(ctx context.Context, t herdr.Transition) {
 		s.dropPendingFor(t.PaneID, "pane_closed")
 		s.forgetExpired(t.PaneID)
 		s.mu.Unlock()
+		s.cfg.WorkerLog.Forget(t.PaneID)
+		s.journal.clearMissing(t.PaneID)
 		if wasBusy {
 			s.push(t.PaneID, aliasOr(prev.Alias)+" has gone away; its pane closed.", voice.UrgencyInterrupt)
 		}
@@ -55,7 +57,11 @@ func (s *Supervisor) HandleTransition(ctx context.Context, t herdr.Transition) {
 		// push; state_since does not move (Store.Apply is a no-op when
 		// the state does not change), so nothing is recorded as a
 		// "started on" or a finish (docs/roles.md "blocked -> blocked is
-		// a block").
+		// a block"). A new block adds a journal entry first, so its
+		// announce turn hears what the worker last wrote.
+		if from != herdr.StateBlocked {
+			s.recordJournal(row, string(herdr.StateBlocked), false)
+		}
 		s.onBlocked(ctx, row)
 	case herdr.StateUnknown:
 		s.mu.Lock()
@@ -88,6 +94,13 @@ func (s *Supervisor) HandleTransition(ctx context.Context, t herdr.Transition) {
 		// Read before finishTask moves the task to last_task: was the
 		// agent running an instruction the shepherd gave this run?
 		instructed := s.runningShepherdTask(row)
+		if from != herdr.StateDone && from != "" {
+			// The journal entry comes before the announce turn (onDone),
+			// which carries the worker's last message; done -> idle is
+			// the same finish seen again and adds none, and a pane first
+			// seen at rest has no news (its transcript is history).
+			s.recordJournal(row, string(t.To), from == herdr.StateWorking)
+		}
 		s.finishTask(t.PaneID)
 		// working -> done and working -> idle are both a finish: herdr
 		// reports done when the user was not looking at the pane and
@@ -129,7 +142,7 @@ func (s *Supervisor) startedInstruction(paneID string, from herdr.State) (starte
 		return "", false
 	}
 	justSent = s.cfg.Now().Sub(p.CreatedAt) <= s.cfg.CancelWindow
-	if t := shortTask(p.PayloadText); t != "" {
+	if t := shortTask(withoutSignOff(p.PayloadText)); t != "" {
 		return t, justSent
 	}
 	return "the instruction", justSent
@@ -157,7 +170,7 @@ func (s *Supervisor) pushStarted(paneID, text string, justSent bool) {
 func (s *Supervisor) finishTask(paneID string) {
 	_, err := s.store.Update(paneID, func(a *state.Agent) {
 		if a.CurrentTask != "" {
-			a.LastTask, a.CurrentTask = a.CurrentTask, ""
+			a.LastTask, a.CurrentTask = withoutSignOff(a.CurrentTask), ""
 		}
 	})
 	if err != nil {
