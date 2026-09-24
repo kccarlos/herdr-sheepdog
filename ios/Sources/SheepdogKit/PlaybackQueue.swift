@@ -27,6 +27,17 @@ import Foundation
 /// queue learns a chunk was the last one, its PCM is already with the
 /// player (or already played), so nothing is left to fade.
 ///
+/// **Time-stretch.** The queue also owns a `PlaybackRatePolicy`: `steer`
+/// (called every 20 ms by `AudioEngine`) reads the buffered audio against
+/// the target and picks a playback rate (0.85–1.05) that `AudioEngine`
+/// applies to an `AVAudioUnitTimePitch` with pitch 0. At rate r the node
+/// plays r seconds of audio per wall-clock second, so the playhead is kept
+/// in wall-clock time and rescaled on every rate change: the drain
+/// prediction and `bufferedMilliseconds` both use the real rate. The target
+/// range comes from a `PlaybackProfile` per voice provider (Gemini
+/// 150–500 ms, GPT-Live 800–2000 ms), and the "start anyway" wait scales
+/// with the target (target + 250 ms, as in the browser page).
+///
 /// `flush` (server) and the Stop button drop everything at once. A flush is
 /// not a drain and not a finished utterance: it does not move the adaptive
 /// target either way.
@@ -56,16 +67,34 @@ public struct PlaybackQueue: Sendable {
     private static let underrunWindow: TimeInterval = 0.3
     private static let targetStepMilliseconds = 100
     private static let targetDecayMilliseconds = 20
-    private static let targetCeilingMilliseconds = 500
     private static let fadeMilliseconds = 8.0
+    /// Headroom over the target before a short utterance starts anyway.
+    private static let waitPaddingMilliseconds = 250
 
     public let sampleRate: Double
     /// A lone short utterance still starts after this long rather than never.
     /// Also the ceiling on how long a post-underrun refill will wait before
-    /// giving up and playing what it has.
-    public let maximumWait: TimeInterval
+    /// giving up and playing what it has. The current target plus 250 ms
+    /// unless a fixed value was given.
+    public var maximumWait: TimeInterval {
+        fixedMaximumWait ?? Double(targetMilliseconds + Self.waitPaddingMilliseconds) / 1000
+    }
+    private let fixedMaximumWait: TimeInterval?
     /// The initial adaptive target, and the floor it decays back down to.
-    public let targetFloorMilliseconds: Int
+    public private(set) var targetFloorMilliseconds: Int
+    /// The most the target may grow to.
+    public private(set) var targetCeilingMilliseconds: Int
+    /// Whether `steer` stretches at all. Off, the queue plays at 1.0
+    /// always: the fixed-rate adaptive buffer this replaced, kept for the
+    /// before/after replays.
+    public let timeStretch: Bool
+
+    /// The playback rate the playhead is running at right now.
+    public private(set) var rate = 1.0
+    /// Wall-clock seconds played at a rate other than 1.0, in total.
+    public private(set) var stretchedSeconds: TimeInterval = 0
+    public private(set) var ratePolicy = PlaybackRatePolicy()
+    private var lastSteerAt: TimeInterval?
 
     public private(set) var phase: Phase = .idle
     /// Samples held back, not yet handed to the player.
@@ -75,8 +104,9 @@ public struct PlaybackQueue: Sendable {
     public private(set) var flushes = 0
     public private(set) var chunksDropped = 0
 
-    /// The jitter-buffer target right now, in milliseconds: 150–500 ms,
-    /// growing on underruns and decaying by a clean utterance at a time.
+    /// The jitter-buffer target right now, in milliseconds: floor to
+    /// ceiling (150–500 ms for Gemini), growing on underruns and decaying
+    /// by a clean utterance at a time.
     public private(set) var targetMilliseconds: Int
     /// Drains that turned out to be audible gaps (more of the same
     /// utterance arrived within `underrunWindow`).
@@ -96,9 +126,10 @@ public struct PlaybackQueue: Sendable {
     private var scheduledLengths: [Int: Int] = [:]
 
     /// When the audio already handed to the player is predicted to run
-    /// out. This is the authoritative "is the node dry" clock — computed
-    /// from chunk durations, not from completion callbacks, which are late
-    /// enough on iOS to make a poor detector.
+    /// out, in wall-clock time at the current `rate`. This is the
+    /// authoritative "is the node dry" clock — computed from chunk
+    /// durations, not from completion callbacks, which are late enough on
+    /// iOS to make a poor detector.
     private var playheadEndsAt: TimeInterval?
     private var lastPushAt: TimeInterval?
     /// Set when a drain is observed; cleared once the following gap (or
@@ -112,12 +143,38 @@ public struct PlaybackQueue: Sendable {
     public init(
         sampleRate: Double = AudioContract.playbackRate,
         prebufferMilliseconds: Int = 150,
-        maximumWait: TimeInterval = 0.4
+        ceilingMilliseconds: Int = 500,
+        maximumWait: TimeInterval? = nil,
+        timeStretch: Bool = true
     ) {
         self.sampleRate = sampleRate
         self.targetFloorMilliseconds = prebufferMilliseconds
+        self.targetCeilingMilliseconds = max(prebufferMilliseconds, ceilingMilliseconds)
         self.targetMilliseconds = prebufferMilliseconds
-        self.maximumWait = maximumWait
+        self.fixedMaximumWait = maximumWait
+        self.timeStretch = timeStretch
+    }
+
+    public init(profile: PlaybackProfile, sampleRate: Double = AudioContract.playbackRate, timeStretch: Bool = true) {
+        self.init(
+            sampleRate: sampleRate,
+            prebufferMilliseconds: profile.floorMilliseconds,
+            ceilingMilliseconds: profile.ceilingMilliseconds,
+            timeStretch: timeStretch
+        )
+    }
+
+    public var profile: PlaybackProfile {
+        PlaybackProfile(floorMilliseconds: targetFloorMilliseconds, ceilingMilliseconds: targetCeilingMilliseconds)
+    }
+
+    /// Switches the target range (the voice provider changed). The target
+    /// restarts at the new floor; counters are kept.
+    public mutating func setProfile(_ profile: PlaybackProfile) {
+        guard profile != self.profile else { return }
+        targetFloorMilliseconds = profile.floorMilliseconds
+        targetCeilingMilliseconds = profile.ceilingMilliseconds
+        targetMilliseconds = profile.floorMilliseconds
     }
 
     /// True while the player has audio to play — what the orb calls "speaking".
@@ -129,10 +186,74 @@ public struct PlaybackQueue: Sendable {
         Int(sampleRate * Double(targetMilliseconds) / 1000.0)
     }
 
-    /// How much audio is waiting to be heard, in milliseconds. Logged so the
-    /// user can see the conversion is not the bottleneck.
+    /// How much audio has been queued or scheduled and not yet reported
+    /// played by the node, in milliseconds. Follows the (late) completion
+    /// callbacks; `bufferedMilliseconds(at:)` is the predicted figure.
     public var queueDepthMilliseconds: Int {
         Int(Double(bufferedSamples + scheduledSamples) / sampleRate * 1000.0)
+    }
+
+    /// How much audio is waiting to be heard at `now`, in milliseconds of
+    /// audio: what is held back plus what the predicted playhead has not
+    /// reached yet (wall-clock time left × rate). The rate policy's `b` and
+    /// the ping's `buffer_ms`.
+    public func bufferedMilliseconds(at now: TimeInterval) -> Double {
+        var seconds = Double(bufferedSamples) / sampleRate
+        if phase == .playing, let endsAt = playheadEndsAt {
+            seconds += max(0, endsAt - now) * rate
+        }
+        return seconds * 1000
+    }
+
+    // MARK: - Time-stretch
+
+    /// The 20 ms control loop: notices a drain, then moves the rate one
+    /// slew step towards what the buffered audio calls for and rescales
+    /// the playhead to it. Returns the rate to apply to the node. With
+    /// `timeStretch` off it always returns 1.0.
+    @discardableResult
+    public mutating func steer(now: TimeInterval) -> Double {
+        observeDrain(now: now)
+        let dt = lastSteerAt.map { max(0, now - $0) } ?? 0
+        lastSteerAt = now
+        guard timeStretch else { return rate }
+        switch phase {
+        case .idle:
+            // Keep the rate through a possible underrun (the drain's
+            // bookkeeping is still open); reset once the utterance is over.
+            if drainedAt == nil {
+                ratePolicy.reset()
+                applyRate(1.0, now: now)
+            }
+        case .buffering:
+            break
+        case .playing:
+            if rate != 1.0 { stretchedSeconds += min(dt, PlaybackRatePolicy.maximumStep) }
+            let next = ratePolicy.step(
+                bufferedMilliseconds: bufferedMilliseconds(at: now),
+                targetMilliseconds: Double(targetMilliseconds),
+                dt: dt
+            )
+            applyRate(next, now: now)
+        }
+        return rate
+    }
+
+    /// Sets the rate directly, bypassing the policy (tests).
+    mutating func setRate(_ next: Double, now: TimeInterval) {
+        observeDrain(now: now)
+        applyRate(next, now: now)
+    }
+
+    /// Rescales the remaining playhead: the audio left is (endsAt − now)·r
+    /// seconds, and at the new rate it lasts that divided by r'.
+    private mutating func applyRate(_ next: Double, now: TimeInterval) {
+        guard next != rate else { return }
+        if phase == .playing, let endsAt = playheadEndsAt, endsAt > now {
+            let remainingAudio = (endsAt - now) * rate
+            playheadEndsAt = now + remainingAudio / next
+        }
+        rate = next
     }
 
     /// Appends a chunk. Returns the chunks to schedule now, in order: empty
@@ -182,6 +303,12 @@ public struct PlaybackQueue: Sendable {
         if scheduledSamples < 0 { scheduledSamples = 0 }
         if live.isEmpty && pending.isEmpty {
             scheduledSamples = 0
+            if phase == .playing {
+                // The node reported dry before the predicted playhead got
+                // there: that is still a drain, dated at the prediction.
+                drains += 1
+                drainedAt = playheadEndsAt
+            }
             phase = .idle
             playheadEndsAt = nil
         }
@@ -208,6 +335,8 @@ public struct PlaybackQueue: Sendable {
         drainedAt = nil
         utteranceHadUnderrun = false
         fadeInNextRelease = false
+        ratePolicy.reset()
+        rate = 1.0
         return hadAudio
     }
 
@@ -246,7 +375,7 @@ public struct PlaybackQueue: Sendable {
     private mutating func registerUnderrun() {
         underruns += 1
         utteranceHadUnderrun = true
-        targetMilliseconds = min(targetMilliseconds + Self.targetStepMilliseconds, Self.targetCeilingMilliseconds)
+        targetMilliseconds = min(targetMilliseconds + Self.targetStepMilliseconds, targetCeilingMilliseconds)
         fadeInNextRelease = true
     }
 
@@ -276,7 +405,7 @@ public struct PlaybackQueue: Sendable {
         scheduledLengths[chunk.id] = chunk.frameCount
         scheduledSamples += chunk.frameCount
         let start = max(playheadEndsAt ?? now, now)
-        playheadEndsAt = start + duration(of: chunk.frameCount)
+        playheadEndsAt = start + duration(of: chunk.frameCount) / rate
         return [chunk]
     }
 
@@ -303,7 +432,7 @@ public struct PlaybackQueue: Sendable {
             live.insert(chunk.id)
             scheduledLengths[chunk.id] = chunk.frameCount
             scheduledSamples += chunk.frameCount
-            playhead += duration(of: chunk.frameCount)
+            playhead += duration(of: chunk.frameCount) / rate
         }
         playheadEndsAt = playhead
         return out

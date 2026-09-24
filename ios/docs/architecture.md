@@ -173,8 +173,10 @@ microphone ─▶ AVAudioEngine input tap (hardware format, ~4 096 frames)
                              the old SilenceGate behind a diagnostics toggle)
            ─▶ VoiceSocket   (one binary frame each)
 
-/ws binary ─▶ PlaybackQueue (adaptive jitter buffer, then chunks in order)
+/ws binary ─▶ PlaybackQueue (adaptive jitter buffer, then chunks in order;
+                             owns the time-stretch rate policy)
            ─▶ AVAudioPlayerNode.scheduleBuffer (no `at:`; the node concatenates)
+           ─▶ AVAudioUnitTimePitch (pitch 0, rate 0.85–1.05, set every 20 ms)
            ─▶ 24 kHz mono Float32 ─▶ main mixer ─▶ speaker
 ```
 
@@ -210,9 +212,79 @@ audible gaps, sometimes mid-word. The buffer's target is now adaptive:
 - `AudioMetrics` and Settings ▸ About report `underruns`, the current
   target, `drains` (every time the node ran dry, underrun or not — the
   ordinary silence between utterances is a drain too) and the largest
-  arrival gap seen while one was worth caring about. `underruns` and the
-  target (`buffer_ms`) also ride the existing 15 s `ping`, mirrored into
-  the daemon's `web.client.stats`; older daemons ignore the extra fields.
+  arrival gap seen while one was worth caring about. A second line shows
+  the time-stretch: current rate, target, underruns and stretched seconds.
+- The 15 s `ping` carries, as the browser page's does: `underruns`,
+  `drains`, `buffer_ms` (audio buffered **now** — it used to be the target,
+  which the browser never sent), `rate` (current) and `stretched_ms`
+  (total wall-clock time played at a rate other than 1.0). The daemon
+  mirrors them into `web.client.stats`; older daemons ignore what they do
+  not know. `drains` used to read 0 there because the app never sent it.
+
+### Adaptive time-stretch
+
+GPT-Live delivers its audio at **0.72–0.86× real time** (the daemon's
+`docs/audio-e2e-results.md`, and the phone: 84 underruns in 8 minutes,
+the buffer at its 500 ms cap from the first reply on). No buffer that
+starts playing within a second can absorb a source that is short for the
+whole reply, so the player also **plays slower when the buffer runs low** —
+pitch-preserving, through an `AVAudioUnitTimePitch` between the player node
+and the mixer. The policy is pure (`PlaybackRatePolicy`, owned by
+`PlaybackQueue`) and identical to the browser page's:
+
+- **Target T per provider** (`PlaybackProfile`, from `/ws`
+  `status.provider`): Gemini starts at 150 ms, cap 500 ms (as before);
+  GPT-Live (`openai`) starts at 800 ms, cap 2 000 ms. The underrun step
+  (+100 ms), decay (−20 ms per clean reply) and refill-before-resume are
+  unchanged on top. The "start anyway" wait for a short reply scales with
+  the target — T + 250 ms, as in the browser — so an 800 ms target is not
+  cut short by the old fixed 400 ms.
+- **Rate r from buffered audio b**: 1.0 when b ≥ T; below T it falls
+  linearly to 0.90 at b = T/2 and to the **0.85 floor** at b ≤ T/4; 1.05
+  when b > 2T, to catch up. The rate moves at most **0.02 per 20 ms**, so
+  every change is a glide.
+- **Catch-up needs latency debt.** Playing at r < 1 adds (1 − r)·dt of
+  latency; only that debt is won back at 1.05. Gemini is ahead of real
+  time — a 10 s reply lands in ~2.5 s, so b sits far above 2T for most of
+  every reply — and would otherwise play everything 5 % fast for no reason.
+  The debt resets when a reply ends. (The spec's rule read literally
+  contradicts "Gemini stays at 1.0"; this is the reconciliation.)
+- **The playhead runs at 1/r.** The queue's drain prediction is kept in
+  wall-clock time and rescaled on every rate change (the audio left,
+  (end − now)·r, lasts that divided by the new rate), and chunks appended
+  while stretched extend it by duration/r. `bufferedMilliseconds(at:)` —
+  the policy's b and the ping's `buffer_ms` — is audio, not wall time.
+- `AudioEngine` runs the 20 ms control loop (a common-mode `Timer`) while
+  the engine runs; a flush or Stop resets the rate to 1.0.
+
+Replays (`TimeStretchReplayTests`, five seeds × 12 replies each; a
+simulated node that plays at the rate the queue asked for and reports
+completions 30 ms late). *Before* is the old fixed-rate buffer (150–500 ms
+for every provider); *after* is time-stretch plus the provider targets:
+
+| Timeline | before | targets only | after | time at r = 1.0 |
+|---|---|---|---|---|
+| GPT-Live, the two recorded turns (0.69×, 0.78×) | 45 underruns, 56.8 s of gaps | 25, 32.4 s | **15, 17.9 s** | 2 % |
+| GPT-Live 0.85×, 2–6 s replies, 0.3–1.5 s stalls every 2–4 s | 31, 48.4 s | 20, 28.7 s | **15, 17.7 s** | 25 % |
+| GPT-Live 0.75×, same shape | 47, 78.0 s | 21, 69.6 s | **19, 51.0 s** | 7 % |
+| GPT-Live 0.75× with a 600 ms fast start | 95, 111.8 s | 30, 98.7 s | **27, 83.9 s** | 2 % |
+| GPT-Live 0.75×, 5–12 s monologues (stress) | 66, 166.3 s | 45, 153.7 s | **37, 115.8 s** | 6 % |
+| GPT-Live 0.85×, 5–12 s monologues (stress) | 47, 96.6 s | 38, 86.9 s | **27, 49.5 s** | 23 % |
+| Gemini 4× | 0 | 0 | **0** | 94 % |
+
+Underruns fall to a third on the recorded turns and gaps to a third, but
+**not to zero**. The reason is arithmetic: both recorded turns arrive
+below the 0.85 floor, so even fully stretched the player consumes faster
+than GPT-Live sends; an 800 ms start runs out near the end of a 3 s turn.
+The target then settles where +100 ms per underrun balances −20 ms per
+clean reply: about one reply in five still has a gap. Offline experiments
+(not committed) showed what would close it — starting GPT-Live at
+**1 200 ms** gave 0 underruns on the recorded turns and 1 on the 0.85×
+timeline; no decay for GPT-Live, or a 0.75 rate floor, each helped less.
+Those change the shared policy, so they are left for the daemon/browser
+side to agree on. For Gemini, what is not 1.0 is mostly the last ~150 ms of
+each reply (the tail always runs below the target once the final chunk is
+in) and brief dips when two slow chunks meet.
 
 The session is `.playAndRecord` with mode `.voiceChat` and options
 `.allowBluetooth`, `.allowBluetoothA2DP`, `.defaultToSpeaker`. `.voiceChat`
@@ -375,7 +447,15 @@ provider and model.
 status and its reason, stalled, muted, gate closed, audio playing, a tool
 call in flight — resolved in one ordered list of rules, most urgent first.
 The views render it and nothing else, so the orb, the title and the buttons
-can never disagree. `capturing` comes off the same value: the microphone
+can never disagree.
+
+*Speaking* is held for **800 ms** across playback gaps (`SpeakingHold`):
+the user saw the orb flick between speaking and muted while GPT-Live
+underran, because speaking outranks muted and every gap dropped it for a
+moment. A flush or Stop drops the hold at once. Mute is not an orb state
+while the dog is speaking or thinking: the orb keeps that state and wears a
+small red slashed-mic badge (`SessionState.showsMuteBadge`); the mute
+button stays the source of truth for mute. `capturing` comes off the same value: the microphone
 runs only in the states where something can hear it, which is why
 `--voice=off` keeps it shut and says why.
 

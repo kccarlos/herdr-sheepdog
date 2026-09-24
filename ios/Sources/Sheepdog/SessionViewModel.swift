@@ -140,7 +140,10 @@ final class SessionViewModel: ObservableObject {
     private var closedReason: String?
     private var stalled = false
     private var gateClosed = false
+    /// Audio is playing right now (raw, from `AudioEngine`).
     private var speaking = false
+    /// Hysteresis on `speaking` for the orb: 800 ms across playback gaps.
+    private var speakingHold = SpeakingHold()
     private var daemonVoiceOff = false
     /// The "voice is off" notice is said once per session, not per status.
     private var saidVoiceIsOff = false
@@ -310,6 +313,7 @@ final class SessionViewModel: ObservableObject {
         stalled = false
         gateClosed = false
         speaking = false
+        speakingHold.reset()
         thinkingExpiry = nil
         micLevel = 0
         holding = false
@@ -382,7 +386,7 @@ final class SessionViewModel: ObservableObject {
     /// The orb went down in hold-to-talk. Talking over the dog stops it.
     func pressToTalk() {
         guard talkMode == .holdToTalk, !holding, VoiceBarModel(state: state, talkMode: talkMode).orbAction == .holdToTalk else { return }
-        if speaking || state == .thinking || state == .stalled { stop() }
+        if speaking || state == .speaking || state == .thinking || state == .stalled { stop() }
         holding = true
         audio.setManualGate(true)
         #if DEBUG
@@ -544,6 +548,7 @@ final class SessionViewModel: ObservableObject {
         conversationChanged()
         socket.send(.cancel)
         speaking = false
+        speakingHold.reset()
         Haptics.stop()
         refresh()
     }
@@ -651,6 +656,7 @@ final class SessionViewModel: ObservableObject {
             conversationChanged()
             scheduleHistorySync()
             speaking = false
+            speakingHold.reset()
         case .error:
             if let text = message.message {
                 show(Banner(tone: .warning, message: "The daemon said: \(text)", hint: nil, retryTitle: nil))
@@ -817,7 +823,7 @@ final class SessionViewModel: ObservableObject {
     }
 
     /// True while the microphone or the player is doing something.
-    private var audioIsBusy: Bool { audio.isRunning || speaking }
+    private var audioIsBusy: Bool { audio.isRunning || speaking || speakingHold.stoppedAt != nil }
 
     private var pendingRefresh: Task<Void, Never>?
 
@@ -859,7 +865,10 @@ final class SessionViewModel: ObservableObject {
                 self.socket.gatedFrames = self.audio.gatedFrames
                 self.socket.inputPeak = self.audio.inputPeak
                 self.socket.underruns = self.metrics.underruns
-                self.socket.bufferMs = self.metrics.bufferTargetMilliseconds
+                self.socket.drains = self.metrics.drains
+                self.socket.bufferMs = self.metrics.bufferedMilliseconds
+                self.socket.rate = self.metrics.playbackRate
+                self.socket.stretchedMs = self.metrics.stretchedMilliseconds
                 self.updateDiagnostics()
                 if let expiry = self.thinkingExpiry, expiry < Date() { self.thinkingExpiry = nil }
                 self.refresh()
@@ -1214,6 +1223,8 @@ final class SessionViewModel: ObservableObject {
     // MARK: - Derivation
 
     private func refresh() {
+        audio.setProvider(liveVoiceProvider ?? voiceProviders?.provider ?? stateVoiceProvider ?? hello?.voiceProvider)
+        let heldSpeaking = speakingHold.update(playing: speaking, now: ProcessInfo.processInfo.systemUptime)
         let inputs = SessionState.Inputs(
             socket: socketLife,
             voice: voiceStatus,
@@ -1221,7 +1232,7 @@ final class SessionViewModel: ObservableObject {
             stalled: stalled,
             muted: isMuted,
             gateClosed: gateClosed,
-            speaking: speaking,
+            speaking: heldSpeaking,
             thinking: thinkingExpiry != nil
         )
         let next = SessionState.resolve(inputs)

@@ -31,6 +31,12 @@ public struct AudioMetrics: Equatable, Sendable {
     public var bufferTargetMilliseconds = 0
     public var drains = 0
     public var largestArrivalGapMilliseconds = 0
+    /// Audio buffered right now (predicted playhead + held back), in ms.
+    public var bufferedMilliseconds = 0
+    /// The time-stretch rate right now, and the total wall-clock time
+    /// played at a rate other than 1.0.
+    public var playbackRate = 1.0
+    public var stretchedMilliseconds = 0
 
     public init() {}
 
@@ -50,6 +56,12 @@ public struct AudioMetrics: Equatable, Sendable {
         self.bufferTargetMilliseconds = targetMilliseconds
         self.drains = drains
         self.largestArrivalGapMilliseconds = largestArrivalGapMilliseconds
+    }
+
+    public mutating func recordTimeStretch(rate: Double, stretchedSeconds: TimeInterval, bufferedMilliseconds: Double) {
+        playbackRate = rate
+        stretchedMilliseconds = Int((stretchedSeconds * 1000).rounded())
+        self.bufferedMilliseconds = Int(bufferedMilliseconds.rounded())
     }
 
     /// The one-line summary under Settings ▸ About.
@@ -73,6 +85,17 @@ public struct AudioMetrics: Equatable, Sendable {
             underruns,
             drains,
             largestArrivalGapMilliseconds
+        )
+    }
+
+    /// The time-stretch line under Settings ▸ About.
+    public var stretchSummary: String {
+        String(
+            format: "rate %.2f× · target %d ms · %d underruns · stretched %.1f s",
+            playbackRate,
+            bufferTargetMilliseconds,
+            underruns,
+            Double(stretchedMilliseconds) / 1000
         )
     }
 }

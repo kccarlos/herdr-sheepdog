@@ -77,7 +77,7 @@ struct VoiceBarView: View {
                 .accessibilityIdentifier("controls.orb")
         } else {
             Button(action: tapOrb) {
-                OrbGlyph(state: state, level: level, size: 64)
+                OrbGlyph(state: state, level: level, size: 64, muted: muted)
             }
             .disabled(model.orbAction == .none)
             .accessibilityLabel(orbAccessibilityLabel)
@@ -206,6 +206,10 @@ struct OrbGlyph: View {
     let state: SessionState
     let level: Float
     var size: CGFloat = 64
+    /// The microphone is muted. Shown as a small red slashed-mic badge
+    /// while the orb is speaking or thinking (which outrank "Muted"), never
+    /// as a separate orb state.
+    var muted = false
 
     @State private var pulse = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -241,6 +245,10 @@ struct OrbGlyph: View {
             if showsStopBadge {
                 stopBadge
             }
+
+            if SessionState.showsMuteBadge(state, muted: muted) {
+                muteBadge
+            }
         }
         .frame(width: size, height: size)
         .onAppear { startPulse() }
@@ -268,6 +276,18 @@ struct OrbGlyph: View {
             .padding(size * 0.09)
             .background(Circle().fill(tint))
             .offset(x: size * 0.32, y: size * 0.32)
+    }
+
+    private var muteBadge: some View {
+        Image(systemName: "mic.slash.fill")
+            .font(.system(size: size * 0.14, weight: .bold))
+            .foregroundStyle(.white)
+            .padding(size * 0.08)
+            .background(Circle().fill(Color(.systemRed)))
+            .offset(x: -size * 0.32, y: size * 0.32)
+            .accessibilityIdentifier("orb.muteBadge")
+            .accessibilityLabel("Microphone muted")
+            .transition(.opacity)
     }
 
     private var breathing: Bool {

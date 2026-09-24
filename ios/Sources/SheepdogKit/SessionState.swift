@@ -86,6 +86,14 @@ public enum SessionState: String, Equatable, Sendable, CaseIterable {
         return .idle
     }
 
+    /// Whether the orb wears the small red slashed-mic badge: the mic is
+    /// muted while the orb shows something other than "Muted" — the dog
+    /// talking or thinking, which outrank mute. The mute button stays the
+    /// source of truth; this only keeps the orb honest about it.
+    public static func showsMuteBadge(_ state: SessionState, muted: Bool) -> Bool {
+        muted && (state == .speaking || state == .thinking)
+    }
+
     /// True while the microphone should be running.
     public var capturing: Bool {
         switch self {
@@ -126,5 +134,56 @@ public enum SessionState: String, Equatable, Sendable, CaseIterable {
         case .listening: return "Listening. \(voiceName) can hear you"
         case .idle: return "Connected and ready"
         }
+    }
+}
+
+/// Hysteresis on "speaking": once audio has played, the orb keeps saying
+/// so for `holdSeconds` across a playback gap, so a brief underrun (or the
+/// pause between two chunks of one reply) never flips the orb to whatever
+/// ranks below speaking — "Muted", when the user muted while the dog
+/// talked. A flush or Stop is not a gap: `reset` drops the hold at once.
+public struct SpeakingHold: Equatable, Sendable {
+    public static let defaultHold: TimeInterval = 0.8
+
+    public let holdSeconds: TimeInterval
+    /// Audio is playing right now.
+    public private(set) var playing = false
+    /// When playback last stopped, while the hold is still running.
+    public private(set) var stoppedAt: TimeInterval?
+
+    public init(holdSeconds: TimeInterval = SpeakingHold.defaultHold) {
+        self.holdSeconds = holdSeconds
+    }
+
+    /// Folds in whether audio is playing at `now` (call it on every
+    /// change and on every tick); returns what the state machine should
+    /// treat as speaking.
+    @discardableResult
+    public mutating func update(playing isPlaying: Bool, now: TimeInterval) -> Bool {
+        if isPlaying {
+            playing = true
+            stoppedAt = nil
+            return true
+        }
+        if playing {
+            playing = false
+            stoppedAt = now
+        }
+        return speaking(at: now)
+    }
+
+    /// What the orb should treat as speaking at `now`.
+    public mutating func speaking(at now: TimeInterval) -> Bool {
+        if playing { return true }
+        guard let stoppedAt else { return false }
+        if now - stoppedAt < holdSeconds { return true }
+        self.stoppedAt = nil
+        return false
+    }
+
+    /// A flush or Stop: not speaking, now.
+    public mutating func reset() {
+        playing = false
+        stoppedAt = nil
     }
 }

@@ -131,6 +131,10 @@ struct SettingsView: View {
                         Text(model.metrics.jitterSummary)
                             .font(.caption.monospaced())
                             .foregroundStyle(.secondary)
+                        Text(model.metrics.stretchSummary)
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.secondary)
+                            .accessibilityIdentifier("about.stretch")
                         if model.metrics.hardwareSampleRate > 0 {
                             Text("Microphone hardware: \(Int(model.metrics.hardwareSampleRate)) Hz")
                                 .font(.caption.monospaced())

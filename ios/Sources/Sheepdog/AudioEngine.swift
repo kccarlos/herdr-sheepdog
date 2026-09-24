@@ -15,7 +15,11 @@ import SheepdogKit
 /// `PlaybackQueue`, so the node concatenates them itself — gapless, and
 /// never "play this now". `PlaybackQueue` also owns the adaptive jitter
 /// buffer: it grows its target on a real underrun and reports the counters
-/// through `AudioMetrics`.
+/// through `AudioMetrics`. Between the player and the mixer sits an
+/// `AVAudioUnitTimePitch` (pitch 0): every 20 ms the queue's
+/// `PlaybackRatePolicy` picks a rate between 0.85 and 1.05 from how much
+/// audio is buffered, so a provider that delivers slower than real time
+/// (GPT-Live) is stretched a little instead of running dry.
 ///
 /// The session is `.playAndRecord` / `.voiceChat`, which turns on the
 /// system's echo canceller: without it the dog hears itself out of the
@@ -62,6 +66,11 @@ final class AudioEngine {
 
     private let engine = AVAudioEngine()
     private let player = AVAudioPlayerNode()
+    /// Pitch-preserving time-stretch between the player and the mixer.
+    private let timePitch = AVAudioUnitTimePitch()
+    /// The 20 ms rate control loop; runs while the engine does.
+    private var steerTimer: Timer?
+    private static let steerInterval: TimeInterval = 0.02
     private let playbackFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: AudioContract.playbackRate, channels: 1, interleaved: false)!
 
     private var converter: PCMConverter?
@@ -79,6 +88,9 @@ final class AudioEngine {
         // a graph wired against the launch-time session (`.soloAmbient`,
         // output only) played nothing once the session changed under it.
         engine.attach(player)
+        engine.attach(timePitch)
+        timePitch.pitch = 0
+        timePitch.rate = 1
         observe()
     }
 
@@ -130,8 +142,7 @@ final class AudioEngine {
             SheepdogLog.audio.error("app input was muted at the system level; unmuting")
             try? AVAudioApplication.shared.setInputMuted(false)
         }
-        engine.disconnectNodeOutput(player)
-        engine.connect(player, to: engine.mainMixerNode, format: playbackFormat)
+        connectPlayback()
         engine.mainMixerNode.outputVolume = 1
         let format = input.inputFormat(forBus: 0)
         guard format.channelCount > 0, format.sampleRate > 0 else {
@@ -160,19 +171,22 @@ final class AudioEngine {
         }
         player.play()
         isRunning = true
+        startSteering()
         restartedForSignal = false
         if !isMuted { watchdog.arm(at: CFAbsoluteTimeGetCurrent()) }
         let route = AVAudioSession.sharedInstance().currentRoute.outputs.map(\.portName).joined(separator: ", ")
         metrics.outputRoute = route
-        SheepdogLog.audio.info("audio started: input \(format.sampleRate, privacy: .public) Hz, \(format.channelCount, privacy: .public) ch, output \(route, privacy: .public), voice processing \(input.isVoiceProcessingEnabled, privacy: .public)")
+        SheepdogLog.audio.info("audio started: input \(format.sampleRate, privacy: .public) Hz, \(format.channelCount, privacy: .public) ch, output \(route, privacy: .public), voice processing \(input.isVoiceProcessingEnabled, privacy: .public), time-pitch latency \(self.timePitch.latency * 1000, privacy: .public) ms")
     }
 
     func stop() {
         guard isRunning else { return }
         engine.inputNode.removeTap(onBus: 0)
+        stopSteering()
         player.stop()
         engine.stop()
         queue.flush()
+        applyRate(1)
         chunker.reset()
         gate.reset()
         converter?.reset()
@@ -356,8 +370,10 @@ final class AudioEngine {
         if isRunning, !isMuted, let change = watchdog.tick(at: CFAbsoluteTimeGetCurrent()) {
             signalChanged(change)
         }
-        schedule(queue.tick(now: CFAbsoluteTimeGetCurrent()))
+        let now = CFAbsoluteTimeGetCurrent()
+        schedule(queue.tick(now: now))
         metrics.recordPlayback(depthMilliseconds: queue.queueDepthMilliseconds)
+        metrics.recordTimeStretch(rate: queue.rate, stretchedSeconds: queue.stretchedSeconds, bufferedMilliseconds: queue.bufferedMilliseconds(at: now))
         recordJitterBufferMetrics()
         setSpeaking(queue.isSpeaking)
     }
@@ -369,7 +385,56 @@ final class AudioEngine {
             player.stop()
             if isRunning { player.play() }
         }
+        applyRate(1)
         setSpeaking(false)
+    }
+
+    /// The voice provider changed (from `/ws` `status.provider`): switch
+    /// the jitter-buffer target range. A no-op when it is already right.
+    func setProvider(_ provider: String?) {
+        let profile = PlaybackProfile.forProvider(provider)
+        guard profile != queue.profile else { return }
+        queue.setProfile(profile)
+        SheepdogLog.audio.info("playback profile for \(provider ?? "default", privacy: .public): target \(profile.floorMilliseconds, privacy: .public)–\(profile.ceilingMilliseconds, privacy: .public) ms")
+        recordJitterBufferMetrics()
+    }
+
+    // MARK: - Time-stretch
+
+    /// player → time-pitch → mixer, both edges at the playback format.
+    private func connectPlayback() {
+        engine.disconnectNodeOutput(player)
+        engine.disconnectNodeOutput(timePitch)
+        engine.connect(player, to: timePitch, format: playbackFormat)
+        engine.connect(timePitch, to: engine.mainMixerNode, format: playbackFormat)
+    }
+
+    private func startSteering() {
+        steerTimer?.invalidate()
+        let timer = Timer(timeInterval: Self.steerInterval, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.steer() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        steerTimer = timer
+    }
+
+    private func stopSteering() {
+        steerTimer?.invalidate()
+        steerTimer = nil
+    }
+
+    /// One control-loop step: release anything due, notice drains, move
+    /// the rate one slew step and hand it to the time-pitch unit.
+    private func steer() {
+        let now = CFAbsoluteTimeGetCurrent()
+        schedule(queue.tick(now: now))
+        applyRate(queue.steer(now: now))
+        metrics.recordTimeStretch(rate: queue.rate, stretchedSeconds: queue.stretchedSeconds, bufferedMilliseconds: queue.bufferedMilliseconds(at: now))
+    }
+
+    private func applyRate(_ rate: Double) {
+        let value = Float(rate)
+        if timePitch.rate != value { timePitch.rate = value }
     }
 
     var queueDepthMilliseconds: Int { queue.queueDepthMilliseconds }
@@ -500,6 +565,7 @@ final class AudioEngine {
         let format = input.inputFormat(forBus: 0)
         guard format.channelCount > 0, format.sampleRate > 0, let converter = try? PCMConverter(inputFormat: format) else {
             isRunning = false
+            stopSteering()
             onNotice?("The microphone went away with the route change.")
             return
         }
@@ -510,13 +576,13 @@ final class AudioEngine {
         input.installTap(onBus: 0, bufferSize: 4_096, format: format) { [weak self] buffer, _ in
             self?.handleCaptured(buffer)
         }
-        engine.disconnectNodeOutput(player)
-        engine.connect(player, to: engine.mainMixerNode, format: playbackFormat)
+        connectPlayback()
         do {
             try engine.start()
             player.play()
         } catch {
             isRunning = false
+            stopSteering()
             onNotice?("Audio stopped after the route change (\(error.localizedDescription)).")
         }
     }

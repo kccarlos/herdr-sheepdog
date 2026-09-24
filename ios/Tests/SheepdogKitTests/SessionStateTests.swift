@@ -52,4 +52,69 @@ final class SessionStateTests: XCTestCase {
         XCTAssertTrue(labels.allSatisfy { !$0.isEmpty })
         XCTAssertEqual(Set(SessionState.allCases.map(\.title)).count, SessionState.allCases.count)
     }
+
+    // MARK: - The orb while muted
+
+    func testMutedWhileTheDogTalksStaysSpeakingWithABadge() {
+        let talking = SessionState.resolve(.init(socket: .open, voice: .connected, muted: true, speaking: true))
+        XCTAssertEqual(talking, .speaking)
+        XCTAssertTrue(SessionState.showsMuteBadge(talking, muted: true))
+        let thinking = SessionState.resolve(.init(socket: .open, voice: .connected, muted: true, thinking: true))
+        XCTAssertEqual(thinking, .thinking)
+        XCTAssertTrue(SessionState.showsMuteBadge(thinking, muted: true))
+    }
+
+    func testTheBadgeOnlyAppearsWhenMuteIsNotAlreadyTheOrb() {
+        XCTAssertFalse(SessionState.showsMuteBadge(.muted, muted: true), "the muted orb already says so")
+        XCTAssertFalse(SessionState.showsMuteBadge(.speaking, muted: false))
+        XCTAssertFalse(SessionState.showsMuteBadge(.thinking, muted: false))
+        for state in SessionState.allCases where state != .speaking && state != .thinking {
+            XCTAssertFalse(SessionState.showsMuteBadge(state, muted: true), "\(state)")
+        }
+    }
+
+    // MARK: - Speaking hold
+
+    func testABriefPlaybackGapKeepsTheOrbSpeaking() {
+        var hold = SpeakingHold()
+        var inputs = SessionState.Inputs(socket: .open, voice: .connected, muted: true)
+        func orb(playing: Bool, at t: TimeInterval) -> SessionState {
+            inputs.speaking = hold.update(playing: playing, now: t)
+            return SessionState.resolve(inputs)
+        }
+        XCTAssertEqual(orb(playing: true, at: 0), .speaking)
+        XCTAssertEqual(orb(playing: true, at: 2), .speaking)
+        // An underrun: 300 ms of nothing, then more of the reply.
+        XCTAssertEqual(orb(playing: false, at: 2.0), .speaking, "no flick to Muted")
+        XCTAssertEqual(orb(playing: false, at: 2.3), .speaking)
+        XCTAssertEqual(orb(playing: true, at: 2.3), .speaking)
+        // The reply really ends: the orb follows 800 ms later.
+        XCTAssertEqual(orb(playing: false, at: 4.0), .speaking)
+        XCTAssertEqual(orb(playing: false, at: 4.79), .speaking)
+        XCTAssertEqual(orb(playing: false, at: 4.81), .muted)
+        XCTAssertEqual(orb(playing: false, at: 9), .muted)
+    }
+
+    func testTheHoldIsMeasuredFromWhenPlaybackStoppedNotStarted() {
+        var hold = SpeakingHold()
+        XCTAssertTrue(hold.update(playing: true, now: 0))
+        // Stopped long after it started: the hold still runs its full 800 ms.
+        XCTAssertTrue(hold.update(playing: false, now: 10))
+        XCTAssertTrue(hold.speaking(at: 10.5))
+        XCTAssertFalse(hold.speaking(at: 10.81))
+    }
+
+    func testStopOrFlushDropsTheHoldAtOnce() {
+        var hold = SpeakingHold()
+        hold.update(playing: true, now: 0)
+        hold.update(playing: false, now: 1)
+        hold.reset()
+        XCTAssertFalse(hold.speaking(at: 1.01), "Stop means stop: the orb does not linger")
+        XCTAssertNil(hold.stoppedAt)
+    }
+
+    func testNothingPlayedMeansNothingHeld() {
+        var hold = SpeakingHold()
+        XCTAssertFalse(hold.update(playing: false, now: 0))
+    }
 }

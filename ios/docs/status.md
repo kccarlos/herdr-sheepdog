@@ -2,7 +2,7 @@
 
 ## Verified
 
-**Unit tests: 216 (214 run, 2 live-daemon tests skip without one), all passing** (`SheepdogKitTests`, iPhone 17 Pro simulator,
+**Unit tests: 242 (240 run, 2 live-daemon tests skip without one), all passing** (`SheepdogKitTests`, iPhone 17 Pro simulator,
 iOS 26, Xcode 27).
 
 ```sh
@@ -61,11 +61,28 @@ They cover:
   slower-than-real-time timeline stays underrun-free on its banked runway; a
   flush mid-utterance counts as neither a drain nor a target move; a long,
   ordinary silence between utterances is a drain but never an underrun;
+- **adaptive time-stretch** (`PlaybackRatePolicyTests`,
+  `PlaybackQueueStretchTests`, `TimeStretchReplayTests`): the rate table
+  and the 0.02-per-20 ms slew, catch-up only against latency debt, the
+  provider profiles, the playhead stretching and shrinking with the rate
+  (drain prediction and buffered audio), flush resetting the rate; replays
+  of the two recorded GPT-Live turns and synthetic 0.75×/0.85× timelines
+  with 0.3–1.5 s stalls, before against after (table in
+  `docs/architecture.md`: underruns 45 → 15 on the recorded turns — a
+  third, not zero), and a 4× Gemini timeline that stays gap-free at 1.0
+  94 % of the time; and the real player → `AVAudioUnitTimePitch` → mixer
+  graph rendered offline (`TimePitchGraphTests`): 1 s of tone at 0.85×
+  plays for 1.178 s;
+- the `ping`'s playback counters (`drains`, `underruns`, `buffer_ms`,
+  `rate`, `stretched_ms`) on the wire;
 - the conversation reducer: fragment merging, the other direction closing an
   output that never carried `final`, `flush` as a boundary, pushes as system
   cards, the voice-off mirroring, the cap;
 - the orb's state machine: every rule in the priority order, and that
   `capturing` is exactly the set of states where something can hear you;
+  the 800 ms speaking hold across a playback gap (muted while the dog
+  talks never flicks to Muted), measured from when playback stopped, and
+  dropped at once by Stop; the mute badge only while speaking or thinking;
 - the voice bar's pure mapping (`VoiceBarModel`): the orb's tap action
   (connect / stop / none), Mute's availability and End's visibility, for
   every `SessionState`;
@@ -267,6 +284,22 @@ the same convention `-sheepdogFakeProviders` uses above.
   the contract; screenshots use `-sheepdogFakeReset`.
 
 ## For the morning
+
+For the time-stretch, on the phone with GPT-Live: long replies should play
+without the gaps, a touch slower when GPT-Live falls behind (pitch
+unchanged — a slightly drawn-out voice, not a lower one) and back to
+normal speed when it catches up. Settings ▸ About's rate line should show
+the rate moving between 0.85 and 1.00 and the target starting at 800 ms;
+the daemon's `web.client.stats` should now show non-zero `drains`, and
+`rate`/`stretched_ms`. Muted while the dog talks, the orb should stay on
+Speaking with a small red mic badge — no flicker. Gaps are expected to fall
+to about a third, not to zero (see `docs/architecture.md`). Gemini: listen
+for no change in voice quality and no added delay at the start of a reply
+(the time-pitch unit is now in its path too, at 1.0); the last ~150 ms of
+each reply runs a little slow (the tail is always below the target), and if
+that sounds drawn out it needs an end-of-reply rule. The time-pitch graph
+itself is only tested offline (`TimePitchGraphTests`); on the phone, check
+first that GPT-Live and Gemini audio play at all.
 
 For New conversation, once the daemon side (`POST /api/conversation/reset`,
 the `conversation.reset` event) is on `main`: check the ⋯ menu actually

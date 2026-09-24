@@ -46,10 +46,14 @@ public final class VoiceSocket {
     /// Counters copied onto the `ping`.
     public var gatedFrames = 0
     public var inputPeak = 0
-    /// The adaptive jitter buffer's audible-gap count and current target
-    /// (ms), also copied onto the `ping`.
+    /// The playback buffer's counters, also copied onto the `ping`:
+    /// audible gaps, times the player ran dry, audio buffered now (ms),
+    /// the current time-stretch rate and total stretched time (ms).
     public var underruns = 0
+    public var drains = 0
     public var bufferMs = 0
+    public var rate = 1.0
+    public var stretchedMs = 0
 
     public var onEvent: ((Event) -> Void)?
 
@@ -267,7 +271,15 @@ public final class VoiceSocket {
             return
         }
         pingSentAt = Date()
-        if !send(.ping(gatedFrames: gatedFrames, peak: inputPeak, underruns: underruns, bufferMs: bufferMs)) {
+        if !send(.ping(
+            gatedFrames: gatedFrames,
+            peak: inputPeak,
+            underruns: underruns,
+            drains: drains,
+            bufferMs: bufferMs,
+            rate: (rate * 1000).rounded() / 1000,
+            stretchedMs: stretchedMs
+        )) {
             pingSentAt = nil
         }
     }

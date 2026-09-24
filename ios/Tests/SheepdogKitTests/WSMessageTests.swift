@@ -37,6 +37,17 @@ final class WSMessageTests: XCTestCase {
         )
     }
 
+    func testPingCarriesThePlaybackCountersTheDaemonLogs() throws {
+        // `drains` read 0 in web.client.stats because the app never sent it.
+        let ping = WSMessage.ping(gatedFrames: 1, peak: 2, underruns: 3, drains: 7, bufferMs: 640, rate: 0.93, stretchedMs: 4_200)
+        XCTAssertEqual(
+            try ping.encodedString(),
+            #"{"buffer_ms":640,"drains":7,"gated_frames":1,"peak":2,"rate":0.93,"stretched_ms":4200,"type":"ping","underruns":3}"#
+        )
+        let back = try decode(try ping.encodedString())
+        XCTAssertEqual(back, ping)
+    }
+
     func testStatusDecodesEveryVoiceState() throws {
         for raw in ["connecting", "connected", "reconnecting", "closed"] {
             let m = try decode(#"{"type":"status","voice":"\#(raw)","muted":false}"#)
