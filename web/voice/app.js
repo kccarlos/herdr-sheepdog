@@ -6,7 +6,10 @@
 
 const $ = (id) => document.getElementById(id);
 
-const PING_EVERY_MS = 15000;
+// The ping carries the playback counters, so it runs at the daemon's
+// web.client.stats interval (5 s): at 15 s, three stats lines in a row
+// repeated one sample and read as a frozen player (2026-09-24 18:21:30).
+const PING_EVERY_MS = 5000;
 const PONG_TIMEOUT_MS = 10000;
 const RECONNECT_MIN_MS = 1000;
 const RECONNECT_MAX_MS = 10000;
@@ -348,9 +351,13 @@ function startPing() {
   stopPing();
   state.pingOutstanding = false;
   state.pingTimer = setInterval(() => {
-    if (state.pingOutstanding && performance.now() - state.pingSentAt > PONG_TIMEOUT_MS) {
-      console.log('[voice] pong timeout; closing socket');
-      if (state.ws) state.ws.close(4000, 'pong timeout');
+    if (state.pingOutstanding) {
+      // Wait for the pong rather than send another ping (which would
+      // restart the clock): the ping runs more often than the timeout.
+      if (performance.now() - state.pingSentAt >= PONG_TIMEOUT_MS) {
+        console.log('[voice] pong timeout; closing socket');
+        if (state.ws) state.ws.close(4000, 'pong timeout');
+      }
       return;
     }
     state.pingSentAt = performance.now();
@@ -365,6 +372,9 @@ function startPing() {
       buffer_ms: state.playback.bufferedMs || 0,
       rate: state.playback.rate || 1,
       stretched_ms: state.playback.stretchedMs || 0,
+      // A context that is not running plays nothing and its worklet stops
+      // reporting: the counters above are then its last values.
+      audio_state: state.ctx ? state.ctx.state : undefined,
     });
   }, PING_EVERY_MS);
 }

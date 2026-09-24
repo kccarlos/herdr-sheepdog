@@ -247,3 +247,71 @@ test('the Player slows down (pitch kept) when its buffer falls below target, and
   const played = Float32Array.from(out).subarray(0, p.stats.played);
   assert.ok(Math.abs(zeroCrossingHz(played) - 440) <= 2, `pitch ${zeroCrossingHz(played)}`);
 });
+
+// 2026-09-24 18:21:06–18:21:44, the "player froze with 3.1 s in hand"
+// report: the page had played a GPT-Live session, the provider switched to
+// Gemini (the page applies the new policy on the next status), "On it."
+// (760 ms at 10.7x real time) then the 7.9 s answer in 26 chunks over
+// 998 ms (7.9x), then nothing. The Player must play all of it out and go
+// idle; it does — the "frozen" buffer_ms 3155 in the log was one 15 s-old
+// ping sample repeated on three web.client.stats lines (the page now pings
+// every 5 s and the daemon logs playback_age_ms). The policy is also
+// switched mid-reply, and a flush lands mid-reply, to cover a start
+// threshold or stretcher state left over from the old policy.
+test('a GPT-Live → Gemini policy switch, then a 7.9x burst and end of stream, drains to 0 without stalling', () => {
+  const OUT = 48000;
+  const block = new Float32Array(128);
+  const blocksFor = (sec) => Math.round((sec * OUT) / 128);
+  const drain = (p, maxSec) => {
+    let n = 0;
+    let stuck = 0;
+    let last = p.buffered;
+    while (p.buffered > 0 || p.state !== 'idle') {
+      p.render(block);
+      n++;
+      assert.ok(n < blocksFor(maxSec), `not drained after ${maxSec} s: state=${p.state} buffered=${p.buffered}`);
+      if (p.buffered === last && p.state !== 'buffering') stuck++;
+      else stuck = 0;
+      last = p.buffered;
+      assert.ok(stuck < 4, `playing but not consuming: state=${p.state} buffered=${p.buffered}`);
+    }
+    return (n * 128) / OUT;
+  };
+  const burst = (p, sec, chunks, wallSec, midway) => {
+    const total = Math.round(RATE * sec);
+    const per = Math.ceil(total / chunks);
+    const tone = sine(220, total, 0.3);
+    for (let c = 0, at = 0; c < chunks; c++, at += per) {
+      p.push(tone.subarray(at, Math.min(total, at + per)));
+      if (c === Math.floor(chunks / 2) && midway) midway(p);
+      for (let i = 0; i < blocksFor(wallSec / chunks); i++) p.render(block);
+    }
+  };
+  const cases = {
+    'switch between replies': null,
+    'switch mid-reply back to GPT-Live': (p) => p.setPolicy(PLAYBACK_POLICY.openai),
+    'switch mid-reply to Gemini': (p) => p.setPolicy(PLAYBACK_POLICY.gemini),
+    'flush mid-reply': (p) => p.flush(),
+  };
+  for (const [name, midway] of Object.entries(cases)) {
+    const p = new Player({ inRate: RATE, outRate: OUT });
+    p.setPolicy(PLAYBACK_POLICY.openai);
+    burst(p, 3, 30, 3.8, null); // a GPT-Live reply at 0.79x real time
+    drain(p, 10);
+    p.setPolicy(PLAYBACK_POLICY.gemini); // voice.provider_changed → status.provider
+    burst(p, 0.76, 6, 0.071, null); // "On it."
+    drain(p, 3);
+    for (let i = 0; i < blocksFor(1.5); i++) p.render(block); // the brain thinks (18:21:16.6 → 18:21:18.6)
+    const drainsBefore = p.stats.drains;
+    const underrunsBefore = p.stats.underruns;
+    burst(p, 7.92, 26, 0.998, midway); // the answer
+    const sec = drain(p, 12);
+    assert.equal(p.buffered, 0, name);
+    assert.equal(p.state, 'idle', name);
+    assert.equal(p.stats.underruns, underrunsBefore, `${name}: an underrun in a 7.9x burst`);
+    assert.ok(p.stats.drains > drainsBefore, `${name}: the answer's end counts as a drain`);
+    // Gemini delivers far ahead of real time: what is left plays at 1.0
+    // apart from the slow-down at the very end of the reply.
+    if (!midway) assert.ok(sec < 7.92 - 0.998 + 0.5, `${name}: ${sec.toFixed(2)} s to drain the rest`);
+  }
+});
