@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kccarlos/herdr-sheepdog/internal/ctxcap"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/inject"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
@@ -477,12 +478,30 @@ func (s *Server) routeUtterance(ctx context.Context, text string) (voice.ToolCal
 	}
 	s.log.Log(logSource, "web.utterance", "", map[string]any{"text": text, "via": "text_router"})
 	s.typed(text)
+	rc := s.deps.RouterContext
+	rc.Item(ctxcap.VoiceItem{Kind: ctxcap.VKindUserText, Class: ctxcap.ClassShepherd, Role: "user", Label: "shepherd typed", Text: text})
 	call, ok := s.deps.Router.Route(text)
 	if !ok {
 		s.log.Log(logSource, "web.utterance_unrouted", "", map[string]any{"text": text})
 		return voice.ToolCall{}, voice.ToolResult{}, errUnrouted
 	}
+	link := ctxcap.CallLink(call.ID)
+	rc.Claim(link)
+	rc.Item(ctxcap.VoiceItem{Kind: ctxcap.VKindToolCall, Class: ctxcap.ClassToolCall, Role: "model", Label: "tool call " + call.Name + " (text router)",
+		Text: "→ " + call.Name + "(" + string(ctxcap.Raw(call.Args)) + ")", Links: []string{link}, Raw: ctxcap.Raw(map[string]any{"id": call.ID, "name": call.Name, "args": call.Args})})
 	res, err := s.runTool(ctx, call, "text_router")
+	resp := map[string]any{"spoken": res.Spoken, "scheduling": res.Scheduling.SchedulingName()}
+	if res.Detail != "" {
+		resp["detail"] = res.Detail
+	}
+	if len(res.Options) > 0 {
+		resp["options"] = res.Options
+	}
+	if err != nil {
+		resp["error"] = err.Error()
+	}
+	rc.Item(ctxcap.VoiceItem{Kind: ctxcap.VKindToolResponse, Class: ctxcap.ClassToolResult, Role: "user", Label: "tool response " + call.Name + " (" + res.Scheduling.SchedulingName() + ")",
+		Text: "← " + call.Name + ": " + string(ctxcap.Raw(resp)), Links: []string{link}, Raw: ctxcap.Raw(map[string]any{"id": call.ID, "name": call.Name, "response": resp})})
 	if err != nil {
 		return call, res, err
 	}

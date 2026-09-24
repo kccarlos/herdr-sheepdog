@@ -1,6 +1,7 @@
 package inject
 
 import (
+	"github.com/kccarlos/herdr-sheepdog/internal/ctxcap"
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
 	"github.com/kccarlos/herdr-sheepdog/internal/supervisor"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
@@ -12,6 +13,9 @@ import (
 // stays visible in the log.
 type SkippedPusher struct {
 	Log logging.Logger
+	// Context, when set, records each push into the voice context log
+	// (the /debug Context tab's text-router session), marked not sent.
+	Context *ctxcap.VoiceSession
 }
 
 var _ supervisor.Pusher = SkippedPusher{}
@@ -34,5 +38,11 @@ func (p SkippedPusher) PushTagged(text string, u voice.Urgency, tags map[string]
 		}
 		p.Log.Log("voice", "voice.push", "", payload)
 	}
+	it := ctxcap.VoiceItem{Kind: ctxcap.VKindPush, Class: ctxcap.ClassPush, Role: "user", Label: "push (" + u.SchedulingName() + ", not sent: --voice=off)", Text: text, Links: ctxcap.LinksFromTags(tags),
+		Raw: ctxcap.Raw(map[string]any{"text": text, "urgency": u.String(), "tags": tags})}
+	if u == voice.UrgencySilent {
+		it.Kind, it.Label = ctxcap.VKindContext, "silent context (not sent: --voice=off)"
+	}
+	p.Context.Item(it)
 	return nil
 }

@@ -101,6 +101,11 @@ type Message struct {
 	Model    string `json:"model,omitempty"`
 	// Tokens is the estimated size of the message.
 	Tokens int `json:"tokens,omitempty"`
+	// Link ties the message to its counterpart in the voice model's
+	// context (the Context tab): "call:<id>" on a request made by the
+	// voice's tool call, "push:<id>" on a push, "evt:<id>" on a worker
+	// event and on the announce request about it.
+	Link string `json:"link,omitempty"`
 }
 
 // ToolCall is one function call the model made.

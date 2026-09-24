@@ -31,7 +31,7 @@ func (s *Supervisor) HandleTransition(ctx context.Context, t herdr.Transition) {
 		if alias == "" {
 			alias = prev.Alias
 		}
-		s.brain.WorkerEvent(alias, string(from), string(t.To), t.Closed)
+		s.brain.WorkerEventLinked(alias, string(from), string(t.To), t.Closed, eventLink(s.newEventID(t.PaneID)))
 	}
 
 	if t.Closed {

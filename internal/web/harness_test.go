@@ -14,6 +14,7 @@ import (
 
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
 	"github.com/kccarlos/herdr-sheepdog/internal/brain/braintest"
+	"github.com/kccarlos/herdr-sheepdog/internal/ctxcap"
 	"github.com/kccarlos/herdr-sheepdog/internal/eventlog"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/inject"
@@ -162,6 +163,10 @@ type harnessOpts struct {
 	// second fake provider "openai" (h.session2) and an unavailable
 	// "other", as Deps.Voice and Deps.VoiceSwitch.
 	switcher bool
+	// voiceCtx attaches a voice context log (the Context tab) with the
+	// text router's session recording into it, as the daemon does with
+	// --voice=off.
+	voiceCtx bool
 }
 
 func newHarness(t *testing.T, o harnessOpts) *harness {
@@ -175,7 +180,16 @@ func newHarness(t *testing.T, o harnessOpts) *harness {
 		t.Fatal(err)
 	}
 	h := inject.NewHerdr(nil, log)
-	var pusher supervisor.Pusher = inject.SkippedPusher{Log: log}
+	var vctx *ctxcap.VoiceLog
+	var routerCtx *ctxcap.VoiceSession
+	if o.voiceCtx {
+		vctx = ctxcap.NewVoiceLog(func(t ctxcap.VoiceTurn, updated bool) {
+			log.Log("voice", "context.step", "", map[string]any{"pane": "voice", "turn": t.Turn, "updated": updated})
+		})
+		routerCtx = vctx.Session("text-router", "")
+		routerCtx.EpochOnFirstUse("text router (--voice=off)", "no voice model")
+	}
+	var pusher supervisor.Pusher = inject.SkippedPusher{Log: log, Context: routerCtx}
 	var session *fakeSession
 	if o.voice {
 		session = newFakeSession()
@@ -207,7 +221,7 @@ func newHarness(t *testing.T, o harnessOpts) *harness {
 	sup.SetVoiceConnected(true)
 	injector := inject.NewInjector(store, h, sup, log, nil)
 	deps := Deps{Log: log, Store: store, Supervisor: sup, Injector: injector, Router: &inject.Router{}, Version: "test", Heartbeat: 200 * time.Millisecond, OutQueue: 8, DevTestdataDir: o.devTestdata, DevBrainDir: o.devBrain, StatsInterval: o.statsInterval,
-		SystemPrompt: func() string { return "You are the voice. Aliases: auth." }, Aliases: []string{"auth"}, ReloadPrompts: o.reloadPrompts, Brain: b, BrainOffReason: "--brain=off", BrainProviders: providers, Token: o.token}
+		SystemPrompt: func() string { return "You are the voice. Aliases: auth." }, Aliases: []string{"auth"}, ReloadPrompts: o.reloadPrompts, Brain: b, BrainOffReason: "--brain=off", BrainProviders: providers, Token: o.token, VoiceContext: vctx, RouterContext: routerCtx}
 	var sw *voice.Switcher
 	var session2 *fakeSession
 	if session != nil {

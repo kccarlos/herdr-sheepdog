@@ -229,6 +229,10 @@ type Supervisor struct {
 	// ToSupervisor can tell the voice echoing an announcement back apart
 	// from a genuine shepherd utterance (utterance.go's isEcho).
 	recentPushes []pushRecord
+	// eventIDs is each pane's latest worker event id (links.go): the
+	// announce turn and pushes about that event carry it, so the Context
+	// tab links them to the brain's worker_event message.
+	eventIDs map[string]string
 	// investigating is the one running background job per pane
 	// (investigate.go).
 	investigating map[string]*liveInvestigation
@@ -436,6 +440,7 @@ func (s *Supervisor) pushTagged(paneID, text string, u voice.Urgency, tags map[s
 		}
 		tags = tagged
 	}
+	tags = s.withPushID(tags)
 	if s.pusher == nil {
 		payload := map[string]any{"text": text, "urgency": u.String()}
 		for k, v := range tags {
@@ -454,7 +459,7 @@ func (s *Supervisor) pushTagged(paneID, text string, u voice.Urgency, tags map[s
 		s.recordPush(text)
 		s.markPushed()
 		if s.brain != nil {
-			s.brain.Pushed(s.aliasOf(paneID), text, u.String())
+			s.brain.PushedLinked(s.aliasOf(paneID), text, u.String(), pushLink(tags))
 		}
 	}
 }
@@ -502,12 +507,17 @@ func (s *Supervisor) pushTo(text string, u voice.Urgency, tags map[string]any) e
 // questions and exits bypass it); otherwise it logs supervisor.push_quiet
 // so the decision stays visible in the event log.
 func (s *Supervisor) pushIf(k pushKind, paneID, text string) {
+	s.pushIfTagged(k, paneID, text, nil)
+}
+
+// pushIfTagged is pushIf with tags for the voice.push event.
+func (s *Supervisor) pushIfTagged(k pushKind, paneID, text string, tags map[string]any) {
 	level := s.chattiness()
 	if !level.allows(k) {
 		s.log.Log(logSource, "supervisor.push_quiet", paneID, map[string]any{"text": text, "chattiness": string(level)})
 		return
 	}
-	s.push(paneID, text, voice.UrgencyIdle)
+	s.pushTagged(paneID, text, voice.UrgencyIdle, tags)
 }
 
 // pushBriefing pushes the current briefing as silent context and records

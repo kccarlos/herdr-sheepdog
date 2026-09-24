@@ -148,6 +148,10 @@ type Request struct {
 	// delivers: its question, the CEO's own words, the sub-agent's
 	// answer and what it follows up on.
 	Investigation *InvestigationInfo
+	// Link is the request message's link to the voice context (the
+	// Context tab): "call:<id>" for the voice tool call that relayed an
+	// utterance, "evt:<id>" for the worker event an announce is about.
+	Link string
 }
 
 // Reply is the answer contract (docs/roles.md): what the assistant says,

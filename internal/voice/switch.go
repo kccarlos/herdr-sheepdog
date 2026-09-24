@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/kccarlos/herdr-sheepdog/internal/ctxcap"
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
 )
 
@@ -48,6 +49,9 @@ var (
 type Switcher struct {
 	log       logging.Logger
 	providers []Provider
+	// ctxlog, when set, gets a marker at every provider switch (the
+	// /debug Context tab).
+	ctxlog *ctxcap.VoiceLog
 
 	audio  chan []byte
 	events chan Event
@@ -97,6 +101,10 @@ func (sw *Switcher) lookup(id string) (Provider, error) {
 	}
 	return Provider{}, fmt.Errorf("%w: %q", ErrUnknownProvider, id)
 }
+
+// SetContextLog sets the voice context log the switch is marked in.
+// Call before Start.
+func (sw *Switcher) SetContextLog(l *ctxcap.VoiceLog) { sw.ctxlog = l }
 
 // Providers lists every provider, available or not.
 func (sw *Switcher) Providers() []ProviderInfo {
@@ -219,6 +227,7 @@ func (sw *Switcher) SetProvider(id, via string) error {
 		ca.ClientAttached(client)
 	}
 	sw.log.Log("voice", "voice.provider_changed", "", map[string]any{"from": from, "to": id, "via": via})
+	sw.ctxlog.Marker("provider switch", fmt.Sprintf("Voice provider switched from %s to %s (via %s): the new provider holds none of the old one's context.", from, id, via), false)
 	sw.emit(EventInterrupted{}) // drop whatever the old voice had queued
 	go func() {
 		defer sw.retire.Done()

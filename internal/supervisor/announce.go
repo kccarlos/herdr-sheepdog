@@ -70,6 +70,9 @@ type announcement struct {
 	// created one: a line about a prompt that is no longer open is
 	// dropped.
 	pending string
+	// eventID is the worker event's id (links.go), set by announce: the
+	// turn's request and every push about the event carry it.
+	eventID string
 }
 
 // turnResult is what the announce goroutine hands back.
@@ -82,6 +85,7 @@ type turnResult struct {
 // the event gets: the brain's when it lands within Config.AnnounceWait,
 // else the code sentence.
 func (s *Supervisor) announce(ctx context.Context, a announcement) {
+	a.eventID = s.eventIDOf(a.row.PaneID)
 	events := []string{a.event}
 	if a.alsoIdle {
 		events = append(events, brain.PromiseEventIdle)
@@ -108,7 +112,7 @@ func (s *Supervisor) announce(ctx context.Context, a announcement) {
 	for _, p := range kept {
 		infos = append(infos, promiseInfo(p))
 	}
-	req := brain.Request{Kind: brain.KindAnnounce, Trigger: brain.TriggerEvent, Agent: aliasOr(a.row.Alias), Event: a.event, Template: a.sentence, Screen: a.screen, Promises: infos, Owed: a.owed, AlsoAsking: a.asking}
+	req := brain.Request{Kind: brain.KindAnnounce, Trigger: brain.TriggerEvent, Agent: aliasOr(a.row.Alias), Event: a.event, Template: a.sentence, Screen: a.screen, Promises: infos, Owed: a.owed, AlsoAsking: a.asking, Link: eventLink(a.eventID)}
 	res := make(chan turnResult, 1)
 	start := s.cfg.Now()
 	go func() {
@@ -181,7 +185,7 @@ func (s *Supervisor) applyResult(a announcement, kept []state.Promise, level Cha
 	}
 	u := voiceUrgency(d.applied)
 	s.logKept(kept, a.event, spoken, u, "brain")
-	s.pushTagged(a.row.PaneID, spoken, u, announceTags(u, duePassed, rep.NeedsUser, a.pending))
+	s.pushTagged(a.row.PaneID, spoken, u, a.tags(announceTags(u, duePassed, rep.NeedsUser, a.pending)))
 }
 
 // announceTags marks a push as one of the exceptions that keep INTERRUPT
@@ -227,7 +231,7 @@ func (s *Supervisor) dropLate(a announcement, kept []state.Promise, level Chatti
 		// Not for yielded or coalesced: a newer turn about the same agent
 		// is about to speak.
 		if reason := fallbackReason(r.err); owed && audible && (reason == "timeout" || reason == "fallback") {
-			s.push(a.row.PaneID, "I couldn't get "+aliasOr(a.row.Alias)+"'s findings in time — ask me and I'll read its screen.", voice.UrgencyIdle)
+			s.pushTagged(a.row.PaneID, "I couldn't get "+aliasOr(a.row.Alias)+"'s findings in time — ask me and I'll read its screen.", voice.UrgencyIdle, a.tags(nil))
 		}
 		return
 	}
@@ -255,7 +259,7 @@ func (s *Supervisor) dropLate(a announcement, kept []state.Promise, level Chatti
 	s.logDecision(a, level, decision{via: "brain", requested: rep.Urgency, applied: appliedIf(add), reason: reason, late: true}, rep, kept, true)
 	s.log.Log(logSource, "brain.push_late", a.row.PaneID, map[string]any{"turn": rep.Turn, "dur_ms": dur, "spoken": spoken, "needs_user": rep.NeedsUser, "relates_to": strings.TrimSpace(rep.RelatesTo), "added": add})
 	if add {
-		s.push(a.row.PaneID, spoken, voice.UrgencyIdle)
+		s.pushTagged(a.row.PaneID, spoken, voice.UrgencyIdle, a.tags(nil))
 	}
 }
 
@@ -323,7 +327,7 @@ func (s *Supervisor) codePath(a announcement, kept []state.Promise, level Chatti
 	}
 	if len(kept) == 0 {
 		if a.kind != pushPromiseOnly {
-			s.pushIf(a.kind, a.row.PaneID, sentence)
+			s.pushIfTagged(a.kind, a.row.PaneID, sentence, a.tags(nil))
 		}
 		return
 	}
@@ -334,7 +338,7 @@ func (s *Supervisor) codePath(a announcement, kept []state.Promise, level Chatti
 		u = voice.UrgencyInterrupt
 	}
 	s.logKept(kept, a.event, line, u, "template")
-	s.pushTagged(a.row.PaneID, line, u, announceTags(u, duePassed, false, ""))
+	s.pushTagged(a.row.PaneID, line, u, a.tags(announceTags(u, duePassed, false, "")))
 }
 
 // recordAnnounceDetail stores an announce turn's detail alongside the

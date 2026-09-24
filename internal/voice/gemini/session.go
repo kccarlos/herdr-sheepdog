@@ -8,6 +8,7 @@ import (
 
 	"google.golang.org/genai"
 
+	"github.com/kccarlos/herdr-sheepdog/internal/ctxcap"
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice/audiotiming"
@@ -25,6 +26,8 @@ type Session struct {
 	dial Dialer
 	log  logging.Logger
 	now  func() time.Time
+	// rec records the voice context (capture.go); nil records nothing.
+	rec *ctxcap.VoiceSession
 
 	audio  chan []byte
 	events chan voice.Event
@@ -117,6 +120,7 @@ func newSession(cfg Config, log logging.Logger, dial Dialer) (*Session, error) {
 		dial:       dial,
 		log:        log,
 		now:        time.Now,
+		rec:        cfg.Context.Session("gemini", cfg.Model),
 		audio:      make(chan []byte),
 		events:     make(chan voice.Event, cfg.EventBuffer),
 		out:        newOutQueue(),
@@ -196,6 +200,7 @@ func (s *Session) finish(reason string) {
 		s.mu.Unlock()
 		s.emit(voice.EventStatus{Status: voice.StatusClosed, Reason: reason})
 		s.log.Log(logSource, "voice.closed", "", map[string]any{"reason": reason})
+		s.rec.Marker("session closed", "The voice session ended ("+reason+").", nil)
 		s.emitMu.Lock()
 		s.eventsClosed = true
 		close(s.events)
@@ -468,6 +473,7 @@ func (s *Session) Reset(reason string) error {
 		return nil
 	}
 	s.dropHandle(reason)
+	s.rec.Marker("conversation reset", "New conversation: the resumption handle is dropped, so the next connection starts without the conversation so far.", nil)
 	select {
 	case s.dropReq <- struct{}{}:
 	default:

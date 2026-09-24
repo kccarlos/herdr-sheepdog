@@ -22,35 +22,69 @@ import (
 // so those are skipped when it is replayed and merged into one model
 // content when it is not. Replies are model text.
 func toContents(msgs []Message, provider, model string) []*genai.Content {
+	return toContentsTraced(msgs, provider, model, nil)
+}
+
+// origin maps one window message onto the request built from it (the
+// Context tab's section map): item is the content (Gemini) or message
+// (OpenAI-compatible) index, part the part or tool call index within
+// it (-1: the whole item), and start/end the message's byte range in a
+// text merged from several messages (-1: the whole part).
+type origin struct {
+	msg, item, part, start, end int
+}
+
+// toContentsTraced is toContents, recording where each message went into
+// tr when it is not nil.
+func toContentsTraced(msgs []Message, provider, model string, tr *[]origin) []*genai.Content {
 	var out []*genai.Content
+	note := func(o origin) {
+		if tr != nil {
+			*tr = append(*tr, o)
+		}
+	}
 	var text []string // pending user lines
+	var textMsgs []int
 	flushText := func() {
 		if len(text) == 0 {
 			return
 		}
+		pos := 0
+		for i, line := range text {
+			note(origin{msg: textMsgs[i], item: len(out), part: 0, start: pos, end: pos + len(line)})
+			pos += len(line) + 1
+		}
 		out = append(out, &genai.Content{Role: genai.RoleUser, Parts: []*genai.Part{{Text: strings.Join(text, "\n")}}})
-		text = nil
+		text, textMsgs = nil, nil
 	}
 	var calls []*genai.Part // pending model function-call parts (no Raw)
+	var callMsgs []int
 	flushCalls := func() {
 		if len(calls) == 0 {
 			return
 		}
+		for i, m := range callMsgs {
+			note(origin{msg: m, item: len(out), part: i, start: -1, end: -1})
+		}
 		out = append(out, &genai.Content{Role: genai.RoleModel, Parts: calls})
-		calls = nil
+		calls, callMsgs = nil, nil
 	}
 	var results []*genai.Part // pending function response parts
+	var resultMsgs []int
 	flushResults := func() {
 		if len(results) == 0 {
 			return
 		}
+		for i, m := range resultMsgs {
+			note(origin{msg: m, item: len(out), part: i, start: -1, end: -1})
+		}
 		out = append(out, &genai.Content{Role: genai.RoleUser, Parts: results})
-		results = nil
+		results, resultMsgs = nil, nil
 	}
 	flushAll := func() { flushText(); flushCalls(); flushResults() }
 	rawCovers := false // the step's Raw was replayed: its other calls are in it
 
-	for _, m := range msgs {
+	for mi, m := range msgs {
 		if m.Kind != KindToolCall {
 			rawCovers = false
 		}
@@ -63,6 +97,7 @@ func toContents(msgs []Message, provider, model string) []*genai.Content {
 				var c genai.Content
 				if err := json.Unmarshal(m.Raw, &c); err == nil && len(c.Parts) > 0 {
 					c.Role = genai.RoleModel
+					note(origin{msg: mi, item: len(out), part: -1, start: -1, end: -1})
 					out = append(out, &c)
 					rawCovers = true
 					continue
@@ -77,6 +112,7 @@ func toContents(msgs []Message, provider, model string) []*genai.Content {
 			}
 			if m.ToolCall != nil {
 				calls = append(calls, &genai.Part{FunctionCall: &genai.FunctionCall{Name: m.ToolCall.Name, Args: m.ToolCall.Args}})
+				callMsgs = append(callMsgs, mi)
 			}
 		case KindToolResult:
 			flushText()
@@ -90,13 +126,16 @@ func toContents(msgs []Message, provider, model string) []*genai.Content {
 				resp = map[string]any{"error": m.ToolResult.Error}
 			}
 			results = append(results, &genai.Part{FunctionResponse: &genai.FunctionResponse{Name: name, Response: resp}})
+			resultMsgs = append(resultMsgs, mi)
 		case KindReply:
 			flushAll()
+			note(origin{msg: mi, item: len(out), part: 0, start: -1, end: -1})
 			out = append(out, &genai.Content{Role: genai.RoleModel, Parts: []*genai.Part{{Text: m.Content}}})
 		default:
 			flushCalls()
 			flushResults()
 			text = append(text, contextLine(m))
+			textMsgs = append(textMsgs, mi)
 		}
 	}
 	flushAll()

@@ -6,6 +6,7 @@ import (
 
 	"google.golang.org/genai"
 
+	"github.com/kccarlos/herdr-sheepdog/internal/ctxcap"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
 
@@ -173,6 +174,7 @@ func (s *Session) doPush(ctx context.Context, item pushItem) {
 	}
 	turnComplete := item.urgency != voice.UrgencySilent
 	err := s.sendOn(gen, func(c Conn) error {
+		setLinks(c, ctxcap.LinksFromTags(item.tags))
 		return c.SendClientContent(genai.LiveClientContentInput{
 			Turns:        pushTurn(item.text, item.urgency),
 			TurnComplete: genai.Ptr(turnComplete),
