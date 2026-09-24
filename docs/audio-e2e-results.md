@@ -342,3 +342,13 @@ Every session was closed by the daemon (`reason: idle`, confirmed by
 - Harness spill-over: a reply or a relay that arrives after a scenario's
   tail belongs to the next one; the harness now waits for 1.5 s of quiet
   (at most 12 s) before each scenario and drops what it saw meanwhile.
+
+### GPT-Live start buffer raised to 1200 ms (2026-09-24)
+
+On the recorded GPT-Live replies the 800 ms start still left one underrun
+on the 0.69× instruction-promise reply and on the chained session. With a
+1200 ms start (cap unchanged at 2000 ms, time-stretch as before) all three
+recorded replay cases drop to **0 underruns** (status-question 3 → 0,
+instruction-promise 2 → 0, chained 4 → 0 against the old Gemini-policy
+baseline). Cost: the first GPT-Live word waits about 0.4 s longer. Gemini is
+unchanged (150/500 ms). The iOS app uses the same numbers.
