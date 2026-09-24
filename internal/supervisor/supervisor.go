@@ -354,11 +354,12 @@ func (s *Supervisor) Run(ctx context.Context) {
 	}
 }
 
-// SetVoiceConnected records whether a voice session is attached; pushes
-// are skipped (and logged as supervisor.push_skipped) while it is not.
-// The first time it turns on — a live connect event, or at once for
-// --voice=off (docs/roles.md "Status") — it also runs
-// announceStartupPromises, once per daemon run.
+// SetVoiceConnected records whether a voice session is attached
+// (session.voice_connected, /api/state). Pushes are not gated on it —
+// pushTagged hands them to the session regardless, which queues them
+// while reconnecting (audit B3). The first time it turns on — a live
+// connect event, or at once for --voice=off (docs/roles.md "Status") —
+// it also runs announceStartupPromises, once per daemon run.
 func (s *Supervisor) SetVoiceConnected(connected bool) {
 	_ = s.store.UpdateSession(func(ss *state.Session) { ss.VoiceConnected = connected })
 	if !connected {
@@ -405,18 +406,20 @@ func (s *Supervisor) OnVoiceEvent(ev voice.Event) {
 	}
 }
 
-func (s *Supervisor) voiceConnected() bool {
-	return s.store.Snapshot().Session.VoiceConnected
-}
-
-// push delivers text to the voice session when one is connected. A
-// spoken push about a pane makes that pane the current subject (what
-// "it" means in the next ask).
+// push delivers text to the voice session. A spoken push about a pane
+// makes that pane the current subject (what "it" means in the next
+// ask).
 func (s *Supervisor) push(paneID, text string, u voice.Urgency) {
 	s.pushTagged(paneID, text, u, nil)
 }
 
 // pushTagged is push with tags for the voice.push event (answers_job).
+// It hands the push to the voice layer even while a session is
+// reconnecting: the session's own queue (Gemini's pushQ, GPT-Live's
+// standby queue) holds it and sends it once the connection is back, so a
+// kept promise or a block line is never lost to a reconnect (audit B3).
+// Only a session-less daemon (--voice=off, or no session at all) skips
+// the push outright, logged as supervisor.push_skipped.
 func (s *Supervisor) pushTagged(paneID, text string, u voice.Urgency, tags map[string]any) {
 	if text == "" {
 		return
@@ -433,7 +436,7 @@ func (s *Supervisor) pushTagged(paneID, text string, u voice.Urgency, tags map[s
 		}
 		tags = tagged
 	}
-	if s.pusher == nil || !s.voiceConnected() {
+	if s.pusher == nil {
 		payload := map[string]any{"text": text, "urgency": u.String()}
 		for k, v := range tags {
 			payload[k] = v

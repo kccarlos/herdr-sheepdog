@@ -499,9 +499,34 @@ func TestNonQuestionScreensCreateNoPending(t *testing.T) {
 	}
 }
 
-func TestBlockedWithoutVoiceOnlyLogs(t *testing.T) {
+// TestBlockedWhileReconnectingStillReachesPusher: a pane blocking while
+// the voice session is reconnecting (session.voice_connected false, but
+// a session still exists) still hands its push to the voice layer,
+// which is trusted to queue it until the connection is back — not
+// dropped as supervisor.push_skipped (audit B3: a push_skipped here lost
+// a kept promise or a block line for good, since the tool-call promise
+// was already kept).
+func TestBlockedWhileReconnectingStillReachesPusher(t *testing.T) {
 	h := twoAgents(t)
 	h.sup.SetVoiceConnected(false)
+	h.block("w5:p1", "codex-approval-prompt.screen.txt")
+	if len(h.pusher.all()) != 1 {
+		t.Fatalf("pushes = %d, want 1 handed to the session to queue while reconnecting", len(h.pusher.all()))
+	}
+	if !strings.Contains(h.pusher.last(t).Text, "auth asks to run") {
+		t.Errorf("push text = %q", h.pusher.last(t).Text)
+	}
+	if h.log.count("supervisor.push_skipped") != 0 || h.log.count("pending.created") != 1 {
+		t.Errorf("push_skipped=%d created=%d", h.log.count("supervisor.push_skipped"), h.log.count("pending.created"))
+	}
+}
+
+// TestBlockedWithoutASessionOnlyLogs: with no voice session at all
+// (--voice=off, pusher nil) a push is skipped and logged, since there is
+// no queue anywhere to hold it.
+func TestBlockedWithoutASessionOnlyLogs(t *testing.T) {
+	h := twoAgents(t)
+	h.sup.pusher = nil
 	h.block("w5:p1", "codex-approval-prompt.screen.txt")
 	if len(h.pusher.all()) != 0 {
 		t.Error("pushed without a voice session")

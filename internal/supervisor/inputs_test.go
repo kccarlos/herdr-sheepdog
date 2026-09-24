@@ -77,10 +77,13 @@ func TestFastPathReadsTheTranscriptNotTheToolArgument(t *testing.T) {
 }
 
 // A transcript older than the prompt cannot answer it, even when it gets
-// through the relay gate (no push in between: the voice is off).
+// through the relay gate (no push in between: there is no voice session
+// at all, so the block's own announce push is skipped rather than
+// bumping the relay gate past it — audit B3: with a session attached,
+// that announce push would reach it and itself reset the gate).
 func TestTranscriptOlderThanThePromptIsRefused(t *testing.T) {
 	h := newHarness(t)
-	h.sup.SetVoiceConnected(false) // no announce push to reset the gate
+	h.sup.pusher = nil // no announce push to reset the gate
 	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
 	h.hear("yes")
 	h.clock.Advance(time.Second)
@@ -210,9 +213,10 @@ func TestMutedClientAuthorisesNothing(t *testing.T) {
 // The regression of 2026-09-23 00:52: the shepherd muted at 00:52:16
 // after a question; the block was pushed, the voice model relayed the
 // push back (echo), then the brain's late line was pushed and the model
-// said "yes" to it on its own. Nothing reaches the pane; without the
-// echo guard's substring luck (a line with no "yes" in it) the relay
-// gate alone stops it.
+// said "yes" to it on its own. Nothing reaches the pane either way: a
+// bare "yes" is never an echo (audit B1 — a push merely containing the
+// word "yes" must not count), so it is the relay gate
+// (voice_initiative_ignored) that stops both bare relays here.
 func TestRegressionVoiceSaysYesToAPushWhileMuted(t *testing.T) {
 	h := newHarness(t)
 	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
@@ -235,8 +239,11 @@ func TestRegressionVoiceSaysYesToAPushWhileMuted(t *testing.T) {
 	if _, has := h.pending(); !has {
 		t.Error("the prompt must stay open")
 	}
-	if n := h.log.count("supervisor.voice_initiative_ignored"); n != 1 {
-		t.Errorf("voice_initiative_ignored = %d, want 1 (the \"yes\" is caught as an echo first)", n)
+	if n := h.log.count("supervisor.voice_initiative_ignored"); n != 2 {
+		t.Errorf("voice_initiative_ignored = %d, want 2 (\"yes\" is never an echo, so the relay gate catches both bare relays)", n)
+	}
+	if h.log.count("supervisor.echo_ignored") != 1 {
+		t.Errorf("echo_ignored = %d, want 1 (only the verbatim announce relay)", h.log.count("supervisor.echo_ignored"))
 	}
 }
 
