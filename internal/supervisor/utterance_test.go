@@ -335,6 +335,38 @@ func TestEchoWindowExpires(t *testing.T) {
 	}
 }
 
+// (3d) A bare short answer is never mistaken for an echo just because a
+// recent push happens to contain a substring of it: a substring match
+// without word boundaries let "no" count as an echo of any push
+// containing "now", and let "approve" match a brain block line ending
+// "— approve?" (audit B1).
+func TestBareAnswerNeverTreatedAsEcho(t *testing.T) {
+	m := braintest.NewModel(
+		braintest.Step{Text: braintest.Reply("heard your no.", "")},
+		braintest.Step{Text: braintest.Reply("heard your approve.", "")},
+	)
+	h := newBrainHarness(t, m)
+	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
+
+	h.sup.push("w5:p1", "I'll deploy it now unless you say otherwise.", voice.UrgencyIdle)
+	res := h.say("no")
+	if res.Scheduling == voice.UrgencySilent {
+		t.Errorf(`"no" after a push containing "now" was treated as an echo: %+v`, res)
+	}
+	if h.log.count("supervisor.echo_ignored") != 0 {
+		t.Error(`"no" was logged as echo_ignored`)
+	}
+
+	h.sup.push("w5:p1", "Auth is blocked on the migration — approve?", voice.UrgencyIdle)
+	res = h.say("approve")
+	if res.Scheduling == voice.UrgencySilent {
+		t.Errorf(`"approve" after a push ending "— approve?" was treated as an echo: %+v`, res)
+	}
+	if h.log.count("supervisor.echo_ignored") != 0 {
+		t.Error(`"approve" was logged as echo_ignored`)
+	}
+}
+
 // (4) A bare stop word never reaches a model and never becomes an
 // answer: phase 4 leaves the worker's question open.
 func TestStopLeavesAnOpenPromptOpen(t *testing.T) {

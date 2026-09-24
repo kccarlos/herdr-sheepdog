@@ -459,15 +459,26 @@ func bareWord(text string) string {
 // bareStop reports whether the whole utterance is one of the stop words.
 func bareStop(text string) bool { return bareStopWords[bareWord(text)] }
 
-// isEcho reports whether text equals, or is contained in, a push spoken
-// within echoWindow (case/punctuation-insensitive): the voice relaying
-// its own announcement back through to_supervisor rather than something
-// the CEO said (docs/issues-2026-09-18.md Bug 2).
+// isEcho reports whether text equals a push spoken within echoWindow
+// (case/punctuation-insensitive), or is a long contiguous whole-word run
+// taken from one: the voice relaying its own announcement back through
+// to_supervisor rather than something the CEO said (docs/issues-2026-09-
+// 18.md Bug 2). A bare short answer (yes, no, approve, an option pick, a
+// stop word) is never an echo, however it overlaps a recent push's own
+// words — a substring match without word boundaries let a bare "no"
+// count as an echo of any push containing "now", "not", "know" or
+// "another", and let "approve" match a brain block line ending
+// "— approve?" (audit B1).
 func (s *Supervisor) isEcho(text string) bool {
+	word := bareWord(text)
+	if bareStopWords[word] || bareYesWords[word] || bareNoWords[word] || bareOptionWords[word] > 0 {
+		return false
+	}
 	norm := normalizeEcho(text)
 	if norm == "" {
 		return false
 	}
+	words := strings.Fields(norm)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	cutoff := s.cfg.Now().Add(-echoWindow)
@@ -475,7 +486,40 @@ func (s *Supervisor) isEcho(text string) bool {
 		if p.at.Before(cutoff) {
 			continue
 		}
-		if pn := normalizeEcho(p.text); pn != "" && strings.Contains(pn, norm) {
+		pn := normalizeEcho(p.text)
+		if pn == "" {
+			continue
+		}
+		if pn == norm {
+			return true
+		}
+		pushWords := strings.Fields(pn)
+		// A whole-word run of at least 4 words, covering at least 60% of
+		// the push, taken from it contiguously: enough to be recognisably
+		// "the push, spoken back", not an incidental word or two shared
+		// with a genuinely new instruction.
+		if len(words) >= 4 && float64(len(words)) >= 0.6*float64(len(pushWords)) && containsContiguousWords(pushWords, words) {
+			return true
+		}
+	}
+	return false
+}
+
+// containsContiguousWords reports whether needle appears as a contiguous,
+// in-order run within haystack.
+func containsContiguousWords(haystack, needle []string) bool {
+	if len(needle) == 0 || len(needle) > len(haystack) {
+		return false
+	}
+	for i := 0; i+len(needle) <= len(haystack); i++ {
+		match := true
+		for j, w := range needle {
+			if haystack[i+j] != w {
+				match = false
+				break
+			}
+		}
+		if match {
 			return true
 		}
 	}
