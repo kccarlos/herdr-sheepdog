@@ -5,8 +5,8 @@
 > a stateful brain (see the D7-revised note below), and on 2026-09-18 D1
 > (voice tools that execute) → one decision-maker, plus removal of the
 > template LLM, investigations and the names shepherd / dog / flock. The
-> current contract is [`docs/roles.md`](docs/roles.md); the decisions and
-> the order of work are in [`docs/issues-2026-09-18.md`](docs/issues-2026-09-18.md).
+> current contract is [`docs/roles.md`](../roles.md); the decisions and
+> the order of work are in [`docs/issues-2026-09-18.md`](issues-2026-09-18.md).
 > Read those first; read this for the original reasoning and the herdr facts.
 
 > Working name: **sheepdog** (rename if taken). A voice supervisor for a herdr agent fleet.

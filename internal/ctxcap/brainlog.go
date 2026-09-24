@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 	"sync"
 	"time"
 )
@@ -267,7 +266,3 @@ func DiffBrain(cur, prev BrainStep, hasPrev bool) Diff {
 	reset := prev.Run != cur.Run || prev.Segment != cur.Segment
 	return DiffSnapshots(prev.Step, prev.Snapshot, cur.Snapshot, reset)
 }
-
-// IsRequestsFile reports whether name is a request log (so transcript
-// readers can skip it).
-func IsRequestsFile(name string) bool { return strings.HasSuffix(name, RequestsSuffix) }

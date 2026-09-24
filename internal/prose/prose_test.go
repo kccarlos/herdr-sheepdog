@@ -98,7 +98,4 @@ func TestSpokenEnforcesD9(t *testing.T) {
 	if got := Spoken("a. b. c.", 0); got != "a. b. c." {
 		t.Errorf("no limit: %q", got)
 	}
-	if EndSentence("Hello") != "Hello." || EndSentence("Hi!") != "Hi!" || EndSentence("") != "" || EndSentence(`say "no"`) != `say "no"` {
-		t.Error("EndSentence")
-	}
 }

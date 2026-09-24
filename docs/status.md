@@ -1,134 +1,86 @@
-# Status — 2026-09-18 (morning after the overnight run)
+# Status — 2026-09-23
 
-Living handoff note. Update it whenever a work package lands or a live check
-is done; it is what a fresh session reads first.
+Living handoff note: what is on `main`, what is verified how, and what is
+open. Update it whenever a PR lands or a live check is done; it is what a
+fresh session reads first. The contract is [`roles.md`](roles.md), the
+code map is [`architecture.md`](architecture.md), every option is in
+[`../CONFIG.md`](../CONFIG.md). How the 2026-09-18 redesign landed, PR by
+PR, is in [`history/roles-status.md`](history/roles-status.md); the
+original plan and older run reports are in [`history/`](history/).
 
 ## Where main is
 
-`main` = `3ccb9a4`. Everything in `sheepdog-v1-plan.md` (WP0–WP7) and in
-`docs/roles.md` Delivery (1a, 1b, 1c, 2, 3) is merged. Twenty-five PRs so
-far, every one squash-merged on green CI after independent verification.
+`main` = `cecab0a` (#49), 49 PRs, every one squash-merged on green CI.
+The v1 plan (WP0–WP7) and the whole 2026-09-18 redesign
+([`history/issues-2026-09-18.md`](history/issues-2026-09-18.md), PRs 1–6
+of its work order) are merged; so is everything since.
 
 | Area | State |
 |---|---|
-| herdr client, state table, event log | done (WP1, WP5) |
-| Gemini Live session, `/voice` page, silence gate, stall recycle | done (WP2, WP6, #16) |
-| Supervisor tools, pending action, chattiness levels | done (WP3, #17) |
-| CLI query tool (`codex exec` / `claude -p`, read-only) | done (WP4) |
-| Packaging: config init, changelog | done (WP7a); the plugin shim and launchd template were deleted in PR 2 — the socket subscription is the only event source and the daemon is run by hand |
-| Live e2e against real panes | done (WP7b): scenarios 1–9 pass, 10 partial |
-| `/debug`: Swimlane, Conversation, Supervisor, Events, State tabs | done (#16, #19, #22) |
-| Brain (stateful SVP), prompt workspace + overrides, evals | done (#20, #21) |
-| Enrichment + promises; push judgment under the chattiness ceiling | done (#23, #24) |
-| Logo (README picture, both pages, favicons) | done (#18) |
-| Brain model switch at runtime (`/debug` picker, `GET /api/brain/models`, `PUT /api/brain/model`, `session.brain_model`) | done (#25); verified with `--brain=fake` and one live model-list call |
-| DeepSeek as a second brain provider (`[deepseek]`, `brain.provider`, `OpenAICompatModel`, provider select on `/debug`, `session.brain_provider`) | in review; verified live: 11 DeepSeek calls (model list, tool-using asks at `low` and twice at `high`, a `prompt`+`promise` propose, a seeded second turn without earlier reasoning) |
-| Phone/LAN access: `web.bind`/`web.token`, bearer/query/cookie auth on `/ws`, `/events` and `/api/*`, `POST /api/login`, public `GET /api/hello`, inline token prompt on `/voice`/`/debug`, LAN URLs in the startup banner | in review; verified with the fake daemon (`--brain=fake --herdr=mock`), not yet on a real phone |
+| herdr client, debounced watcher, state table, event log (stable ids, day files, `Last-Event-ID` replay) | done |
+| Voice: Gemini Live and GPT-Live providers, runtime switch (`PUT /api/voice/provider`), two tools (`to_supervisor`, `stop`), no mid-sentence interruption, silence gate, stall recycle, adaptive playback buffer | done (#30, #34, #42, #43, #45, #46) |
+| Brain: stateful agent loop over a transcript window, tools, provenance, promises, push judgment under the chattiness ceiling, Gemini and DeepSeek providers, runtime model switch | done (#20–#26) |
+| Brain-side intent: one `KindUtterance` turn per shepherd input with the roster, the pending prompt's options and the open promises in the request; code fast paths (bare yes/no, bare stop word); stop procedure | done (#30, #41) |
+| The one rail: `send_keys` only on the shepherd's real input (voice transcription, typed text or a tap), within `supervisor.authorise_window_s` | done (#39) |
+| Approval prompts parsed by code; blocked → blocked (post-answer poll + reconciler); revived prompts | done (#31, #33, #37, #48) |
+| Investigations: background CLI sub-agent jobs with session resume and a ledger | done (#32) |
+| Deliver-later: a `to_supervisor` call waits `brain.reply_wait_s`, then the reply is pushed when it lands | done (#47) |
+| "New conversation" (brain transcript window + voice memory) | done (#44, #48) |
+| Phone/LAN access: `web.bind` / `web.token`, cookie login, `GET /api/hello` | done (#36) |
+| `/debug`: Conversation, Swimlane, Supervisor, Context, Events, State tabs | done (#16, #19, #22, #49) |
+| Evals (`sheepdog eval --set svp\|assistant`, offline by default) | done (#21) |
+| iOS companion app (separate repo, `herdr-sheepdog-ios`, the `/ws` voice contract) | started |
 
-## Verified live vs. verified with the fake model only
+In review: `chore: dead code and stale docs` (this page), then
+`refactor!: remove the legacy voice-tool surface and ask/propose request
+kinds` (stacked on it): the supervisor's pre-redesign tool methods
+(`Briefing`, `Ask`, `Propose`, `Confirm`, `Cancel`, `Note`) and the
+brain's `KindAsk` / `KindPropose` go; `brain.propose_timeout_s` and
+`brain.enrich_timeout_s` are renamed (old names still accepted).
 
-Live (real Gemini) so far: WP0–WP7b, #16, #17, brain 1a (4 turns, 2.75
-model calls/turn avg), 1b assistant eval (23/4/20 skipped when the daily
-quota ran out).
+## Verified live vs. with the fake model only
 
-**Fake model only** (Gemini free tier hit its ~20 req/day/model/key cap on
-2026-09-18): 1c Supervisor tab, phase 2 (enrichment, promises), phase 3
-(push judgment, yield, coalescing). The logic is unit- and daemon-tested
-with `--brain=fake`; the real model's behaviour on it is not yet observed.
+Live: the v1 scenarios (WP7b, 1–9 pass, 10 partial,
+[`history/e2e-results.md`](history/e2e-results.md)), the brain on Gemini
+and on DeepSeek (tool-using turns, the model switch), investigations with
+real Codex/Claude CLI runs, headset sessions on Gemini Live and GPT-Live,
+the audio e2e harness ([`audio-e2e-results.md`](audio-e2e-results.md)).
 
-Live on DeepSeek (`deepseek-flash`, 2026-09-18, `brain-test`): an ask
-that reads a screen (2 calls, 2.8–2.9 s at `low` and `high`), a propose
-that sends `prompt` and `promise` in one step (3.3 s; the
-`reasoning_content` replay was accepted on the second call), and a
-second turn seeded with a transcript whose reasoning had been stripped
-(accepted: the replay rule holds within a turn's tool loop only). The
-provider switch itself (`/debug` select, `PUT`, restart) was verified
-with `--brain=fake` and its two fake providers.
+Fake model / mock herdr only (`--brain=fake --herdr=mock`): most of the
+supervisor's edge cases (reprompt races, deliver-later staleness, reset
+leftovers, echo guard), which are unit- and daemon-tested. Gemini's free
+tier allows about 20 requests per model per key per day; run live checks
+sparingly and `make eval-live` deliberately.
 
-## Live checks to run when quota allows (text first, audio last)
+## Open
 
-0. Key check (free): `set -a; source .env; set +a; curl -s -H "x-goog-api-key: $GEMINI_API_KEY" https://generativelanguage.googleapis.com/v1beta/models | head -c 200`
-1. Brain re-check (2 turns): `bin/sheepdog brain-test --env-file .env --question "what is auth doing?" --agent auth --state working --fixture codex-working.screen.txt` and the propose variant with `--kind propose --question "run the tests and let me know when it's done" --say "..." --alias auth --state idle` (expect `prompt` then `promise`).
-2. Phase 2/3 sequence, real brain, no voice (~10 calls):
-   `SHEEPDOG_DATA_DIR=/tmp/sheepdog-live bin/sheepdog serve --env-file .env --brain=on --herdr=mock --voice=off --dev --port 7799`, then on `/debug`: inject Codex approval preset → utterance "yes" → "tell auth to run the tests and let me know when it's done" → state working → inject done (after-approval screen). Expect: question pushed before the first `brain.step`; one `voice.push` per finish carrying the promise line; `brain.push_decision {via: brain}`; repeat at `quiet` (only the promise line); a second untouched pane at `normal` → `urgency_applied: skip, reason: ceiling`, no turn.
-3. `make eval-live` — a full day's budget on one key; run deliberately, once.
-4. Model switch, real brain (~3 calls): switch to another Gemini model
-   on `/debug` after a turn that used a tool, then ask something that
-   reads a screen; expect the new model's `brain.step`s to succeed (the
-   earlier tool call is replayed without its thought signature). The
-   provider half — switch to deepseek, one tool-using question — is
-   done live (DeepSeek PR); what is left is a Gemini→DeepSeek→Gemini
-   sequence in one daemon run, which needs Gemini quota.
-5. One voice session (ask the user; audio is the quota-hungry path): Codex in `--sandbox read-only -a on-request`; say "why did that one fail?" after a finish, "let me know when it's done", "stop" mid-echo.
+- **`source: worker`** for investigations (asking the idle worker in its
+  own pane): its finish would produce both the announce line and the
+  delivery line for one event, which the one-push-per-event rule
+  forbids. The ledger already carries the field.
+- **agy blocks**: herdr 0.9.0 does not detect Antigravity CLI prompts as
+  `blocked` (needs a local `~/.config/herdr/agent-detection/agy.toml`
+  override or an upstream fix).
+- **GoAway / context compression** (v1 scenario 10) never observed live;
+  `voice.turn`, `voice.stalled` and `voice.recycle` are the signals.
+- **Quota**: 2–3 brain calls per shepherd turn exhaust the Gemini free
+  tier quickly; DeepSeek (`brain.provider = "deepseek"`) is the paid
+  alternative for the brain.
+- **Scratch daemons**: `SHEEPDOG_DATA_DIR` does not move `state.path`;
+  set `SHEEPDOG_STATE_PATH` too, or a second daemon shares the user's
+  `state.json`.
+- **`v0.1.0`** is not tagged yet (the release workflow is ready).
 
-## Next: the 2026-09-18 redesign (PR 1 of 7 in review)
+## How work is done here
 
-`docs/issues-2026-09-18.md` records what the headset sessions on
-2026-09-18 showed (the assistant answering approval prompts by itself,
-`blocked → blocked` invisible, pushes cutting speech) and the decisions
-agreed with the CEO: one decision-maker (the assistant keeps only
-`to_supervisor(text)` and `stop()`; the SVP owns intent behind the
-rail), stop as a per-phase code procedure, nothing interrupting the
-assistant mid-sentence, `blocked → blocked` detection. Work order is at
-the end of that file. PR 1 (D1-revised) is in review: the voice's two
-tools, `brain.KindUtterance` with the roster sentence in the request,
-the `note` tool on the brain, the code fast paths, the stop procedure
-(`supervisor.cancel_window_s`), `voice.name` and the `/debug` labels.
-PR 2 (cleanup) removed the template LLM: approval prompts are parsed
-in code (`internal/herdr/prompt.go`), a finish is phrased by the brain
-or by the code sentence "<alias> finished.", every event gets exactly
-one push, and `[llm]`, `llm-test`/`ask-test` and the plugin shim are
-gone. PR 3 (investigations) added the brain's `investigate` tool and the
-background job behind it: the read-only CLI sub-agent runs in the
-worker's repository with no time limit beyond `brain.investigate_max_s`,
-the brain acknowledges at once with `pending: true`, the answer comes
-back as a `KindInvestigation` event turn pushed `idle` and tagged
-`answers_job`, the ledger lives in `session.investigations` (so `recall`
-and follow-ups survive a restart), a follow-up resumes the same CLI
-session, and stop cancels a running look. Verified with a stub CLI
-backend on the fake daemon and four real CLI runs for the session/resume
-mechanics; `source: worker` is deliberately still open. PR 4
-(`blocked → blocked`) added the post-answer poll and the periodic/startup
-reconciler (`internal/supervisor/reprompt.go`, `supervisor.reprompt_poll_s`),
-both raising a synthetic `blocked → blocked` transition through the
-normal `HandleTransition` path. PR 5 (no mid-sentence interruption) added
-`Speaking()` to the gemini session (narrower than `TurnOpen()`: true only
-once output is actually flowing) and downgrades an INTERRUPT push or
-tool result to WHEN_IDLE while it is true, at send time (`peekPush`,
-`execTool`), except a due promise, a decision on a brand new block
-(`due_promise`/`needs_user` tags from the supervisor's announce path) or
-`stop()`; `voice.push`/`voice.tool_result` gain `scheduling_sent` and
-`/debug` marks a downgraded one "deferred". PR 6 (polish) closed the last
-item on that list: a promise from an earlier daemon run is announced
-once at startup ("Still watching for: …", `promise.carried_over`) and
-left out of the briefing trailer afterwards, and a status question whose
-roster has not changed within `supervisor.repeat_window_s` (default
-60 s) gets a "no change since I last checked" note instead of the
-roster repeated in full. Names from
-here on: shepherd (operator), the dog (voice + brain), the flock
-(workers); `docs/roles.md` is the contract and maps the old CEO / SVP /
-assistant terms still present in code.
-
-## Known gaps and follow-ups
-
-- Found in the 18:44Z session on 2026-09-18: `working → idle` (a finish the
-  user was looking at) was never announced, only `working → done` was —
-  fixed in `transitions.go`/`onDone` (see PR for the promise-matching fix).
-- herdr 0.9.0 does not detect Antigravity CLI prompts as `blocked` (needs a local `~/.config/herdr/agent-detection/agy.toml` override or an upstream manifest fix); user chose to skip agy for now.
-- Eval: "Okay, let's use that then." still routes to `confirm` (left rather than over-fit).
-- Scenario 10 (GoAway/compression) never observed live; `voice.turn`/`voice.stalled`/`voice.recycle` are the signals.
-- Consider a billed Gemini project for the brain (2–3 calls per CEO turn will exhaust the free daily cap quickly); DeepSeek is now the paid alternative for the brain only (`brain.provider = "deepseek"` or the `/debug` picker).
-- `SHEEPDOG_DATA_DIR` does not move `state.path` (it is resolved against the default data dir at `Default()` time): a second daemon started with only `SHEEPDOG_DATA_DIR` set shares the user's `state.json`. Always set `SHEEPDOG_STATE_PATH` too for a scratch daemon.
-- `v0.1.0` not tagged yet (release workflow is ready; user wanted a satisfying voice session first).
-
-## How work is done here (see also the memory notes)
-
-Orchestrator + one coding sub-agent at a time in an isolated worktree under
-`.claude/worktrees/<name>` (gitignored); Conventional Commits; PR per work
-package; orchestrator re-runs `go build/vet`, `go test -race ./...`,
-`golangci-lint run`, `node --test` (after `source ~/.nvm/nvm.sh`) and a
-secret grep before opening the PR; CI watched with
-`GH_TOKEN="$GITHUB_PAT" gh run watch`; squash-merge on green; worktree
-removed and branch deleted after merge. Sub-agents never touch port 7777
-(the user's daemon) or herdr's `kvoice` workspace; they use port 7799 and
-`--herdr=mock`.
+An orchestrating session delegates work packages to at most two coding
+sub-agents at a time, each in its own worktree under
+`.claude/worktrees/<name>` (gitignored). Conventional Commits; one PR per
+package; before opening it: `go build ./... && go vet ./...`,
+`go test -race ./...` with every API key empty, `golangci-lint run`,
+`node --test 'web/voice/*.test.mjs' 'web/debug/*.test.mjs'` and the
+offline evals. CI is watched to green; PRs are squash-merged with the
+conventional title as the subject. Sub-agents never touch port 7777 (the
+user's daemon), the herdr socket or the default data dir: a scratch
+daemon gets its own port, `SHEEPDOG_DATA_DIR`, `SHEEPDOG_STATE_PATH`, an
+empty `--config` and `--brain=fake --herdr=mock --voice=off --dev`.

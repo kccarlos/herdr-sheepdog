@@ -9,7 +9,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 )
 
-// blocked -> blocked is a block (docs/issues-2026-09-18.md, docs/roles.md
+// blocked -> blocked is a block (docs/history/issues-2026-09-18.md, docs/roles.md
 // "Not yet"): herdr reports a pane's status only on change, so a worker
 // that answers one approval prompt and is already showing the next
 // within herdr's own poll window never leaves `blocked` — there is no
@@ -35,7 +35,7 @@ import (
 // whichever mechanism is asking.
 
 // defaultRepromptPollInterval is the poll's cadence
-// (docs/issues-2026-09-18.md: 1 s). Config.RepromptPollInterval exists
+// (docs/history/issues-2026-09-18.md: 1 s). Config.RepromptPollInterval exists
 // only so tests can shrink it; production always gets this value.
 const defaultRepromptPollInterval = time.Second
 

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -206,7 +207,7 @@ func TestRunMockVoiceOffFullChain(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = f.Close() }()
-	evs, err := eventlog.Replay(f)
+	evs, err := readEventFile(f)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -386,7 +387,7 @@ func TestRunCLIDetection(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer func() { _ = f.Close() }()
-		evs, err := eventlog.Replay(f)
+		evs, err := readEventFile(f)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -492,7 +493,7 @@ func TestBrainModelPersistsAcrossRestart(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer func() { _ = f.Close() }()
-		evs, err := eventlog.Replay(f)
+		evs, err := readEventFile(f)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -588,7 +589,7 @@ func TestBrainProviderRestoreFallsBackToConfigured(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer func() { _ = f.Close() }()
-		evs, err := eventlog.Replay(f)
+		evs, err := readEventFile(f)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -749,4 +750,19 @@ func TestLanURLsShape(t *testing.T) {
 			t.Errorf("lanURLs entry %q malformed or loopback", u)
 		}
 	}
+}
+
+// readEventFile decodes a JSONL event file (the daemon's own log, so a
+// malformed line is a test failure, not something to skip).
+func readEventFile(r io.Reader) ([]eventlog.Event, error) {
+	var out []eventlog.Event
+	dec := json.NewDecoder(r)
+	for dec.More() {
+		var ev eventlog.Event
+		if err := dec.Decode(&ev); err != nil {
+			return out, err
+		}
+		out = append(out, ev)
+	}
+	return out, nil
 }

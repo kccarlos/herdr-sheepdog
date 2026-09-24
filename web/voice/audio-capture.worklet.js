@@ -6,7 +6,7 @@
 // Runs on the audio rendering thread. Mute is honoured here as well as in
 // the page, so a muted client posts nothing at all (contract: muted means
 // silence, not zeros). The silence gate withholds near-zero frames after
-// a quiet stretch for the same reason (docs/e2e-results.md): the page is
+// a quiet stretch for the same reason (docs/history/e2e-results.md): the page is
 // told about each transition so the daemon can log it.
 import { CapturePipeline, SilenceGate, levelOf, FRAME_SAMPLES } from './audio-util.js';
 

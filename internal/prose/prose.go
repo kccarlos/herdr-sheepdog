@@ -5,7 +5,6 @@ import (
 	"errors"
 	"regexp"
 	"strings"
-	"unicode"
 )
 
 // DefaultResultBytes is the truncation limit for a screen tail put in a
@@ -150,22 +149,6 @@ func firstSentences(s string, n int) string {
 		return s
 	}
 	return strings.TrimSpace(s[:ends[n-1][1]])
-}
-
-// EndSentence makes sure s ends with terminal punctuation.
-func EndSentence(s string) string {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return s
-	}
-	last := rune(s[len(s)-1])
-	if unicode.IsPunct(last) && strings.ContainsRune(".!?", last) {
-		return s
-	}
-	if strings.ContainsRune(`"')]`, last) {
-		return s
-	}
-	return s + "."
 }
 
 // TruncateRunes cuts s to n runes, appending an ellipsis when it did.

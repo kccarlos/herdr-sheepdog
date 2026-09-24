@@ -216,7 +216,7 @@ func TestBrainSendKeysBlockedByTheRail(t *testing.T) {
 // Once a pending answer_prompt expires (or is otherwise dropped) while
 // the prompt is still on the pane's screen, a later send_keys revives it
 // from the screen and the rail's normal checks apply to what is actually
-// there (docs/issues-2026-09-18.md "an expired approval prompt can never
+// there (docs/history/issues-2026-09-18.md "an expired approval prompt can never
 // be approved").
 func TestBrainSendKeysRevivesAnExpiredPrompt(t *testing.T) {
 	m := braintest.NewModel(

@@ -24,8 +24,10 @@
 //     mock counterpart of a worker showing a new prompt with no herdr
 //     status change in between, for exercising the post-answer poll and
 //     the reconciler (docs/roles.md "blocked -> blocked is a block").
-//   - POST /api/herdr/event: the plugin-shim channel (WP7): the body is the
-//     HERDR_PLUGIN_EVENT_JSON object and status events are fed to the
+//   - POST /api/herdr/event: an optional second way into the Watcher
+//     besides the herdr socket subscription (another process or a test
+//     can feed it): the body is a herdr event object in the
+//     HERDR_PLUGIN_EVENT_JSON shape and status events are fed to the
 //     Watcher through Inject.
 //   - GET /ws: the browser audio pipe of docs/ws-contract.md, server side.
 //     Binary frames go to the voice session, JSON control messages are

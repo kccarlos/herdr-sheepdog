@@ -18,7 +18,7 @@ asked for approval), Claude Code 2.1.275 (`--permission-mode default
 client (no microphone): `testdata/audio/question.wav` streamed as 20 ms
 frames plus 4 s of trailing silence for the audio trials, `{"type":"text"}`
 utterances otherwise. The full narrative, latencies and bugs are in
-`docs/e2e-results.md`.
+`docs/history/e2e-results.md`.
 
 Four daemon runs (line ranges are 1-based line numbers in the JSONL):
 

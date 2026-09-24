@@ -236,8 +236,8 @@ func promiseTrailer(open []state.Promise) string {
 }
 
 // announceStartupPromises speaks, once per daemon run, the open promises
-// an earlier run left behind (docs/roles.md "Status",
-// docs/issues-2026-09-18.md "Smaller items"): this run's transcript has
+// an earlier run left behind (docs/history/roles-status.md,
+// docs/history/issues-2026-09-18.md "Smaller items"): this run's transcript has
 // no memory of making them, so the brain's announce turns cannot be
 // trusted to bring them up, and the shepherd is still owed an answer.
 // Called once, the first time SetVoiceConnected(true) fires (a live

@@ -829,7 +829,7 @@ export class CapturePipeline {
 /**
  * Silence gate for capture frames (docs/ws-contract.md, "Silence gate").
  * Near-zero PCM streamed continuously degrades the Gemini session
- * (docs/e2e-results.md, "zero-valued audio frames"), so frames whose peak
+ * (docs/history/e2e-results.md, "zero-valued audio frames"), so frames whose peak
  * stays below `floor` (Int16 LSB) for `holdMs` are not sent at all. The
  * last `prerollMs` of gated frames are kept in a ring and released with
  * the first loud frame so the first syllable is not clipped.

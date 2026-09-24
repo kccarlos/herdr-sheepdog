@@ -180,7 +180,7 @@ type Supervisor struct {
 	// RepeatWindowS is how long an unchanged roster sentence counts as
 	// "already reported": a status question inside it gets a "no change
 	// since I last checked" note instead of the roster repeated in full
-	// (docs/issues-2026-09-18.md "Smaller items"; default 60).
+	// (docs/history/issues-2026-09-18.md "Smaller items"; default 60).
 	RepeatWindowS int `toml:"repeat_window_s"`
 	// AuthoriseWindowS is how recent the shepherd's own words (a voice
 	// transcript, typed text or a tap) must be to authorise answering a

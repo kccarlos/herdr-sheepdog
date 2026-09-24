@@ -124,13 +124,6 @@ func NewGenaiModel(keys []string, log logging.Logger) (*GenaiModel, error) {
 	}}, nil
 }
 
-// KeyIndex returns the index of the key in use (reports; never the key).
-func (m *GenaiModel) KeyIndex() int {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.idx
-}
-
 // Generate implements Model.
 func (m *GenaiModel) Generate(ctx context.Context, model string, contents []*genai.Content, cfg *genai.GenerateContentConfig) (*genai.GenerateContentResponse, error) {
 	var resp *genai.GenerateContentResponse

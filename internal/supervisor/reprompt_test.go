@@ -289,7 +289,7 @@ func TestBriefingNamesNewQuestionAfterReprompt(t *testing.T) {
 }
 
 // TestFastPathAnswerRepromptsToNewPrompt is the flagship round trip
-// (docs/issues-2026-09-18.md "blocked -> blocked is a block"): the
+// (docs/history/issues-2026-09-18.md "blocked -> blocked is a block"): the
 // bare-word fast path answers a prompt with keys, the pane stays
 // "blocked" exactly as herdr would report it within its own poll window,
 // the post-answer poll notices the next prompt and raises it, and the

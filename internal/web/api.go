@@ -511,10 +511,13 @@ func (s *Server) routeUtterance(ctx context.Context, text string) (voice.ToolCal
 	return call, res, nil
 }
 
-// handleHerdrEvent is the plugin-shim channel: the body is the
-// HERDR_PLUGIN_EVENT_JSON object. Status events are injected into the
-// Watcher; lifecycle events are logged and acknowledged (the Watcher
-// learns about new panes from its own fleet subscription and snapshot).
+// handleHerdrEvent is an optional second way into the Watcher besides
+// the herdr socket subscription (another process or a test can feed it;
+// herdr itself needs no configuring for it): the body is a herdr event
+// object in the HERDR_PLUGIN_EVENT_JSON shape. Status events are
+// injected into the Watcher, logged with source "http"; lifecycle events
+// are logged and acknowledged (the Watcher learns about new panes from
+// its own fleet subscription and snapshot).
 func (s *Server) handleHerdrEvent(w http.ResponseWriter, r *http.Request) {
 	if s.deps.Watcher == nil {
 		writeError(w, http.StatusServiceUnavailable, "no herdr watcher (mock mode)")

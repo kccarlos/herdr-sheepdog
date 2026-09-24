@@ -10,19 +10,19 @@
 A voice supervisor for a herdr agent fleet, built on Gemini Live (or GPT-Live, switchable at runtime): ask
 what is happening, get told proactively when an agent is blocked,
 answer its question, give new instructions, and interrupt — without
-touching a keyboard. See [`sheepdog-v1-plan.md`](sheepdog-v1-plan.md)
-for the full design and [`docs/architecture.md`](docs/architecture.md)
-for a shorter orientation.
+touching a keyboard. [`docs/roles.md`](docs/roles.md) is the design
+contract, [`docs/architecture.md`](docs/architecture.md) a shorter
+orientation to the code, and [`docs/status.md`](docs/status.md) what is
+done and what is open.
 
-**Status:** WP1–WP7a are in — herdr client, state table, the Gemini
-Live voice session, the supervisor and the voice's two tools
-(`to_supervisor`, `stop`), the supervisor brain, the CLI query tool
-behind its `run_cli`, the daemon (`sheepdog serve`) with `/voice` and
-`/debug`, and packaging/docs.
-WP7b ran the plan's scenarios against real agy, Codex and Claude Code
-panes and a live Gemini session: see [`docs/e2e-results.md`](docs/e2e-results.md)
-(scenario table, measured latencies, open issues) and the recorded event
-log in `testdata/e2e/`.
+**Status:** the v1 plan and the 2026-09-18 redesign are in — herdr
+client, state table, the voice session (Gemini Live or GPT-Live) with
+its two tools (`to_supervisor`, `stop`), the stateful supervisor brain
+with the one rail, investigations, the daemon (`sheepdog serve`) with
+`/voice` and `/debug`, and packaging/docs. The v1 scenarios ran against
+real agy, Codex and Claude Code panes and a live Gemini session: see
+[`docs/history/e2e-results.md`](docs/history/e2e-results.md) and the
+recorded event log in `testdata/e2e/`.
 
 ## Install in 3 steps
 
@@ -325,7 +325,7 @@ affected by this; this warning is about the worker panes herdr manages.)
   flicker doesn't fire early) + the code that parses the prompt
   (0.8–1.3 s) + the model's first audio (0.6–0.9 s). Measured: 4.6–5.0 s
   from the `blocked` event to the first spoken audio
-  (`docs/e2e-results.md`). herdr 0.9.0's bundled/remote detection rules
+  (`docs/history/e2e-results.md`). herdr 0.9.0's bundled/remote detection rules
   do not recognise Antigravity CLI 1.2.5 prompts, so `agy` panes are
   never reported `blocked` (see the same document).
 - **A status question:** one brain turn with no tool call — the roster
@@ -370,6 +370,7 @@ make changelog            # regenerates CHANGELOG.md (scripts/changelog.sh)
 make clean
 ```
 
-See [`sheepdog-v1-plan.md`](sheepdog-v1-plan.md) for the full design and
-work package breakdown, and [`CONFIG.md`](CONFIG.md) for every config
-key.
+See [`CONFIG.md`](CONFIG.md) for every config key, and
+[`docs/history/`](docs/history/) for the original plan
+([`sheepdog-v1-plan.md`](docs/history/sheepdog-v1-plan.md)) and older
+run reports.

@@ -114,7 +114,7 @@ type Request struct {
 	// is byte-identical to the one last delivered, within
 	// supervisor.repeat_window_s: requestText adds a note so the brain
 	// can say "no change since I last checked" itself rather than
-	// repeat the roster (docs/issues-2026-09-18.md "Smaller items").
+	// repeat the roster (docs/history/issues-2026-09-18.md "Smaller items").
 	RosterUnchangedFor time.Duration
 	// Stopped is what the stop procedure stopped, for a KindStop turn
 	// ("the instruction to auth was interrupted").
@@ -259,7 +259,7 @@ const (
 	// worker's repository.
 	InvestigationSourceCLI = "cli"
 	// InvestigationSourceWorker is the idle worker itself, asked in its
-	// own pane. Not implemented yet (docs/roles.md "Status").
+	// own pane. Not implemented yet (docs/status.md "Open").
 	InvestigationSourceWorker = "worker"
 )
 

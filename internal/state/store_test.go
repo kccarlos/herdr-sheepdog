@@ -108,7 +108,7 @@ func TestPersistenceRoundTrip(t *testing.T) {
 	if err := s.SetPending(PendingAction{ID: "p1", PaneID: "w5:p1", Kind: PendingAnswerPrompt, SpokenSummary: "auth asks to create hello.txt", CreatedAt: t0, ExpiresAt: t0.Add(2 * time.Minute)}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.UpdateSession(func(ss *Session) { ss.VoiceConnected = true; ss.LastBriefing = "one agent"; ss.LastBriefingAt = &t0 }); err != nil {
+	if err := s.UpdateSession(func(ss *Session) { ss.VoiceConnected = true; ss.Chattiness = "quiet" }); err != nil {
 		t.Fatal(err)
 	}
 
@@ -137,7 +137,7 @@ func TestPersistenceRoundTrip(t *testing.T) {
 	if !ok || p.ID != "p1" || p.SpokenSummary != "auth asks to create hello.txt" || !p.ExpiresAt.Equal(t0.Add(2*time.Minute)) {
 		t.Errorf("pending restored = %+v, %v", p, ok)
 	}
-	if ss := s2.Snapshot().Session; !ss.VoiceConnected || ss.LastBriefing != "one agent" || ss.LastBriefingAt == nil || !ss.LastBriefingAt.Equal(t0) {
+	if ss := s2.Snapshot().Session; !ss.VoiceConnected || ss.Chattiness != "quiet" {
 		t.Errorf("session restored = %+v", ss)
 	}
 	// Re-applying the restart bootstrap transition keeps state_since.
@@ -418,5 +418,22 @@ func TestSyntheticPaneSurvivesHerdrRemoval(t *testing.T) {
 	}
 	if _, ok := s.Get("fake:1"); ok {
 		t.Fatal("synthetic pane not removed by inject close")
+	}
+}
+
+// A state file written before last_briefing / last_briefing_at were
+// dropped from Session still loads, keeping everything else.
+func TestOpenIgnoresDroppedSessionFields(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	legacy := `{"agents":{},"session":{"voice_connected":true,"last_briefing":"one agent","last_briefing_at":"2026-09-01T10:00:00Z","chattiness":"quiet"}}`
+	if err := os.WriteFile(path, []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Open(path, Options{})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if ss := s.Snapshot().Session; !ss.VoiceConnected || ss.Chattiness != "quiet" {
+		t.Errorf("session = %+v", ss)
 	}
 }

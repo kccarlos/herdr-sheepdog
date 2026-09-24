@@ -40,7 +40,7 @@ test('arrows per interaction kind, in their lanes', () => {
     ev('voice.transcript.in', { text: 'tell auth ', final: false }),
     ev('voice.transcript.in', { text: 'to skip the flaky test', final: false }),
     ev('voice.tool_call', { id: 'c1', name: 'propose', args: { agent: 'auth', instruction: 'skip the flaky test' } }, 400),
-    ev('llm.call', { template: 'resolve_instruction', model: 'gemini-3.5-flash-lite', dur_ms: 786 }, 786),
+    ev('brain.step', { template: 'resolve_instruction', model: 'gemini-3.5-flash-lite', dur_ms: 786 }, 786),
     ev('pending.created', { id: 'si-1', kind: 'send_instruction' }, 2, 'supervisor', 'wA:p1'),
     ev('herdr.send', { kind: 'prompt', text: 'skip the flaky test' }, 300, 'herdr', 'wA:p1'),
     ev('voice.tool_result', { id: 'c1', name: 'propose', spoken: 'Sent.', clarify: false, scheduling: 'interrupt', dur_ms: 1090, wait_ms: 0 }, 1),
@@ -55,7 +55,7 @@ test('arrows per interaction kind, in their lanes', () => {
   ]);
   // One merged card per transcript; every hop has its arrow.
   assert.deepEqual(types(rows), [
-    'voice.transcript.in', 'voice.tool_call', 'llm.call', 'pending.created', 'herdr.send', 'voice.tool_result',
+    'voice.transcript.in', 'voice.tool_call', 'brain.step', 'pending.created', 'herdr.send', 'voice.tool_result',
     'voice.transcript.out', 'herdr.state', 'herdr.transition', 'herdr.read', 'gap', 'cli.run', 'voice.push', 'voice.transcript.out',
   ]);
   assert.deepEqual(arrows(rows), [
@@ -63,16 +63,16 @@ test('arrows per interaction kind, in their lanes', () => {
     'voice>you:speech', 'herdr>sup:state', 'sup>herdr:call', 'sup>herdr:call', 'sup>voice:push', 'voice>you:speech',
   ]);
   const c = cards(rows);
-  const [input, call, llm, pending, send, result, speech, , transition, read, cli, push, spoken] = c;
+  const [input, call, step, pending, send, result, speech, , transition, read, cli, push, spoken] = c;
   assert.equal(input.lane, 'you');
   assert.equal(input.text, 'tell auth to skip the flaky test');
   assert.equal(input.fragments, 2);
   assert.equal(input.arrowOut.label, 'speech');
   assert.equal(call.lane, 'voice');
   assert.match(call.arrowOut.label, /^propose\(agent="auth", instruction=/);
-  assert.equal(llm.lane, 'herdr');
-  assert.equal(llm.arrowOut.label, 'resolve_instruction · gemini-3.5-flash-lite · 786 ms');
-  assert.equal(llm.arrowOut.level, 'ok');
+  assert.equal(step.lane, 'sup');
+  assert.equal(step.arrowOut.label, 'resolve_instruction · gemini-3.5-flash-lite · 786 ms');
+  assert.equal(step.arrowOut.level, 'ok');
   assert.equal(pending.lane, 'sup');
   assert.equal(pending.arrowOut, null);
   assert.equal(send.arrowOut.label, 'prompt · "skip the flaky test"');
@@ -120,11 +120,11 @@ test('chain grouping: a user turn owns its call, the nested work, the result and
     ev('voice.tool_result', { id: 'c1', name: 'briefing', spoken: 'One agent working.', scheduling: 'interrupt', dur_ms: 0 }, 1),
     ev('voice.transcript.out', { text: 'One agent working.', final: false }, 600),
     ev('voice.turn', { turn: 1, end: 'complete', responded: true, input_to_response_ms: 1001, tool_calls: 1, dur_ms: 1600 }, 300),
-    // A herdr story with no tool call: transition → read → llm → pending → push → speech.
+    // A herdr story with no tool call: transition → read → brain step → pending → push → speech.
     ev('herdr.state', { state: 'blocked', agent: 'agy', source: 'http' }, 4000, 'herdr', 'wA:p1'),
     ev('herdr.transition', { from: 'done', to: 'blocked', agent: 'agy', workspace_label: 'auth', name: 'one', source: 'http' }, 3000, 'herdr', 'wA:p1'),
     ev('herdr.read', { source: 'recent_unwrapped', lines: 80, dur_ms: 1 }, 3, 'herdr', 'wA:p1'),
-    ev('llm.call', { template: 'summarize_block', model: 'gemini-3.5-flash-lite', dur_ms: 1278 }, 1278),
+    ev('brain.step', { template: 'summarize_block', model: 'gemini-3.5-flash-lite', dur_ms: 1278 }, 1278),
     ev('pending.created', { id: 'ap-1', kind: 'answer_prompt', question: 'accept the edit?' }, 2, 'supervisor', 'wA:p1'),
     ev('voice.push', { text: 'auth-one is waiting for you to accept the edit.', urgency: 'idle' }, 1),
     ev('voice.transcript.out', { text: 'Auth one is waiting.', final: false }, 669),
@@ -145,7 +145,7 @@ test('chain grouping: a user turn owns its call, the nested work, the result and
   assert.equal(chainOf('voice.turn'), 'turn:1');
   const loose = chainOf('herdr.transition');
   assert.match(loose, /^loose:/);
-  for (const type of ['herdr.state', 'herdr.read', 'llm.call', 'pending.created', 'voice.push']) assert.equal(chainOf(type), loose, type);
+  for (const type of ['herdr.state', 'herdr.read', 'brain.step', 'pending.created', 'voice.push']) assert.equal(chainOf(type), loose, type);
   assert.equal(chainOf('voice.transcript.out', 1), loose, 'the speech after the push belongs to the push chain');
   const turn2 = chainOf('voice.text', 1);
   assert.match(turn2, /^turn:/);
@@ -445,10 +445,10 @@ test('e2e fixture, scenarios 2–5: the expected arrow sequence', () => {
   assert.ok(shown < total, 'stats and silent pushes are hidden');
   const seq = cards(rows).filter((r) => r.arrowOut).map((r) => `${r.arrowOut.from}>${r.arrowOut.to} ${r.arrowOut.label}`);
   assert.deepEqual(seq, [
-    // scenario 2: proactive block (agy) → summarize → push → spoken; then the snapshot tick clears it
+    // scenario 2: proactive block (agy) → push → spoken; then the snapshot tick clears it
+    // (the fixture's llm.call events predate the brain and render as plain cards, no arrow)
     'herdr>sup done → blocked',
     'sup>herdr recent_unwrapped · 80 lines',
-    'sup>herdr summarize_block · gemini-3.5-flash-lite · 1.3 s',
     'sup>voice push · idle',
     'voice>you 🔊 669 ms after push',
     'herdr>sup blocked → done',
@@ -460,7 +460,6 @@ test('e2e fixture, scenarios 2–5: the expected arrow sequence', () => {
     // scenario 2/3: block → push → "Yes." → keys ["1"] → confirmed → finished
     'herdr>sup done → blocked',
     'sup>herdr recent_unwrapped · 80 lines',
-    'sup>herdr summarize_block · gemini-3.5-flash-lite · 952 ms',
     'sup>voice push · idle',
     'voice>you 🔊 600 ms after push',
     'you>voice typed',
@@ -475,7 +474,6 @@ test('e2e fixture, scenarios 2–5: the expected arrow sequence', () => {
     // scenario 5: propose → resolve → prompt → "Stop." → ctrl+c → cancelled
     'you>voice typed',
     'voice>sup propose(agent="auth-one", instruction="explain …)',
-    'sup>herdr resolve_instruction · gemini-3.5-flash-lite · 722 ms',
     'sup>herdr prompt · "explain in detail how the clamp function works and list three edge cases"',
     'sup>voice propose · Δ 1.0 s · interrupt',
     'herdr>sup done → working',

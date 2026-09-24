@@ -100,7 +100,7 @@ type Promise struct {
 	ResolvedAt *time.Time `json:"resolved_at,omitempty"`
 	// CarriedOver marks a promise made before the daemon's current run
 	// that was announced once at startup ("Still watching for …",
-	// docs/roles.md "Status"): the briefing trailer never repeats it
+	// docs/history/roles-status.md): the briefing trailer never repeats it
 	// again, and it is never re-announced, even across another restart.
 	// It is still kept normally at its matching event.
 	CarriedOver bool `json:"carried_over,omitempty"`
@@ -219,9 +219,10 @@ type Note struct {
 
 // Session is the voice-session bookkeeping.
 type Session struct {
-	VoiceConnected bool       `json:"voice_connected"`
-	LastBriefing   string     `json:"last_briefing,omitempty"`
-	LastBriefingAt *time.Time `json:"last_briefing_at,omitempty"`
+	VoiceConnected bool `json:"voice_connected"`
+	// (last_briefing / last_briefing_at were written here until they
+	// were found write-only; old state files that carry them still load:
+	// the decoder ignores unknown keys.)
 	// Notes are the note-tool entries of this session, newest last.
 	Notes []Note `json:"notes,omitempty"`
 	// Chattiness is the push policy chosen at runtime (quiet | normal |

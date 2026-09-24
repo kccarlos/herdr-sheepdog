@@ -627,7 +627,7 @@ and account e-mail redacted). Screens are the `text` field of
 | `claude-permission-prompt.screen.txt` / `.read.json` / `.agent-get.json` / `.explain.json` | Claude Code 2.1.275 Write permission prompt (blocked) |
 | `claude-after-approval.screen.txt` | after Enter |
 | `agy-trust-dialog.read.json` / `.explain.json` | Antigravity CLI 1.2.5 folder-trust dialog (WP7b; classified `idle`) |
-| `agy-approval-prompt.screen.txt` / `.read.json` / `.read-detection.json` / `.agent-get.json` / `.agent-list.json` / `.explain.json` / `agy-prompt-wait-response.json` | agy 1.2.5 command-approval prompt ("Run this command?", options 1–4). herdr 0.9.0 with remote manifest 2026.06.24.1 reports it as **`done`**, not `blocked` (`default_known_agent_idle_fallback`); see `docs/e2e-results.md` |
+| `agy-approval-prompt.screen.txt` / `.read.json` / `.read-detection.json` / `.agent-get.json` / `.agent-list.json` / `.explain.json` / `agy-prompt-wait-response.json` | agy 1.2.5 command-approval prompt ("Run this command?", options 1–4). herdr 0.9.0 with remote manifest 2026.06.24.1 reports it as **`done`**, not `blocked` (`default_known_agent_idle_fallback`); see `docs/history/e2e-results.md` |
 | `agy-edit-prompt.screen.txt` / `.read.json` / `.agent-get.json` / `.explain.json` | agy 1.2.5 file-edit prompt ("Accept this file edit?", 1 accept / 2 reject), also reported `done` |
 | `agy-edit-prompt-esc-disabled.read.json` | the same prompt after `esc`: "Esc disabled during file edits — press 1 to accept or 2 to reject" — `no` must send `2` for agy edit prompts |
 | `events-agent-status.jsonl` | the 25 status/lifecycle events of the whole session, verbatim |

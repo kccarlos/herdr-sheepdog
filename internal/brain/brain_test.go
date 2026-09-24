@@ -239,7 +239,7 @@ func TestSendKeysBlocked(t *testing.T) {
 
 // (5b) A blocked agent with nothing recorded is not refused by the rail
 // itself: the Host may still revive the prompt from the screen
-// (docs/issues-2026-09-18.md "an expired approval prompt can never be
+// (docs/history/issues-2026-09-18.md "an expired approval prompt can never be
 // approved"), so the rail defers to it. A plain test Host has no
 // revival logic and still refuses, but with its own reason, not the
 // rail's "has no recorded approval prompt".

@@ -141,7 +141,7 @@ func TestWatcherDedupAcrossChannels(t *testing.T) {
 	ch := w.Transitions()
 	expectTransition(t, ch, "", herdr.StateIdle)
 
-	// Same transition on the socket and on the (future) HTTP shim channel.
+	// Same transition on the socket and on the HTTP channel (POST /api/herdr/event).
 	srv.EmitStatus("w5:p1", herdr.StateWorking)
 	w.Inject(herdr.StatusEvent{PaneID: "w5:p1", WorkspaceID: "w5", Agent: "codex", State: herdr.StateWorking, Source: "http"})
 	expectTransition(t, ch, herdr.StateIdle, herdr.StateWorking)
