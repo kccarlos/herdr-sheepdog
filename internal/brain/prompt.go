@@ -77,9 +77,11 @@ func mergeUserVars(agents []AgentInfo, extra map[string]string) map[string]strin
 	return vars
 }
 
-// slug lowercases a heading into a section name ("The one rail" -> "rail").
+// slug lowercases a heading into a section name ("The one rail" -> "rail",
+// "For the ear" -> "ear").
 func slug(name string) string {
 	name = strings.ToLower(strings.TrimSpace(name))
+	name = strings.TrimPrefix(name, "for ")
 	name = strings.TrimPrefix(name, "the ")
 	name = strings.TrimPrefix(name, "one ")
 	if i := strings.IndexAny(name, " :"); i > 0 {

@@ -441,7 +441,12 @@ func (s *Supervisor) utteranceTurn(ctx context.Context, u *inflightUtterance, te
 // and "halt" (audit B8) — the same word stopped GPT-Live outright but
 // only became an ordinary brain turn on Gemini.
 var (
-	BareStopWords = map[string]bool{"stop": true, "stop stop": true, "wait": true, "cancel": true, "abort": true, "halt": true, "never mind": true, "nevermind": true, "no no": true, "hold on": true}
+	//
+	// "never mind" is not one (docs/iteration-2.md J6, eval case
+	// never-mind-is-not-stop): it is ordinary speech that goes to the
+	// brain, which decides whether it withdraws anything. As a stop word
+	// it sent Ctrl-C to a worker that had just been given a task.
+	BareStopWords = map[string]bool{"stop": true, "stop stop": true, "wait": true, "cancel": true, "abort": true, "halt": true, "no no": true, "hold on": true}
 	bareYesWords  = map[string]bool{
 		"yes": true, "yeah": true, "yep": true, "yup": true, "sure": true, "ok": true, "okay": true,
 		"approve": true, "approve it": true, "please approve": true, "do it": true,

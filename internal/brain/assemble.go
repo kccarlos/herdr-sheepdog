@@ -223,7 +223,7 @@ func stopRequestText(req Request) string {
 	} else {
 		s += " agent=(none)"
 	}
-	return s + "\nThe CEO said stop and the daemon already carried the stop out; an open worker prompt is deliberately left open. Say in one short sentence what was stopped, then offer the correction as a question (\"shall I tell it something else?\"). Read tools only: send nothing."
+	return s + "\nThe CEO said stop and the daemon already carried the stop out; an open worker prompt is deliberately left open. Say in one short sentence what was stopped, then offer the correction as the ask (\"Shall I tell it something else?\"). Read tools only: send nothing."
 }
 
 // investigationRequestText is the request of a delivery turn: the job
@@ -250,7 +250,7 @@ func investigationRequestText(req Request) string {
 		b.WriteString(wrapWorker(req.Agent, "investigation", req.Result))
 		b.WriteString("\n")
 	}
-	b.WriteString("Answer the CEO now, from this and the conversation: spoken is the gist in at most two sentences for the ear — what happened and what it means for them — then an offer (\"want the details?\"); the why, the evidence and the next move go in detail. Plain words, no paths, hashes or ids, jargon only if they used it first. If the agent has worked since, say the answer is as of when the look ran. Reply with the JSON object of the answer contract; read tools only, and say nothing about how the look was run.")
+	b.WriteString("Answer the CEO now, from this and the conversation: spoken is the outcome in at most two short sentences for the ear, what happened and what it means for them; the next move, if any, is the ask; detail explains each term in everyday words. No paths, hashes or ids, jargon only if they used it first. If the agent has worked since, say the answer is as of when the look ran. Reply with the JSON object of the answer contract; read tools only, and say nothing about how the look was run.")
 	return b.String()
 }
 

@@ -153,8 +153,17 @@ type Request struct {
 
 // Reply is the answer contract (docs/roles.md): what the assistant says,
 // what it may use for follow-ups, and whether the CEO must act.
+//
+// The ear contract: Spoken is the headline (at most two short sentences,
+// thirty words, no dashes; the supervisor enforces it with prose.EarLine
+// and moves the overflow into Detail); Ask is the one question when
+// there is a decision only the CEO can make, read as the last sentence;
+// Detail is the plain explanation of every term the headline used, in
+// everyday words, which the voice reads when the CEO asks "what does
+// that mean". An old-shape reply without Ask still parses.
 type Reply struct {
 	Spoken    string   `json:"spoken"`
+	Ask       string   `json:"ask,omitempty"`
 	Detail    string   `json:"detail"`
 	NeedsUser bool     `json:"needs_user"`
 	Options   []string `json:"options,omitempty"`

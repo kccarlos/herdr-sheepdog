@@ -457,7 +457,8 @@ func textOf(resp *genai.GenerateContentResponse) string {
 
 // parseReply decodes the answer contract from the model's text. An
 // empty spoken is an error except when allowEmpty (an event turn: "the
-// code sentence was enough").
+// code sentence was enough"); an ask with no spoken becomes the spoken.
+// ask is optional (an old-shape reply has none).
 func parseReply(text string, allowEmpty bool) (Reply, error) {
 	raw, err := prose.ExtractJSON(text)
 	if err != nil {
@@ -468,6 +469,12 @@ func parseReply(text string, allowEmpty bool) (Reply, error) {
 		return Reply{}, fmt.Errorf("brain: decode reply: %w", err)
 	}
 	r.Spoken = strings.TrimSpace(r.Spoken)
+	r.Ask = strings.TrimSpace(r.Ask)
+	if r.Spoken == "" && r.Ask != "" {
+		// A bare question is the whole line: every consumer reads
+		// Spoken, so it goes there.
+		r.Spoken, r.Ask = r.Ask, ""
+	}
 	if r.Spoken == "" && !allowEmpty {
 		return Reply{}, errors.New("brain: reply without spoken text")
 	}
