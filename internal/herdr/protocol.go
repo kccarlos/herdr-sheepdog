@@ -101,7 +101,33 @@ type AgentInfo struct {
 	Revision      uint64 `json:"revision"`
 	// StateChangeSeq increases on every state change; absent from PaneInfo.
 	StateChangeSeq uint64 `json:"state_change_seq,omitempty"`
+	// Session is the agent's own session as its integration hook reported
+	// it (pane.report_agent_session); nil when none was reported.
+	Session *AgentSession `json:"agent_session,omitempty"`
 }
+
+// AgentSession is herdr's agent_session object (docs/herdr-protocol.md
+// §3, §9): the session the pane's agent reported at SessionStart, so the
+// daemon can read the worker's own transcript (docs/iteration-2.md WP4).
+// Every recorded sample reports Kind "id" — Codex, Claude Code and agy
+// alike; "path" (Claude's agent_session_path) is decoded but not seen.
+type AgentSession struct {
+	// Source is the reporting integration ("herdr:codex", "herdr:claude",
+	// "herdr:antigravity_cli").
+	Source string `json:"source"`
+	// Agent is the kind label the integration reported for.
+	Agent string `json:"agent,omitempty"`
+	// Kind is "id" (Value is a session id) or "path" (Value is the
+	// transcript file).
+	Kind  string `json:"kind"`
+	Value string `json:"value"`
+}
+
+// The AgentSession kinds.
+const (
+	SessionKindID   = "id"
+	SessionKindPath = "path"
+)
 
 // PaneInfo is herdr's PaneInfo: AgentInfo minus the agent-only fields, plus
 // the user pane label.
@@ -114,6 +140,8 @@ type PaneInfo struct {
 	Label         string `json:"label,omitempty"`
 	Cwd           string `json:"cwd,omitempty"`
 	TerminalTitle string `json:"terminal_title_stripped,omitempty"`
+	// Session is the pane's agent_session, as on AgentInfo.
+	Session *AgentSession `json:"agent_session,omitempty"`
 }
 
 // WorkspaceInfo is herdr's WorkspaceInfo.

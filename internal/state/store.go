@@ -150,6 +150,12 @@ func (s *Store) Apply(t herdr.Transition) (Agent, bool, error) {
 	if t.Name != "" && a.Name != t.Name {
 		a.Name, identity = t.Name, true
 	}
+	if sess := t.Session; sess != nil && sess.Value != "" && (a.SessionValue != sess.Value || a.SessionKind != sess.Kind || a.SessionSource != sess.Source) {
+		a.SessionSource, a.SessionKind, a.SessionValue, changed = sess.Source, sess.Kind, sess.Value, true
+	}
+	if t.Cwd != "" && a.Cwd != t.Cwd {
+		a.Cwd, changed = t.Cwd, true
+	}
 	if identity {
 		changed = true
 		if a.Alias == "" || a.AliasAuto {
@@ -238,6 +244,22 @@ func (s *Store) Update(paneID string, fn func(*Agent)) (Agent, error) {
 	}
 	fn(a)
 	return a.clone(), s.persist()
+}
+
+// AppendJournal adds e to the agent's work journal, dropping the oldest
+// entries past MaxJournal, and persists (docs/iteration-2.md WP4).
+func (s *Store) AppendJournal(paneID string, e JournalEntry) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	a, ok := s.table.Agents[paneID]
+	if !ok {
+		return fmt.Errorf("state: no agent in pane %s", paneID)
+	}
+	a.Journal = append(a.Journal, e.clone())
+	if over := len(a.Journal) - MaxJournal; over > 0 {
+		a.Journal = append([]JournalEntry(nil), a.Journal[over:]...)
+	}
+	return s.persist()
 }
 
 // MarkSynthetic flags the row for paneID as injected by the debug page

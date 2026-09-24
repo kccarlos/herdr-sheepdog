@@ -12,6 +12,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
+	"github.com/kccarlos/herdr-sheepdog/internal/workerlog"
 )
 
 // logSource is the source field of every event this package logs.
@@ -141,6 +142,9 @@ type Config struct {
 	Brain *brain.Brain
 	// Now overrides the clock (tests).
 	Now func() time.Time
+	// WorkerLog reads the workers' own session transcripts for the work
+	// journal (journal.go); default the real ~/.claude and ~/.codex.
+	WorkerLog *workerlog.Reader
 
 	chattiness Chattiness // parsed Chattiness
 }
@@ -196,6 +200,9 @@ func (c Config) withDefaults() Config {
 	}
 	if c.Now == nil {
 		c.Now = time.Now
+	}
+	if c.WorkerLog == nil {
+		c.WorkerLog = workerlog.New(workerlog.Options{})
 	}
 	return c
 }
@@ -289,6 +296,9 @@ type Supervisor struct {
 	// resetConfirm is the "start a new conversation?" question waiting
 	// for its confirm phrase (reset.go), nil when none is open.
 	resetConfirm *resetConfirmState
+
+	// journal is the work journal's own bookkeeping (journal.go).
+	journal journalState
 }
 
 // interruptGrace is how long after a user cancel a pane's working -> done

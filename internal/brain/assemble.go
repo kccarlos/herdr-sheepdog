@@ -3,6 +3,7 @@ package brain
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -171,6 +172,9 @@ func contextLine(m Message) string {
 	case KindPromise:
 		return fmt.Sprintf("[%s] %s", ts, m.Content)
 	case KindEventScreen:
+		if m.ToolResult != nil && m.ToolResult.Name == toolWorkerLog {
+			return fmt.Sprintf("[%s] What the worker wrote (its own last message, from its session transcript):\n%s", ts, m.Content)
+		}
 		return fmt.Sprintf("[%s] The screen the supervisor read for this event:\n%s", ts, m.Content)
 	case KindSystem:
 		return fmt.Sprintf("[%s] Note from the daemon: %s", ts, m.Content)
@@ -343,4 +347,102 @@ func statusOr(s string) string {
 		return PromiseOpen
 	}
 	return s
+}
+
+// toolWorkerLog is the ToolResult name of the announce turn's "what the
+// worker wrote" message: a KindEventScreen like the screen, pruned the
+// same way, rendered with its own label (contextLine).
+const toolWorkerLog = "worker_log"
+
+// workerWrote returns the last message the worker wrote for a human, from
+// the journal entry the supervisor appended for this announce's event
+// just before it started the turn (docs/iteration-2.md WP4), or "" when
+// there is none: no transcript, nothing new, or an entry older than the
+// agent's current state (it belongs to an earlier event, or the agent
+// has moved on). Both times come from the supervisor's clock.
+func workerWrote(agent AgentInfo) string {
+	if len(agent.Journal) == 0 || agent.StateSince.IsZero() {
+		return ""
+	}
+	e := agent.Journal[len(agent.Journal)-1]
+	if e.LastAssistant == "" || e.At.Before(agent.StateSince) {
+		return ""
+	}
+	return e.LastAssistant
+}
+
+// Ledger budget of the journal: the last journalLedgerEntries entries per
+// agent, each at most journalLedgerRunes of text, so four agents add
+// under 800 characters to every prompt (docs/iteration-2.md WP4); the
+// full entries are one recall away.
+const (
+	journalLedgerEntries = 3
+	journalLedgerRunes   = 36
+)
+
+// journalLedgerLines renders an agent's last journal entries for the
+// ledger, one short indented line each, newest last ("" when none).
+func journalLedgerLines(journal []JournalEntry, now time.Time) string {
+	start := len(journal) - journalLedgerEntries
+	if start < 0 {
+		start = 0
+	}
+	var b strings.Builder
+	for _, e := range journal[start:] {
+		text := e.LastAssistant
+		if text == "" && e.Instruction != "" {
+			text = "asked: " + e.Instruction
+		}
+		if text == "" {
+			continue
+		}
+		fmt.Fprintf(&b, "  - %s %s ago: %q\n", e.Event, ago(now.Sub(e.At)), clipText(oneLine(text), journalLedgerRunes))
+	}
+	return b.String()
+}
+
+// journalRecallLine renders one journal entry in full for recall.
+func journalRecallLine(alias string, e JournalEntry) string {
+	line := fmt.Sprintf("%s journal (%s, %s)", aliasOr(alias), e.At.Format("15:04"), e.Event)
+	if e.LastAssistant != "" {
+		line += fmt.Sprintf(": wrote %q", oneLine(e.LastAssistant))
+	}
+	if e.Instruction != "" {
+		line += fmt.Sprintf("; instruction %q", e.Instruction)
+	}
+	if len(e.Files) > 0 {
+		line += "; files " + strings.Join(e.Files, ", ")
+	}
+	if len(e.Tools) > 0 {
+		names := make([]string, 0, len(e.Tools))
+		for name := range e.Tools {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for i, name := range names {
+			names[i] = fmt.Sprintf("%s×%d", name, e.Tools[name])
+		}
+		line += "; tools " + strings.Join(names, ", ")
+	}
+	return line
+}
+
+// oneLine joins a multi-line journal message into one line for the
+// ledger and recall (the announce turn keeps the lines).
+func oneLine(s string) string {
+	return strings.Join(strings.Fields(s), " ")
+}
+
+// clipText cuts s to n runes at a word boundary when it can, with an
+// ellipsis.
+func clipText(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	cut := string(r[:n])
+	if i := strings.LastIndexByte(cut, ' '); i > n/2 {
+		cut = cut[:i]
+	}
+	return strings.TrimRight(cut, " ,;:.") + "…"
 }

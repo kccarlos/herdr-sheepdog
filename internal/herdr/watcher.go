@@ -24,6 +24,13 @@ type Transition struct {
 	Closed bool `json:"closed,omitempty"`
 	// Source is the channel that delivered the triggering event.
 	Source string `json:"source,omitempty"`
+	// Session is the agent's reported session as last seen in a snapshot
+	// (the status events do not carry it), and Cwd the pane's working
+	// directory; the supervisor reads the worker's own transcript from
+	// them (docs/iteration-2.md WP4). Not logged: a session names a
+	// transcript on disk.
+	Session *AgentSession `json:"-"`
+	Cwd     string        `json:"-"`
 }
 
 // WatcherConfig tunes the Watcher; zero values take the defaults below.
@@ -84,6 +91,11 @@ type Watcher struct {
 
 type paneState struct {
 	id, workspace, agent, name string
+
+	// session and cwd are the latest snapshot's agent_session and cwd,
+	// carried on every Transition.
+	session *AgentSession
+	cwd     string
 
 	state State // confirmed state ("" until first emit)
 
@@ -215,6 +227,13 @@ func (w *Watcher) refreshSnapshot(ctx context.Context) error {
 		p := w.ensurePane(ctx, a.PaneID, a.WorkspaceID, a.Agent)
 		if a.Name != "" {
 			p.name = a.Name
+		}
+		if a.Session != nil && a.Session.Value != "" {
+			sess := *a.Session
+			p.session = &sess
+		}
+		if a.Cwd != "" {
+			p.cwd = a.Cwd
 		}
 		w.applyEvent(ctx, p, StatusEvent{PaneID: a.PaneID, WorkspaceID: a.WorkspaceID, Agent: a.Agent, State: a.Status, At: at, Source: "snapshot"})
 	}
@@ -354,6 +373,11 @@ func (w *Watcher) emit(ctx context.Context, p *paneState, to State, at time.Time
 		WorkspaceLabel: w.wsLabels[p.workspace],
 		Closed:         closed,
 		Source:         source,
+		Cwd:            p.cwd,
+	}
+	if p.session != nil {
+		sess := *p.session
+		t.Session = &sess
 	}
 	p.state = to
 	w.log.Log("herdr", "herdr.transition", p.id, t)

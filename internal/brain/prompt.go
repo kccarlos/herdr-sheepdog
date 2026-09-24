@@ -198,10 +198,15 @@ func renderLedger(agents []AgentInfo, notes []string, promises []PromiseInfo, no
 		if a.LastBlock != "" {
 			parts = append(parts, "last question: "+a.LastBlock)
 		}
-		if len(parts) == 0 {
+		journal := journalLedgerLines(a.Journal, now)
+		if len(parts) == 0 && journal == "" {
 			continue
 		}
+		if len(parts) == 0 {
+			parts = append(parts, "recent work")
+		}
 		fmt.Fprintf(&b, "- %s: %s\n", aliasOr(a.Alias), strings.Join(parts, "; "))
+		b.WriteString(journal)
 		n++
 	}
 	if len(notes) > 0 {
