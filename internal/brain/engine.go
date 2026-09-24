@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+
+	"github.com/kccarlos/herdr-sheepdog/internal/prose"
 )
 
 // ContextEngine decides what part of the transcript the model sees. The
@@ -103,16 +105,56 @@ type entry struct {
 // Compact (nil makes it a no-op); record may be nil.
 func NewDefaultEngine(pruneAfter int, summarize Summarizer, record func(Message) Message) *DefaultEngine {
 	if pruneAfter <= 0 {
-		pruneAfter = 3
+		pruneAfter = DefaultPruneAfterTurns
 	}
 	return &DefaultEngine{pruneAfter: pruneAfter, summarize: summarize, record: record}
 }
 
-// Ingest implements ContextEngine.
+// Ingest implements ContextEngine. A bulky tool result or event screen
+// enters the window capped to its last windowResultBytes (capResult);
+// the transcript on disk keeps it whole.
 func (e *DefaultEngine) Ingest(m Message, turn int) {
+	if prunable(m) {
+		if c, ok := capResult(m.Content); ok {
+			m.Content, m.Tokens = c, EstimateTokens(c)
+		}
+	}
 	e.mu.Lock()
 	e.window = append(e.window, entry{msg: m, turn: turn})
 	e.mu.Unlock()
+}
+
+// windowResultBytes caps a live tool result (or event screen) in the
+// window: the tail, the part that holds the latest output
+// (docs/iteration-2.md WP5; a 200-line screen was ~16 KB, 4 k tokens of
+// every step for two turns). Fixed, not a knob.
+const windowResultBytes = 4 << 10
+
+// resultCutNote marks where capResult cut a result.
+const resultCutNote = "[earlier output cut for the window; read_screen or recall for more]"
+
+// capResult returns content cut to its last windowResultBytes and true,
+// or content and false when it fits. Provenance delimiters survive: a
+// wrapped result keeps its first (BEGIN) and last (END) lines and only
+// the text between is tailed.
+func capResult(content string) (string, bool) {
+	if len(content) <= windowResultBytes {
+		return content, false
+	}
+	head, body, tail := "", content, ""
+	if strings.HasPrefix(content, "<<<BEGIN_WORKER_OUTPUT") {
+		if i := strings.IndexByte(content, '\n'); i > 0 {
+			head, body = content[:i+1], content[i+1:]
+		}
+		if j := strings.LastIndex(body, "\n"+endWorkerOutput); j >= 0 {
+			body, tail = body[:j], body[j:]
+		}
+	}
+	room := windowResultBytes - len(head) - len(tail) - len(resultCutNote) - 1
+	if room < 512 {
+		room = 512 // an absurdly long BEGIN line still leaves some output
+	}
+	return head + resultCutNote + "\n" + prose.TailBytes(body, room) + tail, true
 }
 
 // Assemble implements ContextEngine.
@@ -224,6 +266,7 @@ func (e *DefaultEngine) Compact(ctx context.Context, budget int) (Compaction, bo
 	if err != nil {
 		return Compaction{}, false, err
 	}
+	summary = capSummary(summary)
 	m := Message{TS: old[len(old)-1].msg.TS, Role: RoleUser, Kind: KindCompaction, Content: summary}
 	if e.record != nil {
 		m = e.record(m)
@@ -237,6 +280,26 @@ func (e *DefaultEngine) Compact(ctx context.Context, budget int) (Compaction, bo
 	rest := append([]entry(nil), e.window[cut:]...)
 	e.window = append([]entry{{msg: m, turn: old[len(old)-1].turn}}, rest...)
 	return Compaction{BeforeTokens: before, AfterTokens: e.tokensLocked(), Dropped: cut, Summary: m}, true, nil
+}
+
+// summaryMaxTokens caps a compaction summary (estimated tokens): a
+// 12 k window cannot afford a summary that grows with every compaction
+// (docs/iteration-2.md WP5).
+const summaryMaxTokens = 600
+
+// capSummary cuts a summary to summaryMaxTokens at a line boundary when
+// it can.
+func capSummary(s string) string {
+	s = strings.TrimSpace(s)
+	limit := summaryMaxTokens * 4
+	if len(s) <= limit {
+		return s
+	}
+	cut := strings.ToValidUTF8(s[:limit-len("…")], "")
+	if i := strings.LastIndexByte(cut, '\n'); i > limit/2 {
+		return strings.TrimSpace(cut[:i])
+	}
+	return strings.TrimSpace(cut) + "…"
 }
 
 // cutPoint returns the index of the first message kept: the smallest

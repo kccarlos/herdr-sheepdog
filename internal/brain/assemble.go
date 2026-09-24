@@ -178,6 +178,8 @@ func contextLine(m Message) string {
 		return fmt.Sprintf("[%s] The screen the supervisor read for this event:\n%s", ts, m.Content)
 	case KindSystem:
 		return fmt.Sprintf("[%s] Note from the daemon: %s", ts, m.Content)
+	case KindState:
+		return m.Content
 	default:
 		return fmt.Sprintf("[%s] %s: %s", ts, m.Kind, m.Content)
 	}
@@ -372,23 +374,42 @@ func workerWrote(agent AgentInfo) string {
 }
 
 // Ledger budget of the journal: the last journalLedgerEntries entries per
-// agent, each at most journalLedgerRunes of text, so four agents add
-// under 800 characters to every prompt (docs/iteration-2.md WP4); the
-// full entries are one recall away.
+// agent, none more than journalLedgerAge older than the agent's newest,
+// each at most journalLedgerRunes of text, so four agents add under 800
+// characters to every prompt (docs/iteration-2.md WP4, the age limit
+// WP5); the full entries are one recall away. The age is measured
+// against the newest entry, not the brain's clock: the entries are
+// stamped by the supervisor's.
 const (
 	journalLedgerEntries = 3
 	journalLedgerRunes   = 36
+	journalLedgerAge     = 24 * time.Hour
 )
 
 // journalLedgerLines renders an agent's last journal entries for the
 // ledger, one short indented line each, newest last ("" when none).
 func journalLedgerLines(journal []JournalEntry, now time.Time) string {
-	start := len(journal) - journalLedgerEntries
-	if start < 0 {
-		start = 0
+	return journalLedgerLinesN(journal, now, journalLedgerEntries)
+}
+
+// journalLedgerLinesN is journalLedgerLines with at most n entries (the
+// state block's budget, dynamicSections).
+func journalLedgerLinesN(journal []JournalEntry, now time.Time, n int) string {
+	var newest time.Time
+	for _, e := range journal {
+		if e.At.After(newest) {
+			newest = e.At
+		}
 	}
+	var recent []JournalEntry
+	for _, e := range journal {
+		if e.At.IsZero() || newest.Sub(e.At) <= journalLedgerAge {
+			recent = append(recent, e)
+		}
+	}
+	start := max(0, len(recent)-n)
 	var b strings.Builder
-	for _, e := range journal[start:] {
+	for _, e := range recent[start:] {
 		text := e.LastAssistant
 		if text == "" && e.Instruction != "" {
 			text = "asked: " + e.Instruction

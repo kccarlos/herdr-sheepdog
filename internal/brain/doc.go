@@ -44,8 +44,9 @@
 // (Config.AnnounceTimeout when the shepherd is owed the line: it keeps a
 // promise, or Request.Owed),
 // declared only the read tools (the executor refuses prompt, send_keys,
-// interrupt, promise and investigate in any event turn), and yield to a
-// waiting CEO turn.
+// interrupt, promise and investigate in any event turn), sent with
+// thinking off whatever is configured (docs/iteration-2.md WP5:
+// turnThinking), and yield to a waiting CEO turn.
 //
 // A KindInvestigation turn is the other event turn: it delivers a
 // finished background job (the investigate tool, docs/roles.md
@@ -85,10 +86,12 @@
 // (from the voice transcript events), pushes, worker state changes, notes,
 // requests, the brain's own tool calls and results, replies and compaction
 // summaries. The ContextEngine decides what of it the model sees: the
-// default engine keeps an in-memory window, prunes bulky tool results to a
+// default engine keeps an in-memory window, holds a bulky tool result's
+// last 4 KB only (the transcript keeps it whole), prunes it to a
 // one-line stub after Config.PruneAfterTurns turns, and compacts the
-// oldest half into one summary message when the window exceeds
-// Config.WindowTokens (estimated). The seam for the memory system (plan
+// oldest half into one summary message of at most 600 tokens when the
+// window exceeds Config.WindowTokens (estimated; 12 k by default since
+// docs/iteration-2.md WP5). The seam for the memory system (plan
 // P6) is that interface: Ingest / Assemble / Compact / AfterTurn, borrowed
 // from OpenClaw. A memory-backed engine plugs in through Config.Engine and
 // may return a system-prompt addition from Assemble (recalled facts) and
@@ -97,10 +100,15 @@
 //
 // # Prompt
 //
-// The system prompt is sectioned, stable content first so a provider's
-// prefix cache applies: role (prompts/svp/SOUL.md), tool guidance with the
-// provenance rule, the one rail and the answer contract (prompts/svp/RULES.md),
-// then the dynamic agent roster, the ledger excerpt and the time.
+// The system prompt is sectioned and holds only stable content, so a
+// provider's prefix cache applies to it and to the conversation after
+// it: role (prompts/svp/SOUL.md), tool guidance with the provenance
+// rule, the one rail and the answer contract (prompts/svp/RULES.md) and
+// USER.md. The dynamic part — agent roster, ledger excerpt,
+// investigations, time last — is the state block, the last message of
+// every request (KindState, never ingested; docs/iteration-2.md WP5),
+// every free text in it clipped so four agents stay near 2.5 k
+// characters.
 //
 // Everything is observable through brain.* events on the logging.Logger:
 // brain.turn, brain.step, brain.tool_call / brain.tool_result (paired by

@@ -117,27 +117,39 @@ a second tool round; `low` is the
 default because it is the cheaper of two equals on this work, and `max`
 is untested.
 
+**Event turns do not think.** An announce or investigation-delivery
+turn is sent with `"thinking": {"type": "disabled"}` and no
+`reasoning_effort`, whatever `deepseek.thinking` says (on Gemini: the
+`minimal` thinking level, `low` on a Pro model); so is the compaction
+summary. The captures of 2026-09-24 put a step's time at ~0.3 s + 35 ms
+per 1 000 prompt tokens + 4.8 ms per completion token, reasoning
+included, and announce steps spent ~470 reasoning tokens (~2.3 s) on a
+judgement call (docs/iteration-2.md WP5). Shepherd turns keep the
+setting below.
+
 **The reasoning replay trade-off.** DeepSeek's thinking mode returns a
 `reasoning_content` with every assistant message and, while tools are
 declared, requires it back on the assistant messages of the current
 turn's tool loop (a missing one is a 400). The brain keeps it on the
 transcript message (`raw`, tagged with `provider` and `model`) and
-replays it only for messages the same provider and model produced; a
+replays it only for messages the same provider and model produced in
+the current turn, and never into a call with thinking disabled; a
 Gemini step is rebuilt as a plain tool call for DeepSeek and vice
-versa. Older turns keep their reasoning for as long as they are in the
-window — the blobs are not counted in the window's token estimate
-(`brain.window_tokens` counts content only), so the real prompt is
-larger than the meter says — and lose it when compaction drops them,
-which the API accepts (verified live with a seeded transcript whose
-`raw` was stripped). Switch models mid-turn and the running turn still
+versa. Earlier turns' reasoning stays on disk: the API accepts the
+messages without it (verified live with a seeded transcript whose `raw`
+was stripped), and replaying it cost ~20 k characters per request in
+the 2026-09-24 captures — counted in `prompt_tokens`, not in the
+window's estimate (`brain.window_tokens` counts content only). Dropping
+it ends the prefix cache's match at the previous turn, which the next
+request pays for once. Switch models mid-turn and the running turn still
 finishes on the pair it started with.
 
 | Key | Env override | Default | Meaning |
 |---|---|---|---|
 | `deepseek.api_key` | `DEEPSEEK_API_KEY` | `""` | The DeepSeek API key (Bearer). Like `GEMINI_API_KEY`, normally left out of the TOML file and set via the environment or `--env-file`; an empty env value does not clear a file value. Never logged: `config show` prints `set`/`unset`. Without it the provider is listed in the picker as unavailable ("no DEEPSEEK_API_KEY") and `brain.provider = "deepseek"` leaves the brain off. One key, no pool: a 429 fails the turn (`brain.rate_limited`, then the daemon's own sentence), it is not retried. |
 | `deepseek.base_url` | `SHEEPDOG_DEEPSEEK_BASE_URL` | `https://api.deepseek.com` | API root; `/chat/completions` and `/models` are appended. |
-| `deepseek.thinking` | `SHEEPDOG_DEEPSEEK_THINKING` | `true` | DeepSeek's thinking mode (`"thinking": {"type": "enabled"}`); `false` sends `disabled`. On, the brain replays `reasoning_content` as described above. |
-| `deepseek.reasoning_effort` | `SHEEPDOG_DEEPSEEK_REASONING_EFFORT` | `low` | `low`, `high` or `max`; sent only with thinking on. See the measurements above. |
+| `deepseek.thinking` | `SHEEPDOG_DEEPSEEK_THINKING` | `true` | DeepSeek's thinking mode for shepherd turns (`"thinking": {"type": "enabled"}`); `false` sends `disabled`. Event turns and compaction summaries are always sent `disabled` (above). On, the brain replays the current turn's `reasoning_content` as described above. |
+| `deepseek.reasoning_effort` | `SHEEPDOG_DEEPSEEK_REASONING_EFFORT` | `low` | `low`, `high` or `max`; sent only with thinking on (so never on an event turn). See the measurements above. |
 
 ## `[web]`
 
@@ -246,8 +258,8 @@ announce wait elapse.
 | `brain.model` | `SHEEPDOG_BRAIN_MODEL` | `gemini-3.5-flash` | The function-calling model the brain starts on, a model of `brain.provider`. The initial value only: a model picked at runtime (`/debug`, `PUT /api/brain/model`) is kept in the state file's `session.brain_model` and wins over this on restart. |
 | `brain.max_steps` | `SHEEPDOG_BRAIN_MAX_STEPS` | `6` | Model calls one turn may make (each tool round is one); beyond it the turn falls back. |
 | `brain.utterance_timeout_s` | `SHEEPDOG_BRAIN_UTTERANCE_TIMEOUT_S` | `12` | Wall-clock budget of one utterance turn — the brain's turn over the shepherd's relayed words, which may be a question or an instruction — and of an investigation's delivery turn, tool rounds included. When less than `brain.step_reserve_s` of it remains after a tool round (or at the last step) the next model call is answer-only (tools disabled, "time is up") and may run up to `brain.final_grace_s` past the budget; only then does the daemon answer for itself. Formerly `brain.propose_timeout_s` (still accepted, see "Deprecated keys"). |
-| `brain.window_tokens` | `SHEEPDOG_BRAIN_WINDOW_TOKENS` | `24000` | Context window target in estimated tokens; above it the oldest half of the window is compacted into one summary message (`brain.compaction`). |
-| `brain.prune_after_turns` | `SHEEPDOG_BRAIN_PRUNE_AFTER_TURNS` | `3` | Turns a tool result (screen, CLI output) stays verbatim in the window before it becomes a one-line stub; the disk transcript keeps the full text. |
+| `brain.window_tokens` | `SHEEPDOG_BRAIN_WINDOW_TOKENS` | `12000` | Context window target in estimated tokens; above it the oldest half of the window is compacted into one summary message (`brain.compaction`, capped at 600 tokens). A trigger, not a hard cap: the turn that crosses it runs on the full window and compaction follows it. Was `24000` until docs/iteration-2.md WP5 (prompts averaged 19.8 k tokens). |
+| `brain.prune_after_turns` | `SHEEPDOG_BRAIN_PRUNE_AFTER_TURNS` | `2` | Turns a tool result (screen, CLI output) stays verbatim in the window before it becomes a one-line stub; the disk transcript keeps the full text. While it is verbatim, the window holds at most its last 4 KB (fixed); the transcript keeps it whole. Was `3` until docs/iteration-2.md WP5. |
 | `brain.step_reserve_s` | `SHEEPDOG_BRAIN_STEP_RESERVE_S` | `0` (default `3`) | When less of the turn's timeout remains after a tool round than this, the next model call is answer-only (no more tools), so the turn ends with an answer instead of another read. `0` takes the package default (3s); negative is rejected. |
 | `brain.final_grace_s` | `SHEEPDOG_BRAIN_FINAL_GRACE_S` | `0` (default `3`) | How far past the turn's timeout that one forced answer-only call may still run before the turn falls back to the code sentence. `0` takes the package default (3s); negative disables the grace entirely (fall back right at the timeout). |
 | `brain.announce_turn_timeout_s` | `SHEEPDOG_BRAIN_ANNOUNCE_TURN_TIMEOUT_S` | `6` | Budget of an ordinary event turn: the `announce` turn that decides what the assistant says about a block or finish and how urgently (README "How chatty is it?"). A finish waits this long (plus `brain.final_grace_s`) for the brain's line before anything is said about it; on expiry the daemon's own sentence is spoken instead (`brain.push_decision {via: template, reason: timeout, wait: turn}`; a promise falls back to "As you asked: …"). Event turns get only the read tools. An announce the shepherd is owed gets the longer `brain.announce_timeout_s` instead. Formerly `brain.enrich_timeout_s` (still accepted). |

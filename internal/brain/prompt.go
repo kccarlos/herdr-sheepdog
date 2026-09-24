@@ -2,6 +2,7 @@ package brain
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -94,14 +95,49 @@ func slug(name string) string {
 	return name
 }
 
+// The state block's budget (docs/iteration-2.md WP5): every free text
+// in the roster and ledger is clipped to a few words — the captures had
+// a 6 k-character ledger of verbatim instructions — and when the block
+// is still over stateBudgetChars the journal gives way, down to one line
+// per agent, so four agents with everything filled in stay near 2.5 k
+// characters. The full text is one recall away.
+const (
+	stateBudgetChars   = 2500
+	rosterTaskRunes    = 36
+	rosterPromptRunes  = 72
+	rosterOptionRunes  = 20
+	ledgerTaskRunes    = 36
+	ledgerResultRunes  = 50
+	ledgerBlockRunes   = 36
+	ledgerNotes        = 5
+	ledgerNoteRunes    = 40
+	ledgerPromiseRunes = 40
+	// ledgerInvestigationsDone is how many finished investigations the
+	// section lists (every running one is listed).
+	ledgerInvestigationsDone = 2
+	invQuestionRunes         = 40
+	invSummaryRunes          = 60
+)
+
 // dynamicSections renders the roster, the ledger excerpt (with the open
-// promises), the investigations and the time.
+// promises), the investigations and the time — the state block, which
+// the loop sends after the window (withState), time last.
 func dynamicSections(agents []AgentInfo, notes []string, promises []PromiseInfo, investigations []InvestigationInfo, now time.Time) []PromptSection {
+	roster := renderRoster(agents, now)
+	invs := renderInvestigations(investigations, now)
+	clock := "## Now\n\n" + now.Format("Mon 2006-01-02 15:04:05 MST")
+	var ledger string
+	for n := journalLedgerEntries; n >= 1; n-- {
+		ledger = renderLedgerN(agents, notes, promises, now, n)
+		if len(roster)+len(ledger)+len(invs)+len(clock) <= stateBudgetChars {
+			break
+		}
+	}
 	return []PromptSection{
-		{Name: "roster", Source: SourceDynamic, Text: renderRoster(agents, now)},
-		{Name: "ledger", Source: SourceDynamic, Text: renderLedger(agents, notes, promises, now)},
-		{Name: "investigations", Source: SourceDynamic, Text: renderInvestigations(investigations, now)},
-		{Name: "time", Source: SourceDynamic, Text: "## Now\n\n" + now.Format("Mon 2006-01-02 15:04:05 MST")},
+		{Name: "roster", Source: SourceDynamic, Text: roster},
+		{Name: "ledger", Source: SourceDynamic, Text: ledger},
+		{Name: "investigations", Source: SourceDynamic, Text: invs},
+		{Name: "time", Source: SourceDynamic, Text: clock},
 	}
 }
 
@@ -125,14 +161,20 @@ func renderInvestigations(investigations []InvestigationInfo, now time.Time) str
 		return b.String()
 	}
 	if len(running) > 0 {
-		b.WriteString("Running now (the answer reaches the CEO on its own when it lands; say how it is going, do not start it again):\n")
+		b.WriteString("Running now (the answer comes on its own; say how it is going, do not start it again):\n")
 		for _, inv := range running {
-			fmt.Fprintf(&b, "- %s (%s): %q, %s so far\n", inv.ID, aliasOr(inv.Agent), inv.Question, ago(now.Sub(inv.Started)))
+			fmt.Fprintf(&b, "- %s (%s): %q, %s so far\n", inv.ID, aliasOr(inv.Agent), clipText(oneLine(inv.Question), invQuestionRunes), ago(now.Sub(inv.Started)))
 		}
 	}
+	if len(done) > ledgerInvestigationsDone {
+		// The last few only; recall has the rest.
+		sort.SliceStable(done, func(i, j int) bool { return done[i].Started.Before(done[j].Started) })
+		done = done[len(done)-ledgerInvestigationsDone:]
+	}
 	if len(done) > 0 {
-		b.WriteString("Already looked into (follow_up_of resumes the same session for a deeper question):\n")
+		b.WriteString("Already looked into (follow_up_of digs deeper):\n")
 		for _, inv := range done {
+			inv.Question, inv.Summary = clipText(oneLine(inv.Question), invQuestionRunes), clipText(oneLine(inv.Summary), invSummaryRunes)
 			fmt.Fprintf(&b, "- %s\n", investigationLine(inv, now))
 		}
 	}
@@ -154,17 +196,17 @@ func renderRoster(agents []AgentInfo, now time.Time) string {
 			fmt.Fprintf(&b, " for %s", ago(now.Sub(a.StateSince)))
 		}
 		if a.Task != "" {
-			fmt.Fprintf(&b, "; task: %q", a.Task)
+			fmt.Fprintf(&b, "; task: %q", clipText(oneLine(a.Task), rosterTaskRunes))
 		}
 		if !a.LastInteraction.IsZero() {
-			fmt.Fprintf(&b, "; the CEO last dealt with it %s ago", ago(now.Sub(a.LastInteraction)))
+			fmt.Fprintf(&b, "; CEO last dealt with it %s ago", agoCoarse(now.Sub(a.LastInteraction)))
 		}
 		if p := a.Pending; p != nil {
-			fmt.Fprintf(&b, "; WAITING FOR AN ANSWER: %s", p.Question)
+			fmt.Fprintf(&b, "; WAITING FOR AN ANSWER: %s", clipText(oneLine(p.Question), rosterPromptRunes))
 			if len(p.Options) > 0 {
 				var opts []string
 				for i, o := range p.Options {
-					opts = append(opts, fmt.Sprintf("%d %q -> keys %v", i+1, o.Label, o.Keys))
+					opts = append(opts, fmt.Sprintf("%d %q -> keys %v", i+1, clipText(o.Label, rosterOptionRunes), o.Keys))
 				}
 				fmt.Fprintf(&b, "; options: %s", strings.Join(opts, ", "))
 			}
@@ -178,27 +220,36 @@ func renderRoster(agents []AgentInfo, now time.Time) string {
 }
 
 // renderLedger lists what each agent last did and asked, the notes and
-// the open promises.
+// the open promises (kept, expired and cancelled ones are in the
+// transcript and recall), every text clipped (the budget above).
 func renderLedger(agents []AgentInfo, notes []string, promises []PromiseInfo, now time.Time) string {
+	return renderLedgerN(agents, notes, promises, now, journalLedgerEntries)
+}
+
+// renderLedgerN is renderLedger with at most journalN journal lines per
+// agent.
+func renderLedgerN(agents []AgentInfo, notes []string, promises []PromiseInfo, now time.Time, journalN int) string {
 	var b strings.Builder
 	b.WriteString("## Ledger\n\n")
 	n := 0
 	for _, a := range agents {
 		var parts []string
-		if a.LastTask != "" {
-			parts = append(parts, "last task "+fmt.Sprintf("%q", a.LastTask))
+		if a.LastTask != "" && a.LastTask != a.Task {
+			// The roster has the current task.
+			parts = append(parts, "last task "+fmt.Sprintf("%q", clipText(oneLine(a.LastTask), ledgerTaskRunes)))
 		}
 		if a.LastResult != "" {
-			r := "last result: " + a.LastResult
+			r := a.LastResult
 			if a.LastDetail != "" {
 				r += " (" + a.LastDetail + ")"
 			}
-			parts = append(parts, r)
+			parts = append(parts, "last result: "+clipText(oneLine(r), ledgerResultRunes))
 		}
-		if a.LastBlock != "" {
-			parts = append(parts, "last question: "+a.LastBlock)
+		if a.LastBlock != "" && a.Pending == nil {
+			// A pending prompt is in the roster in full.
+			parts = append(parts, "last question: "+clipText(oneLine(a.LastBlock), ledgerBlockRunes))
 		}
-		journal := journalLedgerLines(a.Journal, now)
+		journal := journalLedgerLinesN(a.Journal, now, journalN)
 		if len(parts) == 0 && journal == "" {
 			continue
 		}
@@ -210,16 +261,13 @@ func renderLedger(agents []AgentInfo, notes []string, promises []PromiseInfo, no
 		n++
 	}
 	if len(notes) > 0 {
-		start := 0
-		if len(notes) > 5 {
-			start = len(notes) - 5
-		}
+		start := max(0, len(notes)-ledgerNotes)
 		b.WriteString("Notes from the CEO: ")
 		for i, note := range notes[start:] {
 			if i > 0 {
 				b.WriteString(" | ")
 			}
-			b.WriteString(note)
+			b.WriteString(clipText(oneLine(note), ledgerNoteRunes))
 		}
 		b.WriteString("\n")
 		n++
@@ -230,10 +278,10 @@ func renderLedger(agents []AgentInfo, notes []string, promises []PromiseInfo, no
 			continue
 		}
 		if open == 0 {
-			b.WriteString("Open promises (the supervisor keeps them at the matching event; do not repeat them unasked):\n")
+			b.WriteString("Open promises (kept by the supervisor; do not repeat unasked):\n")
 		}
 		open++
-		fmt.Fprintf(&b, "- %q: %s", p.Text, promiseCondition(p))
+		fmt.Fprintf(&b, "- %q: %s", clipText(oneLine(p.Text), ledgerPromiseRunes), promiseCondition(p))
 		if !p.CreatedAt.IsZero() {
 			fmt.Fprintf(&b, ", made %s ago", ago(now.Sub(p.CreatedAt)))
 		}
@@ -272,6 +320,15 @@ func ago(d time.Duration) string {
 	default:
 		return fmt.Sprintf("%d h %d min", int(d.Hours()), int(d.Minutes())%60)
 	}
+}
+
+// agoCoarse is ago in whole hours past the first hour, for the roster's
+// "last dealt with" where minutes are noise.
+func agoCoarse(d time.Duration) string {
+	if d < time.Hour {
+		return ago(d)
+	}
+	return fmt.Sprintf("%d h", int(d.Hours()))
 }
 
 func aliasOr(a string) string {

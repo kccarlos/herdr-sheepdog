@@ -61,6 +61,12 @@ const (
 	// work: today the model switch ("model switched from gemini/X to
 	// deepseek/Y"), so the Supervisor tab shows where the model flipped.
 	KindSystem MessageKind = "system"
+	// KindState is the per-call state block — roster, ledger,
+	// investigations, time — the loop appends after the window on every
+	// model call so the prefix before it stays byte-stable
+	// (docs/iteration-2.md WP5). Never ingested: not in the transcript
+	// and not in the window.
+	KindState MessageKind = "state"
 )
 
 // Message is one transcript line.

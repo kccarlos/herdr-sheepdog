@@ -39,9 +39,12 @@ const (
 	DefaultAnnounceTimeout = 15 * time.Second
 	// DefaultStopTimeout bounds the stop procedure's closing turn: on
 	// expiry the supervisor speaks its own "Stopped: …" sentence.
-	DefaultStopTimeout     = 5 * time.Second
-	DefaultWindowTokens    = 24000
-	DefaultPruneAfterTurns = 3
+	DefaultStopTimeout = 5 * time.Second
+	// DefaultWindowTokens and DefaultPruneAfterTurns were 24000 and 3
+	// until docs/iteration-2.md WP5 halved the window: prompts averaged
+	// 19.8 k tokens and announce turns missed the 2 s reply window.
+	DefaultWindowTokens    = 12000
+	DefaultPruneAfterTurns = 2
 	// DefaultCompactTimeout bounds the summary call of a compaction,
 	// which runs after the reply was returned.
 	DefaultCompactTimeout = 30 * time.Second
@@ -647,11 +650,13 @@ func (b *Brain) Reset(ctx context.Context, via string) (string, error) {
 }
 
 // summarize is the compaction's model call: one plain text-in/text-out
-// generation, no tools, on the current provider and model.
+// generation, no tools, on the current provider and model, thinking off
+// (a summary needs no chain of thought) and short: the engine caps the
+// result at summaryMaxTokens (docs/iteration-2.md WP5).
 func (b *Brain) summarize(ctx context.Context, text string) (string, error) {
-	prompt := "Summarise the following supervisor transcript in at most 12 short lines for your own later reference: what the CEO asked and decided, what each agent was told, did, asked and answered, and anything still open. Keep aliases; drop paths, hashes and ids.\n\n" + text
+	prompt := "Summarise the following supervisor transcript in at most 10 short lines (under 300 words) for your own later reference: what the CEO asked and decided, what each agent was told, did, asked and answered, and anything still open. Keep aliases; drop paths, hashes and ids.\n\n" + text
 	_, model, impl := b.current()
-	resp, err := impl.Generate(ctx, model, []*genai.Content{{Role: genai.RoleUser, Parts: []*genai.Part{{Text: prompt}}}}, &genai.GenerateContentConfig{})
+	resp, err := impl.Generate(ctx, model, []*genai.Content{{Role: genai.RoleUser, Parts: []*genai.Part{{Text: prompt}}}}, &genai.GenerateContentConfig{ThinkingConfig: thinkingOff()})
 	if err != nil {
 		return "", err
 	}

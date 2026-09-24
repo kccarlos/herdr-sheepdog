@@ -104,6 +104,11 @@ func annotate(msgs []Message, turn int) []ctxcap.Section {
 			sec.Key = fmt.Sprintf("msg:%d", i)
 		}
 		sec.Label, sec.Class = kindLabel(m.Kind)
+		if m.Kind == KindState {
+			// One key whatever its position, so a step's diff shows the
+			// state as changed, not removed and re-added.
+			sec.Key = stateKey
+		}
 		link := m.Link
 		switch m.Kind {
 		case KindRequest:
@@ -169,6 +174,8 @@ func kindLabel(k MessageKind) (string, string) {
 		return "event screen", ctxcap.ClassWorker
 	case KindSystem:
 		return "daemon note", ctxcap.ClassSystem
+	case KindState:
+		return "state (roster, ledger, time)", ctxcap.ClassSystem
 	default:
 		return string(k), ctxcap.ClassMeta
 	}
@@ -237,6 +244,12 @@ func addItem(bd *ctxcap.Builder, header, itemPath, role string, parts []part, os
 	pending := header
 	emit := func(base ctxcap.Section, text string) {
 		text, pending = pending+text, ""
+		if base.Key == stateKey {
+			for _, piece := range splitState(base, text) {
+				bd.Add(piece.sec, piece.text)
+			}
+			return
+		}
 		for _, piece := range splitWorker(base, text) {
 			bd.Add(piece.sec, piece.text)
 		}
@@ -351,6 +364,51 @@ func splitWorker(base ctxcap.Section, text string) []piece {
 		add(true, rest[:j])
 		rest = rest[j:]
 	}
+}
+
+// stateKey is the section key of the state block (KindState).
+const stateKey = "state"
+
+// stateLabels names the state block's sections by heading, with the
+// labels they had as system prompt sections.
+var stateLabels = map[string]string{"## Agents": "roster", "## Ledger": "ledger", "## Investigations": "investigations", "## Now": "time"}
+
+// splitState cuts the state block at its "## " headings, one section
+// each (state:roster, state:ledger, …); the text before the first
+// heading stays with the first.
+func splitState(base ctxcap.Section, text string) []piece {
+	var cuts []int
+	for i := 0; i < len(text); {
+		j := strings.Index(text[i:], "\n## ")
+		if j < 0 {
+			break
+		}
+		cuts = append(cuts, i+j+1)
+		i += j + 1
+	}
+	if len(cuts) == 0 {
+		return []piece{{base, text}}
+	}
+	var out []piece
+	for k, at := range cuts {
+		start, end := at, len(text)
+		if k == 0 {
+			start = 0
+		}
+		if k+1 < len(cuts) {
+			end = cuts[k+1]
+		}
+		heading, _, _ := strings.Cut(text[at:], "\n")
+		sec := base
+		name := strings.ToLower(strings.TrimPrefix(heading, "## "))
+		sec.Label = name
+		if l, ok := stateLabels[heading]; ok {
+			sec.Label, name = l, l
+		}
+		sec.Key = stateKey + ":" + name
+		out = append(out, piece{sec, text[start:end]})
+	}
+	return out
 }
 
 // originsByItem groups origins by item.

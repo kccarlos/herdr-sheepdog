@@ -91,11 +91,13 @@ type Brain struct {
 	// (default 12; formerly propose_timeout_s, still accepted).
 	UtteranceTimeoutS int `toml:"utterance_timeout_s"`
 	// WindowTokens is the context window target (estimated tokens); above
-	// it the oldest half is compacted into a summary (default 24000).
+	// it the oldest half is compacted into a summary (default 12000;
+	// 24000 before docs/iteration-2.md WP5).
 	WindowTokens int `toml:"window_tokens"`
 	// PruneAfterTurns is how many turns a tool result (screen, CLI output)
 	// stays verbatim in the window before it is replaced by a one-line
-	// stub; the disk transcript keeps it (default 3).
+	// stub; the disk transcript keeps it (default 2; 3 before
+	// docs/iteration-2.md WP5).
 	PruneAfterTurns int `toml:"prune_after_turns"`
 	// StepReserveS: when less of the turn's timeout remains after a tool
 	// round than this, the next step is answer-only (no more tools), so
@@ -431,7 +433,7 @@ const (
 )
 
 func defaultBrain() Brain {
-	return Brain{Enabled: true, Provider: DefaultBrainProvider, Model: DefaultBrainModel, MaxSteps: 6, UtteranceTimeoutS: 12, WindowTokens: 24000, PruneAfterTurns: 3, AnnounceTurnTimeoutS: 6, AnnounceTimeoutS: 15, AnnounceWaitS: 2, ReplyWaitS: 2, InvestigateMaxS: 600, InvestigateSessionTTLS: 3600}
+	return Brain{Enabled: true, Provider: DefaultBrainProvider, Model: DefaultBrainModel, MaxSteps: 6, UtteranceTimeoutS: 12, WindowTokens: 12000, PruneAfterTurns: 2, AnnounceTurnTimeoutS: 6, AnnounceTimeoutS: 15, AnnounceWaitS: 2, ReplyWaitS: 2, InvestigateMaxS: 600, InvestigateSessionTTLS: 3600}
 }
 
 // defaultCLI mirrors the argv templates verified in
