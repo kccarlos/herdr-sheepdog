@@ -114,7 +114,7 @@ sheepdog serve --voice=off --herdr=mock --dev  # also serve testdata/audio/*.wav
 
 `/voice`: mic → AudioWorklet → 16 kHz PCM16 → WebSocket, gapless 24 kHz
 playback, mute/stop, auto-reconnect, a silence gate for quiet mics.
-`/debug`: five tabs — **Swimlane** (the default: a sequence diagram with
+`/debug`: six tabs — **Swimlane** (the default: a sequence diagram with
 four lanes, Shepherd · Voice · Brain · Flock / CLI, one card
 per event and arrows for every hop with its latency, chains that light up
 across lanes when you click a tool call or an arrow, compressed quiet time,
@@ -133,14 +133,20 @@ sections by source (embedded / override / dynamic) and the window's
 messages by kind against `brain.window_tokens`, with a marker where the
 on-disk transcript stops being what the model sees and pruned tool
 results shown as their stub but still expandable to the full text;
-"Brain off" with the reason when there is no brain), **Events** (the
+"Brain off" with the reason when there is no brain), **Context** (the
+brain's exact request at every model call beside the voice model's
+context reconstructed from what the daemon sent, coloured by section,
+linked across the panes on hover, with a scrubber over every step and
+turn and a diff against the previous one; see
+[`docs/architecture.md`](docs/architecture.md) "Context capture"), **Events** (the
 live event log with filters) and **State** (state table, pending action,
 fake-event injection so the tool path is testable without a mic or
 herdr) — see [`docs/ws-contract.md`](docs/ws-contract.md). Everything
 on `/debug` is read off the event log (D10), except the Supervisor tab,
 which reads the brain's own store through `GET /api/brain/transcript`,
 `/api/brain/context` and `/api/brain/system_prompt` (the `brain.transcript`
-event only tells it to fetch again); `GET /api/voice/system_prompt`
+event only tells it to fetch again), and the Context tab, which reads
+`/api/context/{brain,voice,timeline}` (`context.step` tells it); `GET /api/voice/system_prompt`
 returns the prompt the session runs with, and the header's chattiness
 dropdown switches the push policy at runtime (see below). To see the
 Supervisor tab without a Gemini key, `sheepdog serve --voice=off
