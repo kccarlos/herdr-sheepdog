@@ -284,7 +284,7 @@ export const PLAYBACK_POLICY = Object.freeze({
 export const STRETCH = Object.freeze({
   minRate: 0.85, // floor, at b <= T/4
   midRate: 0.90, // at b = T/2
-  catchUpRate: 1.05, // when b > 2T
+  catchUpRate: 1.05, // when b > 2T and slowing down left a lag debt
   slewPer20ms: 0.02, // max rate change per 20 ms of output
   frameMs: 20, // WSOLA frame
   overlapMs: 10, // WSOLA overlap (= hop: 50 %)
@@ -294,16 +294,20 @@ export const STRETCH = Object.freeze({
 /**
  * Target playback rate for `b` buffered samples against a jitter buffer
  * target `T` (same unit): 1.0 at b >= T; below T it falls linearly to 0.90
- * at b = T/2 and to 0.85 at b = T/4, floored there; above 2T it is 1.05 to
- * catch up. Rates below 1 play slower than real time (the buffer drains
- * slower than it would), pitch preserved by the WSOLA stretcher.
+ * at b = T/2 and to 0.85 at b = T/4, floored there. Above 2T it is 1.05
+ * only while `debt` > 0 — the lag that slowing down added this reply
+ * (Player accumulates (1 − r)·dt while r < 1 and pays back (r − 1)·dt) —
+ * so catch-up only wins back delay the stretch caused; a source that
+ * arrives far ahead of real time (Gemini) plays at 1.0. Rates below 1
+ * play slower than real time, pitch preserved by the WSOLA stretcher.
  * @param {number} b
  * @param {number} T
+ * @param {number} [debt] lag debt (any unit; only its sign matters)
  * @returns {number}
  */
-export function stretchRate(b, T) {
+export function stretchRate(b, T, debt = 0) {
   if (!(T > 0)) return 1;
-  if (b > 2 * T) return STRETCH.catchUpRate;
+  if (b > 2 * T) return debt > 0 ? STRETCH.catchUpRate : 1;
   if (b >= T) return 1;
   if (b <= T / 4) return STRETCH.minRate;
   if (b >= T / 2) return STRETCH.midRate + ((b - T / 2) / (T / 2)) * (1 - STRETCH.midRate);
@@ -545,9 +549,11 @@ export class Wsola {
  * Adaptive time-stretch (unless `stretch: false`): between the ring and
  * the resampler a WSOLA stretcher plays at rate `stretchRate(buffered,
  * target)`, slewed by `slewRate` — slower than real time (pitch kept) as
- * the buffer falls below the target, 1.05× above twice the target — so a
- * source that delivers slower than real time drains the buffer more
- * slowly instead of running dry.
+ * the buffer falls below the target, 1.05× above twice the target only to
+ * pay back the lag debt slowing down added this reply (reset on a drain or
+ * flush) — so a source that delivers slower than real time drains the
+ * buffer more slowly instead of running dry, and one that delivers faster
+ * plays at 1.0.
  */
 export class Player {
   /**
@@ -605,8 +611,11 @@ export class Player {
       search: Math.round((o.inRate * STRETCH.searchMs) / 1000),
     });
     this.rate = 1;
-    // stretched: net input-rate samples the stretch added to playback
-    // (positive when it slowed down, negative when it caught up).
+    // debt: the lag (output samples) slowing down added this reply, which
+    // catch-up at 1.05 may win back; reset at a drain or flush.
+    this.debt = 0;
+    // stretched: output samples played at a rate other than 1.0
+    // (wall-clock time under time-stretch, either direction).
     this.stats = { underruns: 0, drains: 0, dropped: 0, played: 0, flushes: 0, stretched: 0 };
   }
 
@@ -628,7 +637,7 @@ export class Player {
     return this.ring.available + this.wsola.pending + this.wsola.ready;
   }
 
-  /** Seconds of playback time the stretch has added so far (net). */
+  /** Wall-clock ms played at a rate other than 1.0 so far. */
   get stretchedMs() {
     return Math.round((this.stats.stretched / this.inRate) * 1000);
   }
@@ -644,9 +653,11 @@ export class Player {
     const w = this.wsola;
     if (!w) return this.ring.readOne();
     if (w.ready === 0) {
-      this.rate = slewRate(this.rate, stretchRate(this.buffered, this.target), w.H, this.inRate);
+      this.rate = slewRate(this.rate, stretchRate(this.buffered, this.target, this.debt), w.H, this.inRate);
       const r = w.produce(this.ring, this.rate);
-      this.stats.stretched += r.out - r.consumed;
+      if (this.rate !== 1) this.stats.stretched += r.out;
+      // Lag debt: (1 − r)·dt accrues while slower, (r − 1)·dt pays it back.
+      this.debt = Math.max(0, this.debt + (1 - this.rate) * r.out);
     }
     return w.readOne();
   }
@@ -690,6 +701,7 @@ export class Player {
     this.ring.clear();
     if (this.wsola) this.wsola.reset();
     this.rate = 1;
+    this.debt = 0;
     if (this.state === 'playing') this.fade = this.fadeLen;
     if (this.state !== 'idle') this.flushedThisUtterance = true;
     this.state = 'idle';
@@ -758,6 +770,7 @@ export class Player {
           this.next = this.cur;
           this.state = 'idle';
           this.stats.drains++;
+          this.debt = 0; // the reply (or this run of it) ended
           this.outSince = 0;
           this.last = out[i];
           this.fade = this.fadeLen;

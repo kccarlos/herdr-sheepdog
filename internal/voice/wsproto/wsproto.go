@@ -67,8 +67,8 @@ type Message struct {
 	Drains    *int `json:"drains,omitempty"`
 	BufferMs  *int `json:"buffer_ms,omitempty"`
 	// Rate and StretchedMs are the adaptive time-stretch's current
-	// playback rate and the net playback time it has added (ms; negative
-	// when catching up), docs/ws-contract.md "Playback jitter buffer".
+	// playback rate and the total wall-clock ms played at a rate other
+	// than 1.0, docs/ws-contract.md "Playback jitter buffer".
 	Rate        *float64 `json:"rate,omitempty"`
 	StretchedMs *int     `json:"stretched_ms,omitempty"`
 

@@ -297,7 +297,8 @@ type client struct {
 	drains    int
 	bufferMs  int
 	// rate / stretchedMs: the time-stretch's current playback rate and
-	// the net playback time it added (ping rate, stretched_ms).
+	// the wall-clock ms played at a rate other than 1.0 (ping rate,
+	// stretched_ms).
 	rate        float64
 	stretchedMs int
 	// sendWaits is a bounded rolling window of how long recent audio

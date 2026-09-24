@@ -122,15 +122,83 @@ test('WSOLA passes a tail shorter than a frame straight through (never holds aud
   assert.deepEqual(Array.from(out), Array.from(input));
 });
 
-test('rate policy: 1.0 at the target, linear to 0.90 at T/2 and 0.85 at T/4, 1.05 above 2T', () => {
+test('rate policy: 1.0 at the target, linear to 0.90 at T/2 and 0.85 at T/4; 1.05 above 2T only with lag debt', () => {
   const T = 800;
+  // [b, rate with no debt, rate with debt]
   const table = [
-    [0, 0.85], [T / 8, 0.85], [T / 4, 0.85], [(3 * T) / 8, 0.875], [T / 2, 0.9], [(3 * T) / 4, 0.95],
-    [T, 1], [1.5 * T, 1], [2 * T, 1], [2 * T + 1, 1.05], [10 * T, 1.05],
+    [0, 0.85, 0.85], [T / 8, 0.85, 0.85], [T / 4, 0.85, 0.85], [(3 * T) / 8, 0.875, 0.875], [T / 2, 0.9, 0.9],
+    [(3 * T) / 4, 0.95, 0.95], [T, 1, 1], [1.5 * T, 1, 1], [2 * T, 1, 1], [2 * T + 1, 1, 1.05], [10 * T, 1, 1.05],
   ];
-  for (const [b, want] of table) {
-    assert.ok(Math.abs(stretchRate(b, T) - want) < 1e-9, `b=${b}: ${stretchRate(b, T)} want ${want}`);
+  for (const [b, noDebt, withDebt] of table) {
+    assert.ok(Math.abs(stretchRate(b, T) - noDebt) < 1e-9, `b=${b}, no debt: ${stretchRate(b, T)} want ${noDebt}`);
+    assert.ok(Math.abs(stretchRate(b, T, 0) - noDebt) < 1e-9, `b=${b}, debt 0: ${stretchRate(b, T, 0)}`);
+    assert.ok(Math.abs(stretchRate(b, T, 240) - withDebt) < 1e-9, `b=${b}, debt: ${stretchRate(b, T, 240)} want ${withDebt}`);
   }
+});
+
+// Debt semantics in the Player: slowing down accrues (1 − r)·dt, catch-up
+// at 1.05 pays (r − 1)·dt back and stops once it is paid, and a drain or
+// flush (the end of a reply) clears it.
+test('lag debt: accrues while slow, is paid back at 1.05, and resets at the end of a reply', () => {
+  const p = new Player({ inRate: RATE, outRate: RATE });
+  p.setPolicy(PLAYBACK_POLICY.openai); // T = 800 ms
+  const block = new Float32Array(128);
+  const tone = sine(440, RATE * 20);
+  // Start with 800 ms, then trickle at 0.5x until the rate is at its floor.
+  p.push(tone.subarray(0, RATE * 0.8));
+  let at = RATE * 0.8;
+  let rendered = 0;
+  while (p.rate > STRETCH.minRate + 1e-9 || p.debt === 0) {
+    if (rendered % 256 === 0) { p.push(tone.subarray(at, at + 64)); at += 64; }
+    p.render(block);
+    rendered += 128;
+    assert.ok(rendered < RATE * 10, 'never slowed down');
+  }
+  assert.ok(p.debt > 0, 'slowing down accrued debt');
+  // A burst far above 2T: catch-up allowed while the debt lasts.
+  p.push(tone.subarray(at, at + RATE * 5));
+  at += RATE * 5;
+  let fast = 0;
+  let after = 0;
+  for (let i = 0; i < 2000; i++) {
+    p.render(block);
+    if (p.rate > 1) fast++;
+    if (p.debt === 0 && p.rate <= 1) after++;
+    if (after > 50) break;
+  }
+  assert.ok(fast > 0, 'caught up at 1.05 while in debt');
+  assert.equal(p.debt, 0, 'debt paid back');
+  assert.equal(p.rate, 1, 'back to 1.0 once paid, although b > 2T');
+  // Flush clears whatever debt is left.
+  p.debt = 123;
+  p.flush();
+  assert.equal(p.debt, 0);
+});
+
+test('a Gemini-like source (4x real time) plays at 1.0 for at least 95 % of the time', () => {
+  const p = new Player({ inRate: RATE, outRate: RATE }); // Gemini policy (default)
+  const tone = sine(440, RATE * 10);
+  const chunk = 2400; // 100 ms, one every 25 ms of output: 4x real time
+  const block = new Float32Array(128);
+  let pushed = 0;
+  let t = 0;
+  let playing = 0;
+  let atOne = 0;
+  while (pushed < tone.length || p.state !== 'idle') {
+    while (pushed < tone.length && t >= (pushed / chunk) * 600) {
+      p.push(tone.subarray(pushed, pushed + chunk));
+      pushed += chunk;
+    }
+    p.render(block);
+    if (p.state === 'playing') {
+      playing++;
+      if (p.rate === 1) atOne++;
+    }
+    t += 128;
+    assert.ok(t < RATE * 30, 'never drained');
+  }
+  assert.ok(atOne / playing >= 0.95, `played at 1.0 for ${((100 * atOne) / playing).toFixed(1)} %`);
+  assert.equal(p.stretchedMs < 500, true, `stretched ${p.stretchedMs} ms`);
 });
 
 test('rate changes are slewed at most 0.02 per 20 ms', () => {

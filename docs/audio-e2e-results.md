@@ -142,20 +142,23 @@ per-provider policy plus a pitch-preserving WSOLA time-stretch
 (`docs/ws-contract.md` "Playback jitter buffer" has the exact numbers the
 iOS app mirrors): GPT-Live starts at 800 ms and adapts up to 2000 ms;
 below the target the page plays slower than real time (down to 0.85×,
-pitch kept), and above twice the target it catches up at 1.05×. The
+pitch kept), and above twice the target it catches up at 1.05× — only
+while paying back the lag the slow-down added this reply (the iOS app's
+lag-debt rule; a Gemini-like 4× source plays at 1.0 for 98.6 % of the
+time in `stretch.test.mjs`'s replay, 145 ms of 10 s stretched). The
 stretcher costs about 0.2 % of one core (60 s of audio in 113 ms in Node).
 
 Offline replay through the real `Player`
 (`web/voice/playback-timeline.test.mjs`; "before" is the shipped
 Gemini-policy adaptive buffer, which every provider got until now):
 
-| Timeline (arrival ratio) | Before: 150→500 ms, no stretch | 800→2000 ms, no stretch | **After: 800→2000 ms + stretch** | Time-stretched |
+| Timeline (arrival ratio) | Before: 150→500 ms, no stretch | 800→2000 ms, no stretch | **After: 800→2000 ms + stretch** | Played at r ≠ 1 (`stretched_ms`) |
 |---|---|---|---|---|
-| status-question (0.78×) | 3 | 0 | **0** | +0.25 s |
-| instruction-promise (0.69×) | 2 | 1 | **1** | +0.26 s |
-| both chained | 4 | 1 | **1** | +0.51 s |
-| synthetic 20 s reply from the same gaps (0.73×) | 9 | 5 | **4** | +2.4 s |
-| synthetic 60 s reply from the same gaps (0.73×) | 23 | 14 | **11** | +6.7 s |
+| status-question (0.78×) | 3 | 0 | **0** | 2.9 s |
+| instruction-promise (0.69×) | 2 | 1 | **1** | 3.3 s |
+| both chained | 4 | 1 | **1** | 6.2 s |
+| synthetic 20 s reply from the same gaps (0.73×) | 9 | 5 | **4** | 22.4 s |
+| synthetic 60 s reply from the same gaps (0.73×) | 23 | 14 | **11** | 66.8 s |
 
 Near zero on the recorded replies, not on long ones: most of the gain is
 the deeper GPT-Live buffer, and the stretch adds a further cut. A reply

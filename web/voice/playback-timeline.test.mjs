@@ -115,7 +115,7 @@ test('GPT-Live policy plus time-stretch: underruns before vs after on the record
     const b = replay(chunks, { stretch: false });
     const a = replay(chunks, {}, PLAYBACK_POLICY.openai);
     after[name] = a.stats.underruns;
-    t.diagnostic(`${name}: underruns before ${b.stats.underruns}, after ${a.stats.underruns} (time-stretched ${a.stretchedMs} ms)`);
+    t.diagnostic(`${name}: underruns before ${b.stats.underruns}, after ${a.stats.underruns} (played at r != 1 for ${a.stretchedMs} ms)`);
     assert.ok(a.stats.underruns < b.stats.underruns, `${name}: after ${a.stats.underruns} not below before ${b.stats.underruns}`);
   }
   assert.equal(after['status-question'], 0);

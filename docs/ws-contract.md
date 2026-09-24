@@ -41,7 +41,7 @@ scheduling each frame at "now".
 | `{"type":"silence","on":true\|false}` | The client's silence gate closed (`on:true`, no binary frames follow) or reopened (`on:false`). See *Silence gate*. |
 | `{"type":"cancel"}`                  | The "stop" button. The daemon stops current playback (it will send `flush`) and invokes the `cancel` tool path in the supervisor. Equivalent to the user saying "stop". |
 | `{"type":"text","text":"…"}`         | Simulate an utterance: the text is fed to the voice session as if the user had spoken it (`/debug` and the `/voice` text box use this). It is recorded as a typed shepherd input, which the one rail accepts like a transcript (docs/roles.md "The one rail"). Without a voice session (`--voice=off`) the daemon echoes it as an `in` transcript and answers through its text router with one `out` transcript (a text routed to `cancel` yields `flush` then the `out`), or with an `error` when the text cannot be routed. |
-| `{"type":"ping","gated_frames":N?,"peak":N?,"underruns":N?,"drains":N?,"buffer_ms":N?,"rate":F?,"stretched_ms":N?}` | Liveness probe; the daemon answers `pong`. Clients should send one every 15–30 s while idle. The optional counters (frames withheld by the silence gate so far; last input peak in Int16 LSB; the playback jitter buffer's underrun and drain counts and its current buffered level in ms; the time-stretch's current playback rate and the net playback time it has added in ms, negative when catching up — see "Playback jitter buffer" below) are copied into the next `web.client.stats` event, which also carries `send_wait_max_ms`/`send_wait_p95_ms` (how long a recent audio frame waited in the daemon's per-client send queue; near 0 in normal operation). |
+| `{"type":"ping","gated_frames":N?,"peak":N?,"underruns":N?,"drains":N?,"buffer_ms":N?,"rate":F?,"stretched_ms":N?}` | Liveness probe; the daemon answers `pong`. Clients should send one every 15–30 s while idle. The optional counters (frames withheld by the silence gate so far; last input peak in Int16 LSB; the playback jitter buffer's underrun and drain counts and the audio buffered right now in ms; the time-stretch's current playback rate and the total wall-clock ms played at a rate other than 1.0 — see "Playback jitter buffer" below) are copied into the next `web.client.stats` event, which also carries `send_wait_max_ms`/`send_wait_p95_ms` (how long a recent audio frame waited in the daemon's per-client send queue; near 0 in normal operation). |
 
 Unknown `type` values are answered with an `error` message and otherwise
 ignored; the connection stays open.
@@ -141,13 +141,19 @@ adaptive time-stretch**:
 
   | b | r |
   |---|---|
-  | b > 2T | 1.05 (catch up) |
+  | b > 2T | 1.05 while the lag debt is > 0 (catch up), else 1.00 |
   | T ≤ b ≤ 2T | 1.00 |
   | T/2 ≤ b < T | linear, 0.90 at T/2 → 1.00 at T |
   | T/4 < b < T/2 | linear, 0.85 at T/4 → 0.90 at T/2 |
   | b ≤ T/4 | 0.85 (floor) |
 
   r < 1 plays slower than real time, so the buffer drains more slowly.
+  **Catch-up only pays back lag the slow-down added:** while r < 1 the
+  client accumulates a lag debt of (1 − r)·dt; r = 1.05 is allowed only
+  while the debt is > 0 and b > 2T, and each step at r > 1 subtracts
+  (r − 1)·dt (the debt never goes below 0). The debt is reset at the end
+  of each reply (a drain) and on `flush`. So a source that arrives far
+  ahead of real time (Gemini, ~4×) plays at 1.00, not 5 % fast.
   Rate changes are **slewed at most 0.02 per 20 ms** of output (re-evaluated
   every 10 ms hop), so they are inaudible. r is only applied while playing.
 - **Time-stretch is pitch-preserving WSOLA** (waveform-similarity
@@ -165,9 +171,11 @@ adaptive time-stretch**:
 - **Cross-fade every start or resume over ~8 ms** (ramp in from silence)
   so a fresh utterance or a post-underrun resume never clicks; fade out
   over ~2 ms on a drain or a `flush`, which also resets the rate to 1 and
-  empties the stretcher.
-- Report `underruns`, `drains`, the buffered level (`buffer_ms`), the
-  current `rate` and the net time-stretched `stretched_ms` on the `ping`
+  the lag debt to 0 and empties the stretcher.
+- Report `underruns`, `drains`, `buffer_ms` (audio buffered right now,
+  including the stretcher's lookahead), the current `rate` and
+  `stretched_ms` (total wall-clock ms played at r ≠ 1.0, either direction)
+  on the `ping`
   message (above) so `web.client.stats` can see them.
 
 This does not guarantee zero underruns: the floor is 0.85×, so a reply
