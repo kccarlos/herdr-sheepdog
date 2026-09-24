@@ -1,0 +1,6 @@
+{"ts":"2026-01-01T00:00:00Z","source":"voice","type":"voice.tool_result","payload":{"id":"call1","name":"to_supervisor","spoken":"Two agents are running and one is idle."}}
+{"ts":"2026-01-01T00:00:05Z","source":"voice","type":"voice.push","payload":{"text":"It finished the tests and reported six passing.","urgency":"idle"}}
+{"ts":"2026-01-01T00:00:06Z","source":"voice","type":"voice.push","payload":{"text":"Started on the fix, quietly, in the background.","urgency":"silent"}}
+{"ts":"2026-01-01T00:00:10Z","source":"supervisor","type":"brain.push_late","payload":{"turn":1,"spoken":"The build failed with a timeout — want me to retry it now?","needs_user":true,"added":false}}
+{"ts":"2026-01-01T00:00:12Z","source":"supervisor","type":"brain.push_late","payload":{"turn":2,"spoken":"Delivered anyway, so this line does not count as dropped.","needs_user":true,"added":true}}
+{"ts":"2026-01-01T00:00:14Z","source":"supervisor","type":"brain.push_late","payload":{"turn":3,"spoken":"","needs_user":false,"added":false}}

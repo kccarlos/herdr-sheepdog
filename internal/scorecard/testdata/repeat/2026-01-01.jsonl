@@ -1,0 +1,4 @@
+{"ts":"2026-01-01T00:00:00Z","source":"voice","type":"voice.tool_call","payload":{"id":"call1","name":"to_supervisor","args":{"text":"What's discoursecopilot doing right now"}}}
+{"ts":"2026-01-01T00:00:20Z","source":"voice","type":"voice.tool_call","payload":{"id":"call2","name":"to_supervisor","args":{"text":"What's discoursecopilot doing right now"}}}
+{"ts":"2026-01-01T00:00:50Z","source":"voice","type":"voice.tool_call","payload":{"id":"call3","name":"to_supervisor","args":{"text":"Tell ucsummary to run the tests"}}}
+{"ts":"2026-01-01T00:00:55Z","source":"voice","type":"voice.tool_call","payload":{"id":"call4","name":"to_supervisor","args":{"text":"Can you say that again"}}}

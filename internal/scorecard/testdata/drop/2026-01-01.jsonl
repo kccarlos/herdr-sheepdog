@@ -1,0 +1,8 @@
+{"ts":"2026-01-01T00:00:00Z","source":"supervisor","type":"brain.push_late","payload":{"turn":1,"spoken":"X needs the shepherd.","needs_user":true,"added":false}}
+{"ts":"2026-01-01T00:00:01Z","source":"supervisor","type":"brain.push_late","payload":{"turn":2,"spoken":"Y is just an FYI.","needs_user":false,"added":false}}
+{"ts":"2026-01-01T00:00:02Z","source":"supervisor","type":"brain.push_late","payload":{"turn":3,"spoken":"","needs_user":true,"added":false}}
+{"ts":"2026-01-01T00:00:03Z","source":"supervisor","type":"brain.push_late","payload":{"turn":4,"spoken":"Z was delivered anyway.","needs_user":true,"added":true}}
+{"ts":"2026-01-01T00:00:10Z","source":"brain","type":"brain.fallback","payload":{"kind":"announce","reason":"timeout","acted":false}}
+{"ts":"2026-01-01T00:00:11Z","source":"brain","type":"brain.fallback","payload":{"kind":"announce","reason":"timeout","acted":false}}
+{"ts":"2026-01-01T00:00:12Z","source":"brain","type":"brain.fallback","payload":{"kind":"utterance","reason":"rate_limited","acted":false}}
+{"ts":"2026-01-01T00:00:13Z","source":"brain","type":"brain.fallback","payload":{"kind":"utterance","acted":false}}

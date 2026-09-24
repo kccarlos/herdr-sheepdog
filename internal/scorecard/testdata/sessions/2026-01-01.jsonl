@@ -1,0 +1,5 @@
+{"ts":"2026-01-01T00:00:00Z","source":"voice","type":"voice.transcript.in","payload":{"final":false,"text":"before any daemon.start"}}
+{"id":1,"ts":"2026-01-01T00:01:00Z","source":"daemon","type":"daemon.start","payload":{"brain":"on","version":"test1"}}
+{"ts":"2026-01-01T00:01:05Z","source":"voice","type":"voice.tool_call","payload":{"id":"call1","name":"to_supervisor","args":{"text":"session one"}}}
+{"id":2,"ts":"2026-01-01T00:02:00Z","source":"daemon","type":"daemon.start","payload":{"brain":"on","version":"test2"}}
+{"ts":"2026-01-01T00:02:05Z","source":"voice","type":"voice.tool_call","payload":{"id":"call2","name":"to_supervisor","args":{"text":"session two"}}}

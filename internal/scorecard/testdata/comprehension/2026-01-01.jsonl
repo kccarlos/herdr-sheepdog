@@ -1,0 +1,5 @@
+{"ts":"2026-01-01T00:00:00Z","source":"voice","type":"voice.tool_call","payload":{"id":"call1","name":"to_supervisor","args":{"text":"What does that mean?"}}}
+{"ts":"2026-01-01T00:00:05Z","source":"voice","type":"voice.tool_call","payload":{"id":"call2","name":"to_supervisor","args":{"text":"What's discoursecopilot doing"}}}
+{"ts":"2026-01-01T00:00:10Z","source":"voice","type":"voice.tool_call","payload":{"id":"call3","name":"to_supervisor","args":{"text":"Can you explain that differently"}}}
+{"ts":"2026-01-01T00:00:15Z","source":"voice","type":"voice.tool_call","payload":{"id":"call4","name":"to_supervisor","args":{"text":"什么意思"}}}
+{"ts":"2026-01-01T00:00:20Z","source":"voice","type":"voice.tool_call","payload":{"id":"call5","name":"to_supervisor","args":{"text":"Tell it to commit"}}}
