@@ -25,6 +25,7 @@ of its work order) are merged; so is everything since.
 | Approval prompts parsed by code; blocked → blocked (post-answer poll + reconciler); revived prompts | done (#31, #33, #37, #48) |
 | Investigations: background CLI sub-agent jobs with session resume and a ledger | done (#32) |
 | Deliver-later: a `to_supervisor` call waits `brain.reply_wait_s`, then the reply is pushed when it lands | done (#47) |
+| Finish delivery (iteration 2 WP2): a finish waits for the brain's line, only a block speaks at `brain.announce_wait_s`, a late `needs_user` line is always spoken, "started on" for the brain's own prompt is silent | in review |
 | "New conversation" (brain transcript window + voice memory) | done (#44, #48) |
 | Phone/LAN access: `web.bind` / `web.token`, cookie login, `GET /api/hello` | done (#36) |
 | `/debug`: Conversation, Swimlane, Supervisor, Context, Events, State tabs | done (#16, #19, #22, #49) |

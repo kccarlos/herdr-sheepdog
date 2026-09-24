@@ -31,9 +31,11 @@
 // from the stop procedure.
 //
 // announce.go runs the brain's announce turn on every block and finish
-// and speaks the one line that event gets — the brain's when it lands
-// within Config.AnnounceWait, else the code sentence, never both — under
-// the chattiness ceiling.
+// and speaks the one line that event gets under the chattiness ceiling:
+// a finish waits for the brain's line and falls back to the code
+// sentence only when the turn fails; a block speaks the parsed prompt at
+// Config.AnnounceWait unless the brain's line lands first, and a later
+// line is added only when it says the shepherd must act.
 //
 // Pending actions expire after a TTL (Run's ticker); an expired question
 // that the user later confirms is revived and asked again before anything

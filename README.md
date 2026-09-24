@@ -225,16 +225,17 @@ finished the rerun you asked for; the same test still fails."), or
 nothing when you already know, or silent context for the voice model —
 and the level caps what it asked for: never a finish at `quiet`, never
 an agent you have not dealt with at `normal`, `interrupt` only for a due
-promise or a decision you must take. **One line per event, as a rule:**
-the event waits at most `brain.announce_wait_s` (2 s) for the brain, and
-past that the code sentence is spoken and the brain's line dropped
-(`brain.push_late`) — unless it says you must decide and the prompt is
-still open, or the finish is one you are waiting for (it keeps a promise,
-ends an instruction you gave, or the line says which request of yours it
-answers): then you hear "auth finished — here's what it found." and the
-finding follows as soon as the brain has it (`brain.announce_timeout_s`,
-15 s). A finish that leaves a question on screen (Claude Code's own
-post-turn prompt) is announced together with the question. Every judgment is in the event log as `brain.push_decision`
+promise or a decision you must take. **One line per event:** a finish
+is not urgent, so it waits for the brain's line with what the agent
+found (up to `brain.announce_turn_timeout_s`, or
+`brain.announce_timeout_s` when you are waiting for it) and you hear
+that line alone; only if the brain fails or times out do you hear "auth
+finished." A block is urgent: the parsed prompt is spoken after at most
+`brain.announce_wait_s` (2 s), and a brain line that comes later is
+dropped (`brain.push_late`) unless it says you must decide or act, which
+is always spoken. A finish that leaves a question on screen (Claude
+Code's own post-turn prompt) is announced together with the question,
+as fast as a block. Every judgment is in the event log as `brain.push_decision`
 and on the push card in the Supervisor tab.
 
 "Dealt with recently" means that within the last `supervisor.recent_minutes`

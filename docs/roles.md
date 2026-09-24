@@ -130,17 +130,26 @@ trigger}` (`stop_tool` or the bare-word fast path).
 
 ## Pushes
 
-One line per worker event, the brain's when it lands within
-`brain.announce_wait_s`, else the code sentence (the parsed prompt for a
-block, "auth finished" for a finish) — never both, with two exceptions
-that add at most one line. A finish the shepherd is owed — it keeps a
-promise or ends an instruction they gave this run — is announced at the
-wait as "auth finished — here's what it found" and the brain's line with
-the finding follows whenever it lands (within
-`brain.announce_timeout_s`, idle, never dropped for lateness); a late
-line that relates the finish to one of their requests (`relates_to`) is
-added the same way. And a late line that says the shepherd must decide
-on a block that is still open. A finish that leaves a prompt on screen
+One line per worker event, and only a prompt is urgent. **A finish
+waits for the brain's line**: nothing is said at `brain.announce_wait_s`;
+the brain's line (what it found) is spoken alone whenever the announce
+turn answers, within the turn's own budget (`brain.announce_turn_timeout_s`,
+or `brain.announce_timeout_s` when the shepherd is owed it — it keeps a
+promise or ends an instruction they gave this run). Only when the turn
+fails, times out, yields or is coalesced is the code sentence ("auth
+finished") spoken, once, then; an owed finish whose turn timed out says
+in that sentence that its findings could not be had. **A block stays
+fast**: the parsed prompt is spoken at `brain.announce_wait_s` unless the
+brain's line lands first. A brain line that lands after the code
+sentence is dropped (`brain.push_late`), with one rule and one
+exception, each at most one added line at idle: a line that says the
+shepherd must decide or act (`needs_user`) is always spoken, whatever
+the event, unless the prompt it is about is gone; and the finding of an
+owed finish that also asked (below) or a line that relates it to one of
+their requests (`relates_to`) is added too. "<alias> started on …" for
+an instruction the brain sent within `supervisor.cancel_window_s` is
+silent context (the tool result already said it was sent); one picked
+up later is spoken at `chatty`. A finish that leaves a prompt on screen
 (Claude Code's post-turn "teach auto mode…?"; not agy, which reports done
 around its mid-task prompts) is announced with the question in one line
 ("auth finished, and it's asking …"), keeps the finish's promises and

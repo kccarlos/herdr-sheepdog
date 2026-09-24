@@ -2,6 +2,7 @@ package supervisor
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -300,177 +301,265 @@ func TestAnnounceSkipCannotSilencePromise(t *testing.T) {
 	}
 }
 
-// lateAnnounce builds a brain harness whose announce turn answers rep
-// only after the code sentence has been spoken (AnnounceWait 30 ms).
-func lateAnnounce(t *testing.T, rep *braintest.Step, opts ...func(*Config)) (*harness, *braintest.Model) {
-	t.Helper()
-	release := make(chan struct{})
-	m := braintest.NewModel()
-	m.EventDefault = &braintest.Step{Fn: func(call braintest.Call) (*genai.GenerateContentResponse, error) {
-		<-release
+// slowAnnounce is an announce turn that takes `took` on the harness clock
+// (and longer than AnnounceWait in real time) before it answers rep.
+func slowAnnounce(h **harness, took time.Duration, rep *braintest.Step) *braintest.Step {
+	return &braintest.Step{Fn: func(call braintest.Call) (*genai.GenerateContentResponse, error) {
+		time.Sleep(60 * time.Millisecond)
+		(*h).clock.Advance(took)
 		return braintest.Response(*rep), nil
 	}}
-	h := newBrainHarness(t, m, append([]func(*Config){func(c *Config) { c.AnnounceWait = 30 * time.Millisecond }}, opts...)...)
-	pusher := h.pusher
-	go func() {
-		deadline := time.Now().Add(5 * time.Second)
-		for len(pusher.all()) < 1 && time.Now().Before(deadline) {
-			time.Sleep(time.Millisecond)
-		}
-		close(release)
-	}()
-	return h, m
 }
 
-// One push per event for a finish nobody asked about: past AnnounceWait
-// the daemon's own sentence is spoken and the brain's line, whenever it
-// lands, is dropped (brain.push_late) — the two-lines-per-event collision
-// of 2026-09-18 stays gone.
-func TestAnnounceWaitElapsesAndDropsTheLateLine(t *testing.T) {
-	h, _ := lateAnnounce(t, announceReply("Auth finished the refactor; the tests pass.", "idle", "the detail", "", false), func(c *Config) { c.Chattiness = string(Chatty) })
-	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
-	doneAuth(h)
-	if got := h.pushTexts(); len(got) != 1 || got[0] != doneSentence {
-		t.Fatalf("pushes = %v", got)
+// A finish waits for the brain's line (iteration 2 WP2; eval
+// finish-line-needs-user-spoken): at 2026-09-24 00:52:37 the shepherd
+// heard "discoursecopilot-claude has finished its task." and the brain's
+// line with the finding and a question for them, 4.5 s later, was
+// dropped. Now the finish is not spoken at AnnounceWait: the brain's line
+// is spoken alone whenever its turn answers, for any finish the level
+// speaks — nobody's in particular, the shepherd's own instruction, a kept
+// promise (at every level) — with no push_late and the wait logged.
+func TestFinishWaitsForTheBrainsLine(t *testing.T) {
+	line := "Version 2.1.0 is finished and pushed to main. Shall I have it push the tag now, or wait until you've had a look?"
+	cases := []struct {
+		name  string
+		level Chattiness
+		setup func(h *harness)
+		want  string
+	}{
+		{"nobody's, chatty", Chatty, func(*harness) {}, spokenLine(line)},
+		{"the shepherd's instruction, normal", Normal, func(h *harness) {
+			now := h.sup.cfg.Now()
+			if _, err := h.store.Update("w5:p1", func(a *state.Agent) { a.CurrentTask, a.LastInteraction = "cut the release", &now }); err != nil {
+				t.Fatal(err)
+			}
+		}, spokenLine(line)},
+		{"a kept promise, quiet", Quiet, func(h *harness) {
+			if _, err := h.sup.createPromise("w5:p1", brain.PromiseRequest{Text: "tell me when the release is out", Event: "done"}); err != nil {
+				t.Fatal(err)
+			}
+		}, spokenLine(line)},
 	}
-	d := h.decisions()
-	if len(d) != 2 || d[0]["via"] != "template" || d[0]["reason"] != "wait" || d[0]["urgency_applied"] != "idle" || d[1]["via"] != "brain" || d[1]["late"] != true || d[1]["urgency_applied"] != "skip" || d[1]["reason"] != "late" {
-		t.Errorf("push_decision = %v", d)
-	}
-	late := h.log.ofType("brain.push_late")
-	if len(late) != 1 || payload(late[0])["added"] != false || payload(late[0])["turn"] != 1 {
-		t.Errorf("brain.push_late = %v", late)
-	}
-	// The line nobody heard is still what the record keeps of the finish.
-	if row, _ := h.store.Get("w5:p1"); row.LastResult == nil || row.LastResult.Spoken != "Auth finished the refactor; the tests pass." || row.LastResult.Detail != "the detail" {
-		t.Errorf("last_result = %+v", row.LastResult)
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var h *harness
+			m := braintest.NewModel()
+			m.EventDefault = slowAnnounce(&h, 6*time.Second, announceReply(line, "idle", "", "", true))
+			h = newBrainHarness(t, m, func(cfg *Config) { cfg.AnnounceWait = 10 * time.Millisecond; cfg.Chattiness = string(c.level) })
+			h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
+			c.setup(h)
+			doneAuth(h)
+			got := h.pusher.all()
+			if len(got) != 1 || got[0].Text != c.want || got[0].Urgency != voice.UrgencyIdle {
+				t.Fatalf("pushes = %+v", got)
+			}
+			d := h.decisions()
+			if len(d) != 1 || d[0]["via"] != "brain" || d[0]["late"] != false || d[0]["wait"] != waitTurn || d[0]["waited_ms"] != int64(6000) {
+				t.Errorf("push_decision = %v", d)
+			}
+			if n := h.log.count("brain.push_late"); n != 0 {
+				t.Errorf("brain.push_late = %d", n)
+			}
+			if row, _ := h.store.Get("w5:p1"); row.LastResult == nil || row.LastResult.Spoken != spokenLine(line) {
+				t.Errorf("last_result = %+v", row.LastResult)
+			}
+		})
 	}
 }
 
-// The 2026-09-23 23:59:43 sequence: a finish keeps "tell you when the
-// investigation reports back", the brain's line with the answer lands
-// 6.4 s after the wait. The code sentence now says the finding is coming
-// and the late line is pushed as the one addition, never dropped.
-func TestAnnounceLateLineKeepingAPromiseIsAdded(t *testing.T) {
-	line := "Here's the answer to your question: nothing else was connected. The flips were taps on the phone itself."
-	h, _ := lateAnnounce(t, announceReply(line, "idle", "the detail", "the mute investigation", true))
+// A finish whose turn times out speaks the code sentence once, after the
+// turn's own budget, never before it; an owed finish (the shepherd's own
+// instruction, a kept promise) says in the same sentence that its
+// findings could not be had.
+func TestFinishTimeoutSpeaksTheCodeSentenceOnce(t *testing.T) {
+	cases := []struct {
+		name string
+		owed bool
+		want string
+	}{
+		{"not owed", false, doneSentence},
+		{"a kept promise", true, "As you asked: auth finished, but I couldn't get its findings in time. Ask me and I'll read its screen."},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			block := make(chan struct{})
+			defer close(block)
+			m := braintest.NewModel()
+			m.EventDefault = &braintest.Step{Block: block}
+			log := &recLog{}
+			dir := t.TempDir()
+			const budget = 80 * time.Millisecond
+			b, err := brain.New(brain.Config{DataDir: dir, RunID: "t", AnnounceTurnTimeout: budget, AnnounceTimeout: budget, FinalGrace: -1}, m, log)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = b.Close() })
+			h := newHarness(t, func(cfg *Config) {
+				cfg.Brain, cfg.DataDir, cfg.AnnounceWait, cfg.Chattiness = b, dir, 5*time.Millisecond, string(Chatty)
+			})
+			h.log, h.sup.log, h.client.Log = log, log, log
+			h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
+			if c.owed {
+				if _, err := h.sup.createPromise("w5:p1", brain.PromiseRequest{Text: "tell me when it's done", Event: "done"}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			// Nothing is spoken at AnnounceWait: the finish waits.
+			pusher := h.pusher
+			early := make(chan int, 1)
+			go func() {
+				time.Sleep(budget / 2)
+				early <- len(pusher.all())
+			}()
+			start := time.Now()
+			doneAuth(h)
+			if n := <-early; n != 0 {
+				t.Errorf("%d pushes before the turn's budget ran out", n)
+			}
+			if el := time.Since(start); el < budget {
+				t.Errorf("finish spoke after %s, before the budget %s", el, budget)
+			}
+			if got := h.pushTexts(); len(got) != 1 || got[0] != c.want {
+				t.Fatalf("pushes = %v", got)
+			}
+			d := h.decisions()
+			if len(d) != 1 || d[0]["via"] != "template" || d[0]["reason"] != "timeout" || d[0]["wait"] != waitTurn {
+				t.Errorf("push_decision = %v", d)
+			}
+		})
+	}
+}
+
+// A late line about a block: the parsed prompt is spoken at AnnounceWait;
+// a late line that says the shepherd must act is added once at idle —
+// also for a block that created no pending action (widened from "open
+// prompt only"); a late line without needs_user is dropped; a late line
+// about a prompt answered meanwhile is dropped as stale.
+func TestAnnounceLateBlockLines(t *testing.T) {
+	const needs = "Auth wants to write hello.txt; that is the file you said to keep small."
+	cases := []struct {
+		name      string
+		screen    string
+		needsUser bool
+		answer    bool
+		first     string
+		added     bool
+		reason    string
+	}{
+		{"needs_user on an open prompt", "codex-approval-prompt.screen.txt", true, false, "auth asks to run", true, "needs_user"},
+		{"needs_user on a prompt with nothing to answer", "codex-after-ctrl-c.screen.txt", true, false, "auth is waiting at a prompt.", true, "needs_user"},
+		{"no needs_user", "codex-approval-prompt.screen.txt", false, false, "auth asks to run", false, "late"},
+		{"prompt answered meanwhile", "codex-approval-prompt.screen.txt", true, true, "auth asks to run", false, "stale"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			release := make(chan struct{})
+			m := braintest.NewModel()
+			var h *harness
+			m.EventDefault = &braintest.Step{Fn: func(call braintest.Call) (*genai.GenerateContentResponse, error) {
+				<-release
+				if c.answer {
+					h.say("yes")
+				}
+				return braintest.Response(*announceReply(needs, "interrupt", "", "", c.needsUser)), nil
+			}}
+			h = newBrainHarness(t, m, func(cfg *Config) { cfg.AnnounceWait = 30 * time.Millisecond })
+			h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
+			pusher := h.pusher
+			go func() {
+				deadline := time.Now().Add(5 * time.Second)
+				for len(pusher.all()) < 1 && time.Now().Before(deadline) {
+					time.Sleep(time.Millisecond)
+				}
+				close(release)
+			}()
+			h.block("w5:p1", c.screen)
+			got := h.pushTexts()
+			if len(got) == 0 || !strings.HasPrefix(got[0], c.first) {
+				t.Fatalf("pushes = %v", got)
+			}
+			var spoke int
+			for _, p := range h.pusher.all() {
+				if p.Text == needs {
+					spoke++
+					if p.Urgency != voice.UrgencyIdle {
+						t.Errorf("late line urgency = %v", p.Urgency)
+					}
+				}
+			}
+			if want := map[bool]int{true: 1, false: 0}[c.added]; spoke != want {
+				t.Errorf("late line spoken %d times, want %d: %v", spoke, want, got)
+			}
+			late := h.log.ofType("brain.push_late")
+			if len(late) != 1 || payload(late[0])["added"] != c.added || payload(late[0])["needs_user"] != c.needsUser {
+				t.Errorf("brain.push_late = %v", late)
+			}
+			d := h.decisions()
+			if len(d) != 2 || d[0]["reason"] != "wait" || d[0]["wait"] != waitAnnounce || d[0]["waited_ms"] != int64(30) || d[1]["late"] != true || d[1]["reason"] != c.reason {
+				t.Errorf("push_decision = %v", d)
+			}
+		})
+	}
+}
+
+// At quiet a finish nobody is owed is not spoken, so nothing waits for
+// the brain: no model call, no push, the transition returns at once.
+func TestQuietFinishDoesNotWait(t *testing.T) {
+	var h *harness
+	m := braintest.NewModel()
+	m.EventDefault = slowAnnounce(&h, 6*time.Second, announceReply("Auth finished the refactor.", "idle", "", "the refactor", false))
+	h = newBrainHarness(t, m, func(c *Config) { c.Chattiness = string(Quiet) })
 	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
 	h.sup.touch("w5:p1")
-	p, err := h.sup.createPromise("w5:p1", brain.PromiseRequest{Text: "tell you when the investigation reports back", Event: "done"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	start := time.Now()
 	doneAuth(h)
-	got := h.pusher.all()
-	if len(got) != 2 || got[0].Text != "As you asked: auth finished — here's what it found." || got[1].Text != spokenLine(line) || got[1].Urgency != voice.UrgencyIdle {
+	if el := time.Since(start); el > 50*time.Millisecond {
+		t.Errorf("a quiet finish took %s", el)
+	}
+	if got := h.pusher.all(); len(got) != 0 {
 		t.Fatalf("pushes = %+v", got)
 	}
-	d := h.decisions()
-	if len(d) != 2 || d[0]["reason"] != "wait" || d[1]["late"] != true || d[1]["urgency_applied"] != "idle" || d[1]["reason"] != "owed" {
+	if len(m.Calls()) != 0 {
+		t.Errorf("model calls = %d", len(m.Calls()))
+	}
+	if d := h.decisions(); len(d) != 1 || d[0]["via"] != "ceiling" || d[0]["wait"] != nil {
 		t.Errorf("push_decision = %v", d)
 	}
-	if late := h.log.ofType("brain.push_late"); len(late) != 1 || payload(late[0])["added"] != true {
-		t.Errorf("brain.push_late = %v", late)
-	}
-	if kept := h.log.ofType("promise.kept"); len(kept) != 1 || payload(kept[0])["id"] != p.ID || payload(kept[0])["spoken"] != "As you asked: auth finished — here's what it found." {
-		t.Errorf("promise.kept = %v", kept)
-	}
 }
 
-// A finish of an instruction the shepherd gave this run is owed like a
-// promise (the si-tludar-4 follow-up of 2026-09-23): "here's what it
-// found", then the brain's line whenever it lands.
-func TestAnnounceLateLineForTheShepherdsInstructionIsAdded(t *testing.T) {
-	line := "Auth reran the tests: the clamp test still fails on the rate limit."
-	h, m := lateAnnounce(t, announceReply(line, "idle", "", "", false), func(c *Config) { c.Chattiness = string(Normal) })
-	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
-	now := h.sup.cfg.Now()
-	if _, err := h.store.Update("w5:p1", func(a *state.Agent) { a.CurrentTask, a.LastInteraction = "run the tests again", &now }); err != nil {
-		t.Fatal(err)
+// "<alias> started on …" for the brain's own prompt is silent context:
+// the tool result already said it was sent (the duplicate speech of
+// 2026-09-24 00:13:02). An instruction picked up long after it went out
+// is news and spoken at chatty as before; a worker started from the
+// terminal gets no "started on" at all (there is no instruction of ours).
+func TestStartedPushSilentForTheBrainsOwnPrompt(t *testing.T) {
+	h := threeAgents(t, func(c *Config) { c.Chattiness = string(Chatty) })
+	started := `vps started on "run the tests".`
+	h.transition("w7:p1", herdr.StateWorking, herdr.StateDone)
+	h.send("w7:p1", "run the tests")
+	h.clock.Advance(time.Second)
+	h.transition("w7:p1", herdr.StateDone, herdr.StateWorking)
+	pushes := h.pusher.all()
+	last := pushes[len(pushes)-1]
+	if last.Text != started || last.Urgency != voice.UrgencySilent {
+		t.Fatalf("just sent: last push = %+v", last)
 	}
-	doneAuth(h)
-	if got := h.pushTexts(); len(got) != 2 || got[0] != "auth finished — here's what it found." || got[1] != line {
-		t.Fatalf("pushes = %v", got)
+	if slices.Contains(h.pushTexts(), started) {
+		t.Errorf("spoken: %v", h.pushTexts())
 	}
-	// The turn got the owed budget and the request says so.
-	if calls := m.Calls(); len(calls) != 1 || !strings.Contains(calls[0].Text(), "The CEO is waiting on this") {
-		t.Errorf("announce request lacks the owed note")
+	// Picked up past the window (the worker was busy): spoken.
+	h.transition("w7:p1", herdr.StateWorking, herdr.StateDone)
+	h.send("w7:p1", "run the tests")
+	h.clock.Advance(h.sup.cfg.CancelWindow + time.Second)
+	h.transition("w7:p1", herdr.StateDone, herdr.StateWorking)
+	if got := h.pushTexts(); got[len(got)-1] != started {
+		t.Errorf("picked up late: pushes = %v", got)
 	}
-}
-
-// A late line the code could not have known was related — the brain
-// says which request it fulfils (relates_to) — is added at a level that
-// spoke the finish; a quiet level spoke nothing, so adds nothing.
-func TestAnnounceLateRelatedLineIsAdded(t *testing.T) {
-	line := "Auth finished the rerun you asked for; the same test still fails."
-	h, _ := lateAnnounce(t, announceReply(line, "idle", "", "the rerun", false), func(c *Config) { c.Chattiness = string(Chatty) })
-	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
-	doneAuth(h)
-	if got := h.pushTexts(); len(got) != 2 || got[0] != doneSentence || got[1] != line {
-		t.Fatalf("chatty: pushes = %v", got)
-	}
-	h, _ = lateAnnounce(t, announceReply(line, "idle", "", "the rerun", false), func(c *Config) { c.Chattiness = string(Quiet) })
-	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
-	doneAuth(h)
-	if got := h.pushTexts(); len(got) != 0 {
-		t.Fatalf("quiet: pushes = %v", got)
-	}
-}
-
-// An owed finish whose brain line never comes does not leave "here's
-// what it found" hanging.
-func TestAnnounceOwedFinishWithoutALineSaysSo(t *testing.T) {
-	block := make(chan struct{})
-	defer close(block)
-	m := braintest.NewModel()
-	m.EventDefault = &braintest.Step{Block: block}
-	log := &recLog{}
-	dir := t.TempDir()
-	b, err := brain.New(brain.Config{DataDir: dir, RunID: "t", AnnounceTurnTimeout: 30 * time.Millisecond, AnnounceTimeout: 60 * time.Millisecond, FinalGrace: -1}, m, log)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = b.Close() })
-	h := newHarness(t, func(c *Config) { c.Brain = b; c.DataDir = dir; c.AnnounceWait = 10 * time.Millisecond })
-	h.log, h.sup.log, h.client.Log = log, log, log
-	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
-	if _, err := h.sup.createPromise("w5:p1", brain.PromiseRequest{Text: "tell me when it's done", Event: "done"}); err != nil {
-		t.Fatal(err)
-	}
-	doneAuth(h)
-	if got := h.pushTexts(); len(got) != 2 || got[0] != "As you asked: auth finished — here's what it found." || got[1] != "I couldn't get auth's findings in time — ask me and I'll read its screen." {
-		t.Fatalf("pushes = %v", got)
-	}
-}
-
-// The one exception to dropping a late line: it says the shepherd must
-// act and the block is still open, so it is pushed idle as the only
-// addition.
-func TestAnnounceLateNeedsUserIsAdded(t *testing.T) {
-	release := make(chan struct{})
-	m := braintest.NewModel()
-	var pusher *fakePusher
-	m.EventDefault = &braintest.Step{Fn: func(call braintest.Call) (*genai.GenerateContentResponse, error) {
-		<-release
-		return braintest.Response(*announceReply("Auth wants to write hello.txt; that is the file you said to keep small.", "interrupt", "", "", true)), nil
-	}}
-	h := newBrainHarness(t, m, func(c *Config) { c.AnnounceWait = 30 * time.Millisecond })
-	pusher = h.pusher
-	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
-	go func() {
-		deadline := time.Now().Add(5 * time.Second)
-		for len(pusher.all()) < 1 && time.Now().Before(deadline) {
-			time.Sleep(time.Millisecond)
-		}
-		close(release)
-	}()
-	h.block("w5:p1", "codex-approval-prompt.screen.txt")
-	got := h.pusher.all()
-	if len(got) != 2 || !strings.HasPrefix(got[0].Text, "auth asks to run") || got[1].Text != "Auth wants to write hello.txt; that is the file you said to keep small." || got[1].Urgency != voice.UrgencyIdle {
-		t.Fatalf("pushes = %+v", got)
-	}
-	if late := h.log.ofType("brain.push_late"); len(late) != 1 || payload(late[0])["added"] != true {
-		t.Errorf("brain.push_late = %v", late)
+	// Started from the terminal: nothing.
+	n := len(h.pusher.all())
+	h.transition("w6:p1", herdr.StateIdle, herdr.StateWorking)
+	if got := h.pusher.all(); len(got) != n {
+		t.Errorf("terminal start pushed %+v", got[n:])
 	}
 }
 
