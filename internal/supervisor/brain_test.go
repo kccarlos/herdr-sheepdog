@@ -86,6 +86,9 @@ func TestBrainFallbackReportsStatusAndSendsNothing(t *testing.T) {
 	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
 	h.srv.SetScreen("w5:p1", fixture(t, "codex-working.screen.txt"))
 	res := h.say("what is auth doing?")
+	// HasSuffix: the failed turn already marked the roster delivered, so
+	// even this first fallback may say "No change since I last checked"
+	// (a pre-existing quirk of utteranceTurn, left as it is here).
 	if !strings.HasSuffix(res.Spoken, "One agent: auth is working on something. "+noBrainTrailer) || res.Clarify {
 		t.Errorf("fallback = %+v", res)
 	}
