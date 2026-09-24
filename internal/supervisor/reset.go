@@ -13,7 +13,12 @@ import (
 // roster and its ledger, open approval prompts, promises, notes, running
 // investigations and the event log itself are untouched — they never
 // lived in the window or the voice session's own memory, so there is
-// nothing to restore.
+// nothing to restore. It also drops the smaller pieces of state that
+// exist only to bridge the moment of a call or a push into a later one —
+// recentPushes (isEcho), a detached utterance turn still running, and
+// the shepherd-input relay counters (claimInput) — so nothing from
+// before the reset can echo, reply into or authorise anything in the
+// fresh conversation.
 //
 // Two triggers reach the same ResetConversation: POST
 // /api/conversation/reset (web/conversation.go), and the bare voice
@@ -74,6 +79,15 @@ func (s *Supervisor) ConversationStartedAt() time.Time {
 // also names the brain's fresh transcript segment when there is a
 // brain. Logs conversation.reset {via, reset_id, at}.
 func (s *Supervisor) ResetConversation(ctx context.Context, via string) (id string, at time.Time, err error) {
+	// A shepherd turn still running from before the reset (awaitReply's
+	// detached path) must not deliver its reply as a push into the fresh
+	// conversation: mark it dropped, exactly like the daemon shutting
+	// down. This runs first, and not under s.mu below, because
+	// brain.Reset waits for any turn in flight to finish (its own turn
+	// lock) — an utterance blocked in a long tool round would otherwise
+	// make every reset wait for it (or its full turn timeout) instead of
+	// cutting it off at once.
+	s.abandonUtterance()
 	if s.brain != nil {
 		id, err = s.brain.Reset(ctx, via)
 		if err != nil {
@@ -91,6 +105,15 @@ func (s *Supervisor) ResetConversation(ctx context.Context, via string) (id stri
 	s.mu.Lock()
 	s.conversationStartedAt = at
 	s.resetConfirm = nil
+	// A push spoken just before the reset must not be mistaken for an
+	// echo of something said in the new conversation (isEcho).
+	s.recentPushes = nil
+	// No shepherd input recorded before the reset may authorise a
+	// to_supervisor call in the new one (claimInput): bumping the relay
+	// counters to the current inputSeq makes every existing input look
+	// already used, so only a genuinely new one (a higher seq) passes.
+	s.relayedSeq = s.inputSeq
+	s.pushSeq = s.inputSeq
 	s.mu.Unlock()
 	s.log.Log(logSource, "conversation.reset", "", map[string]any{"via": via, "reset_id": id, "at": at.UTC().Format(time.RFC3339)})
 	return id, at, nil

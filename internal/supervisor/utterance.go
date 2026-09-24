@@ -349,7 +349,9 @@ func (s *Supervisor) endUtterance(u *inflightUtterance) {
 }
 
 // abandonUtterance cancels the utterance in flight, if any, so it
-// delivers nothing (the daemon is going down).
+// delivers nothing: the daemon is going down, or (reset.go) a "New
+// conversation" must not let a reply from before the reset land as a
+// push in the fresh one.
 func (s *Supervisor) abandonUtterance() {
 	s.mu.Lock()
 	u := s.utterance
