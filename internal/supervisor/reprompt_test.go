@@ -3,6 +3,7 @@ package supervisor
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -184,6 +185,55 @@ func TestReconcileNeverRaisesSamePromptTwice(t *testing.T) {
 	h.sup.reconcileReprompts(context.Background()) // the screen never moved on
 	if n := h.log.count("supervisor.reprompt"); n != 1 {
 		t.Errorf("second sweep raised the same prompt again: supervisor.reprompt = %d", n)
+	}
+}
+
+// TestPollAndReconcileNeverDoubleRaiseTheSamePrompt races the post-answer
+// poll (started by ToolConfirm's send_keys) against concurrent reconciler
+// sweeps on the same pane, both noticing the same new prompt on screen.
+// Before the fix, each checked promptSignature against s.lastPrompt,
+// released the lock, and only then raised — so both could read the same
+// stale signature and both raise it, producing two pending.created
+// events and two pushes for one prompt (audit B5). Run with
+// `-race -count=20` to also catch the data race the fix's atomic claim
+// (claimPrompt) closes.
+func TestPollAndReconcileNeverDoubleRaiseTheSamePrompt(t *testing.T) {
+	h := twoAgents(t, pollOpts)
+	h.block("w5:p1", "codex-approval-prompt.screen.txt")
+	h.call(ToolConfirm, map[string]any{"answer": "yes"}) // starts the post-answer poll
+	h.srv.SetScreen("w5:p1", fixture(t, "codex-git-prompt.screen.txt"))
+
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+					h.sup.reconcileReprompts(context.Background())
+				}
+			}
+		}()
+	}
+	waitFor(t, func() bool { return h.log.count("supervisor.reprompt_poll") == 1 }, "the poll to end")
+	close(stop)
+	wg.Wait()
+
+	if n := h.log.count("supervisor.reprompt"); n != 1 {
+		t.Errorf("supervisor.reprompt logged %d times, want exactly 1", n)
+	}
+	newPrompts := 0
+	for _, p := range h.pusher.all() {
+		if p.Text == "auth asks to run git diff --stat; git status --short." {
+			newPrompts++
+		}
+	}
+	if newPrompts != 1 {
+		t.Errorf("the new prompt was pushed %d times, want exactly 1", newPrompts)
 	}
 }
 

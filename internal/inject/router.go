@@ -1,11 +1,11 @@
 package inject
 
 import (
-	"regexp"
 	"strconv"
 	"strings"
 	"sync/atomic"
 
+	"github.com/kccarlos/herdr-sheepdog/internal/supervisor"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
 
@@ -19,31 +19,23 @@ type Router struct {
 	seq atomic.Uint64
 }
 
-// reStop is the whole-utterance stop shape (the supervisor runs the
-// same check on the relayed text, so this only saves a hop).
-var reStop = regexp.MustCompile(`^(stop|stop stop|wait|cancel|abort|never ?mind|halt|no no|hold on)$`)
-
 // Route returns the tool call for text, or false when there is nothing
-// to relay.
+// to relay. The bare-stop check reads supervisor.BareStopWords — the
+// same list the supervisor itself checks on the relayed text (this only
+// saves a hop) — so a word like "abort" stops both GPT-Live's Classify
+// path (here) and Gemini's to_supervisor path identically (audit B8:
+// this used to be its own regex, missing "abort" and "halt").
 func (r *Router) Route(text string) (voice.ToolCall, bool) {
-	norm := normalize(text)
+	norm := supervisor.BareWord(text)
 	if norm == "" {
 		return voice.ToolCall{}, false
 	}
 	call := voice.ToolCall{ID: "text-" + strconv.FormatUint(r.seq.Add(1), 10), Args: map[string]any{}}
-	if reStop.MatchString(norm) {
+	if supervisor.BareStopWords[norm] {
 		call.Name = voice.ToolStop
 		return call, true
 	}
 	call.Name = voice.ToolToSupervisor
 	call.Args["text"] = strings.TrimSpace(text)
 	return call, true
-}
-
-// normalize lowercases, collapses whitespace and strips trailing
-// punctuation.
-func normalize(s string) string {
-	s = strings.ToLower(strings.TrimSpace(s))
-	s = strings.Join(strings.Fields(s), " ")
-	return strings.TrimRight(s, ".!?,;: ")
 }

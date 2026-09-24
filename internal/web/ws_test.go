@@ -336,6 +336,37 @@ func TestWSSingleClientReplacement(t *testing.T) {
 	}
 }
 
+// TestWSMuteDoesNotPersistAcrossClients: a client that muted and then
+// disconnected must not leave the next client muted — reconnecting
+// clients start unmuted (docs/ws-contract.md, audit B2).
+func TestWSMuteDoesNotPersistAcrossClients(t *testing.T) {
+	h := newHarness(t, harnessOpts{voice: true})
+	first := dialWS(t, h)
+	first.expect(wsproto.TypeStatus)
+
+	first.send(wsproto.Mute(true))
+	st := first.expect(wsproto.TypeStatus)
+	if st.Muted == nil || !*st.Muted {
+		t.Fatalf("mute status = %+v", st)
+	}
+	waitFor(t, time.Second, h.session.isMuted, "session muted")
+
+	if err := first.conn.Close(websocket.StatusNormalClosure, "done"); err != nil {
+		t.Fatalf("close first: %v", err)
+	}
+
+	second := dialWS(t, h)
+	st = second.expect(wsproto.TypeStatus)
+	if st.Muted == nil || *st.Muted {
+		t.Fatalf("second client's initial status = %+v, want muted:false", st)
+	}
+	waitFor(t, 2*time.Second, func() bool { return !h.session.isMuted() }, "session unmuted for the new client")
+
+	// Frames flow for the new, unmuted client.
+	second.sendAudio([]byte{1, 2, 3})
+	waitFor(t, 2*time.Second, func() bool { return h.session.sentFrames() == 1 }, "audio reached session")
+}
+
 func TestWSBackpressureDropsOldestAudio(t *testing.T) {
 	h := newHarness(t, harnessOpts{voice: true}) // OutQueue = 8
 	c := dialWS(t, h)

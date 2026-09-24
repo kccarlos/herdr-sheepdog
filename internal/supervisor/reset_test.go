@@ -8,6 +8,7 @@ import (
 
 	"github.com/kccarlos/herdr-sheepdog/internal/brain/braintest"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
+	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
 
 // The voice phrase asks a confirming question and sends nothing yet.
@@ -128,6 +129,89 @@ func TestResetConversationAPIPathNoBrain(t *testing.T) {
 	got := h.log.ofType("conversation.reset")
 	if len(got) != 1 || payload(got[0])["via"] != "app" || payload(got[0])["reset_id"] != id {
 		t.Fatalf("conversation.reset = %v", got)
+	}
+}
+
+// A push spoken just before a reset must not be treated as an echo of
+// something said in the new conversation: recentPushes is dropped by
+// ResetConversation (audit "Reset leftovers").
+func TestResetClearsRecentPushEchoMemory(t *testing.T) {
+	m := braintest.NewModel(braintest.Step{Text: braintest.Reply("not an echo", "")})
+	h := newBrainHarness(t, m)
+	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
+	const pushText = "auth asks to run git status --short."
+	h.sup.push("w5:p1", pushText, voice.UrgencyIdle)
+
+	if _, _, err := h.sup.ResetConversation(context.Background(), "app"); err != nil {
+		t.Fatal(err)
+	}
+
+	res := h.say(pushText)
+	if res.Scheduling == voice.UrgencySilent {
+		t.Errorf("a pre-reset push was still treated as an echo after the reset: %+v", res)
+	}
+	if h.log.count("supervisor.echo_ignored") != 0 {
+		t.Error("echo_ignored logged for a push from before the reset")
+	}
+}
+
+// A shepherd turn still detached from its tool call (awaitReply, past
+// Config.ReplyWait) when "New conversation" happens must not deliver its
+// reply as a push into the fresh conversation — it is marked dropped
+// exactly like a stop would (audit "Reset leftovers").
+func TestResetDropsADetachedUtteranceReply(t *testing.T) {
+	release := make(chan struct{})
+	defer close(release)
+	m := braintest.NewModel(braintest.Step{Block: release, Text: braintest.Reply("The tests are green.", "")})
+	h := newBrainHarness(t, m, replyWait(20*time.Millisecond))
+	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
+
+	assertPending(t, h.say("how is auth doing"))
+	waitFor(t, func() bool {
+		h.sup.mu.Lock()
+		defer h.sup.mu.Unlock()
+		return h.sup.utterance != nil && h.sup.utterance.detached
+	}, "the reply to detach")
+
+	if _, _, err := h.sup.ResetConversation(context.Background(), "voice"); err != nil {
+		t.Fatal(err)
+	}
+	h.sup.replies.Wait()
+
+	if pushes, _ := utterancePushes(h); len(pushes) != 0 {
+		t.Errorf("a reset-dropped reply was pushed: %v", pushes)
+	}
+	if n := h.log.count("brain.reply_delivered") + h.log.count("brain.reply_stale"); n != 0 {
+		t.Errorf("%d reply events for a reset-dropped turn, want none", n)
+	}
+	h.sup.mu.Lock()
+	defer h.sup.mu.Unlock()
+	if h.sup.utterance != nil {
+		t.Error("the slot outlived the reset")
+	}
+}
+
+// No shepherd input recorded before a reset may authorise a
+// to_supervisor call in the fresh conversation: the voice relaying an
+// old, unclaimed input's words on its own initiative after the reset
+// gets nothing, exactly as it would with no input behind it at all
+// (audit "Reset leftovers": the relay counters are bumped past every
+// pre-reset input).
+func TestResetPreventsPreResetInputFromAuthorising(t *testing.T) {
+	h := newHarness(t)
+	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
+	h.hear("tell auth to run the tests") // recorded, never claimed by a relay
+
+	if _, _, err := h.sup.ResetConversation(context.Background(), "app"); err != nil {
+		t.Fatal(err)
+	}
+
+	res := h.relay("tell auth to run the tests") // relayed with no hear() behind it
+	if res.Spoken != "" || res.Scheduling != voice.UrgencySilent {
+		t.Fatalf("result = %+v, want the voice-initiative silent result", res)
+	}
+	if h.log.count("supervisor.voice_initiative_ignored") != 1 {
+		t.Errorf("voice_initiative_ignored = %d, want 1", h.log.count("supervisor.voice_initiative_ignored"))
 	}
 }
 

@@ -781,6 +781,48 @@ func TestReconnectOnDropResumesAndReplaysAudio(t *testing.T) {
 	}
 }
 
+// TestPushDuringReconnectIsDeliveredOnceReconnected: a push queued while
+// the connection is down (the supervisor hands it over regardless of
+// connection state, audit B3) is neither dropped nor sent twice — it
+// waits in pushQ and goes out exactly once the fresh connection is up.
+func TestPushDuringReconnectIsDeliveredOnceReconnected(t *testing.T) {
+	c1, c2 := newFakeConn("c1"), newFakeConn("c2")
+	gate := make(chan struct{})
+	d := &fakeDialer{results: []func() (Conn, error){ok(c1), ok(c2)}, gate: gate}
+	h := newHarness(t, Config{}, d)
+
+	c1.serve(handleMsg("handle-A"))
+	time.Sleep(20 * time.Millisecond)
+	c1.fail(errors.New("websocket: close 1006 (abnormal closure)"))
+	h.waitEvent("reconnecting", func(ev voice.Event) bool {
+		st, ok := ev.(voice.EventStatus)
+		return ok && st.Status == voice.StatusReconnecting
+	})
+
+	// Queued mid-gap: neither dropped nor sent on the dead connection.
+	if err := h.s.Push("auth: tests are green.", voice.UrgencySilent); err != nil {
+		t.Fatalf("push during reconnect: %v", err)
+	}
+	time.Sleep(20 * time.Millisecond)
+	if n := len(c1.sentMsgs()); n != 0 {
+		t.Errorf("push sent on the dead connection: %d messages", n)
+	}
+
+	close(gate)
+	h.waitEvent("resumed", func(ev voice.Event) bool { _, ok := ev.(voice.EventResumed); return ok })
+	c2.waitSent(t, "push delivered after reconnect", isContent("auth: tests are green."))
+	time.Sleep(20 * time.Millisecond)
+	n := 0
+	for _, m := range c2.sentMsgs() {
+		if m.kind == "content" {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Errorf("push delivered %d times, want exactly 1", n)
+	}
+}
+
 func TestGoAwayReconnectsProactively(t *testing.T) {
 	c1, c2 := newFakeConn("c1"), newFakeConn("c2")
 	d := &fakeDialer{results: []func() (Conn, error){ok(c1), ok(c2)}}

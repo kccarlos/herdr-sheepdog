@@ -335,6 +335,38 @@ func TestEchoWindowExpires(t *testing.T) {
 	}
 }
 
+// (3d) A bare short answer is never mistaken for an echo just because a
+// recent push happens to contain a substring of it: a substring match
+// without word boundaries let "no" count as an echo of any push
+// containing "now", and let "approve" match a brain block line ending
+// "— approve?" (audit B1).
+func TestBareAnswerNeverTreatedAsEcho(t *testing.T) {
+	m := braintest.NewModel(
+		braintest.Step{Text: braintest.Reply("heard your no.", "")},
+		braintest.Step{Text: braintest.Reply("heard your approve.", "")},
+	)
+	h := newBrainHarness(t, m)
+	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
+
+	h.sup.push("w5:p1", "I'll deploy it now unless you say otherwise.", voice.UrgencyIdle)
+	res := h.say("no")
+	if res.Scheduling == voice.UrgencySilent {
+		t.Errorf(`"no" after a push containing "now" was treated as an echo: %+v`, res)
+	}
+	if h.log.count("supervisor.echo_ignored") != 0 {
+		t.Error(`"no" was logged as echo_ignored`)
+	}
+
+	h.sup.push("w5:p1", "Auth is blocked on the migration — approve?", voice.UrgencyIdle)
+	res = h.say("approve")
+	if res.Scheduling == voice.UrgencySilent {
+		t.Errorf(`"approve" after a push ending "— approve?" was treated as an echo: %+v`, res)
+	}
+	if h.log.count("supervisor.echo_ignored") != 0 {
+		t.Error(`"approve" was logged as echo_ignored`)
+	}
+}
+
 // (4) A bare stop word never reaches a model and never becomes an
 // answer: phase 4 leaves the worker's question open.
 func TestStopLeavesAnOpenPromptOpen(t *testing.T) {
@@ -362,6 +394,29 @@ func TestStopToolRunsTheProcedure(t *testing.T) {
 	h := newBrainHarness(t, m)
 	h.call(ToolStop, nil)
 	assertStopped(t, h, stopPhaseNone, StopTriggerTool)
+}
+
+// "abort" and "halt" are bare stop words here exactly as they are on
+// internal/inject's Router (GPT-Live's Classify path): both now read
+// supervisor.BareStopWords, so the same word can no longer stop one
+// voice provider and become an ordinary brain turn on the other (audit
+// B8 — the router used to carry its own regex with these two words that
+// this package's list lacked).
+func TestBareStopWordsAgreeWithTheRouter(t *testing.T) {
+	for _, word := range []string{"abort", "Halt."} {
+		t.Run(word, func(t *testing.T) {
+			m := braintest.NewModel(braintest.Step{Text: braintest.Reply("Nothing was in flight.", "")})
+			h := newBrainHarness(t, m)
+			res := h.say(word)
+			if res.Scheduling != voice.UrgencyInterrupt && res.Spoken != "Nothing was in flight." {
+				t.Fatalf("say(%q) = %+v, want the stop procedure", word, res)
+			}
+			assertStopped(t, h, stopPhaseNone, StopTriggerBareWord)
+			if got := len(m.Calls()); got != 1 { // the stop procedure's own closing turn only
+				t.Errorf("model calls = %d, want 1 (no ordinary utterance turn)", got)
+			}
+		})
+	}
 }
 
 // (6) Phase 3: an instruction that went to a working agent within the

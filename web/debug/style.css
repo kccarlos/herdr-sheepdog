@@ -221,6 +221,7 @@ td.task, td.block, td.result { max-width: 18em; overflow: hidden; text-overflow:
 .badge.needs-user { background: var(--blocked); } .badge.clarify { background: var(--voice); } .badge.options { background: var(--working); } .badge.error { background: var(--blocked); }
 .badge.pruned { background: transparent; color: var(--muted); border: 1px dashed var(--muted); }
 .badge.req-ask { background: var(--k-request); } .badge.req-propose { background: var(--web); }
+.badge.req-utterance { background: var(--k-ceo); } .badge.req-stop { background: var(--blocked); }
 .badge.req-summarize, .badge.req-keep_promise, .badge.req-announce { background: var(--svp); }
 .badge.decision { background: var(--svp); } .badge.decision.capped { background: var(--unknown); } .badge.decision.template { background: transparent; color: var(--muted); border: 1px dashed var(--muted); }
 .svp-brain-event .text { color: var(--muted); font-style: italic; }

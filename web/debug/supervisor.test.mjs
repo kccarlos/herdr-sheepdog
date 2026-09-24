@@ -194,6 +194,22 @@ test('brain-off state and the empty transcript', () => {
 test('parsers and formatting', () => {
   assert.deepEqual(parseRequest('Request from the assistant (propose): instruction="say \\"hi\\"" agent="auth" [triggered by an event, not by the CEO]\nUse tools'), { reqKind: 'propose', question: 'say "hi"', agent: 'auth', trigger: 'event', nudge: false });
   assert.equal(parseRequest('Time is up: answer now').nudge, true);
+  // B7 regression: a real utterance or stop request must not render as a
+  // nudge (assemble.go's requestText / stopRequestText field names,
+  // "utterance=" and "stopped=", were not in the old ask|propose-only,
+  // question|instruction-only pattern).
+  assert.deepEqual(
+    parseRequest('Request from the assistant (utterance): utterance="what\'s going on" agent=(none: the CEO did not say a name)\nThose are the CEO\'s own words'),
+    { reqKind: 'utterance', question: "what's going on", agent: '', trigger: 'ceo', nudge: false },
+  );
+  assert.deepEqual(
+    parseRequest('Request from the assistant (stop): stopped="sending y to auth" agent="auth"\nThe CEO said stop'),
+    { reqKind: 'stop', question: 'sending y to auth', agent: 'auth', trigger: 'ceo', nudge: false },
+  );
+  assert.deepEqual(
+    parseRequest('Request from the assistant (stop): stopped="nothing was in flight" agent=(none)\nThe CEO said stop'),
+    { reqKind: 'stop', question: 'nothing was in flight', agent: '', trigger: 'ceo', nudge: false },
+  );
   assert.deepEqual(parseReply('```json\n{"spoken":"ok","detail":"","needs_user":false,"clarify":true}\n```').clarify, true);
   assert.equal(parseReply('plain').json, false);
   assert.deepEqual(parsePush('(idle) auth finished.'), { urgency: 'idle', text: 'auth finished.' });
