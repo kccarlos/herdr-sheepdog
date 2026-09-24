@@ -46,7 +46,7 @@ func listDays(dir string) ([]string, error) {
 
 // readEvents reads JSONL events leniently: a malformed line (a torn write
 // before a crash) is skipped rather than hiding everything after it. Ids
-// are derived for lines written before ids existed, as Replay does.
+// are derived for lines written before ids existed, with nextID.
 func readEvents(r io.Reader) ([]Event, error) {
 	var out []Event
 	var last int64

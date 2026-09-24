@@ -73,7 +73,7 @@ ignored; the connection stays open.
 ## Silence gate
 
 Near-zero PCM streamed continuously degrades the model session (WP7b,
-`docs/e2e-results.md`: turns answered only after 4–35 s, idle pushes
+`docs/history/e2e-results.md`: turns answered only after 4–35 s, idle pushes
 swallowed), and a hardware-muted or very quiet microphone produces exactly
 that. The client therefore gates its capture:
 

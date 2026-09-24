@@ -46,7 +46,7 @@ test('tool call pairs with its result by id and nests the supervisor events in b
   const items = groupEvents([
     ev('voice.transcript.in', { text: 'tell auth to skip the flaky test', final: false }),
     ev('voice.tool_call', { id: 'call_7', name: 'propose', args: { agent: 'auth', instruction: 'skip the flaky test' } }),
-    ev('llm.call', { template: 'resolve_instruction', model: 'gemini-3.5-flash-lite', dur_ms: 786, output: '{"pane_id":"fake:1"}' }),
+    ev('brain.step', { template: 'resolve_instruction', model: 'gemini-3.5-flash-lite', dur_ms: 786, output: '{"pane_id":"fake:1"}' }),
     ev('pending.created', { id: 'si-1', kind: 'send_instruction' }, 2, 'supervisor'),
     ev('herdr.send', { kind: 'prompt', text: 'skip the flaky test' }, 300),
     ev('herdr.state', { state: 'working' }, 1), // noise: not nested
@@ -62,7 +62,7 @@ test('tool call pairs with its result by id and nests the supervisor events in b
   assert.equal(tool.summary, 'agent="auth", instruction="skip the flaky test"');
   assert.equal(tool.result.spoken, 'Telling auth to skip the flaky test. Sent.');
   assert.equal(tool.result.scheduling, 'interrupt');
-  assert.deepEqual(tool.nested.map((e) => e.type), ['llm.call', 'pending.created', 'herdr.send']);
+  assert.deepEqual(tool.nested.map((e) => e.type), ['brain.step', 'pending.created', 'herdr.send']);
   // The stall shows on the first response of the turn (the tool row).
   assert.equal(tool.turn.responseMs, 13210);
   assert.equal(tool.turn.stalled, true);
@@ -116,7 +116,7 @@ test('pushes render as supervisor messages with their urgency and the events tha
   const items = groupEvents([
     ev('herdr.transition', { to: 'blocked' }),
     ev('herdr.read', { bytes: 2622 }),
-    ev('llm.call', { template: 'summarize_block', dur_ms: 1143 }),
+    ev('brain.step', { template: 'summarize_block', dur_ms: 1143 }),
     ev('pending.created', { id: 'ap-1', kind: 'answer_prompt' }, 1, 'supervisor'),
     ev('voice.push', { text: 'auth is asking whether it can run a command.', urgency: 'idle' }),
     ev('voice.push', { text: 'One agent: auth is blocked.', urgency: 'silent' }, 60000),
@@ -124,7 +124,7 @@ test('pushes render as supervisor messages with their urgency and the events tha
   ]);
   assert.deepEqual(kinds(items), ['push', 'push', 'push']);
   assert.equal(items[0].urgency, 'idle');
-  assert.deepEqual(items[0].nested.map((e) => e.type), ['herdr.read', 'llm.call', 'pending.created']);
+  assert.deepEqual(items[0].nested.map((e) => e.type), ['herdr.read', 'brain.step', 'pending.created']);
   assert.equal(items[0].deferred, false);
   assert.equal(items[1].urgency, 'silent');
   assert.deepEqual(items[1].nested, []);

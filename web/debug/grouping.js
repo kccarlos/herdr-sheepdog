@@ -5,7 +5,7 @@
 // Pure functions, no DOM (decision D10: the page is a viewer of the log).
 
 /** Supervisor-side event types that belong to the tool call or push in flight. */
-export const NESTED_TYPES = /^(llm\.|cli\.run|herdr\.read|herdr\.send|pending\.|note\.created|supervisor\.|brain\.|investigation\.)/;
+export const NESTED_TYPES = /^(cli\.run|herdr\.read|herdr\.send|pending\.|note\.created|supervisor\.|brain\.|investigation\.)/;
 
 /**
  * Tool call/result families: any `<prefix>.tool_call` / `<prefix>.tool_result`
@@ -75,19 +75,19 @@ export function argSummary(args, max = 60) {
   return parts.join(', ');
 }
 
-/** Renders "provider/model" ("model" alone when the event carries no provider, as llm.call and older brain events do). */
+/** Renders "provider/model" ("model" alone when the event carries no provider, as older brain events do). */
 export function withProvider(provider, model) {
   if (!model) return provider || '';
   return provider ? `${provider}/${model}` : model;
 }
 
-/** Short one-line summary of a supervisor-side event (llm.call, herdr.read, pending.*, …). */
+/** Short one-line summary of a supervisor-side event (brain.step, herdr.read, pending.*, …). */
 export function eventSummary(ev) {
   const p = ev.payload && typeof ev.payload === 'object' ? ev.payload : {};
   const type = ev.type || '';
   const parts = [];
   switch (true) {
-    case type === 'llm.call' || type === 'brain.step':
+    case type === 'brain.step':
       parts.push(p.template, withProvider(p.provider, p.model), p.dur_ms != null ? `${p.dur_ms} ms` : '', p.attempts > 1 ? `${p.attempts} attempts` : '', p.tool_calls != null ? `${p.tool_calls} tool call${p.tool_calls === 1 ? '' : 's'}` : '', p.error ? `error: ${p.error}` : '');
       break;
     case type === 'brain.compaction':

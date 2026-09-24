@@ -164,7 +164,7 @@ func (s *Supervisor) ExpirePending() {
 // is still blocked — its answer_prompt pending expired unanswered while
 // nobody was watching, was dropped without being answered, or was never
 // recorded at all — so the prompt still on screen can still be answered
-// (docs/issues-2026-09-18.md "an expired approval prompt can never be
+// (docs/history/issues-2026-09-18.md "an expired approval prompt can never be
 // approved"). Revival always re-reads the screen rather than trusting
 // what expired or was dropped: the pane may already be asking something
 // else. Caller holds s.mu; ok is false when the pane is gone, not

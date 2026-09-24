@@ -569,11 +569,8 @@ func BrainConfig(cfg config.Config) brain.Config {
 	}
 }
 
-// Brain returns the attached brain, or nil when it is off.
-func (a *App) Brain() *brain.Brain { return a.brain }
-
 // BrainMode reports the effective brain mode: BrainOn, BrainFake, or
-// BrainOff (with BrainOffReason saying why).
+// BrainOff (with a.brainOff saying why).
 func (a *App) BrainMode() string {
 	switch {
 	case a.brain == nil:
@@ -584,9 +581,6 @@ func (a *App) BrainMode() string {
 		return BrainOn
 	}
 }
-
-// BrainOffReason says why the brain is off ("" when it is on).
-func (a *App) BrainOffReason() string { return a.brainOff }
 
 // BrainModel reports the brain's current model ("" when it is off): the
 // configured brain.model until a runtime switch. BrainProvider likewise
@@ -633,9 +627,6 @@ func (a *App) restoreBrainModel() {
 		a.log.Log("daemon", "daemon.brain_model_error", "", map[string]any{"provider": provider, "model": ss.BrainModel, "error": err.Error()})
 	}
 }
-
-// Prompts returns the prompt workspace loader.
-func (a *App) Prompts() *prompts.Loader { return a.prompts }
 
 // ReloadPrompts rescans the prompt override directory (SIGHUP, POST
 // /api/prompts/reload). The brain and the voice session share this

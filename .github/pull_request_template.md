@@ -1,6 +1,6 @@
 ## Work package
 
-<!-- Which work package from sheepdog-v1-plan.md does this PR implement (e.g. WP1)? -->
+<!-- Which work package from docs/history/sheepdog-v1-plan.md does this PR implement (e.g. WP1)? -->
 
 ## What changed
 
@@ -12,4 +12,4 @@
 
 ## Plan deviations
 
-<!-- Anything that differs from sheepdog-v1-plan.md, and why. "None" if none. -->
+<!-- Anything that differs from docs/history/sheepdog-v1-plan.md, and why. "None" if none. -->

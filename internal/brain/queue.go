@@ -118,14 +118,6 @@ func (l *turnLock) release() {
 	}
 }
 
-// waiting reports how many turns are queued behind the current one
-// (both priorities). Used by tests to synchronise without sleeping.
-func (l *turnLock) waiting() int {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return len(l.ceo) + len(l.event)
-}
-
 // ceoWaiting reports how many CEO turns are queued: an event turn checks
 // it before every model call and yields when it is not zero.
 func (l *turnLock) ceoWaiting() int {

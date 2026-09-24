@@ -134,12 +134,6 @@ func (r *Runner) resolveBackend(prefer string) (Backend, error) {
 	}
 }
 
-// RunBackend runs a specific backend regardless of cli.prefer. It is
-// Run with the backend pinned.
-func (r *Runner) RunBackend(ctx context.Context, backend Backend, workspace, question string) (Result, error) {
-	return r.Run(ctx, Query{Backend: backend, Workspace: workspace, Question: question})
-}
-
 // Run carries out one query: it renders the backend's template (the
 // resume one when q.Session is set), runs the child in the workspace and
 // returns what it answered with the session it left behind. At most one

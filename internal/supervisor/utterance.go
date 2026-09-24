@@ -101,7 +101,7 @@ func (s *Supervisor) ToSupervisor(ctx context.Context, text string) (voice.ToolR
 		// CEO had said it (a wasted turn at best; with different phrasing
 		// it could look like authorisation). Nothing was said: no fast
 		// path, no brain turn, and the rail never sees these words as the
-		// CEO's own (docs/issues-2026-09-18.md Bug 2).
+		// CEO's own (docs/history/issues-2026-09-18.md Bug 2).
 		s.log.Log(logSource, "supervisor.echo_ignored", "", map[string]any{"text": text})
 		return voice.ToolResult{Scheduling: voice.UrgencySilent}, nil
 	}
@@ -149,7 +149,7 @@ func (s *Supervisor) ToSupervisor(ctx context.Context, text string) (voice.ToolR
 }
 
 // awaitReply runs the utterance turn detached and waits up to
-// Config.ReplyWait for it (docs/roles.md "Status"). A reply inside the
+// Config.ReplyWait for it (docs/history/roles-status.md). A reply inside the
 // wait is the tool result, exactly as a synchronous call's would be.
 // Past it the call returns a silent pending result at once — the voice
 // said "on it" as it called the tool, and a second acknowledgement would
@@ -583,7 +583,7 @@ func (s *Supervisor) fastAnswer(ctx context.Context, in *shepherdInput) (voice.T
 	case !has && s.expired != nil:
 		// The pane's answer_prompt pending expired while nobody answered,
 		// but the prompt may still be on screen: revive it before mapping
-		// the bare word onto its keys (docs/issues-2026-09-18.md "an
+		// the bare word onto its keys (docs/history/issues-2026-09-18.md "an
 		// expired approval prompt can never be approved"). s.expired only
 		// says which pane; revival always re-reads the screen.
 		revived, ok := s.revivePrompt(ctx, s.expired.PaneID, "fast_path")

@@ -470,7 +470,7 @@ func restartOver(t *testing.T, h *harness, cfg Config) (*Supervisor, *recLog, *f
 }
 
 // TestStartupPromisesAnnounced covers announceStartupPromises (the
-// "Smaller items" of docs/issues-2026-09-18.md): 0 old promises say
+// "Smaller items" of docs/history/issues-2026-09-18.md): 0 old promises say
 // nothing; 1 or 4 are spoken once as "Still watching for: …" (up to
 // three named, the rest tallied), pushed idle and tagged
 // startup_promises, logged as promise.carried_over, flagged

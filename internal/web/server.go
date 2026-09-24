@@ -48,7 +48,8 @@ type Supervisor interface {
 	ResetConversation(ctx context.Context, via string) (id string, at time.Time, err error)
 }
 
-// EventInjector is the Watcher's second input channel (plugin shim).
+// EventInjector is the Watcher's optional second input channel (POST
+// /api/herdr/event), beside the herdr socket subscription.
 type EventInjector interface {
 	Inject(ev herdr.StatusEvent)
 }
@@ -74,7 +75,8 @@ type Deps struct {
 	// in Store's session.voice_provider); nil (--voice=off) answers the
 	// GET with provider "off" and the PUT with 503.
 	VoiceSwitch VoiceSwitcher
-	// Watcher receives plugin-shim events; nil means --herdr=mock.
+	// Watcher receives POST /api/herdr/event status events; nil means
+	// --herdr=mock.
 	Watcher EventInjector
 	// Brain backs GET /api/brain/{transcript,context,system_prompt,models}
 	// and PUT /api/brain/model (the runtime provider/model switch,
@@ -143,8 +145,7 @@ type Deps struct {
 	Token string
 }
 
-// Server is the HTTP server. Create with New, then either Handler() for
-// tests or Listen + Serve.
+// Server is the HTTP server. Create with New, then Listen + Serve.
 type Server struct {
 	deps Deps
 	log  logging.Logger
@@ -294,9 +295,6 @@ func (s *Server) static(name string) error {
 	s.mux.Handle("GET /"+name+"/", http.StripPrefix("/"+name, http.HandlerFunc(serve)))
 	return nil
 }
-
-// Handler returns the routed handler (for httptest).
-func (s *Server) Handler() http.Handler { return s.mux }
 
 // OnVoiceEvent forwards a voice session event to the connected browser
 // (status, transcript, flush, error). The daemon's event fan-out calls it

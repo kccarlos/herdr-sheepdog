@@ -106,11 +106,6 @@ func (i *Injector) SetState(ctx context.Context, paneID string, to herdr.State, 
 	return row, nil
 }
 
-// Done is SetState(done) with the pane text left as it is.
-func (i *Injector) Done(ctx context.Context, paneID string) (state.Agent, error) {
-	return i.SetState(ctx, paneID, herdr.StateDone, "")
-}
-
 // Screen replaces a synthetic pane's screen text without moving its
 // state or touching the supervisor: the mock's counterpart to a worker
 // showing a new prompt while herdr's own status report stays unchanged

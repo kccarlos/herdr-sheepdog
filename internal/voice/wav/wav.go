@@ -128,9 +128,6 @@ func (wr *Writer) Write(pcm []byte) (int, error) {
 	return n, err
 }
 
-// Bytes returns how many PCM bytes were written so far.
-func (wr *Writer) Bytes() int64 { return wr.n }
-
 // Close patches the RIFF and data sizes. It does not close the underlying
 // file.
 func (wr *Writer) Close() error {

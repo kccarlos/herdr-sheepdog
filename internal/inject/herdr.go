@@ -181,12 +181,6 @@ func (h *Herdr) anySynthetic() bool {
 	return len(h.panes) > 0
 }
 
-// Sends returns how many prompts/keys were sent to a synthetic pane.
-func (h *Herdr) Sends(paneID string) int {
-	p, _ := h.get(paneID)
-	return p.sends
-}
-
 // tailLines returns the last n lines of s (all when n <= 0).
 func tailLines(s string, n int) string {
 	if n <= 0 {

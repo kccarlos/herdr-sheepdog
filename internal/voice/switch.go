@@ -133,13 +133,6 @@ func (sw *Switcher) Model() string {
 	return ""
 }
 
-// Current returns the running provider session (nil before Start).
-func (sw *Switcher) Current() Session {
-	sw.mu.RLock()
-	defer sw.mu.RUnlock()
-	return sw.inner
-}
-
 // Start implements Session: it starts the current provider's session.
 func (sw *Switcher) Start(ctx context.Context) error {
 	sw.mu.Lock()

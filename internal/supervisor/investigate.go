@@ -334,14 +334,6 @@ func (s *Supervisor) cancelInvestigations(reason string) {
 	}
 }
 
-// runningInvestigation returns the running job of a pane.
-func (s *Supervisor) runningInvestigation(paneID string) (*liveInvestigation, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	live, ok := s.investigating[paneID]
-	return live, ok
-}
-
 // appendInvestigation records a new job, dropping the oldest past
 // state.MaxInvestigations.
 func (s *Supervisor) appendInvestigation(inv state.Investigation) error {

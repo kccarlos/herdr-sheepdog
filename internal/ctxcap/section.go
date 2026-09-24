@@ -132,9 +132,6 @@ func (bd *Builder) Extend(text string) {
 	last.Tokens = EstimateTokens(bd.b.String()[last.Start:last.End])
 }
 
-// Len is the text length so far.
-func (bd *Builder) Len() int { return bd.b.Len() }
-
 // Snapshot returns the text and sections built so far.
 func (bd *Builder) Snapshot(body json.RawMessage) Snapshot {
 	return Snapshot{Text: bd.b.String(), Sections: append([]Section(nil), bd.secs...), Body: body}

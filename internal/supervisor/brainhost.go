@@ -160,7 +160,7 @@ func (h brainHost) Prompt(ctx context.Context, paneID, text string) (string, err
 // the supervisor's lock — the shepherd's own recorded input must
 // authorise these keys (inputs.go) — reviving the pending action from the screen
 // first when none is recorded but the pane is still blocked
-// (docs/issues-2026-09-18.md "an expired approval prompt can never be
+// (docs/history/issues-2026-09-18.md "an expired approval prompt can never be
 // approved") — then the confirm send path.
 func (h brainHost) AnswerPrompt(ctx context.Context, paneID string, keys []string) (string, error) {
 	s := h.s

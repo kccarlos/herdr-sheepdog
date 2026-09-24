@@ -345,7 +345,7 @@ func TestScenario8ExpiryThenConfirm(t *testing.T) {
 
 // The prompt's pending expired while nobody answered, but it is still on
 // the pane's screen: a later bare "yes" revives it and answers
-// (docs/issues-2026-09-18.md "an expired approval prompt can never be
+// (docs/history/issues-2026-09-18.md "an expired approval prompt can never be
 // approved"). Unlike scenario 8's Confirm path, the fast path never
 // asks first — the CEO's own bare word this turn is the authorisation.
 func TestExpiredPromptRevivedByFastPath(t *testing.T) {
@@ -561,10 +561,6 @@ func TestResumePushesSilentBriefing(t *testing.T) {
 	push := h.pusher.last(t)
 	if push.Urgency != voice.UrgencySilent || push.Text != "Two agents: auth is working on something and docs is idle." {
 		t.Errorf("push = %+v", push)
-	}
-	sess := h.store.Snapshot().Session
-	if sess.LastBriefing != push.Text || sess.LastBriefingAt == nil {
-		t.Errorf("session = %+v", sess)
 	}
 	h.sup.OnVoiceEvent(voice.EventStatus{Status: voice.StatusClosed})
 	if h.store.Snapshot().Session.VoiceConnected {

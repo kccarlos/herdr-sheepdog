@@ -18,13 +18,13 @@
 // highlights its chain): `turn:N` is a user utterance with the tool calls
 // it caused, their supervisor-side events, results and the speech that
 // followed; `loose:N` is supervisor work no tool call started (a herdr
-// transition → read → llm.call → pending.created) and the push it led to.
+// transition → read → brain.step → pending.created) and the push it led to.
 //
 // Tool call/result pairing is generic over any `<prefix>.tool_call` /
 // `<prefix>.tool_result` family with an `id` (grouping.js toolFamily):
 // voice.* calls open a chain; any other family (the supervisor's agent
 // loop, brain.*) is an inner call nested under the voice call in flight,
-// and the herdr.read / cli.run / llm.call cards between an inner call and
+// and the herdr.read / cli.run cards between an inner call and
 // its result carry `parentKey` = that inner call.
 import { NESTED_TYPES, DIVIDERS, DAEMON_DIVIDERS, argSummary, eventSummary, fmtMs, ToolPairer, Fragments, toolFamily, withProvider } from './grouping.js';
 
@@ -43,7 +43,7 @@ const LANE_INDEX = Object.fromEntries(LANES.map((l, i) => [l.id, i]));
 export const GAP_MS = 5000;
 /** A turn that took this long to answer is shown in red. */
 export const STALL_MS = 10000;
-/** Latency colour ramp for llm.call / cli.run / tool results. */
+/** Latency colour ramp for brain.step / cli.run / tool results. */
 export const LATENCY = { warn: 1000, slow: 5000 };
 
 /** Lane of an event by its source (the fallback when no rule matches). */
@@ -51,7 +51,7 @@ export function laneOfSource(source) {
   switch (source) {
     case 'web': return 'you';
     case 'voice': return 'voice';
-    case 'herdr': case 'llm': case 'cli': return 'herdr';
+    case 'herdr': case 'cli': return 'herdr';
     default: return 'sup';
   }
 }
@@ -382,7 +382,7 @@ class Builder {
     return best;
   }
 
-  /** brain.step: the agent loop's own LLM call (llm.call's payload), from the Supervisor lane. */
+  /** brain.step: the agent loop's own LLM call, from the Supervisor lane. */
   brainStep(ev, p) {
     const isErr = !!p.error;
     const card = this.plain(ev, 'sup', { title: `brain step${p.template ? ` ${p.template}` : ''}`, cls: ['brain', ...(isErr ? ['error'] : [])] });
@@ -430,7 +430,7 @@ class Builder {
 
   /**
    * Work with no tool call open goes to the loose chain, which the next
-   * push takes. `work` marks real supervisor work (read, llm.call,
+   * push takes. `work` marks real supervisor work (read, brain.step,
    * pending.*) as opposed to the herdr pings that merely start a story.
    */
   looseChain(work, card) {
@@ -477,13 +477,10 @@ class Builder {
       const card = this.plain(ev, lane, { cls });
       card.chain = this.workChain(card);
       // Between an inner call (brain.tool_call read_screen / run_cli) and
-      // its result, the herdr.read / cli.run / llm.call it ran belongs to it.
+      // its result, the herdr.read / cli.run it ran belongs to it.
       const inner = this.openInner;
       if (inner) { card.parentKey = inner.key; inner.children.push(card.key); }
-      if (type === 'llm.call') {
-        card.title = `LLM ${p.template || ''}`.trim();
-        card.arrow = { from: 'sup', to: 'herdr', kind: 'call', label: [p.template, withProvider(p.provider, p.model), card.durMs != null ? fmtMs(card.durMs) : ''].filter(Boolean).join(' · '), dashed: false, level: isErr ? 'error' : latencyLevel(card.durMs) };
-      } else if (type === 'cli.run') {
+      if (type === 'cli.run') {
         card.title = `CLI ${p.backend || ''}`.trim();
         card.arrow = { from: 'sup', to: 'herdr', kind: 'call', label: [p.backend, card.durMs != null ? fmtMs(card.durMs) : '', p.exit != null && p.exit !== 0 ? `exit ${p.exit}` : '', p.killed ? 'killed' : ''].filter(Boolean).join(' · '), dashed: false, level: isErr ? 'error' : latencyLevel(card.durMs) };
       } else if (type === 'herdr.read' || type === 'herdr.send') {

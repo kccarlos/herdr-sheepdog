@@ -116,7 +116,7 @@ type Config struct {
 	ReplyWait time.Duration
 	// RepeatWindow is how long an unchanged roster sentence counts as
 	// "already reported" (default 60 s, supervisor.repeat_window_s,
-	// docs/issues-2026-09-18.md "Smaller items"): a status question
+	// docs/history/issues-2026-09-18.md "Smaller items"): a status question
 	// inside it gets a context note the brain can use to say "no change
 	// since I last checked" instead of repeating the roster; with no
 	// brain, the code fallback sentence itself is prefixed that way.
@@ -362,7 +362,7 @@ func (s *Supervisor) Run(ctx context.Context) {
 // (session.voice_connected, /api/state). Pushes are not gated on it —
 // pushTagged hands them to the session regardless, which queues them
 // while reconnecting (audit B3). The first time it turns on — a live
-// connect event, or at once for --voice=off (docs/roles.md "Status") —
+// connect event, or at once for --voice=off (docs/history/roles-status.md) —
 // it also runs announceStartupPromises, once per daemon run.
 func (s *Supervisor) SetVoiceConnected(connected bool) {
 	_ = s.store.UpdateSession(func(ss *state.Session) { ss.VoiceConnected = connected })
@@ -466,7 +466,7 @@ func (s *Supervisor) pushTagged(paneID, text string, u voice.Urgency, tags map[s
 
 // pushRecord is one push spoken to the voice, kept for echoWindow so
 // ToSupervisor can recognise the voice relaying it back as if the
-// shepherd had said it (utterance.go's isEcho, docs/issues-2026-09-18.md
+// shepherd had said it (utterance.go's isEcho, docs/history/issues-2026-09-18.md
 // Bug 2).
 type pushRecord struct {
 	text string
@@ -520,12 +520,9 @@ func (s *Supervisor) pushIfTagged(k pushKind, paneID, text string, tags map[stri
 	s.pushTagged(paneID, text, voice.UrgencyIdle, tags)
 }
 
-// pushBriefing pushes the current briefing as silent context and records
-// it in the session.
+// pushBriefing pushes the current briefing as silent context.
 func (s *Supervisor) pushBriefing() {
 	text, _ := s.briefingText()
-	now := s.cfg.Now()
-	_ = s.store.UpdateSession(func(ss *state.Session) { ss.LastBriefing, ss.LastBriefingAt = text, &now })
 	s.push("", text, voice.UrgencySilent)
 }
 

@@ -61,8 +61,8 @@ func (c WatcherConfig) withDefaults() WatcherConfig {
 // Watcher turns herdr's raw event streams into deduplicated, debounced
 // Transitions (plan §3.1). It discovers panes through the fleet subscription
 // and a periodic session.snapshot diff, keeps one status subscription per
-// known pane, accepts a second input channel through Inject (the future
-// plugin-shim HTTP channel), and funnels every channel through the same
+// known pane, accepts a second input channel through Inject (POST
+// /api/herdr/event), and funnels every channel through the same
 // dedup + debounce path. All bookkeeping is owned by the Run goroutine; no
 // locks are needed.
 type Watcher struct {
@@ -127,8 +127,8 @@ func NewWatcher(client *Client, cfg WatcherConfig, log Logger) *Watcher {
 // Transitions is the output channel; it is closed when Run returns.
 func (w *Watcher) Transitions() <-chan Transition { return w.out }
 
-// Inject feeds a status event from another channel (e.g. the plugin hook
-// shim) into the same dedup/debounce path as the socket subscription. It
+// Inject feeds a status event from another channel (POST
+// /api/herdr/event) into the same dedup/debounce path as the socket subscription. It
 // stamps At and Source when they are empty. It never blocks once Run has
 // returned.
 func (w *Watcher) Inject(ev StatusEvent) {

@@ -293,7 +293,7 @@ func (b *Brain) rail(trigger Trigger, row AgentInfo, keys []string) string {
 		// unanswered while nobody was watching, or the daemon never caught
 		// it. Deferred to the Host, which re-reads the screen and revives
 		// the pending action before its own atomic check
-		// (docs/issues-2026-09-18.md "an expired approval prompt can never
+		// (docs/history/issues-2026-09-18.md "an expired approval prompt can never
 		// be approved").
 		return ""
 	}

@@ -556,7 +556,7 @@ free-tier, no 429 seen.
 
 ## 12. WP7b findings (live daemon run, 2026-09-17)
 
-See `docs/e2e-results.md` for the full run. Session-level observations:
+See `docs/history/e2e-results.md` for the full run. Session-level observations:
 
 - **No `GoAway` in a 13-minute session.** The server instead closed the
   connection with `close 1011 (internal server error): Internal error

@@ -20,5 +20,5 @@
 // Since resumes after it, and the web layer pages the conversation
 // history by it (history.go). The event log is
 // the single source of truth for what happened; the /debug page is only a
-// viewer, and Replay reads a recorded file back for tests.
+// viewer, and ReadDay reads a recorded day back.
 package eventlog
