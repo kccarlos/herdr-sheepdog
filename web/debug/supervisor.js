@@ -55,7 +55,12 @@ export const KIND_GROUPS = {
 /** Meter group order (transcript side), then the pruned stubs. */
 export const GROUP_ORDER = ['compaction', 'ceo', 'assistant', 'push', 'worker', 'note', 'promise', 'request', 'tool', 'result', 'reply', 'other'];
 
-const reRequest = /^Request from the assistant \((ask|propose)\): (?:question|instruction)=("(?:[^"\\]|\\.)*")(?: agent=("(?:[^"\\]|\\.)*"|\(none[^)]*\)))?(?: \[triggered by an event[^\]]*\])?/;
+// ask/propose are the original two request kinds; utterance and stop
+// (assemble.go's requestText / stopRequestText) were added later with
+// their own field name ("utterance=", "stopped=") and, for stop, a bare
+// "agent=(none)" with no colon — this must match both old and new
+// transcripts, or a real request renders as a nudge (audit B7).
+const reRequest = /^Request from the assistant \((ask|propose|utterance|stop)\): (?:question|instruction|utterance|stopped)=("(?:[^"\\]|\\.)*")(?: agent=("(?:[^"\\]|\\.)*"|\([^)]*\)))?(?: \[triggered by an event[^\]]*\])?/;
 // announce and investigation are the current event turns; summarize /
 // keep_promise are kept so transcripts of earlier runs still render.
 const reEvent = /^Event from the supervisor \((announce|investigation|summarize|keep_promise)\): agent=("(?:[^"\\]|\\.)*") event=("(?:[^"\\]|\\.)*") template=("(?:[^"\\]|\\.)*")(?: promise=("(?:[^"\\]|\\.)*"))?/;
