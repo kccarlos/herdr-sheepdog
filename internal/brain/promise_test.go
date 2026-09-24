@@ -192,7 +192,10 @@ func TestEventTurnTimeout(t *testing.T) {
 	block := make(chan struct{})
 	defer close(block)
 	m := braintest.NewModel(braintest.Step{Block: block})
-	h := newHarness(t, m, func(c *Config) { c.EnrichTimeout = 50 * time.Millisecond; c.FinalGrace = -1 })
+	h := newHarness(t, m, func(c *Config) {
+		c.EnrichTimeout, c.AnnounceTimeout = 50*time.Millisecond, 60*time.Millisecond
+		c.FinalGrace = -1
+	})
 	start := time.Now()
 	_, err := h.brain.Turn(context.Background(), Request{Kind: KindAnnounce, Agent: "auth", Event: "done", Template: "auth finished.", Promises: []PromiseInfo{{ID: "pr-1", Text: "tell me", Agent: "auth", Event: "done"}}})
 	if err == nil || time.Since(start) > 2*time.Second {
@@ -204,6 +207,40 @@ func TestEventTurnTimeout(t *testing.T) {
 	}
 	if text := h.model.Calls()[0].Text(); !strings.Contains(text, "Event from the supervisor (announce): agent=\"auth\" event=\"done\" template=\"auth finished.\"\nPromises this event keeps (the CEO asked to be told; your line says so, with the result):\n- pr-1: \"tell me\" (when auth finishes)\nNothing has been said about this yet.") {
 		t.Errorf("request = %s", text)
+	}
+	if step := payload(h.log.ofType("brain.step")[0]); step["prompt_tokens_est"] == nil {
+		t.Errorf("brain.step on timeout lacks prompt_tokens_est: %v", step)
+	}
+}
+
+// An announce turn the shepherd is owed (a kept promise, or Owed: the
+// finish of their own instruction) gets AnnounceTimeout; any other event
+// turn keeps EnrichTimeout (the 23:56:27 announce timeout at 9 s).
+func TestOwedAnnounceGetsTheLongerBudget(t *testing.T) {
+	promise := []PromiseInfo{{ID: "pr-1", Text: "tell me", Agent: "auth", Event: "done"}}
+	for _, tc := range []struct {
+		name     string
+		req      Request
+		min, max time.Duration
+	}{
+		{"plain", Request{Kind: KindAnnounce, Agent: "auth", Event: "done", Template: "auth finished."}, 0, time.Second},
+		{"owed", Request{Kind: KindAnnounce, Agent: "auth", Event: "done", Template: "auth finished.", Owed: true}, 1200 * time.Millisecond, 4 * time.Second},
+		{"promise", Request{Kind: KindAnnounce, Agent: "auth", Event: "done", Template: "auth finished.", Promises: promise}, 1200 * time.Millisecond, 4 * time.Second},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			block := make(chan struct{})
+			defer close(block)
+			m := braintest.NewModel(braintest.Step{Block: block})
+			h := newHarness(t, m, func(c *Config) {
+				c.EnrichTimeout, c.AnnounceTimeout = 50*time.Millisecond, 1200*time.Millisecond
+				c.FinalGrace = -1
+			})
+			start := time.Now()
+			_, err := h.brain.Turn(context.Background(), tc.req)
+			if el := time.Since(start); err == nil || el < tc.min || el > tc.max {
+				t.Fatalf("err = %v after %s, want a timeout within [%s, %s]", err, el, tc.min, tc.max)
+			}
+		})
 	}
 }
 

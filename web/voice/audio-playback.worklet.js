@@ -6,9 +6,9 @@
 // continuous buffer is sample-accurate (no drift between scheduled
 // sources), and `flush` empties it in the next 128-frame block (< 3 ms)
 // instead of having to stop every scheduled source. The state machine
-// itself (jitter buffer, underrun accounting, fade-out) lives in
-// audio-util.js so it is unit-tested.
-import { Player, int16ToFloat, PLAYBACK_RATE } from './audio-util.js';
+// itself (jitter buffer, adaptive time-stretch, underrun accounting,
+// fade-out) lives in audio-util.js so it is unit-tested.
+import { Player, int16ToFloat, PLAYBACK_RATE, PLAYBACK_POLICY } from './audio-util.js';
 
 const STATS_EVERY_BLOCKS = 32; // ~85 ms at 48 kHz
 
@@ -33,6 +33,14 @@ class PlaybackProcessor extends AudioWorkletProcessor {
         // PCM16 LE mono; a trailing odd byte would be a contract violation.
         const n = m.data.byteLength >> 1;
         this.player.push(int16ToFloat(new Int16Array(m.data, 0, n)));
+        break;
+      }
+      case 'policy': {
+        // The page learned the voice provider (/ws status.provider):
+        // GPT-Live's slow delivery gets a deeper jitter buffer.
+        const policy = PLAYBACK_POLICY[m.provider] || PLAYBACK_POLICY.gemini;
+        this.player.setPolicy(policy);
+        this.postStats(true);
         break;
       }
       case 'flush':
@@ -61,6 +69,8 @@ class PlaybackProcessor extends AudioWorkletProcessor {
       dropped: p.stats.dropped,
       flushes: p.stats.flushes,
       playedMs: Math.round((p.stats.played / p.outRate) * 1000),
+      rate: Math.round(p.rate * 1000) / 1000,
+      stretchedMs: p.stretchedMs,
       at: currentTime,
     });
   }

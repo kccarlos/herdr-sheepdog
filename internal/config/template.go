@@ -106,6 +106,7 @@ func Template() string {
 # step_reserve_s = %[28]d   # 0: default; below this much time left, the next step is answer-only
 # final_grace_s = %[29]d   # 0: default; how far past the timeout the answer-only step may run
 # enrich_timeout_s = %[32]d   # budget of the brain's announce turn on a block or finish
+# announce_timeout_s = %[46]d   # the same, for a finish that keeps a promise or ends the shepherd's own request
 # announce_wait_s = %[33]d   # how long a finish waits for the brain's line before the template sentence is spoken
 # investigate_max_s = %[40]d   # sanity ceiling of a background investigation: the only limit on how long its answer may take
 # investigate_session_ttl_s = %[41]d   # how long a finished investigation's sub-agent session stays resumable for a follow-up
@@ -134,5 +135,6 @@ func Template() string {
 		d.Supervisor.RepeatWindowS,
 		d.Web.Bind,
 		d.Supervisor.AuthoriseWindowS,
+		d.Brain.AnnounceTimeoutS,
 	)
 }

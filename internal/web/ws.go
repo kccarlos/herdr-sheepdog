@@ -296,6 +296,11 @@ type client struct {
 	underruns int
 	drains    int
 	bufferMs  int
+	// rate / stretchedMs: the time-stretch's current playback rate and
+	// the wall-clock ms played at a rate other than 1.0 (ping rate,
+	// stretched_ms).
+	rate        float64
+	stretchedMs int
 	// sendWaits is a bounded rolling window of how long recent audio
 	// frames waited in the outbound queue before writeLoop sent them
 	// (ms), for web.client.stats send_wait_p95_ms / send_wait_max_ms.
@@ -527,6 +532,12 @@ func (c *client) onControl(data []byte) {
 		if m.BufferMs != nil {
 			c.bufferMs = *m.BufferMs
 		}
+		if m.Rate != nil {
+			c.rate = *m.Rate
+		}
+		if m.StretchedMs != nil {
+			c.stretchedMs = *m.StretchedMs
+		}
 		c.mu.Unlock()
 		c.enqueue(controlFrame(wsproto.Pong()))
 	case wsproto.TypeMute:
@@ -603,6 +614,7 @@ func (c *client) counters() map[string]any {
 		"dropped_audio": c.droppedAudio, "muted_drops": c.mutedDrops, "queued": len(c.queue),
 		"silent": c.silent, "silence_transitions": c.silenceTransitions, "gated_frames": c.gatedFrames, "peak": c.peak,
 		"underruns": c.underruns, "drains": c.drains, "buffer_ms": c.bufferMs,
+		"rate": c.rate, "stretched_ms": c.stretchedMs,
 		"send_wait_max_ms": round1(maxWait), "send_wait_p95_ms": round1(p95Wait),
 		"dur_ms": c.h.s.deps.Now().Sub(c.start).Milliseconds(),
 	}

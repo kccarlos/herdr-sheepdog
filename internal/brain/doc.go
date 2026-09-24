@@ -39,7 +39,9 @@
 // the answer contract; an empty Spoken is a skip. The brain decides
 // whether and how urgently; the supervisor applies the chattiness
 // ceiling and decides nothing about the moment (the push queue does).
-// Announce turns are TriggerEvent, bounded by Config.EnrichTimeout,
+// Announce turns are TriggerEvent, bounded by Config.EnrichTimeout
+// (Config.AnnounceTimeout when the shepherd is owed the line: it keeps a
+// promise, or Request.Owed),
 // declared only the read tools (the executor refuses prompt, send_keys,
 // interrupt, promise and investigate in any event turn), and yield to a
 // waiting CEO turn.

@@ -12,6 +12,23 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
 
+// A live finding longer than spoken_max_sentences fails the case; the
+// offline stand-in answer is never graded on length.
+func TestCheckSVPExpectSpokenMaxSentences(t *testing.T) {
+	exp := SVPExpect{SpokenMaxSentences: 3}
+	long := brain.Reply{Spoken: "It failed. The clamp was off by one. It ran twice. Want the details?"}
+	short := brain.Reply{Spoken: "The clamp test fails on an off-by-one. It only hits the upper bound. Want the details?"}
+	if r := checkSVPExpect(exp, &recorder{}, long, false); len(r) != 1 {
+		t.Errorf("four sentences: reasons = %v", r)
+	}
+	if r := checkSVPExpect(exp, &recorder{}, short, false); len(r) != 0 {
+		t.Errorf("three sentences: reasons = %v", r)
+	}
+	if r := checkSVPExpect(exp, &recorder{}, long, true); len(r) != 0 {
+		t.Errorf("offline: reasons = %v", r)
+	}
+}
+
 // erroringModel always fails (not a rate limit), forcing every turn to
 // fall back (internal/brain's ErrFallback wraps two errors with a double
 // %w, so errors.Unwrap on it is nil — regression test for the panic that

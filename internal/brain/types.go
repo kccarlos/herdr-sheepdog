@@ -134,6 +134,16 @@ type Request struct {
 	// Promises are the promises this event keeps (already marked kept by
 	// the supervisor): the CEO asked to be told, so Spoken says so.
 	Promises []PromiseInfo
+	// Owed marks an announce turn the shepherd is waiting on: the event
+	// keeps a promise or finishes an instruction the shepherd gave this
+	// run. It gets Config.AnnounceTimeout instead of EnrichTimeout, since
+	// the code sentence already said "here's what it found".
+	Owed bool
+	// AlsoAsking is set on a finish whose screen ends at a prompt the
+	// agent showed after its turn (Claude Code's "teach auto mode…?"):
+	// the question as parsed, so the one line covers the result and the
+	// question both.
+	AlsoAsking string
 	// Investigation is the finished job a KindInvestigation turn
 	// delivers: its question, the CEO's own words, the sub-agent's
 	// answer and what it follows up on.

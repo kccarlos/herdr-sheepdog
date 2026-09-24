@@ -533,6 +533,7 @@ func BrainConfig(cfg config.Config) brain.Config {
 		StepReserve:     time.Duration(cfg.Brain.StepReserveS) * time.Second,
 		FinalGrace:      time.Duration(cfg.Brain.FinalGraceS) * time.Second,
 		EnrichTimeout:   time.Duration(cfg.Brain.EnrichTimeoutS) * time.Second,
+		AnnounceTimeout: time.Duration(cfg.Brain.AnnounceTimeoutS) * time.Second,
 		DataDir:         cfg.DataDir,
 	}
 }

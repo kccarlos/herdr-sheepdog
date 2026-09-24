@@ -84,8 +84,9 @@ Does:
   anything and how urgently, in one line that names the decision or the
   next move — never "say yes".
 - Answers for the ear: `{spoken, detail, needs_user, options?, pending?}`.
-  `spoken` is two sentences for status and a short paragraph for an
-  explanation (what happened → why → what it means → next move).
+  `spoken` is one sentence per agent for status, and for findings and
+  explanations the gist in at most two sentences plus an offer ("want
+  the details?"); the rest (why, evidence, next move) goes in `detail`.
 - Serialises turns: single writer; shepherd turns before event turns;
   an event turn yields before its next model call when a shepherd turn
   waits; queued event turns coalesce per agent.
@@ -129,7 +130,19 @@ trigger}` (`stop_tool` or the bare-word fast path).
 
 One line per worker event, the brain's when it lands within
 `brain.announce_wait_s`, else the code sentence (the parsed prompt for a
-block, "auth finished" for a finish) — never both. Nothing interrupts
+block, "auth finished" for a finish) — never both, with two exceptions
+that add at most one line. A finish the shepherd is owed — it keeps a
+promise or ends an instruction they gave this run — is announced at the
+wait as "auth finished — here's what it found" and the brain's line with
+the finding follows whenever it lands (within
+`brain.announce_timeout_s`, idle, never dropped for lateness); a late
+line that relates the finish to one of their requests (`relates_to`) is
+added the same way. And a late line that says the shepherd must decide
+on a block that is still open. A finish that leaves a prompt on screen
+(Claude Code's post-turn "teach auto mode…?"; not agy, which reports done
+around its mid-task prompts) is announced with the question in one line
+("auth finished, and it's asking …"), keeps the finish's promises and
+makes the question the pending answer. Nothing interrupts
 the voice mid-sentence except the shepherd: while the voice is
 speaking, INTERRUPT scheduling is downgraded to WHEN_IDLE, save a due
 promise or a decision on a *new* block. An addition to a block is
@@ -226,7 +239,8 @@ and an utterance with no brain gets the roster sentence and nothing is
 sent. **One push mode** is in: a block or a finish waits up to
 `brain.announce_wait_s` for the brain's line and speaks it alone, else
 the code sentence — a late line is dropped (`brain.push_late`) unless it
-says the shepherd must act on a prompt that is still open, and a line
+says the shepherd must act on a prompt that is still open or the finish
+is owed to the shepherd ("Pushes" above), and a line
 about a resolved block is dropped (`brain.push_stale`). The 10-minute
 silent briefing re-push and the plugin shim are gone too.
 

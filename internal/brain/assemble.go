@@ -224,7 +224,7 @@ func investigationRequestText(req Request) string {
 		b.WriteString(wrapWorker(req.Agent, "investigation", req.Result))
 		b.WriteString("\n")
 	}
-	b.WriteString("Answer the CEO now, from this and the conversation: a short paragraph ordered for the ear — what happened, why, what it means for them, the next move — in plain words, no paths, hashes or ids, jargon only if they used it first. If the agent has worked since, say the answer is as of when the look ran. Reply with the JSON object of the answer contract; read tools only, and say nothing about how the look was run.")
+	b.WriteString("Answer the CEO now, from this and the conversation: spoken is the gist in at most two sentences for the ear — what happened and what it means for them — then an offer (\"want the details?\"); the why, the evidence and the next move go in detail. Plain words, no paths, hashes or ids, jargon only if they used it first. If the agent has worked since, say the answer is as of when the look ran. Reply with the JSON object of the answer contract; read tools only, and say nothing about how the look was run.")
 	return b.String()
 }
 
@@ -256,6 +256,12 @@ func eventRequestText(req Request) string {
 		for _, p := range req.Promises {
 			fmt.Fprintf(&b, "- %s: %q (%s)\n", p.ID, p.Text, promiseCondition(p))
 		}
+	}
+	if req.Owed {
+		b.WriteString("The CEO is waiting on this: the agent was working on their request. Say what it found or did — the gist from the screen, not only that it finished; if the assistant has already said \"" + agent + " finished — here's what it found\", your line is what it found.\n")
+	}
+	if req.AlsoAsking != "" {
+		fmt.Fprintf(&b, "After finishing, the agent is also showing a prompt of its own: %q. Your one line covers both — what it found, then that it is asking this — with needs_user true and the prompt's choices in options.\n", req.AlsoAsking)
 	}
 	b.WriteString("Nothing has been said about this yet. Decide whether the assistant says anything, what, and how urgently: your spoken replaces the template sentence, so carry its news (what the agent did, in the CEO's terms) plus what the sentence lacked — which request of theirs it fulfils, what changed against what they asked, what is still open. Skip when the CEO already knows (the assistant relayed it, or they just asked and heard it) or it is not worth their attention; silent when it is context the assistant should have but not say.")
 	b.WriteString(" Reply with the JSON object of the answer contract plus \"urgency\": one of interrupt (the CEO must act now), idle (at the next pause), silent (context only, not spoken) or skip (say nothing); \"keeps_promise_ids\" for the promise ids above your line keeps; \"relates_to\" for the CEO's request it fulfils; needs_user true when they must decide or act. One line, at most two short sentences. The screen the supervisor read is above; read tools only.")

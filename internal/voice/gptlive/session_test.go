@@ -369,6 +369,62 @@ func TestIdleCloseWaitsForSpeechInProgress(t *testing.T) {
 	}
 }
 
+// TestIdleCloseCountsMutedTimeAsIdle: the shepherd talks, then mutes
+// (the push-to-talk rhythm of 2026-09-23); with nothing playing and no
+// push pending, the muted time counts toward IdleClose at once — the
+// loud frames sent just before the mute do not hold the session open as
+// "a sentence in progress".
+func TestIdleCloseCountsMutedTimeAsIdle(t *testing.T) {
+	cfg := testConfig()
+	cfg.IdleClose = 100 * time.Millisecond
+	cfg.NoiseRun = 10 * time.Second
+	s, d, l := startSession(t, cfg)
+	s.ClientAttached(true)
+	for i := 0; i < 10; i++ {
+		_ = s.SendAudio(tone(3000, 320))
+		time.Sleep(20 * time.Millisecond)
+	}
+	waitFor(t, "open", s.Live)
+	s.SetMuted(true)
+	muted := time.Now()
+	waitFor(t, "idle close while muted", func() bool { return len(l.find("voice.session_close")) == 1 })
+	if el := time.Since(muted); el > time.Second {
+		t.Errorf("closed %s after the mute; the pre-mute loud frames held it", el)
+	}
+	if len(d.last().events(evSessionClose)) != 1 || l.find("voice.session_close")[0]["reason"] != "idle" {
+		t.Fatalf("session_close %v", l.find("voice.session_close"))
+	}
+}
+
+// TestIdleCloseWaitsForADelegationWhileMuted: a muted shepherd waiting
+// for an answer (delegation in flight) keeps the session: closing it
+// would leave the answer queued until they unmute.
+func TestIdleCloseWaitsForADelegationWhileMuted(t *testing.T) {
+	cfg := testConfig()
+	cfg.IdleClose = 100 * time.Millisecond
+	release := make(chan struct{})
+	cfg.Handler = func(ctx context.Context, call voice.ToolCall) (voice.ToolResult, error) {
+		select {
+		case <-release:
+		case <-ctx.Done():
+		}
+		return voice.ToolResult{Spoken: "done"}, nil
+	}
+	s, d, l := startSession(t, cfg)
+	defer close(release)
+	s.ClientAttached(true)
+	_ = s.SendAudio(tone(3000, 640))
+	waitFor(t, "open", s.Live)
+	d.last().server(map[string]any{"type": evInputTranscript, "delta": "what did auth find?"})
+	d.last().server(map[string]any{"type": evDelegationCreated, "offset_ms": 0, "delegation": map[string]any{"id": "del_1", "target": "client"}})
+	waitFor(t, "tool call", func() bool { return len(l.find("voice.tool_call")) == 1 })
+	s.SetMuted(true)
+	time.Sleep(400 * time.Millisecond)
+	if len(l.find("voice.session_close")) != 0 || !s.Live() {
+		t.Fatal("idle close fired with a delegation in flight")
+	}
+}
+
 // TestNoisyRoomClosesAndDisarms: loud frames that go on past NoiseRun
 // with nothing transcribed are room noise: the session closes, and the
 // same noise does not reopen it until the gate closes.

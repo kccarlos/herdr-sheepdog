@@ -66,6 +66,11 @@ type Message struct {
 	Underruns *int `json:"underruns,omitempty"`
 	Drains    *int `json:"drains,omitempty"`
 	BufferMs  *int `json:"buffer_ms,omitempty"`
+	// Rate and StretchedMs are the adaptive time-stretch's current
+	// playback rate and the total wall-clock ms played at a rate other
+	// than 1.0, docs/ws-contract.md "Playback jitter buffer".
+	Rate        *float64 `json:"rate,omitempty"`
+	StretchedMs *int     `json:"stretched_ms,omitempty"`
 
 	// text (client→server: simulated utterance) and transcript (server→client)
 	Text string `json:"text,omitempty"`
