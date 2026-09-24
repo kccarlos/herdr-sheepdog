@@ -12,10 +12,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kccarlos/herdr-sheepdog/internal/cli"
 	"github.com/kccarlos/herdr-sheepdog/internal/config"
 	"github.com/kccarlos/herdr-sheepdog/internal/eventlog"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr/herdrtest"
+	"github.com/kccarlos/herdr-sheepdog/internal/logging"
 )
 
 // noKeys clears every provider key for the test: a developer's .env
@@ -305,6 +307,47 @@ func TestRunSocketModeRetriesWatcherAndAcceptsHTTPEvents(t *testing.T) {
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("Run did not return")
+	}
+}
+
+// TestBuildQuerierWiresConfiguredResumeCommands: cli.codex_resume_cmd /
+// cli.claude_resume_cmd from config must reach the *cli.Runner
+// buildQuerier constructs, not just codex_cmd/claude_cmd — otherwise a
+// follow-up investigation (Session set) always ran the built-in default
+// resume template instead of the configured one (audit B6).
+func TestBuildQuerierWiresConfiguredResumeCommands(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "fakebin.sh")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\necho ARGV:\"$*\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	a := &App{
+		cfg: config.Config{CLI: config.CLI{
+			Prefer:          "codex",
+			CodexBin:        bin,
+			ClaudeBin:       bin,
+			CodexCmd:        []string{bin, "{question}"},
+			ClaudeCmd:       []string{bin, "{question}"},
+			CodexResumeCmd:  []string{bin, "resume-marker", "{session}", "{question}"},
+			ClaudeResumeCmd: []string{bin, "resume-marker", "{session}", "{question}"},
+			TimeoutS:        5,
+			MaxOutputKB:     16,
+		}},
+		log: logging.NopLogger{},
+	}
+	runner, err := a.buildQuerier()
+	if err != nil {
+		t.Fatalf("buildQuerier: %v", err)
+	}
+	if runner == nil {
+		t.Fatal("buildQuerier returned nil: the fake bin was not detected")
+	}
+	res, err := runner.Run(context.Background(), cli.Query{Backend: cli.Codex, Workspace: dir, Question: "why", Session: "sess-1"})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !strings.Contains(res.Raw, "resume-marker") || !strings.Contains(res.Raw, "sess-1") {
+		t.Errorf("resume run = %q, want the configured codex_resume_cmd (with {session} substituted), not the default", res.Raw)
 	}
 }
 

@@ -633,16 +633,18 @@ func (a *App) ReloadPrompts() []prompts.File { return a.prompts.Reload() }
 // absent, the brain simply has no run_cli tool).
 func (a *App) buildQuerier() (*cli.Runner, error) {
 	cfg := cli.Config{
-		Prefer:         a.cfg.CLI.Prefer,
-		CodexBin:       a.cfg.CLI.CodexBin,
-		ClaudeBin:      a.cfg.CLI.ClaudeBin,
-		CodexCmd:       a.cfg.CLI.CodexCmd,
-		ClaudeCmd:      a.cfg.CLI.ClaudeCmd,
-		ClaudeModel:    a.cfg.CLI.ClaudeModel,
-		CodexReasoning: a.cfg.CLI.CodexReasoning,
-		Timeout:        time.Duration(a.cfg.CLI.TimeoutS) * time.Second,
-		MaxOutputBytes: a.cfg.CLI.MaxOutputKB << 10,
-		Log:            a.log,
+		Prefer:          a.cfg.CLI.Prefer,
+		CodexBin:        a.cfg.CLI.CodexBin,
+		ClaudeBin:       a.cfg.CLI.ClaudeBin,
+		CodexCmd:        a.cfg.CLI.CodexCmd,
+		ClaudeCmd:       a.cfg.CLI.ClaudeCmd,
+		CodexResumeCmd:  a.cfg.CLI.CodexResumeCmd,
+		ClaudeResumeCmd: a.cfg.CLI.ClaudeResumeCmd,
+		ClaudeModel:     a.cfg.CLI.ClaudeModel,
+		CodexReasoning:  a.cfg.CLI.CodexReasoning,
+		Timeout:         time.Duration(a.cfg.CLI.TimeoutS) * time.Second,
+		MaxOutputBytes:  a.cfg.CLI.MaxOutputKB << 10,
+		Log:             a.log,
 	}
 	det := cli.Detect(cfg, a.log)
 	if !det.Codex && !det.Claude {
