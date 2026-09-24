@@ -1,0 +1,10 @@
+{"ts":"2026-01-01T00:00:00Z","source":"voice","type":"voice.transcript.in","payload":{"final":false,"text":"How long has it been running"}}
+{"ts":"2026-01-01T00:00:01Z","source":"voice","type":"voice.turn","payload":{"end":"complete","turn":1}}
+{"ts":"2026-01-01T00:00:10Z","source":"voice","type":"voice.transcript.in","payload":{"final":false,"text":"What's going on"}}
+{"ts":"2026-01-01T00:00:11Z","source":"voice","type":"voice.turn","payload":{"end":"complete","turn":2}}
+{"ts":"2026-01-01T00:00:13Z","source":"voice","type":"voice.tool_call","payload":{"id":"call1","name":"to_supervisor","args":{"text":"What's going on"}}}
+{"ts":"2026-01-01T00:00:20Z","source":"voice","type":"voice.transcript.in","payload":{"final":true,"text":"Approve it"}}
+{"ts":"2026-01-01T00:00:23Z","source":"voice","type":"voice.transcript.out","payload":{"text":"Approved."}}
+{"ts":"2026-01-01T00:00:30Z","source":"supervisor","type":"supervisor.voice_initiative_ignored","payload":{"text":"Approve it and the job's done?"}}
+{"ts":"2026-01-01T00:00:31Z","source":"supervisor","type":"supervisor.voice_initiative_ignored","payload":{"text":"Anything else?"}}
+{"ts":"2026-01-01T00:00:32Z","source":"supervisor","type":"supervisor.echo_ignored","payload":{"text":"Approved."}}

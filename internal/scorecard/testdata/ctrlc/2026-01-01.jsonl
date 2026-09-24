@@ -1,0 +1,6 @@
+{"ts":"2026-01-01T00:00:00Z","source":"voice","type":"voice.tool_call","payload":{"id":"call1","name":"to_supervisor","args":{"text":"Stop it, right now"}}}
+{"ts":"2026-01-01T00:00:01Z","source":"voice","type":"voice.tool_call","payload":{"id":"call2","name":"stop","args":{}}}
+{"ts":"2026-01-01T00:00:03Z","source":"herdr","type":"herdr.send","pane_id":"wA:p1","payload":{"keys":["ctrl+c"],"kind":"keys","error":""}}
+{"ts":"2026-01-01T00:00:10Z","source":"herdr","type":"herdr.send","pane_id":"wA:p1","payload":{"keys":["y"],"kind":"keys","error":""}}
+{"ts":"2026-01-01T00:00:20Z","source":"voice","type":"voice.tool_call","payload":{"id":"call3","name":"to_supervisor","args":{"text":"Never mind, cancel that"}}}
+{"ts":"2026-01-01T00:00:22Z","source":"herdr","type":"herdr.send","pane_id":"wB:p1","payload":{"keys":["ctrl+c"],"kind":"keys","error":""}}

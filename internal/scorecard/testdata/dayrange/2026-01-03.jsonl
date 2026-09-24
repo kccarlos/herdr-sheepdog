@@ -1,0 +1,2 @@
+{"ts":"2026-01-03T00:00:00Z","source":"daemon","type":"daemon.start","payload":{"version":"day3"}}
+{"ts":"2026-01-03T00:00:01Z","source":"voice","type":"voice.tool_call","payload":{"id":"bad" "malformed json line missing colon}

@@ -1,0 +1,4 @@
+{"ts":"2026-01-01T00:00:00Z","source":"voice","type":"voice.push","payload":{"text":"Discoursecopilot started the release work.","urgency":"silent"}}
+{"ts":"2026-01-01T00:00:05Z","source":"voice","type":"voice.tool_result","payload":{"id":"call1","name":"to_supervisor","spoken":"Sent — discoursecopilot started the release work now."}}
+{"ts":"2026-01-01T00:00:20Z","source":"voice","type":"voice.push","payload":{"text":"Ucsummary finished packaging.","urgency":"idle"}}
+{"ts":"2026-01-01T00:00:23Z","source":"voice","type":"voice.tool_result","payload":{"id":"call2","name":"to_supervisor","spoken":"Approved — go ahead and merge."}}

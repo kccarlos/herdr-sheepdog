@@ -1,0 +1,12 @@
+{"ts":"2026-01-01T00:00:00Z","source":"voice","type":"voice.transcript.in","payload":{"final":false,"text":"Hey, what's going on"}}
+{"ts":"2026-01-01T00:00:02Z","source":"voice","type":"voice.tool_call","payload":{"id":"call1","name":"to_supervisor","args":{"text":"What's going on?"}}}
+{"ts":"2026-01-01T00:00:03Z","source":"voice","type":"voice.transcript.out","payload":{"text":"Two agents"}}
+{"ts":"2026-01-01T00:00:06Z","source":"voice","type":"voice.tool_result","payload":{"id":"call1","name":"to_supervisor","spoken":"Two agents are running.","dur_ms":4000},"dur_ms":4000}
+{"ts":"2026-01-01T00:00:10Z","source":"brain","type":"brain.turn","payload":{"kind":"announce","trigger":"event","dur_ms":1500},"dur_ms":1500}
+{"ts":"2026-01-01T00:00:10Z","source":"brain","type":"brain.step","payload":{"template":"announce","prompt_tokens":500,"dur_ms":900},"dur_ms":900}
+{"ts":"2026-01-01T00:00:20Z","source":"voice","type":"voice.transcript.in","payload":{"final":false,"text":"Tell it to stop"}}
+{"ts":"2026-01-01T00:00:22Z","source":"voice","type":"voice.tool_call","payload":{"name":"to_supervisor","args":{"text":"Tell it to stop"}}}
+{"ts":"2026-01-01T00:00:23Z","source":"voice","type":"voice.transcript.out","payload":{"text":"Okay"}}
+{"ts":"2026-01-01T00:00:25Z","source":"voice","type":"voice.tool_result","payload":{"name":"to_supervisor","spoken":"Stopping it now."}}
+{"ts":"2026-01-01T00:00:26Z","source":"brain","type":"brain.turn","payload":{"kind":"utterance","trigger":"ceo","dur_ms":800},"dur_ms":800}
+{"ts":"2026-01-01T00:00:26Z","source":"brain","type":"brain.step","payload":{"template":"utterance","prompt_tokens":300,"dur_ms":700},"dur_ms":700}
