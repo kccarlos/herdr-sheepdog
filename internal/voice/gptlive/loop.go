@@ -131,7 +131,14 @@ func (s *Session) idleCheck(now time.Time) {
 	// long past any sentence counts as room noise and does not hold the
 	// session open.
 	talking := !s.lastLoud.IsZero() && now.Sub(s.lastLoud) < 1500*time.Millisecond && now.Sub(s.loudSince) < s.cfg.NoiseRun
-	if lc == nil || len(s.inflight) > 0 || len(s.pushQ) > 0 || s.inputOpen || talking || s.speakingLocked(now) ||
+	if s.muted {
+		// A muted client sends no frames: whatever it said before the
+		// mute is not a sentence in progress, so a muted shepherd with
+		// nothing playing and no push pending is idle (a delegation in
+		// flight still holds the session for its answer).
+		talking = false
+	}
+	if lc == nil || len(s.inflight) > 0 || len(s.pushQ) > 0 || (s.inputOpen && !s.muted) || talking || s.speakingLocked(now) ||
 		now.Sub(s.lastActivity) < s.cfg.IdleClose {
 		s.mu.Unlock()
 		return
