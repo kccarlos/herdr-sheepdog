@@ -318,6 +318,30 @@ func TestDelegationRelaysUtteranceAndAnswersWithCommentary(t *testing.T) {
 	})
 }
 
+// A pending result (the brain's reply comes later as a push, see
+// brain.reply_wait_s) must not tell the model there is nothing to add.
+func TestPendingDelegationResultDoesNotSayNothingToAdd(t *testing.T) {
+	cfg := testConfig()
+	cfg.Handler = func(context.Context, voice.ToolCall) (voice.ToolResult, error) {
+		return voice.ToolResult{Pending: true, Scheduling: voice.UrgencySilent}, nil
+	}
+	s, d, _ := startSession(t, cfg)
+	s.ClientAttached(true)
+	_ = s.SendAudio(tone(3000, 640))
+	waitFor(t, "open", s.Live)
+	c := d.last()
+	c.server(map[string]any{"type": evInputTranscript, "delta": " Why did it fail?", "start_ms": 1000, "end_ms": 1400})
+	c.server(map[string]any{"type": evDelegationCreated, "offset_ms": 1400, "delegation": map[string]any{"id": "item_p", "type": "delegation", "target": "client"}})
+	waitFor(t, "thinking", func() bool { return len(c.events(evThinkingAppend)) == 1 })
+	th := c.events(evThinkingAppend)[0]["content"].(string)
+	if strings.Contains(th, "nothing to add") || !strings.Contains(th, "on its own") {
+		t.Fatalf("pending result appended %q", th)
+	}
+	if n := len(c.events(evCommentaryAppend)); n != 0 {
+		t.Fatalf("pending result spoke %d commentary items", n)
+	}
+}
+
 func TestIdleCloseBillsAndStaysArmedForTheNextUtterance(t *testing.T) {
 	s, d, l := startSession(t, testConfig())
 	s.ClientAttached(true)
