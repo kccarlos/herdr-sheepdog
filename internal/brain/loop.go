@@ -74,6 +74,11 @@ func (b *Brain) Turn(ctx context.Context, req Request) (Reply, error) {
 		req.Trigger = TriggerEvent
 	case req.Kind.IsEvent():
 		timeout = b.cfg.EnrichTimeout
+		if req.Owed || len(req.Promises) > 0 {
+			// The shepherd is owed this line (docs/roles.md "Pushes"):
+			// it gets the longer budget.
+			timeout = b.cfg.AnnounceTimeout
+		}
 		req.Trigger = TriggerEvent
 	}
 	tctx, cancel := context.WithTimeout(ctx, timeout+b.cfg.FinalGrace)
@@ -179,6 +184,12 @@ func (b *Brain) run(ctx context.Context, t *turn) (Reply, error) {
 		var calls []*genai.FunctionCall
 		if err != nil {
 			payload["error"] = err.Error()
+			if reasonFor(err) == "timeout" {
+				// A call that timed out reports no usage: log the
+				// assembled prompt's estimated size, to tell a slow
+				// provider from an oversized window.
+				payload["prompt_tokens_est"] = promptTokens(text, asm.Messages)
+			}
 		} else {
 			if u := resp.UsageMetadata; u != nil {
 				payload["prompt_tokens"], payload["completion_tokens"] = u.PromptTokenCount, u.CandidatesTokenCount
@@ -465,6 +476,16 @@ func parseReply(text string, allowEmpty bool) (Reply, error) {
 }
 
 // reasonFor classifies a model or context error for brain.fallback.
+// promptTokens estimates the size of one model call's prompt: the system
+// text plus the window's messages.
+func promptTokens(system string, msgs []Message) int {
+	n := EstimateTokens(system)
+	for _, m := range msgs {
+		n += EstimateTokens(m.Content)
+	}
+	return n
+}
+
 func reasonFor(err error) string {
 	switch {
 	case errors.Is(err, context.DeadlineExceeded):

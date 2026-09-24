@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
+	"github.com/kccarlos/herdr-sheepdog/internal/brain/braintest"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
@@ -99,6 +100,80 @@ func TestDoneEndingInQuestionBecomesBlock(t *testing.T) {
 				t.Error("answer_prompt survived working")
 			}
 		})
+	}
+}
+
+// askingSentence is the code sentence for claude-result-then-prompt:
+// a finish whose screen ends at Claude Code's own post-turn prompt.
+const askingSentence = "auth finished, and it's asking teach auto mode about your environment."
+
+// TestFinishWithATrailingPromptAnnouncesBoth: 2026-09-23 23:56:17 —
+// Claude Code finished an investigation and at once showed its own
+// "teach auto mode about your environment?" prompt; the finish became a
+// block and the findings were never read. Now (any agent but agy) the
+// finish is announced with the question in one line, the question is
+// the pending answer_prompt, and the finish keeps the promises for done
+// (and blocked).
+func TestFinishWithATrailingPromptAnnouncesBoth(t *testing.T) {
+	for _, level := range Levels {
+		t.Run(string(level), func(t *testing.T) {
+			h := newHarness(t, func(c *Config) { c.Chattiness = string(level) })
+			h.addAgent("w5:p1", "w5", "claude", herdr.StateWorking)
+			if _, err := h.sup.createPromise("w5:p1", brain.PromiseRequest{Text: "tell me when the investigation reports back", Event: "done"}); err != nil {
+				t.Fatal(err)
+			}
+			h.srv.SetScreen("w5:p1", fixture(t, "claude-result-then-prompt.screen.txt"))
+			h.transition("w5:p1", herdr.StateWorking, herdr.StateIdle)
+			if got := h.pushTexts(); len(got) != 1 || got[0] != "As you asked: "+askingSentence {
+				t.Fatalf("pushes = %v", got)
+			}
+			p, ok := h.pending()
+			if !ok || p.Kind != state.PendingAnswerPrompt || p.Question != "teach auto mode about your environment" || len(p.Options) != 2 {
+				t.Fatalf("pending = %+v ok=%v", p, ok)
+			}
+			if h.log.count("supervisor.done_asking") != 1 || h.log.count("supervisor.done_question") != 0 {
+				t.Errorf("done_asking = %d, done_question = %d", h.log.count("supervisor.done_asking"), h.log.count("supervisor.done_question"))
+			}
+			if kept := h.log.ofType("promise.kept"); len(kept) != 1 {
+				t.Errorf("promise.kept = %v", kept)
+			}
+			row, _ := h.store.Get("w5:p1")
+			if row.LastResult == nil || row.LastBlock == nil || row.LastBlock.Question != "teach auto mode about your environment" {
+				t.Errorf("row = %+v", row)
+			}
+		})
+	}
+	// No promise: a question is heard at every level, quiet included.
+	h := newHarness(t, func(c *Config) { c.Chattiness = string(Quiet) })
+	h.addAgent("w5:p1", "w5", "claude", herdr.StateWorking)
+	h.srv.SetScreen("w5:p1", fixture(t, "claude-result-then-prompt.screen.txt"))
+	h.transition("w5:p1", herdr.StateWorking, herdr.StateDone)
+	if got := h.pushTexts(); len(got) != 1 || got[0] != askingSentence {
+		t.Fatalf("quiet: pushes = %v", got)
+	}
+}
+
+// With the brain attached the one announce turn is told the finish also
+// asks, and its line — the finding, then the question — is the event's
+// one push, tagged as a decision the shepherd must take.
+func TestFinishWithATrailingPromptBrainLineCoversBoth(t *testing.T) {
+	line := "Auth found only the phone was connected, so the flips were taps. It's also asking whether to teach auto mode about your environment — yes or not now?"
+	m := braintest.NewModel()
+	m.EventDefault = announceReply(line, "interrupt", "", "", true)
+	h := newBrainHarness(t, m)
+	h.addAgent("w5:p1", "w5", "claude", herdr.StateWorking)
+	h.srv.SetScreen("w5:p1", fixture(t, "claude-result-then-prompt.screen.txt"))
+	h.transition("w5:p1", herdr.StateWorking, herdr.StateIdle)
+	got := h.pusher.all()
+	if len(got) != 1 || got[0].Text != spokenLine(line) || got[0].Urgency != voice.UrgencyInterrupt || h.pusher.tagsOf(0)["needs_user"] != true {
+		t.Fatalf("pushes = %+v tags = %v", got, h.pusher.tagsOf(0))
+	}
+	calls := m.Calls()
+	if len(calls) != 1 || !strings.Contains(calls[0].Text(), `also showing a prompt of its own: "teach auto mode about your environment"`) || !strings.Contains(calls[0].Text(), `template="`+askingSentence+`"`) {
+		t.Errorf("announce request = %s", calls[0].Text())
+	}
+	if row, _ := h.store.Get("w5:p1"); row.LastResult == nil || row.LastResult.Spoken != spokenLine(line) {
+		t.Errorf("last_result = %+v", row.LastResult)
 	}
 }
 

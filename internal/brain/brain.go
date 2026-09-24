@@ -29,6 +29,11 @@ const (
 	// DefaultEnrichTimeout bounds an event turn (announce): on expiry the
 	// supervisor speaks its code sentence instead.
 	DefaultEnrichTimeout = 6 * time.Second
+	// DefaultAnnounceTimeout bounds an announce turn the shepherd is owed
+	// (Request.Owed: it keeps a promise or reports on the shepherd's own
+	// request): the code sentence has already said "here's what it
+	// found", so the brain's line is worth waiting longer for.
+	DefaultAnnounceTimeout = 15 * time.Second
 	// DefaultStopTimeout bounds the stop procedure's closing turn: on
 	// expiry the supervisor speaks its own "Stopped: …" sentence.
 	DefaultStopTimeout     = 5 * time.Second
@@ -60,8 +65,10 @@ type Config struct {
 	MaxSteps int
 	// AskTimeout / ProposeTimeout bound one turn including its tools (an
 	// utterance turn takes ProposeTimeout: it may be an instruction);
-	// EnrichTimeout bounds an event turn and StopTimeout a stop turn.
-	AskTimeout, ProposeTimeout, EnrichTimeout, StopTimeout time.Duration
+	// EnrichTimeout bounds an event turn and StopTimeout a stop turn;
+	// AnnounceTimeout bounds an announce turn the shepherd is owed
+	// (Request.Owed, or one that keeps a promise).
+	AskTimeout, ProposeTimeout, EnrichTimeout, AnnounceTimeout, StopTimeout time.Duration
 	// WindowTokens is the estimated window size that triggers compaction.
 	WindowTokens int
 	// PruneAfterTurns is how many turns a tool result stays verbatim.
@@ -111,6 +118,9 @@ func (c Config) withDefaults() Config {
 	}
 	if c.EnrichTimeout <= 0 {
 		c.EnrichTimeout = DefaultEnrichTimeout
+	}
+	if c.AnnounceTimeout <= 0 {
+		c.AnnounceTimeout = DefaultAnnounceTimeout
 	}
 	if c.StopTimeout <= 0 {
 		c.StopTimeout = DefaultStopTimeout

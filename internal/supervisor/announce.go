@@ -22,13 +22,19 @@ import (
 // the one exception) and interrupt only for a due promise or a decision
 // the shepherd must take.
 //
-// One line per event, never two: the event waits up to
+// One line per event, as a rule: the event waits up to
 // Config.AnnounceWait for the brain's line and speaks it alone; past the
 // wait the code sentence is spoken and the brain's line, whenever it
-// lands, is dropped (brain.push_late) — unless it says the shepherd must
-// act and the block is still open, the one addition worth interrupting a
-// silence for. A line about a block whose prompt is already gone is
-// dropped too (brain.push_stale).
+// lands, is dropped (brain.push_late) — with two exceptions, each at most
+// one addition. A finish the shepherd is owed (it keeps a promise, or
+// ends an instruction they gave this run; or the late line itself says
+// which of their requests it fulfils, relates_to) is announced at the
+// wait as "<alias> finished — here's what it found." and the brain's
+// line with the finding follows whenever it lands, within the longer
+// brain.announce_timeout_s (the 2026-09-23 run dropped the one answer
+// the shepherd was waiting for). And a line that says the shepherd must
+// act on a block that is still open. A line about a block whose prompt is
+// already gone is dropped (brain.push_stale).
 
 // announcement is one worker event the supervisor announces: the code
 // sentence and what the brain gets.
@@ -44,6 +50,17 @@ type announcement struct {
 	// had the pane focused), so an open "idle" promise is kept by this
 	// announcement too, alongside event and any_change.
 	alsoIdle bool
+	// alsoBlocked: the finish left a prompt on screen
+	// (announceFinishAsking), so an open "blocked" promise is kept too.
+	alsoBlocked bool
+	// owed: the finish ends an instruction the shepherd gave this run
+	// (runningShepherdTask). Like a kept promise it makes the brain's
+	// line worth waiting for: the code sentence says "here's what it
+	// found" and the line is added whenever it lands.
+	owed bool
+	// asking is the question of a prompt the agent showed after its
+	// turn, for a finish that also asks (announceFinishAsking).
+	asking string
 	// sentence is the code sentence: the parsed prompt for a block,
 	// "<alias> finished." for a finish.
 	sentence string
@@ -69,6 +86,9 @@ func (s *Supervisor) announce(ctx context.Context, a announcement) {
 	if a.alsoIdle {
 		events = append(events, brain.PromiseEventIdle)
 	}
+	if a.alsoBlocked {
+		events = append(events, brain.PromiseEventBlocked)
+	}
 	kept := s.keepMatching(a.row.PaneID, events...)
 	level := s.chattiness()
 	if s.brain == nil {
@@ -88,7 +108,7 @@ func (s *Supervisor) announce(ctx context.Context, a announcement) {
 	for _, p := range kept {
 		infos = append(infos, promiseInfo(p))
 	}
-	req := brain.Request{Kind: brain.KindAnnounce, Trigger: brain.TriggerEvent, Agent: aliasOr(a.row.Alias), Event: a.event, Template: a.sentence, Screen: a.screen, Promises: infos}
+	req := brain.Request{Kind: brain.KindAnnounce, Trigger: brain.TriggerEvent, Agent: aliasOr(a.row.Alias), Event: a.event, Template: a.sentence, Screen: a.screen, Promises: infos, Owed: a.owed, AlsoAsking: a.asking}
 	res := make(chan turnResult, 1)
 	start := s.cfg.Now()
 	go func() {
@@ -106,8 +126,20 @@ func (s *Supervisor) announce(ctx context.Context, a announcement) {
 		// The shepherd hears the news now; the line the brain is still
 		// writing is too late to be this event's one line.
 		s.codePath(a, kept, level, "wait")
-		s.dropLate(a, level, <-res, start)
+		s.dropLate(a, kept, level, <-res, start)
 	}
+}
+
+// owedFinish reports whether a is a finish the shepherd is waiting on:
+// it keeps a promise or ends their own instruction.
+func owedFinish(a announcement, kept []state.Promise) bool {
+	return a.event == brain.PromiseEventDone && (len(kept) > 0 || a.owed)
+}
+
+// foundSentence is the code sentence of an owed finish spoken before the
+// brain's line lands: it promises the finding that line carries.
+func foundSentence(a announcement) string {
+	return aliasOr(a.row.Alias) + " finished — here's what it found."
 }
 
 // applyResult turns the brain's answer (or failure) into the event's one
@@ -175,13 +207,26 @@ func announceTags(u voice.Urgency, duePassed, needsUser bool, pending string) ma
 }
 
 // dropLate handles the brain's line arriving after the code sentence was
-// spoken: it is never a second line about the same event (brain.push_late)
-// — except when it says the shepherd must act and the block is still
-// open, which is the one thing the code sentence could not know.
-func (s *Supervisor) dropLate(a announcement, level Chattiness, r turnResult, start time.Time) {
+// spoken. As a rule it is not a second line about the same event
+// (brain.push_late); it is added, once, at idle when
+//   - the event is a finish the shepherd is owed (a kept promise, their
+//     own instruction) — the code sentence said "here's what it found"
+//     and this line is the finding — or the line relates the finish to a
+//     request of theirs (relates_to), which the code could not know; or
+//   - it says the shepherd must act and the block is still open.
+//
+// An owed finish whose line never comes (the turn failed or timed out)
+// gets a short closing sentence instead, so "here's what it found" is not
+// left hanging.
+func (s *Supervisor) dropLate(a announcement, kept []state.Promise, level Chattiness, r turnResult, start time.Time) {
 	dur := s.cfg.Now().Sub(start).Milliseconds()
+	owed := owedFinish(a, kept) && a.asking == ""
+	audible := len(kept) > 0 || level.allows(a.kind)
 	if r.err != nil {
-		s.logDecision(a, level, decision{via: "template", requested: "", applied: brain.UrgencySkip, reason: fallbackReason(r.err), late: true, err: r.err}, brain.Reply{}, nil, false)
+		s.logDecision(a, level, decision{via: "template", requested: "", applied: brain.UrgencySkip, reason: fallbackReason(r.err), late: true, err: r.err}, brain.Reply{}, kept, false)
+		if owed && audible {
+			s.push(a.row.PaneID, "I couldn't get "+aliasOr(a.row.Alias)+"'s findings in time — ask me and I'll read its screen.", voice.UrgencyIdle)
+		}
 		return
 	}
 	open := s.pendingStillOpen(a)
@@ -192,9 +237,21 @@ func (s *Supervisor) dropLate(a announcement, level Chattiness, r turnResult, st
 		s.recordFinish(a, spoken)
 		s.recordAnnounceDetail(a, rep)
 	}
-	add := spoken != "" && rep.NeedsUser && open && a.pending != "" && level.allows(a.kind)
-	s.logDecision(a, level, decision{via: "brain", requested: rep.Urgency, applied: appliedIf(add), reason: lateReason(open), late: true}, rep, nil, true)
-	s.log.Log(logSource, "brain.push_late", a.row.PaneID, map[string]any{"turn": rep.Turn, "dur_ms": dur, "spoken": spoken, "needs_user": rep.NeedsUser, "added": add})
+	requested := requestedUrgency(rep.Urgency, spoken)
+	related := a.event == brain.PromiseEventDone && strings.TrimSpace(rep.RelatesTo) != ""
+	reason := lateReason(open)
+	var add bool
+	switch {
+	case spoken == "" || !open:
+	case (owedFinish(a, kept) || related) && audible && (len(kept) > 0 || requested != brain.UrgencySkip):
+		// The finding the shepherd is waiting for. The brain may skip an
+		// unpromised finish (they already heard it), never a promise.
+		add, reason = true, "owed"
+	case rep.NeedsUser && a.pending != "" && level.allows(a.kind):
+		add = true
+	}
+	s.logDecision(a, level, decision{via: "brain", requested: rep.Urgency, applied: appliedIf(add), reason: reason, late: true}, rep, kept, true)
+	s.log.Log(logSource, "brain.push_late", a.row.PaneID, map[string]any{"turn": rep.Turn, "dur_ms": dur, "spoken": spoken, "needs_user": rep.NeedsUser, "relates_to": strings.TrimSpace(rep.RelatesTo), "added": add})
 	if add {
 		s.push(a.row.PaneID, spoken, voice.UrgencyIdle)
 	}
@@ -231,9 +288,11 @@ func fallbackReason(err error) string {
 }
 
 // pendingStillOpen reports whether the answer_prompt a block created is
-// still the pending one; true for anything but a block.
+// still the pending one; true for anything but a block — a finish that
+// also asked (announceFinishAsking) still has its finding to report
+// after the prompt is answered.
 func (s *Supervisor) pendingStillOpen(a announcement) bool {
-	if a.pending == "" {
+	if a.pending == "" || a.event != brain.PromiseEventBlocked {
 		return true
 	}
 	p, has := s.store.Pending()
@@ -254,13 +313,19 @@ func (s *Supervisor) codePath(a announcement, kept []state.Promise, level Chatti
 		}
 		s.logDecision(a, level, decision{via: "template", requested: "", applied: applied, reason: reason}, brain.Reply{}, kept, false)
 	}
+	sentence := a.sentence
+	if reason == "wait" && owedFinish(a, kept) && a.asking == "" {
+		// The brain is still writing the finding: say it is coming
+		// (dropLate adds it).
+		sentence = foundSentence(a)
+	}
 	if len(kept) == 0 {
 		if a.kind != pushPromiseOnly {
-			s.pushIf(a.kind, a.row.PaneID, a.sentence)
+			s.pushIf(a.kind, a.row.PaneID, sentence)
 		}
 		return
 	}
-	line := "As you asked: " + a.sentence
+	line := "As you asked: " + sentence
 	duePassed := s.duePassed(kept)
 	u := voice.UrgencyIdle
 	if duePassed {

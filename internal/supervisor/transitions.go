@@ -85,6 +85,9 @@ func (s *Supervisor) HandleTransition(ctx context.Context, t herdr.Transition) {
 		}
 		s.dropPendingFor(t.PaneID, "finished", state.PendingSendInstruction)
 		s.mu.Unlock()
+		// Read before finishTask moves the task to last_task: was the
+		// agent running an instruction the shepherd gave this run?
+		instructed := s.runningShepherdTask(row)
 		s.finishTask(t.PaneID)
 		// working -> done and working -> idle are both a finish: herdr
 		// reports done when the user was not looking at the pane and
@@ -98,7 +101,7 @@ func (s *Supervisor) HandleTransition(ctx context.Context, t herdr.Transition) {
 				// promise to tell when it is done stays open.
 				s.log.Log(logSource, "supervisor.finished_suppressed", t.PaneID, map[string]any{"reason": "interrupted"})
 			} else {
-				s.onDone(ctx, row)
+				s.onDone(ctx, row, instructed)
 			}
 			return
 		}
@@ -148,9 +151,18 @@ func (s *Supervisor) finishTask(paneID string) {
 // spoken when the chattiness level allows it for this agent (every finish
 // at chatty; at normal only agents the user dealt with within
 // RecentWindow; never at quiet), with the finish's open promises kept in
-// the same line. A screen that ends in a question herdr did not flag
-// (agy) is treated as a block.
-func (s *Supervisor) onDone(ctx context.Context, row state.Agent) {
+// the same line. instructed is set when the agent was running an
+// instruction the shepherd gave this run (runningShepherdTask): the
+// finish is then owed to them like a promise (announce.go).
+//
+// A screen that ends at a prompt is one of two things. agy reports done
+// around its own approval prompts mid-task, so for agy it is a block and
+// nothing finished. Any other agent's real approval prompts arrive as
+// blocked, so a prompt on its finish is one it showed after its turn
+// (Claude Code's "teach auto mode about your environment?"): the finish
+// is announced — what it found — together with the question, in one line
+// (announceFinishAsking).
+func (s *Supervisor) onDone(ctx context.Context, row state.Agent, instructed bool) {
 	alias := aliasOr(row.Alias)
 	kind := s.doneKind(row)
 	// herdr reports the finish as idle rather than done when the user
@@ -160,16 +172,55 @@ func (s *Supervisor) onDone(ctx context.Context, row state.Agent) {
 	read, err := s.herdr.Read(ctx, row.PaneID, herdr.SourceRecentUnwrapped, s.cfg.ReadLines)
 	if err != nil {
 		s.log.Log(logSource, "supervisor.done_error", row.PaneID, map[string]any{"stage": "read", "error": err.Error()})
-		s.announce(ctx, announcement{row: row, kind: kind, event: brain.PromiseEventDone, alsoIdle: alsoIdle, sentence: alias + " finished."})
+		s.announce(ctx, announcement{row: row, kind: kind, event: brain.PromiseEventDone, alsoIdle: alsoIdle, owed: instructed, sentence: alias + " finished."})
 		return
 	}
 	if herdr.EndsInQuestion(read.Text) {
+		if prompt, ok := herdr.ParsePrompt(read.Text); ok && row.Kind != kindAgy {
+			s.announceFinishAsking(ctx, row, prompt, read.Text, alsoIdle, instructed)
+			return
+		}
 		s.log.Log(logSource, "supervisor.done_question", row.PaneID, map[string]any{"alias": alias})
 		s.touch(row.PaneID)
 		s.announceBlock(ctx, row, read.Text)
 		return
 	}
-	s.announce(ctx, announcement{row: row, kind: kind, event: brain.PromiseEventDone, alsoIdle: alsoIdle, sentence: alias + " finished.", screen: read.Text})
+	s.announce(ctx, announcement{row: row, kind: kind, event: brain.PromiseEventDone, alsoIdle: alsoIdle, owed: instructed, sentence: alias + " finished.", screen: read.Text})
+}
+
+// kindAgy is herdr's agent kind label for the Antigravity CLI, which
+// reports done (not blocked) around its approval prompts.
+const kindAgy = "agy"
+
+// announceFinishAsking handles a finish whose screen ends at a prompt the
+// agent showed after its turn: the question is recorded and made the
+// pending answer_prompt exactly as a block's would be, and one announce
+// turn covers both — the finish (its promises for done, idle and blocked
+// are kept by it) and the question. The code sentence is "<alias>
+// finished, and it's asking <question>."; a question is heard at every
+// level.
+func (s *Supervisor) announceFinishAsking(ctx context.Context, row state.Agent, prompt herdr.Prompt, screen string, alsoIdle, instructed bool) {
+	alias := aliasOr(row.Alias)
+	s.log.Log(logSource, "supervisor.done_asking", row.PaneID, map[string]any{"alias": alias, "question": prompt.Phrase()})
+	s.touch(row.PaneID)
+	s.recordBlock(row.PaneID, prompt.Phrase(), false)
+	s.mu.Lock()
+	p := s.newAnswerPrompt(row.PaneID, prompt, alias, row.StateSince)
+	s.setPending(p)
+	s.mu.Unlock()
+	sentence := alias + " finished, and it's asking " + prompt.Phrase() + "."
+	if prompt.Phrase() == "" {
+		sentence = alias + " finished, and it's waiting at a prompt."
+	}
+	s.announce(ctx, announcement{row: row, kind: pushQuestion, event: brain.PromiseEventDone, alsoIdle: alsoIdle, alsoBlocked: true, owed: instructed,
+		sentence: sentence, asking: prompt.Phrase(), screen: screen, pending: p.ID})
+}
+
+// runningShepherdTask reports whether row's current task is an
+// instruction the shepherd sent this run (sendInstruction sets the task
+// and the interaction time together).
+func (s *Supervisor) runningShepherdTask(row state.Agent) bool {
+	return row.CurrentTask != "" && row.LastInteraction != nil && !row.LastInteraction.Before(s.startedAt)
 }
 
 // doneResult is what the record keeps of a finish the brain did not

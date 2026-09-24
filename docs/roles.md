@@ -129,7 +129,19 @@ trigger}` (`stop_tool` or the bare-word fast path).
 
 One line per worker event, the brain's when it lands within
 `brain.announce_wait_s`, else the code sentence (the parsed prompt for a
-block, "auth finished" for a finish) — never both. Nothing interrupts
+block, "auth finished" for a finish) — never both, with two exceptions
+that add at most one line. A finish the shepherd is owed — it keeps a
+promise or ends an instruction they gave this run — is announced at the
+wait as "auth finished — here's what it found" and the brain's line with
+the finding follows whenever it lands (within
+`brain.announce_timeout_s`, idle, never dropped for lateness); a late
+line that relates the finish to one of their requests (`relates_to`) is
+added the same way. And a late line that says the shepherd must decide
+on a block that is still open. A finish that leaves a prompt on screen
+(Claude Code's post-turn "teach auto mode…?"; not agy, which reports done
+around its mid-task prompts) is announced with the question in one line
+("auth finished, and it's asking …"), keeps the finish's promises and
+makes the question the pending answer. Nothing interrupts
 the voice mid-sentence except the shepherd: while the voice is
 speaking, INTERRUPT scheduling is downgraded to WHEN_IDLE, save a due
 promise or a decision on a *new* block. An addition to a block is

@@ -1,0 +1,21 @@
+❯ Follow-up on the mute findings, please — no code changes yet. Was any other client connected during those sessions?
+
+● Read(~/.local/share/sheepdog/events/2026-09-23.jsonl) (ctrl+o to expand)
+
+● In the session you reported, only the phone was connected, so no second front end was
+  involved there: every mute the daemon received came from the phone's button. Earlier that
+  day the browser voice page was left muted, and when the phone connected the daemon pushed
+  that mute to it — so a second front end can cause this, just not in that session.
+
+✻ Worked for 2m 11s
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Teach auto mode about your environment?
+
+ Auto mode can learn which commands are safe here.
+
+ ❯ 1. Yes
+   2. Not now
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏸ manual mode on · ? for shortcuts
