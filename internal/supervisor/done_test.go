@@ -88,8 +88,8 @@ func TestDoneEndingInQuestionBecomesBlock(t *testing.T) {
 			if row.LastResult != nil || row.LastBlock == nil || row.LastBlock.Question != "run this command" {
 				t.Errorf("row = %+v", row)
 			}
-			if res := h.call(ToolConfirm, nil); res.Spoken != "Told auth yes." {
-				t.Errorf("confirm = %+v", res)
+			if res := h.say("yes"); res.Spoken != "Told auth yes." {
+				t.Errorf("answer = %+v", res)
 			}
 			if keys := h.sendKeysRequests(); len(keys) != 1 || keys[0] != [2]string{"w5:p1", "1"} {
 				t.Errorf("send_keys = %v", keys)
@@ -241,7 +241,7 @@ func TestFinishEdges(t *testing.T) {
 		if _, err := h.sup.createPromise("w5:p1", brain.PromiseRequest{Text: "tell me when it's done", Event: "done"}); err != nil {
 			t.Fatal(err)
 		}
-		h.call(ToolCancel, nil)
+		h.say("stop")
 		h.srv.SetScreen("w5:p1", fixture(t, "codex-after-ctrl-c.screen.txt"))
 		before := len(h.pusher.all())
 		h.transition("w5:p1", herdr.StateWorking, herdr.StateIdle)

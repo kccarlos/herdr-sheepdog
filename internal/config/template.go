@@ -44,7 +44,7 @@ func Template() string {
 # end_sensitivity = "default"   # Live speech-end detection: "low" | "high" | "default"
 
 [voice]
-# name = %[38]q   # what the dog calls itself, substituted into the voice prompt as {name}
+# name = %[37]q   # what the dog calls itself, substituted into the voice prompt as {name}
 # provider = "gemini"   # "gemini" (Gemini Live) | "openai" (GPT-Live, billed per minute); the runtime pick in the state file wins
 
 [voice.openai]
@@ -62,12 +62,12 @@ func Template() string {
 # environment instead. With a key, deepseek appears in the /debug model
 # picker whatever brain.provider says.
 # api_key = ""
-# base_url = %[34]q
-# thinking = %[35]t   # DeepSeek's thinking mode
-# reasoning_effort = %[36]q   # "low" | "high" | "max"; low fits the 8 s ask budget
+# base_url = %[33]q
+# thinking = %[34]t   # DeepSeek's thinking mode
+# reasoning_effort = %[35]q   # "low" | "high" | "max"; low fits the 8 s ask budget
 
 [web]
-# bind = %[44]q   # loopback only by default; a LAN or Tailscale address needs token set too (CONFIG.md "web.token")
+# bind = %[43]q   # loopback only by default; a LAN or Tailscale address needs token set too (CONFIG.md "web.token")
 # port = %[10]d
 # token = ""   # required once bind is not loopback: Authorization: Bearer, ?token= for /ws and /events, or POST /api/login sets a cookie
 # dev = false
@@ -88,32 +88,31 @@ func Template() string {
 [supervisor]
 # chattiness = %[19]q   # "quiet" | "normal" | "chatty"; the /debug switch overrides it at runtime
 # recent_minutes = %[20]d   # "normal" announces a finish only for agents you dealt with this recently
-# promise_ttl_s = %[31]d   # how long "tell me when it's done" waits for its event before it expires silently
-# cancel_window_s = %[39]d   # how soon after an instruction a "stop" still interrupts the agent with Ctrl-C
-# reprompt_poll_s = %[42]d   # how long the post-answer poll watches a pane for a different prompt after keys go to it
-# repeat_window_s = %[43]d   # how long an unchanged roster sentence counts as "already reported"; a status question inside it gets a "no change" note instead of the roster repeated in full
-# authorise_window_s = %[45]d   # how recent your own words (voice, typed or a tap) must be to answer a worker's approval prompt
+# promise_ttl_s = %[30]d   # how long "tell me when it's done" waits for its event before it expires silently
+# cancel_window_s = %[38]d   # how soon after an instruction a "stop" still interrupts the agent with Ctrl-C
+# reprompt_poll_s = %[41]d   # how long the post-answer poll watches a pane for a different prompt after keys go to it
+# repeat_window_s = %[42]d   # how long an unchanged roster sentence counts as "already reported"; a status question inside it gets a "no change" note instead of the roster repeated in full
+# authorise_window_s = %[44]d   # how recent your own words (voice, typed or a tap) must be to answer a worker's approval prompt
 
 [brain]
-# enabled = %[21]t   # the stateful supervisor brain behind ask/propose; serve --brain=off overrides
-# provider = %[37]q   # "gemini" | "deepseek": the provider the brain starts on; the /debug picker switches at runtime
+# enabled = %[21]t   # the stateful supervisor brain behind to_supervisor and the announcements; serve --brain=off overrides
+# provider = %[36]q   # "gemini" | "deepseek": the provider the brain starts on; the /debug picker switches at runtime
 # model = %[22]q   # a function-calling model of that provider
 # max_steps = %[23]d   # model calls per turn before the daemon answers for itself
-# ask_timeout_s = %[24]d
-# propose_timeout_s = %[25]d
-# window_tokens = %[26]d   # compact the oldest half of the window above this (estimated tokens)
-# prune_after_turns = %[27]d   # turns a screen/CLI dump stays verbatim in the window
-# step_reserve_s = %[28]d   # 0: default; below this much time left, the next step is answer-only
-# final_grace_s = %[29]d   # 0: default; how far past the timeout the answer-only step may run
-# enrich_timeout_s = %[32]d   # budget of the brain's announce turn on a block or finish
-# announce_timeout_s = %[46]d   # the same, for a finish that keeps a promise or ends the shepherd's own request
-# announce_wait_s = %[33]d   # how long a finish waits for the brain's line before the template sentence is spoken
-# reply_wait_s = %[47]d   # 0: default; how long a request waits for the brain's reply before it comes later as a push; negative always waits
-# investigate_max_s = %[40]d   # sanity ceiling of a background investigation: the only limit on how long its answer may take
-# investigate_session_ttl_s = %[41]d   # how long a finished investigation's sub-agent session stays resumable for a follow-up
+# utterance_timeout_s = %[24]d   # budget of one turn over your relayed words (tools included)
+# window_tokens = %[25]d   # compact the oldest half of the window above this (estimated tokens)
+# prune_after_turns = %[26]d   # turns a screen/CLI dump stays verbatim in the window
+# step_reserve_s = %[27]d   # 0: default; below this much time left, the next step is answer-only
+# final_grace_s = %[28]d   # 0: default; how far past the timeout the answer-only step may run
+# announce_turn_timeout_s = %[31]d   # budget of the brain's announce turn on a block or finish
+# announce_timeout_s = %[45]d   # the same, for a finish that keeps a promise or ends the shepherd's own request
+# announce_wait_s = %[32]d   # how long a finish waits for the brain's line before the template sentence is spoken
+# reply_wait_s = %[46]d   # 0: default; how long a request waits for the brain's reply before it comes later as a push; negative always waits
+# investigate_max_s = %[39]d   # sanity ceiling of a background investigation: the only limit on how long its answer may take
+# investigate_session_ttl_s = %[40]d   # how long a finished investigation's sub-agent session stays resumable for a follow-up
 
 [prompts]
-# dir = %[30]q   # ~/.config/sheepdog/prompts/<name> overrides the matching embedded prompt file
+# dir = %[29]q   # ~/.config/sheepdog/prompts/<name> overrides the matching embedded prompt file
 `,
 		d.DataDir, d.DebounceMS, d.SnapshotIntervalS, d.PendingTTLS,
 		d.Herdr.Socket,
@@ -123,10 +122,10 @@ func Template() string {
 		d.CLI.Prefer, d.CLI.CodexBin, d.CLI.ClaudeBin, d.CLI.ClaudeModel, d.CLI.CodexReasoning, d.CLI.TimeoutS, d.CLI.MaxOutputKB,
 		d.Gemini.StallAfterS,
 		d.Supervisor.Chattiness, d.Supervisor.RecentMinutes,
-		d.Brain.Enabled, d.Brain.Model, d.Brain.MaxSteps, d.Brain.AskTimeoutS, d.Brain.ProposeTimeoutS, d.Brain.WindowTokens, d.Brain.PruneAfterTurns,
+		d.Brain.Enabled, d.Brain.Model, d.Brain.MaxSteps, d.Brain.UtteranceTimeoutS, d.Brain.WindowTokens, d.Brain.PruneAfterTurns,
 		d.Brain.StepReserveS, d.Brain.FinalGraceS,
 		d.Prompts.Dir,
-		d.Supervisor.PromiseTTLS, d.Brain.EnrichTimeoutS,
+		d.Supervisor.PromiseTTLS, d.Brain.AnnounceTurnTimeoutS,
 		d.Brain.AnnounceWaitS,
 		d.DeepSeek.BaseURL, d.DeepSeek.Thinking, d.DeepSeek.ReasoningEffort,
 		d.Brain.Provider,

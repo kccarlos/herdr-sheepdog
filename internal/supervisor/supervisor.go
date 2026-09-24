@@ -201,7 +201,7 @@ func (c Config) withDefaults() Config {
 // OnVoiceEvent and Run may all run at once. One mutex orders every change
 // to the pending slot, the briefing cache and the expired-question memory;
 // model calls and pane reads happen outside it, herdr sends inside it so
-// confirm/cancel/propose cannot interleave.
+// an answer, a stop and an instruction cannot interleave.
 type Supervisor struct {
 	store   *state.Store
 	herdr   Herdr

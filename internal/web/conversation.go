@@ -44,7 +44,8 @@ type ConversationItem struct {
 	Subkind string `json:"subkind,omitempty"`
 	Text    string `json:"text"`
 	// Via is how the shepherd spoke (voice | typed) or how an approval
-	// was answered (tap | fast_path | brain | confirm).
+	// was answered (tap | fast_path | brain; confirm in logs from before
+	// the confirm tool was removed).
 	Via     string `json:"via,omitempty"`
 	Agent   string `json:"agent,omitempty"`
 	Urgency string `json:"urgency,omitempty"`

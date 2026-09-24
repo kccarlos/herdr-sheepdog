@@ -31,12 +31,13 @@ of its work order) are merged; so is everything since.
 | Evals (`sheepdog eval --set svp\|assistant`, offline by default) | done (#21) |
 | iOS companion app (separate repo, `herdr-sheepdog-ios`, the `/ws` voice contract) | started |
 
-In review: `chore: dead code and stale docs` (this page), then
-`refactor!: remove the legacy voice-tool surface and ask/propose request
-kinds` (stacked on it): the supervisor's pre-redesign tool methods
+The pre-redesign surface is gone: the supervisor's old tool methods
 (`Briefing`, `Ask`, `Propose`, `Confirm`, `Cancel`, `Note`) and the
-brain's `KindAsk` / `KindPropose` go; `brain.propose_timeout_s` and
-`brain.enrich_timeout_s` are renamed (old names still accepted).
+brain's `ask` / `propose` request kinds. Production runs on the voice's
+two tools and one `utterance` turn per shepherd input; `brain.propose_timeout_s`
+and `brain.enrich_timeout_s` are now `brain.utterance_timeout_s` and
+`brain.announce_turn_timeout_s` (old names still accepted, CONFIG.md
+"Deprecated keys").
 
 ## Verified live vs. with the fake model only
 
@@ -69,6 +70,9 @@ sparingly and `make eval-live` deliberately.
 - **Scratch daemons**: `SHEEPDOG_DATA_DIR` does not move `state.path`;
   set `SHEEPDOG_STATE_PATH` too, or a second daemon shares the user's
   `state.json`.
+- **Cancelling a promise**: nothing the shepherd can say cancels an open
+  promise (the old cancel tool did; it was not reachable from the voice
+  since the redesign). It expires after `supervisor.promise_ttl_s`.
 - **`v0.1.0`** is not tagged yet (the release workflow is ready).
 
 ## How work is done here

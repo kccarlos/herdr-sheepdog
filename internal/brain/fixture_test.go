@@ -63,7 +63,7 @@ func TestSampleRunFixture(t *testing.T) {
 	next := func(steps ...braintest.Step) { script = append(script, steps...) }
 
 	dir := t.TempDir()
-	b, err := New(Config{DataDir: dir, RunID: "sample-run", Now: now, WindowTokens: 1150, PruneAfterTurns: 4, AskTimeout: 30 * time.Second, ProposeTimeout: 30 * time.Second}, model, &recLog{})
+	b, err := New(Config{DataDir: dir, RunID: "sample-run", Now: now, WindowTokens: 1150, PruneAfterTurns: 4, UtteranceTimeout: 30 * time.Second}, model, &recLog{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +71,7 @@ func TestSampleRunFixture(t *testing.T) {
 	ctx := context.Background()
 	ask := func(q, agent string) Reply {
 		t.Helper()
-		rep, err := b.Ask(ctx, Request{Question: q, Agent: agent})
+		rep, err := b.Turn(ctx, Request{Kind: KindUtterance, Question: q, Agent: agent})
 		if err != nil {
 			t.Fatalf("ask %q: %v", q, err)
 		}
@@ -116,7 +116,7 @@ func TestSampleRunFixture(t *testing.T) {
 	b.Heard("Yes, go ahead.", true)
 	next(braintest.Step{Calls: []*genai.FunctionCall{braintest.FC(ToolSendKeys, map[string]any{"agent": "auth", "keys": []any{"enter"}})}, Usage: [2]int32{4300, 30}},
 		braintest.Step{Text: braintest.Reply("I could not answer auth's prompt: enter is not one of its options, it wants 1 or escape.", "The rail refused send_keys with enter; the prompt's options are 1 (yes, proceed) and esc (no). Say 'option one' or 'no'.") + "", Usage: [2]int32{4500, 50}})
-	if rep, err := b.Propose(ctx, Request{Question: "yes, go ahead and approve it", Agent: "auth"}); err != nil || !strings.HasPrefix(rep.Spoken, "I could not answer") {
+	if rep, err := b.Turn(ctx, Request{Kind: KindUtterance, Question: "yes, go ahead and approve it", Agent: "auth"}); err != nil || !strings.HasPrefix(rep.Spoken, "I could not answer") {
 		t.Fatalf("propose = %+v, %v", rep, err)
 	}
 	b.Quiesce()

@@ -111,7 +111,7 @@ func runSVPCase(ctx context.Context, c SVPCase, fixtureDir string, model brain.M
 	// MaxSteps 3 caps a live case at up to 3 model calls (docs/roles.md
 	// D9-adjacent cost discipline: the Gemini free tier's quota is
 	// limited, keep eval runs small).
-	cfg := brain.Config{MaxSteps: 3, AskTimeout: 8 * time.Second, ProposeTimeout: 12 * time.Second, ThinkingLevel: "low"}
+	cfg := brain.Config{MaxSteps: 3, UtteranceTimeout: 12 * time.Second, ThinkingLevel: "low"}
 	if modelName != "" {
 		cfg.Model = modelName
 	}

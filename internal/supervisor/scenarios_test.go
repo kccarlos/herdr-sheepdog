@@ -23,25 +23,27 @@ func twoAgents(t *testing.T, opts ...func(*Config)) *harness {
 	return h
 }
 
-// Scenario 1: briefing is one sentence from the table, no model call,
-// served from cache in well under 5 ms.
+// Scenario 1: "what's going on" is answered with one sentence from the
+// table — with no brain, the roster sentence itself — and no model call;
+// the roster is served from cache in well under 5 ms (every request to
+// the brain carries it).
 func TestScenario1BriefingNoModelCall(t *testing.T) {
 	h := twoAgents(t)
-	res := h.call(ToolBriefing, nil)
+	res := h.say("what's going on")
 	want := "Two agents: auth is working on something and docs is idle."
-	if res.Spoken != want || res.Scheduling != voice.UrgencyInterrupt {
-		t.Errorf("briefing = %+v, want %q", res, want)
+	if res.Spoken != want+" "+noBrainTrailer || res.Scheduling != voice.UrgencyInterrupt {
+		t.Errorf("status = %+v, want %q", res, want)
 	}
 	if len(h.srv.RequestsFor("pane.read")) != 0 {
-		t.Error("briefing touched herdr")
+		t.Error("the status answer touched herdr")
 	}
 
 	// Timed: 200 cached calls, every one under 5 ms.
 	var worst time.Duration
 	for i := 0; i < 200; i++ {
 		start := time.Now()
-		if _, err := h.sup.Briefing(context.Background()); err != nil {
-			t.Fatal(err)
+		if got := h.roster(); got != want {
+			t.Fatalf("roster = %q", got)
 		}
 		if d := time.Since(start); d > worst {
 			worst = d
@@ -55,35 +57,35 @@ func TestScenario1BriefingNoModelCall(t *testing.T) {
 
 func TestBriefingCacheInvalidation(t *testing.T) {
 	h := twoAgents(t)
-	first := h.call(ToolBriefing, nil).Spoken
-	if h.call(ToolBriefing, nil).Spoken != first {
+	first := h.roster()
+	if h.roster() != first {
 		t.Error("cache not stable")
 	}
 	h.transition("w6:p1", herdr.StateIdle, herdr.StateWorking)
-	if got := h.call(ToolBriefing, nil).Spoken; got != "Two agents: auth is working on something and docs is working on something." {
+	if got := h.roster(); got != "Two agents: auth is working on something and docs is working on something." {
 		t.Errorf("after transition: %q", got)
 	}
 	h.block("w5:p1", "codex-approval-prompt.screen.txt")
-	got := h.call(ToolBriefing, nil).Spoken
+	got := h.roster()
 	if got != "Two agents: auth is asking would you like to run the following command and docs is working on something. Auth is waiting for your answer." {
 		t.Errorf("after block: %q", got)
 	}
-	h.call(ToolConfirm, map[string]any{"answer": "yes"})
-	if got := h.call(ToolBriefing, nil).Spoken; strings.Contains(got, "waiting for your answer") {
-		t.Errorf("after confirm the pending mention must go: %q", got)
+	h.say("yes")
+	if got := h.roster(); strings.Contains(got, "waiting for your answer") {
+		t.Errorf("after the answer the pending mention must go: %q", got)
 	}
 	h.send("w6:p1", "write the readme")
-	if got := h.call(ToolBriefing, nil).Spoken; !strings.Contains(got, `docs is working on "write the readme"`) {
-		t.Errorf("after propose: %q", got)
+	if got := h.roster(); !strings.Contains(got, `docs is working on "write the readme"`) {
+		t.Errorf("after the instruction: %q", got)
 	}
 	h.transition("w5:p1", herdr.StateBlocked, herdr.StateUnknown)
 	h.transition("w6:p1", herdr.StateWorking, herdr.StateUnknown)
-	if got := h.call(ToolBriefing, nil).Spoken; got != "Two agents: auth has exited and docs has exited." {
+	if got := h.roster(); got != "Two agents: auth has exited and docs has exited." {
 		t.Errorf("after exits: %q", got)
 	}
 	h.sup.HandleTransition(context.Background(), herdr.Transition{PaneID: "w5:p1", Closed: true, To: herdr.StateUnknown})
 	h.sup.HandleTransition(context.Background(), herdr.Transition{PaneID: "w6:p1", Closed: true, To: herdr.StateUnknown})
-	if got := h.call(ToolBriefing, nil).Spoken; got != "No agents are running." {
+	if got := h.roster(); got != "No agents are running." {
 		t.Errorf("after close: %q", got)
 	}
 }
@@ -121,13 +123,14 @@ func TestScenario2BlockedPushesAndCreatesPending(t *testing.T) {
 	}
 }
 
-// Scenario 3: "yes" sends the prompt's yes keys to that pane and confirms.
+// Scenario 3: "yes" sends the prompt's yes keys to that pane and confirms
+// (the bare-answer fast path).
 func TestScenario3ConfirmSendsKeys(t *testing.T) {
 	h := twoAgents(t)
 	h.block("w5:p1", "codex-approval-prompt.screen.txt")
-	res := h.call(ToolConfirm, map[string]any{"answer": "yes"})
+	res := h.say("yes")
 	if res.Spoken != "Told auth yes." || res.Clarify {
-		t.Errorf("confirm = %+v", res)
+		t.Errorf("answer = %+v", res)
 	}
 	if keys := h.sendKeysRequests(); len(keys) != 1 || keys[0] != [2]string{"w5:p1", "y"} {
 		t.Errorf("send_keys = %v", keys)
@@ -142,30 +145,38 @@ func TestScenario3ConfirmSendsKeys(t *testing.T) {
 	if !row.LastBlock.Answered {
 		t.Error("last_block not marked answered")
 	}
-	if res := h.call(ToolConfirm, nil); res.Spoken != "Nothing is waiting for an answer." {
-		t.Errorf("second confirm = %q", res.Spoken)
+	// A second "yes" finds nothing to answer: no keys, and with no brain
+	// the roster is the whole answer.
+	if res := h.say("yes"); !strings.HasSuffix(res.Spoken, noBrainTrailer) {
+		t.Errorf("second yes = %q", res.Spoken)
+	}
+	if n := len(h.sendKeysRequests()); n != 1 {
+		t.Errorf("second yes sent keys: %d requests", n)
 	}
 }
 
+// The shepherd's bare answer maps onto the prompt's keys (the fast path:
+// yes and no words, an option by number or ordinal, an option's exact
+// label). Anything looser ("don't ask again", "accept edits") is the
+// brain's to resolve, so with no brain it sends nothing.
 func TestConfirmAnswerMapping(t *testing.T) {
 	cases := []struct {
 		screen, answer, keys, spoken string
 	}{
-		{"codex-approval-prompt.screen.txt", "", "y", "Told auth yes."},
+		{"codex-approval-prompt.screen.txt", "yeah", "y", "Told auth yes."},
 		{"codex-approval-prompt.screen.txt", "no", "esc", "Told auth no."},
 		{"codex-approval-prompt.screen.txt", "option 2", "p", "Told auth option 2."},
 		{"codex-approval-prompt.screen.txt", "the second one", "p", "Told auth option 2."},
-		{"codex-approval-prompt.screen.txt", "don't ask again", "p", "Told auth Yes, and don't ask again for commands that start with `printf '%s\\n' 'hello from codex.' > hello.txt`."},
+		{"codex-approval-prompt.screen.txt", "Yes, proceed", "y", "Told auth Yes, proceed."},
 		{"claude-permission-prompt.screen.txt", "go ahead", "1", "Told auth yes."},
 		{"claude-permission-prompt.screen.txt", "No.", "3", "Told auth no."},
-		{"claude-permission-prompt.screen.txt", "accept edits", "2", "Told auth Yes, and switch to accept edits (auto-approve file edits and common file commands) for this session (shift+tab)."},
 	}
 	for _, c := range cases {
 		t.Run(c.screen+"/"+c.answer, func(t *testing.T) {
 			h := newHarness(t)
 			h.addAgent("w5:p1", "w5", "codex", herdr.StateWorking)
 			h.block("w5:p1", c.screen)
-			res := h.call(ToolConfirm, map[string]any{"answer": c.answer})
+			res := h.say(c.answer)
 			if res.Spoken != c.spoken {
 				t.Errorf("spoken = %q, want %q", res.Spoken, c.spoken)
 			}
@@ -174,18 +185,17 @@ func TestConfirmAnswerMapping(t *testing.T) {
 			}
 		})
 	}
-	h := newHarness(t)
-	h.addAgent("w5:p1", "w5", "codex", herdr.StateWorking)
-	h.block("w5:p1", "codex-approval-prompt.screen.txt")
-	res := h.call(ToolConfirm, map[string]any{"answer": "purple"})
-	if !res.Clarify || !strings.Contains(res.Spoken, "The options are 1 Yes, proceed, 2 Yes, and don't ask again") {
-		t.Errorf("unknown answer = %+v", res)
-	}
-	if len(h.sendKeysRequests()) != 0 {
-		t.Error("unknown answer sent keys")
-	}
-	if _, ok := h.pending(); !ok {
-		t.Error("unknown answer dropped the pending question")
+	for _, answer := range []string{"purple", "don't ask again", "accept edits"} {
+		h := newHarness(t)
+		h.addAgent("w5:p1", "w5", "codex", herdr.StateWorking)
+		h.block("w5:p1", "codex-approval-prompt.screen.txt")
+		h.say(answer)
+		if len(h.sendKeysRequests()) != 0 {
+			t.Errorf("%q sent keys with no brain", answer)
+		}
+		if _, ok := h.pending(); !ok {
+			t.Errorf("%q dropped the pending question", answer)
+		}
 	}
 }
 
@@ -238,33 +248,34 @@ func TestAgyPromptsAnswerWithDigits(t *testing.T) {
 	if p, ok := h.pending(); !ok || strings.Join(p.YesKeys, ",") != "1" || strings.Join(p.NoKeys, ",") != "2" {
 		t.Fatalf("edit prompt pending = %+v", p)
 	}
-	if res := h.call(ToolConfirm, map[string]any{"answer": "no"}); res.Spoken != "Told auth no." {
-		t.Errorf("confirm no = %+v", res)
+	if res := h.say("no"); res.Spoken != "Told auth no." {
+		t.Errorf("no = %+v", res)
 	}
 	if keys := h.sendKeysRequests(); len(keys) != 1 || keys[0] != [2]string{"w5:p1", "2"} {
 		t.Errorf("send_keys = %v, want exactly one \"2\" (not esc)", keys)
 	}
 	h.transition("w5:p1", herdr.StateBlocked, herdr.StateWorking)
 	h.block("w5:p1", "agy-approval-prompt.screen.txt")
-	if res := h.call(ToolConfirm, map[string]any{"answer": "yes"}); res.Spoken != "Told auth yes." {
-		t.Errorf("confirm yes = %+v", res)
+	if res := h.say("yes"); res.Spoken != "Told auth yes." {
+		t.Errorf("yes = %+v", res)
 	}
 	if keys := h.sendKeysRequests(); len(keys) != 2 || keys[1] != [2]string{"w5:p1", "1"} {
 		t.Errorf("send_keys = %v, want \"1\" for the command prompt", keys)
 	}
 }
 
-// Scenario 5: cancel after propose sends Ctrl-C to that pane and nothing
-// else.
+// Scenario 5: "stop" right after an instruction (the stop procedure's
+// interrupt phase) sends Ctrl-C to that pane and nothing else.
 func TestScenario5CancelInterruptsCorrectPane(t *testing.T) {
 	h := twoAgents(t)
 	h.send("w6:p1", "write the readme")
 	if got := h.promptRequests(); len(got) != 1 || got[0][0] != "w6:p1" {
 		t.Fatalf("prompt requests = %v", got)
 	}
-	res := h.call(ToolCancel, nil)
-	if res.Spoken != "Cancelled." || res.Scheduling != voice.UrgencyInterrupt {
-		t.Errorf("cancel = %+v", res)
+	h.transition("w6:p1", herdr.StateIdle, herdr.StateWorking)
+	res := h.say("stop")
+	if res.Spoken != "Stopped: the instruction to docs was interrupted." || res.Scheduling != voice.UrgencyInterrupt {
+		t.Errorf("stop = %+v", res)
 	}
 	if keys := h.sendKeysRequests(); len(keys) != 1 || keys[0] != [2]string{"w6:p1", "ctrl+c"} {
 		t.Errorf("send_keys = %v, want exactly one ctrl+c to w6:p1", keys)
@@ -278,22 +289,22 @@ func TestScenario5CancelInterruptsCorrectPane(t *testing.T) {
 	if h.log.count("pending.cancelled") != 1 {
 		t.Error("no pending.cancelled")
 	}
-	if res := h.call(ToolCancel, nil); res.Spoken != "Nothing to cancel." {
-		t.Errorf("second cancel = %q", res.Spoken)
+	if res := h.say("stop"); res.Spoken != "Nothing was in flight." {
+		t.Errorf("second stop = %q", res.Spoken)
 	}
 	if n := len(h.sendKeysRequests()); n != 1 {
-		t.Errorf("second cancel sent keys: %d", n)
+		t.Errorf("second stop sent keys: %d", n)
 	}
 }
 
-// After a cancel's Ctrl-C the pane settles working -> done; that is not
+// After a stop's Ctrl-C the pane settles working -> done; that is not
 // "finished" (WP7b: sheepdog announced the cancelled turn as completed).
 func TestCancelSuppressesFinishedPush(t *testing.T) {
 	h := twoAgents(t)
 	h.send("w6:p1", "write the readme")
 	h.transition("w6:p1", herdr.StateIdle, herdr.StateWorking)
 	before := len(h.pusher.all())
-	h.call(ToolCancel, nil)
+	h.say("stop")
 	h.transition("w6:p1", herdr.StateWorking, herdr.StateDone)
 	if got := h.pusher.all(); len(got) != before {
 		t.Errorf("push after cancelled turn = %+v, want none", got[len(got)-1])
@@ -309,45 +320,11 @@ func TestCancelSuppressesFinishedPush(t *testing.T) {
 	}
 }
 
-// Scenario 8: the question expires; a later confirm revives it and asks
-// before sending; the next confirm sends.
-func TestScenario8ExpiryThenConfirm(t *testing.T) {
-	h := twoAgents(t)
-	h.block("w5:p1", "codex-approval-prompt.screen.txt")
-	h.clock.Advance(121 * time.Second)
-	h.sup.ExpirePending()
-	if _, ok := h.pending(); ok {
-		t.Fatal("pending did not expire")
-	}
-	if h.log.count("pending.expired") != 1 {
-		t.Error("no pending.expired event")
-	}
-	res := h.call(ToolConfirm, map[string]any{"answer": "yes"})
-	want := "That question expired; auth was asking would you like to run the following command. Should I answer yes?"
-	if res.Spoken != want || !res.Clarify {
-		t.Errorf("confirm after expiry = %+v, want %q", res, want)
-	}
-	if len(h.sendKeysRequests()) != 0 {
-		t.Error("expired confirm sent keys")
-	}
-	p, ok := h.pending()
-	if !ok || p.Kind != state.PendingAnswerPrompt || !p.ExpiresAt.Equal(h.clock.Now().Add(120*time.Second)) {
-		t.Errorf("revived pending = %+v", p)
-	}
-	res = h.call(ToolConfirm, map[string]any{"answer": "yes"})
-	if res.Spoken != "Told auth yes." {
-		t.Errorf("second confirm = %+v", res)
-	}
-	if keys := h.sendKeysRequests(); len(keys) != 1 || keys[0] != [2]string{"w5:p1", "y"} {
-		t.Errorf("send_keys = %v", keys)
-	}
-}
-
 // The prompt's pending expired while nobody answered, but it is still on
 // the pane's screen: a later bare "yes" revives it and answers
 // (docs/history/issues-2026-09-18.md "an expired approval prompt can never be
-// approved"). Unlike scenario 8's Confirm path, the fast path never
-// asks first — the CEO's own bare word this turn is the authorisation.
+// approved"). The fast path never asks first — the CEO's own bare word
+// this turn is the authorisation (scenario 8 of the v1 plan asked first).
 func TestExpiredPromptRevivedByFastPath(t *testing.T) {
 	h := twoAgents(t)
 	h.block("w5:p1", "codex-approval-prompt.screen.txt")
@@ -400,8 +377,12 @@ func TestExpiredQuestionForgottenWhenAgentMovesOn(t *testing.T) {
 	h.sup.ExpirePending()
 	// The user answered on the keyboard: the agent left the prompt.
 	h.transition("w5:p1", herdr.StateBlocked, herdr.StateWorking)
-	if res := h.call(ToolConfirm, nil); res.Spoken != "Nothing is waiting for an answer." {
-		t.Errorf("confirm = %q", res.Spoken)
+	h.say("yes")
+	if got := h.sendKeysRequests(); len(got) != 0 {
+		t.Errorf("send_keys = %v, want none", got)
+	}
+	if h.log.count("pending.revived") != 0 {
+		t.Error("revived a question the agent moved on from")
 	}
 }
 
@@ -448,8 +429,8 @@ func TestReplacementAnnouncement(t *testing.T) {
 	if h.log.count("pending.replaced") != 1 || h.log.count("pending.created") != 2 {
 		t.Errorf("replaced=%d created=%d", h.log.count("pending.replaced"), h.log.count("pending.created"))
 	}
-	// confirm goes to the newest question.
-	h.call(ToolConfirm, nil)
+	// A bare answer goes to the newest question.
+	h.say("yes")
 	if keys := h.sendKeysRequests(); len(keys) != 1 || keys[0] != [2]string{"w6:p1", "1"} {
 		t.Errorf("send_keys = %v", keys)
 	}
@@ -489,11 +470,12 @@ func TestNonQuestionScreensCreateNoPending(t *testing.T) {
 			if push := h.pusher.last(t); push.Urgency != voice.UrgencyIdle || push.Text != "auth is waiting at a prompt." {
 				t.Errorf("push = %+v", push)
 			}
-			if res := h.call(ToolConfirm, nil); res.Spoken != "Nothing is waiting for an answer." {
-				t.Errorf("confirm = %q", res.Spoken)
+			h.say("yes")
+			if got := h.sendKeysRequests(); len(got) != 0 {
+				t.Errorf("yes with no question sent %v", got)
 			}
-			if got := h.call(ToolBriefing, nil).Spoken; got != "One agent: auth is blocked at a prompt." {
-				t.Errorf("briefing = %q", got)
+			if got := h.roster(); got != "One agent: auth is blocked at a prompt." {
+				t.Errorf("roster = %q", got)
 			}
 		})
 	}
@@ -588,7 +570,7 @@ func TestInstructionWhenHerdrSaysBlocked(t *testing.T) {
 	if h.log.count("pending.cancelled") != 1 {
 		t.Error("the failed send_instruction should be cancelled")
 	}
-	h.call(ToolConfirm, nil)
+	h.say("yes")
 	if keys := h.sendKeysRequests(); len(keys) != 1 || keys[0][1] != "y" {
 		t.Errorf("send_keys = %v", keys)
 	}
@@ -606,11 +588,13 @@ func TestInstructionSendError(t *testing.T) {
 	}
 }
 
+// The brain's note tool (brainHost.Note) writes the note file and the
+// session.
 func TestNoteWritesFileAndSession(t *testing.T) {
 	h := newHarness(t)
-	res := h.call(ToolNote, map[string]any{"text": "don't touch the migrations today"})
-	if res.Spoken != "Noted." {
-		t.Errorf("note = %+v", res)
+	echo, err := brainHost{h.sup}.Note("don't touch the migrations today")
+	if err != nil || echo == "" {
+		t.Errorf("note = %q, %v", echo, err)
 	}
 	data, err := os.ReadFile(filepath.Join(h.dir, NotesFile))
 	if err != nil {
@@ -626,9 +610,6 @@ func TestNoteWritesFileAndSession(t *testing.T) {
 	if h.log.count("note.created") != 1 {
 		t.Error("no note.created event")
 	}
-	if res := h.call(ToolNote, map[string]any{"text": " "}); !res.Clarify {
-		t.Errorf("empty note = %+v", res)
-	}
 }
 
 func TestHandlerRejectsUnknownTool(t *testing.T) {
@@ -641,18 +622,20 @@ func TestHandlerRejectsUnknownTool(t *testing.T) {
 	}
 }
 
+// "Stop" with a question open neither interrupts the pane nor answers or
+// drops the question: stop is not "no" (docs/roles.md "Stop").
 func TestCancelPendingQuestionDoesNotInterrupt(t *testing.T) {
 	h := twoAgents(t)
 	h.block("w5:p1", "codex-approval-prompt.screen.txt")
-	res := h.call(ToolCancel, nil)
-	if res.Spoken != "Cancelled." {
-		t.Errorf("cancel = %+v", res)
+	res := h.say("stop")
+	if res.Spoken != "Nothing to stop; auth is still waiting for your answer, so I left its question open." {
+		t.Errorf("stop = %+v", res)
 	}
 	if len(h.sendKeysRequests()) != 0 {
-		t.Error("cancelling a question must not send Ctrl-C to the prompt")
+		t.Error("a stop must not send Ctrl-C (or anything) to the prompt")
 	}
-	if _, ok := h.pending(); ok {
-		t.Error("pending not cleared")
+	if _, ok := h.pending(); !ok {
+		t.Error("stop dropped the open question")
 	}
 }
 
@@ -675,13 +658,14 @@ func TestPersistedPendingSurvivesRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sup2, err := New(store2, h.client, nil, h.pusher, h.log, Config{Now: h.clock.Now})
+	sup2, err := New(store2, h.client, nil, h.pusher, h.log, Config{Now: h.clock.Now, InputGrace: -1})
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, _ := sup2.Confirm(context.Background(), "no")
+	sup2.OnVoiceEvent(voice.EventTranscript{Dir: voice.DirIn, Text: "no", Final: true})
+	res, _ := sup2.ToSupervisor(context.Background(), "no")
 	if res.Spoken != "Told auth no." {
-		t.Errorf("confirm after restart = %+v", res)
+		t.Errorf("answer after restart = %+v", res)
 	}
 	if keys := h.sendKeysRequests(); len(keys) != 1 || keys[0][1] != "esc" {
 		t.Errorf("send_keys = %v", keys)
@@ -705,11 +689,11 @@ func TestConcurrentToolsAndTransitions(t *testing.T) {
 			for j := 0; j < 10; j++ {
 				switch (i + j) % 6 {
 				case 0:
-					h.call(ToolBriefing, nil)
+					h.say("what's going on")
 				case 1:
-					h.call(ToolConfirm, map[string]any{"answer": "yes"})
+					h.say("yes")
 				case 2:
-					h.call(ToolCancel, nil)
+					h.say("stop")
 				case 3:
 					h.send("w5:p1", "continue")
 				case 4:

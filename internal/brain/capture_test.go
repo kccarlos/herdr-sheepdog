@@ -283,7 +283,7 @@ func TestCaptureRestart(t *testing.T) {
 	}
 	b.SetHost(braintest.NewHost())
 	for i := 0; i < 3; i++ {
-		if _, err := b.Ask(context.Background(), Request{Question: "status?"}); err != nil {
+		if _, err := b.Turn(context.Background(), Request{Kind: KindUtterance, Question: "status?"}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -297,7 +297,7 @@ func TestCaptureRestart(t *testing.T) {
 	if n := b2.Requests().Len(); n != 3 {
 		t.Fatalf("loaded %d steps, want 3", n)
 	}
-	if _, err := b2.Ask(context.Background(), Request{Question: "status?"}); err != nil {
+	if _, err := b2.Turn(context.Background(), Request{Kind: KindUtterance, Question: "status?"}); err != nil {
 		t.Fatal(err)
 	}
 	cur, prev, _, _ := b2.Requests().Get(0)

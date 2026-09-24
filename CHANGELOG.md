@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### Breaking changes
+
+- refactor!: remove the legacy voice-tool surface and the ask/propose
+  request kinds. The brain's turn over the shepherd's words is always an
+  `utterance`; the supervisor's `Briefing` / `Ask` / `Propose` /
+  `Confirm` / `Cancel` / `Note` methods are gone.
+- Config: `brain.propose_timeout_s` is now `brain.utterance_timeout_s`
+  and `brain.enrich_timeout_s` is now `brain.announce_turn_timeout_s`
+  (with `SHEEPDOG_BRAIN_UTTERANCE_TIMEOUT_S` /
+  `SHEEPDOG_BRAIN_ANNOUNCE_TURN_TIMEOUT_S`). The old names are still
+  read, with a `daemon.config_deprecated` note at startup;
+  `brain.ask_timeout_s` / `SHEEPDOG_BRAIN_ASK_TIMEOUT_S` are ignored with
+  a note.
+- `sheepdog brain-test`: `--kind ask|propose` is gone; every run is an
+  utterance. `--kind` and `--agent` are still accepted and ignored with a
+  note.
+
 ### Features
 
 - feat(plugin): herdr plugin shim, install/uninstall, launchd plist (5056c09)

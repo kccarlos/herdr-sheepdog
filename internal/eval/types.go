@@ -84,12 +84,13 @@ type SVPAgent struct {
 	Pending *SVPPending `json:"pending,omitempty"`
 }
 
-// SVPRequest is the request the brain receives. Since D1-revised the
-// live kind is utterance — the shepherd's words verbatim, with no agent
-// hint — and the brain decides what they are; ask and propose are the
-// older classified kinds, kept for the cases written against them.
+// SVPRequest is the request the brain receives: an utterance, the
+// shepherd's words verbatim, and the brain decides what they are. Agent
+// is an optional alias hint the live daemon never sends; the cases
+// converted from the removed ask/propose kinds keep theirs, so they test
+// the same loop behaviour as before.
 type SVPRequest struct {
-	Kind     string `json:"kind"` // utterance | ask | propose
+	Kind     string `json:"kind"` // utterance (the only kind; empty means utterance)
 	Question string `json:"question"`
 	Agent    string `json:"agent"`
 	// Briefing is the roster sentence composeBriefing puts in a live

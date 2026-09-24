@@ -423,7 +423,7 @@ func (s *Supervisor) utteranceTurn(ctx context.Context, u *inflightUtterance, te
 	if err != nil {
 		return utteranceOutcome{}
 	}
-	res := toolResultFrom(brain.KindUtterance, rep)
+	res := toolResultFrom(rep)
 	if res.Spoken == "" {
 		return utteranceOutcome{acted: rep.Acted}
 	}
@@ -633,7 +633,7 @@ func bareAnswer(p state.PendingAction, text string) (keys []string, label string
 		}
 	default:
 		// A label match here is exact (both sides normalised the same
-		// way), never the fuzzy overlap confirm uses: "let me know when
+		// way), never a fuzzy overlap: "let me know when
 		// auth is done" must not answer a prompt because "know" contains
 		// a "No" option's label.
 		for _, o := range p.Options {

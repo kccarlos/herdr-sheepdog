@@ -551,6 +551,8 @@ var ErrBoom = errors.New("boom")
 // Request line shapes the reflex model parses (see assemble.go
 // requestText and brain.summarize).
 var (
+	// reRequest also reads the ask / propose request lines of
+	// transcripts written before those kinds were removed.
 	reRequest   = regexp.MustCompile(`Request from the assistant \((ask|propose|utterance)\): (?:question|instruction|utterance)="((?:[^"\\]|\\.)*)" agent=(?:"((?:[^"\\]|\\.)*)"|\(none)`)
 	reStop      = regexp.MustCompile(`Request from the assistant \(stop\): stopped="((?:[^"\\]|\\.)*)"`)
 	reEvent     = regexp.MustCompile(`Event from the supervisor \((announce|investigation)\): agent="((?:[^"\\]|\\.)*)" event="((?:[^"\\]|\\.)*)" template="((?:[^"\\]|\\.)*)"`)
@@ -607,7 +609,10 @@ func utteranceKind(question string) string {
 
 // Reflex returns a Model that answers from what it sees instead of a
 // script, so a whole daemon can run the brain loop without a network:
-// `sheepdog serve --brain=fake`. An ask reads the named agent's screen
+// `sheepdog serve --brain=fake`. It sorts an utterance itself
+// (utteranceKind: a note, a status question, an explanation to
+// investigate, an instruction — "propose" — or a question — "ask"). An
+// ask reads the named agent's screen
 // and answers with its last line; a propose sends the instruction with
 // prompt and reports the echo. When no name was given it lists the
 // agents first and picks the one the words name (or the only one, or
@@ -690,7 +695,7 @@ func reflex(call Call) (*genai.GenerateContentResponse, error) {
 		return Response(Step{Text: eventReply(call, text, m), Usage: usage}), nil
 	}
 	if len(reqs) == 0 {
-		return Response(Step{Text: Reply("The fake model has no request to answer.", "This is the reflex model (--brain=fake); it only answers ask and propose requests."), Usage: [2]int32{int32(len(call.Text()) / 4), 20}}), nil
+		return Response(Step{Text: Reply("The fake model has no request to answer.", "This is the reflex model (--brain=fake); it only answers the shepherd's utterances and the supervisor's events."), Usage: [2]int32{int32(len(call.Text()) / 4), 20}}), nil
 	}
 	req := reRequest.FindStringSubmatch(text[reqs[len(reqs)-1][0]:])
 	kind, question, agent := req[1], unquote(req[2]), unquote(req[3])

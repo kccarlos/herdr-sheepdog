@@ -15,8 +15,9 @@ import (
 
 // brainHost implements brain.Host over the Supervisor: the roster and the
 // ledger come from the state table, reads go through herdr and the CLI
-// query tool, and the actions reuse the propose / confirm / cancel paths
-// so the pending-action bookkeeping (and cancel) keep working.
+// query tool, and the actions reuse the daemon's own send and answer
+// paths so the pending-action bookkeeping (and the stop procedure) keep
+// working.
 type brainHost struct{ s *Supervisor }
 
 var _ brain.Host = brainHost{}
@@ -78,11 +79,10 @@ func (h brainHost) Notes() []string {
 	return out
 }
 
-// Note implements brain.Host: the notes store the voice's own note tool
-// used before D1-revised. The brain's tool result already carries the
-// note into the transcript, so it is not ingested a second time.
+// Note implements brain.Host: the session's notes and notes.jsonl. The
+// brain's tool result already carries the note into the transcript.
 func (h brainHost) Note(text string) (string, error) {
-	if err := h.s.appendNote(text, false); err != nil {
+	if err := h.s.appendNote(text); err != nil {
 		h.s.log.Log(logSource, "supervisor.note_error", "", map[string]any{"error": err.Error(), "via": "brain"})
 		return "", err
 	}
@@ -141,8 +141,8 @@ func (h brainHost) Investigations() []brain.InvestigationInfo {
 	return out
 }
 
-// Prompt implements brain.Host: the propose send path (D4), so cancel can
-// still interrupt it.
+// Prompt implements brain.Host: the instruction send path (D4:
+// sendInstruction), so the stop procedure can still interrupt it.
 func (h brainHost) Prompt(ctx context.Context, paneID, text string) (string, error) {
 	row, ok := h.s.store.Get(paneID)
 	if !ok {
@@ -161,7 +161,7 @@ func (h brainHost) Prompt(ctx context.Context, paneID, text string) (string, err
 // authorise these keys (inputs.go) — reviving the pending action from the screen
 // first when none is recorded but the pane is still blocked
 // (docs/history/issues-2026-09-18.md "an expired approval prompt can never be
-// approved") — then the confirm send path.
+// approved") — then the answer send path (answerKeys).
 func (h brainHost) AnswerPrompt(ctx context.Context, paneID string, keys []string) (string, error) {
 	s := h.s
 	s.mu.Lock()
@@ -299,37 +299,19 @@ func (h brainHost) Promises() []brain.PromiseInfo {
 	return out
 }
 
-// brainTurn routes one ask / propose through the brain. ok is false when
-// the supervisor should answer from its template path instead.
-func (s *Supervisor) brainTurn(ctx context.Context, kind brain.Kind, text, agent string) (voice.ToolResult, bool) {
-	if s.brain == nil {
-		return voice.ToolResult{}, false
-	}
-	rep, err := s.brain.Turn(ctx, brain.Request{Kind: kind, Trigger: brain.TriggerCEO, Question: text, Agent: agent})
-	if err != nil {
-		return voice.ToolResult{}, false
-	}
-	res := toolResultFrom(kind, rep)
-	if res.Spoken == "" {
-		return voice.ToolResult{}, false
-	}
-	return res, true
-}
-
 // toolResultFrom enforces D9 on a brain reply: spoken cut to two
-// sentences and scrubbed, detail and options scrubbed; a propose always
-// interrupts (it is the echo), an ask or an utterance only when the CEO
-// must act. An utterance is not classified, so it cannot claim the echo
-// urgency a propose had; the voice reads the result after its own "on
+// sentences and scrubbed, detail and options scrubbed; it interrupts only
+// when the CEO must act. An utterance is not classified, so it cannot
+// claim an echo's urgency; the voice reads the result after its own "on
 // it" either way (the tool is NON_BLOCKING).
-func toolResultFrom(kind brain.Kind, rep brain.Reply) voice.ToolResult {
+func toolResultFrom(rep brain.Reply) voice.ToolResult {
 	res := voice.ToolResult{Spoken: sentence(prose.Spoken(rep.Spoken, 2)), Detail: prose.Spoken(rep.Detail, 0), Clarify: rep.Clarify, Pending: rep.Pending, Scheduling: voice.UrgencyIdle}
 	for _, o := range rep.Options {
 		if o = strings.TrimSpace(prose.Spoken(o, 1)); o != "" {
 			res.Options = append(res.Options, o)
 		}
 	}
-	if kind == brain.KindPropose || rep.NeedsUser || rep.Clarify {
+	if rep.NeedsUser || rep.Clarify {
 		res.Scheduling = voice.UrgencyInterrupt
 	}
 	return res

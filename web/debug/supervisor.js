@@ -15,7 +15,8 @@
 //   assistant    what the assistant said (assistant_said)
 //   push         a push the supervisor sent, with its urgency
 //   worker       a herdr transition ("auth: working → done")
-//   request      the assistant's ask / propose as the SVP received it
+//   request      the request as the SVP received it (utterance / stop;
+//                ask / propose in transcripts from before they were removed)
 //                (or a nudge: "Time is up", "That was not the JSON")
 //   tool         brain_tool_call paired with its brain_tool_result by id
 //   reply        the SVP's answer-contract reply (parsed when it is JSON)

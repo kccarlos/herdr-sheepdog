@@ -39,14 +39,13 @@ func promiseModel() *braintest.Model {
 	return m
 }
 
-// combined runs the combined utterance through propose and checks the
+// combined has the shepherd say the combined utterance and checks the
 // promise was recorded.
 func combined(h *harness) state.Promise {
 	h.t.Helper()
-	h.sup.OnVoiceEvent(voice.EventTranscript{Dir: voice.DirIn, Text: "run the tests and let me know when it's done", Final: true})
-	res := h.call(ToolPropose, map[string]any{"instruction": "run the tests and let me know when it's done"})
+	res := h.say("run the tests and let me know when it's done")
 	if res.Spoken != "Telling auth to run the tests. Sent; I will tell you when auth finishes." {
-		h.t.Fatalf("propose = %+v", res)
+		h.t.Fatalf("reply = %+v", res)
 	}
 	open := h.sup.openPromises()
 	if len(open) != 1 {
@@ -148,12 +147,12 @@ func TestPromiseKeptAtEveryLevel(t *testing.T) {
 			if len(all) != 1 || all[0].Status != state.PromiseKept || all[0].ResolvedAt == nil {
 				t.Errorf("record = %+v", all)
 			}
-			// brain.turn kinds: propose, then one announce for the finish.
+			// brain.turn kinds: the utterance, then one announce for the finish.
 			var kinds []string
 			for _, ev := range h.log.ofType("brain.turn") {
 				kinds = append(kinds, payload(ev)["kind"].(string))
 			}
-			if strings.Join(kinds, " ") != "propose announce" {
+			if strings.Join(kinds, " ") != "utterance announce" {
 				t.Errorf("brain.turn kinds = %v", kinds)
 			}
 			// The transcript has the kept record after the made one.
@@ -259,7 +258,7 @@ func TestPromiseNotKeptOnInterruptedFinish(t *testing.T) {
 	if _, err := h.sup.createPromise("w5:p1", brain.PromiseRequest{Text: "tell me when it's done", Event: "done"}); err != nil {
 		t.Fatal(err)
 	}
-	h.call(ToolCancel, nil)
+	h.say("stop")
 	h.srv.SetScreen("w5:p1", fixture(t, "codex-after-ctrl-c.screen.txt"))
 	h.transition("w5:p1", herdr.StateWorking, herdr.StateDone)
 	if h.log.count("supervisor.finished_suppressed") != 1 || h.log.count("promise.kept") != 0 || len(h.sup.openPromises()) != 1 {
@@ -299,10 +298,9 @@ func TestPromiseSurvivesRestart(t *testing.T) {
 	if len(msgs) != 1 || msgs[0].Kind != brain.KindPromise || msgs[0].Promise.ID != p.ID || msgs[0].Promise.Status != "open" {
 		t.Errorf("restored transcript = %+v", msgs)
 	}
-	// Briefing mentions it; the finish keeps it.
-	res, _ := sup.Briefing(context.Background())
-	if !strings.HasSuffix(res.Spoken, " You asked me to tell you when auth finishes.") {
-		t.Errorf("briefing = %q", res.Spoken)
+	// The roster mentions it; the finish keeps it.
+	if text, _ := sup.briefingText(); !strings.HasSuffix(text, " You asked me to tell you when auth finishes.") {
+		t.Errorf("roster = %q", text)
 	}
 	h.srv.SetScreen("w5:p1", fixture(t, "codex-after-approval.screen.txt"))
 	sup.HandleTransition(context.Background(), herdr.Transition{PaneID: "w5:p1", From: herdr.StateWorking, To: herdr.StateDone, At: h.clock.Now()})
@@ -312,9 +310,8 @@ func TestPromiseSurvivesRestart(t *testing.T) {
 	if got := store.Snapshot().Session.Promises; len(got) != 1 || got[0].Status != state.PromiseKept {
 		t.Errorf("record = %+v", got)
 	}
-	res, _ = sup.Briefing(context.Background())
-	if strings.Contains(res.Spoken, "You asked me to tell you when auth finishes.") {
-		t.Errorf("briefing still mentions the kept promise: %q", res.Spoken)
+	if text, _ := sup.briefingText(); strings.Contains(text, "You asked me to tell you when auth finishes.") {
+		t.Errorf("the roster still mentions the kept promise: %q", text)
 	}
 }
 
@@ -345,47 +342,30 @@ func TestPromiseExpires(t *testing.T) {
 	if h.log.count("promise.kept") != 0 {
 		t.Error("an expired promise was kept")
 	}
-	if res, _ := h.sup.Briefing(context.Background()); strings.Contains(res.Spoken, "You asked me") {
-		t.Errorf("briefing = %q", res.Spoken)
+	if text := h.roster(); strings.Contains(text, "You asked me") {
+		t.Errorf("roster = %q", text)
 	}
 }
 
-// cancel with nothing pending cancels the latest open promise; with an
-// instruction pending it interrupts that instead (and the promise stays).
+// "Stop" right after the combined utterance interrupts the instruction
+// it sent, and the promise stays: stop withdraws work, not a reminder
+// (the old cancel tool's "Cancelled the reminder" is gone with it).
 func TestPromiseCancel(t *testing.T) {
 	h := newBrainHarness(t, promiseModel())
 	h.addAgent("w5:p1", "auth", "codex", herdr.StateIdle)
 	p := combined(h)
-	// The combined utterance left a send_instruction pending: cancel
-	// interrupts it, the promise stays.
-	if res := h.call(ToolCancel, nil); res.Spoken != "Cancelled." {
-		t.Errorf("cancel with pending = %+v", res)
+	h.transition("w5:p1", herdr.StateIdle, herdr.StateWorking)
+	h.say("stop")
+	if keys := h.sendKeysRequests(); len(keys) != 1 || keys[0] != [2]string{"w5:p1", "ctrl+c"} {
+		t.Errorf("send_keys = %v", keys)
 	}
-	if len(h.sup.openPromises()) != 1 {
-		t.Fatal("cancel with a pending instruction cancelled the promise")
+	if open := h.sup.openPromises(); len(open) != 1 || open[0].ID != p.ID {
+		t.Fatalf("stop with a pending instruction touched the promise: %+v", open)
 	}
-	if res := h.call(ToolCancel, nil); res.Spoken != "Cancelled the reminder." {
-		t.Errorf("cancel = %+v", res)
-	}
-	if len(h.sup.openPromises()) != 0 {
-		t.Error("promise still open")
-	}
-	ev := h.log.ofType("promise.cancelled")
-	if len(ev) != 1 || payload(ev[0])["id"] != p.ID {
-		t.Errorf("promise.cancelled = %v", ev)
-	}
-	if res := h.call(ToolCancel, nil); res.Spoken != "Nothing to cancel." {
-		t.Errorf("cancel again = %+v", res)
-	}
-	// Ingested as cancelled.
-	var statuses []string
-	for _, m := range h.sup.Brain().Transcript().Messages() {
-		if m.Kind == brain.KindPromise {
-			statuses = append(statuses, m.Promise.Status)
-		}
-	}
-	if strings.Join(statuses, " ") != "open cancelled" {
-		t.Errorf("promise messages = %v", statuses)
+	// A second stop has nothing in flight and still leaves the promise.
+	h.say("stop")
+	if len(h.sup.openPromises()) != 1 || h.log.count("promise.cancelled") != 0 {
+		t.Errorf("open=%d cancelled=%d", len(h.sup.openPromises()), h.log.count("promise.cancelled"))
 	}
 }
 
@@ -403,13 +383,12 @@ func TestPromiseInBriefingAndRecall(t *testing.T) {
 	if _, err := h.sup.createPromise("w6:p1", brain.PromiseRequest{Text: "tell me if docs asks", Event: "blocked"}); err != nil {
 		t.Fatal(err)
 	}
-	res := h.call(ToolBriefing, nil)
-	if !strings.HasSuffix(res.Spoken, " You asked me to tell you when auth finishes and when docs asks something.") {
-		t.Errorf("briefing = %q", res.Spoken)
+	if text := h.roster(); !strings.HasSuffix(text, " You asked me to tell you when auth finishes and when docs asks something.") {
+		t.Errorf("roster = %q", text)
 	}
-	res = h.call(ToolAsk, map[string]any{"question": "did I ask you to tell me anything?"})
+	res := h.say("did I ask you to tell me anything?")
 	if res.Spoken != "You asked to be told when auth finishes." {
-		t.Errorf("ask = %+v", res)
+		t.Errorf("reply = %+v", res)
 	}
 	calls := m.Calls()
 	if out := calls[len(calls)-1].Text(); !strings.Contains(out, `Promise (open): "let me know when it's done", when auth finishes`) {
@@ -423,9 +402,9 @@ func TestPromiseInBriefingAndRecall(t *testing.T) {
 func TestPromiseWithReflexModel(t *testing.T) {
 	h := newBrainHarness(t, braintest.Reflex())
 	h.addAgent("w5:p1", "auth", "codex", herdr.StateIdle)
-	res := h.call(ToolPropose, map[string]any{"instruction": "run the tests and let me know when it's done"})
+	res := h.say("run the tests and let me know when it's done")
 	if res.Spoken != "Telling auth to run the tests. Sent; I will tell you when auth finishes." {
-		t.Errorf("propose = %+v", res)
+		t.Errorf("reply = %+v", res)
 	}
 	if len(h.sup.openPromises()) != 1 || len(h.promptRequests()) != 1 {
 		t.Fatalf("open=%d prompts=%v", len(h.sup.openPromises()), h.promptRequests())
@@ -439,10 +418,8 @@ func TestPromiseWithReflexModel(t *testing.T) {
 	if kept := h.log.ofType("promise.kept"); len(kept) != 1 || payload(kept[0])["via"] != "brain" {
 		t.Errorf("promise.kept = %v", kept)
 	}
-	// A bare promise with no instruction text at all still reaches the
-	// brain, which reads the CEO's words from the transcript.
-	h.sup.OnVoiceEvent(voice.EventTranscript{Dir: voice.DirIn, Text: "tell me when auth is done", Final: true})
-	res = h.call(ToolPropose, map[string]any{"instruction": ""})
+	// A bare promise with no instruction in it is recorded alone.
+	res = h.say("tell me when auth is done")
 	if res.Spoken != "I will tell you when auth finishes." || len(h.promptRequests()) != 1 {
 		t.Errorf("bare promise = %+v (prompts %v)", res, h.promptRequests())
 	}
@@ -612,9 +589,8 @@ func TestCarriedOverPromiseInLedgerNotBriefing(t *testing.T) {
 	sup, _, _ := restartOver(t, h, Config{Brain: b})
 	sup.SetVoiceConnected(true)
 
-	res, _ := sup.Briefing(context.Background())
-	if strings.Contains(res.Spoken, "let me know") {
-		t.Errorf("briefing still mentions the carried-over promise: %q", res.Spoken)
+	if text, _ := sup.briefingText(); strings.Contains(text, "let me know") {
+		t.Errorf("the roster still mentions the carried-over promise: %q", text)
 	}
 
 	sup.ShepherdInput(InputTyped, "what's going on")

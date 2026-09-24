@@ -248,38 +248,23 @@ func (h *harness) promptRequests() [][2]string {
 
 func (h *harness) pending() (state.PendingAction, bool) { return h.store.Pending() }
 
-// call runs one tool. The voice surface (to_supervisor, stop) goes
-// through Handler; the older names are no longer declared to any model,
-// so they are called directly.
+// call runs one voice tool (to_supervisor or stop) through Handler, as
+// the voice session does.
 func (h *harness) call(name string, args map[string]any) voice.ToolResult {
 	h.t.Helper()
-	arg := func(k string) string {
-		v, _ := args[k].(string)
-		return v
-	}
-	ctx := context.Background()
-	var res voice.ToolResult
-	var err error
-	switch name {
-	case ToolBriefing:
-		res, err = h.sup.Briefing(ctx)
-	case ToolAsk:
-		res, err = h.sup.Ask(ctx, arg("question"), arg("agent"))
-	case ToolPropose:
-		res, err = h.sup.Propose(ctx, arg("instruction"), arg("agent"))
-	case ToolConfirm:
-		res, err = h.sup.Confirm(ctx, arg("answer"))
-	case ToolCancel:
-		res, err = h.sup.Cancel(ctx)
-	case ToolNote:
-		res, err = h.sup.Note(ctx, arg("text"))
-	default:
-		res, err = h.sup.Handler()(ctx, voice.ToolCall{ID: "c", Name: name, Args: args})
-	}
+	res, err := h.sup.Handler()(context.Background(), voice.ToolCall{ID: "c", Name: name, Args: args})
 	if err != nil {
 		h.t.Fatalf("%s: %v", name, err)
 	}
 	return res
+}
+
+// roster is the roster sentence every request carries and a status
+// question with no brain is answered with (composeBriefing, served from
+// the cache).
+func (h *harness) roster() string {
+	text, _ := h.sup.briefingText()
+	return text
 }
 
 // send is what the brain's prompt tool does: an instruction typed into

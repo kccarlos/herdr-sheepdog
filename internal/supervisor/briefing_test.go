@@ -99,11 +99,11 @@ func TestBriefingReflectsResultsAndAges(t *testing.T) {
 	h.srv.SetScreen("w5:p1", fixture(t, "codex-after-approval.screen.txt"))
 	h.transition("w5:p1", herdr.StateWorking, herdr.StateDone)
 	want := "Two agents: auth is idle; it last finished, and docs is idle."
-	if got := h.call(ToolBriefing, nil).Spoken; got != want {
+	if got := h.roster(); got != want {
 		t.Errorf("briefing = %q, want %q", got, want)
 	}
 	h.clock.Advance(31 * time.Minute)
-	if got := h.call(ToolBriefing, nil).Spoken; got != "Two agents: auth is idle and docs is idle." {
+	if got := h.roster(); got != "Two agents: auth is idle and docs is idle." {
 		t.Errorf("briefing after 31 min = %q", got)
 	}
 }

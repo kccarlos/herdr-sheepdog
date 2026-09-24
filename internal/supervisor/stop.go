@@ -195,7 +195,7 @@ func (s *Supervisor) stopTurn(ctx context.Context, out stopOutcome) (voice.ToolR
 	if err != nil {
 		return voice.ToolResult{}, false
 	}
-	res := toolResultFrom(brain.KindStop, rep)
+	res := toolResultFrom(rep)
 	if res.Spoken == "" {
 		return voice.ToolResult{}, false
 	}

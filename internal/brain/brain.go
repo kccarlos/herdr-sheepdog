@@ -23,13 +23,15 @@ const logSource = "brain"
 
 // Defaults for Config zero values.
 const (
-	DefaultModel          = "gemini-3.5-flash"
-	DefaultMaxSteps       = 6
-	DefaultAskTimeout     = 8 * time.Second
-	DefaultProposeTimeout = 12 * time.Second
-	// DefaultEnrichTimeout bounds an event turn (announce): on expiry the
-	// supervisor speaks its code sentence instead.
-	DefaultEnrichTimeout = 6 * time.Second
+	DefaultModel    = "gemini-3.5-flash"
+	DefaultMaxSteps = 6
+	// DefaultUtteranceTimeout bounds a CEO utterance turn including its
+	// tools (it may turn out to be an instruction) and an investigation
+	// delivery turn.
+	DefaultUtteranceTimeout = 12 * time.Second
+	// DefaultAnnounceTurnTimeout bounds an event turn (announce): on
+	// expiry the supervisor speaks its code sentence instead.
+	DefaultAnnounceTurnTimeout = 6 * time.Second
 	// DefaultAnnounceTimeout bounds an announce turn the shepherd is owed
 	// (Request.Owed: it keeps a promise or reports on the shepherd's own
 	// request): the code sentence has already said "here's what it
@@ -64,12 +66,12 @@ type Config struct {
 	Model string
 	// MaxSteps bounds the model calls in one turn.
 	MaxSteps int
-	// AskTimeout / ProposeTimeout bound one turn including its tools (an
-	// utterance turn takes ProposeTimeout: it may be an instruction);
-	// EnrichTimeout bounds an event turn and StopTimeout a stop turn;
-	// AnnounceTimeout bounds an announce turn the shepherd is owed
+	// UtteranceTimeout bounds an utterance turn including its tools (it
+	// may be an instruction) and an investigation delivery turn;
+	// AnnounceTurnTimeout bounds an event turn and StopTimeout a stop
+	// turn; AnnounceTimeout bounds an announce turn the shepherd is owed
 	// (Request.Owed, or one that keeps a promise).
-	AskTimeout, ProposeTimeout, EnrichTimeout, AnnounceTimeout, StopTimeout time.Duration
+	UtteranceTimeout, AnnounceTurnTimeout, AnnounceTimeout, StopTimeout time.Duration
 	// WindowTokens is the estimated window size that triggers compaction.
 	WindowTokens int
 	// PruneAfterTurns is how many turns a tool result stays verbatim.
@@ -111,14 +113,11 @@ func (c Config) withDefaults() Config {
 	if c.MaxSteps <= 0 {
 		c.MaxSteps = DefaultMaxSteps
 	}
-	if c.AskTimeout <= 0 {
-		c.AskTimeout = DefaultAskTimeout
+	if c.UtteranceTimeout <= 0 {
+		c.UtteranceTimeout = DefaultUtteranceTimeout
 	}
-	if c.ProposeTimeout <= 0 {
-		c.ProposeTimeout = DefaultProposeTimeout
-	}
-	if c.EnrichTimeout <= 0 {
-		c.EnrichTimeout = DefaultEnrichTimeout
+	if c.AnnounceTurnTimeout <= 0 {
+		c.AnnounceTurnTimeout = DefaultAnnounceTurnTimeout
 	}
 	if c.AnnounceTimeout <= 0 {
 		c.AnnounceTimeout = DefaultAnnounceTimeout
@@ -466,25 +465,6 @@ func (b *Brain) Close() error {
 	b.after.Wait()
 	_ = b.requests.Close()
 	return b.transcript.Close()
-}
-
-// Ask runs one ask turn triggered by the CEO.
-func (b *Brain) Ask(ctx context.Context, req Request) (Reply, error) {
-	req.Kind = KindAsk
-	return b.Turn(ctx, req)
-}
-
-// Propose runs one propose turn triggered by the CEO.
-func (b *Brain) Propose(ctx context.Context, req Request) (Reply, error) {
-	req.Kind = KindPropose
-	return b.Turn(ctx, req)
-}
-
-// Utterance runs one turn over the CEO's verbatim words (D1-revised):
-// the brain decides what they are and acts.
-func (b *Brain) Utterance(ctx context.Context, req Request) (Reply, error) {
-	req.Kind = KindUtterance
-	return b.Turn(ctx, req)
 }
 
 // Daemon ingests a line the daemon itself produced, so the transcript

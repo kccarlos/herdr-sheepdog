@@ -107,7 +107,7 @@ sheepdog serve --voice=off --herdr=mock --dev  # also serve testdata/audio/*.wav
 | `sheepdog herdr watch` | Print debounced agent state transitions as JSONL; `--once` prints the persisted state table and exits. |
 | `sheepdog voice-test` | Stream a WAV (or `--text`) through a Gemini Live session with the echo tools; no daemon needed. |
 | `sheepdog audio-e2e` | Speak the scenarios in `testdata/audio-e2e/` (macOS `say` + a generated noise bed) into a running daemon's `/ws` and check transcripts, tool calls, replies and latencies (`docs/audio-e2e-results.md`). |
-| `sheepdog brain-test` | Run one supervisor-brain turn (`--question`, `--kind ask\|propose`) against a mock herdr with a screen fixture, an optional seed transcript and `--say` utterances; prints the reply and the transcript, `brain.*` events on stderr (`--fake` needs no network). |
+| `sheepdog brain-test` | Run one supervisor-brain utterance turn (`--question`: the shepherd's words, relayed through `to_supervisor` as the daemon does; `--kind` and `--agent` are accepted and ignored) against a mock herdr with a screen fixture, an optional seed transcript and `--say` utterances; prints the reply and the transcript, `brain.*` events on stderr (`--fake` needs no network). |
 | `sheepdog prompts export\|show` | Seed `prompts.dir` from the embedded defaults, or print one file's effective text and its source (embedded/override). |
 | `sheepdog eval --set assistant\|svp` | Run the conversation eval set against the assistant prompt or the brain; offline by default (validates + prints "skipped"), `--live` calls the model. |
 | `sheepdog version` \| `help` | Version/commit/build date \| this table. |
@@ -125,7 +125,7 @@ utterances, the dog's replies, tool calls that expand to their arguments,
 result and the supervisor events behind them, supervisor pushes, session
 dividers, per-turn response times), **Supervisor** (the brain's own
 transcript as a chat — your verbatim words, the assistant's replies muted,
-the assistant's `ask`/`propose` requests, the brain's tool calls collapsed
+the requests the brain received (your relayed words, a stop, a worker event), the brain's tool calls collapsed
 to their arguments, result with the provenance delimiters and raw JSON,
 its replies with `needs_user`/`clarify` badges, pushes, worker events,
 compaction cards — under a prompt-budget meter: the system prompt's
@@ -151,8 +151,8 @@ returns the prompt the session runs with, and the header's chattiness
 dropdown switches the push policy at runtime (see below). To see the
 Supervisor tab without a Gemini key, `sheepdog serve --voice=off
 --herdr=mock --dev --brain=fake` runs the brain loop over a scripted
-reflex model (a developer mode: an ask reads the screen, a propose
-prompts; no network call), and
+reflex model (a developer mode: a question reads the screen, an
+instruction prompts; no network call), and
 `sheepdogDebug.loadTranscript('/testdata/brain/sample-run.jsonl')` in
 the console loads a sample run.
 
@@ -163,7 +163,7 @@ say "start over" (then "yes, start over") works the same way by voice.
 
 ## The supervisor brain
 
-Behind `ask` and `propose` sits the brain (the dog's thinking half) of [`docs/roles.md`](docs/roles.md):
+Behind `to_supervisor` sits the brain (the dog's thinking half) of [`docs/roles.md`](docs/roles.md):
 a stateful agent (`internal/brain`, `gemini-3.5-flash` with function
 calling by default, or DeepSeek's `deepseek-flash` with a
 `DEEPSEEK_API_KEY`; the `/debug` header's provider and model picker
@@ -182,7 +182,7 @@ everything read from a worker as data, never instructions. The one rail:
 it may answer a worker's approval prompt only on your words in that turn,
 with a key from the prompt's own options; the code enforces it, not the
 prompt. When it errors or runs out of budget
-(`brain.ask_timeout_s`, `brain.max_steps`) the daemon speaks its own code
+(`brain.utterance_timeout_s`, `brain.max_steps`) the daemon speaks its own code
 sentence instead, so the voice never waits on a loop.
 `sheepdog serve --brain=off` turns it off; it is also off without a
 Gemini key. With no brain sheepdog still watches the flock and announces
@@ -266,13 +266,14 @@ done: the tests passed."), or, without the brain, "As you asked: auth
 finished: …". It waits for a pause unless you asked to be interrupted or
 the promise is past its due time. A promise
 expires silently after `supervisor.promise_ttl_s` (default two hours);
-"cancel" with nothing else pending cancels the latest one ("Cancelled the
-reminder."). The Supervisor tab shows every promise as a card with its
-status; the event log has `promise.created|kept|expired|cancelled`.
+"stop" never cancels one. The Supervisor tab shows every promise as a
+card with its status; the event log has `promise.created|kept|expired`
+(`promise.cancelled` only in logs from before the cancel tool was
+removed).
 
 ## ⚠️ Worker agents must not run fully auto-approve
 
-Sheepdog's `propose()` sends an instruction to a worker immediately
+Sheepdog's brain sends an instruction to a worker (its `prompt` tool) immediately
 after echoing it back by voice — there is **no confirmation step**
 (plan decision D4). The worker's own approval prompts are the only
 safety gate between "the operator said something" and "code changed."
@@ -289,7 +290,7 @@ with one of these:**
 | agy (Antigravity CLI) | `--dangerously-skip-permissions`, `--mode accept-edits` (verified on 1.2.5: the default mode prompts for commands and file edits) |
 | anything else herdr supports | check its own docs for the equivalent "skip all approvals" flag and avoid it too |
 
-(The CLI query tool behind `ask()`'s deep path is a separate, intentionally
+(The CLI query tool behind the brain's `run_cli` and investigations is a separate, intentionally
 read-only invocation of codex/claude — see
 [`docs/cli-query-tools.md`](docs/cli-query-tools.md) — and is not
 affected by this; this warning is about the worker panes herdr manages.)

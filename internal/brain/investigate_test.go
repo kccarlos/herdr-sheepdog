@@ -30,7 +30,7 @@ func TestInvestigateStartsAJobAndAnswersPending(t *testing.T) {
 		braintest.Step{Calls: []*genai.FunctionCall{braintest.FC(ToolInvestigate, map[string]any{"agent": "auth", "question": "why did the clamp test fail?"})}},
 		braintest.Step{Text: `{"spoken": "Reading the diff, about half a minute.", "detail": "Started a look at auth.", "pending": true}`},
 	), nil)
-	rep, err := h.brain.Utterance(context.Background(), Request{Question: "explain why the tests failed"})
+	rep, err := h.brain.Turn(context.Background(), Request{Kind: KindUtterance, Question: "explain why the tests failed"})
 	if err != nil {
 		t.Fatal(err)
 	}

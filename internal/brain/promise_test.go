@@ -26,7 +26,7 @@ func TestPromiseToolRecordsAPromise(t *testing.T) {
 	)
 	h := newHarness(t, m, nil)
 	h.brain.Heard("run the tests and let me know when it's done", true)
-	rep, err := h.brain.Propose(context.Background(), Request{Question: "run the tests and let me know when it's done"})
+	rep, err := h.brain.Turn(context.Background(), Request{Kind: KindUtterance, Question: "run the tests and let me know when it's done"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,13 +84,13 @@ func TestPromiseToolErrors(t *testing.T) {
 	)
 	h := newHarness(t, m, nil)
 	h.host.PromiseErr = braintest.ErrBoom
-	rep, err := h.brain.Propose(context.Background(), Request{Question: "let me know", Agent: "auth"})
+	rep, err := h.brain.Turn(context.Background(), Request{Kind: KindUtterance, Question: "let me know", Agent: "auth"})
 	if err != nil || rep.Spoken != "I could not record that." || len(h.host.Promised) != 0 {
 		t.Fatalf("reply = %+v %v promised = %v", rep, err, h.host.Promised)
 	}
 	// due_in_minutes 0: due now, so the kept push interrupts.
 	h.host.PromiseErr = nil
-	if rep, err := h.brain.Propose(context.Background(), Request{Question: "interrupt me when it's done", Agent: "auth"}); err != nil || rep.Spoken != "I will interrupt you." {
+	if rep, err := h.brain.Turn(context.Background(), Request{Kind: KindUtterance, Question: "interrupt me when it's done", Agent: "auth"}); err != nil || rep.Spoken != "I will interrupt you." {
 		t.Fatalf("reply = %+v %v", rep, err)
 	}
 	if len(h.host.Promised) != 1 || h.host.Promised[0].Due == nil || h.host.Promised[0].Due.After(time.Now()) {
@@ -122,7 +122,7 @@ func TestEventTurnIsReadOnly(t *testing.T) {
 		}},
 		braintest.Step{Text: `{"spoken": "", "detail": "The template was sufficient.", "relates_to": "the rerun", "urgency": "skip"}`},
 	)
-	h := newHarness(t, m, func(c *Config) { c.EnrichTimeout = 6 * time.Second; c.PruneAfterTurns = 1 })
+	h := newHarness(t, m, func(c *Config) { c.AnnounceTurnTimeout = 6 * time.Second; c.PruneAfterTurns = 1 })
 	h.host.SetPending("w5:p1", approvalPrompt())
 	h.brain.Heard("rerun the tests", true)
 	rep, err := h.brain.Turn(context.Background(), Request{Kind: KindAnnounce, Trigger: TriggerCEO, Agent: "auth", Event: "done", Template: "auth finished: ran the tests, 1 failed.", Screen: "$ go test ./...\n--- FAIL: TestLoginRateLimit\nFAIL"})
@@ -193,7 +193,7 @@ func TestEventTurnTimeout(t *testing.T) {
 	defer close(block)
 	m := braintest.NewModel(braintest.Step{Block: block})
 	h := newHarness(t, m, func(c *Config) {
-		c.EnrichTimeout, c.AnnounceTimeout = 50*time.Millisecond, 60*time.Millisecond
+		c.AnnounceTurnTimeout, c.AnnounceTimeout = 50*time.Millisecond, 60*time.Millisecond
 		c.FinalGrace = -1
 	})
 	start := time.Now()
@@ -215,7 +215,7 @@ func TestEventTurnTimeout(t *testing.T) {
 
 // An announce turn the shepherd is owed (a kept promise, or Owed: the
 // finish of their own instruction) gets AnnounceTimeout; any other event
-// turn keeps EnrichTimeout (the 23:56:27 announce timeout at 9 s).
+// turn keeps AnnounceTurnTimeout (the 23:56:27 announce timeout at 9 s).
 func TestOwedAnnounceGetsTheLongerBudget(t *testing.T) {
 	promise := []PromiseInfo{{ID: "pr-1", Text: "tell me", Agent: "auth", Event: "done"}}
 	for _, tc := range []struct {
@@ -232,7 +232,7 @@ func TestOwedAnnounceGetsTheLongerBudget(t *testing.T) {
 			defer close(block)
 			m := braintest.NewModel(braintest.Step{Block: block})
 			h := newHarness(t, m, func(c *Config) {
-				c.EnrichTimeout, c.AnnounceTimeout = 50*time.Millisecond, 1200*time.Millisecond
+				c.AnnounceTurnTimeout, c.AnnounceTimeout = 50*time.Millisecond, 1200*time.Millisecond
 				c.FinalGrace = -1
 			})
 			start := time.Now()
@@ -278,7 +278,7 @@ func TestRecallFindsPromises(t *testing.T) {
 func TestReflexPromisesAndEvents(t *testing.T) {
 	h := newHarness(t, braintest.Reflex(), nil)
 	// Unnamed: the roster is listed and the words pick auth.
-	rep, err := h.brain.Propose(context.Background(), Request{Question: "tell auth to run the tests and let me know when it's done"})
+	rep, err := h.brain.Turn(context.Background(), Request{Kind: KindUtterance, Question: "tell auth to run the tests and let me know when it's done"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -292,7 +292,7 @@ func TestReflexPromisesAndEvents(t *testing.T) {
 		t.Errorf("prompts = %v promised = %+v", h.host.Prompts, h.host.Promised)
 	}
 	// Bare promise, blocked condition, named agent.
-	rep, err = h.brain.Propose(context.Background(), Request{Question: "let me know if it asks anything", Agent: "docs"})
+	rep, err = h.brain.Turn(context.Background(), Request{Kind: KindUtterance, Question: "let me know if it asks anything", Agent: "docs"})
 	if err != nil || rep.Spoken != "I will tell you when docs asks something." || len(h.host.Prompts) != 1 || len(h.host.Promised) != 2 || h.host.Promised[1].Event != PromiseEventBlocked {
 		t.Errorf("bare promise = %+v %v prompts=%v promised=%+v", rep, err, h.host.Prompts, h.host.Promised)
 	}

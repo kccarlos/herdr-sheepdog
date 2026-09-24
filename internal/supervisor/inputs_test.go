@@ -108,7 +108,7 @@ func TestInputPastTheAuthoriseWindowIsRefused(t *testing.T) {
 	h.clock.Advance(time.Second)
 	h.hear("go ahead and approve that")
 	h.clock.Advance(11 * time.Second)
-	h.call(ToolPropose, map[string]any{"instruction": "approve", "agent": "auth"})
+	h.relay("approve")
 	if got := h.sendKeysRequests(); len(got) != 0 {
 		t.Errorf("keys sent: %v", got)
 	}
@@ -146,9 +146,10 @@ func TestOneYesAnswersOnePrompt(t *testing.T) {
 }
 
 // The brain's send_keys runs on the shepherd's input: a "no"-class input
-// never authorises a yes key, whatever the model relayed.
+// never authorises a yes key, whatever the model relayed. (A bare "no"
+// never reaches the brain: the fast path declines with it.)
 func TestNoInputCannotAuthoriseYesKeys(t *testing.T) {
-	for _, said := range []string{"no", "don't run that", "stop", "cancel it", "No, wait."} {
+	for _, said := range []string{"don't run that", "stop", "cancel it", "No, wait."} {
 		t.Run(said, func(t *testing.T) {
 			m := braintest.NewModel(
 				braintest.Step{Calls: []*genai.FunctionCall{braintest.FC(brain.ToolSendKeys, map[string]any{"agent": "auth", "keys": []any{"y"}})}},
@@ -158,7 +159,7 @@ func TestNoInputCannotAuthoriseYesKeys(t *testing.T) {
 			blockedAuth(t, h)
 			h.clock.Advance(time.Second)
 			h.hear(said)
-			h.call(ToolPropose, map[string]any{"instruction": "yes", "agent": "auth"})
+			h.relay("yes")
 			if got := h.sendKeysRequests(); len(got) != 0 {
 				t.Errorf("keys sent: %v", got)
 			}
@@ -180,7 +181,7 @@ func TestNoInputCanDecline(t *testing.T) {
 	blockedAuth(t, h)
 	h.clock.Advance(time.Second)
 	h.hear("no, don't run that")
-	h.call(ToolPropose, map[string]any{"instruction": "no", "agent": "auth"})
+	h.relay("no")
 	if got := h.sendKeysRequests(); len(got) != 1 || got[0][1] != "esc" {
 		t.Errorf("keys = %v", got)
 	}

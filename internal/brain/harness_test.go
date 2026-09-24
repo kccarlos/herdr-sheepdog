@@ -104,7 +104,7 @@ func (h *harness) kinds() []string {
 }
 
 func (h *harness) ask(q, agent string) (Reply, error) {
-	return h.brain.Ask(context.Background(), Request{Question: q, Agent: agent})
+	return h.brain.Turn(context.Background(), Request{Kind: KindUtterance, Question: q, Agent: agent})
 }
 
 func joinKinds(k []string) string { return strings.Join(k, " ") }
