@@ -84,8 +84,9 @@ Does:
   anything and how urgently, in one line that names the decision or the
   next move — never "say yes".
 - Answers for the ear: `{spoken, detail, needs_user, options?, pending?}`.
-  `spoken` is two sentences for status and a short paragraph for an
-  explanation (what happened → why → what it means → next move).
+  `spoken` is one sentence per agent for status, and for findings and
+  explanations the gist in at most two sentences plus an offer ("want
+  the details?"); the rest (why, evidence, next move) goes in `detail`.
 - Serialises turns: single writer; shepherd turns before event turns;
   an event turn yields before its next model call when a shepherd turn
   waits; queued event turns coalesce per agent.

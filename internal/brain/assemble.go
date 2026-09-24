@@ -224,7 +224,7 @@ func investigationRequestText(req Request) string {
 		b.WriteString(wrapWorker(req.Agent, "investigation", req.Result))
 		b.WriteString("\n")
 	}
-	b.WriteString("Answer the CEO now, from this and the conversation: a short paragraph ordered for the ear — what happened, why, what it means for them, the next move — in plain words, no paths, hashes or ids, jargon only if they used it first. If the agent has worked since, say the answer is as of when the look ran. Reply with the JSON object of the answer contract; read tools only, and say nothing about how the look was run.")
+	b.WriteString("Answer the CEO now, from this and the conversation: spoken is the gist in at most two sentences for the ear — what happened and what it means for them — then an offer (\"want the details?\"); the why, the evidence and the next move go in detail. Plain words, no paths, hashes or ids, jargon only if they used it first. If the agent has worked since, say the answer is as of when the look ran. Reply with the JSON object of the answer contract; read tools only, and say nothing about how the look was run.")
 	return b.String()
 }
 

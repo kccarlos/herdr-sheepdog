@@ -109,7 +109,7 @@ func TestInvestigationDeliveryTurn(t *testing.T) {
 		`You asked it: "why did the clamp test fail?"`,
 		`What the CEO actually said: "explain why the tests failed"`,
 		"source=investigation>>>",
-		"short paragraph ordered for the ear",
+		"the gist in at most two sentences for the ear",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("request lacks %q:\n%s", want, text)

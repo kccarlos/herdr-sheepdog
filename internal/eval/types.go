@@ -106,6 +106,10 @@ type SVPExpect struct {
 	// SpokenContainsAnyOf: the reply's spoken text must contain at least
 	// one of these substrings, case-insensitive (live only).
 	SpokenContainsAnyOf []string `json:"spoken_contains_any_of,omitempty"`
+	// SpokenMaxSentences: the reply's spoken text may have at most this
+	// many sentences, when positive (live only): a finding is the gist in
+	// two sentences plus an offer (RULES.md answer contract).
+	SpokenMaxSentences int `json:"spoken_max_sentences,omitempty"`
 	// MustNotCall: none of these tools may complete successfully (a
 	// rail-blocked attempt is fine — that is the rail working).
 	MustNotCall []string `json:"must_not_call,omitempty"`

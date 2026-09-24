@@ -13,6 +13,7 @@ import (
 
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
 	"github.com/kccarlos/herdr-sheepdog/internal/brain/braintest"
+	"github.com/kccarlos/herdr-sheepdog/internal/prose"
 )
 
 // recorder is a logging.Logger that captures the brain.* events grading
@@ -203,7 +204,16 @@ func checkSVPExpect(exp SVPExpect, rec *recorder, reply brain.Reply, offline boo
 			reasons = append(reasons, "spoken "+quoteOrEmpty(reply.Spoken)+" contains none of: "+strings.Join(exp.SpokenContainsAnyOf, ", "))
 		}
 	}
+	if !offline && exp.SpokenMaxSentences > 0 && tooManySentences(reply.Spoken, exp.SpokenMaxSentences) {
+		reasons = append(reasons, fmt.Sprintf("spoken %s has more than %d sentences; the rest belongs in detail", quoteOrEmpty(reply.Spoken), exp.SpokenMaxSentences))
+	}
 	return reasons
+}
+
+// tooManySentences reports whether s has more than n sentences, counted
+// the way the spoken-line scrubber cuts them.
+func tooManySentences(s string, n int) bool {
+	return prose.Spoken(s, n) != prose.Spoken(s, 0)
 }
 
 // buildHost sets up an in-memory braintest.Host from the case: the
