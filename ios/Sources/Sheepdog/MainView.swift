@@ -113,6 +113,7 @@ struct MainView: View {
                         model.toggleMute()
                     },
                     onEnd: { model.disconnect() },
+                    onResume: { model.resumeAudio() },
                     onPress: { model.pressToTalk() },
                     onRelease: { model.releaseToTalk() }
                 )
@@ -175,7 +176,7 @@ struct MainView: View {
             .onChange(of: scenePhase) { _, phase in
                 switch phase {
                 case .active where started: model.becameActive()
-                case .background: model.willResignActive()
+                case .background: model.enteredBackground()
                 default: break
                 }
             }
@@ -287,5 +288,6 @@ struct BannerView: View {
                 .strokeBorder(tint.opacity(0.35), lineWidth: 1)
         )
         .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("banner")
     }
 }

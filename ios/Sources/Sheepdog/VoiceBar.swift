@@ -21,6 +21,7 @@ struct VoiceBarView: View {
     let onStop: () -> Void
     let onMute: () -> Void
     let onEnd: () -> Void
+    var onResume: () -> Void = {}
     var onPress: () -> Void = {}
     var onRelease: () -> Void = {}
 
@@ -89,6 +90,7 @@ struct VoiceBarView: View {
         switch model.orbAction {
         case .connect: onConnect()
         case .stop: onStop()
+        case .resume: onResume()
         case .holdToTalk, .none: break
         }
     }

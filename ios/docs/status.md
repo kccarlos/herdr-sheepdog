@@ -19,10 +19,9 @@ They cover:
   (asserted separately), noise alone never opens it (60 s × 5 kinds × 3
   levels), clicks never open it, the floor follows a room 25 dB louder and
   back, the margin widens for babble, digital silence does not make hiss
-  speech, the pre-roll and the spurious-open count; the old peak gate
-  sending 100 % of a −50 dBFS room where the detector sends 0 % (table in
+  speech, the pre-roll and the spurious-open count (table in
   `docs/architecture.md`);
-- the capture gate: detector switch and hold-to-talk transitions always
+- the capture gate: hold-to-talk transitions always
   matching what the daemon was told, pre-roll on press, reset semantics;
 - the microphone-signal watchdog (3 s of digital zero or no buffers, cleared
   by one real sample, disarmed while muted, re-timed on unmute);
@@ -37,10 +36,7 @@ They cover:
   side writes and re-encoded to the same bytes (one test per message type,
   plus the rejections: unknown type, bad voice state, bad direction, missing
   required field);
-- the silence gate, ported case for case from the browser's
-  `web/voice/audio-util.test.mjs` at the app's 40 ms frame: closes after the
-  hold, counts what it withholds, reopens with the pre-roll in the right
-  order, never gates a short pause, floor inclusive, `Int16.min` peak;
+- the capture peak (`PCMLevel.peak`, `Int16.min` included);
 - the sample-rate path with synthetic signals: 48 k → 16 k keeps a 440 Hz
   tone and a 3:1 length ratio, 12 kHz does not alias down to 4 kHz, streaming
   in 4 096-frame blocks matches one big call, 44.1 kHz hardware works, a
@@ -110,8 +106,8 @@ They cover:
   `/api/conversation` sync, the timeline's divider for it, and the
   reducer's `.reset` (closes an open bubble without adding one, a no-op
   with nothing open) — end to end against the fixture daemon in
-  `NewConversationUITests` (screenshots below), with a `-sheepdogFakeReset`
-  fallback for a daemon that does not have the route yet;
+  `NewConversationUITests` (screenshots below), against the daemon's real
+  `POST /api/conversation/reset`;
 - history and approvals, against JSON captured from the daemon at
   `7a192e9` (`Tests/SheepdogKitTests/Fixtures.swift`): decoding every
   conversation item kind, `/api/state`'s pending view and a real
@@ -209,8 +205,8 @@ reachable while a worker is waiting on an answer.
 daemon on 7799 (`--voice=off`, empty config), launched with
 `-sheepdogFakeVoice` (DEBUG only: pretends the live session is up, no
 microphone, synthetic level) and `-sheepdogFakeProviders` (the provider
-contract's example, since the daemon on `main` does not serve
-`/api/voice/providers` yet):
+contract's example whenever the daemon lists no providers, as the
+`--voice=off` fixture daemon does):
 
 | | What |
 |---|---|
@@ -218,19 +214,16 @@ contract's example, since the daemon on `main` does not serve
 | ![](screenshots/20-mic-live.png) | Live, coach mark dismissed. |
 | ![](screenshots/21-mic-muted.png) | Muted: red slashed mic ("Unmute microphone"), the orb muted, the status line "Muted — tap to unmute" in red, and the one-time Mute caption. |
 | ![](screenshots/22-settings-voice-microphone.png) | Settings ▸ Voice (Gemini Live selected; GPT-Live "Billed per minute" with the note) and Microphone (mode row, Hold to talk). |
-| ![](screenshots/23-settings-voice-detection.png) | Settings ▸ Voice detection: input level, noise floor, margin, gate state, opens / spurious, microphone signal, and the old peak gate toggle. (Values are the fake-voice ones here.) |
+| ![](screenshots/23-settings-voice-detection.png) | Settings ▸ Voice detection: input level, noise floor, margin, gate state, opens / spurious, microphone signal. (Values are the fake-voice ones here.) |
 | ![](screenshots/24-hold-to-talk.png) | Hold to talk on: no mic button, "Hold the orb to talk"; the Voice Isolation tip banner shown once after listening. |
 | ![](screenshots/25-chip-voice-provider.png) | The connection sheet names the voice provider and model. |
 
 ### New conversation (simulator, 2026-09-23)
 
 `NewConversationUITests` against the fixture daemon on 7799, with an
-utterance already logged so there is scrollback to keep. The daemon on
-`main` does not serve `POST /api/conversation/reset` yet, so the app is
-launched with `-sheepdogFakeReset` (DEBUG only): it folds a synthetic
-`conversation.reset` event through the real `ConversationHistory.fold` the
-moment the daemon answers 404, rather than a second, untested code path —
-the same convention `-sheepdogFakeProviders` uses above.
+utterance already logged so there is scrollback to keep, through the
+daemon's real `POST /api/conversation/reset` and its `conversation.reset`
+notice.
 
 | | What |
 |---|---|
@@ -278,10 +271,6 @@ the same convention `-sheepdogFakeProviders` uses above.
 - **The provider picker against a real daemon**: built to the contract
   while the daemon side was being written; screenshots use the contract's
   example.
-- **New conversation against a real daemon**: same story —
-  `POST /api/conversation/reset` was not on `main` yet when this was built,
-  confirmed with a live `curl` against the fixture daemon (404). Built to
-  the contract; screenshots use `-sheepdogFakeReset`.
 
 ## For the morning
 

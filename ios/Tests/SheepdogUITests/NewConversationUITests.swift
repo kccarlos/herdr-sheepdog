@@ -4,12 +4,9 @@ import XCTest
 /// and the divider it leaves in the conversation.
 ///
 /// Needs the fixture daemon on 127.0.0.1:7799 (`--voice=off`, empty
-/// config). The daemon side of `POST /api/conversation/reset` was built in
-/// parallel with this app and may not be on the fixture daemon yet — the
-/// app is launched with `-sheepdogFakeReset` (DEBUG only), which runs the
-/// same `ConversationHistory.fold` a real `conversation.reset` event would
-/// the moment the daemon answers 404, so the screenshots (and the flow)
-/// exercise the real code either way. Not in CI.
+/// config), and runs against its real `POST /api/conversation/reset`: the
+/// divider comes from the daemon's own `conversation.reset` notice. Not in
+/// CI.
 final class NewConversationUITests: XCTestCase {
     private let daemon = "http://127.0.0.1:7799"
 
@@ -22,7 +19,7 @@ final class NewConversationUITests: XCTestCase {
 
     func testNewConversationMenuDialogAndDivider() throws {
         let app = XCUIApplication()
-        app.launchArguments = ["-sheepdogResetState", "-sheepdogAddress", "127.0.0.1:7799", "-sheepdogFakeReset"]
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogAddress", "127.0.0.1:7799"]
         // Scrollback to keep and see a divider land under: an utterance
         // logged on the daemon ahead of time, so it is already on the
         // newest `/api/conversation` page the app fetches at launch —

@@ -22,6 +22,8 @@ public struct VoiceBarModel: Equatable, Sendable {
     public enum OrbAction: Equatable, Sendable {
         case connect
         case stop
+        /// Resume audio iOS paused and would not resume by itself.
+        case resume
         /// Hold-to-talk: press and hold opens the gate, release closes it.
         /// Pressing while the dog talks also stops it (barge-in).
         case holdToTalk
@@ -48,6 +50,10 @@ public struct VoiceBarModel: Equatable, Sendable {
             orbAction = .none
             muteAvailability = .disabled
             endVisible = true
+        case .audioPaused:
+            orbAction = .resume
+            muteAvailability = .enabled
+            endVisible = true
         case .idle, .listening, .silent, .muted:
             orbAction = .none
             muteAvailability = .enabled
@@ -62,7 +68,7 @@ public struct VoiceBarModel: Equatable, Sendable {
             switch state {
             case .idle, .listening, .silent, .muted, .thinking, .stalled, .speaking:
                 orbAction = .holdToTalk
-            case .disconnected, .connecting, .reconnecting, .voiceOff:
+            case .disconnected, .connecting, .reconnecting, .voiceOff, .audioPaused:
                 break
             }
         }
@@ -91,7 +97,7 @@ public struct VoiceBarModel: Equatable, Sendable {
                 return holding ? "Talking — release to send" : "Hold the orb to talk"
             case .thinking, .stalled, .speaking:
                 return holding ? "Talking — release to send" : state.title
-            case .disconnected, .connecting, .reconnecting, .voiceOff:
+            case .disconnected, .connecting, .reconnecting, .voiceOff, .audioPaused:
                 return state.title
             }
         }

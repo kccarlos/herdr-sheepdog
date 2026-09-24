@@ -134,14 +134,11 @@ final class VoiceProvidersTests: XCTestCase {
 
     // MARK: - Settings
 
-    func testTalkModeAndDetectorDefaultsAndRoundTrip() {
+    func testTalkModeDefaultsAndRoundTrip() {
         let defaults = UserDefaults(suiteName: "voice-settings-\(UUID().uuidString)")!
         let store = SettingsStore(defaults: defaults, secrets: InMemorySecretStore())
         XCTAssertEqual(store.talkMode, .openMic, "hold-to-talk is off by default")
-        XCTAssertEqual(store.detector, .voiceActivity)
         store.talkMode = .holdToTalk
-        store.detector = .peak
         XCTAssertEqual(store.talkMode, .holdToTalk)
-        XCTAssertEqual(store.detector, .peak)
     }
 }

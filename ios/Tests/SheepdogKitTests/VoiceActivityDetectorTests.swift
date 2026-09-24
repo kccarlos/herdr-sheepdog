@@ -23,7 +23,7 @@ final class VoiceActivityDetectorTests: XCTestCase {
             let seconds = Double(samples.count) / Double(Audio.rate)
             XCTAssertGreaterThan(seconds, 1, voice)
             XCTAssertLessThan(seconds, 6, voice)
-            XCTAssertGreaterThan(SilenceGate.peak(of: samples), 3_000, "\(voice) should be actual speech")
+            XCTAssertGreaterThan(PCMLevel.peak(of: samples), 3_000, "\(voice) should be actual speech")
         }
     }
 
@@ -95,28 +95,6 @@ final class VoiceActivityDetectorTests: XCTestCase {
             }
         }
         print("VAD noise-only results\n" + table.joined(separator: "\n"))
-    }
-
-    func testTheOldPeakGateStreamedTheRoomAndTheDetectorDoesNot() throws {
-        // What happened on the phone: a quiet room at −50 dBFS is ~100 LSB
-        // of noise, far above the peak gate's 8 LSB, so everything went to
-        // the model. Same audio, both gates, after a 2 s warm-up.
-        for noise in [Audio.Noise.white, .pink, .brown] {
-            let raw = Audio.pcm(Audio.scaled(try Audio.noise(noise, samples: 20 * Audio.rate, seed: 31), toDBFS: -50))
-            var old = CaptureGate(detector: .peak)
-            var new = CaptureGate(detector: .voiceActivity)
-            var oldSent = 0, newSent = 0, frames = 0
-            for (i, frame) in Audio.frames(raw).enumerated() {
-                let o = old.push(frame).send.count
-                let n = new.push(frame).send.count
-                guard i >= 50 else { continue }
-                frames += 1
-                oldSent += o
-                newSent += n
-            }
-            XCTAssertEqual(oldSent, frames, "\(noise): the peak gate sends every frame of room noise")
-            XCTAssertEqual(newSent, 0, "\(noise): the detector sends none")
-        }
     }
 
     func testKeyboardClicksDoNotOpenIt() throws {
@@ -213,7 +191,7 @@ final class VoiceActivityDetectorTests: XCTestCase {
         for _ in 0 ..< 100 { vad.push((0 ..< Audio.frame).map { _ in Int16(rng.gaussian() * 50) }) }
         XCTAssertTrue(vad.isGated)
         let tone = (0 ..< Audio.frame).map { Int16(8_000 * sin(2 * Double.pi * 800 * Double($0) / 16_000)) }
-        var out = SilenceGate.Output(send: [], transition: nil)
+        var out = CaptureGate.Output(send: [], transition: nil)
         for _ in 0 ..< 3 { out = vad.push(tone) }
         XCTAssertEqual(out.transition, .opened, "three voiced frames (120 ms) open it")
         // The attack window (7 frames) plus 100 ms of pre-roll (3), then the

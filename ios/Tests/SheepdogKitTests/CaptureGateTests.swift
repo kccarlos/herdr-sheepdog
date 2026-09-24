@@ -1,7 +1,7 @@
 import XCTest
 @testable import SheepdogKit
 
-/// The gate as the audio engine drives it: detector choice, hold-to-talk,
+/// The gate as the audio engine drives it: the detector, hold-to-talk,
 /// and transitions that always match what the daemon was told.
 final class CaptureGateTests: XCTestCase {
     private let quiet = [Int16](repeating: 0, count: AudioContract.frameSamples)
@@ -11,9 +11,8 @@ final class CaptureGateTests: XCTestCase {
 
     private let tone = (0 ..< AudioContract.frameSamples).map { Int16(8_000 * sin(2 * Double.pi * 700 * Double($0) / 16_000)) }
 
-    func testTheDefaultIsTheVoiceActivityDetector() {
+    func testTheVoiceActivityDetectorDecides() {
         var gate = CaptureGate()
-        XCTAssertEqual(gate.detector, .voiceActivity)
         var rng = VADTestAudio.RNG(seed: 1)
         var closes = 0
         // Room noise well above the old 8 LSB floor: the peak gate would
@@ -23,29 +22,6 @@ final class CaptureGateTests: XCTestCase {
         XCTAssertTrue(gate.isGated)
         XCTAssertFalse(gate.diagnostics.isOpen)
         XCTAssertNotNil(gate.diagnostics.floorDBFS)
-    }
-
-    func testThePeakGateIsStillThereForComparison() {
-        var gate = CaptureGate(detector: .peak)
-        var rng = VADTestAudio.RNG(seed: 1)
-        for _ in 0 ..< 50 { XCTAssertNil(gate.push(noise(&rng, 400)).transition, "400 LSB of room noise keeps the peak gate open") }
-        XCTAssertFalse(gate.isGated)
-        XCTAssertNil(gate.diagnostics.floorDBFS)
-        for _ in 0 ..< 7 { gate.push(quiet) }
-        XCTAssertEqual(gate.push(quiet).transition, .closed, "and it closes on digital silence after 300 ms, as before")
-    }
-
-    func testSwitchingDetectorMidSessionNeverLeavesTheDaemonOutOfStep() {
-        var gate = CaptureGate(detector: .voiceActivity)
-        var rng = VADTestAudio.RNG(seed: 2)
-        for _ in 0 ..< 50 { gate.push(noise(&rng, 400)) }
-        XCTAssertTrue(gate.isGated)
-        gate.detector = .peak
-        // The peak gate starts open, and the daemon is told so.
-        let out = gate.push(noise(&rng, 400))
-        XCTAssertEqual(out.transition, .opened)
-        XCTAssertEqual(out.send.count, 1)
-        XCTAssertFalse(gate.isGated)
     }
 
     func testHoldToTalkOpensOnPressWithPrerollAndClosesOnRelease() {
@@ -99,5 +75,11 @@ final class CaptureGateTests: XCTestCase {
         XCTAssertEqual(CaptureGate.Diagnostics.format(dBFS: -41.4), "−41 dBFS")
         XCTAssertEqual(CaptureGate.Diagnostics.format(dBFS: nil), "—")
         XCTAssertEqual(CaptureGate.Diagnostics.format(dBFS: VoiceActivityDetector.silenceDBFS), "—")
+    }
+
+    func testPeakIsTheLargestAbsoluteSample() {
+        XCTAssertEqual(PCMLevel.peak(of: [0, -32_768, 5]), 32_768)
+        XCTAssertEqual(PCMLevel.peak(of: [3, -7, 5]), 7)
+        XCTAssertEqual(PCMLevel.peak(of: []), 0)
     }
 }

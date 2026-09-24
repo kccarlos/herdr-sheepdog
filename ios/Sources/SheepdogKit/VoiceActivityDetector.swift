@@ -76,7 +76,7 @@ public struct VADTuning: Equatable, Sendable {
 }
 
 /// A voice-activity detector with an adaptive noise floor — the capture gate
-/// the app uses instead of the browser's peak threshold (`SilenceGate`).
+/// the app uses instead of the browser's peak threshold.
 ///
 /// The browser can get away with "peak below 8 LSB for 300 ms" because
 /// Chrome's own noise suppression sits in front of it. On a phone that
@@ -92,11 +92,11 @@ public struct VADTuning: Equatable, Sendable {
 ///    margin (6–10 dB, wider in an unsteady room); close after `hangover`
 ///    below floor + margin − hysteresis.
 ///
-/// The output keeps `SilenceGate`'s contract exactly — the frames to send
+/// The output is `CaptureGate.Output`, the browser gate's contract — the frames to send
 /// (with pre-roll on reopening) and the transition to announce with the
 /// `/ws` `silence` message — so the socket side does not change.
 public struct VoiceActivityDetector: Sendable {
-    public typealias Output = SilenceGate.Output
+    public typealias Output = CaptureGate.Output
 
     public let tuning: VADTuning
 
@@ -190,8 +190,8 @@ public struct VoiceActivityDetector: Sendable {
         return Output(send: [], transition: .closed)
     }
 
-    /// Forgets the pre-roll and reopens without a transition, like
-    /// `SilenceGate.reset()`. The noise floor is kept unless `keepFloor` is
+    /// Forgets the pre-roll and reopens without a transition, as a
+    /// fresh client starts. The noise floor is kept unless `keepFloor` is
     /// false: the room did not change because the user muted.
     public mutating func reset(keepFloor: Bool = true) {
         preroll = []
@@ -216,7 +216,7 @@ public struct VoiceActivityDetector: Sendable {
     // MARK: - Measuring
 
     private mutating func measure(_ frame: [Int16]) {
-        peak = SilenceGate.peak(of: frame)
+        peak = PCMLevel.peak(of: frame)
         var total = 0.0
         for s in frame {
             let v = Double(s)

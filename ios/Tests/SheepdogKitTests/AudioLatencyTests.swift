@@ -10,7 +10,7 @@ final class AudioLatencyTests: XCTestCase {
         let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 48_000, channels: 1, interleaved: false)!
         let converter = try PCMConverter(inputFormat: format)
         var chunker = FrameChunker()
-        var gate = SilenceGate()
+        var gate = CaptureGate()
 
         let source = try XCTUnwrap(PCMConverter.sineBuffer(frequency: 440, sampleRate: 48_000, seconds: 10))
         let samples = source.floatChannelData![0]

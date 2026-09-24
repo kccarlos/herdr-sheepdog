@@ -18,7 +18,8 @@ struct SheepdogApp: App {
             store.hasBeenConfigured = false
             store.keepListeningWhenLocked = true
             try? FileManager.default.removeItem(at: ConversationCache.standard().directory)
-            UserDefaults.standard.removeObject(forKey: "hint.mute.shown")
+            // The one-time hints are cleared by the view model (all of
+            // them, as `-sheepdogResetHints` does).
         }
         // `-sheepdogAddress 127.0.0.1:7799`: start configured, for the
         // history walkthrough and screenshots.

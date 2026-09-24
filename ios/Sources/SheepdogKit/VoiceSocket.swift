@@ -13,7 +13,8 @@ import Foundation
 ///   session — reconnecting would start a fight, so the socket stays down
 ///   and the user decides;
 /// * a reconnecting client starts unmuted and ungated on the daemon, so the
-///   mute and gate state are re-sent on every open.
+///   mute state (muted *or not*: the app owns it) and a closed gate are
+///   sent on every open.
 @MainActor
 public final class VoiceSocket {
     public enum Event: Sendable {
@@ -23,7 +24,10 @@ public final class VoiceSocket {
         /// The socket went away. `retrying` is false when the app will not
         /// reconnect by itself (the user disconnected, or we were replaced).
         case closed(reason: String, retrying: Bool)
-        case failed(DaemonError)
+        /// An attempt failed. `retrying` is true when the socket will try
+        /// again by itself (the daemon was unreachable), false when it
+        /// will not (the address is not a URL).
+        case failed(DaemonError, retrying: Bool)
     }
 
     public enum Life: Equatable, Sendable {
@@ -102,7 +106,7 @@ public final class VoiceSocket {
 
     private func open() {
         guard let url = endpoint.webSocketURL else {
-            onEvent?(.failed(.malformed("the address \(endpoint.display) is not a URL")))
+            onEvent?(.failed(.malformed("the address \(endpoint.display) is not a URL"), retrying: false))
             return
         }
         teardown(code: .goingAway, reason: "reopening")
@@ -170,8 +174,9 @@ public final class VoiceSocket {
         life = .open
         reconnects = 0
         retryDelay = VoiceSocket.retryMinimum
-        // A reconnecting client starts unmuted and ungated on the daemon.
-        if muted { send(.mute(true)) }
+        // A reconnecting client starts unmuted and ungated on the daemon,
+        // or with whatever mute it last had: say which, every time.
+        send(.mute(muted))
         if gateClosed { send(.silence(true)) }
         startPinging()
         onEvent?(.opened)
@@ -212,7 +217,7 @@ public final class VoiceSocket {
             if !everOpened {
                 // Never reached the daemon: say why, and keep retrying so a
                 // daemon that comes back is picked up.
-                onEvent?(.failed(.unreachable(endpoint: endpoint.display, detail: DaemonClient.describe(urlError))))
+                onEvent?(.failed(.unreachable(endpoint: endpoint.display, detail: DaemonClient.describe(urlError)), retrying: true))
             }
         }
         onEvent?(.closed(reason: everOpened ? "connection lost" : "could not connect", retrying: true))

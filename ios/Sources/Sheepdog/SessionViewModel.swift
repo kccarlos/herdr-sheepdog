@@ -68,7 +68,6 @@ final class SessionViewModel: ObservableObject {
     /// The microphone delivers only digital zero while unmuted.
     @Published private(set) var noMicSignal = false
     @Published private(set) var gateDiagnostics = CaptureGate.Diagnostics()
-    @Published private(set) var detector: CaptureGate.Detector = .voiceActivity
     /// The first-run "just talk" coach mark.
     @Published private(set) var showCoachMark = false
     /// Control Center ▸ Mic Mode, as iOS reports it.
@@ -157,6 +156,17 @@ final class SessionViewModel: ObservableObject {
     private var connectionFailed = false
     /// The daemon refused the token.
     private var tokenRefused = false
+    /// Retry quietly through a daemon restart, then with a banner.
+    private var reconnectPolicy = ReconnectPolicy()
+    /// The app owns mute; this answers a daemon that disagrees.
+    private var muteSync = MuteSync()
+    /// Paused in the background: Keep listening with the screen locked is
+    /// off and the app left the foreground.
+    private var backgroundSuspended = false
+    /// iOS paused the audio and would not resume it by itself.
+    private var audioPaused = false
+    /// What the daemon should believe about mute right now.
+    private var daemonMute: Bool { MuteSync.daemonMute(intent: isMuted, suspended: backgroundSuspended) }
 
     init(settings: SettingsStore = SettingsStore(), cache: ConversationCache = .standard()) {
         self.settings = settings
@@ -165,12 +175,11 @@ final class SessionViewModel: ObservableObject {
         self.client = DaemonClient(endpoint: endpoint)
         self.socket = VoiceSocket(endpoint: endpoint)
         talkMode = settings.talkMode
-        detector = settings.detector
-        audio.setDetector(detector)
         if talkMode == .holdToTalk { audio.setManualGate(false) }
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-sheepdogResetHints") {
-            for key in [Self.muteHintShownKey, Self.coachShownKey, Self.micTipShownKey] {
+        let arguments = ProcessInfo.processInfo.arguments
+        if arguments.contains("-sheepdogResetHints") || arguments.contains("-sheepdogResetState") {
+            for key in Self.hintKeys {
                 UserDefaults.standard.removeObject(forKey: key)
             }
         }
@@ -197,6 +206,7 @@ final class SessionViewModel: ObservableObject {
     /// The app came back to the foreground: what happened while it was
     /// away is on the daemon.
     func becameActive() {
+        resumeFromBackground()
         guard isConfigured, settings.hasBeenConfigured else { return }
         Task {
             await refreshState(quiet: true)
@@ -207,6 +217,32 @@ final class SessionViewModel: ObservableObject {
     /// The app is going to the background: write the cache now, not later.
     func willResignActive() {
         saveCache(now: true)
+    }
+
+    /// The app is in the background (screen locked, or another app). With
+    /// Keep listening with the screen locked off, pause: stop the audio
+    /// (capture and playback) and tell the daemon we are muted, so it
+    /// closes a per-minute GPT-Live session. `becameActive` undoes it.
+    func enteredBackground() {
+        willResignActive()
+        guard !backgroundSuspended,
+              AudioLifecycle.suspendsInBackground(keepListeningWhenLocked: settings.keepListeningWhenLocked, connected: wantsConnection) else { return }
+        backgroundSuspended = true
+        audio.stop()
+        socket.muted = daemonMute
+        socket.send(.mute(true))
+        SheepdogLog.session.info("paused in the background (keep listening when locked is off)")
+        refresh()
+    }
+
+    private func resumeFromBackground() {
+        guard backgroundSuspended else { return }
+        backgroundSuspended = false
+        socket.muted = daemonMute
+        socket.send(.mute(daemonMute))
+        startAudioIfNeeded()
+        SheepdogLog.session.info("resumed from the background")
+        refresh()
     }
 
     /// Settings were saved: repoint everything without losing the conversation.
@@ -255,6 +291,7 @@ final class SessionViewModel: ObservableObject {
         eventsLife = .connecting
         connectionFailed = false
         tokenRefused = false
+        reconnectPolicy.reset()
         refresh()
         Task { await openSession() }
     }
@@ -276,7 +313,11 @@ final class SessionViewModel: ObservableObject {
         }
         guard wantsConnection else { return }
 
-        guard await AudioEngine.requestMicrophone() else {
+        let granted = await AudioEngine.requestMicrophone()
+        // The permission prompt can sit there for a while; End may have
+        // been tapped meanwhile.
+        guard wantsConnection else { return }
+        guard granted else {
             show(Banner(tone: .warning, message: AudioEngine.Failure.microphoneDenied.errorDescription ?? "", hint: nil, retryTitle: nil))
             // The session is still worth having: status and transcripts work
             // without a microphone.
@@ -287,7 +328,7 @@ final class SessionViewModel: ObservableObject {
     }
 
     private func openSocket() {
-        socket.muted = isMuted
+        socket.muted = daemonMute
         socket.gateClosed = false
         socket.connect()
         startEvents()
@@ -300,9 +341,11 @@ final class SessionViewModel: ObservableObject {
         wantsConnection = false
         socket.disconnect()
         audio.stop()
-        eventTask?.cancel(); eventTask = nil
-        refreshTask?.cancel(); refreshTask = nil
-        ticker?.cancel(); ticker = nil
+        stopSessionTasks()
+        backgroundSuspended = false
+        audioPaused = false
+        reconnectPolicy.reset()
+        muteSync.reset()
         socketLife = .closed
         eventsLife = .idle
         connectionFailed = false
@@ -323,6 +366,14 @@ final class SessionViewModel: ObservableObject {
         refresh()
     }
 
+    /// The loops that live only as long as the session: the event stream,
+    /// the periodic state refresh and the UI ticker.
+    private func stopSessionTasks() {
+        eventTask?.cancel(); eventTask = nil
+        refreshTask?.cancel(); refreshTask = nil
+        ticker?.cancel(); ticker = nil
+    }
+
     func toggleConnection() {
         wantsConnection ? disconnect() : connect()
     }
@@ -340,19 +391,24 @@ final class SessionViewModel: ObservableObject {
         setMuted(!isMuted)
     }
 
-    private func setMuted(_ muted: Bool) {
+    private func setMuted(_ requested: Bool) {
+        // Hold-to-talk hides Mute: a mute there could never be undone.
+        let muted = MuteSync.intent(requested: requested, talkMode: talkMode)
         guard muted != isMuted else { return }
         if muted { offerMuteHint() }
         isMuted = muted
-        socket.muted = muted
+        socket.muted = daemonMute
         if muted {
             // Stop the source first, so no frame can follow the message.
             audio.setMuted(true)
             socket.send(.mute(true))
         } else {
             // Tell the daemon first, so it does not drop the first frames.
-            socket.send(.mute(false))
+            socket.send(.mute(daemonMute))
             audio.setMuted(false)
+            // Capture starts on the running engine now, not on the
+            // daemon's status echo; start the engine if it is not up.
+            startAudioIfNeeded()
         }
         gateClosed = false
         socket.gateClosed = false
@@ -364,8 +420,10 @@ final class SessionViewModel: ObservableObject {
     private static let muteHintShownKey = "hint.mute.shown"
     private static let coachShownKey = "hint.coach.shown"
     private static let micTipShownKey = "hint.micmode.shown"
+    /// Every one-time hint, for `-sheepdogResetHints` / `-sheepdogResetState`.
+    static let hintKeys = [muteHintShownKey, coachShownKey, micTipShownKey]
 
-    // MARK: - Talk mode, hold to talk, the detector
+    // MARK: - Talk mode, hold to talk
 
     func setTalkMode(_ mode: TalkMode) {
         guard mode != talkMode else { return }
@@ -405,13 +463,6 @@ final class SessionViewModel: ObservableObject {
         if fakeVoice { setFakeGate(closed: true) }
         #endif
         refresh()
-    }
-
-    func setDetector(_ detector: CaptureGate.Detector) {
-        guard detector != self.detector else { return }
-        self.detector = detector
-        settings.detector = detector
-        audio.setDetector(detector)
     }
 
     // MARK: - Coach mark and the microphone-mode tip
@@ -468,7 +519,8 @@ final class SessionViewModel: ObservableObject {
         do {
             let list = try await client.voiceProviders()
             #if DEBUG
-            if list == nil, ProcessInfo.processInfo.arguments.contains("-sheepdogFakeProviders") {
+            // The fixture daemon (`--voice=off`) lists no providers.
+            if list?.providers.isEmpty ?? true, ProcessInfo.processInfo.arguments.contains("-sheepdogFakeProviders") {
                 voiceProviders = Self.fakeProviders(current: voiceProviders?.provider ?? "gemini")
                 return
             }
@@ -511,8 +563,8 @@ final class SessionViewModel: ObservableObject {
     }
 
     #if DEBUG
-    /// The contract's example, for screenshots against a daemon that does
-    /// not serve `/api/voice/providers` yet.
+    /// The contract's example, for screenshots against a daemon that lists
+    /// no voice providers (the `--voice=off` fixture daemon).
     static func fakeProviders(current: String) -> VoiceProviders {
         VoiceProviders(
             provider: current,
@@ -549,6 +601,7 @@ final class SessionViewModel: ObservableObject {
         socket.send(.cancel)
         speaking = false
         speakingHold.reset()
+        thinkingExpiry = nil
         Haptics.stop()
         refresh()
     }
@@ -582,6 +635,11 @@ final class SessionViewModel: ObservableObject {
             self.noMicSignal = noSignal
             if noSignal { Haptics.answerFailed() }
         }
+        audio.onPausedChanged = { [weak self] paused in
+            guard let self else { return }
+            self.audioPaused = paused
+            self.refresh()
+        }
         audio.onNotice = { [weak self] notice in
             guard let self else { return }
             self.reducer.apply(.notice(notice))
@@ -596,16 +654,29 @@ final class SessionViewModel: ObservableObject {
             connectionFailed = false
             tokenRefused = false
             banner = nil
+            reconnectPolicy.opened()
+            muteSync.reset()
             Haptics.connected()
         case let .control(message):
             handle(control: message)
         case let .audio(data):
+            // Paused in the background: nothing plays, and nothing piles
+            // up to play stale on return.
+            guard !backgroundSuspended else { break }
             audio.enqueue(data)
         case let .closed(reason, retrying):
+            // `fail` may already have ended the session this attempt
+            // belonged to; never show "Reconnecting…" for a dead one.
+            let retrying = retrying && wantsConnection
             socketLife = retrying ? .reconnecting : .closed
             audio.stop()
-            if !retrying {
+            if retrying {
+                reconnectPolicy.connectionLost(at: ProcessInfo.processInfo.systemUptime)
+            } else {
                 wantsConnection = false
+                eventsLife = .idle
+                stopSessionTasks()
+                reconnectPolicy.reset()
                 if reason == "replaced" {
                     show(Banner(
                         tone: .warning,
@@ -615,8 +686,21 @@ final class SessionViewModel: ObservableObject {
                     ))
                 }
             }
-        case let .failed(error):
-            fail(error)
+        case let .failed(error, retrying):
+            switch reconnectPolicy.failure(error, retrying: retrying, wantsConnection: wantsConnection, at: ProcessInfo.processInfo.systemUptime) {
+            case .stop:
+                fail(error)
+            case .keepRetrying(showBanner: false):
+                // A daemon restart: the orb says "Reconnecting…", quietly.
+                SheepdogLog.socket.info("reconnect attempt failed, retrying: \(error.message, privacy: .public)")
+            case .keepRetrying(showBanner: true):
+                show(Banner(
+                    tone: .warning,
+                    message: error.message,
+                    hint: "Still trying every few seconds. Tap End to stop.",
+                    retryTitle: "Try now"
+                ))
+            }
         }
         refresh()
     }
@@ -636,13 +720,14 @@ final class SessionViewModel: ObservableObject {
                 closedReason = nil
             }
             #endif
-            if let muted = message.muted, muted != isMuted {
-                // The daemon's view wins: it is the one dropping frames.
-                isMuted = muted
-                socket.muted = muted
-                audio.setMuted(muted)
-                gateClosed = false
-                socket.gateClosed = false
+            // The app owns mute: a daemon that disagrees is told again,
+            // never obeyed.
+            let intent = daemonMute
+            if case let .resend(log) = muteSync.status(daemonMuted: message.muted, intent: intent) {
+                if log {
+                    SheepdogLog.session.error("daemon reports muted=\(message.muted ?? false, privacy: .public) but the app wants muted=\(intent, privacy: .public); re-sending")
+                }
+                socket.send(.mute(intent))
             }
             applyVoiceStatus()
         case .transcript:
@@ -685,7 +770,14 @@ final class SessionViewModel: ObservableObject {
         }
         daemonVoiceOff = false
         saidVoiceIsOff = false
-        guard !audio.isRunning, !isMuted else { return }
+        startAudioIfNeeded()
+    }
+
+    /// The engine runs whenever the voice session is up — muted or not,
+    /// since it also plays what the dog says. Mute only gates capture.
+    private func startAudioIfNeeded() {
+        guard !audio.isRunning,
+              AudioLifecycle.engineShouldRun(socketOpen: socketLife == .open, voice: voiceStatus, suspended: backgroundSuspended) else { return }
         #if DEBUG
         if fakeVoice {
             setFakeGate(closed: talkMode == .holdToTalk)
@@ -693,7 +785,7 @@ final class SessionViewModel: ObservableObject {
         }
         #endif
         do {
-            try audio.start(background: settings.keepListeningWhenLocked)
+            try audio.start()
             metrics = audio.metrics
             // Hold-to-talk starts closed without a transition; tell the
             // daemon, which treats a new client as ungated.
@@ -736,6 +828,11 @@ final class SessionViewModel: ObservableObject {
                     }
                 } catch {
                     SheepdogLog.socket.error("event stream: \(String(describing: error), privacy: .public)")
+                    if case DaemonError.unauthorized = error {
+                        // A refused token does not fix itself by retrying.
+                        self.fail(.unauthorized(endpoint: self.endpointDisplay))
+                        return
+                    }
                     #if DEBUG
                     if ProcessInfo.processInfo.arguments.contains("-sheepdogShowStreamErrors") {
                         self.reducer.apply(.notice("event stream: \(error)"))
@@ -859,7 +956,7 @@ final class SessionViewModel: ObservableObject {
             while !Task.isCancelled {
                 let busy = self?.audioIsBusy ?? false
                 try? await Task.sleep(nanoseconds: busy ? 100_000_000 : 1_000_000_000)
-                guard let self else { return }
+                guard let self, !Task.isCancelled, self.wantsConnection else { return }
                 self.audio.tick()
                 self.metrics = self.audio.metrics
                 self.socket.gatedFrames = self.audio.gatedFrames
@@ -997,12 +1094,6 @@ final class SessionViewModel: ObservableObject {
                 let response = try await self.client.resetConversation(via: "app")
                 self.conversationResetSupported = ConversationResetAvailability(response: response).showsAction
                 guard response != nil else {
-                    #if DEBUG
-                    if ProcessInfo.processInfo.arguments.contains("-sheepdogFakeReset") {
-                        self.applyFakeReset()
-                        return
-                    }
-                    #endif
                     self.show(Banner(tone: .info, message: "This daemon doesn't have New conversation yet.", hint: nil, retryTitle: nil))
                     return
                 }
@@ -1023,23 +1114,6 @@ final class SessionViewModel: ObservableObject {
             }
         }
     }
-
-    #if DEBUG
-    /// `-sheepdogFakeReset`: screenshots and manual checks against a daemon
-    /// that does not serve `/api/conversation/reset` yet (the daemon side
-    /// was built in parallel). Runs the same `fold` the real event would,
-    /// rather than a second code path, with a synthetic id in the event
-    /// log's own scheme (microseconds since the epoch).
-    private func applyFakeReset() {
-        let seq = UInt64(Date().timeIntervalSince1970 * 1_000_000)
-        let event = DaemonEvent(seq: seq, ts: Date(), source: "app", type: "conversation.reset", payload: ["reset_id": .string("fake-\(seq)"), "via": .string("app")])
-        if history.fold(event) != nil { conversationChanged() }
-        reducer.apply(.reset)
-        conversationChanged()
-        conversationResetSupported = true
-        Haptics.newConversation()
-    }
-    #endif
 
     private func loadCache() {
         guard let endpoint = settings.endpoint, let snapshot = cache.load(for: endpoint) else {
@@ -1144,6 +1218,9 @@ final class SessionViewModel: ObservableObject {
         eventsLife = .idle
         socket.disconnect()
         audio.stop()
+        stopSessionTasks()
+        reconnectPolicy.reset()
+        backgroundSuspended = false
         refresh()
     }
 
@@ -1157,7 +1234,22 @@ final class SessionViewModel: ObservableObject {
 
     func retry() {
         banner = nil
-        connect()
+        reconnect()
+    }
+
+    /// The orb's "Audio paused by iOS — tap to resume".
+    func resumeAudio() {
+        do {
+            try audio.resume()
+        } catch {
+            show(Banner(
+                tone: .warning,
+                message: "iOS would not give the audio back (\(error.localizedDescription)).",
+                hint: "Finish the call or whatever is using audio, then tap the orb again.",
+                retryTitle: nil
+            ))
+        }
+        refresh()
     }
 
     /// The banner's button.
@@ -1205,10 +1297,9 @@ final class SessionViewModel: ObservableObject {
         let level = speakingNow ? Float(0.25 + 0.2 * sin(fakePhase)) : 0
         micLevel = level
         gateDiagnostics = CaptureGate.Diagnostics(
-            detector: detector,
             levelDBFS: speakingNow ? -31 + 4 * sin(fakePhase) : -58,
-            floorDBFS: detector == .voiceActivity ? -62 : nil,
-            marginDB: detector == .voiceActivity ? 6 : nil,
+            floorDBFS: -62,
+            marginDB: 6,
             isOpen: speakingNow,
             opens: 4,
             spuriousOpens: 0,
@@ -1233,7 +1324,8 @@ final class SessionViewModel: ObservableObject {
             muted: isMuted,
             gateClosed: gateClosed,
             speaking: heldSpeaking,
-            thinking: thinkingExpiry != nil
+            thinking: thinkingExpiry != nil,
+            audioPaused: audioPaused
         )
         let next = SessionState.resolve(inputs)
         if next != state {

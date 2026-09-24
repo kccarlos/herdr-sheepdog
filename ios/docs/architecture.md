@@ -329,11 +329,11 @@ frame:
    an initial "s" the band filter does not count — is never clipped.
 
 The `/ws` contract is unchanged: `{"type":"silence","on":…}` on every
-transition, frames only while open. `CaptureGate` wraps the detector, the
-old `SilenceGate` (Settings ▸ Voice detection ▸ *Use the old peak gate*, for
-comparison) and hold-to-talk's manual override, and emits a transition
-exactly when its visible state changes, so switching mid-session never
-leaves the daemon out of step. All tunables are in `VADTuning`.
+transition, frames only while open. `CaptureGate` wraps the detector and
+hold-to-talk's manual override, and emits a transition exactly when its
+visible state changes, so switching mid-session never leaves the daemon out
+of step. (The ported peak gate, `SilenceGate`, is gone: it only ever served
+as a comparison and it processed every frame.) All tunables are in `VADTuning`.
 
 **Tested with macOS text-to-speech.** `scripts/make-fixtures.sh` renders six
 voices (Samantha, Daniel, Karen, Moira, Fred, Rishi) with `say` and
@@ -371,7 +371,7 @@ room of others — where Fred's "Stop." is lost and the gate opens on the
 next words; it is asserted separately (at most two of six utterances late,
 mean coverage ≥ 80 %). Voice Isolation (below) is the answer for that room.
 The same room noise at −50 dBFS went through the old peak gate **100 %**
-and through the detector **0 %** (`testTheOldPeakGateStreamedTheRoomAndTheDetectorDoesNot`).
+and through the detector **0 %** (measured before the peak gate was removed).
 
 **Voice Isolation.** iOS's microphone modes (Standard, Voice Isolation,
 Wide Spectrum) apply before the app sees a sample, to apps using voice

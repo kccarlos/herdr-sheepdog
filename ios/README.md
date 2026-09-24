@@ -97,7 +97,7 @@ non-goal), so keep this to a network you trust — your LAN, or Tailscale.
   macOS text-to-speech in five kinds of noise — numbers in
   [`docs/architecture.md`](docs/architecture.md#voice-detection-what-gets-sent).
   Settings ▸ Voice detection shows the live level, noise floor, gate state
-  and spurious opens, with the browser's old peak gate there to compare.
+  and spurious opens.
 - **Just talk.** The status line says "Listening — just talk"; the mic
   button shows your level and only mutes ("Muted — tap to unmute"); a
   first-run coach mark says so. **Hold to talk** is an option in Settings.
@@ -158,14 +158,24 @@ non-goal), so keep this to a network you trust — your LAN, or Tailscale.
   a timed round trip, the daemon's version and voice name, the supervisor's
   model (`brain` on `/api/state`, when the daemon reports one), and
   Reconnect / Open Settings.
-- **Reconnects** with backoff after a drop. If another client takes the
+- **Reconnects** with backoff (up to 10 s) after a drop, through a daemon
+  restart: the orb says "Reconnecting…" quietly for the first 30 s, then a
+  banner says the daemon is unreachable while the app keeps trying until
+  you tap End. A refused token stops at once. If another client takes the
   session (the daemon serves one at a time) the app says so and waits for
   you rather than fighting for it.
-- **Background audio**, optional: a toggle in Settings keeps the session
-  alive with the screen locked.
+- **Keep listening with the screen locked** (Settings, on by default): the
+  session keeps running in the background. Turn it off and leaving the app
+  (locking the phone or switching apps) pauses the microphone and the
+  dog's voice and sends `mute` so the daemon can close a per-minute
+  GPT-Live session; both resume when you come back.
 - **Mute is only the microphone.** "Mute stops your microphone; Sheepdog can
   still talk." — the button's VoiceOver hint, and a one-time caption the
-  first time it is used.
+  first time it is used. The app owns the mute state: it says it to the
+  daemon on every connect (muted or not) and corrects a daemon that
+  disagrees rather than following it. Hold-to-talk never mutes.
+- **Calls and Siri.** When iOS will not hand the audio back after an
+  interruption, the orb says "Audio paused by iOS — tap to resume".
 
 ## What v1 does not do
 

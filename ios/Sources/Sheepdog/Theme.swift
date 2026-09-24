@@ -41,6 +41,7 @@ enum Theme {
         case .muted: return Color(red: 0.72, green: 0.27, blue: 0.27)
         case .stalled: return blocked
         case .voiceOff: return unknown
+        case .audioPaused: return blocked
         case .idle: return done
         case .connecting, .reconnecting: return blocked
         // The voice bar's orb is a Connect button here, so it wears the
@@ -60,6 +61,7 @@ enum Theme {
         case .muted: return "mic.slash.fill"
         case .stalled: return "hourglass"
         case .voiceOff: return "mic.slash"
+        case .audioPaused: return "play.fill"
         case .idle: return "checkmark"
         case .connecting, .reconnecting: return "arrow.triangle.2.circlepath"
         case .disconnected: return "waveform"

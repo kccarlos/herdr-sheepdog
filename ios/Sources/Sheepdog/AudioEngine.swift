@@ -58,11 +58,17 @@ final class AudioEngine {
     var onNotice: ((String) -> Void)?
     /// The microphone stopped (true) or resumed (false) delivering signal.
     var onMicSignal: ((Bool) -> Void)?
+    /// iOS paused the audio and would not resume it (true), or it was
+    /// resumed or stopped (false).
+    var onPausedChanged: ((Bool) -> Void)?
 
     private(set) var metrics = AudioMetrics()
     private(set) var isRunning = false
     private(set) var isMuted = false
     private(set) var isGateClosed = false
+    /// Running, but paused after an interruption iOS would not let us
+    /// resume from by ourselves: `resume()` is the way back.
+    private(set) var needsResume = false
 
     private let engine = AVAudioEngine()
     private let player = AVAudioPlayerNode()
@@ -112,12 +118,13 @@ final class AudioEngine {
 
     // MARK: - Lifecycle
 
-    /// Starts capture and playback. `background` keeps the session alive
-    /// with the screen locked (the Info.plist `audio` background mode plus
-    /// the Settings toggle).
-    func start(background: Bool) throws {
+    /// Starts capture and playback. With the Info.plist `audio` background
+    /// mode a running engine keeps the app alive with the screen locked;
+    /// the view model stops it on backgrounding when Settings ▸ Keep
+    /// listening with the screen locked is off.
+    func start() throws {
         guard !isRunning else { return }
-        try configureSession(background: background)
+        try configureSession()
 
         let input = engine.inputNode
         // `.voiceChat` alone does not cancel echo for AVAudioEngine; the
@@ -192,6 +199,8 @@ final class AudioEngine {
         converter?.reset()
         isRunning = false
         isGateClosed = false
+        interrupted = false
+        setNeedsResume(false)
         watchdog.disarm()
         reportSignal()
         setSpeaking(false)
@@ -213,18 +222,13 @@ final class AudioEngine {
                 onGate?(false)
             }
             onLevel?(0)
-        } else if isRunning {
+        } else if AudioLifecycle.watchdogShouldRun(running: isRunning, muted: false, interrupted: interrupted || needsResume) {
             watchdog.arm(at: CFAbsoluteTimeGetCurrent())
             restartedForSignal = false
         }
     }
 
     // MARK: - The gate
-
-    /// Which detector decides (Settings ▸ Diagnostics).
-    func setDetector(_ detector: CaptureGate.Detector) {
-        gate.detector = detector
-    }
 
     /// Hold-to-talk: `true` pressed, `false` released, `nil` open mic. The
     /// transition reaches the caller through `onGate` with the next frame.
@@ -271,7 +275,7 @@ final class AudioEngine {
         }
     }
 
-    private func configureSession(background: Bool) throws {
+    private func configureSession() throws {
         let session = AVAudioSession.sharedInstance()
         do {
             try session.setCategory(
@@ -283,7 +287,6 @@ final class AudioEngine {
             // the frames the contract wants.
             try session.setPreferredIOBufferDuration(0.04)
             try session.setActive(true, options: [])
-            _ = background
         } catch {
             throw Failure.sessionFailed(error.localizedDescription)
         }
@@ -328,13 +331,13 @@ final class AudioEngine {
             return
         }
         guard !samples.isEmpty else { return }
-        if let change = watchdog.observe(peak: SilenceGate.peak(of: samples), at: CFAbsoluteTimeGetCurrent()) {
+        if let change = watchdog.observe(peak: PCMLevel.peak(of: samples), at: CFAbsoluteTimeGetCurrent()) {
             signalChanged(change)
         }
 
         var level: Float = 0
         for frame in chunker.push(samples) {
-            let peak = SilenceGate.peak(of: frame)
+            let peak = PCMLevel.peak(of: frame)
             level = max(level, Float(peak) / 32_768)
             let out = gate.push(frame)
             if let transition = out.transition {
@@ -367,7 +370,8 @@ final class AudioEngine {
     /// Releases a short utterance that never filled the jitter buffer. Call
     /// from the UI timer.
     func tick() {
-        if isRunning, !isMuted, let change = watchdog.tick(at: CFAbsoluteTimeGetCurrent()) {
+        if AudioLifecycle.watchdogShouldRun(running: isRunning, muted: isMuted, interrupted: interrupted || needsResume),
+           let change = watchdog.tick(at: CFAbsoluteTimeGetCurrent()) {
             signalChanged(change)
         }
         let now = CFAbsoluteTimeGetCurrent()
@@ -514,13 +518,20 @@ final class AudioEngine {
             interrupted = true
             engine.pause()
             flushPlayback()
+            // Nothing can arrive while iOS holds the audio: silence now is
+            // not a broken microphone.
+            watchdog.disarm()
+            reportSignal()
             onNotice?("Paused for a call or Siri.")
         case .ended:
             guard interrupted else { return }
             interrupted = false
             let options = (note.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt).map(AVAudioSession.InterruptionOptions.init)
             guard options?.contains(.shouldResume) ?? true else {
-                onNotice?("iOS kept the audio for something else. Tap Connect to take it back.")
+                // Still "running" but paused: say so, and let the orb take
+                // it back.
+                setNeedsResume(true)
+                onNotice?("iOS kept the audio for something else. Tap the orb to resume.")
                 return
             }
             resumeAfterInterruption()
@@ -548,13 +559,36 @@ final class AudioEngine {
 
     private func resumeAfterInterruption() {
         do {
-            try AVAudioSession.sharedInstance().setActive(true, options: [])
-            try engine.start()
-            player.play()
+            try reactivate()
             onNotice?("Listening again.")
         } catch {
-            onNotice?("Could not pick the audio back up (\(error.localizedDescription)).")
+            setNeedsResume(true)
+            onNotice?("Could not pick the audio back up (\(error.localizedDescription)). Tap the orb to try again.")
         }
+    }
+
+    /// The orb's "tap to resume" after iOS paused the audio.
+    func resume() throws {
+        guard isRunning, needsResume else { return }
+        try reactivate()
+    }
+
+    private func reactivate() throws {
+        guard isRunning else { return }
+        try AVAudioSession.sharedInstance().setActive(true, options: [])
+        try engine.start()
+        player.play()
+        setNeedsResume(false)
+        if AudioLifecycle.watchdogShouldRun(running: isRunning, muted: isMuted, interrupted: false) {
+            watchdog.arm(at: CFAbsoluteTimeGetCurrent())
+            restartedForSignal = false
+        }
+    }
+
+    private func setNeedsResume(_ paused: Bool) {
+        guard paused != needsResume else { return }
+        needsResume = paused
+        onPausedChanged?(paused)
     }
 
     private func restartCapture() {

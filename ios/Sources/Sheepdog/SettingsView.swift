@@ -96,7 +96,7 @@ struct SettingsView: View {
                 Section {
                     Toggle("Keep listening with the screen locked", isOn: $keepListening)
                 } footer: {
-                    Text("Uses the audio background mode, so a session survives the lock screen. Turn it off to have iOS stop the microphone when you put the phone down.")
+                    Text("On: the session keeps running with the screen locked or in another app, so you can keep talking. Off: leaving the app pauses the microphone and \(model.voiceName)'s voice and tells the daemon you're muted (a per-minute voice session stops billing); both come back when you return.")
                 }
 
                 Section {
@@ -286,12 +286,10 @@ struct SettingsView: View {
         return Section {
             LabeledContent("Input level", value: CaptureGate.Diagnostics.format(dBFS: d.levelDBFS))
                 .accessibilityIdentifier("settings.diag.level")
-            if d.detector == .voiceActivity {
-                LabeledContent("Noise floor", value: CaptureGate.Diagnostics.format(dBFS: d.floorDBFS))
-                    .accessibilityIdentifier("settings.diag.floor")
-                if let margin = d.marginDB {
-                    LabeledContent("Opens at", value: String(format: "floor + %.0f dB", margin))
-                }
+            LabeledContent("Noise floor", value: CaptureGate.Diagnostics.format(dBFS: d.floorDBFS))
+                .accessibilityIdentifier("settings.diag.floor")
+            if let margin = d.marginDB {
+                LabeledContent("Opens at", value: String(format: "floor + %.0f dB", margin))
             }
             LabeledContent("Gate", value: gateWord(d))
                 .accessibilityIdentifier("settings.diag.gate")
@@ -299,15 +297,10 @@ struct SettingsView: View {
                 .accessibilityIdentifier("settings.diag.opens")
             LabeledContent("Microphone signal", value: micSignalWord)
                 .accessibilityIdentifier("settings.diag.signal")
-            Toggle("Use the old peak gate", isOn: Binding(
-                get: { model.detector == .peak },
-                set: { model.setDetector($0 ? .peak : .voiceActivity) }
-            ))
-            .accessibilityIdentifier("settings.diag.peakGate")
         } header: {
             Text("Voice detection")
         } footer: {
-            Text("Sheepdog sends audio only while the gate is open: when your voice is clearly above the room's noise floor (speech band, 300–3 400 Hz). A spurious open is one too short to be speech — a door, a cough. The old peak gate (the browser's) is here to compare; it lets almost any room noise through.")
+            Text("Sheepdog sends audio only while the gate is open: when your voice is clearly above the room's noise floor (speech band, 300–3 400 Hz). A spurious open is one too short to be speech — a door, a cough.")
         }
     }
 

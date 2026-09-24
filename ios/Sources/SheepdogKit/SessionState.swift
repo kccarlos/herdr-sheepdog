@@ -12,6 +12,9 @@ public enum SessionState: String, Equatable, Sendable, CaseIterable {
     /// The daemon runs without a voice session (`--voice=off`), or the
     /// session closed for good. Say so; never pretend to listen.
     case voiceOff
+    /// iOS paused the audio (a call, Siri) and would not let it resume by
+    /// itself. The orb is the resume button.
+    case audioPaused
     /// The model has not reacted to the last utterance for a while.
     case stalled
     /// The dog is talking.
@@ -45,6 +48,9 @@ public enum SessionState: String, Equatable, Sendable, CaseIterable {
         public var speaking: Bool
         /// A `voice.tool_call` is outstanding.
         public var thinking: Bool
+        /// The audio engine is paused after an interruption iOS would not
+        /// let it resume from.
+        public var audioPaused: Bool
 
         public init(
             socket: Socket = .closed,
@@ -54,7 +60,8 @@ public enum SessionState: String, Equatable, Sendable, CaseIterable {
             muted: Bool = false,
             gateClosed: Bool = false,
             speaking: Bool = false,
-            thinking: Bool = false
+            thinking: Bool = false,
+            audioPaused: Bool = false
         ) {
             self.socket = socket
             self.voice = voice
@@ -64,6 +71,7 @@ public enum SessionState: String, Equatable, Sendable, CaseIterable {
             self.gateClosed = gateClosed
             self.speaking = speaking
             self.thinking = thinking
+            self.audioPaused = audioPaused
         }
     }
 
@@ -77,6 +85,7 @@ public enum SessionState: String, Equatable, Sendable, CaseIterable {
         }
         if i.voice == .connecting || i.voice == .reconnecting { return .connecting }
         if i.voice == .closed { return .voiceOff }
+        if i.audioPaused { return .audioPaused }
         if i.speaking { return .speaking }
         if i.stalled { return .stalled }
         if i.thinking { return .thinking }
@@ -98,7 +107,7 @@ public enum SessionState: String, Equatable, Sendable, CaseIterable {
     public var capturing: Bool {
         switch self {
         case .listening, .silent, .speaking, .thinking, .stalled, .idle: return true
-        case .disconnected, .connecting, .reconnecting, .voiceOff, .muted: return false
+        case .disconnected, .connecting, .reconnecting, .voiceOff, .audioPaused, .muted: return false
         }
     }
 
@@ -109,6 +118,7 @@ public enum SessionState: String, Equatable, Sendable, CaseIterable {
         case .connecting: return "Connecting…"
         case .reconnecting: return "Reconnecting…"
         case .voiceOff: return "Voice is off on the daemon"
+        case .audioPaused: return "Audio paused by iOS — tap to resume"
         case .stalled: return "Waiting on the model"
         case .speaking: return "Speaking"
         case .thinking: return "Thinking"
@@ -126,6 +136,7 @@ public enum SessionState: String, Equatable, Sendable, CaseIterable {
         case .connecting: return "Connecting to the daemon"
         case .reconnecting: return "Connection dropped, reconnecting"
         case .voiceOff: return "The daemon has no voice session, so \(voiceName) cannot hear you"
+        case .audioPaused: return "iOS paused the audio. Tap to resume"
         case .stalled: return "\(voiceName) has not answered yet"
         case .speaking: return "\(voiceName) is speaking"
         case .thinking: return "\(voiceName) is looking something up"

@@ -9,7 +9,6 @@ public final class SettingsStore {
         static let hasBeenConfigured = "daemon.configured"
         static let tokenAccount = "daemon.token"
         static let talkMode = "voice.talkMode"
-        static let detector = "voice.detector"
     }
 
     private let defaults: UserDefaults
@@ -42,13 +41,6 @@ public final class SettingsStore {
     public var talkMode: TalkMode {
         get { defaults.string(forKey: Key.talkMode).flatMap(TalkMode.init(rawValue:)) ?? .openMic }
         set { defaults.set(newValue.rawValue, forKey: Key.talkMode) }
-    }
-
-    /// Which capture gate decides: the voice-activity detector (default) or
-    /// the browser's old peak gate, kept for comparison.
-    public var detector: CaptureGate.Detector {
-        get { defaults.string(forKey: Key.detector).flatMap(CaptureGate.Detector.init(rawValue:)) ?? .voiceActivity }
-        set { defaults.set(newValue.rawValue, forKey: Key.detector) }
     }
 
     /// False until the user has saved an address once; the first launch
