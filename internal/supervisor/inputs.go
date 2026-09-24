@@ -184,6 +184,7 @@ func (s *Supervisor) claimInput(ctx context.Context) (*shepherdInput, bool) {
 		s.mu.Lock()
 		if last := s.lastInputLocked(); last != nil && last.seq > s.relayedSeq && last.seq > s.pushSeq {
 			s.relayedSeq = s.inputSeq
+			s.acceptedSeq++
 			// Fragments still arriving for this turn stay with this call
 			// (heard); the next turn is a new input.
 			last.claimed = true
@@ -335,6 +336,7 @@ func (s *Supervisor) AnswerTap(ctx context.Context, id string, option int) (voic
 	// later to_supervisor call (the voice relaying the silent line below
 	// back, say).
 	s.relayedSeq = s.inputSeq
+	s.acceptedSeq++
 	in, reason := s.railInputLocked(p, o.Keys)
 	if reason != "" {
 		s.railBlockedLocked(p, o.Keys, "tap", reason)

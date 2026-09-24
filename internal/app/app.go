@@ -285,6 +285,7 @@ func (a *App) wire() error {
 		RepromptPoll:     time.Duration(cfg.Supervisor.RepromptPollS) * time.Second,
 		SnapshotInterval: time.Duration(cfg.SnapshotIntervalS) * time.Second,
 		AnnounceWait:     time.Duration(cfg.Brain.AnnounceWaitS) * time.Second,
+		ReplyWait:        replyWait(cfg, opts),
 		RepeatWindow:     time.Duration(cfg.Supervisor.RepeatWindowS) * time.Second,
 		AuthoriseWindow:  time.Duration(cfg.Supervisor.AuthoriseWindowS) * time.Second,
 
@@ -386,6 +387,18 @@ func initialVoiceProvider(cfg config.Config, opts Options) string {
 		return opts.Voice
 	}
 	return cfg.Voice.Provider
+}
+
+// replyWait is supervisor.Config.ReplyWait: brain.reply_wait_s, except
+// with --voice=off, where it is negative (always wait for the reply). No
+// voice said "on it" there and nothing fills the dead air; the /debug
+// text router shows the tool result it gets, and a late reply would only
+// reach the event log as a skipped push.
+func replyWait(cfg config.Config, opts Options) time.Duration {
+	if opts.Voice == VoiceOff {
+		return -1
+	}
+	return time.Duration(cfg.Brain.ReplyWaitS) * time.Second
 }
 
 // voiceProviders lists both voice providers for the switcher, the one

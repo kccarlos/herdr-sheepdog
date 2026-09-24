@@ -486,6 +486,43 @@ func TestSupervisorAuthoriseWindowConfig(t *testing.T) {
 	}
 }
 
+// TestBrainReplyWaitConfig covers brain.reply_wait_s: default, file, env
+// override, a negative value (the synchronous behaviour) accepted, and a
+// non-integer env value refused.
+func TestBrainReplyWaitConfig(t *testing.T) {
+	cfg, err := load(filepath.Join(t.TempDir(), "missing.toml"), noEnv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Brain.ReplyWaitS != 2 {
+		t.Errorf("default reply_wait_s = %d, want 2", cfg.Brain.ReplyWaitS)
+	}
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte("[brain]\nreply_wait_s = -1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = load(path, noEnv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Brain.ReplyWaitS != -1 {
+		t.Errorf("from file = %d, want -1", cfg.Brain.ReplyWaitS)
+	}
+	cfg, err = load(path, envFrom(map[string]string{"SHEEPDOG_BRAIN_REPLY_WAIT_S": "5"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Brain.ReplyWaitS != 5 {
+		t.Errorf("env override = %d, want 5", cfg.Brain.ReplyWaitS)
+	}
+	if !strings.Contains(cfg.String(), "brain.reply_wait_s=5") {
+		t.Errorf("String() = %s", cfg.String())
+	}
+	if _, err := load(path, envFrom(map[string]string{"SHEEPDOG_BRAIN_REPLY_WAIT_S": "soon"})); err == nil {
+		t.Error("a non-integer SHEEPDOG_BRAIN_REPLY_WAIT_S was accepted")
+	}
+}
+
 func TestBrainConfig(t *testing.T) {
 	cfg, err := load(filepath.Join(t.TempDir(), "missing.toml"), noEnv)
 	if err != nil {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
@@ -22,7 +23,9 @@ import (
 // inflightUtterance is the one to_supervisor call being handled, under
 // s.mu: what the CEO said, how to cancel the turn it is (or is about to
 // be) in, and whether the brain already has it. The stop procedure's
-// first two phases are this slot.
+// first two phases are this slot. It stays installed until the brain's
+// turn is over, which may be long after the tool call returned a pending
+// result (Config.ReplyWait), so a stop can still cancel that turn.
 type inflightUtterance struct {
 	text    string
 	cancel  context.CancelFunc
@@ -30,6 +33,52 @@ type inflightUtterance struct {
 	// dropped is set by the stop procedure: the reply is discarded
 	// rather than answered, so these words reach no worker after all.
 	dropped bool
+
+	// id names the utterance on brain.reply_* and on its late push
+	// (voice.push {answers_utterance}).
+	id string
+	// accepted is s.acceptedSeq once this call was accepted: when it has
+	// moved by the time a late reply lands, the shepherd asked for
+	// something else meanwhile and the reply is stale.
+	accepted uint64
+	// detached is set when the tool call gave up waiting and returned a
+	// pending result: the turn's goroutine then delivers the reply as a
+	// push. done is set, with out, when the turn finished first; finished
+	// is closed then. All three under s.mu, so exactly one side answers.
+	detached bool
+	done     bool
+	out      utteranceOutcome
+	finished chan struct{}
+}
+
+// utteranceOutcome is what one utterance turn produced. ok is false
+// when there was no brain, or it could not answer, and the daemon must
+// speak for itself.
+type utteranceOutcome struct {
+	res voice.ToolResult
+	ok  bool
+	// acted: the turn sent something to a worker or recorded something
+	// (brain.Reply.Acted).
+	acted bool
+	// needsUser: the reply says the shepherd must decide or act.
+	needsUser bool
+}
+
+// replyPendingDetail is the silent pending result's detail: context for
+// the voice model's follow-ups, never read aloud. The voice already said
+// "on it" as it called the tool, so the result adds no speech of its own.
+const replyPendingDetail = "Still working on it; the answer follows on its own."
+
+// callIDKey carries the voice's tool call id from Handler to
+// ToSupervisor, for brain.reply_pending.
+type callIDKey struct{}
+
+// withCallID returns ctx carrying the voice's tool call id.
+func withCallID(ctx context.Context, id string) context.Context {
+	if id == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, callIDKey{}, id)
 }
 
 // ToSupervisor handles the voice's relay tool: the CEO's words, verbatim.
@@ -67,32 +116,219 @@ func (s *Supervisor) ToSupervisor(ctx context.Context, text string) (voice.ToolR
 	if res, ok := s.resetConfirmFastPath(ctx, text); ok {
 		return res, nil
 	}
-	turnCtx, u := s.beginUtterance(ctx, text)
-	defer s.endUtterance(u)
+	if s.cfg.ReplyWait < 0 {
+		// Synchronous: the turn runs under the tool call's own context
+		// and its reply is always the tool result.
+		turnCtx, u := s.beginUtterance(ctx, text)
+		defer s.endUtterance(u)
+		if res, ok := s.fastAnswer(turnCtx, in); ok {
+			return res, nil
+		}
+		return s.inlineResult(turnCtx, u, s.utteranceTurn(turnCtx, u, text)), nil
+	}
+	// The turn is detached from the tool call: the voice cancels a
+	// handler's context as soon as the handler returns, and the turn may
+	// outlive it. Like an investigation job it runs on its own context,
+	// bounded by the brain's own turn timeout; the stop procedure cancels
+	// it through the slot.
+	turnCtx, u := s.beginUtterance(context.Background(), text)
 	if res, ok := s.fastAnswer(turnCtx, in); ok {
+		s.endUtterance(u)
 		return res, nil
 	}
-	res, ok := s.utteranceTurn(turnCtx, u, text)
-	if u.stopped() || turnCtx.Err() != nil {
+	return s.awaitReply(ctx, turnCtx, u, text), nil
+}
+
+// awaitReply runs the utterance turn detached and waits up to
+// Config.ReplyWait for it (docs/roles.md "Status"). A reply inside the
+// wait is the tool result, exactly as a synchronous call's would be.
+// Past it the call returns a silent pending result at once — the voice
+// said "on it" as it called the tool, and a second acknowledgement would
+// only repeat it — and the reply is pushed when it lands (deliverLate).
+// A voice that drops the call meanwhile (the shepherd barged in) gets
+// the same treatment: its result would be discarded, so the reply goes
+// the late way too.
+func (s *Supervisor) awaitReply(ctx, turnCtx context.Context, u *inflightUtterance, text string) voice.ToolResult {
+	start := s.cfg.Now()
+	s.replies.Add(1)
+	go func() {
+		defer s.replies.Done()
+		out := s.utteranceTurn(turnCtx, u, text)
+		s.mu.Lock()
+		if !u.detached {
+			u.out, u.done = out, true
+			s.mu.Unlock()
+			close(u.finished)
+			return
+		}
+		s.mu.Unlock()
+		s.deliverLate(turnCtx, u, out, start)
+	}()
+	timer := time.NewTimer(s.cfg.ReplyWait)
+	defer timer.Stop()
+	select {
+	case <-u.finished:
+	case <-timer.C:
+	case <-ctx.Done():
+	}
+	s.mu.Lock()
+	switch {
+	case !u.done:
+		u.detached = true
+		s.mu.Unlock()
+	case ctx.Err() != nil:
+		// The reply landed just as the voice dropped the call: the tool
+		// result would be discarded, so it is pushed instead.
+		out := u.out
+		s.mu.Unlock()
+		s.replies.Add(1)
+		go func() {
+			defer s.replies.Done()
+			s.deliverLate(turnCtx, u, out, start)
+		}()
+	default:
+		out := u.out
+		s.mu.Unlock()
+		defer s.endUtterance(u)
+		return s.inlineResult(turnCtx, u, out)
+	}
+	payload := map[string]any{"id": u.id, "waited_ms": s.cfg.Now().Sub(start).Milliseconds()}
+	if id, ok := ctx.Value(callIDKey{}).(string); ok {
+		payload["call_id"] = id
+	}
+	s.log.Log(logSource, "brain.reply_pending", "", payload)
+	return voice.ToolResult{Detail: replyPendingDetail, Pending: true, Scheduling: voice.UrgencySilent}
+}
+
+// inlineResult turns a finished turn into the tool result: dropped when
+// the stop procedure (or the voice) cancelled it, the reply when there
+// is one, else the roster sentence.
+func (s *Supervisor) inlineResult(turnCtx context.Context, u *inflightUtterance, out utteranceOutcome) voice.ToolResult {
+	if s.utteranceDropped(u) || turnCtx.Err() != nil {
 		// Stopped, or the voice cancelled the call: the stop procedure
 		// speaks, and the brain's reply is discarded.
-		return droppedResult(), nil
+		return droppedResult()
 	}
-	if ok {
+	if out.ok {
 		// A reply that named an agent counts as dealing with it, like a
 		// spoken briefing does (the normal level's chattiness rule).
-		s.mentionedIn(res.Spoken)
-		return res, nil
+		s.mentionedIn(out.res.Spoken)
+		return out.res
 	}
-	return s.noBrain(), nil
+	return s.noBrain()
+}
+
+// deliverLate pushes the reply of a turn that outlived its tool call,
+// tagged answers_utterance, and ends its slot. A stopped turn delivers
+// nothing. A reply is stale once the shepherd's next request was
+// accepted (acceptedSeq moved): the shepherd has moved on, so a turn
+// that did nothing is dropped, and one that acted is pushed silent — the
+// voice must still know what was done, but it is no longer the answer to
+// what is being discussed. Otherwise the reply is spoken at the next
+// pause, with its subject in front when it is about one agent, and a
+// failed turn gives the roster sentence exactly as the inline path does.
+func (s *Supervisor) deliverLate(turnCtx context.Context, u *inflightUtterance, out utteranceOutcome, start time.Time) {
+	cancelled := turnCtx.Err() != nil
+	s.mu.Lock()
+	dropped := u.dropped
+	stale := s.acceptedSeq != u.accepted
+	if s.utterance == u {
+		s.utterance = nil
+	}
+	s.mu.Unlock()
+	u.cancel()
+	if dropped || cancelled {
+		return
+	}
+	if stale {
+		s.log.Log(logSource, "brain.reply_stale", "", map[string]any{"id": u.id, "acted": out.acted})
+		if !out.ok || !out.acted {
+			return
+		}
+	}
+	var paneID, line string
+	urgency := voice.UrgencyIdle
+	if out.ok {
+		paneID, line = s.lateLine(out.res, u.text)
+		if out.needsUser && s.answerPromptOpen() {
+			// The shepherd must decide on an open prompt: the reply may
+			// ask for the floor, but it is not tagged needs_user — that
+			// exception is a decision on a block the push itself brings
+			// (announce.go's announceTags), so the voice still waits out
+			// its own sentence (docs/roles.md "Pushes").
+			urgency = voice.UrgencyInterrupt
+		}
+	} else {
+		line = s.noBrain().Spoken
+	}
+	if stale {
+		urgency = voice.UrgencySilent
+	} else if out.ok {
+		s.mentionedIn(out.res.Spoken)
+	}
+	s.pushTagged(paneID, line, urgency, map[string]any{"answers_utterance": u.id})
+	s.log.Log(logSource, "brain.reply_delivered", paneID, map[string]any{
+		"id": u.id, "dur_ms": s.cfg.Now().Sub(start).Milliseconds(), "urgency": urgency.String(), "acted": out.acted, "fallback": !out.ok,
+	})
+}
+
+// lateLine is the pushed form of a late reply: its subject in front when
+// it is about one agent ("About auth: …") unless it already opens with
+// that agent's name — heard out of the blue, it must say what it is
+// about — and its options as a choice, as the voice would have read them
+// from a tool result. The spoken text and options are already D9-scrubbed
+// (toolResultFrom); detail stays out, since everything pushed is spoken.
+func (s *Supervisor) lateLine(res voice.ToolResult, asked string) (paneID, line string) {
+	line = res.Spoken
+	if len(res.Options) > 0 {
+		line += " Options: " + strings.Join(res.Options, "; ") + "."
+	}
+	row, ok := s.subjectOf(res.Spoken, asked)
+	if !ok {
+		return "", line
+	}
+	alias := aliasOr(row.Alias)
+	if !strings.HasPrefix(strings.ToLower(res.Spoken), strings.ToLower(alias)) {
+		line = "About " + alias + ": " + line
+	}
+	return row.PaneID, line
+}
+
+// subjectOf is the one agent a reply is about: the one it names, else —
+// when it names none — the one the shepherd's words named. Several named
+// means no single subject.
+func (s *Supervisor) subjectOf(spoken, asked string) (state.Agent, bool) {
+	for _, text := range []string{spoken, asked} {
+		lower := strings.ToLower(text)
+		var named []state.Agent
+		for _, row := range s.store.List() {
+			if row.Alias != "" && strings.Contains(lower, strings.ToLower(row.Alias)) {
+				named = append(named, row)
+			}
+		}
+		if len(named) > 0 {
+			return named[0], len(named) == 1
+		}
+	}
+	return state.Agent{}, false
+}
+
+// answerPromptOpen reports whether a worker's approval prompt is waiting
+// for the shepherd.
+func (s *Supervisor) answerPromptOpen() bool {
+	p, has := s.store.Pending()
+	return has && p.Kind == state.PendingAnswerPrompt
 }
 
 // beginUtterance installs the in-flight slot and returns the turn's
-// cancellable context (the stop procedure cancels it).
-func (s *Supervisor) beginUtterance(ctx context.Context, text string) (context.Context, *inflightUtterance) {
-	turnCtx, cancel := context.WithCancel(ctx)
-	u := &inflightUtterance{text: text, cancel: cancel}
+// cancellable context, derived from parent (the stop procedure cancels
+// it).
+func (s *Supervisor) beginUtterance(parent context.Context, text string) (context.Context, *inflightUtterance) {
+	turnCtx, cancel := context.WithCancel(parent)
+	u := &inflightUtterance{text: text, cancel: cancel, finished: make(chan struct{})}
 	s.mu.Lock()
+	u.id = s.nextID("utt")
+	u.accepted = s.acceptedSeq
 	// A second utterance while one is in flight only takes the slot over:
 	// the older turn is left to finish (the brain's turn lock serialises
 	// them anyway); cancelling it would lose what it was doing.
@@ -112,11 +348,28 @@ func (s *Supervisor) endUtterance(u *inflightUtterance) {
 	u.cancel()
 }
 
-// stopped reports whether the stop procedure dropped this utterance.
-func (u *inflightUtterance) stopped() bool {
+// abandonUtterance cancels the utterance in flight, if any, so it
+// delivers nothing (the daemon is going down).
+func (s *Supervisor) abandonUtterance() {
+	s.mu.Lock()
+	u := s.utterance
+	if u != nil {
+		u.dropped = true
+		s.utterance = nil
+	}
+	s.mu.Unlock()
+	if u != nil {
+		u.cancel()
+	}
+}
+
+// utteranceDropped reports whether the stop procedure dropped u.
+func (s *Supervisor) utteranceDropped(u *inflightUtterance) bool {
 	if u == nil {
 		return false
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return u.dropped
 }
 
@@ -129,10 +382,10 @@ func droppedResult() voice.ToolResult {
 // utteranceTurn runs one brain turn over the CEO's words. ok is false
 // when there was no brain, or it could not answer, and the daemon must
 // speak for itself; a turn the stop procedure cancelled never returns
-// ok, and the caller checks u.stopped() rather than falling through.
-func (s *Supervisor) utteranceTurn(ctx context.Context, u *inflightUtterance, text string) (voice.ToolResult, bool) {
+// ok, and the caller checks utteranceDropped rather than falling through.
+func (s *Supervisor) utteranceTurn(ctx context.Context, u *inflightUtterance, text string) utteranceOutcome {
 	if s.brain == nil {
-		return voice.ToolResult{}, false
+		return utteranceOutcome{}
 	}
 	// The roster sentence travels with the request, so a status question
 	// costs no tool call (D1-revised); the pending prompt with its
@@ -153,13 +406,13 @@ func (s *Supervisor) utteranceTurn(ctx context.Context, u *inflightUtterance, te
 	s.mu.Unlock()
 	rep, err := s.brain.Turn(ctx, req)
 	if err != nil {
-		return voice.ToolResult{}, false
+		return utteranceOutcome{}
 	}
 	res := toolResultFrom(brain.KindUtterance, rep)
 	if res.Spoken == "" {
-		return voice.ToolResult{}, false
+		return utteranceOutcome{acted: rep.Acted}
 	}
-	return res, true
+	return utteranceOutcome{res: res, ok: true, acted: rep.Acted, needsUser: rep.NeedsUser}
 }
 
 // The bare fast-path words (docs/roles.md "One decision-maker"). *Bare*

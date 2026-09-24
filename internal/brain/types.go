@@ -178,6 +178,12 @@ type Reply struct {
 	// and never by the model: the supervisor names it when it drops a
 	// line that came too late (brain.push_late).
 	Turn int `json:"-"`
+	// Acted is set by the brain, never the model, when the turn sent
+	// something to a worker or recorded something (prompt, send_keys,
+	// interrupt, investigate, promise, note): the supervisor keeps a late
+	// utterance reply that acted as silent context rather than dropping it
+	// (internal/supervisor/utterance.go).
+	Acted bool `json:"-"`
 }
 
 // Promise events and statuses (state.Promise mirrors them; the brain

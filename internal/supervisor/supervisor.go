@@ -107,6 +107,13 @@ type Config struct {
 	// (default 2 s). Past it the brain's line is dropped, never spoken
 	// after the sentence. Negative waits for the turn's own timeout.
 	AnnounceWait time.Duration
+	// ReplyWait is how long a to_supervisor call waits for the brain's
+	// reply before it returns a silent pending result and the reply is
+	// pushed when it lands (default 2 s, brain.reply_wait_s; utterance.go).
+	// The voice already said "on it" as it called the tool, so a longer
+	// wait is only dead air. Negative waits for the whole turn: the reply
+	// is always the tool result (--voice=off, brain-test).
+	ReplyWait time.Duration
 	// RepeatWindow is how long an unchanged roster sentence counts as
 	// "already reported" (default 60 s, supervisor.repeat_window_s,
 	// docs/issues-2026-09-18.md "Smaller items"): a status question
@@ -165,6 +172,9 @@ func (c Config) withDefaults() Config {
 	}
 	if c.AnnounceWait == 0 {
 		c.AnnounceWait = 2 * time.Second
+	}
+	if c.ReplyWait == 0 {
+		c.ReplyWait = 2 * time.Second
 	}
 	if c.RepeatWindow == 0 {
 		c.RepeatWindow = 60 * time.Second
@@ -249,6 +259,15 @@ type Supervisor struct {
 	inputSeq   uint64
 	relayedSeq uint64
 	pushSeq    uint64
+	// acceptedSeq counts the shepherd's requests the daemon took up: every
+	// to_supervisor call claimInput accepted, and every tap. A late
+	// utterance reply is stale once it moved on (utterance.go). Unlike
+	// relayedSeq it never moves for transcript fragments that trail the
+	// same relay.
+	acceptedSeq uint64
+	// replies tracks the detached utterance turns (utterance.go), so a test
+	// can wait for a late reply to land.
+	replies sync.WaitGroup
 	// inputWake is closed and replaced whenever an input arrives, for a
 	// call waiting out InputGrace.
 	inputWake chan struct{}
@@ -315,6 +334,9 @@ func (s *Supervisor) Run(ctx context.Context) {
 	// The sub-agent of a running investigation dies with the daemon, so
 	// nothing is left claiming an agent's one live slot.
 	defer s.cancelInvestigations("shutdown")
+	// Likewise a shepherd turn still running past its tool call: its
+	// reply would have nobody to reach (utterance.go).
+	defer s.abandonUtterance()
 	// Once at startup, the roster is already loaded (state.Open ran
 	// before New): catches a pane whose prompt changed while the daemon
 	// was down, which no post-answer poll ever ran for.

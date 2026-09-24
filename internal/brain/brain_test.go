@@ -593,7 +593,7 @@ func TestActedThenBudgetIsNotFallback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
-	if rep.Spoken != "Telling auth to rerun the flaky test. Sent." {
+	if rep.Spoken != "Telling auth to rerun the flaky test. Sent." || !rep.Acted {
 		t.Errorf("reply = %+v", rep)
 	}
 	if len(h.host.Prompts) != 1 || h.host.Prompts[0] != [2]string{"w5:p1", "rerun the flaky test"} {
