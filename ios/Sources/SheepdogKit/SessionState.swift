@@ -32,14 +32,8 @@ public enum SessionState: String, Equatable, Sendable, CaseIterable {
 
     /// The inputs the state is derived from.
     public struct Inputs: Equatable, Sendable {
-        public enum Socket: String, Equatable, Sendable {
-            case closed, connecting, open, reconnecting
-        }
-
-        public var socket: Socket
+        public var socket: SocketLife
         public var voice: WSMessage.Voice?
-        /// `reason` of a `closed` status; `voice_off` is the honest one.
-        public var closedReason: String?
         public var stalled: Bool
         public var muted: Bool
         /// The silence gate is closed: nothing is being sent.
@@ -53,9 +47,8 @@ public enum SessionState: String, Equatable, Sendable, CaseIterable {
         public var audioPaused: Bool
 
         public init(
-            socket: Socket = .closed,
+            socket: SocketLife = .idle,
             voice: WSMessage.Voice? = nil,
-            closedReason: String? = nil,
             stalled: Bool = false,
             muted: Bool = false,
             gateClosed: Bool = false,
@@ -65,7 +58,6 @@ public enum SessionState: String, Equatable, Sendable, CaseIterable {
         ) {
             self.socket = socket
             self.voice = voice
-            self.closedReason = closedReason
             self.stalled = stalled
             self.muted = muted
             self.gateClosed = gateClosed
@@ -78,7 +70,7 @@ public enum SessionState: String, Equatable, Sendable, CaseIterable {
     /// The whole state machine: one ordered set of rules, most urgent first.
     public static func resolve(_ i: Inputs) -> SessionState {
         switch i.socket {
-        case .closed: return .disconnected
+        case .idle: return .disconnected
         case .connecting: return .connecting
         case .reconnecting: return .reconnecting
         case .open: break

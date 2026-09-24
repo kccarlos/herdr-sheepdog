@@ -280,17 +280,6 @@ public struct VoiceActivityDetector: Sendable {
         guard meanSquare > 0 else { return silenceDBFS }
         return max(silenceDBFS, 10 * log10(meanSquare / (32_768.0 * 32_768.0)))
     }
-
-    /// RMS of a frame, dBFS.
-    public static func rmsDBFS(of frame: [Int16]) -> Double {
-        guard !frame.isEmpty else { return silenceDBFS }
-        var total = 0.0
-        for s in frame {
-            let v = Double(s)
-            total += v * v
-        }
-        return dbfs(meanSquare: total / Double(frame.count))
-    }
 }
 
 /// A 2nd-order Butterworth high-pass followed by a 2nd-order low-pass

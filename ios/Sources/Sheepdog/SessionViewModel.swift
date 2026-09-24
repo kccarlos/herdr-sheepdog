@@ -28,8 +28,11 @@ final class SessionViewModel: ObservableObject {
 
     // MARK: - Published state
 
-    @Published private(set) var state: SessionState = .disconnected
-    @Published private(set) var bubbles: [ConversationReducer.Bubble] = []
+    /// `offerListeningHints()` reacts here, at the one place `state`
+    /// actually changes, instead of inline in `refresh()`'s derivation.
+    @Published private(set) var state: SessionState = .disconnected {
+        didSet { if state != oldValue { offerListeningHints() } }
+    }
     /// The conversation as the screen lists it: history, live bubbles and
     /// the dividers between them.
     @Published private(set) var rows: [TimelineRow] = []
@@ -40,10 +43,20 @@ final class SessionViewModel: ObservableObject {
     /// The one-time caption under the controls the first time Mute is used.
     @Published private(set) var showMuteHint = false
     @Published private(set) var agents: [Agent] = []
-    @Published private(set) var pendingAction: PendingAction?
-    @Published private(set) var hello: Hello?
-    @Published private(set) var micLevel: Float = 0
-    @Published private(set) var metrics = AudioMetrics()
+    private(set) var pendingAction: PendingAction?
+    /// Four sources feed `resolvedVoiceProvider`; each tells the audio
+    /// engine's jitter-buffer profile explicitly when it changes, rather
+    /// than `refresh()` re-deriving and re-setting it as a side effect on
+    /// every call regardless of whether anything provider-related moved.
+    @Published private(set) var hello: Hello? {
+        didSet { audio.setProvider(resolvedVoiceProvider) }
+    }
+    /// The input level, the audio metrics and the voice-detection
+    /// diagnostics: everything that changes 10–25 times a second while
+    /// audio is moving, split out so this object's own `@Published`
+    /// properties (and the views that only read those) stay quiet on every
+    /// tick. See `VoiceMeter`.
+    let meter = VoiceMeter()
     /// The daemon connection's own health — the `/ws` socket, the `/events`
     /// stream and the token — independent of the voice state. Drives the
     /// top-left chip.
@@ -55,9 +68,6 @@ final class SessionViewModel: ObservableObject {
     /// daemon's own answer to `POST /api/conversation/reset` (a 404 hides
     /// it), optimistic (shown) until then.
     @Published private(set) var conversationResetSupported = true
-    /// When the current conversation started (`/api/state`'s
-    /// `conversation_started_at`), on a daemon that reports it.
-    @Published private(set) var conversationStartedAt: Date?
     @Published var banner: Banner?
     @Published var isMuted = false
 
@@ -67,7 +77,6 @@ final class SessionViewModel: ObservableObject {
     @Published private(set) var holding = false
     /// The microphone delivers only digital zero while unmuted.
     @Published private(set) var noMicSignal = false
-    @Published private(set) var gateDiagnostics = CaptureGate.Diagnostics()
     /// The first-run "just talk" coach mark.
     @Published private(set) var showCoachMark = false
     /// Control Center ▸ Mic Mode, as iOS reports it.
@@ -76,12 +85,18 @@ final class SessionViewModel: ObservableObject {
 
     // The voice provider (GET/PUT /api/voice/provider[s]).
     /// nil until loaded, and when the daemon has no provider API (404).
-    @Published private(set) var voiceProviders: VoiceProviders?
+    @Published private(set) var voiceProviders: VoiceProviders? {
+        didSet { audio.setProvider(resolvedVoiceProvider) }
+    }
     @Published private(set) var switchingProvider = false
     @Published var providerError: String?
     /// From the `/ws` status message, `/api/state` and `/api/hello`.
-    @Published private(set) var liveVoiceProvider: String?
-    @Published private(set) var stateVoiceProvider: String?
+    @Published private(set) var liveVoiceProvider: String? {
+        didSet { audio.setProvider(resolvedVoiceProvider) }
+    }
+    @Published private(set) var stateVoiceProvider: String? {
+        didSet { audio.setProvider(resolvedVoiceProvider) }
+    }
     @Published private(set) var stateVoiceModel: String?
     /// True from the moment Connect is tapped until Disconnect.
     @Published private(set) var wantsConnection = false
@@ -94,9 +109,17 @@ final class SessionViewModel: ObservableObject {
         VoiceBarModel.statusLine(state: state, talkMode: talkMode, holding: holding, noSignal: noMicSignal)
     }
 
+    /// The voice provider id, from whichever source knows it right now: the
+    /// live `/ws` status, the provider picker's own state, `/api/state`, or
+    /// `/api/hello` — in that order of freshness. One resolver instead of
+    /// this fallback chain copied at each of its two call sites.
+    private var resolvedVoiceProvider: String? {
+        liveVoiceProvider ?? voiceProviders?.provider ?? stateVoiceProvider ?? hello?.voiceProvider
+    }
+
     /// "Gemini Live · gemini-3.8-live", from whichever source knows.
     var voiceProviderDisplay: String? {
-        let id = liveVoiceProvider ?? voiceProviders?.provider ?? stateVoiceProvider ?? hello?.voiceProvider
+        let id = resolvedVoiceProvider
         let option = voiceProviders?.providers.first { $0.id == id }
         let model = (id == voiceProviders?.provider ? voiceProviders?.model : nil)
             ?? (id == stateVoiceProvider ? stateVoiceModel : nil)
@@ -107,9 +130,6 @@ final class SessionViewModel: ObservableObject {
     var daemonVersion: String? { hello?.version }
     var endpointDisplay: String { settings.endpoint?.display ?? "not set" }
     var isConfigured: Bool { settings.endpoint != nil }
-
-    /// The agent the flock strip highlights: the one that is blocked.
-    var blockedAgent: Agent? { agents.first { $0.state == .blocked } }
 
     func pendingQuestion(for agent: Agent) -> String? {
         guard let pending = pendingAction, pending.paneID == agent.paneID else { return nil }
@@ -124,7 +144,12 @@ final class SessionViewModel: ObservableObject {
     private let audio = AudioEngine()
     private var reducer = ConversationReducer()
     private var history = ConversationHistory()
-    private var approvalFlow = ApprovalFlow()
+    /// `approval` (the one thing the views read) is derived from this on
+    /// every mutation — a single `didSet`, not a copy hand-written at each
+    /// of the half-dozen call sites that used to change `approvalFlow`.
+    private var approvalFlow = ApprovalFlow() {
+        didSet { approval = approvalFlow.card }
+    }
     private let cache: ConversationCache
     private var saveTask: Task<Void, Never>?
     private var historySyncTask: Task<Void, Never>?
@@ -143,13 +168,12 @@ final class SessionViewModel: ObservableObject {
     private var speaking = false
     /// Hysteresis on `speaking` for the orb: 800 ms across playback gaps.
     private var speakingHold = SpeakingHold()
-    private var daemonVoiceOff = false
     /// The "voice is off" notice is said once per session, not per status.
     private var saidVoiceIsOff = false
-    private var socketLife: SessionState.Inputs.Socket = .closed
+    private var socketLife: SocketLife = .idle
     /// The `/events` stream's own life, for the connection chip — separate
     /// from the voice socket, since either can be up while the other isn't.
-    private var eventsLife: ConnectionChip.Inputs.State = .idle
+    private var eventsLife: SocketLife = .idle
     /// A connection attempt ended in a failure `VoiceSocket` will not retry
     /// by itself (set in `fail(_:)`, cleared on the next attempt or once
     /// the socket opens).
@@ -177,8 +201,7 @@ final class SessionViewModel: ObservableObject {
         talkMode = settings.talkMode
         if talkMode == .holdToTalk { audio.setManualGate(false) }
         #if DEBUG
-        let arguments = ProcessInfo.processInfo.arguments
-        if arguments.contains("-sheepdogResetHints") || arguments.contains("-sheepdogResetState") {
+        if DebugLaunch.resetHints || DebugLaunch.resetState {
             for key in Self.hintKeys {
                 UserDefaults.standard.removeObject(forKey: key)
             }
@@ -258,7 +281,6 @@ final class SessionViewModel: ObservableObject {
             // Another daemon, another conversation.
             reducer.clear()
             approvalFlow.reset()
-            approval = nil
             loadCache()
             conversationChanged(save: false)
             // Learned per daemon: a different one gets the benefit of the
@@ -346,7 +368,7 @@ final class SessionViewModel: ObservableObject {
         audioPaused = false
         reconnectPolicy.reset()
         muteSync.reset()
-        socketLife = .closed
+        socketLife = .idle
         eventsLife = .idle
         connectionFailed = false
         tokenRefused = false
@@ -358,7 +380,7 @@ final class SessionViewModel: ObservableObject {
         speaking = false
         speakingHold.reset()
         thinkingExpiry = nil
-        micLevel = 0
+        meter.setLevel(0)
         holding = false
         noMicSignal = false
         liveVoiceProvider = nil
@@ -372,10 +394,6 @@ final class SessionViewModel: ObservableObject {
         eventTask?.cancel(); eventTask = nil
         refreshTask?.cancel(); refreshTask = nil
         ticker?.cancel(); ticker = nil
-    }
-
-    func toggleConnection() {
-        wantsConnection ? disconnect() : connect()
     }
 
     /// The chip popover's Reconnect button: a clean disconnect (if one is
@@ -520,7 +538,7 @@ final class SessionViewModel: ObservableObject {
             let list = try await client.voiceProviders()
             #if DEBUG
             // The fixture daemon (`--voice=off`) lists no providers.
-            if list?.providers.isEmpty ?? true, ProcessInfo.processInfo.arguments.contains("-sheepdogFakeProviders") {
+            if list?.providers.isEmpty ?? true, DebugLaunch.fakeProviders {
                 voiceProviders = Self.fakeProviders(current: voiceProviders?.provider ?? "gemini")
                 return
             }
@@ -548,7 +566,7 @@ final class SessionViewModel: ObservableObject {
                 Haptics.tap()
             } catch let error as DaemonError {
                 #if DEBUG
-                if ProcessInfo.processInfo.arguments.contains("-sheepdogFakeProviders") {
+                if DebugLaunch.fakeProviders {
                     self.voiceProviders = Self.fakeProviders(current: id)
                     self.liveVoiceProvider = id
                     return
@@ -623,7 +641,7 @@ final class SessionViewModel: ObservableObject {
             self.refresh()
         }
         audio.onLevel = { [weak self] level in
-            self?.micLevel = level
+            self?.meter.setLevel(level)
         }
         audio.onSpeakingChanged = { [weak self] speaking in
             guard let self else { return }
@@ -668,7 +686,7 @@ final class SessionViewModel: ObservableObject {
             // `fail` may already have ended the session this attempt
             // belonged to; never show "Reconnecting…" for a dead one.
             let retrying = retrying && wantsConnection
-            socketLife = retrying ? .reconnecting : .closed
+            socketLife = retrying ? .reconnecting : .idle
             audio.stop()
             if retrying {
                 reconnectPolicy.connectionLost(at: ProcessInfo.processInfo.systemUptime)
@@ -757,7 +775,6 @@ final class SessionViewModel: ObservableObject {
         let closed = voiceStatus == .closed
         if closed {
             if audio.isRunning { audio.stop() }
-            daemonVoiceOff = true
             if !saidVoiceIsOff {
                 saidVoiceIsOff = true
                 let why = closedReason == "voice_off"
@@ -768,7 +785,6 @@ final class SessionViewModel: ObservableObject {
             }
             return
         }
-        daemonVoiceOff = false
         saidVoiceIsOff = false
         startAudioIfNeeded()
     }
@@ -786,7 +802,7 @@ final class SessionViewModel: ObservableObject {
         #endif
         do {
             try audio.start()
-            metrics = audio.metrics
+            meter.setMetrics(audio.metrics)
             // Hold-to-talk starts closed without a transition; tell the
             // daemon, which treats a new client as ungated.
             let closed = audio.gateIsClosed
@@ -834,7 +850,7 @@ final class SessionViewModel: ObservableObject {
                         return
                     }
                     #if DEBUG
-                    if ProcessInfo.processInfo.arguments.contains("-sheepdogShowStreamErrors") {
+                    if DebugLaunch.showStreamErrors {
                         self.reducer.apply(.notice("event stream: \(error)"))
                         self.conversationChanged()
                     }
@@ -958,14 +974,15 @@ final class SessionViewModel: ObservableObject {
                 try? await Task.sleep(nanoseconds: busy ? 100_000_000 : 1_000_000_000)
                 guard let self, !Task.isCancelled, self.wantsConnection else { return }
                 self.audio.tick()
-                self.metrics = self.audio.metrics
+                let metrics = self.audio.metrics
+                self.meter.setMetrics(metrics)
                 self.socket.gatedFrames = self.audio.gatedFrames
                 self.socket.inputPeak = self.audio.inputPeak
-                self.socket.underruns = self.metrics.underruns
-                self.socket.drains = self.metrics.drains
-                self.socket.bufferMs = self.metrics.bufferedMilliseconds
-                self.socket.rate = self.metrics.playbackRate
-                self.socket.stretchedMs = self.metrics.stretchedMilliseconds
+                self.socket.underruns = metrics.underruns
+                self.socket.drains = metrics.drains
+                self.socket.bufferMs = metrics.bufferedMilliseconds
+                self.socket.rate = metrics.playbackRate
+                self.socket.stretchedMs = metrics.stretchedMilliseconds
                 self.updateDiagnostics()
                 if let expiry = self.thinkingExpiry, expiry < Date() { self.thinkingExpiry = nil }
                 self.refresh()
@@ -1003,17 +1020,14 @@ final class SessionViewModel: ObservableObject {
         }
         pendingAction = state.pendingAction
         applyApproval(approvalFlow.present(state.pendingAction), haptic: true)
-        daemonVoiceOff = state.voice.isOff || state.voice.status == "closed"
         brain = state.brain
         stateVoiceProvider = state.voiceProvider
         stateVoiceModel = state.voiceModel
-        conversationStartedAt = state.conversationStartedAt
     }
 
     // MARK: - Conversation history
 
     private func conversationChanged(save: Bool = true) {
-        bubbles = reducer.bubbles
         rows = ConversationTimeline.rows(history: history.items, live: reducer.bubbles)
         canLoadOlder = history.canLoadOlder
         if save { saveCache(now: false) }
@@ -1149,7 +1163,6 @@ final class SessionViewModel: ObservableObject {
     // MARK: - Approvals
 
     private func applyApproval(_ effect: ApprovalFlow.Effect, haptic: Bool) {
-        approval = approvalFlow.card
         switch effect {
         case .appeared:
             if haptic { Haptics.approvalAppeared() }
@@ -1169,8 +1182,6 @@ final class SessionViewModel: ObservableObject {
             // A newer question may be waiting behind the settled card.
             if self.approvalFlow.card == nil, let pending = self.pendingAction, pending.id != id {
                 self.applyApproval(self.approvalFlow.present(pending), haptic: true)
-            } else {
-                self.approval = self.approvalFlow.card
             }
         }
     }
@@ -1178,7 +1189,6 @@ final class SessionViewModel: ObservableObject {
     /// The shepherd tapped an option on the approval card.
     func answer(option index: Int) {
         guard let pendingID = approvalFlow.card?.pending.id, let option = approvalFlow.tap(index: index) else { return }
-        approval = approvalFlow.card
         Haptics.tap()
         Task { [weak self] in
             guard let self else { return }
@@ -1191,11 +1201,9 @@ final class SessionViewModel: ObservableObject {
                 Haptics.answerFailed()
             } catch let error as DaemonError {
                 self.approvalFlow.failed(pendingID: pendingID, message: error.message)
-                self.approval = self.approvalFlow.card
                 Haptics.answerFailed()
             } catch {
                 self.approvalFlow.failed(pendingID: pendingID, message: error.localizedDescription)
-                self.approval = self.approvalFlow.card
             }
             await self.refreshState(quiet: true)
             // Without the event stream (not connected), the answered
@@ -1211,10 +1219,10 @@ final class SessionViewModel: ObservableObject {
         connectionFailed = true
         if case .unauthorized = error {
             tokenRefused = true
-            showSettingsForToken()
+            showSettings = true
         }
         wantsConnection = false
-        socketLife = .closed
+        socketLife = .idle
         eventsLife = .idle
         socket.disconnect()
         audio.stop()
@@ -1222,10 +1230,6 @@ final class SessionViewModel: ObservableObject {
         reconnectPolicy.reset()
         backgroundSuspended = false
         refresh()
-    }
-
-    private func showSettingsForToken() {
-        showSettings = true
     }
 
     private func show(_ banner: Banner) {
@@ -1272,8 +1276,7 @@ final class SessionViewModel: ObservableObject {
             return
         }
         #endif
-        let next = audio.gateDiagnostics
-        if next != gateDiagnostics { gateDiagnostics = next }
+        meter.setGateDiagnostics(audio.gateDiagnostics)
         if noMicSignal != audio.noSignal, !audio.isRunning { noMicSignal = false }
         refreshMicrophoneMode()
     }
@@ -1281,8 +1284,8 @@ final class SessionViewModel: ObservableObject {
     #if DEBUG
     /// `-sheepdogFakeVoice`: the voice states without a live session or a
     /// microphone, for screenshots and UI tests against `--voice=off`.
-    let fakeVoice = ProcessInfo.processInfo.arguments.contains("-sheepdogFakeVoice")
-    private var fakePhase = 0.0
+    let fakeVoice = DebugLaunch.fakeVoice
+    private var fakeVoiceDriver = FakeVoiceDriver()
 
     private func setFakeGate(closed: Bool) {
         gateClosed = closed
@@ -1292,21 +1295,9 @@ final class SessionViewModel: ObservableObject {
 
     private func fakeTick() {
         guard wantsConnection, voiceStatus == .connected else { return }
-        fakePhase += 0.35
-        let speakingNow = !isMuted && (talkMode == .openMic || holding)
-        let level = speakingNow ? Float(0.25 + 0.2 * sin(fakePhase)) : 0
-        micLevel = level
-        gateDiagnostics = CaptureGate.Diagnostics(
-            levelDBFS: speakingNow ? -31 + 4 * sin(fakePhase) : -58,
-            floorDBFS: -62,
-            marginDB: 6,
-            isOpen: speakingNow,
-            opens: 4,
-            spuriousOpens: 0,
-            gatedFrames: 812,
-            peak: speakingNow ? 9_400 : 30,
-            manual: talkMode == .holdToTalk ? holding : nil
-        )
+        let (level, diagnostics) = fakeVoiceDriver.tick(talkMode: talkMode, holding: holding, isMuted: isMuted)
+        meter.setLevel(level)
+        meter.setGateDiagnostics(diagnostics)
         refreshMicrophoneMode()
     }
     #endif
@@ -1314,12 +1305,10 @@ final class SessionViewModel: ObservableObject {
     // MARK: - Derivation
 
     private func refresh() {
-        audio.setProvider(liveVoiceProvider ?? voiceProviders?.provider ?? stateVoiceProvider ?? hello?.voiceProvider)
         let heldSpeaking = speakingHold.update(playing: speaking, now: ProcessInfo.processInfo.systemUptime)
         let inputs = SessionState.Inputs(
             socket: socketLife,
             voice: voiceStatus,
-            closedReason: closedReason,
             stalled: stalled,
             muted: isMuted,
             gateClosed: gateClosed,
@@ -1328,31 +1317,21 @@ final class SessionViewModel: ObservableObject {
             audioPaused: audioPaused
         )
         let next = SessionState.resolve(inputs)
-        if next != state {
-            state = next
-            offerListeningHints()
-        }
+        if next != state { state = next }
         refreshConnectionChip()
     }
 
     private func refreshConnectionChip() {
+        // `socketLife` is already a `SocketLife`: no mapping needed now that
+        // `SessionState.Inputs` and `ConnectionChip.Inputs` share the type.
         let inputs = ConnectionChip.Inputs(
-            socket: chipSocketState,
+            socket: socketLife,
             events: eventsLife,
             failed: connectionFailed,
             tokenRefused: tokenRefused
         )
         let chip = ConnectionChip(inputs)
         if chip != connectionChip { connectionChip = chip }
-    }
-
-    private var chipSocketState: ConnectionChip.Inputs.State {
-        switch socketLife {
-        case .closed: return .idle
-        case .connecting: return .connecting
-        case .open: return .open
-        case .reconnecting: return .reconnecting
-        }
     }
 
     /// Times a `GET /api/hello` round trip for the connection chip's

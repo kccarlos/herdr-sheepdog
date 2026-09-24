@@ -129,13 +129,6 @@ final class PlaybackQueueStretchTests: XCTestCase {
         XCTAssertEqual(queue.rate, lowest, "never speeds back up without more audio")
     }
 
-    func testFixedRateQueueNeverStretches() {
-        var queue = PlaybackQueue(profile: .openAI, timeStretch: false)
-        _ = queue.push(chunk(800), now: 0)
-        for step in 1...40 { XCTAssertEqual(queue.steer(now: Double(step) * 0.02), 1.0) }
-        XCTAssertEqual(queue.stretchedSeconds, 0)
-    }
-
     func testFlushResetsTheRate() {
         var queue = PlaybackQueue(profile: .openAI)
         _ = queue.push(chunk(1_200), now: 0)
@@ -314,7 +307,12 @@ struct PlaybackReplay {
     static let step: TimeInterval = 0.02
     static let completionLatency: TimeInterval = 0.03
 
-    static func run(_ arrivals: [Arrival], queue initial: PlaybackQueue) -> Result {
+    /// `stretch: false` reproduces the fixed-rate adaptive buffer this
+    /// replaced: `steer` is never called, so the node plays at 1.0 always
+    /// and nothing accrues to `stretchedSeconds` — a policy-only comparison
+    /// against today's real (stretching) queue, with no separate
+    /// production code path to keep alive just for this table.
+    static func run(_ arrivals: [Arrival], queue initial: PlaybackQueue, stretch: Bool = true) -> Result {
         var queue = initial
         var result = Result()
         var node: [(id: Int, remaining: Double, utterance: Int)] = []
@@ -381,7 +379,7 @@ struct PlaybackReplay {
             }
             schedule(queue.tick(now: now), utterance: nil)
             let playing = queue.phase == .playing
-            nodeRate = queue.steer(now: now)
+            nodeRate = stretch ? queue.steer(now: now) : 1.0
             if playing {
                 result.playingSteps += 1
                 if nodeRate == 1.0 { result.unitySteps += 1 }
@@ -407,10 +405,10 @@ final class TimeStretchReplayTests: XCTestCase {
     private static let seeds: [UInt64] = [1, 2, 3, 4, 5]
 
     /// Sums one configuration over every seed.
-    private func total(_ timeline: (UInt64) -> [Arrival], _ queue: PlaybackQueue) -> PlaybackReplay.Result {
+    private func total(_ timeline: (UInt64) -> [Arrival], _ queue: PlaybackQueue, stretch: Bool = true) -> PlaybackReplay.Result {
         var sum = PlaybackReplay.Result()
         for seed in Self.seeds {
-            let r = PlaybackReplay.run(timeline(seed), queue: queue)
+            let r = PlaybackReplay.run(timeline(seed), queue: queue, stretch: stretch)
             sum.underruns += r.underruns
             sum.drains += r.drains
             sum.audibleGapSeconds += r.audibleGapSeconds
@@ -428,9 +426,9 @@ final class TimeStretchReplayTests: XCTestCase {
     /// every provider). targets only: provider targets, no stretch.
     /// after: time-stretch + provider targets.
     private func compare(_ name: String, provider: PlaybackProfile, _ timeline: (UInt64) -> [Arrival]) -> (before: PlaybackReplay.Result, targetsOnly: PlaybackReplay.Result, after: PlaybackReplay.Result) {
-        let before = total(timeline, PlaybackQueue(profile: .gemini, timeStretch: false))
-        let targetsOnly = total(timeline, PlaybackQueue(profile: provider, timeStretch: false))
-        let after = total(timeline, PlaybackQueue(profile: provider, timeStretch: true))
+        let before = total(timeline, PlaybackQueue(profile: .gemini), stretch: false)
+        let targetsOnly = total(timeline, PlaybackQueue(profile: provider), stretch: false)
+        let after = total(timeline, PlaybackQueue(profile: provider))
         let replies = Self.seeds.count * 12
         print(String(
             format: "STRETCH-TABLE | %@ | %d replies | before %d underruns (%.1f s gaps) | targets only %d (%.1f s) | after %d (%.1f s) | stretched %.1f s, r %.2f-%.2f, at 1.0 %.1f%%, tail %.1f%%",

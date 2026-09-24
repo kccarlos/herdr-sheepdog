@@ -3,13 +3,13 @@ import XCTest
 
 final class SessionStateTests: XCTestCase {
     func testASocketThatIsNotOpenBeatsEverythingElse() {
-        XCTAssertEqual(SessionState.resolve(.init(socket: .closed, voice: .connected)), .disconnected)
+        XCTAssertEqual(SessionState.resolve(.init(socket: .idle, voice: .connected)), .disconnected)
         XCTAssertEqual(SessionState.resolve(.init(socket: .connecting)), .connecting)
         XCTAssertEqual(SessionState.resolve(.init(socket: .reconnecting, voice: .connected, speaking: true)), .reconnecting)
     }
 
     func testVoiceOffIsSaidHonestlyRatherThanShownAsListening() {
-        let state = SessionState.resolve(.init(socket: .open, voice: .closed, closedReason: "voice_off"))
+        let state = SessionState.resolve(.init(socket: .open, voice: .closed))
         XCTAssertEqual(state, .voiceOff)
         XCTAssertFalse(state.capturing, "the microphone stays shut when nothing can hear it")
     }

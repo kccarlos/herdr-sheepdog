@@ -264,24 +264,29 @@ for every provider); *after* is time-stretch plus the provider targets:
 
 | Timeline | before | targets only | after | time at r = 1.0 |
 |---|---|---|---|---|
-| GPT-Live, the two recorded turns (0.69×, 0.78×) | 45 underruns, 56.8 s of gaps | 25, 32.4 s | **15, 17.9 s** | 2 % |
-| GPT-Live 0.85×, 2–6 s replies, 0.3–1.5 s stalls every 2–4 s | 31, 48.4 s | 20, 28.7 s | **15, 17.7 s** | 25 % |
-| GPT-Live 0.75×, same shape | 47, 78.0 s | 21, 69.6 s | **19, 51.0 s** | 7 % |
-| GPT-Live 0.75× with a 600 ms fast start | 95, 111.8 s | 30, 98.7 s | **27, 83.9 s** | 2 % |
-| GPT-Live 0.75×, 5–12 s monologues (stress) | 66, 166.3 s | 45, 153.7 s | **37, 115.8 s** | 6 % |
-| GPT-Live 0.85×, 5–12 s monologues (stress) | 47, 96.6 s | 38, 86.9 s | **27, 49.5 s** | 23 % |
+| GPT-Live, the two recorded turns (0.69×, 0.78×) | 45 underruns, 56.8 s of gaps | 5, 7.8 s | **0, 0.0 s** | 0 % |
+| GPT-Live 0.85×, 2–6 s replies, 0.3–1.5 s stalls every 2–4 s | 31, 48.4 s | 6, 9.3 s | **1, 1.1 s** | 15 % |
+| GPT-Live 0.75×, same shape | 47, 78.0 s | 22, 45.9 s | **9, 21.0 s** | 4 % |
+| GPT-Live 0.75× with a 600 ms fast start | 95, 111.8 s | 27, 79.0 s | **22, 52.9 s** | 2 % |
+| GPT-Live 0.75×, 5–12 s monologues (stress) | 66, 166.3 s | 39, 141.0 s | **30, 94.4 s** | 5 % |
+| GPT-Live 0.85×, 5–12 s monologues (stress) | 47, 96.6 s | 27, 72.7 s | **17, 31.1 s** | 15 % |
 | Gemini 4× | 0 | 0 | **0** | 94 % |
 
-Underruns fall to a third on the recorded turns and gaps to a third, but
-**not to zero**. The reason is arithmetic: both recorded turns arrive
-below the 0.85 floor, so even fully stretched the player consumes faster
-than GPT-Live sends; an 800 ms start runs out near the end of a 3 s turn.
-The target then settles where +100 ms per underrun balances −20 ms per
-clean reply: about one reply in five still has a gap. Offline experiments
-(not committed) showed what would close it — starting GPT-Live at
-**1 200 ms** gave 0 underruns on the recorded turns and 1 on the 0.85×
-timeline; no decay for GPT-Live, or a 0.75 rate floor, each helped less.
-Those change the shared policy, so they are left for the daemon/browser
+Underruns and gaps both fall sharply from *before* through *targets only*
+to *after* on every row, and on the two recorded turns they reach **zero**:
+GPT-Live's 1 200 ms provider target alone (*targets only*) is already close
+to the 800 ms + 250 ms wait those turns need, and the stretch finishes the
+job. The synthetic 2–6 s and 5–12 s timelines — deliberately harder than
+the recording, with stalls up to 1.5 s — do not reach zero: both run below
+the 0.85 rate floor for stretches long enough that even fully stretched
+the player consumes faster than the source sends, so the target keeps
+finding a new underrun to grow from. Where it settles balances +100 ms per
+underrun against −20 ms per clean reply — from about one reply in two
+(0.75×, 5–12 s) to about one in sixty (0.85×, 2–6 s). Offline experiments
+(not committed) showed what would close the remaining gap further —
+starting GPT-Live at 1 500 ms, or a 0.75 rate floor — each at the cost of
+more silence before a short reply starts. Those change the shared policy,
+so they are left for the daemon/browser
 side to agree on. For Gemini, what is not 1.0 is mostly the last ~150 ms of
 each reply (the tail always runs below the target once the final chunk is
 in) and brief dips when two slow chunks meet.
@@ -443,11 +448,14 @@ provider and model.
 
 ## The orb
 
-`SessionState` is a pure function of eight inputs — socket life, voice
-status and its reason, stalled, muted, gate closed, audio playing, a tool
-call in flight — resolved in one ordered list of rules, most urgent first.
-The views render it and nothing else, so the orb, the title and the buttons
-can never disagree.
+`SessionState` is a pure function of eight inputs — socket life (`SocketLife`,
+shared with `ConnectionChip` and `VoiceSocket`'s own bookkeeping), voice
+status, stalled, muted, gate closed, speaking, a tool call in flight, and
+audio paused by iOS — resolved in one ordered list of rules, most urgent
+first. The views render it and nothing else, so the orb, the title and the
+buttons can never disagree. (The `closed` status's `reason` string is not
+one of the eight: it only feeds the notice text when voice goes off, never
+the state machine itself.)
 
 *Speaking* is held for **800 ms** across playback gaps (`SpeakingHold`):
 the user saw the orb flick between speaking and muted while GPT-Live

@@ -48,12 +48,8 @@ public struct ConnectionChip: Equatable, Sendable {
 
     /// The signals the status is derived from.
     public struct Inputs: Equatable, Sendable {
-        public enum State: Equatable, Sendable {
-            case idle, connecting, open, reconnecting
-        }
-
-        public var socket: State
-        public var events: State
+        public var socket: SocketLife
+        public var events: SocketLife
         /// A connection attempt ended in a failure that will not retry by
         /// itself (unreachable, malformed, timed out) — distinct from the
         /// socket simply never having been opened.
@@ -62,7 +58,7 @@ public struct ConnectionChip: Equatable, Sendable {
         /// WebSocket upgrade).
         public var tokenRefused: Bool
 
-        public init(socket: State = .idle, events: State = .idle, failed: Bool = false, tokenRefused: Bool = false) {
+        public init(socket: SocketLife = .idle, events: SocketLife = .idle, failed: Bool = false, tokenRefused: Bool = false) {
             self.socket = socket
             self.events = events
             self.failed = failed

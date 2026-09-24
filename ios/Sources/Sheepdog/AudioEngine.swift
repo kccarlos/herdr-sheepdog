@@ -64,8 +64,15 @@ final class AudioEngine {
 
     private(set) var metrics = AudioMetrics()
     private(set) var isRunning = false
-    private(set) var isMuted = false
-    private(set) var isGateClosed = false
+    /// The capture-side switch `setMuted` throws: gates `captureOnMain` on
+    /// the render thread and arms/disarms the watchdog. Not a second source
+    /// of truth for "muted" — the view model's own `isMuted` (and what it
+    /// tells the daemon) is that; nothing outside `AudioEngine` reads this.
+    private var isMuted = false
+    /// Debounces `onGate`: only the *transition* into "closed" is reported
+    /// (from `setMuted` and `captureOnMain`). The view model reads
+    /// `gateIsClosed` for the gate's state itself.
+    private var isGateClosed = false
     /// Running, but paused after an interruption iOS would not let us
     /// resume from by ourselves: `resume()` is the way back.
     private(set) var needsResume = false
@@ -343,7 +350,6 @@ final class AudioEngine {
             if let transition = out.transition {
                 let closed = transition == .closed
                 isGateClosed = closed
-                metrics.silenceTransitions += 1
                 onGate?(closed)
             }
             for send in out.send {
@@ -367,15 +373,21 @@ final class AudioEngine {
         schedule(queue.push(samples, now: CFAbsoluteTimeGetCurrent()))
     }
 
-    /// Releases a short utterance that never filled the jitter buffer. Call
-    /// from the UI timer.
+    /// The watchdog and the playback metrics, on the UI timer's cadence
+    /// (100 ms while audio is moving, 1 s idle). Releasing a short
+    /// utterance that never filled the jitter buffer (`queue.tick`) is
+    /// `steer()`'s job while the engine runs, at its finer 20 ms cadence;
+    /// this only calls it itself when the engine is *not* running, since
+    /// `enqueue` has no `isRunning` guard — audio can arrive (and need
+    /// releasing) before `start()` — and that is the one case `steer()`
+    /// never sees.
     func tick() {
         if AudioLifecycle.watchdogShouldRun(running: isRunning, muted: isMuted, interrupted: interrupted || needsResume),
            let change = watchdog.tick(at: CFAbsoluteTimeGetCurrent()) {
             signalChanged(change)
         }
         let now = CFAbsoluteTimeGetCurrent()
-        schedule(queue.tick(now: now))
+        if !isRunning { schedule(queue.tick(now: now)) }
         metrics.recordPlayback(depthMilliseconds: queue.queueDepthMilliseconds)
         metrics.recordTimeStretch(rate: queue.rate, stretchedSeconds: queue.stretchedSeconds, bufferedMilliseconds: queue.bufferedMilliseconds(at: now))
         recordJitterBufferMetrics()
@@ -427,21 +439,21 @@ final class AudioEngine {
         steerTimer = nil
     }
 
-    /// One control-loop step: release anything due, notice drains, move
-    /// the rate one slew step and hand it to the time-pitch unit.
+    /// One control-loop step, every 20 ms while the engine runs: release
+    /// anything due (`PlaybackQueue.tick`, which also notices a drain when
+    /// nothing has arrived), then move the rate one slew step and hand it
+    /// to the time-pitch unit. The one exception — audio that arrived
+    /// before the engine started — is `tick()`'s job; see its doc comment.
     private func steer() {
         let now = CFAbsoluteTimeGetCurrent()
         schedule(queue.tick(now: now))
         applyRate(queue.steer(now: now))
-        metrics.recordTimeStretch(rate: queue.rate, stretchedSeconds: queue.stretchedSeconds, bufferedMilliseconds: queue.bufferedMilliseconds(at: now))
     }
 
     private func applyRate(_ rate: Double) {
         let value = Float(rate)
         if timePitch.rate != value { timePitch.rate = value }
     }
-
-    var queueDepthMilliseconds: Int { queue.queueDepthMilliseconds }
 
     private func schedule(_ chunks: [PlaybackQueue.Chunk]) {
         guard !chunks.isEmpty else { return }

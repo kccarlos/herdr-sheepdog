@@ -74,20 +74,14 @@ public struct PlaybackQueue: Sendable {
     public let sampleRate: Double
     /// A lone short utterance still starts after this long rather than never.
     /// Also the ceiling on how long a post-underrun refill will wait before
-    /// giving up and playing what it has. The current target plus 250 ms
-    /// unless a fixed value was given.
+    /// giving up and playing what it has. The current target plus 250 ms.
     public var maximumWait: TimeInterval {
-        fixedMaximumWait ?? Double(targetMilliseconds + Self.waitPaddingMilliseconds) / 1000
+        Double(targetMilliseconds + Self.waitPaddingMilliseconds) / 1000
     }
-    private let fixedMaximumWait: TimeInterval?
     /// The initial adaptive target, and the floor it decays back down to.
     public private(set) var targetFloorMilliseconds: Int
     /// The most the target may grow to.
     public private(set) var targetCeilingMilliseconds: Int
-    /// Whether `steer` stretches at all. Off, the queue plays at 1.0
-    /// always: the fixed-rate adaptive buffer this replaced, kept for the
-    /// before/after replays.
-    public let timeStretch: Bool
 
     /// The playback rate the playhead is running at right now.
     public private(set) var rate = 1.0
@@ -143,24 +137,19 @@ public struct PlaybackQueue: Sendable {
     public init(
         sampleRate: Double = AudioContract.playbackRate,
         prebufferMilliseconds: Int = 150,
-        ceilingMilliseconds: Int = 500,
-        maximumWait: TimeInterval? = nil,
-        timeStretch: Bool = true
+        ceilingMilliseconds: Int = 500
     ) {
         self.sampleRate = sampleRate
         self.targetFloorMilliseconds = prebufferMilliseconds
         self.targetCeilingMilliseconds = max(prebufferMilliseconds, ceilingMilliseconds)
         self.targetMilliseconds = prebufferMilliseconds
-        self.fixedMaximumWait = maximumWait
-        self.timeStretch = timeStretch
     }
 
-    public init(profile: PlaybackProfile, sampleRate: Double = AudioContract.playbackRate, timeStretch: Bool = true) {
+    public init(profile: PlaybackProfile, sampleRate: Double = AudioContract.playbackRate) {
         self.init(
             sampleRate: sampleRate,
             prebufferMilliseconds: profile.floorMilliseconds,
-            ceilingMilliseconds: profile.ceilingMilliseconds,
-            timeStretch: timeStretch
+            ceilingMilliseconds: profile.ceilingMilliseconds
         )
     }
 
@@ -209,14 +198,12 @@ public struct PlaybackQueue: Sendable {
 
     /// The 20 ms control loop: notices a drain, then moves the rate one
     /// slew step towards what the buffered audio calls for and rescales
-    /// the playhead to it. Returns the rate to apply to the node. With
-    /// `timeStretch` off it always returns 1.0.
+    /// the playhead to it. Returns the rate to apply to the node.
     @discardableResult
     public mutating func steer(now: TimeInterval) -> Double {
         observeDrain(now: now)
         let dt = lastSteerAt.map { max(0, now - $0) } ?? 0
         lastSteerAt = now
-        guard timeStretch else { return rate }
         switch phase {
         case .idle:
             // Keep the rate through a possible underrun (the drain's

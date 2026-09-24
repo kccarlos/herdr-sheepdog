@@ -286,9 +286,6 @@ public struct PendingAction: Codable, Equatable, Sendable {
         return "An agent is waiting for your answer."
     }
 
-    /// The option the prompt's cursor is on, if the daemon marked one.
-    public var defaultOption: PendingOption? { options?.first { $0.isDefault } }
-
     /// Builds the action from a `pending.created` event (its payload is the
     /// pending view; the pane comes from the event).
     public init?(event: DaemonEvent) {
@@ -495,10 +492,6 @@ public enum JSONValue: Codable, Equatable, Sendable {
         }
     }
 
-    public var stringValue: String? {
-        if case let .string(s) = self { return s }
-        return nil
-    }
 }
 
 extension String {

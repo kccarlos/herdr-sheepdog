@@ -32,7 +32,8 @@ final class PlaybackQueueTests: XCTestCase {
     }
 
     func testAShortUtteranceStartsAfterTheMaximumWait() {
-        var queue = PlaybackQueue(prebufferMilliseconds: 150, maximumWait: 0.4)
+        // 150 ms floor: maximumWait is 150 + 250 ms = 0.4 s.
+        var queue = PlaybackQueue(prebufferMilliseconds: 150)
         XCTAssertTrue(queue.push(chunk(40), now: 0).isEmpty)
         XCTAssertTrue(queue.tick(now: 0.2).isEmpty, "still inside the wait")
         let released = queue.tick(now: 0.45)

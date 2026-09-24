@@ -50,15 +50,6 @@ public struct ConversationReducer: Sendable {
         /// A `flush` frame, or the local Stop button: the open `out`
         /// utterance is over.
         case flush
-        /// A `voice.push` event from `/events`: something the daemon decided
-        /// to say unprompted.
-        case push(text: String, needsUser: Bool)
-        /// A `web.utterance` event — what the shepherd said, mirrored from
-        /// the event log. Only used when the daemon runs `--voice=off`,
-        /// where no transcript frames exist.
-        case mirroredUtterance(String)
-        /// A `voice.tool_result` event's `spoken` line, same mode.
-        case mirroredReply(String)
         /// A local notice ("voice is off on the daemon", "reconnected").
         case notice(String)
         /// "New conversation": the daemon forgot the short-term context.
@@ -87,13 +78,6 @@ public struct ConversationReducer: Sendable {
             append(speaker: dir == .incoming ? .shepherd : .sheepdog, text: text, final: final)
         case .flush:
             closeOpen(.sheepdog)
-        case let .push(text, needsUser):
-            closeOpen(.sheepdog)
-            push(Bubble(id: takeID(), speaker: .system, kind: .push(needsUser: needsUser), text: text, isFinal: true, at: now()))
-        case let .mirroredUtterance(text):
-            append(speaker: .shepherd, text: text, final: true, merge: false)
-        case let .mirroredReply(text):
-            append(speaker: .sheepdog, text: text, final: true, merge: false)
         case let .notice(text):
             push(Bubble(id: takeID(), speaker: .system, kind: .notice, text: text, isFinal: true, at: now()))
         case .reset:

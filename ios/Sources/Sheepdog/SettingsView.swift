@@ -5,6 +5,11 @@ import SwiftUI
 /// both. The token goes to the keychain; nothing else is a secret.
 struct SettingsView: View {
     @EnvironmentObject private var model: SessionViewModel
+    /// Passed explicitly (not read off `model.meter` inside the body):
+    /// an `@EnvironmentObject`'s own `@Published` changes are what
+    /// re-renders a view, and a nested object's changes do not propagate
+    /// through it, so About's live numbers need their own subscription.
+    @ObservedObject var meter: VoiceMeter
     @Environment(\.dismiss) private var dismiss
 
     @State private var address = ""
@@ -125,21 +130,21 @@ struct SettingsView: View {
                         Text("16 kHz out / 24 kHz in, PCM16 mono")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                        Text(model.metrics.summary)
+                        Text(meter.metrics.summary)
                             .font(.caption.monospaced())
                             .foregroundStyle(.secondary)
-                        Text(model.metrics.jitterSummary)
+                        Text(meter.metrics.jitterSummary)
                             .font(.caption.monospaced())
                             .foregroundStyle(.secondary)
-                        Text(model.metrics.stretchSummary)
+                        Text(meter.metrics.stretchSummary)
                             .font(.caption.monospaced())
                             .foregroundStyle(.secondary)
                             .accessibilityIdentifier("about.stretch")
-                        if model.metrics.hardwareSampleRate > 0 {
-                            Text("Microphone hardware: \(Int(model.metrics.hardwareSampleRate)) Hz")
+                        if meter.metrics.hardwareSampleRate > 0 {
+                            Text("Microphone hardware: \(Int(meter.metrics.hardwareSampleRate)) Hz")
                                 .font(.caption.monospaced())
                                 .foregroundStyle(.secondary)
-                            Text("Output: \(model.metrics.outputRoute.isEmpty ? "—" : model.metrics.outputRoute) · played \(model.metrics.playedChunks)/\(model.metrics.scheduledChunks) chunks")
+                            Text("Output: \(meter.metrics.outputRoute.isEmpty ? "—" : meter.metrics.outputRoute) · played \(meter.metrics.playedChunks)/\(meter.metrics.scheduledChunks) chunks")
                                 .font(.caption.monospaced())
                                 .foregroundStyle(.secondary)
                         }
@@ -282,7 +287,7 @@ struct SettingsView: View {
     // MARK: - Diagnostics
 
     private var diagnosticsSection: some View {
-        let d = model.gateDiagnostics
+        let d = meter.gateDiagnostics
         return Section {
             LabeledContent("Input level", value: CaptureGate.Diagnostics.format(dBFS: d.levelDBFS))
                 .accessibilityIdentifier("settings.diag.level")

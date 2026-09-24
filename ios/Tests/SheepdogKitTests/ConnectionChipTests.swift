@@ -2,7 +2,7 @@ import XCTest
 @testable import SheepdogKit
 
 final class ConnectionChipTests: XCTestCase {
-    typealias State = ConnectionChip.Inputs.State
+    typealias State = SocketLife
 
     func testNeverConnectedReadsAsNotConnectedNotOffline() {
         let chip = ConnectionChip(.init())

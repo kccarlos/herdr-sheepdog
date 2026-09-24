@@ -24,6 +24,17 @@ final class HistoryApprovalUITests: XCTestCase {
         }
     }
 
+    /// Runs even if the test fails partway through: `WalkthroughUITests`
+    /// needs a genuinely empty flock for its first screenshot, and this
+    /// test injects `p-billing` and never resolves it away (an approved
+    /// answer_prompt still leaves the pane blocked on the daemon side).
+    /// Removing it only defensively at the *next* run's start, as before,
+    /// left it sitting there for whichever suite happened to run next.
+    override func tearDownWithError() throws {
+        _ = post("/api/inject/remove", ["pane_id": "p-billing"])
+        try super.tearDownWithError()
+    }
+
     func testHistoryThenApproveByTapThenCache() throws {
         // A previous run leaves the synthetic pane blocked; start it over.
         _ = post("/api/inject/remove", ["pane_id": "p-billing"])

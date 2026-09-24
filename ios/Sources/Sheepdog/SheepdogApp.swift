@@ -11,8 +11,7 @@ struct SheepdogApp: App {
     private static func settings() -> SettingsStore {
         let store = SettingsStore()
         #if DEBUG
-        let arguments = ProcessInfo.processInfo.arguments
-        if arguments.contains("-sheepdogResetState") {
+        if DebugLaunch.resetState {
             store.address = ""
             store.token = ""
             store.hasBeenConfigured = false
@@ -21,10 +20,8 @@ struct SheepdogApp: App {
             // The one-time hints are cleared by the view model (all of
             // them, as `-sheepdogResetHints` does).
         }
-        // `-sheepdogAddress 127.0.0.1:7799`: start configured, for the
-        // history walkthrough and screenshots.
-        if let i = arguments.firstIndex(of: "-sheepdogAddress"), i + 1 < arguments.count {
-            store.address = arguments[i + 1]
+        if let address = DebugLaunch.address {
+            store.address = address
             store.hasBeenConfigured = true
         }
         #endif

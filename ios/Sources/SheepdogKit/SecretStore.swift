@@ -52,22 +52,3 @@ public final class KeychainSecretStore: SecretStore {
         ]
     }
 }
-
-/// A fake for the tests and for previews.
-public final class InMemorySecretStore: SecretStore {
-    public private(set) var values: [String: String] = [:]
-
-    public init(_ values: [String: String] = [:]) {
-        self.values = values
-    }
-
-    public func secret(for account: String) -> String? { values[account] }
-
-    public func setSecret(_ value: String?, for account: String) {
-        if let value, !value.isEmpty {
-            values[account] = value
-        } else {
-            values.removeValue(forKey: account)
-        }
-    }
-}

@@ -30,19 +30,19 @@ public final class VoiceSocket {
         case failed(DaemonError, retrying: Bool)
     }
 
-    public enum Life: Equatable, Sendable {
-        case idle, connecting, open, waitingToRetry
-    }
-
     /// Browser constants (`web/voice/app.js`).
     public static let pingInterval: TimeInterval = 15
     public static let pongTimeout: TimeInterval = 10
     public static let retryMinimum: TimeInterval = 1
     public static let retryMaximum: TimeInterval = 10
 
-    public private(set) var life: Life = .idle
-    public private(set) var reconnects = 0
-    public private(set) var lastRoundTrip: TimeInterval?
+    /// The socket's own connection state — internal bookkeeping (and a
+    /// `VoiceSocketTests` observation point) since PR #11's `ReconnectPolicy`
+    /// moved reconnect *decisions* to the view model, which now tracks its
+    /// own life from `onEvent` rather than reading this. Backing off after a
+    /// drop is `.reconnecting`, the same case `SessionState` and
+    /// `ConnectionChip` use for it.
+    private(set) var life: SocketLife = .idle
 
     /// What the caller wants the daemon to believe on every (re)connection.
     public var muted = false
@@ -87,8 +87,6 @@ public final class VoiceSocket {
     public func update(endpoint: DaemonEndpoint) {
         self.endpoint = endpoint
     }
-
-    public var isOpen: Bool { life == .open }
 
     // MARK: - Lifecycle
 
@@ -172,7 +170,6 @@ public final class VoiceSocket {
 
     private func didOpen() {
         life = .open
-        reconnects = 0
         retryDelay = VoiceSocket.retryMinimum
         // A reconnecting client starts unmuted and ungated on the daemon,
         // or with whatever mute it last had: say which, every time.
@@ -185,7 +182,6 @@ public final class VoiceSocket {
     private func handle(text: String) {
         guard let message = try? WSMessage.decode(Data(text.utf8)) else { return }
         if message.type == .pong {
-            if let sent = pingSentAt { lastRoundTrip = Date().timeIntervalSince(sent) }
             pingSentAt = nil
         }
         if message.type == .status, message.voice == .closed, message.reason == "replaced" {
@@ -227,12 +223,11 @@ public final class VoiceSocket {
     private func scheduleRetry() {
         let delay = retryDelay
         retryDelay = min(retryDelay * 2, VoiceSocket.retryMaximum)
-        life = .waitingToRetry
+        life = .reconnecting
         retryTask?.cancel()
         retryTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
             guard let self, !Task.isCancelled, !self.userClosed else { return }
-            self.reconnects += 1
             self.open()
         }
     }

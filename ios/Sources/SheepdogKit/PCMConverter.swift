@@ -97,43 +97,12 @@ public final class PCMConverter {
     /// or a reconnect: the discontinuity makes the tail meaningless).
     public func reset() { converter.reset() }
 
-    // MARK: - Helpers shared with the tests
-
-    /// Reads the Int16 samples out of an interleaved mono buffer.
+    /// Reads the Int16 samples out of an interleaved mono buffer. Shared
+    /// with the tests (`Tests/SheepdogKitTests/TestSupport.swift` has the
+    /// signal-generation helpers that are test-only).
     public static func samples(of buffer: AVAudioPCMBuffer) -> [Int16] {
         guard let channels = buffer.int16ChannelData, buffer.frameLength > 0 else { return [] }
         let n = Int(buffer.frameLength)
         return Array(UnsafeBufferPointer(start: channels[0], count: n))
-    }
-
-    /// Builds a mono Float32 buffer holding `seconds` of a sine — the test
-    /// signal for the 48 k → 16 k path, and a way to exercise the pipeline
-    /// without a microphone.
-    public static func sineBuffer(frequency: Double, sampleRate: Double, seconds: Double, amplitude: Float = 0.5) -> AVAudioPCMBuffer? {
-        guard let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: sampleRate, channels: 1, interleaved: false) else { return nil }
-        let frames = AVAudioFrameCount(sampleRate * seconds)
-        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames), let data = buffer.floatChannelData else { return nil }
-        buffer.frameLength = frames
-        let step = 2.0 * Double.pi * frequency / sampleRate
-        for i in 0 ..< Int(frames) {
-            data[0][i] = amplitude * Float(sin(step * Double(i)))
-        }
-        return buffer
-    }
-
-    /// Goertzel magnitude of `frequency` in `samples` — how the tests check
-    /// that a 440 Hz tone is still a 440 Hz tone after the rate change.
-    public static func toneMagnitude(_ samples: [Int16], frequency: Double, sampleRate: Double) -> Double {
-        guard samples.count > 1 else { return 0 }
-        let k = 2.0 * cos(2.0 * Double.pi * frequency / sampleRate)
-        var s1 = 0.0, s2 = 0.0
-        for sample in samples {
-            let value = Double(sample) / 32_768.0
-            let s0 = value + k * s1 - s2
-            s2 = s1
-            s1 = s0
-        }
-        let power = s1 * s1 + s2 * s2 - k * s1 * s2
-        return sqrt(max(0, power)) / Double(samples.count)
     }
 }

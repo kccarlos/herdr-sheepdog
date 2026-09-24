@@ -100,7 +100,7 @@ struct MainView: View {
 
                 VoiceBarView(
                     state: model.state,
-                    level: model.micLevel,
+                    meter: model.meter,
                     muted: model.isMuted,
                     voiceName: model.voiceName,
                     talkMode: model.talkMode,
@@ -165,7 +165,7 @@ struct MainView: View {
                 Text("Sheepdog and the brain forget this conversation; your agents, open questions and 'tell me when…' reminders stay.")
             }
             .sheet(isPresented: $model.showSettings) {
-                SettingsView()
+                SettingsView(meter: model.meter)
                     .environmentObject(model)
             }
             .onAppear {

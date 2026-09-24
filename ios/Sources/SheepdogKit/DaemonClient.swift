@@ -56,7 +56,6 @@ public struct DaemonEndpoint: Equatable, Sendable {
     /// What the error banners say: `192.168.8.141:7777`.
     public var display: String { "\(host):\(port)" }
 
-    public var baseURL: URL? { URL(string: "\(scheme)://\(hostForURL):\(port)") }
     public var webSocketURL: URL? { URL(string: "\(webSocketScheme)://\(hostForURL):\(port)/ws") }
 
     private var hostForURL: String {

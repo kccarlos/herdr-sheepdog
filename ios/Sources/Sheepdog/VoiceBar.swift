@@ -11,7 +11,9 @@ import SwiftUI
 /// orb is the talk button and the mic button is gone.
 struct VoiceBarView: View {
     let state: SessionState
-    let level: Float
+    /// Only this view (and the mic ring/orb it draws) observes the meter,
+    /// so a micLevel tick re-renders the bar, not the whole main screen.
+    @ObservedObject var meter: VoiceMeter
     let muted: Bool
     let voiceName: String
     var talkMode: TalkMode = .openMic
@@ -25,6 +27,7 @@ struct VoiceBarView: View {
     var onPress: () -> Void = {}
     var onRelease: () -> Void = {}
 
+    private var level: Float { meter.micLevel }
     private var model: VoiceBarModel { VoiceBarModel(state: state, talkMode: talkMode) }
 
     var body: some View {

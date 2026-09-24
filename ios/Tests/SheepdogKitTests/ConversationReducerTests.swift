@@ -50,31 +50,6 @@ final class ConversationReducerTests: XCTestCase {
         XCTAssertEqual(r.bubbles.map(\.text), ["what's going on", "hello?"])
     }
 
-    func testPushesBecomeSystemCardsAndCloseAnOpenReply() {
-        var r = reducer()
-        r.apply(.transcript(.outgoing, text: "working on it", final: false))
-        r.apply(.push(text: "auth is asking whether to run the migration.", needsUser: true))
-        XCTAssertEqual(r.bubbles.count, 2)
-        XCTAssertTrue(r.bubbles[0].isFinal)
-        XCTAssertEqual(r.bubbles[1].speaker, .system)
-        XCTAssertEqual(r.bubbles[1].kind, .push(needsUser: true))
-    }
-
-    func testMirroredEventsBuildBothSidesWhenTheDaemonHasNoVoice() {
-        var r = reducer()
-        r.apply(.mirroredUtterance("what's going on"))
-        r.apply(.mirroredReply("Two agents: auth is blocked, docs is working."))
-        XCTAssertEqual(r.bubbles.map(\.speaker), [.shepherd, .sheepdog])
-        XCTAssertTrue(r.bubbles.allSatisfy(\.isFinal))
-    }
-
-    func testMirroredRepliesNeverMergeWithEachOther() {
-        var r = reducer()
-        r.apply(.mirroredReply("first"))
-        r.apply(.mirroredReply("second"))
-        XCTAssertEqual(r.bubbles.map(\.text), ["first", "second"])
-    }
-
     func testNoticesAreTheirOwnKind() {
         var r = reducer()
         r.apply(.notice("Voice is off on the daemon — it will not hear the microphone."))

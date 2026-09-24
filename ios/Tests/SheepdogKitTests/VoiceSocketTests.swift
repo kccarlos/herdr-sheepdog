@@ -29,7 +29,7 @@ final class VoiceSocketTests: XCTestCase {
         await fulfillment(of: [closed], timeout: 10)
         XCTAssertEqual(failedRetrying, true, "the view model must know this failure is being retried")
         XCTAssertEqual(closedRetrying, true)
-        XCTAssertEqual(socket.life, .waitingToRetry, "the socket goes on retrying by itself")
+        XCTAssertEqual(socket.life, .reconnecting, "the socket goes on retrying by itself")
         socket.disconnect()
         XCTAssertEqual(socket.life, .idle)
     }

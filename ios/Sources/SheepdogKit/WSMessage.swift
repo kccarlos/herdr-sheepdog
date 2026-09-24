@@ -112,7 +112,6 @@ public struct WSMessage: Codable, Equatable, Sendable {
     public static func mute(_ on: Bool) -> WSMessage { WSMessage(type: .mute, on: on) }
     public static func silence(_ on: Bool) -> WSMessage { WSMessage(type: .silence, on: on) }
     public static let cancel = WSMessage(type: .cancel)
-    public static func simulateText(_ text: String) -> WSMessage { WSMessage(type: .text, text: text) }
     public static func ping(
         gatedFrames: Int = 0,
         peak: Int = 0,
@@ -164,10 +163,6 @@ public struct WSMessage: Codable, Equatable, Sendable {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         return try encoder.encode(self)
-    }
-
-    public func encodedString() throws -> String {
-        String(decoding: try encode(), as: UTF8.self)
     }
 
     /// Mirrors `wsproto.Message.Validate`: the fields the type requires.

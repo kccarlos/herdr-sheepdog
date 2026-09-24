@@ -206,7 +206,6 @@ public struct ConversationHistory: Equatable, Sendable {
 
     public var isEmpty: Bool { items.isEmpty }
     public var newestID: Int64? { items.last?.id }
-    public var oldestID: Int64? { items.first?.id }
     public var canLoadOlder: Bool { nextBefore != nil }
 
     /// The newest page (no `before`). The server is the record: every item

@@ -2,7 +2,7 @@
 
 ## Verified
 
-**Unit tests: 242 (240 run, 2 live-daemon tests skip without one), all passing** (`SheepdogKitTests`, iPhone 17 Pro simulator,
+**Unit tests: 245 (243 run, 2 live-daemon tests skip without one), all passing** (`SheepdogKitTests`, iPhone 17 Pro simulator,
 iOS 26, Xcode 27).
 
 ```sh

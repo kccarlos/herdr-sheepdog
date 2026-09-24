@@ -14,8 +14,6 @@ public struct AudioMetrics: Equatable, Sendable {
     public var playbackDepthMilliseconds = 0
     public var peakPlaybackDepthMilliseconds = 0
     public var gatedFrames = 0
-    public var silenceTransitions = 0
-    public var droppedFrames = 0
     public var hardwareSampleRate: Double = 0
     /// Where playback goes ("Speaker", "Receiver", AirPods…), for Settings ▸ About.
     public var outputRoute = ""
