@@ -5,6 +5,8 @@ import (
 	"errors"
 	"flag"
 	"io"
+	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
@@ -15,16 +17,24 @@ import (
 )
 
 func printEvalUsage(w io.Writer) {
-	fprintln(w, "usage: sheepdog eval --set assistant|svp [flags]")
+	fprintln(w, "usage: sheepdog eval --set assistant|svp|regressions|extracted|expanded|all [flags]")
+	fprintln(w, "       sheepdog eval extract [flags]   (cases from an event-log window)")
+	fprintln(w, "       sheepdog eval expand [flags]    (paraphrase and noise variants)")
 	fprintln(w, "")
-	fprintln(w, "Runs the conversation eval set (testdata/eval/{assistant,svp}.jsonl) and prints")
-	fprintln(w, "a pass/fail table. Offline by default: the assistant set is only validated")
-	fprintln(w, "(no model), the SVP set runs through the brain with a scripted fake model (a")
-	fprintln(w, "check of the harness — the rail, provenance wrapping — not of model judgement).")
-	fprintln(w, "--live calls gemini-3.5-flash in plain text mode (never Live audio) for both.")
+	fprintln(w, "Runs the conversation eval sets under testdata/eval and prints a pass/fail table.")
+	fprintln(w, "Offline by default: assistant cases are only validated (no model; a case that")
+	fprintln(w, "carries its logged baseline is graded against it), SVP cases run through the")
+	fprintln(w, "brain with a scripted fake model (a check of the harness — the rail, provenance")
+	fprintln(w, "wrapping, tool calls — not of model judgement); the checks about phrasing are")
+	fprintln(w, "live only and listed as skipped. --live calls gemini-3.5-flash in plain text")
+	fprintln(w, "mode (never Live audio).")
+	fprintln(w, "")
+	fprintln(w, "sets: assistant (assistant.jsonl), svp (svp.jsonl), regressions (regressions.jsonl")
+	fprintln(w, "and regressions.assistant.jsonl), extracted (extracted/*.jsonl), expanded")
+	fprintln(w, "(expanded.jsonl and expanded.assistant.jsonl), all (every set).")
 	fprintln(w, "")
 	fprintln(w, "flags:")
-	fprintln(w, "  --set assistant|svp   which set to run (required)")
+	fprintln(w, "  --set NAME            which set to run (required)")
 	fprintln(w, "  --live                call the real model instead of validating/faking it")
 	fprintln(w, "  --filter SUBSTR       only run cases whose id contains SUBSTR")
 	fprintln(w, "  --dir PATH            eval file directory (default testdata/eval)")
@@ -39,12 +49,25 @@ type evalOpts struct {
 	live                                                        bool
 }
 
+// evalSets are the --set names and the files each reads, relative to
+// --dir (docs/iteration-2.md WP0b: the L0 corpus).
+var evalSets = map[string]struct{ svp, assistant []string }{
+	"assistant":   {assistant: []string{"assistant.jsonl"}},
+	"svp":         {svp: []string{"svp.jsonl"}},
+	"regressions": {svp: []string{"regressions.jsonl"}, assistant: []string{"regressions.assistant.jsonl"}},
+	"extracted":   {svp: []string{"extracted/*.jsonl"}},
+	"expanded":    {svp: []string{"expanded.jsonl"}, assistant: []string{"expanded.assistant.jsonl"}},
+}
+
+// evalSetOrder is the order `--set all` runs the sets in.
+var evalSetOrder = []string{"assistant", "svp", "regressions", "extracted", "expanded"}
+
 func parseEvalFlags(args []string, stderr io.Writer) (evalOpts, int, bool) {
 	fs := flag.NewFlagSet("eval", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() { printEvalUsage(stderr) }
 	var o evalOpts
-	fs.StringVar(&o.set, "set", "", "assistant | svp")
+	fs.StringVar(&o.set, "set", "", "assistant | svp | regressions | extracted | expanded | all")
 	fs.BoolVar(&o.live, "live", false, "call the real model")
 	fs.StringVar(&o.filter, "filter", "", "only run cases whose id contains this")
 	fs.StringVar(&o.dir, "dir", "testdata/eval", "eval file directory")
@@ -58,8 +81,8 @@ func parseEvalFlags(args []string, stderr io.Writer) (evalOpts, int, bool) {
 		}
 		return o, 2, false
 	}
-	if o.set != "assistant" && o.set != "svp" {
-		fprintln(stderr, "sheepdog eval: --set must be assistant or svp")
+	if _, ok := evalSets[o.set]; !ok && o.set != "all" {
+		fprintln(stderr, "sheepdog eval: --set must be one of assistant, svp, regressions, extracted, expanded, all")
 		return o, 2, false
 	}
 	return o, 0, true
@@ -67,6 +90,14 @@ func parseEvalFlags(args []string, stderr io.Writer) (evalOpts, int, bool) {
 
 // runEval implements `sheepdog eval`.
 func runEval(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	if len(args) > 0 {
+		switch args[0] {
+		case "extract":
+			return runEvalExtract(args[1:], stdout, stderr)
+		case "expand":
+			return runEvalExpand(args[1:], stderr)
+		}
+	}
 	o, code, run := parseEvalFlags(args, stderr)
 	if !run {
 		return code
@@ -89,71 +120,105 @@ func runEval(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	}
 	pl := prompts.NewLoader(promptsDir, log)
 
-	switch o.set {
-	case "assistant":
-		return runEvalAssistant(ctx, o, cfg, pl, stdout, stderr)
-	case "svp":
-		return runEvalSVP(ctx, o, cfg, log, stdout, stderr)
+	sets := []string{o.set}
+	if o.set == "all" {
+		sets = evalSetOrder
 	}
-	return 1
-}
-
-func runEvalAssistant(ctx context.Context, o evalOpts, cfg config.Config, pl *prompts.Loader, stdout, stderr io.Writer) int {
-	cases, err := eval.LoadAssistantCases(o.dir + "/assistant.jsonl")
-	if err != nil {
-		fprintf(stderr, "sheepdog eval: %v\n", err)
-		return 1
-	}
-	cases = filterAssistant(cases, o.filter)
-	var results []eval.Result
-	if !o.live {
-		results = eval.RunAssistant(ctx, cases, pl, nil, "")
-	} else {
+	var models *evalModels
+	if o.live {
 		if len(cfg.Gemini.APIKeys) == 0 {
 			fprintln(stderr, "sheepdog eval --live: no Gemini key (set GEMINI_API_KEY or use --env-file)")
 			return 1
 		}
-		model, err := brain.NewGenaiModel(cfg.Gemini.APIKeys, logging.NewJSONLLogger(stderr))
+		m, err := brain.NewGenaiModel(cfg.Gemini.APIKeys, log)
 		if err != nil {
 			fprintf(stderr, "sheepdog eval: %v\n", err)
 			return 1
 		}
-		results = eval.RunAssistant(ctx, cases, pl, model, eval.DefaultAssistantModel)
+		models = &evalModels{model: m, brainModel: cfg.Brain.Model}
 	}
-	eval.WriteTable(stdout, "assistant", results)
-	if eval.HasFailures(results) {
+	failed := false
+	for _, set := range sets {
+		results, err := runEvalSet(ctx, o, set, pl, models)
+		if err != nil {
+			fprintf(stderr, "sheepdog eval: %v\n", err)
+			return 1
+		}
+		eval.WriteTable(stdout, set, results)
+		failed = failed || eval.HasFailures(results)
+	}
+	if failed {
 		return 1
 	}
 	return 0
 }
 
-func runEvalSVP(ctx context.Context, o evalOpts, cfg config.Config, log logging.Logger, stdout, stderr io.Writer) int {
-	cases, err := eval.LoadSVPCases(o.dir + "/svp.jsonl")
-	if err != nil {
-		fprintf(stderr, "sheepdog eval: %v\n", err)
-		return 1
-	}
-	cases = filterSVP(cases, o.filter)
+// evalModels is the live run's model (nil: offline).
+type evalModels struct {
+	model      *brain.GenaiModel
+	brainModel string
+}
+
+// runEvalSet loads and runs one set: its SVP files through the brain,
+// its assistant files through the voice prompt.
+func runEvalSet(ctx context.Context, o evalOpts, set string, pl *prompts.Loader, models *evalModels) ([]eval.Result, error) {
+	spec := evalSets[set]
 	var results []eval.Result
-	if !o.live {
-		results = eval.RunSVPOffline(ctx, cases, o.fixtures)
-	} else {
-		if len(cfg.Gemini.APIKeys) == 0 {
-			fprintln(stderr, "sheepdog eval --live: no Gemini key (set GEMINI_API_KEY or use --env-file)")
-			return 1
-		}
-		model, err := brain.NewGenaiModel(cfg.Gemini.APIKeys, log)
+	for _, pattern := range spec.assistant {
+		files, err := globOrOne(filepath.Join(o.dir, pattern))
 		if err != nil {
-			fprintf(stderr, "sheepdog eval: %v\n", err)
-			return 1
+			return nil, err
 		}
-		results = eval.RunSVPLive(ctx, cases, o.fixtures, model, cfg.Brain.Model)
+		for _, f := range files {
+			cases, err := eval.LoadAssistantCases(f)
+			if err != nil {
+				return nil, err
+			}
+			cases = filterAssistant(cases, o.filter)
+			if models == nil {
+				results = append(results, eval.RunAssistant(ctx, cases, pl, nil, "")...)
+			} else {
+				results = append(results, eval.RunAssistant(ctx, cases, pl, models.model, eval.DefaultAssistantModel)...)
+			}
+		}
 	}
-	eval.WriteTable(stdout, "svp", results)
-	if eval.HasFailures(results) {
-		return 1
+	for _, pattern := range spec.svp {
+		files, err := globOrOne(filepath.Join(o.dir, pattern))
+		if err != nil {
+			return nil, err
+		}
+		for _, f := range files {
+			cases, err := eval.LoadSVPCases(f)
+			if err != nil {
+				return nil, err
+			}
+			cases = filterSVP(cases, o.filter)
+			if models == nil {
+				results = append(results, eval.RunSVPOffline(ctx, cases, o.fixtures)...)
+			} else {
+				results = append(results, eval.RunSVPLive(ctx, cases, o.fixtures, models.model, models.brainModel)...)
+			}
+		}
 	}
-	return 0
+	return results, nil
+}
+
+// globOrOne expands a pattern with a wildcard (sorted; none is an error)
+// or returns a plain path as is, so a missing file is reported by the
+// loader.
+func globOrOne(pattern string) ([]string, error) {
+	if !strings.ContainsAny(pattern, "*?[") {
+		return []string{pattern}, nil
+	}
+	m, err := filepath.Glob(pattern)
+	if err != nil {
+		return nil, err
+	}
+	if len(m) == 0 {
+		return nil, errors.New("no files match " + pattern)
+	}
+	sort.Strings(m)
+	return m, nil
 }
 
 func filterAssistant(cases []eval.AssistantCase, substr string) []eval.AssistantCase {

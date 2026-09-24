@@ -202,6 +202,33 @@ when the brain is down; `composeBriefing` (the roster line in every
 brain request). No template LLM: the brain is the only model that
 phrases, and when it is unavailable the daemon speaks the code sentences.
 
+## The L0 eval corpus
+
+`sheepdog eval --set all` (`make eval`) is the offline gate of
+docs/iteration-2.md: every case below runs through the brain with a
+scripted fake model, so it checks what code decides — tools called,
+`must_not_call`, the rail, `no_tool`, `prompt_must_not_contain` — and
+lists the phrasing checks it skipped (`spoken_max_words`,
+`spoken_no_jargon`, `first_sentence_contains_any_of`, `needs_user`,
+`urgency_not`, …), which only `--live` applies. The sets under
+`testdata/eval/`: `assistant.jsonl` and `svp.jsonl` (hand-written);
+`regressions.jsonl` / `regressions.assistant.jsonl` (the five logged
+failures, each with its log time, the logged behaviour as `observed`, and
+`baseline_fails` — a regression proves offline that it catches the
+failure by failing on the logged baseline; what no check can assert yet is
+its `pending_check`); `extracted/<day>.jsonl` (`sheepdog eval extract`: one
+case per `to_supervisor` relay and per worker block or finish, with the
+transcript, roster, open approval prompts and `source {day, ts,
+event_id}`; secrets, emails and the hostname are scrubbed, `--redact` for
+names); `expanded.jsonl` / `expanded.assistant.jsonl` (`sheepdog eval
+expand`: the job's paraphrases and seeded speech-recognition noise of the
+regressions and one extracted case per job, regenerated with
+`SHEEPDOG_CORPUS_UPDATE=1 go test ./internal/eval/gen`; a test fails if it
+drifts). The log cannot give everything: `herdr.read` logs no text, so a
+screen is at most the first 1 KB of the brain's last `read_screen`;
+aliases come from the supervisor's events (`herdr.transition` carries
+none); the roster sentence is not logged.
+
 ## Prompt files
 
 | File | Holds |

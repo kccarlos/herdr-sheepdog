@@ -116,7 +116,7 @@ func TestLoadSVPCases(t *testing.T) {
 			t.Error("case with empty id")
 		}
 		switch brain.Kind(c.Request.Kind) {
-		case brain.KindUtterance:
+		case brain.KindUtterance, brain.KindAnnounce:
 		default:
 			t.Errorf("%s: bad request.kind %q", c.ID, c.Request.Kind)
 		}

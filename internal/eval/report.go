@@ -3,6 +3,7 @@ package eval
 import (
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 	"time"
 )
@@ -27,9 +28,23 @@ type Result struct {
 	// Got is optional extra context for the table (assistant: tool/agent/
 	// text; svp: tools called).
 	Got map[string]any
+	// SkippedChecks names the checks the case sets that this run could
+	// not apply (offline: the live-only ones about phrasing and
+	// judgement), so a pass never hides what was not checked
+	// (docs/iteration-2.md WP0b).
+	SkippedChecks []string
+	// Pending is the case's pending_check: what it should assert but the
+	// harness cannot yet.
+	Pending string
+	// Baseline is the case's grade against the logged behaviour, when it
+	// carries one ("fails as logged: …" / "passes as logged").
+	Baseline string
 }
 
-// WriteTable prints a pass/fail table and a summary line to w.
+// WriteTable prints a pass/fail table and a summary line to w: per case
+// its status and detail, the checks skipped, what is pending and the
+// baseline grade; then the counts, which checks were skipped how often,
+// and how many cases have a pending check.
 func WriteTable(w io.Writer, set string, results []Result) {
 	_, _ = fmt.Fprintf(w, "== eval --set %s (%d cases) ==\n", set, len(results))
 	idw := 0
@@ -38,7 +53,8 @@ func WriteTable(w io.Writer, set string, results []Result) {
 			idw = len(r.ID)
 		}
 	}
-	pass, fail, skip := 0, 0, 0
+	pass, fail, skip, pending, baseFails := 0, 0, 0, 0, 0
+	skippedChecks := map[string]int{}
 	for _, r := range results {
 		switch r.Status {
 		case StatusPass:
@@ -48,13 +64,49 @@ func WriteTable(w io.Writer, set string, results []Result) {
 		case StatusSkipped:
 			skip++
 		}
+		for _, c := range r.SkippedChecks {
+			skippedChecks[c]++
+		}
+		if r.Pending != "" {
+			pending++
+		}
+		if strings.HasPrefix(r.Baseline, "fails") {
+			baseFails++
+		}
 		detail := r.Detail
 		if detail == "" && r.Status == StatusPass {
 			detail = summarizeGot(r.Got)
 		}
 		_, _ = fmt.Fprintf(w, "  %-4s  %-*s  %6s  %s\n", r.Status, idw, r.ID, r.Duration.Round(time.Millisecond), detail)
+		if len(r.SkippedChecks) > 0 && (r.Status != StatusPass || r.Pending != "" || r.Baseline != "") {
+			// Every skipped check is counted in the summary; per case it
+			// is listed where someone reads the case anyway, so hundreds
+			// of generated passes do not triple the table.
+			_, _ = fmt.Fprintf(w, "        skipped (live only): %s\n", strings.Join(r.SkippedChecks, ", "))
+		}
+		if r.Pending != "" {
+			_, _ = fmt.Fprintf(w, "        pending: %s\n", r.Pending)
+		}
+		if r.Baseline != "" {
+			_, _ = fmt.Fprintf(w, "        baseline: %s\n", firstLine(r.Baseline))
+		}
 	}
 	_, _ = fmt.Fprintf(w, "-- %d pass, %d fail, %d skipped (of %d) --\n", pass, fail, skip, len(results))
+	if len(skippedChecks) > 0 {
+		names := make([]string, 0, len(skippedChecks))
+		for n := range skippedChecks {
+			names = append(names, n)
+		}
+		sort.Strings(names)
+		parts := make([]string, 0, len(names))
+		for _, n := range names {
+			parts = append(parts, fmt.Sprintf("%s ×%d", n, skippedChecks[n]))
+		}
+		_, _ = fmt.Fprintf(w, "-- checks skipped offline (live only): %s --\n", strings.Join(parts, ", "))
+	}
+	if pending > 0 || baseFails > 0 {
+		_, _ = fmt.Fprintf(w, "-- %d with a pending check; %d fail against the logged baseline --\n", pending, baseFails)
+	}
 }
 
 func summarizeGot(got map[string]any) string {
