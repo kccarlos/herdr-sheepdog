@@ -112,6 +112,11 @@ func (s *Supervisor) relayUnanswered(gen uint64) {
 		return
 	}
 	c := s.claimRunLocked(run)
+	// Gemini never marks its input transcription final, so the input may
+	// still be open: close it, or words the shepherd adds now would be
+	// folded into this relay (heard's trailing-fragment case) and reach
+	// nobody.
+	c.in.open = false
 	waited := s.cfg.Now().Sub(c.in.at)
 	s.replies.Add(1)
 	s.mu.Unlock()

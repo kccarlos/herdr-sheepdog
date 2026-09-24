@@ -28,9 +28,6 @@ func (s *Supervisor) Handler() voice.ToolHandler {
 			text, _ := call.Args["text"].(string)
 			return s.ToSupervisor(withCallID(ctx, call.ID), text)
 		case ToolStop:
-			// The voice took the words as a stop: they are not relayed
-			// again by the daemon (relay.go).
-			s.toolCalled()
 			return s.Stop(ctx, StopTriggerTool)
 		default:
 			return voice.ToolResult{}, fmt.Errorf("supervisor: unknown tool %q", call.Name)

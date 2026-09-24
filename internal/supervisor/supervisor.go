@@ -438,6 +438,10 @@ func (s *Supervisor) OnVoiceEvent(ev voice.Event) {
 		if e.Urgency != voice.UrgencySilent {
 			s.pushSpoken(true)
 		}
+	case voice.EventInterrupted:
+		// The shepherd barged in on whatever was playing, a push
+		// included: what the voice says next answers them.
+		s.pushSpoken(false)
 	}
 }
 

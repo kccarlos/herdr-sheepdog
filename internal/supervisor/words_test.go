@@ -290,3 +290,41 @@ func TestStopWithdrawsTheRecordedWords(t *testing.T) {
 		t.Errorf("supervisor.stopped = %v", ev)
 	}
 }
+
+// Words that follow the daemon's relay of an open input are a new input
+// the voice can still relay, not a tail folded into a turn already run.
+func TestWordsAfterTheDaemonRelayAreFresh(t *testing.T) {
+	m := braintest.NewModel(
+		braintest.Step{Text: braintest.Reply("Auth is testing.", "")},
+		braintest.Step{Text: braintest.Reply("Docs is idle.", "")},
+	)
+	h := newBrainHarness(t, m, relayAfter(30*time.Millisecond))
+	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
+	h.sup.OnVoiceEvent(voice.EventTranscript{Dir: voice.DirIn, Text: "how is auth"})
+	waitFor(t, func() bool { return h.log.count("supervisor.relay_by_daemon") == 1 }, "the daemon's relay")
+	h.sup.replies.Wait()
+
+	h.sup.OnVoiceEvent(voice.EventTranscript{Dir: voice.DirIn, Text: " and what about docs"})
+	h.relay("what about docs")
+	if n := h.log.count("supervisor.voice_initiative_ignored"); n != 0 {
+		t.Fatalf("the later words were ignored (%d)", n)
+	}
+	if text := lastCall(t, m); !strings.Contains(text, `utterance="and what about docs"`) {
+		t.Errorf("model saw:\n%s", text)
+	}
+}
+
+// A barge-in ends a push: what the voice says next answers the shepherd.
+func TestBargeInEndsThePushWindow(t *testing.T) {
+	h := newHarness(t, relayAfter(40*time.Millisecond))
+	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
+	h.sup.OnVoiceEvent(voice.EventPush{Text: "Auth finished.", Urgency: voice.UrgencyIdle})
+	h.sup.OnVoiceEvent(voice.EventInterrupted{})
+	h.sup.OnVoiceEvent(voice.EventTranscript{Dir: voice.DirIn, Text: "thanks"})
+	h.sup.OnVoiceEvent(voice.EventTranscript{Dir: voice.DirOut, Text: "You're welcome."})
+	time.Sleep(150 * time.Millisecond)
+	h.sup.replies.Wait()
+	if n := h.log.count("supervisor.relay_by_daemon"); n != 0 {
+		t.Errorf("relay_by_daemon = %d, want 0: the voice answered", n)
+	}
+}
