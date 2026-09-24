@@ -6,6 +6,7 @@
 import { ConversationView, setDogName } from './conversation-view.js';
 import { SwimlaneView } from './swimlane-view.js';
 import { SupervisorView } from './supervisor-view.js';
+import { ContextView } from './context-view.js';
 import { LANES } from './swimlane.js';
 import { offState, parseTranscriptJSONL } from './supervisor.js';
 import { voiceOptions, voiceHint, billedText } from './voicepicker.js';
@@ -121,6 +122,7 @@ function onEvent(ev, encoded) {
   const fresh = conversation.add(ev, encoded);
   swimlane.add(ev, encoded);
   if (fresh) onBrainEvent(ev);
+  if (fresh) contextView.onEvent(ev);
   scheduleConvRender();
   if (events.paused) {
     events.buffer.push(ev);
@@ -797,6 +799,10 @@ function onBrainEvent(ev) {
   }
 }
 
+// The Context tab (context-view.js) fetches /api/context/* itself, and
+// only while it is shown; context.step events mark it stale.
+const contextView = new ContextView($('context'), getJSON);
+
 let svpTimer = 0;
 function scheduleSupervisorRender() {
   if (svpTimer) return;
@@ -900,6 +906,7 @@ function showTab(name) {
   if (name === 'conversation') conversation.render(true);
   if (name === 'supervisor') { supervisor.render(true); $('svp-count').textContent = `${supervisor.messages.size} messages`; if (!brainState.off) fetchBrainContext(); }
   if (name === 'swimlane') renderSwimlane(true);
+  if (name === 'context') contextView.show(); else contextView.hide();
   if (name === 'events' && $('events-follow').checked) $('events').scrollTop = $('events').scrollHeight;
   try { localStorage.setItem('sheepdog-debug-tab', name); } catch (_) { /* private mode */ }
   const ts = selectedTime();
@@ -1015,7 +1022,7 @@ boot();
 // (a JSONL url such as /testdata/brain/sample-run.jsonl in --dev mode,
 // JSONL text, or an array of messages) into the Supervisor tab.
 window.sheepdogDebug = {
-  conversation, swimlane, supervisor,
+  conversation, swimlane, supervisor, context: contextView,
   addEvents: (list) => { for (const ev of list) { conversation.add(ev); swimlane.add(ev); onBrainEvent(ev); } scheduleConvRender(); scheduleSupervisorRender(); },
   clearEvents: () => { swimlane.clear(); renderSwimlane(true); },
   loadTranscript: async (src) => {

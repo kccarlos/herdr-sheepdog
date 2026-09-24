@@ -48,8 +48,8 @@ func TestDiffSnapshots(t *testing.T) {
 	if strings.Join(d.Compacted, ",") != "seq:9" || len(d.Removed) != 3 || d.Removed[0].Reason != ReasonCompacted || d.Removed[0].Text == "" {
 		t.Errorf("compaction diff = %+v", d)
 	}
-	d = DiffSnapshots(6, cur, snap([3]string{"seq:1", ClassShepherd, "fresh\n"}), true)
-	if len(d.Removed) != 3 || d.Removed[0].Reason != ReasonReset {
+	d = DiffSnapshots(6, cur, snap([3]string{"prompt:time", ClassSystem, "10:01\n"}, [3]string{"seq:1", ClassShepherd, "fresh\n"}), true)
+	if len(d.Removed) != 3 || d.Removed[0].Reason != ReasonReset || strings.Join(d.Added, ",") != "seq:1" || len(d.Changed) != 0 {
 		t.Errorf("reset diff = %+v", d)
 	}
 	d = DiffSnapshots(0, Snapshot{}, cur, false)

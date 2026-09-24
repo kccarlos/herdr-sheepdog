@@ -139,7 +139,9 @@ func (s *Server) handleContextVoice(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleContextTimeline(w http.ResponseWriter, r *http.Request) {
 	resp := TimelineResponse{Brain: []ctxcap.BrainStep{}, Voice: []ctxcap.VoiceTurn{}}
 	if b := s.deps.Brain; b != nil {
-		resp.Brain = b.Requests().Steps()
+		if steps := b.Requests().Steps(); len(steps) > 0 {
+			resp.Brain = steps
+		}
 		resp.WindowTokens = b.Config().WindowTokens
 	} else {
 		resp.BrainOff = s.deps.BrainOffReason
@@ -148,7 +150,9 @@ func (s *Server) handleContextTimeline(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if vc := s.deps.VoiceContext; vc != nil {
-		resp.Voice = vc.Turns()
+		if turns := vc.Turns(); len(turns) > 0 {
+			resp.Voice = turns
+		}
 	} else {
 		resp.VoiceOff = s.voiceOff()
 	}

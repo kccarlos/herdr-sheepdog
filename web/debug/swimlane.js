@@ -163,6 +163,10 @@ class Builder {
         // with the other stats by default; the Supervisor tab shows the
         // message itself.
         return this.plain(ev, 'sup', { title: 'transcript', summary: `#${p.seq ?? '?'} ${p.kind || ''}${p.turn ? ` · turn ${p.turn}` : ''}`, cls: ['minor', 'stats', 'brain'], stats: true });
+      case 'context.step':
+        // Bookkeeping for the Context tab ("a step / turn was recorded"):
+        // a stats card, hidden with the other stats by default.
+        return this.plain(ev, p.pane === 'voice' ? 'voice' : 'sup', { title: 'context step', summary: p.pane === 'voice' ? `voice turn ${p.turn ?? '?'}${p.updated ? ' (grew)' : ''}` : `brain step ${p.step ?? '?'} · turn ${p.turn ?? '?'}.${p.turn_step ?? '?'}`, cls: ['minor', 'stats'], stats: true });
       case 'brain.compaction': {
         const card = this.plain(ev, 'sup', { title: 'compaction', cls: ['minor', 'brain'] });
         card.chain = this.workChain(card);

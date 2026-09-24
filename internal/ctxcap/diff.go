@@ -1,5 +1,7 @@
 package ctxcap
 
+import "strings"
+
 // Diff says how a point's context differs from the previous point's in
 // the same pane, by section key.
 type Diff struct {
@@ -50,6 +52,11 @@ func DiffSnapshots(prevID int, prev, cur Snapshot, reset bool) Diff {
 	before := map[string]piece{}
 	if prevID > 0 {
 		for _, s := range prev.Sections {
+			if reset && strings.HasPrefix(s.Key, "seq:") {
+				// Transcript seqs restart at 1 in a new segment: the same
+				// key is a different message.
+				continue
+			}
 			before[s.Key] = piece{s, slice(prev.Text, s)}
 		}
 	}
@@ -75,7 +82,7 @@ func DiffSnapshots(prevID int, prev, cur Snapshot, reset bool) Diff {
 		return d
 	}
 	for _, s := range prev.Sections {
-		if seen[s.Key] {
+		if _, matched := before[s.Key]; matched && seen[s.Key] {
 			continue
 		}
 		reason := ReasonRemoved
