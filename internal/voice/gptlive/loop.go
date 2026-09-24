@@ -3,6 +3,7 @@ package gptlive
 import (
 	"context"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/ctxcap"
@@ -69,15 +70,25 @@ func (s *Session) settle(now time.Time) {
 	var stop *voice.ToolCall
 	if s.unclaimed != "" && s.cfg.Classify != nil {
 		if call, ok := s.cfg.Classify(s.unclaimed); ok && call.Name == voice.ToolStop {
-			s.unclaimed = ""
+			// The stop takes the words, and what settled before them: a
+			// later delegation must not relay them after all.
+			s.unclaimed, s.settledText = "", ""
 			stop = &call
 		}
 	}
 	if s.unclaimed != "" {
 		// Not claimed (yet): a delegation that follows shortly takes it;
 		// otherwise the model answered on its own and the words must not
-		// be glued to the next utterance.
-		s.settledText, s.settledAt = s.unclaimed, now
+		// be glued to the next utterance. A pause mid-sentence settles
+		// the first half, and the second half is added to it rather than
+		// replacing it — replacing it relayed only the tail of the
+		// sentence ("sometimes", 2026-09-23 23:53:26).
+		if s.settledText != "" && now.Sub(s.settledAt) < settledKeep {
+			s.settledText = strings.TrimSpace(s.settledText) + " " + strings.TrimSpace(s.unclaimed)
+		} else {
+			s.settledText = s.unclaimed
+		}
+		s.settledAt = now
 		s.unclaimed = ""
 	}
 	owed := s.turnDoneOwed

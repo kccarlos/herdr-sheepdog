@@ -574,8 +574,10 @@ func (x *extractor) utteranceCase(i int, day string, n int) (SVPCase, bool) {
 	if c.Source.Heard != "" && isPartialRelay(relay, c.Source.Heard) {
 		// The voice relayed only the tail of what was said: whatever the
 		// brain sends must not fill the gap with invented text
-		// (regression partial-relay-no-fabrication).
+		// (regression partial-relay-no-fabrication), and the brain must
+		// be asked what was heard, not the tail (WP3).
 		c.Expect.PromptMustNotContain = []string{"["}
+		c.Expect.QuestionIsHeard = true
 	}
 	c.Observed = x.observeUtterance(i)
 	return c, true

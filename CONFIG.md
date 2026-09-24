@@ -190,6 +190,14 @@ it?" for what each level announces.
 | `supervisor.repeat_window_s` | `SHEEPDOG_SUPERVISOR_REPEAT_WINDOW_S` | `60` | How long an identical roster sentence counts as "already reported": a status question inside the window carries a note the brain can act on ("no change since I last checked") instead of the roster spoken again in full; with the brain off, the daemon's own fallback sentence is prefixed the same way (`docs/history/issues-2026-09-18.md` "Smaller items"). |
 | `supervisor.authorise_window_s` | `SHEEPDOG_SUPERVISOR_AUTHORISE_WINDOW_S` | `30` | How recent the shepherd's own words must be to answer a worker's approval prompt (the one rail, [`docs/roles.md`](docs/roles.md)). The daemon records every shepherd input — a voice transcript, typed text (`/api/inject/utterance`, the `/voice` text box) or a tap (`POST /api/pending/answer`) — and `send_keys` or the bare-answer fast path runs only when one arrived after the prompt appeared and within this many seconds, and that input's own text (never the voice model's tool argument) answers it. A refusal logs `brain.rail_blocked {reason}`. |
 
+Two timings are fixed, not options ([`docs/roles.md`](docs/roles.md) "One
+decision-maker"): a `to_supervisor` call with no fresh shepherd input
+waits up to 1.5 s for the input transcription (it and the tool call reach
+the daemon on different paths, and Gemini's transcription can trail the
+call); this used to be the tests-only `supervisor.Config.InputGrace`
+field, never a config key, and is now a constant. An utterance with no
+tool call and no speech from the voice for 4 s is relayed by the daemon.
+
 ## `[brain]`
 
 The supervisor brain (plan D7-revised, [`docs/roles.md`](docs/roles.md)):

@@ -43,13 +43,31 @@ the role, not what the dog calls anyone.
 ## One decision-maker (D1-revised)
 
 The voice does not classify intent and does not execute. Everything the
-shepherd says that is not small talk goes to the brain verbatim
-(`to_supervisor`). The brain resolves what it is — a status question, a
-question to investigate, an instruction, an answer to a worker's prompt,
-a promise, a note — from the transcript, and acts. The voice speaks what
-the brain returns, answers a first follow-up from the reply's `detail`
-and `options` without going back, and judges the *moment* for anything
-the brain brings unprompted.
+shepherd says that is not small talk goes to the brain (`to_supervisor`).
+**The words the brain gets are the shepherd's recorded input** — the
+voice's input transcription of every utterance since the daemon last
+acted on the shepherd's words (a sentence split by a pause is one
+utterance), typed text, or a tap — never the voice model's
+`to_supervisor` argument, which is only a hint, logged beside them
+(`supervisor.relay {heard, said}`; `supervisor.relay_fallback` when
+nothing was recorded and the argument is all there is). The voice
+model paraphrased, invented ("16" relayed as "What does it say?") and
+cut sentences short ("sometimes") when its argument was the utterance.
+The brain resolves what it is — a status question, a question to
+investigate, an instruction, an answer to a worker's prompt, a promise,
+a note — from the transcript, and acts. The voice speaks what the brain
+returns, answers a first follow-up from the reply's `detail` and
+`options` without going back, and judges the *moment* for anything the
+brain brings unprompted.
+
+An utterance the voice leaves unanswered — no tool call and no word of
+its own for 4 s after the last fragment — is relayed by the daemon
+itself (`supervisor.relay_by_daemon {text, waited_ms}`) and its reply
+pushed; the voice speaking a push is not an answer. Two utterances back
+to back, the second arriving while the first's brain turn is still
+queued, are one turn over both texts (`supervisor.utterance_coalesced
+{n}`); a turn already running is never cut, and its reply is stale if
+it lands after the next request was taken up.
 
 Code fast paths (deterministic, no model): a bare "yes" / "no" /
 "option two" while exactly one worker prompt is open → its keys (the
@@ -133,7 +151,10 @@ the prompt appeared and within `supervisor.authorise_window_s`, and whose
 own words (never the voice model's `to_supervisor` argument) answer it:
 never empty, and a "no" never approves. A `to_supervisor` call with no
 such input since the previous call and the last push is the voice
-model's own initiative and does nothing. Enforced in
+model's own initiative and does nothing
+(`supervisor.voice_initiative_ignored`): that is the one relay guard
+left, since every utterance now runs on the recorded input, and a push
+relayed back can no longer pass for the shepherd's words. Enforced in
 the executor, not by prose; the voice has no tool that can answer a
 prompt at all. Everything else — instructions, Ctrl-C, questions — is
 the brain's call.

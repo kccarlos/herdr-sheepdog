@@ -12,17 +12,29 @@ import (
 )
 
 // The one rail reads the shepherd's real input (docs/roles.md "The one
-// rail"). The voice model's to_supervisor argument is only what the model
-// chose to relay: on 2026-09-23 it relayed a push back as if the shepherd
-// had said it, then called to_supervisor {text: "yes"} on its own while
-// the shepherd's microphone was muted. So the daemon records what the
-// shepherd actually said, typed or tapped — the voice's input
-// transcription, typed text, a tap on the pending question — and
+// rail"), and so does everything else: the words an utterance runs on
+// are the ones the daemon recorded, never the voice model's
+// to_supervisor argument (docs/roles.md "One decision-maker"). The
+// argument is only what the model chose to relay: on 2026-09-23 it
+// relayed a push back as if the shepherd had said it, called
+// to_supervisor {text: "yes"} on its own while the shepherd's microphone
+// was muted, relayed only the tail of a sentence ("sometimes") and
+// turned a transcript of "16" into "What does it say?". So the daemon
+// records what the shepherd actually said, typed or tapped — the voice's
+// input transcription, typed text, a tap on the pending question — and
 //
+//   - a to_supervisor call claims every input since the previous
+//     accepted call and the last spoken push (claimInput): their words,
+//     joined, are the utterance; the argument is logged beside them as
+//     a hint (supervisor.relay {heard, said});
 //   - a to_supervisor call with no shepherd input newer than both the
 //     previous accepted call and the last spoken push is the model's own
 //     initiative: no fast path, no brain turn, nothing said
-//     (supervisor.voice_initiative_ignored);
+//     (supervisor.voice_initiative_ignored). This is the one guard left
+//     of three: a push relayed back (the old echo guard) can no longer
+//     reach the brain as the shepherd's words, since the words are the
+//     recorded ones, but a call with nothing recorded behind it must
+//     still do nothing — it is what the rail stands on;
 //   - answering a worker's approval prompt (the brain's send_keys, the
 //     bare-answer fast path, a tap) needs an input that arrived after the
 //     prompt appeared and within supervisor.authorise_window_s, whose own
@@ -63,6 +75,29 @@ type shepherdInput struct {
 	// used is set once the input authorised an answer to a prompt: one
 	// "yes" answers one prompt.
 	used bool
+	// answered is set when the voice spoke on its own after this input
+	// and before the next one (small talk it answered itself): a later
+	// relay does not glue these words onto the next utterance, and the
+	// daemon does not relay them (relay.go).
+	answered bool
+}
+
+// inputGraceDefault is how long a to_supervisor call with no fresh
+// shepherd input waits for one before it is the voice model's own
+// initiative. The two are not ordered: the input transcription reaches
+// the ledger on the event pump (internal/app), the tool call reaches
+// ToSupervisor on the voice session's own goroutine, and Gemini's input
+// transcription can even trail the tool call in its stream (2026-09-18
+// 06:33:02). The wait ends the moment an input arrives.
+const inputGraceDefault = 1500 * time.Millisecond
+
+// claim is what one relay took up: the newest input (the one the rail
+// reads), the words of every input claimed with it, joined, and how many
+// inputs that was.
+type claim struct {
+	in   *shepherdInput
+	text string
+	n    int
 }
 
 // maxInputs bounds the remembered inputs.
@@ -119,11 +154,33 @@ func (s *Supervisor) heard(text string, final bool) {
 			// The input transcription trails the tool call: these words
 			// are the relay already made, not fresh input for another.
 			s.relayedSeq = s.inputSeq
+		} else {
+			s.armRelayLocked(last)
 		}
 		s.wakeLocked()
 		return
 	}
-	s.addInputLocked(&shepherdInput{kind: InputVoice, text: text, open: !final})
+	in := &shepherdInput{kind: InputVoice, text: text, open: !final}
+	s.addInputLocked(in)
+	s.armRelayLocked(in)
+}
+
+// voiceSpoke records the voice's own speech (voice.transcript.out): it
+// ends the voice input being collected, and — unless it is a push being
+// spoken — it is the voice answering the shepherd's last words itself,
+// so they are neither glued onto the next relay nor relayed by the
+// daemon (relay.go).
+func (s *Supervisor) voiceSpoke(text string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.closeVoiceLocked()
+	if strings.TrimSpace(text) == "" || s.relay.pushSpeaking {
+		return
+	}
+	if last := s.lastInputLocked(); last != nil {
+		last.answered = true
+	}
+	s.disarmRelayLocked()
 }
 
 // closeVoiceInput ends the voice input being collected, so the next
@@ -151,8 +208,7 @@ func (s *Supervisor) addInputLocked(in *shepherdInput) {
 	s.wakeLocked()
 }
 
-// wakeLocked releases a call waiting out Config.InputGrace. Caller holds
-// s.mu.
+// wakeLocked releases a call waiting out inputGrace. Caller holds s.mu.
 func (s *Supervisor) wakeLocked() {
 	close(s.inputWake)
 	s.inputWake = make(chan struct{})
@@ -173,42 +229,77 @@ func (s *Supervisor) markPushed() {
 	s.mu.Unlock()
 }
 
-// claimInput is the to_supervisor gate: the newest shepherd input newer
-// than both the previous accepted call and the last spoken push, waiting
-// up to Config.InputGrace for one (the input transcription can trail the
-// tool call). ok is false when none arrived: the call is the voice
-// model's own initiative.
-func (s *Supervisor) claimInput(ctx context.Context) (*shepherdInput, bool) {
+// claimInput is the to_supervisor gate: every shepherd input newer than
+// both the previous accepted call and the last spoken push, waiting up
+// to inputGrace for one (see inputGraceDefault). ok is false when none
+// arrived: the call is the voice model's own initiative.
+func (s *Supervisor) claimInput(ctx context.Context) (claim, bool) {
 	var deadline <-chan time.Time
 	for {
 		s.mu.Lock()
-		if last := s.lastInputLocked(); last != nil && last.seq > s.relayedSeq && last.seq > s.pushSeq {
-			s.relayedSeq = s.inputSeq
-			s.acceptedSeq++
-			// Fragments still arriving for this turn stay with this call
-			// (heard); the next turn is a new input.
-			last.claimed = true
+		if run := s.freshRunLocked(max(s.relayedSeq, s.pushSeq)); len(run) > 0 {
+			c := s.claimRunLocked(run)
 			s.mu.Unlock()
-			return last, true
+			return c, true
 		}
 		wake := s.inputWake
 		s.mu.Unlock()
-		if s.cfg.InputGrace <= 0 {
-			return nil, false
+		if s.cfg.inputGrace <= 0 {
+			return claim{}, false
 		}
 		if deadline == nil {
-			t := time.NewTimer(s.cfg.InputGrace)
+			t := time.NewTimer(s.cfg.inputGrace)
 			defer t.Stop()
 			deadline = t.C
 		}
 		select {
 		case <-wake:
 		case <-deadline:
-			return nil, false
+			return claim{}, false
 		case <-ctx.Done():
-			return nil, false
+			return claim{}, false
 		}
 	}
+}
+
+// freshRunLocked is the run of unclaimed inputs newer than floor, oldest
+// first, ending with the newest input: what the shepherd said since the
+// daemon last acted on their words. A mid-sentence pause splits one
+// sentence into two inputs (GPT-Live closes an input at every pause,
+// 2026-09-23 23:53:26), so the run takes both; it stops at an input the
+// voice already answered itself, which belongs to that exchange, not to
+// this one. Empty when the newest input is not fresh. Caller holds s.mu.
+func (s *Supervisor) freshRunLocked(floor uint64) []*shepherdInput {
+	var run []*shepherdInput
+	for i := len(s.inputs) - 1; i >= 0; i-- {
+		in := s.inputs[i]
+		if in.seq <= floor || in.claimed || in.kind == InputTap || (len(run) > 0 && in.answered) {
+			break
+		}
+		run = append(run, in)
+	}
+	for i, j := 0, len(run)-1; i < j; i, j = i+1, j-1 {
+		run[i], run[j] = run[j], run[i]
+	}
+	return run
+}
+
+// claimRunLocked takes run up as one request: its inputs are claimed
+// (fragments trailing the newest stay with it, heard), the relay
+// counters move past them, and no daemon relay is left armed for them.
+// Caller holds s.mu.
+func (s *Supervisor) claimRunLocked(run []*shepherdInput) claim {
+	words := make([]string, 0, len(run))
+	for _, in := range run {
+		in.claimed = true
+		if t := strings.TrimSpace(in.text); t != "" {
+			words = append(words, t)
+		}
+	}
+	s.relayedSeq = s.inputSeq
+	s.acceptedSeq++
+	s.disarmRelayLocked()
+	return claim{in: run[len(run)-1], text: strings.Join(words, " "), n: len(run)}
 }
 
 // promptSinceLocked is when p's prompt appeared: its pending action's

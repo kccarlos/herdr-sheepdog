@@ -171,9 +171,11 @@ func newHarness(t *testing.T, opts ...func(*Config)) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// InputGrace off: a relay with no shepherd input is refused at once
+	// inputGrace off: a relay with no shepherd input is refused at once
 	// rather than after waiting for a transcript that will not come.
-	cfg := Config{PendingTTL: 120 * time.Second, Now: h.clock.Now, DataDir: h.dir, InputGrace: -1}
+	// relayAfter off: a heard utterance nobody relays stays unrelayed
+	// unless a test turns the daemon's relay on (relay_test.go).
+	cfg := Config{PendingTTL: 120 * time.Second, Now: h.clock.Now, DataDir: h.dir, inputGrace: -1, relayAfter: -1}
 	for _, o := range opts {
 		o(&cfg)
 	}

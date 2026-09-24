@@ -1,0 +1,131 @@
+package supervisor
+
+import (
+	"context"
+	"time"
+)
+
+// The daemon relays an utterance the voice left unanswered
+// (docs/roles.md "One decision-maker"). On 2026-09-24 00:16:55 the
+// shepherd asked "What's the progress of a Discord Copilot so far?"; the
+// voice model neither called a tool nor said anything (voice.turn
+// {responded: false, tool_calls: 0}), and the question was lost — the
+// lost-utterance rate of the baseline scorecard. The daemon recorded the
+// words itself, so it does not need the voice to relay them: when an
+// input of the shepherd's speech is followed, for relayUnansweredAfter,
+// by neither a tool call nor any speech of the voice's own, it runs
+// through the same path as a relay (fast paths, then one brain turn) and
+// the reply is pushed, as a late reply is (deliverLate) — the voice
+// never asked, so there is no tool result to return it in.
+//
+// What cancels the watch: any voice tool call (to_supervisor claims the
+// words; stop means the voice took them as a stop), the voice speaking
+// on its own (small talk it answered itself) — but not the voice
+// speaking a push, which is not an answer to the shepherd — a newer
+// input (the watch re-arms on it), and a reset.
+
+// relayUnansweredAfter is how long an input of the shepherd's speech may
+// go with no tool call and no speech of the voice's own before the
+// daemon relays it (docs/iteration-2.md's lost-utterance metric counts
+// 5 s; the voice's own tool call arrives within a second when it comes).
+const relayUnansweredAfter = 4 * time.Second
+
+// relayWatch is the unanswered-utterance watch, under s.mu.
+type relayWatch struct {
+	timer *time.Timer
+	// seq is the input the timer was armed for; gen invalidates a timer
+	// that already fired but has not taken s.mu yet.
+	seq uint64
+	gen uint64
+	// pushSpeaking: a push was handed to the voice and its turn has not
+	// completed, so what the voice says now is the push, not an answer.
+	pushSpeaking bool
+	// closed: the daemon is going down; nothing is relayed any more.
+	closed bool
+}
+
+// armRelayLocked (re)starts the watch for in, the voice input that just
+// got words. Caller holds s.mu.
+func (s *Supervisor) armRelayLocked(in *shepherdInput) {
+	if s.cfg.relayAfter < 0 || s.relay.closed {
+		return
+	}
+	s.disarmRelayLocked()
+	gen := s.relay.gen
+	s.relay.seq = in.seq
+	s.relay.timer = time.AfterFunc(s.cfg.relayAfter, func() { s.relayUnanswered(gen) })
+}
+
+// disarmRelayLocked stops the watch. Caller holds s.mu.
+func (s *Supervisor) disarmRelayLocked() {
+	if s.relay.timer != nil {
+		s.relay.timer.Stop()
+		s.relay.timer = nil
+	}
+	s.relay.gen++
+}
+
+// toolCalled records that the voice called a tool: whatever the shepherd
+// said was taken up, so the daemon does not relay it.
+func (s *Supervisor) toolCalled() {
+	s.mu.Lock()
+	s.disarmRelayLocked()
+	s.mu.Unlock()
+}
+
+// pushSpoken records that a push is (true) or no longer is (false, the
+// voice's turn completed) being spoken.
+func (s *Supervisor) pushSpoken(speaking bool) {
+	s.mu.Lock()
+	s.relay.pushSpeaking = speaking
+	s.mu.Unlock()
+}
+
+// stopRelay ends the watch for good (shutdown).
+func (s *Supervisor) stopRelay() {
+	s.mu.Lock()
+	s.relay.closed = true
+	s.disarmRelayLocked()
+	s.mu.Unlock()
+}
+
+// relayUnanswered is the watch firing: the input it was armed for is
+// still the newest, unclaimed and unanswered, so the daemon claims it
+// (with any unanswered words before it in the same run) and relays it.
+func (s *Supervisor) relayUnanswered(gen uint64) {
+	s.mu.Lock()
+	if gen != s.relay.gen || s.relay.closed {
+		s.mu.Unlock()
+		return
+	}
+	s.relay.timer = nil
+	last := s.lastInputLocked()
+	if last == nil || last.seq != s.relay.seq || last.kind != InputVoice || last.claimed || last.answered {
+		s.mu.Unlock()
+		return
+	}
+	// The floor is the last relay only, not the last push: a push spoken
+	// after the question does not answer it.
+	run := s.freshRunLocked(s.relayedSeq)
+	if len(run) == 0 {
+		s.mu.Unlock()
+		return
+	}
+	c := s.claimRunLocked(run)
+	waited := s.cfg.Now().Sub(c.in.at)
+	s.replies.Add(1)
+	s.mu.Unlock()
+	defer s.replies.Done()
+	s.log.Log(logSource, "supervisor.relay_by_daemon", "", map[string]any{"text": c.text, "waited_ms": waited.Milliseconds(), "inputs": c.n})
+	res := s.handleUtterance(context.Background(), c, "", true)
+	if res.Spoken == "" {
+		return
+	}
+	// A fast path answered at once (a stop, an answer to the open prompt,
+	// the reset question): it is said like any other push.
+	var tags map[string]any
+	if bareStop(c.text) {
+		tags = map[string]any{"stop": true}
+	}
+	s.pushTagged("", res.Spoken, res.Scheduling, tags)
+}

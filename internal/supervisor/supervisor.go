@@ -130,12 +130,6 @@ type Config struct {
 	// supervisor.authorise_window_s, docs/roles.md "The one rail";
 	// inputs.go).
 	AuthoriseWindow time.Duration
-	// InputGrace is how long a to_supervisor call with no fresh shepherd
-	// input waits for one before it is treated as the voice model's own
-	// initiative: Gemini's input transcription can trail the tool call
-	// by a moment (default 1.5 s; negative does not wait; tests only —
-	// not in CONFIG.md).
-	InputGrace time.Duration
 	// Brain, when set, is the one model that decides and phrases
 	// (docs/roles.md); without it the daemon speaks code sentences and
 	// sends nothing. New attaches the Supervisor as its Host.
@@ -147,6 +141,16 @@ type Config struct {
 	WorkerLog *workerlog.Reader
 
 	chattiness Chattiness // parsed Chattiness
+
+	// inputGrace is how long a to_supervisor call with no fresh shepherd
+	// input waits for one (default inputGraceDefault; negative does not
+	// wait). Not a knob: only tests change it (inputs.go).
+	inputGrace time.Duration
+	// relayAfter is how long a shepherd utterance may go unanswered
+	// before the daemon relays it itself (default relayUnansweredAfter;
+	// negative never relays). Not a knob: only tests change it
+	// (relay.go).
+	relayAfter time.Duration
 }
 
 func (c Config) withDefaults() Config {
@@ -189,8 +193,11 @@ func (c Config) withDefaults() Config {
 	if c.AuthoriseWindow == 0 {
 		c.AuthoriseWindow = 30 * time.Second
 	}
-	if c.InputGrace == 0 {
-		c.InputGrace = 1500 * time.Millisecond
+	if c.inputGrace == 0 {
+		c.inputGrace = inputGraceDefault
+	}
+	if c.relayAfter == 0 {
+		c.relayAfter = relayUnansweredAfter
 	}
 	if c.InvestigateMax == 0 {
 		c.InvestigateMax = 600 * time.Second
@@ -235,10 +242,6 @@ type Supervisor struct {
 	mentioned     map[string]time.Time // pane -> when a spoken briefing last named it
 	lastPrompt    map[string]string    // pane -> signature of the last answer_prompt built for it (reprompt.go)
 	utterance     *inflightUtterance   // the to_supervisor call in flight (stop.go phases 1 and 2)
-	// recentPushes are the pushes spoken within echoWindow, so
-	// ToSupervisor can tell the voice echoing an announcement back apart
-	// from a genuine shepherd utterance (utterance.go's isEcho).
-	recentPushes []pushRecord
 	// eventIDs is each pane's latest worker event id (links.go): the
 	// announce turn and pushes about that event carry it, so the Context
 	// tab links them to the brain's worker_event message.
@@ -283,8 +286,10 @@ type Supervisor struct {
 	// can wait for a late reply to land.
 	replies sync.WaitGroup
 	// inputWake is closed and replaced whenever an input arrives, for a
-	// call waiting out InputGrace.
+	// call waiting out inputGrace.
 	inputWake chan struct{}
+	// relay is the unanswered-utterance watch (relay.go).
+	relay relayWatch
 	// promptSeenAt is when each pane's current prompt (lastPrompt's
 	// signature) was first recorded, so a revived pending action keeps
 	// the time the prompt really appeared (inputs.go).
@@ -354,6 +359,8 @@ func (s *Supervisor) Run(ctx context.Context) {
 	// Likewise a shepherd turn still running past its tool call: its
 	// reply would have nobody to reach (utterance.go).
 	defer s.abandonUtterance()
+	// And no unanswered utterance is relayed into a daemon going down.
+	defer s.stopRelay()
 	// Once at startup, the roster is already loaded (state.Open ran
 	// before New): catches a pane whose prompt changed while the daemon
 	// was down, which no post-answer poll ever ran for.
@@ -393,9 +400,11 @@ func (s *Supervisor) SetVoiceConnected(connected bool) {
 
 // OnVoiceEvent feeds voice session events: connection status maintains
 // session.voice_connected, a resumed connection gets the briefing pushed
-// silently so the model re-learns the situation (plan §6), and the
+// silently so the model re-learns the situation (plan §6), the
 // transcripts (the CEO's verbatim words, what the assistant said) go into
-// the brain's transcript.
+// the shepherd-input ledger (inputs.go) and the brain's transcript, and
+// tool calls, spoken pushes and the voice's own speech drive the
+// unanswered-utterance watch (relay.go).
 func (s *Supervisor) OnVoiceEvent(ev voice.Event) {
 	switch e := ev.(type) {
 	case voice.EventStatus:
@@ -406,7 +415,7 @@ func (s *Supervisor) OnVoiceEvent(ev voice.Event) {
 		if e.Dir == voice.DirIn {
 			s.heard(e.Text, e.Final)
 		} else {
-			s.closeVoiceInput()
+			s.voiceSpoke(e.Text)
 		}
 		if s.brain != nil {
 			if e.Dir == voice.DirIn {
@@ -417,8 +426,17 @@ func (s *Supervisor) OnVoiceEvent(ev voice.Event) {
 		}
 	case voice.EventTurnComplete:
 		s.closeVoiceInput()
+		s.pushSpoken(false)
 		if s.brain != nil {
 			s.brain.TurnComplete()
+		}
+	case voice.EventToolCall:
+		// The voice took up whatever was said: no daemon relay for it
+		// (relay.go).
+		s.toolCalled()
+	case voice.EventPush:
+		if e.Urgency != voice.UrgencySilent {
+			s.pushSpoken(true)
 		}
 	}
 }
@@ -467,42 +485,13 @@ func (s *Supervisor) pushTagged(paneID, text string, u voice.Urgency, tags map[s
 		return
 	}
 	if u != voice.UrgencySilent {
-		// A silent push is context the voice never speaks, so it cannot be
-		// echoed back as something heard.
-		s.recordPush(text)
+		// A silent push is context the voice never speaks, so it cannot
+		// prompt a relay of its own.
 		s.markPushed()
 		if s.brain != nil {
 			s.brain.PushedLinked(s.aliasOf(paneID), text, u.String(), pushLink(tags))
 		}
 	}
-}
-
-// pushRecord is one push spoken to the voice, kept for echoWindow so
-// ToSupervisor can recognise the voice relaying it back as if the
-// shepherd had said it (utterance.go's isEcho, docs/history/issues-2026-09-18.md
-// Bug 2).
-type pushRecord struct {
-	text string
-	at   time.Time
-}
-
-// echoWindow is how long a push counts as "just spoken" for isEcho.
-const echoWindow = 30 * time.Second
-
-// recordPush remembers text as spoken just now, dropping entries older
-// than echoWindow.
-func (s *Supervisor) recordPush(text string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	now := s.cfg.Now()
-	cutoff := now.Add(-echoWindow)
-	kept := s.recentPushes[:0]
-	for _, p := range s.recentPushes {
-		if p.at.After(cutoff) {
-			kept = append(kept, p)
-		}
-	}
-	s.recentPushes = append(kept, pushRecord{text: text, at: now})
 }
 
 // pushTo hands the line to the pusher, with the tags when it takes them.

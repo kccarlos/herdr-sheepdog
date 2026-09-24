@@ -132,26 +132,21 @@ func TestResetConversationAPIPathNoBrain(t *testing.T) {
 	}
 }
 
-// A push spoken just before a reset must not be treated as an echo of
-// something said in the new conversation: recentPushes is dropped by
-// ResetConversation (audit "Reset leftovers").
-func TestResetClearsRecentPushEchoMemory(t *testing.T) {
-	m := braintest.NewModel(braintest.Step{Text: braintest.Reply("not an echo", "")})
-	h := newBrainHarness(t, m)
+// An utterance heard just before a reset is not relayed by the daemon
+// into the new conversation (relay.go; audit "Reset leftovers").
+func TestResetDisarmsTheDaemonRelay(t *testing.T) {
+	m := braintest.NewModel(braintest.Step{Text: braintest.Reply("should not run", "")})
+	h := newBrainHarness(t, m, relayAfter(30*time.Millisecond))
 	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
-	const pushText = "auth asks to run git status --short."
-	h.sup.push("w5:p1", pushText, voice.UrgencyIdle)
+	h.hear("what's auth doing")
 
 	if _, _, err := h.sup.ResetConversation(context.Background(), "app"); err != nil {
 		t.Fatal(err)
 	}
-
-	res := h.say(pushText)
-	if res.Scheduling == voice.UrgencySilent {
-		t.Errorf("a pre-reset push was still treated as an echo after the reset: %+v", res)
-	}
-	if h.log.count("supervisor.echo_ignored") != 0 {
-		t.Error("echo_ignored logged for a push from before the reset")
+	time.Sleep(100 * time.Millisecond)
+	h.sup.replies.Wait()
+	if n := h.log.count("supervisor.relay_by_daemon"); n != 0 {
+		t.Errorf("relay_by_daemon = %d after a reset, want 0", n)
 	}
 }
 

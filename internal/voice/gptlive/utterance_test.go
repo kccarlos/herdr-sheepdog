@@ -115,3 +115,40 @@ func TestTurnCompleteWaitsForTheShepherdsUtterance(t *testing.T) {
 		t.Fatalf("order %v, want in,turn_complete,final", order)
 	}
 }
+
+// TestPausedSentenceIsRelayedWhole: the 2026-09-23 23:53:26 shape — a
+// pause longer than SettleWait mid-sentence settles the first half, then
+// the second half settles too before the delegation arrives. The relay
+// carries the whole sentence, not the tail ("sometimes").
+func TestPausedSentenceIsRelayedWhole(t *testing.T) {
+	cfg := testConfig()
+	got := make(chan voice.ToolCall, 1)
+	cfg.Handler = func(_ context.Context, call voice.ToolCall) (voice.ToolResult, error) {
+		got <- call
+		return voice.ToolResult{Spoken: "ok"}, nil
+	}
+	cfg.SettleWait = 40 * time.Millisecond
+	s, d, _ := startSession(t, cfg)
+	s.ClientAttached(true)
+	_ = s.SendAudio(tone(3000, 640))
+	waitFor(t, "open", s.Live)
+	c := d.last()
+	for _, delta := range []string{"Tell the sheepdog claude", " that the iOS app voice still have lags."} {
+		c.server(map[string]any{"type": evInputTranscript, "delta": delta})
+	}
+	time.Sleep(150 * time.Millisecond) // the pause: the first half settles
+	for _, delta := range []string{" The status switch", " to mute sometimes"} {
+		c.server(map[string]any{"type": evInputTranscript, "delta": delta})
+	}
+	time.Sleep(150 * time.Millisecond) // the second half settles too
+	c.server(map[string]any{"type": evDelegationCreated, "delegation": map[string]any{"id": "item_paused", "target": "client"}})
+	select {
+	case call := <-got:
+		want := "Tell the sheepdog claude that the iOS app voice still have lags. The status switch to mute sometimes"
+		if call.Args["text"] != want {
+			t.Fatalf("relayed %q, want %q", call.Args["text"], want)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no call")
+	}
+}

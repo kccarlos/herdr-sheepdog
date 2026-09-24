@@ -147,9 +147,11 @@ func TestOneYesAnswersOnePrompt(t *testing.T) {
 
 // The brain's send_keys runs on the shepherd's input: a "no"-class input
 // never authorises a yes key, whatever the model relayed. (A bare "no"
-// never reaches the brain: the fast path declines with it.)
+// never reaches the brain: the fast path declines with it; nor does a
+// bare "stop", which is the stop procedure — see
+// TestHeardStopIsAStopWhateverTheRelay.)
 func TestNoInputCannotAuthoriseYesKeys(t *testing.T) {
-	for _, said := range []string{"don't run that", "stop", "cancel it", "No, wait."} {
+	for _, said := range []string{"don't run that", "stop it", "cancel it", "No, wait."} {
 		t.Run(said, func(t *testing.T) {
 			m := braintest.NewModel(
 				braintest.Step{Calls: []*genai.FunctionCall{braintest.FC(brain.ToolSendKeys, map[string]any{"agent": "auth", "keys": []any{"y"}})}},
@@ -213,11 +215,10 @@ func TestMutedClientAuthorisesNothing(t *testing.T) {
 
 // The regression of 2026-09-23 00:52: the shepherd muted at 00:52:16
 // after a question; the block was pushed, the voice model relayed the
-// push back (echo), then the brain's late line was pushed and the model
-// said "yes" to it on its own. Nothing reaches the pane either way: a
-// bare "yes" is never an echo (audit B1 — a push merely containing the
-// word "yes" must not count), so it is the relay gate
-// (voice_initiative_ignored) that stops both bare relays here.
+// push back, then the brain's late line was pushed and the model said
+// "yes" to it on its own. Nothing reaches the pane: nothing was said
+// since each push, so the relay gate (voice_initiative_ignored) stops
+// all three relays.
 func TestRegressionVoiceSaysYesToAPushWhileMuted(t *testing.T) {
 	h := newHarness(t)
 	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
@@ -226,9 +227,6 @@ func TestRegressionVoiceSaysYesToAPushWhileMuted(t *testing.T) {
 	h.block("w5:p1", "codex-approval-prompt.screen.txt") // 00:52:34
 	announce := h.pusher.last(t).Text
 	h.relay(announce)
-	if h.log.count("supervisor.echo_ignored") != 1 {
-		t.Fatalf("echo_ignored = %d", h.log.count("supervisor.echo_ignored"))
-	}
 	h.clock.Advance(2 * time.Second) // 00:52:36
 	h.sup.push("w5:p1", "Auth needs one more yes to run the diff; I'd approve it.", voice.UrgencyIdle)
 	h.relay("yes")
@@ -240,11 +238,8 @@ func TestRegressionVoiceSaysYesToAPushWhileMuted(t *testing.T) {
 	if _, has := h.pending(); !has {
 		t.Error("the prompt must stay open")
 	}
-	if n := h.log.count("supervisor.voice_initiative_ignored"); n != 2 {
-		t.Errorf("voice_initiative_ignored = %d, want 2 (\"yes\" is never an echo, so the relay gate catches both bare relays)", n)
-	}
-	if h.log.count("supervisor.echo_ignored") != 1 {
-		t.Errorf("echo_ignored = %d, want 1 (only the verbatim announce relay)", h.log.count("supervisor.echo_ignored"))
+	if n := h.log.count("supervisor.voice_initiative_ignored"); n != 3 {
+		t.Errorf("voice_initiative_ignored = %d, want 3", n)
 	}
 }
 
@@ -252,7 +247,7 @@ func TestRegressionVoiceSaysYesToAPushWhileMuted(t *testing.T) {
 // counts; one that arrives only after the grace wait began is waited
 // for.
 func TestRelayWaitsForATrailingTranscript(t *testing.T) {
-	h := newHarness(t, func(c *Config) { c.InputGrace = 2 * time.Second })
+	h := newHarness(t, func(c *Config) { c.inputGrace = 2 * time.Second })
 	blockedAuth(t, h)
 	h.clock.Advance(time.Second)
 	go func() {

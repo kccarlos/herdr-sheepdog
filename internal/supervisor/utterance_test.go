@@ -276,94 +276,49 @@ func TestFastPathRejectsPhrasesWithExtraContent(t *testing.T) {
 	}
 }
 
-// (3b) The voice relaying a push back through to_supervisor — verbatim,
-// or differing only in case or trailing punctuation — is never treated
-// as the CEO's words: no fast path, no brain turn (docs/issues-
-// 2026-09-18.md Bug 2, "the voice relayed an announcement as if the
-// shepherd said it").
-func TestEchoedPushIsIgnored(t *testing.T) {
-	m := braintest.NewModel(braintest.Step{Text: braintest.Reply("not the shepherd", "")})
+// (3b) The voice relaying a push back through to_supervisor never
+// reaches the brain as the CEO's words (docs/issues-2026-09-18.md Bug 2):
+// with nothing said since the push it is the model's own initiative, and
+// with something said, the brain gets what was said, not the push.
+func TestPushRelayedBackNeverReachesTheBrain(t *testing.T) {
+	m := braintest.NewModel(braintest.Step{Text: braintest.Reply("It asked to run git status.", "")})
 	h := newBrainHarness(t, m)
 	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
 	const pushText = "auth asks to run git status --short."
 	h.sup.push("w5:p1", pushText, voice.UrgencyIdle)
 	before := len(m.Calls())
 
-	for _, text := range []string{pushText, strings.ToUpper(pushText), strings.TrimSuffix(pushText, ".")} {
-		res := h.say(text)
-		if res.Scheduling != voice.UrgencySilent || res.Spoken != "" {
-			t.Errorf("say(%q) = %+v", text, res)
-		}
+	if res := h.relay(pushText); res.Scheduling != voice.UrgencySilent || res.Spoken != "" {
+		t.Errorf("relay of the push = %+v, want nothing said", res)
 	}
 	if n := len(m.Calls()) - before; n != 0 {
-		t.Errorf("%d model calls, want none for an echoed push", n)
+		t.Errorf("%d model calls, want none for a relayed push", n)
 	}
-	if h.log.count("supervisor.echo_ignored") != 3 {
-		t.Errorf("echo_ignored = %d, want 3", h.log.count("supervisor.echo_ignored"))
-	}
-	if got := h.sendKeysRequests(); len(got) != 0 {
-		t.Errorf("send_keys = %v, want none", got)
+	if h.log.count("supervisor.voice_initiative_ignored") != 1 {
+		t.Errorf("voice_initiative_ignored = %d, want 1", h.log.count("supervisor.voice_initiative_ignored"))
 	}
 
-	// Genuinely new words are never mistaken for an echo, even sharing
-	// most of the push's own text.
-	res := h.say("yes, " + pushText)
-	if res.Scheduling == voice.UrgencySilent {
-		t.Errorf("a real instruction containing the push text was ignored: %+v", res)
+	h.hear("what did it say?")
+	h.relay(pushText)
+	calls := m.Calls()
+	if len(calls)-before != 1 {
+		t.Fatalf("%d model calls, want one", len(calls)-before)
 	}
-	if got := len(m.Calls()) - before; got != 1 {
-		t.Errorf("%d model calls, want one for the non-echo utterance", got)
+	if text := calls[len(calls)-1].Text(); !strings.Contains(text, `utterance="what did it say?"`) || strings.Contains(text, `utterance="auth asks`) {
+		t.Errorf("the brain was not asked the shepherd's words:\n%s", text)
 	}
 }
 
-// (3c) Past echoWindow a push's own text is no longer treated as an
-// echo: it reaches the brain like anything else.
-func TestEchoWindowExpires(t *testing.T) {
-	m := braintest.NewModel(braintest.Step{Text: braintest.Reply("heard you", "")})
-	h := newBrainHarness(t, m)
-	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
-	const pushText = "auth asks to run git status --short."
-	h.sup.push("w5:p1", pushText, voice.UrgencyIdle)
-	h.clock.Advance(31 * time.Second)
-
-	res := h.say(pushText)
-	if res.Scheduling == voice.UrgencySilent {
-		t.Errorf("a stale push was still treated as an echo: %+v", res)
-	}
-	if h.log.count("supervisor.echo_ignored") != 0 {
-		t.Error("echo_ignored logged past echoWindow")
-	}
-}
-
-// (3d) A bare short answer is never mistaken for an echo just because a
-// recent push happens to contain a substring of it: a substring match
-// without word boundaries let "no" count as an echo of any push
-// containing "now", and let "approve" match a brain block line ending
-// "— approve?" (audit B1).
-func TestBareAnswerNeverTreatedAsEcho(t *testing.T) {
-	m := braintest.NewModel(
-		braintest.Step{Text: braintest.Reply("heard your no.", "")},
-		braintest.Step{Text: braintest.Reply("heard your approve.", "")},
-	)
+// (3c) A bare short answer said after a push reaches the brain like
+// anything else, however the push's own words overlap it (audit B1).
+func TestBareAnswerAfterAPushReachesTheBrain(t *testing.T) {
+	m := braintest.NewModel(braintest.Step{Text: braintest.Reply("heard your no.", "")})
 	h := newBrainHarness(t, m)
 	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
 
 	h.sup.push("w5:p1", "I'll deploy it now unless you say otherwise.", voice.UrgencyIdle)
-	res := h.say("no")
-	if res.Scheduling == voice.UrgencySilent {
-		t.Errorf(`"no" after a push containing "now" was treated as an echo: %+v`, res)
-	}
-	if h.log.count("supervisor.echo_ignored") != 0 {
-		t.Error(`"no" was logged as echo_ignored`)
-	}
-
-	h.sup.push("w5:p1", "Auth is blocked on the migration — approve?", voice.UrgencyIdle)
-	res = h.say("approve")
-	if res.Scheduling == voice.UrgencySilent {
-		t.Errorf(`"approve" after a push ending "— approve?" was treated as an echo: %+v`, res)
-	}
-	if h.log.count("supervisor.echo_ignored") != 0 {
-		t.Error(`"approve" was logged as echo_ignored`)
+	if res := h.say("no"); res.Spoken != "heard your no." {
+		t.Errorf(`"no" after a push containing "now" = %+v`, res)
 	}
 }
 

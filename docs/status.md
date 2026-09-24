@@ -26,6 +26,7 @@ of its work order) are merged; so is everything since.
 | Investigations: background CLI sub-agent jobs with session resume and a ledger | done (#32) |
 | Deliver-later: a `to_supervisor` call waits `brain.reply_wait_s`, then the reply is pushed when it lands | done (#47) |
 | Finish delivery (iteration 2 WP2): a finish waits for the brain's line, only a block speaks at `brain.announce_wait_s`, a late `needs_user` line is always spoken, "started on" for the brain's own prompt is silent | in review |
+| The shepherd's words (iteration 2 WP3): every utterance runs on the recorded input, not the voice's argument (the echo guard is gone); GPT-Live relays a paused sentence whole; the daemon relays an utterance the voice left unanswered for 4 s; back-to-back utterances queued behind a running turn coalesce | in review |
 | "New conversation" (brain transcript window + voice memory) | done (#44, #48) |
 | Phone/LAN access: `web.bind` / `web.token`, cookie login, `GET /api/hello` | done (#36) |
 | `/debug`: Conversation, Swimlane, Supervisor, Context, Events, State tabs | done (#16, #19, #22, #49) |
@@ -57,7 +58,8 @@ the audio e2e harness ([`audio-e2e-results.md`](audio-e2e-results.md)).
 
 Fake model / mock herdr only (`--brain=fake --herdr=mock`): most of the
 supervisor's edge cases (reprompt races, deliver-later staleness, reset
-leftovers, echo guard), which are unit- and daemon-tested. Gemini's free
+leftovers, the relay gate, the daemon's relay of an unanswered
+utterance, coalescing), which are unit- and daemon-tested. Gemini's free
 tier allows about 20 requests per model per key per day; run live checks
 sparingly and `make eval-live` deliberately.
 
