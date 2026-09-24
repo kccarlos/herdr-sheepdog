@@ -15,10 +15,10 @@ import (
 // lived in the window or the voice session's own memory, so there is
 // nothing to restore. It also drops the smaller pieces of state that
 // exist only to bridge the moment of a call or a push into a later one —
-// recentPushes (isEcho), a detached utterance turn still running, and
-// the shepherd-input relay counters (claimInput) — so nothing from
-// before the reset can echo, reply into or authorise anything in the
-// fresh conversation.
+// a detached utterance turn still running, the shepherd-input relay
+// counters (claimInput) and the unanswered-utterance watch (relay.go) —
+// so nothing from before the reset can be relayed, reply into or
+// authorise anything in the fresh conversation.
 //
 // Two triggers reach the same ResetConversation: POST
 // /api/conversation/reset (web/conversation.go), and the bare voice
@@ -105,9 +105,9 @@ func (s *Supervisor) ResetConversation(ctx context.Context, via string) (id stri
 	s.mu.Lock()
 	s.conversationStartedAt = at
 	s.resetConfirm = nil
-	// A push spoken just before the reset must not be mistaken for an
-	// echo of something said in the new conversation (isEcho).
-	s.recentPushes = nil
+	// An utterance from before the reset is not relayed into the new
+	// conversation (relay.go).
+	s.disarmRelayLocked()
 	// No shepherd input recorded before the reset may authorise a
 	// to_supervisor call in the new one (claimInput): bumping the relay
 	// counters to the current inputSeq makes every existing input look

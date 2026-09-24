@@ -220,6 +220,12 @@ type SVPExpect struct {
 	// invented to fill a partial relay (regression
 	// partial-relay-no-fabrication, 2026-09-23 23:53:26).
 	PromptMustNotContain []string `json:"prompt_must_not_contain,omitempty"`
+	// QuestionIsHeard requires the brain to be asked what the shepherd
+	// said (the case's source.heard), not the voice model's relay of it
+	// (request.question): the daemon runs every utterance on its
+	// recorded input (docs/iteration-2.md WP3, regression
+	// partial-relay-no-fabrication). Checked offline.
+	QuestionIsHeard bool `json:"question_is_heard,omitempty"`
 	// SpokenMaxWords: the spoken reply may have at most this many words,
 	// when positive (live only; J1/J3 ≤ 20, WP1's ear contract ≤ 30).
 	SpokenMaxWords int `json:"spoken_max_words,omitempty"`

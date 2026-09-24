@@ -16,7 +16,8 @@ import (
 const delegationSettle = 400 * time.Millisecond
 
 // settledKeep is how long a settled, unclaimed utterance stays available
-// to a delegation that arrives after it.
+// to a delegation that arrives after it, and how close a further settle
+// must follow for its words to join it (the same sentence, paused).
 const settledKeep = 4 * time.Second
 
 // onDelegation starts handling a client delegation: once the input

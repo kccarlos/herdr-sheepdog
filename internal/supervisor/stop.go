@@ -61,6 +61,10 @@ type stopOutcome struct {
 // Stop runs the stop procedure and says what it stopped. trigger is one
 // of the StopTrigger constants.
 func (s *Supervisor) Stop(ctx context.Context, trigger string) (voice.ToolResult, error) {
+	// Whatever the shepherd just said is not relayed by the daemon after
+	// a stop (relay.go): the stop tool, the app's stop button and the
+	// bare word all come through here.
+	s.toolCalled()
 	out := s.resolveStop(ctx)
 	s.log.Log(logSource, "supervisor.stopped", out.paneID, map[string]any{"phase": out.phase, "what": out.what, "trigger": trigger})
 	if s.brain != nil {

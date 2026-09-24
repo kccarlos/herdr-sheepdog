@@ -132,7 +132,7 @@ func runSVPCase(ctx context.Context, c SVPCase, fixtureDir string, model brain.M
 	seedTranscript(b, c.Transcript)
 
 	req := brain.Request{
-		Kind: brain.Kind(c.Request.Kind), Question: c.Request.Question, Agent: c.Request.Agent, Briefing: c.Request.Briefing,
+		Kind: brain.Kind(c.Request.Kind), Question: askedOf(c), Agent: c.Request.Agent, Briefing: c.Request.Briefing,
 		Event: c.Request.Event, Template: c.Request.Template, Owed: c.Request.Owed, Screen: c.Request.Screen,
 	}
 	if req.Kind == "" {
@@ -161,6 +161,7 @@ func runSVPCase(ctx context.Context, c SVPCase, fixtureDir string, model brain.M
 	}
 	reasons, skipped := gradeSVP(c.Expect, rec, reply, offline)
 	reasons = append(reasons, stopWordReasons(c)...)
+	reasons = append(reasons, heardReasons(c, req.Question)...)
 	reasons = append(reasons, base.reasons...)
 	r := Result{ID: c.ID, Duration: dur, Got: got, SkippedChecks: skipped, Pending: c.PendingCheck, Baseline: base.summary}
 	switch {
@@ -190,6 +191,27 @@ func stopWordReasons(c SVPCase) []string {
 	return []string{fmt.Sprintf("%q is a bare stop word: the daemon would run the stop procedure (Ctrl-C a recent instruction) before any brain turn", c.Request.Question)}
 }
 
+// askedOf is the question the daemon puts in front of the brain for c:
+// what the shepherd was heard saying (source.heard), when the case
+// records it, else the relay — the same choice the supervisor makes
+// (supervisor.UtteranceOf).
+func askedOf(c SVPCase) string {
+	if c.Source == nil {
+		return c.Request.Question
+	}
+	q, _ := supervisor.UtteranceOf(c.Source.Heard, c.Request.Question)
+	return q
+}
+
+// heardReasons checks Expect.QuestionIsHeard: the brain was asked asked,
+// which must be the shepherd's recorded words.
+func heardReasons(c SVPCase, asked string) []string {
+	if !c.Expect.QuestionIsHeard || c.Source == nil || c.Source.Heard == "" || asked == c.Source.Heard {
+		return nil
+	}
+	return []string{fmt.Sprintf("the brain was asked %q, not what the shepherd said (%q)", asked, c.Source.Heard)}
+}
+
 // baseline is a case's grade against the logged behaviour (Observed).
 type baseline struct {
 	summary string   // for the table: "fails as logged: …" / "passes as logged"
@@ -215,6 +237,8 @@ func baselineOf(c SVPCase) baseline {
 		reply.NeedsUser = *c.Observed.NeedsUser
 	}
 	fails, _ := gradeSVP(c.Expect, rec, reply, false)
+	// The logged brain was asked the relay itself.
+	fails = append(fails, heardReasons(c, c.Request.Question)...)
 	return judgeBaseline(fails, c.BaselineFails)
 }
 

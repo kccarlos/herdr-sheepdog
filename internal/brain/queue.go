@@ -38,6 +38,7 @@ func (l *turnLock) acquire(ctx context.Context, ceo bool, key string) (replaced 
 	if !l.busy {
 		l.busy = true
 		l.mu.Unlock()
+		turnStarted(ctx)
 		return false, nil
 	}
 	w := &waiter{ch: make(chan struct{}), key: key}
@@ -64,6 +65,7 @@ func (l *turnLock) acquire(ctx context.Context, ceo bool, key string) (replaced 
 		if w.coalesced {
 			return replaced, ErrCoalesced
 		}
+		turnStarted(ctx)
 		return replaced, nil
 	case <-ctx.Done():
 		l.mu.Lock()
@@ -124,4 +126,24 @@ func (l *turnLock) ceoWaiting() int {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return len(l.ceo)
+}
+
+// turnStartKey carries WithTurnStart's callback.
+type turnStartKey struct{}
+
+// WithTurnStart returns ctx carrying f: a turn run under ctx calls f
+// once, the moment it is handed the turn lock — never while it waits.
+// The supervisor coalesces back-to-back shepherd utterances only while
+// the earlier one's turn is still queued (docs/roles.md "One
+// decision-maker"); a turn in progress is never cut, so it must know
+// exactly when the turn started.
+func WithTurnStart(ctx context.Context, f func()) context.Context {
+	return context.WithValue(ctx, turnStartKey{}, f)
+}
+
+// turnStarted calls ctx's WithTurnStart callback, if any.
+func turnStarted(ctx context.Context) {
+	if f, ok := ctx.Value(turnStartKey{}).(func()); ok && f != nil {
+		f()
+	}
 }

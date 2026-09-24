@@ -5,20 +5,24 @@ import (
 	"fmt"
 	"strings"
 	"time"
-	"unicode"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
 
-// One decision-maker (docs/roles.md): the voice relays whatever the CEO
-// said verbatim and decides nothing. Two deterministic fast paths run
-// here, in code, before any model — a bare stop, and a bare answer to
-// the one open prompt — and everything else is one brain turn over the
-// words, which resolves what they are and acts. With no brain the
-// daemon answers from the roster and sends nothing: judging what words
-// mean is the brain's work, and there is no second model for it.
+// One decision-maker (docs/roles.md): the voice hands over whatever the
+// CEO said and decides nothing. The words every path below runs on are
+// the ones the daemon recorded (inputs.go's claimInput) — the voice's
+// input transcription, typed text or a tap — never the voice model's
+// to_supervisor argument, which paraphrased, invented and cut
+// sentences short (2026-09-23/24); the argument is a hint, logged
+// beside them. Two deterministic fast paths run here, in code, before
+// any model — a bare stop, and a bare answer to the one open prompt —
+// and everything else is one brain turn over the words, which resolves
+// what they are and acts. With no brain the daemon answers from the
+// roster and sends nothing: judging what words mean is the brain's
+// work, and there is no second model for it.
 
 // inflightUtterance is the one to_supervisor call being handled, under
 // s.mu: what the CEO said, how to cancel the turn it is (or is about to
@@ -52,6 +56,17 @@ type inflightUtterance struct {
 	done     bool
 	out      utteranceOutcome
 	finished chan struct{}
+
+	// prev is the utterance whose slot this one took over, until
+	// coalesce looked at it. started is set (by the brain's turn lock,
+	// brain.WithTurnStart) once this turn is running; coalesced once a
+	// newer utterance took its words over while it was still queued, so
+	// it delivers nothing. merged counts the utterances in text. All
+	// under s.mu.
+	prev      *inflightUtterance
+	started   bool
+	coalesced bool
+	merged    int
 }
 
 // utteranceOutcome is what one utterance turn produced. ok is false
@@ -90,62 +105,132 @@ func withCallID(ctx context.Context, id string) context.Context {
 	return context.WithValue(ctx, callIDKey{}, id)
 }
 
-// ToSupervisor handles the voice's relay tool: the CEO's words, verbatim.
-func (s *Supervisor) ToSupervisor(ctx context.Context, text string) (voice.ToolResult, error) {
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return voice.ToolResult{Spoken: "Sorry, what was that?", Clarify: true, Scheduling: voice.UrgencyInterrupt}, nil
+// UtteranceOf is the words an utterance runs on (docs/roles.md "One
+// decision-maker"): what the daemon recorded the shepherd saying, typing
+// or tapping (heard), and the voice model's to_supervisor argument
+// (said) only when nothing was recorded — fallback is true then. The
+// eval harness uses it to put the same words in front of the brain as
+// the daemon does.
+func UtteranceOf(heard, said string) (text string, fallback bool) {
+	if h := strings.TrimSpace(heard); h != "" {
+		return h, false
 	}
-	if s.isEcho(text) {
-		// The voice relayed a push back through to_supervisor as if the
-		// CEO had said it (a wasted turn at best; with different phrasing
-		// it could look like authorisation). Nothing was said: no fast
-		// path, no brain turn, and the rail never sees these words as the
-		// CEO's own (docs/history/issues-2026-09-18.md Bug 2).
-		s.log.Log(logSource, "supervisor.echo_ignored", "", map[string]any{"text": text})
-		return voice.ToolResult{Scheduling: voice.UrgencySilent}, nil
-	}
-	in, fresh := s.claimInput(ctx)
+	return strings.TrimSpace(said), true
+}
+
+// ToSupervisor handles the voice's relay tool. said is the model's
+// argument; the utterance is what the shepherd said (UtteranceOf).
+func (s *Supervisor) ToSupervisor(ctx context.Context, said string) (voice.ToolResult, error) {
+	said = strings.TrimSpace(said)
+	c, fresh := s.claimInput(ctx)
 	if !fresh {
 		// Nothing the shepherd said, typed or tapped since the previous
 		// relay or the last push: the voice model is acting on its own
-		// (2026-09-23: "yes" right after a push, with the mic muted).
-		// Nothing happens and nothing is said (inputs.go).
-		s.log.Log(logSource, "supervisor.voice_initiative_ignored", "", map[string]any{"text": text})
+		// (2026-09-23: "yes" right after a push, with the mic muted; a
+		// push relayed back as if the shepherd had said it). Nothing
+		// happens and nothing is said (inputs.go).
+		s.log.Log(logSource, "supervisor.voice_initiative_ignored", "", map[string]any{"text": said})
 		return voice.ToolResult{Scheduling: voice.UrgencySilent}, nil
 	}
+	text, fallback := UtteranceOf(c.text, said)
+	payload := map[string]any{"heard": c.text, "said": said, "inputs": c.n, "input": string(c.in.kind)}
+	if id := callIDOf(ctx); id != "" {
+		payload["call_id"] = id
+	}
+	if fallback {
+		// The recorded input has no words (it cannot today: empty
+		// fragments never become inputs), so the argument is all there
+		// is. Logged, so it shows if it ever happens.
+		s.log.Log(logSource, "supervisor.relay_fallback", "", payload)
+	} else {
+		s.log.Log(logSource, "supervisor.relay", "", payload)
+	}
+	if text == "" {
+		return voice.ToolResult{Spoken: "Sorry, what was that?", Clarify: true, Scheduling: voice.UrgencyInterrupt}, nil
+	}
+	c.text = text
+	return s.handleUtterance(ctx, c, callIDOf(ctx), false), nil
+}
+
+// handleUtterance runs the shepherd's claimed words: the fast paths,
+// then one brain turn. A relay (daemon false) returns the reply as the
+// tool result, waiting up to Config.ReplyWait for it; the daemon's own
+// relay of an unanswered utterance (relay.go) has no tool call to answer,
+// so its turn's reply is always pushed (deliverLate), and only a fast
+// path's result is returned, for the caller to push.
+func (s *Supervisor) handleUtterance(ctx context.Context, c claim, callID string, daemon bool) voice.ToolResult {
+	text := c.text
 	// Bare stop first: "no" is an answer, "no no" is a stop.
 	if bareStop(text) {
-		return s.Stop(ctx, StopTriggerBareWord)
+		res, _ := s.Stop(ctx, StopTriggerBareWord)
+		return res
 	}
 	// The "New conversation" bare-phrase trigger and its confirm
 	// (docs/roles.md "Triggers" (b)): a fast path, like the stop word
 	// above — no model, and only this claimed shepherd input can ask or
 	// confirm it.
 	if res, ok := s.resetConfirmFastPath(ctx, text); ok {
-		return res, nil
+		return res
 	}
-	if s.cfg.ReplyWait < 0 {
+	sync := s.cfg.ReplyWait < 0 && !daemon
+	// The turn is detached from the tool call unless it is synchronous:
+	// the voice cancels a handler's context as soon as the handler
+	// returns, and the turn may outlive it. Like an investigation job it
+	// runs on its own context, bounded by the brain's own turn timeout;
+	// the stop procedure cancels it through the slot.
+	parent := context.Background()
+	if sync {
+		parent = ctx
+	}
+	turnCtx, u := s.beginUtterance(parent, text, callID)
+	if res, ok := s.fastAnswer(turnCtx, c.in, text); ok {
+		s.endUtterance(u)
+		return res
+	}
+	s.coalesce(u)
+	switch {
+	case daemon:
+		s.mu.Lock()
+		u.detached = true
+		s.mu.Unlock()
+		start := s.cfg.Now()
+		s.deliverLate(turnCtx, u, s.utteranceTurn(turnCtx, u), start)
+		return voice.ToolResult{}
+	case sync:
 		// Synchronous: the turn runs under the tool call's own context
 		// and its reply is always the tool result.
-		turnCtx, u := s.beginUtterance(ctx, text, callIDOf(ctx))
 		defer s.endUtterance(u)
-		if res, ok := s.fastAnswer(turnCtx, in); ok {
-			return res, nil
-		}
-		return s.inlineResult(turnCtx, u, s.utteranceTurn(turnCtx, u, text)), nil
+		return s.inlineResult(turnCtx, u, s.utteranceTurn(turnCtx, u))
+	default:
+		return s.awaitReply(ctx, turnCtx, u)
 	}
-	// The turn is detached from the tool call: the voice cancels a
-	// handler's context as soon as the handler returns, and the turn may
-	// outlive it. Like an investigation job it runs on its own context,
-	// bounded by the brain's own turn timeout; the stop procedure cancels
-	// it through the slot.
-	turnCtx, u := s.beginUtterance(context.Background(), text, callIDOf(ctx))
-	if res, ok := s.fastAnswer(turnCtx, in); ok {
-		s.endUtterance(u)
-		return res, nil
+}
+
+// coalesce merges the utterance u took the slot from into u when that
+// one's brain turn is still queued behind another turn (docs/roles.md
+// "One decision-maker"): two back-to-back sentences ("Okay, I closed
+// the UC summary Codex agent." / "Check the remaining.", 2026-09-24
+// 00:41) are one request, and two turns answered them over each other.
+// The queued turn is cancelled before it starts, so it delivers nothing
+// (coalesced), and u runs once over both texts. A turn already running
+// is never cut: it finishes, and its reply is stale if it lands late
+// (acceptedSeq moved when u was accepted; deliverLate).
+func (s *Supervisor) coalesce(u *inflightUtterance) {
+	s.mu.Lock()
+	p := u.prev
+	u.prev = nil
+	if p == nil || !p.inBrain || p.started || p.dropped || p.coalesced || p.done {
+		s.mu.Unlock()
+		return
 	}
-	return s.awaitReply(ctx, turnCtx, u, text), nil
+	p.coalesced = true
+	u.text = p.text + " " + u.text
+	u.merged = p.merged + 1
+	payload := map[string]any{"n": u.merged, "text": u.text, "id": u.id, "replaces": p.id}
+	cancel := p.cancel
+	s.mu.Unlock()
+	cancel()
+	s.log.Log(logSource, "supervisor.utterance_coalesced", "", payload)
 }
 
 // awaitReply runs the utterance turn detached and waits up to
@@ -157,12 +242,12 @@ func (s *Supervisor) ToSupervisor(ctx context.Context, text string) (voice.ToolR
 // A voice that drops the call meanwhile (the shepherd barged in) gets
 // the same treatment: its result would be discarded, so the reply goes
 // the late way too.
-func (s *Supervisor) awaitReply(ctx, turnCtx context.Context, u *inflightUtterance, text string) voice.ToolResult {
+func (s *Supervisor) awaitReply(ctx, turnCtx context.Context, u *inflightUtterance) voice.ToolResult {
 	start := s.cfg.Now()
 	s.replies.Add(1)
 	go func() {
 		defer s.replies.Done()
-		out := s.utteranceTurn(turnCtx, u, text)
+		out := s.utteranceTurn(turnCtx, u)
 		s.mu.Lock()
 		if !u.detached {
 			u.out, u.done = out, true
@@ -213,6 +298,9 @@ func (s *Supervisor) awaitReply(ctx, turnCtx context.Context, u *inflightUtteran
 // the stop procedure (or the voice) cancelled it, the reply when there
 // is one, else the roster sentence.
 func (s *Supervisor) inlineResult(turnCtx context.Context, u *inflightUtterance, out utteranceOutcome) voice.ToolResult {
+	if s.utteranceCoalesced(u) {
+		return coalescedResult()
+	}
 	if s.utteranceDropped(u) || turnCtx.Err() != nil {
 		// Stopped, or the voice cancelled the call: the stop procedure
 		// speaks, and the brain's reply is discarded.
@@ -239,7 +327,7 @@ func (s *Supervisor) inlineResult(turnCtx context.Context, u *inflightUtterance,
 func (s *Supervisor) deliverLate(turnCtx context.Context, u *inflightUtterance, out utteranceOutcome, start time.Time) {
 	cancelled := turnCtx.Err() != nil
 	s.mu.Lock()
-	dropped := u.dropped
+	dropped := u.dropped || u.coalesced
 	stale := s.acceptedSeq != u.accepted
 	if s.utterance == u {
 		s.utterance = nil
@@ -338,13 +426,14 @@ func (s *Supervisor) answerPromptOpen() bool {
 // it).
 func (s *Supervisor) beginUtterance(parent context.Context, text, callID string) (context.Context, *inflightUtterance) {
 	turnCtx, cancel := context.WithCancel(parent)
-	u := &inflightUtterance{text: text, cancel: cancel, finished: make(chan struct{}), callID: callID}
+	u := &inflightUtterance{text: text, cancel: cancel, finished: make(chan struct{}), callID: callID, merged: 1}
 	s.mu.Lock()
 	u.id = s.nextID("utt")
 	u.accepted = s.acceptedSeq
-	// A second utterance while one is in flight only takes the slot over:
-	// the older turn is left to finish (the brain's turn lock serialises
-	// them anyway); cancelling it would lose what it was doing.
+	u.prev = s.utterance
+	// A second utterance while one is in flight takes the slot over: the
+	// older turn is left to finish (the brain's turn lock serialises them
+	// anyway) unless it is still queued, when coalesce merges the two.
 	s.utterance = u
 	s.mu.Unlock()
 	return turnCtx, u
@@ -378,6 +467,20 @@ func (s *Supervisor) abandonUtterance() {
 	}
 }
 
+// utteranceCoalesced reports whether a newer utterance took u's words
+// over (coalesce).
+func (s *Supervisor) utteranceCoalesced(u *inflightUtterance) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return u.coalesced
+}
+
+// coalescedResult is what a coalesced utterance's call returns: its
+// words run with the next utterance's, whose reply answers both.
+func coalescedResult() voice.ToolResult {
+	return voice.ToolResult{Detail: "Merged with what the shepherd said next; one answer follows for both.", Pending: true, Scheduling: voice.UrgencySilent}
+}
+
 // utteranceDropped reports whether the stop procedure dropped u.
 func (s *Supervisor) utteranceDropped(u *inflightUtterance) bool {
 	if u == nil {
@@ -398,10 +501,13 @@ func droppedResult() voice.ToolResult {
 // when there was no brain, or it could not answer, and the daemon must
 // speak for itself; a turn the stop procedure cancelled never returns
 // ok, and the caller checks utteranceDropped rather than falling through.
-func (s *Supervisor) utteranceTurn(ctx context.Context, u *inflightUtterance, text string) utteranceOutcome {
+func (s *Supervisor) utteranceTurn(ctx context.Context, u *inflightUtterance) utteranceOutcome {
 	if s.brain == nil {
 		return utteranceOutcome{}
 	}
+	s.mu.Lock()
+	text := u.text
+	s.mu.Unlock()
 	// The roster sentence travels with the request, so a status question
 	// costs no tool call (D1-revised); the pending prompt with its
 	// option keys and the open promises are in the brain's own roster
@@ -419,7 +525,14 @@ func (s *Supervisor) utteranceTurn(ctx context.Context, u *inflightUtterance, te
 	s.mu.Lock()
 	u.inBrain = true
 	s.mu.Unlock()
-	rep, err := s.brain.Turn(ctx, req)
+	// The turn lock says when the turn really starts: until then a newer
+	// utterance may still take these words over (coalesce).
+	started := brain.WithTurnStart(ctx, func() {
+		s.mu.Lock()
+		u.started = true
+		s.mu.Unlock()
+	})
+	rep, err := s.brain.Turn(started, req)
 	if err != nil {
 		return utteranceOutcome{}
 	}
@@ -485,102 +598,16 @@ func BareWord(text string) string {
 // bareStop reports whether the whole utterance is one of the stop words.
 func bareStop(text string) bool { return BareStopWords[BareWord(text)] }
 
-// isEcho reports whether text equals a push spoken within echoWindow
-// (case/punctuation-insensitive), or is a long contiguous whole-word run
-// taken from one: the voice relaying its own announcement back through
-// to_supervisor rather than something the CEO said (docs/issues-2026-09-
-// 18.md Bug 2). A bare short answer (yes, no, approve, an option pick, a
-// stop word) is never an echo, however it overlaps a recent push's own
-// words — a substring match without word boundaries let a bare "no"
-// count as an echo of any push containing "now", "not", "know" or
-// "another", and let "approve" match a brain block line ending
-// "— approve?" (audit B1).
-func (s *Supervisor) isEcho(text string) bool {
-	word := BareWord(text)
-	if BareStopWords[word] || bareYesWords[word] || bareNoWords[word] || bareOptionWords[word] > 0 {
-		return false
-	}
-	norm := normalizeEcho(text)
-	if norm == "" {
-		return false
-	}
-	words := strings.Fields(norm)
+// fastAnswer is the bare-answer fast path: the shepherd's whole
+// utterance (what was heard, typed or tapped — never the tool argument)
+// answers the one open answer_prompt, so the keys go straight to the
+// pane without a model, when the one rail's reading of in, the newest
+// input, allows it (inputs.go). ok is false for anything else, which
+// goes to the brain.
+func (s *Supervisor) fastAnswer(ctx context.Context, in *shepherdInput, text string) (voice.ToolResult, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	cutoff := s.cfg.Now().Add(-echoWindow)
-	for _, p := range s.recentPushes {
-		if p.at.Before(cutoff) {
-			continue
-		}
-		pn := normalizeEcho(p.text)
-		if pn == "" {
-			continue
-		}
-		if pn == norm {
-			return true
-		}
-		pushWords := strings.Fields(pn)
-		// A whole-word run of at least 4 words, covering at least 60% of
-		// the push, taken from it contiguously: enough to be recognisably
-		// "the push, spoken back", not an incidental word or two shared
-		// with a genuinely new instruction.
-		if len(words) >= 4 && float64(len(words)) >= 0.6*float64(len(pushWords)) && containsContiguousWords(pushWords, words) {
-			return true
-		}
-	}
-	return false
-}
-
-// containsContiguousWords reports whether needle appears as a contiguous,
-// in-order run within haystack.
-func containsContiguousWords(haystack, needle []string) bool {
-	if len(needle) == 0 || len(needle) > len(haystack) {
-		return false
-	}
-	for i := 0; i+len(needle) <= len(haystack); i++ {
-		match := true
-		for j, w := range needle {
-			if haystack[i+j] != w {
-				match = false
-				break
-			}
-		}
-		if match {
-			return true
-		}
-	}
-	return false
-}
-
-// normalizeEcho lower-cases text and collapses every run of non-letter,
-// non-digit characters to a single space, so the echo comparison ignores
-// case and punctuation.
-func normalizeEcho(text string) string {
-	var b strings.Builder
-	space := true // trims the leading run too
-	for _, r := range strings.ToLower(text) {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) {
-			b.WriteRune(r)
-			space = false
-			continue
-		}
-		if !space {
-			b.WriteByte(' ')
-			space = true
-		}
-	}
-	return strings.TrimSpace(b.String())
-}
-
-// fastAnswer is the bare-answer fast path: the shepherd's whole input
-// (what was heard, typed or tapped — never the tool argument) answers
-// the one open answer_prompt, so the keys go straight to the pane
-// without a model, when the one rail's reading of that input allows it
-// (inputs.go). ok is false for anything else, which goes to the brain.
-func (s *Supervisor) fastAnswer(ctx context.Context, in *shepherdInput) (voice.ToolResult, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	text := strings.TrimSpace(in.text)
+	text = strings.TrimSpace(text)
 	p, has := s.store.Pending()
 	switch {
 	case has && p.Kind == state.PendingAnswerPrompt && s.cfg.Now().Before(p.ExpiresAt):

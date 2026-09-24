@@ -60,7 +60,7 @@ func TestExtract(t *testing.T) {
 	if got := strings.Join(utt.Transcript, " | "); got != "CEO: Tell docs to run the tests" {
 		t.Errorf("transcript = %q", got)
 	}
-	if !containsStr(utt.Expect.PromptMustNotContain, "[") || !containsStr(utt.Expect.MustNotCall, brain.ToolInterrupt) {
+	if !containsStr(utt.Expect.PromptMustNotContain, "[") || !utt.Expect.QuestionIsHeard || !containsStr(utt.Expect.MustNotCall, brain.ToolInterrupt) {
 		t.Errorf("expect = %+v, want the partial-relay and no-interrupt invariants", utt.Expect)
 	}
 	if utt.Observed == nil || len(utt.Observed.ToolCalls) != 1 || utt.Observed.ToolCalls[0].Name != "prompt" || utt.Observed.Spoken != "Sending it now." {
