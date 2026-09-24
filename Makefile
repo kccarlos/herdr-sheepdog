@@ -43,17 +43,21 @@ test-web:
 lint:
 	golangci-lint run
 
-# Conversation eval set (testdata/eval/*.jsonl): offline by default — the
-# assistant set is only validated, the SVP set runs through the brain
-# with a scripted fake model (internal/eval). See docs/roles.md.
+# Conversation eval sets (testdata/eval): offline — the assistant cases
+# are only validated, every SVP case (svp, regressions, extracted,
+# expanded) runs through the brain with a scripted fake model
+# (internal/eval), and the phrasing checks are listed as skipped. The L0
+# gate of docs/iteration-2.md; see docs/roles.md "The L0 eval corpus".
 eval: build
-	./bin/$(BINARY) eval --set assistant
-	./bin/$(BINARY) eval --set svp
+	./bin/$(BINARY) eval --set all
 
 # Same, but calls the real model (gemini-3.5-flash, plain text, never
 # Live audio): needs a Gemini key (GEMINI_API_KEY or --env-file) and
 # burns real quota (the free tier's, if that's what's configured) — run
-# it sparingly, it never hot-retries on a 429.
+# it sparingly, it never hot-retries on a 429. Only the two small
+# hand-written sets: the corpus is hundreds of cases (docs/iteration-2.md
+# rule 6: live runs ≤ 30 cases, when the orchestrator says so; use
+# --set regressions or --filter for more).
 eval-live: build
 	./bin/$(BINARY) eval --set assistant --live --env-file .env
 	./bin/$(BINARY) eval --set svp --live --env-file .env

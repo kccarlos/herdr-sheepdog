@@ -89,7 +89,7 @@ func printUsage(w io.Writer) {
 	fprintln(w, "  voice-test    stream a WAV through a Gemini Live session with echo tools")
 	fprintln(w, "  brain-test    run one supervisor-brain turn against a mock herdr and a fixture")
 	fprintln(w, "  prompts       export|show: inspect or scaffold the prompt override directory")
-	fprintln(w, "  eval          run the conversation eval set (--set assistant|svp [--live])")
+	fprintln(w, "  eval          run the conversation eval sets (--set NAME|all [--live]); extract, expand")
 	fprintln(w, "  scorecard     print docs/iteration-2.md's scorecard metrics over the event log")
 	fprintln(w, "  audio-e2e     speak scenarios (macOS say + noise) into a running daemon's /ws")
 	fprintln(w, "  version       print version, commit, and build date")

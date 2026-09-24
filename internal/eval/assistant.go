@@ -32,7 +32,7 @@ func RunAssistant(ctx context.Context, cases []AssistantCase, pl *prompts.Loader
 	out := make([]Result, 0, len(cases))
 	for i, c := range cases {
 		if model == nil {
-			out = append(out, Result{ID: c.ID, Status: StatusSkipped, Detail: "offline"})
+			out = append(out, assistantOffline(c))
 			continue
 		}
 		r := runAssistantCase(ctx, c, pl, model, modelName)
@@ -96,11 +96,32 @@ func runAssistantCase(ctx context.Context, c AssistantCase, pl *prompts.Loader, 
 		}
 	}
 	reasons := checkAssistantExpect(c.Expect, gotTool, gotAgent, gotText, c.Utterance)
+	got := map[string]any{"tool": gotTool, "agent": gotAgent, "text": gotText}
 	if len(reasons) > 0 {
-		return Result{ID: c.ID, Status: StatusFail, Detail: strings.Join(reasons, "; "), Duration: dur,
-			Got: map[string]any{"tool": gotTool, "agent": gotAgent, "text": gotText}}
+		return Result{ID: c.ID, Status: StatusFail, Detail: strings.Join(reasons, "; "), Duration: dur, Got: got, Pending: c.PendingCheck}
 	}
-	return Result{ID: c.ID, Status: StatusPass, Duration: dur, Got: map[string]any{"tool": gotTool, "agent": gotAgent, "text": gotText}}
+	return Result{ID: c.ID, Status: StatusPass, Duration: dur, Got: got, Pending: c.PendingCheck}
+}
+
+// assistantOffline is an assistant case's offline result: without a model
+// nothing runs, but a case that carries the logged behaviour (Observed)
+// is graded against it, so a regression proves it catches the logged
+// failure (see Meta.BaselineFails).
+func assistantOffline(c AssistantCase) Result {
+	r := Result{ID: c.ID, Status: StatusSkipped, Detail: "offline", Pending: c.PendingCheck}
+	if c.Observed == nil {
+		return r
+	}
+	fails := checkAssistantExpect(c.Expect, c.Observed.Tool, "", c.Observed.Text, c.Utterance)
+	b := judgeBaseline(fails, c.BaselineFails)
+	r.Baseline = b.summary
+	switch {
+	case len(b.reasons) > 0:
+		r.Status, r.Detail = StatusFail, strings.Join(b.reasons, "; ")
+	case c.BaselineFails != nil:
+		r.Status, r.Detail = StatusPass, "offline: graded against the logged baseline only (no model)"
+	}
+	return r
 }
 
 // checkAssistantExpect compares what the model did against exp, returning
@@ -110,7 +131,12 @@ func checkAssistantExpect(exp AssistantExpect, gotTool, gotAgent, gotText, utter
 	if exp.Tool != "" && exp.Tool != gotTool {
 		reasons = append(reasons, "tool="+gotTool+", want "+exp.Tool)
 	}
-	if exp.Verbatim && strings.TrimSpace(gotText) != strings.TrimSpace(utterance) {
+	if len(exp.ToolAnyOf) > 0 && !containsStr(exp.ToolAnyOf, gotTool) {
+		reasons = append(reasons, "tool="+gotTool+", want one of "+strings.Join(exp.ToolAnyOf, ", "))
+	}
+	// Verbatim is about a relay's text: a case that also allows no call
+	// (ToolAnyOf with none) is not failed for having no text.
+	if exp.Verbatim && (gotTool == "to_supervisor" || exp.Tool == "to_supervisor") && strings.TrimSpace(gotText) != strings.TrimSpace(utterance) {
 		reasons = append(reasons, "text "+quoteOrEmpty(gotText)+" is not the utterance verbatim ("+quoteOrEmpty(utterance)+")")
 	}
 	if exp.Agent != nil && *exp.Agent != gotAgent {

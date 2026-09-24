@@ -1,0 +1,23 @@
+{"id":1,"ts":"2026-01-02T10:00:00Z","source":"herdr","type":"herdr.state","pane_id":"wA:p1","payload":{"agent":"codex","source":"snapshot","state":"working"}}
+{"id":2,"ts":"2026-01-02T10:00:00.1Z","source":"herdr","type":"herdr.state","pane_id":"wB:p1","payload":{"agent":"claude","source":"snapshot","state":"idle"}}
+{"id":3,"ts":"2026-01-02T10:00:00.2Z","source":"herdr","type":"herdr.state","pane_id":"wC:p1","payload":{"agent":"codex","source":"snapshot","state":"unknown"}}
+{"id":4,"ts":"2026-01-02T10:00:01Z","source":"supervisor","type":"promise.created","pane_id":"wA:p1","payload":{"agent":"auth","event":"done","id":"pr-1","text":"tell me when it's done","turn":1}}
+{"id":5,"ts":"2026-01-02T10:00:02Z","source":"supervisor","type":"pending.created","pane_id":"wB:p1","payload":{"agent":"docs","id":"ap-1","kind":"answer_prompt","question":"May I run npm test?","options":[{"index":1,"label":"Yes","keys":["1"],"default":true},{"index":2,"label":"No","keys":["esc"],"default":false}],"yes_keys":["1"],"no_keys":["esc"]}}
+{"id":6,"ts":"2026-01-02T10:00:02.5Z","source":"supervisor","type":"pending.created","pane_id":"wB:p1","payload":{"agent":"docs","id":"si-1","kind":"send_instruction","question":"","options":[]}}
+{"id":7,"ts":"2026-01-02T10:00:03Z","source":"brain","type":"brain.tool_call","payload":{"id":"t1","name":"read_screen","args":{"agent":"docs"},"turn":1}}
+{"id":8,"ts":"2026-01-02T10:00:03.1Z","source":"brain","type":"brain.tool_result","payload":{"id":"t1","name":"read_screen","dur_ms":3,"error":"","result":"<<<BEGIN_WORKER_OUTPUT agent=docs source=screen>>>\nMay I run npm test? ask bob@example.com, key AIzaSyA1234567890abcdefghijklmnopqrs in /Users/someone/repo\n<<<END_WORKER_OUTPUT>>>"}}
+{"id":9,"ts":"2026-01-02T10:00:05Z","source":"voice","type":"voice.transcript.in","payload":{"final":false,"text":" Tell"}}
+{"id":10,"ts":"2026-01-02T10:00:05.5Z","source":"voice","type":"voice.transcript.in","payload":{"final":false,"text":" docs to run"}}
+{"id":11,"ts":"2026-01-02T10:00:06Z","source":"voice","type":"voice.transcript.in","payload":{"final":false,"text":" the tests"}}
+{"id":12,"ts":"2026-01-02T10:00:07Z","source":"voice","type":"voice.tool_call","payload":{"id":"c1","name":"to_supervisor","args":{"text":"the tests"}}}
+{"id":13,"ts":"2026-01-02T10:00:08Z","source":"brain","type":"brain.tool_call","payload":{"id":"t2","name":"prompt","args":{"agent":"docs","text":"Run the tests [all of them]"},"turn":2}}
+{"id":14,"ts":"2026-01-02T10:00:09Z","source":"brain","type":"brain.turn","payload":{"kind":"utterance","trigger":"ceo","turn":2,"dur_ms":2000}}
+{"id":15,"ts":"2026-01-02T10:00:09.5Z","source":"voice","type":"voice.transcript.out","payload":{"final":false,"text":"Sending"}}
+{"id":16,"ts":"2026-01-02T10:00:09.8Z","source":"voice","type":"voice.transcript.out","payload":{"final":false,"text":" it now."}}
+{"id":17,"ts":"2026-01-02T10:00:10Z","source":"voice","type":"voice.turn","payload":{"turn":3,"end":"complete"}}
+{"id":18,"ts":"2026-01-02T10:00:12Z","source":"voice","type":"voice.transcript.in","payload":{"final":false,"text":"Oh, never mind."}}
+{"id":19,"ts":"2026-01-02T10:00:12.5Z","source":"voice","type":"voice.tool_call","payload":{"id":"c2","name":"stop","args":{}}}
+{"id":20,"ts":"2026-01-02T10:00:20Z","source":"herdr","type":"herdr.transition","pane_id":"wA:p1","payload":{"pane_id":"wA:p1","from":"working","to":"done","agent":"codex","workspace_id":"wA","workspace_label":"auth-repo","source":"socket"}}
+{"id":21,"ts":"2026-01-02T10:00:22Z","source":"supervisor","type":"brain.push_decision","pane_id":"wA:p1","payload":{"agent":"auth","event":"done","via":"brain","template":"auth finished.","spoken":"Auth finished; all 12 tests pass.","needs_user":false,"urgency_requested":"idle"}}
+{"id":22,"ts":"2026-01-02T10:00:25Z","source":"supervisor","type":"pending.confirmed","pane_id":"wB:p1","payload":{"id":"ap-1","answer":"Yes","keys":["1"],"via":"brain"}}
+{"id":23,"ts":"2026-01-02T10:00:30Z","source":"voice","type":"voice.tool_call","payload":{"id":"c3","name":"to_supervisor","args":{"text":"What's going on?"}}}

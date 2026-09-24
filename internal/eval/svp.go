@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -21,7 +22,8 @@ import (
 // whether the rail fired.
 type recorder struct {
 	calls   []string
-	results map[string]bool // tool name -> completed without error (at least once)
+	args    []map[string]any // parallel to calls
+	results map[string]bool  // tool name -> completed without error (at least once)
 	rail    int
 }
 
@@ -35,7 +37,9 @@ func (r *recorder) Log(source, typ, _ string, payload any) {
 	switch typ {
 	case "brain.tool_call":
 		if name, _ := m["name"].(string); name != "" {
+			args, _ := m["args"].(map[string]any)
 			r.calls = append(r.calls, name)
+			r.args = append(r.args, args)
 		}
 	case "brain.tool_result":
 		name, _ := m["name"].(string)
@@ -126,7 +130,10 @@ func runSVPCase(ctx context.Context, c SVPCase, fixtureDir string, model brain.M
 	b.SetHost(host)
 	seedTranscript(b, c.Transcript)
 
-	req := brain.Request{Kind: brain.Kind(c.Request.Kind), Question: c.Request.Question, Agent: c.Request.Agent, Briefing: c.Request.Briefing}
+	req := brain.Request{
+		Kind: brain.Kind(c.Request.Kind), Question: c.Request.Question, Agent: c.Request.Agent, Briefing: c.Request.Briefing,
+		Event: c.Request.Event, Template: c.Request.Template, Owed: c.Request.Owed, Screen: c.Request.Screen,
+	}
 	if req.Kind == "" {
 		req.Kind = brain.KindUtterance
 	}
@@ -134,6 +141,7 @@ func runSVPCase(ctx context.Context, c SVPCase, fixtureDir string, model brain.M
 	b.Quiesce()
 	dur := time.Since(t0)
 	got := map[string]any{"tools_called": strings.Join(rec.names(), ","), "spoken": reply.Spoken}
+	base := baselineOf(c)
 
 	if err != nil && errors.Is(err, brain.ErrAllKeysRateLimited) {
 		// brain.fail wraps a rate limit in ErrFallback (the supervisor
@@ -150,24 +158,101 @@ func runSVPCase(ctx context.Context, c SVPCase, fixtureDir string, model brain.M
 		// run against whatever the recorder captured before it happened.
 		got["fallback"] = firstLine(err.Error())
 	}
-	reasons := checkSVPExpect(c.Expect, rec, reply, offline)
-	if offline {
-		if len(reasons) == 0 {
-			return Result{ID: c.ID, Status: StatusPass, Detail: "harness check (fake model)", Duration: dur, Got: got}
+	reasons, skipped := gradeSVP(c.Expect, rec, reply, offline)
+	reasons = append(reasons, base.reasons...)
+	r := Result{ID: c.ID, Duration: dur, Got: got, SkippedChecks: skipped, Pending: c.PendingCheck, Baseline: base.summary}
+	switch {
+	case offline && len(reasons) == 0:
+		r.Status, r.Detail = StatusPass, "harness check (fake model)"
+		if fb, ok := got["fallback"]; ok {
+			// A turn that fell back never reached the executor: say so,
+			// rather than let a vacuous must_not_call read as checked.
+			r.Detail += fmt.Sprintf(", but the turn fell back: %v", fb)
 		}
-		return Result{ID: c.ID, Status: StatusFail, Detail: "harness check (fake model): " + strings.Join(reasons, "; "), Duration: dur, Got: got}
+	case offline:
+		r.Status, r.Detail = StatusFail, "harness check (fake model): "+strings.Join(reasons, "; ")
+	case len(reasons) > 0:
+		r.Status, r.Detail = StatusFail, strings.Join(reasons, "; ")
+	default:
+		r.Status = StatusPass
 	}
-	if len(reasons) > 0 {
-		return Result{ID: c.ID, Status: StatusFail, Detail: strings.Join(reasons, "; "), Duration: dur, Got: got}
+	return r
+}
+
+// baseline is a case's grade against the logged behaviour (Observed).
+type baseline struct {
+	summary string   // for the table: "fails as logged: …" / "passes as logged"
+	reasons []string // failures of the case itself (BaselineFails violated)
+}
+
+// baselineOf grades c's expectations, every check including the live-only
+// ones, against what the logged system did (c.Observed). This is how a
+// regression case proves offline, with no model, that it catches the
+// failure it was taken from (docs/iteration-2.md rule 2: "fails before").
+func baselineOf(c SVPCase) baseline {
+	if c.Observed == nil {
+		return baseline{}
 	}
-	return Result{ID: c.ID, Status: StatusPass, Duration: dur, Got: got}
+	rec := newRecorder()
+	for _, oc := range c.Observed.ToolCalls {
+		rec.calls = append(rec.calls, oc.Name)
+		rec.args = append(rec.args, oc.Args)
+		rec.results[oc.Name] = true
+	}
+	reply := brain.Reply{Spoken: c.Observed.Spoken, Urgency: c.Observed.Urgency}
+	if c.Observed.NeedsUser != nil {
+		reply.NeedsUser = *c.Observed.NeedsUser
+	}
+	fails, _ := gradeSVP(c.Expect, rec, reply, false)
+	return judgeBaseline(fails, c.BaselineFails)
+}
+
+// judgeBaseline turns the baseline's failure reasons into a summary and,
+// when the case pins the outcome (BaselineFails), a failure of the case.
+func judgeBaseline(fails []string, want *bool) baseline {
+	var b baseline
+	if len(fails) > 0 {
+		b.summary = "fails as logged: " + strings.Join(fails, "; ")
+	} else {
+		b.summary = "passes as logged"
+	}
+	switch {
+	case want == nil:
+	case *want && len(fails) == 0:
+		b.reasons = append(b.reasons, "baseline: the logged behaviour passes this case's expectations, so the case does not catch the failure it was taken from")
+	case !*want && len(fails) > 0:
+		b.reasons = append(b.reasons, "baseline: the logged behaviour was expected to pass but "+b.summary)
+	}
+	return b
 }
 
 // checkSVPExpect grades a case's recorded tool calls and reply against
-// its Expect. offline skips SpokenContainsAnyOf (the fake model's answer
-// is a stand-in, not a real one).
+// its Expect (see gradeSVP).
 func checkSVPExpect(exp SVPExpect, rec *recorder, reply brain.Reply, offline bool) []string {
-	var reasons []string
+	reasons, _ := gradeSVP(exp, rec, reply, offline)
+	return reasons
+}
+
+// liveOnlyChecks are the checks about how the reply is phrased or judged:
+// the offline fake model cannot phrase or judge, so offline they are
+// skipped and listed in the report, never passed silently
+// (docs/iteration-2.md WP0b).
+var liveOnlyChecks = []string{
+	"spoken_contains_any_of", "spoken_max_sentences", "spoken_max_words", "spoken_no_jargon",
+	"first_sentence_contains_any_of", "needs_user", "urgency_not",
+}
+
+// gradeSVP grades a case's recorded tool calls and reply against its
+// Expect, returning a failure reason per mismatch and, offline, the
+// live-only checks the case sets that were skipped.
+func gradeSVP(exp SVPExpect, rec *recorder, reply brain.Reply, offline bool) (reasons, skipped []string) {
+	if offline {
+		for _, name := range liveOnlyChecks {
+			if exp.sets(name) {
+				skipped = append(skipped, name)
+			}
+		}
+	}
 	if len(exp.ToolsUsedAnyOf) > 0 {
 		ok := false
 		for _, want := range exp.ToolsUsedAnyOf {
@@ -207,7 +292,121 @@ func checkSVPExpect(exp SVPExpect, rec *recorder, reply brain.Reply, offline boo
 	if !offline && exp.SpokenMaxSentences > 0 && tooManySentences(reply.Spoken, exp.SpokenMaxSentences) {
 		reasons = append(reasons, fmt.Sprintf("spoken %s has more than %d sentences; the rest belongs in detail", quoteOrEmpty(reply.Spoken), exp.SpokenMaxSentences))
 	}
-	return reasons
+	for i, name := range rec.calls {
+		if name != brain.ToolPrompt || i >= len(rec.args) {
+			continue
+		}
+		text, _ := rec.args[i]["text"].(string)
+		for _, bad := range exp.PromptMustNotContain {
+			if strings.Contains(text, bad) {
+				reasons = append(reasons, fmt.Sprintf("a prompt to a worker contains %q: %s", bad, firstLine(text)))
+			}
+		}
+	}
+	if offline {
+		return reasons, skipped
+	}
+	if exp.SpokenMaxWords > 0 {
+		if n := wordCount(reply.Spoken); n > exp.SpokenMaxWords {
+			reasons = append(reasons, fmt.Sprintf("spoken has %d words, more than %d", n, exp.SpokenMaxWords))
+		}
+	}
+	if exp.SpokenNoJargon {
+		if found := jargonIn(reply.Spoken); len(found) > 0 {
+			reasons = append(reasons, "spoken uses jargon: "+strings.Join(found, ", "))
+		}
+	}
+	if len(exp.FirstSentenceContainsAnyOf) > 0 {
+		first := prose.Spoken(reply.Spoken, 1)
+		if !containsAnyFold(first, exp.FirstSentenceContainsAnyOf) {
+			reasons = append(reasons, "first sentence "+quoteOrEmpty(first)+" contains none of: "+strings.Join(exp.FirstSentenceContainsAnyOf, ", "))
+		}
+	}
+	if exp.NeedsUser != nil && reply.NeedsUser != *exp.NeedsUser {
+		reasons = append(reasons, fmt.Sprintf("needs_user=%v, want %v", reply.NeedsUser, *exp.NeedsUser))
+	}
+	for _, bad := range exp.UrgencyNot {
+		u := reply.Urgency
+		if u == "" && strings.TrimSpace(reply.Spoken) == "" {
+			u = brain.UrgencySkip // an empty line is a skip (brain.Reply.Urgency)
+		}
+		if u == bad {
+			reasons = append(reasons, "urgency="+u+", which this case rules out")
+		}
+	}
+	return reasons, skipped
+}
+
+// sets reports whether the check called name is set on exp (for the
+// report's list of checks skipped offline).
+func (exp SVPExpect) sets(name string) bool {
+	switch name {
+	case "spoken_contains_any_of":
+		return len(exp.SpokenContainsAnyOf) > 0
+	case "spoken_max_sentences":
+		return exp.SpokenMaxSentences > 0
+	case "spoken_max_words":
+		return exp.SpokenMaxWords > 0
+	case "spoken_no_jargon":
+		return exp.SpokenNoJargon
+	case "first_sentence_contains_any_of":
+		return len(exp.FirstSentenceContainsAnyOf) > 0
+	case "needs_user":
+		return exp.NeedsUser != nil
+	case "urgency_not":
+		return len(exp.UrgencyNot) > 0
+	}
+	return false
+}
+
+func containsAnyFold(s string, subs []string) bool {
+	lower := strings.ToLower(s)
+	for _, want := range subs {
+		if strings.Contains(lower, strings.ToLower(want)) {
+			return true
+		}
+	}
+	return false
+}
+
+// wordCount counts whitespace-separated words, the way the scorecard
+// counts a spoken line's length.
+func wordCount(s string) int { return len(strings.Fields(s)) }
+
+// jargonTerms is a small stand-in list of words the shepherd's ear should
+// not have to parse (docs/iteration-2.md WP1: no PR numbers, ms,
+// versions, unfamiliar terms).
+//
+// TODO(WP0a): switch to internal/earmetrics once it lands; this list is a
+// local copy so the two packages are not written against each other.
+var jargonTerms = []string{
+	"daemon", "fast path", "fast paths", "push queue", "chattiness ceiling", "context window",
+	"compact", "compaction", "tokens", "pruning", "send_keys", "rail", "turn loop", "event turn",
+	"system prompt", "fallback", "timers", "ci", "refactor", "api", "json", "ms",
+}
+
+var (
+	reJargonTech = regexp.MustCompile(`(?i)\b(?:pr\s*#?\d+|#\d+|v?\d+\.\d+(?:\.\d+)?|\d+\s*ms)\b`)
+	jargonRes    = func() []*regexp.Regexp {
+		out := make([]*regexp.Regexp, 0, len(jargonTerms))
+		for _, t := range jargonTerms {
+			out = append(out, regexp.MustCompile(`(?i)\b`+regexp.QuoteMeta(t)+`\b`))
+		}
+		return out
+	}()
+)
+
+// jargonIn lists the jargon terms and technical tokens (PR numbers,
+// versions, milliseconds) s uses.
+func jargonIn(s string) []string {
+	var found []string
+	for i, re := range jargonRes {
+		if re.MatchString(s) {
+			found = append(found, jargonTerms[i])
+		}
+	}
+	found = append(found, reJargonTech.FindAllString(s, -1)...)
+	return found
 }
 
 // tooManySentences reports whether s has more than n sentences, counted
@@ -219,27 +418,50 @@ func tooManySentences(s string, n int) bool {
 // buildHost sets up an in-memory braintest.Host from the case: the
 // primary agent (Request.Agent, or "auth") gets ScreenFixture and
 // Pending; Agents adds any further roster rows (ambiguity cases).
+//
+// A RosterOnly case (the extracted and most regression cases) has no
+// synthetic primary: Agents is the logged roster, and the alias the
+// offline script targets is Request.Agent, else the agent with a pending
+// prompt, else the first one.
 func buildHost(c SVPCase, fixtureDir string) (*braintest.Host, string, error) {
 	h := braintest.NewHost()
 	alias := c.Request.Agent
-	if alias == "" {
-		alias = "auth"
-	}
-	text, err := readFixture(c.ScreenFixture, fixtureDir)
-	if err != nil {
-		return nil, "", err
-	}
-	const primaryPane = "w1:p1"
-	h.SetAgent(brain.AgentInfo{PaneID: primaryPane, Alias: alias, Kind: "codex", State: "blocked"})
-	h.SetScreen(primaryPane, text)
-	if c.Pending != nil {
-		h.SetPending(primaryPane, toPendingPrompt(c.Pending))
+	if c.RosterOnly {
+		if len(c.Agents) == 0 {
+			return nil, "", errors.New("roster_only case with no agents")
+		}
+		if alias == "" {
+			alias = c.Agents[0].Alias
+			for _, a := range c.Agents {
+				if a.Pending != nil {
+					alias = a.Alias
+					break
+				}
+			}
+		}
+	} else {
+		if alias == "" {
+			alias = "auth"
+		}
+		text, err := readFixture(c.ScreenFixture, fixtureDir)
+		if err != nil {
+			return nil, "", err
+		}
+		const primaryPane = "w1:p1"
+		h.SetAgent(brain.AgentInfo{PaneID: primaryPane, Alias: alias, Kind: "codex", State: "blocked"})
+		h.SetScreen(primaryPane, text)
+		if c.Pending != nil {
+			h.SetPending(primaryPane, toPendingPrompt(c.Pending))
+		}
 	}
 	for _, n := range c.Notes {
 		h.AddNote(n)
 	}
 	for i, a := range c.Agents {
-		pane := fmt.Sprintf("w%d:p1", i+2)
+		pane := a.PaneID
+		if pane == "" {
+			pane = fmt.Sprintf("w%d:p1", i+2)
+		}
 		h.SetAgent(brain.AgentInfo{PaneID: pane, Alias: a.Alias, Kind: orDefault(a.Kind, "codex"), State: orDefault(a.State, "idle")})
 		if a.Screen != "" {
 			if scr, err := readFixture(a.Screen, fixtureDir); err == nil {
@@ -309,10 +531,18 @@ func scriptFor(c SVPCase, alias string) *braintest.Model {
 		// scripted to try prompt, not send_keys (must_not_call then holds
 		// trivially, as it should — nothing ever attempted it).
 		tool = c.Expect.ToolsUsedAnyOf[0]
-	case c.Expect.RailBlocked || containsStr(c.Expect.MustNotCall, brain.ToolSendKeys):
+	case c.Expect.RailBlocked || (containsStr(c.Expect.MustNotCall, brain.ToolSendKeys) && !hasPending(c)):
 		// No positive expectation: the case exists to test the rail, so
-		// script the attempt the rail must refuse.
+		// script the attempt the rail must refuse. With a prompt open the
+		// rail would rightly let a CEO turn answer it, so there "must not
+		// send keys" is the model's judgement (a status question is not
+		// an approval): live only, nothing to script.
 		tool = brain.ToolSendKeys
+	case brain.Kind(c.Request.Kind).IsEvent() && containsStr(c.Expect.MustNotCall, brain.ToolPrompt):
+		// An event turn that must not act: script the attempt, so every
+		// extracted finish or block proves the executor refuses an action
+		// tool on an event (docs/roles.md "The one rail").
+		tool = brain.ToolPrompt
 	}
 	fc := braintest.FC(tool, defaultArgsFor(tool, alias))
 	return braintest.NewModel(
@@ -346,6 +576,19 @@ func defaultArgsFor(tool, alias string) map[string]any {
 	default:
 		return map[string]any{"agent": alias}
 	}
+}
+
+// hasPending reports whether any agent of c has an open approval prompt.
+func hasPending(c SVPCase) bool {
+	if c.Pending != nil && !c.RosterOnly {
+		return true
+	}
+	for _, a := range c.Agents {
+		if a.Pending != nil {
+			return true
+		}
+	}
+	return false
 }
 
 func containsStr(list []string, want string) bool {
