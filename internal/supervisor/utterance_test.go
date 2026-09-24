@@ -396,6 +396,29 @@ func TestStopToolRunsTheProcedure(t *testing.T) {
 	assertStopped(t, h, stopPhaseNone, StopTriggerTool)
 }
 
+// "abort" and "halt" are bare stop words here exactly as they are on
+// internal/inject's Router (GPT-Live's Classify path): both now read
+// supervisor.BareStopWords, so the same word can no longer stop one
+// voice provider and become an ordinary brain turn on the other (audit
+// B8 — the router used to carry its own regex with these two words that
+// this package's list lacked).
+func TestBareStopWordsAgreeWithTheRouter(t *testing.T) {
+	for _, word := range []string{"abort", "Halt."} {
+		t.Run(word, func(t *testing.T) {
+			m := braintest.NewModel(braintest.Step{Text: braintest.Reply("Nothing was in flight.", "")})
+			h := newBrainHarness(t, m)
+			res := h.say(word)
+			if res.Scheduling != voice.UrgencyInterrupt && res.Spoken != "Nothing was in flight." {
+				t.Fatalf("say(%q) = %+v, want the stop procedure", word, res)
+			}
+			assertStopped(t, h, stopPhaseNone, StopTriggerBareWord)
+			if got := len(m.Calls()); got != 1 { // the stop procedure's own closing turn only
+				t.Errorf("model calls = %d, want 1 (no ordinary utterance turn)", got)
+			}
+		})
+	}
+}
+
 // (6) Phase 3: an instruction that went to a working agent within the
 // cancel window is interrupted; past the window it is not.
 func TestStopInterruptsARecentInstruction(t *testing.T) {

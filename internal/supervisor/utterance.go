@@ -419,8 +419,14 @@ func (s *Supervisor) utteranceTurn(ctx context.Context, u *inflightUtterance, te
 // means the whole utterance, so "don't stop the tests" never matches a
 // stop and "yes please run it" never answers a prompt — only these exact
 // (normalised) phrasings do, including the shepherd's polite ones.
+//
+// BareStopWords is exported so every bare-stop check in the daemon reads
+// the same list: internal/inject's Router (GPT-Live's Classify path)
+// used to keep its own regex, which disagreed with this one on "abort"
+// and "halt" (audit B8) — the same word stopped GPT-Live outright but
+// only became an ordinary brain turn on Gemini.
 var (
-	bareStopWords = map[string]bool{"stop": true, "stop stop": true, "wait": true, "cancel": true, "never mind": true, "nevermind": true, "no no": true, "hold on": true}
+	BareStopWords = map[string]bool{"stop": true, "stop stop": true, "wait": true, "cancel": true, "abort": true, "halt": true, "never mind": true, "nevermind": true, "no no": true, "hold on": true}
 	bareYesWords  = map[string]bool{
 		"yes": true, "yeah": true, "yep": true, "yup": true, "sure": true, "ok": true, "okay": true,
 		"approve": true, "approve it": true, "please approve": true, "do it": true,
@@ -441,11 +447,11 @@ var (
 	}
 )
 
-// bareWord lower-cases the utterance and strips punctuation from each
+// BareWord lower-cases the utterance and strips punctuation from each
 // word, so "yes, please" and "yes please" are the same bare word — but
 // the fast paths still only match a whole utterance: an extra word (a
 // comma-free "but", say) makes it a different one.
-func bareWord(text string) string {
+func BareWord(text string) string {
 	fields := strings.Fields(text)
 	words := make([]string, 0, len(fields))
 	for _, f := range fields {
@@ -457,7 +463,7 @@ func bareWord(text string) string {
 }
 
 // bareStop reports whether the whole utterance is one of the stop words.
-func bareStop(text string) bool { return bareStopWords[bareWord(text)] }
+func bareStop(text string) bool { return BareStopWords[BareWord(text)] }
 
 // isEcho reports whether text equals a push spoken within echoWindow
 // (case/punctuation-insensitive), or is a long contiguous whole-word run
@@ -470,8 +476,8 @@ func bareStop(text string) bool { return bareStopWords[bareWord(text)] }
 // "another", and let "approve" match a brain block line ending
 // "— approve?" (audit B1).
 func (s *Supervisor) isEcho(text string) bool {
-	word := bareWord(text)
-	if bareStopWords[word] || bareYesWords[word] || bareNoWords[word] || bareOptionWords[word] > 0 {
+	word := BareWord(text)
+	if BareStopWords[word] || bareYesWords[word] || bareNoWords[word] || bareOptionWords[word] > 0 {
 		return false
 	}
 	norm := normalizeEcho(text)
@@ -600,7 +606,7 @@ func (s *Supervisor) fastAnswer(ctx context.Context, in *shepherdInput) (voice.T
 // bareAnswer maps a whole-utterance answer onto the pending prompt's
 // keys: yes, no, "option two", or an on-screen option's label.
 func bareAnswer(p state.PendingAction, text string) (keys []string, label string, ok bool) {
-	word := bareWord(text)
+	word := BareWord(text)
 	switch {
 	case word == "":
 		return nil, "", false
@@ -616,7 +622,7 @@ func bareAnswer(p state.PendingAction, text string) (keys []string, label string
 		// auth is done" must not answer a prompt because "know" contains
 		// a "No" option's label.
 		for _, o := range p.Options {
-			if bareWord(o.Label) == word {
+			if BareWord(o.Label) == word {
 				return o.Keys, o.Label, true
 			}
 		}

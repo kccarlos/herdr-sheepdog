@@ -305,6 +305,13 @@ func TestRouter(t *testing.T) {
 		{"stop", voice.ToolStop, ""},
 		{"Cancel", voice.ToolStop, ""},
 		{"no no", voice.ToolStop, ""},
+		// audit B8: "abort" and "halt" used to be in the router's own
+		// stop regex but not in the supervisor's bareStopWords, so the
+		// same word stopped GPT-Live (routed here) but became an
+		// ordinary brain turn relayed through to_supervisor on Gemini.
+		// Both now read supervisor.BareStopWords.
+		{"abort", voice.ToolStop, ""},
+		{"Halt.", voice.ToolStop, ""},
 		{"No!", voice.ToolToSupervisor, "No!"}, // an answer, not a stop
 		{"what's going on?", voice.ToolToSupervisor, "what's going on?"},
 		{"tell auth to skip the flaky test", voice.ToolToSupervisor, "tell auth to skip the flaky test"},

@@ -26,7 +26,7 @@ import (
 const resetConfirmWindow = 20 * time.Second
 
 // bareResetTriggerWords are the whole-utterance phrases that ask for a
-// reset (bareWord-normalised: punctuation and case do not matter).
+// reset (BareWord-normalised: punctuation and case do not matter).
 var bareResetTriggerWords = map[string]bool{
 	"start over": true, "new conversation": true, "start from scratch": true,
 	"reset the conversation": true, "clear the conversation": true,
@@ -104,7 +104,7 @@ func (s *Supervisor) ResetConversation(ctx context.Context, via string) (id stri
 // anything else, which falls through to the brain turn as an ordinary
 // utterance.
 func (s *Supervisor) resetConfirmFastPath(ctx context.Context, text string) (voice.ToolResult, bool) {
-	word := bareWord(text)
+	word := BareWord(text)
 	s.mu.Lock()
 	pending := s.resetConfirm
 	if pending != nil && s.cfg.Now().Sub(pending.at) > resetConfirmWindow {
