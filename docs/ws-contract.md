@@ -123,7 +123,7 @@ adaptive time-stretch**:
 | Provider | Start target (and floor) | Cap |
 |---|---|---|
 | `gemini` | 150 ms | 500 ms |
-| `openai` (GPT-Live) | 800 ms | 2000 ms |
+| `openai` (GPT-Live) | 1200 ms | 2000 ms |
 
 - **Start**: buffer the target before playing the first frame of an
   utterance (or of a resume after running dry); a short utterance that

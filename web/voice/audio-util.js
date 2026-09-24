@@ -277,7 +277,7 @@ export class RingBuffer {
  */
 export const PLAYBACK_POLICY = Object.freeze({
   gemini: Object.freeze({ startMs: 150, capMs: 500 }),
-  openai: Object.freeze({ startMs: 800, capMs: 2000 }),
+  openai: Object.freeze({ startMs: 1200, capMs: 2000 }),
 });
 
 /** Time-stretch rate policy constants (shared with iOS). */
@@ -543,7 +543,7 @@ export class Wsola {
  * playing again — it does not resume on the first new chunk — and every
  * `_start()` ramps in over `crossFadeLen` samples so a resumption or a
  * fresh utterance's first samples never click. Those defaults are
- * Gemini's; `setPolicy(PLAYBACK_POLICY.openai)` gives GPT-Live 800 ms /
+ * Gemini's; `setPolicy(PLAYBACK_POLICY.openai)` gives GPT-Live 1200 ms /
  * 2000 ms.
  *
  * Adaptive time-stretch (unless `stretch: false`): between the ring and

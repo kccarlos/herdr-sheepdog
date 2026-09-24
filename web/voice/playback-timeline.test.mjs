@@ -99,7 +99,7 @@ test('the adaptive target ratchets up on the recorded chained session and stays 
 
 // Before (the adaptive jitter buffer alone, Gemini's 150/500 ms policy,
 // which is what every provider got until now) versus after (GPT-Live's
-// 800/2000 ms policy plus the adaptive time-stretch) on the recorded
+// 1200/2000 ms policy plus the adaptive time-stretch) on the recorded
 // GPT-Live timelines. These recordings arrive at 0.78x and 0.69x real
 // time; the time-stretch floor is 0.85x, so a long enough reply still
 // runs dry eventually — the recorded ones are short enough that it
@@ -119,5 +119,5 @@ test('GPT-Live policy plus time-stretch: underruns before vs after on the record
     assert.ok(a.stats.underruns < b.stats.underruns, `${name}: after ${a.stats.underruns} not below before ${b.stats.underruns}`);
   }
   assert.equal(after['status-question'], 0);
-  assert.ok(after['instruction-promise'] <= 1 && after.chained <= 1, `after = ${JSON.stringify(after)}`);
+  assert.ok(after['instruction-promise'] === 0 && after.chained === 0, `after = ${JSON.stringify(after)}`);
 });
