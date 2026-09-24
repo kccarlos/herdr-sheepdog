@@ -143,15 +143,12 @@ func (b *Brain) run(ctx context.Context, t *turn) (Reply, error) {
 			ToolResult: &ToolResult{Name: ToolReadScreen, Summary: fmt.Sprintf("screen of %s at %s, %d lines", aliasOr(t.req.Agent), t.req.Event, strings.Count(text, "\n")+1)}}, t.n)
 	}
 
-	system, secs := b.systemPrompt()
+	system, secs, state := b.systemPrompt()
 	tools := b.tools
 	if t.req.Kind.ReadOnly() {
 		tools = b.readTools
 	}
-	base := genai.GenerateContentConfig{Tools: tools}
-	if lvl := thinkingLevel(b.cfg.ThinkingLevel); lvl != "" {
-		base.ThinkingConfig = &genai.ThinkingConfig{ThinkingLevel: lvl}
-	}
+	base := genai.GenerateContentConfig{Tools: tools, ThinkingConfig: turnThinking(t.req.Trigger, b.cfg.ThinkingLevel)}
 	corrected := false
 	for step := 1; step <= b.cfg.MaxSteps; step++ {
 		if err := ctx.Err(); err != nil {
@@ -183,12 +180,16 @@ func (b *Brain) run(ctx context.Context, t *turn) (Reply, error) {
 			text += "\n\n" + asm.SystemAddition
 		}
 		config.SystemInstruction = &genai.Content{Parts: []*genai.Part{{Text: text}}}
+		if step > 1 {
+			state = b.stateNow()
+		}
+		msgs := withState(asm.Messages, state, t.n)
 
 		t0 := b.cfg.Now()
-		resp, raw, err := b.generate(ctx, t, asm.Messages, &config)
+		resp, raw, err := b.generate(ctx, t, msgs, &config)
 		t.calls++
 		dur := b.cfg.Now().Sub(t0)
-		b.captureStep(t, step, forced, secs, asm.SystemAddition, asm.Messages, &config, t0, dur, resp, err)
+		b.captureStep(t, step, forced, secs, asm.SystemAddition, msgs, &config, t0, dur, resp, err)
 		payload := map[string]any{"turn": t.n, "step": step, "provider": t.provider, "model": t.model, "template": string(t.req.Kind), "dur_ms": dur.Milliseconds(), "forced": forced}
 		var calls []*genai.FunctionCall
 		if err != nil {
@@ -197,7 +198,7 @@ func (b *Brain) run(ctx context.Context, t *turn) (Reply, error) {
 				// A call that timed out reports no usage: log the
 				// assembled prompt's estimated size, to tell a slow
 				// provider from an oversized window.
-				payload["prompt_tokens_est"] = promptTokens(text, asm.Messages)
+				payload["prompt_tokens_est"] = promptTokens(text, msgs)
 			}
 		} else {
 			if u := resp.UsageMetadata; u != nil {
@@ -206,6 +207,13 @@ func (b *Brain) run(ctx context.Context, t *turn) (Reply, error) {
 					// Reasoning is billed as output: DeepSeek counts it in
 					// completion_tokens, Gemini separately.
 					payload["reasoning_tokens"] = u.ThoughtsTokenCount
+				}
+				if u.CachedContentTokenCount > 0 {
+					// The provider's prefix cache (DeepSeek's
+					// prompt_cache_hit_tokens, Gemini's cached content):
+					// how much of the stable prefix was reused
+					// (docs/iteration-2.md WP5).
+					payload["cache_hit_tokens"] = u.CachedContentTokenCount
 				}
 				t.tokIn += int(u.PromptTokenCount)
 				t.tokOut += int(u.CandidatesTokenCount)
@@ -400,23 +408,63 @@ func (b *Brain) afterTurn(t *turn) {
 func (b *Brain) Quiesce() { b.after.Wait() }
 
 // systemPrompt assembles the sections and logs brain.system_prompt once
-// per run; it returns the text and the sections it was joined from.
-func (b *Brain) systemPrompt() (string, []PromptSection) {
+// per run. It returns the system text and the sections it was joined
+// from — the stable ones (prompt files and USER.md) — and the state
+// block rendered from the dynamic ones (roster, ledger, investigations,
+// time), which travels after the window instead (withState): anything
+// per-turn in the system message would end the provider's prefix cache
+// before the conversation, which is most of the prompt
+// (docs/iteration-2.md WP5; the captures showed a flat 2.7 k cached
+// tokens out of ~20 k).
+func (b *Brain) systemPrompt() (string, []PromptSection, string) {
 	b.mu.Lock()
 	logged := b.promptLogged
 	b.promptLogged = true
 	b.mu.Unlock()
-	secs := b.sections()
+	all := b.sections()
+	var secs, dynamic []PromptSection
+	for _, s := range all {
+		if s.Source == SourceDynamic {
+			dynamic = append(dynamic, s)
+			continue
+		}
+		secs = append(secs, s)
+	}
 	text := joinSections(secs)
+	state := stateText(dynamic)
 	if !logged {
 		var report []map[string]any
-		for _, s := range secs {
+		for _, s := range all {
 			report = append(report, map[string]any{"name": s.Name, "chars": len(s.Text)})
 		}
 		provider, model, _ := b.current()
-		b.log.Log(logSource, "brain.system_prompt", "", map[string]any{"sections": report, "total_chars": len(text), "provider": provider, "model": model, "tools": len(b.tools[0].FunctionDeclarations)})
+		b.log.Log(logSource, "brain.system_prompt", "", map[string]any{"sections": report, "total_chars": len(text), "state_chars": len(state), "provider": provider, "model": model, "tools": len(b.tools[0].FunctionDeclarations)})
 	}
-	return text, secs
+	return text, secs, state
+}
+
+// StateHeader opens the state block (braintest finds the block by it).
+const StateHeader = "State as the daemon has it now (the roster, the record and the time, refreshed on every call; not said by anyone):"
+
+// stateText is the state block: the header, then the dynamic sections.
+func stateText(dynamic []PromptSection) string {
+	if len(dynamic) == 0 {
+		return ""
+	}
+	return StateHeader + "\n\n" + joinSections(dynamic)
+}
+
+// withState returns the window with the state block appended as the last
+// message (KindState, never ingested), so everything before it — system
+// prompt, tools and the transcript so far — is a byte-stable prefix from
+// one call to the next.
+func withState(msgs []Message, state string, turn int) []Message {
+	if state == "" {
+		return msgs
+	}
+	out := make([]Message, len(msgs), len(msgs)+1)
+	copy(out, msgs)
+	return append(out, Message{Role: RoleUser, Kind: KindState, Content: state, Turn: turn, Tokens: EstimateTokens(state)})
 }
 
 // sections assembles the system prompt's sections from the current
@@ -435,6 +483,20 @@ func (b *Brain) sections() []PromptSection {
 	}
 	secs := append(append([]PromptSection(nil), stableSections(b.cfg.Prompts)...), userSection(b.cfg.Prompts, mergeUserVars(agents, userVars)))
 	return append(secs, dynamicSections(agents, notes, promises, investigations, b.cfg.Now())...)
+}
+
+// stateNow renders the state block from the Host as it is now: the loop
+// calls it before every model call, so a step sees what the step before
+// it changed (an agent it prompted is working). At the end of the
+// request it costs the prefix cache nothing.
+func (b *Brain) stateNow() string {
+	var dynamic []PromptSection
+	for _, s := range b.sections() {
+		if s.Source == SourceDynamic {
+			dynamic = append(dynamic, s)
+		}
+	}
+	return stateText(dynamic)
 }
 
 // PromptSections returns the system prompt as it would be assembled for
@@ -514,6 +576,29 @@ func reasonFor(err error) string {
 	default:
 		return "model_error"
 	}
+}
+
+// turnThinking is a turn's thinking setting. An event turn (announce,
+// investigation delivery) is a judgement call that needs no chain of
+// thought: thinking off whatever is configured — Gemini's minimal level,
+// DeepSeek's thinking disabled (buildRequest reads the minimal level so)
+// — which the captures priced at ~470 reasoning tokens, ~2.3 s, per step
+// (docs/iteration-2.md WP5). A CEO turn keeps the configured level.
+func turnThinking(trigger Trigger, level string) *genai.ThinkingConfig {
+	if trigger == TriggerEvent {
+		return thinkingOff()
+	}
+	if lvl := thinkingLevel(level); lvl != "" {
+		return &genai.ThinkingConfig{ThinkingLevel: lvl}
+	}
+	return nil
+}
+
+// thinkingOff is the thinking setting of a call that should not think:
+// Gemini's minimal level, which OpenAICompatModel sends as thinking
+// disabled.
+func thinkingOff() *genai.ThinkingConfig {
+	return &genai.ThinkingConfig{ThinkingLevel: genai.ThinkingLevelMinimal}
 }
 
 // thinkingLevel maps the config word onto the SDK constant.

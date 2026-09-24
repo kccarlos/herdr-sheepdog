@@ -42,7 +42,10 @@ type OpenAICompatConfig struct {
 	// Thinking, when set, is sent as DeepSeek's thinking mode field
 	// ({"type": "enabled"|"disabled"}); nil leaves the provider's
 	// default (enabled). ReasoningEffort, when set, is sent with it
-	// (one of ReasoningEfforts).
+	// (one of ReasoningEfforts). A call whose config asks for the
+	// minimal thinking level (an event turn, a compaction summary:
+	// thinkingOff) is sent disabled whatever these say
+	// (docs/iteration-2.md WP5).
 	Thinking        *bool
 	ReasoningEffort string
 	// HTTPClient overrides http.DefaultClient (tests). No client timeout
@@ -174,10 +177,14 @@ type (
 			FinishReason string      `json:"finish_reason"`
 		} `json:"choices"`
 		Usage *struct {
-			PromptTokens        int `json:"prompt_tokens"`
-			CompletionTokens    int `json:"completion_tokens"`
-			TotalTokens         int `json:"total_tokens"`
-			PromptTokensDetails *struct {
+			PromptTokens     int `json:"prompt_tokens"`
+			CompletionTokens int `json:"completion_tokens"`
+			TotalTokens      int `json:"total_tokens"`
+			// PromptCacheHitTokens is DeepSeek's own count of the
+			// prompt served from its prefix cache; PromptTokensDetails
+			// the OpenAI shape of the same.
+			PromptCacheHitTokens int `json:"prompt_cache_hit_tokens"`
+			PromptTokensDetails  *struct {
 				CachedTokens int `json:"cached_tokens"`
 			} `json:"prompt_tokens_details"`
 			CompletionTokensDetails *struct {
@@ -255,11 +262,23 @@ func (m *OpenAICompatModel) buildRequest(model string, msgs []chatMessage, cfg *
 			req.ToolChoice = "none"
 		}
 	}
-	if m.cfg.Thinking != nil {
+	thinking := m.cfg.Thinking
+	if cfg != nil && cfg.ThinkingConfig != nil && cfg.ThinkingConfig.ThinkingLevel == genai.ThinkingLevelMinimal {
+		off := false
+		thinking = &off
+	}
+	if thinking != nil {
 		req.Thinking = &chatThinking{Type: "disabled"}
-		if *m.cfg.Thinking {
+		if *thinking {
 			req.Thinking.Type = "enabled"
 			req.ReasoningEffort = m.cfg.ReasoningEffort
+		} else {
+			// Nothing to replay into a call that does not think: the
+			// reasoning of earlier steps is dead weight there, and not
+			// something to rely on the API ignoring.
+			for i := range req.Messages {
+				req.Messages[i].ReasoningContent = ""
+			}
 		}
 	}
 	return req
@@ -292,6 +311,9 @@ func (m *OpenAICompatModel) response(out chatResponse) (*genai.GenerateContentRe
 		usage := &genai.GenerateContentResponseUsageMetadata{PromptTokenCount: int32(u.PromptTokens), CandidatesTokenCount: int32(u.CompletionTokens), TotalTokenCount: int32(u.TotalTokens)}
 		if u.PromptTokensDetails != nil {
 			usage.CachedContentTokenCount = int32(u.PromptTokensDetails.CachedTokens)
+		}
+		if u.PromptCacheHitTokens > 0 {
+			usage.CachedContentTokenCount = int32(u.PromptCacheHitTokens)
 		}
 		if u.CompletionTokensDetails != nil {
 			usage.ThoughtsTokenCount = int32(u.CompletionTokensDetails.ReasoningTokens)
@@ -501,14 +523,14 @@ func schemaOf(s *genai.Schema) map[string]any {
 // with the call's id; replies are assistant text, with their
 // reasoning_content from Raw under the same rule.
 //
-// DeepSeek requires the reasoning_content of every earlier assistant
-// message while tools are declared. It is kept here for as long as the
-// message is in the window: pruning touches only tool-result content,
-// and compaction drops whole exchanges (the summary that replaces them
-// is plain text the API needs nothing for). The reasoning blobs are
-// large and not counted in the window's token estimate — the trade-off
-// is a correct follow-up over a tight estimate; CONFIG.md [deepseek]
-// says so.
+// DeepSeek requires the reasoning_content of the assistant messages of
+// the current turn's tool loop while tools are declared; earlier turns'
+// may go (CONFIG.md [deepseek], verified live). So it is replayed only
+// for the messages of the newest turn in msgs (Message.Turn; a window
+// with no turn numbers replays all) — the older blobs were ~20 k
+// characters of every captured request, uncounted by the window's
+// estimate (docs/iteration-2.md WP5) — and never into a call with
+// thinking disabled (buildRequest).
 func (m *OpenAICompatModel) messagesOf(msgs []Message, model string) []chatMessage {
 	return m.messagesOfTraced(msgs, model, nil)
 }
@@ -551,6 +573,11 @@ func (m *OpenAICompatModel) messagesOfTraced(msgs []Message, model string, tr *[
 	}
 	rawCovers := false // the step's Raw was replayed: its other calls are in it
 	own := func(msg Message) bool { return msg.Provider == m.cfg.Provider && msg.Model == model }
+	cur := 0 // the newest turn: only its reasoning is replayed
+	for _, msg := range msgs {
+		cur = max(cur, msg.Turn)
+	}
+	current := func(msg Message) bool { return msg.Turn == cur }
 
 	for mi, msg := range msgs {
 		if msg.Kind != KindToolCall {
@@ -564,6 +591,9 @@ func (m *OpenAICompatModel) messagesOfTraced(msgs []Message, model string, tr *[
 				var cm chatMessage
 				if err := json.Unmarshal(msg.Raw, &cm); err == nil && len(cm.ToolCalls) > 0 {
 					cm.Role, cm.ToolCallID = "assistant", ""
+					if !current(msg) {
+						cm.ReasoningContent = ""
+					}
 					note(origin{msg: mi, item: len(out), part: -1, start: -1, end: -1})
 					out = append(out, cm)
 					rawCovers = true
@@ -606,7 +636,7 @@ func (m *OpenAICompatModel) messagesOfTraced(msgs []Message, model string, tr *[
 			flushText()
 			flushCalls()
 			cm := chatMessage{Role: "assistant", Content: msg.Content}
-			if len(msg.Raw) > 0 && own(msg) {
+			if len(msg.Raw) > 0 && own(msg) && current(msg) {
 				var r chatMessage
 				if json.Unmarshal(msg.Raw, &r) == nil {
 					cm.ReasoningContent = r.ReasoningContent

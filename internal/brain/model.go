@@ -124,8 +124,15 @@ func NewGenaiModel(keys []string, log logging.Logger) (*GenaiModel, error) {
 	}}, nil
 }
 
-// Generate implements Model.
+// Generate implements Model. A Pro model has no minimal thinking level
+// (thinkingOff, an event turn's): it gets low, its least, rather than a
+// 400 on every event turn.
 func (m *GenaiModel) Generate(ctx context.Context, model string, contents []*genai.Content, cfg *genai.GenerateContentConfig) (*genai.GenerateContentResponse, error) {
+	if cfg != nil && cfg.ThinkingConfig != nil && cfg.ThinkingConfig.ThinkingLevel == genai.ThinkingLevelMinimal && strings.Contains(model, "-pro") {
+		c := *cfg
+		c.ThinkingConfig = &genai.ThinkingConfig{ThinkingLevel: genai.ThinkingLevelLow}
+		cfg = &c
+	}
 	var resp *genai.GenerateContentResponse
 	err := m.withKeys(ctx, model, func(client *genai.Client) error {
 		var err error

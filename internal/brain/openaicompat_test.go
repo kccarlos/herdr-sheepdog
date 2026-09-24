@@ -182,11 +182,13 @@ func TestOpenAICompatConfig(t *testing.T) {
 
 // The request the adapter sends for a window: the system message, the
 // brain's tools as JSON Schema (the golden tools file), user lines
-// merged, an own two-call step replayed from Raw (reasoning_content and
-// ids included, its second Raw-less message skipped), tool messages
-// with the calls' ids, a reply with its reasoning_content, a step by
-// another model rebuilt from the neutral fields without reasoning, an
-// answer-only step as tool_choice none, and DeepSeek's thinking fields.
+// merged, an own two-call step replayed from Raw (ids included, its
+// second Raw-less message skipped; its reasoning_content dropped, the
+// step belonging to an earlier turn — docs/iteration-2.md WP5), tool
+// messages with the calls' ids, a reply of an earlier turn without its
+// reasoning_content, a step by another model rebuilt from the neutral
+// fields without reasoning, an answer-only step as tool_choice none, and
+// DeepSeek's thinking fields.
 func TestOpenAICompatRequestGolden(t *testing.T) {
 	srv := newCompatServer(t, ok(`{"spoken":"ok","detail":""}`), ok(`{"spoken":"ok","detail":""}`))
 	m := newCompat(t, srv.srv.URL, true, "low", nil)
@@ -394,12 +396,13 @@ func TestOpenAICompatGenerateContents(t *testing.T) {
 // The brain loop over the adapter: a two-call step is executed as two
 // tools with the API's ids, recorded as calls-then-results, and the
 // next request replays one assistant message (reasoning_content and
-// both tool_calls) followed by two tool messages with matching ids; the
-// reply's reasoning is stored and replayed on the next turn; tokens
-// reach brain.step and brain.turn. After a switch to another provider
-// the same step is rebuilt as plain function calls for Gemini; switched
-// back, the DeepSeek adapter gets the Gemini step rebuilt without
-// reasoning and its own with it.
+// both tool_calls) followed by two tool messages with matching ids and
+// the state block; the reply's reasoning is stored but not replayed on
+// the next turn (only the current turn's is, docs/iteration-2.md WP5);
+// tokens reach brain.step and brain.turn. After a switch to another
+// provider the same step is rebuilt as plain function calls for Gemini;
+// switched back, the DeepSeek adapter gets the Gemini step rebuilt and
+// its own replayed from Raw, both without reasoning (earlier turns).
 func TestBrainOverOpenAICompat(t *testing.T) {
 	srv := newCompatServer(t,
 		toolCalls("Read the screen and check the roster.", [3]string{"call_a", ToolReadScreen, `{"agent":"auth","lines":50}`}, [3]string{"call_b", ToolListAgents, `{}`}),
@@ -448,7 +451,7 @@ func TestBrainOverOpenAICompat(t *testing.T) {
 		}
 		shape = append(shape, s)
 	}
-	if strings.Join(shape, " ") != "system user assistant+call_a+call_b(r) tool@call_a tool@call_b" {
+	if strings.Join(shape, " ") != "system user assistant+call_a+call_b(r) tool@call_a tool@call_b user" {
 		t.Errorf("second request = %v", shape)
 	}
 	if tool := second[3].(map[string]any); !strings.Contains(tool["content"].(string), "BEGIN_WORKER_OUTPUT agent=auth source=screen") {
@@ -462,14 +465,20 @@ func TestBrainOverOpenAICompat(t *testing.T) {
 		t.Errorf("brain.turn = %v", turn)
 	}
 
-	// Turn 2, still DeepSeek: the reply's reasoning_content is replayed.
+	// Turn 2, still DeepSeek: the earlier turn's reasoning_content stays
+	// on disk and out of the request.
 	srv.add(ok(`{"spoken":"Still running.","detail":""}`))
 	if _, err := h.ask("and now?", "auth"); err != nil {
 		t.Fatal(err)
 	}
 	third := srv.request(2)["messages"].([]any)
-	if reply := third[5].(map[string]any); reply["role"] != "assistant" || reply["reasoning_content"] != "thinking about {\"spoken\":\"A" {
-		t.Errorf("reply not replayed with its reasoning: %v", reply)
+	if reply := third[5].(map[string]any); reply["role"] != "assistant" || reply["reasoning_content"] != nil || !strings.Contains(reply["content"].(string), "Auth is running the tests") {
+		t.Errorf("earlier reply replayed with its reasoning: %v", reply)
+	}
+	for _, mm := range third {
+		if rc, _ := mm.(map[string]any)["reasoning_content"].(string); rc != "" {
+			t.Errorf("an earlier turn's reasoning replayed: %v", mm)
+		}
 	}
 
 	// Turn 3 on the fake "gemini": the DeepSeek steps are rebuilt as
@@ -496,8 +505,9 @@ func TestBrainOverOpenAICompat(t *testing.T) {
 		t.Errorf("gemini saw %d function calls, %d signed", fcs, signed)
 	}
 
-	// Turn 4 back on DeepSeek: its own steps replay with reasoning, the
-	// Gemini step is rebuilt (bt- id, no reasoning).
+	// Turn 4 back on DeepSeek: its own step replays from Raw (both
+	// calls, reasoning dropped: an earlier turn), the Gemini step is
+	// rebuilt (bt- id, no reasoning).
 	if err := h.brain.SetModel(ProviderDeepSeek, "deepseek-flash", "test"); err != nil {
 		t.Fatal(err)
 	}
@@ -515,7 +525,7 @@ func TestBrainOverOpenAICompat(t *testing.T) {
 		tcs, _ := m["tool_calls"].([]any)
 		rc, _ := m["reasoning_content"].(string)
 		switch {
-		case len(tcs) == 2 && rc != "":
+		case len(tcs) == 2 && rc == "":
 			own++
 		case len(tcs) == 1 && strings.HasPrefix(tcs[0].(map[string]any)["id"].(string), "bt-") && rc == "":
 			rebuilt++

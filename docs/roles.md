@@ -136,8 +136,8 @@ Does:
   waits; queued event turns coalesce per agent.
 
 Never: speaks to the shepherd directly (only the voice speaks); bypasses
-a worker's gate (the rail); grows its window without bound (20–30k
-tokens).
+a worker's gate (the rail); grows its window without bound (~12k
+tokens, compacted above; docs/iteration-2.md WP5 halved it from 24k).
 
 ## The one rail
 

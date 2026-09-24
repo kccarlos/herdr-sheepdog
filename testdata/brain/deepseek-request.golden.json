@@ -10,7 +10,6 @@
     },
     {
       "content": "",
-      "reasoning_content": "I should look at the screen and the roster.",
       "role": "assistant",
       "tool_calls": [
         {
@@ -43,7 +42,6 @@
     },
     {
       "content": "{\"spoken\":\"Auth is running the tests.\",\"detail\":\"\"}",
-      "reasoning_content": "The screen shows go test running.",
       "role": "assistant"
     },
     {

@@ -67,16 +67,37 @@ func (c Call) IsEvent() bool {
 	return false
 }
 
-// System returns the system instruction text.
+// System returns the prompt as the brain assembles it: the system
+// instruction text, then the state block (roster, ledger,
+// investigations, time), which travels as the last user content since
+// docs/iteration-2.md WP5 (State returns it alone).
 func (c Call) System() string {
-	if c.Config == nil || c.Config.SystemInstruction == nil {
-		return ""
-	}
 	var b strings.Builder
-	for _, p := range c.Config.SystemInstruction.Parts {
-		b.WriteString(p.Text)
+	if c.Config != nil && c.Config.SystemInstruction != nil {
+		for _, p := range c.Config.SystemInstruction.Parts {
+			b.WriteString(p.Text)
+		}
+	}
+	if st := c.State(); st != "" {
+		b.WriteString("\n\n")
+		b.WriteString(st)
 	}
 	return b.String()
+}
+
+// State returns the call's state block — from its header to the end of
+// the last content that holds one — or "".
+func (c Call) State() string {
+	for i := len(c.Contents) - 1; i >= 0; i-- {
+		var t string
+		for _, p := range c.Contents[i].Parts {
+			t += p.Text
+		}
+		if at := strings.LastIndex(t, brain.StateHeader); at >= 0 {
+			return t[at:]
+		}
+	}
+	return ""
 }
 
 // Step is one scripted response: canned text, function calls, an error,
