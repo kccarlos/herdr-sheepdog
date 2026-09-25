@@ -420,6 +420,9 @@ type client struct {
 	// state from the same ping.
 	playbackAt time.Time
 	audioState string
+	// aec is the client's microphone echo cancellation from its ping
+	// ("true", "false", "unknown"; empty: never reported).
+	aec string
 	// sendWaits is a bounded rolling window of how long recent audio
 	// frames waited in the outbound queue before writeLoop sent them
 	// (ms), for web.client.stats send_wait_p95_ms / send_wait_max_ms.
@@ -663,6 +666,9 @@ func (c *client) onControl(data []byte) {
 		if m.AudioState != "" {
 			c.audioState = m.AudioState
 		}
+		if wsproto.ValidAEC(m.AEC) {
+			c.aec = m.AEC
+		}
 		c.mu.Unlock()
 		c.enqueue(controlFrame(wsproto.Pong()))
 	case wsproto.TypeMute:
@@ -760,6 +766,9 @@ func (c *client) counters() map[string]any {
 	}
 	if c.audioState != "" {
 		out["audio_state"] = c.audioState
+	}
+	if c.aec != "" {
+		out["aec"] = c.aec
 	}
 	return out
 }

@@ -4,6 +4,8 @@
 // logic lives here: the page only moves audio and a few control messages
 // (docs/ws-contract.md). Vanilla JS module, no build step.
 
+import { AEC_HINT, aecStatus, aecWarn, isMobile } from './aec.js';
+
 const $ = (id) => document.getElementById(id);
 
 // The ping carries the playback counters, so it runs at the daemon's
@@ -57,6 +59,9 @@ const state = {
   lastUnderruns: 0,
   flushSeq: 0,
   pendingFlushes: new Map(), // id → { kind, t0 }
+  // aec: the microphone's echo cancellation as the browser reports it
+  // ('true'/'false'/'unknown'), sent on the ping (docs/ws-contract.md).
+  aec: 'unknown',
   lastStopMs: null,
   lastFlushMs: null,
 
@@ -222,9 +227,25 @@ async function startSource() {
     state.micSource.connect(state.captureNode);
     const track = stream.getAudioTracks()[0];
     console.log(`[voice] microphone: ${track ? track.label : '?'}`);
+    checkEchoCancellation(track);
   } else if (state.fileBuffer) {
     playFile();
   }
+}
+
+// checkEchoCancellation reads what the browser actually applied (a request
+// for echoCancellation is only a hint) and shows a one-line warning when
+// the model would hear its own voice: echo cancellation off, or not
+// reported on a mobile browser.
+function checkEchoCancellation(track) {
+  let settings;
+  try { settings = track && track.getSettings ? track.getSettings() : undefined; } catch (_) { settings = undefined; }
+  state.aec = aecStatus(settings);
+  const warn = aecWarn(state.aec, isMobile(navigator.userAgent, navigator.maxTouchPoints || 0));
+  const el = $('aec-hint');
+  el.textContent = AEC_HINT;
+  el.classList.toggle('hidden', !warn);
+  console.log(`[voice] echo cancellation: ${state.aec}${warn ? ' (warning shown)' : ''}`);
 }
 
 function stopSource() {
@@ -392,6 +413,7 @@ function startPing() {
       // A context that is not running plays nothing and its worklet stops
       // reporting: the counters above are then its last values.
       audio_state: state.ctx ? state.ctx.state : undefined,
+      aec: state.aec,
     });
   }, PING_EVERY_MS);
 }
