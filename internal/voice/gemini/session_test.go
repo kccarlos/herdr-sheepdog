@@ -690,14 +690,19 @@ func TestPushNotWhileUserSpeaking(t *testing.T) {
 	if c.count("content") != 0 {
 		t.Fatalf("push sent while user speaking: %s", describe(c.sentMsgs()))
 	}
-	c.waitSent(t, "push after speech hold", isContent("docs finished"))
+	// The interrupt overtakes the idle line queued before it
+	// (docs/timelines.md C29), once the shepherd has stopped.
+	c.waitSent(t, "interrupt push after speech hold", isContent("auth crashed"))
 	if el := time.Since(start); el < 180*time.Millisecond {
 		t.Errorf("push went out after %v, want >= 200ms speech hold", el)
+	}
+	if c.count("content") != 1 {
+		t.Fatalf("idle push sent with the interrupt's turn open: %s", describe(c.sentMsgs()))
 	}
 
 	// A finished transcription ends the hold immediately.
 	c.serve(turnCompleteMsg())
-	c.waitSent(t, "queued interrupt push", isContent("auth crashed"))
+	c.waitSent(t, "queued idle push", isContent("docs finished"))
 	c.serve(inputTranscriptMsg("okay", true))
 	h.waitEvent("final in transcript", func(ev voice.Event) bool { tr, ok := ev.(voice.EventTranscript); return ok && tr.Final })
 	c.serve(turnCompleteMsg())

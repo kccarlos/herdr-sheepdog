@@ -181,3 +181,47 @@ func TestEchoLeavesTheBrainWindow(t *testing.T) {
 		})
 	}
 }
+
+// TestEchoWindowAnchoredToPlaybackEnd is docs/timelines.md C5: the
+// window used to open when the voice stopped generating, but Gemini
+// generates ~4x real time and the phone plays a long reply's tail
+// seconds later, so an echo of that tail could pass. With playback
+// reports the window runs from the client's drained (or flushed); while
+// the client says it is still playing, the voice counts as speaking.
+// Without reports the old anchor holds (TestEchoGuardLetsTheShepherdThrough,
+// "the echo, but after the window").
+func TestEchoWindowAnchoredToPlaybackEnd(t *testing.T) {
+	cases := []struct {
+		name     string
+		report   string        // "" = the client sends no reports
+		reportAt time.Duration // after the voice stopped generating
+		after    time.Duration // when the echo is heard
+		echo     bool
+	}{
+		{"drained 3 s after turnComplete, echo 0.5 s after drained", voice.PlaybackDrained, 3 * time.Second, 3500 * time.Millisecond, true},
+		{"flushed late, echo right after", voice.PlaybackFlushed, 4 * time.Second, 5 * time.Second, true},
+		{"still playing, no drained yet", voice.PlaybackStarted, 100 * time.Millisecond, 6 * time.Second, true},
+		{"started before the first transcript fragment", voice.PlaybackStarted, -100 * time.Millisecond, 6 * time.Second, true},
+		{"drained, echo past the window after it", voice.PlaybackDrained, time.Second, 4 * time.Second, false},
+		{"no reports: turnComplete anchors", "", 0, 3500 * time.Millisecond, false},
+		{"a report from before this reply is ignored", voice.PlaybackDrained, -10 * time.Second, 3500 * time.Millisecond, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := braintest.NewModel(braintest.Step{Text: braintest.Reply("ok.", "")})
+			h := newBrainHarness(t, m)
+			h.addAgent("w5:p1", "auth", "codex", herdr.StateIdle)
+			speak(h, echoSaid)
+			stopped := h.clock.Now()
+			if tc.report != "" {
+				h.pusher.setPlayback(voice.PlaybackReport{State: tc.report, At: stopped.Add(tc.reportAt)})
+			}
+			h.clock.Advance(tc.after)
+			h.hear("new change")
+			h.relay("new change")
+			if got := h.log.count("supervisor.echo_dropped") == 1; got != tc.echo {
+				t.Errorf("echo_dropped = %v, want %v", got, tc.echo)
+			}
+		})
+	}
+}

@@ -176,106 +176,174 @@ func exempt(tags map[string]any) bool {
 	return tags["due_promise"] == true || tags["needs_user"] == true || tags["stop"] == true
 }
 
-// pumpPushes delivers at most one queued push per tick. A spoken push
-// waits (up to PushTTL) while no client is attached, whether a session
-// is open or not — the model must not speak it to nobody (2026-09-24
-// 18:22:04) — logging voice.push_held once and voice.push_released when
-// it goes out. In standby a spoken push opens a session when a client is
+// pumpPushes delivers at most one queued push per tick, chosen by the
+// arbitration in voice/pushclass.go: the first ready line the shepherd
+// is owed or must hear now, else the oldest other line — not merely the
+// head of the queue (docs/timelines.md C29). A spoken push waits (up to
+// PushTTL) while no client is attached, whether a session is open or
+// not — the model must not speak it to nobody (2026-09-24 18:22:04) —
+// logging voice.push_held once and voice.push_released when it goes
+// out. In standby a spoken push opens a session when a client is
 // listening, and silent context is kept for the next session's history.
 func (s *Session) pumpPushes(now time.Time) {
 	s.mu.Lock()
-	var item pushItem
-	var send bool
-	var deferred, dropped, held bool
-	for len(s.pushQ) > 0 {
-		head := &s.pushQ[0]
-		lc := s.live
-		if !s.client && head.urgency != voice.UrgencySilent {
-			if now.Sub(head.at) > s.cfg.PushTTL {
-				item = *head
-				s.pushQ = s.pushQ[1:]
-				dropped = true
-				break
-			}
-			if head.heldAt.IsZero() {
-				head.heldAt = now
-				item, held = *head, true
-			}
-			break
-		}
-		if lc == nil {
-			if head.urgency == voice.UrgencySilent {
-				s.held = append(s.held, head.text)
-				if len(s.held) > 10 {
-					s.held = s.held[len(s.held)-10:]
-				}
-				s.pushQ = s.pushQ[1:]
-				continue
-			}
-			if now.Sub(head.at) > s.cfg.PushTTL {
-				item = *head
-				s.pushQ = s.pushQ[1:]
-				dropped = true
-				break
-			}
-			if s.client && !s.muted && !s.opening && !now.Before(s.nextOpen) {
-				s.startOpenLocked("push")
-			}
-			break
-		}
-		if head.urgency == voice.UrgencySilent {
-			item, send = *head, true
-			s.pushQ = s.pushQ[1:]
-			break
-		}
-		// Speaking includes the client still playing the reply, and the
-		// gap runs from the real end of speech (the client's drained).
-		speaking := s.speakingOrPlayingLocked(now)
-		if head.urgency == voice.UrgencyInterrupt && speaking && !exempt(head.tags) {
-			head.urgency = voice.UrgencyIdle
-			deferred = true
-		}
-		if s.inputOpen || s.vad.Hold(now) > 0 {
-			break // never over the shepherd (transcripts, or the client's own detector)
-		}
-		last := s.lastSpoken
-		if ended := s.play.EndedAt(now); ended.After(last) {
-			last = ended
-		}
-		if head.urgency == voice.UrgencyIdle && (speaking || now.Sub(last) < s.cfg.PushGap) {
-			break
-		}
-		item, send = *head, true
-		s.pushQ = s.pushQ[1:]
-		s.lastSpoken = now
-		s.lastActivity = now
-		break
-	}
+	p := s.pickPushLocked(now)
 	lc := s.live
 	s.mu.Unlock()
-	if deferred {
+	for i := 0; i < p.deferred; i++ {
 		s.log.Log(logSource, "voice.push_deferred", "", map[string]any{"kind": "push", "reason": "speaking", "urgency_requested": voice.UrgencyInterrupt.String()})
 	}
-	if dropped {
-		p := heldPayload(item)
-		p["reason"], p["age_ms"] = "no_listener", now.Sub(item.at).Milliseconds()
-		s.log.Log(logSource, "voice.push_dropped", "", p)
+	for _, it := range p.dropped {
+		d := heldPayload(it)
+		d["reason"], d["age_ms"] = "no_listener", now.Sub(it.at).Milliseconds()
+		s.log.Log(logSource, "voice.push_dropped", "", d)
+	}
+	for _, it := range p.held {
+		h := heldPayload(it)
+		h["reason"] = "no_listener"
+		s.log.Log(logSource, "voice.push_held", "", h)
+	}
+	if !p.ok || lc == nil {
 		return
 	}
-	if held {
-		p := heldPayload(item)
-		p["reason"] = "no_listener"
-		s.log.Log(logSource, "voice.push_held", "", p)
-		return
+	if !p.item.heldAt.IsZero() {
+		r := heldPayload(p.item)
+		r["held_ms"] = now.Sub(p.item.heldAt).Milliseconds()
+		s.log.Log(logSource, "voice.push_released", "", r)
 	}
-	if send && lc != nil && !item.heldAt.IsZero() {
-		p := heldPayload(item)
-		p["held_ms"] = now.Sub(item.heldAt).Milliseconds()
-		s.log.Log(logSource, "voice.push_released", "", p)
+	if len(p.over) > 0 {
+		s.log.Log(logSource, "voice.push_overtook", "", overtookPayload(p.item, p.over))
 	}
-	if send && lc != nil {
-		s.deliverPush(lc, item)
+	s.deliverPush(lc, p.item)
+}
+
+// pushPick is pickPushLocked's verdict and what it has to log.
+type pushPick struct {
+	ok   bool
+	item pushItem
+	// over are the items the picked one overtook (voice.push_overtook).
+	over []pushItem
+	// deferred, held and dropped are items downgraded to WHEN_IDLE while
+	// the model speaks, first held for want of a listener, and dropped
+	// after PushTTL.
+	deferred int
+	held     []pushItem
+	dropped  []pushItem
+}
+
+// pickPushLocked chooses the push to send now and removes it from the
+// queue: among the lines the shepherd is owed or must hear now (class
+// 0, voice/pushclass.go), the first ready one; failing that, the oldest
+// other line, if it is ready; never one that would pass an earlier line
+// answering the same utterance. Caller holds s.mu.
+func (s *Session) pickPushLocked(now time.Time) pushPick {
+	var p pushPick
+	lc := s.live
+	kept := s.pushQ[:0]
+	for _, it := range s.pushQ {
+		switch {
+		case it.urgency != voice.UrgencySilent && (!s.client || lc == nil) && now.Sub(it.at) > s.cfg.PushTTL:
+			p.dropped = append(p.dropped, it)
+		case it.urgency == voice.UrgencySilent && lc == nil:
+			// Standby: silent context waits for the next session's
+			// history.
+			s.held = append(s.held, it.text)
+			if len(s.held) > 10 {
+				s.held = s.held[len(s.held)-10:]
+			}
+		default:
+			kept = append(kept, it)
+		}
 	}
+	s.pushQ = kept
+	if len(s.pushQ) == 0 {
+		return p
+	}
+	if lc == nil && s.client {
+		if !s.muted && !s.opening && !now.Before(s.nextOpen) {
+			s.startOpenLocked("push")
+		}
+		return p
+	}
+	// Speaking includes the client still playing the reply, and the gap
+	// runs from the real end of speech (the client's drained).
+	speaking := s.speakingOrPlayingLocked(now)
+	shepherd := s.inputOpen || s.vad.Hold(now) > 0 // never over the shepherd
+	last := s.lastSpoken
+	if ended := s.play.EndedAt(now); ended.After(last) {
+		last = ended
+	}
+	gapOK := now.Sub(last) >= s.cfg.PushGap
+
+	pick, firstOther, otherReady, sawFirst := -1, -1, false, false
+	blocked := map[string]bool{} // utterances an earlier, unready line answers
+	for i := range s.pushQ {
+		it := &s.pushQ[i]
+		first := voice.PushFirstClass(it.requested, it.tags)
+		if !first {
+			if firstOther >= 0 || sawFirst {
+				continue // only the oldest other line, and never past an owed one waiting
+			}
+			firstOther = i
+		}
+		sawFirst = sawFirst || first
+		var ready bool
+		switch {
+		case it.urgency == voice.UrgencySilent:
+			ready = true
+		case !s.client:
+			if it.heldAt.IsZero() {
+				it.heldAt = now
+				p.held = append(p.held, *it)
+			}
+		default:
+			if it.urgency == voice.UrgencyInterrupt && speaking && !exempt(it.tags) {
+				it.urgency = voice.UrgencyIdle
+				p.deferred++
+			}
+			ready = !shepherd && (it.urgency == voice.UrgencyInterrupt || (!speaking && gapOK))
+		}
+		utt := voice.PushUtterance(it.tags)
+		if ready && !blocked[utt] {
+			if first || it.urgency == voice.UrgencySilent {
+				pick = i
+				break
+			}
+			otherReady = true
+			continue
+		}
+		if utt != "" {
+			blocked[utt] = true
+		}
+	}
+	if pick < 0 && otherReady {
+		pick = firstOther
+	}
+	if pick < 0 {
+		return p
+	}
+	p.ok, p.item = true, s.pushQ[pick]
+	p.over = append(p.over, s.pushQ[:pick]...)
+	s.pushQ = append(s.pushQ[:pick:pick], s.pushQ[pick+1:]...)
+	if p.item.urgency != voice.UrgencySilent {
+		s.lastSpoken = now
+		s.lastActivity = now
+	}
+	return p
+}
+
+// overtookPayload is voice.push_overtook's payload: the line sent and
+// the push ids (or texts, for a line without one) of those it passed.
+func overtookPayload(item pushItem, over []pushItem) map[string]any {
+	ids := make([]string, 0, len(over))
+	for _, o := range over {
+		id := voice.PushID(o.tags)
+		if id == "" {
+			id = o.text
+		}
+		ids = append(ids, id)
+	}
+	return map[string]any{"push_id": voice.PushID(item.tags), "text": item.text, "over": ids}
 }
 
 // heldPayload is the voice.push_held / voice.push_released /
@@ -319,9 +387,15 @@ func (s *Session) deliverPush(lc *liveConn, item pushItem) {
 		s.emit(voice.EventError{Err: err})
 	}
 	s.log.Log(logSource, "voice.push", "", payload)
-	if err == nil {
-		s.emit(voice.EventPush{Text: item.text, Urgency: item.urgency})
+	if err != nil {
+		// Not retried: the session is going away (a send fails only on
+		// a dead socket). Say the line is lost (docs/timelines.md §4 (d)).
+		d := heldPayload(item)
+		d["reason"], d["error"] = "send_failed", err.Error()
+		s.log.Log(logSource, "voice.push_dropped", "", d)
+		return
 	}
+	s.emit(voice.EventPush{Text: item.text, Urgency: item.urgency})
 }
 
 // clip bounds an append's content (the API limit is 500 tokens; ~4
@@ -332,4 +406,24 @@ func clip(s string) string {
 		return s
 	}
 	return s[:max]
+}
+
+// DrainPushes empties the push queue and the silent context held for the
+// next session, and returns them (the held context first, then the
+// queue, in order, at the urgency each caller asked for): the voice
+// Switcher carries them over to the next provider's session on a
+// switch.
+func (s *Session) DrainPushes() []voice.QueuedPush {
+	s.mu.Lock()
+	held, q := s.held, s.pushQ
+	s.held, s.pushQ = nil, nil
+	s.mu.Unlock()
+	out := make([]voice.QueuedPush, 0, len(held)+len(q))
+	for _, text := range held {
+		out = append(out, voice.QueuedPush{Text: text, Urgency: voice.UrgencySilent})
+	}
+	for _, it := range q {
+		out = append(out, voice.QueuedPush{Text: it.text, Urgency: it.requested, Tags: it.tags})
+	}
+	return out
 }

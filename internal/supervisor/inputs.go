@@ -137,6 +137,7 @@ func (s *Supervisor) ShepherdInput(kind InputKind, text string) {
 // fragments accumulate into one input until the turn closes (final, the
 // model speaking, turn complete, or a relay claiming it).
 func (s *Supervisor) heard(text string, final bool) {
+	playback := s.lastPlayback() // outside s.mu: the voice session has its own lock
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if text == "" {
@@ -164,7 +165,7 @@ func (s *Supervisor) heard(text string, final bool) {
 		s.wakeLocked()
 		return
 	}
-	in := &shepherdInput{kind: InputVoice, text: text, open: !final, saidBefore: s.echoCandidateLocked()}
+	in := &shepherdInput{kind: InputVoice, text: text, open: !final, saidBefore: s.echoCandidateLocked(playback)}
 	s.addInputLocked(in)
 	s.armRelayLocked(in)
 }

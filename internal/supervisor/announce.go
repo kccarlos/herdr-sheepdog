@@ -203,6 +203,15 @@ func (s *Supervisor) applyResult(a announcement, kept []state.Promise, level Cha
 		// about it: whatever it says now is about something gone.
 		s.logDecision(a, level, decision{via: "brain", requested: rep.Urgency, applied: brain.UrgencySkip, reason: "stale"}, rep, kept, true)
 		s.log.Log(logSource, "brain.push_stale", a.row.PaneID, map[string]any{"turn": rep.Turn, "pending": a.pending, "spoken": spoken})
+		if len(kept) > 0 {
+			// The promises were marked kept before the turn ran
+			// (keepMatching) and their line is now dropped with the
+			// stale block: say so, or the promise ends without a trace
+			// (docs/timelines.md C20).
+			s.log.Log("voice", "voice.push_dropped", a.row.PaneID, map[string]any{
+				"reason": "stale_block", "text": spoken, "pending": a.pending, "agent": aliasOr(a.row.Alias), voice.TagKeepsPromiseIDs: promiseIDs(kept),
+			})
+		}
 		return
 	}
 	requested := requestedUrgency(rep.Urgency, spoken)
@@ -228,7 +237,7 @@ func (s *Supervisor) applyResult(a announcement, kept []state.Promise, level Cha
 	}
 	u := voiceUrgency(d.applied)
 	s.logKept(kept, a.event, spoken, u, "brain")
-	s.pushTagged(a.row.PaneID, spoken, u, a.tags(announceTags(u, duePassed, rep.NeedsUser, a.pending)))
+	s.pushTagged(a.row.PaneID, spoken, u, a.tags(keptTags(announceTags(u, duePassed, rep.NeedsUser, a.pending), kept)))
 }
 
 // announceTags marks a push as one of the exceptions that keep INTERRUPT
@@ -251,6 +260,31 @@ func announceTags(u voice.Urgency, duePassed, needsUser bool, pending string) ma
 		return nil
 	}
 	return tags
+}
+
+// keptTags adds keeps_promise_ids — the promises a line keeps — to
+// tags: a kept promise is owed to the shepherd, so the voice push queue
+// lets it pass plain idle news (voice/pushclass.go, docs/timelines.md
+// C29). tags is returned as is when nothing is kept.
+func keptTags(tags map[string]any, kept []state.Promise) map[string]any {
+	if len(kept) == 0 {
+		return tags
+	}
+	out := make(map[string]any, len(tags)+1)
+	for k, v := range tags {
+		out[k] = v
+	}
+	out[voice.TagKeepsPromiseIDs] = promiseIDs(kept)
+	return out
+}
+
+// promiseIDs lists the ids of ps.
+func promiseIDs(ps []state.Promise) []string {
+	ids := make([]string, len(ps))
+	for i, p := range ps {
+		ids[i] = p.ID
+	}
+	return ids
 }
 
 // dropLate handles the brain's line arriving after the code sentence of
@@ -295,7 +329,7 @@ func (s *Supervisor) dropLate(a announcement, kept []state.Promise, level Chatti
 	s.logDecision(a, level, decision{via: "brain", requested: rep.Urgency, applied: appliedIf(add), reason: reason, late: true}, rep, kept, true)
 	s.log.Log(logSource, "brain.push_late", a.row.PaneID, map[string]any{"turn": rep.Turn, "dur_ms": dur, "spoken": spoken, "needs_user": rep.NeedsUser, "relates_to": strings.TrimSpace(rep.RelatesTo), "added": add})
 	if add {
-		s.pushTagged(a.row.PaneID, spoken, voice.UrgencyIdle, a.tags(nil))
+		s.pushTagged(a.row.PaneID, spoken, voice.UrgencyIdle, a.tags(keptTags(nil, kept)))
 	}
 }
 
@@ -376,7 +410,7 @@ func (s *Supervisor) codePath(a announcement, kept []state.Promise, level Chatti
 		u = voice.UrgencyInterrupt
 	}
 	s.logKept(kept, a.event, line, u, "template")
-	s.pushTagged(a.row.PaneID, line, u, a.tags(announceTags(u, duePassed, false, "")))
+	s.pushTagged(a.row.PaneID, line, u, a.tags(keptTags(announceTags(u, duePassed, false, ""), kept)))
 }
 
 // recordAnnounceDetail stores an announce turn's detail alongside the

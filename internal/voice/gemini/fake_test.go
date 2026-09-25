@@ -33,6 +33,9 @@ type fakeConn struct {
 	closed   chan struct{}
 	once     sync.Once
 	readErr  error // returned by Receive once incoming is closed
+	// contentErr, when set, fails every SendClientContent (a push whose
+	// send fails, without the connection going away).
+	contentErr error
 }
 
 func newFakeConn(name string) *fakeConn {
@@ -64,6 +67,12 @@ func (c *fakeConn) SendRealtimeInput(in genai.LiveRealtimeInput) error {
 }
 
 func (c *fakeConn) SendClientContent(in genai.LiveClientContentInput) error {
+	c.mu.Lock()
+	err := c.contentErr
+	c.mu.Unlock()
+	if err != nil {
+		return err
+	}
 	return c.record(sent{kind: "content", content: in})
 }
 

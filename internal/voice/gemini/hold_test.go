@@ -89,13 +89,15 @@ func TestHeldPushDroppedAfterTTL(t *testing.T) {
 		{text: "old", urgency: voice.UrgencyIdle, requested: voice.UrgencyIdle, at: now},
 		{text: "new", urgency: voice.UrgencyIdle, requested: voice.UrgencyIdle, at: now.Add(4 * time.Minute)},
 	}
-	held, wait := s.holdPush()
-	if !held || wait != heldPushTTL {
-		t.Fatalf("holdPush = %v, %v; want held, %v", held, wait, heldPushTTL)
+	p := s.pickPush()
+	if p.ok || p.wait != heldPushTTL || len(p.held) != 1 {
+		t.Fatalf("pickPush = ok %v, wait %v, held %d; want the head held, wait %v", p.ok, p.wait, len(p.held), heldPushTTL)
 	}
 	now = now.Add(heldPushTTL)
-	if held, wait = s.holdPush(); !held || wait != 0 {
-		t.Fatalf("expired head: holdPush = %v, %v; want held with wait 0 (dropped)", held, wait)
+	p = s.pickPush()
+	s.logPick(p)
+	if p.ok || len(p.dropped) != 1 {
+		t.Fatalf("expired head: pickPush = ok %v, dropped %d; want the old one dropped", p.ok, len(p.dropped))
 	}
 	if len(s.pushQ) != 1 || s.pushQ[0].text != "new" {
 		t.Fatalf("queue after drop = %v, want only \"new\"", s.pushQ)
@@ -103,11 +105,7 @@ func TestHeldPushDroppedAfterTTL(t *testing.T) {
 	if d := log.payloads("voice.push_dropped"); len(d) != 1 || d[0]["text"] != "old" || d[0]["reason"] != "no_listener" {
 		t.Errorf("voice.push_dropped = %v", d)
 	}
-	if held, wait = s.holdPush(); !held || wait != 4*time.Minute {
-		t.Errorf("new head: holdPush = %v, %v; want held, 4m left", held, wait)
-	}
-	s.noClient = false
-	if held, _ = s.holdPush(); held {
-		t.Error("held with a client attached")
+	if p.wait != 4*time.Minute || len(p.held) != 1 || p.held[0].text != "new" {
+		t.Errorf("new head: wait %v, newly held %v; want 4m left, \"new\" held", p.wait, p.held)
 	}
 }

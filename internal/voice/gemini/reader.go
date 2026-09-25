@@ -91,6 +91,11 @@ func (s *Session) handleServerContent(sc *genai.LiveServerContent) {
 		s.mu.Lock()
 		s.lastInput = now
 		s.inputDone = t.Finished
+		s.inText += t.Text
+		if t.Finished {
+			s.recap.Add(voice.RecapUser, s.inText)
+			s.inText = ""
+		}
 		s.mu.Unlock()
 		s.logTurn(s.noteInput(now))
 		s.log.Log(logSource, "voice.transcript.in", "", map[string]any{"text": t.Text, "final": t.Finished})
@@ -103,6 +108,11 @@ func (s *Session) handleServerContent(sc *genai.LiveServerContent) {
 		s.speaking = true
 		s.noteResponseLocked(s.now())
 		s.play.Said(t.Text)
+		// The voice answering means the shepherd finished (Gemini
+		// rarely marks its input transcription final).
+		s.recap.Add(voice.RecapUser, s.inText)
+		s.inText = ""
+		s.outText += t.Text
 		s.mu.Unlock()
 		s.clearStalled()
 		s.log.Log(logSource, "voice.transcript.out", "", map[string]any{"text": t.Text, "final": t.Finished})
@@ -114,6 +124,7 @@ func (s *Session) handleServerContent(sc *genai.LiveServerContent) {
 		s.speaking = false
 		close(s.turnDone)
 		s.turnDone = make(chan struct{})
+		s.flushRecapLocked()
 		turn := s.noteTurnCompleteLocked()
 		timing := s.finishAudioTimingLocked()
 		s.mu.Unlock()
@@ -131,6 +142,7 @@ func (s *Session) handleServerContent(sc *genai.LiveServerContent) {
 func (s *Session) interrupt(by string) {
 	s.mu.Lock()
 	s.speaking = false
+	s.flushRecapLocked() // a cut report may shorten it to what was heard
 	s.play.Flush(s.now())
 	timing := s.finishAudioTimingLocked()
 	s.mu.Unlock()

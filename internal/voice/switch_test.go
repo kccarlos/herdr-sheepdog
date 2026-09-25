@@ -213,3 +213,107 @@ func TestSwitcherForwardsClientPlayback(t *testing.T) {
 		t.Fatalf("LastPlayback %+v", got)
 	}
 }
+
+// pushFake is a fakeSess with a push queue: DrainPushes hands it over,
+// PushTagged records what arrives.
+type pushFake struct {
+	*fakeSess
+	pmu    sync.Mutex
+	queued []QueuedPush
+	got    []QueuedPush
+	refuse bool
+}
+
+func (f *pushFake) DrainPushes() []QueuedPush {
+	f.pmu.Lock()
+	defer f.pmu.Unlock()
+	q := f.queued
+	f.queued = nil
+	return q
+}
+
+func (f *pushFake) PushTagged(text string, u Urgency, tags map[string]any) error {
+	f.pmu.Lock()
+	defer f.pmu.Unlock()
+	if f.refuse {
+		return errors.New("fake: closed")
+	}
+	f.got = append(f.got, QueuedPush{Text: text, Urgency: u, Tags: tags})
+	return nil
+}
+
+type lineLog struct {
+	mu    sync.Mutex
+	lines []map[string]any
+	types []string
+}
+
+func (l *lineLog) Log(_, typ, _ string, payload any) {
+	p, _ := payload.(map[string]any)
+	l.mu.Lock()
+	l.types = append(l.types, typ)
+	l.lines = append(l.lines, p)
+	l.mu.Unlock()
+}
+
+func (l *lineLog) of(typ string) []map[string]any {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	var out []map[string]any
+	for i, t := range l.types {
+		if t == typ {
+			out = append(out, l.lines[i])
+		}
+	}
+	return out
+}
+
+// TestProviderSwitchCarriesQueuedPushes: docs/timelines.md C15 — the
+// pushes queued in the old session (a held answer, a silent line) move
+// to the new one, in order and with their tags, instead of being closed
+// with it without an event; one the new session refuses is logged
+// voice.push_dropped {reason: provider_switch}.
+func TestProviderSwitchCarriesQueuedPushes(t *testing.T) {
+	for _, refuse := range []bool{false, true} {
+		g := &pushFake{fakeSess: newFake("gemini")}
+		o := &pushFake{fakeSess: newFake("openai"), refuse: refuse}
+		log := &lineLog{}
+		sw, err := NewSwitcher([]Provider{
+			{ProviderInfo: ProviderInfo{ID: "gemini", Available: true}, New: func() (Session, error) { return g, nil }},
+			{ProviderInfo: ProviderInfo{ID: "openai", Available: true}, New: func() (Session, error) { return o, nil }},
+		}, "gemini", log)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := sw.Start(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		g.queued = []QueuedPush{
+			{Text: "Auth has two failing tests.", Urgency: UrgencyIdle, Tags: map[string]any{"answers_utterance": "utt-1", "push_id": "push-1"}},
+			{Text: "docs is idle", Urgency: UrgencySilent},
+		}
+		if err := sw.SetProvider("openai", "test"); err != nil {
+			t.Fatal(err)
+		}
+		if refuse {
+			d := log.of("voice.push_dropped")
+			if len(d) != 2 || d[0]["reason"] != "provider_switch" || d[0]["push_id"] != "push-1" || d[0]["to"] != "openai" {
+				t.Errorf("refused: voice.push_dropped = %v", d)
+			}
+			if c := log.of("voice.push_carried"); len(c) != 1 || c[0]["count"] != 0 {
+				t.Errorf("refused: voice.push_carried = %v", c)
+			}
+		} else {
+			if len(o.got) != 2 || o.got[0].Text != "Auth has two failing tests." || o.got[0].Tags["answers_utterance"] != "utt-1" || o.got[1].Urgency != UrgencySilent {
+				t.Errorf("carried = %+v", o.got)
+			}
+			if c := log.of("voice.push_carried"); len(c) != 1 || c[0]["count"] != 2 || c[0]["from"] != "gemini" {
+				t.Errorf("voice.push_carried = %v", c)
+			}
+			if len(log.of("voice.push_dropped")) != 0 {
+				t.Error("a carried push was logged dropped")
+			}
+		}
+		_ = sw.Close()
+	}
+}

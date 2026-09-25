@@ -92,6 +92,13 @@ type Session struct {
 	// speech detector. Both are forgotten when the client changes.
 	play voice.PlaybackTracker
 	vad  voice.ClientSpeech
+	// recap is the recent conversation (recap.go): what the shepherd
+	// said (inText until it is flushed), what the voice said (outText),
+	// cut to what was heard, and the spoken pushes. A connection that
+	// comes back without its resumption handle is seeded with it.
+	recap   voice.Recap
+	inText  string
+	outText string
 
 	readerExit chan readerResult
 	goAway     chan struct{}
@@ -142,6 +149,7 @@ func newSession(cfg Config, log logging.Logger, dial Dialer) (*Session, error) {
 		recycle:    make(chan string, 1),
 		kick:       make(chan struct{}, 1),
 		dropReq:    make(chan struct{}, 1),
+		recap:      voice.Recap{Max: reseedTurns},
 	}, nil
 }
 
@@ -430,6 +438,8 @@ func (s *Session) SendText(text string) error {
 	}
 	s.mu.Lock()
 	s.openTurnLocked()
+	s.flushRecapLocked()
+	s.recap.Add(voice.RecapUser, text)
 	s.mu.Unlock()
 	s.logTurn(s.noteInput(s.now()))
 	s.log.Log(logSource, "voice.text", "", map[string]any{"text": text})
@@ -503,6 +513,10 @@ func (s *Session) Reset(reason string) error {
 		return nil
 	}
 	s.dropHandle(reason)
+	s.mu.Lock()
+	s.recap.Reset() // a new conversation must not be re-seeded with the old one
+	s.inText, s.outText = "", ""
+	s.mu.Unlock()
 	s.rec.Marker("conversation reset", "New conversation: the resumption handle is dropped, so the next connection starts without the conversation so far.", nil)
 	select {
 	case s.dropReq <- struct{}{}:
@@ -607,6 +621,10 @@ func (s *Session) speakingLocked(now time.Time) bool {
 func (s *Session) ClientPlayback(state string, playedMs int) {
 	s.mu.Lock()
 	rep := s.play.Report(s.now(), state, playedMs)
+	if rep.Cut != nil {
+		s.flushRecapLocked()
+		s.recap.Cut(rep.Cut.Full, rep.Heard, rep.Cut.HeardMs)
+	}
 	s.mu.Unlock()
 	s.log.Log(logSource, "voice.playback", "", rep.Payload())
 	if rep.Cut != nil {

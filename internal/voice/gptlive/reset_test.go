@@ -17,7 +17,7 @@ func TestResetClosesLiveSessionAndDropsRecap(t *testing.T) {
 	waitFor(t, "settled into recap", func() bool {
 		s.mu.Lock()
 		defer s.mu.Unlock()
-		return len(s.recap) == 1
+		return s.recap.Len() == 1
 	})
 
 	if err := s.Reset("new_conversation"); err != nil {
@@ -32,7 +32,7 @@ func TestResetClosesLiveSessionAndDropsRecap(t *testing.T) {
 		t.Fatal("still live after Reset")
 	}
 	s.mu.Lock()
-	recapLen := len(s.recap)
+	recapLen := s.recap.Len()
 	s.mu.Unlock()
 	if recapLen != 0 {
 		t.Fatalf("recap not cleared: %d entries", recapLen)
@@ -57,7 +57,7 @@ func TestResetInStandbyClearsRecap(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.mu.Lock()
-	if len(s.recap) != 1 {
+	if s.recap.Len() != 1 {
 		s.mu.Unlock()
 		t.Fatal("expected the typed text in the recap")
 	}
@@ -67,7 +67,7 @@ func TestResetInStandbyClearsRecap(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.mu.Lock()
-	got := len(s.recap)
+	got := s.recap.Len()
 	s.mu.Unlock()
 	if got != 0 {
 		t.Fatalf("recap not cleared: %d entries", got)
