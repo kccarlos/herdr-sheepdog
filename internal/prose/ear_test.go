@@ -120,3 +120,32 @@ func TestEarLine(t *testing.T) {
 		t.Errorf("overflow = %q", over)
 	}
 }
+
+// The two caps (docs/dive-deep.md WP8b): a reply to the shepherd's own
+// words may run to four sentences and sixty words, a detail they asked
+// for; every other line keeps two and thirty (#60). Pinned so neither
+// drifts unnoticed.
+func TestEarCapsPinned(t *testing.T) {
+	if EarBrief != (EarCaps{Sentences: 2, Words: 30}) || EarReply != (EarCaps{Sentences: 4, Words: 60}) {
+		t.Fatalf("caps = brief %+v, reply %+v", EarBrief, EarReply)
+	}
+	detail := "The mic stays red after a call. The listening banner flickers on reconnect. The haptic buzz fires twice. Hold-to-talk drops the first word. Dark mode loses the status colour."
+	got, over := EarLineWith(EarReply, detail, "Shall it fix them?")
+	if want := "The mic stays red after a call. The listening banner flickers on reconnect. The haptic buzz fires twice. Hold-to-talk drops the first word. Shall it fix them?"; got != want {
+		t.Errorf("reply cap:\n got  %q\n want %q", got, want)
+	}
+	if over != "Dark mode loses the status colour." {
+		t.Errorf("reply overflow = %q", over)
+	}
+	brief, over := EarLine(detail, "Shall it fix them?")
+	if brief != "The mic stays red after a call. The listening banner flickers on reconnect. Shall it fix them?" || !strings.HasPrefix(over, "The haptic buzz") {
+		t.Errorf("brief cap = %q / %q", brief, over)
+	}
+	// The word cap bites before the sentence cap.
+	long := strings.TrimSpace(strings.Repeat(strings.Repeat("word ", 19)+"end. ", 6))
+	got, _ = EarLineWith(EarReply, long, "")
+	if w := words(got); w != ReplyWords {
+		t.Errorf("reply of %d words: %q", w, got)
+	}
+	noDashes(t, "reply", got)
+}

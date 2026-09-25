@@ -16,6 +16,28 @@ const (
 	EarWords     = 30
 )
 
+// The caps on a reply to the shepherd's own words (docs/dive-deep.md
+// WP8b): about twenty seconds of speech, so a detail they asked for
+// ("what exactly did it say?") can be heard. The prompt keeps a reply
+// brief by default; this cap is the safety net against a runaway reply,
+// not the style rule. Announce, finish and delivery lines keep EarBrief.
+const (
+	ReplySentences = 4
+	ReplyWords     = 60
+)
+
+// EarCaps are a spoken headline's caps: at most Sentences sentences and
+// Words words.
+type EarCaps struct{ Sentences, Words int }
+
+var (
+	// EarBrief is the cap on every line the shepherd did not ask for:
+	// announcements, finishes, deliveries (EarLine).
+	EarBrief = EarCaps{Sentences: EarSentences, Words: EarWords}
+	// EarReply is the cap on a reply to an utterance (EarLineWith).
+	EarReply = EarCaps{Sentences: ReplySentences, Words: ReplyWords}
+)
+
 // earMinCut is the fewest words a headline cut at a comma keeps: a
 // shorter first clause ("Both landed,") says nothing on its own, so the
 // cut falls at the word cap instead.
@@ -40,7 +62,7 @@ var (
 // reply's detail): nothing the model wrote is lost, it is just not read
 // aloud.
 func Ear(s string) (spoken, overflow string) {
-	return earCut(earSentences(s), false)
+	return earCut(earSentences(s), EarBrief, false)
 }
 
 // EarLine is the line the voice reads for a reply: the headline cut by
@@ -51,8 +73,14 @@ func Ear(s string) (spoken, overflow string) {
 // first question is kept (the rest joins overflow); it always ends with
 // "?". An empty headline with an ask is just the ask.
 func EarLine(headline, ask string) (spoken, overflow string) {
+	return EarLineWith(EarBrief, headline, ask)
+}
+
+// EarLineWith is EarLine with the headline cut to caps instead of
+// EarBrief: EarReply for a reply to the shepherd's own words.
+func EarLineWith(caps EarCaps, headline, ask string) (spoken, overflow string) {
 	q, qOver := earAsk(ask)
-	h, hOver := earCut(earSentences(headline), q != "")
+	h, hOver := earCut(earSentences(headline), caps, q != "")
 	spoken = joinSentences(terminate(h), q)
 	return spoken, joinSentences(hOver, qOver)
 }
@@ -83,9 +111,9 @@ func earSentences(s string) []string {
 	return out
 }
 
-// earCut keeps the first sentences within the caps. dropQuestions moves
+// earCut keeps the first sentences within caps. dropQuestions moves
 // every question to the overflow first (the reply carries its own ask).
-func earCut(sens []string, dropQuestions bool) (kept, overflow string) {
+func earCut(sens []string, caps EarCaps, dropQuestions bool) (kept, overflow string) {
 	var keep, over []string
 	if dropQuestions {
 		var rest []string
@@ -101,13 +129,13 @@ func earCut(sens []string, dropQuestions bool) (kept, overflow string) {
 	words := 0
 	for i, sen := range sens {
 		n := len(strings.Fields(sen))
-		if len(keep) < EarSentences && words+n <= EarWords {
+		if len(keep) < caps.Sentences && words+n <= caps.Words {
 			keep = append(keep, sen)
 			words += n
 			continue
 		}
 		if len(keep) == 0 {
-			head, tail := cutWords(sen, EarWords)
+			head, tail := cutWords(sen, caps.Words)
 			keep = append(keep, head)
 			over = append(over, tail)
 			i++

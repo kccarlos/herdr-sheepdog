@@ -157,9 +157,11 @@ type Request struct {
 // Reply is the answer contract (docs/roles.md): what the assistant says,
 // what it may use for follow-ups, and whether the CEO must act.
 //
-// The ear contract: Spoken is the headline (at most two short sentences,
-// thirty words, no dashes; the supervisor enforces it with prose.EarLine
-// and moves the overflow into Detail); Ask is the one question when
+// The ear contract: Spoken is the headline (two short sentences, thirty
+// words, no dashes by default; up to four and sixty when the CEO asked
+// for detail; the supervisor cuts an utterance reply at prose.EarReply
+// and every other line at prose.EarBrief, and moves the overflow into
+// Detail); Ask is the one question when
 // there is a decision only the CEO can make, read as the last sentence;
 // Detail is the plain explanation of every term the headline used, in
 // everyday words, which the voice reads when the CEO asks "what does
@@ -358,6 +360,20 @@ type AgentInfo struct {
 	Journal []JournalEntry
 }
 
+// SessionRead is what Host.ReadSession found at the end of a worker's
+// own session transcript (internal/workerlog, docs/dive-deep.md WP8a):
+// the worker's last message for a human, whole; the last instruction it
+// received; and what it did for that instruction. The executor caps and
+// wraps it as worker output.
+type SessionRead struct {
+	LastAssistant string
+	Instruction   string
+	// Files are the base names of the files it edited; Tools counts its
+	// tool calls by name.
+	Files []string
+	Tools map[string]int
+}
+
 // JournalEntry is one work journal entry (state.JournalEntry): capped
 // and D9-scrubbed by the supervisor before the brain sees it.
 type JournalEntry struct {
@@ -445,6 +461,10 @@ type Host interface {
 	Note(text string) (string, error)
 	// ReadScreen returns the last lines of the pane.
 	ReadScreen(ctx context.Context, paneID string, lines int) (string, error)
+	// ReadSession reads the end of the pane's worker session transcript
+	// without moving the journal's offset. A session that cannot be read
+	// returns an error naming the worker.session_missing reason.
+	ReadSession(ctx context.Context, paneID string) (SessionRead, error)
 	// RunCLI runs the read-only CLI query tool in the agent's workspace;
 	// ErrNoCLI when there is none.
 	RunCLI(ctx context.Context, paneID, question string) (string, error)

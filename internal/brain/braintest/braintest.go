@@ -276,7 +276,9 @@ type Host struct {
 	agents  []brain.AgentInfo
 	notes   []string
 	screens map[string]string
-	CLI     func(paneID, question string) (string, error)
+	// sessions are what ReadSession returns per pane (SetSession).
+	sessions map[string]brain.SessionRead
+	CLI      func(paneID, question string) (string, error)
 	// Prompts, Keys and Interrupts record the actions (pane -> payload).
 	Prompts    [][2]string
 	Keys       [][2]string
@@ -285,6 +287,9 @@ type Host struct {
 	PromptErr, KeysErr, InterruptErr error
 	// ReadErr fails ReadScreen.
 	ReadErr error
+	// SessionErr fails ReadSession; a pane with no SetSession fails with
+	// a not_reported error.
+	SessionErr error
 	// ReadDelay hooks a slow screen read.
 	ReadHook func(ctx context.Context) error
 	// PromiseErr fails Promise; Promised records every promise made.
@@ -303,7 +308,7 @@ type Host struct {
 
 // NewHost returns an empty Host.
 func NewHost() *Host {
-	return &Host{screens: map[string]string{}}
+	return &Host{screens: map[string]string{}, sessions: map[string]brain.SessionRead{}}
 }
 
 // SetAgent adds or replaces a roster row.
@@ -323,6 +328,13 @@ func (h *Host) SetAgent(a brain.AgentInfo) {
 func (h *Host) SetScreen(paneID, screen string) {
 	h.mu.Lock()
 	h.screens[paneID] = screen
+	h.mu.Unlock()
+}
+
+// SetSession sets what ReadSession returns for a pane.
+func (h *Host) SetSession(paneID string, r brain.SessionRead) {
+	h.mu.Lock()
+	h.sessions[paneID] = r
 	h.mu.Unlock()
 }
 
@@ -411,6 +423,20 @@ func (h *Host) ReadScreen(ctx context.Context, paneID string, lines int) (string
 		return "", fmt.Errorf("no screen for %s", paneID)
 	}
 	return screen, nil
+}
+
+// ReadSession implements brain.Host.
+func (h *Host) ReadSession(_ context.Context, paneID string) (brain.SessionRead, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.SessionErr != nil {
+		return brain.SessionRead{}, h.SessionErr
+	}
+	r, ok := h.sessions[paneID]
+	if !ok {
+		return brain.SessionRead{}, fmt.Errorf("no session record for %s: not_reported (herdr has not reported a session for this pane)", h.aliasLocked(paneID))
+	}
+	return r, nil
 }
 
 // RunCLI implements brain.Host.
@@ -595,6 +621,9 @@ var (
 	reExplainWords = regexp.MustCompile(`(?i)\b(?:explain|why did|why does|why is|what went wrong|walk me through|dig into)\b`)
 	// reFollowUpWords is a question that continues the last one, so the
 	// reflex resumes the last investigation's session.
+	// reSessionWords asks what a worker said, found or changed in
+	// detail: the reflex reads its session record, not its screen.
+	reSessionWords  = regexp.MustCompile(`(?i)\b(?:what exactly|exactly what|tell me more|in detail|the details?|read it to me)\b`)
 	reFollowUpWords = regexp.MustCompile(`(?i)^(?:and|but|so|ok(?:ay)?,?)\b`)
 	// reLedgerInvestigation is a finished job in the prompt's
 	// Investigations section ("- investigation inv-1 (auth, 2 min ago): …").
@@ -757,8 +786,18 @@ func reflex(call Call) (*genai.GenerateContentResponse, error) {
 		// No name given: the roster decides (the question may name one).
 		return Response(Step{Calls: []*genai.FunctionCall{FC(brain.ToolListAgents, nil)}, Usage: usage}), nil
 	default:
-		return Response(Step{Calls: []*genai.FunctionCall{FC(brain.ToolReadScreen, map[string]any{"agent": agent, "lines": float64(100)})}, Usage: usage}), nil
+		return Response(Step{Calls: []*genai.FunctionCall{readCall(agent, question)}, Usage: usage}), nil
 	}
+}
+
+// readCall is the reflex's read of an agent: its session record when the
+// question asks what it said, found or changed in detail (docs/dive-deep.md
+// WP8a), else its screen.
+func readCall(alias, question string) *genai.FunctionCall {
+	if reSessionWords.MatchString(question) {
+		return FC(brain.ToolReadScreen, map[string]any{"agent": alias, "source": brain.SourceSession})
+	}
+	return FC(brain.ToolReadScreen, map[string]any{"agent": alias, "lines": float64(100)})
 }
 
 // respondToResult is the reflex's next step after a tool result.
@@ -778,7 +817,7 @@ func respondToResult(call Call, fr *genai.FunctionResponse) *genai.GenerateConte
 			case "investigate":
 				return Response(Step{Calls: []*genai.FunctionCall{investigateCall(alias, question, call.System())}, Usage: usage})
 			}
-			return Response(Step{Calls: []*genai.FunctionCall{FC(brain.ToolReadScreen, map[string]any{"agent": alias, "lines": float64(100)})}, Usage: usage})
+			return Response(Step{Calls: []*genai.FunctionCall{readCall(alias, question)}, Usage: usage})
 		}
 		if kind == "propose" {
 			return Response(Step{Text: Reply("Which agent should I tell?", "The CEO did not say a name and the fake model does not guess."), Usage: usage})
@@ -1090,6 +1129,21 @@ func replyFromResult(fr *genai.FunctionResponse) string {
 			}
 		}
 		spoken := "The screen is empty."
+		if strings.Contains(out, "source="+brain.SourceSession+">>>") {
+			// A session read: quote the first line of its last message.
+			msg := lines
+			for i, l := range lines {
+				if strings.HasPrefix(l, "Its last message") {
+					msg = lines[i+1:]
+					break
+				}
+			}
+			spoken = "It has written nothing for a human yet."
+			if len(msg) > 0 {
+				spoken = "It wrote: " + llmTrim(strings.TrimPrefix(msg[0], "…"), 160)
+			}
+			return Reply(spoken, fmt.Sprintf("Read its session record through %s; the fake model quotes the first line of its last message.", fr.Name))
+		}
 		if n := len(lines); n > 0 {
 			spoken = fmt.Sprintf("The screen ends with: %s", llmTrim(lines[n-1], 120))
 		}

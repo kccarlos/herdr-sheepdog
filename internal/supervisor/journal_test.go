@@ -34,7 +34,7 @@ func withWorkerLog(dir string) func(*Config) {
 // claudeTurn writes one Claude Code turn — the instruction (as the
 // brain sent it, with the sign-off), an edit, the final message — to a
 // transcript file and points the pane's row at it.
-func claudeTurn(t *testing.T, h *harness, pane, final string) string {
+func claudeTurn(t *testing.T, h *harness, pane, final string) {
 	t.Helper()
 	path := filepath.Join(h.dir, "claude-session.jsonl")
 	lines := []string{
@@ -50,7 +50,6 @@ func claudeTurn(t *testing.T, h *harness, pane, final string) string {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	return path
 }
 
 // A finish appends a journal entry from the worker's own transcript, and

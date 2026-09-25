@@ -7,6 +7,7 @@ import (
 
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
+	"github.com/kccarlos/herdr-sheepdog/internal/prose"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
@@ -199,7 +200,7 @@ func (s *Supervisor) stopTurn(ctx context.Context, out stopOutcome) (voice.ToolR
 	if err != nil {
 		return voice.ToolResult{}, false
 	}
-	res := toolResultFrom(rep)
+	res := toolResultFrom(rep, prose.EarBrief)
 	if res.Spoken == "" {
 		return voice.ToolResult{}, false
 	}

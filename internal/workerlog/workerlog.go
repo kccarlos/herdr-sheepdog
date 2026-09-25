@@ -371,6 +371,45 @@ func (r *Reader) Read(pane string, sess Session) (Digest, error) {
 	return d, nil
 }
 
+// Tail summarises the end of sess's transcript — its last TailWindow
+// bytes — without touching any pane's cursor: the brain's read_screen
+// with source "session" (docs/dive-deep.md WP8a) asks what the worker
+// last said at any moment, and must not make the journal's next Read
+// miss what it has not recorded yet. Fresh is set when the window holds
+// a message for a human; Instructions, Tools and Files are those of the
+// window, so the work since the last instruction in it.
+func (r *Reader) Tail(sess Session) (Digest, error) {
+	path, err := r.Locate(sess)
+	if err != nil {
+		return Digest{}, err
+	}
+	fh, err := os.Open(path)
+	if err != nil {
+		return Digest{}, missing(ReasonUnreadable, err)
+	}
+	defer func() { _ = fh.Close() }()
+	st, err := fh.Stat()
+	if err != nil {
+		return Digest{}, missing(ReasonUnreadable, err)
+	}
+	size := st.Size()
+	d := Digest{Format: sess.format(), Path: path}
+	var start int64
+	if size > TailWindow {
+		start = size - TailWindow
+		d.Skipped = start
+	}
+	acc := &accumulator{format: d.Format}
+	consumed, err := scan(io.NewSectionReader(fh, start, size-start), start > 0, acc.line)
+	if err != nil {
+		return Digest{}, missing(ReasonUnreadable, err)
+	}
+	d.Bytes = consumed
+	acc.fill(&d)
+	d.Fresh = d.LastAssistant != ""
+	return d, nil
+}
+
 // scan calls fn for every complete line of rd and returns how many bytes
 // the complete lines took; a trailing line with no newline yet is not
 // counted, so the next read parses it whole. With align, the first line

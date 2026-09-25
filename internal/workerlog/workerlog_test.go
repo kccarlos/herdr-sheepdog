@@ -262,3 +262,72 @@ func TestCaps(t *testing.T) {
 		t.Error("Clip changed a short text")
 	}
 }
+
+// Tail reads the end of the transcript for the brain (read_screen
+// source "session", docs/dive-deep.md WP8a) and leaves every cursor
+// alone: the journal's next Read still sees everything as new.
+func TestTailDoesNotMoveTheJournalsCursor(t *testing.T) {
+	path, sess := copyFixture(t)
+	r := New(Options{})
+	d, err := r.Tail(sess)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !d.Fresh || !strings.HasPrefix(d.LastAssistant, "The total now rounds half up") || d.Instruction() != "Fix the rounding bug in the total and run the tests." {
+		t.Errorf("Tail = %+v", d)
+	}
+	if want := []string{"total.go", "total_test.go"}; !reflect.DeepEqual(d.Files, want) {
+		t.Errorf("Files = %v, want %v", d.Files, want)
+	}
+	// Twice: the same answer, nothing consumed.
+	if again, err := r.Tail(sess); err != nil || again.LastAssistant != d.LastAssistant || again.Bytes != d.Bytes {
+		t.Errorf("second Tail = %+v, %v", again, err)
+	}
+	st, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := r.Read("w1:p1", sess)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !first.Fresh || first.Bytes != st.Size() || first.Instruction() == "" {
+		t.Errorf("Read after Tail = %+v (size %d): the tail read moved the cursor", first, st.Size())
+	}
+	// After the journal read, Tail still reports the last message.
+	if after, err := r.Tail(sess); err != nil || after.LastAssistant != first.LastAssistant {
+		t.Errorf("Tail after Read = %+v, %v", after, err)
+	}
+}
+
+func TestTailOfABigFileAndMissingSessions(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "big.jsonl")
+	var b strings.Builder
+	b.WriteString(`{"type":"user","message":{"role":"user","content":"An old instruction at the top."}}` + "\n")
+	filler := `{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"` + strings.Repeat("x", 4000) + `"}]}}` + "\n"
+	for b.Len() < TailWindow+(1<<20) {
+		b.WriteString(filler)
+	}
+	b.WriteString(`{"type":"user","message":{"role":"user","content":"The recent instruction."}}` + "\n")
+	b.WriteString(`{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Done with the recent one."}]}}` + "\n")
+	if err := os.WriteFile(path, []byte(b.String()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	d, err := New(Options{}).Tail(Session{Agent: "claude", Kind: "path", Value: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Skipped == 0 || d.Bytes > TailWindow || d.Instruction() != "The recent instruction." || d.LastAssistant != "Done with the recent one." {
+		t.Errorf("Tail = skipped %d, bytes %d, %q / %q", d.Skipped, d.Bytes, d.Instructions, d.LastAssistant)
+	}
+	r := fixtureReader()
+	for sess, want := range map[Session]string{
+		{Agent: "claude"}: ReasonNotReported,
+		{Agent: "agy", Source: "herdr:antigravity_cli", Kind: "id", Value: "70f9969a"}:   ReasonUnsupported,
+		{Agent: "claude", Kind: "path", Value: filepath.Join(t.TempDir(), "gone.jsonl")}: ReasonNotFound,
+	} {
+		if _, err := r.Tail(sess); Reason(err) != want {
+			t.Errorf("Tail(%+v): %v, want %s", sess, err, want)
+		}
+	}
+}

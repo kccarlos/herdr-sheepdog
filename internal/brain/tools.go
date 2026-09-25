@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"google.golang.org/genai"
 
@@ -46,12 +47,28 @@ const (
 	endWorkerOutput   = "<<<END_WORKER_OUTPUT>>>"
 )
 
+// read_screen's sources (docs/dive-deep.md WP8a).
+const (
+	// SourceScreen reads the pane: what the agent is doing now.
+	SourceScreen = "screen"
+	// SourceSession reads the worker's own session transcript: what it
+	// last wrote for a human, its last instruction, what it changed.
+	SourceSession = "session"
+)
+
 // Limits on what a tool result may carry into the window.
 const (
-	defaultScreenLines = 200
-	maxScreenLines     = 1000
-	maxResultBytes     = prose.DefaultResultBytes
-	recallMax          = 8
+	// sessionMessageBytes caps the worker's last message in a session
+	// read (about 3,000 characters): its newest part is kept, so the
+	// result stays under the window's per-result cap with room for the
+	// instruction and the did-line.
+	sessionMessageBytes = 3000
+	// sessionInstructionRunes caps the last instruction in a session read.
+	sessionInstructionRunes = 300
+	defaultScreenLines      = 200
+	maxScreenLines          = 1000
+	maxResultBytes          = prose.DefaultResultBytes
+	recallMax               = 8
 )
 
 // toolDeclarations is the function surface (plain GenerateContent
@@ -65,8 +82,9 @@ func toolDeclarations(readOnly bool) []*genai.Tool {
 	}
 	agent := str("the agent's alias")
 	read := []*genai.FunctionDeclaration{
-		{Name: ToolReadScreen, Description: "Read the last lines of an agent's terminal pane: what it printed, asked or is doing right now.",
-			Parameters: obj(map[string]*genai.Schema{"agent": agent, "lines": {Type: genai.TypeInteger, Description: "how many lines from the bottom (default 200)"}}, []string{"agent"})},
+		{Name: ToolReadScreen, Description: "Read an agent. source screen (the default): the last lines of its terminal pane, for what it is doing right now and what it is asking. source session: its own session record, for what it said, found or changed: its last message for a human in full, the last instruction it received, and the files it edited.",
+			Parameters: obj(map[string]*genai.Schema{"agent": agent, "lines": {Type: genai.TypeInteger, Description: "screen only: how many lines from the bottom (default 200)"},
+				"source": {Type: genai.TypeString, Enum: []string{SourceScreen, SourceSession}, Description: "screen (default) or session"}}, []string{"agent"})},
 		{Name: ToolRunCLI, Description: "Ask a read-only CLI agent a question about the agent's repository (diff, logs, why a test fails). Slow (tens of seconds). Phrase the question with full context: the CLI has not heard this conversation.",
 			Parameters: obj(map[string]*genai.Schema{"agent": agent, "question": str("a self-contained question")}, []string{"agent", "question"})},
 		{Name: ToolListAgents, Description: "The roster: every agent with its state, task and pending question.",
@@ -160,6 +178,14 @@ func (b *Brain) execTool(ctx context.Context, t *turn, call *genai.FunctionCall)
 	out := toolOutcome{agent: row.Alias}
 	switch call.Name {
 	case ToolReadScreen:
+		switch source := strings.ToLower(arg("source")); source {
+		case "", SourceScreen:
+		case SourceSession:
+			return b.readSession(ctx, row, out)
+		default:
+			out.err = fmt.Errorf("read_screen source %q: want %s or %s", source, SourceScreen, SourceSession)
+			return out
+		}
 		lines := defaultScreenLines
 		if n, ok := call.Args["lines"].(float64); ok && n > 0 {
 			lines = min(int(n), maxScreenLines)
@@ -265,6 +291,95 @@ func (b *Brain) execTool(ctx context.Context, t *turn, call *genai.FunctionCall)
 		out.err = fmt.Errorf("unknown tool %q", call.Name)
 	}
 	return out
+}
+
+// readSession is read_screen with source session: the worker's own
+// session transcript through the Host, rendered by sessionText and
+// wrapped as worker output. A session that cannot be read is an error
+// the model reads (the worker.session_missing reason), pointing it back
+// at the screen.
+func (b *Brain) readSession(ctx context.Context, row AgentInfo, out toolOutcome) toolOutcome {
+	read, err := b.host.ReadSession(ctx, row.PaneID)
+	if err != nil {
+		out.err = fmt.Errorf("%w; read_screen with source screen still shows what it is doing now", err)
+		return out
+	}
+	text := sessionText(read)
+	out.result = wrapWorker(row.Alias, SourceSession, text)
+	out.summary = fmt.Sprintf("session of %s, last message %d chars", aliasOr(row.Alias), utf8.RuneCountInString(read.LastAssistant))
+	return out
+}
+
+// sessionText renders a session read for the model: the last
+// instruction, one line of what the worker did for it, then its last
+// message whole up to sessionMessageBytes. A longer message loses its
+// oldest part (the newest is where a worker puts its findings and
+// sign-off), cut at a line boundary, and says so. The message comes
+// last, because the window keeps the tail of a bulky result.
+func sessionText(r SessionRead) string {
+	var b strings.Builder
+	if instr := strings.TrimSpace(r.Instruction); instr != "" {
+		fmt.Fprintf(&b, "Last instruction it received: %s\n", clipRunes(strings.Join(strings.Fields(instr), " "), sessionInstructionRunes))
+	}
+	var did []string
+	if len(r.Files) > 0 {
+		did = append(did, "edited "+strings.Join(r.Files, ", "))
+	}
+	if len(r.Tools) > 0 {
+		names := make([]string, 0, len(r.Tools))
+		for name := range r.Tools {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		calls := make([]string, 0, len(names))
+		for _, name := range names {
+			calls = append(calls, fmt.Sprintf("%s %d", name, r.Tools[name]))
+		}
+		did = append(did, "tool calls: "+strings.Join(calls, ", "))
+	}
+	if len(did) > 0 {
+		fmt.Fprintf(&b, "What it did for it: %s\n", strings.Join(did, "; "))
+	}
+	msg := strings.TrimSpace(r.LastAssistant)
+	switch {
+	case msg == "":
+		b.WriteString("Its last message: none in its session record yet.")
+	case len(msg) > sessionMessageBytes:
+		kept := tailCut(msg, sessionMessageBytes)
+		fmt.Fprintf(&b, "Its last message (the first %d of %d characters are cut; this is its end):\n…%s", utf8.RuneCountInString(msg)-utf8.RuneCountInString(kept), utf8.RuneCountInString(msg), strings.TrimSpace(kept))
+	default:
+		fmt.Fprintf(&b, "Its last message, whole:\n%s", msg)
+	}
+	return b.String()
+}
+
+// tailCut keeps the last max bytes of s, starting at a line break when
+// one falls in the first quarter of them, else at a word boundary, else
+// at a rune boundary.
+func tailCut(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	cut := s[len(s)-max:]
+	if i := strings.IndexByte(cut, '\n'); i >= 0 && i < max/4 {
+		return strings.TrimSpace(cut[i+1:])
+	}
+	if i := strings.IndexAny(cut, " \t"); i >= 0 && i < max/4 {
+		return strings.TrimSpace(cut[i+1:])
+	}
+	for len(cut) > 0 && !utf8.RuneStart(cut[0]) {
+		cut = cut[1:]
+	}
+	return strings.TrimSpace(cut)
+}
+
+// clipRunes cuts s to n runes, marking the cut.
+func clipRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n-1]) + "…"
 }
 
 // validPromiseEvent reports whether event is one of PromiseEvents.
