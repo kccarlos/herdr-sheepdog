@@ -274,14 +274,18 @@ func (s *Supervisor) awaitReply(ctx, turnCtx context.Context, u *inflightUtteran
 	case <-timer.C:
 	case <-ctx.Done():
 	}
+	listening := s.hasListener()
 	s.mu.Lock()
 	switch {
 	case !u.done:
 		u.detached = true
 		s.mu.Unlock()
-	case ctx.Err() != nil:
+	case ctx.Err() != nil || !listening:
 		// The reply landed just as the voice dropped the call: the tool
-		// result would be discarded, so it is pushed instead.
+		// result would be discarded, so it is pushed instead. Likewise
+		// when the page left during the wait: as a tool result the voice
+		// would speak it to nobody at once, while a push is held until a
+		// client attaches (voice.push_held, PR #64).
 		out := u.out
 		s.mu.Unlock()
 		if s.track() {
@@ -298,7 +302,7 @@ func (s *Supervisor) awaitReply(ctx, turnCtx context.Context, u *inflightUtteran
 		defer s.endUtterance(u)
 		return s.inlineResult(turnCtx, u, out)
 	}
-	payload := map[string]any{"id": u.id, "waited_ms": s.cfg.Now().Sub(start).Milliseconds(), "cancelled": ctx.Err() != nil}
+	payload := map[string]any{"id": u.id, "waited_ms": s.cfg.Now().Sub(start).Milliseconds(), "cancelled": ctx.Err() != nil, "no_listener": !listening}
 	if id, ok := ctx.Value(callIDKey{}).(string); ok {
 		payload["call_id"] = id
 	}
@@ -695,6 +699,19 @@ func bareAnswer(p state.PendingAction, text string) (keys []string, label string
 		return nil, "", false
 	}
 	return keys, label, true
+}
+
+// hasListener reports whether a line spoken now can be heard (Listener);
+// true for a Pusher that cannot tell. Invariant it serves in awaitReply:
+// a reply the shepherd is owed is heard, or held until someone can hear
+// it, never spoken into an empty room. The page can leave between the
+// tool call and its result, so this cannot be made unrepresentable; it
+// is checked when the result would be returned.
+func (s *Supervisor) hasListener() bool {
+	if l, ok := s.pusher.(Listener); ok {
+		return l.HasListener()
+	}
+	return true
 }
 
 // The echo guard. Invariant it protects (docs/iteration-2.md rule 5):

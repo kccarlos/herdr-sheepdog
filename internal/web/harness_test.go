@@ -89,6 +89,7 @@ func (f *fakeSession) ClientAttached(a bool) {
 	f.mu.Unlock()
 }
 func (f *fakeSession) isAttached() bool    { f.mu.Lock(); defer f.mu.Unlock(); return f.attached }
+func (f *fakeSession) HasListener() bool   { return f.isAttached() }
 func (f *fakeSession) streamEnds() int     { f.mu.Lock(); defer f.mu.Unlock(); return f.ends }
 func (f *fakeSession) emit(ev voice.Event) { f.events <- ev }
 

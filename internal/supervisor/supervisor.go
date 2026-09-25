@@ -35,6 +35,13 @@ type Pusher interface {
 	Push(text string, u voice.Urgency) error
 }
 
+// Listener is a Pusher that knows whether anyone can hear a spoken line
+// now: a /ws client is attached to the voice session (voice.Switcher).
+// A Pusher without it (--voice=off) is taken to always have one.
+type Listener interface {
+	HasListener() bool
+}
+
 // TagPusher is a Pusher that carries a tag onto the voice.push event it
 // logs — answers_job, the investigation whose answer this push is, which
 // the Conversation view links back to the acknowledgement. A Pusher

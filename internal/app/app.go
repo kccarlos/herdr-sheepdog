@@ -990,6 +990,19 @@ func (l *lazyPusher) PushTagged(text string, u voice.Urgency, tags map[string]an
 	return p.Push(text, u)
 }
 
+// HasListener implements supervisor.Listener through the indirection:
+// the voice session's attach state, or true with --voice=off or before
+// the session exists (nothing is spoken there anyway).
+func (l *lazyPusher) HasListener() bool {
+	l.mu.Lock()
+	p := l.p
+	l.mu.Unlock()
+	if li, ok := p.(supervisor.Listener); ok {
+		return li.HasListener()
+	}
+	return true
+}
+
 // Reset forwards to the voice session's Reset ("New conversation",
 // supervisor.ResetConversation) once one is attached (the voice.Switcher
 // implements it); a no-op before then or with --voice=off, where there
