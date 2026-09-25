@@ -64,21 +64,31 @@ func (s *Supervisor) invalidateBriefingLocked() {
 }
 
 // briefingRepeat reports how long ago text was last delivered to the
-// shepherd in a KindUtterance request, when that was within
-// Config.RepeatWindow (supervisor.repeat_window_s), and records this
-// call as the new "last delivered" mark either way — so the next
-// question in turn has something to compare against.
+// shepherd (markBriefingDelivered), when that was within
+// Config.RepeatWindow (supervisor.repeat_window_s). It only reads: a
+// roster counts as delivered once the shepherd heard an answer, never
+// because a request carried it — a turn that failed delivered nothing,
+// and its fallback must not then claim "no change since I last checked"
+// (2026-09-24 18:16:43: said three times in reply to questions about
+// details, after the brain had errored).
 func (s *Supervisor) briefingRepeat(text string) (time.Duration, bool) {
 	now := s.cfg.Now()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	var age time.Duration
-	repeat := s.lastBriefingText != "" && s.lastBriefingText == text && now.Sub(s.lastBriefingAt) <= s.cfg.RepeatWindow
-	if repeat {
-		age = now.Sub(s.lastBriefingAt)
+	if s.lastBriefingText == "" || s.lastBriefingText != text || now.Sub(s.lastBriefingAt) > s.cfg.RepeatWindow {
+		return 0, false
 	}
+	return now.Sub(s.lastBriefingAt), true
+}
+
+// markBriefingDelivered records text as the roster the shepherd last
+// heard an answer about: after a brain reply, or the roster sentence
+// itself when there is no brain.
+func (s *Supervisor) markBriefingDelivered(text string) {
+	now := s.cfg.Now()
+	s.mu.Lock()
 	s.lastBriefingText, s.lastBriefingAt = text, now
-	return age, repeat
+	s.mu.Unlock()
 }
 
 // stateRank orders agents for the ear: blocked first, then working, then

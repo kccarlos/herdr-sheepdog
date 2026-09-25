@@ -290,6 +290,9 @@ type Supervisor struct {
 	inputWake chan struct{}
 	// relay is the unanswered-utterance watch (relay.go).
 	relay relayWatch
+	// echo is what the voice is saying or just said, for the echo guard
+	// (utterance.go).
+	echo echoWatch
 	// promptSeenAt is when each pane's current prompt (lastPrompt's
 	// signature) was first recorded, so a revived pending action keeps
 	// the time the prompt really appeared (inputs.go).
@@ -427,6 +430,7 @@ func (s *Supervisor) OnVoiceEvent(ev voice.Event) {
 	case voice.EventTurnComplete:
 		s.closeVoiceInput()
 		s.pushSpoken(false)
+		s.voiceStopped()
 		if s.brain != nil {
 			s.brain.TurnComplete()
 		}
@@ -442,6 +446,7 @@ func (s *Supervisor) OnVoiceEvent(ev voice.Event) {
 		// The shepherd barged in on whatever was playing, a push
 		// included: what the voice says next answers them.
 		s.pushSpoken(false)
+		s.voiceStopped()
 	}
 }
 

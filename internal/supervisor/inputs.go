@@ -80,6 +80,10 @@ type shepherdInput struct {
 	// relay does not glue these words onto the next utterance, and the
 	// daemon does not relay them (relay.go).
 	answered bool
+	// saidBefore is what the voice was saying, or had said within
+	// echoWindow, when this voice input began: what it may be an echo of
+	// (echoOf, utterance.go). Empty for anything else.
+	saidBefore string
 }
 
 // inputGraceDefault is how long a to_supervisor call with no fresh
@@ -160,7 +164,7 @@ func (s *Supervisor) heard(text string, final bool) {
 		s.wakeLocked()
 		return
 	}
-	in := &shepherdInput{kind: InputVoice, text: text, open: !final}
+	in := &shepherdInput{kind: InputVoice, text: text, open: !final, saidBefore: s.echoCandidateLocked()}
 	s.addInputLocked(in)
 	s.armRelayLocked(in)
 }
@@ -174,6 +178,7 @@ func (s *Supervisor) voiceSpoke(text string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.closeVoiceLocked()
+	s.echoSpokeLocked(text)
 	if strings.TrimSpace(text) == "" || s.relay.pushSpeaking {
 		return
 	}

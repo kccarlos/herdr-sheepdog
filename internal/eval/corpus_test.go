@@ -64,7 +64,7 @@ func TestRunCorpusOffline(t *testing.T) {
 }
 
 // TestRegressionsCatchLoggedFailures checks each regression case against
-// its logged baseline directly: the four whose failure the logged reply
+// its logged baseline directly: the five whose failure the logged reply
 // shows fail on it, and the finish-line case, whose failure is the
 // supervisor's, passes on it (its pending_check says why).
 func TestRegressionsCatchLoggedFailures(t *testing.T) {
@@ -78,6 +78,7 @@ func TestRegressionsCatchLoggedFailures(t *testing.T) {
 		"partial-relay-no-fabrication":  true,
 		"finish-line-needs-user-spoken": false,
 		"status-needs-you-first":        true,
+		"detail-question-not-no-change": true,
 	}
 	if len(cases) != len(want) {
 		t.Fatalf("got %d regressions, want %d", len(cases), len(want))
