@@ -331,6 +331,15 @@ function openWS() {
     state.wsState = 'closed';
     stopPing();
     console.log(`[voice] ws closed code=${e.code} reason=${JSON.stringify(e.reason)}`);
+    if (e.reason === 'replaced') {
+      // Another client (a second tab, the phone) took the session over.
+      // Reconnecting would take it back, and that client would do the
+      // same, in a loop (docs/timelines.md C14): stop, as the iOS app
+      // does, and let the shepherd press Connect to take it back.
+      disconnect();
+      showError('Another client took over the voice session. Press Connect to take it back.');
+      return;
+    }
     if (!state.userDisconnected) scheduleReconnect();
     render();
   };
