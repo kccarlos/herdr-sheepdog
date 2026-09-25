@@ -143,7 +143,16 @@ func (s *Supervisor) startInvestigation(ctx context.Context, paneID string, req 
 	// supervisor.repeat_window_s too: what the shepherd was last told
 	// has moved on, even though the roster's own wording has not.
 	s.invalidateBriefing()
-	go s.runInvestigation(jobCtx, live, inv)
+	if !s.track() {
+		// The daemon began shutting down meanwhile: the job is closed
+		// out, not started.
+		s.cancelInvestigationFor(paneID, "shutdown")
+		return brain.InvestigationStart{}, errors.New("the daemon is shutting down")
+	}
+	go func() {
+		defer s.replies.Done()
+		s.runInvestigation(jobCtx, live, inv)
+	}()
 	return brain.InvestigationStart{Job: inv.ID, ETASeconds: int(s.investigateETA(backend).Seconds())}, nil
 }
 
@@ -242,12 +251,19 @@ func (s *Supervisor) deliverInvestigation(inv state.Investigation) {
 		Event: "investigation.done", Question: inv.Question, Template: fallback,
 		Result: inv.Result, Investigation: &info,
 	}
-	rep, err := s.brain.Turn(context.Background(), req)
+	// The turn runs under s.life: shutdown ends it and waits for this
+	// goroutine (replies) before the brain closes.
+	rep, err := s.brain.Turn(s.life, req)
 	if errors.Is(err, brain.ErrYielded) {
 		// The shepherd spoke while the answer was being composed: an
 		// event turn gives way, but this one is the answer they are
 		// waiting for, so ask once more behind their turn.
-		rep, err = s.brain.Turn(context.Background(), req)
+		rep, err = s.brain.Turn(s.life, req)
+	}
+	if s.life.Err() != nil {
+		// The daemon is going down and the voice with it: the answer
+		// stays in the ledger (saved above), nothing is pushed.
+		return
 	}
 	if err != nil {
 		s.pushInvestigation(inv, fallback)

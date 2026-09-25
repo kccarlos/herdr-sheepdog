@@ -170,9 +170,14 @@ type Brain struct {
 	readTools []*genai.Tool // the read-only surface (event turns)
 
 	lock  turnLock
-	after sync.WaitGroup  // after-turn work in flight
-	ctx   context.Context // ends on Close (bounds after-turn work)
-	stop  context.CancelFunc
+	after sync.WaitGroup // after-turn work in flight
+	// inFlight counts Turn calls in flight; Close waits for them after
+	// setting closed (under mu), so a turn never runs into a closed
+	// transcript and no Add on after races Close's Wait.
+	inFlight sync.WaitGroup
+	closed   bool
+	ctx      context.Context // ends on Close (bounds after-turn work)
+	stop     context.CancelFunc
 
 	mu     sync.Mutex
 	host   Host
@@ -462,9 +467,16 @@ func (b *Brain) TranscriptPath() string {
 	return filepath.Join(b.cfg.DataDir, TranscriptDir, id+".jsonl")
 }
 
-// Close ends after-turn work, waits for it and closes the transcript.
+// Close refuses new turns (ErrClosed), ends the ones in flight and
+// after-turn work, waits for them and closes the transcript. The
+// supervisor joins its own turns before the daemon closes the brain;
+// this makes a late one (past the daemon's drain) safe as well.
 func (b *Brain) Close() error {
+	b.mu.Lock()
+	b.closed = true
+	b.mu.Unlock()
 	b.stop()
+	b.inFlight.Wait()
 	b.after.Wait()
 	_ = b.requests.Close()
 	return b.transcript.Close()
@@ -500,6 +512,44 @@ func (b *Brain) Heard(text string, final bool) {
 	if final {
 		b.flushInLocked()
 	}
+}
+
+// Echo records that heard, transcribed as the CEO's words, was the
+// assistant's own speech picked up by the microphone (the supervisor's
+// echo guard dropped it). The words must not reach a later turn as
+// something the CEO said, so they leave the window: still pending (the
+// input transcription is often never marked final), or already ingested
+// as CEO utterances since the last request (the voice saying
+// "Checking." flushes them before its tool call). The transcript on
+// disk keeps what was heard, and a system note after it says it was an
+// echo, so the record stays complete and honest.
+func (b *Brain) Echo(heard string) {
+	heard = strings.TrimSpace(heard)
+	if heard == "" {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if pending := joinFragments(b.inBuf); pending != "" && strings.Contains(heard, pending) {
+		b.inBuf = nil
+	}
+	if r, ok := b.engine.(Retracter); ok {
+		msgs := b.transcript.Messages()
+		for i := len(msgs) - 1; i >= 0; i-- {
+			m := msgs[i]
+			if m.Kind == KindRequest {
+				break
+			}
+			if m.Kind != KindCEOUtterance {
+				continue
+			}
+			if !strings.Contains(heard, strings.TrimSpace(m.Content)) {
+				break
+			}
+			r.Retract(m.Seq)
+		}
+	}
+	b.ingest(Message{Role: RoleUser, Kind: KindSystem, Content: fmt.Sprintf("Echo ignored: the microphone picked up the assistant's own speech and it was transcribed as %q. The CEO did not say it.", heard)}, 0)
 }
 
 // Said ingests a fragment of the assistant's speech (voice.transcript.out).

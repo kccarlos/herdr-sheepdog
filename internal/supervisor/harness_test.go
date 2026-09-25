@@ -184,6 +184,10 @@ func newHarness(t *testing.T, opts ...func(*Config)) *harness {
 		t.Fatal(err)
 	}
 	h.sup.SetVoiceConnected(true)
+	// The daemon's shutdown order: the supervisor's background turns end
+	// before the brain closes (withBrain's cleanup, registered earlier,
+	// runs later).
+	t.Cleanup(h.sup.shutdown)
 	return h
 }
 

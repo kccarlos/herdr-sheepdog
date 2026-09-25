@@ -181,8 +181,9 @@ func (s *Supervisor) handleUtterance(ctx context.Context, c claim, callID string
 	// the voice cancels a handler's context as soon as the handler
 	// returns, and the turn may outlive it. Like an investigation job it
 	// runs on its own context, bounded by the brain's own turn timeout;
-	// the stop procedure cancels it through the slot.
-	parent := context.Background()
+	// the stop procedure cancels it through the slot, and shutdown
+	// through s.life.
+	parent := s.life
 	if sync {
 		parent = ctx
 	}
@@ -248,7 +249,11 @@ func (s *Supervisor) coalesce(u *inflightUtterance) {
 // the late way too.
 func (s *Supervisor) awaitReply(ctx, turnCtx context.Context, u *inflightUtterance) voice.ToolResult {
 	start := s.cfg.Now()
-	s.replies.Add(1)
+	if !s.track() {
+		// The daemon is going down: no turn starts that would outlive it.
+		s.endUtterance(u)
+		return voice.ToolResult{Scheduling: voice.UrgencySilent}
+	}
 	go func() {
 		defer s.replies.Done()
 		out := s.utteranceTurn(turnCtx, u)
@@ -269,28 +274,35 @@ func (s *Supervisor) awaitReply(ctx, turnCtx context.Context, u *inflightUtteran
 	case <-timer.C:
 	case <-ctx.Done():
 	}
+	listening := s.hasListener()
 	s.mu.Lock()
 	switch {
 	case !u.done:
 		u.detached = true
 		s.mu.Unlock()
-	case ctx.Err() != nil:
+	case ctx.Err() != nil || !listening:
 		// The reply landed just as the voice dropped the call: the tool
-		// result would be discarded, so it is pushed instead.
+		// result would be discarded, so it is pushed instead. Likewise
+		// when the page left during the wait: as a tool result the voice
+		// would speak it to nobody at once, while a push is held until a
+		// client attaches (voice.push_held, PR #64).
 		out := u.out
 		s.mu.Unlock()
-		s.replies.Add(1)
-		go func() {
-			defer s.replies.Done()
-			s.deliverLate(turnCtx, u, out, start)
-		}()
+		if s.track() {
+			go func() {
+				defer s.replies.Done()
+				s.deliverLate(turnCtx, u, out, start)
+			}()
+		} else {
+			s.endUtterance(u)
+		}
 	default:
 		out := u.out
 		s.mu.Unlock()
 		defer s.endUtterance(u)
 		return s.inlineResult(turnCtx, u, out)
 	}
-	payload := map[string]any{"id": u.id, "waited_ms": s.cfg.Now().Sub(start).Milliseconds(), "cancelled": ctx.Err() != nil}
+	payload := map[string]any{"id": u.id, "waited_ms": s.cfg.Now().Sub(start).Milliseconds(), "cancelled": ctx.Err() != nil, "no_listener": !listening}
 	if id, ok := ctx.Value(callIDKey{}).(string); ok {
 		payload["call_id"] = id
 	}
@@ -689,6 +701,19 @@ func bareAnswer(p state.PendingAction, text string) (keys []string, label string
 	return keys, label, true
 }
 
+// hasListener reports whether a line spoken now can be heard (Listener);
+// true for a Pusher that cannot tell. Invariant it serves in awaitReply:
+// a reply the shepherd is owed is heard, or held until someone can hear
+// it, never spoken into an empty room. The page can leave between the
+// tool call and its result, so this cannot be made unrepresentable; it
+// is checked when the result would be returned.
+func (s *Supervisor) hasListener() bool {
+	if l, ok := s.pusher.(Listener); ok {
+		return l.HasListener()
+	}
+	return true
+}
+
 // The echo guard. Invariant it protects (docs/iteration-2.md rule 5):
 // an utterance is the shepherd's own words — the brain and the one rail
 // both stand on recorded shepherd input — and the assistant's speech
@@ -717,8 +742,11 @@ func bareAnswer(p state.PendingAction, text string) (keys []string, label string
 //
 // An echo is logged (supervisor.echo_dropped, both texts) and not
 // relayed; the call gets a silent result, as a call with no shepherd
-// input does. The brain's transcript still holds the transcription as
-// heard: it is the record of what the microphone picked up.
+// input does. It also leaves the brain's window (Brain.Echo): the words
+// reached the brain as the CEO's before the guard saw them (it runs on
+// the tool call, after the transcript), and left there a later turn
+// would read `CEO said: "new change"` and may act on it. The transcript
+// on disk keeps them, followed by a note that they were an echo.
 
 // echoWindow is how long after the voice's last output a new input may
 // still be its echo. The logged pair was 1.7 s apart: the transcript of
@@ -781,6 +809,9 @@ func (s *Supervisor) echoDropped(c claim) bool {
 	c.in.used = true
 	s.mu.Unlock()
 	s.log.Log(logSource, "supervisor.echo_dropped", "", map[string]any{"heard": c.text, "said": c.in.saidBefore})
+	if s.brain != nil {
+		s.brain.Echo(c.text)
+	}
 	return true
 }
 

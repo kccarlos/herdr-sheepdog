@@ -401,6 +401,15 @@ func (sw *Switcher) ClientAttached(attached bool) {
 	}
 }
 
+// HasListener reports whether a /ws client is attached now
+// (supervisor.Listener): a reply returned as a tool result would be
+// spoken to nobody without one.
+func (sw *Switcher) HasListener() bool {
+	sw.mu.Lock()
+	defer sw.mu.Unlock()
+	return sw.client
+}
+
 // AudioStreamEnd forwards the client's silence gate closing.
 func (sw *Switcher) AudioStreamEnd() {
 	if ae, ok := sw.cur().(interface{ AudioStreamEnd() }); ok {
