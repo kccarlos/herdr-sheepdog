@@ -512,7 +512,8 @@ func schemaOf(s *genai.Schema) map[string]any {
 }
 
 // messagesOf renders the window as chat messages for model (the
-// counterpart of toContents). Context messages become user lines,
+// counterpart of toContents, in the same modelOrder: a step's tool
+// calls and results adjacent). Context messages become user lines,
 // merged while consecutive; a step's tool calls become the assistant
 // message the API returned (Raw: its reasoning_content and tool_calls,
 // ids included) when this provider and model produced it, else one
@@ -579,7 +580,8 @@ func (m *OpenAICompatModel) messagesOfTraced(msgs []Message, model string, tr *[
 	}
 	current := func(msg Message) bool { return msg.Turn == cur }
 
-	for mi, msg := range msgs {
+	for _, mi := range modelOrder(msgs) {
+		msg := msgs[mi]
 		if msg.Kind != KindToolCall {
 			rawCovers = false
 		}
