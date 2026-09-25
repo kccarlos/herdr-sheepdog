@@ -59,3 +59,25 @@ func TestFullReplyUnchanged(t *testing.T) {
 		t.Errorf("window:\n%s", text)
 	}
 }
+
+// TestSaidCutWithTheNextReplyPending: the model started its next reply
+// before the client's flushed report came back; the next reply's words
+// stay pending and are not mistaken for the cut run.
+func TestSaidCutWithTheNextReplyPending(t *testing.T) {
+	h := newHarness(t, braintest.NewModel(braintest.Step{Text: braintest.Reply("Auth.", "")}), nil)
+	full := "Auth is running the tests now"
+	h.brain.Said(full, false)
+	h.brain.TurnComplete()
+	h.brain.Said("Sure, stopping", false)
+	h.brain.SaidCut("Auth is running", full, 1500)
+	h.brain.TurnComplete()
+	if _, err := h.brain.Turn(context.Background(), Request{Kind: KindUtterance, Question: "ok"}); err != nil {
+		t.Fatal(err)
+	}
+	text := h.model.Calls()[0].Text()
+	if !strings.Contains(text, `Assistant said (cut off after 1.5 s): "Auth is running"`) ||
+		strings.Contains(text, `Assistant said: "Auth is running the tests now"`) ||
+		!strings.Contains(text, `Assistant said: "Sure, stopping"`) {
+		t.Errorf("window:\n%s", text)
+	}
+}
