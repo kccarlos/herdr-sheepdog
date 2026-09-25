@@ -272,12 +272,14 @@ export class RingBuffer {
  * Playback policy per voice provider (docs/ws-contract.md "Playback jitter
  * buffer"; the iOS app uses the same numbers). `startMs` is the jitter
  * buffer target a session starts with (and its floor), `capMs` the most it
- * adapts up to on underruns. GPT-Live delivers audio at 0.72–0.86× real
- * time, so it starts with a deep buffer and leans on time-stretch.
+ * adapts up to on underruns. GPT-Live delivered audio at 0.72–0.86× real
+ * time until the daemon paced its input at real time (2026-09-25); it now
+ * runs at ≈1.0× and starts at 400 ms, keeping the 2000 ms cap and the
+ * time-stretch for the bursts that remain.
  */
 export const PLAYBACK_POLICY = Object.freeze({
   gemini: Object.freeze({ startMs: 150, capMs: 500 }),
-  openai: Object.freeze({ startMs: 1200, capMs: 2000 }),
+  openai: Object.freeze({ startMs: 400, capMs: 2000 }),
 });
 
 /** Time-stretch rate policy constants (shared with iOS). */
@@ -543,7 +545,7 @@ export class Wsola {
  * playing again — it does not resume on the first new chunk — and every
  * `_start()` ramps in over `crossFadeLen` samples so a resumption or a
  * fresh utterance's first samples never click. Those defaults are
- * Gemini's; `setPolicy(PLAYBACK_POLICY.openai)` gives GPT-Live 1200 ms /
+ * Gemini's; `setPolicy(PLAYBACK_POLICY.openai)` gives GPT-Live 400 ms /
  * 2000 ms.
  *
  * Adaptive time-stretch (unless `stretch: false`): between the ring and

@@ -93,6 +93,10 @@ type Message struct {
 	// running plays nothing, and its worklet stops reporting, so the
 	// playback counters above stay frozen at their last values.
 	AudioState string `json:"audio_state,omitempty"`
+	// AEC is whether the microphone's echo cancellation is on, as the
+	// browser reports it (track.getSettings().echoCancellation):
+	// AECOn, AECOff or AECUnknown. Other values are ignored.
+	AEC string `json:"aec,omitempty"`
 
 	// text (client→server: simulated utterance) and transcript (server→client)
 	Text string `json:"text,omitempty"`
@@ -137,6 +141,16 @@ func Cancel() Message { return Message{Type: TypeCancel} }
 
 // SimulateText builds a client→server simulated utterance.
 func SimulateText(text string) Message { return Message{Type: TypeText, Text: text} }
+
+// Values of Message.AEC (ping).
+const (
+	AECOn      = "true"
+	AECOff     = "false"
+	AECUnknown = "unknown"
+)
+
+// ValidAEC reports whether v is one of the ping's aec values.
+func ValidAEC(v string) bool { return v == AECOn || v == AECOff || v == AECUnknown }
 
 // Ping builds a client→server liveness probe.
 func Ping() Message { return Message{Type: TypePing} }

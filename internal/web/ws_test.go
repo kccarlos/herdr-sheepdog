@@ -302,6 +302,41 @@ func TestWSPlaybackStatsAndSendWait(t *testing.T) {
 	}
 }
 
+// TestWSPingAECInClientStats: the ping's aec (the browser's echo
+// cancellation: true/false/unknown) shows up in web.client.stats; a value
+// outside the three is ignored (WP-E, docs/ws-contract.md "ping").
+func TestWSPingAECInClientStats(t *testing.T) {
+	h := newHarness(t, harnessOpts{voice: true, statsInterval: 50 * time.Millisecond})
+	c := dialWS(t, h)
+	c.expect(wsproto.TypeStatus)
+
+	aecOf := func(want string) {
+		t.Helper()
+		waitFor(t, 2*time.Second, func() bool {
+			tail := h.log.Tail(0)
+			for i := len(tail) - 1; i >= 0; i-- {
+				if tail[i].Type != "web.client.stats" {
+					continue
+				}
+				var p map[string]any
+				_ = json.Unmarshal(tail[i].Payload, &p)
+				return p["aec"] == want
+			}
+			return false
+		}, "web.client.stats aec "+want)
+	}
+	c.send(wsproto.Message{Type: wsproto.TypePing, AEC: wsproto.AECOff})
+	c.expect(wsproto.TypePong)
+	aecOf("false")
+	c.send(wsproto.Message{Type: wsproto.TypePing, AEC: "maybe"})
+	c.expect(wsproto.TypePong)
+	time.Sleep(120 * time.Millisecond)
+	aecOf("false")
+	c.send(wsproto.Message{Type: wsproto.TypePing, AEC: wsproto.AECUnknown})
+	c.expect(wsproto.TypePong)
+	aecOf("unknown")
+}
+
 func TestWSSingleClientReplacement(t *testing.T) {
 	h := newHarness(t, harnessOpts{voice: true})
 	first := dialWS(t, h)

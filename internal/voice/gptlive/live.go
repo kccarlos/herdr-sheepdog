@@ -57,7 +57,7 @@ func (s *Session) open(reason string) {
 	n := s.sessions
 	s.mu.Unlock()
 	for _, chunk := range pending {
-		if err := s.sendAudio(lc, chunk); err != nil {
+		if err := s.sendAudio(lc, chunk, srcReplay); err != nil {
 			break
 		}
 	}

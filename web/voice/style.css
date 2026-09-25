@@ -56,6 +56,7 @@ input[type=file] { max-width: 100%; }
 #level-peak { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--fg); left: 0; opacity: .6; }
 .meter.muted #level-bar { background: var(--idle); }
 
+.hint { color: var(--warn); border: 1px solid var(--warn); border-radius: 4px; padding: .4rem .6rem; margin: .4rem 0 0; }
 .error { color: var(--danger); background: var(--danger-bg); border: 1px solid var(--danger-line); border-radius: 4px; padding: .4rem .6rem; margin: .4rem 0 0; white-space: pre-wrap; }
 
 .transcript { max-height: 16rem; overflow: auto; font-size: .95em; }

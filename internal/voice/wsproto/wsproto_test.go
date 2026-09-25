@@ -76,3 +76,15 @@ func TestParsePlaybackStartedNeedsNoPlayed(t *testing.T) {
 		t.Fatalf("started without played_ms: %+v %v", m, err)
 	}
 }
+
+func TestPingAEC(t *testing.T) {
+	m, err := Parse([]byte(`{"type":"ping","aec":"false"}`))
+	if err != nil || m.AEC != AECOff {
+		t.Fatalf("Parse = %+v, %v", m, err)
+	}
+	for v, want := range map[string]bool{AECOn: true, AECOff: true, AECUnknown: true, "": false, "yes": false} {
+		if ValidAEC(v) != want {
+			t.Errorf("ValidAEC(%q) = %v", v, !want)
+		}
+	}
+}
