@@ -201,6 +201,156 @@ layer: sheepdog stores only the id.
   the price of being able to follow up; nothing reads those files but
   the CLIs themselves.
 
+## 2c. Forking a worker's own session
+
+Spike of 2026-09-25 for `investigate(source: "worker")` (docs/dive-deep.md
+§3), on **Claude Code 2.1.282** and **codex-cli 0.155.0**, three short
+runs per backend, each in a scratch git repository with a scratch session
+(never a live worker's). Every run went through the runner's environment
+rules: `HERDR_*`, `CLAUDECODE` and `CLAUDE_CODE_*` unset, stdin
+`/dev/null`. The question: can the supervisor ask a worker's own session
+a side question, with its memory, without writing into the session the
+worker's TUI still has open? `[verified]` marks what a run showed,
+`[inferred]` what the file layout implies but no run tested.
+
+### Claude: `--resume <id> --fork-session`
+
+```sh
+# 1. a scratch "worker" session
+claude -p "Remember the word pelican. Reply OK." <read-only flags>
+# 2. the fork: a new session id, the old one untouched
+claude -p "What word did I ask you to remember?" \
+  --resume <id> --fork-session <read-only flags>
+# 3. a follow-up on the fork (plain resume, no --fork-session)
+claude -p "Spell that word backwards." --resume <fork id> <read-only flags>
+```
+
+`<read-only flags>` is the §2 set: `--model claude-haiku-4-5-20251001
+--tools Read,Grep,Glob,WebSearch --allowedTools Read,Grep,Glob,WebSearch
+--strict-mcp-config --permission-mode dontAsk --permission-prompts none
+--output-format json --max-budget-usd 0.50`.
+
+| run | wall | `duration_ms` | cost | tokens | `session_id` |
+|---|---|---|---|---|---|
+| 1 create | 2.5 s | 1 247 | $0.018 | cache write 8 798, out 68 | `50b69d96-…` |
+| 2 fork | 2.1 s | 1 040 | $0.019 | cache read 8 798, write 143, out 40 | `218f5ac7-…` (new) |
+| 3 follow-up | 2.8 s | 1 354 | $0.021 | cache read 8 941, write 112, out 55 | `218f5ac7-…` (same) |
+
+- `--fork-session` exists: "When resuming, create a new session ID
+  instead of reusing the original (use with --resume or --continue)"
+  [verified, `claude --help`].
+- The fork remembers: run 2 answered `pelican` [verified].
+- It is a fork: run 2 returned a new `session_id`, the original
+  `~/.claude/projects/<encoded cwd>/50b69d96-….jsonl` kept its size
+  (67 310 bytes), mtime and SHA-1 through runs 2 and 3, and the fork
+  wrote its own `218f5ac7-….jsonl` holding a copy of the history under
+  the new id [verified].
+- A follow-up resumes the fork, not the worker: run 3 (plain `--resume
+  <fork id>`) returned the fork's id, answered from its memory and grew
+  only the fork's file (73 085 → 79 466 bytes) [verified].
+- Read-only: `permission_denials: []` on every run, `git status` clean
+  [verified]; the tool set is the §2 one, unchanged by `--resume`.
+- herdr: the herdr integration's `SessionStart` hook in
+  `~/.claude/settings.json` matches `startup|resume|clear|compact|fork`,
+  so it *would* fire for a fork, but its script exits unless
+  `HERDR_ENV=1`, `HERDR_SOCKET_PATH` and `HERDR_PANE_ID` are set. With the
+  runner's scrub it is a no-op: `herdr agent list` showed the same panes
+  and the same `agent_session` values before and after all three runs
+  [verified]. Without the scrub (a daemon inside a herdr pane) the fork
+  would report itself as that pane's session [inferred from the script].
+- Claude looks the session up under the project directory named after
+  the child's cwd, so the fork must run in the worker's cwd (herdr's
+  `cwd` for the pane, which is also where `internal/workerlog` looks)
+  [inferred; a cwd mismatch was not run].
+- Forking a session the TUI still has open: the fork only reads the
+  original file and writes its own, so the live session is not touched
+  [inferred from the file layout; the spike's original was closed]. A
+  worker resumed mid-turn (a dangling tool call) was not tested.
+
+### Codex: `codex exec resume` appends; `codex exec fork` forks
+
+```sh
+# 1. a scratch "worker" thread (§2b: no --ephemeral, --json)
+codex exec --sandbox read-only --skip-git-repo-check --color never \
+  -c model_reasoning_effort=low -C <dir> --json "Remember the word pelican. Reply OK."
+# 2. the fork
+codex exec fork <thread> "What word did I ask you to remember?" \
+  -c sandbox_mode=read-only -c model_reasoning_effort=low --skip-git-repo-check --json
+# 3. resume, for comparison
+codex exec resume <thread> "What word did I ask you to remember?" \
+  -c sandbox_mode=read-only -c model_reasoning_effort=low --skip-git-repo-check --json
+```
+
+| run | wall | `turn.completed.usage` | `thread_id` |
+|---|---|---|---|
+| 1 create | 3.2 s | in 11 306 (cached 8 960), out 5 | `01a0d7a6-7d0f-…` |
+| 2 fork | 3.5 s | in 22 632 (cached 17 920), out 11 | `01a0d7a6-b0eb-…` (new) |
+| 3 resume | 3.1 s | in 22 632 (cached 19 968), out 11 | `01a0d7a6-7d0f-…` (same) |
+
+- **`codex exec resume` appends to the original rollout**: run 3
+  re-emitted the original thread id and the original
+  `~/.codex/sessions/…/rollout-…-01a0d7a6-7d0f-….jsonl` grew from 34 518
+  to 41 423 bytes (SHA-1 changed) [verified]. `codex exec resume --help`
+  has no fork flag [verified]. So resume must never be pointed at a
+  worker's live thread.
+- **`codex exec fork <SESSION_ID> [PROMPT]`** exists in 0.155 ("Fork a
+  previous session by id into a new session") with the same options as
+  `exec resume` (`-c`, `--skip-git-repo-check`, `--json`, `--ephemeral`,
+  …; no `--sandbox`, `-C`, `--color` or `--all`) [verified, `--help`].
+  Run 2 answered `Pelican`, returned a new thread id, left the original
+  byte-identical (checked before run 3) and wrote a new rollout
+  [verified].
+- The fork's rollout does not copy the history: its `session_meta` has
+  `forked_from_id`, `forked_from_ordinal_exclusive: 13` and
+  `history_base {thread_id, end_ordinal_exclusive: 13, end_byte_offset:
+  34518}`, and its own lines start at ordinal 13 [verified]. A fork is a
+  read of the parent up to a byte offset; later growth of the parent
+  (the worker working on) is not part of the fork [inferred from the
+  layout].
+- Read-only: the fork's `turn_context` records `sandbox_policy:
+  {type: read-only}`, `approval_policy: never` from `-c
+  sandbox_mode=read-only` [verified]; `git status` clean [verified].
+- A follow-up on the fork is `codex exec resume <fork id>`: it appends
+  to the fork's own rollout, which only sheepdog uses [inferred from
+  run 3's behaviour on the original].
+- Forking a thread whose interactive TUI is still open: the fork only
+  reads the parent's rollout up to the recorded offset and writes a new
+  file, so the TUI's file is never written [inferred; not runnable
+  without a live worker]. Resuming that thread would interleave two
+  writers in one rollout: refused.
+- The herdr integration's Codex hook (`~/.codex/hooks.json`) has the same
+  `HERDR_*` gate; `herdr agent list` was unchanged [verified].
+- Whether `exec fork` finds a thread created under a different cwd is
+  untested (`exec resume` filters by cwd only for `--last`/the picker)
+  [inferred]; sheepdog forks in the worker's cwd anyway.
+
+### Cost and time
+
+The scratch sessions were tiny (≈ 9–23 k tokens with the tools' own
+system prompts), so the runs took 2–3.5 s. A worker's real session is
+much larger: the fork's first turn pays for the worker's whole context,
+and for Claude with a reduced tool list the prompt-cache prefix differs
+from the worker's, so it is not a cache hit [inferred]. Two consequences
+for WP8c:
+
+- The Claude fork runs without `--model`, on the user's default model:
+  Haiku's 200 k window cannot hold a long day's session, and the fork
+  should reason with the worker's own model family. `--max-budget-usd`
+  is raised to 2.00 for the fork (notional on a subscription; a large
+  context on the default model would trip 0.50 on the first turn)
+  [inferred; neither limit was hit in the spike].
+- The run is bounded by `brain.investigate_max_s` like any
+  investigation; it uses the shepherd's own Claude/Codex usage, never
+  Gemini quota.
+
+### Consequence
+
+Both backends can answer from the worker's memory without writing into
+its session: Claude with `--resume <id> --fork-session`, Codex with
+`codex exec fork <thread>` (not `exec resume`). The fork's own id is the
+session a follow-up resumes. The argv is fixed in `internal/cli`
+(`defaultClaudeForkCmd`, `defaultCodexForkCmd`), not configurable.
+
 ## 3. Config defaults
 
 ```toml
@@ -233,6 +383,14 @@ timeout_s     = 60      # kill the process group on expiry (plan §3.5); run_cli
 output_cap_kb = 16
 prefer        = "codex" # first detected wins; both tools took ~17 s on a trivial question at default effort
 ```
+
+The fork templates of `investigate(source: "worker")` (§2c) are not in
+the config: they are fixed in `internal/cli` (`defaultClaudeForkCmd`,
+`defaultCodexForkCmd`), because the fork is only safe in the verified
+form (`--resume {session} --fork-session` for claude, `codex exec fork
+{session}` for codex, never `codex exec resume` on a worker's thread).
+The fork runs on the worker's own backend, whatever `prefer` says, and a
+follow-up resumes the fork's id through the resume templates above.
 
 An investigation is not bounded by `timeout_s` but by
 `brain.investigate_max_s` (600 s), which is a sanity ceiling, not a

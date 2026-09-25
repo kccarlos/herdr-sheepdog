@@ -25,6 +25,10 @@ var (
 	// ErrBusy is returned when a query is already running for the same
 	// workspace; the caller should not block waiting for it.
 	ErrBusy = errors.New("cli: a query is already running for this workspace")
+	// ErrNotForked is returned when a fork run reported the session it
+	// was asked to fork: the backend continued the worker's own session
+	// instead of copying it.
+	ErrNotForked = errors.New("cli: the backend did not fork the session")
 )
 
 // Default config values (plan §3.5, docs/cli-query-tools.md §3).
@@ -89,6 +93,40 @@ var (
 		"--permission-prompts", "none",
 		"--output-format", "json",
 		"--max-budget-usd", "0.50",
+	}
+)
+
+// The fork templates ask a worker's *own* session a side question
+// without writing into it (docs/cli-query-tools.md §2c, verified
+// 2026-09-25): claude's --fork-session copies the history under a new
+// session id, `codex exec fork` starts a new thread that reads the
+// worker's rollout up to a byte offset. `codex exec resume` would append
+// to the worker's live rollout, so it is never used on a worker. The
+// argv is fixed, not configurable: the fork is only safe in this form.
+//
+// The claude fork has no --model: it continues the worker's
+// conversation, which a long day makes larger than Haiku's window, so it
+// runs on the user's default model; its budget cap is raised for the
+// same reason (the first turn pays for the whole context). A follow-up
+// resumes the fork's own id through the resume templates above.
+var (
+	defaultClaudeForkCmd = []string{
+		"claude", "-p", "{question}",
+		"--resume", "{session}", "--fork-session",
+		"--tools", "Read,Grep,Glob,WebSearch",
+		"--allowedTools", "Read,Grep,Glob,WebSearch",
+		"--strict-mcp-config",
+		"--permission-mode", "dontAsk",
+		"--permission-prompts", "none",
+		"--output-format", "json",
+		"--max-budget-usd", "2.00",
+	}
+	defaultCodexForkCmd = []string{
+		"codex", "exec", "fork", "{session}", "{question}",
+		"-c", "sandbox_mode=read-only",
+		"-c", "model_reasoning_effort={reasoning}",
+		"--skip-git-repo-check",
+		"--json",
 	}
 )
 

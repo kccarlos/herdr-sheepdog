@@ -269,8 +269,9 @@ const (
 	// InvestigationSourceCLI is the read-only CLI sub-agent in the
 	// worker's repository.
 	InvestigationSourceCLI = "cli"
-	// InvestigationSourceWorker is the idle worker itself, asked in its
-	// own pane. Not implemented yet (docs/status.md "Open").
+	// InvestigationSourceWorker is the worker itself: its own session,
+	// asked through a read-only fork that never writes into the session
+	// or touches the pane (docs/dive-deep.md §3).
 	InvestigationSourceWorker = "worker"
 )
 
@@ -284,6 +285,9 @@ type InvestigationRequest struct {
 	// FollowUpOf is the id of the job to continue, when the CEO is
 	// digging deeper into an answer they already had.
 	FollowUpOf string
+	// Source is who is asked: InvestigationSourceCLI ("" too) or
+	// InvestigationSourceWorker.
+	Source string
 	// Asked is what the CEO said that started it, in their words (the
 	// delivery turn says what they wanted, not what the tool asked).
 	Asked string
