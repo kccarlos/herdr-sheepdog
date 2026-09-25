@@ -227,9 +227,11 @@ works: the last reply's `detail` (the voice does this itself), a screen
 read, `recall`, then an investigation. An investigation is a background
 job (`investigate(agent, question)`): the brain acknowledges within the
 utterance turn's budget ("reading the diff, about half a minute", `pending: true`),
-the job runs the read-only CLI agent in the worker's repository — or
-asks the idle worker itself in its pane — with no time limit beyond a
-sanity ceiling, and its result comes back as an event turn that pushes
+the job runs the read-only CLI agent in the worker's repository — or,
+with `source: worker`, forks the worker's own CLI session (read-only,
+never touching the pane) and asks there, so it answers from what the
+worker actually saw and tried — with no time limit beyond a sanity
+ceiling, and its result comes back as an event turn that pushes
 the explanation at the next pause, tagged to the request. Follow-ups
 resume the same CLI session (the harness persists it); the brain keeps
 an investigation ledger `recall` can search. One live investigation per

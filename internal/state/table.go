@@ -154,7 +154,8 @@ const (
 // Investigation is one background job the brain started to answer a
 // question the screen cannot (docs/roles.md "Investigations and
 // explanations"): a read-only CLI sub-agent in the worker's repository,
-// or — later — the idle worker itself. Kept in the session so `recall`
+// or a read-only fork of the worker's own CLI session (source: worker),
+// which never touches the pane. Kept in the session so `recall`
 // and follow-ups survive a restart.
 type Investigation struct {
 	ID     string `json:"id"`

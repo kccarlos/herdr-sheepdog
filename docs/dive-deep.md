@@ -1,7 +1,12 @@
 # Dive deep: talking about one worker in detail
 
-Design note, 2026-09-25. Status: proposal, not implemented. It answers
-one complaint from the headset sessions of 2026-09-24: sheepdog gives a
+Design note, 2026-09-25. Status: implemented. WP8a and WP8b landed in
+#68 (`read_screen` reads the worker's session; detail on request widens
+the utterance cap); WP8c landed in #69 (`investigate(source: worker)`
+forks the worker's own CLI session). WP8d (this doc's own follow-through
+— headset script lines, scorecard column, status.md) is this PR.
+
+It answers one complaint from the headset sessions of 2026-09-24: sheepdog gives a
 good status line but cannot hold a conversation about what one worker
 actually did ("what exactly did it say?", "tell me more", "why did it
 do that?").
@@ -107,18 +112,23 @@ the question there.
   read of the repository. It is still background work delivered as a
   push at the next pause, with the same one-job-per-agent rule, and it
   still cannot write.
-- **Must be verified before building** (a spike, one run per backend,
-  on a scratch session, not the shepherd's live worker):
-  - Claude: resuming a session the TUI still has open must not write
-    into the live session's JSONL. `--fork-session` (a new session id
-    from the resumed one) is the safe form; confirm it exists in the
-    installed version and that the fork is read-only.
-  - Codex: whether `codex exec resume` of a thread the TUI is still
-    running is allowed, and whether it forks or appends.
-  - Cost and time: a long day's session is a large context; measure
-    one resume (tens of seconds and the shepherd's own Claude/Codex
-    usage, not Gemini quota) and cap the question with the existing
-    `investigate_max_s`.
+- **What the spike found** (docs/cli-query-tools.md §2c; three short
+  runs per backend on scratch sessions, before WP8c was built):
+  - Claude `--resume <id> --fork-session` answers from memory into a
+    new session id; the original JSONL is byte-identical afterwards,
+    and the fork writes only its own file. Confirmed read-only and
+    safe to build on.
+  - Codex `codex exec resume` **appends to the original rollout**
+    (34,518 → 41,423 bytes in the spike run), so it is never used on a
+    worker's live session. `codex exec fork <id>` (codex-cli 0.155) is
+    the non-appending form instead: a new thread whose rollout
+    references the parent by byte offset, original untouched, sandbox
+    read-only. This is a deviation from the brief above, which assumed
+    Codex would be refused if resume appends — it is supported through
+    `fork` instead.
+  - Cost and time: 2–3.5 s and about $0.02 per run on the spike's tiny
+    scratch sessions. A real day-long session's cost and time were not
+    measured (open item below).
 - This replaces the open item "source: worker types into the idle
   worker's pane" (docs/status.md): the fork never touches the pane, so
   the finish/announce collision that blocked it does not arise.
@@ -152,23 +162,25 @@ the question there.
 
 ## Work packages
 
-- **WP8a** `feat(brain): read_screen reads the worker's session`:
-  `internal/brain/tools.go` (declaration, executor), the Host interface
-  and `internal/supervisor/brainhost.go` (a `ReadSession(pane)` over the
-  existing `workerlog.Reader`), `internal/workerlog` (a bounded
-  last-message read that does not move the journal's offset),
-  `prompts/svp/RULES.md` tools section, tests and the three eval cases.
+- **WP8a** `feat(brain): read_screen reads the worker's session` —
+  **done, #68**: `internal/brain/tools.go` (declaration, executor), the
+  Host interface and `internal/supervisor/brainhost.go` (a
+  `ReadSession(pane)` over the existing `workerlog.Reader`),
+  `internal/workerlog` (a bounded last-message read that does not move
+  the journal's offset), `prompts/svp/RULES.md` tools section, tests and
+  the three eval cases.
 - **WP8b** `feat(prompts): detail on request; the utterance cap is a
-  safety net`: `internal/prose` cap for utterance replies,
-  `prompts/svp/RULES.md`, eval cases; announce and finish caps pinned by
-  a test.
+  safety net` — **done, #68** (same PR as WP8a): `internal/prose` cap
+  for utterance replies, `prompts/svp/RULES.md`, eval cases; announce
+  and finish caps pinned by a test.
 - **WP8c** spike, then `feat(supervisor): investigate can ask the
-  worker's own session`: the spike report first (one run per backend on
-  a scratch session, findings into docs/cli-query-tools.md §2c); then
-  `internal/cli` (fork template), `internal/supervisor/investigate.go`
-  (`source: worker` resolves the pane's session id), `RULES.md`, tests
-  with the CLI harness.
-- **WP8d** docs: headset script lines, scorecard column, status.md.
+  worker's own session` — **done, #69**: the spike report first (one
+  run per backend on a scratch session, findings into
+  docs/cli-query-tools.md §2c); then `internal/cli` (fork template),
+  `internal/supervisor/investigate.go` (`source: worker` resolves the
+  pane's session id), `RULES.md`, tests with the CLI harness.
+- **WP8d** docs: headset script lines, scorecard column, status.md —
+  **done, this PR**.
 
-WP8a and WP8b touch different files and go in one PR or two; WP8c
-follows its spike; WP8d last.
+WP8a and WP8b landed together in #68; WP8c followed its spike in #69;
+WP8d closes out the note here.

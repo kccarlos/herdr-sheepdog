@@ -1,4 +1,4 @@
-# Status — 2026-09-23
+# Status — 2026-09-25
 
 Living handoff note: what is on `main`, what is verified how, and what is
 open. Update it whenever a PR lands or a live check is done; it is what a
@@ -10,10 +10,13 @@ original plan and older run reports are in [`history/`](history/).
 
 ## Where main is
 
-`main` = `cecab0a` (#49), 49 PRs, every one squash-merged on green CI.
+`main` = `bd1a15f` (#73), 73 PRs, every one squash-merged on green CI.
 The v1 plan (WP0–WP7) and the whole 2026-09-18 redesign
 ([`history/issues-2026-09-18.md`](history/issues-2026-09-18.md), PRs 1–6
-of its work order) are merged; so is everything since.
+of its work order) are merged; so is everything since, including all of
+iteration 2's phase-1 work packages (WP1–WP5, #54/#55/#57/#58/#59, plus
+the follow-on caps in #60), WP8 (dive deep, #68/#69) and WP9 (timelines,
+#71/#72).
 
 | Area | State |
 |---|---|
@@ -25,13 +28,21 @@ of its work order) are merged; so is everything since.
 | Approval prompts parsed by code; blocked → blocked (post-answer poll + reconciler); revived prompts | done (#31, #33, #37, #48) |
 | Investigations: background CLI sub-agent jobs with session resume and a ledger | done (#32) |
 | Deliver-later: a `to_supervisor` call waits `brain.reply_wait_s`, then the reply is pushed when it lands | done (#47) |
-| Finish delivery (iteration 2 WP2): a finish waits for the brain's line, only a block speaks at `brain.announce_wait_s`, a late `needs_user` line is always spoken, "started on" for the brain's own prompt is silent | in review |
-| The shepherd's words (iteration 2 WP3): every utterance runs on the recorded input, not the voice's argument (the echo guard is gone); GPT-Live relays a paused sentence whole; the daemon relays an utterance the voice left unanswered for 4 s; back-to-back utterances queued behind a running turn coalesce | in review |
+| Finish delivery (iteration 2 WP2): a finish waits for the brain's line, only a block speaks at `brain.announce_wait_s`, a late `needs_user` line is always spoken, "started on" for the brain's own prompt is silent | done (#54) |
+| The shepherd's words (iteration 2 WP3): every utterance runs on the recorded input, not the voice's argument (the echo guard is gone); GPT-Live relays a paused sentence whole; the daemon relays an utterance the voice left unanswered for 4 s; back-to-back utterances queued behind a running turn coalesce | done (#58) |
 | "New conversation" (brain transcript window + voice memory) | done (#44, #48) |
 | Phone/LAN access: `web.bind` / `web.token`, cookie login, `GET /api/hello` | done (#36) |
 | `/debug`: Conversation, Swimlane, Supervisor, Context, Events, State tabs | done (#16, #19, #22, #49) |
 | Evals (`sheepdog eval --set svp\|assistant`, offline by default) | done (#21) |
-| iOS companion app (separate repo, `herdr-sheepdog-ios`, the `/ws` voice contract) | started |
+| Brain assembly keeps a step's tool calls adjacent to their results in every request, even one heard mid-step; heals transcripts already recorded out of order | done (#62) |
+| Honest fallback when the brain fails (no more false "no change"/"brain is off"); a narrow echo guard drops the voice's own words heard back through the mic and retracts them from the brain's window | done (#63, #65) |
+| Spoken pushes (and a late reply landing with no one attached) are held while no `/ws` client is listening and released on reconnect, dropped after a 5 min TTL; playback stats say how old the sample is | done (#64, #65) |
+| `read_screen(source: session)` reads the worker's own transcript instead of only its pane; a reply may run to 4 sentences / 60 words when the shepherd asked for detail (`docs/dive-deep.md` WP8a/b) | done (#68) |
+| `investigate(source: worker)` forks the worker's own CLI session (Claude `--fork-session`, Codex `exec fork`) read-only and asks there, instead of a fresh sub-agent with no memory of what the worker tried (`docs/dive-deep.md` WP8c) | done (#69) |
+| Client playback reports (`started`/`drained`/`flushed`, `docs/ws-contract.md`); `Speaking()` follows real client playback, not generation; a barge-in cuts the brain's "Assistant said" line to what actually played; a client speech detector holds pushes while the shepherd is talking | done (#70) |
+| Timeline gaps (`docs/timelines.md` WP9): Gemini reconnect after a 1011 re-seeds a recap of what was said instead of only the silent briefing; the push queue lets an owed line overtake idle news instead of stalling behind it; provider-switch and failed-send drops are logged (`voice.push_carried`/`push_dropped`), never silent; the echo window anchors to the client's playback end, not `turnComplete` | done (#72) |
+| GPT-Live input is paced at real wall-clock time while the client is silent (measured `realtime_ratio` ≈1.0 on a live 42 s run, was 0.74–0.87×); playback start buffer 1200 ms → 400 ms; the browser warns when echo cancellation is off | done (#73) |
+| iOS companion app (separate repo, `herdr-sheepdog-ios`, the `/ws` voice contract): playback reports and the client speech detector (#14); Flock pane with per-agent state and answerable prompts, brain-reply cards, held/released/dropped push cards, typed input (#17); Health pane (daemon/voice/brain/pushes/audio/recent-problems), echo-cancellation status, brain and voice model pickers, seven `SessionCore` glitch fixes (#18) | started |
 
 The ear contract (iteration 2, WP1): the brain's reply is a headline
 (`spoken`, capped in code at two sentences and thirty words with no
@@ -55,6 +66,18 @@ Live: the v1 scenarios (WP7b, 1–9 pass, 10 partial,
 and on DeepSeek (tool-using turns, the model switch), investigations with
 real Codex/Claude CLI runs, headset sessions on Gemini Live and GPT-Live,
 the audio e2e harness ([`audio-e2e-results.md`](audio-e2e-results.md)).
+The one #73 GPT-Live pacing run (42 s, scratch daemon, fake brain, mock
+herdr, one billed session) is live-verified: `realtime_ratio` 0.94–1.06
+against 0.74–0.87 before, `max_gap_ms` 88–313 against 626–1464.
+
+Everything else that landed 2026-09-24/25 (#62–#72, and the rest of
+#73) is unit- and harness-tested only — golden requests, replayed
+fixtures, the offline `sheepdog eval`, `web/voice/*.test.mjs` — and has
+not been run against a real phone or a live headset session yet. That
+includes the honest fallback and echo guard (#63/#65), held pushes
+(#64/#65), `read_screen`/`investigate` reading a worker's own session
+(#68/#69), playback reports and the client speech detector (#70), and
+the timeline-gap fixes (#72).
 
 Fake model / mock herdr only (`--brain=fake --herdr=mock`): most of the
 supervisor's edge cases (reprompt races, deliver-later staleness, reset
@@ -65,10 +88,6 @@ sparingly and `make eval-live` deliberately.
 
 ## Open
 
-- **`source: worker`** for investigations (asking the idle worker in its
-  own pane): its finish would produce both the announce line and the
-  delivery line for one event, which the one-push-per-event rule
-  forbids. The ledger already carries the field.
 - **agy blocks**: herdr 0.9.0 does not detect Antigravity CLI prompts as
   `blocked` (needs a local `~/.config/herdr/agent-detection/agy.toml`
   override or an upstream fix).
@@ -84,6 +103,27 @@ sparingly and `make eval-live` deliberately.
   promise (the old cancel tool did; it was not reachable from the voice
   since the redesign). It expires after `supervisor.promise_ttl_s`.
 - **`v0.1.0`** is not tagged yet (the release workflow is ready).
+- **Device verification of the iOS work (#14/#17/#18)**: playback
+  reports, the client speech detector, the Flock and Health panes and
+  the echo-cancellation rebuild-after-route-change fix have each only
+  run in the simulator against fixture daemons; none has been checked
+  on a real phone yet (each PR's own "To check on the phone"/"on the
+  device" section is the checklist).
+- **The relayed-answer path of GPT-Live pacing was not re-measured**:
+  #73's one live run measured the model replying to its own filler
+  ("count slowly from one to twenty"); a reply relayed from the brain
+  (`to_supervisor` → spoken push) through the paced input timeline has
+  not been measured live.
+- **The live model's use of `source` arguments** (`read_screen`'s
+  `source: session`, `investigate`'s `source: worker`) is verified only
+  offline against the fake model and the eval harness; a live run
+  against DeepSeek — which the orchestrator is expected to schedule —
+  has not happened yet.
+- **iOS `PlaybackProfile` should follow the 400 ms GPT-Live start
+  buffer** (#73 lowered it from 1200 ms on the daemon/web side; not
+  done here). Checked 2026-09-25: `herdr-sheepdog-ios`'s
+  `PlaybackRatePolicy.swift` still has `PlaybackProfile.openAI` at
+  1,200 ms — still open.
 
 ## How work is done here
 
@@ -98,3 +138,4 @@ conventional title as the subject. Sub-agents never touch port 7777 (the
 user's daemon), the herdr socket or the default data dir: a scratch
 daemon gets its own port, `SHEEPDOG_DATA_DIR`, `SHEEPDOG_STATE_PATH`, an
 empty `--config` and `--brain=fake --herdr=mock --voice=off --dev`.
+Documents are written in English.
