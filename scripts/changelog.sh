@@ -1,7 +1,7 @@
 #!/bin/sh
-# Generates a Conventional Commits changelog, grouped into
-# Features/Fixes/Performance/Documentation/Build & CI/Other, for one
-# git revision range. `make changelog` writes it to CHANGELOG.md;
+# Generates a Conventional Commits changelog, grouped into Breaking
+# changes/Features/Fixes/Performance/Documentation/Build & CI/Other,
+# for one git revision range. `make changelog` writes it to CHANGELOG.md;
 # release.yml (once tags exist) can instead capture it as the GitHub
 # Release body for just the tag being released.
 #
@@ -15,10 +15,18 @@ set -eu
 RANGE=${1:-}
 HEADING=${2:-Unreleased}
 
+ALL=$(mktemp)
 TMP=$(mktemp)
-trap 'rm -f "$TMP"' EXIT
+trap 'rm -f "$ALL" "$TMP"' EXIT
 # shellcheck disable=SC2086 # RANGE is a single git revision-range token or empty, never quoted on purpose
-git log --no-merges --format='%h %s' $RANGE >"$TMP"
+git log --no-merges --format='%h %s' $RANGE >"$ALL"
+
+# A breaking commit (`type!:` or `type(scope)!:`) is listed once, under
+# "Breaking changes" at the top, whatever its type; the other sections
+# are filled from the rest.
+BREAKING='^[0-9a-f]+ [A-Za-z]+(\([^)]*\))?!:'
+breaking=$(grep -E "$BREAKING" "$ALL" || true)
+grep -Ev "$BREAKING" "$ALL" >"$TMP" || true
 
 bucket() { grep -E "$1" "$TMP" || true; }
 feat=$(bucket '^[0-9a-f]+ feat(\(|!|:)')
@@ -36,6 +44,7 @@ section() { # title, entries (hash-prefixed lines)
 }
 
 printf '## %s\n\n' "$HEADING"
+section "Breaking changes" "$breaking"
 section "Features" "$feat"
 section "Fixes" "$fix"
 section "Performance" "$perf"
