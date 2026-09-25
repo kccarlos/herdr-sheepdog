@@ -115,10 +115,15 @@ type Session interface {
 	// context silently (UrgencySilent).
 	Push(text string, u Urgency) error
 
-	// Speaking reports whether the model is currently producing spoken
-	// output (audio or an output transcript fragment) for the open turn:
-	// true from the first fragment until the turn completes or the
-	// model is interrupted. Nothing interrupts the model mid-sentence
+	// Speaking reports whether the model's speech is still reaching the
+	// shepherd: true from the first output fragment (audio or an output
+	// transcript) of a turn until the /ws client has finished playing
+	// it — its playback report drained (plus PlaybackGapHold) or
+	// flushed, or without playback reports a timing guess (audio sent
+	// minus wall time) — or the model is interrupted. The model's own
+	// turn end is not enough: Gemini generates ~4× real time, so its
+	// turnComplete arrives while the reply is still playing. Nothing
+	// interrupts the model mid-sentence
 	// except the shepherd (docs/roles.md "Pushes"): an implementation
 	// downgrades INTERRUPT scheduling to WHEN_IDLE while this is true,
 	// with a due promise or a decision on a brand new block the only

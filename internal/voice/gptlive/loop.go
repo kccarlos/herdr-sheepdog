@@ -228,15 +228,21 @@ func (s *Session) pumpPushes(now time.Time) {
 			s.pushQ = s.pushQ[1:]
 			break
 		}
-		speaking := s.speakingLocked(now)
+		// Speaking includes the client still playing the reply, and the
+		// gap runs from the real end of speech (the client's drained).
+		speaking := s.speakingOrPlayingLocked(now)
 		if head.urgency == voice.UrgencyInterrupt && speaking && !exempt(head.tags) {
 			head.urgency = voice.UrgencyIdle
 			deferred = true
 		}
-		if s.inputOpen {
-			break // never over the shepherd
+		if s.inputOpen || s.vad.Hold(now) > 0 {
+			break // never over the shepherd (transcripts, or the client's own detector)
 		}
-		if head.urgency == voice.UrgencyIdle && (speaking || now.Sub(s.lastSpoken) < s.cfg.PushGap) {
+		last := s.lastSpoken
+		if ended := s.play.EndedAt(now); ended.After(last) {
+			last = ended
+		}
+		if head.urgency == voice.UrgencyIdle && (speaking || now.Sub(last) < s.cfg.PushGap) {
 			break
 		}
 		item, send = *head, true

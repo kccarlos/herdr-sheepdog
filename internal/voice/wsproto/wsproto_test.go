@@ -13,6 +13,9 @@ func TestRoundTrip(t *testing.T) {
 	}{
 		{"mute", Mute(true), `"type":"mute","on":true`},
 		{"silence", Silence(true), `"type":"silence","on":true`},
+		{"speaking", Speaking(true), `{"type":"speaking","on":true}`},
+		{"playback", Playback(PlaybackFlushed, 0), `{"type":"playback","state":"flushed","played_ms":0}`},
+		{"playback-drained", Playback(PlaybackDrained, 4200), `"state":"drained","played_ms":4200`},
 		{"cancel", Cancel(), `{"type":"cancel"}`},
 		{"text", SimulateText("yes go ahead"), `"text":"yes go ahead"`},
 		{"ping", Ping(), `{"type":"ping"}`},
@@ -36,7 +39,7 @@ func TestRoundTrip(t *testing.T) {
 			if err != nil {
 				t.Fatalf("parse: %v", err)
 			}
-			if back.Type != tc.msg.Type || back.Text != tc.msg.Text || back.Voice != tc.msg.Voice || back.Dir != tc.msg.Dir {
+			if back.Type != tc.msg.Type || back.Text != tc.msg.Text || back.Voice != tc.msg.Voice || back.Dir != tc.msg.Dir || back.State != tc.msg.State {
 				t.Fatalf("round trip mismatch: %+v vs %+v", back, tc.msg)
 			}
 		})
@@ -48,6 +51,11 @@ func TestParseRejects(t *testing.T) {
 		`{}`,
 		`{"type":"mute"}`,
 		`{"type":"silence"}`,
+		`{"type":"speaking"}`,
+		`{"type":"playback"}`,
+		`{"type":"playback","state":"paused","played_ms":1}`,
+		`{"type":"playback","state":"drained"}`,
+		`{"type":"playback","state":"flushed","played_ms":-5}`,
 		`{"type":"text"}`,
 		`{"type":"status","voice":"weird"}`,
 		`{"type":"transcript","dir":"sideways"}`,
@@ -59,5 +67,12 @@ func TestParseRejects(t *testing.T) {
 		if _, err := Parse([]byte(in)); err == nil {
 			t.Errorf("Parse(%s) accepted", in)
 		}
+	}
+}
+
+func TestParsePlaybackStartedNeedsNoPlayed(t *testing.T) {
+	m, err := Parse([]byte(`{"type":"playback","state":"started"}`))
+	if err != nil || m.State != PlaybackStarted || m.PlayedMs != nil {
+		t.Fatalf("started without played_ms: %+v %v", m, err)
 	}
 }

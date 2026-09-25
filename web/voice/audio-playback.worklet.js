@@ -22,6 +22,9 @@ class PlaybackProcessor extends AudioWorkletProcessor {
       prebuffer: o.prebuffer, // samples at inRate; default 100 ms
       capacity: o.capacity,
     });
+    // Playback reports (started / drained / flushed with the ms of the
+    // run played) go to the page, which forwards them to the daemon.
+    this.player.onPlayback = (state, playedMs) => this.port.postMessage({ type: 'playback', state, playedMs });
     this.blocks = 0;
     this.lastSpeaking = false;
     this.port.onmessage = (e) => this.onMessage(e.data);

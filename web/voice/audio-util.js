@@ -617,6 +617,28 @@ export class Player {
     // stretched: output samples played at a rate other than 1.0
     // (wall-clock time under time-stretch, either direction).
     this.stats = { underruns: 0, drains: 0, dropped: 0, played: 0, flushes: 0, stretched: 0 };
+    // Playback reports (docs/ws-contract.md "Playback reports"):
+    // onPlayback(state, playedMs) is called with 'started' when playing
+    // begins after being empty, 'drained' once the ring ran dry and
+    // stayed dry for underrunWindow (an underrun that resumes within it
+    // continues the same run), and 'flushed' on every flush. playedMs is
+    // the source audio (24 kHz stream time, not wall clock under
+    // time-stretch) played in the run since the last drained/flushed.
+    this.onPlayback = null;
+    this.runIn = 0; // source samples received in the current run
+    this.drainPending = false; // ran dry; drained not reported yet
+    this.continuing = false; // the next start resumes an underrun
+  }
+
+  _report(state, samples) {
+    if (!this.onPlayback) return;
+    this.onPlayback(state, Math.max(0, Math.round((samples * 1000) / this.inRate)));
+  }
+
+  _reportDrained() {
+    this.drainPending = false;
+    this._report('drained', this.runIn);
+    this.runIn = 0;
   }
 
   /**
@@ -674,9 +696,15 @@ export class Player {
   /** @param {Float32Array} samples at inRate */
   push(samples) {
     if (samples.length === 0) return;
-    this.stats.dropped += this.ring.write(samples);
+    const dropped = this.ring.write(samples);
+    this.stats.dropped += dropped;
     if (this.state === 'idle') {
       const resumingUnderrun = this.stats.drains > 0 && this.outSince < this.underrunWindow;
+      // The run's playback report: an underrun resume continues it;
+      // otherwise a drain not yet reported ends it now.
+      this.continuing = resumingUnderrun && this.drainPending;
+      if (this.continuing) this.drainPending = false;
+      else if (this.drainPending) this._reportDrained();
       if (resumingUnderrun) {
         this.stats.underruns++;
         this.utteranceHadUnderrun = true;
@@ -694,10 +722,14 @@ export class Player {
       this.state = 'buffering';
       this.waited = 0;
     }
+    this.runIn += samples.length - dropped;
   }
 
   /** Drop everything now; the next block fades the last sample to zero. */
   flush() {
+    // What of the run was heard: everything received minus what is
+    // still buffered (all of it once the ring ran dry).
+    const played = this.drainPending ? this.runIn : Math.max(0, this.runIn - this.buffered);
     this.ring.clear();
     if (this.wsola) this.wsola.reset();
     this.rate = 1;
@@ -711,6 +743,10 @@ export class Player {
     this.waited = 0;
     this.outSince = this.underrunWindow; // audio after a flush is a new utterance, not an underrun
     this.stats.flushes++;
+    this.drainPending = false;
+    this.continuing = false;
+    this._report('flushed', played);
+    this.runIn = 0;
   }
 
   // The "start anyway" ceiling in render() calls (~128-sample blocks),
@@ -731,6 +767,8 @@ export class Player {
     this.state = 'playing';
     this.fadeIn = this.crossFadeLen;
     this.playedThisUtterance = true;
+    if (!this.continuing) this._report('started', 0);
+    this.continuing = false;
   }
 
   /**
@@ -751,6 +789,7 @@ export class Player {
       out.fill(0);
       if (this.fade > 0) this._renderFade(out);
       this.outSince += n;
+      if (this.drainPending && this.state === 'idle' && this.outSince >= this.underrunWindow) this._reportDrained();
       return false;
     }
     let i = 0;
@@ -772,6 +811,7 @@ export class Player {
           this.stats.drains++;
           this.debt = 0; // the reply (or this run of it) ended
           this.outSince = 0;
+          this.drainPending = true;
           this.last = out[i];
           this.fade = this.fadeLen;
           i++;

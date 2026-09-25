@@ -87,6 +87,11 @@ type Session struct {
 	// turns. audioTurnSeq numbers turns across the session's lifetime.
 	audioTiming  *audiotiming.Tracker
 	audioTurnSeq int
+	// play follows what the /ws client actually plays (its playback
+	// reports, or a timing guess without them); vad is the client's own
+	// speech detector. Both are forgotten when the client changes.
+	play voice.PlaybackTracker
+	vad  voice.ClientSpeech
 
 	readerExit chan readerResult
 	goAway     chan struct{}
@@ -244,6 +249,8 @@ func (s *Session) ClientAttached(attached bool) {
 	s.mu.Lock()
 	changed := s.noClient == attached
 	s.noClient = !attached
+	s.play.Detach()
+	s.vad.Reset()
 	s.mu.Unlock()
 	if changed {
 		s.log.Log(logSource, "voice.client", "", map[string]any{"attached": attached})
@@ -574,9 +581,52 @@ func (s *Session) turnOpenNow() bool {
 func (s *Session) TurnOpen() bool { return s.turnOpenNow() }
 
 // Speaking implements voice.Session: true once the model has actually
-// started producing output for the open turn (see the speaking field).
+// started producing output for the open turn (see the speaking field),
+// and on until the client has finished playing it (ClientPlayback; a
+// timing guess without playback reports).
 func (s *Session) Speaking() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.speaking
+	return s.speakingLocked(s.now())
+}
+
+// speakingLocked is Speaking under s.mu.
+func (s *Session) speakingLocked(now time.Time) bool {
+	if s.speaking {
+		return true
+	}
+	playing, _ := s.play.Playing(now)
+	return playing
+}
+
+// ClientPlayback applies a /ws client playback report
+// (docs/ws-contract.md "Playback reports"): it logs voice.playback,
+// wakes the push queue (a drained reply may release a push), and when a
+// flushed run was cut short emits the heard part as a cut transcript
+// for the brain.
+func (s *Session) ClientPlayback(state string, playedMs int) {
+	s.mu.Lock()
+	rep := s.play.Report(s.now(), state, playedMs)
+	s.mu.Unlock()
+	s.log.Log(logSource, "voice.playback", "", rep.Payload())
+	if rep.Cut != nil {
+		s.emit(voice.EventTranscript{Dir: voice.DirOut, Text: rep.Heard, Final: true, Cut: rep.Cut})
+	}
+	s.poke()
+}
+
+// LastPlayback is the client's most recent playback report.
+func (s *Session) LastPlayback() voice.PlaybackReport {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.play.Last()
+}
+
+// ClientSpeaking records the /ws client's speech detector opening (true)
+// or closing (false); push timing holds for it (speakingUntilLocked).
+func (s *Session) ClientSpeaking(on bool) {
+	s.mu.Lock()
+	s.vad.Set(s.now(), on)
+	s.mu.Unlock()
+	s.poke()
 }
