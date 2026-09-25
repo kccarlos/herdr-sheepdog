@@ -72,6 +72,13 @@ final class SessionViewModel: ObservableObject {
     /// it), optimistic (shown) until then.
     @Published private(set) var conversationResetSupported = true
     @Published var banner: Banner?
+    /// Typed input (`POST /api/inject/utterance`): in flight, and the
+    /// daemon's refusal if it had one.
+    @Published private(set) var sendingTyped = false
+    @Published var typedError: String?
+    /// Bumped on every typed line the daemon took: the conversation jumps
+    /// to its end, where the words and the answer are about to land.
+    @Published private(set) var typedSent = 0
 
     // Mirrors of `core`, published for the views (see `publish()`).
     @Published private(set) var isMuted = false
@@ -149,6 +156,8 @@ final class SessionViewModel: ObservableObject {
     private let audio = AudioEngine()
     private var reducer = ConversationReducer()
     private var history = ConversationHistory()
+    /// The brain's replies and held pushes, which the history does not carry.
+    private var activity = BrainActivity()
     /// `approval` (the one thing the views read) is derived from this on
     /// every mutation — a single `didSet`, not a copy hand-written at each
     /// of the half-dozen call sites that used to change `approvalFlow`.
@@ -203,6 +212,7 @@ final class SessionViewModel: ObservableObject {
             Task {
                 await refreshState(quiet: true)
                 await syncHistory()
+                await backfillActivity()
             }
         }
     }
@@ -215,6 +225,7 @@ final class SessionViewModel: ObservableObject {
         Task {
             await refreshState(quiet: true)
             await syncHistory()
+            await backfillActivity()
         }
     }
 
@@ -245,6 +256,7 @@ final class SessionViewModel: ObservableObject {
         if !sameDaemon {
             // Another daemon, another conversation.
             reducer.clear()
+            activity.clear()
             approvalFlow.reset()
             loadCache()
             conversationChanged(save: false)
@@ -697,7 +709,10 @@ final class SessionViewModel: ObservableObject {
                 guard let self, self.core.connection.wantsConnection else { return }
                 // Every (re)open: what the stream missed is in the history
                 // too, and a page is cheaper than a long replay to read.
-                Task { await self.syncHistory() }
+                Task {
+                    await self.syncHistory()
+                    await self.backfillActivity()
+                }
                 self.send(.eventsChanged(.connecting))
                 do {
                     for try await output in self.client.events(since: self.resumeID) {
@@ -756,7 +771,8 @@ final class SessionViewModel: ObservableObject {
     }
 
     private func apply(event: DaemonEvent) {
-        if history.fold(event) != nil {
+        let folded = history.fold(event) != nil
+        if activity.fold(event) || folded {
             conversationChanged()
         }
         switch event.type {
@@ -892,7 +908,7 @@ final class SessionViewModel: ObservableObject {
     // MARK: - Conversation history
 
     private func conversationChanged(save: Bool = true) {
-        rows = ConversationTimeline.rows(history: history.items, live: reducer.bubbles)
+        rows = ConversationTimeline.rows(history: history.items, live: reducer.bubbles, activity: activity)
         canLoadOlder = history.canLoadOlder
         if save { saveCache(now: false) }
     }
@@ -921,6 +937,21 @@ final class SessionViewModel: ObservableObject {
             // and the state probe reports what is wrong in plain words.
             SheepdogLog.socket.error("history: \(String(describing: error), privacy: .public)")
         }
+    }
+
+    /// The brain's recent replies and the held pushes from the daemon's
+    /// current run (`GET /api/events`, prefix-filtered), for what the
+    /// stream did not bring this time: a relaunch, or events before the
+    /// stream's resume point. Quiet on failure — the stream still folds
+    /// them live.
+    func backfillActivity() async {
+        guard settings.endpoint != nil else { return }
+        var changed = false
+        for type in ["voice.tool_result", "voice.push_"] {
+            guard let events = try? await client.recentEvents(type: type, limit: 100) else { continue }
+            for event in events where activity.fold(event) { changed = true }
+        }
+        if changed { conversationChanged(save: false) }
     }
 
     /// A voice turn just ended: once the daemon has logged it, the newest
@@ -953,7 +984,40 @@ final class SessionViewModel: ObservableObject {
         if let endpoint = settings.endpoint { cache.clear(for: endpoint) }
         history.clear()
         reducer.clear()
+        activity.clear()
         conversationChanged(save: false)
+    }
+
+    // MARK: - Typed input
+
+    /// The text field under the conversation: says `text` as if spoken,
+    /// through `POST /api/inject/utterance`, which records it as typed
+    /// shepherd input (the rail takes it like a transcript). The
+    /// conversation shows it from `/events` (or the next history sync when
+    /// not connected). Returns true when the daemon took it.
+    func sendTyped(_ text: String) async -> Bool {
+        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, settings.endpoint != nil, !sendingTyped else { return false }
+        sendingTyped = true
+        typedError = nil
+        defer { sendingTyped = false }
+        do {
+            _ = try await client.sendUtterance(text)
+            typedSent += 1
+            Haptics.tap()
+            if !core.connection.wantsConnection {
+                // No event stream: the daemon has logged it by now.
+                await syncHistory()
+                await backfillActivity()
+            }
+            return true
+        } catch let error as DaemonError {
+            typedError = error.message
+            Haptics.answerFailed()
+        } catch {
+            typedError = error.localizedDescription
+        }
+        return false
     }
 
     // MARK: - New conversation

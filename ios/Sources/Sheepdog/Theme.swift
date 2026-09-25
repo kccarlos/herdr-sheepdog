@@ -11,6 +11,8 @@ enum Theme {
     static let done = Color(red: 0.18, green: 0.52, blue: 0.36)
     static let idle = Color(red: 0.44, green: 0.47, blue: 0.53)
     static let unknown = Color(red: 0.63, green: 0.67, blue: 0.72)
+    /// The orb's "thinking" purple, which is the brain's colour too.
+    static let thinking = Color(red: 0.49, green: 0.36, blue: 0.75)
 
     static func color(for state: Agent.State) -> Color {
         switch state {
@@ -36,7 +38,7 @@ enum Theme {
         switch session {
         case .listening: return .accentColor
         case .speaking: return working
-        case .thinking: return Color(red: 0.49, green: 0.36, blue: 0.75)
+        case .thinking: return thinking
         case .silent: return idle
         case .muted: return Color(red: 0.72, green: 0.27, blue: 0.27)
         case .stalled: return blocked

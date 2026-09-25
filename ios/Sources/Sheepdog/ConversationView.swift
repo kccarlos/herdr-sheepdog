@@ -14,6 +14,9 @@ struct ConversationView: View {
     /// The pending id the pinned approval card is showing, if any.
     var activePendingID: String?
     var loadOlder: () async -> Void = {}
+    /// Changes when the shepherd typed something: follow the conversation
+    /// to its end even if it was scrolled up (the keyboard shrinks it).
+    var followToken = 0
 
     @State private var atBottom = true
     @State private var lastSeenID: String?
@@ -104,6 +107,12 @@ struct ConversationView: View {
                     proxy.scrollTo(Self.bottomAnchor, anchor: .bottom)
                 }
             }
+            .onChange(of: followToken) { _, _ in
+                atBottom = true
+                withAnimation(.easeOut(duration: 0.18)) {
+                    proxy.scrollTo(Self.bottomAnchor, anchor: .bottom)
+                }
+            }
             .onChange(of: activePendingID) { _, _ in
                 // The pinned card appearing or leaving resizes the list:
                 // keep the newest message, the one it is about, in view.
@@ -182,7 +191,167 @@ struct RowView: View {
             }
         case let .live(bubble):
             BubbleView(bubble: bubble, voiceName: voiceName)
+        case let .brain(reply, compact):
+            BrainReplyCard(reply: reply, compact: compact, voiceName: voiceName)
+        case let .held(push):
+            HeldPushCard(push: push)
         }
+    }
+}
+
+/// What the brain told the voice to say (`to_supervisor`'s result): the
+/// headline, and behind a tap the plain explanation the voice reads only
+/// when asked, the choices, and the raw payload. Compact under the dog's
+/// own bubble when that bubble already says the words.
+struct BrainReplyCard: View {
+    let reply: BrainActivity.Reply
+    let compact: Bool
+    let voiceName: String
+
+    @State private var expanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if !compact {
+                HStack(spacing: 6) {
+                    Image(systemName: "brain")
+                    Text("Brain → \(voiceName)")
+                    if reply.clarify { tag("asks you to say more") }
+                }
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Theme.thinking)
+                if reply.pending {
+                    Text(reply.spoken.isEmpty ? "Still working on it — the answer follows as a push." : reply.spoken)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    Text(reply.spoken)
+                        .font(.callout)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                }
+            }
+            if !reply.options.isEmpty {
+                FlowOptions(options: reply.options)
+            }
+            if reply.detail != nil || !reply.raw.isEmpty {
+                DisclosureGroup(isExpanded: $expanded) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        if let detail = reply.detail, !reply.pending {
+                            Text(detail)
+                                .font(.footnote)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .textSelection(.enabled)
+                                .accessibilityIdentifier("brain.detail")
+                        }
+                        RawJSONView(json: reply.raw)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                } label: {
+                    Text(reply.detail != nil && !reply.pending ? "Detail" : "Raw")
+                        .font(.footnote.weight(.medium))
+                }
+                .tint(Theme.thinking)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, compact ? 6 : 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Theme.thinking.opacity(compact ? 0.05 : 0.08))
+        )
+        .overlay(alignment: .leading) {
+            Rectangle().fill(Theme.thinking.opacity(0.6)).frame(width: 3).padding(.vertical, 8)
+        }
+        .padding(.trailing, compact ? 44 : 0)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("bubble.brain")
+    }
+
+    private func tag(_ text: String) -> some View {
+        Text(text)
+            .font(.caption2.weight(.medium))
+            .padding(.horizontal, 6)
+            .padding(.vertical, 1)
+            .background(Theme.thinking.opacity(0.15), in: Capsule())
+    }
+}
+
+/// The choices a brain reply offered, as quiet chips.
+struct FlowOptions: View {
+    let options: [String]
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 6) { chips }
+            VStack(alignment: .leading, spacing: 4) { chips }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Options: \(options.joined(separator: ", "))")
+    }
+
+    private var chips: some View {
+        ForEach(Array(options.enumerated()), id: \.offset) { _, option in
+            Text(option)
+                .font(.caption.weight(.medium))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(Color(.tertiarySystemFill), in: Capsule())
+        }
+    }
+}
+
+/// A push the voice is holding because nobody is listening (it is said
+/// once a client attaches), or one it gave up on after five minutes.
+struct HeldPushCard: View {
+    let push: BrainActivity.HeldPush
+
+    private var dropped: Bool {
+        if case .dropped = push.fate { return true }
+        return false
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Label(dropped ? "Dropped — nobody was listening for 5 minutes" : "Waiting for a listener — said when you connect",
+                  systemImage: dropped ? "bell.slash" : "hourglass")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(dropped ? Color.secondary : Theme.blocked)
+            Text(push.text)
+                .font(.footnote)
+                .foregroundStyle(dropped ? .secondary : .primary)
+                .strikethrough(dropped, color: .secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(style: StrokeStyle(lineWidth: 1.25, dash: [5, 4]))
+                .foregroundStyle(dropped ? Color(.separator) : Theme.blocked.opacity(0.6))
+        )
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier(dropped ? "bubble.pushDropped" : "bubble.pushHeld")
+    }
+}
+
+/// Raw JSON, monospaced and selectable: reachable, never in the way.
+struct RawJSONView: View {
+    let json: String
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            Text(json)
+                .font(.caption2.monospaced())
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+                .padding(8)
+        }
+        .background(Color(.tertiarySystemFill), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .accessibilityIdentifier("raw.json")
     }
 }
 

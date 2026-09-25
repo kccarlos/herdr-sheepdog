@@ -70,10 +70,22 @@ public struct SSEParser: Sendable {
 
     /// Decodes one `data:` payload — the daemon's `eventlog.Event` JSON.
     public static func decode(_ json: String, seq: UInt64) -> DaemonEvent? {
-        guard
-            let object = (try? JSONSerialization.jsonObject(with: Data(json.utf8))) as? [String: Any],
-            let type = object["type"] as? String
-        else { return nil }
+        guard let object = (try? JSONSerialization.jsonObject(with: Data(json.utf8))) as? [String: Any] else { return nil }
+        return decode(object: object, seq: seq)
+    }
+
+    /// `GET /api/events`: a JSON array of the same event objects, each with
+    /// its own `id`. Entries that do not decode are skipped.
+    public static func decodeArray(_ data: Data) -> [DaemonEvent]? {
+        guard let array = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] else { return nil }
+        return array.compactMap { object in
+            let id = (object["id"] as? NSNumber)?.uint64Value ?? 0
+            return decode(object: object, seq: id)
+        }
+    }
+
+    private static func decode(object: [String: Any], seq: UInt64) -> DaemonEvent? {
+        guard let type = object["type"] as? String else { return nil }
         var payload: [String: JSONValue] = [:]
         if let raw = object["payload"] as? [String: Any],
            let data = try? JSONSerialization.data(withJSONObject: raw),

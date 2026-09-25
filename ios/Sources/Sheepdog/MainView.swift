@@ -1,14 +1,23 @@
 import SheepdogKit
 import SwiftUI
 
-/// One screen: the flock across the top, the conversation in the middle,
-/// a status line and the compact voice bar (Mute, orb, End) at the
-/// bottom — everything in thumb reach.
+/// One screen: the flock across the top, the conversation (or the Flock
+/// pane) in the middle, an optional text field, a status line and the
+/// compact voice bar (Mute, orb, End) at the bottom — everything in thumb
+/// reach.
 struct MainView: View {
+    enum Pane: String, CaseIterable, Identifiable {
+        case conversation = "Conversation"
+        case flock = "Flock"
+        var id: String { rawValue }
+    }
+
     @EnvironmentObject private var model: SessionViewModel
     @State private var selectedAgent: Agent?
     @State private var started = false
     @State private var confirmNewConversation = false
+    @State private var pane: Pane = .conversation
+    @State private var typing = false
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
@@ -21,30 +30,52 @@ struct MainView: View {
                         .transition(.move(edge: .top).combined(with: .opacity))
                 }
 
-                AgentStrip(agents: model.agents, question: { model.pendingQuestion(for: $0) }) { agent in
-                    selectedAgent = agent
+                Picker("Show", selection: $pane) {
+                    Text("Conversation").tag(Pane.conversation)
+                    Text(model.agents.isEmpty ? "Flock" : "Flock · \(model.agents.count)").tag(Pane.flock)
                 }
-                .padding(.bottom, 10)
-                // Two `.sheet` modifiers on the same view fight each other in
-                // SwiftUI and only the last one presents, so the agent sheet
-                // hangs off the strip and Settings off the navigation stack.
-                .sheet(item: $selectedAgent) { agent in
-                    AgentSheet(agent: agent, question: model.pendingQuestion(for: agent))
+                .pickerStyle(.segmented)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 8)
+                .accessibilityIdentifier("main.pane")
+
+                if pane == .conversation {
+                    AgentStrip(agents: model.agents, question: { model.pendingQuestion(for: $0) }) { agent in
+                        selectedAgent = agent
+                    }
+                    .padding(.bottom, 10)
+                    // Two `.sheet` modifiers on the same view fight each other in
+                    // SwiftUI and only the last one presents, so the agent sheet
+                    // hangs off the strip and Settings off the navigation stack.
+                    .sheet(item: $selectedAgent) { agent in
+                        AgentSheet(agent: agent, question: model.pendingQuestion(for: agent))
+                    }
                 }
 
                 Divider()
 
-                ConversationView(
-                    rows: model.rows,
-                    voiceName: model.voiceName,
-                    canLoadOlder: model.canLoadOlder,
-                    loadingOlder: model.loadingOlder,
-                    activePendingID: model.approval?.pending.id,
-                    loadOlder: { await model.loadOlder() }
-                )
+                Group {
+                    switch pane {
+                    case .conversation:
+                        ConversationView(
+                            rows: model.rows,
+                            voiceName: model.voiceName,
+                            canLoadOlder: model.canLoadOlder,
+                            loadingOlder: model.loadingOlder,
+                            activePendingID: model.approval?.pending.id,
+                            loadOlder: { await model.loadOlder() },
+                            followToken: model.typedSent
+                        )
+                    case .flock:
+                        FlockView(agents: model.agents, approval: model.approval) { index in
+                            model.answer(option: index)
+                        }
+                    }
+                }
                 .frame(maxHeight: .infinity)
 
-                if let card = model.approval {
+                // On the Flock pane the question sits on its agent's card.
+                if pane == .conversation, let card = model.approval {
                     ApprovalCardView(card: card) { index in
                         model.answer(option: index)
                     }
@@ -81,6 +112,22 @@ struct MainView: View {
                         .accessibilityIdentifier("controls.muteHint")
                 }
 
+                if typing {
+                    TypeBar(
+                        voiceName: model.voiceName,
+                        sending: model.sendingTyped,
+                        error: model.typedError,
+                        send: { await model.sendTyped($0) },
+                        close: {
+                            typing = false
+                            model.typedError = nil
+                        }
+                    )
+                    .padding(.horizontal, 12)
+                    .padding(.top, 8)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+
                 // Fixed height regardless of which state string is showing:
                 // a status line that grows or shrinks the VStack every time
                 // the state changes (e.g. wrapping to two lines) resizes
@@ -89,14 +136,33 @@ struct MainView: View {
                 // enough to lock up the main thread (a genuine SwiftUI
                 // "onChange … multiple times per frame" fault, reproduced
                 // while testing this bar).
-                Text(model.statusLine)
-                    .font(.footnote.weight(.medium))
-                    .foregroundStyle(model.noMicSignal ? Theme.blocked : (model.isMuted ? Color(.systemRed) : .secondary))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
-                    .frame(height: 16)
-                    .padding(.top, 6)
-                    .accessibilityIdentifier("controls.statusLine")
+                ZStack(alignment: .trailing) {
+                    Text(model.statusLine)
+                        .font(.footnote.weight(.medium))
+                        .foregroundStyle(model.noMicSignal ? Theme.blocked : (model.isMuted ? Color(.systemRed) : .secondary))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                        .frame(height: 16)
+                        .padding(.horizontal, 48)
+                        .frame(maxWidth: .infinity)
+                        .accessibilityIdentifier("controls.statusLine")
+                    // Type instead of talking: a quiet room, or a test that
+                    // needs the exact words.
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) { typing.toggle() }
+                    } label: {
+                        Image(systemName: typing ? "keyboard.chevron.compact.down" : "keyboard")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(typing ? Color.accentColor : .secondary)
+                            .frame(width: 44, height: 28)
+                    }
+                    .disabled(!model.isConfigured)
+                    .accessibilityLabel(typing ? "Hide the text field" : "Type instead")
+                    .accessibilityIdentifier("controls.type")
+                    .padding(.trailing, 8)
+                }
+                .frame(height: 28)
+                .padding(.top, 2)
 
                 VoiceBarView(
                     state: model.state,
@@ -122,27 +188,43 @@ struct MainView: View {
             .animation(.spring(duration: 0.3), value: model.approval)
             .animation(.easeInOut(duration: 0.2), value: model.showMuteHint)
             .animation(.spring(duration: 0.35), value: model.showCoachMark)
+            .animation(.easeInOut(duration: 0.2), value: pane)
             .navigationTitle(model.voiceName)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     ConnectionChipView()
                 }
-                if model.conversationResetSupported {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Menu {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        if model.conversationResetSupported {
                             Button {
                                 confirmNewConversation = true
                             } label: {
                                 Label("New conversation", systemImage: "arrow.counterclockwise")
                             }
                             .accessibilityIdentifier("toolbar.newConversation")
-                        } label: {
-                            Image(systemName: "ellipsis.circle")
                         }
-                        .accessibilityLabel("More")
-                        .accessibilityIdentifier("toolbar.more")
+                        // The orb stops the dog while it talks; this is the
+                        // same Stop, reachable whatever the orb is doing.
+                        Button {
+                            model.stop()
+                        } label: {
+                            Label("Stop \(model.voiceName)", systemImage: "stop.circle")
+                        }
+                        .disabled(!model.wantsConnection)
+                        .accessibilityIdentifier("toolbar.stop")
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.2)) { typing = true }
+                        } label: {
+                            Label("Type instead", systemImage: "keyboard")
+                        }
+                        .disabled(!model.isConfigured)
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
                     }
+                    .accessibilityLabel("More")
+                    .accessibilityIdentifier("toolbar.more")
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
@@ -289,5 +371,77 @@ struct BannerView: View {
         )
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("banner")
+    }
+}
+
+/// Type instead of talking: one line to the daemon, as if spoken
+/// (`POST /api/inject/utterance`). What was typed shows up in the
+/// conversation like anything else the shepherd said.
+struct TypeBar: View {
+    let voiceName: String
+    let sending: Bool
+    let error: String?
+    let send: (String) async -> Bool
+    let close: () -> Void
+
+    @State private var text = ""
+    @FocusState private var focused: Bool
+
+    private var canSend: Bool { !sending && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                TextField("Say something to \(voiceName)…", text: $text, axis: .vertical)
+                    .lineLimit(1 ... 4)
+                    .textInputAutocapitalization(.sentences)
+                    .submitLabel(.send)
+                    .focused($focused)
+                    .onSubmit(submit)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .accessibilityIdentifier("type.field")
+                Button(action: submit) {
+                    if sending {
+                        ProgressView().frame(width: 32, height: 32)
+                    } else {
+                        Image(systemName: "arrow.up.circle.fill")
+                            .font(.system(size: 30))
+                            .foregroundStyle(canSend ? Color.accentColor : Color(.tertiaryLabel))
+                    }
+                }
+                .disabled(!canSend)
+                .accessibilityLabel("Send")
+                .accessibilityIdentifier("type.send")
+                Button(action: close) {
+                    Image(systemName: "xmark")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 28, height: 32)
+                }
+                .accessibilityLabel("Close the text field")
+            }
+            if let error {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(Color(.systemRed))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("type.error")
+            }
+        }
+        .onAppear { focused = true }
+    }
+
+    private func submit() {
+        guard canSend else { return }
+        let sent = text
+        Task {
+            if await send(sent) {
+                text = ""
+                // Keyboard down, so the answer has the room to show.
+                focused = false
+            }
+        }
     }
 }

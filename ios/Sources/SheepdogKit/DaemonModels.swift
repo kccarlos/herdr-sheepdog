@@ -56,35 +56,71 @@ public struct Hello: Codable, Equatable, Sendable {
     }
 }
 
-/// One agent of the flock, from `GET /api/state`.
+/// One agent of the flock, from `GET /api/state` (the same list as
+/// `GET /api/agents`).
 ///
 /// A lenient mirror of the daemon's `state.Agent`: only the fields the app
 /// shows are decoded, so a daemon that grows a field does not break us.
 public struct Agent: Codable, Equatable, Identifiable, Sendable {
+    /// `state.Block`: the last time the agent was blocked.
     public struct Block: Codable, Equatable, Sendable {
         public var question: String?
-        public var options: [Option]?
-        public var at: Date?
+        public var seenAt: Date?
+        /// The question was answered (by tap, voice or the brain).
+        public var answered: Bool?
 
-        public struct Option: Codable, Equatable, Sendable {
-            public var label: String
-            public init(label: String) { self.label = label }
-            enum CodingKeys: String, CodingKey { case label }
+        enum CodingKeys: String, CodingKey {
+            case question, answered
+            case seenAt = "seen_at"
         }
 
-        public init(question: String? = nil, options: [Option]? = nil, at: Date? = nil) {
+        public init(question: String? = nil, seenAt: Date? = nil, answered: Bool? = nil) {
             self.question = question
-            self.options = options
+            self.seenAt = seenAt
+            self.answered = answered
+        }
+    }
+
+    /// `state.Result`: what the agent last finished, as the shepherd heard
+    /// it — the announcement (`spoken`) and the brain's detail for it.
+    public struct Result: Codable, Equatable, Sendable {
+        public var spoken: String?
+        public var detail: String?
+        public var at: Date?
+
+        public init(spoken: String? = nil, detail: String? = nil, at: Date? = nil) {
+            self.spoken = spoken
+            self.detail = detail
             self.at = at
         }
     }
 
-    public struct Result: Codable, Equatable, Sendable {
-        public var summary: String?
+    /// `state.JournalEntry`: one stop of the worker, read from its own
+    /// transcript — what it wrote for a human, the instruction it was on,
+    /// the files it touched and its tool counts.
+    public struct JournalEntry: Codable, Equatable, Sendable {
         public var at: Date?
-        public init(summary: String? = nil, at: Date? = nil) {
-            self.summary = summary
+        /// `done`, `idle` or `blocked`.
+        public var event: String?
+        /// The worker's last message, at most 600 characters.
+        public var lastAssistant: String?
+        public var instruction: String?
+        public var filesTouched: [String]?
+        public var tools: [String: Int]?
+
+        enum CodingKeys: String, CodingKey {
+            case at, event, instruction, tools
+            case lastAssistant = "last_assistant"
+            case filesTouched = "files_touched"
+        }
+
+        public init(at: Date? = nil, event: String? = nil, lastAssistant: String? = nil, instruction: String? = nil, filesTouched: [String]? = nil, tools: [String: Int]? = nil) {
             self.at = at
+            self.event = event
+            self.lastAssistant = lastAssistant
+            self.instruction = instruction
+            self.filesTouched = filesTouched
+            self.tools = tools
         }
     }
 
@@ -111,11 +147,15 @@ public struct Agent: Codable, Equatable, Identifiable, Sendable {
     public var lastTask: String?
     public var lastBlock: Block?
     public var lastResult: Result?
+    /// The work journal, oldest first (at most 20 entries).
+    public var journal: [JournalEntry]?
+    /// Injected by the debug page rather than seen through herdr.
+    public var synthetic: Bool?
 
     public var id: String { paneID }
 
     enum CodingKeys: String, CodingKey {
-        case alias, kind, name, state
+        case alias, kind, name, state, journal, synthetic
         case paneID = "pane_id"
         case workspaceLabel = "workspace_label"
         case stateSince = "state_since"
@@ -136,7 +176,9 @@ public struct Agent: Codable, Equatable, Identifiable, Sendable {
         currentTask: String? = nil,
         lastTask: String? = nil,
         lastBlock: Block? = nil,
-        lastResult: Result? = nil
+        lastResult: Result? = nil,
+        journal: [JournalEntry]? = nil,
+        synthetic: Bool? = nil
     ) {
         self.paneID = paneID
         self.alias = alias
@@ -149,16 +191,45 @@ public struct Agent: Codable, Equatable, Identifiable, Sendable {
         self.lastTask = lastTask
         self.lastBlock = lastBlock
         self.lastResult = lastResult
+        self.journal = journal
+        self.synthetic = synthetic
     }
 
-    /// The one-line subtitle on a chip: the pending question wins, then the
-    /// last result, then the current task.
+    /// The one-line subtitle on a chip: the pending question wins, then an
+    /// unanswered block, then the last result, then the current task.
     public func subtitle(pendingQuestion: String?) -> String? {
         if let q = pendingQuestion?.trimmed, !q.isEmpty { return q }
-        if state == .blocked, let q = lastBlock?.question?.trimmed, !q.isEmpty { return q }
-        if let r = lastResult?.summary?.trimmed, !r.isEmpty { return r }
+        if state == .blocked, lastBlock?.answered != true, let q = lastBlock?.question?.trimmed, !q.isEmpty { return q }
+        if let r = lastResult?.spoken?.trimmed, !r.isEmpty { return r }
         if let t = currentTask?.trimmed, !t.isEmpty { return t }
         return nil
+    }
+
+    /// The newest journal entry that carries what the worker wrote for a
+    /// human, if the daemon has read one from its transcript.
+    public var lastWorkerMessage: JournalEntry? {
+        journal?.last { !($0.lastAssistant?.trimmed.isEmpty ?? true) }
+    }
+
+    /// "4 min", "2 h 5 min", "just now": how long the agent has been in its
+    /// state at `now`. Nil without a `state_since`.
+    public func timeInState(at now: Date) -> String? {
+        guard let since = stateSince else { return nil }
+        return Agent.duration(now.timeIntervalSince(since))
+    }
+
+    /// A short duration for people: under a minute is "just now".
+    public static func duration(_ seconds: TimeInterval) -> String {
+        let s = max(0, Int(seconds))
+        if s < 60 { return "just now" }
+        let minutes = s / 60
+        if minutes < 60 { return "\(minutes) min" }
+        let hours = minutes / 60
+        if hours < 48 {
+            let rest = minutes % 60
+            return rest == 0 ? "\(hours) h" : "\(hours) h \(rest) min"
+        }
+        return "\(hours / 24) days"
     }
 }
 
@@ -354,6 +425,22 @@ public enum ConversationResetAvailability: Equatable, Sendable {
     }
 
     public var showsAction: Bool { self == .supported }
+}
+
+/// The reply to `POST /api/inject/utterance`: `{"ok":true,"via":"voice"}`
+/// with a voice session (the answer comes as speech), or the text router's
+/// tool response (`tool`, `spoken`, `via: "text_router"`) with
+/// `--voice=off`.
+public struct UtteranceReply: Decodable, Equatable, Sendable {
+    public var via: String?
+    public var tool: String?
+    public var spoken: String?
+
+    public init(via: String? = nil, tool: String? = nil, spoken: String? = nil) {
+        self.via = via
+        self.tool = tool
+        self.spoken = spoken
+    }
 }
 
 /// `GET /api/state`, trimmed to what the app shows.

@@ -188,6 +188,53 @@ client of this daemon will hit:
    the stream dies between the daemon's 15 s keepalives and reconnects
    forever. The stream session allows 60 s.
 
+## The Flock pane, brain replies and typed input
+
+- **Flock.** The main screen's segmented control switches the middle of
+  the screen between the conversation and the Flock pane; the voice bar
+  stays put. Each agent's card mirrors `/api/state`'s `agents` (the same
+  `Store.List()` as `/api/agents`), refreshed over `/events`:
+  - its state and how long it has been in it (`state_since`);
+  - the current or last task;
+  - the open question: the approval card itself, answerable there, which
+    then leaves the pinned spot above the controls. Otherwise the
+    `last_block` question, marked answered when it was;
+  - `last_result.spoken` with its `detail` behind a disclosure;
+  - what the worker last wrote for a human: the newest `journal` entry's
+    `last_assistant` (≤ 600 characters, read from the worker's own
+    transcript), with the files it touched and its tool counts.
+
+  `Agent` used to read `last_result.summary` and `last_block.at`/`options`,
+  none of which the daemon sends, so the last result never showed. It now
+  decodes `state.Result` (`spoken`, `detail`, `at`), `state.Block`
+  (`question`, `seen_at`, `answered`) and `state.JournalEntry` as they are.
+- **Brain replies** (`BrainActivity`). `voice.tool_result` for
+  `to_supervisor` carries what the brain told the voice: `spoken`, and
+  `detail`, `options`, `clarify` and `pending` when present. The brain's
+  `ask` is not a separate field on the wire: the daemon folds it into
+  `spoken` as the last sentence. With a live voice the reply is a purple
+  "Brain → Sheepdog" card, with the detail and the raw payload behind a
+  disclosure. With `--voice=off` the text router's reply is already the
+  dog's bubble (same event id), so only a compact detail/options footer
+  goes under it.
+- **Held pushes.** `voice.push_held` shows as a dashed "Waiting for a
+  listener" card. On `voice.push_released` it disappears, and the
+  `voice.push` that follows is the ordinary push card. After
+  `voice.push_dropped` it stays, struck through.
+- These are kept apart from `ConversationHistory`, whose newest-page merge
+  drops local items the server does not list. `/events` feeds them live.
+  `GET /api/events?type=voice.tool_result` and `?type=voice.push_` (the
+  daemon's current run) backfill them after a relaunch or a stream
+  reconnect.
+- **Typed input.** The keyboard button at the end of the status line (or
+  ⋯ ▸ Type instead) opens a text field. Sending goes through
+  `POST /api/inject/utterance`, which records the text as typed shepherd
+  input before it reaches the voice or the text router, so the one rail
+  takes it like a transcript. The words and the answer arrive in the
+  conversation the usual way; a refusal (422 "nothing to relay", 502
+  voice error) shows under the field. The ⋯ menu also has Stop, the same
+  as the orb's stop, reachable whatever the orb is doing.
+
 ## Audio
 
 ```

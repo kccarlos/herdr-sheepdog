@@ -126,25 +126,33 @@ struct AgentSheet: View {
                     }
                 }
 
-                if let question = question ?? agent.lastBlock?.question, !question.isEmpty {
+                if let question = question ?? (agent.lastBlock?.answered == true ? nil : agent.lastBlock?.question), !question.isEmpty {
                     Section("Waiting on you") {
                         Text(question)
-                        if let options = agent.lastBlock?.options, !options.isEmpty {
-                            ForEach(Array(options.enumerated()), id: \.offset) { index, option in
-                                Label(option.label, systemImage: "\(index + 1).circle")
-                                    .font(.callout)
-                            }
-                        }
                     }
                 }
 
                 if let task = agent.currentTask, !task.isEmpty {
                     Section("Current task") { Text(task) }
                 }
-                if let result = agent.lastResult?.summary, !result.isEmpty {
-                    Section("Last result") { Text(result) }
+                if let result = agent.lastResult?.spoken, !result.isEmpty {
+                    Section("Last result") {
+                        Text(result)
+                        if let detail = agent.lastResult?.detail, !detail.isEmpty {
+                            Text(detail)
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                 } else if let last = agent.lastTask, !last.isEmpty {
                     Section("Last task") { Text(last) }
+                }
+                if let entry = agent.lastWorkerMessage, let message = entry.lastAssistant {
+                    Section("\(agent.alias) wrote") {
+                        Text(message)
+                            .font(.callout)
+                            .textSelection(.enabled)
+                    }
                 }
             }
             .navigationTitle(agent.alias)

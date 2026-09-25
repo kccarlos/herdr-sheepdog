@@ -302,6 +302,47 @@ public final class DaemonClient: @unchecked Sendable {
         }
     }
 
+    /// `GET /api/events?n=&type=` — the newest `limit` events of the
+    /// daemon's current run (its in-memory ring, 2 000 events), oldest
+    /// first; `type` is a prefix filter (`voice.push` matches
+    /// `voice.push_held` too).
+    public func recentEvents(type: String? = nil, limit: Int = 100) async throws -> [DaemonEvent] {
+        var query = [URLQueryItem(name: "n", value: String(limit))]
+        if let type, !type.isEmpty { query.append(URLQueryItem(name: "type", value: type)) }
+        let request = try request(path: "/api/events", query: query)
+        let (data, response) = try await perform(request)
+        guard let http = response as? HTTPURLResponse else { throw DaemonError.malformed("no HTTP response") }
+        switch http.statusCode {
+        case 200 ..< 300: break
+        case 401: throw DaemonError.unauthorized(endpoint: endpoint.display)
+        default: throw DaemonError.http(status: http.statusCode, endpoint: endpoint.display)
+        }
+        guard let events = SSEParser.decodeArray(data) else { throw DaemonError.malformed("the event list did not decode") }
+        return events
+    }
+
+    /// `POST /api/inject/utterance {"text": …}` — what the shepherd typed,
+    /// as if spoken. The daemon records it as typed shepherd input first
+    /// (so the one rail accepts it like a transcript), then hands it to the
+    /// voice session, or with `--voice=off` to its text router, which
+    /// answers in the reply. A text nothing can route is a 422 with the
+    /// daemon's words.
+    public func sendUtterance(_ text: String) async throws -> UtteranceReply {
+        let body = try JSONSerialization.data(withJSONObject: ["text": text])
+        let request = try request(path: "/api/inject/utterance", method: "POST", body: body)
+        let (data, response) = try await perform(request)
+        guard let http = response as? HTTPURLResponse else { throw DaemonError.malformed("no HTTP response") }
+        switch http.statusCode {
+        case 200 ..< 300:
+            return (try? DaemonClient.decoder.decode(UtteranceReply.self, from: data)) ?? UtteranceReply()
+        case 401:
+            throw DaemonError.unauthorized(endpoint: endpoint.display)
+        default:
+            let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+            throw DaemonError.rejected(status: http.statusCode, message: (object?["error"] as? String) ?? "")
+        }
+    }
+
     private func get<T: Decodable>(_ type: T.Type, path: String, query: [URLQueryItem] = []) async throws -> T {
         let request = try request(path: path, query: query)
         let (data, response) = try await perform(request)

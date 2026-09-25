@@ -74,7 +74,7 @@ final class DaemonModelTests: XCTestCase {
     func testDecodesStateWithAgentsAndAPendingAction() throws {
         let json = """
         {"agents":[{"pane_id":"w1:p1","alias":"auth","kind":"codex","state":"blocked","state_since":"2026-09-22T00:10:00.5Z",
-        "current_task":"add the migration","last_block":{"question":"run the migration?"},"last_result":{"summary":"wrote hello.txt"}}],
+        "current_task":"add the migration","last_block":{"question":"run the migration?"},"last_result":{"spoken":"wrote hello.txt"}}],
         "pending_action":{"id":"p1","pane_id":"w1:p1","kind":"answer_prompt","spoken_summary":"auth is asking",
         "question":"whether to run the migration","options":[{"label":"Yes, proceed"}]},
         "session":{},"voice":{"mode":"off","name":"Rex","status":"closed","reason":"voice_off","muted":false,"stalled":false,"client_connected":true},
@@ -121,12 +121,12 @@ final class DaemonModelTests: XCTestCase {
             paneID: "w1:p1", alias: "auth", state: .blocked,
             currentTask: "add the migration",
             lastBlock: .init(question: "run the migration?"),
-            lastResult: .init(summary: "wrote hello.txt")
+            lastResult: .init(spoken: "wrote hello.txt")
         )
         XCTAssertEqual(agent.subtitle(pendingQuestion: "whether to run it"), "whether to run it")
         XCTAssertEqual(agent.subtitle(pendingQuestion: nil), "run the migration?")
 
-        let working = Agent(paneID: "w1:p2", alias: "docs", state: .working, currentTask: "write the README", lastResult: .init(summary: "done earlier"))
+        let working = Agent(paneID: "w1:p2", alias: "docs", state: .working, currentTask: "write the README", lastResult: .init(spoken: "done earlier"))
         XCTAssertEqual(working.subtitle(pendingQuestion: nil), "done earlier")
 
         let fresh = Agent(paneID: "w1:p3", alias: "new", state: .working, currentTask: "write the README")

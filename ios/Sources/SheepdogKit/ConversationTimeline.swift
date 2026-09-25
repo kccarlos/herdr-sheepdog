@@ -13,6 +13,12 @@ public enum TimelineRow: Identifiable, Equatable, Sendable {
     case item(ConversationItem)
     /// A bubble of this session that has no server id (yet).
     case live(ConversationReducer.Bubble)
+    /// What the brain told the voice. `compact` when the dog's bubble just
+    /// above already says the words (a daemon without a voice): only the
+    /// detail and options are left to show.
+    case brain(BrainActivity.Reply, compact: Bool)
+    /// A push the voice is holding for a listener, or dropped.
+    case held(BrainActivity.HeldPush)
 
     public var id: String {
         switch self {
@@ -20,6 +26,8 @@ public enum TimelineRow: Identifiable, Equatable, Sendable {
         case let .divider(item, _): return "item.\(item.id)"
         case let .item(item): return "item.\(item.id)"
         case let .live(bubble): return "live.\(bubble.id)"
+        case let .brain(reply, _): return "brain.\(reply.id)"
+        case let .held(push): return "held.\(push.id)"
         }
     }
 
@@ -28,6 +36,8 @@ public enum TimelineRow: Identifiable, Equatable, Sendable {
         case let .day(date): return date
         case let .divider(item, _), let .item(item): return item.ts
         case let .live(bubble): return bubble.at
+        case let .brain(reply, _): return reply.ts
+        case let .held(push): return push.ts
         }
     }
 }
@@ -38,6 +48,7 @@ public enum ConversationTimeline {
     public static func rows(
         history: [ConversationItem],
         live: [ConversationReducer.Bubble],
+        activity: BrainActivity = BrainActivity(),
         calendar: Calendar = .current,
         timeFormatter: DateFormatter = ConversationTimeline.defaultTimeFormatter
     ) -> [TimelineRow] {
@@ -78,6 +89,8 @@ public enum ConversationTimeline {
             }
         }
 
+        weave(activity, into: &merged)
+
         // Date dividers where the day changes (and above the first row).
         var out: [TimelineRow] = []
         out.reserveCapacity(merged.count + 4)
@@ -91,6 +104,31 @@ public enum ConversationTimeline {
             out.append(row)
         }
         return out
+    }
+
+    /// Puts the brain's replies and the held pushes in place: a reply the
+    /// dog's bubble already says goes right under that bubble (and only
+    /// when it has a detail or options to add), everything else by time,
+    /// after rows of the same moment.
+    static func weave(_ activity: BrainActivity, into rows: inout [TimelineRow]) {
+        guard !activity.isEmpty else { return }
+        var timed: [TimelineRow] = []
+        for reply in activity.replies {
+            if reply.isAlsoADogItem {
+                guard reply.hasMore, let at = rows.firstIndex(where: { row in
+                    if case let .item(item) = row { return item.id == reply.id && item.kind == .dog }
+                    return false
+                }) else { continue }
+                rows.insert(.brain(reply, compact: true), at: at + 1)
+            } else {
+                timed.append(.brain(reply, compact: false))
+            }
+        }
+        timed += activity.held.filter(\.isShown).map(TimelineRow.held)
+        for row in timed.sorted(by: { $0.date < $1.date }) {
+            let at = rows.firstIndex { $0.date > row.date } ?? rows.endIndex
+            rows.insert(row, at: at)
+        }
     }
 
     /// "Sheepdog restarted · 5:42 PM".

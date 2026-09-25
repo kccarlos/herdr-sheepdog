@@ -230,6 +230,22 @@ notice.
 | ![](screenshots/26-new-conversation-confirm.png) | The ⋯ menu ▸ New conversation: the confirmation dialog, word for word. |
 | ![](screenshots/27-new-conversation-divider.png) | After Start fresh: the scrollback stays, with "New conversation · 10:34 AM" marking the point. |
 
+### Flock pane and typed input (simulator, 2026-09-25)
+
+`FlockTypingUITests` against the fixture daemon (herdr-sheepdog `0be70e6`,
+`--voice=off`):
+
+| | What |
+|---|---|
+| ![](screenshots/28-flock-pane-question.png) | The Flock pane: every agent with its state and how long, the injected question answerable on its card. |
+| ![](screenshots/29-flock-pane-answered.png) | Answered from the card: the daemon's "Told deploy Yes, proceed." |
+| ![](screenshots/30-type-instead.png) | Type instead: the field above the status line. |
+| ![](screenshots/31-typed-answered.png) | The typed words as the shepherd's bubble, and the text router's answer. |
+
+Not seen yet: a brain card with a detail, and a held push. The fake brain
+gives no detail, and `--voice=off` has no voice to hold pushes for. Both
+are unit-tested (`FlockAndBrainTests`) against the daemon's payloads.
+
 ## Not verified
 
 - **Real device audio.** Nothing has run on an iPhone. The microphone, the
