@@ -246,6 +246,17 @@ Not seen yet: a brain card with a detail, and a held push. The fake brain
 gives no detail, and `--voice=off` has no voice to hold pushes for. Both
 are unit-tested (`FlockAndBrainTests`) against the daemon's payloads.
 
+### Health pane (simulator, 2026-09-25)
+
+`HealthUITests` against the fixture daemon: version, uptime and the brain
+picker; chattiness set to Quiet on the phone and read back from the
+daemon's `GET /api/settings`.
+
+| | What |
+|---|---|
+| ![](screenshots/32-health-pane.png) | Daemon, voice and brain at a glance; "Health · 2" on the switch while there are recent problems. |
+| ![](screenshots/33-health-problems.png) | Chattiness, the audio path, and the daemon's own `worker.session_missing` events in plain words (raw JSON behind the chevron). Echo cancellation reads "—" until the engine has run (`--voice=off`). |
+
 ## Not verified
 
 - **Real device audio.** Nothing has run on an iPhone. The microphone, the
@@ -351,7 +362,9 @@ while, wake it, and check nothing is missing or doubled.
   banner that explains what to do. One of them is redundant.
 - **The orb says "Listening" when the microphone failed to start** (denied
   permission, or another app holding it). The banner explains it, but the
-  orb should carry that state itself.
+  orb should carry that state itself. (The separate stale "Listening" after
+  a *failed session* is fixed: SessionCore now resets on failure as it does
+  on End.)
 - The `thinking` state comes from `voice.tool_call` / `voice.tool_result` on
   `/events`; the real Gemini session logs those under the same names as the
   debug path (`internal/voice/gemini/toolexec.go`), so it should fire in a

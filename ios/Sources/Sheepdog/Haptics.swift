@@ -35,6 +35,11 @@ enum Haptics {
         UINotificationFeedbackGenerator().notificationOccurred(.error)
     }
 
+    /// Something needs a look, but nothing failed (the mic went quiet).
+    static func warning() {
+        UINotificationFeedbackGenerator().notificationOccurred(.warning)
+    }
+
     static func tap() {
         UISelectionFeedbackGenerator().selectionChanged()
     }

@@ -124,6 +124,7 @@ struct SettingsView: View {
                     LabeledContent("App", value: Bundle.appVersion)
                     LabeledContent("Daemon", value: model.daemonVersion ?? "not connected")
                     LabeledContent("Voice name", value: model.voiceName)
+                    EchoCancellationRow(status: meter.metrics.voiceProcessing, running: meter.metrics.hardwareSampleRate > 0)
                     VStack(alignment: .leading, spacing: 3) {
                         Text("Audio")
                             .font(.subheadline)
@@ -353,5 +354,37 @@ extension Bundle {
         let short = main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
         let build = main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
         return "\(short) (\(build))"
+    }
+}
+
+/// Settings ▸ About: whether the system echo canceller can hear what the
+/// dog plays on the current route — the thing to check when the dog
+/// answers itself from the speaker.
+struct EchoCancellationRow: View {
+    let status: VoiceProcessingStatus
+    /// The engine has run this session (before that there is no route).
+    let running: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack {
+                Text("Echo cancellation")
+                Spacer()
+                if running {
+                    Label(status.isActive ? "On" : "Off", systemImage: status.isActive ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                        .labelStyle(.titleAndIcon)
+                        .foregroundStyle(status.isActive ? Theme.done : Theme.blocked)
+                } else {
+                    Text("—").foregroundStyle(.secondary)
+                }
+            }
+            if running {
+                Text(status.summary)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("about.echo")
     }
 }

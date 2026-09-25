@@ -80,6 +80,19 @@ final class SessionViewModel: ObservableObject {
     /// to its end, where the words and the answer are about to land.
     @Published private(set) var typedSent = 0
 
+    // The Health pane.
+    /// Uptime, GPT-Live's billed seconds and the recent problems.
+    @Published private(set) var health = DaemonHealth()
+    @Published private(set) var loadingHealth = false
+    /// The brain's catalog and choice; nil until loaded, and on a daemon
+    /// without the route.
+    @Published private(set) var brainModels: BrainModels?
+    @Published private(set) var switchingBrain = false
+    @Published var brainError: String?
+    /// The push chattiness; nil until loaded, and without a supervisor.
+    @Published private(set) var daemonSettings: DaemonSettings?
+    @Published var settingsError: String?
+
     // Mirrors of `core`, published for the views (see `publish()`).
     @Published private(set) var isMuted = false
     @Published private(set) var talkMode: TalkMode = .openMic
@@ -257,6 +270,9 @@ final class SessionViewModel: ObservableObject {
             // Another daemon, another conversation.
             reducer.clear()
             activity.clear()
+            health.clear()
+            brainModels = nil
+            daemonSettings = nil
             approvalFlow.reset()
             loadCache()
             conversationChanged(save: false)
@@ -522,6 +538,9 @@ final class SessionViewModel: ObservableObject {
         audio.onMicSignal = { [weak self] noSignal in
             self?.send(.micSignal(ok: !noSignal))
         }
+        audio.onStopped = { [weak self] message in
+            self?.send(.audioStopped(message))
+        }
         audio.onPausedChanged = { [weak self] paused in
             self?.send(.interruption(paused: paused))
         }
@@ -647,6 +666,7 @@ final class SessionViewModel: ObservableObject {
             case .tap: Haptics.tap()
             case .stop: Haptics.stop()
             case .answerFailed: Haptics.answerFailed()
+            case .micLost: Haptics.warning()
             }
         case .openSettings:
             showSettings = true
@@ -775,6 +795,8 @@ final class SessionViewModel: ObservableObject {
         if activity.fold(event) || folded {
             conversationChanged()
         }
+        var nextHealth = health
+        if nextHealth.fold(event) { health = nextHealth }
         switch event.type {
         case "voice.push":
             guard let text = event.string("text"), !text.isEmpty, event.string("urgency") != "silent" else { break }
@@ -986,6 +1008,99 @@ final class SessionViewModel: ObservableObject {
         reducer.clear()
         activity.clear()
         conversationChanged(save: false)
+    }
+
+    // MARK: - Health
+
+    /// When the daemon started: its `daemon.start` event, else the newest
+    /// "Sheepdog started." divider in the history (the event ring may
+    /// have rolled past it on a long run).
+    var daemonStartedAt: Date? {
+        health.startedAt ?? history.items.last { $0.kind == .notice && $0.text.hasPrefix("Sheepdog started") }?.ts
+    }
+
+    /// Everything the Health pane shows, fetched once when it opens (and
+    /// on pull to refresh); `/events` keeps the problems and the billed
+    /// seconds current after that.
+    func loadHealth() async {
+        guard settings.endpoint != nil, !loadingHealth else { return }
+        loadingHealth = true
+        defer { loadingHealth = false }
+        async let state: Bool = refreshState(quiet: true)
+        async let models: Void = loadBrainModels()
+        async let chattiness: Void = loadDaemonSettings()
+        async let providers: Void = loadVoiceProviders()
+        if hello == nil { hello = try? await client.hello() }
+        // `/api/events` filters by one type prefix: one small request each.
+        var next = health
+        for type in ["daemon.start", "voice.billed_seconds", "web.client.stats", "brain.fallback", "brain.rate_limited", "voice.connect_error",
+                     "voice.push_", "supervisor.echo_dropped", "web.audio_unheard", "voice.playback", "worker.session_missing"] {
+            let limit = type == "web.client.stats" || type == "daemon.start" ? 1 : 30
+            guard let events = try? await client.recentEvents(type: type, limit: limit) else { continue }
+            for event in events { next.fold(event) }
+        }
+        if next != health { health = next }
+        _ = await (state, models, chattiness, providers)
+    }
+
+    func loadBrainModels(provider: String? = nil) async {
+        do {
+            brainModels = try await client.brainModels(provider: provider)
+            brainError = nil
+        } catch let error as DaemonError {
+            brainError = error.message
+        } catch {
+            brainError = error.localizedDescription
+        }
+    }
+
+    /// The brain picker: provider and model for the brain's next turn.
+    func selectBrain(provider: String?, model: String) {
+        guard !switchingBrain else { return }
+        switchingBrain = true
+        brainError = nil
+        Task { [weak self] in
+            guard let self else { return }
+            defer { self.switchingBrain = false }
+            do {
+                self.brainModels = try await self.client.setBrainModel(provider: provider, model: model)
+                Haptics.tap()
+            } catch let error as DaemonError {
+                self.brainError = error.message
+            } catch {
+                self.brainError = error.localizedDescription
+            }
+            await self.refreshState(quiet: true)
+        }
+    }
+
+    func loadDaemonSettings() async {
+        do {
+            daemonSettings = try await client.settings()
+            settingsError = nil
+        } catch let error as DaemonError {
+            // No supervisor is a 503: hide the control, say why.
+            daemonSettings = nil
+            settingsError = error.message
+        } catch {
+            settingsError = error.localizedDescription
+        }
+    }
+
+    func setChattiness(_ level: String) {
+        guard level != daemonSettings?.chattiness else { return }
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                self.daemonSettings = try await self.client.setChattiness(level)
+                self.settingsError = nil
+                Haptics.tap()
+            } catch let error as DaemonError {
+                self.settingsError = error.message
+            } catch {
+                self.settingsError = error.localizedDescription
+            }
+        }
     }
 
     // MARK: - Typed input

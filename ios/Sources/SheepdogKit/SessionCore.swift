@@ -180,9 +180,14 @@ public struct SessionCore: Equatable, Sendable {
         switch event {
         case .connectTapped:
             effects.append(.clearBanner)
+            // Nothing from a session that ended by failing survives into
+            // this one: the orb must not say "Listening" off a stale status
+            // before the daemon has sent a new one.
+            resetSession()
             connection.wantsConnection = true
             connection.socket = .connecting
-            connection.events = .connecting
+            // The `/events` stream does not exist until the probe passes.
+            connection.events = .idle
             connection.failed = false
             connection.tokenRefused = false
             connection.reconnect.reset()
@@ -200,9 +205,19 @@ public struct SessionCore: Equatable, Sendable {
             openSocket(&effects)
 
         case let .probeFailed(error):
+            // A probe that lands after End is for a session nobody wants:
+            // no banner, no "Offline".
+            guard connection.wantsConnection else {
+                derive = false
+                break
+            }
             fail(error, &effects)
 
         case let .tokenRefused(endpoint):
+            guard connection.wantsConnection else {
+                derive = false
+                break
+            }
             // A refused token does not fix itself by retrying.
             fail(.unauthorized(endpoint: endpoint), &effects)
 
@@ -210,7 +225,9 @@ public struct SessionCore: Equatable, Sendable {
             disconnect(&effects)
 
         case let .eventsChanged(life):
-            connection.events = life
+            // A stream task cancelled by End or a failure can still report
+            // from its `catch`; without a session the stream is idle.
+            connection.events = connection.wantsConnection ? life : .idle
 
         case .socketOpened:
             connection.socket = .open
@@ -234,7 +251,7 @@ public struct SessionCore: Equatable, Sendable {
                 connection.wantsConnection = false
                 connection.events = .idle
                 effects.append(contentsOf: [.stopStreams, .stopTicker])
-                connection.reconnect.reset()
+                resetSession()
                 if reason == "replaced" {
                     effects.append(.showBanner(.replaced))
                 }
@@ -319,6 +336,10 @@ public struct SessionCore: Equatable, Sendable {
 
         case let .gateChanged(closed):
             mic.gateClosed = closed
+            // A muted client sends no silence transitions (the contract's
+            // "mute and silence are independent"): muting resets the gate,
+            // and the unmute tells the daemon where it stands.
+            guard !mic.muted else { break }
             connection.socketGateClosed = closed
             effects.append(.send(.silence(closed)))
             // The gate is the app's speech detector: open on speech (or a
@@ -345,12 +366,21 @@ public struct SessionCore: Equatable, Sendable {
         case let .audioStartFailed(message):
             effects.append(.showBanner(.microphoneFailed(message)))
 
+        case let .audioStopped(message):
+            // The engine died under us (a route change it could not
+            // rebuild). Say so, and start it again once — a second
+            // failure is `audioStartFailed`'s banner, not a loop.
+            playback.speaking = false
+            quietSpeaking()
+            effects.append(.notice(message))
+            startAudioIfNeeded(&effects)
+
         case let .playbackChanged(speaking):
             playback.speaking = speaking
 
         case let .micSignal(ok):
             mic.noSignal = !ok
-            if !ok { effects.append(.haptic(.answerFailed)) }
+            if !ok { effects.append(.haptic(.micLost)) }
             derive = false
 
         case let .interruption(paused):
@@ -422,6 +452,7 @@ public struct SessionCore: Equatable, Sendable {
     private mutating func openSocket(_ effects: inout [SessionEffect]) {
         connection.socketMuted = daemonMute
         connection.socketGateClosed = false
+        connection.events = .connecting
         effects.append(contentsOf: [.openSocket, .startStreams, .startTicker])
     }
 
@@ -429,27 +460,31 @@ public struct SessionCore: Equatable, Sendable {
     private mutating func disconnect(_ effects: inout [SessionEffect]) {
         connection.wantsConnection = false
         effects.append(contentsOf: [.closeSocket, .stopAudio, .stopStreams, .stopTicker])
-        suspension.backgroundSuspended = false
-        suspension.pausedByIOS = false
-        connection.reconnect.reset()
-        connection.muteSync.reset()
         connection.socket = .idle
         connection.events = .idle
         connection.failed = false
         connection.tokenRefused = false
-        voice.status = nil
-        voice.saidVoiceIsOff = false
-        voice.closedReason = nil
-        voice.stalled = false
+        resetSession()
+        if mic.talkMode == .holdToTalk { effects.append(.setManualGate(false)) }
+    }
+
+    /// Everything a session learned, forgotten — by End, by a failure that
+    /// ends it, and at the next Connect. The user's own choices (mute, the
+    /// talk mode, the lock toggle) and the connection's failure flags stay.
+    private mutating func resetSession() {
+        suspension.backgroundSuspended = false
+        suspension.pausedByIOS = false
+        connection.reconnect.reset()
+        connection.muteSync.reset()
+        voice = Voice()
         mic.gateClosed = false
-        playback.speaking = false
-        playback.hold.reset()
-        thinkingExpiry = nil
         mic.holding = false
         mic.noSignal = false
         quietSpeaking()
-        voice.provider = nil
-        if mic.talkMode == .holdToTalk { effects.append(.setManualGate(false)) }
+        playback.speaking = false
+        playback.hold.reset()
+        playback.heldSpeaking = false
+        thinkingExpiry = nil
     }
 
     /// A failure that ends the session: say why, and stop everything.
@@ -464,9 +499,7 @@ public struct SessionCore: Equatable, Sendable {
         connection.socket = .idle
         connection.events = .idle
         effects.append(contentsOf: [.closeSocket, .stopAudio, .stopStreams, .stopTicker])
-        connection.reconnect.reset()
-        suspension.backgroundSuspended = false
-        quietSpeaking()
+        resetSession()
     }
 
     /// Tells the daemon the speech detector opened or closed, once per change.
@@ -498,13 +531,18 @@ public struct SessionCore: Equatable, Sendable {
         } else {
             // Tell the daemon first, so it does not drop the first frames.
             effects.append(.send(.mute(daemonMute)))
+            // Muting reset the gate to open without telling the daemon; if
+            // it last heard "closed", say "open" now, so the two agree.
+            if connection.socketGateClosed {
+                connection.socketGateClosed = false
+                effects.append(.send(.silence(false)))
+            }
             effects.append(.setCaptureMuted(false))
             // Capture starts on the running engine now, not on the
             // daemon's status echo; start the engine if it is not up.
             startAudioIfNeeded(&effects)
         }
         mic.gateClosed = false
-        connection.socketGateClosed = false
         effects.append(.haptic(.tap))
     }
 
@@ -597,6 +635,9 @@ public enum SessionEvent: Equatable, Sendable {
     /// `startAudio` ran; `gateClosed` is the gate's state right after.
     case audioStarted(gateClosed: Bool)
     case audioStartFailed(String)
+    /// The running engine stopped by itself (a route change it could not
+    /// rebuild); the words say why.
+    case audioStopped(String)
     case playbackChanged(speaking: Bool)
     /// The microphone delivers signal (`ok`) or only digital zero.
     case micSignal(ok: Bool)
@@ -681,6 +722,8 @@ public enum SessionBanner: Equatable, Sendable {
 
 public enum SessionHaptic: Equatable, Sendable {
     case connected, tap, stop, answerFailed
+    /// The microphone stopped delivering signal: a warning, not an error.
+    case micLost
 }
 
 /// Log lines the core asks for, so the view model keeps its log categories.

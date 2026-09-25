@@ -226,3 +226,32 @@ final class FlockAndBrainTests: XCTestCase {
         }
     }
 }
+
+/// Settings ▸ About's echo-cancellation line.
+final class VoiceProcessingStatusTests: XCTestCase {
+    func testActiveOnlyWithEverythingTheCancellerNeeds() {
+        let on = VoiceProcessingStatus(inputEnabled: true, outputEnabled: true, bypassed: false, voiceChatMode: true, outputRoute: "Speaker", inputRoute: "iPhone Microphone")
+        XCTAssertTrue(on.isActive)
+        XCTAssertEqual(on.summary, "On · Speaker ← iPhone Microphone")
+
+        var off = on
+        off.inputEnabled = false
+        off.outputEnabled = false
+        XCTAssertFalse(off.isActive)
+        XCTAssertEqual(off.summary, "Off — voice processing is off · Speaker ← iPhone Microphone")
+
+        var bypassed = on
+        bypassed.bypassed = true
+        XCTAssertEqual(bypassed.summary, "Off — bypassed · Speaker ← iPhone Microphone")
+
+        var wrongMode = on
+        wrongMode.voiceChatMode = false
+        wrongMode.outputRoute = ""
+        wrongMode.inputRoute = ""
+        XCTAssertEqual(wrongMode.summary, "Off — session not in voice-chat mode")
+
+        var halfway = on
+        halfway.outputEnabled = false
+        XCTAssertEqual(halfway.summary, "Off — the output is not voice-processed · Speaker ← iPhone Microphone")
+    }
+}

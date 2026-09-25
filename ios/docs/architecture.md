@@ -235,6 +235,42 @@ client of this daemon will hit:
   voice error) shows under the field. The ⋯ menu also has Stop, the same
   as the orb's stop, reachable whatever the orb is doing.
 
+## The Health pane
+
+The switch's third pane, "Health", replaces what the Mac's `/debug` page
+was needed for during a test:
+
+- **Daemon.** The connection, the address and the version. Uptime is
+  measured from the newest `daemon.start` (`GET /api/events?type=daemon.start`),
+  or from the history's "Sheepdog started" divider when the 2 000-event
+  ring has rolled past it.
+- **Voice.** Status, the provider picker (the same
+  `GET/PUT /api/voice/provider` calls as Settings) and the model.
+  GPT-Live's billed seconds come from `web.client.stats.voice_billed_seconds`
+  and `voice.billed_seconds.total_s`, with the cost at $0.05/min.
+- **Brain.** Provider and model pickers from `GET /api/brain/models`,
+  switched with `PUT /api/brain/model`: a new provider loads its catalog
+  and takes its first recommended model. The current model is always
+  offered, even when the catalog does not list it. An unavailable provider
+  shows the daemon's reason.
+- **Pushes.** Chattiness levels from `GET /api/settings`, changed with
+  `PUT /api/settings`. Hidden without a supervisor.
+- **Audio on this phone.** The echo-cancellation row (as in Settings ▸
+  About) and the playback counters.
+- **Recent problems** (`DaemonHealth`). One line each, with its time, for:
+  - `brain.fallback` (the reason) and `brain.rate_limited`;
+  - `voice.connect_error`;
+  - `voice.push_held` / `voice.push_dropped`;
+  - `supervisor.echo_dropped` and `web.audio_unheard`;
+  - `voice.playback` with `cut`;
+  - `worker.session_missing`.
+
+  The raw event is behind a tap. The pane fills from
+  `GET /api/events?type=…` (one small request per prefix, since the filter
+  takes one) when it opens or is pulled; `/events` keeps it current. The
+  switch reads "Health · n" while there are non-informational problems
+  from the last 15 minutes.
+
 ## Audio
 
 ```

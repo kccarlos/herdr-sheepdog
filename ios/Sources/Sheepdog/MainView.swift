@@ -9,6 +9,7 @@ struct MainView: View {
     enum Pane: String, CaseIterable, Identifiable {
         case conversation = "Conversation"
         case flock = "Flock"
+        case health = "Health"
         var id: String { rawValue }
     }
 
@@ -19,6 +20,13 @@ struct MainView: View {
     @State private var pane: Pane = .conversation
     @State private var typing = false
     @Environment(\.scenePhase) private var scenePhase
+
+    /// "Health · 2": problems in the last 15 minutes, so a glance at the
+    /// switch says whether something went wrong.
+    private var healthLabel: String {
+        let recent = model.health.problems(since: Date().addingTimeInterval(-15 * 60)).filter { $0.severity != .info }.count
+        return recent == 0 ? "Health" : "Health · \(recent)"
+    }
 
     var body: some View {
         NavigationStack {
@@ -33,6 +41,7 @@ struct MainView: View {
                 Picker("Show", selection: $pane) {
                     Text("Conversation").tag(Pane.conversation)
                     Text(model.agents.isEmpty ? "Flock" : "Flock · \(model.agents.count)").tag(Pane.flock)
+                    Text(healthLabel).tag(Pane.health)
                 }
                 .pickerStyle(.segmented)
                 .padding(.horizontal, 16)
@@ -70,12 +79,14 @@ struct MainView: View {
                         FlockView(agents: model.agents, approval: model.approval) { index in
                             model.answer(option: index)
                         }
+                    case .health:
+                        HealthView(meter: model.meter)
                     }
                 }
                 .frame(maxHeight: .infinity)
 
                 // On the Flock pane the question sits on its agent's card.
-                if pane == .conversation, let card = model.approval {
+                if pane != .flock, let card = model.approval {
                     ApprovalCardView(card: card) { index in
                         model.answer(option: index)
                     }

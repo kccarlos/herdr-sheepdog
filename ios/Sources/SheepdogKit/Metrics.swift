@@ -35,6 +35,8 @@ public struct AudioMetrics: Equatable, Sendable {
     /// played at a rate other than 1.0.
     public var playbackRate = 1.0
     public var stretchedMilliseconds = 0
+    /// The echo canceller's state on the current route.
+    public var voiceProcessing = VoiceProcessingStatus()
 
     public init() {}
 
@@ -102,4 +104,46 @@ public enum SheepdogLog {
     public static let audio = Logger(subsystem: "com.kccarlos.sheepdog", category: "audio")
     public static let socket = Logger(subsystem: "com.kccarlos.sheepdog", category: "socket")
     public static let session = Logger(subsystem: "com.kccarlos.sheepdog", category: "session")
+}
+
+/// Whether the system echo canceller can work right now, for Settings ▸
+/// About and the audio log. It cancels only what it hears itself play, so
+/// it needs all of: the `.voiceChat` session mode, voice processing on the
+/// input node (which makes the engine's I/O one voice-processing unit, so
+/// the output node — where the player's audio goes — is its reference),
+/// and not bypassed.
+public struct VoiceProcessingStatus: Equatable, Sendable {
+    public var inputEnabled: Bool
+    public var outputEnabled: Bool
+    public var bypassed: Bool
+    public var voiceChatMode: Bool
+    /// Where playback goes ("Speaker", "AirPods Pro", …).
+    public var outputRoute: String
+    /// Where the microphone is ("iPhone Microphone", …).
+    public var inputRoute: String
+
+    public init(inputEnabled: Bool = false, outputEnabled: Bool = false, bypassed: Bool = false, voiceChatMode: Bool = false, outputRoute: String = "", inputRoute: String = "") {
+        self.inputEnabled = inputEnabled
+        self.outputEnabled = outputEnabled
+        self.bypassed = bypassed
+        self.voiceChatMode = voiceChatMode
+        self.outputRoute = outputRoute
+        self.inputRoute = inputRoute
+    }
+
+    /// The echo canceller has everything it needs.
+    public var isActive: Bool { inputEnabled && outputEnabled && !bypassed && voiceChatMode }
+
+    /// "On · Speaker ← iPhone Microphone", or "Off — <what is missing>".
+    public var summary: String {
+        let route = [outputRoute, inputRoute].filter { !$0.isEmpty }.joined(separator: " ← ")
+        if isActive { return route.isEmpty ? "On" : "On · \(route)" }
+        var missing: [String] = []
+        if !inputEnabled { missing.append("voice processing is off") }
+        else if !outputEnabled { missing.append("the output is not voice-processed") }
+        if bypassed { missing.append("bypassed") }
+        if !voiceChatMode { missing.append("session not in voice-chat mode") }
+        let why = missing.joined(separator: ", ")
+        return route.isEmpty ? "Off — \(why)" : "Off — \(why) · \(route)"
+    }
 }

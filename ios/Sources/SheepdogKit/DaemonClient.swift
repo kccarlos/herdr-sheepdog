@@ -343,6 +343,66 @@ public final class DaemonClient: @unchecked Sendable {
         }
     }
 
+    /// `GET /api/brain/models[?provider=]` — the brain's model catalog and
+    /// current choice. `nil` on a daemon without the route (404); a daemon
+    /// whose brain is off answers 503 with the reason, thrown as
+    /// `.rejected`.
+    public func brainModels(provider: String? = nil) async throws -> BrainModels? {
+        var query: [URLQueryItem] = []
+        if let provider, !provider.isEmpty { query.append(URLQueryItem(name: "provider", value: provider)) }
+        return try await sendJSON(BrainModels.self, path: "/api/brain/models", query: query, what: "the brain's model list")
+    }
+
+    /// `PUT /api/brain/model {"provider", "model"}` — switches the brain
+    /// for its next turn; the daemon keeps the choice across restarts.
+    public func setBrainModel(provider: String?, model: String) async throws -> BrainModels {
+        var body: [String: String] = ["model": model]
+        if let provider, !provider.isEmpty { body["provider"] = provider }
+        let data = try JSONSerialization.data(withJSONObject: body)
+        guard let models = try await sendJSON(BrainModels.self, path: "/api/brain/model", method: "PUT", body: data, what: "the brain model reply") else {
+            throw DaemonError.rejected(status: 404, message: "this daemon cannot switch the brain's model")
+        }
+        return models
+    }
+
+    /// `GET /api/settings` — the chattiness and its levels. `nil` on a
+    /// daemon without the route.
+    public func settings() async throws -> DaemonSettings? {
+        try await sendJSON(DaemonSettings.self, path: "/api/settings", what: "the settings")
+    }
+
+    /// `PUT /api/settings {"chattiness": level}`.
+    public func setChattiness(_ level: String) async throws -> DaemonSettings {
+        let data = try JSONSerialization.data(withJSONObject: ["chattiness": level])
+        guard let settings = try await sendJSON(DaemonSettings.self, path: "/api/settings", method: "PUT", body: data, what: "the settings reply") else {
+            throw DaemonError.rejected(status: 404, message: "this daemon has no settings to change")
+        }
+        return settings
+    }
+
+    /// One JSON request: 2xx decodes, 404 is `nil` (an older daemon), 401
+    /// is the token, anything else carries the daemon's own words.
+    private func sendJSON<T: Decodable>(_ type: T.Type, path: String, query: [URLQueryItem] = [], method: String = "GET", body: Data? = nil, what: String) async throws -> T? {
+        let request = try request(path: path, query: query, method: method, body: body)
+        let (data, response) = try await perform(request)
+        guard let http = response as? HTTPURLResponse else { throw DaemonError.malformed("no HTTP response") }
+        switch http.statusCode {
+        case 200 ..< 300:
+            do {
+                return try DaemonClient.decoder.decode(T.self, from: data)
+            } catch {
+                throw DaemonError.malformed("\(what) did not decode")
+            }
+        case 404:
+            return nil
+        case 401:
+            throw DaemonError.unauthorized(endpoint: endpoint.display)
+        default:
+            let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+            throw DaemonError.rejected(status: http.statusCode, message: (object?["error"] as? String) ?? "")
+        }
+    }
+
     private func get<T: Decodable>(_ type: T.Type, path: String, query: [URLQueryItem] = []) async throws -> T {
         let request = try request(path: path, query: query)
         let (data, response) = try await perform(request)

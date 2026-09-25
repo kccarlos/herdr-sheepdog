@@ -421,7 +421,7 @@ final class SessionCoreTests: XCTestCase {
     func testTheDaemonsErrorAndAMissingMicSignal() {
         var core = connected()
         XCTAssertEqual(core.apply(.daemonError("boom"), now: t0), [.showBanner(.daemonSaid("boom"))])
-        XCTAssertEqual(core.apply(.micSignal(ok: false), now: t0), [.haptic(.answerFailed)])
+        XCTAssertEqual(core.apply(.micSignal(ok: false), now: t0), [.haptic(.micLost)], "a warning, not an answer that failed")
         XCTAssertEqual(core.statusLine, "No microphone signal — check the mic")
         XCTAssertEqual(core.apply(.micSignal(ok: true), now: t0), [])
         XCTAssertEqual(core.statusLine, "Listening — just talk")
@@ -459,7 +459,7 @@ final class SessionCoreTests: XCTestCase {
         XCTAssertEqual(core.apply(.muteTapped, now: at(1)), [.setCaptureMuted(true), .send(.mute(true)), .send(.speaking(false)), .haptic(.tap)])
         // `AudioEngine.setMuted` reports a closed gate as open again, with
         // no speech behind it: the daemon must not hold its pushes for it.
-        XCTAssertEqual(core.apply(.gateChanged(closed: false), now: at(1)), [.send(.silence(false))])
+        XCTAssertEqual(core.apply(.gateChanged(closed: false), now: at(1)), [], "a muted client sends no silence transitions")
         XCTAssertFalse(core.mic.speaking)
     }
 
@@ -494,5 +494,87 @@ final class SessionCoreTests: XCTestCase {
         XCTAssertEqual(core.apply(.simulatedGate(closed: true), now: t0), [])
         XCTAssertEqual(core.apply(.simulatedGate(closed: false), now: t0), [])
         XCTAssertFalse(core.mic.speaking)
+    }
+
+    // MARK: - The seven glitches the extraction found (PR #13)
+
+    /// 1. A failure used to reset far less than End: the next Connect showed
+    /// "Listening" off the dead session's status before any new one came.
+    func testAFailedSessionLeavesNothingStaleForTheNextConnect() {
+        var core = connected()
+        _ = core.apply(.status(.status(.connected, stalled: true, provider: "openai")), now: t0)
+        _ = core.apply(.toolCall, now: t0)
+        _ = core.apply(.playbackChanged(speaking: true), now: t0)
+        _ = core.apply(.micSignal(ok: false), now: t0)
+        _ = core.apply(.socketFailed(.unreachable(endpoint: "x", detail: ""), willRetry: false), now: at(1))
+        XCTAssertNil(core.voice.status)
+        XCTAssertNil(core.voice.provider)
+        XCTAssertFalse(core.voice.stalled)
+        XCTAssertNil(core.thinkingExpiry)
+        XCTAssertFalse(core.playback.speaking)
+        XCTAssertFalse(core.mic.noSignal)
+
+        _ = core.apply(.connectTapped, now: at(2))
+        _ = core.apply(.probeSucceeded(micGranted: true), now: at(2))
+        _ = core.apply(.socketOpened, now: at(2))
+        XCTAssertNotEqual(core.sessionState, .listening, "no status yet: not Listening")
+        XCTAssertNil(core.voice.status)
+    }
+
+    /// 2. A probe failing after End raised a banner and turned the chip red.
+    func testAProbeFailureAfterEndIsIgnored() {
+        var core = SessionCore()
+        _ = core.apply(.connectTapped, now: t0)
+        _ = core.apply(.endTapped, now: t0)
+        XCTAssertEqual(core.apply(.probeFailed(.unreachable(endpoint: "x", detail: "")), now: at(1)), [])
+        XCTAssertFalse(core.connection.failed)
+        XCTAssertEqual(core.connectionChip.status, ConnectionChip(.init()).status, "still plain Not connected")
+        XCTAssertEqual(core.apply(.tokenRefused(endpoint: "x"), now: at(1)), [])
+    }
+
+    /// 3. The `/events` task cancelled by End could still say "reconnecting".
+    func testAStreamReportAfterEndLeavesTheStreamIdle() {
+        var core = connected()
+        _ = core.apply(.endTapped, now: t0)
+        _ = core.apply(.eventsChanged(.reconnecting), now: at(1))
+        XCTAssertEqual(core.connection.events, .idle)
+    }
+
+    /// 4. Connect marked the stream as connecting before it existed.
+    func testTheStreamIsConnectingOnlyOnceItIsStarted() {
+        var core = SessionCore()
+        _ = core.apply(.connectTapped, now: t0)
+        XCTAssertEqual(core.connection.events, .idle, "the probe runs first")
+        _ = core.apply(.probeSucceeded(micGranted: true), now: t0)
+        XCTAssertEqual(core.connection.events, .connecting)
+    }
+
+    /// 5. An engine that died after a route change stayed dead.
+    func testAnEngineThatDiesIsSaidAndStartedAgain() {
+        var core = connected()
+        _ = core.apply(.gateChanged(closed: false), now: t0)
+        let effects = core.apply(.audioStopped("The microphone went away with the route change."), now: at(1))
+        XCTAssertEqual(effects, [.notice("The microphone went away with the route change."), .startAudio])
+        XCTAssertFalse(core.mic.speaking)
+    }
+
+    /// 6. The unmute's gate reset and the daemon disagreed: a muted client
+    /// now sends no silence transitions, and the unmute says "open" when the
+    /// daemon last heard "closed".
+    func testUnmuteTellsTheDaemonTheGateItLastHeardClosedIsOpen() {
+        var core = connected()
+        _ = core.apply(.gateChanged(closed: true), now: t0)
+        XCTAssertEqual(core.apply(.muteTapped, now: at(1)), [.setCaptureMuted(true), .send(.mute(true)), .haptic(.tap)])
+        XCTAssertEqual(core.apply(.gateChanged(closed: false), now: at(1)), [], "the reset muting reports")
+        XCTAssertEqual(core.apply(.muteTapped, now: at(2)), [.send(.mute(false)), .send(.silence(false)), .setCaptureMuted(false), .startAudio, .haptic(.tap)])
+        XCTAssertFalse(core.connection.socketGateClosed)
+        XCTAssertFalse(core.mic.gateClosed)
+    }
+
+    /// 7. Losing the mic signal played the "answer failed" haptic: now a
+    /// warning (see testTheDaemonsErrorAndAMissingMicSignal).
+    func testMicLossIsAWarningHaptic() {
+        var core = connected()
+        XCTAssertEqual(core.apply(.micSignal(ok: false), now: t0), [.haptic(.micLost)])
     }
 }

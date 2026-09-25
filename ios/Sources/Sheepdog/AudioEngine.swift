@@ -64,6 +64,9 @@ final class AudioEngine {
     /// iOS paused the audio and would not resume it (true), or it was
     /// resumed or stopped (false).
     var onPausedChanged: ((Bool) -> Void)?
+    /// The engine stopped by itself: a route change it could not rebuild
+    /// the capture chain for. The words say why.
+    var onStopped: ((String) -> Void)?
 
     private(set) var metrics = AudioMetrics()
     private(set) var isRunning = false
@@ -137,16 +140,7 @@ final class AudioEngine {
         try configureSession()
 
         let input = engine.inputNode
-        // `.voiceChat` alone does not cancel echo for AVAudioEngine; the
-        // voice-processing I/O unit does, and it has to be on before the
-        // engine starts. Without it the dog hears itself from the speaker.
-        if !input.isVoiceProcessingEnabled {
-            do {
-                try input.setVoiceProcessingEnabled(true)
-            } catch {
-                SheepdogLog.audio.error("voice processing unavailable: \(error.localizedDescription, privacy: .public)")
-            }
-        }
+        enableVoiceProcessing()
         // A voice-processing unit carries its own input mute, and iOS 17 an
         // app-wide one (AirPods' press-to-mute drives it). Either left on
         // gives exactly the symptom seen on the phone — unmuted in the app,
@@ -191,9 +185,50 @@ final class AudioEngine {
         startSteering()
         restartedForSignal = false
         if !isMuted { watchdog.arm(at: CFAbsoluteTimeGetCurrent()) }
-        let route = AVAudioSession.sharedInstance().currentRoute.outputs.map(\.portName).joined(separator: ", ")
-        metrics.outputRoute = route
-        SheepdogLog.audio.info("audio started: input \(format.sampleRate, privacy: .public) Hz, \(format.channelCount, privacy: .public) ch, output \(route, privacy: .public), voice processing \(input.isVoiceProcessingEnabled, privacy: .public), time-pitch latency \(self.timePitch.latency * 1000, privacy: .public) ms")
+        recordVoiceProcessing()
+        SheepdogLog.audio.info("audio started: input \(format.sampleRate, privacy: .public) Hz, \(format.channelCount, privacy: .public) ch, echo cancellation \(self.metrics.voiceProcessing.summary, privacy: .public), time-pitch latency \(self.timePitch.latency * 1000, privacy: .public) ms")
+    }
+
+    /// The echo canceller. `.voiceChat` alone does not cancel echo for
+    /// AVAudioEngine; the voice-processing I/O unit does, and it has to be
+    /// on before the engine starts. Enabling it on the input node turns
+    /// the engine's I/O into one voice-processing unit, so the output node
+    /// the player → time-pitch → mixer chain feeds is the canceller's
+    /// reference: everything the dog says is played through it, nothing
+    /// around it. Without it the dog hears itself from the speaker.
+    /// Called with the engine stopped (start, and the rebuild after a
+    /// configuration change, which can come back without it).
+    private func enableVoiceProcessing() {
+        let input = engine.inputNode
+        if !input.isVoiceProcessingEnabled {
+            do {
+                try input.setVoiceProcessingEnabled(true)
+            } catch {
+                SheepdogLog.audio.error("voice processing unavailable: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+        if input.isVoiceProcessingEnabled, input.isVoiceProcessingBypassed {
+            SheepdogLog.audio.error("voice processing was bypassed; turning it back on")
+            input.isVoiceProcessingBypassed = false
+        }
+    }
+
+    /// Settings ▸ About's echo-cancellation line, and the routes.
+    private func recordVoiceProcessing() {
+        let session = AVAudioSession.sharedInstance()
+        let status = VoiceProcessingStatus(
+            inputEnabled: engine.inputNode.isVoiceProcessingEnabled,
+            outputEnabled: engine.outputNode.isVoiceProcessingEnabled,
+            bypassed: engine.inputNode.isVoiceProcessingBypassed,
+            voiceChatMode: session.mode == .voiceChat && session.category == .playAndRecord,
+            outputRoute: session.currentRoute.outputs.map(\.portName).joined(separator: ", "),
+            inputRoute: session.currentRoute.inputs.map(\.portName).joined(separator: ", ")
+        )
+        metrics.outputRoute = status.outputRoute
+        if status != metrics.voiceProcessing {
+            metrics.voiceProcessing = status
+            SheepdogLog.audio.info("echo cancellation: \(status.summary, privacy: .public)")
+        }
     }
 
     func stop() {
@@ -635,12 +670,21 @@ final class AudioEngine {
         guard isRunning else { return }
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
+        // A category change (another audio client, a system dialog) can
+        // leave the session out of `.voiceChat`, and a rebuilt I/O unit
+        // without voice processing: both switch the echo canceller off.
+        let session = AVAudioSession.sharedInstance()
+        if session.mode != .voiceChat || session.category != .playAndRecord {
+            SheepdogLog.audio.error("audio session left voice chat (\(session.category.rawValue, privacy: .public)/\(session.mode.rawValue, privacy: .public)); restoring it")
+            try? configureSession()
+        }
+        enableVoiceProcessing()
         let input = engine.inputNode
         let format = input.inputFormat(forBus: 0)
         guard format.channelCount > 0, format.sampleRate > 0, let converter = try? PCMConverter(inputFormat: format) else {
             isRunning = false
             stopSteering()
-            onNotice?("The microphone went away with the route change.")
+            onStopped?("The microphone went away with the route change.")
             return
         }
         self.converter = converter
@@ -654,10 +698,11 @@ final class AudioEngine {
         do {
             try engine.start()
             player.play()
+            recordVoiceProcessing()
         } catch {
             isRunning = false
             stopSteering()
-            onNotice?("Audio stopped after the route change (\(error.localizedDescription)).")
+            onStopped?("Audio stopped after the route change (\(error.localizedDescription)).")
         }
     }
 }
