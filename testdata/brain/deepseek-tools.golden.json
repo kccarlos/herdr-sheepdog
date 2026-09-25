@@ -193,7 +193,7 @@
   },
   {
     "function": {
-      "description": "Start a background look into something the screen cannot answer and that may take more than a few seconds: a read-only CLI agent in the agent's repository (or the idle worker itself). It returns at once with a job id; the answer reaches the CEO on its own when the job returns, so acknowledge with pending true and say roughly how long. Phrase the question with full context: the sub-agent has not heard this conversation. One live investigation per agent.",
+      "description": "Start a background look into something the screen cannot answer and that may take more than a few seconds. source cli (the default): a fresh read-only CLI agent in the agent's repository, for questions about the code itself. source worker: the worker's own session, asked through a read-only copy that remembers everything it saw and did, for why it did something, what it tried, or to explain its decision; it never touches the worker. It returns at once with a job id; the answer reaches the CEO on its own when the job returns, so acknowledge with pending true and say roughly how long. Phrase the question with full context: neither has heard this conversation. One live investigation per agent.",
       "name": "investigate",
       "parameters": {
         "properties": {
@@ -207,6 +207,14 @@
           },
           "question": {
             "description": "a self-contained question",
+            "type": "string"
+          },
+          "source": {
+            "description": "cli (default, the repository) or worker (the worker's own memory)",
+            "enum": [
+              "cli",
+              "worker"
+            ],
             "type": "string"
           }
         },

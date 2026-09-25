@@ -36,6 +36,9 @@ type Result struct {
 	// Resumed reports that this run continued Query.Session rather than
 	// starting a new one.
 	Resumed bool
+	// Forked reports that this run forked Query.Session (Query.Fork):
+	// SessionID is then the fork's own id, never Query.Session.
+	Forked bool
 
 	// NumTurns, DurationMS and TotalCostUSD come from claude's own JSON
 	// result object (docs/cli-query-tools.md §2) when present; nil for
@@ -61,6 +64,12 @@ type Query struct {
 	// Session, when set, continues that backend session through the
 	// resume templates instead of starting a new one.
 	Session string
+	// Fork asks Session through the fork templates instead: a copy of
+	// the session answers and the original is not written to
+	// (docs/cli-query-tools.md §2c). It is how a worker's own session is
+	// asked; Backend must name the worker's backend and Session is
+	// required.
+	Fork bool
 	// Timeout overrides cfg.Timeout for this run: an investigation has
 	// its own, much larger ceiling (brain.investigate_max_s).
 	Timeout time.Duration
@@ -106,6 +115,18 @@ func (r *Runner) Query(ctx context.Context, workspace, question string) (string,
 // use.
 func (r *Runner) ResolveBackend() (Backend, error) {
 	return r.resolveBackend(r.cfg.Prefer)
+}
+
+// Has reports whether backend was detected at startup (a fork must run
+// on the worker's own backend, whatever cli.prefer says).
+func (r *Runner) Has(backend Backend) bool {
+	switch backend {
+	case Codex:
+		return r.det.Codex
+	case Claude:
+		return r.det.Claude
+	}
+	return false
 }
 
 // resolveBackend applies cli.prefer: "codex" or "claude" pins the
@@ -156,7 +177,10 @@ func (r *Runner) Run(ctx context.Context, q Query) (Result, error) {
 	}
 	defer r.unlock(slot)
 
-	tmpl, bin, err := r.template(backend, q.Session != "")
+	if q.Fork && q.Session == "" {
+		return Result{}, fmt.Errorf("cli: %s: a fork needs the session to fork", backend)
+	}
+	tmpl, bin, err := r.template(backend, q.Session != "", q.Fork)
 	if err != nil {
 		return Result{}, err
 	}
@@ -185,26 +209,40 @@ func (r *Runner) Run(ctx context.Context, q Query) (Result, error) {
 	dur := time.Since(start)
 
 	result := Result{
-		Backend:   backend,
-		Argv:      argv,
-		DurMS:     dur.Milliseconds(),
-		Exit:      exec.Exit,
-		Killed:    exec.Killed,
-		Capped:    exec.StdoutCapped,
-		Stderr:    exec.Stderr,
-		SessionID: q.Session,
-		Resumed:   q.Session != "",
+		Backend: backend,
+		Argv:    argv,
+		DurMS:   dur.Milliseconds(),
+		Exit:    exec.Exit,
+		Killed:  exec.Killed,
+		Capped:  exec.StdoutCapped,
+		Stderr:  exec.Stderr,
+		Resumed: q.Session != "" && !q.Fork,
+		Forked:  q.Fork,
+	}
+	if !q.Fork {
+		// A resumed run keeps its session even when the output named
+		// none; a fork's session is only ever the one it reported, so
+		// the forked session can never be mistaken for the fork's.
+		result.SessionID = q.Session
 	}
 
 	resErr := r.finish(&result, exec, backend, timeout)
+	if resErr == nil && q.Fork && result.SessionID == q.Session {
+		resErr = fmt.Errorf("%w: %s reported the original session back", ErrNotForked, backend)
+	}
 	r.log(result, argv, question, resErr)
 	return result, resErr
 }
 
 // template returns the argv template and binary for backend; resume
-// picks the follow-up template.
-func (r *Runner) template(backend Backend, resume bool) ([]string, string, error) {
+// picks the follow-up template and fork the fork template (fixed argv,
+// docs/cli-query-tools.md §2c).
+func (r *Runner) template(backend Backend, resume, fork bool) ([]string, string, error) {
 	switch {
+	case backend == Codex && fork:
+		return defaultCodexForkCmd, r.cfg.CodexBin, nil
+	case backend == Claude && fork:
+		return defaultClaudeForkCmd, r.cfg.ClaudeBin, nil
 	case backend == Codex && resume:
 		return r.cfg.CodexResumeCmd, r.cfg.CodexBin, nil
 	case backend == Codex:
@@ -298,6 +336,7 @@ func (r *Runner) log(result Result, fullArgv []string, question string, resErr e
 		// disk); whether there is one decides if a follow-up can resume.
 		"session": result.SessionID != "",
 		"resumed": result.Resumed,
+		"forked":  result.Forked,
 	}
 	if resErr != nil {
 		payload["error"] = resErr.Error()

@@ -23,6 +23,8 @@ type fakeInvestigator struct {
 	queries []InvestigationQuery
 	answer  string
 	session string
+	// backend is the backend the result names ("codex" when unset).
+	backend string
 	err     error
 	// gate, when set, holds every run until it is closed (or the job's
 	// context ends, which is what a cancel or the ceiling does).
@@ -32,8 +34,11 @@ type fakeInvestigator struct {
 func (f *fakeInvestigator) Investigate(ctx context.Context, q InvestigationQuery) (InvestigationResult, error) {
 	f.mu.Lock()
 	f.queries = append(f.queries, q)
-	gate, answer, session, err := f.gate, f.answer, f.session, f.err
+	gate, answer, session, err, backend := f.gate, f.answer, f.session, f.err, f.backend
 	f.mu.Unlock()
+	if backend == "" {
+		backend = "codex"
+	}
 	if gate != nil {
 		select {
 		case <-gate:
@@ -44,7 +49,7 @@ func (f *fakeInvestigator) Investigate(ctx context.Context, q InvestigationQuery
 	if err != nil {
 		return InvestigationResult{}, err
 	}
-	return InvestigationResult{Backend: "codex", Answer: answer, SessionID: session}, nil
+	return InvestigationResult{Backend: backend, Answer: answer, SessionID: session}, nil
 }
 
 func (f *fakeInvestigator) all() []InvestigationQuery {

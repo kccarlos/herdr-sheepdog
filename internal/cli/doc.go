@@ -8,6 +8,12 @@
 // "Investigations and explanations"). The session id comes out of the
 // JSON output — codex's thread.started, claude's session_id.
 //
+// A worker's own session is asked through a fork (Query.Fork): claude
+// --resume --fork-session, codex exec fork. Both answer from the
+// worker's memory and write only a new session of their own, never into
+// the one the worker's TUI has open (docs/cli-query-tools.md §2c); the
+// fork's id is what a follow-up resumes.
+//
 // Runner implements supervisor.Querier. It is deliberately not a
 // supervisor: the only path that changes a worker's files is
 // herdr.Client.Prompt / SendKeys against a worker pane (decision D8). The

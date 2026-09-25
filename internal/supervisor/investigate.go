@@ -4,14 +4,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
+	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/prose"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
+	"github.com/kccarlos/herdr-sheepdog/internal/workerlog"
 )
 
 // Investigations (docs/roles.md "Investigations and explanations"): the
@@ -33,6 +37,16 @@ import (
 // One job per agent: a newer request about the same agent cancels the
 // running one (investigation.cancelled {reason: superseded}), as does a
 // stop and the daemon shutting down.
+//
+// Two sources (docs/dive-deep.md §3). The default, cli, starts a fresh
+// read-only sub-agent in the worker's repository: it has not heard the
+// conversation and never saw what the worker tried. worker asks the
+// worker's own session instead, through a read-only fork of it (claude
+// --fork-session, codex exec fork; docs/cli-query-tools.md §2c): the
+// fork starts with everything the worker saw and did, answers from that
+// memory, and writes only a session of its own, never into the one the
+// worker's TUI has open and never into its pane. The fork's id is the
+// job's session, so a follow-up resumes the fork, not the worker.
 
 // defaultInvestigateETA is the estimate the acknowledgement carries
 // before any job of that backend has finished.
@@ -64,8 +78,15 @@ type InvestigationQuery struct {
 	// Question is what the sub-agent is asked, self-contained.
 	Question string
 	// Session, when set, resumes that sub-agent session instead of
-	// starting a new one.
+	// starting a new one; with Fork, it is the worker's session to fork.
 	Session string
+	// Backend pins the CLI backend ("" applies cli.prefer). A fork runs
+	// on the worker's own backend, and a follow-up on the one that kept
+	// the session.
+	Backend string
+	// Fork asks Session through a read-only fork of it: the worker's own
+	// session answers and is not written to (source worker).
+	Fork bool
 	// Timeout is the sanity ceiling of this run.
 	Timeout time.Duration
 	// Slot is the one-at-a-time slot the run claims, so a minutes-long
@@ -83,6 +104,14 @@ type InvestigationResult struct {
 	// SessionID is the session a follow-up resumes; "" when the backend
 	// reported none.
 	SessionID string
+}
+
+// backendChecker is the optional half of an Investigator that says
+// whether a backend was detected, so asking the worker itself on a
+// machine without that worker's CLI is refused at once with a reason
+// instead of failing in the background.
+type backendChecker interface {
+	HasBackend(backend string) bool
 }
 
 // Investigator is the background half of the CLI query tool: the same
@@ -110,11 +139,14 @@ func (s *Supervisor) startInvestigation(ctx context.Context, paneID string, req 
 	if question == "" {
 		return brain.InvestigationStart{}, errors.New("investigate needs a question")
 	}
-	session, question, err := s.resumeFor(req.FollowUpOf, question)
+	plan, err := s.planInvestigation(row, req, question)
 	if err != nil {
 		return brain.InvestigationStart{}, err
 	}
 	workspace := s.workspaceDir(ctx, row)
+	if workspace == "" {
+		workspace = row.Cwd
+	}
 
 	// A newer question about the same agent replaces the older look.
 	s.cancelInvestigationFor(paneID, "superseded")
@@ -122,8 +154,8 @@ func (s *Supervisor) startInvestigation(ctx context.Context, paneID string, req 
 	now := s.cfg.Now()
 	inv := state.Investigation{
 		ID: s.nextID("inv"), PaneID: paneID, Alias: row.Alias, Workspace: workspace,
-		Question: question, Asked: strings.TrimSpace(req.Asked), FollowUpOf: req.FollowUpOf,
-		Source: state.InvestigationSourceCLI, SessionID: session, Status: state.InvestigationRunning, Started: now,
+		Question: plan.question, Asked: strings.TrimSpace(req.Asked), FollowUpOf: req.FollowUpOf,
+		Source: plan.source, Backend: plan.backend, SessionID: plan.jobSession(), Status: state.InvestigationRunning, Started: now,
 	}
 	if err := s.appendInvestigation(inv); err != nil {
 		return brain.InvestigationStart{}, err
@@ -134,10 +166,13 @@ func (s *Supervisor) startInvestigation(ctx context.Context, paneID string, req 
 	s.investigating[paneID] = live
 	s.mu.Unlock()
 	s.touch(paneID)
-	backend := s.investigatorBackend()
+	backend := plan.backend
+	if backend == "" {
+		backend = s.investigatorBackend()
+	}
 	s.log.Log(logSource, "investigation.started", paneID, map[string]any{
 		"id": inv.ID, "agent": aliasOr(row.Alias), "source": inv.Source, "backend": backend,
-		"question": inv.Question, "follow_up_of": inv.FollowUpOf, "resumed": session != "",
+		"question": inv.Question, "follow_up_of": inv.FollowUpOf, "resumed": plan.session != "", "forked": plan.fork,
 	})
 	// An investigation event resets the "delivered" mark of
 	// supervisor.repeat_window_s too: what the shepherd was last told
@@ -151,35 +186,166 @@ func (s *Supervisor) startInvestigation(ctx context.Context, paneID string, req 
 	}
 	go func() {
 		defer s.replies.Done()
-		s.runInvestigation(jobCtx, live, inv)
+		s.runInvestigation(jobCtx, live, inv, InvestigationQuery{
+			Workspace: inv.Workspace, Question: inv.Question, Session: plan.session,
+			Backend: plan.backend, Fork: plan.fork,
+			Timeout: s.cfg.InvestigateMax, Slot: "investigation:" + inv.PaneID,
+		})
 	}()
 	return brain.InvestigationStart{Job: inv.ID, ETASeconds: int(s.investigateETA(backend).Seconds())}, nil
 }
 
-// resumeFor resolves follow_up_of: the session of the earlier job when
-// it is still resumable, otherwise the question with that job's answer
-// prepended so a cold sub-agent has what the shepherd already heard.
-func (s *Supervisor) resumeFor(followUpOf, question string) (session, q string, err error) {
-	if followUpOf == "" {
-		return "", question, nil
+// investigationPlan is how one job runs: which source, on which backend
+// and session, with what question.
+type investigationPlan struct {
+	source, backend, question string
+	// session is the session the run resumes, or with fork the worker's
+	// session it forks.
+	session string
+	fork    bool
+}
+
+// jobSession is the session the record starts with: a resumed session
+// is the job's own, but a forked one is the worker's and must never
+// become the job's (a follow-up would resume the worker and write into
+// it); the fork's own id replaces it when the run reports one.
+func (p investigationPlan) jobSession() string {
+	if p.fork {
+		return ""
 	}
-	prev, ok := s.investigation(followUpOf)
+	return p.session
+}
+
+// planInvestigation resolves the source and follow_up_of. A follow-up
+// continues the earlier job's source and resumes its session while it
+// is still resumable (the fork, for a worker job); otherwise the
+// question carries that job's answer so a cold start has what the
+// shepherd already heard, and a worker job forks the worker again.
+func (s *Supervisor) planInvestigation(row state.Agent, req brain.InvestigationRequest, question string) (investigationPlan, error) {
+	source, err := investigationSource(req.Source)
+	if err != nil {
+		return investigationPlan{}, err
+	}
+	p := investigationPlan{source: source, question: question}
+	if req.FollowUpOf != "" {
+		prev, err := s.followUp(req.FollowUpOf)
+		if err != nil {
+			return investigationPlan{}, err
+		}
+		prevSource := prev.Source
+		if prevSource == "" {
+			prevSource = state.InvestigationSourceCLI
+		}
+		if strings.TrimSpace(req.Source) != "" && source != prevSource {
+			return investigationPlan{}, fmt.Errorf("investigation %s asked %s, and a follow-up continues it; leave out follow_up_of to ask %s", prev.ID, sourceWhat(prevSource), sourceWhat(source))
+		}
+		p.source = prevSource
+		if prev.SessionID != "" && s.resumable(prev) {
+			p.session, p.backend = prev.SessionID, prev.Backend
+			return p, nil
+		}
+		// No session to resume (the backend reported none, or it is too
+		// old to be there): the sub-agent starts cold with what it said
+		// before.
+		p.question = fmt.Sprintf("Earlier you were asked: %s\nYou answered:\n%s\n\nNow: %s", prev.Question, prev.Result, question)
+	}
+	if p.source == state.InvestigationSourceWorker {
+		backend, session, err := s.workerFork(row)
+		if err != nil {
+			return investigationPlan{}, err
+		}
+		p.backend, p.session, p.fork = backend, session, true
+	}
+	return p, nil
+}
+
+// investigationSource normalises the tool's source argument.
+func investigationSource(source string) (string, error) {
+	switch v := strings.ToLower(strings.TrimSpace(source)); v {
+	case "", state.InvestigationSourceCLI:
+		return state.InvestigationSourceCLI, nil
+	case state.InvestigationSourceWorker:
+		return v, nil
+	default:
+		return "", fmt.Errorf("investigate source %q: want %s (the default, the repository) or %s (the worker's own session)", source, state.InvestigationSourceCLI, state.InvestigationSourceWorker)
+	}
+}
+
+// sourceWhat names a source for an error the model reads.
+func sourceWhat(source string) string {
+	if source == state.InvestigationSourceWorker {
+		return "the worker itself"
+	}
+	return "the repository"
+}
+
+// followUp returns the earlier job follow_up_of names, when it can be
+// followed up.
+func (s *Supervisor) followUp(id string) (state.Investigation, error) {
+	prev, ok := s.investigation(id)
 	if !ok {
-		return "", "", fmt.Errorf("there is no investigation %q; the ledger is in your prompt", followUpOf)
+		return state.Investigation{}, fmt.Errorf("there is no investigation %q; the ledger is in your prompt", id)
 	}
 	switch prev.Status {
 	case state.InvestigationRunning:
-		return "", "", fmt.Errorf("investigation %s is still running; its answer comes on its own", followUpOf)
+		return state.Investigation{}, fmt.Errorf("investigation %s is still running; its answer comes on its own", id)
 	case state.InvestigationDone:
+		return prev, nil
 	default:
-		return "", "", fmt.Errorf("investigation %s did not finish, so there is nothing to follow up on", followUpOf)
+		return state.Investigation{}, fmt.Errorf("investigation %s did not finish, so there is nothing to follow up on", id)
 	}
-	if prev.SessionID != "" && s.resumable(prev) {
-		return prev.SessionID, question, nil
+}
+
+// sessionUUID matches the session ids both backends use: claude's
+// session_id, codex's thread id. herdr reports them; they reach an argv,
+// so nothing else is accepted.
+var sessionUUID = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+
+// workerFork resolves the worker's own session for source worker: the
+// backend that keeps it and the id its fork takes. A session sheepdog
+// cannot find is refused with the worker.session_missing reason, for the
+// model to read, pointing it at the default source.
+func (s *Supervisor) workerFork(row state.Agent) (backend, session string, err error) {
+	alias := aliasOr(row.Alias)
+	refuse := func(why string) error {
+		return fmt.Errorf("cannot ask %s itself: %s; investigate without source asks a read-only agent in its repository instead", alias, why)
 	}
-	// No session to resume (the backend reported none, or it is too old
-	// to be there): the sub-agent starts cold with what it said before.
-	return "", fmt.Sprintf("Earlier you were asked: %s\nYou answered:\n%s\n\nNow: %s", prev.Question, prev.Result, question), nil
+	sess := workerSession(row)
+	if _, err := s.cfg.WorkerLog.Locate(sess); err != nil {
+		reason := workerlog.Reason(err)
+		return "", "", refuse(reason + " (" + sessionMissingWhy[reason] + ")")
+	}
+	backend = workerBackend(sess)
+	session = sess.Value
+	if sess.Kind == herdr.SessionKindPath {
+		// Both backends name the transcript after the session: claude
+		// <id>.jsonl, codex rollout-<timestamp>-<id>.jsonl.
+		stem := strings.TrimSuffix(filepath.Base(sess.Value), ".jsonl")
+		session = stem[max(0, len(stem)-36):]
+	}
+	if !sessionUUID.MatchString(session) {
+		return "", "", refuse(workerlog.ReasonNotFound + " (its session id is not one the " + backend + " CLI can resume)")
+	}
+	if c, ok := s.investigator.(backendChecker); ok && !c.HasBackend(backend) {
+		return "", "", refuse("the " + backend + " CLI that keeps its session is not installed here")
+	}
+	return backend, session, nil
+}
+
+// workerBackend names the CLI that keeps a worker's session, from the
+// reporting integration or the pane's kind (workerlog.Locate has already
+// refused any other).
+func workerBackend(sess workerlog.Session) string {
+	for _, v := range []string{sess.Source, sess.Agent} {
+		v = strings.ToLower(v)
+		switch {
+		case strings.Contains(v, "claude"):
+			return "claude"
+		case strings.Contains(v, "codex"):
+			return "codex"
+		}
+	}
+	return ""
 }
 
 // resumable reports whether a finished job's sub-agent session is still
@@ -194,12 +360,9 @@ func (s *Supervisor) resumable(inv state.Investigation) bool {
 // runInvestigation runs one job and delivers what it found. It never
 // holds s.mu across the run: the job takes minutes and everything else
 // (a shepherd turn, a worker event, a stop) must keep working.
-func (s *Supervisor) runInvestigation(ctx context.Context, live *liveInvestigation, inv state.Investigation) {
+func (s *Supervisor) runInvestigation(ctx context.Context, live *liveInvestigation, inv state.Investigation, q InvestigationQuery) {
 	defer live.cancel()
-	res, err := s.investigator.Investigate(ctx, InvestigationQuery{
-		Workspace: inv.Workspace, Question: inv.Question, Session: inv.SessionID,
-		Timeout: s.cfg.InvestigateMax, Slot: "investigation:" + inv.PaneID,
-	})
+	res, err := s.investigator.Investigate(ctx, q)
 	s.mu.Lock()
 	cancelled := live.cancelled
 	if s.investigating[inv.PaneID] == live {
@@ -223,7 +386,9 @@ func (s *Supervisor) runInvestigation(ctx context.Context, live *liveInvestigati
 	inv.Status, inv.Finished = state.InvestigationDone, &now
 	inv.Result, inv.Backend = strings.TrimSpace(res.Answer), res.Backend
 	inv.Summary = investigationSummary(inv.Result)
-	if res.SessionID != "" {
+	if res.SessionID != "" || q.Fork {
+		// A fork's session is only ever the one it reported: the
+		// worker's own id never becomes the job's.
 		inv.SessionID = res.SessionID
 	}
 	s.saveInvestigation(inv)

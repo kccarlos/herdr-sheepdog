@@ -384,6 +384,14 @@ output_cap_kb = 16
 prefer        = "codex" # first detected wins; both tools took ~17 s on a trivial question at default effort
 ```
 
+The fork templates of `investigate(source: "worker")` (§2c) are not in
+the config: they are fixed in `internal/cli` (`defaultClaudeForkCmd`,
+`defaultCodexForkCmd`), because the fork is only safe in the verified
+form (`--resume {session} --fork-session` for claude, `codex exec fork
+{session}` for codex, never `codex exec resume` on a worker's thread).
+The fork runs on the worker's own backend, whatever `prefer` says, and a
+follow-up resumes the fork's id through the resume templates above.
+
 An investigation is not bounded by `timeout_s` but by
 `brain.investigate_max_s` (600 s), which is a sanity ceiling, not a
 budget: the answer may take as long as it takes (CONFIG.md).

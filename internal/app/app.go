@@ -1059,11 +1059,22 @@ func (l *lazyQuerier) Investigate(ctx context.Context, q supervisor.Investigatio
 	if runner == nil {
 		return supervisor.InvestigationResult{}, cli.ErrUnavailable
 	}
-	res, err := runner.Run(ctx, cli.Query{Workspace: q.Workspace, Question: q.Question, Session: q.Session, Timeout: q.Timeout, Slot: q.Slot})
+	res, err := runner.Run(ctx, cli.Query{Backend: cli.Backend(q.Backend), Workspace: q.Workspace, Question: q.Question, Session: q.Session, Fork: q.Fork, Timeout: q.Timeout, Slot: q.Slot})
 	if err != nil {
 		return supervisor.InvestigationResult{}, err
 	}
 	return supervisor.InvestigationResult{Backend: string(res.Backend), Answer: res.Raw, SessionID: res.SessionID}, nil
+}
+
+// HasBackend reports whether backend was detected, so asking a worker's
+// own session is refused at once on a machine without that worker's
+// CLI. Before detection ran it says yes and the run itself reports
+// cli.ErrUnavailable.
+func (l *lazyQuerier) HasBackend(backend string) bool {
+	l.mu.Lock()
+	runner := l.runner
+	l.mu.Unlock()
+	return runner == nil || runner.Has(cli.Backend(backend))
 }
 
 // ResolveBackend names the backend investigations will use ("" before

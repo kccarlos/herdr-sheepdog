@@ -465,6 +465,9 @@ func (h *Host) Investigate(_ context.Context, paneID string, req brain.Investiga
 		Asked: req.Asked, FollowUpOf: req.FollowUpOf, Source: brain.InvestigationSourceCLI, Backend: "codex",
 		Status: brain.InvestigationRunning, Started: now,
 	}
+	if req.Source != "" {
+		inv.Source = req.Source
+	}
 	h.Investigated = append(h.Investigated, inv)
 	return brain.InvestigationStart{Job: inv.ID, ETASeconds: 30}, nil
 }

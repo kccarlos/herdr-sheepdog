@@ -233,3 +233,18 @@ func waitForQueue(t *testing.T, h *harness, n int) {
 	}
 	t.Fatalf("timed out waiting for %d queued turns", n)
 }
+
+// "Ask it why" goes to the worker's own memory: the tool's source reaches
+// the Host, which forks the worker's session (docs/dive-deep.md §3).
+func TestInvestigateSourceWorkerReachesTheHost(t *testing.T) {
+	h := newHarness(t, braintest.NewModel(
+		braintest.Step{Calls: []*genai.FunctionCall{braintest.FC(ToolInvestigate, map[string]any{"agent": "auth", "question": "why did you skip the migration?", "source": "worker"})}},
+		braintest.Step{Text: `{"spoken": "Asking auth itself, about half a minute.", "detail": "", "pending": true}`},
+	), nil)
+	if _, err := h.brain.Turn(context.Background(), Request{Kind: KindUtterance, Question: "ask it why it skipped the migration"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(h.host.Investigated) != 1 || h.host.Investigated[0].Source != InvestigationSourceWorker {
+		t.Fatalf("jobs = %+v (want one asking the worker itself)", h.host.Investigated)
+	}
+}
