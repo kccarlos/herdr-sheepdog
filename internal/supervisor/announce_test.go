@@ -931,3 +931,58 @@ func TestAnnouncePromiseOnlyEvents(t *testing.T) {
 		t.Errorf("promises = %+v", st)
 	}
 }
+
+// TestKeptPromiseOnAStaleBlockIsLoggedDropped: docs/timelines.md C20 —
+// a promise kept by a block whose prompt was answered while the brain
+// wrote about it is marked kept, and its line is dropped with the stale
+// block. The drop is logged (voice.push_dropped {reason: stale_block})
+// instead of vanishing.
+func TestKeptPromiseOnAStaleBlockIsLoggedDropped(t *testing.T) {
+	m := braintest.NewModel()
+	h := newBrainHarness(t, m)
+	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
+	p, err := h.sup.createPromise("w5:p1", brain.PromiseRequest{Text: "tell me when it asks", Event: "blocked"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.EventDefault = &braintest.Step{Fn: func(call braintest.Call) (*genai.GenerateContentResponse, error) {
+		h.say("yes")
+		return braintest.Response(*announceReply("Auth wants to write hello.txt.", "interrupt", "", "", true)), nil
+	}}
+	h.block("w5:p1", "codex-approval-prompt.screen.txt")
+	if len(h.log.ofType("brain.push_stale")) != 1 {
+		t.Fatalf("brain.push_stale = %v", h.log.ofType("brain.push_stale"))
+	}
+	d := h.log.ofType("voice.push_dropped")
+	if len(d) != 1 {
+		t.Fatalf("voice.push_dropped = %v", d)
+	}
+	pl := payload(d[0])
+	ids, _ := pl["keeps_promise_ids"].([]string)
+	if pl["reason"] != "stale_block" || len(ids) != 1 || ids[0] != p.ID || pl["text"] != "Auth wants to write hello.txt." {
+		t.Errorf("voice.push_dropped = %v", pl)
+	}
+}
+
+// TestKeptPromiseLineIsTaggedOwed: the line that keeps a promise carries
+// keeps_promise_ids, so the voice queue lets it pass plain idle news
+// (docs/timelines.md C29).
+func TestKeptPromiseLineIsTaggedOwed(t *testing.T) {
+	m := braintest.NewModel()
+	m.EventDefault = announceReply("Auth finished: all tests pass.", "idle", "", "", false)
+	h := newBrainHarness(t, m)
+	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
+	p, err := h.sup.createPromise("w5:p1", brain.PromiseRequest{Text: "tell me when it's done", Event: "done"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	doneAuth(h)
+	got := h.pusher.all()
+	if len(got) != 1 {
+		t.Fatalf("pushes = %+v", got)
+	}
+	ids, _ := h.pusher.tagsOf(0)["keeps_promise_ids"].([]string)
+	if len(ids) != 1 || ids[0] != p.ID || !voice.PushOwed(h.pusher.tagsOf(0)) {
+		t.Errorf("tags = %v, want keeps_promise_ids [%s]", h.pusher.tagsOf(0), p.ID)
+	}
+}

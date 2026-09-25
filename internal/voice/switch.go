@@ -227,8 +227,9 @@ func (sw *Switcher) SetProvider(id, via string) error {
 		ca.ClientAttached(client)
 	}
 	sw.log.Log("voice", "voice.provider_changed", "", map[string]any{"from": from, "to": id, "via": via})
+	sw.carryPushes(old, inner, from, id)
 	sw.ctxlog.Marker("provider switch", fmt.Sprintf("Voice provider switched from %s to %s (via %s): the new provider holds none of the old one's context.", from, id, via), false)
-	sw.emit(EventInterrupted{}) // drop whatever the old voice had queued
+	sw.emit(EventInterrupted{}) // drop the old voice's audio (its queued pushes were carried)
 	go func() {
 		defer sw.retire.Done()
 		_ = old.Close()
@@ -239,6 +240,46 @@ func (sw *Switcher) SetProvider(id, via string) error {
 		}
 	}()
 	return nil
+}
+
+// carryPushes moves the pushes still queued in the retired session onto
+// the new one, in order, so a provider switch does not discard lines
+// nobody has heard yet (docs/timelines.md C15: the old session's queue
+// used to be closed with it, with no event). Each goes through the new
+// session's own queue and rules (hold, urgency, arbitration); its queue
+// age restarts. Logs voice.push_carried {count}; a line the new session
+// refuses is logged voice.push_dropped {reason: provider_switch}. A
+// session without DrainPushes carries nothing.
+func (sw *Switcher) carryPushes(old, inner Session, from, to string) {
+	d, ok := old.(interface{ DrainPushes() []QueuedPush })
+	if !ok {
+		return
+	}
+	queued := d.DrainPushes()
+	if len(queued) == 0 {
+		return
+	}
+	carried := 0
+	for _, q := range queued {
+		var err error
+		if tp, ok := inner.(interface {
+			PushTagged(string, Urgency, map[string]any) error
+		}); ok {
+			err = tp.PushTagged(q.Text, q.Urgency, q.Tags)
+		} else {
+			err = inner.Push(q.Text, q.Urgency)
+		}
+		if err != nil {
+			p := map[string]any{"text": q.Text, "urgency": q.Urgency.String(), "reason": "provider_switch", "error": err.Error(), "from": from, "to": to}
+			for k, v := range q.Tags {
+				p[k] = v
+			}
+			sw.log.Log("voice", "voice.push_dropped", "", p)
+			continue
+		}
+		carried++
+	}
+	sw.log.Log("voice", "voice.push_carried", "", map[string]any{"count": carried, "from": from, "to": to})
 }
 
 // forwardLocked pumps inner's audio and events onto the switcher's while

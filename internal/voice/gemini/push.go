@@ -41,10 +41,13 @@ func exempt(tags map[string]any) bool {
 	return tags["due_promise"] == true || tags["needs_user"] == true || tags["stop"] == true
 }
 
-// Push policy (plan §3.6): one at a time, FIFO. UrgencySilent goes as
-// soon as there is a connection. UrgencyInterrupt goes as soon as the user
-// is not speaking. UrgencyIdle additionally waits for the model's turn to
-// complete and for PushGap since the previous spoken push.
+// Push policy (plan §3.6). UrgencySilent goes as soon as there is a
+// connection. UrgencyInterrupt goes as soon as the user is not speaking.
+// UrgencyIdle additionally waits for the model's turn to complete and
+// for PushGap since the previous spoken push. Which push goes next is
+// pickPush's arbitration (voice/pushclass.go): the first ready line the
+// shepherd is owed or must hear now, else the oldest other line — not
+// merely the head of the queue.
 //
 // waitState means "block until the next state change"; a positive
 // duration means "ready after this long unless something changes".
@@ -58,70 +61,42 @@ func (s *Session) pushLoop(ctx context.Context) {
 		case <-s.kick:
 		}
 		for {
-			item, ok := s.peekPush()
-			if !ok {
-				break
-			}
-			if held, wait := s.holdPush(); held {
-				if wait == 0 {
-					continue // the head expired and was dropped
-				}
-				select {
-				case <-ctx.Done():
-					return
-				case <-s.kick:
-				case <-time.After(wait):
-				}
+			p := s.pickPush()
+			s.logPick(p)
+			if p.ok {
+				s.doPush(ctx, p.item)
 				continue
 			}
-			wait, timedOut := s.pushReady(item)
-			if timedOut {
-				s.notePushTimeout()
-			}
-			if wait == 0 {
-				s.popPush()
-				s.doPush(ctx, item)
-				continue
-			}
-			if wait == waitState {
+			if p.wait == waitState {
 				break
 			}
 			select {
 			case <-ctx.Done():
 				return
 			case <-s.kick:
-			case <-time.After(wait):
+			case <-time.After(p.wait):
 			}
 		}
 	}
 }
 
-// peekPush returns the head of the queue, downgrading it from INTERRUPT
-// to WHEN_IDLE in place — once, since the mutation makes the condition
-// below false on every later peek — while the model is speaking and the
-// item is not exempt (docs/roles.md "Pushes": nothing interrupts the
-// model mid-sentence except the shepherd). The downgraded item then
-// runs the ordinary WHEN_IDLE wait below; voice.push_deferred is logged
-// outside the lock.
-func (s *Session) peekPush() (pushItem, bool) {
-	s.mu.Lock()
-	if len(s.pushQ) == 0 {
-		s.mu.Unlock()
-		return pushItem{}, false
-	}
-	head := &s.pushQ[0]
-	deferNow := head.urgency == voice.UrgencyInterrupt && s.speakingLocked(s.now()) && !exempt(head.tags)
-	if deferNow {
-		head.urgency = voice.UrgencyIdle
-	}
-	item := *head
-	s.mu.Unlock()
-	if deferNow {
-		s.log.Log(logSource, "voice.push_deferred", "", map[string]any{
-			"kind": "push", "reason": "speaking", "urgency_requested": voice.UrgencyInterrupt.String(),
-		})
-	}
-	return item, true
+// pushPick is pickPush's verdict and what it has to log.
+type pushPick struct {
+	ok   bool
+	item pushItem
+	// wait is how long until something may be ready (waitState: until
+	// the next state change) when nothing is ready now.
+	wait time.Duration
+	// over are the items the picked one overtook (voice.push_overtook).
+	over []pushItem
+	// timedOut: an open turn was given up on (TurnTimeout).
+	timedOut bool
+	// deferred, held and dropped are items downgraded to WHEN_IDLE while
+	// the model speaks, first held for want of a listener, and dropped
+	// after heldPushTTL.
+	deferred int
+	held     []pushItem
+	dropped  []pushItem
 }
 
 // heldPushTTL is how long a spoken push waits for a listener before it is
@@ -130,42 +105,138 @@ func (s *Session) peekPush() (pushItem, bool) {
 // default), so both providers treat an absent shepherd alike.
 const heldPushTTL = 5 * time.Minute
 
-// holdPush keeps a spoken push (idle or interrupt) queued while no /ws
+// pickPush chooses the push to send now and removes it from the queue
+// (voice/pushclass.go has the arbitration): among the lines the shepherd
+// is owed or must hear now (class 0), the first ready one; failing
+// that, the oldest other line, if it is ready. A line never overtakes an
+// earlier one that answers the same utterance.
+//
+// Per item, as before for the head: an INTERRUPT push is downgraded to
+// WHEN_IDLE, in place and once, while the model is speaking and no tag
+// exempts it (docs/roles.md "Pushes": nothing interrupts the model
+// mid-sentence except the shepherd); a spoken push is held while no /ws
 // client is attached, so the model does not speak it to nobody
-// (2026-09-24 18:22:04: a 12 s answer spoken with the page closed). It
-// guards the invariant "a spoken push is heard or recorded as unheard":
-// the session cannot make an absent listener unrepresentable, since the
-// browser can leave at any moment between the push and the speech. The
-// first hold of an item logs voice.push_held; an item held longer than
-// heldPushTTL is dropped with voice.push_dropped. held reports that the
-// head must not be sent now; wait is how long until the TTL (0 after a
-// drop: look at the new head at once). Silent pushes are context, not
-// speech, and are never held. ClientAttached(true) pokes the loop.
-func (s *Session) holdPush() (held bool, wait time.Duration) {
+// (2026-09-24 18:22:04: a 12 s answer spoken with the page closed) —
+// the invariant "a spoken push is heard or recorded as unheard", which
+// the session cannot make unrepresentable since the browser can leave
+// at any moment — and dropped once held longer than heldPushTTL. Silent
+// pushes are context, not speech, and are never held.
+// ClientAttached(true) pokes the loop.
+func (s *Session) pickPush() pushPick {
 	s.mu.Lock()
-	if !s.noClient || len(s.pushQ) == 0 || s.pushQ[0].urgency == voice.UrgencySilent {
-		s.mu.Unlock()
-		return false, 0
-	}
+	defer s.mu.Unlock()
 	now := s.now()
-	head := &s.pushQ[0]
-	if age := now.Sub(head.at); age >= heldPushTTL {
-		item := *head
-		s.pushQ = s.pushQ[1:]
-		s.mu.Unlock()
-		s.log.Log(logSource, "voice.push_dropped", "", heldPayload(item, "no_listener", age))
-		return true, 0
+	var p pushPick
+	if s.noClient {
+		kept := s.pushQ[:0]
+		for _, it := range s.pushQ {
+			if it.urgency != voice.UrgencySilent && now.Sub(it.at) >= heldPushTTL {
+				p.dropped = append(p.dropped, it)
+				continue
+			}
+			kept = append(kept, it)
+		}
+		s.pushQ = kept
 	}
-	first := head.heldAt.IsZero()
-	if first {
-		head.heldAt = now
+	p.wait = waitState
+	pick, firstOther, otherReady, sawFirst := -1, -1, false, false
+	blocked := map[string]bool{} // utterances an earlier, unready line answers
+	for i := range s.pushQ {
+		it := &s.pushQ[i]
+		first := voice.PushFirstClass(it.requested, it.tags)
+		if !first {
+			if firstOther >= 0 || sawFirst {
+				// Only the oldest other line is ever a candidate, and
+				// never past an owed one still waiting.
+				continue
+			}
+			firstOther = i
+		}
+		sawFirst = sawFirst || first
+		if it.urgency == voice.UrgencyInterrupt && s.speakingLocked(now) && !exempt(it.tags) {
+			it.urgency = voice.UrgencyIdle
+			p.deferred++
+		}
+		var wait time.Duration
+		if s.noClient && it.urgency != voice.UrgencySilent {
+			if it.heldAt.IsZero() {
+				it.heldAt = now
+				p.held = append(p.held, *it)
+			}
+			wait = heldPushTTL - now.Sub(it.at)
+		} else {
+			var timedOut bool
+			wait, timedOut = s.pushReadyLocked(*it, now)
+			p.timedOut = p.timedOut || timedOut
+		}
+		utt := voice.PushUtterance(it.tags)
+		if wait == 0 && !blocked[utt] {
+			if first || it.urgency == voice.UrgencySilent {
+				// Silent context waits for nothing, so taking it in
+				// order costs an owed line nothing.
+				pick = i
+				break
+			}
+			otherReady = true
+			continue // the oldest other line: taken only if no owed line is ready
+		}
+		if utt != "" {
+			blocked[utt] = true
+		}
+		if wait > 0 && (p.wait == waitState || wait < p.wait) {
+			p.wait = wait
+		}
 	}
-	item := *head
-	s.mu.Unlock()
-	if first {
-		s.log.Log(logSource, "voice.push_held", "", heldPayload(item, "no_listener", 0))
+	if pick < 0 && otherReady {
+		pick = firstOther
 	}
-	return true, heldPushTTL - now.Sub(item.at)
+	if pick < 0 {
+		return p
+	}
+	p.ok, p.item = true, s.pushQ[pick]
+	p.over = append(p.over, s.pushQ[:pick]...)
+	s.pushQ = append(s.pushQ[:pick:pick], s.pushQ[pick+1:]...)
+	return p
+}
+
+// logPick writes what pickPush decided: voice.push_dropped for a held
+// line past heldPushTTL, voice.push_held the first time a line is held,
+// voice.push_deferred for a downgrade, voice.push_timeout (and its
+// recycle count) for a turn given up on, and voice.push_overtook when
+// the line picked was not the oldest one queued.
+func (s *Session) logPick(p pushPick) {
+	now := s.now()
+	for _, it := range p.dropped {
+		s.log.Log(logSource, "voice.push_dropped", "", heldPayload(it, "no_listener", now.Sub(it.at)))
+	}
+	for _, it := range p.held {
+		s.log.Log(logSource, "voice.push_held", "", heldPayload(it, "no_listener", 0))
+	}
+	for i := 0; i < p.deferred; i++ {
+		s.log.Log(logSource, "voice.push_deferred", "", map[string]any{
+			"kind": "push", "reason": "speaking", "urgency_requested": voice.UrgencyInterrupt.String(),
+		})
+	}
+	if p.timedOut {
+		s.notePushTimeout()
+	}
+	if p.ok && len(p.over) > 0 {
+		s.log.Log(logSource, "voice.push_overtook", "", overtookPayload(p.item.text, p.item.tags, p.over))
+	}
+}
+
+// overtookPayload is voice.push_overtook's payload: the line sent and
+// the push ids (or texts, for a line without one) of those it passed.
+func overtookPayload(text string, tags map[string]any, over []pushItem) map[string]any {
+	ids := make([]string, 0, len(over))
+	for _, o := range over {
+		id := voice.PushID(o.tags)
+		if id == "" {
+			id = o.text
+		}
+		ids = append(ids, id)
+	}
+	return map[string]any{"push_id": voice.PushID(tags), "text": text, "over": ids}
 }
 
 // heldPayload is the voice.push_held / voice.push_released /
@@ -185,28 +256,18 @@ func heldPayload(item pushItem, reason string, age time.Duration) map[string]any
 	return p
 }
 
-func (s *Session) popPush() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if len(s.pushQ) > 0 {
-		s.pushQ = s.pushQ[1:]
-	}
-}
-
-// pushReady returns 0 when item may be sent now, waitState when it must
+// pushReadyLocked returns 0 when item may be sent now, waitState when it must
 // wait for a state change (connection, turn, speech) or a duration when
 // only time stands in the way. timedOut reports that an open turn was
 // given up on because TurnTimeout elapsed (the caller logs and counts it).
-func (s *Session) pushReady(item pushItem) (wait time.Duration, timedOut bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+// Caller holds s.mu.
+func (s *Session) pushReadyLocked(item pushItem, now time.Time) (wait time.Duration, timedOut bool) {
 	if s.conn == nil {
 		return waitState, false
 	}
 	if item.urgency == voice.UrgencySilent {
 		return 0, false
 	}
-	now := s.now()
 	if until := s.speakingUntilLocked(now); until > 0 {
 		return until, false
 	}
@@ -261,6 +322,11 @@ func (s *Session) speakingUntilLocked(now time.Time) time.Duration {
 	return hold
 }
 
+// maxPushRetries is how many times a push whose send failed is put back
+// at the front of the queue before it is dropped (voice.push_dropped
+// {reason: send_failed}).
+const maxPushRetries = 3
+
 // doPush sends one item. Interrupt flushes local output first; the model
 // interrupts itself when the client content arrives.
 func (s *Session) doPush(ctx context.Context, item pushItem) {
@@ -282,11 +348,21 @@ func (s *Session) doPush(ctx context.Context, item pushItem) {
 		}
 		item.retries++
 		s.mu.Lock()
-		if item.retries <= 3 {
+		requeue := item.retries <= maxPushRetries
+		if requeue {
 			s.pushQ = append([]pushItem{item}, s.pushQ...)
 		}
 		s.mu.Unlock()
 		s.emit(voice.EventError{Err: err})
+		if !requeue {
+			// Given up on: say so, or the line is lost without a trace
+			// (docs/timelines.md C23, §5 "a spoken push is heard or
+			// recorded unheard").
+			p := heldPayload(item, "send_failed", 0)
+			p["retries"] = item.retries
+			p["error"] = err.Error()
+			s.log.Log(logSource, "voice.push_dropped", "", p)
+		}
 		return
 	}
 	s.mu.Lock()
@@ -310,4 +386,19 @@ func (s *Session) doPush(ctx context.Context, item pushItem) {
 	}
 	s.log.Log(logSource, "voice.push", "", payload)
 	s.emit(voice.EventPush{Text: item.text, Urgency: item.urgency})
+}
+
+// DrainPushes empties the push queue and returns what was in it, in
+// order, at the urgency each caller asked for: the voice Switcher
+// carries it over to the next provider's session on a switch.
+func (s *Session) DrainPushes() []voice.QueuedPush {
+	s.mu.Lock()
+	q := s.pushQ
+	s.pushQ = nil
+	s.mu.Unlock()
+	out := make([]voice.QueuedPush, len(q))
+	for i, it := range q {
+		out[i] = voice.QueuedPush{Text: it.text, Urgency: it.requested, Tags: it.tags}
+	}
+	return out
 }
