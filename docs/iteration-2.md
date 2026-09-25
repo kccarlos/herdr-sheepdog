@@ -71,7 +71,7 @@ Phase 0 — measure first (no behaviour change)
 - **WP0c headset script** (appendix below).
 
 Phase 1 — the core loop, each PR under the rules above
-- **WP1 ear contract**: reply = `spoken` (the headline) / `ask` (the
+- **WP1 ear contract** — merged, #55: reply = `spoken` (the headline) / `ask` (the
   one question) / `detail` (the plain explanation). The existing
   `spoken` and `detail` names are kept and redefined rather than
   renamed to `headline` / `plain`: too many consumers (voice tool
@@ -84,31 +84,44 @@ Phase 1 — the core loop, each PR under the rules above
   (which ends with the ask), answers "what does that mean" from
   `detail`, never adds its own follow-up question; the brain's
   "explain simpler" rule; "never mind" out of the stop words.
-- **WP2 finish delivery**: a finish waits for the brain's line (up to
+- **WP2 finish delivery** — merged, #54: a finish waits for the brain's line (up to
   ~10 s) before anything is spoken; only a block gets the code sentence
   at once; a late `needs_user` line is always spoken; the "started
   on…" push for the brain's own action is silent.
-- **WP3 the shepherd's words**: every utterance runs on the recorded
+- **WP3 the shepherd's words** — merged, #58: every utterance runs on the recorded
   transcript, not the voice model's paraphrase; the echo / initiative
   / input-grace guards go where that makes them redundant; a final
   transcript with no tool call and no speech within N s is relayed by
   the daemon; back-to-back utterances coalesce into one turn; GPT-Live
   `settledText` appends instead of overwriting.
-- **WP4 worker history**: keep `agent_session`; on a finish read the
+- **WP4 worker history** — merged, #57: keep `agent_session`; on a finish read the
   worker's own session transcript (Claude: the JSONL path herdr
   reports) for its last assistant message; a per-agent work journal in
   the ledger; `recall` over it; the sign-off convention in every
   instruction the brain sends ("end with three lines for someone who
   can't see the screen: what changed / what needs a decision / next").
-- **WP5 brain speed**: window 24k → 12k tokens, ledger trimmed,
+- **WP5 brain speed** — merged, #59: window 24k → 12k tokens, ledger trimmed,
   thinking off for announce turns, stable prefix; target < 2 s per
-  step, measured by the scorecard.
+  step, measured by the scorecard. (Caps themselves were tightened
+  further the same day in #60: detail capped at three sentences, two on
+  an announce.)
 - **WP6 terms ledger** (after WP1 is measured): the brain records each
   term it introduces with a one-line explanation; recall hits it.
 - **WP7 audio diversity**: audio-e2e gains mid-sentence pauses,
   mute-right-after-speaking, barge-in during a push, and a WER check of
   `voice.transcript.in` against the `say` text; the app gains an opt-in
   recording of the shepherd's utterances for replay.
+- **WP8 dive deep**: talking about one worker in detail —
+  [`docs/dive-deep.md`](dive-deep.md). `read_screen(source: session)`
+  and detail on request (#68), `investigate(source: worker)` forking
+  the worker's own CLI session (#69). Implemented; see that doc's
+  status line.
+- **WP9 timelines and invariants**: a code-verified map of sheepdog's
+  concurrent timelines and what happens when they collide —
+  [`docs/timelines.md`](timelines.md) (#71). The gaps it ranked (Gemini
+  1011 reconnects losing context, the push queue looking only at its
+  head, silent drops, the echo window anchored to generation instead of
+  playback) were fixed in #72.
 
 Phase 2 — breadth, only once J1–J6 are green on two consecutive
 headset sessions.
@@ -125,6 +138,9 @@ the answer, then continue. Note anything you had to repeat.
 4. "Tell <alias> to run the tests and let me know when it's done."
 5. "What's <other alias> doing?" then, immediately, "And the third one?"
 6. Wait for a finish push. Then: "What did it find?"
+   - "What exactly did it say?" (docs/dive-deep.md WP8d)
+   - "Tell me more."
+   - "Ask it why."
 7. "Why?" (to whatever it said)
 8. Start an instruction, then say "Stop."
 9. "Never mind." (nothing should be killed)
@@ -132,4 +148,7 @@ the answer, then continue. Note anything you had to repeat.
     within a second of finishing the sentence.
 
 The scorecard for the session is the result; the notes are the
-qualitative half.
+qualitative half. Detail replies (step 6's three added lines) get their
+own column: words per reply, capped at 60 (docs/dive-deep.md WP8b), and
+whether the answer fell back to the brief two-sentence cap instead of
+naming the worker's own points ("no fallback").
