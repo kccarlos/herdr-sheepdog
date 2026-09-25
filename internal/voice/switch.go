@@ -152,6 +152,13 @@ func (sw *Switcher) Start(ctx context.Context) error {
 		return err
 	}
 	sw.ctx, sw.started, sw.inner = ctx, true, inner
+	// Tell the first session whether a /ws client is attached — at
+	// daemon start usually none — exactly as a provider switch does, so
+	// a push made before the page connects is held for it instead of
+	// spoken to nobody (Gemini's hold is off until told).
+	if ca, ok := inner.(interface{ ClientAttached(bool) }); ok {
+		ca.ClientAttached(sw.client)
+	}
 	sw.forwardLocked(inner)
 	return nil
 }

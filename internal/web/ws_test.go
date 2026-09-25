@@ -267,7 +267,7 @@ func TestWSPlaybackStatsAndSendWait(t *testing.T) {
 
 	underruns, drains, bufferMs := 2, 5, 230
 	rate, stretched := 0.92, 1830
-	c.send(wsproto.Message{Type: wsproto.TypePing, Underruns: &underruns, Drains: &drains, BufferMs: &bufferMs, Rate: &rate, StretchedMs: &stretched})
+	c.send(wsproto.Message{Type: wsproto.TypePing, Underruns: &underruns, Drains: &drains, BufferMs: &bufferMs, Rate: &rate, StretchedMs: &stretched, AudioState: "running"})
 	c.expect(wsproto.TypePong)
 
 	var stats map[string]any
@@ -290,6 +290,12 @@ func TestWSPlaybackStatsAndSendWait(t *testing.T) {
 	}
 	if _, ok := stats["send_wait_max_ms"]; !ok {
 		t.Errorf("send_wait_max_ms missing: %v", stats)
+	}
+	if _, ok := stats["playback_age_ms"]; !ok {
+		t.Errorf("playback_age_ms missing: %v", stats)
+	}
+	if stats["audio_state"] != "running" {
+		t.Errorf("audio_state = %v, want running", stats["audio_state"])
 	}
 	if _, ok := stats["send_wait_p95_ms"]; !ok {
 		t.Errorf("send_wait_p95_ms missing: %v", stats)
@@ -447,5 +453,98 @@ func TestWSWithoutVoice(t *testing.T) {
 		if m.Type == wsproto.TypeTranscript {
 			t.Fatalf("duplicate transcript after stop: %+v", m)
 		}
+	}
+}
+
+// TestWSStatsSayHowOldThePlaybackSampleIs replays 2026-09-24 18:21:30–40:
+// the page pinged every 15 s while web.client.stats logged every 5 s,
+// so three lines repeated one buffer_ms 3155 sample and read as a player
+// frozen for 15 s (it had played on: the next ping showed it drained).
+// Each line now carries playback_age_ms, the sample's age, so a repeated
+// value is visibly old; before the first ping there is none.
+func TestWSStatsSayHowOldThePlaybackSampleIs(t *testing.T) {
+	h := newHarness(t, harnessOpts{voice: true, statsInterval: 30 * time.Millisecond})
+	c := dialWS(t, h)
+	c.expect(wsproto.TypeStatus)
+
+	statsLines := func() []map[string]any {
+		var out []map[string]any
+		for _, ev := range h.log.Tail(0) {
+			if ev.Type != "web.client.stats" {
+				continue
+			}
+			var p map[string]any
+			_ = json.Unmarshal(ev.Payload, &p)
+			out = append(out, p)
+		}
+		return out
+	}
+	waitFor(t, 2*time.Second, func() bool { return len(statsLines()) >= 1 }, "a stats line before any ping")
+	if _, ok := statsLines()[0]["playback_age_ms"]; ok {
+		t.Fatalf("playback_age_ms before any ping: %v", statsLines()[0])
+	}
+
+	bufferMs, drains := 3155, 1
+	c.send(wsproto.Message{Type: wsproto.TypePing, BufferMs: &bufferMs, Drains: &drains})
+	c.expect(wsproto.TypePong)
+	n := len(statsLines())
+	waitFor(t, 2*time.Second, func() bool { return len(statsLines()) >= n+4 }, "four more stats lines")
+	var ages []float64
+	for _, p := range statsLines()[n:] {
+		if p["buffer_ms"] != float64(3155) {
+			continue
+		}
+		age, ok := p["playback_age_ms"].(float64)
+		if !ok {
+			t.Fatalf("stats line without playback_age_ms: %v", p)
+		}
+		ages = append(ages, age)
+	}
+	if len(ages) < 3 {
+		t.Fatalf("got %d lines with the ping's sample, want >= 3", len(ages))
+	}
+	for i := 1; i < len(ages); i++ {
+		if ages[i] <= ages[i-1] {
+			t.Fatalf("playback_age_ms does not grow while the sample repeats: %v", ages)
+		}
+	}
+}
+
+// TestWSModelAudioWithNoClientIsLoggedUnheard: audio the model produces
+// while no page is attached is dropped (real time), but the log says so
+// once per turn (web.audio_unheard) instead of losing it silently
+// (2026-09-24 18:22:00: "Hello. How can I help you?" spoken to a closed
+// page).
+func TestWSModelAudioWithNoClientIsLoggedUnheard(t *testing.T) {
+	h := newHarness(t, harnessOpts{voice: true})
+	unheard := func() int {
+		n := 0
+		for _, ty := range h.types() {
+			if ty == "web.audio_unheard" {
+				n++
+			}
+		}
+		return n
+	}
+	h.session.audio <- []byte{1, 2}
+	h.session.audio <- []byte{3, 4}
+	waitFor(t, 2*time.Second, func() bool { return unheard() == 1 }, "web.audio_unheard for the first unheard chunk")
+	h.session.emit(voice.EventTurnComplete{})
+	time.Sleep(50 * time.Millisecond) // events and audio are pumped separately
+	h.session.audio <- []byte{5, 6}
+	waitFor(t, 2*time.Second, func() bool { return unheard() == 2 }, "a second web.audio_unheard for the next turn")
+	time.Sleep(50 * time.Millisecond)
+	if unheard() != 2 {
+		t.Fatalf("web.audio_unheard logged %d times, want once per turn (2)", unheard())
+	}
+
+	c := dialWS(t, h)
+	c.expect(wsproto.TypeStatus)
+	h.session.audio <- []byte{7, 8}
+	if m, data, err := c.read(2 * time.Second); err != nil || m.Type != "" || len(data) != 2 {
+		t.Fatalf("attached client audio = %+v %v %v", m, data, err)
+	}
+	if unheard() != 2 {
+		t.Fatalf("audio to an attached client logged as unheard")
 	}
 }

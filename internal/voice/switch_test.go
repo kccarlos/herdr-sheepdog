@@ -69,8 +69,12 @@ func TestSwitcher(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	g.client = true // Start must tell the first session the truth: no client yet
 	if err := sw.Start(context.Background()); err != nil {
 		t.Fatal(err)
+	}
+	if g.client {
+		t.Fatal("Start did not tell the first session no client is attached")
 	}
 	if ev := <-sw.Events(); ev.(EventStatus).Reason != "gemini" {
 		t.Fatalf("first event %#v", ev)

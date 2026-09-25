@@ -152,7 +152,11 @@ func (s *Session) idleCheck(now time.Time) {
 		// flight still holds the session for its answer).
 		talking = false
 	}
-	if lc == nil || len(s.inflight) > 0 || len(s.pushQ) > 0 || (s.inputOpen && !s.muted) || talking || s.speakingLocked(now) ||
+	// A push held for want of a listener (pumpPushes) does not hold a
+	// billed session open: nobody is there to hear it, and it opens a
+	// fresh one when a client attaches.
+	pushWaiting := len(s.pushQ) > 0 && s.client
+	if lc == nil || len(s.inflight) > 0 || pushWaiting || (s.inputOpen && !s.muted) || talking || s.speakingLocked(now) ||
 		now.Sub(s.lastActivity) < s.cfg.IdleClose {
 		s.mu.Unlock()
 		return
@@ -172,18 +176,33 @@ func exempt(tags map[string]any) bool {
 	return tags["due_promise"] == true || tags["needs_user"] == true || tags["stop"] == true
 }
 
-// pumpPushes delivers at most one queued push per tick. In standby a
-// spoken push opens a session when a client is listening, waits (up to
-// PushTTL) when none is, and silent context is kept for the next
-// session's history.
+// pumpPushes delivers at most one queued push per tick. A spoken push
+// waits (up to PushTTL) while no client is attached, whether a session
+// is open or not — the model must not speak it to nobody (2026-09-24
+// 18:22:04) — logging voice.push_held once and voice.push_released when
+// it goes out. In standby a spoken push opens a session when a client is
+// listening, and silent context is kept for the next session's history.
 func (s *Session) pumpPushes(now time.Time) {
 	s.mu.Lock()
 	var item pushItem
 	var send bool
-	var deferred, dropped bool
+	var deferred, dropped, held bool
 	for len(s.pushQ) > 0 {
 		head := &s.pushQ[0]
 		lc := s.live
+		if !s.client && head.urgency != voice.UrgencySilent {
+			if now.Sub(head.at) > s.cfg.PushTTL {
+				item = *head
+				s.pushQ = s.pushQ[1:]
+				dropped = true
+				break
+			}
+			if head.heldAt.IsZero() {
+				head.heldAt = now
+				item, held = *head, true
+			}
+			break
+		}
 		if lc == nil {
 			if head.urgency == voice.UrgencySilent {
 				s.held = append(s.held, head.text)
@@ -232,12 +251,36 @@ func (s *Session) pumpPushes(now time.Time) {
 		s.log.Log(logSource, "voice.push_deferred", "", map[string]any{"kind": "push", "reason": "speaking", "urgency_requested": voice.UrgencyInterrupt.String()})
 	}
 	if dropped {
-		s.log.Log(logSource, "voice.push_dropped", "", map[string]any{"text": item.text, "reason": "no_listener", "age_ms": now.Sub(item.at).Milliseconds()})
+		p := heldPayload(item)
+		p["reason"], p["age_ms"] = "no_listener", now.Sub(item.at).Milliseconds()
+		s.log.Log(logSource, "voice.push_dropped", "", p)
 		return
+	}
+	if held {
+		p := heldPayload(item)
+		p["reason"] = "no_listener"
+		s.log.Log(logSource, "voice.push_held", "", p)
+		return
+	}
+	if send && lc != nil && !item.heldAt.IsZero() {
+		p := heldPayload(item)
+		p["held_ms"] = now.Sub(item.heldAt).Milliseconds()
+		s.log.Log(logSource, "voice.push_released", "", p)
 	}
 	if send && lc != nil {
 		s.deliverPush(lc, item)
 	}
+}
+
+// heldPayload is the voice.push_held / voice.push_released /
+// voice.push_dropped payload: the push's text, urgency and tags (push_id,
+// answers_utterance).
+func heldPayload(item pushItem) map[string]any {
+	p := map[string]any{"text": item.text, "urgency": item.requested.String()}
+	for k, v := range item.tags {
+		p[k] = v
+	}
+	return p
 }
 
 // deliverPush sends one push: silent → session.thinking.append, idle →

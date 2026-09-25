@@ -71,6 +71,11 @@ type Message struct {
 	// than 1.0, docs/ws-contract.md "Playback jitter buffer".
 	Rate        *float64 `json:"rate,omitempty"`
 	StretchedMs *int     `json:"stretched_ms,omitempty"`
+	// AudioState is the page's AudioContext state ("running",
+	// "suspended", "interrupted", "closed"): a context that is not
+	// running plays nothing, and its worklet stops reporting, so the
+	// playback counters above stay frozen at their last values.
+	AudioState string `json:"audio_state,omitempty"`
 
 	// text (client→server: simulated utterance) and transcript (server→client)
 	Text string `json:"text,omitempty"`

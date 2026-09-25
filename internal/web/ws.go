@@ -49,6 +49,10 @@ type hub struct {
 	reason  string
 	stalled bool
 	muted   bool
+	// unheard: model audio is being dropped for want of a client in the
+	// current run (web.audio_unheard is logged once per run; a client
+	// attaching or the model's turn completing starts a new run).
+	unheard bool
 }
 
 func newHub(s *Server) *hub {
@@ -121,6 +125,7 @@ func (h *hub) handle(w http.ResponseWriter, r *http.Request) {
 	// client's mic is never silenced by whatever the previous client left
 	// behind (audit B2).
 	h.muted = false
+	h.unheard = false
 	h.mu.Unlock()
 	if h.s.deps.Voice != nil {
 		h.s.deps.Voice.SetMuted(false)
@@ -161,9 +166,25 @@ func (h *hub) current() *client {
 	return h.client
 }
 
-// sendAudio forwards a model audio chunk to the client, if any.
+// sendAudio forwards a model audio chunk to the client, if any. Audio
+// with no client attached is dropped (docs/ws-contract.md "Reconnect
+// behaviour": the conversation is real time), but not silently: the
+// first chunk of each unheard run logs web.audio_unheard, so the log
+// shows the model spoke to nobody (the turn's voice.audio_timing has
+// the length). Spoken pushes are held by the voice session for this
+// reason; what remains here is the model's own answer to audio it
+// heard before the page went away.
 func (h *hub) sendAudio(chunk []byte) {
-	c := h.current()
+	h.mu.Lock()
+	c := h.client
+	first := c == nil && !h.unheard
+	if c == nil {
+		h.unheard = true
+	}
+	h.mu.Unlock()
+	if first {
+		h.s.log.Log(logSource, "web.audio_unheard", "", map[string]any{"bytes": len(chunk), "provider": h.s.voiceProvider()})
+	}
 	if c == nil {
 		return
 	}
@@ -187,6 +208,10 @@ func (h *hub) onVoiceEvent(ev voice.Event) {
 		h.send(h.statusMsg())
 	case voice.EventInterrupted:
 		h.flush()
+	case voice.EventTurnComplete:
+		h.mu.Lock()
+		h.unheard = false // the next unheard audio is another turn
+		h.mu.Unlock()
 	case voice.EventTranscript:
 		h.send(wsproto.Transcript(e.Dir.String(), e.Text, e.Final))
 	case voice.EventError:
@@ -320,6 +345,15 @@ type client struct {
 	// stretched_ms).
 	rate        float64
 	stretchedMs int
+	// playbackAt is when a ping last carried the playback counters: the
+	// page pings every few seconds while statsLoop logs on its own
+	// interval, so web.client.stats reports their age (playback_age_ms)
+	// rather than passing a stale sample off as current (2026-09-24
+	// 18:21:30–40: one 15 s-old sample of buffer_ms 3155 read as a
+	// player frozen for 15 s). audioState is the page's AudioContext
+	// state from the same ping.
+	playbackAt time.Time
+	audioState string
 	// sendWaits is a bounded rolling window of how long recent audio
 	// frames waited in the outbound queue before writeLoop sent them
 	// (ms), for web.client.stats send_wait_p95_ms / send_wait_max_ms.
@@ -557,6 +591,12 @@ func (c *client) onControl(data []byte) {
 		if m.StretchedMs != nil {
 			c.stretchedMs = *m.StretchedMs
 		}
+		if m.BufferMs != nil {
+			c.playbackAt = c.h.s.deps.Now()
+		}
+		if m.AudioState != "" {
+			c.audioState = m.AudioState
+		}
 		c.mu.Unlock()
 		c.enqueue(controlFrame(wsproto.Pong()))
 	case wsproto.TypeMute:
@@ -625,9 +665,10 @@ func (c *client) statsLoop(every time.Duration) {
 // counters snapshots the frame counters for an event payload.
 func (c *client) counters() map[string]any {
 	maxWait, p95Wait := c.sendWaitStats()
+	now := c.h.s.deps.Now()
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return map[string]any{
+	out := map[string]any{
 		"client_id": c.id,
 		"frames_in": c.framesIn, "bytes_in": c.bytesIn, "frames_out": c.framesOut, "bytes_out": c.bytesOut,
 		"dropped_audio": c.droppedAudio, "muted_drops": c.mutedDrops, "queued": len(c.queue),
@@ -635,8 +676,17 @@ func (c *client) counters() map[string]any {
 		"underruns": c.underruns, "drains": c.drains, "buffer_ms": c.bufferMs,
 		"rate": c.rate, "stretched_ms": c.stretchedMs,
 		"send_wait_max_ms": round1(maxWait), "send_wait_p95_ms": round1(p95Wait),
-		"dur_ms": c.h.s.deps.Now().Sub(c.start).Milliseconds(),
+		"dur_ms": now.Sub(c.start).Milliseconds(),
 	}
+	// Absent until the first ping with playback counters: the zeros
+	// above are then placeholders, not a measurement.
+	if !c.playbackAt.IsZero() {
+		out["playback_age_ms"] = now.Sub(c.playbackAt).Milliseconds()
+	}
+	if c.audioState != "" {
+		out["audio_state"] = c.audioState
+	}
+	return out
 }
 
 func round1(v float64) float64 { return math.Round(v*10) / 10 }

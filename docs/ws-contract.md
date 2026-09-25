@@ -41,7 +41,7 @@ scheduling each frame at "now".
 | `{"type":"silence","on":true\|false}` | The client's silence gate closed (`on:true`, no binary frames follow) or reopened (`on:false`). See *Silence gate*. |
 | `{"type":"cancel"}`                  | The "stop" button. The daemon stops current playback (it will send `flush`) and runs the `stop` tool (the stop procedure) in the supervisor. Equivalent to the user saying "stop". |
 | `{"type":"text","text":"…"}`         | Simulate an utterance: the text is fed to the voice session as if the user had spoken it (`/debug` and the `/voice` text box use this). It is recorded as a typed shepherd input, which the one rail accepts like a transcript (docs/roles.md "The one rail"). Without a voice session (`--voice=off`) the daemon echoes it as an `in` transcript and answers through its text router with one `out` transcript (a text routed to `cancel` yields `flush` then the `out`), or with an `error` when the text cannot be routed. |
-| `{"type":"ping","gated_frames":N?,"peak":N?,"underruns":N?,"drains":N?,"buffer_ms":N?,"rate":F?,"stretched_ms":N?}` | Liveness probe; the daemon answers `pong`. Clients should send one every 15–30 s while idle. The optional counters (frames withheld by the silence gate so far; last input peak in Int16 LSB; the playback jitter buffer's underrun and drain counts and the audio buffered right now in ms; the time-stretch's current playback rate and the total wall-clock ms played at a rate other than 1.0 — see "Playback jitter buffer" below) are copied into the next `web.client.stats` event, which also carries `send_wait_max_ms`/`send_wait_p95_ms` (how long a recent audio frame waited in the daemon's per-client send queue; near 0 in normal operation). |
+| `{"type":"ping","gated_frames":N?,"peak":N?,"underruns":N?,"drains":N?,"buffer_ms":N?,"rate":F?,"stretched_ms":N?,"audio_state":S?}` | Liveness probe; the daemon answers `pong`. Clients should send one every 5–30 s; `/voice` sends one every 5 s (the `web.client.stats` interval) and waits for the pong before the next. The optional counters (frames withheld by the silence gate so far; last input peak in Int16 LSB; the playback jitter buffer's underrun and drain counts and the audio buffered right now in ms; the time-stretch's current playback rate and the total wall-clock ms played at a rate other than 1.0 — see "Playback jitter buffer" below; the page's AudioContext state, `running`/`suspended`/`interrupted`/`closed` — a context that is not running plays nothing and stops updating the counters) are copied into every following `web.client.stats` event until the next ping, with `playback_age_ms` (how old that sample is; absent before the first ping with `buffer_ms`) and `audio_state`. A value repeated across stats lines with a growing `playback_age_ms` is one old sample, not a stalled player. The event also carries `send_wait_max_ms`/`send_wait_p95_ms` (how long a recent audio frame waited in the daemon's per-client send queue; near 0 in normal operation). |
 
 Unknown `type` values are answered with an `error` message and otherwise
 ignored; the connection stays open.
@@ -205,8 +205,24 @@ reliably removes is the *click* — an underrun is a faded pause.
 
 - **Browser reconnect.** The daemon session persists. The new client gets a
   `status` and then continues: any model audio produced while no client was
-  attached is **dropped**, not queued (the conversation is real time). A
-  pending `flush` is not replayed.
+  attached is **dropped**, not queued (the conversation is real time), and
+  logged once per model turn as `web.audio_unheard {bytes, provider}` (the
+  turn's `voice.audio_timing` has its length). A pending `flush` is not
+  replayed.
+- **Pushes wait for a listener.** While no client is attached, the voice
+  session holds every spoken push (idle or interrupt) — a brain reply that
+  came after the page closed, an announce, a kept promise — instead of
+  making the model say it to nobody: `voice.push_held {text, urgency,
+  reason: no_listener, push_id, …}` once per push, then `voice.push_released
+  {…, held_ms}` and the usual `voice.push` when a client attaches, where
+  it goes out under the usual urgency rules (after the model's turn, never
+  over the shepherd). A push held 5 minutes is dropped
+  (`voice.push_dropped {reason: no_listener, age_ms}`). Silent pushes are
+  context and are never held. Both providers log `voice.client {attached}`
+  when the attach state changes; an open GPT-Live session is not kept open
+  (billed) for a held push, and a fresh one opens for it on attach. What
+  cannot be held is the model's own reply to audio it heard before the
+  page went away (see `web.audio_unheard` above).
 - **Voice reconnect.** When the daemon reconnects to the model (GoAway, drop,
   rate limit), clients see `status: reconnecting` then `status: connected`.
   Audio frames the client sends during the gap are buffered by the daemon
