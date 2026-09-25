@@ -204,8 +204,15 @@ around its mid-task prompts) is announced with the question in one line
 ("auth finished, and it's asking …"), keeps the finish's promises and
 makes the question the pending answer. Nothing interrupts
 the voice mid-sentence except the shepherd: while the voice is
-speaking, INTERRUPT scheduling is downgraded to WHEN_IDLE, save a due
-promise or a decision on a *new* block. An addition to a block is
+speaking — until the shepherd's client has finished playing the reply,
+not merely until the model finished generating it (docs/ws-contract.md
+"Playback reports") — INTERRUPT scheduling is downgraded to WHEN_IDLE,
+save a due promise, a decision on a *new* block, or the stop button's
+reply. A spoken push also waits while the client's own speech detector
+hears the shepherd, and the push gap runs from the end of playback. When
+a reply is cut off (a barge-in, stop, an interrupting push), the brain's
+"Assistant said" line keeps only the words that played, marked "cut off
+after N s". An addition to a block is
 dropped once the block is resolved. The chattiness level is a ceiling
 code keeps: `quiet` — questions, exits and kept promises; `normal` —
 plus finishes of agents the shepherd dealt with within
