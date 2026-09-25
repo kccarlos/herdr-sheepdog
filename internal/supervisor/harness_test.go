@@ -71,6 +71,22 @@ type fakePusher struct {
 	tags   []map[string]any
 	err    error
 	resets []string
+	// playback is the client's last playback report (LastPlayback).
+	playback voice.PlaybackReport
+}
+
+// LastPlayback implements the playback reports the echo guard anchors
+// its window to (utterance.go).
+func (p *fakePusher) LastPlayback() voice.PlaybackReport {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.playback
+}
+
+func (p *fakePusher) setPlayback(r voice.PlaybackReport) {
+	p.mu.Lock()
+	p.playback = r
+	p.mu.Unlock()
 }
 
 // Reset implements voiceResetter.

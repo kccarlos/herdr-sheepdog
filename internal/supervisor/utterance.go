@@ -753,16 +753,35 @@ func (s *Supervisor) hasListener() bool {
 // still be its echo. The logged pair was 1.7 s apart: the transcript of
 // the voice's speech runs ahead of the audio the phone plays, and the
 // input transcription arrives after the echoed audio ends.
+//
+// The window is anchored to the end of playback when the client reports
+// it (docs/ws-contract.md "Playback reports": the web page, and the iOS
+// app since herdr-sheepdog-ios #14): Gemini generates ~4x real time, so
+// its turnComplete comes seconds before a long reply's tail is played,
+// and an echo of that tail used to arrive after a window anchored at
+// turnComplete had closed (docs/timelines.md C5). While the client says
+// the reply is still playing (started, no drained yet) the voice counts
+// as speaking, for up to echoPlayingMax after it stopped generating. A
+// client without reports keeps the anchor at turnComplete.
 const echoWindow = 2500 * time.Millisecond
+
+// echoPlayingMax bounds how long a "started" report with no drained after
+// it keeps the voice counted as speaking (a lost report must not keep
+// the guard on forever): a 30 s reply generated at 4x plays ~22 s past
+// its turnComplete.
+const echoPlayingMax = 30 * time.Second
 
 // echoWatch is what the voice is saying or last said, under s.mu.
 type echoWatch struct {
 	// said is the voice's output transcript since it last started
 	// speaking; speaking is true until its turn completes or is
-	// interrupted; at is when it last spoke (or stopped speaking).
+	// interrupted; at is when it last spoke (or stopped speaking);
+	// since is when the previous speech stopped (a playback report
+	// after it is about this speech).
 	said     string
 	speaking bool
 	at       time.Time
+	since    time.Time
 }
 
 // echoSpokeLocked records a fragment of the voice's speech. Caller holds
@@ -771,11 +790,15 @@ func (s *Supervisor) echoSpokeLocked(text string) {
 	if strings.TrimSpace(text) == "" {
 		return
 	}
+	now := s.cfg.Now()
 	if !s.echo.speaking {
-		s.echo.said = ""
+		// A playback report after the previous speech ended is about this
+		// one: the client's "started" often comes back before the first
+		// output transcript fragment does.
+		s.echo.said, s.echo.since = "", s.echo.at
 	}
 	s.echo.said += text
-	s.echo.speaking, s.echo.at = true, s.cfg.Now()
+	s.echo.speaking, s.echo.at = true, now
 }
 
 // voiceStopped records that the voice's turn completed or was
@@ -789,13 +812,44 @@ func (s *Supervisor) voiceStopped() {
 }
 
 // echoCandidateLocked is what a voice input starting now may be an echo
-// of: the voice's speech while it speaks or within echoWindow after,
-// else "". Caller holds s.mu.
-func (s *Supervisor) echoCandidateLocked() string {
-	if s.echo.said == "" || (!s.echo.speaking && s.cfg.Now().Sub(s.echo.at) > echoWindow) {
+// of: the voice's speech while it speaks (or the client still plays it)
+// or within echoWindow after, else "". playback is the client's last
+// playback report (zero: none). Caller holds s.mu.
+func (s *Supervisor) echoCandidateLocked(playback voice.PlaybackReport) string {
+	if s.echo.said == "" {
 		return ""
 	}
-	return strings.TrimSpace(s.echo.said)
+	said := strings.TrimSpace(s.echo.said)
+	if s.echo.speaking {
+		return said
+	}
+	now := s.cfg.Now()
+	anchor := s.echo.at
+	if playback.State != "" && playback.At.After(s.echo.since) {
+		switch playback.State {
+		case voice.PlaybackStarted:
+			if now.Sub(s.echo.at) <= echoPlayingMax {
+				return said // the shepherd is still hearing it
+			}
+		case voice.PlaybackDrained, voice.PlaybackFlushed:
+			if playback.At.After(anchor) {
+				anchor = playback.At
+			}
+		}
+	}
+	if now.Sub(anchor) > echoWindow {
+		return ""
+	}
+	return said
+}
+
+// lastPlayback is the voice client's last playback report, when the
+// voice session keeps them (voice.Switcher); zero otherwise.
+func (s *Supervisor) lastPlayback() voice.PlaybackReport {
+	if p, ok := s.pusher.(interface{ LastPlayback() voice.PlaybackReport }); ok {
+		return p.LastPlayback()
+	}
+	return voice.PlaybackReport{}
 }
 
 // echoDropped reports whether c is the voice's own speech picked up by
