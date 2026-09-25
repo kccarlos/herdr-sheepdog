@@ -3,10 +3,11 @@ import Foundation
 /// The jitter-buffer target range for one voice provider.
 ///
 /// Gemini Live delivers faster than real time, so a small buffer is
-/// enough. GPT-Live delivers at 0.72–0.86× real time (measured on the
-/// phone), so a buffer that starts small spends the whole reply catching
-/// up: it starts at 1 200 ms and may grow to 2 s. The browser page and the
-/// daemon use the same numbers.
+/// enough. GPT-Live delivered at 0.72–0.86× real time until the daemon
+/// paced its input at real time (2026-09-25); it now runs at ≈1.0× and
+/// starts at 400 ms, keeping the 2 000 ms cap and the time-stretch for the
+/// bursts that remain. The browser page and the daemon use the same
+/// numbers.
 public struct PlaybackProfile: Equatable, Sendable {
     /// Where the adaptive target starts, and the floor it decays back to.
     public let floorMilliseconds: Int
@@ -19,7 +20,7 @@ public struct PlaybackProfile: Equatable, Sendable {
     }
 
     public static let gemini = PlaybackProfile(floorMilliseconds: 150, ceilingMilliseconds: 500)
-    public static let openAI = PlaybackProfile(floorMilliseconds: 1_200, ceilingMilliseconds: 2_000)
+    public static let openAI = PlaybackProfile(floorMilliseconds: 400, ceilingMilliseconds: 2_000)
 
     /// The profile for a `/ws` `status.provider` value. Unknown or absent
     /// providers (older daemons) get Gemini's, which was the only one.

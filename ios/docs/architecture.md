@@ -332,22 +332,24 @@ audible gaps, sometimes mid-word. The buffer's target is now adaptive:
 
 ### Adaptive time-stretch
 
-GPT-Live delivers its audio at **0.72–0.86× real time** (the daemon's
+GPT-Live delivered its audio at **0.72–0.86× real time** (the daemon's
 `docs/audio-e2e-results.md`, and the phone: 84 underruns in 8 minutes,
-the buffer at its 500 ms cap from the first reply on). No buffer that
-starts playing within a second can absorb a source that is short for the
-whole reply, so the player also **plays slower when the buffer runs low** —
+the buffer at its 500 ms cap from the first reply on) until the daemon
+paced its input at real time (2026-09-25); it now runs at ≈1.0×, but a
+source that falls behind can still run the player dry mid-sentence, so the
+player also **plays slower when the buffer runs low** —
 pitch-preserving, through an `AVAudioUnitTimePitch` between the player node
 and the mixer. The policy is pure (`PlaybackRatePolicy`, owned by
 `PlaybackQueue`) and identical to the browser page's:
 
 - **Target T per provider** (`PlaybackProfile`, from `/ws`
   `status.provider`): Gemini starts at 150 ms, cap 500 ms (as before);
-  GPT-Live (`openai`) starts at 1 200 ms, cap 2 000 ms. The underrun step
-  (+100 ms), decay (−20 ms per clean reply) and refill-before-resume are
-  unchanged on top. The "start anyway" wait for a short reply scales with
-  the target — T + 250 ms, as in the browser — so a 1 200 ms target is not
-  cut short by the old fixed 400 ms.
+  GPT-Live (`openai`) starts at 400 ms, cap 2 000 ms (raised to 1 200 ms on
+  2026-09-24 while GPT-Live's input ran slow, then lowered back to 400 ms
+  on 2026-09-25 once the daemon started pacing that input at real time).
+  The underrun step (+100 ms), decay (−20 ms per clean reply) and
+  refill-before-resume are unchanged on top. The "start anyway" wait for a
+  short reply scales with the target — T + 250 ms, as in the browser.
 - **Rate r from buffered audio b**: 1.0 when b ≥ T; below T it falls
   linearly to 0.90 at b = T/2 and to the **0.85 floor** at b ≤ T/4; 1.05
   when b > 2T, to catch up. The rate moves at most **0.02 per 20 ms**, so
@@ -369,7 +371,11 @@ and the mixer. The policy is pure (`PlaybackRatePolicy`, owned by
 Replays (`TimeStretchReplayTests`, five seeds × 12 replies each; a
 simulated node that plays at the rate the queue asked for and reports
 completions 30 ms late). *Before* is the old fixed-rate buffer (150–500 ms
-for every provider); *after* is time-stretch plus the provider targets:
+for every provider); *after* is time-stretch plus the provider targets. The
+GPT-Live rows below are pinned to the **1 200 ms** target GPT-Live used
+before the daemon paced its input at real time (2026-09-25) — the decision
+this table backs — not to the current 400 ms `.openAI` default; see below
+the table for the real, paced measurement:
 
 | Timeline | before | targets only | after | time at r = 1.0 |
 |---|---|---|---|---|
@@ -399,6 +405,22 @@ so they are left for the daemon/browser
 side to agree on. For Gemini, what is not 1.0 is mostly the last ~150 ms of
 each reply (the tail always runs below the target once the final chunk is
 in) and brief dips when two slow chunks meet.
+
+**Start buffer lowered to 400 ms (2026-09-25).** The daemon now paces
+GPT-Live's input at real time (`docs/audio-e2e-results.md`, the daemon
+repo): one billed run measured `realtime_ratio` 0.94–1.06, against
+0.74–0.87 before. `PlaybackProfile.openAI` follows: 400 ms start, the
+2 000 ms cap and the time-stretch unchanged.
+`testPacedGPTLiveLongReplyPlaysThroughTheFourHundredMillisecondStartBuffer`
+replays that run's real `/ws` arrival timeline (`Timelines.pacedLongReplyMs`,
+mirroring the daemon's committed
+`web/voice/testdata/gptlive-paced-long-reply.json`) through the 400 ms
+profile: at most one underrun, no more than the old 1 200 ms profile sees
+on the same timeline (both catch the same 869 ms hole the daemon's
+`PauseHold` leaves around a mid-count pause — not a gap inside a word),
+and zero from the point the reply becomes continuous. The older, recorded
+pre-pacing timelines above keep replaying under the 1 200 ms profile they
+were tuned for (`TimeStretchReplayTests.prepacingProfile`), not `.openAI`.
 
 The session is `.playAndRecord` with mode `.voiceChat` and options
 `.allowBluetooth`, `.allowBluetoothA2DP`, `.defaultToSpeaker`. `.voiceChat`

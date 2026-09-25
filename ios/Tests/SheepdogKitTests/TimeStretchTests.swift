@@ -72,7 +72,7 @@ final class PlaybackRatePolicyTests: XCTestCase {
 
     func testProviderProfiles() {
         XCTAssertEqual(PlaybackProfile.forProvider("gemini"), PlaybackProfile(floorMilliseconds: 150, ceilingMilliseconds: 500))
-        XCTAssertEqual(PlaybackProfile.forProvider("openai"), PlaybackProfile(floorMilliseconds: 1_200, ceilingMilliseconds: 2_000))
+        XCTAssertEqual(PlaybackProfile.forProvider("openai"), PlaybackProfile(floorMilliseconds: 400, ceilingMilliseconds: 2_000))
         XCTAssertEqual(PlaybackProfile.forProvider(nil), .gemini, "older daemons without a provider field are Gemini")
         XCTAssertEqual(PlaybackProfile.forProvider("something-new"), .gemini)
     }
@@ -113,8 +113,14 @@ final class PlaybackQueueStretchTests: XCTestCase {
         XCTAssertEqual(queue.phase, .idle, "1 050 ms at 1.05× lasts one second")
     }
 
+    // GPT-Live's buffer before its input was paced (2026-09-25): a fixed
+    // 1 200/2 000 ms profile, kept literal here (not `.openAI`, which is
+    // now 400 ms) so this test of the stretch mechanism itself does not
+    // silently change shape when the provider's own numbers do.
+    private static let prepacingProfile = PlaybackProfile(floorMilliseconds: 1_200, ceilingMilliseconds: 2_000)
+
     func testSteerStretchesWhenTheBufferIsLowAndCountsStretchedTime() {
-        var queue = PlaybackQueue(profile: .openAI)
+        var queue = PlaybackQueue(profile: Self.prepacingProfile)
         // 1 200 ms banked at once: plays at 1.0, then the buffer runs down
         // and the rate falls.
         XCTAssertFalse(queue.push(chunk(1_200), now: 0).isEmpty)
@@ -130,7 +136,7 @@ final class PlaybackQueueStretchTests: XCTestCase {
     }
 
     func testFlushResetsTheRate() {
-        var queue = PlaybackQueue(profile: .openAI)
+        var queue = PlaybackQueue(profile: Self.prepacingProfile)
         _ = queue.push(chunk(1_200), now: 0)
         for step in 1...50 { queue.steer(now: Double(step) * 0.02) }
         XCTAssertLessThan(queue.rate, 1.0)
@@ -144,9 +150,9 @@ final class PlaybackQueueStretchTests: XCTestCase {
         XCTAssertEqual(queue.targetMilliseconds, 150)
         XCTAssertEqual(queue.maximumWait, 0.4, accuracy: 1e-9, "Gemini: 150 + 250 ms, as before")
         queue.setProfile(.openAI)
-        XCTAssertEqual(queue.targetMilliseconds, 1_200)
+        XCTAssertEqual(queue.targetMilliseconds, 400)
         XCTAssertEqual(queue.targetCeilingMilliseconds, 2_000)
-        XCTAssertEqual(queue.maximumWait, 1.45, accuracy: 1e-9, "the wait scales with the target")
+        XCTAssertEqual(queue.maximumWait, 0.65, accuracy: 1e-9, "GPT-Live: 400 + 250 ms, as in the browser")
     }
 
     func testCompletionThatBeatsThePredictionStillCountsADrain() {
@@ -256,6 +262,20 @@ enum Timelines {
             t += Double(turn.last ?? 0) / 1000 + 6
         }
         return out
+    }
+
+    /// A real GPT-Live /ws binary-frame arrival timeline, recorded by
+    /// `sheepdog audio-e2e --audio-timeline` against a live session *after*
+    /// the daemon's input-pacing fix (2026-09-25, realtime_ratio 0.94-1.06),
+    /// a 25 s "count from one to twenty" reply — the daemon's committed
+    /// `web/voice/testdata/gptlive-paced-long-reply.json`, every frame
+    /// 4 800 bytes = 100 ms.
+    static let pacedLongReplyMs: [Int] = [0, 100, 199, 298, 399, 510, 599, 699, 799, 899, 1035, 1099, 1199, 1299, 1398, 1559, 1598, 1699, 1799, 1899, 2082, 2097, 2198, 2299, 2400, 2499, 2607, 2697, 2798, 2899, 2999, 3131, 3201, 3299, 3399, 3500, 3656, 3699, 3798, 3899, 3999, 4180, 4199, 4299, 4399, 4501, 4598, 4704, 4798, 4898, 4999, 5868, 5968, 6619, 6801, 6822, 6921, 7020, 7122, 7221, 7326, 7421, 7522, 7621, 7721, 7850, 7919, 8020, 8121, 8221, 8374, 8421, 8522, 8621, 8721, 8899, 8921, 9021, 9128, 9222, 9321, 9423, 9522, 9621, 9722, 9820, 9947, 10021, 10122, 10222, 10321, 10471, 10521, 10622, 10722, 10820, 10995, 11022, 11121, 11221, 11321, 11422, 11521, 11621, 11722, 11822, 11921, 12046, 12121, 12219, 12321, 12421, 12569, 12621, 12722, 12822, 12920, 13093, 13122, 13221, 13321, 13423, 13523, 13621, 13721, 13821, 13921, 14021, 14142, 14222, 14321, 14423, 14521, 14666, 14722, 14822, 14922, 15026, 15190, 15221, 15322, 15422, 15522, 15621, 15721, 15820, 15921, 16021, 16121, 16239, 16322, 16422, 16521, 16621, 16763, 16821, 16921, 17022, 17120, 17288, 17321, 17421, 17521, 17622, 17722, 17821, 17923, 18021, 18121, 18221, 18336, 18421, 18521, 18622, 18722, 18860, 18921, 19021, 19121, 19219, 19385, 19421, 19521, 19622, 19721, 19909, 19921, 20022, 20121, 20221, 20322, 20433, 20521, 20621, 20720, 20821, 20958, 21021, 21121, 21222, 21319, 21482, 21522, 21621, 21721, 21822, 22006, 22022, 22121, 22223, 22321, 22421, 22530, 22621, 22721, 22822, 22922, 23054, 23121, 23222, 23321, 23419, 23578, 23621, 23721, 23822, 23921, 24103, 24122, 24222, 24321, 24420, 24524, 24627, 24721, 24822, 24921, 25024]
+
+    /// Turns raw `at_ms` offsets (a fixture's `chunks`, every one 100 ms of
+    /// audio) into a single-utterance `Arrival` timeline.
+    static func arrivals(msOffsets: [Int], utterance: Int = 0) -> [Arrival] {
+        msOffsets.map { Arrival(at: Double($0) / 1000, milliseconds: 100, utterance: utterance) }
     }
 
     /// Gemini-like replies: 4× real time, 40–200 ms chunks, with the
@@ -404,6 +424,13 @@ struct PlaybackReplay {
 final class TimeStretchReplayTests: XCTestCase {
     private static let seeds: [UInt64] = [1, 2, 3, 4, 5]
 
+    /// The GPT-Live policy before the input-pacing fix (2026-09-25): a
+    /// 1 200 ms start buffer for a source running at 0.69-0.87x real time.
+    /// `Timelines.recorded` and `.recordedInstructionPromise`/
+    /// `.recordedStatusQuestion` were captured then, so they are replayed
+    /// with it rather than with `.openAI`, which is now 400 ms.
+    private static let prepacingProfile = PlaybackProfile(floorMilliseconds: 1_200, ceilingMilliseconds: 2_000)
+
     /// Sums one configuration over every seed.
     private func total(_ timeline: (UInt64) -> [Arrival], _ queue: PlaybackQueue, stretch: Bool = true) -> PlaybackReplay.Result {
         var sum = PlaybackReplay.Result()
@@ -444,7 +471,7 @@ final class TimeStretchReplayTests: XCTestCase {
     }
 
     func testRecordedGPTLiveTurns() {
-        let r = compare("GPT-Live recorded turns (0.69x/0.78x)", provider: .openAI) { Timelines.recorded(seed: $0) }
+        let r = compare("GPT-Live recorded turns (0.69x/0.78x, pre-pacing-fix)", provider: Self.prepacingProfile) { Timelines.recorded(seed: $0) }
         XCTAssertGreaterThan(r.before.underruns, 20, "the recording reproduces the phone's gaps")
         // Not zero: both turns arrive below the 0.85 rate floor (0.69×
         // and 0.78×), so an 800 ms start runs out near the end of a turn;
@@ -454,15 +481,45 @@ final class TimeStretchReplayTests: XCTestCase {
         XCTAssertLessThan(r.after.audibleGapSeconds, r.before.audibleGapSeconds / 2)
     }
 
+    /// After the input-pacing fix (`docs/audio-e2e-results.md`,
+    /// daemon-side, 2026-09-25) GPT-Live delivers at ≈1.0x real time: the
+    /// recorded 25 s reply plays through GPT-Live's 400 ms start buffer
+    /// with no more underruns than the old 1 200 ms buffer — one, at the
+    /// same spot under both, a pause the model made mid-count (the daemon
+    /// drops silence past `PauseHold`, leaving an 869 ms hole in the
+    /// forwarded stream), not a gap inside a word.
+    func testPacedGPTLiveLongReplyPlaysThroughTheFourHundredMillisecondStartBuffer() {
+        XCTAssertEqual(PlaybackProfile.openAI.floorMilliseconds, 400)
+        let arrivals = Timelines.arrivals(msOffsets: Timelines.pacedLongReplyMs)
+        let after = PlaybackReplay.run(arrivals, queue: PlaybackQueue(profile: .openAI))
+        let old = PlaybackReplay.run(arrivals, queue: PlaybackQueue(profile: Self.prepacingProfile))
+        XCTAssertLessThanOrEqual(after.underruns, 1, "underruns \(after.underruns) at 400 ms (1 200 ms: \(old.underruns))")
+        XCTAssertLessThanOrEqual(after.underruns, old.underruns)
+        // From 6.8 s on the reply is continuous (no hole over ~190 ms): at
+        // ≈1.0x the 400 ms buffer alone carries it without an underrun.
+        let tail = Array(Timelines.pacedLongReplyMs[54...])
+        let t0 = tail[0]
+        let tailArrivals = Timelines.arrivals(msOffsets: tail.map { $0 - t0 })
+        let tailResult = PlaybackReplay.run(tailArrivals, queue: PlaybackQueue(profile: .openAI))
+        XCTAssertEqual(tailResult.underruns, 0, "continuous tail underruns \(tailResult.underruns)")
+    }
+
+    // These four synthetic stress tests measure the mechanism (buffer +
+    // stretch) against sources slower than any real GPT-Live traffic seen
+    // since the pacing fix; they are pinned to the pre-pacing 1 200 ms
+    // profile that they were designed to validate (the doc table below),
+    // not to `.openAI`, which now starts at 400 ms for the (paced) real
+    // provider — see `testPacedGPTLiveLongReplyPlaysThroughThe...` for that.
+
     func testGPTLiveAtThreeQuartersRealTime() {
-        let r = compare("GPT-Live 0.75x, 2-6 s replies, stalls 0.3-1.5 s", provider: .openAI) { Timelines.gptLive(speed: 0.75, seed: $0) }
+        let r = compare("GPT-Live 0.75x, 2-6 s replies, stalls 0.3-1.5 s", provider: Self.prepacingProfile) { Timelines.gptLive(speed: 0.75, seed: $0) }
         XCTAssertGreaterThan(r.before.underruns, 20, "the timeline reproduces the phone's problem")
         XCTAssertLessThanOrEqual(r.after.underruns, r.before.underruns / 2)
         XCTAssertGreaterThanOrEqual(r.after.minimumRate, PlaybackRatePolicy.floorRate - 1e-9)
     }
 
     func testGPTLiveAtEightyFivePercentRealTime() {
-        let r = compare("GPT-Live 0.85x, 2-6 s replies, stalls 0.3-1.5 s", provider: .openAI) { Timelines.gptLive(speed: 0.85, seed: $0) }
+        let r = compare("GPT-Live 0.85x, 2-6 s replies, stalls 0.3-1.5 s", provider: Self.prepacingProfile) { Timelines.gptLive(speed: 0.85, seed: $0) }
         XCTAssertGreaterThan(r.before.underruns, 20)
         XCTAssertLessThanOrEqual(r.after.underruns, r.before.underruns / 2)
     }
@@ -470,7 +527,7 @@ final class TimeStretchReplayTests: XCTestCase {
     func testGPTLiveWithAFastStart() {
         var shape = Timelines.Shape.recordedLike
         shape.frontLoad = true
-        let r = compare("GPT-Live 0.75x + fast start", provider: .openAI) { Timelines.gptLive(speed: 0.75, seed: $0, shape: shape) }
+        let r = compare("GPT-Live 0.75x + fast start", provider: Self.prepacingProfile) { Timelines.gptLive(speed: 0.75, seed: $0, shape: shape) }
         XCTAssertLessThan(r.after.underruns, r.before.underruns)
     }
 
@@ -479,9 +536,9 @@ final class TimeStretchReplayTests: XCTestCase {
     /// whole reply and even the 0.85 floor consumes faster than it
     /// arrives. The stress rows show how much the stretch still helps.
     func testLongGPTLiveMonologuesStillImprove() {
-        let slow = compare("GPT-Live 0.75x, 5-12 s replies (stress)", provider: .openAI) { Timelines.gptLive(speed: 0.75, seed: $0, shape: .long) }
+        let slow = compare("GPT-Live 0.75x, 5-12 s replies (stress)", provider: Self.prepacingProfile) { Timelines.gptLive(speed: 0.75, seed: $0, shape: .long) }
         XCTAssertLessThan(slow.after.underruns, slow.before.underruns)
-        let fast = compare("GPT-Live 0.85x, 5-12 s replies (stress)", provider: .openAI) { Timelines.gptLive(speed: 0.85, seed: $0, shape: .long) }
+        let fast = compare("GPT-Live 0.85x, 5-12 s replies (stress)", provider: Self.prepacingProfile) { Timelines.gptLive(speed: 0.85, seed: $0, shape: .long) }
         XCTAssertLessThan(fast.after.underruns, fast.before.underruns)
     }
 
