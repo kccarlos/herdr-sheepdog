@@ -333,14 +333,7 @@ func (s *Session) onOutputText(delta string) {
 // addRecapLocked remembers one finished utterance for the next session's
 // history.
 func (s *Session) addRecapLocked(role, text string) {
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return
-	}
-	s.recap = append(s.recap, recapEntry{role: role, text: text})
-	if len(s.recap) > s.cfg.RecapTurns {
-		s.recap = s.recap[len(s.recap)-s.cfg.RecapTurns:]
-	}
+	s.recap.Add(role, text)
 }
 
 // flushReplyLocked moves the reply being spoken into the recap.
@@ -353,19 +346,12 @@ func (s *Session) flushReplyLocked() {
 // any silent context received in standby as session.input messages.
 func (s *Session) recapItemsLocked() []initialItem {
 	var items []initialItem
-	budget := s.cfg.RecapChars
-	for i := len(s.recap) - 1; i >= 0 && budget > 0; i-- {
-		e := s.recap[i]
-		text := e.text
-		if len(text) > budget {
-			text = text[len(text)-budget:]
-		}
-		budget -= len(text)
-		part := contentPart{Type: "input_text", Text: text}
-		if e.role == "assistant" {
+	for _, e := range s.recap.Recent(s.cfg.RecapChars) {
+		part := contentPart{Type: "input_text", Text: e.Text}
+		if e.Role == voice.RecapAssistant {
 			part.Type = "output_text"
 		}
-		items = append([]initialItem{{Type: "message", Role: e.role, Content: []contentPart{part}}}, items...)
+		items = append(items, initialItem{Type: "message", Role: e.Role, Content: []contentPart{part}})
 	}
 	if len(items) > 0 {
 		note := "The voice line was closed while idle and has just reopened; the messages above are the recent conversation. Carry on from them; do not greet the shepherd again."

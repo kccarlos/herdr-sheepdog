@@ -91,6 +91,9 @@ func (s *Session) rotateKey(reason string) {
 // audio buffered during the gap. reconnect distinguishes the first
 // connection from a later one (which emits EventResumed).
 func (s *Session) install(conn Conn, resumed, reconnect bool) {
+	if reconnect && !resumed {
+		s.reseed(conn) // before any push can use the new connection
+	}
 	s.mu.Lock()
 	s.conn = conn
 	s.connGen++
@@ -221,8 +224,9 @@ func (s *Session) run(ctx context.Context) {
 			// A resumption handle the server keeps rejecting is dead (seen
 			// live: every attempt failed at setup with "Internal error
 			// encountered", ~30 s each, forever). Drop it after a couple of
-			// tries and reconnect fresh: the supervisor re-pushes the
-			// briefing on EventResumed{ContextLost:true}.
+			// tries and reconnect fresh: install re-seeds it with the
+			// recent conversation (reseed.go) and the supervisor
+			// re-pushes the briefing on EventResumed{ContextLost:true}.
 			if s.hasHandle() && !isRateLimited(err) && !errors.Is(err, ErrAllKeysExhausted) {
 				resumeFailures++
 				if resumeFailures >= s.cfg.ResumeAttempts {

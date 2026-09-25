@@ -367,6 +367,8 @@ func (s *Session) doPush(ctx context.Context, item pushItem) {
 	}
 	s.mu.Lock()
 	if turnComplete {
+		s.flushRecapLocked()
+		s.recap.Add(voice.RecapSupervisor, item.text)
 		s.lastSpoken = s.now()
 		s.openTurnLocked()
 		if s.turn != nil {

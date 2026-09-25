@@ -97,7 +97,7 @@ type Session struct {
 	turnDoneOwed bool
 	inText       string // the current input utterance (recap)
 	outText      string // the current reply (recap)
-	recap        []recapEntry
+	recap        voice.Recap
 	held         []string // silent context received in standby
 	pushQ        []pushItem
 	lastSpoken   time.Time
@@ -137,11 +137,6 @@ type liveConn struct {
 	startedOnce sync.Once
 }
 
-type recapEntry struct {
-	role string // "user" | "assistant"
-	text string
-}
-
 // pushItem is one queued Push.
 type pushItem struct {
 	text      string
@@ -174,6 +169,7 @@ func newSession(cfg Config, log logging.Logger, dial Dialer) (*Session, error) {
 		out:      newOutQueue(),
 		inflight: map[string]context.CancelFunc{},
 		armed:    true,
+		recap:    voice.Recap{Max: cfg.RecapTurns},
 	}, nil
 }
 
@@ -335,7 +331,8 @@ func (s *Session) Reset(reason string) error {
 		s.mu.Unlock()
 		return nil
 	}
-	s.recap, s.held = nil, nil
+	s.recap.Reset()
+	s.held = nil
 	s.inText, s.outText = "", ""
 	lc := s.live
 	s.mu.Unlock()
