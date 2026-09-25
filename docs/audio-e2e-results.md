@@ -394,10 +394,10 @@ speakers. Could you please count slowly from one to twenty for me?"):
 the model answered itself ("Sure. One. Two. … Seventeen.", no tool call)
 while the harness's gate was closed.
 
-| | Turns | realtime_ratio | max_gap_ms | p95_gap_ms |
+| | Measured | realtime_ratio | max_gap_ms | p95_gap_ms |
 |---|---|---|---|---|
-| Before (2026-09-23, table above) | 5 | 0.74–0.87 | 626–1464 | 574–1421 |
-| After (2026-09-25) | 5 | **1.00, 0.98, 1.00, 1.06, 0.94** | 171, 233, 88, 97, 313 | 141, 209, 61, 97, 158 |
+| Before (2026-09-23, table above) | 5 replies, 2 scenarios (relayed commentary) | 0.74–0.87 | 626–1464 | 574–1421 |
+| After (2026-09-25) | 1 self-answered reply, 5 `audio_timing` segments split by the model's pauses | **1.00, 0.98, 1.00, 1.06, 0.94** | 171, 233, 88, 97, 313 | 141, 209, 61, 97, 158 |
 
 `voice.audio_timing` per turn after the fix: 9000 ms of audio in 8984 ms,
 2100/2152, 22100/22000, 1200/1129, 4240/4513. No
@@ -408,7 +408,10 @@ reply audio 1248 ms, first output transcript 1017 ms. **Billed: 42 s**
 
 The hypothesis holds: with the input paced at real time, GPT-Live's
 output runs at real time and its mid-reply gaps fall from 0.6–1.5 s to
-under ~320 ms.
+under ~320 ms. Caveat: the before replies were relayed supervisor
+commentary (`commentary.append`), this one the model's own answer (no
+tool call); the fix is upstream of both, but the commentary path was not
+re-measured within the 60 s budget.
 
 **Start buffer lowered to 400 ms** (`PLAYBACK_POLICY.openai`, cap still
 2000 ms, time-stretch unchanged). The run's forwarded-audio timeline is

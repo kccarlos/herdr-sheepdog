@@ -141,4 +141,10 @@ test('paced GPT-Live timeline plays through the 400 ms start buffer', (t) => {
   t.diagnostic(`paced long reply: underruns ${a.stats.underruns} at 400 ms, ${old.stats.underruns} at 1200 ms`);
   assert.equal(PLAYBACK_POLICY.openai.startMs, 400);
   assert.ok(a.stats.underruns <= 1 && a.stats.underruns <= old.stats.underruns, `underruns ${a.stats.underruns} (1200 ms: ${old.stats.underruns})`);
+  // From 6.8 s on the reply is continuous (no hole over ~190 ms): at ≈1.0x
+  // the 400 ms buffer alone carries it without an underrun.
+  const tail = chunks.slice(54);
+  const t0 = tail[0].at_ms;
+  const b = replay(tail.map((c) => ({ at_ms: c.at_ms - t0, bytes: c.bytes })), {}, PLAYBACK_POLICY.openai);
+  assert.equal(b.stats.underruns, 0, `continuous tail underruns ${b.stats.underruns}`);
 });
