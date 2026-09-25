@@ -567,6 +567,47 @@ func (b *Brain) Said(text string, final bool) {
 	}
 }
 
+// SaidCut records that the assistant's speech was cut off before the CEO
+// heard all of it (voice.EventTranscript with Cut): heard is the part
+// that played, full everything the cut run said, heardMs how long it
+// played. Gemini generates ~4× real time, so the run's full text was
+// usually ingested already (at the model's turnComplete) by the time the
+// client flushes: those "Assistant said" lines — the newest ones whose
+// text the run contains — leave the window (Retracter, as Brain.Echo
+// does) and one line with what was heard takes their place, rendered
+// "Assistant said (cut off after N s)". The transcript on disk keeps
+// both, and a brain turn that ran between the two saw the full text.
+func (b *Brain) SaidCut(heard, full string, heardMs int) {
+	full = strings.TrimSpace(full)
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if pending := joinFragments(b.outBuf); pending != "" && strings.Contains(full, pending) {
+		// The cut run's own tail, not ingested yet: the cut line
+		// replaces it. Anything else pending is the next reply's
+		// start (the model spoke again before the client's report
+		// came back) and flushes at that reply's own end.
+		b.outBuf = nil
+	}
+	if r, ok := b.engine.(Retracter); ok && full != "" {
+		// Unlike Echo this walks past requests: a brain turn may have
+		// run on the full line already, but from here on the window
+		// should say what the CEO actually heard.
+		msgs := b.transcript.Messages()
+		for i, looked := len(msgs)-1, 0; i >= 0 && looked < 16; i, looked = i-1, looked+1 {
+			m := msgs[i]
+			if m.Kind != KindAssistantSaid || m.Cut {
+				continue
+			}
+			said := strings.TrimSpace(m.Content)
+			if said == "" || !strings.Contains(full, said) {
+				break
+			}
+			r.Retract(m.Seq)
+		}
+	}
+	b.ingest(Message{Role: RoleUser, Kind: KindAssistantSaid, Content: strings.TrimSpace(heard), Cut: true, CutAfterMs: heardMs}, 0)
+}
+
 // TurnComplete flushes the assistant's pending fragments (the model's
 // turn ended).
 func (b *Brain) TurnComplete() {

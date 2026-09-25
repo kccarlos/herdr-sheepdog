@@ -31,12 +31,14 @@ type pushItem struct {
 	tags map[string]any
 }
 
-// exempt reports whether tags mark this push as one of the two
-// exceptions that keep INTERRUPT scheduling even while the model is
-// speaking: a due promise, or a decision on a block whose pending
-// action this event created (docs/roles.md "Pushes").
+// exempt reports whether tags mark this push as one of the exceptions
+// that keep INTERRUPT scheduling even while the model is speaking: a due
+// promise, a decision on a block whose pending action this event
+// created (docs/roles.md "Pushes"), or the stop button's reply (tag
+// stop, as GPT-Live has it): the shepherd asked for silence, so what
+// was playing is cut regardless.
 func exempt(tags map[string]any) bool {
-	return tags["due_promise"] == true || tags["needs_user"] == true
+	return tags["due_promise"] == true || tags["needs_user"] == true || tags["stop"] == true
 }
 
 // Push policy (plan §3.6): one at a time, FIFO. UrgencySilent goes as
@@ -108,7 +110,7 @@ func (s *Session) peekPush() (pushItem, bool) {
 		return pushItem{}, false
 	}
 	head := &s.pushQ[0]
-	deferNow := head.urgency == voice.UrgencyInterrupt && s.speaking && !exempt(head.tags)
+	deferNow := head.urgency == voice.UrgencyInterrupt && s.speakingLocked(s.now()) && !exempt(head.tags)
 	if deferNow {
 		head.urgency = voice.UrgencyIdle
 	}
@@ -223,23 +225,40 @@ func (s *Session) pushReady(item pushItem) (wait time.Duration, timedOut bool) {
 		s.speaking = false
 		timedOut = true
 	}
-	if gap := s.cfg.PushGap - now.Sub(s.lastSpoken); gap > 0 {
+	// The model's turn is over, but the client may still be playing it
+	// (Gemini generates ~4× real time): wait for the real end of speech
+	// (the client's drained; without playback reports, the timing
+	// guess), and measure the gap from it.
+	if playing, left := s.play.Playing(now); playing {
+		return left, timedOut
+	}
+	last := s.lastSpoken
+	if ended := s.play.EndedAt(now); ended.After(last) {
+		last = ended
+	}
+	if gap := s.cfg.PushGap - now.Sub(last); gap > 0 {
 		return gap, timedOut
 	}
 	return 0, timedOut
 }
 
 // speakingUntilLocked returns how long the user still counts as speaking
-// (0 when not). Heuristic: input transcription activity within SpeechHold
-// that has not been marked finished. Muted users are never speaking.
+// (0 when not): the client's own speech detector when it reports one
+// (open, and ClientSpeechRelease after it closed — it sees the onset
+// long before a transcript does), or input transcription activity within
+// SpeechHold that has not been marked finished, whichever holds longer.
+// Muted users are never speaking.
 func (s *Session) speakingUntilLocked(now time.Time) time.Duration {
-	if s.muted || s.inputDone || s.lastInput.IsZero() {
+	if s.muted {
 		return 0
 	}
-	if left := s.cfg.SpeechHold - now.Sub(s.lastInput); left > 0 {
-		return left
+	hold := s.vad.Hold(now)
+	if !s.inputDone && !s.lastInput.IsZero() {
+		if left := s.cfg.SpeechHold - now.Sub(s.lastInput); left > hold {
+			hold = left
+		}
 	}
-	return 0
+	return hold
 }
 
 // doPush sends one item. Interrupt flushes local output first; the model

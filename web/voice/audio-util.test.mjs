@@ -374,3 +374,66 @@ test('SilenceGate: floor is inclusive-exclusive at the configured LSB and prerol
   assert.equal(r.transition, 'off');
   assert.equal(r.send.length, 1);
 });
+
+// ---------------------------------------------------------------- playback reports
+
+function reporting(opts) {
+  const p = new Player({ inRate: PLAYBACK_RATE, outRate: 48000, prebuffer: 2400, ...opts });
+  const reports = [];
+  p.onPlayback = (state, playedMs) => reports.push([state, playedMs]);
+  return { p, reports };
+}
+
+test('playback reports: started, then drained with the run length once the ring stayed dry', () => {
+  const { p, reports } = reporting({ stretch: false });
+  const block = new Float32Array(128);
+  p.push(sine(600, PLAYBACK_RATE, 24000)); // 1 s
+  while (p.render(block)) { /* play it out */ }
+  assert.deepEqual(reports, [['started', 0]], 'drained waits for the underrun window');
+  for (let i = 0; i < 200; i++) p.render(block); // > 300 ms dry
+  assert.deepEqual(reports, [['started', 0], ['drained', 1000]]);
+});
+
+test('playback reports: an underrun resume continues the run (no extra started/drained)', () => {
+  const { p, reports } = reporting({ stretch: false, maxWaitBlocks: 3 });
+  const block = new Float32Array(128);
+  p.push(new Float32Array(12000).fill(0.25)); // 500 ms
+  while (p.render(block)) { /* drain */ }
+  p.push(new Float32Array(12000).fill(0.25)); // right away: an underrun
+  for (let i = 0; i < 400; i++) p.render(block);
+  assert.equal(p.stats.underruns, 1);
+  assert.deepEqual(reports, [['started', 0], ['drained', 1000]]);
+});
+
+test('playback reports: flushed says how much of the run was heard', () => {
+  const { p, reports } = reporting({ stretch: false });
+  const block = new Float32Array(128);
+  p.push(new Float32Array(240000).fill(0.25)); // 10 s
+  // 4 s of 48 kHz output = 4 s of source at rate 1 (plus the prebuffer wait).
+  for (let i = 0; i < Math.round((4 * 48000) / 128); i++) p.render(block);
+  p.flush();
+  assert.equal(reports[0][0], 'started');
+  assert.equal(reports[1][0], 'flushed');
+  assert.ok(Math.abs(reports[1][1] - 4000) < 60, `heard ${reports[1][1]} ms`);
+  // A flush with nothing playing still reports, with 0.
+  p.flush();
+  assert.deepEqual(reports[2], ['flushed', 0]);
+});
+
+test('playback reports: a flush after the ring ran dry reports the whole run', () => {
+  const { p, reports } = reporting({ stretch: false });
+  const block = new Float32Array(128);
+  p.push(new Float32Array(4800).fill(0.25)); // 200 ms
+  while (p.render(block)) { /* drain */ }
+  p.flush(); // before the underrun window passed
+  assert.deepEqual(reports, [['started', 0], ['flushed', 200]]);
+});
+
+test('playback reports: played_ms is stream time under time-stretch', () => {
+  const { p, reports } = reporting({});
+  const block = new Float32Array(128);
+  p.push(new Float32Array(24000).fill(0.25)); // 1 s, below 2× target: may play slowed
+  while (p.render(block)) { /* drain */ }
+  for (let i = 0; i < 200; i++) p.render(block);
+  assert.deepEqual(reports.at(-1), ['drained', 1000]);
+});

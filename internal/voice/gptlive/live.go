@@ -296,6 +296,7 @@ func (s *Session) onOutputAudio(chunk []byte) {
 	forward := voiced || (!s.lastVoiced.IsZero() && now.Sub(s.lastVoiced) < s.cfg.PauseHold)
 	if forward {
 		s.outBytes += int64(len(chunk))
+		s.play.Sent(now, len(chunk))
 	}
 	s.mu.Unlock()
 	if forward {
@@ -323,6 +324,7 @@ func (s *Session) onOutputText(delta string) {
 	s.lastActivity = now
 	s.speakingNow = true
 	s.outText += delta
+	s.play.Said(delta)
 	s.mu.Unlock()
 	s.log.Log(logSource, "voice.transcript.out", "", map[string]any{"text": delta, "final": false})
 	s.emit(voice.EventTranscript{Dir: voice.DirOut, Text: delta})

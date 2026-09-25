@@ -614,7 +614,7 @@ func TestPushInterruptDeferredWhileSpeaking(t *testing.T) {
 // needs_user are the two exceptions (docs/roles.md "Pushes") that keep
 // INTERRUPT scheduling even while the model is speaking.
 func TestPushExemptTagsStayInterruptWhileSpeaking(t *testing.T) {
-	for _, tag := range []string{"due_promise", "needs_user"} {
+	for _, tag := range []string{"due_promise", "needs_user", "stop"} {
 		t.Run(tag, func(t *testing.T) {
 			c := newFakeConn("c1")
 			h := newHarness(t, Config{}, &fakeDialer{results: []func() (Conn, error){ok(c)}})

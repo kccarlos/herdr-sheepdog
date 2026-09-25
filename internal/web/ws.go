@@ -37,6 +37,24 @@ type voiceStatser interface{ VoiceStats() map[string]any }
 // user's turn when the browser's silence gate stops sending frames.
 type audioEnder interface{ AudioStreamEnd() }
 
+// playbackReporter takes the client's playback reports
+// (docs/ws-contract.md "Playback reports"): the session keeps "the
+// model is speaking" true until the client has played the reply, and
+// truncates a cut-off reply's transcript to what was heard.
+type playbackReporter interface {
+	ClientPlayback(state string, playedMs int)
+}
+
+// speechReporter takes the client's own speech detector (a speaking
+// message, or its silence gate read the same way) for push timing.
+type speechReporter interface{ ClientSpeaking(on bool) }
+
+// tagPusher is a session that carries tags onto a push
+// (supervisor.TagPusher).
+type tagPusher interface {
+	PushTagged(text string, u voice.Urgency, tags map[string]any) error
+}
+
 // hub owns the single browser client and the daemon's view of the voice
 // state (docs/ws-contract.md).
 type hub struct {
@@ -213,6 +231,9 @@ func (h *hub) onVoiceEvent(ev voice.Event) {
 		h.unheard = false // the next unheard audio is another turn
 		h.mu.Unlock()
 	case voice.EventTranscript:
+		if e.Cut != nil {
+			return // a correction for the brain, not a caption
+		}
 		h.send(wsproto.Transcript(e.Dir.String(), e.Text, e.Final))
 	case voice.EventError:
 		if e.Err != nil {
@@ -240,7 +261,15 @@ func (h *hub) flush() {
 func (h *hub) afterCancel(res voice.ToolResult) {
 	h.flush()
 	if h.s.deps.Voice != nil {
-		if err := h.s.deps.Voice.Push(res.Spoken, voice.UrgencyInterrupt); err != nil {
+		// Tagged stop: the one reply that stays INTERRUPT even while the
+		// model (or the client's playback) counts as speaking.
+		push := func() error { return h.s.deps.Voice.Push(res.Spoken, voice.UrgencyInterrupt) }
+		if tp, ok := h.s.deps.Voice.(tagPusher); ok {
+			push = func() error {
+				return tp.PushTagged(res.Spoken, voice.UrgencyInterrupt, map[string]any{"stop": true})
+			}
+		}
+		if err := push(); err != nil {
 			h.s.log.Log(logSource, "web.push_error", "", map[string]any{"error": err.Error()})
 		}
 		return
@@ -261,17 +290,49 @@ func (h *hub) setMuted(on bool) {
 }
 
 // setSilence records a silence-gate transition reported by the client and,
-// when the gate closed, tells the session the audio stream paused.
+// when the gate closed, tells the session the audio stream paused. From a
+// client that never sent a speaking message the gate is also its speech
+// detector: open means speaking (docs/ws-contract.md "Client speech
+// detector").
 func (h *hub) setSilence(c *client, on bool) {
 	c.mu.Lock()
 	c.silent = on
 	c.silenceTransitions++
+	gateIsDetector := !c.speakingReports
 	c.mu.Unlock()
 	h.s.log.Log(logSource, "web.client.silence", "", map[string]any{"client_id": c.id, "on": on})
 	if on {
 		if v, ok := h.s.deps.Voice.(audioEnder); ok {
 			v.AudioStreamEnd()
 		}
+	}
+	if gateIsDetector {
+		if v, ok := h.s.deps.Voice.(speechReporter); ok {
+			v.ClientSpeaking(!on)
+		}
+	}
+}
+
+// setSpeaking records the client's own speech detector (a speaking
+// message): from then on it, not the silence gate, is the signal.
+func (h *hub) setSpeaking(c *client, on bool) {
+	c.mu.Lock()
+	c.speakingReports = true
+	c.mu.Unlock()
+	h.s.log.Log(logSource, "web.client.speaking", "", map[string]any{"client_id": c.id, "on": on})
+	if v, ok := h.s.deps.Voice.(speechReporter); ok {
+		v.ClientSpeaking(on)
+	}
+}
+
+// setPlayback forwards a client playback report to the session, which
+// logs it (voice.playback) with the run it describes.
+func (h *hub) setPlayback(c *client, state string, playedMs int) {
+	c.mu.Lock()
+	c.playbackReports++
+	c.mu.Unlock()
+	if v, ok := h.s.deps.Voice.(playbackReporter); ok {
+		v.ClientPlayback(state, playedMs)
 	}
 }
 
@@ -333,8 +394,13 @@ type client struct {
 	// counters carried by its pings)
 	silent             bool
 	silenceTransitions int
-	gatedFrames        int
-	peak               int
+	// speakingReports: the client sent a speaking message, so its
+	// silence gate no longer stands in for its speech detector.
+	speakingReports bool
+	// playbackReports counts playback messages (web.client.stats).
+	playbackReports int
+	gatedFrames     int
+	peak            int
 	// playback stats reported by the browser's jitter buffer (Player in
 	// audio-util.js), carried on ping messages.
 	underruns int
@@ -603,6 +669,14 @@ func (c *client) onControl(data []byte) {
 		h.setMuted(*m.On)
 	case wsproto.TypeSilence:
 		h.setSilence(c, *m.On)
+	case wsproto.TypeSpeaking:
+		h.setSpeaking(c, *m.On)
+	case wsproto.TypePlayback:
+		played := 0
+		if m.PlayedMs != nil {
+			played = *m.PlayedMs
+		}
+		h.setPlayback(c, m.State, played)
 	case wsproto.TypeCancel:
 		ctx, cancel := h.s.toolCtx()
 		res, err := h.s.runTool(ctx, voice.ToolCall{ID: "ws-cancel", Name: supervisor.ToolStop}, "ws")
@@ -673,7 +747,8 @@ func (c *client) counters() map[string]any {
 		"frames_in": c.framesIn, "bytes_in": c.bytesIn, "frames_out": c.framesOut, "bytes_out": c.bytesOut,
 		"dropped_audio": c.droppedAudio, "muted_drops": c.mutedDrops, "queued": len(c.queue),
 		"silent": c.silent, "silence_transitions": c.silenceTransitions, "gated_frames": c.gatedFrames, "peak": c.peak,
-		"underruns": c.underruns, "drains": c.drains, "buffer_ms": c.bufferMs,
+		"playback_reports": c.playbackReports,
+		"underruns":        c.underruns, "drains": c.drains, "buffer_ms": c.bufferMs,
 		"rate": c.rate, "stretched_ms": c.stretchedMs,
 		"send_wait_max_ms": round1(maxWait), "send_wait_p95_ms": round1(p95Wait),
 		"dur_ms": now.Sub(c.start).Milliseconds(),

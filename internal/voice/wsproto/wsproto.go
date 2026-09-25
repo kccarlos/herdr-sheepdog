@@ -19,11 +19,14 @@ const (
 	ServerSampleRate = 24000
 )
 
-// Message types. Client→server: mute, silence, cancel, text, ping.
-// Server→client: flush, status, transcript, error, pong.
+// Message types. Client→server: mute, silence, speaking, playback,
+// cancel, text, ping. Server→client: flush, status, transcript, error,
+// pong.
 const (
 	TypeMute       = "mute"
 	TypeSilence    = "silence"
+	TypeSpeaking   = "speaking"
+	TypePlayback   = "playback"
 	TypeCancel     = "cancel"
 	TypeText       = "text"
 	TypePing       = "ping"
@@ -42,6 +45,14 @@ const (
 	VoiceClosed       = "closed"
 )
 
+// Playback states carried by a playback message (docs/ws-contract.md
+// "Playback reports").
+const (
+	PlaybackStarted = "started"
+	PlaybackDrained = "drained"
+	PlaybackFlushed = "flushed"
+)
+
 // Transcript directions.
 const (
 	DirIn  = "in"  // what the model heard from the user
@@ -53,8 +64,14 @@ const (
 type Message struct {
 	Type string `json:"type"`
 
-	// mute and silence
+	// mute, silence and speaking
 	On *bool `json:"on,omitempty"`
+
+	// playback: the client's player started, drained or flushed, and
+	// how much of the current spoken run it played (ms of the 24 kHz
+	// stream the daemon sent).
+	State    string `json:"state,omitempty"`
+	PlayedMs *int   `json:"played_ms,omitempty"`
 
 	// ping (optional client counters, mirrored into web.client.stats)
 	GatedFrames *int `json:"gated_frames,omitempty"`
@@ -105,6 +122,16 @@ func Mute(on bool) Message { return Message{Type: TypeMute, On: &on} }
 // off). See docs/ws-contract.md, "Silence gate".
 func Silence(on bool) Message { return Message{Type: TypeSilence, On: &on} }
 
+// Speaking builds a client→server speech-detector message: on means the
+// client hears the shepherd speaking. See docs/ws-contract.md, "Client
+// speech detector".
+func Speaking(on bool) Message { return Message{Type: TypeSpeaking, On: &on} }
+
+// Playback builds a client→server playback report.
+func Playback(state string, playedMs int) Message {
+	return Message{Type: TypePlayback, State: state, PlayedMs: &playedMs}
+}
+
 // Cancel builds the client→server "stop" message.
 func Cancel() Message { return Message{Type: TypeCancel} }
 
@@ -148,9 +175,22 @@ func Parse(data []byte) (Message, error) {
 // Validate checks that the fields required by m.Type are present.
 func (m Message) Validate() error {
 	switch m.Type {
-	case TypeMute, TypeSilence:
+	case TypeMute, TypeSilence, TypeSpeaking:
 		if m.On == nil {
 			return fmt.Errorf("wsproto: %s: missing \"on\"", m.Type)
+		}
+	case TypePlayback:
+		switch m.State {
+		case PlaybackStarted:
+		case PlaybackDrained, PlaybackFlushed:
+			if m.PlayedMs == nil {
+				return fmt.Errorf("wsproto: playback: %s: missing \"played_ms\"", m.State)
+			}
+		default:
+			return fmt.Errorf("wsproto: playback: bad state %q", m.State)
+		}
+		if m.PlayedMs != nil && *m.PlayedMs < 0 {
+			return fmt.Errorf("wsproto: playback: negative \"played_ms\"")
 		}
 	case TypeText:
 		if m.Text == "" {

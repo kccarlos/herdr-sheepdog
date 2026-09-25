@@ -79,6 +79,7 @@ func (s *Session) handleServerContent(sc *genai.LiveServerContent) {
 					s.audioTiming = audiotiming.New(s.audioTurnSeq, wsproto.ServerSampleRate)
 				}
 				s.audioTiming.Chunk(now, len(p.InlineData.Data))
+				s.play.Sent(now, len(p.InlineData.Data))
 				s.mu.Unlock()
 				s.clearStalled()
 				s.out.Push(p.InlineData.Data)
@@ -101,6 +102,7 @@ func (s *Session) handleServerContent(sc *genai.LiveServerContent) {
 		s.openTurnLocked()
 		s.speaking = true
 		s.noteResponseLocked(s.now())
+		s.play.Said(t.Text)
 		s.mu.Unlock()
 		s.clearStalled()
 		s.log.Log(logSource, "voice.transcript.out", "", map[string]any{"text": t.Text, "final": t.Finished})
@@ -129,6 +131,7 @@ func (s *Session) handleServerContent(sc *genai.LiveServerContent) {
 func (s *Session) interrupt(by string) {
 	s.mu.Lock()
 	s.speaking = false
+	s.play.Flush(s.now())
 	timing := s.finishAudioTimingLocked()
 	s.mu.Unlock()
 	dropped := s.out.Flush()

@@ -111,6 +111,11 @@ type Session struct {
 	// turns. audioTurnSeq numbers turns across the session's lifetime.
 	audioTiming  *audiotiming.Tracker
 	audioTurnSeq int
+	// play follows what the /ws client actually plays (its playback
+	// reports, or a timing guess without them); vad is the client's own
+	// speech detector. Both are forgotten when the client changes.
+	play voice.PlaybackTracker
+	vad  voice.ClientSpeech
 }
 
 // liveConn is one GPT-Live session (one WebSocket).
@@ -309,6 +314,8 @@ func (s *Session) ClientAttached(attached bool) {
 	if attached {
 		s.armed = true
 	}
+	s.play.Detach()
+	s.vad.Reset()
 	s.mu.Unlock()
 	if changed {
 		s.log.Log(logSource, "voice.client", "", map[string]any{"attached": attached})
@@ -340,13 +347,58 @@ func (s *Session) Reset(reason string) error {
 	return nil
 }
 
-// Speaking implements voice.Session.
+// Speaking implements voice.Session: the model is producing speech
+// (speakingLocked) or the client is still playing it (ClientPlayback; a
+// timing guess without playback reports).
 func (s *Session) Speaking() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.speakingLocked(s.now())
+	return s.speakingOrPlayingLocked(s.now())
 }
 
+// speakingOrPlayingLocked is Speaking under s.mu: what push timing uses.
+func (s *Session) speakingOrPlayingLocked(now time.Time) bool {
+	if s.speakingLocked(now) {
+		return true
+	}
+	playing, _ := s.play.Playing(now)
+	return playing
+}
+
+// ClientPlayback applies a /ws client playback report
+// (docs/ws-contract.md "Playback reports"): it logs voice.playback and,
+// when a flushed run was cut short, emits the heard part as a cut
+// transcript for the brain. The push pump reads the new state on its
+// next tick.
+func (s *Session) ClientPlayback(state string, playedMs int) {
+	s.mu.Lock()
+	rep := s.play.Report(s.now(), state, playedMs)
+	s.mu.Unlock()
+	s.log.Log(logSource, "voice.playback", "", rep.Payload())
+	if rep.Cut != nil {
+		s.emit(voice.EventTranscript{Dir: voice.DirOut, Text: rep.Heard, Final: true, Cut: rep.Cut})
+	}
+}
+
+// LastPlayback is the client's most recent playback report.
+func (s *Session) LastPlayback() voice.PlaybackReport {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.play.Last()
+}
+
+// ClientSpeaking records the /ws client's speech detector opening (true)
+// or closing (false); pumpPushes holds spoken pushes for it.
+func (s *Session) ClientSpeaking(on bool) {
+	s.mu.Lock()
+	s.vad.Set(s.now(), on)
+	s.mu.Unlock()
+}
+
+// speakingLocked is whether the model is producing speech: voiced
+// output audio or an output transcript within SpeechHold. It is the
+// generation state alone — the synthesised end of the model's turn
+// (speechEnd) and the idle close follow it, not the client's playback.
 func (s *Session) speakingLocked(now time.Time) bool {
 	if s.live == nil {
 		return false
@@ -514,6 +566,9 @@ func (s *Session) finishAudioTimingLocked() map[string]any {
 
 // interrupt drops queued model audio and tells the client to flush.
 func (s *Session) interrupt(by string) {
+	s.mu.Lock()
+	s.play.Flush(s.now())
+	s.mu.Unlock()
 	dropped := s.out.Flush()
 	s.log.Log(logSource, "voice.interrupted", "", map[string]any{"by": by, "dropped_chunks": dropped})
 	s.emit(voice.EventInterrupted{})

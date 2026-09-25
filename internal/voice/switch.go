@@ -410,6 +410,31 @@ func (sw *Switcher) HasListener() bool {
 	return sw.client
 }
 
+// ClientPlayback forwards a /ws client playback report to the current
+// session (docs/ws-contract.md "Playback reports"). A new provider's
+// session starts with no run, so a report about the old one's audio
+// (the flush a switch sends) is logged and otherwise ignored there.
+func (sw *Switcher) ClientPlayback(state string, playedMs int) {
+	if p, ok := sw.cur().(interface{ ClientPlayback(string, int) }); ok {
+		p.ClientPlayback(state, playedMs)
+	}
+}
+
+// ClientSpeaking forwards the /ws client's speech detector.
+func (sw *Switcher) ClientSpeaking(on bool) {
+	if p, ok := sw.cur().(interface{ ClientSpeaking(bool) }); ok {
+		p.ClientSpeaking(on)
+	}
+}
+
+// LastPlayback is the current session's last client playback report.
+func (sw *Switcher) LastPlayback() PlaybackReport {
+	if p, ok := sw.cur().(interface{ LastPlayback() PlaybackReport }); ok {
+		return p.LastPlayback()
+	}
+	return PlaybackReport{}
+}
+
 // AudioStreamEnd forwards the client's silence gate closing.
 func (sw *Switcher) AudioStreamEnd() {
 	if ae, ok := sw.cur().(interface{ AudioStreamEnd() }); ok {

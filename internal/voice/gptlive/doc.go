@@ -23,7 +23,9 @@
 //     session.input_transcript.delta (EventTranscript{DirIn, "", Final});
 //   - the model is speaking while it produced voiced output audio or an
 //     output transcript fragment within SpeechHold; the transition to not
-//     speaking emits EventTurnComplete;
+//     speaking emits EventTurnComplete (Speaking() and the push queue
+//     additionally count the /ws client still playing the reply, from
+//     its playback reports; the synthesised turn end does not);
 //   - silent output audio is dropped, except for a short hangover after
 //     speech so natural pauses survive, so the /ws client only receives
 //     audio while the model talks.

@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -39,6 +40,11 @@ type fakeSession struct {
 	attached bool
 	// resets records every Reset(reason) call.
 	resets []string
+	// playback and speaking record ClientPlayback / ClientSpeaking.
+	playback []string
+	speaking []bool
+	// pushTags records the tags of every PushTagged call.
+	pushTags []map[string]any
 }
 
 func newFakeSession() *fakeSession {
@@ -65,6 +71,18 @@ func (f *fakeSession) Push(text string, _ voice.Urgency) error {
 	f.pushes = append(f.pushes, text)
 	return nil
 }
+func (f *fakeSession) PushTagged(text string, _ voice.Urgency, tags map[string]any) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.pushes = append(f.pushes, text)
+	f.pushTags = append(f.pushTags, tags)
+	return nil
+}
+func (f *fakeSession) taggedPushes() []map[string]any {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]map[string]any(nil), f.pushTags...)
+}
 func (f *fakeSession) Audio() <-chan []byte       { return f.audio }
 func (f *fakeSession) Events() <-chan voice.Event { return f.events }
 func (f *fakeSession) SetMuted(m bool)            { f.mu.Lock(); f.muted = m; f.mu.Unlock() }
@@ -87,6 +105,26 @@ func (f *fakeSession) ClientAttached(a bool) {
 	f.mu.Lock()
 	f.attached = a
 	f.mu.Unlock()
+}
+func (f *fakeSession) ClientPlayback(state string, playedMs int) {
+	f.mu.Lock()
+	f.playback = append(f.playback, fmt.Sprintf("%s:%d", state, playedMs))
+	f.mu.Unlock()
+}
+func (f *fakeSession) ClientSpeaking(on bool) {
+	f.mu.Lock()
+	f.speaking = append(f.speaking, on)
+	f.mu.Unlock()
+}
+func (f *fakeSession) playbackReports() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.playback...)
+}
+func (f *fakeSession) speakingReports() []bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]bool(nil), f.speaking...)
 }
 func (f *fakeSession) isAttached() bool    { f.mu.Lock(); defer f.mu.Unlock(); return f.attached }
 func (f *fakeSession) HasListener() bool   { return f.isAttached() }
@@ -136,7 +174,9 @@ type harness struct {
 	sw       *voice.Switcher
 	watcher  *fakeWatcher
 	// model is the brain's scripted model when harnessOpts.brain is set.
-	model  *braintest.Model
+	model *braintest.Model
+	// brain is the brain when harnessOpts.brain is set.
+	brain  *brain.Brain
 	cancel context.CancelFunc
 }
 
@@ -267,7 +307,7 @@ func newHarness(t *testing.T, o harnessOpts) *harness {
 		}()
 	}
 	hs := httptest.NewServer(srv.Handler())
-	hh := &harness{t: t, log: log, store: store, herdr: h, sup: sup, srv: srv, http: hs, session: session, session2: session2, sw: sw, watcher: watcher, model: model, cancel: cancel}
+	hh := &harness{t: t, log: log, store: store, herdr: h, sup: sup, srv: srv, http: hs, session: session, session2: session2, sw: sw, watcher: watcher, model: model, brain: b, cancel: cancel}
 	t.Cleanup(func() {
 		hs.Close()
 		cancel()

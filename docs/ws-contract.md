@@ -39,6 +39,8 @@ scheduling each frame at "now".
 |--------------------------------------|-----------------------------------------------------------------------------------------------------------|
 | `{"type":"mute","on":true\|false}`   | Mute state changed. See *Mute semantics*.                                                                 |
 | `{"type":"silence","on":true\|false}` | The client's silence gate closed (`on:true`, no binary frames follow) or reopened (`on:false`). See *Silence gate*. |
+| `{"type":"speaking","on":true\|false}` | The client's own speech detector opened (`on:true`, it hears the shepherd) or closed. Optional; see *Client speech detector*. |
+| `{"type":"playback","state":"started\|drained\|flushed","played_ms":N}` | The client's player started, drained or flushed. See *Playback reports*. `played_ms` is required for `drained` and `flushed` (optional, taken as 0, for `started`). |
 | `{"type":"cancel"}`                  | The "stop" button. The daemon stops current playback (it will send `flush`) and runs the `stop` tool (the stop procedure) in the supervisor. Equivalent to the user saying "stop". |
 | `{"type":"text","text":"…"}`         | Simulate an utterance: the text is fed to the voice session as if the user had spoken it (`/debug` and the `/voice` text box use this). It is recorded as a typed shepherd input, which the one rail accepts like a transcript (docs/roles.md "The one rail"). Without a voice session (`--voice=off`) the daemon echoes it as an `in` transcript and answers through its text router with one `out` transcript (a text routed to `cancel` yields `flush` then the `out`), or with an `error` when the text cannot be routed. |
 | `{"type":"ping","gated_frames":N?,"peak":N?,"underruns":N?,"drains":N?,"buffer_ms":N?,"rate":F?,"stretched_ms":N?,"audio_state":S?}` | Liveness probe; the daemon answers `pong`. Clients should send one every 5–30 s; `/voice` sends one every 5 s (the `web.client.stats` interval) and waits for the pong before the next. The optional counters (frames withheld by the silence gate so far; last input peak in Int16 LSB; the playback jitter buffer's underrun and drain counts and the audio buffered right now in ms; the time-stretch's current playback rate and the total wall-clock ms played at a rate other than 1.0 — see "Playback jitter buffer" below; the page's AudioContext state, `running`/`suspended`/`interrupted`/`closed` — a context that is not running plays nothing and stops updating the counters) are copied into every following `web.client.stats` event until the next ping, with `playback_age_ms` (how old that sample is; absent before the first ping with `buffer_ms`) and `audio_state`. A value repeated across stats lines with a growing `playback_age_ms` is one old sample, not a stalled player. The event also carries `send_wait_max_ms`/`send_wait_p95_ms` (how long a recent audio frame waited in the daemon's per-client send queue; near 0 in normal operation). |
@@ -104,6 +106,106 @@ that. The client therefore gates its capture:
 
 `mute` and `silence` are independent: a muted client sends neither frames
 nor `silence` transitions; the gate resumes its own bookkeeping on unmute.
+
+## Playback reports
+
+Added for docs/research/voice-frameworks-2026-09-24.md P4/P5 (WP-B,
+WP-C, WP-D). The daemon only knows what it *sent*; Gemini generates
+~4× real time, so the model's turn is over seconds before the shepherd
+has heard it. The client therefore reports what its player does:
+
+```json
+{"type":"playback","state":"started","played_ms":0}
+{"type":"playback","state":"drained","played_ms":4200}
+{"type":"playback","state":"flushed","played_ms":1850}
+```
+
+- **`started`** — the player began playing after being empty (the
+  jitter buffer reached its start target). Not sent when it resumes
+  from a mid-reply underrun (see `drained`).
+- **`drained`** — the queue ran empty, the last sample played, and no
+  new audio arrived within the underrun window (300 ms; *Playback
+  jitter buffer*). An underrun that resumes within the window is the
+  same run: no `drained`, no `started`, and `played_ms` keeps counting.
+  A client that cannot tell may send `drained` at every dry ring: the
+  daemon keeps "speaking" for 300 ms after `drained` and carries the
+  run's remaining audio over, so the only cost is an extra message.
+- **`flushed`** — on **every** `flush` from the daemon (and on a local
+  flush such as the page's stop button), even with nothing playing
+  (`played_ms: 0`).
+- **`played_ms`** is the audio of the current run actually played since
+  the last `drained`/`flushed` — at `drained` the run's whole length,
+  at `flushed` how much of the cut-off run was heard. It is measured in
+  **stream time**: milliseconds of the daemon's 24 kHz audio consumed
+  by the player (samples received minus samples still buffered), not
+  wall-clock time, so the adaptive time-stretch (0.85–1.05×) does not
+  skew it. The web page's `Player` (`audio-util.js`) implements this;
+  the iOS app must match (stream time, and `flushed` on every flush).
+
+What the daemon does with them:
+
+- **"Speaking" means the shepherd is still hearing it.** The voice
+  session counts as speaking while the model generates **or** the
+  client plays: from `started` until `drained` (+ 300 ms, a gap hold)
+  or `flushed`; audio sent that the client has not started yet counts
+  until its expected end. An INTERRUPT push that arrives while the
+  client still plays a finished turn is deferred to WHEN_IDLE
+  (`voice.push_deferred`) instead of cutting the sentence, and the gap
+  between spoken pushes (`PushGap`, 2 s) runs from `drained`. A started
+  run with no `drained` stops counting 5 s after the expected end of
+  the audio sent (a lost message cannot pin the voice "speaking"), and
+  a client that detaches or is replaced is forgotten at once.
+- **Without playback reports** (an older client, `voice-test`) the
+  daemon falls back to a timing guess: a reply counts as playing until
+  the audio sent so far would have finished at real time from when it
+  started arriving (audio_ms delivered minus wall time), with no
+  jitter-buffer allowance. The session treats a client as reporting
+  once it has sent one `playback` message.
+- **The brain hears what the shepherd heard.** Each `flushed` whose
+  `played_ms` is short of the run (by more than 150 ms) maps
+  `played_ms` onto the run's output transcript — each transcript
+  fragment is placed at the number of audio bytes sent when it arrived,
+  and the fragment straddling the cut contributes a proportional share
+  of its words — and the brain's `Assistant said` line for that speech
+  becomes `Assistant said (cut off after N s): "…heard part…"`. GPT-Live
+  uses the same byte-count method rather than the `start_ms`/`end_ms` on
+  its output transcript: the daemon drops silent output audio before it
+  reaches `/ws`, so the model's own timeline is not the stream the
+  client played.
+- Each report is logged as `voice.playback {state, played_ms, run_ms}`
+  (`run_ms`: audio the daemon sent in that run; a cut adds `cut`,
+  `heard`, `said`).
+- Not done (TODO): telling the voice model silently which part was
+  heard ("the shepherd heard only: …"). A context push right after a
+  barge-in lands while the shepherd is talking, where Gemini's turn
+  handling is most fragile, and it cannot be verified offline.
+
+## Client speech detector
+
+Push timing needs to know when the shepherd is talking; the input
+transcript arrives late (the daemon's own rule is "an input transcript
+within 1.5 s"), so a push can start just as the shepherd does.
+
+- A client with its own voice-activity detector sends
+  `{"type":"speaking","on":true}` when it opens on the shepherd's
+  speech and `{"type":"speaking","on":false}` when it closes. Once a
+  client has sent one `speaking` message, `speaking` is
+  **authoritative** for that connection.
+- A client that never sends `speaking` has its **silence gate** read
+  the same way: `silence` `on:false` (the gate reopened) counts as
+  speaking, `on:true` as not. This is what `/voice` does today — its
+  "detector" is the gate, which opens on any input above the noise
+  floor.
+- While the detector is open, spoken pushes wait (both urgencies); when
+  it closes they wait 300 ms more. An open detector holds pushes on its
+  own for at most 8 s since it opened — a gate held open by room noise
+  must not hold pushes forever; past that only input transcripts hold
+  them. The transcript rule stays in force alongside (whichever holds
+  longer): after `silence on:true` the daemon still streams 1 s of
+  comfort noise before `audioStreamEnd`, so the model's own turn for
+  the shepherd is still open for a moment.
+- Logged as `web.client.speaking {client_id, on}` (`speaking`
+  messages; gate transitions stay `web.client.silence`).
 
 ## Playback jitter buffer
 

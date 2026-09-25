@@ -469,6 +469,14 @@ func (s *Supervisor) OnVoiceEvent(ev voice.Event) {
 	case voice.EventResumed:
 		s.pushBriefing()
 	case voice.EventTranscript:
+		if e.Cut != nil {
+			// Not new speech: the client cut the last spoken run short,
+			// and the brain should remember only what was heard.
+			if s.brain != nil {
+				s.brain.SaidCut(e.Text, e.Cut.Full, e.Cut.HeardMs)
+			}
+			return
+		}
 		if e.Dir == voice.DirIn {
 			s.heard(e.Text, e.Final)
 		} else {

@@ -159,6 +159,14 @@ function setPlaybackPolicy(provider) {
 }
 
 function onPlaybackMessage(m) {
+  if (m.type === 'playback') {
+    // The daemon keeps "the dog is speaking" true until the reply has
+    // actually played, and trims a cut-off reply to what was heard
+    // (docs/ws-contract.md "Playback reports").
+    send({ type: 'playback', state: m.state, played_ms: m.playedMs });
+    if (m.state !== 'started') console.log(`[voice] playback ${m.state} after ${m.playedMs} ms`);
+    return;
+  }
   if (m.type === 'stats') {
     state.playback = m;
     if (m.underruns !== state.lastUnderruns) {

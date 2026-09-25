@@ -61,10 +61,17 @@ type EventStatus struct {
 }
 
 // EventTranscript is an incremental transcript fragment.
+//
+// With Cut set it is not a fragment but a correction (Dir is DirOut,
+// Final true): the client flushed a spoken run before playing all of it,
+// and Text is the part the shepherd actually heard (possibly empty).
+// Consumers that show captions skip it; the brain replaces its
+// "Assistant said" line for the run with it.
 type EventTranscript struct {
 	Dir   Direction
 	Text  string
 	Final bool
+	Cut   *TranscriptCut
 }
 
 // EventInterrupted means queued model audio was dropped; the browser must

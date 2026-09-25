@@ -259,6 +259,12 @@ func contextLine(m Message) string {
 	case KindCEOUtterance:
 		return fmt.Sprintf("[%s] CEO said: %q", ts, m.Content)
 	case KindAssistantSaid:
+		if m.Cut {
+			if m.Content == "" {
+				return fmt.Sprintf("[%s] Assistant started to speak but was cut off before the CEO heard any of it.", ts)
+			}
+			return fmt.Sprintf("[%s] Assistant said (cut off after %.1f s): %q", ts, float64(m.CutAfterMs)/1000, m.Content)
+		}
 		return fmt.Sprintf("[%s] Assistant said: %q", ts, m.Content)
 	case KindPush:
 		return fmt.Sprintf("[%s] Pushed to the assistant: %q", ts, m.Content)

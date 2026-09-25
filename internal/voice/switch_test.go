@@ -19,6 +19,8 @@ type fakeSess struct {
 	closed   bool
 	billed   float64
 	startErr error
+	reports  []string
+	speaking []bool
 }
 
 func newFake(name string) *fakeSess {
@@ -57,6 +59,24 @@ func (f *fakeSess) Events() <-chan Event       { return f.events }
 func (f *fakeSess) SetMuted(m bool)            { f.mu.Lock(); f.muted = m; f.mu.Unlock() }
 func (f *fakeSess) ClientAttached(a bool)      { f.mu.Lock(); f.client = a; f.mu.Unlock() }
 func (f *fakeSess) BilledSeconds() float64     { return f.billed }
+func (f *fakeSess) ClientPlayback(state string, _ int) {
+	f.mu.Lock()
+	f.reports = append(f.reports, state)
+	f.mu.Unlock()
+}
+func (f *fakeSess) ClientSpeaking(on bool) {
+	f.mu.Lock()
+	f.speaking = append(f.speaking, on)
+	f.mu.Unlock()
+}
+func (f *fakeSess) LastPlayback() PlaybackReport {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.reports) == 0 {
+		return PlaybackReport{}
+	}
+	return PlaybackReport{State: f.reports[len(f.reports)-1]}
+}
 
 func TestSwitcher(t *testing.T) {
 	g, o := newFake("gemini"), newFake("openai")
@@ -163,5 +183,33 @@ func TestSwitcherSetBeforeStart(t *testing.T) {
 	}
 	_ = sw.Close()
 	for range sw.Events() {
+	}
+}
+
+// TestSwitcherForwardsClientPlayback: playback reports and the client's
+// speech detector reach the current provider's session.
+func TestSwitcherForwardsClientPlayback(t *testing.T) {
+	g := newFake("gemini")
+	sw, err := NewSwitcher([]Provider{
+		{ProviderInfo: ProviderInfo{ID: "gemini", Available: true}, New: func() (Session, error) { return g, nil }},
+	}, "gemini", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sw.ClientPlayback(PlaybackStarted, 0) // before Start: no session, no panic
+	if err := sw.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sw.Close() })
+	sw.ClientPlayback(PlaybackDrained, 1200)
+	sw.ClientSpeaking(true)
+	g.mu.Lock()
+	reports, speaking := g.reports, g.speaking
+	g.mu.Unlock()
+	if len(reports) != 1 || reports[0] != PlaybackDrained || len(speaking) != 1 || !speaking[0] {
+		t.Fatalf("forwarded reports %v speaking %v", reports, speaking)
+	}
+	if got := sw.LastPlayback(); got.State != PlaybackDrained {
+		t.Fatalf("LastPlayback %+v", got)
 	}
 }

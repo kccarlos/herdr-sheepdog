@@ -113,6 +113,12 @@ type Message struct {
 	// voice's tool call, "push:<id>" on a push, "evt:<id>" on a worker
 	// event and on the announce request about it.
 	Link string `json:"link,omitempty"`
+	// Cut marks a KindAssistantSaid message whose speech the client cut
+	// off (a barge-in, the stop button, an interrupting push): Content
+	// is only the part the CEO heard, and CutAfterMs how much of the
+	// speech played. See Brain.SaidCut.
+	Cut        bool `json:"cut,omitempty"`
+	CutAfterMs int  `json:"cut_after_ms,omitempty"`
 }
 
 // ToolCall is one function call the model made.
