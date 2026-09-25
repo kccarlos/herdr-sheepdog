@@ -282,9 +282,21 @@ type Supervisor struct {
 	// relayedSeq it never moves for transcript fragments that trail the
 	// same relay.
 	acceptedSeq uint64
-	// replies tracks the detached utterance turns (utterance.go), so a test
-	// can wait for a late reply to land.
+	// replies tracks every background goroutine that may call the brain
+	// after the call that started it returned: detached utterance turns
+	// and their late delivery (utterance.go), the daemon's own relay
+	// (relay.go) and investigation jobs with their delivery turn
+	// (investigate.go). shutdown waits for it, so the brain is never
+	// closed under a turn; a test waits on it for a late reply to land.
+	// Add only through track (or under s.mu with shut false).
 	replies sync.WaitGroup
+	// shut is set, under s.mu, once shutdown began: nothing new is
+	// tracked in replies after it.
+	shut bool
+	// life is cancelled by shutdown: the parent of every detached brain
+	// turn, so none holds the daemon's drain for its full budget.
+	life    context.Context
+	endLife context.CancelFunc
 	// inputWake is closed and replaced whenever an input arrives, for a
 	// call waiting out inputGrace.
 	inputWake chan struct{}
@@ -331,6 +343,7 @@ func New(store *state.Store, h Herdr, querier Querier, pusher Pusher, log loggin
 	cfg.chattiness = level
 	s := &Supervisor{store: store, herdr: h, querier: querier, pusher: pusher, log: log, cfg: cfg, brain: cfg.Brain, startedAt: cfg.Now(), conversationStartedAt: cfg.Now(),
 		interrupted: map[string]time.Time{}, mentioned: map[string]time.Time{}, lastPrompt: map[string]string{}, promptSeenAt: map[string]time.Time{}, inputWake: make(chan struct{}), investigating: map[string]*liveInvestigation{}}
+	s.life, s.endLife = context.WithCancel(context.Background())
 	// A querier that can keep a sub-agent session backs the investigate
 	// tool as well (investigate.go); one that cannot still answers
 	// run_cli.
@@ -356,14 +369,7 @@ func (s *Supervisor) Run(ctx context.Context) {
 	defer expiry.Stop()
 	reconcile := time.NewTicker(s.cfg.SnapshotInterval)
 	defer reconcile.Stop()
-	// The sub-agent of a running investigation dies with the daemon, so
-	// nothing is left claiming an agent's one live slot.
-	defer s.cancelInvestigations("shutdown")
-	// Likewise a shepherd turn still running past its tool call: its
-	// reply would have nobody to reach (utterance.go).
-	defer s.abandonUtterance()
-	// And no unanswered utterance is relayed into a daemon going down.
-	defer s.stopRelay()
+	defer s.shutdown()
 	// Once at startup, the roster is already loaded (state.Open ran
 	// before New): catches a pane whose prompt changed while the daemon
 	// was down, which no post-answer poll ever ran for.
@@ -379,6 +385,47 @@ func (s *Supervisor) Run(ctx context.Context) {
 			s.reconcileReprompts(ctx)
 		}
 	}
+}
+
+// shutdown ends the supervisor's background work and waits for it. The
+// invariant it protects: no goroutine of the supervisor calls the brain
+// once Run has returned, because the daemon closes the brain right
+// after (app.go), and a turn racing Brain.Close is a data race on the
+// brain's after-turn WaitGroup (CI, PR #63). In order:
+//   - nothing new is tracked, and no unanswered utterance is relayed
+//     into a daemon going down;
+//   - every detached turn's context ends (life), so a delivery turn
+//     returns at once instead of after its full budget;
+//   - the sub-agent of a running investigation dies with the daemon, so
+//     nothing is left claiming an agent's one live slot;
+//   - a shepherd turn still running past its tool call is dropped: its
+//     reply would have nobody to reach (utterance.go);
+//   - then it waits for all of them (replies).
+//
+// Safe to call more than once (Run calls it; test harnesses call it in
+// cleanup, before the brain closes).
+func (s *Supervisor) shutdown() {
+	s.mu.Lock()
+	s.shut = true
+	s.mu.Unlock()
+	s.stopRelay()
+	s.endLife()
+	s.cancelInvestigations("shutdown")
+	s.abandonUtterance()
+	s.replies.Wait()
+}
+
+// track registers one background goroutine in replies, or reports false
+// once shutdown began (the caller then does not start it). The goroutine
+// calls s.replies.Done when it ends.
+func (s *Supervisor) track() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.shut {
+		return false
+	}
+	s.replies.Add(1)
+	return true
 }
 
 // SetVoiceConnected records whether a voice session is attached

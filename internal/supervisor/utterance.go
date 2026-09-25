@@ -181,8 +181,9 @@ func (s *Supervisor) handleUtterance(ctx context.Context, c claim, callID string
 	// the voice cancels a handler's context as soon as the handler
 	// returns, and the turn may outlive it. Like an investigation job it
 	// runs on its own context, bounded by the brain's own turn timeout;
-	// the stop procedure cancels it through the slot.
-	parent := context.Background()
+	// the stop procedure cancels it through the slot, and shutdown
+	// through s.life.
+	parent := s.life
 	if sync {
 		parent = ctx
 	}
@@ -248,7 +249,11 @@ func (s *Supervisor) coalesce(u *inflightUtterance) {
 // the late way too.
 func (s *Supervisor) awaitReply(ctx, turnCtx context.Context, u *inflightUtterance) voice.ToolResult {
 	start := s.cfg.Now()
-	s.replies.Add(1)
+	if !s.track() {
+		// The daemon is going down: no turn starts that would outlive it.
+		s.endUtterance(u)
+		return voice.ToolResult{Scheduling: voice.UrgencySilent}
+	}
 	go func() {
 		defer s.replies.Done()
 		out := s.utteranceTurn(turnCtx, u)
@@ -279,11 +284,14 @@ func (s *Supervisor) awaitReply(ctx, turnCtx context.Context, u *inflightUtteran
 		// result would be discarded, so it is pushed instead.
 		out := u.out
 		s.mu.Unlock()
-		s.replies.Add(1)
-		go func() {
-			defer s.replies.Done()
-			s.deliverLate(turnCtx, u, out, start)
-		}()
+		if s.track() {
+			go func() {
+				defer s.replies.Done()
+				s.deliverLate(turnCtx, u, out, start)
+			}()
+		} else {
+			s.endUtterance(u)
+		}
 	default:
 		out := u.out
 		s.mu.Unlock()

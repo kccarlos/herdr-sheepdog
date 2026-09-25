@@ -19,6 +19,8 @@ var (
 	ErrNoCLI = errors.New("no CLI query tool is available")
 	// ErrNoHost is returned by a turn before SetHost was called.
 	ErrNoHost = errors.New("brain: no host")
+	// ErrClosed is returned by a turn after Close.
+	ErrClosed = errors.New("brain: closed")
 	// ErrYielded (wrapped in ErrFallback) is returned by an event turn
 	// that stopped before a model call because a CEO turn was waiting
 	// for the lock; the supervisor speaks its code sentence instead.

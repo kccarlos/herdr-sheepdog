@@ -1090,3 +1090,40 @@ func TestReflexModel(t *testing.T) {
 		t.Errorf("window = %+v (dropped %d, transcript %d)", win, c.Dropped, len(msgs))
 	}
 }
+
+// TestCloseEndsATurnInFlight: Close ends a turn still waiting on the
+// model and waits for it, and a turn after Close is refused — the daemon
+// closes the brain after its drain, and a turn that outlived it must not
+// race the after-turn WaitGroup or write to a closed transcript (CI,
+// PR #63).
+func TestCloseEndsATurnInFlight(t *testing.T) {
+	m := braintest.NewModel()
+	m.Default = &braintest.Step{Block: make(chan struct{})}
+	h := newHarness(t, m, nil)
+	done := make(chan error, 1)
+	go func() {
+		_, err := h.ask("what is auth doing?", "auth")
+		done <- err
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for len(m.Calls()) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("the turn never reached the model")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if err := h.brain.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if !errors.Is(err, ErrFallback) {
+			t.Errorf("turn in flight = %v, want a fallback", err)
+		}
+	default:
+		t.Fatal("Close returned before the turn in flight ended")
+	}
+	if _, err := h.ask("and now?", "auth"); !errors.Is(err, ErrClosed) || !errors.Is(err, ErrFallback) {
+		t.Errorf("turn after Close = %v, want ErrClosed (a fallback)", err)
+	}
+}

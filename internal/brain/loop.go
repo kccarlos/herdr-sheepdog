@@ -48,8 +48,15 @@ func (b *Brain) Turn(ctx context.Context, req Request) (Reply, error) {
 		req.Trigger = TriggerCEO
 	}
 	b.mu.Lock()
-	host := b.host
+	host, closed := b.host, b.closed
+	if !closed {
+		b.inFlight.Add(1)
+	}
 	b.mu.Unlock()
+	if closed {
+		return Reply{}, fmt.Errorf("%w: %w", ErrFallback, ErrClosed)
+	}
+	defer b.inFlight.Done()
 	if host == nil {
 		return Reply{}, fmt.Errorf("%w: %w", ErrFallback, ErrNoHost)
 	}
@@ -79,6 +86,8 @@ func (b *Brain) Turn(ctx context.Context, req Request) (Reply, error) {
 	}
 	tctx, cancel := context.WithTimeout(ctx, timeout+b.cfg.FinalGrace)
 	defer cancel()
+	// Close ends a turn in flight, so it does not wait out the budget.
+	defer context.AfterFunc(b.ctx, cancel)()
 	start := b.cfg.Now()
 	key := ""
 	if req.Trigger == TriggerEvent {

@@ -170,9 +170,14 @@ type Brain struct {
 	readTools []*genai.Tool // the read-only surface (event turns)
 
 	lock  turnLock
-	after sync.WaitGroup  // after-turn work in flight
-	ctx   context.Context // ends on Close (bounds after-turn work)
-	stop  context.CancelFunc
+	after sync.WaitGroup // after-turn work in flight
+	// inFlight counts Turn calls in flight; Close waits for them after
+	// setting closed (under mu), so a turn never runs into a closed
+	// transcript and no Add on after races Close's Wait.
+	inFlight sync.WaitGroup
+	closed   bool
+	ctx      context.Context // ends on Close (bounds after-turn work)
+	stop     context.CancelFunc
 
 	mu     sync.Mutex
 	host   Host
@@ -462,9 +467,16 @@ func (b *Brain) TranscriptPath() string {
 	return filepath.Join(b.cfg.DataDir, TranscriptDir, id+".jsonl")
 }
 
-// Close ends after-turn work, waits for it and closes the transcript.
+// Close refuses new turns (ErrClosed), ends the ones in flight and
+// after-turn work, waits for them and closes the transcript. The
+// supervisor joins its own turns before the daemon closes the brain;
+// this makes a late one (past the daemon's drain) safe as well.
 func (b *Brain) Close() error {
+	b.mu.Lock()
+	b.closed = true
+	b.mu.Unlock()
 	b.stop()
+	b.inFlight.Wait()
 	b.after.Wait()
 	_ = b.requests.Close()
 	return b.transcript.Close()

@@ -218,6 +218,7 @@ func TestInvestigationFollowUpResumesSession(t *testing.T) {
 	h.clock.Advance(2 * time.Hour)
 	start(t, h, "and what about the other one?", first.Job, "and what about the other one?")
 	waitFor(t, func() bool { return len(f.all()) == 3 }, "the cold follow-up to run")
+	waitFor(t, func() bool { return len(h.pusher.all()) == 3 }, "the cold follow-up answer")
 	q := f.all()[2]
 	if q.Session != "" || !strings.Contains(q.Question, "The clamp test") && !strings.Contains(q.Question, "You answered") {
 		t.Errorf("cold follow-up = %+v (want no session and the previous answer in the question)", q)
@@ -232,6 +233,33 @@ func TestInvestigationFollowUpResumesSession(t *testing.T) {
 	}
 	if _, err := h.sup.startInvestigation(context.Background(), "w5:p1", brain.InvestigationRequest{Question: "and why?", FollowUpOf: "inv-nope"}); err == nil {
 		t.Error("follow-up of an unknown job was accepted")
+	}
+}
+
+// TestShutdownWaitsForInvestigationDelivery: a job that finished just
+// before the daemon stops is composing its answer (the delivery turn);
+// shutdown ends that turn and waits for it, so the brain the daemon
+// closes next has no turn running (the race CI caught on PR #63), and
+// nothing is pushed into a voice that is going down.
+func TestShutdownWaitsForInvestigationDelivery(t *testing.T) {
+	m := braintest.NewModel()
+	m.EventDefault = &braintest.Step{Block: make(chan struct{})}
+	h := newBrainHarness(t, m)
+	f := &fakeInvestigator{answer: "It ran out of disk.", session: "sess-1"}
+	h.sup.investigator = f
+	h.addAgent("w5:p1", "auth", "codex", herdr.StateIdle)
+	job := start(t, h, "why did the tests fail?", "", "why")
+	waitFor(t, func() bool { return len(m.Calls()) == 1 }, "the delivery turn to reach the model")
+
+	h.sup.shutdown()
+	if n := len(h.pusher.all()); n != 0 {
+		t.Errorf("pushed %d lines while shutting down: %v", n, h.pusher.all())
+	}
+	if inv, _ := h.sup.investigation(job.Job); inv.Status != state.InvestigationDone || inv.Result != "It ran out of disk." {
+		t.Errorf("record = %+v (want the answer kept in the ledger)", inv)
+	}
+	if _, err := h.sup.startInvestigation(context.Background(), "w5:p1", brain.InvestigationRequest{Question: "and now?"}); err == nil {
+		t.Error("a job started after shutdown")
 	}
 }
 
