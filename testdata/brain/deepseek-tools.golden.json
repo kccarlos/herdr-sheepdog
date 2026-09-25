@@ -1,7 +1,7 @@
 [
   {
     "function": {
-      "description": "Read the last lines of an agent's terminal pane: what it printed, asked or is doing right now.",
+      "description": "Read an agent. source screen (the default): the last lines of its terminal pane, for what it is doing right now and what it is asking. source session: its own session record, for what it said, found or changed: its last message for a human in full, the last instruction it received, and the files it edited.",
       "name": "read_screen",
       "parameters": {
         "properties": {
@@ -10,8 +10,16 @@
             "type": "string"
           },
           "lines": {
-            "description": "how many lines from the bottom (default 200)",
+            "description": "screen only: how many lines from the bottom (default 200)",
             "type": "integer"
+          },
+          "source": {
+            "description": "screen (default) or session",
+            "enum": [
+              "screen",
+              "session"
+            ],
+            "type": "string"
           }
         },
         "required": [

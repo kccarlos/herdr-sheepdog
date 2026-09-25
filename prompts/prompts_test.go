@@ -109,6 +109,11 @@ func TestRULESEarContract(t *testing.T) {
 		`End with "Clearer?" as the ` + "`ask`",
 		`"ask": ""`,
 		"Never more than one question per reply",
+		// docs/dive-deep.md WP8a/WP8b: which read is for what, and detail
+		// on request within the reply cap.
+		"`source` session is its own session record",
+		`"what exactly", "tell me more", "what were the N things", "go on", "read it to me"`,
+		"up to four sentences and sixty words",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("RULES.md lacks %q", want)

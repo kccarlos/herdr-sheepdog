@@ -11,6 +11,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/prose"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
+	"github.com/kccarlos/herdr-sheepdog/internal/workerlog"
 )
 
 // brainHost implements brain.Host over the Supervisor: the roster and the
@@ -104,6 +105,46 @@ func (h brainHost) ReadScreen(ctx context.Context, paneID string, lines int) (st
 	h.s.touch(paneID)
 	h.s.setSubject(paneID)
 	return read.Text, nil
+}
+
+// ReadSession implements brain.Host: read_screen with source session
+// (docs/dive-deep.md WP8a). It reads the end of the worker's own session
+// transcript through the reader the journal uses, with workerlog's Tail,
+// which leaves the journal's offset where it is. Like a screen read it
+// counts as dealing with the agent. The instruction loses the sign-off;
+// when the window holds none, the row's instruction stands in. A session
+// that cannot be read is an error carrying the worker.session_missing
+// reason, for the model to read.
+func (h brainHost) ReadSession(_ context.Context, paneID string) (brain.SessionRead, error) {
+	row, ok := h.s.store.Get(paneID)
+	if !ok {
+		return brain.SessionRead{}, errors.New("that agent is gone")
+	}
+	alias := aliasOr(row.Alias)
+	d, err := h.s.cfg.WorkerLog.Tail(workerSession(row))
+	if err != nil {
+		reason := workerlog.Reason(err)
+		return brain.SessionRead{}, fmt.Errorf("no session record for %s: %s (%s)", alias, reason, sessionMissingWhy[reason])
+	}
+	h.s.touch(paneID)
+	h.s.setSubject(paneID)
+	instruction := withoutSignOff(d.Instruction())
+	if instruction == "" {
+		instruction = withoutSignOff(row.CurrentTask)
+	}
+	if instruction == "" {
+		instruction = withoutSignOff(row.LastTask)
+	}
+	return brain.SessionRead{LastAssistant: d.LastAssistant, Instruction: instruction, Files: d.Files, Tools: d.Tools}, nil
+}
+
+// sessionMissingWhy explains each worker.session_missing reason to the
+// model.
+var sessionMissingWhy = map[string]string{
+	workerlog.ReasonNotReported: "herdr has not reported a session for this pane",
+	workerlog.ReasonUnsupported: "this kind of agent keeps no session record sheepdog can read",
+	workerlog.ReasonNotFound:    "its session record file was not found",
+	workerlog.ReasonUnreadable:  "its session record could not be read",
 }
 
 // RunCLI implements brain.Host.
@@ -308,16 +349,20 @@ func (h brainHost) Promises() []brain.PromiseInfo {
 }
 
 // toolResultFrom enforces the ear contract and D9 on a brain reply: the
-// headline cut to the ear caps (prose.EarLine: two sentences, thirty
-// words, no dashes, PR numbers or hashes), the ask appended as the last
+// headline cut to caps (prose.EarReply for a reply to an utterance:
+// four sentences, sixty words, a safety net for a detail the shepherd
+// asked for, docs/dive-deep.md WP8b; prose.EarBrief elsewhere: two
+// sentences, thirty words; no dashes, PR numbers or hashes either way),
+// the ask appended as the last
 // sentence, whatever the cap cut moved to the end of detail (nothing the
 // brain wrote is lost, it is just not read aloud), detail and options
 // scrubbed; it interrupts only when the CEO must act. An utterance is
 // not classified, so it cannot claim an echo's urgency; the voice reads
 // the result after its own "on it" either way (the tool is
 // NON_BLOCKING).
-func toolResultFrom(rep brain.Reply) voice.ToolResult {
-	spoken, overflow := earLine(rep)
+func toolResultFrom(rep brain.Reply, caps prose.EarCaps) voice.ToolResult {
+	spoken, overflow := prose.EarLineWith(caps, rep.Spoken, rep.Ask)
+	spoken = sentence(spoken)
 	detail := prose.Spoken(rep.Detail, 0)
 	if overflow != "" {
 		detail = strings.TrimSpace(detail + " " + overflow)

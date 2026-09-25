@@ -8,6 +8,7 @@ import (
 	"unicode"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
+	"github.com/kccarlos/herdr-sheepdog/internal/prose"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
@@ -554,7 +555,7 @@ func (s *Supervisor) utteranceTurn(ctx context.Context, u *inflightUtterance) ut
 	if err != nil {
 		return utteranceOutcome{}
 	}
-	res := toolResultFrom(rep)
+	res := toolResultFrom(rep, prose.EarReply)
 	if res.Spoken == "" {
 		return utteranceOutcome{acted: rep.Acted}
 	}

@@ -149,6 +149,11 @@ type SVPAgent struct {
 	State   string      `json:"state,omitempty"`
 	Screen  string      `json:"screen,omitempty"` // fixture name under testdata/herdr, or inline text
 	Pending *SVPPending `json:"pending,omitempty"`
+	// Session is the agent's own session transcript (read_screen with
+	// source session, docs/dive-deep.md WP8a): a Claude Code or Codex
+	// JSONL file name under testdata/workerlog, the screen fixture
+	// directory's sibling.
+	Session string `json:"session,omitempty"`
 }
 
 // SVPRequest is the request the brain receives: an utterance, the
@@ -246,6 +251,12 @@ type SVPExpect struct {
 	// NeedsUser, when set, is the reply's required needs_user (live
 	// only: the fake model cannot judge it).
 	NeedsUser *bool `json:"needs_user,omitempty"`
+	// ReadSource requires a read_screen call with this source ("session":
+	// the brain read the worker's own session record for a detail
+	// question, docs/dive-deep.md WP8a) that completed. Checked offline,
+	// where the scripted call is derived from it and the check is that
+	// the Host served the read, and against the logged baseline.
+	ReadSource string `json:"read_source,omitempty"`
 	// UrgencyNot: an announce reply's urgency may be none of these (live
 	// only); "skip" also rejects an empty urgency with an empty spoken,
 	// which the supervisor treats as a skip.

@@ -16,6 +16,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/brain/braintest"
 	"github.com/kccarlos/herdr-sheepdog/internal/prose"
 	"github.com/kccarlos/herdr-sheepdog/internal/supervisor"
+	"github.com/kccarlos/herdr-sheepdog/internal/workerlog"
 )
 
 // recorder is a logging.Logger that captures the brain.* events grading
@@ -63,6 +64,24 @@ func (r *recorder) calledAtAll(name string) bool {
 }
 
 func (r *recorder) calledSuccessfully(name string) bool { return r.results[name] }
+
+// readWith reports whether a read_screen call asked for source (the
+// default source is screen) and read_screen completed at least once.
+func (r *recorder) readWith(source string) bool {
+	for i, name := range r.calls {
+		if name != brain.ToolReadScreen || i >= len(r.args) {
+			continue
+		}
+		got, _ := r.args[i]["source"].(string)
+		if got == "" {
+			got = brain.SourceScreen
+		}
+		if strings.EqualFold(got, source) {
+			return r.calledSuccessfully(brain.ToolReadScreen)
+		}
+	}
+	return false
+}
 
 func (r *recorder) names() []string {
 	seen := map[string]bool{}
@@ -308,6 +327,9 @@ func gradeSVP(exp SVPExpect, rec *recorder, reply brain.Reply, offline bool) (re
 	if exp.RailBlocked && rec.rail == 0 {
 		reasons = append(reasons, "expected the rail to block a call, but brain.rail_blocked never fired")
 	}
+	if exp.ReadSource != "" && !rec.readWith(exp.ReadSource) {
+		reasons = append(reasons, fmt.Sprintf("read_screen with source %s was not called, or did not complete (called: %s)", exp.ReadSource, strings.Join(rec.names(), ",")))
+	}
 	if exp.NoTool && len(rec.calls) > 0 {
 		reasons = append(reasons, "answered with tool calls ("+strings.Join(rec.names(), ",")+"), but the roster and ledger in the prompt are enough")
 	}
@@ -466,13 +488,7 @@ func buildHost(c SVPCase, fixtureDir string) (*braintest.Host, string, error) {
 			return nil, "", errors.New("roster_only case with no agents")
 		}
 		if alias == "" {
-			alias = c.Agents[0].Alias
-			for _, a := range c.Agents {
-				if a.Pending != nil {
-					alias = a.Alias
-					break
-				}
-			}
+			alias = targetOf(c.Agents)
 		}
 	} else {
 		if alias == "" {
@@ -508,8 +524,48 @@ func buildHost(c SVPCase, fixtureDir string) (*braintest.Host, string, error) {
 		if a.Pending != nil {
 			h.SetPending(pane, toPendingPrompt(a.Pending))
 		}
+		if a.Session != "" {
+			read, err := readSessionFixture(a.Session, fixtureDir, orDefault(a.Kind, "codex"))
+			if err != nil {
+				return nil, "", fmt.Errorf("session %s: %w", a.Session, err)
+			}
+			h.SetSession(pane, read)
+		}
 	}
 	return h, alias, nil
+}
+
+// targetOf is the agent a roster_only case's offline script addresses
+// when the request names none: the one with an open prompt, else the one
+// with a session fixture, else the first.
+func targetOf(agents []SVPAgent) string {
+	for _, a := range agents {
+		if a.Pending != nil {
+			return a.Alias
+		}
+	}
+	for _, a := range agents {
+		if a.Session != "" {
+			return a.Alias
+		}
+	}
+	return agents[0].Alias
+}
+
+// readSessionFixture reads a session transcript fixture the way the
+// daemon's Host does (workerlog's Tail): name is a file under the
+// workerlog directory next to fixtureDir (testdata/herdr ->
+// testdata/workerlog), or a path.
+func readSessionFixture(name, fixtureDir, kind string) (brain.SessionRead, error) {
+	path := name
+	if !strings.ContainsAny(name, "/\\") {
+		path = filepath.Join(filepath.Dir(filepath.Clean(fixtureDir)), "workerlog", name)
+	}
+	d, err := workerlog.New(workerlog.Options{}).Tail(workerlog.Session{Agent: kind, Kind: "path", Value: path})
+	if err != nil {
+		return brain.SessionRead{}, err
+	}
+	return brain.SessionRead{LastAssistant: d.LastAssistant, Instruction: d.Instruction(), Files: d.Files, Tools: d.Tools}, nil
 }
 
 func toPendingPrompt(p *SVPPending) *brain.PendingPrompt {
@@ -560,6 +616,14 @@ func scriptFor(c SVPCase, alias string) *braintest.Model {
 	}
 	tool := brain.ToolReadScreen
 	switch {
+	case c.Expect.ReadSource != "":
+		// A detail case: script the read the case requires, so the check
+		// is that the Host served it (the session fixture parsed).
+		fc := braintest.FC(tool, map[string]any{"agent": alias, "source": c.Expect.ReadSource})
+		return braintest.NewModel(
+			braintest.Step{Calls: []*genai.FunctionCall{fc}},
+			braintest.Step{Text: braintest.Reply("Offline scripted answer for "+c.ID+".", "")},
+		)
 	case len(c.Expect.ToolsUsedAnyOf) > 0:
 		// The case's own expectation takes priority: e.g. a case that
 		// wants "prompt" AND asserts must_not_call send_keys should be
