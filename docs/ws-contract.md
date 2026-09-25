@@ -211,8 +211,10 @@ within 1.5 s"), so a push can start just as the shepherd does.
 
 Server audio frames arrive in bursts (observed 40–730 ms per frame, and
 on GPT-Live, gaps up to ~1.5 s within one reply — `docs/audio-e2e-results.md`,
-"Audible gaps in GPT-Live playback"), and GPT-Live delivers its audio at
-only **0.72–0.86× real time** on sustained average. A client that starts
+"Audible gaps in GPT-Live playback"), and GPT-Live delivered its audio at
+only **0.72–0.86× real time** on sustained average until the daemon paced
+its input at real time (2026-09-25: ≈1.0×, gaps under ~320 ms; see
+"GPT-Live input pacing" in `docs/audio-e2e-results.md`). A client that starts
 playing a frame the instant it arrives, or that buffers a fixed small
 amount, underruns audibly mid-sentence. Every client (the web page's
 `audio-util.js` `Player` + `Wsola`; the iOS app implements the **same
@@ -225,7 +227,7 @@ adaptive time-stretch**:
 | Provider | Start target (and floor) | Cap |
 |---|---|---|
 | `gemini` | 150 ms | 500 ms |
-| `openai` (GPT-Live) | 1200 ms | 2000 ms |
+| `openai` (GPT-Live) | 400 ms | 2000 ms |
 
 - **Start**: buffer the target before playing the first frame of an
   utterance (or of a resume after running dry); a short utterance that

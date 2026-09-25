@@ -352,3 +352,71 @@ recorded replay cases drop to **0 underruns** (status-question 3 → 0,
 instruction-promise 2 → 0, chained 4 → 0 against the old Gemini-policy
 baseline). Cost: the first GPT-Live word waits about 0.4 s longer. Gemini is
 unchanged (150/500 ms). The iOS app uses the same numbers.
+
+## GPT-Live input pacing (2026-09-25): output now runs at real time
+
+**Hypothesis** (`docs/research/voice-frameworks-2026-09-24.md` P1): the
+daemon's keep-alive sent one 40 ms tick of silence only when two ticks
+had passed since the last send, so while the client's gate was closed —
+exactly while the model replies — GPT-Live's input timeline advanced at
+≤ 0.5× real time. The docs require "a continuous microphone stream paced
+at its recorded sample rate", and the session timeline advances with
+input.
+
+**Fix** (`internal/voice/gptlive/pace.go`, `loop.go` `keepAlive`): each
+connection counts the input audio it sent against the wall clock since
+its first send; every tick, while the client is not streaming (no client
+frame for 3 ticks), keepAlive sends the owed silence (at most 200 ms at
+once; debt beyond that is forgiven and logged as
+`voice.input_debt_dropped {ms}`). The pre-roll and the frames buffered
+while the session opened are replayed as audio from the past (they move
+the anchor back instead of counting as lead), and a lead over 2 s (a
+client clock running fast) is forgiven. Unit tests on a fake clock:
+`TestKeepAlivePacesClosedGateAtRealTime` (10 s wall → 10 s ± 100 ms),
+`TestKeepAliveSilentWhileClientStreams`,
+`TestKeepAliveTickJitterDoesNotAccumulateDebt` (ticks up to 60 ms late),
+`TestKeepAliveDropsDebtOverBurst`, `TestKeepAliveForgivesLongLead`,
+`TestKeepAliveReplayIsNotLead`.
+
+Silence rather than `session.input_audio.mute`: the WebSocket guide says
+only that muting "does not cancel backend work or stop generated speech"
+— not that the timeline advances while muted and nothing is sent — while
+it does require a continuous, real-time-paced stream. LiveKit can mute
+because its client streams continuously; ours gates, so the daemon has to
+carry the timeline, and paced silence is the path the docs describe.
+Whether a server-side mute changes billing is still unknown.
+
+**Measurement** — one run, scratch daemon on port 7799 (empty config,
+scratch `SHEEPDOG_DATA_DIR`/`SHEEPDOG_STATE_PATH`, `--voice=openai
+--brain=fake --herdr=mock --cli=off`, `idle_close_s=5`), `sheepdog
+audio-e2e --audio-timeline` with a scratch scenario ("Hi! I'm testing my
+speakers. Could you please count slowly from one to twenty for me?"):
+the model answered itself ("Sure. One. Two. … Seventeen.", no tool call)
+while the harness's gate was closed.
+
+| | Turns | realtime_ratio | max_gap_ms | p95_gap_ms |
+|---|---|---|---|---|
+| Before (2026-09-23, table above) | 5 | 0.74–0.87 | 626–1464 | 574–1421 |
+| After (2026-09-25) | 5 | **1.00, 0.98, 1.00, 1.06, 0.94** | 171, 233, 88, 97, 313 | 141, 209, 61, 97, 158 |
+
+`voice.audio_timing` per turn after the fix: 9000 ms of audio in 8984 ms,
+2100/2152, 22100/22000, 1200/1129, 4240/4513. No
+`voice.input_debt_dropped`. Client counters (`web.client.stats`):
+`dropped_audio 0`, `send_wait_max_ms 0.1`, `queued 0`; EOS → first
+reply audio 1248 ms, first output transcript 1017 ms. **Billed: 42 s**
+(one session, closed `idle`, confirmed by `session.closed`).
+
+The hypothesis holds: with the input paced at real time, GPT-Live's
+output runs at real time and its mid-reply gaps fall from 0.6–1.5 s to
+under ~320 ms.
+
+**Start buffer lowered to 400 ms** (`PLAYBACK_POLICY.openai`, cap still
+2000 ms, time-stretch unchanged). The run's forwarded-audio timeline is
+committed as `web/voice/testdata/gptlive-paced-long-reply.json`; replayed
+through the `Player`, 400 ms and the old 1200 ms both see exactly one
+underrun, at the same place — a pause the model made mid-count, where the
+daemon's `PauseHold` drops the silence and leaves an 869 ms hole in the
+forwarded stream — not inside a word (800 ms happens to bridge it). The
+older, pre-pacing recordings keep replaying under the 1200 ms policy they
+were tuned for. The first GPT-Live word now plays about 0.8 s sooner.
+The iOS app's `PlaybackProfile` should follow (separate repo).

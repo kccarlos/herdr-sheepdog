@@ -97,10 +97,15 @@ test('the adaptive target ratchets up on the recorded chained session and stays 
   assert.ok(p.targetMs > 150, `target should have adapted upward, got ${p.targetMs}ms`);
 });
 
+// The GPT-Live policy before the input-pacing fix (2026-09-25): a
+// 1200 ms start buffer for a source running at 0.74-0.87x real time.
+// The recordings below were made then, so they are replayed with it.
+const PREPACING_POLICY = Object.freeze({ startMs: 1200, capMs: 2000 });
+
 // Before (the adaptive jitter buffer alone, Gemini's 150/500 ms policy,
-// which is what every provider got until now) versus after (GPT-Live's
-// 1200/2000 ms policy plus the adaptive time-stretch) on the recorded
-// GPT-Live timelines. These recordings arrive at 0.78x and 0.69x real
+// which is what every provider got until then) versus after (GPT-Live's
+// then 1200/2000 ms policy plus the adaptive time-stretch) on the GPT-Live
+// timelines recorded before the input-pacing fix. These recordings arrive at 0.78x and 0.69x real
 // time; the time-stretch floor is 0.85x, so a long enough reply still
 // runs dry eventually — the recorded ones are short enough that it
 // (almost) does not.
@@ -113,11 +118,27 @@ test('GPT-Live policy plus time-stretch: underruns before vs after on the record
   const after = {};
   for (const [name, chunks] of cases) {
     const b = replay(chunks, { stretch: false });
-    const a = replay(chunks, {}, PLAYBACK_POLICY.openai);
+    const a = replay(chunks, {}, PREPACING_POLICY);
     after[name] = a.stats.underruns;
     t.diagnostic(`${name}: underruns before ${b.stats.underruns}, after ${a.stats.underruns} (played at r != 1 for ${a.stretchedMs} ms)`);
     assert.ok(a.stats.underruns < b.stats.underruns, `${name}: after ${a.stats.underruns} not below before ${b.stats.underruns}`);
   }
   assert.equal(after['status-question'], 0);
   assert.ok(after['instruction-promise'] === 0 && after.chained === 0, `after = ${JSON.stringify(after)}`);
+});
+
+// After the input-pacing fix (gptlive keepAlive pays the silence debt at
+// real time, docs/audio-e2e-results.md 2026-09-25) GPT-Live delivers at
+// ≈1.0x real time: the recorded 25 s reply plays through GPT-Live's
+// 400 ms start buffer with no more underruns than the old 1200 ms buffer
+// — one, at the same spot under both: a pause the model made mid-count
+// (the daemon drops silence past PauseHold, leaving a 869 ms hole in the
+// forwarded stream), not a gap inside a word.
+test('paced GPT-Live timeline plays through the 400 ms start buffer', (t) => {
+  const chunks = loadFixture('gptlive-paced-long-reply.json').chunks;
+  const a = replay(chunks, {}, PLAYBACK_POLICY.openai);
+  const old = replay(chunks, {}, PREPACING_POLICY);
+  t.diagnostic(`paced long reply: underruns ${a.stats.underruns} at 400 ms, ${old.stats.underruns} at 1200 ms`);
+  assert.equal(PLAYBACK_POLICY.openai.startMs, 400);
+  assert.ok(a.stats.underruns <= 1 && a.stats.underruns <= old.stats.underruns, `underruns ${a.stats.underruns} (1200 ms: ${old.stats.underruns})`);
 });

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"strconv"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/ctxcap"
@@ -128,7 +127,7 @@ type liveConn struct {
 	cancel   context.CancelFunc
 	started  chan struct{}
 	done     chan struct{} // closed when the reader exits
-	lastSend atomic.Int64  // unix nanos of the last audio sent
+	pace     inputPacer    // input audio sent vs the wall clock (pace.go)
 
 	// under Session.mu
 	usage       float64
@@ -461,7 +460,7 @@ func (s *Session) SendAudio(pcm16 []byte) error {
 		return nil
 	}
 	s.mu.Unlock()
-	return s.sendAudio(lc, pcm)
+	return s.sendAudio(lc, pcm, srcClient)
 }
 
 func totalLen(chunks [][]byte) int {
@@ -481,8 +480,10 @@ func (s *Session) bufferLocked(pcm []byte) {
 	}
 }
 
-func (s *Session) sendAudio(lc *liveConn, pcm []byte) error {
-	lc.lastSend.Store(s.now().UnixNano())
+// sendAudio appends pcm (24 kHz PCM16) to lc's input and records it on
+// the pacer (pace.go).
+func (s *Session) sendAudio(lc *liveConn, pcm []byte, src audioSrc) error {
+	lc.pace.add(s.now(), len(pcm), src)
 	return s.send(lc, audioAppend{Type: evInputAudioAppend, Audio: base64.StdEncoding.EncodeToString(pcm)})
 }
 

@@ -103,10 +103,18 @@ queued output and tells the client to flush.
   can hear waits up to 5 minutes, then `voice.push_dropped`.
 - **Typed text** (`SendText`) goes straight to the tool handler — GPT-Live
   has no user text input — and the reply is pushed.
-- **Keep-alive.** While a session is open and the client sends nothing
-  (gate closed, muted), the daemon sends 40 ms silence frames: the
-  session timeline advances with input audio ("if the session timeline
-  stops, the acknowledgment can remain pending").
+- **Keep-alive (input pacing).** While a session is open and the client
+  sends nothing (gate closed, muted), the daemon sends silence paced at
+  real time against the wall clock (`pace.go`: at most 200 ms a tick,
+  larger debt forgiven as `voice.input_debt_dropped`): the session
+  timeline advances with input audio ("supply a continuous microphone
+  stream paced at its recorded sample rate"; "if the session timeline
+  stops, the acknowledgment can remain pending"). Until 2026-09-25 it
+  advanced at ≤ 0.5× real time and the model's output ran at 0.74–0.87×;
+  paced, the output runs at ≈1.0× (`docs/audio-e2e-results.md`, "GPT-Live
+  input pacing"). Silence rather than `session.input_audio.mute`: the
+  docs say muting "does not cancel backend work or stop generated
+  speech", not that the timeline advances while nothing is sent.
 - **Billing.** `voice.session_close {billed_s, confirmed}` uses
   `session.closed`'s usage (wall clock when it never came);
   `voice.billed_seconds {total_s}` after every close; `web.client.stats`

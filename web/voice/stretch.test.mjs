@@ -141,7 +141,7 @@ test('rate policy: 1.0 at the target, linear to 0.90 at T/2 and 0.85 at T/4; 1.0
 // flush (the end of a reply) clears it.
 test('lag debt: accrues while slow, is paid back at 1.05, and resets at the end of a reply', () => {
   const p = new Player({ inRate: RATE, outRate: RATE });
-  p.setPolicy(PLAYBACK_POLICY.openai); // T = 800 ms
+  p.setPolicy(PLAYBACK_POLICY.openai); // GPT-Live policy
   const block = new Float32Array(128);
   const tone = sine(440, RATE * 20);
   // Start with 800 ms, then trickle at 0.5x until the rate is at its floor.
@@ -211,20 +211,21 @@ test('rate changes are slewed at most 0.02 per 20 ms', () => {
   assert.ok(Math.abs(r - 0.85) < 1e-9, 'reaches the floor in 150 ms');
 });
 
-test('provider playback policy: Gemini 150/500 ms, GPT-Live 1200/2000 ms', () => {
+test('provider playback policy: Gemini 150/500 ms, GPT-Live 400/2000 ms', () => {
   assert.deepEqual({ ...PLAYBACK_POLICY.gemini }, { startMs: 150, capMs: 500 });
-  assert.deepEqual({ ...PLAYBACK_POLICY.openai }, { startMs: 1200, capMs: 2000 });
+  assert.deepEqual({ ...PLAYBACK_POLICY.openai }, { startMs: 400, capMs: 2000 });
   const p = new Player({ inRate: RATE, outRate: 48000 });
   assert.equal(p.targetMs, 150);
   p.setPolicy(PLAYBACK_POLICY.openai);
-  assert.equal(p.targetMs, 1200);
+  assert.equal(p.targetMs, 400);
   assert.equal(p.maxTarget, RATE * 2);
 });
 
 test('the Player slows down (pitch kept) when its buffer falls below target, and counts the stretched time', () => {
-  // 3 s of tone arriving at 0.75x real time, GPT-Live policy.
+  // 3 s of tone arriving at 0.75x real time behind a 1200 ms buffer (GPT-Live
+  // before its input was paced).
   const p = new Player({ inRate: RATE, outRate: RATE });
-  p.setPolicy(PLAYBACK_POLICY.openai);
+  p.setPolicy({ startMs: 1200, capMs: 2000 });
   const chunk = 2400; // 100 ms
   const tone = sine(440, RATE * 3);
   const block = new Float32Array(128);

@@ -39,7 +39,9 @@ func (s *Session) tick() {
 // closed, muted, no client): the Live session timeline advances with
 // input audio, and appended context or commentary waits for it
 // (docs: "If the session timeline stops, the acknowledgment can remain
-// pending").
+// pending"). It pays the input's debt against the wall clock (pace.go)
+// so the timeline runs at real time, not at the tick's mercy; debt over
+// paceMaxBurst is forgiven and logged as voice.input_debt_dropped.
 func (s *Session) keepAlive(now time.Time) {
 	s.mu.Lock()
 	lc := s.live
@@ -47,11 +49,14 @@ func (s *Session) keepAlive(now time.Time) {
 	if lc == nil {
 		return
 	}
-	if last := lc.lastSend.Load(); last != 0 && now.Sub(time.Unix(0, last)) < 2*s.cfg.Tick {
+	n, dropped := lc.pace.owe(now, paceClientTicks*s.cfg.Tick)
+	if dropped > 0 {
+		s.log.Log(logSource, "voice.input_debt_dropped", "", map[string]any{"ms": dropped.Milliseconds(), "session_id": lc.id})
+	}
+	if n <= 0 {
 		return
 	}
-	n := int(s.cfg.Tick.Seconds()*SampleRate) * 2
-	_ = s.sendAudio(lc, make([]byte, n))
+	_ = s.sendAudio(lc, make([]byte, n*2), srcSilence)
 }
 
 // settle ends the input utterance SettleWait after its last fragment:
