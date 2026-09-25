@@ -725,8 +725,11 @@ func bareAnswer(p state.PendingAction, text string) (keys []string, label string
 //
 // An echo is logged (supervisor.echo_dropped, both texts) and not
 // relayed; the call gets a silent result, as a call with no shepherd
-// input does. The brain's transcript still holds the transcription as
-// heard: it is the record of what the microphone picked up.
+// input does. It also leaves the brain's window (Brain.Echo): the words
+// reached the brain as the CEO's before the guard saw them (it runs on
+// the tool call, after the transcript), and left there a later turn
+// would read `CEO said: "new change"` and may act on it. The transcript
+// on disk keeps them, followed by a note that they were an echo.
 
 // echoWindow is how long after the voice's last output a new input may
 // still be its echo. The logged pair was 1.7 s apart: the transcript of
@@ -789,6 +792,9 @@ func (s *Supervisor) echoDropped(c claim) bool {
 	c.in.used = true
 	s.mu.Unlock()
 	s.log.Log(logSource, "supervisor.echo_dropped", "", map[string]any{"heard": c.text, "said": c.in.saidBefore})
+	if s.brain != nil {
+		s.brain.Echo(c.text)
+	}
 	return true
 }
 

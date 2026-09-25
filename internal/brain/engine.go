@@ -77,6 +77,15 @@ type Resettable interface {
 	Reset()
 }
 
+// Retracter is the optional part of a ContextEngine that takes one
+// message back out of the window (Brain.Echo: words transcribed as the
+// CEO's that were the assistant's own speech). The default engine
+// implements it; an engine that does not keeps the message, and the
+// note Brain.Echo adds after it still says it was an echo.
+type Retracter interface {
+	Retract(seq int) bool
+}
+
 // Summarizer turns a rendering of old messages into a summary: the
 // default engine's one model call per compaction.
 type Summarizer func(ctx context.Context, text string) (string, error)
@@ -190,6 +199,21 @@ func (e *DefaultEngine) Reset() {
 	e.mu.Lock()
 	e.window = nil
 	e.mu.Unlock()
+}
+
+// Retract implements Retracter: the entry holding message seq leaves
+// the window; false when it is not there (pruned into a summary, or
+// never ingested).
+func (e *DefaultEngine) Retract(seq int) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	for i, en := range e.window {
+		if en.msg.Seq == seq {
+			e.window = append(e.window[:i:i], e.window[i+1:]...)
+			return true
+		}
+	}
+	return false
 }
 
 // Tokens implements ContextEngine.

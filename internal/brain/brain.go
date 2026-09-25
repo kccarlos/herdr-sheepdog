@@ -514,6 +514,44 @@ func (b *Brain) Heard(text string, final bool) {
 	}
 }
 
+// Echo records that heard, transcribed as the CEO's words, was the
+// assistant's own speech picked up by the microphone (the supervisor's
+// echo guard dropped it). The words must not reach a later turn as
+// something the CEO said, so they leave the window: still pending (the
+// input transcription is often never marked final), or already ingested
+// as CEO utterances since the last request (the voice saying
+// "Checking." flushes them before its tool call). The transcript on
+// disk keeps what was heard, and a system note after it says it was an
+// echo, so the record stays complete and honest.
+func (b *Brain) Echo(heard string) {
+	heard = strings.TrimSpace(heard)
+	if heard == "" {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if pending := joinFragments(b.inBuf); pending != "" && strings.Contains(heard, pending) {
+		b.inBuf = nil
+	}
+	if r, ok := b.engine.(Retracter); ok {
+		msgs := b.transcript.Messages()
+		for i := len(msgs) - 1; i >= 0; i-- {
+			m := msgs[i]
+			if m.Kind == KindRequest {
+				break
+			}
+			if m.Kind != KindCEOUtterance {
+				continue
+			}
+			if !strings.Contains(heard, strings.TrimSpace(m.Content)) {
+				break
+			}
+			r.Retract(m.Seq)
+		}
+	}
+	b.ingest(Message{Role: RoleUser, Kind: KindSystem, Content: fmt.Sprintf("Echo ignored: the microphone picked up the assistant's own speech and it was transcribed as %q. The CEO did not say it.", heard)}, 0)
+}
+
 // Said ingests a fragment of the assistant's speech (voice.transcript.out).
 // The CEO's pending fragments are flushed first: the assistant answering
 // means the CEO finished.

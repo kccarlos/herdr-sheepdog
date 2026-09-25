@@ -1,9 +1,11 @@
 package supervisor
 
 import (
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/kccarlos/herdr-sheepdog/internal/brain"
 	"github.com/kccarlos/herdr-sheepdog/internal/brain/braintest"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
@@ -124,5 +126,58 @@ func TestEchoOf(t *testing.T) {
 		if got := echoOf(tc.heard, said); got != tc.want {
 			t.Errorf("echoOf(%q) = %v, want %v", tc.heard, got, tc.want)
 		}
+	}
+}
+
+// TestEchoLeavesTheBrainWindow: a dropped echo is not left in the brain's
+// window as the shepherd's words — the next turn must not read `CEO
+// said: "new change"` and act on it. Both ways the words reach the brain
+// first: a final transcript (ingested at once), and an open one the
+// voice's "Checking." flushes before its tool call (Gemini never marks
+// its input final). The transcript on disk keeps the words as heard and
+// a note that they were an echo.
+func TestEchoLeavesTheBrainWindow(t *testing.T) {
+	for _, final := range []bool{true, false} {
+		t.Run(map[bool]string{true: "final", false: "open"}[final], func(t *testing.T) {
+			m := braintest.NewModel(braintest.Step{Text: braintest.Reply("Auth is idle.", "")})
+			h := newBrainHarness(t, m)
+			h.addAgent("w5:p1", "auth", "codex", herdr.StateIdle)
+			speak(h, echoSaid)
+			h.clock.Advance(1700 * time.Millisecond)
+			h.sup.OnVoiceEvent(voice.EventTranscript{Dir: voice.DirIn, Text: "new change", Final: final})
+			h.sup.OnVoiceEvent(voice.EventTranscript{Dir: voice.DirOut, Text: "Checking."})
+			h.sup.OnVoiceEvent(voice.EventTurnComplete{})
+			h.relay("new change")
+			if h.log.count("supervisor.echo_dropped") != 1 {
+				t.Fatalf("echo_dropped = %d", h.log.count("supervisor.echo_dropped"))
+			}
+
+			h.clock.Advance(10 * time.Second)
+			h.say("what is auth doing?")
+			calls := m.Calls()
+			if len(calls) != 1 {
+				t.Fatalf("model calls = %d", len(calls))
+			}
+			prompt := calls[0].Text()
+			if strings.Contains(prompt, `CEO said: "new change"`) {
+				t.Errorf("the echo reached the next turn as the shepherd's words:\n%s", prompt)
+			}
+			if !strings.Contains(prompt, `CEO said: "what is auth doing?"`) || !strings.Contains(prompt, "Echo ignored") {
+				t.Errorf("model saw:\n%s", prompt)
+			}
+			msgs, err := brain.ReadTranscript(h.sup.Brain().TranscriptPath())
+			if err != nil {
+				t.Fatal(err)
+			}
+			notes := 0
+			for _, msg := range msgs {
+				if msg.Kind == brain.KindSystem && strings.Contains(msg.Content, `"new change"`) {
+					notes++
+				}
+			}
+			if notes != 1 {
+				t.Errorf("echo notes in the transcript = %d, want 1", notes)
+			}
+		})
 	}
 }
