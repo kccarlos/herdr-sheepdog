@@ -36,7 +36,7 @@ lives in `SheepdogKit`, and the app target is SwiftUI views plus
 ## The daemon contract, mirrored
 
 `WSMessage` is a direct mirror of the daemon's `internal/voice/wsproto`
-package: the same ten message types, the same required fields, the same
+package: the same twelve message types, the same required fields, the same
 `omitempty` shape on the wire. One test per message decodes the literal JSON
 the Go side writes, so the two cannot drift silently.
 
@@ -48,13 +48,38 @@ order:
   no binary frames at all, never zero-filled ones.
 - **Silence.** The gate's transitions are announced with
   `{"type":"silence","on":…}` before the frames they affect.
-- **Ping.** The contract's JSON `ping` every 15 s carrying `gated_frames` and
-  `peak` (not `URLSessionWebSocketTask.sendPing`, which the daemon does not
-  see); no `pong` within 10 s drops the socket into the reconnect path.
-- **On every (re)connection** the mute and gate state are re-sent, because a
-  reconnecting client starts unmuted and ungated on the daemon.
-- **`flush`** empties the playback queue and closes the open reply bubble.
-  Stop does the same locally and sends `cancel`.
+- **Speaking.** The gate is the app's own speech detector, so its opening on
+  speech (or a hold) is also `{"type":"speaking","on":true}` and its closing
+  `on:false` — once per change, never while muted (muting closes it; the
+  gate reset that muting reports is not speech) and never from the fake
+  voice's simulated gate. `SessionCore` decides it next to `silence`. The
+  daemon treats `speaking` as authoritative once it has seen one, and holds
+  spoken pushes while it is open.
+- **Playback reports.** `PlaybackQueue` reports `started` (a run began
+  playing after being empty), `drained` (it ran dry and nothing came within
+  the 300 ms underrun window — an underrun that resumes inside it is the
+  same run: no `drained`, no second `started`) and `flushed` (every flush,
+  the daemon's or Stop's, even with nothing playing: `played_ms: 0`), the
+  way `web/voice/audio-util.js`'s `Player` does. `played_ms` is **stream
+  time**: the run's received samples minus the ones still buffered, where
+  the playhead's remaining audio is wall-clock time left × rate — so 1 s of
+  audio stretched to 0.85× reports 1000, not 1178. `AudioEngine` hands each
+  report straight to the socket (`onPlaybackReport`), like the frames.
+- **Ping.** The contract's JSON `ping` every 5 s (the daemon's
+  `web.client.stats` interval, as `/voice`) carrying `gated_frames`, `peak`,
+  the playback counters and `audio_state` (`running` / `interrupted` /
+  `suspended`) — not `URLSessionWebSocketTask.sendPing`, which the daemon
+  does not see. A ping waits for its `pong` before the next one; still
+  unanswered after 10 s, the socket drops into the reconnect path. (At the
+  old 15 s every tick overwrote the send time, which only worked because
+  15 > 10.)
+- **On every (re)connection** the mute, gate and speaking state are re-sent,
+  because a reconnecting client starts unmuted and ungated on the daemon,
+  and so that `speaking` is authoritative from the first frame.
+- **`flush`** empties the playback queue (reporting `flushed`) and closes
+  the open reply bubble. Stop does the same locally and sends `cancel`; the
+  daemon's answering `flush` reports a second `flushed` with `played_ms: 0`,
+  as the browser page does.
 
 Auth is `Authorization: Bearer <token>` on every request **including the
 WebSocket upgrade** — `URLSession` can set a header where a browser cannot,
@@ -215,7 +240,7 @@ audible gaps, sometimes mid-word. The buffer's target is now adaptive:
   ordinary silence between utterances is a drain too) and the largest
   arrival gap seen while one was worth caring about. A second line shows
   the time-stretch: current rate, target, underruns and stretched seconds.
-- The 15 s `ping` carries, as the browser page's does: `underruns`,
+- The 5 s `ping` carries, as the browser page's does: `underruns`,
   `drains`, `buffer_ms` (audio buffered **now** — it used to be the target,
   which the browser never sent), `rate` (current) and `stretched_ms`
   (total wall-clock time played at a rate other than 1.0). The daemon

@@ -48,6 +48,54 @@ final class VoiceSocketTests: XCTestCase {
         XCTAssertEqual(first.on, true)
     }
 
+    // MARK: - The speech detector on every open, and the ping
+
+    func testEveryOpenSaysTheSpeechDetectorsStateAfterMute() async throws {
+        let server = try LocalWebSocketServer()
+        defer { server.stop() }
+        let port = try await server.start()
+        let socket = VoiceSocket(endpoint: DaemonEndpoint(host: "127.0.0.1", port: Int(port)))
+        socket.speaking = false
+        socket.connect()
+        defer { socket.disconnect() }
+        let texts = try await server.texts(count: 2, timeout: 10)
+        let messages = try texts.map { try WSMessage.decode(Data($0.utf8)) }
+        XCTAssertEqual(messages, [.mute(false), .speaking(false)], "speaking is authoritative from the first open")
+    }
+
+    func testAPingWaitsForItsPongThenTimesTheSocketOut() async throws {
+        XCTAssertEqual(VoiceSocket.pingInterval, 5, "the daemon's web.client.stats interval")
+        XCTAssertEqual(VoiceSocket.pongTimeout, 10)
+        let sent = Date(timeIntervalSinceReferenceDate: 0)
+        XCTAssertFalse(PingSchedule.timedOut(sentAt: sent, now: sent.addingTimeInterval(5)))
+        XCTAssertTrue(PingSchedule.timedOut(sentAt: sent, now: sent.addingTimeInterval(10)))
+
+        // A server that never answers a JSON ping.
+        let server = try LocalWebSocketServer()
+        defer { server.stop() }
+        let port = try await server.start()
+        let socket = VoiceSocket(endpoint: DaemonEndpoint(host: "127.0.0.1", port: Int(port)))
+        var closedReason: String?
+        socket.onEvent = { event in
+            if case let .closed(reason, _) = event { closedReason = reason }
+        }
+        socket.connect()
+        defer { socket.disconnect() }
+        _ = try await server.texts(count: 2, timeout: 10)  // mute, speaking
+
+        let t0 = Date()
+        socket.pingTick(now: t0)
+        socket.pingTick(now: t0.addingTimeInterval(5))
+        let texts = try await server.texts(count: 3, timeout: 5)
+        try await Task.sleep(nanoseconds: 300_000_000)
+        XCTAssertEqual(server.received.count, 3, "one ping outstanding, not two: \(server.received)")
+        XCTAssertEqual(try WSMessage.decode(Data(texts[2].utf8)).type, .ping)
+        XCTAssertNil(closedReason)
+
+        socket.pingTick(now: t0.addingTimeInterval(10))
+        XCTAssertEqual(closedReason, "no answer from the daemon")
+    }
+
     // MARK: - Helpers
 
     /// Opens a `VoiceSocket` to a local WebSocket server and returns the
@@ -74,7 +122,30 @@ private final class LocalWebSocketServer: @unchecked Sendable {
     private var connections: [NWConnection] = []
     private var readyContinuation: CheckedContinuation<UInt16, Error>?
     private var textContinuation: CheckedContinuation<String, Error>?
-    private var received: String?
+    private var first: String?
+    private var all: [String] = []
+    private var waiters: [(count: Int, continuation: CheckedContinuation<[String], Error>)] = []
+
+    /// Every text frame so far (read on the server's queue).
+    var received: [String] { queue.sync { all } }
+
+    /// Waits until at least `count` text frames arrived; returns them all.
+    func texts(count: Int, timeout: TimeInterval) async throws -> [String] {
+        try await withCheckedThrowingContinuation { continuation in
+            queue.async {
+                if self.all.count >= count {
+                    continuation.resume(returning: self.all)
+                    return
+                }
+                self.waiters.append((count, continuation))
+                self.queue.asyncAfter(deadline: .now() + timeout) {
+                    if let i = self.waiters.firstIndex(where: { $0.count == count }) {
+                        self.waiters.remove(at: i).continuation.resume(throwing: URLError(.timedOut))
+                    }
+                }
+            }
+        }
+    }
 
     init() throws {
         let parameters = NWParameters.tcp
@@ -113,8 +184,8 @@ private final class LocalWebSocketServer: @unchecked Sendable {
     func firstText(timeout: TimeInterval) async throws -> String {
         try await withCheckedThrowingContinuation { continuation in
             queue.async {
-                if let received = self.received {
-                    continuation.resume(returning: received)
+                if let first = self.first {
+                    continuation.resume(returning: first)
                     return
                 }
                 self.textContinuation = continuation
@@ -150,10 +221,16 @@ private final class LocalWebSocketServer: @unchecked Sendable {
         connection.receiveMessage { [weak self] data, context, _, error in
             guard let self, error == nil else { return }
             let metadata = context?.protocolMetadata(definition: NWProtocolWebSocket.definition) as? NWProtocolWebSocket.Metadata
-            if metadata?.opcode == .text, let data, let text = String(data: data, encoding: .utf8), self.received == nil {
-                self.received = text
-                self.textContinuation?.resume(returning: text)
-                self.textContinuation = nil
+            if metadata?.opcode == .text, let data, let text = String(data: data, encoding: .utf8) {
+                self.all.append(text)
+                if self.first == nil {
+                    self.first = text
+                    self.textContinuation?.resume(returning: text)
+                    self.textContinuation = nil
+                }
+                let ready = self.waiters.filter { $0.count <= self.all.count }
+                self.waiters.removeAll { $0.count <= self.all.count }
+                for waiter in ready { waiter.continuation.resume(returning: self.all) }
             }
             self.receive(on: connection)
         }

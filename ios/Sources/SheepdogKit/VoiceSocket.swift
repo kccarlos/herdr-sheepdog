@@ -13,8 +13,12 @@ import Foundation
 ///   session — reconnecting would start a fight, so the socket stays down
 ///   and the user decides;
 /// * a reconnecting client starts unmuted and ungated on the daemon, so the
-///   mute state (muted *or not*: the app owns it) and a closed gate are
-///   sent on every open.
+///   mute state (muted *or not*: the app owns it), a closed gate and the
+///   speech detector's state are sent on every open — the last one makes
+///   `speaking` authoritative for the connection from its first message;
+/// * the ping goes every 5 s (the daemon's `web.client.stats` interval) and
+///   waits for its pong before the next one, like `/voice`: a ping still
+///   unanswered after 10 s drops the socket.
 @MainActor
 public final class VoiceSocket {
     public enum Event: Sendable {
@@ -30,8 +34,9 @@ public final class VoiceSocket {
         case failed(DaemonError, retrying: Bool)
     }
 
-    /// Browser constants (`web/voice/app.js`).
-    public static let pingInterval: TimeInterval = 15
+    /// Browser constants (`web/voice/app.js`: `PING_EVERY_MS`,
+    /// `PONG_TIMEOUT_MS`, the reconnect backoff).
+    public static let pingInterval: TimeInterval = 5
     public static let pongTimeout: TimeInterval = 10
     public static let retryMinimum: TimeInterval = 1
     public static let retryMaximum: TimeInterval = 10
@@ -47,6 +52,8 @@ public final class VoiceSocket {
     /// What the caller wants the daemon to believe on every (re)connection.
     public var muted = false
     public var gateClosed = false
+    /// The app's speech detector is open (it hears the shepherd).
+    public var speaking = false
     /// Counters copied onto the `ping`.
     public var gatedFrames = 0
     public var inputPeak = 0
@@ -58,6 +65,8 @@ public final class VoiceSocket {
     public var bufferMs = 0
     public var rate = 1.0
     public var stretchedMs = 0
+    /// The audio engine's state, copied onto the `ping` (`audio_state`).
+    public var audioState: String?
 
     public var onEvent: ((Event) -> Void)?
 
@@ -175,6 +184,7 @@ public final class VoiceSocket {
         // or with whatever mute it last had: say which, every time.
         send(.mute(muted))
         if gateClosed { send(.silence(true)) }
+        send(.speaking(speaking))
         startPinging()
         onEvent?(.opened)
     }
@@ -261,8 +271,12 @@ public final class VoiceSocket {
         }
     }
 
-    private func pingTick() {
-        if let sent = pingSentAt, Date().timeIntervalSince(sent) > VoiceSocket.pongTimeout {
+    /// One ping period. A ping still out waits for its pong rather than
+    /// being replaced (a new one would restart the clock, and at 5 s the
+    /// 10 s timeout could never fire); past the timeout the socket drops.
+    func pingTick(now: Date = Date()) {
+        if let sent = pingSentAt {
+            guard PingSchedule.timedOut(sentAt: sent, now: now) else { return }
             // The daemon stopped answering: drop the socket so the normal
             // reconnect path takes over.
             onEvent?(.closed(reason: "no answer from the daemon", retrying: true))
@@ -270,7 +284,7 @@ public final class VoiceSocket {
             scheduleRetry()
             return
         }
-        pingSentAt = Date()
+        pingSentAt = now
         if !send(.ping(
             gatedFrames: gatedFrames,
             peak: inputPeak,
@@ -278,9 +292,20 @@ public final class VoiceSocket {
             drains: drains,
             bufferMs: bufferMs,
             rate: (rate * 1000).rounded() / 1000,
-            stretchedMs: stretchedMs
+            stretchedMs: stretchedMs,
+            audioState: audioState
         )) {
             pingSentAt = nil
         }
+    }
+}
+
+/// The ping's timing rule, apart from the socket so it is testable: send
+/// only when no ping is outstanding, and give up on one after
+/// `VoiceSocket.pongTimeout`.
+public enum PingSchedule {
+    /// The outstanding ping sent at `sentAt` has waited too long.
+    public static func timedOut(sentAt: Date, now: Date) -> Bool {
+        now.timeIntervalSince(sentAt) >= VoiceSocket.pongTimeout
     }
 }

@@ -6,13 +6,25 @@ import Foundation
 /// `docs/ws-contract.md`. Binary frames carry raw PCM16 and need no type;
 /// every text frame is one `WSMessage`.
 ///
-/// Client → server: `mute`, `silence`, `cancel`, `text`, `ping`.
+/// Client → server: `mute`, `silence`, `speaking`, `playback`, `cancel`,
+/// `text`, `ping`.
 /// Server → client: `flush`, `status`, `transcript`, `error`, `pong`.
 public struct WSMessage: Codable, Equatable, Sendable {
     /// Message type discriminator. Mirrors `wsproto.Type*`.
     public enum Kind: String, Codable, Sendable {
-        case mute, silence, cancel, text, ping
+        case mute, silence, speaking, playback, cancel, text, ping
         case flush, status, transcript, error, pong
+    }
+
+    /// What a `playback` report says the player did (docs/ws-contract.md
+    /// "Playback reports"). Mirrors `wsproto.Playback*`.
+    public enum PlaybackState: String, Codable, Sendable {
+        /// Began playing after being empty (not on an underrun resume).
+        case started
+        /// Ran empty and stayed empty for the underrun window.
+        case drained
+        /// Dropped everything: every daemon `flush`, and a local stop.
+        case flushed
     }
 
     /// Voice session states carried by a `status` message.
@@ -27,8 +39,13 @@ public struct WSMessage: Codable, Equatable, Sendable {
     }
 
     public var type: Kind
-    /// `mute` / `silence`.
+    /// `mute` / `silence` / `speaking`.
     public var on: Bool?
+    /// `playback`: what the player did, and the milliseconds of the run
+    /// actually played, in stream time (24 kHz audio consumed, not wall
+    /// clock). Required for `drained` and `flushed`.
+    public var state: PlaybackState?
+    public var playedMs: Int?
     /// `ping` counters, mirrored into the daemon's `web.client.stats`.
     public var gatedFrames: Int?
     public var peak: Int?
@@ -44,6 +61,10 @@ public struct WSMessage: Codable, Equatable, Sendable {
     public var bufferMs: Int?
     public var rate: Double?
     public var stretchedMs: Int?
+    /// `ping`: the audio engine's state (`running`, `suspended`,
+    /// `interrupted`) — the browser's AudioContext state, the app's
+    /// equivalent.
+    public var audioState: String?
     /// `text` (client → server) and `transcript` (server → client).
     public var text: String?
     /// `status`.
@@ -61,15 +82,19 @@ public struct WSMessage: Codable, Equatable, Sendable {
     public var message: String?
 
     enum CodingKeys: String, CodingKey {
-        case type, on, text, voice, muted, reason, stalled, dir, final, message, peak, provider, underruns, drains, rate
+        case type, on, state, text, voice, muted, reason, stalled, dir, final, message, peak, provider, underruns, drains, rate
+        case playedMs = "played_ms"
         case gatedFrames = "gated_frames"
         case bufferMs = "buffer_ms"
         case stretchedMs = "stretched_ms"
+        case audioState = "audio_state"
     }
 
     public init(
         type: Kind,
         on: Bool? = nil,
+        state: PlaybackState? = nil,
+        playedMs: Int? = nil,
         gatedFrames: Int? = nil,
         peak: Int? = nil,
         underruns: Int? = nil,
@@ -77,6 +102,7 @@ public struct WSMessage: Codable, Equatable, Sendable {
         bufferMs: Int? = nil,
         rate: Double? = nil,
         stretchedMs: Int? = nil,
+        audioState: String? = nil,
         text: String? = nil,
         voice: Voice? = nil,
         muted: Bool? = nil,
@@ -89,6 +115,8 @@ public struct WSMessage: Codable, Equatable, Sendable {
     ) {
         self.type = type
         self.on = on
+        self.state = state
+        self.playedMs = playedMs
         self.gatedFrames = gatedFrames
         self.peak = peak
         self.underruns = underruns
@@ -96,6 +124,7 @@ public struct WSMessage: Codable, Equatable, Sendable {
         self.bufferMs = bufferMs
         self.rate = rate
         self.stretchedMs = stretchedMs
+        self.audioState = audioState
         self.text = text
         self.voice = voice
         self.muted = muted
@@ -111,6 +140,12 @@ public struct WSMessage: Codable, Equatable, Sendable {
 
     public static func mute(_ on: Bool) -> WSMessage { WSMessage(type: .mute, on: on) }
     public static func silence(_ on: Bool) -> WSMessage { WSMessage(type: .silence, on: on) }
+    /// The app's own speech detector opened (`true`) or closed.
+    public static func speaking(_ on: Bool) -> WSMessage { WSMessage(type: .speaking, on: on) }
+    /// A playback report; `playedMs` is stream time, never negative.
+    public static func playback(_ state: PlaybackState, playedMs: Int) -> WSMessage {
+        WSMessage(type: .playback, state: state, playedMs: max(0, playedMs))
+    }
     public static let cancel = WSMessage(type: .cancel)
     public static func ping(
         gatedFrames: Int = 0,
@@ -119,7 +154,8 @@ public struct WSMessage: Codable, Equatable, Sendable {
         drains: Int? = nil,
         bufferMs: Int? = nil,
         rate: Double? = nil,
-        stretchedMs: Int? = nil
+        stretchedMs: Int? = nil,
+        audioState: String? = nil
     ) -> WSMessage {
         WSMessage(
             type: .ping,
@@ -129,7 +165,8 @@ public struct WSMessage: Codable, Equatable, Sendable {
             drains: drains,
             bufferMs: bufferMs,
             rate: rate,
-            stretchedMs: stretchedMs
+            stretchedMs: stretchedMs,
+            audioState: audioState
         )
     }
 
@@ -168,8 +205,18 @@ public struct WSMessage: Codable, Equatable, Sendable {
     /// Mirrors `wsproto.Message.Validate`: the fields the type requires.
     public func validate() throws {
         switch type {
-        case .mute, .silence:
+        case .mute, .silence, .speaking:
             if on == nil { throw WSMessageError.missingField(type.rawValue, "on") }
+        case .playback:
+            switch state {
+            case .started?:
+                break
+            case .drained?, .flushed?:
+                if playedMs == nil { throw WSMessageError.missingField("playback", "played_ms") }
+            case nil:
+                throw WSMessageError.badValue("playback", "state")
+            }
+            if let playedMs, playedMs < 0 { throw WSMessageError.badValue("playback", "played_ms") }
         case .text:
             if (text ?? "").isEmpty { throw WSMessageError.missingField("text", "text") }
         case .status:

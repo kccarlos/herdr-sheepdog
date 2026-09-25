@@ -502,6 +502,11 @@ final class SessionViewModel: ObservableObject {
         audio.onSpeakingChanged = { [weak self] speaking in
             self?.send(.playbackChanged(speaking: speaking))
         }
+        // What the player did, straight to the daemon (like the frames):
+        // "speaking" on the daemon means the shepherd still hears it.
+        audio.onPlaybackReport = { [weak self] report in
+            self?.socket.send(report.message)
+        }
         audio.onMicSignal = { [weak self] noSignal in
             self?.send(.micSignal(ok: !noSignal))
         }
@@ -555,7 +560,7 @@ final class SessionViewModel: ObservableObject {
             send(.flush)
         case .error:
             if let text = message.message { send(.daemonError(text)) }
-        case .pong, .mute, .silence, .cancel, .text, .ping:
+        case .pong, .mute, .silence, .speaking, .playback, .cancel, .text, .ping:
             break
         }
     }
@@ -571,6 +576,7 @@ final class SessionViewModel: ObservableObject {
         // What the socket says on every open.
         socket.muted = core.connection.socketMuted
         socket.gateClosed = core.connection.socketGateClosed
+        socket.speaking = core.connection.socketSpeaking
         // The playback profile follows the provider before any effect runs.
         if liveVoiceProvider != core.voice.provider { liveVoiceProvider = core.voice.provider }
         for effect in effects { run(effect) }
@@ -839,6 +845,7 @@ final class SessionViewModel: ObservableObject {
                 self.socket.bufferMs = metrics.bufferedMilliseconds
                 self.socket.rate = metrics.playbackRate
                 self.socket.stretchedMs = metrics.stretchedMilliseconds
+                self.socket.audioState = self.audio.audioState
                 self.updateDiagnostics()
                 self.send(.tick)
             }

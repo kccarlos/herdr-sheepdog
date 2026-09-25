@@ -52,8 +52,11 @@ final class AudioEngine {
     var onGate: ((Bool) -> Void)?
     /// Input level, 0…1, for the orb's ring.
     var onLevel: ((Float) -> Void)?
-    /// Playback started or stopped.
+    /// Playback started or stopped (the dog's voice, for the orb).
     var onSpeakingChanged: ((Bool) -> Void)?
+    /// A playback report for the daemon (`started`, `drained`, `flushed`;
+    /// docs/ws-contract.md "Playback reports"), in the order they happened.
+    var onPlaybackReport: ((PlaybackQueue.Report) -> Void)?
     /// An interruption (a call, Siri) or a route change the user should see.
     var onNotice: ((String) -> Void)?
     /// The microphone stopped (true) or resumed (false) delivering signal.
@@ -199,7 +202,8 @@ final class AudioEngine {
         stopSteering()
         player.stop()
         engine.stop()
-        queue.flush()
+        queue.flush(now: CFAbsoluteTimeGetCurrent())
+        deliverReports()
         applyRate(1)
         chunker.reset()
         gate.reset()
@@ -371,6 +375,23 @@ final class AudioEngine {
         let samples = [Int16](pcm16LE: data)
         guard !samples.isEmpty else { return }
         schedule(queue.push(samples, now: CFAbsoluteTimeGetCurrent()))
+        deliverReports()
+    }
+
+    /// Hands the queue's playback reports to the caller, oldest first.
+    /// Called after every queue mutation that can produce one.
+    private func deliverReports() {
+        for report in queue.takeReports() {
+            onPlaybackReport?(report)
+        }
+    }
+
+    /// What the `ping` says about the engine (the browser sends its
+    /// AudioContext state): `running`, `interrupted` (iOS holds the audio)
+    /// or `suspended` (stopped: voice closed, backgrounded, or not started).
+    var audioState: String {
+        guard isRunning else { return "suspended" }
+        return interrupted || needsResume ? "interrupted" : "running"
     }
 
     /// The watchdog and the playback metrics, on the UI timer's cadence
@@ -387,7 +408,10 @@ final class AudioEngine {
             signalChanged(change)
         }
         let now = CFAbsoluteTimeGetCurrent()
-        if !isRunning { schedule(queue.tick(now: now)) }
+        if !isRunning {
+            schedule(queue.tick(now: now))
+            deliverReports()
+        }
         metrics.recordPlayback(depthMilliseconds: queue.queueDepthMilliseconds)
         metrics.recordTimeStretch(rate: queue.rate, stretchedSeconds: queue.stretchedSeconds, bufferedMilliseconds: queue.bufferedMilliseconds(at: now))
         recordJitterBufferMetrics()
@@ -395,9 +419,11 @@ final class AudioEngine {
     }
 
     /// `flush` from the daemon, or the Stop button: drop everything queued,
-    /// now.
+    /// now. Reports `flushed` every time, even with nothing playing.
     func flushPlayback() {
-        if queue.flush() {
+        let hadAudio = queue.flush(now: CFAbsoluteTimeGetCurrent())
+        deliverReports()
+        if hadAudio {
             player.stop()
             if isRunning { player.play() }
         }
@@ -448,6 +474,7 @@ final class AudioEngine {
         let now = CFAbsoluteTimeGetCurrent()
         schedule(queue.tick(now: now))
         applyRate(queue.steer(now: now))
+        deliverReports()
     }
 
     private func applyRate(_ rate: Double) {
@@ -466,6 +493,7 @@ final class AudioEngine {
                 Task { @MainActor in
                     guard let self else { return }
                     self.queue.completed(chunk.id)
+                    self.deliverReports()
                     self.metrics.playedChunks += 1
                     self.setSpeaking(self.queue.isSpeaking)
                 }

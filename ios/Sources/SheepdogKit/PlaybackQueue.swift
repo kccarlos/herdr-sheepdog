@@ -41,7 +41,35 @@ import Foundation
 /// `flush` (server) and the Stop button drop everything at once. A flush is
 /// not a drain and not a finished utterance: it does not move the adaptive
 /// target either way.
+///
+/// **Playback reports** (docs/ws-contract.md "Playback reports"). The queue
+/// also says what its player did, as the daemon wants to hear it, exactly
+/// as the browser's `Player` (`web/voice/audio-util.js`) does: `started`
+/// when a run begins playing after being empty (not when it resumes from
+/// an underrun), `drained` once it ran dry and nothing arrived within the
+/// 300 ms underrun window (an underrun that resumes inside the window is
+/// the same run), `flushed` on every flush, even an empty one. `played_ms`
+/// is **stream time** — the run's received samples minus the ones still
+/// buffered, where "buffered" is the predicted playhead's remaining audio
+/// (wall-clock time left × rate), so a run stretched to 0.85× still reports
+/// its 24 kHz length, not the longer wall-clock time it took. Reports pile
+/// up in `reports`; the caller takes them with `takeReports()` after each
+/// call and sends them.
 public struct PlaybackQueue: Sendable {
+    /// One `{"type":"playback"}` report for the daemon.
+    public struct Report: Equatable, Sendable {
+        public var state: WSMessage.PlaybackState
+        /// Stream milliseconds of the run played (0 for `started`).
+        public var playedMilliseconds: Int
+
+        public init(_ state: WSMessage.PlaybackState, playedMilliseconds: Int) {
+            self.state = state
+            self.playedMilliseconds = playedMilliseconds
+        }
+
+        public var message: WSMessage { .playback(state, playedMs: playedMilliseconds) }
+    }
+
     /// One chunk ready to be scheduled, in arrival order.
     public struct Chunk: Equatable, Identifiable, Sendable {
         public let id: Int
@@ -112,6 +140,14 @@ public struct PlaybackQueue: Sendable {
     /// caring about (mid-utterance, or still inside the underrun window of
     /// a drain) — a long pause between utterances does not count.
     public private(set) var largestArrivalGapMilliseconds = 0
+
+    /// Reports not yet taken by the caller, oldest first.
+    public private(set) var reports: [Report] = []
+    /// Samples received in the current run (since the last `drained` or
+    /// `flushed` report): what `played_ms` counts against.
+    public private(set) var runSamples = 0
+    /// The next release resumes an underrun: the same run, no `started`.
+    private var continuingRun = false
 
     private var pending: [Chunk] = []
     private var nextID = 1
@@ -251,6 +287,7 @@ public struct PlaybackQueue: Sendable {
         observeDrain(now: now)
 
         if phase == .playing {
+            runSamples += samples.count
             return appendLive(samples, now: now)
         }
 
@@ -260,7 +297,14 @@ public struct PlaybackQueue: Sendable {
             bufferingSince = now
         }
 
+        runSamples += samples.count
         return bufferAndMaybeRelease(samples, now: now)
+    }
+
+    /// The reports since the last call, oldest first; empties `reports`.
+    public mutating func takeReports() -> [Report] {
+        defer { reports.removeAll() }
+        return reports
     }
 
     /// Releases a short utterance that never reached the jitter buffer, and
@@ -270,6 +314,7 @@ public struct PlaybackQueue: Sendable {
         observeDrain(now: now)
         if phase == .idle, let drainedAt, now - drainedAt > Self.underrunWindow {
             finalizeCleanUtterance()
+            reportDrained()
             self.drainedAt = nil
         }
         guard phase == .buffering, now - bufferingSince >= maximumWait else { return [] }
@@ -307,8 +352,23 @@ public struct PlaybackQueue: Sendable {
     /// not a drain: it does not count toward underruns or move the
     /// adaptive target, and the next utterance buffers at whatever target
     /// the queue already had.
+    ///
+    /// Always reports `flushed`, with how much of the run was heard by
+    /// `now` (all of it once it ran dry; 0 with nothing playing). Without a
+    /// `now`, everything not yet reported played counts as unheard.
     @discardableResult
-    public mutating func flush() -> Bool {
+    public mutating func flush(now: TimeInterval? = nil) -> Bool {
+        let unplayed: Int
+        if drainedAt != nil {
+            unplayed = 0
+        } else if let now {
+            unplayed = Int((bufferedMilliseconds(at: now) / 1000 * sampleRate).rounded())
+        } else {
+            unplayed = bufferedSamples + scheduledSamples
+        }
+        reports.append(Report(.flushed, playedMilliseconds: milliseconds(max(0, runSamples - unplayed))))
+        runSamples = 0
+        continuingRun = false
         let hadAudio = !pending.isEmpty || !live.isEmpty
         chunksDropped += pending.count + live.count
         pending.removeAll()
@@ -353,10 +413,23 @@ public struct PlaybackQueue: Sendable {
         guard let drainedAt else { return }
         if now - drainedAt <= Self.underrunWindow {
             registerUnderrun()
+            continuingRun = true
         } else {
             finalizeCleanUtterance()
+            reportDrained()
         }
         self.drainedAt = nil
+    }
+
+    /// The run is over: all of it played (the playhead ran out).
+    private mutating func reportDrained() {
+        reports.append(Report(.drained, playedMilliseconds: milliseconds(runSamples)))
+        runSamples = 0
+        continuingRun = false
+    }
+
+    private func milliseconds(_ samples: Int) -> Int {
+        Int((Double(samples) / sampleRate * 1000).rounded())
     }
 
     private mutating func registerUnderrun() {
@@ -414,6 +487,8 @@ public struct PlaybackQueue: Sendable {
         pending.removeAll()
         bufferedSamples = 0
         phase = .playing
+        if !continuingRun { reports.append(Report(.started, playedMilliseconds: 0)) }
+        continuingRun = false
         var playhead = now
         for chunk in out {
             live.insert(chunk.id)

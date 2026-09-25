@@ -54,7 +54,7 @@ final class SessionCoreTests: XCTestCase {
         // Talk: the gate closes on silence and opens on speech.
         XCTAssertEqual(core.apply(.gateChanged(closed: true), now: at(1)), [.send(.silence(true))])
         XCTAssertEqual(core.sessionState, .silent)
-        XCTAssertEqual(core.apply(.gateChanged(closed: false), now: at(2)), [.send(.silence(false))])
+        XCTAssertEqual(core.apply(.gateChanged(closed: false), now: at(2)), [.send(.silence(false)), .send(.speaking(true))])
         XCTAssertEqual(core.sessionState, .listening)
 
         // A tool call: thinking.
@@ -342,7 +342,7 @@ final class SessionCoreTests: XCTestCase {
         XCTAssertTrue(core.mic.holding)
         XCTAssertEqual(core.statusLine, "Talking — release to send")
         XCTAssertEqual(core.apply(.holdBegan, now: t0), [], "already holding")
-        XCTAssertEqual(core.apply(.gateChanged(closed: false), now: t0), [.send(.silence(false))])
+        XCTAssertEqual(core.apply(.gateChanged(closed: false), now: t0), [.send(.silence(false)), .send(.speaking(true))], "holding is talking")
 
         XCTAssertEqual(core.apply(.holdEnded, now: t0), [.setManualGate(false)])
         XCTAssertFalse(core.mic.holding)
@@ -393,7 +393,7 @@ final class SessionCoreTests: XCTestCase {
         _ = core.apply(.toolCall, now: t0)
         XCTAssertEqual(core.apply(.tick, now: at(29.9)), [])
         XCTAssertEqual(core.sessionState, .thinking)
-        XCTAssertEqual(core.apply(.gateChanged(closed: false), now: at(31)), [.send(.silence(false))])
+        XCTAssertEqual(core.apply(.gateChanged(closed: false), now: at(31)), [.send(.silence(false)), .send(.speaking(true))])
         XCTAssertEqual(core.sessionState, .thinking, "only the ticker expires it")
         XCTAssertEqual(core.apply(.tick, now: at(31)), [])
         XCTAssertEqual(core.sessionState, .listening)
@@ -438,5 +438,61 @@ final class SessionCoreTests: XCTestCase {
         _ = core.apply(.status(.status(.connected)), now: t0)
         XCTAssertEqual(core.sessionState, .listening)
         XCTAssertEqual(core.voice.provider, "gemini", "a status without a provider keeps it")
+    }
+
+    // MARK: - The speech detector (`speaking`)
+
+    func testTheGateIsTheSpeechDetectorOncePerChange() {
+        var core = connected()
+        XCTAssertFalse(core.mic.speaking, "a fresh engine hears nothing yet")
+        XCTAssertEqual(core.apply(.gateChanged(closed: true), now: t0), [.send(.silence(true))], "never open: nothing to close")
+        XCTAssertEqual(core.apply(.gateChanged(closed: false), now: at(1)), [.send(.silence(false)), .send(.speaking(true))])
+        XCTAssertTrue(core.connection.socketSpeaking, "a reconnect says it again on open")
+        XCTAssertEqual(core.apply(.gateChanged(closed: true), now: at(2)), [.send(.silence(true)), .send(.speaking(false))])
+        XCTAssertFalse(core.connection.socketSpeaking)
+    }
+
+    func testMutingClosesTheDetectorAndItsGateResetIsNotSpeech() {
+        var core = connected()
+        _ = core.apply(.gateChanged(closed: false), now: t0)
+        XCTAssertTrue(core.mic.speaking)
+        XCTAssertEqual(core.apply(.muteTapped, now: at(1)), [.setCaptureMuted(true), .send(.mute(true)), .send(.speaking(false)), .haptic(.tap)])
+        // `AudioEngine.setMuted` reports a closed gate as open again, with
+        // no speech behind it: the daemon must not hold its pushes for it.
+        XCTAssertEqual(core.apply(.gateChanged(closed: false), now: at(1)), [.send(.silence(false))])
+        XCTAssertFalse(core.mic.speaking)
+    }
+
+    func testTheDetectorIsQuietAfterTheSocketDropsOrTheVoiceCloses() {
+        var core = connected()
+        _ = core.apply(.gateChanged(closed: false), now: t0)
+        _ = core.apply(.socketClosed(reason: "connection lost", willRetry: true), now: at(1))
+        XCTAssertFalse(core.mic.speaking)
+        XCTAssertFalse(core.connection.socketSpeaking, "the reopened socket starts from not speaking")
+
+        var closed = connected()
+        _ = closed.apply(.gateChanged(closed: false), now: t0)
+        let effects = closed.apply(.status(.status(.closed, reason: "shutdown")), now: at(1))
+        XCTAssertTrue(effects.contains(.send(.speaking(false))))
+        XCTAssertFalse(closed.mic.speaking)
+    }
+
+    func testBackgroundPauseClosesTheDetector() {
+        var core = SessionCore(keepListeningWhenLocked: false)
+        _ = core.apply(.connectTapped, now: t0)
+        _ = core.apply(.probeSucceeded(micGranted: true), now: t0)
+        _ = core.apply(.socketOpened, now: t0)
+        _ = core.apply(.status(.status(.connected)), now: t0)
+        _ = core.apply(.gateChanged(closed: false), now: t0)
+        let effects = core.apply(.scenePhase(.background), now: at(1))
+        XCTAssertTrue(effects.contains(.send(.speaking(false))))
+        XCTAssertFalse(core.mic.speaking)
+    }
+
+    func testTheSimulatedGateNeverSaysSpeaking() {
+        var core = connected()
+        XCTAssertEqual(core.apply(.simulatedGate(closed: true), now: t0), [])
+        XCTAssertEqual(core.apply(.simulatedGate(closed: false), now: t0), [])
+        XCTAssertFalse(core.mic.speaking)
     }
 }

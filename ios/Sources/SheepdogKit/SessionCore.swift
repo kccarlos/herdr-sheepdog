@@ -42,6 +42,9 @@ public struct SessionCore: Equatable, Sendable {
         /// these onto the socket after every event.
         public var socketMuted = false
         public var socketGateClosed = false
+        /// The speech detector's state as the socket says it on every open
+        /// (`speaking`), which makes it authoritative from the first frame.
+        public var socketSpeaking = false
     }
 
     /// The daemon's voice session, from `/ws` `status`.
@@ -66,6 +69,11 @@ public struct SessionCore: Equatable, Sendable {
         public var gateClosed = false
         /// The microphone delivers only digital zero while unmuted.
         public var noSignal = false
+        /// The app's speech detector is open — it hears the shepherd — as
+        /// last told to the daemon (`{"type":"speaking"}`). Opens with the
+        /// gate on speech (or a hold), closes with it, and is never open
+        /// while muted or without a running microphone.
+        public var speaking = false
     }
 
     /// What the player is doing.
@@ -219,6 +227,7 @@ public struct SessionCore: Equatable, Sendable {
             let retrying = willRetry && connection.wantsConnection
             connection.socket = retrying ? .reconnecting : .idle
             effects.append(.stopAudio)
+            quietSpeaking()
             if retrying {
                 connection.reconnect.connectionLost(at: t)
             } else {
@@ -312,6 +321,10 @@ public struct SessionCore: Equatable, Sendable {
             mic.gateClosed = closed
             connection.socketGateClosed = closed
             effects.append(.send(.silence(closed)))
+            // The gate is the app's speech detector: open on speech (or a
+            // hold), closed after the hangover. Muting reports the gate
+            // open without any speech, hence the mute check.
+            setShepherdSpeaking(!closed && !mic.muted, &effects)
 
         case let .simulatedGate(closed):
             mic.gateClosed = closed
@@ -325,6 +338,9 @@ public struct SessionCore: Equatable, Sendable {
                 connection.socketGateClosed = gateClosed
                 effects.append(.send(.silence(gateClosed)))
             }
+            // A fresh engine hears nothing yet; a closed start is certainly
+            // not speech.
+            if gateClosed { setShepherdSpeaking(false, &effects) }
 
         case let .audioStartFailed(message):
             effects.append(.showBanner(.microphoneFailed(message)))
@@ -369,6 +385,7 @@ public struct SessionCore: Equatable, Sendable {
             effects.append(.suspendAudio)
             connection.socketMuted = daemonMute
             effects.append(.send(.mute(true)))
+            setShepherdSpeaking(false, &effects)
             effects.append(.log(.pausedInBackground))
 
         case .scenePhase(.active):
@@ -430,6 +447,7 @@ public struct SessionCore: Equatable, Sendable {
         thinkingExpiry = nil
         mic.holding = false
         mic.noSignal = false
+        quietSpeaking()
         voice.provider = nil
         if mic.talkMode == .holdToTalk { effects.append(.setManualGate(false)) }
     }
@@ -448,6 +466,22 @@ public struct SessionCore: Equatable, Sendable {
         effects.append(contentsOf: [.closeSocket, .stopAudio, .stopStreams, .stopTicker])
         connection.reconnect.reset()
         suspension.backgroundSuspended = false
+        quietSpeaking()
+    }
+
+    /// Tells the daemon the speech detector opened or closed, once per change.
+    private mutating func setShepherdSpeaking(_ on: Bool, _ effects: inout [SessionEffect]) {
+        guard on != mic.speaking else { return }
+        mic.speaking = on
+        connection.socketSpeaking = on
+        effects.append(.send(.speaking(on)))
+    }
+
+    /// The socket is going (or gone): the next open starts from "not
+    /// speaking", with nothing to send now.
+    private mutating func quietSpeaking() {
+        mic.speaking = false
+        connection.socketSpeaking = false
     }
 
     private mutating func setMuted(_ requested: Bool, _ effects: inout [SessionEffect]) {
@@ -460,6 +494,7 @@ public struct SessionCore: Equatable, Sendable {
             // Stop the source first, so no frame can follow the message.
             effects.append(.setCaptureMuted(true))
             effects.append(.send(.mute(true)))
+            setShepherdSpeaking(false, &effects)
         } else {
             // Tell the daemon first, so it does not drop the first frames.
             effects.append(.send(.mute(daemonMute)))
@@ -487,6 +522,7 @@ public struct SessionCore: Equatable, Sendable {
     private mutating func applyVoiceStatus(_ effects: inout [SessionEffect]) {
         if voice.status == .closed {
             effects.append(.stopAudio)
+            setShepherdSpeaking(false, &effects)
             if !voice.saidVoiceIsOff {
                 voice.saidVoiceIsOff = true
                 let why = voice.closedReason == "voice_off"
