@@ -113,7 +113,7 @@ scenarios (docs/iteration-2.md, "Rules for every change").
 
 ## 3. Collision table
 
-Status: **ok** (handled), **partial**, **gap**. The four incidents come first.
+Status: **ok** (handled), **partial**, **gap**. The incidents come first. C23 and C29 are mechanisms seen in the log; no spoken failure from either has been logged yet.
 
 | # | Interruption × layer | What happens today (decider) | Status |
 |---|---|---|---|
@@ -139,13 +139,13 @@ Status: **ok** (handled), **partial**, **gap**. The four incidents come first.
 | C20 | prompt answered × its announce turn | `pendingStillOpen` fails → `brain.push_stale`, nothing said; a promise that event kept is already marked kept, so its line is lost [V code] | gap (small) |
 | C21 | new prompt while blocked | the poll or the reconciler raises a synthetic transition; `claimPrompt` stops a double raise [V `TestPollAndReconcileNeverDoubleRaiseTheSamePrompt`]; `raiseReprompt` calls `HandleTransition` outside the pane lock [I] | ok |
 | C22 | worker exits mid-work | the pending action is dropped; an interrupting push [V `TestAgentExitPushesInterrupt`] | ok |
-| C23 | Gemini 1011 / GoAway × voice memory and tool results | GoAway resumes with the handle; a 1011 drops it, so the model forgets the conversation and gets back only the silent briefing. Log 09-23…25: 74 closes with 1011, 68 of 77 resumes `resumed:false`, 48 `handle_dropped server_internal_error`. `pushQ` survives, but a tool response due on the old generation is dropped (`sendOn` → `send_error`; none in the log) [V] | gap (seen) |
+| C23 | Gemini 1011 / GoAway × voice memory and tool results | GoAway resumes with the handle; a 1011 drops it, so the model forgets the conversation and gets back only the silent briefing. Log 09-23…25: 74 closes with 1011, 68 of 77 resumes `resumed:false`, 48 `handle_dropped server_internal_error`. `pushQ` survives, but a tool response due on the old generation is dropped (`sendOn` → `send_error`; none in the log) [V] | gap (mechanism seen) |
 | C24 | GPT-Live idle close × delegation / push | `idleCheck` waits for delegations, input and speech; a push reopens the session with the recap; a result whose session is gone is pushed [V `TestIdleCloseWaitsForADelegationWhileMuted`] | ok |
 | C25 | brain timeout / model error / 429 | an announce falls back to the code sentence; an utterance to "Sorry, I couldn't get an answer…"; a turn that already acted reports it. Log 09-24: 11 announce `timeout` fallbacks (DeepSeek) [V] | ok |
 | C26 | promise fires × voice speaking | past due: tagged `due_promise`, which is exempt, so it interrupts; otherwise idle [V `TestPushExemptTagsStayInterruptWhileSpeaking`] | ok |
 | C27 | voice calls `to_supervisor` with no input | `voice_initiative_ignored` (log 00:24:13, 2 s after `voice.push_timeout`) [V `TestRelayWithoutShepherdInputIsIgnored`] | ok |
 | C28 | transcript vs tool call race | `claimInput` waits up to 1.5 s for the input [V `TestRelayWaitsForATrailingTranscript`] | ok |
-| C29 | interrupt push behind an idle head | the queue looks at the head only, so an urgent or owed line waits for the idle head's turn and gap (up to `TurnTimeout` 30 s). Log 09-24: `voice.push_timeout` at 00:24:11 and 16:21:42 [V] | gap (seen) |
+| C29 | interrupt push behind an idle head | the queue looks at the head only, so an urgent or owed line waits for the idle head's turn and gap (up to `TurnTimeout` 30 s). This includes the stop *button's* reply: `afterCancel` appends it to the tail as a `stop`-tagged push (the stop tool and the bare word return a tool result instead). Log 09-24: `voice.push_timeout` at 00:24:11 and 16:21:42 shows an idle head stalling; nothing logged shows an urgent line behind one [V] | gap |
 | C30 | daemon shutdown × queues | the supervisor joins its turns; the voice sessions discard `pushQ` (acceptable: nobody is left to hear it); the hub sends `closed/shutdown` [V] | ok |
 
 ## 4. Arbitration: who wins
@@ -195,9 +195,9 @@ proposed.
 
 | Rank | Gap | Seen? | Scenario it needs | One-line direction |
 |---|---|---|---|---|
-| 1 | Gemini 1011 loses the voice's conversation (C23): after 68 of 77 resumes the voice knows only the silent briefing, so a "what does that mean?" answered from `detail` (J5) has nothing to draw on | yes, 3 days of logs | audio-e2e: a 1011 injected between a reply and its follow-up | replay a short recap on a context-lost resume, as GPT-Live does |
+| 1 | Gemini 1011 loses the voice's conversation (C23): after 68 of 77 resumes the voice knows only the silent briefing, so a "what does that mean?" answered from `detail` (J5) has nothing to draw on | the context loss, yes (3 days); a spoken failure from it, no | audio-e2e: a 1011 injected between a reply and its follow-up | replay a short recap on a context-lost resume, as GPT-Live does |
 | 2 | iOS sends no playback or speaking reports (C4, C5): the #70 and #63 fixes run on timing guesses on the phone, where both incidents happened; no cut transcripts; the echo window starts at `turnComplete` | yes (both incidents were on the phone) | audio-e2e with an iOS-profile client (no reports), a long reply and an echo at its tail | send `playback`/`speaking` from `PlaybackQueue`; anchor `echoWindow` to the end of playback |
-| 3 | Push-queue head-of-line (C29): an urgent or owed line waits behind an idle head for up to 30 s | yes (`voice.push_timeout` ×2, 09-24) | unit test in `gemini/session_test.go`: interrupt queued behind an idle push during an open turn | let a ready item pass a waiting idle head |
+| 3 | Push-queue head-of-line (C29): an urgent or owed line, the stop button's reply included, waits behind an idle head for up to 30 s | the stall, yes (`voice.push_timeout` ×2, 09-24); an urgent line behind it, no | unit test in `gemini/session_test.go`: interrupt queued behind an idle push during an open turn | let a ready item pass a waiting idle head |
 | 4 | Per-pane serialisation (C18): a block waits behind its own pane's finish turn (≤ 15 s + grace) | no | supervisor scenario through `app.go`'s pane lock: finish, then block within the turn budget | do not hold the pane lock across the announce wait |
 | 5 | Single daemon-wide pending slot (C19): an instruction or a second block displaces an open question; the bare-"yes" fast path is lost for it | no (`pending.replaced` 0) | eval case: A asks, the brain instructs B, the shepherd says "yes" | keep one slot per pane |
 | 6 | Silent drops (C15, C20, send retries): provider switch, 3 failed sends, a kept promise on a stale block | no | unit: switch provider with a held push; announce stale with a kept promise | log `voice.push_dropped` on every discard |
