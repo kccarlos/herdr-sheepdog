@@ -102,7 +102,7 @@ sparingly and `make eval-live` deliberately.
 - **Cancelling a promise**: nothing the shepherd can say cancels an open
   promise (the old cancel tool did; it was not reachable from the voice
   since the redesign). It expires after `supervisor.promise_ttl_s`.
-- **`v0.1.0`** is not tagged yet (the release workflow is ready).
+- **`v0.1.0`** is not tagged yet (the release workflow is ready and builds on Ubuntu only; the darwin binary is signed and notarized afterwards on the Mac with `make release-sign`, see [`signing.md`](signing.md)).
 - **Device verification of the iOS work (#14/#17/#18)**: playback
   reports, the client speech detector, the Flock and Health panes and
   the echo-cancellation rebuild-after-route-change fix have each only

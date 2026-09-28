@@ -28,7 +28,8 @@ recorded event log in `testdata/e2e/`.
 
 **1. Get the binary.** Download a release from GitHub Releases
 (`sheepdog_<version>_darwin_arm64.tar.gz` or `..._linux_amd64.tar.gz`,
-verify against `checksums.txt`), or:
+verify against `checksums.txt`; the macOS binary is signed with a
+Developer ID and notarized, see [`docs/signing.md`](docs/signing.md)), or:
 
 ```sh
 go install github.com/kccarlos/herdr-sheepdog/cmd/sheepdog@latest   # -> $(go env GOPATH)/bin/sheepdog
