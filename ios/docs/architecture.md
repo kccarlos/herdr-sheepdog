@@ -550,7 +550,7 @@ On the iOS 26 simulator on an Apple-silicon Mac, over 117 tap buffers of
   whatever the model sends and nothing more.
 
 The same two numbers are live in the app under Settings ▸ About, and go to
-`os_log` under the subsystem `com.kccarlos.sheepdog`, categories `audio`,
+`os_log` under the subsystem `com.github.kccarlos.herdr-sheepdog-ios`, categories `audio`,
 `socket` and `session`.
 
 ## The voice bar's words

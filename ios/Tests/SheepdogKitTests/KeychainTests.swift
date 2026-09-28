@@ -4,7 +4,7 @@ import XCTest
 /// The token has to survive a round trip through the real keychain — a
 /// missing entitlement shows up here rather than as "Connect does nothing".
 final class KeychainTests: XCTestCase {
-    private let service = "com.kccarlos.sheepdog.tests.\(UUID().uuidString)"
+    private let service = "com.github.kccarlos.herdr-sheepdog-ios.tests.\(UUID().uuidString)"
 
     func testRoundTripAndDelete() {
         let store = KeychainSecretStore(service: service)

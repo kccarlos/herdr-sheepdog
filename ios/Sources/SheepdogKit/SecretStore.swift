@@ -13,7 +13,7 @@ public protocol SecretStore: AnyObject {
 public final class KeychainSecretStore: SecretStore {
     private let service: String
 
-    public init(service: String = "com.kccarlos.sheepdog.daemon") {
+    public init(service: String = "com.github.kccarlos.herdr-sheepdog-ios.daemon") {
         self.service = service
     }
 

@@ -124,7 +124,8 @@ They cover:
   stubbed `URLProtocol`.
 
 `LiveDaemonTests` talks to a real daemon on `127.0.0.1:7799` and skips itself
-when there is none, so CI stays green without one.
+when there is none, so CI (Xcode Cloud) stays green without one. The
+`Sheepdog` scheme also runs the UI tests, which skip themselves the same way.
 
 **End-to-end against a real daemon**, `Tests/SheepdogUITests` — the app
 driven through the whole flow, with a screenshot at each step. Start two
@@ -139,7 +140,7 @@ SHEEPDOG_DATA_DIR=/tmp/sheepdog-ios-token SHEEPDOG_STATE_PATH=/tmp/sheepdog-ios-
   bin/sheepdog serve --brain=fake --herdr=mock --voice=off --dev --port 7798 --env-file /dev/null &
 
 cd ../herdr-sheepdog-ios
-xcrun simctl privacy <udid> grant microphone com.kccarlos.sheepdog.app
+xcrun simctl privacy <udid> grant microphone com.github.kccarlos.herdr-sheepdog-ios
 xcodebuild -scheme SheepdogUITests -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test
 ```
 
@@ -290,7 +291,7 @@ daemon's `GET /api/settings`.
 - **The "no signal" cause.** The 25 s of digital zero after connecting was
   not reproduced here (the simulator has no such path). Now: it is named on
   screen after 3 s, logged with the input format, voice-processing state and
-  both input mutes (`log stream --predicate 'subsystem == "com.kccarlos.sheepdog"'`),
+  both input mutes (`log stream --predicate 'subsystem == "com.github.kccarlos.herdr-sheepdog-ios"'`),
   and capture is rebuilt once. The input-mute clearing at start and the
   multi-channel downmix are the candidate fixes; neither is confirmed.
 - **The Mic Mode panel** (`showSystemUserInterface(.microphoneModes)`) does
@@ -369,8 +370,10 @@ while, wake it, and check nothing is missing or doubled.
   `/events`; the real Gemini session logs those under the same names as the
   debug path (`internal/voice/gemini/toolexec.go`), so it should fire in a
   live session — but that has not been seen happen.
-- **CI is written, not exercised.** The workflow has never run: this repo's
-  first push is the first chance it gets.
+- **Xcode Cloud is configured in the repository, not yet exercised.**
+  `ci_scripts/ci_post_clone.sh` and the shared `Sheepdog` scheme were
+  verified locally; the workflows themselves are created in Xcode once
+  (docs/xcode-cloud.md) and the first real run is the first proof.
 
 ## Known rough edges
 

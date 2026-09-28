@@ -46,10 +46,10 @@ xcodegen generate
 open Sheepdog.xcodeproj
 ```
 
-Then in Xcode: select the **Sheepdog** target ▸ Signing & Capabilities ▸ set
-your Team, pick your iPhone, and run. The bundle identifier
-`com.kccarlos.sheepdog.app` is in `project.yml`; change it if it clashes with
-something you already have.
+Then in Xcode pick your iPhone and run. `project.yml` signs automatically
+with team `GV776BZVA8` and the bundle identifier
+`com.github.kccarlos.herdr-sheepdog-ios`; if you build under another team,
+change `DEVELOPMENT_TEAM` and the bundle identifiers there.
 
 Requires iOS 17 or newer. Built and tested with Xcode 27 against the iOS 26
 simulator.
@@ -59,6 +59,17 @@ From the command line:
 ```sh
 xcodebuild -scheme Sheepdog -destination 'platform=iOS Simulator,name=iPhone 17 Pro' build test
 ```
+
+The `Sheepdog` scheme's tests are the unit suite and the UI tests; the UI
+tests skip themselves unless a fixture daemon is running
+([`docs/status.md`](docs/status.md)).
+
+## CI and TestFlight (Xcode Cloud)
+
+There are no GitHub Actions. Xcode Cloud runs the tests on every pull
+request and push to `main`, and a `v*` tag (`git tag v0.1.0 && git push
+origin v0.1.0`) archives the app and sends it to TestFlight. Setup,
+workflows and troubleshooting: [`docs/xcode-cloud.md`](docs/xcode-cloud.md).
 
 ## Point it at your daemon
 
@@ -194,7 +205,7 @@ non-goal), so keep this to a network you trust — your LAN, or Tailscale.
   orb's state machine, the keychain wrapper.
 - `Sources/Sheepdog` — SwiftUI views, `@MainActor` view models, the audio
   engine.
-- `Tests/SheepdogKitTests` — the unit suite (runs in CI), with the TTS
+- `Tests/SheepdogKitTests` — the unit suite (runs on Xcode Cloud), with the TTS
   speech fixtures in `Tests/SheepdogKitTests/Audio` (regenerate with
   `scripts/make-fixtures.sh`).
 - `Tests/SheepdogUITests` — an end-to-end walkthrough against a real daemon;

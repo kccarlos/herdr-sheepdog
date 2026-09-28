@@ -101,9 +101,9 @@ public struct AudioMetrics: Equatable, Sendable {
 }
 
 public enum SheepdogLog {
-    public static let audio = Logger(subsystem: "com.kccarlos.sheepdog", category: "audio")
-    public static let socket = Logger(subsystem: "com.kccarlos.sheepdog", category: "socket")
-    public static let session = Logger(subsystem: "com.kccarlos.sheepdog", category: "session")
+    public static let audio = Logger(subsystem: "com.github.kccarlos.herdr-sheepdog-ios", category: "audio")
+    public static let socket = Logger(subsystem: "com.github.kccarlos.herdr-sheepdog-ios", category: "socket")
+    public static let session = Logger(subsystem: "com.github.kccarlos.herdr-sheepdog-ios", category: "session")
 }
 
 /// Whether the system echo canceller can work right now, for Settings ▸
