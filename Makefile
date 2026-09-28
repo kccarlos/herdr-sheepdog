@@ -8,7 +8,7 @@ DATE       := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 
 LDFLAGS    := -X 'main.version=$(VERSION)' -X 'main.commit=$(COMMIT)' -X 'main.date=$(DATE)'
 
-.PHONY: build test test-web lint vet cross clean install run-dev changelog eval eval-live
+.PHONY: build test test-web lint vet cross clean install run-dev changelog eval eval-live release-sign
 
 build:
 	go build -ldflags "$(LDFLAGS)" -o bin/$(BINARY) $(CMD)
@@ -24,6 +24,14 @@ run-dev: build
 
 # Regenerates CHANGELOG.md from the full commit history (there are no
 # tags yet; see scripts/changelog.sh).
+# Signs and notarizes the darwin binary of a published release on this Mac
+# and replaces its tarball and checksums.txt (docs/signing.md). The release
+# workflow runs on ubuntu only, so the darwin asset is unsigned until then.
+#   make release-sign TAG=v0.1.0 [DRY_RUN=1]
+release-sign:
+	@test -n "$(TAG)" || { echo "usage: make release-sign TAG=v0.1.0 [DRY_RUN=1]"; exit 2; }
+	./scripts/release-sign.sh $(if $(DRY_RUN),--dry-run) $(TAG)
+
 changelog:
 	{ echo "# Changelog"; echo; ./scripts/changelog.sh; } > CHANGELOG.md
 
