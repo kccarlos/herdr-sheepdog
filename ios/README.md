@@ -66,10 +66,16 @@ tests skip themselves unless a fixture daemon is running
 
 ## CI and TestFlight (Xcode Cloud)
 
-There are no GitHub Actions. Xcode Cloud runs the tests on every pull
-request and push to `main`, and a `v*` tag (`git tag v0.1.0 && git push
-origin v0.1.0`) archives the app and sends it to TestFlight. Setup,
-workflows and troubleshooting: [`docs/xcode-cloud.md`](docs/xcode-cloud.md).
+There are no GitHub Actions (GitHub Actions is also blocked by billing on
+this account). Xcode Cloud runs the tests on every pull request and push to
+`main`, and a `v*` tag (`git tag v0.1.0 && git push origin v0.1.0`) archives
+the app and sends it to TestFlight. Setup, workflows and troubleshooting:
+[`docs/xcode-cloud.md`](docs/xcode-cloud.md).
+
+In TestFlight the app is listed as **"Sheepdog for herdr"** (the name
+"Sheepdog" was taken on the App Store; the home-screen label stays
+"Sheepdog"). It is internal-testing only for now — ask to be added to the
+**Me** group to get an invite.
 
 ## Point it at your daemon
 

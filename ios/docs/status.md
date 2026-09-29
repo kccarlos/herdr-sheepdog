@@ -1,4 +1,20 @@
-# Status — 2026-09-23
+# Status — 2026-09-29
+
+## Distribution
+
+Build **0.1.0 (2)** is in TestFlight, internal group **Me**, built by
+Xcode Cloud on 2026-09-28 from `main` `4916d10` (Xcode 27 / macOS 27). App
+Store Connect record: **"Sheepdog for herdr"** (App ID 6817155887, SKU
+`herdr-sheepdog-ios`; the name "Sheepdog" was taken). Setup and workflows:
+[`xcode-cloud.md`](xcode-cloud.md).
+
+**Not verified**: nothing has been installed on a phone yet — TestFlight has
+the build available, but no one has tapped Install. Every "Not verified"
+item below (real device audio, a live Gemini/GPT-Live session, reconnect in
+the field, history and approvals on the phone, the detector on a real
+microphone) is therefore still exactly as open as it was before this build
+existed; having a TestFlight build only means there is now something to
+install, not that any of it has been checked on hardware.
 
 ## Verified
 
@@ -370,10 +386,11 @@ while, wake it, and check nothing is missing or doubled.
   `/events`; the real Gemini session logs those under the same names as the
   debug path (`internal/voice/gemini/toolexec.go`), so it should fire in a
   live session — but that has not been seen happen.
-- **Xcode Cloud is configured in the repository, not yet exercised.**
-  `ci_scripts/ci_post_clone.sh` and the shared `Sheepdog` scheme were
-  verified locally; the workflows themselves are created in Xcode once
-  (docs/xcode-cloud.md) and the first real run is the first proof.
+- **Xcode Cloud is now exercised.** Both the PR and TestFlight workflows
+  have run real builds (2026-09-28) and produced TestFlight build
+  `0.1.0 (2)` — see the Distribution section above and
+  [`xcode-cloud.md`](xcode-cloud.md). What is still open is device
+  verification of what that build actually does.
 
 ## Known rough edges
 

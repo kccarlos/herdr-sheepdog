@@ -1,19 +1,27 @@
 # Xcode Cloud: tests on every PR, TestFlight on every tag
 
-This repository has no GitHub Actions. Apple's Xcode Cloud builds and tests
-every pull request and every push to `main`, and a `v*` tag archives the
-app and puts it in TestFlight. Xcode Cloud minutes come with the Apple
-Developer Program; GitHub's macOS runners are billed at ten times the Linux
-rate on a private repository.
+This repository has no GitHub Actions (also true on the account level:
+GitHub Actions is blocked by billing on this account since 2026-09-27, and
+private-repo macOS runners bill at ten times the Linux rate besides).
+Apple's Xcode Cloud builds and tests every pull request and every push to
+`main`, and a `v*` tag archives the app and puts it in TestFlight. Xcode
+Cloud minutes come with the Apple Developer Program.
+
+Configured and exercised as of 2026-09-28: the **PR** and **TestFlight**
+workflows below both ran real builds, and build **0.1.0 (2)** is in
+TestFlight (internal group **Me**) — see [`status.md`](status.md) for what
+is and is not verified from there.
 
 | | |
 |---|---|
-| Team | KECHENG AN, Team ID `GV776BZVA8` (`DEVELOPMENT_TEAM` in `project.yml`) |
+| Team | KECHENG AN, Team ID `GV776BZVA8`, Apple ID thisiskecheng@gmail.com (`DEVELOPMENT_TEAM` in `project.yml`) |
 | App bundle ID | `com.github.kccarlos.herdr-sheepdog-ios` |
 | Framework bundle ID | `com.github.kccarlos.herdr-sheepdog-ios.kit` (embedded, not registered separately) |
+| App Store Connect record | "Sheepdog for herdr" (the name "Sheepdog" was taken), App ID 6817155887, SKU `herdr-sheepdog-ios` |
 | Product and scheme | `Sheepdog` (shared; Test runs `SheepdogKitTests` and `SheepdogUITests`, Archive uses Release) |
 | Version | `MARKETING_VERSION` in `project.yml` (now `0.1.0`) |
-| Build number | Xcode Cloud's own, `CI_BUILD_NUMBER` |
+| Build number | Xcode Cloud's own, `CI_BUILD_NUMBER` — latest in TestFlight is `0.1.0 (2)`, built 2026-09-28 from `main` `4916d10` with Xcode 27 / macOS 27 |
+| TestFlight internal group | **Me** (tester: thisiskecheng@gmail.com). Beta App Review contact is unsaved (needs a phone number); only matters for external testing, not used here |
 
 Bundle IDs may contain letters, digits, hyphens and periods (Apple's
 `CFBundleIdentifier` rule), so the hyphens from the GitHub repository name
@@ -82,8 +90,10 @@ xcodegen generate
 open Sheepdog.xcodeproj
 ```
 
-1. **Product ▸ Xcode Cloud ▸ Create Workflow…** (or the Report navigator's
-   Cloud tab ▸ Get Started).
+1. **Integrate ▸ Xcode Cloud ▸ Create Workflow…** (or the Report navigator's
+   Cloud tab ▸ Get Started). Xcode Cloud items live under **Integrate**, not
+   **Product** — `Integrate ▸ Xcode Cloud ▸ Create Workflow…` /
+   `Manage Workflows…`.
 2. **Select a product**: choose **Sheepdog** (the app). Next.
 3. Xcode shows a default workflow. Leave it for now or edit it straight
    into the **PR** workflow below (section 2). Next.
@@ -93,13 +103,16 @@ open Sheepdog.xcodeproj
    GitHub asks to install the **Xcode Cloud** GitHub App: install it on the
    account `kccarlos`, **Only select repositories** ▸
    `herdr-sheepdog-ios` ▸ Install. Back in Xcode, the repository shows as
-   connected.
+   connected. **The remote must be an HTTPS GitHub URL** — see the
+   troubleshooting entry below if Xcode Cloud says it cannot find the
+   repository.
 5. **Connect to App Store Connect**: there is no app record yet, so Xcode
-   offers to create one. Name `Sheepdog` (it has to be unique across the
-   whole App Store; if taken, e.g. `Sheepdog for herdr` — only the store
-   name, the home-screen label stays "Sheepdog"), primary language English
-   (U.S.), bundle ID `com.github.kccarlos.herdr-sheepdog-ios` (Xcode
-   registers it on the team if it is not yet registered). **Complete**.
+   offers to create one. The name `Sheepdog` was taken on the App Store, so
+   the record is named **"Sheepdog for herdr"** instead (only the store
+   listing name — the home-screen label stays "Sheepdog"), primary language
+   English (U.S.), bundle ID `com.github.kccarlos.herdr-sheepdog-ios` (Xcode
+   registers it on the team if it is not yet registered). **Complete**. The
+   record is App ID 6817155887, SKU `herdr-sheepdog-ios`.
 6. Xcode starts the first build. Watch it in the Report navigator ▸ Cloud.
 
 Workflows are stored in App Store Connect, not in this repository. Edit them
@@ -107,7 +120,10 @@ in Xcode (Report navigator ▸ Cloud ▸ right-click **Sheepdog** ▸ Manage
 Workflows…) or on the web (App Store Connect ▸ the app ▸ Xcode Cloud ▸
 Manage Workflows).
 
-## 2. The two workflows
+## 2. The three workflows
+
+As configured and confirmed working on 2026-09-28 (Build 1 on **PR**
+succeeded in about 4.5 minutes; **TestFlight** produced build `0.1.0 (2)`).
 
 ### PR
 
@@ -140,6 +156,16 @@ Store" if the app ever goes further. The post-action needs the internal
 group to exist, so create the group (section 4) before adding it; the first
 tag can also be run without the post-action and the build added to the
 group by hand.
+
+### Internal TestFlight Build
+
+Xcode auto-creates this third workflow the first time a product is set up
+for distribution (it appeared alongside PR and TestFlight without being
+asked for). It starts manually on a branch — there is no automatic Start
+Condition — and its builds are **not** added to any TestFlight group by
+Xcode Cloud; add a build from it in App Store Connect ▸ TestFlight ▸ **Me**
+▸ Builds ▸ **+** if one is needed. In practice the **TestFlight** workflow
+(tag-triggered) is the one used to ship; this one is left as Xcode made it.
 
 ## 3. What it costs
 
@@ -215,3 +241,5 @@ skips the tag check.
 | Build sits at "Missing Compliance" | `ITSAppUsesNonExemptEncryption` missing from the built Info.plist | it is in `project.yml`; check it survived an edit |
 | The TestFlight post-action has no group to pick | no internal group yet | section 4, then edit the workflow |
 | Tests pass locally, fail on Xcode Cloud in the UI tests | a fixture daemon answered on 127.0.0.1:7799 locally | on Xcode Cloud they should skip; look for a test that does not call `XCTSkip` without a daemon |
+| "No source code repositories were found for this project" when connecting the repository | `origin` used the SSH host alias `git@github-kccarlos:…` (an `~/.ssh/config` `Host` alias for a multi-account setup); Xcode Cloud can't resolve it, and a git `url.<alias>.insteadOf` rewrite doesn't help — Xcode applies the remote URL as written | point `origin` at plain HTTPS: `git remote set-url origin https://github.com/kccarlos/herdr-sheepdog-ios.git`, then `gh auth setup-git` (with `gh` logged in as `kccarlos`) so git's credential helper handles push/pull without the SSH alias |
+| Yellow warning in the workflow editor: "the scheme Sheepdog may only exist locally and may not be accessible to Xcode Cloud" | expected — `Sheepdog.xcodeproj` is gitignored, so Xcode Cloud can't see the scheme in the repository itself | ignore it; `ci_scripts/ci_post_clone.sh` generates the project (and the scheme with it) on the runner before the scheme is needed. Confirmed harmless: Build 1 (PR) and Build 2 (TestFlight) both succeeded with this warning showing |
