@@ -360,7 +360,30 @@ type Gemini struct {
 	// "Discord") at the default.
 	StartSensitivity string `toml:"start_sensitivity"`
 	EndSensitivity   string `toml:"end_sensitivity"`
+	// Backend is where the Live connection goes: "aistudio" (Google AI
+	// Studio, the api_keys pool) or "vertex" (Vertex AI, [gemini.vertex]).
+	// Everything above the connection is the same for both.
+	Backend string `toml:"backend"`
+	// Vertex configures the Vertex AI backend (used when Backend is
+	// "vertex").
+	Vertex GeminiVertex `toml:"vertex"`
 }
+
+// GeminiVertex configures Gemini Live on Vertex AI: one API key (no
+// pool), a project and a location.
+type GeminiVertex struct {
+	// APIKey is the Vertex AI API key (bound to a service account). Never
+	// logged.
+	APIKey string `toml:"api_key"`
+	// Project is the Google Cloud project id.
+	Project string `toml:"project"`
+	// Location is the Vertex AI location the Live model is served from
+	// (gemini-3.8-live is not served from "global").
+	Location string `toml:"location"`
+}
+
+// GeminiBackends are the accepted values of gemini.backend.
+var GeminiBackends = []string{"aistudio", "vertex"}
 
 // Herdr configures the herdr socket client.
 type Herdr struct {
@@ -397,7 +420,7 @@ func Default() Config {
 		Herdr:             Herdr{Socket: filepath.Join(home, ".config", "herdr", "herdr.sock")},
 		State:             State{Path: filepath.Join(dataDir, "state.json")},
 		PendingTTLS:       120,
-		Gemini:            Gemini{Model: "gemini-3.8-live", Voice: "Puck", StallAfterS: 10, StartSensitivity: "low", EndSensitivity: "default"},
+		Gemini:            Gemini{Model: "gemini-3.8-live", Voice: "Puck", StallAfterS: 10, StartSensitivity: "low", EndSensitivity: "default", Backend: "aistudio", Vertex: GeminiVertex{Location: "us-central1"}},
 		DeepSeek:          DeepSeek{BaseURL: DefaultDeepSeekBaseURL, Thinking: true, ReasoningEffort: DefaultDeepSeekReasoningEffort},
 		Web:               Web{Bind: DefaultWebBind, Port: DefaultWebPort},
 		CLI:               defaultCLI(),
@@ -567,7 +590,7 @@ func load(path string, lookup func(string) (string, bool)) (Config, error) {
 }
 
 // validateVoice checks [voice], [voice.openai] and the [gemini]
-// sensitivities.
+// sensitivities and backend.
 func validateVoice(cfg Config) error {
 	if !oneOf(cfg.Voice.Provider, VoiceProviders) {
 		return fmt.Errorf("config: voice.provider=%q: want one of %s", cfg.Voice.Provider, strings.Join(VoiceProviders, ", "))
@@ -582,6 +605,12 @@ func validateVoice(cfg Config) error {
 		if !oneOf(f.v, GeminiSensitivities) {
 			return fmt.Errorf("config: gemini.%s=%q: want one of %s", f.name, f.v, strings.Join(GeminiSensitivities, ", "))
 		}
+	}
+	if !oneOf(cfg.Gemini.Backend, GeminiBackends) {
+		return fmt.Errorf("config: gemini.backend=%q: want one of %s", cfg.Gemini.Backend, strings.Join(GeminiBackends, ", "))
+	}
+	if cfg.Gemini.Backend == "vertex" && strings.TrimSpace(cfg.Gemini.Vertex.Location) == "" {
+		return errors.New("config: gemini.vertex.location must not be empty")
 	}
 	return nil
 }
@@ -649,6 +678,7 @@ func validateBrain(b Brain) error {
 //	SHEEPDOG_VOICE_OPENAI_MODEL, SHEEPDOG_VOICE_OPENAI_VOICE,
 //	SHEEPDOG_VOICE_OPENAI_IDLE_CLOSE_S,
 //	SHEEPDOG_GEMINI_START_SENSITIVITY, SHEEPDOG_GEMINI_END_SENSITIVITY,
+//	SHEEPDOG_GEMINI_BACKEND, VERTEX_API_KEY, VERTEX_PROJECT, VERTEX_LOCATION,
 //	SHEEPDOG_BRAIN_ENABLED, SHEEPDOG_BRAIN_PROVIDER, SHEEPDOG_BRAIN_MODEL,
 //	SHEEPDOG_BRAIN_MAX_STEPS,
 //	SHEEPDOG_BRAIN_ASK_TIMEOUT_S, SHEEPDOG_BRAIN_PROPOSE_TIMEOUT_S,
@@ -797,8 +827,8 @@ func applyEnv(cfg *Config, lookup func(string) (string, bool)) error {
 }
 
 // applyVoiceEnv overrides [voice] and [voice.openai] (the key from
-// OPENAI_API_KEY, like the other provider keys) and the [gemini]
-// sensitivities.
+// OPENAI_API_KEY, like the other provider keys), the [gemini]
+// sensitivities and backend, and [gemini.vertex] (VERTEX_*).
 func applyVoiceEnv(cfg *Config, lookup func(string) (string, bool)) error {
 	if v, ok := lookup("SHEEPDOG_VOICE_PROVIDER"); ok {
 		cfg.Voice.Provider = strings.ToLower(strings.TrimSpace(v))
@@ -824,6 +854,16 @@ func applyVoiceEnv(cfg *Config, lookup func(string) (string, bool)) error {
 	}
 	if v, ok := lookup("SHEEPDOG_GEMINI_END_SENSITIVITY"); ok {
 		cfg.Gemini.EndSensitivity = strings.ToLower(strings.TrimSpace(v))
+	}
+	if v, ok := lookup("SHEEPDOG_GEMINI_BACKEND"); ok {
+		cfg.Gemini.Backend = strings.ToLower(strings.TrimSpace(v))
+	}
+	// The Vertex names match the ones gcloud users already have in .env;
+	// like the other keys, an empty value does not clear a file value.
+	for name, dst := range map[string]*string{"VERTEX_API_KEY": &cfg.Gemini.Vertex.APIKey, "VERTEX_PROJECT": &cfg.Gemini.Vertex.Project, "VERTEX_LOCATION": &cfg.Gemini.Vertex.Location} {
+		if v, ok := lookup(name); ok && strings.TrimSpace(v) != "" {
+			*dst = strings.TrimSpace(v)
+		}
 	}
 	return nil
 }
@@ -968,8 +1008,8 @@ func geminiKeysFromEnv(lookup func(string) (string, bool)) []string {
 // counts (or set/unset) only; keep it that way when secret-bearing
 // fields are added.
 func (c Config) String() string {
-	return fmt.Sprintf("data_dir=%s herdr.socket=%s state.path=%s state.full_fsync=%t debounce_ms=%d snapshot_interval_s=%d pending_ttl_s=%d aliases=%d gemini.model=%s gemini.voice=%s gemini.stall_after_s=%d gemini.start_sensitivity=%s gemini.end_sensitivity=%s gemini.api_keys=%d voice.name=%s voice.provider=%s voice.openai.api_key=%s voice.openai.model=%s voice.openai.voice=%s voice.openai.idle_close_s=%d deepseek.api_key=%s deepseek.base_url=%s deepseek.thinking=%t deepseek.reasoning_effort=%s web.bind=%s web.port=%d web.token=%s cli.prefer=%s cli.timeout_s=%d cli.max_output_kb=%d supervisor.chattiness=%s supervisor.recent_minutes=%d supervisor.promise_ttl_s=%d supervisor.cancel_window_s=%d supervisor.reprompt_poll_s=%d supervisor.repeat_window_s=%d supervisor.authorise_window_s=%d brain.enabled=%t brain.provider=%s brain.model=%s brain.max_steps=%d brain.utterance_timeout_s=%d brain.window_tokens=%d brain.prune_after_turns=%d brain.step_reserve_s=%d brain.final_grace_s=%d brain.announce_turn_timeout_s=%d brain.announce_timeout_s=%d brain.announce_wait_s=%d brain.reply_wait_s=%d brain.investigate_max_s=%d brain.investigate_session_ttl_s=%d prompts.dir=%s",
-		c.DataDir, c.Herdr.Socket, c.State.Path, c.State.FullFsync, c.DebounceMS, c.SnapshotIntervalS, c.PendingTTLS, len(c.Aliases), c.Gemini.Model, c.Gemini.Voice, c.Gemini.StallAfterS, c.Gemini.StartSensitivity, c.Gemini.EndSensitivity, len(c.Gemini.APIKeys), c.Voice.Name, c.Voice.Provider, setOrUnset(c.Voice.OpenAI.APIKey), c.Voice.OpenAI.Model, c.Voice.OpenAI.Voice, c.Voice.OpenAI.IdleCloseS, setOrUnset(c.DeepSeek.APIKey), c.DeepSeek.BaseURL, c.DeepSeek.Thinking, c.DeepSeek.ReasoningEffort, c.Web.Bind, c.Web.Port, setOrUnset(c.Web.Token), c.CLI.Prefer, c.CLI.TimeoutS, c.CLI.MaxOutputKB, c.Supervisor.Chattiness, c.Supervisor.RecentMinutes, c.Supervisor.PromiseTTLS, c.Supervisor.CancelWindowS, c.Supervisor.RepromptPollS, c.Supervisor.RepeatWindowS, c.Supervisor.AuthoriseWindowS, c.Brain.Enabled, c.Brain.Provider, c.Brain.Model, c.Brain.MaxSteps, c.Brain.UtteranceTimeoutS, c.Brain.WindowTokens, c.Brain.PruneAfterTurns, c.Brain.StepReserveS, c.Brain.FinalGraceS, c.Brain.AnnounceTurnTimeoutS, c.Brain.AnnounceTimeoutS, c.Brain.AnnounceWaitS, c.Brain.ReplyWaitS, c.Brain.InvestigateMaxS, c.Brain.InvestigateSessionTTLS, c.Prompts.Dir)
+	return fmt.Sprintf("data_dir=%s herdr.socket=%s state.path=%s state.full_fsync=%t debounce_ms=%d snapshot_interval_s=%d pending_ttl_s=%d aliases=%d gemini.model=%s gemini.voice=%s gemini.stall_after_s=%d gemini.start_sensitivity=%s gemini.end_sensitivity=%s gemini.api_keys=%d gemini.backend=%s gemini.vertex.api_key=%s gemini.vertex.project=%s gemini.vertex.location=%s voice.name=%s voice.provider=%s voice.openai.api_key=%s voice.openai.model=%s voice.openai.voice=%s voice.openai.idle_close_s=%d deepseek.api_key=%s deepseek.base_url=%s deepseek.thinking=%t deepseek.reasoning_effort=%s web.bind=%s web.port=%d web.token=%s cli.prefer=%s cli.timeout_s=%d cli.max_output_kb=%d supervisor.chattiness=%s supervisor.recent_minutes=%d supervisor.promise_ttl_s=%d supervisor.cancel_window_s=%d supervisor.reprompt_poll_s=%d supervisor.repeat_window_s=%d supervisor.authorise_window_s=%d brain.enabled=%t brain.provider=%s brain.model=%s brain.max_steps=%d brain.utterance_timeout_s=%d brain.window_tokens=%d brain.prune_after_turns=%d brain.step_reserve_s=%d brain.final_grace_s=%d brain.announce_turn_timeout_s=%d brain.announce_timeout_s=%d brain.announce_wait_s=%d brain.reply_wait_s=%d brain.investigate_max_s=%d brain.investigate_session_ttl_s=%d prompts.dir=%s",
+		c.DataDir, c.Herdr.Socket, c.State.Path, c.State.FullFsync, c.DebounceMS, c.SnapshotIntervalS, c.PendingTTLS, len(c.Aliases), c.Gemini.Model, c.Gemini.Voice, c.Gemini.StallAfterS, c.Gemini.StartSensitivity, c.Gemini.EndSensitivity, len(c.Gemini.APIKeys), c.Gemini.Backend, setOrUnset(c.Gemini.Vertex.APIKey), c.Gemini.Vertex.Project, c.Gemini.Vertex.Location, c.Voice.Name, c.Voice.Provider, setOrUnset(c.Voice.OpenAI.APIKey), c.Voice.OpenAI.Model, c.Voice.OpenAI.Voice, c.Voice.OpenAI.IdleCloseS, setOrUnset(c.DeepSeek.APIKey), c.DeepSeek.BaseURL, c.DeepSeek.Thinking, c.DeepSeek.ReasoningEffort, c.Web.Bind, c.Web.Port, setOrUnset(c.Web.Token), c.CLI.Prefer, c.CLI.TimeoutS, c.CLI.MaxOutputKB, c.Supervisor.Chattiness, c.Supervisor.RecentMinutes, c.Supervisor.PromiseTTLS, c.Supervisor.CancelWindowS, c.Supervisor.RepromptPollS, c.Supervisor.RepeatWindowS, c.Supervisor.AuthoriseWindowS, c.Brain.Enabled, c.Brain.Provider, c.Brain.Model, c.Brain.MaxSteps, c.Brain.UtteranceTimeoutS, c.Brain.WindowTokens, c.Brain.PruneAfterTurns, c.Brain.StepReserveS, c.Brain.FinalGraceS, c.Brain.AnnounceTurnTimeoutS, c.Brain.AnnounceTimeoutS, c.Brain.AnnounceWaitS, c.Brain.ReplyWaitS, c.Brain.InvestigateMaxS, c.Brain.InvestigateSessionTTLS, c.Prompts.Dir)
 }
 
 // setOrUnset renders a secret's presence, never its value.

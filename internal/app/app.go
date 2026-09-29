@@ -171,8 +171,8 @@ func Build(cfg config.Config, opts Options) (*App, error) {
 	if opts.Voice != VoiceOff {
 		switch initialVoiceProvider(cfg, opts) {
 		case VoiceGemini:
-			if len(cfg.Gemini.APIKeys) == 0 {
-				return nil, errors.New("app: the gemini voice needs GEMINI_API_KEY (or gemini.api_keys); use --voice=off to run without it")
+			if _, _, missing := GeminiLive(cfg.Gemini); missing != "" {
+				return nil, fmt.Errorf("app: the gemini voice (backend %s) needs %s; use --voice=off to run without it", cfg.Gemini.Backend, missing)
 			}
 		case VoiceOpenAI:
 			if cfg.Voice.OpenAI.APIKey == "" {
@@ -311,9 +311,11 @@ func (a *App) wire() error {
 	a.voiceCtx = ctxcap.NewVoiceLog(func(t ctxcap.VoiceTurn, updated bool) {
 		a.log.Log("voice", "context.step", "", map[string]any{"pane": "voice", "turn": t.Turn, "kind": t.Kind, "session": t.Session, "updated": updated})
 	})
+	liveKeys, vertex, _ := GeminiLive(cfg.Gemini)
 	gcfg := gemini.Config{
 		Context: a.voiceCtx,
-		APIKeys: cfg.Gemini.APIKeys,
+		APIKeys: liveKeys,
+		Vertex:  vertex,
 		Model:   cfg.Gemini.Model,
 		Voice:   cfg.Gemini.Voice,
 		Aliases: a.aliases(),
@@ -424,14 +426,15 @@ func replyWait(cfg config.Config, opts Options) time.Duration {
 // without a key unavailable with the reason.
 func (a *App) voiceProviders(gcfg gemini.Config, handler voice.ToolHandler) []voice.Provider {
 	cfg := a.cfg
-	g := voice.Provider{ProviderInfo: voice.ProviderInfo{ID: VoiceGemini, Label: "Gemini Live", Model: gcfg.Model, Available: len(cfg.Gemini.APIKeys) > 0}}
+	_, _, missing := GeminiLive(cfg.Gemini)
+	g := voice.Provider{ProviderInfo: voice.ProviderInfo{ID: VoiceGemini, Label: geminiLabel(gcfg.Vertex), Model: gcfg.Model, Available: missing == ""}}
 	if gcfg.Model == "" {
 		g.Model = gemini.DefaultModel
 	}
 	if g.Available {
 		g.New = func() (voice.Session, error) { return gemini.New(gcfg, a.log) }
 	} else {
-		g.Reason = "no GEMINI_API_KEY"
+		g.Reason = "no " + missing
 	}
 	oc := cfg.Voice.OpenAI
 	o := voice.Provider{ProviderInfo: voice.ProviderInfo{ID: VoiceOpenAI, Label: "GPT-Live", Model: oc.Model, Available: oc.APIKey != "", Billing: voice.BillingPerMinute}}

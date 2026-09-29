@@ -3,6 +3,7 @@ package gemini
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"sync"
 
 	"google.golang.org/genai"
@@ -25,12 +26,62 @@ type Dialer interface {
 }
 
 // sdkDialer dials through google.golang.org/genai, one client per key.
+// With vertex set it dials Vertex AI instead of Google AI Studio.
 type sdkDialer struct {
+	vertex *Vertex
+	// baseURL overrides the backend's base URL (tests only).
+	baseURL string
+
 	mu      sync.Mutex
 	clients map[string]*genai.Client
 }
 
-func newSDKDialer() *sdkDialer { return &sdkDialer{clients: map[string]*genai.Client{}} }
+func newSDKDialer(vertex *Vertex) *sdkDialer {
+	return &sdkDialer{vertex: vertex, clients: map[string]*genai.Client{}}
+}
+
+// clientConfig is the genai client configuration for one key.
+//
+// On Vertex (spike 2026-09-29, docs/research/vertex-live-spike-2026-09-29.md)
+// the Live socket is wss://{location}-aiplatform.googleapis.com/ws/
+// google.cloud.aiplatform.v1beta1.LlmBidiService/BidiGenerateContent and
+// accepts the API key as an x-goog-api-key header; the setup names the
+// model as projects/{p}/locations/{l}/publishers/google/models/{m}, which
+// the SDK builds from Project and Location. Two SDK gaps are filled here:
+// with an API key it defaults to the global host, which does not serve
+// the Live models, and it does not put the key on the Vertex socket.
+func (d *sdkDialer) clientConfig(apiKey string) *genai.ClientConfig {
+	if d.vertex == nil {
+		return &genai.ClientConfig{APIKey: apiKey, Backend: genai.BackendGeminiAPI, HTTPOptions: genai.HTTPOptions{BaseURL: d.baseURL}}
+	}
+	base := d.baseURL
+	if base == "" {
+		base = vertexBaseURL(d.vertex.Location)
+	}
+	return &genai.ClientConfig{
+		Backend:  genai.BackendVertexAI,
+		APIKey:   apiKey,
+		Project:  d.vertex.Project,
+		Location: d.vertex.Location,
+		HTTPOptions: genai.HTTPOptions{
+			BaseURL: base,
+			Headers: http.Header{"X-Goog-Api-Key": []string{apiKey}},
+		},
+	}
+}
+
+// vertexBaseURL is the Vertex AI endpoint for location: the global host,
+// a multi-region (us, eu) host, or the regional one.
+func vertexBaseURL(location string) string {
+	switch location {
+	case "global":
+		return "https://aiplatform.googleapis.com/"
+	case "us", "eu":
+		return fmt.Sprintf("https://aiplatform.%s.rep.googleapis.com/", location)
+	default:
+		return fmt.Sprintf("https://%s-aiplatform.googleapis.com/", location)
+	}
+}
 
 func (d *sdkDialer) client(ctx context.Context, apiKey string) (*genai.Client, error) {
 	d.mu.Lock()
@@ -38,7 +89,7 @@ func (d *sdkDialer) client(ctx context.Context, apiKey string) (*genai.Client, e
 	if c, ok := d.clients[apiKey]; ok {
 		return c, nil
 	}
-	c, err := genai.NewClient(ctx, &genai.ClientConfig{APIKey: apiKey, Backend: genai.BackendGeminiAPI})
+	c, err := genai.NewClient(ctx, d.clientConfig(apiKey))
 	if err != nil {
 		return nil, fmt.Errorf("gemini: client: %w", err)
 	}
