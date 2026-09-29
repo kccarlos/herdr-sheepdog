@@ -14,7 +14,13 @@ import (
 type Config struct {
 	// APIKeys is the key pool (config gemini.api_keys). A connection is
 	// bound to one key; rotation happens only at (re)connect. Never logged.
+	// On Vertex it holds the one Vertex key: a rate limit then backs off
+	// and retries the same key.
 	APIKeys []string
+	// Vertex, when set, sends the Live connection to Vertex AI instead of
+	// Google AI Studio (config gemini.backend = "vertex"). Only the
+	// connection differs; everything above it is backend-agnostic.
+	Vertex *Vertex
 	// Model is the Live model (default "gemini-3.8-live").
 	Model string
 	// Voice is the prebuilt voice name (default "Puck").
@@ -94,11 +100,32 @@ type Config struct {
 	ToolResponseWait time.Duration
 }
 
+// Vertex selects the Vertex AI backend (config [gemini.vertex]).
+type Vertex struct {
+	// Project is the Google Cloud project id.
+	Project string
+	// Location serves the Live model, e.g. "us-central1" (the global
+	// endpoint does not serve gemini-3.8-live).
+	Location string
+}
+
+// Backend names the backend for logs and labels: "aistudio" or "vertex".
+func (c Config) Backend() string {
+	if c.Vertex != nil {
+		return "vertex"
+	}
+	return "aistudio"
+}
+
 // DefaultModel is the Live model used when Config.Model is empty.
 const DefaultModel = "gemini-3.8-live"
 
 // ErrNoAPIKeys is returned by New when the key pool is empty.
 var ErrNoAPIKeys = errors.New("gemini: no API keys configured")
+
+// ErrVertexConfig is returned by New when Vertex is set without a project
+// or a location.
+var ErrVertexConfig = errors.New("gemini: vertex needs a project and a location")
 
 func (c Config) withDefaults() Config {
 	if c.Model == "" {

@@ -115,12 +115,15 @@ type readerResult struct {
 // New builds a Session. log may be nil (events are still delivered on
 // Events()). It does not connect; call Start.
 func New(cfg Config, log logging.Logger) (*Session, error) {
-	return newSession(cfg, log, newSDKDialer())
+	return newSession(cfg, log, newSDKDialer(cfg.Vertex))
 }
 
 func newSession(cfg Config, log logging.Logger, dial Dialer) (*Session, error) {
 	if len(cfg.APIKeys) == 0 {
 		return nil, ErrNoAPIKeys
+	}
+	if v := cfg.Vertex; v != nil && (v.Project == "" || v.Location == "") {
+		return nil, ErrVertexConfig
 	}
 	cfg = cfg.withDefaults()
 	if log == nil {

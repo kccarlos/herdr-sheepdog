@@ -33,7 +33,7 @@ func (s *Session) connect(ctx context.Context) (conn Conn, resumed bool, err err
 		if err == nil {
 			conn = s.record(conn, handle != "", prompt, lc)
 			s.log.Log(logSource, "voice.connect", "", map[string]any{
-				"key_index": idx, "resumed": handle != "", "dur_ms": s.now().Sub(started).Milliseconds(),
+				"key_index": idx, "resumed": handle != "", "dur_ms": s.now().Sub(started).Milliseconds(), "backend": s.cfg.Backend(),
 			})
 			// The prompt this connection runs with, so /debug can show it
 			// per session straight from the log (D10).
@@ -44,7 +44,7 @@ func (s *Session) connect(ctx context.Context) (conn Conn, resumed bool, err err
 			return nil, false, ctx.Err()
 		}
 		s.log.Log(logSource, "voice.connect_error", "", map[string]any{
-			"key_index": idx, "resumed": handle != "", "dur_ms": s.now().Sub(started).Milliseconds(), "error": err.Error(),
+			"key_index": idx, "resumed": handle != "", "dur_ms": s.now().Sub(started).Milliseconds(), "backend": s.cfg.Backend(), "error": err.Error(),
 		})
 		if !isRotatable(err) {
 			return nil, false, err

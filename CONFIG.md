@@ -2,8 +2,9 @@
 
 Configuration is read from `~/.config/sheepdog/config.toml` when it
 exists (create one with `sheepdog config init`), then overridden by
-`SHEEPDOG_*` environment variables (and, for the keys, `DEEPSEEK_API_KEY`
-and the Gemini pool `GEMINI_API_KEY`/`GEMINI_API_KEY_1`…`GEMINI_API_KEY_9`).
+`SHEEPDOG_*` environment variables (and, for the keys, `DEEPSEEK_API_KEY`,
+the Gemini pool `GEMINI_API_KEY`/`GEMINI_API_KEY_1`…`GEMINI_API_KEY_9`
+and the Vertex AI `VERTEX_API_KEY`/`VERTEX_PROJECT`/`VERTEX_LOCATION`).
 The environment always wins over the file. See `internal/config/config.go` for the
 authoritative source; this file is checked against it in
 `internal/config/doc_test.go` — a struct field without a matching entry
@@ -58,6 +59,25 @@ Voice session (plan §6).
 | `gemini.stall_after_s` | `SHEEPDOG_GEMINI_STALL_AFTER_S` | `10` | Seconds an utterance may go without any model response (tool call or audio) before `voice.stalled` is logged and the pages show "stalled". The second stall on one connection (or the second idle push that outwaits the 30 s turn timeout) recycles the connection: a reconnect with the still-valid resumption handle (`voice.recycle`), keeping the conversation. |
 | `gemini.start_sensitivity` | `SHEEPDOG_GEMINI_START_SENSITIVITY` | `low` | Live's automatic activity detection, start of speech: `low`, `high` or `default` (the server's own). `low` needs clearer speech before a turn starts, so room noise is not transcribed as words ("fishing", "Discord" were heard from noise at the default). |
 | `gemini.end_sensitivity` | `SHEEPDOG_GEMINI_END_SENSITIVITY` | `default` | End of speech: `low` (waits longer before closing the turn), `high` (closes sooner) or `default`. |
+| `gemini.backend` | `SHEEPDOG_GEMINI_BACKEND` | `aistudio` | Where the Gemini Live connection goes: `aistudio` (Google AI Studio, the `gemini.api_keys` pool) or `vertex` (Vertex AI, `[gemini.vertex]`). Only the connection differs: session, pushes, re-seed, tools and playback are the same. The `/debug` voice picker labels the backend ("Gemini Live (Vertex)") and `voice.connect` carries `backend`. The supervisor brain always uses the AI Studio pool. |
+
+### `[gemini.vertex]`
+
+Gemini Live on Vertex AI, used when `gemini.backend = "vertex"`. One key,
+no pool: a rate limit (429 / `RESOURCE_EXHAUSTED`) logs
+`voice.rate_limited`, waits (the server's retry delay, else 30 s) and
+retries the same key, never a hot retry. The Live socket is
+`wss://{location}-aiplatform.googleapis.com/ws/google.cloud.aiplatform.v1beta1.LlmBidiService/BidiGenerateContent`
+with the key in an `x-goog-api-key` header; `gemini.model` stays the bare
+id (`gemini-3.8-live`) and the daemon names it
+`projects/{project}/locations/{location}/publishers/google/models/{model}`
+in the setup. See `docs/research/vertex-live-spike-2026-09-29.md`.
+
+| Key | Env override | Default | Meaning |
+|---|---|---|---|
+| `gemini.vertex.api_key` | `VERTEX_API_KEY` | `""` | The Vertex AI API key (restricted to `aiplatform.googleapis.com`, bound to a service account). Normally set via the environment or `--env-file`; an empty env value does not clear a file value. Never logged: `config show` prints `set`/`unset`. |
+| `gemini.vertex.project` | `VERTEX_PROJECT` | `""` | The Google Cloud project id. |
+| `gemini.vertex.location` | `VERTEX_LOCATION` | `us-central1` | The Vertex AI location. `gemini-3.8-live` is served from `us-central1` and the `us` multi-region, not from `global` (the setup is refused with close 1008 "Publisher model … was not found"). |
 
 ## `[voice]`
 

@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kccarlos/herdr-sheepdog/internal/app"
 	"github.com/kccarlos/herdr-sheepdog/internal/config"
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
@@ -34,7 +35,8 @@ func printVoiceTestUsage(w io.Writer) {
 	fprintln(w, "frames), with the five voice tools stubbed by echo handlers, and writes every")
 	fprintln(w, "24 kHz audio chunk the model returns to a WAV file. Session events are printed")
 	fprintln(w, "to stderr as JSON lines; a summary goes to stdout on exit. Needs GEMINI_API_KEY")
-	fprintln(w, "(or GEMINI_API_KEY_1..9, or gemini.api_keys in the config).")
+	fprintln(w, "(or GEMINI_API_KEY_1..9, or gemini.api_keys in the config); with gemini.backend")
+	fprintln(w, "= \"vertex\" (SHEEPDOG_GEMINI_BACKEND=vertex) VERTEX_API_KEY and VERTEX_PROJECT instead.")
 	fprintln(w, "")
 	fprintln(w, "flags:")
 	fprintln(w, "  --config PATH       config file (default ~/.config/sheepdog/config.toml)")
@@ -115,8 +117,9 @@ func runVoiceTest(ctx context.Context, args []string, stdout, stderr io.Writer) 
 		fprintf(stderr, "sheepdog: %v\n", err)
 		return 1
 	}
-	if len(cfg.Gemini.APIKeys) == 0 {
-		fprintln(stderr, "sheepdog voice-test: no Gemini API key (set GEMINI_API_KEY or gemini.api_keys)")
+	liveKeys, vertex, missing := app.GeminiLive(cfg.Gemini)
+	if missing != "" {
+		fprintf(stderr, "sheepdog voice-test: no Gemini API key (backend %s: set %s)\n", cfg.Gemini.Backend, missing)
 		return 2
 	}
 
@@ -151,7 +154,8 @@ func runVoiceTest(ctx context.Context, args []string, stdout, stderr io.Writer) 
 	}
 	logger := logging.NewJSONLLogger(stderr)
 	sess, err := gemini.New(gemini.Config{
-		APIKeys: cfg.Gemini.APIKeys,
+		APIKeys: liveKeys,
+		Vertex:  vertex,
 		Model:   cfg.Gemini.Model,
 		Voice:   cfg.Gemini.Voice,
 		Aliases: aliases,

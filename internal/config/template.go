@@ -42,6 +42,14 @@ func Template() string {
 # stall_after_s = %[18]d   # no model response this long after an utterance logs voice.stalled; twice recycles the connection
 # start_sensitivity = "low"   # Live speech-start detection: "low" | "high" | "default"; low keeps room noise from being transcribed
 # end_sensitivity = "default"   # Live speech-end detection: "low" | "high" | "default"
+# backend = "aistudio"   # "aistudio" (Google AI Studio, api_keys) | "vertex" (Vertex AI, [gemini.vertex])
+
+[gemini.vertex]
+# Used when backend = "vertex". api_key and project are normally left
+# unset here: VERTEX_API_KEY and VERTEX_PROJECT are read from the environment.
+# api_key = ""
+# project = ""
+# location = "us-central1"   # the Live model is not served from "global"
 
 [voice]
 # name = %[37]q   # what the dog calls itself, substituted into the voice prompt as {name}
