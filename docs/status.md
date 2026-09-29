@@ -1,4 +1,4 @@
-# Status — 2026-09-25
+# Status — 2026-09-29
 
 Living handoff note: what is on `main`, what is verified how, and what is
 open. Update it whenever a PR lands or a live check is done; it is what a
@@ -10,13 +10,25 @@ original plan and older run reports are in [`history/`](history/).
 
 ## Where main is
 
-`main` = `bd1a15f` (#73), 73 PRs, every one squash-merged on green CI.
+`main` = `69b61ab` (#75), 75 PRs, every one squash-merged on green CI.
 The v1 plan (WP0–WP7) and the whole 2026-09-18 redesign
 ([`history/issues-2026-09-18.md`](history/issues-2026-09-18.md), PRs 1–6
 of its work order) are merged; so is everything since, including all of
 iteration 2's phase-1 work packages (WP1–WP5, #54/#55/#57/#58/#59, plus
 the follow-on caps in #60), WP8 (dive deep, #68/#69) and WP9 (timelines,
 #71/#72).
+
+**GitHub Actions is blocked by billing on this account** (since
+2026-09-27: "recent account payments have failed or your spending limit
+needs to be increased"). The release workflow
+(`.github/workflows/release.yml`) still runs — it is ubuntu-only,
+cross-compiling both binaries with `CGO_ENABLED=0` — so releases are
+unaffected; the darwin binary is then signed and notarized locally with
+`make release-sign` (#75, [`signing.md`](signing.md)). Both this repo and
+the iOS companion repo are private, and private macOS runners bill at ten
+times the Linux rate on top of being unavailable right now, so neither
+repo has macOS CI; the iOS repo uses Xcode Cloud instead (its own compute,
+unaffected by this account's GitHub Actions billing).
 
 | Area | State |
 |---|---|
@@ -42,7 +54,7 @@ the follow-on caps in #60), WP8 (dive deep, #68/#69) and WP9 (timelines,
 | Client playback reports (`started`/`drained`/`flushed`, `docs/ws-contract.md`); `Speaking()` follows real client playback, not generation; a barge-in cuts the brain's "Assistant said" line to what actually played; a client speech detector holds pushes while the shepherd is talking | done (#70) |
 | Timeline gaps (`docs/timelines.md` WP9): Gemini reconnect after a 1011 re-seeds a recap of what was said instead of only the silent briefing; the push queue lets an owed line overtake idle news instead of stalling behind it; provider-switch and failed-send drops are logged (`voice.push_carried`/`push_dropped`), never silent; the echo window anchors to the client's playback end, not `turnComplete` | done (#72) |
 | GPT-Live input is paced at real wall-clock time while the client is silent (measured `realtime_ratio` ≈1.0 on a live 42 s run, was 0.74–0.87×); playback start buffer 1200 ms → 400 ms; the browser warns when echo cancellation is off | done (#73) |
-| iOS companion app (separate repo, `herdr-sheepdog-ios`, the `/ws` voice contract): playback reports and the client speech detector (#14); Flock pane with per-agent state and answerable prompts, brain-reply cards, held/released/dropped push cards, typed input (#17); Health pane (daemon/voice/brain/pushes/audio/recent-problems), echo-cancellation status, brain and voice model pickers, seven `SessionCore` glitch fixes (#18) | started |
+| iOS companion app (separate repo, `herdr-sheepdog-ios`, the `/ws` voice contract): playback reports and the client speech detector (#14); Flock pane with per-agent state and answerable prompts, brain-reply cards, held/released/dropped push cards, typed input (#17); Health pane (daemon/voice/brain/pushes/audio/recent-problems), echo-cancellation status, brain and voice model pickers, seven `SessionCore` glitch fixes (#18); Xcode Cloud CI (PR + TestFlight workflows), TestFlight build 0.1.0 (2) available in the internal **Me** group (2026-09-28) | started |
 
 The ear contract (iteration 2, WP1): the brain's reply is a headline
 (`spoken`, capped in code at two sentences and thirty words with no
