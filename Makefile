@@ -14,8 +14,11 @@ build:
 	go build -ldflags "$(LDFLAGS)" -o bin/$(BINARY) $(CMD)
 
 # Copies the already-built binary to ~/.local/bin/ (expected on PATH).
+# Unlinks first: cp over an existing file keeps the inode, and macOS then
+# SIGKILLs the new binary because its cached code signature no longer matches.
 install: build
 	mkdir -p $(HOME)/.local/bin
+	rm -f $(HOME)/.local/bin/$(BINARY)
 	cp bin/$(BINARY) $(HOME)/.local/bin/$(BINARY)
 
 # A daemon you can poke from /debug without a mic, herdr, or a Gemini key.
