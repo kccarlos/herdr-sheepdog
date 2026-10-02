@@ -57,7 +57,7 @@ scenarios (docs/iteration-2.md, "Rules for every change").
 | ingestion outside turns | `Heard`, `Said`, `SaidCut`, `Echo`, `Pushed`, `WorkerEvent`, `PromiseEvent`, in arrival order (`brain.go`); rendered in `modelOrder` (`assemble.go`) | — |
 | model switch | `SetModel` changes the next turn; a running turn keeps its snapshot | `brain.model_changed` |
 | reset / closed | `Reset` takes the lock with CEO priority, then starts a new segment; `Close` refuses new turns (`ErrClosed`), cancels the ones in flight and waits | `brain.reset` |
-| 429 | Gemini: rotate to the next key per request; DeepSeek: one key, fails the call (`model.go`, `openaicompat.go`) | `brain.rate_limited` |
+| 429 | Gemini: rotate to the next key per request; DeepSeek and Vertex: one key, fails the call (`model.go`, `openaicompat.go`) | `brain.rate_limited` |
 
 ### 1.4 Voice session — `internal/voice` (behind `switch.go` `Switcher`)
 

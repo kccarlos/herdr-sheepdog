@@ -104,7 +104,7 @@ func Template() string {
 
 [brain]
 # enabled = %[21]t   # the stateful supervisor brain behind to_supervisor and the announcements; serve --brain=off overrides
-# provider = %[36]q   # "gemini" | "deepseek": the provider the brain starts on; the /debug picker switches at runtime
+# provider = %[36]q   # "gemini" | "deepseek" | "vertex" (Gemini on Vertex AI with [gemini.vertex]): the provider the brain starts on; the /debug picker switches at runtime
 # model = %[22]q   # a function-calling model of that provider
 # max_steps = %[23]d   # model calls per turn before the daemon answers for itself
 # utterance_timeout_s = %[24]d   # budget of one turn over your relayed words (tools included)

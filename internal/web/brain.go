@@ -189,7 +189,7 @@ type ProviderInfo struct {
 
 // providerLabels are the display names of the known provider ids; an
 // unknown id is shown as itself.
-var providerLabels = map[string]string{brain.ProviderGemini: "Gemini", brain.ProviderDeepSeek: "DeepSeek"}
+var providerLabels = map[string]string{brain.ProviderGemini: "Gemini", brain.ProviderDeepSeek: "DeepSeek", brain.ProviderVertex: "Gemini (Vertex)"}
 
 // ProviderLabel returns the display name of a provider id.
 func ProviderLabel(id string) string {

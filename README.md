@@ -166,8 +166,9 @@ say "start over" (then "yes, start over") works the same way by voice.
 
 Behind `to_supervisor` sits the brain (the dog's thinking half) of [`docs/roles.md`](docs/roles.md):
 a stateful agent (`internal/brain`, `gemini-3.5-flash` with function
-calling by default, or DeepSeek's `deepseek-flash` with a
-`DEEPSEEK_API_KEY`; the `/debug` header's provider and model picker
+calling by default, DeepSeek's `deepseek-flash` with a
+`DEEPSEEK_API_KEY`, or the same Gemini models on Vertex AI with
+`VERTEX_API_KEY` and `VERTEX_PROJECT`; the `/debug` header's provider and model picker
 switches it at runtime from each provider's discovered model list, and
 the choice survives a restart) that keeps one transcript per daemon run — your verbatim words,
 what the voice said, every push and worker state change, its own tool

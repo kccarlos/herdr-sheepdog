@@ -59,7 +59,7 @@ Voice session (plan §6).
 | `gemini.stall_after_s` | `SHEEPDOG_GEMINI_STALL_AFTER_S` | `10` | Seconds an utterance may go without any model response (tool call or audio) before `voice.stalled` is logged and the pages show "stalled". The second stall on one connection (or the second idle push that outwaits the 30 s turn timeout) recycles the connection: a reconnect with the still-valid resumption handle (`voice.recycle`), keeping the conversation. |
 | `gemini.start_sensitivity` | `SHEEPDOG_GEMINI_START_SENSITIVITY` | `low` | Live's automatic activity detection, start of speech: `low`, `high` or `default` (the server's own). `low` needs clearer speech before a turn starts, so room noise is not transcribed as words ("fishing", "Discord" were heard from noise at the default). |
 | `gemini.end_sensitivity` | `SHEEPDOG_GEMINI_END_SENSITIVITY` | `default` | End of speech: `low` (waits longer before closing the turn), `high` (closes sooner) or `default`. |
-| `gemini.backend` | `SHEEPDOG_GEMINI_BACKEND` | `aistudio` | Where the Gemini Live connection goes: `aistudio` (Google AI Studio, the `gemini.api_keys` pool) or `vertex` (Vertex AI, `[gemini.vertex]`). Only the connection differs: session, pushes, re-seed, tools and playback are the same. The `/debug` voice picker labels the backend ("Gemini Live (Vertex)") and `voice.connect` carries `backend`. The supervisor brain always uses the AI Studio pool. |
+| `gemini.backend` | `SHEEPDOG_GEMINI_BACKEND` | `aistudio` | Where the Gemini Live connection goes: `aistudio` (Google AI Studio, the `gemini.api_keys` pool) or `vertex` (Vertex AI, `[gemini.vertex]`). Only the connection differs: session, pushes, re-seed, tools and playback are the same. The `/debug` voice picker labels the backend ("Gemini Live (Vertex)") and `voice.connect` carries `backend`. The supervisor brain uses the AI Studio pool as provider `gemini`; with `[gemini.vertex]` key and project set it can also run on Vertex as provider `vertex`, whatever this says (`[brain]`). |
 
 ### `[gemini.vertex]`
 
@@ -72,6 +72,25 @@ with the key in an `x-goog-api-key` header; `gemini.model` stays the bare
 id (`gemini-3.8-live`) and the daemon names it
 `projects/{project}/locations/{location}/publishers/google/models/{model}`
 in the setup. See `docs/research/vertex-live-spike-2026-09-29.md`.
+
+The same key and project also back the supervisor brain's `vertex`
+provider ("Gemini (Vertex)" in the `/debug` picker), whatever
+`gemini.backend` says: with both set it is registered next to `gemini`
+and `deepseek`, and `sheepdog brain-test --provider vertex` runs a turn on
+it. The brain calls the native `generateContent`
+(`https://aiplatform.googleapis.com/v1beta1/projects/{project}/locations/global/publishers/google/models/{model}:generateContent`,
+key in `x-goog-api-key`) at location **`global`, always**:
+`gemini.vertex.location` is for the Live model only. Checked live on
+2026-10-01, the text models are served at `global` and "not found" at
+`us-central1`, while `gemini-3.8-live` is the other way round. It is the
+same adapter as `gemini` (bare model ids such as `gemini-3.8-flash`;
+thought signatures replayed with the model's tool calls), one key: a 429
+logs `brain.rate_limited {provider: "vertex"}` and fails that call, no
+retry. Vertex's model listing refuses an API key, so the picker shows a
+fixed list of the models that answered at `global` on 2026-10-01:
+`gemini-3.8-flash`, `gemini-3.5-flash`, `gemini-3.5-flash-lite`
+(`gemini-3.8-pro`, `gemini-3.5-pro` and `gemini-3.8-flash-lite` did not).
+Paid per token on the project's billing account.
 
 | Key | Env override | Default | Meaning |
 |---|---|---|---|
@@ -238,14 +257,15 @@ shepherd says), the stop procedure's closing line and the workers'
 announcements, that reasons with tools
 (`read_screen`, `run_cli`, `list_agents`, `recall`) and acts with
 `prompt`, `send_keys`, `interrupt` over a function-calling model — Gemini
-(the key pool) or DeepSeek (`[deepseek]`), switchable at runtime —
+(the key pool), DeepSeek (`[deepseek]`) or Gemini on Vertex AI
+(`[gemini.vertex]`), switchable at runtime —
 keeping one transcript per daemon run at `<data_dir>/brain/<run-id>.jsonl`.
 When it errors or runs out of budget, the daemon speaks its own code
 sentence (a parsed prompt, "<alias> finished.") or reports the roster. Its provider and model can be switched while the
 daemon runs, from the `/debug` header's model picker (the provider
 select lists every provider, a keyless one greyed out with the reason;
 the model select shows that provider's discovered list — Gemini's model
-list, DeepSeek's `GET /models` — and the switch happens when a model is
+list, DeepSeek's `GET /models`, Vertex's fixed list — and the switch happens when a model is
 picked) or `PUT /api/brain/model {"provider": "deepseek", "model":
 "deepseek-flash"}`: the switch takes effect at the next turn (a turn in
 flight finishes on the provider and model it started with), is logged
@@ -274,7 +294,7 @@ announce wait elapse.
 | Key | Env override | Default | Meaning |
 |---|---|---|---|
 | `brain.enabled` | `SHEEPDOG_BRAIN_ENABLED` | `true` | Route the shepherd's words (`to_supervisor`) and the workers' events through the brain (`serve --brain` overrides). |
-| `brain.provider` | `SHEEPDOG_BRAIN_PROVIDER` | `gemini` | The provider the brain starts on: `gemini` (the key pool, rotating on a rate limit) or `deepseek` (`[deepseek]`, one key). Every provider with a key is registered regardless, so the picker can switch to the other at runtime. The initial value only: the pair picked at runtime is kept in the state file's `session.brain_provider` / `session.brain_model` and wins over this on restart. Set `brain.model` to a model of this provider (`deepseek-flash` with `deepseek`; the default `gemini-3.5-flash` is Gemini's, and a mismatch shows as a `brain.step` error at the first turn). |
+| `brain.provider` | `SHEEPDOG_BRAIN_PROVIDER` | `gemini` | The provider the brain starts on: `gemini` (the key pool, rotating on a rate limit), `deepseek` (`[deepseek]`, one key) or `vertex` (Gemini on Vertex AI with the `[gemini.vertex]` key and project, location `global`; same model ids as `gemini`). Every provider with a key is registered regardless, so the picker can switch to the other at runtime. The initial value only: the pair picked at runtime is kept in the state file's `session.brain_provider` / `session.brain_model` and wins over this on restart. Set `brain.model` to a model of this provider (`deepseek-flash` with `deepseek`; the default `gemini-3.5-flash` is Gemini's, and a mismatch shows as a `brain.step` error at the first turn). |
 | `brain.model` | `SHEEPDOG_BRAIN_MODEL` | `gemini-3.5-flash` | The function-calling model the brain starts on, a model of `brain.provider`. The initial value only: a model picked at runtime (`/debug`, `PUT /api/brain/model`) is kept in the state file's `session.brain_model` and wins over this on restart. |
 | `brain.max_steps` | `SHEEPDOG_BRAIN_MAX_STEPS` | `6` | Model calls one turn may make (each tool round is one); beyond it the turn falls back. |
 | `brain.utterance_timeout_s` | `SHEEPDOG_BRAIN_UTTERANCE_TIMEOUT_S` | `12` | Wall-clock budget of one utterance turn — the brain's turn over the shepherd's relayed words, which may be a question or an instruction — and of an investigation's delivery turn, tool rounds included. When less than `brain.step_reserve_s` of it remains after a tool round (or at the last step) the next model call is answer-only (tools disabled, "time is up") and may run up to `brain.final_grace_s` past the budget; only then does the daemon answer for itself. Formerly `brain.propose_timeout_s` (still accepted, see "Deprecated keys"). |
