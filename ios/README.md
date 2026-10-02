@@ -32,6 +32,10 @@ page at `/voice` does (`docs/ws-contract.md`): PCM16 mono, 16 kHz up,
 |---|---|
 | ![New conversation confirmation](docs/screenshots/26-new-conversation-confirm.png) | ![New conversation divider](docs/screenshots/27-new-conversation-divider.png) |
 
+| An approval, never truncated | The flock: running agents | Settings ▸ Models | Dark mode |
+|---|---|---|---|
+| ![Approval card](docs/screenshots/review-light-conversation-approval.png) | ![Flock pane](docs/screenshots/review-light-flock.png) | ![Models](docs/screenshots/review-light-models.png) | ![Dark](docs/screenshots/review-dark-conversation-approval.png) |
+
 | Just talk | Muted | Voice and microphone | Voice detection |
 |---|---|---|---|
 | ![Coach mark](docs/screenshots/19-coach-mark.png) | ![Muted](docs/screenshots/21-mic-muted.png) | ![Settings: voice provider and microphone](docs/screenshots/22-settings-voice-microphone.png) | ![Settings: voice detection](docs/screenshots/23-settings-voice-detection.png) |
@@ -122,13 +126,26 @@ non-goal), so keep this to a network you trust — your LAN, or Tailscale.
   Spectrum and opens iOS's panel; in a noisy room, choose Voice Isolation.
 - **No microphone signal** is said, not silently gated: 3 s of digital zero
   while unmuted and the status line tells you, and capture restarts once.
-- **Voice provider.** Against a daemon that offers more than one (Gemini
-  Live, GPT-Live), Settings ▸ Voice switches between them; GPT-Live is
-  marked as billed per minute.
-- **The flock**, from `/api/state` and the `/events` stream: one chip per
-  agent with a state dot, the pending question as its subtitle, and a
-  highlight when it is blocked. Tap one for its task, its last result and
-  the question it is waiting on.
+- **Models.** Settings ▸ Models picks the voice provider (Gemini Live,
+  GPT-Live — marked as billed per minute) and the brain's provider and
+  model. It applies at once on the daemon, outside Settings' Save/Cancel;
+  Health shows both read-only with "Change in Settings ›".
+- **The flock**, from `/api/state` and the `/events` stream: the running
+  agents (blocked first, then working, then idle and done), one chip each
+  with a state dot and a short line — "Needs approval · git push…" for a
+  blocked one. Agents that are not running (unknown, exited) fold into
+  "Not running (N)" on the Flock pane. The Flock tab carries an amber count
+  of the agents waiting on you. Tasks, questions, the worker's last message
+  and brain replies render their markdown (bold, code, lists, fenced code;
+  headings as bold body text).
+- **Notifications.** After the first successful connection the app asks to
+  send notifications and registers its APNs token with the daemon
+  (`POST /api/push/register`, herdr-sheepdog `docs/push.md`). When an agent
+  needs you, a time-sensitive notification arrives even with the app
+  closed; an approval can be answered from it (Approve / Decline, behind
+  the passcode), and a tap opens that agent's Flock card. Not shown while
+  the app is open and connected. Settings ▸ Models shows whether this
+  phone is registered and whether the daemon can send.
 - **The conversation, with its history.** The app opens on the last
   conversation at once — it keeps the newest 300 messages per daemon in a
   small file on the phone (no token in it) — then loads the daemon's own
@@ -142,7 +159,8 @@ non-goal), so keep this to a network you trust — your LAN, or Tailscale.
   local copy.
 - **Approve by tap.** When a worker stops at an approval prompt, a card
   pinned above the controls shows who is asking, the summary in plain words,
-  the command, and one button per option — the prompt's default prominent,
+  the command (three lines, tap for all), and one button per option, never
+  truncated (the card scrolls inside past half the screen) — the prompt's default prominent,
   the "No…" option in red. A tap answers through
   `POST /api/pending/answer`, the same rail as a spoken answer; the card
   shows the daemon's reply ("You approved — Yes, proceed · by tap"), or
@@ -158,9 +176,11 @@ non-goal), so keep this to a network you trust — your LAN, or Tailscale.
 - **Nothing missed across drops.** The `/events` stream resumes from the
   last event id (`Last-Event-ID`, and `?since=` as the fallback), across
   reconnects and relaunches; replayed events change nothing twice.
-- **A compact voice bar** — Mute, the orb, End (✕) — 72 pt at the bottom,
-  with a small status line above it, so the conversation and the approval
-  card get the rest of the screen. The orb says what is happening —
+- **A compact voice bar** — Mute, the orb, the status line, Type and End
+  (a quiet grey ✕) in one full-width row at the bottom, growing with the
+  text size — so the conversation and the approval card get the rest of the
+  screen. A new question with options plays its own haptic pattern and a
+  short chime (through the voice session, so AirPods hear it). The orb says what is happening —
   listening, quiet, thinking, speaking, muted, stalled, reconnecting — with
   VoiceOver labels for every state; it never pretends, saying so against a
   daemon started with `--voice=off`. Its tap does the one thing that makes
@@ -197,10 +217,9 @@ non-goal), so keep this to a network you trust — your LAN, or Tailscale.
 ## What v1 does not do
 
 - No text input: this is a voice client. Use `/debug` on the Mac to type.
-- No chattiness control, no supervisor-model picker, no event log viewer.
-- No push notifications: the app has to be open (or holding the audio
-  session) to hear a push.
-- Nothing has run on a real device yet — see [`docs/status.md`](docs/status.md).
+- No event log viewer.
+- Voice runs on a real iPhone (TestFlight); what is and is not verified on a
+  device is in [`docs/status.md`](docs/status.md).
 
 ## Layout
 

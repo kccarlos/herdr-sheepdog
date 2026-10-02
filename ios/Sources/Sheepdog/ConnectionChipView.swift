@@ -18,10 +18,12 @@ struct ConnectionChipView: View {
                     .fill(color)
                     .frame(width: 8, height: 8)
                 Text(model.connectionChip.word)
-                    .font(.caption2)
+                    .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
         }
         .accessibilityIdentifier("chip.connection")
         .accessibilityLabel("Connection: \(model.connectionChip.word)")

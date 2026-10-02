@@ -46,9 +46,15 @@ public struct VoiceBarModel: Equatable, Sendable {
             orbAction = .connect
             muteAvailability = .hidden
             endVisible = false
-        case .connecting, .reconnecting, .voiceOff:
+        case .connecting, .reconnecting:
             orbAction = .none
             muteAvailability = .disabled
+            endVisible = true
+        case .voiceOff, .noMicrophone:
+            // Nothing can hear the microphone: no mic button next to an orb
+            // that already says so.
+            orbAction = .none
+            muteAvailability = .hidden
             endVisible = true
         case .audioPaused:
             orbAction = .resume
@@ -68,7 +74,7 @@ public struct VoiceBarModel: Equatable, Sendable {
             switch state {
             case .idle, .listening, .silent, .muted, .thinking, .stalled, .speaking:
                 orbAction = .holdToTalk
-            case .disconnected, .connecting, .reconnecting, .voiceOff, .audioPaused:
+            case .disconnected, .connecting, .reconnecting, .voiceOff, .audioPaused, .noMicrophone:
                 break
             }
         }
@@ -84,6 +90,8 @@ public struct VoiceBarModel: Equatable, Sendable {
         if noSignal, live.contains(state) {
             return "No microphone signal — check the mic"
         }
+        // First run: the orb alone does not say it is the Connect button.
+        if state == .disconnected { return "Tap the orb to connect" }
         switch talkMode {
         case .openMic:
             switch state {
@@ -97,7 +105,7 @@ public struct VoiceBarModel: Equatable, Sendable {
                 return holding ? "Talking — release to send" : "Hold the orb to talk"
             case .thinking, .stalled, .speaking:
                 return holding ? "Talking — release to send" : state.title
-            case .disconnected, .connecting, .reconnecting, .voiceOff, .audioPaused:
+            case .disconnected, .connecting, .reconnecting, .voiceOff, .audioPaused, .noMicrophone:
                 return state.title
             }
         }

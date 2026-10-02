@@ -69,6 +69,9 @@ public struct SessionCore: Equatable, Sendable {
         public var gateClosed = false
         /// The microphone delivers only digital zero while unmuted.
         public var noSignal = false
+        /// The microphone was denied or would not start this session: the
+        /// orb says "No microphone" instead of pretending to listen.
+        public var unavailable = false
         /// The app's speech detector is open — it hears the shepherd — as
         /// last told to the daemon (`{"type":"speaking"}`). Opens with the
         /// gate on speech (or a hold), closes with it, and is never open
@@ -130,7 +133,8 @@ public struct SessionCore: Equatable, Sendable {
             gateClosed: mic.gateClosed,
             speaking: playback.heldSpeaking,
             thinking: thinkingExpiry != nil,
-            audioPaused: suspension.pausedByIOS
+            audioPaused: suspension.pausedByIOS,
+            micUnavailable: mic.unavailable
         )
     }
 
@@ -200,6 +204,7 @@ public struct SessionCore: Equatable, Sendable {
             if !micGranted {
                 // The session is still worth having: status and transcripts
                 // work without a microphone.
+                mic.unavailable = true
                 effects.append(.showBanner(.microphoneDenied))
             }
             openSocket(&effects)
@@ -352,6 +357,7 @@ public struct SessionCore: Equatable, Sendable {
             connection.socketGateClosed = closed
 
         case let .audioStarted(gateClosed):
+            mic.unavailable = false
             // Hold-to-talk starts closed without a transition; tell the
             // daemon, which treats a new client as ungated.
             if gateClosed != mic.gateClosed {
@@ -364,6 +370,7 @@ public struct SessionCore: Equatable, Sendable {
             if gateClosed { setShepherdSpeaking(false, &effects) }
 
         case let .audioStartFailed(message):
+            mic.unavailable = true
             effects.append(.showBanner(.microphoneFailed(message)))
 
         case let .audioStopped(message):
@@ -480,6 +487,7 @@ public struct SessionCore: Equatable, Sendable {
         mic.gateClosed = false
         mic.holding = false
         mic.noSignal = false
+        mic.unavailable = false
         quietSpeaking()
         playback.speaking = false
         playback.hold.reset()
@@ -561,7 +569,10 @@ public struct SessionCore: Equatable, Sendable {
         if voice.status == .closed {
             effects.append(.stopAudio)
             setShepherdSpeaking(false, &effects)
-            if !voice.saidVoiceIsOff {
+            // Being replaced is the banner's to explain ("Another client took
+            // the voice session", with Take it back); a notice as well would
+            // say it twice.
+            if !voice.saidVoiceIsOff, voice.closedReason != "replaced" {
                 voice.saidVoiceIsOff = true
                 let why = voice.closedReason == "voice_off"
                     ? "Voice is off on the daemon (`--voice=off`), so it cannot hear the microphone. Status, transcripts and pushes still work."

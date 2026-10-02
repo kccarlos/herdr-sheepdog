@@ -4,6 +4,11 @@ import Foundation
 import SheepdogKit
 import SwiftUI
 
+/// The screens Settings can push.
+enum SettingsRoute: Hashable {
+    case models
+}
+
 /// Everything the main screen shows, in one place.
 ///
 /// It owns the socket, the audio engine, the event stream and the
@@ -46,7 +51,14 @@ final class SessionViewModel: ObservableObject {
     /// The one-time caption under the controls the first time Mute is used.
     @Published private(set) var showMuteHint = false
     @Published private(set) var agents: [Agent] = []
-    private(set) var pendingAction: PendingAction?
+    /// The agents as the screen groups them: running (blocked, working,
+    /// idle and done) and the rest.
+    var flock: Flock { Flock(agents) }
+    /// Which pane the main screen shows; a notification tap switches it.
+    @Published var pane: MainPane = .conversation
+    /// The agent the Flock pane should scroll to (a notification tap).
+    @Published var focusedAgentPaneID: String?
+    @Published private(set) var pendingAction: PendingAction?
     /// Four sources feed `resolvedVoiceProvider`; each tells the audio
     /// engine's jitter-buffer profile explicitly when it changes, rather
     /// than re-deriving and re-setting it on every event regardless of
@@ -126,6 +138,31 @@ final class SessionViewModel: ObservableObject {
     }
     @Published private(set) var stateVoiceModel: String?
     @Published var showSettings = false
+    /// Where Settings opens: nil for its top, `.models` from Health's
+    /// "Change in Settings ›". Consumed (reset) by SettingsView.
+    @Published var settingsRoute: SettingsRoute?
+
+    /// Health's "Change in Settings ›": Settings, pushed to Models.
+    func openModels() {
+        settingsRoute = .models
+        showSettings = true
+    }
+
+    /// "Gemini · gemini-3.5-flash": the brain as the catalog names it, else
+    /// as `/api/state` reports it.
+    var brainDisplay: String? {
+        if let models = brainModels, !models.model.isEmpty {
+            let provider = models.providers.first { $0.id == models.provider }?.displayName ?? models.provider
+            return [provider, models.model].filter { !$0.isEmpty }.joined(separator: " · ")
+        }
+        return brain?.display
+    }
+
+    /// The Models row's one-line value in Settings.
+    var modelsSummary: String {
+        let parts = [voiceProviderDisplay, brainDisplay].compactMap { $0 }
+        return parts.isEmpty ? "—" : parts.joined(separator: ", ")
+    }
 
     var voiceName: String { hello?.displayName ?? "Sheepdog" }
 
@@ -153,6 +190,9 @@ final class SessionViewModel: ObservableObject {
         return VoiceProviders.display(provider: option?.displayName ?? id, model: model)
     }
     var daemonVersion: String? { hello?.version }
+    /// The daemon connection is up: notifications stay quiet in the
+    /// foreground, the screen already shows what they would say.
+    var sessionIsLive: Bool { connectionChip.status == .connected }
     var endpointDisplay: String { settings.endpoint?.display ?? "not set" }
     var isConfigured: Bool { settings.endpoint != nil }
 
@@ -234,6 +274,7 @@ final class SessionViewModel: ObservableObject {
     /// away is on the daemon.
     func becameActive() {
         send(.scenePhase(.active))
+        Task { await PushCoordinator.shared.refreshAuthorization() }
         guard isConfigured, settings.hasBeenConfigured else { return }
         Task {
             await refreshState(quiet: true)
@@ -260,6 +301,7 @@ final class SessionViewModel: ObservableObject {
     /// Settings were saved: repoint everything without losing the conversation.
     func endpointChanged() {
         guard let endpoint = settings.endpoint else { return }
+        PushCoordinator.shared.endpointChanged(from: client.endpoint)
         let sameDaemon = ConversationCache.key(for: endpoint) == ConversationCache.key(for: client.endpoint)
         if !sameDaemon { saveCache(now: true) }
         client.update(endpoint: endpoint)
@@ -347,6 +389,9 @@ final class SessionViewModel: ObservableObject {
     }
 
     static let muteHint = "Mute stops your microphone; Sheepdog can still talk."
+    /// The one-time caption in the bar's status line: the hint, short
+    /// enough for two lines beside the orb.
+    var muteCaption: String { "Mic off — \(voiceName) can still talk" }
     private static let muteHintShownKey = "hint.mute.shown"
     private static let coachShownKey = "hint.coach.shown"
     private static let micTipShownKey = "hint.micmode.shown"
@@ -555,6 +600,12 @@ final class SessionViewModel: ObservableObject {
         switch event {
         case .opened:
             send(.socketOpened)
+            #if DEBUG
+            // The UI tests start configured; a permission alert would sit
+            // on top of everything they tap.
+            if DebugLaunch.address != nil || DebugLaunch.resetState, !DebugLaunch.askPush { break }
+            #endif
+            PushCoordinator.shared.sessionConnected()
         case let .control(message):
             handle(control: message)
         case let .audio(data):
@@ -564,8 +615,33 @@ final class SessionViewModel: ObservableObject {
             audio.enqueue(data)
         case let .closed(reason, retrying):
             send(.socketClosed(reason: reason, willRetry: retrying))
+            if retrying { probeTokenAfterSocketFailure() }
         case let .failed(error, retrying):
             send(.socketFailed(error, willRetry: retrying))
+            if retrying { probeTokenAfterSocketFailure() }
+        }
+    }
+
+    private var tokenProbe: Task<Void, Never>?
+
+    /// A 401 on the WebSocket upgrade is not readable from
+    /// `URLSessionWebSocketTask`: a token revoked mid-session looked like
+    /// "could not connect" forever. After a failed reconnect, ask
+    /// `/api/state` (where a 401 is plain) and end the session with "the
+    /// token was refused" if that is what it is. One probe at a time.
+    private func probeTokenAfterSocketFailure() {
+        guard tokenProbe == nil, core.connection.wantsConnection else { return }
+        tokenProbe = Task { [weak self] in
+            guard let self else { return }
+            defer { self.tokenProbe = nil }
+            do {
+                _ = try await self.client.state()
+            } catch DaemonError.unauthorized {
+                self.send(.tokenRefused(endpoint: self.endpointDisplay))
+            } catch {
+                // Unreachable or anything else: the reconnect loop's own
+                // words already say it.
+            }
         }
     }
 
@@ -800,8 +876,7 @@ final class SessionViewModel: ObservableObject {
         switch event.type {
         case "voice.push":
             guard let text = event.string("text"), !text.isEmpty, event.string("urgency") != "silent" else { break }
-            let needsUser = event.bool("needs_user") ?? (event.string("urgency") == "interrupt")
-            if isFresh(event) { Haptics.push(needsUser: needsUser) }
+            if isFresh(event) { Haptics.push() }
             refreshSoon()
         case "voice.tool_call":
             send(.toolCall)
@@ -809,7 +884,12 @@ final class SessionViewModel: ObservableObject {
             send(.toolResult)
         case "pending.created":
             if let pending = PendingAction(event: event) {
-                applyApproval(approvalFlow.present(pending), haptic: isFresh(event))
+                applyApproval(approvalFlow.present(pending))
+                // The needs-you cue: a new open question with options, once
+                // per question, and only when it is news (not a replay).
+                if pending.isAnswerPrompt, isFresh(event), cuedPendingIDs.insert(pending.id).inserted {
+                    Haptics.needsYou()
+                }
             }
             refreshSoon()
         case "conversation.reset":
@@ -824,7 +904,7 @@ final class SessionViewModel: ObservableObject {
             let resolution = ConversationItem.Resolution(rawValue: String(event.type.dropFirst("pending.".count))) ?? .unknown
             let id = event.type == "pending.replaced" ? event.string("old_id") : event.string("id")
             if let id {
-                applyApproval(approvalFlow.resolved(pendingID: id, as: resolution, answer: event.string("answer"), via: event.string("via")), haptic: false)
+                applyApproval(approvalFlow.resolved(pendingID: id, as: resolution, answer: event.string("answer"), via: event.string("via")))
             }
             refreshSoon()
         default:
@@ -915,13 +995,16 @@ final class SessionViewModel: ObservableObject {
     }
 
     private func apply(_ state: DaemonState) {
-        agents = state.agents.sorted { lhs, rhs in
-            // The blocked agents first: they are the ones waiting on a person.
-            if (lhs.state == .blocked) != (rhs.state == .blocked) { return lhs.state == .blocked }
-            return lhs.alias.localizedCaseInsensitiveCompare(rhs.alias) == .orderedAscending
-        }
+        // Blocked first (waiting on a person), then working, then idle
+        // and done; what is not running last.
+        var all = state.agents
+        #if DEBUG
+        if DebugLaunch.demoMarkdown { all.append(DebugLaunch.markdownAgent) }
+        #endif
+        let sorted = Flock.sorted(all)
+        if sorted != agents { agents = sorted }
         pendingAction = state.pendingAction
-        applyApproval(approvalFlow.present(state.pendingAction), haptic: true)
+        applyApproval(approvalFlow.present(state.pendingAction))
         brain = state.brain
         stateVoiceProvider = state.voiceProvider
         stateVoiceModel = state.voiceModel
@@ -1205,10 +1288,14 @@ final class SessionViewModel: ObservableObject {
 
     // MARK: - Approvals
 
-    private func applyApproval(_ effect: ApprovalFlow.Effect, haptic: Bool) {
+    /// Questions the needs-you cue already played for.
+    private var cuedPendingIDs: Set<String> = []
+
+    private func applyApproval(_ effect: ApprovalFlow.Effect) {
         switch effect {
         case .appeared:
-            if haptic { Haptics.approvalAppeared() }
+            // The cue itself comes from `pending.created` only.
+            break
         case .settled:
             scheduleApprovalDismiss()
         case .dismissed, .none:
@@ -1224,7 +1311,7 @@ final class SessionViewModel: ObservableObject {
             self.approvalFlow.dismiss(pendingID: id)
             // A newer question may be waiting behind the settled card.
             if self.approvalFlow.card == nil, let pending = self.pendingAction, pending.id != id {
-                self.applyApproval(self.approvalFlow.present(pending), haptic: true)
+                self.applyApproval(self.approvalFlow.present(pending))
             }
         }
     }
@@ -1237,10 +1324,10 @@ final class SessionViewModel: ObservableObject {
             guard let self else { return }
             do {
                 let spoken = try await self.client.answerPending(id: pendingID, option: option.index)
-                self.applyApproval(self.approvalFlow.succeeded(pendingID: pendingID, spoken: spoken), haptic: false)
+                self.applyApproval(self.approvalFlow.succeeded(pendingID: pendingID, spoken: spoken))
                 Haptics.answered()
             } catch DaemonError.pendingGone {
-                self.applyApproval(self.approvalFlow.gone(pendingID: pendingID), haptic: false)
+                self.applyApproval(self.approvalFlow.gone(pendingID: pendingID))
                 Haptics.answerFailed()
             } catch let error as DaemonError {
                 self.approvalFlow.failed(pendingID: pendingID, message: error.message)
@@ -1338,7 +1425,7 @@ final class SessionViewModel: ObservableObject {
     /// it works before the token is right; `/api/state` is the token check.
     func probe(address: String, token: String) async -> Probe {
         guard let endpoint = DaemonEndpoint(text: address, token: token) else {
-            return Probe(ok: false, title: "That address doesn't look like host:port.", lines: ["Try 192.168.8.141:7777."])
+            return Probe(ok: false, title: "That address doesn't look like host:port.", lines: ["For example 192.168.1.20:7777."])
         }
         let probeClient = DaemonClient(endpoint: endpoint)
         do {

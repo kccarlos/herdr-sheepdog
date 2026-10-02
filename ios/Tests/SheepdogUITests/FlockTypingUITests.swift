@@ -41,9 +41,7 @@ final class FlockTypingUITests: XCTestCase {
         XCTAssertTrue(app.otherElements["approval.card"].waitForExistence(timeout: 15), "the pinned card first")
 
         // The Flock pane: the agent's card, with the question on it.
-        let pane = app.segmentedControls["main.pane"]
-        XCTAssertTrue(pane.waitForExistence(timeout: 5))
-        pane.buttons.element(boundBy: 1).tap()
+        tapWhenReady(app.buttons["main.pane.flock"], "the Flock pane")
         XCTAssertTrue(element(app, "flock.agent.deploy").waitForExistence(timeout: 10), "the deploy card")
         XCTAssertTrue(element(app, "flock.agent.deploy.state").exists, "state and how long")
         XCTAssertTrue(app.otherElements["approval.card"].waitForExistence(timeout: 5), "the question sits on its agent's card")
@@ -56,7 +54,7 @@ final class FlockTypingUITests: XCTestCase {
         shot(app, "29-flock-pane-answered")
 
         // Back to the conversation, and type instead of talking.
-        pane.buttons.element(boundBy: 0).tap()
+        tapWhenReady(app.buttons["main.pane.conversation"], "the Conversation pane")
         tapWhenReady(app.buttons["controls.type"], "the keyboard button")
         let field = element(app, "type.field")
         XCTAssertTrue(field.waitForExistence(timeout: 5))

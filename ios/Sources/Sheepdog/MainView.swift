@@ -6,26 +6,17 @@ import SwiftUI
 /// compact voice bar (Mute, orb, End) at the bottom — everything in thumb
 /// reach.
 struct MainView: View {
-    enum Pane: String, CaseIterable, Identifiable {
-        case conversation = "Conversation"
-        case flock = "Flock"
-        case health = "Health"
-        var id: String { rawValue }
-    }
-
     @EnvironmentObject private var model: SessionViewModel
     @State private var selectedAgent: Agent?
     @State private var started = false
     @State private var confirmNewConversation = false
-    @State private var pane: Pane = .conversation
     @State private var typing = false
     @Environment(\.scenePhase) private var scenePhase
 
-    /// "Health · 2": problems in the last 15 minutes, so a glance at the
-    /// switch says whether something went wrong.
-    private var healthLabel: String {
-        let recent = model.health.problems(since: Date().addingTimeInterval(-15 * 60)).filter { $0.severity != .info }.count
-        return recent == 0 ? "Health" : "Health · \(recent)"
+    /// Errors in the last 15 minutes, so a glance at the switch says
+    /// whether something went wrong.
+    private var recentErrors: Int {
+        model.health.problems(since: Date().addingTimeInterval(-15 * 60)).filter { $0.severity == .error }.count
     }
 
     var body: some View {
@@ -33,25 +24,24 @@ struct MainView: View {
             VStack(spacing: 0) {
                 if let banner = model.banner {
                     BannerView(banner: banner, retry: { model.bannerAction() }, dismiss: { model.banner = nil })
+                        // Chrome stops growing at the largest non-
+                        // accessibility size: at AX5 a banner alone filled
+                        // the screen. The conversation keeps scaling.
+                        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
                         .padding(.horizontal, 16)
                         .padding(.bottom, 8)
                         .transition(.move(edge: .top).combined(with: .opacity))
                 }
 
-                Picker("Show", selection: $pane) {
-                    Text("Conversation").tag(Pane.conversation)
-                    Text(model.agents.isEmpty ? "Flock" : "Flock · \(model.agents.count)").tag(Pane.flock)
-                    Text(healthLabel).tag(Pane.health)
-                }
-                .pickerStyle(.segmented)
-                .padding(.horizontal, 16)
-                .padding(.bottom, 8)
-                .accessibilityIdentifier("main.pane")
+                PaneSwitcher(pane: $model.pane, waiting: model.flock.waitingCount, errors: recentErrors)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 8)
 
-                if pane == .conversation {
-                    AgentStrip(agents: model.agents, question: { model.pendingQuestion(for: $0) }) { agent in
+                if model.pane == .conversation {
+                    AgentStrip(agents: model.flock.running, pending: model.pendingAction) { agent in
                         selectedAgent = agent
                     }
+                    .dynamicTypeSize(...DynamicTypeSize.accessibility1)
                     .padding(.bottom, 10)
                     // Two `.sheet` modifiers on the same view fight each other in
                     // SwiftUI and only the last one presents, so the agent sheet
@@ -64,7 +54,7 @@ struct MainView: View {
                 Divider()
 
                 Group {
-                    switch pane {
+                    switch model.pane {
                     case .conversation:
                         ConversationView(
                             rows: model.rows,
@@ -72,11 +62,12 @@ struct MainView: View {
                             canLoadOlder: model.canLoadOlder,
                             loadingOlder: model.loadingOlder,
                             activePendingID: model.approval?.pending.id,
+                            pointerIDs: QuestionFocus.pointerRowIDs(rows: model.rows, pending: model.approval.flatMap { $0.isSettled ? nil : $0.pending }),
                             loadOlder: { await model.loadOlder() },
                             followToken: model.typedSent
                         )
                     case .flock:
-                        FlockView(agents: model.agents, approval: model.approval) { index in
+                        FlockView(flock: model.flock, approval: model.approval, focusedPaneID: $model.focusedAgentPaneID) { index in
                             model.answer(option: index)
                         }
                     case .health:
@@ -86,8 +77,8 @@ struct MainView: View {
                 .frame(maxHeight: .infinity)
 
                 // On the Flock pane the question sits on its agent's card.
-                if pane != .flock, let card = model.approval {
-                    ApprovalCardView(card: card) { index in
+                if model.pane != .flock, let card = model.approval {
+                    PinnedApprovalCard(card: card) { index in
                         model.answer(option: index)
                     }
                     .padding(.horizontal, 12)
@@ -111,18 +102,6 @@ struct MainView: View {
                     }
                 }
 
-                if model.showMuteHint {
-                    Text(SessionViewModel.muteHint)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 24)
-                        .padding(.top, 6)
-                        .transition(.opacity)
-                        .onTapGesture { model.dismissMuteHint() }
-                        .accessibilityIdentifier("controls.muteHint")
-                }
-
                 if typing {
                     TypeBar(
                         voiceName: model.voiceName,
@@ -139,42 +118,6 @@ struct MainView: View {
                     .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
 
-                // Fixed height regardless of which state string is showing:
-                // a status line that grows or shrinks the VStack every time
-                // the state changes (e.g. wrapping to two lines) resizes
-                // the ConversationView above it on every transition, which
-                // thrashes its "am I scrolled to the bottom" tracking badly
-                // enough to lock up the main thread (a genuine SwiftUI
-                // "onChange … multiple times per frame" fault, reproduced
-                // while testing this bar).
-                ZStack(alignment: .trailing) {
-                    Text(model.statusLine)
-                        .font(.footnote.weight(.medium))
-                        .foregroundStyle(model.noMicSignal ? Theme.blocked : (model.isMuted ? Color(.systemRed) : .secondary))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.7)
-                        .frame(height: 16)
-                        .padding(.horizontal, 48)
-                        .frame(maxWidth: .infinity)
-                        .accessibilityIdentifier("controls.statusLine")
-                    // Type instead of talking: a quiet room, or a test that
-                    // needs the exact words.
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.2)) { typing.toggle() }
-                    } label: {
-                        Image(systemName: typing ? "keyboard.chevron.compact.down" : "keyboard")
-                            .font(.footnote.weight(.semibold))
-                            .foregroundStyle(typing ? Color.accentColor : .secondary)
-                            .frame(width: 44, height: 28)
-                    }
-                    .disabled(!model.isConfigured)
-                    .accessibilityLabel(typing ? "Hide the text field" : "Type instead")
-                    .accessibilityIdentifier("controls.type")
-                    .padding(.trailing, 8)
-                }
-                .frame(height: 28)
-                .padding(.top, 2)
-
                 VoiceBarView(
                     state: model.state,
                     meter: model.meter,
@@ -183,6 +126,12 @@ struct MainView: View {
                     talkMode: model.talkMode,
                     holding: model.holding,
                     noSignal: model.noMicSignal,
+                    // The one-time Mute caption takes the status line's
+                    // place rather than a row of its own over the chat.
+                    statusText: model.showMuteHint ? model.muteCaption : model.statusLine,
+                    statusTint: model.noMicSignal || model.state == .noMicrophone ? Theme.blockedText : .secondary,
+                    typing: typing,
+                    canType: model.isConfigured,
                     onConnect: { model.connect() },
                     onStop: { model.stop() },
                     onMute: {
@@ -192,14 +141,16 @@ struct MainView: View {
                     onEnd: { model.disconnect() },
                     onResume: { model.resumeAudio() },
                     onPress: { model.pressToTalk() },
-                    onRelease: { model.releaseToTalk() }
+                    onRelease: { model.releaseToTalk() },
+                    onType: { withAnimation(.easeInOut(duration: 0.2)) { typing.toggle() } }
                 )
+                .dynamicTypeSize(...DynamicTypeSize.accessibility2)
             }
             .animation(.easeInOut(duration: 0.2), value: model.banner)
             .animation(.spring(duration: 0.3), value: model.approval)
             .animation(.easeInOut(duration: 0.2), value: model.showMuteHint)
             .animation(.spring(duration: 0.35), value: model.showCoachMark)
-            .animation(.easeInOut(duration: 0.2), value: pane)
+            .animation(.easeInOut(duration: 0.2), value: model.pane)
             .navigationTitle(model.voiceName)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -294,11 +245,15 @@ struct CoachMarkView: View {
                     .foregroundStyle(.white)
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
-                Button("Got it", action: dismiss)
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(.white)
+                Button(action: dismiss) {
+                    Text("Got it")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.white)
+                        .frame(minWidth: 44, minHeight: 44)
+                        .contentShape(Rectangle())
+                }
                     .buttonStyle(.plain)
-                    .padding(.top, 2)
+                    .padding(.vertical, -10)
                     .accessibilityIdentifier("controls.coachMark.dismiss")
             }
             .padding(12)
@@ -307,7 +262,7 @@ struct CoachMarkView: View {
             Triangle()
                 .fill(Theme.done)
                 .frame(width: 18, height: 9)
-                .padding(.leading, 27)
+                .padding(.leading, 17)
         }
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("controls.coachMark")
@@ -368,7 +323,10 @@ struct BannerView: View {
                 Image(systemName: "xmark")
                     .font(.caption.weight(.bold))
                     .foregroundStyle(.secondary)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
             }
+            .padding(-12)
             .accessibilityLabel("Dismiss")
         }
         .padding(12)
@@ -429,7 +387,8 @@ struct TypeBar: View {
                     Image(systemName: "xmark")
                         .font(.caption.weight(.bold))
                         .foregroundStyle(.secondary)
-                        .frame(width: 28, height: 32)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
                 .accessibilityLabel("Close the text field")
             }
@@ -455,4 +414,42 @@ struct TypeBar: View {
             }
         }
     }
+}
+
+/// The approval card pinned above the controls: its whole height when it
+/// fits in half the screen, else half the screen with the card scrolling
+/// inside — never squeezed by the conversation into one-line options.
+struct PinnedApprovalCard: View {
+    let card: ApprovalFlow.Card
+    let answer: (Int) -> Void
+
+    /// The card's own height, measured.
+    @State private var contentHeight: CGFloat = 0
+
+    private var maxHeight: CGFloat {
+        (UIApplication.shared.connectedScenes.compactMap { ($0 as? UIWindowScene)?.screen.bounds.height }.first ?? 800) * 0.5
+    }
+
+    var body: some View {
+        ScrollView {
+            ApprovalCardView(card: card, answer: answer)
+                .padding(.vertical, 4)
+                .background(GeometryReader { proxy in
+                    Color.clear.preference(key: CardHeightKey.self, value: proxy.size.height)
+                })
+        }
+        .scrollBounceBehavior(.basedOnSize)
+        .scrollIndicators(contentHeight > maxHeight ? .visible : .hidden)
+        .frame(height: min(max(contentHeight, 1), maxHeight))
+        .onPreferenceChange(CardHeightKey.self) { height in
+            // Whole points only: a sub-point wobble must not relayout.
+            let rounded = height.rounded(.up)
+            if rounded != contentHeight { contentHeight = rounded }
+        }
+    }
+}
+
+private struct CardHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
 }

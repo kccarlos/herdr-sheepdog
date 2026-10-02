@@ -5,7 +5,12 @@ import SwiftUI
 /// is: who is asking, what, the command, and one button per option.
 struct ApprovalCardView: View {
     let card: ApprovalFlow.Card
+    /// On an agent's Flock card, which already draws the frame: no second
+    /// border, background or shadow (review B11).
+    var embedded = false
     let answer: (Int) -> Void
+
+    @State private var commandExpanded = false
 
     private var pending: PendingAction { card.pending }
     private var agent: String { pending.agent?.isEmpty == false ? pending.agent! : "An agent" }
@@ -15,32 +20,47 @@ struct ApprovalCardView: View {
             header
             Text(pending.displaySummary)
                 .font(.callout)
-                .lineLimit(4)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityIdentifier("approval.summary")
             if let command = pending.command?.trimmingCharacters(in: .whitespacesAndNewlines), !command.isEmpty {
-                Text(command)
-                    .font(.footnote.monospaced())
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 5)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color(.tertiarySystemFill), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-                    .accessibilityLabel("Command: \(command)")
+                // Up to three lines, never cut in the middle (where the
+                // dangerous part of a command usually is); a tap shows all.
+                Button {
+                    withAnimation(.easeInOut(duration: 0.15)) { commandExpanded.toggle() }
+                } label: {
+                    Text(command)
+                        .font(.footnote.monospaced())
+                        .foregroundStyle(Color(.label))
+                        .multilineTextAlignment(.leading)
+                        .lineLimit(commandExpanded ? nil : 3)
+                        .truncationMode(.tail)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 6)
+                        .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
+                        .background(Color(.tertiarySystemFill), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Command: \(command)")
+                .accessibilityHint(commandExpanded ? "" : "Shows the whole command")
+                .accessibilityIdentifier("approval.command")
             }
             phaseView
         }
-        .padding(14)
-        .background(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Color(.secondarySystemGroupedBackground))
-                .shadow(color: .black.opacity(0.10), radius: 10, y: 2)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .strokeBorder(borderTint.opacity(0.55), lineWidth: 1.25)
-        )
+        .padding(embedded ? 0 : 14)
+        .background {
+            if !embedded {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(Color(.secondarySystemGroupedBackground))
+                    .shadow(color: .black.opacity(0.10), radius: 10, y: 2)
+            }
+        }
+        .overlay {
+            if !embedded {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .strokeBorder(borderTint.opacity(0.55), lineWidth: 1.25)
+            }
+        }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("approval.card")
     }
@@ -125,9 +145,11 @@ private struct OptionButton: View {
     var body: some View {
         let label = HStack(spacing: 8) {
             if sending { ProgressView().controlSize(.small) }
+            // Never truncated: "Yes, and don't ask again for …" is exactly
+            // the option that must be read in full.
             Text(option.label)
-                .lineLimit(2)
                 .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .font(.subheadline.weight(option.isDefault ? .semibold : .regular))
         .frame(maxWidth: .infinity, minHeight: 36)

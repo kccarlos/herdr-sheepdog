@@ -1,14 +1,19 @@
 import SheepdogKit
 import SwiftUI
 
-/// The bottom bar: the mic (mute) button, the orb, and End (✕), each in a
-/// fixed 56–64 pt slot so a hidden or disabled control never shifts the
-/// orb. Stopping the dog lives on the orb itself (`VoiceBarModel.orbAction`).
+/// The bottom bar, one row across the full width: the mic (mute) button,
+/// the orb, the status line beside them, then Type and End (✕). Every
+/// control sits in a fixed slot so a hidden one never shifts the others,
+/// and the bar's height depends only on the text size, never on the state
+/// (a bottom area that grows and shrinks with the state thrashes the
+/// conversation's scroll tracking). Stopping the dog lives on the orb
+/// itself (`VoiceBarModel.orbAction`).
 ///
 /// The mic button is never a bare microphone that invites "press to talk":
 /// while the mic is live it shows the input level as a ring and says
-/// "Mute microphone"; muted, it is a red slashed mic. In hold-to-talk the
-/// orb is the talk button and the mic button is gone.
+/// "Mute microphone"; muted, it is a red slashed mic — the one place that
+/// says "muted" loudly. In hold-to-talk the orb is the talk button and the
+/// mic button is gone; with voice off (or no microphone) it is gone too.
 struct VoiceBarView: View {
     let state: SessionState
     /// Only this view (and the mic ring/orb it draws) observes the meter,
@@ -19,6 +24,11 @@ struct VoiceBarView: View {
     var talkMode: TalkMode = .openMic
     var holding = false
     var noSignal = false
+    /// What the status line says, and in which colour.
+    var statusText = ""
+    var statusTint: Color = .secondary
+    var typing = false
+    var canType = true
     let onConnect: () -> Void
     let onStop: () -> Void
     let onMute: () -> Void
@@ -26,19 +36,35 @@ struct VoiceBarView: View {
     var onResume: () -> Void = {}
     var onPress: () -> Void = {}
     var onRelease: () -> Void = {}
+    var onType: () -> Void = {}
+
+    /// Grows with Dynamic Type so two lines of status always fit; capped so
+    /// the conversation keeps the screen at the largest sizes.
+    @ScaledMetric(relativeTo: .footnote) private var scaledHeight: CGFloat = 68
 
     private var level: Float { meter.micLevel }
     private var model: VoiceBarModel { VoiceBarModel(state: state, talkMode: talkMode) }
+    private var barHeight: CGFloat { min(max(scaledHeight, 68), 120) }
 
     var body: some View {
-        HStack(spacing: 20) {
+        HStack(spacing: 10) {
             muteButton
             orbButton
+            Text(statusText)
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(statusTint)
+                .lineLimit(3)
+                .minimumScaleFactor(0.75)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityIdentifier("controls.statusLine")
+            typeButton
             endButton
         }
-        .padding(.horizontal, 24)
-        .frame(height: 72)
-        .background(.bar)
+        .padding(.horizontal, 12)
+        .frame(height: barHeight)
+        .frame(maxWidth: .infinity)
+        .background(.bar, ignoresSafeAreaEdges: .bottom)
+        .overlay(alignment: .top) { Divider() }
     }
 
     private var muteButton: some View {
@@ -58,14 +84,31 @@ struct VoiceBarView: View {
         .accessibilityIdentifier("controls.mute")
     }
 
+    /// Type instead of talking: a quiet room, or a test that needs the
+    /// exact words.
+    private var typeButton: some View {
+        Button(action: onType) {
+            Image(systemName: typing ? "keyboard.chevron.compact.down" : "keyboard")
+                .font(.system(size: 17, weight: .medium))
+                .foregroundStyle(typing ? Color.accentColor : (canType ? Color(.secondaryLabel) : Color(.tertiaryLabel)))
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .disabled(!canType)
+        .accessibilityLabel(typing ? "Hide the text field" : "Type instead")
+        .accessibilityIdentifier("controls.type")
+    }
+
+    /// End: the rarest control, so a quiet grey ✕, not the loudest thing
+    /// beside the orb.
     private var endButton: some View {
         let visible = model.endVisible
         return Button(action: onEnd) {
             Image(systemName: "xmark")
-                .font(.system(size: 20, weight: .semibold))
-                .frame(width: 56, height: 56)
-                .background(Circle().fill(Color(.systemRed).opacity(0.15)))
-                .foregroundStyle(Color(.systemRed))
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(Color(.secondaryLabel))
+                .frame(width: 44, height: 44)
+                .background(Circle().fill(Color(.tertiarySystemFill)))
         }
         .opacity(visible ? 1 : 0)
         .allowsHitTesting(visible)
@@ -81,7 +124,7 @@ struct VoiceBarView: View {
                 .accessibilityIdentifier("controls.orb")
         } else {
             Button(action: tapOrb) {
-                OrbGlyph(state: state, level: level, size: 64, muted: muted)
+                OrbGlyph(state: state, level: level, size: 56, muted: muted)
             }
             .disabled(model.orbAction == .none)
             .accessibilityLabel(orbAccessibilityLabel)
@@ -154,10 +197,10 @@ struct MicButton: View {
                         .font(.system(size: 15, weight: .bold))
                         .foregroundStyle(Theme.blocked)
                         .background(Circle().fill(Color(.systemBackground)))
-                        .offset(x: 19, y: -19)
+                        .offset(x: 18, y: -18)
                 }
             }
-            .frame(width: 56, height: 56)
+            .frame(width: 52, height: 52)
         }
         .disabled(!enabled)
         .accessibilityLabel(VoiceBarModel.muteLabel(muted: muted))
@@ -178,7 +221,7 @@ struct HoldToTalkOrb: View {
     @GestureState private var pressed = false
 
     var body: some View {
-        OrbGlyph(state: holding ? .listening : state, level: holding ? level : 0, size: 64)
+        OrbGlyph(state: holding ? .listening : state, level: holding ? level : 0, size: 56)
             .overlay(
                 Circle()
                     .strokeBorder(Theme.done, lineWidth: holding ? 3 : 0)
@@ -253,6 +296,17 @@ struct OrbGlyph: View {
 
             if SessionState.showsMuteBadge(state, muted: muted) {
                 muteBadge
+            }
+
+            if state == .noMicrophone {
+                // The mic button's own "no signal" badge, on the orb: the
+                // microphone was refused or would not start.
+                Image(systemName: "exclamationmark.circle.fill")
+                    .font(.system(size: size * 0.24, weight: .bold))
+                    .foregroundStyle(Theme.blocked)
+                    .background(Circle().fill(Color(.systemBackground)))
+                    .offset(x: size * 0.32, y: -size * 0.32)
+                    .accessibilityHidden(true)
             }
         }
         .frame(width: size, height: size)

@@ -7,32 +7,96 @@ import SwiftUI
 /// what the worker itself last wrote. Mirrors `/api/state`'s agents (the
 /// same list as `/api/agents`), refreshed over `/events`.
 struct FlockView: View {
-    let agents: [Agent]
+    /// Whether the agents that are not running (`unknown`, `exited`) are
+    /// offered at all, folded into "Not running (N)" at the bottom. Set to
+    /// false to hide them entirely.
+    static let showsNotRunning = true
+
+    let flock: Flock
     /// The approval card, when a worker is asking: shown inline on that
     /// agent's card instead of pinned above the controls.
     let approval: ApprovalFlow.Card?
+    /// A notification tap: scroll to this agent's card, then forget it.
+    @Binding var focusedPaneID: String?
     let answer: (Int) -> Void
 
+    /// Closed by default: the running agents are what matters.
+    @State private var showNotRunning = false
+
     var body: some View {
-        ScrollView {
-            LazyVStack(spacing: 12) {
-                if agents.isEmpty {
-                    EmptyFlock()
-                        .padding(.top, 12)
-                        .padding(.horizontal, -16)
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(spacing: 12) {
+                    if flock.isEmpty {
+                        EmptyFlock()
+                            .padding(.top, 12)
+                            .padding(.horizontal, -16)
+                    } else if flock.running.isEmpty {
+                        Text("No agent is running right now.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.vertical, 8)
+                    }
+                    ForEach(flock.running) { agent in
+                        card(agent)
+                    }
+                    if Self.showsNotRunning, !flock.notRunning.isEmpty {
+                        notRunningRow
+                        if showNotRunning {
+                            ForEach(flock.notRunning) { agent in
+                                card(agent)
+                            }
+                        }
+                    }
                 }
-                ForEach(agents) { agent in
-                    AgentCard(
-                        agent: agent,
-                        approval: approval?.pending.paneID == agent.paneID ? approval : nil,
-                        answer: answer
-                    )
-                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
+            .onAppear { scrollToFocus(proxy) }
+            .onChange(of: focusedPaneID) { _, _ in scrollToFocus(proxy) }
         }
         .accessibilityIdentifier("flock.list")
+    }
+
+    private func card(_ agent: Agent) -> some View {
+        AgentCard(
+            agent: agent,
+            approval: approval?.pending.paneID == agent.paneID ? approval : nil,
+            answer: answer
+        )
+        .id(agent.paneID)
+    }
+
+    private var notRunningRow: some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.2)) { showNotRunning.toggle() }
+        } label: {
+            HStack {
+                Text("Not running (\(flock.notRunning.count))")
+                    .font(.subheadline.weight(.medium))
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.footnote.weight(.semibold))
+                    .rotationEffect(.degrees(showNotRunning ? 90 : 0))
+            }
+            .foregroundStyle(.secondary)
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityValue(showNotRunning ? "Shown" : "Hidden")
+        .accessibilityHint("Agents whose pane closed or that herdr no longer reports")
+        .accessibilityIdentifier("flock.notRunning")
+    }
+
+    private func scrollToFocus(_ proxy: ScrollViewProxy) {
+        guard let id = focusedPaneID else { return }
+        if flock.notRunning.contains(where: { $0.paneID == id }) { showNotRunning = true }
+        DispatchQueue.main.async {
+            withAnimation { proxy.scrollTo(id, anchor: .top) }
+            focusedPaneID = nil
+        }
     }
 }
 
@@ -57,7 +121,7 @@ struct AgentCard: View {
             }
 
             if let approval {
-                ApprovalCardView(card: approval, answer: answer)
+                ApprovalCardView(card: approval, embedded: true, answer: answer)
             } else if let block = agent.lastBlock, let question = block.question?.trimmedOrNil {
                 labelled(block.answered == true ? "Last question (answered)" : "Asks", question, systemImage: "hand.raised")
                     .foregroundStyle(block.answered == true ? .secondary : .primary)
@@ -68,7 +132,7 @@ struct AgentCard: View {
                     labelled("Last result", spoken, systemImage: "flag.checkered")
                     if let detail = result.detail?.trimmedOrNil {
                         DisclosureGroup("Detail") {
-                            Text(detail)
+                            MarkdownText(detail)
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
                                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -95,29 +159,57 @@ struct AgentCard: View {
         .accessibilityIdentifier("flock.agent.\(agent.alias)")
     }
 
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    @ViewBuilder
     private var header: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Circle().fill(tint).frame(width: 10, height: 10)
-            Text(agent.alias)
-                .font(.headline)
-                .lineLimit(1)
-            if let kind = agent.kind?.trimmedOrNil {
-                Text(kind)
-                    .font(.caption2.weight(.medium))
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(Color(.tertiarySystemFill), in: Capsule())
+        // At the accessibility sizes the name, kind and state no longer fit
+        // on one line: stacked, nothing is cut to "au…".
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) { dot; name }
+                stateText
+                kindTag
             }
-            Spacer(minLength: 4)
-            // Re-evaluated twice a minute, so "4 min" keeps up on its own.
-            TimelineView(.periodic(from: .now, by: 30)) { context in
-                let since = agent.timeInState(at: context.date)
-                Text(since.map { "\(Theme.word(for: agent.state)) · \($0)" } ?? Theme.word(for: agent.state))
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(tint)
-                    .accessibilityIdentifier("flock.agent.\(agent.alias).state")
+        } else {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                dot
+                name
+                kindTag
+                Spacer(minLength: 4)
+                stateText
             }
+        }
+    }
+
+    private var dot: some View { Circle().fill(tint).frame(width: 10, height: 10) }
+
+    private var name: some View {
+        Text(agent.alias)
+            .font(.headline)
+            .lineLimit(1)
+    }
+
+    @ViewBuilder
+    private var kindTag: some View {
+        if let kind = agent.kind?.trimmedOrNil {
+            Text(kind)
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(Color(.tertiarySystemFill), in: Capsule())
+        }
+    }
+
+    private var stateText: some View {
+        // Re-evaluated twice a minute, so "4 min" keeps up on its own.
+        TimelineView(.periodic(from: .now, by: 30)) { context in
+            let since = agent.timeInState(at: context.date)
+            Text(since.map { "\(Theme.word(for: agent.state)) · \($0)" } ?? Theme.word(for: agent.state))
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Theme.textColor(for: agent.state))
+                .accessibilityIdentifier("flock.agent.\(agent.alias).state")
         }
     }
 
@@ -133,7 +225,7 @@ struct AgentCard: View {
                 }
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
-                Text(message)
+                MarkdownText(message)
                     .font(.footnote)
                     .lineLimit(showWholeMessage ? nil : 4)
                     .fixedSize(horizontal: false, vertical: true)
@@ -174,7 +266,7 @@ struct AgentCard: View {
             Label(title, systemImage: systemImage)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
-            Text(text)
+            MarkdownText(text)
                 .font(.callout)
                 .fixedSize(horizontal: false, vertical: true)
                 .textSelection(.enabled)

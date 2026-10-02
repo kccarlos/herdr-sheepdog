@@ -19,11 +19,12 @@ struct SettingsView: View {
     @State private var probe: SessionViewModel.Probe?
     @State private var confirmClear = false
     @FocusState private var addressFocused: Bool
+    @State private var path: [SettingsRoute] = []
 
     private var firstRun: Bool { !model.settings.hasBeenConfigured }
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             Form {
                 if firstRun {
                     Section {
@@ -40,12 +41,13 @@ struct SettingsView: View {
 
                 Section {
                     LabeledContent("Address") {
-                        TextField("192.168.8.141:7777", text: $address)
+                        TextField("e.g. 192.168.1.20:7777", text: $address)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
                             .keyboardType(.URL)
                             .multilineTextAlignment(.trailing)
                             .focused($addressFocused)
+                            .submitLabel(.next)
                             .accessibilityIdentifier("settings.address")
                     }
                     LabeledContent("Token") {
@@ -59,13 +61,7 @@ struct SettingsView: View {
                             .multilineTextAlignment(.trailing)
                             .accessibilityIdentifier("settings.token")
                     }
-                } header: {
-                    Text("Daemon")
-                } footer: {
-                    Text("Plain HTTP, no TLS — keep this to a network you trust (your LAN, or Tailscale). The token is kept in the keychain.")
-                }
-
-                Section {
+                    // Right under the fields, so the keyboard does not cover it.
                     Button {
                         runProbe()
                     } label: {
@@ -92,9 +88,23 @@ struct SettingsView: View {
                         .padding(.vertical, 2)
                         .accessibilityIdentifier("settings.probe.result")
                     }
+                } header: {
+                    Text("Daemon")
+                } footer: {
+                    Text("Plain HTTP, no TLS — keep this to a network you trust (your LAN, or Tailscale). The token is kept in the keychain.")
                 }
 
-                voiceSection
+                Section {
+                    NavigationLink(value: SettingsRoute.models) {
+                        LabeledContent("Models") {
+                            Text(model.modelsSummary)
+                                .lineLimit(1)
+                        }
+                    }
+                    .accessibilityIdentifier("settings.models")
+                } footer: {
+                    Text("The voice \(model.voiceName) talks with and the brain behind it. Changes there apply at once.")
+                }
 
                 microphoneSection
 
@@ -157,6 +167,11 @@ struct SettingsView: View {
             }
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
+            .navigationDestination(for: SettingsRoute.self) { route in
+                switch route {
+                case .models: ModelsView()
+                }
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
@@ -168,6 +183,7 @@ struct SettingsView: View {
                         .disabled(DaemonEndpoint(text: address) == nil)
                 }
             }
+            .scrollDismissesKeyboard(.interactively)
             .onAppear(perform: load)
             .task { await model.loadVoiceProviders() }
             .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
@@ -175,78 +191,6 @@ struct SettingsView: View {
                 model.refreshMicrophoneMode()
             }
         }
-    }
-
-    // MARK: - Voice provider
-
-    @ViewBuilder
-    private var voiceSection: some View {
-        if let list = model.voiceProviders, !list.providers.isEmpty {
-            Section {
-                ForEach(list.providers) { option in
-                    Button {
-                        model.selectVoiceProvider(option.id)
-                    } label: {
-                        HStack(alignment: .firstTextBaseline) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(option.displayName)
-                                    .foregroundStyle(option.isAvailable ? Color(.label) : Color(.tertiaryLabel))
-                                if let detail = providerDetail(option) {
-                                    Text(detail)
-                                        .font(.caption)
-                                        .foregroundStyle(option.isAvailable ? Color(.secondaryLabel) : Color(.tertiaryLabel))
-                                }
-                            }
-                            Spacer()
-                            if option.id == list.provider {
-                                Image(systemName: "checkmark")
-                                    .font(.body.weight(.semibold))
-                                    .foregroundStyle(Color.accentColor)
-                            }
-                        }
-                    }
-                    .disabled(!option.isAvailable || model.switchingProvider)
-                    .accessibilityIdentifier("settings.voiceProvider.\(option.id)")
-                    .accessibilityAddTraits(option.id == list.provider ? .isSelected : [])
-                }
-                if model.switchingProvider {
-                    HStack {
-                        ProgressView()
-                        Text("Switching the live session…")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                if let error = model.providerError {
-                    Text(error)
-                        .font(.caption)
-                        .foregroundStyle(Color(.systemRed))
-                }
-            } header: {
-                Text("Voice")
-            } footer: {
-                Text(voiceFooter(list))
-            }
-        }
-    }
-
-    private func providerDetail(_ option: VoiceProviderOption) -> String? {
-        var parts: [String] = []
-        if let model = option.model { parts.append(model) }
-        if !option.isAvailable {
-            parts.append(option.reason.map { "Unavailable — \($0)" } ?? "Unavailable")
-        } else if option.billedPerMinute {
-            parts.append("Billed per minute")
-        }
-        return parts.isEmpty ? nil : parts.joined(separator: " · ")
-    }
-
-    private func voiceFooter(_ list: VoiceProviders) -> String {
-        var text = "Which model \(model.voiceName) talks with. The daemon switches the live session; the conversation and the flock carry over."
-        if list.providers.contains(where: { $0.billedPerMinute }) {
-            text += " GPT-Live is billed per minute of open session, whether anyone is talking or not — End the session when you are done."
-        }
-        return text
     }
 
     // MARK: - Microphone
@@ -323,6 +267,11 @@ struct SettingsView: View {
     }
 
     private func load() {
+        // Health's "Change in Settings ›" opens straight on Models.
+        if let route = model.settingsRoute {
+            path = [route]
+            model.settingsRoute = nil
+        }
         address = model.settings.address
         token = model.settings.token
         keepListening = model.settings.keepListeningWhenLocked
@@ -373,7 +322,7 @@ struct EchoCancellationRow: View {
                 if running {
                     Label(status.isActive ? "On" : "Off", systemImage: status.isActive ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
                         .labelStyle(.titleAndIcon)
-                        .foregroundStyle(status.isActive ? Theme.done : Theme.blocked)
+                        .foregroundStyle(status.isActive ? Theme.done : Theme.blockedText)
                 } else {
                     Text("—").foregroundStyle(.secondary)
                 }

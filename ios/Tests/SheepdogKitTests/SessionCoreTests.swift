@@ -135,6 +135,44 @@ final class SessionCoreTests: XCTestCase {
         XCTAssertEqual(core.apply(.status(.status(.connected)), now: at(601)), [.startAudio], "the engine comes back with the status")
     }
 
+    func testBeingReplacedIsSaidOnceByTheBannerNotAlsoByANotice() {
+        var core = connected()
+        // VoiceSocket hands over the closing status first, then the close.
+        let status = core.apply(.status(.status(.closed, reason: "replaced")), now: t0)
+        XCTAssertFalse(status.contains { if case .notice = $0 { return true } else { return false } }, "no timeline notice")
+        XCTAssertEqual(core.apply(.socketClosed(reason: "replaced", willRetry: false), now: t0).last, .showBanner(.replaced))
+        // Any other close still gets its notice.
+        var other = connected()
+        XCTAssertTrue(other.apply(.status(.status(.closed, reason: "voice_off")), now: t0).contains { if case .notice = $0 { return true } else { return false } })
+    }
+
+    func testADeniedMicrophoneMakesTheOrbSayNoMicrophone() {
+        var core = SessionCore()
+        _ = core.apply(.connectTapped, now: t0)
+        _ = core.apply(.probeSucceeded(micGranted: false), now: t0)
+        _ = core.apply(.socketOpened, now: t0)
+        _ = core.apply(.status(.status(.connected)), now: t0)
+        XCTAssertEqual(core.sessionState, .noMicrophone, "never \"Listening\" without a microphone")
+        XCTAssertEqual(core.statusLine, "No microphone")
+        XCTAssertFalse(core.sessionState.capturing)
+        // The dog talking still outranks it.
+        _ = core.apply(.playbackChanged(speaking: true), now: t0)
+        XCTAssertEqual(core.sessionState, .speaking)
+        // End forgets it.
+        _ = core.apply(.endTapped, now: t0)
+        _ = core.apply(.connectTapped, now: t0)
+        XCTAssertFalse(core.mic.unavailable)
+    }
+
+    func testAMicrophoneThatWouldNotStartSaysSoUntilItStarts() {
+        var core = connected()
+        XCTAssertEqual(core.sessionState, .listening)
+        _ = core.apply(.audioStartFailed("busy"), now: t0)
+        XCTAssertEqual(core.sessionState, .noMicrophone)
+        _ = core.apply(.audioStarted(gateClosed: false), now: t0)
+        XCTAssertEqual(core.sessionState, .listening)
+    }
+
     func testAClosedSocketThatWillNotRetryEndsTheSessionAndReplacedSaysSo() {
         var core = connected()
         XCTAssertEqual(core.apply(.socketClosed(reason: "replaced", willRetry: false), now: t0), [.stopAudio, .stopStreams, .stopTicker, .showBanner(.replaced)])

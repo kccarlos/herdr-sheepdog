@@ -13,6 +13,9 @@ struct ConversationView: View {
     var loadingOlder = false
     /// The pending id the pinned approval card is showing, if any.
     var activePendingID: String?
+    /// Rows that fold to a one-line pointer while their question is
+    /// pinned on the approval card (`QuestionFocus`).
+    var pointerIDs: Set<String> = []
     var loadOlder: () async -> Void = {}
     /// Changes when the shepherd typed something: follow the conversation
     /// to its end even if it was scrolled up (the keyboard shrinks it).
@@ -39,7 +42,13 @@ struct ConversationView: View {
                             .padding(.top, 28)
                     }
                     ForEach(rows) { row in
-                        RowView(row: row, voiceName: voiceName, activePendingID: activePendingID)
+                        Group {
+                            if pointerIDs.contains(row.id) {
+                                QuestionPointer(row: row)
+                            } else {
+                                RowView(row: row, voiceName: voiceName, activePendingID: activePendingID)
+                            }
+                        }
                             .id(row.id)
                     }
                     Color.clear
@@ -226,7 +235,7 @@ struct BrainReplyCard: View {
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 } else {
-                    Text(reply.spoken)
+                    MarkdownText(reply.spoken)
                         .font(.callout)
                         .fixedSize(horizontal: false, vertical: true)
                         .textSelection(.enabled)
@@ -239,7 +248,7 @@ struct BrainReplyCard: View {
                 DisclosureGroup(isExpanded: $expanded) {
                     VStack(alignment: .leading, spacing: 8) {
                         if let detail = reply.detail, !reply.pending {
-                            Text(detail)
+                            MarkdownText(detail)
                                 .font(.footnote)
                                 .fixedSize(horizontal: false, vertical: true)
                                 .textSelection(.enabled)
@@ -318,7 +327,7 @@ struct HeldPushCard: View {
             Label(dropped ? "Dropped — nobody was listening for 5 minutes" : "Waiting for a listener — said when you connect",
                   systemImage: dropped ? "bell.slash" : "hourglass")
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(dropped ? Color.secondary : Theme.blocked)
+                .foregroundStyle(dropped ? Color.secondary : Theme.blockedText)
             Text(push.text)
                 .font(.footnote)
                 .foregroundStyle(dropped ? .secondary : .primary)
@@ -417,7 +426,7 @@ struct ApprovalItemCard: View {
             HStack(spacing: 6) {
                 Image(systemName: "hand.raised.fill")
                     .font(.caption)
-                    .foregroundStyle(outcome == nil ? Theme.blocked : .secondary)
+                    .foregroundStyle(outcome == nil && isPinned ? Theme.blocked : .secondary)
                 Text(item.agent.map { "\($0) asked" } ?? "An agent asked")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
@@ -432,11 +441,11 @@ struct ApprovalItemCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(outcome == nil ? Theme.blocked.opacity(0.10) : Color(.tertiarySystemBackground))
+                .fill(outcome == nil && isPinned ? Theme.blocked.opacity(0.10) : Color(.tertiarySystemBackground))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(outcome == nil ? Theme.blocked.opacity(0.45) : .clear, lineWidth: 1)
+                .strokeBorder(outcome == nil && isPinned ? Theme.blocked.opacity(0.45) : .clear, lineWidth: 1)
         )
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("bubble.approval")
@@ -452,7 +461,7 @@ struct ApprovalItemCard: View {
         } else if isPinned {
             Label("Waiting for your answer — below", systemImage: "arrow.down.circle")
                 .font(.footnote.weight(.medium))
-                .foregroundStyle(Theme.blocked)
+                .foregroundStyle(Theme.blockedText)
         } else {
             Label("Not answered here", systemImage: "circle.dashed")
                 .font(.footnote)
@@ -509,31 +518,30 @@ struct SpeechBubble: View {
     }
 }
 
-/// A push or a local notice: a full-width card.
+/// A push or a local notice: a full-width card, quiet whatever the push's
+/// urgency. The amber "needs you" look belongs to the approval card alone:
+/// a push that has an open question folds to a pointer to that card
+/// (`QuestionPointer`), and one that has none is news, not an alarm
+/// (review B3).
 struct SystemCard: View {
     let text: String
     let kind: ConversationReducer.Bubble.Kind
     let voiceName: String
 
     var body: some View {
-        let needsUser: Bool = {
-            if case let .push(needs) = kind { return needs }
-            return false
-        }()
         let isPush: Bool = {
             if case .push = kind { return true }
             return false
         }()
-        let tint: Color = needsUser ? Theme.blocked : Theme.idle
 
         HStack(alignment: .top, spacing: 10) {
-            Image(systemName: needsUser ? "hand.raised.fill" : (isPush ? "bell.fill" : "info.circle"))
+            Image(systemName: isPush ? "bell.fill" : "info.circle")
                 .font(.footnote)
-                .foregroundStyle(tint)
+                .foregroundStyle(Theme.idle)
                 .padding(.top, 2)
             Text(text)
-                .font(needsUser ? .callout.weight(.medium) : .footnote)
-                .foregroundStyle(needsUser ? .primary : .secondary)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
         }
@@ -542,15 +550,44 @@ struct SystemCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(needsUser ? tint.opacity(0.12) : Color(.tertiarySystemBackground))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(needsUser ? tint.opacity(0.5) : .clear, lineWidth: 1.5)
+                .fill(Color(.tertiarySystemBackground))
         )
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(needsUser ? "Needs your decision" : (isPush ? "\(voiceName) says" : "Notice")), \(text)")
+        .accessibilityLabel("\(isPush ? "\(voiceName) says" : "Notice"), \(text)")
         .accessibilityIdentifier(isPush ? "bubble.push" : "bubble.notice")
+    }
+}
+
+/// A row about the question pinned on the approval card, folded to one
+/// line that points down at the card (review B1).
+struct QuestionPointer: View {
+    let row: TimelineRow
+
+    private var text: String {
+        switch row {
+        case let .item(item):
+            if item.kind == .approval { return "\(item.agent ?? "An agent") asked — answer below" }
+            return item.text
+        case let .live(bubble): return bubble.text
+        default: return ""
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "arrow.down.circle")
+                .foregroundStyle(Theme.blockedText)
+            Text(text)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+        }
+        .font(.footnote)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 6)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(text). The question is on the card below.")
+        .accessibilityIdentifier("bubble.pointer")
     }
 }
 

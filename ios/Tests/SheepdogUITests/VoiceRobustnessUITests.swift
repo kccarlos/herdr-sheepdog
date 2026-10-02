@@ -35,22 +35,32 @@ final class VoiceRobustnessUITests: XCTestCase {
         sleep(1)
         shot(app, "20-mic-live")
 
-        // Muted: red, slashed, and the status line says how to undo it.
+        // Muted: red and slashed — the one loud "muted" — and, the first
+        // time, the status line says what Mute does instead of a caption of
+        // its own; then how to undo it.
         mic.tap()
-        XCTAssertTrue(app.staticTexts["Muted — tap to unmute"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Mic off — Sheepdog can still talk"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Muted — tap to unmute"].waitForExistence(timeout: 10))
         XCTAssertEqual(app.buttons["controls.mute"].label, "Unmute microphone")
         sleep(1)
         shot(app, "21-mic-muted")
         app.buttons["controls.mute"].tap()
         XCTAssertTrue(app.staticTexts["Listening — just talk"].waitForExistence(timeout: 5))
 
-        // Settings: voice provider, microphone mode, hold to talk, diagnostics.
+        // Settings: Models (voice provider), microphone mode, hold to
+        // talk, diagnostics.
         tapWhenReady(app.buttons["toolbar.settings"], "Settings")
+        tapWhenReady(app.buttons["settings.models"], "Settings ▸ Models")
         XCTAssertTrue(app.buttons["settings.voiceProvider.openai"].waitForExistence(timeout: 10), "the provider section shows")
+        sleep(1)
+        shot(app, "34-settings-models")
+        tapWhenReady(app.navigationBars["Models"].buttons.firstMatch, "Back to Settings")
         let micMode = app.buttons["settings.microphoneMode"]
-        app.swipeUp()
+        for _ in 0 ..< 4 where !(micMode.exists && micMode.isHittable) {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.7))
+                .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)))
+        }
         XCTAssertTrue(micMode.waitForExistence(timeout: 5))
-        app.swipeDown()
         sleep(1)
         shot(app, "22-settings-voice-microphone")
 

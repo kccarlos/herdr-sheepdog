@@ -20,20 +20,22 @@ final class HealthUITests: XCTestCase {
         app.launch()
         tapWhenReady(app.buttons["controls.orb"], "the orb")
 
-        let pane = app.segmentedControls["main.pane"]
-        XCTAssertTrue(pane.waitForExistence(timeout: 10))
-        pane.buttons.element(boundBy: 2).tap()
+        tapWhenReady(app.buttons["main.pane.health"], "the Health pane")
 
         XCTAssertTrue(element(app, "health.version").waitForExistence(timeout: 10))
         let uptime = element(app, "health.uptime")
         XCTAssertTrue(uptime.waitForExistence(timeout: 10))
-        XCTAssertTrue(element(app, "health.brainProvider").waitForExistence(timeout: 10), "the brain picker from /api/brain/models")
+        XCTAssertTrue(element(app, "health.brainModel").waitForExistence(timeout: 10), "the brain, read-only")
         sleep(1)
         shot(app, "32-health-pane")
 
         let list = app.collectionViews["health.list"].exists ? app.collectionViews["health.list"] : app.collectionViews.firstMatch
-        list.swipeUp()
         let chattiness = app.segmentedControls["health.chattiness"]
+        // A short drag, not a swipe: a swipe flings the shorter list past it.
+        for _ in 0 ..< 4 where !(chattiness.exists && chattiness.isHittable) {
+            let from = list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.7))
+            from.press(forDuration: 0.05, thenDragTo: list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)))
+        }
         XCTAssertTrue(chattiness.waitForExistence(timeout: 10))
 
         chattiness.buttons["Quiet"].tap()
@@ -50,6 +52,20 @@ final class HealthUITests: XCTestCase {
         list.swipeUp()
         sleep(1)
         shot(app, "33-health-problems")
+
+        // "Change in Settings ›" opens Settings straight on Models, where
+        // the brain picker from /api/brain/models now lives.
+        list.swipeDown()
+        list.swipeDown()
+        let change = app.buttons["health.changeModels"]
+        for _ in 0 ..< 6 where !(change.exists && change.isHittable) {
+            list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.6))
+                .press(forDuration: 0.05, thenDragTo: list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)))
+        }
+        tapWhenReady(change, "Change in Settings")
+        XCTAssertTrue(element(app, "models.brainProvider").waitForExistence(timeout: 10), "the brain picker from /api/brain/models")
+        sleep(1)
+        shot(app, "35-models-from-health")
     }
 
     private func get(_ url: String) -> Data {

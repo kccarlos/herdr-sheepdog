@@ -6,13 +6,30 @@ import SwiftUI
 /// red, because on a phone a red dot reads as "broken" and a blocked agent
 /// is only waiting for you.
 enum Theme {
-    static let blocked = Color(red: 0.85, green: 0.58, blue: 0.09)
-    static let working = Color(red: 0.17, green: 0.42, blue: 0.69)
-    static let done = Color(red: 0.18, green: 0.52, blue: 0.36)
-    static let idle = Color(red: 0.44, green: 0.47, blue: 0.53)
-    static let unknown = Color(red: 0.63, green: 0.67, blue: 0.72)
+    // The colours live in the asset catalog with a light and a dark
+    // variant each, chosen for contrast (WCAG AA): every colour used for
+    // text reads at 4.5:1 or better on the system backgrounds and on its
+    // own tinted card. Amber is the exception — bright enough for a dot, a
+    // border or a fill, too light for text on white — so it has a darker
+    // twin, `blockedText`, for words.
+
+    /// Amber, for dots, borders and fills.
+    static let blocked = Color("Blocked")
+    /// Amber for words: darker in light mode, lighter in dark.
+    static let blockedText = Color("BlockedText")
+    /// Text and glyphs on an amber fill.
+    static let onBlocked = Color.black
+    static let working = Color("Working")
+    static let done = Color("Done")
+    static let idle = Color("Idle")
+    static let unknown = Color("Unknown")
     /// The orb's "thinking" purple, which is the brain's colour too.
-    static let thinking = Color(red: 0.49, green: 0.36, blue: 0.75)
+    static let thinking = Color("Thinking")
+
+    /// The state's colour for words ("Blocked · 4 min").
+    static func textColor(for state: Agent.State) -> Color {
+        state == .blocked ? blockedText : color(for: state)
+    }
 
     static func color(for state: Agent.State) -> Color {
         switch state {
@@ -40,9 +57,11 @@ enum Theme {
         case .speaking: return working
         case .thinking: return thinking
         case .silent: return idle
-        case .muted: return Color(red: 0.72, green: 0.27, blue: 0.27)
+        // The mic button is the one loud "muted" (red); the orb stays quiet.
+        case .muted: return idle
         case .stalled: return blocked
         case .voiceOff: return unknown
+        case .noMicrophone: return blocked
         case .audioPaused: return blocked
         case .idle: return done
         case .connecting, .reconnecting: return blocked
@@ -60,9 +79,10 @@ enum Theme {
         // says "tap to interrupt", the icon just needs to say "audio".
         case .speaking: return "waveform"
         case .thinking: return "ellipsis"
-        case .muted: return "mic.slash.fill"
+        case .muted: return "waveform"
         case .stalled: return "hourglass"
         case .voiceOff: return "mic.slash"
+        case .noMicrophone: return "mic.slash"
         case .audioPaused: return "play.fill"
         case .idle: return "checkmark"
         case .connecting, .reconnecting: return "arrow.triangle.2.circlepath"

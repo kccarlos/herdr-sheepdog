@@ -77,6 +77,30 @@ public struct DaemonHealth: Equatable, Sendable {
         }
     }
 
+    /// Repeats of one problem, shown as one row: the newest occurrence and
+    /// how many there were (review B4).
+    public struct ProblemGroup: Equatable, Identifiable, Sendable {
+        public var latest: Problem
+        public var count: Int
+        public var id: Int64 { latest.id }
+    }
+
+    /// `problems` (any order) grouped by type and title, newest group first.
+    public static func grouped(_ problems: [Problem]) -> [ProblemGroup] {
+        var groups: [ProblemGroup] = []
+        var index: [String: Int] = [:]
+        for problem in problems.sorted(by: { $0.id > $1.id }) {
+            let key = problem.type + "\u{1F}" + problem.title
+            if let i = index[key] {
+                groups[i].count += 1
+            } else {
+                index[key] = groups.count
+                groups.append(ProblemGroup(latest: problem, count: 1))
+            }
+        }
+        return groups
+    }
+
     /// Problems since `date`, newest first — what the tab's badge counts.
     public func problems(since date: Date) -> [Problem] {
         problems.filter { $0.ts >= date }.reversed()
@@ -93,6 +117,16 @@ public struct DaemonHealth: Equatable, Sendable {
     }
 
     // MARK: - The words
+
+    /// "not_reported", "ENOENT", "session.missing": one token of letters,
+    /// digits and `_ . -` with an underscore or a dot, or all capitals.
+    static func isCode(_ text: String) -> Bool {
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty, !t.contains(" ") else { return false }
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "_.-"))
+        guard t.unicodeScalars.allSatisfy({ allowed.contains($0) }) else { return false }
+        return t.contains("_") || (t.contains(".") && t.lowercased() == t) || (t.uppercased() == t && t.count > 1 && t.rangeOfCharacter(from: .letters) != nil)
+    }
 
     /// One line per event type, from its payload; nil for an event that is
     /// not a problem (a `voice.playback` that was not cut).
@@ -157,6 +191,9 @@ public struct DaemonHealth: Equatable, Sendable {
         default:
             return nil
         }
+        // A machine code ("not_reported") is not a sentence: it stays in
+        // the raw event behind the chevron.
+        if let d = detail, isCode(d) { detail = nil }
         return Problem(id: id, ts: ts, type: event.type, severity: severity, title: title, detail: detail, raw: BrainActivity.rawJSON(event.payload))
     }
 }

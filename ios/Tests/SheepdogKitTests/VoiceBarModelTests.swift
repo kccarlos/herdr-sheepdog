@@ -18,11 +18,16 @@ final class VoiceBarModelTests: XCTestCase {
         }
     }
 
-    func testVoiceOffDisablesMuteButStillOffersEnd() {
-        let m = VoiceBarModel(state: .voiceOff)
-        XCTAssertEqual(m.orbAction, .none)
-        XCTAssertEqual(m.muteAvailability, .disabled)
-        XCTAssertTrue(m.endVisible)
+    func testVoiceOffAndNoMicrophoneHideMuteButStillOfferEnd() {
+        // Nothing can hear the microphone: no mic button beside an orb that
+        // already says so (two mic icons, review A4).
+        for state in [SessionState.voiceOff, .noMicrophone] {
+            let m = VoiceBarModel(state: state)
+            XCTAssertEqual(m.orbAction, .none, "\(state)")
+            XCTAssertEqual(m.muteAvailability, .hidden, "\(state)")
+            XCTAssertTrue(m.endVisible, "\(state)")
+        }
+        XCTAssertEqual(VoiceBarModel.statusLine(state: .noMicrophone), "No microphone")
     }
 
     func testIdleListeningSilentAndMutedLeaveTheOrbUntappable() {
@@ -85,7 +90,8 @@ final class VoiceBarModelTests: XCTestCase {
         XCTAssertEqual(VoiceBarModel.statusLine(state: .muted), "Muted — tap to unmute")
         XCTAssertEqual(VoiceBarModel.statusLine(state: .voiceOff), "Voice is off on the daemon")
         XCTAssertEqual(VoiceBarModel.statusLine(state: .speaking), "Speaking")
-        XCTAssertEqual(VoiceBarModel.statusLine(state: .disconnected), "Not connected")
+        XCTAssertEqual(VoiceBarModel.statusLine(state: .disconnected), "Tap the orb to connect")
+        XCTAssertEqual(VoiceBarModel.statusLine(state: .disconnected, talkMode: .holdToTalk), "Tap the orb to connect")
     }
 
     func testTheStatusLineInHoldToTalk() {

@@ -3,6 +3,7 @@ import SwiftUI
 
 @main
 struct SheepdogApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var model = SessionViewModel(settings: SheepdogApp.settings())
 
     /// The UI walkthrough that drives this app against a `--voice=off`
@@ -32,6 +33,7 @@ struct SheepdogApp: App {
         WindowGroup {
             MainView()
                 .environmentObject(model)
+                .onAppear { PushCoordinator.shared.model = model }
         }
     }
 }

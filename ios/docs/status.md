@@ -1,4 +1,108 @@
-# Status — 2026-09-29
+# Status — 2026-10-01
+
+## UI/UX review changes (2026-10-01)
+
+The CEO-approved scope from the independent UI/UX review (Models in
+Settings, running agents, markdown, notifications, the known gaps and the
+review's look-and-experience items), built and screenshotted in the
+simulator (iPhone 17 Pro, iOS 27) against fixture daemons — the push routes
+from herdr-sheepdog PR #82 (`4f232c0`), the rest from `main` (`bdcbf6e`).
+
+**What changed**
+
+- **Settings ▸ Models**: its own screen (applies at once, outside Settings'
+  Save/Cancel): the voice provider picker (moved from Settings, GPT-Live
+  still marked as billed per minute), the brain's provider and model (moved
+  from Health), and the notification status. Health keeps read-only Voice
+  and Brain lines with "Change in Settings ›", which opens Settings on
+  Models.
+- **Flock**: running agents only (idle, working, blocked, done), blocked
+  first, then working, then idle/done; unknown and exited fold into "Not
+  running (N)", closed by default (`FlockView.showsNotRunning = false`
+  hides them). The agent strip shows the running ones; the Flock tab badge
+  is an amber count of blocked agents, none when nobody waits.
+- **Markdown** (`MarkdownRenderer`): task, question, the worker's last
+  message (still four lines until tapped) and brain replies. Inline
+  bold/italic/code/links, lists, fenced code monospaced; headings as bold
+  body text.
+- **Notifications (APNs)**: permission asked after the first successful
+  connection; the device token goes to the daemon
+  (`POST /api/push/register`), again on token or address change, and is
+  removed (`DELETE`) when notifications are turned off or it moves to
+  another daemon. Debug builds register `sandbox`, Release (Xcode Cloud)
+  `production` — a build setting (`SHEEPDOG_PUSH_ENVIRONMENT`), with the
+  matching `aps-environment` and the time-sensitive entitlement in
+  `project.yml`. The APPROVAL category has Approve (first "Yes…" option,
+  else 1) and Decline (first "No…"), both requiring the passcode: the
+  daemon token is a when-unlocked keychain item, so a locked phone could not
+  read it to answer. A stale or failed answer leaves a notification whose
+  tap opens the app; a tap on any notification opens that agent's Flock
+  card; nothing is shown in the foreground while the session is live.
+- **Known gaps closed**: a token refused mid-session is now named (a failed
+  reconnect probes `/api/state` for the 401); "replaced" is said once (the
+  banner); the orb says "No microphone" with the amber badge when the
+  microphone was denied or would not start (`SessionState.noMicrophone`).
+- **Look and experience**: the approval card never truncates options or
+  the command (three lines, tap for all; the pinned card takes up to half
+  the screen and scrolls inside); a palette in the asset catalog with
+  light/dark variants at AA contrast (amber for fills, `BlockedText` for
+  words); a distinct needs-you cue (Core Haptics pattern + a short chime
+  through the audio session) only for a new question with options; one
+  compact full-width voice bar (status line beside the orb, Type and a grey
+  End in the bar, no mic button with voice off); Dynamic Type (scaled bar,
+  `.caption` chip, menus instead of segmented controls at accessibility
+  sizes, chrome capped so the content keeps the screen); one question
+  shown once (its approval item, push and the dog's restatement fold to
+  one-line pointers while the card is pinned); "Needs approval · …" chips;
+  neutral grey pushes; Health counts errors only, groups repeats (×N) and
+  keeps codes behind the chevron; first-run copy and layout; 44 pt
+  targets; muted said once; no inner border on the Flock approval card.
+
+**Screenshots** (`ReviewScreenshotsUITests`, run with
+`TEST_RUNNER_SHEEPDOG_SHOTS=light|dark|xxxl` against the PR #82 fixture
+daemon on 7797; `-sheepdogFakeVoice`, `-sheepdogFakeProviders`, and DEBUG
+`-sheepdogDemoMarkdown` for the markdown agent the fixture daemon cannot
+produce):
+
+| Light | Dark | What |
+|---|---|---|
+| ![](screenshots/review-light-first-run.png) | ![](screenshots/review-dark-first-run.png) | First run: "e.g. 192.168.1.20:7777", Test connection right under the fields, above the keyboard. |
+| ![](screenshots/review-light-voicebar-disconnected.png) | ![](screenshots/review-dark-voicebar-disconnected.png) | Not connected: "Tap the orb to connect" in the bar. |
+| ![](screenshots/review-light-voicebar-live.png) | ![](screenshots/review-dark-voicebar-live.png) | The compact bar: mic, orb, status, Type, grey End; full-width background. Pushes are neutral notices. |
+| ![](screenshots/review-light-voicebar-muted.png) | ![](screenshots/review-dark-voicebar-muted.png) | Muted, said once: the red mic; the first time, the status line explains Mute instead of a caption over the chat. |
+| ![](screenshots/review-light-conversation-approval.png) | ![](screenshots/review-dark-conversation-approval.png) | A long command (three lines) and long options, nothing truncated; the chip says "Needs approval · git log…"; the question's other copies fold to "auth asked — answer below". |
+| ![](screenshots/review-light-flock.png) | ![](screenshots/review-dark-flock.png) | Flock: blocked first, the amber badge, the approval without an inner border. |
+| ![](screenshots/review-light-flock-markdown.png) | ![](screenshots/review-dark-flock-markdown.png) | Markdown: a bold word and inline code in the task, a heading as bold body text in the worker's message. |
+| ![](screenshots/review-light-flock-not-running.png) | ![](screenshots/review-dark-flock-not-running.png) | "Not running (1)", opened. |
+| ![](screenshots/review-light-health.png) | ![](screenshots/review-dark-health.png) | Health: read-only Voice and Brain, "Change in Settings ›". |
+| ![](screenshots/review-light-models.png) | ![](screenshots/review-dark-models.png) | Settings ▸ Models: voice and brain. |
+| ![](screenshots/review-light-models-notifications.png) | ![](screenshots/review-dark-models-notifications.png) | Notifications: this phone and the daemon's `GET /api/push/status` (the fixture daemon has no APNs key). |
+
+Largest accessibility size (AX5), light:
+
+| | | | |
+|---|---|---|---|
+| ![](screenshots/review-xxxl-voicebar-live.png) | ![](screenshots/review-xxxl-conversation-approval.png) | ![](screenshots/review-xxxl-flock.png) | ![](screenshots/review-xxxl-flock-markdown.png) |
+
+**Tests**: SheepdogKit gained `FlockTests`, `MarkdownRendererTests`,
+`PushTests` (token hex, the register/unregister/status requests through a
+stubbed `URLProtocol`, the docs/push.md payload, action → answer),
+`ReviewPolishTests` (question pointers, chip verbs, grouped problems) and
+`SessionCoreTests` cases for replaced and No microphone.
+
+**Not verified on a device**
+
+- Real APNs delivery, the permission prompt's timing, Approve/Decline from
+  the lock screen and from a cold start, the deep link to the Flock card,
+  and the foreground suppression: none can be exercised against the
+  fixture daemon (no APNs key) and the UI tests skip the permission prompt.
+  The Release entitlement (`aps-environment` production) was checked in a
+  local Release build's signing entitlements, not in an Xcode Cloud
+  archive; if the archive fails on capabilities, see `xcode-cloud.md`.
+- The needs-you chime and haptic pattern (the simulator has no haptics;
+  whether the chime reaches AirPods during a Gemini session).
+- "No microphone" with a real denied or busy microphone, and the token
+  probe after a token is revoked on a running daemon.
 
 ## Distribution
 
@@ -18,8 +122,11 @@ install, not that any of it has been checked on hardware.
 
 ## Verified
 
-**Unit tests: 245 (243 run, 2 live-daemon tests skip without one), all passing** (`SheepdogKitTests`, iPhone 17 Pro simulator,
-iOS 26, Xcode 27).
+**Unit tests: 358 (2 live-daemon tests skip without a fixture daemon), all passing** (2026-10-01) (`SheepdogKitTests`, iPhone 17 Pro simulator, iOS 27, Xcode 27).
+The UI tests pass against the fixture daemons as well; `HistoryApprovalUITests`
+needs the 7799 daemon restarted shortly before it runs (it looks for the
+restart divider), and `ReconnectUITests` skips without
+`scripts/fixture-daemon-restarter.sh`.
 
 ```sh
 xcodegen generate
@@ -281,7 +388,8 @@ daemon's `GET /api/settings`.
   against daemon `0064753` (Gemini Live and the brain on Vertex AI).
   Still not individually confirmed: AirPods and route changes, the lock
   screen and background audio, approvals tapped on the phone, and the
-  Health pane's brain picker (the CEO did not find it on the first try).
+  brain picker (the CEO did not find it in Health on the first try; it is
+  now in Settings ▸ Models).
 - **A real Gemini session.** Seen on 2026-10-01 in the CEO's phone
   session above (Gemini Live on Vertex AI). `flush`, barge-in and
   `stalled` were not specifically exercised.
@@ -313,7 +421,7 @@ daemon's `GET /api/settings`.
   nothing visible in the simulator; the mode reads "Standard" there.
 - **The provider picker against a real daemon**: built to the contract
   while the daemon side was being written; screenshots use the contract's
-  example.
+  example. It now lives in Settings ▸ Models.
 
 ## For the morning
 
@@ -369,18 +477,9 @@ while, wake it, and check nothing is missing or doubled.
 
 ## Known gaps, deliberate for v1
 
-- **The token is only probed on the first connect.** If it is revoked while
-  a session is running, the reconnect loop retries `/ws` and shows "could
-  not connect" rather than "the token was refused" — a 401 on a WebSocket
-  upgrade is not readable from `URLSessionWebSocketTask`.
-- **Being replaced says it twice**: the daemon's `status: closed
-  {reason: replaced}` produces both a notice in the conversation and the
-  banner that explains what to do. One of them is redundant.
-- **The orb says "Listening" when the microphone failed to start** (denied
-  permission, or another app holding it). The banner explains it, but the
-  orb should carry that state itself. (The separate stale "Listening" after
-  a *failed session* is fixed: SessionCore now resets on failure as it does
-  on End.)
+- (Closed 2026-10-01: a token revoked mid-session is now named after a
+  failed reconnect; "replaced" is said once; the orb says "No microphone".
+  See "UI/UX review changes" above.)
 - The `thinking` state comes from `voice.tool_call` / `voice.tool_result` on
   `/events`; the real Gemini session logs those under the same names as the
   debug path (`internal/voice/gemini/toolexec.go`), so it should fire in a
@@ -396,7 +495,8 @@ while, wake it, and check nothing is missing or doubled.
 - iOS offers to save the token to the user's passwords when Settings is
   dismissed. `.textContentType(.oneTimeCode)` does not suppress it; it is a
   system dialog and "Not Now" is the right answer. Worth revisiting.
-- The blocked state is **amber** here, where the daemon's `/debug` page uses
+- The blocked state is **amber** here (asset catalog `Blocked`, with the
+  darker `BlockedText` for words), where the daemon's `/debug` page uses
   red. On a phone a red dot reads as "broken", and a blocked agent is only
   waiting for you. Deliberate deviation.
 - `SheepdogUITests` occasionally fails with "Timed out while evaluating UI

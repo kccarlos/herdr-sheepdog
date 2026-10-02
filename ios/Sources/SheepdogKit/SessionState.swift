@@ -21,6 +21,9 @@ public enum SessionState: String, Equatable, Sendable, CaseIterable {
     case speaking
     /// A tool call is in flight; the dog is working something out.
     case thinking
+    /// The microphone could not be used: permission denied, or it would
+    /// not start (another app holding it). The dog can still talk.
+    case noMicrophone
     /// The microphone is off.
     case muted
     /// Listening, but the silence gate is closed — nothing is being sent.
@@ -45,6 +48,8 @@ public enum SessionState: String, Equatable, Sendable, CaseIterable {
         /// The audio engine is paused after an interruption iOS would not
         /// let it resume from.
         public var audioPaused: Bool
+        /// The microphone was denied or failed to start this session.
+        public var micUnavailable: Bool
 
         public init(
             socket: SocketLife = .idle,
@@ -54,7 +59,8 @@ public enum SessionState: String, Equatable, Sendable, CaseIterable {
             gateClosed: Bool = false,
             speaking: Bool = false,
             thinking: Bool = false,
-            audioPaused: Bool = false
+            audioPaused: Bool = false,
+            micUnavailable: Bool = false
         ) {
             self.socket = socket
             self.voice = voice
@@ -64,6 +70,7 @@ public enum SessionState: String, Equatable, Sendable, CaseIterable {
             self.speaking = speaking
             self.thinking = thinking
             self.audioPaused = audioPaused
+            self.micUnavailable = micUnavailable
         }
     }
 
@@ -81,6 +88,7 @@ public enum SessionState: String, Equatable, Sendable, CaseIterable {
         if i.speaking { return .speaking }
         if i.stalled { return .stalled }
         if i.thinking { return .thinking }
+        if i.micUnavailable { return .noMicrophone }
         if i.muted { return .muted }
         if i.gateClosed { return .silent }
         if i.voice == .connected { return .listening }
@@ -99,7 +107,7 @@ public enum SessionState: String, Equatable, Sendable, CaseIterable {
     public var capturing: Bool {
         switch self {
         case .listening, .silent, .speaking, .thinking, .stalled, .idle: return true
-        case .disconnected, .connecting, .reconnecting, .voiceOff, .audioPaused, .muted: return false
+        case .disconnected, .connecting, .reconnecting, .voiceOff, .audioPaused, .muted, .noMicrophone: return false
         }
     }
 
@@ -115,6 +123,7 @@ public enum SessionState: String, Equatable, Sendable, CaseIterable {
         case .speaking: return "Speaking"
         case .thinking: return "Thinking"
         case .muted: return "Muted"
+        case .noMicrophone: return "No microphone"
         case .silent: return "Listening — quiet"
         case .listening: return "Listening"
         case .idle: return "Ready"
@@ -133,6 +142,7 @@ public enum SessionState: String, Equatable, Sendable, CaseIterable {
         case .speaking: return "\(voiceName) is speaking"
         case .thinking: return "\(voiceName) is looking something up"
         case .muted: return "Microphone muted"
+        case .noMicrophone: return "No microphone. \(voiceName) cannot hear you, but can still talk"
         case .silent: return "Listening. The microphone is quiet, nothing is being sent"
         case .listening: return "Listening. \(voiceName) can hear you"
         case .idle: return "Connected and ready"

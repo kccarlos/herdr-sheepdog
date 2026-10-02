@@ -124,10 +124,10 @@ final class WalkthroughUITests: XCTestCase {
         // Its pane closing is a push the daemon always makes (the code
         // sentence, not a judgement the fake brain can dedupe away).
         try inject("/api/inject/remove", ["pane_id": "w1:p2"])
-        guard let push = bubble(app, "bubble.push", timeout: 20) else {
-            return XCTFail("a push belongs in the conversation as a system card")
-        }
-        XCTAssertTrue(push.label.contains("docs"), "got \(push.label)")
+        // The newest push about docs (the fixture daemon's history may hold
+        // older pushes about other agents).
+        let push = app.descendants(matching: .any).matching(identifier: "bubble.push").matching(NSPredicate(format: "label CONTAINS 'docs'")).firstMatch
+        XCTAssertTrue(push.waitForExistence(timeout: 20), "a push belongs in the conversation as a system card")
         shot(app, "06-push")
 
         // 8. Point it at a port with nothing behind it: a plain sentence,

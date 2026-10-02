@@ -60,6 +60,25 @@ targets:
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
+      # Phone notifications (APNs). The entitlement's aps-environment and
+      # the environment the app tells the daemon its token belongs to are
+      # one decision, made per configuration: Debug (Xcode runs,
+      # development-signed) talks to the APNs sandbox, Release (what Xcode
+      # Cloud archives for TestFlight and the App Store) to production.
+      configs:
+        Debug:
+          APS_ENVIRONMENT: development
+          SHEEPDOG_PUSH_ENVIRONMENT: sandbox
+        Release:
+          APS_ENVIRONMENT: production
+          SHEEPDOG_PUSH_ENVIRONMENT: production
+    entitlements:
+      path: Sources/Sheepdog/Sheepdog.entitlements
+      properties:
+        aps-environment: $(APS_ENVIRONMENT)
+        # Lets "needs you" alerts (interruption-level time-sensitive) break
+        # through Focus; without it iOS delivers them as active.
+        com.apple.developer.usernotifications.time-sensitive: true
     info:
       path: Sources/Sheepdog/Info.plist
       properties:
@@ -93,6 +112,9 @@ targets:
         # so TestFlight builds do not wait on "Missing Compliance".
         # docs/xcode-cloud.md.
         ITSAppUsesNonExemptEncryption: false
+        # sandbox or production, from the configuration (above); read by
+        # PushCoordinator when it registers the device token with the daemon.
+        SheepdogPushEnvironment: $(SHEEPDOG_PUSH_ENVIRONMENT)
 
   SheepdogUITests:
     type: bundle.ui-testing

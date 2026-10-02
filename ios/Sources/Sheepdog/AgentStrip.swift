@@ -5,7 +5,8 @@ import SwiftUI
 /// question or the last result underneath.
 struct AgentStrip: View {
     let agents: [Agent]
-    let question: (Agent) -> String?
+    /// The open question, if any: a blocked agent's chip names what it needs.
+    let pending: PendingAction?
     let onSelect: (Agent) -> Void
 
     var body: some View {
@@ -18,7 +19,7 @@ struct AgentStrip: View {
                         Button {
                             onSelect(agent)
                         } label: {
-                            AgentChip(agent: agent, subtitle: agent.subtitle(pendingQuestion: question(agent)))
+                            AgentChip(agent: agent, subtitle: agent.chipSubtitle(pending: pending))
                         }
                         .buttonStyle(.plain)
                         .accessibilityIdentifier("agent.chip.\(agent.alias)")
@@ -128,12 +129,12 @@ struct AgentSheet: View {
 
                 if let question = question ?? (agent.lastBlock?.answered == true ? nil : agent.lastBlock?.question), !question.isEmpty {
                     Section("Waiting on you") {
-                        Text(question)
+                        MarkdownText(question)
                     }
                 }
 
                 if let task = agent.currentTask, !task.isEmpty {
-                    Section("Current task") { Text(task) }
+                    Section("Current task") { MarkdownText(task) }
                 }
                 if let result = agent.lastResult?.spoken, !result.isEmpty {
                     Section("Last result") {
@@ -145,11 +146,11 @@ struct AgentSheet: View {
                         }
                     }
                 } else if let last = agent.lastTask, !last.isEmpty {
-                    Section("Last task") { Text(last) }
+                    Section("Last task") { MarkdownText(last) }
                 }
                 if let entry = agent.lastWorkerMessage, let message = entry.lastAssistant {
                     Section("\(agent.alias) wrote") {
-                        Text(message)
+                        MarkdownText(message)
                             .font(.callout)
                             .textSelection(.enabled)
                     }

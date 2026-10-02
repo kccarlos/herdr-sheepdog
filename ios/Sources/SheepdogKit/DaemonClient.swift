@@ -420,7 +420,7 @@ public final class DaemonClient: @unchecked Sendable {
         }
     }
 
-    private func perform(_ request: URLRequest) async throws -> (Data, URLResponse) {
+    func perform(_ request: URLRequest) async throws -> (Data, URLResponse) {
         do {
             return try await session.data(for: request)
         } catch let error as URLError {

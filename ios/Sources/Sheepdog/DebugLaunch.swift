@@ -24,6 +24,24 @@ enum DebugLaunch {
     /// `-sheepdogShowStreamErrors`: `/events` failures become notices in the
     /// conversation, instead of only a log line.
     static var showStreamErrors: Bool { arguments.contains("-sheepdogShowStreamErrors") }
+    /// `-sheepdogAskPush`: ask for notification permission after connecting
+    /// even when started with `-sheepdogAddress` (the UI tests otherwise
+    /// skip it, so no system alert covers what they tap).
+    static var askPush: Bool { arguments.contains("-sheepdogAskPush") }
+    /// `-sheepdogDemoMarkdown`: adds a finished agent whose task and last
+    /// message are markdown, for screenshots (the fixture daemon cannot
+    /// produce a worker transcript).
+    static var demoMarkdown: Bool { arguments.contains("-sheepdogDemoMarkdown") }
+    /// The agent `-sheepdogDemoMarkdown` adds.
+    static let markdownAgent = Agent(
+        paneID: "demo-md", alias: "docs", kind: "claude", state: .done, stateSince: Date().addingTimeInterval(-240),
+        lastTask: "Write the **install** section of the README and check `make install` on a clean machine",
+        journal: [Agent.JournalEntry(
+            at: Date().addingTimeInterval(-240), event: "done",
+            lastAssistant: "## Summary\nDone. The README now has an *Install* section:\n\n- `make install` copies the binary to `~/.local/bin`\n- a note on **unlinking first** on macOS\n1. build\n2. install\n\n```\nmake build && make install\n```\nSee [the docs](https://github.com/kccarlos/herdr-sheepdog).",
+            filesTouched: ["README.md"], tools: ["Edit": 3, "Bash": 2]
+        )]
+    )
     /// `-sheepdogAddress 127.0.0.1:7799`: start configured, for the history
     /// walkthrough and screenshots.
     static var address: String? {
