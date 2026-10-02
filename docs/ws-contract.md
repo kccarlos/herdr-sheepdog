@@ -4,6 +4,11 @@ Written in WP2 (2026-09-17). The Go types for every control message live in
 `internal/voice/wsproto`; the browser page (WP6) and the WS server (WP5/WP7)
 are both built from this document. Change the doc and the Go types together.
 
+The optional [sheepdog-bridge](https://github.com/kccarlos/herdr-sheepdog-bridge)
+is one more client of this endpoint: it carries a phone's voice over WebRTC
+and speaks this contract on the phone's behalf (it sends the `playback`
+reports itself). Its phone-side contract is its `docs/client-contract.md`.
+
 ## Endpoint
 
 - `GET /ws` on the daemon's HTTP port, upgraded to a WebSocket. Same origin as
