@@ -20,19 +20,10 @@ import Foundation
 ///   waits for its pong before the next one, like `/voice`: a ping still
 ///   unanswered after 10 s drops the socket.
 @MainActor
-public final class VoiceSocket {
-    public enum Event: Sendable {
-        case opened
-        case control(WSMessage)
-        case audio(Data)
-        /// The socket went away. `retrying` is false when the app will not
-        /// reconnect by itself (the user disconnected, or we were replaced).
-        case closed(reason: String, retrying: Bool)
-        /// An attempt failed. `retrying` is true when the socket will try
-        /// again by itself (the daemon was unreachable), false when it
-        /// will not (the address is not a URL).
-        case failed(DaemonError, retrying: Bool)
-    }
+public final class VoiceSocket: VoiceTransport {
+    /// The transport events (`VoiceTransportEvent`), under the name this
+    /// socket has always used for them.
+    public typealias Event = VoiceTransportEvent
 
     /// Browser constants (`web/voice/app.js`: `PING_EVERY_MS`,
     /// `PONG_TIMEOUT_MS`, the reconnect backoff).

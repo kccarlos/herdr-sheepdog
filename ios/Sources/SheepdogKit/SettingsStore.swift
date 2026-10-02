@@ -9,6 +9,8 @@ public final class SettingsStore {
         static let hasBeenConfigured = "daemon.configured"
         static let tokenAccount = "daemon.token"
         static let talkMode = "voice.talkMode"
+        static let transport = "voice.transport"
+        static let bridgeAddress = "bridge.address"
     }
 
     private let defaults: UserDefaults
@@ -41,6 +43,26 @@ public final class SettingsStore {
     public var talkMode: TalkMode {
         get { defaults.string(forKey: Key.talkMode).flatMap(TalkMode.init(rawValue:)) ?? .openMic }
         set { defaults.set(newValue.rawValue, forKey: Key.talkMode) }
+    }
+
+    /// How the voice travels: the daemon's `/ws` (the default) or LiveKit
+    /// through sheepdog-bridge.
+    public var voiceTransport: VoiceTransportKind {
+        get { defaults.string(forKey: Key.transport).flatMap(VoiceTransportKind.init(rawValue:)) ?? .webSocket }
+        set { defaults.set(newValue.rawValue, forKey: Key.transport) }
+    }
+
+    /// The bridge's address as typed; empty means the daemon's host on
+    /// port 7778.
+    public var bridgeAddress: String {
+        get { defaults.string(forKey: Key.bridgeAddress) ?? "" }
+        set { defaults.set(newValue, forKey: Key.bridgeAddress) }
+    }
+
+    /// The bridge, with the daemon's token as its bearer; nil while
+    /// neither address is usable.
+    public var bridgeEndpoint: DaemonEndpoint? {
+        LiveKitBridge.endpoint(bridgeAddress: bridgeAddress, daemon: endpoint)
     }
 
     /// False until the user has saved an address once; the first launch
