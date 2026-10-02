@@ -100,15 +100,28 @@ utterance, coalescing), which are unit- and daemon-tested. Gemini's free
 tier allows about 20 requests per model per key per day; run live checks
 sparingly and `make eval-live` deliberately.
 
-Fixed after the 2026-10-02 acceptance run (unit- and harness-tested;
-not yet re-run live): Claude Code's AskUserQuestion widget now parses
-as a prompt — `parseOptions` skips the indented description under each
-option and stops at the rule above "Chat about this" — so a block
-records the question and `send_keys ["1"]` passes the rail (the number
-key selects at once, checked against a real Claude Code 2.1.287
-widget); and the stop acknowledgement is the daemon's code sentence at
-once, no longer held behind a brain stop turn (the `stop` request kind
-is gone; what was stopped is a transcript context line).
+**Acceptance run, 2026-10-02 (the v1 success test on the phone).** The
+CEO ran the five scenarios on an iPhone (TestFlight 0.1.0 (2)) against
+the daemon, Gemini Live on Vertex AI, brain on Vertex `gemini-3.8-flash`:
+
+| Scenario | First run (daemon `0064753`) | After #81 (daemon `729e5e0`) |
+|---|---|---|
+| 1 status | pass: answered in about 2 s, no fallback | — |
+| 2 proactive block + voice approval | announce pass; approval **failed**: the AskUserQuestion widget was not parsed (`supervisor.blocked_no_question`), the rail refused `send_keys` three times, the CEO answered on the Mac | **pass**: pending answer-prompt created, "Yes, proceed" sent key `1` via the fast path 2 s after it was said |
+| 3 deep ask | pass on the second phrasing (codex investigation, 31 s, correct answer); the first phrasing got a spoken promise from the voice model with no `to_supervisor` call | — |
+| 4 instruction + confirmation | pass: delivered in 4 s, result read back 27 s after the instruction | — |
+| 5 stop | **failed**: the acknowledgement waited 5.3 s behind a brain stop turn that hit a Vertex 504, and the instruction queued behind a busy Claude Code turn still ran after the Ctrl-C | **pass** on an idle-then-working agent: Ctrl-C 6 ms after "Stop.", "Sent an interrupt to herdr-sheepdog-claude." spoken at once, the pane shows "Interrupted" |
+
+#81 fixed both failures: `parseOptions` skips the indented description
+under each option and stops at the rule above "Chat about this" (the
+number key selects at once, checked against Claude Code 2.1.287), and
+the stop acknowledgement is the daemon's code sentence, no longer a
+brain turn. Right after the re-run, Vertex `gemini-3.8-flash` (location
+`global`) degraded on Google's side: every brain call from 01:01:15 UTC
+ran out its budget with `504 DEADLINE_EXCEEDED`, and a bare "say ok"
+took 30–52 s while Vertex `gemini-3.5-flash` answered in 1 s and AI
+Studio `gemini-3.8-flash` in 3.3 s. The CEO switched the brain to
+DeepSeek at 01:07 UTC and it is staying there for now.
 
 ## Open
 
@@ -128,12 +141,31 @@ is gone; what was stopped is a transcript context line).
   promise (the old cancel tool did; it was not reachable from the voice
   since the redesign). It expires after `supervisor.promise_ttl_s`.
 - **`v0.1.0`** is not tagged yet (the release workflow is ready and builds on Ubuntu only; the darwin binary is signed and notarized afterwards on the Mac with `make release-sign`, see [`signing.md`](signing.md)).
-- **Device verification of the iOS work (#14/#17/#18)**: playback
-  reports, the client speech detector, the Flock and Health panes and
-  the echo-cancellation rebuild-after-route-change fix have each only
-  run in the simulator against fixture daemons; none has been checked
-  on a real phone yet (each PR's own "To check on the phone"/"on the
-  device" section is the checklist).
+- **Device verification of the iOS work (#14/#17/#18)**: the CEO used
+  the TestFlight build (0.1.0 (2)) on their iPhone on 2026-10-01 and
+  confirmed live that voice interaction works, against the daemon on
+  `0064753` with Gemini Live on Vertex AI and the brain on Vertex
+  (`gemini-3.8-flash`, switched at 00:14 UTC; 6 brain turns, no
+  fallback, no `voice.stalled`, `voice.rate_limited` or
+  `supervisor.echo_dropped` in that session). Not individually confirmed
+  yet: AirPods and route changes, the lock screen, approvals tapped on
+  the phone, and the Health pane's brain picker (the CEO could not find
+  it on the first try).
+- **Left over from the 2026-10-02 acceptance run**:
+  - the voice model can promise "I'll let you know" without calling
+    `to_supervisor` (scenario 3's first phrasing), so nothing follows;
+  - a stop's single Ctrl-C does not drop an instruction that is queued
+    behind a busy Claude Code turn (scenario 5's first run);
+  - one block is announced twice (the template sentence, then the
+    brain's line about 9 s later);
+  - `read_screen` on a still-blocked pane did not show the
+    AskUserQuestion widget the block read had; herdr flapped blocked →
+    done → blocked within 0.3 s once;
+  - automatic failover to another brain provider after repeated
+    timeouts (the CEO asked four times during the Vertex degradation and
+    heard the fallback each time) — agreed as worth doing, later;
+  - switch the brain back to Vertex only after re-measuring
+    `gemini-3.8-flash` there.
 - **The relayed-answer path of GPT-Live pacing was not re-measured**:
   #73's one live run measured the model replying to its own filler
   ("count slowly from one to twenty"); a reply relayed from the brain
@@ -144,11 +176,6 @@ is gone; what was stopped is a transcript context line).
   offline against the fake model and the eval harness; a live run
   against DeepSeek — which the orchestrator is expected to schedule —
   has not happened yet.
-- **iOS `PlaybackProfile` should follow the 400 ms GPT-Live start
-  buffer** (#73 lowered it from 1200 ms on the daemon/web side; not
-  done here). Checked 2026-09-25: `herdr-sheepdog-ios`'s
-  `PlaybackRatePolicy.swift` still has `PlaybackProfile.openAI` at
-  1,200 ms — still open.
 
 ## How work is done here
 
