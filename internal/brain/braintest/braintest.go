@@ -604,7 +604,6 @@ var (
 	// reRequest also reads the ask / propose request lines of
 	// transcripts written before those kinds were removed.
 	reRequest   = regexp.MustCompile(`Request from the assistant \((ask|propose|utterance)\): (?:question|instruction|utterance)="((?:[^"\\]|\\.)*)" agent=(?:"((?:[^"\\]|\\.)*)"|\(none)`)
-	reStop      = regexp.MustCompile(`Request from the assistant \(stop\): stopped="((?:[^"\\]|\\.)*)"`)
 	reEvent     = regexp.MustCompile(`Event from the supervisor \((announce|investigation)\): agent="((?:[^"\\]|\\.)*)" event="((?:[^"\\]|\\.)*)" template="((?:[^"\\]|\\.)*)"`)
 	reSummarise = regexp.MustCompile(`^Summarise the following`)
 	// rePromiseLine is one promise of an announce request ("- pr-1: "text" (when auth finishes)").
@@ -712,12 +711,6 @@ func reflex(call Call) (*genai.GenerateContentResponse, error) {
 		}
 		if fr != nil {
 			return respondToResult(call, fr), nil
-		}
-		if reStop.MatchString(t) {
-			// The daemon already carried the stop out; the turn only
-			// says so (read tools only, so no call is made).
-			m := reStop.FindStringSubmatch(t)
-			return Response(Step{Text: Reply("Stopped: "+unquote(m[1])+". Shall I tell it something else?", "The fake model reported what the stop procedure stopped.")}), nil
 		}
 		if reRequest.MatchString(t) || reEvent.MatchString(t) || reSummarise.MatchString(strings.TrimSpace(t)) {
 			text = t

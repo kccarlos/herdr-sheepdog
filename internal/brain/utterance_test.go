@@ -68,33 +68,6 @@ func TestNoteTool(t *testing.T) {
 	}
 }
 
-// (3) A stop turn is CEO-triggered (the shepherd is waiting) but
-// read-only: it reports what the daemon stopped and may send nothing.
-func TestStopTurnIsReadOnly(t *testing.T) {
-	m := braintest.NewModel(
-		braintest.Step{Calls: []*genai.FunctionCall{braintest.FC(ToolPrompt, map[string]any{"agent": "auth", "text": "carry on"})}},
-		braintest.Step{Text: braintest.Reply("Stopped the instruction to auth. Shall I tell it something else?", "")},
-	)
-	h := newHarness(t, m, nil)
-	rep, err := h.brain.Turn(context.Background(), Request{Kind: KindStop, Agent: "auth", Stopped: "the instruction to auth was interrupted"})
-	if err != nil || !strings.HasPrefix(rep.Spoken, "Stopped") {
-		t.Fatalf("reply = %+v err = %v", rep, err)
-	}
-	if len(h.host.Prompts) != 0 {
-		t.Errorf("a stop turn sent something: %v", h.host.Prompts)
-	}
-	if h.log.count("brain.rail_blocked") != 1 {
-		t.Errorf("rail_blocked = %d, want 1", h.log.count("brain.rail_blocked"))
-	}
-	call := h.model.Calls()[0]
-	if n := len(call.Config.Tools[0].FunctionDeclarations); n != 4 {
-		t.Errorf("stop turn declared %d tools, want the 4 read tools", n)
-	}
-	if !strings.Contains(call.Text(), `Request from the assistant (stop): stopped="the instruction to auth was interrupted"`) {
-		t.Errorf("model saw:\n%s", call.Text())
-	}
-}
-
 // (4) A write tool refuses to run once the turn's context is cancelled
 // (the shepherd said stop between the model answering and its calls).
 func TestActionToolRefusesAfterCancel(t *testing.T) {

@@ -5,9 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/kccarlos/herdr-sheepdog/internal/brain"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
-	"github.com/kccarlos/herdr-sheepdog/internal/prose"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
@@ -15,9 +13,13 @@ import (
 // The stop procedure (docs/roles.md "Stop"). "Stop" means something
 // different per phase and the daemon knows the phase from state it
 // already has, so no model decides *what* to stop: the phases below are
-// resolved in order, the first that applies is carried out, and only
-// then does one short read-only brain turn say what was stopped. Event
-// turns (announce) are not cancelled by a stop.
+// resolved in order, the first that applies is carried out, and the
+// daemon's own sentence says what was stopped at once — no model turn
+// stands between the stop and its acknowledgement (a brain turn here
+// once held the reply 5.3 s behind a Vertex 504, 2026-10-02). What was
+// stopped goes into the brain's transcript as a context line, so later
+// questions know about it. Event turns (announce) are not cancelled by a
+// stop.
 
 // Stop triggers, as logged in supervisor.stopped.
 const (
@@ -53,10 +55,12 @@ const (
 type stopOutcome struct {
 	phase string
 	// what is the sentence fragment naming what was stopped, for the
-	// log, the brain's request and the code sentence.
+	// log, the brain's transcript line and the code sentence.
 	what   string
 	paneID string
 	alias  string
+	// failed is set when the interrupt phase could not send its Ctrl-C.
+	failed bool
 }
 
 // Stop runs the stop procedure and says what it stopped. trigger is one
@@ -69,10 +73,8 @@ func (s *Supervisor) Stop(ctx context.Context, trigger string) (voice.ToolResult
 	out := s.resolveStop(ctx)
 	s.log.Log(logSource, "supervisor.stopped", out.paneID, map[string]any{"phase": out.phase, "what": out.what, "trigger": trigger})
 	if s.brain != nil {
+		// A context line, not a turn: no model call.
 		s.brain.Daemon("the CEO said stop: " + out.what)
-	}
-	if res, ok := s.stopTurn(ctx, out); ok {
-		return res, nil
 	}
 	return voice.ToolResult{Spoken: stopSentence(out), Scheduling: voice.UrgencyInterrupt}, nil
 }
@@ -116,10 +118,10 @@ func (s *Supervisor) resolveStop(ctx context.Context) stopOutcome {
 	if has && p.Kind == state.PendingSendInstruction && s.cfg.Now().Sub(p.CreatedAt) <= s.cfg.CancelWindow {
 		if row, ok := s.store.Get(p.PaneID); ok && row.State == herdr.StateWorking {
 			alias := aliasOr(row.Alias)
-			out := stopOutcome{phase: stopPhaseInterrupt, paneID: p.PaneID, alias: alias, what: "the instruction to " + alias + " was interrupted"}
+			out := stopOutcome{phase: stopPhaseInterrupt, paneID: p.PaneID, alias: alias, what: "an interrupt (Ctrl-C) was sent to " + alias}
 			if err := s.herdr.Interrupt(ctx, p.PaneID); err != nil {
 				s.log.Log(logSource, "supervisor.cancel_error", p.PaneID, map[string]any{"id": p.ID, "error": err.Error(), "via": "stop"})
-				out.what = "I could not interrupt " + alias
+				out.what, out.failed = "I could not interrupt "+alias, true
 			} else {
 				// The next working -> done is the Ctrl-C, not a finish.
 				s.interrupted[p.PaneID] = s.cfg.Now()
@@ -188,29 +190,16 @@ func (s *Supervisor) investigationAbout(text string) (string, bool) {
 	return "", false
 }
 
-// stopTurn runs the closing brain turn: read tools only, a short
-// budget, and the CEO's own words triggered it, so it keeps the CEO
-// priority of the turn lock. ok is false when there is no brain or it
-// could not answer, and the code sentence is spoken instead.
-func (s *Supervisor) stopTurn(ctx context.Context, out stopOutcome) (voice.ToolResult, bool) {
-	if s.brain == nil {
-		return voice.ToolResult{}, false
-	}
-	rep, err := s.brain.Turn(ctx, brain.Request{Kind: brain.KindStop, Trigger: brain.TriggerCEO, Agent: out.alias, Stopped: out.what})
-	if err != nil {
-		return voice.ToolResult{}, false
-	}
-	res := toolResultFrom(rep, prose.EarBrief)
-	if res.Spoken == "" {
-		return voice.ToolResult{}, false
-	}
-	res.Scheduling = voice.UrgencyInterrupt
-	return res, true
-}
-
-// stopSentence is what the daemon says with no brain to phrase it.
+// stopSentence is the stop's acknowledgement, short for the ear. The
+// interrupt phase says only that Ctrl-C was sent: that does not
+// guarantee a queued instruction was dropped.
 func stopSentence(out stopOutcome) string {
 	switch out.phase {
+	case stopPhaseInterrupt:
+		if out.failed {
+			return out.what + "."
+		}
+		return "Sent an interrupt to " + out.alias + "."
 	case stopPhaseNone:
 		return "Nothing was in flight."
 	case stopPhasePromptOpen:

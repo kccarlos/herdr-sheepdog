@@ -679,8 +679,9 @@ func TestMessageProviderRoundTrip(t *testing.T) {
 // and its result, and the next request must still put the tool message
 // right after the assistant's tool_calls (DeepSeek answered HTTP 400
 // otherwise, and every later turn failed on the same window). The line
-// is kept, after the result; the next turn (the stop turn that failed
-// in the log) is valid too.
+// is kept, after the result; the next turn (in the log a stop turn,
+// a kind since removed; any later turn failed the same way) is valid
+// too.
 func TestVoiceLineDuringToolCall(t *testing.T) {
 	srv := newCompatServer(t,
 		toolCalls("Read more of the screen.", [3]string{"call_00_Bk", ToolReadScreen, `{"agent":"auth","lines":200}`}),
@@ -703,7 +704,7 @@ func TestVoiceLineDuringToolCall(t *testing.T) {
 		t.Fatalf("transcript = %s (the test needs the line between the call and its result)", got)
 	}
 	h.brain.Quiesce()
-	if _, err := h.brain.Turn(context.Background(), Request{Kind: KindStop, Stopped: "nothing was in flight"}); err != nil {
+	if _, err := h.brain.Turn(context.Background(), Request{Question: "anything else?"}); err != nil {
 		t.Fatalf("next turn: %v", err)
 	}
 	for i := 1; i < srv.count(); i++ {

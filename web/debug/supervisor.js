@@ -15,8 +15,8 @@
 //   assistant    what the assistant said (assistant_said)
 //   push         a push the supervisor sent, with its urgency
 //   worker       a herdr transition ("auth: working → done")
-//   request      the request as the SVP received it (utterance / stop;
-//                ask / propose in transcripts from before they were removed)
+//   request      the request as the SVP received it (utterance; ask /
+//                propose / stop in transcripts from before they were removed)
 //                (or a nudge: "Time is up", "That was not the JSON")
 //   tool         brain_tool_call paired with its brain_tool_result by id
 //   reply        the SVP's answer-contract reply (parsed when it is JSON)
@@ -57,7 +57,8 @@ export const KIND_GROUPS = {
 export const GROUP_ORDER = ['compaction', 'ceo', 'assistant', 'push', 'worker', 'note', 'promise', 'request', 'tool', 'result', 'reply', 'other'];
 
 // ask/propose are the original two request kinds; utterance and stop
-// (assemble.go's requestText / stopRequestText) were added later with
+// (assemble.go's requestText; stop's request is gone since 2026-10-02,
+// but old transcripts still carry it) were added later with
 // their own field name ("utterance=", "stopped=") and, for stop, a bare
 // "agent=(none)" with no colon — this must match both old and new
 // transcripts, or a real request renders as a nudge (audit B7).

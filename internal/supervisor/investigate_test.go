@@ -334,8 +334,8 @@ func TestStopCancelsInvestigation(t *testing.T) {
 	if what, _ := payload(stopped[0])["what"].(string); what != "the look into auth was called off" {
 		t.Errorf("supervisor.stopped what = %q", what)
 	}
-	if res.Spoken == "" {
-		t.Error("the stop turn said nothing")
+	if res.Spoken != "Stopped: the look into auth was called off." {
+		t.Errorf("stop said %q", res.Spoken)
 	}
 	if inv, _ := h.sup.investigation(job.Job); inv.Status != state.InvestigationCancelled {
 		t.Errorf("record = %+v", inv)

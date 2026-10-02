@@ -167,8 +167,13 @@ tools run under its context and never execute) → cancel the running
 investigation the withdrawn request was about, or, with nothing in
 flight, the most recent one → Ctrl-C a worker that
 received an instruction within `supervisor.cancel_window_s` (30 s) →
-leave an open worker prompt open (stop is not "no") → one short brain
-turn saying what was stopped and offering the correction. Undoing a
+leave an open worker prompt open (stop is not "no"). The daemon's own
+sentence acknowledges it at once — no model turn stands between the stop
+and its reply (one used to hold it 5.3 s behind a Vertex 504) — and what
+was stopped goes into the brain's transcript as a context line, so a
+later question knows about it. The interrupt phase says only "Sent an
+interrupt to <alias>.": Ctrl-C does not guarantee a queued instruction
+was dropped. Undoing a
 worker's edits is an instruction to the worker, not a stop. The stop
 words are "stop", "wait", "cancel", "abort", "halt", "hold on" and "no
 no" (`supervisor.BareStopWords`, the voice's `stop` tool); "never mind"

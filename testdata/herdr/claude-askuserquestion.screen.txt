@@ -1,0 +1,51 @@
+  announcement and the CEO can approve or decline it. Please set that up now. When you finish, end with three short lines for someone who cannot see the screen:
+  what changed; what needs a decision; what is next.
+
+⏺ Monitor event: 00:20:33 brain.step {"completion_tokens":78,"dur_ms":1981,"forced":false,"function_calls":["prompt"],"model":"gemini-3.8-flash","prompt_tokens":142…
+
+⏺ Monitor event: 00:20:36 brain.step {"cache_hit_tokens":11472,"completion_tokens":77,"dur_ms":1860,"forced":false,"function_calls":[],"model":"gemini-3.8-flash","p…
+
+⏺ Monitor event: 00:20:41 voice.turn {"dur_ms":10080,"end":"complete","input_to_response_ms":0,"pushes_spoken":1,"responded":true,"stalled":false,"tool_calls":1,"tu…
+
+⏺ Monitor event: 00:20:48 voice.transcript.in {"final":false,"text":"Prompt it saying this is a test."} · sheepdog acceptance scenarios: key daemon events
+
+⏺ Monitor event: 00:20:50 brain.step {"cache_hit_tokens":11488,"completion_tokens":60,"dur_ms":1655,"forced":false,"function_calls":["prompt"],"model":"gemini-3.8-f…
+
+❯ Make sure the approval prompt clearly states: "This is a test approval prompt: do you want to proceed?" so the CEO knows it is explicitly the test. When you
+  finish, end with three short lines for someone who cannot see the screen: what changed; what needs a decision; what is next.
+
+⏺ Monitor event: 00:20:50 herdr.send {"error":"","kind":"prompt","text":"Make sure the approval prompt clearly states: \"This is a test approval prompt: do you want…
+
+⏺ Monitor event: 00:20:51 voice.turn {"dur_ms":3353,"end":"superseded","input_to_response_ms":0,"pushes_spoken":0,"responded":true,"stalled":false,"tool_calls":1,"t…
+
+⏺ Monitor event: 00:20:52 brain.step {"cache_hit_tokens":11467,"completion_tokens":72,"dur_ms":1913,"forced":false,"function_calls":[],"model":"gemini-3.8-flash","p…
+
+⏺ Monitor event: 00:20:53 voice.tool_result {"clarify":false,"detail":"Still working on it; the answer follows on its own.","dur_ms":2002,"id":"call_33381","name":"…
+
+❯ Please make sure you ask it back directly so that an approval prompt appears on screen for the supervisor and phone to relay. When you finish, end with three
+  short lines for someone who cannot see the screen: what changed; what needs a decision; what is next.
+
+⏺ Monitor event: 00:20:57 brain.step {"cache_hit_tokens":11474,"completion_tokens":52,"dur_ms":5240,"forced":false,"function_calls":["prompt"],"model":"gemini-3.8-f…
+
+⏺ Monitor event: 00:20:58 herdr.send {"error":"","kind":"prompt","text":"Please make sure you ask it back directly so that an approval prompt appears on screen for …
+
+⏺ Monitor event: 00:20:59 brain.step {"cache_hit_tokens":11453,"completion_tokens":30,"dur_ms":1349,"forced":false,"function_calls":["read_screen"],"model":"gemini-…
+
+⏺ Monitor event: 00:21:01 brain.step {"cache_hit_tokens":11460,"completion_tokens":72,"dur_ms":2343,"forced":false,"function_calls":[],"model":"gemini-3.8-flash","p…
+
+⏺ 日志核对确认：00:20:12发起提问，00:20:14 brain在Vertex上正常回答，未触发fallback。接下来我会在自己的窗格弹出真实审批提示，让supervisor检测到阻塞并转播到手机。
+─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ ☐ Test
+
+This is a test approval prompt: do you want to proceed?
+
+❯ 1. Yes, proceed
+     Acceptance scenario 2 test: approve. Nothing real happens.
+  2. No, decline
+     Acceptance scenario 2 test: decline. Nothing real happens.
+  3. Type something.
+─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  4. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc to cancel
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── herdr-sheepdog-implementer-v2 ─

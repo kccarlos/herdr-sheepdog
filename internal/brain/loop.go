@@ -65,10 +65,6 @@ func (b *Brain) Turn(ctx context.Context, req Request) (Reply, error) {
 	// decision-maker").
 	timeout := b.cfg.UtteranceTimeout
 	switch {
-	case req.Kind == KindStop:
-		// The CEO is waiting and the procedure already acted: one short
-		// read-only turn to say what was stopped.
-		timeout = b.cfg.StopTimeout
 	case req.Kind == KindInvestigation:
 		// The answer the CEO is owed, composed from a result that took
 		// minutes to get: it gets the longer budget, not the announce

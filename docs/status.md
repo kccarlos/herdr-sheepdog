@@ -100,6 +100,16 @@ utterance, coalescing), which are unit- and daemon-tested. Gemini's free
 tier allows about 20 requests per model per key per day; run live checks
 sparingly and `make eval-live` deliberately.
 
+Fixed after the 2026-10-02 acceptance run (unit- and harness-tested;
+not yet re-run live): Claude Code's AskUserQuestion widget now parses
+as a prompt — `parseOptions` skips the indented description under each
+option and stops at the rule above "Chat about this" — so a block
+records the question and `send_keys ["1"]` passes the rail (the number
+key selects at once, checked against a real Claude Code 2.1.287
+widget); and the stop acknowledgement is the daemon's code sentence at
+once, no longer held behind a brain stop turn (the `stop` request kind
+is gone; what was stopped is a transcript context line).
+
 ## Open
 
 - **agy blocks**: herdr 0.9.0 does not detect Antigravity CLI prompts as

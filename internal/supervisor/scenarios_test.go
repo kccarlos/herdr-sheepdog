@@ -170,6 +170,8 @@ func TestConfirmAnswerMapping(t *testing.T) {
 		{"codex-approval-prompt.screen.txt", "Yes, proceed", "y", "Told auth Yes, proceed."},
 		{"claude-permission-prompt.screen.txt", "go ahead", "1", "Told auth yes."},
 		{"claude-permission-prompt.screen.txt", "No.", "3", "Told auth no."},
+		{"claude-askuserquestion.screen.txt", "go ahead", "1", "Told auth yes."},
+		{"claude-askuserquestion.screen.txt", "No.", "2", "Told auth no."},
 	}
 	for _, c := range cases {
 		t.Run(c.screen+"/"+c.answer, func(t *testing.T) {
@@ -274,7 +276,7 @@ func TestScenario5CancelInterruptsCorrectPane(t *testing.T) {
 	}
 	h.transition("w6:p1", herdr.StateIdle, herdr.StateWorking)
 	res := h.say("stop")
-	if res.Spoken != "Stopped: the instruction to docs was interrupted." || res.Scheduling != voice.UrgencyInterrupt {
+	if res.Spoken != "Sent an interrupt to docs." || res.Scheduling != voice.UrgencyInterrupt {
 		t.Errorf("stop = %+v", res)
 	}
 	if keys := h.sendKeysRequests(); len(keys) != 1 || keys[0] != [2]string{"w6:p1", "ctrl+c"} {
@@ -452,6 +454,41 @@ func TestAgentExitPushesInterrupt(t *testing.T) {
 	h.transition("w6:p1", herdr.StateIdle, herdr.StateUnknown)
 	if len(h.pusher.all()) != before {
 		t.Error("idle exit pushed")
+	}
+}
+
+// The acceptance run of 2026-10-02: Claude Code's AskUserQuestion
+// widget (a description line under each option) went blocked, but the
+// parser saw no prompt — supervisor.blocked_no_question — so send_keys
+// was refused as "has no pending approval prompt now". The blocked
+// chain must record the question and the brain's send_keys ["1"] must
+// pass. In the widget the number key selects at once, no Enter (checked
+// against Claude Code 2.1.287).
+func TestAskUserQuestionBlockCreatesPendingAndSendKeysPasses(t *testing.T) {
+	h := newHarness(t)
+	h.addAgent("w5:p1", "w5", "claude", herdr.StateWorking)
+	h.block("w5:p1", "claude-askuserquestion.screen.txt")
+	if h.log.count("supervisor.blocked_no_question") != 0 || h.log.count("pending.created") != 1 {
+		t.Fatalf("blocked_no_question=%d created=%d", h.log.count("supervisor.blocked_no_question"), h.log.count("pending.created"))
+	}
+	p, ok := h.pending()
+	if !ok || p.Kind != state.PendingAnswerPrompt || p.PaneID != "w5:p1" || len(p.Options) != 3 {
+		t.Fatalf("pending = %+v", p)
+	}
+	if p.Question != "this is a test approval prompt: do you want to proceed" {
+		t.Errorf("question = %q", p.Question)
+	}
+	h.clock.Advance(time.Second)
+	h.sup.ShepherdInput(InputTyped, "yes")
+	res, err := (brainHost{s: h.sup}).AnswerPrompt(context.Background(), "w5:p1", []string{"1"})
+	if err != nil {
+		t.Fatalf("AnswerPrompt: %v", err)
+	}
+	if !strings.HasPrefix(res, "Told auth") {
+		t.Errorf("result = %q", res)
+	}
+	if got := h.sendKeysRequests(); len(got) != 1 || got[0] != [2]string{"w5:p1", "1"} {
+		t.Errorf("keys = %v", got)
 	}
 }
 
