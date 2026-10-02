@@ -92,7 +92,7 @@ an event already notified is not sent again.
   `aps.alert.body` is the same spoken sentence the voice says.
 - `aps.thread-id` is the pane id, so the app groups an agent's alerts.
 - `aps.category` is `APPROVAL` when there is a pending answer-prompt
-  action with options (the app can answer it with
+  action (the app can answer it with
   `POST /api/pending/answer {"id": pending_id, "option": index}`),
   otherwise `AGENT`.
 - `aps.interruption-level` is `time-sensitive` for needs-you events
