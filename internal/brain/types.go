@@ -42,16 +42,14 @@ type Kind string
 // (docs/roles.md "One decision-maker"). (The older classified CEO
 // turns, ask and propose, are gone; their request lines still appear in
 // transcripts written before, and /debug still reads them.)
-// Stop is the short read-only turn the stop procedure runs to say what
-// it stopped; announce is the event turn the supervisor runs on a
-// worker's block or finish (docs/roles.md "Push judgment").
+// Announce is the event turn the supervisor runs on a worker's block or
+// finish (docs/roles.md "Push judgment"). (The stop procedure's closing
+// turn, kind stop, is gone too: the daemon acknowledges a stop with its
+// own sentence and records it as a context line, Brain.Daemon.)
 const (
 	// KindUtterance carries the CEO's words verbatim in Question, with
 	// no agent hint: the brain resolves intent, target and action.
 	KindUtterance Kind = "utterance"
-	// KindStop reports what the stop procedure stopped: read tools
-	// only, a short budget, still CEO-triggered (the CEO is waiting).
-	KindStop Kind = "stop"
 	// KindAnnounce decides what the assistant says about a worker event
 	// and how urgently: the one line for that event, which replaces the
 	// daemon's own sentence and keeps the promises the event fulfils.
@@ -71,9 +69,8 @@ const (
 func (k Kind) IsEvent() bool { return k == KindAnnounce || k == KindInvestigation }
 
 // ReadOnly reports whether k's turn is declared (and allowed) the read
-// tools only: an event turn, and the stop turn, which reports on the
-// procedure code already carried out and must send nothing more.
-func (k Kind) ReadOnly() bool { return k.IsEvent() || k == KindStop }
+// tools only: an event turn.
+func (k Kind) ReadOnly() bool { return k.IsEvent() }
 
 // The urgencies an announce reply may ask for (Reply.Urgency); the
 // supervisor caps them under the chattiness ceiling.
@@ -93,8 +90,8 @@ const (
 	TriggerEvent Trigger = "event"
 )
 
-// Request is one turn's request: the shepherd's relayed words, the stop
-// procedure's closing turn, or a worker event.
+// Request is one turn's request: the shepherd's relayed words or a
+// worker event.
 type Request struct {
 	// Kind defaults to KindUtterance.
 	Kind Kind
@@ -115,9 +112,6 @@ type Request struct {
 	// can say "no change since I last checked" itself rather than
 	// repeat the roster (docs/history/issues-2026-09-18.md "Smaller items").
 	RosterUnchangedFor time.Duration
-	// Stopped is what the stop procedure stopped, for a KindStop turn
-	// ("the instruction to auth was interrupted").
-	Stopped string
 	// Event is the worker event of an event turn (done, blocked).
 	Event string
 	// Template is the sentence the daemon speaks for the event when the

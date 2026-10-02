@@ -185,7 +185,6 @@ func TestStopCancelsDetachedTurn(t *testing.T) {
 		Block: release,
 		Calls: []*genai.FunctionCall{braintest.FC(brain.ToolPrompt, map[string]any{"agent": "auth", "text": "add a readme"})},
 	})
-	m.Default = &braintest.Step{Text: braintest.Reply("Withdrew your request before anything was sent.", "")}
 	h := newBrainHarness(t, m, replyWait(20*time.Millisecond))
 	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
 
@@ -198,7 +197,7 @@ func TestStopCancelsDetachedTurn(t *testing.T) {
 
 	stop := h.call(ToolStop, nil)
 	h.sup.replies.Wait()
-	if !strings.Contains(stop.Spoken, "Withdrew") {
+	if stop.Spoken != `Stopped: your request "tell auth to add a readme" was withdrawn before it acted.` {
 		t.Errorf("stop = %+v", stop)
 	}
 	assertStopped(t, h, stopPhaseCancelTurn, StopTriggerTool)

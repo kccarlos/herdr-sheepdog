@@ -276,7 +276,7 @@ func TestScenario5CancelInterruptsCorrectPane(t *testing.T) {
 	}
 	h.transition("w6:p1", herdr.StateIdle, herdr.StateWorking)
 	res := h.say("stop")
-	if res.Spoken != "Stopped: the instruction to docs was interrupted." || res.Scheduling != voice.UrgencyInterrupt {
+	if res.Spoken != "Sent an interrupt to docs." || res.Scheduling != voice.UrgencyInterrupt {
 		t.Errorf("stop = %+v", res)
 	}
 	if keys := h.sendKeysRequests(); len(keys) != 1 || keys[0] != [2]string{"w6:p1", "ctrl+c"} {

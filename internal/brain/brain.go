@@ -37,9 +37,6 @@ const (
 	// request): the code sentence has already said "here's what it
 	// found", so the brain's line is worth waiting longer for.
 	DefaultAnnounceTimeout = 15 * time.Second
-	// DefaultStopTimeout bounds the stop procedure's closing turn: on
-	// expiry the supervisor speaks its own "Stopped: …" sentence.
-	DefaultStopTimeout = 5 * time.Second
 	// DefaultWindowTokens and DefaultPruneAfterTurns were 24000 and 3
 	// until docs/iteration-2.md WP5 halved the window: prompts averaged
 	// 19.8 k tokens and announce turns missed the 2 s reply window.
@@ -71,10 +68,9 @@ type Config struct {
 	MaxSteps int
 	// UtteranceTimeout bounds an utterance turn including its tools (it
 	// may be an instruction) and an investigation delivery turn;
-	// AnnounceTurnTimeout bounds an event turn and StopTimeout a stop
-	// turn; AnnounceTimeout bounds an announce turn the shepherd is owed
+	// AnnounceTurnTimeout bounds an event turn; AnnounceTimeout bounds an announce turn the shepherd is owed
 	// (Request.Owed, or one that keeps a promise).
-	UtteranceTimeout, AnnounceTurnTimeout, AnnounceTimeout, StopTimeout time.Duration
+	UtteranceTimeout, AnnounceTurnTimeout, AnnounceTimeout time.Duration
 	// WindowTokens is the estimated window size that triggers compaction.
 	WindowTokens int
 	// PruneAfterTurns is how many turns a tool result stays verbatim.
@@ -124,9 +120,6 @@ func (c Config) withDefaults() Config {
 	}
 	if c.AnnounceTimeout <= 0 {
 		c.AnnounceTimeout = DefaultAnnounceTimeout
-	}
-	if c.StopTimeout <= 0 {
-		c.StopTimeout = DefaultStopTimeout
 	}
 	if c.WindowTokens <= 0 {
 		c.WindowTokens = DefaultWindowTokens

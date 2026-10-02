@@ -301,8 +301,6 @@ func requestText(req Request) string {
 		return investigationRequestText(req)
 	case req.Kind.IsEvent():
 		return eventRequestText(req)
-	case req.Kind == KindStop:
-		return stopRequestText(req)
 	}
 	s := fmt.Sprintf("Request from the assistant (%s): utterance=%q", KindUtterance, req.Question)
 	if req.Agent != "" {
@@ -320,23 +318,6 @@ func requestText(req Request) string {
 		s += fmt.Sprintf("\nThe roster is unchanged since you last reported it %d s ago; if the shepherd is only asking for status again, say there has been no change since you last checked, briefly.", int(req.RosterUnchangedFor.Seconds()))
 	}
 	return s + "\nThose are the CEO's own words, relayed verbatim: decide what they are (a status question, something to find out, an instruction, an answer to a worker's prompt, a promise, a note, small talk) and act. Use tools as needed, then reply with the JSON object of the answer contract."
-}
-
-// stopRequestText is the request of the stop procedure's closing turn:
-// the code already resolved and carried out what to stop, so the turn
-// only says so and offers the correction (read tools only).
-func stopRequestText(req Request) string {
-	stopped := req.Stopped
-	if stopped == "" {
-		stopped = "nothing was in flight"
-	}
-	s := fmt.Sprintf("Request from the assistant (stop): stopped=%q", stopped)
-	if req.Agent != "" {
-		s += fmt.Sprintf(" agent=%q", req.Agent)
-	} else {
-		s += " agent=(none)"
-	}
-	return s + "\nThe CEO said stop and the daemon already carried the stop out; an open worker prompt is deliberately left open. Say in one short sentence what was stopped, then offer the correction as the ask (\"Shall I tell it something else?\"). Read tools only: send nothing."
 }
 
 // investigationRequestText is the request of a delivery turn: the job

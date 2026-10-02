@@ -325,12 +325,12 @@ func TestBareAnswerAfterAPushReachesTheBrain(t *testing.T) {
 // (4) A bare stop word never reaches a model and never becomes an
 // answer: phase 4 leaves the worker's question open.
 func TestStopLeavesAnOpenPromptOpen(t *testing.T) {
-	m := braintest.NewModel(braintest.Step{Text: braintest.Reply("Left auth's question open. Shall I answer it?", "")})
+	m := braintest.NewModel()
 	h := newBrainHarness(t, m)
 	blockedAuth(t, h)
 
 	res := h.say("stop")
-	if !strings.Contains(res.Spoken, "auth") || res.Scheduling != voice.UrgencyInterrupt {
+	if res.Spoken != "Nothing to stop; auth is still waiting for your answer, so I left its question open." || res.Scheduling != voice.UrgencyInterrupt {
 		t.Fatalf("result = %+v", res)
 	}
 	if p, has := h.pending(); !has || p.Kind != state.PendingAnswerPrompt {
@@ -345,9 +345,11 @@ func TestStopLeavesAnOpenPromptOpen(t *testing.T) {
 // (5) The stop() tool runs the same procedure as the bare word, and
 // logs which trigger fired.
 func TestStopToolRunsTheProcedure(t *testing.T) {
-	m := braintest.NewModel(braintest.Step{Text: braintest.Reply("Nothing was in flight.", "")})
+	m := braintest.NewModel()
 	h := newBrainHarness(t, m)
-	h.call(ToolStop, nil)
+	if res := h.call(ToolStop, nil); res.Spoken != "Nothing was in flight." {
+		t.Errorf("stop = %+v", res)
+	}
 	assertStopped(t, h, stopPhaseNone, StopTriggerTool)
 }
 
@@ -360,15 +362,15 @@ func TestStopToolRunsTheProcedure(t *testing.T) {
 func TestBareStopWordsAgreeWithTheRouter(t *testing.T) {
 	for _, word := range []string{"abort", "Halt."} {
 		t.Run(word, func(t *testing.T) {
-			m := braintest.NewModel(braintest.Step{Text: braintest.Reply("Nothing was in flight.", "")})
+			m := braintest.NewModel()
 			h := newBrainHarness(t, m)
 			res := h.say(word)
-			if res.Scheduling != voice.UrgencyInterrupt && res.Spoken != "Nothing was in flight." {
+			if res.Scheduling != voice.UrgencyInterrupt || res.Spoken != "Nothing was in flight." {
 				t.Fatalf("say(%q) = %+v, want the stop procedure", word, res)
 			}
 			assertStopped(t, h, stopPhaseNone, StopTriggerBareWord)
-			if got := len(m.Calls()); got != 1 { // the stop procedure's own closing turn only
-				t.Errorf("model calls = %d, want 1 (no ordinary utterance turn)", got)
+			if got := len(m.Calls()); got != 0 {
+				t.Errorf("model calls = %d, want 0 (the stop procedure runs no model)", got)
 			}
 		})
 	}
@@ -429,7 +431,6 @@ func TestStopInterruptsARecentInstruction(t *testing.T) {
 			m := braintest.NewModel(
 				braintest.Step{Calls: []*genai.FunctionCall{braintest.FC(brain.ToolPrompt, map[string]any{"agent": "auth", "text": "add a readme"})}},
 				braintest.Step{Text: braintest.Reply("Telling auth to add a readme. Sent.", "")},
-				braintest.Step{Text: braintest.Reply("Stopped auth.", "")},
 			)
 			h := newBrainHarness(t, m)
 			h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
@@ -465,7 +466,6 @@ func TestStopCancelsTheBrainTurnAndSendsNothing(t *testing.T) {
 		Block: release,
 		Calls: []*genai.FunctionCall{braintest.FC(brain.ToolPrompt, map[string]any{"agent": "auth", "text": "add a readme"})},
 	})
-	m.Default = &braintest.Step{Text: braintest.Reply("Withdrew your request before anything was sent.", "")}
 	h := newBrainHarness(t, m)
 	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
 
@@ -487,7 +487,7 @@ func TestStopCancelsTheBrainTurnAndSendsNothing(t *testing.T) {
 	if res.Scheduling != voice.UrgencySilent {
 		t.Errorf("a dropped utterance must not speak: %+v", res)
 	}
-	if !strings.Contains(stop.Spoken, "Withdrew") {
+	if stop.Spoken != `Stopped: your request "tell auth to add a readme" was withdrawn before it acted.` {
 		t.Errorf("stop = %+v", stop)
 	}
 	assertStopped(t, h, stopPhaseCancelTurn, StopTriggerTool)
@@ -501,7 +501,6 @@ func TestStopAfterTheTurnActedInterrupts(t *testing.T) {
 		braintest.Step{Calls: []*genai.FunctionCall{braintest.FC(brain.ToolPrompt, map[string]any{"agent": "auth", "text": "add a readme"})}},
 		braintest.Step{Block: release, Text: braintest.Reply("Telling auth to add a readme. Sent.", "")},
 	)
-	m.Default = &braintest.Step{Text: braintest.Reply("Stopped auth.", "")}
 	h := newBrainHarness(t, m)
 	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
 
@@ -522,6 +521,50 @@ func TestStopAfterTheTurnActedInterrupts(t *testing.T) {
 	}
 	if ctrlC != 1 {
 		t.Errorf("%d ctrl+c sends, want 1: %v", ctrlC, h.sendKeysRequests())
+	}
+}
+
+// (7c) The stop acknowledgement never waits for the brain: on
+// 2026-10-02 a Vertex 504 held "Stopped: …" 5.3 s behind the Ctrl-C,
+// because a brain turn sat between the stop and its reply. With a model
+// that would block forever, stop answers at once with the code sentence,
+// records what was stopped as a context line, and calls no model.
+func TestStopRepliesWithoutWaitingForTheBrain(t *testing.T) {
+	block := make(chan struct{})
+	defer close(block)
+	m := braintest.NewModel(
+		braintest.Step{Calls: []*genai.FunctionCall{braintest.FC(brain.ToolPrompt, map[string]any{"agent": "auth", "text": "add a readme"})}},
+		braintest.Step{Text: braintest.Reply("Telling auth to add a readme. Sent.", "")},
+	)
+	m.Default = &braintest.Step{Block: block, Text: braintest.Reply("too late", "")}
+	h := newBrainHarness(t, m)
+	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
+	if res := h.say("tell auth to add a readme"); !strings.HasSuffix(res.Spoken, "Sent.") {
+		t.Fatalf("instruction = %+v", res)
+	}
+	calls := len(m.Calls())
+	h.clock.Advance(5 * time.Second)
+
+	start := time.Now()
+	res := h.call(ToolStop, nil)
+	if took := time.Since(start); took > 50*time.Millisecond {
+		t.Errorf("stop took %v, want a few ms", took)
+	}
+	if res.Spoken != "Sent an interrupt to auth." || res.Scheduling != voice.UrgencyInterrupt {
+		t.Errorf("stop = %+v", res)
+	}
+	if got := len(m.Calls()); got != calls {
+		t.Errorf("model calls = %d after the stop, want %d (no stop turn)", got, calls)
+	}
+	assertStopped(t, h, stopPhaseInterrupt, StopTriggerTool)
+	found := false
+	for _, msg := range h.sup.Brain().Transcript().Messages() {
+		if msg.Kind == brain.KindSystem && msg.Content == "the CEO said stop: an interrupt (Ctrl-C) was sent to auth" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("the transcript has no context line for the stop")
 	}
 }
 

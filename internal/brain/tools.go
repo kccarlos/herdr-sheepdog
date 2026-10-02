@@ -73,7 +73,7 @@ const (
 
 // toolDeclarations is the function surface (plain GenerateContent
 // declarations; no Live-only behaviour field). readOnly is the surface
-// of an event or stop turn: the read tools only, no actions, promise or
+// of an event turn: the read tools only, no actions, promise or
 // note.
 func toolDeclarations(readOnly bool) []*genai.Tool {
 	str := func(desc string) *genai.Schema { return &genai.Schema{Type: genai.TypeString, Description: desc} }
@@ -149,10 +149,10 @@ func (b *Brain) execTool(ctx context.Context, t *turn, call *genai.FunctionCall)
 	}
 	if IsActionTool(call.Name) {
 		if trigger != TriggerCEO || t.req.Kind.ReadOnly() {
-			// Event and stop turns are read-only: they are not declared
+			// Event turns are read-only: they are not declared
 			// these tools, and the executor refuses them regardless (the
 			// model may still name one).
-			reason := call.Name + " is only permitted in a turn the CEO's own words triggered, never on an event or a stop"
+			reason := call.Name + " is only permitted in a turn the CEO's own words triggered, never on an event"
 			return toolOutcome{railBlocked: reason, err: fmt.Errorf("%w: %s", ErrNotPermitted, reason)}
 		}
 		if err := ctx.Err(); err != nil {
