@@ -37,8 +37,9 @@ type Notification struct {
 	// Options are the pending prompt's choices (approval only).
 	Options []Option
 	// NeedsYou marks a decision or action the shepherd must take: it is
-	// sent time-sensitive at priority 10. Otherwise (a kept promise) the
-	// alert is active at priority 5.
+	// sent time-sensitive. Otherwise (a kept promise) the alert is
+	// active. Both go at priority 10: a kept promise is something the
+	// CEO asked to hear about, so it must not wait for power batching.
 	NeedsYou bool
 }
 
@@ -66,12 +67,7 @@ func (n Notification) CollapseID() string {
 	return id
 }
 
-func (n Notification) priority() string {
-	if n.NeedsYou {
-		return "10"
-	}
-	return "5"
-}
+func (n Notification) priority() string { return "10" }
 
 // Payload is the APNs JSON body (docs/push.md).
 func (n Notification) Payload() map[string]any {

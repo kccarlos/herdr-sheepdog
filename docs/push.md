@@ -105,7 +105,7 @@ an event already notified is not sent again.
   brain on).
 
 Headers: `apns-push-type: alert`, `apns-topic: <topic>`,
-`apns-priority: 10` for needs-you events and `5` for a kept promise,
+`apns-priority: 10` for every alert (a kept promise was asked for, so it is not left to power batching),
 `apns-collapse-id` = the pending id, else the event id (a later alert
 about the same prompt replaces the earlier one).
 

@@ -235,7 +235,7 @@ func TestPromisePayloadIsActiveAtPriority5(t *testing.T) {
 	if r.path != "/sandbox/3/device/"+tokA {
 		t.Errorf("sandbox device went to %s", r.path)
 	}
-	if r.header.Get("apns-priority") != "5" || r.header.Get("apns-collapse-id") != "evt-9" {
+	if r.header.Get("apns-priority") != "10" || r.header.Get("apns-collapse-id") != "evt-9" {
 		t.Errorf("headers = %v", r.header)
 	}
 	aps := r.body["aps"].(map[string]any)
