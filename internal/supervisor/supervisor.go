@@ -141,6 +141,10 @@ type Config struct {
 	// (docs/roles.md); without it the daemon speaks code sentences and
 	// sends nothing. New attaches the Supervisor as its Host.
 	Brain *brain.Brain
+	// Notifier, when set, gets one phone notification per announced
+	// event that needs the shepherd (a block, an approval prompt, a kept
+	// promise; notify.go), whether or not a voice client is attached.
+	Notifier Notifier
 	// Now overrides the clock (tests).
 	Now func() time.Time
 	// WorkerLog reads the workers' own session transcripts for the work

@@ -332,3 +332,21 @@ the embedded `assistant.md`, `USER.md` and `svp/{SOUL,RULES}.md`.
 | Key | Env override | Default | Meaning |
 |---|---|---|---|
 | `prompts.dir` | `SHEEPDOG_PROMPTS_DIR` | `~/.config/sheepdog/prompts` | Override directory: `<dir>/<name>` (the same relative path as under `prompts/` in the repo, e.g. `assistant.md`, `svp/RULES.md`) replaces the matching embedded file when present; a missing file or directory is not an error. Re-read on `SIGHUP` and `POST /api/prompts/reload`, not just at daemon start. An override of `svp/RULES.md` that drops the rail or the provenance sentence is rejected (`prompts.override_rejected`) and the embedded file is used instead — the one rail cannot be removed by a prompt edit. `sheepdog prompts export [dir]` seeds this directory from the embedded defaults; `sheepdog prompts show <name>` prints the effective text and its source. |
+
+## `[push.apns]`
+
+Phone notifications for the iOS companion app over the Apple Push
+Notification service (docs/push.md). All four keys are needed; with any
+one empty, sending is disabled and `push.disabled` at startup says which
+are missing (devices can still register, so nothing is lost while the key
+is being set up). `config show` prints `key_path` as set/unset only; the
+key file's contents are never read into a log.
+
+| Key | Env override | Default | Meaning |
+|---|---|---|---|
+| `push.apns.key_path` | `SHEEPDOG_APNS_KEY_PATH` | empty (disabled) | The `.p8` APNs auth key (ES256, PKCS#8 PEM) from the Apple Developer account. A leading `~/` is expanded. Keep it mode 600. |
+| `push.apns.key_id` | `SHEEPDOG_APNS_KEY_ID` | empty | The auth key's 10-character Key ID (the JWT `kid`). |
+| `push.apns.team_id` | `SHEEPDOG_APNS_TEAM_ID` | empty | The Apple Developer Team ID the key belongs to (the JWT `iss`). A key from another team is rejected by APNs with `403 InvalidProviderToken`. |
+| `push.apns.topic` | `SHEEPDOG_APNS_TOPIC` | empty | The iOS app's bundle id (`apns-topic`). |
+
+Registered devices persist in `<data_dir>/push_devices.json`.

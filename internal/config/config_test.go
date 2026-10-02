@@ -733,3 +733,28 @@ func TestDeprecatedBrainKeys(t *testing.T) {
 		t.Error("SHEEPDOG_BRAIN_ENRICH_TIMEOUT_S=0 was accepted")
 	}
 }
+
+// [push.apns] is empty (disabled) by default, read from the file,
+// overridden by SHEEPDOG_APNS_*, and String() never prints the key path.
+func TestPushAPNsConfig(t *testing.T) {
+	if d := Default().Push.APNs; d != (APNs{}) {
+		t.Errorf("default push.apns = %+v, want empty", d)
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(path, []byte("[push.apns]\nkey_path = \"/secret/AuthKey.p8\"\nkey_id = \"KID\"\nteam_id = \"TEAM\"\ntopic = \"com.example\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := load(path, envFrom(map[string]string{"SHEEPDOG_APNS_TOPIC": "com.example.env", "SHEEPDOG_APNS_KEY_ID": "KID2"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := APNs{KeyPath: "/secret/AuthKey.p8", KeyID: "KID2", TeamID: "TEAM", Topic: "com.example.env"}
+	if cfg.Push.APNs != want {
+		t.Errorf("push.apns = %+v, want %+v", cfg.Push.APNs, want)
+	}
+	s := cfg.String()
+	if strings.Contains(s, "/secret") || !strings.Contains(s, "push.apns.key_path=set") || !strings.Contains(s, "push.apns.topic=com.example.env") {
+		t.Errorf("String() = %s", s)
+	}
+}

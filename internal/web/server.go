@@ -125,6 +125,10 @@ type Deps struct {
 	// the voice model); nil records nothing.
 	RouterContext *ctxcap.VoiceSession
 
+	// Push backs POST/DELETE /api/push/register and GET /api/push/status
+	// (the iOS app's device registration, docs/push.md); nil answers 503.
+	Push PushService
+
 	// Heartbeat is the SSE keepalive period (default 15 s).
 	Heartbeat time.Duration
 	// OutQueue is the per-client outbound frame limit (default 256).
@@ -250,6 +254,9 @@ func (s *Server) routes() error {
 	s.mux.HandleFunc("GET /api/context/brain", s.authFunc(s.handleContextBrain, false))
 	s.mux.HandleFunc("GET /api/context/voice", s.authFunc(s.handleContextVoice, false))
 	s.mux.HandleFunc("GET /api/context/timeline", s.authFunc(s.handleContextTimeline, false))
+	s.mux.HandleFunc("POST /api/push/register", s.authFunc(s.handlePushRegister, false))
+	s.mux.HandleFunc("DELETE /api/push/register", s.authFunc(s.handlePushUnregister, false))
+	s.mux.HandleFunc("GET /api/push/status", s.authFunc(s.handlePushStatus, false))
 	if s.deps.DevTestdataDir != "" {
 		s.mux.HandleFunc("GET /testdata/{name}", func(w http.ResponseWriter, r *http.Request) {
 			s.serveFixture(w, r, s.deps.DevTestdataDir, ".wav", "audio/wav")
