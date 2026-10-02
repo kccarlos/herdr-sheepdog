@@ -128,12 +128,16 @@ is gone; what was stopped is a transcript context line).
   promise (the old cancel tool did; it was not reachable from the voice
   since the redesign). It expires after `supervisor.promise_ttl_s`.
 - **`v0.1.0`** is not tagged yet (the release workflow is ready and builds on Ubuntu only; the darwin binary is signed and notarized afterwards on the Mac with `make release-sign`, see [`signing.md`](signing.md)).
-- **Device verification of the iOS work (#14/#17/#18)**: playback
-  reports, the client speech detector, the Flock and Health panes and
-  the echo-cancellation rebuild-after-route-change fix have each only
-  run in the simulator against fixture daemons; none has been checked
-  on a real phone yet (each PR's own "To check on the phone"/"on the
-  device" section is the checklist).
+- **Device verification of the iOS work (#14/#17/#18)**: the CEO used
+  the TestFlight build (0.1.0 (2)) on their iPhone on 2026-10-01 and
+  confirmed live that voice interaction works, against the daemon on
+  `0064753` with Gemini Live on Vertex AI and the brain on Vertex
+  (`gemini-3.8-flash`, switched at 00:14 UTC; 6 brain turns, no
+  fallback, no `voice.stalled`, `voice.rate_limited` or
+  `supervisor.echo_dropped` in that session). Not individually confirmed
+  yet: AirPods and route changes, the lock screen, approvals tapped on
+  the phone, and the Health pane's brain picker (the CEO could not find
+  it on the first try).
 - **The relayed-answer path of GPT-Live pacing was not re-measured**:
   #73's one live run measured the model replying to its own filler
   ("count slowly from one to twenty"); a reply relayed from the brain
@@ -144,11 +148,6 @@ is gone; what was stopped is a transcript context line).
   offline against the fake model and the eval harness; a live run
   against DeepSeek — which the orchestrator is expected to schedule —
   has not happened yet.
-- **iOS `PlaybackProfile` should follow the 400 ms GPT-Live start
-  buffer** (#73 lowered it from 1200 ms on the daemon/web side; not
-  done here). Checked 2026-09-25: `herdr-sheepdog-ios`'s
-  `PlaybackRatePolicy.swift` still has `PlaybackProfile.openAI` at
-  1,200 ms — still open.
 
 ## How work is done here
 
