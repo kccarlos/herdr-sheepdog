@@ -25,10 +25,10 @@ type wantOption struct {
 	keys  string // space-separated
 }
 
-// TestParsePrompt runs the parser over every captured prompt: the five
+// TestParsePrompt runs the parser over every captured prompt: the six
 // layouts the flock draws (Codex's command approval and trust dialog,
-// Claude Code's permission prompt, agy's command and edit prompts) plus
-// the git prompt seen live on 2026-09-18.
+// Claude Code's permission prompt and AskUserQuestion widget, agy's
+// command and edit prompts) plus the git prompt seen live on 2026-09-18.
 func TestParsePrompt(t *testing.T) {
 	cases := []struct {
 		fixture  string
@@ -88,6 +88,21 @@ func TestParsePrompt(t *testing.T) {
 			},
 			def: 0, yes: "1", no: "3",
 			summary: "docs is asking do you want to create claude.txt.",
+		},
+		{
+			// Claude Code's AskUserQuestion widget, seen live on
+			// 2026-10-02: a description line under each option, and a
+			// fourth "Chat about this" below a rule that is not an answer.
+			fixture:  "claude-askuserquestion.screen.txt",
+			alias:    "docs",
+			question: "This is a test approval prompt: do you want to proceed?",
+			options: []wantOption{
+				{"Yes, proceed", "1"},
+				{"No, decline", "2"},
+				{"Type something.", "3"},
+			},
+			def: 0, yes: "1", no: "2",
+			summary: "docs is asking this is a test approval prompt: do you want to proceed.",
 		},
 		{
 			fixture:  "agy-approval-prompt.screen.txt",
@@ -190,5 +205,18 @@ func TestParsePromptCursorRequired(t *testing.T) {
 	list := "● Here is what I would do:\n\n  1. Rename the field\n  2. Update the tests\n\n› Ask Codex to do anything\n"
 	if _, ok := herdr.ParsePrompt(list); ok {
 		t.Error("a numbered list parsed as a prompt")
+	}
+}
+
+// TestParsePromptDescribedListNotAPrompt: a numbered list whose items
+// carry indented descriptions, the AskUserQuestion shape, is still not a
+// prompt without the cursor marker.
+func TestParsePromptDescribedListNotAPrompt(t *testing.T) {
+	list := "● Two ways to do it:\n\n  1. Rename the field\n     Touches every caller.\n  2. Add an alias\n     Keeps the old name working.\n\n› Ask Codex to do anything\n"
+	if p, ok := herdr.ParsePrompt(list); ok {
+		t.Errorf("a described numbered list parsed as a prompt: %+v", p)
+	}
+	if herdr.EndsInQuestion(list) {
+		t.Error("EndsInQuestion = true")
 	}
 }

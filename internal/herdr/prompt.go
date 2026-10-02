@@ -4,6 +4,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 // Approval prompts are parsed here, in code (docs/roles.md "Hot paths
@@ -81,8 +82,9 @@ type Prompt struct {
 // ParsePrompt reads the approval prompt at the end of a screen: the
 // numbered options, the question above them and, for Codex, the command
 // and reason it is about. ok is false when the screen's tail is not a
-// prompt — no block of two or more consecutive options numbered from one
-// with the cursor on exactly one of them.
+// prompt — no block of two or more options numbered from one (each may
+// carry indented description lines) with the cursor on exactly one of
+// them.
 func ParsePrompt(screen string) (Prompt, bool) {
 	lines := tailLines(screen, promptTailLines)
 	opts, first, cursor, ok := findOptions(lines)
@@ -147,7 +149,7 @@ func (p Prompt) Summary(alias string) string {
 }
 
 // findOptions returns the last block of options at the end of lines: two
-// or more consecutive numbered lines, numbered from one, with the cursor
+// or more numbered lines (parseOptions), numbered from one, with the cursor
 // marker on exactly one of them (so a numbered list in an agent's own
 // message is not mistaken for a prompt). first is the block's index in
 // lines, cursor the index in opts of the marked option.
@@ -165,20 +167,32 @@ func findOptions(lines []string) (opts []Option, first, cursor int, ok bool) {
 	return nil, 0, 0, false
 }
 
-// parseOptions reads the consecutive numbered options starting at
-// lines[0] (numbered 1, 2, 3, …); cursor is the index of the marked
-// option and cursors how many carry a marker.
+// parseOptions reads the numbered options starting at lines[0]
+// (numbered 1, 2, 3, …); cursor is the index of the marked option and
+// cursors how many carry a marker. A non-numbered line indented at least
+// as deep as the current option's label is that option's continuation
+// (Claude Code's AskUserQuestion draws a description under each label)
+// and is skipped; any other line — a blank, a rule (AskUserQuestion's
+// "Chat about this" sits below one), prose — ends the block.
 func parseOptions(lines []string) (opts []Option, cursor, cursors int) {
 	cursor = -1
-	for i, line := range lines {
-		m := reOption.FindStringSubmatch(line)
-		if m == nil || m[2] != strconv.Itoa(i+1) {
+	labelCol := 0
+	for _, line := range lines {
+		m := reOption.FindStringSubmatchIndex(line)
+		if m != nil && line[m[4]:m[5]] == strconv.Itoa(len(opts)+1) {
+			if m[2] >= 0 {
+				cursor, cursors = len(opts), cursors+1
+			}
+			labelCol = utf8.RuneCountInString(line[:m[6]])
+			opts = append(opts, option(len(opts)+1, line[m[6]:m[7]]))
+			continue
+		}
+		if len(opts) == 0 || strings.TrimSpace(line) == "" || reRule.MatchString(line) || reOption.MatchString(line) {
 			break
 		}
-		if m[1] != "" {
-			cursor, cursors = i, cursors+1
+		if indent := utf8.RuneCountInString(line) - utf8.RuneCountInString(strings.TrimLeft(line, " \t")); indent < labelCol {
+			break
 		}
-		opts = append(opts, option(i+1, m[3]))
 	}
 	return opts, cursor, cursors
 }
