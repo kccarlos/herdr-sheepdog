@@ -77,8 +77,9 @@ type Brain struct {
 	// has no key.
 	Enabled bool `toml:"enabled"`
 	// Provider is the provider the brain starts on: gemini (the Gemini
-	// key pool) or deepseek ([deepseek]); the initial value only, like
-	// Model (default gemini).
+	// key pool), deepseek ([deepseek]) or vertex (Gemini on Vertex AI
+	// with the [gemini.vertex] key and project, always at location
+	// global); the initial value only, like Model (default gemini).
 	Provider string `toml:"provider"`
 	// Model is the function-calling model (default gemini-3.5-flash; a
 	// model of Provider).
@@ -139,7 +140,7 @@ type Brain struct {
 }
 
 // BrainProviders are the accepted values of brain.provider.
-var BrainProviders = []string{"gemini", "deepseek"}
+var BrainProviders = []string{"gemini", "deepseek", "vertex"}
 
 // DeepSeek configures the second supervisor-brain provider: DeepSeek's
 // OpenAI-compatible chat completions API, paid per token. Registered

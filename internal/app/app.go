@@ -272,6 +272,8 @@ func (a *App) wire() error {
 		a.brainOff = "no Gemini key"
 	case cfg.Brain.Provider == brain.ProviderDeepSeek && cfg.DeepSeek.APIKey == "":
 		a.brainOff = "no DEEPSEEK_API_KEY"
+	case cfg.Brain.Provider == brain.ProviderVertex && VertexBrainMissing(cfg.Gemini.Vertex) != "":
+		a.brainOff = "no " + VertexBrainMissing(cfg.Gemini.Vertex)
 	default:
 		b, err := buildBrain(cfg, a.prompts, a.log)
 		if err != nil {
@@ -488,7 +490,8 @@ func (a *App) VoiceProvider() string {
 
 // buildBrain builds the supervisor brain with the [brain] config
 // (BrainConfig) and a transcript under the data dir, over every provider
-// that has a key: gemini (the key pool) and deepseek ([deepseek]),
+// that has a key: gemini (the key pool), deepseek ([deepseek]) and
+// vertex ([gemini.vertex]),
 // starting on brain.provider. The caller has checked that the initial
 // provider has a key.
 func buildBrain(cfg config.Config, pl *prompts.Loader, log logging.Logger) (*brain.Brain, error) {
@@ -519,7 +522,8 @@ func buildBrain(cfg config.Config, pl *prompts.Loader, log logging.Logger) (*bra
 
 // BrainModels builds the brain's Model of every provider the config
 // has a key for (shared with `sheepdog brain-test`): gemini over the
-// key pool, deepseek over the OpenAI-compatible adapter. An empty map
+// key pool, deepseek over the OpenAI-compatible adapter, vertex over
+// the Gemini adapter on Vertex AI (VertexBrainMissing). An empty map
 // when there is no key at all.
 func BrainModels(cfg config.Config, log logging.Logger) (map[string]brain.Model, error) {
 	models := map[string]brain.Model{}
@@ -538,7 +542,29 @@ func BrainModels(cfg config.Config, log logging.Logger) (map[string]brain.Model,
 		}
 		models[brain.ProviderDeepSeek] = m
 	}
+	if VertexBrainMissing(cfg.Gemini.Vertex) == "" {
+		m, err := brain.NewVertexModel(cfg.Gemini.Vertex.APIKey, cfg.Gemini.Vertex.Project, log)
+		if err != nil {
+			return nil, err
+		}
+		models[brain.ProviderVertex] = m
+	}
 	return models, nil
+}
+
+// VertexBrainMissing names the variable the vertex brain provider lacks
+// ("" when it has both). It reuses the voice's [gemini.vertex] key and
+// project but not gemini.backend (the brain may run on Vertex while the
+// voice stays on AI Studio, or the other way round) nor gemini.vertex.
+// location (the brain is always at global: brain.VertexLocation).
+func VertexBrainMissing(v config.GeminiVertex) string {
+	switch {
+	case v.APIKey == "":
+		return "VERTEX_API_KEY"
+	case v.Project == "":
+		return "VERTEX_PROJECT"
+	}
+	return ""
 }
 
 // BrainProviders lists every provider for the /debug picker, with why
@@ -552,7 +578,11 @@ func BrainProviders(cfg config.Config) []web.ProviderInfo {
 	if !deepseek.Available {
 		deepseek.Reason = "no DEEPSEEK_API_KEY"
 	}
-	return []web.ProviderInfo{gemini, deepseek}
+	vertex := web.ProviderInfo{ID: brain.ProviderVertex, Label: web.ProviderLabel(brain.ProviderVertex), Available: VertexBrainMissing(cfg.Gemini.Vertex) == ""}
+	if !vertex.Available {
+		vertex.Reason = "no " + VertexBrainMissing(cfg.Gemini.Vertex)
+	}
+	return []web.ProviderInfo{gemini, deepseek, vertex}
 }
 
 // BrainConfig maps the [brain] config onto brain.Config (shared with

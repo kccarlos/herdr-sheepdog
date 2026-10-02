@@ -25,3 +25,6 @@ func (m *GenaiModel) KeyIndex() int {
 	defer m.mu.Unlock()
 	return m.idx
 }
+
+// NewVertexModelAt is NewVertexModel against baseURL (a fake server).
+var NewVertexModelAt = newVertexModel

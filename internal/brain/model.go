@@ -47,6 +47,9 @@ type MessageModel interface {
 const (
 	ProviderGemini   = "gemini"
 	ProviderDeepSeek = "deepseek"
+	// ProviderVertex is Gemini on Vertex AI: the same GenaiModel and model
+	// ids as ProviderGemini, over the [gemini.vertex] key and project.
+	ProviderVertex = "vertex"
 )
 
 // ModelInfo is one entry of a provider's model catalog, as the /debug
@@ -103,6 +106,15 @@ var notRecommended = regexp.MustCompile(`tts|image|transcribe|lyria|robotics|com
 type GenaiModel struct {
 	keys []string
 	log  logging.Logger
+	// provider is the id brain.rate_limited names (ProviderGemini or
+	// ProviderVertex).
+	provider string
+	// catalog, when set, is what ListModels returns without a request
+	// (Vertex: its model list does not take an API key).
+	catalog []ModelInfo
+	// noMinimal holds the models that refused thinking level minimal
+	// (Generate).
+	noMinimal sync.Map
 
 	mu      sync.Mutex
 	idx     int
@@ -119,27 +131,122 @@ func NewGenaiModel(keys []string, log logging.Logger) (*GenaiModel, error) {
 	if log == nil {
 		log = logging.NopLogger{}
 	}
-	return &GenaiModel{keys: append([]string(nil), keys...), log: log, clients: map[int]*genai.Client{}, newClient: func(ctx context.Context, key string) (*genai.Client, error) {
+	return &GenaiModel{keys: append([]string(nil), keys...), log: log, provider: ProviderGemini, clients: map[int]*genai.Client{}, newClient: func(ctx context.Context, key string) (*genai.Client, error) {
 		return genai.NewClient(ctx, &genai.ClientConfig{APIKey: key, Backend: genai.BackendGeminiAPI})
 	}}, nil
 }
 
-// Generate implements Model. A Pro model has no minimal thinking level
-// (thinkingOff, an event turn's): it gets low, its least, rather than a
-// 400 on every event turn.
+// VertexLocation is where the brain calls Gemini on Vertex AI: always
+// the global endpoint, whatever gemini.vertex.location says. Checked live
+// 2026-10-01 with the API key: the text models (gemini-3.8-flash,
+// gemini-3.5-flash, gemini-3.5-flash-lite) answer at global and are "not
+// found" at us-central1, while the Live model the voice uses is served
+// at us-central1 and not at global (docs/research/
+// vertex-live-spike-2026-09-29.md), so the two cannot share one location.
+const VertexLocation = "global"
+
+// VertexBaseURL is the host of VertexLocation. Set explicitly: the SDK's
+// own choice for an API key is the same today, but the brain must not
+// follow gemini.vertex.location.
+const VertexBaseURL = "https://aiplatform.googleapis.com/"
+
+// VertexModels is the Vertex provider's catalog for the /debug picker: a
+// static list, because Vertex's model listing (publishers/google/models,
+// and the OpenAI-compatible endpoints/openapi/models) refuses an API key
+// (401 / 404). Every entry answered generateContent at global on
+// 2026-10-01; gemini-3.8-pro, gemini-3.5-pro and gemini-3.8-flash-lite
+// did not (404).
+var VertexModels = []ModelInfo{
+	{Name: "gemini-3.8-flash", DisplayName: "Gemini 3.8 Flash", Methods: []string{"generateContent"}, Recommended: true},
+	{Name: "gemini-3.5-flash", DisplayName: "Gemini 3.5 Flash", Methods: []string{"generateContent"}, Recommended: true},
+	{Name: "gemini-3.5-flash-lite", DisplayName: "Gemini 3.5 Flash-Lite", Methods: []string{"generateContent"}, Recommended: true},
+}
+
+// NewVertexModel returns a GenaiModel calling Gemini on Vertex AI with
+// one API key (bound to a service account; no OAuth) in project, at
+// VertexLocation. It is the Gemini provider's model, so thought
+// signatures round-trip exactly as there (Message.Raw holds the model
+// content); a 429 logs brain.rate_limited once and fails the call with
+// ErrAllKeysRateLimited, no retry. log may be nil.
+func NewVertexModel(apiKey, project string, log logging.Logger) (*GenaiModel, error) {
+	return newVertexModel(apiKey, project, VertexBaseURL, log)
+}
+
+func newVertexModel(apiKey, project, baseURL string, log logging.Logger) (*GenaiModel, error) {
+	switch {
+	case apiKey == "":
+		return nil, errors.New("brain: vertex: no API key configured")
+	case project == "":
+		return nil, errors.New("brain: vertex: no project configured")
+	}
+	m, err := NewGenaiModel([]string{apiKey}, log)
+	if err != nil {
+		return nil, fmt.Errorf("brain: vertex: %w", err)
+	}
+	m.provider = ProviderVertex
+	m.catalog = VertexModels
+	m.newClient = func(ctx context.Context, key string) (*genai.Client, error) {
+		return genai.NewClient(ctx, vertexClientConfig(key, project, baseURL))
+	}
+	return m, nil
+}
+
+// vertexClientConfig is the genai configuration for Vertex AI with an
+// API key: the SDK sends it as x-goog-api-key, skips Application Default
+// Credentials, and builds projects/{project}/locations/global/publishers/
+// google/models/{model} from Project and Location.
+func vertexClientConfig(apiKey, project, baseURL string) *genai.ClientConfig {
+	return &genai.ClientConfig{
+		Backend:     genai.BackendVertexAI,
+		APIKey:      apiKey,
+		Project:     project,
+		Location:    VertexLocation,
+		HTTPOptions: genai.HTTPOptions{BaseURL: baseURL},
+	}
+}
+
+// Generate implements Model. A model without a minimal thinking level
+// (thinkingOff, an event turn's) gets low, its least, rather than a 400
+// on every event turn: a Pro model up front, and any other model once it
+// has refused minimal (gemini-3.8-flash does, on AI Studio and Vertex,
+// checked 2026-10-01): that one 400 is retried at low right away and the
+// model remembered, so it costs one extra request per run.
 func (m *GenaiModel) Generate(ctx context.Context, model string, contents []*genai.Content, cfg *genai.GenerateContentConfig) (*genai.GenerateContentResponse, error) {
-	if cfg != nil && cfg.ThinkingConfig != nil && cfg.ThinkingConfig.ThinkingLevel == genai.ThinkingLevelMinimal && strings.Contains(model, "-pro") {
-		c := *cfg
-		c.ThinkingConfig = &genai.ThinkingConfig{ThinkingLevel: genai.ThinkingLevelLow}
-		cfg = &c
+	minimal := cfg != nil && cfg.ThinkingConfig != nil && cfg.ThinkingConfig.ThinkingLevel == genai.ThinkingLevelMinimal
+	_, refused := m.noMinimal.Load(model)
+	if minimal && (strings.Contains(model, "-pro") || refused) {
+		cfg, minimal = thinkingLow(cfg), false
 	}
 	var resp *genai.GenerateContentResponse
-	err := m.withKeys(ctx, model, func(client *genai.Client) error {
+	call := func(client *genai.Client) error {
 		var err error
 		resp, err = client.Models.GenerateContent(ctx, model, contents, cfg)
 		return err
-	})
+	}
+	err := m.withKeys(ctx, model, call)
+	if minimal && minimalRefused(err) {
+		m.noMinimal.Store(model, true)
+		cfg = thinkingLow(cfg)
+		err = m.withKeys(ctx, model, call)
+	}
 	return resp, err
+}
+
+// thinkingLow is cfg at thinking level low.
+func thinkingLow(cfg *genai.GenerateContentConfig) *genai.GenerateContentConfig {
+	c := *cfg
+	c.ThinkingConfig = &genai.ThinkingConfig{ThinkingLevel: genai.ThinkingLevelLow}
+	return &c
+}
+
+// minimalRefused reports the 400 a model without a minimal thinking
+// level answers ("Thinking level is unsupported: THINKING_LEVEL_MINIMAL").
+func minimalRefused(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := err.Error()
+	return strings.Contains(s, "Thinking level is unsupported") && strings.Contains(s, "MINIMAL")
 }
 
 // ListModels implements ModelCatalog: the Gemini model list (a free
@@ -147,6 +254,9 @@ func (m *GenaiModel) Generate(ctx context.Context, model string, contents []*gen
 // that support generateContent, recommended ones first then newest name
 // first. The key pool applies as for Generate.
 func (m *GenaiModel) ListModels(ctx context.Context) ([]ModelInfo, error) {
+	if m.catalog != nil {
+		return append([]ModelInfo(nil), m.catalog...), nil
+	}
 	var raw []*genai.Model
 	err := m.withKeys(ctx, "", func(client *genai.Client) error {
 		raw = raw[:0]
@@ -225,7 +335,7 @@ func (m *GenaiModel) withKeys(ctx context.Context, model string, call func(*gena
 		}
 		wait, _ := retryDelay(err)
 		m.log.Log(logSource, "brain.rate_limited", "", map[string]any{
-			"model": model, "key_index": idx, "keys": len(m.keys), "retry_after_ms": wait.Milliseconds(),
+			"provider": m.provider, "model": model, "key_index": idx, "keys": len(m.keys), "retry_after_ms": wait.Milliseconds(),
 		})
 		m.rotate(idx)
 	}

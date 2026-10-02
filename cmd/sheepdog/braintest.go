@@ -49,7 +49,7 @@ func printBrainTestUsage(w io.Writer) {
 	fprintln(w, "                      codex-after-approval.screen.txt)")
 	fprintln(w, "  --transcript PATH   a brain transcript (JSONL) to seed the run with")
 	fprintln(w, "  --say TEXT          a CEO utterance heard before the request (repeatable)")
-	fprintln(w, "  --provider ID       brain provider: gemini | deepseek (default config brain.provider)")
+	fprintln(w, "  --provider ID       brain provider: gemini | deepseek | vertex (default config brain.provider)")
 	fprintln(w, "  --model NAME        brain model (default config brain.model)")
 	fprintln(w, "  --thinking LEVEL    Gemini thinking level: minimal | low | medium | high (default low;")
 	fprintln(w, "                      DeepSeek's thinking comes from [deepseek])")
@@ -267,8 +267,10 @@ func brainTestModel(o brainTestOpts, cfg config.Config, log logging.Logger) (bra
 			return nil, errors.New("no Gemini key (set GEMINI_API_KEY or use --fake)")
 		case brain.ProviderDeepSeek:
 			return nil, errors.New("no DeepSeek key (set DEEPSEEK_API_KEY or use --fake)")
+		case brain.ProviderVertex:
+			return nil, fmt.Errorf("no Vertex AI credentials (set %s or use --fake)", app.VertexBrainMissing(cfg.Gemini.Vertex))
 		}
-		return nil, fmt.Errorf("unknown provider %q (gemini or deepseek)", provider)
+		return nil, fmt.Errorf("unknown provider %q (gemini, deepseek or vertex)", provider)
 	}
 	return m, nil
 }
