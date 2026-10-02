@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 /// The pure half of the LiveKit transport: the bridge's address, its token
@@ -58,6 +59,17 @@ public enum LiveKitBridge {
         return identity.unicodeScalars.allSatisfy { scalar in
             scalar.isASCII && (CharacterSet.alphanumerics.contains(scalar) || "_.:-".unicodeScalars.contains(scalar))
         }
+    }
+
+    /// A stable per-device identity: `phone-` and the first 12 hex digits
+    /// of the SHA-256 of the device id (`identifierForVendor`), so every
+    /// (re)join is the same participant to the bridge and the room keeps no
+    /// ghost of the last connection. The raw id never leaves the phone.
+    public static func identity(deviceID: UUID?) -> String? {
+        guard let deviceID else { return nil }
+        let digest = SHA256.hash(data: Data(deviceID.uuidString.utf8))
+        let hex = digest.map { String(format: "%02x", $0) }.joined()
+        return "phone-\(hex.prefix(12))"
     }
 
     /// Reads `/livekit/token`'s answer, mapping its failures onto the

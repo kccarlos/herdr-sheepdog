@@ -606,13 +606,19 @@ SessionViewModel ── VoiceTransport (SheepdogKit protocol)
   session as "token refused". `bridge: replaced` (the browser page has the
   daemon) shows a "Take it back" banner; rejoining reclaims it. Health shows
   the transport, the bridge address and its link to the daemon.
-- **Join quirks.** The app lets the bridge pick a fresh identity per join (a
-  rejoin under the same identity is only a "sid update" to the bridge, which
-  then never sends its link state), and re-sends `mute` up to three times,
-  2 s apart, while nothing has arrived after joining: data sent to a
-  participant in its first moments can be lost. Every join says `mute` (and
-  a closed gate) because the bridge forgets phone state when the last phone
-  leaves.
+- **Joining.** The identity is stable per device (`phone-` and 12 hex
+  digits of a SHA-256 of `identifierForVendor`), as the contract
+  recommends: a rejoin is a new participant SID under the same identity,
+  which the bridge treats as a join, and no ghost is left in the room.
+  Once connected, as soon as the bridge's `sheepdog-voice` is subscribed
+  (the downlink is up; at most 2 s), the app says `mute` (and a closed
+  gate): that is
+  the control message the contract asks for, which the bridge answers with
+  its link state and the daemon's latest `status` (a join-time message
+  alone can be lost), and it restores the phone state the bridge forgets
+  when the last phone leaves. If neither has arrived 8 s after joining,
+  the transport reports a retrying failure so the reconnect banner can
+  appear.
 
 ## The voice bar's words
 

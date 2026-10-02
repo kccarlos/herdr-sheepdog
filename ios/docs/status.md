@@ -25,6 +25,41 @@ transport (WebSocket stays the default and the fallback). Design in
   round-tripped (`transcript` in "hello" and out "echo: hello" received by
   the app).
 
+**Contract issues and the bridge's fixes**
+
+1. The bridge's join-time `bridge` message was often lost (data sent in a
+   phone's first moments), and 2. a same-identity rejoin was only a "sid
+   update" to the bridge, so it never greeted the new connection. Both
+   are fixed in herdr-sheepdog-bridge `b6d627d..6374ec9`: `bridge` + the
+   latest `status` are re-sent on every join/rejoin (a new SID counts, also
+   under the same identity) and on the first control message from each
+   identity + SID, and `/ws` has a 3 s leave grace. The app now uses a
+   stable per-device identity (`phone-` + 12 hex of a SHA-256 of
+   `identifierForVendor`) and sends one control message (`mute`) after
+   connecting, once the bridge's `sheepdog-voice` is subscribed (or after
+   2 s); an 8 s timeout raises the retry banner only as a fallback. The
+   first-message wait matters: on a same-identity rejoin `Room.connect`
+   returned in ~30 ms and a `mute` sent at once got its greeting lost.
+3. Deliberate deviation, now allowed by the contract: only `sheepdog-voice`
+   is subscribed (`autoSubscribe` off).
+
+**Smoke re-run against the current bridge (2026-10-02, `6374ec9` built
+from the repo, same throwaway loopback setup)**
+
+- Four launches in a row (three relaunches within the 3 s grace, one
+  after it): every time the same identity `phone-5dd66ebc7c4f`, `bridge` +
+  `status` arrived ~3 ms after the first control message, the transport
+  opened, no retry banner; `/healthz` `phones: 1` throughout (no ghost
+  participants), the bridge kept `/ws` up across the quick rejoins (one
+  `ws.connected`).
+- `text` round-trip: transcript in (5 chars, "hello") and out (11 chars,
+  "echo: hello") received.
+- `Room.connect` took 27–266 ms on every launch; the 10 s first-connect
+  timeout seen with the earlier setup did not recur.
+- Still: the microphone fails to start in the simulator (`-4010`), so no
+  mic audio reached the fake daemon; the chip read "Reconnecting…" from
+  the quiet `/events` stream (below).
+
 **Not verified**
 
 - **Microphone audio over LiveKit: not verified.** In the simulator the
@@ -35,8 +70,9 @@ transport (WebSocket stays the default and the fallback). Design in
 - Hearing `sheepdog-voice` played, echo cancellation, latency and dropouts,
   Wi-Fi ↔ cellular handover, background audio with the screen locked:
   **WAIVED_BY_USER** (physical-device audio is not verifiable here).
-- In the simulator the first `Room.connect` of each launch timed out (10 s)
-  and the retry joined in under a second; not seen on a device yet.
+- In the first smoke run the first `Room.connect` of each launch timed out
+  (10 s) and the retry joined in under a second; it did not recur in the
+  re-run against the current bridge. Not checked on a device.
 - The connection chip read "Reconnecting…" during the smoke run because the
   quiet mock daemon's `/events` sent no event (the stream counts as open on
   its first event); not LiveKit-specific.

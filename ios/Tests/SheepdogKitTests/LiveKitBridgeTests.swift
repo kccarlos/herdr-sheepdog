@@ -55,7 +55,7 @@ final class LiveKitBridgeTests: XCTestCase {
         XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"), "no token, no header")
     }
 
-    func testIdentityRules() {
+    func testIdentityRules() throws {
         XCTAssertTrue(LiveKitBridge.isValidIdentity("phone-1a2b3c4d"))
         XCTAssertTrue(LiveKitBridge.isValidIdentity("a_b.c:d-E9"))
         XCTAssertFalse(LiveKitBridge.isValidIdentity(""))
@@ -63,6 +63,16 @@ final class LiveKitBridgeTests: XCTestCase {
         XCTAssertFalse(LiveKitBridge.isValidIdentity("has space"))
         XCTAssertFalse(LiveKitBridge.isValidIdentity("phöne"))
         XCTAssertFalse(LiveKitBridge.isValidIdentity("sheepdog-bridge"))
+
+        let device = UUID(uuidString: "1A2B3C4D-0000-0000-0000-000000000000")
+        let id = try XCTUnwrap(LiveKitBridge.identity(deviceID: device))
+        XCTAssertTrue(id.hasPrefix("phone-"))
+        XCTAssertEqual(id.count, 18, "phone- and 12 hex digits")
+        XCTAssertTrue(LiveKitBridge.isValidIdentity(id))
+        XCTAssertEqual(LiveKitBridge.identity(deviceID: device), id, "stable across calls")
+        XCTAssertFalse(id.contains("1a2b3c4d"), "a hash, not the device id")
+        XCTAssertNotEqual(LiveKitBridge.identity(deviceID: UUID()), id)
+        XCTAssertNil(LiveKitBridge.identity(deviceID: nil))
     }
 
     // MARK: - The token response
