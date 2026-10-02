@@ -17,6 +17,8 @@ struct SheepdogApp: App {
             store.token = ""
             store.hasBeenConfigured = false
             store.keepListeningWhenLocked = true
+            store.voiceTransport = .webSocket
+            store.bridgeAddress = ""
             try? FileManager.default.removeItem(at: ConversationCache.standard().directory)
             // The one-time hints are cleared by the view model (all of
             // them, as `-sheepdogResetHints` does).
@@ -25,6 +27,9 @@ struct SheepdogApp: App {
             store.address = address
             store.hasBeenConfigured = true
         }
+        if let token = DebugLaunch.token { store.token = token }
+        if let transport = DebugLaunch.transport { store.voiceTransport = transport }
+        if let bridge = DebugLaunch.bridge { store.bridgeAddress = bridge }
         #endif
         return store
     }

@@ -15,6 +15,8 @@ struct SettingsView: View {
     @State private var address = ""
     @State private var token = ""
     @State private var keepListening = true
+    @State private var voiceTransport: VoiceTransportKind = .webSocket
+    @State private var bridgeAddress = ""
     @State private var probing = false
     @State private var probe: SessionViewModel.Probe?
     @State private var confirmClear = false
@@ -106,6 +108,8 @@ struct SettingsView: View {
                     Text("The voice \(model.voiceName) talks with and the brain behind it. Changes there apply at once.")
                 }
 
+                transportSection
+
                 microphoneSection
 
                 Section {
@@ -193,6 +197,35 @@ struct SettingsView: View {
         }
     }
 
+    // MARK: - Voice transport
+
+    private var transportSection: some View {
+        Section {
+            Picker("Voice transport", selection: $voiceTransport) {
+                ForEach(VoiceTransportKind.allCases, id: \.self) { kind in
+                    Text(kind.label).tag(kind)
+                }
+            }
+            .accessibilityIdentifier("settings.transport")
+            if voiceTransport == .liveKit {
+                LabeledContent("Bridge address") {
+                    TextField(LiveKitBridge.defaultAddress(daemon: DaemonEndpoint(text: address)), text: $bridgeAddress)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .keyboardType(.URL)
+                        .multilineTextAlignment(.trailing)
+                        .accessibilityIdentifier("settings.bridgeAddress")
+                }
+            }
+        } header: {
+            Text("Voice transport")
+        } footer: {
+            Text(voiceTransport == .liveKit
+                ? "LiveKit: the voice goes over WebRTC through sheepdog-bridge, which rides out network changes and lossy Wi-Fi. Leave the bridge address empty for the daemon's host on port \(LiveKitBridge.defaultPort). The daemon token above is also the bridge's."
+                : "WebSocket: the voice goes straight to the daemon. Choose LiveKit if you run sheepdog-bridge next to it.")
+        }
+    }
+
     // MARK: - Microphone
 
     private var microphoneSection: some View {
@@ -275,6 +308,8 @@ struct SettingsView: View {
         address = model.settings.address
         token = model.settings.token
         keepListening = model.settings.keepListeningWhenLocked
+        voiceTransport = model.settings.voiceTransport
+        bridgeAddress = model.settings.bridgeAddress
         if address.isEmpty { addressFocused = true }
     }
 
@@ -292,6 +327,8 @@ struct SettingsView: View {
         model.settings.address = address.trimmingCharacters(in: .whitespacesAndNewlines)
         model.settings.token = token.trimmingCharacters(in: .whitespacesAndNewlines)
         model.settings.keepListeningWhenLocked = keepListening
+        model.settings.voiceTransport = voiceTransport
+        model.settings.bridgeAddress = bridgeAddress.trimmingCharacters(in: .whitespacesAndNewlines)
         model.settings.hasBeenConfigured = true
         model.endpointChanged()
         dismiss()

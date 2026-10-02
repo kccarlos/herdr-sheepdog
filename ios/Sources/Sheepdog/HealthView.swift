@@ -31,6 +31,11 @@ struct HealthView: View {
         Section("Daemon") {
             LabeledContent("Connection", value: model.connectionChip.word)
             LabeledContent("Address", value: model.endpointDisplay)
+            LabeledContent("Voice transport", value: model.transportDisplay)
+            if let bridge = model.bridgeDisplay {
+                LabeledContent("Bridge", value: bridge)
+                LabeledContent("Bridge → daemon", value: model.bridgeLink?.word ?? "—")
+            }
             LabeledContent("Version", value: model.daemonVersion ?? "—")
                 .accessibilityIdentifier("health.version")
             TimelineView(.periodic(from: .now, by: 30)) { context in

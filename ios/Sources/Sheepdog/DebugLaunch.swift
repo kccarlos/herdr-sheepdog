@@ -44,8 +44,21 @@ enum DebugLaunch {
     )
     /// `-sheepdogAddress 127.0.0.1:7799`: start configured, for the history
     /// walkthrough and screenshots.
-    static var address: String? {
-        guard let i = arguments.firstIndex(of: "-sheepdogAddress"), i + 1 < arguments.count else { return nil }
+    static var address: String? { value(after: "-sheepdogAddress") }
+    /// `-sheepdogToken dev`: the daemon token to store with `-sheepdogAddress`.
+    static var token: String? { value(after: "-sheepdogToken") }
+    /// `-sheepdogTransport livekit|websocket`: Settings ▸ Voice transport.
+    static var transport: VoiceTransportKind? { value(after: "-sheepdogTransport").flatMap(VoiceTransportKind.init(rawValue:)) }
+    /// `-sheepdogBridge 127.0.0.1:7778`: Settings ▸ Bridge address.
+    static var bridge: String? { value(after: "-sheepdogBridge") }
+    /// `-sheepdogAutoConnect`: tap Connect at launch (the LiveKit smoke run).
+    static var autoConnect: Bool { arguments.contains("-sheepdogAutoConnect") }
+    /// `-sheepdogSmokeText hello`: send this as a `text` control message
+    /// over the voice transport once it opens, to see it round-trip.
+    static var smokeText: String? { value(after: "-sheepdogSmokeText") }
+
+    private static func value(after flag: String) -> String? {
+        guard let i = arguments.firstIndex(of: flag), i + 1 < arguments.count else { return nil }
         return arguments[i + 1]
     }
 }

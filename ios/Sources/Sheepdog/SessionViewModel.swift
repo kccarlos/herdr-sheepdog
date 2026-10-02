@@ -138,6 +138,10 @@ final class SessionViewModel: ObservableObject {
     }
     @Published private(set) var stateVoiceModel: String?
     @Published var showSettings = false
+    /// The transport of the current (or last) session.
+    @Published private(set) var activeTransport: VoiceTransportKind = .webSocket
+    /// LiveKit only: the bridge's link to the daemon, as it last said.
+    @Published private(set) var bridgeLink: BridgeLink?
     /// Where Settings opens: nil for its top, `.models` from Health's
     /// "Change in Settings ›". Consumed (reset) by SettingsView.
     @Published var settingsRoute: SettingsRoute?
@@ -205,7 +209,17 @@ final class SessionViewModel: ObservableObject {
 
     let settings: SettingsStore
     private var client: DaemonClient
+    /// The daemon's `/ws` (the default transport, and the fallback).
     private var socket: VoiceSocket
+    /// LiveKit through sheepdog-bridge, while Settings ▸ Voice transport
+    /// says so; created at the first Connect that wants it.
+    private var liveKit: LiveKitTransport?
+    /// The transport this session drives: `socket` or `liveKit`. Chosen at
+    /// Connect (`selectTransport()`), never swapped mid-session.
+    private var transport: VoiceTransport
+    /// The microphone is meant to run on the LiveKit path (what `startAudio`
+    /// and `stopAudio` mean there, with `AudioEngine` idle).
+    private var liveKitAudio = false
     private let audio = AudioEngine()
     private var reducer = ConversationReducer()
     private var history = ConversationHistory()
@@ -239,9 +253,12 @@ final class SessionViewModel: ObservableObject {
         self.cache = cache
         let endpoint = settings.endpoint ?? DaemonEndpoint(host: "127.0.0.1")
         self.client = DaemonClient(endpoint: endpoint)
-        self.socket = VoiceSocket(endpoint: endpoint)
+        let socket = VoiceSocket(endpoint: endpoint)
+        self.socket = socket
+        self.transport = socket
         self.core = SessionCore(talkMode: settings.talkMode, keepListeningWhenLocked: settings.keepListeningWhenLocked)
         talkMode = settings.talkMode
+        activeTransport = settings.voiceTransport
         if talkMode == .holdToTalk { audio.setManualGate(false) }
         #if DEBUG
         if DebugLaunch.resetHints || DebugLaunch.resetState {
@@ -262,6 +279,9 @@ final class SessionViewModel: ObservableObject {
         if !isConfigured || !settings.hasBeenConfigured {
             showSettings = true
         } else {
+            #if DEBUG
+            if DebugLaunch.autoConnect { connect() }
+            #endif
             Task {
                 await refreshState(quiet: true)
                 await syncHistory()
@@ -306,6 +326,8 @@ final class SessionViewModel: ObservableObject {
         if !sameDaemon { saveCache(now: true) }
         client.update(endpoint: endpoint)
         socket.update(endpoint: endpoint)
+        liveKit?.update(endpoint: endpoint)
+        liveKit?.bridgeAddress = settings.bridgeAddress
         banner = nil
         hello = nil
         if !sameDaemon {
@@ -342,7 +364,53 @@ final class SessionViewModel: ObservableObject {
         }
         client.update(endpoint: endpoint)
         socket.update(endpoint: endpoint)
+        selectTransport()
+        transport.update(endpoint: endpoint)
         send(.connectTapped)
+    }
+
+    /// Settings ▸ Voice transport, applied at Connect (a session keeps the
+    /// transport it started with; saving Settings reconnects).
+    private func selectTransport() {
+        guard !core.connection.wantsConnection else { return }
+        switch settings.voiceTransport {
+        case .webSocket:
+            transport = socket
+        case .liveKit:
+            let liveKit = self.liveKit ?? makeLiveKit()
+            liveKit.bridgeAddress = settings.bridgeAddress
+            transport = liveKit
+        }
+        bridgeLink = nil
+        if activeTransport != settings.voiceTransport { activeTransport = settings.voiceTransport }
+    }
+
+    private func makeLiveKit() -> LiveKitTransport {
+        let liveKit = LiveKitTransport(endpoint: client.endpoint)
+        liveKit.onEvent = { [weak self] event in
+            self?.handle(socket: event)
+        }
+        liveKit.onBridgeSpeaking = { [weak self] speaking in
+            guard let self, self.usingLiveKit else { return }
+            self.send(.playbackChanged(speaking: speaking))
+        }
+        liveKit.onMicrophoneFailed = { [weak self] message in
+            guard let self, self.usingLiveKit else { return }
+            self.liveKitAudio = false
+            self.send(.audioStartFailed("The microphone would not start (\(message))."))
+        }
+        self.liveKit = liveKit
+        return liveKit
+    }
+
+    /// This session's voice goes over LiveKit.
+    private var usingLiveKit: Bool { liveKit != nil && transport === liveKit }
+
+    /// Health: the transport, and the bridge's view of the daemon.
+    var transportDisplay: String { activeTransport.label }
+    var bridgeDisplay: String? {
+        guard activeTransport == .liveKit else { return nil }
+        return LiveKitBridge.endpoint(bridgeAddress: settings.bridgeAddress, daemon: settings.endpoint)?.display ?? "not set"
     }
 
     /// The `probe` effect: the auth probe first — a 401 on the WebSocket
@@ -601,6 +669,11 @@ final class SessionViewModel: ObservableObject {
         case .opened:
             send(.socketOpened)
             #if DEBUG
+            if let text = DebugLaunch.smokeText, !text.isEmpty {
+                transport.send(WSMessage(type: .text, text: text))
+            }
+            #endif
+            #if DEBUG
             // The UI tests start configured; a permission alert would sit
             // on top of everything they tap.
             if DebugLaunch.address != nil || DebugLaunch.resetState, !DebugLaunch.askPush { break }
@@ -619,6 +692,16 @@ final class SessionViewModel: ObservableObject {
         case let .failed(error, retrying):
             send(.socketFailed(error, willRetry: retrying))
             if retrying { probeTokenAfterSocketFailure() }
+        case let .link(link):
+            bridgeLink = link
+            if link == .replaced, core.connection.wantsConnection {
+                show(Banner(
+                    tone: .warning,
+                    message: "The daemon is in use by the browser.",
+                    hint: "The bridge takes it back in 30 seconds, or now if you tap Take it back.",
+                    retryTitle: "Take it back"
+                ))
+            }
         }
     }
 
@@ -680,14 +763,25 @@ final class SessionViewModel: ObservableObject {
     /// re-enters here — safe, since `apply` has returned by then.
     private func send(_ event: SessionEvent) {
         let effects = core.apply(event, now: now)
-        // What the socket says on every open.
-        socket.muted = core.connection.socketMuted
-        socket.gateClosed = core.connection.socketGateClosed
-        socket.speaking = core.connection.socketSpeaking
+        // What the transport says on every open.
+        transport.muted = core.connection.socketMuted
+        transport.gateClosed = core.connection.socketGateClosed
+        transport.speaking = core.connection.socketSpeaking
         // The playback profile follows the provider before any effect runs.
         if liveVoiceProvider != core.voice.provider { liveVoiceProvider = core.voice.provider }
         for effect in effects { run(effect) }
+        if usingLiveKit { syncLiveKitMicrophone() }
         publish()
+    }
+
+    /// LiveKit: the microphone track is live while the session's audio runs,
+    /// unmuted, not paused in the background, and (in hold-to-talk) held.
+    private func syncLiveKitMicrophone() {
+        let live = liveKitAudio
+            && !core.mic.muted
+            && !core.suspension.backgroundSuspended
+            && (core.mic.talkMode == .openMic || core.mic.holding)
+        liveKit?.setMicrophone(live: live)
     }
 
     private func run(_ effect: SessionEffect) {
@@ -695,9 +789,9 @@ final class SessionViewModel: ObservableObject {
         case .probe:
             Task { await openSession() }
         case .openSocket:
-            socket.connect()
+            transport.connect()
         case .closeSocket:
-            socket.disconnect()
+            transport.disconnect(reason: "user disconnect")
         case .startStreams:
             startEvents()
             startRefreshing()
@@ -705,23 +799,29 @@ final class SessionViewModel: ObservableObject {
             eventTask?.cancel(); eventTask = nil
             refreshTask?.cancel(); refreshTask = nil
         case let .send(message):
-            socket.send(message)
+            transport.send(message)
         case .startAudio:
-            startAudioIfNeeded()
+            if usingLiveKit { startLiveKitAudio() } else { startAudioIfNeeded() }
         case .stopAudio, .suspendAudio:
-            audio.stop()
+            if usingLiveKit { liveKitAudio = false } else { audio.stop() }
         case .resumeAudio:
+            // LiveKit's AudioManager takes the session back by itself.
+            guard !usingLiveKit else { break }
             do {
                 try audio.resume()
             } catch {
                 send(.audioResumeFailed(error.localizedDescription))
             }
         case let .setCaptureMuted(muted):
-            audio.setMuted(muted)
+            // LiveKit: `syncLiveKitMicrophone()` mutes the track after the
+            // effects run, from the same core state.
+            if !usingLiveKit { audio.setMuted(muted) }
         case let .setManualGate(manual):
-            audio.setManualGate(manual)
+            if usingLiveKit { setLiveKitGate(manual) } else { audio.setManualGate(manual) }
         case .flushPlayback:
-            audio.flushPlayback()
+            // LiveKit: the bridge dropped the unsent audio on `flush`; the
+            // ~100 ms already in WebRTC's jitter buffer still plays.
+            if !usingLiveKit { audio.flushPlayback() }
         case .flushTranscript:
             reducer.apply(.flush)
             conversationChanged()
@@ -761,6 +861,28 @@ final class SessionViewModel: ObservableObject {
             case .resumedFromBackground:
                 SheepdogLog.session.info("resumed from the background")
             }
+        }
+    }
+
+    /// LiveKit's `startAudio`: no engine to start — the microphone track
+    /// goes live (`syncLiveKitMicrophone`) and the gate starts where
+    /// `AudioEngine`'s would: closed in hold-to-talk until the orb is held.
+    private func startLiveKitAudio() {
+        guard !liveKitAudio else { return }
+        liveKitAudio = true
+        send(.audioStarted(gateClosed: core.mic.talkMode == .holdToTalk && !core.mic.holding))
+    }
+
+    /// LiveKit's hold-to-talk: there is no capture gate to flip, so the
+    /// hold itself is the gate (`AudioEngine` reports it from the next
+    /// frame; here it is reported at once). In open mic the app never sends
+    /// `silence`, and the bridge runs the contract's gate itself.
+    private func setLiveKitGate(_ manual: Bool?) {
+        guard liveKitAudio else { return }
+        if let manual {
+            if manual == core.mic.gateClosed { send(.gateChanged(closed: !manual)) }
+        } else if core.mic.gateClosed {
+            send(.gateChanged(closed: false))
         }
     }
 
@@ -953,6 +1075,13 @@ final class SessionViewModel: ObservableObject {
                 let busy = self?.audioIsBusy ?? false
                 try? await Task.sleep(nanoseconds: busy ? 100_000_000 : 1_000_000_000)
                 guard let self, !Task.isCancelled, self.core.connection.wantsConnection else { return }
+                if self.usingLiveKit {
+                    // LiveKit owns the audio: only the meter and the clock.
+                    self.meter.setLevel(self.liveKitAudio ? self.liveKit?.microphoneLevel ?? 0 : 0)
+                    self.refreshMicrophoneMode()
+                    self.send(.tick)
+                    continue
+                }
                 self.audio.tick()
                 let metrics = self.audio.metrics
                 self.meter.setMetrics(metrics)
