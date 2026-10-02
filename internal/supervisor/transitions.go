@@ -287,7 +287,9 @@ func (s *Supervisor) onBlocked(ctx context.Context, row state.Agent) {
 	if err != nil {
 		s.log.Log(logSource, "supervisor.block_error", row.PaneID, map[string]any{"stage": "read", "error": err.Error()})
 		// It may well be a question: every level hears this.
-		s.push(row.PaneID, alias+" is blocked, but I could not read its screen.", voice.UrgencyIdle)
+		line := alias + " is blocked, but I could not read its screen."
+		s.notify(announcement{row: row, event: brain.PromiseEventBlocked, eventID: s.eventIDOf(row.PaneID)}, nil, line)
+		s.push(row.PaneID, line, voice.UrgencyIdle)
 		return
 	}
 	s.announceBlock(ctx, row, read.Text)

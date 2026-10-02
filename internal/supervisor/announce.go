@@ -237,6 +237,7 @@ func (s *Supervisor) applyResult(a announcement, kept []state.Promise, level Cha
 	}
 	u := voiceUrgency(d.applied)
 	s.logKept(kept, a.event, spoken, u, "brain")
+	s.notify(a, kept, spoken)
 	s.pushTagged(a.row.PaneID, spoken, u, a.tags(keptTags(announceTags(u, duePassed, rep.NeedsUser, a.pending), kept)))
 }
 
@@ -329,6 +330,7 @@ func (s *Supervisor) dropLate(a announcement, kept []state.Promise, level Chatti
 	s.logDecision(a, level, decision{via: "brain", requested: rep.Urgency, applied: appliedIf(add), reason: reason, late: true}, rep, kept, true)
 	s.log.Log(logSource, "brain.push_late", a.row.PaneID, map[string]any{"turn": rep.Turn, "dur_ms": dur, "spoken": spoken, "needs_user": rep.NeedsUser, "relates_to": strings.TrimSpace(rep.RelatesTo), "added": add})
 	if add {
+		s.notify(a, kept, spoken)
 		s.pushTagged(a.row.PaneID, spoken, voice.UrgencyIdle, a.tags(keptTags(nil, kept)))
 	}
 }
@@ -399,6 +401,7 @@ func (s *Supervisor) codePath(a announcement, kept []state.Promise, level Chatti
 	}
 	if len(kept) == 0 {
 		if a.kind != pushPromiseOnly {
+			s.notify(a, kept, sentence)
 			s.pushIfTagged(a.kind, a.row.PaneID, sentence, a.tags(nil))
 		}
 		return
@@ -410,6 +413,7 @@ func (s *Supervisor) codePath(a announcement, kept []state.Promise, level Chatti
 		u = voice.UrgencyInterrupt
 	}
 	s.logKept(kept, a.event, line, u, "template")
+	s.notify(a, kept, line)
 	s.pushTagged(a.row.PaneID, line, u, a.tags(keptTags(announceTags(u, duePassed, false, ""), kept)))
 }
 

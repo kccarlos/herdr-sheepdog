@@ -22,6 +22,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/inject"
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
+	"github.com/kccarlos/herdr-sheepdog/internal/push"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 	"github.com/kccarlos/herdr-sheepdog/internal/supervisor"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
@@ -148,6 +149,11 @@ type App struct {
 	port           int
 
 	queryLazy *lazyQuerier // nil when --cli=off; filled in by Run after daemon.start
+
+	// push sends phone notifications to the iOS app (nil when its device
+	// file could not be read: pushErr says why).
+	push    *push.Sender
+	pushErr error
 }
 
 // Build validates the options and wires every component. Nothing is
@@ -282,6 +288,14 @@ func (a *App) wire() error {
 		a.brain = b
 		a.brainProviders = BrainProviders(cfg)
 	}
+	a.push, a.pushErr = push.New(push.Config{
+		KeyPath: cfg.Push.APNs.KeyPath, KeyID: cfg.Push.APNs.KeyID, TeamID: cfg.Push.APNs.TeamID, Topic: cfg.Push.APNs.Topic,
+		DataDir: cfg.DataDir,
+	}, a.log)
+	var notifier supervisor.Notifier
+	if a.push != nil {
+		notifier = a.push
+	}
 	sup, err := supervisor.New(store, a.herdr, querier, pusher, a.log, supervisor.Config{
 		PendingTTL:       time.Duration(cfg.PendingTTLS) * time.Second,
 		DataDir:          cfg.DataDir,
@@ -299,6 +313,7 @@ func (a *App) wire() error {
 		InvestigateMax:        time.Duration(cfg.Brain.InvestigateMaxS) * time.Second,
 		InvestigateSessionTTL: time.Duration(cfg.Brain.InvestigateSessionTTLS) * time.Second,
 		Brain:                 a.brain,
+		Notifier:              notifier,
 	})
 	if err != nil {
 		if a.brain != nil {
@@ -393,6 +408,9 @@ func (a *App) wire() error {
 	}
 	if a.wref != nil {
 		deps.Watcher = a.wref
+	}
+	if a.push != nil {
+		deps.Push = a.push
 	}
 	srv, err := web.New(deps)
 	if err != nil {
@@ -811,6 +829,11 @@ func (a *App) Run(ctx context.Context) (err error) {
 	}
 	a.restoreBrainModel()
 	a.restoreVoiceProvider()
+	if a.pushErr != nil {
+		a.log.Log("push", "push.disabled", "", map[string]any{"reason": a.pushErr.Error()})
+	} else {
+		a.push.LogStartup()
+	}
 	// Logged here, not in wire(), so it never precedes daemon.start (the
 	// Loader itself is built in wire(), since the brain and the voice
 	// session need it before Run).
@@ -824,6 +847,9 @@ func (a *App) Run(ctx context.Context) (err error) {
 	}
 	start := time.Now()
 	defer func() {
+		// A notification in flight finishes (its push.sent/failed line
+		// logged) before daemon.stop; each is bounded by its own timeout.
+		a.push.Wait()
 		a.log.Log("daemon", "daemon.stop", "", map[string]any{"version": a.opts.Version, "uptime_s": int(time.Since(start).Seconds()), "error": errString(err)})
 		// Flush any debounced hardware-durable fsync (state.full_fsync)
 		// before the event log closes; harmless no-op otherwise.

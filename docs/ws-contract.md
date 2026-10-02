@@ -482,6 +482,14 @@ answer a question by tap. All three need the token under "Auth".
   {"error":"that question is no longer open"}`; an option the question
   does not have is `400`.
 
+## Phone notifications
+
+Not part of `/ws`: the iOS app registers its APNs device token over
+`POST /api/push/register` and the daemon sends system notifications for
+events that need the shepherd, whether or not a `/ws` client is attached.
+The contract (routes, payload, when an alert is sent) is in
+[`push.md`](push.md).
+
 ## Non-goals (v1)
 
 No compression, no multiple clients, no client-side resampling contract
