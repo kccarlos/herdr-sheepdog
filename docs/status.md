@@ -138,6 +138,23 @@ is gone; what was stopped is a transcript context line).
   yet: AirPods and route changes, the lock screen, approvals tapped on
   the phone, and the Health pane's brain picker (the CEO could not find
   it on the first try).
+- **AskUserQuestion prompts cannot be approved by voice** (seen live
+  in acceptance scenario 2, 2026-10-02 00:21–00:27 UTC). herdr reported
+  the Claude Code pane `blocked` and the phone heard the announcement,
+  but the supervisor logged `supervisor.blocked_no_question`, so no
+  pending answer-prompt action existed and the rail refused all three
+  `send_keys` calls ("has no pending approval prompt now"); the CEO had
+  to answer on the Mac. Root cause: `herdr.ParsePrompt` only accepts
+  numbered options on consecutive lines, and AskUserQuestion prints an
+  indented description line under each option, so the block ends after
+  option 1. Reproduced offline with the captured screen (`ok=false`;
+  `ok=true` with three options once the description lines are removed).
+  Fix direction: skip deeper-indented continuation lines between options
+  in `parseOptions`, stop at a rule line, and add the screen as a
+  fixture. Same run: `read_screen` on the still-blocked pane did not show
+  the widget; Vertex returned `504 DEADLINE_EXCEEDED` after about 6 s on
+  two brain steps (both fell back); herdr flapped blocked → done →
+  blocked within 0.3 s.
 - **The relayed-answer path of GPT-Live pacing was not re-measured**:
   #73's one live run measured the model replying to its own filler
   ("count slowly from one to twenty"); a reply relayed from the brain
