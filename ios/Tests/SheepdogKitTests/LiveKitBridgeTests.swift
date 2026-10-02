@@ -63,10 +63,6 @@ final class LiveKitBridgeTests: XCTestCase {
         XCTAssertFalse(LiveKitBridge.isValidIdentity("has space"))
         XCTAssertFalse(LiveKitBridge.isValidIdentity("phöne"))
         XCTAssertFalse(LiveKitBridge.isValidIdentity("sheepdog-bridge"))
-        let id = LiveKitBridge.identity(deviceID: UUID(uuidString: "1A2B3C4D-0000-0000-0000-000000000000"))
-        XCTAssertEqual(id, "phone-1a2b3c4d")
-        XCTAssertTrue(LiveKitBridge.isValidIdentity(id ?? ""))
-        XCTAssertNil(LiveKitBridge.identity(deviceID: nil))
     }
 
     // MARK: - The token response

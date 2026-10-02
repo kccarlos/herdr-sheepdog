@@ -1,7 +1,7 @@
+import AVFoundation
 import Foundation
 import LiveKit
 import SheepdogKit
-import UIKit
 
 /// The voice over WebRTC, through sheepdog-bridge (its
 /// docs/client-contract.md is the spec): fetch a token from the bridge with
@@ -57,7 +57,6 @@ final class LiveKitTransport: VoiceTransport {
 
     private var endpoint: DaemonEndpoint
     private let session: URLSession
-    private let identity: String?
 
     private var room: Room?
     private var observer: RoomObserver?
@@ -91,7 +90,6 @@ final class LiveKitTransport: VoiceTransport {
             config.timeoutIntervalForRequest = 15
             self.session = URLSession(configuration: config)
         }
-        identity = LiveKitBridge.identity(deviceID: UIDevice.current.identifierForVendor)
     }
 
     func update(endpoint: DaemonEndpoint) {
@@ -116,7 +114,12 @@ final class LiveKitTransport: VoiceTransport {
         generation += 1
         let generation = self.generation
         guard let bridge = LiveKitBridge.endpoint(bridgeAddress: bridgeAddress, daemon: endpoint),
-              let request = LiveKitBridge.tokenRequest(bridge: bridge, identity: identity) else {
+              // No `identity`: the bridge picks a fresh `phone-<hex>` per
+              // join. A stable one rejoins as a "sid update", which the
+              // bridge does not treat as a join, so it never says its
+              // `bridge` state to the new connection (seen in the smoke run
+              // after a join that timed out and was retried).
+              let request = LiveKitBridge.tokenRequest(bridge: bridge, identity: nil) else {
             onEvent?(.failed(.malformed("the bridge address \(bridgeAddress) is not a URL"), retrying: false))
             return
         }
@@ -146,7 +149,7 @@ final class LiveKitTransport: VoiceTransport {
         } catch {
             guard generation == self.generation else { return }
             let detail = (error as? URLError).map(DaemonClient.describe) ?? error.localizedDescription
-            failAndRetry(.unreachable(endpoint: "the bridge at \(bridge.display)", detail: detail))
+            failAndRetry(.unreachable(endpoint: bridge.display, detail: "The bridge did not answer. \(detail)"))
             return
         }
         guard generation == self.generation, !Task.isCancelled else { return }
@@ -169,7 +172,7 @@ final class LiveKitTransport: VoiceTransport {
             try await room.connect(url: token.url, token: token.token)
         } catch {
             guard generation == self.generation else { return }
-            failAndRetry(.unreachable(endpoint: "LiveKit at \(token.url)", detail: error.localizedDescription))
+            failAndRetry(.unreachable(endpoint: bridge.display, detail: "The bridge answered, but LiveKit at \(token.url) did not: \(error.localizedDescription)"))
             return
         }
         guard generation == self.generation else {
@@ -193,7 +196,24 @@ final class LiveKitTransport: VoiceTransport {
         // after LiveKit's own reconnect the track is as it was.
         pumpMicrophone()
         if room.remoteParticipants[Participant.Identity(from: LiveKitBridge.bridgeIdentity)] == nil {
-            onEvent?(.failed(.unreachable(endpoint: "the bridge", detail: "Joined the LiveKit room, but sheepdog-bridge is not in it. Is it running?"), retrying: true))
+            onEvent?(.failed(.unreachable(endpoint: bridgeDisplay, detail: "Joined the LiveKit room, but sheepdog-bridge is not in it. Is it running?"), retrying: true))
+        }
+        nudgeIfQuiet(generation: generation)
+    }
+
+    /// Data sent to a participant in its first moments can be lost before
+    /// its data channel is up; if neither the bridge's state nor a daemon
+    /// message has arrived shortly after joining, say `mute` again (the
+    /// daemon answers it with a `status`, and it wakes the bridge's `/ws`).
+    private func nudgeIfQuiet(generation: Int) {
+        Task { [weak self] in
+            for _ in 0 ..< 3 {
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                guard let self, generation == self.generation, !self.userClosed, !self.isOpen else { return }
+                guard self.link != .disconnected, self.link != .replaced else { return }
+                SheepdogLog.socket.info("livekit: nothing from the bridge yet, saying mute again")
+                self.send(.mute(self.muted))
+            }
         }
     }
 
@@ -296,6 +316,7 @@ final class LiveKitTransport: VoiceTransport {
         }
         switch packet {
         case let .bridge(link):
+            SheepdogLog.socket.info("livekit: bridge says the daemon is \(link.rawValue, privacy: .public)")
             self.link = link
             onEvent?(.link(link))
             switch link {
@@ -331,6 +352,7 @@ final class LiveKitTransport: VoiceTransport {
 
     private func setOpen() {
         guard !isOpen, room?.connectionState == .connected else { return }
+        SheepdogLog.socket.info("livekit: open")
         isOpen = true
         sayState()
         onEvent?(.opened)
@@ -437,7 +459,7 @@ final class LiveKitTransport: VoiceTransport {
             guard let self, generation == self.generation else { return }
             self.microphoneTask = nil
             if let failure {
-                SheepdogLog.socket.error("livekit: microphone \(want ? "on" : "off", privacy: .public) failed: \(failure, privacy: .public)")
+                SheepdogLog.socket.error("livekit: microphone \(want ? "on" : "off", privacy: .public) failed (record permission \(AVAudioApplication.shared.recordPermission.rawValue, privacy: .public)): \(failure, privacy: .public)")
                 if want {
                     // Do not loop on a microphone that will not start.
                     self.microphoneWanted = false

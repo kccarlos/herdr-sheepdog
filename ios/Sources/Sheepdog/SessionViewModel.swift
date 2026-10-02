@@ -913,7 +913,10 @@ final class SessionViewModel: ObservableObject {
         if noMicSignal != core.mic.noSignal { noMicSignal = core.mic.noSignal }
         if wantsConnection != core.connection.wantsConnection { wantsConnection = core.connection.wantsConnection }
         let chip = core.connectionChip
-        if chip != connectionChip { connectionChip = chip }
+        if chip != connectionChip {
+            SheepdogLog.session.debug("chip: \(String(describing: chip.status), privacy: .public) socket=\(self.core.connection.socket.rawValue, privacy: .public) events=\(self.core.connection.events.rawValue, privacy: .public)")
+            connectionChip = chip
+        }
         let next = core.sessionState
         if next != state { state = next }
     }

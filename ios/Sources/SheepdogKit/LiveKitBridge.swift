@@ -60,14 +60,6 @@ public enum LiveKitBridge {
         }
     }
 
-    /// A stable per-device identity (`phone-` and the first 8 hex digits of
-    /// a device id), so a reconnect rejoins as the same participant.
-    public static func identity(deviceID: UUID?) -> String? {
-        guard let deviceID else { return nil }
-        let hex = deviceID.uuidString.replacingOccurrences(of: "-", with: "").lowercased()
-        return "phone-\(hex.prefix(8))"
-    }
-
     /// Reads `/livekit/token`'s answer, mapping its failures onto the
     /// words the app already has for the daemon.
     public static func tokenResponse(status: Int, body: Data, bridge: DaemonEndpoint) throws -> BridgeToken {
