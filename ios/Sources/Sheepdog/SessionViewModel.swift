@@ -348,6 +348,8 @@ final class SessionViewModel: ObservableObject {
             disconnect()
             connect()
         } else {
+            // Health shows the transport the next Connect will use.
+            selectTransport()
             Task {
                 await refreshState(quiet: true)
                 await syncHistory()

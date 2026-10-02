@@ -214,6 +214,10 @@ final class LiveKitTransport: VoiceTransport {
                 SheepdogLog.socket.info("livekit: nothing from the bridge yet, saying mute again")
                 self.send(.mute(self.muted))
             }
+            // Still nothing: say so, so the reconnect policy can raise its
+            // banner instead of "Reconnecting…" forever.
+            guard let self, generation == self.generation, !self.userClosed, !self.isOpen, self.link == nil else { return }
+            self.onEvent?(.failed(.unreachable(endpoint: self.bridgeDisplay, detail: "Joined the LiveKit room, but the bridge has not said whether it has the daemon."), retrying: true))
         }
     }
 
