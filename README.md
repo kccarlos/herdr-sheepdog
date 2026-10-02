@@ -344,6 +344,18 @@ affected by this; this warning is about the worker panes herdr manages.)
   [`docs/cli-query-tools.md`](docs/cli-query-tools.md)); sheepdog tells
   the user it's checking rather than going quiet.
 
+## Optional: WebRTC voice through sheepdog-bridge
+
+The daemon and the iOS app work as they are: the phone talks to `GET /ws`
+directly and that stays the default. For a phone on cellular or a flaky
+network, the optional add-on
+[herdr-sheepdog-bridge](https://github.com/kccarlos/herdr-sheepdog-bridge)
+carries the voice over WebRTC instead (Opus, a real jitter buffer, UDP,
+ICE restarts). It runs a LiveKit server plus a small bridge that is just
+another `/ws` client of this daemon, so nothing here changes. The app picks
+it under Settings ▸ Voice transport ▸ LiveKit. Setup (everything on this
+Mac, or LiveKit on a VM) is in the bridge's README.
+
 ## Quota notes
 
 - Gemini free-tier API keys work for both the voice session and the
