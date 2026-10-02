@@ -7,6 +7,15 @@ options:
   generateEmptyDirectories: false
   groupSortPosition: top
 
+# LiveKit (WebRTC) for the optional voice transport through
+# sheepdog-bridge (docs/architecture.md "LiveKit transport"). Only the app
+# target links it; SheepdogKit stays free of it. Pinned exactly so a
+# regenerated project resolves the same SDK; 2.x supports iOS 13+.
+packages:
+  LiveKit:
+    url: https://github.com/livekit/client-sdk-swift
+    exactVersion: 2.17.0
+
 settings:
   base:
     # Swift 5 language mode on purpose: the audio path (AVAudioEngine tap
@@ -52,6 +61,7 @@ targets:
       - path: Sources/Sheepdog
     dependencies:
       - target: SheepdogKit
+      - package: LiveKit
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.github.kccarlos.herdr-sheepdog-ios
