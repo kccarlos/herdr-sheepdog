@@ -167,6 +167,15 @@ DeepSeek at 01:07 UTC and it is staying there for now.
     heard the fallback each time) — agreed as worth doing, later;
   - switch the brain back to Vertex only after re-measuring
     `gemini-3.8-flash` there.
+- **Pending decision (CEO testing first): should every pending approval
+  notify the phone?** Today the APNs notification follows the brain's
+  announce decision, so when the brain skips a block (for example "the
+  CEO just heard it") no notification is sent either. The alternative is
+  to notify for every pending answer-prompt action regardless of the
+  brain, at the cost of an occasional notification the CEO just heard by
+  voice (the app already suppresses banners while it is open and
+  connected). The CEO wants to test the current behaviour before
+  deciding; it is a one-line change in `internal/supervisor/notify.go`.
 - **The relayed-answer path of GPT-Live pacing was not re-measured**:
   #73's one live run measured the model replying to its own filler
   ("count slowly from one to twenty"); a reply relayed from the brain
