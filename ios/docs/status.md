@@ -276,16 +276,15 @@ daemon's `GET /api/settings`.
 
 ## Not verified
 
-- **Real device audio.** Nothing has run on an iPhone. The microphone, the
-  echo canceller, AirPods, the lock screen and the background-audio mode are
-  all untested outside the simulator; the simulator's audio stack is not a
-  substitute. The capture and playback logic is unit-tested with synthetic
-  signals, which is a different claim.
-- **A real Gemini session.** Everything here ran against `--voice=off`, so
-  no audio has been over the wire in either direction, and no `transcript`
-  frame from a live model has ever been rendered by this app (the reducer is
-  tested against the contract's shapes, not against the model's timing).
-  `flush`, barge-in and `stalled` are likewise only tested as inputs.
+- **Real device audio.** Verified live by the CEO on 2026-10-01: voice
+  interaction works on their iPhone with TestFlight build 0.1.0 (2),
+  against daemon `0064753` (Gemini Live and the brain on Vertex AI).
+  Still not individually confirmed: AirPods and route changes, the lock
+  screen and background audio, approvals tapped on the phone, and the
+  Health pane's brain picker (the CEO did not find it on the first try).
+- **A real Gemini session.** Seen on 2026-10-01 in the CEO's phone
+  session above (Gemini Live on Vertex AI). `flush`, barge-in and
+  `stalled` were not specifically exercised.
 - **Reconnect in the field.** The backoff and the `replaced` handling are
   coded to the contract and exercised by hand, not by an automated test.
 - **History and approvals on the phone.** Everything above ran in the
