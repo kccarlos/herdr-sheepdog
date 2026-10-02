@@ -553,6 +553,67 @@ The same two numbers are live in the app under Settings ▸ About, and go to
 `os_log` under the subsystem `com.github.kccarlos.herdr-sheepdog-ios`, categories `audio`,
 `socket` and `session`.
 
+## The LiveKit transport (optional)
+
+Settings ▸ Voice transport picks **WebSocket** (the default, everything
+above) or **LiveKit**: WebRTC through
+[sheepdog-bridge](https://github.com/kccarlos/herdr-sheepdog-bridge), whose
+`docs/client-contract.md` is the spec. The goal is fewer dropouts, lower
+latency and surviving Wi-Fi ↔ cellular (Opus over UDP, NetEQ, ICE restarts)
+without touching the daemon. The WebSocket path is unchanged and stays the
+fallback.
+
+```
+SessionViewModel ── VoiceTransport (SheepdogKit protocol)
+                      ├─ VoiceSocket        (Kit)  /ws, PCM + JSON
+                      └─ LiveKitTransport   (app)  LiveKit Swift SDK 2.17.0
+                              │ GET {bridge}/livekit/token  (bearer = daemon token)
+                              │ Room.connect, publish mic, subscribe sheepdog-voice
+                              └ data topic sheepdog.control  (reliable, ws-contract JSON)
+```
+
+- **The seam.** `VoiceTransport` is connect/disconnect, `send(WSMessage)`,
+  the replay-on-open state (`muted`, `gateClosed`, `speaking`) and
+  `VoiceTransportEvent` (`opened`, `control`, `audio`, `closed`, `failed`,
+  and LiveKit's `link`). `VoiceSocket.Event` is now a typealias for it;
+  nothing else in the socket changed. Only the app target links LiveKit;
+  the pure half (`LiveKitBridge`: bridge address, token request/response,
+  `ControlPacket` decoding of daemon frames and the bridge's
+  `{"type":"bridge","daemon":…}`, the outgoing filter) is in Kit and unit
+  tested. `SessionCore` is unchanged and drives both.
+- **Audio is LiveKit's.** `AudioEngine` does not start: no capture tap, VAD,
+  jitter buffer, time-stretch or playback reports. On this path the view
+  model maps the core's audio effects onto the microphone track: it is
+  live while the session's audio would run, unmuted, not paused in the
+  background, and (hold-to-talk) held. Mute sends `mute` and mutes the
+  track (the core mutes the source first, then sends — the bridge drops
+  frames while muted, so either order is safe). LiveKit's `AudioManager`
+  owns the session with voice-processing I/O (echo cancellation). The orb's
+  "Speaking" comes from the bridge participant's active-speaker state.
+- **What the app does not send.** `playback` (the bridge owns the reports)
+  and `speaking` (one would switch off the bridge's active-speaker
+  detection for the session). In open mic the app never sends `silence`
+  either, so the bridge runs the contract's gate; hold-to-talk sends
+  `silence` from the hold (the hold is the gate), which makes the app's
+  `silence` authoritative for that bridge session.
+- **Open / closed.** `opened` once the room is joined and the bridge has the
+  daemon (its `bridge` message says `connected`, or any daemon message
+  arrives). `closed(retrying)` when the bridge loses the daemon or leaves,
+  when LiveKit starts its own reconnect (then, after it, the last `status`
+  is replayed, since the bridge's `/ws` stayed up and the daemon sends no
+  new one), and when the room drops for good (then a fresh token and a
+  rejoin with the socket's 1–10 s backoff). A refused bearer (401) ends the
+  session as "token refused". `bridge: replaced` (the browser page has the
+  daemon) shows a "Take it back" banner; rejoining reclaims it. Health shows
+  the transport, the bridge address and its link to the daemon.
+- **Join quirks.** The app lets the bridge pick a fresh identity per join (a
+  rejoin under the same identity is only a "sid update" to the bridge, which
+  then never sends its link state), and re-sends `mute` up to three times,
+  2 s apart, while nothing has arrived after joining: data sent to a
+  participant in its first moments can be lost. Every join says `mute` (and
+  a closed gate) because the bridge forgets phone state when the last phone
+  leaves.
+
 ## The voice bar's words
 
 `VoiceBarModel` also owns what the bar *says*. The mic button is never a

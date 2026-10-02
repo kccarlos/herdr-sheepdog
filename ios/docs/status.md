@@ -1,4 +1,46 @@
-# Status — 2026-10-01
+# Status — 2026-10-02
+
+## LiveKit voice transport (2026-10-02, branch `feat/livekit-transport`)
+
+Optional WebRTC voice through sheepdog-bridge, behind Settings ▸ Voice
+transport (WebSocket stays the default and the fallback). Design in
+`docs/architecture.md` "The LiveKit transport".
+
+**Verified**
+
+- Build and the full scheme test run on the iPhone 18 Pro simulator
+  (iOS 27.0; no iPhone 17 Pro simulator is installed): SheepdogKitTests
+  374 executed, 0 failures, 2 skipped (`LiveDaemonTests`, no live daemon);
+  16 of them new (`LiveKitBridgeTests`: bridge address, token
+  request/response, control packets, the outgoing filter, settings
+  persistence). The 10 UI tests skip themselves without the fixture
+  daemon on 7799, as before.
+- Simulator smoke run against the real bridge (`8d409a0`/`c015a93`),
+  `livekit-server` 1.13.7, the bridge's `fakedaemon` (echo) and a throwaway
+  `sheepdog serve --voice=off --herdr=mock` for the app's HTTP side, all on
+  loopback in /tmp, the app launched with `-sheepdogTransport livekit`:
+  token issued, the phone joined (`/healthz`: `phones` ≥ 1,
+  `daemon_connected: true`), `mute` reached the bridge, the fake daemon's
+  `status` came back and opened the transport, and a `text` control message
+  round-tripped (`transcript` in "hello" and out "echo: hello" received by
+  the app).
+
+**Not verified**
+
+- **Microphone audio over LiveKit: not verified.** In the simulator the
+  LiveKit SDK fails to start its audio engine (`-4010`) even with the
+  permission granted, so no microphone track was published, the bridge
+  never logged `room.mic_subscribed`, and no audio frames reached the fake
+  daemon. The app shows the existing "microphone would not start" banner.
+- Hearing `sheepdog-voice` played, echo cancellation, latency and dropouts,
+  Wi-Fi ↔ cellular handover, background audio with the screen locked:
+  **WAIVED_BY_USER** (physical-device audio is not verifiable here).
+- In the simulator the first `Room.connect` of each launch timed out (10 s)
+  and the retry joined in under a second; not seen on a device yet.
+- The connection chip read "Reconnecting…" during the smoke run because the
+  quiet mock daemon's `/events` sent no event (the stream counts as open on
+  its first event); not LiveKit-specific.
+
 
 ## UI/UX review changes (2026-10-01)
 
