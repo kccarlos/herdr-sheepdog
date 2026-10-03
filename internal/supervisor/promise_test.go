@@ -220,7 +220,7 @@ func TestPromiseMatchingAndUrgency(t *testing.T) {
 	h.block("w5:p1", "codex-approval-prompt.screen.txt")
 	got := h.pusher.all()
 	// One line for the block: the kept promise carries the question.
-	if len(got) != 1 || got[0].Text != `As you asked: auth asks to run printf '%s\n' 'hello from codex.' > hello.txt.` || got[0].Urgency != voice.UrgencyIdle {
+	if len(got) != 1 || got[0].Text != `As you asked: auth asks to run printf.` || got[0].Urgency != voice.UrgencyIdle {
 		t.Fatalf("block pushes = %+v", got)
 	}
 	h.transition("w5:p1", herdr.StateBlocked, herdr.StateWorking)

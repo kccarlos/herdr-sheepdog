@@ -61,7 +61,7 @@ func TestPollRepromptRaisesOnDifferentPrompt(t *testing.T) {
 		t.Fatalf("no new pending created: %+v", second)
 	}
 	pushes := h.pusher.all()
-	if len(pushes) != 2 || pushes[1].Text != "auth asks to run git diff --stat; git status --short." {
+	if len(pushes) != 2 || pushes[1].Text != "auth asks to run git diff." {
 		t.Errorf("pushes = %+v", pushes)
 	}
 }
@@ -143,7 +143,7 @@ func TestReconcileRaisesForAnsweredBlockedWithPrompt(t *testing.T) {
 	if !ok || p.Kind != state.PendingAnswerPrompt || p.PaneID != "w5:p1" {
 		t.Fatalf("pending = %+v ok=%v", p, ok)
 	}
-	if push := h.pusher.last(t); push.Text != "auth asks to run git diff --stat; git status --short." {
+	if push := h.pusher.last(t); push.Text != "auth asks to run git diff." {
 		t.Errorf("push = %+v", push)
 	}
 }
@@ -228,7 +228,7 @@ func TestPollAndReconcileNeverDoubleRaiseTheSamePrompt(t *testing.T) {
 	}
 	newPrompts := 0
 	for _, p := range h.pusher.all() {
-		if p.Text == "auth asks to run git diff --stat; git status --short." {
+		if p.Text == "auth asks to run git diff." {
 			newPrompts++
 		}
 	}
@@ -258,7 +258,7 @@ func TestHandleTransitionBlockedToBlocked(t *testing.T) {
 		t.Fatalf("no new pending created: %+v", second)
 	}
 	pushes := h.pusher.all()
-	if len(pushes) != 2 || pushes[1].Text != "auth asks to run git diff --stat; git status --short." || pushes[1].Urgency != voice.UrgencyIdle {
+	if len(pushes) != 2 || pushes[1].Text != "auth asks to run git diff." || pushes[1].Urgency != voice.UrgencyIdle {
 		t.Errorf("pushes = %+v", pushes)
 	}
 	row, _ = h.store.Get("w5:p1")

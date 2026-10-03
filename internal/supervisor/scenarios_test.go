@@ -102,7 +102,7 @@ func TestScenario2BlockedPushesAndCreatesPending(t *testing.T) {
 	h.block("w5:p1", "codex-approval-prompt.screen.txt")
 
 	push := h.pusher.last(t)
-	if push.Text != `auth asks to run printf '%s\n' 'hello from codex.' > hello.txt.` || push.Urgency != voice.UrgencyIdle {
+	if push.Text != `auth asks to run printf.` || push.Urgency != voice.UrgencyIdle {
 		t.Errorf("push = %+v", push)
 	}
 	p, ok := h.pending()
@@ -671,7 +671,7 @@ func TestInstructionWhenHerdrSaysBlocked(t *testing.T) {
 	h.srv.SetScreen("w5:p1", fixture(t, "codex-approval-prompt.screen.txt"))
 	h.srv.SetStatus("w5:p1", herdr.StateBlocked)
 	res := h.send("w5:p1", "skip the flaky test")
-	if !res.Clarify || res.Spoken != `auth asks to run printf '%s\n' 'hello from codex.' > hello.txt. Answer that first.` {
+	if !res.Clarify || res.Spoken != `auth asks to run printf. Answer that first.` {
 		t.Errorf("send = %+v", res)
 	}
 	p, ok := h.pending()

@@ -150,9 +150,10 @@ type Request struct {
 	// Context tab): "call:<id>" for the voice tool call that relayed an
 	// utterance, "evt:<id>" for the worker event an announce is about.
 	Link string
-	// Facts, when set (an announce turn), is what the daemon knows now
-	// about the event and the brain cannot see (docs/bench-2026-10-03.md
-	// #15b): called when the turn starts, after the turn lock — the
+	// Facts, when set, is what the daemon knows now and the brain cannot
+	// see: about the event of an announce turn (docs/bench-2026-10-03.md
+	// #15b), or, on an utterance turn, what the CEO had heard when they
+	// began speaking (Heard): called when the turn starts, after the turn lock — the
 	// template line may have gone out while the turn was queued — and
 	// again before each later step, when a change is put in the window.
 	Facts func() EventFacts
@@ -171,6 +172,34 @@ type EventFacts struct {
 	// Prompt is the state of the approval prompt a block created:
 	// PromptWaiting, PromptAnswered or PromptGone; "" when none.
 	Prompt string
+	// Heard is set on an utterance turn: when the CEO began saying the
+	// words and the spoken lines the voice was given around then
+	// (docs/eval-campaign-2026-10-03.md H6: a "yes" to one question was
+	// taken as the answer to a question pushed after the CEO spoke).
+	Heard *HeardFacts
+}
+
+// HeardFacts is what the CEO had and had not heard when they began
+// speaking.
+type HeardFacts struct {
+	// SpokeAt is when their first words of this utterance reached the
+	// daemon.
+	SpokeAt time.Time
+	// Before is the last spoken line the voice was given before SpokeAt
+	// (nil when none is remembered); After are the lines it was given
+	// since, which the CEO had not heard when they began.
+	Before *PushedLine
+	After  []PushedLine
+}
+
+// PushedLine is one spoken line handed to the voice.
+type PushedLine struct {
+	Text string
+	// At is when the voice was given it (sent, not queued).
+	At time.Time
+	// Unheard is set when the voice layer judged it did not reach the
+	// CEO (voice.push_unheard).
+	Unheard bool
 }
 
 // The states of EventFacts.Prompt.
@@ -436,6 +465,11 @@ type PendingPrompt struct {
 type Option struct {
 	Label string
 	Keys  []string
+	// Meta marks an entry that is not an answer (Claude Code's "Type
+	// something." free-text box): the roster says so, so the brain knows
+	// it exists for a free-text answer and never offers it as a choice
+	// (docs/eval-campaign-2026-10-03.md H2).
+	Meta bool
 }
 
 // AllowedKeys returns every key the prompt's option set permits.

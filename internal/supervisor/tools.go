@@ -177,7 +177,7 @@ func (s *Supervisor) reportBlocked(ctx context.Context, row state.Agent) voice.T
 // starts the post-answer poll (reprompt.go): herdr may already be showing
 // the next prompt within its own poll window with no state change in
 // between. ok reports whether the keys were sent. Caller holds s.mu.
-func (s *Supervisor) answerKeys(ctx context.Context, p state.PendingAction, keys []string, label, format, via string, extra map[string]any) (voice.ToolResult, bool) {
+func (s *Supervisor) answerKeys(ctx context.Context, p state.PendingAction, keys []string, label string, say func(label string) string, via string, extra map[string]any) (voice.ToolResult, bool) {
 	alias := s.aliasOf(p.PaneID)
 	if err := s.herdr.SendKeys(ctx, p.PaneID, keys...); err != nil {
 		s.log.Log(logSource, "supervisor.confirm_error", p.PaneID, map[string]any{"id": p.ID, "keys": keys, "error": err.Error()})
@@ -210,7 +210,7 @@ func (s *Supervisor) answerKeys(ctx context.Context, p state.PendingAction, keys
 	}
 	s.log.Log(logSource, "pending.confirmed", p.PaneID, confirmed)
 	s.startReprompt(p.PaneID)
-	return voice.ToolResult{Spoken: fmt.Sprintf(format, label), Scheduling: voice.UrgencyInterrupt}, true
+	return voice.ToolResult{Spoken: say(label), Scheduling: voice.UrgencyInterrupt}, true
 }
 
 // findAlias matches an alias exactly, then by slug, then by prefix or

@@ -28,7 +28,7 @@ func (s *Supervisor) newAnswerPrompt(paneID string, prompt herdr.Prompt, alias s
 		Kind:   state.PendingAnswerPrompt,
 		// The prompt's own words reach the ear, so D9 applies to them
 		// like any other text from a pane: no paths, hashes or URLs.
-		SpokenSummary: prose.Spoken(prompt.Summary(alias), 0),
+		SpokenSummary: prose.Spoken(prompt.SummaryIn(alias, s.ceoChineseLocked()), 0),
 		Question:      prompt.Phrase(),
 		Command:       prompt.Command,
 		YesKeys:       append([]string(nil), prompt.YesKeys...),
@@ -88,7 +88,7 @@ func (s *Supervisor) setPending(p state.PendingAction) string {
 			"old_id": old.ID, "old_kind": old.Kind, "old_pane_id": old.PaneID, "new_id": p.ID, "new_kind": p.Kind,
 		})
 		if old.Kind == state.PendingAnswerPrompt && p.Kind == state.PendingAnswerPrompt && old.PaneID != p.PaneID && s.allows(pushReplacement) {
-			spoken = fmt.Sprintf("Dropping the earlier question from %s; now %s.", s.aliasOf(old.PaneID), lowerFirst(strings.TrimRight(p.SpokenSummary, ".")))
+			spoken = replacedLine(s.aliasOf(old.PaneID), p.SpokenSummary, s.ceoChineseLocked())
 		}
 	}
 	if err := s.store.SetPending(p); err != nil {
@@ -327,4 +327,14 @@ func answerOptions(p state.PendingAction) []state.Option {
 		}
 	}
 	return out
+}
+
+// replacedLine is the spoken line for a question that displaces another
+// pane's: in the shepherd's language, like the summary it carries (no
+// "。." seam, docs/eval-campaign-2026-10-03.md H1/H4).
+func replacedLine(oldAlias, summary string, zh bool) string {
+	if zh {
+		return "先放下 " + oldAlias + " 之前的问题。现在 " + prose.Terminate(summary)
+	}
+	return fmt.Sprintf("Dropping the earlier question from %s; now %s.", oldAlias, lowerFirst(strings.TrimRight(summary, ".。")))
 }

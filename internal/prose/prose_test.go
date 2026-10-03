@@ -99,3 +99,22 @@ func TestSpokenEnforcesD9(t *testing.T) {
 		t.Errorf("no limit: %q", got)
 	}
 }
+
+// docs/eval-campaign-2026-10-03.md H3: the logged line "bench-codex asks
+// to run go test -race./...." (j1-status-en and four other scenarios):
+// the orphan rule joined the "." that opens "./..." to the flag before
+// it. Punctuation left alone by a scrub is still joined back.
+func TestSpokenKeepsSpaceBeforeDotToken(t *testing.T) {
+	cases := map[string]string{
+		"bench-codex asks to run go test -race ./...": "bench-codex asks to run go test -race ./...",
+		"run go vet ./... then go test .":             "run go vet ./... then go test.",
+		"It edited /Users/kc/bench/calc/calc.go .":    "It edited a file.",
+		"Done , and the tests pass .":                 "Done, and the tests pass.",
+		"Is it ready ?":                               "Is it ready?",
+	}
+	for in, want := range cases {
+		if got := Spoken(in, 0); got != want {
+			t.Errorf("Spoken(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

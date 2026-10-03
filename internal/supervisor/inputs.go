@@ -114,6 +114,10 @@ type claim struct {
 	// event of it: the relay, the brain turn, the reply push). The relay
 	// mints it as it claims the words.
 	id string
+	// start is when the first of these words reached the daemon (the
+	// first input's arrival): what the shepherd had heard by then is
+	// what the words can answer (heard.go).
+	start time.Time
 }
 
 // maxInputs bounds the remembered inputs.
@@ -298,6 +302,7 @@ func (s *Supervisor) markPushed(text string) {
 	s.mu.Lock()
 	s.pushSeq = s.inputSeq
 	s.lastPush = text
+	s.recordSentLocked(text)
 	s.mu.Unlock()
 }
 
@@ -503,7 +508,7 @@ func (s *Supervisor) claimRunLocked(run []*shepherdInput) claim {
 	s.relayedSeq = s.inputSeq
 	s.acceptedSeq++
 	s.disarmRelayLocked()
-	return claim{in: run[len(run)-1], text: strings.Join(words, " "), n: len(run), id: s.nextID("utt")}
+	return claim{in: run[len(run)-1], text: strings.Join(words, " "), n: len(run), id: s.nextID("utt"), start: run[0].at}
 }
 
 // promptSinceLocked is when p's prompt appeared: its pending action's
@@ -608,6 +613,7 @@ func (s *Supervisor) AnswerTap(ctx context.Context, id string, option int) (voic
 	}
 	o := p.Options[option-1]
 	s.closeVoiceLocked()
+	zh := s.ceoChineseLocked()
 	s.addInputLocked(&shepherdInput{kind: InputTap, text: o.Label})
 	// The tap is answered here and now: it is not fresh input for a
 	// later to_supervisor call (the voice relaying the silent line below
@@ -621,7 +627,7 @@ func (s *Supervisor) AnswerTap(ctx context.Context, id string, option int) (voic
 		return voice.ToolResult{}, errors.New(reason)
 	}
 	alias := s.aliasOf(p.PaneID)
-	res, sent := s.answerKeys(ctx, p, o.Keys, o.Label, "Told "+alias+" %s.", "tap", map[string]any{"option": option})
+	res, sent := s.answerKeys(ctx, p, o.Keys, o.Label, func(l string) string { return toldLine(alias, l, zh) }, "tap", map[string]any{"option": option})
 	if sent {
 		in.used = true
 	}

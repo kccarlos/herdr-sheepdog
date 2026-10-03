@@ -54,7 +54,10 @@ func (h brainHost) info(a state.Agent, pending state.PendingAction, has bool) br
 	if has && pending.Kind == state.PendingAnswerPrompt && pending.PaneID == a.PaneID {
 		p := &brain.PendingPrompt{ID: pending.ID, Question: pending.Question, AskedAt: pending.CreatedAt, YesKeys: pending.YesKeys, NoKeys: pending.NoKeys}
 		for _, o := range pending.Options {
-			p.Options = append(p.Options, brain.Option{Label: o.Label, Keys: o.Keys})
+			// Meta goes along as a fact: the brain must know the
+			// free-text entry is not an answer (the phone card and
+			// the yes/no mapping never offer it).
+			p.Options = append(p.Options, brain.Option{Label: o.Label, Keys: o.Keys, Meta: o.Meta})
 		}
 		info.Pending = p
 	}
@@ -241,7 +244,9 @@ func (h brainHost) AnswerPrompt(ctx context.Context, paneID string, keys []strin
 	if reason != "" {
 		return "", fmt.Errorf("%w: %s", brain.ErrNotPermitted, reason)
 	}
-	res, sent := s.answerKeys(ctx, p, keys, keysLabel(p, keys), "Told "+s.aliasOf(paneID)+" %s.", "brain", nil)
+	// A tool result: a fact for the brain, which phrases the reply.
+	alias := s.aliasOf(paneID)
+	res, sent := s.answerKeys(ctx, p, keys, keysLabel(p, keys), func(l string) string { return toldLine(alias, l, false) }, "brain", nil)
 	if sent {
 		in.used = true
 	}
@@ -387,11 +392,8 @@ func earLine(rep brain.Reply) (spoken, overflow string) {
 	return sentence(spoken), overflow
 }
 
-// sentence makes sure s ends with terminal punctuation.
-func sentence(s string) string {
-	s = strings.TrimSpace(s)
-	if s == "" || strings.ContainsRune(".!?\"')]", rune(s[len(s)-1])) {
-		return s
-	}
-	return s + "."
-}
+// sentence makes sure s ends with terminal punctuation: prose's
+// CJK-aware terminators, so a Chinese line ending in 。 or ？ gets no
+// extra "." (docs/eval-campaign-2026-10-03.md H1: "。." / "？." seams,
+// the old check looked at the last byte and knew only ASCII).
+func sentence(s string) string { return prose.Terminate(s) }
