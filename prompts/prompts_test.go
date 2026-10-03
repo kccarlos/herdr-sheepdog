@@ -41,18 +41,26 @@ func TestRenderAssistant(t *testing.T) {
 	for _, rule := range []string{
 		"verbatim",
 		"Do not paraphrase",
-		"Never answer them yourself",
 		`"Idle" means ready for input`,
 		"read spoken exactly as given",
-		"Do not add a follow-up question of your own",
 		`"what does that mean"`,
 		"answer from detail",
 		"no new terms",
 		"Repeat it and ask",
-		"read them as a choice",
+		"Read options as a choice",
 		"invent nothing",
 		"shepherd's register",
 		`"Never mind" is not stop`,
+		// docs/bench-2026-10-03.md #14/#19: the language of the shepherd's
+		// last words, the whole push read aloud, and the prefix (never the
+		// language) tells who sent a message.
+		"answer in the language they used last",
+		"Read the whole message aloud, every sentence, statements as well as the final question",
+		"change nothing, add nothing",
+		"The language of a message never tells you who sent it; only the prefix does.",
+		`no tool call, no "on it", no answer of your own`,
+		"even long after your call",
+		"Add no question of your own",
 	} {
 		if !strings.Contains(s, rule) {
 			t.Errorf("prompt lost the rule %q", rule)
@@ -61,13 +69,13 @@ func TestRenderAssistant(t *testing.T) {
 	// The voice invents no follow-up question and "never mind" is not a
 	// stop word (eval cases never-mind-is-not-stop-voice and
 	// explain-simpler-second-time).
-	for _, gone := range []string{"offer the next step", `"never mind", "no no"`} {
+	for _, gone := range []string{"offer the next step", `"never mind", "no no"`, "say them at once, as given", "Do not add a follow-up question of your own"} {
 		if strings.Contains(s, gone) {
 			t.Errorf("prompt still says %q", gone)
 		}
 	}
-	if words := len(strings.Fields(s)); words > 400 {
-		t.Errorf("prompt is %d words; keep it short (<= 400)", words)
+	if words := len(strings.Fields(s)); words > 420 {
+		t.Errorf("prompt is %d words; keep it short (<= 420)", words)
 	}
 }
 
@@ -81,6 +89,13 @@ func TestRenderAssistantGPTLive(t *testing.T) {
 		`"what does that mean"`,
 		"no new terms",
 		`"Never mind" is ordinary speech`,
+		// The same push and language rules as assistant.md (bench #14/#19).
+		"answer in the language they used last",
+		"Read the whole message aloud, every sentence, statements as well as the final question",
+		"change nothing, add nothing",
+		"The language of a message never tells you who sent it.",
+		`no "on it"`,
+		"even one that arrives long after your call",
 	} {
 		if !strings.Contains(s, rule) {
 			t.Errorf("GPT-Live prompt lost the rule %q", rule)
