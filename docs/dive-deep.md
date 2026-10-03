@@ -1,46 +1,16 @@
 # Dive deep: talking about one worker in detail
 
-Design note, 2026-09-25. Status: implemented. WP8a and WP8b landed in
-#68 (`read_screen` reads the worker's session; detail on request widens
-the utterance cap); WP8c landed in #69 (`investigate(source: worker)`
-forks the worker's own CLI session). WP8d (this doc's own follow-through
-— headset script lines, scorecard column, status.md) is this PR.
+Design note, 2026-09-25. Status: implemented — WP8a and WP8b in #68,
+WP8c in #69.
 
-It answers one complaint from the headset sessions of 2026-09-24: sheepdog gives a
-good status line but cannot hold a conversation about what one worker
-actually did ("what exactly did it say?", "tell me more", "why did it
-do that?").
-
-## What the log shows
-
-Session 18:14–18:26 UTC, daemon `d0f79b9`, brain `deepseek-flash`.
-
-1. Every detail question ran into the tool-call ordering bug (fixed in
-   #62) and fell back to the roster sentence. That was the immediate
-   blocker, and it is gone.
-2. With the bug out of the way, the answers are still the wrong shape
-   for a deep question, for three reasons:
-   - **The material is thin.** The brain's only fresh source is
-     `read_screen`: the last lines of a terminal pane, capped for the
-     window. At 18:24:59 ("what exactly did the agent say?") the pane
-     showed a TUI mid-render, with the worker's real message cut off.
-     The worker's own session transcript (what it wrote for a human) is
-     read only at a finish or block, into the journal (#57), and the
-     brain cannot ask for it.
-   - **There is no room to answer.** The daemon cuts `spoken` at two
-     sentences and thirty words, whatever was asked. So the brain
-     summarises seven glitches into "seven small quirks" and offers to
-     go on, and the shepherd hears a menu instead of an answer.
-   - **"Why" has no memory behind it.** `investigate` starts a fresh
-     read-only CLI agent in the repository, which "has not heard this
-     conversation" and never saw what the worker tried. The shepherd,
-     by contrast, asks the worker itself a side question in its own
-     pane and gets an answer from the worker's memory.
-
-None of this needs a new mode, a state machine or a bigger model: the
-brain's transcript already carries what the shepherd is focused on.
-What is missing is better material, room to use it, and a way to ask
-the worker.
+It answers one complaint from the headset sessions of 2026-09-24:
+sheepdog gave a good status line but could not hold a conversation about
+what one worker actually did ("what exactly did it say?", "tell me
+more", "why did it do that?"). The material was thin (only the last
+lines of a pane), the daemon cut every reply at two sentences, and
+`investigate` started a fresh sub-agent that never saw what the worker
+tried. None of this needs a new mode or a bigger model: the brain's
+transcript already carries what the shepherd is focused on.
 
 ## Proposal: three small changes, no new tool
 
@@ -72,7 +42,7 @@ against what #59 just trimmed. On demand is cheaper.
 
 ### 2. Length is the prompt's call; the code cap becomes a safety net
 
-Today `prose.EarLine` cuts an utterance reply at two sentences and
+Before WP8b, `prose.EarLine` cut an utterance reply at two sentences and
 thirty words. That cap was a reaction to 15–25 s replies (#45, #55) and
 it is right for a status line, but it makes a detail answer impossible.
 The iteration-2 rule is to constrain with measurement, not with code,
@@ -128,10 +98,9 @@ the question there.
     `fork` instead.
   - Cost and time: 2–3.5 s and about $0.02 per run on the spike's tiny
     scratch sessions. A real day-long session's cost and time were not
-    measured (open item below).
-- This replaces the open item "source: worker types into the idle
-  worker's pane" (docs/status.md): the fork never touches the pane, so
-  the finish/announce collision that blocked it does not arise.
+    measured.
+- The fork never touches the pane, so it cannot collide with the
+  worker's own finish or announce.
 
 ### What this does not do
 
@@ -179,8 +148,4 @@ the question there.
   docs/cli-query-tools.md §2c); then `internal/cli` (fork template),
   `internal/supervisor/investigate.go` (`source: worker` resolves the
   pane's session id), `RULES.md`, tests with the CLI harness.
-- **WP8d** docs: headset script lines, scorecard column, status.md —
-  **done, this PR**.
-
-WP8a and WP8b landed together in #68; WP8c followed its spike in #69;
-WP8d closes out the note here.
+- **WP8d** docs: headset script lines, scorecard column — **done**.

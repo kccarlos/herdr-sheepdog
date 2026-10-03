@@ -87,34 +87,12 @@ almost exactly; two need an explanation.
 | 59 brain.push_late total | 61 total | close (2 more) |
 | 171 spoken lines > 40 chars, mean 39 words, p90 76, 65% with a dash | see below | pool size differs, quality metrics don't |
 
-**"171 spoken lines > 40 chars"**: the scorecard's "spoken" pool is
-exactly the two channels docs/iteration-2.md names — `voice.tool_result`
-with a non-empty `spoken`, and `voice.push` with `urgency != "silent"` —
-which gives 136 lines total, 81 of them over 40 characters. That is
-roughly half of 171, but the *quality* of that smaller pool matches the
-hand count closely: mean words 37.7 (hand count 39), p90 73 (hand count
-76), share with a dash 75% (hand count 65%). The most likely explanation
-is that the hand count also included lines from a channel this report
-does not (a plausible candidate: `voice.transcript.out`, the voice
-model's own reconstructed speech, which paraphrases a push rather than
-reciting the daemon's exact `spoken`/`text` field, and can split one
-`spoken` line into more than one heard sentence). Since
-docs/iteration-2.md's own metric definition names the daemon-side fields,
-not the voice model's transcript, this report counts what the daemon
-decided to say, not what a listener might parse the audio into; if the
-per-iteration rules want the audio-side count instead, that argues for
-also aggregating `voice.transcript.out` fragments per turn (see
-"Not measurable as logged today" below).
-
-**"59 vs 61 brain.push_late"**: within 3%; most likely a session or
-day-boundary difference in exactly which few pushes the hand count
-included (e.g. one near a UTC midnight rollover, or one from a very short
-daemon restart). The number that matters for J4 (needs_user lines always
-spoken) matches exactly: 30 of 61 push_late events were `needs_user:true`
-and dropped, both by hand and by this report.
-
-**"time to first word" mean is 136 s, not a few seconds**: this is a
-real limitation of the metric as specified, not a bug — see below.
+The "spoken" pool is the two channels docs/iteration-2.md names
+(`voice.tool_result` with a `spoken`, `voice.push` not silent): 136 lines,
+81 over 40 characters. The hand count likely also counted
+`voice.transcript.out`; the quality numbers still match (mean 37.7 words,
+p90 73, 75 % with a dash). Time to first word's mean is distorted; see
+"Not measurable as logged today".
 
 ## Splitting by session
 
