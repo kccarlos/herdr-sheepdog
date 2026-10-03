@@ -528,7 +528,7 @@ func TestBrainConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !cfg.Brain.Enabled || cfg.Brain.Model != DefaultBrainModel || cfg.Brain.MaxSteps != 6 || cfg.Brain.UtteranceTimeoutS != 12 || cfg.Brain.AnnounceTurnTimeoutS != 6 || cfg.Brain.WindowTokens != 12000 || cfg.Brain.PruneAfterTurns != 2 {
+	if !cfg.Brain.Enabled || cfg.Brain.Model != DefaultBrainModel || cfg.Brain.MaxSteps != 6 || cfg.Brain.UtteranceTimeoutS != 25 || cfg.Brain.AnnounceTurnTimeoutS != 6 || cfg.Brain.WindowTokens != 12000 || cfg.Brain.PruneAfterTurns != 2 {
 		t.Errorf("brain defaults = %+v", cfg.Brain)
 	}
 	dir := t.TempDir()

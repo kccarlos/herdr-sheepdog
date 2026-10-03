@@ -34,8 +34,8 @@ const (
 	refreshOpenMax = 10 * time.Minute
 	// owedReplyWait bounds how long a to_supervisor call answered
 	// "pending" counts as still owed its reply (the brain's utterance
-	// budget is 12 s).
-	owedReplyWait = 20 * time.Second
+	// budget is 25 s, plus a 3 s final grace).
+	owedReplyWait = 35 * time.Second
 	// refreshEvery is how often a due refresh looks for a quiet moment.
 	refreshEvery = time.Second
 )

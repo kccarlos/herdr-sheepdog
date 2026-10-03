@@ -27,8 +27,12 @@ const (
 	DefaultMaxSteps = 6
 	// DefaultUtteranceTimeout bounds a CEO utterance turn including its
 	// tools (it may turn out to be an instruction) and an investigation
-	// delivery turn.
-	DefaultUtteranceTimeout = 12 * time.Second
+	// delivery turn. 25 s since the 2026-10-03 eval campaign: at 12 s,
+	// 45/130 Vertex gemini-3.8-flash runs had a turn time out; at 25 s
+	// utterance fallbacks went 44 → 0. The voice already answers
+	// "pending" within ~2 s and the answer comes as a push, so a longer
+	// budget only delays the slowest answers.
+	DefaultUtteranceTimeout = 25 * time.Second
 	// DefaultAnnounceTurnTimeout bounds an event turn (announce): on
 	// expiry the supervisor speaks its code sentence instead.
 	DefaultAnnounceTurnTimeout = 6 * time.Second
