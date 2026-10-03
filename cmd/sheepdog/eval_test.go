@@ -7,6 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/kccarlos/herdr-sheepdog/internal/config"
+	"github.com/kccarlos/herdr-sheepdog/internal/logging"
 )
 
 func countLines(t *testing.T, path string) int {
@@ -104,4 +107,21 @@ func lastLines(s string, n int) string {
 		lines = lines[len(lines)-n:]
 	}
 	return strings.Join(lines, "\n")
+}
+
+// Without Vertex credentials, --live keeps working with no judge (the
+// wording checks stay the code's) instead of failing on the default.
+func TestEvalLiveDefaultJudgeFallsBackWithoutVertex(t *testing.T) {
+	var cfg config.Config
+	cfg.Gemini.APIKeys = []string{"k"}
+	m, err := evalLiveModels(evalOpts{live: true}, cfg, logging.NopLogger{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.judge != nil || m.judgeNote == "" {
+		t.Fatalf("judge %v note %q", m.judge, m.judgeNote)
+	}
+	if _, err := evalLiveModels(evalOpts{live: true, judge: "vertex"}, cfg, logging.NopLogger{}); err == nil {
+		t.Fatal("an explicit --judge vertex without credentials must fail")
+	}
 }

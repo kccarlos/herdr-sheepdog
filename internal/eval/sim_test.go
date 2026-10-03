@@ -58,7 +58,7 @@ func TestRunSimScriptedConversation(t *testing.T) {
 		NewBrainModel: fixBrain,
 		NewJudge:      func(*Meter) Judge { return fj },
 		FixtureDir:    "../../testdata/herdr",
-		Settle:        300 * time.Millisecond,
+		Settle:        1500 * time.Millisecond, // the finish lands 200 ms after the prompt; slack for -race on CI
 	}, 1)
 	if run.Status != RunPass {
 		t.Fatalf("status %s, failures %+v\n%s", run.Status, run.Failures, renderSim(run.Transcript))
@@ -280,7 +280,7 @@ func TestSimDefaultReactionToKeys(t *testing.T) {
 		return m
 	}
 	fj := &FakeJudge{}
-	run := RunSim(context.Background(), sc, SimOptions{BrainConfig: brain.Config{MaxSteps: 4, UtteranceTimeout: 5 * time.Second}, NewBrainModel: brainModel, NewJudge: func(*Meter) Judge { return fj }, FixtureDir: "../../testdata/herdr", Settle: 600 * time.Millisecond}, 1)
+	run := RunSim(context.Background(), sc, SimOptions{BrainConfig: brain.Config{MaxSteps: 4, UtteranceTimeout: 5 * time.Second}, NewBrainModel: brainModel, NewJudge: func(*Meter) Judge { return fj }, FixtureDir: "../../testdata/herdr", Settle: 1500 * time.Millisecond}, 1)
 	if len(run.Actions) != 1 || run.Actions[0].Detail != "esc" {
 		t.Fatalf("actions = %+v\n%s", run.Actions, renderSim(run.Transcript))
 	}

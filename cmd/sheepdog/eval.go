@@ -159,6 +159,9 @@ func runEval(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 		models = m
+		if m.judgeNote != "" {
+			fprintf(stderr, "sheepdog eval --live: %s\n", m.judgeNote)
+		}
 	}
 	failed := false
 	for _, set := range sets {
@@ -200,6 +203,8 @@ type evalModels struct {
 	assistant  *brain.GenaiModel
 	judge      eval.Judge
 	meter      *eval.Meter
+	// judgeNote says why the default judge is off, when it is.
+	judgeNote string
 }
 
 // evalLiveModels builds the live run's models from the flags and config.
@@ -235,6 +240,13 @@ func evalLiveModels(o evalOpts, cfg config.Config, log logging.Logger) (*evalMod
 	kind := o.judge
 	if kind == "" {
 		kind = eval.BackendVertex
+		if app.VertexBrainMissing(cfg.Gemini.Vertex) != "" {
+			// The default judge needs Vertex credentials; without them the
+			// wording checks stay the code's (as before the judge existed)
+			// rather than failing a run that asked for no judge.
+			out.judgeNote = "no Vertex credentials for the default judge (" + app.VertexBrainMissing(cfg.Gemini.Vertex) + "): wording checks use the code's substring and word lists; pass --judge to choose one"
+			kind = eval.BackendNone
+		}
 	}
 	j, err := evalJudge(kind, o.judgeModel, o.ollamaURL, cfg, log, out.meter)
 	if err != nil {
