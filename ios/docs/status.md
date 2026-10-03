@@ -41,7 +41,7 @@ xcodegen generate
 xcodebuild -scheme Sheepdog -destination 'platform=iOS Simulator,name=iPhone 17 Pro' build test
 ```
 
-The unit suite (`SheepdogKitTests`) has 358 tests. `LiveDaemonTests` and
+The unit suite (`SheepdogKitTests`) has 400 tests. `LiveDaemonTests` and
 every UI test skip themselves when no daemon answers on `127.0.0.1:7799`,
 so Xcode Cloud stays green without a daemon.
 
@@ -69,6 +69,10 @@ xcodebuild -scheme SheepdogUITests -destination 'platform=iOS Simulator,name=iPh
 - `ReviewScreenshotsUITests` writes the screenshots below. Run it with
   `TEST_RUNNER_SHEEPDOG_SHOTS=light|dark|xxxl` against a fixture daemon on
   7797.
+- `AgentScreenUITests` opens an agent window, presses Enter, cancels a
+  Ctrl-C and sends a prompt, and writes the agent-window screenshots. Same
+  flags as the review screenshots; it needs a daemon with the
+  `/api/agents/{pane_id}/screen` and `/input` routes and skips otherwise.
 
 ## Screenshots
 
@@ -90,6 +94,9 @@ cannot produce.
 | ![](screenshots/review-light-health.png) | ![](screenshots/review-dark-health.png) | Health: voice and brain shown read-only, with "Change in Settings ›". |
 | ![](screenshots/review-light-models.png) | ![](screenshots/review-dark-models.png) | Settings ▸ Models: voice and brain. |
 | ![](screenshots/review-light-models-notifications.png) | ![](screenshots/review-dark-models-notifications.png) | Notifications: this phone, and the daemon's `GET /api/push/status`. |
+| ![](screenshots/review-light-agent-screen.png) | ![](screenshots/review-dark-agent-screen.png) | Agent window: an agent's live terminal from its Flock card, wide lines scrolling sideways, with the key bar and prompt field. |
+| ![](screenshots/review-light-agent-screen-confirm.png) | ![](screenshots/review-dark-agent-screen-confirm.png) | Ctrl-C (and Esc) ask before they are sent. |
+| ![](screenshots/review-light-agent-screen-sent.png) | ![](screenshots/review-dark-agent-screen-sent.png) | A prompt sent from the window, echoed on the (mock) screen. |
 
 At the largest accessibility text size (AX5):
 

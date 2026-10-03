@@ -127,6 +127,15 @@ struct AgentSheet: View {
                     }
                 }
 
+                Section {
+                    NavigationLink {
+                        AgentScreenView(agent: agent)
+                    } label: {
+                        Label("Open window", systemImage: "terminal")
+                    }
+                    .accessibilityIdentifier("agentSheet.window")
+                }
+
                 if let question = question ?? (agent.lastBlock?.answered == true ? nil : agent.lastBlock?.question), !question.isEmpty {
                     Section("Waiting on you") {
                         MarkdownText(question)

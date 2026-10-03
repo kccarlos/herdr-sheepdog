@@ -48,6 +48,7 @@ struct MainView: View {
                     // hangs off the strip and Settings off the navigation stack.
                     .sheet(item: $selectedAgent) { agent in
                         AgentSheet(agent: agent, question: model.pendingQuestion(for: agent))
+                            .environmentObject(model)
                     }
                 }
 
@@ -153,6 +154,13 @@ struct MainView: View {
             .animation(.easeInOut(duration: 0.2), value: model.pane)
             .navigationTitle(model.voiceName)
             .navigationBarTitleDisplayMode(.inline)
+            .navigationDestination(for: AgentWindowRoute.self) { route in
+                if let agent = model.flock.all.first(where: { $0.paneID == route.paneID }) {
+                    AgentScreenView(agent: agent)
+                } else {
+                    ContentUnavailableView("That agent is gone", systemImage: "terminal", description: Text("Its pane closed or herdr no longer reports it."))
+                }
+            }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     ConnectionChipView()

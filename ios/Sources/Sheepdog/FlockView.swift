@@ -144,6 +144,15 @@ struct AgentCard: View {
             }
 
             workerMessage
+
+            NavigationLink(value: AgentWindowRoute(paneID: agent.paneID)) {
+                Label("Open window", systemImage: "terminal")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(maxWidth: .infinity, minHeight: 36)
+            }
+            .buttonStyle(.bordered)
+            .accessibilityHint("Shows \(agent.displayName)'s live terminal and lets you type or press keys in it")
+            .accessibilityIdentifier("flock.agent.\(agent.alias).window")
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)

@@ -198,6 +198,31 @@ accessibility text sizes. The voice bar stays in place.
   its `detail`, and the worker's last message to a human (four lines until
   tapped). The agent strip above the conversation shows the same running
   agents.
+- **Agent window** (`AgentScreenView`, `AgentScreenModel`, `AgentKey`).
+  "Open window" on a Flock card (a `NavigationLink` to
+  `AgentWindowRoute` on the main `NavigationStack`), or in the sheet behind
+  a strip chip, pushes the agent's live terminal. It polls
+  `GET /api/agents/{pane_id}/screen?lines=200&hash=…` every 1.5 s while on
+  screen; the last `hash` goes back so an unchanged window answers without
+  `text`, and `AgentScreenModel.revision` only moves when the text does.
+  The text is monospaced and scrolls sideways rather than wrapping a TUI's
+  layout; a new frame scrolls to the bottom only when the view is already
+  there (a bottom anchor reports its position through a preference key,
+  since `onScrollGeometryChange` needs iOS 18), and "Latest" jumps back.
+  Pull to refresh reads at once. The header shows the spoken name (the
+  daemon's `spoken`, else the alias), the state and how long. Under it, a
+  key bar (Enter, Esc, Ctrl-C, 1, 2, 3, ↑, ↓, Tab) and a prompt field post
+  to `POST /api/agents/{pane_id}/input` (`{"keys": […]}` /
+  `{"text": …, "submit": true}`); Esc and Ctrl-C ask first, a send is a
+  haptic, and the controls are disabled until a frame has arrived and
+  while reads fail. Errors show inline: a read failure above the key bar,
+  an input refusal (a blocked agent refuses a prompt, `409`) under the
+  field, and a reply such as "Told auth Yes." when keys answered the open
+  question through the daemon's tap path. A plain `404` (no `{"error"}`
+  body) means a daemon without the routes: the window says so and stops
+  polling; a `404 {"error":"no such agent"}` is an untracked pane.
+  `DaemonClient.agentPath` percent-escapes the pane id (`%12` → `%2512`,
+  `/` → `%2F`). The daemon never serves panes it does not track.
 - **Brain replies and held pushes** (`BrainActivity`). `voice.tool_result`
   for `to_supervisor` shows as a "Brain → Sheepdog" card. With
   `--voice=off`, only a detail/options footer appears under the dog's

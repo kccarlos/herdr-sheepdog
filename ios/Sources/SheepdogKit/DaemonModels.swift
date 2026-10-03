@@ -159,11 +159,20 @@ public struct Agent: Codable, Equatable, Identifiable, Sendable {
     public var journal: [JournalEntry]?
     /// Injected by the debug page rather than seen through herdr.
     public var synthetic: Bool?
+    /// The name the shepherd hears (the daemon's spoken name); older
+    /// daemons omit it.
+    public var spoken: String?
 
     public var id: String { paneID }
 
+    /// The spoken name, else the alias.
+    public var displayName: String {
+        if let s = spoken?.trimmed, !s.isEmpty { return s }
+        return alias
+    }
+
     enum CodingKeys: String, CodingKey {
-        case alias, kind, name, state, journal, synthetic
+        case alias, kind, name, state, journal, synthetic, spoken
         case paneID = "pane_id"
         case workspaceLabel = "workspace_label"
         case stateSince = "state_since"
@@ -186,7 +195,8 @@ public struct Agent: Codable, Equatable, Identifiable, Sendable {
         lastBlock: Block? = nil,
         lastResult: Result? = nil,
         journal: [JournalEntry]? = nil,
-        synthetic: Bool? = nil
+        synthetic: Bool? = nil,
+        spoken: String? = nil
     ) {
         self.paneID = paneID
         self.alias = alias
@@ -201,6 +211,7 @@ public struct Agent: Codable, Equatable, Identifiable, Sendable {
         self.lastResult = lastResult
         self.journal = journal
         self.synthetic = synthetic
+        self.spoken = spoken
     }
 
     /// The one-line subtitle on a chip: the pending question wins, then an

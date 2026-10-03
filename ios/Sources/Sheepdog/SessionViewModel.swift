@@ -1234,6 +1234,27 @@ final class SessionViewModel: ObservableObject {
         return false
     }
 
+    // MARK: - Agent window
+
+    /// `GET /api/agents/{pane}/screen` for `AgentScreenView`. Throws when no
+    /// daemon is configured.
+    func agentScreen(paneID: String, hash: String?) async throws -> AgentScreen? {
+        guard settings.endpoint != nil else { throw DaemonError.malformed("no daemon address set") }
+        return try await client.agentScreen(paneID: paneID, hash: hash)
+    }
+
+    /// `POST /api/agents/{pane}/input` with a prompt.
+    func agentInput(paneID: String, text: String) async throws -> AgentInputReply {
+        guard settings.endpoint != nil else { throw DaemonError.malformed("no daemon address set") }
+        return try await client.agentInput(paneID: paneID, text: text)
+    }
+
+    /// `POST /api/agents/{pane}/input` with keys.
+    func agentInput(paneID: String, keys: [AgentKey]) async throws -> AgentInputReply {
+        guard settings.endpoint != nil else { throw DaemonError.malformed("no daemon address set") }
+        return try await client.agentInput(paneID: paneID, keys: keys)
+    }
+
     // MARK: - New conversation
 
     /// The ⋯ menu's "New conversation", after the confirmation dialog.

@@ -68,6 +68,15 @@ public struct DaemonEndpoint: Equatable, Sendable {
         components.queryItems = query.isEmpty ? nil : query
         return components.url
     }
+
+    /// `url(path:query:)` for a path whose segments are already
+    /// percent-encoded (a pane id with `%` or `/` in it).
+    public func url(percentEncodedPath: String, query: [URLQueryItem] = []) -> URL? {
+        guard var components = URLComponents(string: "\(scheme)://\(hostForURL):\(port)") else { return nil }
+        components.percentEncodedPath = percentEncodedPath
+        components.queryItems = query.isEmpty ? nil : query
+        return components.url
+    }
 }
 
 /// Every failure the app has to explain in plain words.
@@ -162,7 +171,16 @@ public final class DaemonClient: @unchecked Sendable {
     }
 
     public func request(path: String, query: [URLQueryItem] = [], method: String = "GET", body: Data? = nil) throws -> URLRequest {
-        guard let url = endpoint.url(path: path, query: query) else {
+        try request(url: endpoint.url(path: path, query: query), method: method, body: body)
+    }
+
+    /// `request(path:…)` for an already percent-encoded path.
+    public func request(encodedPath: String, query: [URLQueryItem] = [], method: String = "GET", body: Data? = nil) throws -> URLRequest {
+        try request(url: endpoint.url(percentEncodedPath: encodedPath, query: query), method: method, body: body)
+    }
+
+    private func request(url: URL?, method: String, body: Data?) throws -> URLRequest {
+        guard let url else {
             throw DaemonError.malformed("the address \(endpoint.display) is not a URL")
         }
         var request = URLRequest(url: url)
