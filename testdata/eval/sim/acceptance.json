@@ -335,7 +335,7 @@
     },
     {
       "id": "j4-finish-finding",
-      "note": "J4 hear a finish with its finding (headset script step 6): the brain's line carries what it found, not 'X finished.' alone.",
+      "note": "J4 hear a finish with its finding (headset script step 6): the brain's line carries what it found, not 'X finished.' alone. A prompt to fix the links is fine once the CEO said yes to that question; whether the yes answered it is the judge's no_unintended_action item.",
       "goal": "hear what bench-claude found when it finishes the README, and what (if anything) needs your decision",
       "persona": "Start by asking how the README is going. Then wait for news. When you heard the result, end the call.",
       "opening": "How's the README coming along?",
@@ -367,9 +367,18 @@
         "silence_seconds": 35
       },
       "expect": {
-        "no_actions": true,
         "rubric": [
           "Did the CEO hear that the README is done AND that bench-claude found two broken links in CONTRIBUTING.md that need a decision?"
+        ],
+        "forbid": [
+          {
+            "kind": "interrupt",
+            "agent": "bench-claude"
+          },
+          {
+            "kind": "keys",
+            "agent": "bench-claude"
+          }
         ]
       }
     },
