@@ -103,7 +103,9 @@ func (s *Session) install(conn Conn, resumed, reconnect bool) {
 	s.pending, s.pendingBytes = nil, 0
 	handle := s.handle
 	if !resumed {
+		// A fresh session (a 1011, a reset) is what a due refresh wanted.
 		s.freshAt = s.now()
+		s.refreshDue, s.refreshDueAt = "", time.Time{}
 	}
 	s.turnOpen = false
 	s.speaking = false

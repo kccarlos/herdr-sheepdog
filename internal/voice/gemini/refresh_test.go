@@ -2,6 +2,7 @@ package gemini
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -169,5 +170,38 @@ func TestRefreshWaitsForAnOwedReply(t *testing.T) {
 	c1.serve(turnCompleteMsg())
 	if !refreshUntil(h, 2*time.Second) {
 		t.Fatal("no refresh after the reply went out")
+	}
+}
+
+// TestAFreshReconnectSatisfiesADueRefresh: a refresh due but held (an
+// open question) is not run again once a 1011 already brought a fresh
+// session.
+func TestAFreshReconnectSatisfiesADueRefresh(t *testing.T) {
+	c1, c2 := newFakeConn("c1"), newFakeConn("c2")
+	d := &fakeDialer{results: []func() (Conn, error){ok(c1), ok(c2)}}
+	h := newHarness(t, Config{}, d)
+	h.s.SetOpenCheck(func(tags map[string]any) bool { return tags == nil })
+	c1.serve(handleMsg("handle-A"))
+	h.backdate(refreshMaxAge + time.Minute)
+	if refreshUntil(h, 100*time.Millisecond) {
+		t.Fatal("refreshed while a question was open")
+	}
+	h.s.mu.Lock()
+	due := h.s.refreshDue
+	h.s.mu.Unlock()
+	if due != refreshAge {
+		t.Fatalf("refreshDue = %q, want %q", due, refreshAge)
+	}
+	c1.fail(errors.New("websocket: close 1011 (internal server error): Internal error encountered."))
+	h.waitEvent("fresh connection", isContextLost)
+	h.s.SetOpenCheck(func(map[string]any) bool { return false })
+	for end := time.Now().Add(300 * time.Millisecond); time.Now().Before(end); time.Sleep(10 * time.Millisecond) {
+		h.s.maybeRefresh()
+	}
+	if n := len(d.records()); n != 2 {
+		t.Fatalf("dials = %+v: a second fresh connect after the 1011", d.records())
+	}
+	if p := h.log.payloads("voice.session_refreshed"); len(p) != 0 {
+		t.Errorf("voice.session_refreshed = %v", p)
 	}
 }
