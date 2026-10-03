@@ -2,6 +2,7 @@ package eval
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -287,5 +288,61 @@ func TestSimDefaultReactionToKeys(t *testing.T) {
 	facts := fj.Inputs()[len(fj.Inputs())-1].Facts
 	if !strings.Contains(facts, "Worker auth (codex), now idle.") || !strings.Contains(facts, "Okay, I won't do that.") {
 		t.Fatalf("the declined worker did not move on:\n%s", facts)
+	}
+}
+
+// A 504 on the primary provider fails the step over to the registered
+// fallback: the run still passes, and the record counts the failovers
+// and names the provider that answered.
+func TestRunSimRecordsFailover(t *testing.T) {
+	primary := braintest.NewModel()
+	primary.Default = &braintest.Step{Err: genai.APIError{Code: 504, Message: "Deadline expired before operation could complete.", Status: "DEADLINE_EXCEEDED"}}
+	run := RunSim(context.Background(), fixScenario(), SimOptions{
+		BrainConfig:   brain.Config{Provider: brain.ProviderVertex, Model: "gemini-3.8-flash", MaxSteps: 4, UtteranceTimeout: 5 * time.Second},
+		NewBrainModel: func() brain.Model { return primary },
+		Fallbacks:     map[string]brain.Model{brain.ProviderDeepSeek: fixBrain()},
+		NewJudge:      func(*Meter) Judge { return &FakeJudge{} },
+		FixtureDir:    "../../testdata/herdr",
+		Settle:        1500 * time.Millisecond,
+	}, 1)
+	if run.Status != RunPass {
+		t.Fatalf("status %s, failures %+v\n%s", run.Status, run.Failures, renderSim(run.Transcript))
+	}
+	if run.Failovers < 1 || len(run.FailoverEvents) != run.Failovers || !strings.Contains(run.FailoverEvents[0], "vertex to deepseek (http_504)") {
+		t.Errorf("failovers = %d %v", run.Failovers, run.FailoverEvents)
+	}
+	if run.AnsweredBy != brain.ProviderDeepSeek || run.StepsByProvider[brain.ProviderDeepSeek] == 0 || run.StepsByProvider[brain.ProviderVertex] != 0 {
+		t.Errorf("answered by %q, steps %v", run.AnsweredBy, run.StepsByProvider)
+	}
+
+	rep := NewCampaignReport(time.Now(), nil, 1, []SimRun{run}, NewMeter())
+	var md strings.Builder
+	rep.WriteMarkdown(&md, 5)
+	if !strings.Contains(md.String(), "## Brain failover") || !strings.Contains(md.String(), "deepseek ×1") {
+		t.Errorf("report.md lacks the failover table:\n%s", md.String())
+	}
+	path := filepath.Join(t.TempDir(), "report.json")
+	if err := rep.WriteJSON(path); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(path)
+	if !strings.Contains(string(raw), `"failovers": `) || !strings.Contains(string(raw), `"answered_by": "deepseek"`) {
+		t.Errorf("report.json lacks the failover fields")
+	}
+}
+
+// Without a failing primary there is no failover, and the primary is the
+// one that answered.
+func TestRunSimNoFailoverNamesPrimary(t *testing.T) {
+	run := RunSim(context.Background(), fixScenario(), SimOptions{
+		BrainConfig:   brain.Config{Provider: brain.ProviderVertex, Model: "gemini-3.8-flash", MaxSteps: 4, UtteranceTimeout: 5 * time.Second},
+		NewBrainModel: fixBrain,
+		Fallbacks:     map[string]brain.Model{brain.ProviderDeepSeek: braintest.NewModel()},
+		NewJudge:      func(*Meter) Judge { return &FakeJudge{} },
+		FixtureDir:    "../../testdata/herdr",
+		Settle:        1500 * time.Millisecond,
+	}, 1)
+	if run.Failovers != 0 || run.AnsweredBy != brain.ProviderVertex {
+		t.Errorf("failovers %d, answered by %q", run.Failovers, run.AnsweredBy)
 	}
 }

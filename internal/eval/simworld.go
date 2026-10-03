@@ -72,8 +72,11 @@ type SimLine struct {
 
 // simWorldOptions are what a world is built from.
 type simWorldOptions struct {
-	brainCfg   brain.Config
-	model      brain.Model
+	brainCfg brain.Config
+	model    brain.Model
+	// fallbacks are more providers registered on the brain (id to
+	// model), the targets of its failover.
+	fallbacks  map[string]brain.Model
 	fixtureDir string
 	meter      *Meter
 	// events, when set, receives every logged event (the run's JSONL).
@@ -132,6 +135,12 @@ func newSimWorld(ctx context.Context, sc SimScenario, o simWorldOptions) (*simWo
 	if err != nil {
 		w.cleanupDir()
 		return nil, err
+	}
+	for id, m := range o.fallbacks {
+		if err := b.AddProvider(id, m); err != nil {
+			w.cleanupDir()
+			return nil, err
+		}
 	}
 	w.brain = b
 	w.rec.model = b.Model()
@@ -614,6 +623,12 @@ type simRecorder struct {
 	toolCalls []string
 	fallbacks []string
 	timeouts  int
+	// failovers lists the brain's failovers ("vertex to deepseek
+	// (http_504)"); steps counts the answered brain steps per provider;
+	// answeredBy is the provider of the last answered step.
+	failovers  []string
+	steps      map[string]int
+	answeredBy string
 }
 
 func (r *simRecorder) Log(source, typ, pane string, payload any) {
@@ -653,9 +668,27 @@ func (r *simRecorder) Log(source, typ, pane string, payload any) {
 		if isTimeoutText(e) || reason == "timeout" {
 			r.timeouts++
 		}
+	case "brain.failover":
+		from, _ := m["from"].(string)
+		to, _ := m["to"].(string)
+		reason, _ := m["reason"].(string)
+		r.failovers = append(r.failovers, fmt.Sprintf("%s to %s (%s)", from, to, reason))
 	case "brain.step":
 		if r.meter != nil {
-			r.meter.Add("brain", r.model, stepUsage(m))
+			model, _ := m["model"].(string)
+			if model == "" {
+				model = r.model // a failover step bills its own model
+			}
+			r.meter.Add("brain", model, stepUsage(m))
+		}
+		if _, failed := m["error"]; !failed {
+			if p, _ := m["provider"].(string); p != "" {
+				if r.steps == nil {
+					r.steps = map[string]int{}
+				}
+				r.steps[p]++
+				r.answeredBy = p
+			}
 		}
 	}
 }

@@ -245,6 +245,7 @@ func (c CampaignReport) WriteMarkdown(w io.Writer, maxFailures int) {
 		}
 		p("| %s | %d | %d | %d | %d | %d | %s | %s | %.1f | %.3f |\n", name, s.Runs, s.Pass, s.Fail, s.Errored, s.NotRun, rateString(s.PassRate), countsString(s.Primary), float64(s.MeanDurationMS)/1000, s.CostUSD)
 	}
+	p("\n%s", c.failoverSection())
 	p("\n## Failure taxonomy\n\n| Label | Runs (primary) | Runs (any) |\n|---|---|---|\n")
 	for _, t := range FailureOrder {
 		if c.Total.Primary[t] == 0 && c.Total.Labels[t] == 0 {
@@ -304,6 +305,59 @@ func (c CampaignReport) WriteMarkdown(w io.Writer, maxFailures int) {
 		}
 		p("\n```text\n%s\n```\n", renderSim(r.Transcript))
 	}
+}
+
+// failoverSection is the markdown table of the brain's failovers: per
+// scenario, the runs that failed over, their failover count and which
+// provider answered how many runs.
+func (c CampaignReport) failoverSection() string {
+	type agg struct {
+		runs, failedOver, failovers int
+		answered                    map[string]int
+	}
+	var order []string
+	by := map[string]*agg{}
+	total := &agg{answered: map[string]int{}}
+	for _, r := range c.Runs {
+		if r.Status == RunNotRun {
+			continue
+		}
+		a := by[r.Scenario]
+		if a == nil {
+			a = &agg{answered: map[string]int{}}
+			by[r.Scenario] = a
+			order = append(order, r.Scenario)
+		}
+		for _, x := range []*agg{a, total} {
+			x.runs++
+			x.failovers += r.Failovers
+			if r.Failovers > 0 {
+				x.failedOver++
+			}
+			if r.AnsweredBy != "" {
+				x.answered[r.AnsweredBy]++
+			}
+		}
+	}
+	var b strings.Builder
+	b.WriteString("## Brain failover\n\nFailovers = brain.failover events (a step retried on another provider); answered by = the provider of each run's last answered step.\n\n| Scenario | Runs | Runs with failover | Failovers | Answered by |\n|---|---|---|---|---|\n")
+	row := func(name string, a *agg) {
+		var parts []string
+		for k, v := range a.answered {
+			parts = append(parts, fmt.Sprintf("%s ×%d", k, v))
+		}
+		sort.Strings(parts)
+		ans := "–"
+		if len(parts) > 0 {
+			ans = strings.Join(parts, ", ")
+		}
+		fmt.Fprintf(&b, "| %s | %d | %d | %d | %s |\n", name, a.runs, a.failedOver, a.failovers, ans)
+	}
+	for _, id := range order {
+		row(id, by[id])
+	}
+	row("**TOTAL**", total)
+	return b.String()
 }
 
 func rateString(r *float64) string {
