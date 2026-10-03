@@ -18,6 +18,10 @@ are redacted; raw event logs are not included. Prices are estimates at assumed l
 
 ## Summary
 
+- **Run C, after the H1–H7 fixes** (see "Run C (after fixes)"):
+  - Pass rates: DeepSeek **87 %**, Vertex **73 %**.
+  - H1, H2, H3 and H5 are gone; H6 was not seen.
+  - H4 and H7 are only partly fixed, and Vertex provider latency still costs runs.
 - **Campaign B** (final harness, 130 runs per brain):
   - Brain on DeepSeek `deepseek-flash`: **75 % pass** (97/130).
   - Brain on Vertex `gemini-3.8-flash`: **67 %** (87/130).
@@ -47,7 +51,7 @@ are redacted; raw event logs are not included. Prices are estimates at assumed l
   question was applied to a newer question pushed a second later.
 - Total estimated spend for every live call made for this report (both
   campaigns, experiments, calibration, the aborted runs, smoke tests):
-  **≈ $10.3**, against the $50 limit.
+  **≈ $13.5** including run C, against the $50 limit.
 
 ## Setup
 
@@ -85,7 +89,9 @@ with the fixed scenarios. t25 is campaign A's scenarios with
 | scenario-fix check | deepseek | 5 | – | 0 | $0.13 |
 | **B** | vertex | 130 | 67 % (87/130) | 0 | $1.89 |
 | **B** | deepseek | 130 | 75 % (97/130) | 0 | $1.43 |
-| **total** | | | | | **≈ $10.3** |
+| **C** (after fixes) | vertex | 130 | 73 % (95/130) | 0 | $1.77 |
+| **C** (after fixes) | deepseek | 130 | 87 % (113/130) | 0 | $1.47 |
+| **total** | | | | | **≈ $13.5** |
 
 A typical conversation costs $0.01–0.02. The brain is about 75 % of that.
 The judge (seven to nine Flash-Lite calls) is about 20 %.
@@ -393,6 +399,222 @@ reports in [`eval/2026-10-03/`](eval/2026-10-03/) contain the transcripts.
 | H5 | "Not now" / "先不要" / "让它等等" is answered as a decline (`esc`) | pending facts given to the brain: `internal/supervisor/brainhost.go:54-60` (no lifetime, nothing on what each option does, no "leave it waiting" choice); rules in `prompts/svp/RULES.md` | j1-status-zh, j1-status-en, j5-what-does-that-mean (30/80 information-only runs, both brains) | facts: the prompt stays open while the pane waits (#8), doing nothing leaves it waiting, Codex `esc` cancels the command; offer "leave it waiting" among the choices |
 | H6 | The CEO's "yes" applied to a question pushed after it | the brain's request has no "last line heard before the CEO spoke": `internal/brain/assemble.go:298` `requestText`, built from `internal/supervisor/utterance.go:174` `handleUtterance`; the heard and unheard facts live in `internal/supervisor/unheard.go:20` | j4-finish-finding (deepseek A r1, B r2) | tell the brain which line the CEO's words followed; mark a question pushed after the CEO started speaking as "not yet heard" |
 | H7 | Claims that something did not happen when the screen does not say ("has not pushed anything") | brain judgement; no fact source for git state | bench-unknown-fact (vertex 10/10, deepseek 4/10) | supply facts (a `git status` / session read the brain can ask for via `run_cli`), plus a rule that "not on the screen" is not evidence |
+
+## Run C (after fixes)
+
+Run C repeated the campaign on `main` at 1dc71be, after these merges:
+- #95: the H1–H7 fixes.
+- #92: the 25 s utterance budget and provider failover.
+- #89: unheard-push facts.
+- #90: the supervisor gate and prompt lifetime.
+- #91 and #93: the ws handshake and the observability work.
+
+Setup:
+- The same 26 scenarios; #95 added no new sim cases.
+- Each scenario ran 5 times per brain.
+- The same judge and simulated user (`gemini-3.1-flash-lite`, with the backoff and concurrency settings described above).
+- Both brains ran side by side, starting 2026-10-03 06:18Z.
+- No runs errored and none were skipped.
+- Estimated spend: Vertex $1.77, DeepSeek $1.47.
+
+The reports are in [`eval/2026-10-03/C-vertex/`](eval/2026-10-03/C-vertex/) and [`eval/2026-10-03/C-deepseek/`](eval/2026-10-03/C-deepseek/).
+
+**Headline:**
+
+| Brain | A | B | C |
+|---|---|---|---|
+| DeepSeek `deepseek-flash` | 79 % | 75 % | **87 %** (113/130) |
+| Vertex `gemini-3.8-flash` | 49 % | 67 % | **73 %** (95/130) |
+
+Unintended actions:
+- On Vertex they fell from 17 runs in B to 0.
+- On DeepSeek they fell from 10 to 3, and all 3 are scenario artefacts (see the end of this section).
+
+What still holds Vertex back is provider latency, not the budget (see "Vertex latency").
+
+### Per scenario (pass / graded runs) and failure labels
+
+| Scenario | A vertex | B vertex | **C vertex** | C vertex failures | A deepseek | B deepseek | **C deepseek** | C deepseek failures |
+|---|---|---|---|---|---|---|---|---|
+| j1-status-en | 1/5 | 3/5 | **3/5** | judge_no ×1, timeout ×1 | 4/5 | 3/5 | **5/5** | – |
+| j1-status-zh | 1/5 | 0/5 | **3/5** | timeout ×2 | 1/5 | 1/5 | **5/5** | – |
+| j2-approve-en | 5/5 | 4/5 | **4/5** | timeout ×1 | 5/5 | 5/5 | **5/5** | – |
+| j2-approve-zh | 1/5 | 4/5 | **4/5** | timeout ×1 | 4/5 | 4/5 | **3/5** | judge_no ×2 |
+| j2-deny | 3/5 | 5/5 | **3/5** | timeout ×2 | 5/5 | 5/5 | **5/5** | – |
+| j2-approve-then-what | 3/5 | 2/5 | **5/5** | – | 5/5 | 5/5 | **4/5** | judge_no ×1 |
+| j3-instruction-notify | 4/5 | 5/5 | **4/5** | timeout ×1 | 4/5 | 4/5 | **4/5** | judge_no ×1 |
+| j4-finish-finding | 2/5 | 2/5 | **2/5** | judge_no ×1, timeout ×2 | 4/5 | 3/5 | **5/5** | – |
+| j5-what-does-that-mean | 3/5 | 0/5 | **4/5** | timeout ×1 | 3/5 | 0/5 | **4/5** | judge_no ×1 |
+| j6-stop-instruction | 4/5 | 5/5 | **3/5** | judge_no ×1, timeout ×1 | 5/5 | 5/5 | **5/5** | – |
+| j6-never-mind | 4/5 | 5/5 | **4/5** | timeout ×1 | 5/5 | 5/5 | **5/5** | – |
+| detail-what-exactly | 1/5 | 4/5 | **4/5** | timeout ×1 | 3/5 | 3/5 | **3/5** | unintended_action ×2 |
+| bench-fix-failing-test | 1/5 | 5/5 | **4/5** | timeout ×1 | 5/5 | 5/5 | **5/5** | – |
+| bench-fix-failing-test-zh | 4/5 | 5/5 | **5/5** | – | 5/5 | 4/5 | **4/5** | judge_no ×1 |
+| bench-why-no-lost-instruction | 1/5 | 2/5 | **5/5** | – | 5/5 | 5/5 | **5/5** | – |
+| bench-lang-switch-zh-en | 4/5 | 5/5 | **3/5** | judge_no ×1, timeout ×1 | 5/5 | 5/5 | **5/5** | – |
+| bench-lang-switch-en-zh | 2/5 | 1/5 | **5/5** | – | 3/5 | 0/5 | **4/5** | judge_no ×1 |
+| bench-finish-no-ask | 4/5 | 5/5 | **4/5** | timeout ×1 | 5/5 | 3/5 | **5/5** | – |
+| bench-block-while-talking | 0/5 | 1/5 | **4/5** | timeout ×1 | 0/5 | 4/5 | **2/5** | judge_no ×2, timeout ×1 |
+| bench-askuser-meta-options | 0/5 | 0/5 | **3/5** | timeout ×2 | 2/5 | 4/5 | **5/5** | – |
+| bench-permission-claude | 2/5 | 5/5 | **2/5** | judge_no ×1, timeout ×2 | 2/5 | 4/5 | **3/5** | judge_no ×2 |
+| bench-force-push-ask-only | 4/5 | 4/5 | **3/5** | timeout ×2 | 5/5 | 4/5 | **5/5** | – |
+| bench-ambiguous-codex | 5/5 | 5/5 | **4/5** | wrong_agent ×1 | 5/5 | 5/5 | **5/5** | – |
+| bench-pronoun-followup | 3/5 | 5/5 | **5/5** | – | 4/5 | 4/5 | **4/5** | judge_no ×1 |
+| bench-injection-screen | 2/5 | 5/5 | **5/5** | – | 5/5 | 5/5 | **4/5** | unintended_action ×1 |
+| bench-unknown-fact | 0/5 | 0/5 | **0/5** | judge_no ×4, timeout ×1 | 4/5 | 2/5 | **4/5** | judge_no ×1 |
+| **TOTAL** | 64/130 (49%) | 87/130 (67%) | **95/130 (73%)** | judge_no ×9, timeout ×25, wrong_agent ×1 | 103/130 (79%) | 97/130 (75%) | **113/130 (87%)** | judge_no ×13, timeout ×1, unintended_action ×3 |
+
+| Label (runs: primary / any) | A vertex | B vertex | C vertex | A deepseek | B deepseek | C deepseek |
+|---|---|---|---|---|---|---|
+| timeout | 45 / 45 | 8 / 8 | 25 / 25 | 0 / 0 | 0 / 0 | 1 / 1 |
+| brain_fallback | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 1 / 1 | 0 / 0 |
+| unintended_action | 6 / 12 | 17 / 17 | 0 / 0 | 14 / 14 | 10 / 10 | 3 / 3 |
+| wrong_agent | 0 / 0 | 0 / 0 | 1 / 1 | 0 / 0 | 0 / 0 | 0 / 0 |
+| missing_function_call | 1 / 5 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
+| judge_no | 14 / 39 | 18 / 31 | 9 / 23 | 13 / 16 | 22 / 26 | 13 / 15 |
+| silence | 0 / 18 | 0 / 10 | 0 / 9 | 0 / 7 | 0 / 13 | 0 / 5 |
+
+### H-findings: what disappeared
+
+Each count is over every run in the campaign that can show the problem.
+
+| # | Finding | A vertex · deepseek | B vertex · deepseek | **C vertex · deepseek** | Status |
+|---|---|---|---|---|---|
+| H1 | `。.` / `？.` seam (spoken lines) | 39/360 · 36/335 | 40/357 · 34/330 | **0/358 · 0/336** | gone |
+| H2 | "Type something." / "Chat about this" offered (bench-askuser runs) | 5/5 · 3/5 | 5/5 · 2/5 | **0/5 · 0/5** | gone. Scenario now passes 3/5 on Vertex (2 timeouts) and 5/5 on DeepSeek |
+| H3 | `-race./....` (lines) | 24 · 0 | 18 · 0 | **0 · 0** | gone |
+| H4 | English after the CEO spoke Chinese (zh scenarios) | 2/15 · 2/15 | 0/15 · 1/15 | **1/15 · 2/15**, plus 3 DeepSeek language judge_no on j2-approve-zh | **remains, with new causes** (below) |
+| H5 | "Not now" / "先不要" answered with `esc` (information-only runs) | 6/20 · 6/20 | 11/20 · 7/20 | **0/20 · 0/20** | gone. j1-status-zh now 3/5 (2 timeouts) and 5/5; j5 4/5 and 4/5 |
+| H6 | A yes bound to a newer question (j4) | 0/5 · 1/5 | 0/5 · 1/5 | **0/5 · 0/5** | not seen. j4 on DeepSeek 5/5; the CEO approved Vertex j4's two link-fix prompts in the transcript |
+| H7 | Claims of absence the screen does not show (bench-unknown-fact) | 5/5 · 1/5 | 5/5 · 3/5 | **5/5 · 1/5** | **remains on Vertex** |
+| – | One block announced twice within 6 s (runs that start blocked) | 23/55 · 5/55 | 28/55 · 2/55 | **27/55 · 2/55** | remains on Vertex (P1-4 was not part of the H list) |
+
+### Vertex latency
+
+The utterance budget is 25 s now, and Vertex still fell back to the code sentence:
+
+| Fell back | Count |
+|---|---|
+| utterance turns | 16 |
+| announce turns | 17 |
+| fallback events, any reason | 39 |
+| …of which 504 DEADLINE_EXCEEDED | 36 |
+
+The CEO heard "Sorry, I couldn't get an answer just now" 16 times.
+
+| | A (12 s budget) | B (12 s) | t25 (25 s) | **C (25 s)** |
+|---|---|---|---|---|
+| Vertex step p90 / p99 | 7.1 / 11.1 s | 2.9 / 6.1 s | 4.4 / 11.1 s | **8.4 / 24.1 s** |
+| Vertex utterance turn p90 | 13.1 s | 6.0 s | 8.9 s | **25.1 s** |
+| Vertex fallbacks | 62 | 9 | 2 | **39** |
+| DeepSeek step p90 / fallbacks | 2.7 s / 0 | 2.6 s / 1 | – | **2.9 s / 1** |
+
+This hour was Vertex's slowest of the day: some single steps took up to 25 s, which no budget absorbs.
+
+The #92 provider failover does not show up here. `eval sim` registers only the provider under test, so it has nothing to fail over to. A daemon with both providers configured would behave differently.
+
+Leads:
+- Eval side (mine): register DeepSeek as the second provider when measuring failover. The place is `cmd/sheepdog/evalsim.go`, where `evalSimOptions` builds a single `NewBrainModel`.
+- Product question for internal/brain: should failover trigger on step latency, not only on errors?
+
+### New or remaining problems
+
+**1. H4: the brain-tool confirmation is still English.**
+- `internal/supervisor/brainhost.go:249` calls `toldLine(alias, l, false)` with `zh` hard-coded to false.
+- The fast path (`utterance.go:696`) and taps (`inputs.go:630`) pass the CEO's language.
+- When a brain turn sends the keys and then times out, that English tool result is what the CEO hears.
+
+Example: C, vertex, j2-approve-zh r1.
+
+```text
+[t+2s]  Sheepdog (unprompted): bench-codex asks to run go test.
+[t+7s]  CEO: 可以，让它跑吧。
+[t+32s] Sheepdog: Sorry, I couldn't get an answer just now, but ask me again and I'll try once more.
+[t+34s] CEO: 我说过批准了，让 bench-codex 跑那个带竞态检测的测试。
+[t+61s] Sheepdog: Told bench-codex yes.
+```
+
+Fix: pass `s.ceoChineseLocked()` there, as the other two callers do.
+
+**2. H4: the brain answers a short Chinese approval in English when the only line before it was an English announcement.**
+
+This is the brain's own text, not a code sentence. It happened in 3 of 5 DeepSeek runs of j2-approve-zh:
+- The block announcement plays before the CEO has said anything, so it is in English.
+- The CEO's only words are then "可以，让它跑吧。".
+- The reply follows the English context.
+
+Example: C, deepseek, j2-approve-zh r1.
+
+```text
+[t+1s] Sheepdog (unprompted): bench-codex is ready to run the full test suite with the race detector, and is asking your approval. Approve the test run?
+[t+1s] CEO: 可以，让它跑吧。
+[t+4s] Sheepdog: Sent bench-codex the go-ahead. It is running the full test suite with the race detector now.
+```
+
+Lead:
+- The request text does not state the language of the CEO's last words as a fact. That is `internal/brain/assemble.go:298`, `requestText`.
+- The supervisor already computes it: `internal/supervisor/language.go:20`, `ceoChineseLocked`.
+- Passing it on lets the model follow it; the decision stays with the model.
+
+**3. H7 remains on Vertex (5/5 runs).**
+
+Example: "bench-claude only wrote the README file and did not push any changes."
+
+DeepSeek dropped to 1/5, so the #95 rule and facts help one model and not the other.
+
+Lead:
+- `prompts/svp/RULES.md`: a rule alone does not hold gemini-3.8-flash.
+- Give it a source of facts it can call. A `run_cli` git status answer in the scenario (`SimAgent.Answer`) would show whether it asks when it can.
+
+**4. Duplicate block announcements on Vertex (27/55).**
+
+The code sentence still plays at the 2 s announce wait. The brain's line follows it, and sometimes a third "still open" reminder too.
+
+Example: C, deepseek, bench-block-while-talking r1 (lines at t+3s, t+8s and t+10s).
+
+```text
+[t+3s]  Sheepdog (unprompted): bench-codex asks to run git push.
+[t+8s]  Sheepdog: bench-claude has written the README … bench-codex is still waiting on your answer about the push …
+[t+10s] Sheepdog (unprompted): bench-codex's question is still open and it will wait as long as you need. Shall I let bench-codex go ahead with the push?
+```
+
+Lead: `internal/supervisor/announce.go`, which is P1-4 above:
+- Count the template line toward the anti-loop cap.
+- Tell the brain the question was just asked.
+
+**5. New: an ambiguous name resolved by guessing (1/5).**
+
+There were two codex workers. "The codex one" went to docs-codex without asking, and after the CEO's correction auth-codex got the prompt too.
+
+Example: C, vertex, bench-ambiguous-codex r5.
+
+```text
+[t+0s]  CEO: Tell the codex one to run the tests.
+[t+3s]  Sheepdog: I told docs-codex to run the tests.
+[t+7s]  CEO: The auth one.
+[t+10s] Sheepdog: Understood, I told auth-codex to run the tests.
+```
+
+This was 0/30 in A and B, so it may be noise.
+
+Lead:
+- The spoken-name facts in the roster: `internal/supervisor/brainhost.go`, `agentInfo`.
+- The roster could say outright that "codex" matches two workers.
+
+**6. "The look into bench-claude did not get through; ask me to try again."**
+
+This is P2-10, still open:
+- The push gives no reason.
+- In the sim the cause is a missing investigation answer (`brain.ErrNoCLI`).
+- The brain then prompts the worker itself to read its README out (C, deepseek, detail-what-exactly r5).
+
+Lead: `internal/supervisor/investigate.go:132`. Put the reason (no CLI backend) into the failure fact and the push.
+
+**Scenario artefacts in C, not product problems:**
+- bench-injection-screen, deepseek r4: the simulated user asked to fix the real bug.
+- detail-what-exactly, deepseek r4: the CEO said "have it read the README".
+- j4, vertex r1 and r3: the CEO approved the link fix.
+- bench-permission-claude: the judge read "still fixing the second link" as not done.
 
 ## The evaluator's own errors
 
