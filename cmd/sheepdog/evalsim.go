@@ -35,6 +35,8 @@ func printEvalSimUsage(w io.Writer) {
 	fprintln(w, "  --provider ID         live brain provider: vertex or deepseek (gemini, the AI")
 	fprintln(w, "                        Studio free tier, only with --allow-ai-studio)")
 	fprintln(w, "  --model ID            live brain model (default brain.model)")
+	fprintln(w, "  --utterance-timeout D an experiment: override brain.utterance_timeout_s for this")
+	fprintln(w, "                        run (e.g. 25s), to measure what the timeout costs")
 	fprintln(w, "  --simuser KIND        vertex (default with --live), ollama or fake")
 	fprintln(w, "  --simuser-model ID    simulated user model (default "+eval.DefaultJudgeModel+")")
 	fprintln(w, "  --judge KIND          vertex (default with --live), ollama or fake")
@@ -62,6 +64,7 @@ type evalSimOpts struct {
 	files, filter, fixtures, events        string
 	configPath, envFile, promptsDir        string
 	out                                    string
+	uttTimeout                             time.Duration
 	repeat, parallel                       int
 	budget                                 float64
 }
@@ -88,6 +91,7 @@ func parseEvalSimFlags(args []string, stderr io.Writer) (evalSimOpts, int, bool)
 	fs.StringVar(&o.envFile, "env-file", "", "env file")
 	fs.StringVar(&o.promptsDir, "prompts-dir", "", "prompt override directory")
 	fs.StringVar(&o.out, "out", "", "report directory")
+	fs.DurationVar(&o.uttTimeout, "utterance-timeout", 0, "override the brain's utterance timeout")
 	fs.IntVar(&o.repeat, "repeat", 1, "runs per scenario")
 	fs.IntVar(&o.parallel, "parallel", 1, "conversations at once")
 	fs.Float64Var(&o.budget, "budget-usd", 0, "estimated spend limit")
@@ -200,13 +204,14 @@ func simSetup(o evalSimOpts, opts eval.SimOptions) map[string]string {
 		return s
 	}
 	return map[string]string{
-		"mode":           "live",
-		"brain":          opts.BrainConfig.Provider + " " + or(opts.BrainConfig.Model, brain.DefaultModel),
-		"simulated user": or(o.simuser, eval.BackendVertex) + " " + or(o.simuserModel, eval.DefaultJudgeModel),
-		"judge":          or(o.judge, eval.BackendVertex) + " " + or(o.judgeModel, eval.DefaultJudgeModel),
-		"parallel":       fmt.Sprint(o.parallel),
-		"budget_usd":     fmt.Sprint(o.budget),
-		"scenarios":      o.files + filterNote(o.filter),
+		"mode":              "live",
+		"brain":             opts.BrainConfig.Provider + " " + or(opts.BrainConfig.Model, brain.DefaultModel),
+		"simulated user":    or(o.simuser, eval.BackendVertex) + " " + or(o.simuserModel, eval.DefaultJudgeModel),
+		"judge":             or(o.judge, eval.BackendVertex) + " " + or(o.judgeModel, eval.DefaultJudgeModel),
+		"parallel":          fmt.Sprint(o.parallel),
+		"budget_usd":        fmt.Sprint(o.budget),
+		"scenarios":         o.files + filterNote(o.filter),
+		"utterance_timeout": opts.BrainConfig.UtteranceTimeout.String() + " (0s = the brain default, 12s)",
 	}
 }
 
@@ -283,6 +288,9 @@ func evalSimOptions(o evalSimOpts, cfg config.Config, log logging.Logger) (eval.
 		return opts, fmt.Errorf("provider %q has no credentials (vertex: VERTEX_API_KEY and VERTEX_PROJECT; deepseek: DEEPSEEK_API_KEY)", o.provider)
 	}
 	opts.BrainConfig.Provider = o.provider
+	if o.uttTimeout > 0 {
+		opts.BrainConfig.UtteranceTimeout = o.uttTimeout
+	}
 	if o.model != "" {
 		opts.BrainConfig.Model = o.model
 	}

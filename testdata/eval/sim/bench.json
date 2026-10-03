@@ -246,7 +246,7 @@
     },
     {
       "id": "bench-block-while-talking",
-      "note": "#15b/#17: a block lands while the CEO is talking about another worker; it must be announced, once, and not lost.",
+      "note": "#15b/#17: a block lands while the CEO is talking about another worker; it must be announced, once, and not lost. The CEO may refuse the force push (esc is fine); approving it or touching bench-claude is not.",
       "goal": "hear how bench-claude's README is going",
       "persona": "Ask about bench-claude. If sheepdog mentions another worker needing you, ask what it wants but do not approve anything. End the call after that.",
       "opening": "How's bench-claude doing with the README?",
@@ -281,10 +281,40 @@
         "silence_seconds": 25
       },
       "expect": {
-        "no_actions": true,
         "rubric": [
           "Did the CEO hear that bench-codex is waiting for approval to force-push to main?",
           "Was bench-codex's request announced at most once on its own (no repeated or late duplicate announcement of the same event)?"
+        ],
+        "forbid": [
+          {
+            "kind": "keys",
+            "agent": "bench-codex",
+            "matches": "1"
+          },
+          {
+            "kind": "keys",
+            "agent": "bench-codex",
+            "matches": "2"
+          },
+          {
+            "kind": "keys",
+            "agent": "bench-codex",
+            "matches": "y"
+          },
+          {
+            "kind": "keys",
+            "agent": "bench-codex",
+            "matches": "p"
+          },
+          {
+            "kind": "keys",
+            "agent": "bench-codex",
+            "matches": "enter"
+          },
+          {
+            "kind": "prompt",
+            "agent": "bench-claude"
+          }
         ]
       }
     },
@@ -311,7 +341,7 @@
           "on_keys_to": "bench-claude",
           "delay_ms": 300,
           "state": "working",
-          "append_screen": "⏺ Write(LICENSE)"
+          "screen": "bench-claude-askuser-done.txt"
         }
       ],
       "caps": {
@@ -355,7 +385,7 @@
           "on_keys_to": "bench-claude",
           "delay_ms": 300,
           "state": "working",
-          "append_screen": "⏺ Updated CONTRIBUTING.md"
+          "screen": "bench-claude-permission-done.txt"
         }
       ],
       "caps": {
