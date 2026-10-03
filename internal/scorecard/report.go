@@ -81,6 +81,7 @@ func writeMarkdownSection(b *strings.Builder, r Report) {
 	b.WriteString("### Latency\n\n")
 	b.WriteString("| metric | n | mean | median | p90 |\n|---|---|---|---|---|\n")
 	writeStatsRow(b, "answer latency (ms)", r.Latency.AnswerLatencyMS)
+	writeStatsRow(b, "reply latency incl. late pushes (ms)", r.Latency.ReplyLatencyMS)
 	writeStatsRow(b, "time to first word (ms)", r.Latency.TimeToFirstWordMS)
 	writeStatsRow(b, "brain.step prompt_tokens", r.Latency.BrainStepPromptTokens)
 	for _, kind := range sortedKeys(r.Latency.BrainTurnDurByKind) {

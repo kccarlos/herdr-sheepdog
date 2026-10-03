@@ -25,6 +25,8 @@ type turn struct {
 	provider, model string
 	impl            Model
 	start           time.Time
+	// queued is the wall-clock time Turn was called (trace.go).
+	queued time.Time
 	// soft is when the budget for tool rounds ends; the hard deadline is
 	// FinalGrace later.
 	soft time.Time
@@ -89,6 +91,7 @@ func (b *Brain) Turn(ctx context.Context, req Request) (Reply, error) {
 	// Close ends a turn in flight, so it does not wait out the budget.
 	defer context.AfterFunc(b.ctx, cancel)()
 	start := b.cfg.Now()
+	queued := time.Now() // wall clock, for brain.turn_started's queue_ms (trace.go)
 	key := ""
 	if req.Trigger == TriggerEvent {
 		// Event turns about the same agent coalesce — but a delivery
@@ -109,10 +112,14 @@ func (b *Brain) Turn(ctx context.Context, req Request) (Reply, error) {
 		if errors.Is(err, ErrCoalesced) {
 			reason = "coalesced"
 		}
-		b.log.Log(logSource, "brain.fallback", "", map[string]any{"reason": reason, "kind": string(req.Kind), "trigger": string(req.Trigger), "agent": req.Agent, "error": err.Error()})
+		payload := map[string]any{"reason": reason, "kind": string(req.Kind), "trigger": string(req.Trigger), "agent": req.Agent, "error": err.Error()}
+		if req.UtteranceID != "" {
+			payload["utterance_id"] = req.UtteranceID
+		}
+		b.log.Log(logSource, "brain.fallback", "", payload)
 		return Reply{}, fmt.Errorf("%w: waiting for the turn lock: %w", ErrFallback, err)
 	}
-	t := &turn{req: req, start: start, soft: start.Add(timeout)}
+	t := &turn{req: req, start: start, soft: start.Add(timeout), queued: queued}
 	t.provider, t.model, t.impl = b.current()
 	reply, err := b.run(tctx, t)
 	b.after.Add(1)
@@ -132,6 +139,7 @@ func (b *Brain) run(ctx context.Context, t *turn) (Reply, error) {
 		b.flushInLocked()
 	}
 	b.mu.Unlock()
+	b.traceTurn(t)
 	if t.req.Facts != nil {
 		// Now, not when the turn was asked for: it may have queued
 		// behind another turn while the template line went out.

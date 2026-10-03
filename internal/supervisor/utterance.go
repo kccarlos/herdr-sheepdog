@@ -142,11 +142,17 @@ func (s *Supervisor) ToSupervisor(ctx context.Context, said string) (voice.ToolR
 			s.log.Log(logSource, "supervisor.voice_initiative_ignored", "", map[string]any{"text": said})
 			return voice.ToolResult{Scheduling: voice.UrgencySilent}, nil
 		}
-		s.log.Log(logSource, "supervisor.relay_rescued", "", map[string]any{"heard": rescued.text, "said": said, "inputs": rescued.n})
+		s.log.Log(logSource, "supervisor.relay_rescued", "", map[string]any{"heard": rescued.text, "said": said, "inputs": rescued.n, "utterance_id": rescued.id})
 		c = rescued
 	}
 	text, fallback := UtteranceOf(c.text, said)
-	payload := map[string]any{"heard": c.text, "said": said, "inputs": c.n, "input": string(c.in.kind)}
+	payload := map[string]any{"heard": c.text, "said": said, "inputs": c.n, "input": string(c.in.kind), "utterance_id": c.id}
+	// waited_ms: from the shepherd's last words (the input's last
+	// fragment) to this relay — the voice model's share of the wait
+	// (turn.latency's voice_ms).
+	if !c.in.at.IsZero() {
+		payload["waited_ms"] = s.cfg.Now().Sub(c.in.at).Milliseconds()
+	}
 	if id := callIDOf(ctx); id != "" {
 		payload["call_id"] = id
 	}
@@ -199,7 +205,7 @@ func (s *Supervisor) handleUtterance(ctx context.Context, c claim, callID string
 	if sync {
 		parent = ctx
 	}
-	turnCtx, u := s.beginUtterance(parent, text, callID)
+	turnCtx, u := s.beginUtterance(parent, text, callID, c.id)
 	if res, ok := s.fastAnswer(turnCtx, c.in, text); ok {
 		s.endUtterance(u)
 		return res
@@ -243,7 +249,7 @@ func (s *Supervisor) coalesce(u *inflightUtterance) {
 	p.coalesced = true
 	u.text = p.text + " " + u.text
 	u.merged = p.merged + 1
-	payload := map[string]any{"n": u.merged, "text": u.text, "id": u.id, "replaces": p.id}
+	payload := map[string]any{"n": u.merged, "text": u.text, "id": u.id, "replaces": p.id, "utterance_id": u.id}
 	cancel := p.cancel
 	s.mu.Unlock()
 	cancel()
@@ -314,7 +320,7 @@ func (s *Supervisor) awaitReply(ctx, turnCtx context.Context, u *inflightUtteran
 		defer s.endUtterance(u)
 		return s.inlineResult(turnCtx, u, out)
 	}
-	payload := map[string]any{"id": u.id, "waited_ms": s.cfg.Now().Sub(start).Milliseconds(), "cancelled": ctx.Err() != nil, "no_listener": !listening}
+	payload := map[string]any{"id": u.id, "utterance_id": u.id, "waited_ms": s.cfg.Now().Sub(start).Milliseconds(), "cancelled": ctx.Err() != nil, "no_listener": !listening}
 	if id, ok := ctx.Value(callIDKey{}).(string); ok {
 		payload["call_id"] = id
 	}
@@ -367,7 +373,7 @@ func (s *Supervisor) deliverLate(turnCtx context.Context, u *inflightUtterance, 
 		return
 	}
 	if stale {
-		s.log.Log(logSource, "brain.reply_stale", "", map[string]any{"id": u.id, "acted": out.acted})
+		s.log.Log(logSource, "brain.reply_stale", "", map[string]any{"id": u.id, "utterance_id": u.id, "acted": out.acted})
 		if !out.ok || !out.acted {
 			return
 		}
@@ -392,13 +398,13 @@ func (s *Supervisor) deliverLate(turnCtx context.Context, u *inflightUtterance, 
 	} else if out.ok {
 		s.mentionedIn(out.res.Spoken)
 	}
-	tags := map[string]any{"answers_utterance": u.id}
+	tags := map[string]any{"answers_utterance": u.id, "utterance_id": u.id}
 	if u.callID != "" {
 		tags[tagCallID] = u.callID
 	}
 	s.pushTagged(paneID, line, urgency, tags)
 	s.log.Log(logSource, "brain.reply_delivered", paneID, map[string]any{
-		"id": u.id, "dur_ms": s.cfg.Now().Sub(start).Milliseconds(), "urgency": urgency.String(), "acted": out.acted, "fallback": !out.ok,
+		"id": u.id, "utterance_id": u.id, "dur_ms": s.cfg.Now().Sub(start).Milliseconds(), "urgency": urgency.String(), "acted": out.acted, "fallback": !out.ok,
 	})
 }
 
@@ -453,11 +459,13 @@ func (s *Supervisor) answerPromptOpen() bool {
 // beginUtterance installs the in-flight slot and returns the turn's
 // cancellable context, derived from parent (the stop procedure cancels
 // it).
-func (s *Supervisor) beginUtterance(parent context.Context, text, callID string) (context.Context, *inflightUtterance) {
+func (s *Supervisor) beginUtterance(parent context.Context, text, callID, id string) (context.Context, *inflightUtterance) {
 	turnCtx, cancel := context.WithCancel(parent)
-	u := &inflightUtterance{text: text, cancel: cancel, finished: make(chan struct{}), callID: callID, merged: 1}
+	u := &inflightUtterance{text: text, cancel: cancel, finished: make(chan struct{}), callID: callID, merged: 1, id: id}
 	s.mu.Lock()
-	u.id = s.nextID("utt")
+	if u.id == "" {
+		u.id = s.nextID("utt")
+	}
 	u.accepted = s.acceptedSeq
 	u.prev = s.utterance
 	// A second utterance while one is in flight takes the slot over: the
@@ -542,7 +550,7 @@ func (s *Supervisor) utteranceTurn(ctx context.Context, u *inflightUtterance) ut
 	// option keys and the open promises are in the brain's own roster
 	// and ledger sections.
 	brief, _ := s.briefingText()
-	req := brain.Request{Kind: brain.KindUtterance, Trigger: brain.TriggerCEO, Question: text, Briefing: brief, Link: callLink(u.callID)}
+	req := brain.Request{Kind: brain.KindUtterance, Trigger: brain.TriggerCEO, Question: text, Briefing: brief, Link: callLink(u.callID), UtteranceID: u.id}
 	// supervisor.repeat_window_s: an identical roster delivered again
 	// inside the window is noise over voice, so the brain gets a note it
 	// can act on ("no change since I last checked") instead of the

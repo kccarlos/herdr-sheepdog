@@ -110,6 +110,10 @@ type claim struct {
 	in   *shepherdInput
 	text string
 	n    int
+	// id names the utterance these words are (utterance_id on every
+	// event of it: the relay, the brain turn, the reply push). The relay
+	// mints it as it claims the words.
+	id string
 }
 
 // maxInputs bounds the remembered inputs.
@@ -499,7 +503,7 @@ func (s *Supervisor) claimRunLocked(run []*shepherdInput) claim {
 	s.relayedSeq = s.inputSeq
 	s.acceptedSeq++
 	s.disarmRelayLocked()
-	return claim{in: run[len(run)-1], text: strings.Join(words, " "), n: len(run)}
+	return claim{in: run[len(run)-1], text: strings.Join(words, " "), n: len(run), id: s.nextID("utt")}
 }
 
 // promptSinceLocked is when p's prompt appeared: its pending action's

@@ -159,6 +159,7 @@ func (c Config) withDefaults() Config {
 type Brain struct {
 	cfg        Config
 	log        logging.Logger
+	trace      *traceLog // log's turn-id decorator (trace.go)
 	transcript *Transcript
 	// requests is the Context tab's log of every model call's request.
 	requests  *ctxcap.BrainLog
@@ -232,7 +233,10 @@ func New(cfg Config, model Model, log logging.Logger) (*Brain, error) {
 		log = logging.NopLogger{}
 	}
 	cfg = cfg.withDefaults()
-	b := &Brain{cfg: cfg, log: log, models: map[string]Model{cfg.Provider: model}, curProvider: cfg.Provider, curModel: cfg.Model, lastModel: map[string]string{cfg.Provider: cfg.Model}, curRunID: cfg.RunID, tools: toolDeclarations(false), readTools: toolDeclarations(true)}
+	// Every event a turn logs gets the turn's ids (trace.go).
+	trace := newTraceLog(log)
+	log = trace
+	b := &Brain{cfg: cfg, log: log, trace: trace, models: map[string]Model{cfg.Provider: model}, curProvider: cfg.Provider, curModel: cfg.Model, lastModel: map[string]string{cfg.Provider: cfg.Model}, curRunID: cfg.RunID, tools: toolDeclarations(false), readTools: toolDeclarations(true)}
 	b.ctx, b.stop = context.WithCancel(context.Background())
 	path := ""
 	if cfg.DataDir != "" {

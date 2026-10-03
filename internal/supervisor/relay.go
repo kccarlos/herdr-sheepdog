@@ -130,16 +130,16 @@ func (s *Supervisor) relayUnanswered(gen uint64) {
 	s.replies.Add(1)
 	s.mu.Unlock()
 	defer s.replies.Done()
-	s.log.Log(logSource, "supervisor.relay_by_daemon", "", map[string]any{"text": c.text, "waited_ms": waited.Milliseconds(), "inputs": c.n})
+	s.log.Log(logSource, "supervisor.relay_by_daemon", "", map[string]any{"text": c.text, "waited_ms": waited.Milliseconds(), "inputs": c.n, "utterance_id": c.id})
 	res := s.handleUtterance(context.Background(), c, "", true)
 	if res.Spoken == "" {
 		return
 	}
 	// A fast path answered at once (a stop, an answer to the open prompt,
 	// the reset question): it is said like any other push.
-	var tags map[string]any
+	tags := map[string]any{"utterance_id": c.id}
 	if bareStop(c.text) {
-		tags = map[string]any{"stop": true}
+		tags["stop"] = true
 	}
 	s.pushTagged("", res.Spoken, res.Scheduling, tags)
 }
