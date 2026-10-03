@@ -218,6 +218,9 @@ func (s *Supervisor) voiceSpoke(text string) {
 	defer s.mu.Unlock()
 	s.closeVoiceLocked()
 	s.echoSpokeLocked(text)
+	if strings.TrimSpace(text) != "" {
+		s.promptVoiceSpokeLocked(s.relay.pushSpeaking) // buried.go
+	}
 	if strings.TrimSpace(text) == "" || s.relay.pushSpeaking || noSpeech(s.echo.said) {
 		return
 	}
@@ -287,6 +290,7 @@ func (s *Supervisor) addInputLocked(in *shepherdInput) {
 	s.inputSeq++
 	in.seq, in.at = s.inputSeq, s.cfg.Now()
 	s.inputs = append(s.inputs, in)
+	s.promptCEOSpokeLocked() // buried.go
 	if len(s.inputs) > maxInputs {
 		s.inputs = append([]*shepherdInput(nil), s.inputs[len(s.inputs)-maxInputs:]...)
 	}
@@ -319,6 +323,7 @@ func (s *Supervisor) markPushed(text string) {
 	s.pushSeq = s.inputSeq
 	s.lastPush = text
 	s.recordSentLocked(text)
+	s.promptPushedLocked(text) // buried.go
 	s.mu.Unlock()
 }
 

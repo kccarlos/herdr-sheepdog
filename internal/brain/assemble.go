@@ -317,6 +317,9 @@ func requestText(req Request) string {
 	if line := heardLine(req.facts.Heard); line != "" {
 		s += "\n" + line
 	}
+	if req.facts.OpenPrompt != "" {
+		s += "\n" + req.facts.OpenPrompt
+	}
 	if line := languageLine(req.facts.Language); line != "" {
 		s += "\n" + line
 	}
@@ -486,6 +489,9 @@ func factsUpdate(before, now EventFacts) string {
 	}
 	if nb, na := heardAfter(before.Heard), heardAfter(now.Heard); len(na) > len(nb) && now.Heard != nil {
 		parts = append(parts, "while you were working the voice was given, after the CEO began speaking: "+pushedLines(na[len(nb):], now.Heard.SpokeAt)+"; the CEO's words do not answer it")
+	}
+	if now.OpenPrompt != before.OpenPrompt && now.OpenPrompt != "" {
+		parts = append(parts, strings.TrimSuffix(now.OpenPrompt, "."))
 	}
 	if now.Language != before.Language && now.Language != "" {
 		parts = append(parts, "the CEO's last words are now in "+now.Language)

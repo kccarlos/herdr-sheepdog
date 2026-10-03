@@ -306,6 +306,9 @@ type Supervisor struct {
 	// oldest first: what the shepherd had or had not heard when an
 	// utterance began (heard.go).
 	sentPushes []brain.PushedLine
+	// promptHeard is whether the CEO has likely heard the open prompt's
+	// announcement (buried.go).
+	promptHeard promptHearing
 	// acceptedSeq counts the shepherd's requests the daemon took up: every
 	// to_supervisor call claimInput accepted, and every tap. A late
 	// utterance reply is stale once it moved on (utterance.go). Unlike
@@ -414,6 +417,7 @@ func (s *Supervisor) Run(ctx context.Context) {
 		case <-expiry.C:
 			s.ExpirePending()
 			s.ExpirePromises()
+			s.remindBuriedPrompt()
 		case <-reconcile.C:
 			s.reconcileReprompts(ctx)
 		}
@@ -523,6 +527,7 @@ func (s *Supervisor) OnVoiceEvent(ev voice.Event) {
 		s.closeVoiceInput()
 		s.pushSpoken(false)
 		s.voiceStopped()
+		s.promptTurnDone() // buried.go
 		if s.brain != nil {
 			s.brain.TurnComplete()
 		}
@@ -587,6 +592,9 @@ func (s *Supervisor) pushTagged(paneID, text string, u voice.Urgency, tags map[s
 	tags = s.withPushID(tags)
 	if u != voice.UrgencySilent && !s.noteEventLine(paneID, text, tags) {
 		return
+	}
+	if u != voice.UrgencySilent {
+		s.notePromptLine(text, tags) // buried.go
 	}
 	if s.pusher == nil {
 		payload := map[string]any{"text": text, "urgency": u.String()}
