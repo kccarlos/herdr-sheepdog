@@ -20,6 +20,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/kccarlos/herdr-sheepdog/internal/bench"
 	"github.com/kccarlos/herdr-sheepdog/internal/eval"
 )
 
@@ -48,6 +49,12 @@ type Scenario struct {
 	Caps   eval.SimCaps `json:"caps,omitempty"`
 	// Workers are the real agents, in start order.
 	Workers []Worker `json:"workers"`
+	// Audio and Behavior are how the CEO sounds and acts in --voice mode
+	// (tier 2's types: voice, style, disfluency, noise, echo, gate; think
+	// time and barge-in). Collision and reconnect are not supported on a
+	// real flock. Text mode ignores both.
+	Audio    bench.Audio    `json:"audio,omitempty"`
+	Behavior bench.Behavior `json:"behavior,omitempty"`
 	// Setup runs before the call, in order (prompts typed straight into
 	// a worker, as the CEO would have at the terminal earlier).
 	Setup  []Step `json:"setup,omitempty"`
@@ -263,6 +270,9 @@ func (s Scenario) Validate() error {
 		if _, ok := workers[c.Worker]; !ok || len(c.Argv) == 0 {
 			return fmt.Errorf("expect.commands %d: unknown worker or no argv", i)
 		}
+	}
+	if s.Behavior.Collision != nil || s.Behavior.Reconnect != nil {
+		return fmt.Errorf("behavior: collision and reconnect are tier-2 only")
 	}
 	// The conversation half is checked as a simulated-user scenario.
 	return s.Sim().Validate()

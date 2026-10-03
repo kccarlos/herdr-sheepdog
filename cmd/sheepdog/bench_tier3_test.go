@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestWantsTier3(t *testing.T) {
 	for _, tt := range []struct {
@@ -17,6 +20,16 @@ func TestWantsTier3(t *testing.T) {
 	} {
 		if got := wantsTier3(tt.args); got != tt.want {
 			t.Errorf("wantsTier3(%v) = %v", tt.args, got)
+		}
+	}
+}
+
+func TestTier3UsageDocumentsVoice(t *testing.T) {
+	var b strings.Builder
+	printBenchTier3Usage(&b)
+	for _, want := range []string{"--voice", "--tts-model", "--cache-dir", "--say"} {
+		if !strings.Contains(b.String(), want) {
+			t.Errorf("usage lacks %s", want)
 		}
 	}
 }

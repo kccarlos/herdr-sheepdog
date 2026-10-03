@@ -103,18 +103,24 @@ func (b *benchCommon) load(stderr io.Writer) (config.Config, bool) {
 
 // synths are the cached Gemini TTS (say behind it) and the cached say.
 func (b *benchCommon) synths(cfg config.Config, stderr io.Writer) (speech.Synth, speech.Synth, error) {
-	say := &speech.Cache{Dir: b.cacheDir, Inner: &speech.Say{CacheDir: filepath.Join(b.cacheDir, "say-raw")}}
-	if b.noGemini {
+	return benchSynths(cfg.Gemini.Vertex.APIKey, cfg.Gemini.Vertex.Project, b.cacheDir, b.ttsModel, b.noGemini, stderr)
+}
+
+// benchSynths builds the speech renderers: Gemini TTS on Vertex behind
+// a cache, with macOS say behind it (sayOnly: say alone).
+func benchSynths(apiKey, project, cacheDir, ttsModel string, sayOnly bool, stderr io.Writer) (speech.Synth, speech.Synth, error) {
+	say := &speech.Cache{Dir: cacheDir, Inner: &speech.Say{CacheDir: filepath.Join(cacheDir, "say-raw")}}
+	if sayOnly {
 		return say, say, nil
 	}
-	g, err := speech.NewGemini(cfg.Gemini.Vertex.APIKey, cfg.Gemini.Vertex.Project, b.ttsModel)
+	g, err := speech.NewGemini(apiKey, project, ttsModel)
 	if err != nil {
 		return nil, nil, fmt.Errorf("gemini tts: %w (or pass --say)", err)
 	}
 	warn := func(r speech.Request, err error) {
 		fprintf(stderr, "tts: %q: %v\n", r.Text, err)
 	}
-	return speech.Fallback{Synths: []speech.Synth{&speech.Cache{Dir: b.cacheDir, Inner: g}, say}, Warn: warn}, say, nil
+	return speech.Fallback{Synths: []speech.Synth{&speech.Cache{Dir: cacheDir, Inner: g}, say}, Warn: warn}, say, nil
 }
 
 func (b *benchCommon) scratchDir() (string, error) {

@@ -8,7 +8,7 @@ robustness problems before the CEO does.
 |---|---|---|
 | 1 | an LLM CEO types to the real supervisor and brain (no voice model) over the eval sim's scripted mock herdr | `sheepdog eval sim`, `internal/eval` |
 | 2 | **synthetic speech → phone emulator → scratch daemon with the real voice model (Gemini Live on Vertex) and the real brain (DeepSeek, failover to Vertex) → mock herdr scripted from the same sim worlds** | `sheepdog bench`, `internal/bench` (this page) |
-| 3 | the same phone emulator against real herdr workers | another harness; it reuses `internal/bench/voiceclient` |
+| 3 | the real daemon against real herdr workers (Claude Code, Codex); the CEO types by default, or with `--voice` speaks through the same phone emulator | `sheepdog bench run --tier 3`, `internal/bench/tier3` |
 
 ## How a tier-2 run works
 
@@ -224,6 +224,43 @@ failovers, an event excerpt) and `events/<id>.r<n>.jsonl`.
   Live session's `voice.usage` tokens (priced at the native-audio rates,
   on the high side), brain `brain.step` tokens, judge and simulated-CEO
   tokens; the Live audio minutes are reported separately.
+
+## Tier 3 in voice (`--voice`)
+
+`sheepdog bench run --tier 3` drives the real daemon and real coding
+agents (see `docs/bench/tier3-2026-10-03.md`). By default the simulated
+CEO types to the text router and the scratch daemon runs `--voice=off
+--heard-echo`. `--voice` makes the CEO a caller instead:
+
+```
+sheepdog bench run --tier 3 --voice --root /tmp/t3 --filter t3-smoke-status \
+  --ports 7795,7796 --out /tmp/t3-out
+```
+
+- The scratch daemon runs `--voice=gemini` (Gemini Live on Vertex, the
+  scratch config's `gemini.backend`), without `--heard-echo`. It still
+  gets only the Vertex and DeepSeek keys from `--env-file`.
+- The CEO's lines (the opening, then the LLM simulated user's turns) are
+  rendered by the tier-2 TTS (`--tts-model`, `--cache-dir`, `--say`, the
+  same cache) and played into `/ws` by `internal/bench/voiceclient`: the
+  real-time mic frames, the capture gate, the playback reports. The CEO
+  hears the bot through the voice model's output transcription, cut where
+  it was cut off; pushes come as the bot's own speech (a real `voice.push`
+  event is what tier 2 flags as `push`). The simulated user and the judge
+  are the tier-1/2 ones, unchanged, and the judge still sees the workers'
+  real screens and what was sent to them.
+- Scenarios take tier 2's optional `audio` (voice, style, disfluency,
+  noise, echo, gate) and `behavior` (`think_ms`, `barge_in`) fields, used
+  in voice mode only. `collision` and `reconnect` need scripted events
+  and are rejected at tier 3.
+- Each record gets `voice_mode` and a `voice` block (lines said and as
+  heard by the voice model with WER, bot utterances, pushes, flushes,
+  the Live spend). A CEO line the voice model heard nothing of is a
+  `check` failure, as in tier 2. Turn waits are longer than at tier 2 (the
+  first answer within 45 s) because real workers and investigations are
+  slow.
+- It costs Gemini Live audio minutes and TTS on top of the worker usage;
+  without `--voice` the behaviour is unchanged.
 
 ## Limits
 

@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kccarlos/herdr-sheepdog/internal/bench"
 	"github.com/kccarlos/herdr-sheepdog/internal/eval"
 )
 
@@ -18,6 +19,11 @@ import (
 func Run(ctx context.Context, sc Scenario, o Options, repeat int) (rec Record) {
 	t0 := time.Now()
 	meter := eval.NewMeter()
+	var spend *bench.SpendMeter
+	if o.Voice != nil {
+		spend = bench.NewSpendMeter(o.Voice.LiveModel)
+		meter = spend.Meter
+	}
 	rec.SimRun = eval.SimRun{Scenario: sc.ID, Repeat: repeat}
 	rec.Session = fmt.Sprintf("sdbench-%s", randHex(3))
 	logf := func(format string, a ...any) {
@@ -35,6 +41,9 @@ func Run(ctx context.Context, sc Scenario, o Options, repeat int) (rec Record) {
 		}
 		rec.DurationMS = time.Since(t0).Milliseconds()
 		rec.Usage, rec.CostUSD = meter.Lines(), meter.Total()
+		if rec.Voice != nil && spend != nil {
+			rec.Voice.Spend = spend.Total()
+		}
 		rec.Status = eval.StatusOf(rec.Failures)
 	}()
 
@@ -94,11 +103,29 @@ func Run(ctx context.Context, sc Scenario, o Options, repeat int) (rec Record) {
 	w.start = time.Now()
 	initial := w.screens(ctx, 60)
 	go w.poll(ctx)
+	deadline := w.start.Add(time.Duration(caps.MaxSeconds) * time.Second)
+	var cl call = &textCall{w: w, settle: settle, deadline: deadline, logf: logf}
+	if o.Voice != nil {
+		vc, err := dialVoice(ctx, sc, *o.Voice, w.d.BaseURL(), repeat, user, spend, w.start, logf)
+		if err != nil {
+			close(w.stop)
+			<-w.polled
+			rec.EndReason, rec.EndDetail = eval.EndError, err.Error()
+			fail(eval.FailError, firstLine(err.Error()))
+			logf("voice setup failed: %v", err)
+			return rec
+		}
+		cl = vc
+		rec.VoiceMode = true
+		defer vc.close()
+	}
 	// Let the announcements of what the daemon found at start arrive, as
 	// on a phone that connects to a flock already running.
-	convo := w.waitPushes(8*time.Second, settle, time.Now().Add(20*time.Second))
+	convo := cl.arrive(ctx)
+	if vc, ok := cl.(*voiceCall); ok {
+		vc.convo = func() []eval.SimLine { return convo }
+	}
 
-	deadline := w.start.Add(time.Duration(caps.MaxSeconds) * time.Second)
 	silence := time.Duration(caps.SilenceSeconds) * time.Second
 	minWait := 10 * time.Second
 	silent := time.Duration(0)
@@ -142,7 +169,7 @@ loop:
 			convo = append(convo, eval.SimLine{AtMS: w.since(), Who: "system", Text: eval.SimWaitMarker})
 			d := time.Duration(t.WaitSeconds) * time.Second
 			d = min(max(d, minWait), max(silence-silent, minWait))
-			got := w.waitPushes(d, settle, deadline)
+			got := cl.listen(ctx, d, deadline)
 			if len(got) == 0 {
 				silent += d
 				if silent >= silence {
@@ -161,21 +188,15 @@ loop:
 			}
 			rec.Turns++
 			logf("CEO: %s", t.Text)
-			convo = append(convo, eval.SimLine{AtMS: w.since(), Who: "ceo", Text: t.Text})
-			res, serr := w.d.Say(ctx, t.Text)
-			reply := strings.TrimSpace(res.Spoken)
-			if len(res.Options) > 0 {
-				reply = strings.TrimSpace(reply + " Options: " + strings.Join(res.Options, "; ") + ".")
-			}
-			if serr != nil {
-				rec.Fallbacks = append(rec.Fallbacks, "utterance: "+firstLine(serr.Error()))
-			}
-			logf("sheepdog: %s", oneLine(reply, 160))
-			got := append(w.drain(), eval.SimLine{AtMS: w.since(), Who: "sheepdog", Text: reply})
-			got = append(got, w.waitPushes(settle, settle, deadline)...)
+			got, answered, serr := cl.say(ctx, t.Text, rec.Turns == 1 && sc.Opening != "", &rec)
 			eval.SortLines(got)
 			convo = append(convo, got...)
-			if reply != "" {
+			if serr != nil {
+				rec.EndReason, rec.EndDetail = eval.EndError, serr.Error()
+				fail(eval.FailError, firstLine(serr.Error()))
+				break loop
+			}
+			if answered {
 				silent = 0
 			}
 		default:
@@ -191,11 +212,12 @@ loop:
 		v, jerr := judge.Judge(ctx, eval.JudgeInput{Criterion: criteria[0], Transcript: eval.RenderTranscript(convo), Facts: "(the call just ended)", Final: false})
 		if jerr == nil && v.Answer == eval.AnswerWait {
 			rec.Extended = true
-			convo = append(convo, w.waitPushes(min(silence, time.Until(deadline)), settle, deadline)...)
+			convo = append(convo, cl.listen(ctx, min(silence, time.Until(deadline)), deadline)...)
 		}
 	}
 	// The daemon's last words (an announce turn in flight).
-	convo = append(convo, w.waitPushes(settle, settle, time.Now().Add(15*time.Second))...)
+	convo = append(convo, cl.tail(ctx)...)
+	voiceFails := cl.finish(&rec)
 	close(w.stop)
 	<-w.polled
 	eval.SortLines(convo)
@@ -246,6 +268,7 @@ loop:
 	rec.Failovers = len(rec.FailoverEvents)
 
 	checks, cfails := w.checks(ctx, evs, final)
+	cfails = append(cfails, voiceFails...)
 	rec.Checks = append(rec.Checks, checks...)
 	facts := w.facts(initial, final, roster)
 	if rec.EndReason != eval.EndError {
