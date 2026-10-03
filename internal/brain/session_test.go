@@ -49,7 +49,7 @@ func TestReadScreenSessionSource(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.brain.Quiesce()
-	second := h.model.Calls()[1].Text()
+	second := unnonce(h.model.Calls()[1].Text())
 	body := second[strings.Index(second, "<<<BEGIN_WORKER_OUTPUT agent=auth source=session>>>"):]
 	want := "<<<BEGIN_WORKER_OUTPUT agent=auth source=session>>>\n" +
 		"Last instruction it received: Review the iOS app for glitches\n" +
@@ -87,7 +87,7 @@ func TestReadSessionCutsTheOldestPart(t *testing.T) {
 	if _, err := h.ask("tell me more", "auth"); err != nil {
 		t.Fatal(err)
 	}
-	second := h.model.Calls()[1].Text()
+	second := unnonce(h.model.Calls()[1].Text())
 	start, end := strings.Index(second, "<<<BEGIN_WORKER_OUTPUT"), strings.Index(second, "<<<END_WORKER_OUTPUT>>>")
 	if start < 0 || end < 0 {
 		t.Fatalf("no wrapped result:\n%s", second)

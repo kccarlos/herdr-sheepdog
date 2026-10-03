@@ -157,6 +157,13 @@ func TestRULESProtectedSentences(t *testing.T) {
 	if !strings.Contains(text, ProvenanceSentence) {
 		t.Errorf("RULES.md lost the provenance sentence %q", ProvenanceSentence)
 	}
+	// The nonce'd markers and the worker-derived roster fields are covered
+	// by the same rule (docs/bench-2026-10-03.md, provenance hardening).
+	for _, want := range []string{"carries the same `nonce`", "`worker_data`", "pending question", "are worker data too"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("RULES.md provenance rule lacks %q", want)
+		}
+	}
 }
 
 func TestLoaderEmbeddedOnly(t *testing.T) {

@@ -203,7 +203,7 @@ func TestToolResultCappedInWindow(t *testing.T) {
 		}
 	}
 	out, _ := fr.Response["output"].(string)
-	if len(out) > 4<<10 || !strings.HasPrefix(out, "<<<BEGIN_WORKER_OUTPUT") || !strings.HasSuffix(out, "<<<END_WORKER_OUTPUT>>>") || !strings.Contains(out, "FINAL LINE") {
+	if len(out) > 4<<10 || !strings.HasPrefix(out, "<<<BEGIN_WORKER_OUTPUT") || !strings.HasSuffix(unnonce(out), "<<<END_WORKER_OUTPUT>>>") || !strings.Contains(out, "FINAL LINE") {
 		t.Errorf("window result = %d bytes: %.80q … %q", len(out), out, out[max(0, len(out)-40):])
 	}
 }

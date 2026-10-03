@@ -34,6 +34,9 @@ const sampleRunPath = "../../testdata/brain/sample-run.jsonl"
 // the fixture can never drift from the on-disk format. -update rewrites
 // it.
 func TestSampleRunFixture(t *testing.T) {
+	// A counter nonce keeps the golden transcript deterministic.
+	count := 0
+	defer SetNonceSource(func() string { count++; return fmt.Sprintf("n%d", count) })()
 	clock := time.Date(2026, 9, 18, 9, 30, 0, 0, time.UTC)
 	now := func() time.Time { clock = clock.Add(400 * time.Millisecond); return clock }
 
@@ -63,7 +66,7 @@ func TestSampleRunFixture(t *testing.T) {
 	next := func(steps ...braintest.Step) { script = append(script, steps...) }
 
 	dir := t.TempDir()
-	b, err := New(Config{DataDir: dir, RunID: "sample-run", Now: now, WindowTokens: 1150, PruneAfterTurns: 4, UtteranceTimeout: 30 * time.Second}, model, &recLog{})
+	b, err := New(Config{DataDir: dir, RunID: "sample-run", Now: now, WindowTokens: 1250, PruneAfterTurns: 4, UtteranceTimeout: 30 * time.Second}, model, &recLog{})
 	if err != nil {
 		t.Fatal(err)
 	}

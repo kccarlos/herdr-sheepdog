@@ -632,7 +632,7 @@ var (
 	reLedgerInvestigation = regexp.MustCompile(`investigation (\S+) \(`)
 	// reWorkerOutput is the provenance-wrapped body of a request (the
 	// investigation result the delivery turn is given).
-	reWorkerOutput = regexp.MustCompile(`(?s)<<<BEGIN_WORKER_OUTPUT[^>]*>>>\n(.*?)\n<<<END_WORKER_OUTPUT>>>`)
+	reWorkerOutput = regexp.MustCompile(`(?s)<<<BEGIN_WORKER_OUTPUT[^>]*>>>\n(.*?)\n<<<END_WORKER_OUTPUT[^>]*>>>`)
 	reStatusWords  = regexp.MustCompile(`(?i)^(?:what'?s going on|what is going on|how are things|how'?s it going|status|any(?:thing)? (?:news|update)|what'?s up|are (?:we|they) (?:ok|done)|is (?:it|everything) done)\b`)
 	reTellWords    = regexp.MustCompile(`(?i)^(?:tell|ask|have|instruct|get)\s+\S+\s`)
 	// reBriefingLine is the roster sentence the request carries.
@@ -1117,7 +1117,10 @@ func replyFromResult(fr *genai.FunctionResponse) string {
 		if i := strings.Index(body, ">>>\n"); i >= 0 {
 			body = body[i+4:]
 		}
-		body = strings.TrimSuffix(strings.TrimSpace(body), "<<<END_WORKER_OUTPUT>>>")
+		body = strings.TrimSpace(body)
+		if i := strings.LastIndex(body, "<<<END_WORKER_OUTPUT"); i >= 0 {
+			body = body[:i]
+		}
 		var lines []string
 		for _, l := range strings.Split(strings.TrimSpace(body), "\n") {
 			if l = strings.TrimSpace(l); l != "" {
@@ -1125,7 +1128,7 @@ func replyFromResult(fr *genai.FunctionResponse) string {
 			}
 		}
 		spoken := "The screen is empty."
-		if strings.Contains(out, "source="+brain.SourceSession+">>>") {
+		if strings.Contains(out, "source="+brain.SourceSession) {
 			// A session read: quote the first line of its last message.
 			msg := lines
 			for i, l := range lines {
