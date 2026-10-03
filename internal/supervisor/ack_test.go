@@ -119,3 +119,24 @@ func TestAckOnly(t *testing.T) {
 		}
 	}
 }
+
+// Tier-2 echo-barge-in r1 (this branch's verification run): the voice
+// said "Checking." to the question and called no tool, then its own echo
+// came back as "checking" twice, and the daemon relayed "checking
+// checking" only. An input answered with nothing but an acknowledgement
+// stays in the run the daemon relays.
+func TestAcknowledgedQuestionStaysInTheRelayedRun(t *testing.T) {
+	m := braintest.NewModel(braintest.Step{Text: braintest.Reply("Bench-claude wrote the README.", "")})
+	h := newBrainHarness(t, m, relayAfter(60*time.Millisecond))
+	h.addAgent("w5:p1", "bench-claude", "claude", herdr.StateDone)
+	h.sup.OnVoiceEvent(voice.EventTranscript{Dir: voice.DirIn, Text: "What did Bench Claude say when it finished?"})
+	h.sup.OnVoiceEvent(voice.EventTranscript{Dir: voice.DirOut, Text: "Checking."})
+	h.sup.OnVoiceEvent(voice.EventTurnComplete{})
+	h.sup.OnVoiceEvent(voice.EventTranscript{Dir: voice.DirIn, Text: "checking"})
+	waitFor(t, func() bool { return h.log.count("supervisor.relay_by_daemon") == 1 }, "the daemon's relay")
+	h.sup.replies.Wait()
+	ev := h.log.ofType("supervisor.relay_by_daemon")
+	if text, _ := payload(ev[0])["text"].(string); !strings.Contains(text, "What did Bench Claude say when it finished?") {
+		t.Errorf("relayed %q, want the question in it", text)
+	}
+}
