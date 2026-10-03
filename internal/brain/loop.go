@@ -39,6 +39,11 @@ type turn struct {
 	tokIn      int
 	tokOut     int
 	acted      []string // spoken echoes of actions sent
+	// prior is the answer an event turn wrote before it learned a line
+	// about its event had gone out meanwhile (recheck): the turn asks
+	// once more with that fact; should the second step fail, prior is
+	// returned only for an owed event (fail).
+	prior *Reply
 }
 
 // Turn runs one turn (an empty kind is an utterance). The reply is
@@ -199,11 +204,13 @@ func (b *Brain) run(ctx context.Context, t *turn) (Reply, error) {
 		// The last step, or one starting with too little budget left for
 		// another tool round, is answer-only: the model must reply from
 		// what it has.
-		forced := step == b.cfg.MaxSteps || (step > 1 && t.soft.Sub(b.cfg.Now()) < b.cfg.StepReserve)
+		forced := step == b.cfg.MaxSteps || (step > 1 && t.soft.Sub(b.cfg.Now()) < b.cfg.StepReserve) || t.prior != nil
 		config := base // one config per step: the fake model keeps the pointer
 		if forced {
 			config.ToolConfig = &genai.ToolConfig{FunctionCallingConfig: &genai.FunctionCallingConfig{Mode: genai.FunctionCallingConfigModeNone}}
-			b.ingest(Message{Role: RoleUser, Kind: KindRequest, Content: "Time is up: answer now with the JSON object of the answer contract from what you have, without further tool calls."}, t.n)
+			if t.prior == nil { // a recheck's note says what to do
+				b.ingest(Message{Role: RoleUser, Kind: KindRequest, Content: "Time is up: answer now with the JSON object of the answer contract from what you have, without further tool calls."}, t.n)
+			}
 		}
 		asm := b.engine.Assemble(b.cfg.WindowTokens)
 		text := system
@@ -281,8 +288,11 @@ func (b *Brain) run(ctx context.Context, t *turn) (Reply, error) {
 				return b.fail(t, "bad_reply", perr)
 			}
 			b.ingest(t.reply(answer, raw), t.n)
-			b.logTurn(t, false)
 			reply.Turn, reply.Acted = t.n, len(t.acted) > 0
+			if b.recheck(t, step, reply) {
+				continue
+			}
+			b.logTurn(t, false)
 			return reply, nil
 		}
 		b.execCalls(ctx, t, resp, raw, calls)
@@ -379,10 +389,60 @@ func (b *Brain) execCalls(ctx context.Context, t *turn, resp *genai.GenerateCont
 	}
 }
 
+// recheck reports whether an event turn's answer must be asked for once
+// more because the facts changed while its last step ran: a line about
+// the event was handed to the voice (the block template at
+// brain.announce_wait_s) after the request was rendered. factsUpdate
+// runs only before a later step, so a turn that answers in one step —
+// the common case on a slow provider (run C: 27 of 55 Vertex runs that
+// started blocked heard the block twice) — wrote its line as the news
+// the template had already carried. The update goes in the window and
+// one more answer-only step runs; whether to skip, add or correct is the
+// model's (docs/timelines.md, "announce wait"). Once per turn, never past MaxSteps,
+// never for a CEO turn, never for a line that would not be spoken.
+func (b *Brain) recheck(t *turn, step int, reply Reply) bool {
+	if t.prior != nil || t.req.Trigger != TriggerEvent || t.req.Facts == nil || step >= b.cfg.MaxSteps {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(reply.Urgency)) {
+	case UrgencySkip, UrgencySilent:
+		return false
+	}
+	if strings.TrimSpace(reply.Spoken) == "" {
+		return false
+	}
+	now := t.req.Facts()
+	if len(now.Spoken) <= len(t.req.facts.Spoken) {
+		return false
+	}
+	note := factsUpdate(t.req.facts, now)
+	t.req.facts = now
+	t.prior = &reply
+	b.log.Log(logSource, "brain.recheck", "", map[string]any{"turn": t.n, "kind": string(t.req.Kind), "agent": t.req.Agent, "event": t.req.Event, "step": step, "spoken_meanwhile": len(now.Spoken)})
+	b.ingest(Message{Role: RoleUser, Kind: KindSystem, Content: note + " Your answer above was written before that and has not been spoken: answer again, now, with the JSON object of the answer contract and no tool calls.", Agent: t.req.Agent}, t.n)
+	return true
+}
+
 // fail ends a turn without a model answer. When an action was already
 // sent it returns a reply reporting it (nothing may be sent twice by the
 // fallback path); otherwise ErrFallback wrapping the cause.
 func (b *Brain) fail(t *turn, reason string, cause error) (Reply, error) {
+	if t.prior != nil {
+		// The recheck step did not answer. The first answer was written
+		// as if nothing had been said, so it is no answer to the event as
+		// it stands — except on an owed event (a kept promise, the CEO's
+		// own request), where it is the finding they are waiting for and
+		// stands as it would have without the recheck. Otherwise the turn
+		// falls back like any other: the line already spoken carried the
+		// event. On Vertex the recheck often runs out of the 6 + 3 s
+		// announce budget (run C: first steps at 2–6 s, step p90 8 s).
+		owed := t.req.Owed || len(t.req.Promises) > 0
+		b.log.Log(logSource, "brain.recheck_failed", "", map[string]any{"turn": t.n, "reason": reason, "kept_first": owed && reason != "yielded"})
+		if owed && reason != "yielded" {
+			b.logTurn(t, false)
+			return *t.prior, nil
+		}
+	}
 	payload := map[string]any{"reason": reason, "kind": string(t.req.Kind), "trigger": string(t.req.Trigger), "turn": t.n, "acted": len(t.acted) > 0}
 	if cause != nil {
 		payload["error"] = cause.Error()

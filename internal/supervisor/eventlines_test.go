@@ -169,3 +169,102 @@ func TestFourthLineAboutOneEventIsDropped(t *testing.T) {
 		t.Errorf("after the window: last push = %+v", last)
 	}
 }
+
+// Run C (docs/eval-campaign-2026-10-03.md, 27 of 55 Vertex runs that
+// started blocked): the announce turn answered in one slow step, so the
+// template went out at announce_wait while that step ran and the "already
+// spoken" fact, read only before a later step, never reached it. Its line
+// — the same block as news, needs_user — was added late: the CEO heard
+// the block twice within 2–6 s. Now the turn is asked once more with the
+// fact, and the model's skip is final: one line.
+func TestOneStepAnnounceIsToldTheTemplateWentOutBeforeItsLineCounts(t *testing.T) {
+	const news = "auth wants to run the diff and needs your approval. Shall I let it?"
+	release := make(chan struct{})
+	m := braintest.NewModel()
+	m.Default = braintest.NothingToAdd()
+	var calls int
+	m.EventDefault = &braintest.Step{Fn: func(call braintest.Call) (*genai.GenerateContentResponse, error) {
+		calls++
+		if calls == 1 {
+			<-release // a Vertex step slower than announce_wait
+			return braintest.Response(*announceReply(news, "interrupt", "", "", true)), nil
+		}
+		if !strings.Contains(call.Text(), "while you were working the assistant said, about this event:") {
+			return braintest.Response(*announceReply(news, "interrupt", "", "", true)), nil
+		}
+		return braintest.Response(*braintest.NothingToAdd()), nil
+	}}
+	h := newBrainHarness(t, m, func(c *Config) { c.AnnounceWait = 20 * time.Millisecond })
+	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
+	pusher := h.pusher
+	go func() {
+		deadline := time.Now().Add(5 * time.Second)
+		for len(pusher.all()) < 1 && time.Now().Before(deadline) {
+			time.Sleep(time.Millisecond)
+		}
+		close(release)
+	}()
+	h.block("w5:p1", "codex-approval-prompt.screen.txt")
+	if got := h.pushTexts(); len(got) != 1 || !strings.HasPrefix(got[0], "auth asks to run") {
+		t.Fatalf("pushes = %v, want the template alone", got)
+	}
+	if calls != 2 {
+		t.Errorf("model calls = %d, want 2 (the answer, then the recheck)", calls)
+	}
+	if n := h.log.count("brain.recheck"); n != 1 {
+		t.Errorf("brain.recheck = %d", n)
+	}
+	late := h.log.ofType("brain.push_late")
+	if len(late) != 1 || payload(late[0])["added"] != false {
+		t.Errorf("brain.push_late = %v", late)
+	}
+}
+
+// The model may still add to the template after the recheck (that is
+// its call); the anti-loop cap stays the only guard. And a turn that
+// answers inside the wait is not asked twice.
+func TestAnnounceRecheckLeavesTheJudgementToTheModel(t *testing.T) {
+	t.Run("adds after being told", func(t *testing.T) {
+		const added = "That diff touches the file you said to keep small."
+		release := make(chan struct{})
+		m := braintest.NewModel()
+		m.Default = braintest.NothingToAdd()
+		var calls int
+		m.EventDefault = &braintest.Step{Fn: func(call braintest.Call) (*genai.GenerateContentResponse, error) {
+			calls++
+			if calls == 1 {
+				<-release
+			}
+			return braintest.Response(*announceReply(added, "idle", "", "", true)), nil
+		}}
+		h := newBrainHarness(t, m, func(c *Config) { c.AnnounceWait = 20 * time.Millisecond })
+		h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
+		pusher := h.pusher
+		go func() {
+			for len(pusher.all()) < 1 {
+				time.Sleep(time.Millisecond)
+			}
+			close(release)
+		}()
+		h.block("w5:p1", "codex-approval-prompt.screen.txt")
+		if got := h.pushTexts(); len(got) != 2 || got[1] != added || calls != 2 {
+			t.Errorf("pushes = %v, calls = %d", got, calls)
+		}
+	})
+	t.Run("answered inside the wait", func(t *testing.T) {
+		const line = "auth wants to run the diff. Shall I let it?"
+		m := braintest.NewModel()
+		m.Default = braintest.NothingToAdd()
+		var calls int
+		m.EventDefault = &braintest.Step{Fn: func(call braintest.Call) (*genai.GenerateContentResponse, error) {
+			calls++
+			return braintest.Response(*announceReply(line, "interrupt", "", "", true)), nil
+		}}
+		h := newBrainHarness(t, m, func(c *Config) { c.AnnounceWait = 5 * time.Second })
+		h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
+		h.block("w5:p1", "codex-approval-prompt.screen.txt")
+		if got := h.pushTexts(); len(got) != 1 || got[0] != line || calls != 1 || h.log.count("brain.recheck") != 0 {
+			t.Errorf("pushes = %v, calls = %d", got, calls)
+		}
+	})
+}
