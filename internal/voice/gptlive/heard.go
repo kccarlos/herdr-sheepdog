@@ -84,13 +84,15 @@ func (s *Session) settleHeard(now time.Time) {
 // releaseRequeue puts the owed unheard lines back in the push queue, at
 // idle, once the shepherd's turn and the voice's reply are over: nothing
 // generating or playing, no delegation in flight, the shepherd not
-// speaking, and requeueSettle since they last spoke and since playback
-// ended. A line the supervisor says is no longer open is dropped
+// speaking, requeueSettle since they last spoke and since playback
+// ended, and voice.RequeueHold clear (the client's detector settled, the
+// reply to the shepherd's last words over). A line the supervisor says is no longer open is dropped
 // (voice.push_dropped {reason: no_longer_open}).
 func (s *Session) releaseRequeue(now time.Time) {
 	s.mu.Lock()
 	if len(s.requeue) == 0 || s.speakingOrPlayingLocked(now) || len(s.inflight) > 0 || s.inputOpen || s.vad.Hold(now) > 0 ||
-		now.Sub(s.lastInput) < requeueSettle || now.Sub(s.play.EndedAt(now)) < requeueSettle {
+		now.Sub(s.lastInput) < requeueSettle || now.Sub(s.play.EndedAt(now)) < requeueSettle ||
+		voice.RequeueHold(now, voice.RequeueFacts{LastInput: s.lastInput, ReplyDoneAt: s.turnDoneAt, Speech: s.vad}) != "" {
 		s.mu.Unlock()
 		return
 	}

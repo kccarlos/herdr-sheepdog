@@ -73,3 +73,46 @@ func TestHeardTrackerTimesOutAPushNeverVoiced(t *testing.T) {
 		t.Errorf("payload = %v", p)
 	}
 }
+
+// RequeueHold on collision-finish-push r1's timeline (seconds from the
+// call start): the detector opened at 30.0 with the push playing, the
+// first fragment at 30.3, the detector closed at 32.7 and its release
+// ran out at 33.0 — where the old rule re-queued — the words came at
+// 33.4, the reply turn ended at 35.0.
+func TestRequeueHoldCollisionTimeline(t *testing.T) {
+	t0 := time.Date(2026, 10, 3, 3, 0, 0, 0, time.UTC)
+	at := func(s float64) time.Time { return t0.Add(time.Duration(s * float64(time.Second))) }
+	var sp ClientSpeech
+	sp.Set(at(30.0), true)
+	f := RequeueFacts{LastInput: at(30.3), ReplyDoneAt: at(29.0), Speech: sp}
+	if got := RequeueHold(at(31), f); got != "speaking" {
+		t.Errorf("31.0: %q, want speaking", got)
+	}
+	f.Speech.Set(at(32.7), false)
+	if got := RequeueHold(at(33.0), f); got != "speech_settle" {
+		t.Errorf("33.0: %q, want speech_settle", got)
+	}
+	f.LastInput = at(33.4)
+	if got := RequeueHold(at(34.8), f); got != "awaiting_reply" {
+		t.Errorf("34.8: %q, want awaiting_reply", got)
+	}
+	f.ReplyDoneAt = at(35.0)
+	if got := RequeueHold(at(35.1), f); got != "" {
+		t.Errorf("35.1: %q, want free", got)
+	}
+	// Speech the detector heard after the last words waits for its
+	// transcript, but not forever.
+	f.Speech.Set(at(36.0), true)
+	f.Speech.Set(at(37.0), false)
+	if got := RequeueHold(at(39.5), f); got != "awaiting_transcript" {
+		t.Errorf("39.5: %q, want awaiting_transcript", got)
+	}
+	if got := RequeueHold(at(41.5), f); got != "" {
+		t.Errorf("41.5: %q, want free", got)
+	}
+	// A reply that never comes holds only RequeueReplyWait.
+	g := RequeueFacts{LastInput: at(50), ReplyDoneAt: at(40)}
+	if got := RequeueHold(at(61), g); got != "" {
+		t.Errorf("61: %q, want free", got)
+	}
+}

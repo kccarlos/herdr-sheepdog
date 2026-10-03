@@ -123,6 +123,9 @@ type Session struct {
 	// for a quiet moment (heard.go).
 	heard   voice.HeardTracker
 	requeue []voice.UnheardPush
+	// turnDoneAt is when the model last completed a turn
+	// (voice.RequeueHold).
+	turnDoneAt time.Time
 
 	readerExit chan readerResult
 	refreshReq chan refreshRequest

@@ -119,6 +119,7 @@ func (s *Session) speechEnd(now time.Time) {
 		return
 	}
 	s.speakingNow = false
+	s.turnDoneAt = now
 	s.flushReplyLocked()
 	s.heard.TurnComplete()
 	timing := s.finishAudioTimingLocked()

@@ -127,6 +127,7 @@ func (s *Session) handleServerContent(sc *genai.LiveServerContent) {
 		s.mu.Lock()
 		s.turnOpen = false
 		s.speaking = false
+		s.turnDoneAt = s.now()
 		close(s.turnDone)
 		s.turnDone = make(chan struct{})
 		s.flushRecapLocked()
