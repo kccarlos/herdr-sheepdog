@@ -353,6 +353,7 @@ func (a *App) wire() error {
 			return fmt.Errorf("app: voice: %w", err)
 		}
 		sw.SetContextLog(a.voiceCtx)
+		sw.SetOpenCheck(sup.OpenCheck) // unheard pushes and session refresh ask the supervisor
 		a.voice = sw
 		a.voiceSwitch = sw
 		pusher.set(sw)

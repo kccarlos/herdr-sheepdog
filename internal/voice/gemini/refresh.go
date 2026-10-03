@@ -62,7 +62,8 @@ func (s *Session) SetOpenCheck(f voice.OpenCheck) {
 	s.mu.Unlock()
 }
 
-// refreshLoop looks for a quiet moment once a refresh is due.
+// refreshLoop looks for a quiet moment once a refresh is due, and gives
+// the heard watch (heard.go) its timed checks.
 func (s *Session) refreshLoop(ctx context.Context) {
 	tick := time.NewTicker(refreshEvery)
 	defer tick.Stop()
@@ -71,6 +72,7 @@ func (s *Session) refreshLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-tick.C:
+			s.settleHeard()
 			s.maybeRefresh()
 		}
 	}

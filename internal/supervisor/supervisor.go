@@ -529,6 +529,8 @@ func (s *Supervisor) OnVoiceEvent(ev voice.Event) {
 		// included: what the voice says next answers them.
 		s.pushSpoken(false)
 		s.voiceStopped()
+	case voice.EventPushUnheard:
+		s.onPushUnheard(e) // unheard.go
 	}
 }
 

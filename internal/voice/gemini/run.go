@@ -111,9 +111,14 @@ func (s *Session) install(conn Conn, resumed, reconnect bool) {
 	s.stalledNow = false // the connected status below clears it on the page
 	turn := s.finishTurnLocked("reconnect")
 	timing := s.finishAudioTimingLocked()
+	var unheard []voice.UnheardPush
+	if reconnect {
+		unheard = s.heard.Lost() // a line in flight went with the old connection
+	}
 	s.mu.Unlock()
 	s.logTurn(turn)
 	s.logAudioTiming(timing)
+	s.reportUnheard(unheard)
 
 	s.wg.Add(1)
 	go func() { defer s.wg.Done(); s.readLoop(conn, gen) }()
