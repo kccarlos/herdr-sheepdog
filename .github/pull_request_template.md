@@ -1,6 +1,6 @@
-## Work package
+## Why
 
-<!-- Which work package from docs/history/sheepdog-v1-plan.md does this PR implement (e.g. WP1)? -->
+<!-- The failure or need this answers: a log, an eval case id, a scorecard metric (docs/iteration-2.md "Rules for every change"). -->
 
 ## What changed
 
@@ -8,8 +8,8 @@
 
 ## How verified
 
-<!-- Commands run and their outcome (build, vet, test, lint, manual checks). -->
+<!-- Commands run and their outcome (build, vet, test, lint, web tests, evals, live checks). -->
 
-## Plan deviations
+## Docs
 
-<!-- Anything that differs from docs/history/sheepdog-v1-plan.md, and why. "None" if none. -->
+<!-- Which docs were updated (docs/status.md, CONFIG.md, roles.md, …), or "none needed". -->
