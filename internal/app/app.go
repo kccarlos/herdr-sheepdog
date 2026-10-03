@@ -100,6 +100,13 @@ type Options struct {
 	// daemons use it to give scripted findings (internal/bench), so a
 	// benchmark never runs a real coding agent.
 	Querier supervisor.Querier
+	// HeardEcho, with VoiceOff, reports every spoken push and every text
+	// router answer back to the supervisor as a voice session would
+	// (sent, spoken in full, turn complete), so the heard bookkeeping —
+	// what a "yes" answers, the relay gate — works without a voice
+	// model. For harnesses that stand in for the shepherd (`sheepdog
+	// bench run --tier 3`); `serve --heard-echo`.
+	HeardEcho bool
 }
 
 func (o Options) withDefaults() Options {
@@ -386,7 +393,11 @@ func (a *App) wire() error {
 		// been pushed.
 		a.routerCtx = a.voiceCtx.Session("text-router", "")
 		a.routerCtx.EpochOnFirstUse("text router (--voice=off)", "No voice model is running: the /debug text router stands in for it. Nothing here reaches a model; it shows what the router relayed and what a voice model would have been pushed.")
-		pusher.set(inject.SkippedPusher{Log: a.log, Context: a.routerCtx})
+		skipped := inject.SkippedPusher{Log: a.log, Context: a.routerCtx}
+		if opts.HeardEcho {
+			skipped.Heard = func(text string, u voice.Urgency) { heardEcho(sup, voice.EventPush{Text: text, Urgency: u}, text) }
+		}
+		pusher.set(skipped)
 		sup.SetVoiceConnected(true)
 	}
 
@@ -413,6 +424,9 @@ func (a *App) wire() error {
 		Token:          cfg.Web.Token,
 		VoiceContext:   a.voiceCtx,
 		RouterContext:  a.routerCtx,
+	}
+	if opts.HeardEcho && opts.Voice == VoiceOff {
+		deps.HeardEcho = sup.OnVoiceEvent
 	}
 	if opts.Dev || a.cfg.Web.Dev {
 		deps.DevTestdataDir = a.cfg.Web.DevTestdataDir
@@ -1095,6 +1109,20 @@ func (p *paneLocks) lock(pane string) func() {
 	p.mu.Unlock()
 	m.Lock()
 	return m.Unlock
+}
+
+// heardEcho reports a line as a voice session reports one it spoke in
+// full: first (when set) the event that starts it, then the assistant's
+// output transcript and the end of the turn (Options.HeardEcho). On its
+// own goroutine: a push may come with supervisor locks held.
+func heardEcho(sup *supervisor.Supervisor, start voice.Event, text string) {
+	go func() {
+		if start != nil {
+			sup.OnVoiceEvent(start)
+		}
+		sup.OnVoiceEvent(voice.EventTranscript{Dir: voice.DirOut, Text: text, Final: true})
+		sup.OnVoiceEvent(voice.EventTurnComplete{})
+	}()
 }
 
 // lazyPusher lets the supervisor be built before the voice session.
