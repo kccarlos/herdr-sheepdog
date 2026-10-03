@@ -442,7 +442,12 @@ func TestLongWaitStaleReplyIsNotInline(t *testing.T) {
 	}, "the second request to take the slot")
 	close(release)
 
-	assertPending(t, <-first)
+	if res := <-first; res.Pending || res.Spoken != "" || res.Scheduling != voice.UrgencySilent {
+		t.Errorf("first = %+v, want a silent result, not pending (no reply follows)", res)
+	}
+	if n := h.log.count("brain.reply_pending"); n != 0 {
+		t.Errorf("brain.reply_pending = %d, want 0", n)
+	}
 	if res := <-second; res.Spoken != "Docs is idle." || res.Pending {
 		t.Errorf("second = %+v, want the newer reply inline", res)
 	}

@@ -332,6 +332,7 @@ func (s *Supervisor) awaitReply(ctx, turnCtx context.Context, u *inflightUtteran
 		// it, or pushes it silent if the turn acted, as for any late
 		// reply.
 		out := u.out
+		stale := ctx.Err() == nil && listening && s.acceptedSeq != u.accepted
 		s.mu.Unlock()
 		if s.track() {
 			go func() {
@@ -340,6 +341,11 @@ func (s *Supervisor) awaitReply(ctx, turnCtx context.Context, u *inflightUtteran
 			}()
 		} else {
 			s.endUtterance(u)
+		}
+		if stale {
+			// No reply follows for this call (deliverLate logs
+			// brain.reply_stale): it is answered silently, not pending.
+			return voice.ToolResult{Scheduling: voice.UrgencySilent}
 		}
 	default:
 		out := u.out
