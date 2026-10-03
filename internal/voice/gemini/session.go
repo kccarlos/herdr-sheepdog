@@ -690,6 +690,16 @@ func (s *Session) LastPlayback() voice.PlaybackReport {
 	return s.play.Last()
 }
 
+// LastSpeechOnset is when the client's speech detector last opened (ok
+// false when it never reported one): the echo guard tells the
+// shepherd's answer, begun after the voice stopped playing, from its
+// echo, begun while it played.
+func (s *Session) LastSpeechOnset() (time.Time, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.vad.Onset()
+}
+
 // ClientSpeaking records the /ws client's speech detector opening (true)
 // or closing (false); push timing holds for it (speakingUntilLocked).
 func (s *Session) ClientSpeaking(on bool) {

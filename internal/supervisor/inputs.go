@@ -122,6 +122,9 @@ type claim struct {
 	// first input's arrival): what the shepherd had heard by then is
 	// what the words can answer (heard.go).
 	start time.Time
+	// ins are the claimed inputs, oldest first (the echo guard reads
+	// each one).
+	ins []*shepherdInput
 }
 
 // maxInputs bounds the remembered inputs.
@@ -158,6 +161,7 @@ func (s *Supervisor) ShepherdInput(kind InputKind, text string) {
 // model speaking, turn complete, or a relay claiming it).
 func (s *Supervisor) heard(text string, final bool) {
 	playback := s.lastPlayback() // outside s.mu: the voice session has its own lock
+	onset, onsetOK := s.lastSpeechOnset()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if text == "" {
@@ -185,7 +189,10 @@ func (s *Supervisor) heard(text string, final bool) {
 		s.wakeLocked()
 		return
 	}
-	in := &shepherdInput{kind: InputVoice, text: text, open: !final, saidBefore: s.echoCandidateLocked(playback)}
+	if !onsetOK {
+		onset = time.Time{}
+	}
+	in := &shepherdInput{kind: InputVoice, text: text, open: !final, saidBefore: s.echoCandidateLocked(playback, onset)}
 	s.addInputLocked(in)
 	s.armRelayLocked(in)
 }
@@ -517,7 +524,7 @@ func (s *Supervisor) claimRunLocked(run []*shepherdInput) claim {
 	s.relayedSeq = s.inputSeq
 	s.acceptedSeq++
 	s.disarmRelayLocked()
-	return claim{in: run[len(run)-1], text: strings.Join(words, " "), n: len(run), id: s.nextID("utt"), start: run[0].at}
+	return claim{in: run[len(run)-1], text: strings.Join(words, " "), n: len(run), id: s.nextID("utt"), start: run[0].at, ins: run}
 }
 
 // promptSinceLocked is when p's prompt appeared: its pending action's

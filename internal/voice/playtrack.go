@@ -390,6 +390,16 @@ func (c *ClientSpeech) Set(now time.Time, on bool) {
 	}
 }
 
+// Onset is when the client's detector last opened (ok false when it
+// never reported): when the shepherd — or the speaker's echo — last
+// began to sound.
+func (c *ClientSpeech) Onset() (time.Time, bool) {
+	if !c.known || c.since.IsZero() {
+		return time.Time{}, false
+	}
+	return c.since, true
+}
+
 // Reset forgets the client's detector (the client went away).
 func (c *ClientSpeech) Reset() { *c = ClientSpeech{} }
 

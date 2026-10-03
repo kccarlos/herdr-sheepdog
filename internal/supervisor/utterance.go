@@ -3,9 +3,11 @@ package supervisor
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
 	"github.com/kccarlos/herdr-sheepdog/internal/prose"
@@ -191,7 +193,7 @@ func (s *Supervisor) ToSupervisor(ctx context.Context, said string) (voice.ToolR
 // so its turn's reply is always pushed (deliverLate), and only a fast
 // path's result is returned, for the caller to push.
 func (s *Supervisor) handleUtterance(ctx context.Context, c claim, callID string, daemon bool) voice.ToolResult {
-	if s.echoDropped(c) {
+	if s.echoDropped(&c) {
 		return voice.ToolResult{Scheduling: voice.UrgencySilent}
 	}
 	text := c.text
@@ -777,31 +779,43 @@ func (s *Supervisor) hasListener() bool {
 // mic picked it up, Gemini interrupted itself and transcribed "new
 // change" 1.7 s after its last output transcript, and the daemon relayed
 // that to the brain as the shepherd's question. The architecture cannot
-// make this unrepresentable from here: the client has no echo
+// make this unrepresentable from here: the client may have no echo
 // cancellation and the voice model reports only text, so text and
-// timing are all the daemon has to tell the two apart. PR #58 removed
-// the old guard (a relay of a push) because every utterance now runs on
-// the recorded words; this one is narrower. A voice input is an echo
-// only when all of these hold:
+// timing are all the daemon has to tell the two apart.
 //
-//   - it began while the voice was speaking or within echoWindow of its
-//     last output (saidBefore, recorded when the input began: the voice
-//     often says "Checking." between the echo and its tool call);
-//   - it is one input, of at least two words, and not a fast-path phrase
-//     (a bare yes/no/stop word, an option pick, the reset phrases —
-//     those must keep working even when they repeat the assistant, as
-//     "yes, start over" does by design);
-//   - its normalised words line up with a run of what the voice just
-//     said, covering at least 80% of them, one differing short word
-//     forgiven (the ASR heard "new" for "no").
+// On speakerphone it is worse (docs/bench/tier2-2026-10-03.md #3): with
+// the bot's audio leaking back at −15 to −18 dB the voice model
+// transcribed its own speech, often glued and without spaces ("Sent
+// it.I'mwaitingI'll let you…"), sometimes after the shepherd's own words
+// in the same input, and the daemon relayed it. So each voice input of a
+// claimed run is checked on its own:
 //
-// An echo is logged (supervisor.echo_dropped, both texts) and not
-// relayed; the call gets a silent result, as a call with no shepherd
-// input does. It also leaves the brain's window (Brain.Echo): the words
-// reached the brain as the CEO's before the guard saw them (it runs on
-// the tool call, after the transcript), and left there a later turn
-// would read `CEO said: "new change"` and may act on it. The transcript
-// on disk keeps them, followed by a note that they were an echo.
+//   - only an input that began while the voice was speaking (or the
+//     client still playing it) or within echoWindow of the end of its
+//     playback can be an echo: its saidBefore is the voice's speech of
+//     that window, the current run and the runs that ended within it
+//     (the echoed audio trails the transcript). An input that began
+//     before is never touched — a barge-in over the voice keeps working
+//     as long as its words differ from what was played;
+//   - a bare fast-path phrase (yes/no/stop, an option pick, the reset
+//     phrases) is never an echo, even when it repeats the assistant;
+//   - the input is an echo when its words line up with a run of what was
+//     played (echoOf: word by word, 80 % covered, one short word
+//     forgiven — "new" heard for "no"), or when, compared letter by
+//     letter with spaces and punctuation gone (so glued words and
+//     Chinese compare the same way), stretches of what was played cover
+//     at least echoCoverMin of it (echoCover);
+//   - an input that opens or ends with a long stretch of what was played
+//     (echoGlueMin) and has other words too keeps only those words: the
+//     echo is cut off, the shepherd's part is relayed.
+//
+// A whole echo is logged (supervisor.echo_dropped, both texts), never
+// relayed, and leaves the input ledger, so it can neither authorise an
+// answer to a prompt nor be glued onto the next utterance; the call gets
+// a silent result. It also leaves the brain's window (Brain.Echo): the
+// words reached the brain as the CEO's before the guard saw them, and
+// left there a later turn would read `CEO said: "new change"`. An
+// input with the echo cut off is logged with partial and the words kept.
 
 // echoWindow is how long after the voice's last output a new input may
 // still be its echo. The logged pair was 1.7 s apart: the transcript of
@@ -825,6 +839,9 @@ const echoWindow = 2500 * time.Millisecond
 // its turnComplete.
 const echoPlayingMax = 30 * time.Second
 
+// echoKeepRuns is how many earlier speech runs the guard remembers.
+const echoKeepRuns = 3
+
 // echoWatch is what the voice is saying or last said, under s.mu.
 type echoWatch struct {
 	// said is the voice's output transcript since it last started
@@ -836,6 +853,17 @@ type echoWatch struct {
 	speaking bool
 	at       time.Time
 	since    time.Time
+	// start is when the current run began; prev are earlier runs,
+	// oldest first.
+	start time.Time
+	prev  []echoRun
+}
+
+// echoRun is an earlier speech run and when it ended (its playback end
+// when the client reported one).
+type echoRun struct {
+	said       string
+	start, end time.Time
 }
 
 // echoSpokeLocked records a fragment of the voice's speech. Caller holds
@@ -849,7 +877,13 @@ func (s *Supervisor) echoSpokeLocked(text string) {
 		// A playback report after the previous speech ended is about this
 		// one: the client's "started" often comes back before the first
 		// output transcript fragment does.
-		s.echo.said, s.echo.since = "", s.echo.at
+		if said := strings.TrimSpace(s.echo.said); said != "" {
+			s.echo.prev = append(s.echo.prev, echoRun{said: said, start: s.echo.start, end: s.echo.at})
+			if len(s.echo.prev) > echoKeepRuns {
+				s.echo.prev = s.echo.prev[len(s.echo.prev)-echoKeepRuns:]
+			}
+		}
+		s.echo.said, s.echo.since, s.echo.start = "", s.echo.at, now
 	}
 	s.echo.said += text
 	s.echo.speaking, s.echo.at = true, now
@@ -867,9 +901,80 @@ func (s *Supervisor) voiceStopped() {
 
 // echoCandidateLocked is what a voice input starting now may be an echo
 // of: the voice's speech while it speaks (or the client still plays it)
-// or within echoWindow after, else "". playback is the client's last
-// playback report (zero: none). Caller holds s.mu.
-func (s *Supervisor) echoCandidateLocked(playback voice.PlaybackReport) string {
+// or within echoWindow after, with the earlier runs that ended within
+// echoWindow before it, else "". playback is the client's last playback
+// report (zero: none). Caller holds s.mu.
+func (s *Supervisor) echoCandidateLocked(playback voice.PlaybackReport, onset time.Time) string {
+	now := s.cfg.Now()
+	if s.spokeAfterPlaybackLocked(now, playback, onset) {
+		return ""
+	}
+	cur := s.currentEchoLocked(now, playback)
+	// Earlier runs: those that ended within echoWindow, and — while the
+	// current run may be echoed — the ones chained to it by gaps under
+	// echoWindow (the tail of one reply plays on as the next begins).
+	var parts []string
+	next := now
+	if cur != "" {
+		next = s.echo.start
+	}
+	for i := len(s.echo.prev) - 1; i >= 0; i-- {
+		r := s.echo.prev[i]
+		if now.Sub(r.end) > echoWindow && (cur == "" || next.Sub(r.end) > echoWindow) {
+			break
+		}
+		parts = append([]string{r.said}, parts...)
+		next = r.start
+	}
+	if cur != "" {
+		parts = append(parts, cur)
+	}
+	return strings.Join(parts, " ")
+}
+
+// echoTail is how long after the end of playback an echo can still
+// begin: the speaker-to-microphone delay and the client detector's
+// attack.
+const echoTail = 300 * time.Millisecond
+
+// spokeAfterPlaybackLocked reports whether the client's speech detector
+// opened (onset, zero when the client reports none) after the voice had
+// stopped and the client had finished playing it, echoTail allowed: an
+// echo begins while the speaker plays, so words begun after it are the
+// shepherd's — even when they repeat the voice ("fix those two links"
+// to "Shall I fix those two links?"). Caller holds s.mu.
+func (s *Supervisor) spokeAfterPlaybackLocked(now time.Time, playback voice.PlaybackReport, onset time.Time) bool {
+	if onset.IsZero() || s.echo.speaking || s.echo.said == "" {
+		return false
+	}
+	end := s.echo.at
+	if playback.State != "" && playback.At.After(s.echo.since) {
+		switch playback.State {
+		case voice.PlaybackStarted:
+			if now.Sub(s.echo.at) <= echoPlayingMax {
+				return false // still playing
+			}
+		case voice.PlaybackDrained, voice.PlaybackFlushed:
+			if playback.At.After(end) {
+				end = playback.At
+			}
+		}
+	}
+	return onset.After(end.Add(echoTail))
+}
+
+// lastSpeechOnset is when the client's speech detector last opened, when
+// the voice session knows (voice.Switcher).
+func (s *Supervisor) lastSpeechOnset() (time.Time, bool) {
+	if p, ok := s.pusher.(interface{ LastSpeechOnset() (time.Time, bool) }); ok {
+		return p.LastSpeechOnset()
+	}
+	return time.Time{}, false
+}
+
+// currentEchoLocked is the current (or last) speech run when an input
+// starting now may be its echo, else "". Caller holds s.mu.
+func (s *Supervisor) currentEchoLocked(now time.Time, playback voice.PlaybackReport) string {
 	if s.echo.said == "" {
 		return ""
 	}
@@ -877,7 +982,6 @@ func (s *Supervisor) echoCandidateLocked(playback voice.PlaybackReport) string {
 	if s.echo.speaking {
 		return said
 	}
-	now := s.cfg.Now()
 	anchor := s.echo.at
 	if playback.State != "" && playback.At.After(s.echo.since) {
 		switch playback.State {
@@ -906,22 +1010,85 @@ func (s *Supervisor) lastPlayback() voice.PlaybackReport {
 	return voice.PlaybackReport{}
 }
 
-// echoDropped reports whether c is the voice's own speech picked up by
-// the microphone (see the echo guard above), logging
-// supervisor.echo_dropped when it is. The input is marked used, so it
-// can never authorise an answer to a worker's prompt either.
-func (s *Supervisor) echoDropped(c claim) bool {
-	if c.in == nil || c.n != 1 || c.in.kind != InputVoice || c.in.saidBefore == "" || fastPathPhrase(c.text) || !echoOf(c.text, c.in.saidBefore) {
+// echoDropped applies the echo guard (above) to c's inputs. It reports
+// true when nothing of c is left — the call is answered silently —
+// and otherwise leaves c.text as the words that were not echo.
+func (s *Supervisor) echoDropped(c *claim) bool {
+	if c.in == nil || fastPathPhrase(c.text) {
 		return false
 	}
-	s.mu.Lock()
-	c.in.used = true
-	s.mu.Unlock()
-	s.log.Log(logSource, "supervisor.echo_dropped", "", map[string]any{"heard": c.text, "said": c.in.saidBefore})
-	if s.brain != nil {
-		s.brain.Echo(c.text)
+	ins := c.ins
+	if len(ins) == 0 {
+		ins = []*shepherdInput{c.in}
 	}
-	return true
+	type cut struct{ heard, said, kept string }
+	var cuts []cut
+	var kept []string
+	var newest *shepherdInput // the newest input left after the guard
+	s.mu.Lock()
+	for _, in := range ins {
+		text := strings.TrimSpace(in.text)
+		if in.kind != InputVoice || in.saidBefore == "" || text == "" || fastPathPhrase(text) {
+			if text != "" {
+				kept = append(kept, text)
+			}
+			newest = in
+			continue
+		}
+		rest, echo := stripEcho(text, in.saidBefore)
+		if !echo {
+			kept = append(kept, text)
+			newest = in
+			continue
+		}
+		cuts = append(cuts, cut{heard: text, said: in.saidBefore, kept: rest})
+		if rest == "" {
+			in.used = true
+			s.dropInputLocked(in)
+			continue
+		}
+		in.text = rest
+		kept = append(kept, rest)
+		newest = in
+	}
+	s.mu.Unlock()
+	if len(cuts) == 0 {
+		return false
+	}
+	for _, x := range cuts {
+		p := map[string]any{"heard": x.heard, "said": x.said}
+		if x.kept != "" {
+			p["partial"], p["kept"] = true, x.kept
+		}
+		if c.id != "" {
+			p["utterance_id"] = c.id
+		}
+		s.log.Log(logSource, "supervisor.echo_dropped", "", p)
+		if x.kept == "" && s.brain != nil {
+			s.brain.Echo(x.heard)
+		}
+	}
+	if len(kept) == 0 {
+		return true
+	}
+	c.text = strings.Join(kept, " ")
+	if newest != nil {
+		// The rail reads the newest input left: a dropped echo after the
+		// shepherd's "yes" must not stand in for it.
+		c.in = newest
+	}
+	return false
+}
+
+// dropInputLocked removes in from the input ledger (a whole echo is not
+// the shepherd's input). Caller holds s.mu.
+func (s *Supervisor) dropInputLocked(in *shepherdInput) {
+	for i, x := range s.inputs {
+		if x == in {
+			s.inputs = append(s.inputs[:i:i], s.inputs[i+1:]...)
+			return
+		}
+	}
 }
 
 // fastPathPhrase reports whether text, as a whole, is one of the bare
@@ -935,7 +1102,8 @@ func fastPathPhrase(text string) bool {
 // echoOf reports whether heard lines up with a run of said: at least two
 // words, at least 80% of them equal to said's at the same offsets, with
 // one more differing word forgiven when both words are short (≤ 4
-// letters: "new" heard for "no").
+// letters: "new" heard for "no") or two edits apart ("the" heard for
+// "those", echo-barge-in r3).
 func echoOf(heard, said string) bool {
 	in, out := echoWords(heard), echoWords(said)
 	n := len(in)
@@ -948,7 +1116,8 @@ func echoOf(heard, said string) bool {
 		for k := range in {
 			switch {
 			case in[k] == out[p+k]:
-			case len([]rune(in[k])) <= 4 && len([]rune(out[p+k])) <= 4:
+			case len([]rune(in[k])) <= 4 && len([]rune(out[p+k])) <= 4,
+				editDistance([]rune(in[k]), []rune(out[p+k])) <= 2:
 				soft++
 			default:
 				hard++
@@ -976,4 +1145,154 @@ func echoWords(s string) []string {
 		}
 	}
 	return out
+}
+
+const (
+	// echoCoverMin is the share of an input's letters that stretches of
+	// what was played must cover for the whole input to be an echo.
+	echoCoverMin = 0.8
+	// echoStretchLatin / echoStretchHan are the least letters a stretch
+	// must have to count (a whole short input counts at
+	// echoWholeLatin / echoWholeHan): a Chinese character carries about
+	// what four Latin letters do.
+	echoStretchLatin = 8
+	echoStretchHan   = 3
+	echoWholeLatin   = 5
+	echoWholeHan     = 2
+	// echoGlueLatin / echoGlueHan are the least letters an echo stretch
+	// at the start or end of an input must have to be cut off it, the
+	// rest relayed.
+	echoGlueLatin = 12
+	echoGlueHan   = 4
+)
+
+// stripEcho decides whether heard (an input that began in the echo
+// window) is said coming back: a whole echo (rest "", echo true), an
+// echo glued to the shepherd's words at its start or end (rest is their
+// words, echo true), or not an echo (echo false).
+func stripEcho(heard, said string) (rest string, echo bool) {
+	if echoOf(heard, said) || assistantAck(heard) {
+		return "", true
+	}
+	h, offs := normWordsAt(heard)
+	sd := string(normWords(said))
+	if len(h) == 0 || sd == "" {
+		return heard, false
+	}
+	covered := make([]bool, len(h))
+	n := 0
+	for i := 0; i < len(h); {
+		l := longestIn(h[i:], sd)
+		if l > 0 && (l >= stretchMin(h[i:i+l], echoStretchLatin, echoStretchHan) || (i == 0 && l == len(h) && l >= stretchMin(h, echoWholeLatin, echoWholeHan))) {
+			for k := i; k < i+l; k++ {
+				covered[k] = true
+			}
+			n += l
+			i += l
+			continue
+		}
+		i++
+	}
+	if n == 0 {
+		return heard, false
+	}
+	if float64(n) >= echoCoverMin*float64(len(h)) {
+		return "", true
+	}
+	// Glued: a long echo stretch at the start and/or the end.
+	lead := 0
+	for lead < len(h) && covered[lead] {
+		lead++
+	}
+	trail := 0
+	for trail < len(h)-lead && covered[len(h)-1-trail] {
+		trail++
+	}
+	if lead < stretchMin(h[:lead], echoGlueLatin, echoGlueHan) {
+		lead = 0
+	}
+	if trail < stretchMin(h[len(h)-trail:], echoGlueLatin, echoGlueHan) {
+		trail = 0
+	}
+	if lead == 0 && trail == 0 {
+		return heard, false
+	}
+	from, to := 0, len(heard)
+	if lead > 0 {
+		_, size := utf8.DecodeRuneInString(heard[offs[lead-1]:])
+		from = offs[lead-1] + size
+	}
+	if trail > 0 {
+		to = offs[len(h)-trail]
+		// A stretch can begin inside the shepherd's last word ("me?
+		// Bench…" matches "done. Bench…" from its "e"): give the word
+		// back, a few letters at most.
+		for k := 0; k < 3 && to < len(heard) && to > 0; k++ {
+			prev, _ := utf8.DecodeLastRuneInString(heard[:to])
+			next, size := utf8.DecodeRuneInString(heard[to:])
+			if !unicode.IsLetter(prev) || !unicode.IsLetter(next) || unicode.Is(unicode.Han, next) {
+				break
+			}
+			to += size
+		}
+	}
+	if from >= to {
+		return "", true
+	}
+	rest = strings.TrimFunc(heard[from:to], func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) })
+	if len(normWords(rest)) < 2 {
+		return "", true
+	}
+	return rest, true
+}
+
+// assistantAckCues are what only the assistant says: "On it.",
+// "Checking.", "I'll let you know", 我查一下. In echo-barge-in the voice
+// said "On " — its transcript cut there, its audio did not — and the
+// microphone brought back "On it."; the daemon relayed it and the brain
+// took it for the CEO's go-ahead to an offer (an instruction nobody
+// gave). Heard in the echo window, such words are the voice's own.
+var assistantAckCues = regexp.MustCompile(`(?i)^\W*(on it|checking( on it| now| that)?|let me check( that)?|i'?ll (check|look into it|find out|let you know|tell it|pass it on)|one moment|just a (moment|sec|second)|right away|looking into it|working on it|我(来|去)?(查|看)一下|稍等|马上|正在(查|看))\W*$`)
+
+// assistantAck reports whether heard is only an assistant-style
+// acknowledgement (assistantAckCues).
+func assistantAck(heard string) bool { return assistantAckCues.MatchString(heard) }
+
+// normWordsAt is normWords with the byte offset of each kept rune in s.
+func normWordsAt(s string) ([]rune, []int) {
+	var out []rune
+	var offs []int
+	for i, r := range s {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			out = append(out, unicode.ToLower(r))
+			offs = append(offs, i)
+		}
+	}
+	return out, offs
+}
+
+// longestIn is the length of the longest prefix of h found in s.
+func longestIn(h []rune, s string) int {
+	lo, hi := 0, len(h)
+	// Prefix containment is monotone: binary search the length.
+	for lo < hi {
+		mid := (lo + hi + 1) / 2
+		if strings.Contains(s, string(h[:mid])) {
+			lo = mid
+		} else {
+			hi = mid - 1
+		}
+	}
+	return lo
+}
+
+// stretchMin is the least length a stretch like r must have: han for a
+// stretch with a Chinese character in it, latin otherwise.
+func stretchMin(r []rune, latin, han int) int {
+	for _, x := range r {
+		if unicode.Is(unicode.Han, x) {
+			return han
+		}
+	}
+	return latin
 }

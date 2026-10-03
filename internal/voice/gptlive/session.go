@@ -408,6 +408,14 @@ func (s *Session) LastPlayback() voice.PlaybackReport {
 	return s.play.Last()
 }
 
+// LastSpeechOnset is when the client's speech detector last opened (ok
+// false when it never reported one; see gemini.Session.LastSpeechOnset).
+func (s *Session) LastSpeechOnset() (time.Time, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.vad.Onset()
+}
+
 // ClientSpeaking records the /ws client's speech detector opening (true)
 // or closing (false); pumpPushes holds spoken pushes for it.
 func (s *Session) ClientSpeaking(on bool) {
