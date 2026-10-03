@@ -39,6 +39,8 @@ type Result struct {
 	// Baseline is the case's grade against the logged behaviour, when it
 	// carries one ("fails as logged: …" / "passes as logged").
 	Baseline string
+	// Verdicts are the judge's answers, when a judge ran (live).
+	Verdicts []Verdict
 }
 
 // WriteTable prints a pass/fail table and a summary line to w: per case
@@ -89,6 +91,16 @@ func WriteTable(w io.Writer, set string, results []Result) {
 		}
 		if r.Baseline != "" {
 			_, _ = fmt.Fprintf(w, "        baseline: %s\n", firstLine(r.Baseline))
+		}
+		for _, v := range r.Verdicts {
+			if v.Passed() {
+				continue
+			}
+			why := v.Rationale
+			if v.Err != "" {
+				why = "error: " + v.Err
+			}
+			_, _ = fmt.Fprintf(w, "        judge %s: %s — %s\n", orDefault(string(v.Answer), "error"), firstLine(v.Criterion), firstLine(why))
 		}
 	}
 	_, _ = fmt.Fprintf(w, "-- %d pass, %d fail, %d skipped (of %d) --\n", pass, fail, skip, len(results))
@@ -147,4 +159,20 @@ func HasFailures(results []Result) bool {
 		}
 	}
 	return false
+}
+
+// WriteSpend prints the token counts and the estimated spend per role
+// and model (the prices are estimates: eval.Prices). Nothing for an
+// empty meter.
+func WriteSpend(w io.Writer, m *Meter) {
+	lines := m.Lines()
+	if len(lines) == 0 {
+		return
+	}
+	total := 0.0
+	for _, l := range lines {
+		total += l.CostUSD
+		_, _ = fmt.Fprintf(w, "-- spend %-8s %-24s calls %5d  in %9d  out %8d  reasoning %8d  ≈ $%.4f --\n", l.Role, l.Model, l.Usage.Calls, l.Usage.In, l.Usage.Out, l.Usage.Reasoning, l.CostUSD)
+	}
+	_, _ = fmt.Fprintf(w, "-- spend total ≈ $%.4f (estimate at list prices) --\n", total)
 }

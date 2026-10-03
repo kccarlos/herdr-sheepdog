@@ -28,6 +28,10 @@ type recorder struct {
 	args    []map[string]any // parallel to calls
 	results map[string]bool  // tool name -> completed without error (at least once)
 	rail    int
+	// meter, when set, gets the brain's tokens from its brain.step
+	// events under model.
+	meter *Meter
+	model string
 }
 
 func newRecorder() *recorder { return &recorder{results: map[string]bool{}} }
@@ -52,7 +56,30 @@ func (r *recorder) Log(source, typ, _ string, payload any) {
 		}
 	case "brain.rail_blocked":
 		r.rail++
+	case "brain.step":
+		if r.meter != nil {
+			r.meter.Add("brain", r.model, stepUsage(m))
+		}
 	}
+}
+
+// stepUsage reads a brain.step event's token counts.
+func stepUsage(m map[string]any) Usage {
+	return Usage{Calls: 1, In: toInt(m["prompt_tokens"]), Out: toInt(m["completion_tokens"]), Reasoning: toInt(m["reasoning_tokens"])}
+}
+
+func toInt(v any) int {
+	switch n := v.(type) {
+	case int:
+		return n
+	case int32:
+		return int(n)
+	case int64:
+		return int(n)
+	case float64:
+		return int(n)
+	}
+	return 0
 }
 
 func (r *recorder) calledAtAll(name string) bool {
@@ -102,7 +129,7 @@ func (r *recorder) names() []string {
 func RunSVPOffline(ctx context.Context, cases []SVPCase, fixtureDir string) []Result {
 	out := make([]Result, 0, len(cases))
 	for _, c := range cases {
-		out = append(out, runSVPCase(ctx, c, fixtureDir, nil, "", true))
+		out = append(out, runSVPCase(ctx, c, fixtureDir, svpRun{offline: true}))
 	}
 	return out
 }
@@ -111,9 +138,31 @@ func RunSVPOffline(ctx context.Context, cases []SVPCase, fixtureDir string) []Re
 // a rate-limited call are reported as skipped rather than retried (the
 // Gemini free tier needs a cool-down, not a hot loop).
 func RunSVPLive(ctx context.Context, cases []SVPCase, fixtureDir string, model brain.Model, modelName string) []Result {
+	return RunSVPLiveWith(ctx, cases, fixtureDir, SVPLive{Model: model, ModelName: modelName})
+}
+
+// SVPLive configures a live SVP run.
+type SVPLive struct {
+	Model     brain.Model
+	ModelName string
+	// Provider is the brain provider id of Model (gemini, vertex,
+	// deepseek); empty is the brain's default. DeepSeek needs it so the
+	// loop replays its reasoning content.
+	Provider string
+	// Judge, when set, decides the wording checks (spoken_contains_any_of,
+	// first_sentence_contains_any_of, spoken_no_jargon) and the case's
+	// own judge criteria; nil keeps the code checks (substring and word
+	// lists) and skips the criteria.
+	Judge Judge
+	// Meter, when set, counts the brain's tokens.
+	Meter *Meter
+}
+
+// RunSVPLiveWith is RunSVPLive with a provider and an optional judge.
+func RunSVPLiveWith(ctx context.Context, cases []SVPCase, fixtureDir string, live SVPLive) []Result {
 	out := make([]Result, 0, len(cases))
 	for i, c := range cases {
-		r := runSVPCase(ctx, c, fixtureDir, model, modelName, false)
+		r := runSVPCase(ctx, c, fixtureDir, svpRun{model: live.Model, modelName: live.ModelName, provider: live.Provider, judge: live.Judge, meter: live.Meter})
 		out = append(out, r)
 		if r.Err != nil && errors.Is(r.Err, brain.ErrAllKeysRateLimited) {
 			for _, rest := range cases[i+1:] {
@@ -125,13 +174,26 @@ func RunSVPLive(ctx context.Context, cases []SVPCase, fixtureDir string, model b
 	return out
 }
 
-func runSVPCase(ctx context.Context, c SVPCase, fixtureDir string, model brain.Model, modelName string, offline bool) Result {
+// svpRun is how one case runs: offline with the scripted model, or live
+// with a model and, optionally, a judge.
+type svpRun struct {
+	model     brain.Model
+	modelName string
+	provider  string
+	offline   bool
+	judge     Judge
+	meter     *Meter
+}
+
+func runSVPCase(ctx context.Context, c SVPCase, fixtureDir string, run svpRun) Result {
+	offline, model, modelName := run.offline, run.model, run.modelName
 	t0 := time.Now()
 	host, alias, err := buildHost(c, fixtureDir)
 	if err != nil {
 		return Result{ID: c.ID, Status: StatusFail, Detail: "fixture: " + err.Error(), Duration: time.Since(t0)}
 	}
 	rec := newRecorder()
+	rec.meter, rec.model = run.meter, modelName
 	m := model
 	// MaxSteps 3 caps a live case at up to 3 model calls (docs/roles.md
 	// D9-adjacent cost discipline: the Gemini free tier's quota is
@@ -140,6 +202,7 @@ func runSVPCase(ctx context.Context, c SVPCase, fixtureDir string, model brain.M
 	if modelName != "" {
 		cfg.Model = modelName
 	}
+	cfg.Provider = run.provider
 	if offline {
 		m = scriptFor(c, alias)
 	}
@@ -148,6 +211,7 @@ func runSVPCase(ctx context.Context, c SVPCase, fixtureDir string, model brain.M
 		return Result{ID: c.ID, Status: StatusFail, Detail: "brain.New: " + err.Error(), Duration: time.Since(t0)}
 	}
 	defer func() { _ = b.Close() }()
+	rec.model = b.Model()
 	b.SetHost(host)
 	seedTranscript(b, c.Transcript)
 
@@ -179,11 +243,27 @@ func runSVPCase(ctx context.Context, c SVPCase, fixtureDir string, model brain.M
 		// run against whatever the recorder captured before it happened.
 		got["fallback"] = firstLine(err.Error())
 	}
-	reasons, skipped := gradeSVP(c.Expect, rec, reply, offline)
+	judge := run.judge
+	if offline {
+		judge = nil // a scripted reply has nothing to judge
+	}
+	reasons, skipped := gradeSVPWith(c.Expect, rec, reply, offline, judge != nil)
+	var verdicts []Verdict
+	if judge != nil {
+		var why []string
+		verdicts, why = judgeSVP(ctx, judge, c, req, reply, rec, host)
+		reasons = append(reasons, why...)
+	}
+	if fb, ok := got["fallback"]; ok && !offline {
+		// Live, a turn that fell back gave the shepherd the daemon's code
+		// sentence, not an answer: say why first (a timeout reads very
+		// differently from a wrong answer in the failure taxonomy).
+		reasons = append([]string{fmt.Sprintf("%s: %v", reasonFallback, fb)}, reasons...)
+	}
 	reasons = append(reasons, stopWordReasons(c)...)
 	reasons = append(reasons, heardReasons(c, req.Question)...)
 	reasons = append(reasons, base.reasons...)
-	r := Result{ID: c.ID, Duration: dur, Got: got, SkippedChecks: skipped, Pending: c.PendingCheck, Baseline: base.summary}
+	r := Result{ID: c.ID, Duration: dur, Got: got, SkippedChecks: skipped, Pending: c.PendingCheck, Baseline: base.summary, Verdicts: verdicts}
 	switch {
 	case offline && len(reasons) == 0:
 		r.Status, r.Detail = StatusPass, "harness check (fake model)"
@@ -301,6 +381,13 @@ var liveOnlyChecks = []string{
 // Expect, returning a failure reason per mismatch and, offline, the
 // live-only checks the case sets that were skipped.
 func gradeSVP(exp SVPExpect, rec *recorder, reply brain.Reply, offline bool) (reasons, skipped []string) {
+	return gradeSVPWith(exp, rec, reply, offline, false)
+}
+
+// gradeSVPWith is gradeSVP; judged leaves the wording checks
+// (judgeSVP) to the judge instead of the code's substring and word
+// lists.
+func gradeSVPWith(exp SVPExpect, rec *recorder, reply brain.Reply, offline, judged bool) (reasons, skipped []string) {
 	if offline {
 		for _, name := range liveOnlyChecks {
 			if exp.sets(name) {
@@ -334,7 +421,7 @@ func gradeSVP(exp SVPExpect, rec *recorder, reply brain.Reply, offline bool) (re
 	if exp.NoTool && len(rec.calls) > 0 {
 		reasons = append(reasons, "answered with tool calls ("+strings.Join(rec.names(), ",")+"), but the roster and ledger in the prompt are enough")
 	}
-	if !offline && len(exp.SpokenContainsAnyOf) > 0 {
+	if !offline && !judged && len(exp.SpokenContainsAnyOf) > 0 {
 		lower := strings.ToLower(reply.Spoken)
 		found := false
 		for _, want := range exp.SpokenContainsAnyOf {
@@ -369,12 +456,12 @@ func gradeSVP(exp SVPExpect, rec *recorder, reply brain.Reply, offline bool) (re
 			reasons = append(reasons, fmt.Sprintf("spoken has %d words, more than %d", n, exp.SpokenMaxWords))
 		}
 	}
-	if exp.SpokenNoJargon {
+	if exp.SpokenNoJargon && !judged {
 		if found := jargonIn(reply.Spoken); len(found) > 0 {
 			reasons = append(reasons, "spoken uses jargon: "+strings.Join(found, ", "))
 		}
 	}
-	if len(exp.FirstSentenceContainsAnyOf) > 0 {
+	if len(exp.FirstSentenceContainsAnyOf) > 0 && !judged {
 		first := prose.Spoken(reply.Spoken, 1)
 		if !containsAnyFold(first, exp.FirstSentenceContainsAnyOf) {
 			reasons = append(reasons, "first sentence "+quoteOrEmpty(first)+" contains none of: "+strings.Join(exp.FirstSentenceContainsAnyOf, ", "))

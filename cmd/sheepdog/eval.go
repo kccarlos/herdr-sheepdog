@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"fmt"
 	"io"
 	"path/filepath"
 	"sort"
 	"strings"
 
+	"github.com/kccarlos/herdr-sheepdog/internal/app"
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
 	"github.com/kccarlos/herdr-sheepdog/internal/config"
 	"github.com/kccarlos/herdr-sheepdog/internal/eval"
@@ -42,11 +44,20 @@ func printEvalUsage(w io.Writer) {
 	fprintln(w, "  --config PATH         config file (default ~/.config/sheepdog/config.toml)")
 	fprintln(w, "  --env-file PATH       load KEY=VALUE lines into the environment first")
 	fprintln(w, "  --prompts-dir PATH    prompt override directory (default config prompts.dir)")
+	fprintln(w, "  --provider ID         live brain provider: gemini (AI Studio keys, the default),")
+	fprintln(w, "                        vertex or deepseek")
+	fprintln(w, "  --model ID            live brain model (default brain.model)")
+	fprintln(w, "  --judge KIND          LLM judge for the wording checks and judge criteria:")
+	fprintln(w, "                        vertex (default with --live), ollama, fake or none")
+	fprintln(w, "  --judge-model ID      judge model (default "+eval.DefaultJudgeModel+" on vertex,")
+	fprintln(w, "                        "+eval.DefaultOllamaModel+" on ollama)")
+	fprintln(w, "  --ollama-url URL      Ollama OpenAI-compatible root (default "+eval.DefaultOllamaURL+")")
 }
 
 type evalOpts struct {
 	set, filter, dir, fixtures, configPath, envFile, promptsDir string
 	live                                                        bool
+	provider, model, judge, judgeModel, ollamaURL               string
 }
 
 // evalSets are the --set names and the files each reads, relative to
@@ -75,6 +86,11 @@ func parseEvalFlags(args []string, stderr io.Writer) (evalOpts, int, bool) {
 	fs.StringVar(&o.configPath, "config", "", "config file")
 	fs.StringVar(&o.envFile, "env-file", "", "env file")
 	fs.StringVar(&o.promptsDir, "prompts-dir", "", "prompt override directory")
+	fs.StringVar(&o.provider, "provider", "", "live brain provider: gemini, vertex or deepseek")
+	fs.StringVar(&o.model, "model", "", "live brain model")
+	fs.StringVar(&o.judge, "judge", "", "LLM judge: vertex, ollama, fake or none")
+	fs.StringVar(&o.judgeModel, "judge-model", "", "judge model id")
+	fs.StringVar(&o.ollamaURL, "ollama-url", "", "Ollama OpenAI-compatible root")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return o, 0, false
@@ -126,16 +142,12 @@ func runEval(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	}
 	var models *evalModels
 	if o.live {
-		if len(cfg.Gemini.APIKeys) == 0 {
-			fprintln(stderr, "sheepdog eval --live: no Gemini key (set GEMINI_API_KEY or use --env-file)")
-			return 1
-		}
-		m, err := brain.NewGenaiModel(cfg.Gemini.APIKeys, log)
+		m, err := evalLiveModels(o, cfg, log)
 		if err != nil {
-			fprintf(stderr, "sheepdog eval: %v\n", err)
+			fprintf(stderr, "sheepdog eval --live: %v\n", err)
 			return 1
 		}
-		models = &evalModels{model: m, brainModel: cfg.Brain.Model}
+		models = m
 	}
 	failed := false
 	for _, set := range sets {
@@ -147,16 +159,82 @@ func runEval(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		eval.WriteTable(stdout, set, results)
 		failed = failed || eval.HasFailures(results)
 	}
+	if models != nil {
+		eval.WriteSpend(stdout, models.meter)
+	}
 	if failed {
 		return 1
 	}
 	return 0
 }
 
-// evalModels is the live run's model (nil: offline).
+// evalModels is the live run's models (nil: offline): the brain's, the
+// assistant set's (AI Studio Gemini keys; nil without them) and the
+// judge (nil: none).
 type evalModels struct {
-	model      *brain.GenaiModel
+	model      brain.Model
+	provider   string
 	brainModel string
+	assistant  *brain.GenaiModel
+	judge      eval.Judge
+	meter      *eval.Meter
+}
+
+// evalLiveModels builds the live run's models from the flags and config.
+func evalLiveModels(o evalOpts, cfg config.Config, log logging.Logger) (*evalModels, error) {
+	out := &evalModels{provider: o.provider, brainModel: cfg.Brain.Model, meter: eval.NewMeter()}
+	if o.model != "" {
+		out.brainModel = o.model
+	}
+	if len(cfg.Gemini.APIKeys) > 0 {
+		m, err := brain.NewGenaiModel(cfg.Gemini.APIKeys, log)
+		if err != nil {
+			return nil, err
+		}
+		out.assistant = m
+	}
+	switch o.provider {
+	case "", brain.ProviderGemini:
+		if out.assistant == nil {
+			return nil, errors.New("no Gemini key (set GEMINI_API_KEY or use --env-file, or pick --provider vertex|deepseek)")
+		}
+		out.model, out.provider = out.assistant, ""
+	default:
+		models, err := app.BrainModels(cfg, log)
+		if err != nil {
+			return nil, err
+		}
+		m, ok := models[o.provider]
+		if !ok {
+			return nil, fmt.Errorf("provider %q has no credentials (vertex: VERTEX_API_KEY and VERTEX_PROJECT; deepseek: DEEPSEEK_API_KEY)", o.provider)
+		}
+		out.model = m
+	}
+	kind := o.judge
+	if kind == "" {
+		kind = eval.BackendVertex
+	}
+	j, err := evalJudge(kind, o.judgeModel, o.ollamaURL, cfg, log, out.meter)
+	if err != nil {
+		return nil, fmt.Errorf("judge: %w", err)
+	}
+	out.judge = j
+	return out, nil
+}
+
+// evalJudge builds the judge of kind (nil for none).
+func evalJudge(kind, model, ollamaURL string, cfg config.Config, log logging.Logger, meter *eval.Meter) (eval.Judge, error) {
+	switch kind {
+	case eval.BackendNone:
+		return nil, nil
+	case eval.BackendFake:
+		return &eval.FakeJudge{}, nil
+	}
+	m, id, err := eval.NewBackend(eval.BackendOptions{Kind: kind, Model: model, VertexAPIKey: cfg.Gemini.Vertex.APIKey, VertexProject: cfg.Gemini.Vertex.Project, OllamaURL: ollamaURL}, log)
+	if err != nil {
+		return nil, err
+	}
+	return &eval.LLMJudge{Model: eval.Metered(m, meter, "judge"), ModelID: id}, nil
 }
 
 // runEvalSet loads and runs one set: its SVP files through the brain,
@@ -175,10 +253,15 @@ func runEvalSet(ctx context.Context, o evalOpts, set string, pl *prompts.Loader,
 				return nil, err
 			}
 			cases = filterAssistant(cases, o.filter)
-			if models == nil {
+			switch {
+			case models == nil:
 				results = append(results, eval.RunAssistant(ctx, cases, pl, nil, "")...)
-			} else {
-				results = append(results, eval.RunAssistant(ctx, cases, pl, models.model, eval.DefaultAssistantModel)...)
+			case models.assistant == nil:
+				for _, c := range cases {
+					results = append(results, eval.Result{ID: c.ID, Status: eval.StatusSkipped, Detail: "no Gemini key for the assistant set"})
+				}
+			default:
+				results = append(results, eval.RunAssistant(ctx, cases, pl, models.assistant, eval.DefaultAssistantModel)...)
 			}
 		}
 	}
@@ -196,7 +279,7 @@ func runEvalSet(ctx context.Context, o evalOpts, set string, pl *prompts.Loader,
 			if models == nil {
 				results = append(results, eval.RunSVPOffline(ctx, cases, o.fixtures)...)
 			} else {
-				results = append(results, eval.RunSVPLive(ctx, cases, o.fixtures, models.model, models.brainModel)...)
+				results = append(results, eval.RunSVPLiveWith(ctx, cases, o.fixtures, eval.SVPLive{Model: models.model, ModelName: models.brainModel, Provider: models.provider, Judge: models.judge, Meter: models.meter})...)
 			}
 		}
 	}
