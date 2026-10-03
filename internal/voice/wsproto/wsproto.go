@@ -19,22 +19,72 @@ const (
 	ServerSampleRate = 24000
 )
 
-// Message types. Client→server: mute, silence, speaking, playback,
-// cancel, text, ping. Server→client: flush, status, transcript, error,
-// pong.
+// Protocol versions of the /ws contract (docs/ws-contract.md "Protocol
+// version and handshake"). ProtocolVersion is what this build speaks;
+// MinProtocolVersion is the oldest client protocol the daemon still
+// serves. A client that never sends client-ready is protocol 1.
 const (
-	TypeMute       = "mute"
-	TypeSilence    = "silence"
-	TypeSpeaking   = "speaking"
-	TypePlayback   = "playback"
-	TypeCancel     = "cancel"
-	TypeText       = "text"
-	TypePing       = "ping"
-	TypeFlush      = "flush"
-	TypeStatus     = "status"
-	TypeTranscript = "transcript"
-	TypeError      = "error"
-	TypePong       = "pong"
+	ProtocolVersion    = 1
+	MinProtocolVersion = 1
+	// LegacyProtocol is the protocol assumed for a client that sends no
+	// client-ready (the contract as it stood before the handshake).
+	LegacyProtocol = 1
+)
+
+// CloseProtocolUnsupported is the WebSocket close code the daemon uses
+// after rejecting a client whose protocol is below its minimum (an
+// application code, 4000–4999).
+const CloseProtocolUnsupported = 4001
+
+// ReasonProtocolTooOld is the status reason (voice "closed") sent to a
+// client whose protocol is below the daemon's minimum.
+const ReasonProtocolTooOld = "protocol_too_old"
+
+// Features a bot-ready message can list: optional parts of the contract
+// (and the HTTP API next to it) this daemon serves, so a client can
+// branch on a name instead of a version number.
+const (
+	// FeaturePlayback: playback reports drive "speaking" and cut-off
+	// transcripts ("Playback reports").
+	FeaturePlayback = "playback"
+	// FeatureSpeaking: the client speech detector ("Client speech
+	// detector").
+	FeatureSpeaking = "speaking"
+	// FeatureSilence: the silence gate ("Silence gate").
+	FeatureSilence = "silence"
+	// FeatureProvider: status.provider and the runtime voice provider
+	// switch ("Voice provider"); absent with --voice=off.
+	FeatureProvider = "provider"
+	// FeatureHistory: /events resume, GET /api/conversation, POST
+	// /api/conversation/reset and POST /api/pending/answer ("History
+	// and resume").
+	FeatureHistory = "history"
+	// FeaturePush: APNs registration (docs/push.md); absent when the
+	// daemon has no push service.
+	FeaturePush = "push"
+	// FeatureModels: the brain model picker (GET /api/brain/models, PUT
+	// /api/brain/model); absent when the brain is off.
+	FeatureModels = "models"
+)
+
+// Message types. Client→server: client-ready, mute, silence, speaking,
+// playback, cancel, text, ping. Server→client: bot-ready, flush, status,
+// transcript, error, pong.
+const (
+	TypeClientReady = "client-ready"
+	TypeBotReady    = "bot-ready"
+	TypeMute        = "mute"
+	TypeSilence     = "silence"
+	TypeSpeaking    = "speaking"
+	TypePlayback    = "playback"
+	TypeCancel      = "cancel"
+	TypeText        = "text"
+	TypePing        = "ping"
+	TypeFlush       = "flush"
+	TypeStatus      = "status"
+	TypeTranscript  = "transcript"
+	TypeError       = "error"
+	TypePong        = "pong"
 )
 
 // Voice states carried by a status message.
@@ -59,10 +109,37 @@ const (
 	DirOut = "out" // what the model is saying
 )
 
+// ClientInfo identifies the client in a client-ready message.
+type ClientInfo struct {
+	// Name is the client ("sheepdog-ios", "sheepdog-voice").
+	Name string `json:"name"`
+	// Version is the client's own version ("0.1.0 (10)").
+	Version string `json:"version"`
+	// Platform is where it runs ("ios", "web").
+	Platform string `json:"platform"`
+}
+
+// DaemonInfo identifies the daemon in a bot-ready message.
+type DaemonInfo struct {
+	// Version is the daemon's binary version (as /api/hello "version").
+	Version string `json:"version"`
+}
+
 // Message is the union of all control messages. Type selects which of the
 // optional fields are meaningful; unused fields are omitted on the wire.
 type Message struct {
 	Type string `json:"type"`
+
+	// client-ready and bot-ready (docs/ws-contract.md "Protocol version
+	// and handshake"): the protocol the client speaks / the daemon will
+	// speak on this connection, who is talking, and the daemon's
+	// optional features. MinProtocol (bot-ready) is the oldest client
+	// protocol the daemon serves.
+	Protocol    *int        `json:"protocol,omitempty"`
+	MinProtocol *int        `json:"min_protocol,omitempty"`
+	Client      *ClientInfo `json:"client,omitempty"`
+	Daemon      *DaemonInfo `json:"daemon,omitempty"`
+	Features    []string    `json:"features,omitempty"`
 
 	// mute, silence and speaking
 	On *bool `json:"on,omitempty"`
@@ -116,6 +193,19 @@ type Message struct {
 
 	// error
 	Message string `json:"message,omitempty"`
+}
+
+// ClientReady builds the client→server handshake message, the first text
+// frame a protocol-aware client sends.
+func ClientReady(protocol int, client ClientInfo) Message {
+	return Message{Type: TypeClientReady, Protocol: &protocol, Client: &client}
+}
+
+// BotReady builds the server→client reply to ClientReady: the protocol
+// the daemon speaks on this connection, the oldest it serves, its
+// version and its features.
+func BotReady(protocol, minProtocol int, daemonVersion string, features []string) Message {
+	return Message{Type: TypeBotReady, Protocol: &protocol, MinProtocol: &minProtocol, Daemon: &DaemonInfo{Version: daemonVersion}, Features: features}
 }
 
 // Mute builds a client→server mute message.
@@ -189,6 +279,17 @@ func Parse(data []byte) (Message, error) {
 // Validate checks that the fields required by m.Type are present.
 func (m Message) Validate() error {
 	switch m.Type {
+	case TypeClientReady:
+		if m.Protocol == nil {
+			return fmt.Errorf("wsproto: client-ready: missing \"protocol\"")
+		}
+	case TypeBotReady:
+		if m.Protocol == nil {
+			return fmt.Errorf("wsproto: bot-ready: missing \"protocol\"")
+		}
+		if m.Daemon == nil {
+			return fmt.Errorf("wsproto: bot-ready: missing \"daemon\"")
+		}
 	case TypeMute, TypeSilence, TypeSpeaking:
 		if m.On == nil {
 			return fmt.Errorf("wsproto: %s: missing \"on\"", m.Type)
