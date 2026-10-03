@@ -321,12 +321,16 @@ func (s *Supervisor) awaitReply(ctx, turnCtx context.Context, u *inflightUtteran
 	case !u.done:
 		u.detached = true
 		s.mu.Unlock()
-	case ctx.Err() != nil || !listening:
+	case ctx.Err() != nil || !listening || s.acceptedSeq != u.accepted:
 		// The reply landed just as the voice dropped the call: the tool
 		// result would be discarded, so it is pushed instead. Likewise
 		// when the page left during the wait: as a tool result the voice
 		// would speak it to nobody at once, while a push is held until a
-		// client attaches (voice.push_held, PR #64).
+		// client attaches (voice.push_held, PR #64). And when a newer
+		// request was accepted while the call waited (a long
+		// brain.reply_wait_s): the reply is stale, and deliverLate drops
+		// it, or pushes it silent if the turn acted, as for any late
+		// reply.
 		out := u.out
 		s.mu.Unlock()
 		if s.track() {

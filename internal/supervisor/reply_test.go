@@ -407,3 +407,50 @@ func TestLateReplyLabelledWithTheAgentActedOn(t *testing.T) {
 		t.Errorf("tags = %v, want agent auth", tags[0])
 	}
 }
+
+// With a long wait (brain.reply_wait_s above the utterance budget) the
+// first call is still open when the shepherd asks something else. Its
+// reply is stale when it lands: it is not returned as the first call's
+// result (the voice would speak an answer to a question the shepherd
+// moved on from) but goes the late way, where a turn that did nothing is
+// dropped.
+func TestLongWaitStaleReplyIsNotInline(t *testing.T) {
+	release := make(chan struct{})
+	m := braintest.NewModel(
+		braintest.Step{Block: release, Text: braintest.Reply("The tests are green.", "")},
+		braintest.Step{Text: braintest.Reply("Docs is idle.", "")},
+	)
+	h := newBrainHarness(t, m, replyWait(10*time.Second))
+	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
+	h.addAgent("w6:p1", "docs", "claude", herdr.StateIdle)
+
+	h.hear("how is auth doing")
+	first := make(chan voice.ToolResult, 1)
+	go func() { first <- h.relay("how is auth doing") }()
+	waitFor(t, func() bool {
+		h.sup.mu.Lock()
+		defer h.sup.mu.Unlock()
+		return h.sup.utterance != nil && h.sup.utterance.started
+	}, "the first turn to start")
+	h.hear("what about docs")
+	second := make(chan voice.ToolResult, 1)
+	go func() { second <- h.relay("what about docs") }()
+	waitFor(t, func() bool {
+		h.sup.mu.Lock()
+		defer h.sup.mu.Unlock()
+		return h.sup.utterance != nil && h.sup.utterance.text == "what about docs"
+	}, "the second request to take the slot")
+	close(release)
+
+	assertPending(t, <-first)
+	if res := <-second; res.Spoken != "Docs is idle." || res.Pending {
+		t.Errorf("second = %+v, want the newer reply inline", res)
+	}
+	h.sup.replies.Wait()
+	if n := h.log.count("brain.reply_stale"); n != 1 {
+		t.Errorf("brain.reply_stale = %d, want 1", n)
+	}
+	if pushes, _ := utterancePushes(h); len(pushes) != 0 {
+		t.Errorf("pushes = %v, want none (the stale reply did nothing)", pushes)
+	}
+}
