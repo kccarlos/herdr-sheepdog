@@ -138,9 +138,10 @@ Per scenario (passes of 7):
   the announcer path or the generator call (second opinion §3).
 - **The function-response channel is not immune to "On it."** In 6 of 132
   function-response answers the voice said "On it." and never read the
-  body. In 3 of those it then called `to_supervisor` again with the same
-  words (status-en r4: answer at 14.2 s, the same "What's going on?" at
-  15.1 s, the body never voiced). This re-call pattern happened once in A.
+  body. In 2 of those it then called `to_supervisor` again with the same
+  words. A third re-call followed an answer that was never voiced at all
+  (status-en r4: answer at 14.2 s, the same "What's going on?" at 15.1 s,
+  `not_voiced`). This re-call pattern happened once in A.
   The heard watch caught every one. Where nothing made the answer stale
   it was re-pushed (approve-claude-permission r1: function response at
   50.8 s, `body_skipped` at 53.0 s, re-queued push at 55.0 s). The
@@ -195,6 +196,14 @@ old behaviour back, set `reply_wait_s = 2`.
 - Announcements still go as user-role pushes. Their self-relay and
   "On it." are untouched (3 announcement self-relays in B).
 - The same-words re-call fix landed after the A/B and is not measured.
+- A proactive connection refresh waits while a call is in flight
+  (`refresh.go`), and a call can now be in flight for up to 30 s. The
+  GoAway lead time is minutes. If a connection does go, the reactive
+  reconnect and the C23 push cover the answer.
+- The heard watch on function-response answers could re-push an answer
+  the CEO had heard in a paraphrase. In B, every re-queued answer had a
+  coverage of 0.25 or less (cut by the CEO or another push, or "On it."),
+  so this was not observed.
 
 ## Spend
 
