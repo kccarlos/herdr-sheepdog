@@ -71,3 +71,22 @@ func TestReplacedLineLanguage(t *testing.T) {
 		t.Errorf("en = %q", got)
 	}
 }
+
+// Run C, vertex, j2-approve-zh r1: the brain's send_keys confirmation was
+// English after the shepherd said "可以，让它跑吧。", and when the turn
+// timed out after sending, that tool result was what they heard.
+func TestBrainToolConfirmationFollowsTheShepherdsLanguage(t *testing.T) {
+	h := newHarness(t)
+	blockedAuth(t, h)
+	h.clock.Advance(time.Second)
+	h.sup.ShepherdInput(InputVoice, "可以，让它跑吧。")
+	h.clock.Advance(time.Second)
+	p, _ := h.pending()
+	res, err := (brainHost{s: h.sup}).AnswerPrompt(context.Background(), "w5:p1", p.Options[0].Keys)
+	if err != nil {
+		t.Fatalf("AnswerPrompt: %v", err)
+	}
+	if !strings.HasPrefix(res, "已回复 auth：") {
+		t.Errorf("tool result = %q, want the Chinese confirmation", res)
+	}
+}
