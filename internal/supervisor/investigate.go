@@ -415,6 +415,7 @@ func (s *Supervisor) deliverInvestigation(inv state.Investigation) {
 		Kind: brain.KindInvestigation, Trigger: brain.TriggerEvent, Agent: aliasOr(inv.Alias),
 		Event: "investigation.done", Question: inv.Question, Template: fallback,
 		Result: inv.Result, Investigation: &info,
+		Facts: func() brain.EventFacts { return brain.EventFacts{Language: s.ceoLanguage()} },
 	}
 	// The turn runs under s.life: shutdown ends it and waits for this
 	// goroutine (replies) before the brain closes.

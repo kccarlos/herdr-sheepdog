@@ -317,6 +317,9 @@ func requestText(req Request) string {
 	if line := heardLine(req.facts.Heard); line != "" {
 		s += "\n" + line
 	}
+	if line := languageLine(req.facts.Language); line != "" {
+		s += "\n" + line
+	}
 	if req.RosterUnchangedFor > 0 {
 		s += fmt.Sprintf("\nThe roster is unchanged since you last reported it %d s ago; if the shepherd is only asking for status again, say there has been no change since you last checked, briefly.", int(req.RosterUnchangedFor.Seconds()))
 	}
@@ -341,6 +344,9 @@ func investigationRequestText(req Request) string {
 	}
 	if inv.FollowUpOf != "" {
 		fmt.Fprintf(&b, "It digs deeper into investigation %s, so they already heard that answer: do not repeat it.\n", inv.FollowUpOf)
+	}
+	if line := languageLine(req.facts.Language); line != "" {
+		b.WriteString(line + "\n")
 	}
 	if req.Result != "" {
 		b.WriteString("What it found:\n")
@@ -389,6 +395,9 @@ func eventRequestText(req Request) string {
 	if line := promptStateLine(req.facts.Prompt); line != "" {
 		b.WriteString(line + "\n")
 	}
+	if line := languageLine(req.facts.Language); line != "" {
+		b.WriteString(line + "\n")
+	}
 	if len(req.facts.Spoken) > 0 {
 		fmt.Fprintf(&b, "Already said to the CEO about this event, word for word: %s. Your spoken would be said after it, not instead of it. Decide whether the assistant says anything more: skip when that already carries the news, or add only what it lacked (which request of theirs it fulfils, what changed against what they asked, what is still open), or correct it if it was wrong; silent when it is context the assistant should have but not say.", quotedLines(req.facts.Spoken))
 	} else {
@@ -432,6 +441,16 @@ func unheardMark(unheard bool) string {
 	return ""
 }
 
+// languageLine states the language of the CEO's last words
+// (EventFacts.Language), "" when unknown. Only the fact: what to do with
+// it is the model's.
+func languageLine(lang string) string {
+	if lang == "" {
+		return ""
+	}
+	return "The CEO's last words were in " + lang + "."
+}
+
 // promptStateLine states an announced prompt's real state (EventFacts).
 func promptStateLine(state string) string {
 	switch state {
@@ -464,6 +483,9 @@ func factsUpdate(before, now EventFacts) string {
 	}
 	if nb, na := heardAfter(before.Heard), heardAfter(now.Heard); len(na) > len(nb) && now.Heard != nil {
 		parts = append(parts, "while you were working the voice was given, after the CEO began speaking: "+pushedLines(na[len(nb):], now.Heard.SpokeAt)+"; the CEO's words do not answer it")
+	}
+	if now.Language != before.Language && now.Language != "" {
+		parts = append(parts, "the CEO's last words are now in "+now.Language)
 	}
 	if now.Prompt != before.Prompt {
 		if line := promptStateLine(now.Prompt); line != "" {
