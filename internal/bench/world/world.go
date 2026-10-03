@@ -242,8 +242,12 @@ func (w *World) onSend(pane string, payload map[string]any) {
 		w.mu.Lock()
 		w.acts = append(w.acts, eval.SimLine{AtMS: at, Who: "action", Agent: alias, Kind: kind, Detail: keys, Text: "sheepdog " + fmt.Sprintf(verb, alias, keys)})
 		w.mu.Unlock()
-		if !w.trigger(kind, alias, keys) && kind == eval.ActionKeys {
-			w.answered(alias, strings.Fields(keys))
+		if !w.trigger(kind, alias, keys) {
+			if kind == eval.ActionKeys {
+				w.answered(alias, strings.Fields(keys))
+			} else {
+				w.interrupted(alias)
+			}
 		}
 	}
 }
@@ -326,6 +330,23 @@ func (w *World) answered(alias string, keys []string) {
 			input = "❯ "
 		}
 		w.set(alias, strings.TrimRight(screen, "\n")+"\n\n"+footer+"\n\n"+input+"\n", next)
+	})
+}
+
+// interrupted is a working worker's default reaction to a Ctrl-C no cue
+// handles: its turn stops and it is back at its input line.
+func (w *World) interrupted(alias string) {
+	w.mu.Lock()
+	st, kind := w.states[alias], w.kinds[alias]
+	w.mu.Unlock()
+	if st != "working" {
+		return
+	}
+	w.schedule(300*time.Millisecond, func() {
+		w.mu.Lock()
+		screen := w.screens[alias]
+		w.mu.Unlock()
+		w.set(alias, eval.ScreenAfterInterrupt(screen, kind), "idle")
 	})
 }
 

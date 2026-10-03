@@ -311,6 +311,25 @@ func (w *simWorld) answered(alias string, keys []string) {
 	})
 }
 
+// interrupted is a worker's default reaction to a Ctrl-C no scenario
+// event handles: a working worker stops its turn and comes back to its
+// input line, as a real one does, so the interrupt can be seen to take
+// (the brain's interrupt checks it, campaign D N5).
+func (w *simWorld) interrupted(alias string) {
+	w.mu.Lock()
+	st, kind := w.states[alias], w.kinds[alias]
+	w.mu.Unlock()
+	if st != herdr.StateWorking {
+		return
+	}
+	w.schedule(300*time.Millisecond, func() {
+		w.mu.Lock()
+		screen := w.screens[alias]
+		w.mu.Unlock()
+		w.setWorker(context.Background(), alias, ScreenAfterInterrupt(screen, kind), herdr.StateIdle, false)
+	})
+}
+
 // afterTurn fires the events cued on the CEO's nth utterance.
 func (w *simWorld) afterTurn(n int) {
 	for i, e := range w.sc.Events {
@@ -534,8 +553,12 @@ func (h *simHerdr) SendKeys(ctx context.Context, paneID string, keys ...string) 
 			kind = ActionInterrupt
 		}
 		alias := h.w.alias(paneID)
-		if !h.w.trigger(kind, alias, strings.Join(keys, " ")) && kind == ActionKeys {
-			h.w.answered(alias, keys)
+		if !h.w.trigger(kind, alias, strings.Join(keys, " ")) {
+			if kind == ActionKeys {
+				h.w.answered(alias, keys)
+			} else {
+				h.w.interrupted(alias)
+			}
 		}
 	}
 	return err

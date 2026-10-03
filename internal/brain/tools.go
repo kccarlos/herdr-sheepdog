@@ -116,7 +116,7 @@ func toolDeclarations(readOnly bool) []*genai.Tool {
 			}, nil)},
 		{Name: ToolSendKeys, Description: "Answer an agent's approval prompt with the keys of one of its on-screen options (see the roster). Permitted only when the CEO authorised that answer in this turn.",
 			Parameters: obj(map[string]*genai.Schema{"agent": agent, "keys": {Type: genai.TypeArray, Items: str("one key name, e.g. enter, esc, y, 1"), Description: "the option's keys, in order"}}, []string{"agent", "keys"})},
-		{Name: ToolInterrupt, Description: "Send Ctrl-C to an agent to stop what it is doing.",
+		{Name: ToolInterrupt, Description: "Send Ctrl-C to an agent to stop what it is doing. The result says whether it stopped.",
 			Parameters: obj(map[string]*genai.Schema{"agent": agent}, []string{"agent"})},
 		{Name: ToolPromise, Description: "Record promised work: the CEO asked to be told when something happens to an agent (\"tell me when it's done\", \"let me know if it asks\", \"remind me\"). The supervisor keeps it: it tells the CEO at the next matching event, whatever the chattiness level. Use it in the same turn as any instruction that goes with it.",
 			Parameters: obj(map[string]*genai.Schema{"agent": agent, "text": str("what the CEO asked to be told, in their words"), "event": {Type: genai.TypeString, Enum: PromiseEvents, Description: "the condition: done (it finished), blocked (it asks something), idle, or any_change"},

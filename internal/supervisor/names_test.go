@@ -199,8 +199,9 @@ func TestDaemonSentencesUseSpokenNames(t *testing.T) {
 	h.claudeIn("w1:p1", readmeSession, herdr.StateWorking)
 	h.claudeIn("w2:p1", docsSession, herdr.StateWorking)
 	h.srv.SetAgent(herdr.AgentInfo{PaneID: "w1:p1", WorkspaceID: "w9", Agent: "claude", Status: herdr.StateWorking})
+	h.srv.SetStatus("w1:p1", herdr.StateIdle) // the Ctrl-C takes
 	echo, err := brainHost{h.sup}.Interrupt(context.Background(), "w1:p1")
-	if err != nil || echo != "Interrupted README Claude." {
+	if err != nil || echo != "Interrupted README Claude; it stopped." {
 		t.Errorf("interrupt echo = %q, %v", echo, err)
 	}
 	trailer := promiseTrailer(h.sup.spokenPromises([]state.Promise{{PaneID: "w2:p1", Alias: "sheepdog-claude-2", Event: brain.PromiseEventDone, Status: state.PromiseOpen}}))

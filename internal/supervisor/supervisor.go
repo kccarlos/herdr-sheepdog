@@ -167,6 +167,11 @@ type Config struct {
 	// negative never relays). Not a knob: only tests change it
 	// (relay.go).
 	relayAfter time.Duration
+	// interruptCheck is how long the brain's interrupt waits for the
+	// pane to leave working after each Ctrl-C (default
+	// interruptCheckDefault). Not a knob: only tests change it
+	// (brainhost.go, Interrupt).
+	interruptCheck time.Duration
 }
 
 func (c Config) withDefaults() Config {
@@ -214,6 +219,9 @@ func (c Config) withDefaults() Config {
 	}
 	if c.relayAfter == 0 {
 		c.relayAfter = relayUnansweredAfter
+	}
+	if c.interruptCheck == 0 {
+		c.interruptCheck = interruptCheckDefault
 	}
 	if c.InvestigateMax == 0 {
 		c.InvestigateMax = 600 * time.Second
