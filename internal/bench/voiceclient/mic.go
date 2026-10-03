@@ -67,7 +67,7 @@ type mic struct {
 	gated    int // frames withheld so far
 	peak     int // last input peak
 
-	speaking bool
+	speaking  bool
 	silentFor time.Duration
 }
 
