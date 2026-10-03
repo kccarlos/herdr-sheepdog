@@ -230,5 +230,15 @@ make changelog     # regenerate CHANGELOG.md
 make release-sign TAG=v0.1.0   # sign and notarize a release's darwin binary (docs/signing.md)
 ```
 
+### CI/CD
+
+GitHub Actions runs Linux jobs only (`ubuntu-latest`): vet, test, lint, web
+tests, the offline brain eval and the cross-compile on every PR, and the
+Ubuntu release on `v*` tags. Anything Xcode- or iOS-related (build, test,
+archive, TestFlight) runs only on Xcode Cloud, never on GitHub Actions,
+because macOS runners are too expensive; the `policy` CI job fails if a
+workflow uses a `macos-*` runner or calls `xcodebuild`. Signing the darwin
+release binary stays on the maintainer's Mac ([docs/signing.md](docs/signing.md)).
+
 The original v1 plan and older run reports are in
 [`docs/history/`](docs/history/).
