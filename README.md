@@ -21,18 +21,17 @@ AI, or DeepSeek) reads the agents' screens and acts on them.
 
 ## Install
 
-There is no tagged release yet, so build from a checkout (requires Go;
-see `go.mod`):
+Build from a checkout (requires Go; see `go.mod`):
 
 ```sh
 git clone https://github.com/kccarlos/herdr-sheepdog.git && cd herdr-sheepdog
 make install   # builds bin/sheepdog and copies it to ~/.local/bin/
 ```
 
-Once `v0.1.0` is tagged, GitHub Releases carry
+A tagged release on GitHub Releases carries
 `sheepdog_<version>_darwin_arm64.tar.gz` and `..._linux_amd64.tar.gz`
-with `checksums.txt`; the macOS binary is signed and notarized
-([`docs/signing.md`](docs/signing.md)).
+with `checksums.txt`; the macOS binary is signed and notarized with
+`make release-sign` ([`docs/signing.md`](docs/signing.md)).
 
 ## Configure
 
@@ -201,8 +200,9 @@ is not affected.
 
 ## Latency and quota
 
-- A blocked agent is announced about 5 s after it blocks: herdr's own
-  detection, `debounce_ms` (3 s), then the parsed prompt.
+- A blocked agent is announced about 5 s after herdr reports the block
+  (`debounce_ms` 3 s, then the parsed prompt); herdr's own screen
+  detection adds a few seconds before that.
 - From the 2026-10-02 phone run: a status question answered in about
   2 s, an instruction delivered in about 4 s, an investigation answered
   in about 30 s (acknowledged at once).
