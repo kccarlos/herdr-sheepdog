@@ -337,8 +337,11 @@ func (b *Brain) execCalls(ctx context.Context, t *turn, resp *genai.GenerateCont
 	for i, fc := range calls {
 		id := ids[i]
 		t0 := b.cfg.Now()
-		out := b.execTool(ctx, t, fc)
+		out, limit := b.runTool(ctx, t, fc)
 		dur := b.cfg.Now().Sub(t0).Milliseconds()
+		if limit > 0 {
+			b.log.Log(logSource, "brain.tool_timeout", "", map[string]any{"id": id, "name": fc.Name, "timeout_ms": limit.Milliseconds(), "agent": out.agent, "turn": t.n})
+		}
 		if out.railBlocked != "" {
 			b.log.Log(logSource, "brain.rail_blocked", "", map[string]any{"id": id, "agent": out.agent, "keys": keysArg(fc.Args["keys"]), "trigger": string(t.req.Trigger), "reason": out.railBlocked, "turn": t.n})
 		}

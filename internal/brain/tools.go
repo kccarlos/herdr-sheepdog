@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -120,6 +121,98 @@ func toolDeclarations(readOnly bool) []*genai.Tool {
 			Parameters: obj(map[string]*genai.Schema{"text": str("what to remember, in the CEO's words")}, []string{"text"})},
 	}
 	return []*genai.Tool{{FunctionDeclarations: append(read, act...)}}
+}
+
+// Per-tool timeouts: a tool that hangs gets a "timed out" result the
+// model can still answer from, instead of running out the whole turn
+// (pipecat's per-function timeout_secs). Constants, not config keys
+// (docs/iteration-2.md rule 4). From the event log: read_screen p90
+// 52 ms, max 1.6 s; recall and list_agents a few ms; investigate (the
+// start only) 6 ms; run_cli ran into the 12 s turn budget twice.
+const (
+	toolTimeoutQuick       = 2 * time.Second // list_agents, recall (in memory)
+	toolTimeoutReadScreen  = 4 * time.Second // read_screen, screen or session
+	toolTimeoutInvestigate = 5 * time.Second // investigate: starting the job only
+	toolTimeoutRunCLI      = 8 * time.Second // run_cli
+	// toolTimeoutMin is the least a tool gets when the turn's budget
+	// is nearly spent.
+	toolTimeoutMin = time.Second
+)
+
+// toolTimeout returns name's timeout and whether the call may be
+// abandoned when it expires (a read: nothing was sent, so the result
+// can be handed back while the host call is still unwinding). The
+// action tools (prompt, send_keys, interrupt, promise, note) have none:
+// cutting a send short leaves "maybe sent" with no echo to report, and
+// they took ~300 ms at most in the logs; the turn's budget bounds them.
+func toolTimeout(name string) (limit time.Duration, abandon bool) {
+	switch name {
+	case ToolListAgents, ToolRecall:
+		return toolTimeoutQuick, true
+	case ToolReadScreen:
+		return toolTimeoutReadScreen, true
+	case ToolRunCLI:
+		return toolTimeoutRunCLI, true
+	case ToolInvestigate:
+		// The start is waited for: a job that did start must be
+		// reported as started.
+		return toolTimeoutInvestigate, false
+	default:
+		return 0, false
+	}
+}
+
+// runTool runs one call under its tool timeout (toolTimeout), cut so
+// that StepReserve of the turn's deadline is left for the answer. On
+// expiry (the tool's own deadline, not the turn's) the outcome is an
+// error saying so, and limit is the timeout that expired (0 otherwise).
+func (b *Brain) runTool(ctx context.Context, t *turn, call *genai.FunctionCall) (out toolOutcome, limit time.Duration) {
+	limit, abandon := toolTimeout(call.Name)
+	if limit <= 0 {
+		return b.execTool(ctx, t, call), 0
+	}
+	if dl, ok := ctx.Deadline(); ok {
+		limit = min(limit, time.Until(dl)-b.cfg.StepReserve)
+	}
+	limit = max(limit, toolTimeoutMin)
+	tctx, cancel := context.WithTimeout(ctx, limit)
+	defer cancel()
+	timedOut := func() bool { return errors.Is(tctx.Err(), context.DeadlineExceeded) && ctx.Err() == nil }
+	expired := func() toolOutcome {
+		agent, _ := call.Args["agent"].(string)
+		if row, ok := b.host.Resolve(agent); ok {
+			agent = row.Alias
+		}
+		return toolOutcome{agent: agent, err: fmt.Errorf("%s timed out after %s: it did not answer in time; answer from what you have, or say it is not responding", call.Name, seconds(limit))}
+	}
+	if !abandon {
+		out = b.execTool(tctx, t, call)
+		if out.err != nil && timedOut() {
+			return expired(), limit
+		}
+		return out, 0
+	}
+	ch := make(chan toolOutcome, 1)
+	go func() { ch <- b.execTool(tctx, t, call) }()
+	select {
+	case out = <-ch:
+		if out.err != nil && timedOut() {
+			return expired(), limit
+		}
+		return out, 0
+	case <-tctx.Done():
+		if !timedOut() {
+			// The turn ended (budget, stop, Close): that is the turn's
+			// fallback, not a tool timeout.
+			return toolOutcome{err: fmt.Errorf("the turn ended while %s ran: %w", call.Name, ctx.Err())}, 0
+		}
+		return expired(), limit
+	}
+}
+
+// seconds renders d for a sentence the model reads: "4 s", "2.5 s".
+func seconds(d time.Duration) string {
+	return strconv.FormatFloat(d.Round(100*time.Millisecond).Seconds(), 'f', -1, 64) + " s"
 }
 
 // toolOutcome is what one executed call produced.
