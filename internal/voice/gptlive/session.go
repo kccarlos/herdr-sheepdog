@@ -540,6 +540,10 @@ func (s *Session) PushTagged(text string, u voice.Urgency, tags map[string]any) 
 	if s.closed {
 		return ErrClosed
 	}
+	if voice.IsFocus(tags) {
+		// The next billed session opens with it (recapItemsLocked).
+		s.recap.SetFocus(text)
+	}
 	s.pushQ = append(s.pushQ, pushItem{text: text, urgency: u, requested: u, tags: tags, at: s.now()})
 	return nil
 }

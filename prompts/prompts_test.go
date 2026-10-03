@@ -61,6 +61,8 @@ func TestRenderAssistant(t *testing.T) {
 		`no tool call, no "on it", no answer of your own`,
 		"even long after your call",
 		"Add no question of your own",
+		// The supervisor's current-focus line resolves "it" (focus.go).
+		`A "Current focus" context line says which agent "it" or "that one" means`,
 	} {
 		if !strings.Contains(s, rule) {
 			t.Errorf("prompt lost the rule %q", rule)
@@ -96,6 +98,7 @@ func TestRenderAssistantGPTLive(t *testing.T) {
 		"The language of a message never tells you who sent it.",
 		`no "on it"`,
 		"even one that arrives long after your call",
+		`A "Current focus" note from the supervisor says which agent "it" or "that one" means`,
 	} {
 		if !strings.Contains(s, rule) {
 			t.Errorf("GPT-Live prompt lost the rule %q", rule)

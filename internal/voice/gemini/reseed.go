@@ -1,6 +1,8 @@
 package gemini
 
 import (
+	"strings"
+
 	"google.golang.org/genai"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
@@ -56,11 +58,18 @@ func (s *Session) recapText(prefix string) (text string, items, chars int) {
 	s.mu.Lock()
 	s.flushRecapLocked()
 	entries := s.recap.Recent(reseedChars)
+	focus := s.recap.Focus()
 	s.mu.Unlock()
-	if len(entries) == 0 {
+	if len(entries) == 0 && focus == "" {
 		return "", 0, 0
 	}
 	lines := voice.RecapLines(entries)
+	if focus != "" {
+		// The supervisor's current-focus line (voice.TagFocus): the
+		// old connection had it as silent context, the fresh one
+		// learns it here.
+		lines = strings.TrimSpace(lines + "\n" + focus)
+	}
 	return prefix + lines, len(entries), len(lines)
 }
 

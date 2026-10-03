@@ -136,3 +136,34 @@ func TestRecapKeepsOnlyWhatWasHeard(t *testing.T) {
 		t.Errorf("recap:\n%s", text)
 	}
 }
+
+// TestReseedEndsWithTheFocusLine: the supervisor's current-focus line
+// (voice.TagFocus), sent silently on the old connection, is kept and
+// ends the re-seed of a connection that came back without its context
+// (a 1011, a session refresh), so a follow-up about "it" still works.
+func TestReseedEndsWithTheFocusLine(t *testing.T) {
+	c1, c2 := newFakeConn("c1"), newFakeConn("c2")
+	d := &fakeDialer{results: []func() (Conn, error){ok(c1), ok(c2)}}
+	h := newHarness(t, Config{ReconnectBackoff: 5 * time.Millisecond}, d)
+
+	c1.serve(handleMsg("handle-A"))
+	converse(t, h, c1, "how are the tests?", "auth ran them: 3 of 5 pass.")
+	focus := "Current focus, for follow-ups (context only, never read it out). Agent in focus: auth."
+	if err := h.s.PushTagged(focus, voice.UrgencySilent, map[string]any{voice.TagFocus: true}); err != nil {
+		t.Fatal(err)
+	}
+	c1.waitSent(t, "focus", isContent(focus))
+	c1.fail(errors.New("websocket: close 1011 (internal server error): Internal error encountered."))
+	h.waitEvent("resumed", func(ev voice.Event) bool { _, ok := ev.(voice.EventResumed); return ok })
+	c2.waitSent(t, "recap", isContent("Shepherd: how are the tests?"))
+	var recap string
+	for _, m := range c2.sentMsgs() {
+		if m.kind == "content" {
+			recap = m.content.Turns[0].Parts[0].Text
+			break
+		}
+	}
+	if !strings.HasSuffix(recap, focus) || !strings.Contains(recap, "You: auth ran them: 3 of 5 pass.") {
+		t.Errorf("re-seed does not end with the focus line:\n%s", recap)
+	}
+}

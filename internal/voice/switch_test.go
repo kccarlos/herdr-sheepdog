@@ -327,9 +327,15 @@ type recapFake struct {
 	entries []RecapEntry
 	seeded  []RecapEntry
 	order   *[]string
+	focus   string
 }
 
 func (f *recapFake) RecapEntries() []RecapEntry { return f.entries }
+func (f *recapFake) RecapFocus() string         { return f.focus }
+func (f *recapFake) SeedFocus(text string) {
+	f.focus = text
+	*f.order = append(*f.order, "focus")
+}
 func (f *recapFake) SeedRecap(e []RecapEntry) {
 	f.seeded = e
 	*f.order = append(*f.order, "recap")
@@ -381,5 +387,31 @@ func TestProviderSwitchCarriesTheRecap(t *testing.T) {
 	}
 	if c := log.of("voice.recap_carried"); len(c) != 2 || c[0]["items"] != 2 || c[0]["to"] != "openai" || c[1]["to"] != "gemini" {
 		t.Errorf("voice.recap_carried = %v", c)
+	}
+}
+
+// TestProviderSwitchCarriesTheFocus: the supervisor's current-focus
+// line goes to the new provider ahead of the recap (a Gemini session
+// sends the recap, focus last, at once).
+func TestProviderSwitchCarriesTheFocus(t *testing.T) {
+	var order []string
+	g := &recapFake{pushFake: &pushFake{fakeSess: newFake("gemini")}, entries: []RecapEntry{{Role: RecapUser, Text: "how is auth?"}}, order: &order, focus: "Agent in focus: auth."}
+	o := &recapFake{pushFake: &pushFake{fakeSess: newFake("openai")}, order: &order}
+	sw, err := NewSwitcher([]Provider{
+		{ProviderInfo: ProviderInfo{ID: "gemini", Available: true}, New: func() (Session, error) { return g, nil }},
+		{ProviderInfo: ProviderInfo{ID: "openai", Available: true}, New: func() (Session, error) { return o, nil }},
+	}, "gemini", &lineLog{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sw.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = sw.Close() }()
+	if err := sw.SetProvider("openai", "test"); err != nil {
+		t.Fatal(err)
+	}
+	if o.focus != "Agent in focus: auth." || strings.Join(order, ",") != "focus,recap" {
+		t.Errorf("focus = %q, order = %v", o.focus, order)
 	}
 }

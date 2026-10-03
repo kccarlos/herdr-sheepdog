@@ -249,6 +249,9 @@ func (s *Session) pickPushLocked(now time.Time) pushPick {
 		switch {
 		case it.urgency != voice.UrgencySilent && (!s.client || lc == nil) && now.Sub(it.at) > s.cfg.PushTTL:
 			p.dropped = append(p.dropped, it)
+		case it.urgency == voice.UrgencySilent && lc == nil && voice.IsFocus(it.tags):
+			// The focus line: the recap carries the latest one into the
+			// next session's history (recapItemsLocked).
 		case it.urgency == voice.UrgencySilent && lc == nil:
 			// Standby: silent context waits for the next session's
 			// history.

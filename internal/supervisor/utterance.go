@@ -86,6 +86,9 @@ type utteranceOutcome struct {
 	acted bool
 	// needsUser: the reply says the shepherd must decide or act.
 	needsUser bool
+	// focus is what the reply says about the conversation's focus
+	// (focus.go), for the voice once it has spoken the reply.
+	focus focusFacts
 }
 
 // replyPendingDetail is the silent pending result's detail: context for
@@ -361,6 +364,7 @@ func (s *Supervisor) inlineResult(turnCtx context.Context, u *inflightUtterance,
 		// A reply that named an agent counts as dealing with it, like a
 		// spoken briefing does (the normal level's chattiness rule).
 		s.mentionedIn(out.res.Spoken)
+		s.noteFocus(out.focus, u.text)
 		return out.res
 	}
 	return s.fallback()
@@ -419,6 +423,14 @@ func (s *Supervisor) deliverLate(turnCtx context.Context, u *inflightUtterance, 
 		tags[tagCallID] = u.callID
 	}
 	s.pushTagged(paneID, line, urgency, tags)
+	if out.ok && !stale {
+		// A stale reply is context, not what is being discussed: it
+		// does not move the focus.
+		if paneID != "" {
+			out.focus.paneID = paneID
+		}
+		s.noteFocus(out.focus, u.text)
+	}
 	s.log.Log(logSource, "brain.reply_delivered", paneID, map[string]any{
 		"id": u.id, "utterance_id": u.id, "dur_ms": s.cfg.Now().Sub(start).Milliseconds(), "urgency": urgency.String(), "acted": out.acted, "fallback": !out.ok,
 	})
@@ -601,7 +613,7 @@ func (s *Supervisor) utteranceTurn(ctx context.Context, u *inflightUtterance) ut
 		return utteranceOutcome{acted: rep.Acted}
 	}
 	s.markBriefingDelivered(brief)
-	return utteranceOutcome{res: res, ok: true, acted: rep.Acted, needsUser: rep.NeedsUser}
+	return utteranceOutcome{res: res, ok: true, acted: rep.Acted, needsUser: rep.NeedsUser, focus: focusFromReply("", res.Spoken, rep)}
 }
 
 // The bare fast-path words (docs/roles.md "One decision-maker"). *Bare*

@@ -270,6 +270,8 @@ type Supervisor struct {
 	investigating map[string]*liveInvestigation
 	// names is the voice names line bookkeeping (names.go).
 	names namesState
+	// focus is the voice's current-focus line bookkeeping (focus.go).
+	focus focusState
 
 	// startedAt is when this run's Supervisor was built: openPromises
 	// created before it are from an earlier run (promises.go,
@@ -521,6 +523,9 @@ func (s *Supervisor) OnVoiceEvent(ev voice.Event) {
 		if s.brain != nil {
 			s.brain.TurnComplete()
 		}
+		// The voice's turn is over: the focus of the reply it just
+		// spoke goes in as context for the follow-up (focus.go).
+		s.flushFocus()
 	case voice.EventToolCall:
 		// The voice took up whatever was said: no daemon relay for it
 		// (relay.go).
@@ -539,6 +544,7 @@ func (s *Supervisor) OnVoiceEvent(ev voice.Event) {
 		// included: what the voice says next answers them.
 		s.pushSpoken(false)
 		s.voiceStopped()
+		s.flushFocus()
 	case voice.EventPushUnheard:
 		s.onPushUnheard(e) // unheard.go
 	}

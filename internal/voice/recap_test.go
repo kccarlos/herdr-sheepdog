@@ -78,3 +78,22 @@ func TestRecapLeavesOutAcksAndSelfRelays(t *testing.T) {
 		t.Error("BareAck took a real line")
 	}
 }
+
+// The focus slot keeps the latest line, apart from the entries, and a
+// reset forgets it.
+func TestRecapFocusSlot(t *testing.T) {
+	var r Recap
+	r.SetFocus(" first ")
+	r.SetFocus("second")
+	r.Add(RecapUser, "how are the tests?")
+	if r.Focus() != "second" || r.Len() != 1 {
+		t.Fatalf("focus = %q, entries = %d", r.Focus(), r.Len())
+	}
+	if !IsFocus(map[string]any{TagFocus: true}) || IsFocus(nil) {
+		t.Error("IsFocus")
+	}
+	r.Reset()
+	if r.Focus() != "" || r.Len() != 0 {
+		t.Errorf("after reset: focus = %q, entries = %d", r.Focus(), r.Len())
+	}
+}

@@ -366,6 +366,11 @@ func (s *Session) recapItemsLocked() []initialItem {
 		}
 		items = append(items, initialItem{Type: "message", Role: "developer", Content: []contentPart{{Type: "input_text", Text: note}}})
 	}
+	if f := s.recap.Focus(); f != "" {
+		// The supervisor's current-focus line (voice.TagFocus): the
+		// closed session had it as context, the new one starts with it.
+		items = append(items, initialItem{Type: "message", Role: "developer", Content: []contentPart{{Type: "input_text", Text: f}}})
+	}
 	if len(s.held) > 0 {
 		text := "Background from the supervisor while the line was closed (do not read it out unless asked): " + strings.Join(s.held, " ")
 		if len(text) > 1500 {

@@ -526,6 +526,10 @@ func (s *Session) PushTagged(text string, u voice.Urgency, tags map[string]any) 
 		s.mu.Unlock()
 		return ErrClosed
 	}
+	if voice.IsFocus(tags) {
+		// Kept for a fresh connection's re-seed as well (reseed.go).
+		s.recap.SetFocus(text)
+	}
 	s.pushQ = append(s.pushQ, pushItem{text: text, urgency: u, requested: u, tags: tags, at: s.now()})
 	s.mu.Unlock()
 	s.poke()

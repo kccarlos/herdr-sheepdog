@@ -239,6 +239,9 @@ func (s *Supervisor) applyResult(a announcement, kept []state.Promise, level Cha
 	s.logKept(kept, a.event, spoken, u, "brain")
 	s.notify(a, kept, spoken)
 	s.pushTagged(a.row.PaneID, spoken, u, a.tags(keptTags(announceTags(u, duePassed, rep.NeedsUser, a.pending), kept)))
+	if u != voice.UrgencySilent {
+		s.noteFocus(focusFromReply(a.row.PaneID, spoken, rep), "")
+	}
 }
 
 // announceTags marks a push as one of the exceptions that keep INTERRUPT
@@ -332,6 +335,7 @@ func (s *Supervisor) dropLate(a announcement, kept []state.Promise, level Chatti
 	if add {
 		s.notify(a, kept, spoken)
 		s.pushTagged(a.row.PaneID, spoken, voice.UrgencyIdle, a.tags(keptTags(nil, kept)))
+		s.noteFocus(focusFromReply(a.row.PaneID, spoken, rep), "")
 	}
 }
 

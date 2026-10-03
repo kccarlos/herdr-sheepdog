@@ -263,6 +263,15 @@ func (sw *Switcher) carryRecap(old, inner Session, from, to string) {
 	if !ok {
 		return
 	}
+	// The supervisor's current-focus line goes along, ahead of the
+	// recap that a Gemini session sends at once (TagFocus).
+	if fs, ok := old.(interface{ RecapFocus() string }); ok {
+		if fd, ok := inner.(interface{ SeedFocus(string) }); ok {
+			if f := fs.RecapFocus(); f != "" {
+				fd.SeedFocus(f)
+			}
+		}
+	}
 	entries := src.RecapEntries()
 	if len(entries) == 0 {
 		return

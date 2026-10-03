@@ -115,6 +115,7 @@ func (s *Supervisor) ResetConversation(ctx context.Context, via string) (id stri
 	s.relayedSeq = s.inputSeq
 	s.pushSeq = s.inputSeq
 	s.mu.Unlock()
+	s.forgetFocus()
 	s.log.Log(logSource, "conversation.reset", "", map[string]any{"via": via, "reset_id": id, "at": at.UTC().Format(time.RFC3339)})
 	return id, at, nil
 }
