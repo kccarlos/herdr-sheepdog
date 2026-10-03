@@ -262,3 +262,30 @@ func TestSimInterruptCancelsPromptEvents(t *testing.T) {
 		}
 	}
 }
+
+// Keys no scenario event handles still move a blocked worker on: a
+// declined prompt leaves the worker idle at its input line.
+func TestSimDefaultReactionToKeys(t *testing.T) {
+	sc := SimScenario{
+		ID: "decline", Goal: "decline", Script: []string{"no"},
+		Agents: []SimAgent{{Alias: "auth", State: "blocked", Screen: "codex-approval-prompt.screen.txt"}},
+		Caps:   SimCaps{MaxTurns: 2, MaxSeconds: 20, SilenceSeconds: 1},
+	}
+	brainModel := func() brain.Model {
+		m := braintest.NewModel(
+			braintest.Step{Calls: []*genai.FunctionCall{braintest.FC(brain.ToolSendKeys, map[string]any{"agent": "auth", "keys": []any{"esc"}})}},
+			braintest.Step{Text: braintest.Reply("Declined.", "")},
+		)
+		m.EventDefault = braintest.NothingToAdd()
+		return m
+	}
+	fj := &FakeJudge{}
+	run := RunSim(context.Background(), sc, SimOptions{BrainConfig: brain.Config{MaxSteps: 4, UtteranceTimeout: 5 * time.Second}, NewBrainModel: brainModel, NewJudge: func(*Meter) Judge { return fj }, FixtureDir: "../../testdata/herdr", Settle: 600 * time.Millisecond}, 1)
+	if len(run.Actions) != 1 || run.Actions[0].Detail != "esc" {
+		t.Fatalf("actions = %+v\n%s", run.Actions, renderSim(run.Transcript))
+	}
+	facts := fj.Inputs()[len(fj.Inputs())-1].Facts
+	if !strings.Contains(facts, "Worker auth (codex), now idle.") || !strings.Contains(facts, "Okay, I won't do that.") {
+		t.Fatalf("the declined worker did not move on:\n%s", facts)
+	}
+}

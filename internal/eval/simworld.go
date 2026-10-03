@@ -237,7 +237,7 @@ func (w *simWorld) startWorking(alias string) {
 // trigger fires the events that wait on what sheepdog just did to alias.
 // An interrupt also cancels the changes a prompt to alias set in motion:
 // a worker stopped mid-task does not finish it.
-func (w *simWorld) trigger(kind, alias, text string) {
+func (w *simWorld) trigger(kind, alias, text string) bool {
 	if kind == ActionInterrupt {
 		w.mu.Lock()
 		for _, t := range w.pending[alias] {
@@ -246,6 +246,7 @@ func (w *simWorld) trigger(kind, alias, text string) {
 		delete(w.pending, alias)
 		w.mu.Unlock()
 	}
+	fired := false
 	for i, e := range w.sc.Events {
 		var hit bool
 		switch kind {
@@ -257,6 +258,7 @@ func (w *simWorld) trigger(kind, alias, text string) {
 			hit = e.OnInterruptTo == alias
 		}
 		if hit {
+			fired = true
 			i, e := i, e
 			// After startWorking's working transition, so a finish is a
 			// working -> done finish.
@@ -269,6 +271,35 @@ func (w *simWorld) trigger(kind, alias, text string) {
 			}
 		}
 	}
+	return fired
+}
+
+// answered is a worker's default reaction to keys no scenario event
+// handles: a blocked worker leaves its prompt — declined (esc) back to
+// its input line, otherwise on to work — as a real one would, so the
+// supervisor does not keep seeing a prompt that was answered.
+func (w *simWorld) answered(alias string, keys []string) {
+	w.mu.Lock()
+	st, kind := w.states[alias], w.kinds[alias]
+	w.mu.Unlock()
+	if st != herdr.StateBlocked {
+		return
+	}
+	declined := len(keys) == 1 && (keys[0] == "esc" || keys[0] == "escape")
+	w.schedule(300*time.Millisecond, func() {
+		w.mu.Lock()
+		screen := w.screens[alias]
+		w.mu.Unlock()
+		next, footer := herdr.StateWorking, "• Running the approved step…"
+		if declined {
+			next, footer = herdr.StateIdle, "• Okay, I won't do that."
+		}
+		input := "› Ask Codex to do anything"
+		if kind == "claude" {
+			input = "❯ "
+		}
+		w.setWorker(context.Background(), alias, strings.TrimRight(screen, "\n")+"\n\n"+footer+"\n\n"+input+"\n", next, false)
+	})
 }
 
 // afterTurn fires the events cued on the CEO's nth utterance.
@@ -457,7 +488,10 @@ func (h *simHerdr) SendKeys(ctx context.Context, paneID string, keys ...string) 
 		if len(keys) == 1 && keys[0] == "ctrl+c" {
 			kind = ActionInterrupt
 		}
-		h.w.trigger(kind, h.w.alias(paneID), strings.Join(keys, " "))
+		alias := h.w.alias(paneID)
+		if !h.w.trigger(kind, alias, strings.Join(keys, " ")) && kind == ActionKeys {
+			h.w.answered(alias, keys)
+		}
 	}
 	return err
 }
