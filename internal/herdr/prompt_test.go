@@ -126,6 +126,19 @@ func TestParsePrompt(t *testing.T) {
 			summary: "one is asking accept this file edit.",
 		},
 		{
+			// Claude Code 2.1.288's command approval (tier-3 bench
+			// 2026-10-03, finding 3): the command sits between dashed
+			// rules under a "Bash command" header, not on a "$" line.
+			fixture:  "claude-bash-prompt.screen.txt",
+			alias:    "Claude",
+			question: "Do you want to proceed?",
+			command:  "go test ./shop -v",
+			reason:   "Run the shop package tests",
+			options:  []wantOption{{"Yes", "1"}, {"Yes, and don’t ask again for: go test *", "2"}, {"No", "3"}},
+			def:      0, yes: "1", no: "3",
+			summary: "Claude asks to run go test.",
+		},
+		{
 			// Claude Code 2.1.288's folder trust dialog draws no numbers
 			// (tier-3 bench 2026-10-03, finding 1): the cursor starts on
 			// "No, exit" and "yes" is one row down.

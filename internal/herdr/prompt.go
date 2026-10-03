@@ -164,6 +164,9 @@ func ParsePrompt(screen string) (Prompt, bool) {
 	opts = kept
 	p := Prompt{Options: opts, Default: def}
 	p.Question, p.Command, p.Reason = above(lines[:first])
+	if p.Command == "" {
+		p.Command, p.Reason = claudeCommand(lines[:first])
+	}
 	for _, o := range opts {
 		if o.Meta {
 			continue
@@ -424,6 +427,71 @@ func above(lines []string) (question, command, reason string) {
 		question = fallback
 	}
 	return question, command, reason
+}
+
+// claudeBashHeader is the header line of Claude Code's command approval.
+const claudeBashHeader = "bash command"
+
+// claudeCommand reads Claude Code's command approval layout above its
+// options (tier-3 bench 2026-10-03, finding 3):
+//
+//	 Bash command
+//	 Run the shop package tests
+//	╌╌╌╌╌╌╌╌
+//	 go test ./shop -v
+//	╌╌╌╌╌╌╌╌
+//	 This command requires approval
+//
+//	 Do you want to proceed?
+//
+// The command is the block between the last two dashed rules, the
+// reason the description between the header and the first rule. Only a
+// "Bash command" header makes it a command: a file prompt draws the same
+// rules around the file's contents ("Create file" … "1 hello from
+// claude"). Both are "" when the layout is not there.
+func claudeCommand(lines []string) (command, reason string) {
+	dashed := func(line string) bool { return strings.Contains(line, "╌") && reRule.MatchString(line) }
+	r2 := -1
+	for i := len(lines) - 1; i >= 0; i-- {
+		if dashed(lines[i]) {
+			r2 = i
+			break
+		}
+	}
+	r1 := -1
+	for i := r2 - 1; i >= 0; i-- {
+		if dashed(lines[i]) {
+			r1 = i
+			break
+		}
+	}
+	if r1 < 0 {
+		return "", ""
+	}
+	header := -1
+	for i := r1 - 1; i >= 0 && i >= r1-4; i-- {
+		t := strings.TrimSpace(lines[i])
+		if t == "" || reRule.MatchString(t) {
+			break
+		}
+		if strings.EqualFold(t, claudeBashHeader) {
+			header = i
+			break
+		}
+	}
+	if header < 0 {
+		return "", ""
+	}
+	join := func(ls []string) string {
+		var out []string
+		for _, l := range ls {
+			if t := strings.TrimSpace(l); t != "" {
+				out = append(out, t)
+			}
+		}
+		return strings.Join(out, " ")
+	}
+	return join(lines[r1+1 : r2]), join(lines[header+1 : r1])
 }
 
 // tailLines returns the last n lines of text.
