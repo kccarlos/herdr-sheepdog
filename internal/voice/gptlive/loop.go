@@ -31,6 +31,7 @@ func (s *Session) tick() {
 	s.keepAlive(now)
 	s.settle(now)
 	s.speechEnd(now)
+	s.settleHeard(now)
 	s.idleCheck(now)
 	s.pumpPushes(now)
 }
@@ -119,6 +120,7 @@ func (s *Session) speechEnd(now time.Time) {
 	}
 	s.speakingNow = false
 	s.flushReplyLocked()
+	s.heard.TurnComplete()
 	timing := s.finishAudioTimingLocked()
 	owed := s.inputOpen
 	if owed {
@@ -386,11 +388,15 @@ func (s *Session) deliverPush(lc *liveConn, item pushItem) {
 	s.mu.Unlock()
 	setPushLinks(lc, ctxcap.LinksFromTags(item.tags))
 	err := s.send(lc, ev)
+	var unheard []voice.UnheardPush
 	if err == nil && item.urgency != voice.UrgencySilent {
 		s.mu.Lock()
 		s.playUtt.Handed(voice.PushUtteranceID(item.tags))
+		// Watched until its speech is over (heard.go).
+		unheard = s.heard.Pushed(s.now(), item.text, item.tags, item.tags[voice.TagRequeued] == true)
 		s.mu.Unlock()
 	}
+	s.reportUnheard(unheard)
 	payload := map[string]any{"text": item.text, "urgency": item.requested.String(), "scheduling_sent": item.urgency.SchedulingName(), "event": ev.Type}
 	for k, v := range item.tags {
 		payload[k] = v

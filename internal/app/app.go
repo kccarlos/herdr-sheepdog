@@ -479,6 +479,8 @@ func (a *App) voiceProviders(gcfg gemini.Config, handler voice.ToolHandler) []vo
 			Handler:   handler,
 			Classify:  router.Route,
 			Context:   a.voiceCtx,
+			// The spoken names are key terms of the heard check.
+			Names: names,
 			Instructions: func() (string, error) {
 				list := aliases
 				if names != nil {

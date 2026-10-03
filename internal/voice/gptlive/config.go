@@ -50,6 +50,10 @@ type Config struct {
 	// utterance no delegation claimed is also run through it: a bare
 	// stop word runs stop even when the model did not delegate.
 	Classify func(text string) (voice.ToolCall, bool)
+	// Names, when set, returns the agents' current spoken names: the
+	// heard check counts the ones a push mentions among its key terms
+	// (heard.go).
+	Names func() []string
 
 	// IdleClose is how long a live session may go without activity
 	// before it is closed (config voice.openai.idle_close_s, default 45 s).

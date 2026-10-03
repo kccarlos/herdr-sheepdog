@@ -21,25 +21,11 @@ import (
 const requeueSettle = 2 * time.Second
 
 // tagRequeued marks a re-queued push (it is never re-queued again).
-const tagRequeued = "requeued"
+const tagRequeued = voice.TagRequeued
 
 // owedTags reports whether tags alone mark a line the shepherd is owed
-// a hearing of: a decision they must take or a kept or due promise.
-func owedTags(tags map[string]any) bool {
-	if tags == nil {
-		return false
-	}
-	if tags["needs_user"] == true || tags["due_promise"] == true {
-		return true
-	}
-	switch ids := tags[voice.TagKeepsPromiseIDs].(type) {
-	case []string:
-		return len(ids) > 0
-	case []any:
-		return len(ids) > 0
-	}
-	return false
-}
+// a hearing of (voice.OwedTags).
+func owedTags(tags map[string]any) bool { return voice.OwedTags(tags) }
 
 // reportUnheard logs and emits the verdicts; an owed line waits in
 // s.requeue for a quiet moment.
@@ -113,9 +99,6 @@ func (s *Session) releaseRequeue() {
 	s.poke()
 }
 
-// owedPromise reports whether tags mark a kept or due promise: owed
-// whatever the pending prompt's state.
-func owedPromise(tags map[string]any) bool {
-	t := map[string]any{voice.TagKeepsPromiseIDs: tags[voice.TagKeepsPromiseIDs], "due_promise": tags["due_promise"]}
-	return owedTags(t)
-}
+// owedPromise reports whether tags mark a kept or due promise
+// (voice.OwedPromise).
+func owedPromise(tags map[string]any) bool { return voice.OwedPromise(tags) }

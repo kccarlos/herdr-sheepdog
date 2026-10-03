@@ -121,6 +121,12 @@ type Session struct {
 	// (voice.PlaybackUtterance).
 	playUtt voice.PlaybackUtterance
 	vad     voice.ClientSpeech
+	// heard watches each spoken push until its speech is over, judged
+	// by key terms (heard.go); requeue holds the owed unheard lines
+	// waiting for a quiet moment; openCheck is the supervisor's.
+	heard     voice.HeardTracker
+	requeue   []voice.UnheardPush
+	openCheck voice.OpenCheck
 }
 
 // liveConn is one GPT-Live session (one WebSocket).
@@ -167,7 +173,7 @@ func newSession(cfg Config, log logging.Logger, dial Dialer) (*Session, error) {
 	if log == nil {
 		log = logging.NopLogger{}
 	}
-	return &Session{
+	s := &Session{
 		cfg: cfg, dial: dial, log: log, now: time.Now, rec: cfg.Context.Session("openai", cfg.Model),
 		audio:    make(chan []byte),
 		events:   make(chan voice.Event, cfg.EventBuffer),
@@ -175,7 +181,9 @@ func newSession(cfg Config, log logging.Logger, dial Dialer) (*Session, error) {
 		inflight: map[string]context.CancelFunc{},
 		armed:    true,
 		recap:    voice.Recap{Max: cfg.RecapTurns},
-	}, nil
+	}
+	s.heard.Coverage = s.keyTermCoverage
+	return s, nil
 }
 
 // Start implements voice.Session. It does not dial: the session is
@@ -339,6 +347,8 @@ func (s *Session) Reset(reason string) error {
 	s.recap.Reset()
 	s.held = nil
 	s.inText, s.outText = "", ""
+	s.heard.Reset()
+	s.requeue = nil
 	lc := s.live
 	s.mu.Unlock()
 	if lc != nil {
@@ -374,9 +384,15 @@ func (s *Session) speakingOrPlayingLocked(now time.Time) bool {
 // next tick.
 func (s *Session) ClientPlayback(state string, playedMs int) {
 	s.mu.Lock()
-	rep := s.play.Report(s.now(), state, playedMs)
+	now := s.now()
+	rep := s.play.Report(now, state, playedMs)
 	utt := s.playUtt.Started(state)
+	var unheard []voice.UnheardPush
+	if state == voice.PlaybackFlushed {
+		unheard = s.heard.Flushed(now, rep.Cut, rep.Heard)
+	}
 	s.mu.Unlock()
+	s.reportUnheard(unheard)
 	s.log.Log(logSource, "voice.playback", "", voice.TagPayload(rep.Payload(), utt))
 	if rep.Cut != nil {
 		s.emit(voice.EventTranscript{Dir: voice.DirOut, Text: rep.Heard, Final: true, Cut: rep.Cut})
@@ -576,8 +592,11 @@ func (s *Session) finishAudioTimingLocked() map[string]any {
 // interrupt drops queued model audio and tells the client to flush.
 func (s *Session) interrupt(by string) {
 	s.mu.Lock()
-	s.play.Flush(s.now())
+	now := s.now()
+	awaited := s.play.Flush(now)
+	unheard := s.heard.Interrupted(now, by, awaited)
 	s.mu.Unlock()
+	s.reportUnheard(unheard)
 	dropped := s.out.Flush()
 	s.log.Log(logSource, "voice.interrupted", "", map[string]any{"by": by, "dropped_chunks": dropped})
 	s.emit(voice.EventInterrupted{})

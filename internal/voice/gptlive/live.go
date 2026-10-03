@@ -183,7 +183,10 @@ func (s *Session) finalize(lc *liveConn, serverReason string, confirmed bool) {
 	s.flushReplyLocked()
 	timing := s.finishAudioTimingLocked()
 	closing := s.closed
+	// A push not heard by now never will be on this session.
+	unheard := s.heard.Lost()
 	s.mu.Unlock()
+	s.reportUnheard(unheard)
 	s.out.Flush()
 	if timing != nil {
 		s.log.Log(logSource, "voice.audio_timing", "", timing)
@@ -312,6 +315,7 @@ func (s *Session) onInputText(delta string) {
 	s.lastActivity = now
 	s.unclaimed += delta
 	s.inText += delta
+	s.heard.UserInput()
 	s.mu.Unlock()
 	s.log.Log(logSource, "voice.transcript.in", "", map[string]any{"text": delta, "final": false})
 	s.emit(voice.EventTranscript{Dir: voice.DirIn, Text: delta})
@@ -325,6 +329,7 @@ func (s *Session) onOutputText(delta string) {
 	s.speakingNow = true
 	s.outText += delta
 	s.play.Said(delta)
+	s.heard.Said(delta)
 	s.mu.Unlock()
 	s.log.Log(logSource, "voice.transcript.out", "", map[string]any{"text": delta, "final": false})
 	s.emit(voice.EventTranscript{Dir: voice.DirOut, Text: delta})
