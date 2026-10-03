@@ -160,6 +160,10 @@ type Request struct {
 
 	// facts is Facts as the request was rendered.
 	facts EventFacts
+	// records is what the daemon has on record for the agents an
+	// utterance names (agentRecords), set by the loop when the turn
+	// starts.
+	records string
 }
 
 // EventFacts is what has happened to an announced event outside the

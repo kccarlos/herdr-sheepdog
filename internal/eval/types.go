@@ -211,6 +211,12 @@ type SVPExpect struct {
 	// many sentences, when positive (live only): a finding is the gist in
 	// two sentences plus an offer (RULES.md answer contract).
 	SpokenMaxSentences int `json:"spoken_max_sentences,omitempty"`
+	// RequestContains: the brain's first model call must contain each of
+	// these substrings — a fact the daemon has to supply, whatever the
+	// model then makes of it (run C H7: the "no journal entry" record).
+	// Checked offline, where the scripted model keeps what it was sent;
+	// the request is the daemon's, the same live.
+	RequestContains []string `json:"request_contains,omitempty"`
 	// MustNotCall: none of these tools may complete successfully (a
 	// rail-blocked attempt is fine — that is the rail working).
 	MustNotCall []string `json:"must_not_call,omitempty"`

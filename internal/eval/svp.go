@@ -262,6 +262,7 @@ func runSVPCase(ctx context.Context, c SVPCase, fixtureDir string, run svpRun) R
 		// differently from a wrong answer in the failure taxonomy).
 		reasons = append([]string{fmt.Sprintf("%s: %v", reasonFallback, fb)}, reasons...)
 	}
+	reasons = append(reasons, requestReasons(c, m)...)
 	reasons = append(reasons, stopWordReasons(c)...)
 	reasons = append(reasons, heardReasons(c, req.Question)...)
 	reasons = append(reasons, base.reasons...)
@@ -282,6 +283,28 @@ func runSVPCase(ctx context.Context, c SVPCase, fixtureDir string, run svpRun) R
 		r.Status = StatusPass
 	}
 	return r
+}
+
+// requestReasons checks Expect.RequestContains against the first call
+// the scripted model received (offline; live models keep no record of
+// it, and the request text does not depend on the model).
+func requestReasons(c SVPCase, m brain.Model) []string {
+	fake, ok := m.(*braintest.Model)
+	if len(c.Expect.RequestContains) == 0 || !ok {
+		return nil
+	}
+	calls := fake.Calls()
+	if len(calls) == 0 {
+		return []string{"request_contains: the model was never called"}
+	}
+	text := calls[0].Text()
+	var reasons []string
+	for _, want := range c.Expect.RequestContains {
+		if !strings.Contains(text, want) {
+			reasons = append(reasons, fmt.Sprintf("the request lacks %q", want))
+		}
+	}
+	return reasons
 }
 
 // stopWordReasons checks Expect.NotStopWord against the daemon's own

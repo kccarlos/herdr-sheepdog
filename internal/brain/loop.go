@@ -150,6 +150,12 @@ func (b *Brain) run(ctx context.Context, t *turn) (Reply, error) {
 		// behind another turn while the template line went out.
 		t.req.facts = t.req.Facts()
 	}
+	if t.req.Kind == KindUtterance {
+		// What the daemon knows about the agents the words name, and that
+		// it knows nothing more (run C, H7: "did it push?" answered "no"
+		// from a screen that says nothing about pushing).
+		t.req.records = agentRecords(b.host.Agents(), t.req.Question, b.cfg.Now)
+	}
 	b.ingest(Message{Role: RoleUser, Kind: KindRequest, Content: requestText(t.req), Agent: t.req.Agent, Link: t.req.Link}, t.n)
 	if t.req.Kind == KindAnnounce && t.req.Agent != "" {
 		// What the worker itself wrote for a human, before its screen:

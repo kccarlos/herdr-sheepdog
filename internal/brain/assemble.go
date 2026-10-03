@@ -320,6 +320,9 @@ func requestText(req Request) string {
 	if line := languageLine(req.facts.Language); line != "" {
 		s += "\n" + line
 	}
+	if req.records != "" {
+		s += "\n" + req.records
+	}
 	if req.RosterUnchangedFor > 0 {
 		s += fmt.Sprintf("\nThe roster is unchanged since you last reported it %d s ago; if the shepherd is only asking for status again, say there has been no change since you last checked, briefly.", int(req.RosterUnchangedFor.Seconds()))
 	}
@@ -680,4 +683,106 @@ func clipText(s string, n int) string {
 		cut = cut[:i]
 	}
 	return strings.TrimRight(cut, " ,;:.") + "…"
+}
+
+// Budget of an agent record (agentRecords): the last recordEntries
+// journal entries, each text at most recordRunes.
+const (
+	recordEntries = 3
+	recordRunes   = 120
+)
+
+// agentRecords states, for each agent the CEO's words name, everything
+// the daemon has on record about it — its state and since when, its last
+// result, and its journal entries with their times — and says outright
+// when there is no journal entry (run C, H7: asked whether bench-claude
+// had pushed, Vertex said it had not, from a screen that says nothing
+// about pushing). The daemon sees a worker only through its screen and
+// its own session transcript, which the record says too: what is not
+// here is unknown to it, as a fact. "" when no agent is named.
+func agentRecords(agents []AgentInfo, words string, clock func() time.Time) string {
+	var b strings.Builder
+	var now time.Time
+	for _, a := range agents {
+		if !namesAgent(words, a.Alias) {
+			continue
+		}
+		if b.Len() == 0 {
+			now = clock() // only when a record is written: the clock ticks in fixtures
+			b.WriteString("On record (from the worker's screen and its own session transcript, the daemon's only sources; what is not here is not on record, and a run_cli or investigate look can check it):")
+		}
+		fmt.Fprintf(&b, "\n- %s: %s", aliasOr(a.Alias), stateOr(a.State))
+		if !a.StateSince.IsZero() {
+			fmt.Fprintf(&b, " since %s (%s ago)", a.StateSince.Format("15:04:05"), ago(now.Sub(a.StateSince)))
+		}
+		if a.LastResult != "" {
+			fmt.Fprintf(&b, "; last result: %q", clipText(oneLine(a.LastResult), recordRunes))
+		}
+		if len(a.Journal) == 0 {
+			b.WriteString("; no journal entry: beyond this and its screen, nothing it did is on record.")
+			continue
+		}
+		b.WriteString("; journal:")
+		for _, e := range a.Journal[max(0, len(a.Journal)-recordEntries):] {
+			fmt.Fprintf(&b, " [%s %s]", e.At.Format("15:04:05"), e.Event)
+			if e.LastAssistant != "" {
+				fmt.Fprintf(&b, " wrote %q", clipText(oneLine(e.LastAssistant), recordRunes))
+			}
+			if e.Instruction != "" {
+				fmt.Fprintf(&b, " instruction %q", clipText(oneLine(e.Instruction), recordRunes))
+			}
+			if len(e.Files) > 0 {
+				b.WriteString(" files " + strings.Join(e.Files, ", "))
+			}
+			if len(e.Tools) > 0 {
+				names := make([]string, 0, len(e.Tools))
+				for name := range e.Tools {
+					names = append(names, name)
+				}
+				sort.Strings(names)
+				for i, name := range names {
+					names[i] = fmt.Sprintf("%s×%d", name, e.Tools[name])
+				}
+				b.WriteString(" tools " + strings.Join(names, ", "))
+			}
+			b.WriteString(";")
+		}
+	}
+	return b.String()
+}
+
+// namesAgent reports whether words name alias: the alias itself, or
+// with its dashes and underscores heard as spaces ("bench claude"),
+// case-insensitively, as a whole word.
+func namesAgent(words, alias string) bool {
+	alias = strings.ToLower(strings.TrimSpace(alias))
+	if alias == "" {
+		return false
+	}
+	w := strings.ToLower(words)
+	spaced := strings.NewReplacer("-", " ", "_", " ").Replace(alias)
+	for _, form := range []string{alias, spaced} {
+		for i := 0; ; {
+			j := strings.Index(w[i:], form)
+			if j < 0 {
+				break
+			}
+			start, end := i+j, i+j+len(form)
+			if wordEdge(w, start-1) && wordEdge(w, end) {
+				return true
+			}
+			i = start + 1
+		}
+	}
+	return false
+}
+
+// wordEdge reports whether the byte at i of s is outside s or not a
+// letter, digit, dash or underscore.
+func wordEdge(s string, i int) bool {
+	if i < 0 || i >= len(s) {
+		return true
+	}
+	c := s[i]
+	return (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '-' && c != '_'
 }
