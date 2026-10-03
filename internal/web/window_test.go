@@ -257,25 +257,31 @@ func containsSub(lines []string, sub string) bool {
 	return false
 }
 
-// Enter answers with the option the cursor is on; keys sent to another
-// agent's window leave the question open.
-func TestAgentInputEnterAnswersTheDefault(t *testing.T) {
+// Enter is a plain key even while the agent's question is open (the
+// CEO may have moved the cursor with up/down, so the recorded default is
+// not what it selects); keys in another agent's window leave the
+// question alone too.
+func TestAgentInputEnterIsAPlainKey(t *testing.T) {
 	h := newHarness(t, harnessOpts{})
 	trackWorking(t, h, "fake:2", "web", "working")
 	if code, body := h.postJSON("/api/inject/blocked", map[string]any{"pane_id": "fake:1", "alias": "auth", "screen": codexScreen(t)}, nil); code != http.StatusOK {
 		t.Fatalf("inject blocked = %d %s", code, body)
 	}
 	var res map[string]any
-	if code, body := h.postJSON(windowPath("fake:2", "input"), map[string]any{"keys": []string{"enter"}}, &res); code != http.StatusOK || res["kind"] != "keys" {
-		t.Fatalf("enter in another window = %d %s", code, body)
+	if code, body := h.postJSON(windowPath("fake:2", "input"), map[string]any{"keys": []string{"1"}}, &res); code != http.StatusOK || res["kind"] != "keys" {
+		t.Fatalf("1 in another window = %d %s", code, body)
+	}
+	for _, keys := range [][]string{{"down"}, {"enter"}} {
+		if code, body := h.postJSON(windowPath("fake:1", "input"), map[string]any{"keys": keys}, &res); code != http.StatusOK || res["kind"] != "keys" {
+			t.Fatalf("%v = %d %s", keys, code, body)
+		}
 	}
 	if _, has := h.store.Pending(); !has {
-		t.Fatal("keys in another window closed the question")
+		t.Fatal("plain keys closed the question")
 	}
-	if code, body := h.postJSON(windowPath("fake:1", "input"), map[string]any{"keys": []string{"enter"}}, &res); code != http.StatusOK || res["kind"] != "answer" {
-		t.Fatalf("enter = %d %s", code, body)
-	}
-	if _, has := h.store.Pending(); has {
-		t.Error("enter left the question open")
+	for _, ev := range h.log.Tail(0) {
+		if ev.Type == "pending.confirmed" {
+			t.Errorf("plain keys confirmed the question: %s", ev.Payload)
+		}
 	}
 }

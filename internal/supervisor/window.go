@@ -181,10 +181,12 @@ func (s *Supervisor) WindowKeys(ctx context.Context, paneID string, keys []strin
 
 // windowAnswer finds the option of the open approval question for paneID
 // that keys select: its pending id and 1-based index. Keys select an
-// option when they are its own keys, the digit it is listed under (both
-// TUIs take the digit even where the option's key is "y"), or enter on
-// the option the cursor is on (docs/herdr-protocol.md "Answering
-// prompts observed").
+// option when they are its own keys or the digit it is listed under
+// (both TUIs take the digit even where the option's key is "y"). Enter
+// selects nothing here: the CEO may have moved the TUI's cursor with
+// up/down since the question was recorded, so enter goes to the pane as
+// a plain key, and the transition off blocked closes the question
+// (transitions.go).
 func (s *Supervisor) windowAnswer(paneID string, keys []string) (string, int, bool) {
 	p, has := s.store.Pending()
 	if !has || p.Kind != state.PendingAnswerPrompt || p.PaneID != paneID {
@@ -194,8 +196,7 @@ func (s *Supervisor) windowAnswer(paneID string, keys []string) (string, int, bo
 		if o.Meta {
 			continue
 		}
-		if slices.Equal(o.Keys, keys) ||
-			(len(keys) == 1 && (keys[0] == strconv.Itoa(i+1) || (keys[0] == "enter" && o.Default))) {
+		if slices.Equal(o.Keys, keys) || (len(keys) == 1 && keys[0] == strconv.Itoa(i+1)) {
 			return p.ID, i + 1, true
 		}
 	}

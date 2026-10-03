@@ -655,11 +655,14 @@ reachable. A pane id with `:` or `%` is path-escaped as usual.
   transcript line ("the CEO typed a prompt in Auth fix's window: …", "the
   CEO pressed esc in Auth fix's window") so its picture stays right. When
   the keys select one option of the open approval question for that
-  agent (the option's own keys, the digit it is listed under, or `enter`
-  on the option the cursor is on), they answer it through the tap path (`POST /api/pending/answer`'s
+  agent (the option's own keys or the digit it is listed under), they answer
+  it through the tap path (`POST /api/pending/answer`'s
   code): `kind` is `answer`, the pending action is confirmed and cleared
   (`pending.confirmed {via: "tap"}`), and the voice and brain hear it the
-  way they hear a tap. A herdr send that fails is `502`.
+  way they hear a tap. `enter` (and every other key) goes to the pane
+  as it is: the CEO may have moved the cursor with `up`/`down`, so the
+  recorded default is not necessarily what it selects; the transition
+  off `blocked` closes the question. A herdr send that fails is `502`.
 
 ## Phone notifications
 
