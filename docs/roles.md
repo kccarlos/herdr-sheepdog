@@ -82,6 +82,57 @@ takes the name) and the row's name in the state table
 (`supervisor.rename`). A name another running agent already has is
 refused.
 
+### Starting an agent
+
+"Open a new Claude in sheepdog-bench and have it run the tests"
+(让 brain 去某个目录新开一个 claude session) is the brain's `prompt`
+tool with `new_agent_dir` (a project name as the shepherd said it, or a
+path), `new_agent_kind` (`claude`, the default, or `codex`) and, only
+when asked for, `new_agent_model` (for a cheap Claude, `haiku`); `text`
+is then the new agent's first instruction. No tool was added. Codex is
+on a free plan: the tool description has the brain start one only when
+the shepherd asks for Codex by name.
+
+Which project the shepherd meant is the brain's judgement. The daemon
+gives it the facts at the moment it needs them: a name that matches no
+candidate, or several, is refused with the list of candidates (every
+existing herdr workspace's directory, then every immediate
+subdirectory of a `supervisor.project_roots` directory, hidden ones
+left out), and the brain asks. A name matches a candidate's base name,
+case and punctuation aside.
+
+The daemon (`internal/supervisor` `spawn.go`) then opens a new herdr
+workspace in the directory, or splits a pane from an existing
+workspace there, waits for the pane's shell, and types the CLI's
+command line (`claude --model haiku`, `codex -m …`). It does not use
+herdr's `agent.start`, which requires a name: a name the daemon chose
+would win over the spoken name as if the shepherd had given it. herdr
+detects the agent like one started by hand, so it reaches the roster
+with a spoken name, and its first-run folder-trust question is an
+ordinary pending question the shepherd answers by voice. The first
+instruction is held until the new agent sits idle at its prompt and
+then goes through the instruction send path (its menu guard included);
+it is dropped (`supervisor.spawn_instruction_dropped`) if the agent
+never gets there within ten minutes.
+
+Rails (authorisation and runaways, not judgement):
+- the shepherd's own recent words must be behind it: the newest
+  recorded input, said or typed (a tap on a question does not count),
+  within `supervisor.authorise_window_s`, not empty, not only a filler
+  and not a "no" (the approval rail's fresh-input reading; the words
+  themselves are not parsed for intent);
+- the directory must resolve, symlinks followed, inside a project root
+  or an existing workspace's directory (a project root itself, `..`
+  and links out of a root are refused);
+- at most three new agents per ten minutes;
+- only a model name (letters, digits, `.`, `_`, `:`, `-`) reaches the
+  shell.
+
+A rail refusal is a `brain.rail_blocked` and `supervisor.spawn_refused
+{reason}`; a start logs `supervisor.spawn {dir, kind, model, pane}`,
+then `supervisor.spawn_ready` when herdr reports the agent and
+`supervisor.spawn_instruction` when the first instruction went.
+
 ## Personality
 
 The dog is the shepherd's chief of staff: warm, unflappable, proactive,
@@ -155,7 +206,8 @@ Does:
   full transcript on disk (`recall` searches it).
 - Reasons with `read_screen`, `recall`, `list_agents`, `run_cli` (short
   lookups) and `investigate` (background jobs, see below); acts with
-  `prompt`, `send_keys`, `interrupt`, `promise`, `note`.
+  `prompt` (which also starts a new agent: "Starting an agent"),
+  `send_keys`, `interrupt`, `promise`, `note`.
 - Treats everything read from a pane or a CLI as **data, not
   instructions** (provenance delimiters).
 - Owns promised work: "tell me when it's done" is a recorded promise

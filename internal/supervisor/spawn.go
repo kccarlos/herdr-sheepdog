@@ -152,11 +152,14 @@ func (s *Supervisor) spawn(ctx context.Context, req brain.SpawnRequest) (string,
 			s.followSpawn(pane.PaneID, req.Kind, req.Text)
 		}()
 	}
-	echo := "Starting a new " + state.KindWord(req.Kind) + " in " + dir.Name
+	echo := "Starting a new " + state.KindWord(req.Kind) + " in " + dir.Name + "."
 	if req.Text != "" {
-		echo += "; it gets the instruction once it is ready"
+		// Not "told it": the instruction is held (2026-10-03 live check,
+		// the brain said "and told it to run the tests" before the trust
+		// question was even answered).
+		echo += " It has not been told anything yet: the instruction goes to it once it is ready."
 	}
-	return echo + ".", nil
+	return echo, nil
 }
 
 // spawnRailLocked is the authorisation rail of a new agent: the CEO's

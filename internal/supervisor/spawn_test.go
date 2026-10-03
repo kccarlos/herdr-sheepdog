@@ -92,7 +92,7 @@ func TestSpawnStartsAgentAndSendsFirstInstructionWhenReady(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if echo != "Starting a new Claude in bench; it gets the instruction once it is ready." {
+	if echo != "Starting a new Claude in bench. It has not been told anything yet: the instruction goes to it once it is ready." {
 		t.Errorf("echo = %q", echo)
 	}
 	created := w.params("workspace.create")
