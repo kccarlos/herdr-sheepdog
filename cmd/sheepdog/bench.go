@@ -33,6 +33,7 @@ func printBenchUsage(w io.Writer) {
 	fprintln(w, "  run        a tier-2 campaign over testdata/bench/scenarios (costs money)")
 	fprintln(w, "  render     pre-render the scenarios' opening lines and write the manifest")
 	fprintln(w, "  validate   check the scenario files offline")
+	fprintln(w, "  report     rebuild report.json / report.md from a campaign's runs/")
 	fprintln(w, "")
 	fprintln(w, "Run `sheepdog bench <sub> -h` for the flags.")
 }
@@ -51,6 +52,8 @@ func runBench(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 		return runBenchRender(ctx, args[1:], stdout, stderr)
 	case "validate":
 		return runBenchValidate(ctx, args[1:], stdout, stderr)
+	case "report":
+		return runBenchReport(ctx, args[1:], stdout, stderr)
 	case "-h", "--help", "help":
 		printBenchUsage(stdout)
 		return 0
@@ -460,4 +463,75 @@ func orDefaultStr(s, def string) string {
 		return def
 	}
 	return s
+}
+
+func runBenchReport(_ context.Context, args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("bench report", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	from := fs.String("from", "", "a campaign's output directory (with runs/)")
+	out := fs.String("out", "", "write report.json and report.md here (default: --from)")
+	scen := fs.String("scenarios", defaultBenchScenarios, "scenario files")
+	sims := fs.String("sim", defaultBenchSims, "eval sim files (from_sim)")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return 2
+	}
+	if *from == "" {
+		fprintln(stderr, "sheepdog bench report: --from is required")
+		return 2
+	}
+	if *out == "" {
+		*out = *from
+	}
+	runs, err := bench.LoadRuns(*from)
+	if err != nil || len(runs) == 0 {
+		fprintf(stderr, "sheepdog bench report: no runs under %s (%v)\n", *from, err)
+		return 1
+	}
+	scs, err := bench.LoadScenarios(*scen, *sims)
+	if err != nil {
+		fprintf(stderr, "sheepdog bench report: %v\n", err)
+		return 1
+	}
+	var prev bench.Report
+	if b, err := os.ReadFile(filepath.Join(*from, "report.json")); err == nil {
+		_ = json.Unmarshal(b, &prev)
+	}
+	started, repeat := prev.Started, prev.Repeat
+	if started.IsZero() {
+		started = time.Now()
+	}
+	for _, r := range runs {
+		repeat = max(repeat, r.Repeat)
+	}
+	meter := bench.NewSpendMeter("")
+	for _, r := range runs {
+		for _, l := range r.Spend.Lines {
+			meter.Meter.Add(l.Role, l.Model, l.Usage)
+		}
+		meter.Audio(int64(r.Spend.LiveInMin*60000), int64(r.Spend.LiveOutMin*60000))
+	}
+	rep := bench.NewReport(started, prev.Setup, repeat, runs, meter.Total(), scs)
+	if prev.DurationS > 0 {
+		rep.DurationS = prev.DurationS
+	}
+	if err := os.MkdirAll(*out, 0o755); err != nil {
+		fprintf(stderr, "sheepdog bench report: %v\n", err)
+		return 1
+	}
+	if err := rep.WriteJSON(filepath.Join(*out, "report.json")); err != nil {
+		fprintf(stderr, "sheepdog bench report: %v\n", err)
+		return 1
+	}
+	f, err := os.Create(filepath.Join(*out, "report.md"))
+	if err != nil {
+		fprintf(stderr, "sheepdog bench report: %v\n", err)
+		return 1
+	}
+	rep.WriteMarkdown(f, 40)
+	_ = f.Close()
+	fprintf(stdout, "%d runs: %s\n", len(runs), filepath.Join(*out, "report.md"))
+	return 0
 }

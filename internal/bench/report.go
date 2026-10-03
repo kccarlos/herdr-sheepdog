@@ -6,6 +6,7 @@ import (
 	"io"
 	"math"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -74,6 +75,14 @@ type VoiceSummary struct {
 	Interrupted  int                `json:"interrupted"`
 	Stalled      int                `json:"stalled"`
 	Failovers    int                `json:"failovers"`
+	// TTSSources counts the CEO lines by what rendered them (gemini
+	// model or say).
+	TTSSources map[string]int `json:"tts_sources"`
+	// MarkupSpoken counts bot utterances whose heard text carries a
+	// bracketed marker (e.g. "[system event, …]") read aloud.
+	MarkupSpoken int `json:"markup_spoken"`
+	// EmptyBot counts bot utterances with audio but no transcript.
+	EmptyBot int `json:"bot_audio_without_transcript"`
 }
 
 // latencySegments are the turn.latency fields, in pipeline order.
@@ -126,11 +135,20 @@ func NewReport(started time.Time, setup map[string]string, repeat int, runs []Ru
 	for _, s := range scs {
 		cond[s.ID] = conditionOf(s)
 	}
-	v := VoiceSummary{WERByLang: map[string]float64{}, WERByNoise: map[string]float64{}}
+	v := VoiceSummary{WERByLang: map[string]float64{}, WERByNoise: map[string]float64{}, TTSSources: map[string]int{}}
 	nLang, nCond := map[string]int{}, map[string]int{}
 	for _, r := range runs {
+		for _, b := range r.Bot {
+			switch {
+			case strings.Contains(b.Text, "[system") || strings.Contains(b.Text, "[System"):
+				v.MarkupSpoken++
+			case strings.TrimSpace(b.Text) == "" && b.AudioMS > 0:
+				v.EmptyBot++
+			}
+		}
 		for _, l := range r.User {
 			v.Lines++
+			v.TTSSources[orStr(l.Source, "?")]++
 			if l.Heard == "" {
 				v.NotHeard++
 			}
@@ -268,6 +286,8 @@ func (rep Report) WriteMarkdown(w io.Writer, maxFailures int) {
 	_, _ = fmt.Fprintf(w, "- Mean WER of what the voice model heard: %s; by condition: %s.\n", fmtMap(v.WERByLang), fmtMap(v.WERByNoise))
 	_, _ = fmt.Fprintf(w, "- Daemon flushes %d, phone barge-in cuts %d, interrupted %d, stalled %d.\n", v.Flushes, v.LocalFlushes, v.Interrupted, v.Stalled)
 	_, _ = fmt.Fprintf(w, "- Pushes: unheard %d, re-queued %d, deferred %d, held (no listener) %d. Brain failovers %d.\n", v.Unheard, v.Requeued, v.Deferred, v.Held, v.Failovers)
+	_, _ = fmt.Fprintf(w, "- Bot utterances that read a bracketed marker aloud (\"[system event, …]\"): %d; with audio but no transcript: %d.\n", v.MarkupSpoken, v.EmptyBot)
+	_, _ = fmt.Fprintf(w, "- CEO lines rendered by: %s.\n", fmtCounts(v.TTSSources))
 	_, _ = fmt.Fprintf(w, "\n## Failed runs\n\n")
 	n := 0
 	for _, r := range rep.Runs {
@@ -313,4 +333,38 @@ func fmtMap(m map[string]float64) string {
 		return "–"
 	}
 	return strings.Join(parts, ", ")
+}
+
+func fmtCounts(m map[string]int) string {
+	var parts []string
+	for k, v := range m {
+		parts = append(parts, fmt.Sprintf("%s %d", k, v))
+	}
+	sort.Strings(parts)
+	if len(parts) == 0 {
+		return "–"
+	}
+	return strings.Join(parts, ", ")
+}
+
+// LoadRuns reads the run records a campaign wrote under dir/runs.
+func LoadRuns(dir string) ([]Run, error) {
+	files, err := filepath.Glob(filepath.Join(dir, "runs", "*.json"))
+	if err != nil {
+		return nil, err
+	}
+	var runs []Run
+	for _, f := range files {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			return nil, err
+		}
+		var r Run
+		if err := json.Unmarshal(b, &r); err != nil {
+			return nil, fmt.Errorf("%s: %w", f, err)
+		}
+		runs = append(runs, r)
+	}
+	sortRuns(runs)
+	return runs, nil
 }

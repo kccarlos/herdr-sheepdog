@@ -452,7 +452,11 @@ func (r *runner) say(ctx context.Context, text string, barge, collision bool) er
 	samples := speech.Trim(clip.Samples, 60, 150)
 	r.run.Turns++
 	at := r.since()
-	r.lines = append(r.lines, UserLine{AtMS: at, Said: spoken, Voice: clip.Voice, Style: style, Source: clip.Source, DurMS: pcm.DurationMS(len(samples), speech.Rate), BargeIn: barge, Collision: collision})
+	src := clip.Source
+	if clip.Model != "" {
+		src += "/" + clip.Model
+	}
+	r.lines = append(r.lines, UserLine{AtMS: at, Said: spoken, Voice: clip.Voice, Style: style, Source: src, DurMS: pcm.DurationMS(len(samples), speech.Rate), BargeIn: barge, Collision: collision})
 	r.convo = append(r.convo, eval.SimLine{AtMS: at, Who: "ceo", Text: spoken})
 	done, err := r.c.SayAsync(spoken, samples)
 	if err != nil {

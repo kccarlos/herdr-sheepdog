@@ -185,3 +185,18 @@ func sqrt(x float64) float64 {
 	}
 	return z
 }
+
+func TestLoadRunsRebuildsTheReport(t *testing.T) {
+	dir := t.TempDir()
+	r := &runner{o: RunOptions{Out: dir}, sc: Scenario{SimScenario: eval.SimScenario{ID: "a"}}, run: &Run{Scenario: "a", Category: "status", Repeat: 2, Status: eval.RunPass,
+		Bot: []voiceclient.BotUtterance{{Text: "[system event, not spoken by the user] hi", AudioMS: 900}, {AudioMS: 500}}, User: []UserLine{{Said: "x", Heard: "x", Source: "gemini/gemini-2.5-flash-tts"}}}}
+	r.save()
+	runs, err := LoadRuns(dir)
+	if err != nil || len(runs) != 1 || runs[0].Repeat != 2 {
+		t.Fatalf("runs = %+v %v", runs, err)
+	}
+	rep := NewReport(time.Now(), nil, 2, runs, Spend{}, nil)
+	if rep.Voice.MarkupSpoken != 1 || rep.Voice.EmptyBot != 1 || rep.Voice.TTSSources["gemini/gemini-2.5-flash-tts"] != 1 {
+		t.Fatalf("voice = %+v", rep.Voice)
+	}
+}
