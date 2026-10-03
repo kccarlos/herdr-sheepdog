@@ -163,11 +163,13 @@ func (s *Supervisor) relayUnanswered(gen uint64) {
 
 // ackCues are what an acknowledgement says in place of an answer: a
 // promise of work ("on it", "I'll check", "let me look", "one moment",
-// 我查一下, 稍等) or not knowing ("I don't have an update", 不清楚). The
-// voice knows nothing about the agents (prompts/assistant.md), so either
-// means the words still need the brain. Matched anywhere in a short
-// output (ackMaxWords).
-var ackCues = regexp.MustCompile(`(?i)^\W*(checking|looking)\b|\b(on it|checking (on|in|with|that|now|it)|let me check|i'?ll (check|look|see|find|ask|get|pass|relay|tell|let|go|find out|have a look)|i will (check|look|see|find|ask|get|pass|relay|tell|let)|let me (check|see|look|find|ask|get)|i'?m (checking|looking|asking|on it|finding)|looking into|working on it|one (moment|sec|second)|just a (moment|sec|second)|give me a (moment|sec|second)|right away|hang on|hold on|bear with me|i don'?t (have|know)|no update|not sure|i can'?t (tell|see|say))\b|好的?[，,。]?\s*我|我(来|去|先)?(查|看|问|确认)(一下|看|看看)?|让我(查|看|问|确认)|稍等|马上|这就|正在(查|看|问|确认)|等我|不(太)?清楚|不知道|没有(新的)?(更新|消息)`)
+// 我查一下, 稍等), not knowing ("I don't have an update", 不清楚) or a
+// reply that has not come back ("A reply on the workers' status has not
+// come back yet.", "the results aren't in yet", 还没有结果: campaign D
+// N2, the voice prompt's own old wording). The voice knows nothing about
+// the agents (prompts/assistant.md), so each means the words still need
+// the brain. Matched anywhere in a short output (ackMaxWords).
+var ackCues = regexp.MustCompile(`(?i)^\W*(checking|looking)\b|\b(has(n'?t| not) (yet )?come back|(have|has)n'?t (yet )?come in|(is|are)n'?t back|not back yet|(results?|repl(y|ies)|answers?|updates?|word|news) (is|are)n'?t in|(is|are) not in yet|no (reply|replies|answer|result|results|update|updates|word|news) (back )?yet|nothing (back |in )?yet|still waiting (on|for) (a |the )?(reply|replies|answer|result|results|update|word)|on it|checking (on|in|with|that|now|it)|let me check|i'?ll (check|look|see|find|ask|get|pass|relay|tell|let|go|find out|have a look)|i will (check|look|see|find|ask|get|pass|relay|tell|let)|let me (check|see|look|find|ask|get)|i'?m (checking|looking|asking|on it|finding)|looking into|working on it|one (moment|sec|second)|just a (moment|sec|second)|give me a (moment|sec|second)|right away|hang on|hold on|bear with me|i don'?t (have|know)|no update|not sure|i can'?t (tell|see|say))\b|好的?[，,。]?\s*我|我(来|去|先)?(查|看|问|确认)(一下|看|看看)?|让我(查|看|问|确认)|稍等|马上|这就|正在(查|看|问|确认)|等我|不(太)?清楚|不知道|没有(新的)?(更新|消息)|还没(有)?(结果|回复|回音|消息|回来|反馈|答复)|结果还没|(回复|答复)还没`)
 
 // ackWords are whole outputs that only acknowledge ("Okay.", "Sure.",
 // "好的。"): matched only as the entire output, since they also open

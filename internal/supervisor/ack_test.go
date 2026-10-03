@@ -26,6 +26,12 @@ func TestAcknowledgementIsNotAnAnswer(t *testing.T) {
 		{"chinese", "现在情况怎么样？", []string{"好的，我查", "一下。"}},
 		{"chinese wait", "让它跑测试。", []string{"稍等。"}},
 		{"a bare okay", "Tell it to also update the docs.", []string{"Okay."}},
+		// docs/eval/campaign-d-2026-10-03.md N2: the voice prompt's own
+		// "if a reply has not come back yet, say so", spoken for a new
+		// status question that was never relayed.
+		{"status-en r1 (campaign D)", "Not now, just give me a quick status update on all the workers.", []string{"A reply on the workers' status ", "has not come back yet."}},
+		{"names-rename-by-voice r1 (campaign D)", "What's docs doing?", []string{"Docs is still at work; ", "the results aren't in yet."}},
+		{"chinese no result yet", "现在两个都怎么样了？", []string{"还没有结果。"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -97,7 +103,16 @@ func TestAckOnly(t *testing.T) {
 		"Doing well, thanks for asking!":              false,
 		"Okay, bench-claude finished the changelog and the tests pass.":                                          false,
 		"Sure, here is what I can tell you about the weather today, it looks sunny and warm all afternoon long.": false,
-		"你好，今天天气不错。": false,
+		"你好，今天天气不错。":                                            false,
+		"A reply on the workers' status has not come back yet.": true,
+		"The results aren't in yet.":                            true,
+		"No reply yet.":                                         true,
+		"Nothing yet.":                                          true,
+		"还没有结果。":                                                true,
+		// Real answers that say "yet" or "back" are still answers.
+		"bench-claude hasn't finished yet; it is running the tests.": false,
+		"It came back clean: all tests pass.":                        false,
+		"Tests are not passing yet; TestAdd fails.":                  false,
 	} {
 		if got := ackOnly(said); got != want {
 			t.Errorf("ackOnly(%q) = %v, want %v", said, got, want)
