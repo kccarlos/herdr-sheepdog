@@ -13,8 +13,11 @@
 // and never panic; a payload that cannot be marshalled is replaced by an
 // {"encode_error": …} payload so the line is still written.
 //
-// The line shape is exactly {id, ts, source, type, pane_id?, payload,
-// dur_ms?} with dur_ms copied from payload.dur_ms when present. id is
+// The line shape is exactly {id, ts, source, type, pane_id?, turn_id?,
+// utterance_id?, payload, dur_ms?} with dur_ms, turn_id and utterance_id
+// copied from the payload when present (docs/architecture.md "Event
+// ids"). A Tap is a lossy feed for observers (internal/observe): an
+// event that does not fit its buffer is counted, never waited for. id is
 // stable and strictly increasing across day files and restarts (the
 // event's Unix microseconds, or the last id + 1): SSE frames carry it,
 // Since resumes after it, and the web layer pages the conversation

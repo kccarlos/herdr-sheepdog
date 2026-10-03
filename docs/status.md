@@ -53,6 +53,7 @@ What is in:
   APNs notifications for the iOS app ([`push.md`](push.md)).
 - **Measurement:** `sheepdog eval` (offline L0 corpus), `sheepdog
   scorecard`, `sheepdog audio-e2e`.
+- **Observability:** `turn_id` / `utterance_id` on events, `turn.latency` per CEO utterance (scorecard "Turn latency"), the observe-only daemon watchdog (`daemon.heartbeat_missed` / `_ok`); [`architecture.md`](architecture.md) "Observers".
 
 ## Verified live
 
