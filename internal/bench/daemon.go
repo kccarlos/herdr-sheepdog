@@ -75,6 +75,12 @@ func ScratchConfig(o DaemonOptions) config.Config {
 	cfg.Web.Dev = false
 	cfg.Push.APNs.KeyPath = "" // never APNs the CEO's phone
 	cfg.Herdr.Socket = filepath.Join(o.Dir, "no-herdr.sock")
+	if cfg.Gemini.Backend == "vertex" {
+		// The voice runs on Vertex; the AI Studio key pool would only
+		// register the free-tier gemini brain provider as a failover
+		// target (the eval sim leaves it out unless asked, too).
+		cfg.Gemini.APIKeys = nil
+	}
 	cfg.Brain.Enabled = true
 	cfg.Brain.Provider = orStr(o.BrainProvider, brain.ProviderDeepSeek)
 	cfg.Brain.Model = orStr(o.BrainModel, "deepseek-flash")

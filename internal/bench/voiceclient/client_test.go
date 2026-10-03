@@ -32,7 +32,7 @@ func newFakeDaemon(t *testing.T) *fakeDaemon {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/events", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
-		fmt.Fprintf(w, "id: 1\nevent: log\ndata: {\"id\":1,\"ts\":%q,\"type\":\"daemon.start\",\"payload\":{}}\n\n", time.Now().UTC().Format(time.RFC3339Nano))
+		_, _ = fmt.Fprintf(w, "id: 1\nevent: log\ndata: {\"id\":1,\"ts\":%q,\"type\":\"daemon.start\",\"payload\":{}}\n\n", time.Now().UTC().Format(time.RFC3339Nano))
 		w.(http.Flusher).Flush()
 		<-r.Context().Done()
 	})

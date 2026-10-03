@@ -208,7 +208,7 @@ func (c *Client) since() int64 { return time.Since(c.start).Milliseconds() }
 
 func (c *Client) logf(format string, args ...any) {
 	if c.o.Log != nil {
-		fmt.Fprintf(c.o.Log, "[%6.1fs] "+format+"\n", append([]any{float64(c.since()) / 1000}, args...)...)
+		_, _ = fmt.Fprintf(c.o.Log, "[%6.1fs] "+format+"\n", append([]any{float64(c.since()) / 1000}, args...)...)
 	}
 }
 
@@ -313,7 +313,7 @@ func (c *Client) readLoop(conn *websocket.Conn) {
 				}
 			} else if m.Text != "" && !c.dropUntilFlush {
 				c.lastOutAt = now
-				u := c.trailingOrOpen(now)
+				u := c.trailingOrOpen()
 				u.Fragments = append(u.Fragments, Fragment{AtMS: c.since(), Text: m.Text, AudioMS: u.AudioMS})
 			}
 		}
@@ -339,7 +339,7 @@ func (c *Client) openUtterance() *BotUtterance {
 
 // trailingOrOpen: a fragment right after an utterance closed, with no
 // new audio since, belongs to it (transcripts trail their audio).
-func (c *Client) trailingOrOpen(now time.Time) *BotUtterance {
+func (c *Client) trailingOrOpen() *BotUtterance {
 	if c.cur == nil && len(c.rec.Bot) > 0 {
 		last := &c.rec.Bot[len(c.rec.Bot)-1]
 		if c.since()-last.EndMS < c.o.Grace.Milliseconds() && c.lastAudioAt.Before(c.start.Add(time.Duration(last.EndMS)*time.Millisecond)) {
@@ -658,6 +658,17 @@ func (c *Client) PlayingFor() time.Duration {
 		return 0
 	}
 	return time.Duration(c.since()-c.cur.PlayStartMS) * time.Millisecond
+}
+
+// CurrentText is the transcript of the bot utterance in progress ("" when
+// none is open).
+func (c *Client) CurrentText() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.cur == nil {
+		return ""
+	}
+	return joinFragments(c.cur.Fragments)
 }
 
 // UserSpeaking reports whether speech is still queued or the detector is

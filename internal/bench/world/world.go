@@ -40,6 +40,8 @@ type Options struct {
 	// the scenario's events), e.g. to make the simulated CEO talk over
 	// the push it sets off.
 	OnFire func(i int, e eval.SimEvent)
+	// Clock0 is the time base of the world's timeline (default: Start).
+	Clock0 time.Time
 	Log    io.Writer
 }
 
@@ -90,10 +92,13 @@ func New(sc eval.SimScenario, o Options) (*World, error) {
 	return w, nil
 }
 
-// Start follows /events, registers every worker (roster order) and arms
-// the timed cues. The clock starts now.
+// Start follows /events and registers every worker (roster order). The
+// clock starts now (or at Options.Clock0); timed cues wait for Arm.
 func (w *World) Start(ctx context.Context) error {
 	w.start = time.Now()
+	if !w.o.Clock0.IsZero() {
+		w.start = w.o.Clock0
+	}
 	w.ctx, w.cancel = context.WithCancel(context.Background())
 	ready := make(chan error, 1)
 	w.wg.Add(1)
@@ -116,13 +121,19 @@ func (w *World) Start(ctx context.Context) error {
 			return fmt.Errorf("world: register %s: %w", a.Alias, err)
 		}
 	}
+	return nil
+}
+
+// Arm starts the timed cues (at_ms, counted from now): call it when the
+// conversation starts, after the phone heard what the flock said on
+// connect, as the text sim starts them with the conversation.
+func (w *World) Arm() {
 	for i, e := range w.sc.Events {
 		if e.AtMS > 0 {
 			i, e := i, e
 			w.schedule(time.Duration(e.AtMS)*time.Millisecond, func() { w.apply(i, e, e.Agent) })
 		}
 	}
-	return nil
 }
 
 func (w *World) since() int64 { return time.Since(w.start).Milliseconds() }

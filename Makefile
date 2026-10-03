@@ -62,9 +62,12 @@ lint:
 # `eval sim` runs every simulated-user scenario (testdata/eval/sim) on the
 # real supervisor with the scripted brain and user: a harness check of the
 # scenario files (the live campaign is `eval sim --live`, docs/iteration-2.md).
+# `bench validate` checks the voice bench's scenarios and openings manifest
+# (testdata/bench, docs/bench/README.md) without any model.
 eval: build
 	./bin/$(BINARY) eval --set all
 	./bin/$(BINARY) eval sim
+	./bin/$(BINARY) bench validate
 
 # Same, but calls the real model (gemini-3.5-flash, plain text, never
 # Live audio): needs a Gemini key (GEMINI_API_KEY or --env-file) and

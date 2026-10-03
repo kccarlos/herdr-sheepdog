@@ -326,7 +326,7 @@ func writeSamples(dir string, rs []CalibrationResult) error {
 		if err := speech.WriteWAV(filepath.Join(dir, name), r.clipped, speech.Rate); err != nil {
 			return err
 		}
-		fmt.Fprintf(&b, "| %d | %s | %s | %s | %s | %s | %s | %s | %.2f |\n", i+1, name, r.Lang, r.Voice, orStr(r.Style, "neutral"), r.Noise.Name, mdCell(r.Text), mdCell(orStr(r.Heard, "(nothing)")), r.WER)
+		_, _ = fmt.Fprintf(&b, "| %d | %s | %s | %s | %s | %s | %s | %s | %.2f |\n", i+1, name, r.Lang, r.Voice, orStr(r.Style, "neutral"), r.Noise.Name, mdCell(r.Text), mdCell(orStr(r.Heard, "(nothing)")), r.WER)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "transcripts.md"), []byte(b.String()), 0o644); err != nil {
 		return err
@@ -339,29 +339,29 @@ func mdCell(s string) string { return strings.ReplaceAll(strings.ReplaceAll(s, "
 
 func logf(w io.Writer, format string, args ...any) {
 	if w != nil {
-		fmt.Fprintf(w, format+"\n", args...)
+		_, _ = fmt.Fprintf(w, format+"\n", args...)
 	}
 }
 
 // WriteCalibrationMarkdown renders the report.
 func WriteCalibrationMarkdown(w io.Writer, rep CalibrationReport) {
-	fmt.Fprintf(w, "# Voice bench calibration, %s\n\n", rep.Started.UTC().Format("2006-01-02 15:04Z"))
-	fmt.Fprintf(w, "TTS `%s` -> phone emulator -> scratch daemon -> Gemini Live `%s` (input transcription). %d clips in %d s. Word error rate (character error rate for Chinese) after normalising case, punctuation and fillers.\n\n", rep.TTSModel, rep.VoiceModel, len(rep.Results), rep.DurationS)
+	_, _ = fmt.Fprintf(w, "# Voice bench calibration, %s\n\n", rep.Started.UTC().Format("2006-01-02 15:04Z"))
+	_, _ = fmt.Fprintf(w, "TTS `%s` -> phone emulator -> scratch daemon -> Gemini Live `%s` (input transcription). %d clips in %d s. Word error rate (character error rate for Chinese) after normalising case, punctuation and fillers.\n\n", rep.TTSModel, rep.VoiceModel, len(rep.Results), rep.DurationS)
 	if rep.SamplesDir != "" {
-		fmt.Fprintf(w, "Sample clips with transcripts: `%s` (transcripts.md).\n\n", rep.SamplesDir)
+		_, _ = fmt.Fprintf(w, "Sample clips with transcripts: `%s` (transcripts.md).\n\n", rep.SamplesDir)
 	}
-	fmt.Fprintf(w, "| Group | Clips | Mean WER | No transcript |\n|---|---|---|---|\n")
+	_, _ = fmt.Fprintf(w, "| Group | Clips | Mean WER | No transcript |\n|---|---|---|---|\n")
 	for _, g := range rep.Groups {
-		fmt.Fprintf(w, "| %s | %d | %.3f | %d |\n", g.Group, g.Clips, g.Mean, g.Missed)
+		_, _ = fmt.Fprintf(w, "| %s | %d | %.3f | %d |\n", g.Group, g.Clips, g.Mean, g.Missed)
 	}
-	fmt.Fprintf(w, "\n## Worst clips\n\n| Lang | Voice | Style | Noise | Said | Heard | WER |\n|---|---|---|---|---|---|---|\n")
+	_, _ = fmt.Fprintf(w, "\n## Worst clips\n\n| Lang | Voice | Style | Noise | Said | Heard | WER |\n|---|---|---|---|---|---|---|\n")
 	rs := append([]CalibrationResult(nil), rep.Results...)
 	sort.SliceStable(rs, func(i, j int) bool { return rs[i].WER > rs[j].WER })
 	for i, r := range rs {
 		if i >= 12 || r.WER == 0 {
 			break
 		}
-		fmt.Fprintf(w, "| %s | %s | %s | %s | %s | %s | %.2f |\n", r.Lang, r.Voice, orStr(r.Style, "neutral"), r.Noise.Name, mdCell(r.Text), mdCell(orStr(r.Heard, "(nothing)")), r.WER)
+		_, _ = fmt.Fprintf(w, "| %s | %s | %s | %s | %s | %s | %.2f |\n", r.Lang, r.Voice, orStr(r.Style, "neutral"), r.Noise.Name, mdCell(r.Text), mdCell(orStr(r.Heard, "(nothing)")), r.WER)
 	}
-	fmt.Fprintf(w, "\nEstimated spend: $%.3f (%s).\n", rep.Spend.TotalUSD, rep.Spend.Summary())
+	_, _ = fmt.Fprintf(w, "\nEstimated spend: $%.3f (%s).\n", rep.Spend.TotalUSD, rep.Spend.Summary())
 }
