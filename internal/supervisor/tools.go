@@ -124,8 +124,15 @@ func (s *Supervisor) mentionedIn(spoken string) {
 // the action is created before the send so a cancel racing it still
 // interrupts the pane. It returns what to say and, on failure, the send
 // error (an agent at a prompt is reported through reportBlocked).
+//
+// Before anything is typed it reads the pane's screen (menuOnScreen):
+// typed text ends with Enter, and on a menu that Enter picks the option
+// under the cursor.
 func (s *Supervisor) sendInstruction(ctx context.Context, row state.Agent, text, echo string) (voice.ToolResult, error) {
 	alias := aliasOr(state.Say(row))
+	if res, err, blocked := s.menuOnScreen(ctx, row); blocked {
+		return res, err
+	}
 	s.mu.Lock()
 	s.lastSubject = row.PaneID
 	p := s.newSendInstruction(row.PaneID, text, echo)
@@ -152,6 +159,69 @@ func (s *Supervisor) sendInstruction(ctx context.Context, row state.Agent, text,
 	return voice.ToolResult{Spoken: echo + " Sent.", Scheduling: voice.UrgencyInterrupt}, nil
 }
 
+// ErrMenuOnScreen is an instruction that was not typed because the
+// pane's screen shows a menu or prompt (menuOnScreen).
+var ErrMenuOnScreen = errors.New("menu on screen")
+
+// menuOnScreen reads the pane before an instruction is typed. Tier-3
+// bench 2026-10-03, finding 4: herdr reported Codex's "update available"
+// menu as idle, the instruction was typed into it, and the Enter that
+// ends every typed instruction chose "Update now": Codex ran its
+// installer. Whatever a menu looks like — an approval prompt, a CLI's
+// own update, "what's new" or model picker screen — ParsePrompt sees a
+// cursor on one of two or more options at the end of the screen. Then
+// nothing is typed. On a pane herdr reports blocked the menu becomes the
+// pending question (as reportBlocked does after agent_blocked); on any
+// other pane the fact goes back to the brain, which decides what to tell
+// the CEO (supervisor.instruction_blocked_by_menu). A screen that cannot
+// be read does not stop the instruction: herdr's own agent_blocked
+// refusal still stands behind it.
+func (s *Supervisor) menuOnScreen(ctx context.Context, row state.Agent) (voice.ToolResult, error, bool) {
+	read, err := s.herdr.Read(ctx, row.PaneID, herdr.SourceRecentUnwrapped, s.cfg.ReadLines)
+	if err != nil {
+		return voice.ToolResult{}, nil, false
+	}
+	prompt, ok := herdr.ParsePrompt(read.Text)
+	if !ok {
+		return voice.ToolResult{}, nil, false
+	}
+	if s.blockedNow(ctx, row.PaneID) {
+		return s.pendingFromPrompt(row, prompt), herdr.ErrAgentBlocked, true
+	}
+	alias := aliasOr(state.Say(row))
+	var labels []string
+	for _, o := range prompt.Answers() {
+		labels = append(labels, fmt.Sprintf("%q", o.Label))
+	}
+	fact := alias + " is showing a menu"
+	if q := strings.TrimSpace(prompt.Question); q != "" {
+		fact += ", " + fmt.Sprintf("%q", q)
+	}
+	fact += ", with the options " + strings.Join(labels, ", ") + "; nothing was typed."
+	s.log.Log(logSource, "supervisor.instruction_blocked_by_menu", row.PaneID, map[string]any{
+		"agent": aliasOr(row.Alias), "state": string(row.State), "question": prompt.Question, "options": labels,
+	})
+	return voice.ToolResult{Spoken: fact, Scheduling: voice.UrgencyInterrupt}, ErrMenuOnScreen, true
+}
+
+// blockedNow reports whether the pane is blocked: in the state table, or
+// in herdr's own list when the table has not seen the block yet.
+func (s *Supervisor) blockedNow(ctx context.Context, paneID string) bool {
+	if cur, ok := s.store.Get(paneID); ok && cur.State == herdr.StateBlocked {
+		return true
+	}
+	agents, err := s.herdr.ListAgents(ctx)
+	if err != nil {
+		return false
+	}
+	for _, a := range agents {
+		if a.PaneID == paneID {
+			return a.Status == herdr.StateBlocked
+		}
+	}
+	return false
+}
+
 // reportBlocked handles agent.prompt being refused with agent_blocked: the
 // agent is at a prompt we have not announced yet. It reads the screen and
 // turns it into the pending question.
@@ -165,6 +235,13 @@ func (s *Supervisor) reportBlocked(ctx context.Context, row state.Agent) voice.T
 	if !ok {
 		return voice.ToolResult{Spoken: alias + " is waiting at a prompt first; answer that before a new instruction.", Scheduling: voice.UrgencyInterrupt}
 	}
+	return s.pendingFromPrompt(row, prompt)
+}
+
+// pendingFromPrompt records the prompt on a blocked pane as the pending
+// question and says it, asking for its answer first.
+func (s *Supervisor) pendingFromPrompt(row state.Agent, prompt herdr.Prompt) voice.ToolResult {
+	alias := aliasOr(state.Say(row))
 	s.recordBlock(row.PaneID, prompt.Phrase(), false)
 	s.mu.Lock()
 	spoken := s.setPending(s.newAnswerPrompt(row.PaneID, prompt, alias, row.StateSince))
