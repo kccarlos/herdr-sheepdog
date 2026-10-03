@@ -353,8 +353,19 @@ func (h brainHost) Interrupt(ctx context.Context, paneID string) (string, error)
 	if !h.stillWorking(ctx, paneID) {
 		return "Interrupted " + alias + "; it stopped.", nil
 	}
-	if !h.screenShowsRunningTurn(ctx, paneID) {
-		s.log.Log(logSource, "supervisor.interrupt_unconfirmed", paneID, map[string]any{"agent": alias})
+	if ctx.Err() != nil {
+		h.unmarkInterrupted(paneID)
+		s.log.Log(logSource, "supervisor.interrupt_unconfirmed", paneID, map[string]any{"agent": alias, "why": "turn_ended"})
+		return "Sent Ctrl-C to " + alias + "; the turn ran out of time before I could confirm it stopped.", nil
+	}
+	running, read := h.screenShowsRunningTurn(ctx, paneID)
+	if !read {
+		h.unmarkInterrupted(paneID)
+		s.log.Log(logSource, "supervisor.interrupt_unconfirmed", paneID, map[string]any{"agent": alias, "why": "screen_unreadable"})
+		return "Sent Ctrl-C to " + alias + "; herdr still reports it working, and I could not read its screen to confirm, so I sent no second one.", nil
+	}
+	if !running {
+		s.log.Log(logSource, "supervisor.interrupt_unconfirmed", paneID, map[string]any{"agent": alias, "why": "no_running_turn"})
 		return "Sent Ctrl-C to " + alias + "; herdr still reports it working, but its screen shows no running turn.", nil
 	}
 	s.log.Log(logSource, "supervisor.interrupt_retry", paneID, map[string]any{"agent": alias})
@@ -364,9 +375,7 @@ func (h brainHost) Interrupt(ctx context.Context, paneID string) (string, error)
 	if !h.stillWorking(ctx, paneID) {
 		return "The first Ctrl-C did not stop " + alias + "; a second one did, and it stopped.", nil
 	}
-	s.mu.Lock()
-	delete(s.interrupted, paneID)
-	s.mu.Unlock()
+	h.unmarkInterrupted(paneID)
 	s.log.Log(logSource, "supervisor.interrupt_failed", paneID, map[string]any{"agent": alias, "ctrl_c": 2})
 	return "Sent Ctrl-C to " + alias + " twice, and it is still working: it has not stopped.", nil
 }
@@ -442,13 +451,22 @@ func (h brainHost) workingNow(ctx context.Context, paneID string) bool {
 }
 
 // screenShowsRunningTurn reports whether the pane's last lines carry the
-// CLI's running-turn hint ("esc to interrupt": Claude Code and Codex).
-func (h brainHost) screenShowsRunningTurn(ctx context.Context, paneID string) bool {
-	read, err := h.s.herdr.Read(ctx, paneID, herdr.SourceRecentUnwrapped, 12)
+// CLI's running-turn hint ("esc to interrupt": Claude Code and Codex);
+// read is false when the screen could not be read.
+func (h brainHost) screenShowsRunningTurn(ctx context.Context, paneID string) (running, read bool) {
+	r, err := h.s.herdr.Read(ctx, paneID, herdr.SourceRecentUnwrapped, 12)
 	if err != nil {
-		return false
+		return false, false
 	}
-	return strings.Contains(strings.ToLower(read.Text), "to interrupt")
+	return strings.Contains(strings.ToLower(r.Text), "to interrupt"), true
+}
+
+// unmarkInterrupted drops the pane's interrupted mark: when the stop is
+// not confirmed, the pane's next finish is announced rather than hidden.
+func (h brainHost) unmarkInterrupted(paneID string) {
+	h.s.mu.Lock()
+	delete(h.s.interrupted, paneID)
+	h.s.mu.Unlock()
 }
 
 // Promise implements brain.Host: the promise is recorded in the session

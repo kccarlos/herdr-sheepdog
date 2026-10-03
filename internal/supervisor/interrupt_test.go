@@ -2,6 +2,7 @@ package supervisor
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -99,5 +100,23 @@ func TestBrainInterruptNoSecondCtrlCWithoutARunningTurn(t *testing.T) {
 	echo, err := brainHost{h.sup}.Interrupt(t.Context(), "w1:p1")
 	if err != nil || sent.Load() != 1 || !strings.Contains(echo, "its screen shows no running turn") {
 		t.Errorf("echo = %q, %v; Ctrl-C sent %d times", echo, err, sent.Load())
+	}
+}
+
+// The result never claims more than was seen: a screen that cannot be
+// read is said to be unread, with no second Ctrl-C, and the finish that
+// follows is announced.
+func TestBrainInterruptUnreadableScreen(t *testing.T) {
+	h := newHarness(t)
+	h.addAgent("w1:p1", "Claude", "claude", herdr.StateWorking)
+	sent := ctrlCStopsAfter(h, "w1:p1", 0)
+	h.srv.Handle("pane.read", func(json.RawMessage) (any, error) { return nil, errors.New("boom") })
+	echo, err := brainHost{h.sup}.Interrupt(t.Context(), "w1:p1")
+	if err != nil || sent.Load() != 1 || !strings.Contains(echo, "could not read its screen to confirm") {
+		t.Errorf("echo = %q, %v; Ctrl-C sent %d times", echo, err, sent.Load())
+	}
+	h.transition("w1:p1", herdr.StateWorking, herdr.StateDone)
+	if h.log.count("supervisor.finished_suppressed") != 0 {
+		t.Error("the finish after an unconfirmed stop was suppressed")
 	}
 }
