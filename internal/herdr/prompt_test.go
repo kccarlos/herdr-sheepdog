@@ -53,7 +53,7 @@ func TestParsePrompt(t *testing.T) {
 				{"No, and tell Codex what to do differently", "esc"},
 			},
 			def: 0, yes: "y", no: "esc",
-			summary: `auth asks to run printf '%s\n' 'hello from codex.' > hello.txt.`,
+			summary: "auth asks to run printf.",
 		},
 		{
 			fixture:  "codex-git-prompt.screen.txt",
@@ -67,7 +67,7 @@ func TestParsePrompt(t *testing.T) {
 				{"No, and tell Codex what to do differently", "esc"},
 			},
 			def: 0, yes: "y", no: "esc",
-			summary: "auth asks to run git diff --stat; git status --short.",
+			summary: "auth asks to run git diff.",
 		},
 		{
 			fixture:  "codex-trust-dialog.screen.txt",
@@ -264,5 +264,24 @@ func TestParsePromptMetaOptions(t *testing.T) {
 	// A real "Yes" still maps, whatever the meta rows are.
 	if p, _ := herdr.ParsePrompt(screen(t, "claude-askuserquestion.screen.txt")); strings.Join(p.YesKeys, " ") != "1" || strings.Join(p.NoKeys, " ") != "2" {
 		t.Errorf("yes/no = %v / %v", p.YesKeys, p.NoKeys)
+	}
+}
+
+// docs/eval-campaign-2026-10-03.md H3: the block template read the raw
+// command aloud ("bench-codex asks to run go test -race./...."). Only the
+// command's plain leading words are spoken; the full command stays in
+// Prompt.Command.
+func TestSummarySpeaksOnlyPlainCommandWords(t *testing.T) {
+	cases := map[string]string{
+		"go test -race ./...":                  "bench-codex asks to run go test.",
+		"git push --force origin main":         "bench-codex asks to run git push.",
+		"./scripts/release.sh":                 "bench-codex asks to run a command.",
+		"npm run build":                        "bench-codex asks to run npm run build.",
+		"go run ./cmd/sheepdog eval --set all": "bench-codex asks to run go run.",
+	}
+	for cmd, want := range cases {
+		if got := (herdr.Prompt{Command: cmd}).Summary("bench-codex"); got != want {
+			t.Errorf("Summary for %q = %q, want %q", cmd, got, want)
+		}
 	}
 }

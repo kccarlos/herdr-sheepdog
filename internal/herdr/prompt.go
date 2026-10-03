@@ -4,6 +4,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -20,7 +21,7 @@ import (
 const (
 	promptTailLines      = 40
 	promptQuestionLines  = 12
-	promptCommandWords   = 12
+	promptCommandWords   = 4
 	promptMaxOptionLabel = 200
 )
 
@@ -191,7 +192,10 @@ func (p Prompt) Phrase() string {
 func (p Prompt) Summary(alias string) string {
 	switch {
 	case p.Command != "":
-		return alias + " asks to run " + shortCommand(p.Command) + "."
+		if cmd := spokenCommand(p.Command); cmd != "" {
+			return alias + " asks to run " + cmd + "."
+		}
+		return alias + " asks to run a command."
 	case p.Phrase() != "":
 		return alias + " is asking " + p.Phrase() + "."
 	default:
@@ -305,13 +309,35 @@ func tailLines(text string, n int) []string {
 	return lines
 }
 
-// shortCommand trims a command to something sayable inside a sentence.
-func shortCommand(cmd string) string {
-	words := strings.Fields(cmd)
-	if len(words) > promptCommandWords {
-		return strings.Join(words[:promptCommandWords], " ") + "…"
+// spokenCommand is the part of a command a listener can take in: its
+// leading plain words ("go test" of "go test -race ./..."), up to the
+// first flag, path, quote, operator or assignment and at most
+// promptCommandWords of them. The raw rest is screen syntax: spoken, it
+// came out as "-race./...." (docs/eval-campaign-2026-10-03.md H3). The
+// full command stays on the pending action for the brain and the pages.
+func spokenCommand(cmd string) string {
+	var out []string
+	for _, w := range strings.Fields(cmd) {
+		if len(out) == promptCommandWords || !plainWord(w) {
+			break
+		}
+		out = append(out, w)
 	}
-	return strings.Join(words, " ")
+	return strings.Join(out, " ")
+}
+
+// plainWord is a command word that reads as a word: letters, digits,
+// "-" and "_", not opening with "-" (a flag).
+func plainWord(w string) bool {
+	if w == "" || w[0] == '-' {
+		return false
+	}
+	for _, r := range w {
+		if !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '-' && r != '_' {
+			return false
+		}
+	}
+	return true
 }
 
 // truncate cuts s to n runes (an option's label is screen text: it is

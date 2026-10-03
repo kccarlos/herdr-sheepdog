@@ -44,7 +44,7 @@ func (h *harness) pushTexts() []string {
 // context (the brain's own prompt went out just now); "idle again" never.
 func TestChattinessLevels(t *testing.T) {
 	const (
-		authQ    = `auth asks to run printf '%s\n' 'hello from codex.' > hello.txt.`
+		authQ    = `auth asks to run printf.`
 		docsQ    = "docs is asking do you want to create claude.txt."
 		replaced = "Dropping the earlier question from auth; now docs is asking do you want to create claude.txt."
 		docsDone = "docs finished."

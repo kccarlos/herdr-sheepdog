@@ -113,9 +113,14 @@ var (
 	rePaneID  = regexp.MustCompile(`\bw\d+:[pt]\d+\b`)
 	// reIssue matches a PR or issue number ("#49", "PR #49", "PR 49"):
 	// the shepherd hears it and cannot use it.
-	reIssue    = regexp.MustCompile(`(?i)(?:\b(?:PR|pull request|issue)\s*#?\s*\d+\b|#\d+\b)`)
-	reSpaces   = regexp.MustCompile(`[ \t]+`)
-	reOrphan   = regexp.MustCompile(`\s+([,.;:!?])`)
+	reIssue  = regexp.MustCompile(`(?i)(?:\b(?:PR|pull request|issue)\s*#?\s*\d+\b|#\d+\b)`)
+	reSpaces = regexp.MustCompile(`[ \t]+`)
+	// reOrphan is punctuation left standing alone after a scrub ("the
+	// file ." once a path is gone): it is joined back to the word before
+	// only when it ends a token, so the space before a "." that opens a
+	// path or command token stays ("go test -race ./..." was spoken as
+	// "-race./....", docs/eval-campaign-2026-10-03.md H3).
+	reOrphan   = regexp.MustCompile(`\s+([,.;:!?]+)(\s|$)`)
 	reSentence = regexp.MustCompile(`[.!?]+["')\]]*(?:\s+|$)|[。！？]+[”’」』）"')\]]*\s*`)
 )
 
@@ -149,7 +154,7 @@ func scrub(s string) string {
 	s = rePaneID.ReplaceAllString(s, "")
 	s = reIssue.ReplaceAllString(s, "")
 	s = reSpaces.ReplaceAllString(s, " ")
-	s = reOrphan.ReplaceAllString(s, "$1")
+	s = reOrphan.ReplaceAllString(s, "$1$2")
 	return strings.TrimSpace(s)
 }
 
