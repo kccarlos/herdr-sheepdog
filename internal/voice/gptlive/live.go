@@ -330,6 +330,7 @@ func (s *Session) onOutputText(delta string) {
 	s.outText += delta
 	s.play.Said(delta)
 	s.heard.Said(delta)
+	s.requeue.Said(delta)
 	s.mu.Unlock()
 	s.log.Log(logSource, "voice.transcript.out", "", map[string]any{"text": delta, "final": false})
 	s.emit(voice.EventTranscript{Dir: voice.DirOut, Text: delta})

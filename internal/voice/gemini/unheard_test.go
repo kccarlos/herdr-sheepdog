@@ -355,3 +355,49 @@ func TestStaleAnswerGoesToTheBrain(t *testing.T) {
 		t.Errorf("answer sent %d times, want once", n)
 	}
 }
+
+// TestRequeuedLineAlreadyHeardIsDropped is #111's collision-finish-push
+// arm A r1: the kept-promise finish line went out at 19035 ms, the CEO
+// talked over it after "It added the changelog note about", asked "did
+// it touch the changelog?", and the voice answered from what it had
+// voiced: "Yes, it added the changelog note about the fix to the first
+// argument." At 31000 ms the re-queued line replayed the same news. It
+// is now dropped (voice.push_dropped {reason: already_heard}).
+func TestRequeuedLineAlreadyHeardIsDropped(t *testing.T) {
+	c := newFakeConn("c1")
+	h := newHarness(t, Config{}, &fakeDialer{results: []func() (Conn, error){ok(c)}})
+	line := "bench-claude is done. It added the changelog note about the fix to the first argument. Shall I have it run the tests to confirm the fix holds?"
+	tags := map[string]any{"push_id": "push-tmc1yd-8", "event_id": "evt-tmc1yb-7", "agent": "bench-claude", voice.TagKeepsPromiseIDs: []string{"pr-tmc1y1-4"}}
+	if err := h.s.PushTagged(line, voice.UrgencyIdle, tags); err != nil {
+		t.Fatal(err)
+	}
+	c.waitSent(t, "finish push", isContent(line))
+	speakReply(h, c, []string{"Bench-claude is done.", "It added the changelog note about"}, 300)
+	h.s.ClientPlayback(voice.PlaybackStarted, 0)
+	h.s.ClientSpeaking(true)
+	c.serve(interruptedMsg())
+	h.waitEvent("model interrupted", func(voice.Event) bool { return len(h.log.payloads("voice.interrupted")) >= 1 })
+	h.s.ClientPlayback(voice.PlaybackFlushed, 600)
+	ev := h.waitEvent("unheard", isUnheard).(voice.EventPushUnheard)
+	if !ev.Requeue || ev.Push.Reason != voice.UnheardUserTurn {
+		t.Fatalf("unheard = %+v", ev)
+	}
+	c.serve(turnCompleteMsg())
+	h.s.ClientSpeaking(false)
+	c.serve(inputTranscriptMsg("Also, did it touch the changelog?", false))
+	speakReply(h, c, []string{"Yes, it added the changelog note", "about the fix to the first argument."}, 400)
+	h.s.ClientPlayback(voice.PlaybackStarted, 0)
+	c.serve(turnCompleteMsg())
+	h.s.ClientPlayback(voice.PlaybackDrained, 800)
+
+	waitCount(t, "dropped", 1, 8*time.Second, func() int { return len(h.log.payloads("voice.push_dropped")) })
+	if d := h.log.payloads("voice.push_dropped"); d[0]["reason"] != voice.DropAlreadyHeard || d[0]["push_id"] != "push-tmc1yd-8" {
+		t.Errorf("voice.push_dropped = %v", d)
+	}
+	if n := countSent(c, line); n != 1 {
+		t.Errorf("finish line sent %d times, want once", n)
+	}
+	if got := unheardEvents(h); len(got) != 1 {
+		t.Errorf("unheard events = %d, want 1 (already heard is not news for the brain)", len(got))
+	}
+}
