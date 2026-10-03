@@ -284,3 +284,43 @@ func TestFailoverTranscriptCarriesOver(t *testing.T) {
 		t.Errorf("the selected provider's next call lacks the failover's answer")
 	}
 }
+
+// The compaction's summary call fails over like a turn's step: a 504 on
+// the selected provider, the summary written by the next one.
+func TestCompactionSummaryFailsOver(t *testing.T) {
+	isSummary := func(c braintest.Call) bool {
+		return strings.Contains(c.Text(), "Summarise the following supervisor transcript")
+	}
+	primary := braintest.NewModel()
+	primary.Default = &braintest.Step{Fn: func(c braintest.Call) (*genai.GenerateContentResponse, error) {
+		if isSummary(c) {
+			return nil, err504
+		}
+		return braintest.Response(braintest.Step{Text: braintest.Reply("Fine.", "")}), nil
+	}}
+	ds := braintest.NewModel()
+	ds.Default = &braintest.Step{Text: "The CEO asked about auth many times."}
+	h := newHarness(t, primary, func(c *Config) { c.WindowTokens = 300 })
+	_ = h.brain.AddProvider(ProviderDeepSeek, ds)
+	fillWindow(h)
+	if _, err := h.ask("how is auth?", "auth"); err != nil {
+		t.Fatal(err)
+	}
+	h.brain.Quiesce()
+	if c, ok := h.brain.LastCompaction(); !ok || c.Dropped == 0 {
+		t.Fatalf("no compaction: %+v (events %v)", c, h.log.ofType("brain.compaction"))
+	}
+	if calls := ds.Calls(); len(calls) != 1 || !isSummary(calls[0]) || calls[0].Model != DefaultDeepSeekModel {
+		t.Errorf("deepseek calls = %d", len(calls))
+	}
+	ev := h.log.ofType("brain.failover")
+	if len(ev) != 1 {
+		t.Fatalf("brain.failover = %v", ev)
+	}
+	if p := payload(ev[0]); p["call"] != "compaction" || p["from"] != ProviderGemini || p["to"] != ProviderDeepSeek || p["reason"] != "http_504" {
+		t.Errorf("brain.failover = %v", p)
+	}
+	if h.brain.Provider() != ProviderGemini {
+		t.Errorf("selection changed to %s", h.brain.Provider())
+	}
+}

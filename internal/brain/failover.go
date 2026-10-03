@@ -176,14 +176,10 @@ func (b *Brain) onFailingStreak(provider string) bool {
 // deadline for the retry.
 func (b *Brain) generateStep(ctx context.Context, t *turn, step int, msgs []Message, cfg *genai.GenerateContentConfig) (*genai.GenerateContentResponse, json.RawMessage, error) {
 	actx := ctx
-	if !t.failedOver && b.onFailingStreak(t.provider) {
-		if dl, ok := ctx.Deadline(); ok && time.Until(dl)-failoverReserve >= failoverMinAttempt {
-			if _, _, _, ok := b.failoverTarget(t.provider, t.model); ok {
-				var cancel context.CancelFunc
-				actx, cancel = context.WithDeadline(ctx, dl.Add(-failoverReserve))
-				defer cancel()
-			}
-		}
+	if !t.failedOver {
+		var cancel context.CancelFunc
+		actx, cancel = b.firstAttempt(ctx, t.provider, t.model)
+		defer cancel()
 	}
 	resp, raw, err := b.generate(actx, t, msgs, cfg)
 	if err == nil {
@@ -204,11 +200,57 @@ func (b *Brain) generateStep(ctx context.Context, t *turn, step int, msgs []Mess
 	from, fromModel := t.provider, t.model
 	b.log.Log(logSource, "brain.failover", "", map[string]any{
 		"from": from, "from_model": fromModel, "to": to, "to_model": model, "reason": reason, "error": err.Error(),
-		"turn": t.n, "step": step,
+		"turn": t.n, "step": step, "call": "turn",
 	})
 	t.provider, t.model, t.impl, t.failedOver = to, model, impl, true
 	b.noteFailover(from, to)
 	return b.generate(ctx, t, msgs, cfg)
+}
+
+// firstAttempt is the context of a call's first attempt on provider:
+// ctx itself, or — while provider is on a failing streak and a failover
+// target exists — ctx cut failoverReserve before its deadline, so the
+// retry has time (a provider that hangs to the deadline otherwise takes
+// it all).
+func (b *Brain) firstAttempt(ctx context.Context, provider, model string) (context.Context, context.CancelFunc) {
+	if !b.onFailingStreak(provider) {
+		return ctx, func() {}
+	}
+	dl, ok := ctx.Deadline()
+	if !ok || time.Until(dl)-failoverReserve < failoverMinAttempt {
+		return ctx, func() {}
+	}
+	if _, _, _, ok := b.failoverTarget(provider, model); !ok {
+		return ctx, func() {}
+	}
+	return context.WithDeadline(ctx, dl.Add(-failoverReserve))
+}
+
+// generateSummary is the compaction's summary call with the same
+// failover as a turn's step: the selected provider first, then once
+// the failover target (logged as brain.failover {call: compaction}).
+func (b *Brain) generateSummary(ctx context.Context, contents []*genai.Content, cfg *genai.GenerateContentConfig) (*genai.GenerateContentResponse, error) {
+	provider, model, impl := b.current()
+	actx, cancel := b.firstAttempt(ctx, provider, model)
+	defer cancel()
+	resp, err := impl.Generate(actx, model, contents, cfg)
+	if err == nil {
+		b.failoverSucceeded(provider)
+		return resp, nil
+	}
+	reason, ok := failoverReason(ctx, err)
+	if !ok {
+		return nil, err
+	}
+	to, toModel, toImpl, ok := b.failoverTarget(provider, model)
+	if !ok {
+		return nil, err
+	}
+	b.log.Log(logSource, "brain.failover", "", map[string]any{
+		"from": provider, "from_model": model, "to": to, "to_model": toModel, "reason": reason, "error": err.Error(), "call": "compaction",
+	})
+	b.noteFailover(provider, to)
+	return toImpl.Generate(ctx, toModel, contents, cfg)
 }
 
 // failoverSucceeded ends the failing streak when the selected provider

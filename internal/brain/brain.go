@@ -749,13 +749,13 @@ func (b *Brain) Reset(ctx context.Context, via string) (string, error) {
 }
 
 // summarize is the compaction's model call: one plain text-in/text-out
-// generation, no tools, on the current provider and model, thinking off
+// generation, no tools, on the current provider and model (failing over
+// like a turn's step, generateSummary), thinking off
 // (a summary needs no chain of thought) and short: the engine caps the
 // result at summaryMaxTokens (docs/iteration-2.md WP5).
 func (b *Brain) summarize(ctx context.Context, text string) (string, error) {
 	prompt := "Summarise the following supervisor transcript in at most 10 short lines (under 300 words) for your own later reference: what the CEO asked and decided, what each agent was told, did, asked and answered, and anything still open. Keep aliases; drop paths, hashes and ids.\n\n" + text
-	_, model, impl := b.current()
-	resp, err := impl.Generate(ctx, model, []*genai.Content{{Role: genai.RoleUser, Parts: []*genai.Part{{Text: prompt}}}}, &genai.GenerateContentConfig{ThinkingConfig: thinkingOff()})
+	resp, err := b.generateSummary(ctx, []*genai.Content{{Role: genai.RoleUser, Parts: []*genai.Part{{Text: prompt}}}}, &genai.GenerateContentConfig{ThinkingConfig: thinkingOff()})
 	if err != nil {
 		return "", err
 	}
