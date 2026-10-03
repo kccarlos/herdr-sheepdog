@@ -354,6 +354,11 @@ func investigationRequestText(req Request) string {
 	if line := languageLine(req.facts.Language); line != "" {
 		b.WriteString(line + "\n")
 	}
+	if inv.Status == InvestigationError {
+		// Campaign D N8: the daemon used to read its own failure line
+		// ("no command-line helper is set up on this machine") to the CEO.
+		fmt.Fprintf(&b, "It did not run: %s. Tell the CEO in plain words what that means for them (for example that you cannot look at the files directly from here) and what you can still do; do not name tools or helpers.\n", inv.Err)
+	}
 	if req.Result != "" {
 		b.WriteString("What it found:\n")
 		b.WriteString(wrapWorker(req.Agent, "investigation", req.Result))
