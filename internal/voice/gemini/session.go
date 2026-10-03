@@ -3,6 +3,7 @@ package gemini
 import (
 	"context"
 	"fmt"
+	"math"
 	"sync"
 	"time"
 
@@ -95,6 +96,9 @@ type Session struct {
 	// (voice.PlaybackUtterance).
 	playUtt voice.PlaybackUtterance
 	vad     voice.ClientSpeech
+	// echo holds the microphone back while the client plays the model's
+	// audio, dropping what the reply explains (voice/echogate.go).
+	echo voice.EchoGate
 	// recap is the recent conversation (recap.go): what the shepherd
 	// said (inText until it is flushed), what the voice said (outText),
 	// cut to what was heard, and the spoken pushes. A connection that
@@ -295,6 +299,7 @@ func (s *Session) ClientAttached(attached bool) {
 	s.noteAttachLocked(s.now(), attached, changed)
 	s.play.Detach()
 	s.vad.Reset()
+	s.echo.Reset()
 	s.mu.Unlock()
 	if changed {
 		s.log.Log(logSource, "voice.client", "", map[string]any{"attached": attached})
@@ -320,6 +325,13 @@ func (s *Session) ClientAttached(attached bool) {
 // wants the pause in real time. A frame from the client (the gate
 // reopened) cancels the tail and the stream end.
 func (s *Session) AudioStreamEnd() {
+	s.mu.Lock()
+	held, verdict := s.echo.StreamEnd(s.now())
+	s.mu.Unlock()
+	s.logEchoVerdict(verdict, "stream_end")
+	for _, f := range held {
+		_ = s.forwardAudio(f)
+	}
 	s.mu.Lock()
 	conn, muted := s.conn, s.muted
 	s.tailGen++
@@ -427,6 +439,25 @@ func (s *Session) SendAudio(pcm16 []byte) error {
 		s.mu.Unlock()
 		return nil
 	}
+	frames, verdict := s.echo.Mic(s.now(), pcm16)
+	s.mu.Unlock()
+	s.logEchoVerdict(verdict, "barge_in")
+	for _, f := range frames {
+		if err := s.forwardAudio(f); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// forwardAudio sends one microphone frame the echo gate let through
+// (buffered while reconnecting).
+func (s *Session) forwardAudio(pcm16 []byte) error {
+	s.mu.Lock()
+	if s.muted || s.status == voice.StatusClosed {
+		s.mu.Unlock()
+		return nil
+	}
 	s.tailGen++ // the gate reopened: no comfort tail, no stream end
 	conn := s.conn
 	if conn == nil {
@@ -436,6 +467,35 @@ func (s *Session) SendAudio(pcm16 []byte) error {
 	}
 	s.mu.Unlock()
 	return s.sendAudio(conn, pcm16)
+}
+
+// logEchoVerdict logs the echo gate arming (the client's echo showed
+// itself) or letting the shepherd through while the reply played
+// (voice.echo_gate).
+func (s *Session) logEchoVerdict(v *voice.EchoVerdict, why string) {
+	if v == nil {
+		return
+	}
+	s.mu.Lock()
+	st := s.echo.Stats()
+	s.mu.Unlock()
+	if v.Armed {
+		why = "armed"
+	}
+	s.log.Log(logSource, "voice.echo_gate", "", map[string]any{
+		"open": v.Open, "why": why, "corr": round2(v.Corr), "residual": round2(v.Residual), "lag_ms": v.LagMs,
+		"released": v.Released, "withheld_total": st.Withheld, "opens_total": st.Opens,
+	})
+}
+
+func round2(f float64) float64 { return math.Round(f*100) / 100 }
+
+// VoiceStats is merged into web.client.stats: the echo gate's counters.
+func (s *Session) VoiceStats() map[string]any {
+	s.mu.Lock()
+	st := s.echo.Stats()
+	s.mu.Unlock()
+	return map[string]any{"echo_withheld_frames": st.Withheld, "echo_released_frames": st.Released, "echo_opens": st.Opens, "echo_armed": st.Armed}
 }
 
 func (s *Session) sendAudio(conn Conn, pcm16 []byte) error {
@@ -664,6 +724,7 @@ func (s *Session) ClientPlayback(state string, playedMs int) {
 	s.mu.Lock()
 	now := s.now()
 	rep := s.play.Report(now, state, playedMs)
+	s.echo.Playback(now, state)
 	utt := s.playUtt.Started(state)
 	if rep.Cut != nil {
 		s.flushRecapLocked()
