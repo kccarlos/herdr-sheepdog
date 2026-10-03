@@ -3,7 +3,9 @@ package supervisor
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
+	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
@@ -88,7 +90,72 @@ func (s *Supervisor) Stop(ctx context.Context, trigger string) (voice.ToolResult
 			s.brain.Daemon(queuedLine(out))
 		}
 	}
+	if trigger == StopTriggerTool {
+		s.relayStopRest()
+	}
 	return voice.ToolResult{Spoken: stopSentence(out), Scheduling: voice.UrgencyInterrupt}, nil
+}
+
+// stopRestWindow bounds how old the words around a stop() may be for
+// the daemon to relay what followed the stop word.
+const stopRestWindow = 10 * time.Second
+
+// relayStopRest hands the brain what the shepherd said after the stop
+// word. The #113 echo runs: "Stop. Stop. Is anything waiting for me?"
+// went to the voice's stop() tool, the answer was "Nothing was in
+// flight.", and the question was never answered — stop() carries no
+// text, and the tool call kept the daemon from relaying the words. The
+// stop has run by now (and the brain has its context line); the rest of
+// the words go through the same path as a relay, and the reply is pushed
+// as a late reply is. Words that only repeat the stop ("Stop, stop
+// everything") leave nothing to relay.
+func (s *Supervisor) relayStopRest() {
+	s.mu.Lock()
+	last := s.lastInputLocked()
+	if last == nil || last.kind != InputVoice || last.claimed || last.used || s.cfg.Now().Sub(last.at) > stopRestWindow {
+		s.mu.Unlock()
+		return
+	}
+	rest := stopRest(last.text)
+	if rest == "" {
+		s.mu.Unlock()
+		return
+	}
+	c := s.claimRunLocked([]*shepherdInput{last})
+	c.in.open = false
+	c.text = rest
+	s.replies.Add(1)
+	s.mu.Unlock()
+	go func() {
+		defer s.replies.Done()
+		s.log.Log(logSource, "supervisor.stop_rest", "", map[string]any{"text": rest, "heard": last.text, "utterance_id": c.id})
+		res := s.handleUtterance(s.life, c, "", true)
+		if res.Spoken == "" {
+			return
+		}
+		s.pushTagged("", res.Spoken, res.Scheduling, map[string]any{"utterance_id": c.id})
+	}()
+}
+
+// stopLead is the stop words an utterance opens with, repeated: "Stop.
+// Stop.", "Wait, no,", "停下，等一下，".
+var stopLead = regexp.MustCompile(`(?i)^(\s*((stop( it| that| now)?|wait|cancel|hold on|hang on|no|okay|ok)\b|停下|停止|停|等等|等一下|取消|别说了)[\s,.!;:，。！；：、…-]*)+`)
+
+// stopRest is what text says after its opening stop words, or "" when
+// that is nothing more than another word or two of the stop.
+func stopRest(text string) string {
+	lead := stopLead.FindString(text)
+	if strings.TrimSpace(lead) == "" {
+		return ""
+	}
+	rest := strings.TrimSpace(text[len(lead):])
+	if rest == "" || fillerOnly(rest) || bareStop(rest) {
+		return ""
+	}
+	if !strings.ContainsAny(rest, "?？") && spokenLength(rest) < 3 {
+		return ""
+	}
+	return rest
 }
 
 // resolveStop works out the phase from state and carries it out.
