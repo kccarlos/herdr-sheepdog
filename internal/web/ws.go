@@ -159,11 +159,15 @@ func (h *hub) handle(w http.ResponseWriter, r *http.Request) {
 		ca.ClientAttached(true)
 	}
 
-	// The contract: a status message before any binary frame.
+	// The contract: a status message before any binary frame — sent at
+	// once, before the handshake, so a legacy client is served exactly
+	// as before.
 	c.enqueue(controlFrame(h.statusMsg()))
+	c.startHandshake(h.s.deps.HandshakeTimeout)
 	go c.writeLoop()
 	go c.statsLoop(h.s.deps.StatsInterval)
 	reason := c.readLoop(r.Context())
+	c.stopHandshake()
 	c.finish(reason)
 
 	h.mu.Lock()
@@ -423,6 +427,8 @@ type client struct {
 	// aec is the client's microphone echo cancellation from its ping
 	// ("true", "false", "unknown"; empty: never reported).
 	aec string
+	// hs is the protocol handshake (handshake.go).
+	hs handshake
 	// sendWaits is a bounded rolling window of how long recent audio
 	// frames waited in the outbound queue before writeLoop sent them
 	// (ms), for web.client.stats send_wait_p95_ms / send_wait_max_ms.
@@ -602,7 +608,13 @@ func (c *client) readLoop(ctx context.Context) string {
 		c.mu.Lock()
 		c.framesIn++
 		c.bytesIn += len(data)
+		closing := c.closing
 		c.mu.Unlock()
+		if closing {
+			// Replaced, shutting down or refused (protocol_too_old):
+			// nothing more reaches the session.
+			continue
+		}
 		if typ == websocket.MessageBinary {
 			c.onAudio(data)
 			continue
@@ -613,6 +625,9 @@ func (c *client) readLoop(ctx context.Context) string {
 
 // onAudio forwards a microphone frame to the session.
 func (c *client) onAudio(data []byte) {
+	if !c.legacyIfUnresolved("first_frame") {
+		return
+	}
 	h := c.h
 	h.mu.Lock()
 	muted := h.muted
@@ -632,6 +647,13 @@ func (c *client) onAudio(data []byte) {
 func (c *client) onControl(data []byte) {
 	h := c.h
 	m, err := wsproto.Parse(data)
+	if err == nil && m.Type == wsproto.TypeClientReady {
+		c.onClientReady(m)
+		return
+	}
+	if !c.legacyIfUnresolved("first_frame") {
+		return
+	}
 	if err != nil {
 		c.enqueue(controlFrame(wsproto.Error(err.Error())))
 		return

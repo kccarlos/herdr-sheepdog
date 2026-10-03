@@ -4,6 +4,8 @@ import (
 	"crypto/subtle"
 	"net/http"
 	"strings"
+
+	"github.com/kccarlos/herdr-sheepdog/internal/voice/wsproto"
 )
 
 // tokenCookie is the cookie POST /api/login sets once web.token is
@@ -74,6 +76,12 @@ type HelloResponse struct {
 	// "" with --voice=off).
 	VoiceProvider string `json:"voice_provider"`
 	VoiceModel    string `json:"voice_model"`
+	// Protocol is the /ws protocol this daemon speaks and MinProtocol
+	// the oldest client protocol it serves (docs/ws-contract.md
+	// "Protocol version and handshake"). Version is the binary's
+	// version; the two ship and move separately.
+	Protocol    int `json:"protocol"`
+	MinProtocol int `json:"min_protocol"`
 }
 
 // HelloAudio is the /ws audio contract (docs/ws-contract.md): what a
@@ -93,6 +101,7 @@ func (s *Server) handleHello(w http.ResponseWriter, r *http.Request) {
 		Name: "sheepdog", Version: s.deps.Version, VoiceName: s.deps.VoiceName, Auth: auth, WS: "/ws",
 		Audio:         HelloAudio{InHz: 16000, OutHz: 24000, Format: "pcm16le mono"},
 		VoiceProvider: s.voiceProvider(), VoiceModel: s.voiceModel(),
+		Protocol: wsproto.ProtocolVersion, MinProtocol: s.deps.MinProtocol,
 	})
 }
 

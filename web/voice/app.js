@@ -5,6 +5,7 @@
 // (docs/ws-contract.md). Vanilla JS module, no build step.
 
 import { AEC_HINT, aecStatus, aecWarn, isMobile } from './aec.js';
+import { Handshake, clientReady, HANDSHAKE_TIMEOUT_MS } from './handshake.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -40,6 +41,9 @@ const state = {
   pingSentAt: 0,
   pingOutstanding: false,
   pongMs: null,
+  // The /ws protocol handshake of the current connection (handshake.js).
+  handshake: null,
+  handshakeTimer: 0,
 
   muted: false,
   daemonMuted: false,
@@ -330,6 +334,17 @@ function openWS() {
     if (state.ws !== ws) return;
     state.wsState = 'open';
     state.reconnectDelay = RECONNECT_MIN_MS;
+    // client-ready goes first, before anything else on the connection
+    // (docs/ws-contract.md "Protocol version and handshake"); nothing
+    // waits for bot-ready — an older daemon never sends one.
+    state.handshake = new Handshake();
+    send(clientReady());
+    clearTimeout(state.handshakeTimer);
+    state.handshakeTimer = setTimeout(() => {
+      if (state.ws !== ws || !state.handshake) return;
+      state.handshake.onTimeout();
+      render();
+    }, HANDSHAKE_TIMEOUT_MS);
     // Reconnecting clients start unmuted and ungated on the daemon (contract).
     if (state.muted) send({ type: 'mute', on: true });
     if (state.gate.on) send({ type: 'silence', on: true });
@@ -351,7 +366,12 @@ function openWS() {
     state.ws = null;
     state.wsState = 'closed';
     stopPing();
+    clearTimeout(state.handshakeTimer);
     console.log(`[voice] ws closed code=${e.code} reason=${JSON.stringify(e.reason)}`);
+    if (state.handshake && (state.handshake.state === 'rejected' || state.handshake.state === 'daemon_old')) {
+      // A protocol mismatch does not fix itself: no reconnect loop.
+      return;
+    }
     if (e.reason === 'replaced') {
       // Another client (a second tab, the phone) took the session over.
       // Reconnecting would take it back, and that client would do the
@@ -425,6 +445,22 @@ function stopPing() {
 }
 
 function onControl(m) {
+  if (state.handshake) {
+    const r = state.handshake.onMessage(m);
+    if (r.close) {
+      console.log(`[voice] protocol: ${state.handshake.state}`);
+      const handshake = state.handshake;
+      disconnect();
+      state.handshake = handshake;
+      showError(r.message);
+      render();
+      return;
+    }
+    if (r.consumed) {
+      render();
+      return;
+    }
+  }
   switch (m.type) {
     case 'status':
       state.voice = m.voice;
@@ -655,6 +691,7 @@ function render() {
   $('st-flush').textContent = state.lastFlushMs == null ? '–' : `flush → buffer empty ${state.lastFlushMs.toFixed(1)} ms`;
   $('st-reconnects').textContent = String(state.reconnects);
   $('st-ping').textContent = state.pongMs == null ? '–' : `${state.pongMs.toFixed(0)} ms rtt`;
+  $('st-protocol').textContent = state.handshake ? state.handshake.describe() : '–';
 
   renderTranscript();
 }

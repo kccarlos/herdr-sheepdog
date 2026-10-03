@@ -2,7 +2,13 @@
 
 The Go types for every control message live in `internal/voice/wsproto`;
 the WS server, the browser page and the iOS app are all built from this
-document. Change the doc and the Go types together.
+document. Change the doc and the Go types together: every line of every
+fenced `json` block below is one control message, and
+`internal/voice/wsproto/contract_test.go` parses each one with the Go
+type (unknown fields fail), re-encodes it and requires the same JSON back
+(a field the type drops fails), and requires an example of every message
+type. Schemas with placeholders (`true|false`, `N`) stay in tables and
+inline code; only real messages go in `json` blocks.
 
 ## Endpoint
 
@@ -17,6 +23,87 @@ document. Change the doc and the Go types together.
   replacing a browser connection never restarts it. A new client immediately
   receives one `status` message describing the current voice state and then
   continues the same conversation.
+
+## Protocol version and handshake
+
+The daemon and its clients ship separately (the iOS app through
+TestFlight, the daemon as a binary), so `/ws` carries a **protocol
+version**: an integer that changes only when the contract below changes
+in a way a client must know about. It is independent of the daemon's
+binary version.
+
+| Protocol | Contract |
+|---|---|
+| 1 | Everything in this document (the contract as of the handshake's introduction, plus the handshake itself). |
+
+- **`GET /api/hello`** carries `protocol` (what the daemon speaks) and
+  `min_protocol` (the oldest client protocol it still serves), so a
+  client can tell before it connects. A daemon without them is protocol 1.
+- **`client-ready`.** A protocol-aware client sends this as its **first
+  text frame**, before `mute`, `silence`, `speaking` or any audio:
+
+  ```json
+  {"type":"client-ready","protocol":1,"client":{"name":"sheepdog-ios","version":"0.2.0 (12)","platform":"ios"}}
+  {"type":"client-ready","protocol":1,"client":{"name":"sheepdog-voice","version":"embedded","platform":"web"}}
+  ```
+
+  `protocol` is required; `client` (`name`, `version`, `platform`) is
+  for the log and should always be sent.
+- **`bot-ready`.** The daemon answers with the protocol it will speak on
+  this connection (its own: a newer client steps down to it, or closes if
+  it cannot), the oldest it serves, its binary version and its
+  **features** — optional parts of the contract and the HTTP API beside
+  it, so a client branches on a name rather than a version number:
+
+  ```json
+  {"type":"bot-ready","protocol":1,"min_protocol":1,"daemon":{"version":"0.4.2"},"features":["playback","speaking","silence","provider","history","push","models"]}
+  ```
+
+  | Feature | Meaning | Listed |
+  |---|---|---|
+  | `playback` | playback reports drive "speaking" and cut transcripts (*Playback reports*) | always |
+  | `speaking` | the client speech detector (*Client speech detector*) | always |
+  | `silence` | the silence gate (*Silence gate*) | always |
+  | `provider` | `status.provider` and the runtime voice switch (*Voice provider*) | when a voice is configured |
+  | `history` | `/events` resume, `/api/conversation`, reset, answer by tap (*History and resume*) | always |
+  | `push` | APNs registration ([`push.md`](push.md)) | when the daemon has a push service |
+  | `models` | the brain model picker (`/api/brain/models`) | when the brain is on |
+
+- **Order.** The daemon still sends its `status` **at once** on connect,
+  before the handshake, exactly as before (a legacy client depends on
+  it); `bot-ready` follows the client's `client-ready`. A client must
+  not wait for `bot-ready` before it sends audio or its `mute`/`silence`
+  state — it sends `client-ready` first and carries on.
+- **Legacy clients.** A client whose first frame is anything other than
+  `client-ready` (a control message or audio), or that sends nothing for
+  **2 s**, is a **legacy protocol-1 client** (the iOS app 0.1.0, older
+  `/voice` pages, `voice-test`). It is served exactly as before and is
+  never sent `bot-ready`. A `client-ready` that arrives later anyway is
+  still answered with `bot-ready`.
+- **Too old.** A client below `min_protocol` (a `client-ready` with a
+  lower `protocol`, or a legacy client once `min_protocol` is above 1)
+  gets an `error` it can show as is, then `status` `closed` with reason
+  `protocol_too_old`, then a close with WebSocket code **4001** and a
+  short reason; it sees no `bot-ready`. It should not reconnect in a
+  loop: it tells the shepherd to update the app.
+
+  ```json
+  {"type":"error","message":"This app speaks /ws protocol 0; the daemon (version 0.4.2) needs protocol 1 or newer. Update the app."}
+  {"type":"status","voice":"closed","muted":false,"reason":"protocol_too_old"}
+  ```
+
+- **Too new.** A client that needs a newer daemon than the one it got (a
+  `bot-ready` `protocol` below the client's own minimum) closes and tells
+  the shepherd to update the daemon.
+- **An older daemon** has no handshake: it answers `client-ready` with
+  `{"type":"error","message":"wsproto: unknown type \"client-ready\""}`
+  and never sends `bot-ready`. A client takes that error (or 2 s without
+  `bot-ready`) to mean protocol 1, and does not show it as a problem.
+- Logged as `web.client.hello {client_id, protocol, client, legacy,
+  accepted}`: `client` is the `client-ready`'s `{name, version,
+  platform}` (null for a legacy client); a legacy client adds `why`
+  (`first_frame` or `timeout`); a `client-ready` after the client was
+  already resolved adds `late: true`.
 
 ## Frame types
 
@@ -46,7 +133,20 @@ scheduling each frame at "now".
 | `{"type":"ping","gated_frames":N?,"peak":N?,"underruns":N?,"drains":N?,"buffer_ms":N?,"rate":F?,"stretched_ms":N?,"audio_state":S?,"aec":S?}` | Liveness probe; the daemon answers `pong`. Clients should send one every 5–30 s; `/voice` sends one every 5 s (the `web.client.stats` interval) and waits for the pong before the next. The optional counters (frames withheld by the silence gate so far; last input peak in Int16 LSB; the playback jitter buffer's underrun and drain counts and the audio buffered right now in ms; the time-stretch's current playback rate and the total wall-clock ms played at a rate other than 1.0 — see "Playback jitter buffer" below; the page's AudioContext state, `running`/`suspended`/`interrupted`/`closed` — a context that is not running plays nothing and stops updating the counters; `aec`, the microphone's echo cancellation as the browser reports it in `track.getSettings().echoCancellation`: `"true"`, `"false"`, or `"unknown"` when the browser does not say — other values are ignored; `/voice` also shows "Use headphones or the app: this browser's echo cancellation is off" when it is `false`, or `unknown` on a mobile browser) are copied into every following `web.client.stats` event until the next ping, with `playback_age_ms` (how old that sample is; absent before the first ping with `buffer_ms`), `audio_state` and `aec`. A value repeated across stats lines with a growing `playback_age_ms` is one old sample, not a stalled player. The event also carries `send_wait_max_ms`/`send_wait_p95_ms` (how long a recent audio frame waited in the daemon's per-client send queue; near 0 in normal operation). |
 
 Unknown `type` values are answered with an `error` message and otherwise
-ignored; the connection stays open.
+ignored; the connection stays open. Unknown *fields* are ignored (a newer
+client's extra `ping` counters must not break an older daemon).
+
+Examples (`client-ready` is under *Protocol version and handshake*):
+
+```json
+{"type":"mute","on":true}
+{"type":"silence","on":false}
+{"type":"speaking","on":true}
+{"type":"cancel"}
+{"type":"text","text":"what is auth doing"}
+{"type":"ping"}
+{"type":"ping","gated_frames":120,"peak":3400,"underruns":1,"drains":4,"buffer_ms":180,"rate":0.97,"stretched_ms":2300,"audio_state":"running","aec":"true"}
+```
 
 ## Server → client control messages
 
@@ -57,6 +157,20 @@ ignored; the connection stays open.
 | `{"type":"transcript","dir":"in\|out","text":"…","final":bool}`          | Incremental transcription. `in` = what the model heard from the user, `out` = what the model is saying. Fragments of one utterance arrive in order; `final:true` closes it. Output fragments may never carry `final:true`; treat the next `in` transcript or a `flush` as the boundary. GPT-Live has no end-of-utterance event: the daemon closes an `in` utterance with an **empty** fragment (`"text":"","final":true`) once the words stop; a client appends nothing and starts a new bubble for the next `in` text. |
 | `{"type":"error","message":"…"}`                                         | A non-fatal problem the user should see (e.g. rate limited, bad control message). The connection stays open.  |
 | `{"type":"pong"}`                                                        | Reply to `ping`.                                                                                                |
+
+Examples (`bot-ready` is under *Protocol version and handshake*):
+
+```json
+{"type":"flush"}
+{"type":"status","voice":"connected","muted":false,"provider":"gemini"}
+{"type":"status","voice":"connected","muted":false,"reason":"standby","provider":"openai"}
+{"type":"status","voice":"connected","muted":true,"stalled":true,"provider":"gemini"}
+{"type":"status","voice":"closed","muted":false,"reason":"replaced"}
+{"type":"transcript","dir":"in","text":"is auth done","final":true}
+{"type":"transcript","dir":"out","text":"Auth finished its tests.","final":false}
+{"type":"error","message":"rate limited, retrying"}
+{"type":"pong"}
+```
 
 ## Mute semantics
 
@@ -302,6 +416,8 @@ reliably removes is the *click* — an underrun is a faded pause.
   them; a `transcript` may precede or follow the audio it describes by a few
   frames, so clients must not synchronise captions to audio byte counts.
 - The daemon never sends binary frames before the first `status` message.
+  `bot-ready` comes after that `status`, in reply to `client-ready`;
+  audio may arrive before it.
 - Client control messages are handled in order; `cancel` followed by audio
   frames means the audio is a new utterance.
 
@@ -359,10 +475,11 @@ loopback default) every endpoint below is open. With it set:
   A WebSocket upgrade or an SSE stream refused this way never reaches
   the contract below it — the client sees an ordinary HTTP 401, not a
   `status`/`error` frame.
-- `GET /api/hello` answers `{"name":"sheepdog","version":"…","voice_name":"…","auth":"token"|"none","ws":"/ws","audio":{"in_hz":16000,"out_hz":24000,"format":"pcm16le mono"},"voice_provider":"gemini"|"openai"|"off","voice_model":"…"}`
+- `GET /api/hello` answers `{"name":"sheepdog","version":"…","voice_name":"…","auth":"token"|"none","ws":"/ws","audio":{"in_hz":16000,"out_hz":24000,"format":"pcm16le mono"},"voice_provider":"gemini"|"openai"|"off","voice_model":"…","protocol":1,"min_protocol":1}`
   so a client can confirm it found a sheepdog daemon, whether it needs a
-  token, this contract's audio format and the voice model behind it
-  before it ever opens `/ws`.
+  token, this contract's audio format, the voice model behind it and the
+  `/ws` protocol (*Protocol version and handshake*) before it ever opens
+  `/ws`.
 
 ## Voice provider
 

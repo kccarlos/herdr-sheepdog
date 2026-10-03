@@ -25,6 +25,8 @@ func TestRoundTrip(t *testing.T) {
 		{"transcript", Transcript(DirOut, "hello", false), `"dir":"out","final":false`},
 		{"error", Error("boom"), `"message":"boom"`},
 		{"pong", Pong(), `{"type":"pong"}`},
+		{"client-ready", ClientReady(1, ClientInfo{Name: "sheepdog-ios", Version: "0.2.0", Platform: "ios"}), `{"type":"client-ready","protocol":1,"client":{"name":"sheepdog-ios","version":"0.2.0","platform":"ios"}}`},
+		{"bot-ready", BotReady(1, 1, "0.4.2", []string{FeaturePlayback}), `{"type":"bot-ready","protocol":1,"min_protocol":1,"daemon":{"version":"0.4.2"},"features":["playback"]}`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -61,6 +63,8 @@ func TestParseRejects(t *testing.T) {
 		`{"type":"transcript","dir":"sideways"}`,
 		`{"type":"error"}`,
 		`{"type":"nope"}`,
+		`{"type":"client-ready"}`,
+		`{"type":"bot-ready","protocol":1}`,
 		`not json`,
 	}
 	for _, in := range bad {

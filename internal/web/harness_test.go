@@ -210,6 +210,10 @@ type harnessOpts struct {
 	voiceCtx bool
 	// push backs the /api/push routes (Deps.Push).
 	push PushService
+	// handshakeTimeout and minProtocol set Deps.HandshakeTimeout and
+	// Deps.MinProtocol (the /ws protocol handshake).
+	handshakeTimeout time.Duration
+	minProtocol      int
 }
 
 func newHarness(t *testing.T, o harnessOpts) *harness {
@@ -264,7 +268,8 @@ func newHarness(t *testing.T, o harnessOpts) *harness {
 	sup.SetVoiceConnected(true)
 	injector := inject.NewInjector(store, h, sup, log, nil)
 	deps := Deps{Log: log, Store: store, Supervisor: sup, Injector: injector, Router: &inject.Router{}, Version: "test", Heartbeat: 200 * time.Millisecond, OutQueue: 8, DevTestdataDir: o.devTestdata, DevBrainDir: o.devBrain, StatsInterval: o.statsInterval,
-		SystemPrompt: func() string { return "You are the voice. Aliases: auth." }, Aliases: []string{"auth"}, ReloadPrompts: o.reloadPrompts, Brain: b, BrainOffReason: "--brain=off", BrainProviders: providers, Token: o.token, VoiceContext: vctx, RouterContext: routerCtx, Push: o.push}
+		SystemPrompt: func() string { return "You are the voice. Aliases: auth." }, Aliases: []string{"auth"}, ReloadPrompts: o.reloadPrompts, Brain: b, BrainOffReason: "--brain=off", BrainProviders: providers, Token: o.token, VoiceContext: vctx, RouterContext: routerCtx, Push: o.push,
+		HandshakeTimeout: o.handshakeTimeout, MinProtocol: o.minProtocol}
 	var sw *voice.Switcher
 	var session2 *fakeSession
 	if session != nil {

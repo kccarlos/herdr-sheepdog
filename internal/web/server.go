@@ -23,6 +23,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 	"github.com/kccarlos/herdr-sheepdog/internal/supervisor"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
+	"github.com/kccarlos/herdr-sheepdog/internal/voice/wsproto"
 	"github.com/kccarlos/herdr-sheepdog/prompts"
 	static "github.com/kccarlos/herdr-sheepdog/web"
 )
@@ -138,6 +139,14 @@ type Deps struct {
 	StatsInterval time.Duration
 	// ToolTimeout bounds one tool call or injected chain (default 90 s).
 	ToolTimeout time.Duration
+	// HandshakeTimeout is how long /ws waits for a client-ready before
+	// it treats the client as a legacy protocol-1 client (default 2 s;
+	// docs/ws-contract.md "Protocol version and handshake").
+	HandshakeTimeout time.Duration
+	// MinProtocol is the oldest /ws client protocol served (default
+	// wsproto.MinProtocolVersion); a lower one is refused with
+	// status closed/protocol_too_old.
+	MinProtocol int
 	// Now overrides the clock (tests).
 	Now func() time.Time
 
@@ -180,6 +189,12 @@ func New(deps Deps) (*Server, error) {
 	}
 	if deps.ToolTimeout <= 0 {
 		deps.ToolTimeout = 90 * time.Second
+	}
+	if deps.HandshakeTimeout <= 0 {
+		deps.HandshakeTimeout = 2 * time.Second
+	}
+	if deps.MinProtocol <= 0 {
+		deps.MinProtocol = wsproto.MinProtocolVersion
 	}
 	if deps.Now == nil {
 		deps.Now = time.Now
