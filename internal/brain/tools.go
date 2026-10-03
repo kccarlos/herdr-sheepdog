@@ -236,6 +236,8 @@ type toolOutcome struct {
 	// called in an event-triggered turn.
 	railBlocked string
 	agent       string
+	// pane is the agent's pane when the call named one.
+	pane string
 	// promise is the record a promise call created.
 	promise *PromiseInfo
 }
@@ -281,7 +283,7 @@ func (b *Brain) execTool(ctx context.Context, t *turn, call *genai.FunctionCall)
 		if err != nil {
 			return toolOutcome{agent: row.Alias, err: err}
 		}
-		return toolOutcome{agent: row.Alias, acted: echo, result: echo}
+		return toolOutcome{agent: row.Alias, pane: row.PaneID, acted: echo, result: echo}
 	}
 	if call.Name == ToolNote {
 		text := arg("text")
@@ -298,7 +300,7 @@ func (b *Brain) execTool(ctx context.Context, t *turn, call *genai.FunctionCall)
 	if !ok {
 		return toolOutcome{err: fmt.Errorf("no agent called %q; the agents are %s", arg("agent"), b.aliases())}
 	}
-	out := toolOutcome{agent: row.Alias}
+	out := toolOutcome{agent: row.Alias, pane: row.PaneID}
 	switch call.Name {
 	case ToolReadScreen:
 		switch source := strings.ToLower(arg("source")); source {

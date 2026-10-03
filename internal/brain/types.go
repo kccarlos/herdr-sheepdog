@@ -272,6 +272,11 @@ type Reply struct {
 	// utterance reply that acted as silent context rather than dropping it
 	// (internal/supervisor/utterance.go).
 	Acted bool `json:"-"`
+	// ActedOn lists the panes the turn's actions went to, first first,
+	// each once (set by the brain, never the model): a late reply is
+	// labelled with the agent it acted on, not with whichever agent its
+	// words happen to name (campaign D N4).
+	ActedOn []string `json:"-"`
 }
 
 // Promise events and statuses (state.Promise mirrors them; the brain

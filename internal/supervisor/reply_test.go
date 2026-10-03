@@ -376,3 +376,34 @@ func TestUtteranceIDFromRelayToPush(t *testing.T) {
 		t.Errorf("push tags = %v, want utterance_id %s", tags, id)
 	}
 }
+
+// Campaign D N4 (deep-ask-fix-failing-test r1): the brain told
+// bench-codex to fix its bug, and the late reply named only bench-claude
+// ("…and we still have bench-claude going in the background"), so it went
+// out as "About bench-claude: Sent. It is fixing the adding step now…".
+// The label is the agent the turn acted on.
+func TestLateReplyLabelledWithTheAgentActedOn(t *testing.T) {
+	release := make(chan struct{})
+	m := braintest.NewModel(
+		braintest.Step{Calls: []*genai.FunctionCall{braintest.FC(brain.ToolPrompt, map[string]any{"agent": "auth", "text": "Fix the Add function so TestAdd passes."})}},
+		braintest.Step{Block: release, Text: braintest.Reply("Sent. It is fixing the adding step now, and we still have docs going in the background.", "")},
+	)
+	h := newBrainHarness(t, m, replyWait(20*time.Millisecond))
+	h.addAgent("w5:p1", "auth", "codex", herdr.StateIdle)
+	h.addAgent("w6:p1", "docs", "claude", herdr.StateWorking)
+
+	assertPending(t, h.say("Have it fix the failing test."))
+	close(release)
+	h.sup.replies.Wait()
+
+	pushes, tags := utterancePushes(h)
+	if len(pushes) != 1 {
+		t.Fatalf("pushes = %v, want exactly one", pushes)
+	}
+	if want := "About auth: Sent. It is fixing the adding step now, and we still have docs going in the background."; pushes[0].Text != want {
+		t.Errorf("push = %q, want %q", pushes[0].Text, want)
+	}
+	if tags[0]["agent"] != "auth" {
+		t.Errorf("tags = %v, want agent auth", tags[0])
+	}
+}
