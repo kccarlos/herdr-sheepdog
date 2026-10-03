@@ -86,6 +86,8 @@ type shepherdInput struct {
 	// relay does not glue these words onto the next utterance, and the
 	// daemon does not relay them (relay.go).
 	answered bool
+	// answeredAt is when answered was set (silentAnswer).
+	answeredAt time.Time
 	// saidBefore is what the voice was saying, or had said within
 	// echoWindow, when this voice input began: what it may be an echo of
 	// (echoOf, utterance.go). Empty for anything else.
@@ -181,18 +183,65 @@ func (s *Supervisor) heard(text string, final bool) {
 // spoken — it is the voice answering the shepherd's last words itself,
 // so they are neither glued onto the next relay nor relayed by the
 // daemon (relay.go).
+//
+// An output that is not speech is no answer (docs/bench-2026-10-03.md
+// #11): on 2026-10-02 23:55:05 and 23:55:13 Gemini's whole output was
+// the transcript "<no speech detected>" with 0.2 ms of audio, and the
+// shepherd's "结果。" / "你说。" counted as answered, so nobody relayed
+// them. A run whose transcript, angle-bracket placeholders removed, has
+// no letter or digit is ignored here; a run the client played for less
+// than silentAnswerMs is caught when the relay watch fires (the
+// playback report arrives after the transcript; relayUnanswered). So
+// the watch is no longer disarmed here: it checks answered when it
+// fires.
 func (s *Supervisor) voiceSpoke(text string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.closeVoiceLocked()
 	s.echoSpokeLocked(text)
-	if strings.TrimSpace(text) == "" || s.relay.pushSpeaking {
+	if strings.TrimSpace(text) == "" || s.relay.pushSpeaking || noSpeech(s.echo.said) {
 		return
 	}
-	if last := s.lastInputLocked(); last != nil {
-		last.answered = true
+	if last := s.lastInputLocked(); last != nil && !last.answered {
+		last.answered, last.answeredAt = true, s.cfg.Now()
 	}
-	s.disarmRelayLocked()
+}
+
+// silentAnswerMs is the least audio, in milliseconds of playback, an
+// output of the voice must have had to count as answering the shepherd.
+const silentAnswerMs = 50
+
+// noSpeech reports whether the voice's output transcript says nothing:
+// with every <…> placeholder removed (and a trailing one still open,
+// since "<no speech " and "detected>" arrive as two fragments), no letter
+// or digit is left.
+func noSpeech(said string) bool {
+	depth := 0
+	for _, r := range said {
+		switch {
+		case r == '<':
+			depth++
+		case r == '>' && depth > 0:
+			depth--
+		case depth == 0 && (unicode.IsLetter(r) || unicode.IsDigit(r)):
+			return false
+		}
+	}
+	return true
+}
+
+// silentAnswer reports whether the client's playback report shows that
+// the output which answered in carried less than silentAnswerMs of audio:
+// a run that ended (drained or flushed) after the answer was recorded.
+func silentAnswer(in *shepherdInput, playback voice.PlaybackReport) bool {
+	if in.answeredAt.IsZero() || !playback.At.After(in.answeredAt) {
+		return false
+	}
+	switch playback.State {
+	case voice.PlaybackDrained, voice.PlaybackFlushed:
+		return playback.RunMs < silentAnswerMs
+	}
+	return false
 }
 
 // closeVoiceInput ends the voice input being collected, so the next

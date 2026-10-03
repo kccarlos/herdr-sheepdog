@@ -19,10 +19,12 @@ import (
 // never asked, so there is no tool result to return it in.
 //
 // What cancels the watch: any voice tool call (to_supervisor claims the
-// words; stop means the voice took them as a stop), the voice speaking
-// on its own (small talk it answered itself) — but not the voice
-// speaking a push, which is not an answer to the shepherd — a newer
-// input (the watch re-arms on it), and a reset.
+// words; stop means the voice took them as a stop), a newer input (the
+// watch re-arms on it), and a reset. The voice speaking on its own
+// (small talk it answered itself) marks the input answered, and the
+// watch does nothing when it fires — unless that speech turns out to
+// have had no audio (silentAnswer). The voice speaking a push, or a
+// "<no speech detected>" placeholder, is no answer (voiceSpoke).
 
 // relayUnansweredAfter is how long an input of the shepherd's speech may
 // go with no tool call and no speech of the voice's own before the
@@ -93,6 +95,7 @@ func (s *Supervisor) stopRelay() {
 // still the newest, unclaimed and unanswered, so the daemon claims it
 // (with any unanswered words before it in the same run) and relays it.
 func (s *Supervisor) relayUnanswered(gen uint64) {
+	playback := s.lastPlayback() // outside s.mu: the voice session has its own lock
 	s.mu.Lock()
 	if gen != s.relay.gen || s.relay.closed {
 		s.mu.Unlock()
@@ -100,6 +103,12 @@ func (s *Supervisor) relayUnanswered(gen uint64) {
 	}
 	s.relay.timer = nil
 	last := s.lastInputLocked()
+	if last != nil && last.answered && silentAnswer(last, playback) {
+		// The voice's "answer" played for under silentAnswerMs: it said
+		// nothing the shepherd could hear (inputs.go, voiceSpoke).
+		last.answered = false
+		s.log.Log(logSource, "supervisor.silent_answer", "", map[string]any{"text": last.text, "run_ms": playback.RunMs})
+	}
 	if last == nil || last.seq != s.relay.seq || last.kind != InputVoice || last.claimed || last.answered {
 		s.mu.Unlock()
 		return
