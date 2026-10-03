@@ -454,6 +454,7 @@ func (s *Supervisor) deliverInvestigation(inv state.Investigation) {
 	}
 	s.mentionedIn(spoken)
 	s.pushInvestigation(inv, spoken)
+	s.noteFocus(focusFromReply(inv.PaneID, spoken, rep), inv.Question)
 }
 
 // pushInvestigation speaks one line about a job, tagged with the job it

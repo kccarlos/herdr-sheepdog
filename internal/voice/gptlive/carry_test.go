@@ -53,3 +53,47 @@ func TestRecapEntriesIncludeTheUtteranceInProgress(t *testing.T) {
 		t.Errorf("entries =\n%s\nwant\n%s", got, want)
 	}
 }
+
+// TestFocusLineOpensTheNextSession: the supervisor's current-focus line
+// (voice.TagFocus) pushed in standby is not piled into the held
+// background like other silent context; the latest one alone opens the
+// next billed session, after the recap. A later focus replaces it, and
+// a provider switch carries it (RecapFocus / SeedFocus).
+func TestFocusLineOpensTheNextSession(t *testing.T) {
+	s, d, _ := startSession(t, testConfig())
+	focusTags := map[string]any{voice.TagFocus: true}
+	if err := s.PushTagged("Current focus: agent in focus: auth.", voice.UrgencySilent, focusTags); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PushTagged("Current focus: agent in focus: docs.", voice.UrgencySilent, focusTags); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Push("auth is idle.", voice.UrgencySilent); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "standby context", func() bool { s.mu.Lock(); defer s.mu.Unlock(); return len(s.pushQ) == 0 })
+	s.mu.Lock()
+	held := append([]string(nil), s.held...)
+	s.mu.Unlock()
+	if len(held) != 1 || held[0] != "auth is idle." {
+		t.Fatalf("held = %q, want the briefing only", held)
+	}
+	if got := s.RecapFocus(); got != "Current focus: agent in focus: docs." {
+		t.Fatalf("RecapFocus = %q", got)
+	}
+	s.ClientAttached(true)
+	if err := s.SendText("what is it doing?"); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "open", func() bool { return d.last() != nil && len(d.last().events(evSessionStart)) == 1 })
+	input := fmt.Sprint(d.last().events(evSessionStart)[0]["session"].(map[string]any)["input"])
+	if !strings.Contains(input, "agent in focus: docs.") || strings.Contains(input, "agent in focus: auth.") {
+		t.Errorf("history = %s, want the latest focus only", input)
+	}
+
+	other, _, _ := startSession(t, testConfig())
+	other.SeedFocus(s.RecapFocus())
+	if other.RecapFocus() != "Current focus: agent in focus: docs." {
+		t.Errorf("seeded focus = %q", other.RecapFocus())
+	}
+}

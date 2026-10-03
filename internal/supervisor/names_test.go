@@ -211,3 +211,37 @@ func TestDaemonSentencesUseSpokenNames(t *testing.T) {
 		t.Errorf("unknown pane = %q", got)
 	}
 }
+
+// A rename in herdr's own UI reaches the daemon as a name-only
+// transition (herdr.Transition.Renamed, from the snapshot diff): the
+// roster and the voice's names line follow at once, and nothing else
+// happens: no "started on", no announcement, no pending, no journal.
+func TestHerdrRenameIsNameOnly(t *testing.T) {
+	h := newHarness(t, withTitleFixtures(t))
+	h.claudeIn("w1:p1", readmeSession, herdr.StateBlocked)
+	before := len(h.pusher.all())
+	pendingBefore, hadPending := h.store.Pending()
+	h.sup.HandleTransition(context.Background(), herdr.Transition{PaneID: "w1:p1", From: herdr.StateBlocked, To: herdr.StateBlocked, At: h.clock.Now(), Agent: "claude",
+		Name: "docs", WorkspaceID: "w9", WorkspaceLabel: "sheepdog", Renamed: true, Source: "snapshot"})
+	row, _ := h.store.Get("w1:p1")
+	if row.Name != "docs" || state.Say(row) != "docs" || row.State != herdr.StateBlocked {
+		t.Fatalf("row after rename = %+v", row)
+	}
+	pushed := h.pusher.all()[before:]
+	if len(pushed) != 1 || pushed[0].Urgency != voice.UrgencySilent || !strings.Contains(pushed[0].Text, "called: docs") {
+		t.Fatalf("pushes after a rename = %+v, want the names line only", pushed)
+	}
+	if p, has := h.store.Pending(); has != hadPending || p.ID != pendingBefore.ID {
+		t.Errorf("pending changed on a rename: %+v -> %+v", pendingBefore, p)
+	}
+	if h.log.count("supervisor.renamed") != 1 {
+		t.Errorf("supervisor.renamed not logged once")
+	}
+	// The same name seen again (a voice rename echoed back by herdr's
+	// snapshot) changes nothing and logs nothing.
+	h.sup.HandleTransition(context.Background(), herdr.Transition{PaneID: "w1:p1", From: herdr.StateBlocked, To: herdr.StateBlocked, At: h.clock.Now(), Agent: "claude",
+		Name: "docs", WorkspaceID: "w9", WorkspaceLabel: "sheepdog", Renamed: true, Source: "snapshot"})
+	if h.log.count("supervisor.renamed") != 1 || len(h.pusher.all()) != before+1 {
+		t.Errorf("an unchanged name was reported as a rename")
+	}
+}

@@ -29,6 +29,18 @@ func (s *Supervisor) HandleTransition(ctx context.Context, t herdr.Transition) {
 	}
 	defer s.syncNames()
 	s.invalidateBriefing()
+	if t.Renamed && !t.Closed && (t.From == "" || t.From == t.To) {
+		// A name-only update (herdr's own rename, found by the
+		// snapshot diff): the row has the new name and the voice gets
+		// the names line; it is not a state change, so nothing is
+		// announced, journalled or told to the brain as a worker event.
+		if state.Say(prev) != state.Say(row) {
+			// A voice rename comes back from herdr on the next
+			// snapshot with the name the row already has: no event.
+			s.log.Log(logSource, "supervisor.renamed", t.PaneID, map[string]any{"from": state.Say(prev), "to": state.Say(row), "name": t.Name})
+		}
+		return
+	}
 
 	from := t.From
 	if from == "" {

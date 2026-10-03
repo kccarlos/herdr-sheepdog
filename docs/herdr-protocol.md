@@ -269,7 +269,11 @@ Important constraints found in `src/api/subscriptions.rs`:
 - `pane.updated` does **not** fire on status changes (only when the agent name
   changes or the terminal title changes); it is *very* chatty (92 of 117 lines
   in the captured session were `pane_updated` title spinners). Do not use it
-  for state.
+  for state. Its `PaneInfo` has no agent `name` field either (herdr 0.9.3
+  schema), so it cannot tell a rename from a spinner: sheepdog finds an
+  agent rename (`agent.rename`, herdr's own UI) in the `session.snapshot`
+  diff and reports it as a name-only `Transition{Renamed}` within the
+  snapshot interval.
 - `workspace.close` emits **only `workspace_closed`**, not `pane_closed` /
   `pane_exited` for the panes inside it (verified live,
   `testdata/herdr/events-workspace-close.jsonl`).

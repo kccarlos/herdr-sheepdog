@@ -83,6 +83,12 @@ type pushWatch struct {
 // for concurrent use: the session calls it under its own lock and acts
 // on the verdicts it returns after unlocking.
 type HeardTracker struct {
+	// Coverage, when set, judges how much of a push (its text and tags)
+	// reached the shepherd in said, in place of PushCoverage's
+	// word-for-word token pairs: GPT-Live voices pushes in its own words
+	// and judges by key terms (KeyTermCoverage).
+	Coverage func(text string, tags map[string]any, said string) float64
+
 	cur *pushWatch
 	// cut are watches whose speech the daemon flushed, waiting for the
 	// client's flushed report to say how much was played (oldest first,
@@ -217,8 +223,41 @@ func (h *HeardTracker) Lost() []UnheardPush {
 	return out
 }
 
+// Watching reports whether a push is still watched (or waits for the
+// client's flushed report): false once every push sent was judged.
+func (h *HeardTracker) Watching() bool { return h.cur != nil || len(h.cut) > 0 }
+
 // Reset forgets every watch ("New conversation").
-func (h *HeardTracker) Reset() { *h = HeardTracker{} }
+func (h *HeardTracker) Reset() { *h = HeardTracker{Coverage: h.Coverage} }
+
+// TagRequeued marks a push the session put back in its queue because it
+// was not heard: it is never re-queued again.
+const TagRequeued = "requeued"
+
+// OwedTags reports whether tags alone mark a line the shepherd is owed a
+// hearing of: a decision they must take (needs_user) or a kept or due
+// promise.
+func OwedTags(tags map[string]any) bool {
+	if tags == nil {
+		return false
+	}
+	if tags["needs_user"] == true || tags["due_promise"] == true {
+		return true
+	}
+	switch ids := tags[TagKeepsPromiseIDs].(type) {
+	case []string:
+		return len(ids) > 0
+	case []any:
+		return len(ids) > 0
+	}
+	return false
+}
+
+// OwedPromise reports whether tags mark a kept or due promise: owed
+// whatever the pending prompt's state.
+func OwedPromise(tags map[string]any) bool {
+	return OwedTags(map[string]any{TagKeepsPromiseIDs: tags[TagKeepsPromiseIDs], "due_promise": tags["due_promise"]})
+}
 
 // expire judges watches past their time: a flushed one whose client
 // never reported (judged on what was generated), and one the model never
@@ -247,7 +286,12 @@ func (h *HeardTracker) expire(now time.Time) []UnheardPush {
 // too little of it.
 func (h *HeardTracker) judge(out []UnheardPush, w *pushWatch, said, reason string) []UnheardPush {
 	said = strings.TrimSpace(said)
-	cov := PushCoverage(w.text, said)
+	var cov float64
+	if h.Coverage != nil {
+		cov = h.Coverage(w.text, w.tags, said)
+	} else {
+		cov = PushCoverage(w.text, said)
+	}
 	if cov >= HeardMinCoverage {
 		return out
 	}

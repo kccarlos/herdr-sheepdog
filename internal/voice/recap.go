@@ -16,7 +16,25 @@ type Recap struct {
 	// DefaultRecapTurns.
 	Max     int
 	entries []RecapEntry
+	// focus is the supervisor's latest current-focus line (a silent push
+	// tagged TagFocus): a fresh session gets it after the recap.
+	focus string
 }
+
+// TagFocus marks the supervisor's silent current-focus line (the agent
+// in focus, the open question, key points of the last answer): the
+// session keeps the latest one in its Recap (SetFocus), so a fresh
+// model session is told it with the recap of the conversation.
+const TagFocus = "focus"
+
+// IsFocus reports whether tags mark the current-focus line.
+func IsFocus(tags map[string]any) bool { return tags[TagFocus] == true }
+
+// SetFocus keeps the supervisor's latest current-focus line.
+func (r *Recap) SetFocus(text string) { r.focus = strings.TrimSpace(text) }
+
+// Focus is the latest current-focus line ("" when none).
+func (r *Recap) Focus() string { return r.focus }
 
 // Recap roles.
 const (
@@ -160,8 +178,8 @@ func (r *Recap) Seed(entries []RecapEntry) {
 	}
 }
 
-// Reset forgets everything ("New conversation").
-func (r *Recap) Reset() { r.entries = nil }
+// Reset forgets everything ("New conversation"), the focus included.
+func (r *Recap) Reset() { r.entries, r.focus = nil, "" }
 
 // Len is the number of entries kept.
 func (r *Recap) Len() int { return len(r.entries) }

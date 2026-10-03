@@ -23,6 +23,12 @@ type Transition struct {
 	// Closed is set when the pane (or its workspace) went away; To is then
 	// StateUnknown and the pane will not be reported again.
 	Closed bool `json:"closed,omitempty"`
+	// Renamed marks a name-only update: herdr's agent name changed (a
+	// rename in herdr's own UI or `herdr agent rename`) while the state
+	// did not, so From == To. It reports nothing else: no event of
+	// herdr's carries the agent name (pane_updated's PaneInfo has none),
+	// so the session.snapshot diff finds it, within SnapshotInterval.
+	Renamed bool `json:"renamed,omitempty"`
 	// Source is the channel that delivered the triggering event.
 	Source string `json:"source,omitempty"`
 	// Session is the agent's reported session as last seen in a snapshot
@@ -245,7 +251,16 @@ func (w *Watcher) refreshSnapshot(ctx context.Context) error {
 	seen := map[string]bool{}
 	for _, a := range snap.Agents {
 		seen[a.PaneID] = true
+		known, wasKnown := w.panes[a.PaneID]
+		firstSight := !wasKnown || known.seeded
 		p := w.ensurePane(ctx, a.PaneID, a.WorkspaceID, a.Agent)
+		// A pane already reported (state set) whose herdr name differs
+		// from the one it was reported with. A persisted pane seen for
+		// the first time has no name on record here; its row keeps
+		// whatever name it had, and the next state change carries the
+		// current one.
+		renamed := !firstSight && a.Name != "" && a.Name != p.name && p.state != ""
+		before := p.state
 		if a.Name != "" {
 			p.name = a.Name
 		}
@@ -257,6 +272,12 @@ func (w *Watcher) refreshSnapshot(ctx context.Context) error {
 			p.cwd = a.Cwd
 		}
 		w.applyEvent(ctx, p, StatusEvent{PaneID: a.PaneID, WorkspaceID: a.WorkspaceID, Agent: a.Agent, State: a.Status, At: at, Source: "snapshot"})
+		if renamed && p.state == before {
+			// The state did not change (a change would have carried the
+			// new name already): the rename alone reaches the daemon
+			// now, not at the agent's next state change.
+			w.emitRename(ctx, p, at)
+		}
 	}
 	livePanes := map[string]bool{}
 	for _, p := range snap.Panes {
@@ -402,6 +423,33 @@ func (w *Watcher) emit(ctx context.Context, p *paneState, to State, at time.Time
 	}
 	p.state = to
 	w.log.Log("herdr", "herdr.transition", p.id, t)
+	select {
+	case w.out <- t:
+	case <-ctx.Done():
+	}
+}
+
+// emitRename reports a name-only update of a pane in its confirmed
+// state (Transition.Renamed).
+func (w *Watcher) emitRename(ctx context.Context, p *paneState, at time.Time) {
+	t := Transition{
+		PaneID:         p.id,
+		From:           p.state,
+		To:             p.state,
+		At:             at,
+		Agent:          p.agent,
+		Name:           p.name,
+		WorkspaceID:    p.workspace,
+		WorkspaceLabel: w.wsLabels[p.workspace],
+		Source:         "snapshot",
+		Renamed:        true,
+		Cwd:            p.cwd,
+	}
+	if p.session != nil {
+		sess := *p.session
+		t.Session = &sess
+	}
+	w.log.Log("herdr", "herdr.renamed", p.id, map[string]any{"name": p.name, "state": p.state})
 	select {
 	case w.out <- t:
 	case <-ctx.Done():

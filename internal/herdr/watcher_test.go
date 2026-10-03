@@ -374,3 +374,35 @@ func TestWatcherLastBeat(t *testing.T) {
 		t.Errorf("LastBeat did not move on a socket event: %v, then %v", before, w.LastBeat())
 	}
 }
+
+// A rename in herdr's own UI changes no state and no event carries the
+// agent name, so the snapshot diff reports it as a name-only transition
+// (Renamed, From == To) at once instead of at the agent's next state
+// change; an unchanged name reports nothing.
+func TestWatcherSnapshotReportsRename(t *testing.T) {
+	srv := herdrtest.New(t)
+	srv.SetAgent(codexAgent())
+	w, _, _ := startWatcher(t, srv, 100*time.Millisecond, 1)
+	ch := w.Transitions()
+	if tr := expectTransition(t, ch, "", herdr.StateIdle); tr.Name != "recon" || tr.Renamed {
+		t.Fatalf("first transition = %+v", tr)
+	}
+	expectNoTransition(t, ch, 300*time.Millisecond)
+
+	a := codexAgent()
+	a.Name = "docs"
+	srv.SetAgent(a)
+	tr := expectTransition(t, ch, herdr.StateIdle, herdr.StateIdle)
+	if !tr.Renamed || tr.Name != "docs" || tr.Closed || tr.Source != "snapshot" {
+		t.Fatalf("rename transition = %+v", tr)
+	}
+	expectNoTransition(t, ch, 300*time.Millisecond)
+
+	// A rename that comes with a state change rides on that transition.
+	a.Name, a.Status = "docs2", herdr.StateWorking
+	srv.SetAgent(a)
+	if tr := expectTransition(t, ch, herdr.StateIdle, herdr.StateWorking); tr.Renamed || tr.Name != "docs2" {
+		t.Fatalf("state change with rename = %+v", tr)
+	}
+	expectNoTransition(t, ch, 300*time.Millisecond)
+}

@@ -183,7 +183,10 @@ func (s *Session) finalize(lc *liveConn, serverReason string, confirmed bool) {
 	s.flushReplyLocked()
 	timing := s.finishAudioTimingLocked()
 	closing := s.closed
+	// A push not heard by now never will be on this session.
+	unheard := s.heard.Lost()
 	s.mu.Unlock()
+	s.reportUnheard(unheard)
 	s.out.Flush()
 	if timing != nil {
 		s.log.Log(logSource, "voice.audio_timing", "", timing)
@@ -312,6 +315,7 @@ func (s *Session) onInputText(delta string) {
 	s.lastActivity = now
 	s.unclaimed += delta
 	s.inText += delta
+	s.heard.UserInput()
 	s.mu.Unlock()
 	s.log.Log(logSource, "voice.transcript.in", "", map[string]any{"text": delta, "final": false})
 	s.emit(voice.EventTranscript{Dir: voice.DirIn, Text: delta})
@@ -325,6 +329,7 @@ func (s *Session) onOutputText(delta string) {
 	s.speakingNow = true
 	s.outText += delta
 	s.play.Said(delta)
+	s.heard.Said(delta)
 	s.mu.Unlock()
 	s.log.Log(logSource, "voice.transcript.out", "", map[string]any{"text": delta, "final": false})
 	s.emit(voice.EventTranscript{Dir: voice.DirOut, Text: delta})
@@ -365,6 +370,11 @@ func (s *Session) recapItemsLocked() []initialItem {
 			s.recapCarried = false
 		}
 		items = append(items, initialItem{Type: "message", Role: "developer", Content: []contentPart{{Type: "input_text", Text: note}}})
+	}
+	if f := s.recap.Focus(); f != "" {
+		// The supervisor's current-focus line (voice.TagFocus): the
+		// closed session had it as context, the new one starts with it.
+		items = append(items, initialItem{Type: "message", Role: "developer", Content: []contentPart{{Type: "input_text", Text: f}}})
 	}
 	if len(s.held) > 0 {
 		text := "Background from the supervisor while the line was closed (do not read it out unless asked): " + strings.Join(s.held, " ")
