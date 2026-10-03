@@ -52,7 +52,7 @@ Spend:
 | Tier 2 #2: a deferral or hesitation sent `esc` | 5 runs of 102 | **0 of 64** (every `esc` in tier 1 followed a real "no") | gone (#108) |
 | Tier 2 #4: push marker read aloud | 25 utterances in 14/102 runs | **4 utterances in 3/64 runs** (deferral-zh r1, approve-claude-askuser r1, barge-in-hold-to-talk r2) | reduced, not gone |
 | Tier 2 #1: the voice answers for the brain | 7 lost lines | `supervisor.ack_not_answer` fired 2× and `relay_by_daemon` 4×. A new variant gets past it (finding N2). | partly fixed |
-| Tier 2 #5: a re-queued push is cut again | 3/3 | 6 re-queues, none cut again by the CEO. One was voiced as "On it." instead (N3). | fixed as specified; see N3 |
+| Tier 2 #5: a re-queued push is cut again | 3/3 | 6 re-queues. None was cut by the CEO talking again. Two were still lost: one was voiced as "On it." (`body_skipped`, N3) and one was interrupted by another push. | fixed as specified; see N3 |
 | Tier 2 #6: a misheard name means no promise and no finish | reconnect-held-push 0/3 | 0/2 ("Bench Squad" again) | remains |
 | Tier 2 #7: failover spoken in jargon | seen | "DeepSeek is failing; using Vertex for now." (failover-brain-503 r2), `internal/brain/failover.go:296` | remains (not in #108) |
 | Tier 2 #8: slow brain (+9 s) times the turn out | 0/3 | 0/2 | remains (expected) |
