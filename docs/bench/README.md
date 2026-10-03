@@ -235,3 +235,38 @@ failovers, an event excerpt) and `events/<id>.r<n>.jsonl`.
   (`voice.stalled`, latency) rather than provoked.
 - One voice provider: Gemini Live. GPT-Live would need its per-minute
   billing accounted for first.
+
+## Tier-3 findings fixed
+
+The tier-3 report (PR #105, `docs/bench/tier3-2026-10-03.md`, not yet
+merged when these fixes landed) found these on real herdr workers. Each
+fix has a test on the real screen or title captured from those runs
+(testdata/herdr/). The tier-3 scenarios were not re-run: their runner
+ships with #105.
+
+- **Finding 1, P1, trust prompt**: fixed in #107.
+  ParsePrompt reads unnumbered cursor menus (Claude Code 2.1.288's
+  "❯ No, exit / Yes, I trust this folder", agy's trust dialog). Their
+  keys are arrow moves from the cursor plus enter, so a pending is
+  created and the rail accepts down+enter
+  (`claude-trust-dialog.screen.txt`).
+- **Finding 3, P1, "Claude is asking do you want to proceed."**: fixed
+  in #107. The command between Claude Code's dashed
+  rules under "Bash command" is parsed ("Claude asks to run go test.",
+  `claude-bash-prompt.screen.txt`). The two pushes per approval came from
+  the same gap: the announce recheck told the brain that the template
+  had been said, and the brain added a line because the template it saw
+  said nothing.
+- **Finding 4, P1, safety, Codex update menu**: fixed in
+  #107. An instruction is never typed into a menu:
+  the screen is read first, and on a menu nothing is typed. The brain
+  gets the fact, and `supervisor.instruction_blocked_by_menu` is logged
+  (`codex-update-menu.screen.txt`).
+- **Finding 5, P2, names**: fixed in #107. Spoken
+  names take at most three plain words of the session title, with no
+  paths, files or identifiers. An old name reaches the brain only if the
+  CEO heard it (`claude-session-titles.tier3.tsv`).
+- **Finding 6, P2, Chinese**: fixed in #107. The
+  Chinese block line no longer quotes an English question
+  ("Claude 请求运行 go test。" or "Claude 需要你做个决定。"). The sign-off
+  join no longer leaves a "。." seam.
