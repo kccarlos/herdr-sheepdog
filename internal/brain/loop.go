@@ -128,6 +128,11 @@ func (b *Brain) run(ctx context.Context, t *turn) (Reply, error) {
 		b.flushInLocked()
 	}
 	b.mu.Unlock()
+	if t.req.Facts != nil {
+		// Now, not when the turn was asked for: it may have queued
+		// behind another turn while the template line went out.
+		t.req.facts = t.req.Facts()
+	}
 	b.ingest(Message{Role: RoleUser, Kind: KindRequest, Content: requestText(t.req), Agent: t.req.Agent, Link: t.req.Link}, t.n)
 	if t.req.Kind == KindAnnounce && t.req.Agent != "" {
 		// What the worker itself wrote for a human, before its screen:
@@ -170,6 +175,15 @@ func (b *Brain) run(ctx context.Context, t *turn) (Reply, error) {
 			}
 		}
 		t.steps = step
+		if step > 1 && t.req.Facts != nil {
+			// What happened to the event during the previous step (the
+			// template line spoken at announce_wait, the prompt answered).
+			now := t.req.Facts()
+			if note := factsUpdate(t.req.facts, now); note != "" {
+				b.ingest(Message{Role: RoleUser, Kind: KindSystem, Content: note, Agent: t.req.Agent}, t.n)
+			}
+			t.req.facts = now
+		}
 		// The last step, or one starting with too little budget left for
 		// another tool round, is answer-only: the model must reply from
 		// what it has.

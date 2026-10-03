@@ -137,7 +137,7 @@ func (s *Supervisor) announce(ctx context.Context, a announcement) {
 	for _, p := range kept {
 		infos = append(infos, promiseInfo(p))
 	}
-	req := brain.Request{Kind: brain.KindAnnounce, Trigger: brain.TriggerEvent, Agent: aliasOr(a.row.Alias), Event: a.event, Template: a.sentence, Screen: a.screen, Promises: infos, Owed: a.owed, AlsoAsking: a.asking, Link: eventLink(a.eventID)}
+	req := brain.Request{Kind: brain.KindAnnounce, Trigger: brain.TriggerEvent, Agent: aliasOr(a.row.Alias), Event: a.event, Template: a.sentence, Screen: a.screen, Promises: infos, Owed: a.owed, AlsoAsking: a.asking, Link: eventLink(a.eventID), Facts: s.announceFacts(a)}
 	res := make(chan turnResult, 1)
 	start := s.cfg.Now()
 	go func() {

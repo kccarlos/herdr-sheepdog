@@ -3,6 +3,7 @@ package supervisor
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +11,10 @@ import (
 	"testing"
 	"time"
 
+	"google.golang.org/genai"
+
+	"github.com/kccarlos/herdr-sheepdog/internal/brain"
+	"github.com/kccarlos/herdr-sheepdog/internal/brain/braintest"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
@@ -107,8 +112,9 @@ func TestScenario2BlockedPushesAndCreatesPending(t *testing.T) {
 	if len(p.Options) != 3 || p.Options[0].Keys[0] != "y" || p.Options[1].Keys[0] != "p" || p.Options[2].Keys[0] != "esc" || p.YesKeys[0] != "y" || p.NoKeys[0] != "esc" {
 		t.Errorf("keys = %+v", p)
 	}
-	if !p.ExpiresAt.Equal(t0.Add(120 * time.Second)) {
-		t.Errorf("expires_at = %v", p.ExpiresAt)
+	if !p.ExpiresAt.IsZero() {
+		// It lives while the pane is blocked at this prompt (#8).
+		t.Errorf("expires_at = %v, want none", p.ExpiresAt)
 	}
 	if h.log.count("pending.created") != 1 {
 		t.Errorf("pending.created = %d", h.log.count("pending.created"))
@@ -322,72 +328,140 @@ func TestCancelSuppressesFinishedPush(t *testing.T) {
 	}
 }
 
-// The prompt's pending expired while nobody answered, but it is still on
-// the pane's screen: a later bare "yes" revives it and answers
-// (docs/history/issues-2026-09-18.md "an expired approval prompt can never be
-// approved"). The fast path never asks first — the CEO's own bare word
-// this turn is the authorisation (scenario 8 of the v1 plan asked first).
-func TestExpiredPromptRevivedByFastPath(t *testing.T) {
+// The logged case of docs/bench-2026-10-03.md #8: bench-claude's prompt
+// was open from 23:55:47 to 00:03:15, but its pending expired at
+// 23:57:48 (pending_ttl_s). Now it lives while the pane is blocked at
+// the same prompt: minutes later it is still pending, the reconciler
+// keeps it, and a tap on its card still answers.
+func TestPromptLivesWhileThePaneIsBlocked(t *testing.T) {
 	h := twoAgents(t)
-	h.block("w5:p1", "codex-approval-prompt.screen.txt")
-	h.clock.Advance(121 * time.Second)
-	h.sup.ExpirePending()
-	if _, ok := h.pending(); ok {
-		t.Fatal("pending did not expire")
+	h.block("w5:p1", "codex-approval-prompt.screen.txt") // 23:55:47
+	p, _ := h.pending()
+	for range 7 * 60 / 30 { // to 00:03:15, a reconcile every 30 s
+		h.clock.Advance(30 * time.Second)
+		h.sup.ExpirePending()
+		h.sup.reconcileReprompts(context.Background())
 	}
-	res := h.say("yes")
-	if res.Spoken != "Told auth yes." {
-		t.Fatalf("result = %+v", res)
+	h.clock.Advance(28 * time.Second)
+	h.sup.ExpirePending()
+	if got, has := h.pending(); !has || got.ID != p.ID {
+		t.Fatalf("pending = %+v, %v; want %s still open", got, has, p.ID)
+	}
+	if n := h.log.count("pending.expired") + h.log.count("pending.cancelled") + h.log.count("pending.replaced"); n != 0 {
+		t.Errorf("expired+cancelled+replaced = %d, want 0", n)
+	}
+	if _, err := h.sup.AnswerTap(context.Background(), p.ID, 1); err != nil {
+		t.Fatalf("tap after 7.5 min: %v", err)
 	}
 	if keys := h.sendKeysRequests(); len(keys) != 1 || keys[0] != [2]string{"w5:p1", "y"} {
 		t.Errorf("send_keys = %v", keys)
 	}
-	revived := h.log.ofType("pending.revived")
-	if len(revived) != 1 {
-		t.Fatalf("pending.revived = %d", len(revived))
-	}
-	if p := payload(revived[0]); p["source"] != "fast_path" {
-		t.Errorf("pending.revived source = %v, want fast_path", p["source"])
-	}
-	if _, ok := h.pending(); ok {
-		t.Error("pending not cleared after the revived answer")
-	}
 }
 
-// Revival never invents a prompt: once the pane no longer shows one (it
-// moved on, even though herdr has not reported the transition), a bare
-// "yes" past the expiry still finds nothing to answer.
-func TestExpiredPromptWithUnparseableScreenStaysRefused(t *testing.T) {
-	h := twoAgents(t)
+// The pending ends with the prompt: when the pane leaves blocked, when
+// its screen no longer shows a prompt (the reconciler), and a different
+// prompt on screen replaces it. A tap on the old card is then refused.
+func TestPromptEndsWhenThePaneLeavesIt(t *testing.T) {
+	t.Run("left blocked", func(t *testing.T) {
+		h := twoAgents(t)
+		h.block("w5:p1", "codex-approval-prompt.screen.txt")
+		p, _ := h.pending()
+		h.clock.Advance(5 * time.Minute)
+		h.transition("w5:p1", herdr.StateBlocked, herdr.StateWorking)
+		if _, has := h.pending(); has {
+			t.Fatal("pending survived the pane leaving its prompt")
+		}
+		if _, err := h.sup.AnswerTap(context.Background(), p.ID, 1); !errors.Is(err, ErrPendingGone) {
+			t.Errorf("tap err = %v, want ErrPendingGone", err)
+		}
+	})
+	t.Run("prompt gone from the screen", func(t *testing.T) {
+		h := twoAgents(t)
+		h.block("w5:p1", "codex-approval-prompt.screen.txt")
+		h.srv.SetScreen("w5:p1", fixture(t, "codex-working.screen.txt"))
+		h.clock.Advance(30 * time.Second)
+		h.sup.reconcileReprompts(context.Background())
+		if _, has := h.pending(); has {
+			t.Fatal("pending survived its prompt leaving the screen")
+		}
+		ev := h.log.ofType("pending.cancelled")
+		if len(ev) != 1 || payload(ev[0])["reason"] != "prompt_gone" {
+			t.Errorf("pending.cancelled = %v", ev)
+		}
+		h.say("yes")
+		if got := h.sendKeysRequests(); len(got) != 0 {
+			t.Errorf("send_keys = %v, want none", got)
+		}
+	})
+	t.Run("a prompt on a pane herdr reports done", func(t *testing.T) {
+		// agy reports done around its prompts: the pending lives on while
+		// the screen shows the prompt.
+		h := newHarness(t)
+		h.addAgent("w5:p1", "w5", "agy", herdr.StateWorking)
+		h.srv.SetScreen("w5:p1", fixture(t, "agy-approval-prompt.screen.txt"))
+		h.transition("w5:p1", herdr.StateWorking, herdr.StateDone)
+		p, has := h.pending()
+		if !has {
+			t.Fatal("no pending")
+		}
+		h.clock.Advance(5 * time.Minute)
+		h.sup.reconcileReprompts(context.Background())
+		if got, has := h.pending(); !has || got.ID != p.ID {
+			t.Errorf("pending = %+v, %v; want %s still open", got, has, p.ID)
+		}
+	})
+	t.Run("a different prompt", func(t *testing.T) {
+		h := twoAgents(t)
+		h.block("w5:p1", "codex-approval-prompt.screen.txt")
+		old, _ := h.pending()
+		h.srv.SetScreen("w5:p1", fixture(t, "claude-permission-prompt.screen.txt"))
+		h.clock.Advance(30 * time.Second)
+		h.sup.reconcileReprompts(context.Background())
+		p, has := h.pending()
+		if !has || p.ID == old.ID || p.PaneID != "w5:p1" {
+			t.Fatalf("pending = %+v, want a new prompt on w5:p1", p)
+		}
+		if _, err := h.sup.AnswerTap(context.Background(), old.ID, 1); !errors.Is(err, ErrPendingGone) {
+			t.Errorf("tap on the old card err = %v, want ErrPendingGone", err)
+		}
+	})
+}
+
+// The bare-answer fast path applies only within fastAnswerWindow of the
+// announcement; a "yes" minutes later goes to the brain with the prompt
+// and how long it has waited in the roster, and the brain decides (here
+// it answers through the rail).
+func TestLateBareYesGoesToTheBrain(t *testing.T) {
+	m := braintest.NewModel(
+		braintest.Step{Calls: []*genai.FunctionCall{braintest.FC(brain.ToolSendKeys, map[string]any{"agent": "auth", "keys": []any{"y"}})}},
+		braintest.Step{Text: braintest.Reply("Told auth yes.", "")},
+	)
+	h := newBrainHarness(t, m)
+	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
 	h.block("w5:p1", "codex-approval-prompt.screen.txt")
-	h.clock.Advance(121 * time.Second)
-	h.sup.ExpirePending()
-	h.srv.SetScreen("w5:p1", fixture(t, "codex-working.screen.txt"))
-	h.say("yes")
-	if got := h.sendKeysRequests(); len(got) != 0 {
-		t.Errorf("send_keys = %v, want none", got)
+	calls := len(m.Calls())
+	h.clock.Advance(7 * time.Minute)
+	res := h.say("yes")
+	if res.Spoken != "Told auth yes." {
+		t.Errorf("result = %+v", res)
 	}
-	if h.log.count("pending.revived") != 0 {
-		t.Error("revived a prompt that is not on screen")
+	ev := h.log.ofType("supervisor.fast_path_skipped")
+	if len(ev) != 1 || payload(ev[0])["reason"] != "prompt_old" {
+		t.Errorf("fast_path_skipped = %v", ev)
 	}
-}
-
-func TestExpiredQuestionForgottenWhenAgentMovesOn(t *testing.T) {
-	h := twoAgents(t)
-	h.block("w5:p1", "codex-approval-prompt.screen.txt")
-	h.clock.Advance(121 * time.Second)
-	h.sup.ExpirePending()
-	// The user answered on the keyboard: the agent left the prompt.
-	h.transition("w5:p1", herdr.StateBlocked, herdr.StateWorking)
-	h.say("yes")
-	if got := h.sendKeysRequests(); len(got) != 0 {
-		t.Errorf("send_keys = %v, want none", got)
+	if len(m.Calls()) != calls+2 {
+		t.Fatalf("model calls = %d, want the utterance turn's two", len(m.Calls())-calls)
 	}
-	if h.log.count("pending.revived") != 0 {
-		t.Error("revived a question the agent moved on from")
+	// The brain renders the age on its own clock (the real one here).
+	if req := m.Calls()[calls].System(); !strings.Contains(req, "WAITING FOR AN ANSWER (asked ") {
+		t.Errorf("the brain was not told how long the prompt waited:\n%s", req)
+	}
+	if keys := h.sendKeysRequests(); len(keys) != 1 || keys[0] != [2]string{"w5:p1", "y"} {
+		t.Errorf("send_keys = %v", keys)
 	}
 }
 
+// pending_ttl_s still expires an instruction's pending action.
 func TestRunExpiresViaTicker(t *testing.T) {
 	h := newHarness(t, func(c *Config) {
 		c.PendingTTL = 30 * time.Millisecond
@@ -398,7 +472,7 @@ func TestRunExpiresViaTicker(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() { h.sup.Run(ctx); close(done) }()
-	h.block("w5:p1", "codex-approval-prompt.screen.txt")
+	h.send("w5:p1", "run the tests")
 	// Wait for the event, not for the slot: ExpirePending clears the
 	// slot a moment before it logs, so polling the slot can see the gap.
 	deadline := time.Now().Add(2 * time.Second)
@@ -409,7 +483,7 @@ func TestRunExpiresViaTicker(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	if _, ok := h.pending(); ok {
-		t.Error("the expired question is still pending")
+		t.Error("the expired instruction is still pending")
 	}
 	cancel()
 	<-done

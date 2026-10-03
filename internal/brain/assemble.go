@@ -383,9 +383,65 @@ func eventRequestText(req Request) string {
 	if req.AlsoAsking != "" {
 		fmt.Fprintf(&b, "After finishing, the agent is also showing a prompt of its own: %q. Your one line covers both: what it found, then that it is asking this, with the question in ask, needs_user true and the prompt's choices in options.\n", req.AlsoAsking)
 	}
-	b.WriteString("Nothing has been said about this yet. Decide whether the assistant says anything, what, and how urgently: your spoken replaces the template sentence, so carry its news (what the agent did, in the CEO's terms) plus what the sentence lacked — which request of theirs it fulfils, what changed against what they asked, what is still open. Skip when the CEO already knows (the assistant relayed it, or they just asked and heard it) or it is not worth their attention; silent when it is context the assistant should have but not say.")
+	if line := promptStateLine(req.facts.Prompt); line != "" {
+		b.WriteString(line + "\n")
+	}
+	if len(req.facts.Spoken) > 0 {
+		fmt.Fprintf(&b, "Already said to the CEO about this event, word for word: %s. Your spoken would be said after it, not instead of it. Decide whether the assistant says anything more: skip when that already carries the news, or add only what it lacked (which request of theirs it fulfils, what changed against what they asked, what is still open), or correct it if it was wrong; silent when it is context the assistant should have but not say.", quotedLines(req.facts.Spoken))
+	} else {
+		b.WriteString("Nothing has been said about this yet. Decide whether the assistant says anything, what, and how urgently: your spoken replaces the template sentence, so carry its news (what the agent did, in the CEO's terms) plus what the sentence lacked — which request of theirs it fulfils, what changed against what they asked, what is still open. Skip when the CEO already knows (the assistant relayed it, or they just asked and heard it) or it is not worth their attention; silent when it is context the assistant should have but not say.")
+	}
 	b.WriteString(" Reply with the JSON object of the answer contract plus \"urgency\": one of interrupt (the CEO must act now), idle (at the next pause), silent (context only, not spoken) or skip (say nothing); \"keeps_promise_ids\" for the promise ids above your line keeps; \"relates_to\" for the CEO's request it fulfils; needs_user true when they must decide or act. One line for the ear: spoken at most two short sentences, the one question in ask. The screen the supervisor read is above; read tools only.")
 	return b.String()
+}
+
+// promptStateLine states an announced prompt's real state (EventFacts).
+func promptStateLine(state string) string {
+	switch state {
+	case PromptWaiting:
+		return "The agent's prompt is still open, waiting for the CEO's answer."
+	case PromptAnswered:
+		return "The agent's prompt has already been answered."
+	case PromptGone:
+		return "The agent's prompt is no longer open: the agent left it without an answer from the CEO."
+	}
+	return ""
+}
+
+// quotedLines renders lines as "a"; "b".
+func quotedLines(lines []string) string {
+	q := make([]string, len(lines))
+	for i, l := range lines {
+		q[i] = fmt.Sprintf("%q", l)
+	}
+	return strings.Join(q, "; ")
+}
+
+// factsUpdate is the window note for what changed in an announced
+// event's facts since the request was rendered (before a later step of
+// the same turn), "" when nothing did.
+func factsUpdate(before, now EventFacts) string {
+	var parts []string
+	if len(now.Spoken) > len(before.Spoken) {
+		parts = append(parts, "while you were working the assistant said, about this event: "+quotedLines(now.Spoken[len(before.Spoken):])+"; your spoken would follow it, not replace it")
+	}
+	if now.Prompt != before.Prompt {
+		if line := promptStateLine(now.Prompt); line != "" {
+			parts = append(parts, strings.TrimSuffix(lowerFirstRune(line), "."))
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "Update from the supervisor: " + strings.Join(parts, "; ") + "."
+}
+
+// lowerFirstRune lower-cases the first letter of s.
+func lowerFirstRune(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToLower(s[:1]) + s[1:]
 }
 
 // promiseLine renders a promise record for the window and recall.

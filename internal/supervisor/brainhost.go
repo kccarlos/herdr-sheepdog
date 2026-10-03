@@ -52,7 +52,7 @@ func (h brainHost) info(a state.Agent, pending state.PendingAction, has bool) br
 		info.LastInteraction = *a.LastInteraction
 	}
 	if has && pending.Kind == state.PendingAnswerPrompt && pending.PaneID == a.PaneID {
-		p := &brain.PendingPrompt{ID: pending.ID, Question: pending.Question, YesKeys: pending.YesKeys, NoKeys: pending.NoKeys}
+		p := &brain.PendingPrompt{ID: pending.ID, Question: pending.Question, AskedAt: pending.CreatedAt, YesKeys: pending.YesKeys, NoKeys: pending.NoKeys}
 		for _, o := range pending.Options {
 			p.Options = append(p.Options, brain.Option{Label: o.Label, Keys: o.Keys})
 		}

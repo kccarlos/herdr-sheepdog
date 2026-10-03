@@ -60,8 +60,9 @@ type Querier interface {
 
 // Config tunes the Supervisor; zero values take the defaults.
 type Config struct {
-	// PendingTTL is how long a pending action stays confirmable (default
-	// 120 s).
+	// PendingTTL is how long a send_instruction pending action stays
+	// cancellable (default 120 s). An answer_prompt has no clock: it
+	// lives while its pane is blocked at the same prompt (pending.go).
 	PendingTTL time.Duration
 	// ExpiryTick is the period of the expiry check in Run (default 1 s).
 	ExpiryTick time.Duration
@@ -227,7 +228,7 @@ func (c Config) withDefaults() Config {
 
 // Supervisor is safe for concurrent use: tool handlers, HandleTransition,
 // OnVoiceEvent and Run may all run at once. One mutex orders every change
-// to the pending slot, the briefing cache and the expired-question memory;
+// to the pending slot and the briefing cache;
 // model calls and pane reads happen outside it, herdr sends inside it so
 // an answer, a stop and an instruction cannot interleave.
 type Supervisor struct {
@@ -246,7 +247,6 @@ type Supervisor struct {
 	briefing      string               // cached sentence; "" means recompute
 	briefingPanes []string             // panes the cached sentence names
 	briefingAt    time.Time            // when the cached sentence was composed
-	expired       *state.PendingAction // last expired answer_prompt (scenario 8)
 	seq           uint64               // pending action ids
 	interrupted   map[string]time.Time // pane -> when cancel sent Ctrl-C (suppresses the next "finished")
 	lastSubject   string               // pane most recently spoken about (last push subject or tool target)
@@ -257,6 +257,14 @@ type Supervisor struct {
 	// announce turn and pushes about that event carry it, so the Context
 	// tab links them to the brain's worker_event message.
 	eventIDs map[string]string
+	// eventLines are the spoken lines pushed about each worker event,
+	// recent ones only (eventlines.go): the announce turn's facts and the
+	// anti-loop cap.
+	eventLines map[string][]eventLine
+	// answeredPrompt is the id of each pane's last answer_prompt the
+	// shepherd answered (answerKeys): the announce facts tell "answered"
+	// from "the agent left it" (eventlines.go).
+	answeredPrompt map[string]string
 	// investigating is the one running background job per pane
 	// (investigate.go).
 	investigating map[string]*liveInvestigation
@@ -282,11 +290,14 @@ type Supervisor struct {
 	inputs []*shepherdInput
 	// inputSeq numbers every input (each voice fragment bumps it);
 	// relayedSeq is its value when the last to_supervisor call was
-	// accepted and pushSeq its value when the last spoken push went out,
-	// so a call with no input newer than both is the model's own.
+	// accepted and pushSeq its value when the last spoken push was sent
+	// to the voice model (EventPush, not when it was queued), so a call
+	// with no input newer than both is the model's own. lastPush is that
+	// push's text, for the self-relay check (inputs.go).
 	inputSeq   uint64
 	relayedSeq uint64
 	pushSeq    uint64
+	lastPush   string
 	// acceptedSeq counts the shepherd's requests the daemon took up: every
 	// to_supervisor call claimInput accepted, and every tap. A late
 	// utterance reply is stale once it moved on (utterance.go). Unlike
@@ -506,7 +517,12 @@ func (s *Supervisor) OnVoiceEvent(ev voice.Event) {
 		s.toolCalled()
 	case voice.EventPush:
 		if e.Urgency != voice.UrgencySilent {
+			// Sent to the model now, not when it was queued: only from
+			// here can it prompt a relay of its own (inputs.go,
+			// markPushed). A silent push is context the voice never
+			// speaks.
 			s.pushSpoken(true)
+			s.markPushed(e.Text)
 		}
 	case voice.EventInterrupted:
 		// The shepherd barged in on whatever was playing, a push
@@ -547,6 +563,9 @@ func (s *Supervisor) pushTagged(paneID, text string, u voice.Urgency, tags map[s
 		tags = tagged
 	}
 	tags = s.withPushID(tags)
+	if u != voice.UrgencySilent && !s.noteEventLine(paneID, text, tags) {
+		return
+	}
 	if s.pusher == nil {
 		payload := map[string]any{"text": text, "urgency": u.String()}
 		for k, v := range tags {
@@ -559,13 +578,11 @@ func (s *Supervisor) pushTagged(paneID, text string, u voice.Urgency, tags map[s
 		s.log.Log(logSource, "supervisor.push_error", paneID, map[string]any{"text": text, "urgency": u.String(), "error": err.Error()})
 		return
 	}
-	if u != voice.UrgencySilent {
-		// A silent push is context the voice never speaks, so it cannot
-		// prompt a relay of its own.
-		s.markPushed()
-		if s.brain != nil {
-			s.brain.PushedLinked(s.aliasOf(paneID), text, u.String(), pushLink(tags))
-		}
+	if u != voice.UrgencySilent && s.brain != nil {
+		// Queued is not spoken: the relay gate moves only when the voice
+		// session sends the push to the model (OnVoiceEvent's EventPush,
+		// markPushed).
+		s.brain.PushedLinked(s.aliasOf(paneID), text, u.String(), pushLink(tags))
 	}
 }
 

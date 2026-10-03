@@ -50,7 +50,9 @@ func computeLost(events []eventlog.Event) LostReport {
 				boundaries = append(boundaries, *lastFragment)
 				fragmentUsed = true
 			}
-		case ev.Source == "supervisor" && ev.Type == "supervisor.voice_initiative_ignored":
+		case ev.Source == "supervisor" && (ev.Type == "supervisor.voice_initiative_ignored" || ev.Type == "supervisor.self_relay"):
+			// A self-relay (the voice relaying the last spoken push back)
+			// was logged as voice_initiative_ignored until 2026-10-03.
 			r.VoiceInitiativeIgnored++
 		case ev.Source == "supervisor" && ev.Type == "supervisor.echo_ignored":
 			r.EchoIgnored++

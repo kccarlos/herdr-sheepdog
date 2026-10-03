@@ -33,8 +33,9 @@ func (s *Supervisor) newAnswerPrompt(paneID string, prompt herdr.Prompt, alias s
 		Command:       prompt.Command,
 		YesKeys:       append([]string(nil), prompt.YesKeys...),
 		NoKeys:        append([]string(nil), prompt.NoKeys...),
-		CreatedAt:     now,
-		ExpiresAt:     now.Add(s.cfg.PendingTTL),
+		// No ExpiresAt: an answer_prompt lives while the pane is
+		// blocked at this prompt (checkOpenPrompt), not on a clock.
+		CreatedAt: now,
 	}
 	for i, o := range prompt.Options {
 		p.Options = append(p.Options, state.Option{Label: o.Label, Keys: o.Keys, Default: i == prompt.Default})
@@ -93,11 +94,13 @@ func (s *Supervisor) setPending(p state.PendingAction) string {
 	if err := s.store.SetPending(p); err != nil {
 		s.log.Log(logSource, "supervisor.state_error", p.PaneID, map[string]any{"error": err.Error()})
 	}
-	s.expired = nil
 	s.invalidateBriefingLocked()
 	created := map[string]any{
-		"id": p.ID, "kind": p.Kind, "summary": p.SpokenSummary, "question": p.Question, "expires_at": p.ExpiresAt,
+		"id": p.ID, "kind": p.Kind, "summary": p.SpokenSummary, "question": p.Question,
 		"options": PendingOptions(p), "yes_keys": p.YesKeys, "no_keys": p.NoKeys, "agent": s.aliasOf(p.PaneID),
+	}
+	if !p.ExpiresAt.IsZero() {
+		created["expires_at"] = p.ExpiresAt
 	}
 	if p.Command != "" {
 		created["command"] = p.Command
@@ -137,38 +140,40 @@ func (s *Supervisor) dropPendingFor(paneID, reason string, kinds ...state.Pendin
 	s.clearPending(p, reason)
 }
 
-// ExpirePending drops a pending action whose TTL has passed, logging
-// pending.expired. An expired answer_prompt is remembered so that a later
-// bare answer, tap or send_keys can revive it from the screen. Run calls
-// this on every tick.
+// ExpirePending drops a send_instruction pending action whose TTL has
+// passed, logging pending.expired. Run calls this on every tick.
+//
+// An answer_prompt never expires on the clock (docs/bench-2026-10-03.md
+// #8): on 2026-10-02 bench-claude's "do you want to proceed" stayed on
+// screen from 23:55:47 to 00:03:15, but its pending expired at 23:57:48
+// after pending_ttl_s, and the phone card with it. It lives while the
+// pane is blocked at the same prompt: a transition off blocked ends it
+// (transitions.go), and the reconciler checks the screen
+// (checkOpenPrompt). A tap on its card is valid all that time.
 func (s *Supervisor) ExpirePending() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	p, has := s.store.Pending()
-	if !has || s.cfg.Now().Before(p.ExpiresAt) {
+	if !has || p.Kind == state.PendingAnswerPrompt || s.cfg.Now().Before(p.ExpiresAt) {
 		return
 	}
 	if err := s.store.ClearPending(); err != nil {
 		s.log.Log(logSource, "supervisor.state_error", p.PaneID, map[string]any{"error": err.Error()})
 	}
 	s.invalidateBriefingLocked()
-	if p.Kind == state.PendingAnswerPrompt {
-		s.expired = &p
-	}
 	s.log.Log(logSource, "pending.expired", p.PaneID, map[string]any{"id": p.ID, "kind": p.Kind, "question": p.Question})
 }
 
 // revivePrompt re-reads paneID's screen and, when it is still showing an
 // approval prompt, records it as a fresh answer_prompt pending action:
-// the send_keys path (brainHost.AnswerPrompt) and the bare-answer fast
-// path (fastAnswer) call this when no pending is recorded but the pane
-// is still blocked — its answer_prompt pending expired unanswered while
-// nobody was watching, was dropped without being answered, or was never
-// recorded at all — so the prompt still on screen can still be answered
+// the send_keys path (brainHost.AnswerPrompt) calls this when no pending
+// is recorded for the pane but it is still blocked — its answer_prompt
+// was dropped without being answered (another pane's block or an
+// instruction took the one slot), or was never recorded at all — so the
+// prompt still on screen can still be answered
 // (docs/history/issues-2026-09-18.md "an expired approval prompt can never be
 // approved"). Revival always re-reads the screen rather than trusting
-// what expired or was dropped: the pane may already be asking something
-// else. Caller holds s.mu; ok is false when the pane is gone, not
+// what was dropped: the pane may already be asking something else. Caller holds s.mu; ok is false when the pane is gone, not
 // blocked, or its screen does not parse as a prompt.
 func (s *Supervisor) revivePrompt(ctx context.Context, paneID, source string) (state.PendingAction, bool) {
 	row, ok := s.store.Get(paneID)

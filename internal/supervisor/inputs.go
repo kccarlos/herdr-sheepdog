@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
@@ -34,7 +35,12 @@ import (
 //     of three: a push relayed back (the old echo guard) can no longer
 //     reach the brain as the shepherd's words, since the words are the
 //     recorded ones, but a call with nothing recorded behind it must
-//     still do nothing — it is what the rail stands on;
+//     still do nothing — it is what the rail stands on. "Spoken" means
+//     sent to the voice model (EventPush), not queued (markPushed). Two
+//     exceptions are logged: a call that repeats the last spoken push
+//     stays refused as supervisor.self_relay, and one that repeats the
+//     shepherd's own unclaimed words of the last 10 s is accepted on
+//     them as supervisor.relay_rescued (rescueInput);
 //   - answering a worker's approval prompt (the brain's send_keys, the
 //     bare-answer fast path, a tap) needs an input that arrived after the
 //     prompt appeared and within supervisor.authorise_window_s, whose own
@@ -80,6 +86,8 @@ type shepherdInput struct {
 	// relay does not glue these words onto the next utterance, and the
 	// daemon does not relay them (relay.go).
 	answered bool
+	// answeredAt is when answered was set (silentAnswer).
+	answeredAt time.Time
 	// saidBefore is what the voice was saying, or had said within
 	// echoWindow, when this voice input began: what it may be an echo of
 	// (echoOf, utterance.go). Empty for anything else.
@@ -175,18 +183,65 @@ func (s *Supervisor) heard(text string, final bool) {
 // spoken — it is the voice answering the shepherd's last words itself,
 // so they are neither glued onto the next relay nor relayed by the
 // daemon (relay.go).
+//
+// An output that is not speech is no answer (docs/bench-2026-10-03.md
+// #11): on 2026-10-02 23:55:05 and 23:55:13 Gemini's whole output was
+// the transcript "<no speech detected>" with 0.2 ms of audio, and the
+// shepherd's "结果。" / "你说。" counted as answered, so nobody relayed
+// them. A run whose transcript, angle-bracket placeholders removed, has
+// no letter or digit is ignored here; a run the client played for less
+// than silentAnswerMs is caught when the relay watch fires (the
+// playback report arrives after the transcript; relayUnanswered). So
+// the watch is no longer disarmed here: it checks answered when it
+// fires.
 func (s *Supervisor) voiceSpoke(text string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.closeVoiceLocked()
 	s.echoSpokeLocked(text)
-	if strings.TrimSpace(text) == "" || s.relay.pushSpeaking {
+	if strings.TrimSpace(text) == "" || s.relay.pushSpeaking || noSpeech(s.echo.said) {
 		return
 	}
-	if last := s.lastInputLocked(); last != nil {
-		last.answered = true
+	if last := s.lastInputLocked(); last != nil && !last.answered {
+		last.answered, last.answeredAt = true, s.cfg.Now()
 	}
-	s.disarmRelayLocked()
+}
+
+// silentAnswerMs is the least audio, in milliseconds of playback, an
+// output of the voice must have had to count as answering the shepherd.
+const silentAnswerMs = 50
+
+// noSpeech reports whether the voice's output transcript says nothing:
+// with every <…> placeholder removed (and a trailing one still open,
+// since "<no speech " and "detected>" arrive as two fragments), no letter
+// or digit is left.
+func noSpeech(said string) bool {
+	depth := 0
+	for _, r := range said {
+		switch {
+		case r == '<':
+			depth++
+		case r == '>' && depth > 0:
+			depth--
+		case depth == 0 && (unicode.IsLetter(r) || unicode.IsDigit(r)):
+			return false
+		}
+	}
+	return true
+}
+
+// silentAnswer reports whether the client's playback report shows that
+// the output which answered in carried less than silentAnswerMs of audio:
+// a run that ended (drained or flushed) after the answer was recorded.
+func silentAnswer(in *shepherdInput, playback voice.PlaybackReport) bool {
+	if in.answeredAt.IsZero() || !playback.At.After(in.answeredAt) {
+		return false
+	}
+	switch playback.State {
+	case voice.PlaybackDrained, voice.PlaybackFlushed:
+		return playback.RunMs < silentAnswerMs
+	}
+	return false
 }
 
 // closeVoiceInput ends the voice input being collected, so the next
@@ -227,12 +282,151 @@ func (s *Supervisor) lastInputLocked() *shepherdInput {
 	return s.inputs[len(s.inputs)-1]
 }
 
-// markPushed records that a push was just spoken: an input older than it
-// cannot carry a later to_supervisor call.
-func (s *Supervisor) markPushed() {
+// markPushed records that a spoken push was just sent to the voice model
+// (OnVoiceEvent's EventPush): an input older than it cannot carry a later
+// to_supervisor call. It runs on delivery, not when the push was queued:
+// on 2026-10-02 23:54:18 the shepherd said "然后让 Claude 加一个删除功能。"
+// (transcript.in 18.277), a late reply was queued at 19.220 and moved
+// the gate, the voice relayed the words at 19.414 — refused at 20.9 as
+// its own initiative — and the push only went to the model at 21.9.
+// The instruction was lost (docs/bench-2026-10-03.md #10).
+func (s *Supervisor) markPushed(text string) {
 	s.mu.Lock()
 	s.pushSeq = s.inputSeq
+	s.lastPush = text
 	s.mu.Unlock()
+}
+
+// rescueWindow is how recent the shepherd's words must be for a gated
+// to_supervisor call that repeats them to be taken up anyway
+// (rescueInput).
+const rescueWindow = 10 * time.Second
+
+// rescueInput is the gate's safety net. Invariant it protects: a real
+// shepherd utterance is never dropped as the voice model's own
+// initiative. A push sent to the model between the shepherd's words and
+// the model's relay of them still moves the gate past those words; the
+// order of the two streams is not the daemon's to fix (the transcript
+// arrives on the event pump, the call on the session's goroutine, the
+// push on the push queue). So when the gate would refuse a call, but
+// its argument is the shepherd's own unclaimed words from the last
+// rescueWindow — the same run freshRunLocked would take with the push
+// floor left out — the call is accepted on those words
+// (supervisor.relay_rescued). A bare fast-path phrase ("yes", "stop")
+// is never rescued: one word matches too easily, and it could answer a
+// prompt the shepherd had not heard yet.
+func (s *Supervisor) rescueInput(said string) (claim, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	run := s.freshRunLocked(s.relayedSeq)
+	if len(run) == 0 || s.cfg.Now().Sub(run[len(run)-1].at) > rescueWindow {
+		return claim{}, false
+	}
+	words := make([]string, 0, len(run))
+	for _, in := range run {
+		words = append(words, strings.TrimSpace(in.text))
+	}
+	joined := strings.Join(words, " ")
+	if fastPathPhrase(joined) || fastPathPhrase(said) {
+		return claim{}, false
+	}
+	if !sameWords(said, joined) && !sameWords(said, run[len(run)-1].text) {
+		return claim{}, false
+	}
+	return s.claimRunLocked(run), true
+}
+
+// selfRelay reports whether said repeats the last spoken push: the voice
+// model relaying our own line (its question, its options) back as if the
+// shepherd had said it (2026-10-02 23:54:22.9, "要它跑完直接动手修吗?").
+// Such a call is always refused (supervisor.self_relay).
+func (s *Supervisor) selfRelay(said string) bool {
+	s.mu.Lock()
+	push := s.lastPush
+	s.mu.Unlock()
+	return push != "" && partOf(said, push)
+}
+
+// normWords is text lower-cased with every rune that is not a letter or
+// a digit dropped: spaces and punctuation go, so Chinese (no spaces) and
+// English compare the same way, and "Claude 动手。" equals "claude动手".
+func normWords(text string) []rune {
+	var out []rune
+	for _, r := range strings.ToLower(text) {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// sameWords reports whether a and b are the same words after normWords,
+// allowing for a paraphrase's small edits: equal, one containing the
+// other with the shorter at least 60% of the longer, or within an edit
+// distance of a quarter of the longer. Both need at least two runes.
+func sameWords(a, b string) bool {
+	x, y := normWords(a), normWords(b)
+	if len(x) < 2 || len(y) < 2 {
+		return false
+	}
+	if len(x) > len(y) {
+		x, y = y, x
+	}
+	if string(x) == string(y) {
+		return true
+	}
+	if strings.Contains(string(y), string(x)) && 5*len(x) >= 3*len(y) {
+		return true
+	}
+	return 4*editDistance(x, y) <= len(y)
+}
+
+// partOf reports whether said is made of pieces of line: split at its
+// punctuation, the pieces (two runes or more after normWords) found in
+// line cover at least half of said. The voice relays a push's question
+// and its options joined with its own separators.
+func partOf(said, line string) bool {
+	full := string(normWords(line))
+	if full == "" {
+		return false
+	}
+	pieces := strings.FieldsFunc(said, func(r rune) bool {
+		return unicode.IsPunct(r) || unicode.IsSymbol(r)
+	})
+	found, total := 0, 0
+	for _, p := range pieces {
+		w := string(normWords(p))
+		n := len([]rune(w))
+		if n < 2 {
+			continue
+		}
+		total += n
+		if strings.Contains(full, w) {
+			found += n
+		}
+	}
+	return total > 0 && 2*found >= total
+}
+
+// editDistance is the Levenshtein distance of two rune slices.
+func editDistance(a, b []rune) int {
+	prev := make([]int, len(b)+1)
+	cur := make([]int, len(b)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+	for i := 1; i <= len(a); i++ {
+		cur[0] = i
+		for j := 1; j <= len(b); j++ {
+			cost := 1
+			if a[i-1] == b[j-1] {
+				cost = 0
+			}
+			cur[j] = min(prev[j]+1, cur[j-1]+1, prev[j-1]+cost)
+		}
+		prev, cur = cur, prev
+	}
+	return prev[len(b)]
 }
 
 // claimInput is the to_supervisor gate: every shepherd input newer than
@@ -393,34 +587,16 @@ func (s *Supervisor) railBlockedLocked(p state.PendingAction, keys []string, via
 // tapped (POST /api/pending/answer): option is 1-based, as in
 // PendingOptions. The tap is recorded as a shepherd input first, so it
 // passes the same rail as a spoken answer; the keys go through the same
-// executor (the post-answer poll included), an expired pending action
-// whose prompt is still on screen is revived first, and the voice gets a
-// silent line saying what was tapped. id must name the open question
-// (or the one that just expired): anything else is ErrPendingGone.
+// executor (the post-answer poll included), and the voice gets a silent
+// line saying what was tapped. id must name the open question, which
+// lives as long as its pane is blocked at that prompt (pending.go,
+// ExpirePending): anything else is ErrPendingGone.
 func (s *Supervisor) AnswerTap(ctx context.Context, id string, option int) (voice.ToolResult, error) {
 	s.mu.Lock()
 	p, has := s.store.Pending()
-	if !has || p.ID != id || p.Kind != state.PendingAnswerPrompt || !s.cfg.Now().Before(p.ExpiresAt) {
-		// Expired (or past its TTL, not yet swept) unanswered: revive it
-		// from the screen, but only when the screen still shows the same
-		// prompt — a tap is about the question the shepherd saw.
-		var pane string
-		switch {
-		case has && p.ID == id && p.Kind == state.PendingAnswerPrompt:
-			pane = p.PaneID
-		case !has && s.expired != nil && s.expired.ID == id:
-			pane = s.expired.PaneID
-		default:
-			s.mu.Unlock()
-			return voice.ToolResult{}, ErrPendingGone
-		}
-		before := s.lastPrompt[pane]
-		revived, ok := s.revivePrompt(ctx, pane, "tap")
-		if !ok || s.lastPrompt[pane] != before {
-			s.mu.Unlock()
-			return voice.ToolResult{}, ErrPendingGone
-		}
-		p = revived
+	if !has || p.ID != id || p.Kind != state.PendingAnswerPrompt {
+		s.mu.Unlock()
+		return voice.ToolResult{}, ErrPendingGone
 	}
 	if option < 1 || option > len(p.Options) {
 		s.mu.Unlock()
