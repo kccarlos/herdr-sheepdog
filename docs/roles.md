@@ -213,6 +213,12 @@ the executor, not by prose; the voice has no tool that can answer a
 prompt at all. Everything else — instructions, Ctrl-C, questions — is
 the brain's call.
 
+The app's agent window (docs/ws-contract.md "Agent window: screen and
+input") is outside the rail on purpose: there the CEO types or presses
+keys in the worker's window himself, so his tap is the authority. It is
+logged (`web.agent_input`) and told to the brain, and keys that select
+an option of the open question go through the tap path above.
+
 ## Stop
 
 A procedure in code, resolved from what is in flight: drop a call not

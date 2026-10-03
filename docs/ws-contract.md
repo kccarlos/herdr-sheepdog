@@ -610,6 +610,57 @@ answer a question by tap. All three need the token under "Auth".
   {"error":"that question is no longer open"}`; an option the question
   does not have is `400`.
 
+## Agent window: screen and input
+
+Not part of `/ws`: two token-authenticated JSON routes let the app show an
+agent's live terminal window and operate it. Both serve only the agents
+the daemon tracks (the rows of `GET /api/agents`); any other pane id is
+`404 {"error":"no such agent"}`, so the user's other herdr panes are never
+reachable. A pane id with `:` or `%` is path-escaped as usual.
+
+- **`GET /api/agents/{pane_id}/screen?lines=N&hash=H`** — the agent's
+  current screen: the same herdr read the brain's `read_screen` uses
+  (`pane.read`, source `recent-unwrapped`, ANSI stripped; no model is
+  involved). `lines` defaults to 120 and is capped at 500. The answer is
+
+  ```jsonc
+  {"pane_id": "w1:p2", "alias": "auth", "spoken": "Auth fix", "kind": "codex",
+   "state": "working", "state_since": "…", "text": "…", "lines": 120,
+   "truncated": true, "hash": "9f2c0e1a44b7d310", "unchanged": false}
+  ```
+
+  `hash` is a fingerprint of `state` and `text`. A client that polls
+  passes the last `hash` back as `?hash=`; when nothing changed the
+  answer is `{"pane_id", "alias", "spoken", "kind", "state", "state_since",
+  "lines", "hash", "unchanged": true}` without `text`, so an idle window
+  costs a few bytes. Polling every 1–2 s is the intended use (there is no
+  stream route). A read herdr refuses is `502`. Reading a window does not
+  make the agent the conversation's subject: looking is not talking.
+- **`POST /api/agents/{pane_id}/input`** — the CEO operating the window
+  himself. Exactly one of:
+  - `{"text": "…", "submit": true}` — a prompt, sent as one submission
+    (`agent.prompt`, text + Enter; `submit` defaults to true, `false` is
+    `400`). Text is trimmed, non-empty, at most 4 000 bytes. The agent's
+    `current_task` becomes the text. An agent waiting at an approval or
+    question prompt refuses a prompt: `409` with the reason.
+  - `{"keys": ["enter"]}` — up to 8 keys from the allow-list `enter`,
+    `esc`, `ctrl+c`, `1`…`9`, `up`, `down`, `tab` (anything else is
+    `400`), sent as one `pane.send_keys`.
+
+  The answer is `{"ok": true, "kind": "prompt"|"keys"|"answer", "spoken":
+  "…"}`. The authority is the CEO's own tap, so this does not pass the
+  brain's approval rail (docs/roles.md "The one rail"); instead every
+  input is logged as `web.agent_input {kind, len}` (a prompt's length,
+  never its text) or `{kind, keys}`, and the brain is told in a
+  transcript line ("the CEO typed a prompt in Auth fix's window: …", "the
+  CEO pressed esc in Auth fix's window") so its picture stays right. When
+  the keys select one option of the open approval question for that
+  agent (the option's own keys, the digit it is listed under, or `enter`
+  on the option the cursor is on), they answer it through the tap path (`POST /api/pending/answer`'s
+  code): `kind` is `answer`, the pending action is confirmed and cleared
+  (`pending.confirmed {via: "tap"}`), and the voice and brain hear it the
+  way they hear a tap. A herdr send that fails is `502`.
+
 ## Phone notifications
 
 Not part of `/ws`: the iOS app registers its APNs device token over
