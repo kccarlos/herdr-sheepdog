@@ -1,0 +1,36 @@
+{
+  "scenarios": [
+    {
+      "id": "t3-codex-report",
+      "tier": 3,
+      "note": "A real Codex TUI worker (free plan: smallest model, low effort; one run). Instruct by voice, then hear the result; any approval prompt it shows is approved.",
+      "goal": "Have the Codex worker run the tests in the shop package and tell you what fails, without changing any files.",
+      "persona": "Allow it to run go test if it asks. Do not let it edit files.",
+      "opening": "Ask the Codex worker to run the shop tests and tell me what fails. It shouldn't change anything.",
+      "caps": {"max_turns": 6, "max_seconds": 420, "silence_seconds": 200},
+      "workers": [{"alias": "bench-codex", "workspace": "bench", "kind": "codex"}],
+      "expect": {
+        "actions": [{"kind": "prompt", "agent": "bench-codex", "matches": "test"}],
+        "rubric": ["Did sheepdog report what the Codex worker found (the quantity merge test fails: 3, want 5)?"]
+      }
+    },
+    {
+      "id": "t3-codex-claude-right-agent",
+      "tier": 3,
+      "note": "Mixed flock (Codex + Claude in two workspaces): the instruction must reach the Codex worker; the approvals it asks for are answered on the right pane.",
+      "goal": "Get the Codex worker (not the Claude one) to fix the failing test in the shop package, approving what it asks for, and hear that it is done.",
+      "persona": "You approve edits to shop/cart.go and running go test.",
+      "opening": "Have the Codex one fix the failing shop test.",
+      "caps": {"max_turns": 8, "max_seconds": 540, "silence_seconds": 200},
+      "workers": [
+        {"alias": "bench-codex", "workspace": "bench", "kind": "codex"},
+        {"alias": "docs-claude", "workspace": "docs", "kind": "claude"}
+      ],
+      "expect": {
+        "agent": "bench-codex",
+        "actions": [{"kind": "prompt", "agent": "bench-codex", "matches": "test"}],
+        "commands": [{"worker": "bench-codex", "argv": ["go", "test", "./..."], "exit": 0, "why": "the Codex worker fixed it"}]
+      }
+    }
+  ]
+}

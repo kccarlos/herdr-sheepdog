@@ -30,7 +30,9 @@ func printBenchUsage(w io.Writer) {
 	fprintln(w, "")
 	fprintln(w, "  calibrate  TTS clips -> Gemini Live input transcription WER per voice,")
 	fprintln(w, "             language and noise; saves 10 sample clips for listening")
-	fprintln(w, "  run        a tier-2 campaign over testdata/bench/scenarios (costs money)")
+	fprintln(w, "  run        a tier-2 campaign over testdata/bench/scenarios (costs money);")
+	fprintln(w, "             --tier 3: real daemon, real herdr session, real workers")
+	fprintln(w, "             (sheepdog bench run --tier 3 --help)")
 	fprintln(w, "  render     pre-render the scenarios' opening lines and write the manifest")
 	fprintln(w, "  validate   check the scenario files offline")
 	fprintln(w, "  report     rebuild report.json / report.md from a campaign's runs/")
@@ -312,11 +314,15 @@ func runBenchRender(ctx context.Context, args []string, stdout, stderr io.Writer
 }
 
 func runBenchRun(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	if wantsTier3(args) {
+		// Tier 3: real herdr session, real workers (bench_tier3.go).
+		return runBenchTier3(ctx, args, stdout, stderr)
+	}
 	fs := flag.NewFlagSet("bench run", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var common benchCommon
 	common.register(fs)
-	tier := fs.Int("tier", 2, "benchmark tier (only 2 here; tier 3 drives real herdr workers)")
+	tier := fs.Int("tier", 2, "benchmark tier (2 here; --tier 3 runs bench_tier3.go: real herdr workers)")
 	scen := fs.String("scenarios", defaultBenchScenarios, "scenario files")
 	sims := fs.String("sim", defaultBenchSims, "eval sim files (from_sim)")
 	manifest := fs.String("manifest", defaultBenchManifest, "openings manifest")
@@ -339,7 +345,7 @@ func runBenchRun(ctx context.Context, args []string, stdout, stderr io.Writer) i
 		return 2
 	}
 	if *tier != 2 {
-		fprintln(stderr, "sheepdog bench run: only --tier 2 is built in")
+		fprintln(stderr, "sheepdog bench run: --tier must be 2 or 3")
 		return 2
 	}
 	if *out == "" || *repeat < 1 || *budget < 0 {

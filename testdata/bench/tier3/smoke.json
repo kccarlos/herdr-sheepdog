@@ -1,0 +1,16 @@
+{
+  "scenarios": [
+    {
+      "id": "t3-smoke-status",
+      "tier": 3,
+      "note": "Harness smoke test: one idle Claude worker, the CEO asks what it is doing.",
+      "goal": "Find out whether the bench Claude worker is busy or idle.",
+      "opening": "What is the Claude worker doing right now?",
+      "script": ["What is the Claude worker doing right now?"],
+      "fixed": true,
+      "caps": {"max_seconds": 120},
+      "workers": [{"alias": "bench-claude", "workspace": "bench", "kind": "claude"}],
+      "expect": {"no_actions": true}
+    }
+  ]
+}
