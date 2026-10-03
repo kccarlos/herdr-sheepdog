@@ -3,6 +3,9 @@ package supervisor
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -11,6 +14,7 @@ import (
 
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
 	"github.com/kccarlos/herdr-sheepdog/internal/brain/braintest"
+	"github.com/kccarlos/herdr-sheepdog/internal/cli"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
@@ -175,13 +179,13 @@ func TestInvestigationErrorAndCeiling(t *testing.T) {
 	h := newInvestigationHarness(t, f)
 	job := start(t, h, "why did the tests fail?", "", "why")
 	waitFor(t, func() bool { return len(h.pusher.all()) == 1 }, "the failure to be pushed")
-	if got := h.pusher.last(t); got.Text != "The look into auth did not get through; ask me to try again." || got.Urgency != voice.UrgencyIdle {
+	if got := h.pusher.last(t); got.Text != "The look into auth ran out of time; ask me to try again." || got.Urgency != voice.UrgencyIdle {
 		t.Errorf("push = %+v", got)
 	}
 	if errs := h.log.ofType("investigation.error"); len(errs) != 1 || payload(errs[0])["id"] != job.Job {
 		t.Errorf("investigation.error = %v", errs)
 	}
-	if inv, _ := h.sup.investigation(job.Job); inv.Status != state.InvestigationError || inv.Err == "" {
+	if inv, _ := h.sup.investigation(job.Job); inv.Status != state.InvestigationError || !strings.HasPrefix(inv.Err, "it ran out of time") {
 		t.Errorf("record = %+v", inv)
 	}
 
@@ -376,5 +380,48 @@ func TestInvestigationNeedsAQueryTool(t *testing.T) {
 	h.addAgent("w5:p1", "auth", "codex", herdr.StateIdle)
 	if _, err := h.sup.startInvestigation(context.Background(), "w5:p1", brain.InvestigationRequest{Question: "why?"}); err != brain.ErrNoCLI {
 		t.Errorf("err = %v, want ErrNoCLI", err)
+	}
+}
+
+// P2-10 (docs/eval-campaign-2026-10-03.md run C, deepseek,
+// detail-what-exactly r5): "The look into bench-claude did not get
+// through" gave no reason, and the brain then had the worker read its
+// README out itself. The cause is now a fact on the record (the brain's
+// Investigations section) and a short honest reason in the spoken line,
+// in the shepherd's language.
+func TestInvestigationFailureSaysWhy(t *testing.T) {
+	cases := []struct {
+		name   string
+		err    error
+		zh     bool
+		spoken string
+		fact   string
+	}{
+		{"no CLI (the sim)", brain.ErrNoCLI, false, "The look into auth could not run: no command-line helper is set up on this machine to look with.", "no command-line helper"},
+		{"CLI not detected", cli.ErrUnavailable, false, "The look into auth could not run: no command-line helper is set up on this machine to look with.", "no command-line helper"},
+		{"binary missing", fmt.Errorf("cli: codex: %w", &exec.Error{Name: "codex", Err: exec.ErrNotFound}), false, "The look into auth could not run: no command-line helper is set up on this machine to look with.", "no command-line helper"},
+		{"timed out", fmt.Errorf("cli: codex: %w after 10m0s", cli.ErrTimedOut), false, "The look into auth ran out of time; ask me to try again.", "it ran out of time (the limit is"},
+		{"busy", cli.ErrBusy, false, "The look into auth could not start: another look at the same project was still running. Ask me again in a moment.", "another look"},
+		{"exit code", &cli.ExitError{Backend: cli.Codex, Code: 2, Stderr: "boom"}, false, "The look into auth failed: the helper stopped with an error. Ask me to try again.", "exit code 2"},
+		{"refused", fmt.Errorf("%w: not in this workspace", brain.ErrNotPermitted), false, "The look into auth was refused; ask me if you want it another way.", "it was refused"},
+		{"other, in Chinese", errors.New("claude reported an error: overloaded"), true, "查看 auth 的情况失败了；需要的话让我再试一次。", "it failed: claude reported an error"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			f := &fakeInvestigator{err: c.err}
+			h := newInvestigationHarness(t, f)
+			if c.zh {
+				h.hear("它为什么失败了？")
+			}
+			job := start(t, h, "why did the tests fail?", "", "why")
+			waitFor(t, func() bool { return len(h.pusher.all()) == 1 }, "the failure to be pushed")
+			if got := h.pusher.last(t).Text; got != c.spoken {
+				t.Errorf("push = %q, want %q", got, c.spoken)
+			}
+			inv, _ := h.sup.investigation(job.Job)
+			if !strings.Contains(inv.Err, c.fact) {
+				t.Errorf("record err = %q, want it to say %q", inv.Err, c.fact)
+			}
+		})
 	}
 }

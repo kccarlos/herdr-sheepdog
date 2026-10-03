@@ -145,6 +145,9 @@ func TestRunnerTimeoutKillsProcessGroup(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected a timeout error")
 	}
+	if !errors.Is(err, ErrTimedOut) {
+		t.Errorf("error does not wrap ErrTimedOut: %v", err)
+	}
 	if !res.Killed {
 		t.Errorf("res.Killed = false, want true (res=%+v err=%v)", res, err)
 	}
@@ -327,6 +330,10 @@ func TestRunnerNonZeroExit(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "boom: something broke") {
 		t.Errorf("error should carry stderr: %v", err)
+	}
+	var exit *ExitError
+	if !errors.As(err, &exit) || exit.ExitCode() != 3 {
+		t.Errorf("error is not an ExitError with code 3: %#v", err)
 	}
 	payload := log.ofType("cli.run")[0].Payload.(map[string]any)
 	if payload["exit"] != 3 {

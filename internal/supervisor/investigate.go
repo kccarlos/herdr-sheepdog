@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -11,6 +13,7 @@ import (
 	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
+	"github.com/kccarlos/herdr-sheepdog/internal/cli"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/prose"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
@@ -376,11 +379,17 @@ func (s *Supervisor) runInvestigation(ctx context.Context, live *liveInvestigati
 	now := s.cfg.Now()
 	dur := now.Sub(inv.Started)
 	if err != nil {
-		inv.Status, inv.Err, inv.Finished = state.InvestigationError, err.Error(), &now
+		cause := investigationCause(err, s.cfg.InvestigateMax)
+		// The record (the brain's Investigations section and recall)
+		// says why in plain words first; the raw error follows, clipped.
+		inv.Status, inv.Err, inv.Finished = state.InvestigationError, cause.fact+" ("+prose.TruncateRunes(oneLineErr(err), 120)+")", &now
 		s.saveInvestigation(inv)
-		s.log.Log(logSource, "investigation.error", inv.PaneID, map[string]any{"id": inv.ID, "agent": aliasOr(inv.Alias), "dur_ms": dur.Milliseconds(), "error": err.Error()})
+		s.log.Log(logSource, "investigation.error", inv.PaneID, map[string]any{"id": inv.ID, "agent": aliasOr(inv.Alias), "dur_ms": dur.Milliseconds(), "error": err.Error(), "cause": cause.name})
 		s.invalidateBriefing()
-		s.pushInvestigation(inv, "The look into "+aliasOr(inv.Alias)+" did not get through; ask me to try again.")
+		s.mu.Lock()
+		zh := s.ceoChineseLocked()
+		s.mu.Unlock()
+		s.pushInvestigation(inv, cause.line(aliasOr(inv.Alias), zh))
 		return
 	}
 	inv.Status, inv.Finished = state.InvestigationDone, &now
@@ -629,4 +638,64 @@ func investigationInfo(inv state.Investigation, resumable bool) brain.Investigat
 		Source: inv.Source, Backend: inv.Backend, Status: inv.Status, Started: inv.Started, Finished: inv.Finished,
 		Result: inv.Result, Summary: inv.Summary, Err: inv.Err, Resumable: resumable,
 	}
+}
+
+// failCause is why an investigation failed (docs/eval-campaign-2026-10-03.md
+// P2-10: "did not get through" said nothing, and the brain then had the
+// worker read its README out itself): a name for the log, a fact for
+// the brain's record and a short honest reason for the ear.
+type failCause struct {
+	name string
+	fact string
+	// en and zh are the spoken reason after "The look into <alias>"
+	// and "查看 <alias> 的情况" respectively.
+	en, zh string
+}
+
+// investigationCause classifies a failed run: no CLI helper on this
+// machine, its time limit, another look at the same workspace still
+// running, refused, or the helper's exit code.
+func investigationCause(err error, limit time.Duration) failCause {
+	var exit interface{ ExitCode() int }
+	switch {
+	case errors.Is(err, brain.ErrNoCLI), errors.Is(err, cli.ErrUnavailable), errors.Is(err, exec.ErrNotFound), errors.Is(err, fs.ErrNotExist):
+		return failCause{"no_cli", "no command-line helper (codex or claude) is available on this machine to look with",
+			" could not run: no command-line helper is set up on this machine to look with.", "没能进行：这台机器上没有可用的命令行助手。"}
+	case errors.Is(err, cli.ErrTimedOut), errors.Is(err, context.DeadlineExceeded):
+		return failCause{"timeout", "it ran out of time (the limit is " + limitText(limit) + ")",
+			" ran out of time; ask me to try again.", "超时了；需要的话让我再试一次。"}
+	case errors.Is(err, cli.ErrBusy):
+		return failCause{"busy", "another look at the same project was still running",
+			" could not start: another look at the same project was still running. Ask me again in a moment.", "没能开始：同一个项目还有另一次查看在进行。稍后再让我试。"}
+	case errors.Is(err, brain.ErrNotPermitted):
+		return failCause{"refused", "it was refused: " + oneLineErr(err),
+			" was refused; ask me if you want it another way.", "被拒绝了；需要的话告诉我换个方式。"}
+	case errors.As(err, &exit):
+		return failCause{"exit", fmt.Sprintf("the helper stopped with an error (exit code %d)", exit.ExitCode()),
+			" failed: the helper stopped with an error. Ask me to try again.", "失败了：命令行助手出错退出。需要的话让我再试一次。"}
+	default:
+		return failCause{"error", "it failed: " + oneLineErr(err),
+			" failed; ask me to try again.", "失败了；需要的话让我再试一次。"}
+	}
+}
+
+// line is the spoken failure for alias, in the shepherd's language.
+func (c failCause) line(alias string, zh bool) string {
+	if zh {
+		return "查看 " + alias + " 的情况" + c.zh
+	}
+	return "The look into " + alias + c.en
+}
+
+// oneLineErr is err's text on one line.
+func oneLineErr(err error) string {
+	return strings.Join(strings.Fields(err.Error()), " ")
+}
+
+// limitText renders a time limit for the record: "90 s", "10 min".
+func limitText(d time.Duration) string {
+	if d < 2*time.Minute {
+		return fmt.Sprintf("%d s", int(d.Seconds()))
+	}
+	return fmt.Sprintf("%d min", int(d.Minutes()))
 }
