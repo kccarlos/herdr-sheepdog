@@ -130,9 +130,20 @@ func (s *Supervisor) ToSupervisor(ctx context.Context, said string) (voice.ToolR
 		// relay or the last push: the voice model is acting on its own
 		// (2026-09-23: "yes" right after a push, with the mic muted; a
 		// push relayed back as if the shepherd had said it). Nothing
-		// happens and nothing is said (inputs.go).
-		s.log.Log(logSource, "supervisor.voice_initiative_ignored", "", map[string]any{"text": said})
-		return voice.ToolResult{Scheduling: voice.UrgencySilent}, nil
+		// happens and nothing is said (inputs.go) — unless the call
+		// repeats the shepherd's own words of the last few seconds,
+		// which a push sent in between hid from the gate (rescueInput).
+		if s.selfRelay(said) {
+			s.log.Log(logSource, "supervisor.self_relay", "", map[string]any{"text": said})
+			return voice.ToolResult{Scheduling: voice.UrgencySilent}, nil
+		}
+		rescued, ok := s.rescueInput(said)
+		if !ok {
+			s.log.Log(logSource, "supervisor.voice_initiative_ignored", "", map[string]any{"text": said})
+			return voice.ToolResult{Scheduling: voice.UrgencySilent}, nil
+		}
+		s.log.Log(logSource, "supervisor.relay_rescued", "", map[string]any{"heard": rescued.text, "said": said, "inputs": rescued.n})
+		c = rescued
 	}
 	text, fallback := UtteranceOf(c.text, said)
 	payload := map[string]any{"heard": c.text, "said": said, "inputs": c.n, "input": string(c.in.kind)}

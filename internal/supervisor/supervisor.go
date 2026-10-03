@@ -282,11 +282,14 @@ type Supervisor struct {
 	inputs []*shepherdInput
 	// inputSeq numbers every input (each voice fragment bumps it);
 	// relayedSeq is its value when the last to_supervisor call was
-	// accepted and pushSeq its value when the last spoken push went out,
-	// so a call with no input newer than both is the model's own.
+	// accepted and pushSeq its value when the last spoken push was sent
+	// to the voice model (EventPush, not when it was queued), so a call
+	// with no input newer than both is the model's own. lastPush is that
+	// push's text, for the self-relay check (inputs.go).
 	inputSeq   uint64
 	relayedSeq uint64
 	pushSeq    uint64
+	lastPush   string
 	// acceptedSeq counts the shepherd's requests the daemon took up: every
 	// to_supervisor call claimInput accepted, and every tap. A late
 	// utterance reply is stale once it moved on (utterance.go). Unlike
@@ -506,7 +509,12 @@ func (s *Supervisor) OnVoiceEvent(ev voice.Event) {
 		s.toolCalled()
 	case voice.EventPush:
 		if e.Urgency != voice.UrgencySilent {
+			// Sent to the model now, not when it was queued: only from
+			// here can it prompt a relay of its own (inputs.go,
+			// markPushed). A silent push is context the voice never
+			// speaks.
 			s.pushSpoken(true)
+			s.markPushed(e.Text)
 		}
 	case voice.EventInterrupted:
 		// The shepherd barged in on whatever was playing, a push
@@ -559,13 +567,11 @@ func (s *Supervisor) pushTagged(paneID, text string, u voice.Urgency, tags map[s
 		s.log.Log(logSource, "supervisor.push_error", paneID, map[string]any{"text": text, "urgency": u.String(), "error": err.Error()})
 		return
 	}
-	if u != voice.UrgencySilent {
-		// A silent push is context the voice never speaks, so it cannot
-		// prompt a relay of its own.
-		s.markPushed()
-		if s.brain != nil {
-			s.brain.PushedLinked(s.aliasOf(paneID), text, u.String(), pushLink(tags))
-		}
+	if u != voice.UrgencySilent && s.brain != nil {
+		// Queued is not spoken: the relay gate moves only when the voice
+		// session sends the push to the model (OnVoiceEvent's EventPush,
+		// markPushed).
+		s.brain.PushedLinked(s.aliasOf(paneID), text, u.String(), pushLink(tags))
 	}
 }
 
