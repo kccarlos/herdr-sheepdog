@@ -53,11 +53,13 @@ scenarios (docs/iteration-2.md, "Rules for every change").
 | turn (`loop.go` `Turn`/`run`) | queued → running steps 1..`MaxSteps` 6. The last step, or a step that starts with less than `StepReserve` left, is answer-only. Budgets: utterance 12 s, announce 6 s (15 s when owed), stop 5 s, plus `FinalGrace`; **time spent in the queue counts against the budget** | `brain.turn`, `brain.step`, `brain.tool_call/tool_result` |
 | yield | before each model call, an event turn with a CEO waiter queued stops with `ErrYielded`; a step already in flight is never cut | `brain.yielded` |
 | fallback | reason `timeout`, `cancelled`, `rate_limited`, `model_error`, `bad_reply`, `step_budget`, `yielded`, `coalesced`, `queue_timeout`; a turn that already acted returns the action's echo instead (`fail`) | `brain.fallback` |
-| after-turn | prune → compact past 12 k tokens → release the lock (`afterTurn`) | `brain.compaction` |
+| after-turn | prune → release the lock → compact past 12 k tokens, **off the lock** and one at a time (`afterTurn`). The summary is spliced in only if the summarised messages are still the window's prefix; a Retract, Reset or another compaction meanwhile discards it and the next turn's after-work retries. Messages ingested during the summary call stay | `brain.compaction {discarded, reason: window_changed}` |
 | ingestion outside turns | `Heard`, `Said`, `SaidCut`, `Echo`, `Pushed`, `WorkerEvent`, `PromiseEvent`, in arrival order (`brain.go`); rendered in `modelOrder` (`assemble.go`) | — |
 | model switch | `SetModel` changes the next turn; a running turn keeps its snapshot | `brain.model_changed` |
-| reset / closed | `Reset` takes the lock with CEO priority, then starts a new segment; `Close` refuses new turns (`ErrClosed`), cancels the ones in flight and waits | `brain.reset` |
-| 429 | Gemini: rotate to the next key per request; DeepSeek and Vertex: one key, fails the call (`model.go`, `openaicompat.go`) | `brain.rate_limited` |
+| reset / closed | `Reset` takes the lock with CEO priority, cancels a compaction in flight and waits for it, then starts a new segment; `Close` refuses new turns (`ErrClosed`), cancels the ones in flight and after-turn work, and waits | `brain.reset` |
+| tool timeout | each read tool has its own timeout (list_agents, recall 2 s; read_screen 4 s; investigate's start 5 s; run_cli 8 s), cut so `StepReserve` of the turn is left; on expiry the model gets "timed out after N s" and answers. Action tools have only the turn's budget (`tools.go` `runTool`) | `brain.tool_timeout` |
+| failover | a model call failing with 429, 5xx or a transport timeout, with turn budget left, is retried once on the next registered provider (Vertex → DeepSeek → Gemini, the failing one left out), which keeps the rest of the turn; the selection is never changed. While the selected provider is on a failing streak (a failover within 10 min), a step's first attempt leaves 5 s for the retry. Three in a row within 10 min → one spoken notice, at most every 30 min (`failover.go`) | `brain.failover`, `brain.failover_notice` |
+| 429 | Gemini: rotate to the next key per request; DeepSeek and Vertex: one key, fails the call (`model.go`, `openaicompat.go`), then the step fails over (above) | `brain.rate_limited` |
 
 ### 1.4 Voice session — `internal/voice` (behind `switch.go` `Switcher`)
 

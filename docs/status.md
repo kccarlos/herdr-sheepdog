@@ -40,7 +40,10 @@ What is in:
   contract (`spoken` / `ask` / `detail`); push judgment under the
   chattiness ceiling; promises; background investigations, including
   forking the worker's own session; reading the worker's own transcript
-  and a work journal per agent; an honest code fallback when it fails.
+  and a work journal per agent; an honest code fallback when it fails;
+  compaction off the turn lock, per-tool timeouts, and one-step provider
+  failover on 429 / 5xx / timeout with a spoken notice after three in a
+  row (fake-model tests only, not yet live).
 - **Supervisor:** every utterance runs on the shepherd's recorded words;
   the one rail in code (`supervisor.authorise_window_s`); the stop
   procedure, acknowledged by a code sentence with no brain turn;

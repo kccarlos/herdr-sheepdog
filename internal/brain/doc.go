@@ -93,7 +93,8 @@
 // one-line stub after Config.PruneAfterTurns turns, and compacts the
 // oldest half into one summary message of at most 600 tokens when the
 // window exceeds Config.WindowTokens (estimated; 12 k by default since
-// docs/iteration-2.md WP5). The seam for the memory system (plan
+// docs/iteration-2.md WP5) — after the turn lock is released, and only
+// over the messages it summarised if they are still there. The seam for the memory system (plan
 // P6) is that interface: Ingest / Assemble / Compact / AfterTurn, borrowed
 // from OpenClaw. A memory-backed engine plugs in through Config.Engine and
 // may return a system-prompt addition from Assemble (recalled facts) and
@@ -120,7 +121,8 @@
 // Everything is observable through brain.* events on the logging.Logger:
 // brain.turn, brain.step, brain.tool_call / brain.tool_result (paired by
 // id), brain.rail_blocked (a refused send_keys, or an action tool named
-// in an event turn), brain.compaction, brain.fallback, brain.yielded,
+// in an event turn), brain.compaction, brain.tool_timeout,
+// brain.failover / brain.failover_notice, brain.fallback, brain.yielded,
 // brain.event_coalesced, brain.system_prompt and brain.rate_limited
 // (decision D10).
 package brain
