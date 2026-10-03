@@ -192,6 +192,10 @@ type Brain struct {
 	// lastCompaction is the most recent successful compaction (zero
 	// value when none), for the Supervisor tab.
 	lastCompaction CompactionInfo
+	// compactCancel / compactDone are the compaction in flight (nil
+	// when none): one at a time, off the turn lock (afterTurn).
+	compactCancel context.CancelFunc
+	compactDone   chan struct{}
 
 	// catalogs are the cached model lists, one per provider (catalog.go).
 	catalogs catalogCaches
@@ -698,16 +702,19 @@ func (b *Brain) Seed(msgs []Message) {
 // what was said before. The roster, the ledger (promises, notes,
 // investigations) and the pending prompt are not in the window at all
 // (sections() renders them fresh from the Host every turn), so they are
-// unaffected. It waits for any turn in flight, and that turn's
-// after-turn pruning/compaction, to finish first (the turn lock), so
-// nothing from the old conversation lands in the new segment; ctx
-// bounds that wait. via is logged and carried nowhere else. The
+// unaffected. It waits for any turn in flight to finish first (the turn
+// lock) and cancels a compaction in flight (which runs off the lock),
+// waiting for it to end, so nothing from the old conversation lands in
+// the new segment; ctx bounds both waits. via is logged and carried nowhere else. The
 // returned id also names the new transcript segment (TranscriptPath).
 func (b *Brain) Reset(ctx context.Context, via string) (string, error) {
 	if _, err := b.lock.acquire(ctx, true, ""); err != nil {
 		return "", fmt.Errorf("brain: reset: waiting for the turn lock: %w", err)
 	}
 	defer b.lock.release()
+	if err := b.stopCompaction(ctx); err != nil {
+		return "", fmt.Errorf("brain: reset: waiting for the compaction: %w", err)
+	}
 
 	b.mu.Lock()
 	b.resetSeq++
