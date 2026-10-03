@@ -43,18 +43,37 @@ var (
 	reMeta    = regexp.MustCompile(`^\s*(Environment|Model|Sandbox|Approval):`)
 	// reRule matches the separator rules the TUIs draw between sections.
 	reRule = regexp.MustCompile(`^[\s─━═╌╍┄┅–—_\-·•\*]+$`)
+	// reCursorRow is the cursor row of an unnumbered menu: the marker,
+	// then the label (Claude Code 2.1.288's trust dialog draws
+	// "❯ No, exit" over "  Yes, I trust this folder", agy "> Yes, …").
+	reCursorRow = regexp.MustCompile(`^(\s*)([›❯>])\s+(\S.*?)\s*$`)
+)
+
+// Unnumbered menus are read more strictly than numbered ones, since the
+// same marker opens a shell prompt or a TUI's input line: the rows must
+// be short, aligned to the cursor row's label column, stand together at
+// the very end of the screen (at most cursorMenuTrailer non-blank lines
+// such as "Enter to confirm · Esc to cancel" below them) and number at
+// most cursorMenuMax.
+const (
+	cursorMenuMaxLabel = 80
+	cursorMenuTrailer  = 3
+	cursorMenuMax      = 12
 )
 
 // Option is one selectable choice of an approval prompt.
 type Option struct {
-	// Number is the digit it is listed under on screen (1-based).
+	// Number is the digit it is listed under on screen (1-based); on an
+	// unnumbered menu, its position.
 	Number int
 	// Label is its text, without the number and without a key hint that
 	// became Keys.
 	Label string
 	// Keys is the keystroke sequence that selects it: the parenthesised
 	// hint when the screen names a plain key ("y", "p", "esc"), else the
-	// option's number.
+	// option's number; on an unnumbered menu, the arrow moves from the
+	// cursor row then "enter" (["down", "enter"], or ["enter"] for the
+	// cursor's own row).
 	Keys []string
 	// Meta marks an option that is not an answer to the question: Claude
 	// Code's AskUserQuestion draws "Type something." (free text) next to
@@ -120,10 +139,13 @@ func isChatOption(label string) bool { return labelKey(label) == "chat about thi
 // and reason it is about. ok is false when the screen's tail is not a
 // prompt — no block of two or more options numbered from one (each may
 // carry indented description lines) with the cursor on exactly one of
-// them.
+// them, nor an unnumbered cursor menu at the very end (findCursorMenu).
 func ParsePrompt(screen string) (Prompt, bool) {
 	lines := tailLines(screen, promptTailLines)
 	opts, first, cursor, ok := findOptions(lines)
+	if !ok {
+		opts, first, cursor, ok = findCursorMenu(lines)
+	}
 	if !ok {
 		return Prompt{}, false
 	}
@@ -267,6 +289,93 @@ func parseOptions(lines []string) (opts []Option, cursor, cursors int) {
 		}
 	}
 	return opts, cursor, cursors
+}
+
+// findCursorMenu reads an unnumbered menu: rows of choices with the
+// cursor marker on one of them and no numbers (Claude Code 2.1.288's
+// folder trust dialog, agy's). The keys are navigation from the cursor:
+// the rail, the fast path and the phone card send them like any other
+// option's keys. Only the last cursor row of the tail is considered; the
+// other rows are the non-blank lines right above and below it indented
+// exactly to its label column, and the block must be the end of the
+// screen (cursorMenuTrailer). An input line ("❯ Try …" between rules) or
+// a shell prompt has no aligned sibling rows, so it is not a menu.
+func findCursorMenu(lines []string) (opts []Option, first, cursor int, ok bool) {
+	c := -1
+	for i := len(lines) - 1; i >= 0; i-- {
+		if reCursorRow.MatchString(lines[i]) {
+			c = i
+			break
+		}
+	}
+	if c < 0 {
+		return nil, 0, 0, false
+	}
+	m := reCursorRow.FindStringSubmatchIndex(lines[c])
+	label := lines[c][m[6]:m[7]]
+	if reOption.MatchString(lines[c]) || utf8.RuneCountInString(label) > cursorMenuMaxLabel {
+		return nil, 0, 0, false
+	}
+	col := utf8.RuneCountInString(lines[c][:m[6]])
+	row := func(line string) (string, bool) {
+		t := strings.TrimLeft(line, " \t")
+		if t == "" || reRule.MatchString(line) || reCursorRow.MatchString(line) {
+			return "", false
+		}
+		if utf8.RuneCountInString(line)-utf8.RuneCountInString(t) != col {
+			return "", false
+		}
+		t = strings.TrimSpace(t)
+		return t, utf8.RuneCountInString(t) <= cursorMenuMaxLabel
+	}
+	first, last := c, c
+	for first > 0 {
+		if _, ok := row(lines[first-1]); !ok {
+			break
+		}
+		first--
+	}
+	for last < len(lines)-1 {
+		if _, ok := row(lines[last+1]); !ok {
+			break
+		}
+		last++
+	}
+	n := last - first + 1
+	if n < 2 || n > cursorMenuMax {
+		return nil, 0, 0, false
+	}
+	trailer := 0
+	for _, line := range lines[last+1:] {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		if trailer++; trailer > cursorMenuTrailer {
+			return nil, 0, 0, false
+		}
+	}
+	for i := first; i <= last; i++ {
+		text := label
+		if i != c {
+			text, _ = row(lines[i])
+		}
+		opts = append(opts, Option{Number: i - first + 1, Label: truncate(text, promptMaxOptionLabel), Keys: navKeys(i - c)})
+	}
+	return opts, first, c - first, true
+}
+
+// navKeys is the arrow sequence that moves the cursor by d rows (down
+// when positive), then "enter".
+func navKeys(d int) []string {
+	key := "down"
+	if d < 0 {
+		key, d = "up", -d
+	}
+	keys := make([]string, 0, d+1)
+	for range d {
+		keys = append(keys, key)
+	}
+	return append(keys, "enter")
 }
 
 // option builds one option from its number and its raw label: a plain
