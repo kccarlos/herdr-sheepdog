@@ -17,15 +17,18 @@ import (
 // fakeTTS answers every call with 0.5 s of a 24 kHz tone and records the
 // prompt and voice.
 type fakeTTS struct {
-	calls  atomic.Int32
-	prompt string
-	voice  string
-	fail   bool
+	calls     atomic.Int32
+	prompt    string
+	voice     string
+	fail      bool
+	failFirst int32
+	models    []string
 }
 
 func (f *fakeTTS) Generate(_ context.Context, model string, contents []*genai.Content, cfg *genai.GenerateContentConfig) (*genai.GenerateContentResponse, error) {
-	f.calls.Add(1)
-	if f.fail {
+	n := f.calls.Add(1)
+	f.models = append(f.models, model)
+	if f.fail || n <= f.failFirst {
 		return nil, errors.New("Error 429, RESOURCE_EXHAUSTED")
 	}
 	f.prompt = contents[0].Parts[0].Text
@@ -102,12 +105,13 @@ func (s stubSynth) Synthesize(context.Context, Request) (Clip, error) {
 }
 
 func TestFallback(t *testing.T) {
-	f := Fallback{stubSynth{id: "gemini", err: errors.New("quota")}, stubSynth{id: "say"}}
+	warned := 0
+	f := Fallback{Synths: []Synth{stubSynth{id: "gemini", err: errors.New("quota")}, stubSynth{id: "say"}}, Tries: 1, Warn: func(Request, error) { warned++ }}
 	c, err := f.Synthesize(context.Background(), Request{Text: "x"})
-	if err != nil || c.Source != "say" {
-		t.Fatalf("fallback = %+v %v", c, err)
+	if err != nil || c.Source != "say" || warned != 1 {
+		t.Fatalf("fallback = %+v %v (warned %d)", c, err, warned)
 	}
-	if _, err := (Fallback{stubSynth{id: "a", err: errors.New("one")}}).Synthesize(context.Background(), Request{}); err == nil || !strings.Contains(err.Error(), "one") {
+	if _, err := (Fallback{Synths: []Synth{stubSynth{id: "a", err: errors.New("one")}}, Tries: 1}).Synthesize(context.Background(), Request{}); err == nil || !strings.Contains(err.Error(), "one") {
 		t.Fatalf("all failing = %v", err)
 	}
 	if f.ID() != "gemini|say" {
@@ -145,5 +149,22 @@ func TestTrim(t *testing.T) {
 	}
 	if Trim(make([]int16, 10), 100, 50) != nil {
 		t.Fatal("silence should trim to nothing")
+	}
+}
+
+// A rate-limited call retries on the next model (another quota bucket);
+// the clip says which model rendered it.
+func TestGeminiAlternatesOnRateLimit(t *testing.T) {
+	f := &fakeTTS{failFirst: 2}
+	g := &Gemini{Model: f, ModelID: DefaultModel, Alts: []string{AltModel, "x-tts"}}
+	c, err := g.Synthesize(context.Background(), Request{Text: "hi"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(f.models) != 3 || f.models[0] != DefaultModel || f.models[1] != AltModel || f.models[2] != "x-tts" || c.Model != "x-tts" {
+		t.Fatalf("models tried %v, clip model %s", f.models, c.Model)
+	}
+	if _, err := (&Gemini{Model: &fakeTTS{fail: true}, ModelID: DefaultModel, Tries: 2}).Synthesize(context.Background(), Request{Text: "hi"}); err == nil {
+		t.Fatal("want the error after the tries")
 	}
 }

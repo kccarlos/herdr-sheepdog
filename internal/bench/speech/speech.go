@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"google.golang.org/genai"
 
@@ -116,7 +117,18 @@ func ValidStyle(s string) bool {
 type Gemini struct {
 	Model   brain.Model
 	ModelID string
+	// Alts are TTS models a rate-limited call retries on, in turn
+	// (Vertex limits requests per minute per base model, so another
+	// model is another bucket). The clip stays cached under ModelID.
+	Alts []string
+	// Tries bounds the attempts per line (default 6), with backoff
+	// from 2 s up to 20 s between them.
+	Tries int
 }
+
+// DefaultAlts are the other TTS models served at Vertex (checked live
+// with DefaultModel).
+var DefaultAlts = []string{AltModel, "gemini-2.5-flash-preview-tts"}
 
 // NewGemini returns Gemini TTS on Vertex AI with the [gemini.vertex]
 // key and project (location global).
@@ -128,7 +140,13 @@ func NewGemini(apiKey, project, model string) (*Gemini, error) {
 	if model == "" {
 		model = DefaultModel
 	}
-	return &Gemini{Model: m, ModelID: model}, nil
+	var alts []string
+	for _, a := range append([]string{DefaultModel}, DefaultAlts...) {
+		if a != model {
+			alts = append(alts, a)
+		}
+	}
+	return &Gemini{Model: m, ModelID: model, Alts: alts}, nil
 }
 
 // ID implements Synth.
@@ -156,7 +174,30 @@ func (g *Gemini) Synthesize(ctx context.Context, r Request) (Clip, error) {
 		ResponseModalities: []string{"AUDIO"},
 		SpeechConfig:       &genai.SpeechConfig{VoiceConfig: &genai.VoiceConfig{PrebuiltVoiceConfig: &genai.PrebuiltVoiceConfig{VoiceName: voice}}},
 	}
-	resp, err := g.Model.Generate(ctx, g.ModelID, genai.Text(Prompt(r)), cfg)
+	models := append([]string{g.ModelID}, g.Alts...)
+	tries := g.Tries
+	if tries <= 0 {
+		tries = 6
+	}
+	var resp *genai.GenerateContentResponse
+	var err error
+	model := g.ModelID
+	for i := 0; i < tries; i++ {
+		model = models[i%len(models)]
+		resp, err = g.Model.Generate(ctx, model, genai.Text(Prompt(r)), cfg)
+		if err == nil || !retryable(err) || i == tries-1 {
+			break
+		}
+		d := min(time.Duration(2<<min(i, 4))*time.Second, 20*time.Second)
+		if i < len(models)-1 {
+			d = 300 * time.Millisecond // a fresh bucket first
+		}
+		select {
+		case <-time.After(d):
+		case <-ctx.Done():
+			return Clip{}, ctx.Err()
+		}
+	}
 	if err != nil {
 		return Clip{}, fmt.Errorf("gemini tts: %w", err)
 	}
@@ -175,11 +216,22 @@ func (g *Gemini) Synthesize(ctx context.Context, r Request) (Clip, error) {
 	if len(raw) == 0 {
 		return Clip{}, errors.New("gemini tts: no audio in the response")
 	}
-	c := Clip{Samples: pcm.Resample(pcm.FromBytes(raw), rate, Rate), Source: "gemini", Model: g.ModelID, Voice: voice}
+	c := Clip{Samples: pcm.Resample(pcm.FromBytes(raw), rate, Rate), Source: "gemini", Model: model, Voice: voice}
 	if resp.UsageMetadata != nil {
 		c.InTokens, c.OutTokens = int(resp.UsageMetadata.PromptTokenCount), int(resp.UsageMetadata.CandidatesTokenCount)
 	}
 	return c, nil
+}
+
+// retryable: a rate limit or a transient server error.
+func retryable(err error) bool {
+	s := strings.ToLower(err.Error())
+	for _, n := range []string{"429", "rate limit", "resource_exhausted", "quota", "500", "502", "503", "504", "unavailable", "deadline", "internal error"} {
+		if strings.Contains(s, n) {
+			return true
+		}
+	}
+	return false
 }
 
 // rateOf reads rate=N from an audio MIME type ("audio/L16;codec=pcm;rate=24000").
@@ -225,13 +277,19 @@ func (s *Say) Synthesize(ctx context.Context, r Request) (Clip, error) {
 	return Clip{Samples: samples, Source: "say", Voice: voice}, nil
 }
 
-// Fallback tries each synthesizer in order and returns the first clip.
-type Fallback []Synth
+// Fallback tries each synthesizer in order (each Tries times, default
+// 2) and returns the first clip; Warn, when set, hears every failure
+// that a later synthesizer covered.
+type Fallback struct {
+	Synths []Synth
+	Tries  int
+	Warn   func(r Request, err error)
+}
 
 // ID implements Synth.
 func (f Fallback) ID() string {
-	ids := make([]string, len(f))
-	for i, s := range f {
+	ids := make([]string, len(f.Synths))
+	for i, s := range f.Synths {
 		ids[i] = s.ID()
 	}
 	return strings.Join(ids, "|")
@@ -240,14 +298,24 @@ func (f Fallback) ID() string {
 // Synthesize implements Synth.
 func (f Fallback) Synthesize(ctx context.Context, r Request) (Clip, error) {
 	var errs []error
-	for _, s := range f {
-		c, err := s.Synthesize(ctx, r)
-		if err == nil {
-			return c, nil
-		}
-		errs = append(errs, fmt.Errorf("%s: %w", s.ID(), err))
-		if ctx.Err() != nil {
-			break
+	tries := max(f.Tries, 1)
+	if f.Tries == 0 {
+		tries = 2
+	}
+	for _, s := range f.Synths {
+		for i := 0; i < tries; i++ {
+			c, err := s.Synthesize(ctx, r)
+			if err == nil {
+				return c, nil
+			}
+			errs = append(errs, fmt.Errorf("%s: %w", s.ID(), err))
+			if f.Warn != nil {
+				f.Warn(r, fmt.Errorf("%s: %w", s.ID(), err))
+			}
+			if ctx.Err() != nil {
+				return Clip{}, errors.Join(errs...)
+			}
+			time.Sleep(time.Duration(i+1) * 500 * time.Millisecond)
 		}
 	}
 	return Clip{}, errors.Join(errs...)
