@@ -240,13 +240,18 @@ func thinkingLow(cfg *genai.GenerateContentConfig) *genai.GenerateContentConfig 
 }
 
 // minimalRefused reports the 400 a model without a minimal thinking
-// level answers ("Thinking level is unsupported: THINKING_LEVEL_MINIMAL").
+// level answers. The wording has changed: "Thinking level is
+// unsupported: THINKING_LEVEL_MINIMAL" (2026-10-01) and, from Vertex on
+// 2026-10-03, "Thinking level MINIMAL is not supported for this model.
+// Please retry with other thinking level." (seen in the tier-3 bench:
+// every announce turn on gemini-3.8-flash fell back).
 func minimalRefused(err error) bool {
 	if err == nil {
 		return false
 	}
-	s := err.Error()
-	return strings.Contains(s, "Thinking level is unsupported") && strings.Contains(s, "MINIMAL")
+	s := strings.ToLower(err.Error())
+	return strings.Contains(s, "thinking level") && strings.Contains(s, "minimal") &&
+		(strings.Contains(s, "unsupported") || strings.Contains(s, "not supported"))
 }
 
 // ListModels implements ModelCatalog: the Gemini model list (a free

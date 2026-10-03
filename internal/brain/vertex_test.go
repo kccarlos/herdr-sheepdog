@@ -177,10 +177,20 @@ func TestVertexCatalogAndConfig(t *testing.T) {
 // retried once at low and remembered: the next minimal call goes out at
 // low directly.
 func TestGenaiModelMinimalRefusedFallsBackToLow(t *testing.T) {
+	for _, msg := range []string{
+		"Thinking level is unsupported: THINKING_LEVEL_MINIMAL",
+		// Vertex's wording on 2026-10-03 (tier-3 bench).
+		"Thinking level MINIMAL is not supported for this model. Please retry with other thinking level.",
+	} {
+		t.Run(msg[:24], func(t *testing.T) { testMinimalRefused(t, msg) })
+	}
+}
+
+func testMinimalRefused(t *testing.T, msg string) {
 	ok := `{"candidates":[{"content":{"role":"model","parts":[{"text":"{}"}]}}]}`
 	refuse := func(w http.ResponseWriter) {
 		w.WriteHeader(400)
-		_, _ = io.WriteString(w, `{"error":{"code":400,"message":"Thinking level is unsupported: THINKING_LEVEL_MINIMAL","status":"INVALID_ARGUMENT"}}`)
+		_, _ = io.WriteString(w, `{"error":{"code":400,"message":"`+msg+`","status":"INVALID_ARGUMENT"}}`)
 	}
 	fv := &fakeVertex{t: t, answers: []func(http.ResponseWriter){refuse, jsonAnswer(ok), jsonAnswer(ok)}}
 	srv := httptest.NewServer(fv)
