@@ -9,7 +9,11 @@ scenarios come from the bench issues (docs/bench-2026-10-03.md) and the v1
 jobs J1–J6. Each scenario was repeated 5 times per brain, on two brains.
 
 All numbers below are from `sheepdog eval sim --live` runs on 2026-10-03
-(UTC). Prices are estimates at assumed list prices (`internal/eval/llm.go`
+(UTC). Each campaign's `report.md` (tables and the failed runs with
+transcripts) and `report.json` (every run) are in
+[`eval/2026-10-03/`](eval/2026-10-03/): `A-vertex`, `A-deepseek`,
+`B-vertex`, `B-deepseek` and `t25-vertex`. The project id and temp paths
+are redacted; raw event logs are not included. Prices are estimates at assumed list prices (`internal/eval/llm.go`
 `Prices`) and have not been checked against an invoice.
 
 ## Summary
@@ -372,6 +376,24 @@ with the model.
     Fix direction: report why an investigation failed (no CLI backend) as
     a fact.
 
+## Hand-off: findings for the supervisor/prose agent
+
+Each item lists where the cause is (file:line at `origin/main` after #91
+and #92), the scenarios that reproduce it, and the fix direction. Run a
+single scenario with `sheepdog eval sim --live --provider deepseek
+--model deepseek-flash --env-file .env --filter <id> --repeat 5`. The
+reports in [`eval/2026-10-03/`](eval/2026-10-03/) contain the transcripts.
+
+| # | Finding | Where | Reproducing scenarios | Fix direction |
+|---|---|---|---|---|
+| H1 | `。.` / `？.` seam on Chinese lines | `internal/supervisor/brainhost.go:391` `sentence()`: only ASCII terminators count | j1-status-zh, j2-approve-zh, bench-fix-failing-test-zh, bench-lang-switch-en-zh (any reply that ends in Chinese punctuation) | treat `。！？…` as terminal |
+| H2 | "Type something." / "Chat about this" offered as choices | `internal/supervisor/brainhost.go:55-58`: `brain.PendingPrompt.Options` is built without `Option.Meta` | bench-askuser-meta-options | carry Meta to the brain as a fact ("free-text entry, not an answer") |
+| H3 | `go test -race ./...` spoken as `-race./....` | `internal/prose/prose.go:118` `reOrphan` (`\s+([,.;:!?])`); the command comes from `internal/herdr/prompt.go:194` | j1-status-en, j1-status-zh, j2-approve-en, j2-approve-zh, j5-what-does-that-mean (shown when the block's code sentence plays, i.e. a brain slower than AnnounceWait) | do not join a `.` that starts a path; keep raw commands out of the spoken template |
+| H4 | English code sentences after the CEO spoke Chinese | `"Told %s %s."` at `internal/supervisor/utterance.go:667`, `brainhost.go:244`, `inputs.go:620`; block template at `internal/herdr/prompt.go:194`; option labels are screen text | j2-approve-zh, j1-status-zh | use the language of the CEO's last utterance (a fact the daemon has), or leave the wording to the brain |
+| H5 | "Not now" / "先不要" / "让它等等" is answered as a decline (`esc`) | pending facts given to the brain: `internal/supervisor/brainhost.go:54-60` (no lifetime, nothing on what each option does, no "leave it waiting" choice); rules in `prompts/svp/RULES.md` | j1-status-zh, j1-status-en, j5-what-does-that-mean (30/80 information-only runs, both brains) | facts: the prompt stays open while the pane waits (#8), doing nothing leaves it waiting, Codex `esc` cancels the command; offer "leave it waiting" among the choices |
+| H6 | The CEO's "yes" applied to a question pushed after it | the brain's request has no "last line heard before the CEO spoke": `internal/brain/assemble.go:298` `requestText`, built from `internal/supervisor/utterance.go:174` `handleUtterance`; the heard and unheard facts live in `internal/supervisor/unheard.go:20` | j4-finish-finding (deepseek A r1, B r2) | tell the brain which line the CEO's words followed; mark a question pushed after the CEO started speaking as "not yet heard" |
+| H7 | Claims that something did not happen when the screen does not say ("has not pushed anything") | brain judgement; no fact source for git state | bench-unknown-fact (vertex 10/10, deepseek 4/10) | supply facts (a `git status` / session read the brain can ask for via `run_cli`), plus a rule that "not on the screen" is not evidence |
+
 ## The evaluator's own errors
 
 Every rerun above followed a fix to the evaluator, not to sheepdog. What
@@ -433,6 +455,10 @@ sheepdog eval sim --live --provider deepseek --model deepseek-flash \
 sheepdog eval sim --live --provider vertex --model gemini-3.8-flash \
   --utterance-timeout 25s --env-file .env --repeat 2 --parallel 4 --out /tmp/t25
 ```
+
+Since #92 the brain's default utterance budget is 25 s, so a rerun
+measures the new default. `eval --live` (SVP) now uses the brain default
+instead of a hard-coded 12 s.
 
 `report.md` has the tables and the failed runs with transcripts.
 `report.json` has every run: transcript, actions, scripted changes,
