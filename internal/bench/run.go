@@ -138,6 +138,9 @@ type runner struct {
 	lines  []UserLine
 	voice  string
 	bargeN int
+	// answering: hear is listening for the answer to the CEO (the only
+	// time the CEO's barge-in habit applies; not the connect settle).
+	answering bool
 
 	eventFails []eval.Failure // the scenario's voice event checks
 
@@ -373,7 +376,10 @@ func (r *runner) converse(ctx context.Context) {
 			}
 			r.convo = append(r.convo, eval.SimLine{AtMS: r.since(), Who: "system", Text: eval.SimWaitMarker})
 			d := clampDur(time.Duration(t.WaitSeconds)*time.Second, 5*time.Second, silence-silent)
-			if got := r.hear(ctx, 2*time.Second, d, true); got == 0 {
+			r.answering = true
+			got := r.hear(ctx, 2*time.Second, d, true)
+			r.answering = false
+			if got == 0 {
 				silent += d
 				if silent >= silence {
 					run.EndReason = eval.EndSilence
@@ -398,10 +404,12 @@ func (r *runner) converse(ctx context.Context) {
 			}
 			// The answer: the first words within 25 s (a brain turn can
 			// take that long), then until quiet.
+			r.answering = true
 			if got := r.hear(ctx, 1500*time.Millisecond, 25*time.Second, true); got > 0 {
 				silent = 0
 				r.hear(ctx, 1500*time.Millisecond, 20*time.Second, false)
 			}
+			r.answering = false
 			r.w.AfterTurn(run.Turns)
 			if rc := sc.Behavior.Reconnect; rc != nil && rc.AfterTurn == run.Turns {
 				r.reconnect(ctx, rc)
@@ -512,7 +520,7 @@ type bargePlan struct {
 
 func (r *runner) armBarge() *bargePlan {
 	b := r.sc.Behavior.BargeIn
-	if b == nil || r.bargeN >= max(b.Max, 1) || r.rng.Float64() >= b.Prob {
+	if b == nil || !r.answering || r.bargeN >= max(b.Max, 1) || r.rng.Float64() >= b.Prob {
 		return nil
 	}
 	lo, hi := 1500, 4000
