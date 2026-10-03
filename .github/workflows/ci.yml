@@ -52,11 +52,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - name: No macOS runners or xcodebuild in workflows
+      - name: No macOS runners or Xcode builds in workflows
         run: |
           # bracketed characters keep this step from matching itself
-          if grep -nEi 'macos[-]|xcodebuil[d]' .github/workflows/*.yml .github/workflows/*.yaml 2>/dev/null; then
-            echo "::error::macOS runners / xcodebuild are not allowed in GitHub Actions (see README, CI/CD)"
+          if grep -rnEi --include='*.yml' --include='*.yaml' 'macos[-]|xcodebuil[d]' .github/workflows; then
+            echo "::error::macOS runners and Xcode builds are not allowed in GitHub Actions (see README, CI/CD)"
             exit 1
           fi
 
