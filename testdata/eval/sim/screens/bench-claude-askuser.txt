@@ -1,0 +1,22 @@
+ ▐▛███▛█   Claude Code v2.1.275
+▝▜██████▀  Opus 5 (1M context) · Claude Max
+  ▝▝ ▝▝    ~/bench/calc
+
+
+❯ Add a LICENSE file to the repo.
+
+⏺ Before I add it I need to know which license you want.
+────────────────────────────────────────────────────────────────────────────────────────
+ ☐ License
+
+Which license should the calc repo use?
+
+❯ 1. MIT
+     Short and permissive.
+  2. Apache 2.0
+     Permissive, with a patent grant.
+  3. Type something.
+────────────────────────────────────────────────────────────────────────────────────────
+  4. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc to cancel

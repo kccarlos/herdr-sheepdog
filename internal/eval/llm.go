@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"google.golang.org/genai"
 
@@ -240,3 +241,67 @@ func textOf(resp *genai.GenerateContentResponse) string {
 
 // errNoModel is returned when a live component has no model.
 var errNoModel = errors.New("eval: no model configured")
+
+// patient is a brain.Model for the judge and the simulated user (never
+// the brain, whose no-retry policy is part of what is evaluated): at most
+// cap(sem) calls in flight, and a rate limit or a transient server error
+// is retried with exponential backoff.
+type patient struct {
+	inner brain.Model
+	sem   chan struct{}
+	tries int
+	base  time.Duration
+}
+
+// Patient wraps m with a concurrency limit shared by every wrapper built
+// on the same sem, and up to tries attempts per call (backoff from 2 s).
+func Patient(m brain.Model, sem chan struct{}, tries int) brain.Model {
+	if m == nil {
+		return nil
+	}
+	return &patient{inner: m, sem: sem, tries: max(tries, 1), base: 2 * time.Second}
+}
+
+func (p *patient) Generate(ctx context.Context, model string, contents []*genai.Content, cfg *genai.GenerateContentConfig) (*genai.GenerateContentResponse, error) {
+	var err error
+	for i := 0; i < p.tries; i++ {
+		if i > 0 {
+			select {
+			case <-time.After(p.base << (i - 1)):
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+		if p.sem != nil {
+			select {
+			case p.sem <- struct{}{}:
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+		var resp *genai.GenerateContentResponse
+		resp, err = p.inner.Generate(ctx, model, contents, cfg)
+		if p.sem != nil {
+			<-p.sem
+		}
+		if err == nil || !transient(err) {
+			return resp, err
+		}
+	}
+	return nil, err
+}
+
+// transient reports whether err is worth retrying: a rate limit, an
+// overloaded or unavailable server, a server-side deadline.
+func transient(err error) bool {
+	if isRateLimited(err) {
+		return true
+	}
+	s := strings.ToLower(err.Error())
+	for _, n := range []string{"error 500", "error 502", "error 503", "error 504", "unavailable", "overloaded", "deadline_exceeded", "internal error"} {
+		if strings.Contains(s, n) {
+			return true
+		}
+	}
+	return false
+}

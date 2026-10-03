@@ -59,8 +59,12 @@ lint:
 # expanded) runs through the brain with a scripted fake model
 # (internal/eval), and the phrasing checks are listed as skipped. The L0
 # gate of docs/iteration-2.md; see docs/roles.md "The L0 eval corpus".
+# `eval sim` runs every simulated-user scenario (testdata/eval/sim) on the
+# real supervisor with the scripted brain and user: a harness check of the
+# scenario files (the live campaign is `eval sim --live`, docs/iteration-2.md).
 eval: build
 	./bin/$(BINARY) eval --set all
+	./bin/$(BINARY) eval sim
 
 # Same, but calls the real model (gemini-3.5-flash, plain text, never
 # Live audio): needs a Gemini key (GEMINI_API_KEY or --env-file) and

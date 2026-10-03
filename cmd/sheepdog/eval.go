@@ -22,6 +22,7 @@ func printEvalUsage(w io.Writer) {
 	fprintln(w, "usage: sheepdog eval --set assistant|svp|regressions|extracted|expanded|all [flags]")
 	fprintln(w, "       sheepdog eval extract [flags]   (cases from an event-log window)")
 	fprintln(w, "       sheepdog eval expand [flags]    (paraphrase and noise variants)")
+	fprintln(w, "       sheepdog eval sim [flags]       (simulated-user conversations, judged)")
 	fprintln(w, "")
 	fprintln(w, "Runs the conversation eval sets under testdata/eval and prints a pass/fail table.")
 	fprintln(w, "Offline by default: assistant cases are only validated (no model; a case that")
@@ -112,6 +113,8 @@ func runEval(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 			return runEvalExtract(args[1:], stdout, stderr)
 		case "expand":
 			return runEvalExpand(args[1:], stderr)
+		case "sim":
+			return runEvalSim(ctx, args[1:], stdout, stderr)
 		}
 	}
 	o, code, run := parseEvalFlags(args, stderr)
@@ -234,7 +237,7 @@ func evalJudge(kind, model, ollamaURL string, cfg config.Config, log logging.Log
 	if err != nil {
 		return nil, err
 	}
-	return &eval.LLMJudge{Model: eval.Metered(m, meter, "judge"), ModelID: id}, nil
+	return &eval.LLMJudge{Model: eval.Metered(eval.Patient(m, make(chan struct{}, 4), 5), meter, "judge"), ModelID: id}, nil
 }
 
 // runEvalSet loads and runs one set: its SVP files through the brain,

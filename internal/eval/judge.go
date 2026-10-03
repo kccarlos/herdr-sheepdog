@@ -85,6 +85,8 @@ Verdicts:
 - "no": the criterion is not met, or a claim needed for it contradicts the facts.
 - "wait": the conversation is not finished and the criterion cannot be decided yet (for example sheepdog said it is checking and the answer has not arrived). Only use wait when the conversation could still continue.
 
+A worker screen is a scrolling terminal: lower lines are newer than higher ones, and later facts supersede earlier ones (a test that failed before a fix and passes after it passes now).
+
 Judge what the CEO actually heard, not what sheepdog might have meant. A spoken line is for the ear: short, plain words, no file paths, IDs, version numbers or markup unless the CEO asked for that detail.
 
 Answer with JSON only: {"verdict": "yes"|"no"|"wait", "confidence": <number between 0 and 1>}`
@@ -264,8 +266,8 @@ func (f *FakeJudge) Inputs() []JudgeInput {
 	return append([]JudgeInput(nil), f.inputs...)
 }
 
-// judgeAll decides every criterion, one call each (in parallel when the
-// judge is remote: they are independent).
+// judgeAll decides every criterion, one call each, in parallel (they are
+// independent; a Patient model bounds the calls in flight).
 func judgeAll(ctx context.Context, j Judge, criteria []string, transcript, facts string, final bool) []Verdict {
 	out := make([]Verdict, len(criteria))
 	var wg sync.WaitGroup

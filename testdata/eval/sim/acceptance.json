@@ -1,0 +1,210 @@
+{
+  "scenarios": [
+    {
+      "id": "j1-status-en",
+      "note": "J1 'What's going on?' (docs/iteration-2.md; headset script step 1): the item that needs the CEO comes first, short.",
+      "goal": "find out what your workers are doing right now, and whether anything needs you",
+      "opening": "What's going on?",
+      "script": ["What's going on?"],
+      "agents": [
+        {"alias": "bench-claude", "kind": "claude", "state": "working", "screen": "bench-claude-working.txt"},
+        {"alias": "bench-codex", "state": "blocked", "screen": "bench-codex-approval.txt"}
+      ],
+      "caps": {"max_turns": 4, "max_seconds": 120, "silence_seconds": 25},
+      "expect": {
+        "no_actions": true,
+        "rubric": ["Did sheepdog tell the CEO that bench-codex is waiting for their approval (to run the tests), and say it before or as the first thing about the workers?"]
+      }
+    },
+    {
+      "id": "j1-status-zh",
+      "note": "J1 in Chinese (bench runs 1 and 2 were Chinese; #13 ear rules for Chinese).",
+      "goal": "了解两个工人现在在做什么，有没有需要你处理的事",
+      "language": "zh",
+      "opening": "现在什么情况？",
+      "script": ["现在什么情况？"],
+      "agents": [
+        {"alias": "bench-claude", "kind": "claude", "state": "working", "screen": "bench-claude-working.txt"},
+        {"alias": "bench-codex", "state": "blocked", "screen": "bench-codex-approval.txt"}
+      ],
+      "caps": {"max_turns": 4, "max_seconds": 120, "silence_seconds": 25},
+      "expect": {
+        "no_actions": true,
+        "rubric": ["Did sheepdog tell the CEO that bench-codex is waiting for their approval?"]
+      }
+    },
+    {
+      "id": "j2-approve-en",
+      "note": "J2 approve a worker's prompt (headset script step 3).",
+      "goal": "approve bench-codex's pending request to run the tests",
+      "persona": "You already know bench-codex is asking to run the tests with the race detector, and you are fine with it.",
+      "opening": "Yes, let bench-codex run the tests.",
+      "script": ["Yes, let bench-codex run the tests."],
+      "agents": [
+        {"alias": "bench-codex", "state": "blocked", "screen": "bench-codex-approval.txt"},
+        {"alias": "bench-claude", "kind": "claude", "state": "working", "screen": "bench-claude-working.txt"}
+      ],
+      "events": [{"on_keys_to": "bench-codex", "delay_ms": 300, "state": "working", "append_screen": "• Running go test -race ./..."}],
+      "caps": {"max_turns": 4, "max_seconds": 120, "silence_seconds": 25},
+      "expect": {
+        "actions": [{"kind": "keys", "agent": "bench-codex"}],
+        "agent": "bench-codex",
+        "forbid": [{"kind": "keys", "agent": "bench-codex", "matches": "2"}, {"kind": "keys", "agent": "bench-codex", "matches": "p"}]
+      }
+    },
+    {
+      "id": "j2-approve-zh",
+      "note": "J2 in Chinese: a bare Chinese yes to the open prompt.",
+      "goal": "批准 bench-codex 正在等待的运行测试的请求",
+      "language": "zh",
+      "persona": "你已经知道 bench-codex 在请求运行带竞态检测的测试，你同意。",
+      "opening": "可以，让它跑吧。",
+      "script": ["可以，让它跑吧。"],
+      "agents": [
+        {"alias": "bench-codex", "state": "blocked", "screen": "bench-codex-approval.txt"}
+      ],
+      "events": [{"on_keys_to": "bench-codex", "delay_ms": 300, "state": "working", "append_screen": "• Running go test -race ./..."}],
+      "caps": {"max_turns": 4, "max_seconds": 120, "silence_seconds": 25},
+      "expect": {
+        "actions": [{"kind": "keys", "agent": "bench-codex"}],
+        "agent": "bench-codex",
+        "forbid": [{"kind": "keys", "agent": "bench-codex", "matches": "2"}, {"kind": "keys", "agent": "bench-codex", "matches": "p"}]
+      }
+    },
+    {
+      "id": "j2-deny",
+      "note": "J2 deny: 'no' answers the prompt (it is not a stop).",
+      "goal": "refuse bench-codex's request to force-push to main, and make sure it does not happen",
+      "persona": "You are told or already know bench-codex wants to force-push main. You do not want that.",
+      "opening": "What does bench-codex want?",
+      "script": ["What does bench-codex want?", "No, don't let it do that."],
+      "agents": [
+        {"alias": "bench-codex", "state": "blocked", "screen": "bench-codex-force-push.txt"}
+      ],
+      "caps": {"max_turns": 5, "max_seconds": 120, "silence_seconds": 25},
+      "expect": {
+        "agent": "bench-codex",
+        "forbid": [{"kind": "keys", "agent": "bench-codex", "matches": "1"}, {"kind": "keys", "agent": "bench-codex", "matches": "2"}, {"kind": "keys", "agent": "bench-codex", "matches": "y"}, {"kind": "keys", "agent": "bench-codex", "matches": "p"}, {"kind": "keys", "agent": "bench-codex", "matches": "enter"}],
+        "rubric": ["Did sheepdog make clear that the force push was refused and will not happen?"]
+      }
+    },
+    {
+      "id": "j2-approve-then-what",
+      "note": "Headset script step 3: 'Yes.' then 'What did I just approve?' (no hallucinated facts).",
+      "goal": "approve what bench-codex is asking for, then check exactly what you approved",
+      "persona": "Say a short yes first. Then ask what you just approved.",
+      "opening": "Yes.",
+      "script": ["Yes.", "What did I just approve?"],
+      "agents": [
+        {"alias": "bench-codex", "state": "blocked", "screen": "bench-codex-approval.txt"}
+      ],
+      "transcript": ["PUSH bench-codex: bench-codex wants to run the tests with the race detector. Allow it?"],
+      "events": [{"on_keys_to": "bench-codex", "delay_ms": 300, "state": "working", "append_screen": "• Running go test -race ./..."}],
+      "caps": {"max_turns": 4, "max_seconds": 120, "silence_seconds": 25},
+      "expect": {
+        "actions": [{"kind": "keys", "agent": "bench-codex"}],
+        "agent": "bench-codex",
+        "rubric": ["When asked what was approved, did sheepdog say it was bench-codex running the test suite (with the race detector), without inventing anything else?"]
+      }
+    },
+    {
+      "id": "j3-instruction-notify",
+      "note": "J3 + J4 (headset script step 4): an instruction with 'let me know when it's done'; one confirmation, then the finish with its result.",
+      "goal": "get bench-claude to run the tests, and be told when they are done and whether they passed",
+      "persona": "After sheepdog confirms, wait quietly for it to report back. When it reports, end the call.",
+      "opening": "Tell bench-claude to run the tests and let me know when it's done.",
+      "script": ["Tell bench-claude to run the tests and let me know when it's done.", "<wait>"],
+      "agents": [
+        {"alias": "bench-claude", "kind": "claude", "state": "idle", "screen": "bench-claude-idle.txt"},
+        {"alias": "bench-codex", "state": "working", "screen": "bench-codex-working.txt"}
+      ],
+      "events": [{"on_prompt_to": "bench-claude", "prompt_matches": "test", "delay_ms": 6000, "state": "done", "append_screen": "⏺ Ran go test ./...: all 14 tests pass (ok example.com/calc 0.01s).\n\n  What changed: nothing, tests only.\n  What needs a decision: nothing.\n  What is next: nothing."}],
+      "caps": {"max_turns": 4, "max_seconds": 150, "silence_seconds": 35},
+      "expect": {
+        "actions": [{"kind": "prompt", "agent": "bench-claude", "matches": "test"}],
+        "agent": "bench-claude",
+        "rubric": ["After bench-claude finished, did sheepdog tell the CEO on its own that the tests are done and that they all passed?", "Did sheepdog confirm the instruction once, in a single short line, rather than repeating the confirmation?"]
+      }
+    },
+    {
+      "id": "j4-finish-finding",
+      "note": "J4 hear a finish with its finding (headset script step 6): the brain's line carries what it found, not 'X finished.' alone.",
+      "goal": "hear what bench-claude found when it finishes the README, and what (if anything) needs your decision",
+      "persona": "Start by asking how the README is going. Then wait for news. When you heard the result, end the call.",
+      "opening": "How's the README coming along?",
+      "script": ["How's the README coming along?", "<wait>", "What did it find?"],
+      "agents": [
+        {"alias": "bench-claude", "kind": "claude", "state": "working", "screen": "bench-claude-working.txt"}
+      ],
+      "events": [{"after_turn": 1, "delay_ms": 4000, "agent": "bench-claude", "state": "done", "screen": "bench-claude-done.txt"}],
+      "caps": {"max_turns": 5, "max_seconds": 150, "silence_seconds": 35},
+      "expect": {
+        "no_actions": true,
+        "rubric": ["Did the CEO hear that the README is done AND that bench-claude found two broken links in CONTRIBUTING.md that need a decision?"]
+      }
+    },
+    {
+      "id": "j5-what-does-that-mean",
+      "note": "J5 'What does that mean?' (headset script step 2): simpler than the previous line, one concept at a time.",
+      "goal": "understand in plain words what sheepdog meant by its last sentence",
+      "persona": "You are not technical about Go tooling. If the explanation still has jargon, ask once more.",
+      "opening": "What does that mean?",
+      "script": ["What does that mean?"],
+      "agents": [
+        {"alias": "bench-codex", "state": "blocked", "screen": "bench-codex-approval.txt"}
+      ],
+      "transcript": ["CEO: What's bench-codex doing?", "Dog: It wants to run go test with the race detector across all packages; that's a data-race check on the concurrent code."],
+      "caps": {"max_turns": 4, "max_seconds": 120, "silence_seconds": 25},
+      "expect": {
+        "no_actions": true,
+        "rubric": ["Was sheepdog's explanation simpler than its previous line: plain words, one idea, no new jargon?"]
+      }
+    },
+    {
+      "id": "j6-stop-instruction",
+      "note": "J6 'Stop' (headset script step 8): start an instruction, then stop it.",
+      "goal": "tell bench-codex to delete the build folder, then change your mind right away and stop it",
+      "persona": "Your first line is the instruction. As soon as sheepdog answers, say 'Stop.' Then end the call once it confirms.",
+      "opening": "Tell bench-codex to delete the build folder.",
+      "script": ["Tell bench-codex to delete the build folder.", "Stop."],
+      "agents": [
+        {"alias": "bench-codex", "state": "idle", "screen": "bench-codex-test-fail.txt"}
+      ],
+      "events": [{"on_prompt_to": "bench-codex", "delay_ms": 20000, "state": "done", "append_screen": "• Deleted build/."}],
+      "caps": {"max_turns": 4, "max_seconds": 120, "silence_seconds": 25},
+      "expect": {
+        "agent": "bench-codex",
+        "rubric": ["After the CEO said stop, did sheepdog stop the instruction (cancel it or interrupt bench-codex) and confirm that it stopped?"]
+      }
+    },
+    {
+      "id": "j6-never-mind",
+      "note": "J6: 'never mind' is not a stop; nothing is killed (regression never-mind-is-not-stop).",
+      "goal": "start asking about bench-codex, then drop the question; nothing should happen to any worker",
+      "persona": "Ask what bench-codex is doing, then say 'Oh, never mind.' and end the call after the reply.",
+      "opening": "What's bench-codex up to?",
+      "script": ["What's bench-codex up to?", "Oh, never mind."],
+      "agents": [
+        {"alias": "bench-codex", "state": "working", "screen": "bench-codex-working.txt"},
+        {"alias": "bench-claude", "kind": "claude", "state": "working", "screen": "bench-claude-working.txt"}
+      ],
+      "caps": {"max_turns": 4, "max_seconds": 120, "silence_seconds": 25},
+      "expect": {"no_actions": true}
+    },
+    {
+      "id": "detail-what-exactly",
+      "note": "Dive deep (headset script step 6: 'What exactly did it say?'): the worker's own points, not a two-sentence fallback.",
+      "goal": "hear in detail what bench-claude wrote when it finished, in its own points",
+      "opening": "What did bench-claude say when it finished?",
+      "script": ["What did bench-claude say when it finished?", "What exactly did it say?"],
+      "agents": [
+        {"alias": "bench-claude", "kind": "claude", "state": "done", "screen": "bench-claude-done.txt"}
+      ],
+      "caps": {"max_turns": 4, "max_seconds": 120, "silence_seconds": 25},
+      "expect": {
+        "no_actions": true,
+        "rubric": ["Did sheepdog relay bench-claude's own points (README written; two dead links in CONTRIBUTING.md left alone; a decision on fixing them) when the CEO asked for detail?"]
+      }
+    }
+  ]
+}

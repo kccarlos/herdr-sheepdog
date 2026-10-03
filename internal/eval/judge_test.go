@@ -2,8 +2,10 @@ package eval
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/brain/braintest"
 )
@@ -150,5 +152,26 @@ func TestSVPLiveMetersBrainTokens(t *testing.T) {
 	lines := meter.Lines()
 	if len(lines) != 1 || lines[0].Role != "brain" || lines[0].Usage.In != 5000 {
 		t.Fatalf("meter = %+v", lines)
+	}
+}
+
+// Patient retries a rate limit (the judge's and the simulated user's
+// calls only) and gives up on other errors at once.
+func TestPatientRetriesTransient(t *testing.T) {
+	m := braintest.NewModel(
+		braintest.Step{Err: errors.New("Error 429, Message: Resource exhausted")},
+		braintest.Step{Err: errors.New("Error 503, Message: overloaded")},
+		braintest.Step{Text: "ok"},
+	)
+	p := Patient(m, make(chan struct{}, 1), 5).(*patient)
+	p.base = time.Millisecond
+	resp, err := p.Generate(context.Background(), "x", nil, nil)
+	if err != nil || textOf(resp) != "ok" || len(m.Calls()) != 3 {
+		t.Fatalf("resp %q err %v calls %d", textOf(resp), err, len(m.Calls()))
+	}
+	m = braintest.NewModel(braintest.Step{Err: errors.New("Error 400, Message: bad request")}, braintest.Step{Text: "ok"})
+	p = Patient(m, nil, 5).(*patient)
+	if _, err := p.Generate(context.Background(), "x", nil, nil); err == nil || len(m.Calls()) != 1 {
+		t.Fatalf("a 400 was retried: calls %d", len(m.Calls()))
 	}
 }

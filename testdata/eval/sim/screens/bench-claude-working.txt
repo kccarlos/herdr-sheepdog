@@ -1,0 +1,19 @@
+ ▐▛███▛█   Claude Code v2.1.275
+▝▜██████▀  Opus 5 (1M context) · Claude Max
+  ▝▝ ▝▝    ~/bench/calc
+
+
+❯ Write a README for the calc repo: what it does, how to build, how to run the tests.
+
+⏺ Read(calc.go)
+  ⎿  Read 41 lines
+
+⏺ Write(README.md)
+  ⎿  Wrote 38 lines to README.md
+
+✻ Checking the links in README.md… (1m 02s · esc to interrupt)
+
+────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ accept edits on · ? for shortcuts
