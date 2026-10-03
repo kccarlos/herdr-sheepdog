@@ -9,7 +9,7 @@ code map is [`architecture.md`](architecture.md), every option is in
 
 ## Where main is
 
-`main` = `e068ee7` (#85). The v1 plan, the 2026-09-18 redesign and
+`main` = `c6d5404` (#106). The v1 plan, the 2026-09-18 redesign and
 iteration 2's phase-1 work packages (WP1–WP5, WP8, WP9;
 [`iteration-2.md`](iteration-2.md)) are merged.
 
@@ -20,8 +20,8 @@ since #79. The release workflow is Ubuntu-only; the darwin binary is
 signed and notarized locally with `make release-sign`
 ([`signing.md`](signing.md)). Nothing runs on macOS runners. The iOS
 companion app (`herdr-sheepdog-ios`) is built and shipped by Xcode Cloud,
-not GitHub Actions; TestFlight build 0.1.0 (10) is in the internal
-**Me** group.
+not GitHub Actions; TestFlight build 0.1.1 (20) is in the internal
+**Me** group (iOS status: `herdr-sheepdog-ios` `docs/status.md`).
 
 What is in:
 
@@ -34,25 +34,40 @@ What is in:
   and GPT-Live, switchable at runtime; two tools (`to_supervisor`,
   `stop`); no mid-sentence interruption, based on the client's playback
   reports; held pushes while no client listens; re-seed after a Gemini
-  reconnect; GPT-Live input paced at real time.
+  reconnect; a fresh Gemini session after 30 min away or 2 h of age;
+  unheard pushes detected and re-queued or reported to the brain (GPT-Live too, #101); the
+  recap follows a provider switch; GPT-Live input paced at real time.
 - **Brain:** stateful agent over a transcript window with providers
   `gemini`, `vertex` and `deepseek` and a runtime model switch; the ear
   contract (`spoken` / `ask` / `detail`); push judgment under the
   chattiness ceiling; promises; background investigations, including
   forking the worker's own session; reading the worker's own transcript
   and a work journal per agent; an honest code fallback when it fails;
-  compaction off the turn lock, per-tool timeouts, and one-step provider
-  failover on 429 / 5xx / timeout with a spoken notice after three in a
-  row (fake-model tests only, not yet live).
+  compaction off the turn lock, per-tool timeouts, a 25 s utterance
+  budget, and one-step provider failover on 429 / 5xx / timeout with a
+  spoken notice after three in a row (fake-model tests only; `eval sim
+  --fallback-provider` can now exercise it live, not yet run).
 - **Supervisor:** every utterance runs on the shepherd's recorded words;
   the one rail in code (`supervisor.authorise_window_s`); the stop
   procedure, acknowledged by a code sentence with no brain turn;
   deliver-later replies (`brain.reply_wait_s`); "New conversation".
+- **Current focus:** after a brain reply the voice gets one silent line
+  (agent in focus, open question, key points) so it resolves "it" and
+  answers follow-ups ([`timelines.md`](timelines.md); #101).
+- **Names:** every agent has a pane id, an alias and a spoken name (from
+  its project, kind and session title; a CEO-given name wins), which the
+  voice also gets in its vocabulary; "call that one docs" renames by voice
+  ([`roles.md`](roles.md) "Agent names").
 - **Surfaces:** `/voice`, `/debug` (Swimlane, Conversation, Supervisor,
   Context, Events, State), phone access with `web.bind` / `web.token`,
-  APNs notifications for the iOS app ([`push.md`](push.md)).
-- **Measurement:** `sheepdog eval` (offline L0 corpus), `sheepdog
-  scorecard`, `sheepdog audio-e2e`.
+  the agent window API (`GET /api/agents/{pane}/screen`, `POST
+  .../input`; [`ws-contract.md`](ws-contract.md); #103), the `/ws` protocol version and `client-ready` / `bot-ready` handshake
+  ([`ws-contract.md`](ws-contract.md)), APNs notifications for the iOS
+  app ([`push.md`](push.md)).
+- **Measurement:** `sheepdog eval` (offline L0 corpus), `sheepdog eval
+  sim` (a simulated CEO plus an LLM judge; `--live` for the real brain),
+  `sheepdog scorecard`, `sheepdog audio-e2e`, and `sheepdog bench` (tier-2
+  voice benchmark, [`bench/README.md`](bench/README.md)).
 - **Observability:** `turn_id` / `utterance_id` on events, `turn.latency` per CEO utterance (scorecard "Turn latency"), the observe-only daemon watchdog (`daemon.heartbeat_missed` / `_ok`); [`architecture.md`](architecture.md) "Observers".
 
 ## Verified live
@@ -71,6 +86,22 @@ What is in:
   ([`audio-e2e-results.md`](audio-e2e-results.md)); Vertex Live and the
   Vertex brain with `voice-test`, `brain-test` and a scratch daemon; the
   APNs key against both APNs hosts.
+- **Live eval campaign, 2026-10-03** (simulated CEO in text, real
+  brain, mock herdr; [`eval-campaign-2026-10-03.md`](eval-campaign-2026-10-03.md)):
+  26 scenarios x 5 per brain. **Run C**, after the H1-H7 fixes: DeepSeek
+  `deepseek-flash` **87 %** pass, Vertex `gemini-3.8-flash` **73 %**
+  (Vertex provider latency, 504s, costs most of its failures). It
+  measured #88-#95; #98 and #99 landed after it.
+- **Tier-2 voice bench, 2026-10-03** (synthetic speech through a phone
+  emulator into scratch daemons with the real voice model and brain,
+  mock herdr; [`bench/tier2-2026-10-03.md`](bench/tier2-2026-10-03.md)):
+  34 scenarios x 3, **58 % pass over 102 runs**, against 89 % for the same
+  worlds in tier 1: the voice layer is the biggest remaining loss. Tier 3
+  (real herdr workers, #105) is pending.
+- **Unit / eval only, not re-run on the phone:** every bench fix
+  ([`bench-2026-10-03.md`](bench-2026-10-03.md)), the voice session
+  refresh and unheard-push handling, current-focus sync, the agent window API, the `/ws` handshake against the
+  iOS 0.1.1 client, spoken agent names, brain failover.
 - **Fake model / mock herdr only:** most supervisor edge cases
   (reprompt races, deliver-later staleness, reset leftovers, coalescing,
   the daemon's relay of an unanswered utterance) are unit- and
@@ -79,12 +110,21 @@ What is in:
 
 ## Open
 
-- **Bench fixes (decided 2026-10-03):** the open issues and the agreed
-  fix for each (voice-session refresh, dropped CEO input, unheard pushes,
-  CJK-aware runaway cap, AskUserQuestion meta options, asks/repeats,
-  approval lifetime, agent spoken names, provenance hardening) are in
-  [`bench-2026-10-03.md`](bench-2026-10-03.md), the single backlog for
-  that work.
+- **Bench backlog:** every item of
+  [`bench-2026-10-03.md`](bench-2026-10-03.md) is fixed; none has been
+  re-checked live with a real worker and the phone yet. That re-run is the
+  next acceptance step.
+- **Tier-2 bench findings:** the failures named in
+  [`bench/tier2-2026-10-03.md`](bench/tier2-2026-10-03.md) (the voice
+  answering for the brain, deferrals read as declines, echo of the bot's
+  own voice, cut and resumed pushes, markers read aloud) are the next fix
+  list; tier 3 is pending.
+- **Eval campaign leftovers** (run C, [`eval-campaign-2026-10-03.md`](eval-campaign-2026-10-03.md)):
+  the run-C fixes (#99: H4 language, the duplicate block line, H7 fact
+  source) are not re-measured; Vertex step latency (p90 8.4 s, up to 25 s)
+  still causes fallbacks; failover has not been measured live (run
+  `eval sim --live --fallback-provider deepseek`); should failover also
+  trigger on step latency, not only errors?
 - **Pending decision (CEO testing first): should every pending approval
   notify the phone?** Today the APNs notification follows the brain's
   announce decision, so a block the brain skips sends no notification.
@@ -94,7 +134,7 @@ What is in:
 - **Later options:** a brain-written compaction as the reseed source
   instead of the verbatim recap (needs a good prompt); a "current focus"
   silent context from brain to voice after each brain turn (agent in
-  focus, open question, key points) once the bench fixes have landed.
+  focus, open question, key points), now that the bench fixes have landed.
 - **A stop does not drop a queued instruction:** a single Ctrl-C to a
   busy Claude Code pane interrupts the running turn but the queued prompt
   still runs (acceptance run, 2026-10-02 00:34). An idle-then-working

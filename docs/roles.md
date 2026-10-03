@@ -28,7 +28,7 @@ shepherd, brain and voice.
 
 ### Agent names
 
-Every agent has three names (docs/bench-2026-10-03.md "Agent naming"):
+Every agent has three names:
 
 | Layer | Example | Who uses it |
 |---|---|---|
