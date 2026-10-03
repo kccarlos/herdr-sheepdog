@@ -211,7 +211,7 @@ func simSetup(o evalSimOpts, opts eval.SimOptions) map[string]string {
 		"parallel":          fmt.Sprint(o.parallel),
 		"budget_usd":        fmt.Sprint(o.budget),
 		"scenarios":         o.files + filterNote(o.filter),
-		"utterance_timeout": opts.BrainConfig.UtteranceTimeout.String() + " (0s = the brain default, "+brain.DefaultUtteranceTimeout.String()+")",
+		"utterance_timeout": opts.BrainConfig.UtteranceTimeout.String() + " (0s = the brain default, " + brain.DefaultUtteranceTimeout.String() + ")",
 	}
 }
 
