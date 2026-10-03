@@ -111,7 +111,7 @@ func RunSim(ctx context.Context, sc SimScenario, o SimOptions, repeat int) SimRu
 		model = fake
 	}
 	var user SimUser = ScriptedSimUser{}
-	if o.NewSimUser != nil {
+	if o.NewSimUser != nil && !sc.Fixed {
 		user = o.NewSimUser(meter)
 	}
 	var judge Judge = &FakeJudge{}

@@ -344,7 +344,7 @@ func (w *simWorld) facts(initial map[string]string) string {
 	lines := append(append([]SimLine(nil), w.timeline...), acts...)
 	sortLines(lines)
 	if len(lines) == 0 {
-		b.WriteString("Nothing changed on any worker and sheepdog sent nothing to any worker.\n")
+		b.WriteString("No scripted change happened to any worker during the call (each kept doing what its screen shows), and sheepdog sent nothing to any worker.\n")
 	}
 	for _, l := range lines {
 		fmt.Fprintf(&b, "[t+%ds] %s\n", l.AtMS/1000, l.Text)

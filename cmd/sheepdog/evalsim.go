@@ -173,7 +173,9 @@ func runEvalSim(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		}
 		eval.WriteStatsTable(stdout, fmt.Sprintf("eval sim, repeat %d", o.repeat), recs)
 	}
-	eval.WriteSpend(stdout, meter)
+	if o.live {
+		eval.WriteSpend(stdout, meter)
+	}
 	if !o.live {
 		// Offline is a harness check: any failed or errored run is a
 		// broken scenario or harness.
