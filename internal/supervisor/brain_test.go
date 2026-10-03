@@ -434,3 +434,28 @@ func TestToolResultFromEarContract(t *testing.T) {
 		t.Errorf("two questions = %+v", res)
 	}
 }
+
+// Campaign D N7 (bench-pronoun-followup r5): the brain typed "Also add a
+// changelog entry for this change." into bench-claude twice in one turn.
+// The second identical instruction is not sent; the brain gets the fact.
+func TestSameInstructionTwiceInATurnIsSentOnce(t *testing.T) {
+	text := "Also add a changelog entry for this change."
+	m := braintest.NewModel(
+		braintest.Step{Calls: []*genai.FunctionCall{braintest.FC(brain.ToolPrompt, map[string]any{"agent": "docs", "text": text})}},
+		braintest.Step{Calls: []*genai.FunctionCall{braintest.FC(brain.ToolPrompt, map[string]any{"agent": "docs", "text": " also add a changelog entry  for this change."})}},
+		braintest.Step{Text: braintest.Reply("Sent: docs will add a changelog entry.", "")},
+	)
+	h := newBrainHarness(t, m)
+	h.addAgent("w6:p1", "docs", "claude", herdr.StateIdle)
+	h.srv.SetScreen("w6:p1", fixture(t, "claude-idle.screen.txt"))
+	h.say("Tell it to also add a changelog entry.")
+	if got := h.promptRequests(); len(got) != 1 {
+		t.Errorf("agent.prompt = %v, want one", got)
+	}
+	if text := lastCall(t, m); !strings.Contains(text, "That exact instruction already went to docs in this turn; it was not sent again.") {
+		t.Errorf("the brain was not told:\n%s", text)
+	}
+	if h.log.count("brain.prompt_repeat") != 1 {
+		t.Error("brain.prompt_repeat not logged")
+	}
+}

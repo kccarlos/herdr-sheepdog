@@ -360,11 +360,24 @@ func (b *Brain) execTool(ctx context.Context, t *turn, call *genai.FunctionCall)
 			out.err = errors.New("prompt needs text")
 			return out
 		}
+		// A runaway guard (campaign D N7, bench-pronoun-followup r5): the
+		// same instruction to the same agent twice in one turn is typed
+		// once; the second call gets the fact.
+		key := row.PaneID + "\x00" + strings.ToLower(strings.Join(strings.Fields(text), " "))
+		if t.prompted[key] {
+			out.result = "That exact instruction already went to " + aliasOr(row.Alias) + " in this turn; it was not sent again."
+			b.log.Log(logSource, "brain.prompt_repeat", "", map[string]any{"agent": row.Alias, "turn": turn})
+			return out
+		}
 		echo, err := b.host.Prompt(ctx, row.PaneID, text)
 		if err != nil {
 			out.err = err
 			return out
 		}
+		if t.prompted == nil {
+			t.prompted = map[string]bool{}
+		}
+		t.prompted[key] = true
 		out.acted, out.result = echo, echo
 	case ToolSendKeys:
 		keys := keysArg(call.Args["keys"])

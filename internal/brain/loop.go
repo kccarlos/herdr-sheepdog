@@ -39,8 +39,9 @@ type turn struct {
 	calls      int // model calls
 	tokIn      int
 	tokOut     int
-	acted      []string // spoken echoes of actions sent
-	actedOn    []string // the panes those actions went to, each once
+	acted      []string        // spoken echoes of actions sent
+	actedOn    []string        // the panes those actions went to, each once
+	prompted   map[string]bool // pane + instruction already typed this turn (execTool)
 	// prior is the answer an event turn wrote before it learned a line
 	// about its event had gone out meanwhile (recheck): the turn asks
 	// once more with that fact; should the second step fail, prior is
