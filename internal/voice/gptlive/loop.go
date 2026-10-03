@@ -383,6 +383,11 @@ func (s *Session) deliverPush(lc *liveConn, item pushItem) {
 	s.mu.Unlock()
 	setPushLinks(lc, ctxcap.LinksFromTags(item.tags))
 	err := s.send(lc, ev)
+	if err == nil && item.urgency != voice.UrgencySilent {
+		s.mu.Lock()
+		s.playUtt.Handed(voice.PushUtteranceID(item.tags))
+		s.mu.Unlock()
+	}
 	payload := map[string]any{"text": item.text, "urgency": item.requested.String(), "scheduling_sent": item.urgency.SchedulingName(), "event": ev.Type}
 	for k, v := range item.tags {
 		payload[k] = v

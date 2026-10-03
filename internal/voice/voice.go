@@ -91,6 +91,10 @@ type ToolResult struct {
 	Clarify    bool
 	Pending    bool
 	Scheduling Urgency
+	// UtteranceID names the CEO utterance a spoken result answers. It is
+	// never sent to the model: the session puts it on the voice.playback
+	// {state: started} that follows (turn.latency's first audio).
+	UtteranceID string
 }
 
 // ToolHandler executes one tool call. ctx is cancelled when the model

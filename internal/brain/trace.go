@@ -13,7 +13,7 @@ import (
 // "Event ids"). Every event a turn logs carries its number as payload
 // "turn" (brain.step, brain.tool_call, brain.tool_result, brain.yielded,
 // brain.fallback, brain.turn, brain.compaction, brain.transcript,
-// context.step), so one decorator on the brain's logger stamps them all:
+// context.step, brain.failover, brain.tool_timeout), so one decorator on the brain's logger stamps them all:
 // it adds turn_id — a string unique across daemon runs, which the event
 // log lifts to the line's top level — and the utterance_id of the CEO
 // utterance the turn answers (Request.UtteranceID), with no change to

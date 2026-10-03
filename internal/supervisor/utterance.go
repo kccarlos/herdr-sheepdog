@@ -168,7 +168,13 @@ func (s *Supervisor) ToSupervisor(ctx context.Context, said string) (voice.ToolR
 		return voice.ToolResult{Spoken: "Sorry, what was that?", Clarify: true, Scheduling: voice.UrgencyInterrupt}, nil
 	}
 	c.text = text
-	return s.handleUtterance(ctx, c, callIDOf(ctx), false), nil
+	res := s.handleUtterance(ctx, c, callIDOf(ctx), false)
+	if res.Spoken != "" && !res.Pending {
+		// The voice tags the playback of this answer with it
+		// (turn.latency's first audio).
+		res.UtteranceID = c.id
+	}
+	return res, nil
 }
 
 // handleUtterance runs the shepherd's claimed words: the fast paths,

@@ -109,3 +109,23 @@ func TestGPTLivePushWaitsWhileClientSpeaking(t *testing.T) {
 		t.Errorf("push %v after close, want >= %v", el, voice.ClientSpeechRelease)
 	}
 }
+
+// The playback start after a reply push carries its utterance_id, once.
+func TestGPTLivePlaybackStartTaggedWithReplyUtterance(t *testing.T) {
+	s, d, l := startSession(t, testConfig())
+	c := openWithReply(t, s, d, []string{"hi"}, 100)
+	s.ClientPlayback(voice.PlaybackDrained, 100)
+	waitFor(t, "generation over", func() bool {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		return !s.speakingNow
+	})
+	_ = s.PushTagged("the tests are green", voice.UrgencyIdle, map[string]any{"utterance_id": "utt-7"})
+	waitFor(t, "push sent", func() bool { return len(c.events(evCommentaryAppend)) == 1 })
+	s.ClientPlayback(voice.PlaybackStarted, 0)
+	s.ClientPlayback(voice.PlaybackStarted, 0)
+	p := l.find("voice.playback")
+	if len(p) != 3 || p[1]["utterance_id"] != "utt-7" || p[2]["utterance_id"] != nil {
+		t.Fatalf("voice.playback = %v", p)
+	}
+}

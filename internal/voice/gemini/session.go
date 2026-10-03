@@ -91,7 +91,10 @@ type Session struct {
 	// reports, or a timing guess without them); vad is the client's own
 	// speech detector. Both are forgotten when the client changes.
 	play voice.PlaybackTracker
-	vad  voice.ClientSpeech
+	// playUtt tags the next playback start with the reply it plays
+	// (voice.PlaybackUtterance).
+	playUtt voice.PlaybackUtterance
+	vad     voice.ClientSpeech
 	// recap is the recent conversation (recap.go): what the shepherd
 	// said (inText until it is flushed), what the voice said (outText),
 	// cut to what was heard, and the spoken pushes. A connection that
@@ -654,6 +657,7 @@ func (s *Session) ClientPlayback(state string, playedMs int) {
 	s.mu.Lock()
 	now := s.now()
 	rep := s.play.Report(now, state, playedMs)
+	utt := s.playUtt.Started(state)
 	if rep.Cut != nil {
 		s.flushRecapLocked()
 		s.recap.Cut(rep.Cut.Full, rep.Heard, rep.Cut.HeardMs)
@@ -665,7 +669,7 @@ func (s *Session) ClientPlayback(state string, playedMs int) {
 	s.mu.Unlock()
 	s.reportUnheard(unheard)
 	defer s.settleHeard()
-	s.log.Log(logSource, "voice.playback", "", rep.Payload())
+	s.log.Log(logSource, "voice.playback", "", voice.TagPayload(rep.Payload(), utt))
 	if rep.Cut != nil {
 		s.emit(voice.EventTranscript{Dir: voice.DirOut, Text: rep.Heard, Final: true, Cut: rep.Cut})
 	}

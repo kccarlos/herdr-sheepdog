@@ -215,11 +215,15 @@ together, so a reader groups them by id instead of guessing by time:
   turn that answers it (`brain.Request.UtteranceID`), `brain.reply_*`,
   `supervisor.utterance_coalesced` and the reply push (tag
   `utterance_id`, so `voice.push`, `voice.push_held` / `_released` /
-  `_dropped` / `_unheard`) carry it.
+  `_dropped` / `_unheard`) carry it, and so does a spoken inline result
+  (`voice.ToolResult.UtteranceID`, never sent to the model). The voice
+  session tags the first `voice.playback {state: started}` after it
+  handed such a reply to the model with its `utterance_id`.
 - `turn_id` — one brain turn (`turn-<run>-<n>`, unique across daemon
   runs). A decorator on the brain's logger stamps every event that
   carries the turn number (`brain.step`, `brain.tool_call`,
-  `brain.tool_result`, `brain.yielded`, `brain.fallback`, `brain.turn`,
+  `brain.tool_result`, `brain.tool_timeout`, `brain.failover` of a turn's
+  step, `brain.yielded`, `brain.fallback`, `brain.turn`,
   `brain.compaction`, `brain.transcript`, `context.step`) with the turn's
   `turn_id` and `utterance_id`. `brain.turn_started` marks the turn lock
   taken (`queue_ms`, `budget_ms`); an announce turn's `brain.turn_started`
@@ -248,8 +252,8 @@ words → the voice's `to_supervisor` call), `relay_ms` (→
 voice\|daemon, `reply` tool_result\|push, `stale`, and `outcome`
 played\|no_audio (handed over, no playback start within 30 s)\|silent\|dropped\|coalesced\|no_voice\|timeout (10 min)\|restart.
 It is emitted when the reply starts playing or the record ends. The
-playback report carries no id, so the first playback start after the
-hand-over is the reply's. `sheepdog scorecard` prints p50/p90 per
+reply's playback start is the one tagged with its `utterance_id`; in a
+log from before the tag, the first start after the hand-over. `sheepdog scorecard` prints p50/p90 per
 segment ("Turn latency") from these lines, or replays the raw events
 through the same `Tracker` for a log recorded before them.
 

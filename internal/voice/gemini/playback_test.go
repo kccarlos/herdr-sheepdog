@@ -228,3 +228,21 @@ func TestPlaybackForgottenWhenClientChanges(t *testing.T) {
 	}
 	c.waitSent(t, "push with the old client's state forgotten", isContent("hello"))
 }
+
+// The playback start after a reply push carries the push's utterance_id,
+// once; a later start does not (turn.latency's first audio).
+func TestPlaybackStartTaggedWithReplyUtterance(t *testing.T) {
+	c := newFakeConn("c1")
+	h := newHarness(t, Config{PushGap: time.Millisecond}, &fakeDialer{results: []func() (Conn, error){ok(c)}})
+	if err := h.s.PushTagged("The tests are green.", voice.UrgencyInterrupt, map[string]any{"utterance_id": "utt-7"}); err != nil {
+		t.Fatal(err)
+	}
+	h.waitEvent("push sent", func(voice.Event) bool { return h.log.has("voice.push") })
+	h.s.ClientPlayback(voice.PlaybackStarted, 0)
+	h.s.ClientPlayback(voice.PlaybackDrained, 100)
+	h.s.ClientPlayback(voice.PlaybackStarted, 0)
+	ps := h.log.payloads("voice.playback")
+	if len(ps) != 3 || ps[0]["utterance_id"] != "utt-7" || ps[1]["utterance_id"] != nil || ps[2]["utterance_id"] != nil {
+		t.Fatalf("voice.playback = %v", ps)
+	}
+}

@@ -31,9 +31,9 @@ import (
 // Events are matched by utterance_id and turn_id; a log from before the
 // ids falls back to the call id (voice.tool_call ↔ supervisor.relay ↔
 // voice.tool_result / brain.reply_pending), the brain turn number, and
-// time (the first utterance step after the relay; the first playback
-// start after the hand-over — the playback report carries no id, so that
-// last match is by time in every log).
+// time (the first utterance step after the relay). The voice session
+// tags the playback start that follows a reply with its utterance_id; an
+// untagged start (an older log) goes to the reply waiting longest.
 
 // Latency timeouts.
 const (
@@ -143,6 +143,11 @@ type Tracker struct {
 	byTurn map[string]*record
 	calls  map[string]pendingCall
 	lastIn time.Time
+	// TaggedPlayback: the voice tags each reply's playback start with
+	// its utterance_id (this daemon's sessions do), so an untagged start
+	// is never a reply. False for an older log: an untagged start goes
+	// to the reply waiting longest.
+	TaggedPlayback bool
 }
 
 // NewTracker returns an empty tracker.
@@ -272,10 +277,26 @@ func (t *Tracker) Add(ev eventlog.Event) []Breakdown {
 			return t.end(r, ev.TS, OutcomeDropped)
 		}
 	case "voice.playback":
-		if p.State == "started" {
-			if r := t.firstAwaiting(ev.TS); r != nil {
+		if p.State != "started" {
+			break
+		}
+		if ev.UtteranceID != "" {
+			// The session tagged this start with the reply it plays.
+			if r := t.open[ev.UtteranceID]; r != nil {
+				if r.awaitFrom.IsZero() {
+					r.awaitFrom = r.handover
+				}
 				return t.end(r, ev.TS, OutcomePlayed)
 			}
+			break
+		}
+		// Untagged: no reply when the voice tags them; in an older log,
+		// the longest-waiting reply handed over by now.
+		if t.TaggedPlayback {
+			break
+		}
+		if r := t.firstAwaiting(ev.TS); r != nil {
+			return t.end(r, ev.TS, OutcomePlayed)
 		}
 	}
 	return nil
@@ -500,6 +521,12 @@ func msPtr(d time.Duration) *int64 {
 // prefers them when present: TurnLatencies).
 func Replay(events []eventlog.Event) []Breakdown {
 	t := NewTracker()
+	for _, ev := range events {
+		if ev.Type == "voice.playback" && ev.UtteranceID != "" {
+			t.TaggedPlayback = true
+			break
+		}
+	}
 	var out []Breakdown
 	var lastExpire time.Time
 	for _, ev := range events {
@@ -524,7 +551,9 @@ type LatencyObserver struct {
 
 // NewLatencyObserver returns the turn.latency handler.
 func NewLatencyObserver(log logging.Logger) *LatencyObserver {
-	return &LatencyObserver{log: log, t: NewTracker()}
+	t := NewTracker()
+	t.TaggedPlayback = true // this daemon's voice sessions tag reply playback
+	return &LatencyObserver{log: log, t: t}
 }
 
 // Event implements Handler.

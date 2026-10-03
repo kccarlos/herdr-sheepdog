@@ -175,7 +175,8 @@ func TestLatencyObserverLogs(t *testing.T) {
 	o := NewLatencyObserver(log)
 	o.Event(e(0, "supervisor.relay", map[string]any{"call_id": "c1", "utterance_id": "utt-1"}))
 	o.Event(e(5, "voice.tool_result", map[string]any{"id": "c1", "spoken": "Hi."}))
-	o.Event(e(9, "voice.playback", map[string]any{"state": "started"}))
+	o.Event(e(7, "voice.playback", map[string]any{"state": "started"})) // untagged: not the reply
+	o.Event(e(9, "voice.playback", map[string]any{"state": "started", "utterance_id": "utt-1"}))
 	evs := l.Tail(0)
 	if len(evs) != 1 || evs[0].Type != "turn.latency" || evs[0].UtteranceID != "utt-1" {
 		t.Fatalf("events = %+v", evs)
@@ -183,5 +184,22 @@ func TestLatencyObserverLogs(t *testing.T) {
 	var b Breakdown
 	if err := json.Unmarshal(evs[0].Payload, &b); err != nil || b.Outcome != OutcomePlayed || ms(b.FirstAudioMS) != 4 {
 		t.Errorf("turn.latency = %s (%v)", evs[0].Payload, err)
+	}
+}
+
+// The voice tags the reply's playback start: it wins over an earlier,
+// untagged start (the "On it." run), and over a reply waiting longer.
+func TestBreakdownTaggedPlayback(t *testing.T) {
+	out := Replay([]eventlog.Event{
+		e(0, "supervisor.relay", map[string]any{"call_id": "c1", "utterance_id": "utt-1"}),
+		e(10, "supervisor.relay", map[string]any{"call_id": "c2", "utterance_id": "utt-2"}),
+		e(100, "voice.tool_result", map[string]any{"id": "c1", "spoken": "One."}),
+		e(200, "voice.tool_result", map[string]any{"id": "c2", "spoken": "Two."}),
+		e(250, "voice.playback", map[string]any{"state": "started"}),
+		e(300, "voice.playback", map[string]any{"state": "started", "utterance_id": "utt-2"}),
+		e(400, "voice.playback", map[string]any{"state": "started", "utterance_id": "utt-1"}),
+	})
+	if len(out) != 2 || out[0].UtteranceID != "utt-2" || ms(out[0].FirstAudioMS) != 100 || out[1].UtteranceID != "utt-1" || ms(out[1].FirstAudioMS) != 300 {
+		t.Fatalf("breakdowns = %+v", out)
 	}
 }

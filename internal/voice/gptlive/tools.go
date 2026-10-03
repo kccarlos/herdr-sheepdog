@@ -154,11 +154,17 @@ func (s *Session) runTool(ctx context.Context, lc *liveConn, delegationID string
 			s.appendFor(lc, delegationID, evThinkingAppend, spoken)
 		default:
 			s.appendFor(lc, delegationID, evCommentaryAppend, spoken)
+			s.mu.Lock()
+			s.playUtt.Handed(res.UtteranceID)
+			s.mu.Unlock()
 		}
 	case spoken != "":
 		tags := map[string]any{}
 		if call.Name == voice.ToolStop {
 			tags["stop"] = true
+		}
+		if res.UtteranceID != "" {
+			tags[voice.TagUtteranceID] = res.UtteranceID
 		}
 		sched := res.Scheduling
 		if call.Name == voice.ToolStop {

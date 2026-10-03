@@ -109,6 +109,9 @@ func (s *Session) execTool(ctx context.Context, gen int, call voice.ToolCall, tu
 		s.mu.Lock()
 		if sched != voice.UrgencySilent {
 			s.openTurnLocked()
+			if res.Spoken != "" {
+				s.playUtt.Handed(res.UtteranceID)
+			}
 		}
 		if res.Pending && call.ID != "" {
 			s.owedReplies[call.ID] = s.now() // its reply comes as a push
