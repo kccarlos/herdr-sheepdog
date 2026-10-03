@@ -110,8 +110,9 @@ Does:
 - Answers for the ear: `{spoken, ask?, detail, needs_user, options?,
   pending?}` (`prompts/svp/RULES.md` "For the ear", "Explaining",
   "Answer contract").
-  - `spoken` is the headline: at most two sentences and thirty words,
-    one idea each, no dashes or semicolons, the outcome first (done,
+  - `spoken` is the headline: brief by default (two sentences, thirty
+    words), longer only when the shepherd asked for detail; one idea per
+    sentence, no dashes or semicolons, the outcome first (done,
     broken, needs you, still going), the task in the shepherd's words,
     no PR numbers, ms values, hashes, file or component names.
   - `ask` is the one question, when only the shepherd can decide (or
@@ -123,11 +124,13 @@ Does:
   - Asked again ("what does that mean?" a second time), the brain picks
     the one concept, explains it in fewer words than before, and asks
     "Clearer?".
-  - Code enforces the headline on every brain line bound for the voice
-    (`prose.EarLine`, via the supervisor's `earLine`: replies,
-    announcements on time or late, investigation deliveries):
-    dash- and semicolon-joined clauses become sentences, the first two
-    within thirty words are kept, PR numbers and hashes are scrubbed,
+  - Code caps the headline on every brain line bound for the voice
+    (`prose.EarLine` / `EarLineWith`): announcements, finishes and
+    investigation deliveries at two sentences and thirty words
+    (`prose.EarBrief`), a reply to the shepherd's own words at four
+    sentences and sixty words (`prose.EarReply`, a runaway guard, not the
+    style rule; docs/dive-deep.md WP8b). Dash- and semicolon-joined
+    clauses become sentences, PR numbers and hashes are scrubbed,
     the ask is appended last (with an ask, a question in the headline
     moves out), and whatever was cut is appended to `detail` (for an
     announcement, the detail kept on the finish for recall).
@@ -136,8 +139,8 @@ Does:
   waits; queued event turns coalesce per agent.
 
 Never: speaks to the shepherd directly (only the voice speaks); bypasses
-a worker's gate (the rail); grows its window without bound (~12k
-tokens, compacted above; docs/iteration-2.md WP5 halved it from 24k).
+a worker's gate (the rail); grows its window without bound
+(`brain.window_tokens`, compacted above it).
 
 ## The one rail
 
@@ -169,7 +172,7 @@ flight, the most recent one → Ctrl-C a worker that
 received an instruction within `supervisor.cancel_window_s` (30 s) →
 leave an open worker prompt open (stop is not "no"). The daemon's own
 sentence acknowledges it at once — no model turn stands between the stop
-and its reply (one used to hold it 5.3 s behind a Vertex 504) — and what
+and its reply — and what
 was stopped goes into the brain's transcript as a context line, so a
 later question knows about it. The interrupt phase says only "Sent an
 interrupt to <alias>.": Ctrl-C does not guarantee a queued instruction
@@ -177,8 +180,7 @@ was dropped. Undoing a
 worker's edits is an instruction to the worker, not a stop. The stop
 words are "stop", "wait", "cancel", "abort", "halt", "hold on" and "no
 no" (`supervisor.BareStopWords`, the voice's `stop` tool); "never mind"
-is not one: it is ordinary speech the brain reads, and it once sent
-Ctrl-C to a worker that had just been given a task. Event turns
+is not one: it is ordinary speech the brain reads. Event turns
 are not cancelled by stop. Logged as `supervisor.stopped {phase, what,
 trigger}` (`stop_tool` or the bare-word fast path).
 
@@ -325,7 +327,8 @@ none); the roster sentence is not logged.
 
 | File | Holds |
 |---|---|
-| `prompts/assistant.md` | The voice's whole system prompt: persona, hearing, the two tools, reading a reply, follow-ups from `detail`, pushes (≤ 400 words; re-billed every turn). |
+| `prompts/assistant.md` | The voice's whole system prompt on Gemini Live: persona, hearing, the two tools, reading a reply, follow-ups from `detail`, pushes (≤ 400 words; re-billed every turn). |
+| `prompts/assistant-gptlive.md` | The same for GPT-Live, whose client delegation replaces the two tools. |
 | `prompts/svp/SOUL.md` | The brain's role and manner: who it serves, its bias to execution, the copilot manner. |
 | `prompts/svp/RULES.md` | The brain's tool guidance, one `## ` section per stable-prompt piece (tools, intent, record, promises, announcing, the one rail, fallback, for the ear, explaining, the answer contract). |
 | `prompts/USER.md` | The shepherd's profile: `{aliases}`, `{chattiness}`, `{tz}`, free text. |

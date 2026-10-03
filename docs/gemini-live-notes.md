@@ -1,6 +1,13 @@
 # Gemini Live API notes for `internal/voice/gemini`
 
-Recorded 2026-09-17. Sources, in order of authority:
+Recorded 2026-09-17 against Google AI Studio; dated reference, not
+rewritten since. §§10–13 come from the v1 tool surface (the `briefing`,
+`propose` and `confirm` tools, since replaced by `to_supervisor` and
+`stop`). Vertex AI's differences are in
+[`research/vertex-live-spike-2026-09-29.md`](research/vertex-live-spike-2026-09-29.md)
+and CONFIG.md `[gemini.vertex]`.
+
+Sources, in order of authority:
 
 1. Go SDK `google.golang.org/genai` **v1.71.0** (module cache
    `~/go/pkg/mod/google.golang.org/genai@v1.71.0/`, files `live.go`,
@@ -639,7 +646,9 @@ talking. The narrower `speaking` field is set only where output
 actually starts flowing (a `ModelTurn.InlineData` chunk or the first
 `OutputTranscription` fragment) and cleared on `TurnComplete` or any
 `interrupt()` (the server's `Interrupted` report or the client's own
-pre-send flush), so it is exactly docs/roles.md "Pushes"'s "the voice is
+pre-send flush). `Speaking()` is `speaking` **or** the client still
+playing the reply, from its playback reports (#70, docs/ws-contract.md
+"Playback reports"), so it is docs/roles.md "Pushes"'s "the voice is
 speaking". There is no API-level "queue this INTERRUPT for later" (§4):
 the daemon downgrades in its own queue instead — `peekPush` mutates the
 head item from INTERRUPT to WHEN_IDLE, in place, the moment it is

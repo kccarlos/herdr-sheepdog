@@ -1,13 +1,8 @@
 # Iteration 2: make the core loop work, and prove it
 
-Written 2026-09-23 after a review of the first week (49 PRs, 4 headset
-sessions) and of the event logs of 2026-09-23/24. The verdict: the
-architecture (voice hears and speaks; brain judges; workers act; the
-rail in code; the event log as the one record) is right. The way of
-working was not: features landed about twelve PRs per real session,
-verification proved the design contract rather than the experience,
-and every live failure got a guard instead of a root cause. This
-iteration changes the loop, not the architecture.
+Written 2026-09-23 after the first week (49 PRs, 4 headset sessions). The
+architecture stays; the way of working changes: every change cites a
+measured failure, adds an eval case, and reports before/after.
 
 ## The product is six jobs
 
@@ -59,69 +54,37 @@ baseline is the 2026-09-23/24 logs.
 
 ## Work packages
 
-Phase 0 — measure first (no behaviour change)
-- **WP0a scorecard**: `internal/earmetrics` (pure functions over a
-  spoken line) and `sheepdog scorecard` over the event logs, markdown
-  output. Run on the existing logs = the baseline.
+Phase 0 — measure first (done)
+- **WP0a scorecard**: `internal/earmetrics` and `sheepdog scorecard`
+  over the event logs; the baseline is
+  [`scorecard-baseline-2026-09-24.md`](scorecard-baseline-2026-09-24.md).
 - **WP0b eval corpus**: `sheepdog eval extract` turns a log window into
-  cases (transcript, agents, screens, request); the five logged
-  failures as cases; paraphrase and transcript-noise generators
-  (checked-in lists, not live); L0 runner over the mock brain with
-  deterministic checks. Hundreds of cases, free.
-- **WP0c headset script** (appendix below).
+  cases; the five logged failures as cases; paraphrase and
+  transcript-noise generators (`eval expand`); the L0 runner over the
+  mock brain ([`roles.md`](roles.md) "The L0 eval corpus").
+- **WP0c headset script**: the appendix below.
 
-Phase 1 — the core loop, each PR under the rules above
-- **WP1 ear contract** — merged, #55: reply = `spoken` (the headline) / `ask` (the
-  one question) / `detail` (the plain explanation). The existing
-  `spoken` and `detail` names are kept and redefined rather than
-  renamed to `headline` / `plain`: too many consumers (voice tool
-  results, the web API, the debug page, evals, the iOS app) read them,
-  and a rename would be churn with no change for the ear.
-  `prose.EarLine` enforces ≤ 2 sentences, ≤ 30 words, no dashes /
-  semicolons / PR numbers / hashes, the ask last (overflow moves to
-  `detail`); ms values and versions are left to the prompt, since
-  cutting them mid-sentence breaks the grammar. The voice reads spoken
-  (which ends with the ask), answers "what does that mean" from
-  `detail`, never adds its own follow-up question; the brain's
-  "explain simpler" rule; "never mind" out of the stop words.
-- **WP2 finish delivery** — merged, #54: a finish waits for the brain's line (up to
-  ~10 s) before anything is spoken; only a block gets the code sentence
-  at once; a late `needs_user` line is always spoken; the "started
-  on…" push for the brain's own action is silent.
-- **WP3 the shepherd's words** — merged, #58: every utterance runs on the recorded
-  transcript, not the voice model's paraphrase; the echo / initiative
-  / input-grace guards go where that makes them redundant; a final
-  transcript with no tool call and no speech within N s is relayed by
-  the daemon; back-to-back utterances coalesce into one turn; GPT-Live
-  `settledText` appends instead of overwriting.
-- **WP4 worker history** — merged, #57: keep `agent_session`; on a finish read the
-  worker's own session transcript (Claude: the JSONL path herdr
-  reports) for its last assistant message; a per-agent work journal in
-  the ledger; `recall` over it; the sign-off convention in every
-  instruction the brain sends ("end with three lines for someone who
-  can't see the screen: what changed / what needs a decision / next").
-- **WP5 brain speed** — merged, #59: window 24k → 12k tokens, ledger trimmed,
-  thinking off for announce turns, stable prefix; target < 2 s per
-  step, measured by the scorecard. (Caps themselves were tightened
-  further the same day in #60: detail capped at three sentences, two on
-  an announce.)
-- **WP6 terms ledger** (after WP1 is measured): the brain records each
-  term it introduces with a one-line explanation; recall hits it.
-- **WP7 audio diversity**: audio-e2e gains mid-sentence pauses,
-  mute-right-after-speaking, barge-in during a push, and a WER check of
-  `voice.transcript.in` against the `say` text; the app gains an opt-in
-  recording of the shepherd's utterances for replay.
-- **WP8 dive deep**: talking about one worker in detail —
-  [`docs/dive-deep.md`](dive-deep.md). `read_screen(source: session)`
-  and detail on request (#68), `investigate(source: worker)` forking
-  the worker's own CLI session (#69). Implemented; see that doc's
-  status line.
-- **WP9 timelines and invariants**: a code-verified map of sheepdog's
-  concurrent timelines and what happens when they collide —
-  [`docs/timelines.md`](timelines.md) (#71). The gaps it ranked (Gemini
-  1011 reconnects losing context, the push queue looking only at its
-  head, silent drops, the echo window anchored to generation instead of
-  playback) were fixed in #72.
+Phase 1 — the core loop (done unless noted; the behaviour is described
+in [`roles.md`](roles.md))
+- **WP1 ear contract** (#55): reply = `spoken` / `ask` / `detail`,
+  capped in code (`prose.EarLine`); "never mind" is not a stop word.
+- **WP2 finish delivery** (#54): a finish waits for the brain's line;
+  only a block speaks at once; a late `needs_user` line is always
+  spoken.
+- **WP3 the shepherd's words** (#58): every utterance runs on the
+  recorded transcript; the daemon relays an unanswered utterance;
+  back-to-back utterances coalesce.
+- **WP4 worker history** (#57): the worker's own session transcript, a
+  work journal per agent, the sign-off trailer.
+- **WP5 brain speed** (#59, #60): window 24k → 12k tokens, trimmed
+  ledger, no thinking on event turns, a stable prompt prefix.
+- **WP6 terms ledger** (open): the brain records each term it introduces
+  with a one-line explanation; `recall` finds it.
+- **WP7 audio diversity** (open): audio-e2e gains mid-sentence pauses,
+  mute right after speaking, barge-in during a push and a WER check.
+- **WP8 dive deep** (#68, #69): [`dive-deep.md`](dive-deep.md).
+- **WP9 timelines and invariants** (#71, #72):
+  [`timelines.md`](timelines.md).
 
 Phase 2 — breadth, only once J1–J6 are green on two consecutive
 headset sessions.

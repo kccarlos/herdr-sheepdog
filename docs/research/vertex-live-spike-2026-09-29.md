@@ -1,5 +1,7 @@
 # Vertex AI Live spike — 2026-09-29
 
+> Superseded: implemented in #77 (Gemini Live on Vertex) and #79 (the `vertex` brain provider); the current facts are in CONFIG.md `[gemini.vertex]`.
+
 Question: can sheepdog's Gemini Live voice path (`internal/voice/gemini`,
 today Google AI Studio only) run on Vertex AI with the Vertex API key in
 `.env` (`VERTEX_API_KEY`, restricted to `aiplatform.googleapis.com`, bound

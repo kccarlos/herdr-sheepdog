@@ -358,7 +358,7 @@ session a follow-up resumes. The argv is fixed in `internal/cli`
 # {cwd}, {question}, {model}, {reasoning} and (resume only) {session}
 # are substituted by sheepdog; argv arrays, no shell.
 codex_cmd  = ["codex", "exec", "--sandbox", "read-only", "--skip-git-repo-check",
-              "--color", "never", "-c", "model_reasoning_effort=low",
+              "--color", "never", "-c", "model_reasoning_effort={reasoning}",
               "-C", "{cwd}", "--json", "{question}"]
 claude_cmd = ["claude", "-p", "{question}", "--model", "{model}",
               "--tools", "Read,Grep,Glob,WebSearch",
@@ -379,10 +379,14 @@ claude_resume_cmd = ["claude", "-p", "{question}", "--resume", "{session}",
                      "--permission-mode", "dontAsk", "--permission-prompts", "none",
                      "--output-format", "json",
                      "--max-budget-usd", "0.50"]
-timeout_s     = 60      # kill the process group on expiry (plan §3.5); run_cli only
-output_cap_kb = 16
-prefer        = "codex" # first detected wins; both tools took ~17 s on a trivial question at default effort
+claude_model    = "claude-haiku-4-5-20251001"  # fills {model}
+codex_reasoning = "low"                        # fills {reasoning}
+timeout_s       = 60      # kill the process group on expiry; run_cli only
+max_output_kb   = 16
+prefer          = "auto"  # codex if on PATH, else claude
 ```
+
+`internal/config/config.go`'s `defaultCLI` is authoritative.
 
 The fork templates of `investigate(source: "worker")` (§2c) are not in
 the config: they are fixed in `internal/cli` (`defaultClaudeForkCmd`,
@@ -396,7 +400,7 @@ An investigation is not bounded by `timeout_s` but by
 `brain.investigate_max_s` (600 s), which is a sanity ceiling, not a
 budget: the answer may take as long as it takes (CONFIG.md).
 
-Runner notes for WP4:
+Runner notes:
 
 - `exec.Command` with `Stdin = nil` (→ `/dev/null`), `Dir = cwd` (Claude) plus
   `-C cwd` (Codex), `Setpgid` and kill the whole group on timeout (both tools
@@ -430,9 +434,8 @@ Runner notes for WP4:
   writing session files; there is no approval flag on `exec` (0.154 has only
   `on-request|never` on the interactive CLI).
 - **Latency assumption:** a trivial question took ~17 s on both tools with
-  the user's default (max-effort / Opus) settings — the `ask()` path should
-  say "checking" immediately (already in the plan) and consider
-  `model_reasoning_effort=low` / `--model sonnet` defaults.
+  the user's default (max-effort / Opus) settings, hence the low-effort
+  and Haiku defaults above and an immediate "checking" from the brain.
 - **New requirement:** scrub `HERDR_*` env vars before spawning either CLI
   (their herdr integration hooks would otherwise report a session for the
   inherited pane).
