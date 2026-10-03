@@ -290,13 +290,13 @@ func evalSimOptions(o evalSimOpts, cfg config.Config, log logging.Logger) (eval.
 
 	// One limit for every judge and simulated-user call of the campaign:
 	// a burst of parallel judge calls got 429s from Vertex Flash-Lite.
-	sem := make(chan struct{}, 6)
+	sem := make(chan struct{}, 4)
 	backend := func(kind, model string) (brain.Model, string, error) {
 		if kind == "" {
 			kind = eval.BackendVertex
 		}
 		m, id, err := eval.NewBackend(eval.BackendOptions{Kind: kind, Model: model, VertexAPIKey: cfg.Gemini.Vertex.APIKey, VertexProject: cfg.Gemini.Vertex.Project, OllamaURL: o.ollamaURL}, log)
-		return eval.Patient(m, sem, 5), id, err
+		return eval.Patient(m, sem, 8, altFor(kind, id)), id, err
 	}
 	um, uid, err := backend(o.simuser, o.simuserModel)
 	if err != nil {

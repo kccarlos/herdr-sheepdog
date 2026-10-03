@@ -256,7 +256,7 @@ func evalJudge(kind, model, ollamaURL string, cfg config.Config, log logging.Log
 	if err != nil {
 		return nil, err
 	}
-	return &eval.LLMJudge{Model: eval.Metered(eval.Patient(m, make(chan struct{}, 4), 5), meter, "judge"), ModelID: id}, nil
+	return &eval.LLMJudge{Model: eval.Metered(eval.Patient(m, make(chan struct{}, 4), 8, altFor(kind, id)), meter, "judge"), ModelID: id}, nil
 }
 
 // runEvalSet loads and runs one set: its SVP files through the brain,
@@ -350,4 +350,13 @@ func filterSVP(cases []eval.SVPCase, substr string) []eval.SVPCase {
 		}
 	}
 	return out
+}
+
+// altFor is the alternate model a judge's retries use (Vertex Flash-Lite
+// only).
+func altFor(kind, id string) string {
+	if kind == eval.BackendVertex && id == eval.DefaultJudgeModel {
+		return eval.AltJudgeModel
+	}
+	return ""
 }

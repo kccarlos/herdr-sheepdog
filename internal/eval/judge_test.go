@@ -163,14 +163,17 @@ func TestPatientRetriesTransient(t *testing.T) {
 		braintest.Step{Err: errors.New("Error 503, Message: overloaded")},
 		braintest.Step{Text: "ok"},
 	)
-	p := Patient(m, make(chan struct{}, 1), 5).(*patient)
+	p := Patient(m, make(chan struct{}, 1), 5, "alt").(*patient)
 	p.base = time.Millisecond
 	resp, err := p.Generate(context.Background(), "x", nil, nil)
 	if err != nil || textOf(resp) != "ok" || len(m.Calls()) != 3 {
 		t.Fatalf("resp %q err %v calls %d", textOf(resp), err, len(m.Calls()))
 	}
+	if ids := []string{m.Calls()[0].Model, m.Calls()[1].Model, m.Calls()[2].Model}; ids[0] != "x" || ids[1] != "alt" || ids[2] != "x" {
+		t.Errorf("retries did not alternate models: %v", ids)
+	}
 	m = braintest.NewModel(braintest.Step{Err: errors.New("Error 400, Message: bad request")}, braintest.Step{Text: "ok"})
-	p = Patient(m, nil, 5).(*patient)
+	p = Patient(m, nil, 5, "").(*patient)
 	if _, err := p.Generate(context.Background(), "x", nil, nil); err == nil || len(m.Calls()) != 1 {
 		t.Fatalf("a 400 was retried: calls %d", len(m.Calls()))
 	}

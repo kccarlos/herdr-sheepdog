@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"sort"
 	"strings"
 	"sync"
@@ -35,6 +36,10 @@ const (
 // key: gemini-3.1-flash-lite and gemini-3.5-flash-lite both answer
 // generateContent; gemini-3.8-flash-lite and the -preview ids are 404.
 const DefaultJudgeModel = "gemini-3.1-flash-lite"
+
+// AltJudgeModel is the Flash-Lite id the judge's and the simulated
+// user's retries alternate with on Vertex (a separate rate-limit bucket).
+const AltJudgeModel = "gemini-3.5-flash-lite"
 
 // DefaultOllamaModel and DefaultOllamaURL are the local fallback.
 const (
@@ -245,31 +250,43 @@ var errNoModel = errors.New("eval: no model configured")
 // patient is a brain.Model for the judge and the simulated user (never
 // the brain, whose no-retry policy is part of what is evaluated): at most
 // cap(sem) calls in flight, and a rate limit or a transient server error
-// is retried with exponential backoff.
+// is retried with jittered exponential backoff (capped at 30 s). With an
+// alternate model id, retries alternate between the two: Vertex rate
+// limits each model separately, and Flash-Lite's shared quota ran out
+// under a 5-way campaign (2026-10-03: 45 of 130 runs lost the simulated
+// user to 429s).
 type patient struct {
 	inner brain.Model
 	sem   chan struct{}
 	tries int
 	base  time.Duration
+	alt   string
 }
 
 // Patient wraps m with a concurrency limit shared by every wrapper built
 // on the same sem, and up to tries attempts per call (backoff from 2 s).
-func Patient(m brain.Model, sem chan struct{}, tries int) brain.Model {
+// alt, when set, is a second model id the retries alternate with.
+func Patient(m brain.Model, sem chan struct{}, tries int, alt string) brain.Model {
 	if m == nil {
 		return nil
 	}
-	return &patient{inner: m, sem: sem, tries: max(tries, 1), base: 2 * time.Second}
+	return &patient{inner: m, sem: sem, tries: max(tries, 1), base: 2 * time.Second, alt: alt}
 }
 
 func (p *patient) Generate(ctx context.Context, model string, contents []*genai.Content, cfg *genai.GenerateContentConfig) (*genai.GenerateContentResponse, error) {
 	var err error
 	for i := 0; i < p.tries; i++ {
+		id := model
 		if i > 0 {
+			d := min(p.base<<(i-1), 30*time.Second)
+			d += time.Duration(rand.Int64N(int64(d)/2 + 1))
 			select {
-			case <-time.After(p.base << (i - 1)):
+			case <-time.After(d):
 			case <-ctx.Done():
 				return nil, ctx.Err()
+			}
+			if p.alt != "" && i%2 == 1 {
+				id = p.alt
 			}
 		}
 		if p.sem != nil {
@@ -280,7 +297,7 @@ func (p *patient) Generate(ctx context.Context, model string, contents []*genai.
 			}
 		}
 		var resp *genai.GenerateContentResponse
-		resp, err = p.inner.Generate(ctx, model, contents, cfg)
+		resp, err = p.inner.Generate(ctx, id, contents, cfg)
 		if p.sem != nil {
 			<-p.sem
 		}
