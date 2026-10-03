@@ -83,6 +83,7 @@ func (s *Session) handleServerContent(sc *genai.LiveServerContent) {
 				}
 				s.audioTiming.Chunk(now, len(p.InlineData.Data))
 				s.play.Sent(now, len(p.InlineData.Data))
+				s.echo.Out(p.InlineData.Data)
 				s.mu.Unlock()
 				s.clearStalled()
 				s.out.Push(p.InlineData.Data)
@@ -153,6 +154,7 @@ func (s *Session) interrupt(by string) {
 	s.speaking = false
 	s.flushRecapLocked() // a cut report may shorten it to what was heard
 	awaited := s.play.Flush(now)
+	s.echo.Flush(now)
 	unheard := s.heard.Interrupted(now, by, awaited)
 	timing := s.finishAudioTimingLocked()
 	s.mu.Unlock()
