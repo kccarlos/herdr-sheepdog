@@ -51,14 +51,22 @@ var (
 // quota is the scarcest); providers not listed follow, sorted.
 var failoverOrder = []string{ProviderVertex, ProviderDeepSeek, ProviderGemini}
 
-// providerSpoken is how a notice names a provider.
-var providerSpoken = map[string]string{ProviderGemini: "Gemini", ProviderVertex: "Vertex", ProviderDeepSeek: "DeepSeek"}
+// Notice is something the brain tells the CEO about itself, in both
+// languages the daemon speaks: the notifier picks the one the CEO last
+// spoke (supervisor.ceoLanguage).
+type Notice struct {
+	English string
+	Chinese string
+}
 
-func spokenProvider(id string) string {
-	if s, ok := providerSpoken[id]; ok {
-		return s
-	}
-	return id
+// failoverNotice is the line for a failing streak. It names no vendor
+// (tier-2 bench 2026-10-03 #7: "DeepSeek is failing; using Vertex for
+// now." made the simulated CEO ask about "the Vertex worker"): which
+// model answers is the daemon's business, that answers may differ is
+// the CEO's.
+var failoverNotice = Notice{
+	English: "My usual model is having trouble; a backup is answering for now.",
+	Chinese: "我平时用的模型出了点问题，现在先由备用模型回答。",
 }
 
 // failoverState is the run's record of failovers away from the selected
@@ -293,8 +301,8 @@ func (b *Brain) noteFailover(from, to string) {
 	if !due {
 		return
 	}
-	text := fmt.Sprintf("%s is failing; using %s for now.", spokenProvider(from), spokenProvider(to))
-	b.log.Log(logSource, "brain.failover_notice", "", map[string]any{"from": from, "to": to, "failovers": n, "text": text})
+	notice := failoverNotice
+	b.log.Log(logSource, "brain.failover_notice", "", map[string]any{"from": from, "to": to, "failovers": n, "text": notice.English})
 	// Off the turn: the notice path is the supervisor's push, which must
 	// not run under whatever the turn's caller holds. Tracked as
 	// after-turn work, so Close waits for it before closing the
@@ -302,14 +310,14 @@ func (b *Brain) noteFailover(from, to string) {
 	b.after.Add(1)
 	go func() {
 		defer b.after.Done()
-		notify(text)
+		notify(notice)
 	}()
 }
 
 // SetNotifier sets how the brain tells the CEO something about itself
-// (a provider failing over and over): the daemon's spoken push. nil
-// turns notices off.
-func (b *Brain) SetNotifier(f func(text string)) {
+// (a provider failing over and over): the daemon's spoken push, in the
+// CEO's language. nil turns notices off.
+func (b *Brain) SetNotifier(f func(n Notice)) {
 	b.mu.Lock()
 	b.notify = f
 	b.mu.Unlock()

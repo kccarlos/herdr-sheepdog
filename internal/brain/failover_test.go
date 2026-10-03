@@ -57,7 +57,7 @@ type notices struct {
 
 func newNotices(b *Brain) *notices {
 	n := &notices{ch: make(chan string, 8)}
-	b.SetNotifier(func(text string) { n.ch <- text })
+	b.SetNotifier(func(notice Notice) { n.ch <- notice.English })
 	return n
 }
 
@@ -199,7 +199,7 @@ func TestFailoverNotice(t *testing.T) {
 		t.Fatalf("notice before three consecutive failovers: %q", s)
 	}
 	turn(true)
-	if s := n.next(); s != "Vertex is failing; using DeepSeek for now." {
+	if s := n.next(); s != "My usual model is having trouble; a backup is answering for now." {
 		t.Fatalf("notice = %q", s)
 	}
 	if ev := h.log.ofType("brain.failover_notice"); len(ev) != 1 || payload(ev[0])["failovers"] != 3 {

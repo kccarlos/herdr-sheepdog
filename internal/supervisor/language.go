@@ -63,3 +63,12 @@ func toldLine(alias, label string, zh bool) string {
 	}
 	return "已回复 " + alias + "：" + strings.TrimRight(label, ".。 ") + "。"
 }
+
+// noticeText is a brain notice in the CEO's language: Chinese once their
+// last words were Chinese, English otherwise.
+func (s *Supervisor) noticeText(n brain.Notice) string {
+	if s.ceoLanguage() == brain.LanguageChinese && n.Chinese != "" {
+		return n.Chinese
+	}
+	return n.English
+}

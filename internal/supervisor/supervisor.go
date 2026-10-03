@@ -384,8 +384,8 @@ func New(store *state.Store, h Herdr, querier Querier, pusher Pusher, log loggin
 	if s.brain != nil {
 		s.brain.SetHost(brainHost{s})
 		// The brain's notices about itself (a provider failing over and
-		// over) are spoken like any daemon line.
-		s.brain.SetNotifier(func(text string) { s.push("", text, voice.UrgencyIdle) })
+		// over) are spoken like any daemon line, in the CEO's language.
+		s.brain.SetNotifier(func(n brain.Notice) { s.push("", s.noticeText(n), voice.UrgencyIdle) })
 		s.restorePromises()
 	}
 	return s, nil

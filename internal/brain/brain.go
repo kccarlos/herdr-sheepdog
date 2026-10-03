@@ -207,7 +207,7 @@ type Brain struct {
 	// failover is the streak of failovers away from the selected
 	// provider; notify tells the CEO about it (SetNotifier).
 	failover failoverState
-	notify   func(text string)
+	notify   func(n Notice)
 
 	// catalogs are the cached model lists, one per provider (catalog.go).
 	catalogs catalogCaches
