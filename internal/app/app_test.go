@@ -766,3 +766,29 @@ func readEventFile(r io.Reader) ([]eventlog.Event, error) {
 	}
 	return out, nil
 }
+
+type stubQuerier struct{}
+
+func (stubQuerier) Query(context.Context, string, string) (string, error) { return "scripted", nil }
+
+// TestBuildQuerierOption: Options.Querier replaces the CLI querier (the
+// voice bench never runs a real coding agent), whatever --cli says.
+func TestBuildQuerierOption(t *testing.T) {
+	cfg := testConfig(t)
+	a, err := Build(cfg, Options{Voice: VoiceOff, Herdr: HerdrMock, Brain: BrainOff, CLI: CLIOn, Querier: stubQuerier{}, Stderr: io.Discard})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = a.elog.Close() }()
+	if a.QuerierLazy() {
+		t.Fatal("the CLI querier was built although Options.Querier was set")
+	}
+	b, err := Build(testConfig(t), Options{Voice: VoiceOff, Herdr: HerdrMock, Brain: BrainOff, Stderr: io.Discard})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = b.elog.Close() }()
+	if !b.QuerierLazy() {
+		t.Fatal("without Options.Querier the CLI querier is the default")
+	}
+}

@@ -83,6 +83,75 @@ func (i *Injector) Blocked(ctx context.Context, req BlockedRequest) (state.Agent
 	return row, nil
 }
 
+// PaneRequest describes a synthetic pane registered in any state (the
+// voice bench's scripted workers start working, idle or done, not only
+// blocked).
+type PaneRequest struct {
+	PaneID string `json:"pane_id"`
+	// Alias pins the spoken name (optional).
+	Alias string `json:"alias,omitempty"`
+	// Kind is the agent kind label (default "codex").
+	Kind string `json:"kind,omitempty"`
+	// State is working, idle, done or blocked (default idle).
+	State string `json:"state,omitempty"`
+	// Screen is the pane text the supervisor will read.
+	Screen string `json:"screen"`
+}
+
+// Pane registers a synthetic pane in req.State, or updates one, and runs
+// its transition through the supervisor. A new pane is reported as coming
+// from unknown (as the herdr watcher's first snapshot reports a pane it
+// had not seen), so it is never mistaken for a finish; blocked takes the
+// Blocked path.
+func (i *Injector) Pane(ctx context.Context, req PaneRequest) (state.Agent, error) {
+	req.PaneID = strings.TrimSpace(req.PaneID)
+	to := herdr.State(strings.ToLower(strings.TrimSpace(req.State)))
+	if to == "" {
+		to = herdr.StateIdle
+	}
+	if to == herdr.StateBlocked {
+		return i.Blocked(ctx, BlockedRequest{PaneID: req.PaneID, Alias: req.Alias, Kind: req.Kind, Screen: req.Screen})
+	}
+	switch {
+	case req.PaneID == "":
+		return state.Agent{}, errors.New("inject: pane_id is required")
+	case strings.TrimSpace(req.Screen) == "":
+		return state.Agent{}, errors.New("inject: screen is required")
+	case !to.Valid() || to == herdr.StateUnknown:
+		return state.Agent{}, fmt.Errorf("inject: invalid state %q", to)
+	}
+	if req.Kind == "" {
+		req.Kind = "codex"
+	}
+	row, ok := i.store.Get(req.PaneID)
+	if ok && !row.Synthetic {
+		return state.Agent{}, fmt.Errorf("%w: %s", ErrNotSynthetic, req.PaneID)
+	}
+	from := herdr.StateUnknown
+	if ok {
+		from = row.State
+	} else {
+		var err error
+		row, _, err = i.store.Apply(herdr.Transition{PaneID: req.PaneID, To: to, At: i.now(), Agent: req.Kind, WorkspaceID: "synthetic", Source: state.SourceInject})
+		if err != nil {
+			return state.Agent{}, err
+		}
+	}
+	if err := i.store.MarkSynthetic(req.PaneID); err != nil {
+		return state.Agent{}, err
+	}
+	if alias := strings.TrimSpace(req.Alias); alias != "" && alias != row.Alias {
+		if err := i.store.SetAlias(req.PaneID, alias); err != nil {
+			return state.Agent{}, err
+		}
+	}
+	i.herdr.SetScreen(req.PaneID, req.Kind, req.Screen, to)
+	i.log.Log("web", "web.inject", req.PaneID, map[string]any{"kind": "pane", "state": string(to), "alias": req.Alias, "agent": req.Kind, "screen_bytes": len(req.Screen)})
+	i.transition(ctx, req.PaneID, req.Kind, from, to)
+	row, _ = i.store.Get(req.PaneID)
+	return row, nil
+}
+
 // SetState moves a synthetic pane to another state (done, working, idle,
 // unknown) through the supervisor. A non-empty screen replaces the pane
 // text first, so a "done" can show what the agent finished with.
