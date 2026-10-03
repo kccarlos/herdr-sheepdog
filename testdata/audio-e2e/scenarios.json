@@ -74,6 +74,27 @@
       "tail_ms": 14000,
       "full_tail": true,
       "expect": {"no_tool": true, "events": [{"type": "voice.session_close", "payload": {"reason": "idle"}, "providers": ["openai"]}]}
+    },
+    {
+      "name": "approval-yes-then-what",
+      "note": "Multi-turn (headset script step 3): the block is announced once, a bare 'Yes.' approves it within 3 s of speech, and 'What did I just approve?' is answered without sending keys. Added 2026-10-02 with the multi-turn, max_*_ms and absent assertions; not yet run live.",
+      "setup": [{"inject_blocked": {"pane_id": "w1:p1", "alias": "auth", "kind": "codex", "screen_fixture": "codex-approval-prompt.screen.txt"}}],
+      "turns": [
+        {
+          "name": "approve",
+          "segments": [{"silence_ms": 6000}, {"say": "Yes."}, {"silence_ms": 400}],
+          "tail_ms": 12000,
+          "expect": {"tool": "to_supervisor", "keys_sent": true, "max_eos_to_tool_ms": 3000,
+            "absent": [{"type": "voice.push", "contains": "auth", "from_ms": -7000, "max_count": 1, "note": "the block is announced once (docs/bench-2026-10-03.md #15)"}]}
+        },
+        {
+          "name": "what-approved",
+          "segments": [{"silence_ms": 800}, {"say": "What did I just approve?"}, {"silence_ms": 400}],
+          "tail_ms": 15000,
+          "expect": {"tool": "to_supervisor", "reply": true, "max_eos_to_first_audio_ms": 8000,
+            "absent": [{"type": "herdr.send", "payload": {"kind": "keys"}, "from_ms": -2000, "note": "a question sends no keys"}]}
+        }
+      ]
     }
   ]
 }

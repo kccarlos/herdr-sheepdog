@@ -44,6 +44,24 @@ type Scenario struct {
 	// after the first reply audio (barge-in: "stop" mid-reply).
 	SpeakAfterReplyMS int    `json:"speak_after_reply_ms,omitempty"`
 	Expect            Expect `json:"expect"`
+	// Turns, set instead of Segments, makes a multi-turn scenario: each
+	// turn's segments play in order, each followed by its own tail, and
+	// each turn's Expect is checked against what happened in its window
+	// (from its first frame to the next turn's first frame). Expect still
+	// checks the whole run; latencies there are from the last speech.
+	Turns []Turn `json:"turns,omitempty"`
+}
+
+// Turn is one exchange of a multi-turn scenario.
+type Turn struct {
+	Name     string    `json:"name,omitempty"`
+	Segments []Segment `json:"segments"`
+	// TailMS, QuietMS and FullTail are the turn's own tail (defaults as
+	// for a scenario).
+	TailMS   int    `json:"tail_ms,omitempty"`
+	QuietMS  int    `json:"quiet_ms,omitempty"`
+	FullTail bool   `json:"full_tail,omitempty"`
+	Expect   Expect `json:"expect"`
 }
 
 // Setup is one HTTP call before the audio starts.
@@ -113,6 +131,39 @@ type Expect struct {
 	KeysSent bool `json:"keys_sent,omitempty"`
 	// Events: each must appear (type, and payload fields equal).
 	Events []EventMatch `json:"events,omitempty"`
+	// MaxEOSToFirstInMS, MaxEOSToToolMS, MaxEOSToFirstAudioMS and
+	// MaxEOSToFirstOutMS bound the latencies from the end of speech
+	// (zero: unchecked). A bound on something that never happened fails.
+	MaxEOSToFirstInMS    int64 `json:"max_eos_to_first_in_ms,omitempty"`
+	MaxEOSToToolMS       int64 `json:"max_eos_to_tool_ms,omitempty"`
+	MaxEOSToFirstAudioMS int64 `json:"max_eos_to_first_audio_ms,omitempty"`
+	MaxEOSToFirstOutMS   int64 `json:"max_eos_to_first_out_ms,omitempty"`
+	// Absent asserts that something does not happen (or not more than
+	// MaxCount times) in a window: a duplicate announcement, a flush
+	// that should not come, a tool call that must not be made.
+	Absent []Absent `json:"absent,omitempty"`
+}
+
+// Absent matches daemon events (Type, Payload, Contains) or timeline
+// items (Timeline: in, out, audio, flush, status, error; Contains on the
+// text) and fails when more than MaxCount match inside the window.
+type Absent struct {
+	Type    string         `json:"type,omitempty"`
+	Payload map[string]any `json:"payload,omitempty"`
+	// Timeline matches a client-side timeline kind instead of an event.
+	Timeline string `json:"timeline,omitempty"`
+	// Contains is a case-insensitive substring of the event's payload
+	// (rendered) or the timeline item's text.
+	Contains string `json:"contains,omitempty"`
+	// FromMS and ToMS bound the window relative to the end of speech
+	// (negative FromMS reaches before it; ToMS 0 = to the end).
+	FromMS int64 `json:"from_ms,omitempty"`
+	ToMS   int64 `json:"to_ms,omitempty"`
+	// MaxCount is how many matches are allowed (default 0: none).
+	MaxCount int `json:"max_count,omitempty"`
+	// Note says what the assertion guards, for the failure message.
+	Note      string   `json:"note,omitempty"`
+	Providers []string `json:"providers,omitempty"`
 }
 
 // EventMatch matches one daemon event.
@@ -140,8 +191,21 @@ func Load(path string) (File, error) {
 		if s.Name == "" {
 			return f, fmt.Errorf("audioe2e: scenario %d has no name", i)
 		}
-		if len(s.Segments) == 0 {
+		if len(s.Segments) == 0 && len(s.Turns) == 0 {
 			return f, fmt.Errorf("audioe2e: scenario %s has no segments", s.Name)
+		}
+		if len(s.Segments) > 0 && len(s.Turns) > 0 {
+			return f, fmt.Errorf("audioe2e: scenario %s has both segments and turns", s.Name)
+		}
+		for j, t := range s.Turns {
+			if len(t.Segments) == 0 {
+				return f, fmt.Errorf("audioe2e: scenario %s turn %d has no segments", s.Name, j+1)
+			}
+		}
+		for _, a := range allAbsent(s) {
+			if (a.Type == "") == (a.Timeline == "") {
+				return f, fmt.Errorf("audioe2e: scenario %s: an absent check needs exactly one of type and timeline", s.Name)
+			}
 		}
 	}
 	return f, nil
@@ -162,4 +226,21 @@ func inList(v string, list []string) bool {
 		}
 	}
 	return false
+}
+
+func allAbsent(s Scenario) []Absent {
+	out := append([]Absent(nil), s.Expect.Absent...)
+	for _, t := range s.Turns {
+		out = append(out, t.Expect.Absent...)
+	}
+	return out
+}
+
+// turns is the scenario as a list of turns: its Turns, or one turn made
+// of its Segments and tail.
+func (s Scenario) turns() []Turn {
+	if len(s.Turns) > 0 {
+		return s.Turns
+	}
+	return []Turn{{Name: s.Name, Segments: s.Segments, TailMS: s.TailMS, QuietMS: s.QuietMS, FullTail: s.FullTail}}
 }
