@@ -102,7 +102,15 @@ func TestRULESEarContract(t *testing.T) {
 	}
 	for _, want := range []string{
 		"## For the ear",
-		"thirty words or fewer",
+		// docs/bench-2026-10-03.md #13-#15: short by default, the prompt (not
+		// the code) decides length; the language the shepherd last used; ask
+		// only for an open decision; names as given.
+		"`spoken` is short by default",
+		"You decide the length; the daemon only stops a runaway",
+		"in the language the shepherd last used, English or Chinese",
+		"and only when a decision is actually open",
+		"has an empty `ask`",
+		"never invent a nickname",
 		"Put the one decision in `ask`",
 		"## Explaining",
 		"do not repeat yourself",
@@ -113,7 +121,7 @@ func TestRULESEarContract(t *testing.T) {
 		// on request within the reply cap.
 		"`source` session is its own session record",
 		`"what exactly", "tell me more", "what were the N things", "go on", "read it to me"`,
-		"up to four sentences and sixty words",
+		"as much as they asked for",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("RULES.md lacks %q", want)

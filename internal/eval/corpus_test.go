@@ -182,3 +182,29 @@ func TestNotStopWord(t *testing.T) {
 		t.Errorf("without not_stop_word: %v", r)
 	}
 }
+
+// ask_empty and reply_language are live-only checks: skipped offline, and
+// live they fail an ask on a plain status line and a Chinese reply after
+// the shepherd switched to English (bench #14, #15a).
+func TestGradeAskEmptyAndReplyLanguage(t *testing.T) {
+	en := SVPExpect{AskEmpty: true, ReplyLanguage: "en"}
+	reasons, skipped := gradeSVP(en, newRecorder(), brain.Reply{Spoken: "好的", Ask: "要不要？"}, true)
+	if len(reasons) != 0 || strings.Join(skipped, ",") != "ask_empty,reply_language" {
+		t.Errorf("offline: reasons %v skipped %v", reasons, skipped)
+	}
+	reasons, _ = gradeSVP(en, newRecorder(), brain.Reply{Spoken: "Both are idle.", Ask: "Shall I rerun the checks?"}, false)
+	if len(reasons) != 1 || !strings.Contains(reasons[0], "ask") {
+		t.Errorf("an ask on a status line: %v", reasons)
+	}
+	reasons, _ = gradeSVP(en, newRecorder(), brain.Reply{Spoken: "两个都闲着。"}, false)
+	if len(reasons) != 1 || !strings.Contains(reasons[0], "English") {
+		t.Errorf("Chinese after English: %v", reasons)
+	}
+	if reasons, _ = gradeSVP(en, newRecorder(), brain.Reply{Spoken: "Both are idle."}, false); len(reasons) != 0 {
+		t.Errorf("a good English status failed: %v", reasons)
+	}
+	zh := SVPExpect{ReplyLanguage: "zh"}
+	if reasons, _ = gradeSVP(zh, newRecorder(), brain.Reply{Spoken: "Both are idle."}, false); len(reasons) != 1 {
+		t.Errorf("English after Chinese: %v", reasons)
+	}
+}
