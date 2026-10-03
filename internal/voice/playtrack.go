@@ -151,9 +151,11 @@ func (p *PlaybackTracker) Said(text string) {
 
 // Flush records that the daemon dropped the output and told the client
 // to flush (EventInterrupted): the current run waits for the client's
-// flushed report, and nothing is playing any more.
-func (p *PlaybackTracker) Flush(now time.Time) {
-	if !p.run.empty() {
+// flushed report, and nothing is playing any more. It reports whether
+// a run now waits for that report (false: nothing had been sent).
+func (p *PlaybackTracker) Flush(now time.Time) bool {
+	awaited := !p.run.empty()
+	if awaited {
 		p.run.flushedAt = now
 		p.awaiting = append(p.awaiting, p.run)
 		if len(p.awaiting) > maxAwaiting {
@@ -165,6 +167,7 @@ func (p *PlaybackTracker) Flush(now time.Time) {
 	p.holdUntil = time.Time{}
 	p.est = time.Time{}
 	p.endedAt = now
+	return awaited
 }
 
 // Detach forgets the client (it went away, or a new one replaced it):

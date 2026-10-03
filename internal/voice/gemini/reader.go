@@ -38,11 +38,14 @@ func (s *Session) handleMessage(msg *genai.LiveServerMessage, gen int) {
 		}
 	case msg.SessionResumptionUpdate != nil:
 		u := msg.SessionResumptionUpdate
-		if u.Resumable && u.NewHandle != "" {
-			s.mu.Lock()
+		s.mu.Lock()
+		// Only the live connection's handle, and none while a refresh
+		// is starting a fresh session (refresh.go): the old
+		// connection's late update would make it resume after all.
+		if u.Resumable && u.NewHandle != "" && gen == s.connGen && !s.refreshing {
 			s.handle = u.NewHandle
-			s.mu.Unlock()
 		}
+		s.mu.Unlock()
 	case msg.ToolCall != nil:
 		for _, fc := range msg.ToolCall.FunctionCalls {
 			if fc != nil {
@@ -92,6 +95,7 @@ func (s *Session) handleServerContent(sc *genai.LiveServerContent) {
 		s.lastInput = now
 		s.inputDone = t.Finished
 		s.inText += t.Text
+		s.heard.UserInput()
 		if t.Finished {
 			s.recap.Add(voice.RecapUser, s.inText)
 			s.inText = ""
@@ -108,6 +112,7 @@ func (s *Session) handleServerContent(sc *genai.LiveServerContent) {
 		s.speaking = true
 		s.noteResponseLocked(s.now())
 		s.play.Said(t.Text)
+		s.heard.Said(t.Text)
 		// The voice answering means the shepherd finished (Gemini
 		// rarely marks its input transcription final).
 		s.recap.Add(voice.RecapUser, s.inText)
@@ -125,12 +130,14 @@ func (s *Session) handleServerContent(sc *genai.LiveServerContent) {
 		close(s.turnDone)
 		s.turnDone = make(chan struct{})
 		s.flushRecapLocked()
+		s.heard.TurnComplete()
 		turn := s.noteTurnCompleteLocked()
 		timing := s.finishAudioTimingLocked()
 		s.mu.Unlock()
 		s.logTurn(turn)
 		s.logAudioTiming(timing)
 		s.emit(voice.EventTurnComplete{})
+		s.settleHeard()
 		s.poke()
 	}
 }
@@ -141,11 +148,14 @@ func (s *Session) handleServerContent(sc *genai.LiveServerContent) {
 // ("push").
 func (s *Session) interrupt(by string) {
 	s.mu.Lock()
+	now := s.now()
 	s.speaking = false
 	s.flushRecapLocked() // a cut report may shorten it to what was heard
-	s.play.Flush(s.now())
+	awaited := s.play.Flush(now)
+	unheard := s.heard.Interrupted(now, by, awaited)
 	timing := s.finishAudioTimingLocked()
 	s.mu.Unlock()
+	s.reportUnheard(unheard)
 	dropped := s.out.Flush()
 	s.log.Log(logSource, "voice.interrupted", "", map[string]any{"by": by, "dropped_chunks": dropped})
 	s.logAudioTiming(timing)

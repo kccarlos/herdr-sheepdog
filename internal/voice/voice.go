@@ -95,6 +95,13 @@ type ToolResult struct {
 // handler's result is discarded.
 type ToolHandler func(ctx context.Context, call ToolCall) (ToolResult, error)
 
+// OpenCheck is the supervisor's answer to "is it still open?", which
+// the voice layer cannot see for itself. Asked with nil tags: is a
+// question waiting for the shepherd (a pending approval or decision)?
+// Asked with a push's tags: is what that line is about — the prompt it
+// announced, the promise it keeps — still owed to the shepherd?
+type OpenCheck func(tags map[string]any) bool
+
 // Session is one long-lived voice session owned by the daemon.
 //
 // Start connects; Close ends the session for good. All other methods are

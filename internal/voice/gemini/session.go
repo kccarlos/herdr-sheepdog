@@ -100,7 +100,29 @@ type Session struct {
 	inText  string
 	outText string
 
+	// Session refresh (refresh.go): when the model session last started
+	// fresh, when the client went away (zero while one is attached),
+	// the refresh due and since when, and whether one is under way
+	// (spoken pushes wait for the fresh connection).
+	freshAt      time.Time
+	clientGoneAt time.Time
+	everAttached bool
+	refreshDue   string
+	refreshDueAt time.Time
+	refreshing   bool
+	// owedReplies are to_supervisor calls answered "pending", by call
+	// id, until the push carrying their reply goes out.
+	owedReplies map[string]time.Time
+	// openCheck is the supervisor's voice.OpenCheck (nil: none).
+	openCheck voice.OpenCheck
+	// heard watches each spoken push until its speech is over
+	// (voice/heard.go); requeue holds the owed unheard lines waiting
+	// for a quiet moment (heard.go).
+	heard   voice.HeardTracker
+	requeue []voice.UnheardPush
+
 	readerExit chan readerResult
+	refreshReq chan refreshRequest
 	goAway     chan struct{}
 	recycle    chan string
 	kick       chan struct{}
@@ -136,23 +158,25 @@ func newSession(cfg Config, log logging.Logger, dial Dialer) (*Session, error) {
 		return nil, err
 	}
 	return &Session{
-		cfg:        cfg,
-		dial:       dial,
-		log:        log,
-		now:        time.Now,
-		rec:        cfg.Context.Session("gemini", cfg.Model),
-		audio:      make(chan []byte),
-		events:     make(chan voice.Event, cfg.EventBuffer),
-		out:        newOutQueue(),
-		status:     voice.StatusConnecting,
-		inflight:   map[string]context.CancelFunc{},
-		turnDone:   make(chan struct{}),
-		readerExit: make(chan readerResult, 4),
-		goAway:     make(chan struct{}, 1),
-		recycle:    make(chan string, 1),
-		kick:       make(chan struct{}, 1),
-		dropReq:    make(chan struct{}, 1),
-		recap:      voice.Recap{Max: reseedTurns},
+		cfg:         cfg,
+		dial:        dial,
+		log:         log,
+		now:         time.Now,
+		rec:         cfg.Context.Session("gemini", cfg.Model),
+		audio:       make(chan []byte),
+		events:      make(chan voice.Event, cfg.EventBuffer),
+		out:         newOutQueue(),
+		status:      voice.StatusConnecting,
+		inflight:    map[string]context.CancelFunc{},
+		turnDone:    make(chan struct{}),
+		readerExit:  make(chan readerResult, 4),
+		refreshReq:  make(chan refreshRequest, 1),
+		owedReplies: map[string]time.Time{},
+		goAway:      make(chan struct{}, 1),
+		recycle:     make(chan string, 1),
+		kick:        make(chan struct{}, 1),
+		dropReq:     make(chan struct{}, 1),
+		recap:       voice.Recap{Max: reseedTurns},
 	}, nil
 }
 
@@ -178,10 +202,11 @@ func (s *Session) Start(ctx context.Context) error {
 	}
 	s.install(conn, resumed, false)
 
-	s.wg.Add(3)
+	s.wg.Add(4)
 	go func() { defer s.wg.Done(); s.out.pump(s.ctx, s.audio) }()
 	go func() { defer s.wg.Done(); s.pushLoop(s.ctx) }()
 	go func() { defer s.wg.Done(); s.run(s.ctx) }()
+	go func() { defer s.wg.Done(); s.refreshLoop(s.ctx) }()
 	return nil
 }
 
@@ -255,11 +280,13 @@ func (s *Session) SetMuted(muted bool) {
 // when a browser client connects (true) or the last one goes away
 // (false). While none is attached, spoken pushes are held in the push
 // queue (push.go holdPush) and released, under the usual urgency rules,
-// when one attaches. Logs voice.client on a change.
+// when one attaches. A client back after a long absence makes a session
+// refresh due (refresh.go). Logs voice.client on a change.
 func (s *Session) ClientAttached(attached bool) {
 	s.mu.Lock()
 	changed := s.noClient == attached
 	s.noClient = !attached
+	s.noteAttachLocked(s.now(), attached, changed)
 	s.play.Detach()
 	s.vad.Reset()
 	s.mu.Unlock()
@@ -519,6 +546,8 @@ func (s *Session) Reset(reason string) error {
 	s.mu.Lock()
 	s.recap.Reset() // a new conversation must not be re-seeded with the old one
 	s.inText, s.outText = "", ""
+	s.heard.Reset()
+	s.requeue = nil
 	s.mu.Unlock()
 	s.rec.Marker("conversation reset", "New conversation: the resumption handle is dropped, so the next connection starts without the conversation so far.", nil)
 	select {
@@ -623,12 +652,19 @@ func (s *Session) speakingLocked(now time.Time) bool {
 // for the brain.
 func (s *Session) ClientPlayback(state string, playedMs int) {
 	s.mu.Lock()
-	rep := s.play.Report(s.now(), state, playedMs)
+	now := s.now()
+	rep := s.play.Report(now, state, playedMs)
 	if rep.Cut != nil {
 		s.flushRecapLocked()
 		s.recap.Cut(rep.Cut.Full, rep.Heard, rep.Cut.HeardMs)
 	}
+	var unheard []voice.UnheardPush
+	if state == voice.PlaybackFlushed {
+		unheard = s.heard.Flushed(now, rep.Cut, rep.Heard)
+	}
 	s.mu.Unlock()
+	s.reportUnheard(unheard)
+	defer s.settleHeard()
 	s.log.Log(logSource, "voice.playback", "", rep.Payload())
 	if rep.Cut != nil {
 		s.emit(voice.EventTranscript{Dir: voice.DirOut, Text: rep.Heard, Final: true, Cut: rep.Cut})

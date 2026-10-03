@@ -3,6 +3,7 @@ package voice
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -315,5 +316,70 @@ func TestProviderSwitchCarriesQueuedPushes(t *testing.T) {
 			}
 		}
 		_ = sw.Close()
+	}
+}
+
+// recapFake is a fakeSess with a recap: RecapEntries hands it over,
+// SeedRecap records what arrives, and both note their order against
+// pushes.
+type recapFake struct {
+	*pushFake
+	entries []RecapEntry
+	seeded  []RecapEntry
+	order   *[]string
+}
+
+func (f *recapFake) RecapEntries() []RecapEntry { return f.entries }
+func (f *recapFake) SeedRecap(e []RecapEntry) {
+	f.seeded = e
+	*f.order = append(*f.order, "recap")
+}
+func (f *recapFake) PushTagged(text string, u Urgency, tags map[string]any) error {
+	*f.order = append(*f.order, "push")
+	return f.pushFake.PushTagged(text, u, tags)
+}
+
+// TestProviderSwitchCarriesTheRecap is the Pipecat-comparison item
+// "carry context across a voice provider switch": the new provider used
+// to start with none of the conversation. It now gets the old session's
+// filtered recap, before the carried pushes, both ways.
+func TestProviderSwitchCarriesTheRecap(t *testing.T) {
+	var order []string
+	recap := []RecapEntry{{Role: RecapUser, Text: "why did auth fail?"}, {Role: RecapAssistant, Text: "Two tests time out."}}
+	g := &recapFake{pushFake: &pushFake{fakeSess: newFake("gemini")}, entries: recap, order: &order}
+	o := &recapFake{pushFake: &pushFake{fakeSess: newFake("openai")}, order: &order}
+	g2 := &recapFake{pushFake: &pushFake{fakeSess: newFake("gemini")}, order: &order}
+	log := &lineLog{}
+	gs := []Session{g, g2}
+	sw, err := NewSwitcher([]Provider{
+		{ProviderInfo: ProviderInfo{ID: "gemini", Available: true}, New: func() (Session, error) { s := gs[0]; gs = gs[1:]; return s, nil }},
+		{ProviderInfo: ProviderInfo{ID: "openai", Available: true}, New: func() (Session, error) { return o, nil }},
+	}, "gemini", log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sw.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = sw.Close() }()
+	g.queued = []QueuedPush{{Text: "docs is idle", Urgency: UrgencySilent}}
+	if err := sw.SetProvider("openai", "test"); err != nil {
+		t.Fatal(err)
+	}
+	if len(o.seeded) != 2 || o.seeded[1].Text != "Two tests time out." {
+		t.Fatalf("seeded = %+v", o.seeded)
+	}
+	if strings.Join(order, ",") != "recap,push" {
+		t.Errorf("order = %v, want the recap before the carried pushes", order)
+	}
+	o.entries = append(o.seeded, RecapEntry{Role: RecapUser, Text: "and docs?"})
+	if err := sw.SetProvider("gemini", "test"); err != nil {
+		t.Fatal(err)
+	}
+	if len(g2.seeded) != 3 || g2.seeded[2].Text != "and docs?" {
+		t.Errorf("back to gemini: seeded = %+v", g2.seeded)
+	}
+	if c := log.of("voice.recap_carried"); len(c) != 2 || c[0]["items"] != 2 || c[0]["to"] != "openai" || c[1]["to"] != "gemini" {
+		t.Errorf("voice.recap_carried = %v", c)
 	}
 }

@@ -102,15 +102,25 @@ func (s *Session) install(conn Conn, resumed, reconnect bool) {
 	pending := s.pending
 	s.pending, s.pendingBytes = nil, 0
 	handle := s.handle
+	if !resumed {
+		// A fresh session (a 1011, a reset) is what a due refresh wanted.
+		s.freshAt = s.now()
+		s.refreshDue, s.refreshDueAt = "", time.Time{}
+	}
 	s.turnOpen = false
 	s.speaking = false
 	s.stalls, s.pushTimeouts = 0, 0
 	s.stalledNow = false // the connected status below clears it on the page
 	turn := s.finishTurnLocked("reconnect")
 	timing := s.finishAudioTimingLocked()
+	var unheard []voice.UnheardPush
+	if reconnect {
+		unheard = s.heard.Lost() // a line in flight went with the old connection
+	}
 	s.mu.Unlock()
 	s.logTurn(turn)
 	s.logAudioTiming(timing)
+	s.reportUnheard(unheard)
 
 	s.wg.Add(1)
 	go func() { defer s.wg.Done(); s.readLoop(conn, gen) }()
@@ -149,6 +159,9 @@ func (s *Session) run(ctx context.Context) {
 			return
 		case <-s.goAway:
 			s.proactiveReconnect(ctx, "goaway")
+			continue
+		case r := <-s.refreshReq:
+			s.refresh(ctx, r)
 			continue
 		case <-s.dropReq:
 			// Reset already dropped the handle: proactiveReconnect's
@@ -267,12 +280,12 @@ func (s *Session) rateLimitWait(err error) time.Duration {
 // proactiveReconnect opens a new connection with the current handle while
 // the old one is still alive (GoAway, recycle), then swaps them. On
 // failure the old connection is kept until the server closes it and the
-// normal path runs.
-func (s *Session) proactiveReconnect(ctx context.Context, why string) {
+// normal path runs. It reports whether the swap happened.
+func (s *Session) proactiveReconnect(ctx context.Context, why string) bool {
 	conn, resumed, err := s.connect(ctx)
 	if err != nil {
 		s.emit(voice.EventError{Err: fmt.Errorf("%s reconnect: %w", why, err)})
-		return
+		return false
 	}
 	s.mu.Lock()
 	old := s.conn
@@ -281,6 +294,7 @@ func (s *Session) proactiveReconnect(ctx context.Context, why string) {
 	if old != nil {
 		_ = old.Close()
 	}
+	return true
 }
 
 // handleReadError is called by the reader when Receive fails; the run

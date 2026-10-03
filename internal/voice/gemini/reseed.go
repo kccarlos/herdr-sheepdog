@@ -24,6 +24,12 @@ const (
 	reseedTurns = voice.DefaultRecapTurns
 )
 
+// switchPrefix introduces a recap carried over from another voice
+// provider (voice.Switcher).
+const switchPrefix = "[system context, not spoken by the user] You have just taken over this voice conversation from another voice model. " +
+	"This is the recent conversation, oldest first, only so you can follow up on it. " +
+	"Do not answer it, read it out or mention it; carry on and wait for the shepherd.\n"
+
 // reseedPrefix introduces the recap to the model: context only, never
 // something to answer or read out.
 const reseedPrefix = "[system context, not spoken by the user] The voice connection dropped and came back without its history. " +
@@ -41,6 +47,12 @@ func (s *Session) flushRecapLocked() {
 // reseedText is the recap to seed a context-lost connection with, how
 // many entries it holds and its length ("" when there is nothing).
 func (s *Session) reseedText() (text string, items, chars int) {
+	return s.recapText(reseedPrefix)
+}
+
+// recapText is the recap under prefix, how many entries it holds and
+// the length of its lines ("" when there is nothing).
+func (s *Session) recapText(prefix string) (text string, items, chars int) {
 	s.mu.Lock()
 	s.flushRecapLocked()
 	entries := s.recap.Recent(reseedChars)
@@ -49,7 +61,7 @@ func (s *Session) reseedText() (text string, items, chars int) {
 		return "", 0, 0
 	}
 	lines := voice.RecapLines(entries)
-	return reseedPrefix + lines, len(entries), len(lines)
+	return prefix + lines, len(entries), len(lines)
 }
 
 // reseed sends the recap on conn — a fresh connection not installed yet,
@@ -59,7 +71,13 @@ func (s *Session) reseedText() (text string, items, chars int) {
 // connection's own reader reports a dead socket.
 func (s *Session) reseed(conn Conn) {
 	text, items, chars := s.reseedText()
-	if text == "" {
+	s.sendRecap(conn, text, items, chars, "not_resumed")
+}
+
+// sendRecap sends a rendered recap on conn as silent client content
+// that does not complete the turn, and logs voice.reseeded {reason}.
+func (s *Session) sendRecap(conn Conn, text string, items, chars int, reason string) {
+	if text == "" || conn == nil {
 		return
 	}
 	s.sendMu.Lock()
@@ -68,7 +86,7 @@ func (s *Session) reseed(conn Conn) {
 		TurnComplete: genai.Ptr(false),
 	})
 	s.sendMu.Unlock()
-	p := map[string]any{"items": items, "chars": chars, "reason": "not_resumed"}
+	p := map[string]any{"items": items, "chars": chars, "reason": reason}
 	if err != nil {
 		p["send_error"] = err.Error()
 	}

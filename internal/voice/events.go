@@ -113,6 +113,17 @@ type EventResumed struct {
 	ContextLost bool
 }
 
+// EventPushUnheard is emitted when a spoken push was judged not heard
+// (heard.go, voice.push_unheard). Requeue is set when the session puts
+// it back in its own queue, once, to be spoken after the shepherd's turn
+// and its reply (a decision the shepherd must take, a kept promise);
+// otherwise nothing more happens to it in the voice layer, and the
+// supervisor tells the brain.
+type EventPushUnheard struct {
+	Push    UnheardPush
+	Requeue bool
+}
+
 // EventError reports a non-fatal problem (rate limit, send failure). The
 // session keeps running unless an EventStatus{StatusClosed} follows.
 type EventError struct {
@@ -127,4 +138,5 @@ func (EventToolResult) isEvent()   {}
 func (EventPush) isEvent()         {}
 func (EventTurnComplete) isEvent() {}
 func (EventResumed) isEvent()      {}
+func (EventPushUnheard) isEvent()  {}
 func (EventError) isEvent()        {}

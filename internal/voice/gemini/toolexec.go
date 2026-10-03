@@ -105,9 +105,14 @@ func (s *Session) execTool(ctx context.Context, gen int, call voice.ToolCall, tu
 			ID: call.ID, Name: call.Name, Response: resp, Scheduling: scheduling(sched),
 		}}})
 	})
-	if sendErr == nil && sched != voice.UrgencySilent {
+	if sendErr == nil && (sched != voice.UrgencySilent || res.Pending) {
 		s.mu.Lock()
-		s.openTurnLocked()
+		if sched != voice.UrgencySilent {
+			s.openTurnLocked()
+		}
+		if res.Pending && call.ID != "" {
+			s.owedReplies[call.ID] = s.now() // its reply comes as a push
+		}
 		s.mu.Unlock()
 	}
 	// dur_ms is the handler's own time; wait_ms the pause for the model to
