@@ -336,6 +336,29 @@ func (s *Server) handleInjectBlocked(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, injectResponse{OK: true, Agent: row, DurMS: s.deps.Now().Sub(start).Milliseconds()})
 }
 
+// handleInjectPane registers a synthetic pane in any state (POST
+// /api/inject/pane): the voice bench's scripted workers.
+func (s *Server) handleInjectPane(w http.ResponseWriter, r *http.Request) {
+	if s.deps.Injector == nil {
+		writeError(w, http.StatusServiceUnavailable, "injection not available")
+		return
+	}
+	var req inject.PaneRequest
+	if err := readJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "bad body: "+err.Error())
+		return
+	}
+	ctx, cancel := s.toolCtx()
+	defer cancel()
+	start := s.deps.Now()
+	row, err := s.deps.Injector.Pane(ctx, req)
+	if err != nil {
+		writeError(w, injectStatus(err), err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, injectResponse{OK: true, Agent: row, DurMS: s.deps.Now().Sub(start).Milliseconds()})
+}
+
 type paneRequest struct {
 	PaneID string `json:"pane_id"`
 	State  string `json:"state,omitempty"`

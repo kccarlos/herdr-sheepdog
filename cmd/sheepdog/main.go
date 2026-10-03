@@ -58,6 +58,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return runEval(ctx, args[1:], stdout, stderr)
 	case "scorecard":
 		return runScorecard(ctx, args[1:], stdout, stderr)
+	case "bench":
+		return runBench(ctx, args[1:], stdout, stderr)
 	case "audio-e2e":
 		return runAudioE2E(ctx, args[1:], stdout, stderr)
 	case "version":
@@ -92,6 +94,7 @@ func printUsage(w io.Writer) {
 	fprintln(w, "  eval          run the conversation eval sets (--set NAME|all [--live]); extract, expand")
 	fprintln(w, "  scorecard     print docs/iteration-2.md's scorecard metrics over the event log")
 	fprintln(w, "  audio-e2e     speak scenarios (macOS say + noise) into a running daemon's /ws")
+	fprintln(w, "  bench         the voice benchmark: synthetic speech into scratch daemons (tier 2)")
 	fprintln(w, "  version       print version, commit, and build date")
 	fprintln(w, "  help          show this help message")
 }

@@ -580,3 +580,40 @@ func TestSystemPromptListsCurrentSpokenNames(t *testing.T) {
 		t.Errorf("aliases with no spoken names = %v, want the configured aliases", sp.Aliases)
 	}
 }
+
+// TestInjectPaneEndpoint: /api/inject/pane registers a synthetic pane in
+// any state (no block, no pending action, no finish announcement for a
+// new idle or working pane), updates it, and refuses bad states.
+func TestInjectPaneEndpoint(t *testing.T) {
+	h := newHarness(t, harnessOpts{})
+	var res injectResponse
+	code, body := h.postJSON("/api/inject/pane", map[string]any{"pane_id": "fake:1", "alias": "docs", "kind": "claude", "state": "working", "screen": "● Writing the README…"}, &res)
+	if code != http.StatusOK || !res.OK || res.Agent.Alias != "docs" || res.Agent.State != herdr.StateWorking || !res.Agent.Synthetic {
+		t.Fatalf("inject pane = %d %s", code, body)
+	}
+	var st StateResponse
+	if code := h.getJSON("/api/state", &st); code != http.StatusOK || st.PendingAction != nil {
+		t.Fatalf("a working pane made a pending action: %+v", st)
+	}
+	code, body = h.postJSON("/api/inject/pane", map[string]any{"pane_id": "fake:2", "screen": "› Ask Codex to do anything"}, &res)
+	if code != http.StatusOK || res.Agent.State != herdr.StateIdle || res.Agent.Kind != "codex" {
+		t.Fatalf("default idle codex = %d %s", code, body)
+	}
+	code, body = h.postJSON("/api/inject/pane", map[string]any{"pane_id": "fake:1", "state": "blocked", "kind": "codex", "screen": codexScreen(t)}, &res)
+	if code != http.StatusOK || res.Agent.State != herdr.StateBlocked {
+		t.Fatalf("pane to blocked = %d %s", code, body)
+	}
+	if code := h.getJSON("/api/state", &st); code != http.StatusOK || st.PendingAction == nil {
+		t.Fatalf("blocked through /api/inject/pane made no pending action: %+v", st)
+	}
+	for _, bad := range []map[string]any{
+		{"pane_id": "fake:3", "state": "sleeping", "screen": "x"},
+		{"pane_id": "fake:3", "state": "unknown", "screen": "x"},
+		{"pane_id": "fake:3", "state": "idle"},
+		{"screen": "x"},
+	} {
+		if code, body := h.postJSON("/api/inject/pane", bad, nil); code != http.StatusBadRequest {
+			t.Errorf("inject pane %v = %d %s, want 400", bad, code, body)
+		}
+	}
+}

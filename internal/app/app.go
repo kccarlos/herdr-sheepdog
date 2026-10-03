@@ -94,6 +94,12 @@ type Options struct {
 	// WatcherRetry is the wait before re-running a Watcher whose initial
 	// snapshot failed (default 5 s).
 	WatcherRetry time.Duration
+	// Querier, when set, answers run_cli and (when it implements
+	// supervisor.Investigator) investigations instead of the codex/claude
+	// CLIs found on PATH; CLI is then ignored. The voice bench's scratch
+	// daemons use it to give scripted findings (internal/bench), so a
+	// benchmark never runs a real coding agent.
+	Querier supervisor.Querier
 }
 
 func (o Options) withDefaults() Options {
@@ -244,7 +250,10 @@ func (a *App) wire() error {
 	pusher := &lazyPusher{}
 	lazyQ := &lazyQuerier{}
 	var querier supervisor.Querier // nil (not lazyQ) when --cli=off, so run_cli is unavailable entirely
-	if opts.CLI == CLIOn {
+	switch {
+	case opts.Querier != nil:
+		querier = opts.Querier
+	case opts.CLI == CLIOn:
 		querier = lazyQ
 		a.queryLazy = lazyQ
 	}
