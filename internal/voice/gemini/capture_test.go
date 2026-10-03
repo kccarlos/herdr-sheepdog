@@ -101,7 +101,7 @@ func TestVoiceContextCapture(t *testing.T) {
 			t.Errorf("%s links = %v raw %d", label, s.Links, len(s.Raw))
 		}
 	}
-	if s, text := section(p, "push"); strings.Join(s.Links, ",") != "push:p1,evt:e1" || !strings.Contains(text, "[system event, not spoken by the user] auth finished.") {
+	if s, text := section(p, "push"); strings.Join(s.Links, ",") != "push:p1,evt:e1" || !strings.Contains(text, "[system event, not spoken by the user]\nauth finished.") {
 		t.Errorf("push = %v %q", s.Links, text)
 	}
 	if strings.Contains(p.Text, "key-0") {
