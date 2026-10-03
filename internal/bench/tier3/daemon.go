@@ -31,6 +31,10 @@ type DaemonOptions struct {
 	// BrainModel is brain.model (default gemini-3.8-flash, the daemon's
 	// own setting on this machine).
 	BrainModel string
+	// Voice runs the daemon with the real voice model (--voice=gemini, on
+	// Vertex) for a phone emulator, instead of --voice=off with the text
+	// router and --heard-echo.
+	Voice bool
 	// Log receives the daemon's stderr.
 	Log io.Writer
 }
@@ -87,8 +91,7 @@ func StartDaemon(ctx context.Context, o DaemonOptions) (*Daemon, error) {
 	if err := os.WriteFile(cfgPath, []byte(fmt.Sprintf(configTOML, o.BrainModel)), 0o600); err != nil {
 		return nil, err
 	}
-	args := []string{"serve", "--voice=off", "--herdr=socket", "--cli=on", "--brain=on", "--dev", "--heard-echo",
-		"--port", fmt.Sprint(o.Port), "--config", cfgPath, "--data-dir", data}
+	args := serveArgs(o, cfgPath, data)
 	if o.EnvFile != "" {
 		env, err := filterEnvFile(o.EnvFile, filepath.Join(o.Dir, "daemon.env"))
 		if err != nil {
@@ -130,6 +133,24 @@ func StartDaemon(ctx context.Context, o DaemonOptions) (*Daemon, error) {
 	d.Stop()
 	return nil, fmt.Errorf("tier3: the daemon did not answer on port %d", o.Port)
 }
+
+// serveArgs are the scratch daemon's flags: the text router with the
+// heard echo, or (Voice) the real voice model for the phone emulator.
+func serveArgs(o DaemonOptions, cfgPath, data string) []string {
+	voice := []string{"--voice=off"}
+	if o.Voice {
+		voice = []string{"--voice=gemini"}
+	}
+	args := append([]string{"serve"}, voice...)
+	args = append(args, "--herdr=socket", "--cli=on", "--brain=on", "--dev")
+	if !o.Voice {
+		args = append(args, "--heard-echo")
+	}
+	return append(args, "--port", fmt.Sprint(o.Port), "--config", cfgPath, "--data-dir", data)
+}
+
+// BaseURL is the daemon's web root (the phone emulator's BaseURL).
+func (d *Daemon) BaseURL() string { return d.url("") }
 
 // daemonEnvKeys are the env-file keys the scratch daemon gets: the
 // Vertex brain and the DeepSeek failover. GEMINI_API_KEY (the AI Studio

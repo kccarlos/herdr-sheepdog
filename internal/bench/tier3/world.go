@@ -52,6 +52,10 @@ type Options struct {
 	Keep bool
 	// Settle is how long to listen for pushes after a reply (default 4 s).
 	Settle time.Duration
+	// Voice, when set, makes the simulated CEO a caller: speech through
+	// the tier-2 phone emulator into a scratch daemon with the real voice
+	// model. Nil is the text router (the default).
+	Voice *VoiceOptions
 	// Log receives progress lines.
 	Log io.Writer
 }
@@ -75,6 +79,10 @@ type Record struct {
 	Aliases map[string]string `json:"aliases,omitempty"`
 	// SetupMS is how long the setup took before the call.
 	SetupMS int64 `json:"setup_ms"`
+	// VoiceMode is set when the CEO spoke (Options.Voice); Voice then has
+	// the call's audio side.
+	VoiceMode bool      `json:"voice_mode,omitempty"`
+	Voice     *VoiceRun `json:"voice,omitempty"`
 }
 
 // worker is a started worker.
@@ -212,7 +220,7 @@ func (w *world) setup(ctx context.Context, rec *Record) error {
 		return err
 	}
 	w.dlog = dlog
-	w.d, err = StartDaemon(ctx, DaemonOptions{Bin: w.o.SheepdogBin, Port: w.port, Dir: filepath.Join(w.dir, "daemon"), Socket: sock, EnvFile: w.o.EnvFile, BrainModel: w.o.BrainModel, Log: dlog})
+	w.d, err = StartDaemon(ctx, DaemonOptions{Bin: w.o.SheepdogBin, Port: w.port, Dir: filepath.Join(w.dir, "daemon"), Socket: sock, EnvFile: w.o.EnvFile, BrainModel: w.o.BrainModel, Voice: w.o.Voice != nil, Log: dlog})
 	if err != nil {
 		return err
 	}

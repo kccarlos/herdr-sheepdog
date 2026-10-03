@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kccarlos/herdr-sheepdog/internal/bench/speech"
 	"github.com/kccarlos/herdr-sheepdog/internal/bench/tier3"
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
 	"github.com/kccarlos/herdr-sheepdog/internal/config"
@@ -50,6 +51,12 @@ func printBenchTier3Usage(w io.Writer) {
 	fprintln(w, "  --out DIR             write report.json and report.md under DIR")
 	fprintln(w, "  --events DIR          write each run's full daemon event log under DIR")
 	fprintln(w, "  --keep                keep each run's scratch directory")
+	fprintln(w, "  --voice               the simulated CEO speaks: TTS through the tier-2 phone emulator into")
+	fprintln(w, "                        a daemon with the real voice model (Gemini Live on Vertex), and hears")
+	fprintln(w, "                        the bot's speech (default: text through the text router)")
+	fprintln(w, "  --tts-model ID        with --voice: Gemini TTS model (default "+speech.DefaultModel+")")
+	fprintln(w, "  --cache-dir DIR       with --voice: rendered speech cache (shared with tier 2)")
+	fprintln(w, "  --say                 with --voice: render with macOS say only (no Gemini TTS)")
 }
 
 // wantsTier3 reports whether bench run's flags ask for tier 3 (its flag
@@ -94,6 +101,10 @@ func runBenchTier3(ctx context.Context, args []string, stdout, stderr io.Writer)
 	out := fs.String("out", "", "report directory")
 	events := fs.String("events", "", "event log directory")
 	keep := fs.Bool("keep", false, "keep scratch directories")
+	voice := fs.Bool("voice", false, "the simulated CEO speaks through the phone emulator")
+	ttsModel := fs.String("tts-model", speech.DefaultModel, "Gemini TTS model")
+	cacheDir := fs.String("cache-dir", defaultBenchCache(), "rendered speech cache")
+	sayOnly := fs.Bool("say", false, "render with macOS say only")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -149,6 +160,16 @@ func runBenchTier3(ctx context.Context, args []string, stdout, stderr io.Writer)
 		Ports: pool, EventsDir: *events, Keep: *keep, Log: stderr,
 	}
 	project, key := os.Getenv("VERTEX_PROJECT"), os.Getenv("VERTEX_API_KEY")
+	ttsID := ""
+	if *voice {
+		syn, _, err := benchSynths(key, project, *cacheDir, *ttsModel, *sayOnly, stderr)
+		if err != nil {
+			fprintf(stderr, "sheepdog bench run: %v\n", err)
+			return 1
+		}
+		o.Voice = &tier3.VoiceOptions{Synth: syn}
+		ttsID = syn.ID()
+	}
 	sem := make(chan struct{}, 4)
 	backend := func(kind string) (brain.Model, string, error) {
 		m, id, err := eval.NewBackend(eval.BackendOptions{Kind: kind, Model: *judgeModel, VertexAPIKey: key, VertexProject: project}, logging.NopLogger{})
@@ -195,13 +216,17 @@ func runBenchTier3(ctx context.Context, args []string, stdout, stderr io.Writer)
 	eval.WriteSimTable(stdout, runs)
 	if *out != "" {
 		setup := map[string]string{
-			"mode":           "tier 3 (real herdr session, real workers, scratch daemon --voice=off --heard-echo)",
+			"mode":           "tier 3 (real herdr session, real workers, scratch daemon --voice=off --heard-echo; the CEO types)",
 			"brain":          "gemini (vertex) " + orStr(*brainModel, "gemini-3.8-flash"),
 			"workers":        "claude " + *claudeModel + "; codex " + *codexModel + " (" + *codexEffort + ")",
 			"simulated user": *simuser + " " + orStr(*judgeModel, eval.DefaultJudgeModel),
 			"judge":          *judgeKind + " " + orStr(*judgeModel, eval.DefaultJudgeModel),
 			"parallel":       fmt.Sprint(*parallel),
 			"scenarios":      *files + filterNote(*filter),
+		}
+		if *voice {
+			setup["mode"] = "tier 3 voice (real herdr session, real workers, scratch daemon with the real voice model; the CEO speaks through the phone emulator)"
+			setup["tts"] = ttsID
 		}
 		rep := eval.NewCampaignReport(started, setup, *repeat, runs, meter)
 		if err := writeSimReports(*out, rep); err != nil {
