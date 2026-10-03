@@ -75,6 +75,11 @@ type Deps struct {
 	// Router is the text-only tool router used for simulated utterances
 	// when Voice is nil.
 	Router *inject.Router
+	// HeardEcho, when set (--voice=off with `serve --heard-echo`), gets
+	// the voice events a voice session would report around a routed
+	// utterance: the to_supervisor call, then the answer spoken in full
+	// and the end of the turn.
+	HeardEcho func(voice.Event)
 	// Voice is the live voice session; nil means --voice=off.
 	Voice voice.Session
 	// VoiceSwitch backs GET /api/voice/providers and PUT

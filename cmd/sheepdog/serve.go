@@ -50,13 +50,16 @@ func printServeUsage(w io.Writer) {
 	fprintln(w, "  --verbose         also print every event to stderr as JSON lines")
 	fprintln(w, "  --dev             serve testdata/audio/*.wav at /testdata/ so the voice page")
 	fprintln(w, "                    can use a fixture as its microphone (config: web.dev)")
+	fprintln(w, "  --heard-echo      with --voice=off: report every spoken push and text-router")
+	fprintln(w, "                    answer back as heard, as a voice session would (harnesses")
+	fprintln(w, "                    that stand in for the shepherd, e.g. sheepdog bench run)")
 }
 
 // serveOpts are the parsed flags.
 type serveOpts struct {
 	configPath, envFile, voice, herdr, cli, brain, dataDir string
 	port                                                   int
-	verbose, dev                                           bool
+	verbose, dev, heardEcho                                bool
 }
 
 func parseServeFlags(args []string, stderr io.Writer) (serveOpts, int, bool) {
@@ -74,6 +77,7 @@ func parseServeFlags(args []string, stderr io.Writer) (serveOpts, int, bool) {
 	fs.StringVar(&o.dataDir, "data-dir", "", "data directory")
 	fs.BoolVar(&o.verbose, "verbose", false, "echo events to stderr")
 	fs.BoolVar(&o.dev, "dev", false, "developer routes")
+	fs.BoolVar(&o.heardEcho, "heard-echo", false, "with --voice=off, report pushes and answers back as heard")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return o, 0, false
@@ -128,7 +132,7 @@ func runServe(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 		}
 		cfg.DataDir = o.dataDir
 	}
-	opts := app.Options{Voice: o.voice, Herdr: o.herdr, CLI: o.cli, Brain: o.brain, Port: o.port, Dev: o.dev, Version: version, Stderr: stderr}
+	opts := app.Options{Voice: o.voice, Herdr: o.herdr, CLI: o.cli, Brain: o.brain, Port: o.port, Dev: o.dev, HeardEcho: o.heardEcho, Version: version, Stderr: stderr}
 	if o.verbose {
 		opts.Echo = logging.NewJSONLLogger(stderr)
 	}

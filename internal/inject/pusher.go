@@ -16,6 +16,9 @@ type SkippedPusher struct {
 	// Context, when set, records each push into the voice context log
 	// (the /debug Context tab's text-router session), marked not sent.
 	Context *ctxcap.VoiceSession
+	// Heard, when set, is told of every spoken (non-silent) push, as if
+	// a voice session had spoken it (app.Options.HeardEcho).
+	Heard func(text string, u voice.Urgency)
 }
 
 var _ supervisor.Pusher = SkippedPusher{}
@@ -44,5 +47,8 @@ func (p SkippedPusher) PushTagged(text string, u voice.Urgency, tags map[string]
 		it.Kind, it.Label = ctxcap.VKindContext, "silent context (not sent: --voice=off)"
 	}
 	p.Context.Item(it)
+	if p.Heard != nil && u != voice.UrgencySilent && text != "" {
+		p.Heard(text, u)
+	}
 	return nil
 }

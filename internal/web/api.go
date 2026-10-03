@@ -254,13 +254,16 @@ func (s *Server) toolCtx() (context.Context, context.CancelFunc) {
 
 // ToolResponse is the body of the endpoints that run a tool.
 type ToolResponse struct {
-	Tool       string         `json:"tool"`
-	Args       map[string]any `json:"args,omitempty"`
-	Spoken     string         `json:"spoken"`
-	Clarify    bool           `json:"clarify"`
-	Pending    bool           `json:"pending,omitempty"`
-	Scheduling string         `json:"scheduling"`
-	Via        string         `json:"via"`
+	Tool    string         `json:"tool"`
+	Args    map[string]any `json:"args,omitempty"`
+	Spoken  string         `json:"spoken"`
+	Clarify bool           `json:"clarify"`
+	Pending bool           `json:"pending,omitempty"`
+	// Options are the choices read out with the answer (an open
+	// prompt's), as the voice model gets them.
+	Options    []string `json:"options,omitempty"`
+	Scheduling string   `json:"scheduling"`
+	Via        string   `json:"via"`
 }
 
 // runTool executes one tool call through the supervisor, logging
@@ -290,7 +293,7 @@ func (s *Server) runTool(ctx context.Context, call voice.ToolCall, via string) (
 }
 
 func toolResponse(call voice.ToolCall, res voice.ToolResult, via string) ToolResponse {
-	return ToolResponse{Tool: call.Name, Args: call.Args, Spoken: res.Spoken, Clarify: res.Clarify, Pending: res.Pending, Scheduling: res.Scheduling.String(), Via: via}
+	return ToolResponse{Tool: call.Name, Args: call.Args, Spoken: res.Spoken, Clarify: res.Clarify, Pending: res.Pending, Options: res.Options, Scheduling: res.Scheduling.String(), Via: via}
 }
 
 // handleCancel runs the stop tool (the debug page's Cancel button; the
@@ -522,7 +525,14 @@ func (s *Server) routeUtterance(ctx context.Context, text string) (voice.ToolCal
 	rc.Claim(link)
 	rc.Item(ctxcap.VoiceItem{Kind: ctxcap.VKindToolCall, Class: ctxcap.ClassToolCall, Role: "model", Label: "tool call " + call.Name + " (text router)",
 		Text: "→ " + call.Name + "(" + string(ctxcap.Raw(call.Args)) + ")", Links: []string{link}, Raw: ctxcap.Raw(map[string]any{"id": call.ID, "name": call.Name, "args": call.Args})})
+	if s.deps.HeardEcho != nil {
+		s.deps.HeardEcho(voice.EventToolCall{Call: call})
+	}
 	res, err := s.runTool(ctx, call, "text_router")
+	if s.deps.HeardEcho != nil && strings.TrimSpace(res.Spoken) != "" {
+		s.deps.HeardEcho(voice.EventTranscript{Dir: voice.DirOut, Text: res.Spoken, Final: true})
+		s.deps.HeardEcho(voice.EventTurnComplete{})
+	}
 	resp := map[string]any{"spoken": res.Spoken, "scheduling": res.Scheduling.SchedulingName()}
 	if res.Detail != "" {
 		resp["detail"] = res.Detail
