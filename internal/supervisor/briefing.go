@@ -122,7 +122,7 @@ func composeBriefing(agents []state.Agent, pending state.PendingAction, now time
 		if ri != rj {
 			return ri < rj
 		}
-		return agents[i].Alias < agents[j].Alias
+		return state.Say(agents[i]) < state.Say(agents[j])
 	})
 	listed := agents
 	if len(agents) > briefingListMax {
@@ -152,7 +152,7 @@ func composeBriefing(agents []state.Agent, pending state.PendingAction, now time
 // describeAgent is one agent's clause: state plus what it is doing or
 // last did.
 func describeAgent(a state.Agent, now time.Time) string {
-	alias := a.Alias
+	alias := state.Say(a)
 	if alias == "" {
 		alias = "an agent"
 	}
@@ -187,8 +187,11 @@ func recentResult(a state.Agent, now time.Time) string {
 		return ""
 	}
 	spoken := strings.TrimRight(a.LastResult.Spoken, ".!?")
-	if a.Alias != "" && strings.HasPrefix(strings.ToLower(spoken), strings.ToLower(a.Alias)+" ") {
-		spoken = lowerFirst(strings.TrimSpace(spoken[len(a.Alias):]))
+	for _, name := range []string{state.Say(a), a.Alias} {
+		if name != "" && strings.HasPrefix(strings.ToLower(spoken), strings.ToLower(name)+" ") {
+			spoken = lowerFirst(strings.TrimSpace(spoken[len(name):]))
+			break
+		}
 	}
 	return trimWords(spoken, briefingResultMaxWords)
 }
@@ -235,7 +238,7 @@ func pendingTrailer(agents []state.Agent, pending state.PendingAction, sentence 
 	alias := ""
 	for _, a := range agents {
 		if a.PaneID == pending.PaneID {
-			alias = a.Alias
+			alias = state.Say(a)
 		}
 	}
 	if alias == "" {

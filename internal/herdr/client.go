@@ -182,6 +182,18 @@ func (c *Client) Prompt(ctx context.Context, paneID, text string) (AgentInfo, er
 	return res.Agent, err
 }
 
+// Rename sets the agent's herdr name (`agent.rename`), what herdr shows
+// and reports as the agent's name from then on; an empty name clears it.
+func (c *Client) Rename(ctx context.Context, paneID, name string) error {
+	params := map[string]any{"target": paneID, "name": name}
+	if name == "" {
+		params["name"] = nil
+	}
+	err := c.Call(ctx, "agent.rename", params, nil)
+	c.log("herdr.rename", paneID, map[string]any{"name": name, "error": errString(err)})
+	return err
+}
+
 // SendKeys sends named keys (`enter`, `esc`, `1`, `ctrl+c`, …) to the pane
 // via `pane.send_keys`. All keys are validated by the server before any
 // byte is written.

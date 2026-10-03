@@ -268,6 +268,8 @@ type Supervisor struct {
 	// investigating is the one running background job per pane
 	// (investigate.go).
 	investigating map[string]*liveInvestigation
+	// names is the voice names line bookkeeping (names.go).
+	names namesState
 
 	// startedAt is when this run's Supervisor was built: openPromises
 	// created before it are from an earlier run (promises.go,
@@ -399,6 +401,7 @@ func (s *Supervisor) Run(ctx context.Context) {
 	reconcile := time.NewTicker(s.cfg.SnapshotInterval)
 	defer reconcile.Stop()
 	defer s.shutdown()
+	defer s.stopNames()
 	// Once at startup, the roster is already loaded (state.Open ran
 	// before New): catches a pane whose prompt changed while the daemon
 	// was down, which no post-answer poll ever ran for.

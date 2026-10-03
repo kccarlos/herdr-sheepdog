@@ -1,0 +1,4 @@
+{"type":"user","message":{"role":"user","content":"Update the README for the new install steps"},"sessionId":"22222222-3333-4444-8555-666666666666"}
+{"type":"ai-title","aiTitle":"Install steps","sessionId":"22222222-3333-4444-8555-666666666666"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Updated."}]},"sessionId":"22222222-3333-4444-8555-666666666666"}
+{"type":"ai-title","aiTitle":"README","sessionId":"22222222-3333-4444-8555-666666666666"}

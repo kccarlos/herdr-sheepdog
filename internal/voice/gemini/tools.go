@@ -55,7 +55,7 @@ func TextToolDeclarations() []*genai.Tool {
 // systemPrompt renders the voice system prompt with the dog's name and
 // the aliases.
 func systemPrompt(cfg Config) (string, error) {
-	vars := prompts.AssistantVars(cfg.Name, cfg.Aliases)
+	vars := prompts.AssistantVars(cfg.Name, cfg.names())
 	if cfg.SystemPrompt != "" {
 		text := cfg.SystemPrompt
 		for k, v := range vars {
@@ -77,7 +77,7 @@ func liveConfig(cfg Config, prompt, handle string) *genai.LiveConnectConfig {
 		},
 		SystemInstruction:        &genai.Content{Parts: []*genai.Part{{Text: prompt}}},
 		Tools:                    toolDeclarations(),
-		InputAudioTranscription:  &genai.AudioTranscriptionConfig{CustomVocabulary: cfg.Aliases},
+		InputAudioTranscription:  &genai.AudioTranscriptionConfig{CustomVocabulary: cfg.names()},
 		OutputAudioTranscription: &genai.AudioTranscriptionConfig{},
 		ContextWindowCompression: &genai.ContextWindowCompressionConfig{
 			TriggerTokens: genai.Ptr(cfg.CompressionTrigger),

@@ -229,18 +229,23 @@
   },
   {
     "function": {
-      "description": "Remember something the CEO decided or wants kept in mind (\"remember the migrations are off limits today\", \"we are on the release branch\"). Notes are in the ledger of every later turn. Not for promised work: that is promise.",
+      "description": "Remember something the CEO decided or wants kept in mind (\"remember the migrations are off limits today\", \"we are on the release branch\"). Notes are in the ledger of every later turn. Not for promised work: that is promise. With agent and name it renames that agent instead (\"call that one docs\"): the CEO hears it by that name from then on.",
       "name": "note",
       "parameters": {
         "properties": {
+          "agent": {
+            "description": "only to rename: the agent's alias",
+            "type": "string"
+          },
+          "name": {
+            "description": "only to rename: the new name, as the CEO said it",
+            "type": "string"
+          },
           "text": {
             "description": "what to remember, in the CEO's words",
             "type": "string"
           }
         },
-        "required": [
-          "text"
-        ],
         "type": "object"
       }
     },

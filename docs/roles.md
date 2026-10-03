@@ -26,6 +26,54 @@ dog*, *the flock*; internal identifiers keep their names until the
 rename lands. "CEO", "SVP" and "assistant" in older docs and code mean
 shepherd, brain and voice.
 
+### Agent names
+
+Every agent has three names (docs/bench-2026-10-03.md "Agent naming"):
+
+| Layer | Example | Who uses it |
+|---|---|---|
+| **Machine id** | `w5:p1` (the herdr pane id) | Code, the app, the API. Never spoken. |
+| **Alias** | `herdr-sheepdog-claude-2` | Unique and stable (workspace label + herdr name or kind, `-N` on a clash, or pinned in the config `[aliases]`). The brain's tool calls. |
+| **Spoken name** | "README Claude" | What the shepherd hears and says. |
+
+The daemon computes the spoken name (`internal/state` `SpokenNames`,
+stored on each row as `spoken`) as the shortest form unique among the
+*running* agents (exited ones take no part and keep their last name):
+the kind alone ("Claude"); else project and kind ("sheepdog Claude");
+else, when one project has several of a kind, the worker's own session
+title and kind ("README Claude"); else project, kind and a number
+("sheepdog Claude 2"). A name the CEO gave always wins, verbatim: the
+herdr agent name (herdr `agent rename`, or a voice rename) or an alias
+pinned in the config (or by the /debug inject page). Kinds are said as words
+(`agy` is "Antigravity").
+
+The session title is a fact the daemon reads on every worker
+transition (`internal/workerlog` `Title`): Claude Code's
+`custom-title`, else its last `ai-title`, from the tail of the session
+JSONL; Codex's last `thread_name` for the session id in
+`~/.codex/session_index.jsonl` (the rollout file does not carry it).
+
+The brain's roster shows the spoken name beside the alias (`- alias
+(kind), say "README Claude" (just renamed from "Claude"), session
+"…": state`); RULES.md has it speak the name verbatim (a word or two of
+a long title will do), mention the old name once right after a change,
+and pass the alias to tools. Tool calls also resolve a spoken name or
+a unique session title. The daemon's own sentences (the briefing,
+"started on …", "finished", "has exited") use the spoken name too.
+
+The voice model gets the running agents' spoken names in its system
+prompt and Gemini's speech-to-text `CustomVocabulary` at every
+(re)connect, and, whenever the set changes, a silent context line
+("The agents are now called: README Claude, sheepdog Claude. …",
+`supervisor.names`, debounced 2 s), so its list is never stale.
+
+Renaming by voice ("call that one docs") is the brain's `note` tool
+with `agent` and `name`: herdr `agent.rename` when the herdr client can
+(a refusal is logged as `supervisor.rename_error`; the roster still
+takes the name) and the row's name in the state table
+(`supervisor.rename`). A name another running agent already has is
+refused.
+
 ## Personality
 
 The dog is the shepherd's chief of staff: warm, unflappable, proactive,

@@ -117,8 +117,8 @@ func toolDeclarations(readOnly bool) []*genai.Tool {
 		{Name: ToolInvestigate, Description: "Start a background look into something the screen cannot answer and that may take more than a few seconds. source cli (the default): a fresh read-only CLI agent in the agent's repository, for questions about the code itself. source worker: the worker's own session, asked through a read-only copy that remembers everything it saw and did, for why it did something, what it tried, or to explain its decision; it never touches the worker. It returns at once with a job id; the answer reaches the CEO on its own when the job returns, so acknowledge with pending true and say roughly how long. Phrase the question with full context: neither has heard this conversation. One live investigation per agent.",
 			Parameters: obj(map[string]*genai.Schema{"agent": agent, "question": str("a self-contained question"), "follow_up_of": str("the id of the investigation this digs deeper into, to resume the same session"),
 				"source": {Type: genai.TypeString, Enum: []string{InvestigationSourceCLI, InvestigationSourceWorker}, Description: "cli (default, the repository) or worker (the worker's own memory)"}}, []string{"agent", "question"})},
-		{Name: ToolNote, Description: "Remember something the CEO decided or wants kept in mind (\"remember the migrations are off limits today\", \"we are on the release branch\"). Notes are in the ledger of every later turn. Not for promised work: that is promise.",
-			Parameters: obj(map[string]*genai.Schema{"text": str("what to remember, in the CEO's words")}, []string{"text"})},
+		{Name: ToolNote, Description: "Remember something the CEO decided or wants kept in mind (\"remember the migrations are off limits today\", \"we are on the release branch\"). Notes are in the ledger of every later turn. Not for promised work: that is promise. With agent and name it renames that agent instead (\"call that one docs\"): the CEO hears it by that name from then on.",
+			Parameters: obj(map[string]*genai.Schema{"text": str("what to remember, in the CEO's words"), "agent": str("only to rename: the agent's alias"), "name": str("only to rename: the new name, as the CEO said it")}, nil)},
 	}
 	return []*genai.Tool{{FunctionDeclarations: append(read, act...)}}
 }
@@ -261,6 +261,17 @@ func (b *Brain) execTool(ctx context.Context, t *turn, call *genai.FunctionCall)
 			// model answering and its calls running: nothing is sent.
 			return toolOutcome{err: fmt.Errorf("the turn was cancelled before %s ran: %w", call.Name, err)}
 		}
+	}
+	if call.Name == ToolNote && arg("name") != "" {
+		row, ok := b.host.Resolve(arg("agent"))
+		if !ok {
+			return toolOutcome{err: fmt.Errorf("to rename, name the agent: no agent called %q; the agents are %s", arg("agent"), b.aliases())}
+		}
+		echo, err := b.host.Rename(ctx, row.PaneID, arg("name"))
+		if err != nil {
+			return toolOutcome{agent: row.Alias, err: err}
+		}
+		return toolOutcome{agent: row.Alias, acted: echo, result: echo}
 	}
 	if call.Name == ToolNote {
 		text := arg("text")
@@ -595,6 +606,8 @@ func (b *Brain) listAgents() toolOutcome {
 	}
 	type row struct {
 		Alias      string      `json:"alias"`
+		Spoken     string      `json:"spoken,omitempty"`
+		Title      string      `json:"session_title,omitempty"`
 		Kind       string      `json:"kind"`
 		State      string      `json:"state"`
 		WorkerData *workerData `json:"worker_data,omitempty"`
@@ -602,7 +615,10 @@ func (b *Brain) listAgents() toolOutcome {
 	agents := b.host.Agents()
 	rows := make([]row, 0, len(agents))
 	for _, a := range agents {
-		r := row{Alias: a.Alias, Kind: a.Kind, State: a.State}
+		r := row{Alias: a.Alias, Kind: a.Kind, State: a.State, Title: a.Title}
+		if a.Spoken != a.Alias {
+			r.Spoken = a.Spoken
+		}
 		wd := workerData{Task: a.Task, LastTask: a.LastTask, LastResult: a.LastResult}
 		if a.Pending != nil {
 			wd.PendingQuestion = a.Pending.Question
@@ -717,7 +733,11 @@ func queryWords(q string) []string {
 func (b *Brain) aliases() string {
 	var names []string
 	for _, a := range b.host.Agents() {
-		names = append(names, aliasOr(a.Alias))
+		n := aliasOr(a.Alias)
+		if a.Spoken != "" && a.Spoken != a.Alias {
+			n += fmt.Sprintf(" (said %q)", a.Spoken)
+		}
+		names = append(names, n)
 	}
 	if len(names) == 0 {
 		return "none (no agents are running)"

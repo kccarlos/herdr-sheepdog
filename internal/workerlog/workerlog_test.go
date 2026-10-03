@@ -331,3 +331,57 @@ func TestTailOfABigFileAndMissingSessions(t *testing.T) {
 		}
 	}
 }
+
+func TestTitleFromSessionFiles(t *testing.T) {
+	r := New(Options{ClaudeProjects: filepath.Join("testdata", "claude", "projects"), CodexSessions: filepath.Join("testdata", "codex", "sessions")})
+	cases := []struct {
+		name string
+		sess Session
+		want string
+	}{
+		{"claude: the last ai-title", Session{Agent: "claude", Kind: "id", Value: "22222222-3333-4444-8555-666666666666", Cwd: "/tmp/work/titles"}, "README"},
+		{"claude: a custom title wins", Session{Agent: "claude", Kind: "id", Value: "33333333-4444-4555-8666-777777777777"}, "docs pass"},
+		{"claude: no title yet", Session{Agent: "claude", Kind: "id", Value: claudeID}, ""},
+		{"codex: the last thread name by id", Session{Agent: "codex", Source: "herdr:codex", Kind: "id", Value: codexID}, "Run suite and report failure"},
+		{"codex: by rollout path", Session{Agent: "codex", Kind: "path", Value: "/x/rollout-2026-09-24T10-00-00-" + codexID + ".jsonl"}, "Run suite and report failure"},
+		{"codex: unnamed thread", Session{Agent: "codex", Kind: "id", Value: "01a0c000-0000-7000-8000-000000000042"}, ""},
+	}
+	for _, c := range cases {
+		got, err := r.Title(c.sess)
+		if err != nil || got != c.want {
+			t.Errorf("%s: Title = %q, %v; want %q", c.name, got, err, c.want)
+		}
+	}
+	if _, err := r.Title(Session{Agent: "agy", Kind: "id", Value: "x"}); Reason(err) != ReasonUnsupported {
+		t.Errorf("agy: %v", err)
+	}
+	if _, err := r.Title(Session{Agent: "claude"}); Reason(err) != ReasonNotReported {
+		t.Errorf("none reported: %v", err)
+	}
+	none := New(Options{ClaudeProjects: t.TempDir(), CodexSessions: filepath.Join(t.TempDir(), "sessions")})
+	if _, err := none.Title(Session{Agent: "codex", Kind: "id", Value: codexID}); Reason(err) != ReasonNotFound {
+		t.Errorf("no index: %v", err)
+	}
+}
+
+// A title line cut by the tail window is skipped, and a later one is
+// still found.
+func TestTitleTailWindow(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "s.jsonl")
+	body := `{"type":"ai-title","aiTitle":"Old"}` + "\n" + strings.Repeat(`{"type":"user","message":{"role":"user","content":"x"}}`+"\n", 10) + `{"type":"ai-title","aiTitle":"New"}` + "\n"
+	if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	if err := scanTail(p, int64(len(body)-5), func(l []byte) {
+		if strings.Contains(string(l), "aiTitle") {
+			got = append(got, string(l))
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, []string{`{"type":"ai-title","aiTitle":"New"}`}) {
+		t.Errorf("got %v", got)
+	}
+}
