@@ -117,6 +117,7 @@ type Client struct {
 	lastPush       time.Time
 	lastPushID     string
 	outQ           chan BotUtterance
+	handing        int // utterances closed but still in their grace period
 	lastAudioAt    time.Time
 	lastOutAt      time.Time
 	lastInAt       time.Time
@@ -365,8 +366,10 @@ func (c *Client) closeUtterance(end string, playedMS int) {
 	c.rec.Bot = append(c.rec.Bot, *u)
 	idx := len(c.rec.Bot) - 1
 	c.logf("bot %s (%d/%d ms): %s", end, u.PlayedMS, u.AudioMS, joinFragments(u.Fragments))
+	c.handing++
 	time.AfterFunc(c.o.Grace, func() {
 		c.mu.Lock()
+		c.handing--
 		b := &c.rec.Bot[idx]
 		b.Text = joinFragments(b.Fragments)
 		b.Heard = heardText(b.Fragments, b.PlayedMS, b.AudioMS)
@@ -642,11 +645,12 @@ func (c *Client) NextUtterance(ctx context.Context, timeout time.Duration) (BotU
 }
 
 // BotActive reports whether the bot is speaking or about to (audio
-// buffered or playing, or an utterance open).
+// buffered or playing, an utterance open, or one finished but not yet
+// handed to NextUtterance).
 func (c *Client) BotActive() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.player.Active() || c.cur != nil
+	return c.player.Active() || c.cur != nil || c.handing > 0
 }
 
 // PlayingFor is how long the current bot utterance has been playing (0
@@ -690,7 +694,7 @@ func (c *Client) QuietFor() time.Duration {
 			last = t
 		}
 	}
-	if c.player.Active() || c.cur != nil {
+	if c.player.Active() || c.cur != nil || c.handing > 0 {
 		return 0
 	}
 	return time.Since(last)
