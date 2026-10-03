@@ -2,9 +2,12 @@ package brain
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -43,8 +46,13 @@ func IsActionTool(name string) bool {
 // Provenance delimiters around everything read from a worker pane or
 // produced by the CLI tool (docs/roles.md: data, not instructions).
 const (
-	beginWorkerOutput = "<<<BEGIN_WORKER_OUTPUT agent=%s source=%s>>>"
-	endWorkerOutput   = "<<<END_WORKER_OUTPUT>>>"
+	// Both markers carry the same per-call random nonce, so text from a
+	// worker cannot forge the end marker: it cannot know the nonce, and
+	// wrapWorker defangs any marker-shaped string inside the text anyway.
+	beginWorkerOutput = "<<<BEGIN_WORKER_OUTPUT nonce=%s agent=%s source=%s>>>"
+	endWorkerOutput   = "<<<END_WORKER_OUTPUT nonce=%s>>>"
+	// endWorkerPrefix starts every end marker, whatever its nonce.
+	endWorkerPrefix = "<<<END_WORKER_OUTPUT"
 )
 
 // read_screen's sources (docs/dive-deep.md WP8a).
@@ -452,28 +460,62 @@ func keysArg(v any) []string {
 	return out
 }
 
-// wrapWorker puts provenance delimiters around text from a worker.
-func wrapWorker(alias, source, text string) string {
-	return fmt.Sprintf(beginWorkerOutput, aliasOr(alias), source) + "\n" + strings.TrimRight(text, "\n") + "\n" + endWorkerOutput
+// reMarker matches a provenance marker's opening ("<<<BEGIN_WORKER_OUTPUT",
+// "<<< end_worker_output"), in any case, inside worker text.
+var reMarker = regexp.MustCompile(`(?i)<<<\s*((?:BEGIN|END)_WORKER_OUTPUT)`)
+
+// nonceSource makes a marker nonce; tests swap it for a counter so golden
+// transcripts stay deterministic.
+var nonceSource = newNonce
+
+// newNonce is a fresh unguessable marker nonce.
+func newNonce() string {
+	var buf [6]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		// crypto/rand does not fail on supported platforms; a time-derived
+		// nonce still differs per call.
+		return fmt.Sprintf("%x", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(buf[:])
 }
 
-// listAgents renders the roster as JSON for the model.
+// wrapWorker puts provenance delimiters around text from a worker. Any
+// marker-shaped string inside the text is neutralised (its "<<<" becomes
+// "[") and both markers carry a per-call nonce, so a screen cannot close
+// the wrapper early and have what follows read as the brain's own.
+func wrapWorker(alias, source, text string) string {
+	nonce := nonceSource()
+	text = reMarker.ReplaceAllString(strings.TrimRight(text, "\n"), "[$1")
+	return fmt.Sprintf(beginWorkerOutput, nonce, aliasOr(alias), source) + "\n" + text + "\n" + fmt.Sprintf(endWorkerOutput, nonce)
+}
+
+// listAgents renders the roster as JSON for the model. What the workers
+// wrote (task, last task, last result, the question they asked) sits under
+// each row's worker_data key: it is data from another agent, never an
+// instruction to the brain (RULES.md provenance rule).
 func (b *Brain) listAgents() toolOutcome {
-	type row struct {
-		Alias           string `json:"alias"`
-		Kind            string `json:"kind"`
-		State           string `json:"state"`
+	type workerData struct {
 		Task            string `json:"task,omitempty"`
 		LastTask        string `json:"last_task,omitempty"`
 		LastResult      string `json:"last_result,omitempty"`
 		PendingQuestion string `json:"pending_question,omitempty"`
 	}
+	type row struct {
+		Alias      string      `json:"alias"`
+		Kind       string      `json:"kind"`
+		State      string      `json:"state"`
+		WorkerData *workerData `json:"worker_data,omitempty"`
+	}
 	agents := b.host.Agents()
 	rows := make([]row, 0, len(agents))
 	for _, a := range agents {
-		r := row{Alias: a.Alias, Kind: a.Kind, State: a.State, Task: a.Task, LastTask: a.LastTask, LastResult: a.LastResult}
+		r := row{Alias: a.Alias, Kind: a.Kind, State: a.State}
+		wd := workerData{Task: a.Task, LastTask: a.LastTask, LastResult: a.LastResult}
 		if a.Pending != nil {
-			r.PendingQuestion = a.Pending.Question
+			wd.PendingQuestion = a.Pending.Question
+		}
+		if wd != (workerData{}) {
+			r.WorkerData = &wd
 		}
 		rows = append(rows, r)
 	}

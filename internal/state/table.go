@@ -247,6 +247,10 @@ type Option struct {
 	// Default marks the option the prompt's cursor is on (what enter
 	// selects).
 	Default bool `json:"default,omitempty"`
+	// Meta marks an option that is not an answer ("Type something."): it
+	// stays in the option set the rail accepts, but the phone card, the
+	// push buttons and the yes/no and by-number mapping never offer it.
+	Meta bool `json:"meta,omitempty"`
 }
 
 // Note is one thing the user asked to be remembered (the brain's note

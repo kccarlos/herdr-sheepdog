@@ -2,6 +2,7 @@ package supervisor
 
 import (
 	"context"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -36,7 +37,7 @@ func TestReadSessionLeavesTheJournalFresh(t *testing.T) {
 	if len(calls) < 2 {
 		t.Fatalf("model calls = %d", len(calls))
 	}
-	text := calls[1].Text()
+	text := unnonce(calls[1].Text())
 	for _, want := range []string{
 		"<<<BEGIN_WORKER_OUTPUT agent=auth source=session>>>",
 		"Last instruction it received: Fix the rounding bug.\n",
@@ -80,3 +81,9 @@ func TestReadSessionMissingReasons(t *testing.T) {
 		t.Error("an unknown pane read a session")
 	}
 }
+
+var reNonceAttr = regexp.MustCompile(` nonce=[0-9a-z]+`)
+
+// unnonce drops the per-call nonce from every provenance marker, so a test
+// can compare against the marker text without knowing it.
+func unnonce(s string) string { return reNonceAttr.ReplaceAllString(s, "") }

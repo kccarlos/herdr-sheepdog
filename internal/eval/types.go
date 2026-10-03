@@ -261,6 +261,14 @@ type SVPExpect struct {
 	// only); "skip" also rejects an empty urgency with an empty spoken,
 	// which the supervisor treats as a skip.
 	UrgencyNot []string `json:"urgency_not,omitempty"`
+	// AskEmpty requires the reply's ask to be empty (live only): ask is
+	// for an open decision, never for a plain status or finish line
+	// (docs/bench-2026-10-03.md #15a).
+	AskEmpty bool `json:"ask_empty,omitempty"`
+	// ReplyLanguage is "en" or "zh" (live only): spoken and ask are in the
+	// language the CEO last used, which for "en" means no CJK characters at
+	// all and for "zh" that spoken has some (#14).
+	ReplyLanguage string `json:"reply_language,omitempty"`
 }
 
 // SVPCase is one line of testdata/eval/svp.jsonl (and of the

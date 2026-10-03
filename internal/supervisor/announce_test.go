@@ -318,9 +318,9 @@ func slowAnnounce(h **harness, took time.Duration, rep *braintest.Step) *brainte
 }
 
 // The ear contract applies to announcements too (iteration 2 WP1): the
-// brain's finish line is cut to the ear caps (dash-joined clauses split,
-// two sentences, no PR number), its ask is heard last, and what the cap
-// cut is kept after the detail on last_result for recall.
+// brain's finish line has its dash-joined clauses split and no PR number,
+// its ask is heard last, and nothing short of a runaway (bench #13, one
+// high cap for every line) is cut.
 func TestAnnounceLineIsCappedForTheEar(t *testing.T) {
 	m := braintest.NewModel()
 	m.EventDefault = withAsk(announceReply("Auth merged the lag fix you asked for as #49 — the tests pass — and the docs are updated too.", "idle", "A merge puts the change into the shared code.", "", false), "Shall I have it start the next one?")
@@ -329,12 +329,12 @@ func TestAnnounceLineIsCappedForTheEar(t *testing.T) {
 	h.sup.touch("w5:p1")
 	doneAuth(h)
 	got := h.pusher.all()
-	const want = "Auth merged the lag fix you asked for as. The tests pass. Shall I have it start the next one?"
+	const want = "Auth merged the lag fix you asked for as. The tests pass. And the docs are updated too. Shall I have it start the next one?"
 	if len(got) != 1 || got[0].Text != want {
 		t.Fatalf("pushes = %+v, want one line %q", got, want)
 	}
 	row, _ := h.store.Get("w5:p1")
-	if row.LastResult == nil || row.LastResult.Spoken != want || row.LastResult.Detail != "A merge puts the change into the shared code. And the docs are updated too." {
+	if row.LastResult == nil || row.LastResult.Spoken != want || row.LastResult.Detail != "A merge puts the change into the shared code." {
 		t.Errorf("last_result = %+v", row.LastResult)
 	}
 }

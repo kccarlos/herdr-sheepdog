@@ -349,10 +349,9 @@ func (h brainHost) Promises() []brain.PromiseInfo {
 }
 
 // toolResultFrom enforces the ear contract and D9 on a brain reply: the
-// headline cut to caps (prose.EarReply for a reply to an utterance:
-// four sentences, sixty words, a safety net for a detail the shepherd
-// asked for, docs/dive-deep.md WP8b; prose.EarBrief elsewhere: two
-// sentences, thirty words; no dashes, PR numbers or hashes either way),
+// headline cut to caps (prose.EarRunaway for every line: a runaway guard
+// of about 45 s of speech, the prompt decides the length; no dashes, PR
+// numbers or hashes),
 // the ask appended as the last
 // sentence, whatever the cap cut moved to the end of detail (nothing the
 // brain wrote is lost, it is just not read aloud), detail and options

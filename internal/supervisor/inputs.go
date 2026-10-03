@@ -598,7 +598,7 @@ func (s *Supervisor) AnswerTap(ctx context.Context, id string, option int) (voic
 		s.mu.Unlock()
 		return voice.ToolResult{}, ErrPendingGone
 	}
-	if option < 1 || option > len(p.Options) {
+	if option < 1 || option > len(p.Options) || p.Options[option-1].Meta {
 		s.mu.Unlock()
 		return voice.ToolResult{}, fmt.Errorf("%w: %d (the question has %d)", ErrNoSuchOption, option, len(p.Options))
 	}
@@ -646,6 +646,9 @@ type PendingOption struct {
 func PendingOptions(p state.PendingAction) []PendingOption {
 	out := make([]PendingOption, 0, len(p.Options))
 	for i, o := range p.Options {
+		if o.Meta {
+			continue
+		}
 		out = append(out, PendingOption{Index: i + 1, Label: o.Label, Keys: append([]string{}, o.Keys...), Default: o.Default})
 	}
 	return out

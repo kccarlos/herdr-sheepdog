@@ -454,7 +454,7 @@ func TestBrainOverOpenAICompat(t *testing.T) {
 	if strings.Join(shape, " ") != "system user assistant+call_a+call_b(r) tool@call_a tool@call_b user" {
 		t.Errorf("second request = %v", shape)
 	}
-	if tool := second[3].(map[string]any); !strings.Contains(tool["content"].(string), "BEGIN_WORKER_OUTPUT agent=auth source=screen") {
+	if tool := second[3].(map[string]any); !strings.Contains(tool["content"].(string), "agent=auth source=screen>>>") {
 		t.Errorf("tool result content = %v", tool["content"])
 	}
 	steps := h.log.ofType("brain.step")

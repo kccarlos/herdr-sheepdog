@@ -37,6 +37,9 @@ func (s *Supervisor) notify(a announcement, kept []state.Promise, text string) {
 		n.PendingID = a.pending
 		if p, ok := s.store.Pending(); ok && p.ID == a.pending {
 			for i, o := range p.Options {
+				if o.Meta {
+					continue
+				}
 				n.Options = append(n.Options, push.Option{Index: i + 1, Label: o.Label})
 			}
 		}

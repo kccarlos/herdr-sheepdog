@@ -38,7 +38,7 @@ func (s *Supervisor) newAnswerPrompt(paneID string, prompt herdr.Prompt, alias s
 		CreatedAt: now,
 	}
 	for i, o := range prompt.Options {
-		p.Options = append(p.Options, state.Option{Label: o.Label, Keys: o.Keys, Default: i == prompt.Default})
+		p.Options = append(p.Options, state.Option{Label: o.Label, Keys: o.Keys, Default: i == prompt.Default, Meta: o.Meta})
 	}
 	// Remembered so the post-answer poll and the reconciler can tell a
 	// new prompt from this one (docs/roles.md "blocked -> blocked is a
@@ -219,8 +219,10 @@ func mapAnswer(p state.PendingAction, answer string) ([]string, string, error) {
 	switch {
 	case yesWords[a]:
 		keys := p.YesKeys
-		if len(keys) == 0 && len(p.Options) > 0 {
-			keys = p.Options[0].Keys
+		if len(keys) == 0 {
+			if ans := answerOptions(p); len(ans) > 0 {
+				keys = ans[0].Keys
+			}
 		}
 		if len(keys) == 0 {
 			keys = []string{"enter"}
@@ -234,12 +236,12 @@ func mapAnswer(p state.PendingAction, answer string) ([]string, string, error) {
 		return keys, "no", nil
 	}
 	if n := optionNumber(a); n > 0 {
-		if n > len(p.Options) {
+		if n > len(p.Options) || p.Options[n-1].Meta {
 			return nil, "", fmt.Errorf("there is no option %d", n)
 		}
 		return p.Options[n-1].Keys, "option " + strconv.Itoa(n), nil
 	}
-	if o, ok := matchLabel(p.Options, a); ok {
+	if o, ok := matchLabel(answerOptions(p), a); ok {
 		return o.Keys, o.Label, nil
 	}
 	return nil, "", fmt.Errorf("no option matches %q", answer)
@@ -313,4 +315,16 @@ func lowerFirst(s string) string {
 		return s
 	}
 	return strings.ToLower(s[:1]) + s[1:]
+}
+
+// answerOptions are p's options that answer the question: the Meta ones
+// ("Type something.") stay in p.Options for the rail only.
+func answerOptions(p state.PendingAction) []state.Option {
+	var out []state.Option
+	for _, o := range p.Options {
+		if !o.Meta {
+			out = append(out, o)
+		}
+	}
+	return out
 }

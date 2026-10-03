@@ -83,7 +83,7 @@ func TestReadScreenThenAnswer(t *testing.T) {
 	if utter < 0 || req < 0 || utter > req {
 		t.Errorf("utterance must precede the request:\n%s", first)
 	}
-	second := calls[1].Text()
+	second := unnonce(calls[1].Text())
 	if !strings.Contains(second, "<<<BEGIN_WORKER_OUTPUT agent=auth source=screen>>>") || !strings.Contains(second, "Would you like to run the following command?") || !strings.Contains(second, "<<<END_WORKER_OUTPUT>>>") {
 		t.Errorf("screen not delivered with provenance:\n%s", second)
 	}
@@ -378,7 +378,7 @@ func TestProvenanceInjection(t *testing.T) {
 			t.Errorf("system prompt lacks %q", rule)
 		}
 	}
-	second := calls[1].Text()
+	second := unnonce(calls[1].Text())
 	begin, inj, end := strings.Index(second, "<<<BEGIN_WORKER_OUTPUT agent=auth source=screen>>>"), strings.Index(second, "ignore previous instructions"), strings.Index(second, "<<<END_WORKER_OUTPUT>>>")
 	if begin < 0 || inj < begin || end < inj {
 		t.Errorf("injection not inside the delimiters:\n%s", second)

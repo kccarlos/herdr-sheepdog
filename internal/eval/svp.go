@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode"
 
 	"google.golang.org/genai"
 
@@ -293,7 +294,7 @@ func checkSVPExpect(exp SVPExpect, rec *recorder, reply brain.Reply, offline boo
 // (docs/iteration-2.md WP0b).
 var liveOnlyChecks = []string{
 	"spoken_contains_any_of", "spoken_max_sentences", "spoken_max_words", "spoken_no_jargon",
-	"first_sentence_contains_any_of", "needs_user", "urgency_not",
+	"first_sentence_contains_any_of", "needs_user", "urgency_not", "ask_empty", "reply_language",
 }
 
 // gradeSVP grades a case's recorded tool calls and reply against its
@@ -382,6 +383,12 @@ func gradeSVP(exp SVPExpect, rec *recorder, reply brain.Reply, offline bool) (re
 	if exp.NeedsUser != nil && reply.NeedsUser != *exp.NeedsUser {
 		reasons = append(reasons, fmt.Sprintf("needs_user=%v, want %v", reply.NeedsUser, *exp.NeedsUser))
 	}
+	if exp.AskEmpty && strings.TrimSpace(reply.Ask) != "" {
+		reasons = append(reasons, "ask "+quoteOrEmpty(reply.Ask)+" on a line with no open decision; ask is only for a decision the shepherd has to take")
+	}
+	if why := languageReasons(exp.ReplyLanguage, reply); why != "" {
+		reasons = append(reasons, why)
+	}
 	for _, bad := range exp.UrgencyNot {
 		u := reply.Urgency
 		if u == "" && strings.TrimSpace(reply.Spoken) == "" {
@@ -412,8 +419,36 @@ func (exp SVPExpect) sets(name string) bool {
 		return exp.NeedsUser != nil
 	case "urgency_not":
 		return len(exp.UrgencyNot) > 0
+	case "ask_empty":
+		return exp.AskEmpty
+	case "reply_language":
+		return exp.ReplyLanguage != ""
 	}
 	return false
+}
+
+// languageReasons grades Expect.ReplyLanguage: "en" wants spoken and ask
+// free of CJK characters, "zh" wants a CJK character in spoken.
+func languageReasons(lang string, reply brain.Reply) string {
+	hasCJK := func(s string) bool {
+		for _, r := range s {
+			if unicode.In(r, unicode.Han, unicode.Hiragana, unicode.Katakana, unicode.Hangul) {
+				return true
+			}
+		}
+		return false
+	}
+	switch lang {
+	case "en":
+		if hasCJK(reply.Spoken) || hasCJK(reply.Ask) {
+			return "reply is not in English though the shepherd last spoke English: " + quoteOrEmpty(reply.Spoken+" "+reply.Ask)
+		}
+	case "zh":
+		if !hasCJK(reply.Spoken) {
+			return "reply is not in Chinese though the shepherd last spoke Chinese: " + quoteOrEmpty(reply.Spoken)
+		}
+	}
+	return ""
 }
 
 func containsAnyFold(s string, subs []string) bool {

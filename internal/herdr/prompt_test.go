@@ -220,3 +220,49 @@ func TestParsePromptDescribedListNotAPrompt(t *testing.T) {
 		t.Error("EndsInQuestion = true")
 	}
 }
+
+// AskUserQuestion's own rows are not answers (docs/bench-2026-10-03.md
+// #2): "Type something." is kept for the rail but marked Meta and left out
+// of Answers (the phone card, the spoken choices, the fast yes/no);
+// "Chat about this" is dropped altogether, with or without the rule above
+// it.
+func TestParsePromptMetaOptions(t *testing.T) {
+	p, ok := herdr.ParsePrompt(screen(t, "claude-askuserquestion.screen.txt"))
+	if !ok {
+		t.Fatal("not a prompt")
+	}
+	if len(p.Options) != 3 || !p.Options[2].Meta || p.Options[0].Meta || p.Options[1].Meta {
+		t.Fatalf("options = %+v", p.Options)
+	}
+	if strings.Join(p.Options[2].Keys, " ") != "3" {
+		t.Errorf("the rail must still accept Type something: %+v", p.Options[2])
+	}
+	ans := p.Answers()
+	if len(ans) != 2 || ans[0].Label != "Yes, proceed" || ans[1].Label != "No, decline" {
+		t.Errorf("answers = %+v", ans)
+	}
+
+	// No rule between the options: "Chat about this" is a fourth numbered
+	// row. It is dropped; "Type something." is still marked.
+	const noRule = "Pick one?\n\n❯ 1. Red\n  2. Blue\n  3. Type something.\n  4. Chat about this\n\nEnter to select"
+	p, ok = herdr.ParsePrompt(noRule)
+	if !ok || len(p.Options) != 3 || p.Options[2].Label != "Type something." || !p.Options[2].Meta {
+		t.Fatalf("no-rule prompt = %+v ok=%v", p, ok)
+	}
+	for _, o := range p.Options {
+		if strings.Contains(strings.ToLower(o.Label), "chat") {
+			t.Errorf("Chat about this offered: %+v", o)
+		}
+	}
+	// No yes/no label: the fast path has nothing to map to when the cursor
+	// sits on a meta row.
+	const cursorOnMeta = "Pick one?\n\n  1. Red\n  2. Blue\n❯ 3. Type something.\n"
+	p, ok = herdr.ParsePrompt(cursorOnMeta)
+	if !ok || p.Default != 2 || len(p.YesKeys) != 0 || len(p.Answers()) != 2 {
+		t.Errorf("cursor on meta: %+v ok=%v", p, ok)
+	}
+	// A real "Yes" still maps, whatever the meta rows are.
+	if p, _ := herdr.ParsePrompt(screen(t, "claude-askuserquestion.screen.txt")); strings.Join(p.YesKeys, " ") != "1" || strings.Join(p.NoKeys, " ") != "2" {
+		t.Errorf("yes/no = %v / %v", p.YesKeys, p.NoKeys)
+	}
+}

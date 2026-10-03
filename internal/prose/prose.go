@@ -116,7 +116,7 @@ var (
 	reIssue    = regexp.MustCompile(`(?i)(?:\b(?:PR|pull request|issue)\s*#?\s*\d+\b|#\d+\b)`)
 	reSpaces   = regexp.MustCompile(`[ \t]+`)
 	reOrphan   = regexp.MustCompile(`\s+([,.;:!?])`)
-	reSentence = regexp.MustCompile(`[.!?]+(?:["')\]]*)(?:\s+|$)`)
+	reSentence = regexp.MustCompile(`[.!?]+["')\]]*(?:\s+|$)|[。！？]+[”’」』）"')\]]*\s*`)
 )
 
 // Spoken enforces decision D9 on model output: at most maxSentences

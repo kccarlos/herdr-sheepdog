@@ -155,7 +155,7 @@ func capResult(content string) (string, bool) {
 		if i := strings.IndexByte(content, '\n'); i > 0 {
 			head, body = content[:i+1], content[i+1:]
 		}
-		if j := strings.LastIndex(body, "\n"+endWorkerOutput); j >= 0 {
+		if j := strings.LastIndex(body, "\n"+endWorkerPrefix); j >= 0 {
 			body, tail = body[:j], body[j:]
 		}
 	}

@@ -154,7 +154,7 @@ func TestEventTurnIsReadOnly(t *testing.T) {
 			t.Errorf("event turn declares %s", d.Name)
 		}
 	}
-	text := call.Text()
+	text := unnonce(call.Text())
 	if !strings.Contains(text, `Event from the supervisor (announce): agent="auth" event="done" template="auth finished: ran the tests, 1 failed."`) || !strings.Contains(text, "Nothing has been said about this yet.") || !strings.Contains(text, "The screen the supervisor read for this event:\n<<<BEGIN_WORKER_OUTPUT agent=auth source=screen>>>\n$ go test") {
 		t.Errorf("model saw:\n%s", text)
 	}

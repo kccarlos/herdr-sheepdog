@@ -277,7 +277,7 @@ func TestFastPathRejectsPhrasesWithExtraContent(t *testing.T) {
 }
 
 // (3b) The voice relaying a push back through to_supervisor never
-// reaches the brain as the CEO's words (docs/issues-2026-09-18.md Bug 2):
+// reaches the brain as the CEO's words (docs/history/issues-2026-09-18.md Bug 2):
 // with nothing said since the push it is the model's own initiative, and
 // with something said, the brain gets what was said, not the push.
 func TestPushRelayedBackNeverReachesTheBrain(t *testing.T) {

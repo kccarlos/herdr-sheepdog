@@ -125,7 +125,7 @@ func TestCaptureGemini(t *testing.T) {
 	// Untrusted worker output sits inside its delimiters.
 	for _, s := range sectionsWith(last.Snapshot, "worker output (untrusted)") {
 		text := strings.TrimRight(last.Text[s.Start:s.End], "\n")
-		if !strings.HasPrefix(text, "<<<BEGIN_WORKER_OUTPUT") || !strings.HasSuffix(text, "<<<END_WORKER_OUTPUT>>>") {
+		if !strings.HasPrefix(text, "<<<BEGIN_WORKER_OUTPUT") || !strings.HasSuffix(unnonce(text), "<<<END_WORKER_OUTPUT>>>") {
 			t.Errorf("untrusted piece not delimited: %.80q … %.40q", text, text[max(0, len(text)-40):])
 		}
 	}

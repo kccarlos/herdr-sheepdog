@@ -355,12 +355,19 @@ func splitWorker(base ctxcap.Section, text string) []piece {
 		}
 		add(false, rest[:i])
 		rest = rest[i:]
-		j := strings.Index(rest, endWorkerOutput)
+		j := strings.Index(rest, endWorkerPrefix)
+		if j >= 0 {
+			// The end marker runs to its closing ">>>" (it carries a nonce).
+			if k := strings.Index(rest[j:], ">>>"); k >= 0 {
+				j += k + len(">>>")
+			} else {
+				j = -1
+			}
+		}
 		if j < 0 {
 			add(true, rest)
 			return out
 		}
-		j += len(endWorkerOutput)
 		add(true, rest[:j])
 		rest = rest[j:]
 	}

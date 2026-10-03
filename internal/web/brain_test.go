@@ -91,10 +91,10 @@ func TestBrainEndpointsWithFakeBrain(t *testing.T) {
 	if got := strings.Join(kinds, " "); got != "worker_event request event_screen brain_tool_call brain_tool_result reply push request brain_tool_call brain_tool_result brain_tool_call brain_tool_result reply" {
 		t.Fatalf("kinds = %s", got)
 	}
-	if msgs[8].ToolCall == nil || msgs[8].ToolCall.Name != brain.ToolListAgents || msgs[10].ToolCall == nil || msgs[10].ToolCall.Name != brain.ToolReadScreen || msgs[11].ToolResult == nil || !strings.Contains(msgs[11].Content, "BEGIN_WORKER_OUTPUT agent=auth source=screen") || msgs[11].Turn != 2 {
+	if msgs[8].ToolCall == nil || msgs[8].ToolCall.Name != brain.ToolListAgents || msgs[10].ToolCall == nil || msgs[10].ToolCall.Name != brain.ToolReadScreen || msgs[11].ToolResult == nil || !strings.Contains(msgs[11].Content, "BEGIN_WORKER_OUTPUT nonce=") || msgs[11].Turn != 2 {
 		t.Errorf("tool messages = %+v / %+v / %+v", msgs[8], msgs[10], msgs[11])
 	}
-	if msgs[2].Kind != brain.KindEventScreen || msgs[2].Turn != 1 || msgs[2].ToolResult == nil || !strings.Contains(msgs[2].Content, "BEGIN_WORKER_OUTPUT agent=auth source=screen") {
+	if msgs[2].Kind != brain.KindEventScreen || msgs[2].Turn != 1 || msgs[2].ToolResult == nil || !strings.Contains(msgs[2].Content, "BEGIN_WORKER_OUTPUT nonce=") {
 		t.Errorf("event screen = %+v", msgs[2])
 	}
 	var tail []TranscriptMessage

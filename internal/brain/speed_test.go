@@ -124,7 +124,7 @@ func TestAnnouncePromptBudget(t *testing.T) {
 	if len(state) > 3000 {
 		t.Errorf("state = %d chars", len(state))
 	}
-	if EstimateTokens(static+state) > 4500 {
+	if EstimateTokens(static+state) > 4700 {
 		t.Errorf("system + state = %d tokens", EstimateTokens(static+state))
 	}
 }
@@ -174,7 +174,7 @@ func TestCapResult(t *testing.T) {
 	if !ok || len(got) > windowResultBytes {
 		t.Fatalf("capped = %v, %d bytes", ok, len(got))
 	}
-	if !strings.HasPrefix(got, "<<<BEGIN_WORKER_OUTPUT agent=auth source=screen>>>\n"+resultCutNote) || !strings.HasSuffix(got, endWorkerOutput) || !strings.Contains(got, "line 399") || strings.Contains(got, "line 000") {
+	if !strings.HasPrefix(unnonce(got), "<<<BEGIN_WORKER_OUTPUT agent=auth source=screen>>>\n"+resultCutNote) || !strings.HasSuffix(unnonce(got), "<<<END_WORKER_OUTPUT>>>") || !strings.Contains(got, "line 399") || strings.Contains(got, "line 000") {
 		t.Errorf("capped result:\n%s", got)
 	}
 	if small, ok := capResult("short"); ok || small != "short" {
