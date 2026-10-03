@@ -35,6 +35,11 @@ type DaemonOptions struct {
 	// Vertex) for a phone emulator, instead of --voice=off with the text
 	// router and --heard-echo.
 	Voice bool
+	// ProjectRoots is supervisor.project_roots for the scratch daemon:
+	// where the brain may start a new agent by voice. It defaults to the
+	// run's own repos directory, never the config default (~/Documents),
+	// so a bench brain can never start an agent in the CEO's real projects.
+	ProjectRoots string
 	// Log receives the daemon's stderr.
 	Log io.Writer
 }
@@ -107,6 +112,7 @@ func StartDaemon(ctx context.Context, o DaemonOptions) (*Daemon, error) {
 		"SHEEPDOG_STATE_PATH="+filepath.Join(o.Dir, "state.json"),
 		"SHEEPDOG_WEB_BIND=127.0.0.1",
 		"SHEEPDOG_CLI_PREFER=claude",
+		"SHEEPDOG_SUPERVISOR_PROJECT_ROOTS="+projectRoots(o),
 	)
 	cmd.Stdout, cmd.Stderr = o.Log, o.Log
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -132,6 +138,15 @@ func StartDaemon(ctx context.Context, o DaemonOptions) (*Daemon, error) {
 	}
 	d.Stop()
 	return nil, fmt.Errorf("tier3: the daemon did not answer on port %d", o.Port)
+}
+
+// projectRoots is the scratch daemon's supervisor.project_roots: the
+// option, or the run's repos directory next to the daemon's.
+func projectRoots(o DaemonOptions) string {
+	if o.ProjectRoots != "" {
+		return o.ProjectRoots
+	}
+	return filepath.Join(filepath.Dir(o.Dir), "repos")
 }
 
 // serveArgs are the scratch daemon's flags: the text router with the
