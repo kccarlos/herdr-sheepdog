@@ -334,3 +334,45 @@ func TestLateBrainErrorPushesFallback(t *testing.T) {
 		t.Errorf("brain.reply_delivered = %v", ev)
 	}
 }
+
+// One utterance id from the relay to the reply push: supervisor.relay
+// mints it, the brain turn, brain.reply_pending and brain.reply_delivered
+// carry it, and so does the push (tag utterance_id, which the event log
+// lifts to the line's top level).
+func TestUtteranceIDFromRelayToPush(t *testing.T) {
+	release := make(chan struct{})
+	m := braintest.NewModel(braintest.Step{Block: release, Text: braintest.Reply("The tests are green.", "")})
+	h := newBrainHarness(t, m, replyWait(20*time.Millisecond))
+	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
+
+	assertPending(t, h.say("how is auth doing"))
+	close(release)
+	h.sup.replies.Wait()
+
+	relay := h.log.ofType("supervisor.relay")
+	if len(relay) != 1 {
+		t.Fatalf("supervisor.relay ×%d", len(relay))
+	}
+	id, _ := payload(relay[0])["utterance_id"].(string)
+	if !strings.HasPrefix(id, "utt-") {
+		t.Fatalf("relay = %v, want an utterance id", payload(relay[0]))
+	}
+	if _, ok := payload(relay[0])["waited_ms"].(int64); !ok {
+		t.Errorf("relay = %v, want waited_ms", payload(relay[0]))
+	}
+	for _, typ := range []string{"brain.turn_started", "brain.step", "brain.turn", "brain.reply_pending", "brain.reply_delivered"} {
+		evs := h.log.ofType(typ)
+		if len(evs) == 0 {
+			t.Errorf("no %s", typ)
+		}
+		for _, e := range evs {
+			if payload(e)["utterance_id"] != id {
+				t.Errorf("%s = %v, want utterance_id %s", typ, payload(e), id)
+			}
+		}
+	}
+	_, tags := utterancePushes(h)
+	if len(tags) != 1 || tags[0]["utterance_id"] != id || tags[0]["answers_utterance"] != id {
+		t.Errorf("push tags = %v, want utterance_id %s", tags, id)
+	}
+}

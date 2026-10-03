@@ -22,6 +22,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/inject"
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
+	"github.com/kccarlos/herdr-sheepdog/internal/observe"
 	"github.com/kccarlos/herdr-sheepdog/internal/push"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 	"github.com/kccarlos/herdr-sheepdog/internal/supervisor"
@@ -150,6 +151,11 @@ type App struct {
 
 	queryLazy *lazyQuerier // nil when --cli=off; filled in by Run after daemon.start
 
+	// observer runs the observers (internal/observe) off a lossy tap of
+	// the event log.
+	observer *observe.Observer
+	watchdog *observe.Watchdog
+
 	// push sends phone notifications to the iOS app (nil when its device
 	// file could not be read: pushErr says why).
 	push    *push.Sender
@@ -207,6 +213,7 @@ func Build(cfg config.Config, opts Options) (*App, error) {
 		_ = elog.Close()
 		return nil, err
 	}
+	a.observer = observe.New(a.log, elog.Tap(observe.TapBuffer), a.observers()...)
 	return a, nil
 }
 
@@ -867,6 +874,9 @@ func (a *App) Run(ctx context.Context) (err error) {
 	defer cancel()
 	var wg sync.WaitGroup
 
+	wg.Add(1)
+	go func() { defer wg.Done(); a.observer.Run(inner) }()
+
 	if a.wref != nil {
 		wg.Add(1)
 		go func() { defer wg.Done(); a.runWatcher(inner) }()
@@ -882,6 +892,7 @@ func (a *App) Run(ctx context.Context) (err error) {
 		go func() {
 			defer wg.Done()
 			for ev := range a.voice.Events() {
+				a.watchdog.OnVoiceEvent(ev)
 				a.sup.OnVoiceEvent(ev)
 				a.web.OnVoiceEvent(ev)
 			}
@@ -921,6 +932,42 @@ func (a *App) Run(ctx context.Context) (err error) {
 		a.log.Log("daemon", "daemon.drain_timeout", "", nil)
 	}
 	return nil
+}
+
+// observers are the handlers the observer feeds (internal/observe).
+func (a *App) observers() []observe.Handler {
+	a.watchdog = observe.NewWatchdog(a.log, a.watchdogProbes())
+	return []observe.Handler{observe.NewLatencyObserver(a.log), a.watchdog}
+}
+
+// watchdogProbes are the read-only accessors the watchdog polls; a
+// component the daemon runs without (no brain, --voice=off,
+// --herdr=mock) has none.
+func (a *App) watchdogProbes() observe.Probes {
+	var p observe.Probes
+	if a.brain != nil {
+		p.Brain = a.brain.RunningTurn
+	}
+	if pb, ok := a.voice.(voice.PushBacklogger); ok {
+		p.PushBacklog = pb.PushBacklog
+	}
+	if li, ok := a.voice.(supervisor.Listener); ok {
+		p.Listener = li.HasListener
+	}
+	if a.wref != nil && a.hc != nil {
+		p.HerdrBeat = a.wref.beat
+		p.HerdrPing = func(ctx context.Context) error {
+			_, err := a.hc.Ping(ctx)
+			return err
+		}
+		// Three missed snapshots (and no event meanwhile).
+		iv := time.Duration(a.cfg.SnapshotIntervalS) * time.Second
+		if iv <= 0 {
+			iv = 30 * time.Second
+		}
+		p.HerdrStale = 3*iv + 10*time.Second
+	}
+	return p
 }
 
 // runWatcher keeps a Watcher running: transitions are handled serialised
@@ -983,6 +1030,18 @@ func (r *watcherRef) set(w *herdr.Watcher) {
 	r.mu.Lock()
 	r.w = w
 	r.mu.Unlock()
+}
+
+// beat is the current Watcher's LastBeat; running is false while none
+// runs (the watchdog's herdr probe).
+func (r *watcherRef) beat() (last time.Time, running bool) {
+	r.mu.Lock()
+	w := r.w
+	r.mu.Unlock()
+	if w == nil {
+		return time.Time{}, false
+	}
+	return w.LastBeat(), true
 }
 
 // Inject implements web.EventInjector.

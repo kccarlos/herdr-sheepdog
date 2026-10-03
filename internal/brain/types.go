@@ -142,6 +142,10 @@ type Request struct {
 	// delivers: its question, the CEO's own words, the sub-agent's
 	// answer and what it follows up on.
 	Investigation *InvestigationInfo
+	// UtteranceID names the CEO utterance an utterance turn answers
+	// (the supervisor mints it at the relay): every event of the turn
+	// carries it (trace.go).
+	UtteranceID string
 	// Link is the request message's link to the voice context (the
 	// Context tab): "call:<id>" for the voice tool call that relayed an
 	// utterance, "evt:<id>" for the worker event an announce is about.

@@ -349,3 +349,47 @@ func TestEncodedMatchesFile(t *testing.T) {
 		t.Fatalf("file %q != encoded %q", data, enc)
 	}
 }
+
+func TestTurnAndUtteranceIDsLifted(t *testing.T) {
+	l, err := Open("", Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = l.Close() }()
+	l.Log("brain", "brain.step", "", map[string]any{"turn": 3, "turn_id": "turn-x-3", "utterance_id": "utt-x-1", "dur_ms": 12})
+	l.Log("voice", "voice.push", "", map[string]any{"text": "hi", "utterance_id": "utt-x-1"})
+	l.Log("brain", "brain.turn", "", map[string]any{"turn_id": 7, "utterance_id": nil, "dur_ms": "slow"}) // wrong types: ignored one by one
+	l.Log("herdr", "herdr.state", "w1:p1", nil)
+
+	evs := l.Tail(0)
+	if len(evs) != 4 {
+		t.Fatalf("got %d events", len(evs))
+	}
+	if e := evs[0]; e.TurnID != "turn-x-3" || e.UtteranceID != "utt-x-1" || e.DurMS == nil || *e.DurMS != 12 {
+		t.Errorf("step = %+v", e)
+	}
+	if e := evs[1]; e.TurnID != "" || e.UtteranceID != "utt-x-1" {
+		t.Errorf("push = %+v", e)
+	}
+	if e := evs[2]; e.TurnID != "" || e.UtteranceID != "" || e.DurMS != nil {
+		t.Errorf("odd types = %+v", e)
+	}
+	var line map[string]any
+	if err := json.Unmarshal(evs[0].Encoded(), &line); err != nil {
+		t.Fatal(err)
+	}
+	if line["turn_id"] != "turn-x-3" || line["utterance_id"] != "utt-x-1" {
+		t.Errorf("top-level ids missing from the line: %s", evs[0].Encoded())
+	}
+	if strings.Contains(string(evs[3].Encoded()), "turn_id") || strings.Contains(string(evs[3].Encoded()), "utterance_id") {
+		t.Errorf("empty ids must be omitted: %s", evs[3].Encoded())
+	}
+	// A line written before the ids existed still decodes, ids empty.
+	var old Event
+	if err := json.Unmarshal([]byte(`{"id":1,"ts":"2026-09-17T10:00:00Z","source":"voice","type":"voice.push","payload":{"text":"x"}}`), &old); err != nil {
+		t.Fatal(err)
+	}
+	if old.TurnID != "" || old.UtteranceID != "" {
+		t.Errorf("old line = %+v", old)
+	}
+}

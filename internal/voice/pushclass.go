@@ -55,6 +55,17 @@ func PushUtterance(tags map[string]any) string {
 	return id
 }
 
+// TagUtteranceID is the push tag naming the CEO utterance a reply push
+// answers, for the event log's utterance_id (docs/architecture.md "Event
+// ids").
+const TagUtteranceID = "utterance_id"
+
+// PushUtteranceID is a push's utterance_id tag ("" when none).
+func PushUtteranceID(tags map[string]any) string {
+	id, _ := tags[TagUtteranceID].(string)
+	return id
+}
+
 // PushID is a push's id ("" when it has none).
 func PushID(tags map[string]any) string {
 	id, _ := tags[TagPushID].(string)

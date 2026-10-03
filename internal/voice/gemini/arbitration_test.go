@@ -180,3 +180,20 @@ func TestDrainPushesHandsOverTheQueue(t *testing.T) {
 		t.Errorf("DrainPushes = %+v, queue left %d", got, len(s.pushQ))
 	}
 }
+
+// PushBacklog reports the queue's length and its oldest item (the daemon
+// watchdog).
+func TestPushBacklog(t *testing.T) {
+	s, err := newSession(Config{APIKeys: []string{"k"}}, &recLogger{}, &fakeDialer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n, oldest := s.PushBacklog(); n != 0 || !oldest.IsZero() {
+		t.Fatalf("empty queue = %d, %v", n, oldest)
+	}
+	now := time.Date(2026, 9, 25, 9, 0, 0, 0, time.UTC)
+	s.pushQ = []pushItem{{text: "b", at: now}, {text: "a", at: now.Add(-time.Minute)}}
+	if n, oldest := s.PushBacklog(); n != 2 || !oldest.Equal(now.Add(-time.Minute)) {
+		t.Fatalf("backlog = %d, %v", n, oldest)
+	}
+}

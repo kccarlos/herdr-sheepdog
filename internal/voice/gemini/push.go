@@ -377,6 +377,7 @@ func (s *Session) doPush(ctx context.Context, item pushItem) {
 		s.flushRecapLocked()
 		s.recap.Add(voice.RecapSupervisor, item.text)
 		s.lastSpoken = s.now()
+		s.playUtt.Handed(voice.PushUtteranceID(item.tags))
 		s.openTurnLocked()
 		if s.turn != nil {
 			s.turn.pushesSpoken++
@@ -396,6 +397,23 @@ func (s *Session) doPush(ctx context.Context, item pushItem) {
 	}
 	s.log.Log(logSource, "voice.push", "", payload)
 	s.emit(voice.EventPush{Text: item.text, Urgency: item.urgency})
+}
+
+// PushBacklog implements voice.PushBacklogger: the queued pushes and
+// when the oldest was queued (the daemon watchdog).
+func (s *Session) PushBacklog() (n int, oldest time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return backlog(s.pushQ)
+}
+
+func backlog(q []pushItem) (n int, oldest time.Time) {
+	for _, it := range q {
+		if oldest.IsZero() || it.at.Before(oldest) {
+			oldest = it.at
+		}
+	}
+	return len(q), oldest
 }
 
 // DrainPushes empties the push queue and returns what was in it, in

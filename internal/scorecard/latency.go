@@ -12,6 +12,10 @@ type LatencyReport struct {
 	// AnswerLatencyMS is, per voice.tool_call(to_supervisor), the time to
 	// its matching voice.tool_result.
 	AnswerLatencyMS Stats
+	// ReplyLatencyMS is, per voice.tool_call(to_supervisor), the time
+	// until its reply reached the voice: the tool result when it carried
+	// the answer, else the late push (computeReplyLatency).
+	ReplyLatencyMS Stats
 	// TimeToFirstWordMS is, per voice.tool_call, the time from the last
 	// voice.transcript.in before it to the first voice.transcript.out
 	// after it.
@@ -132,6 +136,7 @@ func computeLatency(events []eventlog.Event) LatencyReport {
 
 	return LatencyReport{
 		AnswerLatencyMS:       computeStats(answerMS),
+		ReplyLatencyMS:        computeReplyLatency(events),
 		TimeToFirstWordMS:     computeStats(firstWordMS),
 		BrainTurnDurByKind:    byKind,
 		BrainStepPromptTokens: computeStats(promptTokens),

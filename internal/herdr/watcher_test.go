@@ -353,3 +353,24 @@ func TestWatcherKnownPanesReconciledBySnapshot(t *testing.T) {
 		t.Errorf("transition = %+v", tr)
 	}
 }
+
+// LastBeat moves on every successful snapshot and every socket event
+// (the daemon watchdog's herdr probe).
+func TestWatcherLastBeat(t *testing.T) {
+	srv := herdrtest.New(t)
+	srv.SetWorkspace(herdr.WorkspaceInfo{WorkspaceID: "w5", Label: "sheepdog-recon"})
+	srv.SetAgent(codexAgent())
+	w, _, _ := startWatcher(t, srv, time.Hour, 1)
+	ch := w.Transitions()
+	expectTransition(t, ch, "", herdr.StateIdle)
+	before := w.LastBeat()
+	if before.IsZero() || time.Since(before) > 3*time.Second {
+		t.Fatalf("LastBeat after the initial snapshot = %v", before)
+	}
+	time.Sleep(5 * time.Millisecond)
+	srv.EmitStatus("w5:p1", herdr.StateWorking)
+	expectTransition(t, ch, herdr.StateIdle, herdr.StateWorking)
+	if !w.LastBeat().After(before) {
+		t.Errorf("LastBeat did not move on a socket event: %v, then %v", before, w.LastBeat())
+	}
+}

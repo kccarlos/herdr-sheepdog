@@ -79,6 +79,35 @@ type PlaybackReport struct {
 	Heard string
 }
 
+// PlaybackUtterance tags the next playback start with the utterance the
+// session last handed to the model to speak (a reply push or a spoken
+// tool result), so turn.latency matches that start to the reply by id.
+// Not safe for concurrent use: the session calls it under its own lock.
+type PlaybackUtterance struct{ id string }
+
+// Handed records what the model was just given to speak: an utterance's
+// reply (id), or anything else ("": the next start is not a reply).
+func (p *PlaybackUtterance) Handed(id string) { p.id = id }
+
+// Started returns the utterance to tag a playback report in state with,
+// once: only a start is tagged, and only the first after a hand-over.
+func (p *PlaybackUtterance) Started(state string) string {
+	if state != PlaybackStarted {
+		return ""
+	}
+	id := p.id
+	p.id = ""
+	return id
+}
+
+// TagPayload adds utterance_id to a voice.playback payload when id is set.
+func TagPayload(payload map[string]any, id string) map[string]any {
+	if id != "" {
+		payload["utterance_id"] = id
+	}
+	return payload
+}
+
 // Payload is the voice.playback event payload.
 func (r PlaybackReport) Payload() map[string]any {
 	p := map[string]any{"state": r.State, "played_ms": r.PlayedMs, "run_ms": r.RunMs}

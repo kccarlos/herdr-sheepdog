@@ -383,6 +383,11 @@ func (s *Session) deliverPush(lc *liveConn, item pushItem) {
 	s.mu.Unlock()
 	setPushLinks(lc, ctxcap.LinksFromTags(item.tags))
 	err := s.send(lc, ev)
+	if err == nil && item.urgency != voice.UrgencySilent {
+		s.mu.Lock()
+		s.playUtt.Handed(voice.PushUtteranceID(item.tags))
+		s.mu.Unlock()
+	}
 	payload := map[string]any{"text": item.text, "urgency": item.requested.String(), "scheduling_sent": item.urgency.SchedulingName(), "event": ev.Type}
 	for k, v := range item.tags {
 		payload[k] = v
@@ -411,6 +416,19 @@ func clip(s string) string {
 		return s
 	}
 	return s[:max]
+}
+
+// PushBacklog implements voice.PushBacklogger: the queued pushes and
+// when the oldest was queued (the daemon watchdog).
+func (s *Session) PushBacklog() (n int, oldest time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, it := range s.pushQ {
+		if oldest.IsZero() || it.at.Before(oldest) {
+			oldest = it.at
+		}
+	}
+	return len(s.pushQ), oldest
 }
 
 // DrainPushes empties the push queue and the silent context held for the

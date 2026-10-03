@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/ctxcap"
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
@@ -485,6 +486,15 @@ func setOpenCheck(s Session, f OpenCheck) {
 	if oc, ok := s.(interface{ SetOpenCheck(OpenCheck) }); ok && f != nil {
 		oc.SetOpenCheck(f)
 	}
+}
+
+// PushBacklog implements PushBacklogger for the current session (none
+// queued when it has no push queue).
+func (sw *Switcher) PushBacklog() (n int, oldest time.Time) {
+	if pb, ok := sw.cur().(PushBacklogger); ok {
+		return pb.PushBacklog()
+	}
+	return 0, time.Time{}
 }
 
 // HasListener reports whether a /ws client is attached now

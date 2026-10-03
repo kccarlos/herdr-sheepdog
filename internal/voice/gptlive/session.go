@@ -117,7 +117,10 @@ type Session struct {
 	// reports, or a timing guess without them); vad is the client's own
 	// speech detector. Both are forgotten when the client changes.
 	play voice.PlaybackTracker
-	vad  voice.ClientSpeech
+	// playUtt tags the next playback start with the reply it plays
+	// (voice.PlaybackUtterance).
+	playUtt voice.PlaybackUtterance
+	vad     voice.ClientSpeech
 }
 
 // liveConn is one GPT-Live session (one WebSocket).
@@ -372,8 +375,9 @@ func (s *Session) speakingOrPlayingLocked(now time.Time) bool {
 func (s *Session) ClientPlayback(state string, playedMs int) {
 	s.mu.Lock()
 	rep := s.play.Report(s.now(), state, playedMs)
+	utt := s.playUtt.Started(state)
 	s.mu.Unlock()
-	s.log.Log(logSource, "voice.playback", "", rep.Payload())
+	s.log.Log(logSource, "voice.playback", "", voice.TagPayload(rep.Payload(), utt))
 	if rep.Cut != nil {
 		s.emit(voice.EventTranscript{Dir: voice.DirOut, Text: rep.Heard, Final: true, Cut: rep.Cut})
 	}
