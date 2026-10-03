@@ -99,6 +99,19 @@ live question, and one live run says little. Three tools answer it
     sheepdog eval sim --live --provider vertex --model gemini-3.8-flash \
       --env-file .env --repeat 5 --parallel 5 --budget-usd 25 --out DIR
 
+- **Failover in campaigns**. The sim registers a second brain provider
+  next to `--provider`, so the brain's failover (a step that gets a
+  429/5xx/504/timeout is retried once on the next provider, order Vertex
+  then DeepSeek then Gemini) is exercised. `--fallback-provider
+  vertex|deepseek|gemini|none` picks it; the default registers every
+  provider with credentials, as the daemon does (gemini, the AI Studio
+  free tier, only with `--allow-ai-studio`). Per run, report.json has
+  `failovers`, `failover_events`, `answered_by` and `steps_by_provider`
+  (from the run's `brain.failover` and `brain.step` events); report.md
+  has a "Brain failover" table. A failover is not a failure label: the
+  run is graded on the answer it got. Brain spend is metered under the
+  model of the provider that answered each step.
+
 A conversation costs about $0.01–0.02 at list prices (brain on
 gemini-3.8-flash, judge and simulated user on Flash-Lite). Results:
 [`eval-campaign-2026-10-03.md`](eval-campaign-2026-10-03.md).

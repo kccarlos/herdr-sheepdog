@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -34,6 +35,10 @@ func printEvalSimUsage(w io.Writer) {
 	fprintln(w, "  --live                real brain, simulated user and judge (costs money)")
 	fprintln(w, "  --provider ID         live brain provider: vertex or deepseek (gemini, the AI")
 	fprintln(w, "                        Studio free tier, only with --allow-ai-studio)")
+	fprintln(w, "  --fallback-provider ID second brain provider the failover can retry a step on:")
+	fprintln(w, "                        vertex, deepseek, gemini (needs --allow-ai-studio) or none.")
+	fprintln(w, "                        Default: every provider with credentials, as the daemon")
+	fprintln(w, "                        registers them (gemini only with --allow-ai-studio)")
 	fprintln(w, "  --model ID            live brain model (default brain.model)")
 	fprintln(w, "  --utterance-timeout D an experiment: override brain.utterance_timeout_s for this")
 	fprintln(w, "                        run (e.g. 25s), to measure what the timeout costs")
@@ -58,15 +63,15 @@ func printEvalSimUsage(w io.Writer) {
 }
 
 type evalSimOpts struct {
-	live, allowAIStudio                    bool
-	provider, model, simuser, simuserModel string
-	judge, judgeModel, ollamaURL           string
-	files, filter, fixtures, events        string
-	configPath, envFile, promptsDir        string
-	out                                    string
-	uttTimeout                             time.Duration
-	repeat, parallel                       int
-	budget                                 float64
+	live, allowAIStudio                              bool
+	provider, fallback, model, simuser, simuserModel string
+	judge, judgeModel, ollamaURL                     string
+	files, filter, fixtures, events                  string
+	configPath, envFile, promptsDir                  string
+	out                                              string
+	uttTimeout                                       time.Duration
+	repeat, parallel                                 int
+	budget                                           float64
 }
 
 func parseEvalSimFlags(args []string, stderr io.Writer) (evalSimOpts, int, bool) {
@@ -77,6 +82,7 @@ func parseEvalSimFlags(args []string, stderr io.Writer) (evalSimOpts, int, bool)
 	fs.BoolVar(&o.live, "live", false, "real models")
 	fs.BoolVar(&o.allowAIStudio, "allow-ai-studio", false, "allow the gemini (AI Studio) brain provider")
 	fs.StringVar(&o.provider, "provider", "", "live brain provider")
+	fs.StringVar(&o.fallback, "fallback-provider", "", "failover provider (vertex, deepseek, gemini, none)")
 	fs.StringVar(&o.model, "model", "", "live brain model")
 	fs.StringVar(&o.simuser, "simuser", "", "simulated user backend")
 	fs.StringVar(&o.simuserModel, "simuser-model", "", "simulated user model")
@@ -117,6 +123,21 @@ func parseEvalSimFlags(args []string, stderr io.Writer) (evalSimOpts, int, bool)
 			fprintln(stderr, "sheepdog eval sim --live: --provider must be vertex or deepseek")
 			return o, 2, false
 		}
+	}
+	switch o.fallback {
+	case "", "none", brain.ProviderVertex, brain.ProviderDeepSeek:
+	case brain.ProviderGemini:
+		if !o.allowAIStudio {
+			fprintln(stderr, "sheepdog eval sim: --fallback-provider gemini is the AI Studio free tier; pass --allow-ai-studio to use it anyway")
+			return o, 2, false
+		}
+	default:
+		fprintln(stderr, "sheepdog eval sim: --fallback-provider must be vertex, deepseek, gemini or none")
+		return o, 2, false
+	}
+	if o.live && o.fallback != "" && o.fallback == o.provider {
+		fprintln(stderr, "sheepdog eval sim: --fallback-provider must differ from --provider")
+		return o, 2, false
 	}
 	return o, 0, true
 }
@@ -204,15 +225,53 @@ func simSetup(o evalSimOpts, opts eval.SimOptions) map[string]string {
 		return s
 	}
 	return map[string]string{
-		"mode":              "live",
-		"brain":             opts.BrainConfig.Provider + " " + or(opts.BrainConfig.Model, brain.DefaultModel),
-		"simulated user":    or(o.simuser, eval.BackendVertex) + " " + or(o.simuserModel, eval.DefaultJudgeModel),
-		"judge":             or(o.judge, eval.BackendVertex) + " " + or(o.judgeModel, eval.DefaultJudgeModel),
-		"parallel":          fmt.Sprint(o.parallel),
-		"budget_usd":        fmt.Sprint(o.budget),
-		"scenarios":         o.files + filterNote(o.filter),
-		"utterance_timeout": opts.BrainConfig.UtteranceTimeout.String() + " (0s = the brain default, " + brain.DefaultUtteranceTimeout.String() + ")",
+		"mode":               "live",
+		"brain":              opts.BrainConfig.Provider + " " + or(opts.BrainConfig.Model, brain.DefaultModel),
+		"simulated user":     or(o.simuser, eval.BackendVertex) + " " + or(o.simuserModel, eval.DefaultJudgeModel),
+		"judge":              or(o.judge, eval.BackendVertex) + " " + or(o.judgeModel, eval.DefaultJudgeModel),
+		"failover providers": providerList(opts.Fallbacks),
+		"parallel":           fmt.Sprint(o.parallel),
+		"budget_usd":         fmt.Sprint(o.budget),
+		"scenarios":          o.files + filterNote(o.filter),
+		"utterance_timeout":  opts.BrainConfig.UtteranceTimeout.String() + " (0s = the brain default, " + brain.DefaultUtteranceTimeout.String() + ")",
 	}
+}
+
+// fallbackModels picks the brain's extra providers out of models (every
+// provider with credentials): the one --fallback-provider names, none
+// for "none", else all but the primary, like the daemon registers them
+// (gemini, the AI Studio free tier, only with --allow-ai-studio).
+func fallbackModels(o evalSimOpts, models map[string]brain.Model) (map[string]brain.Model, error) {
+	out := map[string]brain.Model{}
+	switch o.fallback {
+	case "none":
+	case "":
+		for id, m := range models {
+			if id == o.provider || (id == brain.ProviderGemini && !o.allowAIStudio) {
+				continue
+			}
+			out[id] = m
+		}
+	default:
+		m, ok := models[o.fallback]
+		if !ok {
+			return nil, fmt.Errorf("fallback provider %q has no credentials (vertex: VERTEX_API_KEY and VERTEX_PROJECT; deepseek: DEEPSEEK_API_KEY; gemini: GEMINI_API_KEY)", o.fallback)
+		}
+		out[o.fallback] = m
+	}
+	return out, nil
+}
+
+func providerList(m map[string]brain.Model) string {
+	if len(m) == 0 {
+		return "none"
+	}
+	ids := make([]string, 0, len(m))
+	for id := range m {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return strings.Join(ids, ", ")
 }
 
 func filterNote(f string) string {
@@ -295,6 +354,10 @@ func evalSimOptions(o evalSimOpts, cfg config.Config, log logging.Logger) (eval.
 		opts.BrainConfig.Model = o.model
 	}
 	opts.NewBrainModel = func() brain.Model { return m }
+	opts.Fallbacks, err = fallbackModels(o, models)
+	if err != nil {
+		return opts, err
+	}
 
 	// One limit for every judge and simulated-user call of the campaign:
 	// a burst of parallel judge calls got 429s from Vertex Flash-Lite.

@@ -32,6 +32,10 @@ type SimOptions struct {
 	// NewBrainModel returns the brain's model for one run; nil runs the
 	// scripted fake (offline).
 	NewBrainModel func() brain.Model
+	// Fallbacks are more providers registered on the brain next to
+	// BrainConfig.Provider (id to model), so its failover is exercised:
+	// a 429/5xx/timeout on the primary retries the step on the next one.
+	Fallbacks map[string]brain.Model
 	// NewSimUser and NewJudge build the simulated user and the judge for
 	// one run, metering on m; nil NewSimUser is the scripted user, nil
 	// NewJudge the fake judge (every item yes).
@@ -78,9 +82,17 @@ type SimRun struct {
 	Timeline    []SimLine      `json:"timeline,omitempty"`
 	Verdicts    []NamedVerdict `json:"verdicts,omitempty"`
 	Fallbacks   []string       `json:"fallbacks,omitempty"`
-	ToolCalls   []string       `json:"tool_calls,omitempty"`
-	Usage       []MeterLine    `json:"usage,omitempty"`
-	CostUSD     float64        `json:"cost_usd_estimate"`
+	// Failovers counts the brain's failovers to another provider
+	// (brain.failover events), listed in FailoverEvents; AnsweredBy is
+	// the provider of the last answered brain step and StepsByProvider
+	// how many steps each provider answered.
+	Failovers       int            `json:"failovers"`
+	FailoverEvents  []string       `json:"failover_events,omitempty"`
+	AnsweredBy      string         `json:"answered_by,omitempty"`
+	StepsByProvider map[string]int `json:"steps_by_provider,omitempty"`
+	ToolCalls       []string       `json:"tool_calls,omitempty"`
+	Usage           []MeterLine    `json:"usage,omitempty"`
+	CostUSD         float64        `json:"cost_usd_estimate"`
 	// Extended is set when the judge said wait at end_call and the
 	// harness kept listening for the answer.
 	Extended bool `json:"extended,omitempty"`
@@ -128,7 +140,7 @@ func RunSim(ctx context.Context, sc SimScenario, o SimOptions, repeat int) SimRu
 			scale = 0.02
 		}
 	}
-	w, err := newSimWorld(ctx, sc, simWorldOptions{brainCfg: o.BrainConfig, model: model, fixtureDir: o.FixtureDir, meter: meter, events: sink, timeScale: scale})
+	w, err := newSimWorld(ctx, sc, simWorldOptions{brainCfg: o.BrainConfig, model: model, fallbacks: o.Fallbacks, fixtureDir: o.FixtureDir, meter: meter, events: sink, timeScale: scale})
 	if err != nil {
 		run.EndReason, run.EndDetail = EndError, err.Error()
 		run.Failures = append(run.Failures, Failure{FailError, "world: " + err.Error()})
@@ -258,6 +270,15 @@ loop:
 	run.Fallbacks = append([]string(nil), w.rec.fallbacks...)
 	run.ToolCalls = append([]string(nil), w.rec.toolCalls...)
 	timeouts := w.rec.timeouts
+	run.FailoverEvents = append([]string(nil), w.rec.failovers...)
+	run.Failovers = len(run.FailoverEvents)
+	run.AnsweredBy = w.rec.answeredBy
+	if len(w.rec.steps) > 0 {
+		run.StepsByProvider = map[string]int{}
+		for k, v := range w.rec.steps {
+			run.StepsByProvider[k] = v
+		}
+	}
 	w.rec.mu.Unlock()
 	w.close()
 
