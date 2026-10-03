@@ -46,6 +46,9 @@ type namesState struct {
 	sent  string      // the names line last pushed
 	want  string      // the line waiting for the debounce
 	timer *time.Timer // the pending debounce, nil when none
+	// said holds the spoken names (lower-cased) that went out in a
+	// line meant for the CEO's ear (noteNamesSaid).
+	said map[string]bool
 }
 
 // refreshTitle reads the worker's session title and stores it on the
@@ -211,4 +214,85 @@ func recentSpokenWas(a state.Agent, now time.Time) string {
 		return ""
 	}
 	return a.SpokenWas
+}
+
+// spokenWasToMention is the old name the roster tells the brain about:
+// recentSpokenWas, and only when the CEO was actually told that name
+// before. Tier-3 bench 2026-10-03, finding 5: on a fresh call the brain
+// said "previously bench Claude" about a name the CEO had never heard
+// (the rename happened before the call).
+func (s *Supervisor) spokenWasToMention(a state.Agent) string {
+	was := recentSpokenWas(a, s.cfg.Now())
+	if was == "" {
+		return ""
+	}
+	n := &s.names
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if !n.said[strings.ToLower(was)] {
+		return ""
+	}
+	return was
+}
+
+// noteNamesSaid records which agents' names a line meant for the CEO's
+// ear carries: a spoken push as it went to the voice, a reply, the
+// voice's own final output transcript. The names checked are each row's
+// current and previous spoken name, longest first, each matched as whole
+// words where no longer name already matched ("Claude" is not said by
+// "bench Claude 2").
+func (s *Supervisor) noteNamesSaid(text string) {
+	if strings.TrimSpace(text) == "" {
+		return
+	}
+	var names []string
+	for _, a := range s.store.List() {
+		for _, n := range []string{state.Say(a), a.SpokenWas} {
+			if n = strings.TrimSpace(n); n != "" {
+				names = append(names, strings.ToLower(n))
+			}
+		}
+	}
+	sort.Slice(names, func(i, j int) bool { return len(names[i]) > len(names[j]) })
+	lower := []byte(strings.ToLower(text))
+	var hits []string
+	for _, n := range names {
+		for from := 0; ; {
+			i := strings.Index(string(lower[from:]), n)
+			if i < 0 {
+				break
+			}
+			i += from
+			end := i + len(n)
+			if wordEdge(lower, i-1) && wordEdge(lower, end) {
+				hits = append(hits, n)
+				for k := i; k < end; k++ {
+					lower[k] = 0 // a shorter name cannot match inside it
+				}
+			}
+			from = end
+		}
+	}
+	if len(hits) == 0 {
+		return
+	}
+	n := &s.names
+	n.mu.Lock()
+	if n.said == nil {
+		n.said = map[string]bool{}
+	}
+	for _, h := range hits {
+		n.said[h] = true
+	}
+	n.mu.Unlock()
+}
+
+// wordEdge reports whether position i of b is outside the text or not
+// an ASCII letter or digit (a name ends at a word boundary).
+func wordEdge(b []byte, i int) bool {
+	if i < 0 || i >= len(b) {
+		return true
+	}
+	c := b[i]
+	return (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != 0
 }

@@ -1,0 +1,12 @@
+# Claude Code session titles seen by the tier-3 bench, 2026-10-03 (worker.title
+# events of t3-two-claudes-names, runs c1, c2, c3): two Claudes in project
+# "bench". Each run: one "title<TAB>expected spoken name" line per worker,
+# runs separated by a blank line.
+Cart type description	Cart type description Claude
+TODO.md tasks list	tasks list Claude
+
+shop/cart.go Cart type	Cart type Claude
+TODO.md tasks	tasks Claude
+
+Shop cart type	Shop cart type Claude
+TODO.md tasks	tasks Claude

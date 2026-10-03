@@ -32,7 +32,7 @@ import (
 // maxTitleWords caps the session title inside a spoken name; the roster
 // carries the whole (clipped) title, and the brain picks a word or two
 // of a long one when it speaks.
-const maxTitleWords = 6
+const maxTitleWords = 3
 
 // MaxTitleRunes caps a session title stored on a row.
 const MaxTitleRunes = 60
@@ -111,17 +111,62 @@ func CleanTitle(title string) string {
 const maxTitleNameRunes = 32
 
 // titleWords is the title as it goes into a spoken name: its first
-// maxTitleWords words, at most maxTitleNameRunes.
+// maxTitleWords plain words (speakableWord), without a dangling "and" or
+// "the" at the end, at most maxTitleNameRunes. Tier-3 bench 2026-10-03,
+// finding 5: Claude Code titles name files ("shop/cart.go Cart type",
+// "TODO.md tasks"), and the names built from them verbatim were ones
+// the brain would not say. "" when no plain word is left: the agent is
+// then numbered (project, kind, number).
 func titleWords(title string) string {
-	f := strings.Fields(CleanTitle(title))
-	if len(f) > maxTitleWords {
-		f = f[:maxTitleWords]
+	var f []string
+	for _, w := range strings.Fields(CleanTitle(title)) {
+		if len(f) == maxTitleWords {
+			break
+		}
+		if w = strings.Trim(w, "\"'`“”‘’()[]{},;:!?"); speakableWord(w) {
+			f = append(f, w)
+		}
+	}
+	for len(f) > 1 && danglingWords[strings.ToLower(f[len(f)-1])] {
+		f = f[:len(f)-1]
 	}
 	t := strings.Join(f, " ")
 	if r := []rune(t); len(r) > maxTitleNameRunes {
 		t = strings.TrimSpace(string(r[:maxTitleNameRunes]))
 	}
 	return t
+}
+
+// danglingWords do not end a name.
+var danglingWords = map[string]bool{"and": true, "or": true, "the": true, "a": true, "an": true, "of": true, "to": true, "for": true, "with": true, "in": true, "on": true}
+
+// speakableWord reports whether a title word reads aloud as a word: only
+// letters, with inner hyphens or apostrophes, and not a code identifier
+// (an upper-case letter after a lower-case one: "CartItem", "addItem").
+// A path, a file name, a flag, a number or anything with code
+// punctuation is not.
+func speakableWord(w string) bool {
+	if w == "" {
+		return false
+	}
+	prevLower := false
+	for i, r := range w {
+		switch {
+		case r == '-' || r == '\'' || r == '’':
+			if i == 0 || i == len(w)-utf8.RuneLen(r) {
+				return false
+			}
+			prevLower = false
+		case unicode.IsLetter(r):
+			if prevLower && unicode.IsUpper(r) {
+				return false
+			}
+			prevLower = unicode.IsLower(r)
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // SpokenNames computes the spoken name of every running agent, keyed by

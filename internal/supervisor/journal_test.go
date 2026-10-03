@@ -215,3 +215,20 @@ func TestPromptCarriesTheSignOff(t *testing.T) {
 		t.Error("withSignOff / withoutSignOff do not round-trip")
 	}
 }
+
+// Tier-3 bench 2026-10-03 (run A, herdr.send): a Chinese instruction
+// reached the worker as "请运行 shop 相关的测试。. When you finish, …".
+// The sign-off join respects CJK terminators.
+func TestSignOffJoinRespectsCJKTerminators(t *testing.T) {
+	for in, want := range map[string]string{
+		"请运行 shop 相关的测试。": "请运行 shop 相关的测试。 " + SignOff,
+		"请运行 shop 相关的测试":  "请运行 shop 相关的测试。 " + SignOff,
+		"能修好吗？":           "能修好吗？ " + SignOff,
+		"Run the tests":   "Run the tests. " + SignOff,
+		"Run the tests!":  "Run the tests! " + SignOff,
+	} {
+		if got := withSignOff(in); got != want {
+			t.Errorf("withSignOff(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

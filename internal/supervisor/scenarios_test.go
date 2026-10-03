@@ -678,8 +678,10 @@ func TestInstructionWhenHerdrSaysBlocked(t *testing.T) {
 	if !ok || p.Kind != state.PendingAnswerPrompt {
 		t.Errorf("pending = %+v", p)
 	}
-	if h.log.count("pending.cancelled") != 1 {
-		t.Error("the failed send_instruction should be cancelled")
+	// The screen is read before typing (menuOnScreen): nothing is sent,
+	// so no send_instruction is created and none needs cancelling.
+	if got := h.promptRequests(); len(got) != 0 {
+		t.Errorf("agent.prompt = %v, want nothing typed", got)
 	}
 	h.say("yes")
 	if keys := h.sendKeysRequests(); len(keys) != 1 || keys[0][1] != "y" {

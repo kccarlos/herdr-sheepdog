@@ -44,16 +44,17 @@ var journalRetry = 300 * time.Millisecond
 // and the journal all use the instruction without it (withoutSignOff).
 const SignOff = "When you finish, end with three short lines for someone who cannot see the screen: what changed; what needs a decision; what is next."
 
-// withSignOff appends SignOff to an instruction.
+// withSignOff appends SignOff to an instruction, after terminating it
+// the CJK-aware way (prose.Terminate): the old check looked at the last
+// byte and knew only ASCII, so a Chinese instruction reached the worker
+// as "请运行 shop 相关的测试。. When you finish, …" (tier-3 bench
+// 2026-10-03, finding 6; the H1 seam).
 func withSignOff(text string) string {
 	text = strings.TrimSpace(text)
 	if text == "" || strings.HasSuffix(text, SignOff) {
 		return text
 	}
-	if !strings.ContainsAny(text[len(text)-1:], ".!?") {
-		text += "."
-	}
-	return text + " " + SignOff
+	return prose.Terminate(text) + " " + SignOff
 }
 
 // withoutSignOff strips SignOff from an instruction, wherever the

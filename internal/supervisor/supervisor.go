@@ -508,6 +508,9 @@ func (s *Supervisor) OnVoiceEvent(ev voice.Event) {
 			s.heard(e.Text, e.Final)
 		} else {
 			s.voiceSpoke(e.Text)
+			if e.Final {
+				s.noteNamesSaid(e.Text) // names.go: what the CEO was told
+			}
 		}
 		if s.brain != nil {
 			if e.Dir == voice.DirIn {
@@ -538,6 +541,7 @@ func (s *Supervisor) OnVoiceEvent(ev voice.Event) {
 			// speaks.
 			s.pushSpoken(true)
 			s.markPushed(e.Text)
+			s.noteNamesSaid(e.Text) // names.go: what the CEO was told
 		}
 	case voice.EventInterrupted:
 		// The shepherd barged in on whatever was playing, a push

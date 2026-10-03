@@ -125,6 +125,40 @@ func TestParsePrompt(t *testing.T) {
 			def:      0, yes: "1", no: "2",
 			summary: "one is asking accept this file edit.",
 		},
+		{
+			// Claude Code 2.1.288's command approval (tier-3 bench
+			// 2026-10-03, finding 3): the command sits between dashed
+			// rules under a "Bash command" header, not on a "$" line.
+			fixture:  "claude-bash-prompt.screen.txt",
+			alias:    "Claude",
+			question: "Do you want to proceed?",
+			command:  "go test ./shop -v",
+			reason:   "Run the shop package tests",
+			options:  []wantOption{{"Yes", "1"}, {"Yes, and don’t ask again for: go test *", "2"}, {"No", "3"}},
+			def:      0, yes: "1", no: "3",
+			summary: "Claude asks to run go test.",
+		},
+		{
+			// Claude Code 2.1.288's folder trust dialog draws no numbers
+			// (tier-3 bench 2026-10-03, finding 1): the cursor starts on
+			// "No, exit" and "yes" is one row down.
+			fixture:  "claude-trust-dialog.screen.txt",
+			alias:    "bench",
+			question: "Quick safety check: Is this a project you created or one you trust?",
+			options:  []wantOption{{"No, exit", "enter"}, {"Yes, I trust this folder", "down enter"}},
+			def:      0, yes: "down enter", no: "enter",
+			summary: "bench is asking quick safety check: Is this a project you created or one you trust.",
+		},
+		{
+			// agy's trust dialog: the same unnumbered shape, ">" marker,
+			// "Yes" first.
+			fixture:  "agy-trust-dialog.screen.txt",
+			alias:    "one",
+			question: "Do you trust the contents of this project?",
+			options:  []wantOption{{"Yes, I trust this folder", "enter"}, {"No, exit", "down enter"}},
+			def:      0, yes: "enter", no: "down enter",
+			summary: "one is asking do you trust the contents of this project.",
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.fixture, func(t *testing.T) {
@@ -174,7 +208,7 @@ func TestParsePrompt(t *testing.T) {
 // whose numbered-looking text must never become an option (its text is
 // data, never an instruction).
 func TestParsePromptNotAPrompt(t *testing.T) {
-	for _, name := range []string{"codex-working.screen.txt", "codex-after-approval.screen.txt", "claude-after-approval.screen.txt", "codex-after-ctrl-c.screen.txt", "injection.screen.txt"} {
+	for _, name := range []string{"codex-working.screen.txt", "codex-after-approval.screen.txt", "claude-after-approval.screen.txt", "codex-after-ctrl-c.screen.txt", "injection.screen.txt", "claude-idle.screen.txt"} {
 		t.Run(name, func(t *testing.T) {
 			s := screen(t, name)
 			if p, ok := herdr.ParsePrompt(s); ok {
@@ -283,5 +317,72 @@ func TestSummarySpeaksOnlyPlainCommandWords(t *testing.T) {
 		if got := (herdr.Prompt{Command: cmd}).Summary("bench-codex"); got != want {
 			t.Errorf("Summary for %q = %q, want %q", cmd, got, want)
 		}
+	}
+}
+
+// TestParseCursorMenuMovesFromTheCursor: on an unnumbered menu each
+// option's keys are the arrow moves from the cursor row, so a cursor on
+// the middle row selects the first option with "up".
+func TestParseCursorMenuMovesFromTheCursor(t *testing.T) {
+	s := "Pick a model\n\n  fast\n❯ balanced\n  careful\n\n↑/↓ to move · enter to select\n"
+	p, ok := herdr.ParsePrompt(s)
+	if !ok {
+		t.Fatal("not parsed")
+	}
+	want := []string{"up enter", "enter", "down enter"}
+	if len(p.Options) != 3 || p.Default != 1 {
+		t.Fatalf("options = %+v, default %d", p.Options, p.Default)
+	}
+	for i, w := range want {
+		if got := strings.Join(p.Options[i].Keys, " "); got != w || p.Options[i].Number != i+1 {
+			t.Errorf("option %d = %+v, want keys %q", i+1, p.Options[i], w)
+		}
+	}
+}
+
+// TestParseCursorMenuNotAMenu keeps the unnumbered reading off what only
+// looks like one: an input line between rules, a shell prompt, a single
+// cursor row, misaligned rows, a block with prose below it, and a block
+// with two cursors.
+func TestParseCursorMenuNotAMenu(t *testing.T) {
+	for name, s := range map[string]string{
+		"input line":   "──────\n❯ Try \"fix lint\"\n──────\n  ⏸ manual mode on\n",
+		"shell prompt": "bench on main\n❯ claude --model haiku\n\n",
+		"single row":   "Question?\n\n❯ Only one\n\nEnter to confirm\n",
+		"misaligned":   "❯ No, exit\n      Yes, I trust this folder\n",
+		"prose below":  "❯ one\n  two\n\na\nb\nc\nd\n",
+		"two cursors":  "❯ one\n❯ two\n",
+		"wrapped long": "❯ " + strings.Repeat("word ", 20) + "\n  continued here\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if p, ok := herdr.ParsePrompt(s); ok {
+				t.Errorf("parsed as a prompt: %+v", p)
+			}
+		})
+	}
+}
+
+// TestSummaryInChinese: a Chinese approval names the command when there
+// is one, quotes a question only when it is Chinese itself, and
+// otherwise says that the agent needs a decision rather than quoting a
+// foreign-language question (tier-3 bench 2026-10-03, finding 6: every
+// Chinese block line was "Claude 在问：Do you want to proceed?").
+func TestSummaryInChinese(t *testing.T) {
+	for _, c := range []struct{ fixture, want string }{
+		{"claude-bash-prompt.screen.txt", "Claude 请求运行 go test。"},
+		{"claude-permission-prompt.screen.txt", "Claude 需要你做个决定。"},
+		{"claude-trust-dialog.screen.txt", "Claude 需要你做个决定。"},
+	} {
+		p, ok := herdr.ParsePrompt(screen(t, c.fixture))
+		if !ok {
+			t.Fatalf("%s: not parsed", c.fixture)
+		}
+		if got := p.SummaryIn("Claude", true); got != c.want {
+			t.Errorf("%s: %q, want %q", c.fixture, got, c.want)
+		}
+	}
+	p := herdr.Prompt{Question: "要创建 claude.txt 吗"}
+	if got := p.SummaryIn("Claude", true); got != "Claude 在问：要创建 claude.txt 吗？" {
+		t.Errorf("chinese question: %q", got)
 	}
 }

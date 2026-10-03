@@ -266,6 +266,9 @@ func TestPendingCancelAndProposeStop(t *testing.T) {
 
 	// propose through the router → send_instruction pending → stop → ctrl+c.
 	h.postJSON("/api/inject/state", map[string]any{"pane_id": "fake:1", "state": "working"}, nil)
+	// The prompt has left the screen: an instruction is never typed into
+	// a menu that is still on it (supervisor.menuOnScreen).
+	h.postJSON("/api/inject/screen", map[string]any{"pane_id": "fake:1", "screen": "• Working (3s • esc to interrupt)\n"}, nil)
 	code, body = h.postJSON("/api/inject/utterance", map[string]any{"text": "tell auth to skip the flaky test and rerun"}, &tr)
 	if code != http.StatusOK || tr.Tool != supervisor.ToolToSupervisor || !strings.HasSuffix(tr.Spoken, "Sent.") {
 		t.Fatalf("propose = %d %s", code, body)

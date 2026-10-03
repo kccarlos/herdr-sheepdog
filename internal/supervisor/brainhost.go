@@ -37,7 +37,7 @@ func (h brainHost) Agents() []brain.AgentInfo {
 // info converts one row.
 func (h brainHost) info(a state.Agent, pending state.PendingAction, has bool) brain.AgentInfo {
 	info := brain.AgentInfo{PaneID: a.PaneID, Alias: a.Alias, Kind: a.Kind, State: string(a.State), StateSince: a.StateSince, Task: withoutSignOff(a.CurrentTask), LastTask: withoutSignOff(a.LastTask)}
-	info.Spoken, info.Title, info.SpokenWas = state.Say(a), a.Title, recentSpokenWas(a, h.s.cfg.Now())
+	info.Spoken, info.Title, info.SpokenWas = state.Say(a), a.Title, h.s.spokenWasToMention(a)
 	info.Journal = journalInfo(a.Journal)
 	if a.LastResult != nil && a.LastResult.Spoken != "" {
 		info.LastResult = a.LastResult.Spoken

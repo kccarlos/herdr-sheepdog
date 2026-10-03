@@ -42,7 +42,10 @@ stored on each row as `spoken`) as the shortest form unique among the
 the kind alone ("Claude"); else project and kind ("sheepdog Claude");
 else, when one project has several of a kind, the worker's own session
 title and kind ("README Claude"); else project, kind and a number
-("sheepdog Claude 2"). A name the CEO gave always wins, verbatim: the
+("sheepdog Claude 2"). Only up to three plain words of the title go into
+the name: paths, file names and code identifiers are dropped
+("shop/cart.go Cart type" gives "Cart type Claude"), and a title with no
+plain word left falls back to the number. A name the CEO gave always wins, verbatim: the
 herdr agent name (herdr `agent rename`, or a voice rename) or an alias
 pinned in the config (or by the /debug inject page). Kinds are said as words
 (`agy` is "Antigravity").
@@ -55,7 +58,9 @@ JSONL; Codex's last `thread_name` for the session id in
 
 The brain's roster shows the spoken name beside the alias (`- alias
 (kind), say "README Claude" (just renamed from "Claude"), session
-"…": state`); RULES.md has it speak the name verbatim (a word or two of
+"…": state`); the old name is shown only when the shepherd was told it
+before (a spoken push, a reply or the voice's own words carried it).
+RULES.md has it speak the name verbatim (a word or two of
 a long title will do), mention the old name once right after a change,
 and pass the alias to tools. Tool calls also resolve a spoken name or
 a unique session title, and the "on record" facts a request carries
