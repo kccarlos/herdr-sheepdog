@@ -15,11 +15,12 @@ func isContextLost(ev voice.Event) bool {
 	return ok && r.ContextLost
 }
 
-// backdate moves the session's fresh-start time back by d, as if the
-// model session had been running (resumed throughout) that long.
-func (h *harness) backdate(d time.Duration) {
+// pastMaxAge moves the session's fresh-start time back past
+// refreshMaxAge, as if the model session had been running (resumed
+// throughout) that long.
+func (h *harness) pastMaxAge() {
 	h.s.mu.Lock()
-	h.s.freshAt = h.s.freshAt.Add(-d)
+	h.s.freshAt = h.s.freshAt.Add(-refreshMaxAge - time.Minute)
 	h.s.mu.Unlock()
 }
 
@@ -54,7 +55,7 @@ func TestSessionRefreshedAfterTwoHours(t *testing.T) {
 	c1.serve(handleMsg("handle-A"))
 	converse(t, h, c1, "what is auth doing?", "On it.")
 	converse(t, h, c1, "and docs?", "Docs finished the readme.")
-	h.backdate(refreshMaxAge + time.Minute)
+	h.pastMaxAge()
 
 	h.waitEvent("fresh connection", isContextLost)
 	recs := d.records()
@@ -95,7 +96,7 @@ func TestRefreshWaitsForAQuietMoment(t *testing.T) {
 		open <- v
 		return tags == nil && v
 	})
-	h.backdate(refreshMaxAge + time.Minute)
+	h.pastMaxAge()
 
 	c1.serve(outputTranscriptMsg("Auth is running "))
 	h.waitEvent("speech", func(ev voice.Event) bool { tr, ok := ev.(voice.EventTranscript); return ok && tr.Dir == voice.DirOut })
@@ -158,7 +159,7 @@ func TestRefreshWaitsForAnOwedReply(t *testing.T) {
 	c1.serve(toolCallMsg("call-1", voice.ToolToSupervisor, map[string]any{"text": "what is auth doing?"}))
 	c1.serve(turnCompleteMsg())
 	c1.waitSent(t, "pending tool result", func(m sent) bool { return m.kind == "tool" })
-	h.backdate(refreshMaxAge + time.Minute)
+	h.pastMaxAge()
 	if refreshUntil(h, 200*time.Millisecond) {
 		t.Fatal("refreshed while a reply was owed")
 	}
@@ -182,7 +183,7 @@ func TestAFreshReconnectSatisfiesADueRefresh(t *testing.T) {
 	h := newHarness(t, Config{}, d)
 	h.s.SetOpenCheck(func(tags map[string]any) bool { return tags == nil })
 	c1.serve(handleMsg("handle-A"))
-	h.backdate(refreshMaxAge + time.Minute)
+	h.pastMaxAge()
 	if refreshUntil(h, 100*time.Millisecond) {
 		t.Fatal("refreshed while a question was open")
 	}
