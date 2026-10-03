@@ -125,7 +125,7 @@ type Session struct {
 	// by key terms (heard.go); requeue holds the owed unheard lines
 	// waiting for a quiet moment; openCheck is the supervisor's.
 	heard   voice.HeardTracker
-	requeue []voice.UnheardPush
+	requeue voice.Requeue
 	// turnDoneAt is when the model's speech last ended (voice.RequeueHold).
 	turnDoneAt time.Time
 	openCheck  voice.OpenCheck
@@ -350,7 +350,7 @@ func (s *Session) Reset(reason string) error {
 	s.held = nil
 	s.inText, s.outText = "", ""
 	s.heard.Reset()
-	s.requeue = nil
+	s.requeue.Reset()
 	lc := s.live
 	s.mu.Unlock()
 	if lc != nil {

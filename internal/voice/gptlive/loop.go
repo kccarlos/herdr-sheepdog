@@ -394,7 +394,9 @@ func (s *Session) deliverPush(lc *liveConn, item pushItem) {
 		s.mu.Lock()
 		s.playUtt.Handed(voice.PushUtteranceID(item.tags))
 		// Watched until its speech is over (heard.go).
-		unheard = s.heard.Pushed(s.now(), item.text, item.tags, item.tags[voice.TagRequeued] == true)
+		sentAt := s.now()
+		unheard = s.heard.Pushed(sentAt, item.text, item.tags, item.tags[voice.TagRequeued] == true)
+		s.requeue.Pushed(sentAt, item.tags)
 		s.mu.Unlock()
 	}
 	s.reportUnheard(unheard)

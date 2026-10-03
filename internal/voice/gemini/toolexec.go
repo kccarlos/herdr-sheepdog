@@ -25,6 +25,10 @@ func (s *Session) startTool(gen int, fc *genai.FunctionCall) {
 	}
 	turnDone := s.turnDone
 	s.noteToolCallLocked(s.now())
+	if call.Name == voice.ToolToSupervisor || call.Name == voice.ToolStop {
+		text, _ := call.Args["text"].(string)
+		s.requeue.Asked(s.now(), text)
+	}
 	s.mu.Unlock()
 	s.clearStalled()
 

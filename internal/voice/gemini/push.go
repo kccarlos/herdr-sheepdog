@@ -405,7 +405,9 @@ func (s *Session) doPush(ctx context.Context, item pushItem) {
 	}
 	var unheard []voice.UnheardPush
 	if turnComplete {
-		unheard = s.heard.Pushed(s.now(), item.text, item.tags, item.tags[tagRequeued] == true)
+		sentAt := s.now()
+		unheard = s.heard.Pushed(sentAt, item.text, item.tags, item.tags[tagRequeued] == true)
+		s.requeue.Pushed(sentAt, item.tags)
 		s.flushRecapLocked()
 		s.recap.Add(voice.RecapSupervisor, item.text)
 		s.lastSpoken = s.now()
