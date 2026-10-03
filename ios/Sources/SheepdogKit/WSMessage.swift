@@ -6,14 +6,47 @@ import Foundation
 /// `docs/ws-contract.md`. Binary frames carry raw PCM16 and need no type;
 /// every text frame is one `WSMessage`.
 ///
-/// Client → server: `mute`, `silence`, `speaking`, `playback`, `cancel`,
-/// `text`, `ping`.
-/// Server → client: `flush`, `status`, `transcript`, `error`, `pong`.
+/// Client → server: `client-ready`, `mute`, `silence`, `speaking`,
+/// `playback`, `cancel`, `text`, `ping`.
+/// Server → client: `bot-ready`, `flush`, `status`, `transcript`, `error`,
+/// `pong`.
 public struct WSMessage: Codable, Equatable, Sendable {
     /// Message type discriminator. Mirrors `wsproto.Type*`.
     public enum Kind: String, Codable, Sendable {
+        case clientReady = "client-ready"
         case mute, silence, speaking, playback, cancel, text, ping
+        case botReady = "bot-ready"
         case flush, status, transcript, error, pong
+    }
+
+    /// Who is talking, on `client-ready` (docs/ws-contract.md "Protocol
+    /// version and handshake"). Mirrors `wsproto.ClientInfo`.
+    public struct ClientInfo: Codable, Equatable, Sendable {
+        public var name: String
+        public var version: String
+        public var platform: String
+
+        public init(name: String, version: String, platform: String) {
+            self.name = name
+            self.version = version
+            self.platform = platform
+        }
+
+        /// This app: "sheepdog-ios", "0.1.0 (10)", "ios".
+        public static func app(bundle: Bundle = .main) -> ClientInfo {
+            let short = bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
+            let build = bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
+            return ClientInfo(name: "sheepdog-ios", version: "\(short) (\(build))", platform: "ios")
+        }
+    }
+
+    /// The daemon, on `bot-ready`. Mirrors `wsproto.DaemonInfo`.
+    public struct DaemonInfo: Codable, Equatable, Sendable {
+        public var version: String
+
+        public init(version: String) {
+            self.version = version
+        }
     }
 
     /// What a `playback` report says the player did (docs/ws-contract.md
@@ -39,6 +72,14 @@ public struct WSMessage: Codable, Equatable, Sendable {
     }
 
     public var type: Kind
+    /// `client-ready` / `bot-ready`: the protocol the client speaks, or
+    /// the one the daemon will speak on this connection; `bot-ready` adds
+    /// the oldest client protocol it serves, its version and features.
+    public var `protocol`: Int?
+    public var minProtocol: Int?
+    public var client: ClientInfo?
+    public var daemon: DaemonInfo?
+    public var features: [String]?
     /// `mute` / `silence` / `speaking`.
     public var on: Bool?
     /// `playback`: what the player did, and the milliseconds of the run
@@ -83,6 +124,8 @@ public struct WSMessage: Codable, Equatable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case type, on, state, text, voice, muted, reason, stalled, dir, final, message, peak, provider, underruns, drains, rate
+        case `protocol`, client, daemon, features
+        case minProtocol = "min_protocol"
         case playedMs = "played_ms"
         case gatedFrames = "gated_frames"
         case bufferMs = "buffer_ms"
@@ -92,6 +135,11 @@ public struct WSMessage: Codable, Equatable, Sendable {
 
     public init(
         type: Kind,
+        protocol: Int? = nil,
+        minProtocol: Int? = nil,
+        client: ClientInfo? = nil,
+        daemon: DaemonInfo? = nil,
+        features: [String]? = nil,
         on: Bool? = nil,
         state: PlaybackState? = nil,
         playedMs: Int? = nil,
@@ -114,6 +162,11 @@ public struct WSMessage: Codable, Equatable, Sendable {
         message: String? = nil
     ) {
         self.type = type
+        self.protocol = `protocol`
+        self.minProtocol = minProtocol
+        self.client = client
+        self.daemon = daemon
+        self.features = features
         self.on = on
         self.state = state
         self.playedMs = playedMs
@@ -137,6 +190,12 @@ public struct WSMessage: Codable, Equatable, Sendable {
     }
 
     // MARK: - Client → server constructors
+
+    /// The handshake's first frame (docs/ws-contract.md "Protocol version
+    /// and handshake").
+    public static func clientReady(protocol p: Int = ProtocolHandshake.protocolVersion, client: ClientInfo) -> WSMessage {
+        WSMessage(type: .clientReady, protocol: p, client: client)
+    }
 
     public static func mute(_ on: Bool) -> WSMessage { WSMessage(type: .mute, on: on) }
     public static func silence(_ on: Bool) -> WSMessage { WSMessage(type: .silence, on: on) }
@@ -172,6 +231,9 @@ public struct WSMessage: Codable, Equatable, Sendable {
 
     // MARK: - Server → client constructors (tests and fakes)
 
+    public static func botReady(protocol p: Int, minProtocol: Int = 1, daemonVersion: String, features: [String] = []) -> WSMessage {
+        WSMessage(type: .botReady, protocol: p, minProtocol: minProtocol, daemon: DaemonInfo(version: daemonVersion), features: features)
+    }
     public static let flush = WSMessage(type: .flush)
     public static func status(_ voice: Voice, muted: Bool = false, reason: String? = nil, stalled: Bool? = nil, provider: String? = nil) -> WSMessage {
         WSMessage(type: .status, voice: voice, muted: muted, reason: reason, stalled: stalled, provider: provider)
@@ -205,6 +267,11 @@ public struct WSMessage: Codable, Equatable, Sendable {
     /// Mirrors `wsproto.Message.Validate`: the fields the type requires.
     public func validate() throws {
         switch type {
+        case .clientReady:
+            if `protocol` == nil { throw WSMessageError.missingField("client-ready", "protocol") }
+        case .botReady:
+            if `protocol` == nil { throw WSMessageError.missingField("bot-ready", "protocol") }
+            if daemon == nil { throw WSMessageError.missingField("bot-ready", "daemon") }
         case .mute, .silence, .speaking:
             if on == nil { throw WSMessageError.missingField(type.rawValue, "on") }
         case .playback:

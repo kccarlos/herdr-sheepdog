@@ -41,6 +41,10 @@ Go side writes, so the two cannot drift apart silently.
 
 The app sends what `web/voice/app.js` sends, in the same order:
 
+- **Handshake.** The first frame on every open is
+  `{"type":"client-ready","protocol":1,"client":{"name":"sheepdog-ios","version":"0.2.0 (12)","platform":"ios"}}`
+  (version from `CFBundleShortVersionString` and `CFBundleVersion`); see
+  "The protocol handshake" below.
 - **Mute.** To mute, the app stops the microphone *and then* sends
   `{"type":"mute","on":true}`. To unmute, it sends `{"type":"mute","on":false}`
   *first* and then resumes. While muted, no binary frames are sent at all
@@ -66,6 +70,40 @@ The app sends what `web/voice/app.js` sends, in the same order:
   ungated.
 - **`flush`** empties the playback queue and closes the open reply bubble.
   Stop does the same locally and also sends `cancel`.
+
+### The protocol handshake
+
+The app and the daemon ship separately, so `/ws` carries an integer
+protocol version (daemon docs/ws-contract.md "Protocol version and
+handshake"; this app speaks 1 and works with daemons from 1 up).
+`ProtocolHandshake` (SheepdogKit, pure, `ProtocolHandshakeTests`) is the
+state machine; `VoiceSocket` feeds it every control message and a 2 s
+timer:
+
+```
+idle ──open, client-ready sent──▶ waiting
+waiting ──bot-ready (protocol ≥ 1)──────────────▶ ready(protocol, daemon version, features)
+waiting ──error "unknown type client-ready"─────▶ legacy   (an older daemon; error not shown)
+waiting ──2 s, no bot-ready─────────────────────▶ legacy   (protocol 1)
+any ──status closed "protocol_too_old"──────────▶ appTooOld(the daemon's error text)  → close
+any ──bot-ready below our minimum───────────────▶ daemonTooOld                         → close
+```
+
+- Nothing waits for `bot-ready`: `mute`, `silence`, `speaking` and audio
+  follow `client-ready` at once, so an older daemon costs nothing.
+- `bot-ready` and the old daemon's error are swallowed; the session never
+  sees them.
+- A mismatch closes the socket like `replaced`, without reconnecting
+  (`VoiceSocket` reports `.closed(reason: "protocol", retrying: false)`).
+  The core raises `SessionBanner.protocolMismatch` with the words to show
+  ("Update the app" / "Update the daemon"), and the connection chip reads
+  **Update needed** (red) until the next Connect.
+- Health and the chip's sheet show a **Protocol** row: the handshake's
+  result, or `/api/hello`'s `protocol`/`min_protocol` before a socket
+  opened (no fields there: a daemon from before the handshake, protocol 1).
+- `LiveHandshakeTests` runs the handshake against a real daemon when
+  `TEST_RUNNER_SHEEPDOG_LIVE_WS=127.0.0.1:<port>` is set (new daemon:
+  `ready`; old daemon: `legacy` with no error shown), and skips otherwise.
 
 Auth is `Authorization: Bearer <token>` on every request, **including the
 WebSocket upgrade**, so the token never appears in a URL. Before opening

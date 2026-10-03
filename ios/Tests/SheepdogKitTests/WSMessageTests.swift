@@ -9,6 +9,35 @@ final class WSMessageTests: XCTestCase {
         try WSMessage.decode(Data(json.utf8))
     }
 
+    func testClientReadyRoundTrip() throws {
+        let client = WSMessage.ClientInfo(name: "sheepdog-ios", version: "0.2.0 (12)", platform: "ios")
+        XCTAssertEqual(
+            try WSMessage.clientReady(client: client).encodedString(),
+            #"{"client":{"name":"sheepdog-ios","platform":"ios","version":"0.2.0 (12)"},"protocol":1,"type":"client-ready"}"#
+        )
+        let m = try decode(#"{"type":"client-ready","protocol":1,"client":{"name":"sheepdog-ios","version":"0.2.0 (12)","platform":"ios"}}"#)
+        XCTAssertEqual(m.type, .clientReady)
+        XCTAssertEqual(m.client, client)
+        XCTAssertThrowsError(try decode(#"{"type":"client-ready"}"#), "protocol is required")
+    }
+
+    func testBotReadyAsTheDaemonSendsIt() throws {
+        let m = try decode(#"{"type":"bot-ready","protocol":1,"min_protocol":1,"daemon":{"version":"0.4.2"},"features":["playback","speaking","silence","provider","history","push","models"]}"#)
+        XCTAssertEqual(m.type, .botReady)
+        XCTAssertEqual(m.protocol, 1)
+        XCTAssertEqual(m.minProtocol, 1)
+        XCTAssertEqual(m.daemon?.version, "0.4.2")
+        XCTAssertEqual(m.features?.count, 7)
+        XCTAssertThrowsError(try decode(#"{"type":"bot-ready","protocol":1}"#), "daemon is required")
+    }
+
+    func testTheAppNamesItselfFromItsBundle() {
+        let info = WSMessage.ClientInfo.app()
+        XCTAssertEqual(info.name, "sheepdog-ios")
+        XCTAssertEqual(info.platform, "ios")
+        XCTAssertFalse(info.version.isEmpty)
+    }
+
     func testMuteRoundTrip() throws {
         XCTAssertEqual(try WSMessage.mute(true).encodedString(), #"{"on":true,"type":"mute"}"#)
         let m = try decode(#"{"type":"mute","on":false}"#)

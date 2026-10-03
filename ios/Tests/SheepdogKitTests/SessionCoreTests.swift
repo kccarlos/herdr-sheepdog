@@ -183,6 +183,32 @@ final class SessionCoreTests: XCTestCase {
         XCTAssertEqual(other.apply(.socketClosed(reason: "going away", willRetry: false), now: t0), [.stopAudio, .stopStreams, .stopTicker])
     }
 
+    func testAProtocolMismatchEndsTheSessionSaysWhyAndKeepsTheChipRed() {
+        var core = connected()
+        _ = core.apply(.handshakeChanged(.waiting), now: t0)
+        let words = "This app speaks /ws protocol 1; the daemon needs protocol 2 or newer. Update the app."
+        _ = core.apply(.handshakeChanged(.appTooOld(words)), now: t0)
+        let effects = core.apply(.socketClosed(reason: ProtocolHandshake.closeReason, willRetry: false), now: t0)
+        XCTAssertEqual(effects.last, .showBanner(.protocolMismatch(words)))
+        XCTAssertFalse(core.connection.wantsConnection, "retrying cannot fix it")
+        XCTAssertEqual(core.connectionChip.status, .updateNeeded)
+        XCTAssertEqual(core.connectionChip.word, "Update needed")
+        // The next Connect starts over.
+        _ = core.apply(.connectTapped, now: t0)
+        XCTAssertEqual(core.connection.handshake, .idle)
+        XCTAssertNotEqual(core.connectionChip.status, .updateNeeded)
+    }
+
+    func testANegotiatedOrLegacyHandshakeLeavesTheChipAlone() {
+        var core = connected()
+        _ = core.apply(.handshakeChanged(.legacy), now: t0)
+        XCTAssertEqual(core.connectionChip, connected().connectionChip)
+        _ = core.apply(.handshakeChanged(.ready(protocol: 1, daemonVersion: "x", features: [])), now: t0)
+        XCTAssertEqual(core.connectionChip, connected().connectionChip)
+        _ = core.apply(.endTapped, now: t0)
+        XCTAssertEqual(core.connection.handshake, .idle)
+    }
+
     func testARetryingCloseAfterEndIsNotReconnecting() {
         var core = connected()
         _ = core.apply(.endTapped, now: t0)

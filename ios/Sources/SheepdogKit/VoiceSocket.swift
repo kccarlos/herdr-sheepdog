@@ -16,6 +16,10 @@ import Foundation
 ///   mute state (muted *or not*: the app owns it), a closed gate and the
 ///   speech detector's state are sent on every open — the last one makes
 ///   `speaking` authoritative for the connection from its first message;
+/// * `client-ready` is the first frame on every open (the protocol
+///   handshake, `ProtocolHandshake`); nothing waits for `bot-ready`, and a
+///   protocol mismatch closes the socket without reconnecting, like
+///   `replaced`;
 /// * the ping goes every 5 s (the daemon's `web.client.stats` interval) and
 ///   waits for its pong before the next one, like `/voice`: a ping still
 ///   unanswered after 10 s drops the socket.
@@ -32,6 +36,8 @@ public final class VoiceSocket {
         /// again by itself (the daemon was unreachable), false when it
         /// will not (the address is not a URL).
         case failed(DaemonError, retrying: Bool)
+        /// The protocol handshake moved (`ProtocolHandshake.State`).
+        case handshake(ProtocolHandshake.State)
     }
 
     /// Browser constants (`web/voice/app.js`: `PING_EVERY_MS`,
@@ -70,11 +76,17 @@ public final class VoiceSocket {
 
     public var onEvent: ((Event) -> Void)?
 
+    /// Who the app says it is on `client-ready`.
+    public var client = WSMessage.ClientInfo.app()
+    /// The handshake of the current (or last) connection.
+    public private(set) var handshake = ProtocolHandshake()
+
     private var endpoint: DaemonEndpoint
     private let session: URLSession
     private var task: URLSessionWebSocketTask?
     private var receiveLoop: Task<Void, Never>?
     private var pingLoop: Task<Void, Never>?
+    private var handshakeTimer: Task<Void, Never>?
     private var retryTask: Task<Void, Never>?
     private var retryDelay: TimeInterval = VoiceSocket.retryMinimum
     private var userClosed = true
@@ -142,6 +154,8 @@ public final class VoiceSocket {
         retryTask = nil
         pingLoop?.cancel()
         pingLoop = nil
+        handshakeTimer?.cancel()
+        handshakeTimer = nil
         receiveLoop?.cancel()
         receiveLoop = nil
         pingSentAt = nil
@@ -180,6 +194,13 @@ public final class VoiceSocket {
     private func didOpen() {
         life = .open
         retryDelay = VoiceSocket.retryMinimum
+        // The handshake first, before anything else on the connection.
+        // An older daemon answers it with an "unknown type" error, which
+        // the handshake swallows.
+        handshake.start()
+        send(.clientReady(client: client))
+        startHandshakeTimer()
+        onEvent?(.handshake(handshake.state))
         // A reconnecting client starts unmuted and ungated on the daemon,
         // or with whatever mute it last had: say which, every time.
         send(.mute(muted))
@@ -193,6 +214,22 @@ public final class VoiceSocket {
         guard let message = try? WSMessage.decode(Data(text.utf8)) else { return }
         if message.type == .pong {
             pingSentAt = nil
+        }
+        let before = handshake.state
+        let action = handshake.receive(message)
+        if handshake.state != before { onEvent?(.handshake(handshake.state)) }
+        switch action {
+        case .forward:
+            break
+        case .swallow:
+            return
+        case .close:
+            // A version mismatch does not fix itself: no reconnect loop.
+            userClosed = true
+            teardown(reason: ProtocolHandshake.closeReason)
+            life = .idle
+            onEvent?(.closed(reason: ProtocolHandshake.closeReason, retrying: false))
+            return
         }
         if message.type == .status, message.voice == .closed, message.reason == "replaced" {
             // Another client owns the session now. Reconnecting would make
@@ -210,6 +247,8 @@ public final class VoiceSocket {
     private func didClose(error: Error, everOpened: Bool) {
         pingLoop?.cancel()
         pingLoop = nil
+        handshakeTimer?.cancel()
+        handshakeTimer = nil
         task = nil
         if userClosed {
             life = .idle
@@ -257,6 +296,23 @@ public final class VoiceSocket {
         guard let task, life == .open else { return false }
         task.send(.data(frame)) { _ in }
         return true
+    }
+
+    private func startHandshakeTimer() {
+        handshakeTimer?.cancel()
+        let generation = self.generation
+        handshakeTimer = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(ProtocolHandshake.timeout * 1_000_000_000))
+            guard let self, !Task.isCancelled, generation == self.generation else { return }
+            self.handshakeTimedOut()
+        }
+    }
+
+    /// No `bot-ready` within `ProtocolHandshake.timeout`: an older daemon.
+    func handshakeTimedOut() {
+        let before = handshake.state
+        handshake.timedOut()
+        if handshake.state != before { onEvent?(.handshake(handshake.state)) }
     }
 
     private func startPinging() {

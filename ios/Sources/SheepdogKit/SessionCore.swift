@@ -33,6 +33,10 @@ public struct SessionCore: Equatable, Sendable {
         public var failed = false
         /// The daemon refused the token.
         public var tokenRefused = false
+        /// The `/ws` protocol handshake (`ProtocolHandshake`), as the socket
+        /// last reported it. A mismatch outlives the connection, so the
+        /// chip keeps saying what to update until the next Connect.
+        public var handshake: ProtocolHandshake.State = .idle
         /// Retry quietly through a daemon restart, then with a banner.
         public var reconnect = ReconnectPolicy()
         /// The app owns mute; this answers a daemon that disagrees.
@@ -147,7 +151,8 @@ public struct SessionCore: Equatable, Sendable {
             socket: connection.socket,
             events: connection.events,
             failed: connection.failed,
-            tokenRefused: connection.tokenRefused
+            tokenRefused: connection.tokenRefused,
+            updateNeeded: connection.handshake.isMismatch
         ))
     }
 
@@ -194,6 +199,7 @@ public struct SessionCore: Equatable, Sendable {
             connection.events = .idle
             connection.failed = false
             connection.tokenRefused = false
+            connection.handshake = .idle
             connection.reconnect.reset()
             effects.append(.probe)
 
@@ -260,6 +266,9 @@ public struct SessionCore: Equatable, Sendable {
                 if reason == "replaced" {
                     effects.append(.showBanner(.replaced))
                 }
+                if reason == ProtocolHandshake.closeReason, let message = connection.handshake.mismatchMessage {
+                    effects.append(.showBanner(.protocolMismatch(message)))
+                }
             }
 
         case let .socketFailed(error, willRetry):
@@ -296,6 +305,10 @@ public struct SessionCore: Equatable, Sendable {
 
         case let .daemonError(text):
             effects.append(.showBanner(.daemonSaid(text)))
+
+        case let .handshakeChanged(state):
+            connection.handshake = state
+            derive = false
 
         case .muteTapped:
             setMuted(!mic.muted, &effects)
@@ -471,6 +484,7 @@ public struct SessionCore: Equatable, Sendable {
         connection.events = .idle
         connection.failed = false
         connection.tokenRefused = false
+        connection.handshake = .idle
         resetSession()
         if mic.talkMode == .holdToTalk { effects.append(.setManualGate(false)) }
     }
@@ -636,6 +650,8 @@ public enum SessionEvent: Equatable, Sendable {
     case flush
     /// The daemon's `error`.
     case daemonError(String)
+    /// The `/ws` protocol handshake moved.
+    case handshakeChanged(ProtocolHandshake.State)
 
     // The audio engine
     /// The silence gate flipped (`onGate`).
@@ -727,6 +743,9 @@ public enum SessionBanner: Equatable, Sendable {
     case microphoneFailed(String)
     /// The daemon's `error` message.
     case daemonSaid(String)
+    /// The `/ws` protocol handshake found a mismatch: update the app, or
+    /// the daemon. No retry button — retrying cannot fix it.
+    case protocolMismatch(String)
     /// iOS would not give the audio back.
     case audioResumeFailed(String)
 }

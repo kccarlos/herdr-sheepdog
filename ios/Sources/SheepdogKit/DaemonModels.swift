@@ -33,9 +33,15 @@ public struct Hello: Codable, Equatable, Sendable {
     /// on daemons that can switch provider. Absent on older ones.
     public var voiceProvider: String?
     public var voiceModel: String?
+    /// The `/ws` protocol the daemon speaks and the oldest client protocol
+    /// it serves (docs/ws-contract.md "Protocol version and handshake").
+    /// Absent on daemons from before the handshake: protocol 1.
+    public var `protocol`: Int?
+    public var minProtocol: Int?
 
     enum CodingKeys: String, CodingKey {
-        case name, version, auth, ws, audio
+        case name, version, auth, ws, audio, `protocol`
+        case minProtocol = "min_protocol"
         case voiceName = "voice_name"
         case voiceProvider = "voice_provider"
         case voiceModel = "voice_model"
@@ -44,7 +50,7 @@ public struct Hello: Codable, Equatable, Sendable {
     public var needsToken: Bool { auth == "token" }
     public var displayName: String { voiceName?.isEmpty == false ? voiceName! : "Sheepdog" }
 
-    public init(name: String, version: String, voiceName: String? = nil, auth: String, ws: String, audio: Audio, voiceProvider: String? = nil, voiceModel: String? = nil) {
+    public init(name: String, version: String, voiceName: String? = nil, auth: String, ws: String, audio: Audio, voiceProvider: String? = nil, voiceModel: String? = nil, protocol p: Int? = nil, minProtocol: Int? = nil) {
         self.name = name
         self.version = version
         self.voiceName = voiceName
@@ -53,6 +59,8 @@ public struct Hello: Codable, Equatable, Sendable {
         self.audio = audio
         self.voiceProvider = voiceProvider
         self.voiceModel = voiceModel
+        self.protocol = p
+        self.minProtocol = minProtocol
     }
 }
 

@@ -33,6 +33,8 @@ struct HealthView: View {
             LabeledContent("Address", value: model.endpointDisplay)
             LabeledContent("Version", value: model.daemonVersion ?? "—")
                 .accessibilityIdentifier("health.version")
+            LabeledContent("Protocol", value: model.protocolDisplay)
+                .accessibilityIdentifier("health.protocol")
             TimelineView(.periodic(from: .now, by: 30)) { context in
                 LabeledContent("Up for", value: model.daemonStartedAt.map { Agent.duration(context.date.timeIntervalSince($0)) } ?? "—")
                     .accessibilityIdentifier("health.uptime")

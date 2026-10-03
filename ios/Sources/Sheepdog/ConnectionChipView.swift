@@ -86,6 +86,8 @@ private struct ConnectionDetailView: View {
                 Section {
                     LabeledContent("Daemon", value: model.daemonVersion ?? "—")
                         .accessibilityIdentifier("chip.daemonVersion")
+                    LabeledContent("Protocol", value: model.protocolDisplay)
+                        .accessibilityIdentifier("chip.protocol")
                     LabeledContent("Voice name", value: model.voiceName)
                         .accessibilityIdentifier("chip.voiceName")
                     LabeledContent("Voice status", value: model.state.title)

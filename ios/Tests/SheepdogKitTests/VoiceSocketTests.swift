@@ -36,16 +36,21 @@ final class VoiceSocketTests: XCTestCase {
 
     // MARK: - Mute on every open (the app owns mute)
 
+    func testEveryOpenStartsWithClientReady() async throws {
+        let first = try await openingMessages(muted: false)[0]
+        XCTAssertEqual(first, .clientReady(client: Self.client), "the handshake goes before anything else")
+    }
+
     func testEveryOpenSaysNotMutedToo() async throws {
-        let first = try await firstMessage(muted: false)
-        XCTAssertEqual(first.type, .mute)
-        XCTAssertEqual(first.on, false, "an unmuted app says so, so a daemon's stale mute is cleared")
+        let second = try await openingMessages(muted: false)[1]
+        XCTAssertEqual(second.type, .mute)
+        XCTAssertEqual(second.on, false, "an unmuted app says so, so a daemon's stale mute is cleared")
     }
 
     func testEveryOpenSaysMuted() async throws {
-        let first = try await firstMessage(muted: true)
-        XCTAssertEqual(first.type, .mute)
-        XCTAssertEqual(first.on, true)
+        let second = try await openingMessages(muted: true)[1]
+        XCTAssertEqual(second.type, .mute)
+        XCTAssertEqual(second.on, true)
     }
 
     // MARK: - The speech detector on every open, and the ping
@@ -56,11 +61,12 @@ final class VoiceSocketTests: XCTestCase {
         let port = try await server.start()
         let socket = VoiceSocket(endpoint: DaemonEndpoint(host: "127.0.0.1", port: Int(port)))
         socket.speaking = false
+        socket.client = Self.client
         socket.connect()
         defer { socket.disconnect() }
-        let texts = try await server.texts(count: 2, timeout: 10)
+        let texts = try await server.texts(count: 3, timeout: 10)
         let messages = try texts.map { try WSMessage.decode(Data($0.utf8)) }
-        XCTAssertEqual(messages, [.mute(false), .speaking(false)], "speaking is authoritative from the first open")
+        XCTAssertEqual(messages, [.clientReady(client: Self.client), .mute(false), .speaking(false)], "speaking is authoritative from the first open")
     }
 
     func testAPingWaitsForItsPongThenTimesTheSocketOut() async throws {
@@ -81,35 +87,117 @@ final class VoiceSocketTests: XCTestCase {
         }
         socket.connect()
         defer { socket.disconnect() }
-        _ = try await server.texts(count: 2, timeout: 10)  // mute, speaking
+        _ = try await server.texts(count: 3, timeout: 10)  // client-ready, mute, speaking
 
         let t0 = Date()
         socket.pingTick(now: t0)
         socket.pingTick(now: t0.addingTimeInterval(5))
-        let texts = try await server.texts(count: 3, timeout: 5)
+        let texts = try await server.texts(count: 4, timeout: 5)
         try await Task.sleep(nanoseconds: 300_000_000)
-        XCTAssertEqual(server.received.count, 3, "one ping outstanding, not two: \(server.received)")
-        XCTAssertEqual(try WSMessage.decode(Data(texts[2].utf8)).type, .ping)
+        XCTAssertEqual(server.received.count, 4, "one ping outstanding, not two: \(server.received)")
+        XCTAssertEqual(try WSMessage.decode(Data(texts[3].utf8)).type, .ping)
         XCTAssertNil(closedReason)
 
         socket.pingTick(now: t0.addingTimeInterval(10))
         XCTAssertEqual(closedReason, "no answer from the daemon")
     }
 
+    // MARK: - The protocol handshake
+
+    func testBotReadyCompletesTheHandshakeAndIsNotHandedOn() async throws {
+        let (server, socket, events) = try await handshakeRig()
+        defer { server.stop(); socket.disconnect() }
+        server.send(#"{"type":"bot-ready","protocol":1,"min_protocol":1,"daemon":{"version":"0.4.2"},"features":["playback"]}"#)
+        try await waitUntil { socket.handshake.state.negotiatedProtocol == 1 }
+        XCTAssertEqual(socket.handshake.state, .ready(protocol: 1, daemonVersion: "0.4.2", features: ["playback"]))
+        XCTAssertTrue(events.handshakes.contains(.waiting))
+        XCTAssertFalse(events.controls.contains { $0.type == .botReady }, "the session never sees bot-ready")
+    }
+
+    func testAnOlderDaemonsUnknownTypeErrorIsNotShown() async throws {
+        let (server, socket, events) = try await handshakeRig()
+        defer { server.stop(); socket.disconnect() }
+        server.send(#"{"type":"error","message":"wsproto: unknown type \"client-ready\""}"#)
+        try await waitUntil { socket.handshake.state == .legacy }
+        XCTAssertFalse(events.controls.contains { $0.type == .error }, "an old daemon's answer is not a problem")
+        XCTAssertEqual(socket.life, .open, "and the session carries on")
+    }
+
+    func testNoBotReadyMeansProtocolOneAfterTheTimeout() async throws {
+        let (server, socket, _) = try await handshakeRig()
+        defer { server.stop(); socket.disconnect() }
+        XCTAssertEqual(socket.handshake.state, .waiting)
+        socket.handshakeTimedOut()
+        XCTAssertEqual(socket.handshake.state, .legacy)
+        XCTAssertEqual(socket.life, .open)
+    }
+
+    func testARefusedAppClosesWithoutRetrying() async throws {
+        let (server, socket, events) = try await handshakeRig()
+        defer { server.stop(); socket.disconnect() }
+        server.send(#"{"type":"error","message":"This app speaks /ws protocol 1; the daemon (version 2.0) needs protocol 2 or newer. Update the app."}"#)
+        server.send(#"{"type":"status","voice":"closed","muted":false,"reason":"protocol_too_old"}"#)
+        try await waitUntil { events.closed != nil }
+        XCTAssertEqual(events.closed?.reason, ProtocolHandshake.closeReason)
+        XCTAssertEqual(events.closed?.retrying, false, "a mismatch does not fix itself")
+        XCTAssertEqual(socket.life, .idle)
+        XCTAssertTrue(socket.handshake.isMismatch)
+        XCTAssertFalse(events.controls.contains { $0.type == .status && $0.voice == .closed }, "no \"voice closed\" notice on top of the banner")
+    }
+
     // MARK: - Helpers
 
+    static let client = WSMessage.ClientInfo(name: "sheepdog-ios", version: "test", platform: "ios")
+
+    /// What a socket reported, for the handshake tests.
+    @MainActor
+    final class Recorder {
+        var handshakes: [ProtocolHandshake.State] = []
+        var controls: [WSMessage] = []
+        var closed: (reason: String, retrying: Bool)?
+    }
+
+    /// A socket opened against a local server, past its opening frames.
+    private func handshakeRig() async throws -> (LocalWebSocketServer, VoiceSocket, Recorder) {
+        let server = try LocalWebSocketServer()
+        let port = try await server.start()
+        let socket = VoiceSocket(endpoint: DaemonEndpoint(host: "127.0.0.1", port: Int(port)))
+        socket.client = Self.client
+        let recorder = Recorder()
+        socket.onEvent = { event in
+            switch event {
+            case let .handshake(state): recorder.handshakes.append(state)
+            case let .control(message): recorder.controls.append(message)
+            case let .closed(reason, retrying): recorder.closed = (reason, retrying)
+            default: break
+            }
+        }
+        socket.connect()
+        _ = try await server.texts(count: 3, timeout: 10)
+        return (server, socket, recorder)
+    }
+
+    private func waitUntil(timeout: TimeInterval = 5, _ condition: () -> Bool) async throws {
+        let deadline = Date().addingTimeInterval(timeout)
+        while !condition() {
+            if Date() > deadline { throw URLError(.timedOut) }
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+    }
+
     /// Opens a `VoiceSocket` to a local WebSocket server and returns the
-    /// first control message the server receives.
-    private func firstMessage(muted: Bool) async throws -> WSMessage {
+    /// first two control messages the server receives.
+    private func openingMessages(muted: Bool) async throws -> [WSMessage] {
         let server = try LocalWebSocketServer()
         defer { server.stop() }
         let port = try await server.start()
         let socket = VoiceSocket(endpoint: DaemonEndpoint(host: "127.0.0.1", port: Int(port)))
         socket.muted = muted
+        socket.client = Self.client
         socket.connect()
         defer { socket.disconnect() }
-        let text = try await server.firstText(timeout: 10)
-        return try WSMessage.decode(Data(text.utf8))
+        let texts = try await server.texts(count: 2, timeout: 10)
+        return try texts.map { try WSMessage.decode(Data($0.utf8)) }
     }
 }
 
@@ -193,6 +281,17 @@ private final class LocalWebSocketServer: @unchecked Sendable {
                     self.textContinuation?.resume(throwing: URLError(.timedOut))
                     self.textContinuation = nil
                 }
+            }
+        }
+    }
+
+    /// Sends one text frame to every client.
+    func send(_ text: String) {
+        queue.async {
+            for connection in self.connections {
+                let metadata = NWProtocolWebSocket.Metadata(opcode: .text)
+                let context = NWConnection.ContentContext(identifier: "text", metadata: [metadata])
+                connection.send(content: Data(text.utf8), contentContext: context, isComplete: true, completion: .idempotent)
             }
         }
     }

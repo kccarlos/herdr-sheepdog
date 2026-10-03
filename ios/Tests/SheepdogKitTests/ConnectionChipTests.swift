@@ -11,6 +11,15 @@ final class ConnectionChipTests: XCTestCase {
         XCTAssertEqual(chip.tint, .grey)
     }
 
+    func testAProtocolMismatchReadsAsUpdateNeededBelowARefusedToken() {
+        let chip = ConnectionChip(.init(updateNeeded: true))
+        XCTAssertEqual(chip.status, .updateNeeded)
+        XCTAssertEqual(chip.word, "Update needed")
+        XCTAssertEqual(chip.tint, .red)
+        XCTAssertEqual(ConnectionChip(.init(failed: true, updateNeeded: true)).status, .updateNeeded, "retrying will not fix it")
+        XCTAssertEqual(ConnectionChip(.init(tokenRefused: true, updateNeeded: true)).status, .tokenRefused)
+    }
+
     func testBothUpIsConnected() {
         let chip = ConnectionChip(.init(socket: .open, events: .open))
         XCTAssertEqual(chip.status, .connected)

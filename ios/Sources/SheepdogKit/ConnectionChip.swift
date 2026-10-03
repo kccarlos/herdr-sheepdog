@@ -13,6 +13,9 @@ public struct ConnectionChip: Equatable, Sendable {
         case connected
         case offline
         case tokenRefused
+        /// The `/ws` protocol handshake found the app and the daemon
+        /// cannot talk (one of them needs updating).
+        case updateNeeded
     }
 
     /// A colour name, kept as a word so SheepdogKit stays free of UIKit or
@@ -34,6 +37,7 @@ public struct ConnectionChip: Equatable, Sendable {
         case .connected: return "Connected"
         case .offline: return "Offline"
         case .tokenRefused: return "Token refused"
+        case .updateNeeded: return "Update needed"
         }
     }
 
@@ -41,7 +45,7 @@ public struct ConnectionChip: Equatable, Sendable {
         switch status {
         case .connected: return .green
         case .connecting: return .amber
-        case .offline, .tokenRefused: return .red
+        case .offline, .tokenRefused, .updateNeeded: return .red
         case .notConnected: return .grey
         }
     }
@@ -57,12 +61,15 @@ public struct ConnectionChip: Equatable, Sendable {
         /// The daemon refused the token (401 on `/api/state` or the
         /// WebSocket upgrade).
         public var tokenRefused: Bool
+        /// The protocol handshake ended in a mismatch.
+        public var updateNeeded: Bool
 
-        public init(socket: SocketLife = .idle, events: SocketLife = .idle, failed: Bool = false, tokenRefused: Bool = false) {
+        public init(socket: SocketLife = .idle, events: SocketLife = .idle, failed: Bool = false, tokenRefused: Bool = false, updateNeeded: Bool = false) {
             self.socket = socket
             self.events = events
             self.failed = failed
             self.tokenRefused = tokenRefused
+            self.updateNeeded = updateNeeded
         }
     }
 
@@ -72,6 +79,8 @@ public struct ConnectionChip: Equatable, Sendable {
     public init(_ inputs: Inputs) {
         if inputs.tokenRefused {
             status = .tokenRefused
+        } else if inputs.updateNeeded {
+            status = .updateNeeded
         } else if inputs.failed {
             status = .offline
         } else if inputs.socket == .connecting || inputs.socket == .reconnecting

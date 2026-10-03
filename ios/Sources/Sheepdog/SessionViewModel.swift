@@ -76,6 +76,9 @@ final class SessionViewModel: ObservableObject {
     /// stream and the token — independent of the voice state. Drives the
     /// top-left chip.
     @Published private(set) var connectionChip = ConnectionChip(.init())
+    /// The `/ws` protocol handshake (`ProtocolHandshake`), for Health and
+    /// the chip's sheet.
+    @Published private(set) var handshake: ProtocolHandshake.State = .idle
     /// The supervisor's model, from `/api/state`'s `brain`, when the
     /// daemon reports one.
     @Published private(set) var brain: BrainInfo?
@@ -190,6 +193,16 @@ final class SessionViewModel: ObservableObject {
         return VoiceProviders.display(provider: option?.displayName ?? id, model: model)
     }
     var daemonVersion: String? { hello?.version }
+
+    /// The `/ws` protocol for Health: the handshake's word once a socket
+    /// opened, otherwise what `/api/hello` says (nothing there: an older
+    /// daemon, protocol 1).
+    var protocolDisplay: String {
+        if handshake != .idle { return handshake.summary }
+        guard let hello else { return "—" }
+        guard let p = hello.protocol else { return "1 (older daemon)" }
+        return "\(p) (serves \(hello.minProtocol ?? p) and up)"
+    }
     /// The daemon connection is up: notifications stay quiet in the
     /// foreground, the screen already shows what they would say.
     var sessionIsLive: Bool { connectionChip.status == .connected }
@@ -619,6 +632,8 @@ final class SessionViewModel: ObservableObject {
         case let .failed(error, retrying):
             send(.socketFailed(error, willRetry: retrying))
             if retrying { probeTokenAfterSocketFailure() }
+        case let .handshake(state):
+            send(.handshakeChanged(state))
         }
     }
 
@@ -667,7 +682,7 @@ final class SessionViewModel: ObservableObject {
             send(.flush)
         case .error:
             if let text = message.message { send(.daemonError(text)) }
-        case .pong, .mute, .silence, .speaking, .playback, .cancel, .text, .ping:
+        case .pong, .mute, .silence, .speaking, .playback, .cancel, .text, .ping, .clientReady, .botReady:
             break
         }
     }
@@ -792,6 +807,7 @@ final class SessionViewModel: ObservableObject {
         if wantsConnection != core.connection.wantsConnection { wantsConnection = core.connection.wantsConnection }
         let chip = core.connectionChip
         if chip != connectionChip { connectionChip = chip }
+        if handshake != core.connection.handshake { handshake = core.connection.handshake }
         let next = core.sessionState
         if next != state { state = next }
     }
@@ -1475,6 +1491,13 @@ extension SessionViewModel.Banner {
             self.init(tone: .warning, message: message, hint: "Status and what the dog says still work without it.", retryTitle: nil)
         case let .daemonSaid(text):
             self.init(tone: .warning, message: "The daemon said: \(text)", hint: nil, retryTitle: nil)
+        case let .protocolMismatch(text):
+            self.init(
+                tone: .error,
+                message: text,
+                hint: "The app and the daemon ship separately; the newer one still works with the older one only down to its minimum.",
+                retryTitle: nil
+            )
         case let .audioResumeFailed(message):
             self.init(
                 tone: .warning,
