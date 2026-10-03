@@ -1,16 +1,18 @@
-# Status (2026-10-02)
+# Status (2026-10-03)
 
 ## Distribution
 
-TestFlight build **0.1.0 (10)**, internal group **Me**. Xcode Cloud built it
-from tag `v0.1.0` (`2355322`, PR #24) with the **TestFlight** workflow.
+TestFlight build **0.1.1 (20)**, internal group **Me**. Xcode Cloud built it
+from tag `v0.1.1` (`df7267f`, PR #29) with the **TestFlight** workflow.
+`main` is at `d54ef56` (#31, the agent window, after the build); no GitHub Actions run anything here (Xcode Cloud
+only, see [`xcode-cloud.md`](xcode-cloud.md)).
 The App Store Connect record is **"Sheepdog for herdr"**. For setup,
 workflows and troubleshooting, see [`xcode-cloud.md`](xcode-cloud.md).
 
 ## Verified on a real iPhone
 
-The CEO checked these on 2026-10-01 and 2026-10-02 with the TestFlight
-build against a live daemon (Gemini Live, with the brain on Vertex AI):
+The CEO checked these on 2026-10-01 and 2026-10-02 with TestFlight build
+0.1.0 against a live daemon (Gemini Live, with the brain on Vertex AI):
 
 - Voice interaction: talking to the dog and hearing it answer.
 - Answering approvals by voice.
@@ -18,9 +20,18 @@ build against a live daemon (Gemini Live, with the brain on Vertex AI):
 
 ## Not verified on a device yet
 
+- **Everything new in 0.1.1 (20)** has only run in the simulator and the
+  unit and fixture-daemon tests: the `client-ready` / `bot-ready`
+  handshake and the Protocol row against the user's own daemon (the
+  handshake itself is checked by `LiveHandshakeTests` against a fixture
+  daemon), the Models screen, the running-only flock and Markdown.
+- **The agent window (#31, on `main`, not in 0.1.1 (20)):** a live terminal and key bar per agent from its Flock card, over the daemon's `/api/agents/{pane}/screen` and `.../input`. Only simulator and fixture-daemon tests so far; no TestFlight build carries it.
 - **AirPods and audio route changes.** This includes AirPods going in or
   out mid-session and whether the needs-you chime reaches them.
 - **AskUserQuestion with several questions** in one prompt.
+- **The daemon's 2026-10-03 fixes** (voice session refresh, unheard
+  pushes, spoken agent names) on the phone: see the daemon's
+  `docs/status.md`.
 
 ## Known rough edges
 

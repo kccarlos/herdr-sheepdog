@@ -6,8 +6,8 @@ Apple's Xcode Cloud builds and tests every pull request and every push to
 `main`, and a `v*` tag archives the app and puts it in TestFlight. Xcode
 Cloud minutes are included in the Apple Developer Program.
 
-The latest build in TestFlight is **0.1.0 (10)** (internal group **Me**),
-built from tag `v0.1.0`.
+The latest build in TestFlight is **0.1.1 (20)** (internal group **Me**),
+built from tag `v0.1.1` (`df7267f`, #29).
 
 | | |
 |---|---|
@@ -16,8 +16,8 @@ built from tag `v0.1.0`.
 | Framework bundle ID | `com.github.kccarlos.herdr-sheepdog-ios.kit` (embedded, not registered separately) |
 | App Store Connect record | "Sheepdog for herdr" (the name "Sheepdog" was taken), App ID 6817155887, SKU `herdr-sheepdog-ios` |
 | Product and scheme | `Sheepdog` (shared; Test runs `SheepdogKitTests` and `SheepdogUITests`, Archive uses Release) |
-| Version | `MARKETING_VERSION` in `project.yml` (now `0.1.0`) |
-| Build number | Xcode Cloud's own, `CI_BUILD_NUMBER`. The latest in TestFlight is `0.1.0 (10)`, from tag `v0.1.0` (`2355322`) |
+| Version | `MARKETING_VERSION` in `project.yml` (now `0.1.1`) |
+| Build number | Xcode Cloud's own, `CI_BUILD_NUMBER`. The latest in TestFlight is `0.1.1 (20)`, from tag `v0.1.1` (`df7267f`) |
 | TestFlight internal group | **Me** (tester: thisiskecheng@gmail.com). The Beta App Review contact is not saved; it only matters for external testing, which is not used |
 
 Bundle IDs may contain letters, digits, hyphens and periods (Apple's
@@ -79,7 +79,7 @@ update bundle identifier". On 2026-10-02 **Push Notifications** and **Time
 Sensitive Notifications** were enabled by hand on the App ID
 `com.github.kccarlos.herdr-sheepdog-ios`
 (<https://developer.apple.com/account/resources/identifiers/list>), and the
-next build (10) shipped. Any new capability needs the same step before the
+next build shipped. Any new capability needs the same step before the
 first archive that uses it. On the daemon side, you need an APNs auth key
 (`.p8`) for team `GV776BZVA8` (herdr-sheepdog `docs/push.md`).
 
@@ -220,16 +220,16 @@ needs no justification for this. External testers or the App Store would.
 ## 5. Releasing a build
 
 ```sh
-# project.yml: MARKETING_VERSION: "0.1.0" (bump it in a PR first for later releases)
+# project.yml: MARKETING_VERSION: "0.1.1" (bump it in a PR first: the next release is 0.1.2 or 0.2.0)
 git checkout main && git pull
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.1.1   # the tag must be v + MARKETING_VERSION and unused
+git push origin v0.1.1
 ```
 
 The TestFlight workflow starts on the tag, archives, uploads, and adds the
-build to the `Me` group; TestFlight shows it as `0.1.0 (N)` with `N` the
+build to the `Me` group; TestFlight shows it as `0.1.1 (N)` with `N` the
 Xcode Cloud build number. A tag is used once: for the next build, bump
-`MARKETING_VERSION` (e.g. to `0.1.1`) and tag `v0.1.1`. To send another
+`MARKETING_VERSION` (e.g. to `0.1.2`) and tag `v0.1.2`. To send another
 build of the same version instead, start the TestFlight workflow by hand in
 Xcode (Report navigator ▸ Cloud ▸ right-click TestFlight ▸ Start Build ▸
 branch `main`); it gets a new build number, and a manual start on a branch

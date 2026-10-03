@@ -42,7 +42,7 @@ Go side writes, so the two cannot drift apart silently.
 The app sends what `web/voice/app.js` sends, in the same order:
 
 - **Handshake.** The first frame on every open is
-  `{"type":"client-ready","protocol":1,"client":{"name":"sheepdog-ios","version":"0.2.0 (12)","platform":"ios"}}`
+  `{"type":"client-ready","protocol":1,"client":{"name":"sheepdog-ios","version":"0.1.1 (20)","platform":"ios"}}`
   (version from `CFBundleShortVersionString` and `CFBundleVersion`); see
   "The protocol handshake" below.
 - **Mute.** To mute, the app stops the microphone *and then* sends
