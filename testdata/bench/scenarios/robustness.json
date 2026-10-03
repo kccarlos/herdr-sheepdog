@@ -1,0 +1,179 @@
+{
+  "scenarios": [
+    {
+      "id": "reconnect-held-push",
+      "category": "reconnect",
+      "from_sim": "bench-finish-no-ask",
+      "note": "The phone drops for 12 s right after the request; the finish lands while away and must be told on return.",
+      "behavior": {
+        "reconnect": {
+          "after_turn": 1,
+          "away_ms": 12000
+        }
+      },
+      "voice_expect": {
+        "events": [
+          {
+            "type": "voice.push_held",
+            "note": "the finish waited for a listener"
+          }
+        ]
+      },
+      "seed": 301
+    },
+    {
+      "id": "reconnect-long-session",
+      "category": "reconnect",
+      "goal": "over one longer call: hear what both workers are doing, have bench-claude add a changelog entry, and hear when it is done",
+      "opening": "Morning. What's everyone up to?",
+      "persona": "A longer call. Ask about both workers, one at a time. Then ask sheepdog to have bench-claude add a changelog entry, and wait to hear it is done. Do not approve anything.",
+      "script": [
+        "Morning. What's everyone up to?",
+        "What's bench-codex doing exactly?",
+        "Tell bench-claude to add a changelog entry too.",
+        "<wait>"
+      ],
+      "agents": [
+        {
+          "alias": "bench-claude",
+          "kind": "claude",
+          "state": "working",
+          "screen": "bench-claude-working.txt"
+        },
+        {
+          "alias": "bench-codex",
+          "kind": "codex",
+          "state": "working",
+          "screen": "bench-codex-working.txt"
+        }
+      ],
+      "events": [
+        {
+          "on_prompt_to": "bench-claude",
+          "prompt_matches": "changelog",
+          "delay_ms": 8000,
+          "state": "done",
+          "append_screen": "• Added the changelog entry under Unreleased.\n\nDone: changelog entry added."
+        }
+      ],
+      "caps": {
+        "max_turns": 10,
+        "max_seconds": 360,
+        "silence_seconds": 45
+      },
+      "expect": {
+        "actions": [
+          {
+            "kind": "prompt",
+            "agent": "bench-claude",
+            "matches": "changelog"
+          }
+        ],
+        "forbid": [
+          {
+            "kind": "keys"
+          }
+        ],
+        "rubric": [
+          "Did the CEO hear, by the end, that bench-claude added the changelog entry?"
+        ]
+      },
+      "behavior": {
+        "reconnect": {
+          "after_turn": 2,
+          "away_ms": 8000
+        }
+      },
+      "audio": {
+        "style": "mixed"
+      },
+      "note": "A longer call with a reconnect in the middle.",
+      "seed": 302
+    },
+    {
+      "id": "failover-brain-503",
+      "category": "failover",
+      "from_sim": "j1-status-en",
+      "note": "The primary brain provider answers 503 to its first requests: the step must fail over to vertex.",
+      "faults": {
+        "brain_fail_first": 3,
+        "brain_fail_status": 503
+      },
+      "voice_expect": {
+        "events": [
+          {
+            "type": "brain.failover"
+          }
+        ]
+      },
+      "seed": 311
+    },
+    {
+      "id": "unheard-approval-requeue",
+      "category": "unheard",
+      "goal": "hear how the README is going, and learn about anything that needs you",
+      "opening": "How's the README going?",
+      "persona": "Ask about the README. If you hear that something needs you, ask what it is, but do not approve anything. End the call after.",
+      "script": [
+        "How's the README going?",
+        "What does bench-codex want?"
+      ],
+      "agents": [
+        {
+          "alias": "bench-claude",
+          "kind": "claude",
+          "state": "working",
+          "screen": "bench-claude-working.txt"
+        },
+        {
+          "alias": "bench-codex",
+          "kind": "codex",
+          "state": "working",
+          "screen": "bench-codex-working.txt"
+        }
+      ],
+      "events": [
+        {
+          "at_ms": 6000,
+          "agent": "bench-codex",
+          "state": "blocked",
+          "screen": "bench-codex-approval.txt"
+        }
+      ],
+      "expect": {
+        "forbid": [
+          {
+            "kind": "keys",
+            "agent": "bench-codex"
+          }
+        ],
+        "rubric": [
+          "Did the CEO hear (at some point in the call) that bench-codex is waiting for approval to run the tests?"
+        ]
+      },
+      "behavior": {
+        "collision": {
+          "event": 0,
+          "offset_ms": 600,
+          "line": "Hey, and remind me later to look at the README links, okay?"
+        }
+      },
+      "note": "The CEO talks over the approval announcement: an unheard needs-you push must come again.",
+      "seed": 321
+    },
+    {
+      "id": "slowness-brain-9s",
+      "category": "slowness",
+      "from_sim": "j1-status-en",
+      "note": "Every brain request takes 9 s more (a slow provider): the voice must hold the line and report back.",
+      "faults": {
+        "brain_delay_ms": 9000
+      },
+      "caps": {
+        "max_seconds": 300,
+        "silence_seconds": 60
+      },
+      "seed": 331
+    }
+  ]
+}

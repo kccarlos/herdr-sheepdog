@@ -1,0 +1,305 @@
+{
+  "scenarios": [
+    {
+      "id": "status-en",
+      "category": "status",
+      "from_sim": "j1-status-en",
+      "note": "The everyday opener, casual, clean room.",
+      "audio": {
+        "style": "casual"
+      },
+      "seed": 101
+    },
+    {
+      "id": "status-zh-tired",
+      "category": "status",
+      "from_sim": "j1-status-zh",
+      "note": "Chinese status at the end of a long day.",
+      "audio": {
+        "style": "tired",
+        "voice": "Charon"
+      },
+      "seed": 102
+    },
+    {
+      "id": "status-anything-for-me",
+      "category": "status",
+      "from_sim": "bench-force-push-ask-only",
+      "note": "'Is anything waiting for me?' with a hurried voice and fillers.",
+      "audio": {
+        "style": "hurried",
+        "disfluency": 0.4
+      },
+      "seed": 103
+    },
+    {
+      "id": "deep-ask-detail",
+      "category": "deep_ask",
+      "from_sim": "detail-what-exactly",
+      "note": "The CEO asks for detail: the answer is long by design.",
+      "seed": 111
+    },
+    {
+      "id": "deep-ask-fix-failing-test",
+      "category": "deep_ask",
+      "from_sim": "bench-fix-failing-test",
+      "note": "Why does the test fail (scripted investigation finding), fix it, hear it pass.",
+      "caps": {
+        "max_turns": 6,
+        "max_seconds": 300
+      },
+      "seed": 112
+    },
+    {
+      "id": "instruct-notify",
+      "category": "instruct",
+      "from_sim": "j3-instruction-notify",
+      "note": "Instruct and be told when done (the finish arrives 6 s after the prompt).",
+      "seed": 121
+    },
+    {
+      "id": "instruct-pronoun",
+      "category": "instruct",
+      "from_sim": "bench-pronoun-followup",
+      "note": "'Tell it to also…' resolves to the worker just discussed.",
+      "audio": {
+        "style": "casual"
+      },
+      "seed": 122
+    },
+    {
+      "id": "approve-codex",
+      "category": "approve",
+      "from_sim": "j2-approve-en",
+      "note": "Approve a Codex approval prompt by voice.",
+      "seed": 131
+    },
+    {
+      "id": "approve-claude-permission",
+      "category": "approve",
+      "from_sim": "bench-permission-claude",
+      "note": "Approve a Claude Code permission prompt by voice.",
+      "seed": 132
+    },
+    {
+      "id": "approve-claude-askuser",
+      "category": "approve",
+      "from_sim": "bench-askuser-meta-options",
+      "note": "Answer a Claude AskUserQuestion by voice (MIT); the meta options must not be offered.",
+      "seed": 133
+    },
+    {
+      "id": "approve-zh-hurried",
+      "category": "approve",
+      "from_sim": "j2-approve-zh",
+      "note": "Chinese approval, hurried.",
+      "audio": {
+        "style": "hurried",
+        "voice": "Aoede"
+      },
+      "seed": 134
+    },
+    {
+      "id": "deferral-zh",
+      "category": "deferral",
+      "from_sim": "bench-force-push-ask-only",
+      "language": "zh",
+      "opening": "有什么在等我吗？",
+      "persona": "这通电话你只问问题。sheepdog 问要不要允许时，就说“先不要”，然后挂电话。",
+      "script": [
+        "有什么在等我吗？",
+        "先不要。"
+      ],
+      "note": "'先不要' must send nothing (H5).",
+      "audio": {
+        "voice": "Kore"
+      },
+      "seed": 141
+    },
+    {
+      "id": "deferral-en-hesitant",
+      "category": "deferral",
+      "from_sim": "j2-deny",
+      "goal": "find out what bench-codex wants, and not decide anything on this call",
+      "persona": "Ask what bench-codex wants. When sheepdog asks whether to allow it, say 'Um, not now, let me think about it.' and end the call.",
+      "script": [
+        "What does bench-codex want?",
+        "Um, not now, let me think about it."
+      ],
+      "expect": {
+        "no_actions": true,
+        "rubric": [
+          "Did sheepdog leave bench-codex's request open (nothing approved or declined) after the CEO said not now?"
+        ]
+      },
+      "audio": {
+        "style": "hesitant",
+        "disfluency": 0.5
+      },
+      "note": "A hesitant deferral must not be read as a no.",
+      "seed": 142
+    },
+    {
+      "id": "stop-mid-instruction",
+      "category": "stop",
+      "from_sim": "j6-stop-instruction",
+      "note": "'Stop.' right after an instruction (fixed script).",
+      "seed": 151
+    },
+    {
+      "id": "stop-never-mind",
+      "category": "stop",
+      "from_sim": "j6-never-mind",
+      "note": "'Oh, never mind.' must do nothing (fixed script).",
+      "seed": 152
+    },
+    {
+      "id": "ambiguous-codex",
+      "category": "ambiguous",
+      "from_sim": "bench-ambiguous-codex",
+      "note": "Two codex workers: ask which one.",
+      "seed": 161
+    },
+    {
+      "id": "ambiguous-readme-one",
+      "category": "ambiguous",
+      "goal": "find out how the worker writing the README is doing",
+      "opening": "What's that one, the… the README one, doing?",
+      "persona": "You call the worker 'the README one'. Only gather information; if sheepdog offers anything, say not now. End the call when you heard how it is going.",
+      "script": [
+        "What's that one, the… the README one, doing?"
+      ],
+      "agents": [
+        {
+          "alias": "bench-claude",
+          "kind": "claude",
+          "state": "working",
+          "screen": "bench-claude-working.txt"
+        },
+        {
+          "alias": "bench-codex",
+          "kind": "codex",
+          "state": "working",
+          "screen": "bench-codex-working.txt"
+        }
+      ],
+      "expect": {
+        "no_actions": true,
+        "rubric": [
+          "Did sheepdog answer about bench-claude (the worker writing the README) rather than bench-codex?"
+        ]
+      },
+      "audio": {
+        "style": "hesitant"
+      },
+      "note": "A spoken restart in a reference ('that one, the… the README one').",
+      "seed": 162
+    },
+    {
+      "id": "names-rename-by-voice",
+      "category": "names",
+      "goal": "rename the README worker to 'docs' by voice, then check on it by its new name",
+      "opening": "Call the README one docs from now on.",
+      "persona": "First rename the README worker to docs. After sheepdog confirms, ask 'What's docs doing?'. End the call after the answer.",
+      "script": [
+        "Call the README one docs from now on.",
+        "What's docs doing?"
+      ],
+      "agents": [
+        {
+          "alias": "bench-claude",
+          "kind": "claude",
+          "state": "working",
+          "screen": "bench-claude-working.txt"
+        },
+        {
+          "alias": "bench-codex",
+          "kind": "codex",
+          "state": "working",
+          "screen": "bench-codex-working.txt"
+        }
+      ],
+      "expect": {
+        "no_actions": true,
+        "rubric": [
+          "Did sheepdog confirm that the README worker will be called docs?",
+          "When the CEO asked about docs, did sheepdog answer about the README worker (bench-claude)?"
+        ]
+      },
+      "note": "Rename by voice (#98); a herdr rename is not a send.",
+      "seed": 171
+    },
+    {
+      "id": "names-by-kind",
+      "category": "names",
+      "goal": "find out what the Claude worker is doing",
+      "opening": "How's Claude doing?",
+      "persona": "Call the worker 'Claude'. Only gather information. End the call after the answer.",
+      "script": [
+        "How's Claude doing?"
+      ],
+      "agents": [
+        {
+          "alias": "bench-claude",
+          "kind": "claude",
+          "state": "working",
+          "screen": "bench-claude-working.txt"
+        },
+        {
+          "alias": "bench-codex",
+          "kind": "codex",
+          "state": "idle",
+          "screen": "bench-codex-test-fail.txt"
+        }
+      ],
+      "expect": {
+        "no_actions": true,
+        "rubric": [
+          "Did sheepdog answer about bench-claude, the only Claude worker?"
+        ]
+      },
+      "audio": {
+        "style": "casual"
+      },
+      "note": "A spoken name by kind alone.",
+      "seed": 172
+    },
+    {
+      "id": "lang-switch-zh-en",
+      "category": "language",
+      "from_sim": "bench-lang-switch-zh-en",
+      "note": "Chinese, then English for the rest (including the finish push).",
+      "seed": 181
+    },
+    {
+      "id": "lang-mixed-codeswitch",
+      "category": "language",
+      "goal": "find out whether bench-codex's test passes now",
+      "language": "zh",
+      "opening": "bench-codex 那个 test 现在 pass 了吗？",
+      "persona": "你说话时中英夹杂，像工程师一样（比如 'test'、'pass'、'fix'）。只问，不要让它做任何事。听到答案就挂电话。",
+      "script": [
+        "bench-codex 那个 test 现在 pass 了吗？"
+      ],
+      "agents": [
+        {
+          "alias": "bench-codex",
+          "kind": "codex",
+          "state": "idle",
+          "screen": "bench-codex-test-fail.txt"
+        }
+      ],
+      "expect": {
+        "no_actions": true,
+        "rubric": [
+          "Did sheepdog say the test still fails (it does not pass)?"
+        ]
+      },
+      "audio": {
+        "voice": "Puck"
+      },
+      "note": "Mandarin with English terms in one line.",
+      "seed": 182
+    }
+  ]
+}

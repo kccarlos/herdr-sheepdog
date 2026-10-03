@@ -1,0 +1,131 @@
+{
+  "scenarios": [
+    {
+      "id": "collision-block-while-talking",
+      "category": "collision",
+      "from_sim": "bench-block-while-talking",
+      "note": "A block lands while the CEO talks; the CEO talks again over the announcement.",
+      "behavior": {
+        "collision": {
+          "event": 0,
+          "offset_ms": 2200,
+          "line": "And how long will the README take?"
+        }
+      },
+      "seed": 201
+    },
+    {
+      "id": "collision-finish-push",
+      "category": "collision",
+      "from_sim": "bench-finish-no-ask",
+      "note": "The CEO asks something just as the finish push starts.",
+      "behavior": {
+        "collision": {
+          "event": 0,
+          "offset_ms": 1800,
+          "line": "Also, did it touch the changelog?"
+        }
+      },
+      "seed": 202
+    },
+    {
+      "id": "barge-in-long-answer",
+      "category": "barge_in",
+      "from_sim": "detail-what-exactly",
+      "note": "Open mic: the CEO talks over a long answer; the voice model must yield.",
+      "behavior": {
+        "barge_in": {
+          "prob": 1,
+          "after_ms": [
+            2500,
+            3500
+          ],
+          "line": "Okay, okay. Just tell me if it needs anything from me."
+        }
+      },
+      "seed": 211
+    },
+    {
+      "id": "barge-in-hold-to-talk",
+      "category": "barge_in",
+      "from_sim": "j1-status-en",
+      "note": "Hold-to-talk: the phone cuts its own playback and reports flushed.",
+      "behavior": {
+        "barge_in": {
+          "prob": 1,
+          "after_ms": [
+            1800,
+            2600
+          ],
+          "line": "Wait, just the important part.",
+          "local": true
+        }
+      },
+      "seed": 212
+    },
+    {
+      "id": "noise-cafe-approve",
+      "category": "noise",
+      "from_sim": "j2-approve-en",
+      "note": "Approve by voice in a cafe (10 dB SNR).",
+      "audio": {
+        "noise": {
+          "name": "cafe-10dB",
+          "kind": "cafe",
+          "snr_db": 10
+        }
+      },
+      "seed": 221
+    },
+    {
+      "id": "noise-pink-status-zh",
+      "category": "noise",
+      "from_sim": "j1-status-zh",
+      "note": "Chinese status over loud broadband noise (5 dB SNR).",
+      "audio": {
+        "noise": {
+          "name": "pink-5dB",
+          "kind": "pink",
+          "snr_db": 5
+        }
+      },
+      "seed": 222
+    },
+    {
+      "id": "echo-instruct",
+      "category": "echo",
+      "from_sim": "j3-instruction-notify",
+      "note": "The phone's speaker leaks into the mic (-18 dB, 120 ms).",
+      "audio": {
+        "echo": {
+          "delay_ms": 120,
+          "gain_db": -18
+        }
+      },
+      "seed": 231
+    },
+    {
+      "id": "echo-barge-in",
+      "category": "echo",
+      "from_sim": "detail-what-exactly",
+      "note": "Echo plus talking over the bot.",
+      "audio": {
+        "echo": {
+          "delay_ms": 100,
+          "gain_db": -15
+        }
+      },
+      "behavior": {
+        "barge_in": {
+          "prob": 1,
+          "after_ms": [
+            2000,
+            3000
+          ],
+          "line": "Stop, stop. Is anything waiting for me?"
+        }
+      },
+      "seed": 232
+    }
+  ]
+}

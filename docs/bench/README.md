@@ -1,0 +1,237 @@
+# Voice bench (`sheepdog bench`)
+
+An end-to-end benchmark of the way the CEO actually uses sheepdog: by
+voice, from the phone, eyes off the screen. Its job is to find
+robustness problems before the CEO does.
+
+| Tier | What talks to what | Where |
+|---|---|---|
+| 1 | an LLM CEO types to the real supervisor and brain (no voice model) over the eval sim's scripted mock herdr | `sheepdog eval sim`, `internal/eval` |
+| 2 | **synthetic speech → phone emulator → scratch daemon with the real voice model (Gemini Live on Vertex) and the real brain (DeepSeek, failover to Vertex) → mock herdr scripted from the same sim worlds** | `sheepdog bench`, `internal/bench` (this page) |
+| 3 | the same phone emulator against real herdr workers | another harness; it reuses `internal/bench/voiceclient` |
+
+## How a tier-2 run works
+
+```text
+ LLM CEO (Vertex flash-lite)          judge (Vertex flash-lite, after the call)
+   │ text                 ▲ heard text                     ▲ transcript as heard + facts
+   ▼                      │                                │
+ Gemini TTS (Vertex) ──► phone emulator ──/ws──► scratch daemon (in process, :7790-7792)
+   voice, style,          iOS capture gate,        Gemini Live ◄─► supervisor ◄─► brain
+   disfluencies           jitter buffer,                              │        (DeepSeek ─► fault proxy)
+                          playback reports,                           ▼
+                          noise bed, echo                     mock herdr panes ◄── world driver
+                                                              (/api/inject/*)      (sim cues, /events)
+```
+
+1. A scratch daemon starts **in process** on its worker's port (7790,
+   7791 or 7792 — never 7777) with its own data directory and state
+   file under the scratch directory, loopback only, no token, no APNs
+   key (it can never notify the CEO's phone), the AI Studio key pool
+   dropped (the free-tier brain provider is never a failover target),
+   voice on (Gemini Live, `gemini.backend` from the CEO's config), brain
+   `deepseek-flash` with the Vertex provider registered for failover,
+   and `--cli=off` semantics: run_cli and investigations answer from the
+   scenario's scripted findings (`app.Options.Querier`), never from a
+   real coding agent.
+2. The **phone emulator** connects to `/ws` like the iOS app and waits
+   for the voice to be connected.
+3. The **world driver** registers the scenario's workers as synthetic
+   panes (`POST /api/inject/pane`, any state), follows `/events` for
+   `herdr.send` and plays the scenario's cues through
+   `/api/inject/state` and `/api/inject/screen` with the text sim's
+   semantics (a prompted idle worker goes busy, an answered prompt
+   moves on, an interrupt cancels what a prompt set in motion, timed
+   cues and cues after the CEO's nth utterance).
+4. The phone first hears whatever the flock says on connect (the
+   initial blocks' announcements), then the timed cues start and the
+   CEO says the scenario's **pinned opening line**; from turn two the
+   LLM CEO talks (or the scenario's fixed script). It hears the bot only
+   through the voice model's output transcription, cut where the CEO
+   cut the bot off, and speaks through TTS.
+5. After the call the judge grades the default rubric (answered, no
+   unintended action, right agent, no hallucination, ear friendly,
+   language) and the scenario's own items against the facts (every
+   screen at the start and what changed, every scripted change, every
+   action sheepdog sent). Code checks: required/forbidden actions, and
+   voice checks (below).
+
+## The phone emulator (`internal/bench/voiceclient`)
+
+A Go client that behaves like the iOS app on `/ws`
+([ws-contract.md](../ws-contract.md)); tier 3 reuses it unchanged.
+
+- **Handshake**: `client-ready` (protocol 1, `sheepdog-bench`) as the
+  first text frame; `bot-ready` features recorded; `status` tracked.
+- **Microphone**: 16 kHz PCM16 in 40 ms frames at real time; queued
+  speech, the room bed (and a −75 dBFS self-noise floor by default) and
+  the echo are mixed per frame.
+- **Capture gate** `ios` (default): the SheepdogKit
+  `VoiceActivityDetector` numbers — opens after 120 ms voiced within
+  280 ms, sends the attack plus 100 ms of pre-roll, closes after 400 ms
+  unvoiced; `silence` and `speaking` move with it; no binary frame after
+  `silence on`. `web`: the `/voice` page's peak gate. The detector hears
+  the CEO's speech plus the echo, not the steady room noise (the app's
+  detector adapts its floor to that) — an idealised detector.
+- **Player**: the contract's jitter buffer in stream time (150 ms start
+  target, start anyway after target + 250 ms, 300 ms underrun window,
+  +100 ms on a mid-run underrun, −20 ms decay), `playback`
+  started/drained/flushed with `played_ms`, `flushed` on every daemon
+  `flush` (0 when nothing played), `ping` with the counters every 5 s.
+  No time-stretch (stream time is what `played_ms` measures either way).
+- **Barge-in**: talking over the bot is the open-mic case (the voice
+  model must yield; the daemon flushes). With `LocalBargeIn` (the iOS
+  hold-to-talk press) the phone cuts its own playback at once, reports
+  `flushed`, and drops the rest of that bot turn until the daemon's
+  `flush`.
+- **Detach / Reattach**: the phone going away (pushes are held by the
+  daemon) and coming back with a fresh handshake.
+- **Recording**: every `/ws` frame (audio as sizes), the `/events`
+  stream from connect on, the audio both ways, the input transcript, and
+  each bot utterance with its fragments, `played_ms`, the part heard,
+  and whether a `voice.push` preceded it.
+
+API in brief:
+
+```go
+c, err := voiceclient.Dial(ctx, voiceclient.Options{BaseURL: url, Bed: bed.Next, Echo: &voiceclient.Echo{DelayMS: 120, GainDB: -18}})
+err = c.WaitConnected(ctx, 30*time.Second)
+err = c.Say(ctx, "status please", samples16k)    // blocks for the clip's length; SayAsync does not
+u, ok := c.NextUtterance(ctx, 15*time.Second)    // u.Text, u.Heard, u.PlayedMS, u.End, u.Push
+c.WaitQuiet(ctx, 1500*time.Millisecond, 20*time.Second)
+heard := c.InTranscriptSince(atMS)               // what the voice model heard the CEO say
+c.Detach(); err = c.Reattach(ctx)
+rec := c.Close()                                 // voiceclient.Recording
+```
+
+## Speech (`internal/bench/speech`)
+
+Gemini TTS on Vertex AI through the genai SDK with the project's API key
+(location global). Checked live 2026-10-03: `gemini-2.5-flash-tts` (the
+default), `gemini-2.5-pro-tts`, `gemini-2.5-flash-preview-tts`,
+`gemini-2.5-flash-lite-preview-tts` and `gemini-3.1-flash-tts-preview`
+answer with 24 kHz L16; `gemini-3.1-flash-tts` and `gemini-3.5-flash-tts`
+are 404. Vertex limits TTS requests per minute per base model, so a
+rate-limited line retries on the other TTS models in turn, with backoff;
+macOS `say` is the last resort (the manifest records which rendered an
+opening).
+
+- Voices Kore, Charon, Aoede, Puck; English and Mandarin.
+- Styles as the documented "Say …:" instruction: neutral, tired,
+  hurried, casual, hesitant (`mixed` picks one per line).
+- Disfluencies: fillers ("um,", "嗯…", "那个…") and restarts ("the…
+  the README one").
+- Output resampled to 16 kHz (`internal/bench/pcm`); clips cached by
+  synthesizer, model, language, voice, style and text under
+  `~/Library/Caches/sheepdog-bench/tts` (`--cache-dir`).
+- Noise beds: the audio-e2e generators (white, pink, brown, cafe) at an
+  SNR below the speech; the speaker echo: the bot's played audio,
+  delayed and attenuated, mixed back into the microphone.
+
+## Scenarios (`testdata/bench/scenarios/*.json`)
+
+Each scenario is an eval sim scenario — inline, or taken from
+`testdata/eval/sim` by id (`from_sim`) with any field overriding it —
+plus how the CEO sounds and behaves:
+
+| Field | Meaning |
+|---|---|
+| `id`, `category`, `note` | name, report group, why it exists |
+| `from_sim` | start from this sim scenario (agents, events, goal, persona, opening, script, caps, expect) |
+| `goal`, `persona`, `language`, `opening`, `script`, `fixed`, `agents`, `events`, `caps`, `expect` | as in the sim (`internal/eval/sim.go`); `notes` and `transcript` are refused (they seed an in-process brain) |
+| `audio.voice` / `style` / `disfluency` | TTS voice (default: picked by the id), style, filler/restart probability |
+| `audio.noise` | `{"name","kind","snr_db"}` room bed |
+| `audio.echo` | `{"delay_ms","gain_db"}` speaker leak |
+| `audio.floor_dbfs`, `audio.gate` | mic self-noise (default −75), `ios` or `web` gate |
+| `behavior.think_ms` | pause before each reply, default [500, 2000] |
+| `behavior.barge_in` | `{"prob","after_ms":[min,max],"line","local","max"}` talk over a long answer |
+| `behavior.collision` | `{"event","offset_ms","line"}` talk just as scripted event's push arrives |
+| `behavior.reconnect` | `{"after_turn","away_ms"}` the phone drops and comes back |
+| `faults` | `{"brain_fail_first","brain_fail_status","brain_delay_ms"}` through a proxy in front of DeepSeek |
+| `voice_expect` | `{"events":[…],"absent":[…],"opening_heard":[…]}` voice-layer checks |
+| `seed` | think times, barge-in, disfluencies (each repeat adds its index) |
+
+The opening line of every scenario is rendered once and pinned:
+`sheepdog bench render` writes `testdata/bench/openings.json` (text,
+voice, style, model, cache key, SHA-256 of the PCM); the audio stays in
+the cache, outside the repository. `sheepdog bench validate` (part of
+`make eval`) checks the files and the manifest offline.
+
+| Category | Scenarios | Exercises |
+|---|---|---|
+| status | status-en, status-zh-tired, status-anything-for-me | the everyday opener, Chinese, hurried with fillers |
+| deep_ask | deep-ask-detail, deep-ask-fix-failing-test | a long detailed answer; investigation finding, fix, notify |
+| instruct | instruct-notify, instruct-pronoun | instruct and hear back; "tell it to also…" |
+| approve | approve-codex, approve-claude-permission, approve-claude-askuser, approve-zh-hurried | Codex prompt, Claude permission prompt, Claude AskUserQuestion, Chinese |
+| deferral | deferral-zh, deferral-en-hesitant | "先不要" / "um, not now" must send nothing |
+| stop | stop-mid-instruction, stop-never-mind | "Stop." after an instruction; "never mind" |
+| ambiguous | ambiguous-codex, ambiguous-readme-one | two codex workers; "that one, the… the README one" |
+| names | names-rename-by-voice, names-by-kind | rename by voice (#98); a worker called by its kind |
+| language | lang-switch-zh-en, lang-mixed-codeswitch | switch mid-call; Mandarin with English terms |
+| collision | collision-block-while-talking, collision-finish-push | the CEO talks just as a push arrives |
+| barge_in | barge-in-long-answer, barge-in-hold-to-talk | open-mic barge-in; local cut (hold-to-talk) |
+| noise | noise-cafe-approve, noise-pink-status-zh | cafe 10 dB; pink 5 dB |
+| echo | echo-instruct, echo-barge-in | speaker leak, alone and with barge-in |
+| reconnect | reconnect-held-push, reconnect-long-session | a push lands while the phone is away; a longer call with a drop |
+| failover | failover-brain-503 | the primary brain provider answers 503 |
+| unheard | unheard-approval-requeue | the CEO talks over an approval announcement |
+| slowness | slowness-brain-9s | every brain request 9 s slower |
+
+## Commands
+
+```sh
+# Validate the audio first: TTS clips -> Gemini Live input transcription.
+sheepdog bench calibrate --env-file .env --out /tmp/bench-cal
+# Pin the openings (after changing a scenario's opening, voice or style).
+sheepdog bench render --env-file .env
+# Offline check (also in make eval).
+sheepdog bench validate
+# A campaign: three scratch daemons, every scenario three times, a budget.
+sheepdog bench run --tier 2 --env-file .env --repeat 3 --budget-usd 40 --out /tmp/bench-run
+```
+
+`bench run` flags: `--scenarios`, `--filter` (ids or categories),
+`--repeat`, `--budget-usd` (no new run once the estimate reaches it; the
+rest are not_run), `--ports` / `--parallel` (≤ 3), `--simuser` /
+`--judge` (`vertex`, `ollama`, `fake`) with `--simuser-model` /
+`--judge-model`, `--save-audio DIR` (WAV of both directions per run,
+keep it outside the repo), `--scratch`, `--cache-dir`, `--tts-model`,
+`--say` (no Gemini TTS). The judge and the simulated CEO share one
+limit of four calls in flight with jittered backoff and the alternating
+Flash-Lite model (#94).
+
+Output: `report.md`, `report.json`, `spend.log` (one line per finished
+run with the running total), `runs/<id>.r<n>.json` (the full record:
+transcript as heard, CEO lines with what the voice model heard and its
+WER, bot utterances, actions, verdicts, latency, voice counters,
+failovers, an event excerpt) and `events/<id>.r<n>.jsonl`.
+
+## Reading the results
+
+- **Taxonomy**: the eval's labels (#94) unchanged, so tier 1 and tier 2
+  count the same way. Voice-layer problems are `check` with a `voice:`
+  detail: a CEO line the voice model heard nothing of, an opening heard
+  without its key words, an expected event missing (e.g. no
+  `voice.push_held` while the phone was away) or an unexpected one.
+- **Latency**: the daemon's `turn.latency` events (#93) per segment
+  (voice, relay, queue, brain, model, tool, delivery, push queue, first
+  audio, total), p50/p90/max over every turn.
+- **Voice layer**: WER of what the voice model heard per language and
+  acoustic condition, daemon flushes, phone cuts, interrupted and
+  stalled turns, pushes unheard / re-queued / deferred / held, brain
+  failovers.
+- **Spend** (estimates at list prices, `eval.Prices`): TTS tokens, the
+  Live session's `voice.usage` tokens (priced at the native-audio rates,
+  on the high side), brain `brain.step` tokens, judge and simulated-CEO
+  tokens; the Live audio minutes are reported separately.
+
+## Limits
+
+- The speech detector is idealised (it hears the CEO's clean speech and
+  the echo, not the room); real-device detector misfires are tier 3's.
+- Faults are injected between the daemon and DeepSeek only: provider
+  failover and a slow brain. Gemini Live's own slowness cannot be
+  injected from here (TLS WebSocket to Vertex); it is observed
+  (`voice.stalled`, latency) rather than provoked.
+- One voice provider: Gemini Live. GPT-Live would need its per-minute
+  billing accounted for first.
