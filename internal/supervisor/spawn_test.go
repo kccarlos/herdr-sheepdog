@@ -204,8 +204,20 @@ func TestSpawnRefusesPathsOutsideProjectRoots(t *testing.T) {
 			t.Errorf("%s: spawned", dir)
 		}
 	}
-	if n := len(w.srv.RequestsFor("workspace.create")); n != 0 {
-		t.Errorf("workspace.create calls = %d", n)
+	// A shell pane sitting above an outside directory (the home
+	// directory, say) does not open everything below it.
+	parent := filepath.Dir(outside)
+	w.srv.SetPane(herdr.PaneInfo{PaneID: "w9:p1", WorkspaceID: "w9", Cwd: parent})
+	w.hear("open a claude in " + outside)
+	if _, err := w.spawn(brain.SpawnRequest{Dir: outside, Kind: "claude"}); err == nil {
+		t.Errorf("%s below a workspace's directory: spawned", outside)
+	}
+	w.hear("open a claude in there")
+	if _, err := w.spawn(brain.SpawnRequest{Dir: "bench", Kind: "gemini"}); err == nil {
+		t.Error("spawned an unknown kind")
+	}
+	if n := len(w.srv.RequestsFor("workspace.create")) + len(w.srv.RequestsFor("pane.split")); n != 0 {
+		t.Errorf("herdr pane calls = %d", n)
 	}
 	// A path inside a root is allowed even below the first level.
 	deep := filepath.Join(w.bench, "sub")

@@ -122,7 +122,7 @@ Rails (authorisation and runaways, not judgement):
   and not a "no" (the approval rail's fresh-input reading; the words
   themselves are not parsed for intent);
 - the directory must resolve, symlinks followed, inside a project root
-  or an existing workspace's directory (a project root itself, `..`
+  or be an existing workspace's directory (a project root itself, `..`
   and links out of a root are refused);
 - at most three new agents per ten minutes;
 - only a model name (letters, digits, `.`, `_`, `:`, `-`) reaches the

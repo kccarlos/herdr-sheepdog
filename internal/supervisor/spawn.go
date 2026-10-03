@@ -25,7 +25,7 @@ import (
 //   - the CEO's own recent words must be behind it (spawnRailLocked, the
 //     same fresh-input reading as the approval rail);
 //   - the directory must resolve, symlinks followed, inside a project
-//     root (supervisor.project_roots) or an existing workspace's
+//     root (supervisor.project_roots) or be an existing workspace's
 //     directory: never an arbitrary path;
 //   - at most spawnMax new agents per spawnWindow.
 //
@@ -97,6 +97,9 @@ func (s *Supervisor) spawn(ctx context.Context, req brain.SpawnRequest) (string,
 	sp, ok := s.herdr.(Spawner)
 	if !ok {
 		return refuse("no herdr spawner", errors.New("starting a new agent is not available here"))
+	}
+	if req.Kind != brain.SpawnClaude && req.Kind != brain.SpawnCodex {
+		return refuse("bad kind", fmt.Errorf("kind %q: want %s", req.Kind, strings.Join(brain.SpawnKinds, " or ")))
 	}
 	if req.Model != "" && !spawnModel.MatchString(req.Model) {
 		return refuse("bad model", fmt.Errorf("model %q is not a model name", req.Model))
@@ -244,8 +247,8 @@ func (s *Supervisor) spawnDirs(snap herdr.Snapshot) []spawnDir {
 
 // resolveSpawnDir turns what the brain passed into one allowed
 // directory. A path (absolute or ~/…) must resolve, symlinks followed,
-// to a directory inside a project root or an existing workspace's
-// directory. A name matches a candidate's base name (case and
+// to a directory inside a project root or to an existing workspace's
+// directory itself. A name matches a candidate's base name (case and
 // punctuation aside) when exactly one does. Otherwise the error lists
 // the candidates, for the brain to ask the CEO.
 func resolveSpawnDir(want string, dirs []spawnDir, roots []string) (spawnDir, string, error) {
@@ -265,12 +268,10 @@ func resolveSpawnDir(want string, dirs []spawnDir, roots []string) (spawnDir, st
 				return d, "", nil
 			}
 		}
+		// A workspace's directory counts only as itself (matched above):
+		// a shell pane sitting in the home directory must not open every
+		// path below it. Only a project root allows what lies inside.
 		allowed := false
-		for _, d := range dirs {
-			if d.Pane != "" && inside(path, d.Path) {
-				allowed = true
-			}
-		}
 		for _, r := range roots {
 			if rr := realDir(r); rr != "" && inside(path, rr) {
 				allowed = true
