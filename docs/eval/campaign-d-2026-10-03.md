@@ -167,6 +167,18 @@ Leads:
 - Fold the names line into the next push.
 - If a push's audio stops for more than a second before its text is done, count it as cut, and re-send it whole instead of letting the model resume.
 
+**Changed in #115, cause not confirmed.** Silent context now waits until the voice is quiet: no output being generated, and the client not playing. A newer focus line replaces one still queued. Silent pushes sent while the voice spoke fell from 74/100 (base: main, 10 scenarios × 3) to 3/100.
+
+The stall rate did not fall. These counts leave out gaps that were a barge-in, so D shows 9, not the 11 above:
+
+| Arm | Stalled pushes | Rate |
+|---|---|---|
+| D | 9/135 | 6.7 % |
+| base | 2/74 | 2.7 % |
+| #115 | 7/104 | 6.7 % |
+
+In base, the 25 pushes that had a silent line sent during them did not stall. The remaining stalls are model-side generation pauses of about 7 s (`voice.audio_timing` max_gap ≈ 6.9 s) with nothing sent by the daemon, so N1 stays open.
+
 ### N2 (P1): the voice answers new status questions from its context and never relays them
 
 26 of 126 CEO lines never reached the brain (no `supervisor.relay`, `relay_by_daemon` or fast path within 12 s).
@@ -237,6 +249,27 @@ Leads:
 - Treat `answers_utterance` as owed.
 - Re-queue a `body_skipped` push whose heard text is only an ack.
 - Count `self_relay` per run in the bench report.
+
+**Fixed in #115.** An `answers_utterance` push is now owed. It is re-queued once after the CEO's turn unless it is stale by then:
+- `superseded`: a newer answer went out after it was sent;
+- `asked_since`: the CEO handed on new words (the voice relaying the push's own text does not count).
+
+A stale answer is dropped and goes to the brain as unheard. Unheard answers re-queued at the verdict:
+
+| Arm | Re-queued |
+|---|---|
+| D | 0/13 |
+| base | 0/7 |
+| #115 | 16/16 |
+
+What happened to the 16:
+- 8 were superseded, and the brain was told.
+- 6 were dropped as already heard (see the next paragraph).
+- 2 were re-sent: 1 was heard, and 1 was voiced "On it." again. The model treating a push as a request is not fixed.
+
+**#111 leftover, fixed in #115.** A re-queued line whose content the voice retold since its verdict is dropped as `voice.push_dropped {reason: already_heard}`: content-word coverage of what the CEO heard, plus everything said since, is at least 0.5. Finish lines replayed after the CEO had heard the answer in collision-finish-push:
+- before: #111 4/6, base 2/3;
+- #115: 0/6 runs (4 lines dropped).
 
 ### N4 (P2): a late reply is labelled with the wrong agent
 

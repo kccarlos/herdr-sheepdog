@@ -119,6 +119,7 @@ func (s *Session) handleServerContent(sc *genai.LiveServerContent) {
 		s.play.Said(t.Text)
 		s.echo.Said(t.Text)
 		s.heard.Said(t.Text)
+		s.requeue.Said(t.Text)
 		// The voice answering means the shepherd finished (Gemini
 		// rarely marks its input transcription final).
 		s.recap.Add(voice.RecapUser, s.inText)

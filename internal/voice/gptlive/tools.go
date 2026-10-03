@@ -91,6 +91,10 @@ func (s *Session) startTool(lc *liveConn, delegationID string, call voice.ToolCa
 	}
 	ctx, cancel := context.WithCancel(s.ctx)
 	s.inflight[call.ID] = cancel
+	if call.Name == voice.ToolToSupervisor || call.Name == voice.ToolStop {
+		text, _ := call.Args["text"].(string)
+		s.requeue.Asked(s.now(), text)
+	}
 	s.mu.Unlock()
 	s.wg.Add(1)
 	go func() {

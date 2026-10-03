@@ -125,7 +125,7 @@ type Session struct {
 	// by key terms (heard.go); requeue holds the owed unheard lines
 	// waiting for a quiet moment; openCheck is the supervisor's.
 	heard   voice.HeardTracker
-	requeue []voice.UnheardPush
+	requeue voice.Requeue
 	// turnDoneAt is when the model's speech last ended (voice.RequeueHold).
 	turnDoneAt time.Time
 	openCheck  voice.OpenCheck
@@ -350,7 +350,7 @@ func (s *Session) Reset(reason string) error {
 	s.held = nil
 	s.inText, s.outText = "", ""
 	s.heard.Reset()
-	s.requeue = nil
+	s.requeue.Reset()
 	lc := s.live
 	s.mu.Unlock()
 	if lc != nil {
@@ -436,6 +436,21 @@ func (s *Session) speakingLocked(now time.Time) bool {
 		(!s.lastOutText.IsZero() && now.Sub(s.lastOutText) < s.cfg.SpeechHold)
 }
 
+// No echo gate here (voice/echogate.go, #113, is Gemini's). Its audio
+// path differs where the gate depends on it:
+//   - The gate arms first on the model cutting its own reply right after
+//     it starts (two self-interruptions). GPT-Live reports no
+//     interruption: the session flushes only for a stop or an
+//     interrupting push, so that signal never comes, and the gate would
+//     arm only on the slower transcript or audio match.
+//   - GPT-Live wants a continuous input stream paced in real time
+//     (pace.go). Frames the gate withholds would be paid for as
+//     keep-alive silence, and held frames released on a barge-in would
+//     then arrive as lead; the pacer would have to count withheld audio
+//     as sent first.
+//   - The bench runs Gemini only, so arming, false openings and barge-in
+//     latency on GPT-Live could not be measured.
+//
 // SendAudio implements voice.Session: 16 kHz PCM16 from /ws, resampled
 // to 24 kHz. In standby a loud frame from an attached, unmuted, armed
 // client opens a session; the frames around it are replayed once it has

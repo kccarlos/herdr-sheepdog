@@ -124,9 +124,9 @@ type Session struct {
 	openCheck voice.OpenCheck
 	// heard watches each spoken push until its speech is over
 	// (voice/heard.go); requeue holds the owed unheard lines waiting
-	// for a quiet moment (heard.go).
+	// for a quiet moment (heard.go, voice/requeue.go).
 	heard   voice.HeardTracker
-	requeue []voice.UnheardPush
+	requeue voice.Requeue
 	// turnDoneAt is when the model last completed a turn
 	// (voice.RequeueHold).
 	turnDoneAt time.Time
@@ -592,11 +592,30 @@ func (s *Session) PushTagged(text string, u voice.Urgency, tags map[string]any) 
 	if voice.IsFocus(tags) {
 		// Kept for a fresh connection's re-seed as well (reseed.go).
 		s.recap.SetFocus(text)
+		if s.replaceFocusLocked(text, u, tags) {
+			s.mu.Unlock()
+			return nil
+		}
 	}
 	s.pushQ = append(s.pushQ, pushItem{text: text, urgency: u, requested: u, tags: tags, at: s.now()})
 	s.mu.Unlock()
 	s.poke()
 	return nil
+}
+
+// replaceFocusLocked puts a new current-focus line in the place of one
+// still queued (silent context waits while the voice speaks, push.go
+// silentWaitLocked): only the latest focus is worth sending. The names
+// line needs no such step: the supervisor debounces it and never sends
+// the same line twice. Caller holds s.mu.
+func (s *Session) replaceFocusLocked(text string, u voice.Urgency, tags map[string]any) bool {
+	for i := range s.pushQ {
+		if voice.IsFocus(s.pushQ[i].tags) {
+			s.pushQ[i].text, s.pushQ[i].urgency, s.pushQ[i].requested, s.pushQ[i].tags = text, u, u, tags
+			return true
+		}
+	}
+	return false
 }
 
 // Reset implements the optional voice.Session Reset: it drops the
@@ -617,7 +636,7 @@ func (s *Session) Reset(reason string) error {
 	s.recap.Reset() // a new conversation must not be re-seeded with the old one
 	s.inText, s.outText = "", ""
 	s.heard.Reset()
-	s.requeue = nil
+	s.requeue.Reset()
 	s.mu.Unlock()
 	s.rec.Marker("conversation reset", "New conversation: the resumption handle is dropped, so the next connection starts without the conversation so far.", nil)
 	select {

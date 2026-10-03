@@ -42,7 +42,7 @@ func exempt(tags map[string]any) bool {
 }
 
 // Push policy (plan §3.6). UrgencySilent goes as soon as there is a
-// connection. UrgencyInterrupt goes as soon as the user is not speaking.
+// connection and the voice is quiet (silentWaitLocked). UrgencyInterrupt goes as soon as the user is not speaking.
 // UrgencyIdle additionally waits for the model's turn to complete and
 // for PushGap since the previous spoken push. Which push goes next is
 // pickPush's arbitration (voice/pushclass.go): the first ready line the
@@ -172,8 +172,9 @@ func (s *Session) pickPush() pushPick {
 		utt := voice.PushUtterance(it.tags)
 		if wait == 0 && !blocked[utt] {
 			if first || it.urgency == voice.UrgencySilent {
-				// Silent context waits for nothing, so taking it in
-				// order costs an owed line nothing.
+				// Silent context, once the voice is quiet, waits for
+				// nothing more, so taking it in order costs an owed
+				// line nothing.
 				pick = i
 				break
 			}
@@ -268,7 +269,7 @@ func (s *Session) pushReadyLocked(item pushItem, now time.Time) (wait time.Durat
 		return waitState, false
 	}
 	if item.urgency == voice.UrgencySilent {
-		return 0, false
+		return s.silentWaitLocked(now), false
 	}
 	if until := s.speakingUntilLocked(now); until > 0 {
 		return until, false
@@ -303,6 +304,37 @@ func (s *Session) pushReadyLocked(item pushItem, now time.Time) (wait time.Durat
 		return gap, timedOut
 	}
 	return 0, timedOut
+}
+
+// Silent context waits for the voice to be quiet (campaign D N1,
+// docs/eval/campaign-d-2026-10-03.md): it used to go out at once, as a
+// user-role client turn, even while a spoken push was being generated.
+// 11 of 135 spoken pushes stopped mid-sentence for 3–24 s and their
+// tail came back only at the next turn, glued to the reply to the
+// CEO; 6 of the 11 had the names line or the current-focus line sent
+// while they were spoken (15 % of the 41 pushes a silent line landed
+// in, 5 % of the other 94). Context is not urgent, so it now waits
+// until no output is being generated and the client is not playing.
+// silentRecheck is how often a silent line held for generation looks
+// again (the reader pokes the loop on turnComplete, but not on every
+// interruption).
+const silentRecheck = 250 * time.Millisecond
+
+// silentWaitLocked is how long a silent push must still wait: while the
+// model generates output (bounded by TurnTimeout since its last output,
+// so a turn that never completes cannot hold context for ever) and
+// while the client plays it. Caller holds s.mu.
+func (s *Session) silentWaitLocked(now time.Time) time.Duration {
+	if s.speaking {
+		if left := s.cfg.TurnTimeout - now.Sub(s.turnOpenedAt); left > 0 {
+			return min(left, silentRecheck)
+		}
+		return 0
+	}
+	if playing, left := s.play.Playing(now); playing {
+		return left
+	}
+	return 0
 }
 
 // speakingUntilLocked returns how long the user still counts as speaking
@@ -373,7 +405,9 @@ func (s *Session) doPush(ctx context.Context, item pushItem) {
 	}
 	var unheard []voice.UnheardPush
 	if turnComplete {
-		unheard = s.heard.Pushed(s.now(), item.text, item.tags, item.tags[tagRequeued] == true)
+		sentAt := s.now()
+		unheard = s.heard.Pushed(sentAt, item.text, item.tags, item.tags[tagRequeued] == true)
+		s.requeue.Pushed(sentAt, item.tags)
 		s.flushRecapLocked()
 		s.recap.Add(voice.RecapSupervisor, item.text)
 		s.lastSpoken = s.now()

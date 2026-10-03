@@ -48,6 +48,9 @@ type UnheardPush struct {
 	// Requeued marks a push that was itself a re-queue of an unheard
 	// one: it is never re-queued again.
 	Requeued bool
+	// SentAt is when the push was sent (Requeue tells a stale answer by
+	// what happened since).
+	SentAt time.Time
 }
 
 // Payload is the voice.push_unheard payload (push_id, event_id, agent
@@ -236,7 +239,8 @@ const TagRequeued = "requeued"
 
 // OwedTags reports whether tags alone mark a line the shepherd is owed a
 // hearing of: a decision they must take (needs_user) or a kept or due
-// promise.
+// promise. An answer to their question is owed as well, unless stale
+// (Requeue.Owed).
 func OwedTags(tags map[string]any) bool {
 	if tags == nil {
 		return false
@@ -298,7 +302,7 @@ func (h *HeardTracker) judge(out []UnheardPush, w *pushWatch, said, reason strin
 	if w.userTurn && reason != UnheardInterruptedByPush {
 		reason = UnheardUserTurn
 	}
-	return append(out, UnheardPush{Text: w.text, Tags: w.tags, Coverage: cov, Heard: said, Reason: reason, Requeued: w.requeued})
+	return append(out, UnheardPush{Text: w.text, Tags: w.tags, Coverage: cov, Heard: said, Reason: reason, Requeued: w.requeued, SentAt: w.sentAt})
 }
 
 // judgeRuns judges the watches of flushed runs on what was generated

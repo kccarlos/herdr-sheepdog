@@ -1,6 +1,7 @@
 package gemini
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -116,8 +117,9 @@ func TestPushLostToTheShepherdsTurnIsRequeued(t *testing.T) {
 // TestInterruptPushCutsAnAnswerAndIsReported is run 2's 00:48:12: an
 // approval (needs_user, interrupt) cut a spoken answer after its first
 // phrase. The answer is judged unheard (interrupted_by_push) on the
-// client's flushed report, with the part that was heard; it is not a
-// line the voice re-queues, so it goes to the supervisor. Gemini's own
+// client's flushed report, with the part that was heard; an answer to
+// the shepherd's question is owed (campaign D N3), so it waits to be
+// re-queued once the approval is over. Gemini's own
 // "interrupted" for the approval and the stray turnComplete before it is
 // voiced do not count against the approval, which is then heard whole.
 func TestInterruptPushCutsAnAnswerAndIsReported(t *testing.T) {
@@ -137,7 +139,7 @@ func TestInterruptPushCutsAnAnswerAndIsReported(t *testing.T) {
 	h.s.ClientPlayback(voice.PlaybackFlushed, 2000)
 
 	ev := h.waitEvent("unheard", isUnheard).(voice.EventPushUnheard)
-	if ev.Requeue || ev.Push.Reason != voice.UnheardInterruptedByPush || voice.PushID(ev.Push.Tags) != "push-tmb3k8-369" {
+	if !ev.Requeue || ev.Push.Reason != voice.UnheardInterruptedByPush || voice.PushID(ev.Push.Tags) != "push-tmb3k8-369" {
 		t.Fatalf("unheard = %+v", ev)
 	}
 	if heard := strings.ReplaceAll(ev.Push.Heard, " ", ""); heard != "claude改的是删除功能：购物车里把" {
@@ -162,7 +164,8 @@ func TestInterruptPushCutsAnAnswerAndIsReported(t *testing.T) {
 
 // TestBodySkippedIsReported is run 2's 00:50:54: a line with options
 // read as the question and the options alone (#19); unheard,
-// body_skipped, not re-queued.
+// body_skipped. It answers the shepherd's question, so it is owed and
+// waits to be re-queued (campaign D N3).
 func TestBodySkippedIsReported(t *testing.T) {
 	c := newFakeConn("c1")
 	h := newHarness(t, Config{}, &fakeDialer{results: []func() (Conn, error){ok(c)}})
@@ -173,7 +176,7 @@ func TestBodySkippedIsReported(t *testing.T) {
 	c.serve(outputTranscriptMsg(run2OptionsSaid))
 	c.serve(turnCompleteMsg())
 	ev := h.waitEvent("unheard", isUnheard).(voice.EventPushUnheard)
-	if ev.Requeue || ev.Push.Reason != voice.UnheardBodySkipped || ev.Push.Coverage >= voice.HeardMinCoverage {
+	if !ev.Requeue || ev.Push.Reason != voice.UnheardBodySkipped || ev.Push.Coverage >= voice.HeardMinCoverage {
 		t.Fatalf("unheard = %+v", ev)
 	}
 }
@@ -266,4 +269,135 @@ func TestRequeueWaitsForTheShepherdsWholeTurn(t *testing.T) {
 	c.serve(turnCompleteMsg())
 	h.s.ClientPlayback(voice.PlaybackDrained, 400)
 	waitCount(t, "re-queued sends", 2, 6*time.Second, func() int { return countSent(c, line) })
+}
+
+// Campaign D lang-mixed-codeswitch r1 (docs/eval/campaign-d-2026-10-03.md
+// N3), as logged.
+const n3Answer = "Bench Codex 说 test 还没过。 TestAdd 失败了，加 2 和 3 得到的是 3，不是 5，它自己说之前那句全过其实只跑了另一部分。 要让它把这个 bug 修掉，然后再跑一次 test 吗？"
+
+// selfRelayRefused answers a to_supervisor call the way the supervisor
+// refuses a self relay: nothing to say.
+func selfRelayRefused(context.Context, voice.ToolCall) (voice.ToolResult, error) {
+	time.Sleep(50 * time.Millisecond)
+	return voice.ToolResult{Scheduling: voice.UrgencySilent}, nil
+}
+
+// TestUnheardAnswerIsRequeued is lang-mixed-codeswitch r1: the answer to
+// the CEO's question went out at 11010 ms, the voice said "Checking."
+// and relayed the answer's own text back with to_supervisor (refused as
+// supervisor.self_relay). The answer was judged unheard (body_skipped)
+// and, not being "owed", dropped: 50 s of silence followed. An answer is
+// now owed: re-queued once the moment is quiet, and the voice relaying
+// its own text does not count as the CEO asking something else.
+func TestUnheardAnswerIsRequeued(t *testing.T) {
+	c := newFakeConn("c1")
+	h := newHarness(t, Config{Handler: selfRelayRefused}, &fakeDialer{results: []func() (Conn, error){ok(c)}})
+	tags := map[string]any{"push_id": "push-tmc27d-4", voice.TagAnswersUtterance: "utt-tmc279-3", "call_id": "call_135658"}
+	if err := h.s.PushTagged(n3Answer, voice.UrgencyIdle, tags); err != nil {
+		t.Fatal(err)
+	}
+	c.waitSent(t, "answer", isContent(n3Answer))
+	speakReply(h, c, []string{"Checking."}, 300)
+	h.s.ClientPlayback(voice.PlaybackStarted, 0)
+	c.serve(toolCallMsg("call_135666", voice.ToolToSupervisor, map[string]any{"text": n3Answer}))
+	c.serve(turnCompleteMsg())
+	h.s.ClientPlayback(voice.PlaybackDrained, 300)
+
+	ev := h.waitEvent("unheard", isUnheard).(voice.EventPushUnheard)
+	if !ev.Requeue || ev.Push.Reason != voice.UnheardBodySkipped || ev.Push.Heard != "Checking." {
+		t.Fatalf("unheard = %+v", ev)
+	}
+	waitCount(t, "re-queued sends", 2, 6*time.Second, func() int { return countSent(c, n3Answer) })
+	if rq := h.log.payloads("voice.push_requeued"); len(rq) != 1 || rq[0]["push_id"] != "push-tmc27d-4" || rq[0]["reason"] != voice.UnheardBodySkipped {
+		t.Errorf("voice.push_requeued = %v", rq)
+	}
+	if d := h.log.payloads("voice.push_dropped"); len(d) != 0 {
+		t.Errorf("voice.push_dropped = %v", d)
+	}
+}
+
+// TestStaleAnswerGoesToTheBrain: an answer cut by the CEO is owed, but
+// when the CEO goes on to ask something else (barge-in-long-answer r1:
+// "Okay, okay. Just tell me if it needs anything", relayed), it is not
+// replayed after the reply to that: it is dropped (asked_since) and the
+// supervisor is told it was not heard (EventPushUnheard, Requeue false).
+func TestStaleAnswerGoesToTheBrain(t *testing.T) {
+	c := newFakeConn("c1")
+	h := newHarness(t, Config{Handler: selfRelayRefused}, &fakeDialer{results: []func() (Conn, error){ok(c)}})
+	answer := "Bench Claude wrote the README and is checking its links now. It found two broken links, one to the setup page and one to the API reference."
+	if err := h.s.PushTagged(answer, voice.UrgencyIdle, map[string]any{"push_id": "push-a", voice.TagAnswersUtterance: "utt-1"}); err != nil {
+		t.Fatal(err)
+	}
+	c.waitSent(t, "answer", isContent(answer))
+	speakReply(h, c, []string{"Bench Claude wrote the README"}, 300)
+	h.s.ClientPlayback(voice.PlaybackStarted, 0)
+	c.serve(inputTranscriptMsg("Okay, okay. Just tell me if it needs anything.", false))
+	c.serve(interruptedMsg())
+	h.waitEvent("model interrupted", func(voice.Event) bool { return len(h.log.payloads("voice.interrupted")) >= 1 })
+	h.s.ClientPlayback(voice.PlaybackFlushed, 300)
+	ev := h.waitEvent("unheard", isUnheard).(voice.EventPushUnheard)
+	if !ev.Requeue || ev.Push.Reason != voice.UnheardUserTurn {
+		t.Fatalf("unheard = %+v", ev)
+	}
+	c.serve(toolCallMsg("call-2", voice.ToolToSupervisor, map[string]any{"text": "Okay, okay. Just tell me if it needs anything."}))
+	speakReply(h, c, []string{"Checking."}, 300)
+	c.serve(turnCompleteMsg())
+
+	waitCount(t, "dropped", 1, 6*time.Second, func() int { return len(h.log.payloads("voice.push_dropped")) })
+	if d := h.log.payloads("voice.push_dropped"); d[0]["reason"] != voice.DropAskedSince || d[0]["push_id"] != "push-a" {
+		t.Errorf("voice.push_dropped = %v", d)
+	}
+	got := unheardEvents(h)
+	if len(got) != 2 || got[1].Requeue || got[1].Push.Text != answer {
+		t.Errorf("unheard events = %+v, want the drop told as unheard", got)
+	}
+	if n := countSent(c, answer); n != 1 {
+		t.Errorf("answer sent %d times, want once", n)
+	}
+}
+
+// TestRequeuedLineAlreadyHeardIsDropped is #111's collision-finish-push
+// arm A r1: the kept-promise finish line went out at 19035 ms, the CEO
+// talked over it after "It added the changelog note about", asked "did
+// it touch the changelog?", and the voice answered from what it had
+// voiced: "Yes, it added the changelog note about the fix to the first
+// argument." At 31000 ms the re-queued line replayed the same news. It
+// is now dropped (voice.push_dropped {reason: already_heard}).
+func TestRequeuedLineAlreadyHeardIsDropped(t *testing.T) {
+	c := newFakeConn("c1")
+	h := newHarness(t, Config{}, &fakeDialer{results: []func() (Conn, error){ok(c)}})
+	line := "bench-claude is done. It added the changelog note about the fix to the first argument. Shall I have it run the tests to confirm the fix holds?"
+	tags := map[string]any{"push_id": "push-tmc1yd-8", "event_id": "evt-tmc1yb-7", "agent": "bench-claude", voice.TagKeepsPromiseIDs: []string{"pr-tmc1y1-4"}}
+	if err := h.s.PushTagged(line, voice.UrgencyIdle, tags); err != nil {
+		t.Fatal(err)
+	}
+	c.waitSent(t, "finish push", isContent(line))
+	speakReply(h, c, []string{"Bench-claude is done.", "It added the changelog note about"}, 300)
+	h.s.ClientPlayback(voice.PlaybackStarted, 0)
+	h.s.ClientSpeaking(true)
+	c.serve(interruptedMsg())
+	h.waitEvent("model interrupted", func(voice.Event) bool { return len(h.log.payloads("voice.interrupted")) >= 1 })
+	h.s.ClientPlayback(voice.PlaybackFlushed, 600)
+	ev := h.waitEvent("unheard", isUnheard).(voice.EventPushUnheard)
+	if !ev.Requeue || ev.Push.Reason != voice.UnheardUserTurn {
+		t.Fatalf("unheard = %+v", ev)
+	}
+	c.serve(turnCompleteMsg())
+	h.s.ClientSpeaking(false)
+	c.serve(inputTranscriptMsg("Also, did it touch the changelog?", false))
+	speakReply(h, c, []string{"Yes, it added the changelog note", "about the fix to the first argument."}, 400)
+	h.s.ClientPlayback(voice.PlaybackStarted, 0)
+	c.serve(turnCompleteMsg())
+	h.s.ClientPlayback(voice.PlaybackDrained, 800)
+
+	waitCount(t, "dropped", 1, 8*time.Second, func() int { return len(h.log.payloads("voice.push_dropped")) })
+	if d := h.log.payloads("voice.push_dropped"); d[0]["reason"] != voice.DropAlreadyHeard || d[0]["push_id"] != "push-tmc1yd-8" {
+		t.Errorf("voice.push_dropped = %v", d)
+	}
+	if n := countSent(c, line); n != 1 {
+		t.Errorf("finish line sent %d times, want once", n)
+	}
+	if got := unheardEvents(h); len(got) != 1 {
+		t.Errorf("unheard events = %d, want 1 (already heard is not news for the brain)", len(got))
+	}
 }

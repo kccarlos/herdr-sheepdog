@@ -47,7 +47,7 @@ func (s *Session) keyTermCoverage(text string, tags map[string]any, said string)
 }
 
 // reportUnheard logs and emits the verdicts; an owed line waits in
-// s.requeue for a quiet moment.
+// s.requeue for a quiet moment (voice/requeue.go).
 func (s *Session) reportUnheard(vs []voice.UnheardPush) {
 	if len(vs) == 0 {
 		return
@@ -56,16 +56,17 @@ func (s *Session) reportUnheard(vs []voice.UnheardPush) {
 	check := s.openCheck
 	s.mu.Unlock()
 	for _, v := range vs {
-		requeue := !v.Requeued && (voice.OwedTags(v.Tags) || (check != nil && check(v.Tags)))
+		open := check != nil && voice.PushUtterance(v.Tags) == "" && !voice.OwedTags(v.Tags) && check(v.Tags)
+		s.mu.Lock()
+		requeue := s.requeue.Owed(v, open)
+		if requeue {
+			s.requeue.Add(v)
+		}
+		s.mu.Unlock()
 		p := v.Payload()
 		p["requeue"] = requeue
 		p["judge"] = "key_terms"
 		s.log.Log(logSource, "voice.push_unheard", "", p)
-		if requeue {
-			s.mu.Lock()
-			s.requeue = append(s.requeue, v)
-			s.mu.Unlock()
-		}
 		s.emit(voice.EventPushUnheard{Push: v, Requeue: requeue})
 	}
 }
@@ -86,28 +87,36 @@ func (s *Session) settleHeard(now time.Time) {
 // generating or playing, no delegation in flight, the shepherd not
 // speaking, requeueSettle since they last spoke and since playback
 // ended, and voice.RequeueHold clear (the client's detector settled, the
-// reply to the shepherd's last words over). A line the supervisor says is no longer open is dropped
-// (voice.push_dropped {reason: no_longer_open}).
+// reply to the shepherd's last words over). A line voice.Requeue says
+// is no longer needed is dropped (voice.push_dropped with its reason); a
+// stale answer also goes to the supervisor as unheard
+// (EventPushUnheard, Requeue false).
 func (s *Session) releaseRequeue(now time.Time) {
 	s.mu.Lock()
-	if len(s.requeue) == 0 || s.speakingOrPlayingLocked(now) || len(s.inflight) > 0 || s.inputOpen || s.vad.Hold(now) > 0 ||
+	if s.requeue.Len() == 0 || s.speakingOrPlayingLocked(now) || len(s.inflight) > 0 || s.inputOpen || s.vad.Hold(now) > 0 ||
 		now.Sub(s.lastInput) < requeueSettle || now.Sub(s.play.EndedAt(now)) < requeueSettle ||
 		voice.RequeueHold(now, voice.RequeueFacts{LastInput: s.lastInput, ReplyDoneAt: s.turnDoneAt, Speech: s.vad}) != "" {
 		s.mu.Unlock()
 		return
 	}
-	items, check := s.requeue, s.openCheck
-	s.requeue = nil
+	items, check := s.requeue.Take(), s.openCheck
 	s.mu.Unlock()
-	for _, v := range items {
+	for _, rel := range items {
+		v := rel.Push
+		if rel.Drop == "" && check != nil && voice.OpenCheckDecides(v.Tags) && !check(v.Tags) {
+			rel.Drop = voice.DropNoLongerOpen
+		}
 		tags := make(map[string]any, len(v.Tags)+1)
 		for k, val := range v.Tags {
 			tags[k] = val
 		}
-		if check != nil && !voice.OwedPromise(tags) && !check(tags) {
+		if rel.Drop != "" {
 			p := heldPayload(pushItem{text: v.Text, requested: voice.UrgencyIdle, tags: tags})
-			p["reason"] = "no_longer_open"
+			p["reason"] = rel.Drop
 			s.log.Log(logSource, "voice.push_dropped", "", p)
+			if rel.Tell {
+				s.emit(voice.EventPushUnheard{Push: v, Requeue: false})
+			}
 			continue
 		}
 		tags[voice.TagRequeued] = true
