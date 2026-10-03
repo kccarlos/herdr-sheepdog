@@ -270,3 +270,13 @@ ships with #105.
   Chinese block line no longer quotes an English question
   ("Claude 请求运行 go test。" or "Claude 需要你做个决定。"). The sign-off
   join no longer leaves a "。." seam.
+
+- **#107's known limit, a menu on an idle pane**: fixed in #111. The
+  brain's rail defers to the host for any pane that is not working.
+  `revivePrompt` revives a menu shown on a pane that is not blocked, but
+  only when the CEO's newest words are about it: they name an option or a
+  word of its question, or pick one by number. So "skip" by voice answers
+  Codex's update menu. Words about something else still get nothing.
+- **Findings 7, 8, 9** (failover budget, queued instruction after a stop,
+  buried prompt): fixed in #111. The details are in
+  `tier3-2026-10-03.md`.
