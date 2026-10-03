@@ -245,8 +245,11 @@ func (h brainHost) AnswerPrompt(ctx context.Context, paneID string, keys []strin
 		return "", fmt.Errorf("%w: %s", brain.ErrNotPermitted, reason)
 	}
 	// A tool result: a fact for the brain, which phrases the reply.
-	alias := s.aliasOf(paneID)
-	res, sent := s.answerKeys(ctx, p, keys, keysLabel(p, keys), func(l string) string { return toldLine(alias, l, false) }, "brain", nil)
+	// In the shepherd's language, like the fast path and taps: when the
+	// turn times out after sending, this result is what they hear
+	// (docs/eval-campaign-2026-10-03.md run C, H4).
+	alias, zh := s.aliasOf(paneID), s.ceoChineseLocked()
+	res, sent := s.answerKeys(ctx, p, keys, keysLabel(p, keys), func(l string) string { return toldLine(alias, l, zh) }, "brain", nil)
 	if sent {
 		in.used = true
 	}

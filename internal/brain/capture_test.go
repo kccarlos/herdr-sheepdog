@@ -236,7 +236,7 @@ func TestCaptureDiffPruneCompactReset(t *testing.T) {
 	// Compaction: a tiny budget makes the next turn's after-work compact.
 	h2 := newHarness(t, braintest.NewModel(), func(c *Config) { c.WindowTokens = 60 })
 	h2.model.Default = &braintest.Step{Text: braintest.Reply("Fine.", "")}
-	for _, q := range []string{"first question about auth", "second question about docs", "third"} {
+	for _, q := range []string{"first question", "second question", "third"} {
 		if _, err := h2.ask(q, ""); err != nil {
 			t.Fatal(err)
 		}

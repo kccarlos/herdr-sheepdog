@@ -160,6 +160,10 @@ type Request struct {
 
 	// facts is Facts as the request was rendered.
 	facts EventFacts
+	// records is what the daemon has on record for the agents an
+	// utterance names (agentRecords), set by the loop when the turn
+	// starts.
+	records string
 }
 
 // EventFacts is what has happened to an announced event outside the
@@ -177,7 +181,18 @@ type EventFacts struct {
 	// (docs/eval-campaign-2026-10-03.md H6: a "yes" to one question was
 	// taken as the answer to a question pushed after the CEO spoke).
 	Heard *HeardFacts
+	// Language is the language of the CEO's last words, LanguageChinese
+	// or LanguageEnglish; "" when they have said nothing yet. A fact for
+	// the model to follow, not a rule (run C, H4: a short Chinese "yes"
+	// after an English announcement was answered in English).
+	Language string
 }
+
+// The values of EventFacts.Language.
+const (
+	LanguageChinese = "Chinese"
+	LanguageEnglish = "English"
+)
 
 // HeardFacts is what the CEO had and had not heard when they began
 // speaking.

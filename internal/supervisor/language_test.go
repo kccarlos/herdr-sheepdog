@@ -5,6 +5,11 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kccarlos/herdr-sheepdog/internal/brain"
+	"github.com/kccarlos/herdr-sheepdog/internal/brain/braintest"
+	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
+	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
 
 // docs/eval-campaign-2026-10-03.md H4: after the shepherd spoke Chinese,
@@ -69,5 +74,60 @@ func TestReplacedLineLanguage(t *testing.T) {
 	}
 	if got := replacedLine("auth", "docs is asking do you want to create claude.txt.", false); got != "Dropping the earlier question from auth; now docs is asking do you want to create claude.txt." {
 		t.Errorf("en = %q", got)
+	}
+}
+
+// Run C, vertex, j2-approve-zh r1: the brain's send_keys confirmation was
+// English after the shepherd said "可以，让它跑吧。", and when the turn
+// timed out after sending, that tool result was what they heard.
+func TestBrainToolConfirmationFollowsTheShepherdsLanguage(t *testing.T) {
+	h := newHarness(t)
+	blockedAuth(t, h)
+	h.clock.Advance(time.Second)
+	h.sup.ShepherdInput(InputVoice, "可以，让它跑吧。")
+	h.clock.Advance(time.Second)
+	p, _ := h.pending()
+	res, err := (brainHost{s: h.sup}).AnswerPrompt(context.Background(), "w5:p1", p.Options[0].Keys)
+	if err != nil {
+		t.Fatalf("AnswerPrompt: %v", err)
+	}
+	if !strings.HasPrefix(res, "已回复 auth：") {
+		t.Errorf("tool result = %q, want the Chinese confirmation", res)
+	}
+}
+
+// Run C, deepseek, j2-approve-zh r1: the only line before the CEO's
+// "可以，让它跑吧。" was the English block announcement, and the brain
+// followed the English context. The request now states the language of
+// the CEO's last words as a fact (what to do with it stays the model's).
+func TestUtteranceRequestStatesTheCEOsLanguage(t *testing.T) {
+	m := braintest.NewModel(braintest.Step{Text: braintest.Reply("已让 auth 继续。", "")})
+	h := newBrainHarness(t, m)
+	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
+	h.sup.OnVoiceEvent(voice.EventPush{Text: "auth is ready to run the full test suite with the race detector. Approve the test run?", Urgency: voice.UrgencyIdle})
+	h.clock.Advance(time.Second)
+	h.say("可以，让它跑吧。")
+	calls := m.Calls()
+	if len(calls) == 0 {
+		t.Fatal("no brain turn")
+	}
+	if text := calls[0].Text(); !strings.Contains(text, "The CEO's last words were in Chinese.") {
+		t.Errorf("request lacks the language fact:\n%s", text)
+	}
+}
+
+// The fact follows the CEO's words, and is absent before they spoke.
+func TestCEOLanguageFact(t *testing.T) {
+	h := newHarness(t)
+	if got := h.sup.ceoLanguage(); got != "" {
+		t.Errorf("before any words: %q", got)
+	}
+	h.hear("现在什么情况？")
+	if got := h.sup.ceoLanguage(); got != brain.LanguageChinese {
+		t.Errorf("zh: %q", got)
+	}
+	h.hear("What about docs?")
+	if got := h.sup.ceoLanguage(); got != brain.LanguageEnglish {
+		t.Errorf("en: %q", got)
 	}
 }

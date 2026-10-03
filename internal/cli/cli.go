@@ -2,6 +2,7 @@ package cli
 
 import (
 	"errors"
+	"fmt"
 	"os/exec"
 	"time"
 
@@ -29,7 +30,24 @@ var (
 	// was asked to fork: the backend continued the worker's own session
 	// instead of copying it.
 	ErrNotForked = errors.New("cli: the backend did not fork the session")
+	// ErrTimedOut is wrapped by the error of a run killed at its time
+	// limit.
+	ErrTimedOut = errors.New("timed out")
 )
+
+// ExitError is a run whose process exited non-zero.
+type ExitError struct {
+	Backend Backend
+	Code    int
+	Stderr  string
+}
+
+func (e *ExitError) Error() string {
+	return fmt.Sprintf("cli: %s: exit %d: %s", e.Backend, e.Code, e.Stderr)
+}
+
+// ExitCode is the process's exit code.
+func (e *ExitError) ExitCode() int { return e.Code }
 
 // Default config values (plan §3.5, docs/cli-query-tools.md §3).
 const (

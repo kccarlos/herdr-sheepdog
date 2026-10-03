@@ -264,10 +264,10 @@ func (r *Runner) finish(result *Result, exec execResult, backend Backend, timeou
 		return fmt.Errorf("cli: %s: %w", backend, exec.StartErr)
 	}
 	if exec.Killed {
-		return fmt.Errorf("cli: %s: timed out after %s", backend, timeout)
+		return fmt.Errorf("cli: %s: %w after %s", backend, ErrTimedOut, timeout)
 	}
 	if exec.Exit != 0 {
-		return fmt.Errorf("cli: %s: exit %d: %s", backend, exec.Exit, strings.TrimSpace(exec.Stderr))
+		return &ExitError{Backend: backend, Code: exec.Exit, Stderr: strings.TrimSpace(exec.Stderr)}
 	}
 	switch backend {
 	case Claude:

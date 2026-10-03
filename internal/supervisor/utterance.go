@@ -570,7 +570,9 @@ func (s *Supervisor) utteranceTurn(ctx context.Context, u *inflightUtterance) ut
 	// What the shepherd had heard when they began: evaluated when the
 	// turn starts, since it may queue behind an announce turn whose
 	// line goes out meanwhile (heard.go).
-	req.Facts = func() brain.EventFacts { return brain.EventFacts{Heard: s.heardFacts(start)} }
+	req.Facts = func() brain.EventFacts {
+		return brain.EventFacts{Heard: s.heardFacts(start), Language: s.ceoLanguage()}
+	}
 	// supervisor.repeat_window_s: an identical roster delivered again
 	// inside the window is noise over voice, so the brain gets a note it
 	// can act on ("no change since I last checked") instead of the

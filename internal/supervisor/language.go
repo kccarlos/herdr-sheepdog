@@ -3,6 +3,7 @@ package supervisor
 import (
 	"strings"
 
+	"github.com/kccarlos/herdr-sheepdog/internal/brain"
 	"github.com/kccarlos/herdr-sheepdog/internal/prose"
 )
 
@@ -26,6 +27,25 @@ func (s *Supervisor) ceoChineseLocked() bool {
 		return prose.Chinese(in.text)
 	}
 	return false
+}
+
+// ceoLanguage is the language of the shepherd's last words for the
+// brain's request facts (brain.EventFacts.Language): "" before they have
+// said anything.
+func (s *Supervisor) ceoLanguage() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := len(s.inputs) - 1; i >= 0; i-- {
+		in := s.inputs[i]
+		if in.kind == InputTap || strings.TrimSpace(in.text) == "" {
+			continue
+		}
+		if prose.Chinese(in.text) {
+			return brain.LanguageChinese
+		}
+		return brain.LanguageEnglish
+	}
+	return ""
 }
 
 // toldLine is the spoken confirmation of an answer the daemon sent

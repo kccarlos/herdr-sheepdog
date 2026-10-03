@@ -317,6 +317,12 @@ func requestText(req Request) string {
 	if line := heardLine(req.facts.Heard); line != "" {
 		s += "\n" + line
 	}
+	if line := languageLine(req.facts.Language); line != "" {
+		s += "\n" + line
+	}
+	if req.records != "" {
+		s += "\n" + req.records
+	}
 	if req.RosterUnchangedFor > 0 {
 		s += fmt.Sprintf("\nThe roster is unchanged since you last reported it %d s ago; if the shepherd is only asking for status again, say there has been no change since you last checked, briefly.", int(req.RosterUnchangedFor.Seconds()))
 	}
@@ -341,6 +347,9 @@ func investigationRequestText(req Request) string {
 	}
 	if inv.FollowUpOf != "" {
 		fmt.Fprintf(&b, "It digs deeper into investigation %s, so they already heard that answer: do not repeat it.\n", inv.FollowUpOf)
+	}
+	if line := languageLine(req.facts.Language); line != "" {
+		b.WriteString(line + "\n")
 	}
 	if req.Result != "" {
 		b.WriteString("What it found:\n")
@@ -389,6 +398,9 @@ func eventRequestText(req Request) string {
 	if line := promptStateLine(req.facts.Prompt); line != "" {
 		b.WriteString(line + "\n")
 	}
+	if line := languageLine(req.facts.Language); line != "" {
+		b.WriteString(line + "\n")
+	}
 	if len(req.facts.Spoken) > 0 {
 		fmt.Fprintf(&b, "Already said to the CEO about this event, word for word: %s. Your spoken would be said after it, not instead of it. Decide whether the assistant says anything more: skip when that already carries the news, or add only what it lacked (which request of theirs it fulfils, what changed against what they asked, what is still open), or correct it if it was wrong; silent when it is context the assistant should have but not say.", quotedLines(req.facts.Spoken))
 	} else {
@@ -432,6 +444,16 @@ func unheardMark(unheard bool) string {
 	return ""
 }
 
+// languageLine states the language of the CEO's last words
+// (EventFacts.Language), "" when unknown. Only the fact: what to do with
+// it is the model's.
+func languageLine(lang string) string {
+	if lang == "" {
+		return ""
+	}
+	return "The CEO's last words were in " + lang + "."
+}
+
 // promptStateLine states an announced prompt's real state (EventFacts).
 func promptStateLine(state string) string {
 	switch state {
@@ -464,6 +486,9 @@ func factsUpdate(before, now EventFacts) string {
 	}
 	if nb, na := heardAfter(before.Heard), heardAfter(now.Heard); len(na) > len(nb) && now.Heard != nil {
 		parts = append(parts, "while you were working the voice was given, after the CEO began speaking: "+pushedLines(na[len(nb):], now.Heard.SpokeAt)+"; the CEO's words do not answer it")
+	}
+	if now.Language != before.Language && now.Language != "" {
+		parts = append(parts, "the CEO's last words are now in "+now.Language)
 	}
 	if now.Prompt != before.Prompt {
 		if line := promptStateLine(now.Prompt); line != "" {
@@ -658,4 +683,106 @@ func clipText(s string, n int) string {
 		cut = cut[:i]
 	}
 	return strings.TrimRight(cut, " ,;:.") + "…"
+}
+
+// Budget of an agent record (agentRecords): the last recordEntries
+// journal entries, each text at most recordRunes.
+const (
+	recordEntries = 3
+	recordRunes   = 120
+)
+
+// agentRecords states, for each agent the CEO's words name, everything
+// the daemon has on record about it — its state and since when, its last
+// result, and its journal entries with their times — and says outright
+// when there is no journal entry (run C, H7: asked whether bench-claude
+// had pushed, Vertex said it had not, from a screen that says nothing
+// about pushing). The daemon sees a worker only through its screen and
+// its own session transcript, which the record says too: what is not
+// here is unknown to it, as a fact. "" when no agent is named.
+func agentRecords(agents []AgentInfo, words string, clock func() time.Time) string {
+	var b strings.Builder
+	var now time.Time
+	for _, a := range agents {
+		if !namesAgent(words, a.Alias) {
+			continue
+		}
+		if b.Len() == 0 {
+			now = clock() // only when a record is written: the clock ticks in fixtures
+			b.WriteString("On record (from the worker's screen and its own session transcript, the daemon's only sources; what is not here is not on record, and a run_cli or investigate look can check it):")
+		}
+		fmt.Fprintf(&b, "\n- %s: %s", aliasOr(a.Alias), stateOr(a.State))
+		if !a.StateSince.IsZero() {
+			fmt.Fprintf(&b, " since %s (%s ago)", a.StateSince.Format("15:04:05"), ago(now.Sub(a.StateSince)))
+		}
+		if a.LastResult != "" {
+			fmt.Fprintf(&b, "; last result: %q", clipText(oneLine(a.LastResult), recordRunes))
+		}
+		if len(a.Journal) == 0 {
+			b.WriteString("; no journal entry: beyond this and its screen, nothing it did is on record.")
+			continue
+		}
+		b.WriteString("; journal:")
+		for _, e := range a.Journal[max(0, len(a.Journal)-recordEntries):] {
+			fmt.Fprintf(&b, " [%s %s]", e.At.Format("15:04:05"), e.Event)
+			if e.LastAssistant != "" {
+				fmt.Fprintf(&b, " wrote %q", clipText(oneLine(e.LastAssistant), recordRunes))
+			}
+			if e.Instruction != "" {
+				fmt.Fprintf(&b, " instruction %q", clipText(oneLine(e.Instruction), recordRunes))
+			}
+			if len(e.Files) > 0 {
+				b.WriteString(" files " + strings.Join(e.Files, ", "))
+			}
+			if len(e.Tools) > 0 {
+				names := make([]string, 0, len(e.Tools))
+				for name := range e.Tools {
+					names = append(names, name)
+				}
+				sort.Strings(names)
+				for i, name := range names {
+					names[i] = fmt.Sprintf("%s×%d", name, e.Tools[name])
+				}
+				b.WriteString(" tools " + strings.Join(names, ", "))
+			}
+			b.WriteString(";")
+		}
+	}
+	return b.String()
+}
+
+// namesAgent reports whether words name alias: the alias itself, or
+// with its dashes and underscores heard as spaces ("bench claude"),
+// case-insensitively, as a whole word.
+func namesAgent(words, alias string) bool {
+	alias = strings.ToLower(strings.TrimSpace(alias))
+	if alias == "" {
+		return false
+	}
+	w := strings.ToLower(words)
+	spaced := strings.NewReplacer("-", " ", "_", " ").Replace(alias)
+	for _, form := range []string{alias, spaced} {
+		for i := 0; ; {
+			j := strings.Index(w[i:], form)
+			if j < 0 {
+				break
+			}
+			start, end := i+j, i+j+len(form)
+			if wordEdge(w, start-1) && wordEdge(w, end) {
+				return true
+			}
+			i = start + 1
+		}
+	}
+	return false
+}
+
+// wordEdge reports whether the byte at i of s is outside s or not a
+// letter, digit, dash or underscore.
+func wordEdge(s string, i int) bool {
+	if i < 0 || i >= len(s) {
+		return true
+	}
+	c := s[i]
+	return (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '-' && c != '_'
 }
