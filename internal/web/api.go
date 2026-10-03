@@ -193,6 +193,8 @@ func (s *Server) handlePendingAnswer(w http.ResponseWriter, r *http.Request) {
 }
 
 // SystemPromptResponse is the body of GET /api/voice/system_prompt.
+// Aliases are the agent names the prompt is rendered with: the current
+// spoken names (Deps.Names), else the configured aliases.
 type SystemPromptResponse struct {
 	Text    string   `json:"text"`
 	Aliases []string `json:"aliases"`
@@ -209,6 +211,14 @@ func (s *Server) handleSystemPrompt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	aliases := s.deps.Aliases
+	if s.deps.Names != nil {
+		// The current spoken names, as the prompt text itself has them:
+		// the start-up alias list goes stale as agents come, go and are
+		// renamed.
+		if n := s.deps.Names(); len(n) > 0 {
+			aliases = n
+		}
+	}
 	if aliases == nil {
 		aliases = []string{}
 	}

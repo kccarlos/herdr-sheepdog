@@ -395,6 +395,7 @@ func (a *App) wire() error {
 
 		SystemPrompt:   func() string { s, _ := gemini.SystemPrompt(gcfg); return s },
 		Aliases:        gcfg.Aliases,
+		Names:          sup.SpokenNames,
 		VoiceName:      cfg.Voice.Name,
 		ReloadPrompts:  a.ReloadPrompts,
 		Brain:          a.brain,

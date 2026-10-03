@@ -101,6 +101,12 @@ type Deps struct {
 	// means no system prompt configured (404).
 	SystemPrompt func() string
 	Aliases      []string
+	// Names, when set, returns the running agents' current spoken names
+	// (docs/roles.md "Agent names"): the list the system prompt is
+	// rendered with at the next (re)connect. GET /api/voice/system_prompt
+	// answers it in place of Aliases (the static start-up list) whenever
+	// it returns any.
+	Names func() []string
 	// VoiceName is the dog's own name (config voice.name), served on
 	// /api/state so the pages can label its side of the conversation.
 	VoiceName string

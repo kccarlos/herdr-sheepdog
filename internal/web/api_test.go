@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strconv"
 	"strings"
 	"testing"
@@ -529,5 +530,53 @@ func TestSettingsEndpoint(t *testing.T) {
 	}
 	if !subsequence(h.types(), []string{"supervisor.settings"}) {
 		t.Fatalf("supervisor.settings not logged: %v", h.types())
+	}
+}
+
+// GET /api/voice/system_prompt lists the agents' current spoken names
+// (Deps.Names) rather than the static start-up alias list, and falls
+// back to the aliases while no agent has a spoken name.
+func TestSystemPromptListsCurrentSpokenNames(t *testing.T) {
+	l, err := eventlog.Open(t.TempDir(), eventlog.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = l.Close() })
+	store, err := state.Open("", state.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := []string{"README Claude", "docs"}
+	srv, err := New(Deps{Log: l, Store: store, Version: "test", VoiceMode: "gemini",
+		SystemPrompt: func() string { return "prompt" }, Aliases: []string{"w5-claude"},
+		Names: func() []string { return names }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hs := httptest.NewServer(srv.Handler())
+	t.Cleanup(hs.Close)
+	get := func() SystemPromptResponse {
+		t.Helper()
+		resp, err := http.Get(hs.URL + "/api/voice/system_prompt")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		var sp SystemPromptResponse
+		if err := json.NewDecoder(resp.Body).Decode(&sp); err != nil || resp.StatusCode != http.StatusOK {
+			t.Fatalf("system_prompt = %d %v", resp.StatusCode, err)
+		}
+		return sp
+	}
+	if sp := get(); strings.Join(sp.Aliases, ",") != "README Claude,docs" {
+		t.Errorf("aliases = %v, want the current spoken names", sp.Aliases)
+	}
+	names = []string{"sheepdog Claude"} // a rename: the next request follows it
+	if sp := get(); strings.Join(sp.Aliases, ",") != "sheepdog Claude" {
+		t.Errorf("aliases after rename = %v", sp.Aliases)
+	}
+	names = nil
+	if sp := get(); strings.Join(sp.Aliases, ",") != "w5-claude" {
+		t.Errorf("aliases with no spoken names = %v, want the configured aliases", sp.Aliases)
 	}
 }
