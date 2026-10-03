@@ -39,7 +39,7 @@ func (s *Supervisor) briefingText() (string, []string) {
 	if s.briefing == "" || now.Sub(s.briefingAt) > briefingCacheMaxAge {
 		pending, _ := s.store.Pending()
 		s.briefing, s.briefingPanes = composeBriefing(s.store.List(), pending, now)
-		if trailer := promiseTrailer(s.openPromises()); trailer != "" {
+		if trailer := promiseTrailer(s.spokenPromises(s.openPromises())); trailer != "" {
 			s.briefing += " " + trailer
 		}
 		s.briefingAt = now

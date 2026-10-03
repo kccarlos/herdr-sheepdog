@@ -58,8 +58,11 @@ The brain's roster shows the spoken name beside the alias (`- alias
 "…": state`); RULES.md has it speak the name verbatim (a word or two of
 a long title will do), mention the old name once right after a change,
 and pass the alias to tools. Tool calls also resolve a spoken name or
-a unique session title. The daemon's own sentences (the briefing,
-"started on …", "finished", "has exited") use the spoken name too.
+a unique session title, and the "on record" facts a request carries
+find an agent named by alias, spoken name or title. Every sentence the
+daemon speaks itself (the briefing, "started on …", "finished", "has
+exited", echoes, promise and investigation lines) uses the spoken name;
+tags, logs and request fields keep the alias.
 
 The voice model gets the running agents' spoken names in its system
 prompt and Gemini's speech-to-text `CustomVocabulary` at every

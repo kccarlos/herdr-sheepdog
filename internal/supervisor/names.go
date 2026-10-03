@@ -169,6 +169,41 @@ func (s *Supervisor) rename(ctx context.Context, paneID, name string) (string, e
 	return old + " is called " + name + " now.", nil
 }
 
+// sayOf is how a pane's agent is named aloud: its spoken name, or
+// "another agent" when the pane is unknown (never a pane id: D9). The
+// alias stays for tool plumbing, tags and logs (aliasOf).
+func (s *Supervisor) sayOf(paneID string) string {
+	if a, ok := s.store.Get(paneID); ok {
+		if n := state.Say(a); n != "" {
+			return n
+		}
+	}
+	return "another agent"
+}
+
+// sayPane is sayOf for a record that kept the alias of a pane that may
+// be gone (a promise, an investigation): the pane's current spoken name
+// while it exists, else that alias.
+func (s *Supervisor) sayPane(paneID, alias string) string {
+	if a, ok := s.store.Get(paneID); ok {
+		if n := state.Say(a); n != "" {
+			return n
+		}
+	}
+	return aliasOr(alias)
+}
+
+// spokenPromises returns the promises with each Alias replaced by the
+// pane's current spoken name, for the sentences that name them.
+func (s *Supervisor) spokenPromises(ps []state.Promise) []state.Promise {
+	out := make([]state.Promise, len(ps))
+	for i, p := range ps {
+		p.Alias = s.sayPane(p.PaneID, p.Alias)
+		out[i] = p
+	}
+	return out
+}
+
 // recentSpokenWas is the agent's old spoken name while its change is
 // recent enough to mention, else "".
 func recentSpokenWas(a state.Agent, now time.Time) string {

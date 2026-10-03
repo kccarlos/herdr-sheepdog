@@ -202,7 +202,7 @@ func (h brainHost) Prompt(ctx context.Context, paneID, text string) (string, err
 		return "", errors.New("that agent is gone")
 	}
 	text = withoutSignOff(text)
-	echo := "Telling " + aliasOr(row.Alias) + " to " + lowerFirst(strings.TrimRight(strings.TrimSpace(text), ".")) + "."
+	echo := "Telling " + aliasOr(state.Say(row)) + " to " + lowerFirst(strings.TrimRight(strings.TrimSpace(text), ".")) + "."
 	h.s.journal.signOff.Do(func() { h.s.log.Log(logSource, "supervisor.signoff", "", map[string]any{"trailer": SignOff}) })
 	res, err := h.s.sendInstruction(ctx, row, withSignOff(text), echo)
 	if err == nil {
@@ -254,7 +254,7 @@ func (h brainHost) AnswerPrompt(ctx context.Context, paneID string, keys []strin
 	// In the shepherd's language, like the fast path and taps: when the
 	// turn times out after sending, this result is what they hear
 	// (docs/eval-campaign-2026-10-03.md run C, H4).
-	alias, zh := s.aliasOf(paneID), s.ceoChineseLocked()
+	alias, zh := s.sayOf(paneID), s.ceoChineseLocked()
 	res, sent := s.answerKeys(ctx, p, keys, keysLabel(p, keys), func(l string) string { return toldLine(alias, l, zh) }, "brain", nil)
 	if sent {
 		in.used = true
@@ -331,7 +331,7 @@ func (h brainHost) Interrupt(ctx context.Context, paneID string) (string, error)
 	s := h.s
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	alias := s.aliasOf(paneID)
+	alias := s.sayOf(paneID)
 	if err := s.herdr.Interrupt(ctx, paneID); err != nil {
 		s.log.Log(logSource, "supervisor.cancel_error", paneID, map[string]any{"error": err.Error(), "via": "brain"})
 		return "", fmt.Errorf("could not interrupt %s: %w", alias, err)

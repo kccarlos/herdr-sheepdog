@@ -439,7 +439,7 @@ func (s *Supervisor) lateLine(res voice.ToolResult, asked string) (paneID, line 
 	if !ok {
 		return "", line
 	}
-	alias := aliasOr(row.Alias)
+	alias := aliasOr(state.Say(row))
 	if !strings.HasPrefix(strings.ToLower(res.Spoken), strings.ToLower(alias)) {
 		line = "About " + alias + ": " + line
 	}
@@ -692,7 +692,7 @@ func (s *Supervisor) fastAnswer(ctx context.Context, in *shepherdInput, text str
 		s.railBlockedLocked(p, keys, "fast_path", reason)
 		return voice.ToolResult{}, false
 	}
-	alias := s.aliasOf(p.PaneID)
+	alias := s.sayOf(p.PaneID)
 	s.log.Log(logSource, "supervisor.fast_path", p.PaneID, map[string]any{"path": "answer", "text": text, "answer": label, "id": p.ID, "input": string(in.kind)})
 	zh := s.ceoChineseLocked()
 	res, sent := s.answerKeys(ctx, p, keys, label, func(l string) string { return toldLine(alias, l, zh) }, "fast_path", nil)

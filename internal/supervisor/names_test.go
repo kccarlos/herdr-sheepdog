@@ -188,3 +188,26 @@ func TestPendingTrailerKeepsRunes(t *testing.T) {
 		t.Errorf("trailer = %q", got)
 	}
 }
+
+// The daemon's own sentences name an agent by its spoken name: an
+// echo, a promise trailer, an investigation fallback.
+func TestDaemonSentencesUseSpokenNames(t *testing.T) {
+	h := newHarness(t, withTitleFixtures(t))
+	h.claudeIn("w1:p1", readmeSession, herdr.StateWorking)
+	h.claudeIn("w2:p1", docsSession, herdr.StateWorking)
+	h.srv.SetAgent(herdr.AgentInfo{PaneID: "w1:p1", WorkspaceID: "w9", Agent: "claude", Status: herdr.StateWorking})
+	echo, err := brainHost{h.sup}.Interrupt(context.Background(), "w1:p1")
+	if err != nil || echo != "Interrupted README Claude." {
+		t.Errorf("interrupt echo = %q, %v", echo, err)
+	}
+	trailer := promiseTrailer(h.sup.spokenPromises([]state.Promise{{PaneID: "w2:p1", Alias: "sheepdog-claude-2", Event: brain.PromiseEventDone, Status: state.PromiseOpen}}))
+	if !strings.Contains(trailer, "docs pass Claude finishes") {
+		t.Errorf("promise trailer = %q", trailer)
+	}
+	if got := h.sup.sayPane("w9:gone", "old-alias"); got != "old-alias" {
+		t.Errorf("a gone pane = %q", got)
+	}
+	if got := h.sup.sayOf("w9:gone"); got != "another agent" {
+		t.Errorf("unknown pane = %q", got)
+	}
+}

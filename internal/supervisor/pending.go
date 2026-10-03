@@ -88,7 +88,7 @@ func (s *Supervisor) setPending(p state.PendingAction) string {
 			"old_id": old.ID, "old_kind": old.Kind, "old_pane_id": old.PaneID, "new_id": p.ID, "new_kind": p.Kind,
 		})
 		if old.Kind == state.PendingAnswerPrompt && p.Kind == state.PendingAnswerPrompt && old.PaneID != p.PaneID && s.allows(pushReplacement) {
-			spoken = replacedLine(s.aliasOf(old.PaneID), p.SpokenSummary, s.ceoChineseLocked())
+			spoken = replacedLine(s.sayOf(old.PaneID), p.SpokenSummary, s.ceoChineseLocked())
 		}
 	}
 	if err := s.store.SetPending(p); err != nil {
@@ -188,7 +188,7 @@ func (s *Supervisor) revivePrompt(ctx context.Context, paneID, source string) (s
 	if !ok {
 		return state.PendingAction{}, false
 	}
-	p := s.newAnswerPrompt(paneID, prompt, aliasOr(row.Alias), row.StateSince)
+	p := s.newAnswerPrompt(paneID, prompt, aliasOr(state.Say(row)), row.StateSince)
 	s.setPending(p)
 	s.log.Log(logSource, "pending.revived", paneID, map[string]any{"id": p.ID, "source": source})
 	return p, true

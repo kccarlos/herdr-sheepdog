@@ -117,7 +117,7 @@ func (s *Supervisor) resolveStop(ctx context.Context) stopOutcome {
 	p, has := s.store.Pending()
 	if has && p.Kind == state.PendingSendInstruction && s.cfg.Now().Sub(p.CreatedAt) <= s.cfg.CancelWindow {
 		if row, ok := s.store.Get(p.PaneID); ok && row.State == herdr.StateWorking {
-			alias := aliasOr(row.Alias)
+			alias := aliasOr(state.Say(row))
 			out := stopOutcome{phase: stopPhaseInterrupt, paneID: p.PaneID, alias: alias, what: "an interrupt (Ctrl-C) was sent to " + alias}
 			if err := s.herdr.Interrupt(ctx, p.PaneID); err != nil {
 				s.log.Log(logSource, "supervisor.cancel_error", p.PaneID, map[string]any{"id": p.ID, "error": err.Error(), "via": "stop"})
@@ -143,7 +143,7 @@ func (s *Supervisor) resolveStop(ctx context.Context) stopOutcome {
 
 	// Phase 5: a question stays a question. Stop is not "no".
 	if has && p.Kind == state.PendingAnswerPrompt {
-		alias := s.aliasOf(p.PaneID)
+		alias := s.sayOf(p.PaneID)
 		s.mu.Unlock()
 		return stopOutcome{phase: stopPhasePromptOpen, paneID: p.PaneID, alias: alias, what: alias + " is still waiting for your answer, so I left its question open"}
 	}
@@ -169,7 +169,7 @@ func (s *Supervisor) stopInvestigation(withdrawn stopOutcome) (stopOutcome, bool
 	if !ok {
 		return stopOutcome{}, false
 	}
-	alias := aliasOr(inv.Alias)
+	alias := s.sayPane(inv.PaneID, inv.Alias)
 	return stopOutcome{phase: stopPhaseInvestigation, paneID: inv.PaneID, alias: alias, what: "the look into " + alias + " was called off"}, true
 }
 
@@ -180,7 +180,7 @@ func (s *Supervisor) investigationAbout(text string) (string, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for paneID, live := range s.investigating {
-		if live.alias != "" && strings.Contains(lower, strings.ToLower(live.alias)) {
+		if live.alias != "" && strings.Contains(lower, strings.ToLower(live.alias)) || strings.Contains(lower, strings.ToLower(s.sayOf(paneID))) {
 			return paneID, true
 		}
 	}

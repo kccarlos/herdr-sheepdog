@@ -125,7 +125,7 @@ func (s *Supervisor) mentionedIn(spoken string) {
 // interrupts the pane. It returns what to say and, on failure, the send
 // error (an agent at a prompt is reported through reportBlocked).
 func (s *Supervisor) sendInstruction(ctx context.Context, row state.Agent, text, echo string) (voice.ToolResult, error) {
-	alias := aliasOr(row.Alias)
+	alias := aliasOr(state.Say(row))
 	s.mu.Lock()
 	s.lastSubject = row.PaneID
 	p := s.newSendInstruction(row.PaneID, text, echo)
@@ -156,7 +156,7 @@ func (s *Supervisor) sendInstruction(ctx context.Context, row state.Agent, text,
 // agent is at a prompt we have not announced yet. It reads the screen and
 // turns it into the pending question.
 func (s *Supervisor) reportBlocked(ctx context.Context, row state.Agent) voice.ToolResult {
-	alias := aliasOr(row.Alias)
+	alias := aliasOr(state.Say(row))
 	read, err := s.herdr.Read(ctx, row.PaneID, herdr.SourceRecentUnwrapped, s.cfg.ReadLines)
 	if err != nil {
 		return voice.ToolResult{Spoken: alias + " is waiting at a prompt first, but I could not read it.", Scheduling: voice.UrgencyInterrupt}
@@ -178,7 +178,7 @@ func (s *Supervisor) reportBlocked(ctx context.Context, row state.Agent) voice.T
 // the next prompt within its own poll window with no state change in
 // between. ok reports whether the keys were sent. Caller holds s.mu.
 func (s *Supervisor) answerKeys(ctx context.Context, p state.PendingAction, keys []string, label string, say func(label string) string, via string, extra map[string]any) (voice.ToolResult, bool) {
-	alias := s.aliasOf(p.PaneID)
+	alias := s.sayOf(p.PaneID)
 	if err := s.herdr.SendKeys(ctx, p.PaneID, keys...); err != nil {
 		s.log.Log(logSource, "supervisor.confirm_error", p.PaneID, map[string]any{"id": p.ID, "keys": keys, "error": err.Error()})
 		return voice.ToolResult{Spoken: "I could not send that to " + alias + ".", Scheduling: voice.UrgencyInterrupt}, false
