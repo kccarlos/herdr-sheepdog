@@ -190,7 +190,7 @@ func runSVPCase(ctx context.Context, c SVPCase, fixtureDir string, run svpRun) R
 	t0 := time.Now()
 	host, alias, err := buildHost(c, fixtureDir)
 	if err != nil {
-		return Result{ID: c.ID, Status: StatusFail, Detail: "fixture: " + err.Error(), Duration: time.Since(t0)}
+		return Result{ID: c.ID, Status: StatusFail, Detail: "fixture: " + err.Error(), Duration: time.Since(t0), Failures: []Failure{{FailError, "fixture: " + err.Error()}}}
 	}
 	rec := newRecorder()
 	rec.meter, rec.model = run.meter, modelName
@@ -208,7 +208,7 @@ func runSVPCase(ctx context.Context, c SVPCase, fixtureDir string, run svpRun) R
 	}
 	b, err := brain.New(cfg, m, rec)
 	if err != nil {
-		return Result{ID: c.ID, Status: StatusFail, Detail: "brain.New: " + err.Error(), Duration: time.Since(t0)}
+		return Result{ID: c.ID, Status: StatusFail, Detail: "brain.New: " + err.Error(), Duration: time.Since(t0), Failures: []Failure{{FailError, "brain.New: " + err.Error()}}}
 	}
 	defer func() { _ = b.Close() }()
 	rec.model = b.Model()
@@ -233,10 +233,10 @@ func runSVPCase(ctx context.Context, c SVPCase, fixtureDir string, run svpRun) R
 		// tolerates it and answers for itself); RunSVPLive
 		// needs to see it unwrapped to stop rather than hot-retry the
 		// remaining cases against the same exhausted key pool.
-		return Result{ID: c.ID, Status: StatusFail, Detail: firstLine(err.Error()), Err: err, Duration: dur, Got: got}
+		return Result{ID: c.ID, Status: StatusFail, Detail: firstLine(err.Error()), Err: err, Duration: dur, Got: got, Failures: classifySVP(nil, err)}
 	}
 	if err != nil && !errors.Is(err, brain.ErrFallback) {
-		return Result{ID: c.ID, Status: StatusFail, Detail: firstLine(err.Error()), Err: err, Duration: dur, Got: got}
+		return Result{ID: c.ID, Status: StatusFail, Detail: firstLine(err.Error()), Err: err, Duration: dur, Got: got, Failures: classifySVP(nil, err)}
 	}
 	if err != nil {
 		// A clean fallback (no reply) still lets the harness checks below
@@ -263,7 +263,7 @@ func runSVPCase(ctx context.Context, c SVPCase, fixtureDir string, run svpRun) R
 	reasons = append(reasons, stopWordReasons(c)...)
 	reasons = append(reasons, heardReasons(c, req.Question)...)
 	reasons = append(reasons, base.reasons...)
-	r := Result{ID: c.ID, Duration: dur, Got: got, SkippedChecks: skipped, Pending: c.PendingCheck, Baseline: base.summary, Verdicts: verdicts}
+	r := Result{ID: c.ID, Duration: dur, Got: got, SkippedChecks: skipped, Pending: c.PendingCheck, Baseline: base.summary, Verdicts: verdicts, Failures: classifySVP(reasons, nil)}
 	switch {
 	case offline && len(reasons) == 0:
 		r.Status, r.Detail = StatusPass, "harness check (fake model)"

@@ -53,12 +53,15 @@ func printEvalUsage(w io.Writer) {
 	fprintln(w, "  --judge-model ID      judge model (default "+eval.DefaultJudgeModel+" on vertex,")
 	fprintln(w, "                        "+eval.DefaultOllamaModel+" on ollama)")
 	fprintln(w, "  --ollama-url URL      Ollama OpenAI-compatible root (default "+eval.DefaultOllamaURL+")")
+	fprintln(w, "  --repeat N            live: run each case N times; per-case pass rates (errored")
+	fprintln(w, "                        and not-run runs excluded) and the failure taxonomy")
 }
 
 type evalOpts struct {
 	set, filter, dir, fixtures, configPath, envFile, promptsDir string
 	live                                                        bool
 	provider, model, judge, judgeModel, ollamaURL               string
+	repeat                                                      int
 }
 
 // evalSets are the --set names and the files each reads, relative to
@@ -92,10 +95,15 @@ func parseEvalFlags(args []string, stderr io.Writer) (evalOpts, int, bool) {
 	fs.StringVar(&o.judge, "judge", "", "LLM judge: vertex, ollama, fake or none")
 	fs.StringVar(&o.judgeModel, "judge-model", "", "judge model id")
 	fs.StringVar(&o.ollamaURL, "ollama-url", "", "Ollama OpenAI-compatible root")
+	fs.IntVar(&o.repeat, "repeat", 1, "live: run each case N times and report pass rates")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return o, 0, false
 		}
+		return o, 2, false
+	}
+	if o.repeat < 1 || (o.repeat > 1 && !o.live) {
+		fprintln(stderr, "sheepdog eval: --repeat N (N ≥ 1) is for --live runs; offline is deterministic")
 		return o, 2, false
 	}
 	if _, ok := evalSets[o.set]; !ok && o.set != "all" {
@@ -154,13 +162,24 @@ func runEval(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	}
 	failed := false
 	for _, set := range sets {
-		results, err := runEvalSet(ctx, o, set, pl, models)
-		if err != nil {
-			fprintf(stderr, "sheepdog eval: %v\n", err)
-			return 1
+		var recs []eval.RunRecord
+		for rep := 1; rep <= o.repeat; rep++ {
+			results, err := runEvalSet(ctx, o, set, pl, models)
+			if err != nil {
+				fprintf(stderr, "sheepdog eval: %v\n", err)
+				return 1
+			}
+			if o.repeat == 1 {
+				eval.WriteTable(stdout, set, results)
+			}
+			for _, r := range results {
+				recs = append(recs, r.Record(rep))
+			}
+			failed = failed || eval.HasFailures(results)
 		}
-		eval.WriteTable(stdout, set, results)
-		failed = failed || eval.HasFailures(results)
+		if o.repeat > 1 {
+			eval.WriteStatsTable(stdout, fmt.Sprintf("eval --set %s, repeat %d", set, o.repeat), recs)
+		}
 	}
 	if models != nil {
 		eval.WriteSpend(stdout, models.meter)

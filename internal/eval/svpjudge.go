@@ -144,3 +144,42 @@ func lastLines(s string, n int) []string {
 	}
 	return lines
 }
+
+// classifySVP labels an SVP result's failure reasons with the taxonomy.
+func classifySVP(reasons []string, err error) []Failure {
+	var fs []Failure
+	if err != nil {
+		t := FailError
+		if !isRateLimited(err) && isTimeoutText(err.Error()) {
+			t = FailTimeout
+		}
+		fs = append(fs, Failure{t, firstLine(err.Error())})
+	}
+	for _, r := range reasons {
+		fs = append(fs, Failure{classifyReason(r), r})
+	}
+	return fs
+}
+
+// classifyReason maps one failure reason (svp.go's wording) to a label.
+func classifyReason(r string) FailureType {
+	switch {
+	case strings.HasPrefix(r, reasonFallback):
+		switch {
+		case isRateLimited(errorString(r)):
+			return FailError
+		case isTimeoutText(r):
+			return FailTimeout
+		}
+		return FailBrainFallback
+	case strings.HasPrefix(r, reasonJudgeNo):
+		return FailJudgeNo
+	case strings.HasPrefix(r, reasonJudgeError+": judge error"):
+		return FailError
+	case strings.HasPrefix(r, "none of [") || strings.HasPrefix(r, "read_screen with source"):
+		return FailMissingCall
+	case strings.Contains(r, "completed successfully but must not") || strings.HasPrefix(r, "a prompt to a worker contains"):
+		return FailUnintendedAction
+	}
+	return FailCheck
+}

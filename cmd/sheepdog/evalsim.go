@@ -6,8 +6,11 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/app"
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
@@ -37,6 +40,12 @@ func printEvalSimUsage(w io.Writer) {
 	fprintln(w, "  --judge KIND          vertex (default with --live), ollama or fake")
 	fprintln(w, "  --judge-model ID      judge model (default "+eval.DefaultJudgeModel+")")
 	fprintln(w, "  --ollama-url URL      Ollama OpenAI-compatible root (default "+eval.DefaultOllamaURL+")")
+	fprintln(w, "  --repeat N            run every scenario N times (default 1); pass rates exclude")
+	fprintln(w, "                        errored and not-run runs")
+	fprintln(w, "  --parallel N          conversations at once (default 1)")
+	fprintln(w, "  --budget-usd X        stop starting runs once the estimated spend reaches X")
+	fprintln(w, "                        (the rest are not_run; default 0 = no limit)")
+	fprintln(w, "  --out DIR             write report.json and report.md under DIR")
 	fprintln(w, "  --files GLOB          scenario files (default testdata/eval/sim/*.json)")
 	fprintln(w, "  --filter SUBSTR       only scenarios whose id contains SUBSTR")
 	fprintln(w, "  --fixtures PATH       screen fixture directory (default testdata/herdr)")
@@ -52,6 +61,9 @@ type evalSimOpts struct {
 	judge, judgeModel, ollamaURL           string
 	files, filter, fixtures, events        string
 	configPath, envFile, promptsDir        string
+	out                                    string
+	repeat, parallel                       int
+	budget                                 float64
 }
 
 func parseEvalSimFlags(args []string, stderr io.Writer) (evalSimOpts, int, bool) {
@@ -75,10 +87,18 @@ func parseEvalSimFlags(args []string, stderr io.Writer) (evalSimOpts, int, bool)
 	fs.StringVar(&o.configPath, "config", "", "config file")
 	fs.StringVar(&o.envFile, "env-file", "", "env file")
 	fs.StringVar(&o.promptsDir, "prompts-dir", "", "prompt override directory")
+	fs.StringVar(&o.out, "out", "", "report directory")
+	fs.IntVar(&o.repeat, "repeat", 1, "runs per scenario")
+	fs.IntVar(&o.parallel, "parallel", 1, "conversations at once")
+	fs.Float64Var(&o.budget, "budget-usd", 0, "estimated spend limit")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return o, 0, false
 		}
+		return o, 2, false
+	}
+	if o.repeat < 1 || o.parallel < 1 || o.budget < 0 {
+		fprintln(stderr, "sheepdog eval sim: --repeat and --parallel must be at least 1, --budget-usd not negative")
 		return o, 2, false
 	}
 	if o.live {
@@ -126,19 +146,88 @@ func runEvalSim(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		fprintf(stderr, "sheepdog eval sim: %v\n", err)
 		return 1
 	}
-	var runs []eval.SimRun
-	for _, sc := range scenarios {
-		r := eval.RunSim(ctx, sc, opts, 1)
-		runs = append(runs, r)
-		fprintf(stderr, "%s: %s (%s) ≈ $%.4f\n", sc.ID, r.Status, r.EndReason, r.CostUSD)
-	}
+	started := time.Now()
+	total := len(scenarios) * o.repeat
+	var mu sync.Mutex
+	n, spent := 0, 0.0
+	runs, meter := eval.Campaign(ctx, scenarios, opts, o.repeat, o.parallel, o.budget, func(r eval.SimRun) {
+		mu.Lock()
+		defer mu.Unlock()
+		n++
+		spent += r.CostUSD
+		fprintf(stderr, "[%d/%d] %s r%d: %s (%s, %s) ≈ $%.4f, total ≈ $%.3f\n", n, total, r.Scenario, r.Repeat, r.Status, r.EndReason, eval.Primary(r.Failures), r.CostUSD, spent)
+	})
 	eval.WriteSimTable(stdout, runs)
-	for _, r := range runs {
-		if r.Status == eval.RunFail || r.Status == eval.RunError {
+	if o.out != "" {
+		rep := eval.NewCampaignReport(started, simSetup(o, opts), o.repeat, runs, meter)
+		if err := writeSimReports(o.out, rep); err != nil {
+			fprintf(stderr, "sheepdog eval sim: %v\n", err)
 			return 1
+		}
+		fprintf(stderr, "reports: %s, %s\n", filepath.Join(o.out, "report.json"), filepath.Join(o.out, "report.md"))
+	}
+	if o.repeat > 1 {
+		recs := make([]eval.RunRecord, len(runs))
+		for i, r := range runs {
+			recs[i] = r.Record()
+		}
+		eval.WriteStatsTable(stdout, fmt.Sprintf("eval sim, repeat %d", o.repeat), recs)
+	}
+	eval.WriteSpend(stdout, meter)
+	if !o.live {
+		// Offline is a harness check: any failed or errored run is a
+		// broken scenario or harness.
+		for _, r := range runs {
+			if r.Status != eval.RunPass {
+				return 1
+			}
 		}
 	}
 	return 0
+}
+
+// simSetup records what a campaign ran on, for its report.
+func simSetup(o evalSimOpts, opts eval.SimOptions) map[string]string {
+	if !o.live {
+		return map[string]string{"mode": "offline (scripted brain, scripted user, fake judge)"}
+	}
+	or := func(s, def string) string {
+		if s == "" {
+			return def
+		}
+		return s
+	}
+	return map[string]string{
+		"mode":           "live",
+		"brain":          opts.BrainConfig.Provider + " " + or(opts.BrainConfig.Model, brain.DefaultModel),
+		"simulated user": or(o.simuser, eval.BackendVertex) + " " + or(o.simuserModel, eval.DefaultJudgeModel),
+		"judge":          or(o.judge, eval.BackendVertex) + " " + or(o.judgeModel, eval.DefaultJudgeModel),
+		"parallel":       fmt.Sprint(o.parallel),
+		"budget_usd":     fmt.Sprint(o.budget),
+		"scenarios":      o.files + filterNote(o.filter),
+	}
+}
+
+func filterNote(f string) string {
+	if f == "" {
+		return ""
+	}
+	return " (filter " + f + ")"
+}
+
+func writeSimReports(dir string, rep eval.CampaignReport) error {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	if err := rep.WriteJSON(filepath.Join(dir, "report.json")); err != nil {
+		return err
+	}
+	f, err := os.Create(filepath.Join(dir, "report.md"))
+	if err != nil {
+		return err
+	}
+	rep.WriteMarkdown(f, 25)
+	return f.Close()
 }
 
 // loadSimScenarios reads every scenario file of the glob, filtered.

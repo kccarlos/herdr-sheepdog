@@ -41,6 +41,24 @@ type Result struct {
 	Baseline string
 	// Verdicts are the judge's answers, when a judge ran (live).
 	Verdicts []Verdict
+	// Failures label a failed result with the fixed taxonomy.
+	Failures []Failure
+}
+
+// RunStatus maps a result onto the run statuses repeat statistics use: a
+// skipped case never ran, and a failure that is only a harness error
+// (a rate limit, a judge error) is an errored run.
+func (r Result) RunStatus() RunStatus {
+	switch r.Status {
+	case StatusPass:
+		return RunPass
+	case StatusSkipped:
+		return RunNotRun
+	}
+	if s := statusOf(r.Failures); s == RunError {
+		return RunError
+	}
+	return RunFail
 }
 
 // WriteTable prints a pass/fail table and a summary line to w: per case
