@@ -566,7 +566,7 @@ func (s *Supervisor) utteranceTurn(ctx context.Context, u *inflightUtterance) ut
 	if err != nil {
 		return utteranceOutcome{}
 	}
-	res := toolResultFrom(rep, prose.EarReply)
+	res := toolResultFrom(rep, prose.EarRunaway)
 	if res.Spoken == "" {
 		return utteranceOutcome{acted: rep.Acted}
 	}

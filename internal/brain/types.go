@@ -179,11 +179,9 @@ const (
 // Reply is the answer contract (docs/roles.md): what the assistant says,
 // what it may use for follow-ups, and whether the CEO must act.
 //
-// The ear contract: Spoken is the headline (two short sentences, thirty
-// words, no dashes by default; up to four and sixty when the CEO asked
-// for detail; the supervisor cuts an utterance reply at prose.EarReply
-// and every other line at prose.EarBrief, and moves the overflow into
-// Detail); Ask is the one question when
+// The ear contract: Spoken is the headline (short by default, longer when
+// the CEO asked for detail, no dashes; the supervisor cuts only a runaway,
+// at prose.EarRunaway, and moves the overflow into Detail); Ask is the one question when
 // there is a decision only the CEO can make, read as the last sentence;
 // Detail is the plain explanation of every term the headline used, in
 // everyday words, which the voice reads when the CEO asks "what does

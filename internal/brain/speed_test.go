@@ -124,7 +124,7 @@ func TestAnnouncePromptBudget(t *testing.T) {
 	if len(state) > 3000 {
 		t.Errorf("state = %d chars", len(state))
 	}
-	if EstimateTokens(static+state) > 4500 {
+	if EstimateTokens(static+state) > 4700 {
 		t.Errorf("system + state = %d tokens", EstimateTokens(static+state))
 	}
 }

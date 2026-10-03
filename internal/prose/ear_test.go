@@ -133,8 +133,8 @@ func TestEarLine(t *testing.T) {
 // caps (2 sentences / 30 words, 4 / 60) are gone by decision; the prompt,
 // not the code, decides how much to say.
 func TestEarRunawayCap(t *testing.T) {
-	if EarBrief != EarRunaway || EarReply != EarRunaway || EarRunaway.Seconds != 44 || EarWords != 110 {
-		t.Fatalf("caps = %+v %+v %+v", EarBrief, EarReply, EarRunaway)
+	if EarRunaway.Seconds != 44 || EarWords != 110 {
+		t.Fatalf("cap = %+v", EarRunaway)
 	}
 	detail := "The mic stays red after a call. The listening banner flickers on reconnect. The haptic buzz fires twice. Hold-to-talk drops the first word. Dark mode loses the status colour."
 	got, over := EarLine(detail, "Shall it fix them?")

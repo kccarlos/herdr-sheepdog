@@ -32,13 +32,6 @@ type EarCaps struct{ Seconds float64 }
 // EarRunaway is the one cap on every spoken line.
 var EarRunaway = EarCaps{Seconds: EarSeconds}
 
-// EarBrief and EarReply are kept for callers that still pass a cap per
-// kind. They are the same runaway cap: there is no per-kind cap any more.
-var (
-	EarBrief = EarRunaway
-	EarReply = EarRunaway
-)
-
 // earMinCut is the least speech (about six words) a headline cut at a
 // comma keeps: a shorter first clause says nothing on its own, so the cut
 // falls at the cap instead.

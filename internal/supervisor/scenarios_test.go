@@ -822,3 +822,38 @@ func TestConcurrentToolsAndTransitions(t *testing.T) {
 	cancel()
 	<-done
 }
+
+// "Type something." (bench #2) is not an answer: the phone card, the push
+// buttons, the by-number mapping and the label match never offer it, while
+// the rail still accepts its key so the brain can type a dictated answer.
+func TestAskUserQuestionMetaOptionIsRailOnly(t *testing.T) {
+	h := newHarness(t)
+	h.addAgent("w5:p1", "w5", "claude", herdr.StateWorking)
+	h.block("w5:p1", "claude-askuserquestion.screen.txt")
+	p, ok := h.pending()
+	if !ok || len(p.Options) != 3 || !p.Options[2].Meta || p.Options[0].Meta {
+		t.Fatalf("pending options = %+v", p.Options)
+	}
+	card := PendingOptions(p)
+	if len(card) != 2 || card[0].Label != "Yes, proceed" || card[1].Label != "No, decline" {
+		t.Errorf("phone card = %+v", card)
+	}
+	if !allowedKeys(p)["3"] || !selectedBy(p, []string{"3"}) {
+		t.Errorf("the rail must still accept Type something (key 3)")
+	}
+	if _, _, err := mapAnswer(p, "option 3"); err == nil {
+		t.Error("option 3 (Type something.) mapped from words")
+	}
+	if _, _, err := mapAnswer(p, "type something"); err == nil {
+		t.Error("the label of the meta option matched")
+	}
+	if keys, _, err := mapAnswer(p, "yes"); err != nil || strings.Join(keys, " ") != "1" {
+		t.Errorf("yes = %v %v", keys, err)
+	}
+	if keys, _, err := mapAnswer(p, "no"); err != nil || strings.Join(keys, " ") != "2" {
+		t.Errorf("no = %v %v", keys, err)
+	}
+	if _, err := h.sup.AnswerTap(context.Background(), p.ID, 3); err == nil {
+		t.Error("a tap on the meta option was accepted")
+	}
+}

@@ -44,7 +44,7 @@ func TestUtteranceAndAnnounceShareTheRunawayCap(t *testing.T) {
 	// detail: scrubbed, never cut, plus whatever the runaway cap moved there.
 	detail := strings.TrimSpace(strings.Repeat("One plain sentence about a term. ", 8))
 	runaway := strings.TrimSpace(strings.Repeat(strings.Repeat("word ", 9)+"end. ", 14))
-	for name, caps := range map[string]prose.EarCaps{"reply": prose.EarReply, "brief": prose.EarBrief} {
+	for name, caps := range map[string]prose.EarCaps{"every line": prose.EarRunaway} {
 		got := toolResultFrom(brain.Reply{Spoken: runaway, Detail: detail + " See /a/b/c.go."}, caps)
 		if n := len(strings.Fields(got.Spoken)); n > prose.EarWords || n < 90 || !strings.HasPrefix(got.Detail, detail+" See a file ") || !strings.HasSuffix(got.Detail, "end.") {
 			t.Errorf("%s: toolResultFrom = %q / %q", name, got.Spoken, got.Detail)
