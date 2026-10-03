@@ -283,7 +283,11 @@ function renderPending(p) {
     + (p.yes_keys ? `   yes=${p.yes_keys.join(' ')}` : '') + (p.no_keys ? ` no=${p.no_keys.join(' ')}` : '');
   const exp = new Date(p.expires_at);
   const left = Math.round((exp.getTime() - Date.now()) / 1000);
-  $('pending-expires').textContent = isNaN(exp) ? '' : `${exp.toLocaleTimeString()} (${left >= 0 ? `${left}s left` : 'expired'})`;
+  // An answer_prompt has no expiry (zero time): it lives while the pane
+  // is blocked at the prompt.
+  const none = isNaN(exp) || exp.getUTCFullYear() < 2000;
+  $('pending-expires').textContent = none ? (p.kind === 'answer_prompt' ? 'while the prompt is open' : '')
+    : `${exp.toLocaleTimeString()} (${left >= 0 ? `${left}s left` : 'expired'})`;
 }
 
 function renderVoice(v, st) {

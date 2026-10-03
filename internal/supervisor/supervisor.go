@@ -60,8 +60,9 @@ type Querier interface {
 
 // Config tunes the Supervisor; zero values take the defaults.
 type Config struct {
-	// PendingTTL is how long a pending action stays confirmable (default
-	// 120 s).
+	// PendingTTL is how long a send_instruction pending action stays
+	// cancellable (default 120 s). An answer_prompt has no clock: it
+	// lives while its pane is blocked at the same prompt (pending.go).
 	PendingTTL time.Duration
 	// ExpiryTick is the period of the expiry check in Run (default 1 s).
 	ExpiryTick time.Duration
@@ -227,7 +228,7 @@ func (c Config) withDefaults() Config {
 
 // Supervisor is safe for concurrent use: tool handlers, HandleTransition,
 // OnVoiceEvent and Run may all run at once. One mutex orders every change
-// to the pending slot, the briefing cache and the expired-question memory;
+// to the pending slot and the briefing cache;
 // model calls and pane reads happen outside it, herdr sends inside it so
 // an answer, a stop and an instruction cannot interleave.
 type Supervisor struct {
@@ -246,7 +247,6 @@ type Supervisor struct {
 	briefing      string               // cached sentence; "" means recompute
 	briefingPanes []string             // panes the cached sentence names
 	briefingAt    time.Time            // when the cached sentence was composed
-	expired       *state.PendingAction // last expired answer_prompt (scenario 8)
 	seq           uint64               // pending action ids
 	interrupted   map[string]time.Time // pane -> when cancel sent Ctrl-C (suppresses the next "finished")
 	lastSubject   string               // pane most recently spoken about (last push subject or tool target)

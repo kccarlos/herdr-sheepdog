@@ -640,25 +640,19 @@ func (s *Supervisor) fastAnswer(ctx context.Context, in *shepherdInput, text str
 	defer s.mu.Unlock()
 	text = strings.TrimSpace(text)
 	p, has := s.store.Pending()
-	switch {
-	case has && p.Kind == state.PendingAnswerPrompt && s.cfg.Now().Before(p.ExpiresAt):
-		// Live and unexpired: the ordinary case.
-	case !has && s.expired != nil:
-		// The pane's answer_prompt pending expired while nobody answered,
-		// but the prompt may still be on screen: revive it before mapping
-		// the bare word onto its keys (docs/history/issues-2026-09-18.md "an
-		// expired approval prompt can never be approved"). s.expired only
-		// says which pane; revival always re-reads the screen.
-		revived, ok := s.revivePrompt(ctx, s.expired.PaneID, "fast_path")
-		if !ok {
-			return voice.ToolResult{}, false
-		}
-		p = revived
-	default:
+	if !has || p.Kind != state.PendingAnswerPrompt {
 		return voice.ToolResult{}, false
 	}
 	keys, label, ok := bareAnswer(p, text)
 	if !ok {
+		return voice.ToolResult{}, false
+	}
+	if age := s.cfg.Now().Sub(p.CreatedAt); age > fastAnswerWindow {
+		// Minutes after the announcement a bare "yes" may be about
+		// something else the shepherd heard since: the brain gets the
+		// words, with the prompt and how long it has waited in its
+		// roster, and decides (docs/bench-2026-10-03.md #8).
+		s.log.Log(logSource, "supervisor.fast_path_skipped", p.PaneID, map[string]any{"reason": "prompt_old", "age_s": int(age.Seconds()), "text": text, "id": p.ID})
 		return voice.ToolResult{}, false
 	}
 	if rin, reason := s.railInputLocked(p, keys); reason != "" || rin != in {
@@ -712,6 +706,12 @@ func bareAnswer(p state.PendingAction, text string) (keys []string, label string
 	}
 	return keys, label, true
 }
+
+// fastAnswerWindow is how long after a prompt was announced (its pending
+// action created) a bare answer still goes straight to its keys. Not a
+// knob: past it the brain decides, so a longer or shorter window changes
+// only how often a model call is spent on a bare word.
+const fastAnswerWindow = 60 * time.Second
 
 // hasListener reports whether a line spoken now can be heard (Listener);
 // true for a Pusher that cannot tell. Invariant it serves in awaitReply:

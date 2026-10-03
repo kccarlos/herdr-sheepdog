@@ -31,7 +31,7 @@ so they have no `SHEEPDOG_*` override.
 | `data_dir` | `SHEEPDOG_DATA_DIR` | `~/.local/share/sheepdog` | Where the daemon keeps its own files: the JSONL event log and (unless overridden) the state file. |
 | `debounce_ms` | `SHEEPDOG_DEBOUNCE_MS` | `3000` | How long a herdr `blocked` state must persist before it becomes a transition (plan §3.1); filters transient flicker. |
 | `snapshot_interval_s` | `SHEEPDOG_SNAPSHOT_INTERVAL_S` | `30` | Period of the herdr `session.snapshot` diff loop that catches panes the event stream missed. |
-| `pending_ttl_s` | `SHEEPDOG_PENDING_TTL_S` | `120` | How long a pending action (an unanswered agent question, or an in-flight instruction) stays confirmable/cancellable before it expires. |
+| `pending_ttl_s` | `SHEEPDOG_PENDING_TTL_S` | `120` | How long an in-flight instruction's pending action stays cancellable before it expires. An unanswered agent question has no TTL: it lives while the agent is blocked at that prompt (herdr state and screen), and the bare yes/no fast path answers it only within a minute of its announcement; later the words go to the brain. |
 | `aliases` | *(TOML only)* | `{}` | Table mapping a herdr pane id to a spoken alias, e.g. `"w9:p1" = "auth"`. Pinned aliases win over derived ones, for new agents and for rows already on disk. |
 
 ## `[herdr]`

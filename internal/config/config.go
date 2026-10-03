@@ -35,8 +35,9 @@ type Config struct {
 	// Aliases maps pane_id -> spoken alias, e.g. "w9:p1" = "auth".
 	Aliases map[string]string `toml:"aliases"`
 
-	// PendingTTLS is how long a pending action (an unanswered agent
-	// question or an in-flight instruction) stays confirmable/cancellable.
+	// PendingTTLS is how long an in-flight instruction's pending action
+	// stays cancellable. An unanswered agent question has no TTL: it
+	// lives while the agent is blocked at that prompt.
 	PendingTTLS int `toml:"pending_ttl_s"`
 
 	Herdr      Herdr      `toml:"herdr"`

@@ -366,40 +366,20 @@ func TestTapRejectsStaleIDsAndBadOptions(t *testing.T) {
 	}
 }
 
-// A tap on a question whose pending expired while the prompt is still on
-// screen revives it and answers it (PR #37); if the screen now shows a
-// different prompt, the tap is stale.
-func TestTapRevivesAnExpiredPrompt(t *testing.T) {
+// A spoken "yes" to a prompt minutes old still is after the prompt
+// appeared: the rail measures from when it was first seen (inputs.go's
+// promptSinceLocked); within the fast-path window it goes straight to the
+// keys.
+func TestYesWithinTheFastWindowAuthorises(t *testing.T) {
 	h := newHarness(t)
 	blockedAuth(t, h)
-	p, _ := h.pending()
-	h.clock.Advance(121 * time.Second)
-	h.sup.ExpirePending()
-	if _, err := h.sup.AnswerTap(context.Background(), p.ID, 1); err != nil {
-		t.Fatal(err)
-	}
-	if got := h.sendKeysRequests(); len(got) != 1 {
-		t.Errorf("keys = %v", got)
-	}
-	if h.log.count("pending.revived") != 1 {
-		t.Errorf("pending.revived = %d", h.log.count("pending.revived"))
-	}
-}
-
-// A spoken "yes" to a prompt whose pending expired revives it and is
-// still after the prompt appeared: the revival keeps the time the prompt
-// was first seen (inputs.go's promptSinceLocked).
-func TestYesToAnExpiredPromptStillAuthorises(t *testing.T) {
-	h := newHarness(t)
-	blockedAuth(t, h)
-	h.clock.Advance(121 * time.Second)
-	h.sup.ExpirePending()
+	h.clock.Advance(50 * time.Second)
 	h.say("yes")
 	if got := h.sendKeysRequests(); len(got) != 1 {
 		t.Errorf("keys = %v", got)
 	}
-	if h.log.count("pending.revived") != 1 || h.log.count("brain.rail_blocked") != 0 {
-		t.Errorf("revived=%d rail_blocked=%d", h.log.count("pending.revived"), h.log.count("brain.rail_blocked"))
+	if h.log.count("brain.rail_blocked") != 0 || h.log.count("supervisor.fast_path_skipped") != 0 {
+		t.Errorf("rail_blocked=%d fast_path_skipped=%d", h.log.count("brain.rail_blocked"), h.log.count("supervisor.fast_path_skipped"))
 	}
 }
 

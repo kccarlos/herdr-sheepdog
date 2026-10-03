@@ -392,9 +392,14 @@ type JournalEntry struct {
 type PendingPrompt struct {
 	ID       string
 	Question string
-	Options  []Option
-	YesKeys  []string
-	NoKeys   []string
+	// AskedAt is when the prompt was announced (the pending action's
+	// creation): the roster says how long it has waited, a fact the
+	// brain weighs when the CEO's words may or may not answer it
+	// (docs/bench-2026-10-03.md #8).
+	AskedAt time.Time
+	Options []Option
+	YesKeys []string
+	NoKeys  []string
 }
 
 // Option is one selectable choice of a PendingPrompt.

@@ -195,7 +195,6 @@ func (s *Supervisor) answerKeys(ctx context.Context, p state.PendingAction, keys
 	}); err != nil {
 		s.log.Log(logSource, "supervisor.state_error", p.PaneID, map[string]any{"error": err.Error()})
 	}
-	s.expired = nil
 	// Answered: the next prompt on this pane appeared after now, even if
 	// it reads the same (inputs.go's promptSinceLocked).
 	delete(s.promptSeenAt, p.PaneID)

@@ -587,34 +587,16 @@ func (s *Supervisor) railBlockedLocked(p state.PendingAction, keys []string, via
 // tapped (POST /api/pending/answer): option is 1-based, as in
 // PendingOptions. The tap is recorded as a shepherd input first, so it
 // passes the same rail as a spoken answer; the keys go through the same
-// executor (the post-answer poll included), an expired pending action
-// whose prompt is still on screen is revived first, and the voice gets a
-// silent line saying what was tapped. id must name the open question
-// (or the one that just expired): anything else is ErrPendingGone.
+// executor (the post-answer poll included), and the voice gets a silent
+// line saying what was tapped. id must name the open question, which
+// lives as long as its pane is blocked at that prompt (pending.go,
+// ExpirePending): anything else is ErrPendingGone.
 func (s *Supervisor) AnswerTap(ctx context.Context, id string, option int) (voice.ToolResult, error) {
 	s.mu.Lock()
 	p, has := s.store.Pending()
-	if !has || p.ID != id || p.Kind != state.PendingAnswerPrompt || !s.cfg.Now().Before(p.ExpiresAt) {
-		// Expired (or past its TTL, not yet swept) unanswered: revive it
-		// from the screen, but only when the screen still shows the same
-		// prompt — a tap is about the question the shepherd saw.
-		var pane string
-		switch {
-		case has && p.ID == id && p.Kind == state.PendingAnswerPrompt:
-			pane = p.PaneID
-		case !has && s.expired != nil && s.expired.ID == id:
-			pane = s.expired.PaneID
-		default:
-			s.mu.Unlock()
-			return voice.ToolResult{}, ErrPendingGone
-		}
-		before := s.lastPrompt[pane]
-		revived, ok := s.revivePrompt(ctx, pane, "tap")
-		if !ok || s.lastPrompt[pane] != before {
-			s.mu.Unlock()
-			return voice.ToolResult{}, ErrPendingGone
-		}
-		p = revived
+	if !has || p.ID != id || p.Kind != state.PendingAnswerPrompt {
+		s.mu.Unlock()
+		return voice.ToolResult{}, ErrPendingGone
 	}
 	if option < 1 || option > len(p.Options) {
 		s.mu.Unlock()

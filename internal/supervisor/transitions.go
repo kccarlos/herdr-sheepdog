@@ -37,7 +37,7 @@ func (s *Supervisor) HandleTransition(ctx context.Context, t herdr.Transition) {
 	if t.Closed {
 		s.mu.Lock()
 		s.dropPendingFor(t.PaneID, "pane_closed")
-		s.forgetExpired(t.PaneID)
+		s.forgetPrompt(t.PaneID)
 		s.mu.Unlock()
 		s.cfg.WorkerLog.Forget(t.PaneID)
 		s.journal.clearMissing(t.PaneID)
@@ -66,7 +66,7 @@ func (s *Supervisor) HandleTransition(ctx context.Context, t herdr.Transition) {
 	case herdr.StateUnknown:
 		s.mu.Lock()
 		s.dropPendingFor(t.PaneID, "agent_exited")
-		s.forgetExpired(t.PaneID)
+		s.forgetPrompt(t.PaneID)
 		s.mu.Unlock()
 		if wasBusy {
 			s.push(t.PaneID, alias+" has exited while it was busy.", voice.UrgencyInterrupt)
@@ -76,7 +76,7 @@ func (s *Supervisor) HandleTransition(ctx context.Context, t herdr.Transition) {
 		// Whatever the previous state, a working pane is no longer at a
 		// prompt (agy reports done, not blocked, around its prompts).
 		s.dropPendingFor(t.PaneID, "prompt_gone", state.PendingAnswerPrompt)
-		s.forgetExpired(t.PaneID)
+		s.forgetPrompt(t.PaneID)
 		started, justSent := s.startedInstruction(t.PaneID, from)
 		s.mu.Unlock()
 		if started != "" {
@@ -87,7 +87,7 @@ func (s *Supervisor) HandleTransition(ctx context.Context, t herdr.Transition) {
 		s.mu.Lock()
 		if from == herdr.StateBlocked {
 			s.dropPendingFor(t.PaneID, "prompt_gone", state.PendingAnswerPrompt)
-			s.forgetExpired(t.PaneID)
+			s.forgetPrompt(t.PaneID)
 		}
 		s.dropPendingFor(t.PaneID, "finished", state.PendingSendInstruction)
 		s.mu.Unlock()
@@ -349,12 +349,9 @@ func (s *Supervisor) recordBlock(paneID, question string, answered bool) {
 	s.invalidateBriefing()
 }
 
-// forgetExpired drops the remembered expired question of paneID, and when
-// its prompt first appeared. Caller holds s.mu.
-func (s *Supervisor) forgetExpired(paneID string) {
-	if s.expired != nil && s.expired.PaneID == paneID {
-		s.expired = nil
-	}
+// forgetPrompt drops when paneID's prompt first appeared. Caller holds
+// s.mu.
+func (s *Supervisor) forgetPrompt(paneID string) {
 	// The pane left its prompt (answered in the terminal, say): a prompt
 	// that reads the same later appeared then, not now (inputs.go).
 	delete(s.promptSeenAt, paneID)

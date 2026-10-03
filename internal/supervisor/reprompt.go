@@ -110,13 +110,16 @@ func (s *Supervisor) pollReprompt(paneID string) {
 // Config.SnapshotInterval afterwards.
 func (s *Supervisor) reconcileReprompts(ctx context.Context) {
 	for _, row := range s.store.List() {
+		if p, has := s.store.Pending(); has && p.PaneID == row.PaneID {
+			if p.Kind == state.PendingAnswerPrompt {
+				s.checkOpenPrompt(ctx, row, p)
+			}
+			continue
+		}
 		if row.State != herdr.StateBlocked {
 			continue
 		}
 		if row.LastBlock != nil && !row.LastBlock.Answered {
-			continue
-		}
-		if p, has := s.store.Pending(); has && p.PaneID == row.PaneID {
 			continue
 		}
 		read, err := s.herdr.Read(ctx, row.PaneID, herdr.SourceRecentUnwrapped, s.cfg.ReadLines)
@@ -136,6 +139,50 @@ func (s *Supervisor) reconcileReprompts(ctx context.Context) {
 		if !s.raiseReprompt(ctx, row, prompt, "reconcile", 0) {
 			s.releasePromptClaim(row.PaneID, sig, prev)
 		}
+	}
+}
+
+// checkOpenPrompt is the open answer_prompt's lifetime check, on every
+// reconcile tick (docs/bench-2026-10-03.md #8): the pending action lives
+// while its pane is at the same prompt. A transition off blocked ends it
+// (transitions.go); here the screen decides: no prompt ends it
+// (pending.cancelled {prompt_gone}), and a different prompt replaces it
+// like a reprompt does on a blocked pane, or ends it on one herdr
+// reports done or idle (agy's prompts, a finish that asks). A tap on the
+// old card must never send its keys into a question it was not about. A
+// failed read keeps it.
+func (s *Supervisor) checkOpenPrompt(ctx context.Context, row state.Agent, p state.PendingAction) {
+	gone := func() {
+		s.mu.Lock()
+		if cur, has := s.store.Pending(); has && cur.ID == p.ID {
+			s.clearPending(cur, "prompt_gone")
+		}
+		s.mu.Unlock()
+	}
+	read, err := s.herdr.Read(ctx, row.PaneID, herdr.SourceRecentUnwrapped, s.cfg.ReadLines)
+	if err != nil {
+		s.log.Log(logSource, "supervisor.reconcile_error", row.PaneID, map[string]any{"error": err.Error()})
+		return
+	}
+	prompt, ok := herdr.ParsePrompt(read.Text)
+	if !ok {
+		gone()
+		return
+	}
+	sig := promptSignature(prompt)
+	if sig == pendingSignature(p) {
+		return
+	}
+	if row.State != herdr.StateBlocked {
+		gone()
+		return
+	}
+	prev, claimed := s.claimPrompt(row.PaneID, sig)
+	if !claimed {
+		return
+	}
+	if !s.raiseReprompt(ctx, row, prompt, "reconcile", 0) {
+		s.releasePromptClaim(row.PaneID, sig, prev)
 	}
 }
 

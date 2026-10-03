@@ -202,7 +202,11 @@ func renderRoster(agents []AgentInfo, now time.Time) string {
 			fmt.Fprintf(&b, "; CEO last dealt with it %s ago", agoCoarse(now.Sub(a.LastInteraction)))
 		}
 		if p := a.Pending; p != nil {
-			fmt.Fprintf(&b, "; WAITING FOR AN ANSWER: %s", clipText(oneLine(p.Question), rosterPromptRunes))
+			b.WriteString("; WAITING FOR AN ANSWER")
+			if !p.AskedAt.IsZero() {
+				fmt.Fprintf(&b, " (asked %s ago)", ago(now.Sub(p.AskedAt)))
+			}
+			fmt.Fprintf(&b, ": %s", clipText(oneLine(p.Question), rosterPromptRunes))
 			if len(p.Options) > 0 {
 				var opts []string
 				for i, o := range p.Options {

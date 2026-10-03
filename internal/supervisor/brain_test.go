@@ -177,7 +177,7 @@ func TestBrainSendKeysPassesTheRail(t *testing.T) {
 		t.Errorf("confirmed=%d rail_blocked=%d", h.log.count("pending.confirmed"), h.log.count("brain.rail_blocked"))
 	}
 	// Call 0 was the block's announce event turn; the CEO turn is 1–2.
-	if sys := m.Calls()[1].System(); !strings.Contains(sys, "WAITING FOR AN ANSWER: would you like to run the following command") || !strings.Contains(sys, `"Yes, proceed" -> keys [y]`) {
+	if sys := m.Calls()[1].System(); !strings.Contains(sys, "WAITING FOR AN ANSWER (asked ") || !strings.Contains(sys, "ago): would you like to run the following command") || !strings.Contains(sys, `"Yes, proceed" -> keys [y]`) {
 		t.Errorf("roster lacks the prompt:\n%s", sys)
 	}
 	if second := m.Calls()[2].Text(); !strings.Contains(second, "Told auth yes.") {
@@ -223,28 +223,27 @@ func TestBrainSendKeysBlockedByTheRail(t *testing.T) {
 	}
 }
 
-// Once a pending answer_prompt expires (or is otherwise dropped) while
-// the prompt is still on the pane's screen, a later send_keys revives it
-// from the screen and the rail's normal checks apply to what is actually
-// there (docs/history/issues-2026-09-18.md "an expired approval prompt can never
-// be approved").
-// Here the pending expires while the brain's turn runs: a prompt that had
-// already expired when the shepherd spoke is revived by the fast path
-// before any turn starts (TestExpiredPromptRevivedByFastPath).
-func TestBrainSendKeysRevivesAnExpiredPrompt(t *testing.T) {
+// Once a pending answer_prompt is dropped unanswered while the prompt is
+// still on the pane's screen (another pane's block or an instruction took
+// the one slot), a later send_keys revives it from the screen and the
+// rail's normal checks apply to what is actually there
+// (docs/history/issues-2026-09-18.md "an expired approval prompt can never
+// be approved"). Here it is dropped while the brain's turn runs.
+func TestBrainSendKeysRevivesADroppedPrompt(t *testing.T) {
 	var h *harness
 	m := braintest.NewModel(
 		braintest.Step{Fn: func(braintest.Call) (*genai.GenerateContentResponse, error) {
 			h.clock.Advance(11 * time.Second)
-			h.sup.ExpirePending()
-			if _, has := h.pending(); has {
-				t.Error("pending did not expire")
+			h.sup.mu.Lock()
+			if p, has := h.store.Pending(); has {
+				h.sup.clearPending(p, "replaced")
 			}
+			h.sup.mu.Unlock()
 			return braintest.Response(braintest.Step{Calls: []*genai.FunctionCall{braintest.FC(brain.ToolSendKeys, map[string]any{"agent": "auth", "keys": []any{"y"}})}}), nil
 		}},
 		braintest.Step{Text: braintest.Reply("Told auth yes.", "")},
 	)
-	h = newBrainHarness(t, m, func(c *Config) { c.PendingTTL = 10 * time.Second })
+	h = newBrainHarness(t, m)
 	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
 	h.block("w5:p1", "codex-approval-prompt.screen.txt")
 	res := h.say("please approve it")
