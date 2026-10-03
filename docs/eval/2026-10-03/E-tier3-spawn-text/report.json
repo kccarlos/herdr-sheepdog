@@ -1,0 +1,294 @@
+{
+  "started": "2026-10-03T11:41:52.257889-07:00",
+  "finished": "2026-10-03T11:46:13.722833-07:00",
+  "setup": {
+    "brain": "gemini (vertex) gemini-3.8-flash",
+    "judge": "vertex gemini-3.1-flash-lite",
+    "mode": "tier 3 (real herdr session, real workers, scratch daemon --voice=off --heard-echo; the CEO types)",
+    "parallel": "1",
+    "scenarios": "OUT/t3scen/*.json (filter t3-spawn)",
+    "simulated user": "vertex gemini-3.1-flash-lite",
+    "workers": "claude haiku; codex gpt-6-luna (low)"
+  },
+  "repeat": 1,
+  "stats": [
+    {
+      "case": "t3-spawn-by-voice",
+      "runs": 1,
+      "pass": 0,
+      "fail": 1,
+      "errored": 0,
+      "not_run": 0,
+      "pass_rate": 0,
+      "primary": {
+        "judge_no": 1
+      },
+      "labels": {
+        "judge_no": 1
+      },
+      "mean_duration_ms": 261462,
+      "cost_usd_estimate": 0.0054335
+    }
+  ],
+  "total": {
+    "case": "TOTAL",
+    "runs": 1,
+    "pass": 0,
+    "fail": 1,
+    "errored": 0,
+    "not_run": 0,
+    "pass_rate": 0,
+    "primary": {
+      "judge_no": 1
+    },
+    "labels": {
+      "judge_no": 1
+    },
+    "mean_duration_ms": 261462,
+    "cost_usd_estimate": 0.0054335
+  },
+  "spend": [
+    {
+      "role": "judge",
+      "model": "gemini-3.1-flash-lite",
+      "usage": {
+        "calls": 10,
+        "in": 16436,
+        "out": 209
+      },
+      "cost_usd_estimate": 0.0044225
+    },
+    {
+      "role": "simuser",
+      "model": "gemini-3.1-flash-lite",
+      "usage": {
+        "calls": 5,
+        "in": 3534,
+        "out": 85
+      },
+      "cost_usd_estimate": 0.001011
+    }
+  ],
+  "spend_usd_estimate": 0.0054335,
+  "runs": [
+    {
+      "scenario": "t3-spawn-by-voice",
+      "repeat": 1,
+      "status": "fail",
+      "failures": [
+        {
+          "type": "judge_no",
+          "detail": "no_hallucination: Sheepdog falsely claimed at [t+40s] that the agent was \"asking do you want to create CONTRIBUTING.md,\" when the agent had already autonomously written the file as shown in the screen of `bench-claude-2`. This contradicts the agent's own terminal output, which states \"Wrote 27 lines to CONTRIBUTING.md\" and \"Done.\""
+        }
+      ],
+      "end_reason": "end_call",
+      "end_detail": "The CONTRIBUTING.md file was created and saved successfully.",
+      "goal_met_self": true,
+      "turns": 3,
+      "duration_ms": 261462,
+      "transcript": [
+        {
+          "at_ms": 8390,
+          "who": "ceo",
+          "text": "Start a new Claude agent on Haiku in the bench project and have it add a short CONTRIBUTING file explaining how to run the tests."
+        },
+        {
+          "at_ms": 14027,
+          "who": "sheepdog",
+          "text": "Starting a new Claude agent on Haiku in bench to write the contributing guide."
+        },
+        {
+          "at_ms": 19154,
+          "who": "ceo",
+          "text": "Great. Let me know when it's done."
+        },
+        {
+          "at_ms": 22637,
+          "who": "sheepdog",
+          "text": "I will let you know as soon as it finishes."
+        },
+        {
+          "at_ms": 27423,
+          "who": "system",
+          "text": "The CEO waits in silence."
+        },
+        {
+          "at_ms": 40555,
+          "who": "push",
+          "text": "CONTRIBUTING file Claude is asking do you want to create CONTRIBUTING.md."
+        },
+        {
+          "at_ms": 42051,
+          "who": "push",
+          "text": "It has written the contributing guide and needs your yes to save it in the bench project. The guide explains how to run the tests. Approve saving it?"
+        },
+        {
+          "at_ms": 50360,
+          "who": "ceo",
+          "text": "Yes, approve it."
+        },
+        {
+          "at_ms": 54248,
+          "who": "sheepdog",
+          "text": "Approved. It is saving the file now."
+        },
+        {
+          "at_ms": 58161,
+          "who": "push",
+          "text": "The contributing guide is finished. It covers how to run the project's tests with standard Go test commands. Shall I have it commit the new file?"
+        },
+        {
+          "at_ms": 58924,
+          "who": "system",
+          "text": "The CEO waits in silence."
+        }
+      ],
+      "actions": [
+        {
+          "at_ms": 15312,
+          "who": "action",
+          "text": "prompt to new agent in pane w1:p2: \"Add a short CONTRIBUTING file explaining how to run the tests. When you finish, end with three short lines for someone who cannot see the screen: what changed; what needs a decision; what is next.\"",
+          "agent": "new agent in pane w1:p2",
+          "kind": "prompt",
+          "detail": "Add a short CONTRIBUTING file explaining how to run the tests. When you finish, end with three short lines for someone who cannot see the screen: what changed; what needs a decision; what is next."
+        },
+        {
+          "at_ms": 52323,
+          "who": "action",
+          "text": "keys to new agent in pane w1:p2: 1",
+          "agent": "new agent in pane w1:p2",
+          "kind": "keys",
+          "detail": "1"
+        }
+      ],
+      "timeline": [
+        {
+          "at_ms": -214,
+          "who": "worker",
+          "text": "bench-claude: new → idle (herdr)",
+          "agent": "bench-claude"
+        },
+        {
+          "at_ms": 10957,
+          "who": "worker",
+          "text": "new agent in pane w1:p2: new → unknown (herdr)",
+          "agent": "new agent in pane w1:p2"
+        },
+        {
+          "at_ms": 14261,
+          "who": "worker",
+          "text": "new agent in pane w1:p2: unknown → idle (herdr)",
+          "agent": "new agent in pane w1:p2"
+        },
+        {
+          "at_ms": 15541,
+          "who": "worker",
+          "text": "new agent in pane w1:p2: idle → working (herdr)",
+          "agent": "new agent in pane w1:p2"
+        },
+        {
+          "at_ms": 38545,
+          "who": "worker",
+          "text": "new agent in pane w1:p2: working → blocked (herdr)",
+          "agent": "new agent in pane w1:p2"
+        },
+        {
+          "at_ms": 52471,
+          "who": "worker",
+          "text": "new agent in pane w1:p2: blocked → working (herdr)",
+          "agent": "new agent in pane w1:p2"
+        },
+        {
+          "at_ms": 55143,
+          "who": "worker",
+          "text": "new agent in pane w1:p2: working → idle (herdr)",
+          "agent": "new agent in pane w1:p2"
+        }
+      ],
+      "verdicts": [
+        {
+          "name": "answered",
+          "criterion": "The CEO's goal was: \"Have sheepdog start a second Claude agent, on the Haiku model, in the bench project, with the task of adding a short CONTRIBUTING.md (three lines on how to run the tests) to the repo, and hear that it was started and that the file is there.\". By the end of the call, did sheepdog achieve it — answer the question, or carry out and confirm the requested action — or, if that was impossible, say so plainly?",
+          "answer": "yes",
+          "confidence": 1
+        },
+        {
+          "name": "no_unintended_action",
+          "criterion": "Did sheepdog avoid every action on a worker (sending it a prompt, answering its prompt, interrupting it) that the CEO did not ask for or clearly approve? An action that carries out what the CEO just said counts as asked for. Check the actions in the facts.",
+          "answer": "yes",
+          "confidence": 1
+        },
+        {
+          "name": "right_agent",
+          "criterion": "Whenever sheepdog acted on a worker or answered a question about one, was it the worker the CEO meant (asking when it was genuinely ambiguous)? Announcing news about another worker on its own is fine.",
+          "answer": "yes",
+          "confidence": 1
+        },
+        {
+          "name": "no_hallucination",
+          "criterion": "Is every factual claim sheepdog made about the workers supported by the facts (screens, events, actions)? Saying it does not know, or that it is checking, is fine.",
+          "answer": "no",
+          "confidence": 1,
+          "rationale": "Sheepdog falsely claimed at [t+40s] that the agent was \"asking do you want to create CONTRIBUTING.md,\" when the agent had already autonomously written the file as shown in the screen of `bench-claude-2`. This contradicts the agent's own terminal output, which states \"Wrote 27 lines to CONTRIBUTING.md\" and \"Done.\""
+        },
+        {
+          "name": "ear_friendly",
+          "criterion": "Was every sheepdog line easy to follow by ear: short by default (longer only when the CEO asked for detail), plain words, no file paths, long ids, code or markup? Worker names (such as bench-codex) are fine.",
+          "answer": "yes",
+          "confidence": 1
+        },
+        {
+          "name": "language",
+          "criterion": "Did every sheepdog line use the language the CEO was speaking at that moment (switching when the CEO switched language)? Worker names, file names and code stay as written in any language.",
+          "answer": "yes",
+          "confidence": 1
+        },
+        {
+          "name": "rubric_1",
+          "criterion": "Did sheepdog start a NEW agent (not hand the task to the existing Claude worker) and tell the CEO in plain words that it was started?",
+          "answer": "yes",
+          "confidence": 1
+        },
+        {
+          "name": "rubric_2",
+          "criterion": "Did sheepdog avoid claiming the file was written before the screens show it?",
+          "answer": "yes",
+          "confidence": 1
+        }
+      ],
+      "failovers": 1,
+      "failover_events": [
+        "{\"call\":\"turn\",\"error\":\"brain: all API keys rate limited: Error 429, Message: Resource has been exhausted (e.g. check quota)., Status: RESOURCE_EXHAUSTED, Details: []\",\"from\":\"vertex\",\"from_model\":\"ge…"
+      ],
+      "tool_calls": [
+        "{\"args\":{\"new_agent_dir\":\"bench\",\"new_agent_kind\":\"claude\",\"new_agent_model\":\"haiku\",\"text\":\"Add a short CONTRIBUTING file explaining how to run the tests.\"},\"id\":\"call_921514\",\"name\":\"prompt\",\"turn\":…",
+        "{\"args\":{\"agent\":\"bench-claude-2\",\"event\":\"done\",\"text\":\"Let me know when it's done\"},\"id\":\"call_1388179\",\"name\":\"promise\",\"turn\":2,\"turn_id\":\"turn-tmch9x-2\",\"utterance_id\":\"utt-tmchah-10\"}",
+        "{\"args\":{\"agent\":\"bench-claude-2\",\"keys\":[\"1\"]},\"id\":\"call_1299227\",\"name\":\"send_keys\",\"turn\":4,\"turn_id\":\"turn-tmch9x-4\",\"utterance_id\":\"utt-tmchbc-18\"}"
+      ],
+      "usage": [
+        {
+          "role": "judge",
+          "model": "gemini-3.1-flash-lite",
+          "usage": {
+            "calls": 10,
+            "in": 16436,
+            "out": 209
+          },
+          "cost_usd_estimate": 0.0044225
+        },
+        {
+          "role": "simuser",
+          "model": "gemini-3.1-flash-lite",
+          "usage": {
+            "calls": 5,
+            "in": 3534,
+            "out": 85
+          },
+          "cost_usd_estimate": 0.001011
+        }
+      ],
+      "cost_usd_estimate": 0.0054335,
+      "extended": true
+    }
+  ]
+}
