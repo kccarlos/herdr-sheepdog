@@ -39,6 +39,7 @@ func TestDeferralOrHesitationNeverDeclines(t *testing.T) {
 		{"#113 echo runs", "No, definitely don't approve that, ok?", true, ""},
 		{"chinese decline with a question", "不要批准，它还在干什么？", true, ""},
 		{"why don't you", "Why don't you run it?", false, "ask a question"},
+		{"bench-block-while-talking r3 (#114 tier 1)", "Yes, tell it no. And back to the README, is it finished?", true, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

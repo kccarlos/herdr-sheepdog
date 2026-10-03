@@ -621,8 +621,10 @@ func deferralInput(text string) bool { return deferralWords.MatchString(text) }
 // definitely don't approve that, ok?") was refused for asking a
 // question. A question next to a decline this plain does not make it
 // unclear; a bare "No." with a question still is ("No. What does bench
-// Codex want?" was a TTS "Uhh").
-var explicitDeclineWords = regexp.MustCompile(`(?i)\b(don'?t|do not|never|definitely not)\s+(\w+\s+)?(approve|allow|accept|run|push|do|proceed|let|go ahead)\b|\b(deny|decline|reject|refuse)\s+(it|that|this|the)\b|(不要|别|不准|不许|不能)(让它|让他)?(批准|同意|允许|跑|运行|推|执行|做)|拒绝`)
+// Codex want?" was a TTS "Uhh"). "Tell it no" counts (this PR's tier-1
+// bench-block-while-talking r3: "Yes, tell it no. And back to the
+// README, is it finished?" was refused twice).
+var explicitDeclineWords = regexp.MustCompile(`(?i)\b(don'?t|do not|never|definitely not)\s+(\w+\s+)?(approve|allow|accept|run|push|do|proceed|let|go ahead)\b|\b(deny|decline|reject|refuse)\s+(it|that|this|the)\b|\b(tell|answer)\s+(it|him|her|them|[\w-]+)\s+no\b|\bsay no\b|(不要|别|不准|不许|不能)(让它|让他)?(批准|同意|允许|跑|运行|推|执行|做)|拒绝`)
 
 // whyNot is a suggestion, not a decline: "why don't you run it?".
 var whyNot = regexp.MustCompile(`(?i)\bwhy (don'?t|not)\b|为什么不`)
