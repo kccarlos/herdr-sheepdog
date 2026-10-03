@@ -9,7 +9,7 @@ code map is [`architecture.md`](architecture.md), every option is in
 
 ## Where main is
 
-`main` = `043bf64` (#98). The v1 plan, the 2026-09-18 redesign and
+`main` = `c6d5404` (#106). The v1 plan, the 2026-09-18 redesign and
 iteration 2's phase-1 work packages (WP1–WP5, WP8, WP9;
 [`iteration-2.md`](iteration-2.md)) are merged.
 
@@ -35,7 +35,7 @@ What is in:
   `stop`); no mid-sentence interruption, based on the client's playback
   reports; held pushes while no client listens; re-seed after a Gemini
   reconnect; a fresh Gemini session after 30 min away or 2 h of age;
-  unheard pushes detected and re-queued or reported to the brain; the
+  unheard pushes detected and re-queued or reported to the brain (GPT-Live too, #101); the
   recap follows a provider switch; GPT-Live input paced at real time.
 - **Brain:** stateful agent over a transcript window with providers
   `gemini`, `vertex` and `deepseek` and a runtime model switch; the ear
@@ -51,18 +51,23 @@ What is in:
   the one rail in code (`supervisor.authorise_window_s`); the stop
   procedure, acknowledged by a code sentence with no brain turn;
   deliver-later replies (`brain.reply_wait_s`); "New conversation".
+- **Current focus:** after a brain reply the voice gets one silent line
+  (agent in focus, open question, key points) so it resolves "it" and
+  answers follow-ups ([`timelines.md`](timelines.md); #101).
 - **Names:** every agent has a pane id, an alias and a spoken name (from
   its project, kind and session title; a CEO-given name wins), which the
   voice also gets in its vocabulary; "call that one docs" renames by voice
   ([`roles.md`](roles.md) "Agent names").
 - **Surfaces:** `/voice`, `/debug` (Swimlane, Conversation, Supervisor,
   Context, Events, State), phone access with `web.bind` / `web.token`,
-  the `/ws` protocol version and `client-ready` / `bot-ready` handshake
+  the agent window API (`GET /api/agents/{pane}/screen`, `POST
+  .../input`; [`ws-contract.md`](ws-contract.md); #103), the `/ws` protocol version and `client-ready` / `bot-ready` handshake
   ([`ws-contract.md`](ws-contract.md)), APNs notifications for the iOS
   app ([`push.md`](push.md)).
 - **Measurement:** `sheepdog eval` (offline L0 corpus), `sheepdog eval
   sim` (a simulated CEO plus an LLM judge; `--live` for the real brain),
-  `sheepdog scorecard`, `sheepdog audio-e2e`.
+  `sheepdog scorecard`, `sheepdog audio-e2e`, and `sheepdog bench` (tier-2
+  voice benchmark, [`bench/README.md`](bench/README.md)).
 - **Observability:** `turn_id` / `utterance_id` on events, `turn.latency` per CEO utterance (scorecard "Turn latency"), the observe-only daemon watchdog (`daemon.heartbeat_missed` / `_ok`); [`architecture.md`](architecture.md) "Observers".
 
 ## Verified live
@@ -87,9 +92,15 @@ What is in:
   `deepseek-flash` **87 %** pass, Vertex `gemini-3.8-flash` **73 %**
   (Vertex provider latency, 504s, costs most of its failures). It
   measured #88-#95; #98 and #99 landed after it.
+- **Tier-2 voice bench, 2026-10-03** (synthetic speech through a phone
+  emulator into scratch daemons with the real voice model and brain,
+  mock herdr; [`bench/tier2-2026-10-03.md`](bench/tier2-2026-10-03.md)):
+  34 scenarios x 3, **58 % pass over 102 runs**, against 89 % for the same
+  worlds in tier 1: the voice layer is the biggest remaining loss. Tier 3
+  (real herdr workers, #105) is pending.
 - **Unit / eval only, not re-run on the phone:** every bench fix
   ([`bench-2026-10-03.md`](bench-2026-10-03.md)), the voice session
-  refresh and unheard-push handling, the `/ws` handshake against the
+  refresh and unheard-push handling, current-focus sync, the agent window API, the `/ws` handshake against the
   iOS 0.1.1 client, spoken agent names, brain failover.
 - **Fake model / mock herdr only:** most supervisor edge cases
   (reprompt races, deliver-later staleness, reset leftovers, coalescing,
@@ -103,6 +114,11 @@ What is in:
   [`bench-2026-10-03.md`](bench-2026-10-03.md) is fixed; none has been
   re-checked live with a real worker and the phone yet. That re-run is the
   next acceptance step.
+- **Tier-2 bench findings:** the failures named in
+  [`bench/tier2-2026-10-03.md`](bench/tier2-2026-10-03.md) (the voice
+  answering for the brain, deferrals read as declines, echo of the bot's
+  own voice, cut and resumed pushes, markers read aloud) are the next fix
+  list; tier 3 is pending.
 - **Eval campaign leftovers** (run C, [`eval-campaign-2026-10-03.md`](eval-campaign-2026-10-03.md)):
   the run-C fixes (#99: H4 language, the duplicate block line, H7 fact
   source) are not re-measured; Vertex step latency (p90 8.4 s, up to 25 s)

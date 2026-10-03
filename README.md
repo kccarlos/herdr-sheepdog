@@ -80,7 +80,7 @@ or `100.x.x.x` (Tailscale) one.
 - **iOS app** ("Sheepdog for herdr", repo `herdr-sheepdog-ios`,
   TestFlight internal testing): type the host:port from the `lan url`
   line and the token into its Settings. It speaks the same `/ws` contract
-  (with its protocol handshake) as `/voice`, shows the flock with answerable prompts, and gets a
+  (with its protocol handshake) as `/voice`, shows the flock with answerable prompts, a window onto each agent's screen with input (`/api/agents/{pane}/screen`, `.../input`), and gets a
   notification when an agent needs you once `[push.apns]` is configured
   ([`docs/push.md`](docs/push.md)).
 - **Browser:** open `<lan url>/voice`; the page asks for the token once
@@ -102,6 +102,7 @@ Tailscale), never the open internet. See
 | `sheepdog prompts export` \| `show` | Seed `prompts.dir` from the embedded prompts \| print one file's effective text and source. |
 | `sheepdog eval` | The conversation eval sets (`--set assistant\|svp\|regressions\|extracted\|expanded\|all`); offline by default, `--live` calls the model. `eval extract` / `eval expand` build cases from the event log. `eval sim` runs simulated-CEO conversations graded by an LLM judge (`--live`, `--repeat`, `--fallback-provider`; [`docs/eval-campaign-2026-10-03.md`](docs/eval-campaign-2026-10-03.md)). |
 | `sheepdog scorecard` | Ear and latency metrics over the event log ([`docs/iteration-2.md`](docs/iteration-2.md) "Scorecard metrics"). |
+| `sheepdog bench` \| `bench validate` | The tier-2 voice benchmark: synthetic speech through a phone emulator into scratch daemons ([`docs/bench/README.md`](docs/bench/README.md), results in [`docs/bench/tier2-2026-10-03.md`](docs/bench/tier2-2026-10-03.md)). |
 | `sheepdog audio-e2e` | Speak scripted scenarios (macOS `say` + noise) into a running daemon's `/ws` ([`docs/audio-e2e-results.md`](docs/audio-e2e-results.md)). |
 | `sheepdog version` \| `help` | Version, commit and build date \| the command list. |
 
