@@ -116,7 +116,7 @@ func toolDeclarations(readOnly bool) []*genai.Tool {
 			}, nil)},
 		{Name: ToolSendKeys, Description: "Answer an agent's approval prompt with the keys of one of its on-screen options (see the roster). Permitted only when the CEO authorised that answer in this turn.",
 			Parameters: obj(map[string]*genai.Schema{"agent": agent, "keys": {Type: genai.TypeArray, Items: str("one key name, e.g. enter, esc, y, 1"), Description: "the option's keys, in order"}}, []string{"agent", "keys"})},
-		{Name: ToolInterrupt, Description: "Send Ctrl-C to an agent to stop what it is doing.",
+		{Name: ToolInterrupt, Description: "Send Ctrl-C to an agent to stop what it is doing. The result says whether it stopped.",
 			Parameters: obj(map[string]*genai.Schema{"agent": agent}, []string{"agent"})},
 		{Name: ToolPromise, Description: "Record promised work: the CEO asked to be told when something happens to an agent (\"tell me when it's done\", \"let me know if it asks\", \"remind me\"). The supervisor keeps it: it tells the CEO at the next matching event, whatever the chattiness level. Use it in the same turn as any instruction that goes with it.",
 			Parameters: obj(map[string]*genai.Schema{"agent": agent, "text": str("what the CEO asked to be told, in their words"), "event": {Type: genai.TypeString, Enum: PromiseEvents, Description: "the condition: done (it finished), blocked (it asks something), idle, or any_change"},
@@ -236,6 +236,8 @@ type toolOutcome struct {
 	// called in an event-triggered turn.
 	railBlocked string
 	agent       string
+	// pane is the agent's pane when the call named one.
+	pane string
 	// promise is the record a promise call created.
 	promise *PromiseInfo
 }
@@ -281,7 +283,7 @@ func (b *Brain) execTool(ctx context.Context, t *turn, call *genai.FunctionCall)
 		if err != nil {
 			return toolOutcome{agent: row.Alias, err: err}
 		}
-		return toolOutcome{agent: row.Alias, acted: echo, result: echo}
+		return toolOutcome{agent: row.Alias, pane: row.PaneID, acted: echo, result: echo}
 	}
 	if call.Name == ToolNote {
 		text := arg("text")
@@ -298,7 +300,7 @@ func (b *Brain) execTool(ctx context.Context, t *turn, call *genai.FunctionCall)
 	if !ok {
 		return toolOutcome{err: fmt.Errorf("no agent called %q; the agents are %s", arg("agent"), b.aliases())}
 	}
-	out := toolOutcome{agent: row.Alias}
+	out := toolOutcome{agent: row.Alias, pane: row.PaneID}
 	switch call.Name {
 	case ToolReadScreen:
 		switch source := strings.ToLower(arg("source")); source {
@@ -358,11 +360,24 @@ func (b *Brain) execTool(ctx context.Context, t *turn, call *genai.FunctionCall)
 			out.err = errors.New("prompt needs text")
 			return out
 		}
+		// A runaway guard (campaign D N7, bench-pronoun-followup r5): the
+		// same instruction to the same agent twice in one turn is typed
+		// once; the second call gets the fact.
+		key := row.PaneID + "\x00" + strings.ToLower(strings.Join(strings.Fields(text), " "))
+		if t.prompted[key] {
+			out.result = "That exact instruction already went to " + aliasOr(row.Alias) + " in this turn; it was not sent again."
+			b.log.Log(logSource, "brain.prompt_repeat", "", map[string]any{"agent": row.Alias, "turn": turn})
+			return out
+		}
 		echo, err := b.host.Prompt(ctx, row.PaneID, text)
 		if err != nil {
 			out.err = err
 			return out
 		}
+		if t.prompted == nil {
+			t.prompted = map[string]bool{}
+		}
+		t.prompted[key] = true
 		out.acted, out.result = echo, echo
 	case ToolSendKeys:
 		keys := keysArg(call.Args["keys"])

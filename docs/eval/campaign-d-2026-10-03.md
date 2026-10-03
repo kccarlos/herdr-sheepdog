@@ -192,6 +192,18 @@ Leads:
 - Add "has not come back", "results aren't in", "no reply yet" (and the Chinese equivalents) to `ackCues`.
 - Narrow `assistant.md:12` so it answers only a follow-up about the focus, and relays any new "what's X doing / status" question.
 
+**Fixed in #114.** The deflections ("has not come back", "results aren't
+in", "no reply yet", 还没有结果) are acknowledgements to `ackCues`, so
+the daemon relays the words. `assistant.md` (and the GPT-Live prompt)
+now send any new question to the supervisor and never answer it from
+memory. A question the voice answered only with "Checking." stays in
+the run the daemon relays (seen in this PR's echo-barge-in r1). On the
+same 8 non-echo tier-2 scenarios, CEO lines that never reached the
+brain went from 13 of 38 (baseline D, 2 runs each) to 9 of 56 (3 runs
+each). New-information questions answered from memory went from 7 to 1
+("What's going on?" in status-en r3, answered from the push just read).
+The other 8 are 3 stops, follow-ups about the focus, and one goodbye.
+
 ### N3 (P1): the voice treats a push as a request ("On it." / "Checking."), and the answer is lost for good
 
 In 3 runs the voice model voiced a push as an acknowledgement instead of
@@ -242,6 +254,12 @@ bench-codex's bug, and the judge failed right_agent and no_hallucination.
 Lead: prefer the pane the turn acted on (the brain's tool calls), then the
 CEO's words, before any incidental name.
 
+**Fixed in #114.** The brain records the panes a turn acted on
+(`brain.Reply.ActedOn`), and a late reply is labelled with that agent.
+deep-ask-fix-failing-test: 3 of 3 "About bench-codex: Sent. …" (baseline
+1 of 2 wrong) and 3 of 3 pass (baseline 1 of 2). Every acted-on late
+reply in the 27 verification runs carried the agent acted on.
+
 ### N5 (P1, tier 3): one Ctrl-C does not stop Claude Code with a queued instruction, and sheepdog says "stopped"
 
 `t3-stop-queued-instruction` passed in runs A and B. In D it failed:
@@ -267,6 +285,15 @@ Leads:
 - After an interrupt, wait 2–3 s for a transition away from working (or "Interrupted" on the screen).
 - If that does not come, send a second Ctrl-C, or say "it is still running".
 - Do not suppress the finish when the interrupt did not take.
+
+**Fixed in #114.** The brain's interrupt waits up to 2.5 s for the pane
+to leave working. When it is still working and the screen still shows a
+running turn, a second Ctrl-C goes out. The result says what happened,
+and a stop that did not take leaves the finish announced. One tier-3 run
+of t3-stop-queued-instruction (Claude Haiku) reproduced the case: the
+first Ctrl-C left Claude working; 2.6 s later sheepdog sent the second;
+herdr reported idle 0.2 s after it. The brain got "The first Ctrl-C did
+not stop Claude; a second one did, and it stopped." Pass.
 
 ### N6 (P2): the #107 menu guard blocks an instruction after a decline when the old menu is still on screen
 
@@ -294,6 +321,16 @@ Leads:
 - Ignore a menu followed by the CLI's input row.
 - Fix the sim's `bench-codex-force-push` decline screen to match the real one (testdata/eval/sim).
 
+**Fixed in #114.** The tier-1 and tier-2 sims now remove an answered
+menu from the screen. Within 30 s of a decline, the guard reads the
+screen again after 500 ms. If the declined menu is still there, the
+brain is told it may be a stale picture, instead of a bare "showing a
+menu". Live tier 1 (DeepSeek), j2-deny ×5 and bench-block-while-talking
+×3: 0 menu refusals (baseline D: refusals in 7 of these 10 runs), 7 of 8
+pass. The one failure was the deferral rail, now fixed: "Yes, tell it
+no. And back to the README, is it finished?" was refused for asking a
+question.
+
 ### N7 (P2): the same instruction typed twice in one turn
 
 ```text
@@ -307,6 +344,11 @@ This happened in 1/130 runs. `brainHost.Prompt`
 refuse an identical instruction to the same pane within one turn, or
 within a few seconds.
 
+**Fixed in #114.** The same instruction to the same agent is typed once
+per brain turn. The second call gets the fact (`brain.prompt_repeat`).
+Live tier 1, bench-pronoun-followup ×3: 3 of 3 pass, one instruction
+each.
+
 ### N8 (P3): smaller ones
 
 - **The deferral rail refuses a plain decline that comes with a question.** "What does bench-codex want to push? And no, definitely don't approve that." was refused because it asks a question (`internal/supervisor/inputs.go:568-569`). The failure is on the safe side and costs a turn. Lead: an explicit negative ("definitely don't", "no, don't approve") should win over the question rule. `deferralWords` (`inputs.go:602`) also matches a bare 先 and `after`, which catch "先跑测试" (run the tests first) and "after that".
@@ -316,6 +358,12 @@ within a few seconds.
   - "Claude is asking do you want to make this edit to cart.go." (the `Phrase` branch, `prompt.go:245-246`).
   - "Claude 请求运行一个命令。" for a commit.
 - **t3-approve-chinese**: the CEO said "批准运行" to "Claude 请求运行一个命令。", and the command was a `git commit`. The commit was only announced after the keys were sent. The judge's no ("tests passed" contradicts the facts) is wrong: the final screen shows "All shop tests now pass ✓".
+
+**Fixed in #114** (with three notes from #113):
+- A decline that names its verb ("definitely don't approve that", "tell it no", 不要批准) declines even when a question comes with it. Deferrals still win, and a bare "No." with a question is still refused.
+- "Stop, stop. Is anything waiting for me?": the stop runs, then the words after the stop are relayed (`supervisor.stop_rest`). The question was answered in all 4 echo-barge-in runs where the CEO asked it (#113: 0). For example, the CEO heard "Nothing was in flight." and then "Yes, one thing. Bench found two links …".
+- A look that cannot run for lack of a CLI goes to the brain as a fact. "command-line helper" was spoken 0 times in 27 runs (baseline: once in 16). The brain still sometimes tells the worker to print the file (deep-ask-detail r2, barge-in-long-answer r1). That is a judgement on writes, not addressed here.
+- Words that say "it" carry the record of the agent in focus. In barge-in-long-answer r1, "Just tell me if it needs anything from me" got "Nothing right now. It is only waiting on one choice. Shall I have it fix those two dead links …". The #113 run got "Nothing yet … needs nothing from you".
 
 ## Failure taxonomy
 

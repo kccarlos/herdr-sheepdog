@@ -389,7 +389,16 @@ func (s *Supervisor) runInvestigation(ctx context.Context, live *liveInvestigati
 		s.mu.Lock()
 		zh := s.ceoChineseLocked()
 		s.mu.Unlock()
-		s.pushInvestigation(inv, cause.line(s.sayPane(inv.PaneID, inv.Alias), zh))
+		line := cause.line(s.sayPane(inv.PaneID, inv.Alias), zh)
+		if cause.name == "no_cli" && s.brain != nil {
+			// Campaign D N8: "could not run: no command-line helper is
+			// set up on this machine" was read to the CEO as is, and a
+			// worker was then told to print its README. The brain gets
+			// the fact and says what it means for the CEO.
+			s.deliverInvestigation(inv, line)
+			return
+		}
+		s.pushInvestigation(inv, line)
 		return
 	}
 	inv.Status, inv.Finished = state.InvestigationDone, &now
@@ -406,15 +415,15 @@ func (s *Supervisor) runInvestigation(ctx context.Context, live *liveInvestigati
 		"bytes": len(inv.Result), "session_id_present": inv.SessionID != "",
 	})
 	s.invalidateBriefing()
-	s.deliverInvestigation(inv)
+	s.deliverInvestigation(inv, "The look into "+s.sayPane(inv.PaneID, inv.Alias)+" is done; ask me what it found.")
 }
 
 // deliverInvestigation runs the delivery event turn and pushes its line
 // at the next pause (docs/roles.md: the shepherd is expecting it, so it
 // never interrupts). With no brain, or one that could not answer, the
-// daemon says the look is done and keeps the answer in the ledger.
-func (s *Supervisor) deliverInvestigation(inv state.Investigation) {
-	fallback := "The look into " + s.sayPane(inv.PaneID, inv.Alias) + " is done; ask me what it found."
+// daemon says fallback (for a finished look: it is done, and the answer
+// is in the ledger). A look that failed carries its cause in inv.Err.
+func (s *Supervisor) deliverInvestigation(inv state.Investigation, fallback string) {
 	if s.brain == nil {
 		s.pushInvestigation(inv, fallback)
 		return
@@ -661,7 +670,7 @@ func investigationCause(err error, limit time.Duration) failCause {
 	switch {
 	case errors.Is(err, brain.ErrNoCLI), errors.Is(err, cli.ErrUnavailable), errors.Is(err, exec.ErrNotFound), errors.Is(err, fs.ErrNotExist):
 		return failCause{"no_cli", "no command-line helper (codex or claude) is available on this machine to look with",
-			" could not run: no command-line helper is set up on this machine to look with.", "没能进行：这台机器上没有可用的命令行助手。"}
+			" could not run: I can't look at its files directly from here.", "没能进行：我在这里没法直接查看它的文件。"}
 	case errors.Is(err, cli.ErrTimedOut), errors.Is(err, context.DeadlineExceeded):
 		return failCause{"timeout", "it ran out of time (the limit is " + limitText(limit) + ")",
 			" ran out of time; ask me to try again.", "超时了；需要的话让我再试一次。"}

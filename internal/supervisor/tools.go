@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
@@ -178,17 +179,37 @@ var ErrMenuOnScreen = errors.New("menu on screen")
 // the CEO (supervisor.instruction_blocked_by_menu). A screen that cannot
 // be read does not stop the instruction: herdr's own agent_blocked
 // refusal still stands behind it.
+//
+// Campaign D N6: right after the shepherd declined a prompt, the old menu
+// may still be drawn (the tier-1 sim kept it; a real CLI may not have
+// redrawn yet), and the guard refused the follow-up instruction 20 times
+// in 7 of 130 runs. So within declineRecheckWindow of a decline on the
+// pane the screen is read once more after declineRecheckDelay; if the
+// menu is gone the instruction goes, and if the declined menu is still
+// there the brain is told exactly that — it may be a stale picture —
+// instead of a bare "showing a menu".
 func (s *Supervisor) menuOnScreen(ctx context.Context, row state.Agent) (voice.ToolResult, error, bool) {
-	read, err := s.herdr.Read(ctx, row.PaneID, herdr.SourceRecentUnwrapped, s.cfg.ReadLines)
-	if err != nil {
-		return voice.ToolResult{}, nil, false
-	}
-	prompt, ok := herdr.ParsePrompt(read.Text)
+	prompt, ok := s.menuOf(ctx, row.PaneID)
 	if !ok {
 		return voice.ToolResult{}, nil, false
 	}
 	if s.blockedNow(ctx, row.PaneID) {
 		return s.pendingFromPrompt(row, prompt), herdr.ErrAgentBlocked, true
+	}
+	s.mu.Lock()
+	mark, declined := s.declined[row.PaneID]
+	s.mu.Unlock()
+	since := s.cfg.Now().Sub(mark.at)
+	declined = declined && since <= declineRecheckWindow
+	if declined {
+		select {
+		case <-ctx.Done():
+		case <-time.After(declineRecheckDelay):
+		}
+		if prompt, ok = s.menuOf(ctx, row.PaneID); !ok {
+			s.log.Log(logSource, "supervisor.menu_gone_after_decline", row.PaneID, map[string]any{"agent": aliasOr(row.Alias)})
+			return voice.ToolResult{}, nil, false
+		}
 	}
 	alias := aliasOr(state.Say(row))
 	var labels []string
@@ -200,10 +221,45 @@ func (s *Supervisor) menuOnScreen(ctx context.Context, row state.Agent) (voice.T
 		fact += ", " + fmt.Sprintf("%q", q)
 	}
 	fact += ", with the options " + strings.Join(labels, ", ") + "; nothing was typed."
+	stale := declined && sameQuestion(prompt.Phrase(), mark.question)
+	if stale {
+		fact += fmt.Sprintf(" It is the menu the CEO declined %d s ago, still on screen after the decline was sent: it may be a stale picture that has not redrawn, and herdr reports %s %s, not blocked.", int(since.Seconds()), alias, row.State)
+	}
 	s.log.Log(logSource, "supervisor.instruction_blocked_by_menu", row.PaneID, map[string]any{
-		"agent": aliasOr(row.Alias), "state": string(row.State), "question": prompt.Question, "options": labels,
+		"agent": aliasOr(row.Alias), "state": string(row.State), "question": prompt.Question, "options": labels, "after_decline": stale,
 	})
 	return voice.ToolResult{Spoken: fact, Scheduling: voice.UrgencyInterrupt}, ErrMenuOnScreen, true
+}
+
+// declineMark is a prompt the shepherd declined: when, and its question
+// (the pending action's, herdr.Prompt.Phrase).
+type declineMark struct {
+	at       time.Time
+	question string
+}
+
+// declineRecheckWindow is how long after a decline the menu guard reads
+// the screen twice; declineRecheckDelay is the wait between the reads
+// (the sims redraw 300 ms after keys).
+const (
+	declineRecheckWindow = 30 * time.Second
+	declineRecheckDelay  = 500 * time.Millisecond
+)
+
+// menuOf reads the pane and parses a menu at its end.
+func (s *Supervisor) menuOf(ctx context.Context, paneID string) (herdr.Prompt, bool) {
+	read, err := s.herdr.Read(ctx, paneID, herdr.SourceRecentUnwrapped, s.cfg.ReadLines)
+	if err != nil {
+		return herdr.Prompt{}, false
+	}
+	return herdr.ParsePrompt(read.Text)
+}
+
+// sameQuestion reports whether two prompt questions read the same
+// (case and spacing aside); two empty questions count as the same.
+func sameQuestion(a, b string) bool {
+	norm := func(s string) string { return strings.ToLower(strings.Join(strings.Fields(s), " ")) }
+	return norm(a) == norm(b)
 }
 
 // blockedNow reports whether the pane is blocked: in the state table, or
@@ -281,6 +337,12 @@ func (s *Supervisor) answerKeys(ctx context.Context, p state.PendingAction, keys
 		s.answeredPrompt = map[string]string{}
 	}
 	s.answeredPrompt[p.PaneID] = p.ID
+	if declines(p, keys) {
+		if s.declined == nil {
+			s.declined = map[string]declineMark{}
+		}
+		s.declined[p.PaneID] = declineMark{at: now, question: p.Question}
+	}
 	s.invalidateBriefingLocked()
 	s.lastSubject = p.PaneID
 	confirmed := map[string]any{"id": p.ID, "answer": label, "keys": keys, "via": via}

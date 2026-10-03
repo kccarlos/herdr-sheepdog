@@ -33,6 +33,14 @@ func TestDeferralOrHesitationNeverDeclines(t *testing.T) {
 		{"plain no", "No, don't run it.", true, ""},
 		{"plain chinese no", "不要跑这个。", true, ""},
 		{"no, tell it", "No, tell it to use the other file.", true, ""},
+		// Campaign D N8 and #113: a decline spelled out with its verb
+		// still declines when a question comes with it.
+		{"campaign D N8", "What does bench-codex want to push? And no, definitely don't approve that.", true, ""},
+		{"#113 echo runs", "No, definitely don't approve that, ok?", true, ""},
+		{"chinese decline with a question", "不要批准，它还在干什么？", true, ""},
+		{"why don't you", "Why don't you run it?", false, "ask a question"},
+		{"cannot is no decline", "它现在不能跑吗？", false, "ask a question"},
+		{"bench-block-while-talking r3 (#114 tier 1)", "Yes, tell it no. And back to the README, is it finished?", true, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

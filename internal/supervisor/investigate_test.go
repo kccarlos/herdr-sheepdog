@@ -70,12 +70,19 @@ const investigateAnswer = "The clamp test asserts the wrong bound, so the rerun 
 // with investigateAnswer and whose CLI sub-agent is fake.
 func newInvestigationHarness(t *testing.T, f *fakeInvestigator, opts ...func(*Config)) *harness {
 	t.Helper()
+	h, _ := newInvestigationHarnessModel(t, f, opts...)
+	return h
+}
+
+// newInvestigationHarnessModel is newInvestigationHarness with its model.
+func newInvestigationHarnessModel(t *testing.T, f *fakeInvestigator, opts ...func(*Config)) (*harness, *braintest.Model) {
+	t.Helper()
 	m := braintest.NewModel()
 	m.EventDefault = &braintest.Step{Text: mustReply(brain.Reply{Spoken: investigateAnswer, Detail: "From the look.", Urgency: brain.UrgencyIdle})}
 	h := newBrainHarness(t, m, opts...)
 	h.sup.investigator = f
 	h.addAgent("w5:p1", "auth", "codex", herdr.StateIdle)
-	return h
+	return h, m
 }
 
 func mustReply(r brain.Reply) string {
@@ -388,7 +395,9 @@ func TestInvestigationNeedsAQueryTool(t *testing.T) {
 // through" gave no reason, and the brain then had the worker read its
 // README out itself. The cause is now a fact on the record (the brain's
 // Investigations section) and a short honest reason in the spoken line,
-// in the shepherd's language.
+// in the shepherd's language. No CLI helper is the exception (campaign D
+// N8): that line was jargon to the CEO, so the brain gets the fact and
+// phrases what it means.
 func TestInvestigationFailureSaysWhy(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -397,9 +406,9 @@ func TestInvestigationFailureSaysWhy(t *testing.T) {
 		spoken string
 		fact   string
 	}{
-		{"no CLI (the sim)", brain.ErrNoCLI, false, "The look into auth could not run: no command-line helper is set up on this machine to look with.", "no command-line helper"},
-		{"CLI not detected", cli.ErrUnavailable, false, "The look into auth could not run: no command-line helper is set up on this machine to look with.", "no command-line helper"},
-		{"binary missing", fmt.Errorf("cli: codex: %w", &exec.Error{Name: "codex", Err: exec.ErrNotFound}), false, "The look into auth could not run: no command-line helper is set up on this machine to look with.", "no command-line helper"},
+		{"no CLI (the sim)", brain.ErrNoCLI, false, investigateAnswer, "no command-line helper"},
+		{"CLI not detected", cli.ErrUnavailable, false, investigateAnswer, "no command-line helper"},
+		{"binary missing", fmt.Errorf("cli: codex: %w", &exec.Error{Name: "codex", Err: exec.ErrNotFound}), false, investigateAnswer, "no command-line helper"},
 		{"timed out", fmt.Errorf("cli: codex: %w after 10m0s", cli.ErrTimedOut), false, "The look into auth ran out of time; ask me to try again.", "it ran out of time (the limit is"},
 		{"busy", cli.ErrBusy, false, "The look into auth could not start: another look at the same project was still running. Ask me again in a moment.", "another look"},
 		{"exit code", &cli.ExitError{Backend: cli.Codex, Code: 2, Stderr: "boom"}, false, "The look into auth failed: the helper stopped with an error. Ask me to try again.", "exit code 2"},
@@ -409,7 +418,7 @@ func TestInvestigationFailureSaysWhy(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			f := &fakeInvestigator{err: c.err}
-			h := newInvestigationHarness(t, f)
+			h, m := newInvestigationHarnessModel(t, f)
 			if c.zh {
 				h.hear("它为什么失败了？")
 			}
@@ -421,6 +430,11 @@ func TestInvestigationFailureSaysWhy(t *testing.T) {
 			inv, _ := h.sup.investigation(job.Job)
 			if !strings.Contains(inv.Err, c.fact) {
 				t.Errorf("record err = %q, want it to say %q", inv.Err, c.fact)
+			}
+			if c.spoken == investigateAnswer {
+				if text := lastCall(t, m); !strings.Contains(text, "It did not run: no command-line helper") || !strings.Contains(text, "do not name tools or helpers") {
+					t.Errorf("the brain did not get the fact:\n%s", text)
+				}
 			}
 		})
 	}

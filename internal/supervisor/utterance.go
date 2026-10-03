@@ -88,6 +88,8 @@ type utteranceOutcome struct {
 	acted bool
 	// needsUser: the reply says the shepherd must decide or act.
 	needsUser bool
+	// actedOn: the panes the turn's actions went to (brain.Reply.ActedOn).
+	actedOn []string
 	// focus is what the reply says about the conversation's focus
 	// (focus.go), for the voice once it has spoken the reply.
 	focus focusFacts
@@ -403,7 +405,7 @@ func (s *Supervisor) deliverLate(turnCtx context.Context, u *inflightUtterance, 
 	var paneID, line string
 	urgency := voice.UrgencyIdle
 	if out.ok {
-		paneID, line = s.lateLine(out.res, u.text)
+		paneID, line = s.lateLine(out.res, u.text, out.actedOn)
 		if out.needsUser && s.answerPromptOpen() {
 			// The shepherd must decide on an open prompt: the reply may
 			// ask for the floor, but it is not tagged needs_user — that
@@ -444,12 +446,13 @@ func (s *Supervisor) deliverLate(turnCtx context.Context, u *inflightUtterance, 
 // about — and its options as a choice, as the voice would have read them
 // from a tool result. The spoken text and options are already D9-scrubbed
 // (toolResultFrom); detail stays out, since everything pushed is spoken.
-func (s *Supervisor) lateLine(res voice.ToolResult, asked string) (paneID, line string) {
+// actedOn is the panes the turn acted on (subjectOf).
+func (s *Supervisor) lateLine(res voice.ToolResult, asked string, actedOn []string) (paneID, line string) {
 	line = res.Spoken
 	if len(res.Options) > 0 {
 		line += " Options: " + strings.Join(res.Options, "; ") + "."
 	}
-	row, ok := s.subjectOf(res.Spoken, asked)
+	row, ok := s.subjectOf(res.Spoken, asked, actedOn)
 	if !ok {
 		return "", line
 	}
@@ -460,10 +463,22 @@ func (s *Supervisor) lateLine(res voice.ToolResult, asked string) (paneID, line 
 	return row.PaneID, line
 }
 
-// subjectOf is the one agent a reply is about: the one it names, else —
-// when it names none — the one the shepherd's words named. Several named
-// means no single subject.
-func (s *Supervisor) subjectOf(spoken, asked string) (state.Agent, bool) {
+// subjectOf is the one agent a reply is about: the one agent the turn
+// acted on, else the one it names, else — when it names none — the one
+// the shepherd's words named. Several means no single subject. Campaign D
+// N4: the brain told bench-codex to fix its bug and the reply mentioned
+// only bench-claude ("we still have bench-claude going in the
+// background"), so the CEO heard "About bench-claude: Sent. It is fixing
+// the adding step now".
+func (s *Supervisor) subjectOf(spoken, asked string, actedOn []string) (state.Agent, bool) {
+	if len(actedOn) > 1 {
+		return state.Agent{}, false
+	}
+	if len(actedOn) == 1 {
+		if row, ok := s.store.Get(actedOn[0]); ok {
+			return row, true
+		}
+	}
 	for _, text := range []string{spoken, asked} {
 		lower := strings.ToLower(text)
 		var named []state.Agent
@@ -581,6 +596,14 @@ func (s *Supervisor) utteranceTurn(ctx context.Context, u *inflightUtterance) ut
 	// and ledger sections.
 	brief, _ := s.briefingText()
 	req := brain.Request{Kind: brain.KindUtterance, Trigger: brain.TriggerCEO, Question: text, Briefing: brief, Link: callLink(u.callID), UtteranceID: u.id}
+	// The agent the conversation is on, for words that say "it" (the
+	// brain's agentRecords).
+	s.mu.Lock()
+	subject := s.lastSubject
+	s.mu.Unlock()
+	if row, ok := s.store.Get(subject); ok {
+		req.Focus = row.Alias
+	}
 	// What the shepherd had heard when they began: evaluated when the
 	// turn starts, since it may queue behind an announce turn whose
 	// line goes out meanwhile (heard.go).
@@ -615,7 +638,7 @@ func (s *Supervisor) utteranceTurn(ctx context.Context, u *inflightUtterance) ut
 		return utteranceOutcome{acted: rep.Acted}
 	}
 	s.markBriefingDelivered(brief)
-	return utteranceOutcome{res: res, ok: true, acted: rep.Acted, needsUser: rep.NeedsUser, focus: focusFromReply("", res.Spoken, rep)}
+	return utteranceOutcome{res: res, ok: true, acted: rep.Acted, actedOn: rep.ActedOn, needsUser: rep.NeedsUser, focus: focusFromReply("", res.Spoken, rep)}
 }
 
 // The bare fast-path words (docs/roles.md "One decision-maker"). *Bare*

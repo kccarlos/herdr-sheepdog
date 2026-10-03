@@ -167,6 +167,11 @@ type Config struct {
 	// negative never relays). Not a knob: only tests change it
 	// (relay.go).
 	relayAfter time.Duration
+	// interruptCheck is how long the brain's interrupt waits for the
+	// pane to leave working after each Ctrl-C (default
+	// interruptCheckDefault). Not a knob: only tests change it
+	// (brainhost.go, Interrupt).
+	interruptCheck time.Duration
 }
 
 func (c Config) withDefaults() Config {
@@ -215,6 +220,9 @@ func (c Config) withDefaults() Config {
 	if c.relayAfter == 0 {
 		c.relayAfter = relayUnansweredAfter
 	}
+	if c.interruptCheck == 0 {
+		c.interruptCheck = interruptCheckDefault
+	}
 	if c.InvestigateMax == 0 {
 		c.InvestigateMax = 600 * time.Second
 	}
@@ -257,6 +265,9 @@ type Supervisor struct {
 	mentioned     map[string]time.Time // pane -> when a spoken briefing last named it
 	lastPrompt    map[string]string    // pane -> signature of the last answer_prompt built for it (reprompt.go)
 	utterance     *inflightUtterance   // the to_supervisor call in flight (stop.go phases 1 and 2)
+	// declined is the last prompt the shepherd declined per pane, for
+	// the menu guard (tools.go, menuOnScreen).
+	declined map[string]declineMark
 	// eventIDs is each pane's latest worker event id (links.go): the
 	// announce turn and pushes about that event carry it, so the Context
 	// tab links them to the brain's worker_event message.

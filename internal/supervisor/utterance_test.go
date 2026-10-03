@@ -794,3 +794,53 @@ func TestStopAfterAQueuedInstructionTellsTheBrain(t *testing.T) {
 		})
 	}
 }
+
+// The #113 echo runs (echo-barge-in r2): "Stop. Stop. Is anything waiting
+// for me?" went to the voice's stop() tool, the answer was "Nothing was
+// in flight.", and the question was dropped. The stop still runs at once;
+// what followed the stop words then goes to the brain, and its reply is
+// pushed.
+func TestStopToolAlsoRelaysTheRestOfTheWords(t *testing.T) {
+	m := braintest.NewModel(braintest.Step{Text: braintest.Reply("Nothing is waiting for you; auth is still working.", "")})
+	h := newBrainHarness(t, m)
+	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
+	h.sup.OnVoiceEvent(voice.EventTranscript{Dir: voice.DirIn, Text: "Stop. Stop. Is anything waiting for me?"})
+	if res := h.call(ToolStop, nil); res.Spoken != "Nothing was in flight." {
+		t.Errorf("stop = %+v", res)
+	}
+	assertStopped(t, h, stopPhaseNone, StopTriggerTool)
+	h.sup.replies.Wait()
+	if ev := h.log.ofType("supervisor.stop_rest"); len(ev) != 1 || payload(ev[0])["text"] != "Is anything waiting for me?" {
+		t.Errorf("stop_rest = %v", ev)
+	}
+	if text := lastCall(t, m); !strings.Contains(text, `utterance="Is anything waiting for me?"`) {
+		t.Errorf("model saw:\n%s", text)
+	}
+	n := 0
+	for _, p := range h.pusher.all() {
+		if strings.Contains(p.Text, "Nothing is waiting for you") {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Errorf("the reply was pushed %d times: %+v", n, h.pusher.all())
+	}
+}
+
+func TestStopRest(t *testing.T) {
+	for text, want := range map[string]string{
+		"Stop. Stop. Is anything waiting for me?": "Is anything waiting for me?",
+		"Wait, what is auth doing?":               "what is auth doing?",
+		"停下，现在谁在等我？":                              "现在谁在等我？",
+		"Stop, stop.":                             "",
+		"Stop everything.":                        "",
+		"No no, stop it.":                         "",
+		"Stop.":                                   "",
+		"Nothing is running, right?":              "",
+		"What is auth doing?":                     "",
+	} {
+		if got := stopRest(text); got != want {
+			t.Errorf("stopRest(%q) = %q, want %q", text, got, want)
+		}
+	}
+}

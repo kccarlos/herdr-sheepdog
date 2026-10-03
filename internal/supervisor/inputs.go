@@ -498,12 +498,17 @@ func (s *Supervisor) claimInput(ctx context.Context) (claim, bool) {
 // sentence into two inputs (GPT-Live closes an input at every pause,
 // 2026-09-23 23:53:26), so the run takes both; it stops at an input the
 // voice already answered itself, which belongs to that exchange, not to
-// this one. Empty when the newest input is not fresh. Caller holds s.mu.
+// this one — unless that "answer" was only an acknowledgement (ackOnly):
+// in a tier-2 echo-barge-in run the voice said "Checking." to "What did
+// bench-claude say when it finished?" without calling a tool, its own
+// echo came back as "checking", and the daemon relayed "checking
+// checking" while the question was lost. Empty when the newest input is
+// not fresh. Caller holds s.mu.
 func (s *Supervisor) freshRunLocked(floor uint64) []*shepherdInput {
 	var run []*shepherdInput
 	for i := len(s.inputs) - 1; i >= 0; i-- {
 		in := s.inputs[i]
-		if in.seq <= floor || in.claimed || in.kind == InputTap || (len(run) > 0 && in.answered) {
+		if in.seq <= floor || in.claimed || in.kind == InputTap || (len(run) > 0 && in.answered && !ackOnly(in.answeredWith)) {
 			break
 		}
 		run = append(run, in)
@@ -570,7 +575,7 @@ func (s *Supervisor) railInputLocked(p state.PendingAction, keys []string) (*she
 		return nil, fmt.Sprintf("the shepherd only said %q, a filler, which answers nothing; %s's prompt stays open", strings.TrimSpace(in.text), alias)
 	case in.kind != InputTap && declines(p, keys) && deferralInput(in.text):
 		return nil, fmt.Sprintf("the shepherd said %q, which puts %s's prompt off rather than declining it; nothing was sent and the prompt stays open, so tell them it is still waiting", strings.TrimSpace(in.text), alias)
-	case in.kind != InputTap && declines(p, keys) && asksQuestion(in.text):
+	case in.kind != InputTap && declines(p, keys) && asksQuestion(in.text) && !explicitDecline(in.text):
 		return nil, fmt.Sprintf("the shepherd's words %q also ask a question, so they do not plainly decline %s's prompt; nothing was sent: answer the question, and ask whether to decline if that is still unclear", strings.TrimSpace(in.text), alias)
 	}
 	return in, ""
@@ -608,6 +613,26 @@ var deferralWords = regexp.MustCompile(`(?i)\b(yet|later|not now|not right now|f
 
 // deferralInput reports whether text puts a decision off.
 func deferralInput(text string) bool { return deferralWords.MatchString(text) }
+
+// explicitDeclineWords are a decline spelled out with its verb: "don't
+// approve that", "definitely don't run it", "never push", "reject it",
+// 不要批准, 别让它跑, 拒绝. Campaign D N8: "What does bench-codex want to
+// push? And no, definitely don't approve that." (and #113's "no,
+// definitely don't approve that, ok?") was refused for asking a
+// question. A question next to a decline this plain does not make it
+// unclear; a bare "No." with a question still is ("No. What does bench
+// Codex want?" was a TTS "Uhh"). "Tell it no" counts (this PR's tier-1
+// bench-block-while-talking r3: "Yes, tell it no. And back to the
+// README, is it finished?" was refused twice).
+var explicitDeclineWords = regexp.MustCompile(`(?i)\b(don'?t|do not|never|definitely not)\s+(\w+\s+)?(approve|allow|accept|run|push|do|proceed|let|go ahead)\b|\b(deny|decline|reject|refuse)\s+(it|that|this|the)\b|\b(tell|answer)\s+(it|him|her|them|[\w-]+)\s+no\b|\bsay no\b|(不要|别|不准|不许)(让它|让他)?(批准|同意|允许|跑|运行|推|执行|做)|拒绝`)
+
+// whyNot is a suggestion, not a decline: "why don't you run it?".
+var whyNot = regexp.MustCompile(`(?i)\bwhy (don'?t|not)\b|为什么不`)
+
+// explicitDecline reports whether text declines in so many words.
+func explicitDecline(text string) bool {
+	return explicitDeclineWords.MatchString(text) && !whyNot.MatchString(text)
+}
 
 // questionWords open a question clause.
 var questionWords = regexp.MustCompile(`(?i)(^|[.,!;:]\s*)(what|why|how|which|who|when|where|is it|does it|did it|can it|could it|should it)\b|吗|什么|怎么|为什么|哪个|哪|呢`)

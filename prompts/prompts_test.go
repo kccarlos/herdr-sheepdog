@@ -63,6 +63,9 @@ func TestRenderAssistant(t *testing.T) {
 		"Add no question of your own",
 		// The supervisor's current-focus line resolves "it" (focus.go).
 		`A "Current focus" context line says which agent "it" or "that one" means`,
+		// docs/eval/campaign-d-2026-10-03.md N2: a new status question is
+		// relayed, never answered from what the voice heard earlier.
+		"A new question (status, what an agent is doing or found) goes to to_supervisor, never answered from memory.",
 	} {
 		if !strings.Contains(s, rule) {
 			t.Errorf("prompt lost the rule %q", rule)
@@ -71,7 +74,7 @@ func TestRenderAssistant(t *testing.T) {
 	// The voice invents no follow-up question and "never mind" is not a
 	// stop word (eval cases never-mind-is-not-stop-voice and
 	// explain-simpler-second-time).
-	for _, gone := range []string{"offer the next step", `"never mind", "no no"`, "say them at once, as given", "Do not add a follow-up question of your own"} {
+	for _, gone := range []string{"if a reply has not come back yet, say so", "offer the next step", `"never mind", "no no"`, "say them at once, as given", "Do not add a follow-up question of your own"} {
 		if strings.Contains(s, gone) {
 			t.Errorf("prompt still says %q", gone)
 		}
@@ -99,12 +102,13 @@ func TestRenderAssistantGPTLive(t *testing.T) {
 		`no "on it"`,
 		"even one that arrives long after your call",
 		`A "Current focus" note from the supervisor says which agent "it" or "that one" means`,
+		"delegate any question that asks for new information",
 	} {
 		if !strings.Contains(s, rule) {
 			t.Errorf("GPT-Live prompt lost the rule %q", rule)
 		}
 	}
-	for _, gone := range []string{"offer the next step", `"never mind" and "no no"`, "cancel or never mind"} {
+	for _, gone := range []string{"if a result has not come back yet, say so", "offer the next step", `"never mind" and "no no"`, "cancel or never mind"} {
 		if strings.Contains(s, gone) {
 			t.Errorf("GPT-Live prompt still says %q", gone)
 		}

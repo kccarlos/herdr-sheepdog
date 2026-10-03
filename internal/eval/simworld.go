@@ -285,8 +285,9 @@ func (w *simWorld) trigger(kind, alias, text string) bool {
 
 // answered is a worker's default reaction to keys no scenario event
 // handles: a blocked worker leaves its prompt — declined (esc) back to
-// its input line, otherwise on to work — as a real one would, so the
-// supervisor does not keep seeing a prompt that was answered.
+// its input line, otherwise on to work — as a real one would, with the
+// menu gone from the screen (ScreenAfterAnswer), so the supervisor does
+// not keep seeing a prompt that was answered.
 func (w *simWorld) answered(alias string, keys []string) {
 	w.mu.Lock()
 	st, kind := w.states[alias], w.kinds[alias]
@@ -299,15 +300,30 @@ func (w *simWorld) answered(alias string, keys []string) {
 		w.mu.Lock()
 		screen := w.screens[alias]
 		w.mu.Unlock()
-		next, footer := herdr.StateWorking, "• Running the approved step…"
+		next := herdr.StateWorking
 		if declined {
-			next, footer = herdr.StateIdle, "• Okay, I won't do that."
+			next = herdr.StateIdle
 		}
-		input := "› Ask Codex to do anything"
-		if kind == "claude" {
-			input = "❯ "
-		}
-		w.setWorker(context.Background(), alias, strings.TrimRight(screen, "\n")+"\n\n"+footer+"\n\n"+input+"\n", next, false)
+		w.setWorker(context.Background(), alias, ScreenAfterAnswer(screen, kind, declined), next, false)
+	})
+}
+
+// interrupted is a worker's default reaction to a Ctrl-C no scenario
+// event handles: a working worker stops its turn and comes back to its
+// input line, as a real one does, so the interrupt can be seen to take
+// (the brain's interrupt checks it, campaign D N5).
+func (w *simWorld) interrupted(alias string) {
+	w.mu.Lock()
+	st, kind := w.states[alias], w.kinds[alias]
+	w.mu.Unlock()
+	if st != herdr.StateWorking {
+		return
+	}
+	w.schedule(300*time.Millisecond, func() {
+		w.mu.Lock()
+		screen := w.screens[alias]
+		w.mu.Unlock()
+		w.setWorker(context.Background(), alias, ScreenAfterInterrupt(screen, kind), herdr.StateIdle, false)
 	})
 }
 
@@ -534,8 +550,12 @@ func (h *simHerdr) SendKeys(ctx context.Context, paneID string, keys ...string) 
 			kind = ActionInterrupt
 		}
 		alias := h.w.alias(paneID)
-		if !h.w.trigger(kind, alias, strings.Join(keys, " ")) && kind == ActionKeys {
-			h.w.answered(alias, keys)
+		if !h.w.trigger(kind, alias, strings.Join(keys, " ")) {
+			if kind == ActionKeys {
+				h.w.answered(alias, keys)
+			} else {
+				h.w.interrupted(alias)
+			}
 		}
 	}
 	return err

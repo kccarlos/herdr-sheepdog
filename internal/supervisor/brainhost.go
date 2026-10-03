@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
@@ -329,20 +330,143 @@ func keysLabel(p state.PendingAction, keys []string) string {
 }
 
 // Interrupt implements brain.Host: Ctrl-C to the pane, its pending action
-// dropped, the next "done" treated as interrupted (like cancel).
+// dropped, the next "done" treated as interrupted (like cancel) — and then
+// checked. Campaign D N5 (tier 3, t3-stop-queued-instruction): Claude Code
+// was busy with an instruction queued behind its turn, one Ctrl-C left it
+// working (it most likely cleared the queued message), and the result
+// "Interrupted Claude." let the brain tell the CEO it had stopped. The
+// CEO asked for a stop, so finishing it is not a judgement: when the pane
+// still works after interruptCheck and its screen still shows a running
+// turn, a second Ctrl-C goes out. The result says what happened — stopped,
+// stopped after the second, or still working after two — and a stop that
+// did not take leaves the finish announced (no interrupted mark).
+//
+// The second Ctrl-C needs the screen's "… to interrupt" hint as well as
+// herdr's working state: a CLI already back at its input takes a second
+// Ctrl-C as the first half of "exit".
 func (h brainHost) Interrupt(ctx context.Context, paneID string) (string, error) {
+	s := h.s
+	alias, err := h.sendInterrupt(ctx, paneID, true)
+	if err != nil {
+		return "", err
+	}
+	if !h.stillWorking(ctx, paneID) {
+		return "Interrupted " + alias + "; it stopped.", nil
+	}
+	if ctx.Err() != nil {
+		h.unmarkInterrupted(paneID)
+		s.log.Log(logSource, "supervisor.interrupt_unconfirmed", paneID, map[string]any{"agent": alias, "why": "turn_ended"})
+		return "Sent Ctrl-C to " + alias + "; the turn ran out of time before I could confirm it stopped.", nil
+	}
+	running, read := h.screenShowsRunningTurn(ctx, paneID)
+	if !read {
+		h.unmarkInterrupted(paneID)
+		s.log.Log(logSource, "supervisor.interrupt_unconfirmed", paneID, map[string]any{"agent": alias, "why": "screen_unreadable"})
+		return "Sent Ctrl-C to " + alias + "; herdr still reports it working, and I could not read its screen to confirm, so I sent no second one.", nil
+	}
+	if !running {
+		s.log.Log(logSource, "supervisor.interrupt_unconfirmed", paneID, map[string]any{"agent": alias, "why": "no_running_turn"})
+		return "Sent Ctrl-C to " + alias + "; herdr still reports it working, but its screen shows no running turn.", nil
+	}
+	s.log.Log(logSource, "supervisor.interrupt_retry", paneID, map[string]any{"agent": alias})
+	if _, err := h.sendInterrupt(ctx, paneID, false); err != nil {
+		return "", fmt.Errorf("the first Ctrl-C did not stop %s, and the second could not be sent: %w", alias, err)
+	}
+	if !h.stillWorking(ctx, paneID) {
+		return "The first Ctrl-C did not stop " + alias + "; a second one did, and it stopped.", nil
+	}
+	h.unmarkInterrupted(paneID)
+	s.log.Log(logSource, "supervisor.interrupt_failed", paneID, map[string]any{"agent": alias, "ctrl_c": 2})
+	return "Sent Ctrl-C to " + alias + " twice, and it is still working: it has not stopped.", nil
+}
+
+// sendInterrupt sends one Ctrl-C under the supervisor's lock and marks the
+// pane interrupted before the lock is released, so the working -> idle
+// transition it causes (another goroutine) is not announced as a finish.
+// first also drops the pane's pending action and makes it the subject.
+func (h brainHost) sendInterrupt(ctx context.Context, paneID string, first bool) (string, error) {
 	s := h.s
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	alias := s.sayOf(paneID)
 	if err := s.herdr.Interrupt(ctx, paneID); err != nil {
 		s.log.Log(logSource, "supervisor.cancel_error", paneID, map[string]any{"error": err.Error(), "via": "brain"})
-		return "", fmt.Errorf("could not interrupt %s: %w", alias, err)
+		return alias, fmt.Errorf("could not interrupt %s: %w", alias, err)
 	}
 	s.interrupted[paneID] = s.cfg.Now()
-	s.dropPendingFor(paneID, "brain_interrupt")
-	s.lastSubject = paneID
-	return "Interrupted " + alias + ".", nil
+	if first {
+		s.dropPendingFor(paneID, "brain_interrupt")
+		s.lastSubject = paneID
+	}
+	return alias, nil
+}
+
+// interruptCheckDefault is how long a Ctrl-C gets to take: herdr reported
+// Claude idle 0.3 s after the Ctrl-C that did stop it (campaign D, tier 3).
+const interruptCheckDefault = 2500 * time.Millisecond
+
+// interruptPoll is how often the check looks.
+const interruptPoll = 100 * time.Millisecond
+
+// stillWorking waits up to Config.interruptCheck for the pane to leave
+// working: the state table (herdr's socket events) or herdr's own list.
+// It reports whether the pane was still working when the time ran out
+// (or the turn's context ended first).
+func (h brainHost) stillWorking(ctx context.Context, paneID string) bool {
+	s := h.s
+	deadline := time.Now().Add(s.cfg.interruptCheck)
+	for {
+		if !h.workingNow(ctx, paneID) {
+			return false
+		}
+		if time.Now().After(deadline) {
+			return true
+		}
+		select {
+		case <-ctx.Done():
+			return true
+		case <-time.After(interruptPoll):
+		}
+	}
+}
+
+// workingNow reports whether the pane is working: the state table first,
+// herdr's list when the table still says working.
+func (h brainHost) workingNow(ctx context.Context, paneID string) bool {
+	s := h.s
+	row, ok := s.store.Get(paneID)
+	if !ok || row.State != herdr.StateWorking {
+		return false
+	}
+	agents, err := s.herdr.ListAgents(ctx)
+	if err != nil {
+		return true
+	}
+	for _, a := range agents {
+		if a.PaneID == paneID {
+			return a.Status == herdr.StateWorking
+		}
+	}
+	return false
+}
+
+// screenShowsRunningTurn reports whether the pane's last lines carry the
+// CLI's running-turn hint ("esc to interrupt": Claude Code and Codex);
+// read is false when the screen could not be read.
+func (h brainHost) screenShowsRunningTurn(ctx context.Context, paneID string) (running, read bool) {
+	r, err := h.s.herdr.Read(ctx, paneID, herdr.SourceRecentUnwrapped, 12)
+	if err != nil {
+		return false, false
+	}
+	return strings.Contains(strings.ToLower(r.Text), "to interrupt"), true
+}
+
+// unmarkInterrupted drops the pane's interrupted mark: when the stop is
+// not confirmed, the pane's next finish is announced rather than hidden.
+func (h brainHost) unmarkInterrupted(paneID string) {
+	h.s.mu.Lock()
+	delete(h.s.interrupted, paneID)
+	h.s.mu.Unlock()
 }
 
 // Promise implements brain.Host: the promise is recorded in the session

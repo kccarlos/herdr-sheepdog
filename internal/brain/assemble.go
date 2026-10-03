@@ -3,6 +3,7 @@ package brain
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -353,6 +354,11 @@ func investigationRequestText(req Request) string {
 	}
 	if line := languageLine(req.facts.Language); line != "" {
 		b.WriteString(line + "\n")
+	}
+	if inv.Status == InvestigationError {
+		// Campaign D N8: the daemon used to read its own failure line
+		// ("no command-line helper is set up on this machine") to the CEO.
+		fmt.Fprintf(&b, "It did not run: %s. Tell the CEO in plain words what that means for them (for example that you cannot look at the files directly from here) and what you can still do; do not name tools or helpers.\n", inv.Err)
 	}
 	if req.Result != "" {
 		b.WriteString("What it found:\n")
@@ -708,18 +714,40 @@ const (
 // here is unknown to it, as a fact. When no agent is named but the words
 // carry a name like theirs, the fact that no agent has it
 // (unmatchedNameLine); "" otherwise.
-func agentRecords(agents []AgentInfo, words string, clock func() time.Time) string {
+//
+// focus is the agent the conversation is on (the alias the supervisor
+// last spoke about or acted on). When the words name no agent but point
+// at one ("it", "that one", 它), its record is given, marked as the agent
+// in focus: the #113 echo runs (barge-in-long-answer r3) asked "tell me
+// if it needs anything from me" about a worker that had finished, and the
+// brain answered "Nothing yet" with no record of the finish in front of
+// it.
+func agentRecords(agents []AgentInfo, words, focus string, clock func() time.Time) string {
+	var picked []AgentInfo
+	for _, a := range agents {
+		if namesAgent(words, a.Alias) || namesAgent(words, a.Spoken) || namesAgent(words, a.Title) {
+			// The alias, the spoken name ("README Claude") or the
+			// worker's session title ("the README one").
+			picked = append(picked, a)
+		}
+	}
+	inFocus := false
+	if len(picked) == 0 && focus != "" && pointsAtOne.MatchString(words) {
+		for _, a := range agents {
+			if a.Alias == focus {
+				picked, inFocus = append(picked, a), true
+			}
+		}
+	}
 	var b strings.Builder
 	var now time.Time
-	for _, a := range agents {
-		if !namesAgent(words, a.Alias) && !namesAgent(words, a.Spoken) && !namesAgent(words, a.Title) {
-			// Neither the alias nor the spoken name ("README Claude")
-			// nor the worker's session title ("the README one").
-			continue
-		}
+	for _, a := range picked {
 		if b.Len() == 0 {
 			now = clock() // only when a record is written: the clock ticks in fixtures
 			b.WriteString("On record (from the worker's screen and its own session transcript, the daemon's only sources; what is not here is not on record, and a run_cli or investigate look can check it):")
+			if inFocus {
+				b.WriteString(" the CEO's words name no agent; the one in focus is")
+			}
 		}
 		fmt.Fprintf(&b, "\n- %s", aliasOr(a.Alias))
 		if a.Spoken != "" && a.Spoken != a.Alias {
@@ -767,6 +795,9 @@ func agentRecords(agents []AgentInfo, words string, clock func() time.Time) stri
 	}
 	return b.String()
 }
+
+// pointsAtOne matches words that refer to one agent without naming it.
+var pointsAtOne = regexp.MustCompile(`(?i)\b(it|its|it's|that one|this one|that agent|the agent|that worker|the worker)\b|它`)
 
 // namesAgent reports whether words name alias: the alias itself, or
 // with its dashes and underscores heard as spaces ("bench claude"),

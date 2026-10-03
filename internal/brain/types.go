@@ -146,6 +146,10 @@ type Request struct {
 	// (the supervisor mints it at the relay): every event of the turn
 	// carries it (trace.go).
 	UtteranceID string
+	// Focus is the alias of the agent the conversation is on, for an
+	// utterance whose words point at an agent without naming it
+	// (agentRecords).
+	Focus string
 	// Link is the request message's link to the voice context (the
 	// Context tab): "call:<id>" for the voice tool call that relayed an
 	// utterance, "evt:<id>" for the worker event an announce is about.
@@ -272,6 +276,11 @@ type Reply struct {
 	// utterance reply that acted as silent context rather than dropping it
 	// (internal/supervisor/utterance.go).
 	Acted bool `json:"-"`
+	// ActedOn lists the panes the turn's actions went to, first first,
+	// each once (set by the brain, never the model): a late reply is
+	// labelled with the agent it acted on, not with whichever agent its
+	// words happen to name (campaign D N4).
+	ActedOn []string `json:"-"`
 }
 
 // Promise events and statuses (state.Promise mirrors them; the brain

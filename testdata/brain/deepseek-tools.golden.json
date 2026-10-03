@@ -147,7 +147,7 @@
   },
   {
     "function": {
-      "description": "Send Ctrl-C to an agent to stop what it is doing.",
+      "description": "Send Ctrl-C to an agent to stop what it is doing. The result says whether it stopped.",
       "name": "interrupt",
       "parameters": {
         "properties": {

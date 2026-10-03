@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -38,7 +39,9 @@ type turn struct {
 	calls      int // model calls
 	tokIn      int
 	tokOut     int
-	acted      []string // spoken echoes of actions sent
+	acted      []string        // spoken echoes of actions sent
+	actedOn    []string        // the panes those actions went to, each once
+	prompted   map[string]bool // pane + instruction already typed this turn (execTool)
 	// prior is the answer an event turn wrote before it learned a line
 	// about its event had gone out meanwhile (recheck): the turn asks
 	// once more with that fact; should the second step fail, prior is
@@ -154,7 +157,7 @@ func (b *Brain) run(ctx context.Context, t *turn) (Reply, error) {
 		// What the daemon knows about the agents the words name, and that
 		// it knows nothing more (run C, H7: "did it push?" answered "no"
 		// from a screen that says nothing about pushing).
-		t.req.records = agentRecords(b.host.Agents(), t.req.Question, b.cfg.Now)
+		t.req.records = agentRecords(b.host.Agents(), t.req.Question, t.req.Focus, b.cfg.Now)
 	}
 	b.ingest(Message{Role: RoleUser, Kind: KindRequest, Content: requestText(t.req), Agent: t.req.Agent, Link: t.req.Link}, t.n)
 	if t.req.Kind == KindAnnounce && t.req.Agent != "" {
@@ -294,7 +297,7 @@ func (b *Brain) run(ctx context.Context, t *turn) (Reply, error) {
 				return b.fail(t, "bad_reply", perr)
 			}
 			b.ingest(t.reply(answer, raw), t.n)
-			reply.Turn, reply.Acted = t.n, len(t.acted) > 0
+			reply.Turn, reply.Acted, reply.ActedOn = t.n, len(t.acted) > 0, t.actedOn
 			if b.recheck(t, step, reply) {
 				continue
 			}
@@ -375,6 +378,9 @@ func (b *Brain) execCalls(ctx context.Context, t *turn, resp *genai.GenerateCont
 		}
 		if out.acted != "" {
 			t.acted = append(t.acted, out.acted)
+			if out.pane != "" && !slices.Contains(t.actedOn, out.pane) {
+				t.actedOn = append(t.actedOn, out.pane)
+			}
 		}
 		res := &ToolResult{ID: id, Name: fc.Name, DurMS: dur, Summary: out.summary}
 		payload := map[string]any{"id": id, "name": fc.Name, "dur_ms": dur, "turn": t.n}
@@ -458,7 +464,7 @@ func (b *Brain) fail(t *turn, reason string, cause error) (Reply, error) {
 		reply := Reply{Spoken: strings.Join(t.acted, " "), Detail: "The supervisor acted but ran out of budget before reporting in full."}
 		b.ingest(Message{Role: RoleAssistant, Kind: KindReply, Content: mustJSON(reply)}, t.n)
 		b.logTurn(t, false)
-		reply.Turn, reply.Acted = t.n, true
+		reply.Turn, reply.Acted, reply.ActedOn = t.n, true, t.actedOn
 		return reply, nil
 	}
 	b.logTurn(t, true)

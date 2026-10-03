@@ -119,3 +119,58 @@ func TestIdleMenuAnswerableByVoice(t *testing.T) {
 		})
 	}
 }
+
+// Campaign D N6 (j2-deny, all 5 tier-1 runs): the CEO declined Codex's
+// force push, then asked for a follow-up; the sim's decline screen kept
+// the old menu, and the guard refused the instruction three times. Right
+// after a decline the screen is read once more: a menu that is gone lets
+// the instruction through, and one still there goes back to the brain
+// as the declined menu, possibly stale.
+func TestMenuGuardAfterADecline(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		redraw  bool
+		blocked bool
+	}{
+		{"the screen redraws a moment later", true, false},
+		{"the declined menu stays on screen", false, true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			h := newHarness(t)
+			h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
+			h.block("w5:p1", "codex-approval-prompt.screen.txt")
+			p, ok := h.pending()
+			if !ok || len(p.NoKeys) == 0 {
+				t.Fatalf("pending = %+v", p)
+			}
+			h.hear("No, don't do that.")
+			if _, err := (brainHost{s: h.sup}).AnswerPrompt(context.Background(), "w5:p1", p.NoKeys); err != nil {
+				t.Fatal(err)
+			}
+			h.transition("w5:p1", herdr.StateBlocked, herdr.StateIdle)
+			h.clock.Advance(3 * time.Second)
+			if c.redraw {
+				go func() {
+					time.Sleep(declineRecheckDelay / 3)
+					h.srv.SetScreen("w5:p1", fixture(t, "codex-declined-esc.screen.txt"))
+				}()
+			}
+			_, err := brainHost{s: h.sup}.Prompt(context.Background(), "w5:p1", "Push to a new branch instead.")
+			if blocked := errors.Is(err, ErrMenuOnScreen); blocked != c.blocked {
+				t.Fatalf("err = %v, want blocked %v", err, c.blocked)
+			}
+			if c.blocked {
+				if msg := err.Error(); !strings.Contains(msg, "the menu the CEO declined 3 s ago") || !strings.Contains(msg, "may be a stale picture") {
+					t.Errorf("fact = %q", msg)
+				}
+				return
+			}
+			if got := h.promptRequests(); len(got) != 1 {
+				t.Errorf("agent.prompt = %v, want the instruction", got)
+			}
+			if h.log.count("supervisor.menu_gone_after_decline") != 1 {
+				t.Error("supervisor.menu_gone_after_decline not logged")
+			}
+		})
+	}
+}
