@@ -210,7 +210,11 @@ func renderRoster(agents []AgentInfo, now time.Time) string {
 			if len(p.Options) > 0 {
 				var opts []string
 				for i, o := range p.Options {
-					opts = append(opts, fmt.Sprintf("%d %q -> keys %v", i+1, clipText(o.Label, rosterOptionRunes), o.Keys))
+					opt := fmt.Sprintf("%d %q -> keys %v", i+1, clipText(o.Label, rosterOptionRunes), o.Keys)
+					if o.Meta {
+						opt += " (a free-text entry, not an answer: never offer it)"
+					}
+					opts = append(opts, opt)
 				}
 				fmt.Fprintf(&b, "; options: %s", strings.Join(opts, ", "))
 			}

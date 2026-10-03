@@ -54,7 +54,10 @@ func (h brainHost) info(a state.Agent, pending state.PendingAction, has bool) br
 	if has && pending.Kind == state.PendingAnswerPrompt && pending.PaneID == a.PaneID {
 		p := &brain.PendingPrompt{ID: pending.ID, Question: pending.Question, AskedAt: pending.CreatedAt, YesKeys: pending.YesKeys, NoKeys: pending.NoKeys}
 		for _, o := range pending.Options {
-			p.Options = append(p.Options, brain.Option{Label: o.Label, Keys: o.Keys})
+			// Meta goes along as a fact: the brain must know the
+			// free-text entry is not an answer (the phone card and
+			// the yes/no mapping never offer it).
+			p.Options = append(p.Options, brain.Option{Label: o.Label, Keys: o.Keys, Meta: o.Meta})
 		}
 		info.Pending = p
 	}

@@ -436,6 +436,11 @@ type PendingPrompt struct {
 type Option struct {
 	Label string
 	Keys  []string
+	// Meta marks an entry that is not an answer (Claude Code's "Type
+	// something." free-text box): the roster says so, so the brain knows
+	// it exists for a free-text answer and never offers it as a choice
+	// (docs/eval-campaign-2026-10-03.md H2).
+	Meta bool
 }
 
 // AllowedKeys returns every key the prompt's option set permits.
