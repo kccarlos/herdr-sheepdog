@@ -387,11 +387,8 @@ func earLine(rep brain.Reply) (spoken, overflow string) {
 	return sentence(spoken), overflow
 }
 
-// sentence makes sure s ends with terminal punctuation.
-func sentence(s string) string {
-	s = strings.TrimSpace(s)
-	if s == "" || strings.ContainsRune(".!?\"')]", rune(s[len(s)-1])) {
-		return s
-	}
-	return s + "."
-}
+// sentence makes sure s ends with terminal punctuation: prose's
+// CJK-aware terminators, so a Chinese line ending in 。 or ？ gets no
+// extra "." (docs/eval-campaign-2026-10-03.md H1: "。." / "？." seams,
+// the old check looked at the last byte and knew only ASCII).
+func sentence(s string) string { return prose.Terminate(s) }

@@ -293,6 +293,12 @@ func splitSentences(s string) []string {
 	return out
 }
 
+// Terminate makes sure s ends with terminal punctuation, CJK-aware: a
+// line already ending in 。！？… (or a closing quote or bracket) is left
+// alone, a Chinese line gets 。 and anything else a full stop. A trailing
+// comma, colon or semicolon (either width) is dropped first.
+func Terminate(s string) string { return terminate(s) }
+
 // terminate makes sure s ends with terminal punctuation.
 func terminate(s string) string {
 	s = strings.TrimSpace(s)
