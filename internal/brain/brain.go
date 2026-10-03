@@ -196,6 +196,13 @@ type Brain struct {
 	// when none): one at a time, off the turn lock (afterTurn).
 	compactCancel context.CancelFunc
 	compactDone   chan struct{}
+	// lastModel is the model this run last selected on each provider
+	// (New, SetModel): the model a failover to that provider runs.
+	lastModel map[string]string
+	// failover is the streak of failovers away from the selected
+	// provider; notify tells the CEO about it (SetNotifier).
+	failover failoverState
+	notify   func(text string)
 
 	// catalogs are the cached model lists, one per provider (catalog.go).
 	catalogs catalogCaches
@@ -221,7 +228,7 @@ func New(cfg Config, model Model, log logging.Logger) (*Brain, error) {
 		log = logging.NopLogger{}
 	}
 	cfg = cfg.withDefaults()
-	b := &Brain{cfg: cfg, log: log, models: map[string]Model{cfg.Provider: model}, curProvider: cfg.Provider, curModel: cfg.Model, curRunID: cfg.RunID, tools: toolDeclarations(false), readTools: toolDeclarations(true)}
+	b := &Brain{cfg: cfg, log: log, models: map[string]Model{cfg.Provider: model}, curProvider: cfg.Provider, curModel: cfg.Model, lastModel: map[string]string{cfg.Provider: cfg.Model}, curRunID: cfg.RunID, tools: toolDeclarations(false), readTools: toolDeclarations(true)}
 	b.ctx, b.stop = context.WithCancel(context.Background())
 	path := ""
 	if cfg.DataDir != "" {
@@ -382,6 +389,7 @@ func (b *Brain) SetModel(provider, name, via string) error {
 		return nil
 	}
 	b.curProvider, b.curModel = provider, name
+	b.lastModel[provider] = name
 	b.mu.Unlock()
 	b.log.Log(logSource, "brain.model_changed", "", map[string]any{"from_provider": fromProvider, "from": from, "provider": provider, "to": name, "via": via})
 	b.ingest(Message{Role: RoleSystem, Kind: KindSystem, Content: fmt.Sprintf("model switched from %s/%s to %s/%s", fromProvider, from, provider, name)}, 0)

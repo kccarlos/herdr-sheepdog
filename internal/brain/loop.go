@@ -27,12 +27,16 @@ type turn struct {
 	start           time.Time
 	// soft is when the budget for tool rounds ends; the hard deadline is
 	// FinalGrace later.
-	soft   time.Time
-	steps  int
-	calls  int // model calls
-	tokIn  int
-	tokOut int
-	acted  []string // spoken echoes of actions sent
+	soft time.Time
+	// failedOver is set once a step was retried on another provider
+	// (generateStep): provider, model and impl are that one's from then
+	// on, and there is no second failover in the turn.
+	failedOver bool
+	steps      int
+	calls      int // model calls
+	tokIn      int
+	tokOut     int
+	acted      []string // spoken echoes of actions sent
 }
 
 // Turn runs one turn (an empty kind is an utterance). The reply is
@@ -205,7 +209,7 @@ func (b *Brain) run(ctx context.Context, t *turn) (Reply, error) {
 		msgs := withState(asm.Messages, state, t.n)
 
 		t0 := b.cfg.Now()
-		resp, raw, err := b.generate(ctx, t, msgs, &config)
+		resp, raw, err := b.generateStep(ctx, t, step, msgs, &config)
 		t.calls++
 		dur := b.cfg.Now().Sub(t0)
 		b.captureStep(t, step, forced, secs, asm.SystemAddition, msgs, &config, t0, dur, resp, err)

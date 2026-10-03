@@ -375,6 +375,9 @@ func New(store *state.Store, h Herdr, querier Querier, pusher Pusher, log loggin
 	s.restoreInvestigations()
 	if s.brain != nil {
 		s.brain.SetHost(brainHost{s})
+		// The brain's notices about itself (a provider failing over and
+		// over) are spoken like any daemon line.
+		s.brain.SetNotifier(func(text string) { s.push("", text, voice.UrgencyIdle) })
 		s.restorePromises()
 	}
 	return s, nil
