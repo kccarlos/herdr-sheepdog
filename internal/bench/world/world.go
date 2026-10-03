@@ -321,15 +321,11 @@ func (w *World) answered(alias string, keys []string) {
 		w.mu.Lock()
 		screen := w.screens[alias]
 		w.mu.Unlock()
-		next, footer := "working", "• Running the approved step…"
+		next := "working"
 		if declined {
-			next, footer = "idle", "• Okay, I won't do that."
+			next = "idle"
 		}
-		input := "› Ask Codex to do anything"
-		if kind == "claude" {
-			input = "❯ "
-		}
-		w.set(alias, strings.TrimRight(screen, "\n")+"\n\n"+footer+"\n\n"+input+"\n", next)
+		w.set(alias, eval.ScreenAfterAnswer(screen, kind, declined), next)
 	})
 }
 

@@ -265,6 +265,9 @@ type Supervisor struct {
 	mentioned     map[string]time.Time // pane -> when a spoken briefing last named it
 	lastPrompt    map[string]string    // pane -> signature of the last answer_prompt built for it (reprompt.go)
 	utterance     *inflightUtterance   // the to_supervisor call in flight (stop.go phases 1 and 2)
+	// declined is the last prompt the shepherd declined per pane, for
+	// the menu guard (tools.go, menuOnScreen).
+	declined map[string]declineMark
 	// eventIDs is each pane's latest worker event id (links.go): the
 	// announce turn and pushes about that event carry it, so the Context
 	// tab links them to the brain's worker_event message.
