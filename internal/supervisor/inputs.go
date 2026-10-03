@@ -570,7 +570,7 @@ func (s *Supervisor) railInputLocked(p state.PendingAction, keys []string) (*she
 		return nil, fmt.Sprintf("the shepherd only said %q, a filler, which answers nothing; %s's prompt stays open", strings.TrimSpace(in.text), alias)
 	case in.kind != InputTap && declines(p, keys) && deferralInput(in.text):
 		return nil, fmt.Sprintf("the shepherd said %q, which puts %s's prompt off rather than declining it; nothing was sent and the prompt stays open, so tell them it is still waiting", strings.TrimSpace(in.text), alias)
-	case in.kind != InputTap && declines(p, keys) && asksQuestion(in.text):
+	case in.kind != InputTap && declines(p, keys) && asksQuestion(in.text) && !explicitDecline(in.text):
 		return nil, fmt.Sprintf("the shepherd's words %q also ask a question, so they do not plainly decline %s's prompt; nothing was sent: answer the question, and ask whether to decline if that is still unclear", strings.TrimSpace(in.text), alias)
 	}
 	return in, ""
@@ -608,6 +608,24 @@ var deferralWords = regexp.MustCompile(`(?i)\b(yet|later|not now|not right now|f
 
 // deferralInput reports whether text puts a decision off.
 func deferralInput(text string) bool { return deferralWords.MatchString(text) }
+
+// explicitDeclineWords are a decline spelled out with its verb: "don't
+// approve that", "definitely don't run it", "never push", "reject it",
+// 不要批准, 别让它跑, 拒绝. Campaign D N8: "What does bench-codex want to
+// push? And no, definitely don't approve that." (and #113's "no,
+// definitely don't approve that, ok?") was refused for asking a
+// question. A question next to a decline this plain does not make it
+// unclear; a bare "No." with a question still is ("No. What does bench
+// Codex want?" was a TTS "Uhh").
+var explicitDeclineWords = regexp.MustCompile(`(?i)\b(don'?t|do not|never|definitely not)\s+(\w+\s+)?(approve|allow|accept|run|push|do|proceed|let|go ahead)\b|\b(deny|decline|reject|refuse)\s+(it|that|this|the)\b|(不要|别|不准|不许|不能)(让它|让他)?(批准|同意|允许|跑|运行|推|执行|做)|拒绝`)
+
+// whyNot is a suggestion, not a decline: "why don't you run it?".
+var whyNot = regexp.MustCompile(`(?i)\bwhy (don'?t|not)\b|为什么不`)
+
+// explicitDecline reports whether text declines in so many words.
+func explicitDecline(text string) bool {
+	return explicitDeclineWords.MatchString(text) && !whyNot.MatchString(text)
+}
 
 // questionWords open a question clause.
 var questionWords = regexp.MustCompile(`(?i)(^|[.,!;:]\s*)(what|why|how|which|who|when|where|is it|does it|did it|can it|could it|should it)\b|吗|什么|怎么|为什么|哪个|哪|呢`)
