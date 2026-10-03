@@ -186,6 +186,11 @@ func TestApplyCeilingTable(t *testing.T) {
 		{Normal, pushDoneOther, "interrupt", ceilingInput{kept: true, duePassed: true}, "interrupt", "brain"},
 		{Normal, pushDoneOther, "interrupt", ceilingInput{kept: true, needsUser: true}, "interrupt", "brain"},
 		{Chatty, pushPromiseOnly, "idle", ceilingInput{kept: true}, "idle", "brain"},
+		// The finish of the CEO's own instruction is owed like a promise.
+		{Quiet, pushDoneInvolved, "idle", ceilingInput{owed: true}, "idle", "brain"},
+		{Normal, pushDoneOther, "idle", ceilingInput{owed: true}, "idle", "brain"},
+		{Normal, pushDoneOther, "skip", ceilingInput{owed: true}, "skip", "brain"},
+		{Quiet, pushDoneOther, "interrupt", ceilingInput{owed: true}, "idle", "ceiling"},
 		// a question is spoken at every level; interrupt only for a
 		// decision the shepherd must take.
 		{Quiet, pushQuestion, "idle", ceilingInput{}, "idle", "brain"},
@@ -984,5 +989,53 @@ func TestKeptPromiseLineIsTaggedOwed(t *testing.T) {
 	ids, _ := h.pusher.tagsOf(0)["keeps_promise_ids"].([]string)
 	if len(ids) != 1 || ids[0] != p.ID || !voice.PushOwed(h.pusher.tagsOf(0)) {
 		t.Errorf("tags = %v, want keeps_promise_ids [%s]", h.pusher.tagsOf(0), p.ID)
+	}
+}
+
+// An owed line is never suppressed by chattiness (tier-2 bench
+// 2026-10-03 #6: the finish the CEO asked about was skipped by the
+// ceiling, brain.push_decision {"via":"ceiling","urgency_applied":"skip"},
+// supervisor.push_quiet). A kept promise was already spoken at every
+// level; the finish of the CEO's own instruction now is too — at quiet,
+// and at normal past the recent window — with the brain's line, or with
+// the code sentence when the turn fails.
+func TestOwedFinishBypassesCeiling(t *testing.T) {
+	for _, level := range []Chattiness{Quiet, Normal} {
+		t.Run(string(level), func(t *testing.T) {
+			m := braintest.NewModel()
+			m.EventDefault = announceReply("Auth finished the tests you asked for.", "idle", "", "the tests", false)
+			h := newBrainHarness(t, m, func(c *Config) { c.Chattiness = string(level) })
+			h.addAgent("w5:p1", "auth", "codex", herdr.StateIdle)
+			h.send("w5:p1", "run the tests")
+			h.transition("w5:p1", herdr.StateIdle, herdr.StateWorking)
+			h.clock.Advance(31 * time.Minute) // past normal's recent window
+			doneAuth(h)
+			if got := h.pushTexts(); len(got) != 1 || got[0] != "Auth finished the tests you asked for." {
+				t.Fatalf("pushes = %q", got)
+			}
+			for _, pq := range h.log.ofType("supervisor.push_quiet") {
+				if strings.Contains(payload(pq)["text"].(string), "finished") {
+					t.Errorf("push_quiet = %v", pq)
+				}
+			}
+			if d := h.decisions(); len(d) != 1 || d[0]["via"] != "brain" || d[0]["urgency_applied"] != "idle" {
+				t.Errorf("push_decision = %v", d)
+			}
+		})
+	}
+	// Without a brain the code sentence is the owed line, at quiet too.
+	h := newHarness(t, func(c *Config) { c.Chattiness = string(Quiet) })
+	h.addAgent("w5:p1", "auth", "codex", herdr.StateIdle)
+	h.send("w5:p1", "run the tests")
+	h.transition("w5:p1", herdr.StateIdle, herdr.StateWorking)
+	doneAuth(h)
+	if got := h.pushTexts(); len(got) != 1 || got[0] != doneSentence {
+		t.Fatalf("no brain, quiet: pushes = %q", got)
+	}
+	// A finish nobody asked for stays under the ceiling.
+	h.transition("w5:p1", herdr.StateDone, herdr.StateWorking)
+	doneAuth(h)
+	if got := h.pushTexts(); len(got) != 1 {
+		t.Fatalf("an unowed finish at quiet was spoken: %q", got)
 	}
 }

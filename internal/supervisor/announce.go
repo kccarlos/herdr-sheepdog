@@ -18,9 +18,10 @@ import (
 // the event keeps and its transcript, and decides *whether* the voice
 // says anything (skip, silent) and *how urgently* (idle, interrupt); the
 // voice still decides the moment (the push queue). Code keeps the
-// ceiling the brain cannot lift: the chattiness level (with kept promises
-// the one exception) and interrupt only for a due promise or a decision
-// the shepherd must take.
+// ceiling the brain cannot lift: the chattiness level (with owed lines —
+// a kept promise, the finish of the shepherd's own instruction — the
+// exception) and interrupt only for a due promise or a decision the
+// shepherd must take.
 //
 // One line per event, and when it is spoken depends on the event
 // (iteration 2 WP2, the 2026-09-24 scorecard: 48 of 61 brain lines were
@@ -222,7 +223,7 @@ func (s *Supervisor) applyResult(a announcement, kept []state.Promise, level Cha
 		return
 	}
 	duePassed := s.duePassed(kept)
-	d := applyCeiling(level, a.kind, requested, ceilingInput{kept: len(kept) > 0, duePassed: duePassed, needsUser: rep.NeedsUser})
+	d := applyCeiling(level, a.kind, requested, ceilingInput{kept: len(kept) > 0, owed: a.owed, duePassed: duePassed, needsUser: rep.NeedsUser})
 	d.via = "brain"
 	s.logDecision(a, level, d, rep, kept, true)
 	// Whatever the ceiling does with it, the brain's line is what the
@@ -303,7 +304,7 @@ func promiseIDs(ps []state.Promise) []string {
 //     which the code could not know.
 func (s *Supervisor) dropLate(a announcement, kept []state.Promise, level Chattiness, r turnResult, start time.Time) {
 	dur := s.cfg.Now().Sub(start).Milliseconds()
-	audible := len(kept) > 0 || level.allows(a.kind)
+	audible := len(kept) > 0 || a.owed || level.allows(a.kind)
 	if r.err != nil {
 		s.logDecision(a, level, decision{via: "template", requested: "", applied: brain.UrgencySkip, reason: fallbackReason(r.err), late: true, err: r.err}, brain.Reply{}, kept, false)
 		return
@@ -394,7 +395,7 @@ func (s *Supervisor) codePath(a announcement, kept []state.Promise, level Chatti
 	s.recordFinish(a, doneResult)
 	if s.brain != nil && reason != "promise" {
 		applied := brain.UrgencySkip
-		if level.allows(a.kind) {
+		if a.owed || level.allows(a.kind) {
 			applied = brain.UrgencyIdle
 		}
 		s.logDecision(a, level, decision{via: "template", requested: "", applied: applied, reason: reason}, brain.Reply{}, kept, false)
@@ -404,7 +405,14 @@ func (s *Supervisor) codePath(a announcement, kept []state.Promise, level Chatti
 		sentence = noFindingSentence(a)
 	}
 	if len(kept) == 0 {
-		if a.kind != pushPromiseOnly {
+		switch {
+		case a.kind == pushPromiseOnly:
+		case a.owed:
+			// The shepherd's own instruction ended: owed like a promise,
+			// so no chattiness level silences it.
+			s.notify(a, kept, sentence)
+			s.pushTagged(a.row.PaneID, sentence, voice.UrgencyIdle, a.tags(nil))
+		default:
 			s.notify(a, kept, sentence)
 			s.pushIfTagged(a.kind, a.row.PaneID, sentence, a.tags(nil))
 		}
@@ -493,6 +501,7 @@ func (s *Supervisor) logDecision(a announcement, level Chattiness, d decision, r
 // ceilingInput is what the ceiling weighs besides the level and kind.
 type ceilingInput struct {
 	kept      bool // the announcement keeps a promise
+	owed      bool // the finish ends the shepherd's own instruction
 	duePassed bool // a kept promise is past its due time
 	needsUser bool // the brain says the CEO must decide or act
 }
@@ -500,7 +509,8 @@ type ceilingInput struct {
 // applyCeiling caps what the brain asked for under the chattiness level:
 // skip and silent pass as asked (context is not speech); a kept promise
 // is spoken at every level, at idle, or interrupt when its due time
-// passed or the brain says the CEO must act; otherwise the level's
+// passed or the brain says the CEO must act; the finish of the CEO's own
+// instruction (owed) is spoken at every level too; otherwise the level's
 // policy table decides whether the line is spoken at all (normal keeps
 // the recent_minutes rule for finishes), and interrupt is allowed only
 // for a decision the CEO must take.
@@ -521,7 +531,7 @@ func applyCeiling(level Chattiness, kind pushKind, requested string, in ceilingI
 		}
 		return d
 	}
-	if !level.allows(kind) {
+	if !level.allows(kind) && !in.owed {
 		d.applied, d.reason = brain.UrgencySkip, "ceiling"
 		return d
 	}
@@ -536,10 +546,11 @@ func applyCeiling(level Chattiness, kind pushKind, requested string, in ceilingI
 }
 
 // ceilingForbidsAll reports that the level would silence every audible
-// line about a: no promise is kept and the sentence's class is not
-// spoken at this level.
+// line about a: nothing is owed (no promise kept, not the finish of the
+// shepherd's own instruction) and the sentence's class is not spoken at
+// this level. An owed line is never suppressed by chattiness.
 func ceilingForbidsAll(level Chattiness, a announcement, kept []state.Promise) bool {
-	return len(kept) == 0 && !level.allows(a.kind)
+	return len(kept) == 0 && !a.owed && !level.allows(a.kind)
 }
 
 // requestedUrgency normalises the brain's urgency: an unknown or empty

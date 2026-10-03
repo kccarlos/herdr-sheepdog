@@ -699,7 +699,9 @@ const (
 // had pushed, Vertex said it had not, from a screen that says nothing
 // about pushing). The daemon sees a worker only through its screen and
 // its own session transcript, which the record says too: what is not
-// here is unknown to it, as a fact. "" when no agent is named.
+// here is unknown to it, as a fact. When no agent is named but the words
+// carry a name like theirs, the fact that no agent has it
+// (unmatchedNameLine); "" otherwise.
 func agentRecords(agents []AgentInfo, words string, clock func() time.Time) string {
 	var b strings.Builder
 	var now time.Time
@@ -753,6 +755,9 @@ func agentRecords(agents []AgentInfo, words string, clock func() time.Time) stri
 			}
 			b.WriteString(";")
 		}
+	}
+	if b.Len() == 0 {
+		return unmatchedNameLine(agents, words)
 	}
 	return b.String()
 }

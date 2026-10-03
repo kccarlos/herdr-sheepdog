@@ -55,8 +55,11 @@ func TestChattinessLevels(t *testing.T) {
 		trust = "vps is asking do you trust the contents of this directory."
 		exit  = "auth has exited while it was busy."
 	)
+	// vps's finish of the instruction sent in step 5 is owed to the
+	// shepherd, so even quiet speaks it (announce.go: an owed line is
+	// never suppressed by chattiness).
 	want := map[Chattiness][]string{
-		Quiet:  {authQ, docsQ, trust, exit},
+		Quiet:  {authQ, docsQ, vpsDone, trust, exit},
 		Normal: {authQ, replaced, docsDone, vpsDone, trust, exit},
 		Chatty: {authQ, replaced, docsDone, vpsDone, vpsDone, trust, exit},
 	}
@@ -118,10 +121,10 @@ func TestChattinessLevels(t *testing.T) {
 
 // TestNormalDoneWindow: at normal a finish is announced only when the user
 // dealt with the agent within RecentWindow; a spoken briefing counts, the
-// silent periodic one does not.
+// silent periodic one does not. The finish of the shepherd's own
+// instruction is owed, whatever the window (TestOwedFinishBypassesCeiling).
 func TestNormalDoneWindow(t *testing.T) {
 	h := threeAgents(t)
-	h.send("w7:p1", "run the tests")
 	h.clock.Advance(31 * time.Minute)
 	h.transition("w7:p1", herdr.StateWorking, herdr.StateDone)
 	if got := h.pushTexts(); len(got) != 0 {
