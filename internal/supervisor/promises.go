@@ -62,12 +62,13 @@ func (s *Supervisor) openPromiseFor(paneID, event string) (state.Promise, bool) 
 // duplicatePromiseErr is the promise tool's answer to a promise that is
 // already open (tier-2 bench 2026-10-03, collision-finish-push: the
 // judge counted "Noted. I'll tell you…" confirmations as unprompted): the
-// fact that it is recorded, since when, and — when it was made in an
-// earlier turn — that that turn's reply already acknowledged it.
+// fact that it is recorded, since when, and in which earlier turn (the
+// brain's transcript shows whether that turn's reply told the CEO; the
+// daemon does not claim it did).
 func duplicatePromiseErr(old state.Promise, turn int) error {
 	msg := fmt.Sprintf("already promised at %s: %q is still open, nothing new was recorded", old.CreatedAt.Format("15:04:05"), old.Text)
 	if old.CreatedTurn != 0 && old.CreatedTurn != turn {
-		msg += fmt.Sprintf("; it was acknowledged to the CEO in turn %d, so there is nothing new to confirm", old.CreatedTurn)
+		msg += fmt.Sprintf("; it was made in turn %d, and whether that turn's reply told the CEO is in your transcript", old.CreatedTurn)
 	}
 	return errors.New(msg)
 }

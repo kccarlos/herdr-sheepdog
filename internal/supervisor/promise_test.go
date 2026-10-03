@@ -604,7 +604,7 @@ func TestCarriedOverPromiseInLedgerNotBriefing(t *testing.T) {
 }
 
 // A promise the brain repeats is not recorded twice: the tool's error is
-// the fact that it is already open and was acknowledged in its own turn
+// the fact that it is already open and in which turn it was made
 // (tier-2 bench 2026-10-03, collision-finish-push: "Noted. I'll tell
 // you…" confirmations counted as unprompted). A promise for another
 // event, or once the first was kept, is recorded as usual.
@@ -617,7 +617,7 @@ func TestDuplicatePromiseIsAFact(t *testing.T) {
 	}
 	h.clock.Advance(20 * time.Second)
 	_, err = h.sup.createPromise("w5:p1", brain.PromiseRequest{Text: "let the CEO know when auth finishes", Event: brain.PromiseEventDone, Turn: 5})
-	want := `already promised at ` + first.CreatedAt.Format("15:04:05") + `: "tell me when auth is done" is still open, nothing new was recorded; it was acknowledged to the CEO in turn 3, so there is nothing new to confirm`
+	want := `already promised at ` + first.CreatedAt.Format("15:04:05") + `: "tell me when auth is done" is still open, nothing new was recorded; it was made in turn 3, and whether that turn's reply told the CEO is in your transcript`
 	if err == nil || err.Error() != want {
 		t.Fatalf("duplicate: err = %v\nwant %s", err, want)
 	}
@@ -627,9 +627,9 @@ func TestDuplicatePromiseIsAFact(t *testing.T) {
 	if h.log.count("promise.duplicate") != 1 {
 		t.Error("no promise.duplicate event")
 	}
-	// Repeated inside the same turn: not yet acknowledged.
+	// Repeated inside the same turn: no earlier turn to point to.
 	_, err = h.sup.createPromise("w5:p1", brain.PromiseRequest{Text: "tell me when auth is done", Event: brain.PromiseEventDone, Turn: 3})
-	if err == nil || strings.Contains(err.Error(), "acknowledged") {
+	if err == nil || strings.Contains(err.Error(), "made in turn") {
 		t.Errorf("same turn: err = %v", err)
 	}
 	if _, err := h.sup.createPromise("w5:p1", brain.PromiseRequest{Text: "tell me if it asks", Event: brain.PromiseEventBlocked, Turn: 5}); err != nil {

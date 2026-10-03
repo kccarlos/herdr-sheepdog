@@ -283,10 +283,11 @@ a reply is cut off (a barge-in, stop, an interrupting push), the brain's
 "Assistant said" line keeps only the words that played, marked "cut off
 after N s". An addition to a block is
 dropped once the block is resolved. The chattiness level is a ceiling
-code keeps: `quiet` — questions, exits and kept promises; `normal` —
-plus finishes of agents the shepherd dealt with within
-`supervisor.recent_minutes`; `chatty` — everything the brain wants to
-say. Kept promises are spoken at every level.
+code keeps: `quiet` — questions, exits, kept promises and the finish of
+the shepherd's own instruction; `normal` — plus finishes of agents the
+shepherd dealt with within `supervisor.recent_minutes`; `chatty` —
+everything the brain wants to say. Owed lines (a kept promise, the
+finish of the shepherd's own instruction) are spoken at every level.
 
 ## Investigations and explanations
 
