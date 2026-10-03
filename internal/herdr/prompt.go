@@ -55,6 +55,15 @@ type Option struct {
 	// hint when the screen names a plain key ("y", "p", "esc"), else the
 	// option's number.
 	Keys []string
+	// Meta marks an option that is not an answer to the question: Claude
+	// Code's AskUserQuestion draws "Type something." (free text) next to
+	// the real choices. It stays in Prompt.Options, so its keys remain
+	// allowed for the brain's send_keys (it can give a free-text answer
+	// the CEO dictated), but it is never shown on the phone card, read as
+	// a spoken choice or mapped by the fast yes/no path: use
+	// Prompt.Answers for those. "Chat about this" is not an option at all
+	// (see isChatOption): it is dropped.
+	Meta bool
 }
 
 // Prompt is a worker's approval prompt, as parsed from its screen.
@@ -67,7 +76,10 @@ type Prompt struct {
 	Command string
 	// Reason is the prompt's own reason line, when it shows one (Codex).
 	Reason string
-	// Options are the numbered choices in screen order.
+	// Options are the numbered choices in screen order, meta options
+	// ("Type something.") included, "Chat about this" excluded. These are
+	// the keys the one rail accepts; to show or speak the choices use
+	// Answers.
 	Options []Option
 	// Default is the index in Options of the option carrying the cursor
 	// marker — the one "enter" also selects.
@@ -78,6 +90,29 @@ type Prompt struct {
 	YesKeys []string
 	NoKeys  []string
 }
+
+// Answers are the options that answer the question: Options without the
+// meta ones. The phone card, the spoken choices and the fast yes/no
+// mapping use this list; Options is for the rail.
+func (p Prompt) Answers() []Option {
+	var out []Option
+	for _, o := range p.Options {
+		if !o.Meta {
+			out = append(out, o)
+		}
+	}
+	return out
+}
+
+// metaLabel and chatLabel are the AskUserQuestion widget's own rows, as
+// lower-cased labels without their trailing full stop.
+func labelKey(label string) string {
+	return strings.ToLower(strings.TrimRight(strings.TrimSpace(label), ". "))
+}
+
+func isMetaOption(label string) bool { return labelKey(label) == "type something" }
+
+func isChatOption(label string) bool { return labelKey(label) == "chat about this" }
 
 // ParsePrompt reads the approval prompt at the end of a screen: the
 // numbered options, the question above them and, for Codex, the command
@@ -91,9 +126,25 @@ func ParsePrompt(screen string) (Prompt, bool) {
 	if !ok {
 		return Prompt{}, false
 	}
-	p := Prompt{Options: opts, Default: cursor}
+	// "Chat about this" is dropped; "Type something." is kept but marked.
+	kept, def := make([]Option, 0, len(opts)), -1
+	for i, o := range opts {
+		if isChatOption(o.Label) {
+			continue
+		}
+		o.Meta = isMetaOption(o.Label)
+		if i == cursor {
+			def = len(kept)
+		}
+		kept = append(kept, o)
+	}
+	opts = kept
+	p := Prompt{Options: opts, Default: def}
 	p.Question, p.Command, p.Reason = above(lines[:first])
 	for _, o := range opts {
+		if o.Meta {
+			continue
+		}
 		label := strings.ToLower(o.Label)
 		if len(p.YesKeys) == 0 && strings.HasPrefix(label, "yes") {
 			p.YesKeys = o.Keys
@@ -102,7 +153,7 @@ func ParsePrompt(screen string) (Prompt, bool) {
 			p.NoKeys = o.Keys
 		}
 	}
-	if len(p.YesKeys) == 0 && p.Default >= 0 {
+	if len(p.YesKeys) == 0 && p.Default >= 0 && !opts[p.Default].Meta {
 		p.YesKeys = opts[p.Default].Keys
 	}
 	return p, true
