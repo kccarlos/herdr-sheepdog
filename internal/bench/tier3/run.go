@@ -225,6 +225,17 @@ loop:
 	final := w.screens(ctx, 80)
 	roster, _, _ := w.d.Agents(ctx)
 	rec.Roster = roster
+	// An agent sheepdog started during the call (spawn by voice) is in
+	// the roster but not the bench's workers: read its screen too, so
+	// the judge sees it.
+	for _, r := range roster {
+		if _, ours := w.aliasOf[r.PaneID]; ours || r.Alias == "" {
+			continue
+		}
+		if s, err := w.h.Read(ctx, r.PaneID, 80); err == nil {
+			final[r.Alias] = s
+		}
+	}
 	rec.Screens = map[string]string{}
 	for _, k := range sortedKeys(final) {
 		rec.Screens[k] = tail(final[k], 30)

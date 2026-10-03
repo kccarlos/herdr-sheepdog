@@ -488,6 +488,11 @@ func (w *world) event(e Event) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	alias := w.aliasOf[e.PaneID]
+	if alias == "" && e.PaneID != "" {
+		// A pane sheepdog opened during the call (an agent started by
+		// voice).
+		alias = "new agent in pane " + e.PaneID
+	}
 	switch e.Type {
 	case "voice.push":
 		if str("urgency") == "silent" || strings.TrimSpace(str("text")) == "" {
@@ -598,6 +603,15 @@ func (w *world) facts(initial, final map[string]string, roster []AgentRow) strin
 	for _, wk := range w.order {
 		fmt.Fprintf(&b, "\nScreen of %s at the start (last lines):\n%s\n", w.daemonAlias(wk.Alias), tail(initial[wk.Alias], 25))
 		fmt.Fprintf(&b, "\nScreen of %s at the end (last lines):\n%s\n", w.daemonAlias(wk.Alias), tail(final[wk.Alias], 40))
+	}
+	for _, r := range roster {
+		if _, ours := w.aliasOf[r.PaneID]; ours || r.Alias == "" {
+			continue
+		}
+		fmt.Fprintf(&b, "\nWorker %s (%s) was started by sheepdog during the call (a new agent, not one of the workers above). Spoken name %q, session title %q, state now %s.\n", r.Alias, r.Kind, r.Spoken, r.Title, r.State)
+		if s, ok := final[r.Alias]; ok {
+			fmt.Fprintf(&b, "Screen of %s at the end (last lines):\n%s\n", r.Alias, tail(s, 40))
+		}
 	}
 	w.mu.Lock()
 	defer w.mu.Unlock()

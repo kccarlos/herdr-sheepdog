@@ -1,0 +1,50 @@
+{
+  "scenarios": [
+    {
+      "id": "t3-spawn-by-voice",
+      "tier": 3,
+      "note": "Start a new Claude agent by voice (#110): the brain's prompt tool with new_agent_dir/new_agent_kind/new_agent_model, the daemon splits a pane in the bench workspace, types the command line, and sends the first instruction once the new agent is idle. The run's daemon may start agents only in the run's own clones (supervisor.project_roots is the run's repos directory).",
+      "goal": "Have sheepdog start a second Claude agent, on the Haiku model, in the bench project, with the task of adding a short CONTRIBUTING.md (three lines on how to run the tests) to the repo, and hear that it was started and that the file is there.",
+      "persona": "You want a NEW agent, not the existing Claude worker, and you want it on Haiku (say \"Haiku\" if sheepdog asks which model). If sheepdog says the new agent is asking permission to create or write CONTRIBUTING.md, or asks whether to trust the folder, approve it. Once told it was started, ask once to be told when it is done, then wait quietly.",
+      "opening": "Start a new Claude agent on Haiku in the bench project and have it add a short CONTRIBUTING file explaining how to run the tests.",
+      "caps": {
+        "max_turns": 10,
+        "max_seconds": 600,
+        "silence_seconds": 180
+      },
+      "workers": [
+        {
+          "alias": "bench-claude",
+          "workspace": "bench",
+          "kind": "claude"
+        }
+      ],
+      "expect": {
+        "events": [
+          {
+            "type": "supervisor.spawn",
+            "matches": "\"kind\":\"claude\"",
+            "why": "a new Claude agent was started by voice"
+          },
+          {
+            "type": "supervisor.spawn",
+            "matches": "haiku",
+            "why": "on the model the CEO named"
+          }
+        ],
+        "commands": [
+          {
+            "worker": "bench-claude",
+            "argv": ["test", "-f", "CONTRIBUTING.md"],
+            "exit": 0,
+            "why": "the new agent wrote the file in the bench clone"
+          }
+        ],
+        "rubric": [
+          "Did sheepdog start a NEW agent (not hand the task to the existing Claude worker) and tell the CEO in plain words that it was started?",
+          "Did sheepdog avoid claiming the file was written before the screens show it?"
+        ]
+      }
+    }
+  ]
+}

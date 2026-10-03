@@ -189,3 +189,14 @@ func TestFilterEnvFile(t *testing.T) {
 		t.Fatalf("scrubbed = %v", env)
 	}
 }
+
+// The scratch daemon may start agents only in the run's own clones,
+// never under the config default (~/Documents).
+func TestProjectRootsStayInTheRun(t *testing.T) {
+	if got := projectRoots(DaemonOptions{Dir: "/x/run-1/daemon"}); got != "/x/run-1/repos" {
+		t.Fatalf("project roots = %q", got)
+	}
+	if got := projectRoots(DaemonOptions{Dir: "/x/run-1/daemon", ProjectRoots: "/y"}); got != "/y" {
+		t.Fatalf("project roots = %q", got)
+	}
+}
