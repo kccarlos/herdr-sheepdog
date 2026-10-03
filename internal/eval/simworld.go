@@ -372,18 +372,44 @@ func (w *simWorld) facts(initial map[string]string) string {
 	acts := w.rec.actions() // before w.mu: the recorder takes w.mu under its own lock
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	ws := WorldState{Agents: w.sc.Agents, Kinds: map[string]string{}, States: map[string]string{}, Initial: initial, Screens: w.screens, Timeline: w.timeline, Actions: acts}
+	for k, v := range w.kinds {
+		ws.Kinds[k] = v
+	}
+	for k, v := range w.states {
+		ws.States[k] = string(v)
+	}
+	return WorldFacts(ws)
+}
+
+// WorldState is a scripted world's state for the judge's facts.
+type WorldState struct {
+	Agents []SimAgent
+	// Kinds and States are each worker's kind and state now, by alias.
+	Kinds, States map[string]string
+	// Initial and Screens are each worker's screen at the start and now.
+	Initial, Screens map[string]string
+	// Timeline are the scripted worker changes, Actions what sheepdog
+	// sent to the workers.
+	Timeline, Actions []SimLine
+}
+
+// WorldFacts renders the judge's ground truth: every worker's screen at
+// the start and what changed since, the scripted changes and every
+// action sheepdog sent (shared by the text sim and the voice bench).
+func WorldFacts(ws WorldState) string {
 	var b strings.Builder
-	for _, a := range w.sc.Agents {
-		fmt.Fprintf(&b, "Worker %s (%s), now %s.\n", a.Alias, w.kinds[a.Alias], w.states[a.Alias])
+	for _, a := range ws.Agents {
+		fmt.Fprintf(&b, "Worker %s (%s), now %s.\n", a.Alias, ws.Kinds[a.Alias], ws.States[a.Alias])
 		if a.Answer != "" {
 			fmt.Fprintf(&b, "  What an investigation of %s finds: %s\n", a.Alias, a.Answer)
 		}
 		b.WriteString("  Screen at the start (last lines):\n")
-		for _, l := range lastLines(initial[a.Alias], 25) {
+		for _, l := range lastLines(ws.Initial[a.Alias], 25) {
 			b.WriteString("    " + l + "\n")
 		}
-		if now := w.screens[a.Alias]; now != initial[a.Alias] {
-			if added, ok := strings.CutPrefix(now, initial[a.Alias]); ok {
+		if now := ws.Screens[a.Alias]; now != ws.Initial[a.Alias] {
+			if added, ok := strings.CutPrefix(now, ws.Initial[a.Alias]); ok {
 				// The usual case: the worker wrote more below what was
 				// there. Show only the new lines, so old output (a test
 				// that failed before the fix) is not read as current.
@@ -400,7 +426,7 @@ func (w *simWorld) facts(initial map[string]string) string {
 		}
 	}
 	b.WriteString("Notes: a worker screen shows the worker's own history, including what it was asked before this call; only the actions listed below were sent by sheepdog during the call. Every prompt sheepdog sends ends with a standard sign-off request the daemon appends (\"When you finish, end with three short lines for someone who cannot see the screen…\"); that is not part of what sheepdog decided.\n")
-	lines := append(append([]SimLine(nil), w.timeline...), acts...)
+	lines := append(append([]SimLine(nil), ws.Timeline...), ws.Actions...)
 	sortLines(lines)
 	if len(lines) == 0 {
 		b.WriteString("No scripted change happened to any worker during the call (each kept doing what its screen shows), and sheepdog sent nothing to any worker.\n")
@@ -417,35 +443,45 @@ func (w *simWorld) facts(initial map[string]string) string {
 // is an error, not a one-line screen (a typo would otherwise run the
 // scenario against the file name).
 func (w *simWorld) resolveScreens() error {
-	w.resolved = map[string]string{}
+	r, err := ResolveScreens(w.sc, w.fixtureDir)
+	w.resolved = r
+	return err
+}
+
+// ResolveScreens reads every screen sc names (its agents' and events'):
+// a file in the scenario's screens/ directory, a fixture under
+// fixtureDir, or — only when it spans lines — inline text. A one-line
+// name that is no file is an error.
+func ResolveScreens(sc SimScenario, fixtureDir string) (map[string]string, error) {
+	resolved := map[string]string{}
 	names := []string{}
-	for _, a := range w.sc.Agents {
+	for _, a := range sc.Agents {
 		names = append(names, a.Screen)
 	}
-	for _, e := range w.sc.Events {
+	for _, e := range sc.Events {
 		if e.Screen != "" {
 			names = append(names, e.Screen)
 		}
 	}
 	for _, n := range names {
 		if strings.Contains(n, "\n") {
-			w.resolved[n] = n
+			resolved[n] = n
 			continue
 		}
 		var err error
 		var text string
-		if w.sc.screenDir != "" {
-			text, err = readFixture(n, w.sc.screenDir)
+		if sc.screenDir != "" {
+			text, err = readFixture(n, sc.screenDir)
 		}
-		if w.sc.screenDir == "" || err != nil {
-			text, err = readFixture(n, w.fixtureDir)
+		if sc.screenDir == "" || err != nil {
+			text, err = readFixture(n, fixtureDir)
 		}
 		if err != nil {
-			return fmt.Errorf("screen %q: %w", n, err)
+			return resolved, fmt.Errorf("screen %q: %w", n, err)
 		}
-		w.resolved[n] = text
+		resolved[n] = text
 	}
-	return nil
+	return resolved, nil
 }
 
 func (w *simWorld) screenText(s string) string { return w.resolved[s] }

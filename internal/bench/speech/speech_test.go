@@ -47,7 +47,7 @@ func TestGeminiStyleVoiceAndResample(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(f.prompt, "Say slowly and tiredly") || !strings.HasSuffix(f.prompt, ": what's the codex one doing") {
+	if !strings.HasPrefix(f.prompt, "Say in a tired, flat voice") || !strings.HasSuffix(f.prompt, ": what's the codex one doing") {
 		t.Errorf("prompt = %q", f.prompt)
 	}
 	if f.voice != "Charon" || c.Voice != "Charon" || c.Source != "gemini" || c.OutTokens != 13 {

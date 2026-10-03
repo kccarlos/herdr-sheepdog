@@ -87,7 +87,11 @@ func TestIOSGate(t *testing.T) {
 	m.push(frameOf(3000), 3000)
 	var msgs []string
 	for i := 0; i < 10; i++ {
-		msgs = append(msgs, msgTypes(m.push(frameOf(50), 0).msgs)...)
+		o := m.push(frameOf(50), 0)
+		msgs = append(msgs, msgTypes(o.msgs)...)
+		if len(o.msgs) > 0 && len(o.frames) > 0 {
+			t.Fatal("a frame went out with silence on (it would cancel the daemon's stream end)")
+		}
 	}
 	if len(msgs) != 2 || msgs[0] != "silence:on" || msgs[1] != "speaking:off" {
 		t.Fatalf("close after 400 ms: %v", msgs)

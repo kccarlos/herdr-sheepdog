@@ -68,6 +68,10 @@ type Options struct {
 	// Gate is the capture gate: GateIOS (default, the app's), GateWeb
 	// (the /voice page's peak gate) or GateOff.
 	Gate string
+	// GateStartsOpen starts the iOS gate open on connect (it then closes
+	// after 400 ms without voice) instead of closed with an immediate
+	// silence on.
+	GateStartsOpen bool
 	// Player is the jitter buffer (default the Gemini numbers).
 	Player PlayerConfig
 	// NoEvents skips the /events stream.
@@ -131,6 +135,7 @@ func Dial(ctx context.Context, o Options) (*Client, error) {
 	c := &Client{o: o, start: time.Now(), player: NewPlayer(o.Player), statusCh: make(chan string, 16), outQ: make(chan BotUtterance, 64)}
 	c.rec.Start = c.start
 	c.mic = newMic(o.Gate, !o.NoSpeaking)
+	c.mic.startOpen = o.GateStartsOpen
 	if o.Echo != nil {
 		c.echo = pcm.NewEchoLine(InRate, o.Echo.DelayMS, o.Echo.GainDB)
 	}

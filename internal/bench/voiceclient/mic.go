@@ -58,6 +58,9 @@ type micOut struct {
 type mic struct {
 	mode         string
 	sendSpeaking bool
+	// startOpen: the iOS gate starts open at connect instead of closed
+	// (no silence on before the first audio).
+	startOpen bool
 
 	open     bool // gate open (frames flow)
 	held     [][]int16
@@ -82,7 +85,7 @@ func newMic(mode string, sendSpeaking bool) *mic {
 // (and says so), the web gate open.
 func (m *mic) reset() []wsproto.Message {
 	m.held, m.voiced, m.unvoiced, m.quietFor, m.speaking, m.silentFor = nil, nil, 0, 0, false, 0
-	if m.mode == GateIOS {
+	if m.mode == GateIOS && !m.startOpen {
 		m.open = false
 		return []wsproto.Message{wsproto.Silence(true)}
 	}
@@ -141,16 +144,20 @@ func (m *mic) iosGate(frame []int16, voiced bool) micOut {
 	} else {
 		m.unvoiced++
 	}
-	out.frames = append(out.frames, frame)
 	if m.unvoiced >= iosHang {
+		// Close: silence on, and no binary frame after it (a frame after
+		// silence on would cancel the daemon's stream end).
 		m.open = false
 		m.voiced = nil
+		m.gated++
 		out.msgs = append(out.msgs, wsproto.Silence(true))
 		if m.sendSpeaking {
 			m.speaking = false
 			out.msgs = append(out.msgs, wsproto.Speaking(false))
 		}
+		return out
 	}
+	out.frames = append(out.frames, frame)
 	return out
 }
 

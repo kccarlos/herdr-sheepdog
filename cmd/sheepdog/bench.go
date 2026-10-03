@@ -121,6 +121,8 @@ func runBenchCalibrate(ctx context.Context, args []string, stdout, stderr io.Wri
 	samples := fs.String("samples", "", "save 10 sample clips + transcripts here (default ~/Documents/sheepdog-bench/calibration-<date>)")
 	limit := fs.Int("limit", 0, "only the first N clips of the plan")
 	seed := fs.Int64("seed", 1, "plan seed (disfluencies)")
+	gate := fs.String("gate", "ios", "capture gate: ios, web or off")
+	gateOpen := fs.Bool("gate-starts-open", false, "start the ios gate open (no silence on at connect)")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -152,7 +154,7 @@ func runBenchCalibrate(ctx context.Context, args []string, stdout, stderr io.Wri
 	fprintf(stderr, "calibration: %d clips, scratch daemon on :%d (%s)\n", len(plan), *port, dir)
 	rep, err := bench.Calibrate(ctx, bench.CalibrationOptions{
 		Daemon: bench.DaemonOptions{Config: cfg, Port: *port, Dir: filepath.Join(dir, "calibrate"), Log: stderr},
-		Synth:  syn, Say: say, Plan: plan, SamplesDir: *samples, Log: stderr,
+		Synth:  syn, Say: say, Plan: plan, SamplesDir: *samples, Log: stderr, Gate: *gate, GateStartsOpen: *gateOpen,
 	})
 	if err != nil {
 		fprintf(stderr, "sheepdog bench calibrate: %v\n", err)

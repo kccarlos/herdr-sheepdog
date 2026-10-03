@@ -62,10 +62,10 @@ var Styles = []string{StyleNeutral, StyleTired, StyleHurried, StyleCasual, Style
 // way to steer delivery: "Say tiredly: …").
 var stylePrompt = map[string]string{
 	StyleNeutral:  "Say naturally, like someone talking on the phone",
-	StyleTired:    "Say slowly and tiredly, in a low voice, like someone exhausted late at night",
+	StyleTired:    "Say in a tired, flat voice, like someone at the end of a long day",
 	StyleHurried:  "Say quickly and a little impatiently, like someone in a hurry between meetings",
 	StyleCasual:   "Say casually and relaxed, like talking to a colleague",
-	StyleHesitant: "Say hesitantly, with small pauses, like someone unsure how to put it",
+	StyleHesitant: "Say a little hesitantly, like someone thinking while they talk",
 }
 
 // Request is one line to render.

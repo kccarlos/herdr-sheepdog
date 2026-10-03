@@ -135,6 +135,9 @@ type CalibrationOptions struct {
 	// SamplesDir gets 10 sample clips and their transcripts for the CEO.
 	SamplesDir string
 	Log        io.Writer
+	// Gate and GateStartsOpen are the emulator's capture gate.
+	Gate           string
+	GateStartsOpen bool
 }
 
 // Calibrate streams every clip into a scratch daemon (voice on, brain
@@ -154,7 +157,7 @@ func Calibrate(ctx context.Context, o CalibrationOptions) (CalibrationReport, er
 	bed, _ := NewBed("", 0)
 	beds := map[string]*Bed{}
 	cur := bed
-	c, err := voiceclient.Dial(ctx, voiceclient.Options{BaseURL: d.URL, Bed: func(n int) []int16 { return cur.Next(n) }})
+	c, err := voiceclient.Dial(ctx, voiceclient.Options{BaseURL: d.URL, Bed: func(n int) []int16 { return cur.Next(n) }, Gate: o.Gate, GateStartsOpen: o.GateStartsOpen})
 	if err != nil {
 		return rep, err
 	}
