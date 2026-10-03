@@ -36,6 +36,30 @@ jobs:
         with:
           version: v2.13
 
+  eval:
+    # Offline brain eval: fake model, no network, no API keys (make eval).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: make eval
+
+  policy:
+    # Xcode/iOS work runs only on Xcode Cloud; macOS runners are too expensive.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: No macOS runners or xcodebuild in workflows
+        run: |
+          # bracketed characters keep this step from matching itself
+          if grep -nEi 'macos[-]|xcodebuil[d]' .github/workflows/*.yml .github/workflows/*.yaml 2>/dev/null; then
+            echo "::error::macOS runners / xcodebuild are not allowed in GitHub Actions (see README, CI/CD)"
+            exit 1
+          fi
+
   web:
     runs-on: ubuntu-latest
     steps:
@@ -66,7 +90,8 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
         run: go build -o dist/sheepdog-${{ matrix.goos }}-${{ matrix.goarch }} ./cmd/sheepdog
-      - uses: actions/upload-artifact@v7
+      - if: github.event_name == 'push'
+        uses: actions/upload-artifact@v7
         with:
           name: sheepdog-${{ matrix.goos }}-${{ matrix.goarch }}
           path: dist/sheepdog-${{ matrix.goos }}-${{ matrix.goarch }}
