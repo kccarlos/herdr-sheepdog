@@ -43,6 +43,10 @@ type inflightUtterance struct {
 	// id names the utterance on brain.reply_* and on its late push
 	// (voice.push {answers_utterance}).
 	id string
+	// start is when the shepherd began saying these words (claim.start;
+	// the earlier one when two utterances coalesce): the brain is told
+	// what they had heard by then (heard.go).
+	start time.Time
 	// callID is the voice's tool call id that relayed the words: the
 	// brain request and the late push carry it (links.go).
 	callID string
@@ -212,6 +216,9 @@ func (s *Supervisor) handleUtterance(ctx context.Context, c claim, callID string
 		parent = ctx
 	}
 	turnCtx, u := s.beginUtterance(parent, text, callID, c.id)
+	s.mu.Lock()
+	u.start = c.start
+	s.mu.Unlock()
 	if res, ok := s.fastAnswer(turnCtx, c.in, text); ok {
 		s.endUtterance(u)
 		return res
@@ -255,6 +262,9 @@ func (s *Supervisor) coalesce(u *inflightUtterance) {
 	p.coalesced = true
 	u.text = p.text + " " + u.text
 	u.merged = p.merged + 1
+	if !p.start.IsZero() && (u.start.IsZero() || p.start.Before(u.start)) {
+		u.start = p.start
+	}
 	payload := map[string]any{"n": u.merged, "text": u.text, "id": u.id, "replaces": p.id, "utterance_id": u.id}
 	cancel := p.cancel
 	s.mu.Unlock()
@@ -549,7 +559,7 @@ func (s *Supervisor) utteranceTurn(ctx context.Context, u *inflightUtterance) ut
 		return utteranceOutcome{}
 	}
 	s.mu.Lock()
-	text := u.text
+	text, start := u.text, u.start
 	s.mu.Unlock()
 	// The roster sentence travels with the request, so a status question
 	// costs no tool call (D1-revised); the pending prompt with its
@@ -557,6 +567,10 @@ func (s *Supervisor) utteranceTurn(ctx context.Context, u *inflightUtterance) ut
 	// and ledger sections.
 	brief, _ := s.briefingText()
 	req := brain.Request{Kind: brain.KindUtterance, Trigger: brain.TriggerCEO, Question: text, Briefing: brief, Link: callLink(u.callID), UtteranceID: u.id}
+	// What the shepherd had heard when they began: evaluated when the
+	// turn starts, since it may queue behind an announce turn whose
+	// line goes out meanwhile (heard.go).
+	req.Facts = func() brain.EventFacts { return brain.EventFacts{Heard: s.heardFacts(start)} }
 	// supervisor.repeat_window_s: an identical roster delivered again
 	// inside the window is noise over voice, so the brain gets a note it
 	// can act on ("no change since I last checked") instead of the

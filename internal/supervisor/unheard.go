@@ -18,6 +18,7 @@ import (
 // onPushUnheard records a push the CEO did not hear in the brain's
 // transcript, unless the voice layer re-queued it.
 func (s *Supervisor) onPushUnheard(e voice.EventPushUnheard) {
+	s.markUnheard(e.Push.Text) // heard.go
 	if e.Requeue || s.brain == nil || e.Push.Text == "" {
 		return
 	}

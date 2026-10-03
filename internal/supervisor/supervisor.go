@@ -298,6 +298,10 @@ type Supervisor struct {
 	relayedSeq uint64
 	pushSeq    uint64
 	lastPush   string
+	// sentPushes are the last few spoken pushes sent to the voice model,
+	// oldest first: what the shepherd had or had not heard when an
+	// utterance began (heard.go).
+	sentPushes []brain.PushedLine
 	// acceptedSeq counts the shepherd's requests the daemon took up: every
 	// to_supervisor call claimInput accepted, and every tap. A late
 	// utterance reply is stale once it moved on (utterance.go). Unlike

@@ -314,6 +314,9 @@ func requestText(req Request) string {
 	if req.Briefing != "" {
 		s += "\nStatus as the daemon has it: " + req.Briefing
 	}
+	if line := heardLine(req.facts.Heard); line != "" {
+		s += "\n" + line
+	}
 	if req.RosterUnchangedFor > 0 {
 		s += fmt.Sprintf("\nThe roster is unchanged since you last reported it %d s ago; if the shepherd is only asking for status again, say there has been no change since you last checked, briefly.", int(req.RosterUnchangedFor.Seconds()))
 	}
@@ -395,6 +398,40 @@ func eventRequestText(req Request) string {
 	return b.String()
 }
 
+// heardLine states what the CEO had heard when they began speaking,
+// when the voice was given a line after that: their words were said
+// before they heard it, so they cannot answer it (H6). "" otherwise.
+func heardLine(h *HeardFacts) string {
+	if h == nil || h.SpokeAt.IsZero() || len(h.After) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "The CEO began saying these words at %s.", h.SpokeAt.Format("15:04:05"))
+	if h.Before != nil {
+		fmt.Fprintf(&b, " The last line the voice was given before that (%s): %q%s.", h.Before.At.Format("15:04:05"), h.Before.Text, unheardMark(h.Before.Unheard))
+	}
+	b.WriteString(" Given to the voice after they began, so not heard when they spoke: ")
+	b.WriteString(pushedLines(h.After, h.SpokeAt))
+	b.WriteString(". Their words answer what they had heard, not these; if they could mean either, ask.")
+	return b.String()
+}
+
+// pushedLines renders lines as [15:04:06, 2 s after] "text"; ….
+func pushedLines(lines []PushedLine, since time.Time) string {
+	parts := make([]string, len(lines))
+	for i, l := range lines {
+		parts[i] = fmt.Sprintf("[%s, %d s after] %q%s", l.At.Format("15:04:05"), int(l.At.Sub(since).Seconds()), l.Text, unheardMark(l.Unheard))
+	}
+	return strings.Join(parts, "; ")
+}
+
+func unheardMark(unheard bool) string {
+	if unheard {
+		return " (judged not heard)"
+	}
+	return ""
+}
+
 // promptStateLine states an announced prompt's real state (EventFacts).
 func promptStateLine(state string) string {
 	switch state {
@@ -425,6 +462,9 @@ func factsUpdate(before, now EventFacts) string {
 	if len(now.Spoken) > len(before.Spoken) {
 		parts = append(parts, "while you were working the assistant said, about this event: "+quotedLines(now.Spoken[len(before.Spoken):])+"; your spoken would follow it, not replace it")
 	}
+	if nb, na := heardAfter(before.Heard), heardAfter(now.Heard); len(na) > len(nb) && now.Heard != nil {
+		parts = append(parts, "while you were working the voice was given, after the CEO began speaking: "+pushedLines(na[len(nb):], now.Heard.SpokeAt)+"; the CEO's words do not answer it")
+	}
 	if now.Prompt != before.Prompt {
 		if line := promptStateLine(now.Prompt); line != "" {
 			parts = append(parts, strings.TrimSuffix(lowerFirstRune(line), "."))
@@ -434,6 +474,14 @@ func factsUpdate(before, now EventFacts) string {
 		return ""
 	}
 	return "Update from the supervisor: " + strings.Join(parts, "; ") + "."
+}
+
+// heardAfter is h.After, nil-safe.
+func heardAfter(h *HeardFacts) []PushedLine {
+	if h == nil {
+		return nil
+	}
+	return h.After
 }
 
 // lowerFirstRune lower-cases the first letter of s.
