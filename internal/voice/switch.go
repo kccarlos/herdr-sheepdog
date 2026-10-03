@@ -540,6 +540,15 @@ func (sw *Switcher) LastPlayback() PlaybackReport {
 	return PlaybackReport{}
 }
 
+// LastSpeechOnset is when the current session's client speech detector
+// last opened (ok false when unknown).
+func (sw *Switcher) LastSpeechOnset() (time.Time, bool) {
+	if p, ok := sw.cur().(interface{ LastSpeechOnset() (time.Time, bool) }); ok {
+		return p.LastSpeechOnset()
+	}
+	return time.Time{}, false
+}
+
 // AudioStreamEnd forwards the client's silence gate closing.
 func (sw *Switcher) AudioStreamEnd() {
 	if ae, ok := sw.cur().(interface{ AudioStreamEnd() }); ok {

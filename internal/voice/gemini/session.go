@@ -123,6 +123,9 @@ type Session struct {
 	// for a quiet moment (heard.go).
 	heard   voice.HeardTracker
 	requeue []voice.UnheardPush
+	// turnDoneAt is when the model last completed a turn
+	// (voice.RequeueHold).
+	turnDoneAt time.Time
 
 	readerExit chan readerResult
 	refreshReq chan refreshRequest
@@ -685,6 +688,16 @@ func (s *Session) LastPlayback() voice.PlaybackReport {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.play.Last()
+}
+
+// LastSpeechOnset is when the client's speech detector last opened (ok
+// false when it never reported one): the echo guard tells the
+// shepherd's answer, begun after the voice stopped playing, from its
+// echo, begun while it played.
+func (s *Session) LastSpeechOnset() (time.Time, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.vad.Onset()
 }
 
 // ClientSpeaking records the /ws client's speech detector opening (true)

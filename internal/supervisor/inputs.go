@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 	"unicode"
@@ -86,8 +87,11 @@ type shepherdInput struct {
 	// relay does not glue these words onto the next utterance, and the
 	// daemon does not relay them (relay.go).
 	answered bool
-	// answeredAt is when answered was set (silentAnswer).
-	answeredAt time.Time
+	// answeredAt is when answered was set (silentAnswer); answeredWith
+	// is what the voice said since (ackOnly: an acknowledgement is no
+	// answer).
+	answeredAt   time.Time
+	answeredWith string
 	// saidBefore is what the voice was saying, or had said within
 	// echoWindow, when this voice input began: what it may be an echo of
 	// (echoOf, utterance.go). Empty for anything else.
@@ -118,6 +122,9 @@ type claim struct {
 	// first input's arrival): what the shepherd had heard by then is
 	// what the words can answer (heard.go).
 	start time.Time
+	// ins are the claimed inputs, oldest first (the echo guard reads
+	// each one).
+	ins []*shepherdInput
 }
 
 // maxInputs bounds the remembered inputs.
@@ -154,6 +161,7 @@ func (s *Supervisor) ShepherdInput(kind InputKind, text string) {
 // model speaking, turn complete, or a relay claiming it).
 func (s *Supervisor) heard(text string, final bool) {
 	playback := s.lastPlayback() // outside s.mu: the voice session has its own lock
+	onset, onsetOK := s.lastSpeechOnset()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if text == "" {
@@ -181,7 +189,10 @@ func (s *Supervisor) heard(text string, final bool) {
 		s.wakeLocked()
 		return
 	}
-	in := &shepherdInput{kind: InputVoice, text: text, open: !final, saidBefore: s.echoCandidateLocked(playback)}
+	if !onsetOK {
+		onset = time.Time{}
+	}
+	in := &shepherdInput{kind: InputVoice, text: text, open: !final, saidBefore: s.echoCandidateLocked(playback, onset)}
 	s.addInputLocked(in)
 	s.armRelayLocked(in)
 }
@@ -210,9 +221,14 @@ func (s *Supervisor) voiceSpoke(text string) {
 	if strings.TrimSpace(text) == "" || s.relay.pushSpeaking || noSpeech(s.echo.said) {
 		return
 	}
-	if last := s.lastInputLocked(); last != nil && !last.answered {
-		last.answered, last.answeredAt = true, s.cfg.Now()
+	last := s.lastInputLocked()
+	if last == nil {
+		return
 	}
+	if !last.answered {
+		last.answered, last.answeredAt, last.answeredWith = true, s.cfg.Now(), ""
+	}
+	last.answeredWith += text
 }
 
 // silentAnswerMs is the least audio, in milliseconds of playback, an
@@ -508,7 +524,7 @@ func (s *Supervisor) claimRunLocked(run []*shepherdInput) claim {
 	s.relayedSeq = s.inputSeq
 	s.acceptedSeq++
 	s.disarmRelayLocked()
-	return claim{in: run[len(run)-1], text: strings.Join(words, " "), n: len(run), id: s.nextID("utt"), start: run[0].at}
+	return claim{in: run[len(run)-1], text: strings.Join(words, " "), n: len(run), id: s.nextID("utt"), start: run[0].at, ins: run}
 }
 
 // promptSinceLocked is when p's prompt appeared: its pending action's
@@ -545,8 +561,75 @@ func (s *Supervisor) railInputLocked(p state.PendingAction, keys []string) (*she
 		return nil, "the shepherd's last words were empty"
 	case negativeInput(in.text) && approves(p, keys):
 		return nil, fmt.Sprintf("the shepherd said %q, which cannot approve %s's prompt", strings.TrimSpace(in.text), alias)
+	case in.kind != InputTap && fillerOnly(in.text):
+		return nil, fmt.Sprintf("the shepherd only said %q, a filler, which answers nothing; %s's prompt stays open", strings.TrimSpace(in.text), alias)
+	case in.kind != InputTap && declines(p, keys) && deferralInput(in.text):
+		return nil, fmt.Sprintf("the shepherd said %q, which puts %s's prompt off rather than declining it; nothing was sent and the prompt stays open, so tell them it is still waiting", strings.TrimSpace(in.text), alias)
+	case in.kind != InputTap && declines(p, keys) && asksQuestion(in.text):
+		return nil, fmt.Sprintf("the shepherd's words %q also ask a question, so they do not plainly decline %s's prompt; nothing was sent: answer the question, and ask whether to decline if that is still unclear", strings.TrimSpace(in.text), alias)
 	}
 	return in, ""
+}
+
+// A deferral or a hesitation is not a decline (docs/bench/tier2-2026-10-03.md
+// #2). Over voice the brain sent `esc` — which cancels a Codex command —
+// on "先不要。", "先不要跑，文档那边核对好了吗？", "No, don't run that
+// yet. …" and on "No. What does bench Codex want?" (a TTS "Uhh"
+// transcribed as "No."). A decline is irreversible, so the rail refuses
+// one when the shepherd's newest words carry a deferral marker, also ask
+// a question, or are only a filler, and the brain reads why: the
+// judgement (ask, wait, answer) stays the brain's, only the irreversible
+// key is held back. A plain "no" / "不要" / "No, don't run it." still
+// declines.
+
+// declines reports whether keys select p's no answer or an option whose
+// label declines (no / don't / deny / decline / reject / cancel / skip).
+func declines(p state.PendingAction, keys []string) bool {
+	label := strings.ToLower(strings.TrimSpace(keysLabel(p, keys)))
+	if label == "no" {
+		return true
+	}
+	for _, w := range []string{"no", "don't", "do not", "deny", "decline", "reject", "cancel", "skip"} {
+		if label == w || strings.HasPrefix(label, w+" ") || strings.HasPrefix(label, w+",") {
+			return true
+		}
+	}
+	return len(keys) == 1 && keys[0] == "esc" && !approves(p, keys)
+}
+
+// deferralWords mark words that put a decision off: "yet", "later",
+// "not now", "wait", "hold on", "let me think"; 先, 等, 再说, 暂时.
+var deferralWords = regexp.MustCompile(`(?i)\b(yet|later|not now|not right now|for now|for the moment|hold on|hang on|hold off|wait|in a (bit|minute|moment|sec|second|while)|give me a (sec|second|minute|moment)|let me think|think about it|not today|tomorrow|after(wards)?)\b|先|等(一下|一等|等|会|下)?|稍后|待会|回头|晚点|再说|暂时|暂不|一会|考虑|想想|想一想`)
+
+// deferralInput reports whether text puts a decision off.
+func deferralInput(text string) bool { return deferralWords.MatchString(text) }
+
+// questionWords open a question clause.
+var questionWords = regexp.MustCompile(`(?i)(^|[.,!;:]\s*)(what|why|how|which|who|when|where|is it|does it|did it|can it|could it|should it)\b|吗|什么|怎么|为什么|哪个|哪|呢`)
+
+// asksQuestion reports whether text asks something: a question mark, or
+// a question word opening a clause.
+func asksQuestion(text string) bool {
+	return strings.ContainsAny(text, "?？") || questionWords.MatchString(text)
+}
+
+// fillers are hesitation sounds that answer nothing on their own.
+var fillers = map[string]bool{"um": true, "umm": true, "uh": true, "uhh": true, "uhm": true, "hmm": true, "hm": true, "er": true, "erm": true, "ah": true, "eh": true, "mm": true, "嗯": true, "呃": true, "啊": true, "额": true, "那个": true, "就是": true, "这个": true}
+
+// fillerOnly reports whether text is nothing but fillers.
+func fillerOnly(text string) bool {
+	fields := strings.FieldsFunc(strings.ToLower(text), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	})
+	if len(fields) == 0 {
+		return false
+	}
+	for _, f := range fields {
+		if !fillers[f] {
+			return false
+		}
+	}
+	return true
 }
 
 // negativeWords open a "no"-class input: "no", "don't …", "stop", "cancel".

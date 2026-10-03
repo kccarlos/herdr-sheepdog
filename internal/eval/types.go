@@ -112,8 +112,9 @@ type AssistantCase struct {
 	// "Dog: " is the assistant's own prior turn (model role); anything
 	// else — including a CEO utterance verbatim, or a push with its
 	// "[system event, not spoken by the user] " / "[system context, not
-	// spoken by the user] " prefix exactly as internal/voice/gemini's
-	// pushTurn renders it — is a user-role turn, unchanged.
+	// spoken by the user] " prefix (internal/voice/gemini's pushTurn
+	// sends the prefix and the text as two parts of one turn) — is a
+	// user-role turn, unchanged.
 	Context []string `json:"context,omitempty"`
 	// Aliases are the {aliases} substitution for this case's system
 	// prompt; defaults to ["auth", "docs"] when empty.

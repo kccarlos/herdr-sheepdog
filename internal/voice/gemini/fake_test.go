@@ -149,7 +149,7 @@ func describe(ms []sent) string {
 	for _, m := range ms {
 		switch m.kind {
 		case "content":
-			out += fmt.Sprintf("[content %q tc=%v] ", m.content.Turns[0].Parts[0].Text, *m.content.TurnComplete)
+			out += fmt.Sprintf("[content %q tc=%v] ", turnText(m.content.Turns[0]), *m.content.TurnComplete)
 		case "tool":
 			out += fmt.Sprintf("[tool %s %s] ", m.tool.FunctionResponses[0].Name, m.tool.FunctionResponses[0].Scheduling)
 		case "audio":
@@ -384,6 +384,18 @@ func goAwayMsg(left time.Duration) *genai.LiveServerMessage {
 func isContent(text string) func(sent) bool {
 	return func(m sent) bool {
 		return m.kind == "content" && len(m.content.Turns) > 0 && len(m.content.Turns[0].Parts) > 0 &&
-			strings.Contains(m.content.Turns[0].Parts[0].Text, text)
+			strings.Contains(turnText(m.content.Turns[0]), text)
 	}
+}
+
+// turnText joins a turn's text parts with spaces (a push is its marker
+// and its text, two parts).
+func turnText(c *genai.Content) string {
+	var parts []string
+	for _, p := range c.Parts {
+		if p != nil && p.Text != "" {
+			parts = append(parts, p.Text)
+		}
+	}
+	return strings.Join(parts, " ")
 }

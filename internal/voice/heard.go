@@ -396,3 +396,71 @@ func coverageTokens(text string) []string {
 	flush()
 	return out
 }
+
+// Re-queue timing (docs/bench/tier2-2026-10-03.md #5). In
+// collision-finish-push r1 the CEO talked over a finish push; it was cut
+// and judged unheard (user_turn) at 30.3 s, and re-queued at 33.0 s — the
+// moment the client's speech detector had closed and its 300 ms release
+// run out — while the CEO's input transcript (33.4 s) and the voice's
+// reply to it were still to come. The re-sent push was cut again and the
+// CEO heard "ignoring its first argument.". An owed line now goes back
+// only once all of the CEO's turn is over: the client's detector closed
+// for RequeueSettle, the speech it heard transcribed, and the voice's
+// reply to that transcript finished (its playback end is the sessions'
+// own requeueSettle check).
+
+const (
+	// RequeueSettle is how long after the client's speech detector
+	// closed a re-queued line still waits.
+	RequeueSettle = 2 * time.Second
+	// RequeueTranscriptWait bounds the wait for the input transcript of
+	// speech the detector heard: Gemini
+	// transcribes at the end of a turn, and noise may open a web gate
+	// with nothing to transcribe.
+	RequeueTranscriptWait = 4 * time.Second
+	// RequeueReplyWait bounds the wait for the voice's reply to the
+	// CEO's last words: a turn that never comes must not hold the line
+	// forever.
+	RequeueReplyWait = 10 * time.Second
+)
+
+// RequeueFacts is what a session knows of the CEO's turn when it
+// considers releasing an owed unheard line.
+type RequeueFacts struct {
+	// LastInput is the last input transcript fragment; ReplyDoneAt the
+	// end of the voice's last turn (turnComplete, or the end of its
+	// speech).
+	LastInput   time.Time
+	ReplyDoneAt time.Time
+	// Speech is the client's speech detector.
+	Speech ClientSpeech
+}
+
+// RequeueHold reports why an owed line must still wait ("" when it need
+// not): the CEO is speaking, stopped less than RequeueSettle ago, said
+// something not transcribed yet, or the voice has not answered their
+// last words.
+func RequeueHold(now time.Time, f RequeueFacts) string {
+	sp := f.Speech
+	if sp.known && sp.on && now.Sub(sp.since) < ClientSpeechTrust {
+		return "speaking"
+	}
+	if sp.known && !sp.on && !sp.closedAt.IsZero() && now.Sub(sp.closedAt) < RequeueSettle {
+		return "speech_settle"
+	}
+	// Speech the detector heard after the last transcript: Gemini
+	// transcribes it at the end, so wait for the words.
+	if sp.known && !sp.since.IsZero() && !f.LastInput.After(sp.since) {
+		base := sp.since
+		if sp.closedAt.After(base) {
+			base = sp.closedAt
+		}
+		if now.Sub(base) < RequeueTranscriptWait {
+			return "awaiting_transcript"
+		}
+	}
+	if !f.LastInput.IsZero() && f.LastInput.After(f.ReplyDoneAt) && now.Sub(f.LastInput) < RequeueReplyWait {
+		return "awaiting_reply"
+	}
+	return ""
+}

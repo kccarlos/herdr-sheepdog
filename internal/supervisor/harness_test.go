@@ -71,8 +71,24 @@ type fakePusher struct {
 	tags   []map[string]any
 	err    error
 	resets []string
-	// playback is the client's last playback report (LastPlayback).
+	// playback is the client's last playback report (LastPlayback);
+	// onset when the client's speech detector last opened.
 	playback voice.PlaybackReport
+	onset    time.Time
+}
+
+// LastSpeechOnset implements the client speech onset the echo guard
+// reads (utterance.go).
+func (p *fakePusher) LastSpeechOnset() (time.Time, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.onset, !p.onset.IsZero()
+}
+
+func (p *fakePusher) setOnset(t time.Time) {
+	p.mu.Lock()
+	p.onset = t
+	p.mu.Unlock()
 }
 
 // LastPlayback implements the playback reports the echo guard anchors

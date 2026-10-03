@@ -24,8 +24,8 @@ func TestNoSpeechOutputIsNotAnAnswer(t *testing.T) {
 		{"no speech placeholder", []string{"<no speech ", "detected>"}, nil, true},
 		{"placeholder with silence played", []string{"<no speech detected>"}, &voice.PlaybackReport{State: voice.PlaybackDrained, RunMs: 0}, true},
 		{"real answer", []string{"结果还没出来,一出我就告诉你。"}, nil, false},
-		{"real answer played", []string{"Sure."}, &voice.PlaybackReport{State: voice.PlaybackDrained, RunMs: 700}, false},
-		{"answer with under 50 ms of audio", []string{"Sure."}, &voice.PlaybackReport{State: voice.PlaybackDrained, RunMs: 20}, true},
+		{"real answer played", []string{"Nothing yet."}, &voice.PlaybackReport{State: voice.PlaybackDrained, RunMs: 700}, false},
+		{"answer with under 50 ms of audio", []string{"Nothing yet."}, &voice.PlaybackReport{State: voice.PlaybackDrained, RunMs: 20}, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -123,16 +123,31 @@ func scheduling(u voice.Urgency) genai.FunctionResponseScheduling {
 	}
 }
 
-// pushTurn wraps a push as a user-role client turn. The bracketed prefix
-// tells the model the text was not spoken by the user (notes §4).
+// The push markers: a user-role turn that starts with one is the brain's
+// (or the daemon's) words, never the shepherd's (notes §4;
+// prompts/assistant.md explains both).
+const (
+	pushEventMarker   = "[system event, not spoken by the user]"
+	pushContextMarker = "[system context, not spoken by the user]"
+)
+
+// pushTurn wraps a push as a user-role client turn: the marker, then the
+// text, as two parts of one turn. With the marker glued to the text
+// (one part) the voice read it aloud in 25 utterances of the 2026-10-03
+// tier-2 campaign ("[system event, not spoken by the user] bench-codex
+// wants…"; docs/bench/tier2-2026-10-03.md #4). Measured on
+// barge-in-hold-to-talk, status-en and deferral-zh, 3 runs each, with
+// the same prompt (prompts/assistant.md explains the marker): glued,
+// 3 of 17 spoken pushes began with the marker; as its own part, 0 of 19;
+// a non-word marker ("»", the prompt rewritten for it) also read none
+// (0 of 16), but the voice then
+// relayed four pushes back as the shepherd's words.
 func pushTurn(text string, u voice.Urgency) []*genai.Content {
-	var prefix string
+	marker := pushEventMarker
 	if u == voice.UrgencySilent {
-		prefix = "[system context, not spoken by the user] "
-	} else {
-		prefix = "[system event, not spoken by the user] "
+		marker = pushContextMarker
 	}
-	return []*genai.Content{{Role: "user", Parts: []*genai.Part{{Text: prefix + text}}}}
+	return []*genai.Content{{Role: "user", Parts: []*genai.Part{{Text: marker}, {Text: text}}}}
 }
 
 // errorResult is the spoken result when a tool handler fails (D9: written

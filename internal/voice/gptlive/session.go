@@ -124,9 +124,11 @@ type Session struct {
 	// heard watches each spoken push until its speech is over, judged
 	// by key terms (heard.go); requeue holds the owed unheard lines
 	// waiting for a quiet moment; openCheck is the supervisor's.
-	heard     voice.HeardTracker
-	requeue   []voice.UnheardPush
-	openCheck voice.OpenCheck
+	heard   voice.HeardTracker
+	requeue []voice.UnheardPush
+	// turnDoneAt is when the model's speech last ended (voice.RequeueHold).
+	turnDoneAt time.Time
+	openCheck  voice.OpenCheck
 }
 
 // liveConn is one GPT-Live session (one WebSocket).
@@ -404,6 +406,14 @@ func (s *Session) LastPlayback() voice.PlaybackReport {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.play.Last()
+}
+
+// LastSpeechOnset is when the client's speech detector last opened (ok
+// false when it never reported one; see gemini.Session.LastSpeechOnset).
+func (s *Session) LastSpeechOnset() (time.Time, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.vad.Onset()
 }
 
 // ClientSpeaking records the /ws client's speech detector opening (true)

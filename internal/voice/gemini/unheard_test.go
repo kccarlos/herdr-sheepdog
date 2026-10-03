@@ -215,3 +215,55 @@ func TestRequeueDroppedWhenNoLongerOpen(t *testing.T) {
 		t.Errorf("sent %d times, want once", n)
 	}
 }
+
+// TestRequeueWaitsForTheShepherdsWholeTurn is collision-finish-push r1
+// (docs/bench/tier2-2026-10-03.md #5): the CEO talked over a finish
+// push; it was cut and re-queued the moment the client's detector had
+// closed and released, before the CEO's input transcript and the
+// voice's reply to it, and the re-sent push was cut again. It now waits
+// for the detector to settle, the words, and the reply to play out.
+func TestRequeueWaitsForTheShepherdsWholeTurn(t *testing.T) {
+	c := newFakeConn("c1")
+	h := newHarness(t, Config{}, &fakeDialer{results: []func() (Conn, error){ok(c)}})
+	line := "Bench-claude is done. It added the changelog entry you asked for, fixing the parser ignoring its first argument."
+	if err := h.s.PushTagged(line, voice.UrgencyIdle, map[string]any{"push_id": "push-finish", "needs_user": true}); err != nil {
+		t.Fatal(err)
+	}
+	c.waitSent(t, "finish push", isContent(line))
+	speakReply(h, c, []string{"Bench-claude", "is", "done."}, 300)
+	h.s.ClientPlayback(voice.PlaybackStarted, 0)
+
+	// The CEO starts talking over it: the detector opens, a first
+	// fragment arrives, the model yields and the client flushes.
+	h.s.ClientSpeaking(true)
+	c.serve(inputTranscriptMsg("Also,", false))
+	c.serve(interruptedMsg())
+	h.waitEvent("model interrupted", func(voice.Event) bool { return len(h.log.payloads("voice.interrupted")) >= 1 })
+	h.s.ClientPlayback(voice.PlaybackFlushed, 600)
+	ev := h.waitEvent("unheard", isUnheard).(voice.EventPushUnheard)
+	if !ev.Requeue || ev.Push.Reason != voice.UnheardUserTurn {
+		t.Fatalf("unheard = %+v", ev)
+	}
+	c.serve(turnCompleteMsg())
+
+	// The CEO keeps talking for a while, then the detector closes.
+	time.Sleep(2200 * time.Millisecond)
+	h.s.ClientSpeaking(false)
+	// Past the old rule (detector release, 2 s since the first fragment
+	// and since the flush): still held — the rest of the words and the
+	// reply are to come.
+	time.Sleep(1200 * time.Millisecond)
+	if n := countSent(c, line); n != 1 {
+		t.Fatalf("re-sent %d times while the CEO's turn was still open", n-1)
+	}
+	c.serve(inputTranscriptMsg(" did it touch the changelog?", false))
+	time.Sleep(1200 * time.Millisecond)
+	if n := countSent(c, line); n != 1 {
+		t.Fatalf("re-sent before the reply to the CEO's words")
+	}
+	speakReply(h, c, []string{"Checking."}, 400)
+	h.s.ClientPlayback(voice.PlaybackStarted, 0)
+	c.serve(turnCompleteMsg())
+	h.s.ClientPlayback(voice.PlaybackDrained, 400)
+	waitCount(t, "re-queued sends", 2, 6*time.Second, func() int { return countSent(c, line) })
+}
