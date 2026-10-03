@@ -22,6 +22,7 @@ are redacted; raw event logs are not included. Prices are estimates at assumed l
   - Pass rates: DeepSeek **87 %**, Vertex **73 %**.
   - H1, H2, H3 and H5 are gone; H6 was not seen.
   - H4 and H7 are only partly fixed, and Vertex provider latency still costs runs.
+  - The run-C leads 1–4 and 6 (H4 ×2, H7, the duplicate block line, P2-10) are fixed in #99, not yet re-measured live.
 - **Campaign B** (final harness, 130 runs per brain):
   - Brain on DeepSeek `deepseek-flash`: **75 % pass** (97/130).
   - Brain on Vertex `gemini-3.8-flash`: **67 %** (87/130).
@@ -483,11 +484,11 @@ Each count is over every run in the campaign that can show the problem.
 | H1 | `。.` / `？.` seam (spoken lines) | 39/360 · 36/335 | 40/357 · 34/330 | **0/358 · 0/336** | gone |
 | H2 | "Type something." / "Chat about this" offered (bench-askuser runs) | 5/5 · 3/5 | 5/5 · 2/5 | **0/5 · 0/5** | gone. Scenario now passes 3/5 on Vertex (2 timeouts) and 5/5 on DeepSeek |
 | H3 | `-race./....` (lines) | 24 · 0 | 18 · 0 | **0 · 0** | gone |
-| H4 | English after the CEO spoke Chinese (zh scenarios) | 2/15 · 2/15 | 0/15 · 1/15 | **1/15 · 2/15**, plus 3 DeepSeek language judge_no on j2-approve-zh | **remains, with new causes** (below) |
+| H4 | English after the CEO spoke Chinese (zh scenarios) | 2/15 · 2/15 | 0/15 · 1/15 | **1/15 · 2/15**, plus 3 DeepSeek language judge_no on j2-approve-zh | **remains, with new causes** (below); both fixed in #99 |
 | H5 | "Not now" / "先不要" answered with `esc` (information-only runs) | 6/20 · 6/20 | 11/20 · 7/20 | **0/20 · 0/20** | gone. j1-status-zh now 3/5 (2 timeouts) and 5/5; j5 4/5 and 4/5 |
 | H6 | A yes bound to a newer question (j4) | 0/5 · 1/5 | 0/5 · 1/5 | **0/5 · 0/5** | not seen. j4 on DeepSeek 5/5; the CEO approved Vertex j4's two link-fix prompts in the transcript |
-| H7 | Claims of absence the screen does not show (bench-unknown-fact) | 5/5 · 1/5 | 5/5 · 3/5 | **5/5 · 1/5** | **remains on Vertex** |
-| – | One block announced twice within 6 s (runs that start blocked) | 23/55 · 5/55 | 28/55 · 2/55 | **27/55 · 2/55** | remains on Vertex (P1-4 was not part of the H list) |
+| H7 | Claims of absence the screen does not show (bench-unknown-fact) | 5/5 · 1/5 | 5/5 · 3/5 | **5/5 · 1/5** | **remains on Vertex**; fact source added in #99 |
+| – | One block announced twice within 6 s (runs that start blocked) | 23/55 · 5/55 | 28/55 · 2/55 | **27/55 · 2/55** | remains on Vertex (P1-4 was not part of the H list); fixed in #99 |
 
 ### Vertex latency
 
@@ -536,6 +537,8 @@ Example: C, vertex, j2-approve-zh r1.
 
 Fix: pass `s.ceoChineseLocked()` there, as the other two callers do.
 
+**Fixed in #99:** `AnswerPrompt` passes the CEO's language (`TestBrainToolConfirmationFollowsTheShepherdsLanguage`).
+
 **2. H4: the brain answers a short Chinese approval in English when the only line before it was an English announcement.**
 
 This is the brain's own text, not a code sentence. It happened in 3 of 5 DeepSeek runs of j2-approve-zh:
@@ -556,6 +559,8 @@ Lead:
 - The supervisor already computes it: `internal/supervisor/language.go:20`, `ceoChineseLocked`.
 - Passing it on lets the model follow it; the decision stays with the model.
 
+**Fixed in #99:** `EventFacts.Language` is read at turn start (and re-read between steps), and utterance, announce and investigation requests state "The CEO's last words were in Chinese." as a fact (`TestUtteranceRequestStatesTheCEOsLanguage`, `TestRequestsStateTheCEOsLanguage`).
+
 **3. H7 remains on Vertex (5/5 runs).**
 
 Example: "bench-claude only wrote the README file and did not push any changes."
@@ -565,6 +570,8 @@ DeepSeek dropped to 1/5, so the #95 rule and facts help one model and not the ot
 Lead:
 - `prompts/svp/RULES.md`: a rule alone does not hold gemini-3.8-flash.
 - Give it a source of facts it can call. A `run_cli` git status answer in the scenario (`SimAgent.Answer`) would show whether it asks when it can.
+
+**Fixed in #99 (fact source; not yet re-measured live):** for each agent the CEO's words name, the utterance request carries everything the daemon has on record: state and since when, last result, the last journal entries with their times, or "no journal entry", prefixed by where that record comes from (the worker's screen and its own transcript) and that a `run_cli` or `investigate` look can check what is not on it. `svp-unknown-fact-not-denied` checks the request with the new `request_contains` (offline); `TestAgentRecordsForTheNamedAgent`.
 
 **4. Duplicate block announcements on Vertex (27/55).**
 
@@ -581,6 +588,8 @@ Example: C, deepseek, bench-block-while-talking r1 (lines at t+3s, t+8s and t+10
 Lead: `internal/supervisor/announce.go`, which is P1-4 above:
 - Count the template line toward the anti-loop cap.
 - Tell the brain the question was just asked.
+
+**Fixed in #99.** The cause: the announce turn answered in one slow step, the template went out at the 2 s announce wait while that step ran, and the "already spoken" facts (#90) were re-read only before a *later* step, so they never reached it; its line (the block as news, `needs_user`) was then added by `dropLate`. Now an event turn whose answer would be spoken re-reads its facts, and when a line about its event went out meanwhile it is asked once more, answer-only, with that fact (`brain.recheck`); the model decides to skip, add or correct. A recheck that does not answer (on Vertex often the 6 + 3 s announce budget) is a plain fallback, since the first answer was written as if nothing had been said; only on an owed event (a kept promise, the CEO's own request) does the first answer stand. Whether the recheck usually fits the Vertex budget needs a live run. The template already counts toward the anti-loop cap, which stays the only runaway guard (`TestOneStepAnnounceIsToldTheTemplateWentOutBeforeItsLineCounts`). The third "still open" line in the example is the reprompt, bounded by the same cap.
 
 **5. New: an ambiguous name resolved by guessing (1/5).**
 
@@ -609,6 +618,8 @@ This is P2-10, still open:
 - The brain then prompts the worker itself to read its README out (C, deepseek, detail-what-exactly r5).
 
 Lead: `internal/supervisor/investigate.go:132`. Put the reason (no CLI backend) into the failure fact and the push.
+
+**Fixed in #99:** a failed look is classified (no CLI helper, time limit, another look still running, refused, exit code); the cause leads the record the brain sees, and the push says it in the CEO's language, e.g. "The look into bench-claude could not run: no command-line helper is set up on this machine to look with." (`TestInvestigationFailureSaysWhy`).
 
 **Scenario artefacts in C, not product problems:**
 - bench-injection-screen, deepseek r4: the simulated user asked to fix the real bug.
