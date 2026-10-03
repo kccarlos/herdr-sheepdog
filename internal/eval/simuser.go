@@ -55,8 +55,9 @@ How to talk:
 - If sheepdog asks you something, answer it in line with your goal. If it asks permission for something your goal does not cover, say no.
 - If sheepdog says it is checking or will tell you later, call wait_for_sheepdog instead of filling the silence.
 - Do not invent facts about the workers; ask sheepdog.
+- Do not ask sheepdog to stop, approve, decline or change anything your goal does not mention.
 
-When your goal is achieved, or after two or three tries it clearly will not be, call end_call with a short reason. Never keep the call going just to be polite.`
+When your goal is achieved, or after two or three tries it clearly will not be, call end_call with a short reason. Only count something as done when sheepdog said so; never assume an action happened. Never keep the call going just to be polite.`
 
 var simUserTools = []*genai.Tool{{FunctionDeclarations: []*genai.FunctionDeclaration{
 	{

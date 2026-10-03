@@ -329,7 +329,7 @@
         "agent": "bench-claude",
         "rubric": [
           "After bench-claude finished, did sheepdog tell the CEO on its own that the tests are done and that they all passed?",
-          "Did sheepdog confirm the instruction once, in a single short line, rather than repeating the confirmation?"
+          "Did sheepdog confirm the instruction once (a short confirmation, not repeated later)?"
         ]
       }
     },

@@ -419,7 +419,7 @@
       "id": "bench-ambiguous-codex",
       "note": "Agent naming (decided fix: spoken names, ask when unsure): two codex workers, 'the codex one'.",
       "goal": "get the auth codex worker to run its tests",
-      "persona": "Say 'the codex one' without naming it at first. If sheepdog asks which one, say the auth one.",
+      "persona": "Say 'the codex one' without naming it at first. If sheepdog asks which one, say the auth one. Once sheepdog confirms it told the worker, end the call.",
       "opening": "Tell the codex one to run the tests.",
       "script": [
         "Tell the codex one to run the tests.",

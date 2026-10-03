@@ -46,8 +46,9 @@ type simWorld struct {
 	aliasOf  map[string]string // pane id -> alias
 	kinds    map[string]string // alias -> kind
 	states   map[string]herdr.State
-	screens  map[string]string // alias -> current screen
-	resolved map[string]string // screen name -> text (resolveScreens)
+	screens  map[string]string        // alias -> current screen
+	resolved map[string]string        // screen name -> text (resolveScreens)
+	pending  map[string][]*time.Timer // alias -> changes a prompt set in motion
 	fired    map[int]bool
 	timers   []*time.Timer
 	timeline []SimLine // worker changes, for the judge's facts
@@ -98,7 +99,7 @@ func newSimWorld(ctx context.Context, sc SimScenario, o simWorldOptions) (*simWo
 	w := &simWorld{
 		sc: sc, start: time.Now(), dir: dir, fixtureDir: o.fixtureDir,
 		panes: map[string]string{}, aliasOf: map[string]string{}, kinds: map[string]string{},
-		states: map[string]herdr.State{}, screens: map[string]string{}, fired: map[int]bool{},
+		states: map[string]herdr.State{}, screens: map[string]string{}, fired: map[int]bool{}, pending: map[string][]*time.Timer{},
 	}
 	if err := w.resolveScreens(); err != nil {
 		w.cleanupDir()
@@ -234,7 +235,17 @@ func (w *simWorld) startWorking(alias string) {
 }
 
 // trigger fires the events that wait on what sheepdog just did to alias.
+// An interrupt also cancels the changes a prompt to alias set in motion:
+// a worker stopped mid-task does not finish it.
 func (w *simWorld) trigger(kind, alias, text string) {
+	if kind == ActionInterrupt {
+		w.mu.Lock()
+		for _, t := range w.pending[alias] {
+			t.Stop()
+		}
+		delete(w.pending, alias)
+		w.mu.Unlock()
+	}
 	for i, e := range w.sc.Events {
 		var hit bool
 		switch kind {
@@ -250,7 +261,12 @@ func (w *simWorld) trigger(kind, alias, text string) {
 			// After startWorking's working transition, so a finish is a
 			// working -> done finish.
 			d := max(time.Duration(e.DelayMS)*time.Millisecond, 200*time.Millisecond)
-			w.schedule(d, func() { w.apply(context.Background(), i, e, alias) })
+			t := w.schedule(d, func() { w.apply(context.Background(), i, e, alias) })
+			if kind == ActionPrompt && t != nil {
+				w.mu.Lock()
+				w.pending[alias] = append(w.pending[alias], t)
+				w.mu.Unlock()
+			}
 		}
 	}
 }
@@ -265,13 +281,15 @@ func (w *simWorld) afterTurn(n int) {
 	}
 }
 
-func (w *simWorld) schedule(d time.Duration, fn func()) {
+func (w *simWorld) schedule(d time.Duration, fn func()) *time.Timer {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.closed {
-		return
+		return nil
 	}
-	w.timers = append(w.timers, time.AfterFunc(time.Duration(float64(d)*w.scale), fn))
+	t := time.AfterFunc(time.Duration(float64(d)*w.scale), fn)
+	w.timers = append(w.timers, t)
+	return t
 }
 
 // say is one CEO utterance: recorded as the shepherd's own input (so the
@@ -341,6 +359,7 @@ func (w *simWorld) facts(initial map[string]string) string {
 			}
 		}
 	}
+	b.WriteString("Notes: a worker screen shows the worker's own history, including what it was asked before this call; only the actions listed below were sent by sheepdog during the call. Every prompt sheepdog sends ends with a standard sign-off request the daemon appends (\"When you finish, end with three short lines for someone who cannot see the screen…\"); that is not part of what sheepdog decided.\n")
 	lines := append(append([]SimLine(nil), w.timeline...), acts...)
 	sortLines(lines)
 	if len(lines) == 0 {

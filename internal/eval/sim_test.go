@@ -229,3 +229,36 @@ func TestSimUnknownScreenErrors(t *testing.T) {
 		t.Fatalf("status %s detail %q", run.Status, run.EndDetail)
 	}
 }
+
+// An interrupt cancels what a prompt set in motion: the stopped worker
+// does not finish.
+func TestSimInterruptCancelsPromptEvents(t *testing.T) {
+	sc := fixScenario()
+	sc.Opening = ""
+	sc.Script = []string{"tell bench-codex to fix it", "stop", "<wait>"}
+	sc.Caps.SilenceSeconds = 5 // the run outlives the finish it cancelled
+	sc.Events[0].DelayMS = 3000
+	sc.Expect = SimExpect{}
+	brainModel := func() brain.Model {
+		return braintest.NewModel(
+			braintest.Step{Calls: []*genai.FunctionCall{braintest.FC(brain.ToolPrompt, map[string]any{"agent": "bench-codex", "text": "fix the add test"})}},
+			braintest.Step{Text: braintest.Reply("Told bench-codex.", "")},
+		)
+	}
+	run := RunSim(context.Background(), sc, SimOptions{
+		BrainConfig: brain.Config{MaxSteps: 4, UtteranceTimeout: 5 * time.Second}, NewBrainModel: brainModel,
+		FixtureDir: "../../testdata/herdr", Settle: 200 * time.Millisecond,
+	}, 1)
+	interrupted := false
+	for _, a := range run.Actions {
+		interrupted = interrupted || a.Kind == ActionInterrupt
+	}
+	if !interrupted {
+		t.Fatalf("no interrupt: %+v\n%s", run.Actions, renderSim(run.Transcript))
+	}
+	for _, l := range run.Timeline {
+		if strings.Contains(l.Text, "is now done") {
+			t.Fatalf("the interrupted worker finished anyway: %+v", run.Timeline)
+		}
+	}
+}
