@@ -6,6 +6,7 @@ import (
 
 	"github.com/kccarlos/herdr-sheepdog/internal/brain/braintest"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
+	"github.com/kccarlos/herdr-sheepdog/internal/state"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
 
@@ -70,5 +71,18 @@ func TestOpenCheckFollowsThePendingPrompt(t *testing.T) {
 	}
 	if !h.sup.OpenCheck(map[string]any{voice.TagKeepsPromiseIDs: []string{"pr-1"}}) {
 		t.Error("a kept promise reported closed")
+	}
+}
+
+// TestOpenCheckIgnoresAnInstructionAwaitingConfirmation: only a worker's
+// prompt counts as a question waiting for the CEO (CEO, 2026-10-03); an
+// instruction awaiting confirmation does not hold a session refresh.
+func TestOpenCheckIgnoresAnInstructionAwaitingConfirmation(t *testing.T) {
+	h := newHarness(t)
+	if err := h.store.SetPending(state.PendingAction{ID: "si-1", PaneID: "w5:p1", Kind: state.PendingSendInstruction, PayloadText: "run the tests"}); err != nil {
+		t.Fatal(err)
+	}
+	if h.sup.OpenCheck(nil) {
+		t.Error("a send_instruction pending counted as an open question")
 	}
 }

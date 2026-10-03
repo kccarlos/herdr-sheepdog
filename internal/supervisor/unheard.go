@@ -3,6 +3,8 @@ package supervisor
 import (
 	"fmt"
 
+	"github.com/kccarlos/herdr-sheepdog/internal/state"
+
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
 
@@ -27,11 +29,14 @@ func (s *Supervisor) onPushUnheard(e voice.EventPushUnheard) {
 }
 
 // OpenCheck is the voice layer's voice.OpenCheck. With nil tags: is a
-// question waiting for the CEO (a pending action)? With a push's tags:
-// is what it is about still owed to them — a kept or due promise, or
-// the prompt its worker event raised, still the pending one?
+// worker's prompt waiting for the CEO (a pending answer_prompt; an
+// instruction awaiting confirmation does not hold a session refresh)?
+// With a push's tags: is what it is about still owed to them — a kept
+// or due promise, or the prompt its worker event raised, still the
+// pending one? An answer_prompt lives as long as the pane waits at it.
 func (s *Supervisor) OpenCheck(tags map[string]any) bool {
 	p, has := s.store.Pending()
+	has = has && p.Kind == state.PendingAnswerPrompt
 	if tags == nil {
 		return has
 	}
