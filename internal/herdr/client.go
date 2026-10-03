@@ -194,6 +194,44 @@ func (c *Client) Rename(ctx context.Context, paneID, name string) error {
 	return err
 }
 
+// CreateWorkspace opens a new workspace whose shell starts in cwd
+// (`workspace.create`, unfocused) and returns its root pane.
+func (c *Client) CreateWorkspace(ctx context.Context, cwd, label string) (PaneInfo, error) {
+	var res struct {
+		Root PaneInfo `json:"root_pane"`
+	}
+	params := map[string]any{"cwd": cwd, "focus": false}
+	if label != "" {
+		params["label"] = label
+	}
+	err := c.Call(ctx, "workspace.create", params, &res)
+	c.log("herdr.workspace_create", res.Root.PaneID, map[string]any{"cwd": cwd, "label": label, "error": errString(err)})
+	return res.Root, err
+}
+
+// SplitPane splits paneID to the right, unfocused, with a new shell in
+// cwd (`pane.split`), and returns the new pane.
+func (c *Client) SplitPane(ctx context.Context, paneID, cwd string) (PaneInfo, error) {
+	var res struct {
+		Pane PaneInfo `json:"pane"`
+	}
+	err := c.Call(ctx, "pane.split", map[string]any{"pane_id": paneID, "direction": "right", "cwd": cwd, "focus": false}, &res)
+	c.log("herdr.pane_split", paneID, map[string]any{"cwd": cwd, "pane": res.Pane.PaneID, "error": errString(err)})
+	return res.Pane, err
+}
+
+// SendInput types text into the pane and then presses keys, in one write
+// (`pane.send_input`): a command line for the pane's shell.
+func (c *Client) SendInput(ctx context.Context, paneID, text string, keys ...string) error {
+	params := map[string]any{"pane_id": paneID, "text": text}
+	if len(keys) > 0 {
+		params["keys"] = keys
+	}
+	err := c.Call(ctx, "pane.send_input", params, nil)
+	c.log("herdr.send", paneID, map[string]any{"kind": "input", "text": text, "keys": keys, "error": errString(err)})
+	return err
+}
+
 // SendKeys sends named keys (`enter`, `esc`, `1`, `ctrl+c`, …) to the pane
 // via `pane.send_keys`. All keys are validated by the server before any
 // byte is written.

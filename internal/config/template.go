@@ -101,6 +101,7 @@ func Template() string {
 # reprompt_poll_s = %[41]d   # how long the post-answer poll watches a pane for a different prompt after keys go to it
 # repeat_window_s = %[42]d   # how long an unchanged roster sentence counts as "already reported"; a status question inside it gets a "no change" note instead of the roster repeated in full
 # authorise_window_s = %[44]d   # how recent your own words (voice, typed or a tap) must be to answer a worker's approval prompt
+# project_roots = ["~/Documents"]   # a new agent may be started by voice in a subdirectory of one of these, or in an existing workspace's directory
 
 [brain]
 # enabled = %[21]t   # the stateful supervisor brain behind to_supervisor and the announcements; serve --brain=off overrides

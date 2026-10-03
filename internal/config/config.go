@@ -199,6 +199,11 @@ type Supervisor struct {
 	// transcript, typed text or a tap) must be to authorise answering a
 	// worker's approval prompt (docs/roles.md "The one rail"; default 30).
 	AuthoriseWindowS int `toml:"authorise_window_s"`
+	// ProjectRoots are the directories a new agent may be started in
+	// (docs/roles.md "Starting an agent"): any immediate subdirectory of
+	// one of them, or the directory of an existing herdr workspace. A
+	// leading "~/" is the home directory (default ["~/Documents"]).
+	ProjectRoots []string `toml:"project_roots"`
 }
 
 // Voice is the dog's spoken half, as the operator meets it.
@@ -449,7 +454,7 @@ func Default() Config {
 		Web:               Web{Bind: DefaultWebBind, Port: DefaultWebPort},
 		CLI:               defaultCLI(),
 		Voice:             Voice{Name: DefaultVoiceName, Provider: "gemini", OpenAI: VoiceOpenAI{Model: "gpt-live-1", Voice: "marin", IdleCloseS: 45}},
-		Supervisor:        Supervisor{Chattiness: DefaultChattiness, RecentMinutes: 30, PromiseTTLS: 7200, CancelWindowS: 30, RepromptPollS: 10, RepeatWindowS: 60, AuthoriseWindowS: 30},
+		Supervisor:        Supervisor{Chattiness: DefaultChattiness, RecentMinutes: 30, PromiseTTLS: 7200, CancelWindowS: 30, RepromptPollS: 10, RepeatWindowS: 60, AuthoriseWindowS: 30, ProjectRoots: []string{"~/Documents"}},
 		Brain:             defaultBrain(),
 		Prompts:           Prompts{Dir: filepath.Join(home, ".config", "sheepdog", "prompts")},
 	}
@@ -601,6 +606,7 @@ func load(path string, lookup func(string) (string, bool)) (Config, error) {
 	if cfg.Supervisor.AuthoriseWindowS <= 0 {
 		return Config{}, fmt.Errorf("config: supervisor.authorise_window_s=%d: want a positive integer", cfg.Supervisor.AuthoriseWindowS)
 	}
+	cfg.Supervisor.ProjectRoots = expandRoots(cfg.Supervisor.ProjectRoots)
 	if err := validateBrain(cfg.Brain); err != nil {
 		return Config{}, err
 	}
@@ -840,6 +846,9 @@ func applyEnv(cfg *Config, lookup func(string) (string, bool)) error {
 		}
 		cfg.Supervisor.AuthoriseWindowS = n
 	}
+	if v, ok := lookup("SHEEPDOG_SUPERVISOR_PROJECT_ROOTS"); ok {
+		cfg.Supervisor.ProjectRoots = filepath.SplitList(v)
+	}
 	if v, ok := lookup("SHEEPDOG_VOICE_NAME"); ok {
 		cfg.Voice.Name = strings.TrimSpace(v)
 	}
@@ -1052,8 +1061,8 @@ func geminiKeysFromEnv(lookup func(string) (string, bool)) []string {
 // counts (or set/unset) only; keep it that way when secret-bearing
 // fields are added.
 func (c Config) String() string {
-	return fmt.Sprintf("data_dir=%s herdr.socket=%s state.path=%s state.full_fsync=%t debounce_ms=%d snapshot_interval_s=%d pending_ttl_s=%d aliases=%d gemini.model=%s gemini.voice=%s gemini.stall_after_s=%d gemini.start_sensitivity=%s gemini.end_sensitivity=%s gemini.api_keys=%d gemini.backend=%s gemini.vertex.api_key=%s gemini.vertex.project=%s gemini.vertex.location=%s voice.name=%s voice.provider=%s voice.openai.api_key=%s voice.openai.model=%s voice.openai.voice=%s voice.openai.idle_close_s=%d deepseek.api_key=%s deepseek.base_url=%s deepseek.thinking=%t deepseek.reasoning_effort=%s web.bind=%s web.port=%d web.token=%s cli.prefer=%s cli.timeout_s=%d cli.max_output_kb=%d supervisor.chattiness=%s supervisor.recent_minutes=%d supervisor.promise_ttl_s=%d supervisor.cancel_window_s=%d supervisor.reprompt_poll_s=%d supervisor.repeat_window_s=%d supervisor.authorise_window_s=%d brain.enabled=%t brain.provider=%s brain.model=%s brain.max_steps=%d brain.utterance_timeout_s=%d brain.window_tokens=%d brain.prune_after_turns=%d brain.step_reserve_s=%d brain.final_grace_s=%d brain.announce_turn_timeout_s=%d brain.announce_timeout_s=%d brain.announce_wait_s=%d brain.reply_wait_s=%d brain.investigate_max_s=%d brain.investigate_session_ttl_s=%d prompts.dir=%s push.apns.key_path=%s push.apns.key_id=%s push.apns.team_id=%s push.apns.topic=%s",
-		c.DataDir, c.Herdr.Socket, c.State.Path, c.State.FullFsync, c.DebounceMS, c.SnapshotIntervalS, c.PendingTTLS, len(c.Aliases), c.Gemini.Model, c.Gemini.Voice, c.Gemini.StallAfterS, c.Gemini.StartSensitivity, c.Gemini.EndSensitivity, len(c.Gemini.APIKeys), c.Gemini.Backend, setOrUnset(c.Gemini.Vertex.APIKey), c.Gemini.Vertex.Project, c.Gemini.Vertex.Location, c.Voice.Name, c.Voice.Provider, setOrUnset(c.Voice.OpenAI.APIKey), c.Voice.OpenAI.Model, c.Voice.OpenAI.Voice, c.Voice.OpenAI.IdleCloseS, setOrUnset(c.DeepSeek.APIKey), c.DeepSeek.BaseURL, c.DeepSeek.Thinking, c.DeepSeek.ReasoningEffort, c.Web.Bind, c.Web.Port, setOrUnset(c.Web.Token), c.CLI.Prefer, c.CLI.TimeoutS, c.CLI.MaxOutputKB, c.Supervisor.Chattiness, c.Supervisor.RecentMinutes, c.Supervisor.PromiseTTLS, c.Supervisor.CancelWindowS, c.Supervisor.RepromptPollS, c.Supervisor.RepeatWindowS, c.Supervisor.AuthoriseWindowS, c.Brain.Enabled, c.Brain.Provider, c.Brain.Model, c.Brain.MaxSteps, c.Brain.UtteranceTimeoutS, c.Brain.WindowTokens, c.Brain.PruneAfterTurns, c.Brain.StepReserveS, c.Brain.FinalGraceS, c.Brain.AnnounceTurnTimeoutS, c.Brain.AnnounceTimeoutS, c.Brain.AnnounceWaitS, c.Brain.ReplyWaitS, c.Brain.InvestigateMaxS, c.Brain.InvestigateSessionTTLS, c.Prompts.Dir, setOrUnset(c.Push.APNs.KeyPath), c.Push.APNs.KeyID, c.Push.APNs.TeamID, c.Push.APNs.Topic)
+	return fmt.Sprintf("data_dir=%s herdr.socket=%s state.path=%s state.full_fsync=%t debounce_ms=%d snapshot_interval_s=%d pending_ttl_s=%d aliases=%d gemini.model=%s gemini.voice=%s gemini.stall_after_s=%d gemini.start_sensitivity=%s gemini.end_sensitivity=%s gemini.api_keys=%d gemini.backend=%s gemini.vertex.api_key=%s gemini.vertex.project=%s gemini.vertex.location=%s voice.name=%s voice.provider=%s voice.openai.api_key=%s voice.openai.model=%s voice.openai.voice=%s voice.openai.idle_close_s=%d deepseek.api_key=%s deepseek.base_url=%s deepseek.thinking=%t deepseek.reasoning_effort=%s web.bind=%s web.port=%d web.token=%s cli.prefer=%s cli.timeout_s=%d cli.max_output_kb=%d supervisor.chattiness=%s supervisor.recent_minutes=%d supervisor.promise_ttl_s=%d supervisor.cancel_window_s=%d supervisor.reprompt_poll_s=%d supervisor.repeat_window_s=%d supervisor.authorise_window_s=%d supervisor.project_roots=%s brain.enabled=%t brain.provider=%s brain.model=%s brain.max_steps=%d brain.utterance_timeout_s=%d brain.window_tokens=%d brain.prune_after_turns=%d brain.step_reserve_s=%d brain.final_grace_s=%d brain.announce_turn_timeout_s=%d brain.announce_timeout_s=%d brain.announce_wait_s=%d brain.reply_wait_s=%d brain.investigate_max_s=%d brain.investigate_session_ttl_s=%d prompts.dir=%s push.apns.key_path=%s push.apns.key_id=%s push.apns.team_id=%s push.apns.topic=%s",
+		c.DataDir, c.Herdr.Socket, c.State.Path, c.State.FullFsync, c.DebounceMS, c.SnapshotIntervalS, c.PendingTTLS, len(c.Aliases), c.Gemini.Model, c.Gemini.Voice, c.Gemini.StallAfterS, c.Gemini.StartSensitivity, c.Gemini.EndSensitivity, len(c.Gemini.APIKeys), c.Gemini.Backend, setOrUnset(c.Gemini.Vertex.APIKey), c.Gemini.Vertex.Project, c.Gemini.Vertex.Location, c.Voice.Name, c.Voice.Provider, setOrUnset(c.Voice.OpenAI.APIKey), c.Voice.OpenAI.Model, c.Voice.OpenAI.Voice, c.Voice.OpenAI.IdleCloseS, setOrUnset(c.DeepSeek.APIKey), c.DeepSeek.BaseURL, c.DeepSeek.Thinking, c.DeepSeek.ReasoningEffort, c.Web.Bind, c.Web.Port, setOrUnset(c.Web.Token), c.CLI.Prefer, c.CLI.TimeoutS, c.CLI.MaxOutputKB, c.Supervisor.Chattiness, c.Supervisor.RecentMinutes, c.Supervisor.PromiseTTLS, c.Supervisor.CancelWindowS, c.Supervisor.RepromptPollS, c.Supervisor.RepeatWindowS, c.Supervisor.AuthoriseWindowS, strings.Join(c.Supervisor.ProjectRoots, string(filepath.ListSeparator)), c.Brain.Enabled, c.Brain.Provider, c.Brain.Model, c.Brain.MaxSteps, c.Brain.UtteranceTimeoutS, c.Brain.WindowTokens, c.Brain.PruneAfterTurns, c.Brain.StepReserveS, c.Brain.FinalGraceS, c.Brain.AnnounceTurnTimeoutS, c.Brain.AnnounceTimeoutS, c.Brain.AnnounceWaitS, c.Brain.ReplyWaitS, c.Brain.InvestigateMaxS, c.Brain.InvestigateSessionTTLS, c.Prompts.Dir, setOrUnset(c.Push.APNs.KeyPath), c.Push.APNs.KeyID, c.Push.APNs.TeamID, c.Push.APNs.Topic)
 }
 
 // setOrUnset renders a secret's presence, never its value.
@@ -1062,4 +1071,24 @@ func setOrUnset(secret string) string {
 		return "unset"
 	}
 	return "set"
+}
+
+// expandRoots expands a leading "~/" (or a bare "~") of each project
+// root to the home directory and drops empty entries.
+func expandRoots(roots []string) []string {
+	home, _ := os.UserHomeDir()
+	out := make([]string, 0, len(roots))
+	for _, r := range roots {
+		r = strings.TrimSpace(r)
+		switch {
+		case r == "":
+			continue
+		case home != "" && r == "~":
+			r = home
+		case home != "" && strings.HasPrefix(r, "~/"):
+			r = filepath.Join(home, r[2:])
+		}
+		out = append(out, r)
+	}
+	return out
 }

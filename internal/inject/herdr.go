@@ -32,6 +32,7 @@ type synthetic struct {
 
 var _ supervisor.Herdr = (*Herdr)(nil)
 var _ supervisor.Renamer = (*Herdr)(nil)
+var _ supervisor.Spawner = (*Herdr)(nil)
 
 // NewHerdr wraps inner (may be nil). log may be nil.
 func NewHerdr(inner supervisor.Herdr, log logging.Logger) *Herdr {
@@ -159,6 +160,53 @@ func (h *Herdr) Rename(ctx context.Context, paneID, name string) error {
 	}
 	h.log.Log("herdr", "herdr.rename", paneID, map[string]any{"name": name, "synthetic": true})
 	return nil
+}
+
+// spawner is the inner client's spawn half, or an error saying there is
+// none (mock herdr): a new agent is always a real one.
+func (h *Herdr) spawner() (supervisor.Spawner, error) {
+	sp, ok := h.inner.(supervisor.Spawner)
+	if !ok {
+		return nil, fmt.Errorf("herdr: cannot start agents here")
+	}
+	return sp, nil
+}
+
+// Snapshot implements supervisor.Spawner (the inner client's snapshot;
+// synthetic panes have no workspace).
+func (h *Herdr) Snapshot(ctx context.Context) (herdr.Snapshot, error) {
+	sp, err := h.spawner()
+	if err != nil {
+		return herdr.Snapshot{}, err
+	}
+	return sp.Snapshot(ctx)
+}
+
+// CreateWorkspace implements supervisor.Spawner.
+func (h *Herdr) CreateWorkspace(ctx context.Context, cwd, label string) (herdr.PaneInfo, error) {
+	sp, err := h.spawner()
+	if err != nil {
+		return herdr.PaneInfo{}, err
+	}
+	return sp.CreateWorkspace(ctx, cwd, label)
+}
+
+// SplitPane implements supervisor.Spawner.
+func (h *Herdr) SplitPane(ctx context.Context, paneID, cwd string) (herdr.PaneInfo, error) {
+	sp, err := h.spawner()
+	if err != nil {
+		return herdr.PaneInfo{}, err
+	}
+	return sp.SplitPane(ctx, paneID, cwd)
+}
+
+// SendInput implements supervisor.Spawner.
+func (h *Herdr) SendInput(ctx context.Context, paneID, text string, keys ...string) error {
+	sp, err := h.spawner()
+	if err != nil {
+		return err
+	}
+	return sp.SendInput(ctx, paneID, text, keys...)
 }
 
 // Interrupt implements supervisor.Herdr.

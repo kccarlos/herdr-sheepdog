@@ -308,6 +308,9 @@ type Host struct {
 	// name), and a rename sets the row's Spoken.
 	RenameErr error
 	Renamed   [][2]string
+	// SpawnErr fails Spawn; Spawned records every new agent asked for.
+	SpawnErr error
+	Spawned  []brain.SpawnRequest
 	// InvestigateErr fails Investigate; Investigated is the job ledger
 	// the investigate tool filled (running until SetInvestigation).
 	InvestigateErr error
@@ -394,6 +397,19 @@ func (h *Host) Rename(_ context.Context, paneID, name string) (string, error) {
 	}
 	return "It is called " + name + " now.", nil
 }
+
+// Spawn implements brain.Spawner: it records the request and echoes it.
+func (h *Host) Spawn(_ context.Context, req brain.SpawnRequest) (string, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.SpawnErr != nil {
+		return "", h.SpawnErr
+	}
+	h.Spawned = append(h.Spawned, req)
+	return "Starting a new " + req.Kind + " in " + req.Dir + ".", nil
+}
+
+var _ brain.Spawner = (*Host)(nil)
 
 // Agents implements brain.Host.
 func (h *Host) Agents() []brain.AgentInfo {
