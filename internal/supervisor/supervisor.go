@@ -257,6 +257,14 @@ type Supervisor struct {
 	// announce turn and pushes about that event carry it, so the Context
 	// tab links them to the brain's worker_event message.
 	eventIDs map[string]string
+	// eventLines are the spoken lines pushed about each worker event,
+	// recent ones only (eventlines.go): the announce turn's facts and the
+	// anti-loop cap.
+	eventLines map[string][]eventLine
+	// answeredPrompt is the id of each pane's last answer_prompt the
+	// shepherd answered (answerKeys): the announce facts tell "answered"
+	// from "the agent left it" (eventlines.go).
+	answeredPrompt map[string]string
 	// investigating is the one running background job per pane
 	// (investigate.go).
 	investigating map[string]*liveInvestigation
@@ -555,6 +563,9 @@ func (s *Supervisor) pushTagged(paneID, text string, u voice.Urgency, tags map[s
 		tags = tagged
 	}
 	tags = s.withPushID(tags)
+	if u != voice.UrgencySilent && !s.noteEventLine(paneID, text, tags) {
+		return
+	}
 	if s.pusher == nil {
 		payload := map[string]any{"text": text, "urgency": u.String()}
 		for k, v := range tags {

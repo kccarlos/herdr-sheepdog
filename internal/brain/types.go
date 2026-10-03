@@ -146,7 +146,35 @@ type Request struct {
 	// Context tab): "call:<id>" for the voice tool call that relayed an
 	// utterance, "evt:<id>" for the worker event an announce is about.
 	Link string
+	// Facts, when set (an announce turn), is what the daemon knows now
+	// about the event and the brain cannot see (docs/bench-2026-10-03.md
+	// #15b): called when the turn starts, after the turn lock — the
+	// template line may have gone out while the turn was queued — and
+	// again before each later step, when a change is put in the window.
+	Facts func() EventFacts
+
+	// facts is Facts as the request was rendered.
+	facts EventFacts
 }
+
+// EventFacts is what has happened to an announced event outside the
+// brain's turn.
+type EventFacts struct {
+	// Spoken are the lines already said about this event, word for word
+	// and in order (the daemon's template sentence spoken at
+	// brain.announce_wait_s while the brain was still writing, say).
+	Spoken []string
+	// Prompt is the state of the approval prompt a block created:
+	// PromptWaiting, PromptAnswered or PromptGone; "" when none.
+	Prompt string
+}
+
+// The states of EventFacts.Prompt.
+const (
+	PromptWaiting  = "waiting"
+	PromptAnswered = "answered"
+	PromptGone     = "gone"
+)
 
 // Reply is the answer contract (docs/roles.md): what the assistant says,
 // what it may use for follow-ups, and whether the CEO must act.
