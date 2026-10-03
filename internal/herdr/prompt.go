@@ -217,8 +217,12 @@ func (p Prompt) Phrase() string {
 func (p Prompt) Summary(alias string) string { return p.SummaryIn(alias, false) }
 
 // SummaryIn is Summary in Chinese when zh is set: the language of the
-// shepherd's last words (docs/eval-campaign-2026-10-03.md H4). The
-// question is the screen's own text and is quoted as it is.
+// shepherd's last words (docs/eval-campaign-2026-10-03.md H4). A
+// question that is itself Chinese is quoted as it is; any other question
+// is not: the Chinese line only names the agent and that it needs a
+// decision, since quoting "Do you want to proceed?" verbatim put an
+// English sentence into every Chinese approval (tier-3 bench 2026-10-03,
+// finding 6). The brain's line, when it comes, phrases the question.
 func (p Prompt) SummaryIn(alias string, zh bool) string {
 	cmd := spokenCommand(p.Command)
 	switch {
@@ -226,7 +230,7 @@ func (p Prompt) SummaryIn(alias string, zh bool) string {
 		return alias + " 请求运行 " + cmd + "。"
 	case zh && p.Command != "":
 		return alias + " 请求运行一个命令。"
-	case zh && strings.TrimSpace(p.Question) != "":
+	case zh && hasHan(p.Question):
 		q := strings.TrimSpace(p.Question)
 		if !strings.HasSuffix(q, "?") && !strings.HasSuffix(q, "？") {
 			q += "？"
@@ -243,6 +247,16 @@ func (p Prompt) SummaryIn(alias string, zh bool) string {
 	default:
 		return alias + " is asking for a decision."
 	}
+}
+
+// hasHan reports whether s contains a Han character.
+func hasHan(s string) bool {
+	for _, r := range s {
+		if unicode.Is(unicode.Han, r) {
+			return true
+		}
+	}
+	return false
 }
 
 // findOptions returns the last block of options at the end of lines: two

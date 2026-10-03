@@ -361,3 +361,28 @@ func TestParseCursorMenuNotAMenu(t *testing.T) {
 		})
 	}
 }
+
+// TestSummaryInChinese: a Chinese approval names the command when there
+// is one, quotes a question only when it is Chinese itself, and
+// otherwise says that the agent needs a decision rather than quoting a
+// foreign-language question (tier-3 bench 2026-10-03, finding 6: every
+// Chinese block line was "Claude 在问：Do you want to proceed?").
+func TestSummaryInChinese(t *testing.T) {
+	for _, c := range []struct{ fixture, want string }{
+		{"claude-bash-prompt.screen.txt", "Claude 请求运行 go test。"},
+		{"claude-permission-prompt.screen.txt", "Claude 需要你做个决定。"},
+		{"claude-trust-dialog.screen.txt", "Claude 需要你做个决定。"},
+	} {
+		p, ok := herdr.ParsePrompt(screen(t, c.fixture))
+		if !ok {
+			t.Fatalf("%s: not parsed", c.fixture)
+		}
+		if got := p.SummaryIn("Claude", true); got != c.want {
+			t.Errorf("%s: %q, want %q", c.fixture, got, c.want)
+		}
+	}
+	p := herdr.Prompt{Question: "要创建 claude.txt 吗"}
+	if got := p.SummaryIn("Claude", true); got != "Claude 在问：要创建 claude.txt 吗？" {
+		t.Errorf("chinese question: %q", got)
+	}
+}
