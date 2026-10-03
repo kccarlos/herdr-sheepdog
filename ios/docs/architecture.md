@@ -1,33 +1,32 @@
 # Architecture
 
-Two targets, one rule: anything that can be tested without a microphone
-lives in `SheepdogKit`, and the app target is SwiftUI views plus
-`@MainActor` view models over it.
+There are two targets and one rule: anything that can be tested without a
+microphone lives in `SheepdogKit`. The app target is SwiftUI views and
+`@MainActor` view models built on top of it.
 
 ```
 ┌──────────────────────────── Sheepdog (app target) ────────────────────────────┐
-│  MainView ── AgentStrip ── ConversationView ── ApprovalCardView ── ControlBar  │
-│  SettingsView                                 (or PresenceOrb)                │
+│  MainView ── PaneSwitcher ── AgentStrip ── ConversationView / FlockView /      │
+│              HealthView ── PinnedApprovalCard ── TypeBar ── VoiceBarView       │
+│  SettingsView ── ModelsView                  PushCoordinator (APNs)            │
 │        │                                                                      │
 │  SessionViewModel (@MainActor): adapts SessionCore, runs its effects          │
 │        │                     │                    │                           │
 │  AudioEngine            VoiceSocket          DaemonClient                     │
-│  (AVAudioEngine,        (/ws)                (/api/hello, /api/state,         │
-│   AVAudioSession)                             /api/login, /events,            │
-│                                               /api/conversation,              │
-│                                               /api/pending/answer,            │
-│                                               /api/conversation/reset)        │
+│  (AVAudioEngine,        (/ws)                (/api/*, /events)                │
+│   AVAudioSession)                                                             │
 └───────┼─────────────────────┼─────────────────────┼───────────────────────────┘
         │                     │                     │
 ┌───────┼─────────────────────┼─────────────────────┼─── SheepdogKit ───────────┐
 │  PCMConverter          WSMessage             SSEParser                        │
-│  FrameChunker          (wsproto mirror)      Hello / DaemonState / Agent      │
-│  VoiceActivityDetector / CaptureGate         DaemonError                      │
-│  PlaybackQueue         ConversationReducer   SettingsStore / SecretStore      │
-│  AudioMetrics          SessionCore           ConversationHistory / Item       │
-│                        SessionState          ReconnectPolicy / MuteSync       │
-│                        ApprovalFlow          ConversationTimeline             │
-│                                              ConversationCache (JSON file)    │
+│  FrameChunker          (wsproto mirror)      DaemonModels / Flock             │
+│  VoiceActivityDetector / CaptureGate         ConversationHistory / Timeline   │
+│  MicSignalWatchdog     SessionCore           ConversationCache (JSON file)    │
+│  PlaybackQueue /       SessionState          ApprovalFlow / QuestionFocus     │
+│  PlaybackRatePolicy    VoiceBarModel         BrainActivity / DaemonHealth     │
+│  Metrics               ConnectionChip        Push / MarkdownRenderer          │
+│                        SessionPolicies       VoiceProviders                   │
+│                                              SettingsStore / SecretStore      │
 └───────────────────────────────────────────────────────────────────────────────┘
                                    │
                         sheepdog daemon on your Mac
@@ -35,241 +34,187 @@ lives in `SheepdogKit`, and the app target is SwiftUI views plus
 
 ## The daemon contract, mirrored
 
-`WSMessage` is a direct mirror of the daemon's `internal/voice/wsproto`
-package: the same twelve message types, the same required fields, the same
-`omitempty` shape on the wire. One test per message decodes the literal JSON
-the Go side writes, so the two cannot drift silently.
+`WSMessage` mirrors the daemon's `internal/voice/wsproto` package directly:
+the same message types, the same required fields and the same `omitempty`
+shape on the wire. Each message has a test that decodes the literal JSON the
+Go side writes, so the two cannot drift apart silently.
 
-Everything the app sends is what `web/voice/app.js` sends, in the same
-order:
+The app sends what `web/voice/app.js` sends, in the same order:
 
-- **Mute.** On: stop the microphone, *then* send `{"type":"mute","on":true}`.
-  Off: send `{"type":"mute","on":false}` *first*, then resume. Muted means
-  no binary frames at all, never zero-filled ones.
-- **Silence.** The gate's transitions are announced with
-  `{"type":"silence","on":…}` before the frames they affect.
-- **Speaking.** The gate is the app's own speech detector, so its opening on
-  speech (or a hold) is also `{"type":"speaking","on":true}` and its closing
-  `on:false` — once per change, never while muted (muting closes it; the
-  gate reset that muting reports is not speech) and never from the fake
-  voice's simulated gate. `SessionCore` decides it next to `silence`. The
-  daemon treats `speaking` as authoritative once it has seen one, and holds
-  spoken pushes while it is open.
+- **Mute.** To mute, the app stops the microphone *and then* sends
+  `{"type":"mute","on":true}`. To unmute, it sends `{"type":"mute","on":false}`
+  *first* and then resumes. While muted, no binary frames are sent at all
+  (never zero-filled ones).
+- **Silence.** The gate announces each transition with
+  `{"type":"silence","on":…}` before the frames it affects.
+- **Speaking.** The gate is the app's own speech detector. When it opens on
+  speech (or a hold), the app sends `{"type":"speaking","on":true}`, and
+  `on:false` when it closes. This is sent once per change and never while
+  muted. Once the daemon has seen a `speaking` message, it treats that
+  signal as authoritative and holds spoken pushes while it is on.
 - **Playback reports.** `PlaybackQueue` reports `started` (a run began
-  playing after being empty), `drained` (it ran dry and nothing came within
-  the 300 ms underrun window — an underrun that resumes inside it is the
-  same run: no `drained`, no second `started`) and `flushed` (every flush,
-  the daemon's or Stop's, even with nothing playing: `played_ms: 0`), the
-  way `web/voice/audio-util.js`'s `Player` does. `played_ms` is **stream
-  time**: the run's received samples minus the ones still buffered, where
-  the playhead's remaining audio is wall-clock time left × rate — so 1 s of
-  audio stretched to 0.85× reports 1000, not 1178. `AudioEngine` hands each
-  report straight to the socket (`onPlaybackReport`), like the frames.
-- **Ping.** The contract's JSON `ping` every 5 s (the daemon's
-  `web.client.stats` interval, as `/voice`) carrying `gated_frames`, `peak`,
-  the playback counters and `audio_state` (`running` / `interrupted` /
-  `suspended`) — not `URLSessionWebSocketTask.sendPing`, which the daemon
-  does not see. A ping waits for its `pong` before the next one; still
-  unanswered after 10 s, the socket drops into the reconnect path. (At the
-  old 15 s every tick overwrote the send time, which only worked because
-  15 > 10.)
-- **On every (re)connection** the mute, gate and speaking state are re-sent,
-  because a reconnecting client starts unmuted and ungated on the daemon,
-  and so that `speaking` is authoritative from the first frame.
-- **`flush`** empties the playback queue (reporting `flushed`) and closes
-  the open reply bubble. Stop does the same locally and sends `cancel`; the
-  daemon's answering `flush` reports a second `flushed` with `played_ms: 0`,
-  as the browser page does.
+  playing after the queue was empty), `drained` (the queue ran dry and
+  nothing arrived within 300 ms) and `flushed` (on every flush), the same
+  way `web/voice/audio-util.js` does. `played_ms` is stream time: 1 s of
+  audio stretched to 0.85× reports 1000.
+- **Ping.** Every 5 s the app sends a JSON `ping` carrying `gated_frames`,
+  `peak`, the playback counters (`underruns`, `drains`, `buffer_ms`,
+  `rate`, `stretched_ms`) and `audio_state`. If a ping has no `pong` after
+  10 s, the socket goes into the reconnect path.
+- **On every (re)connection** the app re-sends the mute, gate and speaking
+  state, because the daemon treats a reconnecting client as unmuted and
+  ungated.
+- **`flush`** empties the playback queue and closes the open reply bubble.
+  Stop does the same locally and also sends `cancel`.
 
-Auth is `Authorization: Bearer <token>` on every request **including the
-WebSocket upgrade** — `URLSession` can set a header where a browser cannot,
-so the `?token=` query form is never used and the token never lands in a
-URL. Before opening `/ws` the app probes `GET /api/state`, where a 401 is a
-plain status code; a refused upgrade is far harder to read back.
+Auth is `Authorization: Bearer <token>` on every request, **including the
+WebSocket upgrade**, so the token never appears in a URL. Before opening
+`/ws`, the app probes `GET /api/state`, where a 401 is a plain status code.
+After a failed reconnect, the same probe tells whether the token was
+revoked mid-session.
 
 ## Events
 
-`GET /events` is the app's second input: agent state changes (it refetches
-`/api/state`, debounced), `voice.push` (a system card and a haptic), and
+`GET /events` is the app's second input. It carries agent state changes
+(which trigger a debounced refetch of `/api/state`), pushes,
 `voice.tool_call` / `voice.tool_result` (the orb's *thinking* state, with a
-30 s timeout so a missed result cannot stick).
+30 s timeout), brain replies, held pushes and `pending.*`.
 
-Every event that is a conversation item of its own — a typed utterance
-(`web.utterance` not via voice, `voice.text`), a reply spoken without a
-voice model (`voice.tool_result` with a `via` other than `voice`), a push
-that is not silent, an `answer_prompt`'s `pending.created` and its
-resolution, `daemon.start` and the voice session's reconnects — is folded
-into `ConversationHistory` by the daemon's own rules
-(`internal/web/conversation.go`), keyed by its event id. That is the id
-`/api/conversation` gives the same item later, so the two merge instead of
-showing twice. Transcript fragments are the exception: `/ws` delivers them
-sooner, so they stay id-less bubbles in `ConversationReducer` until a
-newest-page sync (2.5 s after a turn ends) replaces them with the server's
-items.
+Every event that is a conversation item in its own right (a typed
+utterance, a reply without a voice model, a push, an approval and its
+resolution, `daemon.start`, voice reconnects) is folded into
+`ConversationHistory` by the daemon's own rules and keyed by its event id.
+`/api/conversation` later returns the same item under the same id, so the
+two copies merge instead of showing twice. Transcript fragments are the
+exception: `/ws` delivers them sooner, so they stay id-less bubbles in
+`ConversationReducer` until a sync 2.5 s after the turn replaces them.
 
 **Resume.** The client tracks the last SSE `id:` and reconnects with
-`Last-Event-ID` and `?since=` (never `?since=0`: a small number is a count
-to the daemon). The id is kept in the cache, so a relaunch resumes too. An
-event at or below the last id is dropped, and folding is idempotent anyway:
-a replayed `pending.created` cannot reopen an approval that was answered
-since. Haptics fire only for events less than a minute old, so a replay
-after a long sleep is silent.
+`Last-Event-ID` and `?since=`. The id is kept in the cache, so a relaunch
+resumes too. Folding is idempotent: a replayed `pending.created` cannot
+reopen an approval that was answered in the meantime. Haptics fire only for
+events less than a minute old.
+
+There are two `/events` pitfalls that any client of this daemon will hit:
+
+1. **Foundation's `AsyncLineSequence` drops empty lines**, and an empty line
+   is what ends an SSE record. The client reads raw bytes and splits on
+   `\n` itself.
+2. **The stream needs its own `URLSession`.** `timeoutIntervalForRequest`
+   is an inactivity timeout, and the 8 s value used for the JSON endpoints
+   would kill the stream between the daemon's 15 s keepalives. The stream
+   session allows 60 s.
 
 ## History and the cache
 
-`GET /api/conversation` (newest page, 200 items) is fetched at launch when
-an address is configured — before, and without, Connect — on every
-(re)open of the event stream, on returning to the foreground, and shortly
-after each voice turn. The merge rule (`ConversationHistory.applyNewest`):
-the server is the record for the id range its page covers, so a local
-item in that range that the server does not have is dropped; live items
-newer than the page survive it; older ones (the cache, earlier pages) are
-kept unless the page says there is nothing older. Older pages come from
-`before=<next_before>` and merge by id.
+The app fetches `GET /api/conversation` (the newest page, 200 items) at
+launch, before and without Connect. It fetches it again on every (re)open
+of the event stream, on return to the foreground, and after each voice
+turn. Under `ConversationHistory.applyNewest`, the server is the record for
+the id range its page covers. Live items newer than the page survive, and
+older pages come from `before=<next_before>`.
 
 `ConversationCache` writes the newest 300 items, `next_before` and the last
-event id to `Application Support/Conversations/<host>_<port>.json`, one
-file per daemon, excluded from backups, debounced by a second and written
-at once when the app goes to the background. The token is not in the file
-or its name. The screen is `ConversationTimeline.rows`: history and live
-bubbles merged by time, a date divider where the day changes, `notice`
-items as dividers, and the push that repeats a new approval's words folded
-into the approval card.
+event id to `Application Support/Conversations/<host>_<port>.json`, one file
+per daemon, excluded from backups. The token is in neither the file nor its
+name. `ConversationTimeline.rows` builds the screen: history and live
+bubbles merged by time, date dividers, `notice` items as dividers, and
+duplicate copies of a pinned question folded to one-line pointers
+(`QuestionFocus`).
 
 ## Approvals
 
-`ApprovalFlow` is the pinned card's state machine: *open* → *sending* (one
-option; further taps ignored) → *answered* (the daemon's `spoken`) or
-*gone* (409, "That question was already answered or has gone.") or back to
-*open* with the error under the buttons. `pending.confirmed` from somewhere
-else settles an open card as answered (by voice); `expired`, `cancelled`,
-`replaced`, or a state refresh without the question dismisses it. Our own
-`pending.confirmed` can arrive before the HTTP reply; the reply settles the
-card. A settled card stays 3.5 s, then the orb comes back — or the next
-question, if one is waiting. `/api/state`'s `pending_action` is the source
-of truth (refreshed every 5 s and on every `pending.*` event); the event is
-the fast path. Only `answer_prompt` actions with options get a card; the
-POST sends the option's 1-based `index`.
+`ApprovalFlow` is the state machine behind the pinned card. It goes from
+*open* to *sending* (one option, further taps ignored) to either
+*answered* (the daemon's `spoken`), *gone* (409) or back to *open* with the
+error shown. A `pending.confirmed` from somewhere else settles the card as
+answered by voice. `expired`, `cancelled`, `replaced`, or a state refresh
+without the question dismisses it. `/api/state`'s `pending_action` is the
+source of truth (refreshed every 5 s and on every `pending.*` event), and
+the event is the fast path. The POST to `/api/pending/answer` sends the
+option's 1-based `index`. On the Flock pane the card sits on its agent's
+card instead of above the voice bar.
 
 ## New conversation
 
-The ⋯ menu's "New conversation" is `POST /api/conversation/reset
-{"via":"app"}`, which forgets only the supervisor's and the voice model's
-*short-term* context — the roster, open approvals, promises and notes, and
-the scrollback itself all stay, so it is a much smaller thing than *Settings
-▸ Clear conversation on this phone* (`clearConversation()`, which drops the
-local copy of the scrollback too). `DaemonClient.resetConversation` returns
-`nil` on a 404, the `voiceProviders()` convention: `conversationResetSupported`
-starts `true` (optimistic) and only a real 404 hides the action, learned per
-daemon (`endpointChanged()` resets it when the daemon itself changes).
+⋯ ▸ New conversation calls `POST /api/conversation/reset {"via":"app"}`.
+This resets only the supervisor's and the voice model's short-term context
+and keeps the scrollback. *Settings ▸ Clear conversation on this phone*
+drops the local copy instead. A 404 hides the menu item, and the app learns
+this separately for each daemon. The app adds no optimistic divider: the
+daemon logs the reset before it answers, so the divider arrives as an
+ordinary notice item, deduplicated by event id and `reset_id`.
 
-There is deliberately no optimistic local divider. The daemon logs the
-reset (and assigns it its event id) before answering the POST, so by the
-time the app acts on either the reply or the `conversation.reset` SSE event
-that follows, `history.fold` or the next `/api/conversation` sync already
-has an item with that id — the same id-based merge every other notice
-(`daemon.start`, `pending.created`, …) already relies on to survive being
-seen twice, live and then from history. The event's `reset_id` rides along
-as a second key `fold` also dedupes by, for the same belt-and-suspenders
-reason `pending.*` events use their pending id rather than trusting event
-ids alone. `ConversationReducer.apply(.reset)` only closes whatever bubble
-was still open (the in-flight turn is stale, not worth continuing) — it adds
-nothing itself, since the divider is the notice item, not a reducer bubble.
+## Main screen panes
 
-Two things about `/events` that cost a day to find, and that any other
-client of this daemon will hit:
+`PaneSwitcher` switches the middle of the screen between Conversation,
+Flock and Health. It is built from buttons, so Flock can carry an amber
+badge with the number of blocked agents, and it turns into a menu at the
+accessibility text sizes. The voice bar stays in place.
 
-1. **Foundation's `AsyncLineSequence` drops empty lines.** An empty line is
-   exactly what terminates one SSE record, so `for try await line in
-   bytes.lines` yields every field and never completes an event. The client
-   reads raw bytes and splits on `\n` itself.
-2. **The stream needs its own `URLSession`.** `timeoutIntervalForRequest` is
-   an inactivity timeout; with the 8 s value that suits the JSON endpoints,
-   the stream dies between the daemon's 15 s keepalives and reconnects
-   forever. The stream session allows 60 s.
+- **Flock** (`Flock`, `FlockView`). Only running agents are listed (idle,
+  working, blocked, done): blocked first, then working, then idle and
+  done. Unknown and exited agents fold into a closed "Not running (N)"
+  group. Each card shows the agent's state and how long it has been in it,
+  the task, the open question (answerable on the card), `last_result` with
+  its `detail`, and the worker's last message to a human (four lines until
+  tapped). The agent strip above the conversation shows the same running
+  agents.
+- **Brain replies and held pushes** (`BrainActivity`). `voice.tool_result`
+  for `to_supervisor` shows as a "Brain → Sheepdog" card. With
+  `--voice=off`, only a detail/options footer appears under the dog's
+  bubble. `voice.push_held` shows as a "Waiting for a listener" card, which
+  goes away on release and is struck through on drop. After a relaunch,
+  these are backfilled from `GET /api/events?type=…`.
+- **Typed input.** The keyboard button in the voice bar (or ⋯ ▸ Type
+  instead) opens `TypeBar`. Sending goes through
+  `POST /api/inject/utterance`, and the words and the answer arrive in the
+  conversation the usual way.
+- **Health** (`HealthView`, `DaemonHealth`). It shows the daemon's
+  connection, address, version and uptime (from the newest `daemon.start`),
+  plus the voice and brain read-only with "Change in Settings ›", which
+  opens Settings ▸ Models. It also shows GPT-Live's billed time, chattiness
+  (`GET/PUT /api/settings`), this phone's audio path, and recent problems
+  from `GET /api/events?type=…`: errors only, repeats grouped as ×N, and
+  the raw event behind a tap.
+- **Markdown** (`MarkdownRenderer`). Tasks, questions, the worker's last
+  message and brain replies support inline bold, italic, code and links,
+  lists, and monospaced fenced code. Headings render as bold body text.
 
-## The Flock pane, brain replies and typed input
+## Settings ▸ Models
 
-- **Flock.** The main screen's segmented control switches the middle of
-  the screen between the conversation and the Flock pane; the voice bar
-  stays put. Each agent's card mirrors `/api/state`'s `agents` (the same
-  `Store.List()` as `/api/agents`), refreshed over `/events`:
-  - its state and how long it has been in it (`state_since`);
-  - the current or last task;
-  - the open question: the approval card itself, answerable there, which
-    then leaves the pinned spot above the controls. Otherwise the
-    `last_block` question, marked answered when it was;
-  - `last_result.spoken` with its `detail` behind a disclosure;
-  - what the worker last wrote for a human: the newest `journal` entry's
-    `last_assistant` (≤ 600 characters, read from the worker's own
-    transcript), with the files it touched and its tool counts.
+`ModelsView` takes effect at once, outside Settings' Save/Cancel:
 
-  `Agent` used to read `last_result.summary` and `last_block.at`/`options`,
-  none of which the daemon sends, so the last result never showed. It now
-  decodes `state.Result` (`spoken`, `detail`, `at`), `state.Block`
-  (`question`, `seen_at`, `answered`) and `state.JournalEntry` as they are.
-- **Brain replies** (`BrainActivity`). `voice.tool_result` for
-  `to_supervisor` carries what the brain told the voice: `spoken`, and
-  `detail`, `options`, `clarify` and `pending` when present. The brain's
-  `ask` is not a separate field on the wire: the daemon folds it into
-  `spoken` as the last sentence. With a live voice the reply is a purple
-  "Brain → Sheepdog" card, with the detail and the raw payload behind a
-  disclosure. With `--voice=off` the text router's reply is already the
-  dog's bubble (same event id), so only a compact detail/options footer
-  goes under it.
-- **Held pushes.** `voice.push_held` shows as a dashed "Waiting for a
-  listener" card. On `voice.push_released` it disappears, and the
-  `voice.push` that follows is the ordinary push card. After
-  `voice.push_dropped` it stays, struck through.
-- These are kept apart from `ConversationHistory`, whose newest-page merge
-  drops local items the server does not list. `/events` feeds them live.
-  `GET /api/events?type=voice.tool_result` and `?type=voice.push_` (the
-  daemon's current run) backfill them after a relaunch or a stream
-  reconnect.
-- **Typed input.** The keyboard button at the end of the status line (or
-  ⋯ ▸ Type instead) opens a text field. Sending goes through
-  `POST /api/inject/utterance`, which records the text as typed shepherd
-  input before it reaches the voice or the text router, so the one rail
-  takes it like a transcript. The words and the answer arrive in the
-  conversation the usual way; a refusal (422 "nothing to relay", 502
-  voice error) shows under the field. The ⋯ menu also has Stop, the same
-  as the orb's stop, reachable whatever the orb is doing.
+- **Voice.** `GET /api/voice/providers` lists the providers, and
+  `PUT /api/voice/provider` switches between them. Unavailable providers
+  are disabled with the daemon's reason. GPT-Live is marked "Billed per
+  minute". A 404 hides the section, and the provider fields on hello, state
+  and `/ws` `status` are optional, so older daemons still work.
+- **Brain.** `GET /api/brain/models` provides the provider and model
+  pickers, and `PUT /api/brain/model` switches. A new provider takes its
+  first recommended model. The current model is always offered.
+- **Notifications.** This phone's registration and the daemon's
+  `GET /api/push/status`.
 
-## The Health pane
+## Notifications (APNs)
 
-The switch's third pane, "Health", replaces what the Mac's `/debug` page
-was needed for during a test:
+`PushCoordinator` asks for permission after the first successful
+connection. It sends the device token to the daemon with
+`POST /api/push/register`, sends it again when the token or the daemon
+address changes, and removes it (`DELETE`) when notifications are turned
+off or the app moves to another daemon. Debug builds register as `sandbox`
+and Release builds as `production`. This comes from the build setting
+`SHEEPDOG_PUSH_ENVIRONMENT` (Info.plist `SheepdogPushEnvironment`), which
+matches the `aps-environment` entitlement in `project.yml`. The
+time-sensitive entitlement lets needs-you alerts break through Focus.
 
-- **Daemon.** The connection, the address and the version. Uptime is
-  measured from the newest `daemon.start` (`GET /api/events?type=daemon.start`),
-  or from the history's "Sheepdog started" divider when the 2 000-event
-  ring has rolled past it.
-- **Voice.** Status, the provider picker (the same
-  `GET/PUT /api/voice/provider` calls as Settings) and the model.
-  GPT-Live's billed seconds come from `web.client.stats.voice_billed_seconds`
-  and `voice.billed_seconds.total_s`, with the cost at $0.05/min.
-- **Brain.** Provider and model pickers from `GET /api/brain/models`,
-  switched with `PUT /api/brain/model`: a new provider loads its catalog
-  and takes its first recommended model. The current model is always
-  offered, even when the catalog does not list it. An unavailable provider
-  shows the daemon's reason.
-- **Pushes.** Chattiness levels from `GET /api/settings`, changed with
-  `PUT /api/settings`. Hidden without a supervisor.
-- **Audio on this phone.** The echo-cancellation row (as in Settings ▸
-  About) and the playback counters.
-- **Recent problems** (`DaemonHealth`). One line each, with its time, for:
-  - `brain.fallback` (the reason) and `brain.rate_limited`;
-  - `voice.connect_error`;
-  - `voice.push_held` / `voice.push_dropped`;
-  - `supervisor.echo_dropped` and `web.audio_unheard`;
-  - `voice.playback` with `cut`;
-  - `worker.session_missing`.
-
-  The raw event is behind a tap. The pane fills from
-  `GET /api/events?type=…` (one small request per prefix, since the filter
-  takes one) when it opens or is pulled; `/events` keeps it current. The
-  switch reads "Health · n" while there are non-informational problems
-  from the last 15 minutes.
+The `APPROVAL` category has **Approve** (the first "Yes…" option, otherwise
+option 1) and **Decline** (the first "No…" option). Both require the
+passcode, because the daemon token is a when-unlocked keychain item. If an
+answer fails or is stale, a notification remains that opens the app when
+tapped. Tapping any notification opens that agent's Flock card. Nothing is
+shown in the foreground while the session is live. The payload format is
+described in the daemon's `docs/push.md`.
 
 ## Audio
 
@@ -278,8 +223,7 @@ microphone ─▶ AVAudioEngine input tap (hardware format, ~4 096 frames)
            ─▶ copy off the render thread ─▶ main actor
            ─▶ PCMConverter  (AVAudioConverter: anti-alias + rate change → 16 kHz mono Int16)
            ─▶ FrameChunker  (640 samples = 40 ms = 1 280 bytes)
-           ─▶ CaptureGate   (VoiceActivityDetector by default; hold-to-talk override;
-                             the old SilenceGate behind a diagnostics toggle)
+           ─▶ CaptureGate   (VoiceActivityDetector; hold-to-talk override)
            ─▶ VoiceSocket   (one binary frame each)
 
 /ws binary ─▶ PlaybackQueue (adaptive jitter buffer, then chunks in order;
@@ -289,244 +233,15 @@ microphone ─▶ AVAudioEngine input tap (hardware format, ~4 096 frames)
            ─▶ 24 kHz mono Float32 ─▶ main mixer ─▶ speaker
 ```
 
-### The adaptive jitter buffer
-
-`PlaybackQueue` used to hold a fixed 150 ms jitter buffer. Bursty arrival —
-especially from the GPT-Live provider, which front-loads a reply and then
-sends slower than real time — could still run the player dry mid-sentence:
-audible gaps, sometimes mid-word. The buffer's target is now adaptive:
-
-- It starts at 150 ms and tracks its own **playhead** (when the audio
-  already handed to the player should run out), computed from chunk
-  durations rather than from `AVAudioPlayerNode`'s completion callbacks,
-  which land late and jittery on iOS and made a poor drain detector.
-  `completed(_:)` still exists, for the queue depth and `isSpeaking`.
-- A drain is an **underrun** — a gap the user actually heard — only if more
-  audio of the *same* utterance arrives within 300 ms of it. Each underrun
-  raises the target by 100 ms, capped at 500 ms, and the raised target is
-  kept for the rest of the session.
-- After an underrun the queue **refills before resuming**: it holds new
-  chunks until the (now higher) target is buffered again, rather than
-  scheduling the first one alone and risking another gap right behind it.
-- A clean utterance (no underrun) decays the target 20 ms, down to the
-  150 ms floor. A `flush` is a reset, not a drain: it does not move the
-  target either way.
-- The first chunk of a post-underrun refill gets an 8 ms linear fade-in, so
-  the resumption doesn't click. There is deliberately **no matching
-  fade-out** at the drain side: by the time the queue learns a chunk was
-  the last one, that PCM is already with the player (or already played),
-  so there is nothing left to fade without a lookahead buffer, which is out
-  of scope here. The browser page hits the identical constraint with
-  `AudioBufferSourceNode`.
-- `AudioMetrics` and Settings ▸ About report `underruns`, the current
-  target, `drains` (every time the node ran dry, underrun or not — the
-  ordinary silence between utterances is a drain too) and the largest
-  arrival gap seen while one was worth caring about. A second line shows
-  the time-stretch: current rate, target, underruns and stretched seconds.
-- The 5 s `ping` carries, as the browser page's does: `underruns`,
-  `drains`, `buffer_ms` (audio buffered **now** — it used to be the target,
-  which the browser never sent), `rate` (current) and `stretched_ms`
-  (total wall-clock time played at a rate other than 1.0). The daemon
-  mirrors them into `web.client.stats`; older daemons ignore what they do
-  not know. `drains` used to read 0 there because the app never sent it.
-
-### Adaptive time-stretch
-
-GPT-Live delivered its audio at **0.72–0.86× real time** (the daemon's
-`docs/audio-e2e-results.md`, and the phone: 84 underruns in 8 minutes,
-the buffer at its 500 ms cap from the first reply on) until the daemon
-paced its input at real time (2026-09-25); it now runs at ≈1.0×, but a
-source that falls behind can still run the player dry mid-sentence, so the
-player also **plays slower when the buffer runs low** —
-pitch-preserving, through an `AVAudioUnitTimePitch` between the player node
-and the mixer. The policy is pure (`PlaybackRatePolicy`, owned by
-`PlaybackQueue`) and identical to the browser page's:
-
-- **Target T per provider** (`PlaybackProfile`, from `/ws`
-  `status.provider`): Gemini starts at 150 ms, cap 500 ms (as before);
-  GPT-Live (`openai`) starts at 400 ms, cap 2 000 ms (raised to 1 200 ms on
-  2026-09-24 while GPT-Live's input ran slow, then lowered back to 400 ms
-  on 2026-09-25 once the daemon started pacing that input at real time).
-  The underrun step (+100 ms), decay (−20 ms per clean reply) and
-  refill-before-resume are unchanged on top. The "start anyway" wait for a
-  short reply scales with the target — T + 250 ms, as in the browser.
-- **Rate r from buffered audio b**: 1.0 when b ≥ T; below T it falls
-  linearly to 0.90 at b = T/2 and to the **0.85 floor** at b ≤ T/4; 1.05
-  when b > 2T, to catch up. The rate moves at most **0.02 per 20 ms**, so
-  every change is a glide.
-- **Catch-up needs latency debt.** Playing at r < 1 adds (1 − r)·dt of
-  latency; only that debt is won back at 1.05. Gemini is ahead of real
-  time — a 10 s reply lands in ~2.5 s, so b sits far above 2T for most of
-  every reply — and would otherwise play everything 5 % fast for no reason.
-  The debt resets when a reply ends. (The spec's rule read literally
-  contradicts "Gemini stays at 1.0"; this is the reconciliation.)
-- **The playhead runs at 1/r.** The queue's drain prediction is kept in
-  wall-clock time and rescaled on every rate change (the audio left,
-  (end − now)·r, lasts that divided by the new rate), and chunks appended
-  while stretched extend it by duration/r. `bufferedMilliseconds(at:)` —
-  the policy's b and the ping's `buffer_ms` — is audio, not wall time.
-- `AudioEngine` runs the 20 ms control loop (a common-mode `Timer`) while
-  the engine runs; a flush or Stop resets the rate to 1.0.
-
-Replays (`TimeStretchReplayTests`, five seeds × 12 replies each; a
-simulated node that plays at the rate the queue asked for and reports
-completions 30 ms late). *Before* is the old fixed-rate buffer (150–500 ms
-for every provider); *after* is time-stretch plus the provider targets. The
-GPT-Live rows below are pinned to the **1 200 ms** target GPT-Live used
-before the daemon paced its input at real time (2026-09-25) — the decision
-this table backs — not to the current 400 ms `.openAI` default; see below
-the table for the real, paced measurement:
-
-| Timeline | before | targets only | after | time at r = 1.0 |
-|---|---|---|---|---|
-| GPT-Live, the two recorded turns (0.69×, 0.78×) | 45 underruns, 56.8 s of gaps | 5, 7.8 s | **0, 0.0 s** | 0 % |
-| GPT-Live 0.85×, 2–6 s replies, 0.3–1.5 s stalls every 2–4 s | 31, 48.4 s | 6, 9.3 s | **1, 1.1 s** | 15 % |
-| GPT-Live 0.75×, same shape | 47, 78.0 s | 22, 45.9 s | **9, 21.0 s** | 4 % |
-| GPT-Live 0.75× with a 600 ms fast start | 95, 111.8 s | 27, 79.0 s | **22, 52.9 s** | 2 % |
-| GPT-Live 0.75×, 5–12 s monologues (stress) | 66, 166.3 s | 39, 141.0 s | **30, 94.4 s** | 5 % |
-| GPT-Live 0.85×, 5–12 s monologues (stress) | 47, 96.6 s | 27, 72.7 s | **17, 31.1 s** | 15 % |
-| Gemini 4× | 0 | 0 | **0** | 94 % |
-
-Underruns and gaps both fall sharply from *before* through *targets only*
-to *after* on every row, and on the two recorded turns they reach **zero**:
-GPT-Live's 1 200 ms provider target alone (*targets only*) is already close
-to the 800 ms + 250 ms wait those turns need, and the stretch finishes the
-job. The synthetic 2–6 s and 5–12 s timelines — deliberately harder than
-the recording, with stalls up to 1.5 s — do not reach zero: both run below
-the 0.85 rate floor for stretches long enough that even fully stretched
-the player consumes faster than the source sends, so the target keeps
-finding a new underrun to grow from. Where it settles balances +100 ms per
-underrun against −20 ms per clean reply — from about one reply in two
-(0.75×, 5–12 s) to about one in sixty (0.85×, 2–6 s). Offline experiments
-(not committed) showed what would close the remaining gap further —
-starting GPT-Live at 1 500 ms, or a 0.75 rate floor — each at the cost of
-more silence before a short reply starts. Those change the shared policy,
-so they are left for the daemon/browser
-side to agree on. For Gemini, what is not 1.0 is mostly the last ~150 ms of
-each reply (the tail always runs below the target once the final chunk is
-in) and brief dips when two slow chunks meet.
-
-**Start buffer lowered to 400 ms (2026-09-25).** The daemon now paces
-GPT-Live's input at real time (`docs/audio-e2e-results.md`, the daemon
-repo): one billed run measured `realtime_ratio` 0.94–1.06, against
-0.74–0.87 before. `PlaybackProfile.openAI` follows: 400 ms start, the
-2 000 ms cap and the time-stretch unchanged.
-`testPacedGPTLiveLongReplyPlaysThroughTheFourHundredMillisecondStartBuffer`
-replays that run's real `/ws` arrival timeline (`Timelines.pacedLongReplyMs`,
-mirroring the daemon's committed
-`web/voice/testdata/gptlive-paced-long-reply.json`) through the 400 ms
-profile: at most one underrun, no more than the old 1 200 ms profile sees
-on the same timeline (both catch the same 869 ms hole the daemon's
-`PauseHold` leaves around a mid-count pause — not a gap inside a word),
-and zero from the point the reply becomes continuous. The older, recorded
-pre-pacing timelines above keep replaying under the 1 200 ms profile they
-were tuned for (`TimeStretchReplayTests.prepacingProfile`), not `.openAI`.
-
-The session is `.playAndRecord` with mode `.voiceChat` and options
-`.allowBluetooth`, `.allowBluetoothA2DP`, `.defaultToSpeaker`. `.voiceChat`
-is what turns on the system echo canceller: without it the dog's own voice
-out of the speaker comes back up the microphone and it interrupts itself.
-Interruptions (a call, Siri) pause the engine and flush playback; route
-changes (AirPods in or out) rebuild the capture chain, because the hardware
-sample rate changes underneath the tap.
-
-The input tap runs on the audio render thread, so the buffer is copied there
-and the conversion happens on the main actor, which owns the converter, the
-chunker and the gate. One copy of ~85 ms of float samples, about twelve
-times a second, is far cheaper than making that state thread-safe.
-
-### Voice detection (what gets sent)
-
-The browser's gate — peak below 8 LSB (−72 dBFS) for 300 ms — was ported
-first, and on a phone it almost never closed: Chrome runs its own noise
-suppression in front of that gate, iOS did not, so room noise streamed to
-the model continuously and came back as words ("fishing", "Discord"). It
-is replaced by `VoiceActivityDetector` (`Sources/SheepdogKit`), per 40 ms
-frame:
-
-1. **Level in the speech band.** The frame goes through a 2nd-order
-   high-pass at 300 Hz and low-pass at 3.4 kHz (fans, HVAC, handling rumble
-   and hiss are mostly outside), is cut into four 10 ms sub-blocks, and its
-   level is the **second-quietest** sub-block's energy in dBFS — sustained
-   speech barely moves, a keyboard click (one or two sub-blocks) vanishes.
-2. **Adaptive noise floor**: the 15th percentile of those levels over the
-   last 4 s, never below −72 dBFS. The pauses between words set it, not the
-   words; it follows a louder room up within the window (~3.5 s) and a
-   quieter one down within about a second.
-3. **Adaptive margin**: the gate opens at floor + 6…10 dB. The margin is
-   `4 + 2 × spread`, where spread is the 15th minus the 2nd percentile of
-   the same history (speech never reaches down there): a steady fan gets
-   6 dB, a room of other voices ~10.
-4. **Attack and hangover**: open once 120 ms (3 frames) of the last 280 ms
-   are above the margin — a window, not a run, because speech dips between
-   syllables; close after 400 ms below the margin minus 3 dB of hysteresis.
-5. **Pre-roll**: on opening, the attack window plus 100 ms of withheld audio
-   is sent ahead of the opening frame (380 ms), so the first syllable — and
-   an initial "s" the band filter does not count — is never clipped.
-
-The `/ws` contract is unchanged: `{"type":"silence","on":…}` on every
-transition, frames only while open. `CaptureGate` wraps the detector and
-hold-to-talk's manual override, and emits a transition exactly when its
-visible state changes, so switching mid-session never leaves the daemon out
-of step. (The ported peak gate, `SilenceGate`, is gone: it only ever served
-as a comparison and it processed every frame.) All tunables are in `VADTuning`.
-
-**Tested with macOS text-to-speech.** `scripts/make-fixtures.sh` renders six
-voices (Samantha, Daniel, Karen, Moira, Fred, Rishi) with `say` and
-`afconvert` to 16 kHz mono PCM16 (508 KB, committed). The tests generate
-white, pink and brown noise, **babble** (the other five voices at once) and
-a **keyboard** (3–8 ms bursts 80–350 ms apart), mix them under two
-utterances at 20/10/5 dB SNR (speech at −26 dBFS active level), and score
-three voice pairs per cell. Latency is from the first frame where the voice
-is 6 dB above the noise in the speech band; coverage is the share of
-frames where the voice is above the noise (full band) that reached the
-socket.
-
-| Noise | SNR | Open latency, median / worst | Coverage (worst) | Opens on the noise between utterances |
-|---|---|---|---|---|
-| white | 20 dB | 120 / 120 ms | 100 % | 0 |
-| white | 10 dB | 120 / 160 ms | 100 % | 0 |
-| white | 5 dB | 120 / 160 ms | 100 % | 0 |
-| pink | 20 dB | 120 / 160 ms | 100 % | 0 |
-| pink | 10 dB | 160 / 200 ms | 100 % | 0 |
-| pink | 5 dB | 120 / 160 ms | 100 % | 0 |
-| brown | 20 dB | 160 / 200 ms | 100 % | 0 |
-| brown | 10 dB | 120 / 120 ms | 100 % | 0 |
-| brown | 5 dB | 120 / 120 ms | 100 % | 0 |
-| babble | 20 dB | 120 / 160 ms | 100 % | 0 |
-| babble | 10 dB | 120 / 160 ms | 100 % | 0 |
-| babble | 5 dB | 160 / **1 120 ms** | **29 %** | 0 |
-| clicks | 20 dB | 160 / 200 ms | 100 % | 0 |
-| clicks | 10 dB | 160 / 200 ms | 100 % | 0 |
-| clicks | 5 dB | 160 / 200 ms | 100 % | 0 |
-
-Noise alone, 60 s of each kind at −31, −45 and −60 dBFS: **0 opens** in
-every one of the 15 runs (the brief's limit was 1 per 10 s). Loud clicks at
-−20 dBFS: 0. The one weak cell is **5 dB babble** — one voice barely above a
-room of others — where Fred's "Stop." is lost and the gate opens on the
-next words; it is asserted separately (at most two of six utterances late,
-mean coverage ≥ 80 %). Voice Isolation (below) is the answer for that room.
-The same room noise at −50 dBFS went through the old peak gate **100 %**
-and through the detector **0 %** (measured before the peak gate was removed).
-
-**Voice Isolation.** iOS's microphone modes (Standard, Voice Isolation,
-Wide Spectrum) apply before the app sees a sample, to apps using voice
-processing. Settings ▸ Microphone mode shows `AVCaptureDevice.activeMicrophoneMode`
-and opens the system panel (`showSystemUserInterface(.microphoneModes)`);
-a one-time tip suggests it after the first listening session.
-
-**No microphone signal.** `MicSignalWatchdog`: unmuted, capturing, and every
-sample digital zero (or no buffers at all) for 3 s means the capture path is
-broken, not that the room is quiet — a real room is never exactly zero. The
-status line says "No microphone signal — check the mic", the mic button gets
-an amber badge, the engine logs the input format, voice-processing state and
-both input mutes, and rebuilds the capture chain once. At start the engine
-also clears the voice-processing unit's own input mute and iOS 17's app-wide
-input mute (AirPods' press-to-mute drives it) — either left on gives exactly
-the 25 s of zeros seen on the phone on 2026-09-22 — and a multi-channel
-input is downmixed rather than reduced to its first channel.
-
-### Sample rates
+The session is `.playAndRecord` with mode `.voiceChat` and the options
+`.allowBluetooth`, `.allowBluetoothA2DP` and `.defaultToSpeaker`.
+`.voiceChat` turns on the system echo canceller. Interruptions (a call,
+Siri) pause the engine and flush playback. If iOS will not give the audio
+back, the orb says "Audio paused by iOS — tap to resume". Route changes
+rebuild the capture chain, because the hardware sample rate changes
+underneath the tap. The tap buffer is copied on the render thread and
+converted on the main actor, which owns the converter, the chunker and the
+gate.
 
 | | Rate | Format |
 |---|---|---|
@@ -535,64 +250,144 @@ input is downmixed rather than reduced to its first channel.
 | Down from the daemon | 24 000 Hz | PCM16 LE mono, arbitrary chunks |
 | Player node | 24 000 Hz | Float32 mono (the engine resamples to the device) |
 
-### Measured
+`AudioLatencyTests` measured capturing, converting, chunking and gating one
+85.3 ms tap buffer at about 0.07 ms on average in the simulator, so the
+conversion is not a bottleneck. The live numbers are in Settings ▸ About and
+in `os_log` (subsystem `com.github.kccarlos.herdr-sheepdog-ios`, categories
+`audio`, `socket` and `session`).
 
-On the iOS 26 simulator on an Apple-silicon Mac, over 117 tap buffers of
-85.3 ms each (`AudioLatencyTests`):
+### The adaptive jitter buffer
 
-- **Capture, convert, chunk and gate one tap buffer: mean 0.073 ms, worst
-  0.171 ms.** The real-time budget for that buffer is 85.3 ms, so the
-  conversion uses about 0.09 % of it. The sample-rate path is not the
-  bottleneck and will not be on a device either.
-- **Playback queue depth**, driven with the chunk sizes the model actually
-  produces (40–730 ms): **730 ms worst case**, which is one long chunk — the
-  queue adds a jitter buffer (150–500 ms, adaptive — see above) on top of
-  whatever the model sends and nothing more.
+`PlaybackQueue` tracks its own **playhead**, computed from chunk durations
+rather than from `AVAudioPlayerNode`'s completion callbacks, which arrive
+late and jittery.
 
-The same two numbers are live in the app under Settings ▸ About, and go to
-`os_log` under the subsystem `com.github.kccarlos.herdr-sheepdog-ios`, categories `audio`,
-`socket` and `session`.
+- A drain counts as an **underrun** (a gap you can hear) only if more audio
+  from the same utterance arrives within 300 ms. Each underrun raises the
+  target by 100 ms, up to the provider's ceiling.
+- After an underrun, the queue **refills before resuming**. The first chunk
+  of the refill gets an 8 ms fade-in.
+- An utterance with no underrun decays the target by 20 ms, down to the
+  provider's floor. A `flush` does not move the target.
+- The "start anyway" wait for a short reply is the target plus 250 ms.
 
-## The voice bar's words
+### Adaptive time-stretch
 
-`VoiceBarModel` also owns what the bar *says*. The mic button is never a
-bare microphone: live, it shows the input level as a ring and reads "Mute
-microphone"; muted, it is a red slashed mic reading "Unmute microphone",
-and the status line says "Muted — tap to unmute". Connected and unmuted the
-status line says "Listening — just talk", and the first time that happens a
-coach mark says "Just talk — Sheepdog is listening. Tap the mic only to
-mute." (People had been muting to talk.) **Hold to talk** (Settings,
-off by default) turns the orb into a walkie-talkie — press opens the gate
-with its pre-roll, release closes it, pressing while the dog talks stops
-it — and hides Mute.
+The player **plays slower when the buffer runs low**, preserving pitch,
+through an `AVAudioUnitTimePitch`. The policy (`PlaybackRatePolicy`) is pure
+and matches the browser page's:
 
-## The voice provider
+- **Target T per provider** (`PlaybackProfile`, chosen from `/ws`
+  `status.provider`): Gemini starts at 150 ms with a 500 ms cap. GPT-Live
+  (`openai`) starts at 400 ms with a 2 000 ms cap.
+- **Rate r from buffered audio b**: 1.0 when b ≥ T. Below T it falls
+  linearly to 0.90 at T/2 and reaches the 0.85 floor at T/4. Above 2T it
+  is 1.05. The rate changes by at most 0.02 per 20 ms.
+- **Catching up needs latency debt.** The player speeds up to 1.05 only to
+  win back latency it added by playing slower than 1.0. Gemini arrives far
+  ahead of real time and would otherwise play everything 5 % fast. The
+  debt resets when a reply ends.
+- The playhead runs at 1/r, and `bufferedMilliseconds(at:)` (the policy's b
+  and the ping's `buffer_ms`) measures audio, not wall-clock time.
+  `AudioEngine` runs the 20 ms control loop, and a flush or Stop resets the
+  rate to 1.0.
 
-`GET /api/voice/providers` lists what the daemon can run the live session on
-(Gemini Live, GPT-Live); `PUT /api/voice/provider {"provider":…}` switches.
-Settings ▸ Voice lists them, unavailable ones disabled with the daemon's
-reason, GPT-Live marked "Billed per minute". `/api/hello`, `/api/state`
-(`voice_provider`, `voice_model`) and the `/ws` `status` (`provider`) are
-decoded as optional, and a 404 on the list hides the section, so the app
-works unchanged against an older daemon. The connection sheet shows the
-provider and model.
+`TimeStretchReplayTests` replays recorded and synthetic GPT-Live and Gemini
+arrival timelines through the queue. `TimePitchGraphTests` renders the real
+player → time-pitch → mixer graph offline.
+
+### Voice detection (what gets sent)
+
+`VoiceActivityDetector` runs on each 40 ms frame:
+
+1. **Level in the speech band.** The frame passes through a 2nd-order
+   high-pass filter at 300 Hz and a low-pass filter at 3.4 kHz. It is then
+   cut into four 10 ms sub-blocks, and its level is the energy of the
+   **second-quietest** sub-block. Sustained speech barely moves this value,
+   while a keyboard click disappears.
+2. **Adaptive noise floor**: the 15th percentile of the levels over the
+   last 4 s, never below −72 dBFS.
+3. **Adaptive margin**: the gate opens at floor + `4 + 2 × spread` dB, where
+   spread is the 15th minus the 2nd percentile. A steady fan gives about
+   6 dB, and a room of other voices about 10.
+4. **Attack and hangover**: the gate opens once 120 ms of the last 280 ms
+   are above the margin, and closes after 400 ms below the margin minus
+   3 dB.
+5. **Pre-roll**: when the gate opens, 380 ms of withheld audio is sent
+   first, so the first syllable is never clipped.
+
+`CaptureGate` wraps the detector and the hold-to-talk override. It emits a
+transition exactly when its visible state changes. All the tunables are in
+`VADTuning`.
+
+**Tested with macOS text-to-speech.** `scripts/make-fixtures.sh` renders six
+voices with `say`. The tests mix them with white, pink and brown noise,
+babble (the other voices) and keyboard clicks at 20, 10 and 5 dB SNR.
+
+| Noise | SNR | Open latency, median / worst | Coverage (worst) | Opens on the noise between utterances |
+|---|---|---|---|---|
+| white | 20 / 10 / 5 dB | 120 / 120–160 ms | 100 % | 0 |
+| pink | 20 / 10 / 5 dB | 120–160 / 160–200 ms | 100 % | 0 |
+| brown | 20 / 10 / 5 dB | 120–160 / 120–200 ms | 100 % | 0 |
+| babble | 20 / 10 dB | 120 / 160 ms | 100 % | 0 |
+| babble | 5 dB | 160 / **1 120 ms** | **29 %** | 0 |
+| clicks | 20 / 10 / 5 dB | 160 / 200 ms | 100 % | 0 |
+
+Noise alone (60 s of each kind at −31, −45 and −60 dBFS) opens the gate
+**0 times**. The weak cell is 5 dB babble, one voice barely above a room of
+others. It is asserted separately, and Voice Isolation is the answer for
+that room.
+
+**Voice Isolation.** Settings ▸ Microphone shows
+`AVCaptureDevice.activeMicrophoneMode` and opens the system panel. A
+one-time tip suggests it after the first listening session.
+
+**No microphone signal.** `MicSignalWatchdog` watches for 3 s in which the
+app is unmuted and capturing but every sample is digital zero (or no
+buffers arrive). That means the capture path is broken. The status line
+then says "No microphone signal — check the mic", the engine logs the input
+format, the voice-processing state and both input mutes, and it rebuilds
+the capture chain once. At start, the engine clears the voice-processing
+unit's input mute and iOS's app-wide input mute, and downmixes a
+multi-channel input. When the microphone is denied or will not start, the
+orb says "No microphone" (`SessionState.noMicrophone`).
+
+## The voice bar
+
+`VoiceBarView` is one full-width row containing the mic (mute) button, the
+orb, the status line, Type and End (✕). Each control has a fixed slot, and
+the bar's height depends only on the text size. `VoiceBarModel` decides
+what the orb's tap does (Connect when disconnected, Stop while the dog is
+thinking or speaking, otherwise nothing) and what the bar says: "Tap the
+orb to connect", "Listening — just talk", "Muted — tap to unmute", "Hold
+the orb to talk". While the mic is live, the mic button shows the input
+level as a ring. When muted, it shows a red slashed mic. With voice off or
+no microphone, the mic button is hidden. A first-run coach mark explains
+that the mic is only for muting. The first time Mute is used, the status
+line explains it. **Hold to talk** (Settings ▸ Microphone) turns the orb
+into a push-to-talk button and hides Mute.
+
+The **connection chip** (`ConnectionChip`) reflects only the daemon
+connection (the `/ws` socket, the `/events` stream and the token), never
+the voice state. It shows green "Connected", amber "Reconnecting…", red
+"Offline" or "Token refused", or grey "Not connected". Tapping it opens the
+address, a timed round trip, the daemon's version, the voice provider and
+model, the brain, and Reconnect / Open Settings.
+
+A new question with options plays a distinct haptic pattern and a short
+chime through the audio session (`Haptics`).
 
 ## The session core
 
-`SessionCore` (Kit) is every decision the voice session makes, as a value:
-connecting and reconnecting, who owns mute, when the audio engine runs,
-hold-to-talk, playback, the thinking timeout, the background pause and the
-"paused by iOS" state. `SessionViewModel` only adapts. Each callback — a tap,
-the `/ws` socket, the `/events` stream, the audio engine, the scene phase,
-the UI ticker — becomes a `SessionEvent`; `apply(_:now:)` updates the core
-and returns `[SessionEffect]`; the view model runs the effects in order,
-copies `socketMuted`/`socketGateClosed` onto `VoiceSocket` (which says them
-on every open), and publishes what the core derives. An effect may call
-back synchronously (`AudioEngine.setMuted` reports the gate), which just
-feeds the next event: `apply` has returned by then. `SessionCoreTests`
-pins the behaviour as event sequences with the exact effects.
-
-The core's fields, by concern:
+`SessionCore` (Kit) holds every decision the voice session makes, as a
+value: connecting and reconnecting, who owns mute, when the audio engine
+runs, hold-to-talk, playback, the thinking timeout, the background pause
+and the "paused by iOS" state. `SessionViewModel` only adapts it. Every
+callback (a tap, the socket, the event stream, the audio engine, the scene
+phase, the UI ticker) becomes a `SessionEvent`. `apply(_:now:)` updates the
+core and returns `[SessionEffect]`, and the view model runs those effects
+in order. `SessionCoreTests` pins the behaviour as event sequences with
+their exact effects.
 
 | Group | Fields |
 |---|---|
@@ -603,98 +398,41 @@ The core's fields, by concern:
 | `thinkingExpiry` | a tool call's 30 s timeout |
 | `suspension` | `pausedByIOS`, `backgroundSuspended`, `keepListeningWhenLocked` |
 
-Derived, as pure computed properties: `sessionState` (the orb),
-`connectionChip`, `voiceBar` (`VoiceBarModel`), `statusLine`, `daemonMute`,
-`acceptsPlayback` (not while paused in the background) and `playbackBusy`
-(the ticker's fast cadence).
+These are derived as pure computed properties: `sessionState` (the orb),
+`connectionChip`, `voiceBar`, `statusLine`, `daemonMute`, `acceptsPlayback`
+and `playbackBusy`.
 
-**Events.** The user: `connectTapped`, `endTapped`, `muteTapped`,
-`holdBegan`, `holdEnded`, `talkModeChanged`, `resumeTapped`, `stopTapped`,
-`keepListeningLockedChanged`, `providerSelected`. Connecting:
-`probeSucceeded(micGranted:)`, `probeFailed`, `tokenRefused` (a 401 on
-`/events`), `eventsChanged(SocketLife)`. The socket: `socketOpened`,
-`socketClosed(reason:willRetry:)`, `socketFailed(_:willRetry:)`, `status`,
-`flush`, `daemonError`. The engine: `gateChanged`, `simulatedGate` (the
-fake-voice debug mode), `audioStarted(gateClosed:)`, `audioStartFailed`,
-`playbackChanged`, `micSignal(ok:)`, `interruption(paused:)`,
-`audioResumeFailed`. `/events`: `toolCall`, `toolResult`. The app:
-`scenePhase(active|background)`, `tick`.
+Behaviour worth knowing:
 
-**Effects.** `probe` (the `/api/state` auth probe, then the microphone
-permission), `openSocket`, `closeSocket`, `startStreams`/`stopStreams`
-(`/events` and the 5 s state refresh), `send(WSMessage)`, `startAudio`
-(unless the engine runs), `stopAudio`, `suspendAudio`, `resumeAudio`,
-`setCaptureMuted`, `setManualGate`, `flushPlayback`, `flushTranscript`,
-`startTicker`/`stopTicker`, `showBanner(SessionBanner)`/`clearBanner`,
-`notice`, `haptic`, `openSettings`, `refreshState` (debounced),
-`syncHistory` (2.5 s later), `log`.
-
-The connection, as a state diagram (`connection.socket`, with
-`wantsConnection`):
-
-```
-            connectTapped                      probeSucceeded
-  idle ───────────────────▶ connecting ─────────────────────────▶ connecting
-   ▲  ▲   [clearBanner, probe]   │        [openSocket, startStreams,  (socket)
-   │  │                          │         startTicker]                 │
-   │  │ probeFailed / 401        │                                      │ socketOpened
-   │  └──────────────────────────┘                                      ▼ [clearBanner, haptic]
-   │     [showBanner, (openSettings), closeSocket, stopAudio,  ┌────── open ◀──────────┐
-   │      stopStreams, stopTicker]                              │        │              │
-   │                                                            │        │ socketClosed │ socketOpened
-   │  endTapped (from anywhere): [closeSocket, stopAudio,       │        │ willRetry    │
-   │   stopStreams, stopTicker, (setManualGate(false))]         │        ▼ [stopAudio]  │
-   │                                                            │   reconnecting ───────┘
-   │  socketClosed !willRetry: [stopAudio, stopStreams,         │        │ socketFailed: quiet for 30 s
-   └── stopTicker, (showBanner(.replaced))] ◀───────────────────┘        │ [log], then one banner
-                                                                         │ [showBanner(stillReconnecting)],
-      socketFailed 401 or !willRetry ─▶ idle (as probeFailed)            │ then quiet until End
-```
-
-Once open, the voice and the microphone:
-
-```
-  status(connected|connecting…) ─▶ [startAudio] ─▶ audioStarted(gateClosed) ─▶ [send(silence) if it differs]
-  status(closed)                ─▶ [stopAudio, notice once per session]
-  status(muted ≠ the app's)     ─▶ [log once, send(mute(app's))]      (never adopted)
-  muteTapped (open mic)         ─▶ mute:   [setCaptureMuted(true), send(mute(true)), haptic]
-                                   unmute: [send(mute(false)), setCaptureMuted(false), startAudio?, haptic]
-  talkModeChanged(hold)         ─▶ unmute first if muted, then [setManualGate(false)]; Mute is inert there
-  holdBegan / holdEnded         ─▶ [stop… if the dog is busy, setManualGate(true), haptic] / [setManualGate(false)]
-  scenePhase(background), lock toggle off ─▶ [suspendAudio, send(mute(true)), log]
-  scenePhase(active) after that           ─▶ [send(mute(user's)), startAudio?, log]
-  interruption(paused: true)    ─▶ orb "Audio paused by iOS"; resumeTapped ─▶ [resumeAudio]
-  toolCall ─▶ thinking until toolResult [refreshState], stopTapped, End, or a tick 30 s later
-  stopTapped ─▶ [flushPlayback, flushTranscript, send(cancel), haptic]; drops the speaking hold
-  flush      ─▶ [flushPlayback, flushTranscript, syncHistory]; drops the speaking hold
-```
+- **Reconnects** use backoff of up to 10 s. For the first 30 s the orb
+  quietly says "Reconnecting…". After that, one banner says the daemon is
+  unreachable while the app keeps trying until End. A refused token stops
+  the session at once. If another client takes the session (the daemon
+  serves one at a time), the app says so once and waits.
+- **The app owns mute.** It tells the daemon its mute state on every
+  connect and corrects a daemon that disagrees. Hold-to-talk never mutes.
+- **Keep listening with the screen locked** (on by default). When it is
+  off, going to the background pauses the microphone and playback and
+  sends `mute`, so a per-minute GPT-Live session stops billing. Both resume
+  when the app comes back.
 
 ## The orb
 
-`SessionState` is a pure function of eight inputs — socket life (`SocketLife`,
-shared with `ConnectionChip` and `VoiceSocket`'s own bookkeeping), voice
-status, stalled, muted, gate closed, speaking, a tool call in flight, and
-audio paused by iOS — resolved in one ordered list of rules, most urgent
-first; `SessionCore.sessionState` feeds it from the core's fields. The views render it and nothing else, so the orb, the title and the
-buttons can never disagree. (The `closed` status's `reason` string is not
-one of the eight: it only feeds the notice text when voice goes off, never
-the state machine itself.)
-
-*Speaking* is held for **800 ms** across playback gaps (`SpeakingHold`):
-the user saw the orb flick between speaking and muted while GPT-Live
-underran, because speaking outranks muted and every gap dropped it for a
-moment. A flush or Stop drops the hold at once. Mute is not an orb state
-while the dog is speaking or thinking: the orb keeps that state and wears a
-small red slashed-mic badge (`SessionState.showsMuteBadge`); the mute
-button stays the source of truth for mute. `capturing` comes off the same value: the microphone
-runs only in the states where something can hear it, which is why
-`--voice=off` keeps it shut and says why.
+`SessionState` is a pure function of the socket life, voice status,
+stalled, muted, gate closed, speaking, a tool call in flight, microphone
+availability and audio paused by iOS. It is resolved through one ordered
+list of rules, most urgent first. The views render only this value, so the
+orb, the status line and the buttons cannot disagree. *Speaking* is held
+for 800 ms across playback gaps (`SpeakingHold`), and a flush or Stop drops
+it at once. Mute is not an orb state while the dog is speaking or thinking.
+Instead the orb wears a small red mic badge. `capturing` is derived from
+the same value: the microphone runs only in states where something can
+hear it.
 
 ## Concurrency
 
-Swift 5 language mode, on purpose. The audio path (tap callbacks,
-`AVAudioConverter` input blocks, `AVAudioPlayerNode` completion handlers) is
-not `Sendable`-clean and making it so under Swift 6 strict concurrency would
-have cost more than it bought for v1. The shape is still safe: the Kit types
+The project uses Swift 5 language mode on purpose. The audio path (tap
+callbacks, `AVAudioConverter` input blocks, `AVAudioPlayerNode` completion
+handlers) is not `Sendable`-clean. The design is still safe: the Kit types
 are value types, the view models and the audio engine are `@MainActor`, and
 the one real-time boundary is the explicit buffer copy in the tap.

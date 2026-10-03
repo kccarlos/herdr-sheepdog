@@ -1,16 +1,12 @@
 # Xcode Cloud: tests on every PR, TestFlight on every tag
 
-This repository has no GitHub Actions (also true on the account level:
-GitHub Actions is blocked by billing on this account since 2026-09-27, and
-private-repo macOS runners bill at ten times the Linux rate besides).
+iOS does not use GitHub Actions; it is blocked by billing on this account.
 Apple's Xcode Cloud builds and tests every pull request and every push to
 `main`, and a `v*` tag archives the app and puts it in TestFlight. Xcode
-Cloud minutes come with the Apple Developer Program.
+Cloud minutes are included in the Apple Developer Program.
 
-Configured and exercised as of 2026-09-28: the **PR** and **TestFlight**
-workflows below both ran real builds, and build **0.1.0 (2)** is in
-TestFlight (internal group **Me**) — see [`status.md`](status.md) for what
-is and is not verified from there.
+The latest build in TestFlight is **0.1.0 (10)** (internal group **Me**),
+built from tag `v0.1.0`.
 
 | | |
 |---|---|
@@ -20,8 +16,8 @@ is and is not verified from there.
 | App Store Connect record | "Sheepdog for herdr" (the name "Sheepdog" was taken), App ID 6817155887, SKU `herdr-sheepdog-ios` |
 | Product and scheme | `Sheepdog` (shared; Test runs `SheepdogKitTests` and `SheepdogUITests`, Archive uses Release) |
 | Version | `MARKETING_VERSION` in `project.yml` (now `0.1.0`) |
-| Build number | Xcode Cloud's own, `CI_BUILD_NUMBER` — latest in TestFlight is `0.1.0 (2)`, built 2026-09-28 from `main` `4916d10` with Xcode 27 / macOS 27 |
-| TestFlight internal group | **Me** (tester: thisiskecheng@gmail.com). Beta App Review contact is unsaved (needs a phone number); only matters for external testing, not used here |
+| Build number | Xcode Cloud's own, `CI_BUILD_NUMBER`. The latest in TestFlight is `0.1.0 (10)`, from tag `v0.1.0` (`2355322`) |
+| TestFlight internal group | **Me** (tester: thisiskecheng@gmail.com). The Beta App Review contact is not saved; it only matters for external testing, which is not used |
 
 Bundle IDs may contain letters, digits, hyphens and periods (Apple's
 `CFBundleIdentifier` rule), so the hyphens from the GitHub repository name
@@ -76,15 +72,15 @@ configuration, `production` in Release, which is what Xcode Cloud
 archives — and `com.apple.developer.usernotifications.time-sensitive`. The
 Info.plist key `SheepdogPushEnvironment` follows the same split (`sandbox` /
 `production`) and is what the app tells the daemon its device token belongs
-to. Automatic signing normally turns the capabilities on for the App ID by
-itself. **If an archive fails on capabilities or provisioning** ("Provisioning
-profile … doesn't include the aps-environment entitlement", "doesn't support
-the Push Notifications capability", or the same for Time Sensitive
-Notifications), enable **Push Notifications** and **Time Sensitive
-Notifications** on the App ID `com.github.kccarlos.herdr-sheepdog-ios` at
-<https://developer.apple.com/account/resources/identifiers/list> and re-run
-the build. The daemon side needs an APNs auth key (`.p8`) for team
-`GV776BZVA8` — herdr-sheepdog `docs/push.md`.
+to. Xcode Cloud's automatic signing does **not** turn these capabilities on
+for the App ID. Build 9 failed at export with "Automatic signing cannot
+update bundle identifier". On 2026-10-02 **Push Notifications** and **Time
+Sensitive Notifications** were enabled by hand on the App ID
+`com.github.kccarlos.herdr-sheepdog-ios`
+(<https://developer.apple.com/account/resources/identifiers/list>), and the
+next build (10) shipped. Any new capability needs the same step before the
+first archive that uses it. On the daemon side, you need an APNs auth key
+(`.p8`) for team `GV776BZVA8` (herdr-sheepdog `docs/push.md`).
 
 **Export compliance.** `ITSAppUsesNonExemptEncryption` is `NO` in the app's
 Info.plist: the app uses only the encryption built into iOS (HTTPS/WSS
@@ -139,9 +135,6 @@ Manage Workflows).
 
 ## 2. The three workflows
 
-As configured and confirmed working on 2026-09-28 (Build 1 on **PR**
-succeeded in about 4.5 minutes; **TestFlight** produced build `0.1.0 (2)`).
-
 ### PR
 
 | Section | Setting |
@@ -165,14 +158,12 @@ request as a GitHub check.
 | Environment | Xcode **Latest Release**, macOS **Latest Release** |
 | Start Conditions | **Tag Changes**: Custom Tags ▸ tag begins with `v`. Remove any branch condition |
 | Actions | **Archive** ▸ Platform iOS, Scheme **Sheepdog**, Deployment Preparation **TestFlight (Internal Testing Only)** |
-| Post-Actions | **TestFlight Internal Testing** ▸ the internal group from section 4 |
+| Post-Actions | **TestFlight Internal Testing** ▸ group **Me** (section 4) |
 
 "TestFlight (Internal Testing Only)" skips the App Store checks that only
 matter for external testers and the store; switch it to "TestFlight and App
 Store" if the app ever goes further. The post-action needs the internal
-group to exist, so create the group (section 4) before adding it; the first
-tag can also be run without the post-action and the build added to the
-group by hand.
+group to exist, so create the group (section 4) before adding it.
 
 ### Internal TestFlight Build
 
@@ -196,9 +187,9 @@ script.
 Expected, from this repository on a local Mac (Xcode 27, Apple silicon;
 Xcode Cloud machines are in the same range but a clean build every time):
 
-- **PR** (post-clone + build for testing + 334 tests, of which the 8 UI
-  tests and 2 live-daemon tests skip): about 5–10 minutes. The tests
-  themselves take about 1.5 minutes.
+- **PR** (post-clone, build for testing, and the unit tests; the UI tests
+  and live-daemon tests skip): about 5–10 minutes. The tests themselves
+  take about 1.5 minutes.
 - **TestFlight** (post-clone + Release archive + signing + upload): about
   5–10 minutes, then App Store Connect processes the build for another
   5–30 minutes (not billed) before TestFlight offers it.
@@ -245,6 +236,9 @@ skips the tag check.
 
 ## 6. When something fails
 
+To see why a run failed without opening Xcode, use `asc xcode-cloud doctor`
+and download the log artifacts (`~/.claude/skills/asc/SKILL.md`).
+
 | Symptom | Cause | Fix |
 |---|---|---|
 | Fails in "Run ci_post_clone.sh" with `tag vX does not match MARKETING_VERSION` | the tag and `project.yml` disagree | delete the tag (`git push --delete origin vX`), fix `MARKETING_VERSION` on `main`, tag again |
@@ -253,11 +247,11 @@ skips the tag check.
 | Post-clone script not run at all ("Could not find Sheepdog.xcodeproj") | the script is not executable or not at `ci_scripts/ci_post_clone.sh` | `git update-index --chmod=+x ci_scripts/ci_post_clone.sh`, keep the directory at the repository root next to `project.yml` |
 | "Scheme Sheepdog is not shared" / the scheme is missing in the workflow editor | the scheme came from a hand-made project, or `schemes:` was removed from `project.yml` | keep the `schemes:` block; XcodeGen writes it to `Sheepdog.xcodeproj/xcshareddata/xcschemes/`. Regenerate locally and reopen the workflow editor |
 | `No profiles for 'com.github.kccarlos.herdr-sheepdog-ios'` / `Automatic signing is disabled` / "requires a development team" | the bundle ID is not registered on team `GV776BZVA8`, or `DEVELOPMENT_TEAM` changed | check <https://developer.apple.com/account/resources/identifiers/list>; register it by hand if onboarding did not; keep `DEVELOPMENT_TEAM: GV776BZVA8` and `CODE_SIGN_STYLE: Automatic` |
-| Archive fails: the profile "doesn't include the aps-environment entitlement" / "doesn't support the Push Notifications capability" (or Time Sensitive Notifications) | the App ID does not have the capability yet | enable Push Notifications and Time Sensitive Notifications on `com.github.kccarlos.herdr-sheepdog-ios` in the developer portal (Identifiers), then re-run ("How the build works" ▸ Push notifications) |
+| Export fails with "Automatic signing cannot update bundle identifier" (build 9), or the archive fails because the profile "doesn't include the aps-environment entitlement" / "doesn't support the Push Notifications capability" (or Time Sensitive Notifications) | the App ID does not have the capability; Xcode Cloud will not add it | enable Push Notifications and Time Sensitive Notifications on `com.github.kccarlos.herdr-sheepdog-ios` in the developer portal (Identifiers), then re-run ("How the build works" ▸ Push notifications) |
 | Signing fails with an agreement or "Program License Agreement" message | a pending agreement | accept it (section 1) and re-run |
 | `No suitable application records were found` | no App Store Connect app record | create it (App Store Connect ▸ Apps ▸ + ▸ New App, the bundle ID above) |
 | Build sits at "Missing Compliance" | `ITSAppUsesNonExemptEncryption` missing from the built Info.plist | it is in `project.yml`; check it survived an edit |
 | The TestFlight post-action has no group to pick | no internal group yet | section 4, then edit the workflow |
 | Tests pass locally, fail on Xcode Cloud in the UI tests | a fixture daemon answered on 127.0.0.1:7799 locally | on Xcode Cloud they should skip; look for a test that does not call `XCTSkip` without a daemon |
 | "No source code repositories were found for this project" when connecting the repository | `origin` used the SSH host alias `git@github-kccarlos:…` (an `~/.ssh/config` `Host` alias for a multi-account setup); Xcode Cloud can't resolve it, and a git `url.<alias>.insteadOf` rewrite doesn't help — Xcode applies the remote URL as written | point `origin` at plain HTTPS: `git remote set-url origin https://github.com/kccarlos/herdr-sheepdog-ios.git`, then `gh auth setup-git` (with `gh` logged in as `kccarlos`) so git's credential helper handles push/pull without the SSH alias |
-| Yellow warning in the workflow editor: "the scheme Sheepdog may only exist locally and may not be accessible to Xcode Cloud" | expected — `Sheepdog.xcodeproj` is gitignored, so Xcode Cloud can't see the scheme in the repository itself | ignore it; `ci_scripts/ci_post_clone.sh` generates the project (and the scheme with it) on the runner before the scheme is needed. Confirmed harmless: Build 1 (PR) and Build 2 (TestFlight) both succeeded with this warning showing |
+| Yellow warning in the workflow editor: "the scheme Sheepdog may only exist locally and may not be accessible to Xcode Cloud" | expected — `Sheepdog.xcodeproj` is gitignored, so Xcode Cloud can't see the scheme in the repository itself | ignore it; `ci_scripts/ci_post_clone.sh` generates the project (and the scheme with it) on the runner before the scheme is needed |
