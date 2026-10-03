@@ -226,8 +226,11 @@ func (h brainHost) AnswerPrompt(ctx context.Context, paneID string, keys []strin
 	defer s.mu.Unlock()
 	p, has := s.store.Pending()
 	if !has || p.Kind != state.PendingAnswerPrompt || p.PaneID != paneID {
-		revived, ok := s.revivePrompt(ctx, paneID, "send_keys")
+		revived, ok, why := s.revivePrompt(ctx, paneID, "send_keys")
 		if !ok {
+			if why != "" {
+				return "", fmt.Errorf("%w: %s; nothing was sent", brain.ErrNotPermitted, why)
+			}
 			return "", fmt.Errorf("%w: %s has no pending approval prompt now", brain.ErrNotPermitted, s.aliasOf(paneID))
 		}
 		p = revived

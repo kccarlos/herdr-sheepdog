@@ -456,7 +456,9 @@ func TestStartupPromisesAnnounced(t *testing.T) {
 			h := newHarness(t)
 			h.addAgent("w5:p1", "auth", "codex", herdr.StateIdle)
 			for i := 0; i < n; i++ {
-				if _, err := h.sup.createPromise("w5:p1", brain.PromiseRequest{Text: fmt.Sprintf("thing %d is done", i), Event: brain.PromiseEventDone}); err != nil {
+				// One per event: a second open promise for the same event
+				// is a duplicate (TestDuplicatePromiseIsAFact).
+				if _, err := h.sup.createPromise("w5:p1", brain.PromiseRequest{Text: fmt.Sprintf("thing %d is done", i), Event: brain.PromiseEvents[i]}); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -598,5 +600,43 @@ func TestCarriedOverPromiseInLedgerNotBriefing(t *testing.T) {
 	sys := calls[len(calls)-1].System()
 	if !strings.Contains(sys, `"let me know when it's done": when auth finishes`) || !strings.Contains(sys, "(from an earlier run)") {
 		t.Errorf("ledger:\n%s", sys)
+	}
+}
+
+// A promise the brain repeats is not recorded twice: the tool's error is
+// the fact that it is already open and in which turn it was made
+// (tier-2 bench 2026-10-03, collision-finish-push: "Noted. I'll tell
+// you…" confirmations counted as unprompted). A promise for another
+// event, or once the first was kept, is recorded as usual.
+func TestDuplicatePromiseIsAFact(t *testing.T) {
+	h := newHarness(t)
+	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
+	first, err := h.sup.createPromise("w5:p1", brain.PromiseRequest{Text: "tell me when auth is done", Event: brain.PromiseEventDone, Turn: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.clock.Advance(20 * time.Second)
+	_, err = h.sup.createPromise("w5:p1", brain.PromiseRequest{Text: "let the CEO know when auth finishes", Event: brain.PromiseEventDone, Turn: 5})
+	want := `already promised at ` + first.CreatedAt.Format("15:04:05") + `: "tell me when auth is done" is still open, nothing new was recorded; it was made in turn 3, and whether that turn's reply told the CEO is in your transcript`
+	if err == nil || err.Error() != want {
+		t.Fatalf("duplicate: err = %v\nwant %s", err, want)
+	}
+	if open := h.sup.openPromises(); len(open) != 1 {
+		t.Errorf("open promises = %d", len(open))
+	}
+	if h.log.count("promise.duplicate") != 1 {
+		t.Error("no promise.duplicate event")
+	}
+	// Repeated inside the same turn: no earlier turn to point to.
+	_, err = h.sup.createPromise("w5:p1", brain.PromiseRequest{Text: "tell me when auth is done", Event: brain.PromiseEventDone, Turn: 3})
+	if err == nil || strings.Contains(err.Error(), "made in turn") {
+		t.Errorf("same turn: err = %v", err)
+	}
+	if _, err := h.sup.createPromise("w5:p1", brain.PromiseRequest{Text: "tell me if it asks", Event: brain.PromiseEventBlocked, Turn: 5}); err != nil {
+		t.Errorf("another event: %v", err)
+	}
+	doneAuth(h)
+	if _, err := h.sup.createPromise("w5:p1", brain.PromiseRequest{Text: "tell me when auth is done again", Event: brain.PromiseEventDone, Turn: 6}); err != nil {
+		t.Errorf("after the first was kept: %v", err)
 	}
 }

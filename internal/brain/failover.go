@@ -36,13 +36,25 @@ const (
 // Variables only so tests can shrink them.
 var (
 	// failoverReserve is what a step's first attempt leaves for the
-	// retry while the selected provider is on a failing streak: the
-	// 2026-10-02 01:01–01:07 Vertex calls each ran into the turn's
-	// deadline before answering 504, leaving no time for anything else.
-	failoverReserve = 5 * time.Second
-	// failoverMinAttempt is the least the first attempt keeps; with less
-	// the reserve is not taken.
+	// retry on another provider: the fallback's typical step. Measured
+	// on the daemon's brain.step events (2026-09-18 – 10-03): DeepSeek
+	// deepseek-flash p50 2.3 s, p90 6.7 s, p95 8.3 s, max 12.6 s (486
+	// steps); Vertex gemini-3.8-flash p50 2.3 s, p90 6.7 s, p95 8.6 s,
+	// max 15.6 s (144). 8 s is about the p95 of either. Tier-3 bench
+	// 2026-10-03 #7: Vertex answered 504 after about 20 s and the
+	// DeepSeek retry had about 1 s left.
+	failoverReserve = 8 * time.Second
+	// failoverMinAttempt is the least the first attempt keeps while the
+	// selected provider is on a failing streak (it has just failed, so
+	// its attempt may be short); with less the reserve is not taken.
 	failoverMinAttempt = 2 * time.Second
+	// failoverHealthyAttempt is the least the first attempt keeps when
+	// the provider is not on a streak: as much as the reserve, so a
+	// healthy but slow first call is not cut for a retry it does not
+	// need (an owed announce turn of 15 s + 3 s grace keeps 10 s; the
+	// 25 s utterance turn's first step keeps 20 s, above every step
+	// measured).
+	failoverHealthyAttempt = 8 * time.Second
 )
 
 // failoverOrder is the order candidates are tried in after the failing
@@ -51,14 +63,22 @@ var (
 // quota is the scarcest); providers not listed follow, sorted.
 var failoverOrder = []string{ProviderVertex, ProviderDeepSeek, ProviderGemini}
 
-// providerSpoken is how a notice names a provider.
-var providerSpoken = map[string]string{ProviderGemini: "Gemini", ProviderVertex: "Vertex", ProviderDeepSeek: "DeepSeek"}
+// Notice is something the brain tells the CEO about itself, in both
+// languages the daemon speaks: the notifier picks the one the CEO last
+// spoke (supervisor.ceoLanguage).
+type Notice struct {
+	English string
+	Chinese string
+}
 
-func spokenProvider(id string) string {
-	if s, ok := providerSpoken[id]; ok {
-		return s
-	}
-	return id
+// failoverNotice is the line for a failing streak. It names no vendor
+// (tier-2 bench 2026-10-03 #7: "DeepSeek is failing; using Vertex for
+// now." made the simulated CEO ask about "the Vertex worker"): which
+// model answers is the daemon's business, that answers may differ is
+// the CEO's.
+var failoverNotice = Notice{
+	English: "My usual model is having trouble; a backup is answering for now.",
+	Chinese: "我平时用的模型出了点问题，现在先由备用模型回答。",
 }
 
 // failoverState is the run's record of failovers away from the selected
@@ -156,8 +176,8 @@ func contains(list []string, s string) bool {
 }
 
 // onFailingStreak reports whether provider (the selected one) failed
-// over within failoverStreakWindow: its next first attempt leaves time
-// for the retry (failoverReserve).
+// over within failoverStreakWindow: its next first attempt may be cut
+// to failoverMinAttempt to leave the retry its reserve.
 func (b *Brain) onFailingStreak(provider string) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -171,9 +191,8 @@ func (b *Brain) onFailingStreak(provider string) bool {
 // generateStep is one model call of the turn with failover: the turn's
 // provider first, then — once per turn, on a failoverReason error — the
 // failover target, which stays the turn's provider for its remaining
-// steps. While the selected provider is on a failing streak and a
-// target exists, the first attempt leaves failoverReserve of the turn's
-// deadline for the retry.
+// steps. When a target exists, the first attempt leaves failoverReserve
+// of the turn's deadline for the retry (firstAttempt).
 func (b *Brain) generateStep(ctx context.Context, t *turn, step int, msgs []Message, cfg *genai.GenerateContentConfig) (*genai.GenerateContentResponse, json.RawMessage, error) {
 	actx := ctx
 	if !t.failedOver {
@@ -208,16 +227,21 @@ func (b *Brain) generateStep(ctx context.Context, t *turn, step int, msgs []Mess
 }
 
 // firstAttempt is the context of a call's first attempt on provider:
-// ctx itself, or — while provider is on a failing streak and a failover
-// target exists — ctx cut failoverReserve before its deadline, so the
-// retry has time (a provider that hangs to the deadline otherwise takes
-// it all).
+// ctx cut failoverReserve before its deadline when a failover target is
+// registered and the attempt still keeps its minimum — failoverMinAttempt
+// while provider is on a failing streak, failoverHealthyAttempt otherwise
+// — so a provider that hangs until it answers 504 leaves the retry a
+// real budget; else ctx itself.
 func (b *Brain) firstAttempt(ctx context.Context, provider, model string) (context.Context, context.CancelFunc) {
-	if !b.onFailingStreak(provider) {
+	dl, ok := ctx.Deadline()
+	if !ok {
 		return ctx, func() {}
 	}
-	dl, ok := ctx.Deadline()
-	if !ok || time.Until(dl)-failoverReserve < failoverMinAttempt {
+	least := failoverHealthyAttempt
+	if b.onFailingStreak(provider) {
+		least = failoverMinAttempt
+	}
+	if time.Until(dl)-failoverReserve < least {
 		return ctx, func() {}
 	}
 	if _, _, _, ok := b.failoverTarget(provider, model); !ok {
@@ -293,8 +317,8 @@ func (b *Brain) noteFailover(from, to string) {
 	if !due {
 		return
 	}
-	text := fmt.Sprintf("%s is failing; using %s for now.", spokenProvider(from), spokenProvider(to))
-	b.log.Log(logSource, "brain.failover_notice", "", map[string]any{"from": from, "to": to, "failovers": n, "text": text})
+	notice := failoverNotice
+	b.log.Log(logSource, "brain.failover_notice", "", map[string]any{"from": from, "to": to, "failovers": n, "text": notice.English})
 	// Off the turn: the notice path is the supervisor's push, which must
 	// not run under whatever the turn's caller holds. Tracked as
 	// after-turn work, so Close waits for it before closing the
@@ -302,14 +326,14 @@ func (b *Brain) noteFailover(from, to string) {
 	b.after.Add(1)
 	go func() {
 		defer b.after.Done()
-		notify(text)
+		notify(notice)
 	}()
 }
 
 // SetNotifier sets how the brain tells the CEO something about itself
-// (a provider failing over and over): the daemon's spoken push. nil
-// turns notices off.
-func (b *Brain) SetNotifier(f func(text string)) {
+// (a provider failing over and over): the daemon's spoken push, in the
+// CEO's language. nil turns notices off.
+func (b *Brain) SetNotifier(f func(n Notice)) {
 	b.mu.Lock()
 	b.notify = f
 	b.mu.Unlock()

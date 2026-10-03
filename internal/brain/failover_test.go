@@ -57,7 +57,7 @@ type notices struct {
 
 func newNotices(b *Brain) *notices {
 	n := &notices{ch: make(chan string, 8)}
-	b.SetNotifier(func(text string) { n.ch <- text })
+	b.SetNotifier(func(notice Notice) { n.ch <- notice.English })
 	return n
 }
 
@@ -199,7 +199,7 @@ func TestFailoverNotice(t *testing.T) {
 		t.Fatalf("notice before three consecutive failovers: %q", s)
 	}
 	turn(true)
-	if s := n.next(); s != "Vertex is failing; using DeepSeek for now." {
+	if s := n.next(); s != "My usual model is having trouble; a backup is answering for now." {
 		t.Fatalf("notice = %q", s)
 	}
 	if ev := h.log.ofType("brain.failover_notice"); len(ev) != 1 || payload(ev[0])["failovers"] != 3 {
@@ -228,11 +228,13 @@ func TestFailoverNotice(t *testing.T) {
 }
 
 // While the selected provider is on a failing streak, a step's first
-// attempt leaves the reserve for the retry: a call that hangs to the
-// turn's deadline (the 01:01 Vertex shape) is cut early and the retry
-// still answers. Without the streak the same hang runs out the turn.
+// attempt leaves the reserve for the retry even when it keeps only the
+// streak minimum: a call that hangs to the turn's deadline (the 01:01
+// Vertex shape) is cut early and the retry still answers. Without the
+// streak, a turn too short to keep the healthy minimum is not cut, and
+// the same hang runs out the turn.
 func TestFailoverReserveOnFailingStreak(t *testing.T) {
-	defer SetFailoverReserve(400*time.Millisecond, 100*time.Millisecond)()
+	defer SetFailoverReserve(400*time.Millisecond, 100*time.Millisecond, 800*time.Millisecond)()
 	hang := braintest.Step{FnCtx: func(ctx context.Context, _ braintest.Call) (*genai.GenerateContentResponse, error) {
 		<-ctx.Done()
 		return nil, ctx.Err()
@@ -263,6 +265,75 @@ func TestFailoverReserveOnFailingStreak(t *testing.T) {
 	ev := h.log.ofType("brain.failover")
 	if len(ev) != 2 || payload(ev[1])["reason"] != "timeout" {
 		t.Errorf("brain.failover = %v", ev)
+	}
+}
+
+// Tier-3 bench 2026-10-03 #7: Vertex answered 504 after about 20 s and
+// the DeepSeek retry had about 1 s left. With another provider
+// registered, a step's first attempt now leaves the reserve for the
+// retry outside a failing streak too, whenever the attempt keeps the
+// healthy minimum: the hang is cut, the retry answers with the reserve
+// left, and a healthy call that answers inside its cut is untouched.
+func TestFailoverReserveWithoutStreak(t *testing.T) {
+	defer SetFailoverReserve(400*time.Millisecond, 100*time.Millisecond, 400*time.Millisecond)()
+	var cut time.Duration
+	hang := braintest.Step{FnCtx: func(ctx context.Context, _ braintest.Call) (*genai.GenerateContentResponse, error) {
+		start := time.Now()
+		<-ctx.Done()
+		cut = time.Since(start)
+		return nil, err504 // Vertex's answer when its own deadline expires
+	}}
+	slowOK := braintest.Step{FnCtx: func(ctx context.Context, _ braintest.Call) (*genai.GenerateContentResponse, error) {
+		select {
+		case <-time.After(300 * time.Millisecond):
+			return braintest.Response(braintest.Step{Text: braintest.Reply("Slow but fine.", "")}), nil
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}}
+	primary := braintest.NewModel(hang, slowOK)
+	h := newHarness(t, primary, func(c *Config) {
+		c.Provider, c.Model = ProviderVertex, "gemini-3.8-flash"
+		c.UtteranceTimeout, c.FinalGrace = 500*time.Millisecond, 500*time.Millisecond
+	})
+	var retryLeft time.Duration
+	ds := braintest.NewModel(braintest.Step{FnCtx: func(ctx context.Context, _ braintest.Call) (*genai.GenerateContentResponse, error) {
+		if dl, ok := ctx.Deadline(); ok {
+			retryLeft = time.Until(dl)
+		}
+		return braintest.Response(braintest.Step{Text: braintest.Reply("Fine.", "")}), nil
+	}})
+	if err := h.brain.AddProvider(ProviderDeepSeek, ds); err != nil {
+		t.Fatal(err)
+	}
+	rep, err := h.ask("how is auth?", "auth")
+	if err != nil {
+		t.Fatalf("turn fell back: %v", err)
+	}
+	if rep.Spoken != "Fine." {
+		t.Errorf("reply = %+v", rep)
+	}
+	if cut > 800*time.Millisecond {
+		t.Errorf("first attempt ran %s, want cut at about 600 ms", cut)
+	}
+	if retryLeft < 300*time.Millisecond {
+		t.Errorf("retry had %s left, want about the 400 ms reserve", retryLeft)
+	}
+	if ev := h.log.ofType("brain.failover"); len(ev) != 1 || payload(ev[0])["from"] != ProviderVertex {
+		t.Errorf("brain.failover = %v", ev)
+	}
+	// A healthy call that answers inside its cut is not affected (the
+	// streak the first turn started does not matter here: it answers).
+	rep, err = h.ask("how is auth?", "auth")
+	if err != nil || rep.Spoken != "Slow but fine." {
+		t.Errorf("healthy slow call: %+v, %v", rep, err)
+	}
+	// Alone, a provider's first attempt keeps the whole turn.
+	h2 := newHarness(t, braintest.NewModel(slowOK), func(c *Config) {
+		c.UtteranceTimeout, c.FinalGrace = 500*time.Millisecond, 500*time.Millisecond
+	})
+	if rep, err := h2.ask("how is auth?", "auth"); err != nil || rep.Spoken != "Slow but fine." {
+		t.Errorf("single provider: %+v, %v", rep, err)
 	}
 }
 

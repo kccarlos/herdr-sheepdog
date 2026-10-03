@@ -186,6 +186,11 @@ type EventFacts struct {
 	// the model to follow, not a rule (run C, H4: a short Chinese "yes"
 	// after an English announcement was answered in English).
 	Language string
+	// OpenPrompt is set on an utterance turn when a worker's prompt is
+	// open and the CEO has likely not heard its announcement (another
+	// line buried it, or the voice judged it unheard) before these words
+	// (docs/bench/tier3-2026-10-03.md #9): the fact, as a sentence.
+	OpenPrompt string
 }
 
 // The values of EventFacts.Language.

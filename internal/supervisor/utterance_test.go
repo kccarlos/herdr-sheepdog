@@ -739,3 +739,58 @@ func waitFor(t *testing.T, cond func() bool, what string) {
 	}
 	t.Fatalf("timed out waiting for %s", what)
 }
+
+// Tier-3 bench 2026-10-03 #8: an instruction typed into a busy Claude
+// Code is folded into its running turn; the stop's Ctrl-C stops both,
+// but the request stays in the worker's history. The brain gets that as
+// a fact (a context line); nothing is sent to the worker to drop it. An
+// instruction that started the agent's turn itself gets no such line.
+func TestStopAfterAQueuedInstructionTellsTheBrain(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		state  herdr.State
+		queued bool
+	}{
+		{"busy agent", herdr.StateWorking, true},
+		{"idle agent", herdr.StateIdle, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := braintest.NewModel(
+				braintest.Step{Calls: []*genai.FunctionCall{braintest.FC(brain.ToolPrompt, map[string]any{"agent": "auth", "text": "also write a README"})}},
+				braintest.Step{Text: braintest.Reply("Telling auth to also write a README. Sent.", "")},
+			)
+			h := newBrainHarness(t, m)
+			h.addAgent("w5:p1", "auth", "claude", tc.state)
+			h.clock.Advance(10 * time.Second) // busy for a while before the instruction
+			if res := h.say("tell auth to also write a README right now"); !strings.HasSuffix(res.Spoken, "Sent.") {
+				t.Fatalf("propose = %+v", res)
+			}
+			if tc.state == herdr.StateIdle {
+				h.clock.Advance(time.Second)
+				h.transition("w5:p1", herdr.StateIdle, herdr.StateWorking)
+			}
+			h.clock.Advance(5 * time.Second)
+			stop := h.say("stop")
+			if stop.Spoken != "Sent an interrupt to auth." {
+				t.Errorf("stop = %+v", stop)
+			}
+			const want = `the instruction "also write a README." was typed into auth's running turn before the interrupt, so it may still be in auth's history and come back with its next instruction; nothing was sent to drop it`
+			var found bool
+			for _, msg := range h.sup.Brain().Transcript().Messages() {
+				if msg.Kind == brain.KindSystem && msg.Content == want {
+					found = true
+				}
+			}
+			if found != tc.queued {
+				t.Errorf("queued fact in the transcript = %v, want %v", found, tc.queued)
+			}
+			ev := h.log.ofType("supervisor.stopped")
+			if q, _ := payload(ev[0])["queued"].(string); (q == "also write a README.") != tc.queued {
+				t.Errorf("supervisor.stopped = %v", payload(ev[0]))
+			}
+			if n := len(h.promptRequests()); n != 1 {
+				t.Errorf("%d prompts sent, want only the instruction", n)
+			}
+		})
+	}
+}

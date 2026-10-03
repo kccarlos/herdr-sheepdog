@@ -71,3 +71,46 @@ func TestAgentRecordsBySpokenNameAndTitle(t *testing.T) {
 		t.Errorf("by title:\n%s", got)
 	}
 }
+
+// Tier-2 bench 2026-10-03 #6: "Let me know when bench-claude is done."
+// reached the brain as "Oh, I know when Bench Squad is done." and the
+// brain invented a rename. The request now states that no agent has the
+// heard name, with the closest names, so the brain can ask.
+func TestUnmatchedHeardName(t *testing.T) {
+	clock := func() time.Time { return time.Date(2026, 10, 3, 6, 20, 0, 0, time.UTC) }
+	agents := []AgentInfo{
+		{Alias: "bench-codex", State: "working"},
+		{Alias: "bench-claude", Spoken: "bench-claude", State: "working"},
+	}
+	for _, words := range []string{
+		"Oh, I know when Bench Squad is done.",
+		"Oh, I know when Bench Quad is done.",
+		"Let me know when Bench Clad is done.",
+		"Was Bench Clear done?",
+	} {
+		got := agentRecords(agents, words, clock)
+		if !strings.HasPrefix(got, "No agent is called \"Bench ") || !strings.Contains(got, "none was renamed to that") {
+			t.Errorf("%q: line = %q", words, got)
+			continue
+		}
+		if i, j := strings.Index(got, `"bench-claude"`), strings.Index(got, `"bench-codex"`); i < 0 || j < 0 || i > j {
+			t.Errorf("%q: closest names not nearest first: %q", words, got)
+		}
+	}
+	if got := agentRecords(agents, "Oh, I know when Bench Squad is done.", clock); got != `No agent is called "Bench Squad", and none was renamed to that; the closest names: "bench-claude", "bench-codex". Speech recognition can mishear a name.` {
+		t.Errorf("line = %q", got)
+	}
+	// Not a name: a lower-case word after the prefix, no prefix at all,
+	// or an agent that is named.
+	for _, words := range []string{"is the bench done?", "how is everyone doing?", "what about bench-claude-2", "Let me know when Bench Claude is done."} {
+		if got := unmatchedNameLine(agents, words); got != "" {
+			t.Errorf("%q: line = %q", words, got)
+		}
+	}
+	// A spoken name's first word counts too, and the spoken name is
+	// listed with its alias.
+	spoken := []AgentInfo{{Alias: "sheepdog-claude", Spoken: "README Claude"}, {Alias: "sheepdog-claude-2", Spoken: "Parser Claude"}}
+	if got := unmatchedNameLine(spoken, "Is README Cloud finished?"); !strings.Contains(got, `"README Cloud"`) || !strings.Contains(got, `"README Claude" (sheepdog-claude), "Parser Claude" (sheepdog-claude-2)`) {
+		t.Errorf("spoken: %q", got)
+	}
+}

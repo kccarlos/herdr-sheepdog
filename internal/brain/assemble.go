@@ -317,6 +317,9 @@ func requestText(req Request) string {
 	if line := heardLine(req.facts.Heard); line != "" {
 		s += "\n" + line
 	}
+	if req.facts.OpenPrompt != "" {
+		s += "\n" + req.facts.OpenPrompt
+	}
 	if line := languageLine(req.facts.Language); line != "" {
 		s += "\n" + line
 	}
@@ -486,6 +489,9 @@ func factsUpdate(before, now EventFacts) string {
 	}
 	if nb, na := heardAfter(before.Heard), heardAfter(now.Heard); len(na) > len(nb) && now.Heard != nil {
 		parts = append(parts, "while you were working the voice was given, after the CEO began speaking: "+pushedLines(na[len(nb):], now.Heard.SpokeAt)+"; the CEO's words do not answer it")
+	}
+	if now.OpenPrompt != before.OpenPrompt && now.OpenPrompt != "" {
+		parts = append(parts, strings.TrimSuffix(now.OpenPrompt, "."))
 	}
 	if now.Language != before.Language && now.Language != "" {
 		parts = append(parts, "the CEO's last words are now in "+now.Language)
@@ -699,7 +705,9 @@ const (
 // had pushed, Vertex said it had not, from a screen that says nothing
 // about pushing). The daemon sees a worker only through its screen and
 // its own session transcript, which the record says too: what is not
-// here is unknown to it, as a fact. "" when no agent is named.
+// here is unknown to it, as a fact. When no agent is named but the words
+// carry a name like theirs, the fact that no agent has it
+// (unmatchedNameLine); "" otherwise.
 func agentRecords(agents []AgentInfo, words string, clock func() time.Time) string {
 	var b strings.Builder
 	var now time.Time
@@ -753,6 +761,9 @@ func agentRecords(agents []AgentInfo, words string, clock func() time.Time) stri
 			}
 			b.WriteString(";")
 		}
+	}
+	if b.Len() == 0 {
+		return unmatchedNameLine(agents, words)
 	}
 	return b.String()
 }

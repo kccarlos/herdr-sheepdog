@@ -53,14 +53,20 @@ func (s *Supervisor) eventIDOf(paneID string) string {
 
 // tags returns tags with the announcement's event id added.
 func (a announcement) tags(tags map[string]any) map[string]any {
-	if a.eventID == "" {
+	if a.eventID == "" && a.pending == "" {
 		return tags
 	}
-	out := make(map[string]any, len(tags)+1)
+	out := make(map[string]any, len(tags)+2)
 	for k, v := range tags {
 		out[k] = v
 	}
-	out[tagEventID] = a.eventID
+	if a.eventID != "" {
+		out[tagEventID] = a.eventID
+	}
+	if a.pending != "" {
+		// The answer_prompt the line announces (buried.go).
+		out[tagPendingID] = a.pending
+	}
 	return out
 }
 

@@ -585,7 +585,7 @@ func (s *Supervisor) utteranceTurn(ctx context.Context, u *inflightUtterance) ut
 	// turn starts, since it may queue behind an announce turn whose
 	// line goes out meanwhile (heard.go).
 	req.Facts = func() brain.EventFacts {
-		return brain.EventFacts{Heard: s.heardFacts(start), Language: s.ceoLanguage()}
+		return brain.EventFacts{Heard: s.heardFacts(start), Language: s.ceoLanguage(), OpenPrompt: s.openPromptFact(start)}
 	}
 	// supervisor.repeat_window_s: an identical roster delivered again
 	// inside the window is noise over voice, so the brain gets a note it

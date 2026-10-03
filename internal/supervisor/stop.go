@@ -61,6 +61,11 @@ type stopOutcome struct {
 	alias  string
 	// failed is set when the interrupt phase could not send its Ctrl-C.
 	failed bool
+	// queued is the instruction the interrupt phase's Ctrl-C followed
+	// when it went to an agent already busy with a turn of its own:
+	// typed into the running turn, it may stay in the worker's history
+	// (queuedLine).
+	queued string
 }
 
 // Stop runs the stop procedure and says what it stopped. trigger is one
@@ -71,10 +76,17 @@ func (s *Supervisor) Stop(ctx context.Context, trigger string) (voice.ToolResult
 	// bare word all come through here.
 	s.toolCalled()
 	out := s.resolveStop(ctx)
-	s.log.Log(logSource, "supervisor.stopped", out.paneID, map[string]any{"phase": out.phase, "what": out.what, "trigger": trigger})
+	stopped := map[string]any{"phase": out.phase, "what": out.what, "trigger": trigger}
+	if out.queued != "" {
+		stopped["queued"] = out.queued
+	}
+	s.log.Log(logSource, "supervisor.stopped", out.paneID, stopped)
 	if s.brain != nil {
 		// A context line, not a turn: no model call.
 		s.brain.Daemon("the CEO said stop: " + out.what)
+		if out.queued != "" {
+			s.brain.Daemon(queuedLine(out))
+		}
 	}
 	return voice.ToolResult{Spoken: stopSentence(out), Scheduling: voice.UrgencyInterrupt}, nil
 }
@@ -125,6 +137,11 @@ func (s *Supervisor) resolveStop(ctx context.Context) stopOutcome {
 			} else {
 				// The next working -> done is the Ctrl-C, not a finish.
 				s.interrupted[p.PaneID] = s.cfg.Now()
+				if row.StateSince.Before(p.CreatedAt) {
+					// Busy before the instruction went in: it was queued
+					// into the running turn.
+					out.queued = withoutSignOff(p.PayloadText)
+				}
 			}
 			s.clearPending(p, "stop")
 			s.mu.Unlock()
@@ -188,6 +205,16 @@ func (s *Supervisor) investigationAbout(text string) (string, bool) {
 		return s.lastSubject, true
 	}
 	return "", false
+}
+
+// queuedLine is the fact the brain gets after a stop interrupted an agent
+// that had an instruction queued (tier-3 bench 2026-10-03 #8): Claude
+// Code folds a message typed into a busy session into its running turn,
+// and Ctrl-C stops both but leaves the request in its conversation, so
+// the next instruction may revive it. Nothing is sent to the worker:
+// whether to tell it to drop the request is the CEO's call.
+func queuedLine(out stopOutcome) string {
+	return fmt.Sprintf("the instruction %q was typed into %s's running turn before the interrupt, so it may still be in %s's history and come back with its next instruction; nothing was sent to drop it", out.queued, out.alias, out.alias)
 }
 
 // stopSentence is the stop's acknowledgement, short for the ear. The

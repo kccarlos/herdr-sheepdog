@@ -31,10 +31,11 @@ func (m *GenaiModel) KeyIndex() int {
 // NewVertexModelAt is NewVertexModel against baseURL (a fake server).
 var NewVertexModelAt = newVertexModel
 
-// SetFailoverReserve shrinks the failover reserve and minimum first
-// attempt for a test; the returned func restores them.
-func SetFailoverReserve(reserve, minAttempt time.Duration) func() {
-	r, m := failoverReserve, failoverMinAttempt
-	failoverReserve, failoverMinAttempt = reserve, minAttempt
-	return func() { failoverReserve, failoverMinAttempt = r, m }
+// SetFailoverReserve shrinks the failover reserve and the minimum first
+// attempt (on a failing streak, and healthy) for a test; the returned
+// func restores them.
+func SetFailoverReserve(reserve, minAttempt, healthyAttempt time.Duration) func() {
+	r, m, h := failoverReserve, failoverMinAttempt, failoverHealthyAttempt
+	failoverReserve, failoverMinAttempt, failoverHealthyAttempt = reserve, minAttempt, healthyAttempt
+	return func() { failoverReserve, failoverMinAttempt, failoverHealthyAttempt = r, m, h }
 }

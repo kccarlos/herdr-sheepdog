@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 )
@@ -60,5 +61,61 @@ func TestInstructionTypedAtTheInputLine(t *testing.T) {
 	}
 	if h.log.count("supervisor.instruction_blocked_by_menu") != 0 {
 		t.Error("blocked at an input line")
+	}
+}
+
+// #107's known limit: a menu on an idle pane got no pending, so "skip"
+// by voice hit "no pending approval prompt". The send_keys path now
+// revives a menu shown on an idle pane when the shepherd's newest words
+// are about it — they name an option or a word of its question — and the
+// rail checks those words as for any prompt. Words about something else,
+// or a working pane, still get nothing.
+func TestIdleMenuAnswerableByVoice(t *testing.T) {
+	screen := fixture(t, "codex-update-menu.screen.txt")
+	prompt, ok := herdr.ParsePrompt(screen)
+	if !ok || len(prompt.Options) < 2 {
+		t.Fatalf("fixture does not parse: %+v", prompt)
+	}
+	skip := prompt.Options[1].Keys
+	for _, c := range []struct {
+		name   string
+		state  herdr.State
+		words  string
+		sent   bool
+		reason string
+	}{
+		{"skip by voice", herdr.StateIdle, "Skip it.", true, ""},
+		{"by number", herdr.StateIdle, "option two", true, ""},
+		{"words about something else", herdr.StateIdle, "Tell codex to run the tests.", false, "auth is showing a menu, but the shepherd's last words are not about it"},
+		{"working pane", herdr.StateWorking, "Skip it.", false, "has no pending approval prompt now"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			h := newHarness(t)
+			h.addAgent("w5:p1", "auth", "codex", c.state)
+			h.srv.SetScreen("w5:p1", screen)
+			h.clock.Advance(time.Second)
+			h.hear(c.words)
+			_, err := brainHost{s: h.sup}.AnswerPrompt(context.Background(), "w5:p1", skip)
+			sent := len(h.sendKeysRequests()) == 1
+			if sent != c.sent {
+				t.Fatalf("sent = %v (err %v), want %v", sent, err, c.sent)
+			}
+			if c.sent {
+				if err != nil {
+					t.Fatal(err)
+				}
+				ev := h.log.ofType("pending.revived")
+				if len(ev) != 1 || payload(ev[0])["state"] != string(herdr.StateIdle) {
+					t.Errorf("pending.revived = %v", ev)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), c.reason) {
+				t.Errorf("err = %v, want %q", err, c.reason)
+			}
+			if _, ok := h.pending(); ok {
+				t.Error("a pending action was left behind")
+			}
+		})
 	}
 }
