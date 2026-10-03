@@ -401,7 +401,6 @@ func (s *Supervisor) Run(ctx context.Context) {
 	reconcile := time.NewTicker(s.cfg.SnapshotInterval)
 	defer reconcile.Stop()
 	defer s.shutdown()
-	defer s.stopNames()
 	// Once at startup, the roster is already loaded (state.Open ran
 	// before New): catches a pane whose prompt changed while the daemon
 	// was down, which no post-answer poll ever ran for.
@@ -440,6 +439,7 @@ func (s *Supervisor) shutdown() {
 	s.mu.Lock()
 	s.shut = true
 	s.mu.Unlock()
+	s.stopNames()
 	s.stopRelay()
 	s.endLife()
 	s.cancelInvestigations("shutdown")

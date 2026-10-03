@@ -46,6 +46,8 @@ func TestSpokenNames(t *testing.T) {
 			map[string]string{"p1": "Claude", "p2": "Claude 2"}},
 		{"agy and unknown kinds", []Agent{ag("p1", "agy", "x", ""), ag("p2", "pi", "x", "")},
 			map[string]string{"p1": "Antigravity", "p2": "Pi"}},
+		{"chinese title capped by runes", []Agent{ag("p1", "claude", "s", "修复语音延迟修复语音延迟修复语音延迟修复语音延迟修复语音延迟修复语音延迟修复语音延迟"), ag("p2", "claude", "s", "")},
+			map[string]string{"p1": "修复语音延迟修复语音延迟修复语音延迟修复语音延迟修复语音延迟修复 Claude", "p2": "s Claude"}},
 		{"no project", []Agent{ag("p1", "codex", "", "A"), ag("p2", "codex", "", "")},
 			map[string]string{"p1": "A Codex", "p2": "Codex"}},
 	}

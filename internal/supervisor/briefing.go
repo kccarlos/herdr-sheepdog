@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
@@ -188,7 +190,7 @@ func recentResult(a state.Agent, now time.Time) string {
 	}
 	spoken := strings.TrimRight(a.LastResult.Spoken, ".!?")
 	for _, name := range []string{state.Say(a), a.Alias} {
-		if name != "" && strings.HasPrefix(strings.ToLower(spoken), strings.ToLower(name)+" ") {
+		if name != "" && len(spoken) > len(name) && spoken[len(name)] == ' ' && strings.EqualFold(spoken[:len(name)], name) {
 			spoken = lowerFirst(strings.TrimSpace(spoken[len(name):]))
 			break
 		}
@@ -244,7 +246,8 @@ func pendingTrailer(agents []state.Agent, pending state.PendingAction, sentence 
 	if alias == "" {
 		return ""
 	}
-	name := strings.ToUpper(alias[:1]) + alias[1:]
+	r, n := utf8.DecodeRuneInString(alias)
+	name := string(unicode.ToUpper(r)) + alias[n:]
 	if pending.Question == "" || strings.Contains(sentence, pending.Question) {
 		return name + " is waiting for your answer."
 	}

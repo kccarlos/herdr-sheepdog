@@ -124,11 +124,7 @@ func TestRenameThroughNoteTool(t *testing.T) {
 		braintest.Step{Text: braintest.Reply("Docs pass Claude is called docs now.", "")},
 	)
 	h := newBrainHarness(t, m, withTitleFixtures(t))
-	var renamed []json.RawMessage
-	h.srv.Handle("agent.rename", func(p json.RawMessage) (any, error) {
-		renamed = append(renamed, p)
-		return map[string]any{}, nil
-	})
+	h.srv.Handle("agent.rename", func(json.RawMessage) (any, error) { return map[string]any{}, nil })
 	h.claudeIn("w1:p1", readmeSession, herdr.StateIdle)
 	h.claudeIn("w2:p1", docsSession, herdr.StateIdle)
 
@@ -136,12 +132,13 @@ func TestRenameThroughNoteTool(t *testing.T) {
 	if !strings.Contains(res.Spoken, "docs") {
 		t.Errorf("result = %+v", res)
 	}
+	renamed := h.srv.RequestsFor("agent.rename")
 	if len(renamed) != 1 {
 		t.Fatalf("agent.rename requests = %d", len(renamed))
 	}
 	var params struct{ Target, Name string }
-	if err := json.Unmarshal(renamed[0], &params); err != nil || params.Target != "w2:p1" || params.Name != "docs" {
-		t.Errorf("agent.rename params = %s", renamed[0])
+	if err := json.Unmarshal(renamed[0].Params, &params); err != nil || params.Target != "w2:p1" || params.Name != "docs" {
+		t.Errorf("agent.rename params = %s", renamed[0].Params)
 	}
 	row, _ := h.store.Get("w2:p1")
 	if row.Name != "docs" || row.Spoken != "docs" || row.SpokenWas != "docs pass Claude" {
@@ -179,5 +176,15 @@ func TestRenameEdgeCases(t *testing.T) {
 	}
 	if _, err := h.sup.rename(context.Background(), "w2:p1", "Front End"); err == nil {
 		t.Error("a name another agent has was accepted")
+	}
+}
+
+// A CEO name in Chinese starts the briefing's trailer intact (the first
+// rune upper-cased, never a cut byte).
+func TestPendingTrailerKeepsRunes(t *testing.T) {
+	agents := []state.Agent{{PaneID: "w1:p1", Alias: "x-claude", Name: "文档", Spoken: "文档", State: herdr.StateBlocked}}
+	got := pendingTrailer(agents, state.PendingAction{Kind: state.PendingAnswerPrompt, PaneID: "w1:p1"}, "")
+	if got != "文档 is waiting for your answer." {
+		t.Errorf("trailer = %q", got)
 	}
 }

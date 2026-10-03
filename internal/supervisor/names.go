@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
+	"github.com/kccarlos/herdr-sheepdog/internal/prose"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
@@ -58,6 +59,8 @@ func (s *Supervisor) refreshTitle(row state.Agent) {
 	if err != nil || title == "" {
 		return
 	}
+	// Worker text spoken aloud: D9 applies (no PR numbers, hashes, paths).
+	title = prose.Spoken(title, 0)
 	if changed, err := s.store.SetTitle(row.PaneID, title); err == nil && changed {
 		s.log.Log(logSource, "worker.title", row.PaneID, map[string]any{"agent": aliasOr(row.Alias), "title": state.CleanTitle(title)})
 	}

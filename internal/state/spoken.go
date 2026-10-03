@@ -106,14 +106,22 @@ func CleanTitle(title string) string {
 	return title
 }
 
+// maxTitleNameRunes bounds the title inside a spoken name when words do
+// not (a Chinese title has no spaces).
+const maxTitleNameRunes = 32
+
 // titleWords is the title as it goes into a spoken name: its first
-// maxTitleWords words.
+// maxTitleWords words, at most maxTitleNameRunes.
 func titleWords(title string) string {
 	f := strings.Fields(CleanTitle(title))
 	if len(f) > maxTitleWords {
 		f = f[:maxTitleWords]
 	}
-	return strings.Join(f, " ")
+	t := strings.Join(f, " ")
+	if r := []rune(t); len(r) > maxTitleNameRunes {
+		t = strings.TrimSpace(string(r[:maxTitleNameRunes]))
+	}
+	return t
 }
 
 // SpokenNames computes the spoken name of every running agent, keyed by
