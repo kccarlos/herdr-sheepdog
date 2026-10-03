@@ -146,6 +146,10 @@ type Request struct {
 	// (the supervisor mints it at the relay): every event of the turn
 	// carries it (trace.go).
 	UtteranceID string
+	// Focus is the alias of the agent the conversation is on, for an
+	// utterance whose words point at an agent without naming it
+	// (agentRecords).
+	Focus string
 	// Link is the request message's link to the voice context (the
 	// Context tab): "call:<id>" for the voice tool call that relayed an
 	// utterance, "evt:<id>" for the worker event an announce is about.

@@ -459,3 +459,25 @@ func TestSameInstructionTwiceInATurnIsSentOnce(t *testing.T) {
 		t.Error("brain.prompt_repeat not logged")
 	}
 }
+
+// The #113 echo runs (barge-in-long-answer r3): after an answer about
+// docs, "Just tell me if it needs anything from me" reaches the brain
+// with docs' record — finished, and what it last did — though the words
+// name no agent.
+func TestUtteranceAboutItCarriesTheFocusRecord(t *testing.T) {
+	m := braintest.NewModel(
+		braintest.Step{Calls: []*genai.FunctionCall{braintest.FC(brain.ToolReadScreen, map[string]any{"agent": "docs"})}},
+		braintest.Step{Text: braintest.Reply("Docs finished the README.", "")},
+		braintest.Step{Text: braintest.Reply("It needs your call on the two broken links.", "")},
+	)
+	h := newBrainHarness(t, m)
+	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
+	h.addAgent("w6:p1", "docs", "claude", herdr.StateDone)
+	h.srv.SetScreen("w6:p1", fixture(t, "claude-idle.screen.txt"))
+	h.say("What did docs say when it finished?")
+	h.say("Okay, okay. Just tell me if it needs anything from me.")
+	text := lastCall(t, m)
+	if !strings.Contains(text, "the one in focus is") || !strings.Contains(text, "- docs: done") {
+		t.Errorf("the request lacks docs' record:\n%s", text)
+	}
+}

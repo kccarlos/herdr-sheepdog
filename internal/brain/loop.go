@@ -157,7 +157,7 @@ func (b *Brain) run(ctx context.Context, t *turn) (Reply, error) {
 		// What the daemon knows about the agents the words name, and that
 		// it knows nothing more (run C, H7: "did it push?" answered "no"
 		// from a screen that says nothing about pushing).
-		t.req.records = agentRecords(b.host.Agents(), t.req.Question, b.cfg.Now)
+		t.req.records = agentRecords(b.host.Agents(), t.req.Question, t.req.Focus, b.cfg.Now)
 	}
 	b.ingest(Message{Role: RoleUser, Kind: KindRequest, Content: requestText(t.req), Agent: t.req.Agent, Link: t.req.Link}, t.n)
 	if t.req.Kind == KindAnnounce && t.req.Agent != "" {

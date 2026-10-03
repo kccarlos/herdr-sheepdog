@@ -596,6 +596,14 @@ func (s *Supervisor) utteranceTurn(ctx context.Context, u *inflightUtterance) ut
 	// and ledger sections.
 	brief, _ := s.briefingText()
 	req := brain.Request{Kind: brain.KindUtterance, Trigger: brain.TriggerCEO, Question: text, Briefing: brief, Link: callLink(u.callID), UtteranceID: u.id}
+	// The agent the conversation is on, for words that say "it" (the
+	// brain's agentRecords).
+	s.mu.Lock()
+	subject := s.lastSubject
+	s.mu.Unlock()
+	if row, ok := s.store.Get(subject); ok {
+		req.Focus = row.Alias
+	}
 	// What the shepherd had heard when they began: evaluated when the
 	// turn starts, since it may queue behind an announce turn whose
 	// line goes out meanwhile (heard.go).

@@ -18,7 +18,7 @@ func TestAgentRecordsForTheNamedAgent(t *testing.T) {
 		{Alias: "bench-claude", State: "done", StateSince: now.Add(-2 * time.Minute)},
 		{Alias: "bench-codex", State: "working", Journal: []JournalEntry{{At: now.Add(-time.Minute), Event: "done", LastAssistant: "All tests pass.", Files: []string{"clamp.go"}, Tools: map[string]int{"Bash": 2}}}},
 	}
-	got := agentRecords(agents, "Did bench-claude push its changes yet?", clock)
+	got := agentRecords(agents, "Did bench-claude push its changes yet?", "", clock)
 	for _, want := range []string{
 		"On record (from the worker's screen and its own session transcript, the daemon's only sources; what is not here is not on record, and a run_cli or investigate look can check it):",
 		"- bench-claude: done since 06:18:00 (2 min ago); no journal entry",
@@ -30,14 +30,14 @@ func TestAgentRecordsForTheNamedAgent(t *testing.T) {
 	if strings.Contains(got, "bench-codex") {
 		t.Errorf("an agent the words do not name is in the record:\n%s", got)
 	}
-	got = agentRecords(agents, "what did bench codex do", clock)
+	got = agentRecords(agents, "what did bench codex do", "", clock)
 	if !strings.Contains(got, `- bench-codex: working; journal: [06:19:00 done] wrote "All tests pass." files clamp.go tools Bash×2;`) {
 		t.Errorf("journal record:\n%s", got)
 	}
-	if got := agentRecords(agents, "how is everyone doing?", clock); got != "" {
+	if got := agentRecords(agents, "how is everyone doing?", "", clock); got != "" {
 		t.Errorf("no name, record = %q", got)
 	}
-	if got := agentRecords(agents, "what about bench-claude-2", clock); got != "" {
+	if got := agentRecords(agents, "what about bench-claude-2", "", clock); got != "" {
 		t.Errorf("a longer name matched: %q", got)
 	}
 }
@@ -58,15 +58,15 @@ func TestAgentRecordsBySpokenNameAndTitle(t *testing.T) {
 		{Alias: "sheepdog-claude", Spoken: "README Claude", Title: "README", State: "done"},
 		{Alias: "sheepdog-claude-2", Spoken: "Fix flaky test Claude", Title: "Fix flaky test", State: "working"},
 	}
-	got := agentRecords(agents, "did README Claude push yet?", clock)
+	got := agentRecords(agents, "did README Claude push yet?", "", clock)
 	if !strings.Contains(got, `- sheepdog-claude ("README Claude"): done`) || strings.Contains(got, "claude-2") {
 		t.Errorf("by spoken name:\n%s", got)
 	}
-	got = agentRecords(agents, "what did the flaky test one change", clock)
+	got = agentRecords(agents, "what did the flaky test one change", "", clock)
 	if got != "" {
 		t.Errorf("a partial title matched:\n%s", got)
 	}
-	got = agentRecords(agents, "is the fix flaky test one done?", clock)
+	got = agentRecords(agents, "is the fix flaky test one done?", "", clock)
 	if !strings.Contains(got, "sheepdog-claude-2") || strings.Contains(got, "- sheepdog-claude (") {
 		t.Errorf("by title:\n%s", got)
 	}
@@ -88,7 +88,7 @@ func TestUnmatchedHeardName(t *testing.T) {
 		"Let me know when Bench Clad is done.",
 		"Was Bench Clear done?",
 	} {
-		got := agentRecords(agents, words, clock)
+		got := agentRecords(agents, words, "", clock)
 		if !strings.HasPrefix(got, "No agent is called \"Bench ") || !strings.Contains(got, "none was renamed to that") {
 			t.Errorf("%q: line = %q", words, got)
 			continue
@@ -97,7 +97,7 @@ func TestUnmatchedHeardName(t *testing.T) {
 			t.Errorf("%q: closest names not nearest first: %q", words, got)
 		}
 	}
-	if got := agentRecords(agents, "Oh, I know when Bench Squad is done.", clock); got != `No agent is called "Bench Squad", and none was renamed to that; the closest names: "bench-claude", "bench-codex". Speech recognition can mishear a name.` {
+	if got := agentRecords(agents, "Oh, I know when Bench Squad is done.", "", clock); got != `No agent is called "Bench Squad", and none was renamed to that; the closest names: "bench-claude", "bench-codex". Speech recognition can mishear a name.` {
 		t.Errorf("line = %q", got)
 	}
 	// Not a name: a lower-case word after the prefix, no prefix at all,
@@ -112,5 +112,34 @@ func TestUnmatchedHeardName(t *testing.T) {
 	spoken := []AgentInfo{{Alias: "sheepdog-claude", Spoken: "README Claude"}, {Alias: "sheepdog-claude-2", Spoken: "Parser Claude"}}
 	if got := unmatchedNameLine(spoken, "Is README Cloud finished?"); !strings.Contains(got, `"README Cloud"`) || !strings.Contains(got, `"README Claude" (sheepdog-claude), "Parser Claude" (sheepdog-claude-2)`) {
 		t.Errorf("spoken: %q", got)
+	}
+}
+
+// The #113 echo runs (barge-in-long-answer r3): "Just tell me if it needs
+// anything from me" names no agent, so the request carried no record of
+// the worker that had finished, and the brain said "Nothing yet". Words
+// that point at one agent without naming it get the record of the agent
+// in focus; words about everyone still get none.
+func TestAgentRecordsForTheAgentInFocus(t *testing.T) {
+	now := time.Date(2026, 10, 3, 8, 22, 30, 0, time.UTC)
+	clock := func() time.Time { return now }
+	agents := []AgentInfo{
+		{Alias: "bench-claude", State: "done", StateSince: now.Add(-20 * time.Second), LastResult: "finished the README; two broken links need a decision"},
+		{Alias: "bench-codex", State: "working"},
+	}
+	got := agentRecords(agents, "Okay, okay. Just tell me if it needs anything from me.", "bench-claude", clock)
+	for _, want := range []string{"the CEO's words name no agent; the one in focus is", "- bench-claude: done since 08:22:10", `last result: "finished the README; two broken links need a decision"`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("record lacks %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "bench-codex") {
+		t.Errorf("another agent in the record:\n%s", got)
+	}
+	if got := agentRecords(agents, "Is anything waiting for me?", "bench-claude", clock); got != "" {
+		t.Errorf("words about everyone got the focus record: %q", got)
+	}
+	if got := agentRecords(agents, "what is bench-codex doing?", "bench-claude", clock); strings.Contains(got, "bench-claude") {
+		t.Errorf("a named agent lost to the focus:\n%s", got)
 	}
 }
