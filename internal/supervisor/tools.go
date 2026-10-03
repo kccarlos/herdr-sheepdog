@@ -59,6 +59,7 @@ func (s *Supervisor) workspaceDir(ctx context.Context, row state.Agent) string {
 func (s *Supervisor) noBrain() voice.ToolResult {
 	text, panes := s.briefingText()
 	s.markMentioned(panes)
+	s.noteNamesSaid(text)
 	roster := text
 	if _, repeat := s.briefingRepeat(text); repeat {
 		text = "No change since I last checked: " + text
@@ -109,6 +110,7 @@ func (s *Supervisor) mentionedIn(spoken string) {
 	if spoken == "" {
 		return
 	}
+	s.noteNamesSaid(spoken)
 	lower := strings.ToLower(spoken)
 	var panes []string
 	for _, row := range s.store.List() {

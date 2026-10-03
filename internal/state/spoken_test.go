@@ -1,6 +1,10 @@
 package state
 
 import (
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -27,7 +31,7 @@ func TestSpokenNames(t *testing.T) {
 		{"two of a kind in one project, titles", []Agent{ag("p1", "claude", "sheepdog", "README"), ag("p2", "claude", "sheepdog", "Fix flaky test")},
 			map[string]string{"p1": "README Claude", "p2": "Fix flaky test Claude"}},
 		{"three of a kind, one project, one title", []Agent{ag("p1", "codex", "sheepdog", "Run suite and report failure"), ag("p2", "codex", "sheepdog", ""), ag("p3", "codex", "sheepdog", "")},
-			map[string]string{"p1": "Run suite and report failure Codex", "p2": "sheepdog Codex 1", "p3": "sheepdog Codex 2"}},
+			map[string]string{"p1": "Run suite Codex", "p2": "sheepdog Codex 1", "p3": "sheepdog Codex 2"}},
 		{"two left without a unique title, one with", []Agent{ag("p1", "codex", "sheepdog", "Docs"), ag("p2", "codex", "sheepdog", "")},
 			map[string]string{"p1": "Docs Codex", "p2": "sheepdog Codex"}},
 		{"same title twice falls back to numbers", []Agent{ag("p1", "claude", "sheepdog", "README"), ag("p2", "claude", "sheepdog", "readme")},
@@ -35,7 +39,7 @@ func TestSpokenNames(t *testing.T) {
 		{"three of a kind across two projects", []Agent{ag("p1", "claude", "sheepdog", "README"), ag("p2", "claude", "sheepdog", "Tests"), ag("p3", "claude", "docs", "x")},
 			map[string]string{"p1": "README Claude", "p2": "Tests Claude", "p3": "docs Claude"}},
 		{"long title capped", []Agent{ag("p1", "claude", "s", "one two three four five six seven eight"), ag("p2", "claude", "s", "")},
-			map[string]string{"p1": "one two three four five six Claude", "p2": "s Claude"}},
+			map[string]string{"p1": "one two three Claude", "p2": "s Claude"}},
 		{"exited agents ignored", []Agent{ag("p1", "claude", "sheepdog", "README"), exited(ag("p2", "claude", "sheepdog", "Tests"))},
 			map[string]string{"p1": "Claude"}},
 		{"CEO herdr name wins", []Agent{named(ag("p1", "claude", "sheepdog", "README"), "docs"), ag("p2", "claude", "sheepdog", "Tests")},
@@ -129,4 +133,53 @@ func TestStoreSpokenNameChanges(t *testing.T) {
 	if err := s.SetName("p2", "  "); err == nil {
 		t.Error("an empty name was accepted")
 	}
+}
+
+// TestSpokenNamesFromRealTitles: the session titles two Claudes in one
+// project really had in the tier-3 bench (finding 5: the names were
+// "shop/cart.go Cart type Claude" and "TODO.md tasks Claude", and the
+// brain fell back to "the first Claude"). Paths, file names and code
+// identifiers are dropped from the spoken name.
+func TestSpokenNamesFromRealTitles(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join("..", "..", "testdata", "herdr", "claude-session-titles.tier3.tsv"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var runs [][][2]string
+	cur := [][2]string{}
+	for _, line := range strings.Split(string(b)+"\n", "\n") {
+		switch {
+		case strings.HasPrefix(line, "#"):
+		case strings.TrimSpace(line) == "":
+			if len(cur) > 0 {
+				runs = append(runs, cur)
+				cur = [][2]string{}
+			}
+		default:
+			title, want, _ := strings.Cut(line, "\t")
+			cur = append(cur, [2]string{title, want})
+		}
+	}
+	if len(runs) != 3 {
+		t.Fatalf("runs = %d", len(runs))
+	}
+	check := func(t *testing.T, rows [][2]string) {
+		t.Helper()
+		var agents []Agent
+		for i, r := range rows {
+			agents = append(agents, Agent{PaneID: "w1:p" + strconv.Itoa(i+1), Kind: "claude", WorkspaceLabel: "bench", Title: r[0], State: herdr.StateWorking, AliasAuto: true})
+		}
+		got := SpokenNames(agents)
+		for i, r := range rows {
+			if n := got["w1:p"+strconv.Itoa(i+1)]; n != r[1] {
+				t.Errorf("title %q: spoken %q, want %q", r[0], n, r[1])
+			}
+		}
+	}
+	for _, run := range runs {
+		check(t, run)
+	}
+	// Code identifiers go too; nothing speakable left numbers the agents.
+	check(t, [][2]string{{"fix internal/herdr/prompt.go", "fix Claude"}, {"update CartItem addItem", "update Claude"}})
+	check(t, [][2]string{{"shop/cart.go", "bench Claude 1"}, {"TODO.md", "bench Claude 2"}})
 }

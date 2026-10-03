@@ -69,6 +69,9 @@ func TestSpokenNamesFromTitlesReachRosterAndVoice(t *testing.T) {
 		t.Fatalf("row = %+v", row)
 	}
 
+	// The CEO hears that name (a spoken push as it reaches the voice).
+	h.sup.OnVoiceEvent(voice.EventPush{Text: "Claude is working on the README.", Urgency: voice.UrgencyIdle})
+
 	// A second Claude in the same project: both are told apart by their
 	// own session titles, and the first one's old name is kept.
 	h.claudeIn("w2:p1", docsSession, herdr.StateWorking)
@@ -244,4 +247,39 @@ func TestHerdrRenameIsNameOnly(t *testing.T) {
 	if h.log.count("supervisor.renamed") != 1 || len(h.pusher.all()) != before+1 {
 		t.Errorf("an unchanged name was reported as a rename")
 	}
+}
+
+// Tier-3 bench 2026-10-03, finding 5: on a fresh call the brain said
+// "previously bench Claude" about a name the CEO had never heard. The
+// roster gives the brain an old name only when it went out to the CEO
+// before.
+func TestOldNameOnlyWhenTheCEOHeardIt(t *testing.T) {
+	spokenWas := func(h *harness) string {
+		for _, a := range (brainHost{h.sup}).Agents() {
+			if a.PaneID == "w1:p1" {
+				return a.SpokenWas
+			}
+		}
+		return "?"
+	}
+	t.Run("never said", func(t *testing.T) {
+		h := newHarness(t, withTitleFixtures(t))
+		h.claudeIn("w1:p1", readmeSession, herdr.StateWorking)
+		h.claudeIn("w2:p1", docsSession, herdr.StateWorking)
+		if row, _ := h.store.Get("w1:p1"); row.SpokenWas != "Claude" {
+			t.Fatalf("row = %+v", row)
+		}
+		if got := spokenWas(h); got != "" {
+			t.Errorf("SpokenWas = %q, want none: the CEO never heard it", got)
+		}
+	})
+	t.Run("said in a reply", func(t *testing.T) {
+		h := newHarness(t, withTitleFixtures(t))
+		h.claudeIn("w1:p1", readmeSession, herdr.StateWorking)
+		h.sup.mentionedIn("Claude is still on the README.")
+		h.claudeIn("w2:p1", docsSession, herdr.StateWorking)
+		if got := spokenWas(h); got != "Claude" {
+			t.Errorf("SpokenWas = %q, want Claude", got)
+		}
+	})
 }
