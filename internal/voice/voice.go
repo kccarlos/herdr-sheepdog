@@ -8,7 +8,10 @@
 // LE mono chunks in playback order. Both match docs/ws-contract.md.
 package voice
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // Urgency says how a push or a tool result should reach the user (plan §5,
 // §6). The zero value is UrgencyIdle: speak when the model is not already
@@ -101,6 +104,13 @@ type ToolHandler func(ctx context.Context, call ToolCall) (ToolResult, error)
 // Asked with a push's tags: is what that line is about — the prompt it
 // announced, the promise it keeps — still owed to the shepherd?
 type OpenCheck func(tags map[string]any) bool
+
+// PushBacklogger is implemented by sessions with a push queue: how many
+// pushes wait in it and when the oldest was queued (zero when none). The
+// daemon watchdog reads it (internal/observe); it only reads.
+type PushBacklogger interface {
+	PushBacklog() (n int, oldest time.Time)
+}
 
 // Session is one long-lived voice session owned by the daemon.
 //

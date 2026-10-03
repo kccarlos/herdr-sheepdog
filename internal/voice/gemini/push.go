@@ -398,6 +398,23 @@ func (s *Session) doPush(ctx context.Context, item pushItem) {
 	s.emit(voice.EventPush{Text: item.text, Urgency: item.urgency})
 }
 
+// PushBacklog implements voice.PushBacklogger: the queued pushes and
+// when the oldest was queued (the daemon watchdog).
+func (s *Session) PushBacklog() (n int, oldest time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return backlog(s.pushQ)
+}
+
+func backlog(q []pushItem) (n int, oldest time.Time) {
+	for _, it := range q {
+		if oldest.IsZero() || it.at.Before(oldest) {
+			oldest = it.at
+		}
+	}
+	return len(q), oldest
+}
+
 // DrainPushes empties the push queue and returns what was in it, in
 // order, at the urgency each caller asked for: the voice Switcher
 // carries it over to the next provider's session on a switch.

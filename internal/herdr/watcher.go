@@ -2,6 +2,7 @@ package herdr
 
 import (
 	"context"
+	"sync/atomic"
 	"time"
 )
 
@@ -83,6 +84,10 @@ type Watcher struct {
 	out    chan Transition
 	done   chan struct{}
 
+	// beat is the Unix nanoseconds of the last sign of life: a
+	// successful snapshot or an event from herdr (LastBeat).
+	beat atomic.Int64
+
 	// Owned by Run.
 	panes    map[string]*paneState
 	wsLabels map[string]string
@@ -122,7 +127,7 @@ func NewWatcher(client *Client, cfg WatcherConfig, log Logger) *Watcher {
 	if log == nil {
 		log = NopLogger{}
 	}
-	return &Watcher{
+	w := &Watcher{
 		client:   client,
 		cfg:      cfg.withDefaults(),
 		log:      log,
@@ -134,7 +139,18 @@ func NewWatcher(client *Client, cfg WatcherConfig, log Logger) *Watcher {
 		panes:    map[string]*paneState{},
 		wsLabels: map[string]string{},
 	}
+	w.alive()
+	return w
 }
+
+// alive records a sign of life (LastBeat).
+func (w *Watcher) alive() { w.beat.Store(time.Now().UnixNano()) }
+
+// LastBeat is when the watcher last heard from herdr: its last
+// successful session.snapshot (every SnapshotInterval) or socket event.
+// The daemon watchdog reads it (internal/observe); a watcher that has not
+// heard anything since it was built reports its creation time.
+func (w *Watcher) LastBeat() time.Time { return time.Unix(0, w.beat.Load()) }
 
 // Transitions is the output channel; it is closed when Run returns.
 func (w *Watcher) Transitions() <-chan Transition { return w.out }
@@ -179,6 +195,7 @@ func (w *Watcher) Run(ctx context.Context) error {
 	if err := w.refreshSnapshot(ctx); err != nil {
 		return err
 	}
+	w.alive()
 	ticker := time.NewTicker(w.cfg.SnapshotInterval)
 	defer ticker.Stop()
 
@@ -194,8 +211,10 @@ func (w *Watcher) Run(ctx context.Context) error {
 				fleet = nil
 				continue
 			}
+			w.alive()
 			w.handleFleet(ctx, ev)
 		case ev := <-w.status:
+			w.alive()
 			w.handleStatus(ctx, ev)
 		case ev := <-w.inject:
 			w.handleStatus(ctx, ev)
@@ -204,6 +223,8 @@ func (w *Watcher) Run(ctx context.Context) error {
 		case <-ticker.C:
 			if err := w.refreshSnapshot(ctx); err != nil {
 				w.log.Log("herdr", "herdr.snapshot_error", "", map[string]any{"error": err.Error()})
+			} else {
+				w.alive()
 			}
 		}
 	}

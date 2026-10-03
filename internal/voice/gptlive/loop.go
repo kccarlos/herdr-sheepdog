@@ -413,6 +413,19 @@ func clip(s string) string {
 	return s[:max]
 }
 
+// PushBacklog implements voice.PushBacklogger: the queued pushes and
+// when the oldest was queued (the daemon watchdog).
+func (s *Session) PushBacklog() (n int, oldest time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, it := range s.pushQ {
+		if oldest.IsZero() || it.at.Before(oldest) {
+			oldest = it.at
+		}
+	}
+	return len(s.pushQ), oldest
+}
+
 // DrainPushes empties the push queue and the silent context held for the
 // next session, and returns them (the held context first, then the
 // queue, in order, at the urgency each caller asked for): the voice
