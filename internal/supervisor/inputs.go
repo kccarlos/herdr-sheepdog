@@ -86,8 +86,11 @@ type shepherdInput struct {
 	// relay does not glue these words onto the next utterance, and the
 	// daemon does not relay them (relay.go).
 	answered bool
-	// answeredAt is when answered was set (silentAnswer).
-	answeredAt time.Time
+	// answeredAt is when answered was set (silentAnswer); answeredWith
+	// is what the voice said since (ackOnly: an acknowledgement is no
+	// answer).
+	answeredAt   time.Time
+	answeredWith string
 	// saidBefore is what the voice was saying, or had said within
 	// echoWindow, when this voice input began: what it may be an echo of
 	// (echoOf, utterance.go). Empty for anything else.
@@ -210,9 +213,14 @@ func (s *Supervisor) voiceSpoke(text string) {
 	if strings.TrimSpace(text) == "" || s.relay.pushSpeaking || noSpeech(s.echo.said) {
 		return
 	}
-	if last := s.lastInputLocked(); last != nil && !last.answered {
-		last.answered, last.answeredAt = true, s.cfg.Now()
+	last := s.lastInputLocked()
+	if last == nil {
+		return
 	}
+	if !last.answered {
+		last.answered, last.answeredAt, last.answeredWith = true, s.cfg.Now(), ""
+	}
+	last.answeredWith += text
 }
 
 // silentAnswerMs is the least audio, in milliseconds of playback, an
