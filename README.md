@@ -80,7 +80,7 @@ or `100.x.x.x` (Tailscale) one.
 - **iOS app** ("Sheepdog for herdr", repo `herdr-sheepdog-ios`,
   TestFlight internal testing): type the host:port from the `lan url`
   line and the token into its Settings. It speaks the same `/ws` contract
-  as `/voice`, shows the flock with answerable prompts, and gets a
+  (with its protocol handshake) as `/voice`, shows the flock with answerable prompts, and gets a
   notification when an agent needs you once `[push.apns]` is configured
   ([`docs/push.md`](docs/push.md)).
 - **Browser:** open `<lan url>/voice`; the page asks for the token once
@@ -100,7 +100,7 @@ Tailscale), never the open internet. See
 | `sheepdog voice-test` | Stream a WAV (or `--text`) through a Gemini Live session with echo tools; no daemon needed. |
 | `sheepdog brain-test` | Run one brain turn against a mock herdr and a screen fixture (`--question`, `--say`, `--provider`; `--fake` needs no network). |
 | `sheepdog prompts export` \| `show` | Seed `prompts.dir` from the embedded prompts \| print one file's effective text and source. |
-| `sheepdog eval` | The conversation eval sets (`--set assistant\|svp\|regressions\|extracted\|expanded\|all`); offline by default, `--live` calls the model. `eval extract` / `eval expand` build cases from the event log. |
+| `sheepdog eval` | The conversation eval sets (`--set assistant\|svp\|regressions\|extracted\|expanded\|all`); offline by default, `--live` calls the model. `eval extract` / `eval expand` build cases from the event log. `eval sim` runs simulated-CEO conversations graded by an LLM judge (`--live`, `--repeat`, `--fallback-provider`; [`docs/eval-campaign-2026-10-03.md`](docs/eval-campaign-2026-10-03.md)). |
 | `sheepdog scorecard` | Ear and latency metrics over the event log ([`docs/iteration-2.md`](docs/iteration-2.md) "Scorecard metrics"). |
 | `sheepdog audio-e2e` | Speak scripted scenarios (macOS `say` + noise) into a running daemon's `/ws` ([`docs/audio-e2e-results.md`](docs/audio-e2e-results.md)). |
 | `sheepdog version` \| `help` | Version, commit and build date \| the command list. |
@@ -233,7 +233,7 @@ make release-sign TAG=v0.1.0   # sign and notarize a release's darwin binary (do
 ### CI/CD
 
 GitHub Actions runs Linux jobs only (`ubuntu-latest`): vet, test, lint, web
-tests, the offline brain eval and the cross-compile on every PR, and the
+tests, the offline eval, the policy guard and the cross-compile on every PR, and the
 Ubuntu release on `v*` tags. Anything Xcode- or iOS-related (build, test,
 archive, TestFlight) runs only on Xcode Cloud, never on GitHub Actions,
 because macOS runners are too expensive; the `policy` CI job fails if a
