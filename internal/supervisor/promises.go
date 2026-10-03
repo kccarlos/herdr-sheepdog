@@ -27,6 +27,13 @@ func (s *Supervisor) createPromise(paneID string, req brain.PromiseRequest) (sta
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if old, dup := s.openPromiseFor(paneID, req.Event); dup {
+		// The brain is repeating a promise it already made: the fact goes
+		// back as the tool's error, and nothing new is recorded, so the
+		// finish is not kept twice and the brain need not confirm again.
+		s.log.Log(logSource, "promise.duplicate", paneID, map[string]any{"id": old.ID, "text": req.Text, "event": req.Event, "turn": req.Turn})
+		return state.Promise{}, duplicatePromiseErr(old, req.Turn)
+	}
 	now := s.cfg.Now()
 	p := state.Promise{ID: s.nextID("pr"), PaneID: paneID, Alias: row.Alias, Text: req.Text, Event: req.Event, Status: state.PromiseOpen, CreatedTurn: req.Turn, CreatedAt: now, Due: req.Due}
 	if err := s.store.UpdateSession(func(ss *state.Session) { ss.Promises = append(ss.Promises, p) }); err != nil {
@@ -39,6 +46,30 @@ func (s *Supervisor) createPromise(paneID string, req brain.PromiseRequest) (sta
 	}
 	s.log.Log(logSource, "promise.created", paneID, payload)
 	return p, nil
+}
+
+// openPromiseFor returns the open promise of paneID for event, when one
+// exists.
+func (s *Supervisor) openPromiseFor(paneID, event string) (state.Promise, bool) {
+	for _, p := range s.store.Snapshot().Session.Promises {
+		if p.Status == state.PromiseOpen && p.PaneID == paneID && p.Event == event {
+			return p, true
+		}
+	}
+	return state.Promise{}, false
+}
+
+// duplicatePromiseErr is the promise tool's answer to a promise that is
+// already open (tier-2 bench 2026-10-03, collision-finish-push: the
+// judge counted "Noted. I'll tell you…" confirmations as unprompted): the
+// fact that it is recorded, since when, and — when it was made in an
+// earlier turn — that that turn's reply already acknowledged it.
+func duplicatePromiseErr(old state.Promise, turn int) error {
+	msg := fmt.Sprintf("already promised at %s: %q is still open, nothing new was recorded", old.CreatedAt.Format("15:04:05"), old.Text)
+	if old.CreatedTurn != 0 && old.CreatedTurn != turn {
+		msg += fmt.Sprintf("; it was acknowledged to the CEO in turn %d, so there is nothing new to confirm", old.CreatedTurn)
+	}
+	return errors.New(msg)
 }
 
 // promises returns the session's promises, open ones first (then the
