@@ -16,6 +16,8 @@ func ev(ms int, source, typ, utt string, payload map[string]any) eventlog.Event 
 	return eventlog.Event{TS: t0.Add(time.Duration(ms) * time.Millisecond), Source: source, Type: typ, UtteranceID: utt, Payload: raw}
 }
 
+func eventsOf(evs ...eventlog.Event) []eventlog.Event { return evs }
+
 func TestReplyLatencyByIDs(t *testing.T) {
 	events := []eventlog.Event{
 		// Inline: the tool result carries the answer at 1.5 s.

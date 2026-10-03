@@ -934,7 +934,7 @@ func (a *App) Run(ctx context.Context) (err error) {
 
 // observers are the handlers the observer feeds (internal/observe).
 func (a *App) observers() []observe.Handler {
-	return nil
+	return []observe.Handler{observe.NewLatencyObserver(a.log)}
 }
 
 // runWatcher keeps a Watcher running: transitions are handled serialised

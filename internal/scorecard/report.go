@@ -15,18 +15,19 @@ import (
 // Report is every docs/iteration-2.md scorecard metric computed over one
 // slice of the event log (a session, or the whole loaded range).
 type Report struct {
-	Label         string          `json:"label"`
-	Events        int             `json:"events"`
-	From          time.Time       `json:"from,omitempty"`
-	To            time.Time       `json:"to,omitempty"`
-	Latency       LatencyReport   `json:"latency"`
-	Ear           EarReport       `json:"ear"`
-	RepeatAsk     RepeatAskReport `json:"repeat_ask"`
-	Lost          LostReport      `json:"lost_utterance"`
-	Drop          DropReport      `json:"brain_line_drop"`
-	CtrlC         CtrlCReport     `json:"ctrl_c"`
-	Comprehension int             `json:"comprehension_follow_ups"`
-	Duplicate     DuplicateReport `json:"duplicate_speech"`
+	Label         string            `json:"label"`
+	Events        int               `json:"events"`
+	From          time.Time         `json:"from,omitempty"`
+	To            time.Time         `json:"to,omitempty"`
+	Latency       LatencyReport     `json:"latency"`
+	TurnLatency   TurnLatencyReport `json:"turn_latency"`
+	Ear           EarReport         `json:"ear"`
+	RepeatAsk     RepeatAskReport   `json:"repeat_ask"`
+	Lost          LostReport        `json:"lost_utterance"`
+	Drop          DropReport        `json:"brain_line_drop"`
+	CtrlC         CtrlCReport       `json:"ctrl_c"`
+	Comprehension int               `json:"comprehension_follow_ups"`
+	Duplicate     DuplicateReport   `json:"duplicate_speech"`
 }
 
 // Analyze computes every metric over events, labelling the result label.
@@ -36,6 +37,7 @@ func Analyze(label string, events []eventlog.Event) Report {
 		r.From, r.To = events[0].TS, events[len(events)-1].TS
 	}
 	r.Latency = computeLatency(events)
+	r.TurnLatency = computeTurnLatency(events)
 	r.Ear = computeEar(events)
 	r.RepeatAsk = computeRepeatAsk(events)
 	r.Lost = computeLost(events)
@@ -89,6 +91,8 @@ func writeMarkdownSection(b *strings.Builder, r Report) {
 	}
 	b.WriteString("\n")
 
+	writeTurnLatency(b, r.TurnLatency)
+
 	b.WriteString("### Ear metrics\n\n")
 	b.WriteString("| pool | n | mean words | median words | p90 words | share > 30 words | share with dash | share ending closed | mean jargon/line |\n")
 	b.WriteString("|---|---|---|---|---|---|---|---|---|\n")
@@ -128,6 +132,30 @@ func writeMarkdownSection(b *strings.Builder, r Report) {
 	if len(r.Duplicate.Instances) > 0 {
 		b.WriteString("\n")
 	}
+}
+
+func writeTurnLatency(b *strings.Builder, r TurnLatencyReport) {
+	fmt.Fprintf(b, "### Turn latency\n\n%d CEO utterances (turn.latency, %s)", r.N, r.Source)
+	if len(r.Outcomes) > 0 {
+		b.WriteString(":")
+		for i, o := range sortedKeys(r.Outcomes) {
+			if i > 0 {
+				b.WriteString(",")
+			}
+			fmt.Fprintf(b, " %s %d", o, r.Outcomes[o])
+		}
+	}
+	b.WriteString(".\n\n")
+	if r.N == 0 {
+		return
+	}
+	b.WriteString("| segment | n | p50 | p90 | mean |\n|---|---|---|---|---|\n")
+	for _, name := range TurnLatencySegments {
+		if s, ok := r.Segments[name]; ok {
+			fmt.Fprintf(b, "| %s | %d | %.0f | %.0f | %.0f |\n", name, s.N, s.Median, s.P90, s.Mean)
+		}
+	}
+	b.WriteString("\n")
 }
 
 func writeStatsRow(b *strings.Builder, name string, s Stats) {
