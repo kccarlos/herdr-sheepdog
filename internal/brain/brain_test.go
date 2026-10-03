@@ -243,12 +243,21 @@ func TestSendKeysBlocked(t *testing.T) {
 // approved"), so the rail defers to it. A plain test Host has no
 // revival logic and still refuses, but with its own reason, not the
 // rail's "has no recorded approval prompt".
+// An idle agent defers the same way: a menu on an idle pane (Codex's
+// update menu) is not reported blocked, and the Host revives it when the
+// CEO's words are about it (#107's known limit).
 func TestSendKeysDefersToHostWhenBlockedWithNoPending(t *testing.T) {
+	for _, state := range []string{"blocked", "idle"} {
+		t.Run(state, func(t *testing.T) { sendKeysDefersToHost(t, state) })
+	}
+}
+
+func sendKeysDefersToHost(t *testing.T, state string) {
 	h := newHarness(t, braintest.NewModel(
 		braintest.Step{Calls: []*genai.FunctionCall{braintest.FC(ToolSendKeys, map[string]any{"agent": "auth", "keys": []any{"enter"}})}},
 		braintest.Step{Text: braintest.Reply("I cannot answer that prompt myself.", "")},
 	), nil)
-	h.host.SetAgent(AgentInfo{PaneID: "w5:p1", Alias: "auth", Kind: "codex", State: "blocked"})
+	h.host.SetAgent(AgentInfo{PaneID: "w5:p1", Alias: "auth", Kind: "codex", State: state})
 	h.host.SetPending("w5:p1", nil)
 	rep, err := h.brain.Turn(context.Background(), Request{Kind: KindUtterance, Trigger: TriggerCEO, Question: "answer yes", Agent: "auth"})
 	if err != nil {

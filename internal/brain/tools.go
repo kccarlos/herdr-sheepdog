@@ -514,15 +514,16 @@ func (b *Brain) rail(trigger Trigger, row AgentInfo, keys []string) string {
 		return "send_keys is only permitted in a turn the CEO's own words triggered, never on an event"
 	}
 	if row.Pending == nil {
-		if row.State != "blocked" {
+		if row.State == "working" {
 			return fmt.Sprintf("%s has no recorded approval prompt to answer", aliasOr(row.Alias))
 		}
-		// Blocked with nothing recorded: its answer_prompt pending expired
+		// Nothing recorded: blocked, its answer_prompt pending expired
 		// unanswered while nobody was watching, or the daemon never caught
-		// it. Deferred to the Host, which re-reads the screen and revives
-		// the pending action before its own atomic check
-		// (docs/history/issues-2026-09-18.md "an expired approval prompt can never
-		// be approved").
+		// it (docs/history/issues-2026-09-18.md "an expired approval prompt
+		// can never be approved"); or idle with a menu on screen, which
+		// herdr does not report as blocked (#107's known limit). Deferred
+		// to the Host, which re-reads the screen and revives the pending
+		// action before its own atomic check.
 		return ""
 	}
 	if len(keys) == 0 {

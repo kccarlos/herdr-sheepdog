@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/prose"
@@ -173,25 +174,90 @@ func (s *Supervisor) ExpirePending() {
 // prompt still on screen can still be answered
 // (docs/history/issues-2026-09-18.md "an expired approval prompt can never be
 // approved"). Revival always re-reads the screen rather than trusting
-// what was dropped: the pane may already be asking something else. Caller holds s.mu; ok is false when the pane is gone, not
-// blocked, or its screen does not parse as a prompt.
-func (s *Supervisor) revivePrompt(ctx context.Context, paneID, source string) (state.PendingAction, bool) {
-	row, ok := s.store.Get(paneID)
-	if !ok || row.State != herdr.StateBlocked {
-		return state.PendingAction{}, false
+// what was dropped: the pane may already be asking something else.
+//
+// A menu on a pane herdr does not report blocked (Codex's update menu
+// shows on an idle pane; tools.go's menuOnScreen tells the brain about
+// it) is revived too, but only when the shepherd's newest words are
+// about it (wordsAboutMenuLocked): they name one of its options or words
+// of its question. The rail then checks those words as for any prompt.
+// Caller holds s.mu; ok is false when the pane is gone or working, its
+// screen does not parse as a prompt, or — not blocked — the shepherd's
+// words are not about the menu (why says so).
+func (s *Supervisor) revivePrompt(ctx context.Context, paneID, source string) (p state.PendingAction, ok bool, why string) {
+	row, found := s.store.Get(paneID)
+	if !found || row.State == herdr.StateWorking {
+		return state.PendingAction{}, false, ""
 	}
+	blocked := row.State == herdr.StateBlocked
 	read, err := s.herdr.Read(ctx, paneID, herdr.SourceRecentUnwrapped, s.cfg.ReadLines)
 	if err != nil {
-		return state.PendingAction{}, false
+		return state.PendingAction{}, false, ""
 	}
-	prompt, ok := herdr.ParsePrompt(read.Text)
-	if !ok {
-		return state.PendingAction{}, false
+	prompt, parsed := herdr.ParsePrompt(read.Text)
+	if !parsed {
+		return state.PendingAction{}, false, ""
 	}
-	p := s.newAnswerPrompt(paneID, prompt, aliasOr(state.Say(row)), row.StateSince)
+	if !blocked && !s.wordsAboutMenuLocked(prompt, row) {
+		return state.PendingAction{}, false, fmt.Sprintf("%s is showing a menu, but the shepherd's last words are not about it", aliasOr(state.Say(row)))
+	}
+	p = s.newAnswerPrompt(paneID, prompt, aliasOr(state.Say(row)), row.StateSince)
 	s.setPending(p)
-	s.log.Log(logSource, "pending.revived", paneID, map[string]any{"id": p.ID, "source": source})
-	return p, true
+	s.log.Log(logSource, "pending.revived", paneID, map[string]any{"id": p.ID, "source": source, "state": string(row.State)})
+	return p, true, ""
+}
+
+// menuStopWords are words too common to tie the shepherd's words to a
+// menu.
+var menuStopWords = map[string]bool{"the": true, "and": true, "for": true, "you": true, "your": true, "this": true, "that": true, "with": true, "now": true, "what": true, "want": true, "would": true, "like": true, "tell": true, "can": true, "please": true, "it's": true, "its": true}
+
+// wordsAboutMenuLocked reports whether the shepherd's newest words are
+// about prompt, a menu on row's idle pane: they share a word (three
+// letters or more, not the agent's own name or a common word) with one
+// of its answer options or its question, or pick an option by number.
+// Caller holds s.mu.
+func (s *Supervisor) wordsAboutMenuLocked(prompt herdr.Prompt, row state.Agent) bool {
+	in := s.lastInputLocked()
+	if in == nil || strings.TrimSpace(in.text) == "" {
+		return false
+	}
+	if n := optionNumber(normalizeAnswer(in.text)); n > 0 && n <= len(prompt.Options) {
+		return true
+	}
+	skip := map[string]bool{}
+	for _, name := range []string{row.Alias, state.Say(row), row.Kind} {
+		for _, w := range menuWords(name) {
+			skip[w] = true
+		}
+	}
+	menu := map[string]bool{}
+	for _, w := range menuWords(prompt.Question) {
+		menu[w] = true
+	}
+	for _, o := range prompt.Answers() {
+		for _, w := range menuWords(o.Label) {
+			menu[w] = true
+		}
+	}
+	for _, w := range menuWords(in.text) {
+		if menu[w] && !skip[w] && !menuStopWords[w] {
+			return true
+		}
+	}
+	return false
+}
+
+// menuWords are the lower-case words of text, three letters or more.
+func menuWords(text string) []string {
+	var out []string
+	for _, w := range strings.FieldsFunc(strings.ToLower(text), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '\''
+	}) {
+		if len([]rune(w)) >= 3 {
+			out = append(out, w)
+		}
+	}
+	return out
 }
 
 var (
