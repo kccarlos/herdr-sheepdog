@@ -195,11 +195,8 @@ proposed.
 
 | Rank | Gap | Seen? | Scenario it needs | One-line direction |
 |---|---|---|---|---|
-| 1 | **Fixed #72.** Gemini 1011 loses the voice's conversation (C23): after 68 of 77 resumes the voice knows only the silent briefing, so a "what does that mean?" answered from `detail` (J5) has nothing to draw on | the context loss, yes (3 days); a spoken failure from it, no | audio-e2e: a 1011 injected between a reply and its follow-up | replay a short recap on a context-lost resume, as GPT-Live does |
-| 2 | **Fixed #72.** The echo window (C5) is anchored at `turnComplete`, not at the end of playback, so with a long reply on a slow client an echo of its tail can arrive after the window closed; the phone now reports `playback`/`speaking` (herdr-sheepdog-ios #14), unverified on a device | yes (both incidents were on the phone) | audio-e2e with a long reply and an echo at its tail; a device session with the speaker at full volume | anchor `echoWindow` to `drained` from the playback reports |
-| 3 | **Fixed #72.** Push-queue head-of-line (C29): an urgent or owed line, the stop button's reply included, waits behind an idle head for up to 30 s | the stall, yes (`voice.push_timeout` ×2, 09-24); an urgent line behind it, no | unit test in `gemini/session_test.go`: interrupt queued behind an idle push during an open turn | let a ready item pass a waiting idle head |
 | 4 | Per-pane serialisation (C18): a block waits behind its own pane's finish turn (≤ 15 s + grace) | no | supervisor scenario through `app.go`'s pane lock: finish, then block within the turn budget | do not hold the pane lock across the announce wait |
 | 5 | Single daemon-wide pending slot (C19): an instruction or a second block displaces an open question; the bare-"yes" fast path is lost for it | no (`pending.replaced` 0) | eval case: A asks, the brain instructs B, the shepherd says "yes" | keep one slot per pane |
-| 6 | **Fixed #72** (the switch carries the queue over; the rest log `voice.push_dropped`). Silent drops (C15, C20, send retries): provider switch, 3 failed sends, a kept promise on a stale block | no | unit: switch provider with a held push; announce stale with a kept promise | log `voice.push_dropped` on every discard |
-| 7 | **Fixed #72.** Web page ping-pong after `replaced` (C14) | no (`replaced:true` 0) | two-client ws test | stop reconnecting on `closed/replaced`, as iOS does |
-| 8 | Stop leaves queued pushes (C11) | no | audio-e2e: stop while an announce is queued | none until seen |
+| 8 | Stop leaves queued pushes (C11) | no (not in the 2026-10-03 bench runs either) | audio-e2e: stop while an announce is queued | none until seen |
+
+Rows fixed in #72 were removed on 2026-10-03; the issues found in the bench runs that day, and their decided fixes, are in [bench-2026-10-03.md](bench-2026-10-03.md).

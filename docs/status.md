@@ -126,57 +126,36 @@ DeepSeek at 01:07 UTC and it is staying there for now.
 
 ## Open
 
-- **agy blocks**: herdr 0.9.0 does not detect Antigravity CLI prompts as
-  `blocked` (needs a local `~/.config/herdr/agent-detection/agy.toml`
-  override or an upstream fix).
-- **GoAway / context compression** (v1 scenario 10) never observed live;
-  `voice.turn`, `voice.stalled` and `voice.recycle` are the signals.
-- **Quota**: 2–3 brain calls per shepherd turn exhaust the Gemini free
-  tier quickly; DeepSeek (`brain.provider = "deepseek"`) and Gemini on
-  Vertex AI (`brain.provider = "vertex"`) are the paid alternatives for
-  the brain.
-- **Scratch daemons**: `SHEEPDOG_DATA_DIR` does not move `state.path`;
+- **Bench fixes (decided 2026-10-03):** the open issues and the agreed
+  fix for each (voice-session refresh, dropped CEO input, unheard pushes,
+  CJK-aware runaway cap, AskUserQuestion meta options, asks/repeats,
+  approval lifetime, agent spoken names, provenance hardening) are in
+  [`bench-2026-10-03.md`](bench-2026-10-03.md), the single backlog for
+  that work.
+- **Pending decision (CEO testing first): should every pending approval
+  notify the phone?** Today the APNs notification follows the brain's
+  announce decision, so a block the brain skips sends no notification.
+  The alternative notifies for every pending answer-prompt action
+  regardless of the brain; it is a one-line change in
+  `internal/supervisor/notify.go`.
+- **Later options:** a brain-written compaction as the reseed source
+  instead of the verbatim recap (needs a good prompt); a "current focus"
+  silent context from brain to voice after each brain turn (agent in
+  focus, open question, key points) once the bench fixes have landed.
+- **A stop does not drop a queued instruction:** a single Ctrl-C to a
+  busy Claude Code pane interrupts the running turn but the queued prompt
+  still runs (acceptance run, 2026-10-02 00:34). An idle-then-working
+  agent stops cleanly.
+- **`v0.1.0` of the daemon is not tagged** (GitHub Actions is blocked by
+  billing; the darwin binary is signed and notarized on the Mac with
+  `make release-sign`, see [`signing.md`](signing.md)).
+- **Not yet checked on a device:** AirPods and route changes, and a
+  multi-question (tabbed) AskUserQuestion widget.
+- **agy blocks:** herdr 0.9.0 does not detect Antigravity CLI prompts as
+  `blocked` (needs a local agent-detection override or an upstream fix).
+- **Scratch daemons:** `SHEEPDOG_DATA_DIR` does not move `state.path`;
   set `SHEEPDOG_STATE_PATH` too, or a second daemon shares the user's
   `state.json`.
-- **Cancelling a promise**: nothing the shepherd can say cancels an open
-  promise (the old cancel tool did; it was not reachable from the voice
-  since the redesign). It expires after `supervisor.promise_ttl_s`.
-- **`v0.1.0`** is not tagged yet (the release workflow is ready and builds on Ubuntu only; the darwin binary is signed and notarized afterwards on the Mac with `make release-sign`, see [`signing.md`](signing.md)).
-- **Device verification of the iOS work (#14/#17/#18)**: the CEO used
-  the TestFlight build (0.1.0 (2)) on their iPhone on 2026-10-01 and
-  confirmed live that voice interaction works, against the daemon on
-  `0064753` with Gemini Live on Vertex AI and the brain on Vertex
-  (`gemini-3.8-flash`, switched at 00:14 UTC; 6 brain turns, no
-  fallback, no `voice.stalled`, `voice.rate_limited` or
-  `supervisor.echo_dropped` in that session). Not individually confirmed
-  yet: AirPods and route changes, the lock screen, approvals tapped on
-  the phone, and the Health pane's brain picker (the CEO could not find
-  it on the first try).
-- **Left over from the 2026-10-02 acceptance run**:
-  - the voice model can promise "I'll let you know" without calling
-    `to_supervisor` (scenario 3's first phrasing), so nothing follows;
-  - a stop's single Ctrl-C does not drop an instruction that is queued
-    behind a busy Claude Code turn (scenario 5's first run);
-  - one block is announced twice (the template sentence, then the
-    brain's line about 9 s later);
-  - `read_screen` on a still-blocked pane did not show the
-    AskUserQuestion widget the block read had; herdr flapped blocked →
-    done → blocked within 0.3 s once;
-  - automatic failover to another brain provider after repeated
-    timeouts (the CEO asked four times during the Vertex degradation and
-    heard the fallback each time) — agreed as worth doing, later;
-  - switch the brain back to Vertex only after re-measuring
-    `gemini-3.8-flash` there.
-- **The relayed-answer path of GPT-Live pacing was not re-measured**:
-  #73's one live run measured the model replying to its own filler
-  ("count slowly from one to twenty"); a reply relayed from the brain
-  (`to_supervisor` → spoken push) through the paced input timeline has
-  not been measured live.
-- **The live model's use of `source` arguments** (`read_screen`'s
-  `source: session`, `investigate`'s `source: worker`) is verified only
-  offline against the fake model and the eval harness; a live run
-  against DeepSeek — which the orchestrator is expected to schedule —
-  has not happened yet.
 
 ## How work is done here
 
