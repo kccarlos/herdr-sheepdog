@@ -304,6 +304,10 @@ type Host struct {
 	// NoteErr fails Note; Noted records every note the note tool made.
 	NoteErr error
 	Noted   []string
+	// RenameErr fails Rename; Renamed records every rename (pane ->
+	// name), and a rename sets the row's Spoken.
+	RenameErr error
+	Renamed   [][2]string
 	// InvestigateErr fails Investigate; Investigated is the job ledger
 	// the investigate tool filled (running until SetInvestigation).
 	InvestigateErr error
@@ -375,6 +379,22 @@ func (h *Host) Note(text string) (string, error) {
 	return "Noted.", nil
 }
 
+// Rename implements brain.Host.
+func (h *Host) Rename(_ context.Context, paneID, name string) (string, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.RenameErr != nil {
+		return "", h.RenameErr
+	}
+	h.Renamed = append(h.Renamed, [2]string{paneID, name})
+	for i := range h.agents {
+		if h.agents[i].PaneID == paneID {
+			h.agents[i].SpokenWas, h.agents[i].Spoken = h.agents[i].Spoken, name
+		}
+	}
+	return "It is called " + name + " now.", nil
+}
+
 // Agents implements brain.Host.
 func (h *Host) Agents() []brain.AgentInfo {
 	h.mu.Lock()
@@ -388,7 +408,7 @@ func (h *Host) Resolve(name string) (brain.AgentInfo, bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	for _, a := range h.agents {
-		if strings.ToLower(a.Alias) == name {
+		if strings.ToLower(a.Alias) == name || (a.Spoken != "" && strings.ToLower(a.Spoken) == name) {
 			return a, true
 		}
 	}

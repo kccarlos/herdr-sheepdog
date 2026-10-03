@@ -389,7 +389,7 @@ func (s *Supervisor) runInvestigation(ctx context.Context, live *liveInvestigati
 		s.mu.Lock()
 		zh := s.ceoChineseLocked()
 		s.mu.Unlock()
-		s.pushInvestigation(inv, cause.line(aliasOr(inv.Alias), zh))
+		s.pushInvestigation(inv, cause.line(s.sayPane(inv.PaneID, inv.Alias), zh))
 		return
 	}
 	inv.Status, inv.Finished = state.InvestigationDone, &now
@@ -414,7 +414,7 @@ func (s *Supervisor) runInvestigation(ctx context.Context, live *liveInvestigati
 // never interrupts). With no brain, or one that could not answer, the
 // daemon says the look is done and keeps the answer in the ledger.
 func (s *Supervisor) deliverInvestigation(inv state.Investigation) {
-	fallback := "The look into " + aliasOr(inv.Alias) + " is done; ask me what it found."
+	fallback := "The look into " + s.sayPane(inv.PaneID, inv.Alias) + " is done; ask me what it found."
 	if s.brain == nil {
 		s.pushInvestigation(inv, fallback)
 		return

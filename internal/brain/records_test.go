@@ -48,3 +48,26 @@ func TestRequestTextCarriesTheRecord(t *testing.T) {
 		t.Errorf("request:\n%s", text)
 	}
 }
+
+// The record also finds an agent by its spoken name or its session
+// title, the names the CEO actually says.
+func TestAgentRecordsBySpokenNameAndTitle(t *testing.T) {
+	now := time.Date(2026, 10, 3, 6, 20, 0, 0, time.UTC)
+	clock := func() time.Time { return now }
+	agents := []AgentInfo{
+		{Alias: "sheepdog-claude", Spoken: "README Claude", Title: "README", State: "done"},
+		{Alias: "sheepdog-claude-2", Spoken: "Fix flaky test Claude", Title: "Fix flaky test", State: "working"},
+	}
+	got := agentRecords(agents, "did README Claude push yet?", clock)
+	if !strings.Contains(got, `- sheepdog-claude ("README Claude"): done`) || strings.Contains(got, "claude-2") {
+		t.Errorf("by spoken name:\n%s", got)
+	}
+	got = agentRecords(agents, "what did the flaky test one change", clock)
+	if got != "" {
+		t.Errorf("a partial title matched:\n%s", got)
+	}
+	got = agentRecords(agents, "is the fix flaky test one done?", clock)
+	if !strings.Contains(got, "sheepdog-claude-2") || strings.Contains(got, "- sheepdog-claude (") {
+		t.Errorf("by title:\n%s", got)
+	}
+}

@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
@@ -37,7 +39,7 @@ func (s *Supervisor) briefingText() (string, []string) {
 	if s.briefing == "" || now.Sub(s.briefingAt) > briefingCacheMaxAge {
 		pending, _ := s.store.Pending()
 		s.briefing, s.briefingPanes = composeBriefing(s.store.List(), pending, now)
-		if trailer := promiseTrailer(s.openPromises()); trailer != "" {
+		if trailer := promiseTrailer(s.spokenPromises(s.openPromises())); trailer != "" {
 			s.briefing += " " + trailer
 		}
 		s.briefingAt = now
@@ -122,7 +124,7 @@ func composeBriefing(agents []state.Agent, pending state.PendingAction, now time
 		if ri != rj {
 			return ri < rj
 		}
-		return agents[i].Alias < agents[j].Alias
+		return state.Say(agents[i]) < state.Say(agents[j])
 	})
 	listed := agents
 	if len(agents) > briefingListMax {
@@ -152,7 +154,7 @@ func composeBriefing(agents []state.Agent, pending state.PendingAction, now time
 // describeAgent is one agent's clause: state plus what it is doing or
 // last did.
 func describeAgent(a state.Agent, now time.Time) string {
-	alias := a.Alias
+	alias := state.Say(a)
 	if alias == "" {
 		alias = "an agent"
 	}
@@ -187,8 +189,11 @@ func recentResult(a state.Agent, now time.Time) string {
 		return ""
 	}
 	spoken := strings.TrimRight(a.LastResult.Spoken, ".!?")
-	if a.Alias != "" && strings.HasPrefix(strings.ToLower(spoken), strings.ToLower(a.Alias)+" ") {
-		spoken = lowerFirst(strings.TrimSpace(spoken[len(a.Alias):]))
+	for _, name := range []string{state.Say(a), a.Alias} {
+		if name != "" && len(spoken) > len(name) && spoken[len(name)] == ' ' && strings.EqualFold(spoken[:len(name)], name) {
+			spoken = lowerFirst(strings.TrimSpace(spoken[len(name):]))
+			break
+		}
 	}
 	return trimWords(spoken, briefingResultMaxWords)
 }
@@ -235,13 +240,14 @@ func pendingTrailer(agents []state.Agent, pending state.PendingAction, sentence 
 	alias := ""
 	for _, a := range agents {
 		if a.PaneID == pending.PaneID {
-			alias = a.Alias
+			alias = state.Say(a)
 		}
 	}
 	if alias == "" {
 		return ""
 	}
-	name := strings.ToUpper(alias[:1]) + alias[1:]
+	r, n := utf8.DecodeRuneInString(alias)
+	name := string(unicode.ToUpper(r)) + alias[n:]
 	if pending.Question == "" || strings.Contains(sentence, pending.Question) {
 		return name + " is waiting for your answer."
 	}

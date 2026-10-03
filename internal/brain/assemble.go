@@ -704,14 +704,20 @@ func agentRecords(agents []AgentInfo, words string, clock func() time.Time) stri
 	var b strings.Builder
 	var now time.Time
 	for _, a := range agents {
-		if !namesAgent(words, a.Alias) {
+		if !namesAgent(words, a.Alias) && !namesAgent(words, a.Spoken) && !namesAgent(words, a.Title) {
+			// Neither the alias nor the spoken name ("README Claude")
+			// nor the worker's session title ("the README one").
 			continue
 		}
 		if b.Len() == 0 {
 			now = clock() // only when a record is written: the clock ticks in fixtures
 			b.WriteString("On record (from the worker's screen and its own session transcript, the daemon's only sources; what is not here is not on record, and a run_cli or investigate look can check it):")
 		}
-		fmt.Fprintf(&b, "\n- %s: %s", aliasOr(a.Alias), stateOr(a.State))
+		fmt.Fprintf(&b, "\n- %s", aliasOr(a.Alias))
+		if a.Spoken != "" && a.Spoken != a.Alias {
+			fmt.Fprintf(&b, " (%q)", a.Spoken)
+		}
+		fmt.Fprintf(&b, ": %s", stateOr(a.State))
 		if !a.StateSince.IsZero() {
 			fmt.Fprintf(&b, " since %s (%s ago)", a.StateSince.Format("15:04:05"), ago(now.Sub(a.StateSince)))
 		}

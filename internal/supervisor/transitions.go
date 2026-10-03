@@ -19,6 +19,15 @@ func (s *Supervisor) HandleTransition(ctx context.Context, t herdr.Transition) {
 	if err != nil {
 		s.log.Log(logSource, "supervisor.state_error", t.PaneID, map[string]any{"error": err.Error()})
 	}
+	if !t.Closed {
+		// The worker's own session title, read as a fact: it may
+		// change the spoken names (names.go).
+		s.refreshTitle(row)
+		if r, ok := s.store.Get(t.PaneID); ok {
+			row = r
+		}
+	}
+	defer s.syncNames()
 	s.invalidateBriefing()
 
 	from := t.From
@@ -42,12 +51,12 @@ func (s *Supervisor) HandleTransition(ctx context.Context, t herdr.Transition) {
 		s.cfg.WorkerLog.Forget(t.PaneID)
 		s.journal.clearMissing(t.PaneID)
 		if wasBusy {
-			s.push(t.PaneID, aliasOr(prev.Alias)+" has gone away; its pane closed.", voice.UrgencyInterrupt)
+			s.push(t.PaneID, aliasOr(state.Say(prev))+" has gone away; its pane closed.", voice.UrgencyInterrupt)
 		}
 		return
 	}
 
-	alias := aliasOr(row.Alias)
+	alias := aliasOr(state.Say(row))
 	switch t.To {
 	case herdr.StateBlocked:
 		// From is not consulted: a synthetic blocked -> blocked
@@ -200,7 +209,7 @@ func (s *Supervisor) finishTask(paneID string) {
 // is announced — what it found — together with the question, in one line
 // (announceFinishAsking).
 func (s *Supervisor) onDone(ctx context.Context, row state.Agent, instructed bool) {
-	alias := aliasOr(row.Alias)
+	alias := aliasOr(state.Say(row))
 	kind := s.doneKind(row)
 	// herdr reports the finish as idle rather than done when the user
 	// had the pane focused (herdr/src/pane/state.rs's "seen" bit): an
@@ -237,7 +246,7 @@ const kindAgy = "agy"
 // finished, and it's asking <question>."; a question is heard at every
 // level.
 func (s *Supervisor) announceFinishAsking(ctx context.Context, row state.Agent, prompt herdr.Prompt, screen string, alsoIdle, instructed bool) {
-	alias := aliasOr(row.Alias)
+	alias := aliasOr(state.Say(row))
 	s.log.Log(logSource, "supervisor.done_asking", row.PaneID, map[string]any{"alias": alias, "question": prompt.Phrase()})
 	s.touch(row.PaneID)
 	s.recordBlock(row.PaneID, prompt.Phrase(), false)
@@ -281,7 +290,7 @@ func (s *Supervisor) recordResult(paneID, spoken string) {
 // and — when the agent is really asking — creates the pending action and
 // announces it.
 func (s *Supervisor) onBlocked(ctx context.Context, row state.Agent) {
-	alias := aliasOr(row.Alias)
+	alias := aliasOr(state.Say(row))
 	s.touch(row.PaneID)
 	read, err := s.herdr.Read(ctx, row.PaneID, herdr.SourceRecentUnwrapped, s.cfg.ReadLines)
 	if err != nil {
@@ -301,7 +310,7 @@ func (s *Supervisor) onBlocked(ctx context.Context, row state.Agent) {
 // announce then keeps the block's promises and speaks the one line the
 // block gets: the brain's, or the parsed prompt's own sentence.
 func (s *Supervisor) announceBlock(ctx context.Context, row state.Agent, screen string) {
-	alias := aliasOr(row.Alias)
+	alias := aliasOr(state.Say(row))
 	prompt, ok := herdr.ParsePrompt(screen)
 	if !ok {
 		// Blocked at something with no options to send: the user has to

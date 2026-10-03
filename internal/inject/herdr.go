@@ -31,6 +31,7 @@ type synthetic struct {
 }
 
 var _ supervisor.Herdr = (*Herdr)(nil)
+var _ supervisor.Renamer = (*Herdr)(nil)
 
 // NewHerdr wraps inner (may be nil). log may be nil.
 func NewHerdr(inner supervisor.Herdr, log logging.Logger) *Herdr {
@@ -143,6 +144,20 @@ func (h *Herdr) SendKeys(ctx context.Context, paneID string, keys ...string) err
 	h.panes[paneID].sends++
 	h.mu.Unlock()
 	h.log.Log("herdr", "herdr.send", paneID, map[string]any{"kind": "keys", "keys": keys, "synthetic": true})
+	return nil
+}
+
+// Rename implements supervisor.Renamer: a synthetic pane's rename is
+// only logged; a real one goes to the inner client when it can rename.
+func (h *Herdr) Rename(ctx context.Context, paneID, name string) error {
+	if !h.IsSynthetic(paneID) {
+		r, ok := h.inner.(supervisor.Renamer)
+		if !ok {
+			return fmt.Errorf("herdr: cannot rename %s here", paneID)
+		}
+		return r.Rename(ctx, paneID, name)
+	}
+	h.log.Log("herdr", "herdr.rename", paneID, map[string]any{"name": name, "synthetic": true})
 	return nil
 }
 

@@ -191,7 +191,17 @@ func renderRoster(agents []AgentInfo, now time.Time) string {
 		return b.String()
 	}
 	for _, a := range agents {
-		fmt.Fprintf(&b, "- %s (%s): %s", aliasOr(a.Alias), kindOr(a.Kind), stateOr(a.State))
+		fmt.Fprintf(&b, "- %s (%s)", aliasOr(a.Alias), kindOr(a.Kind))
+		if a.Spoken != "" && a.Spoken != a.Alias {
+			fmt.Fprintf(&b, ", say %q", a.Spoken)
+		}
+		if a.SpokenWas != "" {
+			fmt.Fprintf(&b, " (just renamed from %q)", a.SpokenWas)
+		}
+		if a.Title != "" && !strings.Contains(a.Spoken, a.Title) {
+			fmt.Fprintf(&b, ", session %q", a.Title)
+		}
+		fmt.Fprintf(&b, ": %s", stateOr(a.State))
 		if !a.StateSince.IsZero() {
 			fmt.Fprintf(&b, " for %s", ago(now.Sub(a.StateSince)))
 		}

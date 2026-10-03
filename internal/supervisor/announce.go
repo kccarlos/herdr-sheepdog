@@ -186,7 +186,7 @@ func owedFinish(a announcement, kept []state.Promise) bool {
 // for what it found, so the sentence says it could not be had and how to
 // get it.
 func noFindingSentence(a announcement) string {
-	return aliasOr(a.row.Alias) + " finished, but I couldn't get its findings in time. Ask me and I'll read its screen."
+	return aliasOr(state.Say(a.row)) + " finished, but I couldn't get its findings in time. Ask me and I'll read its screen."
 }
 
 // applyResult turns the brain's answer (or failure) into the event's one

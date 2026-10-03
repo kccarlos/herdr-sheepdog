@@ -211,6 +211,9 @@ type Options struct {
 	// CodexSessions is Codex's sessions directory (default
 	// $CODEX_HOME/sessions or ~/.codex/sessions).
 	CodexSessions string
+	// CodexIndex is Codex's session index, where it keeps each thread's
+	// name (default session_index.jsonl next to CodexSessions).
+	CodexIndex string
 }
 
 // Reader reads transcripts incrementally, one cursor per pane. It is
@@ -245,6 +248,9 @@ func New(opts Options) *Reader {
 			base = filepath.Join(home, ".codex")
 		}
 		opts.CodexSessions = filepath.Join(base, "sessions")
+	}
+	if opts.CodexIndex == "" {
+		opts.CodexIndex = filepath.Join(filepath.Dir(opts.CodexSessions), "session_index.jsonl")
 	}
 	return &Reader{opts: opts, cursors: map[string]*cursor{}}
 }

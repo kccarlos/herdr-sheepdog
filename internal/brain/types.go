@@ -406,8 +406,16 @@ type InvestigationInfo struct {
 type AgentInfo struct {
 	PaneID string
 	Alias  string
-	Kind   string
-	State  string
+	// Spoken is the name the shepherd hears and says (docs/roles.md
+	// "Agent names"): the brain speaks it verbatim, while tool calls
+	// take the alias. SpokenWas is its previous spoken name while the
+	// change is recent, so the brain mentions the old name once. Title
+	// is the worker's own session title, a fact.
+	Spoken    string
+	SpokenWas string
+	Title     string
+	Kind      string
+	State     string
 	// StateSince is when State was entered (zero when unknown).
 	StateSince time.Time
 	// Task is the current instruction; LastTask the one last finished.
@@ -541,6 +549,10 @@ type Host interface {
 	// Note records something the CEO wants remembered ("don't touch the
 	// migrations today"); it returns the spoken echo.
 	Note(text string) (string, error)
+	// Rename gives the pane's agent the name the CEO chose ("call that
+	// one docs", the note tool with agent and name): herdr agent rename
+	// and the roster. It returns the spoken echo.
+	Rename(ctx context.Context, paneID, name string) (string, error)
 	// ReadScreen returns the last lines of the pane.
 	ReadScreen(ctx context.Context, paneID string, lines int) (string, error)
 	// ReadSession reads the end of the pane's worker session transcript

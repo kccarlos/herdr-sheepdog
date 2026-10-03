@@ -343,6 +343,9 @@ func (a *App) wire() error {
 		Model:   cfg.Gemini.Model,
 		Voice:   cfg.Gemini.Voice,
 		Aliases: a.aliases(),
+		// The running agents' spoken names, read at every (re)connect
+		// (docs/roles.md "Agent names").
+		Names:   sup.SpokenNames,
 		Name:    cfg.Voice.Name,
 		Handler: sup.Handler(),
 		Prompts: a.prompts,
@@ -468,7 +471,7 @@ func (a *App) voiceProviders(gcfg gemini.Config, handler voice.ToolHandler) []vo
 	o := voice.Provider{ProviderInfo: voice.ProviderInfo{ID: VoiceOpenAI, Label: "GPT-Live", Model: oc.Model, Available: oc.APIKey != "", Billing: voice.BillingPerMinute}}
 	if o.Available {
 		router := &inject.Router{}
-		name, aliases, pl := cfg.Voice.Name, gcfg.Aliases, a.prompts
+		name, aliases, names, pl := cfg.Voice.Name, gcfg.Aliases, gcfg.Names, a.prompts
 		ocfg := gptlive.Config{
 			APIKey: oc.APIKey, Model: oc.Model, Voice: oc.Voice,
 			IdleClose: time.Duration(oc.IdleCloseS) * time.Second,
@@ -476,7 +479,13 @@ func (a *App) voiceProviders(gcfg gemini.Config, handler voice.ToolHandler) []vo
 			Classify:  router.Route,
 			Context:   a.voiceCtx,
 			Instructions: func() (string, error) {
-				text, _ := pl.Render(prompts.AssistantGPTLive, prompts.AssistantVars(name, aliases))
+				list := aliases
+				if names != nil {
+					if n := names(); len(n) > 0 {
+						list = n
+					}
+				}
+				text, _ := pl.Render(prompts.AssistantGPTLive, prompts.AssistantVars(name, list))
 				return text, nil
 			},
 		}

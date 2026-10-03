@@ -1346,3 +1346,32 @@ func TestSystemPromptName(t *testing.T) {
 		t.Errorf("override = %q", got)
 	}
 }
+
+// The running agents' spoken names replace the static alias list in the
+// system prompt and the speech-to-text vocabulary, read again at every
+// connect, so a connection after a roster change hears the new names.
+func TestSpokenNamesFollowTheRoster(t *testing.T) {
+	names := []string{"Claude"}
+	cfg := Config{APIKeys: []string{"k"}, Aliases: []string{"herdr-sheepdog-claude"}, Names: func() []string { return names }}.withDefaults()
+	prompt, _ := systemPrompt(cfg)
+	lc := liveConfig(cfg, prompt, "")
+	if got := lc.InputAudioTranscription.CustomVocabulary; len(got) != 1 || got[0] != "Claude" {
+		t.Errorf("vocabulary = %v", got)
+	}
+	if !strings.Contains(prompt, "Claude") || strings.Contains(prompt, "herdr-sheepdog-claude") {
+		t.Errorf("prompt names: %q", prompt)
+	}
+	names = []string{"README Claude", "sheepdog Claude"}
+	prompt, _ = systemPrompt(cfg)
+	lc = liveConfig(cfg, prompt, "")
+	if got := lc.InputAudioTranscription.CustomVocabulary; len(got) != 2 || got[0] != "README Claude" {
+		t.Errorf("vocabulary after the roster changed = %v", got)
+	}
+	if !strings.Contains(prompt, "README Claude, sheepdog Claude") {
+		t.Errorf("prompt after the roster changed: %q", prompt)
+	}
+	names = nil
+	if got := cfg.names(); len(got) != 1 || got[0] != "herdr-sheepdog-claude" {
+		t.Errorf("no agents running: %v, want the configured aliases", got)
+	}
+}

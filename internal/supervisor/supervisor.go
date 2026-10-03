@@ -268,6 +268,8 @@ type Supervisor struct {
 	// investigating is the one running background job per pane
 	// (investigate.go).
 	investigating map[string]*liveInvestigation
+	// names is the voice names line bookkeeping (names.go).
+	names namesState
 
 	// startedAt is when this run's Supervisor was built: openPromises
 	// created before it are from an earlier run (promises.go,
@@ -437,6 +439,7 @@ func (s *Supervisor) shutdown() {
 	s.mu.Lock()
 	s.shut = true
 	s.mu.Unlock()
+	s.stopNames()
 	s.stopRelay()
 	s.endLife()
 	s.cancelInvestigations("shutdown")

@@ -37,6 +37,7 @@ func (h brainHost) Agents() []brain.AgentInfo {
 // info converts one row.
 func (h brainHost) info(a state.Agent, pending state.PendingAction, has bool) brain.AgentInfo {
 	info := brain.AgentInfo{PaneID: a.PaneID, Alias: a.Alias, Kind: a.Kind, State: string(a.State), StateSince: a.StateSince, Task: withoutSignOff(a.CurrentTask), LastTask: withoutSignOff(a.LastTask)}
+	info.Spoken, info.Title, info.SpokenWas = state.Say(a), a.Title, recentSpokenWas(a, h.s.cfg.Now())
 	info.Journal = journalInfo(a.Journal)
 	if a.LastResult != nil && a.LastResult.Spoken != "" {
 		info.LastResult = a.LastResult.Spoken
@@ -92,6 +93,11 @@ func (h brainHost) Note(text string) (string, error) {
 		return "", err
 	}
 	return "Noted.", nil
+}
+
+// Rename implements brain.Host (names.go).
+func (h brainHost) Rename(ctx context.Context, paneID, name string) (string, error) {
+	return h.s.rename(ctx, paneID, name)
 }
 
 // ReadScreen implements brain.Host. Like ask's screen read, it counts as
@@ -196,7 +202,7 @@ func (h brainHost) Prompt(ctx context.Context, paneID, text string) (string, err
 		return "", errors.New("that agent is gone")
 	}
 	text = withoutSignOff(text)
-	echo := "Telling " + aliasOr(row.Alias) + " to " + lowerFirst(strings.TrimRight(strings.TrimSpace(text), ".")) + "."
+	echo := "Telling " + aliasOr(state.Say(row)) + " to " + lowerFirst(strings.TrimRight(strings.TrimSpace(text), ".")) + "."
 	h.s.journal.signOff.Do(func() { h.s.log.Log(logSource, "supervisor.signoff", "", map[string]any{"trailer": SignOff}) })
 	res, err := h.s.sendInstruction(ctx, row, withSignOff(text), echo)
 	if err == nil {
@@ -248,7 +254,7 @@ func (h brainHost) AnswerPrompt(ctx context.Context, paneID string, keys []strin
 	// In the shepherd's language, like the fast path and taps: when the
 	// turn times out after sending, this result is what they hear
 	// (docs/eval-campaign-2026-10-03.md run C, H4).
-	alias, zh := s.aliasOf(paneID), s.ceoChineseLocked()
+	alias, zh := s.sayOf(paneID), s.ceoChineseLocked()
 	res, sent := s.answerKeys(ctx, p, keys, keysLabel(p, keys), func(l string) string { return toldLine(alias, l, zh) }, "brain", nil)
 	if sent {
 		in.used = true
@@ -325,7 +331,7 @@ func (h brainHost) Interrupt(ctx context.Context, paneID string) (string, error)
 	s := h.s
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	alias := s.aliasOf(paneID)
+	alias := s.sayOf(paneID)
 	if err := s.herdr.Interrupt(ctx, paneID); err != nil {
 		s.log.Log(logSource, "supervisor.cancel_error", paneID, map[string]any{"error": err.Error(), "via": "brain"})
 		return "", fmt.Errorf("could not interrupt %s: %w", alias, err)

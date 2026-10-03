@@ -626,7 +626,7 @@ func (s *Supervisor) AnswerTap(ctx context.Context, id string, option int) (voic
 		s.mu.Unlock()
 		return voice.ToolResult{}, errors.New(reason)
 	}
-	alias := s.aliasOf(p.PaneID)
+	alias := s.sayOf(p.PaneID)
 	res, sent := s.answerKeys(ctx, p, o.Keys, o.Label, func(l string) string { return toldLine(alias, l, zh) }, "tap", map[string]any{"option": option})
 	if sent {
 		in.used = true

@@ -256,7 +256,7 @@ func (s *Supervisor) announceStartupPromises() {
 	}
 	s.invalidateBriefing()
 	s.log.Log(logSource, "promise.carried_over", "", map[string]any{"ids": ids})
-	s.pushTagged("", startupPromiseSentence(carried), voice.UrgencyIdle, map[string]any{"startup_promises": true})
+	s.pushTagged("", startupPromiseSentence(s.spokenPromises(carried)), voice.UrgencyIdle, map[string]any{"startup_promises": true})
 }
 
 // startupPromiseSentence is announceStartupPromises' one line: "Still

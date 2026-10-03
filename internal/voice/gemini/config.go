@@ -28,6 +28,12 @@ type Config struct {
 	// Aliases are the spoken agent names, put in the system prompt and in
 	// the input transcription CustomVocabulary.
 	Aliases []string
+	// Names, when set, returns the agents' current spoken names
+	// (docs/roles.md "Agent names") and replaces Aliases: read at every
+	// (re)connect, so the system prompt and the vocabulary follow the
+	// roster; the supervisor's silent names line covers a running
+	// connection. An empty result falls back to Aliases.
+	Names func() []string
 	// Name is what the dog calls itself (config voice.name, default
 	// "Sheepdog"), substituted into the system prompt as {name}.
 	Name string
@@ -177,4 +183,15 @@ func (c Config) withDefaults() Config {
 		c.ToolResponseWait = 1500 * time.Millisecond
 	}
 	return c
+}
+
+// names is the agent name list of one connection: Names when it has
+// any, else Aliases.
+func (c Config) names() []string {
+	if c.Names != nil {
+		if n := c.Names(); len(n) > 0 {
+			return n
+		}
+	}
+	return c.Aliases
 }

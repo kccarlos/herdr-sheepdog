@@ -37,7 +37,7 @@ func (s *Session) connect(ctx context.Context) (conn Conn, resumed bool, err err
 			})
 			// The prompt this connection runs with, so /debug can show it
 			// per session straight from the log (D10).
-			s.log.Log(logSource, "voice.system_prompt", "", map[string]any{"text": prompt, "aliases": s.cfg.Aliases, "model": s.cfg.Model})
+			s.log.Log(logSource, "voice.system_prompt", "", map[string]any{"text": prompt, "aliases": s.cfg.names(), "model": s.cfg.Model})
 			return conn, handle != "", nil
 		}
 		if ctx.Err() != nil {

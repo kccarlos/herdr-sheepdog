@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -96,6 +97,7 @@ func Open(path string, opts Options) (*Store, error) {
 		}
 	}
 	s.table = t
+	s.refreshSpokenLocked()
 	return s, nil
 }
 
@@ -128,6 +130,7 @@ func (s *Store) Apply(t herdr.Transition) (Agent, bool, error) {
 		if s.table.PendingAction != nil && s.table.PendingAction.PaneID == t.PaneID {
 			s.table.PendingAction = nil
 		}
+		s.refreshSpokenLocked()
 		return Agent{}, true, s.persist()
 	}
 
@@ -178,6 +181,7 @@ func (s *Store) Apply(t herdr.Transition) (Agent, bool, error) {
 	if !changed {
 		return a.clone(), false, nil
 	}
+	s.refreshSpokenLocked()
 	return a.clone(), true, s.persist()
 }
 
@@ -228,7 +232,58 @@ func (s *Store) SetAlias(paneID, alias string) error {
 		return nil
 	}
 	a.Alias, a.AliasAuto = slug, false
+	s.refreshSpokenLocked()
 	return s.persist()
+}
+
+// SetName records a name the CEO gave the agent (a voice rename through
+// the brain; herdr agent rename arrives through Apply). It wins over the
+// computed spoken name; a derived alias follows it ("sheepdog-docs").
+// An empty name, or one another running agent is already called, is an
+// error.
+func (s *Store) SetName(paneID, name string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	a, ok := s.table.Agents[paneID]
+	if !ok {
+		return fmt.Errorf("state: no agent in pane %s", paneID)
+	}
+	name = strings.Join(strings.Fields(name), " ")
+	if name == "" {
+		return fmt.Errorf("state: empty name")
+	}
+	for id, other := range s.table.Agents {
+		if id != paneID && running(*other) && (strings.EqualFold(Say(*other), name) || strings.EqualFold(other.Alias, Slug(name))) {
+			return fmt.Errorf("state: another agent is already called %q", name)
+		}
+	}
+	if a.Name == name {
+		return nil
+	}
+	a.Name = name
+	if a.AliasAuto || a.Alias == "" {
+		a.Alias, a.AliasAuto = s.defaultAlias(a)
+	}
+	s.refreshSpokenLocked()
+	return s.persist()
+}
+
+// SetTitle records the worker's session title (CleanTitle applied) and
+// reports whether it changed.
+func (s *Store) SetTitle(paneID, title string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	a, ok := s.table.Agents[paneID]
+	if !ok {
+		return false, fmt.Errorf("state: no agent in pane %s", paneID)
+	}
+	title = CleanTitle(title)
+	if title == "" || a.Title == title {
+		return false, nil
+	}
+	a.Title = title
+	s.refreshSpokenLocked()
+	return true, s.persist()
 }
 
 // Update mutates the row for paneID under the lock and persists. It is
@@ -243,6 +298,7 @@ func (s *Store) Update(paneID string, fn func(*Agent)) (Agent, error) {
 		return Agent{}, fmt.Errorf("state: no agent in pane %s", paneID)
 	}
 	fn(a)
+	s.refreshSpokenLocked()
 	return a.clone(), s.persist()
 }
 

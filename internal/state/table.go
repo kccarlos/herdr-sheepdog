@@ -19,8 +19,20 @@ type Agent struct {
 	Kind           string `json:"kind"`
 	Workspace      string `json:"workspace"`
 	WorkspaceLabel string `json:"workspace_label,omitempty"`
-	// Name is the herdr agent name when the user assigned one.
+	// Name is the herdr agent name when the user assigned one (herdr
+	// agent rename, or a voice rename through the brain's note tool).
 	Name string `json:"name,omitempty"`
+	// Title is the worker's own session title (Claude Code's ai-title or
+	// custom-title, Codex's thread name), read from its session files as
+	// a fact (internal/workerlog), cleaned and capped (CleanTitle).
+	Title string `json:"title,omitempty"`
+	// Spoken is the name the shepherd hears (spoken.go): computed by the
+	// store whenever a row changes. SpokenWas is the one it had before
+	// its last change, at SpokenChangedAt, so the brain can mention the
+	// old name once.
+	Spoken          string    `json:"spoken,omitempty"`
+	SpokenWas       string    `json:"spoken_was,omitempty"`
+	SpokenChangedAt time.Time `json:"spoken_changed_at,omitzero"`
 
 	State herdr.State `json:"state"`
 	// StateSince changes only when State changes.
