@@ -1,0 +1,17 @@
+ ▐▛███▛█   Claude Code v2.1.275
+▝▜██████▀  Opus 5 (1M context) · Claude Max
+  ▝▝ ▝▝    ~/bench/calc
+
+❯ Fix the two dead links in CONTRIBUTING.md.
+
+⏺ Update(CONTRIBUTING.md)
+  ⎿  Updated CONTRIBUTING.md with 1 addition and 1 removal
+
+⏺ Fixing the second dead link…
+
+✻ Working… (6s · esc to interrupt)
+
+────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ accept edits on · ? for shortcuts

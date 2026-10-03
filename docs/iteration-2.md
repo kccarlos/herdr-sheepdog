@@ -40,9 +40,11 @@ baseline is the 2026-09-23/24 logs.
 5. If the fix is a guard, the PR says which invariant it protects and
    why the architecture cannot make the failure unrepresentable
    instead.
-6. No live API calls in tests. Gemini free-tier quota and GPT-Live
-   minutes are for the shepherd's own sessions. DeepSeek text runs of
-   the eval set happen only when the orchestrator says so, ≤ 30 cases.
+6. No live API calls in tests or CI. Gemini free-tier quota and
+   GPT-Live minutes are for the shepherd's own sessions. Live eval runs
+   (below) use Vertex AI or DeepSeek, never the AI Studio free tier,
+   carry a spend budget (`--budget-usd`) and report their estimated
+   spend.
 
 ## Three gates, none substitutes for another
 
@@ -51,6 +53,61 @@ baseline is the 2026-09-23/24 logs.
   asked the right things and their answers meet the ear metrics.
 - The scripted headset session (L3, 10 min, same script every build,
   appendix): the experience. One session per build.
+
+## Live evaluation: judge, simulated user, repeat runs
+
+The offline L0 gate checks the harness; whether the models behave is a
+live question, and one live run says little. Three tools answer it
+(after pipecat's `evals`, docs/research comparison):
+
+- **LLM judge** (`internal/eval/judge.go`). One criterion per call,
+  phrased so yes is good; verdict `yes`, `no` or `wait` (the
+  conversation is not finished — the harness may keep listening; a final
+  judgement has no wait). A rationale is a second call, only for a no or
+  a low-confidence verdict. Backends: Gemini Flash-Lite on Vertex
+  (`gemini-3.1-flash-lite`, default), local Ollama (`gemma4`, small runs),
+  a scripted fake (tests). In `sheepdog eval --live` the judge decides
+  the wording checks that offline are skipped
+  (`spoken_contains_any_of`, `first_sentence_contains_any_of`,
+  `spoken_no_jargon`) plus a case's `expect.judge` items; the structural
+  checks stay in code.
+- **Simulated user** (`sheepdog eval sim`, scenarios in
+  `testdata/eval/sim/*.json`). An LLM plays the CEO with a goal and talks
+  in text to the real supervisor and brain over a mock herdr whose
+  workers change on cue (a time, the CEO's Nth turn, what sheepdog sends
+  a worker); announcements reach the simulated CEO as they would the
+  phone. It hangs up with `end_call` or waits with `wait_for_sheepdog`;
+  caps on turns, total time and silence end the call otherwise, and the
+  end reason is recorded. The judge grades six default items (answered,
+  no_unintended_action, right_agent, no_hallucination, ear_friendly,
+  language) and the scenario's own, against the transcript and the ground
+  truth (screens, scripted changes, every action sent). Code checks on
+  what reached the workers give missing_function_call, unintended_action
+  and wrong_agent. A `fixed` scenario plays its script live when the
+  exact words matter ("Stop.", "Oh, never mind."). Offline, `make eval`
+  runs every scenario with the scripted brain and user: a harness check
+  of the files.
+- **Repeat and stats**. `--repeat N` (and `--parallel`, `--budget-usd`,
+  `--out` for report.json and report.md). Pass rate = pass / (pass +
+  fail): errored runs (the harness failed: a rate limit, a judge or
+  simulated-user error) and not_run runs (budget, cancel) are reported
+  but excluded, and never count as a pass. Failure labels are fixed:
+  error, not_run, timeout, brain_fallback, unintended_action,
+  wrong_agent, missing_function_call, judge_no, check, silence,
+  max_turns.
+
+    sheepdog eval sim --live --provider vertex --model gemini-3.8-flash \
+      --env-file .env --repeat 5 --parallel 5 --budget-usd 25 --out DIR
+
+A conversation costs about $0.01–0.02 at list prices (brain on
+gemini-3.8-flash, judge and simulated user on Flash-Lite). Results:
+[`eval-campaign-2026-10-03.md`](eval-campaign-2026-10-03.md).
+
+audio-e2e (`testdata/audio-e2e/scenarios.json`) has the same kind of
+assertions for the audio path: `max_eos_to_*_ms` latency bounds,
+`absent` (something must not happen, or not more than `max_count` times,
+in a window — a duplicate announcement), and multi-turn scenarios with
+per-turn expectations.
 
 ## Work packages
 

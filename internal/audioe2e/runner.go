@@ -112,6 +112,12 @@ type Result struct {
 	SessionsClosed []any   `json:"sessions_closed,omitempty"`
 	BilledTotalS   float64 `json:"billed_total_s"`
 
+	// EOSMS is the end of the last speech (ms from the start), the
+	// origin of the latencies and of the absent windows.
+	EOSMS int64 `json:"eos_ms"`
+	// Turns are a multi-turn scenario's per-turn outcomes.
+	Turns []TurnResult `json:"turns,omitempty"`
+
 	DurMS    int64   `json:"dur_ms"`
 	Timeline []Timed `json:"timeline"`
 	Events   []Event `json:"events"`
@@ -155,7 +161,19 @@ func (r *recorder) at(t time.Time) int64 { return t.Sub(r.t0).Milliseconds() }
 // Run plays one scenario against the daemon.
 func Run(ctx context.Context, sc Scenario, o Options) (Result, error) {
 	res := Result{Name: sc.Name, Provider: o.Provider, EOSToFirstIn: -1, EOSToTool: -1, EOSToFirstAudio: -1, EOSToFirstOut: -1}
-	chunks, err := render(ctx, sc, o)
+	// Every turn's segments render as one stream (one noise bed, one SNR
+	// reference); turnOf says which turn each chunk belongs to.
+	turns := sc.turns()
+	flat := sc
+	flat.Segments = nil
+	var turnOf []int
+	for i, t := range turns {
+		flat.Segments = append(flat.Segments, t.Segments...)
+		for range t.Segments {
+			turnOf = append(turnOf, i)
+		}
+	}
+	chunks, err := render(ctx, flat, o)
 	if err != nil {
 		return res, err
 	}
@@ -237,6 +255,7 @@ func Run(ctx context.Context, sc Scenario, o Options) (Result, error) {
 	var inWAV []int16
 	var eos time.Time
 	var speechStart time.Time
+	var turnSpeech, turnEOS time.Time // the current turn's
 	tick := time.NewTicker(frameDur)
 	defer tick.Stop()
 	spoke := false
@@ -254,12 +273,16 @@ func Run(ctx context.Context, sc Scenario, o Options) (Result, error) {
 			if c.speech && speechStart.IsZero() {
 				speechStart = time.Now()
 			}
+			if c.speech && turnSpeech.IsZero() {
+				turnSpeech = time.Now()
+			}
 			if err := g.push(frame); err != nil {
 				return err
 			}
 			inWAV = append(inWAV, frame...)
 			if c.speech && Peak(frame) >= 300 {
 				eos = time.Now()
+				turnEOS = eos
 			}
 		}
 		if c.speech {
@@ -300,58 +323,75 @@ func Run(ctx context.Context, sc Scenario, o Options) (Result, error) {
 		}
 	}
 	var cancelOnce sync.Once
-	for _, c := range chunks {
-		if c.afterReply {
-			deadline := time.Now().Add(25 * time.Second)
-			for {
-				rec.mu.Lock()
-				first := rec.firstAt
-				rec.mu.Unlock()
-				if !first.IsZero() && time.Since(first) >= time.Duration(sc.SpeakAfterReplyMS)*time.Millisecond {
-					break
-				}
-				if time.Now().After(deadline) {
-					break
-				}
-				if err := idle(frameDur); err != nil {
-					return res, err
+	var windows []turnWindow
+	ci := 0
+	for ti, turn := range turns {
+		turnStart := time.Now()
+		turnSpeech, turnEOS = time.Time{}, time.Time{}
+		for ; ci < len(chunks) && turnOf[ci] == ti; ci++ {
+			c := chunks[ci]
+			if c.afterReply {
+				deadline := time.Now().Add(25 * time.Second)
+				for {
+					rec.mu.Lock()
+					first := rec.firstAt
+					rec.mu.Unlock()
+					if !first.IsZero() && time.Since(first) >= time.Duration(sc.SpeakAfterReplyMS)*time.Millisecond {
+						break
+					}
+					if time.Now().After(deadline) {
+						break
+					}
+					if err := idle(frameDur); err != nil {
+						return res, err
+					}
 				}
 			}
+			if err := play(c); err != nil {
+				return res, err
+			}
 		}
-		if err := play(c); err != nil {
-			return res, err
-		}
-	}
 
-	// The tail: listen, cancelling if asked, ending once the reply is
-	// over.
-	tail := time.Duration(sc.TailMS) * time.Millisecond
-	if tail <= 0 {
-		tail = 10 * time.Second
-	}
-	quiet := time.Duration(sc.QuietMS) * time.Millisecond
-	if quiet <= 0 {
-		quiet = 2500 * time.Millisecond
-	}
-	end := time.Now().Add(tail)
-	for time.Now().Before(end) {
-		rec.mu.Lock()
-		first, lastA, lastO := rec.firstAt, rec.lastAudio, rec.lastOut
-		rec.mu.Unlock()
-		if sc.CancelAfterMS > 0 && !first.IsZero() && time.Since(first) >= time.Duration(sc.CancelAfterMS)*time.Millisecond {
-			cancelOnce.Do(func() {
-				rec.mu.Lock()
-				rec.timeline = append(rec.timeline, Timed{AtMS: rec.at(time.Now()), Kind: "cancel_sent"})
-				rec.mu.Unlock()
-				_ = send(wsproto.Cancel())
-			})
+		// The turn's tail: listen, cancelling if asked, ending once the
+		// reply is over.
+		tail := time.Duration(turn.TailMS) * time.Millisecond
+		if tail <= 0 {
+			tail = 10 * time.Second
 		}
-		if !sc.FullTail && !first.IsZero() && time.Since(lastA) >= quiet && (lastO.IsZero() || time.Since(lastO) >= quiet) {
-			break
+		quiet := time.Duration(turn.QuietMS) * time.Millisecond
+		if quiet <= 0 {
+			quiet = 2500 * time.Millisecond
 		}
-		if err := idle(frameDur); err != nil {
-			return res, err
+		end := time.Now().Add(tail)
+		for time.Now().Before(end) {
+			rec.mu.Lock()
+			first, lastA, lastO := rec.firstAt, rec.lastAudio, rec.lastOut
+			rec.mu.Unlock()
+			if sc.CancelAfterMS > 0 && !first.IsZero() && time.Since(first) >= time.Duration(sc.CancelAfterMS)*time.Millisecond {
+				cancelOnce.Do(func() {
+					rec.mu.Lock()
+					rec.timeline = append(rec.timeline, Timed{AtMS: rec.at(time.Now()), Kind: "cancel_sent"})
+					rec.mu.Unlock()
+					_ = send(wsproto.Cancel())
+				})
+			}
+			if !turn.FullTail && !first.IsZero() && time.Since(lastA) >= quiet && (lastO.IsZero() || time.Since(lastO) >= quiet) {
+				break
+			}
+			if err := idle(frameDur); err != nil {
+				return res, err
+			}
 		}
+		w := turnWindow{start: rec.at(turnStart), speechStart: rec.at(turnSpeech), spoke: !turnSpeech.IsZero()}
+		if turnEOS.IsZero() {
+			w.eos = rec.at(time.Now())
+		} else {
+			w.eos = rec.at(turnEOS)
+		}
+		if n := len(windows); n > 0 {
+			windows[n-1].end = w.start
+		}
+		windows = append(windows, w)
 	}
 	time.Sleep(700 * time.Millisecond) // trailing events
 	_ = conn.Close(websocket.StatusNormalClosure, "audio-e2e done")
@@ -372,23 +412,8 @@ func Run(ctx context.Context, sc Scenario, o Options) (Result, error) {
 		eos = time.Now() // no speech: latencies stay -1 below
 	}
 	eosMS := rec.at(eos)
-	for _, tl := range rec.timeline {
-		d := tl.AtMS - eosMS
-		switch tl.Kind {
-		case "in":
-			if res.EOSToFirstIn == -1 && !speechStart.IsZero() && tl.AtMS >= rec.at(speechStart) {
-				res.EOSToFirstIn = d
-			}
-		case "audio":
-			if res.EOSToFirstAudio == -1 && d >= 0 {
-				res.EOSToFirstAudio = d
-			}
-		case "out":
-			if res.EOSToFirstOut == -1 && d >= 0 {
-				res.EOSToFirstOut = d
-			}
-		}
-	}
+	res.EOSMS = eosMS
+	res.EOSToFirstIn, res.EOSToTool, res.EOSToFirstAudio, res.EOSToFirstOut = latencies(rec.timeline, rec.events, rec.at(speechStart), eosMS, !speechStart.IsZero())
 	for _, ev := range rec.events {
 		switch ev.Type {
 		case "voice.tool_call":
@@ -396,9 +421,6 @@ func Run(ctx context.Context, sc Scenario, o Options) (Result, error) {
 			args, _ := ev.Payload["args"].(map[string]any)
 			text, _ := args["text"].(string)
 			res.Tools = append(res.Tools, strings.TrimSpace(name+" "+quoteIf(text)))
-			if res.EOSToTool == -1 && !speechStart.IsZero() {
-				res.EOSToTool = ev.AtMS - eosMS
-			}
 		case "voice.session_open":
 			res.SessionsOpened++
 		case "voice.session_close":
@@ -414,6 +436,9 @@ func Run(ctx context.Context, sc Scenario, o Options) (Result, error) {
 		_ = writeWAV(filepath.Join(o.Save, sc.Name+".out.wav"), rec.outAudio, wsproto.ServerSampleRate)
 	}
 	res.Failures = check(sc.Expect, &res, o.Provider)
+	var turnFails []string
+	res.Turns, turnFails = checkTurns(sc, &res, windows, o.Provider)
+	res.Failures = append(res.Failures, turnFails...)
 	res.Pass = len(res.Failures) == 0
 	return res, nil
 }

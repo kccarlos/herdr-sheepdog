@@ -23,9 +23,11 @@ func TestScenariosFileLoads(t *testing.T) {
 			t.Errorf("duplicate scenario %s", s.Name)
 		}
 		seen[s.Name] = true
-		for _, seg := range s.Segments {
-			if seg.Say == "" && seg.SilenceMS == 0 && seg.NoiseMS == 0 {
-				t.Errorf("%s: empty segment", s.Name)
+		for _, turn := range s.turns() {
+			for _, seg := range turn.Segments {
+				if seg.Say == "" && seg.SilenceMS == 0 && seg.NoiseMS == 0 {
+					t.Errorf("%s: empty segment", s.Name)
+				}
 			}
 		}
 	}

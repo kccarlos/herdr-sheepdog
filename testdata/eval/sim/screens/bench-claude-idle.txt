@@ -1,0 +1,16 @@
+ ▐▛███▛█   Claude Code v2.1.275
+▝▜██████▀  Opus 5 (1M context) · Claude Max
+  ▝▝ ▝▝    ~/bench/calc
+
+
+❯ Add a CHANGELOG entry for the Add() fix.
+
+⏺ Update(CHANGELOG.md)
+  ⎿  Added 3 lines
+
+⏺ Added an "Unreleased" entry: "Fix Add() ignoring its first argument."
+
+────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ accept edits on · ? for shortcuts

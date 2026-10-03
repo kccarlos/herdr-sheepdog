@@ -269,6 +269,10 @@ type SVPExpect struct {
 	// language the CEO last used, which for "en" means no CJK characters at
 	// all and for "zh" that spoken has some (#14).
 	ReplyLanguage string `json:"reply_language,omitempty"`
+	// Judge are extra yes/no criteria for the LLM judge (live with a
+	// judge only), phrased so yes is the good outcome: "Does the reply
+	// say which test fails?".
+	Judge []string `json:"judge,omitempty"`
 }
 
 // SVPCase is one line of testdata/eval/svp.jsonl (and of the
