@@ -65,8 +65,9 @@ type Options struct {
 	// NoSpeaking leaves out the speaking messages (the daemon then reads
 	// the silence gate as the detector).
 	NoSpeaking bool
-	// GateOff sends every frame (no silence gate).
-	GateOff bool
+	// Gate is the capture gate: GateIOS (default, the app's), GateWeb
+	// (the /voice page's peak gate) or GateOff.
+	Gate string
 	// Player is the jitter buffer (default the Gemini numbers).
 	Player PlayerConfig
 	// NoEvents skips the /events stream.
@@ -129,7 +130,7 @@ func Dial(ctx context.Context, o Options) (*Client, error) {
 	}
 	c := &Client{o: o, start: time.Now(), player: NewPlayer(o.Player), statusCh: make(chan string, 16), outQ: make(chan BotUtterance, 64)}
 	c.rec.Start = c.start
-	c.mic = &mic{gateOff: o.GateOff, sendSpeaking: !o.NoSpeaking}
+	c.mic = newMic(o.Gate, !o.NoSpeaking)
 	if o.Echo != nil {
 		c.echo = pcm.NewEchoLine(InRate, o.Echo.DelayMS, o.Echo.GainDB)
 	}
@@ -182,10 +183,15 @@ func (c *Client) attach(ctx context.Context) error {
 	c.wmu.Unlock()
 	c.mu.Lock()
 	c.attached = true
-	c.mic.closed, c.mic.quietFor, c.mic.preroll, c.mic.speaking = false, 0, nil, false
+	initial := c.mic.reset()
 	c.mu.Unlock()
 	if err := c.send(wsproto.ClientReady(wsproto.ProtocolVersion, c.o.Client)); err != nil {
 		return err
+	}
+	for _, m := range initial {
+		if err := c.send(m); err != nil {
+			return err
+		}
 	}
 	c.wg.Add(2)
 	go func() { defer c.wg.Done(); c.readLoop(conn) }()
@@ -438,11 +444,16 @@ func (c *Client) micLoop() {
 		if c.o.Bed != nil {
 			frame = pcm.Mix(frame, c.o.Bed(FrameSamples))
 		}
+		var echoNow []int16
 		if c.echo != nil {
-			frame = pcm.Mix(frame, c.echo.Next(FrameSamples))
+			echoNow = c.echo.Next(FrameSamples)
+			frame = pcm.Mix(frame, echoNow)
 		}
 		c.rec.MicAudio = append(c.rec.MicAudio, frame...)
 		voicePeak := pcm.Peak(clean)
+		if c.echo != nil {
+			voicePeak = pcm.Peak(pcm.Mix(clean, echoNow))
+		}
 		out := c.mic.push(frame, voicePeak)
 		if c.dropUntilFlush && !c.mic.speaking && len(c.speech) == 0 {
 			c.dropUntilFlush = false // the shepherd stopped and no flush came: play again

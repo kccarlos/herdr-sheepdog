@@ -113,9 +113,16 @@ var Prices = map[string]Price{
 	"gemini-3.8-flash":      {In: 0.50, Out: 3.00},
 	"deepseek-flash":        {In: 0.30, Out: 0.60},
 	"deepseek-chat":         {In: 0.30, Out: 0.60},
-	"gemma4:latest":         {},
-	BackendFake:             {},
-	braintestFakeModel:      {},
+	// The voice bench (internal/bench): Gemini TTS on Vertex, and the
+	// Live model's session tokens (voice.usage), priced at the native
+	// audio rates on the high side (audio in, audio out) since the log
+	// does not split text from audio.
+	"gemini-2.5-flash-tts":         {In: 0.50, Out: 10.00},
+	"gemini-3.1-flash-tts-preview": {In: 1.00, Out: 20.00},
+	"gemini-3.8-live":              {In: 3.00, Out: 12.00},
+	"gemma4:latest":                {},
+	BackendFake:                    {},
+	braintestFakeModel:             {},
 }
 
 // UnknownPrice is what a model missing from Prices is charged at.
