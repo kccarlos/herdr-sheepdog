@@ -348,13 +348,22 @@ func (s *Session) recapItemsLocked() []initialItem {
 	var items []initialItem
 	for _, e := range s.recap.Recent(s.cfg.RecapChars) {
 		part := contentPart{Type: "input_text", Text: e.Text}
-		if e.Role == voice.RecapAssistant {
+		role := e.Role
+		switch e.Role {
+		case voice.RecapAssistant:
 			part.Type = "output_text"
+		case voice.RecapSupervisor:
+			// A spoken push carried over from Gemini (a provider switch).
+			role, part.Text = "developer", "Supervisor update, already spoken to the shepherd: "+e.Text
 		}
-		items = append(items, initialItem{Type: "message", Role: e.Role, Content: []contentPart{part}})
+		items = append(items, initialItem{Type: "message", Role: role, Content: []contentPart{part}})
 	}
 	if len(items) > 0 {
 		note := "The voice line was closed while idle and has just reopened; the messages above are the recent conversation. Carry on from them; do not greet the shepherd again."
+		if s.recapCarried {
+			note = "You have just taken over this voice conversation from another voice model; the messages above are the recent conversation. Carry on from them; do not greet the shepherd again."
+			s.recapCarried = false
+		}
 		items = append(items, initialItem{Type: "message", Role: "developer", Content: []contentPart{{Type: "input_text", Text: note}}})
 	}
 	if len(s.held) > 0 {

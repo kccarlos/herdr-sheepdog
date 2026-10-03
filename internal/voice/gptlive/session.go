@@ -97,6 +97,9 @@ type Session struct {
 	inText       string // the current input utterance (recap)
 	outText      string // the current reply (recap)
 	recap        voice.Recap
+	// recapCarried: the recap came from another provider (SeedRecap);
+	// the next session's history says so once.
+	recapCarried bool
 	held         []string // silent context received in standby
 	pushQ        []pushItem
 	lastSpoken   time.Time

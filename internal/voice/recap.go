@@ -141,6 +141,25 @@ func (r *Recap) Cut(full, heard string, heardMs int) bool {
 	return false
 }
 
+// Entries returns a copy of the entries kept, oldest first (a provider
+// switch hands them to the new session).
+func (r *Recap) Entries() []RecapEntry {
+	return append([]RecapEntry(nil), r.entries...)
+}
+
+// Seed puts entries (another session's, already filtered) before the
+// ones kept, within Max.
+func (r *Recap) Seed(entries []RecapEntry) {
+	r.entries = append(append([]RecapEntry(nil), entries...), r.entries...)
+	max := r.Max
+	if max <= 0 {
+		max = DefaultRecapTurns
+	}
+	if len(r.entries) > max {
+		r.entries = r.entries[len(r.entries)-max:]
+	}
+}
+
 // Reset forgets everything ("New conversation").
 func (r *Recap) Reset() { r.entries = nil }
 

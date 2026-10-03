@@ -230,6 +230,7 @@ func (sw *Switcher) SetProvider(id, via string) error {
 	}
 	setOpenCheck(inner, check)
 	sw.log.Log("voice", "voice.provider_changed", "", map[string]any{"from": from, "to": id, "via": via})
+	sw.carryRecap(old, inner, from, id)
 	sw.carryPushes(old, inner, from, id)
 	sw.ctxlog.Marker("provider switch", fmt.Sprintf("Voice provider switched from %s to %s (via %s): the new provider holds none of the old one's context.", from, id, via), false)
 	sw.emit(EventInterrupted{}) // drop the old voice's audio (its queued pushes were carried)
@@ -243,6 +244,30 @@ func (sw *Switcher) SetProvider(id, via string) error {
 		}
 	}()
 	return nil
+}
+
+// carryRecap gives the new session the old one's recent conversation
+// (its filtered Recap: the shepherd's words, the voice's replies cut to
+// what was heard, the spoken pushes), so a provider switch does not
+// start the new voice with no idea what was just said. Gemini sends it
+// at once as silent context on its live connection; GPT-Live keeps it
+// for the history its next billed session opens with. It goes before
+// the carried pushes. Logs voice.recap_carried {items, from, to}.
+func (sw *Switcher) carryRecap(old, inner Session, from, to string) {
+	src, ok := old.(interface{ RecapEntries() []RecapEntry })
+	if !ok {
+		return
+	}
+	dst, ok := inner.(interface{ SeedRecap([]RecapEntry) })
+	if !ok {
+		return
+	}
+	entries := src.RecapEntries()
+	if len(entries) == 0 {
+		return
+	}
+	dst.SeedRecap(entries)
+	sw.log.Log("voice", "voice.recap_carried", "", map[string]any{"items": len(entries), "from": from, "to": to})
 }
 
 // carryPushes moves the pushes still queued in the retired session onto
