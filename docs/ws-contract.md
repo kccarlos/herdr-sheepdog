@@ -1,8 +1,8 @@
 # Browser ↔ daemon WebSocket contract
 
-Written in WP2 (2026-09-17). The Go types for every control message live in
-`internal/voice/wsproto`; the browser page (WP6) and the WS server (WP5/WP7)
-are both built from this document. Change the doc and the Go types together.
+The Go types for every control message live in `internal/voice/wsproto`;
+the WS server, the browser page and the iOS app are all built from this
+document. Change the doc and the Go types together.
 
 ## Endpoint
 
@@ -211,7 +211,7 @@ within 1.5 s"), so a push can start just as the shepherd does.
 
 Server audio frames arrive in bursts (observed 40–730 ms per frame, and
 on GPT-Live, gaps up to ~1.5 s within one reply — `docs/audio-e2e-results.md`,
-"Audible gaps in GPT-Live playback"), and GPT-Live delivered its audio at
+"GPT-Live playback gaps"), and GPT-Live delivered its audio at
 only **0.72–0.86× real time** on sustained average until the daemon paced
 its input at real time (2026-09-25: ≈1.0×, gaps under ~320 ms; see
 "GPT-Live input pacing" in `docs/audio-e2e-results.md`). A client that starts
@@ -339,10 +339,9 @@ reliably removes is the *click* — an underrun is a faded pause.
 
 ## Auth
 
-Added when `web.bind`/`web.token` (CONFIG.md "web.token") let the daemon
-be reached from a phone on the LAN or over Tailscale, not just
-localhost. With `web.token` unset (the loopback default) every endpoint
-below is open, as in the original v1 contract. With it set:
+`web.bind`/`web.token` (CONFIG.md "web.token") let the daemon be reached
+from a phone on the LAN or over Tailscale. With `web.token` unset (the
+loopback default) every endpoint below is open. With it set:
 
 - `GET /`, `/voice`, `/debug` and their assets, and `GET /api/hello`
   stay public — they hold no data, and a client has to be able to reach
@@ -490,7 +489,7 @@ events that need the shepherd, whether or not a `/ws` client is attached.
 The contract (routes, payload, when an alert is sent) is in
 [`push.md`](push.md).
 
-## Non-goals (v1)
+## Non-goals
 
 No compression, no multiple clients, no client-side resampling contract
 beyond "send 16 kHz PCM16 mono", no timestamps in frames. No TLS: the

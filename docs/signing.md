@@ -43,7 +43,7 @@ blocked by Gatekeeper only when downloaded with a browser (see
 
 ### 1. Agreements
 
-Signed in as the Account Holder (thisiskecheng@gmail.com, team
+Signed in as the Account Holder (team
 `GV776BZVA8`), accept any pending agreement at
 <https://developer.apple.com/account>. Notarization fails with a 403
 while one is pending.
@@ -54,7 +54,7 @@ It already exists on this Mac. To check:
 
 ```sh
 security find-identity -v -p codesigning | grep "Developer ID Application"
-#  4) <sha1> "Developer ID Application: KECHENG AN (GV776BZVA8)"
+#  4) <sha1> "Developer ID Application: <Account Holder name> (GV776BZVA8)"
 ```
 
 The script picks the first valid identity whose name contains
@@ -71,7 +71,7 @@ signature".
 
 Note that the certificate's common name is the account holder's legal
 name, so `codesign -dv` on the released binary shows
-`Authority=Developer ID Application: KECHENG AN (GV776BZVA8)`. Anyone can
+`Authority=Developer ID Application: <Account Holder name> (GV776BZVA8)`. Anyone can
 read it from the download; that is how Developer ID works.
 
 ### 3. Notary credentials
@@ -83,7 +83,7 @@ ID (appleid.apple.com ▸ Sign-In and Security ▸ App-Specific Passwords):
 
 ```sh
 xcrun notarytool store-credentials sheepdog-notary \
-  --apple-id thisiskecheng@gmail.com --team-id GV776BZVA8 \
+  --apple-id <Account Holder Apple ID> --team-id GV776BZVA8 \
   --password <app-specific password>
 ```
 
@@ -156,7 +156,7 @@ that moment may be refused until they are online.
 ```sh
 shasum -a 256 -c checksums.txt --ignore-missing
 tar -xzf sheepdog_v0.1.0_darwin_arm64.tar.gz
-codesign -dv --verbose=2 sheepdog     # Authority=Developer ID Application: KECHENG AN (GV776BZVA8), flags=0x10000(runtime)
+codesign -dv --verbose=2 sheepdog     # Authority=Developer ID Application: <Account Holder name> (GV776BZVA8), flags=0x10000(runtime)
 codesign --verify --strict --check-notarization -R=notarized -vv sheepdog
 spctl --assess --type open --context context:primary-signature -vv sheepdog
 # sheepdog: accepted
