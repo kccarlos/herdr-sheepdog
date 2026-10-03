@@ -396,8 +396,9 @@ func (r *runner) converse(ctx context.Context) {
 				run.Failures = append(run.Failures, eval.Failure{Type: eval.FailError, Detail: "speech: " + eval.FirstLine(err.Error())})
 				return
 			}
-			// The answer: the first words within 15 s, then until quiet.
-			if got := r.hear(ctx, 1500*time.Millisecond, 15*time.Second, true); got > 0 {
+			// The answer: the first words within 25 s (a brain turn can
+			// take that long), then until quiet.
+			if got := r.hear(ctx, 1500*time.Millisecond, 25*time.Second, true); got > 0 {
 				silent = 0
 				r.hear(ctx, 1500*time.Millisecond, 20*time.Second, false)
 			}
@@ -474,10 +475,15 @@ func (r *runner) say(ctx context.Context, text string, barge, collision bool) er
 // collision habits. It returns how many utterances it heard.
 func (r *runner) hear(ctx context.Context, quiet, max time.Duration, needAny bool) int {
 	end := time.Now().Add(max)
+	hard := end.Add(30 * time.Second) // never walk away mid-sentence, within reason
 	n := 0
 	lastHeard := time.Now()
 	barge := r.armBarge()
-	for time.Now().Before(end) && ctx.Err() == nil {
+	for ctx.Err() == nil {
+		now := time.Now()
+		if now.After(hard) || (now.After(end) && !r.c.BotActive() && !r.c.UserSpeaking()) {
+			break
+		}
 		if u, ok := r.c.NextUtterance(ctx, 100*time.Millisecond); ok {
 			n++
 			lastHeard = time.Now()
