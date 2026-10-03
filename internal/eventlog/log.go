@@ -73,6 +73,7 @@ type Log struct {
 	ringHead int // index of the oldest entry when the ring is full
 	ringLen  int
 	subs     map[*subscriber]struct{}
+	taps     map[*Tap]struct{} // lossy observer feeds (tap.go)
 	closed   bool
 	reported bool // write error already reported to stderr
 
@@ -133,6 +134,7 @@ func (l *Log) Log(source, typ, paneID string, payload any) {
 	l.writeLocked(ev)
 	l.pushRingLocked(ev)
 	dropped := l.fanOutLocked(ev)
+	l.offerTapsLocked(ev)
 	l.mu.Unlock()
 
 	for _, s := range dropped {
@@ -319,6 +321,7 @@ func (l *Log) Close() error {
 		subs = append(subs, s)
 	}
 	l.subs = map[*subscriber]struct{}{}
+	l.closeTapsLocked()
 	l.closeFileLocked()
 	reported := l.reported
 	l.mu.Unlock()

@@ -22,6 +22,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/inject"
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
+	"github.com/kccarlos/herdr-sheepdog/internal/observe"
 	"github.com/kccarlos/herdr-sheepdog/internal/push"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 	"github.com/kccarlos/herdr-sheepdog/internal/supervisor"
@@ -150,6 +151,10 @@ type App struct {
 
 	queryLazy *lazyQuerier // nil when --cli=off; filled in by Run after daemon.start
 
+	// observer runs the observers (internal/observe) off a lossy tap of
+	// the event log.
+	observer *observe.Observer
+
 	// push sends phone notifications to the iOS app (nil when its device
 	// file could not be read: pushErr says why).
 	push    *push.Sender
@@ -207,6 +212,7 @@ func Build(cfg config.Config, opts Options) (*App, error) {
 		_ = elog.Close()
 		return nil, err
 	}
+	a.observer = observe.New(a.log, elog.Tap(observe.TapBuffer), a.observers()...)
 	return a, nil
 }
 
@@ -867,6 +873,9 @@ func (a *App) Run(ctx context.Context) (err error) {
 	defer cancel()
 	var wg sync.WaitGroup
 
+	wg.Add(1)
+	go func() { defer wg.Done(); a.observer.Run(inner) }()
+
 	if a.wref != nil {
 		wg.Add(1)
 		go func() { defer wg.Done(); a.runWatcher(inner) }()
@@ -920,6 +929,11 @@ func (a *App) Run(ctx context.Context) (err error) {
 	case <-time.After(a.opts.Drain):
 		a.log.Log("daemon", "daemon.drain_timeout", "", nil)
 	}
+	return nil
+}
+
+// observers are the handlers the observer feeds (internal/observe).
+func (a *App) observers() []observe.Handler {
 	return nil
 }
 
