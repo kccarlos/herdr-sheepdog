@@ -3,6 +3,7 @@ package voice
 import (
 	"fmt"
 	"strings"
+	"unicode"
 )
 
 // Recap is the recent conversation a voice session keeps so a fresh
@@ -37,10 +38,23 @@ type RecapEntry struct {
 	Cut        bool
 }
 
-// Add remembers one finished utterance (blank text is ignored).
+// Add remembers one finished utterance. Blank text is ignored, and so
+// is what would only teach a fresh model the wrong habit
+// (docs/bench-2026-10-03.md #9): a bare acknowledgement of the voice's
+// own ("On it.", "checking", "好的") and its "<no speech detected>"
+// placeholder, and a shepherd entry that only repeats the line the
+// voice was just given or said (its own speech heard back, or a push's
+// question relayed as if the shepherd had asked it). Run 1's 18-hour
+// session had relayed 17 of 17 Chinese push questions with "on it".
 func (r *Recap) Add(role, text string) {
 	text = strings.TrimSpace(text)
 	if text == "" {
+		return
+	}
+	if role == RecapAssistant && BareAck(text) {
+		return
+	}
+	if role == RecapUser && r.repeatsRecent(text) {
 		return
 	}
 	r.entries = append(r.entries, RecapEntry{Role: role, Text: text})
@@ -51,6 +65,60 @@ func (r *Recap) Add(role, text string) {
 	if len(r.entries) > max {
 		r.entries = r.entries[len(r.entries)-max:]
 	}
+}
+
+// recapAckWords are the voice's bare acknowledgements, normalised
+// (lower case, letters and digits only).
+var recapAckWords = map[string]bool{
+	"onit": true, "checking": true, "checkingnow": true, "letmecheck": true, "ok": true, "okay": true,
+	"gotit": true, "sure": true, "onemoment": true, "justamoment": true, "nospeechdetected": true,
+	"好的": true, "好": true, "收到": true, "明白": true, "明白了": true, "稍等": true, "马上": true,
+	"我看看": true, "我查一下": true, "正在查": true, "好的我看看": true, "好的稍等": true,
+}
+
+// BareAck reports whether text is only an acknowledgement ("On it.",
+// "checking", "好的。") or the "<no speech detected>" placeholder: a
+// line with nothing in it a later model could follow up on.
+func BareAck(text string) bool {
+	return recapAckWords[recapNorm(text)]
+}
+
+// repeatsRecent reports whether a shepherd entry only repeats one of
+// the last few lines the voice was given or said. A short answer that
+// happens to echo the question ("fix it", "允许它运行") is the
+// shepherd's own: only a repeat of at least selfRelayMin letters counts.
+func (r *Recap) repeatsRecent(text string) bool {
+	n := recapNorm(text)
+	if len([]rune(n)) < selfRelayMin {
+		return false
+	}
+	seen := 0
+	for i := len(r.entries) - 1; i >= 0 && seen < 3; i-- {
+		e := r.entries[i]
+		if e.Role == RecapUser {
+			continue
+		}
+		seen++
+		if strings.Contains(recapNorm(e.Text), n) {
+			return true
+		}
+	}
+	return false
+}
+
+// selfRelayMin is the shortest shepherd entry (letters and digits)
+// taken as a repeat of the voice's own line.
+const selfRelayMin = 8
+
+// recapNorm lower-cases text and keeps only its letters and digits.
+func recapNorm(text string) string {
+	var b strings.Builder
+	for _, c := range strings.ToLower(text) {
+		if unicode.IsLetter(c) || unicode.IsDigit(c) {
+			b.WriteRune(c)
+		}
+	}
+	return b.String()
 }
 
 // Cut replaces the newest assistant entry that full (everything the cut

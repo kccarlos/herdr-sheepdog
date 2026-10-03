@@ -38,11 +38,14 @@ func (s *Session) handleMessage(msg *genai.LiveServerMessage, gen int) {
 		}
 	case msg.SessionResumptionUpdate != nil:
 		u := msg.SessionResumptionUpdate
-		if u.Resumable && u.NewHandle != "" {
-			s.mu.Lock()
+		s.mu.Lock()
+		// Only the live connection's handle, and none while a refresh
+		// is starting a fresh session (refresh.go): the old
+		// connection's late update would make it resume after all.
+		if u.Resumable && u.NewHandle != "" && gen == s.connGen && !s.refreshing {
 			s.handle = u.NewHandle
-			s.mu.Unlock()
 		}
+		s.mu.Unlock()
 	case msg.ToolCall != nil:
 		for _, fc := range msg.ToolCall.FunctionCalls {
 			if fc != nil {

@@ -65,6 +65,7 @@ type Switcher struct {
 	inner     Session
 	muted     bool
 	client    bool
+	openCheck OpenCheck
 	// billedRetired is the billed duration of retired sessions (a
 	// GPT-Live session switched away from).
 	billedRetired float64
@@ -159,6 +160,7 @@ func (sw *Switcher) Start(ctx context.Context) error {
 	if ca, ok := inner.(interface{ ClientAttached(bool) }); ok {
 		ca.ClientAttached(sw.client)
 	}
+	setOpenCheck(inner, sw.openCheck)
 	sw.forwardLocked(inner)
 	return nil
 }
@@ -217,7 +219,7 @@ func (sw *Switcher) SetProvider(id, via string) error {
 	}
 	old := sw.inner
 	sw.current, sw.inner = id, inner
-	muted, client := sw.muted, sw.client
+	muted, client, check := sw.muted, sw.client, sw.openCheck
 	sw.forwardLocked(inner)
 	sw.retire.Add(1)
 	sw.mu.Unlock()
@@ -226,6 +228,7 @@ func (sw *Switcher) SetProvider(id, via string) error {
 	if ca, ok := inner.(interface{ ClientAttached(bool) }); ok {
 		ca.ClientAttached(client)
 	}
+	setOpenCheck(inner, check)
 	sw.log.Log("voice", "voice.provider_changed", "", map[string]any{"from": from, "to": id, "via": via})
 	sw.carryPushes(old, inner, from, id)
 	sw.ctxlog.Marker("provider switch", fmt.Sprintf("Voice provider switched from %s to %s (via %s): the new provider holds none of the old one's context.", from, id, via), false)
@@ -439,6 +442,23 @@ func (sw *Switcher) ClientAttached(attached bool) {
 	sw.mu.Unlock()
 	if ca, ok := s.(interface{ ClientAttached(bool) }); ok {
 		ca.ClientAttached(attached)
+	}
+}
+
+// SetOpenCheck installs the supervisor's OpenCheck on the current
+// session and every later one (a provider switch).
+func (sw *Switcher) SetOpenCheck(f OpenCheck) {
+	sw.mu.Lock()
+	sw.openCheck = f
+	s := sw.inner
+	sw.mu.Unlock()
+	setOpenCheck(s, f)
+}
+
+// setOpenCheck hands f to s when it takes one.
+func setOpenCheck(s Session, f OpenCheck) {
+	if oc, ok := s.(interface{ SetOpenCheck(OpenCheck) }); ok && f != nil {
+		oc.SetOpenCheck(f)
 	}
 }
 

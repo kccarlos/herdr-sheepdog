@@ -43,3 +43,38 @@ func TestRecapCutKeepsWhatWasHeard(t *testing.T) {
 		t.Errorf("an unheard reply stayed: %+v", got)
 	}
 }
+
+// TestRecapLeavesOutAcksAndSelfRelays is docs/bench-2026-10-03.md #9:
+// the re-seed of a fresh session must not teach it the degraded
+// session's habits — the bare "On it." / "checking" / "好的" it said
+// while relaying a push's own question, its "<no speech detected>"
+// placeholder, and the relayed question itself recorded as if the
+// shepherd had asked it.
+func TestRecapLeavesOutAcksAndSelfRelays(t *testing.T) {
+	r := Recap{}
+	r.Add(RecapSupervisor, "测试跑完了，数量出来是三，应该是五。要我直接让 codex 把它修掉吗？")
+	r.Add(RecapAssistant, "On it.")
+	r.Add(RecapUser, "要我直接让 codex 把它修掉吗？") // the push's question heard back
+	r.Add(RecapAssistant, "checking")
+	r.Add(RecapAssistant, "好的。")
+	r.Add(RecapAssistant, "<no speech detected>")
+	r.Add(RecapUser, "让 codex 修掉吗") // short: the shepherd's own answer, kept
+	r.Add(RecapUser, "让 codex 修。")
+	r.Add(RecapAssistant, "On it, telling codex to fix the count now.")
+	got := RecapLines(r.Recent(1000))
+	want := "Supervisor update: 测试跑完了，数量出来是三，应该是五。要我直接让 codex 把它修掉吗？\n" +
+		"Shepherd: 让 codex 修掉吗\n" +
+		"Shepherd: 让 codex 修。\n" +
+		"You: On it, telling codex to fix the count now."
+	if got != want {
+		t.Errorf("recap =\n%s\nwant\n%s", got, want)
+	}
+	for _, ack := range []string{"On it.", "on it", "Checking", "好的", "收到。", "<no speech detected>"} {
+		if !BareAck(ack) {
+			t.Errorf("BareAck(%q) = false", ack)
+		}
+	}
+	if BareAck("Docs finished.") {
+		t.Error("BareAck took a real line")
+	}
+}

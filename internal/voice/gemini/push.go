@@ -262,7 +262,9 @@ func heldPayload(item pushItem, reason string, age time.Duration) map[string]any
 // given up on because TurnTimeout elapsed (the caller logs and counts it).
 // Caller holds s.mu.
 func (s *Session) pushReadyLocked(item pushItem, now time.Time) (wait time.Duration, timedOut bool) {
-	if s.conn == nil {
+	if s.conn == nil || s.refreshing {
+		// A refresh dials while the old connection is still live: the
+		// line waits for the fresh one (install pokes the loop).
 		return waitState, false
 	}
 	if item.urgency == voice.UrgencySilent {
@@ -366,6 +368,9 @@ func (s *Session) doPush(ctx context.Context, item pushItem) {
 		return
 	}
 	s.mu.Lock()
+	if id, _ := item.tags[ctxcap.TagCallID].(string); id != "" {
+		delete(s.owedReplies, id) // the reply the voice was told follows
+	}
 	if turnComplete {
 		s.flushRecapLocked()
 		s.recap.Add(voice.RecapSupervisor, item.text)
