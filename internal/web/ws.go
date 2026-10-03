@@ -137,6 +137,65 @@ func (h *hub) handle(w http.ResponseWriter, r *http.Request) {
 	h.mu.Lock()
 	h.seq++
 	c.id = h.seq
+	busy := h.client != nil
+	h.mu.Unlock()
+
+	// A new client replaces the attached one only once its handshake is
+	// accepted (handshake.go): a client about to be refused for its
+	// protocol must not kick a working one off. With nobody attached
+	// there is nobody to kick, so it attaches at once, as before.
+	replaced := false
+	if busy {
+		c.mu.Lock()
+		c.pendingAttach = true
+		c.mu.Unlock()
+	} else {
+		replaced = h.attach(c)
+	}
+	h.s.log.Log(logSource, "web.client.connect", "", map[string]any{"client_id": c.id, "remote": c.remote, "replaced": replaced, "pending": busy})
+
+	// The contract: a status message before any binary frame — sent at
+	// once, before the handshake, so a legacy client is served exactly
+	// as before. A pending client is told it starts unmuted (it will, on
+	// attach) rather than the attached client's mute.
+	st := h.statusMsg()
+	if busy {
+		unmuted := false
+		st.Muted = &unmuted
+	}
+	first := controlFrame(st)
+	c.mu.Lock()
+	c.firstStatus = first.data
+	c.mu.Unlock()
+	c.enqueue(first)
+	c.startHandshake(h.s.deps.HandshakeTimeout)
+	go c.writeLoop()
+	go c.statsLoop(h.s.deps.StatsInterval)
+	reason := c.readLoop(r.Context())
+	c.stopHandshake()
+	c.finish(reason)
+
+	h.mu.Lock()
+	c.gone = true
+	last := h.client == c
+	if last {
+		h.client = nil
+	}
+	h.mu.Unlock()
+	if ca, ok := h.s.deps.Voice.(clientAttacher); ok && last {
+		ca.ClientAttached(false)
+	}
+}
+
+// attach makes c the attached client, replacing (and closing) the one
+// before it, and reports whether there was one. A client whose
+// connection already ended is not attached.
+func (h *hub) attach(c *client) bool {
+	h.mu.Lock()
+	if c.gone || h.client == c {
+		h.mu.Unlock()
+		return false
+	}
 	old := h.client
 	h.client = c
 	// docs/ws-contract.md: "reconnecting clients start unmuted" — a new
@@ -148,37 +207,14 @@ func (h *hub) handle(w http.ResponseWriter, r *http.Request) {
 	if h.s.deps.Voice != nil {
 		h.s.deps.Voice.SetMuted(false)
 	}
-
-	replaced := old != nil
-	if replaced {
+	if old != nil {
 		old.enqueue(controlFrame(h.closedStatus("replaced")))
 		old.closeAfterFlush(websocket.StatusNormalClosure, "replaced")
 	}
-	h.s.log.Log(logSource, "web.client.connect", "", map[string]any{"client_id": c.id, "remote": c.remote, "replaced": replaced})
 	if ca, ok := h.s.deps.Voice.(clientAttacher); ok {
 		ca.ClientAttached(true)
 	}
-
-	// The contract: a status message before any binary frame — sent at
-	// once, before the handshake, so a legacy client is served exactly
-	// as before.
-	c.enqueue(controlFrame(h.statusMsg()))
-	c.startHandshake(h.s.deps.HandshakeTimeout)
-	go c.writeLoop()
-	go c.statsLoop(h.s.deps.StatsInterval)
-	reason := c.readLoop(r.Context())
-	c.stopHandshake()
-	c.finish(reason)
-
-	h.mu.Lock()
-	last := h.client == c
-	if last {
-		h.client = nil
-	}
-	h.mu.Unlock()
-	if ca, ok := h.s.deps.Voice.(clientAttacher); ok && last {
-		ca.ClientAttached(false)
-	}
+	return old != nil
 }
 
 // current returns the attached client, if any.
@@ -429,6 +465,13 @@ type client struct {
 	aec string
 	// hs is the protocol handshake (handshake.go).
 	hs handshake
+	// pendingAttach: another client was attached when this one
+	// connected, so it replaces that one only once its handshake is
+	// accepted. firstStatus is the status it was sent on connect.
+	pendingAttach bool
+	firstStatus   []byte
+	// gone (under hub.mu): the connection ended; never attach it.
+	gone bool
 	// sendWaits is a bounded rolling window of how long recent audio
 	// frames waited in the outbound queue before writeLoop sent them
 	// (ms), for web.client.stats send_wait_p95_ms / send_wait_max_ms.

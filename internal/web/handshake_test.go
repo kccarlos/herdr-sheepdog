@@ -189,3 +189,71 @@ func TestHelloProtocol(t *testing.T) {
 		t.Fatalf("hello = %+v", hello)
 	}
 }
+
+// A client refused for its protocol never replaces the attached one: the
+// working client is not told "replaced", keeps the audio and stays
+// attached.
+func TestHandshakeRefusedClientDoesNotReplace(t *testing.T) {
+	h := newHarness(t, harnessOpts{voice: true})
+	first := dialWS(t, h)
+	first.expect(wsproto.TypeStatus)
+	first.send(wsproto.ClientReady(1, iosClient))
+	first.expect(wsproto.TypeBotReady)
+
+	second := dialWS(t, h)
+	second.expect(wsproto.TypeStatus)
+	second.send(wsproto.ClientReady(0, iosClient))
+	second.expect(wsproto.TypeError)
+	if st := second.expect(wsproto.TypeStatus); st.Reason != wsproto.ReasonProtocolTooOld {
+		t.Fatalf("second status = %+v", st)
+	}
+	if ce := second.expectClose(); ce.Code != wsproto.CloseProtocolUnsupported {
+		t.Fatalf("second close = %+v", ce)
+	}
+
+	// The first client hears nothing about it and still gets the audio.
+	h.session.audio <- []byte{7, 7}
+	m, data, err := first.read(2 * time.Second)
+	if err != nil || m.Type != "" || len(data) != 2 {
+		t.Fatalf("first client after the refusal = %+v %v %v (want the audio, not a replaced status)", m, data, err)
+	}
+	first.send(wsproto.Ping())
+	first.expect(wsproto.TypePong)
+	var st StateResponse
+	h.getJSON("/api/state", &st)
+	if !st.Voice.ClientConnected {
+		t.Fatal("the first client should still be attached")
+	}
+	for _, ty := range h.types() {
+		if ty == "web.client.attach" {
+			t.Fatal("a refused client was attached")
+		}
+	}
+}
+
+// An accepted client does replace the attached one, as soon as its
+// client-ready arrives (no 2 s wait).
+func TestHandshakeAcceptedClientReplaces(t *testing.T) {
+	h := newHarness(t, harnessOpts{voice: true})
+	first := dialWS(t, h)
+	first.expect(wsproto.TypeStatus)
+	first.send(wsproto.Ping())
+	first.expect(wsproto.TypePong)
+
+	second := dialWS(t, h)
+	second.expect(wsproto.TypeStatus)
+	start := time.Now()
+	second.send(wsproto.ClientReady(1, iosClient))
+	second.expect(wsproto.TypeBotReady)
+	st := first.expect(wsproto.TypeStatus)
+	if st.Voice != wsproto.VoiceClosed || st.Reason != "replaced" {
+		t.Fatalf("first status = %+v", st)
+	}
+	if d := time.Since(start); d > time.Second {
+		t.Fatalf("replacement took %v", d)
+	}
+	h.session.audio <- []byte{3, 3}
+	if m, data, err := second.read(2 * time.Second); err != nil || m.Type != "" || len(data) != 2 {
+		t.Fatalf("second client audio = %+v %v %v", m, data, err)
+	}
+}

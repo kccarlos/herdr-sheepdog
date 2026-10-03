@@ -18,7 +18,14 @@ inline code; only real messages go in `json` blocks.
   bind (a phone on the LAN or over Tailscale).
 - **One client at a time.** A second connection replaces the first: the
   daemon sends the first client `{"type":"status","voice":"closed","reason":"replaced"}`
-  and closes it with WebSocket code 1000, then serves the new one.
+  and closes it with WebSocket code 1000, then serves the new one. The
+  replacement waits for the new client's handshake to be accepted (its
+  `client-ready`, its first other frame, or 2 s of silence; see *Protocol
+  version and handshake*), so a client refused for its protocol never
+  kicks the attached one off. Until then the new client has had its
+  connect `status` (with `muted:false`, the state it will start in) and
+  nothing else; on attach it gets a fresh `status` if the voice state
+  changed meanwhile. With no client attached a new one attaches at once.
 - The Gemini session lives in the daemon (decision D2). Opening, closing or
   replacing a browser connection never restarts it. A new client immediately
   receives one `status` message describing the current voice state and then
@@ -85,7 +92,8 @@ binary version.
   gets an `error` it can show as is, then `status` `closed` with reason
   `protocol_too_old`, then a close with WebSocket code **4001** and a
   short reason; it sees no `bot-ready`. It should not reconnect in a
-  loop: it tells the shepherd to update the app.
+  loop: it tells the shepherd to update the app. A refused client never
+  replaces the client already attached.
 
   ```json
   {"type":"error","message":"This app speaks /ws protocol 0; the daemon (version 0.4.2) needs protocol 1 or newer. Update the app."}
@@ -99,6 +107,10 @@ binary version.
   `{"type":"error","message":"wsproto: unknown type \"client-ready\""}`
   and never sends `bot-ready`. A client takes that error (or 2 s without
   `bot-ready`) to mean protocol 1, and does not show it as a problem.
+- `web.client.connect {client_id, remote, replaced, pending}` —
+  `pending` when another client was attached, in which case
+  `web.client.attach {client_id, replaced}` follows once the handshake is
+  accepted.
 - Logged as `web.client.hello {client_id, protocol, client, legacy,
   accepted}`: `client` is the `client-ready`'s `{name, version,
   platform}` (null for a legacy client); a legacy client adds `why`

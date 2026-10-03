@@ -84,6 +84,9 @@ func (c *client) legacyIfUnresolved(why string) bool {
 	c.h.s.log.Log(logSource, "web.client.hello", "", map[string]any{
 		"client_id": c.id, "protocol": wsproto.LegacyProtocol, "client": nil, "legacy": true, "why": why, "accepted": ok,
 	})
+	if ok {
+		c.attachIfPending()
+	}
 	return ok
 }
 
@@ -112,9 +115,30 @@ func (c *client) onClientReady(m wsproto.Message) {
 	if !ok {
 		return
 	}
+	c.attachIfPending()
 	// The daemon speaks its own protocol; a newer client steps down to
 	// it (or closes, if it cannot).
 	c.enqueue(controlFrame(wsproto.BotReady(wsproto.ProtocolVersion, c.h.s.deps.MinProtocol, c.h.s.deps.Version, c.h.s.features())))
+}
+
+// attachIfPending attaches a client that connected while another was
+// attached, now that its handshake is accepted: only then does it replace
+// that one. It is sent a fresh status if the hub's differs from the one
+// it got on connect.
+func (c *client) attachIfPending() {
+	c.mu.Lock()
+	pending := c.pendingAttach
+	c.pendingAttach = false
+	first := c.firstStatus
+	c.mu.Unlock()
+	if !pending {
+		return
+	}
+	replaced := c.h.attach(c)
+	c.h.s.log.Log(logSource, "web.client.attach", "", map[string]any{"client_id": c.id, "replaced": replaced})
+	if now := controlFrame(c.h.statusMsg()); string(now.data) != string(first) {
+		c.enqueue(now)
+	}
 }
 
 // checkProtocol refuses a client below the daemon's minimum: an error a
