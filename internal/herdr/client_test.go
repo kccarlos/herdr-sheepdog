@@ -384,3 +384,46 @@ func waitSubs(t *testing.T, srv *herdrtest.Server, n int) {
 	}
 	t.Fatalf("subscriptions = %d, want %d", srv.SubscriptionCount(), n)
 }
+
+// The spawn calls (docs/roles.md "Starting an agent"): workspace.create
+// returns the root pane, pane.split the new pane, and pane.send_input
+// types the command line with its Enter in one write.
+func TestClientSpawnCalls(t *testing.T) {
+	srv := herdrtest.New(t)
+	srv.Handle("workspace.create", func(json.RawMessage) (any, error) {
+		return map[string]any{"type": "workspace_created", "root_pane": map[string]any{"pane_id": "w7:p1", "workspace_id": "w7", "cwd": "/p/app"}}, nil
+	})
+	srv.Handle("pane.split", func(json.RawMessage) (any, error) {
+		return map[string]any{"type": "pane_info", "pane": map[string]any{"pane_id": "w7:p2", "workspace_id": "w7", "cwd": "/p/app"}}, nil
+	})
+	srv.Handle("pane.send_input", func(json.RawMessage) (any, error) { return map[string]any{"type": "ok"}, nil })
+	c := herdr.NewClient(srv.Path)
+	ctx := context.Background()
+	root, err := c.CreateWorkspace(ctx, "/p/app", "app")
+	if err != nil || root.PaneID != "w7:p1" {
+		t.Fatalf("CreateWorkspace = %+v, %v", root, err)
+	}
+	pane, err := c.SplitPane(ctx, "w7:p1", "/p/app")
+	if err != nil || pane.PaneID != "w7:p2" {
+		t.Fatalf("SplitPane = %+v, %v", pane, err)
+	}
+	if err := c.SendInput(ctx, "w7:p2", "claude --model haiku", "enter"); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{
+		"workspace.create": `{"cwd":"/p/app","focus":false,"label":"app"}`,
+		"pane.split":       `{"cwd":"/p/app","direction":"right","focus":false,"pane_id":"w7:p1"}`,
+		"pane.send_input":  `{"keys":["enter"],"pane_id":"w7:p2","text":"claude --model haiku"}`,
+	}
+	for _, r := range srv.Requests() {
+		if w, ok := want[r.Method]; ok {
+			if string(r.Params) != w {
+				t.Errorf("%s params = %s, want %s", r.Method, r.Params, w)
+			}
+			delete(want, r.Method)
+		}
+	}
+	if len(want) > 0 {
+		t.Errorf("never called: %v", want)
+	}
+}

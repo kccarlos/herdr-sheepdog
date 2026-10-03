@@ -105,8 +105,15 @@ func toolDeclarations(readOnly bool) []*genai.Tool {
 		return []*genai.Tool{{FunctionDeclarations: read}}
 	}
 	act := []*genai.FunctionDeclaration{
-		{Name: ToolPrompt, Description: "Send an instruction to an agent as typed text. Its own approval prompts still apply. Use for anything the CEO tells an agent to do.",
-			Parameters: obj(map[string]*genai.Schema{"agent": agent, "text": str("the instruction, complete and self-contained")}, []string{"agent", "text"})},
+		{Name: ToolPrompt, Description: "Send an instruction to an agent as typed text. Its own approval prompts still apply. Use for anything the CEO tells an agent to do. " +
+			"To start a new agent instead, only when the CEO asks for one, omit agent and give new_agent_dir; text is then its first instruction (optional). " +
+			"A directory that is not a known project is refused with the list of projects: ask the CEO which one. Its first question (e.g. trusting the folder) comes to the CEO like any other. " +
+			"Codex runs on a free plan: start one only when the CEO asks for Codex by name.",
+			Parameters: obj(map[string]*genai.Schema{"agent": agent, "text": str("the instruction, complete and self-contained"),
+				"new_agent_dir":   str("only to start a new agent: the project's directory name as the CEO said it, or its path"),
+				"new_agent_kind":  {Type: genai.TypeString, Enum: SpawnKinds, Description: "only to start a new agent: claude (default) or codex"},
+				"new_agent_model": str("only when the CEO asks for a model; for a cheap Claude, haiku"),
+			}, nil)},
 		{Name: ToolSendKeys, Description: "Answer an agent's approval prompt with the keys of one of its on-screen options (see the roster). Permitted only when the CEO authorised that answer in this turn.",
 			Parameters: obj(map[string]*genai.Schema{"agent": agent, "keys": {Type: genai.TypeArray, Items: str("one key name, e.g. enter, esc, y, 1"), Description: "the option's keys, in order"}}, []string{"agent", "keys"})},
 		{Name: ToolInterrupt, Description: "Send Ctrl-C to an agent to stop what it is doing.",
@@ -261,6 +268,9 @@ func (b *Brain) execTool(ctx context.Context, t *turn, call *genai.FunctionCall)
 			// model answering and its calls running: nothing is sent.
 			return toolOutcome{err: fmt.Errorf("the turn was cancelled before %s ran: %w", call.Name, err)}
 		}
+	}
+	if call.Name == ToolPrompt && spawning(call.Args) {
+		return b.spawn(ctx, arg)
 	}
 	if call.Name == ToolNote && arg("name") != "" {
 		row, ok := b.host.Resolve(arg("agent"))

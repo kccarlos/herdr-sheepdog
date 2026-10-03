@@ -332,6 +332,7 @@ func (a *App) wire() error {
 		ReplyWait:        replyWait(cfg, opts),
 		RepeatWindow:     time.Duration(cfg.Supervisor.RepeatWindowS) * time.Second,
 		AuthoriseWindow:  time.Duration(cfg.Supervisor.AuthoriseWindowS) * time.Second,
+		ProjectRoots:     cfg.Supervisor.ProjectRoots,
 
 		InvestigateMax:        time.Duration(cfg.Brain.InvestigateMaxS) * time.Second,
 		InvestigateSessionTTL: time.Duration(cfg.Brain.InvestigateSessionTTLS) * time.Second,

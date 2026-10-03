@@ -138,6 +138,10 @@ type Config struct {
 	// supervisor.authorise_window_s, docs/roles.md "The one rail";
 	// inputs.go).
 	AuthoriseWindow time.Duration
+	// ProjectRoots are where a new agent may be started (spawn.go,
+	// supervisor.project_roots): their immediate subdirectories are the
+	// candidates, and any directory inside one is allowed.
+	ProjectRoots []string
 	// Brain, when set, is the one model that decides and phrases
 	// (docs/roles.md); without it the daemon speaks code sentences and
 	// sends nothing. New attaches the Supervisor as its Host.
@@ -342,6 +346,9 @@ type Supervisor struct {
 	// signature) was first recorded, so a revived pending action keeps
 	// the time the prompt really appeared (inputs.go).
 	promptSeenAt map[string]time.Time
+	// spawns are when the last new agents were started (spawn.go's
+	// rate cap).
+	spawns []time.Time
 
 	// conversationStartedAt is when the current conversation began: the
 	// last reset, or startedAt (reset.go, GET /api/state).
