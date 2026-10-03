@@ -469,8 +469,9 @@ func (s *Session) forwardAudio(pcm16 []byte) error {
 	return s.sendAudio(conn, pcm16)
 }
 
-// logEchoVerdict logs the echo gate letting the shepherd through while
-// the reply played (voice.echo_gate).
+// logEchoVerdict logs the echo gate arming (the client's echo showed
+// itself) or letting the shepherd through while the reply played
+// (voice.echo_gate).
 func (s *Session) logEchoVerdict(v *voice.EchoVerdict, why string) {
 	if v == nil {
 		return
@@ -478,6 +479,9 @@ func (s *Session) logEchoVerdict(v *voice.EchoVerdict, why string) {
 	s.mu.Lock()
 	st := s.echo.Stats()
 	s.mu.Unlock()
+	if v.Armed {
+		why = "armed"
+	}
 	s.log.Log(logSource, "voice.echo_gate", "", map[string]any{
 		"open": v.Open, "why": why, "corr": round2(v.Corr), "residual": round2(v.Residual), "lag_ms": v.LagMs,
 		"released": v.Released, "withheld_total": st.Withheld, "opens_total": st.Opens,
@@ -491,7 +495,7 @@ func (s *Session) VoiceStats() map[string]any {
 	s.mu.Lock()
 	st := s.echo.Stats()
 	s.mu.Unlock()
-	return map[string]any{"echo_withheld_frames": st.Withheld, "echo_released_frames": st.Released, "echo_opens": st.Opens}
+	return map[string]any{"echo_withheld_frames": st.Withheld, "echo_released_frames": st.Released, "echo_opens": st.Opens, "echo_armed": st.Armed}
 }
 
 func (s *Session) sendAudio(conn Conn, pcm16 []byte) error {

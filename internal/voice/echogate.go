@@ -3,7 +3,9 @@ package voice
 import (
 	"math"
 	"sort"
+	"strings"
 	"time"
+	"unicode"
 )
 
 // EchoGate keeps the voice's own speech, leaking from the phone's speaker
@@ -39,6 +41,9 @@ type EchoGate struct {
 	playing  bool
 	playhead time.Time
 	reports  bool
+	// runStart is when the current reply began playing (after a pause
+	// longer than the echo tail).
+	runStart time.Time
 
 	// microphone: frames held back while the reply plays, with their
 	// block powers on the microphone timeline.
@@ -49,22 +54,27 @@ type EchoGate struct {
 	pass      bool
 	echoRun   int
 	unsure    int
-	// candLag / candN: the delay a streak of echo matches began at and
-	// how many successive windows matched near it.
-	candLag int
-	candN   int
-	// learnedHere: the echo's level was first learned from the frames
-	// held now and not yet confirmed by echoConfirmations more echo
-	// windows, so the echo verdicts are not trusted to keep any out
-	// (speech that happened to match the reply's start).
-	learnedHere bool
-	confirmed   int
-	// echoAt is the last held frame a window judged echo ended on.
-	echoAt time.Time
+	// burst: this frame came with the previous one (pre-roll released at
+	// once); the frames' places on the timeline settle once it is over,
+	// so nothing is judged until then.
+	burst bool
+	// firstLag / firstN: before the gate is armed, the delay a streak of
+	// echo matches began at and its length.
+	firstLag int
+	firstN   int
 	// recent are the last microphone block powers (the floor).
 	recent []float64
+	// armed: this client's echo has shown itself; until then nothing is
+	// held back.
+	armed bool
+	// said is the reply's recent words (Heard).
+	said string
+	// replyOnset: the microphone opened right as the current reply
+	// began; selfCuts counts interruptions that followed one (Flush).
+	replyOnset time.Time
+	selfCuts   int
 	// coupling is the echo's microphone/reply power ratio, learned from
-	// the windows judged echo (0: no echo seen yet).
+	// the windows judged echo (0: none yet).
 	coupling float64
 	lagMs    int
 
@@ -76,6 +86,7 @@ type EchoGateStats struct {
 	Withheld int // frames dropped as echo
 	Released int // held frames released on a shepherd verdict
 	Opens    int // shepherd verdicts while the reply played
+	Armed    bool
 }
 
 type echoBlock struct {
@@ -104,6 +115,11 @@ const (
 	// the microphone timeline (acoustic delay, output latency, a burst
 	// of pre-roll the client released at once).
 	echoMaxLag = 1000 * time.Millisecond
+	// echoMinLag: the echo may lead the play timeline a little: the
+	// client reports "started" once its player has begun, a few frames
+	// after the first sound left the speaker (on the bench the echo's
+	// delay at the daemon measured 10–50 ms).
+	echoMinLag = -200 * time.Millisecond
 	// echoMinBlocks / echoWindowBlocks: the window a verdict needs and
 	// looks at (240 / 320 ms).
 	echoMinBlocks    = 24
@@ -117,22 +133,9 @@ const (
 	// echoUnsureFrames: consecutive unsure verdicts after which held
 	// audio is let through (640 ms, all of it still held).
 	echoUnsureFrames = 16
-	// echoReleaseOverlap: of the frames judged echo, how much is
-	// released ahead of the shepherd's words anyway.
-	echoReleaseOverlap = 80 * time.Millisecond
 	// echoUsualLag: the echo delays to rule out before the first verdict
 	// that a window is the shepherd's.
 	echoUsualLag = 400 * time.Millisecond
-	// echoSteadyFrames / echoLagSlackMs: an echo match must hold its
-	// delay (±30 ms) over three successive windows.
-	echoSteadyFrames = 3
-	// echoMaxSpreadDB: the most the microphone/reply ratio of an echo
-	// spreads (interquartile, dB) over a window.
-	echoMaxSpreadDB = 4.0
-	// echoConfirmations: echo windows after the first that confirm the
-	// echo's level before its verdicts may keep held audio out.
-	echoConfirmations = 8
-	echoLagSlackMs    = 30
 	// echoCorr is the envelope correlation at or above which the reply
 	// may explain the window; echoResidual the share of the window's
 	// energy above the echo's level (+6 dB) below which it does.
@@ -141,10 +144,25 @@ const (
 	echoMargin   = 4.0 // +6 dB, as a power ratio
 	// echoFirstCorr: the stricter correlation the first echo verdict
 	// needs, before the echo's coupling is known.
-	echoFirstCorr = 0.8
-	// echoCouplingSpread: a window more than 10 dB louder, relative to
+	echoFirstCorr = 0.9
+	// echoFirstSteady: successive full windows (600 ms of sliding, about
+	// three windows that do not overlap) the arming match must hold its
+	// delay over.
+	echoFirstSteady = 15
+	// echoSaidKeep: the reply's words kept for Heard (runes);
+	// echoHeardWithin: how long after the reply a transcript of its
+	// words still counts as its echo.
+	echoSaidKeep    = 400
+	echoHeardWithin = 3 * time.Second
+	// echoOnsetWithin / echoSelfCutWithin / echoSelfCuts: a microphone
+	// opening within 400 ms of a reply's start, an interruption within
+	// 1.5 s of it, twice, arm the gate.
+	echoOnsetWithin   = 400 * time.Millisecond
+	echoSelfCutWithin = 1500 * time.Millisecond
+	echoSelfCuts      = 2
+	// echoCouplingSpread: a window more than 6 dB louder, relative to
 	// the reply, than the echo has been is not echo.
-	echoCouplingSpread = 10.0
+	echoCouplingSpread = 4.0
 	// echoFloorPow: −70 dBFS, the floor under every block's power.
 	echoFloorPow = 1e-7
 	// echoRefActive: a reference block counts as sound above −55 dBFS.
@@ -187,15 +205,31 @@ func (g *EchoGate) Playback(now time.Time, state string) {
 }
 
 // Flush records that the daemon dropped the output (an interruption):
-// nothing queued will play.
-func (g *EchoGate) Flush(now time.Time) {
+// nothing queued will play. An interruption that follows a microphone
+// opening right at the start of the reply is the model cutting itself
+// off on its echo; the second one arms the gate (it reports whether it
+// armed now). A client leaking echo shows itself this way first: the
+// model cuts the reply within half a second, too soon for the audio
+// comparison to be sure.
+func (g *EchoGate) Flush(now time.Time) bool {
 	g.advance(now)
 	g.pending, g.refCarry = nil, nil
+	onset := g.replyOnset
+	g.replyOnset = time.Time{}
+	if g.armed || onset.IsZero() || now.Sub(onset) > echoSelfCutWithin {
+		return false
+	}
+	if g.selfCuts++; g.selfCuts < echoSelfCuts {
+		return false
+	}
+	g.armed, g.stats.Armed = true, true
+	return true
 }
 
 // Reset forgets the client (it went away or was replaced).
 func (g *EchoGate) Reset() {
 	stats := g.stats
+	stats.Armed = false // the next client shows its own echo, or not
 	*g = EchoGate{stats: stats}
 }
 
@@ -206,6 +240,7 @@ func (g *EchoGate) Stats() EchoGateStats { return g.stats }
 type EchoVerdict struct {
 	State    EchoState
 	Open     bool    // the shepherd: frames released
+	Armed    bool    // the client's echo showed itself: the gate holds from now on
 	Corr     float64 // best envelope correlation
 	Residual float64 // share of energy the reply leaves unexplained
 	LagMs    int
@@ -232,7 +267,7 @@ const (
 
 // Mic takes one microphone frame (16 kHz PCM16) and returns the frames
 // to send to the model now (none while it holds echo back), and a
-// verdict when the gate opened on this frame.
+// verdict when the gate armed or opened on this frame.
 func (g *EchoGate) Mic(now time.Time, frame []byte) ([][]byte, *EchoVerdict) {
 	at := g.stamp(now)
 	g.advance(now)
@@ -249,6 +284,11 @@ func (g *EchoGate) Mic(now time.Time, frame []byte) ([][]byte, *EchoVerdict) {
 	if len(g.recent) > echoRecentKeep {
 		g.recent = g.recent[len(g.recent)-echoRecentKeep:]
 	}
+	if g.segFrames == 1 && g.playing && !g.runStart.IsZero() {
+		if d := now.Sub(g.runStart); d >= -100*time.Millisecond && d <= echoOnsetWithin {
+			g.replyOnset = now // the microphone opened as the reply began
+		}
+	}
 	if !g.active(now) {
 		out, v := g.settle()
 		g.pass, g.echoRun, g.unsure = false, 0, 0
@@ -256,10 +296,31 @@ func (g *EchoGate) Mic(now time.Time, frame []byte) ([][]byte, *EchoVerdict) {
 	}
 	f.data = append([]byte(nil), frame...)
 	g.held = append(g.held, f)
+	if !g.armed {
+		// Not armed: until this client's echo has shown itself (a strong
+		// match that holds its delay, or the model hearing the reply's
+		// own words: Heard), nothing is held back — the microphone flows
+		// as it would without the gate, and the frames are only watched.
+		if len(g.held) > echoWindowBlocks/echoBlocksPerFrame {
+			g.held = g.held[len(g.held)-echoWindowBlocks/echoBlocksPerFrame:]
+		}
+		if !g.burst && len(g.held)*echoBlocksPerFrame >= echoWindowBlocks {
+			if v := g.judge(); v.State == EchoIsEcho && g.coupling > 0 {
+				g.held = nil // armed from the next frame on
+				g.armed, g.stats.Armed = true, true
+				v.Armed = true
+				return [][]byte{frame}, &v
+			}
+		}
+		return [][]byte{frame}, nil
+	}
 	if g.pass {
 		// Open: keep a window of history to notice echo alone again.
 		if len(g.held) > echoWindowBlocks/echoBlocksPerFrame {
 			g.held = g.held[len(g.held)-echoWindowBlocks/echoBlocksPerFrame:]
+		}
+		if g.burst {
+			return [][]byte{frame}, nil
 		}
 		switch g.judge().State {
 		case EchoIsEcho:
@@ -275,7 +336,7 @@ func (g *EchoGate) Mic(now time.Time, frame []byte) ([][]byte, *EchoVerdict) {
 		}
 		return [][]byte{frame}, nil
 	}
-	if len(g.held)*echoBlocksPerFrame < echoMinBlocks {
+	if g.burst || len(g.held)*echoBlocksPerFrame < echoMinBlocks {
 		return nil, nil
 	}
 	v := g.judge()
@@ -291,9 +352,6 @@ func (g *EchoGate) Mic(now time.Time, frame []byte) ([][]byte, *EchoVerdict) {
 			v.Open, v.Released = true, len(out)
 			return out, &v
 		}
-	case EchoIsEcho:
-		g.unsure = 0
-		g.echoAt = f.at
 	default:
 		g.unsure = 0
 	}
@@ -310,7 +368,7 @@ func (g *EchoGate) Mic(now time.Time, frame []byte) ([][]byte, *EchoVerdict) {
 func (g *EchoGate) StreamEnd(now time.Time) ([][]byte, *EchoVerdict) {
 	g.advance(now)
 	out, v := g.settle()
-	g.pass, g.echoRun, g.unsure, g.lastFrame, g.echoAt = false, 0, 0, time.Time{}, time.Time{}
+	g.pass, g.echoRun, g.unsure, g.lastFrame = false, 0, 0, time.Time{}
 	return out, v
 }
 
@@ -343,15 +401,8 @@ func (g *EchoGate) settle() ([][]byte, *EchoVerdict) {
 func (g *EchoGate) open() [][]byte {
 	out := make([][]byte, 0, len(g.held))
 	for _, h := range g.held {
-		// Frames a window already judged echo stay out, but for the
-		// last 80 ms of it: the words may have begun at its tail.
-		if !g.echoAt.IsZero() && !g.learnedHere && h.at.Before(g.echoAt.Add(-echoReleaseOverlap)) {
-			g.stats.Withheld++
-			continue
-		}
 		out = append(out, h.data)
 	}
-	g.echoAt = time.Time{}
 	g.stats.Released += len(out)
 	g.stats.Opens++
 	g.held = g.held[:0]
@@ -365,6 +416,7 @@ func (g *EchoGate) open() [][]byte {
 // client's pre-roll, released at once when its gate opens) is audio
 // from before it arrived, so the segment shifts back to end at now.
 func (g *EchoGate) stamp(now time.Time) time.Time {
+	g.burst = !g.lastFrame.IsZero() && now.Sub(g.lastFrame) < 20*time.Millisecond
 	if g.lastFrame.IsZero() || now.Sub(g.lastFrame) > 250*time.Millisecond {
 		g.segStart, g.segFrames = now, 0
 	}
@@ -386,6 +438,9 @@ func (g *EchoGate) stamp(now time.Time) time.Time {
 func (g *EchoGate) advance(now time.Time) {
 	if g.playing {
 		for len(g.pending) > 0 && !g.playhead.After(now) {
+			if n := len(g.played); n == 0 || g.playhead.Sub(g.played[n-1].at) > EchoTail {
+				g.runStart = g.playhead // a reply after a pause
+			}
 			g.played = append(g.played, echoBlock{at: g.playhead, pow: g.pending[0]})
 			g.pending = g.pending[1:]
 			g.playhead = g.playhead.Add(echoBlock10ms)
@@ -447,15 +502,18 @@ func (g *EchoGate) judge() EchoVerdict {
 	if len(g.played) == 0 {
 		return EchoVerdict{State: EchoShepherd, Corr: -1, Residual: 1}
 	}
-	start := g.played[0].at.Add(-echoBlock10ms)
+	// Only what the current reply can explain: the microphone before it
+	// began (the shepherd, the room, an older reply's tail) is not
+	// judged against the silence between replies.
+	start := g.runStart.Add(-echoBlock10ms)
 	need := echoMinBlocks
 	if g.coupling == 0 {
 		need = echoWindowBlocks - echoBlocksPerFrame // the first echo verdict needs (nearly) a full window
 	}
 	var x, lx, y, ly, ratios []float64
 	best := EchoVerdict{State: EchoUnsure, Corr: -1, Residual: 1}
-	usable, loose := time.Duration(-1), false
-	for lag := time.Duration(0); lag <= echoMaxLag; lag += echoBlock10ms {
+	usable, loose := echoMinLag-echoBlock10ms, false
+	for lag := echoMinLag; lag <= echoMaxLag; lag += echoBlock10ms {
 		x, lx, y, ly = x[:0], lx[:0], y[:0], ly[:0]
 		activeRef := 0
 		for _, m := range mic {
@@ -495,15 +553,6 @@ func (g *EchoGate) judge() EchoVerdict {
 		}
 		sort.Float64s(ratios)
 		coupling := ratios[len(ratios)/2]
-		// An echo is the reply at one level: the ratio barely moves from
-		// block to block (interquartile spread), where speech that only
-		// shares the reply's rhythm swings by many dB.
-		if spread := 10 * math.Log10(ratios[3*len(ratios)/4]/ratios[len(ratios)/4]); spread > echoMaxSpreadDB {
-			if best.State != EchoIsEcho && r > best.Corr {
-				best.Corr, best.LagMs = r, int(lag/time.Millisecond)
-			}
-			continue
-		}
 		if g.coupling == 0 && r < echoFirstCorr {
 			loose = true // might be echo; not sure enough for a first verdict
 			if best.State != EchoIsEcho && r > best.Corr {
@@ -524,21 +573,18 @@ func (g *EchoGate) judge() EchoVerdict {
 		}
 		res := excess / total
 		lagMs := int(lag / time.Millisecond)
-		if res < echoResidual && (best.State != EchoIsEcho || g.better(lagMs, r, best)) {
+		if res < echoResidual && (best.State != EchoIsEcho || res < best.Residual) {
 			best = EchoVerdict{State: EchoIsEcho, Corr: r, Residual: res, LagMs: lagMs, coupling: coupling, full: len(x) >= echoWindowBlocks-echoBlocksPerFrame}
 		} else if best.State != EchoIsEcho && r > best.Corr {
 			best.Corr, best.Residual, best.LagMs = r, res, int(lag/time.Millisecond)
 		}
 	}
-	if best.State == EchoIsEcho && !g.steady(best.LagMs) {
-		// A match at a delay of its own: speech-like sound matches the
-		// reply somewhere among a hundred delays now and then; an echo
-		// keeps its delay.
+	if best.State == EchoIsEcho && !g.armed && !g.firstSteady(best.LagMs, best.full) {
 		best.State = EchoUnsure
 		return best
 	}
 	if best.State != EchoIsEcho {
-		g.candN = 0
+		g.firstN = 0
 	}
 	switch {
 	case best.State == EchoIsEcho:
@@ -553,57 +599,117 @@ func (g *EchoGate) judge() EchoVerdict {
 	return best
 }
 
-// better: of two echo matches, the one at the echo's known delay, else
-// the closer one.
-func (g *EchoGate) better(lagMs int, r float64, cur EchoVerdict) bool {
-	if g.coupling > 0 {
-		near, curNear := absInt(lagMs-g.lagMs) <= echoLagSlackMs, absInt(cur.LagMs-g.lagMs) <= echoLagSlackMs
-		if near != curNear {
-			return near
+// Said records the reply's words as the model speaks them (its output
+// transcript).
+func (g *EchoGate) Said(text string) {
+	g.said += text
+	if r := []rune(g.said); len(r) > echoSaidKeep {
+		g.said = string(r[len(r)-echoSaidKeep:])
+	}
+}
+
+// Heard takes what the model heard the shepherd say so far this turn
+// (its input transcript) and arms the gate when it is the reply's own
+// words heard while the reply played or just after: the speaker's echo
+// reached the model. That is how a leaking client usually shows itself
+// first — the model cuts its reply off on the echo within half a
+// second, too soon for the audio comparison to be sure. It reports
+// whether the gate armed now.
+func (g *EchoGate) Heard(now time.Time, heard string) bool {
+	if g.armed || !g.reports {
+		return false
+	}
+	g.advance(now)
+	if !g.playing && (len(g.played) == 0 || now.Sub(g.played[len(g.played)-1].at) > echoHeardWithin) {
+		return false
+	}
+	if !EchoText(heard, g.said) {
+		return false
+	}
+	g.armed, g.stats.Armed = true, true
+	return true
+}
+
+// EchoText reports whether heard is (mostly) the words of said, in
+// their order: at least two of its word pairs (Han characters count as
+// words), and half of them, appear in said. Pairs, not words: the
+// shepherd's own sentence often shares words with the reply that
+// answers it, rarely their run.
+func EchoText(heard, said string) bool {
+	h, sd := echoTokens(heard), echoTokens(said)
+	if len(h) < 3 || len(sd) < 2 {
+		return false
+	}
+	in := map[string]bool{}
+	for i := 1; i < len(sd); i++ {
+		in[sd[i-1]+" "+sd[i]] = true
+	}
+	n := 0
+	for i := 1; i < len(h); i++ {
+		if in[h[i-1]+" "+h[i]] {
+			n++
 		}
 	}
-	return r > cur.Corr
+	return n >= 2 && n*2 >= len(h)-1
 }
 
-// steady follows the delay of successive echo matches: a match counts
-// once it held its delay over echoSteadyFrames windows, or at once at
-// the echo's known delay.
-func (g *EchoGate) steady(lagMs int) bool {
-	// candLag is the delay the streak began at: an echo stays there, a
-	// chance match drifts.
-	if g.candN > 0 && absInt(lagMs-g.candLag) <= echoLagSlackMs {
-		g.candN++
+// echoTokens splits text into lower-case words of letters and digits;
+// each Han character is a word of its own.
+func echoTokens(s string) []string {
+	var out []string
+	var cur []rune
+	flush := func() {
+		if len(cur) > 0 {
+			out = append(out, string(cur))
+		}
+		cur = cur[:0]
+	}
+	for _, r := range strings.ToLower(s) {
+		switch {
+		case unicode.Is(unicode.Han, r):
+			flush()
+			out = append(out, string(r))
+		case unicode.IsLetter(r) || unicode.IsDigit(r):
+			cur = append(cur, r)
+		default:
+			flush()
+		}
+	}
+	flush()
+	return out
+}
+
+// firstSteady: before the gate is armed, an echo match must hold its
+// delay (±30 ms of where the streak began) over echoFirstSteady full
+// windows. Speech that shares the reply's rhythm matches it somewhere
+// among a hundred delays now and then; an echo stays put. (Once armed,
+// the delay may wander as the client's player underruns; the echo's
+// level then keeps the shepherd apart.)
+func (g *EchoGate) firstSteady(lagMs int, full bool) bool {
+	if d := lagMs - g.firstLag; full && g.firstN > 0 && d >= -30 && d <= 30 {
+		g.firstN++
+	} else if full {
+		g.firstN, g.firstLag = 1, lagMs
 	} else {
-		g.candN, g.candLag = 1, lagMs
+		g.firstN = 0
 	}
-	if g.coupling > 0 && absInt(lagMs-g.lagMs) <= echoLagSlackMs {
-		return true
-	}
-	return g.candN >= echoSteadyFrames
+	return g.firstN >= echoFirstSteady
 }
 
-func absInt(v int) int {
-	if v < 0 {
-		return -v
-	}
-	return v
-}
-
-// learn follows the echo's coupling (log average) and delay from full
-// echo windows.
+// learn follows the echo's coupling (log average) and delay (average)
+// from full echo windows.
 func (g *EchoGate) learn(c float64, lagMs int) {
 	if c <= 0 {
 		return
 	}
-	g.lagMs = lagMs
 	if g.coupling == 0 {
-		g.coupling, g.learnedHere, g.confirmed = c, true, 0
+		g.coupling, g.lagMs = c, lagMs
 		return
 	}
-	if g.confirmed++; g.confirmed >= echoConfirmations {
-		g.learnedHere = false
-	}
 	g.coupling = math.Exp(0.8*math.Log(g.coupling) + 0.2*math.Log(c))
+	// The delay follows slowly too: it wanders as the player underruns,
+	// but one odd window must not move it.
+	g.lagMs = (4*g.lagMs + lagMs) / 5
 }
 
 // lagNeeded is how far back the comparison must reach before a window

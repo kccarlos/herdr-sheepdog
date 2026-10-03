@@ -96,6 +96,7 @@ func (s *Session) handleServerContent(sc *genai.LiveServerContent) {
 		s.lastInput = now
 		s.inputDone = t.Finished
 		s.inText += t.Text
+		armed := s.echo.Heard(now, s.inText)
 		s.heard.UserInput()
 		if t.Finished {
 			s.recap.Add(voice.RecapUser, s.inText)
@@ -103,6 +104,9 @@ func (s *Session) handleServerContent(sc *genai.LiveServerContent) {
 		}
 		s.mu.Unlock()
 		s.logTurn(s.noteInput(now))
+		if armed {
+			s.log.Log(logSource, "voice.echo_gate", "", map[string]any{"open": false, "why": "armed", "heard": t.Text})
+		}
 		s.log.Log(logSource, "voice.transcript.in", "", map[string]any{"text": t.Text, "final": t.Finished})
 		s.emit(voice.EventTranscript{Dir: voice.DirIn, Text: t.Text, Final: t.Finished})
 		s.poke()
@@ -113,6 +117,7 @@ func (s *Session) handleServerContent(sc *genai.LiveServerContent) {
 		s.speaking = true
 		s.noteResponseLocked(s.now())
 		s.play.Said(t.Text)
+		s.echo.Said(t.Text)
 		s.heard.Said(t.Text)
 		// The voice answering means the shepherd finished (Gemini
 		// rarely marks its input transcription final).
@@ -154,13 +159,16 @@ func (s *Session) interrupt(by string) {
 	s.speaking = false
 	s.flushRecapLocked() // a cut report may shorten it to what was heard
 	awaited := s.play.Flush(now)
-	s.echo.Flush(now)
+	armed := s.echo.Flush(now)
 	unheard := s.heard.Interrupted(now, by, awaited)
 	timing := s.finishAudioTimingLocked()
 	s.mu.Unlock()
 	s.reportUnheard(unheard)
 	dropped := s.out.Flush()
 	s.log.Log(logSource, "voice.interrupted", "", map[string]any{"by": by, "dropped_chunks": dropped})
+	if armed {
+		s.log.Log(logSource, "voice.echo_gate", "", map[string]any{"open": false, "why": "armed", "by": "self_interruption"})
+	}
 	s.logAudioTiming(timing)
 	s.emit(voice.EventInterrupted{})
 }
