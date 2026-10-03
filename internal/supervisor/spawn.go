@@ -22,8 +22,9 @@ import (
 // gives it the candidate directories when a name does not resolve, and
 // holds the rails, which are about authorisation and runaways only:
 //
-//   - the CEO's own recent words must be behind it (spawnRailLocked, the
-//     same fresh-input reading as the approval rail);
+//   - the CEO's own recent words must be behind it, not yet spent on
+//     another write (spawnRailLocked, the same fresh-input reading as the
+//     approval rail; one input starts one agent);
 //   - the directory must resolve, symlinks followed, inside a project
 //     root (supervisor.project_roots) or be an existing workspace's
 //     directory: never an arbitrary path;
@@ -119,13 +120,20 @@ func (s *Supervisor) spawn(ctx context.Context, req brain.SpawnRequest) (string,
 	if err != nil {
 		return refuse(reason, err)
 	}
-	// The slot is taken before anything opens, under the lock that
-	// counted it: two calls racing cannot both take the last one.
+	// The words and the slot are taken before anything opens, under the
+	// lock that checked them: two calls racing cannot both spend the same
+	// words or the last slot. The rail is read again, since the words may
+	// have answered a prompt while the directory was resolved.
 	s.mu.Lock()
-	if reason := s.spawnRateLocked(); reason != "" {
+	reason = s.spawnRailLocked()
+	if reason == "" {
+		reason = s.spawnRateLocked()
+	}
+	if reason != "" {
 		s.mu.Unlock()
 		return refuse(reason, fmt.Errorf("%w: %s", brain.ErrNotPermitted, reason))
 	}
+	s.lastInputLocked().used = true
 	s.spawns = append(s.spawns, s.cfg.Now())
 	s.mu.Unlock()
 
@@ -167,8 +175,9 @@ func (s *Supervisor) spawn(ctx context.Context, req brain.SpawnRequest) (string,
 
 // spawnRailLocked is the authorisation rail of a new agent: the CEO's
 // newest input — said or typed, never a tap on a question — arrived
-// within supervisor.authorise_window_s, has words, and is not a "no" or
-// only a filler. It does not read what the words ask for: that is the
+// within supervisor.authorise_window_s, has words, is not a "no" or
+// only a filler, and has not already authorised a write (an answer to a
+// prompt or another new agent: spawn marks the words used). It does not read what the words ask for: that is the
 // brain's judgement. Caller holds s.mu.
 func (s *Supervisor) spawnRailLocked() string {
 	in := s.lastInputLocked()
@@ -178,6 +187,8 @@ func (s *Supervisor) spawnRailLocked() string {
 		return "the CEO has said nothing that asks for a new agent"
 	case in.kind == InputTap:
 		return "the CEO's last input was a tap on a question, not a request for a new agent"
+	case in.used:
+		return "the CEO's last words already answered a prompt or started an agent; a new agent needs words of their own"
 	case now.Sub(in.at) > s.cfg.AuthoriseWindow:
 		return fmt.Sprintf("the CEO's last words were %d s ago, past supervisor.authorise_window_s (%d s)", int(now.Sub(in.at).Seconds()), int(s.cfg.AuthoriseWindow.Seconds()))
 	case strings.TrimSpace(in.text) == "":

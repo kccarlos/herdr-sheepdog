@@ -169,6 +169,12 @@ func TestSpawnRailNeedsTheCEOsRecentWords(t *testing.T) {
 		}, "tap"},
 		{"no", func(w *spawnWorld) { w.hear("no") }, "does not ask"},
 		{"filler", func(w *spawnWorld) { w.hear("um") }, "asks for nothing"},
+		{"words already answered a prompt", func(w *spawnWorld) {
+			w.hear("yes, and open a claude in bench")
+			w.sup.mu.Lock()
+			w.sup.lastInputLocked().used = true
+			w.sup.mu.Unlock()
+		}, "already answered"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -252,6 +258,29 @@ func TestSpawnUnknownDirListsCandidates(t *testing.T) {
 	// An existing workspace's directory is a project, wherever it is.
 	if _, err := w.spawn(brain.SpawnRequest{Dir: "kvoice", Kind: "claude"}); err != nil {
 		t.Errorf("workspace dir: %v", err)
+	}
+}
+
+// One input starts one agent: the second spawn on the same words is
+// refused until the CEO says something new.
+func TestSpawnConsumesTheWords(t *testing.T) {
+	w := newSpawnWorld(t)
+	w.hear("open two claudes in app")
+	if _, err := w.spawn(brain.SpawnRequest{Dir: "app", Kind: "claude"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.spawn(brain.SpawnRequest{Dir: "app", Kind: "claude"}); !errors.Is(err, brain.ErrNotPermitted) || !strings.Contains(err.Error(), "already") {
+		t.Fatalf("second spawn on the same words: %v", err)
+	}
+	w.sup.mu.Lock()
+	used := w.sup.lastInputLocked().used
+	w.sup.mu.Unlock()
+	if !used {
+		t.Error("the spawn did not mark the words used: they could still answer a prompt")
+	}
+	w.hear("yes, another one")
+	if _, err := w.spawn(brain.SpawnRequest{Dir: "app", Kind: "claude"}); err != nil {
+		t.Fatalf("after new words: %v", err)
 	}
 }
 

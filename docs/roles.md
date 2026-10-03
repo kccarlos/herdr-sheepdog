@@ -118,9 +118,12 @@ never gets there within ten minutes.
 Rails (authorisation and runaways, not judgement):
 - the shepherd's own recent words must be behind it: the newest
   recorded input, said or typed (a tap on a question does not count),
-  within `supervisor.authorise_window_s`, not empty, not only a filler
-  and not a "no" (the approval rail's fresh-input reading; the words
-  themselves are not parsed for intent);
+  within `supervisor.authorise_window_s`, not empty, not only a filler,
+  not a "no", and not already spent on another write (an answer to a
+  prompt or another new agent). A start marks the words used, so one
+  input starts one agent and cannot then also answer a prompt (the
+  approval rail's fresh-input reading; the words themselves are not
+  parsed for intent);
 - the directory must resolve, symlinks followed, inside a project root
   or be an existing workspace's directory (a project root itself, `..`
   and links out of a root are refused);
