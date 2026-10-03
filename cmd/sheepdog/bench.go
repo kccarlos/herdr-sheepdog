@@ -118,7 +118,7 @@ func runBenchCalibrate(ctx context.Context, args []string, stdout, stderr io.Wri
 	common.register(fs)
 	port := fs.Int("port", bench.DefaultPorts[0], "scratch daemon port")
 	out := fs.String("out", "", "write calibration.json and calibration.md here")
-	samples := fs.String("samples", "", "save 10 sample clips + transcripts here (default ~/Documents/sheepdog-bench/calibration-<date>)")
+	samples := fs.String("samples", "", "save 10 sample clips + transcripts here (default ~/Documents/sheepdog-voice-bench/calibration-<date>)")
 	limit := fs.Int("limit", 0, "only the first N clips of the plan")
 	seed := fs.Int64("seed", 1, "plan seed (disfluencies)")
 	gate := fs.String("gate", "ios", "capture gate: ios, web or off")
@@ -145,7 +145,7 @@ func runBenchCalibrate(ctx context.Context, args []string, stdout, stderr io.Wri
 	}
 	if *samples == "" {
 		home, _ := os.UserHomeDir()
-		*samples = filepath.Join(home, "Documents", "sheepdog-bench", "calibration-"+time.Now().Format("2006-01-02"))
+		*samples = filepath.Join(home, "Documents", "sheepdog-voice-bench", "calibration-"+time.Now().Format("2006-01-02"))
 	}
 	plan := bench.CalibrationPlan(*seed)
 	if *limit > 0 && *limit < len(plan) {
