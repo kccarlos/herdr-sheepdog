@@ -2,6 +2,7 @@ package brain
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -22,7 +23,11 @@ type ContextEngine interface {
 	Assemble(budget int) Assembly
 	// Compact shrinks the window when it exceeds budget (estimated
 	// tokens); ok is false when nothing was done. The default engine
-	// summarises the oldest half with one model call.
+	// summarises the oldest half with one model call. The brain calls
+	// it without the turn lock (a turn, Ingest, Retract or Reset may run
+	// meanwhile), so an engine must be safe for that and must not splice
+	// a summary over messages that changed while it was written
+	// (ErrCompactionStale).
 	Compact(ctx context.Context, budget int) (Compaction, bool, error)
 	// AfterTurn runs bookkeeping at the end of turn (the default engine
 	// prunes tool results older than PruneAfterTurns turns).
@@ -86,6 +91,12 @@ type Retracter interface {
 	Retract(seq int) bool
 }
 
+// ErrCompactionStale is returned by Compact when the messages it
+// summarised changed while the summary was being written (a Retract, a
+// Reset or another compaction): the summary is discarded and the window
+// left as it is, for the next compaction to try again.
+var ErrCompactionStale = errors.New("brain: compaction discarded: the summarised messages changed meanwhile")
+
 // Summarizer turns a rendering of old messages into a summary: the
 // default engine's one model call per compaction.
 type Summarizer func(ctx context.Context, text string) (string, error)
@@ -102,12 +113,17 @@ type DefaultEngine struct {
 
 	mu     sync.Mutex
 	window []entry
+	// nextID numbers the entries (entry.id).
+	nextID uint64
 }
 
 type entry struct {
 	msg    Message
 	turn   int
 	pruned bool
+	// id is unique within the engine: Compact checks by it that the
+	// prefix it summarised is still there.
+	id uint64
 }
 
 // NewDefaultEngine builds the default engine. summarize is required for
@@ -129,7 +145,8 @@ func (e *DefaultEngine) Ingest(m Message, turn int) {
 		}
 	}
 	e.mu.Lock()
-	e.window = append(e.window, entry{msg: m, turn: turn})
+	e.nextID++
+	e.window = append(e.window, entry{msg: m, turn: turn, id: e.nextID})
 	e.mu.Unlock()
 }
 
@@ -291,6 +308,17 @@ func (e *DefaultEngine) Compact(ctx context.Context, budget int) (Compaction, bo
 		return Compaction{}, false, err
 	}
 	summary = capSummary(summary)
+	// The summary call ran without the brain's turn lock: whatever
+	// changed the summarised prefix meanwhile (Retract, Reset, another
+	// compaction) wins, and the summary is dropped before it reaches the
+	// transcript. Checked again after recording, which runs outside the
+	// engine's lock (the transcript's append hook logs).
+	e.mu.Lock()
+	same := samePrefix(e.window, old)
+	e.mu.Unlock()
+	if !same {
+		return Compaction{}, false, ErrCompactionStale
+	}
 	m := Message{TS: old[len(old)-1].msg.TS, Role: RoleUser, Kind: KindCompaction, Content: summary}
 	if e.record != nil {
 		m = e.record(m)
@@ -299,11 +327,30 @@ func (e *DefaultEngine) Compact(ctx context.Context, budget int) (Compaction, bo
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	if !samePrefix(e.window, old) {
+		return Compaction{}, false, ErrCompactionStale
+	}
 	// Messages ingested during the model call stay; only the ones
 	// summarised go.
 	rest := append([]entry(nil), e.window[cut:]...)
-	e.window = append([]entry{{msg: m, turn: old[len(old)-1].turn}}, rest...)
+	e.nextID++
+	e.window = append([]entry{{msg: m, turn: old[len(old)-1].turn, id: e.nextID}}, rest...)
 	return Compaction{BeforeTokens: before, AfterTokens: e.tokensLocked(), Dropped: cut, Summary: m}, true, nil
+}
+
+// samePrefix reports whether window still starts with exactly the
+// entries of old, by entry id: pruning a result to its stub meanwhile
+// does not count as a change, the summary covers it either way.
+func samePrefix(window, old []entry) bool {
+	if len(window) < len(old) {
+		return false
+	}
+	for i, en := range old {
+		if window[i].id != en.id {
+			return false
+		}
+	}
+	return true
 }
 
 // summaryMaxTokens caps a compaction summary (estimated tokens): a

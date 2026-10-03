@@ -1,5 +1,7 @@
 package brain
 
+import "time"
+
 // QueuedTurns exposes the turn-lock waiter count to the external test
 // package so concurrency tests can synchronise without sleeping.
 func (b *Brain) QueuedTurns() int { return b.lock.waiting() }
@@ -28,3 +30,11 @@ func (m *GenaiModel) KeyIndex() int {
 
 // NewVertexModelAt is NewVertexModel against baseURL (a fake server).
 var NewVertexModelAt = newVertexModel
+
+// SetFailoverReserve shrinks the failover reserve and minimum first
+// attempt for a test; the returned func restores them.
+func SetFailoverReserve(reserve, minAttempt time.Duration) func() {
+	r, m := failoverReserve, failoverMinAttempt
+	failoverReserve, failoverMinAttempt = reserve, minAttempt
+	return func() { failoverReserve, failoverMinAttempt = r, m }
+}

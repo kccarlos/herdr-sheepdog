@@ -27,8 +27,12 @@ const (
 	DefaultMaxSteps = 6
 	// DefaultUtteranceTimeout bounds a CEO utterance turn including its
 	// tools (it may turn out to be an instruction) and an investigation
-	// delivery turn.
-	DefaultUtteranceTimeout = 12 * time.Second
+	// delivery turn. 25 s since the 2026-10-03 eval campaign: at 12 s,
+	// 45/130 Vertex gemini-3.8-flash runs had a turn time out; at 25 s
+	// utterance fallbacks went 44 → 0. The voice already answers
+	// "pending" within ~2 s and the answer comes as a push, so a longer
+	// budget only delays the slowest answers.
+	DefaultUtteranceTimeout = 25 * time.Second
 	// DefaultAnnounceTurnTimeout bounds an event turn (announce): on
 	// expiry the supervisor speaks its code sentence instead.
 	DefaultAnnounceTurnTimeout = 6 * time.Second
@@ -192,6 +196,17 @@ type Brain struct {
 	// lastCompaction is the most recent successful compaction (zero
 	// value when none), for the Supervisor tab.
 	lastCompaction CompactionInfo
+	// compactCancel / compactDone are the compaction in flight (nil
+	// when none): one at a time, off the turn lock (afterTurn).
+	compactCancel context.CancelFunc
+	compactDone   chan struct{}
+	// lastModel is the model this run last selected on each provider
+	// (New, SetModel): the model a failover to that provider runs.
+	lastModel map[string]string
+	// failover is the streak of failovers away from the selected
+	// provider; notify tells the CEO about it (SetNotifier).
+	failover failoverState
+	notify   func(text string)
 
 	// catalogs are the cached model lists, one per provider (catalog.go).
 	catalogs catalogCaches
@@ -217,7 +232,7 @@ func New(cfg Config, model Model, log logging.Logger) (*Brain, error) {
 		log = logging.NopLogger{}
 	}
 	cfg = cfg.withDefaults()
-	b := &Brain{cfg: cfg, log: log, models: map[string]Model{cfg.Provider: model}, curProvider: cfg.Provider, curModel: cfg.Model, curRunID: cfg.RunID, tools: toolDeclarations(false), readTools: toolDeclarations(true)}
+	b := &Brain{cfg: cfg, log: log, models: map[string]Model{cfg.Provider: model}, curProvider: cfg.Provider, curModel: cfg.Model, lastModel: map[string]string{cfg.Provider: cfg.Model}, curRunID: cfg.RunID, tools: toolDeclarations(false), readTools: toolDeclarations(true)}
 	b.ctx, b.stop = context.WithCancel(context.Background())
 	path := ""
 	if cfg.DataDir != "" {
@@ -378,6 +393,7 @@ func (b *Brain) SetModel(provider, name, via string) error {
 		return nil
 	}
 	b.curProvider, b.curModel = provider, name
+	b.lastModel[provider] = name
 	b.mu.Unlock()
 	b.log.Log(logSource, "brain.model_changed", "", map[string]any{"from_provider": fromProvider, "from": from, "provider": provider, "to": name, "via": via})
 	b.ingest(Message{Role: RoleSystem, Kind: KindSystem, Content: fmt.Sprintf("model switched from %s/%s to %s/%s", fromProvider, from, provider, name)}, 0)
@@ -698,16 +714,19 @@ func (b *Brain) Seed(msgs []Message) {
 // what was said before. The roster, the ledger (promises, notes,
 // investigations) and the pending prompt are not in the window at all
 // (sections() renders them fresh from the Host every turn), so they are
-// unaffected. It waits for any turn in flight, and that turn's
-// after-turn pruning/compaction, to finish first (the turn lock), so
-// nothing from the old conversation lands in the new segment; ctx
-// bounds that wait. via is logged and carried nowhere else. The
+// unaffected. It waits for any turn in flight to finish first (the turn
+// lock) and cancels a compaction in flight (which runs off the lock),
+// waiting for it to end, so nothing from the old conversation lands in
+// the new segment; ctx bounds both waits. via is logged and carried nowhere else. The
 // returned id also names the new transcript segment (TranscriptPath).
 func (b *Brain) Reset(ctx context.Context, via string) (string, error) {
 	if _, err := b.lock.acquire(ctx, true, ""); err != nil {
 		return "", fmt.Errorf("brain: reset: waiting for the turn lock: %w", err)
 	}
 	defer b.lock.release()
+	if err := b.stopCompaction(ctx); err != nil {
+		return "", fmt.Errorf("brain: reset: waiting for the compaction: %w", err)
+	}
 
 	b.mu.Lock()
 	b.resetSeq++
@@ -734,13 +753,13 @@ func (b *Brain) Reset(ctx context.Context, via string) (string, error) {
 }
 
 // summarize is the compaction's model call: one plain text-in/text-out
-// generation, no tools, on the current provider and model, thinking off
+// generation, no tools, on the current provider and model (failing over
+// like a turn's step, generateSummary), thinking off
 // (a summary needs no chain of thought) and short: the engine caps the
 // result at summaryMaxTokens (docs/iteration-2.md WP5).
 func (b *Brain) summarize(ctx context.Context, text string) (string, error) {
 	prompt := "Summarise the following supervisor transcript in at most 10 short lines (under 300 words) for your own later reference: what the CEO asked and decided, what each agent was told, did, asked and answered, and anything still open. Keep aliases; drop paths, hashes and ids.\n\n" + text
-	_, model, impl := b.current()
-	resp, err := impl.Generate(ctx, model, []*genai.Content{{Role: genai.RoleUser, Parts: []*genai.Part{{Text: prompt}}}}, &genai.GenerateContentConfig{ThinkingConfig: thinkingOff()})
+	resp, err := b.generateSummary(ctx, []*genai.Content{{Role: genai.RoleUser, Parts: []*genai.Part{{Text: prompt}}}}, &genai.GenerateContentConfig{ThinkingConfig: thinkingOff()})
 	if err != nil {
 		return "", err
 	}

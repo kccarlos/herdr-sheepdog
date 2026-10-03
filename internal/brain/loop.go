@@ -27,12 +27,16 @@ type turn struct {
 	start           time.Time
 	// soft is when the budget for tool rounds ends; the hard deadline is
 	// FinalGrace later.
-	soft   time.Time
-	steps  int
-	calls  int // model calls
-	tokIn  int
-	tokOut int
-	acted  []string // spoken echoes of actions sent
+	soft time.Time
+	// failedOver is set once a step was retried on another provider
+	// (generateStep): provider, model and impl are that one's from then
+	// on, and there is no second failover in the turn.
+	failedOver bool
+	steps      int
+	calls      int // model calls
+	tokIn      int
+	tokOut     int
+	acted      []string // spoken echoes of actions sent
 }
 
 // Turn runs one turn (an empty kind is an utterance). The reply is
@@ -205,7 +209,7 @@ func (b *Brain) run(ctx context.Context, t *turn) (Reply, error) {
 		msgs := withState(asm.Messages, state, t.n)
 
 		t0 := b.cfg.Now()
-		resp, raw, err := b.generate(ctx, t, msgs, &config)
+		resp, raw, err := b.generateStep(ctx, t, step, msgs, &config)
 		t.calls++
 		dur := b.cfg.Now().Sub(t0)
 		b.captureStep(t, step, forced, secs, asm.SystemAddition, msgs, &config, t0, dur, resp, err)
@@ -337,8 +341,11 @@ func (b *Brain) execCalls(ctx context.Context, t *turn, resp *genai.GenerateCont
 	for i, fc := range calls {
 		id := ids[i]
 		t0 := b.cfg.Now()
-		out := b.execTool(ctx, t, fc)
+		out, limit := b.runTool(ctx, t, fc)
 		dur := b.cfg.Now().Sub(t0).Milliseconds()
+		if limit > 0 {
+			b.log.Log(logSource, "brain.tool_timeout", "", map[string]any{"id": id, "name": fc.Name, "timeout_ms": limit.Milliseconds(), "agent": out.agent, "turn": t.n})
+		}
 		if out.railBlocked != "" {
 			b.log.Log(logSource, "brain.rail_blocked", "", map[string]any{"id": id, "agent": out.agent, "keys": keysArg(fc.Args["keys"]), "trigger": string(t.req.Trigger), "reason": out.railBlocked, "turn": t.n})
 		}
@@ -396,20 +403,32 @@ func (b *Brain) logTurn(t *turn, fallback bool) {
 	})
 }
 
-// afterTurn prunes, compacts and hands the lock over.
+// afterTurn prunes, hands the lock over, then compacts. The summary call
+// runs without the turn lock (it took up to 14 s in the logs, and the
+// CEO's next utterance queued behind it): the engine discards a summary
+// whose messages changed meanwhile (ErrCompactionStale), and at most one
+// compaction runs at a time — the next turn's after-work retries.
 func (b *Brain) afterTurn(t *turn) {
 	defer b.after.Done()
-	defer b.lock.release()
 	b.engine.AfterTurn(t.n)
 	if b.engine.Tokens() <= b.cfg.WindowTokens {
+		b.lock.release()
 		return
 	}
-	ctx, cancel := context.WithTimeout(b.ctx, b.cfg.CompactTimeout)
-	defer cancel()
+	// The slot is claimed before the lock goes, so a Reset that takes
+	// the lock next always finds this compaction to cancel.
+	ctx, done, ok := b.startCompaction()
+	b.lock.release()
+	if !ok {
+		return
+	}
+	defer done()
 	t0 := b.cfg.Now()
 	c, ok, err := b.engine.Compact(ctx, b.cfg.WindowTokens)
 	payload := map[string]any{"turn": t.n, "dur_ms": b.cfg.Now().Sub(t0).Milliseconds()}
 	switch {
+	case errors.Is(err, ErrCompactionStale):
+		payload["discarded"], payload["reason"] = true, "window_changed"
 	case err != nil:
 		payload["error"] = err.Error()
 	case !ok:
@@ -421,6 +440,46 @@ func (b *Brain) afterTurn(t *turn) {
 		b.mu.Unlock()
 	}
 	b.log.Log(logSource, "brain.compaction", "", payload)
+}
+
+// startCompaction claims the one compaction slot: ok is false while
+// another compaction runs. ctx is bounded by CompactTimeout and ended by
+// Close or Reset (stopCompaction); done frees the slot.
+func (b *Brain) startCompaction() (ctx context.Context, done func(), ok bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.compactDone != nil {
+		return nil, nil, false
+	}
+	ctx, cancel := context.WithTimeout(b.ctx, b.cfg.CompactTimeout)
+	ch := make(chan struct{})
+	b.compactCancel, b.compactDone = cancel, ch
+	return ctx, func() {
+		cancel()
+		b.mu.Lock()
+		b.compactCancel, b.compactDone = nil, nil
+		b.mu.Unlock()
+		close(ch)
+	}, true
+}
+
+// stopCompaction cancels a compaction in flight and waits for it (ctx
+// bounds the wait): Reset must not let a summary of the old conversation
+// land in the new segment.
+func (b *Brain) stopCompaction(ctx context.Context) error {
+	b.mu.Lock()
+	cancel, ch := b.compactCancel, b.compactDone
+	b.mu.Unlock()
+	if ch == nil {
+		return nil
+	}
+	cancel()
+	select {
+	case <-ch:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // Quiesce waits for after-turn work (pruning, compaction) to finish.

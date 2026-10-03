@@ -108,6 +108,9 @@ type Step struct {
 	Err   error
 	// Fn, when set, replaces the fields above.
 	Fn func(call Call) (*genai.GenerateContentResponse, error)
+	// FnCtx is Fn with the call's context (a fake that blocks until
+	// cancelled); it wins over Fn.
+	FnCtx func(ctx context.Context, call Call) (*genai.GenerateContentResponse, error)
 	// Block, when set, is waited on before responding (serialisation
 	// tests).
 	Block <-chan struct{}
@@ -226,6 +229,9 @@ func (m *Model) Generate(ctx context.Context, model string, contents []*genai.Co
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		}
+	}
+	if step.FnCtx != nil {
+		return step.FnCtx(ctx, call)
 	}
 	if step.Fn != nil {
 		return step.Fn(call)
