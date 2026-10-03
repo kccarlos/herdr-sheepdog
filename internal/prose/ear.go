@@ -7,54 +7,55 @@ import (
 	"unicode/utf8"
 )
 
-// The ear caps (docs/roles.md "The brain — do / don't", the answer
-// contract): a spoken headline is at most EarSentences sentences and
-// EarWords words, one idea per sentence, no dashes or semicolons. The
-// shepherd hears it once and cannot scroll back.
+// The ear cap (docs/bench-2026-10-03.md #13): the harness does not judge
+// how much a spoken line should say, the brain's prompt does (short by
+// default, longer when the shepherd asks for detail). The code only stops
+// a runaway: one high cap for every spoken line, about 45 seconds of
+// speech, measured by estimated speaking time so Chinese and English
+// (and mixed text) are treated alike.
 const (
-	EarSentences = 2
-	EarWords     = 30
+	// WordsPerSecond and HanziPerSecond are the speaking rates the
+	// estimate uses.
+	WordsPerSecond = 2.5
+	HanziPerSecond = 4.5
+	// EarSeconds is the runaway cap: ~110 English words or ~200 CJK
+	// characters.
+	EarSeconds = 44.0
+	// EarWords is the cap in English words, for callers and tests that
+	// count words.
+	EarWords = 110
 )
 
-// The caps on a reply to the shepherd's own words (docs/dive-deep.md
-// WP8b): about twenty seconds of speech, so a detail they asked for
-// ("what exactly did it say?") can be heard. The prompt keeps a reply
-// brief by default; this cap is the safety net against a runaway reply,
-// not the style rule. Announce, finish and delivery lines keep EarBrief.
-const (
-	ReplySentences = 4
-	ReplyWords     = 60
-)
+// EarCaps is a spoken headline's cap: at most Seconds of estimated speech.
+type EarCaps struct{ Seconds float64 }
 
-// EarCaps are a spoken headline's caps: at most Sentences sentences and
-// Words words.
-type EarCaps struct{ Sentences, Words int }
+// EarRunaway is the one cap on every spoken line.
+var EarRunaway = EarCaps{Seconds: EarSeconds}
 
+// EarBrief and EarReply are kept for callers that still pass a cap per
+// kind. They are the same runaway cap: there is no per-kind cap any more.
 var (
-	// EarBrief is the cap on every line the shepherd did not ask for:
-	// announcements, finishes, deliveries (EarLine).
-	EarBrief = EarCaps{Sentences: EarSentences, Words: EarWords}
-	// EarReply is the cap on a reply to an utterance (EarLineWith).
-	EarReply = EarCaps{Sentences: ReplySentences, Words: ReplyWords}
+	EarBrief = EarRunaway
+	EarReply = EarRunaway
 )
 
-// earMinCut is the fewest words a headline cut at a comma keeps: a
-// shorter first clause ("Both landed,") says nothing on its own, so the
-// cut falls at the word cap instead.
-const earMinCut = 6
+// earMinCut is the least speech (about six words) a headline cut at a
+// comma keeps: a shorter first clause says nothing on its own, so the cut
+// falls at the cap instead.
+const earMinCut = 6 / WordsPerSecond
 
 var (
 	// reClause matches a dash or semicolon that joins two clauses: an
 	// em dash (spaced or not), a spaced en dash, a spaced "-" or "--",
 	// and "; ". An unspaced en dash ("3–5") or hyphen ("dead-code",
 	// "--force") is part of a word and is kept.
-	reClause = regexp.MustCompile(`\s*—\s*|\s+(?:–|--?)\s+|\s*;(?:\s+|$)`)
+	reClause = regexp.MustCompile(`\s*—\s*|\s*；\s*|\s+(?:–|--?)\s+|\s*;(?:\s+|$)`)
 )
 
 // Ear cuts a spoken line for the ear. It scrubs s like Spoken (D9: no
 // URLs, paths, hashes, pane ids, PR or issue numbers), turns every
 // dash- or semicolon-joined clause into its own sentence, then keeps
-// the first EarSentences sentences within EarWords words. When the first
+// whole sentences up to the runaway cap (EarSeconds). When the first
 // sentence alone is over the cap it is cut at its last comma within the
 // cap (or at the cap itself), never mid-word. Every sentence ends with
 // terminal punctuation.
@@ -62,7 +63,7 @@ var (
 // reply's detail): nothing the model wrote is lost, it is just not read
 // aloud.
 func Ear(s string) (spoken, overflow string) {
-	return earCut(earSentences(s), EarBrief, false)
+	return earCut(earSentences(s), EarRunaway, false)
 }
 
 // EarLine is the line the voice reads for a reply: the headline cut by
@@ -73,11 +74,10 @@ func Ear(s string) (spoken, overflow string) {
 // first question is kept (the rest joins overflow); it always ends with
 // "?". An empty headline with an ask is just the ask.
 func EarLine(headline, ask string) (spoken, overflow string) {
-	return EarLineWith(EarBrief, headline, ask)
+	return EarLineWith(EarRunaway, headline, ask)
 }
 
-// EarLineWith is EarLine with the headline cut to caps instead of
-// EarBrief: EarReply for a reply to the shepherd's own words.
+// EarLineWith is EarLine with an explicit cap (every cap is EarRunaway).
 func EarLineWith(caps EarCaps, headline, ask string) (spoken, overflow string) {
 	q, qOver := earAsk(ask)
 	h, hOver := earCut(earSentences(headline), caps, q != "")
@@ -86,7 +86,8 @@ func EarLineWith(caps EarCaps, headline, ask string) (spoken, overflow string) {
 }
 
 // earSentences scrubs s and splits it into sentences, a dash- or
-// semicolon-joined clause counting as one.
+// semicolon-joined clause counting as one. Sentences end at . ! ? and at
+// the full-width 。！？ .
 func earSentences(s string) []string {
 	s = scrub(s)
 	if s == "" {
@@ -95,7 +96,7 @@ func earSentences(s string) []string {
 	var out []string
 	for i, clause := range reClause.Split(s, -1) {
 		clause = strings.TrimSpace(clause)
-		if strings.Trim(clause, ".,:!? ") == "" {
+		if strings.Trim(clause, ".,:!? 。，：！？、") == "" {
 			continue
 		}
 		if i > 0 {
@@ -118,7 +119,7 @@ func earCut(sens []string, caps EarCaps, dropQuestions bool) (kept, overflow str
 	if dropQuestions {
 		var rest []string
 		for _, sen := range sens {
-			if strings.HasSuffix(sen, "?") {
+			if isQuestion(sen) {
 				over = append(over, sen)
 			} else {
 				rest = append(rest, sen)
@@ -126,18 +127,20 @@ func earCut(sens []string, caps EarCaps, dropQuestions bool) (kept, overflow str
 		}
 		sens = rest
 	}
-	words := 0
+	secs := 0.0
 	for i, sen := range sens {
-		n := len(strings.Fields(sen))
-		if len(keep) < caps.Sentences && words+n <= caps.Words {
+		n := SpeechSeconds(sen)
+		if secs+n <= caps.Seconds {
 			keep = append(keep, sen)
-			words += n
+			secs += n
 			continue
 		}
 		if len(keep) == 0 {
-			head, tail := cutWords(sen, caps.Words)
+			head, tail := cutSpeech(sen, caps.Seconds)
 			keep = append(keep, head)
-			over = append(over, tail)
+			if tail != "" {
+				over = append(over, tail)
+			}
 			i++
 		}
 		over = append(over, sens[i:]...)
@@ -158,37 +161,126 @@ func earAsk(ask string) (q, overflow string) {
 	sens := splitSentences(s)
 	pick := 0
 	for i, sen := range sens {
-		if strings.HasSuffix(sen, "?") {
+		if isQuestion(sen) {
 			pick = i
 			break
 		}
 	}
-	q = capitalise(strings.TrimRight(sens[pick], ".!,:; "))
-	if !strings.HasSuffix(q, "?") {
-		q += "?"
+	q = capitalise(strings.TrimRight(sens[pick], ".!,:; 。！，：；、"))
+	if !isQuestion(q) {
+		if endsCJK(q) {
+			q += "？"
+		} else {
+			q += "?"
+		}
 	}
 	rest := append(append([]string{}, sens[:pick]...), sens[pick+1:]...)
 	return q, strings.Join(rest, " ")
 }
 
-// cutWords cuts sen to at most n words: at the last comma within them
-// when that keeps at least earMinCut words, else at the n-th word. The
-// head ends with a full stop; tail is the rest, capitalised.
-func cutWords(sen string, n int) (head, tail string) {
-	fields := strings.Fields(sen)
-	if len(fields) <= n {
-		return sen, ""
+// speechToken is a unit of speech: one CJK character or one word, with
+// the punctuation and space that follow it.
+type speechToken struct {
+	text string
+	secs float64
+}
+
+func isCJK(r rune) bool {
+	return unicode.In(r, unicode.Han, unicode.Hiragana, unicode.Katakana, unicode.Hangul)
+}
+
+// endsCJK reports whether s ends in a CJK character or full-width
+// punctuation, so a mark added to it should be the full-width one.
+func endsCJK(s string) bool {
+	r, _ := utf8.DecodeLastRuneInString(s)
+	return isCJK(r) || (r >= 0xFF00 && r <= 0xFFEF) || (r >= 0x3000 && r <= 0x303F) || r == '…'
+}
+
+// isQuestion reports whether s ends with a question mark, either width.
+func isQuestion(s string) bool {
+	return strings.HasSuffix(s, "?") || strings.HasSuffix(s, "？")
+}
+
+func speechTokens(s string) []speechToken {
+	var out []speechToken
+	rs := []rune(s)
+	for i := 0; i < len(rs); {
+		j := i
+		var secs float64
+		if isCJK(rs[i]) {
+			j = i + 1
+			secs = 1 / HanziPerSecond
+		} else {
+			letters := false
+			for j < len(rs) && !isCJK(rs[j]) && !unicode.IsSpace(rs[j]) {
+				if unicode.IsLetter(rs[j]) || unicode.IsDigit(rs[j]) {
+					letters = true
+				}
+				j++
+			}
+			if letters {
+				secs = 1 / WordsPerSecond
+			}
+		}
+		// Space after it belongs to it.
+		for j < len(rs) && unicode.IsSpace(rs[j]) {
+			j++
+		}
+		out = append(out, speechToken{string(rs[i:j]), secs})
+		i = j
 	}
-	at := n
-	for i := n; i >= earMinCut; i-- {
-		if strings.HasSuffix(fields[i-1], ",") {
+	return out
+}
+
+// SpeechSeconds estimates how long s takes to say: ~2.5 English words
+// per second, ~4.5 CJK characters per second, punctuation free.
+func SpeechSeconds(s string) float64 {
+	var t float64
+	for _, tok := range speechTokens(s) {
+		t += tok.secs
+	}
+	return t
+}
+
+// cutSpeech cuts sen to at most maxSec of speech: at the last comma
+// within it when that keeps at least earMinCut seconds, else at the cap,
+// never inside a word. The head ends with terminal punctuation; tail is
+// the rest, capitalised.
+func cutSpeech(sen string, maxSec float64) (head, tail string) {
+	toks := speechTokens(sen)
+	at, comma, secs := len(toks), -1, 0.0
+	for i, tok := range toks {
+		if secs+tok.secs > maxSec {
 			at = i
 			break
 		}
+		secs += tok.secs
+		if strings.HasSuffix(strings.TrimSpace(tok.text), ",") || strings.HasSuffix(strings.TrimSpace(tok.text), "，") {
+			if secs >= earMinCut {
+				comma = i + 1
+			}
+		}
 	}
-	head = strings.Join(fields[:at], " ")
-	head = strings.TrimRight(head, ",:;")
-	return terminate(head), capitalise(strings.Join(fields[at:], " "))
+	if at == len(toks) {
+		return sen, ""
+	}
+	if comma > 0 {
+		at = comma
+	}
+	// Punctuation that follows the last kept word stays with it.
+	for at < len(toks) && toks[at].secs == 0 && comma <= 0 {
+		at++
+	}
+	var h, t strings.Builder
+	for i, tok := range toks {
+		if i < at {
+			h.WriteString(tok.text)
+		} else {
+			t.WriteString(tok.text)
+		}
+	}
+	head = strings.TrimRight(strings.TrimSpace(h.String()), ",:;，、：；")
+	return terminate(head), capitalise(strings.TrimSpace(t.String()))
 }
 
 // splitSentences splits s after each run of terminal punctuation; a
@@ -214,9 +306,15 @@ func terminate(s string) string {
 	if s == "" {
 		return ""
 	}
-	s = strings.TrimRight(s, ",:;")
-	if last, _ := utf8.DecodeLastRuneInString(s); strings.ContainsRune(".!?\"')]", last) {
+	s = strings.TrimRight(s, ",:;，、：；")
+	if s == "" {
+		return ""
+	}
+	if last, _ := utf8.DecodeLastRuneInString(s); strings.ContainsRune(".!?\"')]。！？…」』）”’", last) {
 		return s
+	}
+	if endsCJK(s) {
+		return s + "。"
 	}
 	return s + "."
 }

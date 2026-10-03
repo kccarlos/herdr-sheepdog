@@ -331,7 +331,7 @@ func TestBrainRunCLIUsesTheQuerier(t *testing.T) {
 	if len(q.calls) != 1 || q.calls[0] != "why did the login test fail?" || q.dirs[0] != "/work/w5:p1" {
 		t.Errorf("querier calls=%v dirs=%v", q.calls, q.dirs)
 	}
-	if out := m.Calls()[1].Text(); !strings.Contains(out, "BEGIN_WORKER_OUTPUT agent=auth source=cli") || !strings.Contains(out, "QUERY:why did the login test fail?") {
+	if out := m.Calls()[1].Text(); !strings.Contains(out, "agent=auth source=cli") || !strings.Contains(out, "QUERY:why did the login test fail?") {
 		t.Errorf("the CLI output did not reach the brain:\n%s", out)
 	}
 	// With no CLI tool the brain is told so rather than left waiting.
@@ -388,10 +388,9 @@ func TestNoBrainIsInert(t *testing.T) {
 }
 
 func TestToolResultFromReply(t *testing.T) {
-	// The cap moves the third sentence to the end of detail: nothing the
-	// brain wrote is lost, it is just not read aloud.
+	// Short lines are not cut (one high runaway cap, bench #13).
 	res := toolResultFrom(brain.Reply{Spoken: "One. Two. Three.", Detail: "See /a/b/c.go and abc1234def5678", Options: []string{"keep /x/y/z", ""}, NeedsUser: true}, prose.EarBrief)
-	if res.Spoken != "One. Two." || res.Detail != "See a file and Three." || len(res.Options) != 1 || res.Options[0] != "keep a file" || res.Scheduling != voice.UrgencyInterrupt {
+	if res.Spoken != "One. Two. Three." || res.Detail != "See a file and" || len(res.Options) != 1 || res.Options[0] != "keep a file" || res.Scheduling != voice.UrgencyInterrupt {
 		t.Errorf("result = %+v", res)
 	}
 	if res := toolResultFrom(brain.Reply{Spoken: "fine"}, prose.EarBrief); res.Spoken != "fine." || res.Scheduling != voice.UrgencyIdle {
@@ -403,13 +402,13 @@ func TestToolResultFromReply(t *testing.T) {
 }
 
 // The ear contract (docs/iteration-2.md WP1): the 2026-09-24 line the
-// shepherd heard (101 words, dashes, two PR numbers) is cut to the ear
-// caps, the ask is heard last, and the overflow lands in detail after
-// the plain explanation.
+// shepherd heard (101 words, dashes, two PR numbers), said twice over so it
+// is a runaway, is cut at the runaway cap, the ask is heard last, and the
+// overflow lands in detail after the plain explanation.
 func TestToolResultFromEarContract(t *testing.T) {
 	const heard = "Both landed: the Context tab is merged as daemon #49 — a new /debug tab beside Supervisor showing the brain's exact request and the voice model's context side by side, linked, with a scrubber and diffs against the previous step — and the first app refactor went in as #12, dead code out and duplicated state merged, behaviour unchanged with 245 tests green. It's asking whether to carry on with the next two in parallel — the daemon's dead-code and docs cleanup then removing the legacy tool surface, and the app's testable SessionCore — and I'd say yes."
 	const plain = "A tab is a page of the debug screen."
-	res := toolResultFrom(brain.Reply{Spoken: heard, Ask: "Shall it carry on with both?", Detail: plain, NeedsUser: true}, prose.EarBrief)
+	res := toolResultFrom(brain.Reply{Spoken: heard + " " + heard, Ask: "Shall it carry on with both?", Detail: plain, NeedsUser: true}, prose.EarBrief)
 	head, ok := strings.CutSuffix(res.Spoken, " Shall it carry on with both?")
 	if !ok {
 		t.Fatalf("the ask is not the last sentence: %q", res.Spoken)
