@@ -1,0 +1,1521 @@
+{
+  "started": "2026-10-03T02:13:27.301651-07:00",
+  "duration_s": 1151,
+  "tts_model": "gemini/gemini-2.5-flash-tts|say",
+  "voice_model": "gemini-3.8-live",
+  "results": [
+    {
+      "lang": "en",
+      "voice": "Kore",
+      "style": "",
+      "noise": {
+        "name": "clean",
+        "kind": "",
+        "snr_db": 0
+      },
+      "text": "What's the codex one doing right now?",
+      "source": "gemini",
+      "heard": "What's the Codex one doing right now?",
+      "wer": 0,
+      "dur_ms": 1819,
+      "key": "cdcb9cb09283ba810938a610",
+      "model": "gemini-2.5-flash-tts"
+    },
+    {
+      "lang": "en",
+      "voice": "Kore",
+      "style": "tired",
+      "noise": {
+        "name": "clean",
+        "kind": "",
+        "snr_db": 0
+      },
+      "text": "Tell bench-claude to run the tests and let me know when they pass.",
+      "source": "gemini",
+      "heard": "Claude, to run the tests. And let me know when they pass.",
+      "wer": 0.14285714285714285,
+      "dur_ms": 15890,
+      "key": "4a4a8193a5ef1d072fd31660",
+      "model": "gemini-2.5-flash-tts"
+    },
+    {
+      "lang": "en",
+      "voice": "Kore",
+      "style": "hurried",
+      "noise": {
+        "name": "clean",
+        "kind": "",
+        "snr_db": 0
+      },
+      "text": "Yes, approve it, just this once.",
+      "source": "gemini",
+      "heard": "Yes, approve it just this once.",
+      "wer": 0,
+      "dur_ms": 1610,
+      "key": "c8549e4d28aa923e4d23cc1b",
+      "model": "gemini-2.5-flash-tts"
+    },
+    {
+      "lang": "en",
+      "voice": "Kore",
+      "style": "hesitant",
+      "noise": {
+        "name": "clean",
+        "kind": "",
+        "snr_db": 0
+      },
+      "text": "No wait, stop, don't do that.",
+      "source": "gemini",
+      "heard": "Wait. Stop. Don't do that.",
+      "wer": 0.16666666666666666,
+      "dur_ms": 7970,
+      "key": "98a86feee2abd822c0f78e24",
+      "model": "gemini-2.5-flash-tts"
+    },
+    {
+      "lang": "en",
+      "voice": "Kore",
+      "style": "casual",
+      "noise": {
+        "name": "clean",
+        "kind": "",
+        "snr_db": 0
+      },
+      "text": "Which one is asking for permission?",
+      "source": "gemini",
+      "heard": "Which one is asking for permission?",
+      "wer": 0,
+      "dur_ms": 2248,
+      "key": "a4aaacc5055b768ceb724092",
+      "model": "gemini-2.5-flash-tts"
+    },
+    {
+      "lang": "en",
+      "voice": "Kore",
+      "style": "",
+      "noise": {
+        "name": "clean",
+        "kind": "",
+        "snr_db": 0
+      },
+      "text": "Call the README one docs from now on.",
+      "source": "gemini",
+      "heard": "Call the Readme One docs from now on.",
+      "wer": 0,
+      "dur_ms": 2410,
+      "key": "bc776d1afca93d62d28df33f",
+      "model": "gemini-2.5-flash-tts"
+    },
+    {
+      "lang": "en",
+      "voice": "Charon",
+      "style": "tired",
+      "noise": {
+        "name": "clean",
+        "kind": "",
+        "snr_db": 0
+      },
+      "text": "What's the codex one doing right now?",
+      "source": "gemini",
+      "heard": "What's the Codex one doing right now?",
+      "wer": 0,
+      "dur_ms": 7890,
+      "key": "6d61594e57e3b8aff2661e68",
+      "model": "gemini-2.5-flash-tts"
+    },
+    {
+      "lang": "en",
+      "voice": "Charon",
+      "style": "hurried",
+      "noise": {
+        "name": "clean",
+        "kind": "",
+        "snr_db": 0
+      },
+      "text": "Tell bench-claude to run the tests and let me know when they pass.",
+      "source": "gemini",
+      "heard": "Tell Bench Claude to run the tests and let me know when they pass.",
+      "wer": 0,
+      "dur_ms": 2850,
+      "key": "ebd067f328162633192cbbaa",
+      "model": "gemini-2.5-flash-tts"
+    },
+    {
+      "lang": "en",
+      "voice": "Charon",
+      "style": "hesitant",
+      "noise": {
+        "name": "clean",
+        "kind": "",
+        "snr_db": 0
+      },
+      "text": "Uh, yes, approve it, just this once.",
+      "source": "gemini",
+      "heard": "Move it. Just this once.",
+      "wer": 0.3333333333333333,
+      "dur_ms": 7770,
+      "key": "15aa080a8ca5b3170d548f5b",
+      "model": "gemini-2.5-flash-tts"
+    },
+    {
+      "lang": "en",
+      "voice": "Charon",
+      "style": "casual",
+      "noise": {
+        "name": "clean",
+        "kind": "",
+        "snr_db": 0
+      },
+      "text": "No wait, stop, don't do that.",
+      "source": "gemini",
+      "heard": "Now, wait. Stop. Don't do that.",
+      "wer": 0.16666666666666666,
+      "dur_ms": 2650,
+      "key": "a68b558e8e8e7c9282815cdd",
+      "model": "gemini-2.5-flash-tts"
+    },
+    {
+      "lang": "en",
+      "voice": "Charon",
+      "style": "",
+      "noise": {
+        "name": "clean",
+        "kind": "",
+        "snr_db": 0
+      },
+      "text": "Which one is asking for permission?",
+      "source": "gemini",
+      "heard": "Which one is asking for permission?",
+      "wer": 0,
+      "dur_ms": 2330,
+      "key": "4923deae30de6f6c481bf40f",
+      "model": "gemini-2.5-flash-tts"
+    },
+    {
+      "lang": "en",
+      "voice": "Charon",
+      "style": "tired",
+      "noise": {
+        "name": "clean",
+        "kind": "",
+        "snr_db": 0
+      },
+      "text": "Call the README one docs from now on.",
+      "source": "gemini",
+      "heard": "Call the Readme One docs from now on.",
+      "wer": 0,
+      "dur_ms": 4770,
+      "key": "30f185729714f0faa0d4f733",
+      "model": "gemini-2.5-flash-tts"
+    },
+    {
+      "lang": "en",
+      "voice": "Aoede",
+      "style": "hurried",
+      "noise": {
+        "name": "clean",
+        "kind": "",
+        "snr_db": 0
+      },
+      "text": "What's the codex one doing right now?",
+      "source": "gemini",
+      "heard": "What's the Codex one doing right now?",
+      "wer": 0,
+      "dur_ms": 2050,
+      "key": "6d8b1215241f1d4765de4508",
+      "model": "gemini-2.5-flash-tts"
+    },
+    {
+      "lang": "en",
+      "voice": "Aoede",
+      "style": "hesitant",
+      "noise": {
+        "name": "clean",
+        "kind": "",
+        "snr_db": 0
+      },
+      "text": "Um, tell bench-claude to run the tests and let me know when they pass.",
+      "source": "gemini",
+      "heard": "Um. Tell Bench Claude to run the tests and let me know when they pass.",
+      "wer": 0,
+      "dur_ms": 10570,
+      "key": "dceeaebe3e162248c4801663",
+      "model": "gemini-2.5-flash-tts"
+    },
+    {
+      "lang": "en",
+      "voice": "Aoede",
+      "style": "casual",
+      "noise": {
+        "name": "clean",
+        "kind": "",
+        "snr_db": 0
+      },
+      "text": "Yes, approve it, just this once.",
+      "source": "gemini",
+      "heard": "Yes, approve it just this once.",
+      "wer": 0,
+      "dur_ms": 2824,
+      "key": "c582e423cb462eb38273aaa4",
+      "model": "gemini-2.5-flash-tts"
+    },
+    {
+      "lang": "en",
+      "voice": "Aoede",
+      "style": "",
+      "noise": {
+        "name": "clean",
+        "kind": "",
+        "snr_db": 0
+      },
+      "text": "No wait, stop, don't do that.",
+      "source": "gemini",
+      "heard": "",
+      "wer": 1,
+      "dur_ms": 2810,
+      "key": "93b308c79c00ee13aefbcf9d",
+      "model": "gemini-2.5-flash-tts"
+    },
+    {
+      "lang": "en",
+      "voice": "Aoede",
+      "style": "tired",
+      "noise": {
+        "name": "clean",
+        "kind": "",
+        "snr_db": 0
+      },
+      "text": "Which one is asking for permission?",
+      "source": "gemini",
+      "heard": "Which one is asking for permission?",
+      "wer": 0,
+      "dur_ms": 3810,
+      "key": "569836e22fb92bb58bb1a319",
+      "model": "gemini-2.5-flash-tts"
+    },
+    {
+      "lang": "en",
+      "voice": "Aoede",
+      "style": "hurried",
+      "noise": {
+        "name": "clean",
+        "kind": "",
+        "snr_db": 0
+      },
+      "text": "Call the README one docs from now on.",
+      "source": "gemini",
+      "heard": "Call the Readme One docs from now on.",
+      "wer": 0,
+      "dur_ms": 1970,
+      "key": "fb30f88a616d3e5feec7c872",
+      "model": "gemini-2.5-flash-tts"
+    },
+    {
+      "lang": "en",
+      "voice": "Puck",
+      "style": "hesitant",
+      "noise": {
+        "name": "clean",
+        "kind": "",
+        "snr_db": 0
+      },
+      "text": "Uh, what's… What's the codex one doing right now?",
+      "source": "gemini",
+      "heard": "What's the Codex one doing right now?",
+      "wer": 0.125,
+      "dur_ms": 8080,
+      "key": "e9d9b5db79421329aa9be0ed",
+      "model": "gemini-2.5-flash-tts"
+    },
+    {
+      "lang": "en",
+      "voice": "Puck",
+      "style": "casual",
+      "noise": {
+        "name": "clean",
+        "kind": "",
+        "snr_db": 0
+      },
+      "text": "Tell bench-claude to run the tests and let me know when they pass.",
+      "source": "gemini",
+      "heard": "Tell Bench Claude to run the tests and let me know when they pass.",
+      "wer": 0,
+      "dur_ms": 3844,
+      "key": "4d42cbc91c166f6f52fa963b",
+      "model": "gemini-2.5-flash-tts"
+    },
+    {
+      "lang": "en",
+      "voice": "Puck",
+      "style": "",
+      "noise": {
+        "name": "clean",
+        "kind": "",
+        "snr_db": 0
+      },
+      "text": "Yes, approve it, just this once.",
+      "source": "gemini",
+      "heard": "Yes, approve it just this once.",
+      "wer": 0,
+      "dur_ms": 3011,
+      "key": "58df4ec86a9b7025e2ebc690",
+      "model": "gemini-2.5-flash-tts"
+    },
+    {
+      "lang": "en",
+      "voice": "Puck",
+      "style": "tired",
+      "noise": {
+        "name": "clean",
+        "kind": "",
+        "snr_db": 0
+      },
+      "text": "No wait, stop, don't do that.",
+      "source": "gemini",
+      "heard": "No, wait. Stop. Don't do that.",
+      "wer": 0,
+      "dur_ms": 4657,
+      "key": "e77a443e4bf5ccdc94404437",
+      "model": "gemini-2.5-flash-tts"
+    },
+    {
+      "lang": "en",
+      "voice": "Puck",
+      "style": "hurried",
+      "noise": {
+        "name": "clean",
+        "kind": "",
+        "snr_db": 0
+      },
+      "text": "Which one is asking for permission?",
+      "source": "gemini",
+      "heard": "Which one is asking for permission?",
+      "wer": 0,
+      "dur_ms": 1718,
+      "key": "970fdf0d83eb9ea7d5599c10",
+      "model": "gemini-2.5-flash-tts"
+    },
+    {
+      "lang": "en",
+      "voice": "Puck",
+      "style": "hesitant",
+      "noise": {
+        "name": "clean",
+        "kind": "",
+        "snr_db": 0
+      },
+      "text": "Okay so, call the… the README one docs from now on.",
+      "source": "gemini",
+      "heard": "Okay, so call the Readme One docs from now on.",
+      "wer": 0.09090909090909091,
+      "dur_ms": 8730,
+      "key": "e91e9cc5a79ff510f0e107bb",
+      "model": "gemini-2.5-flash-tts"
+    },
+    {
+      "lang": "en",
+      "voice": "Kore",
+      "style": "",
+      "noise": {
+        "name": "cafe-10dB",
+        "kind": "cafe",
+        "snr_db": 10
+      },
+      "text": "What's the codex one doing right now?",
+      "source": "gemini",
+      "heard": "What's the Codex one doing right now?",
+      "wer": 0,
+      "dur_ms": 1819,
+      "key": "cdcb9cb09283ba810938a610",
+      "model": "gemini-2.5-flash-tts"
+    },
+    {
+      "lang": "en",
+      "voice": "Kore",
+      "style": "",
+      "noise": {
+        "name": "cafe-10dB",
+        "kind": "cafe",
+        "snr_db": 10
+      },
+      "text": "Yes, approve it, just this once.",
+      "source": "gemini",
+      "heard": "Yes, approve it just this once.",
+      "wer": 0,
+      "dur_ms": 2744,
+      "key": "2a19dac22028186d17bbcabb",
+      "model": "gemini-2.5-flash-tts"
+    },
+    {
+      "lang": "en",
+      "voice": "Kore",
+      "style": "",
+      "noise": {
+        "name": "cafe-10dB",
+        "kind": "cafe",
+        "snr_db": 10
+      },
+      "text": "Which one is asking for permission?",
+      "source": "gemini",
+      "heard": "Which one is asking for permission?",
+      "wer": 0,
+      "dur_ms": 1855,
+      "key": "47f9f5175cdfa256e7cfc192",
+      "model": "gemini-2.5-flash-tts"
+    },
+    {
+      "lang": "en",
+      "voice": "Charon",
+      "style": "",
+      "noise": {
+        "name": "cafe-10dB",
+        "kind": "cafe",
+        "snr_db": 10
+      },
+      "text": "Tell bench-claude to run the tests and let me know when they pass.",
+      "source": "gemini",
+      "heard": "Tell Bench Claude to run the tests and let me know when they pass.",
+      "wer": 0,
+      "dur_ms": 3450,
+      "key": "087f7e6998bd8006bb0f7906",
+      "model": "gemini-2.5-flash-tts"
+    },
+    {
+      "lang": "en",
+      "voice": "Charon",
+      "style": "",
+      "noise": {
+        "name": "cafe-10dB",
+        "kind": "cafe",
+        "snr_db": 10
+      },
+      "text": "No wait, stop, don't do that.",
+      "source": "gemini",
+      "heard": "No, wait. Stop. Don't do that.",
+      "wer": 0,
+      "dur_ms": 2450,
+      "key": "29df3b4495b47f206fd50390",
+      "model": "gemini-2.5-flash-tts"
+    },
+    {
+      "lang": "en",
+      "voice": "Charon",
+      "style": "",
+      "noise": {
+        "name": "cafe-10dB",
+        "kind": "cafe",
+        "snr_db": 10
+      },
+      "text": "Call the README one docs from now on.",
+      "source": "gemini",
+      "heard": "Call the Readme One docs from now on.",
+      "wer": 0,
+      "dur_ms": 2375,
+      "key": "a6f8ea7568936b625af69ae0",
+      "model": "gemini-2.5-flash-tts"
+    },
+    {
+      "lang": "en",
+      "voice": "Kore",
+      "style": "",
+      "noise": {
+        "name": "pink-5dB",
+        "kind": "pink",
+        "snr_db": 5
+      },
+      "text": "What's the codex one doing right now?",
+      "source": "gemini",
+      "heard": "What's the Codex one doing right now?",
+      "wer": 0,
+      "dur_ms": 1819,
+      "key": "cdcb9cb09283ba810938a610",
+      "model": "gemini-2.5-flash-tts"
+    },
+    {
+      "lang": "en",
+      "voice": "Kore",
+      "style": "",
+      "noise": {
+        "name": "pink-5dB",
+        "kind": "pink",
+        "snr_db": 5
+      },
+      "text": "Yes, approve it, just this once.",
+      "source": "gemini",
+      "heard": "Yes, approve it just this once.",
+      "wer": 0,
+      "dur_ms": 2744,
+      "key": "2a19dac22028186d17bbcabb",
+      "model": "gemini-2.5-flash-tts"
+    },
+    {
+      "lang": "en",
+      "voice": "Kore",
+      "style": "",
+      "noise": {
+        "name": "pink-5dB",
+        "kind": "pink",
+        "snr_db": 5
+      },
+      "text": "Which one is asking for permission?",
+      "source": "gemini",
+      "heard": "Which one is asking for permission?",
+      "wer": 0,
+      "dur_ms": 1855,
+      "key": "47f9f5175cdfa256e7cfc192",
+      "model": "gemini-2.5-flash-tts"
+    },
+    {
+      "lang": "en",
+      "voice": "Charon",
+      "style": "",
+      "noise": {
+        "name": "pink-5dB",
+        "kind": "pink",
+        "snr_db": 5
+      },
+      "text": "Tell bench-claude to run the tests and let me know when they pass.",
+      "source": "gemini",
+      "heard": "Tell Bench Claude to run the tests and let me know when they pass.",
+      "wer": 0,
+      "dur_ms": 3450,
+      "key": "087f7e6998bd8006bb0f7906",
+      "model": "gemini-2.5-flash-tts"
+    },
+    {
+      "lang": "en",
+      "voice": "Charon",
+      "style": "",
+      "noise": {
+        "name": "pink-5dB",
+        "kind": "pink",
+        "snr_db": 5
+      },
+      "text": "No wait, stop, don't do that.",
+      "source": "gemini",
+      "heard": "No, wait. Stop. Don't do that.",
+      "wer": 0,
+      "dur_ms": 2450,
+      "key": "29df3b4495b47f206fd50390",
+      "model": "gemini-2.5-flash-tts"
+    },
+    {
+      "lang": "en",
+      "voice": "Charon",
+      "style": "",
+      "noise": {
+        "name": "pink-5dB",
+        "kind": "pink",
+        "snr_db": 5
+      },
+      "text": "Call the README one docs from now on.",
+      "source": "gemini",
+      "heard": "Call the Readme One docs from now on.",
+      "wer": 0,
+      "dur_ms": 2375,
+      "key": "a6f8ea7568936b625af69ae0",
+      "model": "gemini-2.5-flash-tts"
+    },
+    {
+      "lang": "en",
+      "voice": "say",
+      "style": "",
+      "noise": {
+        "name": "clean",
+        "kind": "",
+        "snr_db": 0
+      },
+      "text": "What's the codex one doing right now?",
+      "source": "say",
+      "heard": "What's the Codex one doing right now?",
+      "wer": 0,
+      "dur_ms": 2170,
+      "key": "9238c7b22e9df8b424e74fa9"
+    },
+    {
+      "lang": "en",
+      "voice": "say",
+      "style": "",
+      "noise": {
+        "name": "clean",
+        "kind": "",
+        "snr_db": 0
+      },
+      "text": "Yes, approve it, just this once.",
+      "source": "say",
+      "heard": "Yes, approve it just this once.",
+      "wer": 0,
+      "dur_ms": 2564,
+      "key": "317e0a25169f2ffacfd09f15"
+    },
+    {
+      "lang": "en",
+      "voice": "say",
+      "style": "",
+      "noise": {
+        "name": "clean",
+        "kind": "",
+        "snr_db": 0
+      },
+      "text": "Which one is asking for permission?",
+      "source": "say",
+      "heard": "Which one is asking for permission?",
+      "wer": 0,
+      "dur_ms": 1845,
+      "key": "074aa459ec204252f9c7ec28"
+    },
+    {
+      "lang": "zh",
+      "voice": "Kore",
+      "style": "",
+      "noise": {
+        "name": "clean",
+        "kind": "",
+        "snr_db": 0
+      },
+      "text": "那个 codex 现在在干嘛？",
+      "source": "gemini",
+      "heard": "那个 Codex 现在在干嘛？",
+      "wer": 0,
+      "dur_ms": 2675,
+      "key": "60686d56c97007ff696b12bf",
+      "model": "gemini-2.5-flash-tts"
+    },
+    {
+      "lang": "zh",
+      "voice": "Kore",
+      "style": "tired",
+      "noise": {
+        "name": "clean",
+        "kind": "",
+        "snr_db": 0
+      },
+      "text": "让 bench-claude 跑一下测试，跑完告诉我。",
+      "source": "gemini",
+      "heard": "让 Bench Claude 跑一下测试，跑完告诉我。",
+      "wer": 0,
+      "dur_ms": 6090,
+      "key": "dfe53923a7914bf1025303b2",
+      "model": "gemini-2.5-flash-tts"
+    },
+    {
+      "lang": "zh",
+      "voice": "Kore",
+      "style": "hurried",
+      "noise": {
+        "name": "clean",
+        "kind": "",
+        "snr_db": 0
+      },
+      "text": "可以，批准吧，就这一次。",
+      "source": "gemini",
+      "heard": "可以批准吧，就这一次。",
+      "wer": 0,
+      "dur_ms": 1850,
+      "key": "c157b5395f0508c682906c55",
+      "model": "gemini-2.5-flash-tts"
+    },
+    {
+      "lang": "zh",
+      "voice": "Kore",
+      "style": "hesitant",
+      "noise": {
+        "name": "clean",
+        "kind": "",
+        "snr_db": 0
+      },
+      "text": "先不…先不要，等一下再说。",
+      "source": "gemini",
+      "heard": "不，等等。停下。别那样做。",
+      "wer": 0.9,
+      "dur_ms": 6210,
+      "key": "c533b53ea5ab57b7e9443b9f",
+      "model": "gemini-2.5-flash-tts"
+    },
+    {
+      "lang": "zh",
+      "voice": "Kore",
+      "style": "casual",
+      "noise": {
+        "name": "clean",
+        "kind": "",
+        "snr_db": 0
+      },
+      "text": "哪个在等我批准？",
+      "source": "gemini",
+      "heard": "哪个在等我批准？",
+      "wer": 0,
+      "dur_ms": 1850,
+      "key": "c2a94bfc5e257e27fa4516e5",
+      "model": "gemini-2.5-flash-tts"
+    },
+    {
+      "lang": "zh",
+      "voice": "Kore",
+      "style": "",
+      "noise": {
+        "name": "clean",
+        "kind": "",
+        "snr_db": 0
+      },
+      "text": "把写 README 的那个改叫文档。",
+      "source": "gemini",
+      "heard": "把写 Readme 的那个改叫文档。",
+      "wer": 0,
+      "dur_ms": 3130,
+      "key": "13ba073eabf66f098ec9d605",
+      "model": "gemini-2.5-flash-tts"
+    },
+    {
+      "lang": "zh",
+      "voice": "Charon",
+      "style": "tired",
+      "noise": {
+        "name": "clean",
+        "kind": "",
+        "snr_db": 0
+      },
+      "text": "那个 codex 现在在干嘛？",
+      "source": "gemini",
+      "heard": "那个 Codex 现在在干嘛？",
+      "wer": 0,
+      "dur_ms": 4479,
+      "key": "c90c41a31cf36029476478ef",
+      "model": "gemini-2.5-flash-tts"
+    },
+    {
+      "lang": "zh",
+      "voice": "Charon",
+      "style": "hurried",
+      "noise": {
+        "name": "clean",
+        "kind": "",
+        "snr_db": 0
+      },
+      "text": "让 bench-claude 跑一下测试，跑完告诉我。",
+      "source": "gemini",
+      "heard": "让 Bench Claude 跑一下测试，跑完告诉我。",
+      "wer": 0,
+      "dur_ms": 2650,
+      "key": "5e34757f013cc643c8e0a322",
+      "model": "gemini-2.5-flash-tts"
+    },
+    {
+      "lang": "zh",
+      "voice": "Charon",
+      "style": "hesitant",
+      "noise": {
+        "name": "clean",
+        "kind": "",
+        "snr_db": 0
+      },
+      "text": "呃，可以，批准吧，就这一次。",
+      "source": "gemini",
+      "heard": "可以。批准吧，就这一次。",
+      "wer": 0,
+      "dur_ms": 7130,
+      "key": "b2837e8b7bef68be9da8ce94",
+      "model": "gemini-2.5-flash-tts"
+    },
+    {
+      "lang": "zh",
+      "voice": "Charon",
+      "style": "casual",
+      "noise": {
+        "name": "clean",
+        "kind": "",
+        "snr_db": 0
+      },
+      "text": "先不要，等一下再说。",
+      "source": "gemini",
+      "heard": "先不要，等一下再说。",
+      "wer": 0,
+      "dur_ms": 2219,
+      "key": "bb5e99c1e950850a38101922",
+      "model": "gemini-2.5-flash-tts"
+    },
+    {
+      "lang": "zh",
+      "voice": "Charon",
+      "style": "",
+      "noise": {
+        "name": "clean",
+        "kind": "",
+        "snr_db": 0
+      },
+      "text": "哪个在等我批准？",
+      "source": "gemini",
+      "heard": "哪 个 在 等 我 批 准 ?",
+      "wer": 0,
+      "dur_ms": 1665,
+      "key": "d1254765801e62fade4cf8f4"
+    },
+    {
+      "lang": "zh",
+      "voice": "Charon",
+      "style": "tired",
+      "noise": {
+        "name": "clean",
+        "kind": "",
+        "snr_db": 0
+      },
+      "text": "把写 README 的那个改叫文档。",
+      "source": "gemini",
+      "heard": "把写 Readme 的那个改叫文档。",
+      "wer": 0,
+      "dur_ms": 2425,
+      "key": "44fc3ff3193d7760613a2613"
+    },
+    {
+      "lang": "zh",
+      "voice": "Aoede",
+      "style": "hurried",
+      "noise": {
+        "name": "clean",
+        "kind": "",
+        "snr_db": 0
+      },
+      "text": "那个 codex 现在在干嘛？",
+      "source": "gemini",
+      "heard": "那个 Codex 现在在干嘛？",
+      "wer": 0,
+      "dur_ms": 2163,
+      "key": "941400c061a076921614f29d"
+    },
+    {
+      "lang": "zh",
+      "voice": "Aoede",
+      "style": "hesitant",
+      "noise": {
+        "name": "clean",
+        "kind": "",
+        "snr_db": 0
+      },
+      "text": "就是…让 bench-claude 跑一下测试，跑完告诉我。",
+      "source": "gemini",
+      "heard": "就 是 , 让 Bench Claude 跑 一 下 测 试 , 跑 完 告 诉 我 。",
+      "wer": 0,
+      "dur_ms": 4444,
+      "key": "af652fbbf1a9d9a157a6815a"
+    },
+    {
+      "lang": "zh",
+      "voice": "Aoede",
+      "style": "casual",
+      "noise": {
+        "name": "clean",
+        "kind": "",
+        "snr_db": 0
+      },
+      "text": "可以，批准吧，就这一次。",
+      "source": "gemini",
+      "heard": "可以，批准吧，就这一次。",
+      "wer": 0,
+      "dur_ms": 2680,
+      "key": "41f882b105b00ecded645721"
+    },
+    {
+      "lang": "zh",
+      "voice": "Aoede",
+      "style": "",
+      "noise": {
+        "name": "clean",
+        "kind": "",
+        "snr_db": 0
+      },
+      "text": "先不要，等一下再说。",
+      "source": "gemini",
+      "heard": "先不要，等一下再说。",
+      "wer": 0,
+      "dur_ms": 2322,
+      "key": "8c6ade1639d9f0a82f1f31ab"
+    },
+    {
+      "lang": "zh",
+      "voice": "Aoede",
+      "style": "tired",
+      "noise": {
+        "name": "clean",
+        "kind": "",
+        "snr_db": 0
+      },
+      "text": "哪个在等我批准？",
+      "source": "gemini",
+      "heard": "哪 个 在 等 我 批 准 ?",
+      "wer": 0,
+      "dur_ms": 1665,
+      "key": "dd9cfaa24e8d28b37c1aa655"
+    },
+    {
+      "lang": "zh",
+      "voice": "Aoede",
+      "style": "hurried",
+      "noise": {
+        "name": "clean",
+        "kind": "",
+        "snr_db": 0
+      },
+      "text": "把写 README 的那个改叫文档。",
+      "source": "gemini",
+      "heard": "",
+      "wer": 1,
+      "dur_ms": 2425,
+      "key": "1fbdfa55ae12d6ddc07d4ad3"
+    },
+    {
+      "lang": "zh",
+      "voice": "Puck",
+      "style": "hesitant",
+      "noise": {
+        "name": "clean",
+        "kind": "",
+        "snr_db": 0
+      },
+      "text": "嗯…那个 codex 现在在干嘛？",
+      "source": "gemini",
+      "heard": "把写 Readme 的那个改叫文档。那个 Codex 现在在干嘛？",
+      "wer": 1.25,
+      "dur_ms": 2617,
+      "key": "a010e26e0abb8a511022802b"
+    },
+    {
+      "lang": "zh",
+      "voice": "Puck",
+      "style": "casual",
+      "noise": {
+        "name": "clean",
+        "kind": "",
+        "snr_db": 0
+      },
+      "text": "让 bench-claude 跑一下测试，跑完告诉我。",
+      "source": "gemini",
+      "heard": "让 Bench Claude 跑一下测试，跑完告诉我。",
+      "wer": 0,
+      "dur_ms": 3722,
+      "key": "99894888000651dffbad756b"
+    },
+    {
+      "lang": "zh",
+      "voice": "Puck",
+      "style": "",
+      "noise": {
+        "name": "clean",
+        "kind": "",
+        "snr_db": 0
+      },
+      "text": "可以，批准吧，就这一次。",
+      "source": "gemini",
+      "heard": "可以，批准吧，就这一次。",
+      "wer": 0,
+      "dur_ms": 2680,
+      "key": "7450698b9a62117450dbb687"
+    },
+    {
+      "lang": "zh",
+      "voice": "Puck",
+      "style": "tired",
+      "noise": {
+        "name": "clean",
+        "kind": "",
+        "snr_db": 0
+      },
+      "text": "先不要，等一下再说。",
+      "source": "gemini",
+      "heard": "No, wait. Stop. Don't do that.",
+      "wer": 1,
+      "dur_ms": 3868,
+      "key": "bf78554b62cc47662a0aa2d9",
+      "model": "gemini-2.5-flash-tts"
+    },
+    {
+      "lang": "zh",
+      "voice": "Puck",
+      "style": "hurried",
+      "noise": {
+        "name": "clean",
+        "kind": "",
+        "snr_db": 0
+      },
+      "text": "哪个在等我批准？",
+      "source": "gemini",
+      "heard": "哪 个 在 等 我 批 准 ?",
+      "wer": 0,
+      "dur_ms": 1284,
+      "key": "85f7857551674d85196defd6",
+      "model": "gemini-2.5-flash-tts"
+    },
+    {
+      "lang": "zh",
+      "voice": "Puck",
+      "style": "hesitant",
+      "noise": {
+        "name": "clean",
+        "kind": "",
+        "snr_db": 0
+      },
+      "text": "呃，把写 README 的那个改叫文档。",
+      "source": "gemini",
+      "heard": "把 写 Readme 的 那 个 改 叫 文 档 。",
+      "wer": 0,
+      "dur_ms": 7090,
+      "key": "ea37ce295a2e18daebd3389e",
+      "model": "gemini-2.5-flash-tts"
+    },
+    {
+      "lang": "zh",
+      "voice": "Kore",
+      "style": "",
+      "noise": {
+        "name": "cafe-10dB",
+        "kind": "cafe",
+        "snr_db": 10
+      },
+      "text": "那个 codex 现在在干嘛？",
+      "source": "gemini",
+      "heard": "那个 Codex 现在在干嘛？",
+      "wer": 0,
+      "dur_ms": 2675,
+      "key": "60686d56c97007ff696b12bf",
+      "model": "gemini-2.5-flash-tts"
+    },
+    {
+      "lang": "zh",
+      "voice": "Kore",
+      "style": "",
+      "noise": {
+        "name": "cafe-10dB",
+        "kind": "cafe",
+        "snr_db": 10
+      },
+      "text": "可以，批准吧，就这一次。",
+      "source": "gemini",
+      "heard": "可以。批准吧，就这一次。",
+      "wer": 0,
+      "dur_ms": 2610,
+      "key": "29391677759d26a8fdb116b7",
+      "model": "gemini-2.5-flash-tts"
+    },
+    {
+      "lang": "zh",
+      "voice": "Kore",
+      "style": "",
+      "noise": {
+        "name": "cafe-10dB",
+        "kind": "cafe",
+        "snr_db": 10
+      },
+      "text": "哪个在等我批准？",
+      "source": "gemini",
+      "heard": "哪 个 在 等 我 批 准 ?",
+      "wer": 0,
+      "dur_ms": 2010,
+      "key": "d3cd929eaac8b8191ef1224c",
+      "model": "gemini-2.5-flash-tts"
+    },
+    {
+      "lang": "zh",
+      "voice": "Charon",
+      "style": "",
+      "noise": {
+        "name": "cafe-10dB",
+        "kind": "cafe",
+        "snr_db": 10
+      },
+      "text": "让 bench-claude 跑一下测试，跑完告诉我。",
+      "source": "gemini",
+      "heard": "让 Bench Claude 跑一下测试。跑完告诉我。",
+      "wer": 0,
+      "dur_ms": 3508,
+      "key": "03797e0f409bae383932e909",
+      "model": "gemini-2.5-flash-tts"
+    },
+    {
+      "lang": "zh",
+      "voice": "Charon",
+      "style": "",
+      "noise": {
+        "name": "cafe-10dB",
+        "kind": "cafe",
+        "snr_db": 10
+      },
+      "text": "先不要，等一下再说。",
+      "source": "gemini",
+      "heard": "No, wait. Stop. Don't do that.",
+      "wer": 1,
+      "dur_ms": 1798,
+      "key": "b41327cc1ebb902865c551bd",
+      "model": "gemini-2.5-flash-tts"
+    },
+    {
+      "lang": "zh",
+      "voice": "Charon",
+      "style": "",
+      "noise": {
+        "name": "cafe-10dB",
+        "kind": "cafe",
+        "snr_db": 10
+      },
+      "text": "把写 README 的那个改叫文档。",
+      "source": "gemini",
+      "heard": "把写 Readme 的那个改叫文档。",
+      "wer": 0,
+      "dur_ms": 2663,
+      "key": "730c463b43542498b39d5447",
+      "model": "gemini-2.5-flash-tts"
+    },
+    {
+      "lang": "zh",
+      "voice": "Kore",
+      "style": "",
+      "noise": {
+        "name": "pink-5dB",
+        "kind": "pink",
+        "snr_db": 5
+      },
+      "text": "那个 codex 现在在干嘛？",
+      "source": "gemini",
+      "heard": "那个 Codex 现在在干嘛？",
+      "wer": 0,
+      "dur_ms": 2675,
+      "key": "60686d56c97007ff696b12bf",
+      "model": "gemini-2.5-flash-tts"
+    },
+    {
+      "lang": "zh",
+      "voice": "Kore",
+      "style": "",
+      "noise": {
+        "name": "pink-5dB",
+        "kind": "pink",
+        "snr_db": 5
+      },
+      "text": "可以，批准吧，就这一次。",
+      "source": "gemini",
+      "heard": "可以。批准吧，就这一次。",
+      "wer": 0,
+      "dur_ms": 2610,
+      "key": "29391677759d26a8fdb116b7",
+      "model": "gemini-2.5-flash-tts"
+    },
+    {
+      "lang": "zh",
+      "voice": "Kore",
+      "style": "",
+      "noise": {
+        "name": "pink-5dB",
+        "kind": "pink",
+        "snr_db": 5
+      },
+      "text": "哪个在等我批准？",
+      "source": "gemini",
+      "heard": "哪个在等我批准？",
+      "wer": 0,
+      "dur_ms": 2010,
+      "key": "d3cd929eaac8b8191ef1224c",
+      "model": "gemini-2.5-flash-tts"
+    },
+    {
+      "lang": "zh",
+      "voice": "Charon",
+      "style": "",
+      "noise": {
+        "name": "pink-5dB",
+        "kind": "pink",
+        "snr_db": 5
+      },
+      "text": "让 bench-claude 跑一下测试，跑完告诉我。",
+      "source": "gemini",
+      "heard": "让 Bench Claude 跑一下测试。跑完告诉我。",
+      "wer": 0,
+      "dur_ms": 3508,
+      "key": "03797e0f409bae383932e909",
+      "model": "gemini-2.5-flash-tts"
+    },
+    {
+      "lang": "zh",
+      "voice": "Charon",
+      "style": "",
+      "noise": {
+        "name": "pink-5dB",
+        "kind": "pink",
+        "snr_db": 5
+      },
+      "text": "先不要，等一下再说。",
+      "source": "gemini",
+      "heard": "Not yet. Tell me later.",
+      "wer": 1,
+      "dur_ms": 1798,
+      "key": "b41327cc1ebb902865c551bd",
+      "model": "gemini-2.5-flash-tts"
+    },
+    {
+      "lang": "zh",
+      "voice": "Charon",
+      "style": "",
+      "noise": {
+        "name": "pink-5dB",
+        "kind": "pink",
+        "snr_db": 5
+      },
+      "text": "把写 README 的那个改叫文档。",
+      "source": "gemini",
+      "heard": "把写 Readme 的那个改叫文档。",
+      "wer": 0,
+      "dur_ms": 2663,
+      "key": "730c463b43542498b39d5447",
+      "model": "gemini-2.5-flash-tts"
+    },
+    {
+      "lang": "zh",
+      "voice": "say",
+      "style": "",
+      "noise": {
+        "name": "clean",
+        "kind": "",
+        "snr_db": 0
+      },
+      "text": "那个 codex 现在在干嘛？",
+      "source": "say",
+      "heard": "那个 Codex 现在在干嘛？",
+      "wer": 0,
+      "dur_ms": 2163,
+      "key": "28af83554df42d209432d6f5"
+    },
+    {
+      "lang": "zh",
+      "voice": "say",
+      "style": "",
+      "noise": {
+        "name": "clean",
+        "kind": "",
+        "snr_db": 0
+      },
+      "text": "可以，批准吧，就这一次。",
+      "source": "say",
+      "heard": "可以。批准吧，就这一次。",
+      "wer": 0,
+      "dur_ms": 2680,
+      "key": "029a5cf73b97c6bbdde91850"
+    },
+    {
+      "lang": "zh",
+      "voice": "say",
+      "style": "",
+      "noise": {
+        "name": "clean",
+        "kind": "",
+        "snr_db": 0
+      },
+      "text": "哪个在等我批准？",
+      "source": "say",
+      "heard": "哪 个 在 等 我 批 准 ?",
+      "wer": 0,
+      "dur_ms": 1665,
+      "key": "2691e68104049250e15c1793"
+    }
+  ],
+  "groups": [
+    {
+      "group": "all",
+      "clips": 78,
+      "mean_wer": 0.10481324231324231,
+      "missed": 2
+    },
+    {
+      "group": "lang=en",
+      "clips": 39,
+      "mean_wer": 0.05193417693417693,
+      "missed": 1
+    },
+    {
+      "group": "lang=zh",
+      "clips": 39,
+      "mean_wer": 0.15769230769230771,
+      "missed": 1
+    },
+    {
+      "group": "noise=cafe-10dB lang=en",
+      "clips": 6,
+      "mean_wer": 0,
+      "missed": 0
+    },
+    {
+      "group": "noise=cafe-10dB lang=zh",
+      "clips": 6,
+      "mean_wer": 0.16666666666666666,
+      "missed": 0
+    },
+    {
+      "group": "noise=clean lang=en",
+      "clips": 27,
+      "mean_wer": 0.07501603334936667,
+      "missed": 1
+    },
+    {
+      "group": "noise=clean lang=zh",
+      "clips": 27,
+      "mean_wer": 0.1537037037037037,
+      "missed": 1
+    },
+    {
+      "group": "noise=pink-5dB lang=en",
+      "clips": 6,
+      "mean_wer": 0,
+      "missed": 0
+    },
+    {
+      "group": "noise=pink-5dB lang=zh",
+      "clips": 6,
+      "mean_wer": 0.16666666666666666,
+      "missed": 0
+    },
+    {
+      "group": "style=casual lang=en",
+      "clips": 4,
+      "mean_wer": 0.041666666666666664,
+      "missed": 0
+    },
+    {
+      "group": "style=casual lang=zh",
+      "clips": 4,
+      "mean_wer": 0,
+      "missed": 0
+    },
+    {
+      "group": "style=hesitant lang=en",
+      "clips": 5,
+      "mean_wer": 0.1431818181818182,
+      "missed": 0
+    },
+    {
+      "group": "style=hesitant lang=zh",
+      "clips": 5,
+      "mean_wer": 0.43,
+      "missed": 0
+    },
+    {
+      "group": "style=hurried lang=en",
+      "clips": 5,
+      "mean_wer": 0,
+      "missed": 0
+    },
+    {
+      "group": "style=hurried lang=zh",
+      "clips": 5,
+      "mean_wer": 0.2,
+      "missed": 1
+    },
+    {
+      "group": "style=neutral lang=en",
+      "clips": 20,
+      "mean_wer": 0.05,
+      "missed": 1
+    },
+    {
+      "group": "style=neutral lang=zh",
+      "clips": 20,
+      "mean_wer": 0.1,
+      "missed": 0
+    },
+    {
+      "group": "style=tired lang=en",
+      "clips": 5,
+      "mean_wer": 0.02857142857142857,
+      "missed": 0
+    },
+    {
+      "group": "style=tired lang=zh",
+      "clips": 5,
+      "mean_wer": 0.2,
+      "missed": 0
+    },
+    {
+      "group": "voice=Aoede lang=en",
+      "clips": 6,
+      "mean_wer": 0.16666666666666666,
+      "missed": 1
+    },
+    {
+      "group": "voice=Aoede lang=zh",
+      "clips": 6,
+      "mean_wer": 0.16666666666666666,
+      "missed": 1
+    },
+    {
+      "group": "voice=Charon lang=en",
+      "clips": 12,
+      "mean_wer": 0.041666666666666664,
+      "missed": 0
+    },
+    {
+      "group": "voice=Charon lang=zh",
+      "clips": 12,
+      "mean_wer": 0.16666666666666666,
+      "missed": 0
+    },
+    {
+      "group": "voice=Kore lang=en",
+      "clips": 12,
+      "mean_wer": 0.025793650793650796,
+      "missed": 0
+    },
+    {
+      "group": "voice=Kore lang=zh",
+      "clips": 12,
+      "mean_wer": 0.075,
+      "missed": 0
+    },
+    {
+      "group": "voice=Puck lang=en",
+      "clips": 6,
+      "mean_wer": 0.03598484848484849,
+      "missed": 0
+    },
+    {
+      "group": "voice=Puck lang=zh",
+      "clips": 6,
+      "mean_wer": 0.375,
+      "missed": 0
+    },
+    {
+      "group": "voice=say lang=en",
+      "clips": 3,
+      "mean_wer": 0,
+      "missed": 0
+    },
+    {
+      "group": "voice=say lang=zh",
+      "clips": 3,
+      "mean_wer": 0,
+      "missed": 0
+    }
+  ],
+  "samples_dir": "/Users/kc/Documents/sheepdog-voice-bench/calibration-2026-10-03",
+  "spend": {
+    "total_usd_estimate": 6.0445655,
+    "lines": [
+      {
+        "role": "live",
+        "model": "gemini-3.8-live",
+        "usage": {
+          "calls": 154,
+          "in": 1933484,
+          "out": 17152
+        },
+        "cost_usd_estimate": 6.006276
+      },
+      {
+        "role": "tts",
+        "model": "gemini-2.5-flash-tts",
+        "usage": {
+          "calls": 40,
+          "in": 999,
+          "out": 3779
+        },
+        "cost_usd_estimate": 0.0382895
+      }
+    ],
+    "live_audio_in_min": 4.857333333333333,
+    "live_audio_out_min": 8.380533333333334
+  }
+}
