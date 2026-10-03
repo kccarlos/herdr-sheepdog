@@ -678,7 +678,8 @@ func (s *Supervisor) fastAnswer(ctx context.Context, in *shepherdInput, text str
 	}
 	alias := s.aliasOf(p.PaneID)
 	s.log.Log(logSource, "supervisor.fast_path", p.PaneID, map[string]any{"path": "answer", "text": text, "answer": label, "id": p.ID, "input": string(in.kind)})
-	res, sent := s.answerKeys(ctx, p, keys, label, "Told "+alias+" %s.", "fast_path", nil)
+	zh := s.ceoChineseLocked()
+	res, sent := s.answerKeys(ctx, p, keys, label, func(l string) string { return toldLine(alias, l, zh) }, "fast_path", nil)
 	if sent {
 		in.used = true
 	}

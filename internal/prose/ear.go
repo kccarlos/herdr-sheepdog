@@ -337,3 +337,15 @@ func joinSentences(parts ...string) string {
 	}
 	return strings.Join(out, " ")
 }
+
+// Chinese reports whether s holds Chinese characters: the one language
+// test the daemon makes, for the few code sentences it speaks without
+// the brain (zh or en, matched to the shepherd's last words).
+func Chinese(s string) bool {
+	for _, r := range s {
+		if unicode.Is(unicode.Han, r) {
+			return true
+		}
+	}
+	return false
+}

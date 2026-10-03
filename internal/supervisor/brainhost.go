@@ -241,7 +241,9 @@ func (h brainHost) AnswerPrompt(ctx context.Context, paneID string, keys []strin
 	if reason != "" {
 		return "", fmt.Errorf("%w: %s", brain.ErrNotPermitted, reason)
 	}
-	res, sent := s.answerKeys(ctx, p, keys, keysLabel(p, keys), "Told "+s.aliasOf(paneID)+" %s.", "brain", nil)
+	// A tool result: a fact for the brain, which phrases the reply.
+	alias := s.aliasOf(paneID)
+	res, sent := s.answerKeys(ctx, p, keys, keysLabel(p, keys), func(l string) string { return toldLine(alias, l, false) }, "brain", nil)
 	if sent {
 		in.used = true
 	}

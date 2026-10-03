@@ -608,6 +608,7 @@ func (s *Supervisor) AnswerTap(ctx context.Context, id string, option int) (voic
 	}
 	o := p.Options[option-1]
 	s.closeVoiceLocked()
+	zh := s.ceoChineseLocked()
 	s.addInputLocked(&shepherdInput{kind: InputTap, text: o.Label})
 	// The tap is answered here and now: it is not fresh input for a
 	// later to_supervisor call (the voice relaying the silent line below
@@ -621,7 +622,7 @@ func (s *Supervisor) AnswerTap(ctx context.Context, id string, option int) (voic
 		return voice.ToolResult{}, errors.New(reason)
 	}
 	alias := s.aliasOf(p.PaneID)
-	res, sent := s.answerKeys(ctx, p, o.Keys, o.Label, "Told "+alias+" %s.", "tap", map[string]any{"option": option})
+	res, sent := s.answerKeys(ctx, p, o.Keys, o.Label, func(l string) string { return toldLine(alias, l, zh) }, "tap", map[string]any{"option": option})
 	if sent {
 		in.used = true
 	}

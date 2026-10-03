@@ -189,12 +189,29 @@ func (p Prompt) Phrase() string {
 
 // Summary is the sentence the daemon speaks about the prompt when the
 // brain does not phrase one (docs/roles.md "Pushes").
-func (p Prompt) Summary(alias string) string {
+func (p Prompt) Summary(alias string) string { return p.SummaryIn(alias, false) }
+
+// SummaryIn is Summary in Chinese when zh is set: the language of the
+// shepherd's last words (docs/eval-campaign-2026-10-03.md H4). The
+// question is the screen's own text and is quoted as it is.
+func (p Prompt) SummaryIn(alias string, zh bool) string {
+	cmd := spokenCommand(p.Command)
 	switch {
-	case p.Command != "":
-		if cmd := spokenCommand(p.Command); cmd != "" {
-			return alias + " asks to run " + cmd + "."
+	case zh && p.Command != "" && cmd != "":
+		return alias + " 请求运行 " + cmd + "。"
+	case zh && p.Command != "":
+		return alias + " 请求运行一个命令。"
+	case zh && strings.TrimSpace(p.Question) != "":
+		q := strings.TrimSpace(p.Question)
+		if !strings.HasSuffix(q, "?") && !strings.HasSuffix(q, "？") {
+			q += "？"
 		}
+		return alias + " 在问：" + q
+	case zh:
+		return alias + " 需要你做个决定。"
+	case p.Command != "" && cmd != "":
+		return alias + " asks to run " + cmd + "."
+	case p.Command != "":
 		return alias + " asks to run a command."
 	case p.Phrase() != "":
 		return alias + " is asking " + p.Phrase() + "."
