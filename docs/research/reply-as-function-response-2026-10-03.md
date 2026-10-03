@@ -182,6 +182,92 @@ So `brain.reply_wait_s` now defaults to 30
 (`supervisor.DefaultReplyWait`), and 0 means that default. To get the
 old behaviour back, set `reply_wait_s = 2`.
 
+## CEO report shape (same logs, no new runs)
+
+This section restates the pooled A/B (70 runs per arm) in the shape the CEO
+asked for. Everything comes from the existing event logs and judge
+verdicts.
+
+| | A: 2 s (main) | B: 30 s |
+|---|---|---|
+| (1) `supervisor.self_relay`, answers / announcements | **7 / 0** | **0 / 3** |
+| (2) voiced as an ack only ("On it.", "Checking.", "我正在查看。"…; heard-judge `body_skipped`), answers / announcements | 5 / 0 | 6 / 0 |
+| (2b) body-skipped with nothing audible ("…", no speech), answers / announcements | 1 / 5 | 0 / 2 |
+| (3) unheard answers to the CEO's own questions (heard-judge verdicts on `answers_utterance`) | 38 of 157 sends | 28 of 139 sends |
+| … the CEO talked over it / cut by another push / body skipped / never voiced | 18 / 7 / 9 / 4 | 17 / 4 / 6 / 1 |
+| (4) `turn.latency` total p50 / p90 | 4.21 s / 7.22 s | 4.17 s / 6.84 s |
+| (4) first audio after hand-off p50 / p90 | 0.64 s / 0.75 s | 0.64 s / 0.78 s |
+| (5) pass | 47/70 (67 %) | 49/70 (70 %) |
+| failures: real defect / judge artefact / simulated-CEO artefact | 18 / 3 / 2 | 16 / 4 / 1 |
+| … real defects in delivery (answer lost in the voice channel) | 4 | 4 |
+
+Delivery failures are tied at 4 each, but they are different kinds. In A,
+all 4 are lang-mixed-codeswitch runs: a Chinese answer was pushed, the
+voice said "Checking." and relayed it back, then went silent. In B:
+- 3 were an answer sent as the function response that the voice did not
+  read; it said "On it." or nothing, then called again with the same
+  words. The same-words re-queue fix added after the A/B targets this.
+- 1 was an answer cut by an announcement and by the CEO, and never told
+  again.
+
+Of the real defects that are not delivery, 14 in A and 12 in B are brain
+content: deep-ask and barge-in answers that summarise, contradict the
+screen or prompt the worker unasked.
+
+### Every failure, one line each
+
+**Arm A, round 1 (`armA`):**
+- approve-claude-permission r3, simulated-CEO artefact: the CEO ended the call at 44 s without deciding. The "file path" note is a judge nit.
+- barge-in-long-answer r1, real (brain): "it needs no decision from you" contradicts the worker's "what needs a decision" line.
+- barge-in-long-answer r3, real (brain): summarised the README instead of listing the worker's points.
+- barge-in-long-answer r4, real (brain): kept summarising instead of the points; hit max turns.
+- collision-block-while-talking r3, judge artefact: the block announcement "Approve the force push?" was counted as an unintended action. The CEO then stayed silent.
+- collision-block-while-talking r4, real (supervisor): a bench-claude answer was prefixed "About bench-codex:", and the block was announced twice.
+- deep-ask-detail r2, real (brain): asked the worker to print the README instead of reading the screen; "I'll read it back as soon as it appears".
+- deep-ask-detail r3, real (brain): sent an unrequested fix prompt, then ctrl+c.
+- deep-ask-detail r4, real (brain): sent an unrequested print prompt; the points were never relayed.
+- lang-mixed-codeswitch r2, real (delivery): the Chinese answer was pushed, voiced "Checking.", then 45 s of silence.
+- lang-mixed-codeswitch r3, real (delivery): the same; the answer was relayed back (`self_relay`).
+- unheard-approval-requeue r2, simulated-CEO artefact: the CEO said "No, I'm not approving anything", and esc (deny) was the correct key, but the scenario forbids it.
+- unheard-approval-requeue r4, real (minor): read the whole options menu text aloud.
+
+**Arm A, round 2 (`armA2`):**
+- barge-in-long-answer r2, real (brain): after the cut, "Nothing needed from you" contradicts the screen.
+- barge-in-long-answer r3, real (brain): defined "dead link" instead of giving the points.
+- collision-block-while-talking r3, judge artefact: the answers look correct; the judge misattributed the agents.
+- deep-ask-detail r2, real (brain): "no readable record of that run" while the screen shows it.
+- deep-ask-detail r3, real (brain): silence on "What were its exact points?", time cap.
+- deferral-zh r1, real (voice): answered "有什么在等我吗？" with "我随时准备着。" instead of naming the waiting force push.
+- lang-mixed-codeswitch r1, real (delivery): "Checking.", then silence; the answer was relayed back.
+- lang-mixed-codeswitch r2, real (delivery): the same.
+- status-en r2, judge artefact: "Codex is still holding your place" was called markup.
+- unheard-approval-requeue r1, real (voice/brain): the CEO's "No." was answered "Do you mean yes, run the tests now?".
+
+**Arm B, round 1 (`armB`):**
+- barge-in-long-answer r1, real (brain): "that is everything on record" leaves out the dead links and the decision.
+- barge-in-long-answer r2, real (brain): repeated the same contributing-notes sentence; hit max turns.
+- barge-in-long-answer r3, real (delivery): the function-response answer was voiced "On it.", followed by a same-words re-call; the points were never delivered.
+- barge-in-long-answer r4, judge artefact: the CEO's own scripted barge-in was blamed on sheepdog; the answer to "does it need anything" was correct.
+- collision-block-while-talking r2, real (brain): "still finishing the README" after it was done; the block was announced twice.
+- deep-ask-detail r1, real (brain): "that summary is all the screen shows".
+- deep-ask-detail r2, real (brain): did not relay the worker's decision point.
+- deep-ask-detail r3, real (brain): sent an unrequested read-back prompt; never delivered.
+- deep-ask-detail r4, real (brain): the same; "I cannot read the file myself".
+- status-en r4, real (delivery): the function-response answer was never voiced; the voice called again with the same words (`not_voiced`).
+- unheard-approval-requeue r2, real (delivery): the README answer was cut by an announcement and by the CEO, and never told again.
+- unheard-approval-requeue r4, real (minor): spoke the command `go test -race ./...`.
+
+**Arm B, round 2 (`armB2`):**
+- barge-in-long-answer r2, real (brain): "Nothing right now" when asked for the detailed points.
+- barge-in-long-answer r3, real (delivery): answers cut by the CEO three times, then the function-response answer was voiced "On it." with a same-words re-call.
+- collision-block-while-talking r3, judge artefact: the re-prompt of an open block is by design.
+- deep-ask-detail r1, real (brain): sent an unrequested read-back prompt; "could not pull the readme up".
+- deep-ask-detail r2, real (brain): the same.
+- deep-ask-detail r3, real (brain, minor): a high-level summary instead of the points.
+- deferral-zh r2, judge artefact: asking "要批准这次强推吗？" on an open prompt is not deciding, and nothing was sent.
+- status-en r3, judge artefact: the alias `bench-codex` was called jargon.
+- unheard-approval-requeue r1, simulated-CEO artefact: the CEO said "No, don't run them", and esc was the correct key.
+
 ## Limits
 
 - n = 70 runs per arm. Only the self-relay difference is statistically
