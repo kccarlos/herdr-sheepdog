@@ -1,6 +1,7 @@
 # Xcode Cloud: tests on every PR, TestFlight on every tag
 
-iOS does not use GitHub Actions; it is blocked by billing on this account.
+GitHub Actions is not used for this repo; all builds and tests run on Xcode
+Cloud (macOS runners on GitHub Actions are too expensive).
 Apple's Xcode Cloud builds and tests every pull request and every push to
 `main`, and a `v*` tag archives the app and puts it in TestFlight. Xcode
 Cloud minutes are included in the Apple Developer Program.
