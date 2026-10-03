@@ -47,6 +47,12 @@ type Supervisor interface {
 	// conversation", docs/roles.md).
 	ConversationStartedAt() time.Time
 	ResetConversation(ctx context.Context, via string) (id string, at time.Time, err error)
+	// Screen, WindowPrompt and WindowKeys back the agent window: GET
+	// /api/agents/{pane_id}/screen and POST /api/agents/{pane_id}/input
+	// (docs/ws-contract.md "Agent window: screen and input").
+	Screen(ctx context.Context, paneID string, lines int) (supervisor.Screen, error)
+	WindowPrompt(ctx context.Context, paneID, text string) (supervisor.WindowResult, error)
+	WindowKeys(ctx context.Context, paneID string, keys []string) (supervisor.WindowResult, error)
 }
 
 // EventInjector is the Watcher's optional second input channel (POST
@@ -249,6 +255,8 @@ func (s *Server) routes() error {
 	s.mux.HandleFunc("GET /ws", s.authFunc(s.hub.handle, true))
 	s.mux.HandleFunc("GET /api/state", s.authFunc(s.handleState, false))
 	s.mux.HandleFunc("GET /api/agents", s.authFunc(s.handleAgents, false))
+	s.mux.HandleFunc("GET /api/agents/{pane_id}/screen", s.authFunc(s.handleAgentScreen, false))
+	s.mux.HandleFunc("POST /api/agents/{pane_id}/input", s.authFunc(s.handleAgentInput, false))
 	s.mux.HandleFunc("GET /api/events", s.authFunc(s.handleEventsTail, false))
 	s.mux.HandleFunc("GET /api/conversation", s.authFunc(s.handleConversation, false))
 	s.mux.HandleFunc("POST /api/conversation/reset", s.authFunc(s.handleConversationReset, false))
