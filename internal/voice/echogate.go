@@ -375,7 +375,8 @@ func (g *EchoGate) StreamEnd(now time.Time) ([][]byte, *EchoVerdict) {
 // settle decides the held frames once the comparison is over: echo and
 // silence are dropped, anything else is let through.
 func (g *EchoGate) settle() ([][]byte, *EchoVerdict) {
-	if g.pass || len(g.held) == 0 {
+	if g.pass || !g.armed || len(g.held) == 0 {
+		// Open, or unarmed (the held frames are copies already sent).
 		g.held = nil
 		return nil, nil
 	}
@@ -591,7 +592,7 @@ func (g *EchoGate) judge() EchoVerdict {
 		if best.full {
 			g.learn(best.coupling, best.LagMs)
 		}
-	case usable < g.lagNeeded() || loose:
+	case usable < g.lagNeeded() || loose || !g.covered(mic[0].at, start):
 		best.State = EchoUnsure
 	default:
 		best.State = EchoShepherd
@@ -710,6 +711,14 @@ func (g *EchoGate) learn(c float64, lagMs int) {
 	// The delay follows slowly too: it wanders as the player underruns,
 	// but one odd window must not move it.
 	g.lagMs = (4*g.lagMs + lagMs) / 5
+}
+
+// covered: the whole window, shifted by the echo's delay, lies within
+// the current reply. A window that still holds the moment before the
+// reply's echo arrived is not judged the shepherd's: the echo's attack
+// against the quiet before it matches the reply poorly.
+func (g *EchoGate) covered(first, start time.Time) bool {
+	return !first.Add(-g.lagNeeded()).Before(start)
 }
 
 // lagNeeded is how far back the comparison must reach before a window

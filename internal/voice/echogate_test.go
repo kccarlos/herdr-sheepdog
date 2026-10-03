@@ -564,3 +564,26 @@ func TestEchoGateArmsOnSelfInterruptions(t *testing.T) {
 		t.Fatal("not armed after two self-interruptions")
 	}
 }
+
+// TestEchoGateUnarmedNeverResends: unarmed, every frame goes out once
+// and only once, whatever the reply and the client's gate do.
+func TestEchoGateUnarmedNeverResends(t *testing.T) {
+	g := &EchoGate{}
+	t0 := time.Unix(100, 0)
+	g.Out(pcmBytes(up24(speechLike(1, 16000*2, 16000))))
+	g.Playback(t0, PlaybackStarted)
+	ceo := speechLike(5, 16000*3, 12000)
+	sent := 0
+	for k := 0; k < 40; k++ {
+		out, _ := g.Mic(t0.Add(time.Duration(500+k*40)*time.Millisecond), pcmBytes(ceo[k*640:(k+1)*640]))
+		sent += len(out)
+		if k == 30 {
+			g.Playback(t0.Add(time.Duration(500+k*40)*time.Millisecond), PlaybackDrained)
+		}
+	}
+	out, _ := g.StreamEnd(t0.Add(3 * time.Second))
+	sent += len(out)
+	if sent != 40 {
+		t.Fatalf("%d frames sent for 40", sent)
+	}
+}
