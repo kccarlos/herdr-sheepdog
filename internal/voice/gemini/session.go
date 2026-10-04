@@ -68,9 +68,9 @@ type Session struct {
 	// (usage.go).
 	lastUsage, handleUsage usageSnap
 	resumeCtx              *resumeCtx
-	keyIdx           int
-	turnOpen         bool
-	turnOpenedAt     time.Time
+	keyIdx                 int
+	turnOpen               bool
+	turnOpenedAt           time.Time
 	// speaking is narrower than turnOpen: true only once the model has
 	// actually started producing output (audio or an output transcript
 	// fragment) for the open turn, false again on turnComplete or an
