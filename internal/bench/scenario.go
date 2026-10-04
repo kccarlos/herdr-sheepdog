@@ -105,13 +105,33 @@ type Reconnect struct {
 	AwayMS    int `json:"away_ms"`
 }
 
-// Resume: after the answer to the CEO's AfterTurn-th utterance the
-// daemon's voice connection is recycled (the GoAway path: a new
-// connection resumed from the latest handle, the old one closed), so
-// the following turns show what the model kept. Measurement scenario for
-// docs/research/live-resume-context-2026-10-04.md.
+// Resume: after the answer to the CEO's AfterTurn-th utterance (and
+// after each of AfterTurns) the daemon's voice connection is recycled
+// (the GoAway path: a new connection resumed from the latest handle, the
+// old one closed; on a connection that was itself resumed the daemon
+// opens a fresh session and re-seeds it instead), so the following
+// turns show what the model kept. Measurement scenario for
+// docs/research/live-resume-context-2026-10-04.md; two recycles with a
+// turn between them exercise the second-generation case.
 type Resume struct {
-	AfterTurn int `json:"after_turn"`
+	AfterTurn  int   `json:"after_turn,omitempty"`
+	AfterTurns []int `json:"after_turns,omitempty"`
+}
+
+// At reports whether the connection is recycled after turn.
+func (r *Resume) At(turn int) bool {
+	if r == nil {
+		return false
+	}
+	if r.AfterTurn == turn {
+		return true
+	}
+	for _, t := range r.AfterTurns {
+		if t == turn {
+			return true
+		}
+	}
+	return false
 }
 
 // Faults are injected between the scratch daemon and DeepSeek.
@@ -305,8 +325,14 @@ func (s Scenario) validate() error {
 	if r := b.Reconnect; r != nil && (r.AfterTurn < 1 || r.AwayMS <= 0) {
 		return fmt.Errorf("behavior.reconnect: after_turn >= 1 and away_ms > 0")
 	}
-	if r := b.Resume; r != nil && r.AfterTurn < 1 {
-		return fmt.Errorf("behavior.resume: after_turn >= 1")
+	if r := b.Resume; r != nil {
+		ok := r.AfterTurn >= 1 || (r.AfterTurn == 0 && len(r.AfterTurns) > 0)
+		for _, t := range r.AfterTurns {
+			ok = ok && t >= 1
+		}
+		if !ok {
+			return fmt.Errorf("behavior.resume: after_turn or after_turns, each >= 1")
+		}
 	}
 	for _, m := range append(append([]EventMatch(nil), s.Voice.Events...), s.Voice.Absent...) {
 		if m.Type == "" {
