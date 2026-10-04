@@ -40,20 +40,36 @@ type ResumeDay struct {
 	ModalityBefore map[string]int64 `json:"modality_before,omitempty"`
 	ModalityAfter  map[string]int64 `json:"modality_after,omitempty"`
 	Derived        int              `json:"derived"` // rows derived from voice.usage, not voice.resume_context
+	// First* is the day's resumes of a session that was never resumed
+	// before (generation 1), Later* the resumes of an already resumed
+	// session (generation 2 and up): the canary found that a handle
+	// issued by a resumed connection restores only that connection's own
+	// content (docs/research/live-resume-context-2026-10-04.md).
+	FirstN      int     `json:"first_n"`
+	FirstRatio  float64 `json:"first_ratio"`
+	LaterN      int     `json:"later_n"`
+	LaterRatio  float64 `json:"later_ratio"`
+	firstBefore int64
+	firstAfter  int64
+	laterBefore int64
+	laterAfter  int64
 }
 
 // ResumeRow is one resumed connection.
 type ResumeRow struct {
-	TS           time.Time        `json:"ts"`
-	Source       string           `json:"source"` // resume_context | derived
-	Before       int64            `json:"before"`
-	HandlePrompt int64            `json:"handle_prompt,omitempty"`
-	After        int64            `json:"after"`
-	Ratio        float64          `json:"ratio"`
-	BeforeByMod  map[string]int64 `json:"before_by_modality,omitempty"`
-	AfterByMod   map[string]int64 `json:"after_by_modality,omitempty"`
-	Backend      string           `json:"backend,omitempty"`
-	Model        string           `json:"model,omitempty"`
+	TS           time.Time `json:"ts"`
+	Source       string    `json:"source"` // resume_context | derived
+	Before       int64     `json:"before"`
+	HandlePrompt int64     `json:"handle_prompt,omitempty"`
+	After        int64     `json:"after"`
+	Ratio        float64   `json:"ratio"`
+	// Generation counts the resumes of the session so far: 1 for the
+	// first resume of a connection that was opened fresh.
+	Generation  int              `json:"generation"`
+	BeforeByMod map[string]int64 `json:"before_by_modality,omitempty"`
+	AfterByMod  map[string]int64 `json:"after_by_modality,omitempty"`
+	Backend     string           `json:"backend,omitempty"`
+	Model       string           `json:"model,omitempty"`
 }
 
 type usagePayload struct {
@@ -91,12 +107,14 @@ func ratio(after, before int64) float64 {
 func computeResumeRetention(events []eventlog.Event) ResumeReport {
 	var rows []ResumeRow
 	var lastUsage, handlePrompt int64
+	gen := 0
 	var pending *ResumeRow // a resumed connection waiting for its first usage
 	derivedLast := false   // the last row came from derivation and may be replaced
 	for _, ev := range events {
 		switch {
-		case ev.Source == "daemon" && ev.Type == "daemon.start":
-			lastUsage, handlePrompt, pending, derivedLast = 0, 0, nil, false
+		case ev.Source == "daemon" && ev.Type == "daemon.start", ev.Type == "voice.handle_dropped", ev.Type == "voice.session_refreshed":
+			// A fresh session from here on.
+			lastUsage, handlePrompt, pending, derivedLast, gen = 0, 0, nil, false, 0
 		case ev.Type == "voice.usage":
 			p := decode[usagePayload](ev.Payload)
 			if pending != nil {
@@ -114,12 +132,13 @@ func computeResumeRetention(events []eventlog.Event) ResumeReport {
 			p := decode[resumePayload](ev.Payload)
 			if p.Resumed != nil && !*p.Resumed {
 				// A fresh session: nothing to compare.
-				lastUsage, handlePrompt, pending, derivedLast = 0, 0, nil, false
+				lastUsage, handlePrompt, pending, derivedLast, gen = 0, 0, nil, false, 0
 				continue
 			}
 			derivedLast = false
+			gen++
 			if lastUsage > 0 {
-				pending = &ResumeRow{TS: ev.TS, Source: "derived", Before: lastUsage, HandlePrompt: handlePrompt}
+				pending = &ResumeRow{TS: ev.TS, Source: "derived", Before: lastUsage, HandlePrompt: handlePrompt, Generation: gen}
 			}
 		case ev.Type == "voice.resume_context":
 			p := decode[resumeContextPayload](ev.Payload)
@@ -128,7 +147,7 @@ func computeResumeRetention(events []eventlog.Event) ResumeReport {
 			}
 			row := ResumeRow{
 				TS: ev.TS, Source: "resume_context", Before: p.Before, HandlePrompt: p.HandlePrompt, After: p.After,
-				Ratio: ratio(p.After, p.Before), BeforeByMod: p.BeforeBy, AfterByMod: p.AfterBy, Backend: p.Backend, Model: p.Model,
+				Ratio: ratio(p.After, p.Before), Generation: gen, BeforeByMod: p.BeforeBy, AfterByMod: p.AfterBy, Backend: p.Backend, Model: p.Model,
 			}
 			if derivedLast && len(rows) > 0 {
 				rows[len(rows)-1] = row // the same resume, now with modality detail
@@ -156,6 +175,15 @@ func computeResumeRetention(events []eventlog.Event) ResumeReport {
 		if r.Source == "derived" {
 			d.Derived++
 		}
+		if r.Generation == 1 {
+			d.FirstN++
+			d.firstBefore += r.Before
+			d.firstAfter += r.After
+		} else if r.Generation > 1 {
+			d.LaterN++
+			d.laterBefore += r.Before
+			d.laterAfter += r.After
+		}
 		if r.BeforeByMod != nil || r.AfterByMod != nil {
 			if d.ModalityBefore == nil {
 				d.ModalityBefore, d.ModalityAfter = map[string]int64{}, map[string]int64{}
@@ -171,6 +199,8 @@ func computeResumeRetention(events []eventlog.Event) ResumeReport {
 	rep := ResumeReport{Resumes: len(rows), Rows: rows}
 	for _, d := range byDay {
 		d.Ratio = ratio(d.After, d.Before)
+		d.FirstRatio = ratio(d.firstAfter, d.firstBefore)
+		d.LaterRatio = ratio(d.laterAfter, d.laterBefore)
 		rep.Days = append(rep.Days, *d)
 	}
 	sort.Slice(rep.Days, func(i, j int) bool { return rep.Days[i].Day < rep.Days[j].Day })

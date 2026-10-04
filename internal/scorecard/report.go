@@ -145,7 +145,7 @@ func writeResumeRetention(b *strings.Builder, r ResumeReport) {
 	if r.Resumes == 0 {
 		return
 	}
-	b.WriteString("| day | resumes | after / before | ratio | worst | per modality after / before | derived |\n|---|---|---|---|---|---|---|\n")
+	b.WriteString("| day | resumes | after / before | ratio | worst | 1st resume of a session | later resumes | per modality after / before | derived |\n|---|---|---|---|---|---|---|---|---|\n")
 	for _, d := range r.Days {
 		var mods []string
 		for _, k := range sortedKeys(d.ModalityBefore) {
@@ -155,9 +155,16 @@ func writeResumeRetention(b *strings.Builder, r ResumeReport) {
 		if m == "" {
 			m = "n/a"
 		}
-		fmt.Fprintf(b, "| %s | %d | %d / %d | %.2f | %.2f | %s | %d |\n", d.Day, d.Resumes, d.After, d.Before, d.Ratio, d.MinRatio, m, d.Derived)
+		fmt.Fprintf(b, "| %s | %d | %d / %d | %.2f | %.2f | %s | %s | %s | %d |\n", d.Day, d.Resumes, d.After, d.Before, d.Ratio, d.MinRatio, genCell(d.FirstN, d.FirstRatio), genCell(d.LaterN, d.LaterRatio), m, d.Derived)
 	}
 	b.WriteString("\n")
+}
+
+func genCell(n int, r float64) string {
+	if n == 0 {
+		return "n/a"
+	}
+	return fmt.Sprintf("%.2f (n=%d)", r, n)
 }
 
 func writeTurnLatency(b *strings.Builder, r TurnLatencyReport) {
