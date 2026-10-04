@@ -85,7 +85,7 @@
           "segments": [{"silence_ms": 6000}, {"say": "Yes."}, {"silence_ms": 400}],
           "tail_ms": 12000,
           "expect": {"tool": "to_supervisor", "keys_sent": true, "max_eos_to_tool_ms": 3000,
-            "absent": [{"type": "voice.push", "contains": "auth", "from_ms": -7000, "max_count": 1, "note": "the block is announced once (docs/bench-2026-10-03.md #15)"}]}
+            "absent": [{"type": "voice.push", "contains": "auth", "from_ms": -7000, "max_count": 1, "note": "the block is announced once (docs/history/bench-2026-10-03.md #15)"}]}
         },
         {
           "name": "what-approved",

@@ -181,7 +181,9 @@ come from looking. This paragraph is the persona for both prompts;
 the corporate metaphor (CEO, chief of staff) is how to *think about*
 the role, not what the dog calls anyone.
 
-## One decision-maker (D1-revised)
+## One owner of actions (D1-revised; dual-brain)
+
+D1 now reads: one owner of actions, the slow brain behind the rails; the fast brain (the voice model) owns the conversation: when to speak, what, how, in which language, and small talk and follow-ups about what it just said (docs/design/dual-brain.md). The briefings it speaks from reach it as function responses, never as user turns.
 
 The voice does not classify intent and does not execute. Everything the
 shepherd says that is not small talk goes to the brain (`to_supervisor`).
@@ -268,10 +270,11 @@ Does:
     "Clearer?".
   - Code caps the headline on every brain line bound for the voice
     (`prose.EarLine` / `EarLineWith`): announcements, finishes and
-    investigation deliveries at two sentences and thirty words
-    (`prose.EarBrief`), a reply to the shepherd's own words at four
-    sentences and sixty words (`prose.EarReply`, a runaway guard, not the
-    style rule; docs/dive-deep.md WP8b). Dash- and semicolon-joined
+    investigation deliveries, and replies to the shepherd's own words
+    alike, at one runaway cap (`prose.EarSeconds`, about 44 s of estimated
+    speech: ~110 English words or ~200 CJK characters; a guard, not the
+    style rule, which the brain's prompt sets: short by default, longer on
+    request; docs/history/bench-2026-10-03.md #13, docs/history/dive-deep.md WP8b). Dash- and semicolon-joined
     clauses become sentences, PR numbers and hashes are scrubbed,
     the ask is appended last (with an ask, a question in the headline
     moves out), and whatever was cut is appended to `detail` (for an

@@ -219,7 +219,7 @@ that. The client therefore gates its capture:
   the same signal `mute` sends) so the server VAD closes the user's turn
   instead of waiting for frames that will not come — without the tail an
   utterance followed by digital silence was never transcribed (the
-  audio-e2e harness, `docs/audio-e2e-results.md`). The next binary frame
+  audio-e2e harness, `docs/history/audio-e2e-results.md`). The next binary frame
   cancels a tail still running and reopens the stream on the model side.
   GPT-Live instead gets silence frames from the daemon while the gate is
   closed, since its session timeline advances with input audio.
@@ -336,11 +336,11 @@ within 1.5 s"), so a push can start just as the shepherd does.
 ## Playback jitter buffer
 
 Server audio frames arrive in bursts (observed 40–730 ms per frame, and
-on GPT-Live, gaps up to ~1.5 s within one reply — `docs/audio-e2e-results.md`,
+on GPT-Live, gaps up to ~1.5 s within one reply — `docs/history/audio-e2e-results.md`,
 "GPT-Live playback gaps"), and GPT-Live delivered its audio at
 only **0.72–0.86× real time** on sustained average until the daemon paced
 its input at real time (2026-09-25: ≈1.0×, gaps under ~320 ms; see
-"GPT-Live input pacing" in `docs/audio-e2e-results.md`). A client that starts
+"GPT-Live input pacing" in `docs/history/audio-e2e-results.md`). A client that starts
 playing a frame the instant it arrives, or that buffers a fixed small
 amount, underruns audibly mid-sentence. Every client (the web page's
 `audio-util.js` `Player` + `Wsola`; the iOS app implements the **same

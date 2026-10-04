@@ -58,7 +58,7 @@ type RecapEntry struct {
 
 // Add remembers one finished utterance. Blank text is ignored, and so
 // is what would only teach a fresh model the wrong habit
-// (docs/bench-2026-10-03.md #9): a bare acknowledgement of the voice's
+// (docs/history/bench-2026-10-03.md #9): a bare acknowledgement of the voice's
 // own ("On it.", "checking", "好的") and its "<no speech detected>"
 // placeholder, and a shepherd entry that only repeats the line the
 // voice was just given or said (its own speech heard back, or a push's

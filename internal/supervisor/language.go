@@ -8,7 +8,7 @@ import (
 )
 
 // The language of the daemon's own code sentences
-// (docs/eval-campaign-2026-10-03.md H4). Wherever a brain turn follows,
+// (docs/eval/eval-campaign-2026-10-03.md H4). Wherever a brain turn follows,
 // the brain gets the facts and writes the line in the shepherd's
 // language itself. The few sentences the daemon speaks without it — the
 // bare-answer fast path, a tapped answer, the block template when the

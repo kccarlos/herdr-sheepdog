@@ -29,6 +29,8 @@ needs_user); Ctrl-C sends without a stop word; count of "what does that
 mean"-class follow-ups; brain turn duration and prompt tokens. The
 baseline is the 2026-09-23/24 logs.
 
+> **Superseded (2026-10-04):** the heard-coverage family (unheard-push rate, word and key-term coverage of a spoken push, re-queue counts) judged verbatim reading. Since the dual-brain layer (#122) the fast brain voices briefings in its own words, so the judge asks whether the key facts reached the CEO correctly and in time: the fact-delivery rubric (`facts_current`, `no_hallucination`, unauthorised actions, ack-only, latency) in [`eval/dual-brain-2026-10-04.md`](eval/dual-brain-2026-10-04.md). `voice.push_unheard` is now a GPT-Live-only event.
+
 ## Rules for every change in this iteration
 
 1. It cites a failure: a scorecard metric or an eval case id taken from
@@ -114,7 +116,7 @@ live question, and one live run says little. Three tools answer it
 
 A conversation costs about $0.01–0.02 at list prices (brain on
 gemini-3.8-flash, judge and simulated user on Flash-Lite). Results:
-[`eval-campaign-2026-10-03.md`](eval-campaign-2026-10-03.md).
+[`eval-campaign-2026-10-03.md`](eval/eval-campaign-2026-10-03.md).
 
 audio-e2e (`testdata/audio-e2e/scenarios.json`) has the same kind of
 assertions for the audio path: `max_eos_to_*_ms` latency bounds,
@@ -127,7 +129,7 @@ per-turn expectations.
 Phase 0 — measure first (done)
 - **WP0a scorecard**: `internal/earmetrics` and `sheepdog scorecard`
   over the event logs; the baseline is
-  [`scorecard-baseline-2026-09-24.md`](scorecard-baseline-2026-09-24.md).
+  [`scorecard-baseline-2026-09-24.md`](history/scorecard-baseline-2026-09-24.md).
 - **WP0b eval corpus**: `sheepdog eval extract` turns a log window into
   cases; the five logged failures as cases; paraphrase and
   transcript-noise generators (`eval expand`); the L0 runner over the
@@ -152,7 +154,7 @@ in [`roles.md`](roles.md))
   with a one-line explanation; `recall` finds it.
 - **WP7 audio diversity** (open): audio-e2e gains mid-sentence pauses,
   mute right after speaking, barge-in during a push and a WER check.
-- **WP8 dive deep** (#68, #69): [`dive-deep.md`](dive-deep.md).
+- **WP8 dive deep** (#68, #69): [`dive-deep.md`](history/dive-deep.md).
 - **WP9 timelines and invariants** (#71, #72):
   [`timelines.md`](timelines.md).
 
@@ -171,7 +173,7 @@ the answer, then continue. Note anything you had to repeat.
 4. "Tell <alias> to run the tests and let me know when it's done."
 5. "What's <other alias> doing?" then, immediately, "And the third one?"
 6. Wait for a finish push. Then: "What did it find?"
-   - "What exactly did it say?" (docs/dive-deep.md WP8d)
+   - "What exactly did it say?" (docs/history/dive-deep.md WP8d)
    - "Tell me more."
    - "Ask it why."
 7. "Why?" (to whatever it said)
@@ -182,6 +184,6 @@ the answer, then continue. Note anything you had to repeat.
 
 The scorecard for the session is the result; the notes are the
 qualitative half. Detail replies (step 6's three added lines) get their
-own column: words per reply, capped at 60 (docs/dive-deep.md WP8b), and
+own column: words per reply, capped at 60 (docs/history/dive-deep.md WP8b), and
 whether the answer fell back to the brief two-sentence cap instead of
 naming the worker's own points ("no fallback").

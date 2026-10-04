@@ -1,3 +1,5 @@
+> Superseded by [`docs/design/dual-brain.md`](../design/dual-brain.md) (adopted and merged in #122); kept as a dated snapshot.
+
 # Reply as the function response: A/B on tier 2 (2026-10-03)
 
 Question: should the brain's answer reach the voice as the `to_supervisor`

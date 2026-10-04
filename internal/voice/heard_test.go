@@ -8,7 +8,7 @@ import (
 // Push texts and output transcripts from run 2 (2026-10-03), as logged.
 const (
 	// 00:50:54.318 push-tmb3os-403: read as the question and the
-	// options; the body was skipped (docs/bench-2026-10-03.md #19).
+	// options; the body was skipped (docs/history/bench-2026-10-03.md #19).
 	run2OptionsPush = "只有一件：claude 要准备跑整套检查，停在那里等你一句许可。其他的都不用你管，codex 那个失败还挂着，但没在催你。. 这一条测试命令让它跑吗？? Options: 允许，就这一次; 允许，以后这条命令不用再问; 不允许."
 	run2OptionsSaid = "这一条测试命令让它跑吗？可以选择：允许，就这一次；允许，以后这条命令不用再问；不允许。"
 	// 00:51:17.082 push-tmb3ot-404, voiced the same way.

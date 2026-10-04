@@ -328,7 +328,7 @@ func TestCancelSuppressesFinishedPush(t *testing.T) {
 	}
 }
 
-// The logged case of docs/bench-2026-10-03.md #8: bench-claude's prompt
+// The logged case of docs/history/bench-2026-10-03.md #8: bench-claude's prompt
 // was open from 23:55:47 to 00:03:15, but its pending expired at
 // 23:57:48 (pending_ttl_s). Now it lives while the pane is blocked at
 // the same prompt: minutes later it is still pending, the reconciler

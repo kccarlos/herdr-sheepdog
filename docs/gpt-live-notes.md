@@ -12,7 +12,7 @@ Recorded 2026-09-23. Sources, in order of authority:
    `api/reference/resources/live/primary-websocket`.
 2. One raw-wire probe (a throwaway `coder/websocket` program in the
    session scratchpad, 11 s billed) and the audio-e2e runs
-   (`docs/audio-e2e-results.md`), which confirmed every field below.
+   (`docs/history/audio-e2e-results.md`), which confirmed every field below.
 
 ## Connection
 
@@ -111,7 +111,7 @@ queued output and tells the client to flush.
   stream paced at its recorded sample rate"; "if the session timeline
   stops, the acknowledgment can remain pending"). Until 2026-09-25 it
   advanced at ≤ 0.5× real time and the model's output ran at 0.74–0.87×;
-  paced, the output runs at ≈1.0× (`docs/audio-e2e-results.md`, "GPT-Live
+  paced, the output runs at ≈1.0× (`docs/history/audio-e2e-results.md`, "GPT-Live
   input pacing"). Silence rather than `session.input_audio.mute`: the
   docs say muting "does not cancel backend work or stop generated
   speech", not that the timeline advances while nothing is sent.

@@ -31,7 +31,7 @@ var repeatCueWords = []string{"again", "repeat", "say again", "i mean"}
 // stream is every voice.tool_call(to_supervisor) text and every final
 // voice.transcript.in text, merged in time order (real logs carry almost
 // none of the latter — "final" is essentially never true in practice, see
-// docs/scorecard-baseline-2026-09-24.md — so this is a fallback, not the
+// docs/history/scorecard-baseline-2026-09-24.md — so this is a fallback, not the
 // primary source).
 func computeRepeatAsk(events []eventlog.Event) RepeatAskReport {
 	utterances := utteranceTexts(events)

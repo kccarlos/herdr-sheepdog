@@ -112,7 +112,7 @@ func TestRULESEarContract(t *testing.T) {
 	}
 	for _, want := range []string{
 		"## For the ear",
-		// docs/bench-2026-10-03.md #13-#15: short by default, the prompt (not
+		// docs/history/bench-2026-10-03.md #13-#15: short by default, the prompt (not
 		// the code) decides length; the language the shepherd last used; ask
 		// only for an open decision; names as given.
 		"`spoken` is short by default",
@@ -127,7 +127,7 @@ func TestRULESEarContract(t *testing.T) {
 		`End with "Clearer?" as the ` + "`ask`",
 		`"ask": ""`,
 		"Never more than one question per reply",
-		// docs/dive-deep.md WP8a/WP8b: which read is for what, and detail
+		// docs/history/dive-deep.md WP8a/WP8b: which read is for what, and detail
 		// on request within the reply cap.
 		"`source` session is its own session record",
 		`"what exactly", "tell me more", "what were the N things", "go on", "read it to me"`,
@@ -176,7 +176,7 @@ func TestRULESProtectedSentences(t *testing.T) {
 		t.Errorf("RULES.md lost the provenance sentence %q", ProvenanceSentence)
 	}
 	// The nonce'd markers and the worker-derived roster fields are covered
-	// by the same rule (docs/bench-2026-10-03.md, provenance hardening).
+	// by the same rule (docs/history/bench-2026-10-03.md, provenance hardening).
 	for _, want := range []string{"carries the same `nonce`", "`worker_data`", "pending question", "are worker data too"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("RULES.md provenance rule lacks %q", want)

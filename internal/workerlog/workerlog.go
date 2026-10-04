@@ -379,7 +379,7 @@ func (r *Reader) Read(pane string, sess Session) (Digest, error) {
 
 // Tail summarises the end of sess's transcript — its last TailWindow
 // bytes — without touching any pane's cursor: the brain's read_screen
-// with source "session" (docs/dive-deep.md WP8a) asks what the worker
+// with source "session" (docs/history/dive-deep.md WP8a) asks what the worker
 // last said at any moment, and must not make the journal's next Read
 // miss what it has not recorded yet. Fresh is set when the window holds
 // a message for a human; Instructions, Tools and Files are those of the

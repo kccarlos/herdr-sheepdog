@@ -17,7 +17,7 @@ func (h *harness) played() {
 	h.sup.OnVoiceEvent(voice.EventPush{Text: last.Text, Urgency: last.Urgency})
 }
 
-// The 2026-10-02 23:54:18 sequence (docs/bench-2026-10-03.md #10): the
+// The 2026-10-02 23:54:18 sequence (docs/history/bench-2026-10-03.md #10): the
 // shepherd's instruction arrives while a late reply is queued; the voice
 // relays the instruction before that reply is sent to it. The call is
 // the shepherd's, so it is accepted; the voice relaying the reply's own

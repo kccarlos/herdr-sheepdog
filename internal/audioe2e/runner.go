@@ -56,7 +56,7 @@ type Options struct {
 	FloorDBFS float64
 	// RecordAudioTimeline, when set, fills Result.AudioChunks with every
 	// server→client binary frame's arrival offset and size — the raw
-	// input for an offline jitter-buffer replay (docs/audio-e2e-results.md).
+	// input for an offline jitter-buffer replay (docs/history/audio-e2e-results.md).
 	RecordAudioTimeline bool
 }
 
@@ -71,7 +71,7 @@ type Timed struct {
 // offset from the scenario start and its byte length. Captured for every
 // frame (not just burst starts, unlike Timeline's "audio" entries) so the
 // sequence can be replayed offline against the page's jitter-buffer code
-// to count underruns at a given prebuffer (docs/audio-e2e-results.md,
+// to count underruns at a given prebuffer (docs/history/audio-e2e-results.md,
 // the audible-gaps investigation).
 type AudioChunk struct {
 	AtMS  int64 `json:"at_ms"`

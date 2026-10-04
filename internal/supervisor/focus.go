@@ -10,7 +10,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
 
-// Current focus, brain → voice (docs/bench-2026-10-03.md "Kept as
+// Current focus, brain → voice (docs/history/bench-2026-10-03.md "Kept as
 // options / backlog"). The voice model hears only what it says and what
 // it is pushed; the brain's turn knows which agent the conversation is
 // about, which question is open and what the answer's detail held. After

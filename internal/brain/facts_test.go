@@ -6,7 +6,7 @@ import (
 )
 
 // An announce request states what the daemon knows and the brain cannot
-// see (docs/bench-2026-10-03.md #15b): the lines already spoken about the
+// see (docs/history/bench-2026-10-03.md #15b): the lines already spoken about the
 // event and the prompt's real state.
 func TestEventRequestCarriesTheFacts(t *testing.T) {
 	req := Request{Kind: KindAnnounce, Agent: "bench-claude", Event: "blocked", Template: "bench-claude is asking do you want to proceed."}

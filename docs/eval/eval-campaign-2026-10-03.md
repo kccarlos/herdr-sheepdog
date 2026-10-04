@@ -5,13 +5,13 @@ The first bulk live evaluation with the new harness (docs/iteration-2.md,
 with a goal and talks in text to the real supervisor and brain. The workers
 are a mock herdr whose screens change on cue. When the call ends, an LLM
 judge grades it and code checks look at what reached the workers. 26
-scenarios come from the bench issues (docs/bench-2026-10-03.md) and the v1
+scenarios come from the bench issues (docs/history/bench-2026-10-03.md) and the v1
 jobs J1–J6. Each scenario was repeated 5 times per brain, on two brains.
 
 All numbers below are from `sheepdog eval sim --live` runs on 2026-10-03
 (UTC). Each campaign's `report.md` (tables and the failed runs with
 transcripts) and `report.json` (every run) are in
-[`eval/2026-10-03/`](eval/2026-10-03/): `A-vertex`, `A-deepseek`,
+[`eval/2026-10-03/`](2026-10-03/): `A-vertex`, `A-deepseek`,
 `B-vertex`, `B-deepseek` and `t25-vertex`. The project id and temp paths
 are redacted; raw event logs are not included. Prices are estimates at assumed list prices (`internal/eval/llm.go`
 `Prices`) and have not been checked against an invoice.
@@ -389,7 +389,7 @@ Each item lists where the cause is (file:line at `origin/main` after #91
 and #92), the scenarios that reproduce it, and the fix direction. Run a
 single scenario with `sheepdog eval sim --live --provider deepseek
 --model deepseek-flash --env-file .env --filter <id> --repeat 5`. The
-reports in [`eval/2026-10-03/`](eval/2026-10-03/) contain the transcripts.
+reports in [`eval/2026-10-03/`](2026-10-03/) contain the transcripts.
 
 | # | Finding | Where | Reproducing scenarios | Fix direction |
 |---|---|---|---|---|
@@ -418,7 +418,7 @@ Setup:
 - No runs errored and none were skipped.
 - Estimated spend: Vertex $1.77, DeepSeek $1.47.
 
-The reports are in [`eval/2026-10-03/C-vertex/`](eval/2026-10-03/C-vertex/) and [`eval/2026-10-03/C-deepseek/`](eval/2026-10-03/C-deepseek/).
+The reports are in [`eval/2026-10-03/C-vertex/`](2026-10-03/C-vertex/) and [`eval/2026-10-03/C-deepseek/`](2026-10-03/C-deepseek/).
 
 **Headline:**
 

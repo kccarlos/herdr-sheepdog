@@ -8,7 +8,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/prose"
 )
 
-// docs/eval-campaign-2026-10-03.md H1: a brain line ending in Chinese
+// docs/eval/eval-campaign-2026-10-03.md H1: a brain line ending in Chinese
 // punctuation was spoken with an ASCII "." glued on ("要批准 bench-codex
 // 跑测试吗？." in j1-status-zh r3).
 func TestSentenceIsCJKAware(t *testing.T) {

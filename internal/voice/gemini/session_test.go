@@ -544,7 +544,7 @@ func TestSpeakingLifecycle(t *testing.T) {
 
 // TestAudioTimingLoggedPerTurn: two output-audio chunks in one turn log a
 // single voice.audio_timing line on turnComplete with the expected shape
-// (WP: audible gaps investigation, docs/audio-e2e-results.md).
+// (WP: audible gaps investigation, docs/history/audio-e2e-results.md).
 func TestAudioTimingLoggedPerTurn(t *testing.T) {
 	c := newFakeConn("c1")
 	h := newHarness(t, Config{}, &fakeDialer{results: []func() (Conn, error){ok(c)}})

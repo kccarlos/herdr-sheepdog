@@ -25,7 +25,7 @@ func announceRequest(m *braintest.Model) string {
 	return ""
 }
 
-// 2026-10-03 00:50:48 (docs/bench-2026-10-03.md #15): bench-claude's
+// 2026-10-03 00:50:48 (docs/history/bench-2026-10-03.md #15): bench-claude's
 // block spoke its template ("bench-claude is asking do you want to
 // proceed.") at announce_wait while the brain had not answered, and the
 // brain, told "Nothing has been said about this yet", announced the
@@ -170,7 +170,7 @@ func TestFourthLineAboutOneEventIsDropped(t *testing.T) {
 	}
 }
 
-// Run C (docs/eval-campaign-2026-10-03.md, 27 of 55 Vertex runs that
+// Run C (docs/eval/eval-campaign-2026-10-03.md, 27 of 55 Vertex runs that
 // started blocked): the announce turn answered in one slow step, so the
 // template went out at announce_wait while that step ran and the "already
 // spoken" fact, read only before a later step, never reached it. Its line

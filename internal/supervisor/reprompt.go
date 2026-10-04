@@ -143,7 +143,7 @@ func (s *Supervisor) reconcileReprompts(ctx context.Context) {
 }
 
 // checkOpenPrompt is the open answer_prompt's lifetime check, on every
-// reconcile tick (docs/bench-2026-10-03.md #8): the pending action lives
+// reconcile tick (docs/history/bench-2026-10-03.md #8): the pending action lives
 // while its pane is at the same prompt. A transition off blocked ends it
 // (transitions.go); here the screen decides: no prompt ends it
 // (pending.cancelled {prompt_gone}), and a different prompt replaces it

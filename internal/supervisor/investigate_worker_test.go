@@ -68,7 +68,7 @@ func startWorker(h *harness, question, followUpOf string) (brain.InvestigationSt
 // source worker forks the worker's own session on its own backend: the
 // query carries the worker's session with Fork set, the record never
 // holds the worker's id, and once the run reports the fork's id that is
-// the job's session (docs/dive-deep.md §3, docs/cli-query-tools.md §2c).
+// the job's session (docs/history/dive-deep.md §3, docs/cli-query-tools.md §2c).
 func TestWorkerInvestigationForksTheWorkersSession(t *testing.T) {
 	f := &fakeInvestigator{answer: "I skipped the migration because the schema was frozen.", session: forkSession, backend: "claude", gate: make(chan struct{})}
 	h, _ := newWorkerInvestigationHarness(t, f)

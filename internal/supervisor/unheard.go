@@ -8,7 +8,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
 
-// Unheard pushes (docs/bench-2026-10-03.md #17, #18, #19). The voice
+// Unheard pushes (docs/history/bench-2026-10-03.md #17, #18, #19). The voice
 // layer judges whether each spoken push reached the CEO (voice/heard.go)
 // and re-queues, once, the lines they are owed a hearing of. Every other
 // unheard line is a fact the brain cannot see: it becomes a transcript

@@ -203,7 +203,7 @@ layer: sheepdog stores only the id.
 
 ## 2c. Forking a worker's own session
 
-Spike of 2026-09-25 for `investigate(source: "worker")` (docs/dive-deep.md
+Spike of 2026-09-25 for `investigate(source: "worker")` (docs/history/dive-deep.md
 §3), on **Claude Code 2.1.282** and **codex-cli 0.155.0**, three short
 runs per backend, each in a scratch git repository with a scratch session
 (never a live worker's). Every run went through the runner's environment

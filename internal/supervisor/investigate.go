@@ -41,7 +41,7 @@ import (
 // running one (investigation.cancelled {reason: superseded}), as does a
 // stop and the daemon shutting down.
 //
-// Two sources (docs/dive-deep.md §3). The default, cli, starts a fresh
+// Two sources (docs/history/dive-deep.md §3). The default, cli, starts a fresh
 // read-only sub-agent in the worker's repository: it has not heard the
 // conversation and never saw what the worker tried. worker asks the
 // worker's own session instead, through a read-only fork of it (claude
@@ -650,7 +650,7 @@ func investigationInfo(inv state.Investigation, resumable bool) brain.Investigat
 	}
 }
 
-// failCause is why an investigation failed (docs/eval-campaign-2026-10-03.md
+// failCause is why an investigation failed (docs/eval/eval-campaign-2026-10-03.md
 // P2-10: "did not get through" said nothing, and the brain then had the
 // worker read its README out itself): a name for the log, a fact for
 // the brain's record and a short honest reason for the ear.

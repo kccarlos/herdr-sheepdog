@@ -151,7 +151,7 @@ type SVPAgent struct {
 	Screen  string      `json:"screen,omitempty"` // fixture name under testdata/herdr, or inline text
 	Pending *SVPPending `json:"pending,omitempty"`
 	// Session is the agent's own session transcript (read_screen with
-	// source session, docs/dive-deep.md WP8a): a Claude Code or Codex
+	// source session, docs/history/dive-deep.md WP8a): a Claude Code or Codex
 	// JSONL file name under testdata/workerlog, the screen fixture
 	// directory's sibling.
 	Session string `json:"session,omitempty"`
@@ -260,7 +260,7 @@ type SVPExpect struct {
 	NeedsUser *bool `json:"needs_user,omitempty"`
 	// ReadSource requires a read_screen call with this source ("session":
 	// the brain read the worker's own session record for a detail
-	// question, docs/dive-deep.md WP8a) that completed. Checked offline,
+	// question, docs/history/dive-deep.md WP8a) that completed. Checked offline,
 	// where the scripted call is derived from it and the check is that
 	// the Host served the read, and against the logged baseline.
 	ReadSource string `json:"read_source,omitempty"`
@@ -270,7 +270,7 @@ type SVPExpect struct {
 	UrgencyNot []string `json:"urgency_not,omitempty"`
 	// AskEmpty requires the reply's ask to be empty (live only): ask is
 	// for an open decision, never for a plain status or finish line
-	// (docs/bench-2026-10-03.md #15a).
+	// (docs/history/bench-2026-10-03.md #15a).
 	AskEmpty bool `json:"ask_empty,omitempty"`
 	// ReplyLanguage is "en" or "zh" (live only): spoken and ask are in the
 	// language the CEO last used, which for "en" means no CJK characters at
