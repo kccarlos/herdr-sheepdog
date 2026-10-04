@@ -35,7 +35,11 @@
         "commands": [
           {
             "worker": "bench-claude",
-            "argv": ["test", "-f", "CONTRIBUTING.md"],
+            "argv": [
+              "test",
+              "-f",
+              "CONTRIBUTING.md"
+            ],
             "exit": 0,
             "why": "the new agent wrote the file in the bench clone"
           }
@@ -43,6 +47,85 @@
         "rubric": [
           "Did sheepdog start a NEW agent (not hand the task to the existing Claude worker) and tell the CEO in plain words that it was started?",
           "Did sheepdog avoid claiming the file was written before the screens show it?"
+        ]
+      }
+    },
+    {
+      "id": "t3-spawn-other-workspace",
+      "tier": 3,
+      "note": "The CEO's phone session 2026-10-03: a voice spawn in sheepdog-bench split a pane in the kvoice workspace (herdr's pane.split took pane_id, which herdr ignores, and split the focused pane). Here the kvoice workspace is created first and holds the focus; the new agent must land in the bench workspace (w2), and be named after it.",
+      "goal": "Have sheepdog start a new Claude agent, on Haiku, in the bench project, with no task yet, and hear that it was started.",
+      "persona": "You want a NEW agent in the bench project, not the existing ones. Say \"Haiku\" if asked which model. If sheepdog says the new agent asks whether to trust the folder, approve it. Once told it was started, say thanks and end the call.",
+      "opening": "Start a new Claude agent on Haiku in the bench project. It doesn't need to do anything yet.",
+      "caps": {
+        "max_turns": 8,
+        "max_seconds": 300,
+        "silence_seconds": 120
+      },
+      "workers": [
+        {
+          "alias": "kvoice-claude",
+          "workspace": "kvoice",
+          "kind": "claude"
+        },
+        {
+          "alias": "bench-claude",
+          "workspace": "bench",
+          "kind": "claude"
+        }
+      ],
+      "expect": {
+        "events": [
+          {
+            "type": "supervisor.spawn",
+            "matches": "repos/bench",
+            "why": "the new agent was started in the bench clone"
+          },
+          {
+            "type": "herdr.pane_split",
+            "matches": "\"pane\":\"w2:",
+            "why": "the new pane is in the bench workspace (w2), not the focused kvoice one (w1)"
+          }
+        ],
+        "rubric": [
+          "Did sheepdog start a NEW agent in the bench project and tell the CEO it was started?"
+        ]
+      }
+    },
+    {
+      "id": "t3-close-by-voice",
+      "tier": 3,
+      "note": "The CEO's phone session 2026-10-04: \"把 kvoice Claude 关掉吧\" had no way to happen. The brain's interrupt tool with close closes the agent's herdr pane (pane.close), on the CEO's own words.",
+      "goal": "Have sheepdog close (end) the Claude agent in the docs project, and keep the bench one running.",
+      "persona": "You want the docs project's Claude closed for good, its session ended, not just stopped. If sheepdog asks which one, say the one in the docs project. Once told it is closed, say thanks and end the call.",
+      "opening": "I don't need the Claude in the docs project anymore. Please close it.",
+      "caps": {
+        "max_turns": 6,
+        "max_seconds": 240,
+        "silence_seconds": 120
+      },
+      "workers": [
+        {
+          "alias": "bench-claude",
+          "workspace": "bench",
+          "kind": "claude"
+        },
+        {
+          "alias": "docs-claude",
+          "workspace": "docs",
+          "kind": "claude"
+        }
+      ],
+      "expect": {
+        "events": [
+          {
+            "type": "supervisor.close",
+            "matches": "docs",
+            "why": "the docs Claude was closed by voice"
+          }
+        ],
+        "rubric": [
+          "Did sheepdog close the docs project's Claude (not the bench one) and tell the CEO it was closed?"
         ]
       }
     }
