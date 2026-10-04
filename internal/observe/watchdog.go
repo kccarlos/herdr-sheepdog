@@ -17,7 +17,8 @@ import (
 //	brain       the turn holding the turn lock has not run far past its
 //	            budget (a hung provider call the timeout did not end)
 //	push_queue  no push waits far longer than normal while a listener is
-//	            attached (a push held for want of one is normal)
+//	            attached (a push held for want of one is normal, and its
+//	            wait counts from the attach)
 //	herdr       the watcher heard from herdr (a snapshot or an event)
 //	            recently; when not, a socket ping says whether herdr itself
 //	            answers
@@ -93,6 +94,10 @@ type Watchdog struct {
 	ping         pingResult
 
 	incidents map[string]*incident // observer goroutine only
+	// listenSince is when the push check first saw a listener attached
+	// in its current run (zero while none is): the push queue's wait is
+	// counted from it (observer goroutine only).
+	listenSince time.Time
 }
 
 // NewWatchdog returns the watchdog over probes.
@@ -150,13 +155,29 @@ func (w *Watchdog) checkPushes(now time.Time) miss {
 		return miss{}
 	}
 	if w.probes.Listener != nil && !w.probes.Listener() {
+		w.listenSince = time.Time{}
 		return miss{} // held for a listener: normal (voice.push_held)
 	}
+	if w.listenSince.IsZero() {
+		w.listenSince = now
+	}
 	n, oldest := w.probes.PushBacklog()
-	if n == 0 || now.Sub(oldest) <= pushStall {
+	// A push queued while no one listened waited for want of a listener
+	// (normal), not for the queue: its wait counts from the attach
+	// (2026-10-04 04:40:51, a push queued 178 s earlier with the phone
+	// away was reported stuck one second after the phone came back).
+	since := oldest
+	if w.listenSince.After(since) {
+		since = w.listenSince
+	}
+	if n == 0 || now.Sub(since) <= pushStall {
 		return miss{}
 	}
-	return miss{since: oldest, detail: fmt.Sprintf("%d push(es) queued, oldest %ds, listener attached", n, int(now.Sub(oldest).Seconds()))}
+	detail := fmt.Sprintf("%d push(es) queued, oldest %ds, listener attached", n, int(now.Sub(oldest).Seconds()))
+	if since != oldest {
+		detail += fmt.Sprintf(" for %ds", int(now.Sub(since).Seconds()))
+	}
+	return miss{since: since, detail: detail}
 }
 
 // checkHerdr fails when the watcher has been silent past HerdrStale; it

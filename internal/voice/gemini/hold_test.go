@@ -90,8 +90,8 @@ func TestHeldPushDroppedAfterTTL(t *testing.T) {
 		{text: "new", urgency: voice.UrgencyIdle, requested: voice.UrgencyIdle, at: now.Add(4 * time.Minute)},
 	}
 	p := s.pickPush()
-	if p.ok || p.wait != heldPushTTL || len(p.held) != 1 {
-		t.Fatalf("pickPush = ok %v, wait %v, held %d; want the head held, wait %v", p.ok, p.wait, len(p.held), heldPushTTL)
+	if p.ok || p.wait != heldPushTTL || len(p.held) != 2 {
+		t.Fatalf("pickPush = ok %v, wait %v, held %d; want both held, wait %v", p.ok, p.wait, len(p.held), heldPushTTL)
 	}
 	now = now.Add(heldPushTTL)
 	p = s.pickPush()
@@ -105,7 +105,34 @@ func TestHeldPushDroppedAfterTTL(t *testing.T) {
 	if d := log.payloads("voice.push_dropped"); len(d) != 1 || d[0]["text"] != "old" || d[0]["reason"] != "no_listener" {
 		t.Errorf("voice.push_dropped = %v", d)
 	}
-	if p.wait != 4*time.Minute || len(p.held) != 1 || p.held[0].text != "new" {
-		t.Errorf("new head: wait %v, newly held %v; want 4m left, \"new\" held", p.wait, p.held)
+	if p.wait != 4*time.Minute || len(p.held) != 0 {
+		t.Errorf("new head: wait %v, newly held %v; want 4m left, \"new\" held already", p.wait, p.held)
+	}
+}
+
+// TestEveryWaitingPushIsLoggedHeld replays 2026-10-04 04:37:52: with the
+// phone away, a push queued behind another held one never logged
+// voice.push_held (only the line that was a candidate was stamped), so
+// its 178 s wait read like a stuck queue. Every spoken line waiting for
+// a listener is recorded as held, and released with its held time.
+func TestEveryWaitingPushIsLoggedHeld(t *testing.T) {
+	c := newFakeConn("c1")
+	h := newHarness(t, Config{}, &fakeDialer{results: []func() (Conn, error){ok(c)}})
+	h.s.ClientAttached(false)
+	for _, id := range []string{"push-tmd8t7-104", "push-tmd8v4-107"} {
+		if err := h.s.PushTagged("line "+id, voice.UrgencyIdle, map[string]any{"push_id": id}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	time.Sleep(100 * time.Millisecond)
+	if held := h.log.payloads("voice.push_held"); len(held) != 2 {
+		t.Fatalf("voice.push_held = %v, want both lines", held)
+	}
+	h.s.ClientAttached(true)
+	c.waitSent(t, "first line", isContent("line push-tmd8t7-104"))
+	c.serve(turnCompleteMsg())
+	c.waitSent(t, "second line", isContent("line push-tmd8v4-107"))
+	if rel := h.log.payloads("voice.push_released"); len(rel) != 2 {
+		t.Errorf("voice.push_released = %v, want both lines", rel)
 	}
 }

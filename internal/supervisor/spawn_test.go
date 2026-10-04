@@ -11,7 +11,9 @@ import (
 	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
+	"github.com/kccarlos/herdr-sheepdog/internal/brain/braintest"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
+	"github.com/kccarlos/herdr-sheepdog/internal/state"
 )
 
 // spawnWorld is a harness with a project root holding bench, app and a
@@ -23,6 +25,13 @@ type spawnWorld struct {
 }
 
 func newSpawnWorld(t *testing.T) *spawnWorld {
+	t.Helper()
+	return newSpawnWorldWith(t, newHarness)
+}
+
+// newSpawnWorldWith builds the world on a harness from mk (newHarness,
+// or a brain harness).
+func newSpawnWorldWith(t *testing.T, mk func(*testing.T, ...func(*Config)) *harness) *spawnWorld {
 	t.Helper()
 	oldPoll, oldShell := spawnPoll, spawnShellWait
 	spawnPoll, spawnShellWait = 5*time.Millisecond, 50*time.Millisecond
@@ -36,7 +45,7 @@ func newSpawnWorld(t *testing.T) *spawnWorld {
 			t.Fatal(err)
 		}
 	}
-	h := newHarness(t, func(c *Config) { c.ProjectRoots = []string{root} })
+	h := mk(t, func(c *Config) { c.ProjectRoots = []string{root} })
 	w := &spawnWorld{harness: h, root: root, bench: filepath.Join(root, "bench")}
 	n := 0
 	newPane := func(p json.RawMessage) herdr.PaneInfo {
@@ -46,6 +55,7 @@ func newSpawnWorld(t *testing.T) *spawnWorld {
 		_ = json.Unmarshal(p, &params)
 		n++
 		pane := herdr.PaneInfo{PaneID: "w20:p" + string(rune('0'+n)), WorkspaceID: "w20", Cwd: params.Cwd, Status: herdr.StateUnknown}
+		h.srv.SetPane(pane)
 		h.srv.SetScreen(pane.PaneID, "bench ❯ ")
 		return pane
 	}
@@ -144,11 +154,64 @@ func TestSpawnReusesExistingWorkspace(t *testing.T) {
 		t.Errorf("workspace.create calls = %d", n)
 	}
 	split := w.params("pane.split")
-	if len(split) != 1 || split[0]["pane_id"] != "w3:p1" || split[0]["cwd"] != w.bench {
+	if len(split) != 1 || split[0]["target_pane_id"] != "w3:p1" || split[0]["cwd"] != w.bench {
 		t.Fatalf("pane.split = %v", split)
 	}
 	if in := w.params("pane.send_input"); len(in) != 1 || in[0]["text"] != "codex" {
 		t.Fatalf("pane.send_input = %v", in)
+	}
+}
+
+// The CEO's phone session, 2026-10-03 22:24:11: "在 Sheepdog Bench 开一个
+// 新的 Claude" split wP:p1 (the bench workspace's pane) but the new pane
+// came back as wM:p3, in the kvoice workspace, and the agent was named
+// "kvoice Claude 2". herdr's pane.split reads the pane to split from
+// target_pane_id and, without it, splits the focused pane. This mock
+// herdr behaves like the real one (verified against herdr 0.9.3): the
+// new pane must land in the bench workspace, and its name follows.
+func TestSpawnSplitLandsInTheProjectsWorkspace(t *testing.T) {
+	w := newSpawnWorld(t)
+	kvoice := filepath.Join(w.root, "kvoice")
+	if err := os.Mkdir(kvoice, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	w.srv.SetWorkspace(herdr.WorkspaceInfo{WorkspaceID: "wM", Label: "kvoice", Focused: true})
+	w.srv.SetWorkspace(herdr.WorkspaceInfo{WorkspaceID: "wP", Label: "bench"})
+	w.srv.SetPane(herdr.PaneInfo{PaneID: "wM:p1", WorkspaceID: "wM", Cwd: kvoice})
+	w.srv.SetPane(herdr.PaneInfo{PaneID: "wP:p1", WorkspaceID: "wP", Cwd: w.bench})
+	n := 0
+	w.srv.Handle("pane.split", func(p json.RawMessage) (any, error) {
+		var params struct {
+			Target string `json:"target_pane_id"`
+			Cwd    string `json:"cwd"`
+		}
+		_ = json.Unmarshal(p, &params)
+		ws := "wM" // herdr's fallback: the focused pane's workspace
+		if params.Target != "" {
+			ws = strings.SplitN(params.Target, ":", 2)[0]
+		}
+		n++
+		pane := herdr.PaneInfo{PaneID: ws + ":p" + string(rune('2'+n)), WorkspaceID: ws, Cwd: params.Cwd, Status: herdr.StateUnknown}
+		w.srv.SetScreen(pane.PaneID, "bench ❯ ")
+		return map[string]any{"type": "pane_info", "pane": pane}, nil
+	})
+	w.hear("在 bench 开一个新的 Claude")
+	if _, err := w.spawn(brain.SpawnRequest{Dir: "bench", Kind: "claude"}); err != nil {
+		t.Fatal(err)
+	}
+	ev := w.log.ofType("supervisor.spawn")
+	if len(ev) != 1 {
+		t.Fatalf("supervisor.spawn events = %d", len(ev))
+	}
+	pane, _ := ev[0].Payload.(map[string]any)["pane"].(string)
+	if !strings.HasPrefix(pane, "wP:") {
+		t.Fatalf("the new agent's pane = %s, want one in the bench workspace wP", pane)
+	}
+	w.sup.HandleTransition(context.Background(), herdr.Transition{PaneID: pane, To: herdr.StateIdle, At: w.clock.Now(), Agent: "claude", WorkspaceID: "wP", WorkspaceLabel: "bench", Cwd: w.bench})
+	w.sup.HandleTransition(context.Background(), herdr.Transition{PaneID: "wM:p1", To: herdr.StateIdle, At: w.clock.Now(), Agent: "claude", WorkspaceID: "wM", WorkspaceLabel: "kvoice", Cwd: kvoice})
+	row, _ := w.store.Get(pane)
+	if got := state.Say(row); got != "bench Claude" {
+		t.Errorf("the new agent is called %q, want %q", got, "bench Claude")
 	}
 }
 
@@ -314,5 +377,73 @@ func TestSpawnRefusesModelThatIsNotAName(t *testing.T) {
 	}
 	if got := spawnCommand("codex", "gpt-5.5-mini"); got != "codex -m gpt-5.5-mini" {
 		t.Errorf("codex command = %q", got)
+	}
+}
+
+// The CEO's phone session, 2026-10-04 04:58:57: a new Claude in kvoice
+// was not recognised by herdr within 60 s and supervisor.spawn_not_ready
+// dropped its first instruction. Now the brain is told the agent is not
+// ready, with its pane's last lines (here Claude's folder-trust
+// question), the watch goes on, and the instruction goes once the agent
+// is recognised and idle.
+func TestSpawnNotReadyKeepsWaitingAndTellsTheBrain(t *testing.T) {
+	oldReady, oldFirst := spawnReadyWait, spawnFirstWait
+	spawnReadyWait, spawnFirstWait = 60*time.Millisecond, 5*time.Second
+	t.Cleanup(func() { spawnReadyWait, spawnFirstWait = oldReady, oldFirst })
+	m := braintest.NewModel(braintest.Step{Text: braintest.Reply("It is still waiting at the trust question.", "")})
+	w := newSpawnWorldWith(t, func(t *testing.T, opts ...func(*Config)) *harness { return newBrainHarness(t, m, opts...) })
+	w.hear("在 kvoice 开一个新的 Claude, 让它解释一下这个项目")
+	if _, err := w.spawn(brain.SpawnRequest{Dir: "bench", Kind: "claude", Text: "explain this project"}); err != nil {
+		t.Fatal(err)
+	}
+	w.srv.SetScreen("w20:p1", fixture(t, "claude-trust-dialog.screen.txt"))
+	waitFor(t, func() bool { return w.log.count("supervisor.spawn_not_ready") == 1 }, "supervisor.spawn_not_ready")
+	ev := w.log.ofType("supervisor.spawn_not_ready")[0].Payload.(map[string]any)
+	if ev["still_waiting"] != true {
+		t.Errorf("spawn_not_ready = %v", ev)
+	}
+	if n := w.log.count("supervisor.spawn_instruction_dropped"); n != 0 {
+		t.Fatalf("the instruction was dropped at the not-ready mark")
+	}
+
+	// The brain's next turn has the fact and the screen.
+	w.say("怎么样了?")
+	calls := m.Calls()
+	if len(calls) == 0 {
+		t.Fatal("no brain turn")
+	}
+	text := calls[len(calls)-1].Text()
+	if !strings.Contains(text, "the new Claude started 0 s ago is not recognised by herdr as ready yet; its first instruction is held") || !strings.Contains(text, "trust this folder") {
+		t.Errorf("the brain was not told:\n%s", text)
+	}
+
+	// Recognised, the trust question answered, idle: the instruction goes.
+	w.srv.SetScreen("w20:p1", "❯ ")
+	w.detect("w20:p1", "", herdr.StateIdle)
+	waitFor(t, func() bool { return len(w.promptRequests()) == 1 }, "the held first instruction")
+	if got := w.promptRequests()[0]; got[0] != "w20:p1" || !strings.HasPrefix(got[1], "explain this project") {
+		t.Errorf("first instruction = %v", got)
+	}
+}
+
+// A not-ready agent whose pane closes ends the watch: the instruction is
+// dropped as "the pane closed" (in the phone session the CEO closed the
+// pane by hand at 05:00:28), not kept for ten minutes.
+func TestSpawnNotReadyEndsWhenThePaneCloses(t *testing.T) {
+	oldReady, oldGone := spawnReadyWait, spawnGoneCheck
+	spawnReadyWait, spawnGoneCheck = 40*time.Millisecond, 20*time.Millisecond
+	t.Cleanup(func() { spawnReadyWait, spawnGoneCheck = oldReady, oldGone })
+	w := newSpawnWorld(t)
+	w.hear("open a Claude in bench and have it run the tests")
+	if _, err := w.spawn(brain.SpawnRequest{Dir: "bench", Kind: "claude", Text: "run the tests"}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, func() bool { return w.log.count("supervisor.spawn_not_ready") == 1 }, "supervisor.spawn_not_ready")
+	w.srv.Handle("pane.read", func(json.RawMessage) (any, error) {
+		return nil, &herdr.Error{Code: "pane_not_found", Message: "pane w20:p1 not found"}
+	})
+	waitFor(t, func() bool { return w.log.count("supervisor.spawn_instruction_dropped") == 1 }, "supervisor.spawn_instruction_dropped")
+	if p := w.log.ofType("supervisor.spawn_instruction_dropped")[0].Payload.(map[string]any); p["reason"] != "the pane closed" {
+		t.Errorf("dropped = %v", p)
 	}
 }

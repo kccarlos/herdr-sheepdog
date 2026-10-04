@@ -412,7 +412,7 @@ func TestClientSpawnCalls(t *testing.T) {
 	}
 	want := map[string]string{
 		"workspace.create": `{"cwd":"/p/app","focus":false,"label":"app"}`,
-		"pane.split":       `{"cwd":"/p/app","direction":"right","focus":false,"pane_id":"w7:p1"}`,
+		"pane.split":       `{"cwd":"/p/app","direction":"right","focus":false,"target_pane_id":"w7:p1"}`,
 		"pane.send_input":  `{"keys":["enter"],"pane_id":"w7:p2","text":"claude --model haiku"}`,
 	}
 	for _, r := range srv.Requests() {
@@ -425,5 +425,24 @@ func TestClientSpawnCalls(t *testing.T) {
 	}
 	if len(want) > 0 {
 		t.Errorf("never called: %v", want)
+	}
+}
+
+// pane.close takes the pane as pane_id (PaneTarget), and herdr's error
+// for a pane that is gone matches ErrPaneNotFound.
+func TestClientClosePane(t *testing.T) {
+	srv := herdrtest.New(t)
+	srv.Handle("pane.close", func(p json.RawMessage) (any, error) {
+		if string(p) != `{"pane_id":"w7:p2"}` {
+			return nil, &herdr.Error{Code: "pane_not_found", Message: "pane not found"}
+		}
+		return map[string]any{"type": "ok"}, nil
+	})
+	c := herdr.NewClient(srv.Path)
+	if err := c.ClosePane(context.Background(), "w7:p2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.ClosePane(context.Background(), "w9:p9"); !errors.Is(err, herdr.ErrPaneNotFound) {
+		t.Errorf("closing a gone pane = %v", err)
 	}
 }

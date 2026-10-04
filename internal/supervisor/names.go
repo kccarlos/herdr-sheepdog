@@ -143,9 +143,14 @@ func (s *Supervisor) stopNames() {
 	n.mu.Unlock()
 }
 
-// rename gives the agent the name the CEO chose: herdr agent rename when
-// the herdr client can, and the state table either way. It returns the
-// spoken echo.
+// rename gives the agent the name the CEO chose: the state table keeps
+// the spoken form ("kvoice explainer"), and herdr gets the spelling its
+// agent names allow (state.HerdrName: "kvoice-explainer") when the
+// herdr client can rename. It returns the spoken echo, which says so
+// when herdr refused or could not take the name: the CEO and the brain
+// hear what happened, not a success that did not (2026-10-04 05:00:43,
+// "kvoice explainer" was refused by herdr while the daemon reported the
+// rename done).
 func (s *Supervisor) rename(ctx context.Context, paneID, name string) (string, error) {
 	row, ok := s.store.Get(paneID)
 	if !ok {
@@ -156,20 +161,37 @@ func (s *Supervisor) rename(ctx context.Context, paneID, name string) (string, e
 	if err := s.store.SetName(paneID, name); err != nil {
 		return "", err
 	}
+	fields := map[string]any{"from": old, "to": name}
+	var herdrNote string
 	if r, ok := s.herdr.(Renamer); ok {
-		if err := r.Rename(ctx, paneID, name); err != nil {
-			// The table has the name already; herdr's own label stays
-			// behind until it is renamed there.
-			s.log.Log(logSource, "supervisor.rename_error", paneID, map[string]any{"name": name, "error": err.Error()})
+		hname, valid := state.HerdrName(name)
+		fields["herdr_name"] = hname
+		switch {
+		case !valid:
+			fields["herdr"] = "not_sent"
+			herdrNote = " herdr only takes names in lowercase English letters and digits, so herdr's own label still shows the old name."
+		default:
+			if err := r.Rename(ctx, paneID, hname); err != nil {
+				// The table has the name already; herdr's own label
+				// stays behind until it is renamed there.
+				s.log.Log(logSource, "supervisor.rename_error", paneID, map[string]any{"name": name, "herdr_name": hname, "error": err.Error()})
+				fields["herdr"] = "refused"
+				fields["herdr_error"] = err.Error()
+				// Spoken (the fallback path reads the echo aloud): the
+				// fact, not herdr's rule text, which stays in the log.
+				herdrNote = " herdr refused the name, so herdr's own label still shows the old name."
+			} else {
+				fields["herdr"] = "renamed"
+			}
 		}
 	}
-	s.log.Log(logSource, "supervisor.rename", paneID, map[string]any{"from": old, "to": name})
+	s.log.Log(logSource, "supervisor.rename", paneID, fields)
 	s.invalidateBriefing()
 	s.syncNames()
 	if old == "" || strings.EqualFold(old, name) {
-		return "It is called " + name + " now.", nil
+		return "It is called " + name + " now." + herdrNote, nil
 	}
-	return old + " is called " + name + " now.", nil
+	return old + " is called " + name + " now." + herdrNote, nil
 }
 
 // sayOf is how a pane's agent is named aloud: its spoken name, or

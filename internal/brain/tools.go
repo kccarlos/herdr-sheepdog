@@ -116,8 +116,12 @@ func toolDeclarations(readOnly bool) []*genai.Tool {
 			}, nil)},
 		{Name: ToolSendKeys, Description: "Answer an agent's approval prompt with the keys of one of its on-screen options (see the roster). Permitted only when the CEO authorised that answer in this turn.",
 			Parameters: obj(map[string]*genai.Schema{"agent": agent, "keys": {Type: genai.TypeArray, Items: str("one key name, e.g. enter, esc, y, 1"), Description: "the option's keys, in order"}}, []string{"agent", "keys"})},
-		{Name: ToolInterrupt, Description: "Send Ctrl-C to an agent to stop what it is doing. The result says whether it stopped.",
-			Parameters: obj(map[string]*genai.Schema{"agent": agent}, []string{"agent"})},
+		{Name: ToolInterrupt, Description: "Send Ctrl-C to an agent to stop what it is doing. The result says whether it stopped. " +
+			"With close true it closes the agent instead: its pane and session end, only when the CEO asks to close or shut down that agent or its session (not to stop a task). If it is unclear which agent, ask first.",
+			Parameters: obj(map[string]*genai.Schema{"agent": agent,
+				"close":        {Type: genai.TypeBoolean, Description: "only when the CEO asks to close the agent: close its pane, ending it"},
+				"protected_ok": {Type: genai.TypeBoolean, Description: "only with close, when the CEO named this very agent and the result said it is protected"},
+			}, []string{"agent"})},
 		{Name: ToolPromise, Description: "Record promised work: the CEO asked to be told when something happens to an agent (\"tell me when it's done\", \"let me know if it asks\", \"remind me\"). The supervisor keeps it: it tells the CEO at the next matching event, whatever the chattiness level. Use it in the same turn as any instruction that goes with it.",
 			Parameters: obj(map[string]*genai.Schema{"agent": agent, "text": str("what the CEO asked to be told, in their words"), "event": {Type: genai.TypeString, Enum: PromiseEvents, Description: "the condition: done (it finished), blocked (it asks something), idle, or any_change"},
 				"due_in_minutes": {Type: genai.TypeInteger, Description: "only when the CEO gave a deadline or asked to be interrupted at once (0); a promise kept past its due time interrupts instead of waiting for a pause"}}, []string{"agent", "text", "event"})},
@@ -396,6 +400,10 @@ func (b *Brain) execTool(ctx context.Context, t *turn, call *genai.FunctionCall)
 		}
 		out.acted, out.result = echo, echo
 	case ToolInterrupt:
+		if closing, _ := call.Args["close"].(bool); closing {
+			protectedOK, _ := call.Args["protected_ok"].(bool)
+			return b.closeAgent(ctx, row, protectedOK, out)
+		}
 		echo, err := b.host.Interrupt(ctx, row.PaneID)
 		if err != nil {
 			out.err = err

@@ -377,9 +377,13 @@ Barge-in sequence observed (client content sent while the model was counting):
 - Enable with `SessionResumption: &genai.SessionResumptionConfig{}` (empty) on
   the first connect. The server then sends `sessionResumptionUpdate` messages;
   keep the **latest `NewHandle` where `Resumable == true`**. Handles are UUIDs
-  (`"8149f0e4-9364-4fd5-89ca-255fb6b3c9cc"`). One arrived right after setup
-  and none during the following turns in the SDK run, so persist whatever you
-  have; the docs say updates come periodically and after turns.
+  (`"8149f0e4-9364-4fd5-89ca-255fb6b3c9cc"`). **Corrected 2026-10-04:** the
+  server sends a new handle after every completed turn (the CEO's experiment,
+  2026-10-03: one per turn, each with the prompt size at issue growing turn by
+  turn), not only after setup. The first SDK run here saw one after setup and
+  none later, and this note said so; that was wrong. The daemon logs every
+  update as `voice.handle_update {handle (first 8 characters), resumable,
+  accepted, prompt_tokens, silent_since, since_last_ms}`.
 - Reconnect: `client.Live.Connect(ctx, model, cfgWith(SessionResumption: &genai.SessionResumptionConfig{Handle: h}))`.
   You must resend the full config (tools, system instruction, compression).
   Verified: after `Close()` and reconnecting with the handle (590 ms), the
@@ -389,10 +393,18 @@ Barge-in sequence observed (client content sent while the model was counting):
 - `Transparent: true` additionally gives `LastConsumedClientMessageIndex` so a
   client can replay buffered audio frames sent after the last handle; not
   needed for v1 (a few hundred ms of audio lost on reconnect is acceptable).
-- What is lost: anything the model was generating at the moment of the drop
-  (`resumable:false` updates mark such moments), and any in-flight tool calls
-  — re-issue nothing; the Supervisor should re-push the briefing as `silent`
-  after reconnect (plan §6).
+- What is lost: a clean resume with the latest handle loses nothing up to
+  that handle (the CEO's experiment, 2026-10-03). Lost are anything the model
+  was generating at the moment of the drop (`resumable:false` updates mark such
+  moments), any in-flight tool calls, and **silent context sent after the last
+  handle** (pushes with `turnComplete: false`: names, focus, briefings), since
+  no turn completed to issue a handle covering them. The session keeps those
+  silent pushes and sends them again after a resume (`voice.resume
+  {silent_resent}`, `internal/voice/gemini/handle.go`); the Supervisor also
+  re-pushes the briefing as `silent` after every reconnect (plan §6). Context
+  shrinks seen in daemon logs after a resume most likely came from resuming
+  with a stale handle (one the daemon held while a newer turn's handle was
+  dropped, e.g. during a refresh); the per-update log makes that checkable.
 
 ### GoAway (not observed — the smoke test did not run for the ~10 min limit)
 

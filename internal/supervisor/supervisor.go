@@ -142,6 +142,14 @@ type Config struct {
 	// supervisor.project_roots): their immediate subdirectories are the
 	// candidates, and any directory inside one is allowed.
 	ProjectRoots []string
+	// ProtectedDirs are directories whose agents are closed only when
+	// the brain says the CEO named that very agent (close.go): the
+	// daemon's own working directory, where the CEO's orchestrator
+	// session works.
+	ProtectedDirs []string
+	// OwnPane is the herdr pane the daemon itself runs in (its
+	// HERDR_PANE_ID), "" when none; it is protected like ProtectedDirs.
+	OwnPane string
 	// Brain, when set, is the one model that decides and phrases
 	// (docs/roles.md); without it the daemon speaks code sentences and
 	// sends nothing. New attaches the Supervisor as its Host.

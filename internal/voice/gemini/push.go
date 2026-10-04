@@ -143,6 +143,15 @@ func (s *Session) pickPush() pushPick {
 	blocked := map[string]bool{} // utterances an earlier, unready line answers
 	for i := range s.pushQ {
 		it := &s.pushQ[i]
+		if s.noClient && it.urgency != voice.UrgencySilent && it.heldAt.IsZero() {
+			// Every spoken line waiting for a listener is recorded as
+			// held, not only the one that is a candidate now
+			// (2026-10-04 04:37:52: a push queued behind another never
+			// logged voice.push_held, so its 178 s wait looked like a
+			// stuck queue).
+			it.heldAt = now
+			p.held = append(p.held, *it)
+		}
 		first := voice.PushFirstClass(it.requested, it.tags)
 		if !first {
 			if firstOther >= 0 || sawFirst {
@@ -159,10 +168,6 @@ func (s *Session) pickPush() pushPick {
 		}
 		var wait time.Duration
 		if s.noClient && it.urgency != voice.UrgencySilent {
-			if it.heldAt.IsZero() {
-				it.heldAt = now
-				p.held = append(p.held, *it)
-			}
 			wait = heldPushTTL - now.Sub(it.at)
 		} else {
 			var timedOut bool
@@ -402,6 +407,9 @@ func (s *Session) doPush(ctx context.Context, item pushItem) {
 	s.mu.Lock()
 	if id, _ := item.tags[ctxcap.TagCallID].(string); id != "" {
 		delete(s.owedReplies, id) // the reply the voice was told follows
+	}
+	if !turnComplete {
+		s.keepSilentLocked(item) // handle.go: re-sent after a resume
 	}
 	var unheard []voice.UnheardPush
 	if turnComplete {

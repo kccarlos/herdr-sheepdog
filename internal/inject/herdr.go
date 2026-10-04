@@ -32,6 +32,7 @@ type synthetic struct {
 
 var _ supervisor.Herdr = (*Herdr)(nil)
 var _ supervisor.Renamer = (*Herdr)(nil)
+var _ supervisor.Closer = (*Herdr)(nil)
 var _ supervisor.Spawner = (*Herdr)(nil)
 
 // NewHerdr wraps inner (may be nil). log may be nil.
@@ -160,6 +161,19 @@ func (h *Herdr) Rename(ctx context.Context, paneID, name string) error {
 	}
 	h.log.Log("herdr", "herdr.rename", paneID, map[string]any{"name": name, "synthetic": true})
 	return nil
+}
+
+// ClosePane implements supervisor.Closer: a synthetic pane has nothing
+// to close and is refused; a real one goes to the inner client.
+func (h *Herdr) ClosePane(ctx context.Context, paneID string) error {
+	if h.IsSynthetic(paneID) {
+		return fmt.Errorf("herdr: %s is not a real pane", paneID)
+	}
+	c, ok := h.inner.(supervisor.Closer)
+	if !ok {
+		return fmt.Errorf("herdr: cannot close %s here", paneID)
+	}
+	return c.ClosePane(ctx, paneID)
 }
 
 // spawner is the inner client's spawn half, or an error saying there is

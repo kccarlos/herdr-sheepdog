@@ -108,6 +108,15 @@ What is in:
   daemon-tested. Gemini's free tier allows about 20 requests per model
   per key per day: run live checks and `make eval-live` sparingly.
 
+- **Phone-session fixes, 2026-10-03 (this PR, unit tests + isolated
+  herdr check):** voice spawns split the named workspace's pane
+  (`target_pane_id`); renames send herdr's spelling and report refusals;
+  a new agent not ready in 60 s is waited for (≤ 10 min) and the brain
+  told; agents can be closed by voice (`interrupt` with `close`, words
+  rail, protected own-directory agent); Gemini handle updates logged and
+  post-handle silent context re-sent on resume; the push-queue watchdog
+  counts from the listener's attach.
+
 ## Open
 
 - **Bench backlog:** every item of

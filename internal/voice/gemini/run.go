@@ -102,10 +102,18 @@ func (s *Session) install(conn Conn, resumed, reconnect bool) {
 	pending := s.pending
 	s.pending, s.pendingBytes = nil, 0
 	handle := s.handle
+	resent := 0
 	if !resumed {
 		// A fresh session (a 1011, a reset) is what a due refresh wanted.
 		s.freshAt = s.now()
 		s.refreshDue, s.refreshDueAt = "", time.Time{}
+		// The re-seed and the briefing rebuild a fresh context; nothing
+		// is owed from the old one.
+		s.postHandle = nil
+	} else if reconnect {
+		// The resumed context ends at the handle: the silent lines sent
+		// after it go again (handle.go).
+		resent = s.resendAfterResumeLocked()
 	}
 	s.turnOpen = false
 	s.speaking = false
@@ -132,7 +140,7 @@ func (s *Session) install(conn Conn, resumed, reconnect bool) {
 	}
 	s.emit(voice.EventStatus{Status: voice.StatusConnected})
 	if reconnect {
-		s.log.Log(logSource, "voice.resume", "", map[string]any{"handle": handle, "resumed": resumed, "replayed_chunks": len(pending)})
+		s.log.Log(logSource, "voice.resume", "", map[string]any{"handle": handle, "resumed": resumed, "replayed_chunks": len(pending), "silent_resent": resent})
 		s.emit(voice.EventResumed{Handle: handle, ContextLost: !resumed})
 	}
 	s.poke()

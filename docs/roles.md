@@ -134,7 +134,38 @@ Rails (authorisation and runaways, not judgement):
 A rail refusal is a `brain.rail_blocked` and `supervisor.spawn_refused
 {reason}`; a start logs `supervisor.spawn {dir, kind, model, pane}`,
 then `supervisor.spawn_ready` when herdr reports the agent and
-`supervisor.spawn_instruction` when the first instruction went.
+`supervisor.spawn_instruction` when the first instruction went. An
+agent herdr has not recognised after 60 s logs
+`supervisor.spawn_not_ready {still_waiting}` and the brain gets a
+transcript line saying so, with the pane's last lines (often the
+first-run question); the watch goes on to the ten-minute bound or until
+the pane closes, and the brain is told whether the held instruction
+went or was dropped.
+
+### Closing an agent
+
+"把 kvoice Claude 关掉吧" (close that agent, end its session) is the
+brain's `interrupt` tool with `close: true`; no tool was added. Plain
+`interrupt` still sends Ctrl-C to stop a task; `close` ends the agent:
+the daemon (`internal/supervisor` `close.go`) closes its pane with
+herdr's `pane.close` (a workspace's last pane closes the workspace), and
+herdr's `pane_closed` takes it off the roster like any agent that exits.
+Which agent the shepherd meant is the brain's judgement; the tool
+description has it ask when that is unclear.
+
+Rails (authority, not judgement):
+- the shepherd's own recent, unused words, read exactly as for a new
+  agent; a close marks them used, so one input closes one agent;
+- the agent working in the daemon's own directory (where the CEO's
+  orchestrator session runs; `supervisor.Config.ProtectedDirs`, set to
+  the daemon's working directory) and the pane the daemon itself runs in
+  (`HERDR_PANE_ID`) are refused unless the brain passes `protected_ok`,
+  which the description reserves for the shepherd naming that very
+  agent. The refusal tells the brain why, so it can ask.
+
+A refusal logs `brain.rail_blocked` and `supervisor.close_refused
+{reason}`; a close logs `supervisor.close {agent, spoken, kind, cwd,
+state}`.
 
 ## Personality
 
