@@ -147,23 +147,14 @@ func (s *Supervisor) ToSupervisorRead(ctx context.Context, said, reading string)
 	c, fresh := s.claimInput(ctx)
 	if !fresh {
 		// Nothing the shepherd said, typed or tapped since the previous
-		// relay or the last push: the voice model is acting on its own
-		// (2026-09-23: "yes" right after a push, with the mic muted; a
-		// push relayed back as if the shepherd had said it). Nothing
-		// happens and nothing is said (inputs.go) — unless the call
-		// repeats the shepherd's own words of the last few seconds,
-		// which a push sent in between hid from the gate (rescueInput).
-		if s.selfRelay(said) {
-			s.log.Log(logSource, "supervisor.self_relay", "", map[string]any{"text": said})
-			return voice.ToolResult{Scheduling: voice.UrgencySilent}, nil
-		}
-		rescued, ok := s.rescueInput(said)
-		if !ok {
-			s.log.Log(logSource, "supervisor.voice_initiative_ignored", "", map[string]any{"text": said})
-			return voice.ToolResult{Scheduling: voice.UrgencySilent}, nil
-		}
-		s.log.Log(logSource, "supervisor.relay_rescued", "", map[string]any{"heard": rescued.text, "said": said, "inputs": rescued.n, "utterance_id": rescued.id})
-		c = rescued
+		// relay: the call is the voice model's own (2026-09-23: "yes"
+		// right after a push, with the mic muted). No brain turn runs,
+		// since only the CEO's words authorise one (the rail). The voice
+		// is told so as a fact, silently, instead of a code guess at
+		// whether it relayed a briefing back (selfRelay, removed in
+		// dual-brain ablation G2).
+		s.log.Log(logSource, "supervisor.voice_initiative_ignored", "", map[string]any{"text": said})
+		return voice.ToolResult{Spoken: s.noFreshWordsFact(), Scheduling: voice.UrgencySilent}, nil
 	}
 	text, fallback := UtteranceOf(c.text, said)
 	payload := map[string]any{"heard": c.text, "said": said, "inputs": c.n, "input": string(c.in.kind), "utterance_id": c.id}
@@ -199,6 +190,19 @@ func (s *Supervisor) ToSupervisorRead(ctx context.Context, said, reading string)
 		res.UtteranceID = c.id
 	}
 	return res, nil
+}
+
+// noFreshWordsFact is the silent result of a to_supervisor call with no
+// new words of the CEO's: what happened, for the voice to know.
+func (s *Supervisor) noFreshWordsFact() string {
+	s.mu.Lock()
+	in := s.lastInputLocked()
+	s.mu.Unlock()
+	fact := "Nothing was handed on: the slow brain acts only on the CEO's own words, and the CEO has said nothing new since your last call."
+	if in != nil && strings.TrimSpace(in.text) != "" {
+		fact += fmt.Sprintf(" Their last words, at %s, were %q.", in.at.Format("15:04:05"), strings.TrimSpace(in.text))
+	}
+	return fact
 }
 
 // handleUtterance runs the shepherd's claimed words: the fast paths,

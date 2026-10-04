@@ -330,56 +330,6 @@ func (s *Supervisor) markPushed(text string) {
 	s.mu.Unlock()
 }
 
-// rescueWindow is how recent the shepherd's words must be for a gated
-// to_supervisor call that repeats them to be taken up anyway
-// (rescueInput).
-const rescueWindow = 10 * time.Second
-
-// rescueInput is the gate's safety net. Invariant it protects: a real
-// shepherd utterance is never dropped as the voice model's own
-// initiative. A push sent to the model between the shepherd's words and
-// the model's relay of them still moves the gate past those words; the
-// order of the two streams is not the daemon's to fix (the transcript
-// arrives on the event pump, the call on the session's goroutine, the
-// push on the push queue). So when the gate would refuse a call, but
-// its argument is the shepherd's own unclaimed words from the last
-// rescueWindow — the same run freshRunLocked would take with the push
-// floor left out — the call is accepted on those words
-// (supervisor.relay_rescued). A bare fast-path phrase ("yes", "stop")
-// is never rescued: one word matches too easily, and it could answer a
-// prompt the shepherd had not heard yet.
-func (s *Supervisor) rescueInput(said string) (claim, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	run := s.freshRunLocked(s.relayedSeq)
-	if len(run) == 0 || s.cfg.Now().Sub(run[len(run)-1].at) > rescueWindow {
-		return claim{}, false
-	}
-	words := make([]string, 0, len(run))
-	for _, in := range run {
-		words = append(words, strings.TrimSpace(in.text))
-	}
-	joined := strings.Join(words, " ")
-	if fastPathPhrase(joined) || fastPathPhrase(said) {
-		return claim{}, false
-	}
-	if !sameWords(said, joined) && !sameWords(said, run[len(run)-1].text) {
-		return claim{}, false
-	}
-	return s.claimRunLocked(run), true
-}
-
-// selfRelay reports whether said repeats the last spoken push: the voice
-// model relaying our own line (its question, its options) back as if the
-// shepherd had said it (2026-10-02 23:54:22.9, "要它跑完直接动手修吗?").
-// Such a call is always refused (supervisor.self_relay).
-func (s *Supervisor) selfRelay(said string) bool {
-	s.mu.Lock()
-	push := s.lastPush
-	s.mu.Unlock()
-	return push != "" && partOf(said, push)
-}
-
 // normWords is text lower-cased with every rune that is not a letter or
 // a digit dropped: spaces and punctuation go, so Chinese (no spaces) and
 // English compare the same way, and "Claude 动手。" equals "claude动手".
@@ -391,54 +341,6 @@ func normWords(text string) []rune {
 		}
 	}
 	return out
-}
-
-// sameWords reports whether a and b are the same words after normWords,
-// allowing for a paraphrase's small edits: equal, one containing the
-// other with the shorter at least 60% of the longer, or within an edit
-// distance of a quarter of the longer. Both need at least two runes.
-func sameWords(a, b string) bool {
-	x, y := normWords(a), normWords(b)
-	if len(x) < 2 || len(y) < 2 {
-		return false
-	}
-	if len(x) > len(y) {
-		x, y = y, x
-	}
-	if string(x) == string(y) {
-		return true
-	}
-	if strings.Contains(string(y), string(x)) && 5*len(x) >= 3*len(y) {
-		return true
-	}
-	return 4*editDistance(x, y) <= len(y)
-}
-
-// partOf reports whether said is made of pieces of line: split at its
-// punctuation, the pieces (two runes or more after normWords) found in
-// line cover at least half of said. The voice relays a push's question
-// and its options joined with its own separators.
-func partOf(said, line string) bool {
-	full := string(normWords(line))
-	if full == "" {
-		return false
-	}
-	pieces := strings.FieldsFunc(said, func(r rune) bool {
-		return unicode.IsPunct(r) || unicode.IsSymbol(r)
-	})
-	found, total := 0, 0
-	for _, p := range pieces {
-		w := string(normWords(p))
-		n := len([]rune(w))
-		if n < 2 {
-			continue
-		}
-		total += n
-		if strings.Contains(full, w) {
-			found += n
-		}
-	}
-	return total > 0 && 2*found >= total
 }
 
 // editDistance is the Levenshtein distance of two rune slices.
@@ -463,14 +365,18 @@ func editDistance(a, b []rune) int {
 }
 
 // claimInput is the to_supervisor gate: every shepherd input newer than
-// both the previous accepted call and the last spoken push, waiting up
-// to inputGrace for one (see inputGraceDefault). ok is false when none
-// arrived: the call is the voice model's own initiative.
+// the previous accepted call, waiting up to inputGrace for one (see
+// inputGraceDefault). ok is false when none arrived: the call is the
+// voice model's own, and no CEO words authorise a brain turn. A spoken
+// push no longer moves the floor (dual-brain ablation G2): briefings go
+// as function responses, which the voice does not mistake for the CEO,
+// so words the CEO said before a briefing still count, and the fuzzy
+// rescue of words a push had hidden (rescueInput) is gone with it.
 func (s *Supervisor) claimInput(ctx context.Context) (claim, bool) {
 	var deadline <-chan time.Time
 	for {
 		s.mu.Lock()
-		if run := s.freshRunLocked(max(s.relayedSeq, s.pushSeq)); len(run) > 0 {
+		if run := s.freshRunLocked(s.relayedSeq); len(run) > 0 {
 			c := s.claimRunLocked(run)
 			s.mu.Unlock()
 			return c, true

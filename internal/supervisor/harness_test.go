@@ -345,3 +345,9 @@ func payload(e logging.Line) map[string]any {
 	m, _ := e.Payload.(map[string]any)
 	return m
 }
+
+// noFreshWords reports whether res is the silent fact a to_supervisor
+// call with no new CEO words gets (no brain turn ran).
+func noFreshWords(res voice.ToolResult) bool {
+	return res.Scheduling == voice.UrgencySilent && strings.HasPrefix(res.Spoken, "Nothing was handed on")
+}

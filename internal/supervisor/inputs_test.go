@@ -25,8 +25,8 @@ func TestRelayWithoutShepherdInputIsIgnored(t *testing.T) {
 	h := newHarness(t)
 	blockedAuth(t, h)
 	res := h.relay("yes")
-	if res.Spoken != "" || res.Scheduling != voice.UrgencySilent {
-		t.Errorf("result = %+v, want silent and empty", res)
+	if !noFreshWords(res) {
+		t.Errorf("result = %+v, want the silent no-fresh-words fact", res)
 	}
 	if got := h.sendKeysRequests(); len(got) != 0 {
 		t.Errorf("keys sent: %v", got)

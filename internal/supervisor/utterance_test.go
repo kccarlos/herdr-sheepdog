@@ -288,7 +288,7 @@ func TestPushRelayedBackNeverReachesTheBrain(t *testing.T) {
 	h.sup.push("w5:p1", pushText, voice.UrgencyIdle)
 	before := len(m.Calls())
 
-	if res := h.relay(pushText); res.Scheduling != voice.UrgencySilent || res.Spoken != "" {
+	if res := h.relay(pushText); !noFreshWords(res) {
 		t.Errorf("relay of the push = %+v, want nothing said", res)
 	}
 	if n := len(m.Calls()) - before; n != 0 {

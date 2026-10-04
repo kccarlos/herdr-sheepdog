@@ -8,7 +8,6 @@ import (
 
 	"github.com/kccarlos/herdr-sheepdog/internal/brain/braintest"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
-	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
 
 // The voice phrase asks a confirming question and sends nothing yet.
@@ -94,7 +93,7 @@ func TestResetConfirmationExpires(t *testing.T) {
 func TestResetPhraseNeedsShepherdInput(t *testing.T) {
 	h := newHarness(t)
 	res := h.relay("start over") // relayed with no hear() behind it
-	if res.Spoken != "" {
+	if !noFreshWords(res) {
 		t.Fatalf("result = %+v, want the voice-initiative silent result", res)
 	}
 	if got := h.log.ofType("supervisor.reset_confirm"); len(got) != 0 {
@@ -202,7 +201,7 @@ func TestResetPreventsPreResetInputFromAuthorising(t *testing.T) {
 	}
 
 	res := h.relay("tell auth to run the tests") // relayed with no hear() behind it
-	if res.Spoken != "" || res.Scheduling != voice.UrgencySilent {
+	if !noFreshWords(res) {
 		t.Fatalf("result = %+v, want the voice-initiative silent result", res)
 	}
 	if h.log.count("supervisor.voice_initiative_ignored") != 1 {
