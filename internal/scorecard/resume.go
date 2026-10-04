@@ -51,13 +51,13 @@ type ResumeDay struct {
 	// rows here.
 	FreshAfterResume int     `json:"fresh_after_resume"`
 	FirstN           int     `json:"first_n"`
-	FirstRatio  float64 `json:"first_ratio"`
-	LaterN      int     `json:"later_n"`
-	LaterRatio  float64 `json:"later_ratio"`
-	firstBefore int64
-	firstAfter  int64
-	laterBefore int64
-	laterAfter  int64
+	FirstRatio       float64 `json:"first_ratio"`
+	LaterN           int     `json:"later_n"`
+	LaterRatio       float64 `json:"later_ratio"`
+	firstBefore      int64
+	firstAfter       int64
+	laterBefore      int64
+	laterAfter       int64
 }
 
 // ResumeRow is one resumed connection.
