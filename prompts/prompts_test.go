@@ -54,6 +54,9 @@ func TestRenderAssistant(t *testing.T) {
 		`"Never mind" is not stop`,
 		"answer in the language they used last, whatever language a briefing is in",
 		"Never state a fact about an agent that no briefing carried",
+		// Tier 3 two-claudes-names: retold in its own words, the voice
+		// said "the first Claude"; names are facts.
+		"by the name the briefing uses",
 	} {
 		if !strings.Contains(s, rule) {
 			t.Errorf("prompt lost the rule %q", rule)
