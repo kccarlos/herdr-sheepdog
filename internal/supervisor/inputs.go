@@ -88,8 +88,7 @@ type shepherdInput struct {
 	// daemon does not relay them (relay.go).
 	answered bool
 	// answeredAt is when answered was set (silentAnswer); answeredWith
-	// is what the voice said since (ackOnly: an acknowledgement is no
-	// answer).
+	// is what the voice said since.
 	answeredAt   time.Time
 	answeredWith string
 	// saidBefore is what the voice was saying, or had said within
@@ -502,17 +501,12 @@ func (s *Supervisor) claimInput(ctx context.Context) (claim, bool) {
 // sentence into two inputs (GPT-Live closes an input at every pause,
 // 2026-09-23 23:53:26), so the run takes both; it stops at an input the
 // voice already answered itself, which belongs to that exchange, not to
-// this one — unless that "answer" was only an acknowledgement (ackOnly):
-// in a tier-2 echo-barge-in run the voice said "Checking." to "What did
-// bench-claude say when it finished?" without calling a tool, its own
-// echo came back as "checking", and the daemon relayed "checking
-// checking" while the question was lost. Empty when the newest input is
-// not fresh. Caller holds s.mu.
+// this one. Empty when the newest input is not fresh. Caller holds s.mu.
 func (s *Supervisor) freshRunLocked(floor uint64) []*shepherdInput {
 	var run []*shepherdInput
 	for i := len(s.inputs) - 1; i >= 0; i-- {
 		in := s.inputs[i]
-		if in.seq <= floor || in.claimed || in.kind == InputTap || (len(run) > 0 && in.answered && !ackOnly(in.answeredWith)) {
+		if in.seq <= floor || in.claimed || in.kind == InputTap || (len(run) > 0 && in.answered) {
 			break
 		}
 		run = append(run, in)

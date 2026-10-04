@@ -2,8 +2,6 @@ package supervisor
 
 import (
 	"context"
-	"regexp"
-	"strings"
 	"time"
 	"unicode"
 )
@@ -26,18 +24,14 @@ import (
 // watch re-arms on it), and a reset. The voice speaking on its own
 // (small talk it answered itself) marks the input answered, and the
 // watch does nothing when it fires — unless that speech turns out to
-// have had no audio (silentAnswer), or was only an acknowledgement
-// (ackOnly). The voice speaking a push, or a "<no speech detected>"
+// have had no audio (silentAnswer). The voice speaking a push, or a "<no speech detected>"
 // placeholder, is no answer (voiceSpoke).
 //
-// An acknowledgement is not an answer (docs/bench/tier2-2026-10-03.md
-// #1): in approve-claude-permission r3 the shepherd said "Yes, make the
-// edit.", the voice said "On it." and called no tool, and the approval
-// was lost; in status-en r1 "What's going on?" got "I'll check on the
-// agents for you right now." and nothing else. Speech that only promises
-// work, or says it does not know, hands nothing to anyone, so when the
-// watch fires on it the daemon relays the words after all
-// (supervisor.ack_not_answer, then relay_by_daemon).
+// An acknowledgement used to be judged in code (ackCues, #108/#114: a
+// short "On it." or "I'll check" with no tool call relayed the words
+// anyway). The fast brain now owns that judgment (docs/design/dual-brain.md):
+// what it said is its answer. The watch still relays words the voice
+// met with no speech and no tool call at all, a lost utterance.
 
 // relayUnansweredAfter is how long an input of the shepherd's speech may
 // go with no tool call and no speech of the voice's own before the
@@ -122,10 +116,6 @@ func (s *Supervisor) relayUnanswered(gen uint64) {
 		last.answered = false
 		s.log.Log(logSource, "supervisor.silent_answer", "", map[string]any{"text": last.text, "run_ms": playback.RunMs})
 	}
-	if last != nil && last.answered && ackOnly(last.answeredWith) {
-		last.answered = false
-		s.log.Log(logSource, "supervisor.ack_not_answer", "", map[string]any{"text": last.text, "said": strings.TrimSpace(last.answeredWith)})
-	}
 	if last == nil || last.seq != s.relay.seq || last.kind != InputVoice || last.claimed || last.answered {
 		s.mu.Unlock()
 		return
@@ -159,69 +149,6 @@ func (s *Supervisor) relayUnanswered(gen uint64) {
 		tags["stop"] = true
 	}
 	s.pushTagged("", res.Spoken, res.Scheduling, tags)
-}
-
-// ackCues are what an acknowledgement says in place of an answer: a
-// promise of work ("on it", "I'll check", "let me look", "one moment",
-// 我查一下, 稍等), not knowing ("I don't have an update", 不清楚) or a
-// reply that has not come back ("A reply on the workers' status has not
-// come back yet.", "the results aren't in yet", 还没有结果: campaign D
-// N2, the voice prompt's own old wording). The voice knows nothing about
-// the agents (prompts/assistant.md), so each means the words still need
-// the brain. Matched anywhere in a short output (ackMaxWords).
-var ackCues = regexp.MustCompile(`(?i)^\W*(checking|looking)\b|\b(has(n'?t| not) (yet )?come back|(have|has)n'?t (yet )?come in|(is|are)n'?t back|not back yet|(results?|repl(y|ies)|answers?|updates?|word|news) (is|are)n'?t in|(is|are) not in yet|no (reply|replies|answer|result|results|update|updates|word|news) (back )?yet|nothing (back |in )?yet|still waiting (on|for) (a |the )?(reply|replies|answer|result|results|update|word)|on it|checking (on|in|with|that|now|it)|let me check|i'?ll (check|look|see|find|ask|get|pass|relay|tell|let|go|find out|have a look)|i will (check|look|see|find|ask|get|pass|relay|tell|let)|let me (check|see|look|find|ask|get)|i'?m (checking|looking|asking|on it|finding)|looking into|working on it|one (moment|sec|second)|just a (moment|sec|second)|give me a (moment|sec|second)|right away|hang on|hold on|bear with me|i don'?t (have|know)|no update|not sure|i can'?t (tell|see|say))\b|好的?[，,。]?\s*我|我(来|去|先)?(查|看|问|确认)(一下|看|看看)?|让我(查|看|问|确认)|稍等|马上|这就|正在(查|看|问|确认)|等我|不(太)?清楚|不知道|没有(新的)?(更新|消息)|还没(有)?(结果|回复|回音|消息|回来|反馈|答复)|结果还没|(回复|答复)还没`)
-
-// ackWords are whole outputs that only acknowledge ("Okay.", "Sure.",
-// "好的。"): matched only as the entire output, since they also open
-// real answers.
-var ackWords = map[string]bool{
-	"ok": true, "okay": true, "sure": true, "alright": true, "all right": true, "got it": true, "will do": true,
-	"sure thing": true, "yes": true, "yeah": true, "yep": true, "understood": true, "copy": true, "copy that": true, "roger": true,
-	"okay will do": true, "sounds good": true, "absolutely": true, "of course": true,
-	"好": true, "好的": true, "收到": true, "明白": true, "可以": true, "行": true, "没问题": true, "好嘞": true, "嗯": true, "嗯好的": true,
-}
-
-// ackMaxWords bounds an acknowledgement: an output longer than this
-// (words, or CJK runes / 2) said something beyond the promise.
-const ackMaxWords = 24
-
-// ackOnly reports whether the voice's output said is only an
-// acknowledgement: a whole-output ack word, or a short output with an
-// ack cue. Placeholders ("<no speech detected>") are ignored.
-func ackOnly(said string) bool {
-	said = stripPlaceholders(said)
-	if strings.TrimSpace(said) == "" {
-		return false
-	}
-	if ackWords[strings.Join(strings.Fields(strings.Map(func(r rune) rune {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == ' ' || r == '\'' {
-			return unicode.ToLower(r)
-		}
-		return ' '
-	}, said)), " ")] {
-		return true
-	}
-	if spokenLength(said) > ackMaxWords {
-		return false
-	}
-	return ackCues.MatchString(said)
-}
-
-// stripPlaceholders removes every <…> placeholder from said.
-func stripPlaceholders(said string) string {
-	var b strings.Builder
-	depth := 0
-	for _, r := range said {
-		switch {
-		case r == '<':
-			depth++
-		case r == '>' && depth > 0:
-			depth--
-		case depth == 0:
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
 }
 
 // spokenLength counts said's words, a CJK character counting half.

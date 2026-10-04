@@ -10,48 +10,33 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
 
-// The logged sequences (docs/bench/tier2-2026-10-03.md #1): the voice
-// acknowledged the shepherd's words without calling to_supervisor, and
-// the relay watch took the acknowledgement for an answer. An
-// acknowledgement is no answer: the daemon relays the words.
-func TestAcknowledgementIsNotAnAnswer(t *testing.T) {
-	cases := []struct {
-		name  string
-		heard string
-		said  []string
-	}{
-		{"approve-claude-permission r3", "Yes, make the edit.", []string{"On ", "it."}},
-		{"status-en r1", "What's going on?", []string{"I'll check on the agents ", "for you right now."}},
-		{"a deflection", "What is bench-claude doing?", []string{"I don't have an update on bench-claude's ", "specific task at the moment."}},
-		{"chinese", "现在情况怎么样？", []string{"好的，我查", "一下。"}},
-		{"chinese wait", "让它跑测试。", []string{"稍等。"}},
-		{"a bare okay", "Tell it to also update the docs.", []string{"Okay."}},
-		// docs/eval/campaign-d-2026-10-03.md N2: the voice prompt's own
-		// "if a reply has not come back yet, say so", spoken for a new
-		// status question that was never relayed.
-		{"status-en r1 (campaign D)", "Not now, just give me a quick status update on all the workers.", []string{"A reply on the workers' status ", "has not come back yet."}},
-		{"names-rename-by-voice r1 (campaign D)", "What's docs doing?", []string{"Docs is still at work; ", "the results aren't in yet."}},
-		{"chinese no result yet", "现在两个都怎么样了？", []string{"还没有结果。"}},
+// The fast brain owns the judgment an acknowledgement used to get in
+// code (docs/design/dual-brain.md; ackCues removed): whatever the voice
+// said is its answer, and the daemon does not second-guess it. Words met
+// with neither speech nor a tool call are still relayed (a lost
+// utterance, not a judgment of what was said).
+func TestVoiceAnswerIsNotSecondGuessed(t *testing.T) {
+	h := newHarness(t, relayAfter(30*time.Millisecond))
+	h.addAgent("w5:p1", "bench-claude", "claude", herdr.StateWorking)
+	h.sup.OnVoiceEvent(voice.EventTranscript{Dir: voice.DirIn, Text: "Yes, make the edit."})
+	h.sup.OnVoiceEvent(voice.EventTranscript{Dir: voice.DirOut, Text: "On it."})
+	h.sup.OnVoiceEvent(voice.EventTurnComplete{})
+	time.Sleep(120 * time.Millisecond)
+	h.sup.replies.Wait()
+	if n := h.log.count("supervisor.relay_by_daemon"); n != 0 {
+		t.Errorf("relay_by_daemon = %d, want 0", n)
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			m := braintest.NewModel(braintest.Step{Text: braintest.Reply("Bench-claude is editing the file.", "")})
-			h := newBrainHarness(t, m, relayAfter(30*time.Millisecond))
-			h.addAgent("w5:p1", "bench-claude", "claude", herdr.StateWorking)
-			h.sup.OnVoiceEvent(voice.EventTranscript{Dir: voice.DirIn, Text: tc.heard})
-			for _, f := range tc.said {
-				h.sup.OnVoiceEvent(voice.EventTranscript{Dir: voice.DirOut, Text: f})
-			}
-			h.sup.OnVoiceEvent(voice.EventTurnComplete{})
-			waitFor(t, func() bool { return h.log.count("supervisor.relay_by_daemon") == 1 }, "the daemon's relay")
-			h.sup.replies.Wait()
-			if ev := h.log.ofType("supervisor.ack_not_answer"); len(ev) != 1 || payload(ev[0])["text"] != tc.heard {
-				t.Errorf("ack_not_answer = %v", ev)
-			}
-			if text := lastCall(t, m); !strings.Contains(text, `utterance="`+tc.heard+`"`) {
-				t.Errorf("model saw:\n%s", text)
-			}
-		})
+}
+
+func TestUnansweredWordsAreStillRelayed(t *testing.T) {
+	m := braintest.NewModel(braintest.Step{Text: braintest.Reply("Bench-claude is editing the file.", "")})
+	h := newBrainHarness(t, m, relayAfter(30*time.Millisecond))
+	h.addAgent("w5:p1", "bench-claude", "claude", herdr.StateWorking)
+	h.sup.OnVoiceEvent(voice.EventTranscript{Dir: voice.DirIn, Text: "What is bench-claude doing?"})
+	waitFor(t, func() bool { return h.log.count("supervisor.relay_by_daemon") == 1 }, "the daemon's relay")
+	h.sup.replies.Wait()
+	if text := lastCall(t, m); !strings.Contains(text, `utterance="What is bench-claude doing?"`) {
+		t.Errorf("model saw:\n%s", text)
 	}
 }
 
@@ -83,60 +68,5 @@ func TestAnswerOrRelayAfterAcknowledgementHoldsTheWatch(t *testing.T) {
 				t.Errorf("relay_by_daemon = %d, want 0", n)
 			}
 		})
-	}
-}
-
-func TestAckOnly(t *testing.T) {
-	for said, want := range map[string]bool{
-		"On it.":    true,
-		"Checking.": true,
-		"I'll check on the agents for you right now.": true,
-		"Let me look into that.":                      true,
-		"One moment.":                                 true,
-		"Okay.":                                       true,
-		"好的。":                                         true,
-		"我看一下。":                                       true,
-		"收到，马上。":                                      true,
-		"不太清楚。":                                       true,
-		"<no speech detected>":                        false,
-		"":                                            false,
-		"Doing well, thanks for asking!":              false,
-		"Okay, bench-claude finished the changelog and the tests pass.":                                          false,
-		"Sure, here is what I can tell you about the weather today, it looks sunny and warm all afternoon long.": false,
-		"你好，今天天气不错。":                                            false,
-		"A reply on the workers' status has not come back yet.": true,
-		"The results aren't in yet.":                            true,
-		"No reply yet.":                                         true,
-		"Nothing yet.":                                          true,
-		"还没有结果。":                                                true,
-		// Real answers that say "yet" or "back" are still answers.
-		"bench-claude hasn't finished yet; it is running the tests.": false,
-		"It came back clean: all tests pass.":                        false,
-		"Tests are not passing yet; TestAdd fails.":                  false,
-	} {
-		if got := ackOnly(said); got != want {
-			t.Errorf("ackOnly(%q) = %v, want %v", said, got, want)
-		}
-	}
-}
-
-// Tier-2 echo-barge-in r1 (this branch's verification run): the voice
-// said "Checking." to the question and called no tool, then its own echo
-// came back as "checking" twice, and the daemon relayed "checking
-// checking" only. An input answered with nothing but an acknowledgement
-// stays in the run the daemon relays.
-func TestAcknowledgedQuestionStaysInTheRelayedRun(t *testing.T) {
-	m := braintest.NewModel(braintest.Step{Text: braintest.Reply("Bench-claude wrote the README.", "")})
-	h := newBrainHarness(t, m, relayAfter(60*time.Millisecond))
-	h.addAgent("w5:p1", "bench-claude", "claude", herdr.StateDone)
-	h.sup.OnVoiceEvent(voice.EventTranscript{Dir: voice.DirIn, Text: "What did Bench Claude say when it finished?"})
-	h.sup.OnVoiceEvent(voice.EventTranscript{Dir: voice.DirOut, Text: "Checking."})
-	h.sup.OnVoiceEvent(voice.EventTurnComplete{})
-	h.sup.OnVoiceEvent(voice.EventTranscript{Dir: voice.DirIn, Text: "checking"})
-	waitFor(t, func() bool { return h.log.count("supervisor.relay_by_daemon") == 1 }, "the daemon's relay")
-	h.sup.replies.Wait()
-	ev := h.log.ofType("supervisor.relay_by_daemon")
-	if text, _ := payload(ev[0])["text"].(string); !strings.Contains(text, "What did Bench Claude say when it finished?") {
-		t.Errorf("relayed %q, want the question in it", text)
 	}
 }
