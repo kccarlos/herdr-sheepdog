@@ -403,6 +403,9 @@ func (s *Session) doPush(ctx context.Context, item pushItem) {
 	if id, _ := item.tags[ctxcap.TagCallID].(string); id != "" {
 		delete(s.owedReplies, id) // the reply the voice was told follows
 	}
+	if !turnComplete {
+		s.keepSilentLocked(item) // handle.go: re-sent after a resume
+	}
 	var unheard []voice.UnheardPush
 	if turnComplete {
 		sentAt := s.now()

@@ -42,10 +42,13 @@ func (s *Session) handleMessage(msg *genai.LiveServerMessage, gen int) {
 		// Only the live connection's handle, and none while a refresh
 		// is starting a fresh session (refresh.go): the old
 		// connection's late update would make it resume after all.
-		if u.Resumable && u.NewHandle != "" && gen == s.connGen && !s.refreshing {
+		accepted := u.Resumable && u.NewHandle != "" && gen == s.connGen && !s.refreshing
+		if accepted {
 			s.handle = u.NewHandle
 		}
+		p := s.noteHandleLocked(u.NewHandle, u.Resumable, accepted)
 		s.mu.Unlock()
+		s.log.Log(logSource, "voice.handle_update", "", p)
 	case msg.ToolCall != nil:
 		for _, fc := range msg.ToolCall.FunctionCalls {
 			if fc != nil {
@@ -59,6 +62,9 @@ func (s *Session) handleMessage(msg *genai.LiveServerMessage, gen int) {
 	}
 	if msg.UsageMetadata != nil {
 		u := msg.UsageMetadata
+		s.mu.Lock()
+		s.lastPromptTokens = u.PromptTokenCount
+		s.mu.Unlock()
 		s.log.Log(logSource, "voice.usage", "", map[string]any{
 			"prompt": u.PromptTokenCount, "response": u.ResponseTokenCount, "total": u.TotalTokenCount,
 		})
