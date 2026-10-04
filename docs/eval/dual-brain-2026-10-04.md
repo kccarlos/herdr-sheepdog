@@ -86,6 +86,18 @@ instruct 2/6 → 5/6, names 2/6 → 4/6, approve 7/12 → 9/12, status 5/9 →
 7/9; language 4/6 → 3/6, reconnect 4/6 → 3/6, stop 4/6 → 3/6, deep-ask
 5/6 → 4/6, collision 1/6 both.
 
+**Attribution caveat.** The branch includes #117 (`brain.reply_wait_s
+= 30`: the answer is the call's own result); main runs 2 s. Under that
+night's slow brain almost every main answer became a user-role push,
+the path that produces self-relay, "On it." and lost answers, which is
+part of why main fell to 51 % here (78 % in its own earlier run). No
+main + #117 arm was run, and every ablation step already contains #117,
+so #117's share of the gain is not separated; its own A/B (67 % → 70 %,
+self-relay 7 → 0) is the lower bound for that share. Latency footnote:
+the branch's p90 includes turns where the relay claimed an earlier
+unclaimed CEO line (`waited_ms` ≈ 22 s in deep-ask r1), which inflates
+the branch's own number.
+
 What the branch fixed, by mechanism:
 - **No daemon delivery failures (7 → 0).** On main a slow brain reply
   (> 2 s) became a user-role push, which the voice relayed back ("Shall
@@ -276,6 +288,26 @@ run, the two sequential runs, the prompt v1–v3 interleaved runs), tier 1
 Live and TTS; the Vertex brains ≈ $1 more), Live probes $0.3. Claude
 subscription: weekly allowance 17 % → 7 % over the night (tier-3 Haiku
 workers and this agent), session meter never below 38 %.
+
+## Reproduce
+
+```sh
+# scenario dir: testdata/bench/scenarios/*.json plus the campaign-E echo variants,
+# minus failover-brain-503 and slowness-brain-9s (their proxy needs DeepSeek)
+# interleaved: one port per arm, --parallel 1, both started together (20 s apart)
+MAIN/sheepdog   bench run --tier 2 --brain-provider vertex --brain-model gemini-3.8-flash \
+  --env-file .env --scenarios 'OUT/t2scen/*.json' --repeat 3 --ports 7790 --parallel 1 --out OUT/main &
+BRANCH/sheepdog bench run --tier 2 --brain-provider vertex --brain-model gemini-3.8-flash \
+  --env-file .env --scenarios 'OUT/t2scen/*.json' --repeat 3 --ports 7791 --parallel 1 --out OUT/branch &
+# ablation pairs: the same with --filter <the 17 ids above>; tier 1:
+sheepdog eval sim --live --provider vertex --model gemini-3.8-flash --repeat 5 --parallel 3 --env-file .env --out OUT/t1
+# tier 3 (ports 7793/7794, DISABLE_AUTO_UPDATE=true for oh-my-zsh):
+sheepdog bench run --tier 3 [--voice] --files 'OUT/t3scen/*.json' --ports 7793 --parallel 1 --root OUT/t3root --env-file .env --out OUT/t3
+scripts/bench-ceo-shape.py OUT/main OUT/branch --exclude-echo   # the CEO's report shape, per arm
+```
+
+The main arm is origin/main + the rubric commit + the bench brain-flag
+commit (`eval/db-main-arm`, local worktree `sheepdog-db-main`).
 
 ## How to read the numbers
 
