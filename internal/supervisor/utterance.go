@@ -833,51 +833,19 @@ func (s *Supervisor) hasListener() bool {
 	return true
 }
 
-// The echo guard. Invariant it protects (docs/iteration-2.md rule 5):
-// an utterance is the shepherd's own words — the brain and the one rail
-// both stand on recorded shepherd input — and the assistant's speech
-// coming back through the phone's microphone is not. On 2026-09-24
-// 18:23:50 the iOS speaker played "No change, all four are idle…", the
-// mic picked it up, Gemini interrupted itself and transcribed "new
-// change" 1.7 s after its last output transcript, and the daemon relayed
-// that to the brain as the shepherd's question. The architecture cannot
-// make this unrepresentable from here: the client may have no echo
-// cancellation and the voice model reports only text, so text and
-// timing are all the daemon has to tell the two apart.
-//
-// On speakerphone it is worse (docs/bench/tier2-2026-10-03.md #3): with
-// the bot's audio leaking back at −15 to −18 dB the voice model
-// transcribed its own speech, often glued and without spaces ("Sent
-// it.I'mwaitingI'll let you…"), sometimes after the shepherd's own words
-// in the same input, and the daemon relayed it. So each voice input of a
-// claimed run is checked on its own:
-//
-//   - only an input that began while the voice was speaking (or the
-//     client still playing it) or within echoWindow of the end of its
-//     playback can be an echo: its saidBefore is the voice's speech of
-//     that window, the current run and the runs that ended within it
-//     (the echoed audio trails the transcript). An input that began
-//     before is never touched — a barge-in over the voice keeps working
-//     as long as its words differ from what was played;
-//   - a bare fast-path phrase (yes/no/stop, an option pick, the reset
-//     phrases) is never an echo, even when it repeats the assistant;
-//   - the input is an echo when its words line up with a run of what was
-//     played (echoOf: word by word, 80 % covered, one short word
-//     forgiven — "new" heard for "no"), or when, compared letter by
-//     letter with spaces and punctuation gone (so glued words and
-//     Chinese compare the same way), stretches of what was played cover
-//     at least echoCoverMin of it (echoCover);
-//   - an input that opens or ends with a long stretch of what was played
-//     (echoGlueMin) and has other words too keeps only those words: the
-//     echo is cut off, the shepherd's part is relayed.
-//
-// A whole echo is logged (supervisor.echo_dropped, both texts), never
-// relayed, and leaves the input ledger, so it can neither authorise an
-// answer to a prompt nor be glued onto the next utterance; the call gets
-// a silent result. It also leaves the brain's window (Brain.Echo): the
-// words reached the brain as the CEO's before the guard saw them, and
-// left there a later turn would read `CEO said: "new change"`. An
-// input with the echo cut off is logged with partial and the words kept.
+// Possible echo. On 2026-09-24 18:23:50 the iOS speaker played "No
+// change, all four are idle…", the mic picked it up and Gemini
+// transcribed "new change" as the shepherd's words; on speakerphone the
+// bot's own speech came back often (docs/bench/tier2-2026-10-03.md #3).
+// The client may have no echo cancellation and the voice model reports
+// only text, so the daemon cannot tell the two apart for sure, and it no
+// longer tries to decide (dual-brain, #122): an input that began while
+// the voice was speaking (or the client still playing it) or within
+// echoWindow of the end of its playback carries what was played then
+// (saidBefore), and handleUtterance hands both to the brain as a fact
+// (echoNote, logged as supervisor.echo_possible). The brain judges
+// whether it was the CEO; words that were the line coming back
+// authorise nothing.
 
 // echoWindow is how long after the voice's last output a new input may
 // still be its echo. The logged pair was 1.7 s apart: the transcript of

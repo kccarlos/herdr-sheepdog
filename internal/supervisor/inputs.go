@@ -36,11 +36,9 @@ import (
 //     reach the brain as the shepherd's words, since the words are the
 //     recorded ones, but a call with nothing recorded behind it must
 //     still do nothing — it is what the rail stands on. "Spoken" means
-//     sent to the voice model (EventPush), not queued (markPushed). Two
-//     exceptions are logged: a call that repeats the last spoken push
-//     stays refused as supervisor.self_relay, and one that repeats the
-//     shepherd's own unclaimed words of the last 10 s is accepted on
-//     them as supervisor.relay_rescued (rescueInput);
+//     sent to the voice model (EventPush), not queued (markPushed). The
+//     ignored call gets a silent fact back (the CEO said nothing new,
+//     with their last words), so the fast brain knows nothing was done;
 //   - answering a worker's approval prompt (the brain's send_keys, the
 //     bare-answer fast path, a tap) needs an input that arrived after the
 //     prompt appeared and within supervisor.authorise_window_s, whose own
