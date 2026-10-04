@@ -19,9 +19,11 @@ Setup: `cmd/livecanary` (README there), Vertex `us-central1`,
 / target 4 000, handle without `transparent`, transcription on, one
 non-blocking tool). Eight spoken facts, then the arm, then one probe question
 per fact, graded by keywords. Raw JSONL: `live-resume-context-results/`.
-Estimated Vertex spend for everything on this page: about $3 (the canary
-runs are cents each; the 9-minute GoAway runs and the 5-minute mic run the
-most).
+Spend: about 35 canary runs and 3 bench runs, about 150 minutes of open Live
+sessions in all (most of it idle or text). Not read back from the Vertex
+billing console; estimated at roughly $2 to $9 from the bench's own meter
+(about $0.06 per audio minute, an upper bound for sessions that mostly
+wait), under the $10 cap by that bound.
 
 ## Per-arm results
 
@@ -46,18 +48,24 @@ probe turn, so +30 to +40 is "unchanged").
 | compress, no resume | 1/9 | 4279 | same loss in one connection: by design (sliding window) |
 | chain, idle, gen-1 handle reused 4x, 12.7k tokens | 8/8 | 12731 to 12760 | no turn between resumes: no new handle, the same gen-1 handle |
 | chain, idle, fill 0 | 8/8 | 1168 to 1201 | same |
-| **chain, a turn after each resume (3 to 4 resumes)** | **0/8** | **5191 then 167, 166 (and 1192 then 215, 173; 1220 then 168, 170; ...)** | **7 of 7 runs: step 1 fine, step 2 (handle from a resumed connection) falls to the system prompt** |
+| **chain, a turn after each resume (3 to 4 resumes)** | **0/8** | **5191 then 167, 166 (and 1192 then 215, 173; 1220 then 168, 170; ...)** | **9 of 9 runs: step 1 fine, step 2 (handle from a resumed connection) falls to the system prompt** |
 | chain, the same with `-transparent` | 0/8 | 1220 then 168 | no difference |
 | chain, 45 s idle before the next resume | 0/8 | 1206 then 168 | no difference |
+| **chain, 7 turns (about 70 s) on the resumed connection before the next resume (2 runs)** | **0/8 both** | 1169 then 1210 then 1444 then 364 (1164, 1203, 1428, 355) | the handle issued after 7 turns restores 364 tokens: the system prompt (~145) plus the ~210 tokens that connection added itself; a later handle does not recover the inherited context |
 | **chain with one new fact per connection (3 resumes, 2 runs)** | **1/10 both** | 1178 then 1219 then 170 | only the fact told on the last connection survives; the original eight and the fact told on connection 2 are gone |
 
-Confirmation runs: the suspect arm (chain with a turn) was run 7 times
+Confirmation runs: the suspect arm (chain with a turn) was run 9 times
 (different fills, `-transparent`, a wait, with and without graded probes)
-and failed 7 of 7; `compress` was run twice (resume and no resume) with the
+and failed 9 of 9; `compress` was run twice (resume and no resume) with the
 same loss. Two harness bugs were found and fixed on the way (a stale
 turn-completion misaligned probe answers in longmic and interrupt; the
 interrupt arm's system prompt let the model answer "I don't know" to the
 story request); those runs were discarded and rerun.
+
+The per-modality numbers (the new `voice.usage` details, #134) show both
+sides collapse at the second-generation resume, TEXT 952 to 144 and AUDIO
+4239 to 23 in one chain run (the first resume: TEXT 952, AUDIO 4239 kept),
+which rules out "audio is counted differently after a resume".
 
 ### The mechanism, in the canary
 
@@ -119,7 +127,7 @@ refactor facts (no `to_supervisor` call after the resume), and
 `voice.resume_context` logged 1745 to 2446, 1629 to 2322, 1771 to 2459
 (AUDIO 330 to 608, TEXT 1415 to 1838): the first resume of the session, so no
 loss, as the canary predicts. A scenario that resumes **twice** before asking
-would exercise the loss; the bench has `behavior.resume` for one resume per
+(a turn on the resumed connection in between) would exercise the loss; the bench has `behavior.resume` for one resume per
 call (`after_turn`), so extending it to a list is the follow-up if the CEO
 wants it. Report and events: `live-resume-context-results/bench-resume-recall/`.
 
@@ -134,11 +142,14 @@ wants it. Report and events: `live-resume-context-results/bench-resume-recall/`.
 | Big context alone, long answers, natural GoAway timing | not it (13.5k, 8.6k of model audio, 9.5k at a natural GoAway: first resumes, lossless) |
 | **Resuming a resumed session (generation 2 and up)** | **it: 7 of 7 canary runs; 0 of 7 first resumes and 12 of 23 later resumes in the daemon log lose tokens** |
 
-Open: the canary loses everything older than the last connection; the daemon
-logs show partial loss. The partial figures follow from the same mechanism
-(the last connection's own content survives), but the log has no recall
-data, so whether the fast brain actually answered wrongly after those resumes
-is unproven. The new events (#134) and the scorecard line measure it going
+Open: the canary loses everything older than the last connection, the daemon
+logs show partial loss. The gap is the size of the survivor: in the canary the
+resumed connection added about 200 tokens (one to seven small turns), in the
+daemon a connection lives about 9 minutes with dozens of turns and adds
+thousands, and exactly that survives (the 7-turn canary run shows the same
+rule at a smaller scale: 364 tokens = system prompt + the connection's own
+content). The log has no recall data, so whether the fast brain actually
+answered wrongly after those resumes is unproven. The new events (#134) and the scorecard line measure it going
 forward.
 
 ## Options for the CEO (none implemented)
@@ -154,14 +165,17 @@ forward.
    (the daemon knows the generation), send the recap and briefings as silent
    context. Same re-seed quality as 1, but only when needed; needs the
    generation bookkeeping.
-3. **Extend the session life instead of resuming.** Nothing in the data
+3. **Wait for a later handle.** Not an option: a handle issued after seven
+   turns on the resumed connection still restores only that connection's own
+   content.
+4. **Extend the session life instead of resuming.** Nothing in the data
    shows the 9-minute GoAway can be moved; the only lever is the compression
    trigger (it does not postpone the GoAway). Not a fix.
-4. **Leave it, rely on the slow brain.** The slow brain answers whatever the
+5. **Leave it, rely on the slow brain.** The slow brain answers whatever the
    fast brain cannot (the fast brain hands off when it has no facts), at the
    price of latency and the stale or invented answers seen in the phone test.
    Cheapest; the loss stays invisible to the CEO.
-5. **Report it to Google** (a handle issued after a resume should carry the
+6. **Report it to Google** (a handle issued after a resume should carry the
    whole context) and keep 1 or 2 as the workaround meanwhile. The canary is
    the reproducer: `go run ./cmd/livecanary -arm chain -chain-fill 0 -chain-talk`.
 

@@ -52,6 +52,7 @@ var (
 	chainFill   = flag.Int("chain-fill", 11000, "chain: grow the context to about this many prompt tokens first (0 = just the facts)")
 	chainProbe  = flag.Bool("chain-probe", false, "chain: with -chain-talk, the turn after each resume asks a fact question (graded) instead of small talk")
 	chainWait   = flag.Duration("chain-wait", 0, "chain: idle time after the turn before the next resume")
+	chainTurns  = flag.Int("chain-turns", 0, "chain: with -chain-talk, this many extra small-talk turns (about 10 s apart) on each resumed connection before the next resume")
 	chainNew    = flag.Bool("chain-newfact", false, "chain: tell one new fact on every resumed connection and ask about all of them at the end (which connection's content does a resume restore?)")
 	goawayMax   = flag.Duration("goaway-max", 14*time.Minute, "goaway: longest wait for the server's GoAway")
 )
@@ -141,7 +142,7 @@ func (st *state) readLoop(sess *genai.Session, conn int) {
 	for {
 		msg, err := sess.Receive()
 		if err != nil {
-			logj("recv_end", map[string]any{"conn": conn, "err": err.Error()})
+			logj("recv_end", map[string]any{"conn": conn, "err": scrubErr(err)})
 			return
 		}
 		st.handle1(msg, conn)
@@ -241,6 +242,16 @@ func (st *state) handle1(msg *genai.LiveServerMessage, conn int) {
 	}
 }
 
+// scrubErr keeps the last part of an error ("use of closed network
+// connection"), not the dial string with the machine's addresses in it.
+func scrubErr(err error) string {
+	msg := err.Error()
+	if i := strings.LastIndex(msg, ": "); i >= 0 {
+		return msg[i+2:]
+	}
+	return msg
+}
+
 func pcm(name string) ([]byte, error) {
 	b, err := audioFS.ReadFile("audio/" + name + ".wav")
 	if err != nil {
@@ -317,13 +328,13 @@ func (st *state) waitQuiet(quiet, max time.Duration) {
 	}
 }
 
-func (st *state) waitTurn(d time.Duration) bool {
+func (st *state) waitTurn(d time.Duration) {
 	select {
 	case <-st.turnDone:
-		return true
+		return
 	case <-time.After(d):
 		logj("turn_timeout", nil)
-		return false
+		return
 	}
 }
 
@@ -496,7 +507,7 @@ func main() {
 			fatal(err.Error())
 		}
 		outFile = f
-		defer f.Close()
+		defer func() { _ = f.Close() }()
 	}
 	client, err := genai.NewClient(context.Background(), &genai.ClientConfig{
 		Backend: genai.BackendVertexAI, APIKey: key, Project: project, Location: *location,
@@ -530,9 +541,9 @@ func main() {
 		if *armFlag == "goaway" {
 			// Like the daemon: the new connection first, then the old one goes.
 			r.connect(handle)
-			old.Close()
+			_ = old.Close()
 		} else {
-			old.Close()
+			_ = old.Close()
 			time.Sleep(2 * time.Second)
 			r.connect(handle)
 		}
@@ -581,7 +592,7 @@ func main() {
 	}
 	sum["missed"] = missed
 	logj("summary", sum)
-	r.sess.Close()
+	_ = r.sess.Close()
 	logj("done", nil)
 }
 
@@ -845,7 +856,7 @@ func (r *runner) runChain() []fact {
 		st.wantAfter, st.afterFirst = true, nil
 		st.mu.Unlock()
 		old := r.sess
-		old.Close()
+		_ = old.Close()
 		time.Sleep(2 * time.Second)
 		r.connect(handle)
 		time.Sleep(12 * time.Second)
@@ -864,6 +875,10 @@ func (r *runner) runChain() []fact {
 				r.smallTalk()
 			}
 			time.Sleep(3 * time.Second)
+		}
+		for k := 0; k < *chainTurns; k++ {
+			time.Sleep(8 * time.Second)
+			r.smallTalk()
 		}
 		time.Sleep(*chainWait)
 		st.mu.Lock()

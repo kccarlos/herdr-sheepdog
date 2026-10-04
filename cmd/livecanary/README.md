@@ -54,7 +54,7 @@ plus the arm's own facts.
 | `compress` | text filler until the context crosses the 16k trigger and compression visibly shrinks it, then one late fact | parking spot |
 | `fill` | text filler to about 12k prompt tokens, below the trigger | parking spot |
 | `long` | four complete long spoken stories (the model's own audio output dominates the context) | none |
-| `chain` | resumes several times in a row, each from the handle the previous (resumed) connection issued; with `-chain-newfact` a new fact is told on every connection; `-chain-fill N`, `-chain-talk`, `-chain-probe`, `-chain-wait`, `-chain-n` shape it. Without `-chain-talk` the connections stay idle and the one gen-1 handle is reused | per step facts with `-chain-newfact` |
+| `chain` | resumes several times in a row, each from the handle the previous (resumed) connection issued; with `-chain-newfact` a new fact is told on every connection; `-chain-fill N`, `-chain-talk`, `-chain-probe`, `-chain-wait`, `-chain-turns`, `-chain-n` shape it. Without `-chain-talk` the connections stay idle and the one gen-1 handle is reused | per step facts with `-chain-newfact` |
 | `tool` | two real tool round trips: the system instruction makes the model call `lookup`; a spoken fact is told between the first call and its result | umbrella, museum hours, bus 42 |
 | `interrupt` | three barge-ins: the user speaks a new fact over a long story | parking, dentist, gift |
 | `longmic` | five minutes of continuous microphone audio: ambient noise plus an unrelated spoken remark about every 45 s | none |
@@ -82,8 +82,8 @@ See the results note for the table. In short:
   (generation 2 and up) restores only what was said on that connection**:
   `chain -chain-talk` (and `-chain-newfact`) recall 0/8 spoken facts, the
   prompt falls to about 170 tokens (the system prompt), only a fact told
-  on the last connection survives. Reproduced 7 of 7 times, with and
-  without `-transparent`, with and without waiting. A healthy canary shows
+  on the last connection survives. Reproduced 9 of 9 times, with and
+  without `-transparent`, with a wait, with 7 turns on the resumed connection. A healthy canary shows
   `chain -chain-talk` recalling the facts; today it does not.
 - By design: silent context sent after the last handle is lost (the daemon
   re-sends it, #123) and compression drops the oldest content with or

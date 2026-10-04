@@ -1,4 +1,4 @@
-{"arm":"chain","backend":"vertex","date":"2026-10-04T19:11:24Z","kind":"start","location":"us-central1","model":"gemini-3.8-live","resume":true,"t":0.000092292,"transparent":false}
+{"arm":"chain","backend":"vertex","date":"2026-10-04T19:11:24Z","kind":"start","location":"us-central1","model":"gemini-3.8-live","resume":true,"t":9.2292e-05,"transparent":false}
 {"arm":"chain","conn":1,"kind":"connected","resumed_with":false,"t":0.50534475}
 {"arm":"chain","fact":"blue_key","kind":"fact_sent","t":4.676456375}
 {"arm":"chain","conn":1,"kind":"heard","t":4.77412325,"text":"Please remember this: the blue key is in drawer number seven."}
@@ -43,17 +43,17 @@
 {"arm":"chain","conn":1,"kind":"usage","prompt":1168,"prompt_by_modality":{"AUDIO":907,"TEXT":261},"response":27,"response_by_modality":{"AUDIO":25,"TEXT":2},"t":62.049041542,"thoughts":22,"total":1217}
 {"arm":"chain","conn":1,"kind":"turn_complete","said":"Okay.","t":62.04922325}
 {"arm":"chain","conn":1,"handle":"8aca12a2","kind":"handle","prompt_at_issue":1168,"resumable":true,"t":62.070779875}
-{"arm":"chain","conn":1,"err":"read tcp [2601:644:8101:6260:65a3:652a:fc07:5d14]:60425-\u003e[2001:4860:4842:400::]:443: use of closed network connection","kind":"recv_end","t":65.050817167}
+{"arm":"chain","conn":1,"err":"use of closed network connection","kind":"recv_end","t":65.050817167}
 {"arm":"chain","conn":2,"kind":"connected","resumed_with":true,"t":67.545372708}
 {"arm":"chain","before_prompt":1168,"kind":"chain_step","same_handle_next":true,"step":1,"t":79.546563667}
-{"arm":"chain","conn":2,"err":"read tcp [2601:644:8101:6260:65a3:652a:fc07:5d14]:60448-\u003e[2001:4860:4842:400::]:443: use of closed network connection","kind":"recv_end","t":79.547189708}
+{"arm":"chain","conn":2,"err":"use of closed network connection","kind":"recv_end","t":79.547189708}
 {"arm":"chain","conn":3,"kind":"connected","resumed_with":true,"t":81.99813775}
 {"arm":"chain","before_prompt":1168,"kind":"chain_step","same_handle_next":true,"step":2,"t":93.999380917}
-{"arm":"chain","conn":3,"err":"read tcp [2601:644:8101:6260:65a3:652a:fc07:5d14]:60454-\u003e[2001:4860:4842:400::]:443: use of closed network connection","kind":"recv_end","t":94.000079292}
+{"arm":"chain","conn":3,"err":"use of closed network connection","kind":"recv_end","t":94.000079292}
 {"arm":"chain","conn":4,"kind":"connected","resumed_with":true,"t":96.577550375}
 {"arm":"chain","before_prompt":1168,"kind":"chain_step","same_handle_next":true,"step":3,"t":108.578814875}
 {"arm":"chain","handle_known":true,"handles_seen":9,"kind":"before_resume","prompt":1168,"prompt_by_modality":{"AUDIO":907,"TEXT":261},"t":108.579000667}
-{"arm":"chain","conn":4,"err":"read tcp [2601:644:8101:6260:65a3:652a:fc07:5d14]:60457-\u003e[2001:4860:4842:400::]:443: use of closed network connection","kind":"recv_end","t":108.579268833}
+{"arm":"chain","conn":4,"err":"use of closed network connection","kind":"recv_end","t":108.579268833}
 {"arm":"chain","conn":5,"kind":"connected","resumed_with":true,"t":110.877653625}
 {"arm":"chain","fact":"blue_key","kind":"probe_sent","q":"Where is the blue key?","t":114.380220875}
 {"arm":"chain","conn":5,"kind":"usage","prompt":1201,"prompt_by_modality":{"AUDIO":932,"TEXT":269},"response":81,"response_by_modality":{"AUDIO":72,"TEXT":9},"t":117.481123167,"thoughts":51,"total":1333}
@@ -95,5 +95,5 @@
 {"arm":"chain","conn":5,"kind":"turn_complete","said":"The spare charger is in the green backpack.","t":157.717903625}
 {"arm":"chain","conn":5,"handle":"3f4c5da6","kind":"handle","prompt_at_issue":1811,"resumable":true,"t":157.719197542}
 {"arm":"chain","fact":"charger","hit":true,"kind":"probe_result","said":"The spare charger is in the green backpack.","t":158.918471792}
-{"arm":"chain","backend":"vertex","date":"2026-10-04","handles":9,"interrupted":0,"kind":"summary","location":"us-central1","missed":null,"model":"gemini-3.8-live","prompt_after_by_modality":{"AUDIO":932,"TEXT":269},"prompt_after_first":1201,"prompt_before":1168,"prompt_before_by_modality":{"AUDIO":907,"TEXT":261},"prompt_ratio":1.0282534246575343,"recall":"8/8","recall_spoken_facts":"8/8","results":[{"name":"blue_key","q":"Where is the blue key?","said":"The blue key is in drawer number seven.","hit":true},{"name":"cat","q":"What is my sister's cat called?","said":"Your sister's cat is called Pickle.","hit":true},{"name":"dana","q":"When is the meeting with Dana?","said":"The meeting with Dana is on Thursday at 3.","hit":true},{"name":"server_code","q":"What is the server room code?","said":"The server room code is 4492.","hit":true},{"name":"bike","q":"What is wrong with the red bike?","said":"The red bike has a flat rear tire.","hit":true},{"name":"wifi","q":"What is the Wi-Fi password hint?","said":"The Wi-Fi password hint is mango river.","hit":true},{"name":"library","q":"When is the library book due?","said":"The library book is due on the 12th.","hit":true},{"name":"charger","q":"Where is the spare charger?","said":"The spare charger is in the green backpack.","hit":true}],"resumed":true,"t":160.91981825,"tool_calls":0,"turns":17}
+{"arm":"chain","backend":"vertex","date":"2026-10-04","handles":9,"interrupted":0,"kind":"summary","location":"us-central1","missed":null,"model":"gemini-3.8-live","prompt_after_by_modality":{"AUDIO":932,"TEXT":269},"prompt_after_first":1201,"prompt_before":1168,"prompt_before_by_modality":{"AUDIO":907,"TEXT":261},"prompt_ratio":1.0282534246575343,"recall":"8/8","recall_spoken_facts":"8/8","results":[{"hit":true,"name":"blue_key","q":"Where is the blue key?","said":"The blue key is in drawer number seven."},{"hit":true,"name":"cat","q":"What is my sister's cat called?","said":"Your sister's cat is called Pickle."},{"hit":true,"name":"dana","q":"When is the meeting with Dana?","said":"The meeting with Dana is on Thursday at 3."},{"hit":true,"name":"server_code","q":"What is the server room code?","said":"The server room code is 4492."},{"hit":true,"name":"bike","q":"What is wrong with the red bike?","said":"The red bike has a flat rear tire."},{"hit":true,"name":"wifi","q":"What is the Wi-Fi password hint?","said":"The Wi-Fi password hint is mango river."},{"hit":true,"name":"library","q":"When is the library book due?","said":"The library book is due on the 12th."},{"hit":true,"name":"charger","q":"Where is the spare charger?","said":"The spare charger is in the green backpack."}],"resumed":true,"t":160.91981825,"tool_calls":0,"turns":17}
 {"arm":"chain","kind":"done","t":160.92077275}
