@@ -107,7 +107,15 @@ func TestWatchdogIncidents(t *testing.T) {
 		t.Fatalf("held without a listener: %v", got)
 	}
 	listener = true
-	if got := tick(5 * time.Second); len(got) != 1 || got[0] != "daemon.heartbeat_missed push_queue 2 push(es) queued, oldest 105s, listener attached" {
+	// The phone comes back (2026-10-04 04:40:51): the wait counts from
+	// the attach, so a push queued while no one listened is not stuck.
+	if got := tick(5 * time.Second); len(got) != 0 {
+		t.Fatalf("a push held for a listener was reported stuck at the attach: %v", got)
+	}
+	if got := tick(80 * time.Second); len(got) != 0 {
+		t.Fatalf("within pushStall of the attach: %v", got)
+	}
+	if got := tick(15 * time.Second); len(got) != 1 || got[0] != "daemon.heartbeat_missed push_queue 2 push(es) queued, oldest 200s, listener attached for 95s" {
 		t.Fatalf("push miss = %v", got)
 	}
 	queued = 0
