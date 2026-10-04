@@ -56,7 +56,7 @@ const (
 	endWorkerPrefix = "<<<END_WORKER_OUTPUT"
 )
 
-// read_screen's sources (docs/dive-deep.md WP8a).
+// read_screen's sources (docs/history/dive-deep.md WP8a).
 const (
 	// SourceScreen reads the pane: what the agent is doing now.
 	SourceScreen = "screen"

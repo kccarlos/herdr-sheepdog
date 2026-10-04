@@ -1,6 +1,6 @@
 // Replays real GPT-Live /ws audio arrival timelines (recorded with
 // `sheepdog audio-e2e --audio-timeline` against a live scratch daemon,
-// docs/audio-e2e-results.md) through the actual Player state machine to
+// docs/history/audio-e2e-results.md) through the actual Player state machine to
 // measure the adaptive jitter buffer against a naive fixed buffer on real
 // bursty data, not a synthetic approximation of it.
 import { test } from 'node:test';
@@ -128,7 +128,7 @@ test('GPT-Live policy plus time-stretch: underruns before vs after on the record
 });
 
 // After the input-pacing fix (gptlive keepAlive pays the silence debt at
-// real time, docs/audio-e2e-results.md 2026-09-25) GPT-Live delivers at
+// real time, docs/history/audio-e2e-results.md 2026-09-25) GPT-Live delivers at
 // ≈1.0x real time: the recorded 25 s reply plays through GPT-Live's
 // 400 ms start buffer with no more underruns than the old 1200 ms buffer
 // — one, at the same spot under both: a pause the model made mid-count

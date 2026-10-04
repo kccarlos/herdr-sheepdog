@@ -7,7 +7,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
 
-// Session refresh (docs/bench-2026-10-03.md #9). A Gemini Live session
+// Session refresh (docs/history/bench-2026-10-03.md #9). A Gemini Live session
 // resumed again and again degrades: in run 1 (2026-10-02), an 18-hour
 // session resumed ~120 times voiced 5 % of push bodies and relayed 17 of
 // 17 Chinese push questions back through to_supervisor, while run 2's

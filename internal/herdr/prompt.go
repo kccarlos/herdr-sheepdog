@@ -217,7 +217,7 @@ func (p Prompt) Phrase() string {
 func (p Prompt) Summary(alias string) string { return p.SummaryIn(alias, false) }
 
 // SummaryIn is Summary in Chinese when zh is set: the language of the
-// shepherd's last words (docs/eval-campaign-2026-10-03.md H4). A
+// shepherd's last words (docs/eval/eval-campaign-2026-10-03.md H4). A
 // question that is itself Chinese is quoted as it is; any other question
 // is not: the Chinese line only names the agent and that it needs a
 // decision, since quoting "Do you want to proceed?" verbatim put an
@@ -521,7 +521,7 @@ func tailLines(text string, n int) []string {
 // leading plain words ("go test" of "go test -race ./..."), up to the
 // first flag, path, quote, operator or assignment and at most
 // promptCommandWords of them. The raw rest is screen syntax: spoken, it
-// came out as "-race./...." (docs/eval-campaign-2026-10-03.md H3). The
+// came out as "-race./...." (docs/eval/eval-campaign-2026-10-03.md H3). The
 // full command stays on the pending action for the brain and the pages.
 func spokenCommand(cmd string) string {
 	var out []string

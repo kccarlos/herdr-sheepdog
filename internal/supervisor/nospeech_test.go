@@ -8,7 +8,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
 
-// 2026-10-02 23:55:05 (docs/bench-2026-10-03.md #11): the shepherd said
+// 2026-10-02 23:55:05 (docs/history/bench-2026-10-03.md #11): the shepherd said
 // "结果。" and Gemini's only output was "<no speech detected>", in two
 // fragments, with 0.2 ms of audio. That is no answer: the daemon relays
 // the words. A real answer still keeps them from being relayed, and so

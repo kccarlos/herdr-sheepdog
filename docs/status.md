@@ -83,11 +83,11 @@ What is in:
   the brain on Gemini and DeepSeek; investigations with real Codex and
   Claude CLIs; headset sessions on both voice providers; the audio e2e
   harness and the GPT-Live pacing run
-  ([`audio-e2e-results.md`](audio-e2e-results.md)); Vertex Live and the
+  ([`audio-e2e-results.md`](history/audio-e2e-results.md)); Vertex Live and the
   Vertex brain with `voice-test`, `brain-test` and a scratch daemon; the
   APNs key against both APNs hosts.
 - **Live eval campaign, 2026-10-03** (simulated CEO in text, real
-  brain, mock herdr; [`eval-campaign-2026-10-03.md`](eval-campaign-2026-10-03.md)):
+  brain, mock herdr; [`eval-campaign-2026-10-03.md`](eval/eval-campaign-2026-10-03.md)):
   26 scenarios x 5 per brain. **Run C**, after the H1-H7 fixes: DeepSeek
   `deepseek-flash` **87 %** pass, Vertex `gemini-3.8-flash` **73 %**
   (Vertex provider latency, 504s, costs most of its failures). It
@@ -99,7 +99,7 @@ What is in:
   worlds in tier 1: the voice layer is the biggest remaining loss. Tier 3
   (real herdr workers, #105) is pending.
 - **Unit / eval only, not re-run on the phone:** every bench fix
-  ([`bench-2026-10-03.md`](bench-2026-10-03.md)), the voice session
+  ([`bench-2026-10-03.md`](history/bench-2026-10-03.md)), the voice session
   refresh and unheard-push handling, current-focus sync, the agent window API, the `/ws` handshake against the
   iOS 0.1.1 client, spoken agent names, brain failover.
 - **Fake model / mock herdr only:** most supervisor edge cases
@@ -120,7 +120,7 @@ What is in:
 ## Open
 
 - **Bench backlog:** every item of
-  [`bench-2026-10-03.md`](bench-2026-10-03.md) is fixed; none has been
+  [`bench-2026-10-03.md`](history/bench-2026-10-03.md) is fixed; none has been
   re-checked live with a real worker and the phone yet. That re-run is the
   next acceptance step.
 - **Tier-2 bench findings:** the failures named in
@@ -128,7 +128,7 @@ What is in:
   answering for the brain, deferrals read as declines, echo of the bot's
   own voice, cut and resumed pushes, markers read aloud) are the next fix
   list; tier 3 is pending.
-- **Eval campaign leftovers** (run C, [`eval-campaign-2026-10-03.md`](eval-campaign-2026-10-03.md)):
+- **Eval campaign leftovers** (run C, [`eval-campaign-2026-10-03.md`](eval/eval-campaign-2026-10-03.md)):
   the run-C fixes (#99: H4 language, the duplicate block line, H7 fact
   source) are not re-measured; Vertex step latency (p90 8.4 s, up to 25 s)
   still causes fallbacks; failover has not been measured live (run

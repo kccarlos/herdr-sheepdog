@@ -161,7 +161,7 @@ type Request struct {
 	// utterance, "evt:<id>" for the worker event an announce is about.
 	Link string
 	// Facts, when set, is what the daemon knows now and the brain cannot
-	// see: about the event of an announce turn (docs/bench-2026-10-03.md
+	// see: about the event of an announce turn (docs/history/bench-2026-10-03.md
 	// #15b), or, on an utterance turn, what the CEO had heard when they
 	// began speaking (Heard): called when the turn starts, after the turn lock — the
 	// template line may have gone out while the turn was queued — and
@@ -188,7 +188,7 @@ type EventFacts struct {
 	Prompt string
 	// Heard is set on an utterance turn: when the CEO began saying the
 	// words and the spoken lines the voice was given around then
-	// (docs/eval-campaign-2026-10-03.md H6: a "yes" to one question was
+	// (docs/eval/eval-campaign-2026-10-03.md H6: a "yes" to one question was
 	// taken as the answer to a question pushed after the CEO spoke).
 	Heard *HeardFacts
 	// Language is the language of the CEO's last words, LanguageChinese
@@ -359,7 +359,7 @@ const (
 	InvestigationSourceCLI = "cli"
 	// InvestigationSourceWorker is the worker itself: its own session,
 	// asked through a read-only fork that never writes into the session
-	// or touches the pane (docs/dive-deep.md §3).
+	// or touches the pane (docs/history/dive-deep.md §3).
 	InvestigationSourceWorker = "worker"
 )
 
@@ -461,7 +461,7 @@ type AgentInfo struct {
 }
 
 // SessionRead is what Host.ReadSession found at the end of a worker's
-// own session transcript (internal/workerlog, docs/dive-deep.md WP8a):
+// own session transcript (internal/workerlog, docs/history/dive-deep.md WP8a):
 // the worker's last message for a human, whole; the last instruction it
 // received; and what it did for that instruction. The executor caps and
 // wraps it as worker output.
@@ -497,7 +497,7 @@ type PendingPrompt struct {
 	// AskedAt is when the prompt was announced (the pending action's
 	// creation): the roster says how long it has waited, a fact the
 	// brain weighs when the CEO's words may or may not answer it
-	// (docs/bench-2026-10-03.md #8).
+	// (docs/history/bench-2026-10-03.md #8).
 	AskedAt time.Time
 	Options []Option
 	YesKeys []string
@@ -511,7 +511,7 @@ type Option struct {
 	// Meta marks an entry that is not an answer (Claude Code's "Type
 	// something." free-text box): the roster says so, so the brain knows
 	// it exists for a free-text answer and never offers it as a choice
-	// (docs/eval-campaign-2026-10-03.md H2).
+	// (docs/eval/eval-campaign-2026-10-03.md H2).
 	Meta bool
 }
 

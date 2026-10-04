@@ -118,7 +118,7 @@ func (h brainHost) ReadScreen(ctx context.Context, paneID string, lines int) (st
 }
 
 // ReadSession implements brain.Host: read_screen with source session
-// (docs/dive-deep.md WP8a). It reads the end of the worker's own session
+// (docs/history/dive-deep.md WP8a). It reads the end of the worker's own session
 // transcript through the reader the journal uses, with workerlog's Tail,
 // which leaves the journal's offset where it is. Like a screen read it
 // counts as dealing with the agent. The instruction loses the sign-off;
@@ -257,7 +257,7 @@ func (h brainHost) AnswerPrompt(ctx context.Context, paneID string, keys []strin
 	// A tool result: a fact for the brain, which phrases the reply.
 	// In the shepherd's language, like the fast path and taps: when the
 	// turn times out after sending, this result is what they hear
-	// (docs/eval-campaign-2026-10-03.md run C, H4).
+	// (docs/eval/eval-campaign-2026-10-03.md run C, H4).
 	alias, zh := s.sayOf(paneID), s.ceoChineseLocked()
 	res, sent := s.answerKeys(ctx, p, keys, keysLabel(p, keys), func(l string) string { return toldLine(alias, l, zh) }, "brain", nil)
 	if sent {
@@ -530,6 +530,6 @@ func earLine(rep brain.Reply) (spoken, overflow string) {
 
 // sentence makes sure s ends with terminal punctuation: prose's
 // CJK-aware terminators, so a Chinese line ending in 。 or ？ gets no
-// extra "." (docs/eval-campaign-2026-10-03.md H1: "。." / "？." seams,
+// extra "." (docs/eval/eval-campaign-2026-10-03.md H1: "。." / "？." seams,
 // the old check looked at the last byte and knew only ASCII).
 func sentence(s string) string { return prose.Terminate(s) }

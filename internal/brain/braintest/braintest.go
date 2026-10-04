@@ -846,7 +846,7 @@ func reflex(call Call) (*genai.GenerateContentResponse, error) {
 }
 
 // readCall is the reflex's read of an agent: its session record when the
-// question asks what it said, found or changed in detail (docs/dive-deep.md
+// question asks what it said, found or changed in detail (docs/history/dive-deep.md
 // WP8a), else its screen.
 func readCall(alias, question string) *genai.FunctionCall {
 	if reSessionWords.MatchString(question) {

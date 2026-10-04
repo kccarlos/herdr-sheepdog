@@ -11,7 +11,7 @@
 // transcript after the CEO's verbatim words, the context window is
 // assembled into model contents, and the loop calls the Model; every
 // function call it returns is executed (read_screen — the pane, or with
-// source session the worker's own session record, docs/dive-deep.md
+// source session the worker's own session record, docs/history/dive-deep.md
 // WP8a — run_cli, list_agents, recall; prompt, send_keys, interrupt,
 // promise, note, investigate)
 // through the Host, the responses are

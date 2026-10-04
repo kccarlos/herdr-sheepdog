@@ -7,7 +7,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 )
 
-// Lines about one worker event (docs/bench-2026-10-03.md #15). The
+// Lines about one worker event (docs/history/bench-2026-10-03.md #15). The
 // daemon remembers what it pushed to be spoken about each event (the
 // pushes carry the event id, links.go) for two things:
 //

@@ -6,7 +6,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
 
-// Unheard pushes on GPT-Live (voice/heard.go; docs/bench-2026-10-03.md
+// Unheard pushes on GPT-Live (voice/heard.go; docs/history/bench-2026-10-03.md
 // #17, #18, #19). GPT-Live voices an idle push (commentary.append) in its
 // own words, so a spoken push is judged by its key terms — the agents it
 // names, its numbers, its option labels — against the output transcript

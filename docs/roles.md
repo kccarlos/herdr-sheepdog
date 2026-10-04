@@ -271,7 +271,7 @@ Does:
     investigation deliveries at two sentences and thirty words
     (`prose.EarBrief`), a reply to the shepherd's own words at four
     sentences and sixty words (`prose.EarReply`, a runaway guard, not the
-    style rule; docs/dive-deep.md WP8b). Dash- and semicolon-joined
+    style rule; docs/history/dive-deep.md WP8b). Dash- and semicolon-joined
     clauses become sentences, PR numbers and hashes are scrubbed,
     the ask is appended last (with an ask, a question in the headline
     moves out), and whatever was cut is appended to `detail` (for an

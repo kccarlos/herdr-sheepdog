@@ -757,7 +757,7 @@ func (s *Supervisor) fastAnswer(ctx context.Context, in *shepherdInput, text str
 		// Minutes after the announcement a bare "yes" may be about
 		// something else the shepherd heard since: the brain gets the
 		// words, with the prompt and how long it has waited in its
-		// roster, and decides (docs/bench-2026-10-03.md #8).
+		// roster, and decides (docs/history/bench-2026-10-03.md #8).
 		s.log.Log(logSource, "supervisor.fast_path_skipped", p.PaneID, map[string]any{"reason": "prompt_old", "age_s": int(age.Seconds()), "text": text, "id": p.ID})
 		return voice.ToolResult{}, false
 	}

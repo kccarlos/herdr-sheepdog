@@ -1,6 +1,6 @@
 # Voice layer research: problems, how voice-agent frameworks solve them, and a WebRTC/Pion assessment
 
-> Superseded: recommendations 1–5 landed in #70 and #73 (see the "Done" column); later voice issues and their decided fixes are in [`../bench-2026-10-03.md`](../bench-2026-10-03.md).
+> Superseded: recommendations 1–5 landed in #70 and #73 (see the "Done" column); later voice issues and their decided fixes are in [`../history/bench-2026-10-03.md`](../history/bench-2026-10-03.md).
 
 Date: 2026-09-24. Research method: read-only over source code and official docs; no Gemini or OpenAI API calls were made.
 Upstream source clones (livekit-agents, pipecat, ten-framework) live in the research session's scratchpad; none went into the repo.

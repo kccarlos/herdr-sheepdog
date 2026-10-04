@@ -18,7 +18,7 @@ import (
 // read_screen with source session reads the worker's own transcript
 // through the journal's reader without moving its offset: the finish
 // after it still journals the worker's final message
-// (docs/dive-deep.md WP8a).
+// (docs/history/dive-deep.md WP8a).
 func TestReadSessionLeavesTheJournalFresh(t *testing.T) {
 	m := braintest.NewModel(
 		braintest.Step{Calls: []*genai.FunctionCall{braintest.FC(brain.ToolReadScreen, map[string]any{"agent": "auth", "source": "session"})}},

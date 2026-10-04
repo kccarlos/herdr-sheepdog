@@ -44,7 +44,7 @@ func TestRecapCutKeepsWhatWasHeard(t *testing.T) {
 	}
 }
 
-// TestRecapLeavesOutAcksAndSelfRelays is docs/bench-2026-10-03.md #9:
+// TestRecapLeavesOutAcksAndSelfRelays is docs/history/bench-2026-10-03.md #9:
 // the re-seed of a fresh session must not teach it the degraded
 // session's habits — the bare "On it." / "checking" / "好的" it said
 // while relaying a push's own question, its "<no speech detected>"

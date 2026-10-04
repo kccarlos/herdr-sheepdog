@@ -7,7 +7,7 @@ import (
 )
 
 // What the shepherd had heard when they began speaking
-// (docs/eval-campaign-2026-10-03.md H6). In j4-finish-finding the
+// (docs/eval/eval-campaign-2026-10-03.md H6). In j4-finish-finding the
 // shepherd said "Yes, let me know when it's done." to the brain's offer;
 // a second later a finish line asking "Want it to fix those two links?"
 // went out, and the brain took the yes as the answer to that newer

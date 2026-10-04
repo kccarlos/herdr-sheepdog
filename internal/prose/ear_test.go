@@ -6,7 +6,7 @@ import (
 )
 
 // baseline101 is the line the shepherd heard on 2026-09-24
-// (docs/scorecard-baseline-2026-09-24.md): 101 words, three em dashes,
+// (docs/history/scorecard-baseline-2026-09-24.md): 101 words, three em dashes,
 // two PR numbers.
 const baseline101Once = "Both landed: the Context tab is merged as daemon #49 — a new /debug tab beside Supervisor showing the brain's exact request and the voice model's context side by side, linked, with a scrubber and diffs against the previous step — and the first app refactor went in as #12, dead code out and duplicated state merged, behaviour unchanged with 245 tests green. It's asking whether to carry on with the next two in parallel — the daemon's dead-code and docs cleanup then removing the legacy tool surface, and the app's testable SessionCore — and I'd say yes."
 
@@ -128,7 +128,7 @@ func TestEarLine(t *testing.T) {
 	}
 }
 
-// One runaway cap for every spoken line (docs/bench-2026-10-03.md #13):
+// One runaway cap for every spoken line (docs/history/bench-2026-10-03.md #13):
 // about 45 s of speech, ~110 English words or ~200 hanzi. The old per-kind
 // caps (2 sentences / 30 words, 4 / 60) are gone by decision; the prompt,
 // not the code, decides how much to say.

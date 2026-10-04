@@ -100,7 +100,7 @@ func TestSpokenEnforcesD9(t *testing.T) {
 	}
 }
 
-// docs/eval-campaign-2026-10-03.md H3: the logged line "bench-codex asks
+// docs/eval/eval-campaign-2026-10-03.md H3: the logged line "bench-codex asks
 // to run go test -race./...." (j1-status-en and four other scenarios):
 // the orphan rule joined the "." that opens "./..." to the flag before
 // it. Punctuation left alone by a scrub is still joined back.

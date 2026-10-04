@@ -144,7 +144,7 @@ func (s *Supervisor) dropPendingFor(paneID, reason string, kinds ...state.Pendin
 // ExpirePending drops a send_instruction pending action whose TTL has
 // passed, logging pending.expired. Run calls this on every tick.
 //
-// An answer_prompt never expires on the clock (docs/bench-2026-10-03.md
+// An answer_prompt never expires on the clock (docs/history/bench-2026-10-03.md
 // #8): on 2026-10-02 bench-claude's "do you want to proceed" stayed on
 // screen from 23:55:47 to 00:03:15, but its pending expired at 23:57:48
 // after pending_ttl_s, and the phone card with it. It lives while the
@@ -397,7 +397,7 @@ func answerOptions(p state.PendingAction) []state.Option {
 
 // replacedLine is the spoken line for a question that displaces another
 // pane's: in the shepherd's language, like the summary it carries (no
-// "。." seam, docs/eval-campaign-2026-10-03.md H1/H4).
+// "。." seam, docs/eval/eval-campaign-2026-10-03.md H1/H4).
 func replacedLine(oldAlias, summary string, zh bool) string {
 	if zh {
 		return "先放下 " + oldAlias + " 之前的问题。现在 " + prose.Terminate(summary)

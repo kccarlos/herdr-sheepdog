@@ -264,7 +264,7 @@ func TestCaps(t *testing.T) {
 }
 
 // Tail reads the end of the transcript for the brain (read_screen
-// source "session", docs/dive-deep.md WP8a) and leaves every cursor
+// source "session", docs/history/dive-deep.md WP8a) and leaves every cursor
 // alone: the journal's next Read still sees everything as new.
 func TestTailDoesNotMoveTheJournalsCursor(t *testing.T) {
 	path, sess := copyFixture(t)

@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// docs/eval-campaign-2026-10-03.md H6: the utterance request states what
+// docs/eval/eval-campaign-2026-10-03.md H6: the utterance request states what
 // the CEO had not heard when they began speaking, and a line given to
 // the voice during the turn is reported before the next step.
 func TestHeardFactsInUtteranceRequest(t *testing.T) {

@@ -6,7 +6,7 @@ import (
 	"unicode"
 )
 
-// Heard detection (docs/bench-2026-10-03.md #17, #18, #19). A push that
+// Heard detection (docs/history/bench-2026-10-03.md #17, #18, #19). A push that
 // was sent is not a push that was heard. In run 2 (2026-10-03) a kept
 // promise went out at 00:48:38.760 just as the CEO spoke again
 // (transcript.in 0.5 s later): the model answered them and never voiced

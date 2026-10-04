@@ -79,7 +79,7 @@ func TestRegressionsCatchLoggedFailures(t *testing.T) {
 		"finish-line-needs-user-spoken": false,
 		"status-needs-you-first":        true,
 		"detail-question-not-no-change": true,
-		// docs/dive-deep.md WP8a/WP8b: the logged turns never read the
+		// docs/history/dive-deep.md WP8a/WP8b: the logged turns never read the
 		// worker's session.
 		"detail-what-are-the-seven-glitches": true,
 		"detail-what-exactly-did-it-say":     true,

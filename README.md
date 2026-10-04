@@ -100,10 +100,10 @@ Tailscale), never the open internet. See
 | `sheepdog voice-test` | Stream a WAV (or `--text`) through a Gemini Live session with echo tools; no daemon needed. |
 | `sheepdog brain-test` | Run one brain turn against a mock herdr and a screen fixture (`--question`, `--say`, `--provider`; `--fake` needs no network). |
 | `sheepdog prompts export` \| `show` | Seed `prompts.dir` from the embedded prompts \| print one file's effective text and source. |
-| `sheepdog eval` | The conversation eval sets (`--set assistant\|svp\|regressions\|extracted\|expanded\|all`); offline by default, `--live` calls the model. `eval extract` / `eval expand` build cases from the event log. `eval sim` runs simulated-CEO conversations graded by an LLM judge (`--live`, `--repeat`, `--fallback-provider`; [`docs/eval-campaign-2026-10-03.md`](docs/eval-campaign-2026-10-03.md)). |
+| `sheepdog eval` | The conversation eval sets (`--set assistant\|svp\|regressions\|extracted\|expanded\|all`); offline by default, `--live` calls the model. `eval extract` / `eval expand` build cases from the event log. `eval sim` runs simulated-CEO conversations graded by an LLM judge (`--live`, `--repeat`, `--fallback-provider`; [`docs/eval/eval-campaign-2026-10-03.md`](docs/eval/eval-campaign-2026-10-03.md)). |
 | `sheepdog scorecard` | Ear and latency metrics over the event log ([`docs/iteration-2.md`](docs/iteration-2.md) "Scorecard metrics"). |
 | `sheepdog bench` \| `bench validate` | The tier-2 voice benchmark: synthetic speech through a phone emulator into scratch daemons ([`docs/bench/README.md`](docs/bench/README.md), results in [`docs/bench/tier2-2026-10-03.md`](docs/bench/tier2-2026-10-03.md)). |
-| `sheepdog audio-e2e` | Speak scripted scenarios (macOS `say` + noise) into a running daemon's `/ws` ([`docs/audio-e2e-results.md`](docs/audio-e2e-results.md)). |
+| `sheepdog audio-e2e` | Speak scripted scenarios (macOS `say` + noise) into a running daemon's `/ws` ([`docs/history/audio-e2e-results.md`](docs/history/audio-e2e-results.md)). |
 | `sheepdog version` \| `help` | Version, commit and build date \| the command list. |
 
 Useful `serve` flags:

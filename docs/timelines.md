@@ -206,4 +206,4 @@ proposed.
 | 5 | Single daemon-wide pending slot (C19): an instruction or a second block displaces an open question; the bare-"yes" fast path is lost for it | no (`pending.replaced` 0) | eval case: A asks, the brain instructs B, the shepherd says "yes" | keep one slot per pane |
 | 8 | Stop leaves queued pushes (C11) | no (not in the 2026-10-03 bench runs either) | audio-e2e: stop while an announce is queued | none until seen |
 
-Rows fixed in #72 were removed on 2026-10-03; the issues found in the bench runs that day, all fixed, are in [bench-2026-10-03.md](bench-2026-10-03.md).
+Rows fixed in #72 were removed on 2026-10-03; the issues found in the bench runs that day, all fixed, are in [bench-2026-10-03.md](history/bench-2026-10-03.md).
