@@ -427,3 +427,22 @@ func TestClientSpawnCalls(t *testing.T) {
 		t.Errorf("never called: %v", want)
 	}
 }
+
+// pane.close takes the pane as pane_id (PaneTarget), and herdr's error
+// for a pane that is gone matches ErrPaneNotFound.
+func TestClientClosePane(t *testing.T) {
+	srv := herdrtest.New(t)
+	srv.Handle("pane.close", func(p json.RawMessage) (any, error) {
+		if string(p) != `{"pane_id":"w7:p2"}` {
+			return nil, &herdr.Error{Code: "pane_not_found", Message: "pane not found"}
+		}
+		return map[string]any{"type": "ok"}, nil
+	})
+	c := herdr.NewClient(srv.Path)
+	if err := c.ClosePane(context.Background(), "w7:p2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.ClosePane(context.Background(), "w9:p9"); !errors.Is(err, herdr.ErrPaneNotFound) {
+		t.Errorf("closing a gone pane = %v", err)
+	}
+}

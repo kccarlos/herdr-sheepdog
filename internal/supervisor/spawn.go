@@ -186,18 +186,27 @@ func (s *Supervisor) spawn(ctx context.Context, req brain.SpawnRequest) (string,
 // newest input — said or typed, never a tap on a question — arrived
 // within supervisor.authorise_window_s, has words, is not a "no" or
 // only a filler, and has not already authorised a write (an answer to a
-// prompt or another new agent: spawn marks the words used). It does not read what the words ask for: that is the
-// brain's judgement. Caller holds s.mu.
+// prompt, a new agent, a close: each marks the words used). It does not
+// read what the words ask for: that is the brain's judgement. Caller
+// holds s.mu.
 func (s *Supervisor) spawnRailLocked() string {
+	return s.wordsRailLocked("a new agent", "started an agent")
+}
+
+// wordsRailLocked is spawnRailLocked's reading for any write that needs
+// words of the CEO's own: what names the write ("a new agent", "closing
+// an agent"), spent what the words may already have done. Caller holds
+// s.mu.
+func (s *Supervisor) wordsRailLocked(what, spent string) string {
 	in := s.lastInputLocked()
 	now := s.cfg.Now()
 	switch {
 	case in == nil:
-		return "the CEO has said nothing that asks for a new agent"
+		return "the CEO has said nothing that asks for " + what
 	case in.kind == InputTap:
-		return "the CEO's last input was a tap on a question, not a request for a new agent"
+		return "the CEO's last input was a tap on a question, not a request for " + what
 	case in.used:
-		return "the CEO's last words already answered a prompt or started an agent; a new agent needs words of their own"
+		return "the CEO's last words already answered a prompt or " + spent + "; " + what + " needs words of their own"
 	case now.Sub(in.at) > s.cfg.AuthoriseWindow:
 		return fmt.Sprintf("the CEO's last words were %d s ago, past supervisor.authorise_window_s (%d s)", int(now.Sub(in.at).Seconds()), int(s.cfg.AuthoriseWindow.Seconds()))
 	case strings.TrimSpace(in.text) == "":
@@ -205,7 +214,7 @@ func (s *Supervisor) spawnRailLocked() string {
 	case fillerOnly(in.text):
 		return fmt.Sprintf("the CEO only said %q, which asks for nothing", strings.TrimSpace(in.text))
 	case negativeInput(in.text):
-		return fmt.Sprintf("the CEO said %q, which does not ask for a new agent", strings.TrimSpace(in.text))
+		return fmt.Sprintf("the CEO said %q, which does not ask for %s", strings.TrimSpace(in.text), what)
 	}
 	return ""
 }

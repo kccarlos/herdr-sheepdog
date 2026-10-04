@@ -224,6 +224,14 @@ func (c *Client) SplitPane(ctx context.Context, paneID, cwd string) (PaneInfo, e
 	return res.Pane, err
 }
 
+// ClosePane closes the pane (`pane.close`), ending whatever runs in it;
+// closing a workspace's last pane closes the workspace.
+func (c *Client) ClosePane(ctx context.Context, paneID string) error {
+	err := c.Call(ctx, "pane.close", map[string]any{"pane_id": paneID}, nil)
+	c.log("herdr.pane_close", paneID, map[string]any{"error": errString(err)})
+	return err
+}
+
 // SendInput types text into the pane and then presses keys, in one write
 // (`pane.send_input`): a command line for the pane's shell.
 func (c *Client) SendInput(ctx context.Context, paneID, text string, keys ...string) error {

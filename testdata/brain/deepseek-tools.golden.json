@@ -147,13 +147,21 @@
   },
   {
     "function": {
-      "description": "Send Ctrl-C to an agent to stop what it is doing. The result says whether it stopped.",
+      "description": "Send Ctrl-C to an agent to stop what it is doing. The result says whether it stopped. With close true it closes the agent instead: its pane and session end, only when the CEO asks to close or shut down that agent or its session (not to stop a task). If it is unclear which agent, ask first.",
       "name": "interrupt",
       "parameters": {
         "properties": {
           "agent": {
             "description": "the agent's alias",
             "type": "string"
+          },
+          "close": {
+            "description": "only when the CEO asks to close the agent: close its pane, ending it",
+            "type": "boolean"
+          },
+          "protected_ok": {
+            "description": "only with close, when the CEO named this very agent and the result said it is protected",
+            "type": "boolean"
           }
         },
         "required": [

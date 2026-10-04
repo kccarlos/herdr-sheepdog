@@ -479,6 +479,10 @@ for shells.
 // the pane to split is target_pane_id (PaneSplitParams); an unknown key such as
 // pane_id is ignored and herdr splits the focused pane instead (seen 2026-10-03).
 
+→ {"id":"x","method":"pane.close","params":{"pane_id":"w5:p2"}}
+← {"id":"x","result":{"type":"ok"}}   // a workspace's last pane closes the workspace;
+                                       // a gone pane is {"error":{"code":"pane_not_found",…}}
+
 → {"id":"d","method":"workspace.close","params":{"workspace_id":"w5"}}
 ← {"id":"d","result":{"type":"ok"}}
 ```
