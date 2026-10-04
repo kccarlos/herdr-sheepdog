@@ -207,7 +207,9 @@ func newHarness(t *testing.T, opts ...func(*Config)) *harness {
 	// rather than after waiting for a transcript that will not come.
 	// relayAfter off: a heard utterance nobody relays stays unrelayed
 	// unless a test turns the daemon's relay on (relay_test.go).
-	cfg := Config{PendingTTL: 120 * time.Second, Now: h.clock.Now, DataDir: h.dir, inputGrace: -1, relayAfter: -1, interruptCheck: 40 * time.Millisecond}
+	// bareAnswers on: most tests answer a prompt with a bare "yes" as a
+	// shortcut; the daemon itself never does (dual-brain ablation G4).
+	cfg := Config{PendingTTL: 120 * time.Second, Now: h.clock.Now, DataDir: h.dir, inputGrace: -1, relayAfter: -1, interruptCheck: 40 * time.Millisecond, bareAnswers: true}
 	for _, o := range opts {
 		o(&cfg)
 	}

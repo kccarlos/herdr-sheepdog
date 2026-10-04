@@ -244,9 +244,15 @@ func (s *Supervisor) handleUtterance(ctx context.Context, c claim, callID string
 	u.start = c.start
 	u.reading = c.reading
 	s.mu.Unlock()
-	if res, ok := s.fastAnswer(turnCtx, c.in, text); ok {
-		s.endUtterance(u)
-		return res
+	if s.cfg.bareAnswers || s.brain == nil {
+		// With a brain, the brain reads every answer (dual-brain
+		// ablation G4); the bare-answer fast path is left for a
+		// brain-less daemon (--brain=off), where nothing else could,
+		// and for the test harness (Config.bareAnswers).
+		if res, ok := s.fastAnswer(turnCtx, c.in, text); ok {
+			s.endUtterance(u)
+			return res
+		}
 	}
 	s.coalesce(u)
 	switch {

@@ -771,7 +771,7 @@ func TestPersistedPendingSurvivesRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sup2, err := New(store2, h.client, nil, h.pusher, h.log, Config{Now: h.clock.Now, inputGrace: -1, relayAfter: -1})
+	sup2, err := New(store2, h.client, nil, h.pusher, h.log, Config{Now: h.clock.Now, inputGrace: -1, relayAfter: -1, bareAnswers: true})
 	if err != nil {
 		t.Fatal(err)
 	}

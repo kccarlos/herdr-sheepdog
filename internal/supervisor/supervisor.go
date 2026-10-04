@@ -179,6 +179,12 @@ type Config struct {
 	// negative never relays). Not a knob: only tests change it
 	// (relay.go).
 	relayAfter time.Duration
+	// bareAnswers turns the old bare-answer fast path back on with a
+	// brain (a bare "yes"/"no"/"option two" sent as keys without it).
+	// Only the test harness sets it: since dual-brain ablation G4 a
+	// daemon with a brain leaves every reading of the shepherd's words
+	// to the brain; a brain-less one keeps the fast path.
+	bareAnswers bool
 	// interruptCheck is how long the brain's interrupt waits for the
 	// pane to leave working after each Ctrl-C (default
 	// interruptCheckDefault). Not a knob: only tests change it

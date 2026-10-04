@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"regexp"
 	"strings"
 	"time"
 	"unicode"
@@ -475,26 +474,16 @@ func (s *Supervisor) railInputLocked(p state.PendingAction, keys []string) (*she
 		return nil, "the shepherd's last words were empty"
 	case negativeInput(in.text) && approves(p, keys):
 		return nil, fmt.Sprintf("the shepherd said %q, which cannot approve %s's prompt", strings.TrimSpace(in.text), alias)
-	case in.kind != InputTap && fillerOnly(in.text):
-		return nil, fmt.Sprintf("the shepherd only said %q, a filler, which answers nothing; %s's prompt stays open", strings.TrimSpace(in.text), alias)
-	case in.kind != InputTap && declines(p, keys) && deferralInput(in.text):
-		return nil, fmt.Sprintf("the shepherd said %q, which puts %s's prompt off rather than declining it; nothing was sent and the prompt stays open, so tell them it is still waiting", strings.TrimSpace(in.text), alias)
-	case in.kind != InputTap && declines(p, keys) && asksQuestion(in.text) && !explicitDecline(in.text):
-		return nil, fmt.Sprintf("the shepherd's words %q also ask a question, so they do not plainly decline %s's prompt; nothing was sent: answer the question, and ask whether to decline if that is still unclear", strings.TrimSpace(in.text), alias)
 	}
 	return in, ""
 }
 
-// A deferral or a hesitation is not a decline (docs/bench/tier2-2026-10-03.md
-// #2). Over voice the brain sent `esc` — which cancels a Codex command —
-// on "先不要。", "先不要跑，文档那边核对好了吗？", "No, don't run that
-// yet. …" and on "No. What does bench Codex want?" (a TTS "Uhh"
-// transcribed as "No."). A decline is irreversible, so the rail refuses
-// one when the shepherd's newest words carry a deferral marker, also ask
-// a question, or are only a filler, and the brain reads why: the
-// judgement (ask, wait, answer) stays the brain's, only the irreversible
-// key is held back. A plain "no" / "不要" / "No, don't run it." still
-// declines.
+// Whether the shepherd's words decline, put off or question a prompt is
+// the brain's to decide (RULES.md: "not now" puts it off; a no option is
+// not a pause). The deferral, decline and question word lists that held
+// a decline back (#108, #114) were removed in dual-brain ablation G4: the
+// rail keeps only that the keys answer fresh words of the shepherd's own
+// and that a "no" never approves.
 
 // declines reports whether keys select p's no answer or an option whose
 // label declines (no / don't / deny / decline / reject / cancel / skip).
@@ -509,42 +498,6 @@ func declines(p state.PendingAction, keys []string) bool {
 		}
 	}
 	return len(keys) == 1 && keys[0] == "esc" && !approves(p, keys)
-}
-
-// deferralWords mark words that put a decision off: "yet", "later",
-// "not now", "wait", "hold on", "let me think"; 先, 等, 再说, 暂时.
-var deferralWords = regexp.MustCompile(`(?i)\b(yet|later|not now|not right now|for now|for the moment|hold on|hang on|hold off|wait|in a (bit|minute|moment|sec|second|while)|give me a (sec|second|minute|moment)|let me think|think about it|not today|tomorrow|after(wards)?)\b|先|等(一下|一等|等|会|下)?|稍后|待会|回头|晚点|再说|暂时|暂不|一会|考虑|想想|想一想`)
-
-// deferralInput reports whether text puts a decision off.
-func deferralInput(text string) bool { return deferralWords.MatchString(text) }
-
-// explicitDeclineWords are a decline spelled out with its verb: "don't
-// approve that", "definitely don't run it", "never push", "reject it",
-// 不要批准, 别让它跑, 拒绝. Campaign D N8: "What does bench-codex want to
-// push? And no, definitely don't approve that." (and #113's "no,
-// definitely don't approve that, ok?") was refused for asking a
-// question. A question next to a decline this plain does not make it
-// unclear; a bare "No." with a question still is ("No. What does bench
-// Codex want?" was a TTS "Uhh"). "Tell it no" counts (this PR's tier-1
-// bench-block-while-talking r3: "Yes, tell it no. And back to the
-// README, is it finished?" was refused twice).
-var explicitDeclineWords = regexp.MustCompile(`(?i)\b(don'?t|do not|never|definitely not)\s+(\w+\s+)?(approve|allow|accept|run|push|do|proceed|let|go ahead)\b|\b(deny|decline|reject|refuse)\s+(it|that|this|the)\b|\b(tell|answer)\s+(it|him|her|them|[\w-]+)\s+no\b|\bsay no\b|(不要|别|不准|不许)(让它|让他)?(批准|同意|允许|跑|运行|推|执行|做)|拒绝`)
-
-// whyNot is a suggestion, not a decline: "why don't you run it?".
-var whyNot = regexp.MustCompile(`(?i)\bwhy (don'?t|not)\b|为什么不`)
-
-// explicitDecline reports whether text declines in so many words.
-func explicitDecline(text string) bool {
-	return explicitDeclineWords.MatchString(text) && !whyNot.MatchString(text)
-}
-
-// questionWords open a question clause.
-var questionWords = regexp.MustCompile(`(?i)(^|[.,!;:]\s*)(what|why|how|which|who|when|where|is it|does it|did it|can it|could it|should it)\b|吗|什么|怎么|为什么|哪个|哪|呢`)
-
-// asksQuestion reports whether text asks something: a question mark, or
-// a question word opening a clause.
-func asksQuestion(text string) bool {
-	return strings.ContainsAny(text, "?？") || questionWords.MatchString(text)
 }
 
 // fillers are hesitation sounds that answer nothing on their own.
