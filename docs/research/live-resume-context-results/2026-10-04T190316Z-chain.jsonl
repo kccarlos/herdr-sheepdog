@@ -1,0 +1,157 @@
+{"arm":"chain","backend":"vertex","date":"2026-10-04T19:03:16Z","kind":"start","location":"us-central1","model":"gemini-3.8-live","resume":true,"t":0.000164708,"transparent":false}
+{"arm":"chain","conn":1,"kind":"connected","resumed_with":false,"t":0.565913625}
+{"arm":"chain","fact":"blue_key","kind":"fact_sent","t":4.793195625}
+{"arm":"chain","conn":1,"kind":"heard","t":4.891581708,"text":"Please remember this: the blue key is in drawer number seven."}
+{"arm":"chain","conn":1,"kind":"usage","prompt":224,"prompt_by_modality":{"AUDIO":93,"TEXT":131},"response":49,"response_by_modality":{"AUDIO":33,"TEXT":16},"t":6.242617166,"thoughts":85,"total":358}
+{"arm":"chain","conn":1,"kind":"turn_complete","said":"Got it.","t":6.242734416}
+{"arm":"chain","conn":1,"handle":"36c2fb76","kind":"handle","prompt_at_issue":224,"resumable":true,"t":6.343400666}
+{"arm":"chain","fact":"cat","kind":"fact_sent","t":11.6751875}
+{"arm":"chain","conn":1,"kind":"heard","t":11.771276833,"text":"Remember this too: my sister's cat is called Pickle."}
+{"arm":"chain","conn":1,"kind":"usage","prompt":355,"prompt_by_modality":{"AUDIO":208,"TEXT":147},"response":43,"response_by_modality":{"AUDIO":27,"TEXT":16},"t":12.738793833,"thoughts":44,"total":442}
+{"arm":"chain","conn":1,"kind":"turn_complete","said":"Got it.","t":12.739337458}
+{"arm":"chain","conn":1,"handle":"2e80e71e","kind":"handle","prompt_at_issue":355,"resumable":true,"t":12.744235208}
+{"arm":"chain","fact":"dana","kind":"fact_sent","t":18.365220416}
+{"arm":"chain","conn":1,"kind":"heard","t":18.499225208,"text":"Another one, the server room code is 4492."}
+{"arm":"chain","conn":1,"kind":"usage","prompt":491,"prompt_by_modality":{"AUDIO":327,"TEXT":164},"response":42,"response_by_modality":{"AUDIO":25,"TEXT":17},"t":19.53101375,"thoughts":59,"total":592}
+{"arm":"chain","conn":1,"kind":"turn_complete","said":"Got it.","t":19.531113166}
+{"arm":"chain","conn":1,"handle":"24292faf","kind":"handle","prompt_at_issue":491,"resumable":true,"t":19.554161125}
+{"arm":"chain","fact":"server_code","kind":"fact_sent","t":25.021847375}
+{"arm":"chain","conn":1,"kind":"heard","t":25.212808625,"text":"Remember, the meeting with Dana moved to Thursday at 3:00."}
+{"arm":"chain","conn":1,"kind":"usage","prompt":624,"prompt_by_modality":{"AUDIO":441,"TEXT":183},"response":47,"response_by_modality":{"AUDIO":28,"TEXT":19},"t":26.335088666,"thoughts":61,"total":732}
+{"arm":"chain","conn":1,"kind":"turn_complete","said":"Got it.","t":26.335202958}
+{"arm":"chain","conn":1,"handle":"8a19c02f","kind":"handle","prompt_at_issue":624,"resumable":true,"t":26.357164166}
+{"arm":"chain","fact":"bike","kind":"fact_sent","t":31.867939166}
+{"arm":"chain","conn":1,"kind":"heard","t":32.024613,"text":"Also remember, the red bike has a flat rear tire."}
+{"arm":"chain","conn":1,"kind":"usage","prompt":757,"prompt_by_modality":{"AUDIO":559,"TEXT":198},"response":41,"response_by_modality":{"AUDIO":26,"TEXT":15},"t":33.073972499999996,"thoughts":49,"total":847}
+{"arm":"chain","conn":1,"kind":"turn_complete","said":"Got it.","t":33.074099791}
+{"arm":"chain","conn":1,"handle":"e32d79ac","kind":"handle","prompt_at_issue":757,"resumable":true,"t":33.074161541}
+{"arm":"chain","fact":"wifi","kind":"fact_sent","t":38.549266583}
+{"arm":"chain","conn":1,"kind":"heard","t":38.643008666,"text":"Note this: the Wi-Fi password hint is mango river."}
+{"arm":"chain","conn":1,"kind":"usage","prompt":884,"prompt_by_modality":{"AUDIO":670,"TEXT":214},"response":42,"response_by_modality":{"AUDIO":26,"TEXT":16},"t":39.636163625,"thoughts":43,"total":969}
+{"arm":"chain","conn":1,"kind":"turn_complete","said":"Got it.","t":39.636275375}
+{"arm":"chain","conn":1,"handle":"c61f6545","kind":"handle","prompt_at_issue":884,"resumable":true,"t":39.658555375}
+{"arm":"chain","fact":"library","kind":"fact_sent","t":44.898534583}
+{"arm":"chain","conn":1,"kind":"heard","t":44.992379625,"text":"Remember, the library book is due on the 12th."}
+{"arm":"chain","conn":1,"kind":"usage","prompt":1006,"prompt_by_modality":{"AUDIO":775,"TEXT":231},"response":67,"response_by_modality":{"AUDIO":50,"TEXT":17},"t":46.947403041,"thoughts":44,"total":1117}
+{"arm":"chain","conn":1,"kind":"turn_complete","said":"Got it.","t":46.947535}
+{"arm":"chain","conn":1,"handle":"6235cb98","kind":"handle","prompt_at_issue":1006,"resumable":true,"t":46.972438625}
+{"arm":"chain","fact":"charger","kind":"fact_sent","t":52.447828291}
+{"arm":"chain","conn":1,"kind":"heard","t":52.578568083,"text":"Last one, the spare charger is in the green backpack."}
+{"arm":"chain","conn":1,"kind":"usage","prompt":1155,"prompt_by_modality":{"AUDIO":909,"TEXT":246},"response":43,"response_by_modality":{"AUDIO":28,"TEXT":15},"t":53.578279666,"thoughts":30,"total":1228}
+{"arm":"chain","conn":1,"kind":"turn_complete","said":"Got it.","t":53.5784545}
+{"arm":"chain","conn":1,"handle":"3e9f7cb9","kind":"handle","prompt_at_issue":1155,"resumable":true,"t":53.598292166}
+{"arm":"chain","kind":"turn_timeout","t":149.582914541}
+{"arm":"chain","conn":1,"kind":"interrupted","t":153.217074458}
+{"arm":"chain","conn":1,"kind":"usage","prompt":1205,"prompt_by_modality":{"AUDIO":937,"TEXT":268},"response":2604,"response_by_modality":{"AUDIO":2300,"TEXT":304},"t":153.247603833,"thoughts":810,"total":4619}
+{"arm":"chain","conn":1,"kind":"turn_complete","said":"Once upon a time, there was an adventurous traveler named Clara who set out to explore the forgotten ruins of a distant continent. She packed her sturdy leather bag with just the essentials: a worn-out map, a reliable compass, and a silver locket inherited from her grandmother. Clara traveled by train for three days, watching the vibrant green landscapes slowly fade into arid, rocky deserts. Upon reaching her destination, she discovered the ancient city was hidden within the dense foliage of a tropical jungle. The air was thick and humid, filled with the sounds of exotic birds and unseen creatures moving through the canopy. She navigated through the tangled vines, using a small machete to clear a narrow path toward the center of the ruins. Suddenly, the trees parted to reveal a magnificent stone temple, its facade intricately carved with symbols of a lost civilization. Clara felt a surge of excitement as she realized she was the first person to set foot here in over a century. She climbed the steep stone steps carefully, her heart pounding with anticipation. As she reached the top, an elderly man wearing traditional robes stepped out from the shadows of the doorway. He welcomed her warmly, explaining that he was the appointed guardian of this ancient sanctuary. The old man shared stories of the temple\u2019s history, describing how his ancestors had built it to honor the celestial skies. Together, they spent the evening talking under the stars, bridging the gap between two different worlds and cultures. Before leaving, he gifted her a small polished stone that would always guide her back","t":153.247721125}
+{"arm":"chain","conn":1,"handle":"c6dd841a","kind":"handle","prompt_at_issue":1205,"resumable":true,"t":153.266095666}
+{"arm":"chain","conn":1,"kind":"interrupted","t":156.859453208}
+{"arm":"chain","conn":1,"kind":"usage","prompt":3857,"prompt_by_modality":{"AUDIO":3260,"TEXT":597},"response":103,"response_by_modality":{"AUDIO":90,"TEXT":13},"t":156.941167541,"thoughts":38,"total":3998}
+{"arm":"chain","conn":1,"kind":"turn_complete","said":"Leo arrived in a bustling coastal town, his backpack loaded with art","t":156.941302}
+{"arm":"chain","conn":1,"handle":"43ec74c9","kind":"handle","prompt_at_issue":3857,"resumable":true,"t":156.964484458}
+{"arm":"chain","conn":1,"kind":"interrupted","t":160.524590208}
+{"arm":"chain","conn":1,"kind":"usage","prompt":3988,"prompt_by_modality":{"AUDIO":3358,"TEXT":630},"response":103,"response_by_modality":{"AUDIO":90,"TEXT":13},"t":160.662101708,"thoughts":68,"total":4159}
+{"arm":"chain","conn":1,"kind":"turn_complete","said":"Maya stepped off the train into the warmth of the Mediterranean sun,","t":160.662224375}
+{"arm":"chain","conn":1,"handle":"a8439148","kind":"handle","prompt_at_issue":3988,"resumable":true,"t":160.684956791}
+{"arm":"chain","conn":1,"kind":"interrupted","t":164.221710541}
+{"arm":"chain","conn":1,"kind":"usage","prompt":4118,"prompt_by_modality":{"AUDIO":3456,"TEXT":662},"response":91,"response_by_modality":{"AUDIO":80,"TEXT":11},"t":164.323363541,"thoughts":244,"total":4453}
+{"arm":"chain","conn":1,"kind":"turn_complete","said":"Sam, a photographer seeking solitude and quiet inspiration, boarded","t":164.323464208}
+{"arm":"chain","conn":1,"handle":"5bc6ed43","kind":"handle","prompt_at_issue":4118,"resumable":true,"t":164.347388541}
+{"arm":"chain","conn":1,"kind":"interrupted","t":167.880283}
+{"arm":"chain","conn":1,"kind":"usage","prompt":4247,"prompt_by_modality":{"AUDIO":3554,"TEXT":693},"response":102,"response_by_modality":{"AUDIO":88,"TEXT":14},"t":167.917298125,"thoughts":58,"total":4407}
+{"arm":"chain","conn":1,"kind":"turn_complete","said":"Elena reached the village nestled high in the misty mountains after a long,","t":167.917395875}
+{"arm":"chain","conn":1,"handle":"203bfcae","kind":"handle","prompt_at_issue":4247,"resumable":true,"t":167.941622333}
+{"arm":"chain","conn":1,"kind":"interrupted","t":171.543366583}
+{"arm":"chain","conn":1,"kind":"usage","prompt":4378,"prompt_by_modality":{"AUDIO":3652,"TEXT":726},"response":94,"response_by_modality":{"AUDIO":80,"TEXT":14},"t":171.596002,"thoughts":239,"total":4711}
+{"arm":"chain","conn":1,"kind":"turn_complete","said":"Julian arrived at the remote coastal village as the sun began to set,","t":171.596040583}
+{"arm":"chain","conn":1,"handle":"9163a36d","kind":"handle","prompt_at_issue":4378,"resumable":true,"t":171.622721625}
+{"arm":"chain","conn":1,"kind":"interrupted","t":175.207874083}
+{"arm":"chain","conn":1,"kind":"usage","prompt":4509,"prompt_by_modality":{"AUDIO":3750,"TEXT":759},"response":47,"response_by_modality":{"AUDIO":42,"TEXT":5},"t":175.249509541,"thoughts":615,"total":5171}
+{"arm":"chain","conn":1,"kind":"turn_complete","said":"Oliver was a dedicated researcher","t":175.249623333}
+{"arm":"chain","conn":1,"handle":"0e0d4776","kind":"handle","prompt_at_issue":4509,"resumable":true,"t":175.278396333}
+{"arm":"chain","conn":1,"kind":"interrupted","t":178.882893208}
+{"arm":"chain","conn":1,"kind":"usage","prompt":4553,"prompt_by_modality":{"AUDIO":3775,"TEXT":778},"response":101,"response_by_modality":{"AUDIO":88,"TEXT":13},"t":178.9257205,"thoughts":55,"total":4709}
+{"arm":"chain","conn":1,"kind":"turn_complete","said":"Oliver was a dedicated botanist, embarking on a solo expedition into","t":178.925813208}
+{"arm":"chain","conn":1,"handle":"159ee8a9","kind":"handle","prompt_at_issue":4553,"resumable":true,"t":178.950090666}
+{"arm":"chain","conn":1,"kind":"interrupted","t":182.543787333}
+{"arm":"chain","conn":1,"kind":"usage","prompt":4684,"prompt_by_modality":{"AUDIO":3873,"TEXT":811},"response":102,"response_by_modality":{"AUDIO":88,"TEXT":14},"t":182.592978791,"thoughts":69,"total":4855}
+{"arm":"chain","conn":1,"kind":"turn_complete","said":"Leo arrived in the snow-dusted village just as twilight settled over","t":182.593110458}
+{"arm":"chain","conn":1,"handle":"fa8d1aaf","kind":"handle","prompt_at_issue":4684,"resumable":true,"t":182.621977041}
+{"arm":"chain","conn":1,"kind":"interrupted","t":186.225087375}
+{"arm":"chain","conn":1,"kind":"usage","prompt":4817,"prompt_by_modality":{"AUDIO":3971,"TEXT":846},"response":101,"response_by_modality":{"AUDIO":84,"TEXT":17},"t":186.266150958,"thoughts":151,"total":5069}
+{"arm":"chain","conn":1,"kind":"turn_complete","said":"Arthur was a master clockmaker who decided to leave his workshop in search of the legendary","t":186.266267833}
+{"arm":"chain","conn":1,"handle":"ad2b9cad","kind":"handle","prompt_at_issue":4817,"resumable":true,"t":186.291336041}
+{"arm":"chain","conn":1,"kind":"interrupted","t":189.888597958}
+{"arm":"chain","conn":1,"kind":"usage","prompt":4953,"prompt_by_modality":{"AUDIO":4069,"TEXT":884},"response":63,"response_by_modality":{"AUDIO":54,"TEXT":9},"t":190.020168875,"thoughts":732,"total":5748}
+{"arm":"chain","conn":1,"kind":"turn_complete","said":"Silas was an ambitious architect who always sought","t":190.020277208}
+{"arm":"chain","conn":1,"handle":"87eeffc3","kind":"handle","prompt_at_issue":4953,"resumable":true,"t":190.047198541}
+{"arm":"chain","conn":1,"kind":"interrupted","t":192.076100833}
+{"arm":"chain","conn":1,"kind":"usage","prompt":5056,"prompt_by_modality":{"AUDIO":4142,"TEXT":914},"response":56,"response_by_modality":{"AUDIO":50,"TEXT":6},"t":192.153308541,"thoughts":125,"total":5237}
+{"arm":"chain","conn":1,"kind":"turn_complete","said":"Elara was a dedicated seeker","t":192.153432916}
+{"arm":"chain","conn":1,"handle":"55b9962b","kind":"handle","prompt_at_issue":5056,"resumable":true,"t":192.179940875}
+{"arm":"chain","conn":1,"kind":"usage","prompt":5153,"prompt_by_modality":{"AUDIO":4215,"TEXT":938},"response":26,"response_by_modality":{"AUDIO":24,"TEXT":2},"t":193.244817041,"thoughts":72,"total":5251}
+{"arm":"chain","conn":1,"kind":"turn_complete","said":"Ok.","t":193.244938958}
+{"arm":"chain","conn":1,"handle":"dd213bc2","kind":"handle","prompt_at_issue":5153,"resumable":true,"t":193.271792875}
+{"arm":"chain","conn":1,"err":"use of closed network connection","kind":"recv_end","t":195.154843625}
+{"arm":"chain","conn":2,"kind":"connected","resumed_with":true,"t":197.917145916}
+{"arm":"chain","conn":2,"kind":"usage","prompt":5191,"prompt_by_modality":{"AUDIO":4239,"TEXT":952},"response":25,"response_by_modality":{"AUDIO":23,"TEXT":2},"t":211.01726925,"thoughts":45,"total":5261}
+{"arm":"chain","conn":2,"kind":"turn_complete","said":"Ok.","t":211.017437083}
+{"arm":"chain","conn":2,"handle":"b630bcd7","kind":"handle","prompt_at_issue":5191,"resumable":true,"t":211.0389425}
+{"after_by_modality":{"AUDIO":4239,"TEXT":952},"after_prompt":5191,"arm":"chain","before_prompt":5153,"kind":"chain_step","same_handle_next":false,"step":1,"t":212.919091916}
+{"arm":"chain","conn":2,"err":"use of closed network connection","kind":"recv_end","t":212.919550208}
+{"arm":"chain","conn":3,"kind":"connected","resumed_with":true,"t":215.527586833}
+{"arm":"chain","conn":3,"kind":"usage","prompt":167,"prompt_by_modality":{"AUDIO":23,"TEXT":144},"response":24,"response_by_modality":{"AUDIO":22,"TEXT":2},"t":228.719868375,"thoughts":115,"total":306}
+{"arm":"chain","conn":3,"kind":"turn_complete","said":"Ok.","t":228.720061125}
+{"arm":"chain","conn":3,"handle":"85208ed9","kind":"handle","prompt_at_issue":167,"resumable":true,"t":228.739571875}
+{"after_by_modality":{"AUDIO":23,"TEXT":144},"after_prompt":167,"arm":"chain","before_prompt":5191,"kind":"chain_step","same_handle_next":false,"step":2,"t":230.53050325}
+{"arm":"chain","conn":3,"err":"use of closed network connection","kind":"recv_end","t":230.531226791}
+{"arm":"chain","conn":4,"kind":"connected","resumed_with":true,"t":233.365056541}
+{"arm":"chain","conn":4,"kind":"usage","prompt":166,"prompt_by_modality":{"AUDIO":22,"TEXT":144},"response":24,"response_by_modality":{"AUDIO":22,"TEXT":2},"t":246.465211791,"thoughts":40,"total":230}
+{"arm":"chain","conn":4,"kind":"turn_complete","said":"Ok.","t":246.4653475}
+{"arm":"chain","conn":4,"handle":"0e953c6a","kind":"handle","prompt_at_issue":166,"resumable":true,"t":246.511161208}
+{"after_by_modality":{"AUDIO":22,"TEXT":144},"after_prompt":166,"arm":"chain","before_prompt":167,"kind":"chain_step","same_handle_next":false,"step":3,"t":248.367864166}
+{"arm":"chain","handle_known":true,"handles_seen":24,"kind":"before_resume","prompt":166,"prompt_by_modality":{"AUDIO":22,"TEXT":144},"t":248.368041291}
+{"arm":"chain","conn":4,"err":"use of closed network connection","kind":"recv_end","t":248.368279125}
+{"arm":"chain","conn":5,"kind":"connected","resumed_with":true,"t":250.862045583}
+{"arm":"chain","fact":"blue_key","kind":"probe_sent","q":"Where is the blue key?","t":254.365584083}
+{"arm":"chain","conn":5,"kind":"usage","prompt":160,"prompt_by_modality":{"AUDIO":22,"TEXT":138},"response":35,"response_by_modality":{"AUDIO":29,"TEXT":6},"t":255.725135583,"thoughts":83,"total":278}
+{"arm":"chain","conn":5,"kind":"turn_complete","said":"I don't know.","t":255.72607025}
+{"arm":"chain","conn":5,"handle":"f129d80f","kind":"handle","prompt_at_issue":160,"resumable":true,"t":255.772632875}
+{"arm":"chain","fact":"blue_key","hit":false,"kind":"probe_result","said":"I don't know.","t":256.928262083}
+{"arm":"chain","fact":"cat","kind":"probe_sent","q":"What is my sister's cat called?","t":258.42906525}
+{"arm":"chain","conn":5,"kind":"usage","prompt":204,"prompt_by_modality":{"AUDIO":51,"TEXT":153},"response":33,"response_by_modality":{"AUDIO":27,"TEXT":6},"t":259.72243225,"thoughts":72,"total":309}
+{"arm":"chain","conn":5,"kind":"turn_complete","said":"I don't know.","t":259.72264375}
+{"arm":"chain","conn":5,"handle":"49e1a88c","kind":"handle","prompt_at_issue":204,"resumable":true,"t":259.732237625}
+{"arm":"chain","fact":"cat","hit":false,"kind":"probe_result","said":"I don't know.","t":260.924931125}
+{"arm":"chain","fact":"dana","kind":"probe_sent","q":"When is the meeting with Dana?","t":262.427338}
+{"arm":"chain","conn":5,"kind":"usage","prompt":244,"prompt_by_modality":{"AUDIO":78,"TEXT":166},"response":31,"response_by_modality":{"AUDIO":25,"TEXT":6},"t":263.609941375,"thoughts":70,"total":345}
+{"arm":"chain","conn":5,"kind":"turn_complete","said":"I don't know.","t":263.610055125}
+{"arm":"chain","conn":5,"handle":"ec0ed465","kind":"handle","prompt_at_issue":244,"resumable":true,"t":263.62908}
+{"arm":"chain","fact":"dana","hit":false,"kind":"probe_result","said":"I don't know.","t":264.810921958}
+{"arm":"chain","fact":"server_code","kind":"probe_sent","q":"What is the server room code?","t":266.312615791}
+{"arm":"chain","conn":5,"kind":"usage","prompt":282,"prompt_by_modality":{"AUDIO":103,"TEXT":179},"response":35,"response_by_modality":{"AUDIO":29,"TEXT":6},"t":267.693901541,"thoughts":54,"total":371}
+{"arm":"chain","conn":5,"kind":"turn_complete","said":"I don't know.","t":267.694113166}
+{"arm":"chain","conn":5,"handle":"705602d5","kind":"handle","prompt_at_issue":282,"resumable":true,"t":267.71671625}
+{"arm":"chain","fact":"server_code","hit":false,"kind":"probe_result","said":"I don't know.","t":268.895277}
+{"arm":"chain","fact":"bike","kind":"probe_sent","q":"What is wrong with the red bike?","t":270.39746075}
+{"arm":"chain","conn":5,"kind":"usage","prompt":325,"prompt_by_modality":{"AUDIO":132,"TEXT":193},"response":34,"response_by_modality":{"AUDIO":28,"TEXT":6},"t":271.637254875,"thoughts":53,"total":412}
+{"arm":"chain","conn":5,"kind":"turn_complete","said":"I don't know.","t":271.637358791}
+{"arm":"chain","conn":5,"handle":"65d14f95","kind":"handle","prompt_at_issue":325,"resumable":true,"t":271.658415666}
+{"arm":"chain","fact":"bike","hit":false,"kind":"probe_result","said":"I don't know.","t":272.837628291}
+{"arm":"chain","fact":"wifi","kind":"probe_sent","q":"What is the Wi-Fi password hint?","t":274.338367}
+{"arm":"chain","conn":5,"kind":"usage","prompt":368,"prompt_by_modality":{"AUDIO":160,"TEXT":208},"response":36,"response_by_modality":{"AUDIO":30,"TEXT":6},"t":275.821854791,"thoughts":72,"total":476}
+{"arm":"chain","conn":5,"kind":"turn_complete","said":"I don't know.","t":275.82198825}
+{"arm":"chain","conn":5,"handle":"2ecb404f","kind":"handle","prompt_at_issue":368,"resumable":true,"t":275.822056458}
+{"arm":"chain","fact":"wifi","hit":false,"kind":"probe_result","said":"I don't know.","t":277.023948041}
+{"arm":"chain","fact":"library","kind":"probe_sent","q":"When is the library book due?","t":278.524829833}
+{"arm":"chain","conn":5,"kind":"usage","prompt":411,"prompt_by_modality":{"AUDIO":190,"TEXT":221},"response":31,"response_by_modality":{"AUDIO":25,"TEXT":6},"t":279.711607958,"thoughts":61,"total":503}
+{"arm":"chain","conn":5,"kind":"turn_complete","said":"I don't know.","t":279.711760166}
+{"arm":"chain","conn":5,"handle":"560653ba","kind":"handle","prompt_at_issue":411,"resumable":true,"t":279.73075325}
+{"arm":"chain","fact":"library","hit":false,"kind":"probe_result","said":"I don't know.","t":280.912966833}
+{"arm":"chain","fact":"charger","kind":"probe_sent","q":"Where is the spare charger?","t":282.415271708}
+{"arm":"chain","conn":5,"kind":"usage","prompt":448,"prompt_by_modality":{"AUDIO":215,"TEXT":233},"response":32,"response_by_modality":{"AUDIO":26,"TEXT":6},"t":283.577176083,"thoughts":53,"total":533}
+{"arm":"chain","conn":5,"kind":"turn_complete","said":"I don't know.","t":283.577314708}
+{"arm":"chain","conn":5,"handle":"ba31112a","kind":"handle","prompt_at_issue":448,"resumable":true,"t":283.684466083}
+{"arm":"chain","fact":"charger","hit":false,"kind":"probe_result","said":"I don't know.","t":284.779426375}
+{"arm":"chain","backend":"vertex","date":"2026-10-04","handles":24,"interrupted":12,"kind":"summary","location":"us-central1","missed":["blue_key","cat","dana","server_code","bike","wifi","library","charger"],"model":"gemini-3.8-live","prompt_after_by_modality":{"AUDIO":22,"TEXT":138},"prompt_after_first":160,"prompt_before":166,"prompt_before_by_modality":{"AUDIO":22,"TEXT":144},"prompt_ratio":0.963855421686747,"recall":"0/8","recall_spoken_facts":"0/8","results":[{"hit":false,"name":"blue_key","q":"Where is the blue key?","said":"I don't know."},{"hit":false,"name":"cat","q":"What is my sister's cat called?","said":"I don't know."},{"hit":false,"name":"dana","q":"When is the meeting with Dana?","said":"I don't know."},{"hit":false,"name":"server_code","q":"What is the server room code?","said":"I don't know."},{"hit":false,"name":"bike","q":"What is wrong with the red bike?","said":"I don't know."},{"hit":false,"name":"wifi","q":"What is the Wi-Fi password hint?","said":"I don't know."},{"hit":false,"name":"library","q":"When is the library book due?","said":"I don't know."},{"hit":false,"name":"charger","q":"Where is the spare charger?","said":"I don't know."}],"resumed":true,"t":286.780026833,"tool_calls":0,"turns":32}
+{"arm":"chain","kind":"done","t":286.780636291}

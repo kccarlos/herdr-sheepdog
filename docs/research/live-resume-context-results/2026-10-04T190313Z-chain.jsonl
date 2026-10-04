@@ -1,0 +1,124 @@
+{"arm":"chain","backend":"vertex","date":"2026-10-04T19:03:13Z","kind":"start","location":"us-central1","model":"gemini-3.8-live","resume":true,"t":0.000176458,"transparent":false}
+{"arm":"chain","conn":1,"kind":"connected","resumed_with":false,"t":0.464150708}
+{"arm":"chain","fact":"blue_key","kind":"fact_sent","t":4.697844625}
+{"arm":"chain","conn":1,"kind":"heard","t":4.796669125,"text":"Please remember this: the blue key is in drawer number seven."}
+{"arm":"chain","conn":1,"kind":"usage","prompt":224,"prompt_by_modality":{"AUDIO":93,"TEXT":131},"response":40,"response_by_modality":{"AUDIO":24,"TEXT":16},"t":5.734970625,"thoughts":56,"total":320}
+{"arm":"chain","conn":1,"kind":"turn_complete","said":"Got it.","t":5.735147458}
+{"arm":"chain","conn":1,"handle":"bcd1eb45","kind":"handle","prompt_at_issue":224,"resumable":true,"t":5.783069333}
+{"arm":"chain","fact":"cat","kind":"fact_sent","t":11.172071791}
+{"arm":"chain","conn":1,"kind":"heard","t":11.267322708,"text":"Remember this too: my sister's cat is called Pickle."}
+{"arm":"chain","conn":1,"kind":"usage","prompt":348,"prompt_by_modality":{"AUDIO":201,"TEXT":147},"response":41,"response_by_modality":{"AUDIO":25,"TEXT":16},"t":12.253539916,"thoughts":53,"total":442}
+{"arm":"chain","conn":1,"kind":"turn_complete","said":"Got it.","t":12.253682208}
+{"arm":"chain","conn":1,"handle":"8aab655a","kind":"handle","prompt_at_issue":348,"resumable":true,"t":12.266714583}
+{"arm":"chain","fact":"dana","kind":"fact_sent","t":17.907878166}
+{"arm":"chain","conn":1,"kind":"heard","t":18.006381,"text":"Another one, the server room code is 4492."}
+{"arm":"chain","conn":1,"kind":"usage","prompt":482,"prompt_by_modality":{"AUDIO":318,"TEXT":164},"response":43,"response_by_modality":{"AUDIO":26,"TEXT":17},"t":19.214744375,"thoughts":62,"total":587}
+{"arm":"chain","conn":1,"kind":"turn_complete","said":"Got it.","t":19.214863166}
+{"arm":"chain","conn":1,"handle":"5f2a011e","kind":"handle","prompt_at_issue":482,"resumable":true,"t":19.304780041}
+{"arm":"chain","fact":"server_code","kind":"fact_sent","t":24.724835916}
+{"arm":"chain","conn":1,"kind":"heard","t":24.823804458,"text":"Remember, the meeting with Dana moved to Thursday at 3:00."}
+{"arm":"chain","conn":1,"kind":"usage","prompt":616,"prompt_by_modality":{"AUDIO":433,"TEXT":183},"response":45,"response_by_modality":{"AUDIO":26,"TEXT":19},"t":25.932509541,"thoughts":45,"total":706}
+{"arm":"chain","conn":1,"kind":"turn_complete","said":"Got it.","t":25.932643666}
+{"arm":"chain","conn":1,"handle":"0fa4e7ad","kind":"handle","prompt_at_issue":616,"resumable":true,"t":25.952760416}
+{"arm":"chain","fact":"bike","kind":"fact_sent","t":31.47963175}
+{"arm":"chain","conn":1,"kind":"heard","t":31.608915083,"text":"Also remember, the red bike has a flat rear tire."}
+{"arm":"chain","conn":1,"kind":"usage","prompt":747,"prompt_by_modality":{"AUDIO":549,"TEXT":198},"response":41,"response_by_modality":{"AUDIO":26,"TEXT":15},"t":32.704244208,"thoughts":38,"total":826}
+{"arm":"chain","conn":1,"kind":"turn_complete","said":"Got it.","t":32.704356416}
+{"arm":"chain","conn":1,"handle":"b0a3bf0a","kind":"handle","prompt_at_issue":747,"resumable":true,"t":32.725729625}
+{"arm":"chain","fact":"wifi","kind":"fact_sent","t":38.152594625}
+{"arm":"chain","conn":1,"kind":"heard","t":38.287619958,"text":"Note this: the Wi-Fi password hint is mango river."}
+{"arm":"chain","conn":1,"kind":"usage","prompt":874,"prompt_by_modality":{"AUDIO":660,"TEXT":214},"response":45,"response_by_modality":{"AUDIO":29,"TEXT":16},"t":39.328470458,"thoughts":62,"total":981}
+{"arm":"chain","conn":1,"kind":"turn_complete","said":"Got it.","t":39.328581041}
+{"arm":"chain","conn":1,"handle":"51cc3e3a","kind":"handle","prompt_at_issue":874,"resumable":true,"t":39.352093541}
+{"arm":"chain","fact":"library","kind":"fact_sent","t":44.595768625}
+{"arm":"chain","conn":1,"kind":"heard","t":44.692717875,"text":"Remember, the library book is due on the 12th."}
+{"arm":"chain","conn":1,"kind":"usage","prompt":999,"prompt_by_modality":{"AUDIO":768,"TEXT":231},"response":45,"response_by_modality":{"AUDIO":28,"TEXT":17},"t":45.674964166,"thoughts":53,"total":1097}
+{"arm":"chain","conn":1,"kind":"turn_complete","said":"Got it.","t":45.675137708}
+{"arm":"chain","conn":1,"handle":"0fd18739","kind":"handle","prompt_at_issue":999,"resumable":true,"t":45.695747375}
+{"arm":"chain","fact":"charger","kind":"fact_sent","t":51.156267958}
+{"arm":"chain","conn":1,"kind":"heard","t":51.285357125,"text":"Last one, the spare charger is in the green backpack."}
+{"arm":"chain","conn":1,"kind":"usage","prompt":1128,"prompt_by_modality":{"AUDIO":882,"TEXT":246},"response":40,"response_by_modality":{"AUDIO":25,"TEXT":15},"t":52.187818875,"thoughts":36,"total":1204}
+{"arm":"chain","conn":1,"kind":"turn_complete","said":"Got it.","t":52.187951458}
+{"arm":"chain","conn":1,"handle":"6b34fe66","kind":"handle","prompt_at_issue":1128,"resumable":true,"t":52.206291125}
+{"arm":"chain","conn":1,"kind":"usage","prompt":1175,"prompt_by_modality":{"AUDIO":907,"TEXT":268},"response":1414,"response_by_modality":{"AUDIO":1244,"TEXT":170},"t":109.121540291,"thoughts":637,"total":3226}
+{"arm":"chain","conn":1,"kind":"turn_complete","said":"Elara arrived in a land of shimmering peaks. She had traveled many miles to reach the Whispering Valley. The air was filled with a constant melody. Ancient trees stood guard over the path. Every morning, the sky painted itself in vibrant hues. Elara stopped at a small village known for its artisan weavers. She learned about their tradition of weaving stories into silk. The villagers showed her patterns depicting forgotten myths. She felt a deep connection to their history. One evening, she explored a hidden cave behind a waterfall. Inside, she discovered glowing crystals embedded in the walls. The cave resonated with a soft, humming vibration. She realized the valley's magic came from these gems. Elara spent hours documenting the crystal formations. She knew this place would change her perspective forever. With a heart full of wonder, she prepared to continue her journey.","t":109.121655458}
+{"arm":"chain","conn":1,"handle":"f3efdf54","kind":"handle","prompt_at_issue":1175,"resumable":true,"t":109.146511208}
+{"arm":"chain","conn":1,"kind":"usage","prompt":2606,"prompt_by_modality":{"AUDIO":2149,"TEXT":457},"response":1532,"response_by_modality":{"AUDIO":1332,"TEXT":200},"t":166.849905541,"thoughts":327,"total":4465}
+{"arm":"chain","conn":1,"kind":"turn_complete","said":"Soren adjusted his thick fur cloak against the biting northern wind. He had been trekking for weeks across the frozen wastes of the Silent Plains. His goal was to find the Star-Chamber, an ancient observatory lost to time. By night, he navigated using constellations that glittered like diamonds in the pitch-black sky. He relied on his trusted sled dogs to pull their supplies through the deep, powdery snow. One afternoon, the sun cast a pale blue light across a jagged mountain range. Hidden in the shadow of the cliffs, Soren spotted the entrance to an underground ruin. Carved symbols on the stone archway suggested a civilization that worshipped the cosmos. He carefully descended the dark, icy steps into the heart of the structure. At the subterranean center, he found a pedestal holding an obsidian astrolabe that pulsed with a faint silver light. Soren knew this artifact could guide travelers through the most treacherous winter storms. With the prize secured, he looked forward to sharing its knowledge with his people.","t":166.85004}
+{"arm":"chain","conn":1,"handle":"f0b87cc0","kind":"handle","prompt_at_issue":2606,"resumable":true,"t":166.886963375}
+{"arm":"chain","conn":1,"kind":"usage","prompt":4155,"prompt_by_modality":{"AUDIO":3479,"TEXT":676},"response":1292,"response_by_modality":{"AUDIO":1126,"TEXT":166},"t":215.917907541,"thoughts":173,"total":5620}
+{"arm":"chain","conn":1,"kind":"turn_complete","said":"Yara pushed through the dense foliage of the Emerald Canopy. The tropical heat was heavy, clinging to her skin like a damp cloak. She had spent years studying maps in search of the Sunken Temple. Vibrant orchids bloomed along the vine-tangled paths. Parrots flashed their bright plumage through the trees above. Yara relied on her brass compass to keep her bearings steady. Progress was slow, as the undergrowth fought back. She used her machete to carve a way forward. Finally, she cleared a wall of creepers. Before her lay the crumbling stone of the forgotten temple. Vines snaked around ancient carvings of sun gods. Yara approached the central entrance with a sense of reverence. Inside, she discovered a gold relic on a sunlit pedestal. Securing the artifact, she felt a profound sense of accomplishment.","t":215.918071458}
+{"arm":"chain","conn":1,"handle":"b81e8772","kind":"handle","prompt_at_issue":4155,"resumable":true,"t":215.918163416}
+{"arm":"chain","conn":1,"kind":"usage","prompt":5464,"prompt_by_modality":{"AUDIO":4603,"TEXT":861},"response":2165,"response_by_modality":{"AUDIO":1864,"TEXT":301},"t":295.195804291,"thoughts":463,"total":8092}
+{"arm":"chain","conn":1,"kind":"turn_complete","said":"Kenji stepped into the sea of towering bamboo stalks, their green heights reaching toward the morning mist. The sunlight filtered through the leaves, creating dancing patterns of shadow and light on the damp earth. He had dedicated his life to finding the legendary Silver Moon Lotus, said to bloom only once a century. Armed with a map drawn on aged parchment, he followed the hidden whispering currents of the forest. The path ahead was treacherous, blocked by twisted roots and slippery moss-covered stones. Kenji moved with practiced grace, his walking staff tapping rhythmically against the dense clay soil. Occasionally, the distant call of a mountain bird echoed through the quiet groves. As dusk began to settle, the air chilled, and a thick fog rolled in from the valleys below. He pressed forward, guided by the stories his grandfather had told him of this sacred grove. At the heart of the forest, he stumbled upon an overgrown stone archway, draped in ancient wisteria. Stepping through the portal, he found a serene clearing centered around a tranquil pond. The water was perfectly still, reflecting the rising full moon like an inverted sky. In the exact middle of the pond, a single, glowing silver lotus unfurled its petals. Kenji bowed deeply in respect, feeling the immense spiritual energy radiating from the bloom. He did not pick it, knowing its beauty and power belonged to the forest alone. Instead, he sat by the water's edge and began to meditate, absorbing the peaceful atmosphere into his soul.","t":295.195978041}
+{"arm":"chain","conn":1,"handle":"3427454b","kind":"handle","prompt_at_issue":5464,"resumable":true,"t":295.221156458}
+{"arm":"chain","conn":1,"kind":"usage","prompt":7646,"prompt_by_modality":{"AUDIO":6465,"TEXT":1181},"response":1258,"response_by_modality":{"AUDIO":1095,"TEXT":163},"t":343.070510625,"thoughts":184,"total":9088}
+{"arm":"chain","conn":1,"kind":"turn_complete","said":"Amara adjusted her linen scarf against the rising dust of the Red Sands. She had been traveling for days toward the mythical Echoing Canyons. The air rippled with heat, shimmering in the vast expanse. Amara relied on her weathered leather journal to document her path. She carefully monitored her water supply as she approached the canyon's edge. As she descended the rocky path, the landscape transformed into towering sandstone walls. The canyon was renowned for its unique acoustic properties. She could hear the faint whispering of the wind echoing through the labyrinthine passages. Suddenly, she noticed painted symbols on the canyon wall. Amara meticulously sketched the ancient petroglyphs in her journal. The colors shifted rapidly as dusk approached. With the stars beginning to emerge, she prepared to set up her campsite for the night.","t":343.071782875}
+{"arm":"chain","conn":1,"handle":"15637a63","kind":"handle","prompt_at_issue":7646,"resumable":true,"t":343.122342375}
+{"arm":"chain","conn":1,"kind":"usage","prompt":8921,"prompt_by_modality":{"AUDIO":7558,"TEXT":1363},"response":1208,"response_by_modality":{"AUDIO":1051,"TEXT":157},"t":396.065297375,"thoughts":236,"total":10365}
+{"arm":"chain","conn":1,"kind":"turn_complete","said":"Thorne maneuvered his rowboat through the mist-shrouded archipelago of the Obsidian Isles. He had been navigating these dark waters for days in search of the legendary Sunken Lighthouse. The air was heavy with salt and an eerie silence. Thorne relied on an ancient brass astrolabe to chart his course through the treacherous reefs. The churning dark waves lapped relentlessly against the hull. Suddenly, a faint bioluminescent glow broke the monotony of the deep water beneath him. He peered over the edge of the boat, his breath catching in his throat. The Sunken Lighthouse stood fully illuminated on the ocean floor, untouched by the ages. A profound sense of awe washed over him as he gazed at the impossible structure. He made meticulous notes in his journal to document this monumental discovery.","t":396.065432375}
+{"arm":"chain","conn":1,"handle":"1d27cbdb","kind":"handle","prompt_at_issue":8921,"resumable":true,"t":396.065707958}
+{"arm":"chain","conn":1,"kind":"usage","prompt":10146,"prompt_by_modality":{"AUDIO":8607,"TEXT":1539},"response":1253,"response_by_modality":{"AUDIO":1090,"TEXT":163},"t":443.478551875,"thoughts":98,"total":11497}
+{"arm":"chain","conn":1,"kind":"turn_complete","said":"Kaelen adjusted his linen scarf against the rising dust of the Red Sands. He had been traveling for days toward the mythical Singing Sands. The air rippled with heat, shimmering in the vast expanse. Kaelen relied on his weathered leather journal to document his path. He carefully monitored his water supply as he approached the canyon's edge. As he descended the rocky path, the landscape transformed into towering sandstone walls. The canyon was renowned for its unique acoustic properties. He could hear the faint whispering of the wind echoing through the labyrinthine passages. Suddenly, he noticed painted symbols on the canyon wall. Kaelen meticulously sketched the ancient petroglyphs in his journal. The colors shifted rapidly as dusk approached. With the stars beginning to emerge, he prepared to set up his campsite for the night.","t":443.479652416}
+{"arm":"chain","conn":1,"handle":"9bb68148","kind":"handle","prompt_at_issue":10146,"resumable":true,"t":443.509525708}
+{"arm":"chain","conn":1,"kind":"usage","prompt":11416,"prompt_by_modality":{"AUDIO":9695,"TEXT":1721},"response":1305,"response_by_modality":{"AUDIO":1129,"TEXT":176},"t":492.39035275,"thoughts":71,"total":12792}
+{"arm":"chain","conn":1,"kind":"turn_complete","said":"Leo climbed the rugged trail towards the Cloud-Piercer Observatory. The air grew thin and sharp as he ascended the mountain passes. He had spent years researching the constellations visible only from this remote peak. Along the way, he encountered a small group of nomadic shepherds sheltering in a rock cave. They shared a hot cup of herbal tea and stories of the valley below. Leo learned unique folk names for several stars that weren't on any of his maps. Energized by their hospitality, he pressed on through the late afternoon. Just as the sun began to dip, he saw the stone silhouette of the observatory. The path opened into a wide terrace overlooking the entire valley. Leo marveled at the clear skies stretching out before him. He immediately began setting up his telescope in preparation for the night's observations. He knew this night would unveil secrets hidden from the world for centuries.","t":492.390537208}
+{"arm":"chain","conn":1,"handle":"e4a559d0","kind":"handle","prompt_at_issue":11416,"resumable":true,"t":492.425008583}
+{"arm":"chain","conn":1,"kind":"usage","prompt":12731,"prompt_by_modality":{"AUDIO":10822,"TEXT":1909},"response":23,"response_by_modality":{"AUDIO":21,"TEXT":2},"t":495.887606541,"thoughts":167,"total":12921}
+{"arm":"chain","conn":1,"kind":"turn_complete","said":"Ok.","t":495.887754375}
+{"arm":"chain","conn":1,"handle":"73e68c80","kind":"handle","prompt_at_issue":12731,"resumable":true,"t":495.887851625}
+{"arm":"chain","conn":1,"err":"use of closed network connection","kind":"recv_end","t":498.888496416}
+{"arm":"chain","conn":2,"kind":"connected","resumed_with":true,"t":501.158752791}
+{"arm":"chain","before_prompt":12731,"kind":"chain_step","same_handle_next":true,"step":1,"t":513.159995333}
+{"arm":"chain","conn":2,"err":"use of closed network connection","kind":"recv_end","t":513.16041625}
+{"arm":"chain","conn":3,"kind":"connected","resumed_with":true,"t":515.58618325}
+{"arm":"chain","before_prompt":12731,"kind":"chain_step","same_handle_next":true,"step":2,"t":527.587302375}
+{"arm":"chain","conn":3,"err":"use of closed network connection","kind":"recv_end","t":527.587871333}
+{"arm":"chain","conn":4,"kind":"connected","resumed_with":true,"t":530.198404333}
+{"arm":"chain","before_prompt":12731,"kind":"chain_step","same_handle_next":true,"step":3,"t":542.19894525}
+{"arm":"chain","handle_known":true,"handles_seen":17,"kind":"before_resume","prompt":12731,"prompt_by_modality":{"AUDIO":10822,"TEXT":1909},"t":542.199195875}
+{"arm":"chain","conn":4,"err":"use of closed network connection","kind":"recv_end","t":542.199721541}
+{"arm":"chain","conn":5,"kind":"connected","resumed_with":true,"t":544.708682125}
+{"arm":"chain","fact":"blue_key","kind":"probe_sent","q":"Where is the blue key?","t":548.210975}
+{"arm":"chain","conn":5,"kind":"usage","prompt":12760,"prompt_by_modality":{"AUDIO":10843,"TEXT":1917},"response":68,"response_by_modality":{"AUDIO":59,"TEXT":9},"t":551.018539166,"thoughts":54,"total":12882}
+{"arm":"chain","conn":5,"kind":"turn_complete","said":"The blue key is in drawer number seven.","t":551.018833625}
+{"arm":"chain","conn":5,"handle":"78f3c390","kind":"handle","prompt_at_issue":12760,"resumable":true,"t":551.028788166}
+{"arm":"chain","fact":"blue_key","hit":true,"kind":"probe_result","said":"The blue key is in drawer number seven.","t":552.220083958}
+{"arm":"chain","fact":"cat","kind":"probe_sent","q":"What is my sister's cat called?","t":553.72155375}
+{"arm":"chain","conn":5,"kind":"usage","prompt":12835,"prompt_by_modality":{"AUDIO":10900,"TEXT":1935},"response":61,"response_by_modality":{"AUDIO":52,"TEXT":9},"t":556.33754675,"thoughts":141,"total":13037}
+{"arm":"chain","conn":5,"kind":"turn_complete","said":"Your sister's cat is called Pickle.","t":556.337765125}
+{"arm":"chain","conn":5,"handle":"91bb0047","kind":"handle","prompt_at_issue":12835,"resumable":true,"t":556.361174125}
+{"arm":"chain","fact":"cat","hit":true,"kind":"probe_result","said":"Your sister's cat is called Pickle.","t":557.538577875}
+{"arm":"chain","fact":"dana","kind":"probe_sent","q":"When is the meeting with Dana?","t":559.040298666}
+{"arm":"chain","conn":5,"kind":"usage","prompt":12901,"prompt_by_modality":{"AUDIO":10950,"TEXT":1951},"response":96,"response_by_modality":{"AUDIO":83,"TEXT":13},"t":562.593039291,"thoughts":63,"total":13060}
+{"arm":"chain","conn":5,"kind":"turn_complete","said":"The meeting with Dana is on Thursday at three o'clock.","t":562.593253208}
+{"arm":"chain","conn":5,"handle":"fdb65f32","kind":"handle","prompt_at_issue":12901,"resumable":true,"t":562.61848375}
+{"arm":"chain","fact":"dana","hit":true,"kind":"probe_result","said":"The meeting with Dana is on Thursday at three o'clock.","t":563.794479083}
+{"arm":"chain","fact":"server_code","kind":"probe_sent","q":"What is the server room code?","t":565.29599975}
+{"arm":"chain","conn":5,"kind":"usage","prompt":13002,"prompt_by_modality":{"AUDIO":11031,"TEXT":1971},"response":95,"response_by_modality":{"AUDIO":85,"TEXT":10},"t":569.008436125,"thoughts":79,"total":13176}
+{"arm":"chain","conn":5,"kind":"turn_complete","said":"The server room code is four four nine two.","t":569.008547}
+{"arm":"chain","conn":5,"handle":"a5864526","kind":"handle","prompt_at_issue":13002,"resumable":true,"t":569.031221416}
+{"arm":"chain","fact":"server_code","hit":true,"kind":"probe_result","said":"The server room code is four four nine two.","t":570.209806833}
+{"arm":"chain","fact":"bike","kind":"probe_sent","q":"What is wrong with the red bike?","t":571.711482041}
+{"arm":"chain","conn":5,"kind":"usage","prompt":13103,"prompt_by_modality":{"AUDIO":11114,"TEXT":1989},"response":73,"response_by_modality":{"AUDIO":64,"TEXT":9},"t":574.528664541,"thoughts":90,"total":13266}
+{"arm":"chain","conn":5,"kind":"turn_complete","said":"The red bike has a flat rear tire.","t":574.528780291}
+{"arm":"chain","conn":5,"handle":"2c19a4ea","kind":"handle","prompt_at_issue":13103,"resumable":true,"t":574.555763416}
+{"arm":"chain","fact":"bike","hit":true,"kind":"probe_result","said":"The red bike has a flat rear tire.","t":575.72997825}
+{"arm":"chain","fact":"wifi","kind":"probe_sent","q":"What is the Wi-Fi password hint?","t":577.231315291}
+{"arm":"chain","conn":5,"kind":"usage","prompt":13183,"prompt_by_modality":{"AUDIO":11176,"TEXT":2007},"response":90,"response_by_modality":{"AUDIO":80,"TEXT":10},"t":583.106211541,"thoughts":77,"total":13350}
+{"arm":"chain","conn":5,"kind":"turn_complete","said":"The Wi-Fi password hint is mango river.","t":583.106354583}
+{"arm":"chain","conn":5,"handle":"eeea38a5","kind":"handle","prompt_at_issue":13183,"resumable":true,"t":583.126210666}
+{"arm":"chain","fact":"wifi","hit":true,"kind":"probe_result","said":"The Wi-Fi password hint is mango river.","t":584.307567708}
+{"arm":"chain","fact":"library","kind":"probe_sent","q":"When is the library book due?","t":585.808256958}
+{"arm":"chain","conn":5,"kind":"usage","prompt":13278,"prompt_by_modality":{"AUDIO":11254,"TEXT":2024},"response":67,"response_by_modality":{"AUDIO":55,"TEXT":12},"t":588.444288291,"thoughts":72,"total":13417}
+{"arm":"chain","conn":5,"kind":"turn_complete","said":"The library book is due on the 12th.","t":588.444516416}
+{"arm":"chain","conn":5,"handle":"7501f297","kind":"handle","prompt_at_issue":13278,"resumable":true,"t":588.468851375}
+{"arm":"chain","fact":"library","hit":true,"kind":"probe_result","said":"The library book is due on the 12th.","t":589.645254208}
+{"arm":"chain","fact":"charger","kind":"probe_sent","q":"Where is the spare charger?","t":591.1465535}
+{"arm":"chain","conn":5,"kind":"usage","prompt":13349,"prompt_by_modality":{"AUDIO":11307,"TEXT":2042},"response":78,"response_by_modality":{"AUDIO":69,"TEXT":9},"t":594.169479375,"thoughts":51,"total":13478}
+{"arm":"chain","conn":5,"kind":"turn_complete","said":"The spare charger is in the green backpack.","t":594.169583916}
+{"arm":"chain","conn":5,"handle":"63385f77","kind":"handle","prompt_at_issue":13349,"resumable":true,"t":594.169662541}
+{"arm":"chain","fact":"charger","hit":true,"kind":"probe_result","said":"The spare charger is in the green backpack.","t":595.370825166}
+{"arm":"chain","backend":"vertex","date":"2026-10-04","handles":17,"interrupted":0,"kind":"summary","location":"us-central1","missed":null,"model":"gemini-3.8-live","prompt_after_by_modality":{"AUDIO":10843,"TEXT":1917},"prompt_after_first":12760,"prompt_before":12731,"prompt_before_by_modality":{"AUDIO":10822,"TEXT":1909},"prompt_ratio":1.0022779043280183,"recall":"8/8","recall_spoken_facts":"8/8","results":[{"hit":true,"name":"blue_key","q":"Where is the blue key?","said":"The blue key is in drawer number seven."},{"hit":true,"name":"cat","q":"What is my sister's cat called?","said":"Your sister's cat is called Pickle."},{"hit":true,"name":"dana","q":"When is the meeting with Dana?","said":"The meeting with Dana is on Thursday at three o'clock."},{"hit":true,"name":"server_code","q":"What is the server room code?","said":"The server room code is four four nine two."},{"hit":true,"name":"bike","q":"What is wrong with the red bike?","said":"The red bike has a flat rear tire."},{"hit":true,"name":"wifi","q":"What is the Wi-Fi password hint?","said":"The Wi-Fi password hint is mango river."},{"hit":true,"name":"library","q":"When is the library book due?","said":"The library book is due on the 12th."},{"hit":true,"name":"charger","q":"Where is the spare charger?","said":"The spare charger is in the green backpack."}],"resumed":true,"t":597.372123041,"tool_calls":0,"turns":25}
+{"arm":"chain","conn":5,"err":"use of closed network connection","kind":"recv_end","t":597.372453}
+{"arm":"chain","kind":"done","t":597.372472458}

@@ -1,0 +1,113 @@
+{"arm":"chain","backend":"vertex","date":"2026-10-04T19:13:54Z","kind":"start","location":"us-central1","model":"gemini-3.8-live","resume":true,"t":0.000191333,"transparent":false}
+{"arm":"chain","conn":1,"kind":"connected","resumed_with":false,"t":0.496796583}
+{"arm":"chain","fact":"blue_key","kind":"fact_sent","t":4.659845917}
+{"arm":"chain","conn":1,"kind":"heard","t":4.794196,"text":"Please remember this: the blue key is in drawer number seven."}
+{"arm":"chain","conn":1,"kind":"usage","prompt":224,"prompt_by_modality":{"AUDIO":93,"TEXT":131},"response":40,"response_by_modality":{"AUDIO":24,"TEXT":16},"t":5.702471625,"thoughts":58,"total":322}
+{"arm":"chain","conn":1,"kind":"turn_complete","said":"Got it.","t":5.702645083}
+{"arm":"chain","conn":1,"handle":"f521a4c7","kind":"handle","prompt_at_issue":224,"resumable":true,"t":5.730543792}
+{"arm":"chain","fact":"cat","kind":"fact_sent","t":11.078200125}
+{"arm":"chain","conn":1,"kind":"heard","t":11.201220375,"text":"Remember this too: my sister's cat is called Pickle."}
+{"arm":"chain","conn":1,"kind":"usage","prompt":348,"prompt_by_modality":{"AUDIO":201,"TEXT":147},"response":40,"response_by_modality":{"AUDIO":24,"TEXT":16},"t":12.131578917,"thoughts":54,"total":442}
+{"arm":"chain","conn":1,"kind":"turn_complete","said":"Got it.","t":12.131778583}
+{"arm":"chain","conn":1,"handle":"819ed529","kind":"handle","prompt_at_issue":348,"resumable":true,"t":12.133982583}
+{"arm":"chain","fact":"dana","kind":"fact_sent","t":17.719424583}
+{"arm":"chain","conn":1,"kind":"heard","t":17.80836725,"text":"Another one, the server room code is 4492."}
+{"arm":"chain","conn":1,"kind":"usage","prompt":481,"prompt_by_modality":{"AUDIO":317,"TEXT":164},"response":43,"response_by_modality":{"AUDIO":26,"TEXT":17},"t":18.948025625,"thoughts":34,"total":558}
+{"arm":"chain","conn":1,"kind":"turn_complete","said":"Got it.","t":18.948244167}
+{"arm":"chain","conn":1,"handle":"558338d0","kind":"handle","prompt_at_issue":481,"resumable":true,"t":18.948367167}
+{"arm":"chain","fact":"server_code","kind":"fact_sent","t":24.386666917}
+{"arm":"chain","conn":1,"kind":"heard","t":24.48159725,"text":"Remember, the meeting with Dana moved to Thursday at 3:00."}
+{"arm":"chain","conn":1,"kind":"usage","prompt":615,"prompt_by_modality":{"AUDIO":432,"TEXT":183},"response":44,"response_by_modality":{"AUDIO":25,"TEXT":19},"t":25.508216833,"thoughts":47,"total":706}
+{"arm":"chain","conn":1,"kind":"turn_complete","said":"Got it.","t":25.508416083}
+{"arm":"chain","conn":1,"handle":"12f5b1b1","kind":"handle","prompt_at_issue":615,"resumable":true,"t":25.530706}
+{"arm":"chain","fact":"bike","kind":"fact_sent","t":30.995218792}
+{"arm":"chain","conn":1,"kind":"heard","t":31.131663875,"text":"Also remember, the red bike has a flat rear tire."}
+{"arm":"chain","conn":1,"kind":"usage","prompt":745,"prompt_by_modality":{"AUDIO":547,"TEXT":198},"response":41,"response_by_modality":{"AUDIO":26,"TEXT":15},"t":32.210890625,"thoughts":56,"total":842}
+{"arm":"chain","conn":1,"kind":"turn_complete","said":"Got it.","t":32.211096375}
+{"arm":"chain","conn":1,"handle":"cde62ba2","kind":"handle","prompt_at_issue":745,"resumable":true,"t":32.235302167}
+{"arm":"chain","fact":"wifi","kind":"fact_sent","t":37.606766583}
+{"arm":"chain","conn":1,"kind":"heard","t":37.704199958,"text":"Note this: the Wi-Fi password hint is mango river."}
+{"arm":"chain","conn":1,"kind":"usage","prompt":872,"prompt_by_modality":{"AUDIO":658,"TEXT":214},"response":41,"response_by_modality":{"AUDIO":25,"TEXT":16},"t":38.703561917,"thoughts":59,"total":972}
+{"arm":"chain","conn":1,"kind":"turn_complete","said":"Got it.","t":38.703746167}
+{"arm":"chain","conn":1,"handle":"35eef827","kind":"handle","prompt_at_issue":872,"resumable":true,"t":38.725870208}
+{"arm":"chain","fact":"library","kind":"fact_sent","t":43.937917042}
+{"arm":"chain","conn":1,"kind":"heard","t":51.253658958,"text":"Remember, the library book is due on the 12th."}
+{"arm":"chain","conn":1,"kind":"usage","prompt":993,"prompt_by_modality":{"AUDIO":762,"TEXT":231},"response":41,"response_by_modality":{"AUDIO":24,"TEXT":17},"t":52.31219625,"thoughts":41,"total":1075}
+{"arm":"chain","conn":1,"kind":"turn_complete","said":"Got it.","t":52.312399542}
+{"arm":"chain","conn":1,"handle":"df19b0f2","kind":"handle","prompt_at_issue":993,"resumable":true,"t":52.323653708}
+{"arm":"chain","fact":"charger","kind":"fact_sent","t":57.738385375}
+{"arm":"chain","conn":1,"kind":"heard","t":57.857908625,"text":"Last one, the spare charger is in the green backpack."}
+{"arm":"chain","conn":1,"kind":"usage","prompt":1118,"prompt_by_modality":{"AUDIO":872,"TEXT":246},"response":40,"response_by_modality":{"AUDIO":25,"TEXT":15},"t":58.827510542,"thoughts":32,"total":1190}
+{"arm":"chain","conn":1,"kind":"turn_complete","said":"Got it.","t":58.8278605}
+{"arm":"chain","conn":1,"handle":"ddf994ad","kind":"handle","prompt_at_issue":1118,"resumable":true,"t":58.850444}
+{"arm":"chain","conn":1,"kind":"usage","prompt":1158,"prompt_by_modality":{"AUDIO":897,"TEXT":261},"response":25,"response_by_modality":{"AUDIO":23,"TEXT":2},"t":64.352705083,"thoughts":26,"total":1209}
+{"arm":"chain","conn":1,"kind":"turn_complete","said":"Ok.","t":64.352772333}
+{"arm":"chain","conn":1,"handle":"3be0fcd8","kind":"handle","prompt_at_issue":1158,"resumable":true,"t":64.377914833}
+{"arm":"chain","conn":1,"err":"use of closed network connection","kind":"recv_end","t":67.354466667}
+{"arm":"chain","conn":2,"kind":"connected","resumed_with":true,"t":69.984675417}
+{"arm":"chain","conn":2,"kind":"usage","prompt":1195,"prompt_by_modality":{"AUDIO":920,"TEXT":275},"response":29,"response_by_modality":{"AUDIO":26,"TEXT":3},"t":84.604756,"thoughts":31,"total":1255}
+{"arm":"chain","conn":2,"kind":"turn_complete","said":"Got it.","t":84.605139583}
+{"arm":"chain","conn":2,"handle":"16996a12","kind":"handle","prompt_at_issue":1195,"resumable":true,"t":84.650093208}
+{"after_by_modality":{"AUDIO":920,"TEXT":275},"after_prompt":1195,"arm":"chain","before_prompt":1158,"kind":"chain_step","same_handle_next":false,"step":1,"t":87.606379125}
+{"arm":"chain","conn":2,"err":"use of closed network connection","kind":"recv_end","t":87.606956708}
+{"arm":"chain","conn":3,"kind":"connected","resumed_with":true,"t":90.144238708}
+{"arm":"chain","conn":3,"kind":"usage","prompt":171,"prompt_by_modality":{"AUDIO":26,"TEXT":145},"response":29,"response_by_modality":{"AUDIO":26,"TEXT":3},"t":105.131171917,"thoughts":53,"total":253}
+{"arm":"chain","conn":3,"kind":"turn_complete","said":"Got it.","t":105.131395542}
+{"arm":"chain","conn":3,"handle":"f927becd","kind":"handle","prompt_at_issue":171,"resumable":true,"t":105.131542417}
+{"after_by_modality":{"AUDIO":26,"TEXT":145},"after_prompt":171,"arm":"chain","before_prompt":1195,"kind":"chain_step","same_handle_next":false,"step":2,"t":108.132727458}
+{"arm":"chain","handle_known":true,"handles_seen":11,"kind":"before_resume","prompt":171,"prompt_by_modality":{"AUDIO":26,"TEXT":145},"t":108.133005417}
+{"arm":"chain","conn":3,"err":"use of closed network connection","kind":"recv_end","t":108.134002375}
+{"arm":"chain","conn":4,"kind":"connected","resumed_with":true,"t":110.700264917}
+{"arm":"chain","fact":"blue_key","kind":"probe_sent","q":"Where is the blue key?","t":114.203146417}
+{"arm":"chain","conn":4,"kind":"usage","prompt":165,"prompt_by_modality":{"AUDIO":26,"TEXT":139},"response":37,"response_by_modality":{"AUDIO":31,"TEXT":6},"t":115.779652458,"thoughts":61,"total":263}
+{"arm":"chain","conn":4,"kind":"turn_complete","said":"I don't know.","t":115.779837292}
+{"arm":"chain","conn":4,"handle":"89442fbe","kind":"handle","prompt_at_issue":165,"resumable":true,"t":115.943168375}
+{"arm":"chain","fact":"blue_key","hit":false,"kind":"probe_result","said":"I don't know.","t":116.980354167}
+{"arm":"chain","fact":"cat","kind":"probe_sent","q":"What is my sister's cat called?","t":118.482062333}
+{"arm":"chain","conn":4,"kind":"usage","prompt":209,"prompt_by_modality":{"AUDIO":55,"TEXT":154},"response":38,"response_by_modality":{"AUDIO":32,"TEXT":6},"t":119.981487125,"thoughts":53,"total":300}
+{"arm":"chain","conn":4,"kind":"turn_complete","said":"I don't know.","t":119.981662667}
+{"arm":"chain","conn":4,"handle":"dc8c6af0","kind":"handle","prompt_at_issue":209,"resumable":true,"t":120.038738125}
+{"arm":"chain","fact":"cat","hit":false,"kind":"probe_result","said":"I don't know.","t":121.182899333}
+{"arm":"chain","fact":"dana","kind":"probe_sent","q":"When is the meeting with Dana?","t":122.684646333}
+{"arm":"chain","conn":4,"kind":"usage","prompt":252,"prompt_by_modality":{"AUDIO":85,"TEXT":167},"response":40,"response_by_modality":{"AUDIO":34,"TEXT":6},"t":124.340215583,"thoughts":73,"total":365}
+{"arm":"chain","conn":4,"kind":"turn_complete","said":"I don't know.","t":124.340391167}
+{"arm":"chain","conn":4,"handle":"58007476","kind":"handle","prompt_at_issue":252,"resumable":true,"t":124.355058042}
+{"arm":"chain","fact":"dana","hit":false,"kind":"probe_result","said":"I don't know.","t":125.541487375}
+{"arm":"chain","fact":"server_code","kind":"probe_sent","q":"What is the server room code?","t":127.042920167}
+{"arm":"chain","conn":4,"kind":"usage","prompt":297,"prompt_by_modality":{"AUDIO":117,"TEXT":180},"response":36,"response_by_modality":{"AUDIO":30,"TEXT":6},"t":128.528356292,"thoughts":72,"total":405}
+{"arm":"chain","conn":4,"kind":"turn_complete","said":"I don't know.","t":128.528542458}
+{"arm":"chain","conn":4,"handle":"77072ca3","kind":"handle","prompt_at_issue":297,"resumable":true,"t":128.528968667}
+{"arm":"chain","fact":"server_code","hit":false,"kind":"probe_result","said":"I don't know.","t":129.729510667}
+{"arm":"chain","fact":"bike","kind":"probe_sent","q":"What is wrong with the red bike?","t":131.230791208}
+{"arm":"chain","conn":4,"kind":"usage","prompt":341,"prompt_by_modality":{"AUDIO":147,"TEXT":194},"response":38,"response_by_modality":{"AUDIO":32,"TEXT":6},"t":132.720407292,"thoughts":38,"total":417}
+{"arm":"chain","conn":4,"kind":"turn_complete","said":"I don't know.","t":132.72051625}
+{"arm":"chain","conn":4,"handle":"d8bd78ce","kind":"handle","prompt_at_issue":341,"resumable":true,"t":132.720612}
+{"arm":"chain","fact":"bike","hit":false,"kind":"probe_result","said":"I don't know.","t":133.92181325}
+{"arm":"chain","fact":"wifi","kind":"probe_sent","q":"What is the Wi-Fi password hint?","t":135.42341575}
+{"arm":"chain","conn":4,"kind":"usage","prompt":386,"prompt_by_modality":{"AUDIO":177,"TEXT":209},"response":35,"response_by_modality":{"AUDIO":29,"TEXT":6},"t":136.757203583,"thoughts":51,"total":472}
+{"arm":"chain","conn":4,"kind":"turn_complete","said":"I don't know.","t":136.757384375}
+{"arm":"chain","conn":4,"handle":"26c3833f","kind":"handle","prompt_at_issue":386,"resumable":true,"t":137.104989958}
+{"arm":"chain","fact":"wifi","hit":false,"kind":"probe_result","said":"I don't know.","t":137.958775292}
+{"arm":"chain","fact":"library","kind":"probe_sent","q":"When is the library book due?","t":139.459873833}
+{"arm":"chain","conn":4,"kind":"usage","prompt":428,"prompt_by_modality":{"AUDIO":206,"TEXT":222},"response":39,"response_by_modality":{"AUDIO":33,"TEXT":6},"t":141.110809958,"thoughts":45,"total":512}
+{"arm":"chain","conn":4,"kind":"turn_complete","said":"I don't know.","t":141.110986208}
+{"arm":"chain","conn":4,"handle":"64f746e9","kind":"handle","prompt_at_issue":428,"resumable":true,"t":141.111124375}
+{"arm":"chain","fact":"library","hit":false,"kind":"probe_result","said":"I don't know.","t":142.31231125}
+{"arm":"chain","fact":"charger","kind":"probe_sent","q":"Where is the spare charger?","t":143.813902708}
+{"arm":"chain","conn":4,"kind":"usage","prompt":471,"prompt_by_modality":{"AUDIO":237,"TEXT":234},"response":39,"response_by_modality":{"AUDIO":33,"TEXT":6},"t":145.306968833,"thoughts":51,"total":561}
+{"arm":"chain","conn":4,"kind":"turn_complete","said":"I don't know.","t":145.307195208}
+{"arm":"chain","conn":4,"handle":"8579a894","kind":"handle","prompt_at_issue":471,"resumable":true,"t":145.332698333}
+{"arm":"chain","fact":"charger","hit":false,"kind":"probe_result","said":"I don't know.","t":146.508487917}
+{"arm":"chain","fact":"step1_in_conn2","kind":"probe_sent","q":"What is the password for step 1?","t":148.009890167}
+{"arm":"chain","conn":4,"kind":"usage","prompt":517,"prompt_by_modality":{"AUDIO":268,"TEXT":249},"response":36,"response_by_modality":{"AUDIO":30,"TEXT":6},"t":149.699741292,"thoughts":78,"total":631}
+{"arm":"chain","conn":4,"kind":"turn_complete","said":"I don't know.","t":149.699965}
+{"arm":"chain","conn":4,"handle":"dab29478","kind":"handle","prompt_at_issue":517,"resumable":true,"t":149.700291667}
+{"arm":"chain","fact":"step1_in_conn2","hit":false,"kind":"probe_result","said":"I don't know.","t":150.901563125}
+{"arm":"chain","fact":"step2_in_conn3","kind":"probe_sent","q":"What is the password for step 2?","t":152.403268917}
+{"arm":"chain","conn":4,"kind":"usage","prompt":562,"prompt_by_modality":{"AUDIO":298,"TEXT":264},"response":77,"response_by_modality":{"AUDIO":68,"TEXT":9},"t":155.280328667,"thoughts":63,"total":702}
+{"arm":"chain","conn":4,"kind":"turn_complete","said":"The password for step 2 is copper.","t":155.280526542}
+{"arm":"chain","conn":4,"handle":"07a82b81","kind":"handle","prompt_at_issue":562,"resumable":true,"t":155.297404}
+{"arm":"chain","fact":"step2_in_conn3","hit":true,"kind":"probe_result","said":"The password for step 2 is copper.","t":156.481745042}
+{"arm":"chain","backend":"vertex","date":"2026-10-04","handles":11,"interrupted":0,"kind":"summary","location":"us-central1","missed":["blue_key","cat","dana","server_code","bike","wifi","library","charger","step1_in_conn2"],"model":"gemini-3.8-live","prompt_after_by_modality":{"AUDIO":26,"TEXT":139},"prompt_after_first":165,"prompt_before":171,"prompt_before_by_modality":{"AUDIO":26,"TEXT":145},"prompt_ratio":0.9649122807017544,"recall":"1/10","recall_spoken_facts":"0/8","results":[{"hit":false,"name":"blue_key","q":"Where is the blue key?","said":"I don't know."},{"hit":false,"name":"cat","q":"What is my sister's cat called?","said":"I don't know."},{"hit":false,"name":"dana","q":"When is the meeting with Dana?","said":"I don't know."},{"hit":false,"name":"server_code","q":"What is the server room code?","said":"I don't know."},{"hit":false,"name":"bike","q":"What is wrong with the red bike?","said":"I don't know."},{"hit":false,"name":"wifi","q":"What is the Wi-Fi password hint?","said":"I don't know."},{"hit":false,"name":"library","q":"When is the library book due?","said":"I don't know."},{"hit":false,"name":"charger","q":"Where is the spare charger?","said":"I don't know."},{"hit":false,"name":"step1_in_conn2","q":"What is the password for step 1?","said":"I don't know."},{"hit":true,"name":"step2_in_conn3","q":"What is the password for step 2?","said":"The password for step 2 is copper."}],"resumed":true,"t":158.483026917,"tool_calls":0,"turns":21}
+{"arm":"chain","conn":4,"err":"use of closed network connection","kind":"recv_end","t":158.483777042}
+{"arm":"chain","kind":"done","t":158.483813083}

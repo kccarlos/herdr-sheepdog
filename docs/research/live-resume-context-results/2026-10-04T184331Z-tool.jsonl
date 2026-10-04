@@ -1,0 +1,125 @@
+{"arm":"tool","backend":"vertex","date":"2026-10-04T18:43:31Z","kind":"start","location":"us-central1","model":"gemini-3.8-live","resume":true,"t":0.000192042,"transparent":false}
+{"arm":"tool","conn":1,"kind":"connected","resumed_with":false,"t":0.433398167}
+{"arm":"tool","fact":"blue_key","kind":"fact_sent","t":4.684295125}
+{"arm":"tool","conn":1,"kind":"heard","t":4.778814125,"text":"Please remember this: the blue key is in drawer number seven."}
+{"arm":"tool","conn":1,"kind":"usage","prompt":275,"prompt_by_modality":{"AUDIO":93,"TEXT":182},"response":41,"response_by_modality":{"AUDIO":25,"TEXT":16},"t":5.740115792}
+{"arm":"tool","conn":1,"kind":"turn_complete","said":"Got it.","t":5.7403390420000004}
+{"arm":"tool","conn":1,"handle":"e32b17ab","kind":"handle","prompt_at_issue":275,"resumable":true,"t":5.784528417}
+{"arm":"tool","fact":"cat","kind":"fact_sent","t":11.171373917}
+{"arm":"tool","conn":1,"kind":"heard","t":11.265817042,"text":"Remember this too: my sister's cat is called Pickle."}
+{"arm":"tool","conn":1,"kind":"usage","prompt":400,"prompt_by_modality":{"AUDIO":202,"TEXT":198},"response":41,"response_by_modality":{"AUDIO":25,"TEXT":16},"t":12.255086292}
+{"arm":"tool","conn":1,"kind":"turn_complete","said":"Got it.","t":12.255295}
+{"arm":"tool","conn":1,"handle":"0e954380","kind":"handle","prompt_at_issue":400,"resumable":true,"t":12.2981385}
+{"arm":"tool","fact":"dana","kind":"fact_sent","t":17.886346667}
+{"arm":"tool","conn":1,"kind":"heard","t":17.978058167,"text":"Another one, the server room code is 4492."}
+{"arm":"tool","conn":1,"kind":"usage","prompt":534,"prompt_by_modality":{"AUDIO":319,"TEXT":215},"response":43,"response_by_modality":{"AUDIO":26,"TEXT":17},"t":19.077996709}
+{"arm":"tool","conn":1,"kind":"turn_complete","said":"Got it.","t":19.078279625}
+{"arm":"tool","conn":1,"handle":"cbf8186c","kind":"handle","prompt_at_issue":534,"resumable":true,"t":19.120880625}
+{"arm":"tool","fact":"server_code","kind":"fact_sent","t":24.538677292}
+{"arm":"tool","conn":1,"kind":"heard","t":24.656092167,"text":"Remember, the meeting with Dana moved to Thursday at 3:00."}
+{"arm":"tool","conn":1,"kind":"usage","prompt":668,"prompt_by_modality":{"AUDIO":434,"TEXT":234},"response":45,"response_by_modality":{"AUDIO":26,"TEXT":19},"t":25.75337425}
+{"arm":"tool","conn":1,"kind":"turn_complete","said":"Got it.","t":25.753604209}
+{"arm":"tool","conn":1,"handle":"d89925b6","kind":"handle","prompt_at_issue":668,"resumable":true,"t":25.80287925}
+{"arm":"tool","fact":"bike","kind":"fact_sent","t":31.273988084}
+{"arm":"tool","conn":1,"kind":"heard","t":31.439489834,"text":"Also remember, the red bike has a flat rear tire."}
+{"arm":"tool","conn":1,"kind":"usage","prompt":799,"prompt_by_modality":{"AUDIO":550,"TEXT":249},"response":41,"response_by_modality":{"AUDIO":26,"TEXT":15},"t":32.459906042}
+{"arm":"tool","conn":1,"kind":"turn_complete","said":"Got it.","t":32.460184209}
+{"arm":"tool","conn":1,"handle":"23dd6013","kind":"handle","prompt_at_issue":799,"resumable":true,"t":32.496562209}
+{"arm":"tool","fact":"wifi","kind":"fact_sent","t":37.916153667}
+{"arm":"tool","conn":1,"kind":"heard","t":38.015288209,"text":"Note this: the Wi-Fi password hint is mango river."}
+{"arm":"tool","conn":1,"kind":"usage","prompt":926,"prompt_by_modality":{"AUDIO":661,"TEXT":265},"response":42,"response_by_modality":{"AUDIO":26,"TEXT":16},"t":38.98199825}
+{"arm":"tool","conn":1,"kind":"turn_complete","said":"Got it.","t":38.982022959}
+{"arm":"tool","conn":1,"handle":"5c9cd88a","kind":"handle","prompt_at_issue":926,"resumable":true,"t":39.026012875}
+{"arm":"tool","fact":"library","kind":"fact_sent","t":44.236905417}
+{"arm":"tool","conn":1,"kind":"heard","t":44.331561125,"text":"Remember, the library book is due on the 12th."}
+{"arm":"tool","conn":1,"kind":"usage","prompt":1048,"prompt_by_modality":{"AUDIO":766,"TEXT":282},"response":43,"response_by_modality":{"AUDIO":26,"TEXT":17},"t":45.254395625}
+{"arm":"tool","conn":1,"kind":"turn_complete","said":"Got it.","t":45.25458375}
+{"arm":"tool","conn":1,"handle":"4c451e93","kind":"handle","prompt_at_issue":1048,"resumable":true,"t":45.292811834}
+{"arm":"tool","fact":"charger","kind":"fact_sent","t":50.7231055}
+{"arm":"tool","conn":1,"kind":"heard","t":50.851938459,"text":"Last one, the spare charger is in the green backpack."}
+{"arm":"tool","conn":1,"kind":"usage","prompt":1175,"prompt_by_modality":{"AUDIO":878,"TEXT":297},"response":39,"response_by_modality":{"AUDIO":24,"TEXT":15},"t":51.795456959}
+{"arm":"tool","conn":1,"kind":"turn_complete","said":"Got it.","t":51.795551792}
+{"arm":"tool","conn":1,"handle":"83301973","kind":"handle","prompt_at_issue":1175,"resumable":true,"t":51.797786292}
+{"args":{"query":"opening hours of the city museum"},"arm":"tool","conn":1,"kind":"tool_call","name":"lookup","t":56.580169667}
+{"arm":"tool","conn":1,"kind":"usage","prompt":1213,"prompt_by_modality":{"AUDIO":902,"TEXT":311},"response":15,"response_by_modality":{"TEXT":15},"t":56.580452667}
+{"arm":"tool","conn":1,"kind":"turn_complete","said":"","t":56.580516667}
+{"arm":"tool","conn":1,"handle":"6a210ffc","kind":"handle","prompt_at_issue":1213,"resumable":true,"t":56.624344834}
+{"arm":"tool","conn":1,"kind":"usage","prompt":1235,"prompt_by_modality":{"AUDIO":902,"TEXT":333},"response":27,"response_by_modality":{"AUDIO":24,"TEXT":3},"t":57.790356292}
+{"arm":"tool","conn":1,"kind":"turn_complete","said":"Got it.","t":57.790546084}
+{"arm":"tool","conn":1,"handle":"de000e5d","kind":"handle","prompt_at_issue":1235,"resumable":true,"t":57.832154709}
+{"arm":"tool","err":"<nil>","kind":"tool_response_sent","result":"The city museum is open 9 to 5, closed Mondays.","t":59.792982334}
+{"arm":"tool","conn":1,"kind":"usage","prompt":1278,"prompt_by_modality":{"AUDIO":926,"TEXT":352},"response":105,"response_by_modality":{"AUDIO":91,"TEXT":14},"t":63.56557975}
+{"arm":"tool","conn":1,"kind":"turn_complete","said":"The city museum is open 9 to 5, closed Mondays.","t":63.565703875}
+{"arm":"tool","conn":1,"handle":"e5433134","kind":"handle","prompt_at_issue":1278,"resumable":true,"t":63.607044459}
+{"args":{"query":"bus schedule number 42"},"arm":"tool","conn":1,"kind":"tool_call","name":"lookup","t":66.874871917}
+{"arm":"tool","conn":1,"kind":"usage","prompt":1393,"prompt_by_modality":{"AUDIO":1015,"TEXT":378},"response":15,"response_by_modality":{"TEXT":15},"t":66.876055167}
+{"arm":"tool","conn":1,"kind":"turn_complete","said":"","t":66.876196792}
+{"arm":"tool","err":"<nil>","kind":"tool_response_sent","result":"The number 42 bus runs every 15 minutes until midnight.","t":66.972399209}
+{"arm":"tool","conn":1,"handle":"bf3735a8","kind":"handle","prompt_at_issue":1393,"resumable":true,"t":66.998267292}
+{"arm":"tool","conn":1,"kind":"usage","prompt":1418,"prompt_by_modality":{"AUDIO":1015,"TEXT":403},"response":122,"response_by_modality":{"AUDIO":107,"TEXT":15},"t":71.443041709}
+{"arm":"tool","conn":1,"kind":"turn_complete","said":"The number 42 bus runs every 15 minutes until midnight.","t":71.443226417}
+{"arm":"tool","conn":1,"handle":"29e88f72","kind":"handle","prompt_at_issue":1418,"resumable":true,"t":71.487863584}
+{"arm":"tool","first_called":true,"kind":"tool_rounds","second_called":true,"t":74.445393375}
+{"arm":"tool","conn":1,"kind":"usage","prompt":1550,"prompt_by_modality":{"AUDIO":1120,"TEXT":430},"response":26,"response_by_modality":{"AUDIO":24,"TEXT":2},"t":75.501330167}
+{"arm":"tool","conn":1,"kind":"turn_complete","said":"Ok.","t":75.50157525}
+{"arm":"tool","conn":1,"handle":"56bf1105","kind":"handle","prompt_at_issue":1550,"resumable":true,"t":75.546297834}
+{"arm":"tool","handle_known":true,"handles_seen":14,"kind":"before_resume","prompt":1550,"prompt_by_modality":{"AUDIO":1120,"TEXT":430},"t":78.503804917}
+{"arm":"tool","conn":1,"err":"use of closed network connection","kind":"recv_end","t":78.504564542}
+{"arm":"tool","conn":2,"kind":"connected","resumed_with":true,"t":80.884275834}
+{"arm":"tool","fact":"blue_key","kind":"probe_sent","q":"Where is the blue key?","t":84.388394917}
+{"arm":"tool","conn":2,"kind":"usage","prompt":1582,"prompt_by_modality":{"AUDIO":1144,"TEXT":438},"response":72,"response_by_modality":{"AUDIO":63,"TEXT":9},"t":87.100165959}
+{"arm":"tool","conn":2,"kind":"turn_complete","said":"The blue key is in drawer number seven.","t":87.100368625}
+{"arm":"tool","conn":2,"handle":"d27f7750","kind":"handle","prompt_at_issue":1582,"resumable":true,"t":87.144457667}
+{"arm":"tool","fact":"blue_key","hit":true,"kind":"probe_result","said":"The blue key is in drawer number seven.","t":88.302581125}
+{"arm":"tool","fact":"cat","kind":"probe_sent","q":"What is my sister's cat called?","t":89.803073}
+{"arm":"tool","conn":2,"kind":"usage","prompt":1661,"prompt_by_modality":{"AUDIO":1205,"TEXT":456},"response":73,"response_by_modality":{"AUDIO":64,"TEXT":9},"t":92.689285375}
+{"arm":"tool","conn":2,"kind":"turn_complete","said":"Your sister's cat is called Pickle.","t":92.689367584}
+{"arm":"tool","conn":2,"handle":"4b21fc35","kind":"handle","prompt_at_issue":1661,"resumable":true,"t":92.68942275}
+{"arm":"tool","fact":"cat","hit":true,"kind":"probe_result","said":"Your sister's cat is called Pickle.","t":93.891560917}
+{"arm":"tool","fact":"dana","kind":"probe_sent","q":"When is the meeting with Dana?","t":95.394039375}
+{"arm":"tool","conn":2,"kind":"usage","prompt":1739,"prompt_by_modality":{"AUDIO":1267,"TEXT":472},"response":94,"response_by_modality":{"AUDIO":80,"TEXT":14},"t":105.797266042}
+{"arm":"tool","conn":2,"kind":"turn_complete","said":"The meeting with Dana is on Thursday at 3:00.","t":105.79747575}
+{"arm":"tool","conn":2,"handle":"c02ace5b","kind":"handle","prompt_at_issue":1739,"resumable":true,"t":105.797566792}
+{"arm":"tool","fact":"dana","hit":true,"kind":"probe_result","said":"The meeting with Dana is on Thursday at 3:00.","t":106.997832209}
+{"arm":"tool","fact":"server_code","kind":"probe_sent","q":"What is the server room code?","t":108.500408959}
+{"arm":"tool","conn":2,"kind":"usage","prompt":1838,"prompt_by_modality":{"AUDIO":1345,"TEXT":493},"response":94,"response_by_modality":{"AUDIO":83,"TEXT":11},"t":112.088787959}
+{"arm":"tool","conn":2,"kind":"turn_complete","said":"The server room code is 4492.","t":112.089004542}
+{"arm":"tool","conn":2,"handle":"5c5a6bf4","kind":"handle","prompt_at_issue":1838,"resumable":true,"t":112.11494425}
+{"arm":"tool","fact":"server_code","hit":true,"kind":"probe_result","said":"The server room code is 4492.","t":113.290119084}
+{"arm":"tool","fact":"bike","kind":"probe_sent","q":"What is wrong with the red bike?","t":114.792780834}
+{"arm":"tool","conn":2,"kind":"usage","prompt":1938,"prompt_by_modality":{"AUDIO":1426,"TEXT":512},"response":73,"response_by_modality":{"AUDIO":64,"TEXT":9},"t":117.547931375}
+{"arm":"tool","conn":2,"kind":"turn_complete","said":"The red bike has a flat rear tire.","t":117.548100292}
+{"arm":"tool","conn":2,"handle":"378a8ea0","kind":"handle","prompt_at_issue":1938,"resumable":true,"t":117.596273834}
+{"arm":"tool","fact":"bike","hit":true,"kind":"probe_result","said":"The red bike has a flat rear tire.","t":118.750281042}
+{"arm":"tool","fact":"wifi","kind":"probe_sent","q":"What is the Wi-Fi password hint?","t":120.251365375}
+{"arm":"tool","conn":2,"kind":"usage","prompt":2018,"prompt_by_modality":{"AUDIO":1488,"TEXT":530},"response":86,"response_by_modality":{"AUDIO":76,"TEXT":10},"t":123.418365709}
+{"arm":"tool","conn":2,"kind":"turn_complete","said":"The Wi-Fi password hint is mango river.","t":123.418477292}
+{"arm":"tool","conn":2,"handle":"b5322d5d","kind":"handle","prompt_at_issue":2018,"resumable":true,"t":123.462139917}
+{"arm":"tool","fact":"wifi","hit":true,"kind":"probe_result","said":"The Wi-Fi password hint is mango river.","t":124.619663417}
+{"arm":"tool","fact":"library","kind":"probe_sent","q":"When is the library book due?","t":126.12038525}
+{"arm":"tool","conn":2,"kind":"usage","prompt":2109,"prompt_by_modality":{"AUDIO":1562,"TEXT":547},"response":79,"response_by_modality":{"AUDIO":67,"TEXT":12},"t":128.988643375}
+{"arm":"tool","conn":2,"kind":"turn_complete","said":"The library book is due on the 12th.","t":128.9887835}
+{"arm":"tool","conn":2,"handle":"f14bb610","kind":"handle","prompt_at_issue":2109,"resumable":true,"t":129.032366917}
+{"arm":"tool","fact":"library","hit":true,"kind":"probe_result","said":"The library book is due on the 12th.","t":130.189487167}
+{"arm":"tool","fact":"charger","kind":"probe_sent","q":"Where is the spare charger?","t":131.691949375}
+{"arm":"tool","conn":2,"kind":"usage","prompt":2192,"prompt_by_modality":{"AUDIO":1627,"TEXT":565},"response":81,"response_by_modality":{"AUDIO":72,"TEXT":9},"t":134.788412459}
+{"arm":"tool","conn":2,"kind":"turn_complete","said":"The spare charger is in the green backpack.","t":134.788544375}
+{"arm":"tool","conn":2,"handle":"1d412044","kind":"handle","prompt_at_issue":2192,"resumable":true,"t":134.83509125}
+{"arm":"tool","fact":"charger","hit":true,"kind":"probe_result","said":"The spare charger is in the green backpack.","t":135.988975125}
+{"arm":"tool","fact":"umbrella","kind":"probe_sent","q":"Where is the umbrella?","t":137.491021834}
+{"arm":"tool","conn":2,"kind":"usage","prompt":2276,"prompt_by_modality":{"AUDIO":1697,"TEXT":579},"response":62,"response_by_modality":{"AUDIO":55,"TEXT":7},"t":139.885466375}
+{"arm":"tool","conn":2,"kind":"turn_complete","said":"The umbrella is in the car.","t":139.885690125}
+{"arm":"tool","conn":2,"handle":"f0ac7dc2","kind":"handle","prompt_at_issue":2276,"resumable":true,"t":139.934041792}
+{"arm":"tool","fact":"umbrella","hit":true,"kind":"probe_result","said":"The umbrella is in the car.","t":141.086405375}
+{"arm":"tool","fact":"museum_hours","kind":"probe_sent","q":"What are the museum's opening hours?","t":142.588913459}
+{"arm":"tool","conn":2,"kind":"usage","prompt":2345,"prompt_by_modality":{"AUDIO":1750,"TEXT":595},"response":106,"response_by_modality":{"AUDIO":92,"TEXT":14},"t":146.427058375}
+{"arm":"tool","conn":2,"kind":"turn_complete","said":"The city museum is open 9 to 5, closed Mondays.","t":146.427261875}
+{"arm":"tool","conn":2,"handle":"44488c30","kind":"handle","prompt_at_issue":2345,"resumable":true,"t":146.470221709}
+{"arm":"tool","fact":"museum_hours","hit":true,"kind":"probe_result","said":"The city museum is open 9 to 5, closed Mondays.","t":147.629475584}
+{"arm":"tool","fact":"bus42","kind":"probe_sent","q":"How often does the number 42 bus run?","t":149.131677042}
+{"arm":"tool","conn":2,"kind":"usage","prompt":2460,"prompt_by_modality":{"AUDIO":1840,"TEXT":620},"response":119,"response_by_modality":{"AUDIO":104,"TEXT":15},"t":153.504656375}
+{"arm":"tool","conn":2,"kind":"turn_complete","said":"The number 42 bus runs every 15 minutes until midnight.","t":153.504813834}
+{"arm":"tool","conn":2,"handle":"0a3af3ad","kind":"handle","prompt_at_issue":2460,"resumable":true,"t":153.521964459}
+{"arm":"tool","fact":"bus42","hit":true,"kind":"probe_result","said":"The number 42 bus runs every 15 minutes until midnight.","t":154.706207542}
+{"arm":"tool","backend":"vertex","date":"2026-10-04","handles":14,"interrupted":0,"kind":"summary","location":"us-central1","missed":null,"model":"gemini-3.8-live","prompt_after_by_modality":{"AUDIO":1144,"TEXT":438},"prompt_after_first":1582,"prompt_before":1550,"prompt_before_by_modality":{"AUDIO":1120,"TEXT":430},"prompt_ratio":1.0206451612903227,"recall":"11/11","recall_spoken_facts":"8/8","results":[{"hit":true,"name":"blue_key","q":"Where is the blue key?","said":"The blue key is in drawer number seven."},{"hit":true,"name":"cat","q":"What is my sister's cat called?","said":"Your sister's cat is called Pickle."},{"hit":true,"name":"dana","q":"When is the meeting with Dana?","said":"The meeting with Dana is on Thursday at 3:00."},{"hit":true,"name":"server_code","q":"What is the server room code?","said":"The server room code is 4492."},{"hit":true,"name":"bike","q":"What is wrong with the red bike?","said":"The red bike has a flat rear tire."},{"hit":true,"name":"wifi","q":"What is the Wi-Fi password hint?","said":"The Wi-Fi password hint is mango river."},{"hit":true,"name":"library","q":"When is the library book due?","said":"The library book is due on the 12th."},{"hit":true,"name":"charger","q":"Where is the spare charger?","said":"The spare charger is in the green backpack."},{"hit":true,"name":"umbrella","q":"Where is the umbrella?","said":"The umbrella is in the car."},{"hit":true,"name":"museum_hours","q":"What are the museum's opening hours?","said":"The city museum is open 9 to 5, closed Mondays."},{"hit":true,"name":"bus42","q":"How often does the number 42 bus run?","said":"The number 42 bus runs every 15 minutes until midnight."}],"resumed":true,"t":156.706980625,"tool_calls":2,"turns":25}
+{"arm":"tool","kind":"done","t":156.707812459}

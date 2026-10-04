@@ -43,3 +43,4 @@ go.work.sum
 
 # local test audio
 *.wav
+!cmd/livecanary/audio/*.wav
