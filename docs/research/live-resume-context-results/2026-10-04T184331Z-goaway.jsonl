@@ -1,0 +1,121 @@
+{"arm":"goaway","backend":"vertex","date":"2026-10-04T18:43:31Z","kind":"start","location":"us-central1","model":"gemini-3.8-live","resume":true,"t":0.000167625,"transparent":false}
+{"arm":"goaway","conn":1,"kind":"connected","resumed_with":false,"t":0.433438791}
+{"arm":"goaway","fact":"blue_key","kind":"fact_sent","t":4.664523166}
+{"arm":"goaway","conn":1,"kind":"heard","t":4.75926375,"text":"Please remember this: the blue key is in drawer number seven."}
+{"arm":"goaway","conn":1,"kind":"usage","prompt":206,"prompt_by_modality":{"AUDIO":93,"TEXT":113},"response":43,"response_by_modality":{"AUDIO":27,"TEXT":16},"t":5.852773958}
+{"arm":"goaway","conn":1,"kind":"turn_complete","said":"Got it.","t":5.852975416}
+{"arm":"goaway","conn":1,"handle":"7af10fb6","kind":"handle","prompt_at_issue":206,"resumable":true,"t":5.8969785}
+{"arm":"goaway","fact":"cat","kind":"fact_sent","t":11.277380208}
+{"arm":"goaway","conn":1,"kind":"heard","t":11.4279245,"text":"Remember this too: my sister's cat is called Pickle."}
+{"arm":"goaway","conn":1,"kind":"usage","prompt":333,"prompt_by_modality":{"AUDIO":204,"TEXT":129},"response":45,"response_by_modality":{"AUDIO":29,"TEXT":16},"t":12.4737035}
+{"arm":"goaway","conn":1,"kind":"turn_complete","said":"Got it.","t":12.47386775}
+{"arm":"goaway","conn":1,"handle":"6f832677","kind":"handle","prompt_at_issue":333,"resumable":true,"t":12.473951458}
+{"arm":"goaway","fact":"dana","kind":"fact_sent","t":18.096401916}
+{"arm":"goaway","conn":1,"kind":"heard","t":18.241042,"text":"Another one, the server room code is 4492."}
+{"arm":"goaway","conn":1,"kind":"usage","prompt":471,"prompt_by_modality":{"AUDIO":325,"TEXT":146},"response":45,"response_by_modality":{"AUDIO":28,"TEXT":17},"t":19.369736958}
+{"arm":"goaway","conn":1,"kind":"turn_complete","said":"Got it.","t":19.36992275}
+{"arm":"goaway","conn":1,"handle":"ad7b6f53","kind":"handle","prompt_at_issue":471,"resumable":true,"t":19.41383625}
+{"arm":"goaway","fact":"server_code","kind":"fact_sent","t":24.830240041}
+{"arm":"goaway","conn":1,"kind":"heard","t":24.938015916,"text":"Remember, the meeting with Dana moved to Thursday at 3:00."}
+{"arm":"goaway","conn":1,"kind":"usage","prompt":607,"prompt_by_modality":{"AUDIO":442,"TEXT":165},"response":44,"response_by_modality":{"AUDIO":25,"TEXT":19},"t":26.105064458}
+{"arm":"goaway","conn":1,"kind":"turn_complete","said":"Got it.","t":26.10537525}
+{"arm":"goaway","conn":1,"handle":"bfc12a22","kind":"handle","prompt_at_issue":607,"resumable":true,"t":26.105776125}
+{"arm":"goaway","fact":"bike","kind":"fact_sent","t":31.640888541}
+{"arm":"goaway","conn":1,"kind":"heard","t":31.73902275,"text":"Also remember, the red bike has a flat rear tire."}
+{"arm":"goaway","conn":1,"kind":"usage","prompt":737,"prompt_by_modality":{"AUDIO":557,"TEXT":180},"response":45,"response_by_modality":{"AUDIO":30,"TEXT":15},"t":32.95682575}
+{"arm":"goaway","conn":1,"kind":"turn_complete","said":"Got it.","t":32.9570355}
+{"arm":"goaway","conn":1,"handle":"a5567c41","kind":"handle","prompt_at_issue":737,"resumable":true,"t":33.002563416}
+{"arm":"goaway","fact":"wifi","kind":"fact_sent","t":38.398416208}
+{"arm":"goaway","conn":1,"kind":"heard","t":38.495923,"text":"Note this: the Wi-Fi password hint is mango river."}
+{"arm":"goaway","conn":1,"kind":"usage","prompt":868,"prompt_by_modality":{"AUDIO":672,"TEXT":196},"response":42,"response_by_modality":{"AUDIO":26,"TEXT":16},"t":39.538329458}
+{"arm":"goaway","conn":1,"kind":"turn_complete","said":"Got it.","t":39.538352916}
+{"arm":"goaway","conn":1,"handle":"615a200a","kind":"handle","prompt_at_issue":868,"resumable":true,"t":39.582966833}
+{"arm":"goaway","fact":"library","kind":"fact_sent","t":44.791401125}
+{"arm":"goaway","conn":1,"kind":"heard","t":44.884637166,"text":"Remember, the library book is due on the 12th."}
+{"arm":"goaway","conn":1,"kind":"usage","prompt":990,"prompt_by_modality":{"AUDIO":777,"TEXT":213},"response":44,"response_by_modality":{"AUDIO":27,"TEXT":17},"t":45.799072208}
+{"arm":"goaway","conn":1,"kind":"turn_complete","said":"Got it.","t":45.799307}
+{"arm":"goaway","conn":1,"handle":"df418013","kind":"handle","prompt_at_issue":990,"resumable":true,"t":45.845249375}
+{"arm":"goaway","fact":"charger","kind":"fact_sent","t":51.27019875}
+{"arm":"goaway","conn":1,"kind":"heard","t":51.393869541,"text":"Last one, the spare charger is in the green backpack."}
+{"arm":"goaway","conn":1,"kind":"usage","prompt":1118,"prompt_by_modality":{"AUDIO":890,"TEXT":228},"response":39,"response_by_modality":{"AUDIO":24,"TEXT":15},"t":52.344221708}
+{"arm":"goaway","conn":1,"kind":"turn_complete","said":"Got it.","t":52.344394708}
+{"arm":"goaway","conn":1,"handle":"17686682","kind":"handle","prompt_at_issue":1118,"resumable":true,"t":52.388837166}
+{"arm":"goaway","conn":1,"kind":"usage","prompt":1159,"prompt_by_modality":{"AUDIO":914,"TEXT":245},"response":26,"response_by_modality":{"AUDIO":24,"TEXT":2},"t":57.916405375}
+{"arm":"goaway","conn":1,"kind":"turn_complete","said":"Ok.","t":57.916596791}
+{"arm":"goaway","conn":1,"handle":"ea037f0f","kind":"handle","prompt_at_issue":1159,"resumable":true,"t":57.959726166}
+{"arm":"goaway","conn":1,"kind":"usage","prompt":1199,"prompt_by_modality":{"AUDIO":938,"TEXT":261},"response":26,"response_by_modality":{"AUDIO":24,"TEXT":2},"t":104.088952958}
+{"arm":"goaway","conn":1,"kind":"turn_complete","said":"Ok.","t":104.089106208}
+{"arm":"goaway","conn":1,"handle":"e58f9e78","kind":"handle","prompt_at_issue":1199,"resumable":true,"t":104.110001833}
+{"arm":"goaway","conn":1,"kind":"usage","prompt":1239,"prompt_by_modality":{"AUDIO":962,"TEXT":277},"response":25,"response_by_modality":{"AUDIO":23,"TEXT":2},"t":150.204951666}
+{"arm":"goaway","conn":1,"kind":"turn_complete","said":"Ok.","t":150.205161583}
+{"arm":"goaway","conn":1,"handle":"ab3ea4eb","kind":"handle","prompt_at_issue":1239,"resumable":true,"t":150.248921416}
+{"arm":"goaway","conn":1,"kind":"usage","prompt":1278,"prompt_by_modality":{"AUDIO":985,"TEXT":293},"response":26,"response_by_modality":{"AUDIO":24,"TEXT":2},"t":196.334544}
+{"arm":"goaway","conn":1,"kind":"turn_complete","said":"Ok.","t":196.334818958}
+{"arm":"goaway","conn":1,"handle":"c459377e","kind":"handle","prompt_at_issue":1278,"resumable":true,"t":196.380066541}
+{"arm":"goaway","conn":1,"kind":"usage","prompt":1318,"prompt_by_modality":{"AUDIO":1009,"TEXT":309},"response":25,"response_by_modality":{"AUDIO":23,"TEXT":2},"t":242.438069208}
+{"arm":"goaway","conn":1,"kind":"turn_complete","said":"Ok.","t":242.438210541}
+{"arm":"goaway","conn":1,"handle":"a01c7a2a","kind":"handle","prompt_at_issue":1318,"resumable":true,"t":242.48180075}
+{"arm":"goaway","conn":1,"kind":"usage","prompt":1357,"prompt_by_modality":{"AUDIO":1032,"TEXT":325},"response":25,"response_by_modality":{"AUDIO":23,"TEXT":2},"t":288.569451625}
+{"arm":"goaway","conn":1,"kind":"turn_complete","said":"Ok.","t":288.569614708}
+{"arm":"goaway","conn":1,"handle":"864a4db7","kind":"handle","prompt_at_issue":1357,"resumable":true,"t":288.616930041}
+{"arm":"goaway","conn":1,"kind":"usage","prompt":1396,"prompt_by_modality":{"AUDIO":1055,"TEXT":341},"response":26,"response_by_modality":{"AUDIO":24,"TEXT":2},"t":334.81520875}
+{"arm":"goaway","conn":1,"kind":"turn_complete","said":"Ok.","t":334.815648166}
+{"arm":"goaway","conn":1,"handle":"aa8a002f","kind":"handle","prompt_at_issue":1396,"resumable":true,"t":334.910773625}
+{"arm":"goaway","conn":1,"kind":"usage","prompt":1436,"prompt_by_modality":{"AUDIO":1079,"TEXT":357},"response":26,"response_by_modality":{"AUDIO":24,"TEXT":2},"t":381.04836325}
+{"arm":"goaway","conn":1,"kind":"turn_complete","said":"Ok.","t":381.04861375}
+{"arm":"goaway","conn":1,"handle":"34befee2","kind":"handle","prompt_at_issue":1436,"resumable":true,"t":381.048765666}
+{"arm":"goaway","conn":1,"kind":"usage","prompt":1476,"prompt_by_modality":{"AUDIO":1103,"TEXT":373},"response":27,"response_by_modality":{"AUDIO":25,"TEXT":2},"t":427.284571125}
+{"arm":"goaway","conn":1,"kind":"turn_complete","said":"Ok.","t":427.285421333}
+{"arm":"goaway","conn":1,"handle":"1f8ee48c","kind":"handle","prompt_at_issue":1476,"resumable":true,"t":427.32852825}
+{"arm":"goaway","conn":1,"kind":"usage","prompt":1518,"prompt_by_modality":{"AUDIO":1128,"TEXT":390},"response":26,"response_by_modality":{"AUDIO":24,"TEXT":2},"t":473.385936166}
+{"arm":"goaway","conn":1,"kind":"turn_complete","said":"Ok.","t":473.386197708}
+{"arm":"goaway","conn":1,"handle":"429cd953","kind":"handle","prompt_at_issue":1518,"resumable":true,"t":473.430253708}
+{"arm":"goaway","conn":1,"kind":"usage","prompt":1559,"prompt_by_modality":{"AUDIO":1152,"TEXT":407},"response":26,"response_by_modality":{"AUDIO":24,"TEXT":2},"t":519.5374925}
+{"arm":"goaway","conn":1,"kind":"turn_complete","said":"Ok.","t":519.537760541}
+{"arm":"goaway","conn":1,"handle":"35f26141","kind":"handle","prompt_at_issue":1559,"resumable":true,"t":519.582812916}
+{"arm":"goaway","conn":1,"kind":"goaway","t":547.64100825,"time_left":"30s"}
+{"arm":"goaway","handle_known":true,"handles_seen":19,"kind":"before_resume","prompt":1559,"prompt_by_modality":{"AUDIO":1152,"TEXT":407},"t":549.577306083}
+{"arm":"goaway","conn":2,"kind":"connected","resumed_with":true,"t":550.13378975}
+{"arm":"goaway","conn":1,"err":"read tcp [2601:644:8101:6260:65a3:652a:fc07:5d14]:60077-\u003e[2001:4860:4842:400::]:443: use of closed network connection","kind":"recv_end","t":550.13427675}
+{"arm":"goaway","fact":"blue_key","kind":"probe_sent","q":"Where is the blue key?","t":553.637542041}
+{"arm":"goaway","conn":2,"kind":"usage","prompt":1591,"prompt_by_modality":{"AUDIO":1176,"TEXT":415},"response":76,"response_by_modality":{"AUDIO":67,"TEXT":9},"t":556.4437705}
+{"arm":"goaway","conn":2,"kind":"turn_complete","said":"The blue key is in drawer number seven.","t":556.443968541}
+{"arm":"goaway","conn":2,"handle":"c4cad4e3","kind":"handle","prompt_at_issue":1591,"resumable":true,"t":556.487979666}
+{"arm":"goaway","fact":"blue_key","hit":true,"kind":"probe_result","said":"The blue key is in drawer number seven.","t":557.646159916}
+{"arm":"goaway","fact":"cat","kind":"probe_sent","q":"What is my sister's cat called?","t":559.1479715}
+{"arm":"goaway","conn":2,"kind":"usage","prompt":1674,"prompt_by_modality":{"AUDIO":1241,"TEXT":433},"response":71,"response_by_modality":{"AUDIO":62,"TEXT":9},"t":561.768762125}
+{"arm":"goaway","conn":2,"kind":"turn_complete","said":"Your sister's cat is called Pickle.","t":561.768961333}
+{"arm":"goaway","conn":2,"handle":"531ffac2","kind":"handle","prompt_at_issue":1674,"resumable":true,"t":561.815500833}
+{"arm":"goaway","fact":"cat","hit":true,"kind":"probe_result","said":"Your sister's cat is called Pickle.","t":562.970278625}
+{"arm":"goaway","fact":"dana","kind":"probe_sent","q":"When is the meeting with Dana?","t":564.472134}
+{"arm":"goaway","conn":2,"kind":"usage","prompt":1750,"prompt_by_modality":{"AUDIO":1301,"TEXT":449},"response":80,"response_by_modality":{"AUDIO":66,"TEXT":14},"t":567.42126125}
+{"arm":"goaway","conn":2,"kind":"turn_complete","said":"The meeting with Dana is on Thursday at 3:00.","t":567.421419875}
+{"arm":"goaway","conn":2,"handle":"c0862d02","kind":"handle","prompt_at_issue":1750,"resumable":true,"t":567.465791291}
+{"arm":"goaway","fact":"dana","hit":true,"kind":"probe_result","said":"The meeting with Dana is on Thursday at 3:00.","t":568.623399958}
+{"arm":"goaway","fact":"server_code","kind":"probe_sent","q":"What is the server room code?","t":570.126091166}
+{"arm":"goaway","conn":2,"kind":"usage","prompt":1835,"prompt_by_modality":{"AUDIO":1365,"TEXT":470},"response":80,"response_by_modality":{"AUDIO":69,"TEXT":11},"t":572.9964375}
+{"arm":"goaway","conn":2,"kind":"turn_complete","said":"The server room code is 4492.","t":572.996546541}
+{"arm":"goaway","conn":2,"handle":"d03c67a7","kind":"handle","prompt_at_issue":1835,"resumable":true,"t":573.041812541}
+{"arm":"goaway","fact":"server_code","hit":true,"kind":"probe_result","said":"The server room code is 4492.","t":574.197289458}
+{"arm":"goaway","fact":"bike","kind":"probe_sent","q":"What is wrong with the red bike?","t":575.699786333}
+{"arm":"goaway","conn":2,"kind":"usage","prompt":1921,"prompt_by_modality":{"AUDIO":1432,"TEXT":489},"response":77,"response_by_modality":{"AUDIO":68,"TEXT":9},"t":578.534787208}
+{"arm":"goaway","conn":2,"kind":"turn_complete","said":"The red bike has a flat rear tire.","t":578.535762916}
+{"arm":"goaway","conn":2,"handle":"49b7a438","kind":"handle","prompt_at_issue":1921,"resumable":true,"t":578.583900041}
+{"arm":"goaway","fact":"bike","hit":true,"kind":"probe_result","said":"The red bike has a flat rear tire.","t":579.736117416}
+{"arm":"goaway","fact":"wifi","kind":"probe_sent","q":"What is the Wi-Fi password hint?","t":581.236882958}
+{"arm":"goaway","conn":2,"kind":"usage","prompt":2005,"prompt_by_modality":{"AUDIO":1498,"TEXT":507},"response":90,"response_by_modality":{"AUDIO":80,"TEXT":10},"t":584.697480208}
+{"arm":"goaway","conn":2,"kind":"turn_complete","said":"The Wi-Fi password hint is mango river.","t":584.697626375}
+{"arm":"goaway","conn":2,"handle":"71a0eab5","kind":"handle","prompt_at_issue":2005,"resumable":true,"t":584.741493541}
+{"arm":"goaway","fact":"wifi","hit":true,"kind":"probe_result","said":"The Wi-Fi password hint is mango river.","t":585.899809708}
+{"arm":"goaway","fact":"library","kind":"probe_sent","q":"When is the library book due?","t":587.401290333}
+{"arm":"goaway","conn":2,"kind":"usage","prompt":2100,"prompt_by_modality":{"AUDIO":1576,"TEXT":524},"response":77,"response_by_modality":{"AUDIO":65,"TEXT":12},"t":590.237135}
+{"arm":"goaway","conn":2,"kind":"turn_complete","said":"The library book is due on the 12th.","t":590.237253916}
+{"arm":"goaway","conn":2,"handle":"cc06a98d","kind":"handle","prompt_at_issue":2100,"resumable":true,"t":590.241076416}
+{"arm":"goaway","fact":"library","hit":true,"kind":"probe_result","said":"The library book is due on the 12th.","t":591.438505958}
+{"arm":"goaway","fact":"charger","kind":"probe_sent","q":"Where is the spare charger?","t":592.941101458}
+{"arm":"goaway","conn":2,"kind":"usage","prompt":2181,"prompt_by_modality":{"AUDIO":1639,"TEXT":542},"response":80,"response_by_modality":{"AUDIO":71,"TEXT":9},"t":595.893964958}
+{"arm":"goaway","conn":2,"kind":"turn_complete","said":"The spare charger is in the green backpack.","t":595.894160333}
+{"arm":"goaway","conn":2,"handle":"3f52d21e","kind":"handle","prompt_at_issue":2181,"resumable":true,"t":596.004381041}
+{"arm":"goaway","fact":"charger","hit":true,"kind":"probe_result","said":"The spare charger is in the green backpack.","t":597.094417666}
+{"arm":"goaway","backend":"vertex","date":"2026-10-04","handles":19,"interrupted":0,"kind":"summary","location":"us-central1","missed":null,"model":"gemini-3.8-live","prompt_after_by_modality":{"AUDIO":1176,"TEXT":415},"prompt_after_first":1591,"prompt_before":1559,"prompt_before_by_modality":{"AUDIO":1152,"TEXT":407},"prompt_ratio":1.0205259781911482,"recall":"8/8","recall_spoken_facts":"8/8","results":[{"name":"blue_key","q":"Where is the blue key?","said":"The blue key is in drawer number seven.","hit":true},{"name":"cat","q":"What is my sister's cat called?","said":"Your sister's cat is called Pickle.","hit":true},{"name":"dana","q":"When is the meeting with Dana?","said":"The meeting with Dana is on Thursday at 3:00.","hit":true},{"name":"server_code","q":"What is the server room code?","said":"The server room code is 4492.","hit":true},{"name":"bike","q":"What is wrong with the red bike?","said":"The red bike has a flat rear tire.","hit":true},{"name":"wifi","q":"What is the Wi-Fi password hint?","said":"The Wi-Fi password hint is mango river.","hit":true},{"name":"library","q":"When is the library book due?","said":"The library book is due on the 12th.","hit":true},{"name":"charger","q":"Where is the spare charger?","said":"The spare charger is in the green backpack.","hit":true}],"resumed":true,"t":599.096756458,"tool_calls":0,"turns":27}
+{"arm":"goaway","kind":"done","t":599.097540458}

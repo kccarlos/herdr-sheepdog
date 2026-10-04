@@ -1,0 +1,129 @@
+{"arm":"compress","backend":"vertex","date":"2026-10-04T18:43:31Z","kind":"start","location":"us-central1","model":"gemini-3.8-live","resume":true,"t":0.000180666,"transparent":false}
+{"arm":"compress","conn":1,"kind":"connected","resumed_with":false,"t":0.433403333}
+{"arm":"compress","fact":"blue_key","kind":"fact_sent","t":4.660883875}
+{"arm":"compress","conn":1,"kind":"heard","t":4.760482,"text":"Please remember this: the blue key is in drawer number seven."}
+{"arm":"compress","conn":1,"kind":"usage","prompt":206,"prompt_by_modality":{"AUDIO":93,"TEXT":113},"response":41,"response_by_modality":{"AUDIO":25,"TEXT":16},"t":5.783035541}
+{"arm":"compress","conn":1,"kind":"turn_complete","said":"Got it.","t":5.7832462079999996}
+{"arm":"compress","conn":1,"handle":"88684fea","kind":"handle","prompt_at_issue":206,"resumable":true,"t":5.854827791}
+{"arm":"compress","fact":"cat","kind":"fact_sent","t":11.192388875}
+{"arm":"compress","conn":1,"kind":"heard","t":11.289936,"text":"Remember this too: my sister's cat is called Pickle."}
+{"arm":"compress","conn":1,"kind":"usage","prompt":331,"prompt_by_modality":{"AUDIO":202,"TEXT":129},"response":40,"response_by_modality":{"AUDIO":24,"TEXT":16},"t":12.152462916}
+{"arm":"compress","conn":1,"kind":"turn_complete","said":"Got it.","t":12.152628541}
+{"arm":"compress","conn":1,"handle":"a0b360a1","kind":"handle","prompt_at_issue":331,"resumable":true,"t":12.192241041}
+{"arm":"compress","fact":"dana","kind":"fact_sent","t":17.781472166}
+{"arm":"compress","conn":1,"kind":"heard","t":17.875681833,"text":"Another one, the server room code is 4492."}
+{"arm":"compress","conn":1,"kind":"usage","prompt":464,"prompt_by_modality":{"AUDIO":318,"TEXT":146},"response":40,"response_by_modality":{"AUDIO":23,"TEXT":17},"t":18.898074125}
+{"arm":"compress","conn":1,"kind":"turn_complete","said":"Got it.","t":18.898273666}
+{"arm":"compress","conn":1,"handle":"11693fb1","kind":"handle","prompt_at_issue":464,"resumable":true,"t":18.941035916}
+{"arm":"compress","fact":"server_code","kind":"fact_sent","t":24.368508041}
+{"arm":"compress","conn":1,"kind":"heard","t":24.533675708,"text":"Remember, the meeting with Dana moved to Thursday at 3:00."}
+{"arm":"compress","conn":1,"kind":"usage","prompt":595,"prompt_by_modality":{"AUDIO":430,"TEXT":165},"response":44,"response_by_modality":{"AUDIO":25,"TEXT":19},"t":25.580039}
+{"arm":"compress","conn":1,"kind":"turn_complete","said":"Got it.","t":25.580249082999998}
+{"arm":"compress","conn":1,"handle":"27b27db7","kind":"handle","prompt_at_issue":595,"resumable":true,"t":25.580353041}
+{"arm":"compress","fact":"bike","kind":"fact_sent","t":31.127755375}
+{"arm":"compress","conn":1,"kind":"heard","t":31.22934425,"text":"Also remember, the red bike has a flat rear tire."}
+{"arm":"compress","conn":1,"kind":"usage","prompt":725,"prompt_by_modality":{"AUDIO":545,"TEXT":180},"response":43,"response_by_modality":{"AUDIO":28,"TEXT":15},"t":32.397502458}
+{"arm":"compress","conn":1,"kind":"turn_complete","said":"Got it.","t":32.397614541}
+{"arm":"compress","conn":1,"handle":"286f5eb6","kind":"handle","prompt_at_issue":725,"resumable":true,"t":32.435593708}
+{"arm":"compress","fact":"wifi","kind":"fact_sent","t":37.851553416}
+{"arm":"compress","conn":1,"kind":"heard","t":37.942442666,"text":"Note this: the Wi-Fi password hint is mango river."}
+{"arm":"compress","conn":1,"kind":"usage","prompt":854,"prompt_by_modality":{"AUDIO":658,"TEXT":196},"response":40,"response_by_modality":{"AUDIO":24,"TEXT":16},"t":38.868969791}
+{"arm":"compress","conn":1,"kind":"turn_complete","said":"Got it.","t":38.869007708}
+{"arm":"compress","conn":1,"handle":"691c769d","kind":"handle","prompt_at_issue":854,"resumable":true,"t":38.910044208}
+{"arm":"compress","fact":"library","kind":"fact_sent","t":44.112662083}
+{"arm":"compress","conn":1,"kind":"heard","t":44.215926916,"text":"Remember, the library book is due on the 12th."}
+{"arm":"compress","conn":1,"kind":"usage","prompt":974,"prompt_by_modality":{"AUDIO":761,"TEXT":213},"response":43,"response_by_modality":{"AUDIO":26,"TEXT":17},"t":45.076316458}
+{"arm":"compress","conn":1,"kind":"turn_complete","said":"Got it.","t":45.07645975}
+{"arm":"compress","conn":1,"handle":"938fb690","kind":"handle","prompt_at_issue":974,"resumable":true,"t":45.121522458}
+{"arm":"compress","fact":"charger","kind":"fact_sent","t":50.549813083}
+{"arm":"compress","conn":1,"kind":"heard","t":50.640445,"text":"Last one, the spare charger is in the green backpack."}
+{"arm":"compress","conn":1,"kind":"usage","prompt":1101,"prompt_by_modality":{"AUDIO":873,"TEXT":228},"response":38,"response_by_modality":{"AUDIO":23,"TEXT":15},"t":51.530964375}
+{"arm":"compress","conn":1,"kind":"turn_complete","said":"Got it.","t":51.5311755}
+{"arm":"compress","conn":1,"handle":"af3c0fed","kind":"handle","prompt_at_issue":1101,"resumable":true,"t":51.575381333}
+{"arm":"compress","conn":1,"kind":"usage","prompt":3157,"prompt_by_modality":{"AUDIO":896,"TEXT":2261},"response":26,"response_by_modality":{"AUDIO":24,"TEXT":2},"t":58.338405458}
+{"arm":"compress","conn":1,"kind":"turn_complete","said":"Ok.","t":58.338634833}
+{"arm":"compress","conn":1,"handle":"3957b03f","kind":"handle","prompt_at_issue":3157,"resumable":true,"t":58.385028166}
+{"arm":"compress","kind":"compress_round","peak":0,"prompt":3157,"round":1,"t":59.840830416}
+{"arm":"compress","conn":1,"kind":"usage","prompt":5222,"prompt_by_modality":{"AUDIO":920,"TEXT":4302},"response":25,"response_by_modality":{"AUDIO":23,"TEXT":2},"t":62.063948583}
+{"arm":"compress","conn":1,"kind":"turn_complete","said":"Ok.","t":62.064273666}
+{"arm":"compress","conn":1,"handle":"e1873311","kind":"handle","prompt_at_issue":5222,"resumable":true,"t":62.112922791}
+{"arm":"compress","kind":"compress_round","peak":3157,"prompt":5222,"round":2,"t":63.5653445}
+{"arm":"compress","conn":1,"kind":"usage","prompt":7287,"prompt_by_modality":{"AUDIO":943,"TEXT":6344},"response":32,"response_by_modality":{"AUDIO":30,"TEXT":2},"t":66.121712458}
+{"arm":"compress","conn":1,"kind":"turn_complete","said":"Ok.","t":66.121930125}
+{"arm":"compress","conn":1,"handle":"bfa16e90","kind":"handle","prompt_at_issue":7287,"resumable":true,"t":66.1676995}
+{"arm":"compress","kind":"compress_round","peak":5222,"prompt":7287,"round":3,"t":67.62418675}
+{"arm":"compress","conn":1,"kind":"usage","prompt":9355,"prompt_by_modality":{"AUDIO":973,"TEXT":8382},"response":30,"response_by_modality":{"AUDIO":28,"TEXT":2},"t":70.145050125}
+{"arm":"compress","conn":1,"kind":"turn_complete","said":"Ok.","t":70.14528925}
+{"arm":"compress","conn":1,"handle":"5c1980a0","kind":"handle","prompt_at_issue":9355,"resumable":true,"t":70.145459}
+{"arm":"compress","kind":"compress_round","peak":7287,"prompt":9355,"round":4,"t":71.646991666}
+{"arm":"compress","conn":1,"kind":"usage","prompt":11423,"prompt_by_modality":{"AUDIO":1001,"TEXT":10422},"response":24,"response_by_modality":{"AUDIO":22,"TEXT":2},"t":74.031769}
+{"arm":"compress","conn":1,"kind":"turn_complete","said":"Ok.","t":74.031963916}
+{"arm":"compress","conn":1,"handle":"0ec53a72","kind":"handle","prompt_at_issue":11423,"resumable":true,"t":74.079893166}
+{"arm":"compress","kind":"compress_round","peak":9355,"prompt":11423,"round":5,"t":75.532516458}
+{"arm":"compress","conn":1,"kind":"usage","prompt":13484,"prompt_by_modality":{"AUDIO":1023,"TEXT":12461},"response":28,"response_by_modality":{"AUDIO":26,"TEXT":2},"t":77.841705833}
+{"arm":"compress","conn":1,"kind":"turn_complete","said":"Ok.","t":77.842104875}
+{"arm":"compress","conn":1,"handle":"6edc47ec","kind":"handle","prompt_at_issue":13484,"resumable":true,"t":77.889729416}
+{"arm":"compress","kind":"compress_round","peak":11423,"prompt":13484,"round":6,"t":79.344320916}
+{"arm":"compress","conn":1,"kind":"usage","prompt":2178,"prompt_by_modality":{"AUDIO":26,"TEXT":2152},"response":23,"response_by_modality":{"AUDIO":21,"TEXT":2},"t":81.742926791}
+{"arm":"compress","conn":1,"kind":"turn_complete","said":"Ok.","t":81.743139791}
+{"arm":"compress","conn":1,"handle":"d3797d5a","kind":"handle","prompt_at_issue":2178,"resumable":true,"t":81.789734958}
+{"arm":"compress","kind":"compress_round","peak":13484,"prompt":2178,"round":7,"t":83.245382833}
+{"arm":"compress","conn":1,"kind":"usage","prompt":4237,"prompt_by_modality":{"AUDIO":47,"TEXT":4190},"response":26,"response_by_modality":{"AUDIO":24,"TEXT":2},"t":85.590163416}
+{"arm":"compress","conn":1,"kind":"turn_complete","said":"Ok.","t":85.590373541}
+{"arm":"compress","conn":1,"handle":"ad7d0f34","kind":"handle","prompt_at_issue":4237,"resumable":true,"t":85.632551083}
+{"arm":"compress","kind":"compress_round","peak":13484,"prompt":4237,"round":8,"t":87.092552291}
+{"arm":"compress","drop_seen":true,"kind":"compress_done","peak":13484,"t":87.092750458}
+{"arm":"compress","conn":1,"kind":"usage","prompt":4274,"prompt_by_modality":{"AUDIO":71,"TEXT":4203},"response":29,"response_by_modality":{"AUDIO":26,"TEXT":3},"t":88.253939791}
+{"arm":"compress","conn":1,"kind":"turn_complete","said":"Got it.","t":88.254144333}
+{"arm":"compress","conn":1,"handle":"97e9c116","kind":"handle","prompt_at_issue":4274,"resumable":true,"t":88.2985375}
+{"arm":"compress","handle_known":true,"handles_seen":17,"kind":"before_resume","prompt":4274,"prompt_by_modality":{"AUDIO":71,"TEXT":4203},"t":91.255991958}
+{"arm":"compress","conn":1,"err":"read tcp [2601:644:8101:6260:65a3:652a:fc07:5d14]:60076-\u003e[2001:4860:4842:400::]:443: use of closed network connection","kind":"recv_end","t":91.256552416}
+{"arm":"compress","conn":2,"kind":"connected","resumed_with":true,"t":93.75483375}
+{"arm":"compress","fact":"blue_key","kind":"probe_sent","q":"Where is the blue key?","t":97.257843583}
+{"arm":"compress","conn":2,"kind":"usage","prompt":4309,"prompt_by_modality":{"AUDIO":97,"TEXT":4212},"response":40,"response_by_modality":{"AUDIO":34,"TEXT":6},"t":105.866957625}
+{"arm":"compress","conn":2,"kind":"turn_complete","said":"I don't know.","t":105.867107416}
+{"arm":"compress","conn":2,"handle":"19ca2549","kind":"handle","prompt_at_issue":4309,"resumable":true,"t":105.867204541}
+{"arm":"compress","fact":"blue_key","hit":false,"kind":"probe_result","said":"I don't know.","t":107.06934925}
+{"arm":"compress","fact":"cat","kind":"probe_sent","q":"What is my sister's cat called?","t":108.570312583}
+{"arm":"compress","conn":2,"kind":"usage","prompt":4356,"prompt_by_modality":{"AUDIO":129,"TEXT":4227},"response":31,"response_by_modality":{"AUDIO":25,"TEXT":6},"t":109.764971916}
+{"arm":"compress","conn":2,"kind":"turn_complete","said":"I don't know.","t":109.765162041}
+{"arm":"compress","conn":2,"handle":"a7f75909","kind":"handle","prompt_at_issue":4356,"resumable":true,"t":109.784220541}
+{"arm":"compress","fact":"cat","hit":false,"kind":"probe_result","said":"I don't know.","t":110.966917958}
+{"arm":"compress","fact":"dana","kind":"probe_sent","q":"When is the meeting with Dana?","t":112.467531916}
+{"arm":"compress","conn":2,"kind":"usage","prompt":4394,"prompt_by_modality":{"AUDIO":154,"TEXT":4240},"response":37,"response_by_modality":{"AUDIO":31,"TEXT":6},"t":113.898704833}
+{"arm":"compress","conn":2,"kind":"turn_complete","said":"I don't know.","t":113.898856875}
+{"arm":"compress","conn":2,"handle":"cd379cb6","kind":"handle","prompt_at_issue":4394,"resumable":true,"t":113.943210375}
+{"arm":"compress","fact":"dana","hit":false,"kind":"probe_result","said":"I don't know.","t":115.100049916}
+{"arm":"compress","fact":"server_code","kind":"probe_sent","q":"What is the server room code?","t":116.60266475}
+{"arm":"compress","conn":2,"kind":"usage","prompt":4436,"prompt_by_modality":{"AUDIO":183,"TEXT":4253},"response":40,"response_by_modality":{"AUDIO":34,"TEXT":6},"t":118.13274475}
+{"arm":"compress","conn":2,"kind":"turn_complete","said":"I don't know.","t":118.132916583}
+{"arm":"compress","conn":2,"handle":"119aab57","kind":"handle","prompt_at_issue":4436,"resumable":true,"t":118.173745166}
+{"arm":"compress","fact":"server_code","hit":false,"kind":"probe_result","said":"I don't know.","t":119.335143916}
+{"arm":"compress","fact":"bike","kind":"probe_sent","q":"What is wrong with the red bike?","t":120.835592416}
+{"arm":"compress","conn":2,"kind":"usage","prompt":4482,"prompt_by_modality":{"AUDIO":215,"TEXT":4267},"response":39,"response_by_modality":{"AUDIO":33,"TEXT":6},"t":122.398305583}
+{"arm":"compress","conn":2,"kind":"turn_complete","said":"I don't know.","t":122.398521166}
+{"arm":"compress","conn":2,"handle":"66121a2b","kind":"handle","prompt_at_issue":4482,"resumable":true,"t":122.441356}
+{"arm":"compress","fact":"bike","hit":false,"kind":"probe_result","said":"I don't know.","t":123.599211125}
+{"arm":"compress","fact":"wifi","kind":"probe_sent","q":"What is the Wi-Fi password hint?","t":125.102105833}
+{"arm":"compress","conn":2,"kind":"usage","prompt":4528,"prompt_by_modality":{"AUDIO":246,"TEXT":4282},"response":40,"response_by_modality":{"AUDIO":34,"TEXT":6},"t":126.768521791}
+{"arm":"compress","conn":2,"kind":"turn_complete","said":"I don't know.","t":126.768735208}
+{"arm":"compress","conn":2,"handle":"d0237dfe","kind":"handle","prompt_at_issue":4528,"resumable":true,"t":126.768791291}
+{"arm":"compress","fact":"wifi","hit":false,"kind":"probe_result","said":"I don't know.","t":127.969278666}
+{"arm":"compress","fact":"library","kind":"probe_sent","q":"When is the library book due?","t":129.470072083}
+{"arm":"compress","conn":2,"kind":"usage","prompt":4573,"prompt_by_modality":{"AUDIO":278,"TEXT":4295},"response":37,"response_by_modality":{"AUDIO":31,"TEXT":6},"t":130.962422}
+{"arm":"compress","conn":2,"kind":"turn_complete","said":"I don't know.","t":130.962691125}
+{"arm":"compress","conn":2,"handle":"96f47ddb","kind":"handle","prompt_at_issue":4573,"resumable":true,"t":130.972189208}
+{"arm":"compress","fact":"library","hit":false,"kind":"probe_result","said":"I don't know.","t":132.164917291}
+{"arm":"compress","fact":"charger","kind":"probe_sent","q":"Where is the spare charger?","t":133.665787125}
+{"arm":"compress","conn":2,"kind":"usage","prompt":4614,"prompt_by_modality":{"AUDIO":307,"TEXT":4307},"response":41,"response_by_modality":{"AUDIO":35,"TEXT":6},"t":135.496524416}
+{"arm":"compress","conn":2,"kind":"turn_complete","said":"I don't know.","t":135.496720041}
+{"arm":"compress","conn":2,"handle":"0fa1e1db","kind":"handle","prompt_at_issue":4614,"resumable":true,"t":135.540825625}
+{"arm":"compress","fact":"charger","hit":false,"kind":"probe_result","said":"I don't know.","t":136.698460166}
+{"arm":"compress","fact":"parking","kind":"probe_sent","q":"Where is the parking spot?","t":138.200836458}
+{"arm":"compress","conn":2,"kind":"usage","prompt":4659,"prompt_by_modality":{"AUDIO":340,"TEXT":4319},"response":71,"response_by_modality":{"AUDIO":63,"TEXT":8},"t":140.924102375}
+{"arm":"compress","conn":2,"kind":"turn_complete","said":"The parking spot is B14.","t":140.9242095}
+{"arm":"compress","conn":2,"handle":"b50d7813","kind":"handle","prompt_at_issue":4659,"resumable":true,"t":140.924302958}
+{"arm":"compress","fact":"parking","hit":true,"kind":"probe_result","said":"The parking spot is B14.","t":142.126436958}
+{"arm":"compress","backend":"vertex","date":"2026-10-04","handles":17,"interrupted":0,"kind":"summary","location":"us-central1","missed":["blue_key","cat","dana","server_code","bike","wifi","library","charger"],"model":"gemini-3.8-live","prompt_after_by_modality":{"AUDIO":97,"TEXT":4212},"prompt_after_first":4309,"prompt_before":4274,"prompt_before_by_modality":{"AUDIO":71,"TEXT":4203},"prompt_ratio":1.0081890500701918,"recall":"1/9","recall_spoken_facts":"0/8","results":[{"name":"blue_key","q":"Where is the blue key?","said":"I don't know.","hit":false},{"name":"cat","q":"What is my sister's cat called?","said":"I don't know.","hit":false},{"name":"dana","q":"When is the meeting with Dana?","said":"I don't know.","hit":false},{"name":"server_code","q":"What is the server room code?","said":"I don't know.","hit":false},{"name":"bike","q":"What is wrong with the red bike?","said":"I don't know.","hit":false},{"name":"wifi","q":"What is the Wi-Fi password hint?","said":"I don't know.","hit":false},{"name":"library","q":"When is the library book due?","said":"I don't know.","hit":false},{"name":"charger","q":"Where is the spare charger?","said":"I don't know.","hit":false},{"name":"parking","q":"Where is the parking spot?","said":"The parking spot is B14.","hit":true}],"resumed":true,"t":144.12868475,"tool_calls":0,"turns":26}
+{"arm":"compress","conn":2,"err":"read tcp [2601:644:8101:6260:65a3:652a:fc07:5d14]:60132-\u003e[2001:4860:4842:400::]:443: use of closed network connection","kind":"recv_end","t":144.129050208}
+{"arm":"compress","kind":"done","t":144.129060208}

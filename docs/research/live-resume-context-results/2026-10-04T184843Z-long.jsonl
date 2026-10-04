@@ -1,0 +1,103 @@
+{"arm":"long","backend":"vertex","date":"2026-10-04T18:48:43Z","kind":"start","location":"us-central1","model":"gemini-3.8-live","resume":true,"t":0.00029275,"transparent":false}
+{"arm":"long","conn":1,"kind":"connected","resumed_with":false,"t":0.468889}
+{"arm":"long","fact":"blue_key","kind":"fact_sent","t":4.714929833}
+{"arm":"long","conn":1,"kind":"heard","t":4.809017333,"text":"Please remember this: the blue key is in drawer number seven."}
+{"arm":"long","conn":1,"kind":"usage","prompt":224,"prompt_by_modality":{"AUDIO":93,"TEXT":131},"response":43,"response_by_modality":{"AUDIO":27,"TEXT":16},"t":5.907761167,"thoughts":59,"total":326}
+{"arm":"long","conn":1,"kind":"turn_complete","said":"Got it.","t":5.907935333}
+{"arm":"long","conn":1,"handle":"808991cb","kind":"handle","prompt_at_issue":224,"resumable":true,"t":5.957014125}
+{"arm":"long","fact":"cat","kind":"fact_sent","t":11.342891}
+{"arm":"long","conn":1,"kind":"heard","t":11.472439583,"text":"Remember this too: my sister's cat is called Pickle."}
+{"arm":"long","conn":1,"kind":"usage","prompt":351,"prompt_by_modality":{"AUDIO":204,"TEXT":147},"response":41,"response_by_modality":{"AUDIO":25,"TEXT":16},"t":12.397746208,"thoughts":58,"total":450}
+{"arm":"long","conn":1,"kind":"turn_complete","said":"Got it.","t":12.3979705}
+{"arm":"long","conn":1,"handle":"a731ce09","kind":"handle","prompt_at_issue":351,"resumable":true,"t":12.398101958}
+{"arm":"long","fact":"dana","kind":"fact_sent","t":18.045421333}
+{"arm":"long","conn":1,"kind":"heard","t":18.1643865,"text":"Another one, the server room code is 4492."}
+{"arm":"long","conn":1,"kind":"usage","prompt":485,"prompt_by_modality":{"AUDIO":321,"TEXT":164},"response":43,"response_by_modality":{"AUDIO":26,"TEXT":17},"t":19.288290083,"thoughts":63,"total":591}
+{"arm":"long","conn":1,"kind":"turn_complete","said":"Got it.","t":19.288495917}
+{"arm":"long","conn":1,"handle":"34e128b5","kind":"handle","prompt_at_issue":485,"resumable":true,"t":19.3366005}
+{"arm":"long","fact":"server_code","kind":"fact_sent","t":24.801840042}
+{"arm":"long","conn":1,"kind":"heard","t":24.977378875,"text":"Remember, the meeting with Dana moved to Thursday at 3:00."}
+{"arm":"long","conn":1,"kind":"usage","prompt":619,"prompt_by_modality":{"AUDIO":436,"TEXT":183},"response":45,"response_by_modality":{"AUDIO":26,"TEXT":19},"t":26.028187375,"thoughts":38,"total":702}
+{"arm":"long","conn":1,"kind":"turn_complete","said":"Got it.","t":26.028351042}
+{"arm":"long","conn":1,"handle":"d40acb37","kind":"handle","prompt_at_issue":619,"resumable":true,"t":26.045778167}
+{"arm":"long","fact":"bike","kind":"fact_sent","t":31.583075958}
+{"arm":"long","conn":1,"kind":"heard","t":31.680604083,"text":"Also remember, the red bike has a flat rear tire."}
+{"arm":"long","conn":1,"kind":"usage","prompt":750,"prompt_by_modality":{"AUDIO":552,"TEXT":198},"response":40,"response_by_modality":{"AUDIO":25,"TEXT":15},"t":32.72350975,"thoughts":35,"total":825}
+{"arm":"long","conn":1,"kind":"turn_complete","said":"Got it.","t":32.723667167}
+{"arm":"long","conn":1,"handle":"db832f54","kind":"handle","prompt_at_issue":750,"resumable":true,"t":32.842305208}
+{"arm":"long","fact":"wifi","kind":"fact_sent","t":38.184703208}
+{"arm":"long","conn":1,"kind":"heard","t":38.289315208,"text":"Note this: the Wi-Fi password hint is mango river."}
+{"arm":"long","conn":1,"kind":"usage","prompt":876,"prompt_by_modality":{"AUDIO":662,"TEXT":214},"response":42,"response_by_modality":{"AUDIO":26,"TEXT":16},"t":39.300751708,"thoughts":54,"total":972}
+{"arm":"long","conn":1,"kind":"turn_complete","said":"Got it.","t":39.300878833}
+{"arm":"long","conn":1,"handle":"fb5880b6","kind":"handle","prompt_at_issue":876,"resumable":true,"t":39.351969917}
+{"arm":"long","fact":"library","kind":"fact_sent","t":44.572216292}
+{"arm":"long","conn":1,"kind":"heard","t":44.677515292,"text":"Remember, the library book is due on the 12th."}
+{"arm":"long","conn":1,"kind":"usage","prompt":998,"prompt_by_modality":{"AUDIO":767,"TEXT":231},"response":41,"response_by_modality":{"AUDIO":24,"TEXT":17},"t":45.533113333,"thoughts":46,"total":1085}
+{"arm":"long","conn":1,"kind":"turn_complete","said":"Got it.","t":45.533446125}
+{"arm":"long","conn":1,"handle":"befff3cf","kind":"handle","prompt_at_issue":998,"resumable":true,"t":45.577113208}
+{"arm":"long","fact":"charger","kind":"fact_sent","t":51.021126792}
+{"arm":"long","conn":1,"kind":"heard","t":51.194788292,"text":"Last one, the spare charger is in the green backpack."}
+{"arm":"long","conn":1,"kind":"usage","prompt":1123,"prompt_by_modality":{"AUDIO":877,"TEXT":246},"response":41,"response_by_modality":{"AUDIO":26,"TEXT":15},"t":52.244553083,"thoughts":35,"total":1199}
+{"arm":"long","conn":1,"kind":"turn_complete","said":"Got it.","t":52.244702125}
+{"arm":"long","conn":1,"handle":"102dd363","kind":"handle","prompt_at_issue":1123,"resumable":true,"t":52.244799208}
+{"arm":"long","conn":1,"kind":"usage","prompt":1173,"prompt_by_modality":{"AUDIO":903,"TEXT":270},"response":1696,"response_by_modality":{"AUDIO":1486,"TEXT":210},"t":116.791536875,"thoughts":580,"total":3449}
+{"arm":"long","conn":1,"kind":"turn_complete","said":"Elias lived on the isolated island of Skellig Rock for over thirty years. His only companions were the gulls and the rhythmic sound of the waves against the cliffs. Every evening, he climbed the winding spiral staircase to the lantern room. He carefully polished the massive brass clockwork mechanism. Then, he lit the wick and ensured the great lens rotated perfectly. One stormy night, the wind howled louder than Elias had ever heard before. Rain lashed against the thick glass panes like thrown pebbles. Suddenly, Elias spotted a small fishing boat struggling against the violent swells. They were dangerously close to the jagged rocks hidden beneath the foam. Elias worked tirelessly to ensure the beam remained steady and bright. He watched anxiously as the vessel navigated the treacherous passage. The captain of the boat flashed a quick signal of gratitude as they passed. By morning, the storm cleared, revealing the boat safely maneuvering out to deep waters. Elias felt a quiet pride in knowing his vigilance had protected them. He brewed himself a strong cup of tea and watched the sunrise paint the sky.","t":116.791779958}
+{"arm":"long","conn":1,"handle":"3f126bf8","kind":"handle","prompt_at_issue":1173,"resumable":true,"t":116.838582875}
+{"arm":"long","conn":1,"kind":"usage","prompt":2890,"prompt_by_modality":{"AUDIO":2387,"TEXT":503},"response":1868,"response_by_modality":{"AUDIO":1629,"TEXT":239},"t":184.709553167,"thoughts":443,"total":5201}
+{"arm":"long","conn":1,"kind":"turn_complete","said":"The old railway station at night was a sanctuary of silence and low-hanging shadows. Dimly lit platforms stretched into the darkness, smelling faintly of creosote and stale rain. Arthur, the night station master, sat in his glass-walled office, watching the flickering fluorescent lights. His only company was the occasional hiss of steam from a distant freight engine being shunted in the yards. A sudden crackle over the intercom announced the arrival of the midnight express. The platform lights hummed to life, casting long, dramatic shadows across the cobblestones. From the gloom emerged the locomotive, a powerful engine breathing heavily with heat and smoke. Only a handful of weary travelers stepped off, their coats pulled tight against the biting cold wind. They moved like ghosts toward the exit, their muffled footsteps echoing against the high stone walls. Arthur marked the logbook, recording the train's precise arrival time with slow, deliberate strokes. The whistle blew sharp and clear, slicing through the nocturnal quietude. Slowly, the train lurched forward, its red tail lights fading like dying embers in the distance. Once again, tranquility reclaimed the station, leaving it wrapped in the deep quiet of the midnight hour.","t":184.709740417}
+{"arm":"long","conn":1,"handle":"a977d6e6","kind":"handle","prompt_at_issue":2890,"resumable":true,"t":184.757994542}
+{"arm":"long","conn":1,"kind":"usage","prompt":4780,"prompt_by_modality":{"AUDIO":4014,"TEXT":766},"response":1580,"response_by_modality":{"AUDIO":1393,"TEXT":187},"t":242.6763225,"thoughts":58,"total":6418}
+{"arm":"long","conn":1,"kind":"turn_complete","said":"High in the mist-shrouded peaks, the village market awakened to the sound of chiming bells. Stalls made of rough-hewn pine lined the cobblestone square, overflowing with vibrant textiles and fresh produce. Farmers from lower valleys proudly displayed baskets of glistening apples, pungent cheeses, and bundles of dried herbs. The crisp mountain air was thick with the tempting aroma of sizzling sausages and freshly baked rye bread. Villagers moved between the stalls exchanging gossip and bartering for their daily needs. Children darted through the bustling crowd, their laughter echoing against the ancient stone walls. An elderly weaver showed off her intricate patterns, explaining the significance of each motif to keen buyers. As the afternoon sun began to dip behind the peaks, long shadows stretched across the market square. Traders started to pack away their remaining wares, counting their coins with satisfaction. The vibrant market slowly quieted, leaving behind the peaceful silence of the mountain evening.","t":242.676538792}
+{"arm":"long","conn":1,"handle":"9a4e8fb1","kind":"handle","prompt_at_issue":4780,"resumable":true,"t":242.726861958}
+{"arm":"long","conn":1,"kind":"usage","prompt":6381,"prompt_by_modality":{"AUDIO":5405,"TEXT":976},"response":2169,"response_by_modality":{"AUDIO":1870,"TEXT":299},"t":320.316015417,"thoughts":428,"total":8978}
+{"arm":"long","conn":1,"kind":"turn_complete","said":"The iron-hulled freighter, the *Stormbreaker*, labored heavily as it fought against mountainous waves. The horizon had vanished hours ago, replaced by a swirling cauldron of bruised-purple clouds and horizontal rain. Captain Hale stood on the salt-slicked bridge, his knuckles white as his hands gripped the iron railing. Gale-force winds screamed through the rigging like wounded beasts, deafening all on deck. Below decks, the engine room was a frenzy of noise, heat, and desperate effort to keep the massive propellers churning. A rogue wave suddenly slammed into the starboard side, causing the vessel to heel violently to port. Alarms blared as unsecured cargo shifted in the hold, sending a shudder through the ship's entire frame. Seawater surged across the bow, flooding the foredeck and testing the limits of the watertight seals. Through the driving rain, the radar screen flickered erratically, useless against the blinding intensity of the storm. The first mate shouted over the gale, reporting a breach in the forward storage compartments. Captain Hale did not break his concentration, calculating every adjustment needed to keep the ship from broaching. For hours, the battle between man, machine, and the fury of the open ocean raged without mercy. Slowly, the sky began to show faint streaks of pre-dawn gray, signaling the weakening of the storm's core. Though battered and leaking slightly, the *Stormbreaker* remained afloat, cutting steadily through the subsiding swell toward calmer waters.","t":320.31634375}
+{"arm":"long","conn":1,"handle":"d03e13d5","kind":"handle","prompt_at_issue":6381,"resumable":true,"t":320.374866375}
+{"arm":"long","conn":1,"kind":"usage","prompt":8560,"prompt_by_modality":{"AUDIO":7273,"TEXT":1287},"response":28,"response_by_modality":{"AUDIO":26,"TEXT":2},"t":323.96552025,"thoughts":257,"total":8845}
+{"arm":"long","conn":1,"kind":"turn_complete","said":"Ok.","t":323.965701708}
+{"arm":"long","conn":1,"handle":"d3c8372e","kind":"handle","prompt_at_issue":8560,"resumable":true,"t":324.020781625}
+{"arm":"long","handle_known":true,"handles_seen":13,"kind":"before_resume","prompt":8560,"prompt_by_modality":{"AUDIO":7273,"TEXT":1287},"t":326.967747125}
+{"arm":"long","conn":1,"err":"read tcp [2601:644:8101:6260:65a3:652a:fc07:5d14]:60171-\u003e[2001:4860:4844:400::]:443: use of closed network connection","kind":"recv_end","t":326.968657958}
+{"arm":"long","conn":2,"kind":"connected","resumed_with":true,"t":329.676995625}
+{"arm":"long","fact":"blue_key","kind":"probe_sent","q":"Where is the blue key?","t":333.17975575}
+{"arm":"long","conn":2,"kind":"usage","prompt":8594,"prompt_by_modality":{"AUDIO":7299,"TEXT":1295},"response":81,"response_by_modality":{"AUDIO":72,"TEXT":9},"t":336.404201125,"thoughts":67,"total":8742}
+{"arm":"long","conn":2,"kind":"turn_complete","said":"The blue key is in drawer number seven.","t":336.40443775}
+{"arm":"long","conn":2,"handle":"3eaacae0","kind":"handle","prompt_at_issue":8594,"resumable":true,"t":336.406856875}
+{"arm":"long","fact":"blue_key","hit":true,"kind":"probe_result","said":"The blue key is in drawer number seven.","t":337.6058155}
+{"arm":"long","fact":"cat","kind":"probe_sent","q":"What is my sister's cat called?","t":339.10758375}
+{"arm":"long","conn":2,"kind":"usage","prompt":8682,"prompt_by_modality":{"AUDIO":7369,"TEXT":1313},"response":63,"response_by_modality":{"AUDIO":54,"TEXT":9},"t":341.648617917,"thoughts":72,"total":8817}
+{"arm":"long","conn":2,"kind":"turn_complete","said":"Your sister's cat is called Pickle.","t":341.648792}
+{"arm":"long","conn":2,"handle":"f5e1b975","kind":"handle","prompt_at_issue":8682,"resumable":true,"t":341.681952875}
+{"arm":"long","fact":"cat","hit":true,"kind":"probe_result","said":"Your sister's cat is called Pickle.","t":342.849638083}
+{"arm":"long","fact":"dana","kind":"probe_sent","q":"When is the meeting with Dana?","t":344.351756708}
+{"arm":"long","conn":2,"kind":"usage","prompt":8750,"prompt_by_modality":{"AUDIO":7421,"TEXT":1329},"response":91,"response_by_modality":{"AUDIO":81,"TEXT":10},"t":347.747628958,"thoughts":51,"total":8892}
+{"arm":"long","conn":2,"kind":"turn_complete","said":"The meeting with Dana is on Thursday at three.","t":347.747766542}
+{"arm":"long","conn":2,"handle":"519a1d02","kind":"handle","prompt_at_issue":8750,"resumable":true,"t":347.801476167}
+{"arm":"long","fact":"dana","hit":true,"kind":"probe_result","said":"The meeting with Dana is on Thursday at three.","t":348.949964}
+{"arm":"long","fact":"server_code","kind":"probe_sent","q":"What is the server room code?","t":350.450344458}
+{"arm":"long","conn":2,"kind":"usage","prompt":8846,"prompt_by_modality":{"AUDIO":7500,"TEXT":1346},"response":88,"response_by_modality":{"AUDIO":77,"TEXT":11},"t":353.759770042,"thoughts":59,"total":8993}
+{"arm":"long","conn":2,"kind":"turn_complete","said":"The server room code is 4492.","t":353.759853333}
+{"arm":"long","conn":2,"handle":"533bf671","kind":"handle","prompt_at_issue":8846,"resumable":true,"t":353.80393875}
+{"arm":"long","fact":"server_code","hit":true,"kind":"probe_result","said":"The server room code is 4492.","t":354.9620045}
+{"arm":"long","fact":"bike","kind":"probe_sent","q":"What is wrong with the red bike?","t":356.464302417}
+{"arm":"long","conn":2,"kind":"usage","prompt":8940,"prompt_by_modality":{"AUDIO":7575,"TEXT":1365},"response":75,"response_by_modality":{"AUDIO":66,"TEXT":9},"t":359.33834175,"thoughts":87,"total":9102}
+{"arm":"long","conn":2,"kind":"turn_complete","said":"The red bike has a flat rear tire.","t":359.338478083}
+{"arm":"long","conn":2,"handle":"efe3b68f","kind":"handle","prompt_at_issue":8940,"resumable":true,"t":359.381998208}
+{"arm":"long","fact":"bike","hit":true,"kind":"probe_result","said":"The red bike has a flat rear tire.","t":360.540642875}
+{"arm":"long","fact":"wifi","kind":"probe_sent","q":"What is the Wi-Fi password hint?","t":362.042875375}
+{"arm":"long","conn":2,"kind":"usage","prompt":9022,"prompt_by_modality":{"AUDIO":7639,"TEXT":1383},"response":86,"response_by_modality":{"AUDIO":76,"TEXT":10},"t":365.335497833,"thoughts":53,"total":9161}
+{"arm":"long","conn":2,"kind":"turn_complete","said":"The Wi-Fi password hint is mango river.","t":365.335662042}
+{"arm":"long","conn":2,"handle":"1bbbf38a","kind":"handle","prompt_at_issue":9022,"resumable":true,"t":365.382576125}
+{"arm":"long","fact":"wifi","hit":true,"kind":"probe_result","said":"The Wi-Fi password hint is mango river.","t":366.537584208}
+{"arm":"long","fact":"library","kind":"probe_sent","q":"When is the library book due?","t":368.039684042}
+{"arm":"long","conn":2,"kind":"usage","prompt":9113,"prompt_by_modality":{"AUDIO":7713,"TEXT":1400},"response":78,"response_by_modality":{"AUDIO":66,"TEXT":12},"t":370.879088792,"thoughts":54,"total":9245}
+{"arm":"long","conn":2,"kind":"turn_complete","said":"The library book is due on the 12th.","t":370.879239458}
+{"arm":"long","conn":2,"handle":"622f47f5","kind":"handle","prompt_at_issue":9113,"resumable":true,"t":371.007523583}
+{"arm":"long","fact":"library","hit":true,"kind":"probe_result","said":"The library book is due on the 12th.","t":372.081383917}
+{"arm":"long","fact":"charger","kind":"probe_sent","q":"Where is the spare charger?","t":373.582981875}
+{"arm":"long","conn":2,"kind":"usage","prompt":9195,"prompt_by_modality":{"AUDIO":7777,"TEXT":1418},"response":77,"response_by_modality":{"AUDIO":68,"TEXT":9},"t":376.533873958,"thoughts":61,"total":9333}
+{"arm":"long","conn":2,"kind":"turn_complete","said":"The spare charger is in the green backpack.","t":376.533969417}
+{"arm":"long","conn":2,"handle":"d35a5679","kind":"handle","prompt_at_issue":9195,"resumable":true,"t":376.584248042}
+{"arm":"long","fact":"charger","hit":true,"kind":"probe_result","said":"The spare charger is in the green backpack.","t":377.736151792}
+{"arm":"long","backend":"vertex","date":"2026-10-04","handles":13,"interrupted":0,"kind":"summary","location":"us-central1","missed":null,"model":"gemini-3.8-live","prompt_after_by_modality":{"AUDIO":7299,"TEXT":1295},"prompt_after_first":8594,"prompt_before":8560,"prompt_before_by_modality":{"AUDIO":7273,"TEXT":1287},"prompt_ratio":1.0039719626168224,"recall":"8/8","recall_spoken_facts":"8/8","results":[{"name":"blue_key","q":"Where is the blue key?","said":"The blue key is in drawer number seven.","hit":true},{"name":"cat","q":"What is my sister's cat called?","said":"Your sister's cat is called Pickle.","hit":true},{"name":"dana","q":"When is the meeting with Dana?","said":"The meeting with Dana is on Thursday at three.","hit":true},{"name":"server_code","q":"What is the server room code?","said":"The server room code is 4492.","hit":true},{"name":"bike","q":"What is wrong with the red bike?","said":"The red bike has a flat rear tire.","hit":true},{"name":"wifi","q":"What is the Wi-Fi password hint?","said":"The Wi-Fi password hint is mango river.","hit":true},{"name":"library","q":"When is the library book due?","said":"The library book is due on the 12th.","hit":true},{"name":"charger","q":"Where is the spare charger?","said":"The spare charger is in the green backpack.","hit":true}],"resumed":true,"t":379.738353458,"tool_calls":0,"turns":21}
+{"arm":"long","conn":2,"err":"read tcp [2601:644:8101:6260:65a3:652a:fc07:5d14]:60232-\u003e[2001:4860:4842:400::]:443: use of closed network connection","kind":"recv_end","t":379.738741792}
+{"arm":"long","kind":"done","t":379.738781417}

@@ -1,0 +1,118 @@
+{"arm":"fill","backend":"vertex","date":"2026-10-04T18:44:12Z","kind":"start","location":"us-central1","model":"gemini-3.8-live","resume":false,"t":0.00021075,"transparent":false}
+{"arm":"fill","conn":1,"kind":"connected","resumed_with":false,"t":0.495671375}
+{"arm":"fill","fact":"blue_key","kind":"fact_sent","t":4.709631125}
+{"arm":"fill","conn":1,"kind":"heard","t":4.828074792,"text":"Please remember this: the blue key is in drawer number seven."}
+{"arm":"fill","conn":1,"kind":"usage","prompt":206,"prompt_by_modality":{"AUDIO":93,"TEXT":113},"response":39,"response_by_modality":{"AUDIO":23,"TEXT":16},"t":5.8219005}
+{"arm":"fill","conn":1,"kind":"turn_complete","said":"Got it.","t":5.822127208}
+{"arm":"fill","conn":1,"handle":"6cb5d5ea","kind":"handle","prompt_at_issue":206,"resumable":true,"t":5.863657708}
+{"arm":"fill","fact":"cat","kind":"fact_sent","t":11.253466542}
+{"arm":"fill","conn":1,"kind":"heard","t":11.362945375,"text":"Remember this too: my sister's cat is called Pickle."}
+{"arm":"fill","conn":1,"kind":"usage","prompt":329,"prompt_by_modality":{"AUDIO":200,"TEXT":129},"response":40,"response_by_modality":{"AUDIO":24,"TEXT":16},"t":12.194521583}
+{"arm":"fill","conn":1,"kind":"turn_complete","said":"Got it.","t":12.19471125}
+{"arm":"fill","conn":1,"handle":"8c1f9309","kind":"handle","prompt_at_issue":329,"resumable":true,"t":12.239227417}
+{"arm":"fill","fact":"dana","kind":"fact_sent","t":17.851241333}
+{"arm":"fill","conn":1,"kind":"heard","t":17.948650042,"text":"Another one, the server room code is 4492."}
+{"arm":"fill","conn":1,"kind":"usage","prompt":462,"prompt_by_modality":{"AUDIO":316,"TEXT":146},"response":42,"response_by_modality":{"AUDIO":25,"TEXT":17},"t":19.014804333}
+{"arm":"fill","conn":1,"kind":"turn_complete","said":"Got it.","t":19.01500325}
+{"arm":"fill","conn":1,"handle":"a1ba0d5c","kind":"handle","prompt_at_issue":462,"resumable":true,"t":19.055019375}
+{"arm":"fill","fact":"server_code","kind":"fact_sent","t":24.521154042}
+{"arm":"fill","conn":1,"kind":"heard","t":24.607766,"text":"Remember, the meeting with Dana moved to Thursday at 3:00."}
+{"arm":"fill","conn":1,"kind":"usage","prompt":595,"prompt_by_modality":{"AUDIO":430,"TEXT":165},"response":43,"response_by_modality":{"AUDIO":24,"TEXT":19},"t":25.616507917}
+{"arm":"fill","conn":1,"kind":"turn_complete","said":"Got it.","t":25.616681833}
+{"arm":"fill","conn":1,"handle":"378841ed","kind":"handle","prompt_at_issue":595,"resumable":true,"t":25.661706958}
+{"arm":"fill","fact":"bike","kind":"fact_sent","t":31.157641833}
+{"arm":"fill","conn":1,"kind":"heard","t":31.285509542,"text":"Also remember, the red bike has a flat rear tire."}
+{"arm":"fill","conn":1,"kind":"usage","prompt":724,"prompt_by_modality":{"AUDIO":544,"TEXT":180},"response":41,"response_by_modality":{"AUDIO":26,"TEXT":15},"t":32.386474708}
+{"arm":"fill","conn":1,"kind":"turn_complete","said":"Got it.","t":32.386667625}
+{"arm":"fill","conn":1,"handle":"cc627eaa","kind":"handle","prompt_at_issue":724,"resumable":true,"t":32.433380542}
+{"arm":"fill","fact":"wifi","kind":"fact_sent","t":37.855083208}
+{"arm":"fill","conn":1,"kind":"heard","t":37.95033575,"text":"Note this: the Wi-Fi password hint is mango river."}
+{"arm":"fill","conn":1,"kind":"usage","prompt":851,"prompt_by_modality":{"AUDIO":655,"TEXT":196},"response":44,"response_by_modality":{"AUDIO":28,"TEXT":16},"t":39.011797}
+{"arm":"fill","conn":1,"kind":"turn_complete","said":"Got it.","t":39.011976875}
+{"arm":"fill","conn":1,"handle":"36757ceb","kind":"handle","prompt_at_issue":851,"resumable":true,"t":39.055472833}
+{"arm":"fill","fact":"library","kind":"fact_sent","t":44.288826958}
+{"arm":"fill","conn":1,"kind":"heard","t":44.396473042,"text":"Remember, the library book is due on the 12th."}
+{"arm":"fill","conn":1,"kind":"usage","prompt":975,"prompt_by_modality":{"AUDIO":762,"TEXT":213},"response":43,"response_by_modality":{"AUDIO":26,"TEXT":17},"t":45.263424792}
+{"arm":"fill","conn":1,"kind":"turn_complete","said":"Got it.","t":45.26371575}
+{"arm":"fill","conn":1,"handle":"d239ec67","kind":"handle","prompt_at_issue":975,"resumable":true,"t":45.312707125}
+{"arm":"fill","fact":"charger","kind":"fact_sent","t":50.737366542}
+{"arm":"fill","conn":1,"kind":"heard","t":50.830021333,"text":"Last one, the spare charger is in the green backpack."}
+{"arm":"fill","conn":1,"kind":"usage","prompt":1102,"prompt_by_modality":{"AUDIO":874,"TEXT":228},"response":40,"response_by_modality":{"AUDIO":25,"TEXT":15},"t":51.745457792}
+{"arm":"fill","conn":1,"kind":"turn_complete","said":"Got it.","t":51.74551925}
+{"arm":"fill","conn":1,"handle":"a5a7611a","kind":"handle","prompt_at_issue":1102,"resumable":true,"t":51.799348417}
+{"arm":"fill","conn":1,"kind":"usage","prompt":3160,"prompt_by_modality":{"AUDIO":899,"TEXT":2261},"response":28,"response_by_modality":{"AUDIO":26,"TEXT":2},"t":65.586017917}
+{"arm":"fill","conn":1,"kind":"turn_complete","said":"Okay.","t":65.586355542}
+{"arm":"fill","conn":1,"handle":"987e5537","kind":"handle","prompt_at_issue":3160,"resumable":true,"t":65.586542917}
+{"arm":"fill","kind":"compress_round","peak":0,"prompt":3160,"round":1,"t":67.088535417}
+{"arm":"fill","conn":1,"kind":"usage","prompt":5227,"prompt_by_modality":{"AUDIO":925,"TEXT":4302},"response":22,"response_by_modality":{"AUDIO":20,"TEXT":2},"t":69.2721365}
+{"arm":"fill","conn":1,"kind":"turn_complete","said":"Okay.","t":69.272235208}
+{"arm":"fill","conn":1,"handle":"51567b66","kind":"handle","prompt_at_issue":5227,"resumable":true,"t":69.293485042}
+{"arm":"fill","kind":"compress_round","peak":3160,"prompt":5227,"round":2,"t":70.774358667}
+{"arm":"fill","conn":1,"kind":"usage","prompt":7289,"prompt_by_modality":{"AUDIO":945,"TEXT":6344},"response":27,"response_by_modality":{"AUDIO":25,"TEXT":2},"t":73.229466708}
+{"arm":"fill","conn":1,"kind":"turn_complete","said":"Ok.","t":73.229634125}
+{"arm":"fill","conn":1,"handle":"3da4414c","kind":"handle","prompt_at_issue":7289,"resumable":true,"t":73.269198542}
+{"arm":"fill","kind":"compress_round","peak":5227,"prompt":7289,"round":3,"t":74.731165667}
+{"arm":"fill","conn":1,"kind":"usage","prompt":9352,"prompt_by_modality":{"AUDIO":970,"TEXT":8382},"response":23,"response_by_modality":{"AUDIO":21,"TEXT":2},"t":76.905443208}
+{"arm":"fill","conn":1,"kind":"turn_complete","said":"Ok.","t":76.905625208}
+{"arm":"fill","conn":1,"handle":"2d260b5b","kind":"handle","prompt_at_issue":9352,"resumable":true,"t":76.946180792}
+{"arm":"fill","kind":"compress_round","peak":7289,"prompt":9352,"round":4,"t":78.407739292}
+{"arm":"fill","conn":1,"kind":"usage","prompt":11413,"prompt_by_modality":{"AUDIO":991,"TEXT":10422},"response":26,"response_by_modality":{"AUDIO":24,"TEXT":2},"t":80.711990125}
+{"arm":"fill","conn":1,"kind":"turn_complete","said":"Ok.","t":80.712149167}
+{"arm":"fill","conn":1,"handle":"60034020","kind":"handle","prompt_at_issue":11413,"resumable":true,"t":80.761408458}
+{"arm":"fill","kind":"compress_round","peak":9352,"prompt":11413,"round":5,"t":82.214341917}
+{"arm":"fill","conn":1,"kind":"usage","prompt":13476,"prompt_by_modality":{"AUDIO":1015,"TEXT":12461},"response":29,"response_by_modality":{"AUDIO":27,"TEXT":2},"t":84.763731625}
+{"arm":"fill","conn":1,"kind":"turn_complete","said":"Ok.","t":84.763891833}
+{"arm":"fill","conn":1,"handle":"68c27b1e","kind":"handle","prompt_at_issue":13476,"resumable":true,"t":84.763974458}
+{"arm":"fill","kind":"compress_round","peak":11413,"prompt":13476,"round":6,"t":86.265175042}
+{"arm":"fill","drop_seen":false,"kind":"compress_done","peak":13476,"t":86.265298333}
+{"arm":"fill","conn":1,"kind":"usage","prompt":13516,"prompt_by_modality":{"AUDIO":1042,"TEXT":12474},"response":24,"response_by_modality":{"AUDIO":21,"TEXT":3},"t":87.384609208}
+{"arm":"fill","conn":1,"kind":"turn_complete","said":"Got it.","t":87.384869}
+{"arm":"fill","conn":1,"handle":"5119fa36","kind":"handle","prompt_at_issue":13516,"resumable":true,"t":87.398106792}
+{"arm":"fill","handle_known":true,"handles_seen":15,"kind":"before_resume","prompt":13516,"prompt_by_modality":{"AUDIO":1042,"TEXT":12474},"t":90.3851695}
+{"arm":"fill","fact":"blue_key","kind":"probe_sent","q":"Where is the blue key?","t":91.887050875}
+{"arm":"fill","conn":1,"kind":"usage","prompt":13546,"prompt_by_modality":{"AUDIO":1063,"TEXT":12483},"response":80,"response_by_modality":{"AUDIO":71,"TEXT":9},"t":94.937095708}
+{"arm":"fill","conn":1,"kind":"turn_complete","said":"The blue key is in drawer number seven.","t":94.93763875}
+{"arm":"fill","conn":1,"handle":"cc14045c","kind":"handle","prompt_at_issue":13546,"resumable":true,"t":94.985690042}
+{"arm":"fill","fact":"blue_key","hit":true,"kind":"probe_result","said":"The blue key is in drawer number seven.","t":96.13863025}
+{"arm":"fill","fact":"cat","kind":"probe_sent","q":"What is my sister's cat called?","t":97.63996575}
+{"arm":"fill","conn":1,"kind":"usage","prompt":13633,"prompt_by_modality":{"AUDIO":1132,"TEXT":12501},"response":74,"response_by_modality":{"AUDIO":65,"TEXT":9},"t":100.49156875}
+{"arm":"fill","conn":1,"kind":"turn_complete","said":"Your sister's cat is called Pickle.","t":100.491720333}
+{"arm":"fill","conn":1,"handle":"a36be3b6","kind":"handle","prompt_at_issue":13633,"resumable":true,"t":100.491807833}
+{"arm":"fill","fact":"cat","hit":true,"kind":"probe_result","said":"Your sister's cat is called Pickle.","t":101.693946083}
+{"arm":"fill","fact":"dana","kind":"probe_sent","q":"When is the meeting with Dana?","t":103.196231458}
+{"arm":"fill","conn":1,"kind":"usage","prompt":13712,"prompt_by_modality":{"AUDIO":1195,"TEXT":12517},"response":94,"response_by_modality":{"AUDIO":80,"TEXT":14},"t":106.564002542}
+{"arm":"fill","conn":1,"kind":"turn_complete","said":"The meeting with Dana is on Thursday at 3:00.","t":106.56413675}
+{"arm":"fill","conn":1,"handle":"c2cea8ac","kind":"handle","prompt_at_issue":13712,"resumable":true,"t":106.628715292}
+{"arm":"fill","fact":"dana","hit":true,"kind":"probe_result","said":"The meeting with Dana is on Thursday at 3:00.","t":107.766348167}
+{"arm":"fill","fact":"server_code","kind":"probe_sent","q":"What is the server room code?","t":109.269204542}
+{"arm":"fill","conn":1,"kind":"usage","prompt":13811,"prompt_by_modality":{"AUDIO":1273,"TEXT":12538},"response":90,"response_by_modality":{"AUDIO":79,"TEXT":11},"t":112.694200292}
+{"arm":"fill","conn":1,"kind":"turn_complete","said":"The server room code is 4492.","t":112.694366083}
+{"arm":"fill","conn":1,"handle":"840c1d5b","kind":"handle","prompt_at_issue":13811,"resumable":true,"t":112.742655417}
+{"arm":"fill","fact":"server_code","hit":true,"kind":"probe_result","said":"The server room code is 4492.","t":113.895362917}
+{"arm":"fill","fact":"bike","kind":"probe_sent","q":"What is wrong with the red bike?","t":115.397006125}
+{"arm":"fill","conn":1,"kind":"usage","prompt":13907,"prompt_by_modality":{"AUDIO":1350,"TEXT":12557},"response":81,"response_by_modality":{"AUDIO":72,"TEXT":9},"t":118.467368083}
+{"arm":"fill","conn":1,"kind":"turn_complete","said":"The red bike has a flat rear tire.","t":118.467545}
+{"arm":"fill","conn":1,"handle":"dee667fd","kind":"handle","prompt_at_issue":13907,"resumable":true,"t":118.51371375}
+{"arm":"fill","fact":"bike","hit":true,"kind":"probe_result","said":"The red bike has a flat rear tire.","t":119.669131333}
+{"arm":"fill","fact":"wifi","kind":"probe_sent","q":"What is the Wi-Fi password hint?","t":121.171438125}
+{"arm":"fill","conn":1,"kind":"usage","prompt":13995,"prompt_by_modality":{"AUDIO":1420,"TEXT":12575},"response":87,"response_by_modality":{"AUDIO":77,"TEXT":10},"t":124.385853708}
+{"arm":"fill","conn":1,"kind":"turn_complete","said":"The Wi-Fi password hint is mango river.","t":124.38596325}
+{"arm":"fill","conn":1,"handle":"f9e7873a","kind":"handle","prompt_at_issue":13995,"resumable":true,"t":124.43213025}
+{"arm":"fill","fact":"wifi","hit":true,"kind":"probe_result","said":"The Wi-Fi password hint is mango river.","t":125.58815425}
+{"arm":"fill","fact":"library","kind":"probe_sent","q":"When is the library book due?","t":127.090860208}
+{"arm":"fill","conn":1,"kind":"usage","prompt":14087,"prompt_by_modality":{"AUDIO":1495,"TEXT":12592},"response":79,"response_by_modality":{"AUDIO":67,"TEXT":12},"t":130.006407583}
+{"arm":"fill","conn":1,"kind":"turn_complete","said":"The library book is due on the 12th.","t":130.006591917}
+{"arm":"fill","conn":1,"handle":"0be395bd","kind":"handle","prompt_at_issue":14087,"resumable":true,"t":130.05882575}
+{"arm":"fill","fact":"library","hit":true,"kind":"probe_result","said":"The library book is due on the 12th.","t":131.208686958}
+{"arm":"fill","fact":"charger","kind":"probe_sent","q":"Where is the spare charger?","t":132.711140833}
+{"arm":"fill","conn":1,"kind":"usage","prompt":14170,"prompt_by_modality":{"AUDIO":1560,"TEXT":12610},"response":82,"response_by_modality":{"AUDIO":73,"TEXT":9},"t":135.908549292}
+{"arm":"fill","conn":1,"kind":"turn_complete","said":"The spare charger is in the green backpack.","t":135.908692625}
+{"arm":"fill","conn":1,"handle":"6fddf076","kind":"handle","prompt_at_issue":14170,"resumable":true,"t":135.958319833}
+{"arm":"fill","fact":"charger","hit":true,"kind":"probe_result","said":"The spare charger is in the green backpack.","t":137.110876708}
+{"arm":"fill","fact":"parking","kind":"probe_sent","q":"Where is the parking spot?","t":138.613351917}
+{"arm":"fill","conn":1,"kind":"usage","prompt":14256,"prompt_by_modality":{"AUDIO":1631,"TEXT":12625},"response":77,"response_by_modality":{"AUDIO":69,"TEXT":8},"t":141.559670417}
+{"arm":"fill","conn":1,"kind":"turn_complete","said":"The parking spot is B14.","t":141.559801083}
+{"arm":"fill","conn":1,"handle":"cdcb16ee","kind":"handle","prompt_at_issue":14256,"resumable":true,"t":141.6113715}
+{"arm":"fill","fact":"parking","hit":true,"kind":"probe_result","said":"The parking spot is B14.","t":142.761995792}
+{"arm":"fill","backend":"vertex","date":"2026-10-04","handles":15,"interrupted":0,"kind":"summary","location":"us-central1","missed":null,"model":"gemini-3.8-live","prompt_before":13516,"prompt_before_by_modality":{"AUDIO":1042,"TEXT":12474},"recall":"9/9","recall_spoken_facts":"8/8","results":[{"name":"blue_key","q":"Where is the blue key?","said":"The blue key is in drawer number seven.","hit":true},{"name":"cat","q":"What is my sister's cat called?","said":"Your sister's cat is called Pickle.","hit":true},{"name":"dana","q":"When is the meeting with Dana?","said":"The meeting with Dana is on Thursday at 3:00.","hit":true},{"name":"server_code","q":"What is the server room code?","said":"The server room code is 4492.","hit":true},{"name":"bike","q":"What is wrong with the red bike?","said":"The red bike has a flat rear tire.","hit":true},{"name":"wifi","q":"What is the Wi-Fi password hint?","said":"The Wi-Fi password hint is mango river.","hit":true},{"name":"library","q":"When is the library book due?","said":"The library book is due on the 12th.","hit":true},{"name":"charger","q":"Where is the spare charger?","said":"The spare charger is in the green backpack.","hit":true},{"name":"parking","q":"Where is the parking spot?","said":"The parking spot is B14.","hit":true}],"resumed":false,"t":144.764299708,"tool_calls":0,"turns":24}
+{"arm":"fill","kind":"done","t":144.764810167}
