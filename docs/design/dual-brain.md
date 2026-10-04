@@ -103,13 +103,14 @@ The design does not repeat v1 (no action tools, rails unchanged), the
 mouthpiece (no verbatim scripts, no user-role pushes) or the guardrail
 wave (facts instead of detectors). **The one earlier failure that can
 recur is N2: the fast brain answering from stale or wrong facts.** It is
-now allowed to answer simple status from briefings, which N2's fix
-forbade. Mitigations: every briefing is timestamped, says who it is from
-and what it supersedes; the prompt tells the fast brain to trust the
-newest briefing, say how old a fact is, and hand anything not freshly
-covered to the slow brain; and both arms are judged on a new item,
-`facts_current` (stale or wrongly retold facts), next to
-`no_hallucination`.
+the CEO's starting direction let it answer simple status from briefings,
+which N2's fix forbade. Mitigations planned: every briefing is
+timestamped, says who it is from and what it supersedes, and both arms
+are judged on a new item, `facts_current` (stale or wrongly retold
+facts), next to `no_hallucination`. The runs then showed the risk is
+real (prompt v4 below): the fast brain cannot judge freshness, so
+questions about agents went back to the slow brain, framed as a fact it
+cannot see rather than a prohibition.
 
 ## Design
 
@@ -118,7 +119,7 @@ covered to the slow brain; and both arms are judged on a new item,
 | | Fast brain: Gemini Live | Slow brain: the existing brain |
 |---|---|---|
 | Owns | The conversation: when to speak, what, how; turn-taking, register, language | What the CEO wants, which agent, what to do, investigations |
-| Answers itself | Follow-ups and simple status from its briefings; small talk; "say again" | Everything else |
+| Answers itself | Follow-ups about what it just said ("what does that mean", "say again"); small talk; when to speak and how | Every question about an agent (v4), every decision, every action |
 | Asks | When it did not catch the words | When the words are ambiguous |
 | Actions | None | All, behind the rails |
 | Knows | Briefings (facts with time and provenance), its own conversation | Transcript, screens, sessions, ledger, journal |
@@ -206,14 +207,14 @@ owns the conversation; briefings are never the CEO and carry who/when/
 relation; trust the newest; tell the substance in its own words, skip
 what the CEO already heard; a decision only the CEO can take is said as
 a question with its options, never answered or recommended; answer
-follow-ups and simple status from briefings and say how old a fact is;
-hand anything not freshly covered, any doubt, and anything to be done to
-the slow brain with the exact words and its own reading; it cannot act.
+follow-ups about what it just said; hand every question about an agent,
+any doubt, and anything to be done to the slow brain with the exact
+words and its own reading (v4, below); it cannot act.
 Gone: "read spoken exactly as given", "change nothing, add nothing", the
 forced "say on it as you call it", "never answered from memory", "you
 decide nothing".
 
-Two corrections came from the first branch runs, each a real behaviour
+Three corrections came from the first branch runs, each a real behaviour
 seen in a transcript, not a judge's taste:
 
 - v2: the voice answered "What were the specific points it made?" from
@@ -226,7 +227,28 @@ seen in a transcript, not a judge's taste:
   two-claudes-names, branch 0/2, main 2/2). Names are facts: it now uses
   the name the briefing uses.
 
-Every measurement in the results doc uses v3 unless marked otherwise.
+- v4: still allowed to answer "simple status" from briefings, the voice
+  answered partially ("What's going on?" with one of two agents), from a
+  stale briefing, or said "I don't have any recent information on
+  bench-claude" and "I'll need a moment" **without** calling the slow
+  brain (interleaved tier 2 at 50 runs per arm: branch 21/50, main
+  30/51; `facts_current` failures 8 vs 3). The fast brain cannot see the
+  clock or the screens, so a briefing only says what was true when it
+  was sent. Now every question about what an agent is doing, did or
+  found goes to the slow brain, even when the voice knows part of it; it
+  may say what it already knows while it waits, and a promise to check
+  must come with the call. Follow-ups about what it just said stay its
+  own.
+
+This is the one place the experiment walked back the CEO's starting
+direction ("answers simple status questions from its briefings"): the
+data say the fast brain cannot judge freshness, which is the N2 failure
+the history check flagged. The difference from main's N2 rule is the
+framing (a fact about what it cannot see, plus permission to talk while
+waiting) and the channel (answers come back as labelled facts, so no
+"On it." and no relay of its own lines).
+
+Every measurement in the results doc uses v4 unless marked otherwise.
 
 ### The harness: rails and labelled facts
 
