@@ -273,19 +273,24 @@ func (s *Session) resendAfterResume() {
 	recs := s.afterHandleLocked()
 	s.mu.Unlock()
 	for _, r := range recs {
-		p := make(map[string]any, len(r.payload)+1)
-		for k, v := range r.payload {
-			p[k] = v
-		}
-		p["resent"] = "re-sent after a reconnect; first sent at " + clock(r.at) + "; it may already be in your context"
 		rr := r
-		rr.payload = p
+		rr.payload = resentPayload(r, "re-sent after a reconnect; first sent at "+clock(r.at)+"; it may already be in your context")
 		err := s.sendOn(gen, func(c Conn) error { return c.SendToolResponse(briefingResponse(rr, voice.UrgencySilent)) })
-		s.log.Log(logSource, "voice.briefing_resent", "", map[string]any{"briefing": r.id, "at": clock(r.at), "error": errString(err)})
+		s.log.Log(logSource, "voice.briefing_resent", "", map[string]any{"briefing": r.id, "at": clock(r.at), "reason": "after_resume", "error": errString(err)})
 		if err != nil {
 			return
 		}
 	}
+}
+
+// resentPayload is a copy of r's payload marked as re-sent (note).
+func resentPayload(r briefRec, note string) map[string]any {
+	p := make(map[string]any, len(r.payload)+1)
+	for k, v := range r.payload {
+		p[k] = v
+	}
+	p["resent"] = note
+	return p
 }
 
 // sendBriefing is doPush's send for the briefing channel: the

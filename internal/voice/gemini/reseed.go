@@ -1,6 +1,7 @@
 package gemini
 
 import (
+	"fmt"
 	"strings"
 
 	"google.golang.org/genai"
@@ -80,7 +81,80 @@ func (s *Session) recapText(prefix string) (text string, items, chars int) {
 // connection's own reader reports a dead socket.
 func (s *Session) reseed(conn Conn) {
 	text, items, chars := s.reseedText()
-	s.sendRecap(conn, text, items, chars, "not_resumed")
+	s.sendRecap(conn, text, items, chars, s.freshReason())
+}
+
+// freshReason is why a reconnect came back without its context:
+// reasonResumedTwice when the session left out a handle from a resumed
+// connection (handle.go), else "not_resumed".
+func (s *Session) freshReason() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.freshWhy != "" {
+		return s.freshWhy
+	}
+	return "not_resumed"
+}
+
+// The recap carries the conversation and the spoken briefings (cut to
+// its budget), not the silent ones: the roster, names, delivery facts,
+// a slow-brain result sent as context. So a fresh connection is also
+// given the most recent briefings again, silently, each marked as
+// re-sent with its first time (the supervisor's roster briefing on
+// EventResumed follows). A "New conversation" clears the ledger first.
+const (
+	// reseedBriefs bounds how many briefings are re-sent.
+	reseedBriefs = 8
+	// reseedBriefChars bounds their facts in all (newest kept).
+	reseedBriefChars = 3000
+)
+
+// reseedBriefingsLocked picks the briefings to re-send, oldest first:
+// the newest ones within the bounds, not the current-focus lines (the
+// recap ends with the latest focus). Caller holds s.mu.
+func (s *Session) reseedBriefingsLocked() []briefRec {
+	var out []briefRec
+	chars := 0
+	for i := len(s.brief.recs) - 1; i >= 0 && len(out) < reseedBriefs; i-- {
+		r := s.brief.recs[i]
+		if r.kind == "current focus" {
+			continue
+		}
+		n := len(fmt.Sprint(r.payload["facts"]))
+		if chars+n > reseedBriefChars && len(out) > 0 {
+			break
+		}
+		chars += n
+		out = append(out, r)
+	}
+	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+		out[i], out[j] = out[j], out[i]
+	}
+	return out
+}
+
+// reseedBriefings sends the recent briefings on conn — a fresh
+// connection not installed yet — as SILENT function responses, logging
+// voice.briefing_resent {reason} for each. Briefing channel only.
+func (s *Session) reseedBriefings(conn Conn) {
+	if conn == nil || !s.useBriefings() {
+		return
+	}
+	reason := s.freshReason()
+	s.mu.Lock()
+	recs := s.reseedBriefingsLocked()
+	s.mu.Unlock()
+	for _, r := range recs {
+		rr := r
+		rr.payload = resentPayload(r, "re-sent because the voice connection restarted without its history; first sent at "+clock(r.at)+"; a newer briefing supersedes it")
+		s.sendMu.Lock()
+		err := conn.SendToolResponse(briefingResponse(rr, voice.UrgencySilent))
+		s.sendMu.Unlock()
+		s.log.Log(logSource, "voice.briefing_resent", "", map[string]any{"briefing": r.id, "at": clock(r.at), "reason": reason, "error": errString(err)})
+		if err != nil {
+			return
+		}
+	}
 }
 
 // sendRecap sends a rendered recap on conn as silent client content

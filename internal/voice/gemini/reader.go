@@ -45,6 +45,7 @@ func (s *Session) handleMessage(msg *genai.LiveServerMessage, gen int) {
 		accepted := u.Resumable && u.NewHandle != "" && gen == s.connGen && !s.refreshing
 		if accepted {
 			s.handle = u.NewHandle
+			s.handleGen = s.resumeGen
 			s.handleUsage = s.lastUsage
 			s.noteBriefHandleLocked()
 		}

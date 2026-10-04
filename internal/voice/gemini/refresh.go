@@ -25,7 +25,10 @@ import (
 // in flight and no question is waiting for the shepherd (the
 // supervisor's open check). Logged voice.session_refreshed {reason,
 // age_s}. These are runaway guards on the session's lifetime, not
-// tuning, so they are constants.
+// tuning, so they are constants. Since a GoAway on a resumed connection
+// opens a fresh session anyway (handle.go, "never resume a resumed
+// session"), freshAt moves every second GoAway (~18 min) and the max-age
+// refresh rarely fires; it stays as the guard.
 const (
 	refreshAway   = 30 * time.Minute
 	refreshMaxAge = 2 * time.Hour

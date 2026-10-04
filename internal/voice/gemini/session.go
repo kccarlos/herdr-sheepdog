@@ -56,6 +56,14 @@ type Session struct {
 	// so a Session used without the hub (voice-test) speaks as before.
 	noClient bool
 	handle   string // latest resumable handle
+	// Resume generations (handle.go "never resume a resumed session"):
+	// resumeGen is how many resumes deep the live connection is (0:
+	// opened fresh), handleGen the resumeGen of the connection that
+	// issued handle, dialGen the handleGen the last dial presented, and
+	// freshWhy why the last dial left a handle out ("" or
+	// reasonResumedTwice).
+	resumeGen, handleGen, dialGen int
+	freshWhy                      string
 	// handleAt is when the handle was accepted; postHandle the silent
 	// pushes sent since (handle.go); lastPromptTokens the prompt size
 	// of the latest usage report.
@@ -644,6 +652,8 @@ func (s *Session) Reset(reason string) error {
 	s.mu.Lock()
 	s.recap.Reset() // a new conversation must not be re-seeded with the old one
 	s.inText, s.outText = "", ""
+	// Nor given the old conversation's briefings again (reseed.go).
+	s.brief.recs, s.brief.cut = nil, ""
 	s.mu.Unlock()
 	s.rec.Marker("conversation reset", "New conversation: the resumption handle is dropped, so the next connection starts without the conversation so far.", nil)
 	select {
