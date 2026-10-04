@@ -62,6 +62,12 @@ type Session struct {
 	handleAt         time.Time
 	postHandle       []pushItem
 	lastPromptTokens int32
+	// lastUsage is the latest usage report of the live connection,
+	// handleUsage the one current when the accepted handle was issued,
+	// resumeCtx a resumed connection waiting for its first report
+	// (usage.go).
+	lastUsage, handleUsage usageSnap
+	resumeCtx              *resumeCtx
 	keyIdx           int
 	turnOpen         bool
 	turnOpenedAt     time.Time
