@@ -68,6 +68,15 @@ func (s *Session) handleMessage(msg *genai.LiveServerMessage, gen int) {
 		rc := s.noteUsageLocked(u, gen == s.connGen)
 		s.mu.Unlock()
 		p := map[string]any{"prompt": u.PromptTokenCount, "response": u.ResponseTokenCount, "total": u.TotalTokenCount}
+		if u.ThoughtsTokenCount != 0 {
+			p["thoughts"] = u.ThoughtsTokenCount
+		}
+		if u.CachedContentTokenCount != 0 {
+			p["cached"] = u.CachedContentTokenCount
+		}
+		if u.ToolUsePromptTokenCount != 0 {
+			p["tool_use_prompt"] = u.ToolUsePromptTokenCount
+		}
 		if m := modalityTotals(u.PromptTokensDetails); m != nil {
 			p["prompt_by_modality"] = m
 		}
