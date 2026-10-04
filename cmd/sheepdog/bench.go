@@ -344,6 +344,8 @@ func runBenchRun(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	judge := fs.String("judge", eval.BackendVertex, "judge backend: vertex, ollama or fake")
 	judgeModel := fs.String("judge-model", "", "judge model (default "+eval.DefaultJudgeModel+")")
 	saveAudio := fs.String("save-audio", "", "also write each run's mic and bot audio as WAV here (outside the repo)")
+	brainProvider := fs.String("brain-provider", "", "scratch daemons' brain provider (default deepseek; the fault scenarios need deepseek)")
+	brainModel := fs.String("brain-model", "", "scratch daemons' brain model (default deepseek-flash)")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -389,7 +391,7 @@ func runBenchRun(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	}
 	setup := map[string]string{
 		"tier":  "2 (synthetic speech -> phone emulator -> scratch daemon: real voice model, real brain, mock herdr scripted from the eval sim worlds)",
-		"voice": cfg.Gemini.Model + " (backend " + cfg.Gemini.Backend + ")", "brain": "deepseek deepseek-flash (failover: vertex)",
+		"voice": cfg.Gemini.Model + " (backend " + cfg.Gemini.Backend + ")", "brain": orDefaultStr(*brainProvider, "deepseek") + " " + orDefaultStr(*brainModel, "deepseek-flash") + " (failover: vertex)",
 		"tts": syn.ID(), "simulated CEO": *simuser + " " + orDefaultStr(*simuserModel, eval.DefaultJudgeModel), "judge": *judge + " " + orDefaultStr(*judgeModel, eval.DefaultJudgeModel),
 		"ports": *portsFlag, "parallel": fmt.Sprint(len(ports)), "budget_usd": fmt.Sprint(*budget), "scenarios": *scen + filterNote(*filter),
 	}
@@ -405,7 +407,7 @@ func runBenchRun(ctx context.Context, args []string, stdout, stderr io.Writer) i
 		fprintf(stderr, "sheepdog bench run: %v\n", err)
 		return 1
 	}
-	ropts := bench.RunOptions{Config: cfg, Scratch: dir, FixtureDir: *fixtures, Synth: syn, Out: *out, SaveAudio: *saveAudio}
+	ropts := bench.RunOptions{Config: cfg, Scratch: dir, FixtureDir: *fixtures, Synth: syn, Out: *out, SaveAudio: *saveAudio, BrainProvider: *brainProvider, BrainModel: *brainModel}
 	sem := make(chan struct{}, 4) // one limit for every judge and simulated-CEO call (#94)
 	backend := func(kind, model string) (brain.Model, string, error) {
 		m, id, err := eval.NewBackend(eval.BackendOptions{Kind: kind, Model: model, VertexAPIKey: cfg.Gemini.Vertex.APIKey, VertexProject: cfg.Gemini.Vertex.Project}, nil)
