@@ -27,7 +27,7 @@ func TestResumeResendsSilentContextAfterTheLastHandle(t *testing.T) {
 	c1.waitSent(t, "names line", isContent("The agents are now called: Claude."))
 	c1.serve(&genai.LiveServerMessage{UsageMetadata: &genai.UsageMetadata{PromptTokenCount: 420}})
 	c1.serve(handleMsg("handle-A-0123456789"))
-	waitLog(t, h, "voice.handle_update", 1)
+	waitHandleUpdates(t, h, 1)
 	// After the handle: a focus line and a briefing, then the drop.
 	if err := h.s.PushTagged("Current focus: kvoice Claude.", voice.UrgencySilent, map[string]any{"focus": true}); err != nil {
 		t.Fatal(err)
@@ -59,7 +59,7 @@ func TestResumeResendsSilentContextAfterTheLastHandle(t *testing.T) {
 	}
 	// The re-sent lines are kept again until the next handle.
 	c2.serve(handleMsg("handle-B"))
-	waitLog(t, h, "voice.handle_update", 2)
+	waitHandleUpdates(t, h, 2)
 	if up := h.log.payloads("voice.handle_update"); up[1]["silent_since"] != 2 {
 		t.Errorf("second voice.handle_update = %v", up[1])
 	}
@@ -71,13 +71,13 @@ func TestNonResumableHandleUpdateIsLoggedOnly(t *testing.T) {
 	c1 := newFakeConn("c1")
 	h := newHarness(t, Config{}, &fakeDialer{results: []func() (Conn, error){ok(c1)}})
 	c1.serve(handleMsg("handle-A"))
-	waitLog(t, h, "voice.handle_update", 1)
+	waitHandleUpdates(t, h, 1)
 	if err := h.s.Push("Briefing.", voice.UrgencySilent); err != nil {
 		t.Fatal(err)
 	}
 	c1.waitSent(t, "briefing", isContent("Briefing."))
 	c1.serve(&genai.LiveServerMessage{SessionResumptionUpdate: &genai.LiveServerSessionResumptionUpdate{Resumable: false}})
-	waitLog(t, h, "voice.handle_update", 2)
+	waitHandleUpdates(t, h, 2)
 	up := h.log.payloads("voice.handle_update")[1]
 	if up["accepted"] != false || up["resumable"] != false || up["silent_since"] != 1 {
 		t.Errorf("voice.handle_update = %v", up)
@@ -90,8 +90,10 @@ func TestNonResumableHandleUpdateIsLoggedOnly(t *testing.T) {
 	}
 }
 
-func waitLog(t *testing.T, h *harness, typ string, n int) {
+// waitHandleUpdates waits for n voice.handle_update events.
+func waitHandleUpdates(t *testing.T, h *harness, n int) {
 	t.Helper()
+	const typ = "voice.handle_update"
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		if len(h.log.payloads(typ)) >= n {
