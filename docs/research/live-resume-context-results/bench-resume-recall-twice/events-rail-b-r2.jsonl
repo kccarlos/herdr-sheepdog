@@ -1,0 +1,16 @@
+{"ts":null,"type":"voice.connect","payload":{"backend":"vertex","dur_ms":457,"key_index":0,"resumed":false}}
+{"ts":null,"type":"voice.tool_call","payload":{"args":{"reading":"asking for agent status","text":"what's everyone up to?"},"id":"call_108069","name":"to_supervisor"}}
+{"ts":null,"type":"voice.tool_call","payload":{"args":{"reading":"asking for bench-codex details","text":"What is bench-codex working on exactly?"},"id":"call_108073","name":"to_supervisor"}}
+{"ts":null,"type":"voice.recycle","payload":{"handle":true,"reason":"bench_resume"}}
+{"ts":null,"type":"voice.connect","payload":{"backend":"vertex","dur_ms":611,"handle_generation":0,"key_index":0,"resumed":true}}
+{"ts":null,"type":"voice.resume","payload":{"generation":1,"handle":"7c0c3654-efce-4f34-abda-b323b535b016","replayed_chunks":0,"resumed":true,"silent_resent":1}}
+{"ts":null,"type":"voice.briefing_resent","payload":{"at":"14:22:03","briefing":"b-3","error":"","reason":"after_resume"}}
+{"ts":null,"type":"voice.resume_context","payload":{"after_at":"2026-10-04T21:22:22.239991Z","after_ms":14896,"after_prompt":2501,"after_prompt_by_modality":{"AUDIO":618,"TEXT":1883},"backend":"vertex","before_at":"2026-10-04T21:22:02.494845Z","before_prompt":1777,"before_prompt_by_modality":{"AUDIO":330,"TEXT":1447},"delta_prompt":724,"generation":1,"handle_at":"2026-10-04T21:22:02.494845Z","handle_prompt":1777,"handle_prompt_by_modality":{"AUDIO":330,"TEXT":1447},"model":"gemini-3.8-live","ratio_prompt":1.4074282498593134,"resumed_at":"2026-10-04T21:22:07.343506Z"}}
+{"ts":null,"type":"voice.recycle","payload":{"handle":true,"reason":"bench_resume"}}
+{"ts":null,"type":"voice.handle_dropped","payload":{"generation":1,"handle":"6bc70f1f","handle_generation":1,"reason":"resumed_twice"}}
+{"ts":null,"type":"voice.connect","payload":{"backend":"vertex","dur_ms":561,"key_index":0,"resumed":false}}
+{"ts":null,"type":"voice.reseeded","payload":{"chars":1329,"items":8,"reason":"resumed_twice"}}
+{"ts":null,"type":"voice.briefing_resent","payload":{"at":"14:21:23","briefing":"b-1","error":"","reason":"resumed_twice"}}
+{"ts":null,"type":"voice.briefing_resent","payload":{"at":"14:22:07","briefing":"b-5","error":"","reason":"resumed_twice"}}
+{"ts":null,"type":"voice.resume","payload":{"generation":0,"handle":"","replayed_chunks":0,"resumed":false,"silent_resent":0}}
+{"ts":null,"type":"voice.tool_call","payload":{"args":{"reading":"checking current tasks for bench-codex and bench-claude","text":"Remind me, what did you tell me about bench-codex and bench-claude?"},"id":"call_48094","name":"to_supervisor"}}

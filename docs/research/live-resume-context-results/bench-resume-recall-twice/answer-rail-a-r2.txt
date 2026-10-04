@@ -1,0 +1,12 @@
+pass
+ceo: Morning. What's everyone up to?
+sheepdog: Morning! bench-claude is writing the README for the calculator and checking the links, while bench-codex is refactoring the parser into its own package.
+ceo: What is bench-codex working on exactly?
+sheepdog: bench-codex is moving the parsing logic and its tests into a new dedicated directory, then updating the main file to keep everything organized.
+push: Yeah, it's just separating the parser code into its own folder to make the project cleaner.
+system: The voice connection was recycled (a session resume).
+ceo: And what is bench-claude writing?
+sheepdog: bench-claude is putting together a README that covers the calculator's purpose, how to build it, and how to run tests. It's also verifying all the links in the document.
+system: The voice connection was recycled (a session resume).
+ceo: Remind me, what did you tell me about bench-codex and bench-claude?
+sheepdog: bench-claude is writing a README for the calculator project and checking all the links, while bench-codex is moving the parser into its own folder and updating the main file imports.
