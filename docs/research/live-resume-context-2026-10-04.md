@@ -181,3 +181,15 @@ forward.
 
 Whatever is chosen, run the canary after a model or backend change:
 `chain -chain-talk` is the check that fails today.
+
+## Follow-up: option 1 implemented (#139)
+
+The CEO chose option 1. The daemon never presents a handle issued by a
+resumed connection; the reconnect opens a fresh session re-seeded from the
+recap and the last briefings (`voice.handle_dropped {reason: resumed_twice}`).
+Tier-2 `resume-recall-twice` (recycles after turns 2 and 3, then a question
+about both workers), Vertex brain `gemini-3.5-flash`: with the rail 5 of 5
+runs recalled both facts; on main 2 of 3 (the second resume 2,565 → 2,227
+prompt tokens, AUDIO 555 → 339, and one answer "I haven't shared any details
+about bench-codex yet"). Canary chain arm re-run on the same day: 0/8, the
+platform is unchanged. Results: `live-resume-context-results/bench-resume-recall-twice/`.
