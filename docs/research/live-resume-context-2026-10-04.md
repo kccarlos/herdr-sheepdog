@@ -140,7 +140,7 @@ wants it. Report and events: `live-resume-context-results/bench-resume-recall/`.
 | Long continuous mic audio | not it: 5 minutes, 8/8 (continuous noise costs almost no tokens) |
 | Sessions crossing the 16k trigger | not the resume drops: compression drops the oldest content with or without a resume, and the daemon's drops happen at 7 to 13k, below it (one 19.5k to 3.1k drop with no resume in the 10-04 log is the compression) |
 | Big context alone, long answers, natural GoAway timing | not it (13.5k, 8.6k of model audio, 9.5k at a natural GoAway: first resumes, lossless) |
-| **Resuming a resumed session (generation 2 and up)** | **it: 7 of 7 canary runs; 0 of 7 first resumes and 12 of 23 later resumes in the daemon log lose tokens** |
+| **Resuming a resumed session (generation 2 and up)** | **it: 9 of 9 canary runs; 0 of 7 first resumes and 12 of 23 later resumes in the daemon log lose tokens** |
 
 Open: the canary loses everything older than the last connection, the daemon
 logs show partial loss. The gap is the size of the survivor: in the canary the
