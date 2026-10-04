@@ -52,6 +52,8 @@ type inflightUtterance struct {
 	// callID is the voice's tool call id that relayed the words: the
 	// brain request and the late push carry it (links.go).
 	callID string
+	// reading is the voice's own reading of the words (claim.reading).
+	reading string
 	// accepted is s.acceptedSeq once this call was accepted: when it has
 	// moved by the time a late reply lands, the shepherd asked for
 	// something else meanwhile and the reply is stale.
@@ -134,6 +136,13 @@ func UtteranceOf(heard, said string) (text string, fallback bool) {
 // ToSupervisor handles the voice's relay tool. said is the model's
 // argument; the utterance is what the shepherd said (UtteranceOf).
 func (s *Supervisor) ToSupervisor(ctx context.Context, said string) (voice.ToolResult, error) {
+	return s.ToSupervisorRead(ctx, said, "")
+}
+
+// ToSupervisorRead is ToSupervisor with the voice's own short reading
+// of the words (the call's optional "reading" argument), which reaches
+// the brain labelled as the fast brain's hint, never as the CEO's words.
+func (s *Supervisor) ToSupervisorRead(ctx context.Context, said, reading string) (voice.ToolResult, error) {
 	said = strings.TrimSpace(said)
 	c, fresh := s.claimInput(ctx)
 	if !fresh {
@@ -179,6 +188,10 @@ func (s *Supervisor) ToSupervisor(ctx context.Context, said string) (voice.ToolR
 		return voice.ToolResult{Spoken: "Sorry, what was that?", Clarify: true, Scheduling: voice.UrgencyInterrupt}, nil
 	}
 	c.text = text
+	c.reading = strings.TrimSpace(reading)
+	if c.reading != "" {
+		payload["reading"] = c.reading
+	}
 	res := s.handleUtterance(ctx, c, callIDOf(ctx), false)
 	if res.Spoken != "" && !res.Pending {
 		// The voice tags the playback of this answer with it
@@ -225,6 +238,7 @@ func (s *Supervisor) handleUtterance(ctx context.Context, c claim, callID string
 	turnCtx, u := s.beginUtterance(parent, text, callID, c.id)
 	s.mu.Lock()
 	u.start = c.start
+	u.reading = c.reading
 	s.mu.Unlock()
 	if res, ok := s.fastAnswer(turnCtx, c.in, text); ok {
 		s.endUtterance(u)
@@ -432,7 +446,10 @@ func (s *Supervisor) deliverLate(turnCtx context.Context, u *inflightUtterance, 
 	} else if out.ok {
 		s.mentionedIn(out.res.Spoken)
 	}
-	tags := map[string]any{"answers_utterance": u.id, "utterance_id": u.id}
+	tags := map[string]any{"answers_utterance": u.id, "utterance_id": u.id, "answers_text": u.text}
+	if !u.start.IsZero() {
+		tags["asked_at"] = u.start.Format("15:04:05")
+	}
 	if u.callID != "" {
 		tags[tagCallID] = u.callID
 	}
@@ -598,14 +615,14 @@ func (s *Supervisor) utteranceTurn(ctx context.Context, u *inflightUtterance) ut
 		return utteranceOutcome{}
 	}
 	s.mu.Lock()
-	text, start := u.text, u.start
+	text, start, reading := u.text, u.start, u.reading
 	s.mu.Unlock()
 	// The roster sentence travels with the request, so a status question
 	// costs no tool call (D1-revised); the pending prompt with its
 	// option keys and the open promises are in the brain's own roster
 	// and ledger sections.
 	brief, _ := s.briefingText()
-	req := brain.Request{Kind: brain.KindUtterance, Trigger: brain.TriggerCEO, Question: text, Briefing: brief, Link: callLink(u.callID), UtteranceID: u.id}
+	req := brain.Request{Kind: brain.KindUtterance, Trigger: brain.TriggerCEO, Question: text, VoiceReading: reading, Briefing: brief, Link: callLink(u.callID), UtteranceID: u.id}
 	// The agent the conversation is on, for words that say "it" (the
 	// brain's agentRecords).
 	s.mu.Lock()

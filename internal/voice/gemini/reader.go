@@ -44,6 +44,7 @@ func (s *Session) handleMessage(msg *genai.LiveServerMessage, gen int) {
 		// connection's late update would make it resume after all.
 		if u.Resumable && u.NewHandle != "" && gen == s.connGen && !s.refreshing {
 			s.handle = u.NewHandle
+			s.noteHandleLocked()
 		}
 		s.mu.Unlock()
 	case msg.ToolCall != nil:

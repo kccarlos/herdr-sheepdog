@@ -103,6 +103,9 @@ func (s *Session) execTool(ctx context.Context, gen int, call voice.ToolCall, tu
 		})
 	}
 	resp := map[string]any{"spoken": res.Spoken}
+	if s.useBriefings() {
+		resp = s.answerBriefing(call, res)
+	}
 	if res.Clarify {
 		resp["clarify"] = true
 	}

@@ -154,7 +154,7 @@ func (s *Supervisor) relayUnanswered(gen uint64) {
 	}
 	// A fast path answered at once (a stop, an answer to the open prompt,
 	// the reset question): it is said like any other push.
-	tags := map[string]any{"utterance_id": c.id}
+	tags := map[string]any{"utterance_id": c.id, "from": "daemon"}
 	if bareStop(c.text) {
 		tags["stop"] = true
 	}

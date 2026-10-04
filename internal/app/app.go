@@ -370,6 +370,7 @@ func (a *App) wire() error {
 		StallAfter:       time.Duration(cfg.Gemini.StallAfterS) * time.Second,
 		StartSensitivity: cfg.Gemini.StartSensitivity,
 		EndSensitivity:   cfg.Gemini.EndSensitivity,
+		BriefingChannel:  cfg.Gemini.BriefingChannel,
 	}
 	if _, err := gemini.SystemPrompt(gcfg); err != nil {
 		return err

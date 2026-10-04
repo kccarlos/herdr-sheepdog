@@ -369,7 +369,16 @@ func (s *Session) doPush(ctx context.Context, item pushItem) {
 		s.interrupt("push")
 	}
 	turnComplete := item.urgency != voice.UrgencySilent
+	var brief briefRec
+	if s.useBriefings() {
+		s.mu.Lock()
+		brief = s.newBriefingLocked(item.text, item.urgency, item.tags)
+		s.mu.Unlock()
+	}
 	err := s.sendOn(gen, func(c Conn) error {
+		if s.useBriefings() {
+			return sendBriefing(c, item, brief)
+		}
 		setLinks(c, ctxcap.LinksFromTags(item.tags))
 		return c.SendClientContent(genai.LiveClientContentInput{
 			Turns:        pushTurn(item.text, item.urgency),
@@ -426,6 +435,13 @@ func (s *Session) doPush(ctx context.Context, item pushItem) {
 		s.log.Log(logSource, "voice.push_released", "", p)
 	}
 	payload := map[string]any{"text": item.text, "urgency": item.requested.String(), "scheduling_sent": item.urgency.SchedulingName()}
+	if brief.id != "" {
+		payload["briefing"] = brief.id
+		payload["channel"] = ChannelFunctionResponse
+		if rel, ok := brief.payload["relation"]; ok {
+			payload["relation"] = rel
+		}
+	}
 	for k, v := range item.tags {
 		payload[k] = v
 	}

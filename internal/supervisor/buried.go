@@ -229,7 +229,7 @@ func (s *Supervisor) remindBuriedPrompt() {
 	s.log.Log(logSource, "supervisor.prompt_reminded", p.PaneID, map[string]any{
 		"pending": p.ID, "reason": reason, "since_announced_s": int(age.Seconds()), "text": text, "agent": s.aliasOf(p.PaneID),
 	})
-	tags := map[string]any{tagPendingID: p.ID, "prompt_reminder": true}
+	tags := map[string]any{tagPendingID: p.ID, "prompt_reminder": true, "from": "daemon", "kind": "reminder of an open prompt"}
 	if evt := s.eventIDOf(p.PaneID); evt != "" {
 		// The voice asks OpenCheck whether the event's prompt is still
 		// the pending one before it speaks a held line.

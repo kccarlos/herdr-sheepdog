@@ -593,7 +593,7 @@ func (s *Supervisor) OnVoiceEvent(ev voice.Event) {
 // makes that pane the current subject (what "it" means in the next
 // ask).
 func (s *Supervisor) push(paneID, text string, u voice.Urgency) {
-	s.pushTagged(paneID, text, u, nil)
+	s.pushTagged(paneID, text, u, fromDaemon(nil))
 }
 
 // pushTagged is push with tags for the voice.push event (answers_job).

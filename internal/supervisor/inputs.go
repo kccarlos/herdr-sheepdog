@@ -125,6 +125,10 @@ type claim struct {
 	// ins are the claimed inputs, oldest first (the echo guard reads
 	// each one).
 	ins []*shepherdInput
+	// reading is the voice's own short reading of the words (the
+	// to_supervisor call's optional "reading" argument): a hint for the
+	// brain, labelled as the voice's, never the CEO's words.
+	reading string
 }
 
 // maxInputs bounds the remembered inputs.

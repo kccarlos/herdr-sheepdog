@@ -42,6 +42,7 @@ func Template() string {
 # stall_after_s = %[18]d   # no model response this long after an utterance logs voice.stalled; twice recycles the connection
 # start_sensitivity = "low"   # Live speech-start detection: "low" | "high" | "default"; low keeps room noise from being transcribed
 # end_sensitivity = "default"   # Live speech-end detection: "low" | "high" | "default"
+# briefing_channel = "function_response"   # how briefings reach Live: "function_response" (labelled tool results) | "user_turn" (marked user-role turns, the old way)
 # backend = "aistudio"   # "aistudio" (Google AI Studio, api_keys) | "vertex" (Vertex AI, [gemini.vertex])
 
 [gemini.vertex]

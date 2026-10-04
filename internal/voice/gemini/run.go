@@ -134,6 +134,9 @@ func (s *Session) install(conn Conn, resumed, reconnect bool) {
 	if reconnect {
 		s.log.Log(logSource, "voice.resume", "", map[string]any{"handle": handle, "resumed": resumed, "replayed_chunks": len(pending)})
 		s.emit(voice.EventResumed{Handle: handle, ContextLost: !resumed})
+		if resumed && s.useBriefings() {
+			s.resendAfterResume()
+		}
 	}
 	s.poke()
 }

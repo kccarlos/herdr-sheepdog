@@ -130,6 +130,8 @@ type Session struct {
 	// turnDoneAt is when the model last completed a turn
 	// (voice.RequeueHold).
 	turnDoneAt time.Time
+	// brief is the briefing ledger (briefing.go).
+	brief briefLedger
 
 	readerExit chan readerResult
 	refreshReq chan refreshRequest
@@ -749,6 +751,10 @@ func (s *Session) ClientPlayback(state string, playedMs int) {
 		s.flushRecapLocked()
 		s.recap.Cut(rep.Cut.Full, rep.Heard, rep.Cut.HeardMs)
 	}
+	var cutFact string
+	if state == voice.PlaybackFlushed && s.useBriefings() {
+		cutFact, _ = s.noteCutLocked(rep)
+	}
 	var unheard []voice.UnheardPush
 	if state == voice.PlaybackFlushed {
 		unheard = s.heard.Flushed(now, rep.Cut, rep.Heard)
@@ -756,6 +762,11 @@ func (s *Session) ClientPlayback(state string, playedMs int) {
 	s.mu.Unlock()
 	s.reportUnheard(unheard)
 	defer s.settleHeard()
+	if cutFact != "" {
+		// The voice cannot see the phone: tell it what the CEO heard
+		// of the line they talked over (a fact, not a re-queue).
+		_ = s.PushTagged(cutFact, voice.UrgencySilent, map[string]any{"kind": "delivery", "from": "daemon"})
+	}
 	s.log.Log(logSource, "voice.playback", "", voice.TagPayload(rep.Payload(), utt))
 	if rep.Cut != nil {
 		s.emit(voice.EventTranscript{Dir: voice.DirOut, Text: rep.Heard, Final: true, Cut: rep.Cut})

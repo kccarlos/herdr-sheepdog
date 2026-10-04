@@ -411,10 +411,10 @@ func (s *Supervisor) codePath(a announcement, kept []state.Promise, level Chatti
 			// The shepherd's own instruction ended: owed like a promise,
 			// so no chattiness level silences it.
 			s.notify(a, kept, sentence)
-			s.pushTagged(a.row.PaneID, sentence, voice.UrgencyIdle, a.tags(nil))
+			s.pushTagged(a.row.PaneID, sentence, voice.UrgencyIdle, a.tags(fromDaemon(nil)))
 		default:
 			s.notify(a, kept, sentence)
-			s.pushIfTagged(a.kind, a.row.PaneID, sentence, a.tags(nil))
+			s.pushIfTagged(a.kind, a.row.PaneID, sentence, a.tags(fromDaemon(nil)))
 		}
 		return
 	}
@@ -426,7 +426,19 @@ func (s *Supervisor) codePath(a announcement, kept []state.Promise, level Chatti
 	}
 	s.logKept(kept, a.event, line, u, "template")
 	s.notify(a, kept, line)
-	s.pushTagged(a.row.PaneID, line, u, a.tags(keptTags(announceTags(u, duePassed, false, ""), kept)))
+	s.pushTagged(a.row.PaneID, line, u, a.tags(fromDaemon(keptTags(announceTags(u, duePassed, false, ""), kept))))
+}
+
+// fromDaemon marks a push as the daemon's own sentence (the briefing's
+// provenance, voice/gemini/briefing.go): a code sentence, not the slow
+// brain's line.
+func fromDaemon(tags map[string]any) map[string]any {
+	out := make(map[string]any, len(tags)+1)
+	for k, v := range tags {
+		out[k] = v
+	}
+	out["from"] = "daemon"
+	return out
 }
 
 // recordAnnounceDetail stores an announce turn's detail alongside the
