@@ -1,4 +1,4 @@
-# Status — 2026-10-03
+# Status — 2026-10-04
 
 Living handoff note: what is on `main`, what is verified how, and what is
 open. Update it whenever a PR lands or a live check is done; it is what a
@@ -9,7 +9,7 @@ code map is [`architecture.md`](architecture.md), every option is in
 
 ## Where main is
 
-`main` = `c6d5404` (#106). The v1 plan, the 2026-09-18 redesign and
+`main` = `6a45016` (#129; the dual-brain voice layer landed in #122). The v1 plan, the 2026-09-18 redesign and
 iteration 2's phase-1 work packages (WP1–WP5, WP8, WP9;
 [`iteration-2.md`](iteration-2.md)) are merged.
 
@@ -35,8 +35,20 @@ What is in:
   `stop`); no mid-sentence interruption, based on the client's playback
   reports; held pushes while no client listens; re-seed after a Gemini
   reconnect; a fresh Gemini session after 30 min away or 2 h of age;
-  unheard pushes detected and re-queued or reported to the brain (GPT-Live too, #101); the
-  recap follows a provider switch; GPT-Live input paced at real time.
+  the recap follows a provider switch; GPT-Live input paced at real time;
+  GPT-Live keeps the heard watch (unheard pushes re-queued or reported to
+  the brain, #101).
+- **Dual-brain voice layer** (#122, [`design/dual-brain.md`](design/dual-brain.md),
+  [`eval/dual-brain-2026-10-04.md`](eval/dual-brain-2026-10-04.md)): Gemini
+  Live is the fast brain and owns the conversation; the slow brain owns
+  actions behind the rails. Everything the daemon tells it (answers, worker
+  news, focus and names lines, cut-off facts) arrives as a **briefing**, a
+  function response, never a user turn; `to_supervisor` answers use the
+  same shape and wait up to `brain.reply_wait_s` (default 30, above the
+  25 s utterance budget). The Gemini heard watch and re-queue, the
+  self-relay and rescue guards and the echo text guard were removed: the
+  phone's playback report becomes a cut-off fact for the fast brain, words
+  that began over the voice's own line a timing fact for the slow brain.
 - **Brain:** stateful agent over a transcript window with providers
   `gemini`, `vertex` and `deepseek` and a runtime model switch; the ear
   contract (`spoken` / `ask` / `detail`); push judgment under the
@@ -50,7 +62,7 @@ What is in:
 - **Supervisor:** every utterance runs on the shepherd's recorded words;
   the one rail in code (`supervisor.authorise_window_s`); the stop
   procedure, acknowledged by a code sentence with no brain turn;
-  deliver-later replies (`brain.reply_wait_s`); "New conversation".
+  replies handed back as the call's own result within `brain.reply_wait_s` (default 30 s), later as a briefing; "New conversation".
 - **Current focus:** after a brain reply the voice gets one silent line
   (agent in focus, open question, key points) so it resolves "it" and
   answers follow-ups ([`timelines.md`](timelines.md); #101).

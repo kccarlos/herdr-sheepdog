@@ -29,6 +29,8 @@ needs_user); Ctrl-C sends without a stop word; count of "what does that
 mean"-class follow-ups; brain turn duration and prompt tokens. The
 baseline is the 2026-09-23/24 logs.
 
+> **Superseded (2026-10-04):** the heard-coverage family (unheard-push rate, word and key-term coverage of a spoken push, re-queue counts) judged verbatim reading. Since the dual-brain layer (#122) the fast brain voices briefings in its own words, so the judge asks whether the key facts reached the CEO correctly and in time: the fact-delivery rubric (`facts_current`, `no_hallucination`, unauthorised actions, ack-only, latency) in [`eval/dual-brain-2026-10-04.md`](eval/dual-brain-2026-10-04.md). `voice.push_unheard` is now a GPT-Live-only event.
+
 ## Rules for every change in this iteration
 
 1. It cites a failure: a scorecard metric or an eval case id taken from

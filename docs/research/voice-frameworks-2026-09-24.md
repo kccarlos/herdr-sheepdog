@@ -1,3 +1,5 @@
+> Superseded by [`docs/design/dual-brain.md`](../design/dual-brain.md) (adopted and merged in #122); kept as a dated snapshot.
+
 # Voice layer research: problems, how voice-agent frameworks solve them, and a WebRTC/Pion assessment
 
 > Superseded: recommendations 1–5 landed in #70 and #73 (see the "Done" column); later voice issues and their decided fixes are in [`../history/bench-2026-10-03.md`](../history/bench-2026-10-03.md).
