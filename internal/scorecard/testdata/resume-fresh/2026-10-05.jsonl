@@ -1,0 +1,12 @@
+{"ts":"2026-10-05T10:00:00Z","source":"daemon","type":"daemon.start","payload":{}}
+{"ts":"2026-10-05T10:01:00Z","source":"voice","type":"voice.usage","payload":{"prompt":3000}}
+{"ts":"2026-10-05T10:09:00Z","source":"voice","type":"voice.resume","payload":{"handle":"h1","resumed":true,"generation":1}}
+{"ts":"2026-10-05T10:09:04Z","source":"voice","type":"voice.usage","payload":{"prompt":3100}}
+{"ts":"2026-10-05T10:09:04Z","source":"voice","type":"voice.resume_context","payload":{"generation":1,"before_prompt":3000,"after_prompt":3100}}
+{"ts":"2026-10-05T10:15:00Z","source":"voice","type":"voice.usage","payload":{"prompt":6000}}
+{"ts":"2026-10-05T10:18:00Z","source":"voice","type":"voice.handle_dropped","payload":{"reason":"resumed_twice","handle_generation":1,"generation":1}}
+{"ts":"2026-10-05T10:18:01Z","source":"voice","type":"voice.resume","payload":{"handle":"","resumed":false,"generation":0}}
+{"ts":"2026-10-05T10:18:05Z","source":"voice","type":"voice.usage","payload":{"prompt":1800}}
+{"ts":"2026-10-05T10:27:00Z","source":"voice","type":"voice.usage","payload":{"prompt":4000}}
+{"ts":"2026-10-05T10:27:30Z","source":"voice","type":"voice.resume","payload":{"handle":"h3","resumed":true,"generation":1}}
+{"ts":"2026-10-05T10:27:34Z","source":"voice","type":"voice.usage","payload":{"prompt":4050}}

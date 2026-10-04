@@ -141,11 +141,11 @@ func writeMarkdownSection(b *strings.Builder, r Report) {
 // writeResumeRetention prints the daily resume-retention lines: prompt
 // tokens after / before a Gemini Live resume (tokens, not recall).
 func writeResumeRetention(b *strings.Builder, r ResumeReport) {
-	fmt.Fprintf(b, "### Resume retention (Gemini Live)\n\n%d resumed connection(s). Prompt tokens after / before the resume; a drop is not proof of lost facts.\n\n", r.Resumes)
-	if r.Resumes == 0 {
+	fmt.Fprintf(b, "### Resume retention (Gemini Live)\n\n%d resumed connection(s). Prompt tokens after / before the resume; a drop is not proof of lost facts. A fresh session opened instead of resuming a resumed one (re-seeded from the recap and briefings) is counted apart, not as a resume.\n\n", r.Resumes)
+	if len(r.Days) == 0 {
 		return
 	}
-	b.WriteString("| day | resumes | after / before | ratio | worst | 1st resume of a session | later resumes | per modality after / before | derived |\n|---|---|---|---|---|---|---|---|---|\n")
+	b.WriteString("| day | resumes | after / before | ratio | worst | 1st resume of a session | later resumes | fresh instead of a 2nd resume | per modality after / before | derived |\n|---|---|---|---|---|---|---|---|---|---|\n")
 	for _, d := range r.Days {
 		var mods []string
 		for _, k := range sortedKeys(d.ModalityBefore) {
@@ -155,7 +155,7 @@ func writeResumeRetention(b *strings.Builder, r ResumeReport) {
 		if m == "" {
 			m = "n/a"
 		}
-		fmt.Fprintf(b, "| %s | %d | %d / %d | %.2f | %.2f | %s | %s | %s | %d |\n", d.Day, d.Resumes, d.After, d.Before, d.Ratio, d.MinRatio, genCell(d.FirstN, d.FirstRatio), genCell(d.LaterN, d.LaterRatio), m, d.Derived)
+		fmt.Fprintf(b, "| %s | %d | %d / %d | %.2f | %.2f | %s | %s | %d | %s | %d |\n", d.Day, d.Resumes, d.After, d.Before, d.Ratio, d.MinRatio, genCell(d.FirstN, d.FirstRatio), genCell(d.LaterN, d.LaterRatio), d.FreshAfterResume, m, d.Derived)
 	}
 	b.WriteString("\n")
 }

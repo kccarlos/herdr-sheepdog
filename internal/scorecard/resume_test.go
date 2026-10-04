@@ -26,3 +26,27 @@ func TestComputeResumeRetention(t *testing.T) {
 		t.Errorf("day = %+v", d)
 	}
 }
+
+// TestResumeRetentionFreshAfterResume: a fresh session opened instead of
+// resuming a resumed one (voice.handle_dropped resumed_twice) is no
+// resume row; it is counted per day, and the next resume is a first
+// resume again (the daemon's logged generation).
+func TestResumeRetentionFreshAfterResume(t *testing.T) {
+	events, err := Load("testdata/resume-fresh", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := computeResumeRetention(events)
+	if r.Resumes != 2 || len(r.Days) != 1 {
+		t.Fatalf("resumes = %d, days = %d, want 2 and 1", r.Resumes, len(r.Days))
+	}
+	d := r.Days[0]
+	if d.FreshAfterResume != 1 || d.FirstN != 2 || d.LaterN != 0 || !approxEqual(d.MinRatio, 1.0125) {
+		t.Errorf("day = %+v", d)
+	}
+	for _, row := range r.Rows {
+		if row.Generation != 1 {
+			t.Errorf("row %+v: want generation 1", row)
+		}
+	}
+}
