@@ -3,10 +3,12 @@ package gemini
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"google.golang.org/genai"
 
+	"github.com/kccarlos/herdr-sheepdog/internal/ctxcap"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
 
@@ -77,6 +79,15 @@ func (s *Session) execTool(ctx context.Context, gen int, call voice.ToolCall, tu
 	case <-ctx.Done():
 		s.log.Log(logSource, "voice.tool_result", "", map[string]any{"id": call.ID, "name": call.Name, "cancelled": true})
 		s.emit(voice.EventToolResult{Call: call, Err: ctx.Err(), Cancelled: true})
+		s.pushUnsentAnswer(call, res, "cancelled")
+		return
+	}
+	if !s.holdForShepherd(ctx, call, res) {
+		// Cancelled while the shepherd spoke: an answer still reaches
+		// them, the late way (the supervisor's barge-in rule, C7).
+		s.log.Log(logSource, "voice.tool_result", "", map[string]any{"id": call.ID, "name": call.Name, "cancelled": true})
+		s.emit(voice.EventToolResult{Call: call, Err: ctx.Err(), Cancelled: true})
+		s.pushUnsentAnswer(call, res, "cancelled")
 		return
 	}
 	// An INTERRUPT result is downgraded to WHEN_IDLE at send time, now
@@ -109,6 +120,7 @@ func (s *Session) execTool(ctx context.Context, gen int, call voice.ToolCall, tu
 			ID: call.ID, Name: call.Name, Response: resp, Scheduling: scheduling(sched),
 		}}})
 	})
+	var unheard []voice.UnheardPush
 	if sendErr == nil && (sched != voice.UrgencySilent || res.Pending) {
 		s.mu.Lock()
 		if sched != voice.UrgencySilent {
@@ -116,11 +128,29 @@ func (s *Session) execTool(ctx context.Context, gen int, call voice.ToolCall, tu
 			if res.Spoken != "" {
 				s.playUtt.Handed(res.UtteranceID)
 			}
+			if isAnswer(call, res) {
+				// The answer is watched like a spoken push (voice/heard.go):
+				// voiced as "On it." it is judged unheard and re-queued,
+				// and the re-seed recap keeps it.
+				now := s.now()
+				line, tags := answerLine(call, res)
+				unheard = s.heard.Pushed(now, line, tags, false)
+				s.requeue.Pushed(now, tags)
+				s.flushRecapLocked()
+				s.recap.Add(voice.RecapSupervisor, line)
+			}
 		}
 		if res.Pending && call.ID != "" {
 			s.owedReplies[call.ID] = s.now() // its reply comes as a push
 		}
 		s.mu.Unlock()
+	}
+	s.reportUnheard(unheard)
+	if sendErr != nil {
+		// The connection the call came on is gone (docs/timelines.md
+		// C23): the answer goes through the push queue, which outlives
+		// connections.
+		s.pushUnsentAnswer(call, res, "send_error")
 	}
 	// dur_ms is the handler's own time; wait_ms the pause for the model to
 	// close its turn (the /debug swimlane shows both as the hop latency).
@@ -164,4 +194,82 @@ func (s *Session) cancelTools(ids []string) {
 	for _, c := range cancels {
 		c()
 	}
+}
+
+// shepherdHoldMax bounds how long a tool result waits for the shepherd
+// to stop speaking: past it the result goes out anyway (WHEN_IDLE lets
+// the model place it).
+const shepherdHoldMax = 10 * time.Second
+
+// shepherdHoldStep is how often a held result looks again.
+const shepherdHoldStep = 250 * time.Millisecond
+
+// holdForShepherd holds a spoken result while the shepherd is speaking
+// (speakingUntilLocked, the rule the push queue follows): a reply that
+// lands seconds after the call (brain.reply_wait_s) would otherwise be
+// voiced over their next sentence. stop() is never held. It reports
+// false when ctx ended during the hold.
+func (s *Session) holdForShepherd(ctx context.Context, call voice.ToolCall, res voice.ToolResult) bool {
+	if call.Name == voice.ToolStop || res.Spoken == "" || res.Scheduling == voice.UrgencySilent {
+		return true
+	}
+	deadline := s.now().Add(shepherdHoldMax)
+	held := false
+	for {
+		s.mu.Lock()
+		now := s.now()
+		until := s.speakingUntilLocked(now)
+		s.mu.Unlock()
+		if until <= 0 || !now.Before(deadline) {
+			break
+		}
+		if !held {
+			held = true
+			s.log.Log(logSource, "voice.push_deferred", "", map[string]any{"kind": "tool_result", "name": call.Name, "reason": "shepherd_speaking"})
+		}
+		select {
+		case <-time.After(min(until, shepherdHoldStep)):
+		case <-ctx.Done():
+			return false
+		}
+	}
+	return true
+}
+
+// isAnswer reports whether res is a spoken answer to the shepherd's
+// words (not pending, not silent context, not the stop tool).
+func isAnswer(call voice.ToolCall, res voice.ToolResult) bool {
+	return call.Name == voice.ToolToSupervisor && res.Spoken != "" && !res.Pending && res.Scheduling != voice.UrgencySilent
+}
+
+// answerLine is an answer as a push would carry it: the spoken text with
+// its options as a choice, tagged with the utterance it answers.
+func answerLine(call voice.ToolCall, res voice.ToolResult) (string, map[string]any) {
+	line := res.Spoken
+	if len(res.Options) > 0 {
+		line += " Options: " + strings.Join(res.Options, "; ") + "."
+	}
+	tags := map[string]any{voice.TagAnswersUtterance: res.UtteranceID, voice.TagUtteranceID: res.UtteranceID}
+	if res.UtteranceID == "" {
+		tags = map[string]any{}
+	}
+	if call.ID != "" {
+		tags[ctxcap.TagCallID] = call.ID
+	}
+	return line, tags
+}
+
+// pushUnsentAnswer hands an answer whose function response could not be
+// sent to the push queue, so it is still spoken (reason: send_error or
+// cancelled). Anything that is not an answer is dropped as before.
+func (s *Session) pushUnsentAnswer(call voice.ToolCall, res voice.ToolResult, reason string) {
+	if !isAnswer(call, res) {
+		return
+	}
+	line, tags := answerLine(call, res)
+	tags["fallback"] = reason
+	if err := s.PushTagged(line, res.Scheduling, tags); err != nil {
+		return
+	}
+	s.log.Log(logSource, "voice.tool_result_pushed", "", map[string]any{"id": call.ID, "name": call.Name, "reason": reason})
 }

@@ -128,8 +128,9 @@ type Brain struct {
 	AnnounceWaitS int `toml:"announce_wait_s"`
 	// ReplyWaitS is how long a to_supervisor call waits for the brain's
 	// reply before it returns a silent pending result and the reply is
-	// pushed when it lands (0: default 2; negative: wait for the whole
-	// turn, the fully synchronous behaviour).
+	// pushed when it lands (0: default 30, above the utterance budget, so
+	// the reply is the call's own result; negative: wait for the whole
+	// turn, the fully synchronous behaviour, where a barge-in cancels it).
 	ReplyWaitS int `toml:"reply_wait_s"`
 	// InvestigateMaxS is the sanity ceiling of one background
 	// investigation — the only time limit on its answer; a job still
@@ -485,7 +486,7 @@ const (
 )
 
 func defaultBrain() Brain {
-	return Brain{Enabled: true, Provider: DefaultBrainProvider, Model: DefaultBrainModel, MaxSteps: 6, UtteranceTimeoutS: 25, WindowTokens: 12000, PruneAfterTurns: 2, AnnounceTurnTimeoutS: 6, AnnounceTimeoutS: 15, AnnounceWaitS: 2, ReplyWaitS: 2, InvestigateMaxS: 600, InvestigateSessionTTLS: 3600}
+	return Brain{Enabled: true, Provider: DefaultBrainProvider, Model: DefaultBrainModel, MaxSteps: 6, UtteranceTimeoutS: 25, WindowTokens: 12000, PruneAfterTurns: 2, AnnounceTurnTimeoutS: 6, AnnounceTimeoutS: 15, AnnounceWaitS: 2, ReplyWaitS: 30, InvestigateMaxS: 600, InvestigateSessionTTLS: 3600}
 }
 
 // defaultCLI mirrors the argv templates verified in
