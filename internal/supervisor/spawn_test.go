@@ -12,6 +12,7 @@ import (
 
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
+	"github.com/kccarlos/herdr-sheepdog/internal/state"
 )
 
 // spawnWorld is a harness with a project root holding bench, app and a
@@ -144,11 +145,64 @@ func TestSpawnReusesExistingWorkspace(t *testing.T) {
 		t.Errorf("workspace.create calls = %d", n)
 	}
 	split := w.params("pane.split")
-	if len(split) != 1 || split[0]["pane_id"] != "w3:p1" || split[0]["cwd"] != w.bench {
+	if len(split) != 1 || split[0]["target_pane_id"] != "w3:p1" || split[0]["cwd"] != w.bench {
 		t.Fatalf("pane.split = %v", split)
 	}
 	if in := w.params("pane.send_input"); len(in) != 1 || in[0]["text"] != "codex" {
 		t.Fatalf("pane.send_input = %v", in)
+	}
+}
+
+// The CEO's phone session, 2026-10-03 22:24:11: "在 Sheepdog Bench 开一个
+// 新的 Claude" split wP:p1 (the bench workspace's pane) but the new pane
+// came back as wM:p3, in the kvoice workspace, and the agent was named
+// "kvoice Claude 2". herdr's pane.split reads the pane to split from
+// target_pane_id and, without it, splits the focused pane. This mock
+// herdr behaves like the real one (verified against herdr 0.9.3): the
+// new pane must land in the bench workspace, and its name follows.
+func TestSpawnSplitLandsInTheProjectsWorkspace(t *testing.T) {
+	w := newSpawnWorld(t)
+	kvoice := filepath.Join(w.root, "kvoice")
+	if err := os.Mkdir(kvoice, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	w.srv.SetWorkspace(herdr.WorkspaceInfo{WorkspaceID: "wM", Label: "kvoice", Focused: true})
+	w.srv.SetWorkspace(herdr.WorkspaceInfo{WorkspaceID: "wP", Label: "bench"})
+	w.srv.SetPane(herdr.PaneInfo{PaneID: "wM:p1", WorkspaceID: "wM", Cwd: kvoice})
+	w.srv.SetPane(herdr.PaneInfo{PaneID: "wP:p1", WorkspaceID: "wP", Cwd: w.bench})
+	n := 0
+	w.srv.Handle("pane.split", func(p json.RawMessage) (any, error) {
+		var params struct {
+			Target string `json:"target_pane_id"`
+			Cwd    string `json:"cwd"`
+		}
+		_ = json.Unmarshal(p, &params)
+		ws := "wM" // herdr's fallback: the focused pane's workspace
+		if params.Target != "" {
+			ws = strings.SplitN(params.Target, ":", 2)[0]
+		}
+		n++
+		pane := herdr.PaneInfo{PaneID: ws + ":p" + string(rune('2'+n)), WorkspaceID: ws, Cwd: params.Cwd, Status: herdr.StateUnknown}
+		w.srv.SetScreen(pane.PaneID, "bench ❯ ")
+		return map[string]any{"type": "pane_info", "pane": pane}, nil
+	})
+	w.hear("在 bench 开一个新的 Claude")
+	if _, err := w.spawn(brain.SpawnRequest{Dir: "bench", Kind: "claude"}); err != nil {
+		t.Fatal(err)
+	}
+	ev := w.log.ofType("supervisor.spawn")
+	if len(ev) != 1 {
+		t.Fatalf("supervisor.spawn events = %d", len(ev))
+	}
+	pane, _ := ev[0].Payload.(map[string]any)["pane"].(string)
+	if !strings.HasPrefix(pane, "wP:") {
+		t.Fatalf("the new agent's pane = %s, want one in the bench workspace wP", pane)
+	}
+	w.sup.HandleTransition(context.Background(), herdr.Transition{PaneID: pane, To: herdr.StateIdle, At: w.clock.Now(), Agent: "claude", WorkspaceID: "wP", WorkspaceLabel: "bench", Cwd: w.bench})
+	w.sup.HandleTransition(context.Background(), herdr.Transition{PaneID: "wM:p1", To: herdr.StateIdle, At: w.clock.Now(), Agent: "claude", WorkspaceID: "wM", WorkspaceLabel: "kvoice", Cwd: kvoice})
+	row, _ := w.store.Get(pane)
+	if got := state.Say(row); got != "bench Claude" {
+		t.Errorf("the new agent is called %q, want %q", got, "bench Claude")
 	}
 }
 

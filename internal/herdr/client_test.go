@@ -412,7 +412,7 @@ func TestClientSpawnCalls(t *testing.T) {
 	}
 	want := map[string]string{
 		"workspace.create": `{"cwd":"/p/app","focus":false,"label":"app"}`,
-		"pane.split":       `{"cwd":"/p/app","direction":"right","focus":false,"pane_id":"w7:p1"}`,
+		"pane.split":       `{"cwd":"/p/app","direction":"right","focus":false,"target_pane_id":"w7:p1"}`,
 		"pane.send_input":  `{"keys":["enter"],"pane_id":"w7:p2","text":"claude --model haiku"}`,
 	}
 	for _, r := range srv.Requests() {

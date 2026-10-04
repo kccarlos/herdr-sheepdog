@@ -474,6 +474,11 @@ for shells.
 → {"id":"c","method":"agent.wait","params":{"target":"recon","until":["blocked"],"timeout_ms":120000}}
 ← {"id":"c","result":{"type":"agent_info","agent":{…}}}      // or {"error":{"code":"timeout",…}}
 
+→ {"id":"s","method":"pane.split","params":{"target_pane_id":"w5:p1","direction":"right","cwd":"/abs/path","focus":false}}
+← {"id":"s","result":{"type":"pane_info","pane":{…"pane_id":"w5:p2","workspace_id":"w5"…}}}
+// the pane to split is target_pane_id (PaneSplitParams); an unknown key such as
+// pane_id is ignored and herdr splits the focused pane instead (seen 2026-10-03).
+
 → {"id":"d","method":"workspace.close","params":{"workspace_id":"w5"}}
 ← {"id":"d","result":{"type":"ok"}}
 ```

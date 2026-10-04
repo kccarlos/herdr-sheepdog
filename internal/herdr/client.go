@@ -210,12 +210,16 @@ func (c *Client) CreateWorkspace(ctx context.Context, cwd, label string) (PaneIn
 }
 
 // SplitPane splits paneID to the right, unfocused, with a new shell in
-// cwd (`pane.split`), and returns the new pane.
+// cwd (`pane.split`), and returns the new pane. The pane to split goes
+// in target_pane_id (PaneSplitParams in `herdr api schema --json`):
+// herdr ignores an unknown pane_id and splits the focused pane instead,
+// which put two voice-started agents into the wrong workspace on
+// 2026-10-03 (the bench agent in kvoice's, the kvoice one in bench's).
 func (c *Client) SplitPane(ctx context.Context, paneID, cwd string) (PaneInfo, error) {
 	var res struct {
 		Pane PaneInfo `json:"pane"`
 	}
-	err := c.Call(ctx, "pane.split", map[string]any{"pane_id": paneID, "direction": "right", "cwd": cwd, "focus": false}, &res)
+	err := c.Call(ctx, "pane.split", map[string]any{"target_pane_id": paneID, "direction": "right", "cwd": cwd, "focus": false}, &res)
 	c.log("herdr.pane_split", paneID, map[string]any{"cwd": cwd, "pane": res.Pane.PaneID, "error": errString(err)})
 	return res.Pane, err
 }
