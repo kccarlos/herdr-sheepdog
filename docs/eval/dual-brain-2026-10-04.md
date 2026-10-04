@@ -269,10 +269,11 @@ relation}` for each briefing and `voice.briefing_resent` after a resume.
 
 ## Spend
 
-About **$55** of API credit at list prices (budget $60): tier 2 ≈ $33
-(including the discarded DeepSeek and confounded runs, ≈ $9), tier 1
-≈ $6.4, tier 3 ≈ $8.5 (judge, simulated CEO, Live and TTS; brains on
-Vertex ≈ $1 more), Live probes $0.3, the RULES.md check $0.2. Claude
+About **$55** of API credit at list prices (budget $60): tier 2 ≈ $40
+(≈ $16 of it on runs later discarded or superseded: the DeepSeek-402
+run, the two sequential runs, the prompt v1–v3 interleaved runs), tier 1
+≈ $6.4 (incl. the RULES.md check), tier 3 ≈ $7.5 (judge, simulated CEO,
+Live and TTS; the Vertex brains ≈ $1 more), Live probes $0.3. Claude
 subscription: weekly allowance 17 % → 7 % over the night (tier-3 Haiku
 workers and this agent), session meter never below 38 %.
 
