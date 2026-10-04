@@ -103,6 +103,7 @@ func (s *Session) install(conn Conn, resumed, reconnect bool) {
 	s.pending, s.pendingBytes = nil, 0
 	handle := s.handle
 	resent := 0
+	var stale map[string]any
 	if !resumed {
 		// A fresh session (a 1011, a reset) is what a due refresh wanted.
 		s.freshAt = s.now()
@@ -110,10 +111,12 @@ func (s *Session) install(conn Conn, resumed, reconnect bool) {
 		// The re-seed and the briefing rebuild a fresh context; nothing
 		// is owed from the old one.
 		s.postHandle = nil
+		s.resumeCtx = nil // a fresh session has nothing to compare
 	} else if reconnect {
 		// The resumed context ends at the handle: the silent lines sent
 		// after it go again (handle.go).
 		resent = s.resendAfterResumeLocked()
+		stale = s.startResumeContextLocked()
 	}
 	s.turnOpen = false
 	s.speaking = false
@@ -124,6 +127,9 @@ func (s *Session) install(conn Conn, resumed, reconnect bool) {
 	s.mu.Unlock()
 	s.logTurn(turn)
 	s.logAudioTiming(timing)
+	if stale != nil {
+		s.log.Log(logSource, "voice.resume_context", "", stale)
+	}
 
 	s.wg.Add(1)
 	go func() { defer s.wg.Done(); s.readLoop(conn, gen) }()

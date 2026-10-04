@@ -45,6 +45,7 @@ func (s *Session) handleMessage(msg *genai.LiveServerMessage, gen int) {
 		accepted := u.Resumable && u.NewHandle != "" && gen == s.connGen && !s.refreshing
 		if accepted {
 			s.handle = u.NewHandle
+			s.handleUsage = s.lastUsage
 			s.noteBriefHandleLocked()
 		}
 		p := s.noteHandleLocked(u.NewHandle, u.Resumable, accepted)
@@ -64,11 +65,28 @@ func (s *Session) handleMessage(msg *genai.LiveServerMessage, gen int) {
 	if msg.UsageMetadata != nil {
 		u := msg.UsageMetadata
 		s.mu.Lock()
-		s.lastPromptTokens = u.PromptTokenCount
+		rc := s.noteUsageLocked(u, gen == s.connGen)
 		s.mu.Unlock()
-		s.log.Log(logSource, "voice.usage", "", map[string]any{
-			"prompt": u.PromptTokenCount, "response": u.ResponseTokenCount, "total": u.TotalTokenCount,
-		})
+		p := map[string]any{"prompt": u.PromptTokenCount, "response": u.ResponseTokenCount, "total": u.TotalTokenCount}
+		if u.ThoughtsTokenCount != 0 {
+			p["thoughts"] = u.ThoughtsTokenCount
+		}
+		if u.CachedContentTokenCount != 0 {
+			p["cached"] = u.CachedContentTokenCount
+		}
+		if u.ToolUsePromptTokenCount != 0 {
+			p["tool_use_prompt"] = u.ToolUsePromptTokenCount
+		}
+		if m := modalityTotals(u.PromptTokensDetails); m != nil {
+			p["prompt_by_modality"] = m
+		}
+		if m := modalityTotals(u.ResponseTokensDetails); m != nil {
+			p["response_by_modality"] = m
+		}
+		s.log.Log(logSource, "voice.usage", "", p)
+		if rc != nil {
+			s.log.Log(logSource, "voice.resume_context", "", rc)
+		}
 	}
 }
 
