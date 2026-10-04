@@ -7,9 +7,14 @@ code map is [`architecture.md`](architecture.md), every option is in
 [`../CONFIG.md`](../CONFIG.md), and the PR-by-PR history is
 `CHANGELOG.md`.
 
+For agents picking up the work: the working handover, with the CEO's
+principles, the latest test results, the decisions waiting and the next
+work queue, is [`handover-2026-10-04.md`](handover-2026-10-04.md). Read it
+after this page.
+
 ## Where main is
 
-`main` = `6a45016` (#129; the dual-brain voice layer landed in #122). The v1 plan, the 2026-09-18 redesign and
+`main` = `2d906d2` (#131; the dual-brain voice layer landed in #122 and is the adopted design since the CEO's phone test of 2026-10-04). The v1 plan, the 2026-09-18 redesign and
 iteration 2's phase-1 work packages (WP1–WP5, WP8, WP9;
 [`iteration-2.md`](iteration-2.md)) are merged.
 
@@ -20,7 +25,7 @@ since #79. The release workflow is Ubuntu-only; the darwin binary is
 signed and notarized locally with `make release-sign`
 ([`signing.md`](signing.md)). Nothing runs on macOS runners. The iOS
 companion app (`herdr-sheepdog-ios`) is built and shipped by Xcode Cloud,
-not GitHub Actions; TestFlight build 0.1.1 (20) is in the internal
+not GitHub Actions; TestFlight build 0.1.2 (29) is in the internal
 **Me** group (iOS status: `herdr-sheepdog-ios` `docs/status.md`).
 
 What is in:
@@ -84,6 +89,18 @@ What is in:
 
 ## Verified live
 
+- **Dual-brain phone test, 2026-10-04** (iPhone speakerphone, TestFlight
+  0.1.2 (29), Gemini Live on Vertex, brain on Vertex `gemini-3.8-flash`
+  then `gemini-3.5-flash`): the CEO judged it smooth and adopted it. Of 73
+  turns the fast brain answered 33 itself (about 24 right, 3 stale, 4
+  wrong); no unauthorised action; 3 news briefings never voiced; replies in
+  Traditional instead of Simplified Chinese; occasional echo on
+  speakerphone. Details and the ranked fixes are in the handover.
+- **Tier-3 bench (real herdr, Claude Haiku workers) and campaign E,
+  2026-10-03/04:** tier 1 88 %, tier 2 67 %, tier 3 text 7/12 and voice
+  5/12 ([`eval/campaign-e-2026-10-03.md`](eval/campaign-e-2026-10-03.md));
+  dual-brain vs main on tier 2: 61/90 vs 46/90
+  ([`eval/dual-brain-2026-10-04.md`](eval/dual-brain-2026-10-04.md)).
 - **The v1 success test on the phone, 2026-10-02** (iPhone, TestFlight,
   Gemini Live on Vertex, brain on Vertex `gemini-3.8-flash`): status,
   proactive block with voice approval, deep ask (codex investigation),
@@ -131,21 +148,23 @@ What is in:
 
 ## Open
 
-- **Bench backlog:** every item of
-  [`bench-2026-10-03.md`](history/bench-2026-10-03.md) is fixed; none has been
-  re-checked live with a real worker and the phone yet. That re-run is the
-  next acceptance step.
-- **Tier-2 bench findings:** the failures named in
-  [`bench/tier2-2026-10-03.md`](bench/tier2-2026-10-03.md) (the voice
-  answering for the brain, deferrals read as declines, echo of the bot's
-  own voice, cut and resumed pushes, markers read aloud) are the next fix
-  list; tier 3 is pending.
-- **Eval campaign leftovers** (run C, [`eval-campaign-2026-10-03.md`](eval/eval-campaign-2026-10-03.md)):
-  the run-C fixes (#99: H4 language, the duplicate block line, H7 fact
-  source) are not re-measured; Vertex step latency (p90 8.4 s, up to 25 s)
-  still causes fallbacks; failover has not been measured live (run
-  `eval sim --live --fallback-provider deepseek`); should failover also
-  trigger on step latency, not only errors?
+- **Next work (agreed, not started; see the handover's queue):** fast-brain
+  prompt toward facts (hand off anything new, comparative or historical;
+  ask when unsure), briefings carrying their age and a finished flag, tool
+  timeouts reported as not verified, unvoiced briefings reported to the
+  fast brain, the roster formatter, stable agent names, reliable spawn
+  launch; then a **language preference in Settings** fed into both brains'
+  prompts. Prompt and information changes only, no judgment in code.
+- **Brain failover is broken in practice:** DeepSeek returns 402
+  Insufficient Balance (since 2026-10-03), so a Vertex timeout ends in the
+  fallback line. The CEO is to top it up or pick another fallback. The live
+  brain is Vertex `gemini-3.5-flash`; `gemini-3.8-flash` on Vertex has
+  bursts of 20-50 s steps and 504s.
+- **Gemini Live mid-answer pauses** (~7 s, Vertex `gemini-3.8-live` only,
+  [`research/live-pauses-2026-10-04.md`](research/live-pauses-2026-10-04.md)):
+  trial `gemini.backend=aistudio` pending.
+- **Flaky CI test:** `TestWSMuteDoesNotPersistAcrossClients` (internal/web)
+  fails now and then; re-run the job.
 - **Pending decision (CEO testing first): should every pending approval
   notify the phone?** Today the APNs notification follows the brain's
   announce decision, so a block the brain skips sends no notification.
