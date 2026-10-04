@@ -160,7 +160,7 @@ What is in:
   fallback line. The CEO is to top it up or pick another fallback. The live
   brain is Vertex `gemini-3.5-flash`; `gemini-3.8-flash` on Vertex has
   bursts of 20-50 s steps and 504s.
-- **Gemini Live loses context on the second and later resumes** (a handle from a resumed connection keeps only that connection's content; first resume lossless; [`research/live-resume-context-2026-10-04.md`](research/live-resume-context-2026-10-04.md)). Measured, not fixed: options are with the CEO (handover). `voice.resume_context` and the scorecard's resume-retention line track it; `cmd/livecanary` is the platform canary.
+- **Gemini Live loses context on the second and later resumes** (a handle from a resumed connection keeps only that connection's content; first resume lossless; [`research/live-resume-context-2026-10-04.md`](research/live-resume-context-2026-10-04.md)). Worked around (CEO option 1, #139): the daemon never resumes a resumed session; the reconnect after one opens a fresh session re-seeded from the recap and the recent briefings (`voice.handle_dropped {reason: resumed_twice}`). Bench `resume-recall-twice` (two recycles, a turn between): both facts recalled 5/5 with the rail, 2/3 without. `voice.resume_context` and the scorecard's resume-retention line (now with a "fresh instead of a 2nd resume" count) track it; `cmd/livecanary -arm chain` is the platform canary (still 0/8: the platform is unchanged).
 - **Gemini Live mid-answer pauses** (~7 s, Vertex `gemini-3.8-live` only,
   [`research/live-pauses-2026-10-04.md`](research/live-pauses-2026-10-04.md)):
   trial `gemini.backend=aistudio` pending.
