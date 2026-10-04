@@ -72,6 +72,8 @@ type Behavior struct {
 	Collision *Collision `json:"collision,omitempty"`
 	// Reconnect drops the phone's connection for a while.
 	Reconnect *Reconnect `json:"reconnect,omitempty"`
+	// Resume forces one Gemini session resume mid-call.
+	Resume *Resume `json:"resume,omitempty"`
 }
 
 // BargeIn: with probability Prob per answer, once a bot utterance has
@@ -101,6 +103,15 @@ type Collision struct {
 type Reconnect struct {
 	AfterTurn int `json:"after_turn"`
 	AwayMS    int `json:"away_ms"`
+}
+
+// Resume: after the answer to the CEO's AfterTurn-th utterance the
+// daemon's voice connection is recycled (the GoAway path: a new
+// connection resumed from the latest handle, the old one closed), so
+// the following turns show what the model kept. Measurement scenario for
+// docs/research/live-resume-context-2026-10-04.md.
+type Resume struct {
+	AfterTurn int `json:"after_turn"`
 }
 
 // Faults are injected between the scratch daemon and DeepSeek.
@@ -293,6 +304,9 @@ func (s Scenario) validate() error {
 	}
 	if r := b.Reconnect; r != nil && (r.AfterTurn < 1 || r.AwayMS <= 0) {
 		return fmt.Errorf("behavior.reconnect: after_turn >= 1 and away_ms > 0")
+	}
+	if r := b.Resume; r != nil && r.AfterTurn < 1 {
+		return fmt.Errorf("behavior.resume: after_turn >= 1")
 	}
 	for _, m := range append(append([]EventMatch(nil), s.Voice.Events...), s.Voice.Absent...) {
 		if m.Type == "" {

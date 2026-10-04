@@ -174,6 +174,63 @@
         "silence_seconds": 60
       },
       "seed": 331
+    },
+    {
+      "id": "resume-recall",
+      "category": "reconnect",
+      "goal": "hear what the two workers are doing, then (after the voice connection is resumed mid-call) ask the voice to repeat what it told you about bench-codex",
+      "opening": "Morning. What's everyone up to?",
+      "persona": "Asks about the workers, then asks what the assistant just said about bench-codex. Plain and short.",
+      "fixed": true,
+      "script": [
+        "Morning. What's everyone up to?",
+        "What is bench-codex working on exactly?",
+        "Remind me, what did you just tell me about bench-codex?"
+      ],
+      "agents": [
+        {
+          "alias": "bench-claude",
+          "kind": "claude",
+          "state": "working",
+          "screen": "bench-claude-working.txt"
+        },
+        {
+          "alias": "bench-codex",
+          "kind": "codex",
+          "state": "working",
+          "screen": "bench-codex-working.txt"
+        }
+      ],
+      "caps": {
+        "max_turns": 6,
+        "max_seconds": 240,
+        "silence_seconds": 40
+      },
+      "expect": {
+        "no_actions": true,
+        "rubric": [
+          "After the voice connection was resumed, did the answer to the last question repeat what was said about bench-codex before it (the parser refactor, working for a couple of minutes), instead of claiming not to know?"
+        ]
+      },
+      "behavior": {
+        "resume": {
+          "after_turn": 2
+        }
+      },
+      "voice_expect": {
+        "events": [
+          {
+            "type": "voice.recycle",
+            "note": "the forced resume"
+          },
+          {
+            "type": "voice.resume_context",
+            "note": "tokens before and after the resume"
+          }
+        ]
+      },
+      "note": "Tier-2 measurement for docs/research/live-resume-context-2026-10-04.md: facts briefed before one forced Gemini resume, asked about after it. Read the voice.resume_context event and whether the last answer came from the voice (no voice.tool_call to_supervisor after the resume) or from the brain.",
+      "seed": 303
     }
   ]
 }

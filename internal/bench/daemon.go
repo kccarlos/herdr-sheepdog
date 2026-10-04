@@ -149,6 +149,10 @@ func StartDaemon(ctx context.Context, o DaemonOptions) (*Daemon, error) {
 	}
 }
 
+// RecycleVoice forces one Gemini resume (the voice session reconnects
+// with its handle); false when the voice provider cannot.
+func (d *Daemon) RecycleVoice(reason string) bool { return d.app.RecycleVoice(reason) }
+
 // Close stops the daemon (and waits for it, at most 15 s).
 func (d *Daemon) Close() {
 	if d == nil {
