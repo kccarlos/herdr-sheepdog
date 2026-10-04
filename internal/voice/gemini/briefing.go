@@ -216,9 +216,9 @@ func (s *Session) relationsLocked(r briefRec) []string {
 // playback run): how much of it played and what they heard. It goes
 // out as a silent briefing at once and is repeated on the next spoken
 // one. Caller holds s.mu.
-func (s *Session) noteCutLocked(rep voice.PlaybackReport) (string, bool) {
+func (s *Session) noteCutLocked(rep voice.PlaybackReport) string {
 	if rep.Cut == nil || rep.RunMs <= 0 {
-		return "", false
+		return ""
 	}
 	heard := strings.TrimSpace(rep.Heard)
 	who := "the CEO cut you off"
@@ -232,7 +232,7 @@ func (s *Session) noteCutLocked(rep voice.PlaybackReport) (string, bool) {
 		fact += "; they heard nothing of it"
 	}
 	s.brief.cut = fact
-	return fact, true
+	return fact
 }
 
 // noteHandleLocked records a resumable handle. Caller holds s.mu.

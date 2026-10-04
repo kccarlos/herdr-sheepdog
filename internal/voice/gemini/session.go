@@ -746,7 +746,7 @@ func (s *Session) ClientPlayback(state string, playedMs int) {
 	}
 	var cutFact string
 	if state == voice.PlaybackFlushed && s.useBriefings() {
-		cutFact, _ = s.noteCutLocked(rep)
+		cutFact = s.noteCutLocked(rep)
 	}
 	s.mu.Unlock()
 	if cutFact != "" {

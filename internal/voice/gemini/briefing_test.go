@@ -139,9 +139,9 @@ func TestCutFactSaysWhoCut(t *testing.T) {
 	now := time.Now()
 	rep := voice.PlaybackReport{State: voice.PlaybackFlushed, PlayedMs: 2100, RunMs: 6400, At: now, Cut: &voice.TranscriptCut{}, Heard: "bench-codex wants to"}
 	s.mu.Lock()
-	fact, _ := s.noteCutLocked(rep)
+	fact := s.noteCutLocked(rep)
 	s.brief.flushBy, s.brief.flushAt = "push", now
-	byDaemon, _ := s.noteCutLocked(rep)
+	byDaemon := s.noteCutLocked(rep)
 	s.mu.Unlock()
 	if !strings.Contains(fact, "the CEO cut you off after 2.1 s of 6.4 s") || !strings.Contains(fact, `"bench-codex wants to"`) {
 		t.Errorf("fact = %q", fact)
