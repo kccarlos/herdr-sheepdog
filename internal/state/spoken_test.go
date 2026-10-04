@@ -183,3 +183,25 @@ func TestSpokenNamesFromRealTitles(t *testing.T) {
 	check(t, [][2]string{{"fix internal/herdr/prompt.go", "fix Claude"}, {"update CartItem addItem", "update Claude"}})
 	check(t, [][2]string{{"shop/cart.go", "bench Claude 1"}, {"TODO.md", "bench Claude 2"}})
 }
+
+// HerdrName is herdr's spelling of a spoken name (agent.rename's rule).
+func TestHerdrName(t *testing.T) {
+	for _, c := range []struct {
+		in   string
+		want string
+		ok   bool
+	}{
+		{"kvoice explainer", "kvoice-explainer", true},
+		{"Front End", "front-end", true},
+		{"docs_2", "docs-2", true},
+		{"文档", "", false},
+		{"2nd claude", "", false},
+		{"", "", false},
+		{"a very long name that goes on and on past the limit", "a-very-long-name-that-goes-on-an", true},
+	} {
+		got, ok := HerdrName(c.in)
+		if got != c.want || ok != c.ok {
+			t.Errorf("HerdrName(%q) = %q, %v; want %q, %v", c.in, got, ok, c.want, c.ok)
+		}
+	}
+}

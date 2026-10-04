@@ -27,6 +27,27 @@ func Slug(s string) string {
 	return strings.TrimRight(b.String(), "-")
 }
 
+// herdrNameMax is herdr's agent-name length limit.
+const herdrNameMax = 32
+
+// HerdrName is the form of a spoken name herdr accepts as an agent name
+// (agent.rename: a lowercase letter first, then lowercase letters,
+// digits, '-' or '_', 1–32 characters): "kvoice explainer" becomes
+// "kvoice-explainer". ok is false when nothing usable is left (a name in
+// Chinese only, or one that starts with a digit): herdr cannot carry it
+// and keeps its own label. A mechanical spelling, not a reading of the
+// name: the spoken form stays the CEO's.
+func HerdrName(name string) (string, bool) {
+	h := Slug(name)
+	if len(h) > herdrNameMax {
+		h = strings.TrimRight(h[:herdrNameMax], "-")
+	}
+	if h == "" || h[0] < 'a' || h[0] > 'z' {
+		return "", false
+	}
+	return h, true
+}
+
 // deriveAlias builds the default alias for an agent: the workspace label
 // followed by the agent name (when the user named it) or its kind, e.g.
 // "auth-service-codex". Empty parts are skipped; with nothing at all it
