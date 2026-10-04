@@ -156,6 +156,7 @@ func (s *Session) interrupt(by string) {
 	s.speaking = false
 	s.flushRecapLocked() // a cut report may shorten it to what was heard
 	s.play.Flush(now)
+	s.brief.flushBy, s.brief.flushAt = by, now
 	armed := s.echo.Flush(now)
 	timing := s.finishAudioTimingLocked()
 	s.mu.Unlock()

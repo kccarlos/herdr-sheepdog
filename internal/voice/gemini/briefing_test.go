@@ -128,3 +128,25 @@ func TestAnswerIsBriefingShaped(t *testing.T) {
 		t.Errorf("response = %v", r)
 	}
 }
+
+// TestCutFactSaysWhoCut: a flush the daemon made for an urgent briefing
+// is not reported as the CEO cutting the voice off.
+func TestCutFactSaysWhoCut(t *testing.T) {
+	s, err := newSession(Config{APIKeys: []string{"k"}}, &recLogger{}, &fakeDialer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	rep := voice.PlaybackReport{State: voice.PlaybackFlushed, PlayedMs: 2100, RunMs: 6400, At: now, Cut: &voice.TranscriptCut{}, Heard: "bench-codex wants to"}
+	s.mu.Lock()
+	fact, _ := s.noteCutLocked(rep)
+	s.brief.flushBy, s.brief.flushAt = "push", now
+	byDaemon, _ := s.noteCutLocked(rep)
+	s.mu.Unlock()
+	if !strings.Contains(fact, "the CEO cut you off after 2.1 s of 6.4 s") || !strings.Contains(fact, `"bench-codex wants to"`) {
+		t.Errorf("fact = %q", fact)
+	}
+	if !strings.Contains(byDaemon, "the daemon cut you off") {
+		t.Errorf("daemon cut = %q", byDaemon)
+	}
+}

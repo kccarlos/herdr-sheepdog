@@ -85,6 +85,11 @@ type briefLedger struct {
 	// cut is the CEO's last barge-in over a spoken line, told in the
 	// next briefing when the silent one has not gone yet.
 	cut string
+	// flushBy and flushAt are who last flushed the output (interrupt:
+	// "model" when Live heard the CEO, "push" when the daemon made way
+	// for an urgent briefing) and when.
+	flushBy string
+	flushAt time.Time
 }
 
 // clock renders t for a briefing: the local wall-clock time.
@@ -216,7 +221,11 @@ func (s *Session) noteCutLocked(rep voice.PlaybackReport) (string, bool) {
 		return "", false
 	}
 	heard := strings.TrimSpace(rep.Heard)
-	fact := fmt.Sprintf("at %s the CEO cut you off after %.1f s of %.1f s", clock(rep.At), float64(rep.PlayedMs)/1000, float64(rep.RunMs)/1000)
+	who := "the CEO cut you off"
+	if s.brief.flushBy == "push" && rep.At.Sub(s.brief.flushAt) < 3*time.Second {
+		who = "the daemon cut you off to make way for an urgent briefing"
+	}
+	fact := fmt.Sprintf("at %s %s after %.1f s of %.1f s", clock(rep.At), who, float64(rep.PlayedMs)/1000, float64(rep.RunMs)/1000)
 	if heard != "" {
 		fact += fmt.Sprintf("; they heard only: %q", heard)
 	} else {
