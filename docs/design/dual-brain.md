@@ -294,7 +294,18 @@ contract, the announce pipeline, chattiness, promises, investigations.
 
 ## Ablation results
 
-(Filled in from `docs/eval/dual-brain-2026-10-04.md`.)
+Interleaved pairs, 17 scenarios × 3, prompt v4 (details in the results
+doc):
+
+| Step | Pass non-echo | Unheard answers | Latency p50 | Kept? |
+|---|---|---|---|---|
+| core → +G1+G2 | 18/43 → 14/42 | 14/82 → 14/82 | 4.4 → 6.5 s | yes (noise) |
+| +G2 → +G3 | 15/45 → 14/45 | 11/88 → 1/59 | 6.4 → 5.4 s | yes |
+| +G3 → +G4+G6 | 28/45 → 28/45 | 3/53 → 3/59 | 4.0 → 5.0 s; −16 dB echo 2/6 → 0/6 | **not proven harmless**: restore the bare-answer fast path as a latency path; re-test G6 alone |
+
+Full branch vs main, interleaved, all scenarios × 3: 61/90 vs 46/90
+non-echo; self-relay 1 vs 23; bare acks 1 vs 25; unheard answers 5/139
+vs 26/178; `facts_current` 4 vs 9; latency p50 4.5 vs 5.3 s.
 
 ## Switching the CEO's daemon to this branch and back
 

@@ -184,6 +184,98 @@ finding E3 (the rail should accept only options the CEO heard), main 4
 passes of 4, branch 2 of 4. **No unauthorised action specific to the
 branch was found in any tier.**
 
+### Ablation, one removal group at a time (tier 2)
+
+Each step was run against the previous one **interleaved** (one port
+each, same moment), on the same 17 scenarios × 3 (status ×3, deep-ask,
+instruct-pronoun, approve ×3, deferral ×2, collision ×2, barge-in long
+answer, mixed language, unheard approval, the two −16 dB echo
+scenarios). Every binary has prompt v4. Pass rates differ between pairs
+because the Vertex brain got slower through the night (p90 latency
+≈ 19 s in every pair); compare **within** a pair only. Time ran out for
+one pair per group, so G1 and G2 (both about the relay gate) and G4 and
+G6 were measured together.
+
+| Pair (A → B) | pass non-echo A → B | unheard answers | self-relay ans/ann | ack-only | `facts_current` no | latency p50 | verdict |
+|---|---|---|---|---|---|---|---|
+| core → +G1+G2 (ack lists; self-relay and push floor) | 18/43 → 14/42 | 14/82 → 14/82 | 3/1 → 2/0 | 0 → 0 | 5 → 4 | 4.39 → 6.46 s | within noise (p ≈ 0.5); kept |
+| +G2 → +G3 (heard coverage and re-queue) | 15/45 → 14/45 | 11/88 → **1/59** | 1/1 → 1/3 | 1 → 0 | 9 → 8 | 6.42 → 5.37 s | equal pass, far fewer unheard answers (no re-queued duplicates); kept |
+| +G3 → +G4+G6 (rail word lists, fast path; echo text guard) | 28/45 → 28/45 | 3/53 → 3/59 | 0/0 → 1/0 | 0 → 0 | 1 → 5 | 3.97 → 4.96 s | pass equal, but latency +1 s (every bare "yes" now takes a brain turn), −16 dB echo 2/6 → 0/6, `facts_current` 1 → 5: **not proven harmless** |
+
+Reading: G1, G2 and G3 did not make the bench worse. G4+G6 kept the
+pass rate but cost about a second of median latency and lost the two
+−16 dB echo passes (n = 6, so a direction, not proof); they should not be
+adopted as they are — restore the bare-answer fast path (as a latency
+path, with the rail unchanged) and the echo text guard, or test each on
+its own first. The gains of
+the full branch over main come from the channel and the prompt (with
+#117), and G3 removes the duplicate announcements the re-queue made out
+of correct paraphrases. With the old detectors still in (core), the
+heard watch judged the fast brain's paraphrases as unheard and re-queued
+them: 14 unheard answers out of 82 sends, against 1 of 59 once it was
+gone.
+
+## Readiness ranking
+
+1. **Ready to try on the phone:** the briefing channel and the fast-brain
+   prompt (v4) with #117. Biggest, clearest effect: the voice no longer
+   relays or "On it."s the daemon's lines (23 → 1, 25 → 1), answers
+   reach the ear (unheard 26/178 → 5/139), and under the same slow brain
+   the branch passed 61/90 vs main's 46/90.
+2. **Ready, low risk:** G3 (heard coverage + re-queue out) and G1/G2
+   (ack lists, self-relay matching out): no measurable loss, less code,
+   and the facts that replace them (cut after N s, no fresh words) are
+   cheap.
+3. **Not ready as is:** G4 (the brain reads every answer, including a
+   bare "yes") and G6 (echo text guard out). In their ablation pair the
+   pass rate was unchanged but median latency rose ~1 s and the −16 dB
+   echo runs went 2/6 → 0/6. Recommendation: put the bare-answer fast
+   path back as a latency path (the rail is unchanged either way) and
+   re-test G6 alone. E3 (approve only the option the CEO heard) is open
+   in both arms.
+4. **Not solved by either arm:** echo without AEC (−16 dB): 1/6 both;
+   the branch's voice cuts itself off on its own echo instead of the text
+   guard dropping words. Keep the #113 audio gate; real phones use AEC
+   (−40 dB is the realistic case).
+5. **Known costs of retelling:** occasional stale or wrong retelling
+   (4 vs main's 9 `facts_current`), invented detail in a deep-ask answer
+   when it did not hand the question over (2 runs), "briefing" said
+   aloud once, one off-topic monologue in a noisy Chinese call. Watch
+   these on the phone.
+
+## What the CEO should try on the phone
+
+Switch binaries as in the design doc ("Switching the CEO's daemon"),
+then, in one session of 15–20 minutes:
+
+1. Ask "what's going on?" with two or three agents busy: the voice
+   should hand it over and answer with every agent, by name.
+2. Let an approval arrive while you are talking: it should wait, then
+   be said once, as a question with its options; say "not now", then
+   later "yes": nothing should be sent on "not now".
+3. Ask a follow-up on what it just said ("what does that mean?") — it
+   should answer at once without a pause; then ask "what exactly did it
+   say?" — it should hand over and read the worker's points.
+4. Cut it off mid-sentence and ask "what did you say?": it knows what
+   you heard (the cut fact) and should repeat the part you missed.
+5. Leave the phone for ~10 minutes (a GoAway/resume), then ask about the
+   last news: briefings sent just before the drop are re-sent.
+6. Listen for: "On it." with nothing after it (should be gone), its own
+   question relayed back (gone), names changed ("the first Claude"),
+   stale status, and the word "briefing" spoken.
+
+The event log shows `voice.push {briefing, channel: function_response,
+relation}` for each briefing and `voice.briefing_resent` after a resume.
+
+## Spend
+
+About **$55** of API credit at list prices (budget $60): tier 2 ≈ $33
+(including the discarded DeepSeek and confounded runs, ≈ $9), tier 1
+≈ $6.4, tier 3 ≈ $8.5 (judge, simulated CEO, Live and TTS; brains on
+Vertex ≈ $1 more), Live probes $0.3, the RULES.md check $0.2. Claude
+subscription: weekly allowance 17 % → 7 % over the night (tier-3 Haiku
+workers and this agent), session meter never below 38 %.
+
 ## How to read the numbers
 
 - Pass rates move by ±7–10 points between identical campaigns on these
