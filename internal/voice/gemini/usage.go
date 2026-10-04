@@ -124,8 +124,8 @@ func (s *Session) resumeContextPayloadLocked(after *usageSnap) map[string]any {
 	r.atHandle.fields("handle_", p)
 	if after != nil {
 		after.fields("after_", p)
-		p["delta_prompt"] = after.prompt - r.before.prompt
 		if r.before.prompt > 0 {
+			p["delta_prompt"] = after.prompt - r.before.prompt
 			p["ratio_prompt"] = float64(after.prompt) / float64(r.before.prompt)
 		}
 		p["after_ms"] = after.at.Sub(r.resumedAt).Milliseconds()
