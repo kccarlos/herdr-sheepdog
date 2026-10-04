@@ -108,6 +108,27 @@ def load_events(path):
     return out
 
 
+def _ts(e):
+    from datetime import datetime
+    return datetime.fromisoformat(e["ts"].replace("Z", "+00:00")).timestamp() * 1000
+
+
+def align(rec, events):
+    """Tier-3 events carry wall-clock ts; the record's lines are ms from the
+    call's start. Anchor on the first worker transition, which the
+    record's timeline also lists."""
+    tl = [t for t in rec.get("timeline") or [] if t.get("who") == "worker"]
+    first = next((e for e in events if e.get("type") == "herdr.transition"), None)
+    if tl and first:
+        t0 = _ts(first) - tl[0]["at_ms"]
+    else:
+        hello = next((e for e in events if e.get("type") == "web.client.hello"), events[0])
+        t0 = _ts(hello)
+    for e in events:
+        if "ts" in e:
+            e["at_ms"] = int(_ts(e) - t0)
+
+
 def analyse_run(rec, events):
     r = Counter()
     ceo = [(u.get("at_ms", 0), u.get("heard_by_voice") or u.get("said") or "") for u in rec.get("user_lines") or []]
@@ -182,8 +203,19 @@ def main():
     status = Counter()
     per_cat = {}
     for d in args:
-        for f in sorted(glob.glob(os.path.join(d, "runs", "*.json"))):
-            rec = json.load(open(f))
+        recs = []
+        t3 = os.path.join(d, "tier3.json")
+        if os.path.exists(t3):
+            # Tier 3 (--voice): one file, the voice block holds the lines.
+            for rec in json.load(open(t3)):
+                v = rec.get("voice") or {}
+                rec.setdefault("user_lines", v.get("user_lines"))
+                rec.setdefault("bot_utterances", v.get("bot_utterances"))
+                recs.append(("%s.r%d" % (rec.get("scenario"), rec.get("repeat") or 1), rec))
+        else:
+            for f in sorted(glob.glob(os.path.join(d, "runs", "*.json"))):
+                recs.append((os.path.basename(f)[:-5], json.load(open(f))))
+        for base, rec in recs:
             sid = rec.get("scenario", "")
             is_echo = "echo" in sid
             if exclude_echo and is_echo or only_echo and not is_echo:
@@ -191,8 +223,9 @@ def main():
             if rec.get("status") not in ("pass", "fail"):
                 status[rec.get("status")] += 1
                 continue
-            base = os.path.basename(f)[:-5]
             ev = load_events(os.path.join(d, "events", base + ".jsonl"))
+            if ev and "at_ms" not in ev[0]:
+                align(rec, ev)
             r = analyse_run(rec, ev)
             lat_tot += r.pop("_tot", [])
             lat_fa += r.pop("_fa", [])
