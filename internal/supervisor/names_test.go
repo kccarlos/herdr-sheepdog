@@ -169,7 +169,7 @@ func TestRenameEdgeCases(t *testing.T) {
 	h.claudeIn("w1:p1", readmeSession, herdr.StateIdle)
 	h.claudeIn("w2:p1", docsSession, herdr.StateIdle)
 	echo, err := h.sup.rename(context.Background(), "w1:p1", "  front   end ")
-	if err != nil || !strings.HasPrefix(echo, "README Claude is called front end now. herdr refused the name (") {
+	if err != nil || echo != "README Claude is called front end now. herdr refused the name, so herdr's own label still shows the old name." {
 		t.Errorf("rename = %q, %v", echo, err)
 	}
 	if h.log.count("supervisor.rename_error") != 1 {

@@ -177,7 +177,9 @@ func (s *Supervisor) rename(ctx context.Context, paneID, name string) (string, e
 				s.log.Log(logSource, "supervisor.rename_error", paneID, map[string]any{"name": name, "herdr_name": hname, "error": err.Error()})
 				fields["herdr"] = "refused"
 				fields["herdr_error"] = err.Error()
-				herdrNote = " herdr refused the name (" + err.Error() + "), so herdr's own label still shows the old name."
+				// Spoken (the fallback path reads the echo aloud): the
+				// fact, not herdr's rule text, which stays in the log.
+				herdrNote = " herdr refused the name, so herdr's own label still shows the old name."
 			} else {
 				fields["herdr"] = "renamed"
 			}
