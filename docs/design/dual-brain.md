@@ -213,6 +213,21 @@ Gone: "read spoken exactly as given", "change nothing, add nothing", the
 forced "say on it as you call it", "never answered from memory", "you
 decide nothing".
 
+Two corrections came from the first branch runs, each a real behaviour
+seen in a transcript, not a judge's taste:
+
+- v2: the voice answered "What were the specific points it made?" from
+  its one-line briefing, and "What's going on?" with the one agent a
+  briefing had mentioned (the N2 risk above). Now a status question is
+  its own only when fresh briefings cover every agent it asks about, and
+  detail always comes from the slow brain ("a briefing is a summary").
+- v3: retelling in its own words, it said "the first Claude … the
+  second" for "Cart type Claude" and "Tasks Claude" (tier 3
+  two-claudes-names, branch 0/2, main 2/2). Names are facts: it now uses
+  the name the briefing uses.
+
+Every measurement in the results doc uses v3 unless marked otherwise.
+
 ### The harness: rails and labelled facts
 
 Kept as **rails** (stop a runaway or an unauthorised action):
@@ -273,8 +288,11 @@ cd ~/Documents/herdr-sheepdog && set -a; . ./.env; set +a; exec ~/bin/sheepdog-d
 ```
 
 Back to main: stop it the same way and start `sheepdog serve` (the
-installed main binary) as before. Config is shared and compatible: the
-branch adds one optional key, `gemini.briefing_channel` (default
-`function_response`; `user_turn` keeps the branch's prompt but sends the
-old marked user turns). Main ignores nothing it needs; the branch reads
-the same state file and event log. The phone app needs no change.
+installed main binary) as before. Config is shared: the branch's one new
+key, `gemini.briefing_channel`, is optional (main ignores it if present;
+leave it out). To try the old transport on the branch, set
+`SHEEPDOG_GEMINI_BRIEFING_CHANNEL=user_turn` in the environment. Both
+read the same state file and event log; the phone app needs no change.
+After switching, the first Live session starts fresh (the branch's
+voice prompt differs, so no resumption across binaries is attempted
+beyond what the daemon already does on start).
