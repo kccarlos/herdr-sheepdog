@@ -92,10 +92,10 @@ audio (no `--save-audio`), so timbre and prosody are not assessed.
   cleanly (WER 0.02). Audio arrives paced at real time (ratio 1.02), so there is
   no lead buffer on the phone when a stall hits.
 - **B, AI Studio 3.8-live**: same model, so the same wording; Chinese heard
-  cleanly (WER 0.0, 4 lines) and the English WER is a little higher (0.13 over 27
+  cleanly (WER 0.0, 6 lines) and the English WER is a little higher (0.13 over 25
   lines, noisy). Audio arrives in bursts (ratio about 4.4, the answer is delivered
   well ahead of playback), first audio about 300 ms slower than Vertex. Free tier:
-  no 429 in 16 runs (about 17 min of Live audio, 62 answers); the daily cap was
+  no 429 in 16 runs (about 5 min of Live audio, 62 answers); the daily cap was
   not reached, so how much headroom remains is unknown.
 - **C, Vertex 2.5 native audio**: no gap, bursts at about 3.2x, first audio 730
   ms. But Chinese is poor: the input transcription comes back with spaces between
@@ -126,7 +126,7 @@ or more; that is a different provider and not part of this question.)
 - On Vertex since 10-02: 11 gaps in 223 answers of 2 s or more (4.9 %), every one
   6.9 to 7.3 s. The bench's 3 in 102 (about 3 %) matches. The earlier Vertex days
   (09-29, 10-01) have too few answers to say anything.
-- On AI Studio (09-23/24): gaps in 6 of 119 answers (5 %), but irregular sizes up
+- On AI Studio (09-23/24): gaps in 6 of 104 answers of 2 s or more (6 %), but irregular sizes up
   to 24 s, and `realtime_ratio` around 0.73, that is audio arriving slower than
   real time throughout those answers. That was a different failure (a slow or
   loaded model), and it was on a day of preview-model load; today's AI Studio
