@@ -62,13 +62,22 @@ var (
 	// spawnShellWait bounds the wait for a new pane's shell to print
 	// its prompt before the command line is typed.
 	spawnShellWait = 5 * time.Second
-	// spawnReadyWait bounds the wait for herdr to report the new agent.
+	// spawnReadyWait is how long herdr may take to report the new agent
+	// before the brain is told it is not ready (the watch goes on).
 	spawnReadyWait = 60 * time.Second
-	// spawnFirstWait bounds the wait for the agent to sit idle (its
-	// trust question answered) before the first instruction goes; past
-	// it the instruction is dropped and logged.
+	// spawnFirstWait bounds the whole wait, from the start, for the
+	// agent to be recognised and sit idle (its trust question answered)
+	// before the first instruction goes; past it the instruction is
+	// dropped, logged and the brain told.
 	spawnFirstWait = 10 * time.Minute
+	// spawnGoneCheck is how often a new agent herdr has not recognised
+	// is checked for a closed pane.
+	spawnGoneCheck = 15 * time.Second
 )
+
+// spawnScreenLines is how many of a not-ready agent's last pane lines
+// the brain is given.
+const spawnScreenLines = 15
 
 // spawnModel is the model names the command line accepts: letters,
 // digits and . _ : - only, so nothing reaches the shell but a word.
@@ -177,18 +186,27 @@ func (s *Supervisor) spawn(ctx context.Context, req brain.SpawnRequest) (string,
 // newest input — said or typed, never a tap on a question — arrived
 // within supervisor.authorise_window_s, has words, is not a "no" or
 // only a filler, and has not already authorised a write (an answer to a
-// prompt or another new agent: spawn marks the words used). It does not read what the words ask for: that is the
-// brain's judgement. Caller holds s.mu.
+// prompt, a new agent, a close: each marks the words used). It does not
+// read what the words ask for: that is the brain's judgement. Caller
+// holds s.mu.
 func (s *Supervisor) spawnRailLocked() string {
+	return s.wordsRailLocked("a new agent", "started an agent")
+}
+
+// wordsRailLocked is spawnRailLocked's reading for any write that needs
+// words of the CEO's own: what names the write ("a new agent", "closing
+// an agent"), spent what the words may already have done. Caller holds
+// s.mu.
+func (s *Supervisor) wordsRailLocked(what, spent string) string {
 	in := s.lastInputLocked()
 	now := s.cfg.Now()
 	switch {
 	case in == nil:
-		return "the CEO has said nothing that asks for a new agent"
+		return "the CEO has said nothing that asks for " + what
 	case in.kind == InputTap:
-		return "the CEO's last input was a tap on a question, not a request for a new agent"
+		return "the CEO's last input was a tap on a question, not a request for " + what
 	case in.used:
-		return "the CEO's last words already answered a prompt or started an agent; a new agent needs words of their own"
+		return "the CEO's last words already answered a prompt or " + spent + "; " + what + " needs words of their own"
 	case now.Sub(in.at) > s.cfg.AuthoriseWindow:
 		return fmt.Sprintf("the CEO's last words were %d s ago, past supervisor.authorise_window_s (%d s)", int(now.Sub(in.at).Seconds()), int(s.cfg.AuthoriseWindow.Seconds()))
 	case strings.TrimSpace(in.text) == "":
@@ -196,7 +214,7 @@ func (s *Supervisor) spawnRailLocked() string {
 	case fillerOnly(in.text):
 		return fmt.Sprintf("the CEO only said %q, which asks for nothing", strings.TrimSpace(in.text))
 	case negativeInput(in.text):
-		return fmt.Sprintf("the CEO said %q, which does not ask for a new agent", strings.TrimSpace(in.text))
+		return fmt.Sprintf("the CEO said %q, which does not ask for %s", strings.TrimSpace(in.text), what)
 	}
 	return ""
 }
@@ -400,17 +418,27 @@ func (s *Supervisor) waitShell(ctx context.Context, paneID string) {
 // sit idle at its prompt (its trust question answered by the CEO through
 // the normal pending path), and sends the instruction through the
 // instruction send path (sendInstruction's menu guard included).
+//
+// An agent herdr has not recognised after spawnReadyWait is not given up
+// on (the CEO's phone session, 2026-10-04 04:59:57: the kvoice Claude
+// was dropped after 60 s with its instruction, most likely still at its
+// first-run question): the brain is told, with the pane's last lines,
+// that the agent is not ready and the instruction is held, and the watch
+// goes on until spawnFirstWait or the pane closes. What the screen means
+// is the brain's to read.
 func (s *Supervisor) followSpawn(paneID, kind, text string) {
 	ctx := s.life
-	ready := time.Now().Add(spawnReadyWait)
-	first := time.Now().Add(spawnFirstWait)
-	seen := false
+	start := time.Now()
+	ready := start.Add(spawnReadyWait)
+	first := start.Add(spawnFirstWait)
+	seen, late := false, false
+	var lastCheck time.Time
 	for {
 		row, ok := s.store.Get(paneID)
 		if ok && row.State != herdr.StateUnknown && row.State != "" {
 			if !seen {
 				seen = true
-				s.log.Log(logSource, "supervisor.spawn_ready", paneID, map[string]any{"kind": kind, "state": string(row.State), "agent": aliasOr(row.Alias)})
+				s.log.Log(logSource, "supervisor.spawn_ready", paneID, map[string]any{"kind": kind, "state": string(row.State), "agent": aliasOr(row.Alias), "waited_s": int(time.Since(start).Seconds())})
 				if text == "" {
 					return
 				}
@@ -422,22 +450,87 @@ func (s *Supervisor) followSpawn(paneID, kind, text string) {
 					fields["error"] = err.Error()
 				}
 				s.log.Log(logSource, "supervisor.spawn_instruction", paneID, fields)
+				if late && err == nil {
+					s.tellBrain(fmt.Sprintf("the new %s (%s) is ready now; its held first instruction went to it: %q", state.KindWord(kind), s.sayOf(paneID), text))
+				}
 				return
 			}
 		}
 		now := time.Now()
 		switch {
-		case !seen && now.After(ready):
-			s.log.Log(logSource, "supervisor.spawn_not_ready", paneID, map[string]any{"kind": kind, "waited_s": int(spawnReadyWait.Seconds())})
+		case now.After(first):
+			reason := "the agent never sat idle"
+			if !seen {
+				reason = "herdr never recognised the agent"
+			}
+			s.log.Log(logSource, "supervisor.spawn_instruction_dropped", paneID, map[string]any{"kind": kind, "text": text, "reason": reason, "waited_s": int(spawnFirstWait.Seconds())})
+			if text != "" {
+				s.tellBrain(fmt.Sprintf("the new %s's first instruction was not sent: %s within %d minutes. The instruction was: %q", state.KindWord(kind), reason, int(spawnFirstWait.Minutes()), text))
+			}
 			return
-		case seen && now.After(first):
-			s.log.Log(logSource, "supervisor.spawn_instruction_dropped", paneID, map[string]any{"kind": kind, "text": text, "reason": "the agent never sat idle"})
-			return
+		case !seen && !late && now.After(ready):
+			late = true
+			tail, gone := s.spawnScreen(ctx, paneID)
+			s.log.Log(logSource, "supervisor.spawn_not_ready", paneID, map[string]any{"kind": kind, "waited_s": int(spawnReadyWait.Seconds()), "still_waiting": !gone, "first_instruction": text != ""})
+			if gone {
+				s.spawnGone(paneID, kind, text)
+				return
+			}
+			line := fmt.Sprintf("the new %s started %d s ago is not recognised by herdr as ready yet", state.KindWord(kind), int(spawnReadyWait.Seconds()))
+			if text != "" {
+				line += fmt.Sprintf("; its first instruction is held until it is ready (waiting up to %d minutes)", int(spawnFirstWait.Minutes()))
+			}
+			s.tellBrain(line + ". The last lines of its pane:\n" + tail)
+			lastCheck = now
+		case !seen && late && now.Sub(lastCheck) >= spawnGoneCheck:
+			// herdr reports no agent, so only the pane says whether it
+			// still exists.
+			lastCheck = now
+			if _, gone := s.spawnScreen(ctx, paneID); gone {
+				s.spawnGone(paneID, kind, text)
+				return
+			}
 		}
 		select {
 		case <-ctx.Done():
 			return
 		case <-time.After(spawnPoll):
 		}
+	}
+}
+
+// spawnScreen reads the last lines of a new agent's pane; gone is true
+// when herdr says the pane no longer exists.
+func (s *Supervisor) spawnScreen(ctx context.Context, paneID string) (tail string, gone bool) {
+	read, err := s.herdr.Read(ctx, paneID, herdr.SourceRecentUnwrapped, spawnScreenLines)
+	if err != nil {
+		if errors.Is(err, herdr.ErrPaneNotFound) {
+			return "", true
+		}
+		return "(could not read the pane: " + err.Error() + ")", false
+	}
+	text := strings.TrimSpace(read.Text)
+	if text == "" {
+		return "(the pane is empty)", false
+	}
+	return text, false
+}
+
+// spawnGone ends a start-up watch whose pane closed before the agent was
+// recognised.
+func (s *Supervisor) spawnGone(paneID, kind, text string) {
+	s.log.Log(logSource, "supervisor.spawn_instruction_dropped", paneID, map[string]any{"kind": kind, "text": text, "reason": "the pane closed"})
+	line := fmt.Sprintf("the new %s's pane was closed before it was ready", state.KindWord(kind))
+	if text != "" {
+		line += fmt.Sprintf("; its first instruction was not sent: %q", text)
+	}
+	s.tellBrain(line)
+}
+
+// tellBrain puts a fact the daemon saw into the brain's transcript, for
+// its next turn (no turn is started).
+func (s *Supervisor) tellBrain(line string) {
+	if s.brain != nil {
+		s.brain.Daemon(line)
 	}
 }

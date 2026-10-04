@@ -150,7 +150,7 @@ func (s *Store) Apply(t herdr.Transition) (Agent, bool, error) {
 	if t.WorkspaceLabel != "" && a.WorkspaceLabel != t.WorkspaceLabel {
 		a.WorkspaceLabel, identity = t.WorkspaceLabel, true
 	}
-	if t.Name != "" && a.Name != t.Name {
+	if t.Name != "" && a.Name != t.Name && !herdrSpelling(a.Name, t.Name) {
 		a.Name, identity = t.Name, true
 	}
 	if sess := t.Session; sess != nil && sess.Value != "" && (a.SessionValue != sess.Value || a.SessionKind != sess.Kind || a.SessionSource != sess.Source) {
@@ -183,6 +183,14 @@ func (s *Store) Apply(t herdr.Transition) (Agent, bool, error) {
 	}
 	s.refreshSpokenLocked()
 	return a.clone(), true, s.persist()
+}
+
+// herdrSpelling reports whether reported is how herdr spells name
+// (HerdrName): a voice rename to "kvoice explainer" comes back from herdr
+// as "kvoice-explainer", and the spoken form the CEO gave is kept.
+func herdrSpelling(name, reported string) bool {
+	h, ok := HerdrName(name)
+	return ok && name != "" && h == reported
 }
 
 // defaultAlias returns the config alias for the pane (pinned) or a derived

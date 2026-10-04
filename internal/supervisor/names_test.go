@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -168,7 +169,7 @@ func TestRenameEdgeCases(t *testing.T) {
 	h.claudeIn("w1:p1", readmeSession, herdr.StateIdle)
 	h.claudeIn("w2:p1", docsSession, herdr.StateIdle)
 	echo, err := h.sup.rename(context.Background(), "w1:p1", "  front   end ")
-	if err != nil || echo != "README Claude is called front end now." {
+	if err != nil || echo != "README Claude is called front end now. herdr refused the name, so herdr's own label still shows the old name." {
 		t.Errorf("rename = %q, %v", echo, err)
 	}
 	if h.log.count("supervisor.rename_error") != 1 {
@@ -179,6 +180,84 @@ func TestRenameEdgeCases(t *testing.T) {
 	}
 	if _, err := h.sup.rename(context.Background(), "w2:p1", "Front End"); err == nil {
 		t.Error("a name another agent has was accepted")
+	}
+}
+
+// herdrNameRule is herdr 0.9.3's agent.rename check, for a mock herdr.
+var herdrNameRule = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,31}$`)
+
+// The CEO's phone session, 2026-10-04 05:00:43: "kvoice explainer" went
+// to herdr as typed, herdr refused it (invalid_agent_name) and the
+// daemon still logged supervisor.rename and said it was done. herdr now
+// gets its own spelling, the CEO's spoken form stays, and herdr echoing
+// its spelling back does not replace the spoken form.
+func TestRenameSendsHerdrSafeNameAndKeepsSpokenForm(t *testing.T) {
+	h := newHarness(t, withTitleFixtures(t))
+	h.srv.Handle("agent.rename", func(p json.RawMessage) (any, error) {
+		var params struct{ Name string }
+		_ = json.Unmarshal(p, &params)
+		if !herdrNameRule.MatchString(params.Name) {
+			return nil, &herdr.Error{Code: "invalid_agent_name", Message: "agent name must start with a lowercase letter and contain only lowercase letters, digits, '-' or '_' (1-32 characters)"}
+		}
+		return map[string]any{}, nil
+	})
+	h.claudeIn("w1:p1", readmeSession, herdr.StateIdle)
+	echo, err := h.sup.rename(context.Background(), "w1:p1", "kvoice explainer")
+	if err != nil || echo != "Claude is called kvoice explainer now." {
+		t.Fatalf("rename = %q, %v", echo, err)
+	}
+	reqs := h.srv.RequestsFor("agent.rename")
+	if len(reqs) != 1 || !strings.Contains(string(reqs[0].Params), `"name":"kvoice-explainer"`) {
+		t.Fatalf("agent.rename requests = %v", reqs)
+	}
+	if h.log.count("supervisor.rename_error") != 0 {
+		t.Error("a herdr-safe name was refused")
+	}
+	ev := h.log.ofType("supervisor.rename")
+	if len(ev) != 1 || ev[0].Payload.(map[string]any)["herdr"] != "renamed" {
+		t.Errorf("supervisor.rename = %+v", ev)
+	}
+	// herdr's snapshot reports its spelling back: the spoken form stays.
+	h.sup.HandleTransition(context.Background(), herdr.Transition{PaneID: "w1:p1", From: herdr.StateIdle, To: herdr.StateIdle, At: h.clock.Now(), Agent: "claude",
+		Name: "kvoice-explainer", WorkspaceID: "w9", WorkspaceLabel: "sheepdog", Renamed: true, Source: "snapshot"})
+	if row, _ := h.store.Get("w1:p1"); row.Name != "kvoice explainer" || state.Say(row) != "kvoice explainer" {
+		t.Errorf("row after herdr's echo = %+v", row)
+	}
+	if h.log.count("supervisor.renamed") != 0 {
+		t.Error("herdr's echo of the voice rename was reported as a new rename")
+	}
+	// A later rename in herdr's own UI still wins.
+	h.sup.HandleTransition(context.Background(), herdr.Transition{PaneID: "w1:p1", From: herdr.StateIdle, To: herdr.StateIdle, At: h.clock.Now(), Agent: "claude",
+		Name: "docs", WorkspaceID: "w9", WorkspaceLabel: "sheepdog", Renamed: true, Source: "snapshot"})
+	if row, _ := h.store.Get("w1:p1"); state.Say(row) != "docs" {
+		t.Errorf("row after a herdr UI rename = %+v", row)
+	}
+}
+
+// A name herdr refuses, or cannot carry at all, is reported as such: the
+// echo the brain reads says herdr kept its old label, and the log says
+// refused, never a plain success.
+func TestRenameReportsHerdrRefusal(t *testing.T) {
+	h := newHarness(t, withTitleFixtures(t))
+	h.srv.Handle("agent.rename", func(json.RawMessage) (any, error) {
+		return nil, &herdr.Error{Code: "invalid_agent_name", Message: "agent name must start with a lowercase letter"}
+	})
+	h.claudeIn("w1:p1", readmeSession, herdr.StateIdle)
+	echo, err := h.sup.rename(context.Background(), "w1:p1", "kvoice explainer")
+	if err != nil || !strings.Contains(echo, "herdr refused the name") || !strings.Contains(echo, "still shows the old name") {
+		t.Fatalf("rename = %q, %v", echo, err)
+	}
+	ev := h.log.ofType("supervisor.rename")
+	if len(ev) != 1 || ev[0].Payload.(map[string]any)["herdr"] != "refused" {
+		t.Errorf("supervisor.rename = %+v", ev)
+	}
+	// Chinese only: nothing herdr can take, so nothing is sent.
+	echo, err = h.sup.rename(context.Background(), "w1:p1", "文档")
+	if err != nil || !strings.Contains(echo, "herdr's own label still shows the old name") {
+		t.Fatalf("rename = %q, %v", echo, err)
+	}
+	if n := len(h.srv.RequestsFor("agent.rename")); n != 1 {
+		t.Errorf("agent.rename requests = %d, want 1 (none for a name herdr cannot carry)", n)
 	}
 }
 

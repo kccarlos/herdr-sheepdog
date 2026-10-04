@@ -235,8 +235,8 @@ func (s *Session) noteCutLocked(rep voice.PlaybackReport) string {
 	return fact
 }
 
-// noteHandleLocked records a resumable handle. Caller holds s.mu.
-func (s *Session) noteHandleLocked() { s.brief.handleAt = s.now() }
+// noteBriefHandleLocked records a resumable handle for the briefing re-send. Caller holds s.mu.
+func (s *Session) noteBriefHandleLocked() { s.brief.handleAt = s.now() }
 
 // afterHandleLocked lists the briefings sent after the last resumable
 // handle: a resume with that handle does not restore them (a silent

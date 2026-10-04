@@ -333,6 +333,8 @@ func (a *App) wire() error {
 		RepeatWindow:     time.Duration(cfg.Supervisor.RepeatWindowS) * time.Second,
 		AuthoriseWindow:  time.Duration(cfg.Supervisor.AuthoriseWindowS) * time.Second,
 		ProjectRoots:     cfg.Supervisor.ProjectRoots,
+		ProtectedDirs:    ownDir(),
+		OwnPane:          os.Getenv("HERDR_PANE_ID"),
 
 		InvestigateMax:        time.Duration(cfg.Brain.InvestigateMaxS) * time.Second,
 		InvestigateSessionTTL: time.Duration(cfg.Brain.InvestigateSessionTTLS) * time.Second,
@@ -1273,4 +1275,14 @@ func errString(err error) string {
 		return ""
 	}
 	return err.Error()
+}
+
+// ownDir is the daemon's working directory, whose agents are closed only
+// when the CEO named them (supervisor.Config.ProtectedDirs): the CEO's
+// orchestrator session works there.
+func ownDir() []string {
+	if wd, err := os.Getwd(); err == nil {
+		return []string{wd}
+	}
+	return nil
 }

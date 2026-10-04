@@ -54,11 +54,17 @@ type Session struct {
 	// (ClientAttached(false)); spoken pushes are held until one is
 	// (push.go holdPush). The zero value — never told — does not hold,
 	// so a Session used without the hub (voice-test) speaks as before.
-	noClient     bool
-	handle       string // latest resumable handle
-	keyIdx       int
-	turnOpen     bool
-	turnOpenedAt time.Time
+	noClient bool
+	handle   string // latest resumable handle
+	// handleAt is when the handle was accepted; postHandle the silent
+	// pushes sent since (handle.go); lastPromptTokens the prompt size
+	// of the latest usage report.
+	handleAt         time.Time
+	postHandle       []pushItem
+	lastPromptTokens int32
+	keyIdx           int
+	turnOpen         bool
+	turnOpenedAt     time.Time
 	// speaking is narrower than turnOpen: true only once the model has
 	// actually started producing output (audio or an output transcript
 	// fragment) for the open turn, false again on turnComplete or an

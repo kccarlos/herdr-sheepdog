@@ -311,6 +311,9 @@ type Host struct {
 	// SpawnErr fails Spawn; Spawned records every new agent asked for.
 	SpawnErr error
 	Spawned  []brain.SpawnRequest
+	// CloseErr fails CloseAgent; Closed records every close asked for.
+	CloseErr error
+	Closed   []brain.CloseRequest
 	// InvestigateErr fails Investigate; Investigated is the job ledger
 	// the investigate tool filled (running until SetInvestigation).
 	InvestigateErr error
@@ -410,6 +413,20 @@ func (h *Host) Spawn(_ context.Context, req brain.SpawnRequest) (string, error) 
 }
 
 var _ brain.Spawner = (*Host)(nil)
+
+// CloseAgent implements brain.Closer: it records the request and echoes
+// it.
+func (h *Host) CloseAgent(_ context.Context, req brain.CloseRequest) (string, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.CloseErr != nil {
+		return "", h.CloseErr
+	}
+	h.Closed = append(h.Closed, req)
+	return "Closed " + h.aliasLocked(req.PaneID) + ".", nil
+}
+
+var _ brain.Closer = (*Host)(nil)
 
 // Agents implements brain.Host.
 func (h *Host) Agents() []brain.AgentInfo {
