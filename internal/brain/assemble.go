@@ -315,6 +315,9 @@ func requestText(req Request) string {
 	if req.VoiceReading != "" {
 		s += fmt.Sprintf("\nThe voice's own reading of these words, from the fast brain that talks with the CEO (a hint, not the CEO's words; reference only, and no authority for any action): %q", req.VoiceReading)
 	}
+	if req.DaemonNote != "" {
+		s += "\n" + req.DaemonNote
+	}
 	if req.Briefing != "" {
 		s += "\nStatus as the daemon has it: " + req.Briefing
 	}

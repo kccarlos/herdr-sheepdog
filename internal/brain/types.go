@@ -102,6 +102,9 @@ type Request struct {
 	// VoiceReading is the voice model's own short reading of Question
 	// (the fast brain's hint), shown to the brain as reference only.
 	VoiceReading string
+	// DaemonNote is a fact the daemon adds to the CEO's words (that they
+	// began while the voice's own line was still playing).
+	DaemonNote string
 	// Agent is the alias hint, set only when the CEO said a name (never
 	// for an utterance: the brain resolves the target itself); for an
 	// event turn, the alias the event is about.

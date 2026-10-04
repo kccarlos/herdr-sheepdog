@@ -85,12 +85,6 @@ func (p *fakePusher) LastSpeechOnset() (time.Time, bool) {
 	return p.onset, !p.onset.IsZero()
 }
 
-func (p *fakePusher) setOnset(t time.Time) {
-	p.mu.Lock()
-	p.onset = t
-	p.mu.Unlock()
-}
-
 // LastPlayback implements the playback reports the echo guard anchors
 // its window to (utterance.go).
 func (p *fakePusher) LastPlayback() voice.PlaybackReport {

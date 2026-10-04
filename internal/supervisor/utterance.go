@@ -3,11 +3,8 @@ package supervisor
 import (
 	"context"
 	"fmt"
-	"regexp"
 	"strings"
 	"time"
-	"unicode"
-	"unicode/utf8"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
 	"github.com/kccarlos/herdr-sheepdog/internal/prose"
@@ -54,6 +51,9 @@ type inflightUtterance struct {
 	callID string
 	// reading is the voice's own reading of the words (claim.reading).
 	reading string
+	// echoNote says the words began while the voice's line was still
+	// playing (echoNote): a fact for the brain.
+	echoNote string
 	// accepted is s.acceptedSeq once this call was accepted: when it has
 	// moved by the time a late reply lands, the shepherd asked for
 	// something else meanwhile and the reply is stale.
@@ -212,8 +212,9 @@ func (s *Supervisor) noFreshWordsFact() string {
 // so its turn's reply is always pushed (deliverLate), and only a fast
 // path's result is returned, for the caller to push.
 func (s *Supervisor) handleUtterance(ctx context.Context, c claim, callID string, daemon bool) voice.ToolResult {
-	if s.echoDropped(&c) {
-		return voice.ToolResult{Scheduling: voice.UrgencySilent}
+	note := echoNote(c)
+	if note != "" {
+		s.log.Log(logSource, "supervisor.echo_possible", "", map[string]any{"text": c.text, "utterance_id": c.id})
 	}
 	text := c.text
 	// Bare stop first: "no" is an answer, "no no" is a stop.
@@ -243,6 +244,7 @@ func (s *Supervisor) handleUtterance(ctx context.Context, c claim, callID string
 	s.mu.Lock()
 	u.start = c.start
 	u.reading = c.reading
+	u.echoNote = note
 	s.mu.Unlock()
 	if s.cfg.bareAnswers || s.brain == nil {
 		// With a brain, the brain reads every answer (dual-brain
@@ -625,14 +627,14 @@ func (s *Supervisor) utteranceTurn(ctx context.Context, u *inflightUtterance) ut
 		return utteranceOutcome{}
 	}
 	s.mu.Lock()
-	text, start, reading := u.text, u.start, u.reading
+	text, start, reading, echo := u.text, u.start, u.reading, u.echoNote
 	s.mu.Unlock()
 	// The roster sentence travels with the request, so a status question
 	// costs no tool call (D1-revised); the pending prompt with its
 	// option keys and the open promises are in the brain's own roster
 	// and ledger sections.
 	brief, _ := s.briefingText()
-	req := brain.Request{Kind: brain.KindUtterance, Trigger: brain.TriggerCEO, Question: text, VoiceReading: reading, Briefing: brief, Link: callLink(u.callID), UtteranceID: u.id}
+	req := brain.Request{Kind: brain.KindUtterance, Trigger: brain.TriggerCEO, Question: text, VoiceReading: reading, DaemonNote: echo, Briefing: brief, Link: callLink(u.callID), UtteranceID: u.id}
 	// The agent the conversation is on, for words that say "it" (the
 	// brain's agentRecords).
 	s.mu.Lock()
@@ -1070,289 +1072,26 @@ func (s *Supervisor) lastPlayback() voice.PlaybackReport {
 	return voice.PlaybackReport{}
 }
 
-// echoDropped applies the echo guard (above) to c's inputs. It reports
-// true when nothing of c is left — the call is answered silently —
-// and otherwise leaves c.text as the words that were not echo.
-func (s *Supervisor) echoDropped(c *claim) bool {
-	if c.in == nil || fastPathPhrase(c.text) {
-		return false
-	}
+// echoNote is the fact the brain gets instead of the old echo text
+// guard (dual-brain ablation G6): which of c's words began while the
+// phone was still playing the voice's own line, or within echoWindow of
+// its end, and what that line was. Timing is physics; whether the words
+// are the CEO or the line coming back through the speaker is the
+// brain's to judge. "" when none did.
+func echoNote(c claim) string {
 	ins := c.ins
-	if len(ins) == 0 {
+	if len(ins) == 0 && c.in != nil {
 		ins = []*shepherdInput{c.in}
 	}
-	type cut struct{ heard, said, kept string }
-	var cuts []cut
-	var kept []string
-	var newest *shepherdInput // the newest input left after the guard
-	s.mu.Lock()
 	for _, in := range ins {
-		text := strings.TrimSpace(in.text)
-		if in.kind != InputVoice || in.saidBefore == "" || text == "" || fastPathPhrase(text) {
-			if text != "" {
-				kept = append(kept, text)
-			}
-			newest = in
+		said := strings.TrimSpace(in.saidBefore)
+		if in.kind != InputVoice || said == "" {
 			continue
 		}
-		rest, echo := stripEcho(text, in.saidBefore)
-		if !echo {
-			kept = append(kept, text)
-			newest = in
-			continue
+		if r := []rune(said); len(r) > 240 {
+			said = "…" + string(r[len(r)-240:])
 		}
-		cuts = append(cuts, cut{heard: text, said: in.saidBefore, kept: rest})
-		if rest == "" {
-			in.used = true
-			s.dropInputLocked(in)
-			continue
-		}
-		in.text = rest
-		kept = append(kept, rest)
-		newest = in
+		return fmt.Sprintf("Daemon fact: the words %q began while the phone was still playing the voice's own line, or just after it: %q. On a speakerphone they may be that line coming back through the microphone rather than the CEO; they authorise nothing if so.", strings.TrimSpace(in.text), said)
 	}
-	s.mu.Unlock()
-	if len(cuts) == 0 {
-		return false
-	}
-	for _, x := range cuts {
-		p := map[string]any{"heard": x.heard, "said": x.said}
-		if x.kept != "" {
-			p["partial"], p["kept"] = true, x.kept
-		}
-		if c.id != "" {
-			p["utterance_id"] = c.id
-		}
-		s.log.Log(logSource, "supervisor.echo_dropped", "", p)
-		if x.kept == "" && s.brain != nil {
-			s.brain.Echo(x.heard)
-		}
-	}
-	if len(kept) == 0 {
-		return true
-	}
-	c.text = strings.Join(kept, " ")
-	if newest != nil {
-		// The rail reads the newest input left: a dropped echo after the
-		// shepherd's "yes" must not stand in for it.
-		c.in = newest
-	}
-	return false
-}
-
-// dropInputLocked removes in from the input ledger (a whole echo is not
-// the shepherd's input). Caller holds s.mu.
-func (s *Supervisor) dropInputLocked(in *shepherdInput) {
-	for i, x := range s.inputs {
-		if x == in {
-			s.inputs = append(s.inputs[:i:i], s.inputs[i+1:]...)
-			return
-		}
-	}
-}
-
-// fastPathPhrase reports whether text, as a whole, is one of the bare
-// phrases the fast paths answer: never taken for an echo.
-func fastPathPhrase(text string) bool {
-	w := BareWord(text)
-	_, option := bareOptionWords[w]
-	return BareStopWords[w] || bareYesWords[w] || bareNoWords[w] || option || bareResetTriggerWords[w] || bareResetConfirmWords[w]
-}
-
-// echoOf reports whether heard lines up with a run of said: at least two
-// words, at least 80% of them equal to said's at the same offsets, with
-// one more differing word forgiven when both words are short (≤ 4
-// letters: "new" heard for "no") or two edits apart ("the" heard for
-// "those", echo-barge-in r3).
-func echoOf(heard, said string) bool {
-	in, out := echoWords(heard), echoWords(said)
-	n := len(in)
-	if n < 2 || n > len(out) {
-		return false
-	}
-	allowed := n / 5 // 80% covered
-	for p := 0; p+n <= len(out); p++ {
-		hard, soft := 0, 0
-		for k := range in {
-			switch {
-			case in[k] == out[p+k]:
-			case len([]rune(in[k])) <= 4 && len([]rune(out[p+k])) <= 4,
-				editDistance([]rune(in[k]), []rune(out[p+k])) <= 2:
-				soft++
-			default:
-				hard++
-			}
-		}
-		if hard <= allowed && hard+soft <= allowed+1 {
-			return true
-		}
-	}
-	return false
-}
-
-// echoWords lower-cases s and keeps its words' letters and digits.
-func echoWords(s string) []string {
-	var out []string
-	for _, f := range strings.Fields(strings.ToLower(s)) {
-		w := strings.Map(func(r rune) rune {
-			if unicode.IsLetter(r) || unicode.IsDigit(r) {
-				return r
-			}
-			return -1
-		}, f)
-		if w != "" {
-			out = append(out, w)
-		}
-	}
-	return out
-}
-
-const (
-	// echoCoverMin is the share of an input's letters that stretches of
-	// what was played must cover for the whole input to be an echo.
-	echoCoverMin = 0.8
-	// echoStretchLatin / echoStretchHan are the least letters a stretch
-	// must have to count (a whole short input counts at
-	// echoWholeLatin / echoWholeHan): a Chinese character carries about
-	// what four Latin letters do.
-	echoStretchLatin = 8
-	echoStretchHan   = 3
-	echoWholeLatin   = 5
-	echoWholeHan     = 2
-	// echoGlueLatin / echoGlueHan are the least letters an echo stretch
-	// at the start or end of an input must have to be cut off it, the
-	// rest relayed.
-	echoGlueLatin = 12
-	echoGlueHan   = 4
-)
-
-// stripEcho decides whether heard (an input that began in the echo
-// window) is said coming back: a whole echo (rest "", echo true), an
-// echo glued to the shepherd's words at its start or end (rest is their
-// words, echo true), or not an echo (echo false).
-func stripEcho(heard, said string) (rest string, echo bool) {
-	if echoOf(heard, said) || assistantAck(heard) {
-		return "", true
-	}
-	h, offs := normWordsAt(heard)
-	sd := string(normWords(said))
-	if len(h) == 0 || sd == "" {
-		return heard, false
-	}
-	covered := make([]bool, len(h))
-	n := 0
-	for i := 0; i < len(h); {
-		l := longestIn(h[i:], sd)
-		if l > 0 && (l >= stretchMin(h[i:i+l], echoStretchLatin, echoStretchHan) || (i == 0 && l == len(h) && l >= stretchMin(h, echoWholeLatin, echoWholeHan))) {
-			for k := i; k < i+l; k++ {
-				covered[k] = true
-			}
-			n += l
-			i += l
-			continue
-		}
-		i++
-	}
-	if n == 0 {
-		return heard, false
-	}
-	if float64(n) >= echoCoverMin*float64(len(h)) {
-		return "", true
-	}
-	// Glued: a long echo stretch at the start and/or the end.
-	lead := 0
-	for lead < len(h) && covered[lead] {
-		lead++
-	}
-	trail := 0
-	for trail < len(h)-lead && covered[len(h)-1-trail] {
-		trail++
-	}
-	if lead < stretchMin(h[:lead], echoGlueLatin, echoGlueHan) {
-		lead = 0
-	}
-	if trail < stretchMin(h[len(h)-trail:], echoGlueLatin, echoGlueHan) {
-		trail = 0
-	}
-	if lead == 0 && trail == 0 {
-		return heard, false
-	}
-	from, to := 0, len(heard)
-	if lead > 0 {
-		_, size := utf8.DecodeRuneInString(heard[offs[lead-1]:])
-		from = offs[lead-1] + size
-	}
-	if trail > 0 {
-		to = offs[len(h)-trail]
-		// A stretch can begin inside the shepherd's last word ("me?
-		// Bench…" matches "done. Bench…" from its "e"): give the word
-		// back, a few letters at most.
-		for k := 0; k < 3 && to < len(heard) && to > 0; k++ {
-			prev, _ := utf8.DecodeLastRuneInString(heard[:to])
-			next, size := utf8.DecodeRuneInString(heard[to:])
-			if !unicode.IsLetter(prev) || !unicode.IsLetter(next) || unicode.Is(unicode.Han, next) {
-				break
-			}
-			to += size
-		}
-	}
-	if from >= to {
-		return "", true
-	}
-	rest = strings.TrimFunc(heard[from:to], func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) })
-	if len(normWords(rest)) < 2 {
-		return "", true
-	}
-	return rest, true
-}
-
-// assistantAckCues are what only the assistant says: "On it.",
-// "Checking.", "I'll let you know", 我查一下. In echo-barge-in the voice
-// said "On " — its transcript cut there, its audio did not — and the
-// microphone brought back "On it."; the daemon relayed it and the brain
-// took it for the CEO's go-ahead to an offer (an instruction nobody
-// gave). Heard in the echo window, such words are the voice's own.
-var assistantAckCues = regexp.MustCompile(`(?i)^\W*(on it|checking( on it| now| that)?|let me check( that)?|i'?ll (check|look into it|find out|let you know|tell it|pass it on)|one moment|just a (moment|sec|second)|right away|looking into it|working on it|我(来|去)?(查|看)一下|稍等|马上|正在(查|看))\W*$`)
-
-// assistantAck reports whether heard is only an assistant-style
-// acknowledgement (assistantAckCues).
-func assistantAck(heard string) bool { return assistantAckCues.MatchString(heard) }
-
-// normWordsAt is normWords with the byte offset of each kept rune in s.
-func normWordsAt(s string) ([]rune, []int) {
-	var out []rune
-	var offs []int
-	for i, r := range s {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) {
-			out = append(out, unicode.ToLower(r))
-			offs = append(offs, i)
-		}
-	}
-	return out, offs
-}
-
-// longestIn is the length of the longest prefix of h found in s.
-func longestIn(h []rune, s string) int {
-	lo, hi := 0, len(h)
-	// Prefix containment is monotone: binary search the length.
-	for lo < hi {
-		mid := (lo + hi + 1) / 2
-		if strings.Contains(s, string(h[:mid])) {
-			lo = mid
-		} else {
-			hi = mid - 1
-		}
-	}
-	return lo
-}
-
-// stretchMin is the least length a stretch like r must have: han for a
-// stretch with a Chinese character in it, latin otherwise.
-func stretchMin(r []rune, latin, han int) int {
-	for _, x := range r {
-		if unicode.Is(unicode.Han, x) {
-			return han
-		}
-	}
-	return latin
+	return ""
 }

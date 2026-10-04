@@ -329,40 +329,6 @@ func (s *Supervisor) markPushed(text string) {
 	s.mu.Unlock()
 }
 
-// normWords is text lower-cased with every rune that is not a letter or
-// a digit dropped: spaces and punctuation go, so Chinese (no spaces) and
-// English compare the same way, and "Claude 动手。" equals "claude动手".
-func normWords(text string) []rune {
-	var out []rune
-	for _, r := range strings.ToLower(text) {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) {
-			out = append(out, r)
-		}
-	}
-	return out
-}
-
-// editDistance is the Levenshtein distance of two rune slices.
-func editDistance(a, b []rune) int {
-	prev := make([]int, len(b)+1)
-	cur := make([]int, len(b)+1)
-	for j := range prev {
-		prev[j] = j
-	}
-	for i := 1; i <= len(a); i++ {
-		cur[0] = i
-		for j := 1; j <= len(b); j++ {
-			cost := 1
-			if a[i-1] == b[j-1] {
-				cost = 0
-			}
-			cur[j] = min(prev[j]+1, cur[j-1]+1, prev[j-1]+cost)
-		}
-		prev, cur = cur, prev
-	}
-	return prev[len(b)]
-}
-
 // claimInput is the to_supervisor gate: every shepherd input newer than
 // the previous accepted call, waiting up to inputGrace for one (see
 // inputGraceDefault). ok is false when none arrived: the call is the
