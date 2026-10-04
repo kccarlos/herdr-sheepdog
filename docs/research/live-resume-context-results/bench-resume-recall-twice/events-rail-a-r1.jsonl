@@ -1,0 +1,16 @@
+{"ts":null,"type":"voice.connect","payload":{"backend":"vertex","dur_ms":685,"key_index":0,"resumed":false}}
+{"ts":null,"type":"voice.tool_call","payload":{"args":{"reading":"asking what the agents bench-claude and bench-codex are doing","text":"Morning, what's everyone up to?"},"id":"call_265772","name":"to_supervisor"}}
+{"ts":null,"type":"voice.tool_call","payload":{"args":{"reading":"what bench-codex is refactoring","text":"What is bench-codex working on exactly?"},"id":"call_265804","name":"to_supervisor"}}
+{"ts":null,"type":"brain.failover","payload":{"call":"turn","error":"brain: all API keys rate limited: Error 429, Message: Resource has been exhausted (e.g. check quota)., Status: RESOURCE_EXHAUSTED, Details: []","from":"vertex","from_model":"gemini-3.5-flash","reason":"rate_limited","step":3,"to":"deepseek","to_model":"deepseek-flash","turn":2,"turn_id":"turn-tmej7a-2","utterance_id":"utt-tmej85-6"}}
+{"ts":null,"type":"voice.tool_call","payload":{"args":{"reading":"asking for details on bench-codex's refactoring work","text":"What is bench-codex working on exactly?"},"id":"call_265824","name":"to_supervisor"}}
+{"ts":null,"type":"voice.recycle","payload":{"handle":true,"reason":"bench_resume"}}
+{"ts":null,"type":"voice.connect","payload":{"backend":"vertex","dur_ms":459,"handle_generation":0,"key_index":0,"resumed":true}}
+{"ts":null,"type":"voice.resume","payload":{"generation":1,"handle":"97cdbd5a-a62b-4637-84e2-578b522dd9bf","replayed_chunks":0,"resumed":true,"silent_resent":0}}
+{"ts":null,"type":"voice.resume_context","payload":{"after_at":"2026-10-04T21:19:53.333718Z","after_ms":16449,"after_prompt":1995,"after_prompt_by_modality":{"AUDIO":454,"TEXT":1541},"backend":"vertex","before_at":"2026-10-04T21:19:32.24762Z","before_prompt":1745,"before_prompt_by_modality":{"AUDIO":336,"TEXT":1409},"delta_prompt":250,"generation":1,"handle_at":"2026-10-04T21:19:32.24762Z","handle_prompt":1745,"handle_prompt_by_modality":{"AUDIO":336,"TEXT":1409},"model":"gemini-3.8-live","ratio_prompt":1.143266475644699,"resumed_at":"2026-10-04T21:19:36.884513Z"}}
+{"ts":null,"type":"voice.recycle","payload":{"handle":true,"reason":"bench_resume"}}
+{"ts":null,"type":"voice.handle_dropped","payload":{"generation":1,"handle":"767c6771","handle_generation":1,"reason":"resumed_twice"}}
+{"ts":null,"type":"voice.connect","payload":{"backend":"vertex","dur_ms":496,"key_index":0,"resumed":false}}
+{"ts":null,"type":"voice.reseeded","payload":{"chars":1012,"items":8,"reason":"resumed_twice"}}
+{"ts":null,"type":"voice.briefing_resent","payload":{"at":"14:18:49","briefing":"b-1","error":"","reason":"resumed_twice"}}
+{"ts":null,"type":"voice.briefing_resent","payload":{"at":"14:19:36","briefing":"b-3","error":"","reason":"resumed_twice"}}
+{"ts":null,"type":"voice.resume","payload":{"generation":0,"handle":"","replayed_chunks":0,"resumed":false,"silent_resent":0}}

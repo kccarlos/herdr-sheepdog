@@ -17,8 +17,13 @@ func (s *Session) connect(ctx context.Context) (conn Conn, resumed bool, err err
 	tried := 0
 	for {
 		s.mu.Lock()
+		dropped := s.freshInsteadLocked()
 		key, idx, handle := s.cfg.APIKeys[s.keyIdx], s.keyIdx, s.handle
+		s.dialGen = s.handleGen
 		s.mu.Unlock()
+		if dropped != nil {
+			s.log.Log(logSource, "voice.handle_dropped", "", dropped)
+		}
 
 		// Rendered fresh on every connect (not cached at New) so a
 		// prompts.Loader.Reload() between reconnects takes effect without
@@ -32,9 +37,13 @@ func (s *Session) connect(ctx context.Context) (conn Conn, resumed bool, err err
 		conn, err = s.dial.Dial(ctx, key, s.cfg.Model, lc)
 		if err == nil {
 			conn = s.record(conn, handle != "", prompt, lc)
-			s.log.Log(logSource, "voice.connect", "", map[string]any{
+			p := map[string]any{
 				"key_index": idx, "resumed": handle != "", "dur_ms": s.now().Sub(started).Milliseconds(), "backend": s.cfg.Backend(),
-			})
+			}
+			if handle != "" {
+				p["handle_generation"] = s.dialGenNow()
+			}
+			s.log.Log(logSource, "voice.connect", "", p)
 			// The prompt this connection runs with, so /debug can show it
 			// per session straight from the log (D10).
 			s.log.Log(logSource, "voice.system_prompt", "", map[string]any{"text": prompt, "aliases": s.cfg.names(), "model": s.cfg.Model})
@@ -92,12 +101,25 @@ func (s *Session) rotateKey(reason string) {
 // connection from a later one (which emits EventResumed).
 func (s *Session) install(conn Conn, resumed, reconnect bool) {
 	if reconnect && !resumed {
-		s.reseed(conn) // before any push can use the new connection
+		// Before any push can use the new connection: the recent
+		// conversation, then the recent briefings (reseed.go).
+		s.reseed(conn)
+		s.reseedBriefings(conn)
 	}
 	s.mu.Lock()
 	s.conn = conn
 	s.connGen++
 	gen := s.connGen
+	if resumed {
+		s.resumeGen = s.dialGen + 1
+	} else {
+		s.resumeGen = 0
+		// The dial presented no handle: one set since came from the
+		// old connection's last turn and belongs to the old session.
+		s.handle, s.handleGen = "", 0
+	}
+	s.freshWhy = ""
+	resumeGen := s.resumeGen
 	s.status = voice.StatusConnected
 	pending := s.pending
 	s.pending, s.pendingBytes = nil, 0
@@ -141,7 +163,7 @@ func (s *Session) install(conn Conn, resumed, reconnect bool) {
 	}
 	s.emit(voice.EventStatus{Status: voice.StatusConnected})
 	if reconnect {
-		s.log.Log(logSource, "voice.resume", "", map[string]any{"handle": handle, "resumed": resumed, "replayed_chunks": len(pending), "silent_resent": resent})
+		s.log.Log(logSource, "voice.resume", "", map[string]any{"handle": handle, "resumed": resumed, "generation": resumeGen, "replayed_chunks": len(pending), "silent_resent": resent})
 		s.emit(voice.EventResumed{Handle: handle, ContextLost: !resumed})
 		if resumed && s.useBriefings() {
 			s.resendAfterResume()

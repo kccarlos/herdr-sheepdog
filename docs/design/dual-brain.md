@@ -195,7 +195,11 @@ standalone client, text input, 7 sessions, < $0.30):
 - **Resume.** Briefings sent after the last resumable handle are re-sent
   silently on a resumed connection, marked `resent` with their first
   time (handover finding: silent context after the last completed turn is
-  lost on resume; a SILENT response never produces a handle).
+  lost on resume; a SILENT response never produces a handle). A handle
+  from a resumed connection is never used (it restores only that
+  connection's content): the reconnect opens a fresh session instead, and
+  the last briefings are re-sent silently after the recap, marked as
+  re-sent with their first time (#139).
 - The slow brain's contract is unchanged (`spoken`, `ask`, `detail`,
   `options`): `spoken` becomes `facts`. RULES.md now says the voice
   retells it in its own words.

@@ -307,6 +307,17 @@
       "dur_ms": 2130
     },
     {
+      "scenario": "resume-recall-twice",
+      "text": "Morning. What's everyone up to?",
+      "lang": "en",
+      "voice": "Charon",
+      "source": "gemini",
+      "model": "gemini-2.5-flash-tts",
+      "cache_key": "7e91a51db4796f575a0bcd04",
+      "sha256": "6e70b0634f8c0e721aada9d2f1d7436ce124d9f58bcad41c26512c93cfbb3999",
+      "dur_ms": 2250
+    },
+    {
       "scenario": "collision-block-while-talking",
       "text": "How's bench-claude doing with the README?",
       "lang": "en",

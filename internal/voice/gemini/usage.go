@@ -64,6 +64,7 @@ type resumeCtx struct {
 	atHandle  usageSnap // last usage when the accepted handle was issued
 	before    usageSnap // last usage before the resume
 	handleAt  time.Time
+	gen       int // the resumed connection's generation (handle.go)
 }
 
 func (u usageSnap) fields(prefix string, p map[string]any) {
@@ -102,7 +103,7 @@ func (s *Session) startResumeContextLocked() map[string]any {
 	if s.resumeCtx != nil {
 		stale = s.resumeContextPayloadLocked(nil)
 	}
-	s.resumeCtx = &resumeCtx{resumedAt: s.now(), atHandle: s.handleUsage, before: s.lastUsage, handleAt: s.handleAt}
+	s.resumeCtx = &resumeCtx{resumedAt: s.now(), atHandle: s.handleUsage, before: s.lastUsage, handleAt: s.handleAt, gen: s.resumeGen}
 	return stale
 }
 
@@ -116,6 +117,7 @@ func (s *Session) resumeContextPayloadLocked(after *usageSnap) map[string]any {
 		"backend":    s.cfg.Backend(),
 		"model":      model,
 		"resumed_at": r.resumedAt.UTC().Format(time.RFC3339Nano),
+		"generation": r.gen,
 	}
 	if !r.handleAt.IsZero() {
 		p["handle_at"] = r.handleAt.UTC().Format(time.RFC3339Nano)

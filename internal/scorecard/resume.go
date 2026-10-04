@@ -45,14 +45,19 @@ type ResumeDay struct {
 	// session (generation 2 and up): the canary found that a handle
 	// issued by a resumed connection restores only that connection's own
 	// content (docs/research/live-resume-context-2026-10-04.md).
-	FirstN      int     `json:"first_n"`
-	FirstRatio  float64 `json:"first_ratio"`
-	LaterN      int     `json:"later_n"`
-	LaterRatio  float64 `json:"later_ratio"`
-	firstBefore int64
-	firstAfter  int64
-	laterBefore int64
-	laterAfter  int64
+	// FreshAfterResume counts the reconnects that opened a fresh session
+	// instead of resuming a resumed one (voice.handle_dropped reason
+	// resumed_twice, the CEO's option 1): re-seeded, not resumed, so not
+	// rows here.
+	FreshAfterResume int     `json:"fresh_after_resume"`
+	FirstN           int     `json:"first_n"`
+	FirstRatio       float64 `json:"first_ratio"`
+	LaterN           int     `json:"later_n"`
+	LaterRatio       float64 `json:"later_ratio"`
+	firstBefore      int64
+	firstAfter       int64
+	laterBefore      int64
+	laterAfter       int64
 }
 
 // ResumeRow is one resumed connection.
@@ -82,7 +87,12 @@ type handleUpdatePayload struct {
 }
 
 type resumePayload struct {
-	Resumed *bool `json:"resumed"`
+	Resumed    *bool `json:"resumed"`
+	Generation *int  `json:"generation"` // logged since the resumed_twice rail
+}
+
+type handleDroppedPayload struct {
+	Reason string `json:"reason"`
 }
 
 type resumeContextPayload struct {
@@ -94,6 +104,7 @@ type resumeContextPayload struct {
 	After        int64            `json:"after_prompt"`
 	AfterBy      map[string]int64 `json:"after_prompt_by_modality"`
 	AfterMissing bool             `json:"after_missing"`
+	Generation   *int             `json:"generation"`
 }
 
 func ratio(after, before int64) float64 {
@@ -110,7 +121,11 @@ func computeResumeRetention(events []eventlog.Event) ResumeReport {
 	gen := 0
 	var pending *ResumeRow // a resumed connection waiting for its first usage
 	derivedLast := false   // the last row came from derivation and may be replaced
+	fresh := map[string]int{}
 	for _, ev := range events {
+		if ev.Type == "voice.handle_dropped" && decode[handleDroppedPayload](ev.Payload).Reason == "resumed_twice" {
+			fresh[ev.TS.UTC().Format("2006-01-02")]++
+		}
 		switch {
 		case ev.Source == "daemon" && ev.Type == "daemon.start", ev.Type == "voice.handle_dropped", ev.Type == "voice.session_refreshed":
 			// A fresh session from here on.
@@ -137,6 +152,9 @@ func computeResumeRetention(events []eventlog.Event) ResumeReport {
 			}
 			derivedLast = false
 			gen++
+			if p.Generation != nil {
+				gen = *p.Generation // the daemon's own count, where logged
+			}
 			if lastUsage > 0 {
 				pending = &ResumeRow{TS: ev.TS, Source: "derived", Before: lastUsage, HandlePrompt: handlePrompt, Generation: gen}
 			}
@@ -144,6 +162,9 @@ func computeResumeRetention(events []eventlog.Event) ResumeReport {
 			p := decode[resumeContextPayload](ev.Payload)
 			if p.AfterMissing {
 				continue
+			}
+			if p.Generation != nil {
+				gen = *p.Generation
 			}
 			row := ResumeRow{
 				TS: ev.TS, Source: "resume_context", Before: p.Before, HandlePrompt: p.HandlePrompt, After: p.After,
@@ -195,6 +216,14 @@ func computeResumeRetention(events []eventlog.Event) ResumeReport {
 				d.ModalityAfter[strings.ToUpper(k)] += v
 			}
 		}
+	}
+	for day, n := range fresh {
+		d := byDay[day]
+		if d == nil {
+			d = &ResumeDay{Day: day}
+			byDay[day] = d
+		}
+		d.FreshAfterResume = n
 	}
 	rep := ResumeReport{Resumes: len(rows), Rows: rows}
 	for _, d := range byDay {

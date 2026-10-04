@@ -1,0 +1,11 @@
+fail
+ceo: Morning. What's everyone up to?
+sheepdog: Morning! bench-claude is verifying the links in the calculator documentation, and bench-codex is organizing the parser code.
+ceo: What is bench-codex working on exactly?
+sheepdog: It's moving the parsing logic and tests into a dedicated subfolder to keep the code structure clean.
+system: The voice connection was recycled (a session resume).
+ceo: And what is bench-claude writing?
+sheepdog: bench-claude is creating a guide that explains what the calculator project does and how to run its tests.
+system: The voice connection was recycled (a session resume).
+ceo: Remind me, what did you tell me about bench-codex and bench-claude?
+sheepdog: Bench-codex is moving the parsing code and its tests into a new subfolder, while bench-claude is writing an explanatory guide for the calculator project.

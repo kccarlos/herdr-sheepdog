@@ -405,6 +405,26 @@ Barge-in sequence observed (client content sent while the model was counting):
   shrinks seen in daemon logs after a resume most likely came from resuming
   with a stale handle (one the daemon held while a newer turn's handle was
   dropped, e.g. during a refresh); the per-update log makes that checkable.
+  **Superseded 2026-10-04:** the shrinks are the next point.
+- **A handle issued by a resumed connection restores only that connection's
+  own content** (2026-10-04, `cmd/livecanary -arm chain -chain-talk`: 9 of 9
+  runs, 0 of 8 facts; details in
+  `research/live-resume-context-2026-10-04.md`). The first resume of a
+  fresh session is lossless; resuming with a handle the resumed connection
+  issued loses everything it inherited, whatever `transparent` or the wait.
+  Reusing the generation-0 handle (no turn on the resumed connection, so no
+  new handle) is still lossless. **The daemon therefore never resumes a
+  resumed session** (CEO decision, option 1): every accepted handle carries
+  the generation of the connection that issued it, and a reconnect of any
+  kind presents only a generation-0 handle; otherwise it opens a fresh
+  session, re-seeded from the recap (conversation, focus) and the recent
+  briefings, then the supervisor's roster briefing (`handle.go`,
+  `reseed.go`; `voice.handle_dropped {reason: resumed_twice,
+  handle_generation, generation}`, `voice.resume {generation}`). So a
+  long session alternates: fresh, resume at the first GoAway (~9 min),
+  fresh + re-seed at the second (~18 min). The canary's chain arm, which
+  bypasses the daemon, still fails (re-run 2026-10-04: 0/8); run it after a
+  model or backend change to see whether the platform changed.
 
 ### GoAway (not observed — the smoke test did not run for the ~10 min limit)
 

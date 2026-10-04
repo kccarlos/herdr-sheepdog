@@ -419,7 +419,7 @@ func (r *runner) converse(ctx context.Context) {
 			if rc := sc.Behavior.Reconnect; rc != nil && rc.AfterTurn == run.Turns {
 				r.reconnect(ctx, rc)
 			}
-			if rs := sc.Behavior.Resume; rs != nil && rs.AfterTurn == run.Turns {
+			if sc.Behavior.Resume.At(run.Turns) {
 				r.resume(ctx)
 			}
 		default:

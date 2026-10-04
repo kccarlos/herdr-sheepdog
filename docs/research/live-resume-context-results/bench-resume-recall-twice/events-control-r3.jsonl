@@ -1,0 +1,14 @@
+{"ts":null,"type":"voice.connect","payload":{"backend":"vertex","dur_ms":473,"key_index":0,"resumed":false}}
+{"ts":null,"type":"voice.tool_call","payload":{"args":{"reading":"check status of agents","text":"What's everyone up to?"},"id":"call_48182","name":"to_supervisor"}}
+{"ts":null,"type":"voice.tool_call","payload":{"args":{"reading":"details on bench-codex task","text":"What is bench-codex working on exactly?"},"id":"call_48202","name":"to_supervisor"}}
+{"ts":null,"type":"voice.recycle","payload":{"handle":true,"reason":"bench_resume"}}
+{"ts":null,"type":"voice.connect","payload":{"backend":"vertex","dur_ms":524,"key_index":0,"resumed":true}}
+{"ts":null,"type":"voice.resume","payload":{"handle":"144aba4b-de76-4ec5-aefa-26233601ae40","replayed_chunks":0,"resumed":true,"silent_resent":1}}
+{"ts":null,"type":"voice.briefing_resent","payload":{"at":"14:23:47","briefing":"b-3","error":""}}
+{"ts":null,"type":"voice.tool_call","payload":{"args":{"reading":"details of bench-claude's writing task","text":"What is bench-claude writing?"},"id":"call_117286","name":"to_supervisor"}}
+{"ts":null,"type":"voice.resume_context","payload":{"after_at":"2026-10-04T21:24:00.247289Z","after_ms":8378,"after_prompt":2374,"after_prompt_by_modality":{"AUDIO":535,"TEXT":1839},"backend":"vertex","before_at":"2026-10-04T21:23:47.119787Z","before_prompt":1751,"before_prompt_by_modality":{"AUDIO":322,"TEXT":1429},"delta_prompt":623,"handle_at":"2026-10-04T21:23:47.119787Z","handle_prompt":1751,"handle_prompt_by_modality":{"AUDIO":322,"TEXT":1429},"model":"gemini-3.8-live","ratio_prompt":1.3557966876070817,"resumed_at":"2026-10-04T21:23:51.869045Z"}}
+{"ts":null,"type":"voice.recycle","payload":{"handle":true,"reason":"bench_resume"}}
+{"ts":null,"type":"voice.connect","payload":{"backend":"vertex","dur_ms":379,"key_index":0,"resumed":true}}
+{"ts":null,"type":"voice.resume","payload":{"handle":"0b5970aa-6f7a-47a0-b909-47a054023aad","replayed_chunks":0,"resumed":true,"silent_resent":1}}
+{"ts":null,"type":"voice.briefing_resent","payload":{"at":"14:24:11","briefing":"b-6","error":""}}
+{"ts":null,"type":"voice.resume_context","payload":{"after_at":"2026-10-04T21:24:33.003285Z","after_ms":18187,"after_prompt":2182,"after_prompt_by_modality":{"AUDIO":326,"TEXT":1856},"backend":"vertex","before_at":"2026-10-04T21:24:10.240601Z","before_prompt":2498,"before_prompt_by_modality":{"AUDIO":535,"TEXT":1963},"delta_prompt":-316,"handle_at":"2026-10-04T21:24:10.240601Z","handle_prompt":2498,"handle_prompt_by_modality":{"AUDIO":535,"TEXT":1963},"model":"gemini-3.8-live","ratio_prompt":0.8734987990392313,"resumed_at":"2026-10-04T21:24:14.815847Z"}}

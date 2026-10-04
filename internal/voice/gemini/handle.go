@@ -16,6 +16,45 @@ import (
 // so a context shrink in the log can be matched to the handle it came
 // from.
 
+// Never resume a resumed session (CEO decision, docs/handover-2026-10-04.md;
+// docs/research/live-resume-context-2026-10-04.md). A handle issued by a
+// connection that was itself opened by a resume restores only what was
+// said on that connection, not the context it inherited (canary chain
+// arm: 9 of 9 runs, 0 of 8 facts); the first resume of a fresh session
+// is lossless. So every accepted handle carries the generation of the
+// connection that issued it (handleGen: 0 for a connection opened
+// fresh), and a reconnect of any kind (GoAway, recycle, a dropped
+// socket) presents a handle only from generation 0. Otherwise it opens
+// a fresh session, which install re-seeds like any other context-lost
+// connection (reseed.go). Logged voice.handle_dropped {reason:
+// resumed_twice, handle_generation, generation}. A rail on what Live
+// keeps, not a judgment.
+
+// reasonResumedTwice is the voice.handle_dropped and voice.reseeded
+// reason when a handle from a resumed connection is left out.
+const reasonResumedTwice = "resumed_twice"
+
+// freshInsteadLocked drops a handle issued by a resumed connection, so
+// the dial that follows opens a fresh session, and returns the
+// voice.handle_dropped payload (nil when the handle is kept or there is
+// none). Caller holds s.mu.
+func (s *Session) freshInsteadLocked() map[string]any {
+	if s.handle == "" || s.handleGen < 1 {
+		return nil
+	}
+	p := map[string]any{"reason": reasonResumedTwice, "handle": handleTail(s.handle), "handle_generation": s.handleGen, "generation": s.resumeGen}
+	s.handle, s.handleGen = "", 0
+	s.freshWhy = reasonResumedTwice
+	return p
+}
+
+// dialGenNow is the handle generation the last dial presented.
+func (s *Session) dialGenNow() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.dialGen
+}
+
 // postHandleMax caps the silent pushes kept for re-sending: names, focus
 // and briefings come a few per turn, and a turn ends with a new handle.
 const postHandleMax = 32

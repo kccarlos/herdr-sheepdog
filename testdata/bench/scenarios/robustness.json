@@ -231,6 +231,81 @@
       },
       "note": "Tier-2 measurement for docs/research/live-resume-context-2026-10-04.md: facts briefed before one forced Gemini resume, asked about after it. Read the voice.resume_context event and whether the last answer came from the voice (no voice.tool_call to_supervisor after the resume) or from the brain.",
       "seed": 303
+    },
+    {
+      "id": "resume-recall-twice",
+      "category": "reconnect",
+      "goal": "hear what the two workers are doing, with the voice connection recycled twice mid-call (a turn in between), then ask the voice to repeat what it told you about both workers",
+      "opening": "Morning. What's everyone up to?",
+      "persona": "Asks about each worker in turn, then asks the assistant to repeat what it said about both. Plain and short.",
+      "fixed": true,
+      "script": [
+        "Morning. What's everyone up to?",
+        "What is bench-codex working on exactly?",
+        "And what is bench-claude writing?",
+        "Remind me, what did you tell me about bench-codex and bench-claude?"
+      ],
+      "agents": [
+        {
+          "alias": "bench-claude",
+          "kind": "claude",
+          "state": "working",
+          "screen": "bench-claude-working.txt"
+        },
+        {
+          "alias": "bench-codex",
+          "kind": "codex",
+          "state": "working",
+          "screen": "bench-codex-working.txt"
+        }
+      ],
+      "caps": {
+        "max_turns": 8,
+        "max_seconds": 300,
+        "silence_seconds": 40
+      },
+      "expect": {
+        "no_actions": true,
+        "rubric": [
+          "After the two reconnects, did the answer to the last question repeat what was said before them about bench-codex (refactoring the parser into its own package) and about bench-claude (writing the README for the calc repo), instead of claiming not to know?"
+        ]
+      },
+      "behavior": {
+        "resume": {
+          "after_turns": [
+            2,
+            3
+          ]
+        }
+      },
+      "voice_expect": {
+        "events": [
+          {
+            "type": "voice.resume",
+            "payload": {
+              "resumed": true,
+              "generation": 1
+            },
+            "note": "the first recycle resumes (lossless)"
+          },
+          {
+            "type": "voice.handle_dropped",
+            "payload": {
+              "reason": "resumed_twice"
+            },
+            "note": "the second recycle is on a resumed connection: fresh session instead"
+          },
+          {
+            "type": "voice.reseeded",
+            "payload": {
+              "reason": "resumed_twice"
+            },
+            "note": "the fresh session is re-seeded from the recap"
+          }
+        ]
+      },
+      "note": "Tier-2 check of the CEO's option 1 (docs/handover-2026-10-04.md): facts told before two forced recycles, with a turn on the resumed connection between them, asked about after both. Without the rail the second resume would restore only the resumed connection's own content (docs/research/live-resume-context-2026-10-04.md). Read whether the last answer came from the voice (no voice.tool_call to_supervisor after the second recycle) or from the brain.",
+      "seed": 304
     }
   ]
 }
