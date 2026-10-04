@@ -1,0 +1,10 @@
+{"ts":"2026-10-04T10:00:00Z","source":"daemon","type":"daemon.start","payload":{}}
+{"ts":"2026-10-04T10:01:00Z","source":"voice","type":"voice.usage","payload":{"prompt":10000,"response":50,"total":10050}}
+{"ts":"2026-10-04T10:01:01Z","source":"voice","type":"voice.handle_update","payload":{"accepted":true,"prompt_tokens":10000}}
+{"ts":"2026-10-04T10:05:00Z","source":"voice","type":"voice.resume","payload":{"handle":"h","resumed":true,"replayed_chunks":0}}
+{"ts":"2026-10-04T10:05:05Z","source":"voice","type":"voice.usage","payload":{"prompt":7000,"response":10,"total":7010}}
+{"ts":"2026-10-04T10:15:00Z","source":"voice","type":"voice.resume","payload":{"handle":"h2","resumed":true}}
+{"ts":"2026-10-04T10:15:04Z","source":"voice","type":"voice.usage","payload":{"prompt":6500,"response":10,"total":6510,"prompt_by_modality":{"AUDIO":5000,"TEXT":1500}}}
+{"ts":"2026-10-04T10:15:04Z","source":"voice","type":"voice.resume_context","payload":{"backend":"vertex","model":"m","before_prompt":8000,"before_prompt_by_modality":{"AUDIO":6000,"TEXT":2000},"handle_prompt":7900,"after_prompt":6500,"after_prompt_by_modality":{"AUDIO":5000,"TEXT":1500}}}
+{"ts":"2026-10-04T10:20:00Z","source":"voice","type":"voice.resume","payload":{"handle":"","resumed":false}}
+{"ts":"2026-10-04T10:20:05Z","source":"voice","type":"voice.usage","payload":{"prompt":900}}

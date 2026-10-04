@@ -133,6 +133,7 @@ type runner struct {
 	o      RunOptions
 	rng    *rand.Rand
 	c      *voiceclient.Client
+	d      *Daemon
 	w      *world.World
 	user   eval.SimUser
 	meter  *SpendMeter
@@ -217,6 +218,7 @@ func RunScenario(ctx context.Context, sc Scenario, repeat, port int, o RunOption
 		return finish()
 	}
 	r.c = c
+	r.d = d
 	var rec voiceclient.Recording
 	closed := false
 	closeClient := func() {
@@ -417,6 +419,9 @@ func (r *runner) converse(ctx context.Context) {
 			if rc := sc.Behavior.Reconnect; rc != nil && rc.AfterTurn == run.Turns {
 				r.reconnect(ctx, rc)
 			}
+			if rs := sc.Behavior.Resume; rs != nil && rs.AfterTurn == run.Turns {
+				r.resume(ctx)
+			}
 		default:
 			run.EndReason, run.EndDetail = eval.EndError, "unknown turn kind "+t.Kind
 			run.Failures = append(run.Failures, eval.Failure{Type: eval.FailError, Detail: run.EndDetail})
@@ -595,6 +600,22 @@ func (r *runner) reconnect(ctx context.Context, rc *Reconnect) {
 	_ = r.c.WaitConnected(ctx, 30*time.Second)
 	r.convo = append(r.convo, eval.SimLine{AtMS: r.since(), Who: "system", Text: "The phone is connected again."})
 	r.hear(ctx, 2500*time.Millisecond, 20*time.Second, false)
+}
+
+// resume forces one Gemini resume and lets it settle: the voice model's
+// connection is swapped for one resumed from its latest handle.
+func (r *runner) resume(ctx context.Context) {
+	ok := r.d.RecycleVoice("bench_resume")
+	r.convo = append(r.convo, eval.SimLine{AtMS: r.since(), Who: "system", Text: "The voice connection was recycled (a session resume)."})
+	if !ok {
+		r.run.Failures = append(r.run.Failures, eval.Failure{Type: eval.FailError, Detail: "resume: the voice provider cannot recycle"})
+		return
+	}
+	select {
+	case <-time.After(4 * time.Second):
+	case <-ctx.Done():
+	}
+	_ = r.c.WaitConnected(ctx, 30*time.Second)
 }
 
 // collect fills the run's voice-side record from the recording.

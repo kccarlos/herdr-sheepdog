@@ -545,6 +545,16 @@ func (a *App) restoreVoiceProvider() {
 	}
 }
 
+// RecycleVoice forces the voice session to reconnect with its resumption
+// handle (a Gemini resume), reporting whether the provider supports it.
+// For the bench and debugging; the daemon never calls it on its own.
+func (a *App) RecycleVoice(reason string) bool {
+	if a.voiceSwitch == nil {
+		return false
+	}
+	return a.voiceSwitch.Recycle(reason)
+}
+
 // VoiceProvider reports the voice provider ("off" without a voice).
 func (a *App) VoiceProvider() string {
 	if a.voiceSwitch == nil {

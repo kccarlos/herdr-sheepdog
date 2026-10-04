@@ -443,6 +443,17 @@ func (sw *Switcher) Reset(reason string) error {
 	return nil
 }
 
+// Recycle asks the current provider's session to swap its connection
+// for one resumed from its handle (Gemini only; a no-op elsewhere): a
+// debugging and bench hook that forces one resume.
+func (sw *Switcher) Recycle(reason string) bool {
+	if s, ok := sw.cur().(interface{ Recycle(string) }); ok {
+		s.Recycle(reason)
+		return true
+	}
+	return false
+}
+
 // Speaking implements Session.
 func (sw *Switcher) Speaking() bool {
 	if s := sw.cur(); s != nil {

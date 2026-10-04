@@ -161,6 +161,12 @@ func (s *Session) notePushTimeout() {
 	}
 }
 
+// Recycle swaps the live connection for a fresh one resumed from the
+// current handle, the path a GoAway or repeated stalls take (logged as
+// voice.recycle). For the bench and debugging: it forces one resume
+// without waiting for the server's ~9 minute GoAway. Coalesced.
+func (s *Session) Recycle(reason string) { s.requestRecycle(reason) }
+
 // requestRecycle asks the run loop for a proactive reconnect with the
 // current resumption handle (the GoAway path). Coalesced.
 func (s *Session) requestRecycle(reason string) {
