@@ -412,11 +412,7 @@ func (s *Session) doPush(ctx context.Context, item pushItem) {
 	if id, _ := item.tags[ctxcap.TagCallID].(string); id != "" {
 		delete(s.owedReplies, id) // the reply the voice was told follows
 	}
-	var unheard []voice.UnheardPush
 	if turnComplete {
-		sentAt := s.now()
-		unheard = s.heard.Pushed(sentAt, item.text, item.tags, item.tags[tagRequeued] == true)
-		s.requeue.Pushed(sentAt, item.tags)
 		s.flushRecapLocked()
 		s.recap.Add(voice.RecapSupervisor, item.text)
 		s.lastSpoken = s.now()
@@ -428,7 +424,6 @@ func (s *Session) doPush(ctx context.Context, item pushItem) {
 	}
 	now := s.now()
 	s.mu.Unlock()
-	s.reportUnheard(unheard)
 	if !item.heldAt.IsZero() {
 		p := heldPayload(item, "", 0)
 		p["held_ms"] = now.Sub(item.heldAt).Milliseconds()

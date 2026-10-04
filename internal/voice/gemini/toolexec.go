@@ -27,10 +27,6 @@ func (s *Session) startTool(gen int, fc *genai.FunctionCall) {
 	}
 	turnDone := s.turnDone
 	s.noteToolCallLocked(s.now())
-	if call.Name == voice.ToolToSupervisor || call.Name == voice.ToolStop {
-		text, _ := call.Args["text"].(string)
-		s.requeue.Asked(s.now(), text)
-	}
 	s.mu.Unlock()
 	s.clearStalled()
 
@@ -123,7 +119,6 @@ func (s *Session) execTool(ctx context.Context, gen int, call voice.ToolCall, tu
 			ID: call.ID, Name: call.Name, Response: resp, Scheduling: scheduling(sched),
 		}}})
 	})
-	var unheard []voice.UnheardPush
 	if sendErr == nil && (sched != voice.UrgencySilent || res.Pending) {
 		s.mu.Lock()
 		if sched != voice.UrgencySilent {
@@ -132,13 +127,8 @@ func (s *Session) execTool(ctx context.Context, gen int, call voice.ToolCall, tu
 				s.playUtt.Handed(res.UtteranceID)
 			}
 			if isAnswer(call, res) {
-				// The answer is watched like a spoken push (voice/heard.go):
-				// voiced as "On it." it is judged unheard and re-queued,
-				// and the re-seed recap keeps it.
-				now := s.now()
-				line, tags := answerLine(call, res)
-				unheard = s.heard.Pushed(now, line, tags, false)
-				s.requeue.Pushed(now, tags)
+				// The re-seed recap keeps the answer.
+				line, _ := answerLine(call, res)
 				s.flushRecapLocked()
 				s.recap.Add(voice.RecapSupervisor, line)
 			}
@@ -148,7 +138,6 @@ func (s *Session) execTool(ctx context.Context, gen int, call voice.ToolCall, tu
 		}
 		s.mu.Unlock()
 	}
-	s.reportUnheard(unheard)
 	if sendErr != nil {
 		// The connection the call came on is gone (docs/timelines.md
 		// C23): the answer goes through the push queue, which outlives

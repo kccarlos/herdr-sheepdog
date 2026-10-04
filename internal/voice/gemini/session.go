@@ -122,11 +122,6 @@ type Session struct {
 	owedReplies map[string]time.Time
 	// openCheck is the supervisor's voice.OpenCheck (nil: none).
 	openCheck voice.OpenCheck
-	// heard watches each spoken push until its speech is over
-	// (voice/heard.go); requeue holds the owed unheard lines waiting
-	// for a quiet moment (heard.go, voice/requeue.go).
-	heard   voice.HeardTracker
-	requeue voice.Requeue
 	// turnDoneAt is when the model last completed a turn
 	// (voice.RequeueHold).
 	turnDoneAt time.Time
@@ -637,8 +632,6 @@ func (s *Session) Reset(reason string) error {
 	s.mu.Lock()
 	s.recap.Reset() // a new conversation must not be re-seeded with the old one
 	s.inText, s.outText = "", ""
-	s.heard.Reset()
-	s.requeue.Reset()
 	s.mu.Unlock()
 	s.rec.Marker("conversation reset", "New conversation: the resumption handle is dropped, so the next connection starts without the conversation so far.", nil)
 	select {
@@ -755,13 +748,7 @@ func (s *Session) ClientPlayback(state string, playedMs int) {
 	if state == voice.PlaybackFlushed && s.useBriefings() {
 		cutFact, _ = s.noteCutLocked(rep)
 	}
-	var unheard []voice.UnheardPush
-	if state == voice.PlaybackFlushed {
-		unheard = s.heard.Flushed(now, rep.Cut, rep.Heard)
-	}
 	s.mu.Unlock()
-	s.reportUnheard(unheard)
-	defer s.settleHeard()
 	if cutFact != "" {
 		// The voice cannot see the phone: tell it what the CEO heard
 		// of the line they talked over (a fact, not a re-queue).

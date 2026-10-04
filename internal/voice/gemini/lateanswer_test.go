@@ -86,27 +86,3 @@ func TestLateAnswerHeldWhileShepherdSpeaks(t *testing.T) {
 		t.Errorf("voice.push_deferred = %v", p)
 	}
 }
-
-// A spoken answer sent as the function response is watched like a
-// push: voiced as "On it." it is judged unheard (body_skipped) and
-// re-queued as an answer owed.
-func TestAnswerAsFunctionResponseIsWatched(t *testing.T) {
-	c := newFakeConn("c1")
-	gate := make(chan struct{})
-	close(gate)
-	h := newHarness(t, Config{Handler: lateHandler(gate)}, &fakeDialer{results: []func() (Conn, error){ok(c)}})
-
-	c.serve(toolCallMsg("call_1", voice.ToolToSupervisor, map[string]any{"text": "how is auth"}))
-	c.serve(turnCompleteMsg())
-	c.waitSent(t, "tool response", func(m sent) bool { return m.kind == "tool" })
-	c.serve(outputTranscriptMsg("On it."))
-	c.serve(turnCompleteMsg())
-	ev := h.waitEvent("unheard", func(ev voice.Event) bool { _, ok := ev.(voice.EventPushUnheard); return ok })
-	u := ev.(voice.EventPushUnheard)
-	if u.Push.Reason != voice.UnheardBodySkipped || u.Push.Text != "Auth's tests are green. Options: merge; wait." {
-		t.Errorf("unheard = %+v", u.Push)
-	}
-	if voice.PushUtterance(u.Push.Tags) != "utt-1" {
-		t.Errorf("tags = %v, want answers_utterance utt-1", u.Push.Tags)
-	}
-}
