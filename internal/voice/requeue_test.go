@@ -61,6 +61,18 @@ func TestRequeueStaleAnswer(t *testing.T) {
 		{"new question", func(r *Requeue) { r.Asked(rqAt(17675), "Okay, okay. Just tell me if it needs anything.") }, DropAskedSince},
 		{"stop", func(r *Requeue) { r.Asked(rqAt(15017), "") }, DropAskedSince},
 		{"asked before it was sent", func(r *Requeue) { r.Asked(rqAt(9000), "is the test passing?") }, ""},
+		// The voice calls again with the question the answer answers
+		// (A/B 2026-10-03, barge-in-long-answer r3: "On it.", the same
+		// words again, the body never read): not new words.
+		{"same question again", func(r *Requeue) {
+			r.Asked(rqAt(9000), "Is the test passing?")
+			r.Asked(rqAt(12000), "is the test passing? ")
+		}, ""},
+		{"same question, then a new one", func(r *Requeue) {
+			r.Asked(rqAt(9000), "is the test passing?")
+			r.Asked(rqAt(12000), "is the test passing?")
+			r.Asked(rqAt(17675), "Okay, okay. Just tell me if it needs anything.")
+		}, DropAskedSince},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

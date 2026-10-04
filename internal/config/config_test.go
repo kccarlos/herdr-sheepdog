@@ -494,8 +494,8 @@ func TestBrainReplyWaitConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Brain.ReplyWaitS != 2 {
-		t.Errorf("default reply_wait_s = %d, want 2", cfg.Brain.ReplyWaitS)
+	if cfg.Brain.ReplyWaitS != 30 {
+		t.Errorf("default reply_wait_s = %d, want 30", cfg.Brain.ReplyWaitS)
 	}
 	path := filepath.Join(t.TempDir(), "config.toml")
 	if err := os.WriteFile(path, []byte("[brain]\nreply_wait_s = -1\n"), 0o600); err != nil {

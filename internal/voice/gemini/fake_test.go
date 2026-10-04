@@ -282,6 +282,11 @@ func newHarness(t *testing.T, cfg Config, dialer *fakeDialer) *harness {
 	if cfg.ToolResponseWait == 0 {
 		cfg.ToolResponseWait = 60 * time.Millisecond
 	}
+	if cfg.BriefingChannel == "" {
+		// The push-queue tests read the marked user-role turns; the
+		// briefing channel has its own tests (briefing_test.go).
+		cfg.BriefingChannel = ChannelUserTurn
+	}
 	log := &recLogger{}
 	s, err := newSession(cfg, log, dialer)
 	if err != nil {

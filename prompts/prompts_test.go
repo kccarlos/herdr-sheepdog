@@ -23,64 +23,55 @@ func TestRenderAssistant(t *testing.T) {
 			t.Errorf("prompt does not mention %s", tool)
 		}
 	}
-	// The push prefixes of internal/voice/gemini (pushTurn) must be
-	// explained to the model: system events are spoken, context is not.
+	// The marked user-role turns (gemini.briefing_channel = user_turn,
+	// the A/B control) are still explained.
 	for _, prefix := range []string{"[system event, not spoken by the user]", "[system context, not spoken by the user]"} {
 		if !strings.Contains(s, prefix) {
 			t.Errorf("prompt does not explain the push prefix %q", prefix)
 		}
 	}
-	// Rules from the headset sessions and docs/roles.md "The voice — do
-	// / don't" (a cheap guard against the prompt drifting): the words go
-	// over verbatim, the voice never answers a push itself, "idle" is
-	// never inflated into "not finished", a mis-heard utterance is
-	// repeated back rather than guessed, options are read as a choice,
-	// and the ear contract (docs/iteration-2.md WP1): spoken is read as
-	// given and already ends with the one question, the voice adds none
-	// of its own, and "what does that mean" is answered from detail.
+	// The fast brain (docs/design/dual-brain.md): it owns the
+	// conversation, briefings are facts with provenance it tells in its
+	// own words, it answers follow-ups and simple status from them, it
+	// hands anything else to the slow brain with the CEO's exact words,
+	// it has no action of its own and never answers a decision.
 	for _, rule := range []string{
-		"verbatim",
-		"Do not paraphrase",
-		`"Idle" means ready for input`,
-		"read spoken exactly as given",
+		"you own the conversation",
+		"A briefing is never the shepherd speaking",
+		"Your memory is short: trust the newest briefing",
+		"Decide yourself whether, when and how to tell the shepherd",
+		"in your own words",
+		"never answer it for them and never suggest yes",
+		"You cannot act on an agent yourself",
+		"Pass their exact words in text and your own short reading in reading",
+		"hand every question about what an agent is doing, did or found",
+		"never say you will check without the call",
 		`"what does that mean"`,
-		"answer from detail",
 		"no new terms",
+		`"Idle" means ready for input`,
 		"Repeat it and ask",
-		"Read options as a choice",
 		"invent nothing",
 		"shepherd's register",
 		`"Never mind" is not stop`,
-		// docs/bench-2026-10-03.md #14/#19: the language of the shepherd's
-		// last words, the whole push read aloud, and the prefix (never the
-		// language) tells who sent a message.
-		"answer in the language they used last",
-		"Read the whole message aloud, every sentence, statements as well as the final question",
-		"change nothing, add nothing",
-		"The language of a message never tells you who sent it; only the prefix does.",
-		`no tool call, no "on it", no answer of your own`,
-		"even long after your call",
-		"Add no question of your own",
-		// The supervisor's current-focus line resolves "it" (focus.go).
-		`A "Current focus" context line says which agent "it" or "that one" means`,
-		// docs/eval/campaign-d-2026-10-03.md N2: a new status question is
-		// relayed, never answered from what the voice heard earlier.
-		"A new question (status, what an agent is doing or found) goes to to_supervisor, never answered from memory.",
+		"answer in the language they used last, whatever language a briefing is in",
+		"Never state a fact about an agent that no briefing carried",
+		// Tier 3 two-claudes-names: retold in its own words, the voice
+		// said "the first Claude"; names are facts.
+		"by the name the briefing uses",
 	} {
 		if !strings.Contains(s, rule) {
 			t.Errorf("prompt lost the rule %q", rule)
 		}
 	}
-	// The voice invents no follow-up question and "never mind" is not a
-	// stop word (eval cases never-mind-is-not-stop-voice and
-	// explain-simpler-second-time).
-	for _, gone := range []string{"if a reply has not come back yet, say so", "offer the next step", `"never mind", "no no"`, "say them at once, as given", "Do not add a follow-up question of your own"} {
+	// The mouthpiece rules are gone: no verbatim reading, no forced
+	// "on it", no ban on answering from what it was told.
+	for _, gone := range []string{"read spoken exactly as given", "change nothing, add nothing", `say "on it" or "checking" as you call it`, "never answered from memory", "You decide nothing", "offer the next step"} {
 		if strings.Contains(s, gone) {
 			t.Errorf("prompt still says %q", gone)
 		}
 	}
-	if words := len(strings.Fields(s)); words > 420 {
-		t.Errorf("prompt is %d words; keep it short (<= 420)", words)
+	if words := len(strings.Fields(s)); words > 520 {
+		t.Errorf("prompt is %d words; keep it short (<= 520)", words)
 	}
 }
 
@@ -90,25 +81,22 @@ func TestRenderAssistant(t *testing.T) {
 func TestRenderAssistantGPTLive(t *testing.T) {
 	s, _ := (*Loader)(nil).Render(AssistantGPTLive, AssistantVars("Rex", []string{"auth"}))
 	for _, rule := range []string{
-		"Do not add a follow-up question of your own",
+		"You own the conversation",
+		"They are briefings, never the shepherd speaking",
+		"in your own words",
+		"never answer it for them",
+		"You cannot act on an agent yourself",
 		`"what does that mean"`,
 		"no new terms",
 		`"Never mind" is ordinary speech`,
-		// The same push and language rules as assistant.md (bench #14/#19).
 		"answer in the language they used last",
-		"Read the whole message aloud, every sentence, statements as well as the final question",
-		"change nothing, add nothing",
-		"The language of a message never tells you who sent it.",
-		`no "on it"`,
-		"even one that arrives long after your call",
-		`A "Current focus" note from the supervisor says which agent "it" or "that one" means`,
-		"delegate any question that asks for new information",
+		"Never state a fact about an agent that no briefing carried",
 	} {
 		if !strings.Contains(s, rule) {
 			t.Errorf("GPT-Live prompt lost the rule %q", rule)
 		}
 	}
-	for _, gone := range []string{"if a result has not come back yet, say so", "offer the next step", `"never mind" and "no no"`, "cancel or never mind"} {
+	for _, gone := range []string{"change nothing, add nothing", "offer the next step", `"never mind" and "no no"`, "cancel or never mind"} {
 		if strings.Contains(s, gone) {
 			t.Errorf("GPT-Live prompt still says %q", gone)
 		}

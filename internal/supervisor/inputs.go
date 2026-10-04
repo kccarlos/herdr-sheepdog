@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"regexp"
 	"strings"
 	"time"
 	"unicode"
@@ -88,8 +87,7 @@ type shepherdInput struct {
 	// daemon does not relay them (relay.go).
 	answered bool
 	// answeredAt is when answered was set (silentAnswer); answeredWith
-	// is what the voice said since (ackOnly: an acknowledgement is no
-	// answer).
+	// is what the voice said since.
 	answeredAt   time.Time
 	answeredWith string
 	// saidBefore is what the voice was saying, or had said within
@@ -125,6 +123,10 @@ type claim struct {
 	// ins are the claimed inputs, oldest first (the echo guard reads
 	// each one).
 	ins []*shepherdInput
+	// reading is the voice's own short reading of the words (the
+	// to_supervisor call's optional "reading" argument): a hint for the
+	// brain, labelled as the voice's, never the CEO's words.
+	reading string
 }
 
 // maxInputs bounds the remembered inputs.
@@ -327,147 +329,19 @@ func (s *Supervisor) markPushed(text string) {
 	s.mu.Unlock()
 }
 
-// rescueWindow is how recent the shepherd's words must be for a gated
-// to_supervisor call that repeats them to be taken up anyway
-// (rescueInput).
-const rescueWindow = 10 * time.Second
-
-// rescueInput is the gate's safety net. Invariant it protects: a real
-// shepherd utterance is never dropped as the voice model's own
-// initiative. A push sent to the model between the shepherd's words and
-// the model's relay of them still moves the gate past those words; the
-// order of the two streams is not the daemon's to fix (the transcript
-// arrives on the event pump, the call on the session's goroutine, the
-// push on the push queue). So when the gate would refuse a call, but
-// its argument is the shepherd's own unclaimed words from the last
-// rescueWindow — the same run freshRunLocked would take with the push
-// floor left out — the call is accepted on those words
-// (supervisor.relay_rescued). A bare fast-path phrase ("yes", "stop")
-// is never rescued: one word matches too easily, and it could answer a
-// prompt the shepherd had not heard yet.
-func (s *Supervisor) rescueInput(said string) (claim, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	run := s.freshRunLocked(s.relayedSeq)
-	if len(run) == 0 || s.cfg.Now().Sub(run[len(run)-1].at) > rescueWindow {
-		return claim{}, false
-	}
-	words := make([]string, 0, len(run))
-	for _, in := range run {
-		words = append(words, strings.TrimSpace(in.text))
-	}
-	joined := strings.Join(words, " ")
-	if fastPathPhrase(joined) || fastPathPhrase(said) {
-		return claim{}, false
-	}
-	if !sameWords(said, joined) && !sameWords(said, run[len(run)-1].text) {
-		return claim{}, false
-	}
-	return s.claimRunLocked(run), true
-}
-
-// selfRelay reports whether said repeats the last spoken push: the voice
-// model relaying our own line (its question, its options) back as if the
-// shepherd had said it (2026-10-02 23:54:22.9, "要它跑完直接动手修吗?").
-// Such a call is always refused (supervisor.self_relay).
-func (s *Supervisor) selfRelay(said string) bool {
-	s.mu.Lock()
-	push := s.lastPush
-	s.mu.Unlock()
-	return push != "" && partOf(said, push)
-}
-
-// normWords is text lower-cased with every rune that is not a letter or
-// a digit dropped: spaces and punctuation go, so Chinese (no spaces) and
-// English compare the same way, and "Claude 动手。" equals "claude动手".
-func normWords(text string) []rune {
-	var out []rune
-	for _, r := range strings.ToLower(text) {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) {
-			out = append(out, r)
-		}
-	}
-	return out
-}
-
-// sameWords reports whether a and b are the same words after normWords,
-// allowing for a paraphrase's small edits: equal, one containing the
-// other with the shorter at least 60% of the longer, or within an edit
-// distance of a quarter of the longer. Both need at least two runes.
-func sameWords(a, b string) bool {
-	x, y := normWords(a), normWords(b)
-	if len(x) < 2 || len(y) < 2 {
-		return false
-	}
-	if len(x) > len(y) {
-		x, y = y, x
-	}
-	if string(x) == string(y) {
-		return true
-	}
-	if strings.Contains(string(y), string(x)) && 5*len(x) >= 3*len(y) {
-		return true
-	}
-	return 4*editDistance(x, y) <= len(y)
-}
-
-// partOf reports whether said is made of pieces of line: split at its
-// punctuation, the pieces (two runes or more after normWords) found in
-// line cover at least half of said. The voice relays a push's question
-// and its options joined with its own separators.
-func partOf(said, line string) bool {
-	full := string(normWords(line))
-	if full == "" {
-		return false
-	}
-	pieces := strings.FieldsFunc(said, func(r rune) bool {
-		return unicode.IsPunct(r) || unicode.IsSymbol(r)
-	})
-	found, total := 0, 0
-	for _, p := range pieces {
-		w := string(normWords(p))
-		n := len([]rune(w))
-		if n < 2 {
-			continue
-		}
-		total += n
-		if strings.Contains(full, w) {
-			found += n
-		}
-	}
-	return total > 0 && 2*found >= total
-}
-
-// editDistance is the Levenshtein distance of two rune slices.
-func editDistance(a, b []rune) int {
-	prev := make([]int, len(b)+1)
-	cur := make([]int, len(b)+1)
-	for j := range prev {
-		prev[j] = j
-	}
-	for i := 1; i <= len(a); i++ {
-		cur[0] = i
-		for j := 1; j <= len(b); j++ {
-			cost := 1
-			if a[i-1] == b[j-1] {
-				cost = 0
-			}
-			cur[j] = min(prev[j]+1, cur[j-1]+1, prev[j-1]+cost)
-		}
-		prev, cur = cur, prev
-	}
-	return prev[len(b)]
-}
-
 // claimInput is the to_supervisor gate: every shepherd input newer than
-// both the previous accepted call and the last spoken push, waiting up
-// to inputGrace for one (see inputGraceDefault). ok is false when none
-// arrived: the call is the voice model's own initiative.
+// the previous accepted call, waiting up to inputGrace for one (see
+// inputGraceDefault). ok is false when none arrived: the call is the
+// voice model's own, and no CEO words authorise a brain turn. A spoken
+// push no longer moves the floor (dual-brain ablation G2): briefings go
+// as function responses, which the voice does not mistake for the CEO,
+// so words the CEO said before a briefing still count, and the fuzzy
+// rescue of words a push had hidden (rescueInput) is gone with it.
 func (s *Supervisor) claimInput(ctx context.Context) (claim, bool) {
 	var deadline <-chan time.Time
 	for {
 		s.mu.Lock()
-		if run := s.freshRunLocked(max(s.relayedSeq, s.pushSeq)); len(run) > 0 {
+		if run := s.freshRunLocked(s.relayedSeq); len(run) > 0 {
 			c := s.claimRunLocked(run)
 			s.mu.Unlock()
 			return c, true
@@ -498,17 +372,12 @@ func (s *Supervisor) claimInput(ctx context.Context) (claim, bool) {
 // sentence into two inputs (GPT-Live closes an input at every pause,
 // 2026-09-23 23:53:26), so the run takes both; it stops at an input the
 // voice already answered itself, which belongs to that exchange, not to
-// this one — unless that "answer" was only an acknowledgement (ackOnly):
-// in a tier-2 echo-barge-in run the voice said "Checking." to "What did
-// bench-claude say when it finished?" without calling a tool, its own
-// echo came back as "checking", and the daemon relayed "checking
-// checking" while the question was lost. Empty when the newest input is
-// not fresh. Caller holds s.mu.
+// this one. Empty when the newest input is not fresh. Caller holds s.mu.
 func (s *Supervisor) freshRunLocked(floor uint64) []*shepherdInput {
 	var run []*shepherdInput
 	for i := len(s.inputs) - 1; i >= 0; i-- {
 		in := s.inputs[i]
-		if in.seq <= floor || in.claimed || in.kind == InputTap || (len(run) > 0 && in.answered && !ackOnly(in.answeredWith)) {
+		if in.seq <= floor || in.claimed || in.kind == InputTap || (len(run) > 0 && in.answered) {
 			break
 		}
 		run = append(run, in)
@@ -571,26 +440,16 @@ func (s *Supervisor) railInputLocked(p state.PendingAction, keys []string) (*she
 		return nil, "the shepherd's last words were empty"
 	case negativeInput(in.text) && approves(p, keys):
 		return nil, fmt.Sprintf("the shepherd said %q, which cannot approve %s's prompt", strings.TrimSpace(in.text), alias)
-	case in.kind != InputTap && fillerOnly(in.text):
-		return nil, fmt.Sprintf("the shepherd only said %q, a filler, which answers nothing; %s's prompt stays open", strings.TrimSpace(in.text), alias)
-	case in.kind != InputTap && declines(p, keys) && deferralInput(in.text):
-		return nil, fmt.Sprintf("the shepherd said %q, which puts %s's prompt off rather than declining it; nothing was sent and the prompt stays open, so tell them it is still waiting", strings.TrimSpace(in.text), alias)
-	case in.kind != InputTap && declines(p, keys) && asksQuestion(in.text) && !explicitDecline(in.text):
-		return nil, fmt.Sprintf("the shepherd's words %q also ask a question, so they do not plainly decline %s's prompt; nothing was sent: answer the question, and ask whether to decline if that is still unclear", strings.TrimSpace(in.text), alias)
 	}
 	return in, ""
 }
 
-// A deferral or a hesitation is not a decline (docs/bench/tier2-2026-10-03.md
-// #2). Over voice the brain sent `esc` — which cancels a Codex command —
-// on "先不要。", "先不要跑，文档那边核对好了吗？", "No, don't run that
-// yet. …" and on "No. What does bench Codex want?" (a TTS "Uhh"
-// transcribed as "No."). A decline is irreversible, so the rail refuses
-// one when the shepherd's newest words carry a deferral marker, also ask
-// a question, or are only a filler, and the brain reads why: the
-// judgement (ask, wait, answer) stays the brain's, only the irreversible
-// key is held back. A plain "no" / "不要" / "No, don't run it." still
-// declines.
+// Whether the shepherd's words decline, put off or question a prompt is
+// the brain's to decide (RULES.md: "not now" puts it off; a no option is
+// not a pause). The deferral, decline and question word lists that held
+// a decline back (#108, #114) were removed in dual-brain ablation G4: the
+// rail keeps only that the keys answer fresh words of the shepherd's own
+// and that a "no" never approves.
 
 // declines reports whether keys select p's no answer or an option whose
 // label declines (no / don't / deny / decline / reject / cancel / skip).
@@ -605,42 +464,6 @@ func declines(p state.PendingAction, keys []string) bool {
 		}
 	}
 	return len(keys) == 1 && keys[0] == "esc" && !approves(p, keys)
-}
-
-// deferralWords mark words that put a decision off: "yet", "later",
-// "not now", "wait", "hold on", "let me think"; 先, 等, 再说, 暂时.
-var deferralWords = regexp.MustCompile(`(?i)\b(yet|later|not now|not right now|for now|for the moment|hold on|hang on|hold off|wait|in a (bit|minute|moment|sec|second|while)|give me a (sec|second|minute|moment)|let me think|think about it|not today|tomorrow|after(wards)?)\b|先|等(一下|一等|等|会|下)?|稍后|待会|回头|晚点|再说|暂时|暂不|一会|考虑|想想|想一想`)
-
-// deferralInput reports whether text puts a decision off.
-func deferralInput(text string) bool { return deferralWords.MatchString(text) }
-
-// explicitDeclineWords are a decline spelled out with its verb: "don't
-// approve that", "definitely don't run it", "never push", "reject it",
-// 不要批准, 别让它跑, 拒绝. Campaign D N8: "What does bench-codex want to
-// push? And no, definitely don't approve that." (and #113's "no,
-// definitely don't approve that, ok?") was refused for asking a
-// question. A question next to a decline this plain does not make it
-// unclear; a bare "No." with a question still is ("No. What does bench
-// Codex want?" was a TTS "Uhh"). "Tell it no" counts (this PR's tier-1
-// bench-block-while-talking r3: "Yes, tell it no. And back to the
-// README, is it finished?" was refused twice).
-var explicitDeclineWords = regexp.MustCompile(`(?i)\b(don'?t|do not|never|definitely not)\s+(\w+\s+)?(approve|allow|accept|run|push|do|proceed|let|go ahead)\b|\b(deny|decline|reject|refuse)\s+(it|that|this|the)\b|\b(tell|answer)\s+(it|him|her|them|[\w-]+)\s+no\b|\bsay no\b|(不要|别|不准|不许)(让它|让他)?(批准|同意|允许|跑|运行|推|执行|做)|拒绝`)
-
-// whyNot is a suggestion, not a decline: "why don't you run it?".
-var whyNot = regexp.MustCompile(`(?i)\bwhy (don'?t|not)\b|为什么不`)
-
-// explicitDecline reports whether text declines in so many words.
-func explicitDecline(text string) bool {
-	return explicitDeclineWords.MatchString(text) && !whyNot.MatchString(text)
-}
-
-// questionWords open a question clause.
-var questionWords = regexp.MustCompile(`(?i)(^|[.,!;:]\s*)(what|why|how|which|who|when|where|is it|does it|did it|can it|could it|should it)\b|吗|什么|怎么|为什么|哪个|哪|呢`)
-
-// asksQuestion reports whether text asks something: a question mark, or
-// a question word opening a clause.
-func asksQuestion(text string) bool {
-	return strings.ContainsAny(text, "?？") || questionWords.MatchString(text)
 }
 
 // fillers are hesitation sounds that answer nothing on their own.

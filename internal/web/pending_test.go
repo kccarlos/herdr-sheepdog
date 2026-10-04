@@ -100,7 +100,7 @@ func TestTypedUtteranceIsAShepherdInput(t *testing.T) {
 	// The voice model calling to_supervisor on its own (no typed input).
 	var tr ToolResponse
 	res, err := h.srv.runTool(t.Context(), toolCall("yes"), "voice")
-	if err != nil || res.Spoken != "" {
+	if err != nil || !strings.HasPrefix(res.Spoken, "Nothing was handed on") {
 		t.Fatalf("model-initiated relay = %+v %v", res, err)
 	}
 	if code, body := h.postJSON("/api/inject/utterance", map[string]any{"text": "yes"}, &tr); code != http.StatusOK || !strings.Contains(tr.Spoken, "Told auth yes") {

@@ -180,8 +180,26 @@ func (r *Requeue) stale(v UnheardPush) string {
 	if r.lastAnswer.After(v.SentAt) {
 		return DropSuperseded
 	}
+	// The words the answer answers: the last hand-off before it was sent.
+	// The voice calling again with exactly those words after the answer
+	// came (seen with the answer as a late function response: "On it.",
+	// the same question again, the body never read) is not the shepherd
+	// asking something new.
+	var asked string
 	for _, a := range r.asks {
-		if a.at.After(v.SentAt) && (strings.TrimSpace(a.text) == "" || PushCoverage(v.Text, a.text) < HeardMinCoverage) {
+		if !a.at.After(v.SentAt) {
+			asked = strings.TrimSpace(a.text)
+		}
+	}
+	for _, a := range r.asks {
+		if !a.at.After(v.SentAt) {
+			continue
+		}
+		t := strings.TrimSpace(a.text)
+		if asked != "" && strings.EqualFold(t, asked) {
+			continue
+		}
+		if t == "" || PushCoverage(v.Text, a.text) < HeardMinCoverage {
 			return DropAskedSince
 		}
 	}

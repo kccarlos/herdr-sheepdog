@@ -1,0 +1,93 @@
+arm,run,class,secondary,quote,note
+main,ambiguous-codex.r2,JUDGE,REAL_DAEMON,[47s] I'll let you know when the tests are complete.,Tests were started and confirmed ('I told auth-codex to run the tests'); judge wants a result nobody asked for; one push unheard/requeued
+main,ambiguous-readme-one.r2,ENV,,"[28s] Sorry, I couldn't get an answer just now",deepseek 402; fallback sentence was the whole answer
+main,approve-claude-askuser.r2,ENV,,[38s] On it. (then silence),deepseek 402 killed the brain turn for the MIT instruction
+main,approve-claude-permission.r1,JUDGE,,[47s] Approved bench-claude's edit.,Approval was what CEO asked; judge read it as premature 'task complete'
+main,approve-claude-permission.r3,REAL_VOICE,REAL_DAEMON,[54s] <no speech>{pause},push_unheard reason=body_skipped twice: voice swallowed 'Approved the edit' push; CEO left in silence
+main,approve-zh-hurried.r2,ENV,,[17s] 好的，已批准 bench-codex 运行测试。,Only brain_fallback flag (402); CEO was served correctly -> harmless
+main,approve-zh-hurried.r3,JUDGE,,[33s] 已经批准 bench-codex运行测试了。,Judge claims English reply; transcript line is Chinese
+main,barge-in-hold-to-talk.r1,JUDGE,REAL_DAEMON,[2s] bench-codex asks to run go test.,Approval request was the first thing said; judge strict on 'lead with status'. Duplicate 'On it' pushes and 9s split answer are minor real issues
+main,barge-in-hold-to-talk.r2,JUDGE,,[41s] bench-codex will wait. Only bench-claude is running,Facts correct; rubric order pedantry
+main,barge-in-hold-to-talk.r3,REAL_VOICE,REAL_DAEMON,[22s] on it,push_unheard reason=body_skipped heard='on it': voice replaced the answer push with a filler; CEO waited in silence
+main,barge-in-long-answer.r1,ENV,,"[56s] Sorry, I couldn't get an answer just now",deepseek 402; answer lost
+main,barge-in-long-answer.r3,REAL_BRAIN,REAL_VOICE,[26s] Understood. I will let you know if Bench Claude asks for anything.,Worker already had a pending decision (two dead links); brain/line said nothing needed; earlier line cut off
+main,collision-block-while-talking.r1,REAL_DAEMON,JUDGE,[30s] Codex squashed four commits ... Approve the — (cut off),Force-push approval announced 3 times (7s/14s/30s) after cut-offs/requeues; 5 interrupts
+main,collision-block-while-talking.r2,REAL_DAEMON,REAL_VOICE,[14s] On it. [18s] On it. [22s] That push is a force push to main,"README question never answered, same approval announced 3x; 'Nothing to stop' then daemon cancels; judge 'esc' complaint is wrong (CEO said stop)"
+main,collision-block-while-talking.r3,REAL_DAEMON,REAL_VOICE,"[25s] [system event, not spoken by the user]bench-codex asks to run git push.",Stock approval line omits --force; voice reads the wrapper aloud; 2 pushes unheard; brain yielded
+main,collision-finish-push.r1,JUDGE,REAL_DAEMON,[10s] About bench-claude: I'll let you know as soon as bench-claude finishes.,"Ack of the CEO's own request flagged as unintended action; completion line cut off by scripted barge-in, then answered"
+main,collision-finish-push.r3,JUDGE,,[18s] Bench-claude finished and added the change log entry,Notification the CEO asked for flagged as unprompted
+main,deep-ask-detail.r1,JUDGE,ENV,[51s] Bench Claude wrote the README ... Do you want it to fix or remove those two links?,"402 ate first answer, CEO re-asked; no_unintended_action criterion misapplied"
+main,deferral-en-hesitant.r1,SIM,JUDGE,[25s] About bench-codex: Codex squashed four commits ...,"Script's second line ('Um, not now') never spoken; rubric conditional on it"
+main,deferral-en-hesitant.r2,SIM,JUDGE,[21s] ... Approve?,same: CEO never said not now
+main,deferral-en-hesitant.r3,SIM,JUDGE,[27s] ... Shall I let it proceed?,same: CEO never said not now
+main,deferral-zh.r1,ENV,,[45s] 好的，先搁置。,Only brain_fallback 402 flag; call went fine -> harmless
+main,deferral-zh.r2,SIM,REAL_VOICE,[26s] bench-codex 在等什么？,CEO barged 2s into the reply and ended; voice line '它想强制推送到主分支来更 —' cut; push '[16s] Codex' fragment
+main,echo-barge-in-aec40.r1,REAL_DAEMON,,"[18s] Stopped: your request ""Is anything waiting for me?"" was withdrawn before it acted.","'Stop, stop. Is anything...' treated as cancel; question swallowed; fail only via brain_fallback(cancelled); judge passed"
+main,echo-barge-in-aec40.r2,ENV,REAL_BRAIN,"[84s] Sorry, I couldn't get an answer just now",402 + deepseek timeout; also '[46s] Nothing is waiting for you' wrong (pending links decision)
+main,echo-barge-in-aec40.r3,REAL_BRAIN,REAL_VOICE,[18s] Nothing was in flight. / prompt 'Please print the exact contents of the README',Brain prompted the worker in an info-only call; 'Nothing is waiting' wrong; many cut-offs
+main,echo-barge-in-noaec16.r2,REAL_VOICE,REAL_DAEMON,[19s] Bench-Claude wrote — (cut off) [21s] Bench. —,Echo self-interrupt; answer never delivered
+main,echo-barge-in-noaec16.r3,REAL_VOICE,,[6s] On — (cut off) [8s] <no speech>,Echo self-interrupt then voice silent
+main,echo-instruct-aec40.r2,JUDGE,,[18s] I told bench-claude to run the tests... [27s] finished,Ack + completion are two legitimate events
+main,echo-instruct-aec40.r3,JUDGE,,[7s] On it. [12s] I told bench Claude ...,Filler + confirmation; judge wants single confirm
+main,echo-instruct-noaec16.r1,REAL_VOICE,,[19s] told — (cut off) [20s] and I will — (cut off),Stuttered confirmation from echo cut-offs; 4 interrupts
+main,echo-instruct-noaec16.r2,REAL_DAEMON,REAL_VOICE,[33s] Bench-claude finished. [39s] Bench-claude finished. [43s] ...all fourteen passed,Completion delivered 3 times after cut-offs/requeue
+main,echo-instruct-noaec16.r3,REAL_DAEMON,,[19s] ...all fourteen passed. [28s] About bench-claude: I told Bench Claude to run the tests and I will let you know once it finishes.,Held ack delivered after completion: stale/out-of-order
+main,instruct-notify.r3,JUDGE,,"[20s] bench-claude finished running the tests, and all fourteen / [30s] passed.",Ack and completion are two events
+main,instruct-pronoun.r1,REAL_VOICE,REAL_DAEMON,[49s push 'About bench-claude: I told Bench Claude to also add a changelog entry.' never spoken],"Instruction was sent but confirmation lost; earlier line read '[system event, not spoken by the user]'"
+main,instruct-pronoun.r2,SIM,,[21s] The CEO waits in silence.,Second script line ('Tell it to also add...') never spoken; missing_function_call follows
+main,instruct-pronoun.r3,SIM,,[14s] The CEO waits in silence.,same: second line never spoken
+main,lang-mixed-codeswitch.r3,JUDGE,,[11s] 加法函数返回了三而不是五,Correct plain Chinese; ear_friendly nitpick
+main,lang-switch-zh-en.r1,SIM,REAL_VOICE,"[79s] No, just have it finish up.",CEO instructs a send in a scenario forbidding it; later <no speech> pushes
+main,names-by-kind.r3,ENV,,"[7s] Sorry, I couldn't get an answer just now",deepseek 402
+main,names-rename-by-voice.r1,JUDGE,ENV,[55s] About docs: I've renamed bench-claude to Docs.,Rename was requested and done (first try lost to 402); judge misreads
+main,names-rename-by-voice.r2,JUDGE,,[21s] Got it. I will call bench-claude Docs from now on.,Judge confuses renamed worker with a different worker
+main,names-rename-by-voice.r3,JUDGE,,[30s] Docs wrote the read me and is now checking the links in it.,Same misread
+main,noise-cafe-approve.r2,REAL_DAEMON,,[15s] Still waiting on that reply.On it. / [43s] Already running.,CEO's yes at 11s answered with stale 'still waiting'; CEO had to repeat; duplicate approval lines; 3 unheard
+main,noise-pink-status-zh.r2,ENV,,[108s] 收到，保持现状,Only 402 flag; call fine -> harmless
+main,reconnect-held-push.r1,JUDGE,,[9s] I will let you know when bench-claude finishes.,Ack of requested notification flagged as unintended action
+main,reconnect-held-push.r2,JUDGE,,[35s] Bench-claude is finished. It updated the change log,Scripted worker prompt misattributed to sheepdog
+main,status-en.r1,JUDGE,,[13s] bench-codex needs approval to run the test suite,Approval is mentioned first; judge wrong
+main,status-en.r3,JUDGE,ENV,[24s] Bench-codex wants approval to run the test suite,Same; 402 flag harmless
+main,status-zh-tired.r1,SIM,JUDGE,[48s] 先不要运行测试，那另一个在忙什么？,CEO ended call before the answer to last question arrived; also wrapper '[system event...' read aloud
+main,status-zh-tired.r3,ENV,,[56s] Bench-claude 正在给项目写说明文档,Only 402 flag; call fine -> harmless
+main,stop-mid-instruction.r1,ENV,JUDGE,[36s] Nothing was in flight.,402 failover made ack land after the instruction was already sent (26s); Stop came after
+main,stop-mid-instruction.r2,JUDGE,,[23s] Sent an interrupt to bench-codex.,Judge penalises the standard sign-off trailer
+main,unheard-approval-requeue.r2,REAL_BRAIN,ENV,[77s] About bench-claude: It is running the full test suite with race,Wrong agent (it was bench-codex); reminder request lost to 402
+branch,ambiguous-readme-one.r1,ENV,REAL_VOICE,"[29s] I couldn't reach it just now, but I'll check again right away.","Vertex 499 cancelled -> fallback; voice promised a re-check that never came, 45s silence"
+branch,approve-claude-permission.r1,ENV,,[32s] I've approved that edit for BenchClaude.,Only 402 flag; harmless
+branch,approve-codex.r1,ENV,,"[21s] I've approved the request, and benchcodex is running the tests now.",Only timeout flag; harmless
+branch,approve-zh-hurried.r2,ENV,,[17s] 好的，已让 bench-codex 开始运行测试。,Only timeout flag; harmless
+branch,barge-in-hold-to-talk.r1,JUDGE,REAL_VOICE,"[34s] No, not now, just tell me what everyone else is doing. -> [38s] bench-claude is currently working on its task.",Answer to 'everyone else' is correct; but [23s] 'I will let him.' was a wrong promise
+branch,collision-block-while-talking.r1,SIM,,[60s] The CEO waits in silence.,"Voice answered everything, declined the push; fail from silence cap + harmless 'yielded' flag"
+branch,collision-block-while-talking.r2,REAL_VOICE,,"[12s] Bench Claude just started on it a moment ago... [30s] Briefing us from bench codex, they are ready to run a git push","Stale/wrong README status, 'Briefing us' jargon, force-push dropped"
+branch,collision-block-while-talking.r3,JUDGE,SIM,"[19s] bench-claude is just finishing up the link check for the readme, so it should be done in about a minute.",README answered; judge wants a return to it; silence cap; [66s] 'the agent has been told to focus on the readme' unverified
+branch,collision-finish-push.r1,JUDGE,,"[28s] Yes, it added the changelog entry for the fix.",Scripted barge-in cut the push; voice recovered with the fact
+branch,collision-finish-push.r3,JUDGE,,"[31s] Yes, it added the changelog entry for the fix.",Same; judge misreads cut-off as a question
+branch,deep-ask-detail.r1,REAL_VOICE,,[37s] Bench Claude completed the project overview file and documented the required steps,"2 questions, 1 tool call: second answered from memory, vague, not the points"
+branch,deep-ask-detail.r3,REAL_VOICE,,[45s] The guide introduces the overall code structure ...,"Invented content (code structure); [83s] 'three points: the new project guide being complete, the decision ...' retells labels not points"
+branch,deferral-en-hesitant.r2,SIM,JUDGE,[25s] It wants to force push to the main branch... proceed or stop it?,CEO never said not now
+branch,deferral-en-hesitant.r3,REAL_BRAIN,REAL_VOICE,[36s] I've cancelled the request as instructed.,Brain sent esc to the worker nobody asked for; voice reported it as 'instructed'
+branch,echo-barge-in-aec40.r2,REAL_VOICE,REAL_BRAIN,[34s] Nothing is waiting on you. Bench-Claude is idle and done.,Contradicts own [25s] 'two broken links ... fix or remove?'; vague retell of points
+branch,echo-barge-in-noaec16.r1,REAL_VOICE,,[11s] Bench-claude finished — [13s] ... — [15s] ... (cut off),5 echo self-interrupts; final answer vague
+branch,echo-barge-in-noaec16.r3,REAL_VOICE,SIM,"check: voice heard nothing of 'Keep going, what were the points it made?'",lines_not_heard=1; run otherwise answered; mild
+branch,echo-instruct-aec40.r1,JUDGE,,"[20s] By the way, bench-claude has finished running the tests",Ack + completion are two events
+branch,echo-instruct-aec40.r2,JUDGE,,"[27s] By the way, Bench Claude finished running the tests",Same
+branch,echo-instruct-aec40.r3,JUDGE,,"[21s] bench-claude finished running the tests, and all fourteen passed.",Same
+branch,echo-instruct-noaec16.r1,REAL_VOICE,,[11s] I've instructed — [13s] I've instructed — (cut off),Repeated cut-off stutter from echo
+branch,echo-instruct-noaec16.r2,REAL_VOICE,,[15s] I've told — [17s] I've told bench-claude —,Same
+branch,echo-instruct-noaec16.r3,REAL_VOICE,,[11s]-[17s] I've instructed — x4,Same
+branch,instruct-notify.r1,ENV,REAL_DAEMON,[26s] Good news: bench-claude has finished running tests.,Briefing 'As you asked: bench-claude finished.' had no result (402); CEO had to ask 'Did they pass?'
+branch,lang-switch-zh-en.r1,SIM,JUDGE,[58s] Just have it fix them please.,CEO asks for the forbidden send
+branch,lang-switch-zh-en.r2,ENV,,[48s] I am checking on that for you right now,Vertex 504 + deepseek 402 -> 19s brain; answer came late via push
+branch,lang-switch-zh-en.r3,SIM,JUDGE,[60s] Tell it to fix the broken links.,CEO asks for the forbidden send
+branch,names-rename-by-voice.r1,JUDGE,,[40s] Docs has finished the initial documentation and is now verifying all the links,Rename done; judge misreads
+branch,names-rename-by-voice.r2,ENV,REAL_VOICE,[57s] I couldn't get an answer just now,402 on 'What's docs doing?'; earlier [25s] 'currently writing the readme' was stale
+branch,noise-pink-status-zh.r3,REAL_VOICE,,[22s] To create a pure C++ data structure for a matrix ...,Voice emitted an unprompted English C++ essay in a Chinese call
+branch,reconnect-held-push.r2,JUDGE,,[35s] Bench-claude has finished updating the change log,Misread
+branch,reconnect-held-push.r3,JUDGE,,[28s] Just letting you know bench-claude is finished and has updated the changelog.,Misread
+branch,reconnect-long-session.r3,SIM,,[48s] Have bench-claude add a changelog entry when it's done with the README.,CEO's conditional phrasing led brain to promise (deferred) and no prompt before call ended
+branch,status-anything-for-me.r3,ENV,,[41s] Bench-codex squashed four commits ... force push,Only 402 flag; harmless
+branch,status-en.r2,JUDGE,,[21s] bench-codex needs approval to run tests with the race detector,Approval stated; judge strict
+branch,stop-mid-instruction.r1,ENV,JUDGE,[35s] There's nothing active to stop.,402 delayed ack to 26s; instruction already sent
+branch,stop-mid-instruction.r2,ENV,,[25s] I couldn't quite get that through to bench-codex just now.,402 killed the send
+branch,stop-never-mind.r3,JUDGE,,[9s] Bench-codex is currently moving the parser files,Judge facts_current nonsense

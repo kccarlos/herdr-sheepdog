@@ -374,7 +374,16 @@ func (s *Session) doPush(ctx context.Context, item pushItem) {
 		s.interrupt("push")
 	}
 	turnComplete := item.urgency != voice.UrgencySilent
+	var brief briefRec
+	if s.useBriefings() {
+		s.mu.Lock()
+		brief = s.newBriefingLocked(item.text, item.urgency, item.tags)
+		s.mu.Unlock()
+	}
 	err := s.sendOn(gen, func(c Conn) error {
+		if s.useBriefings() {
+			return sendBriefing(c, item, brief)
+		}
 		setLinks(c, ctxcap.LinksFromTags(item.tags))
 		return c.SendClientContent(genai.LiveClientContentInput{
 			Turns:        pushTurn(item.text, item.urgency),
@@ -411,11 +420,7 @@ func (s *Session) doPush(ctx context.Context, item pushItem) {
 	if !turnComplete {
 		s.keepSilentLocked(item) // handle.go: re-sent after a resume
 	}
-	var unheard []voice.UnheardPush
 	if turnComplete {
-		sentAt := s.now()
-		unheard = s.heard.Pushed(sentAt, item.text, item.tags, item.tags[tagRequeued] == true)
-		s.requeue.Pushed(sentAt, item.tags)
 		s.flushRecapLocked()
 		s.recap.Add(voice.RecapSupervisor, item.text)
 		s.lastSpoken = s.now()
@@ -427,13 +432,19 @@ func (s *Session) doPush(ctx context.Context, item pushItem) {
 	}
 	now := s.now()
 	s.mu.Unlock()
-	s.reportUnheard(unheard)
 	if !item.heldAt.IsZero() {
 		p := heldPayload(item, "", 0)
 		p["held_ms"] = now.Sub(item.heldAt).Milliseconds()
 		s.log.Log(logSource, "voice.push_released", "", p)
 	}
 	payload := map[string]any{"text": item.text, "urgency": item.requested.String(), "scheduling_sent": item.urgency.SchedulingName()}
+	if brief.id != "" {
+		payload["briefing"] = brief.id
+		payload["channel"] = ChannelFunctionResponse
+		if rel, ok := brief.payload["relation"]; ok {
+			payload["relation"] = rel
+		}
+	}
 	for k, v := range item.tags {
 		payload[k] = v
 	}

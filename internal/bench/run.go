@@ -25,6 +25,9 @@ import (
 type RunOptions struct {
 	// Config is the daemon configuration the scratch daemons start from.
 	Config config.Config
+	// BrainProvider and BrainModel pick the scratch daemons' brain
+	// (default deepseek, deepseek-flash; DaemonOptions).
+	BrainProvider, BrainModel string
 	// Scratch is where each run's daemon directory goes.
 	Scratch string
 	// FixtureDir is testdata/herdr.
@@ -170,7 +173,7 @@ func RunScenario(ctx context.Context, sc Scenario, repeat, port int, o RunOption
 	// The scratch daemon, behind the fault proxy when the scenario asks.
 	dir := filepath.Join(o.Scratch, fmt.Sprintf("%s.r%d", sc.ID, repeat))
 	_ = os.RemoveAll(dir)
-	dopts := DaemonOptions{Config: o.Config, Port: port, Dir: dir, Querier: world.Querier{Agents: sc.Agents}, Log: io.Discard}
+	dopts := DaemonOptions{Config: o.Config, Port: port, Dir: dir, Querier: world.Querier{Agents: sc.Agents}, Log: io.Discard, BrainProvider: o.BrainProvider, BrainModel: o.BrainModel}
 	var proxy *FaultProxy
 	if sc.Faults.Active() {
 		p, err := StartFaultProxy(o.Config.DeepSeek.BaseURL, sc.Faults)

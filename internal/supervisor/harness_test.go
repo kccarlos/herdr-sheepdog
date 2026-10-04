@@ -85,12 +85,6 @@ func (p *fakePusher) LastSpeechOnset() (time.Time, bool) {
 	return p.onset, !p.onset.IsZero()
 }
 
-func (p *fakePusher) setOnset(t time.Time) {
-	p.mu.Lock()
-	p.onset = t
-	p.mu.Unlock()
-}
-
 // LastPlayback implements the playback reports the echo guard anchors
 // its window to (utterance.go).
 func (p *fakePusher) LastPlayback() voice.PlaybackReport {
@@ -207,7 +201,9 @@ func newHarness(t *testing.T, opts ...func(*Config)) *harness {
 	// rather than after waiting for a transcript that will not come.
 	// relayAfter off: a heard utterance nobody relays stays unrelayed
 	// unless a test turns the daemon's relay on (relay_test.go).
-	cfg := Config{PendingTTL: 120 * time.Second, Now: h.clock.Now, DataDir: h.dir, inputGrace: -1, relayAfter: -1, interruptCheck: 40 * time.Millisecond}
+	// bareAnswers on: most tests answer a prompt with a bare "yes" as a
+	// shortcut; the daemon itself never does (dual-brain ablation G4).
+	cfg := Config{PendingTTL: 120 * time.Second, Now: h.clock.Now, DataDir: h.dir, inputGrace: -1, relayAfter: -1, interruptCheck: 40 * time.Millisecond, bareAnswers: true}
 	for _, o := range opts {
 		o(&cfg)
 	}
@@ -344,4 +340,10 @@ func (h *harness) relay(text string) voice.ToolResult {
 func payload(e logging.Line) map[string]any {
 	m, _ := e.Payload.(map[string]any)
 	return m
+}
+
+// noFreshWords reports whether res is the silent fact a to_supervisor
+// call with no new CEO words gets (no brain turn ran).
+func noFreshWords(res voice.ToolResult) bool {
+	return res.Scheduling == voice.UrgencySilent && strings.HasPrefix(res.Spoken, "Nothing was handed on")
 }

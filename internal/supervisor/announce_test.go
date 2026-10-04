@@ -496,7 +496,9 @@ func TestAnnounceLateBlockLines(t *testing.T) {
 				}
 				return braintest.Response(*announceReply(needs, "interrupt", "", "", c.needsUser)), nil
 			}}
-			h = newBrainHarness(t, m, func(cfg *Config) { cfg.AnnounceWait = 30 * time.Millisecond })
+			// The "yes" is said from inside the event turn, which holds the
+			// brain's turn lock: its call must not wait for its own turn.
+			h = newBrainHarness(t, m, func(cfg *Config) { cfg.AnnounceWait = 30 * time.Millisecond; cfg.ReplyWait = 20 * time.Millisecond })
 			h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
 			pusher := h.pusher
 			go func() {

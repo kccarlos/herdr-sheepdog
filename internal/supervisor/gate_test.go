@@ -47,23 +47,23 @@ func TestQueuedPushDoesNotHideTheShepherdsWords(t *testing.T) {
 	// 21.9: the reply is sent to the model and spoken.
 	h.clock.Advance(2500 * time.Millisecond)
 	h.played()
-	// 22.924: the voice relays the reply's question back.
+	// 22.924: the voice relays the reply's question back: no new CEO
+	// words, so no brain turn; the voice is told so as a silent fact.
 	h.clock.Advance(time.Second)
-	h.relay("要它跑完直接动手修吗?")
-	if n := h.log.count("supervisor.self_relay"); n != 1 {
-		t.Errorf("self_relay = %d, want 1", n)
+	res := h.relay("要它跑完直接动手修吗?")
+	if n := h.log.count("supervisor.voice_initiative_ignored"); n != 1 {
+		t.Errorf("voice_initiative_ignored = %d, want 1", n)
 	}
-	if n := h.log.count("supervisor.voice_initiative_ignored") + h.log.count("supervisor.relay_rescued"); n != 0 {
-		t.Errorf("ignored+rescued = %d, want 0", n)
+	if res.Scheduling != voice.UrgencySilent || res.Spoken == "" {
+		t.Errorf("result = %+v, want a silent fact", res)
 	}
 }
 
-// The safety net: a push really was sent between the shepherd's words
-// and the voice's relay of them, so the gate refuses the call; its text
-// is the shepherd's own words of a moment ago, so it is accepted
-// (supervisor.relay_rescued). Other text, a bare "yes", or words past
-// the rescue window stay refused.
-func TestGatedRelayOfRecentShepherdWordsIsRescued(t *testing.T) {
+// A briefing sent between the shepherd's words and the voice's relay of
+// them no longer hides those words (dual-brain ablation G2): the call
+// claims them, with no fuzzy rescue needed; a second call with no new
+// words is the voice's own.
+func TestBriefingDoesNotMoveTheGate(t *testing.T) {
 	h := newHarness(t)
 	h.addAgent("w5:p1", "auth", "codex", herdr.StateIdle)
 	h.hear("tell claude to add a delete feature")
@@ -72,63 +72,12 @@ func TestGatedRelayOfRecentShepherdWordsIsRescued(t *testing.T) {
 	h.played()
 	h.clock.Advance(time.Second)
 	h.relay("Tell Claude to add a delete feature.")
-	ev := h.log.ofType("supervisor.relay_rescued")
+	ev := h.log.ofType("supervisor.relay")
 	if len(ev) != 1 || payload(ev[0])["heard"] != "tell claude to add a delete feature" {
-		t.Fatalf("relay_rescued = %v", ev)
+		t.Fatalf("relay = %v", ev)
 	}
-	if n := h.log.count("supervisor.voice_initiative_ignored"); n != 0 {
-		t.Errorf("ignored = %d", n)
-	}
-	// Claimed now: the same relay again is the model's own.
-	h.relay("Tell Claude to add a delete feature.")
-	if n := h.log.count("supervisor.relay_rescued"); n != 1 {
-		t.Errorf("rescued twice: %d", n)
-	}
-
-	// Different words: refused.
-	h.hear("what is docs doing")
-	h.sup.push("w5:p1", "Auth is idle.", voice.UrgencyIdle)
-	h.played()
-	h.relay("Approve the deploy.")
-	// A bare yes: refused even though the shepherd said it.
-	h.hear("yes")
-	h.sup.push("w5:p1", "Auth asks to run the diff.", voice.UrgencyIdle)
-	h.played()
-	h.relay("yes")
-	// Past the window: refused.
-	h.hear("run the migration on staging")
-	h.sup.push("w5:p1", "Docs finished.", voice.UrgencyIdle)
-	h.played()
-	h.clock.Advance(11 * time.Second)
-	h.relay("run the migration on staging")
-	if n := h.log.count("supervisor.relay_rescued"); n != 1 {
-		t.Errorf("rescued = %d, want 1", n)
-	}
-	if n := h.log.count("supervisor.voice_initiative_ignored"); n != 4 {
-		t.Errorf("ignored = %d, want 4", n)
-	}
-}
-
-func TestSameWordsAndPartOf(t *testing.T) {
-	for _, c := range []struct {
-		a, b string
-		want bool
-	}{
-		{"然后让 Claude 加一个删除功能。", "然后让Claude加一个删除功能", true},
-		{"Tell Claude to add a delete feature.", "tell claude to add a delete feature", true},
-		{"tell claude to add a delete feature please", "tell claude to add a delete feature", true},
-		{"Approve the deploy.", "what is docs doing", false},
-		{"好", "好", false},
-	} {
-		if got := sameWords(c.a, c.b); got != c.want {
-			t.Errorf("sameWords(%q, %q) = %v", c.a, c.b, got)
-		}
-	}
-	push := "Claude 的删除功能写好了,一直在等你准它动手。. 先准 Claude 动手吗? Options: 准 Claude 动手; 让 Codex 也去修; 先都不动"
-	if !partOf("先准 Claude 动手吗? 准 Claude 动手; 让 Codex 也去修; 先都不动.", push) {
-		t.Error("the push's question and options were not recognised")
-	}
-	if partOf("然后让 Claude 加一个删除功能。", push) {
-		t.Error("the shepherd's own instruction was taken for the push")
+	h.relay("Auth finished the tests.")
+	if n := h.log.count("supervisor.voice_initiative_ignored"); n != 1 {
+		t.Errorf("ignored = %d, want 1", n)
 	}
 }

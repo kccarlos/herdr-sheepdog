@@ -59,6 +59,15 @@ type Querier interface {
 }
 
 // Config tunes the Supervisor; zero values take the defaults.
+// DefaultReplyWait is brain.reply_wait_s's default: above the utterance
+// budget (25 s) plus the final answer-only grace (3 s), so the brain's
+// answer is the to_supervisor call's own result. The 2026-10-03 A/B
+// (docs/research/reply-as-function-response-2026-10-03.md) measured it
+// against the old 2 s: no answer relayed back as the shepherd's words
+// (7 of 147 before), no Chinese answer lost (6 of 36 before), pass rate
+// and latency unchanged.
+const DefaultReplyWait = 30 * time.Second
+
 type Config struct {
 	// PendingTTL is how long a send_instruction pending action stays
 	// cancellable (default 120 s). An answer_prompt has no clock: it
@@ -121,10 +130,13 @@ type Config struct {
 	AnnounceWait time.Duration
 	// ReplyWait is how long a to_supervisor call waits for the brain's
 	// reply before it returns a silent pending result and the reply is
-	// pushed when it lands (default 2 s, brain.reply_wait_s; utterance.go).
-	// The voice already said "on it" as it called the tool, so a longer
-	// wait is only dead air. Negative waits for the whole turn: the reply
-	// is always the tool result (--voice=off, brain-test).
+	// pushed when it lands (default DefaultReplyWait, brain.reply_wait_s;
+	// utterance.go). Above the utterance budget, the reply is the tool
+	// result (Gemini: the late function response) unless the shepherd
+	// barges in, the connection goes or the page leaves, which push it
+	// (docs/research/reply-as-function-response-2026-10-03.md). Negative
+	// waits for the whole turn under the call's own context, so a barge-in
+	// cancels the turn (--voice=off, brain-test).
 	ReplyWait time.Duration
 	// RepeatWindow is how long an unchanged roster sentence counts as
 	// "already reported" (default 60 s, supervisor.repeat_window_s,
@@ -175,6 +187,12 @@ type Config struct {
 	// negative never relays). Not a knob: only tests change it
 	// (relay.go).
 	relayAfter time.Duration
+	// bareAnswers turns the old bare-answer fast path back on with a
+	// brain (a bare "yes"/"no"/"option two" sent as keys without it).
+	// Only the test harness sets it: since dual-brain ablation G4 a
+	// daemon with a brain leaves every reading of the shepherd's words
+	// to the brain; a brain-less one keeps the fast path.
+	bareAnswers bool
 	// interruptCheck is how long the brain's interrupt waits for the
 	// pane to leave working after each Ctrl-C (default
 	// interruptCheckDefault). Not a knob: only tests change it
@@ -214,7 +232,7 @@ func (c Config) withDefaults() Config {
 		c.AnnounceWait = 2 * time.Second
 	}
 	if c.ReplyWait == 0 {
-		c.ReplyWait = 2 * time.Second
+		c.ReplyWait = DefaultReplyWait
 	}
 	if c.RepeatWindow == 0 {
 		c.RepeatWindow = 60 * time.Second
@@ -589,7 +607,7 @@ func (s *Supervisor) OnVoiceEvent(ev voice.Event) {
 // makes that pane the current subject (what "it" means in the next
 // ask).
 func (s *Supervisor) push(paneID, text string, u voice.Urgency) {
-	s.pushTagged(paneID, text, u, nil)
+	s.pushTagged(paneID, text, u, fromDaemon(nil))
 }
 
 // pushTagged is push with tags for the voice.push event (answers_job).

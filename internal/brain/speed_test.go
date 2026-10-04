@@ -124,7 +124,7 @@ func TestAnnouncePromptBudget(t *testing.T) {
 	if len(state) > 3000 {
 		t.Errorf("state = %d chars", len(state))
 	}
-	if EstimateTokens(static+state) > 4700 {
+	if EstimateTokens(static+state) > 4750 { // +50 for the voice's reading hint (dual-brain)
 		t.Errorf("system + state = %d tokens", EstimateTokens(static+state))
 	}
 }

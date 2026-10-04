@@ -1,0 +1,318 @@
+package gemini
+
+import (
+	"fmt"
+	"strings"
+	"time"
+
+	"google.golang.org/genai"
+
+	"github.com/kccarlos/herdr-sheepdog/internal/ctxcap"
+	"github.com/kccarlos/herdr-sheepdog/internal/voice"
+)
+
+// The briefing channel (docs/design/dual-brain.md): everything the
+// daemon and the slow brain tell the voice model — answers, worker
+// news, context — reaches it as a function response, never as a
+// user-role turn. Gemini Live has no mid-session system role; a
+// clientContent turn is, on the wire, the user speaking, and the voice
+// took pushes for requests ("On it.", a push relayed back as the CEO's
+// words). A function response is a tool's result: the model knows it is
+// not the CEO, and its scheduling (WHEN_IDLE, INTERRUPT, SILENT) is the
+// one Live offers.
+//
+// The function response answers a call the model never made: an id the
+// daemon makes up ("b-7") under the name "briefing", which is not among
+// the declared tools. Live probes on Vertex gemini-3.8-live, 2026-10-04
+// (5 sessions): every such response was accepted; WHEN_IDLE was voiced
+// at the next pause, INTERRUPT cut a long answer and was voiced at once,
+// SILENT was remembered and used for a later question, a Chinese
+// briefing was voiced in the conversation's language, and the session
+// kept issuing resumable handles. The alternatives failed: willContinue
+// on an open call is rejected by Vertex (close 1007, unknown field), and
+// an always-open "updates" call the model must re-open was not re-opened
+// after its second answer.
+//
+// Each briefing is self-contained, because Live's memory is short and
+// lossy: who it comes from, the time, what it is, and how it relates to
+// earlier briefings (answers the CEO's words of 12:03:10; updates b-4
+// about the same agent; the 2nd briefing about the same prompt; the CEO
+// cut off the previous line after 2 s). Facts, not a script: the voice
+// decides whether, when and how to say it.
+
+// BriefingName is the function name briefings arrive under.
+const BriefingName = "briefing"
+
+// Briefing channel names (Config.BriefingChannel).
+const (
+	// ChannelFunctionResponse delivers briefings as function responses
+	// (the default).
+	ChannelFunctionResponse = "function_response"
+	// ChannelUserTurn delivers them as the older marked user-role
+	// client turns (pushTurn), kept as the A/B control.
+	ChannelUserTurn = "user_turn"
+)
+
+// briefingLabel opens every briefing: provenance, the way Claude Code
+// labels a message relayed from another agent.
+const briefingLabel = "Not the CEO speaking. Facts for you from the sheepdog system; you decide whether, when and how to tell the CEO, in your own words."
+
+// briefingKeep is how many briefings the ledger remembers for relations
+// and for re-sending after a resume.
+const briefingKeep = 48
+
+// briefRec is one briefing sent to the model.
+type briefRec struct {
+	id      string
+	at      time.Time
+	urgency voice.Urgency
+	kind    string
+	about   string
+	pending string
+	answers string
+	payload map[string]any
+	// spoken: the model was asked to speak it (not SILENT).
+	spoken bool
+}
+
+// briefLedger is the session's record of briefings, under s.mu.
+type briefLedger struct {
+	seq  int
+	recs []briefRec
+	// handleAt is when the last resumable handle arrived: briefings sent
+	// after it are not in the context a resume restores.
+	handleAt time.Time
+	// cut is the CEO's last barge-in over a spoken line, told in the
+	// next briefing when the silent one has not gone yet.
+	cut string
+	// flushBy and flushAt are who last flushed the output (interrupt:
+	// "model" when Live heard the CEO, "push" when the daemon made way
+	// for an urgent briefing) and when.
+	flushBy string
+	flushAt time.Time
+}
+
+// clock renders t for a briefing: the local wall-clock time.
+func clock(t time.Time) string { return t.Format("15:04:05") }
+
+// briefingKind names what a push is, from its tags.
+func briefingKind(tags map[string]any, u voice.Urgency) string {
+	switch {
+	case tags["kind"] != nil:
+		return fmt.Sprint(tags["kind"])
+	case voice.IsFocus(tags):
+		return "current focus"
+	case tags[voice.TagAnswersUtterance] != nil:
+		return "answer"
+	case tags["answers_job"] != nil:
+		return "result of an investigation the slow brain started"
+	case tags["stop"] == true:
+		return "stop result"
+	case u == voice.UrgencySilent:
+		return "context"
+	default:
+		return "news"
+	}
+}
+
+// briefingFrom names who a push comes from, from its tags.
+func briefingFrom(tags map[string]any) string {
+	if f, ok := tags["from"].(string); ok && f != "" {
+		return f
+	}
+	switch {
+	case voice.IsFocus(tags), tags["stop"] == true:
+		return "daemon"
+	case tags[voice.TagAnswersUtterance] != nil, tags["answers_job"] != nil, tags["event_id"] != nil:
+		return "slow brain"
+	default:
+		return "supervisor"
+	}
+}
+
+// newBriefingLocked builds the payload for one briefing and records it.
+// Caller holds s.mu.
+func (s *Session) newBriefingLocked(text string, u voice.Urgency, tags map[string]any) briefRec {
+	now := s.now()
+	s.brief.seq++
+	r := briefRec{
+		id:      fmt.Sprintf("b-%d", s.brief.seq),
+		at:      now,
+		urgency: u,
+		kind:    briefingKind(tags, u),
+		spoken:  u != voice.UrgencySilent,
+	}
+	r.about, _ = tags["agent"].(string)
+	r.pending, _ = tags["pending_id"].(string)
+	r.answers, _ = tags[voice.TagAnswersUtterance].(string)
+	p := map[string]any{
+		"about_this": briefingLabel,
+		"briefing":   r.id,
+		"at":         clock(now),
+		"from":       briefingFrom(tags),
+		"kind":       r.kind,
+		"facts":      text,
+	}
+	if r.about != "" {
+		p["agent"] = r.about
+	}
+	if words, _ := tags["answers_text"].(string); words != "" {
+		asked, _ := tags["asked_at"].(string)
+		p["answers"] = fmt.Sprintf("the CEO's words at %s: %q", asked, words)
+	}
+	if tags["needs_user"] == true {
+		p["decision"] = "the CEO's own decision; only their words can answer it"
+	}
+	if tags["due_promise"] == true {
+		p["promised"] = "the CEO asked to be told this"
+	}
+	if rel := s.relationsLocked(r); len(rel) > 0 {
+		p["relation"] = rel
+	}
+	r.payload = p
+	s.brief.recs = append(s.brief.recs, r)
+	if len(s.brief.recs) > briefingKeep {
+		s.brief.recs = s.brief.recs[len(s.brief.recs)-briefingKeep:]
+	}
+	return r
+}
+
+// relationsLocked says how r relates to earlier briefings: the same
+// prompt again, a newer word about the same agent, the CEO's last cut.
+// Facts only; the voice decides what they mean.
+func (s *Session) relationsLocked(r briefRec) []string {
+	var out []string
+	if r.pending != "" {
+		n, first := 0, ""
+		for _, e := range s.brief.recs {
+			if e.pending == r.pending && e.spoken {
+				n++
+				if first == "" {
+					first = e.id + " at " + clock(e.at)
+				}
+			}
+		}
+		if n > 0 && r.spoken {
+			out = append(out, fmt.Sprintf("briefing number %d about the same open prompt (first: %s)", n+1, first))
+		}
+	}
+	if r.about != "" && r.pending == "" {
+		for i := len(s.brief.recs) - 1; i >= 0; i-- {
+			e := s.brief.recs[i]
+			if e.about == r.about && e.kind != "current focus" {
+				out = append(out, fmt.Sprintf("newer than %s (%s) about %s; where they differ, this one holds", e.id, clock(e.at), r.about))
+				break
+			}
+		}
+	}
+	if s.brief.cut != "" && r.spoken {
+		out = append(out, s.brief.cut)
+		s.brief.cut = ""
+	}
+	return out
+}
+
+// noteCutLocked records that the CEO cut off a spoken line (a flushed
+// playback run): how much of it played and what they heard. It goes
+// out as a silent briefing at once and is repeated on the next spoken
+// one. Caller holds s.mu.
+func (s *Session) noteCutLocked(rep voice.PlaybackReport) string {
+	if rep.Cut == nil || rep.RunMs <= 0 {
+		return ""
+	}
+	heard := strings.TrimSpace(rep.Heard)
+	who := "the CEO cut you off"
+	if s.brief.flushBy == "push" && rep.At.Sub(s.brief.flushAt) < 3*time.Second {
+		who = "the daemon cut you off to make way for an urgent briefing"
+	}
+	fact := fmt.Sprintf("at %s %s after %.1f s of %.1f s", clock(rep.At), who, float64(rep.PlayedMs)/1000, float64(rep.RunMs)/1000)
+	if heard != "" {
+		fact += fmt.Sprintf("; they heard only: %q", heard)
+	} else {
+		fact += "; they heard nothing of it"
+	}
+	s.brief.cut = fact
+	return fact
+}
+
+// noteBriefHandleLocked records a resumable handle for the briefing re-send. Caller holds s.mu.
+func (s *Session) noteBriefHandleLocked() { s.brief.handleAt = s.now() }
+
+// afterHandleLocked lists the briefings sent after the last resumable
+// handle: a resume with that handle does not restore them (a silent
+// one never completes a turn, so no newer handle follows it). Caller
+// holds s.mu.
+func (s *Session) afterHandleLocked() []briefRec {
+	var out []briefRec
+	for _, r := range s.brief.recs {
+		if r.at.After(s.brief.handleAt) {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// briefingResponse is the function response carrying one briefing.
+func briefingResponse(r briefRec, sched voice.Urgency) genai.LiveToolResponseInput {
+	return genai.LiveToolResponseInput{FunctionResponses: []*genai.FunctionResponse{{
+		ID: r.id, Name: BriefingName, Response: r.payload, Scheduling: scheduling(sched),
+	}}}
+}
+
+// useBriefings reports whether pushes go as function responses.
+func (s *Session) useBriefings() bool { return s.cfg.BriefingChannel != ChannelUserTurn }
+
+// resendAfterResume re-sends, silently, the briefings that went out
+// after the last resumable handle, once a resume restored the context
+// that handle names (handover 2026-10-04: silent context sent after the
+// last completed turn is lost on resume). Each is marked as re-sent
+// with its original time.
+func (s *Session) resendAfterResume() {
+	gen := s.liveGen()
+	s.mu.Lock()
+	recs := s.afterHandleLocked()
+	s.mu.Unlock()
+	for _, r := range recs {
+		p := make(map[string]any, len(r.payload)+1)
+		for k, v := range r.payload {
+			p[k] = v
+		}
+		p["resent"] = "re-sent after a reconnect; first sent at " + clock(r.at) + "; it may already be in your context"
+		rr := r
+		rr.payload = p
+		err := s.sendOn(gen, func(c Conn) error { return c.SendToolResponse(briefingResponse(rr, voice.UrgencySilent)) })
+		s.log.Log(logSource, "voice.briefing_resent", "", map[string]any{"briefing": r.id, "at": clock(r.at), "error": errString(err)})
+		if err != nil {
+			return
+		}
+	}
+}
+
+// sendBriefing is doPush's send for the briefing channel: the
+// payload goes as a function response with the push's scheduling.
+func sendBriefing(c Conn, item pushItem, r briefRec) error {
+	setLinks(c, ctxcap.LinksFromTags(item.tags))
+	return c.SendToolResponse(briefingResponse(r, item.urgency))
+}
+
+// answerLabel opens a to_supervisor result: what it is and whose.
+const answerLabel = "The slow brain's answer to your to_supervisor call, not the CEO speaking: facts for you to tell the CEO in your own words."
+
+// answerBriefing is a tool result in the briefing shape: the time, who
+// answers, and the facts in place of a line to read. detail, options,
+// clarify and pending are added by the caller as before.
+func (s *Session) answerBriefing(call voice.ToolCall, res voice.ToolResult) map[string]any {
+	now := s.now()
+	resp := map[string]any{"about_this": answerLabel, "at": clock(now), "from": "slow brain"}
+	if call.Name == voice.ToolStop {
+		resp["about_this"] = "The daemon's result for your stop call: facts for you to tell the CEO."
+		resp["from"] = "daemon"
+	}
+	if res.Spoken != "" {
+		resp["facts"] = res.Spoken
+	}
+	if res.Pending {
+		resp["about_this"] = "The slow brain is still working on your to_supervisor call; its answer will arrive later as a briefing on its own. Say nothing more about it unless the CEO asks."
+	}
+	return resp
+}

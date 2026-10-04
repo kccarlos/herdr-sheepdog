@@ -104,6 +104,10 @@ type Config struct {
 	// Responding before that turnComplete made the model treat the result
 	// as unavailable in WP2's first live run.
 	ToolResponseWait time.Duration
+	// BriefingChannel is how pushes reach the model (briefing.go):
+	// "function_response" (the default) or "user_turn" (the marked
+	// user-role client turns, the A/B control).
+	BriefingChannel string
 }
 
 // Vertex selects the Vertex AI backend (config [gemini.vertex]).

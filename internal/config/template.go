@@ -42,6 +42,7 @@ func Template() string {
 # stall_after_s = %[18]d   # no model response this long after an utterance logs voice.stalled; twice recycles the connection
 # start_sensitivity = "low"   # Live speech-start detection: "low" | "high" | "default"; low keeps room noise from being transcribed
 # end_sensitivity = "default"   # Live speech-end detection: "low" | "high" | "default"
+# briefing_channel = "function_response"   # how briefings reach Live: "function_response" (labelled tool results) | "user_turn" (marked user-role turns, the old way)
 # backend = "aistudio"   # "aistudio" (Google AI Studio, api_keys) | "vertex" (Vertex AI, [gemini.vertex])
 
 [gemini.vertex]
@@ -116,7 +117,7 @@ func Template() string {
 # announce_turn_timeout_s = %[31]d   # budget of the brain's announce turn on a block or finish
 # announce_timeout_s = %[45]d   # the same, for a finish that keeps a promise or ends the shepherd's own request
 # announce_wait_s = %[32]d   # how long a block waits for the brain's line before the parsed prompt is spoken (a finish waits for the turn)
-# reply_wait_s = %[46]d   # 0: default; how long a request waits for the brain's reply before it comes later as a push; negative always waits
+# reply_wait_s = %[46]d   # 0: default; how long a request waits for the brain's reply before it comes later as a push (above the 25 s utterance budget: the reply is the call's own result); negative always waits
 # investigate_max_s = %[39]d   # sanity ceiling of a background investigation: the only limit on how long its answer may take
 # investigate_session_ttl_s = %[40]d   # how long a finished investigation's sub-agent session stays resumable for a follow-up
 

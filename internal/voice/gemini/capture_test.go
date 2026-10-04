@@ -90,7 +90,7 @@ func TestVoiceContextCapture(t *testing.T) {
 	if s, text := section(p, "system instructions"); s.Class != ctxcap.ClassSystem || !strings.Contains(text, "auth") {
 		t.Errorf("instructions = %+v %.80q", s, text)
 	}
-	if _, text := section(p, "tool declarations"); !strings.Contains(text, "to_supervisor(text) [non_blocking]") || !strings.Contains(text, "stop()") {
+	if _, text := section(p, "tool declarations"); !strings.Contains(text, "to_supervisor(reading, text) [non_blocking]") || !strings.Contains(text, "stop()") {
 		t.Errorf("tools = %q", text)
 	}
 	if s, text := section(p, "shepherd"); !strings.Contains(text, "🎤 audio 0.3 s") || !strings.Contains(text, `heard: "what is auth doing?"`) || strings.Join(s.Links, ",") != "call:fc-1" {

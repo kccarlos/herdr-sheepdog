@@ -21,9 +21,10 @@ func toolDeclarations() []*genai.Tool {
 	}
 	return []*genai.Tool{{FunctionDeclarations: []*genai.FunctionDeclaration{
 		{Name: voice.ToolToSupervisor, Behavior: genai.BehaviorNonBlocking,
-			Description: "Hand the user's words to the supervisor, verbatim, whenever they are about the agents or the work: a status question, something to find out, an instruction, an answer to an agent's question ('yes', 'option two'), 'let me know when…', 'remember…', 'explain…', a doubt ('are you sure?'). The supervisor decides what they mean and what to do. Do not paraphrase and do not guess which agent is meant. Say 'on it' or 'checking' as you call it; the reply comes back as spoken, detail, options, clarify and pending.",
+			Description: "Hand the user's words to the slow brain, which reads the agents' screens, investigates and acts: anything you have no fresh briefing for, a doubt ('are you sure?'), an instruction, an answer to an agent's question ('yes', 'option two', 'not now'), starting, stopping or renaming an agent, 'let me know when…', 'remember…'. Pass their exact words; the slow brain decides what they mean. Its answer comes back as this call's result (facts for you to tell in your own words) or later as a briefing.",
 			Parameters: obj(map[string]*genai.Schema{
-				"text": {Type: genai.TypeString, Description: "exactly what the user said, in their own words"},
+				"text":    {Type: genai.TypeString, Description: "exactly what the user said, in their own words"},
+				"reading": {Type: genai.TypeString, Description: "optional: your own short reading of what they want, in a few words (which agent, what for), as a hint for the slow brain"},
 			}, []string{"text"})},
 		{Name: voice.ToolStop, Behavior: genai.BehaviorNonBlocking,
 			Description: "The user says stop, wait, cancel, no no. Call it at once, before anything else; the supervisor works out what to stop and tells you. \"Never mind\" is not stop: hand it to to_supervisor.",

@@ -128,8 +128,9 @@ type Brain struct {
 	AnnounceWaitS int `toml:"announce_wait_s"`
 	// ReplyWaitS is how long a to_supervisor call waits for the brain's
 	// reply before it returns a silent pending result and the reply is
-	// pushed when it lands (0: default 2; negative: wait for the whole
-	// turn, the fully synchronous behaviour).
+	// pushed when it lands (0: default 30, above the utterance budget, so
+	// the reply is the call's own result; negative: wait for the whole
+	// turn, the fully synchronous behaviour, where a barge-in cancels it).
 	ReplyWaitS int `toml:"reply_wait_s"`
 	// InvestigateMaxS is the sanity ceiling of one background
 	// investigation — the only time limit on its answer; a job still
@@ -368,6 +369,12 @@ type Gemini struct {
 	// "Discord") at the default.
 	StartSensitivity string `toml:"start_sensitivity"`
 	EndSensitivity   string `toml:"end_sensitivity"`
+	// BriefingChannel is how the daemon's and the brain's words reach the
+	// Live model (docs/design/dual-brain.md): "function_response" (the
+	// default; a function response labelled with provenance) or
+	// "user_turn" (the older marked user-role client turn, the A/B
+	// control).
+	BriefingChannel string `toml:"briefing_channel"`
 	// Backend is where the Live connection goes: "aistudio" (Google AI
 	// Studio, the api_keys pool) or "vertex" (Vertex AI, [gemini.vertex]).
 	// Everything above the connection is the same for both.
@@ -392,6 +399,9 @@ type GeminiVertex struct {
 
 // GeminiBackends are the accepted values of gemini.backend.
 var GeminiBackends = []string{"aistudio", "vertex"}
+
+// GeminiBriefingChannels are the valid gemini.briefing_channel values.
+var GeminiBriefingChannels = []string{"function_response", "user_turn"}
 
 // Push configures phone notifications (docs/push.md).
 type Push struct {
@@ -449,7 +459,7 @@ func Default() Config {
 		Herdr:             Herdr{Socket: filepath.Join(home, ".config", "herdr", "herdr.sock")},
 		State:             State{Path: filepath.Join(dataDir, "state.json")},
 		PendingTTLS:       120,
-		Gemini:            Gemini{Model: "gemini-3.8-live", Voice: "Puck", StallAfterS: 10, StartSensitivity: "low", EndSensitivity: "default", Backend: "aistudio", Vertex: GeminiVertex{Location: "us-central1"}},
+		Gemini:            Gemini{Model: "gemini-3.8-live", Voice: "Puck", StallAfterS: 10, StartSensitivity: "low", EndSensitivity: "default", BriefingChannel: "function_response", Backend: "aistudio", Vertex: GeminiVertex{Location: "us-central1"}},
 		DeepSeek:          DeepSeek{BaseURL: DefaultDeepSeekBaseURL, Thinking: true, ReasoningEffort: DefaultDeepSeekReasoningEffort},
 		Web:               Web{Bind: DefaultWebBind, Port: DefaultWebPort},
 		CLI:               defaultCLI(),
@@ -485,7 +495,7 @@ const (
 )
 
 func defaultBrain() Brain {
-	return Brain{Enabled: true, Provider: DefaultBrainProvider, Model: DefaultBrainModel, MaxSteps: 6, UtteranceTimeoutS: 25, WindowTokens: 12000, PruneAfterTurns: 2, AnnounceTurnTimeoutS: 6, AnnounceTimeoutS: 15, AnnounceWaitS: 2, ReplyWaitS: 2, InvestigateMaxS: 600, InvestigateSessionTTLS: 3600}
+	return Brain{Enabled: true, Provider: DefaultBrainProvider, Model: DefaultBrainModel, MaxSteps: 6, UtteranceTimeoutS: 25, WindowTokens: 12000, PruneAfterTurns: 2, AnnounceTurnTimeoutS: 6, AnnounceTimeoutS: 15, AnnounceWaitS: 2, ReplyWaitS: 30, InvestigateMaxS: 600, InvestigateSessionTTLS: 3600}
 }
 
 // defaultCLI mirrors the argv templates verified in
@@ -635,6 +645,9 @@ func validateVoice(cfg Config) error {
 		if !oneOf(f.v, GeminiSensitivities) {
 			return fmt.Errorf("config: gemini.%s=%q: want one of %s", f.name, f.v, strings.Join(GeminiSensitivities, ", "))
 		}
+	}
+	if !oneOf(cfg.Gemini.BriefingChannel, GeminiBriefingChannels) {
+		return fmt.Errorf("config: gemini.briefing_channel=%q: want one of %s", cfg.Gemini.BriefingChannel, strings.Join(GeminiBriefingChannels, ", "))
 	}
 	if !oneOf(cfg.Gemini.Backend, GeminiBackends) {
 		return fmt.Errorf("config: gemini.backend=%q: want one of %s", cfg.Gemini.Backend, strings.Join(GeminiBackends, ", "))
@@ -889,6 +902,9 @@ func applyVoiceEnv(cfg *Config, lookup func(string) (string, bool)) error {
 	}
 	if v, ok := lookup("SHEEPDOG_GEMINI_END_SENSITIVITY"); ok {
 		cfg.Gemini.EndSensitivity = strings.ToLower(strings.TrimSpace(v))
+	}
+	if v, ok := lookup("SHEEPDOG_GEMINI_BRIEFING_CHANNEL"); ok {
+		cfg.Gemini.BriefingChannel = strings.ToLower(strings.TrimSpace(v))
 	}
 	if v, ok := lookup("SHEEPDOG_GEMINI_BACKEND"); ok {
 		cfg.Gemini.Backend = strings.ToLower(strings.TrimSpace(v))

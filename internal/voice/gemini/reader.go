@@ -45,6 +45,7 @@ func (s *Session) handleMessage(msg *genai.LiveServerMessage, gen int) {
 		accepted := u.Resumable && u.NewHandle != "" && gen == s.connGen && !s.refreshing
 		if accepted {
 			s.handle = u.NewHandle
+			s.noteBriefHandleLocked()
 		}
 		p := s.noteHandleLocked(u.NewHandle, u.Resumable, accepted)
 		s.mu.Unlock()
@@ -103,7 +104,6 @@ func (s *Session) handleServerContent(sc *genai.LiveServerContent) {
 		s.inputDone = t.Finished
 		s.inText += t.Text
 		armed := s.echo.Heard(now, s.inText)
-		s.heard.UserInput()
 		if t.Finished {
 			s.recap.Add(voice.RecapUser, s.inText)
 			s.inText = ""
@@ -124,8 +124,6 @@ func (s *Session) handleServerContent(sc *genai.LiveServerContent) {
 		s.noteResponseLocked(s.now())
 		s.play.Said(t.Text)
 		s.echo.Said(t.Text)
-		s.heard.Said(t.Text)
-		s.requeue.Said(t.Text)
 		// The voice answering means the shepherd finished (Gemini
 		// rarely marks its input transcription final).
 		s.recap.Add(voice.RecapUser, s.inText)
@@ -144,14 +142,12 @@ func (s *Session) handleServerContent(sc *genai.LiveServerContent) {
 		close(s.turnDone)
 		s.turnDone = make(chan struct{})
 		s.flushRecapLocked()
-		s.heard.TurnComplete()
 		turn := s.noteTurnCompleteLocked()
 		timing := s.finishAudioTimingLocked()
 		s.mu.Unlock()
 		s.logTurn(turn)
 		s.logAudioTiming(timing)
 		s.emit(voice.EventTurnComplete{})
-		s.settleHeard()
 		s.poke()
 	}
 }
@@ -165,12 +161,11 @@ func (s *Session) interrupt(by string) {
 	now := s.now()
 	s.speaking = false
 	s.flushRecapLocked() // a cut report may shorten it to what was heard
-	awaited := s.play.Flush(now)
+	s.play.Flush(now)
+	s.brief.flushBy, s.brief.flushAt = by, now
 	armed := s.echo.Flush(now)
-	unheard := s.heard.Interrupted(now, by, awaited)
 	timing := s.finishAudioTimingLocked()
 	s.mu.Unlock()
-	s.reportUnheard(unheard)
 	dropped := s.out.Flush()
 	s.log.Log(logSource, "voice.interrupted", "", map[string]any{"by": by, "dropped_chunks": dropped})
 	if armed {
