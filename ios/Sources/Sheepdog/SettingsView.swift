@@ -106,6 +106,18 @@ struct SettingsView: View {
                     Text("The voice \(model.voiceName) talks with and the brain behind it. Changes there apply at once.")
                 }
 
+                Section {
+                    NavigationLink(value: SettingsRoute.languages) {
+                        LabeledContent("Languages") {
+                            Text(model.daemonSettings?.languagesSummary ?? "—")
+                                .lineLimit(1)
+                        }
+                    }
+                    .accessibilityIdentifier("settings.languages")
+                } footer: {
+                    Text("The languages you speak, most preferred first. \(model.voiceName) and the brain answer in the one you use, in your script.")
+                }
+
                 microphoneSection
 
                 Section {
@@ -170,6 +182,7 @@ struct SettingsView: View {
             .navigationDestination(for: SettingsRoute.self) { route in
                 switch route {
                 case .models: ModelsView()
+                case .languages: LanguagesView()
                 }
             }
             .toolbar {
@@ -185,7 +198,10 @@ struct SettingsView: View {
             }
             .scrollDismissesKeyboard(.interactively)
             .onAppear(perform: load)
-            .task { await model.loadVoiceProviders() }
+            .task {
+                await model.loadVoiceProviders()
+                await model.loadDaemonSettings()
+            }
             .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
                 // Back from Control Center's Mic Mode panel.
                 model.refreshMicrophoneMode()

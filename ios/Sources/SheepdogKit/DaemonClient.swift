@@ -398,6 +398,17 @@ public final class DaemonClient: @unchecked Sendable {
         return settings
     }
 
+    /// `PUT /api/settings {"languages": codes}` — the language preference,
+    /// most preferred first (an empty list clears it). The chattiness is
+    /// left as it is.
+    public func setLanguages(_ codes: [String]) async throws -> DaemonSettings {
+        let data = try JSONSerialization.data(withJSONObject: ["languages": codes])
+        guard let settings = try await sendJSON(DaemonSettings.self, path: "/api/settings", method: "PUT", body: data, what: "the settings reply") else {
+            throw DaemonError.rejected(status: 404, message: "this daemon has no settings to change")
+        }
+        return settings
+    }
+
     /// One JSON request: 2xx decodes, 404 is `nil` (an older daemon), 401
     /// is the token, anything else carries the daemon's own words.
     private func sendJSON<T: Decodable>(_ type: T.Type, path: String, query: [URLQueryItem] = [], method: String = "GET", body: Data? = nil, what: String) async throws -> T? {

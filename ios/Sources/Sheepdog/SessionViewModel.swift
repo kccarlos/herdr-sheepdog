@@ -7,6 +7,7 @@ import SwiftUI
 /// The screens Settings can push.
 enum SettingsRoute: Hashable {
     case models
+    case languages
 }
 
 /// Everything the main screen shows, in one place.
@@ -1198,6 +1199,29 @@ final class SessionViewModel: ObservableObject {
                 self.settingsError = error.message
             } catch {
                 self.settingsError = error.localizedDescription
+            }
+        }
+    }
+
+    /// Sends the language preference (most preferred first); the
+    /// daemon's reply replaces the local copy, so the screen shows what
+    /// it kept.
+    func setLanguages(_ codes: [String]) {
+        guard codes != (daemonSettings?.languages ?? []) else { return }
+        if var optimistic = daemonSettings {
+            optimistic.languages = codes
+            daemonSettings = optimistic
+        }
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                self.daemonSettings = try await self.client.setLanguages(codes)
+                self.settingsError = nil
+                Haptics.tap()
+            } catch {
+                // Back to what the daemon has, then say why it refused.
+                await self.loadDaemonSettings()
+                self.settingsError = (error as? DaemonError)?.message ?? error.localizedDescription
             }
         }
     }

@@ -26,6 +26,11 @@ The CEO checked these on 2026-10-01 and 2026-10-02 with TestFlight build
   handshake itself is checked by `LiveHandshakeTests` against a fixture
   daemon), the Models screen, the running-only flock and Markdown.
 - **The agent window (#31, on `main`, not in 0.1.1 (20)):** a live terminal and key bar per agent from its Flock card, over the daemon's `/api/agents/{pane}/screen` and `.../input`. Only simulator and fixture-daemon tests so far; no TestFlight build carries it.
+- **Settings ▸ Languages (#33):** pick the languages you speak, most
+  preferred first, from the daemon's catalog (`GET /api/settings`
+  `language_options`; 简体中文 and 繁體中文 are separate); each change is
+  `PUT /api/settings {"languages": [...]}` and both brains are told
+  (daemon #142). Unit tests and a simulator build only so far.
 - **AirPods and audio route changes.** This includes AirPods going in or
   out mid-session and whether the needs-you chime reaches them.
 - **AskUserQuestion with several questions** in one prompt.

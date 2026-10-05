@@ -262,13 +262,111 @@ public struct BrainModels: Codable, Equatable, Sendable {
     }
 }
 
-/// `GET/PUT /api/settings`: the push chattiness and its levels.
+/// `GET/PUT /api/settings`: the push chattiness and its levels, and the
+/// shepherd's language preference with the catalog to pick from (both
+/// `nil` from a daemon older than the language setting).
 public struct DaemonSettings: Codable, Equatable, Sendable {
     public var chattiness: String
     public var levels: [String]
+    /// Language codes, most preferred first; empty when none is set.
+    public var languages: [String]?
+    /// The languages the daemon offers, in display order.
+    public var languageOptions: [LanguageOption]?
 
-    public init(chattiness: String, levels: [String]) {
+    enum CodingKeys: String, CodingKey {
+        case chattiness, levels, languages
+        case languageOptions = "language_options"
+    }
+
+    public init(chattiness: String, levels: [String], languages: [String]? = nil, languageOptions: [LanguageOption]? = nil) {
         self.chattiness = chattiness
         self.levels = levels
+        self.languages = languages
+        self.languageOptions = languageOptions
+    }
+
+    /// Whether this daemon has the language setting.
+    public var supportsLanguages: Bool { languageOptions?.isEmpty == false }
+
+    /// The chosen languages as catalog entries, in preference order
+    /// (a code the catalog no longer lists is skipped).
+    public var chosenLanguages: [LanguageOption] {
+        let options = languageOptions ?? []
+        return (languages ?? []).compactMap { code in options.first { $0.code == code } }
+    }
+
+    /// The catalog entries not chosen yet, in the catalog's order.
+    public var otherLanguages: [LanguageOption] {
+        let chosen = Set(languages ?? [])
+        return (languageOptions ?? []).filter { !chosen.contains($0.code) }
+    }
+
+    /// One line for the Settings row: "简体中文, English", or "Not set".
+    public var languagesSummary: String {
+        let names = chosenLanguages.map(\.native)
+        return names.isEmpty ? "Not set" : names.joined(separator: ", ")
+    }
+}
+
+/// One entry of the daemon's language catalog (`language_options`).
+public struct LanguageOption: Codable, Equatable, Hashable, Sendable, Identifiable {
+    /// BCP-47 code, as Gemini Live writes it (`zh-Hans`, `zh-Hant`, `en`).
+    public var code: String
+    /// English name, e.g. "Chinese (Simplified)".
+    public var name: String
+    /// The name in the language itself, e.g. "简体中文".
+    public var native: String
+    /// Voice providers that support it: "gemini", "openai".
+    public var providers: [String]
+
+    public var id: String { code }
+
+    public init(code: String, name: String, native: String, providers: [String]) {
+        self.code = code
+        self.name = name
+        self.native = native
+        self.providers = providers
+    }
+
+    /// The providers in words ("Gemini Live and GPT-Live", "Gemini Live
+    /// only").
+    public var providersSummary: String {
+        let names = providers.map { id -> String in
+            switch id {
+            case "gemini": return "Gemini Live"
+            case "openai": return "GPT-Live"
+            default: return id
+            }
+        }
+        switch names.count {
+        case 0: return "No voice provider"
+        case 1: return "\(names[0]) only"
+        default: return names.joined(separator: " and ")
+        }
+    }
+}
+
+/// Edits to the ordered language preference, kept pure so they can be
+/// tested: the Languages screen applies one and sends the result.
+public enum LanguagePreference {
+    /// Adds `code` as the least preferred language (no-op if present).
+    public static func adding(_ code: String, to list: [String]) -> [String] {
+        list.contains(code) ? list : list + [code]
+    }
+
+    /// Removes the languages at `offsets`.
+    public static func removing(atOffsets offsets: IndexSet, from list: [String]) -> [String] {
+        list.enumerated().filter { !offsets.contains($0.offset) }.map(\.element)
+    }
+
+    /// Moves the languages at `source` before `destination`, as SwiftUI's
+    /// `onMove` reports it.
+    public static func moving(fromOffsets source: IndexSet, toOffset destination: Int, in list: [String]) -> [String] {
+        let moved = source.sorted().map { list[$0] }
+        var rest = list.enumerated().filter { !source.contains($0.offset) }.map(\.element)
+        let before = source.filter { $0 < destination }.count
+        let at = min(max(destination - before, 0), rest.count)
+        rest.insert(contentsOf: moved, at: at)
+        return rest
     }
 }
