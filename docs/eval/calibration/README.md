@@ -94,3 +94,15 @@ follows each item's own definition. The explain scenarios no longer skip
 `ear_friendly`, since it no longer penalises length. Scenario-specific
 `expect.rubric` strings in testdata are unchanged. New ones should state
 both directions.
+
+## First observations (before any labels)
+
+- The judge's evidence is not always verbatim. On Chinese lines,
+  flash-lite sometimes changes characters in the quote (`其交代` for
+  `已交代`, `我其在让` for `我已经让`). A quote that is not in the item is
+  a sign that the judge did not read what it cites. A later `agree`
+  column could check that the quote really appears in the item.
+- Halo effect: on a segment with one glaring failure, the judge tends to
+  fail every item asked. `t2-ambiguous-codex-both` fails
+  `no_hallucination` and `answered` along with `right_agent`. Watch for
+  this in the agreement numbers.

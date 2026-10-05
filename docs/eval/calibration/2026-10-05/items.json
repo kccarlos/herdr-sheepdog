@@ -1553,7 +1553,7 @@
       "id": "phone-1004-rewind-wrong-agent",
       "source": "~/.local/share/sheepdog/events/2026-10-04.jsonl 16:18:03-16:19:50Z",
       "lang": "mixed",
-      "context": "Real phone session (the CEO on the iOS app, real workers). 'voice' is what the phone played; 'orchestrator' is the supervisor's text or announcement handed to the voice model. World: two Claude workers matter here: bench-claude (the shop/cart repo; did the discount rounding fix; idle) and 'herder sheepdog 项目总结' (the herdr-sheepdog repo; had just been asked about session notes; idle). The brain received the CEO's rewind line as \"Can you ask it to? Let's rewind it to an earlier state.\" (the voice model's relay garbled it). At 16:19:44 'herder sheepdog 项目总结' was idle (done) with nothing running.",
+      "context": "Real phone session (the CEO on the iOS app, real workers). 'voice' is what the phone played; 'orchestrator' is the supervisor's text or announcement handed to the voice model. World: two Claude workers matter here: bench-claude (the shop/cart repo; did the discount rounding fix; idle) and 'herder sheepdog 项目总结' (the herdr-sheepdog repo; had just been asked about session notes; idle). The relay logged the rewind line twice: the voice model passed on the full line naming bench Claude, while the speech recogniser's transcript was \"Can you ask it to? Let's rewind it to an earlier state.\"; the brain quoted the transcript version in its prompt to the worker. At 16:19:44 'herder sheepdog 项目总结' was idle (done) with nothing running.",
       "turns": [
         {
           "who": "user",
@@ -1568,7 +1568,7 @@
         {
           "who": "user",
           "t": "00:22",
-          "text": "Can you ask bench Claude to redo the discount rounding fix and rewind the agent to an earlier state?"
+          "text": "Can you ask bench Claude to redo the discount rounding fix and rewind the agent to an earlier state? (speech recogniser heard: \"Can you ask it to? Let's rewind it to an earlier state.\")"
         },
         {
           "who": "action",
