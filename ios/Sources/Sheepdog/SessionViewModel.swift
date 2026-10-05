@@ -80,6 +80,11 @@ final class SessionViewModel: ObservableObject {
     /// The `/ws` protocol handshake (`ProtocolHandshake`), for Health and
     /// the chip's sheet.
     @Published private(set) var handshake: ProtocolHandshake.State = .idle
+    /// The last thing the daemon pushed about the open agent window over
+    /// `/ws` (`AgentScreenStream`); `seq` makes every push a change.
+    @Published private(set) var agentScreenPush: AgentScreenPush?
+    /// The agent window over `/ws`: one subscription for the app.
+    private var screenStream = AgentScreenStream()
     /// The supervisor's model, from `/api/state`'s `brain`, when the
     /// daemon reports one.
     @Published private(set) var brain: BrainInfo?
@@ -636,13 +641,16 @@ final class SessionViewModel: ObservableObject {
             guard core.acceptsPlayback else { break }
             audio.enqueue(data)
         case let .closed(reason, retrying):
+            screenStream.socketClosed()
             send(.socketClosed(reason: reason, willRetry: retrying))
             if retrying { probeTokenAfterSocketFailure() }
         case let .failed(error, retrying):
+            screenStream.socketClosed()
             send(.socketFailed(error, willRetry: retrying))
             if retrying { probeTokenAfterSocketFailure() }
         case let .handshake(state):
             send(.handshakeChanged(state))
+            if let message = screenStream.handshake(state) { socket.send(message) }
         }
     }
 
@@ -691,7 +699,12 @@ final class SessionViewModel: ObservableObject {
             send(.flush)
         case .error:
             if let text = message.message { send(.daemonError(text)) }
-        case .pong, .mute, .silence, .speaking, .playback, .cancel, .text, .ping, .clientReady, .botReady:
+        case .screen, .screenError:
+            if let event = screenStream.receive(message), let pane = screenStream.paneID {
+                agentScreenPush = AgentScreenPush(seq: (agentScreenPush?.seq ?? 0) + 1, paneID: pane, event: event)
+            }
+        case .pong, .mute, .silence, .speaking, .playback, .cancel, .text, .ping, .clientReady, .botReady,
+             .screenSubscribe, .screenUnsubscribe:
             break
         }
     }
@@ -1329,6 +1342,22 @@ final class SessionViewModel: ObservableObject {
     }
 
     // MARK: - Agent window
+
+    /// `AgentScreenView` opened `paneID`'s window: stream it over `/ws`
+    /// when the daemon can (`AgentScreenStream`).
+    func openAgentScreen(paneID: String) {
+        if let message = screenStream.open(paneID: paneID) { socket.send(message) }
+    }
+
+    /// The window closed: stop its stream.
+    func closeAgentScreen(paneID: String) {
+        if let message = screenStream.close(paneID: paneID) { socket.send(message) }
+    }
+
+    /// Whether `paneID`'s window is pushed over `/ws` (else the view polls).
+    func agentScreenStreaming(paneID: String) -> Bool {
+        screenStream.isStreaming(paneID)
+    }
 
     /// `GET /api/agents/{pane}/screen` for `AgentScreenView`. Throws when no
     /// daemon is configured.

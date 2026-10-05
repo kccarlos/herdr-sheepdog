@@ -7,9 +7,10 @@ import Foundation
 /// every text frame is one `WSMessage`.
 ///
 /// Client → server: `client-ready`, `mute`, `silence`, `speaking`,
-/// `playback`, `cancel`, `text`, `ping`.
+/// `playback`, `cancel`, `text`, `ping`, `screen-subscribe`,
+/// `screen-unsubscribe`.
 /// Server → client: `bot-ready`, `flush`, `status`, `transcript`, `error`,
-/// `pong`.
+/// `pong`, `screen`, `screen-error`.
 public struct WSMessage: Codable, Equatable, Sendable {
     /// Message type discriminator. Mirrors `wsproto.Type*`.
     public enum Kind: String, Codable, Sendable {
@@ -17,6 +18,11 @@ public struct WSMessage: Codable, Equatable, Sendable {
         case mute, silence, speaking, playback, cancel, text, ping
         case botReady = "bot-ready"
         case flush, status, transcript, error, pong
+        /// The agent window over `/ws` (feature `screen`).
+        case screenSubscribe = "screen-subscribe"
+        case screenUnsubscribe = "screen-unsubscribe"
+        case screen
+        case screenError = "screen-error"
     }
 
     /// Who is talking, on `client-ready` (docs/ws-contract.md "Protocol
@@ -119,8 +125,15 @@ public struct WSMessage: Codable, Equatable, Sendable {
     /// `transcript`.
     public var dir: Direction?
     public var final: Bool?
-    /// `error`.
+    /// `error` and `screen-error`.
     public var message: String?
+    /// `screen-subscribe` (`pane_id`, `lines`), `screen` (the window, the
+    /// body of `GET /api/agents/{pane}/screen`) and `screen-error`
+    /// (`pane_id`; `ended` when the subscription is over).
+    public var paneID: String?
+    public var lines: Int?
+    public var screen: AgentScreen?
+    public var ended: Bool?
 
     enum CodingKeys: String, CodingKey {
         case type, on, state, text, voice, muted, reason, stalled, dir, final, message, peak, provider, underruns, drains, rate
@@ -131,6 +144,8 @@ public struct WSMessage: Codable, Equatable, Sendable {
         case bufferMs = "buffer_ms"
         case stretchedMs = "stretched_ms"
         case audioState = "audio_state"
+        case paneID = "pane_id"
+        case lines, screen, ended
     }
 
     public init(
@@ -159,7 +174,11 @@ public struct WSMessage: Codable, Equatable, Sendable {
         provider: String? = nil,
         dir: Direction? = nil,
         final: Bool? = nil,
-        message: String? = nil
+        message: String? = nil,
+        paneID: String? = nil,
+        lines: Int? = nil,
+        screen: AgentScreen? = nil,
+        ended: Bool? = nil
     ) {
         self.type = type
         self.protocol = `protocol`
@@ -187,6 +206,10 @@ public struct WSMessage: Codable, Equatable, Sendable {
         self.dir = dir
         self.final = final
         self.message = message
+        self.paneID = paneID
+        self.lines = lines
+        self.screen = screen
+        self.ended = ended
     }
 
     // MARK: - Client → server constructors
@@ -229,6 +252,12 @@ public struct WSMessage: Codable, Equatable, Sendable {
         )
     }
 
+    /// Show me this agent's window (`screen` frames follow).
+    public static func screenSubscribe(paneID: String, lines: Int? = nil) -> WSMessage {
+        WSMessage(type: .screenSubscribe, paneID: paneID, lines: lines)
+    }
+    public static let screenUnsubscribe = WSMessage(type: .screenUnsubscribe)
+
     // MARK: - Server → client constructors (tests and fakes)
 
     public static func botReady(protocol p: Int, minProtocol: Int = 1, daemonVersion: String, features: [String] = []) -> WSMessage {
@@ -243,13 +272,18 @@ public struct WSMessage: Codable, Equatable, Sendable {
     }
     public static func error(_ message: String) -> WSMessage { WSMessage(type: .error, message: message) }
     public static let pong = WSMessage(type: .pong)
+    public static func screen(_ screen: AgentScreen) -> WSMessage { WSMessage(type: .screen, screen: screen) }
+    public static func screenError(paneID: String, _ message: String, ended: Bool? = nil) -> WSMessage {
+        WSMessage(type: .screenError, message: message, paneID: paneID, ended: ended)
+    }
 
     // MARK: - Wire format
 
     /// Decodes one text frame. Unknown `type` values throw, mirroring
     /// `wsproto.Parse`; the caller keeps the connection open.
     public static func decode(_ data: Data) throws -> WSMessage {
-        let m = try JSONDecoder().decode(WSMessage.self, from: data)
+        // The daemon's decoder: a `screen` frame carries an RFC 3339 date.
+        let m = try DaemonClient.decoder.decode(WSMessage.self, from: data)
         try m.validate()
         return m
     }
@@ -261,6 +295,7 @@ public struct WSMessage: Codable, Equatable, Sendable {
         try validate()
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
         return try encoder.encode(self)
     }
 
@@ -292,7 +327,15 @@ public struct WSMessage: Codable, Equatable, Sendable {
             if dir == nil { throw WSMessageError.badValue("transcript", "dir") }
         case .error:
             if (message ?? "").isEmpty { throw WSMessageError.missingField("error", "message") }
-        case .cancel, .ping, .flush, .pong:
+        case .screenSubscribe:
+            if (paneID ?? "").isEmpty { throw WSMessageError.missingField("screen-subscribe", "pane_id") }
+            if let lines, lines < 1 { throw WSMessageError.badValue("screen-subscribe", "lines") }
+        case .screen:
+            if screen == nil { throw WSMessageError.missingField("screen", "screen") }
+        case .screenError:
+            if (paneID ?? "").isEmpty { throw WSMessageError.missingField("screen-error", "pane_id") }
+            if (message ?? "").isEmpty { throw WSMessageError.missingField("screen-error", "message") }
+        case .cancel, .ping, .flush, .pong, .screenUnsubscribe:
             break
         }
     }

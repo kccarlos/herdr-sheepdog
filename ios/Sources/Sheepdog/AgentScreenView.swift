@@ -9,9 +9,10 @@ struct AgentWindowRoute: Hashable {
 }
 
 /// An agent's live terminal window, and the controls to operate it: a
-/// prompt field and a key bar. Polls `GET /api/agents/{pane}/screen` every
-/// 1.5 s while on screen, passing the last hash back so an idle window
-/// costs a few bytes; follows new output only while scrolled to the
+/// prompt field and a key bar. Streams the window over `/ws` when the
+/// daemon lists the `screen` feature (a frame only when it changed);
+/// otherwise polls `GET /api/agents/{pane}/screen` every 1.5 s while on
+/// screen, passing the last hash back so an idle window costs a few bytes; follows new output only while scrolled to the
 /// bottom. Wide TUI lines scroll sideways instead of wrapping.
 struct AgentScreenView: View {
     /// The row the window was opened from (name and state until the first
@@ -43,6 +44,13 @@ struct AgentScreenView: View {
         .navigationTitle(name)
         .navigationBarTitleDisplayMode(.inline)
         .task(id: agent.paneID) { await poll() }
+        .onChange(of: model.agentScreenPush) { _, push in
+            guard let push, push.paneID == agent.paneID else { return }
+            switch push.event {
+            case let .frame(frame): screen.apply(frame)
+            case let .error(message, _): screen.fail(message: message)
+            }
+        }
         .confirmationDialog(
             confirmKey.map { $0.confirmationTitle(agent: name) } ?? "",
             isPresented: Binding(get: { confirmKey != nil }, set: { if !$0 { confirmKey = nil } }),
@@ -268,8 +276,18 @@ struct AgentScreenView: View {
 
     // MARK: - Actions
 
+    /// Streams the window when the daemon can, else polls; the stream's
+    /// frames arrive through `onChange(of: model.agentScreenPush)`. A
+    /// dropped connection falls back to polling until a new one subscribes
+    /// again.
     private func poll() async {
+        model.openAgentScreen(paneID: agent.paneID)
+        defer { model.closeAgentScreen(paneID: agent.paneID) }
         while !Task.isCancelled {
+            if model.agentScreenStreaming(paneID: agent.paneID) {
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                continue
+            }
             await refresh()
             if screen.unsupported { return }
             try? await Task.sleep(nanoseconds: UInt64(AgentScreenModel.pollInterval * 1_000_000_000))

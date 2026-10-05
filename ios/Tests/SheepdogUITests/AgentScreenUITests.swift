@@ -63,6 +63,13 @@ final class AgentScreenUITests: XCTestCase {
         sleep(1)
         shot(app, "agent-screen")
 
+        // New output on the daemon reaches the open window (pushed over
+        // /ws by a daemon with the `screen` feature, else the next poll).
+        status("POST", "/api/inject/screen", ["pane_id": pane, "screen": Self.screen + "\n• Ran go vet ./...\n"])
+        let updated = NSPredicate(format: "label CONTAINS 'Ran go vet'")
+        expectation(for: updated, evaluatedWith: text)
+        waitForExpectations(timeout: 10)
+
         // Enter goes straight through.
         let enter = app.buttons["agentScreen.key.enter"]
         XCTAssertTrue(enter.isEnabled)
@@ -95,6 +102,45 @@ final class AgentScreenUITests: XCTestCase {
         if app.keyboards.firstMatch.exists { app.descendants(matching: .any)["agentScreen.text"].tap() }
         sleep(1)
         shot(app, "agent-screen-sent")
+    }
+
+    /// With the session connected (the orb), a daemon with the `screen`
+    /// feature pushes the window over `/ws`: the app subscribes on open,
+    /// new output shows up, and leaving the window unsubscribes. Skips
+    /// against a daemon without the stream.
+    func testTheWindowStreamsOverTheSocket() throws {
+        since = lastEventID()
+        status("POST", "/api/inject/blocked", ["pane_id": pane, "alias": "auth", "kind": "codex", "screen": Self.screen])
+        status("POST", "/api/inject/state", ["pane_id": pane, "state": "working", "screen": Self.screen])
+
+        let app = XCUIApplication()
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogAddress", host, "-sheepdogFakeVoice"]
+        app.launch()
+        let orb = app.buttons["controls.orb"]
+        XCTAssertTrue(orb.waitForExistence(timeout: 10))
+        orb.tap()
+        let statusLine = app.staticTexts["controls.statusLine"]
+        let listening = NSPredicate(format: "label == 'Listening — just talk'")
+        expectation(for: listening, evaluatedWith: statusLine)
+        waitForExpectations(timeout: 15)
+
+        app.buttons["main.pane.flock"].tap()
+        let open = app.buttons["flock.agent.auth.window"]
+        XCTAssertTrue(open.waitForExistence(timeout: 15))
+        open.tap()
+        let text = app.descendants(matching: .any)["agentScreen.text"]
+        expectation(for: NSPredicate(format: "label CONTAINS 'make test'"), evaluatedWith: text)
+        waitForExpectations(timeout: 10)
+        guard waitForEvent("web.screen.subscribe", timeout: 5) else {
+            throw XCTSkip("the daemon on \(host) does not stream agent windows")
+        }
+
+        status("POST", "/api/inject/screen", ["pane_id": pane, "screen": Self.screen + "\n• Ran go vet ./...\n"])
+        expectation(for: NSPredicate(format: "label CONTAINS 'Ran go vet'"), evaluatedWith: text)
+        waitForExpectations(timeout: 5)
+
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(waitForEvent("web.screen.end", timeout: 5), "leaving the window ends the stream")
     }
 
     /// A Codex TUI mid-turn, with lines wider than the phone.
@@ -144,6 +190,40 @@ final class AgentScreenUITests: XCTestCase {
         }.resume()
         wait(for: [done], timeout: 10)
         return code
+    }
+
+    /// Events before this id belong to earlier runs.
+    private var since: Int64 = 0
+
+    /// The daemon's `/api/events` tail.
+    private func events() -> [[String: Any]] {
+        var events: [[String: Any]] = []
+        let done = expectation(description: "events")
+        URLSession.shared.dataTask(with: URL(string: daemon + "/api/events?n=500")!) { data, _, _ in
+            events = (data.flatMap { try? JSONSerialization.jsonObject(with: $0) } as? [[String: Any]]) ?? []
+            done.fulfill()
+        }.resume()
+        wait(for: [done], timeout: 10)
+        return events
+    }
+
+    private func lastEventID() -> Int64 {
+        (events().last?["id"] as? NSNumber)?.int64Value ?? 0
+    }
+
+    /// Whether the daemon logged `type` for this test's pane since the
+    /// test began, waiting up to `timeout`.
+    private func waitForEvent(_ type: String, timeout: TimeInterval) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            let found = events().contains {
+                $0["type"] as? String == type && $0["pane_id"] as? String == pane
+                    && (($0["id"] as? NSNumber)?.int64Value ?? 0) > since
+            }
+            if found { return true }
+            usleep(250_000)
+        } while Date() < deadline
+        return false
     }
 
     private func shot(_ app: XCUIApplication, _ name: String) {

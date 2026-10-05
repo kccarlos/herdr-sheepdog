@@ -1,5 +1,18 @@
 # Status (2026-10-05)
 
+## Agent window over /ws (unreleased)
+
+The agent window streams its screen over the existing `/ws` connection
+when the daemon lists the `screen` feature (daemon #151): one
+subscription, a frame only when the window changed, unsubscribe on close,
+resubscribe after a reconnect. It polls `GET /api/agents/{pane}/screen`
+every 1.5 s as before with an older daemon or while the socket is down.
+Kit tests: `AgentScreenStreamTests`; `AgentScreenUITests.testTheWindowStreamsOverTheSocket`
+connects with the orb, opens a window, sees new output arrive and checks the
+daemon logged the subscribe and the unsubscribe (passed on the iPhone 17
+simulator against a `--herdr=mock` scratch daemon with daemon #151). Not yet
+in TestFlight.
+
 ## Polish batch B (PR #36, in 0.1.4 (48))
 
 In TestFlight 0.1.4 (48): connection chip words

@@ -201,7 +201,15 @@ accessibility text sizes. The voice bar stays in place.
 - **Agent window** (`AgentScreenView`, `AgentScreenModel`, `AgentKey`).
   "Open window" on a Flock card (a `NavigationLink` to
   `AgentWindowRoute` on the main `NavigationStack`), or in the sheet behind
-  a strip chip, pushes the agent's live terminal. It polls
+  a strip chip, pushes the agent's live terminal. When the daemon's
+  `bot-ready` lists the `screen` feature, the window streams over `/ws`
+  (`AgentScreenStream`, held once by `SessionViewModel` since the daemon
+  allows one subscription per client): `screen-subscribe` on open and on
+  every new connection, `screen-unsubscribe` on close, and a `screen`
+  frame from the daemon only when the window changed (daemon
+  docs/ws-contract.md "Agent window over /ws"). Until the first frame
+  arrives on a connection — or with an older daemon, a legacy connection
+  or no connection — it polls
   `GET /api/agents/{pane_id}/screen?lines=200&hash=…` every 1.5 s while on
   screen; the last `hash` goes back so an unchanged window answers without
   `text`, and `AgentScreenModel.revision` only moves when the text does.
