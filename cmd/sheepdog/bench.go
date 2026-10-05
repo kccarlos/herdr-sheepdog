@@ -22,7 +22,7 @@ import (
 )
 
 func printBenchUsage(w io.Writer) {
-	fprintln(w, "usage: sheepdog bench <calibrate|run|render|validate> [flags]")
+	fprintln(w, "usage: sheepdog bench <calibrate|run|render|validate|report|northstar> [flags]")
 	fprintln(w, "")
 	fprintln(w, "The voice benchmark (docs/bench/README.md): synthetic speech (Gemini TTS on")
 	fprintln(w, "Vertex) from a phone emulator into scratch daemons on ports 7790-7792 with the")
@@ -36,6 +36,8 @@ func printBenchUsage(w io.Writer) {
 	fprintln(w, "  render     pre-render the scenarios' opening lines and write the manifest")
 	fprintln(w, "  validate   check the scenario files offline")
 	fprintln(w, "  report     rebuild report.json / report.md from a campaign's runs/")
+	fprintln(w, "  northstar  the north-star block and programmatic checks of a result")
+	fprintln(w, "             directory (tier 1, 2 or 3), or A vs B with --vs (offline)")
 	fprintln(w, "")
 	fprintln(w, "Run `sheepdog bench <sub> -h` for the flags.")
 }
@@ -56,6 +58,8 @@ func runBench(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 		return runBenchValidate(ctx, args[1:], stdout, stderr)
 	case "report":
 		return runBenchReport(ctx, args[1:], stdout, stderr)
+	case "northstar":
+		return runBenchNorthStar(ctx, args[1:], stdout, stderr)
 	case "-h", "--help", "help":
 		printBenchUsage(stdout)
 		return 0
@@ -472,6 +476,7 @@ func runBenchRun(ctx context.Context, args []string, stdout, stderr io.Writer) i
 		_ = spendLog.Close()
 	}
 	rep := bench.NewReport(started, setup, *repeat, runs, meter.Total(), scs)
+	rep.SetNorthStar(runs, scs, filepath.Join(*out, "events"))
 	if err := rep.WriteJSON(filepath.Join(*out, "report.json")); err != nil {
 		fprintf(stderr, "sheepdog bench run: %v\n", err)
 		return 1
@@ -553,6 +558,7 @@ func runBenchReport(ctx context.Context, args []string, stdout, stderr io.Writer
 		meter.Audio(int64(r.Spend.LiveInMin*60000), int64(r.Spend.LiveOutMin*60000))
 	}
 	rep := bench.NewReport(started, prev.Setup, repeat, runs, meter.Total(), scs)
+	rep.SetNorthStar(runs, scs, filepath.Join(*from, "events"))
 	if prev.DurationS > 0 {
 		rep.DurationS = prev.DurationS
 	}

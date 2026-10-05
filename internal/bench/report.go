@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/eval"
+	"github.com/kccarlos/herdr-sheepdog/internal/northstar"
 )
 
 // Report is a campaign's outcome.
@@ -30,7 +31,10 @@ type Report struct {
 	Spend      Spend            `json:"spend"`
 	// Explain aggregates the explanation scores (explain scenarios).
 	Explain *eval.ExplainSummary `json:"explain,omitempty"`
-	Runs    []RunSummary         `json:"runs"`
+	// NorthStar is the north-star block (internal/northstar): NewReport
+	// computes it from the records alone; SetNorthStar adds the events.
+	NorthStar *northstar.Block `json:"north_star,omitempty"`
+	Runs      []RunSummary     `json:"runs"`
 }
 
 // RunSummary is a run's line in the report (the full record is under
@@ -187,6 +191,7 @@ func NewReport(started time.Time, setup map[string]string, repeat int, runs []Ru
 		ex = append(ex, r.Explain)
 	}
 	rep.Explain = eval.SummarizeExplain(ex)
+	rep.NorthStar = northstar.Summarize("2", NorthStarRuns(runs, scs, ""))
 	for _, r := range runs {
 		s := RunSummary{Scenario: r.Scenario, Category: r.Category, Repeat: r.Repeat, Status: r.Status, Primary: string(eval.Primary(r.Failures)), Failures: r.Failures, EndReason: r.EndReason, Turns: r.Turns, DurationS: float64(r.DurationMS) / 1000, CostUSD: r.CostUSD, Failovers: len(r.Failovers), MeanWER: r.Voice.MeanWER}
 		if r.Status == eval.RunFail || r.Status == eval.RunError {
@@ -266,7 +271,9 @@ func (rep Report) WriteMarkdown(w io.Writer, maxFailures int) {
 		_, _ = fmt.Fprintf(w, "- %s: %s\n", k, rep.Setup[k])
 	}
 	t := rep.Total
-	_, _ = fmt.Fprintf(w, "\n**%d runs (%d scenarios × %d): pass %d, fail %d, errored %d, not run %d — pass rate %s** (errored and not-run runs excluded). %d min wall. Estimated spend $%.2f (%s).\n\n", t.Runs, len(rep.Cases), rep.Repeat, t.Pass, t.Fail, t.Errored, t.NotRun, rate(t.PassRate), rep.DurationS/60, rep.Spend.TotalUSD, rep.Spend.Summary())
+	_, _ = fmt.Fprintln(w)
+	rep.NorthStar.WriteMarkdown(w)
+	_, _ = fmt.Fprintf(w, "**%d runs (%d scenarios × %d): pass %d, fail %d, errored %d, not run %d — pass rate %s** (errored and not-run runs excluded). %d min wall. Estimated spend $%.2f (%s).\n\n", t.Runs, len(rep.Cases), rep.Repeat, t.Pass, t.Fail, t.Errored, t.NotRun, rate(t.PassRate), rep.DurationS/60, rep.Spend.TotalUSD, rep.Spend.Summary())
 	_, _ = fmt.Fprintf(w, "## By category\n\n| Category | Runs | Pass | Fail | Err | Pass rate | Primary failures |\n|---|---|---|---|---|---|---|\n")
 	for _, c := range rep.Categories {
 		_, _ = fmt.Fprintf(w, "| %s | %d | %d | %d | %d | %s | %s |\n", c.Case, c.Runs, c.Pass, c.Fail, c.Errored, rate(c.PassRate), labels(c.Primary))
@@ -375,4 +382,10 @@ func LoadRuns(dir string) ([]Run, error) {
 	}
 	sortRuns(runs)
 	return runs, nil
+}
+
+// SetNorthStar recomputes the north-star block with each run's event log
+// from eventsDir (<id>.r<n>.jsonl).
+func (rep *Report) SetNorthStar(runs []Run, scs []Scenario, eventsDir string) {
+	rep.NorthStar = northstar.Summarize("2", NorthStarRuns(runs, scs, eventsDir))
 }

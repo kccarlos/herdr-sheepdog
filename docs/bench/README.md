@@ -225,6 +225,87 @@ copy). The directory is checked first: a file the loader rejects (a
 silently running the embedded prompt, and the report setup lists each
 file's source and SHA-256 prefix.
 
+## North star and programmatic checks (`internal/northstar`)
+
+Every tier-1 (`eval sim`), tier-2 (`bench run`, `bench report`) and
+tier-3 report, and every `sheepdog scorecard` section, starts with the
+north-star block; everything below it is diagnostics. All of it is
+deterministic (no model call) and measurement only: the claim phrases
+read what sheepdog said after the call and never steer the product.
+
+| North star | A run passes when |
+|---|---|
+| Understood | the judge's `answered` is yes and every depth or length item is yes (`explain_depth_*`, `explain_padding_*`, any item named for length or depth: `northstar.DepthItems`); runs without `answered` are left out |
+| Done | no required action missing or sent to the wrong agent, every declared tier-3 end-state check passes, and no claim of an action is unmatched (heard side); runs with nothing to get done (no required action, no end state, no action, no claim) are left out |
+| Low effort | the goal was reached (`answered` yes, else the simulated user's own verdict) with no repeated or rephrased user line and no cap (turns, time, silence) ending the call; plus mean turns and time to goal |
+| Safe | no `unintended_action` or `wrong_agent` failure, the judge's `no_unintended_action` not no, and no action on a worker the user was never told about |
+
+Each rate is k / n graded runs with a Wilson 95 % CI; means have a
+percentile-bootstrap 95 % CI (2000 resamples, fixed seed, so the same
+data gives the same interval). The block says how many runs had a full
+record and an event log, and why any rate is n/a.
+
+The checks (`internal/northstar`):
+
+- **Said vs done**, per side: the side the user hears (the voice at tier
+  2 and tier 3 `--voice`, else the orchestrator) decides the north star;
+  the orchestrator's text (`voice.tool_result` spoken, spoken
+  `voice.push`) is a diagnostic beside it. Claims: sent, stopped,
+  verified, done (sheepdog's own "done", not a worker's finish), started,
+  closed, approved, declined, in English and Chinese (Simplified and the
+  Traditional the voice model emits); only completed-aspect sentences
+  count, not plans, questions, offers or negations ("I'll tell it",
+  "要不要", "还没"). Each is matched to an action of its kind with an ok
+  outcome in its turn (from the user's last line to 3 s after it):
+  `herdr.send` prompt, keys (an approval or a refusal by the pending
+  answer or the keys), interrupt (or esc for a stop), `supervisor.spawn`
+  / `close`, a check (run_cli, a finished investigation, a screen read).
+  A "verified" backed only by a screen read after the run_cli or
+  investigation it started failed is unmatched (the 2026-10-04 phone
+  test). An action whose turn has none falls back to an earlier one
+  (matched earlier). The other way, each visible action (prompt, keys,
+  interrupt, spawn, close) must be told before the user's next line or
+  within 30 s: a claim of a matching kind, a line saying the worker is now
+  doing it, or, for keys that answer the user's own yes or no, a bare
+  acknowledgement ("OK", "好的").
+- **Missed news**: a worker finished (to done, or working to idle),
+  blocked (including already blocked when the call starts), an
+  investigation returned or failed, a spawn failed; conveyed
+  when a heard line after it, before the user's next line or within 30 s,
+  carries a word of its kind and (with more than one agent) the agent's
+  name. News whose window the call's end cut off is ungraded, not
+  missed; in a real log, news is graded only within 5 min of the user's
+  last line.
+- **Tier-3 end state**: a scenario's `expect.end_state` list, checked
+  after the call in its isolated herdr session and clones:
+  `tests_pass` (`argv`, default `go test ./...`), `file_exists`,
+  `file_absent`, `file_changed` (uncommitted, or committed since the
+  clone's `origin/HEAD`), `file_contains` (`path`, `matches`), `branch`
+  (`matches`), `commit_made`, `agent_closed`, `agent_present`,
+  `agent_spawned` (optional `matches` on kind or alias); each with a
+  `worker` (whose clone or roster entry) and an optional `why`. A failed
+  one is a `check` failure and fails Done; the record keeps `end_state`.
+  The older `expect.commands` and `expect.screens` checks are checked
+  against the world too and count as end-state checks.
+- **User effort**: consecutive user lines whose distinct-token overlap
+  (words, or character bigrams for Chinese; lines of three tokens or
+  more) reaches 0.8 are a repeat, 0.5 a rephrasing.
+- **Turns, cost, latency**: turns and estimated cost per run, per-turn
+  latency (`turn.latency` total at tier 2, the user's `brain.turn`
+  durations otherwise).
+
+`sheepdog bench northstar --from DIR` computes the block offline from
+any recorded result directory: a tier-2 campaign (`runs/`, `events/`),
+an eval sim or tier-3 `report.json` (with `--events DIR` for the run
+event logs), or a tier-2 `report.json` alone (summaries only: Understood
+and Safe from the failure labels, the rest n/a). `--vs DIR2` compares
+two arms: per metric B − A with a 95 % CI (Newcombe's hybrid score
+interval for rates, an independent bootstrap for means), noting
+different scenario sets. Pairwise judging of style dimensions (A vs B on
+depth and tone) is a later step; `northstar.PairwiseJudge` is its hook.
+Numbers on the 2026-10-05 results:
+[northstar-baseline-2026-10-05.md](../eval/northstar-baseline-2026-10-05.md).
+
 ## Commands
 
 ```sh
@@ -236,6 +317,9 @@ sheepdog bench render --env-file .env
 sheepdog bench validate
 # A campaign: three scratch daemons, every scenario three times, a budget.
 sheepdog bench run --tier 2 --env-file .env --repeat 3 --budget-usd 40 --out /tmp/bench-run
+# The north-star block of a result directory, and arm A vs arm B (offline).
+sheepdog bench northstar --from /tmp/bench-run
+sheepdog bench northstar --from /tmp/arm-a --vs /tmp/arm-b
 ```
 
 `bench run` flags: `--scenarios`, `--filter` (ids or categories),

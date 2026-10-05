@@ -112,6 +112,10 @@ type Expect struct {
 	Screens []ScreenCheck `json:"screens,omitempty"`
 	// Commands run in a worker's repo after the call (e.g. go test).
 	Commands []CommandCheck `json:"commands,omitempty"`
+	// EndState is what Done means for the scenario, checked against the
+	// world after the call (tests pass, a file exists or changed, an agent
+	// closed, the branch): the north star's end state (endstate.go).
+	EndState []EndStateCheck `json:"end_state,omitempty"`
 }
 
 // EventCheck counts daemon events of a type (prefix) whose JSON payload
@@ -269,6 +273,11 @@ func (s Scenario) Validate() error {
 	for i, c := range s.Expect.Commands {
 		if _, ok := workers[c.Worker]; !ok || len(c.Argv) == 0 {
 			return fmt.Errorf("expect.commands %d: unknown worker or no argv", i)
+		}
+	}
+	for i, c := range s.Expect.EndState {
+		if err := c.validate(workers); err != nil {
+			return fmt.Errorf("expect.end_state %d: %w", i, err)
 		}
 	}
 	if s.Behavior.Collision != nil || s.Behavior.Reconnect != nil {

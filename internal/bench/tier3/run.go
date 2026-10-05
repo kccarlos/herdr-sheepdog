@@ -279,6 +279,13 @@ loop:
 	rec.Failovers = len(rec.FailoverEvents)
 
 	checks, cfails := w.checks(ctx, evs, final)
+	ours := map[string]bool{}
+	for pane := range aliasOf {
+		ours[pane] = true
+	}
+	var efails []eval.Failure
+	rec.EndState, efails = checkEndState(ctx, sc.Expect.EndState, endWorld{repo: w.repoOf, alias: w.daemonAlias, roster: roster, ours: ours})
+	cfails = append(cfails, efails...)
 	cfails = append(cfails, voiceFails...)
 	rec.Checks = append(rec.Checks, checks...)
 	facts := w.facts(initial, final, roster)

@@ -19,6 +19,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/config"
 	"github.com/kccarlos/herdr-sheepdog/internal/eval"
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
+	"github.com/kccarlos/herdr-sheepdog/internal/northstar"
 )
 
 func printBenchTier3Usage(w io.Writer) {
@@ -229,6 +230,11 @@ func runBenchTier3(ctx context.Context, args []string, stdout, stderr io.Writer)
 			setup["tts"] = ttsID
 		}
 		rep := eval.NewCampaignReport(started, setup, *repeat, runs, meter)
+		tier := "3"
+		if *voice {
+			tier = "3 voice"
+		}
+		rep.NorthStar = northstar.Summarize(tier, tier3.NorthStarRuns(recs, scs, *events, *voice))
 		if err := writeSimReports(*out, rep); err != nil {
 			fprintf(stderr, "sheepdog bench run: %v\n", err)
 			return 1
