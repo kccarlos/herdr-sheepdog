@@ -43,9 +43,20 @@ func TestRenderAssistant(t *testing.T) {
 		"in your own words",
 		"never answer it for them and never suggest yes",
 		"You cannot act on an agent yourself",
-		"Pass their exact words in text and your own short reading in reading",
-		"hand every question about what an agent is doing, did or found",
-		"never say you will check without the call",
+		"Pass their exact words in text; your own reading goes only in reading",
+		// Prompt v5 (docs/design/dual-brain.md): grounding first, a
+		// narrow self-answer set, everything new handed off, waiting
+		// talk about what is being done (phone test 2026-10-04).
+		"Grounding comes first",
+		"When none carries it, or two disagree, do not explain or guess",
+		"Answer only three things yourself",
+		`"which is right"`,
+		`"why"`,
+		`"what did we discuss first"`,
+		"Unclear which agent they mean? Ask them first.",
+		"say only what is being done",
+		"never content or status",
+		"or that you will check without the call",
 		`"what does that mean"`,
 		"no new terms",
 		`"Idle" means ready for input`,
@@ -53,8 +64,10 @@ func TestRenderAssistant(t *testing.T) {
 		"invent nothing",
 		"shepherd's register",
 		`"Never mind" is not stop`,
-		"answer in the language they used last, whatever language a briefing is in",
-		"Never state a fact about an agent that no briefing carried",
+		"Answer in the language and script the shepherd used last",
+		"Simplified Chinese to Simplified",
+		"whatever language a briefing is in",
+		"how old its facts were when it reached you",
 		// Tier 3 two-claudes-names: retold in its own words, the voice
 		// said "the first Claude"; names are facts.
 		"by the name the briefing uses",
@@ -65,13 +78,13 @@ func TestRenderAssistant(t *testing.T) {
 	}
 	// The mouthpiece rules are gone: no verbatim reading, no forced
 	// "on it", no ban on answering from what it was told.
-	for _, gone := range []string{"read spoken exactly as given", "change nothing, add nothing", `say "on it" or "checking" as you call it`, "never answered from memory", "You decide nothing", "offer the next step"} {
+	for _, gone := range []string{"read spoken exactly as given", "change nothing, add nothing", `say "on it" or "checking" as you call it`, "never answered from memory", "You decide nothing", "offer the next step", "say what you already know"} {
 		if strings.Contains(s, gone) {
 			t.Errorf("prompt still says %q", gone)
 		}
 	}
-	if words := len(strings.Fields(s)); words > 520 {
-		t.Errorf("prompt is %d words; keep it short (<= 520)", words)
+	if words := len(strings.Fields(s)); words > 540 {
+		t.Errorf("prompt is %d words; keep it short (<= 540)", words)
 	}
 }
 
