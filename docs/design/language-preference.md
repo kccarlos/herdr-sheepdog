@@ -49,10 +49,13 @@ Checked 2026-10-05 against the providers' current docs.
   (developers.openai.com/api/docs/models/gpt-live-1,
   …/guides/live, …/guides/live-prompting) name none; the prompting guide
   only says to state the language in the instructions. The closest
-  official OpenAI list is its speech-recognition language list (Whisper's
-  57 languages under 50 % word error rate, also given for its realtime
-  models), with Chinese as one entry covering both scripts. The current
-  speech-to-text guide no longer prints it and points at Whisper's list.
+  official OpenAI list is the one for its realtime speech models: "OpenAI
+  only lists the languages that exceeded <50% word error rate", 57
+  languages, Chinese as one entry covering both scripts. OpenAI's current
+  speech-to-text guide no longer prints it; it was read tonight from
+  Microsoft's copy for `gpt-realtime` / `gpt-realtime-mini`
+  (https://learn.microsoft.com/en-us/azure/ai-services/speech-service/voice-live-language-support,
+  updated 2026-09-24).
 - Every one of those 57 is in Gemini's table, so the catalog is those 57
   (Chinese split into the two scripts, Portuguese into Brazil and
   Portugal as Gemini lists them): 59 entries, all supported by both.

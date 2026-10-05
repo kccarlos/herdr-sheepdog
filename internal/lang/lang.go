@@ -43,10 +43,10 @@ var both = []string{ProviderGemini, ProviderOpenAI}
 //     Chinese as zh-Hans and zh-Hant).
 //   - GPT-Live: OpenAI publishes no language list for gpt-live-1 (the
 //     model page, the Live guide and the Live prompting guide name
-//     none). The list used is OpenAI's published speech-recognition
-//     list (Whisper's languages under 50 % word error rate, the same
-//     list OpenAI gives for its realtime models); Chinese there covers
-//     both scripts.
+//     none). The list used is the one OpenAI gives for its realtime
+//     speech models (the 57 languages under 50 % word error rate, as
+//     https://learn.microsoft.com/en-us/azure/ai-services/speech-service/voice-live-language-support
+//     reproduces it for gpt-realtime); Chinese there covers both scripts.
 //
 // Every one of those 57 OpenAI languages is in Gemini's table, so every
 // entry is supported by both. Providers is kept per entry so a future
