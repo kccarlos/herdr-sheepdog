@@ -1,0 +1,311 @@
+{
+  "scenarios": [
+    {
+      "id": "explain-zh-input-rules",
+      "note": "Phone test 2026-10-05 18:02-18:05Z: the orchestrator's spoken had four sentences with reasons and an example, the voice said two; on '你可以给我一点详细的解释吗' it only rephrased. The worker's summary has the substance (numbers, reasons, an example, what to keep, a recommendation and its cost).",
+      "goal": "understand what the hard-coded rules in the input layer are, why they are a problem, and what can be done, in enough detail to decide",
+      "persona": "Speaks Chinese. Curious, wants the full explanation; keeps asking for more.",
+      "language": "zh",
+      "opening": "summary-claude 发现了什么？给我讲讲输入层的硬编码规则是怎么回事。",
+      "fixed": true,
+      "script": [
+        "summary-claude 发现了什么？给我讲讲输入层的硬编码规则是怎么回事。",
+        "然后呢？",
+        "你可以给我一点详细的解释吗？",
+        "为什么这是个问题？",
+        "举个例子？"
+      ],
+      "agents": [
+        {
+          "alias": "summary-claude",
+          "kind": "claude",
+          "state": "idle",
+          "screen": "explain-claude-input-rules.txt",
+          "answer": "Deeper look: in last week's logs 63 of 70 approvals were a plain 'yes' or '好的', which is what the fast path speeds up (about 1.2 s each). Removing it means the model sees every reply; the risk is a slow answer on an urgent approval. A middle way: keep a tiny allow list of exact one-word replies ('yes', '好') and send anything longer to the model, which would have caught the '好的继续，不过先跑测试' case."
+        },
+        {
+          "alias": "bench-codex",
+          "state": "idle",
+          "screen": "bench-codex-refactor-done.txt"
+        }
+      ],
+      "caps": {
+        "max_turns": 5,
+        "max_seconds": 240,
+        "silence_seconds": 30
+      },
+      "expect": {
+        "no_actions": true,
+        "skip": [
+          "ear_friendly"
+        ]
+      },
+      "explain": {
+        "turns": [
+          "explain",
+          "then",
+          "more",
+          "why",
+          "example"
+        ],
+        "key_points": [
+          "About 1,500 characters of hand-written regular expressions and word lists match short replies such as 好的, 继续, yes or wait.",
+          "Those matches are turned straight into an approve key or a cancel without asking the model.",
+          "A whole sentence is matched on its first words, so a condition after it (a 'but ...') is lost; this bypasses the rule that the model decides.",
+          "There are three word lists for the same meanings in three files and they disagree (for example 行 approves in one file but not in another).",
+          "Example: '好的继续，不过先跑测试' was approved in 40 ms and the 'run the tests first' part never reached the model.",
+          "The safety rule that refuses dangerous keys should stay in code.",
+          "Recommendation: delete the word lists (about 300 lines) and send every reply to the model, at a cost of about 1.2 seconds more latency on a plain yes."
+        ]
+      }
+    },
+    {
+      "id": "explain-en-flaky-test",
+      "note": "English 'explain / then / more / why / example' over a worker's investigation with a cause, numbers, a consequence and fix options.",
+      "goal": "understand why the checkout test is flaky, whether it matters, and what the fix options are",
+      "persona": "Speaks English. Wants the full story, asks follow-ups.",
+      "opening": "What did bench-codex find about the flaky test? Explain it to me.",
+      "fixed": true,
+      "script": [
+        "What did bench-codex find about the flaky test? Explain it to me.",
+        "Then?",
+        "More detail please.",
+        "Why does that happen?",
+        "Give me an example."
+      ],
+      "agents": [
+        {
+          "alias": "bench-codex",
+          "state": "idle",
+          "screen": "explain-codex-flaky-test.txt",
+          "answer": "Ran the test 200 times with the race detector: 17 failures, every one with the price cache empty when the request arrived. With a wait on Ready() added locally: 0 failures in 200 runs. The race exists since the 'parallel cache warm-up' change three weeks ago, which moved the warm-up into a background goroutine."
+        },
+        {
+          "alias": "bench-claude",
+          "kind": "claude",
+          "state": "idle",
+          "screen": "bench-claude-idle.txt"
+        }
+      ],
+      "caps": {
+        "max_turns": 5,
+        "max_seconds": 240,
+        "silence_seconds": 30
+      },
+      "expect": {
+        "no_actions": true,
+        "skip": [
+          "ear_friendly"
+        ]
+      },
+      "explain": {
+        "turns": [
+          "explain",
+          "then",
+          "more",
+          "why",
+          "example"
+        ],
+        "key_points": [
+          "The checkout totals test fails about 1 run in 12 (7 of 84 runs this week).",
+          "Cause: the test sends its request before the price cache has finished warming up (a race).",
+          "With an empty cache the handler uses list prices, so the total misses the 15% member discount (100 instead of 85).",
+          "It blocked two deploys last week, each needing a manual re-run of about 25 minutes.",
+          "It is a test problem, not a production bug: production warms the cache before taking traffic.",
+          "Recommended fix: wait for the cache's ready signal in the test setup (about 3 lines); the alternative is a fake cache.",
+          "Nothing has been changed yet."
+        ]
+      }
+    },
+    {
+      "id": "explain-zh-notes-ledger",
+      "note": "Chinese 'explain / why / example / then' over the notes-ledger review from the 2026-10-05 phone test (备忘录满 5 条后旧的会被挤出).",
+      "goal": "understand what the notes ledger problem is, why it matters, and whether to build the delete tool",
+      "persona": "Speaks Chinese. Wants reasons and an example before deciding.",
+      "language": "zh",
+      "opening": "memo-claude 那边的备忘录分析是什么意思？给我解释一下。",
+      "fixed": true,
+      "script": [
+        "memo-claude 那边的备忘录分析是什么意思？给我解释一下。",
+        "为什么这很重要？",
+        "举个例子？",
+        "然后呢？"
+      ],
+      "agents": [
+        {
+          "alias": "memo-claude",
+          "kind": "claude",
+          "state": "idle",
+          "screen": "explain-claude-notes-ledger.txt",
+          "answer": "The ledger was added in July with a cap of 5 to keep the brain's prompt short; each note costs about 40 tokens, so even 10 notes would add only about 400 tokens. The delete tool would be a 'forget' tool the brain can call with the note's words; it would refuse to delete a note the CEO marked as a rule unless asked twice."
+        },
+        {
+          "alias": "bench-codex",
+          "state": "idle",
+          "screen": "bench-codex-refactor-done.txt"
+        }
+      ],
+      "caps": {
+        "max_turns": 4,
+        "max_seconds": 220,
+        "silence_seconds": 30
+      },
+      "expect": {
+        "no_actions": true,
+        "skip": [
+          "ear_friendly"
+        ]
+      },
+      "explain": {
+        "turns": [
+          "explain",
+          "why",
+          "example",
+          "then"
+        ],
+        "key_points": [
+          "The notes ledger keeps at most 5 notes; a 6th note silently pushes the oldest one out.",
+          "All 5 slots are used and 2 notes are stale (a release date that has passed, a worker that no longer exists).",
+          "The next note will push out 'always ask before pushing to main', the oldest and most important note.",
+          "A delete tool would let the CEO remove stale notes by voice; it is about 60 lines plus tests.",
+          "It is useful but not urgent: nothing is lost until a 6th note is added.",
+          "The alternative is raising the cap to 10, which only delays the problem and keeps stale notes."
+        ]
+      }
+    },
+    {
+      "id": "explain-en-invoice-job",
+      "note": "English 'explain / why / example / more' over a failed job with numbers, a deadline, a cause and two fixes.",
+      "goal": "understand why the invoice job failed, what it costs, and what the options are",
+      "persona": "Speaks English. Asks why and for an example, then for more detail.",
+      "opening": "Explain what api-claude found about the invoice job.",
+      "fixed": true,
+      "script": [
+        "Explain what api-claude found about the invoice job.",
+        "Why did it break now?",
+        "Give me an example.",
+        "More detail please."
+      ],
+      "agents": [
+        {
+          "alias": "api-claude",
+          "kind": "claude",
+          "state": "idle",
+          "screen": "explain-claude-invoice-job.txt",
+          "answer": "Checked the provider's docs: the limit is 100 calls per minute per API key, and the bulk endpoint counts as one call however many invoices it carries (up to 500). The job's last success sent 87 invoices on 2026-10-04. Customers on annual plans are billed on the 1st, so the 4,200 spike repeats every month."
+        },
+        {
+          "alias": "bench-codex",
+          "state": "idle",
+          "screen": "bench-codex-refactor-done.txt"
+        }
+      ],
+      "caps": {
+        "max_turns": 4,
+        "max_seconds": 220,
+        "silence_seconds": 30
+      },
+      "expect": {
+        "no_actions": true,
+        "skip": [
+          "ear_friendly"
+        ]
+      },
+      "explain": {
+        "turns": [
+          "explain",
+          "why",
+          "example",
+          "more"
+        ],
+        "key_points": [
+          "The nightly invoice job sends one payment-provider API call per invoice.",
+          "Last night had 4,200 invoices but the provider allows 100 calls per minute, so the calls were rejected as too many requests.",
+          "The job has no retry, so 4,100 invoices were not sent; customers get them a day late unless it is re-run before 9:00.",
+          "It worked before because there were fewer than 100 invoices a night; the new annual plans pushed it to 4,200 on the 1st.",
+          "Proper fix: the bulk endpoint takes 500 invoices per call (9 calls), about 40 lines.",
+          "Quick fix: retry with a one-minute wait (about 42 minutes); re-running is safe because duplicate invoice ids are ignored."
+        ]
+      }
+    },
+    {
+      "id": "explain-control-en-done",
+      "note": "Control: simple yes/no questions where a short answer is right; the screen has extra detail the answer should not pad with.",
+      "goal": "know whether bench-codex is done and whether the tests passed",
+      "persona": "Speaks English. Busy, wants short answers.",
+      "opening": "Is bench-codex done?",
+      "fixed": true,
+      "script": [
+        "Is bench-codex done?",
+        "Did the tests pass?"
+      ],
+      "agents": [
+        {
+          "alias": "bench-codex",
+          "state": "done",
+          "screen": "explain-codex-tests-done.txt"
+        },
+        {
+          "alias": "bench-claude",
+          "kind": "claude",
+          "state": "working",
+          "screen": "explain-claude-refactor-working.txt"
+        }
+      ],
+      "caps": {
+        "max_turns": 2,
+        "max_seconds": 150,
+        "silence_seconds": 30
+      },
+      "expect": {
+        "no_actions": true
+      },
+      "explain": {
+        "turns": [
+          "simple",
+          "simple"
+        ]
+      }
+    },
+    {
+      "id": "explain-control-zh-busy",
+      "note": "Control: simple Chinese questions where a short answer is right.",
+      "goal": "know whether bench-claude is busy and whether bench-codex finished",
+      "persona": "Speaks Chinese. Busy, wants short answers.",
+      "language": "zh",
+      "opening": "bench-claude 现在在忙吗？",
+      "fixed": true,
+      "script": [
+        "bench-claude 现在在忙吗？",
+        "bench-codex 跑完了吗？"
+      ],
+      "agents": [
+        {
+          "alias": "bench-claude",
+          "kind": "claude",
+          "state": "working",
+          "screen": "explain-claude-refactor-working.txt"
+        },
+        {
+          "alias": "bench-codex",
+          "state": "done",
+          "screen": "explain-codex-tests-done.txt"
+        }
+      ],
+      "caps": {
+        "max_turns": 2,
+        "max_seconds": 150,
+        "silence_seconds": 30
+      },
+      "expect": {
+        "no_actions": true
+      },
+      "explain": {
+        "turns": [
+          "simple",
+          "simple"
+        ]
+      }
+    }
+  ]
+}

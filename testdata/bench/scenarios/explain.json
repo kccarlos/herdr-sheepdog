@@ -1,0 +1,67 @@
+{
+  "scenarios": [
+    {
+      "id": "explain-zh-input-rules",
+      "category": "explain",
+      "from_sim": "explain-zh-input-rules",
+      "note": "Tier-2 form of the sim scenario (explanation evals, handover 2026-10-04 'Next' step 1).",
+      "audio": {
+        "style": "casual",
+        "voice": "Charon"
+      },
+      "seed": 501
+    },
+    {
+      "id": "explain-en-flaky-test",
+      "category": "explain",
+      "from_sim": "explain-en-flaky-test",
+      "note": "Tier-2 form of the sim scenario (explanation evals, handover 2026-10-04 'Next' step 1).",
+      "audio": {
+        "voice": "Kore"
+      },
+      "seed": 502
+    },
+    {
+      "id": "explain-zh-notes-ledger",
+      "category": "explain",
+      "from_sim": "explain-zh-notes-ledger",
+      "note": "Tier-2 form of the sim scenario (explanation evals, handover 2026-10-04 'Next' step 1).",
+      "audio": {
+        "voice": "Aoede"
+      },
+      "seed": 503
+    },
+    {
+      "id": "explain-en-invoice-job",
+      "category": "explain",
+      "from_sim": "explain-en-invoice-job",
+      "note": "Tier-2 form of the sim scenario (explanation evals, handover 2026-10-04 'Next' step 1).",
+      "audio": {
+        "style": "casual",
+        "voice": "Puck"
+      },
+      "seed": 504
+    },
+    {
+      "id": "explain-control-en-done",
+      "category": "explain",
+      "from_sim": "explain-control-en-done",
+      "note": "Tier-2 form of the sim scenario (explanation evals, handover 2026-10-04 'Next' step 1).",
+      "audio": {
+        "style": "hurried",
+        "voice": "Kore"
+      },
+      "seed": 505
+    },
+    {
+      "id": "explain-control-zh-busy",
+      "category": "explain",
+      "from_sim": "explain-control-zh-busy",
+      "note": "Tier-2 form of the sim scenario (explanation evals, handover 2026-10-04 'Next' step 1).",
+      "audio": {
+        "voice": "Charon"
+      },
+      "seed": 506
+    }
+  ]
+}

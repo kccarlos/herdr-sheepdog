@@ -346,7 +346,7 @@ func runBenchRun(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	saveAudio := fs.String("save-audio", "", "also write each run's mic and bot audio as WAV here (outside the repo)")
 	brainProvider := fs.String("brain-provider", "", "scratch daemons' brain provider (default deepseek; the fault scenarios need deepseek)")
 	brainModel := fs.String("brain-model", "", "scratch daemons' brain model (default deepseek-flash)")
-	promptsDir := fs.String("prompts-dir", "", "scratch daemons' prompts.dir: override prompt files (e.g. an older assistant.md for an A/B arm); empty uses the config's")
+	promptsDir := fs.String("prompts-dir", "", "scratch daemons' prompts.dir: override prompt files for an A/B arm (assistant.md, USER.md, svp/SOUL.md, svp/RULES.md; files left out stay embedded); empty uses the config's")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -380,7 +380,16 @@ func runBenchRun(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	if !ok {
 		return 1
 	}
+	promptsLine := ""
 	if *promptsDir != "" {
+		// An A/B arm: every prompt file there (svp/ included) must be
+		// taken, or the arm would silently run the embedded prompts.
+		line, err := bench.PromptsArm(*promptsDir)
+		if err != nil {
+			fprintf(stderr, "sheepdog bench run: %v\n", err)
+			return 1
+		}
+		promptsLine = line
 		cfg.Prompts.Dir = *promptsDir
 	}
 	scs, err := loadBenchScenarios(*scen, *sims, *filter)
@@ -399,8 +408,8 @@ func runBenchRun(ctx context.Context, args []string, stdout, stderr io.Writer) i
 		"tts": syn.ID(), "simulated CEO": *simuser + " " + orDefaultStr(*simuserModel, eval.DefaultJudgeModel), "judge": *judge + " " + orDefaultStr(*judgeModel, eval.DefaultJudgeModel),
 		"ports": *portsFlag, "parallel": fmt.Sprint(len(ports)), "budget_usd": fmt.Sprint(*budget), "scenarios": *scen + filterNote(*filter),
 	}
-	if *promptsDir != "" {
-		setup["prompts_dir"] = *promptsDir
+	if promptsLine != "" {
+		setup["prompts_dir"] = promptsLine
 	}
 	if m, err := bench.LoadManifest(*manifest); err == nil {
 		if probs := m.Check(scs); len(probs) > 0 {
@@ -486,13 +495,17 @@ func orDefaultStr(s, def string) string {
 	return s
 }
 
-func runBenchReport(_ context.Context, args []string, stdout, stderr io.Writer) int {
+func runBenchReport(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("bench report", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	from := fs.String("from", "", "a campaign's output directory (with runs/)")
 	out := fs.String("out", "", "write report.json and report.md here (default: --from)")
 	scen := fs.String("scenarios", defaultBenchScenarios, "scenario files")
 	sims := fs.String("sim", defaultBenchSims, "eval sim files (from_sim)")
+	rescore := fs.Bool("rescore-explain", false, "score the explain scenarios' runs again from their records and events (judge calls only; rewrites runs/*.json)")
+	judgeModel := fs.String("judge-model", "", "with --rescore-explain: judge model (default "+eval.DefaultJudgeModel+")")
+	configPath := fs.String("config", "", "with --rescore-explain: config file")
+	envFile := fs.String("env-file", "", "with --rescore-explain: load KEY=VALUE lines first")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -515,6 +528,11 @@ func runBenchReport(_ context.Context, args []string, stdout, stderr io.Writer) 
 	if err != nil {
 		fprintf(stderr, "sheepdog bench report: %v\n", err)
 		return 1
+	}
+	if *rescore {
+		if code := rescoreExplain(ctx, *from, runs, scs, *configPath, *envFile, *judgeModel, stderr); code != 0 {
+			return code
+		}
 	}
 	var prev bench.Report
 	if b, err := os.ReadFile(filepath.Join(*from, "report.json")); err == nil {
@@ -554,5 +572,52 @@ func runBenchReport(_ context.Context, args []string, stdout, stderr io.Writer) 
 	rep.WriteMarkdown(f, 40)
 	_ = f.Close()
 	fprintf(stdout, "%d runs: %s\n", len(runs), filepath.Join(*out, "report.md"))
+	return 0
+}
+
+// rescoreExplain scores the explain runs again with the Vertex judge and
+// rewrites their records; the report is then rebuilt from them.
+func rescoreExplain(ctx context.Context, dir string, runs []bench.Run, scs []bench.Scenario, configPath, envFile, judgeModel string, stderr io.Writer) int {
+	if code, ok := loadServeEnvFile(envFile, stderr); !ok || code != 0 {
+		return 1
+	}
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		fprintf(stderr, "sheepdog bench report: %v\n", err)
+		return 1
+	}
+	m, id, err := eval.NewBackend(eval.BackendOptions{Kind: eval.BackendVertex, Model: judgeModel, VertexAPIKey: cfg.Gemini.Vertex.APIKey, VertexProject: cfg.Gemini.Vertex.Project}, nil)
+	if err != nil {
+		fprintf(stderr, "sheepdog bench report: judge: %v\n", err)
+		return 1
+	}
+	sem := make(chan struct{}, 4)
+	byID := map[string]bench.Scenario{}
+	for _, s := range scs {
+		byID[s.ID] = s
+	}
+	meter := eval.NewMeter()
+	judge := &eval.LLMJudge{Model: eval.Metered(eval.Patient(m, sem, 8, altFor(eval.BackendVertex, id)), meter, "judge"), ModelID: id}
+	n := 0
+	for i := range runs {
+		r := &runs[i]
+		sc, ok := byID[r.Scenario]
+		if !ok || sc.Explain == nil {
+			continue
+		}
+		evs, err := bench.LoadEvents(filepath.Join(dir, "events", fmt.Sprintf("%s.r%d.jsonl", r.Scenario, r.Repeat)))
+		if err != nil {
+			fprintf(stderr, "sheepdog bench report: %s r%d: %v\n", r.Scenario, r.Repeat, err)
+			continue
+		}
+		bench.RescoreExplain(ctx, judge, sc, r, evs)
+		b, _ := json.MarshalIndent(r, "", "  ")
+		if err := os.WriteFile(filepath.Join(dir, "runs", fmt.Sprintf("%s.r%d.json", r.Scenario, r.Repeat)), b, 0o644); err != nil {
+			fprintf(stderr, "sheepdog bench report: %v\n", err)
+			return 1
+		}
+		n++
+	}
+	fprintf(stderr, "rescored %d explain runs, judge ≈ $%.3f\n", n, meter.Total())
 	return 0
 }

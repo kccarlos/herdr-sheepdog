@@ -112,6 +112,9 @@ type Run struct {
 	Spend      Spend                      `json:"spend"`
 	CostUSD    float64                    `json:"cost_usd_estimate"`
 	Extended   bool                       `json:"extended,omitempty"`
+	// Explain is the explanation scores of a scenario with an explain
+	// block: the orchestrator's text and the voice's speech separately.
+	Explain *eval.ExplainScore `json:"explain,omitempty"`
 	// Excerpt is a compact event timeline for the report.
 	Excerpt []string `json:"excerpt,omitempty"`
 }
@@ -147,6 +150,7 @@ type runner struct {
 	answering bool
 
 	eventFails []eval.Failure // the scenario's voice event checks
+	exchanges  []eval.ExplainExchange
 
 	fireMu sync.Mutex
 	fireAt time.Time // the collision's event landed
@@ -306,6 +310,10 @@ func RunScenario(ctx context.Context, sc Scenario, repeat, port int, o RunOption
 		run.Verdicts = append(run.Verdicts, eval.NamedVerdict{Name: names[i], Verdict: v})
 	}
 	run.Failures = append(run.Failures, r.failures()...)
+	if sc.Explain != nil {
+		run.Explain = eval.ScoreExplain(ctx, judge, sc.Explain, sc.Language, r.exchanges, true)
+		run.Failures = append(run.Failures, run.Explain.Failures()...)
+	}
 	return finish()
 }
 
@@ -697,8 +705,118 @@ func (r *runner) collect(rec voiceclient.Recording, proxy *FaultProxy) {
 		run.Proxy = &ProxyStats{Requests: req, Failed: failed}
 	}
 	run.Excerpt = excerpt(rec)
+	if r.sc.Explain != nil {
+		r.exchanges = explainExchanges(r.sc.Explain, r.lines, rec)
+	}
 	r.eventFails = voiceEventChecks(r.sc, rec.Events)
 	r.writeEvents(rec)
+}
+
+// explainExchanges splits the call at the CEO's lines: for each, the
+// orchestrator's text (every to_supervisor result's spoken and detail,
+// and the daemon's pushes) and what the voice said, until the next line.
+func explainExchanges(spec *eval.ExplainSpec, lines []UserLine, rec voiceclient.Recording) []eval.ExplainExchange {
+	var ex []eval.ExplainExchange
+	turn := 0
+	var bounds []int64
+	for _, l := range lines {
+		if l.BargeIn || l.Collision {
+			continue // not a scripted question
+		}
+		turn++
+		ex = append(ex, eval.ExplainExchange{Turn: turn, AtMS: l.AtMS, Kind: spec.Kind(turn), Question: l.Said})
+		bounds = append(bounds, l.AtMS)
+	}
+	at := func(ms int64) int {
+		for i := len(bounds) - 1; i >= 0; i-- {
+			if ms >= bounds[i] {
+				return i
+			}
+		}
+		return -1
+	}
+	add := func(dst *string, s string) {
+		if s = strings.TrimSpace(s); s != "" {
+			*dst = strings.TrimSpace(*dst + " " + s)
+		}
+	}
+	// A to_supervisor result belongs to the question its call was made
+	// for (a slow answer can arrive after the next question started).
+	callAt := map[string]int{}
+	for _, ev := range rec.Events {
+		if ev.Type == "voice.tool_call" {
+			if id, _ := ev.Payload["id"].(string); id != "" {
+				callAt[id] = at(ev.AtMS)
+			}
+		}
+	}
+	for _, ev := range rec.Events {
+		i := at(ev.AtMS)
+		if ev.Type == "voice.tool_result" {
+			if id, _ := ev.Payload["id"].(string); id != "" {
+				if j, ok := callAt[id]; ok {
+					i = j
+				}
+			}
+		}
+		if i < 0 {
+			continue
+		}
+		switch ev.Type {
+		case "voice.tool_result":
+			if n, _ := ev.Payload["name"].(string); n != "" && n != "to_supervisor" {
+				continue
+			}
+			spoken, _ := ev.Payload["spoken"].(string)
+			detail, _ := ev.Payload["detail"].(string)
+			var opts []string
+			if os, ok := ev.Payload["options"].([]any); ok {
+				for _, o := range os {
+					opts = append(opts, fmt.Sprint(o))
+				}
+			}
+			ex[i].Consulted = true
+			add(&ex[i].Orchestrator, eval.JoinOrchestrator(spoken, detail, opts))
+			add(&ex[i].Spoken, spoken)
+		case "voice.push":
+			if strings.EqualFold(fmt.Sprint(ev.Payload["focus"]), "true") || ev.Payload["urgency"] == "silent" {
+				continue // context for the voice (focus, names), not a line to say
+			}
+			text, _ := ev.Payload["text"].(string)
+			add(&ex[i].Orchestrator, text)
+			add(&ex[i].Spoken, text)
+		}
+	}
+	// The voice's speech by fragment time: one utterance can run on into
+	// the next question (a stalled answer the CEO talked over). Only what
+	// was heard counts (a flushed utterance is cut at its heard part).
+	for _, u := range rec.Bot {
+		if len(u.Fragments) == 0 {
+			if i := at(u.StartMS); i >= 0 {
+				add(&ex[i].Voice, u.Heard)
+			}
+			continue
+		}
+		left := len([]rune(u.Heard))
+		parts := make([]strings.Builder, len(ex))
+		for _, f := range u.Fragments {
+			if left <= 0 {
+				break
+			}
+			r := []rune(f.Text)
+			if len(r) > left {
+				r = r[:left]
+			}
+			left -= len(r)
+			if i := at(f.AtMS); i >= 0 {
+				parts[i].WriteString(string(r))
+			}
+		}
+		for i := range parts {
+			add(&ex[i].Voice, parts[i].String())
+		}
+	}
+	return ex
 }
 
 // failures labels a finished run with the shared taxonomy.
@@ -930,4 +1048,46 @@ func sortRuns(runs []Run) {
 		}
 		return runs[i].Repeat < runs[j].Repeat
 	})
+}
+
+// RescoreExplain scores an explain scenario's recorded run again (the
+// run record's lines and bot utterances, and the events the campaign
+// wrote): a new judge or a changed scorer without paying for the call
+// again. The run's explanation failures are replaced and its status
+// recomputed.
+func RescoreExplain(ctx context.Context, j eval.Judge, sc Scenario, r *Run, events []voiceclient.Event) {
+	if sc.Explain == nil || r.Status == eval.RunNotRun || r.EndReason == eval.EndError {
+		return
+	}
+	ex := explainExchanges(sc.Explain, r.User, voiceclient.Recording{Events: events, Bot: r.Bot})
+	var kept []eval.Failure
+	for _, f := range r.Failures {
+		if strings.HasPrefix(f.Detail, "explain_") || strings.HasPrefix(f.Detail, "judge explain_") {
+			continue
+		}
+		kept = append(kept, f)
+	}
+	r.Explain = eval.ScoreExplain(ctx, j, sc.Explain, sc.Language, ex, true)
+	r.Failures = append(kept, r.Explain.Failures()...)
+	r.Status = eval.StatusOf(r.Failures)
+}
+
+// LoadEvents reads a run's events file (events/<id>.r<n>.jsonl).
+func LoadEvents(path string) ([]voiceclient.Event, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var out []voiceclient.Event
+	for _, line := range strings.Split(string(b), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var ev voiceclient.Event
+		if err := json.Unmarshal([]byte(line), &ev); err != nil {
+			return nil, err
+		}
+		out = append(out, ev)
+	}
+	return out, nil
 }

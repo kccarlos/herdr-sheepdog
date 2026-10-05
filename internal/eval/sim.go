@@ -58,6 +58,9 @@ type SimScenario struct {
 	Transcript []string  `json:"transcript,omitempty"`
 	Caps       SimCaps   `json:"caps,omitempty"`
 	Expect     SimExpect `json:"expect"`
+	// Explain, when set, scores the call's explanations (explain.go):
+	// what each scripted turn asks for and the substance the world holds.
+	Explain *ExplainSpec `json:"explain,omitempty"`
 
 	// screenDir is where bare screen names are looked up first: the
 	// screens/ directory next to the scenario file (LoadSimFile).
@@ -282,6 +285,11 @@ func (s SimScenario) validate() error {
 	for _, k := range s.Expect.Skip {
 		if _, ok := defaultRubric[k]; !ok {
 			return fmt.Errorf("expect.skip %q is not a default rubric item", k)
+		}
+	}
+	if s.Explain != nil {
+		if err := s.Explain.validate(s); err != nil {
+			return fmt.Errorf("explain: %w", err)
 		}
 	}
 	return nil
