@@ -395,6 +395,15 @@ func TestWSMuteDoesNotPersistAcrossClients(t *testing.T) {
 	if err := first.conn.Close(websocket.StatusNormalClosure, "done"); err != nil {
 		t.Fatalf("close first: %v", err)
 	}
+	// Wait until the server has torn the first client down. A client that
+	// dials while another is still attached is only "pending": with no
+	// client-ready it attaches (and the session unmutes) after the
+	// handshake timeout, which is a different path from the one under test.
+	waitFor(t, 2*time.Second, func() bool {
+		var st StateResponse
+		h.getJSON("/api/state", &st)
+		return !st.Voice.ClientConnected
+	}, "first client detached")
 
 	second := dialWS(t, h)
 	st = second.expect(wsproto.TypeStatus)

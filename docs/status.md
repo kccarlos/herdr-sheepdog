@@ -207,8 +207,6 @@ What is in:
 - **Gemini Live mid-answer pauses** (~7 s, Vertex `gemini-3.8-live` only,
   [`research/live-pauses-2026-10-04.md`](research/live-pauses-2026-10-04.md)):
   trial `gemini.backend=aistudio` pending.
-- **Flaky CI test:** `TestWSMuteDoesNotPersistAcrossClients` (internal/web)
-  fails now and then; re-run the job.
 - **Pending decision (CEO testing first): should every pending approval
   notify the phone?** Today the APNs notification follows the brain's
   announce decision, so a block the brain skips sends no notification.
