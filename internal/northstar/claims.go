@@ -120,6 +120,8 @@ func res(ps ...string) []*regexp.Regexp {
 // and its caveat or plan are two sentences).
 var sentenceSplit = regexp.MustCompile(`(?i)[.!?;。！？；\n]+(\s+|$)|[。！？；]|,\s+(but|and|so)\s+|\s+and\s+(i'll|i will|we'll|will)\s+|，(但是|但|不过|不過|并且|並且|然后|然後)`)
 
+var sentInterrupt = regexp.MustCompile(`(?i)\bsent\s+(it\s+|\S+\s+)?(a\s+|an\s+)?(ctrl[- ]?c|interrupt|stop)\b`)
+
 var startedOn = regexp.MustCompile(`(?i)\b(started|set)\s+.{1,40}?\s+(on|working on)\s+`)
 
 // optionsTail strips the " Options: …" sentence eval sim appends to a
@@ -163,6 +165,10 @@ func sentenceClaims(sent string) []ClaimKind {
 	// a new agent.
 	if has(out, ClaimStarted) && startedOn.MatchString(low) {
 		out = append(without(out, ClaimStarted), ClaimSent)
+	}
+	// "Sent an interrupt" is a stop, not a sent prompt.
+	if has(out, ClaimStopped) && sentInterrupt.MatchString(low) {
+		out = without(out, ClaimSent)
 	}
 	// An approval or a refusal also reads as "done"; keep the specific
 	// claim only.

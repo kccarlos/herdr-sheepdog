@@ -117,39 +117,48 @@ func conveys(r Run, n News, text string) bool {
 }
 
 // mentionsAgent reports whether text names agent: its alias, the alias
-// without a bench- prefix, any part of it of three letters or more, its
-// kind, or its spoken name.
+// without a bench- prefix, its spoken name, or a part of its alias (three
+// letters or more) or its kind that no other known agent shares ("auth"
+// for auth-codex next to docs-codex, but not "codex").
 func mentionsAgent(agents []Agent, alias, text string) bool {
 	if strings.HasPrefix(alias, "new agent in pane") {
 		// An agent started during the call, not named yet in the record.
 		return true
 	}
 	low := strings.ToLower(text)
-	var names []string
+	parts := func(a Agent) []string {
+		var out []string
+		for _, n := range []string{a.Alias, a.Kind} {
+			for _, p := range strings.FieldsFunc(strings.ToLower(n), func(r rune) bool { return r == '-' || r == '_' || r == ' ' }) {
+				if len(p) >= 3 && p != "bench" {
+					out = append(out, p)
+				}
+			}
+		}
+		return out
+	}
+	target := Agent{Alias: alias}
+	shared := map[string]int{}
 	for _, a := range agents {
-		if a.Alias != alias {
-			continue
+		if a.Alias == alias {
+			target = a
 		}
-		names = append(names, a.Alias, a.Kind, a.Spoken)
-	}
-	if len(names) == 0 {
-		names = append(names, alias)
-	}
-	var all []string
-	for _, n := range names {
-		n = strings.ToLower(strings.TrimSpace(n))
-		if n == "" {
-			continue
-		}
-		all = append(all, n, strings.TrimPrefix(n, "bench-"))
-		for _, p := range strings.FieldsFunc(n, func(r rune) bool { return r == '-' || r == '_' || r == ' ' }) {
-			if len(p) >= 3 && p != "bench" {
-				all = append(all, p)
+		seen := map[string]bool{}
+		for _, p := range parts(a) {
+			if !seen[p] {
+				seen[p] = true
+				shared[p]++
 			}
 		}
 	}
-	for _, n := range all {
-		if n != "" && strings.Contains(low, n) {
+	names := []string{target.Alias, strings.TrimPrefix(target.Alias, "bench-"), target.Spoken}
+	for _, p := range parts(target) {
+		if shared[p] <= 1 {
+			names = append(names, p)
+		}
+	}
+	for _, n := range names {
+		if n = strings.ToLower(strings.TrimSpace(n)); n != "" && strings.Contains(low, n) {
 			return true
 		}
 	}

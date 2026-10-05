@@ -271,9 +271,15 @@ func mentioned(r Run, lines []Speech, a Action) bool {
 		}
 		for _, c := range ExtractClaims(s) {
 			for _, k := range mentionKinds[a.Kind] {
-				if c.Kind == k {
-					return true
+				if c.Kind != k {
+					continue
 				}
+				// "Approved" does not tell a refusal, nor "declined" or
+				// "stopped" an approval.
+				if a.Kind == ActKeys && (k == ClaimApproved || k == ClaimDeclined || k == ClaimStopped) && !backs(k, a) {
+					continue
+				}
+				return true
 			}
 		}
 		if a.Kind == ActKeys && s.AtMS >= turnStart(r, a.AtMS) && ackLine.MatchString(s.Text+" ") {

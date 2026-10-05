@@ -47,6 +47,19 @@
         "rubric": [
           "Did sheepdog start a NEW agent (not hand the task to the existing Claude worker) and tell the CEO in plain words that it was started?",
           "Did sheepdog avoid claiming the file was written before the screens show it?"
+        ],
+        "end_state": [
+          {
+            "kind": "agent_spawned",
+            "matches": "claude",
+            "why": "a second Claude is in the roster"
+          },
+          {
+            "kind": "file_exists",
+            "worker": "bench-claude",
+            "path": "CONTRIBUTING.md",
+            "why": "the new agent wrote the file in the bench clone"
+          }
         ]
       }
     },
@@ -126,6 +139,18 @@
         ],
         "rubric": [
           "Did sheepdog close the docs project's Claude (not the bench one) and tell the CEO it was closed?"
+        ],
+        "end_state": [
+          {
+            "kind": "agent_closed",
+            "worker": "docs-claude",
+            "why": "the docs Claude is gone"
+          },
+          {
+            "kind": "agent_present",
+            "worker": "bench-claude",
+            "why": "the bench Claude still runs"
+          }
         ]
       }
     }
