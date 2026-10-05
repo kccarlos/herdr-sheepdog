@@ -42,7 +42,7 @@ func (s *Session) onDelegation(lc *liveConn, id string, offsetMS int64) {
 			// took it, or the transcript never came): tell the model so it
 			// does not wait for a result.
 			s.log.Log(logSource, "voice.delegation_empty", "", map[string]any{"id": id})
-			s.appendFor(lc, id, evThinkingAppend, "Nothing new from the shepherd to act on; no result will follow for this request.")
+			s.appendFor(lc, id, evThinkingAppend, "Nothing new from the user to act on; no result will follow for this request.")
 			s.doneInflight(id)
 			return
 		}

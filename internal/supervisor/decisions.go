@@ -32,10 +32,10 @@ func (s *Supervisor) openDecisions() []string {
 		seen[row.PaneID] = true
 		name := aliasOr(state.Say(row))
 		if q := strings.TrimSpace(question); q != "" {
-			out = append(out, fmt.Sprintf("%s is waiting at a prompt for the CEO's answer (%q)", name, clipRunes(q, 80)))
+			out = append(out, fmt.Sprintf("%s is waiting at a prompt for the user's answer (%q)", name, clipRunes(q, 80)))
 			return
 		}
-		out = append(out, name+" is waiting at a prompt for the CEO's answer")
+		out = append(out, name+" is waiting at a prompt for the user's answer")
 	}
 	// No supervisor lock here: the voice session calls this under its
 	// own. An answer clears the pending prompt and marks the block
@@ -71,7 +71,7 @@ func clipRunes(s string, n int) string {
 func (s *Supervisor) DecisionsNow() string {
 	open := s.openDecisions()
 	if len(open) == 0 {
-		return "none: as this reached you, no agent is waiting for the CEO's answer"
+		return "none: as this reached you, no agent is waiting for the user's answer"
 	}
 	return "yes: as this reached you, " + strings.Join(open, "; ")
 }
@@ -81,7 +81,7 @@ func (s *Supervisor) DecisionsNow() string {
 func (s *Supervisor) decisionsLine() string {
 	open := s.openDecisions()
 	if len(open) == 0 {
-		return "Decisions open right now: none. No agent is waiting at a prompt for the CEO's answer."
+		return "Decisions open right now: none. No agent is waiting at a prompt for the user's answer."
 	}
 	return "Decisions open right now: " + strings.Join(open, "; ") + "."
 }

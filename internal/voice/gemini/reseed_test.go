@@ -56,7 +56,7 @@ func TestReconnectAfter1011ReseedsTheConversation(t *testing.T) {
 	}
 	recap := contents[0].content.Turns[0].Parts[0].Text
 	for _, want := range []string{
-		"Shepherd: why did the auth tests fail?",
+		"User: why did the auth tests fail?",
 		"You: Two tests time out on the token refresh.",
 		"Supervisor update: docs finished the readme.",
 		"Do not answer it",
@@ -155,7 +155,7 @@ func TestReseedEndsWithTheFocusLine(t *testing.T) {
 	c1.waitSent(t, "focus", isContent(focus))
 	c1.fail(errors.New("websocket: close 1011 (internal server error): Internal error encountered."))
 	h.waitEvent("resumed", func(ev voice.Event) bool { _, ok := ev.(voice.EventResumed); return ok })
-	c2.waitSent(t, "recap", isContent("Shepherd: how are the tests?"))
+	c2.waitSent(t, "recap", isContent("User: how are the tests?"))
 	var recap string
 	for _, m := range c2.sentMsgs() {
 		if m.kind == "content" {

@@ -46,7 +46,7 @@ func TestBriefingIsAFunctionResponse(t *testing.T) {
 			t.Errorf("briefing lacks %s: %v", k, fr.Response)
 		}
 	}
-	if fr.Response["from"] != "slow brain" {
+	if fr.Response["from"] != "orchestrator" {
 		t.Errorf("from = %v", fr.Response["from"])
 	}
 	if c.count("content") != 0 {
@@ -124,7 +124,7 @@ func TestAnswerIsBriefingShaped(t *testing.T) {
 	c.serve(turnCompleteMsg())
 	m := c.waitSent(t, "answer", func(m sent) bool { return m.kind == "tool" && m.tool.FunctionResponses[0].ID == "call-1" })
 	r := m.tool.FunctionResponses[0].Response
-	if r["facts"] != "auth is done; 42 tests pass." || r["spoken"] != nil || r["from"] != "slow brain" || r["at"] == nil {
+	if r["facts"] != "auth is done; 42 tests pass." || r["spoken"] != nil || r["from"] != "orchestrator" || r["at"] == nil {
 		t.Errorf("response = %v", r)
 	}
 }
@@ -143,7 +143,7 @@ func TestCutFactSaysWhoCut(t *testing.T) {
 	s.brief.flushBy, s.brief.flushAt = "push", now
 	byDaemon := s.noteCutLocked(rep)
 	s.mu.Unlock()
-	if !strings.Contains(fact, "the CEO cut you off after 2.1 s of 6.4 s") || !strings.Contains(fact, `"bench-codex wants to"`) {
+	if !strings.Contains(fact, "the user cut you off after 2.1 s of 6.4 s") || !strings.Contains(fact, `"bench-codex wants to"`) {
 		t.Errorf("fact = %q", fact)
 	}
 	if !strings.Contains(byDaemon, "the daemon cut you off") {

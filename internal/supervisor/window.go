@@ -132,7 +132,7 @@ func (s *Supervisor) WindowPrompt(ctx context.Context, paneID, text string) (Win
 	s.invalidateBriefingLocked()
 	s.mu.Unlock()
 	if s.brain != nil {
-		s.brain.Daemon(fmt.Sprintf("the CEO typed a prompt in %s's window: %q", name, text))
+		s.brain.Daemon(fmt.Sprintf("the user typed a prompt in %s's window: %q", name, text))
 	}
 	return WindowResult{Kind: "prompt", Spoken: "Sent to " + name + "."}, nil
 }
@@ -174,7 +174,7 @@ func (s *Supervisor) WindowKeys(ctx context.Context, paneID string, keys []strin
 	}
 	name := aliasOr(state.Say(row))
 	if s.brain != nil {
-		s.brain.Daemon(fmt.Sprintf("the CEO pressed %s in %s's window", strings.Join(keys, " "), name))
+		s.brain.Daemon(fmt.Sprintf("the user pressed %s in %s's window", strings.Join(keys, " "), name))
 	}
 	return WindowResult{Kind: "keys", Spoken: "Pressed " + strings.Join(keys, " ") + " in " + name + "'s window."}, nil
 }

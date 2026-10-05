@@ -20,7 +20,7 @@ func TestHeardFactsInUtteranceRequest(t *testing.T) {
 	h.After = []PushedLine{{Text: "Want it to fix those two links?", At: start.Add(time.Second)}}
 	s := requestText(req)
 	for _, want := range []string{
-		"The CEO began saying these words at 09:00:09.",
+		"The user began saying these words at 09:00:09.",
 		`The last line the voice was given before that (09:00:05): "Shall I let you know when it finishes?".`,
 		`so not heard when they spoke: [09:00:10, 1 s after] "Want it to fix those two links?"`,
 	} {

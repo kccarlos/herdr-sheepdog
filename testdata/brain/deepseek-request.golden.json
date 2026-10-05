@@ -5,7 +5,7 @@
       "role": "system"
     },
     {
-      "content": "[10:00:00] Worker event: auth: ? -\u003e working\n[10:00:00] CEO said: \"what is auth doing?\"\n[10:00:00] Request from the assistant (ask): question=\"what is auth doing?\" agent=\"auth\"",
+      "content": "[10:00:00] Worker event: auth: ? -\u003e working\n[10:00:00] User said: \"what is auth doing?\"\n[10:00:00] Request from the assistant (ask): question=\"what is auth doing?\" agent=\"auth\"",
       "role": "user"
     },
     {

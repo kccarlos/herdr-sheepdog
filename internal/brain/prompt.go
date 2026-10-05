@@ -215,7 +215,7 @@ func renderRoster(agents []AgentInfo, now time.Time) string {
 			fmt.Fprintf(&b, "; task: %q", clipText(oneLine(a.Task), rosterTaskRunes))
 		}
 		if !a.LastInteraction.IsZero() {
-			fmt.Fprintf(&b, "; CEO last dealt with it %s ago", agoCoarse(now.Sub(a.LastInteraction)))
+			fmt.Fprintf(&b, "; user last dealt with it %s ago", agoCoarse(now.Sub(a.LastInteraction)))
 		}
 		if p := a.Pending; p != nil {
 			b.WriteString("; WAITING FOR AN ANSWER")
@@ -286,7 +286,7 @@ func renderLedgerN(agents []AgentInfo, notes []string, promises []PromiseInfo, n
 	}
 	if len(notes) > 0 {
 		start := max(0, len(notes)-ledgerNotes)
-		b.WriteString("Notes from the CEO: ")
+		b.WriteString("Notes from the user: ")
 		for i, note := range notes[start:] {
 			if i > 0 {
 				b.WriteString(" | ")

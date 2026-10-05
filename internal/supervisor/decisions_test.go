@@ -18,7 +18,7 @@ func TestAnnounceSaysNoDecisionOpen(t *testing.T) {
 	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
 	h.sup.touch("w5:p1")
 	doneAuth(h)
-	if text := m.Calls()[0].Text(); !strings.Contains(text, "Decisions open right now: none. No agent is waiting at a prompt for the CEO's answer.") {
+	if text := m.Calls()[0].Text(); !strings.Contains(text, "Decisions open right now: none. No agent is waiting at a prompt for the user's answer.") {
 		t.Errorf("model saw:\n%s", text)
 	}
 	if got := h.sup.DecisionsNow(); !strings.HasPrefix(got, "none:") {

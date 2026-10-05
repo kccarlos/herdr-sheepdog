@@ -42,7 +42,7 @@ func TestInvestigateStartsAJobAndAnswersPending(t *testing.T) {
 	}
 	job := h.host.Investigated[0]
 	if job.Question != "why did the clamp test fail?" || job.Asked != "explain why the tests failed" {
-		t.Errorf("job = %+v (the CEO's own words travel with it)", job)
+		t.Errorf("job = %+v (the user's own words travel with it)", job)
 	}
 	// The tool result is the job and the estimate, nothing else: the
 	// answer is not in this turn.
@@ -107,9 +107,9 @@ func TestInvestigationDeliveryTurn(t *testing.T) {
 	for _, want := range []string{
 		`Event from the supervisor (investigation): agent="auth" event="investigation.done"`,
 		`You asked it: "why did the clamp test fail?"`,
-		`What the CEO actually said: "explain why the tests failed"`,
+		`What the user actually said: "explain why the tests failed"`,
 		"source=investigation>>>",
-		"the outcome in at most two short sentences for the ear",
+		"the outcome for the ear, as complete as the finding needs",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("request lacks %q:\n%s", want, text)

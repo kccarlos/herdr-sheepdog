@@ -673,7 +673,7 @@ var (
 	// know when it's done") into the instruction and the promise.
 	rePromise  = regexp.MustCompile(`(?i)^(.*?)\s*(?:,|;|\band\b|\bthen\b)?\s*\b((?:please\s+)?(?:let me know|tell me|remind me|ping me|notify me)\b.*)$`)
 	reLastTask = regexp.MustCompile(`(?m)^- ([^:\n]+): last task "((?:[^"\\]|\\.)*)"`)
-	reCEOSaid  = regexp.MustCompile(`CEO said: "((?:[^"\\]|\\.)*)"`)
+	reCEOSaid  = regexp.MustCompile(`User said: "((?:[^"\\]|\\.)*)"`)
 	// The shapes an utterance takes for the reflex's own intent split
 	// (the real brain decides this with a model; this is a stand-in).
 	reNoteWords = regexp.MustCompile(`(?i)^(?:please\s+)?(?:remember|note|keep in mind|don'?t forget)\b`)
@@ -777,7 +777,7 @@ func reflex(call Call) (*genai.GenerateContentResponse, error) {
 	}
 	if reSummarise.MatchString(strings.TrimSpace(text)) {
 		lines := strings.Count(strings.TrimSpace(text), "\n")
-		return Response(Step{Text: fmt.Sprintf("Summary by the fake model: %d transcript lines about the agents and what the CEO asked; nothing is still open.", lines)}), nil
+		return Response(Step{Text: fmt.Sprintf("Summary by the fake model: %d transcript lines about the agents and what the user asked; nothing is still open.", lines)}), nil
 	}
 	usage := [2]int32{int32(len(call.Text()) / 4), 30}
 	forced := call.Config != nil && call.Config.ToolConfig != nil && call.Config.ToolConfig.FunctionCallingConfig != nil && call.Config.ToolConfig.FunctionCallingConfig.Mode == genai.FunctionCallingConfigModeNone
@@ -800,7 +800,7 @@ func reflex(call Call) (*genai.GenerateContentResponse, error) {
 		return Response(Step{Text: eventReply(call, text, m), Usage: usage}), nil
 	}
 	if len(reqs) == 0 {
-		return Response(Step{Text: Reply("The fake model has no request to answer.", "This is the reflex model (--brain=fake); it only answers the shepherd's utterances and the supervisor's events."), Usage: [2]int32{int32(len(call.Text()) / 4), 20}}), nil
+		return Response(Step{Text: Reply("The fake model has no request to answer.", "This is the reflex model (--brain=fake); it only answers the user's utterances and the supervisor's events."), Usage: [2]int32{int32(len(call.Text()) / 4), 20}}), nil
 	}
 	req := reRequest.FindStringSubmatch(text[reqs[len(reqs)-1][0]:])
 	kind, question, agent := req[1], unquote(req[2]), unquote(req[3])
@@ -875,7 +875,7 @@ func respondToResult(call Call, fr *genai.FunctionResponse) *genai.GenerateConte
 			return Response(Step{Calls: []*genai.FunctionCall{readCall(alias, question)}, Usage: usage})
 		}
 		if kind == "propose" {
-			return Response(Step{Text: Reply("Which agent should I tell?", "The CEO did not say a name and the fake model does not guess."), Usage: usage})
+			return Response(Step{Text: Reply("Which agent should I tell?", "The user did not say a name and the fake model does not guess."), Usage: usage})
 		}
 	case brain.ToolPrompt:
 		// The instruction went; a promise in the same words is still

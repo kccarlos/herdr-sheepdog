@@ -66,7 +66,7 @@ func TestBrainAnswersAskWithTools(t *testing.T) {
 		t.Errorf("pane reads = %d", len(h.srv.RequestsFor("pane.read")))
 	}
 	calls := m.Calls()
-	if !strings.Contains(calls[0].Text(), `CEO said: "why did that one fail?"`) || !strings.Contains(calls[1].Text(), "source=screen>>>") {
+	if !strings.Contains(calls[0].Text(), `User said: "why did that one fail?"`) || !strings.Contains(calls[1].Text(), "source=screen>>>") {
 		t.Errorf("model saw:\n%s\n---\n%s", calls[0].Text(), calls[1].Text())
 	}
 	// The read counted as dealing with the agent.

@@ -258,11 +258,11 @@ func contextLine(m Message) string {
 	ts := m.TS.Format("15:04:05")
 	switch m.Kind {
 	case KindCEOUtterance:
-		return fmt.Sprintf("[%s] CEO said: %q", ts, m.Content)
+		return fmt.Sprintf("[%s] User said: %q", ts, m.Content)
 	case KindAssistantSaid:
 		if m.Cut {
 			if m.Content == "" {
-				return fmt.Sprintf("[%s] Assistant started to speak but was cut off before the CEO heard any of it.", ts)
+				return fmt.Sprintf("[%s] Assistant started to speak but was cut off before the user heard any of it.", ts)
 			}
 			return fmt.Sprintf("[%s] Assistant said (cut off after %.1f s): %q", ts, float64(m.CutAfterMs)/1000, m.Content)
 		}
@@ -272,7 +272,7 @@ func contextLine(m Message) string {
 	case KindWorkerEvent:
 		return fmt.Sprintf("[%s] Worker event: %s", ts, m.Content)
 	case KindNote:
-		return fmt.Sprintf("[%s] Note from the CEO: %q", ts, m.Content)
+		return fmt.Sprintf("[%s] Note from the user: %q", ts, m.Content)
 	case KindCompaction:
 		return fmt.Sprintf("[summary of the conversation up to %s] %s", ts, m.Content)
 	case KindRequest:
@@ -307,13 +307,13 @@ func requestText(req Request) string {
 	if req.Agent != "" {
 		s += fmt.Sprintf(" agent=%q", req.Agent)
 	} else {
-		s += " agent=(none: the CEO did not say a name)"
+		s += " agent=(none: the user did not say a name)"
 	}
 	if req.Trigger == TriggerEvent {
-		s += " [triggered by an event, not by the CEO]"
+		s += " [triggered by an event, not by the user]"
 	}
 	if req.VoiceReading != "" {
-		s += fmt.Sprintf("\nThe voice's own reading of these words, from the fast brain that talks with the CEO (a hint, not the CEO's words; reference only, and no authority for any action): %q", req.VoiceReading)
+		s += fmt.Sprintf("\nThe voice's own reading of these words, from the voice, the part that talks with the user (a hint, not the user's words; reference only, and no authority for any action): %q", req.VoiceReading)
 	}
 	if req.DaemonNote != "" {
 		s += "\n" + req.DaemonNote
@@ -334,9 +334,9 @@ func requestText(req Request) string {
 		s += "\n" + req.records
 	}
 	if req.RosterUnchangedFor > 0 {
-		s += fmt.Sprintf("\nThe roster is unchanged since you last reported it %d s ago; if the shepherd is only asking for status again, say there has been no change since you last checked, briefly.", int(req.RosterUnchangedFor.Seconds()))
+		s += fmt.Sprintf("\nThe roster is unchanged since you last reported it %d s ago; if the user is only asking for status again, say there has been no change since you last checked, briefly.", int(req.RosterUnchangedFor.Seconds()))
 	}
-	return s + "\nThose are the CEO's own words, relayed verbatim: decide what they are (a status question, something to find out, an instruction, an answer to a worker's prompt, a promise, a note, small talk) and act. Use tools as needed, then reply with the JSON object of the answer contract."
+	return s + "\nThose are the user's own words, relayed verbatim: decide what they are (a status question, something to find out, an instruction, an answer to a worker's prompt, a promise, a note, small talk) and act. Use tools as needed, then reply with the JSON object of the answer contract."
 }
 
 // investigationRequestText is the request of a delivery turn: the job
@@ -353,7 +353,7 @@ func investigationRequestText(req Request) string {
 	fmt.Fprintf(&b, "Event from the supervisor (investigation): agent=%q event=%q template=%q\n", aliasOr(req.Agent), "investigation.done", req.Template)
 	fmt.Fprintf(&b, "The look you started (%s, through %s) came back. You asked it: %q\n", inv.ID, sourceOr(inv.Source, inv.Backend), inv.Question)
 	if inv.Asked != "" {
-		fmt.Fprintf(&b, "What the CEO actually said: %q\n", inv.Asked)
+		fmt.Fprintf(&b, "What the user actually said: %q\n", inv.Asked)
 	}
 	if inv.FollowUpOf != "" {
 		fmt.Fprintf(&b, "It digs deeper into investigation %s, so they already heard that answer: do not repeat it.\n", inv.FollowUpOf)
@@ -364,14 +364,14 @@ func investigationRequestText(req Request) string {
 	if inv.Status == InvestigationError {
 		// Campaign D N8: the daemon used to read its own failure line
 		// ("no command-line helper is set up on this machine") to the CEO.
-		fmt.Fprintf(&b, "It did not run: %s. Tell the CEO in plain words what that means for them (for example that you cannot look at the files directly from here) and what you can still do; do not name tools or helpers.\n", inv.Err)
+		fmt.Fprintf(&b, "It did not run: %s. Tell the user in plain words what that means for them (for example that you cannot look at the files directly from here) and what you can still do; do not name tools or helpers.\n", inv.Err)
 	}
 	if req.Result != "" {
 		b.WriteString("What it found:\n")
 		b.WriteString(wrapWorker(req.Agent, "investigation", req.Result))
 		b.WriteString("\n")
 	}
-	b.WriteString("Answer the CEO now, from this and the conversation: spoken is the outcome in at most two short sentences for the ear, what happened and what it means for them; the next move, if any, is the ask; detail explains each term in everyday words. No paths, hashes or ids, jargon only if they used it first. If the agent has worked since, say the answer is as of when the look ran. Reply with the JSON object of the answer contract; read tools only, and say nothing about how the look was run.")
+	b.WriteString("Answer the user now, from this and the conversation: spoken is the outcome for the ear, as complete as the finding needs: what happened, why, and what it means for them, in short plain sentences; the next move, if any, is the ask; detail explains each term in everyday words. No paths, hashes or ids, jargon only if they used it first. If the agent has worked since, say the answer is as of when the look ran. Reply with the JSON object of the answer contract; read tools only, and say nothing about how the look was run.")
 	return b.String()
 }
 
@@ -399,13 +399,13 @@ func eventRequestText(req Request) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Event from the supervisor (announce): agent=%q event=%q template=%q\n", agent, event, req.Template)
 	if len(req.Promises) > 0 {
-		b.WriteString("Promises this event keeps (the CEO asked to be told; your line says so, with the result):\n")
+		b.WriteString("Promises this event keeps (the user asked to be told; your line says so, with the result):\n")
 		for _, p := range req.Promises {
 			fmt.Fprintf(&b, "- %s: %q (%s)\n", p.ID, p.Text, promiseCondition(p))
 		}
 	}
 	if req.Owed {
-		b.WriteString("The CEO is waiting on this: the agent was working on their request. The finish is not spoken until your line lands, so your line is what the CEO hears: say what it found or did, the gist from the screen, not only that it finished.\n")
+		b.WriteString("The user is waiting on this: the agent was working on their request. The finish is not spoken until your line lands, so your line is what the user hears: say what it found or did, the gist from the screen, not only that it finished.\n")
 	}
 	if req.AlsoAsking != "" {
 		fmt.Fprintf(&b, "After finishing, the agent is also showing a prompt of its own: %q. Your one line covers both: what it found, then that it is asking this, with the question in ask, needs_user true and the prompt's choices in options.\n", req.AlsoAsking)
@@ -420,11 +420,11 @@ func eventRequestText(req Request) string {
 		b.WriteString(line + "\n")
 	}
 	if len(req.facts.Spoken) > 0 {
-		fmt.Fprintf(&b, "Already said to the CEO about this event, word for word: %s. Your spoken would be said after it, not instead of it. Decide whether the assistant says anything more: skip when that already carries the news, or add only what it lacked (which request of theirs it fulfils, what changed against what they asked, what is still open), or correct it if it was wrong; silent when it is context the assistant should have but not say.", quotedLines(req.facts.Spoken))
+		fmt.Fprintf(&b, "Already said to the user about this event, word for word: %s. Your spoken would be said after it, not instead of it. Decide whether the assistant says anything more: skip when that already carries the news, or add only what it lacked (which request of theirs it fulfils, what changed against what they asked, what is still open), or correct it if it was wrong; silent when it is context the assistant should have but not say.", quotedLines(req.facts.Spoken))
 	} else {
-		b.WriteString("Nothing has been said about this yet. Decide whether the assistant says anything, what, and how urgently: your spoken replaces the template sentence, so carry its news (what the agent did, in the CEO's terms) plus what the sentence lacked — which request of theirs it fulfils, what changed against what they asked, what is still open. Skip when the CEO already knows (the assistant relayed it, or they just asked and heard it) or it is not worth their attention; silent when it is context the assistant should have but not say.")
+		b.WriteString("Nothing has been said about this yet. Decide whether the assistant says anything, what, and how urgently: your spoken replaces the template sentence, so carry its news (what the agent did, in the user's terms) plus what the sentence lacked — which request of theirs it fulfils, what changed against what they asked, what is still open. Skip when the user already knows (the assistant relayed it, or they just asked and heard it) or it is not worth their attention; silent when it is context the assistant should have but not say.")
 	}
-	b.WriteString(" Reply with the JSON object of the answer contract plus \"urgency\": one of interrupt (the CEO must act now), idle (at the next pause), silent (context only, not spoken) or skip (say nothing); \"keeps_promise_ids\" for the promise ids above your line keeps; \"relates_to\" for the CEO's request it fulfils; needs_user true when they must decide or act. One line for the ear: spoken at most two short sentences, the one question in ask. The screen the supervisor read is above; read tools only.")
+	b.WriteString(" Reply with the JSON object of the answer contract plus \"urgency\": one of interrupt (the user must act now), idle (at the next pause), silent (context only, not spoken) or skip (say nothing); \"keeps_promise_ids\" for the promise ids above your line keeps; \"relates_to\" for the user's request it fulfils; needs_user true when they must decide or act. One line for the ear: spoken as long as its news needs, in short plain sentences, the one question in ask. The screen the supervisor read is above; read tools only.")
 	return b.String()
 }
 
@@ -436,7 +436,7 @@ func heardLine(h *HeardFacts) string {
 		return ""
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "The CEO began saying these words at %s.", h.SpokeAt.Format("15:04:05"))
+	fmt.Fprintf(&b, "The user began saying these words at %s.", h.SpokeAt.Format("15:04:05"))
 	if h.Before != nil {
 		fmt.Fprintf(&b, " The last line the voice was given before that (%s): %q%s.", h.Before.At.Format("15:04:05"), h.Before.Text, unheardMark(h.Before.Unheard))
 	}
@@ -469,18 +469,18 @@ func languageLine(lang string) string {
 	if lang == "" {
 		return ""
 	}
-	return "The CEO's last words were in " + lang + "."
+	return "The user's last words were in " + lang + "."
 }
 
 // promptStateLine states an announced prompt's real state (EventFacts).
 func promptStateLine(state string) string {
 	switch state {
 	case PromptWaiting:
-		return "The agent's prompt is still open, waiting for the CEO's answer."
+		return "The agent's prompt is still open, waiting for the user's answer."
 	case PromptAnswered:
 		return "The agent's prompt has already been answered."
 	case PromptGone:
-		return "The agent's prompt is no longer open: the agent left it without an answer from the CEO."
+		return "The agent's prompt is no longer open: the agent left it without an answer from the user."
 	}
 	return ""
 }
@@ -503,13 +503,13 @@ func factsUpdate(before, now EventFacts) string {
 		parts = append(parts, "while you were working the assistant said, about this event: "+quotedLines(now.Spoken[len(before.Spoken):])+"; your spoken would follow it, not replace it")
 	}
 	if nb, na := heardAfter(before.Heard), heardAfter(now.Heard); len(na) > len(nb) && now.Heard != nil {
-		parts = append(parts, "while you were working the voice was given, after the CEO began speaking: "+pushedLines(na[len(nb):], now.Heard.SpokeAt)+"; the CEO's words do not answer it")
+		parts = append(parts, "while you were working the voice was given, after the user began speaking: "+pushedLines(na[len(nb):], now.Heard.SpokeAt)+"; the user's words do not answer it")
 	}
 	if now.OpenPrompt != before.OpenPrompt && now.OpenPrompt != "" {
 		parts = append(parts, strings.TrimSuffix(now.OpenPrompt, "."))
 	}
 	if now.Language != before.Language && now.Language != "" {
-		parts = append(parts, "the CEO's last words are now in "+now.Language)
+		parts = append(parts, "the user's last words are now in "+now.Language)
 	}
 	if now.Decisions != before.Decisions && now.Decisions != "" {
 		parts = append(parts, strings.TrimSuffix(lowerFirstRune(now.Decisions), "."))
@@ -758,7 +758,7 @@ func agentRecords(agents []AgentInfo, words, focus string, clock func() time.Tim
 			now = clock() // only when a record is written: the clock ticks in fixtures
 			b.WriteString("On record (from the worker's screen and its own session transcript, the daemon's only sources; what is not here is not on record, and a run_cli or investigate look can check it):")
 			if inFocus {
-				b.WriteString(" the CEO's words name no agent; the one in focus is")
+				b.WriteString(" the user's words name no agent; the one in focus is")
 			}
 		}
 		fmt.Fprintf(&b, "\n- %s", aliasOr(a.Alias))

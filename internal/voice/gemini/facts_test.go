@@ -113,7 +113,7 @@ func TestUnvoicedBriefingIsReported(t *testing.T) {
 	c.serve(turnCompleteMsg())
 	r := c.waitSent(t, "answer", func(m sent) bool { return m.kind == "tool" && m.tool.FunctionResponses[0].ID == "call-1" }).tool.FunctionResponses[0].Response
 	rel, _ := r["relation"].([]string)
-	if len(rel) == 0 || !strings.Contains(rel[0], "the CEO has not heard it") {
+	if len(rel) == 0 || !strings.Contains(rel[0], "the user has not heard it") {
 		t.Errorf("answer relation = %v", r["relation"])
 	}
 
@@ -141,7 +141,7 @@ func TestUnvoicedBriefingIsReported(t *testing.T) {
 func TestAnnouncementCarriesDecisionOpen(t *testing.T) {
 	c := newFakeConn("c1")
 	cfg := briefingConfig()
-	cfg.DecisionsNow = func() string { return "none: as this reached you, no agent is waiting for the CEO's answer" }
+	cfg.DecisionsNow = func() string { return "none: as this reached you, no agent is waiting for the user's answer" }
 	h := newHarness(t, cfg, &fakeDialer{results: []func() (Conn, error){ok(c)}})
 	if err := h.s.PushTagged("bench-claude added the changelog entry.", voice.UrgencyIdle, map[string]any{"agent": "bench-claude", "event_id": "evt-1"}); err != nil {
 		t.Fatal(err)

@@ -21,7 +21,7 @@ func TestRecapRecentKeepsTheNewestWithinBudget(t *testing.T) {
 	if len(got) != 3 || got[0].Text != "6789" || got[1].Text != "abcde" || got[2].Text != "XYZ" {
 		t.Errorf("Recent = %+v", got)
 	}
-	if lines := RecapLines(got); lines != "Shepherd: 6789\nYou: abcde\nSupervisor update: XYZ" {
+	if lines := RecapLines(got); lines != "User: 6789\nYou: abcde\nSupervisor update: XYZ" {
 		t.Errorf("RecapLines = %q", lines)
 	}
 }
@@ -63,8 +63,8 @@ func TestRecapLeavesOutAcksAndSelfRelays(t *testing.T) {
 	r.Add(RecapAssistant, "On it, telling codex to fix the count now.")
 	got := RecapLines(r.Recent(1000))
 	want := "Supervisor update: 测试跑完了，数量出来是三，应该是五。要我直接让 codex 把它修掉吗？\n" +
-		"Shepherd: 让 codex 修掉吗\n" +
-		"Shepherd: 让 codex 修。\n" +
+		"User: 让 codex 修掉吗\n" +
+		"User: 让 codex 修。\n" +
 		"You: On it, telling codex to fix the count now."
 	if got != want {
 		t.Errorf("recap =\n%s\nwant\n%s", got, want)

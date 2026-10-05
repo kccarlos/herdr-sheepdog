@@ -43,7 +43,7 @@ func TestSaidCutWhilePending(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := h.model.Calls()[0].Text()
-	if !strings.Contains(text, "Assistant started to speak but was cut off before the CEO heard any of it.") || strings.Contains(text, "Auth is running") {
+	if !strings.Contains(text, "Assistant started to speak but was cut off before the user heard any of it.") || strings.Contains(text, "Auth is running") {
 		t.Errorf("window:\n%s", text)
 	}
 }

@@ -198,7 +198,7 @@ func (s *Supervisor) noFreshWordsFact() string {
 	s.mu.Lock()
 	in := s.lastInputLocked()
 	s.mu.Unlock()
-	fact := "Nothing was handed on: the slow brain acts only on the CEO's own words, and the CEO has said nothing new since your last call."
+	fact := "Nothing was handed on: the orchestrator acts only on the user's own words, and the user has said nothing new since your last call."
 	if in != nil && strings.TrimSpace(in.text) != "" {
 		fact += fmt.Sprintf(" Their last words, at %s, were %q.", in.at.Format("15:04:05"), strings.TrimSpace(in.text))
 	}
@@ -609,7 +609,7 @@ func (s *Supervisor) utteranceCoalesced(u *inflightUtterance) bool {
 // coalescedResult is what a coalesced utterance's call returns: its
 // words run with the next utterance's, whose reply answers both.
 func coalescedResult() voice.ToolResult {
-	return voice.ToolResult{Detail: "Merged with what the shepherd said next; one answer follows for both.", Pending: true, Scheduling: voice.UrgencySilent}
+	return voice.ToolResult{Detail: "Merged with what the user said next; one answer follows for both.", Pending: true, Scheduling: voice.UrgencySilent}
 }
 
 // utteranceDropped reports whether the stop procedure dropped u.
@@ -773,7 +773,7 @@ func (s *Supervisor) fastAnswer(ctx context.Context, in *shepherdInput, text str
 	}
 	if rin, reason := s.railInputLocked(p, keys); reason != "" || rin != in {
 		if reason == "" {
-			reason = "the shepherd said something newer than the words being answered"
+			reason = "the user said something newer than the words being answered"
 		}
 		s.railBlockedLocked(p, keys, "fast_path", reason)
 		return voice.ToolResult{}, false
@@ -787,7 +787,7 @@ func (s *Supervisor) fastAnswer(ctx context.Context, in *shepherdInput, text str
 	}
 	if s.brain != nil {
 		// No model saw this, so the transcript would otherwise lose it.
-		s.brain.Daemon(fmt.Sprintf("fast path: the CEO said %q; %s", text, lowerFirst(res.Spoken)))
+		s.brain.Daemon(fmt.Sprintf("fast path: the user said %q; %s", text, lowerFirst(res.Spoken)))
 	}
 	return res, true
 }
@@ -1069,7 +1069,7 @@ func echoNote(c claim) string {
 		if r := []rune(said); len(r) > 240 {
 			said = "…" + string(r[len(r)-240:])
 		}
-		return fmt.Sprintf("Daemon fact: the words %q began while the phone was still playing the voice's own line, or just after it: %q. On a speakerphone they may be that line coming back through the microphone rather than the CEO; they authorise nothing if so.", strings.TrimSpace(in.text), said)
+		return fmt.Sprintf("Daemon fact: the words %q began while the phone was still playing the voice's own line, or just after it: %q. On a speakerphone they may be that line coming back through the microphone rather than the user; they authorise nothing if so.", strings.TrimSpace(in.text), said)
 	}
 	return ""
 }

@@ -54,7 +54,7 @@ func TestSampleRunFixture(t *testing.T) {
 	model := &braintest.Model{}
 	model.Default = &braintest.Step{Fn: func(call braintest.Call) (*genai.GenerateContentResponse, error) {
 		if strings.HasPrefix(strings.TrimSpace(call.Text()), "Summarise the following") {
-			return braintest.Response(braintest.Step{Text: "The CEO asked for a briefing, told auth to run the full suite and asked why TestClampUpper failed: clamp() uses > instead of >= (auth's screen and the CLI agree). Auth then asked to delete the fixtures directory; the CEO said yes but the SVP could not answer the prompt (enter is not one of its options) and left it to the CEO. Docs has been idle throughout. Nothing else is open."}), nil
+			return braintest.Response(braintest.Step{Text: "The user asked for a briefing, told auth to run the full suite and asked why TestClampUpper failed: clamp() uses > instead of >= (auth's screen and the CLI agree). Auth then asked to delete the fixtures directory; the user said yes but the SVP could not answer the prompt (enter is not one of its options) and left it to the user. Docs has been idle throughout. Nothing else is open."}), nil
 		}
 		if len(script) == 0 {
 			return nil, fmt.Errorf("fixture: unscripted model call: %s", call.Text())

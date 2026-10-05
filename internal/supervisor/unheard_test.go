@@ -30,7 +30,7 @@ func TestUnheardPushReachesTheBrainAsAFact(t *testing.T) {
 		t.Fatal("no brain turn")
 	}
 	text := calls[len(calls)-1].Text()
-	if !strings.Contains(text, `the CEO did not hear: "claude 改的是删除功能：购物车里把某件商品整件拿掉。" (only "claude 改的是删除功能：购物车里把" reached them)`) {
+	if !strings.Contains(text, `the user did not hear: "claude 改的是删除功能：购物车里把某件商品整件拿掉。" (only "claude 改的是删除功能：购物车里把" reached them)`) {
 		t.Errorf("the brain was not told:\n%s", text)
 	}
 	if strings.Contains(text, "数量出来是三") {

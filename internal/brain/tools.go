@@ -105,31 +105,31 @@ func toolDeclarations(readOnly bool) []*genai.Tool {
 		return []*genai.Tool{{FunctionDeclarations: read}}
 	}
 	act := []*genai.FunctionDeclaration{
-		{Name: ToolPrompt, Description: "Send an instruction to an agent as typed text. Its own approval prompts still apply. Use for anything the CEO tells an agent to do. " +
-			"To start a new agent instead, only when the CEO asks for one, omit agent and give new_agent_dir; text is then its first instruction (optional). " +
-			"A directory that is not a known project is refused with the list of projects: ask the CEO which one. Its first question (e.g. trusting the folder) comes to the CEO like any other. " +
-			"Codex runs on a free plan: start one only when the CEO asks for Codex by name.",
+		{Name: ToolPrompt, Description: "Send an instruction to an agent as typed text. Its own approval prompts still apply. Use for anything the user tells an agent to do. " +
+			"To start a new agent instead, only when the user asks for one, omit agent and give new_agent_dir; text is then its first instruction (optional). " +
+			"A directory that is not a known project is refused with the list of projects: ask the user which one. Its first question (e.g. trusting the folder) comes to the user like any other. " +
+			"Codex runs on a free plan: start one only when the user asks for Codex by name.",
 			Parameters: obj(map[string]*genai.Schema{"agent": agent, "text": str("the instruction, complete and self-contained"),
-				"new_agent_dir":   str("only to start a new agent: the project's directory name as the CEO said it, or its path"),
+				"new_agent_dir":   str("only to start a new agent: the project's directory name as the user said it, or its path"),
 				"new_agent_kind":  {Type: genai.TypeString, Enum: SpawnKinds, Description: "only to start a new agent: claude (default) or codex"},
-				"new_agent_model": str("only when the CEO asks for a model; for a cheap Claude, haiku"),
+				"new_agent_model": str("only when the user asks for a model; for a cheap Claude, haiku"),
 			}, nil)},
-		{Name: ToolSendKeys, Description: "Answer an agent's approval prompt with the keys of one of its on-screen options (see the roster). Permitted only when the CEO authorised that answer in this turn.",
+		{Name: ToolSendKeys, Description: "Answer an agent's approval prompt with the keys of one of its on-screen options (see the roster). Permitted only when the user authorised that answer in this turn.",
 			Parameters: obj(map[string]*genai.Schema{"agent": agent, "keys": {Type: genai.TypeArray, Items: str("one key name, e.g. enter, esc, y, 1"), Description: "the option's keys, in order"}}, []string{"agent", "keys"})},
 		{Name: ToolInterrupt, Description: "Send Ctrl-C to an agent to stop what it is doing. The result says whether it stopped. " +
-			"With close true it closes the agent instead: its pane and session end, only when the CEO asks to close or shut down that agent or its session (not to stop a task). If it is unclear which agent, ask first.",
+			"With close true it closes the agent instead: its pane and session end, only when the user asks to close or shut down that agent or its session (not to stop a task). If it is unclear which agent, ask first.",
 			Parameters: obj(map[string]*genai.Schema{"agent": agent,
-				"close":        {Type: genai.TypeBoolean, Description: "only when the CEO asks to close the agent: close its pane, ending it"},
-				"protected_ok": {Type: genai.TypeBoolean, Description: "only with close, when the CEO named this very agent and the result said it is protected"},
+				"close":        {Type: genai.TypeBoolean, Description: "only when the user asks to close the agent: close its pane, ending it"},
+				"protected_ok": {Type: genai.TypeBoolean, Description: "only with close, when the user named this very agent and the result said it is protected"},
 			}, []string{"agent"})},
-		{Name: ToolPromise, Description: "Record promised work: the CEO asked to be told when something happens to an agent (\"tell me when it's done\", \"let me know if it asks\", \"remind me\"). The supervisor keeps it: it tells the CEO at the next matching event, whatever the chattiness level. Use it in the same turn as any instruction that goes with it.",
-			Parameters: obj(map[string]*genai.Schema{"agent": agent, "text": str("what the CEO asked to be told, in their words"), "event": {Type: genai.TypeString, Enum: PromiseEvents, Description: "the condition: done (it finished), blocked (it asks something), idle, or any_change"},
-				"due_in_minutes": {Type: genai.TypeInteger, Description: "only when the CEO gave a deadline or asked to be interrupted at once (0); a promise kept past its due time interrupts instead of waiting for a pause"}}, []string{"agent", "text", "event"})},
-		{Name: ToolInvestigate, Description: "Start a background look into something the screen cannot answer and that may take more than a few seconds. source cli (the default): a fresh read-only CLI agent in the agent's repository, for questions about the code itself. source worker: the worker's own session, asked through a read-only copy that remembers everything it saw and did, for why it did something, what it tried, or to explain its decision; it never touches the worker. It returns at once with a job id; the answer reaches the CEO on its own when the job returns, so acknowledge with pending true and say roughly how long. Phrase the question with full context: neither has heard this conversation. One live investigation per agent.",
+		{Name: ToolPromise, Description: "Record promised work: the user asked to be told when something happens to an agent (\"tell me when it's done\", \"let me know if it asks\", \"remind me\"). The supervisor keeps it: it tells the user at the next matching event, whatever the chattiness level. Use it in the same turn as any instruction that goes with it.",
+			Parameters: obj(map[string]*genai.Schema{"agent": agent, "text": str("what the user asked to be told, in their words"), "event": {Type: genai.TypeString, Enum: PromiseEvents, Description: "the condition: done (it finished), blocked (it asks something), idle, or any_change"},
+				"due_in_minutes": {Type: genai.TypeInteger, Description: "only when the user gave a deadline or asked to be interrupted at once (0); a promise kept past its due time interrupts instead of waiting for a pause"}}, []string{"agent", "text", "event"})},
+		{Name: ToolInvestigate, Description: "Start a background look into something the screen cannot answer and that may take more than a few seconds. source cli (the default): a fresh read-only CLI agent in the agent's repository, for questions about the code itself. source worker: the worker's own session, asked through a read-only copy that remembers everything it saw and did, for why it did something, what it tried, or to explain its decision; it never touches the worker. It returns at once with a job id; the answer reaches the user on its own when the job returns, so acknowledge with pending true and say roughly how long. Phrase the question with full context: neither has heard this conversation. One live investigation per agent.",
 			Parameters: obj(map[string]*genai.Schema{"agent": agent, "question": str("a self-contained question"), "follow_up_of": str("the id of the investigation this digs deeper into, to resume the same session"),
 				"source": {Type: genai.TypeString, Enum: []string{InvestigationSourceCLI, InvestigationSourceWorker}, Description: "cli (default, the repository) or worker (the worker's own memory)"}}, []string{"agent", "question"})},
-		{Name: ToolNote, Description: "Remember something the CEO decided or wants kept in mind (\"remember the migrations are off limits today\", \"we are on the release branch\"). Notes are in the ledger of every later turn. Not for promised work: that is promise. With agent and name it renames that agent instead (\"call that one docs\"): the CEO hears it by that name from then on.",
-			Parameters: obj(map[string]*genai.Schema{"text": str("what to remember, in the CEO's words"), "agent": str("only to rename: the agent's alias"), "name": str("only to rename: the new name, as the CEO said it")}, nil)},
+		{Name: ToolNote, Description: "Remember something the user decided or wants kept in mind (\"remember the migrations are off limits today\", \"we are on the release branch\"). Notes are in the ledger of every later turn. Not for promised work: that is promise. With agent and name it renames that agent instead (\"call that one docs\"): the user hears it by that name from then on.",
+			Parameters: obj(map[string]*genai.Schema{"text": str("what to remember, in the user's words"), "agent": str("only to rename: the agent's alias"), "name": str("only to rename: the new name, as the user said it")}, nil)},
 	}
 	return []*genai.Tool{{FunctionDeclarations: append(read, act...)}}
 }
@@ -266,7 +266,7 @@ func (b *Brain) execTool(ctx context.Context, t *turn, call *genai.FunctionCall)
 			// Event turns are read-only: they are not declared
 			// these tools, and the executor refuses them regardless (the
 			// model may still name one).
-			reason := call.Name + " is only permitted in a turn the CEO's own words triggered, never on an event"
+			reason := call.Name + " is only permitted in a turn the user's own words triggered, never on an event"
 			return toolOutcome{railBlocked: reason, err: fmt.Errorf("%w: %s", ErrNotPermitted, reason)}
 		}
 		if err := ctx.Err(); err != nil {
@@ -413,7 +413,7 @@ func (b *Brain) execTool(ctx context.Context, t *turn, call *genai.FunctionCall)
 	case ToolPromise:
 		text, event := arg("text"), strings.ToLower(arg("event"))
 		if text == "" {
-			out.err = errors.New("promise needs the text of what the CEO asked to be told")
+			out.err = errors.New("promise needs the text of what the user asked to be told")
 			return out
 		}
 		if !validPromiseEvent(event) {
@@ -544,7 +544,7 @@ func validPromiseEvent(event string) bool {
 // set. It returns the refusal reason, or "".
 func (b *Brain) rail(trigger Trigger, row AgentInfo, keys []string) string {
 	if trigger != TriggerCEO {
-		return "send_keys is only permitted in a turn the CEO's own words triggered, never on an event"
+		return "send_keys is only permitted in a turn the user's own words triggered, never on an event"
 	}
 	if row.Pending == nil {
 		if row.State == "working" {

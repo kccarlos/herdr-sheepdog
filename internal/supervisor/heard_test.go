@@ -35,7 +35,7 @@ func TestUtteranceRequestSaysWhatTheCEOHadNotHeard(t *testing.T) {
 	}
 	text := calls[0].Text()
 	for _, want := range []string{
-		"The CEO began saying these words at",
+		"The user began saying these words at",
 		"The last line the voice was given before that",
 		offer,
 		"Given to the voice after they began, so not heard when they spoke: [",

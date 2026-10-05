@@ -170,7 +170,7 @@ func Line(codes []string) string {
 	if len(names) == 0 {
 		return ""
 	}
-	line := "The shepherd's language setting, in order of preference: " + strings.Join(names, ", ") + ". Answer in the language they use"
+	line := "The user's language setting, in order of preference: " + strings.Join(names, ", ") + ". Answer in the language they use"
 	switch len(chinese) {
 	case 1:
 		line += "; write Chinese in " + chinese[0] + " characters"

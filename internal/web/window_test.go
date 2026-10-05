@@ -158,7 +158,7 @@ func TestAgentInputPrompt(t *testing.T) {
 			t.Errorf("the prompt text was logged: %s", ev.Payload)
 		}
 	}
-	if lines := brainLines(h); !containsSub(lines, "the CEO typed a prompt in") || !containsSub(lines, "run the tests") {
+	if lines := brainLines(h); !containsSub(lines, "the user typed a prompt in") || !containsSub(lines, "run the tests") {
 		t.Errorf("brain lines = %q", lines)
 	}
 
@@ -201,7 +201,7 @@ func TestAgentInputKeys(t *testing.T) {
 	if in := agentInputs(t, h); len(in) != 1 || in[0]["kind"] != "keys" {
 		t.Errorf("web.agent_input = %v", in)
 	}
-	if lines := brainLines(h); !containsSub(lines, "the CEO pressed esc in") {
+	if lines := brainLines(h); !containsSub(lines, "the user pressed esc in") {
 		t.Errorf("brain lines = %q", lines)
 	}
 	for _, keys := range [][]string{{"q"}, {"ctrl+d"}, {"enter", "rm -rf"}, {}, {"1", "1", "1", "1", "1", "1", "1", "1", "1"}} {
@@ -243,7 +243,7 @@ func TestAgentInputKeysAnswerThePendingQuestion(t *testing.T) {
 	if !confirmed {
 		t.Errorf("no pending.confirmed via tap in %v", h.types())
 	}
-	if lines := brainLines(h); !containsSub(lines, "the shepherd tapped") {
+	if lines := brainLines(h); !containsSub(lines, "the user tapped") {
 		t.Errorf("brain lines = %q", lines)
 	}
 }

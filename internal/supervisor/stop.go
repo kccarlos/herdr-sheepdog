@@ -85,7 +85,7 @@ func (s *Supervisor) Stop(ctx context.Context, trigger string) (voice.ToolResult
 	s.log.Log(logSource, "supervisor.stopped", out.paneID, stopped)
 	if s.brain != nil {
 		// A context line, not a turn: no model call.
-		s.brain.Daemon("the CEO said stop: " + out.what)
+		s.brain.Daemon("the user said stop: " + out.what)
 		if out.queued != "" {
 			s.brain.Daemon(queuedLine(out))
 		}

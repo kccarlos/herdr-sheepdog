@@ -86,7 +86,7 @@ func TestIdleMenuAnswerableByVoice(t *testing.T) {
 	}{
 		{"skip by voice", herdr.StateIdle, "Skip it.", true, ""},
 		{"by number", herdr.StateIdle, "option two", true, ""},
-		{"words about something else", herdr.StateIdle, "Tell codex to run the tests.", false, "auth is showing a menu, but the shepherd's last words are not about it"},
+		{"words about something else", herdr.StateIdle, "Tell codex to run the tests.", false, "auth is showing a menu, but the user's last words are not about it"},
 		{"working pane", herdr.StateWorking, "Skip it.", false, "has no pending approval prompt now"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -160,7 +160,7 @@ func TestMenuGuardAfterADecline(t *testing.T) {
 				t.Fatalf("err = %v, want blocked %v", err, c.blocked)
 			}
 			if c.blocked {
-				if msg := err.Error(); !strings.Contains(msg, "the menu the CEO declined 3 s ago") || !strings.Contains(msg, "may be a stale picture") {
+				if msg := err.Error(); !strings.Contains(msg, "the menu the user declined 3 s ago") || !strings.Contains(msg, "may be a stale picture") {
 					t.Errorf("fact = %q", msg)
 				}
 				return
