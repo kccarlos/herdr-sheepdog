@@ -65,11 +65,16 @@ const (
 	// FeatureModels: the brain model picker (GET /api/brain/models, PUT
 	// /api/brain/model); absent when the brain is off.
 	FeatureModels = "models"
+	// FeatureScreen: the agent window over /ws (screen-subscribe,
+	// screen-unsubscribe, screen, screen-error; "Agent window over /ws");
+	// absent when the daemon has no supervisor.
+	FeatureScreen = "screen"
 )
 
 // Message types. Client→server: client-ready, mute, silence, speaking,
-// playback, cancel, text, ping. Server→client: bot-ready, flush, status,
-// transcript, error, pong.
+// playback, cancel, text, ping, screen-subscribe, screen-unsubscribe.
+// Server→client: bot-ready, flush, status, transcript, error, pong,
+// screen, screen-error.
 const (
 	TypeClientReady = "client-ready"
 	TypeBotReady    = "bot-ready"
@@ -85,6 +90,11 @@ const (
 	TypeTranscript  = "transcript"
 	TypeError       = "error"
 	TypePong        = "pong"
+
+	TypeScreenSubscribe   = "screen-subscribe"
+	TypeScreenUnsubscribe = "screen-unsubscribe"
+	TypeScreen            = "screen"
+	TypeScreenError       = "screen-error"
 )
 
 // Voice states carried by a status message.
@@ -123,6 +133,22 @@ type ClientInfo struct {
 type DaemonInfo struct {
 	// Version is the daemon's binary version (as /api/hello "version").
 	Version string `json:"version"`
+}
+
+// Screen is one frame of an agent's window on a screen message: the body
+// of GET /api/agents/{pane_id}/screen without "unchanged" (a frame is only
+// sent when it changed).
+type Screen struct {
+	PaneID     string `json:"pane_id"`
+	Alias      string `json:"alias"`
+	Spoken     string `json:"spoken,omitempty"`
+	Kind       string `json:"kind,omitempty"`
+	State      string `json:"state"`
+	StateSince string `json:"state_since,omitempty"`
+	Text       string `json:"text"`
+	Lines      int    `json:"lines"`
+	Truncated  bool   `json:"truncated"`
+	Hash       string `json:"hash"`
 }
 
 // Message is the union of all control messages. Type selects which of the
@@ -191,8 +217,16 @@ type Message struct {
 	Dir   string `json:"dir,omitempty"`
 	Final *bool  `json:"final,omitempty"`
 
-	// error
+	// error and screen-error
 	Message string `json:"message,omitempty"`
+
+	// screen-subscribe (PaneID, Lines), screen-error (PaneID, Ended) and
+	// screen (Screen): the agent window over /ws. Ended is set on a
+	// screen-error that ended the subscription.
+	PaneID string  `json:"pane_id,omitempty"`
+	Lines  *int    `json:"lines,omitempty"`
+	Screen *Screen `json:"screen,omitempty"`
+	Ended  bool    `json:"ended,omitempty"`
 }
 
 // ClientReady builds the client→server handshake message, the first text
@@ -264,6 +298,28 @@ func Error(msg string) Message { return Message{Type: TypeError, Message: msg} }
 // Pong builds the reply to Ping.
 func Pong() Message { return Message{Type: TypePong} }
 
+// ScreenSubscribe builds the client→server request for an agent's window;
+// lines <= 0 leaves the daemon's default.
+func ScreenSubscribe(paneID string, lines int) Message {
+	m := Message{Type: TypeScreenSubscribe, PaneID: paneID}
+	if lines > 0 {
+		m.Lines = &lines
+	}
+	return m
+}
+
+// ScreenUnsubscribe builds the client→server end of the subscription.
+func ScreenUnsubscribe() Message { return Message{Type: TypeScreenUnsubscribe} }
+
+// ScreenFrame builds a server→client screen frame.
+func ScreenFrame(s Screen) Message { return Message{Type: TypeScreen, Screen: &s} }
+
+// ScreenError builds a server→client screen-error; ended means the
+// subscription is over.
+func ScreenError(paneID, msg string, ended bool) Message {
+	return Message{Type: TypeScreenError, PaneID: paneID, Message: msg, Ended: ended}
+}
+
 // Parse decodes one text frame and validates the fields the type requires.
 func Parse(data []byte) (Message, error) {
 	var m Message
@@ -325,7 +381,22 @@ func (m Message) Validate() error {
 		if m.Message == "" {
 			return fmt.Errorf("wsproto: error: missing \"message\"")
 		}
-	case TypeCancel, TypePing, TypeFlush, TypePong:
+	case TypeScreenSubscribe:
+		if m.PaneID == "" {
+			return fmt.Errorf("wsproto: screen-subscribe: missing \"pane_id\"")
+		}
+		if m.Lines != nil && *m.Lines < 1 {
+			return fmt.Errorf("wsproto: screen-subscribe: \"lines\" must be positive")
+		}
+	case TypeScreen:
+		if m.Screen == nil || m.Screen.PaneID == "" {
+			return fmt.Errorf("wsproto: screen: missing \"screen\"")
+		}
+	case TypeScreenError:
+		if m.PaneID == "" || m.Message == "" {
+			return fmt.Errorf("wsproto: screen-error: missing \"pane_id\" or \"message\"")
+		}
+	case TypeCancel, TypePing, TypeFlush, TypePong, TypeScreenUnsubscribe:
 	case "":
 		return fmt.Errorf("wsproto: missing \"type\"")
 	default:

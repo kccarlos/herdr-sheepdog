@@ -121,7 +121,10 @@ What is in:
 - **Surfaces:** `/voice`, `/debug` (Swimlane, Conversation, Supervisor,
   Context, Events, State), phone access with `web.bind` / `web.token`,
   the agent window API (`GET /api/agents/{pane}/screen`, `POST
-  .../input`; [`ws-contract.md`](ws-contract.md); #103), the `/ws` protocol version and `client-ready` / `bot-ready` handshake
+  .../input`; [`ws-contract.md`](ws-contract.md); #103) and the same
+  window streamed over `/ws` (feature `screen`: one subscription per
+  client, a frame only when the window changed, read every 1 s or sooner
+  on a transition, reads ≥ 250 ms apart; "Agent window over /ws"), the `/ws` protocol version and `client-ready` / `bot-ready` handshake
   ([`ws-contract.md`](ws-contract.md)), APNs notifications for the iOS
   app ([`push.md`](push.md)).
 - **Measurement:** `sheepdog eval` (offline L0 corpus), `sheepdog eval

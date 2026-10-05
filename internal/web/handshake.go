@@ -41,6 +41,9 @@ func (s *Server) features() []string {
 	if s.deps.Brain != nil {
 		f = append(f, wsproto.FeatureModels)
 	}
+	if s.deps.Supervisor != nil {
+		f = append(f, wsproto.FeatureScreen)
+	}
 	return f
 }
 

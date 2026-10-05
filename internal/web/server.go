@@ -164,6 +164,12 @@ type Deps struct {
 	// wsproto.MinProtocolVersion); a lower one is refused with
 	// status closed/protocol_too_old.
 	MinProtocol int
+	// ScreenInterval is how often a /ws screen subscription reads the
+	// agent's window (default 1 s); ScreenMinGap is the least time between
+	// two reads, when a transition or an input asks for one sooner
+	// (default 250 ms). docs/ws-contract.md "Agent window over /ws".
+	ScreenInterval time.Duration
+	ScreenMinGap   time.Duration
 	// Now overrides the clock (tests).
 	Now func() time.Time
 
@@ -212,6 +218,12 @@ func New(deps Deps) (*Server, error) {
 	}
 	if deps.MinProtocol <= 0 {
 		deps.MinProtocol = wsproto.MinProtocolVersion
+	}
+	if deps.ScreenInterval <= 0 {
+		deps.ScreenInterval = time.Second
+	}
+	if deps.ScreenMinGap <= 0 {
+		deps.ScreenMinGap = 250 * time.Millisecond
 	}
 	if deps.Now == nil {
 		deps.Now = time.Now

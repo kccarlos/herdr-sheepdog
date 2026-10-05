@@ -465,6 +465,8 @@ type client struct {
 	aec string
 	// hs is the protocol handshake (handshake.go).
 	hs handshake
+	// screen is the client's one agent-window subscription (screen.go).
+	screen *screenSub
 	// pendingAttach: another client was attached when this one
 	// connected, so it replaces that one only once its handshake is
 	// accepted. firstStatus is the status it was sent on connect.
@@ -579,6 +581,8 @@ func (c *client) closeAfterFlush(code websocket.StatusCode, reason string) {
 	c.mu.Lock()
 	c.closing = true
 	c.mu.Unlock()
+	// Nothing more is sent to a closing client: its window stops now.
+	c.stopScreen("closed")
 	c.enqueue(frame{close: true, code: code, reason: reason})
 }
 
@@ -748,6 +752,14 @@ func (c *client) onControl(data []byte) {
 			played = *m.PlayedMs
 		}
 		h.setPlayback(c, m.State, played)
+	case wsproto.TypeScreenSubscribe:
+		lines := 0
+		if m.Lines != nil {
+			lines = *m.Lines
+		}
+		c.subscribeScreen(m.PaneID, lines)
+	case wsproto.TypeScreenUnsubscribe:
+		c.stopScreen("unsubscribe")
 	case wsproto.TypeCancel:
 		ctx, cancel := h.s.toolCtx()
 		res, err := h.s.runTool(ctx, voice.ToolCall{ID: "ws-cancel", Name: supervisor.ToolStop}, "ws")
@@ -843,6 +855,7 @@ func round1(v float64) float64 { return math.Round(v*10) / 10 }
 // finish logs the disconnect and stops the writer. Safe to call twice.
 func (c *client) finish(reason string) {
 	c.once.Do(func() {
+		c.stopScreen("disconnect")
 		close(c.done)
 		_ = c.conn.CloseNow()
 		payload := c.counters()

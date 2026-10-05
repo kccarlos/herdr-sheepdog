@@ -63,7 +63,7 @@ binary version.
   it, so a client branches on a name rather than a version number:
 
   ```json
-  {"type":"bot-ready","protocol":1,"min_protocol":1,"daemon":{"version":"0.4.2"},"features":["playback","speaking","silence","provider","history","push","models"]}
+  {"type":"bot-ready","protocol":1,"min_protocol":1,"daemon":{"version":"0.4.2"},"features":["playback","speaking","silence","provider","history","push","models","screen"]}
   ```
 
   | Feature | Meaning | Listed |
@@ -75,6 +75,12 @@ binary version.
   | `history` | `/events` resume, `/api/conversation`, reset, answer by tap (*History and resume*) | always |
   | `push` | APNs registration ([`push.md`](push.md)) | when the daemon has a push service |
   | `models` | the brain model picker (`/api/brain/models`) | when the brain is on |
+  | `screen` | the agent window over `/ws` (*Agent window over /ws*) | when the daemon has a supervisor (always, in practice) |
+
+  A new optional part of the contract is a new feature, not a new
+  protocol: a client uses it only when `bot-ready` lists it, and a
+  daemon without it never sees its messages, so both directions stay
+  compatible and `protocol` stays 1.
 
 - **Order.** The daemon still sends its `status` **at once** on connect,
   before the handshake, exactly as before (a legacy client depends on
@@ -142,6 +148,8 @@ scheduling each frame at "now".
 | `{"type":"playback","state":"started\|drained\|flushed","played_ms":N}` | The client's player started, drained or flushed. See *Playback reports*. `played_ms` is required for `drained` and `flushed` (optional, taken as 0, for `started`). |
 | `{"type":"cancel"}`                  | The "stop" button. The daemon stops current playback (it will send `flush`) and runs the `stop` tool (the stop procedure) in the supervisor. Equivalent to the user saying "stop". |
 | `{"type":"text","text":"…"}`         | Simulate an utterance: the text is fed to the voice session as if the user had spoken it (`/debug` and the `/voice` text box use this). It is recorded as a typed shepherd input, which the one rail accepts like a transcript (docs/roles.md "The one rail"). Without a voice session (`--voice=off`) the daemon echoes it as an `in` transcript and answers through its text router with one `out` transcript (a text routed to `cancel` yields `flush` then the `out`), or with an `error` when the text cannot be routed. |
+| `{"type":"screen-subscribe","pane_id":"…","lines":N?}` | Show me this agent's window; `screen` frames follow. Replaces the client's previous subscription. See *Agent window over /ws*. |
+| `{"type":"screen-unsubscribe"}`      | Stop the window's `screen` frames. |
 | `{"type":"ping","gated_frames":N?,"peak":N?,"underruns":N?,"drains":N?,"buffer_ms":N?,"rate":F?,"stretched_ms":N?,"audio_state":S?,"aec":S?}` | Liveness probe; the daemon answers `pong`. Clients should send one every 5–30 s; `/voice` sends one every 5 s (the `web.client.stats` interval) and waits for the pong before the next. The optional counters (frames withheld by the silence gate so far; last input peak in Int16 LSB; the playback jitter buffer's underrun and drain counts and the audio buffered right now in ms; the time-stretch's current playback rate and the total wall-clock ms played at a rate other than 1.0 — see "Playback jitter buffer" below; the page's AudioContext state, `running`/`suspended`/`interrupted`/`closed` — a context that is not running plays nothing and stops updating the counters; `aec`, the microphone's echo cancellation as the browser reports it in `track.getSettings().echoCancellation`: `"true"`, `"false"`, or `"unknown"` when the browser does not say — other values are ignored; `/voice` also shows "Use headphones or the app: this browser's echo cancellation is off" when it is `false`, or `unknown` on a mobile browser) are copied into every following `web.client.stats` event until the next ping, with `playback_age_ms` (how old that sample is; absent before the first ping with `buffer_ms`), `audio_state` and `aec`. A value repeated across stats lines with a growing `playback_age_ms` is one old sample, not a stalled player. The event also carries `send_wait_max_ms`/`send_wait_p95_ms` (how long a recent audio frame waited in the daemon's per-client send queue; near 0 in normal operation), and with Gemini Live the echo gate's `echo_armed`, `echo_withheld_frames`, `echo_released_frames`, `echo_opens` (docs/research/echo-2026-10-03.md: once this client's echo has shown itself, microphone audio the playing reply explains is held back). |
 
 Unknown `type` values are answered with an `error` message and otherwise
@@ -156,6 +164,9 @@ Examples (`client-ready` is under *Protocol version and handshake*):
 {"type":"speaking","on":true}
 {"type":"cancel"}
 {"type":"text","text":"what is auth doing"}
+{"type":"screen-subscribe","pane_id":"w1:p2","lines":200}
+{"type":"screen-subscribe","pane_id":"w1:p2"}
+{"type":"screen-unsubscribe"}
 {"type":"ping"}
 {"type":"ping","gated_frames":120,"peak":3400,"underruns":1,"drains":4,"buffer_ms":180,"rate":0.97,"stretched_ms":2300,"audio_state":"running","aec":"true"}
 ```
@@ -169,6 +180,8 @@ Examples (`client-ready` is under *Protocol version and handshake*):
 | `{"type":"transcript","dir":"in\|out","text":"…","final":bool}`          | Incremental transcription. `in` = what the model heard from the user, `out` = what the model is saying. Fragments of one utterance arrive in order; `final:true` closes it. Output fragments may never carry `final:true`; treat the next `in` transcript or a `flush` as the boundary. GPT-Live has no end-of-utterance event: the daemon closes an `in` utterance with an **empty** fragment (`"text":"","final":true`) once the words stop; a client appends nothing and starts a new bubble for the next `in` text. |
 | `{"type":"error","message":"…"}`                                         | A non-fatal problem the user should see (e.g. rate limited, bad control message). The connection stays open.  |
 | `{"type":"pong"}`                                                        | Reply to `ping`.                                                                                                |
+| `{"type":"screen","screen":{…}}`                                         | The subscribed agent's window changed (*Agent window over /ws*).                                                 |
+| `{"type":"screen-error","pane_id":"…","message":"…","ended":true?}`      | The subscribed window could not be read; `ended` means the subscription is over.                                 |
 
 Examples (`bot-ready` is under *Protocol version and handshake*):
 
@@ -660,8 +673,10 @@ reachable. A pane id with `:` or `%` is path-escaped as usual.
   passes the last `hash` back as `?hash=`; when nothing changed the
   answer is `{"pane_id", "alias", "spoken", "kind", "state", "state_since",
   "lines", "hash", "unchanged": true}` without `text`, so an idle window
-  costs a few bytes. Polling every 1–2 s is the intended use (there is no
-  stream route). A read herdr refuses is `502`. Reading a window does not
+  costs a few bytes. A client whose daemon lists the `screen` feature
+  streams the window over `/ws` instead (*Agent window over /ws*); this
+  route stays for older daemons and for one-off reads, where polling
+  every 1–2 s is the intended use. A read herdr refuses is `502`. Reading a window does not
   make the agent the conversation's subject: looking is not talking.
 - **`POST /api/agents/{pane_id}/input`** — the CEO operating the window
   himself. Exactly one of:
@@ -691,6 +706,64 @@ reachable. A pane id with `:` or `%` is path-escaped as usual.
   recorded default is not necessarily what it selects; the transition
   off `blocked` closes the question. A herdr send that fails is `502`.
 
+## Agent window over /ws
+
+Feature `screen`. The same window as `GET /api/agents/{pane_id}/screen`,
+pushed over the `/ws` connection the app already holds instead of
+polled. The client asks for one agent's window; the daemon sends a
+frame at once and then whenever the window changes.
+
+- **`screen-subscribe {pane_id, lines?}`** starts the subscription;
+  `lines` is as on the route (default 120, cap 500). **At most one per
+  client**: a second subscribe replaces the first (to switch agents, or
+  to get a fresh frame at once). Only agents the daemon tracks, as on
+  the route.
+- **`screen-unsubscribe`** ends it. Closing the window sends it; the
+  connection ending (closed, replaced, refused, daemon shutdown) ends
+  it too, and a reconnecting client subscribes again: nothing carries
+  over to the next connection, nor to a client that replaces this one.
+- **`screen {screen}`**: `screen` is the route's body without
+  `unchanged`: `pane_id`, `alias`, `spoken`, `kind`, `state`,
+  `state_since`, `text`, `lines`, `truncated`, `hash`. The first frame
+  comes right after the subscribe; after that a frame is sent only when
+  `hash` (state and text) changed, so an idle window sends nothing.
+
+  ```json
+  {"type":"screen","screen":{"pane_id":"w1:p2","alias":"auth","spoken":"Auth fix","kind":"codex","state":"working","state_since":"2026-10-05T09:12:03Z","text":"› run the tests\n• Running go test ./...","lines":200,"truncated":true,"hash":"9f2c0e1a44b7d310"}}
+  ```
+
+- **`screen-error {pane_id, message, ended?}`**: `ended: true` when the
+  subscription is over — the pane is not (or no longer) a tracked agent
+  (`no such agent`), or the daemon has no supervisor. Otherwise a read
+  failed (herdr down): it is sent once per run of failures, reads go on,
+  and the next good read sends a full `screen` frame even if nothing
+  changed, so the client can clear its error.
+
+  ```json
+  {"type":"screen-error","pane_id":"w1:p9","message":"no such agent","ended":true}
+  {"type":"screen-error","pane_id":"w1:p2","message":"herdr: pane.read: read: EOF"}
+  ```
+
+- **When the daemon reads.** herdr has no "output changed" subscription
+  (its `events.wait` refuses output matches), so the daemon reads the
+  subscribed window itself, the same `pane.read` the route does: every
+  **1 s**, and sooner when the event log shows the watcher's debounced
+  `herdr.transition` or a `herdr.send` for that pane (a state change,
+  or input the CEO, the brain or a tap sent it). **Rate cap:** two
+  reads are never less than **250 ms** apart, so at most four frames a
+  second and usually one. With one `/ws` client and one subscription
+  per client, the daemon reads at most one window this way, however
+  the app is used.
+- **Fallback.** A client that does not see `screen` in `bot-ready`
+  (an older daemon, a legacy connection, no `/ws` connection at the
+  moment) polls the route as before. A subscribed client that loses its
+  `/ws` connection polls until it is back, then subscribes again.
+- Logged as `web.screen.subscribe {client_id, lines}` and
+  `web.screen.end {client_id, reason, frames, reads, failures}` with the
+  pane id; `reason` is `unsubscribe`, `resubscribe`, `gone`, `closed`
+  (replaced, refused or shut down) or `disconnect`. Each read logs
+  `herdr.read` as the route's does.
+
 ## Phone notifications
 
 Not part of `/ws`: the iOS app registers its APNs device token over
@@ -701,7 +774,7 @@ The contract (routes, payload, when an alert is sent) is in
 
 ## Non-goals
 
-No compression, no multiple clients, no client-side resampling contract
+No compression, no multiple clients, no more than one agent window per client, no client-side resampling contract
 beyond "send 16 kHz PCM16 mono", no timestamps in frames. No TLS: the
 `Secure` cookie flag stays off and the token travels in the clear, so a
 non-loopback bind should be a private network (a LAN you trust, or a
