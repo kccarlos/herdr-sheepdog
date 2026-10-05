@@ -14,7 +14,7 @@ after this page.
 
 ## Where main is
 
-`main` = `2d906d2` (#131; the dual-brain voice layer landed in #122 and is the adopted design since the CEO's phone test of 2026-10-04). The v1 plan, the 2026-09-18 redesign and
+`main` = `2d906d2` (#131, plus later PRs up to #141; the dual-brain voice layer landed in #122 and is the adopted design since the CEO's phone test of 2026-10-04). The v1 plan, the 2026-09-18 redesign and
 iteration 2's phase-1 work packages (WP1–WP5, WP8, WP9;
 [`iteration-2.md`](iteration-2.md)) are merged.
 
@@ -54,6 +54,22 @@ What is in:
   self-relay and rescue guards and the echo text guard were removed: the
   phone's playback report becomes a cut-off fact for the fast brain, words
   that began over the voice's own line a timing fact for the slow brain.
+- **Fast brain toward facts** (#141, prompt v5.1,
+  [`eval/fast-brain-facts-2026-10-04.md`](eval/fast-brain-facts-2026-10-04.md)):
+  grounding first; the voice answers only its own last line, word
+  meanings and small talk, and hands off anything new, comparisons,
+  "why", history and doubt; asks when the agent is unclear. Every
+  briefing carries its age at delivery and the agent's spoken name and
+  state; slow-brain tool timeouts reach it as `not_verified`; a spoken
+  briefing that drew no speech is reported to both brains
+  (`voice.briefing_unvoiced`); the roster says "finished work N min
+  ago" instead of splicing a report; a spoken name the CEO heard or said
+  is pinned (`supervisor.name_pinned`); a new agent herdr does not see
+  after 20 s is reported to the CEO with its pane's last lines, and new
+  panes get `DISABLE_AUTO_UPDATE=true`. Tier-2 A/B (prompt only, same
+  binary): phone-test cases 9/18 → 11/18, hand-off 75 % → 90 %, rewind
+  prompts on an ambiguous "it" 4 → 0, existing suite 21/36 → 21/36;
+  self-answer ≈ 1.2 s vs hand-off ≈ 5.5 s.
 - **Brain:** stateful agent over a transcript window with providers
   `gemini`, `vertex` and `deepseek` and a runtime model switch; the ear
   contract (`spoken` / `ask` / `detail`); push judgment under the

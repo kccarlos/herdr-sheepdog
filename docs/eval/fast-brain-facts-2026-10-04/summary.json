@@ -1,0 +1,620 @@
+{
+ "facts-old": {
+  "label": "facts cases, old prompt (v4)",
+  "runs": 18,
+  "pass": 9,
+  "errored": 0,
+  "lines": 51,
+  "handoff": 38,
+  "self": 12,
+  "none": 1,
+  "self_graded": 12,
+  "self_ok": 9,
+  "lat_p50_all": "5.05 s",
+  "lat_p50_self": "1.22 s",
+  "lat_p50_handoff": "5.63 s",
+  "turn_latency_p50": "4.58 s",
+  "tool_timeouts": 4,
+  "byscen": {
+   "facts-ambiguous-rewind": [
+    0,
+    3
+   ],
+   "facts-contradiction-linecount": [
+    3,
+    3
+   ],
+   "facts-history-first": [
+    2,
+    3
+   ],
+   "facts-stale-conclusion-zh": [
+    1,
+    3
+   ],
+   "facts-timeout-not-verified": [
+    0,
+    3
+   ],
+   "facts-zh-simplified": [
+    3,
+    3
+   ]
+  }
+ },
+ "facts-new": {
+  "label": "facts cases, new prompt (v5)",
+  "runs": 18,
+  "pass": 10,
+  "errored": 0,
+  "lines": 51,
+  "handoff": 46,
+  "self": 5,
+  "none": 0,
+  "self_graded": 5,
+  "self_ok": 5,
+  "lat_p50_all": "5.30 s",
+  "lat_p50_self": "1.07 s",
+  "lat_p50_handoff": "5.45 s",
+  "turn_latency_p50": "4.58 s",
+  "tool_timeouts": 4,
+  "byscen": {
+   "facts-ambiguous-rewind": [
+    1,
+    3
+   ],
+   "facts-contradiction-linecount": [
+    3,
+    3
+   ],
+   "facts-history-first": [
+    2,
+    3
+   ],
+   "facts-stale-conclusion-zh": [
+    0,
+    3
+   ],
+   "facts-timeout-not-verified": [
+    1,
+    3
+   ],
+   "facts-zh-simplified": [
+    3,
+    3
+   ]
+  }
+ },
+ "suite-old": {
+  "label": "existing suite, old prompt (v4)",
+  "runs": 36,
+  "pass": 21,
+  "errored": 0,
+  "lines": 78,
+  "handoff": 58,
+  "self": 20,
+  "none": 0,
+  "self_graded": 20,
+  "self_ok": 16,
+  "lat_p50_all": "5.06 s",
+  "lat_p50_self": "1.19 s",
+  "lat_p50_handoff": "5.54 s",
+  "turn_latency_p50": "4.54 s",
+  "tool_timeouts": 0,
+  "byscen": {
+   "ambiguous-codex": [
+    1,
+    1
+   ],
+   "ambiguous-readme-one": [
+    0,
+    1
+   ],
+   "approve-claude-askuser": [
+    1,
+    1
+   ],
+   "approve-claude-permission": [
+    0,
+    1
+   ],
+   "approve-codex": [
+    1,
+    1
+   ],
+   "approve-zh-hurried": [
+    1,
+    1
+   ],
+   "deep-ask-detail": [
+    1,
+    1
+   ],
+   "deep-ask-fix-failing-test": [
+    1,
+    1
+   ],
+   "deferral-en-hesitant": [
+    0,
+    1
+   ],
+   "deferral-zh": [
+    1,
+    1
+   ],
+   "instruct-notify": [
+    0,
+    1
+   ],
+   "instruct-pronoun": [
+    1,
+    1
+   ],
+   "names-rename-by-voice": [
+    0,
+    1
+   ],
+   "status-anything-for-me": [
+    1,
+    1
+   ],
+   "status-en": [
+    0,
+    1
+   ],
+   "status-zh-tired": [
+    1,
+    1
+   ],
+   "stop-mid-instruction": [
+    1,
+    1
+   ],
+   "stop-never-mind": [
+    1,
+    1
+   ],
+   "barge-in-hold-to-talk": [
+    0,
+    1
+   ],
+   "barge-in-long-answer": [
+    0,
+    1
+   ],
+   "collision-block-while-talking": [
+    0,
+    1
+   ],
+   "collision-finish-push": [
+    1,
+    1
+   ],
+   "echo-barge-in": [
+    1,
+    1
+   ],
+   "echo-instruct": [
+    0,
+    1
+   ],
+   "failover-brain-503": [
+    0,
+    1
+   ],
+   "lang-mixed-codeswitch": [
+    1,
+    1
+   ],
+   "lang-switch-zh-en": [
+    0,
+    1
+   ],
+   "names-by-kind": [
+    1,
+    1
+   ],
+   "noise-cafe-approve": [
+    1,
+    1
+   ],
+   "noise-pink-status-zh": [
+    1,
+    1
+   ],
+   "reconnect-held-push": [
+    0,
+    1
+   ],
+   "reconnect-long-session": [
+    0,
+    1
+   ],
+   "resume-recall-twice": [
+    1,
+    1
+   ],
+   "resume-recall": [
+    1,
+    1
+   ],
+   "slowness-brain-9s": [
+    0,
+    1
+   ],
+   "unheard-approval-requeue": [
+    1,
+    1
+   ]
+  }
+ },
+ "suite-new": {
+  "label": "existing suite, new prompt (v5)",
+  "runs": 36,
+  "pass": 17,
+  "errored": 0,
+  "lines": 77,
+  "handoff": 50,
+  "self": 27,
+  "none": 0,
+  "self_graded": 27,
+  "self_ok": 26,
+  "lat_p50_all": "4.69 s",
+  "lat_p50_self": "1.17 s",
+  "lat_p50_handoff": "5.29 s",
+  "turn_latency_p50": "4.36 s",
+  "tool_timeouts": 0,
+  "byscen": {
+   "ambiguous-codex": [
+    1,
+    1
+   ],
+   "ambiguous-readme-one": [
+    1,
+    1
+   ],
+   "approve-claude-askuser": [
+    0,
+    1
+   ],
+   "approve-claude-permission": [
+    0,
+    1
+   ],
+   "approve-codex": [
+    1,
+    1
+   ],
+   "approve-zh-hurried": [
+    1,
+    1
+   ],
+   "deep-ask-detail": [
+    0,
+    1
+   ],
+   "deep-ask-fix-failing-test": [
+    1,
+    1
+   ],
+   "deferral-en-hesitant": [
+    0,
+    1
+   ],
+   "deferral-zh": [
+    1,
+    1
+   ],
+   "instruct-notify": [
+    1,
+    1
+   ],
+   "instruct-pronoun": [
+    0,
+    1
+   ],
+   "names-rename-by-voice": [
+    0,
+    1
+   ],
+   "status-anything-for-me": [
+    0,
+    1
+   ],
+   "status-en": [
+    0,
+    1
+   ],
+   "status-zh-tired": [
+    1,
+    1
+   ],
+   "stop-mid-instruction": [
+    1,
+    1
+   ],
+   "stop-never-mind": [
+    1,
+    1
+   ],
+   "barge-in-hold-to-talk": [
+    0,
+    1
+   ],
+   "barge-in-long-answer": [
+    0,
+    1
+   ],
+   "collision-block-while-talking": [
+    0,
+    1
+   ],
+   "collision-finish-push": [
+    0,
+    1
+   ],
+   "echo-barge-in": [
+    0,
+    1
+   ],
+   "echo-instruct": [
+    0,
+    1
+   ],
+   "failover-brain-503": [
+    0,
+    1
+   ],
+   "lang-mixed-codeswitch": [
+    1,
+    1
+   ],
+   "lang-switch-zh-en": [
+    0,
+    1
+   ],
+   "names-by-kind": [
+    1,
+    1
+   ],
+   "noise-cafe-approve": [
+    1,
+    1
+   ],
+   "noise-pink-status-zh": [
+    1,
+    1
+   ],
+   "reconnect-held-push": [
+    1,
+    1
+   ],
+   "reconnect-long-session": [
+    0,
+    1
+   ],
+   "resume-recall-twice": [
+    1,
+    1
+   ],
+   "resume-recall": [
+    1,
+    1
+   ],
+   "slowness-brain-9s": [
+    0,
+    1
+   ],
+   "unheard-approval-requeue": [
+    0,
+    1
+   ]
+  }
+ },
+ "v51-facts": {
+  "label": "facts cases, prompt v5.1 (language line restored)",
+  "runs": 18,
+  "pass": 11,
+  "errored": 0,
+  "lines": 51,
+  "handoff": 46,
+  "self": 5,
+  "none": 0,
+  "self_graded": 5,
+  "self_ok": 5,
+  "lat_p50_all": "4.88 s",
+  "lat_p50_self": "1.10 s",
+  "lat_p50_handoff": "5.50 s",
+  "turn_latency_p50": "4.25 s",
+  "tool_timeouts": 3,
+  "byscen": {
+   "facts-ambiguous-rewind": [
+    3,
+    3
+   ],
+   "facts-contradiction-linecount": [
+    3,
+    3
+   ],
+   "facts-history-first": [
+    2,
+    3
+   ],
+   "facts-stale-conclusion-zh": [
+    1,
+    3
+   ],
+   "facts-timeout-not-verified": [
+    0,
+    3
+   ],
+   "facts-zh-simplified": [
+    2,
+    3
+   ]
+  }
+ },
+ "v51-suite": {
+  "label": "existing suite, prompt v5.1",
+  "runs": 36,
+  "pass": 21,
+  "errored": 0,
+  "lines": 82,
+  "handoff": 54,
+  "self": 28,
+  "none": 0,
+  "self_graded": 28,
+  "self_ok": 19,
+  "lat_p50_all": "4.52 s",
+  "lat_p50_self": "1.20 s",
+  "lat_p50_handoff": "5.44 s",
+  "turn_latency_p50": "4.53 s",
+  "tool_timeouts": 0,
+  "byscen": {
+   "ambiguous-codex": [
+    1,
+    1
+   ],
+   "ambiguous-readme-one": [
+    1,
+    1
+   ],
+   "approve-claude-askuser": [
+    1,
+    1
+   ],
+   "approve-claude-permission": [
+    1,
+    1
+   ],
+   "approve-codex": [
+    1,
+    1
+   ],
+   "approve-zh-hurried": [
+    1,
+    1
+   ],
+   "deep-ask-detail": [
+    0,
+    1
+   ],
+   "deep-ask-fix-failing-test": [
+    1,
+    1
+   ],
+   "deferral-en-hesitant": [
+    1,
+    1
+   ],
+   "deferral-zh": [
+    1,
+    1
+   ],
+   "instruct-notify": [
+    1,
+    1
+   ],
+   "instruct-pronoun": [
+    0,
+    1
+   ],
+   "names-rename-by-voice": [
+    0,
+    1
+   ],
+   "status-anything-for-me": [
+    1,
+    1
+   ],
+   "status-en": [
+    1,
+    1
+   ],
+   "status-zh-tired": [
+    0,
+    1
+   ],
+   "stop-mid-instruction": [
+    1,
+    1
+   ],
+   "stop-never-mind": [
+    1,
+    1
+   ],
+   "barge-in-hold-to-talk": [
+    0,
+    1
+   ],
+   "barge-in-long-answer": [
+    0,
+    1
+   ],
+   "collision-block-while-talking": [
+    0,
+    1
+   ],
+   "collision-finish-push": [
+    0,
+    1
+   ],
+   "echo-barge-in": [
+    0,
+    1
+   ],
+   "echo-instruct": [
+    0,
+    1
+   ],
+   "failover-brain-503": [
+    0,
+    1
+   ],
+   "lang-mixed-codeswitch": [
+    1,
+    1
+   ],
+   "lang-switch-zh-en": [
+    1,
+    1
+   ],
+   "names-by-kind": [
+    1,
+    1
+   ],
+   "noise-cafe-approve": [
+    1,
+    1
+   ],
+   "noise-pink-status-zh": [
+    1,
+    1
+   ],
+   "reconnect-held-push": [
+    0,
+    1
+   ],
+   "reconnect-long-session": [
+    0,
+    1
+   ],
+   "resume-recall-twice": [
+    1,
+    1
+   ],
+   "resume-recall": [
+    1,
+    1
+   ],
+   "slowness-brain-9s": [
+    0,
+    1
+   ],
+   "unheard-approval-requeue": [
+    0,
+    1
+   ]
+  }
+ }
+}
