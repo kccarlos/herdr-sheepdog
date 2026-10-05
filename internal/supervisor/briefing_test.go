@@ -32,7 +32,7 @@ func TestComposeBriefingShapes(t *testing.T) {
 	doneStale.LastResult = stale
 	doneLong := agent("w5:p1", "api", herdr.StateDone)
 	doneLong.LastResult = long
-	// The brain's own line names the agent; the clause says it already.
+	// The brain's own line never goes into the sentence, only the time.
 	brainLine := agent("w7:p1", "auth", herdr.StateIdle)
 	brainLine.LastResult = &state.Result{Spoken: "Auth finished the rerun you asked for.", At: now}
 	pending := state.PendingAction{Kind: state.PendingAnswerPrompt, PaneID: "w2:p1", Question: "whether it can create claude.txt"}
@@ -50,15 +50,15 @@ func TestComposeBriefingShapes(t *testing.T) {
 		{"asking with pending", []state.Agent{askingQ}, pending, "One agent: docs is asking whether it can create claude.txt. Docs is waiting for your answer.", 1},
 		{"asking no pending", []state.Agent{askingQ}, state.PendingAction{}, "One agent: docs is asking whether it can create claude.txt.", 1},
 		{"blocked no question", []state.Agent{agent("w2:p1", "docs", herdr.StateBlocked)}, state.PendingAction{}, "One agent: docs is blocked at a prompt.", 1},
-		{"idle fresh result", []state.Agent{idleFresh}, state.PendingAction{}, "One agent: vps is idle; it last created hello.txt with the requested line.", 1},
+		{"idle fresh result", []state.Agent{idleFresh}, state.PendingAction{}, "One agent: vps is idle; it finished work 5 min ago.", 1},
 		{"done stale result", []state.Agent{doneStale}, state.PendingAction{}, "One agent: web is idle.", 1},
-		{"done long result trimmed", []state.Agent{doneLong}, state.PendingAction{}, "One agent: api is idle; it last one two three four five six seven eight nine ten eleven twelve.", 1},
-		{"result naming the agent", []state.Agent{brainLine}, state.PendingAction{}, "One agent: auth is idle; it last finished the rerun you asked for.", 1},
+		{"long result never spliced in", []state.Agent{doneLong}, state.PendingAction{}, "One agent: api is idle; it finished work under a minute ago.", 1},
+		{"result naming the agent", []state.Agent{brainLine}, state.PendingAction{}, "One agent: auth is idle; it finished work under a minute ago.", 1},
 		{"exited", []state.Agent{agent("w1:p1", "auth", herdr.StateUnknown)}, state.PendingAction{}, "One agent: auth has exited.", 1},
 		{"three agents blocked first", []state.Agent{working, idleFresh, askingQ}, pending,
-			`Three agents: docs is asking whether it can create claude.txt, auth is working on "run the auth tests and fix whatever fails in the…", and vps is idle; it last created hello.txt with the requested line. Docs is waiting for your answer.`, 3},
+			`Three agents: docs is asking whether it can create claude.txt, auth is working on "run the auth tests and fix whatever fails in the…", and vps is idle; it finished work 5 min ago. Docs is waiting for your answer.`, 3},
 		{"five agents count plus interesting", []state.Agent{doneStale, working, idleFresh, askingQ, agent("w6:p1", "cli", herdr.StateUnknown)}, pending,
-			`Five agents: docs is asking whether it can create claude.txt, auth is working on "run the auth tests and fix whatever fails in the…", and vps is idle; it last created hello.txt with the requested line; one more is idle and one more has exited. Docs is waiting for your answer.`, 3},
+			`Five agents: docs is asking whether it can create claude.txt, auth is working on "run the auth tests and fix whatever fails in the…", and vps is idle; it finished work 5 min ago; one more is idle and one more has exited. Docs is waiting for your answer.`, 3},
 		{"six agents same rest", []state.Agent{agent("w6:p1", "b1", herdr.StateWorking), agent("w6:p2", "b2", herdr.StateWorking), agent("w6:p3", "b3", herdr.StateWorking), agent("w7:p1", "a1", herdr.StateWorking), agent("w8:p1", "a2", herdr.StateWorking), agent("w9:p1", "a3", herdr.StateWorking)}, state.PendingAction{},
 			`Six agents: a1 is working on something, a2 is working on something, and a3 is working on something; the other three are working.`, 3},
 	}
@@ -98,7 +98,7 @@ func TestBriefingReflectsResultsAndAges(t *testing.T) {
 	h := twoAgents(t)
 	h.srv.SetScreen("w5:p1", fixture(t, "codex-after-approval.screen.txt"))
 	h.transition("w5:p1", herdr.StateWorking, herdr.StateDone)
-	want := "Two agents: auth is idle; it last finished, and docs is idle."
+	want := "Two agents: auth is idle; it finished work under a minute ago, and docs is idle."
 	if got := h.roster(); got != want {
 		t.Errorf("briefing = %q, want %q", got, want)
 	}
@@ -197,5 +197,19 @@ func TestNoBrainRepeatFallback(t *testing.T) {
 	res = h.say("now?")
 	if strings.HasPrefix(res.Spoken, "No change since I last checked: ") {
 		t.Fatalf("after a transition = %+v", res)
+	}
+}
+
+// TestRosterNeverSplicesAWorkerReport: phone test 2026-10-04 16:21Z, the
+// roster read "claude is idle; it last reports that because all
+// previous work (including the bug fixes and the, and codex is idle":
+// the brain's announcement, cut to twelve words inside the template.
+func TestRosterNeverSplicesAWorkerReport(t *testing.T) {
+	now := t0.Add(10 * time.Minute)
+	c := agent("w1:p1", "claude", herdr.StateIdle)
+	c.LastResult = &state.Result{Spoken: "claude reports that because all previous work (including the bug fixes and the discount changes) remains uncommitted, it stopped.", At: now.Add(-3 * time.Minute)}
+	got, _ := composeBriefing([]state.Agent{c, agent("w2:p1", "codex", herdr.StateIdle)}, state.PendingAction{}, now)
+	if want := "Two agents: claude is idle; it finished work 3 min ago, and codex is idle."; got != want {
+		t.Errorf("got  %q\nwant %q", got, want)
 	}
 }
