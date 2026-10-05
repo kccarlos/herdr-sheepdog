@@ -16,7 +16,7 @@ in).
   (docs/ws-contract.md "Settings"). Kept in the state file
   (`session.languages`) like chattiness; no config key.
 - One sentence describes it (`lang.Line`), the same for both brains:
-  "The shepherd's language setting, in order of preference: Chinese
+  "The user's language setting, in order of preference: Chinese
   (Simplified) 简体中文, English. Answer in the language they use; write
   Chinese in Simplified characters."
 - **Slow brain:** a `## Language` section in the state block (after the
