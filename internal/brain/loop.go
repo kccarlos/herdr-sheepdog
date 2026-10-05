@@ -35,13 +35,16 @@ type turn struct {
 	// (generateStep): provider, model and impl are that one's from then
 	// on, and there is no second failover in the turn.
 	failedOver bool
-	steps      int
-	calls      int // model calls
-	tokIn      int
-	tokOut     int
-	acted      []string        // spoken echoes of actions sent
-	actedOn    []string        // the panes those actions went to, each once
-	prompted   map[string]bool // pane + instruction already typed this turn (execTool)
+	// retried is set once a step was retried on the same provider after
+	// a 499 CANCELLED (generateStep): once per turn.
+	retried  bool
+	steps    int
+	calls    int // model calls
+	tokIn    int
+	tokOut   int
+	acted    []string        // spoken echoes of actions sent
+	actedOn  []string        // the panes those actions went to, each once
+	prompted map[string]bool // pane + instruction already typed this turn (execTool)
 	// notVerified: the tool calls that timed out (Reply.NotVerified);
 	// consulted: the aliases the tools named (Reply.Agents).
 	notVerified []string

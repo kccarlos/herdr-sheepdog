@@ -395,3 +395,47 @@ func TestCompactionSummaryFailsOver(t *testing.T) {
 		t.Errorf("selection changed to %s", h.brain.Provider())
 	}
 }
+
+// err499 is the transport error Vertex returned three times in the
+// 2026-10-05 baseline (deep-ask-detail 08:43:08Z, …).
+var err499 = genai.APIError{Code: 499, Message: "The operation was cancelled.", Status: "CANCELLED"}
+
+// A 499 CANCELLED is retried once on the same provider before anything
+// else: the reply comes from the retry, brain.retry is logged, no
+// failover and no fallback.
+func TestRetryOnce499(t *testing.T) {
+	m := braintest.NewModel()
+	m.Add(braintest.Step{Err: err499})
+	m.Default = &braintest.Step{Text: braintest.Reply("Auth is running the tests.", "")}
+	h := newHarness(t, m, func(c *Config) { c.Provider, c.Model = ProviderVertex, "gemini-3.5-flash" })
+	ds := answering("from deepseek")
+	_ = h.brain.AddProvider(ProviderDeepSeek, ds)
+	rep, err := h.ask("what is auth doing?", "auth")
+	if err != nil {
+		t.Fatalf("turn fell back: %v", err)
+	}
+	if rep.Spoken != "Auth is running the tests." {
+		t.Errorf("reply = %+v", rep)
+	}
+	if n := len(m.Calls()); n != 2 {
+		t.Errorf("vertex calls = %d, want 2", n)
+	}
+	if len(ds.Calls()) != 0 || h.log.count("brain.failover") != 0 {
+		t.Error("failed over on a 499")
+	}
+	ev := h.log.ofType("brain.retry")
+	if len(ev) != 1 || payload(ev[0])["reason"] != "cancelled_499" {
+		t.Errorf("brain.retry = %v", ev)
+	}
+}
+
+// Only one retry per turn: a second 499 falls back as before.
+func TestRetry499OncePerTurn(t *testing.T) {
+	h := newHarness(t, failing(err499), nil)
+	if _, err := h.ask("how is auth?", "auth"); !errors.Is(err, ErrFallback) {
+		t.Fatalf("err = %v, want ErrFallback", err)
+	}
+	if n := h.log.count("brain.retry"); n != 1 {
+		t.Errorf("brain.retry = %d, want 1", n)
+	}
+}

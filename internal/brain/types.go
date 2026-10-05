@@ -2,7 +2,9 @@ package brain
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 )
 
@@ -250,12 +252,12 @@ const (
 // everyday words, which the voice reads when the CEO asks "what does
 // that mean". An old-shape reply without Ask still parses.
 type Reply struct {
-	Spoken    string   `json:"spoken"`
-	Ask       string   `json:"ask,omitempty"`
-	Detail    string   `json:"detail"`
-	NeedsUser bool     `json:"needs_user"`
-	Options   []string `json:"options,omitempty"`
-	Clarify   bool     `json:"clarify"`
+	Spoken    string     `json:"spoken"`
+	Ask       string     `json:"ask,omitempty"`
+	Detail    string     `json:"detail"`
+	NeedsUser bool       `json:"needs_user"`
+	Options   OptionList `json:"options,omitempty"`
+	Clarify   bool       `json:"clarify"`
 	// Pending marks an answer that is not the final one: the brain said
 	// how long it will take and the result follows on its own (the
 	// investigations work of docs/roles.md). Plumbed through to the
@@ -625,4 +627,50 @@ type Host interface {
 	Promise(ctx context.Context, paneID string, req PromiseRequest) (PromiseInfo, error)
 	// Promises returns every promise of the session, open ones first.
 	Promises() []PromiseInfo
+}
+
+// OptionList is Reply.Options decoded tolerantly: the contract asks for
+// short string labels, but a model sometimes returns objects
+// ({"label": "Run tests"}), and one such reply failed the whole turn
+// (baseline 2026-10-05, status-en pass 1, 08:33:31Z: "cannot unmarshal
+// object into Reply.options.0 of type string", then silence). Each item
+// may be a string or an object with a label, text, title, option or
+// value field; anything else is skipped. A parse fix (rail /
+// robustness), not a reading of meaning: it encodes as plain strings.
+type OptionList []string
+
+// UnmarshalJSON accepts a list of strings or of label objects, a single
+// string, or null; any other shape is no options rather than a failed
+// turn (the spoken line still holds the news).
+func (o *OptionList) UnmarshalJSON(data []byte) error {
+	var items []json.RawMessage
+	if err := json.Unmarshal(data, &items); err != nil {
+		items = []json.RawMessage{data}
+	}
+	out := make(OptionList, 0, len(items))
+	for _, raw := range items {
+		if label := optionLabel(raw); label != "" {
+			out = append(out, label)
+		}
+	}
+	*o = out
+	return nil
+}
+
+// optionLabel is the label of one option item, "" when it has none.
+func optionLabel(raw json.RawMessage) string {
+	var s string
+	if json.Unmarshal(raw, &s) == nil {
+		return strings.TrimSpace(s)
+	}
+	var obj map[string]any
+	if json.Unmarshal(raw, &obj) != nil {
+		return ""
+	}
+	for _, k := range []string{"label", "text", "title", "option", "value"} {
+		if v, ok := obj[k].(string); ok && strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
 }
