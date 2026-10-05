@@ -2,6 +2,7 @@ package supervisor
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
@@ -53,7 +54,37 @@ func agentState(a state.Agent, now time.Time) string {
 	} else if a.State == herdr.StateIdle || a.State == herdr.StateDone {
 		st += "; no finished work recorded"
 	}
+	st += taskFacts(a, now)
 	return "as this reached you: " + st
+}
+
+// Roster-line facts of AgentNow (information; baseline 2026-10-05
+// cluster 5: "bench-claude is verifying all the links" for a worker
+// whose task was "write a README"): the worker's own task title (its
+// session title), the instruction it is on, and its last activity in
+// its record, each verbatim and clipped, so "what is it doing" can be
+// told in the worker's terms. Absent fields are left out.
+const (
+	agentNowTitleRunes = 60
+	agentNowTaskRunes  = 100
+)
+
+// taskFacts renders the task title, the current instruction and the
+// last activity ("; task title \"…\"; instruction \"…\"; last activity:
+// done 3 min ago"), "" when none is known.
+func taskFacts(a state.Agent, now time.Time) string {
+	var b strings.Builder
+	if t := strings.TrimSpace(a.Title); t != "" {
+		fmt.Fprintf(&b, "; task title %q", clipRunes(t, agentNowTitleRunes))
+	}
+	if t := strings.Join(strings.Fields(withoutSignOff(a.CurrentTask)), " "); t != "" && a.State != herdr.StateIdle && a.State != herdr.StateDone {
+		fmt.Fprintf(&b, "; instruction it is on %q", clipRunes(t, agentNowTaskRunes))
+	}
+	if n := len(a.Journal); n > 0 && !a.Journal[n-1].At.IsZero() && now.After(a.Journal[n-1].At) {
+		e := a.Journal[n-1]
+		fmt.Fprintf(&b, "; last activity on record: %s %s ago", e.Event, spokenAge(now.Sub(e.At)))
+	}
+	return b.String()
 }
 
 // spokenAge renders a duration coarsely for a model's ear: "45 s",

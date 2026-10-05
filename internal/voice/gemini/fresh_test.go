@@ -130,24 +130,79 @@ func TestSecondGoAwayStartsFresh(t *testing.T) {
 	}
 }
 
-// TestResumedConnectionLostBeforeItsOwnHandleResumesAgain: until the
+// TestResumedConnectionLostBeforeItsOwnHandleStartsFresh: until the
 // resumed connection issues a handle of its own, the session still holds
-// the fresh connection's handle, and resuming it again is lossless (the
-// canary's idle chain: the same generation-0 handle reused, 8 of 8).
-func TestResumedConnectionLostBeforeItsOwnHandleResumesAgain(t *testing.T) {
-	c1, c2, c3 := newFakeConn("c1"), newFakeConn("c2"), newFakeConn("c3")
-	d := &fakeDialer{results: []func() (Conn, error){ok(c1), ok(c2), ok(c3)}}
+// the generation-0 handle it resumed with; presenting it again would be
+// a second resume of the first session (baseline 2026-10-05,
+// resume-recall-twice r3). The drop opens a fresh session instead,
+// logged resumed_twice, and that session's own first GoAway resumes.
+func TestResumedConnectionLostBeforeItsOwnHandleStartsFresh(t *testing.T) {
+	c1, c2, c3, c4 := newFakeConn("c1"), newFakeConn("c2"), newFakeConn("c3"), newFakeConn("c4")
+	d := &fakeDialer{results: []func() (Conn, error){ok(c1), ok(c2), ok(c3), ok(c4)}}
 	h := newHarness(t, Config{ReconnectBackoff: 5 * time.Millisecond}, d)
 
 	acceptHandle(t, h, c1, "handle-1")
 	c1.serve(goAwayMsg(30 * time.Second))
 	waitResumes(t, h, 1)
 	c2.fail(errors.New("websocket: close 1006 (abnormal closure)"))
-	if r := waitResumes(t, h, 2); r.ContextLost || r.Handle != "handle-1" {
-		t.Fatalf("after the drop: %+v, want a resume with handle-1", r)
+	if r := waitResumes(t, h, 2); !r.ContextLost {
+		t.Fatalf("after the drop: %+v, want a fresh session", r)
 	}
-	if h.log.has("voice.handle_dropped") {
-		t.Errorf("a generation-0 handle was dropped: %v", h.log.payloads("voice.handle_dropped"))
+	dropped := h.log.payloads("voice.handle_dropped")
+	if len(dropped) != 1 || dropped[0]["reason"] != reasonResumedTwice || dropped[0]["handle_generation"] != 0 || dropped[0]["generation"] != 1 {
+		t.Errorf("voice.handle_dropped = %v", dropped)
+	}
+	acceptHandle(t, h, c3, "handle-3")
+	c3.serve(goAwayMsg(30 * time.Second))
+	if r := waitResumes(t, h, 3); r.ContextLost || r.Handle != "handle-3" {
+		t.Fatalf("the fresh session's first GoAway: %+v, want a resume with handle-3", r)
+	}
+	if got := dialHandles(d); strings.Join(got, ",") != ",handle-1,,handle-3" {
+		t.Errorf("dials presented %q", got)
+	}
+}
+
+// TestTwoQuickRecyclesDoNotReuseTheHandle is the #139 gap (baseline
+// 2026-10-05, resume-recall-twice r3, 09:06:44Z and 09:06:58Z): the
+// first recycle resumes; a turn happens on the resumed connection but
+// no handle arrives before the second recycle 14 s later. The second
+// recycle must not present the first session's handle again (that turn
+// would be lost with no re-seed): it opens a fresh session, re-seeded
+// with the turn heard on the resumed connection.
+func TestTwoQuickRecyclesDoNotReuseTheHandle(t *testing.T) {
+	c1, c2, c3 := newFakeConn("c1"), newFakeConn("c2"), newFakeConn("c3")
+	d := &fakeDialer{results: []func() (Conn, error){ok(c1), ok(c2), ok(c3)}}
+	h := newHarness(t, Config{}, d)
+
+	converse(t, h, c1, "what is codex doing?", "Codex is refactoring the parser.")
+	acceptHandle(t, h, c1, "handle-1")
+	h.s.Recycle("bench_resume")
+	if r := waitResumes(t, h, 1); r.ContextLost || r.Handle != "handle-1" {
+		t.Fatalf("first recycle: %+v, want a resume with handle-1", r)
+	}
+	c2.serve(inputTranscriptMsg("and what is claude writing?", false))
+	c2.serve(outputTranscriptMsg("Claude is writing the README."))
+	c2.serve(turnCompleteMsg())
+	isTurn := func(ev voice.Event) bool { _, ok := ev.(voice.EventTurnComplete); return ok }
+	for deadline := time.Now().Add(3 * time.Second); h.countEvents(isTurn) < 2 && time.Now().Before(deadline); {
+		time.Sleep(2 * time.Millisecond)
+	}
+	h.s.Recycle("bench_resume")
+	if r := waitResumes(t, h, 2); !r.ContextLost {
+		t.Fatalf("second recycle: %+v, want a fresh session", r)
+	}
+	if got := dialHandles(d); strings.Join(got, ",") != ",handle-1," {
+		t.Errorf("dials presented %q, want the third with no handle", got)
+	}
+	recap := c3.waitSent(t, "recap", isContent("Claude is writing the README."))
+	if text := turnText(recap.content.Turns[0]); !strings.Contains(text, "Codex is refactoring the parser.") {
+		t.Errorf("recap lacks the first connection's turn:\n%s", text)
+	}
+	if p := h.log.payloads("voice.handle_dropped"); len(p) != 1 || p[0]["reason"] != reasonResumedTwice {
+		t.Errorf("voice.handle_dropped = %v", p)
+	}
+	if p := h.log.payloads("voice.reseeded"); len(p) != 1 || p[0]["reason"] != reasonResumedTwice {
+		t.Errorf("voice.reseeded = %v", p)
 	}
 }
 

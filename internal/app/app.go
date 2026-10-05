@@ -368,6 +368,9 @@ func (a *App) wire() error {
 		// Every briefing about an agent names it by its spoken name and
 		// says its state as of delivery (information, prompt v5).
 		AgentNow: sup.AgentNow,
+		// Every spoken announcement says whether a decision is open
+		// as it reaches the model (information).
+		DecisionsNow: sup.DecisionsNow,
 		// The shepherd's language setting (PUT /api/settings), read at
 		// every (re)connect; a change mid-session goes as silent context.
 		Language: sup.LanguageLine,

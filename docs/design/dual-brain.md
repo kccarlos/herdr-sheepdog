@@ -231,7 +231,21 @@ standalone client, text input, 7 sessions, < $0.30):
   from a resumed connection is never used (it restores only that
   connection's content): the reconnect opens a fresh session instead, and
   the last briefings are re-sent silently after the recap, marked as
-  re-sent with their first time (#139).
+  re-sent with their first time (#139). Since #146 this also holds
+  before the resumed connection has issued a handle of its own: a
+  reconnect from any connection opened by a resume presents no handle
+  (the baseline's two recycles 14 s apart had re-presented the first
+  session's handle, losing the turn in between with no re-seed).
+- **Decision open** (#146, information): every spoken announcement
+  carries `decision_open`, computed as it reaches the model ("none: as
+  this reached you, no agent is waiting for the CEO's answer", or which
+  agent waits at which prompt), and the slow brain's announce turn gets
+  the same fact ("Decisions open right now: none. …"). The prompts say no
+  open decision means no question (baseline 2026-10-05 cluster 3: a
+  finish announced with an invented "Shall I have it run the tests?").
+- **Roster line** (#146, information): `agent_state` also quotes the
+  worker's task title (its session title), the instruction it is on
+  (while not idle) and its last activity on record ("done 3 min ago").
 - The slow brain's contract is unchanged (`spoken`, `ask`, `detail`,
   `options`): `spoken` becomes `facts`. RULES.md now says the voice
   retells it in its own words.
@@ -302,6 +316,17 @@ framing (a fact about what it cannot see, plus permission to talk while
 waiting) and the channel (answers come back as labelled facts, so no
 "On it." and no relay of its own lines).
 
+- v5.2 (#146, baseline information fixes): technical terms stay in
+  English when speaking Chinese ("race detector" had been voiced as
+  种族检测器, "racial detector"); an announcement whose `decision_open`
+  is none ends on the news with no question. Two trims keep the 540-word
+  budget (the relation example, the "the answer comes as…" clause).
+  RULES.md: "not yet", "don't run that yet", 先不要, 等一下 put an open
+  prompt off (no keys, no `esc`); a question is never an instruction, so
+  "read me what it wrote" relays the worker's own report (now in full in
+  the agent record) instead of prompting the worker to print a file;
+  same English-terms rule.
+
 Every measurement in the dual-brain results doc uses v4 unless marked
 otherwise; the v5 A/B is in its own results doc.
 
@@ -331,7 +356,13 @@ the brain; since v5: briefing age and the agent's state at delivery,
 `not_verified` checks, unvoiced briefings, the roster's "finished work
 N min ago" (no model prose spliced into it), spoken names kept once the
 CEO heard or said them, and a new agent herdr does not see after 20 s
-reported to both brains with its pane's last lines.
+reported to both brains with its pane's last lines; since #146: the
+decision-open fact on announcements (both brains), the task title,
+instruction and last activity in `agent_state`, and the worker's newest
+report in full in the slow brain's agent record. Robustness rails of
+#146 (parse and transport, no meaning): `options` decoded from strings
+or label objects; one same-provider retry on a 499 CANCELLED
+(`brain.retry`).
 
 ### Removed patches (ablation groups)
 

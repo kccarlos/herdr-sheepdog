@@ -118,6 +118,20 @@ func failoverReason(ctx context.Context, err error) (string, bool) {
 	return "", false
 }
 
+// isCancelled499 reports a request the model's server cancelled (HTTP
+// 499 CANCELLED: "The operation was cancelled."): seen three times on
+// Vertex in the 2026-10-05 baseline, each time falling back to the
+// template text. A transport failure, retried once per turn
+// (generateStep); not a failover reason.
+func isCancelled499(err error) bool {
+	var api genai.APIError
+	if errors.As(err, &api) && api.Code == 499 {
+		return true
+	}
+	var compat *APIError
+	return errors.As(err, &compat) && compat.Status == 499
+}
+
 // failoverTarget picks the provider and model a failed step is retried
 // on: the first registered provider other than from, in failoverOrder.
 // ok is false when there is none.
@@ -201,6 +215,16 @@ func (b *Brain) generateStep(ctx context.Context, t *turn, step int, msgs []Mess
 		defer cancel()
 	}
 	resp, raw, err := b.generate(actx, t, msgs, cfg)
+	if err != nil && !t.retried && isCancelled499(err) && ctx.Err() == nil && actx.Err() == nil {
+		// One retry on the same provider, within the attempt's budget
+		// (rail / robustness): a 499 is a dropped request, not an
+		// answer, and the next try usually works.
+		t.retried = true
+		b.log.Log(logSource, "brain.retry", "", map[string]any{
+			"provider": t.provider, "model": t.model, "reason": "cancelled_499", "error": err.Error(), "turn": t.n, "step": step,
+		})
+		resp, raw, err = b.generate(actx, t, msgs, cfg)
+	}
 	if err == nil {
 		b.failoverSucceeded(t.provider)
 		return resp, raw, nil

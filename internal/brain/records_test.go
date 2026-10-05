@@ -143,3 +143,24 @@ func TestAgentRecordsForTheAgentInFocus(t *testing.T) {
 		t.Errorf("a named agent lost to the focus:\n%s", got)
 	}
 }
+
+// Baseline 2026-10-05 cluster 2: "read me what it wrote" became a
+// "cat README.md" prompt. The record of a named agent now carries its
+// newest report in full when the clipped journal line cut it.
+func TestAgentRecordsCarryTheFullLastReport(t *testing.T) {
+	now := time.Date(2026, 10, 5, 8, 0, 0, 0, time.UTC)
+	clock := func() time.Time { return now }
+	report := "The README is written: what calc does, build steps, and how to run the tests. While checking it I found two broken links in CONTRIBUTING.md (both point to a docs folder that does not exist); I left them alone.\nWhat changed: new README.\nWhat needs a decision: whether to fix or delete the two dead links.\nWhat is next: nothing unless you want the links fixed."
+	agents := []AgentInfo{{Alias: "bench-claude", State: "done", Journal: []JournalEntry{
+		{At: now.Add(-9 * time.Minute), Event: "done", LastAssistant: "Fixed Add()."},
+		{At: now.Add(-time.Minute), Event: "done", LastAssistant: report},
+	}}}
+	got := agentRecords(agents, "what exactly did bench-claude write?", "", clock)
+	if !strings.Contains(got, `its own last report in full (read, not sent for): "`+oneLine(report)+`";`) {
+		t.Errorf("record lacks the full report:\n%s", got)
+	}
+	agents[0].Journal = agents[0].Journal[:1]
+	if got := agentRecords(agents, "what did bench-claude write?", "", clock); strings.Contains(got, "in full") {
+		t.Errorf("a short report repeated in full:\n%s", got)
+	}
+}

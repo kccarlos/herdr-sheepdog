@@ -413,6 +413,9 @@ func eventRequestText(req Request) string {
 	if line := promptStateLine(req.facts.Prompt); line != "" {
 		b.WriteString(line + "\n")
 	}
+	if req.facts.Decisions != "" {
+		b.WriteString(req.facts.Decisions + "\n")
+	}
 	if line := languageLine(req.facts.Language); line != "" {
 		b.WriteString(line + "\n")
 	}
@@ -507,6 +510,9 @@ func factsUpdate(before, now EventFacts) string {
 	}
 	if now.Language != before.Language && now.Language != "" {
 		parts = append(parts, "the CEO's last words are now in "+now.Language)
+	}
+	if now.Decisions != before.Decisions && now.Decisions != "" {
+		parts = append(parts, strings.TrimSuffix(lowerFirstRune(now.Decisions), "."))
 	}
 	if now.Prompt != before.Prompt {
 		if line := promptStateLine(now.Prompt); line != "" {
@@ -767,7 +773,7 @@ func agentRecords(agents []AgentInfo, words, focus string, clock func() time.Tim
 			fmt.Fprintf(&b, "; last result: %q", clipText(oneLine(a.LastResult), recordRunes))
 		}
 		if len(a.Journal) == 0 {
-			b.WriteString("; no journal entry: beyond this and its screen, nothing it did is on record.")
+			b.WriteString("; no journal entry: beyond this and its screen, nothing it did is on record; its last report, if any, is the last thing it wrote on its screen.")
 			continue
 		}
 		b.WriteString("; journal:")
@@ -795,11 +801,30 @@ func agentRecords(agents []AgentInfo, words, focus string, clock func() time.Tim
 			}
 			b.WriteString(";")
 		}
+		if full := lastReport(a.Journal); full != "" {
+			fmt.Fprintf(&b, " its own last report in full (read, not sent for): %q;", full)
+		}
 	}
 	if b.Len() == 0 {
 		return unmatchedNameLine(agents, words)
 	}
 	return b.String()
+}
+
+// lastReport is the worker's newest message for a human, in full as the
+// journal keeps it (≤ 600 runes), when the record's clipped line cut it;
+// "" otherwise (information; baseline 2026-10-05 cluster 2: asked for
+// the points it wrote, the brain typed "cat README.md" into the worker
+// instead of relaying its report).
+func lastReport(journal []JournalEntry) string {
+	if len(journal) == 0 {
+		return ""
+	}
+	text := oneLine(journal[len(journal)-1].LastAssistant)
+	if len([]rune(text)) <= recordRunes {
+		return ""
+	}
+	return text
 }
 
 // pointsAtOne matches words that refer to one agent without naming it.

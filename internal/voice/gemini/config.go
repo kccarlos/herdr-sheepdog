@@ -40,6 +40,11 @@ type Config struct {
 	// computed when the briefing reaches the model (docs/design/
 	// dual-brain.md, prompt v5). ok is false for an unknown alias.
 	AgentNow func(alias string) (name, state string, ok bool)
+	// DecisionsNow, when set, says whether any agent is waiting for the
+	// CEO's answer as a briefing reaches the model ("none: …" or "yes:
+	// …"); it goes on every spoken announcement as decision_open
+	// (information; baseline 2026-10-05 cluster 3).
+	DecisionsNow func() string
 	// Language, when set, returns the shepherd's language setting as one
 	// line of information (internal/lang.Line; "" when none is set). It
 	// is appended to the system prompt at every (re)connect, so the next
