@@ -64,8 +64,7 @@ func TestRenderAssistant(t *testing.T) {
 		"invent nothing",
 		"shepherd's register",
 		`"Never mind" is not stop`,
-		"Answer in the language and script the shepherd used last",
-		"Simplified Chinese to Simplified",
+		"answer in the language and script they used last (Simplified or Traditional characters)",
 		"whatever language a briefing is in",
 		"how old its facts were when it reached you",
 		// Tier 3 two-claudes-names: retold in its own words, the voice
