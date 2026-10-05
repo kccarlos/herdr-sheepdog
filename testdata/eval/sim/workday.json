@@ -222,7 +222,7 @@
             },
             {
               "beat": 13,
-              "answer": "the first thing was what everyone was up to (the status of the six workers), then which ones needed the CEO"
+              "answer": "the first thing was the CEO's opening question, what everyone was up to, and sheepdog's status answer to it (whatever it reported first, such as infra-codex waiting for its plan); then which ones needed the CEO. Naming the opening status question, or the first worker its answer was about, both count"
             }
           ]
         }
@@ -880,7 +880,7 @@
           "coherence": [
             {
               "beat": 11,
-              "answer": "the first thing was the overall status (现在什么情况), then notes-claude's notes ledger",
+              "answer": "the first thing was the CEO's opening status question (现在什么情况) and sheepdog's answer to it (whatever it reported first, such as db-codex's pending migration); then notes-claude's notes ledger. Naming the opening status question, or the first worker its answer was about, both count",
               "after_resume": true
             },
             {
@@ -1258,7 +1258,7 @@
           "coherence": [
             {
               "beat": 14,
-              "answer": "the first thing was the flaky test (TestCheckoutTotals racing the cache warm-up), and it ended with flaky-codex applying the Ready() fix",
+              "answer": "the first thing was the CEO's opening overview request and, as the first specific topic, the flaky test (TestCheckoutTotals racing the cache warm-up), which ended with flaky-codex applying the Ready() fix. Naming either the overview or the flaky test as first counts, as long as the flaky test's outcome is right when given",
               "after_resume": true
             }
           ]
@@ -1508,7 +1508,7 @@
             },
             {
               "beat": 17,
-              "answer": "the first thing was the status of the workers, then pricing-claude's free-shipping question (put off)",
+              "answer": "the first thing was the CEO's opening status request and sheepdog's answer to it (whatever it reported first); then pricing-claude's free-shipping question, which the CEO put off. Naming the opening status question, or the first worker its answer was about, both count",
               "after_resume": true
             }
           ]

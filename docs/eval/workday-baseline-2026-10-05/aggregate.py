@@ -56,7 +56,24 @@ def load_t1(d):
 
 
 def load_t2(d):
-    return [json.load(open(p)) for p in sorted(glob.glob(os.path.join(d, "runs", "workday-*.json")))]
+    out = []
+    for p in sorted(glob.glob(os.path.join(d, "runs", "workday-*.json"))):
+        r = json.load(open(p))
+        ev = os.path.join(d, "events", os.path.basename(p)[:-5] + ".jsonl")
+        steps = collections.Counter()
+        if os.path.exists(ev):
+            for line in open(ev):
+                if '"brain.step"' in line:
+                    steps[json.loads(line).get("payload", {}).get("provider", "?")] += 1
+        r["steps_by_provider"] = dict(steps)
+        out.append(r)
+    return out
+
+
+def vertex_share(r):
+    s = r.get("steps_by_provider") or {}
+    n = sum(s.values())
+    return s.get("vertex", 0) / n if n else None
 
 
 CODE_DONE = {"missing_function_call", "wrong_agent"}
@@ -89,6 +106,7 @@ def run_view(r):
         "turns": r.get("turns", 0), "beats": len(beats), "again": again, "answer": answer,
         "duration_s": r.get("duration_ms", 0) / 1000, "cost": r.get("cost_usd_estimate", 0),
         "errors": sum(1 for f in fails if f == "error"),
+        "vertex_share": vertex_share(r),
     }
     view["turns_per_beat"] = view["turns"] / view["beats"] if view["beats"] else None
     # North star per run.
@@ -163,8 +181,12 @@ def split(views, key):
 
 def main():
     t1d, t2d = sys.argv[1], sys.argv[2]
-    t1 = [run_view(r) for r in load_t1(t1d)]
-    t2 = [run_view(r) for r in load_t2(t2d)]
+    graded = lambda r: r.get("status") not in ("not_run", None) and r.get("verdicts")
+    t1 = [run_view(r) for r in load_t1(t1d) if graded(r)]
+    t2 = [run_view(r) for r in load_t2(t2d) if graded(r)]
+    if os.environ.get("CLEAN_ONLY"):
+        t1 = [v for v in t1 if (v["vertex_share"] or 0) >= 0.9]
+        t2 = [v for v in t2 if (v["vertex_share"] or 0) >= 0.9]
     for v in t2:
         v["held_out"] = v["scenario"] in HELD_OUT
     for v in t1:
@@ -180,6 +202,9 @@ def main():
         L += [f"## {label} by persona", ""] + split(vs, "persona") + [""]
         L += [f"## {label}: held out vs tuning set", ""] + split(vs, "held_out") + [""]
     for label, vs in (("Tier 1", t1), ("Tier 2", t2)):
+        sh = [v["vertex_share"] for v in vs if v["vertex_share"] is not None]
+        clean = sum(1 for x in sh if x >= 0.9)
+        L += [f"{label}: brain steps on Vertex per run, mean {100*sum(sh)/max(1,len(sh)):.0f} %; runs with >= 90 % on Vertex: {clean}/{len(vs)}", ""]
         ends = collections.Counter(v["end"] for v in vs)
         L += [f"{label}: end reasons {dict(ends)}; runs with judge or harness errors {sum(1 for v in vs if v['errors'])}; spend ≈ ${sum(v['cost'] for v in vs):.2f}; mean duration {sum(v['duration_s'] for v in vs)/max(1,len(vs)):.0f} s", ""]
     orch = []
