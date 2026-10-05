@@ -744,9 +744,10 @@ frame at once and then whenever the window changes.
   {"type":"screen-error","pane_id":"w1:p2","message":"herdr: pane.read: read: EOF"}
   ```
 
-- **When the daemon reads.** herdr has no "output changed" subscription
-  (its `events.wait` refuses output matches), so the daemon reads the
-  subscribed window itself, the same `pane.read` the route does: every
+- **When the daemon reads.** herdr offers no plain "output changed"
+  event to wait on (`events.wait` refuses output matches, herdr protocol
+  22; a catch-all `pane.output_matched` subscription was not evaluated),
+  so the daemon reads the subscribed window itself, the same `pane.read` the route does: every
   **1 s**, and sooner when the event log shows the watcher's debounced
   `herdr.transition` or a `herdr.send` for that pane (a state change,
   or input the CEO, the brain or a tap sent it). **Rate cap:** two

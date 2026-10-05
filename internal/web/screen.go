@@ -14,8 +14,9 @@ import (
 // a screen frame whenever the window changed, instead of the app polling
 // GET /api/agents/{pane_id}/screen.
 //
-// herdr has no output-changed subscription (events.wait refuses output
-// matches), so the daemon reads the one subscribed window itself: every
+// herdr offers no plain output-changed event to wait on (events.wait
+// refuses output matches; a catch-all pane.output_matched subscription was
+// not evaluated), so the daemon reads the one subscribed window itself: every
 // Deps.ScreenInterval, and sooner (never closer than Deps.ScreenMinGap to
 // the last read) when the event log shows the watcher's debounced
 // herdr.transition or a herdr.send for that pane. Only a changed hash is
