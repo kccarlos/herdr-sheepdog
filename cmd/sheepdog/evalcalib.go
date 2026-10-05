@@ -124,8 +124,12 @@ func runEvalCalib(ctx context.Context, args []string, stdout, stderr io.Writer) 
 			fprintf(stderr, "sheepdog eval calib: %v\n", err)
 			return 1
 		}
-		defer fh.Close()
-		if code := writeJSON(fh, stderr, verdicts); code != 0 {
+		code := writeJSON(fh, stderr, verdicts)
+		if err := fh.Close(); err != nil && code == 0 {
+			fprintf(stderr, "sheepdog eval calib: %v\n", err)
+			code = 1
+		}
+		if code != 0 {
 			return code
 		}
 		errs := 0

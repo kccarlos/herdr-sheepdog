@@ -176,7 +176,7 @@ func (it CalibItem) Transcript() string {
 		case "event":
 			who = "EVENT"
 		}
-		fmt.Fprintf(&b, "[%s] %s: %s\n", t.T, who, t.Text)
+		_, _ = fmt.Fprintf(&b, "[%s] %s: %s\n", t.T, who, t.Text)
 	}
 	return b.String()
 }
@@ -410,20 +410,20 @@ func WriteAgreement(w io.Writer, rep CalibAgreement) {
 		}
 		return fmt.Sprintf("%d/%d (%.0f %%)", a, n, 100*float64(a)/float64(n))
 	}
-	fmt.Fprintf(w, "# Judge–CEO agreement\n\n")
-	fmt.Fprintf(w, "Overall: agreement %s, Cohen's kappa %s; CEO n/a %d, unpaired %d.\n\n", pct(rep.Overall.Agree, rep.Overall.N), kappa(rep.Overall.Kappa), rep.Overall.CEONA, rep.Overall.Missing)
-	fmt.Fprintf(w, "| Rubric item | Agreement | Kappa | CEO n/a | Unpaired |\n|---|---|---|---|---|\n")
+	_, _ = fmt.Fprintf(w, "# Judge–CEO agreement\n\n")
+	_, _ = fmt.Fprintf(w, "Overall: agreement %s, Cohen's kappa %s; CEO n/a %d, unpaired %d.\n\n", pct(rep.Overall.Agree, rep.Overall.N), kappa(rep.Overall.Kappa), rep.Overall.CEONA, rep.Overall.Missing)
+	_, _ = fmt.Fprintf(w, "| Rubric item | Agreement | Kappa | CEO n/a | Unpaired |\n|---|---|---|---|---|\n")
 	for _, s := range rep.PerRubric {
-		fmt.Fprintf(w, "| %s | %s | %s | %d | %d |\n", s.RubricID, pct(s.Agree, s.N), kappa(s.Kappa), s.CEONA, s.Missing)
+		_, _ = fmt.Fprintf(w, "| %s | %s | %s | %d | %d |\n", s.RubricID, pct(s.Agree, s.N), kappa(s.Kappa), s.CEONA, s.Missing)
 	}
-	fmt.Fprintf(w, "\n| Item | Agreement |\n|---|---|\n")
+	_, _ = fmt.Fprintf(w, "\n| Item | Agreement |\n|---|---|\n")
 	for _, s := range rep.PerItem {
-		fmt.Fprintf(w, "| %s | %s |\n", s.ItemID, pct(s.Agree, s.N))
+		_, _ = fmt.Fprintf(w, "| %s | %s |\n", s.ItemID, pct(s.Agree, s.N))
 	}
 	if len(rep.Disagreements) > 0 {
-		fmt.Fprintf(w, "\n## Disagreements\n\n| Item | Rubric item | CEO | Judge | Judge's evidence | CEO's note |\n|---|---|---|---|---|---|\n")
+		_, _ = fmt.Fprintf(w, "\n## Disagreements\n\n| Item | Rubric item | CEO | Judge | Judge's evidence | CEO's note |\n|---|---|---|---|---|---|\n")
 		for _, d := range rep.Disagreements {
-			fmt.Fprintf(w, "| %s | %s | %s | %s | %s | %s |\n", d.ItemID, d.RubricID, d.Label, d.Verdict, cell(d.Evidence), cell(d.Note))
+			_, _ = fmt.Fprintf(w, "| %s | %s | %s | %s | %s | %s |\n", d.ItemID, d.RubricID, d.Label, d.Verdict, cell(d.Evidence), cell(d.Note))
 		}
 	}
 }
