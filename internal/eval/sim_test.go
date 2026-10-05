@@ -76,7 +76,7 @@ func TestRunSimScriptedConversation(t *testing.T) {
 			t.Errorf("transcript lacks %q:\n%s", want, text)
 		}
 	}
-	if len(run.Verdicts) != 7 || run.Verdicts[0].Name != "answered" {
+	if len(run.Verdicts) != 8 || run.Verdicts[0].Name != "answered" {
 		t.Errorf("verdicts = %+v", run.Verdicts)
 	}
 	in := fj.Inputs()[len(fj.Inputs())-1]

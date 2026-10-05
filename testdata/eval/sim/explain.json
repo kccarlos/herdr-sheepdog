@@ -35,10 +35,7 @@
         "silence_seconds": 30
       },
       "expect": {
-        "no_actions": true,
-        "skip": [
-          "ear_friendly"
-        ]
+        "no_actions": true
       },
       "explain": {
         "turns": [
@@ -93,10 +90,7 @@
         "silence_seconds": 30
       },
       "expect": {
-        "no_actions": true,
-        "skip": [
-          "ear_friendly"
-        ]
+        "no_actions": true
       },
       "explain": {
         "turns": [
@@ -151,10 +145,7 @@
         "silence_seconds": 30
       },
       "expect": {
-        "no_actions": true,
-        "skip": [
-          "ear_friendly"
-        ]
+        "no_actions": true
       },
       "explain": {
         "turns": [
@@ -206,10 +197,7 @@
         "silence_seconds": 30
       },
       "expect": {
-        "no_actions": true,
-        "skip": [
-          "ear_friendly"
-        ]
+        "no_actions": true
       },
       "explain": {
         "turns": [
