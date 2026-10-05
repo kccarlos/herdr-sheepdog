@@ -269,7 +269,8 @@ The checks (`internal/northstar`):
   doing it, or, for keys that answer the user's own yes or no, a bare
   acknowledgement ("OK", "好的").
 - **Missed news**: a worker finished (to done, or working to idle),
-  blocked, an investigation returned or failed, a spawn failed; conveyed
+  blocked (including already blocked when the call starts), an
+  investigation returned or failed, a spawn failed; conveyed
   when a heard line after it, before the user's next line or within 30 s,
   carries a word of its kind and (with more than one agent) the agent's
   name. News whose window the call's end cut off is ungraded, not
@@ -284,6 +285,8 @@ The checks (`internal/northstar`):
   `agent_spawned` (optional `matches` on kind or alias); each with a
   `worker` (whose clone or roster entry) and an optional `why`. A failed
   one is a `check` failure and fails Done; the record keeps `end_state`.
+  The older `expect.commands` and `expect.screens` checks are checked
+  against the world too and count as end-state checks.
 - **User effort**: consecutive user lines whose distinct-token overlap
   (words, or character bigrams for Chinese; lines of three tokens or
   more) reaches 0.8 are a repeat, 0.5 a rephrasing.

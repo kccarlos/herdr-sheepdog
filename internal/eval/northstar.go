@@ -94,7 +94,9 @@ func NorthStarRun(r SimRun, sc *SimScenario, evs []northstar.Event, o NorthStarO
 			case "done":
 				nr.Initial = append(nr.Initial, northstar.News{Kind: northstar.NewsFinished, Agent: a.Alias, Detail: "at start"})
 			case "blocked":
-				nr.Initial = append(nr.Initial, northstar.News{Kind: northstar.NewsBlocked, Agent: a.Alias, Detail: "at start"})
+				// A worker waiting on the user when the call starts is news
+				// to tell (tier 3 logs it as new → blocked).
+				nr.News = append(nr.News, northstar.News{Kind: northstar.NewsBlocked, Agent: a.Alias, Detail: "at start"})
 			}
 		}
 	}

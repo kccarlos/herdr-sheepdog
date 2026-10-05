@@ -68,8 +68,11 @@ func NorthStarRun(r Run, sc *Scenario, evs []northstar.Event) northstar.Run {
 		nr.ExpectsActions = len(sc.Expect.Actions) > 0
 		for _, a := range sc.Agents {
 			nr.Agents = append(nr.Agents, northstar.Agent{Alias: a.Alias, Kind: orStr(a.Kind, "codex")})
-			if a.State == "done" {
+			switch a.State {
+			case "done":
 				nr.Initial = append(nr.Initial, northstar.News{Kind: northstar.NewsFinished, Agent: a.Alias, Detail: "at start"})
+			case "blocked":
+				nr.News = append(nr.News, northstar.News{Kind: northstar.NewsBlocked, Agent: a.Alias, Detail: "at start"})
 			}
 		}
 	}

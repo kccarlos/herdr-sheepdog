@@ -65,7 +65,7 @@ func runBenchNorthStar(_ context.Context, args []string, stdout, stderr io.Write
 		printBenchNorthStarUsage(stderr)
 		return 2
 	}
-	a, tierA, err := loadNorthStarRuns(*from, *events, src)
+	a, tierA, err := loadNorthStarRuns(*from, *events, src, stderr)
 	if err != nil {
 		fprintf(stderr, "sheepdog bench northstar: %v\n", err)
 		return 1
@@ -89,7 +89,7 @@ func runBenchNorthStar(_ context.Context, args []string, stdout, stderr io.Write
 		b.WriteMarkdown(w)
 		return 0
 	}
-	bb, tierB, err := loadNorthStarRuns(*vs, *vsEvents, src)
+	bb, tierB, err := loadNorthStarRuns(*vs, *vsEvents, src, stderr)
 	if err != nil {
 		fprintf(stderr, "sheepdog bench northstar: %v\n", err)
 		return 1
@@ -119,7 +119,12 @@ func writeJSONOut(w io.Writer, v any, stderr io.Writer) int {
 // loadNorthStarRuns reads a result directory in whichever form it has:
 // a tier-2 campaign's runs/, an eval sim or tier-3 report.json with full
 // runs, or a tier-2 report.json with summaries only.
-func loadNorthStarRuns(dir, events string, src nsSources) ([]northstar.Run, string, error) {
+func loadNorthStarRuns(dir, events string, src nsSources, stderr io.Writer) ([]northstar.Run, string, error) {
+	warn := func(n int, err error, glob string) {
+		if n == 0 || err != nil {
+			fprintf(stderr, "sheepdog bench northstar: no scenarios from %s (%v): Done counts only runs with an action or a claim, and agent names come from the records\n", glob, err)
+		}
+	}
 	if events == "" {
 		events = filepath.Join(dir, "events")
 	}
@@ -128,7 +133,8 @@ func loadNorthStarRuns(dir, events string, src nsSources) ([]northstar.Run, stri
 		if err != nil {
 			return nil, "", err
 		}
-		scs, _ := bench.LoadScenarios(src.scenarios, src.sims)
+		scs, err := bench.LoadScenarios(src.scenarios, src.sims)
+		warn(len(scs), err, src.scenarios)
 		return bench.NorthStarRuns(runs, scs, events), "2", nil
 	}
 	b, err := os.ReadFile(filepath.Join(dir, "report.json"))
@@ -147,7 +153,8 @@ func loadNorthStarRuns(dir, events string, src nsSources) ([]northstar.Run, stri
 		if err := json.Unmarshal(b, &rep); err != nil {
 			return nil, "", err
 		}
-		scs, _ := bench.LoadScenarios(src.scenarios, src.sims)
+		scs, err := bench.LoadScenarios(src.scenarios, src.sims)
+		warn(len(scs), err, src.scenarios)
 		return bench.SummaryRuns(rep.Runs, scs), "2 (summary)", nil
 	}
 	var rep eval.CampaignReport
@@ -156,7 +163,8 @@ func loadNorthStarRuns(dir, events string, src nsSources) ([]northstar.Run, stri
 	}
 	mode := rep.Setup["mode"]
 	if strings.Contains(mode, "tier 3") {
-		scs, _ := tier3.LoadGlob(src.tier3, "")
+		scs, err := tier3.LoadGlob(src.tier3, "")
+		warn(len(scs), err, src.tier3)
 		recs := make([]tier3.Record, len(rep.Runs))
 		for i, r := range rep.Runs {
 			recs[i] = tier3.Record{SimRun: r}
@@ -168,6 +176,7 @@ func loadNorthStarRuns(dir, events string, src nsSources) ([]northstar.Run, stri
 		}
 		return tier3.NorthStarRuns(recs, scs, events, voice), tier, nil
 	}
-	scs, _ := loadSimScenarios(src.sims, "")
+	scs, err := loadSimScenarios(src.sims, "")
+	warn(len(scs), err, src.sims)
 	return eval.NorthStarRuns(rep.Runs, eval.NorthStarOptions{Tier: "1", Scenarios: scs, EventsDir: events}), "1", nil
 }

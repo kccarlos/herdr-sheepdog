@@ -101,3 +101,15 @@ func TestEndStateValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestWorldChecksBecomeEndState(t *testing.T) {
+	got := worldChecks([]string{
+		"PASS go test ./... in bench-claude: exit 0 (want 0) — the fix landed",
+		"FAIL screen bench-claude ~ README — the file is shown",
+		"FAIL event supervisor.close: 0 seen",
+		"teardown: boom",
+	})
+	if len(got) != 2 || !got[0].Pass || got[1].Pass {
+		t.Fatalf("world checks = %+v", got)
+	}
+}

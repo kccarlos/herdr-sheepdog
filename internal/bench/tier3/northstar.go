@@ -3,6 +3,8 @@ package tier3
 import (
 	"fmt"
 	"path/filepath"
+	"regexp"
+	"strings"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/eval"
 	"github.com/kccarlos/herdr-sheepdog/internal/northstar"
@@ -33,7 +35,7 @@ func NorthStarRuns(recs []Record, scs []Scenario, eventsDir string, voice bool) 
 			sc = &s
 		}
 		nr := eval.NorthStarRun(r.SimRun, sc, evs, o)
-		nr.EndState = r.EndState
+		nr.EndState = append(worldChecks(r.Checks), r.EndState...)
 		for _, row := range r.Roster {
 			for i := range nr.Agents {
 				if nr.Agents[i].Alias == row.Alias {
@@ -42,6 +44,23 @@ func NorthStarRuns(recs []Record, scs []Scenario, eventsDir string, voice bool) 
 			}
 		}
 		out = append(out, nr)
+	}
+	return out
+}
+
+// worldCheck matches a code-check line about the world after the call:
+// a command in a worker's repo or a worker's final screen (the event and
+// voice checks are about the conversation, not the end state).
+var worldCheck = regexp.MustCompile(`^(PASS|FAIL) (screen \S+|.+ in \S+: exit -?\d+ \(want -?\d+\))`)
+
+// worldChecks are a record's expect.commands and expect.screens outcomes
+// as end-state checks: they are checked against the world too.
+func worldChecks(lines []string) []northstar.EndCheck {
+	var out []northstar.EndCheck
+	for _, l := range lines {
+		if m := worldCheck.FindStringSubmatch(l); m != nil {
+			out = append(out, northstar.EndCheck{Name: strings.TrimPrefix(strings.TrimPrefix(l, "PASS "), "FAIL "), Pass: m[1] == "PASS"})
+		}
 	}
 	return out
 }

@@ -1,7 +1,9 @@
 package eval
 
 import (
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/northstar"
 )
@@ -22,7 +24,7 @@ func TestNorthStarRunFromSimRun(t *testing.T) {
 		Verdicts: []NamedVerdict{{Name: "answered", Verdict: Verdict{Answer: AnswerYes}}, {Name: "no_unintended_action", Verdict: Verdict{Answer: AnswerYes}}},
 	}
 	nr := NorthStarRun(r, &sc, nil, NorthStarOptions{Tier: "1"})
-	if !nr.ExpectsActions || len(nr.Initial) != 1 || len(nr.News) != 1 || nr.Heard != northstar.SideOrchestrator {
+	if !nr.ExpectsActions || len(nr.News) != 2 || nr.Heard != northstar.SideOrchestrator {
 		t.Fatalf("run = %+v", nr)
 	}
 	o := northstar.Evaluate(nr)
@@ -31,5 +33,18 @@ func TestNorthStarRunFromSimRun(t *testing.T) {
 	}
 	if o.Done == nil || !*o.Done || o.Safe == nil || !*o.Safe || o.LowEffort == nil || !*o.LowEffort {
 		t.Fatalf("north star = %+v", o)
+	}
+}
+
+func TestCampaignReportStartsWithTheNorthStar(t *testing.T) {
+	runs := []SimRun{{Scenario: "s", Repeat: 1, Status: RunPass, Transcript: []SimLine{{Who: "ceo", Text: "hi"}}}}
+	rep := NewCampaignReport(time.Now(), nil, 1, runs, NewMeter())
+	rep.NorthStar = NorthStarBlock(runs, NorthStarOptions{Tier: "1"})
+	var sb strings.Builder
+	rep.WriteMarkdown(&sb, 5)
+	out := sb.String()
+	ns, pass := strings.Index(out, "## North star"), strings.Index(out, "## Pass rate per scenario")
+	if ns < 0 || pass < 0 || ns > pass {
+		t.Fatalf("the north star must come first:\n%s", out)
 	}
 }
