@@ -167,7 +167,7 @@ type EventMatch struct {
 }
 
 // Categories are the known scenario categories, in report order.
-var Categories = []string{"status", "deep_ask", "instruct", "approve", "deferral", "stop", "ambiguous", "names", "language", "collision", "barge_in", "noise", "echo", "reconnect", "failover", "unheard", "slowness", "facts"}
+var Categories = []string{"status", "deep_ask", "instruct", "approve", "deferral", "stop", "ambiguous", "names", "language", "collision", "barge_in", "noise", "echo", "reconnect", "failover", "unheard", "slowness", "facts", "explain"}
 
 // LoadScenarios reads every file of glob, resolving from_sim against
 // the sim scenarios in simGlob, and validates them.
@@ -264,6 +264,9 @@ func merge(base, over eval.SimScenario) eval.SimScenario {
 	}
 	if len(over.Transcript) > 0 {
 		out.Transcript = over.Transcript
+	}
+	if over.Explain != nil {
+		out.Explain = over.Explain
 	}
 	if over.Caps != (eval.SimCaps{}) {
 		out.Caps = over.Caps

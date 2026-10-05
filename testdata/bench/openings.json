@@ -241,6 +241,75 @@
       "dur_ms": 3200
     },
     {
+      "scenario": "explain-zh-input-rules",
+      "text": "summary-claude 发现了什么？给我讲讲输入层的硬编码规则是怎么回事。",
+      "lang": "zh",
+      "voice": "Charon",
+      "style": "casual",
+      "source": "gemini",
+      "model": "gemini-2.5-flash-tts",
+      "cache_key": "1db5ef80e50c58eda886b584",
+      "sha256": "fe7ebaf5cacafc49565b0617381ad321192b6d2bab1172da5da4bc299c33386c",
+      "dur_ms": 6130
+    },
+    {
+      "scenario": "explain-en-flaky-test",
+      "text": "What did bench-codex find about the flaky test? Explain it to me.",
+      "lang": "en",
+      "voice": "Kore",
+      "source": "gemini",
+      "model": "gemini-2.5-flash-tts",
+      "cache_key": "5cc576d8e2c45daa89e13c09",
+      "sha256": "30844b399d12ba17d9819b45365f75c8cba7fe9fedff85a1cb80856c7d6294aa",
+      "dur_ms": 3890
+    },
+    {
+      "scenario": "explain-zh-notes-ledger",
+      "text": "memo-claude 那边的备忘录分析是什么意思？给我解释一下。",
+      "lang": "zh",
+      "voice": "Aoede",
+      "source": "gemini",
+      "model": "gemini-2.5-flash-tts",
+      "cache_key": "a021a5b7c1aa53462c89a560",
+      "sha256": "00633d4fe1a7cb28f267287de15b3c2e847a6be8b6b330c15864bc51efb4d25e",
+      "dur_ms": 4810
+    },
+    {
+      "scenario": "explain-en-invoice-job",
+      "text": "Explain what api-claude found about the invoice job.",
+      "lang": "en",
+      "voice": "Puck",
+      "style": "casual",
+      "source": "gemini",
+      "model": "gemini-2.5-flash-tts",
+      "cache_key": "0bdf47307e3bf36be5242162",
+      "sha256": "014c90480f20f0710383e2e5e7f3a19ca7dca4c80eb39fb00f68b44af1b4f568",
+      "dur_ms": 3170
+    },
+    {
+      "scenario": "explain-control-en-done",
+      "text": "Is bench-codex done?",
+      "lang": "en",
+      "voice": "Kore",
+      "style": "hurried",
+      "source": "gemini",
+      "model": "gemini-2.5-flash-tts",
+      "cache_key": "f596ea4af63ac36fa4105ad1",
+      "sha256": "2a6f54470979806ee4d1474aeb648207c1cb92282df7abe031dbdb43640e5fc1",
+      "dur_ms": 1210
+    },
+    {
+      "scenario": "explain-control-zh-busy",
+      "text": "bench-claude 现在在忙吗？",
+      "lang": "zh",
+      "voice": "Charon",
+      "source": "gemini",
+      "model": "gemini-2.5-flash-tts",
+      "cache_key": "eafb1ffc430e702087161de0",
+      "sha256": "446f14d049d0bd259288f68e7f929c3aa0e3723aa74f0da0e18c3cb143b83499",
+      "dur_ms": 1890
+    },
+    {
       "scenario": "facts-contradiction-linecount",
       "text": "How many lines of Go does the shop repo have, according to bench-claude?",
       "lang": "en",

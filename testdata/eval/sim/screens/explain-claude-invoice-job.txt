@@ -1,0 +1,30 @@
+ ▐▛███▛█   Claude Code v2.1.275
+▝▜██████▀  Opus 5 (1M context) · Claude Max
+  ▝▝ ▝▝    ~/src/billing
+
+
+❯ The nightly invoice job failed. Why?
+
+⏺ Bash(grep -c 'status=429' logs/invoice-job-2026-10-05.log)
+  ⎿  4100
+
+⏺ Why the nightly invoice job failed
+
+  - The job sends one API call per invoice to the payment provider. Last night
+    it had 4,200 invoices; the provider allows 100 calls per minute, so after
+    the first 100 calls every call got HTTP 429 (too many requests).
+  - The job has no retry, so 4,100 invoices were not sent. Customers will get
+    them a day late unless we re-run the job before 9:00.
+  - It worked until this week because there were fewer than 100 invoices a
+    night; the new annual plans pushed it to 4,200 on the 1st of the month.
+  - Proper fix: use the provider's bulk endpoint, which takes 500 invoices per
+    call (9 calls for 4,200). About 40 lines.
+  - Quick fix: retry with a 1-minute wait; sending all 4,100 would take about
+    42 minutes.
+  - Re-running now with the quick fix is safe: the provider ignores a duplicate
+    invoice id.
+
+────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ accept edits on · ? for shortcuts

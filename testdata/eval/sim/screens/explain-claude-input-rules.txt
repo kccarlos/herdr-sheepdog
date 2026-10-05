@@ -1,0 +1,38 @@
+ ▐▛███▛█   Claude Code v2.1.275
+▝▜██████▀  Opus 5 (1M context) · Claude Max
+  ▝▝ ▝▝    ~/src/sheepdog
+
+
+❯ Summarise how the input layer handles short replies. Is anything hard-coded?
+
+⏺ Read(internal/supervisor/inputs.go, internal/voice/fastpath.go, internal/lang/cues.go)
+
+⏺ Summary: hard-coded rules in the input layer
+
+  1. What it is: about 1,500 characters of hand-written regular expressions and
+     word lists (ackCues, denyCues, holdCues) match short Chinese and English
+     replies such as "好的", "继续", "yes", "wait" and "等一下", and turn them
+     straight into an approve key or a cancel, without asking the model.
+  2. Why it is a problem:
+     - It bypasses the project's rule that the model decides. A whole sentence
+       like "好的，继续，但是先别动数据库" matches on "好的，继续" and is approved,
+       so the "but don't touch the database yet" part is lost.
+     - There are three word lists for the same meanings in three files and they
+       disagree: "行" approves in fastpath.go but not in cues.go; "算了" cancels
+       in one and is ignored in the other.
+     - 9 of the 41 tests in inputs_test.go only test the word lists.
+  3. Example: on 2026-10-02 the CEO said "好的继续，不过先跑测试" to a Codex
+     approval. The fast path sent "y" in 40 ms and "run the tests first" never
+     reached the model.
+  4. Keep: the safety rule that refuses dangerous keys (ctrl+c into a running
+     migration) must stay in code.
+  5. Recommendation: delete the three word lists (about 300 lines), keep the
+     safety rule, and send every reply to the model. Cost: about 1.2 s more
+     latency on a plain "yes".
+
+  Want me to make the change?
+
+────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ accept edits on · ? for shortcuts
