@@ -34,6 +34,12 @@ type Config struct {
 	// roster; the supervisor's silent names line covers a running
 	// connection. An empty result falls back to Aliases.
 	Names func() []string
+	// AgentNow, when set, returns an agent's spoken name and a sentence
+	// of its state as of now ("idle for 4 min; it last finished work 4
+	// min ago"), by alias: every briefing about an agent carries both,
+	// computed when the briefing reaches the model (docs/design/
+	// dual-brain.md, prompt v5). ok is false for an unknown alias.
+	AgentNow func(alias string) (name, state string, ok bool)
 	// Name is what the dog calls itself (config voice.name, default
 	// "Sheepdog"), substituted into the system prompt as {name}.
 	Name string

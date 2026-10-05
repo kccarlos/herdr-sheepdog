@@ -176,6 +176,7 @@ the cache, outside the repository. `sheepdog bench validate` (part of
 | failover | failover-brain-503 | the primary brain provider answers 503 |
 | unheard | unheard-approval-requeue | the CEO talks over an approval announcement |
 | slowness | slowness-brain-9s | every brain request 9 s slower |
+| facts | facts-contradiction-linecount, facts-history-first, facts-stale-conclusion-zh, facts-ambiguous-rewind, facts-zh-simplified, facts-timeout-not-verified | the 2026-10-04 phone-test failures (tier-1 forms in `testdata/eval/sim/phone-2026-10-04.json`): two disagreeing numbers, "what did we talk about first", "现在有结论了吗" after a finish, an ambiguous "rewind it", Simplified replies, no claimed verification after run_cli times out |
 
 ## Commands
 
@@ -196,7 +197,9 @@ rest are not_run), `--ports` / `--parallel` (≤ 3), `--simuser` /
 `--judge` (`vertex`, `ollama`, `fake`) with `--simuser-model` /
 `--judge-model`, `--save-audio DIR` (WAV of both directions per run,
 keep it outside the repo), `--scratch`, `--cache-dir`, `--tts-model`,
-`--say` (no Gemini TTS). The judge and the simulated CEO share one
+`--say` (no Gemini TTS), `--prompts-dir DIR` (the scratch daemons'
+`prompts.dir`: an override `assistant.md` there is the prompt arm of
+an A/B; both arms then run the same binary). The judge and the simulated CEO share one
 limit of four calls in flight with jittered backoff and the alternating
 Flash-Lite model (#94).
 

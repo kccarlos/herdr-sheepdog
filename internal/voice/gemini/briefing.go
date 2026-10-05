@@ -63,8 +63,12 @@ const briefingKeep = 48
 
 // briefRec is one briefing sent to the model.
 type briefRec struct {
-	id      string
-	at      time.Time
+	id string
+	at time.Time
+	// factsAt is when the facts were written (the push was queued): a
+	// push may wait in the queue while the CEO talks or no phone
+	// listens, so it can reach the model well after it was true.
+	factsAt time.Time
 	urgency voice.Urgency
 	kind    string
 	about   string
@@ -90,6 +94,11 @@ type briefLedger struct {
 	// for an urgent briefing) and when.
 	flushBy string
 	flushAt time.Time
+	// watch is the spoken briefing awaiting the model's speech;
+	// unvoiced the facts about briefings that drew none, carried to the
+	// next spoken briefing or answer (unvoiced.go).
+	watch    *voiceWatch
+	unvoiced []string
 }
 
 // clock renders t for a briefing: the local wall-clock time.
@@ -131,13 +140,17 @@ func briefingFrom(tags map[string]any) string {
 }
 
 // newBriefingLocked builds the payload for one briefing and records it.
-// Caller holds s.mu.
-func (s *Session) newBriefingLocked(text string, u voice.Urgency, tags map[string]any) briefRec {
+// factsAt is when its facts were written (zero: now). Caller holds s.mu.
+func (s *Session) newBriefingLocked(text string, u voice.Urgency, tags map[string]any, factsAt time.Time) briefRec {
 	now := s.now()
+	if factsAt.IsZero() || factsAt.After(now) {
+		factsAt = now
+	}
 	s.brief.seq++
 	r := briefRec{
 		id:      fmt.Sprintf("b-%d", s.brief.seq),
 		at:      now,
+		factsAt: factsAt,
 		urgency: u,
 		kind:    briefingKind(tags, u),
 		spoken:  u != voice.UrgencySilent,
@@ -152,10 +165,16 @@ func (s *Session) newBriefingLocked(text string, u voice.Urgency, tags map[strin
 		"from":       briefingFrom(tags),
 		"kind":       r.kind,
 		"facts":      text,
+		"age":        ageLine(now.Sub(factsAt)),
 	}
 	if r.about != "" {
 		p["agent"] = r.about
+		if name, st, ok := s.agentNow(r.about); ok {
+			p["agent"] = name
+			p["agent_state"] = st
+		}
 	}
+	s.addAnswerFactsLocked(p, tags)
 	if words, _ := tags["answers_text"].(string); words != "" {
 		asked, _ := tags["asked_at"].(string)
 		p["answers"] = fmt.Sprintf("the CEO's words at %s: %q", asked, words)
@@ -204,6 +223,10 @@ func (s *Session) relationsLocked(r briefRec) []string {
 				break
 			}
 		}
+	}
+	if r.spoken && len(s.brief.unvoiced) > 0 {
+		out = append(out, s.brief.unvoiced...)
+		s.brief.unvoiced = nil
 	}
 	if s.brief.cut != "" && r.spoken {
 		out = append(out, s.brief.cut)
@@ -274,7 +297,7 @@ func (s *Session) resendAfterResume() {
 	s.mu.Unlock()
 	for _, r := range recs {
 		rr := r
-		rr.payload = resentPayload(r, "re-sent after a reconnect; first sent at "+clock(r.at)+"; it may already be in your context")
+		rr.payload = s.resentPayload(r, "re-sent after a reconnect; first sent at "+clock(r.at)+"; it may already be in your context")
 		err := s.sendOn(gen, func(c Conn) error { return c.SendToolResponse(briefingResponse(rr, voice.UrgencySilent)) })
 		s.log.Log(logSource, "voice.briefing_resent", "", map[string]any{"briefing": r.id, "at": clock(r.at), "reason": "after_resume", "error": errString(err)})
 		if err != nil {
@@ -283,13 +306,22 @@ func (s *Session) resendAfterResume() {
 	}
 }
 
-// resentPayload is a copy of r's payload marked as re-sent (note).
-func resentPayload(r briefRec, note string) map[string]any {
+// resentPayload is a copy of r's payload marked as re-sent (note), its
+// age and the agent's state told as of now.
+func (s *Session) resentPayload(r briefRec, note string) map[string]any {
 	p := make(map[string]any, len(r.payload)+1)
 	for k, v := range r.payload {
 		p[k] = v
 	}
 	p["resent"] = note
+	if !r.factsAt.IsZero() {
+		p["age"] = ageLine(s.now().Sub(r.factsAt))
+	}
+	if r.about != "" {
+		if _, st, ok := s.agentNow(r.about); ok {
+			p["agent_state"] = st
+		}
+	}
 	return p
 }
 
@@ -304,11 +336,28 @@ func sendBriefing(c Conn, item pushItem, r briefRec) error {
 const answerLabel = "The slow brain's answer to your to_supervisor call, not the CEO speaking: facts for you to tell the CEO in your own words."
 
 // answerBriefing is a tool result in the briefing shape: the time, who
-// answers, and the facts in place of a line to read. detail, options,
-// clarify and pending are added by the caller as before.
-func (s *Session) answerBriefing(call voice.ToolCall, res voice.ToolResult) map[string]any {
+// answers, how old the answer is (answeredAt: when the slow brain
+// returned it), and the facts in place of a line to read. detail,
+// options, clarify and pending are added by the caller as before.
+func (s *Session) answerBriefing(call voice.ToolCall, res voice.ToolResult, answeredAt time.Time) map[string]any {
 	now := s.now()
-	resp := map[string]any{"about_this": answerLabel, "at": clock(now), "from": "slow brain"}
+	if answeredAt.IsZero() || answeredAt.After(now) {
+		answeredAt = now
+	}
+	resp := map[string]any{"about_this": answerLabel, "at": clock(now), "from": "slow brain", "age": ageLine(now.Sub(answeredAt))}
+	tags := map[string]any{}
+	if len(res.NotVerified) > 0 {
+		tags[voice.TagNotVerified] = res.NotVerified
+	}
+	if len(res.Agents) > 0 {
+		tags[voice.TagAgents] = res.Agents
+	}
+	s.mu.Lock()
+	s.addAnswerFactsLocked(resp, tags)
+	if rel := s.pendingDeliveryFactsLocked(); len(rel) > 0 {
+		resp["relation"] = rel
+	}
+	s.mu.Unlock()
 	if call.Name == voice.ToolStop {
 		resp["about_this"] = "The daemon's result for your stop call: facts for you to tell the CEO."
 		resp["from"] = "daemon"
@@ -320,4 +369,78 @@ func (s *Session) answerBriefing(call voice.ToolCall, res voice.ToolResult) map[
 		resp["about_this"] = "The slow brain is still working on your to_supervisor call; its answer will arrive later as a briefing on its own. Say nothing more about it unless the CEO asks."
 	}
 	return resp
+}
+
+// ageLine says how old a briefing's facts were when it reached the
+// model, which has no clock of its own.
+func ageLine(d time.Duration) string {
+	if d < 3*time.Second {
+		return "fresh: written as it was sent to you"
+	}
+	return "written " + spokenDuration(d) + " before it reached you; things may have moved on since"
+}
+
+// spokenDuration renders d coarsely: "45 s", "4 min", "2 h 5 min".
+func spokenDuration(d time.Duration) string {
+	switch {
+	case d < time.Minute:
+		return fmt.Sprintf("%d s", int(d.Seconds()))
+	case d < time.Hour:
+		return fmt.Sprintf("%d min", int(d.Minutes()))
+	default:
+		h := int(d.Hours())
+		m := int(d.Minutes()) - 60*h
+		if m == 0 {
+			return fmt.Sprintf("%d h", h)
+		}
+		return fmt.Sprintf("%d h %d min", h, m)
+	}
+}
+
+// agentNow asks the supervisor for an agent's spoken name and its state
+// as of now (Config.AgentNow).
+func (s *Session) agentNow(alias string) (name, state string, ok bool) {
+	if s.cfg.AgentNow == nil || alias == "" {
+		return "", "", false
+	}
+	return s.cfg.AgentNow(alias)
+}
+
+// notVerifiedLabel opens the not_verified fact.
+const notVerifiedLabel = "these checks by the slow brain did not finish, so nothing they would have shown is verified: "
+
+// addAnswerFactsLocked adds the facts an answer's tags carry: the
+// slow brain's checks that did not finish, and the state now of the
+// agents the answer is about. Caller holds s.mu (agentNow takes no
+// session lock).
+func (s *Session) addAnswerFactsLocked(p map[string]any, tags map[string]any) {
+	if nv := stringList(tags[voice.TagNotVerified]); len(nv) > 0 {
+		p["not_verified"] = notVerifiedLabel + strings.Join(nv, "; ")
+	}
+	var states []string
+	for _, alias := range stringList(tags[voice.TagAgents]) {
+		if name, st, ok := s.agentNow(alias); ok {
+			states = append(states, name+": "+st)
+		}
+	}
+	if len(states) > 0 {
+		p["agents_now"] = states
+	}
+}
+
+// stringList reads a []string or []any tag.
+func stringList(v any) []string {
+	switch l := v.(type) {
+	case []string:
+		return l
+	case []any:
+		out := make([]string, 0, len(l))
+		for _, e := range l {
+			if str, ok := e.(string); ok && str != "" {
+				out = append(out, str)
+			}
+		}
+		return out
+	}
+	return nil
 }

@@ -26,6 +26,9 @@ import (
 //     project has several of a kind;
 //  5. project, kind and a number ("sheepdog Claude 2").
 //
+// A computed name the CEO has heard or said is pinned (PinSpoken) and
+// kept like a CEO name from then on: rules 2-5 no longer move it.
+//
 // Exited agents (state unknown) take no part: they keep the name they
 // last had.
 
@@ -189,16 +192,27 @@ func SpokenNames(agents []Agent) map[string]string {
 			out[a.PaneID] = n
 			continue
 		}
+		if a.SpokenPinned && a.Spoken != "" {
+			out[a.PaneID] = a.Spoken
+			continue
+		}
 		k := strings.ToLower(a.Kind)
 		if _, ok := byKind[k]; !ok {
 			kinds = append(kinds, k)
 		}
 		byKind[k] = append(byKind[k], a)
 	}
+	// Names already given (CEO names, pinned names) are not handed out
+	// again: a newcomer skips to the next, longer form.
+	taken := map[string]bool{}
+	for _, n := range out {
+		taken[strings.ToLower(n)] = true
+	}
+	free := func(n string) bool { return !taken[strings.ToLower(n)] }
 	for _, k := range kinds {
 		group := byKind[k]
 		kw := KindWord(k)
-		if len(group) == 1 {
+		if len(group) == 1 && free(kw) {
 			out[group[0].PaneID] = kw
 			continue
 		}
@@ -214,7 +228,7 @@ func SpokenNames(agents []Agent) map[string]string {
 		for _, p := range projects {
 			pg := byProject[p]
 			base := strings.TrimSpace(p + " " + kw)
-			if len(pg) == 1 {
+			if len(pg) == 1 && free(base) {
 				out[pg[0].PaneID] = base
 				continue
 			}
@@ -226,13 +240,13 @@ func SpokenNames(agents []Agent) map[string]string {
 			}
 			var rest []Agent
 			for _, a := range pg {
-				if t := titleWords(a.Title); t != "" && titles[strings.ToLower(t)] == 1 {
+				if t := titleWords(a.Title); t != "" && titles[strings.ToLower(t)] == 1 && free(t+" "+kw) {
 					out[a.PaneID] = t + " " + kw
 					continue
 				}
 				rest = append(rest, a)
 			}
-			if len(rest) == 1 {
+			if len(rest) == 1 && free(base) {
 				out[rest[0].PaneID] = base
 				continue
 			}
@@ -243,9 +257,22 @@ func SpokenNames(agents []Agent) map[string]string {
 	}
 
 	// Whatever still collides (two CEO names alike, a CEO name equal to
-	// a computed one) gets a number, the first in pane order keeping it.
-	seen := map[string]bool{}
+	// a computed one) gets a number, the first in pane order keeping it;
+	// CEO-given and pinned names go first, so they keep theirs.
+	kept := func(a Agent) bool { return CEOName(a) != "" || (a.SpokenPinned && a.Spoken != "") }
+	order := make([]Agent, 0, len(run))
 	for _, a := range run {
+		if kept(a) {
+			order = append(order, a)
+		}
+	}
+	for _, a := range run {
+		if !kept(a) {
+			order = append(order, a)
+		}
+	}
+	seen := map[string]bool{}
+	for _, a := range order {
 		name := out[a.PaneID]
 		key := strings.ToLower(name)
 		if !seen[key] {
@@ -297,4 +324,32 @@ func Say(a Agent) string {
 		return n
 	}
 	return a.Alias
+}
+
+// PinSpoken pins the current spoken name of every running agent whose
+// name (case-insensitive) is in names: the CEO heard or said it, so it
+// stays (SpokenNames). It returns the panes newly pinned.
+func (s *Store) PinSpoken(names []string) ([]string, error) {
+	if len(names) == 0 {
+		return nil, nil
+	}
+	want := make(map[string]bool, len(names))
+	for _, n := range names {
+		want[strings.ToLower(strings.TrimSpace(n))] = true
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var pinned []string
+	for id, a := range s.table.Agents {
+		if a.SpokenPinned || a.Spoken == "" || CEOName(*a) != "" || !running(*a) || !want[strings.ToLower(a.Spoken)] {
+			continue
+		}
+		a.SpokenPinned = true
+		pinned = append(pinned, id)
+	}
+	if len(pinned) == 0 {
+		return nil, nil
+	}
+	sort.Strings(pinned)
+	return pinned, s.persist()
 }

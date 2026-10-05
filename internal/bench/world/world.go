@@ -462,7 +462,7 @@ type Querier struct {
 func (q Querier) answerFor(workspace string) (eval.SimAgent, bool) {
 	for _, a := range q.Agents {
 		if workspace == "ws-"+a.Alias || strings.HasSuffix(workspace, "/"+a.Alias) || workspace == a.Alias {
-			return a, a.Answer != ""
+			return a, a.Answer != "" || a.CLIHangs
 		}
 	}
 	// A synthetic pane reports no workspace: with one scripted answer,
@@ -470,7 +470,7 @@ func (q Querier) answerFor(workspace string) (eval.SimAgent, bool) {
 	var hit eval.SimAgent
 	n := 0
 	for _, a := range q.Agents {
-		if a.Answer != "" {
+		if a.Answer != "" || a.CLIHangs {
 			hit, n = a, n+1
 		}
 	}
@@ -478,10 +478,14 @@ func (q Querier) answerFor(workspace string) (eval.SimAgent, bool) {
 }
 
 // Query implements supervisor.Querier.
-func (q Querier) Query(_ context.Context, workspace, _ string) (string, error) {
+func (q Querier) Query(ctx context.Context, workspace, _ string) (string, error) {
 	a, ok := q.answerFor(workspace)
 	if !ok {
 		return "", brain.ErrNoCLI
+	}
+	if a.CLIHangs {
+		<-ctx.Done()
+		return "", ctx.Err()
 	}
 	return a.Answer, nil
 }
@@ -491,6 +495,10 @@ func (q Querier) Investigate(ctx context.Context, iq supervisor.InvestigationQue
 	a, ok := q.answerFor(iq.Workspace)
 	if !ok {
 		return supervisor.InvestigationResult{}, brain.ErrNoCLI
+	}
+	if a.CLIHangs {
+		<-ctx.Done()
+		return supervisor.InvestigationResult{}, ctx.Err()
 	}
 	d := time.Duration(a.AnswerDelayMS) * time.Millisecond
 	if d == 0 {

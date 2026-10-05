@@ -73,14 +73,15 @@ func TestSpokenNamesFromTitlesReachRosterAndVoice(t *testing.T) {
 	// The CEO hears that name (a spoken push as it reaches the voice).
 	h.sup.OnVoiceEvent(voice.EventPush{Text: "Claude is working on the README.", Urgency: voice.UrgencyIdle})
 
-	// A second Claude in the same project: both are told apart by their
-	// own session titles, and the first one's old name is kept.
+	// A second Claude in the same project: the first keeps the name the
+	// CEO heard (pinned; phone test 2026-10-04, an auto-title renamed an
+	// agent the CEO knew), and the newcomer takes the next free form.
 	h.claudeIn("w2:p1", docsSession, herdr.StateWorking)
 	lines := h.namesLines()
-	if len(lines) != 2 || !strings.Contains(lines[1], "README Claude, docs pass Claude") {
+	if len(lines) != 2 || !strings.Contains(lines[1], "Claude, sheepdog Claude") {
 		t.Fatalf("names lines after a second Claude = %q", lines)
 	}
-	if got := h.sup.SpokenNames(); strings.Join(got, "|") != "README Claude|docs pass Claude" {
+	if got := h.sup.SpokenNames(); strings.Join(got, "|") != "Claude|sheepdog Claude" {
 		t.Errorf("SpokenNames = %v", got)
 	}
 	var first brain.AgentInfo
@@ -89,10 +90,13 @@ func TestSpokenNamesFromTitlesReachRosterAndVoice(t *testing.T) {
 			first = a
 		}
 	}
-	if first.Spoken != "README Claude" || first.SpokenWas != "Claude" || first.Title != "README" || first.Alias != "sheepdog-claude" {
+	if first.Spoken != "Claude" || first.SpokenWas != "" || first.Title != "README" || first.Alias != "sheepdog-claude" {
 		t.Errorf("roster row = %+v", first)
 	}
-	if b, _ := h.sup.briefingText(); !strings.Contains(b, "README Claude is working") || !strings.Contains(b, "docs pass Claude is working") {
+	if h.log.count("supervisor.name_pinned") != 1 {
+		t.Errorf("supervisor.name_pinned not logged once")
+	}
+	if b, _ := h.sup.briefingText(); !strings.Contains(b, "Claude is working") || !strings.Contains(b, "sheepdog Claude is working") {
 		t.Errorf("briefing = %q", b)
 	}
 
@@ -354,12 +358,26 @@ func TestOldNameOnlyWhenTheCEOHeardIt(t *testing.T) {
 		}
 	})
 	t.Run("said in a reply", func(t *testing.T) {
+		// Heard by the CEO, the name is pinned: it never changes, so
+		// there is no old name to mention.
 		h := newHarness(t, withTitleFixtures(t))
 		h.claudeIn("w1:p1", readmeSession, herdr.StateWorking)
 		h.sup.mentionedIn("Claude is still on the README.")
 		h.claudeIn("w2:p1", docsSession, herdr.StateWorking)
-		if got := spokenWas(h); got != "Claude" {
-			t.Errorf("SpokenWas = %q, want Claude", got)
+		if row, _ := h.store.Get("w1:p1"); row.Spoken != "Claude" || !row.SpokenPinned {
+			t.Errorf("row = %+v, want the heard name kept", row)
+		}
+		if got := spokenWas(h); got != "" {
+			t.Errorf("SpokenWas = %q, want none", got)
+		}
+	})
+	t.Run("said by the CEO", func(t *testing.T) {
+		h := newHarness(t, withTitleFixtures(t))
+		h.claudeIn("w1:p1", readmeSession, herdr.StateWorking)
+		h.sup.OnVoiceEvent(voice.EventTranscript{Dir: voice.DirIn, Text: "what is Claude doing"})
+		h.claudeIn("w2:p1", docsSession, herdr.StateWorking)
+		if row, _ := h.store.Get("w1:p1"); row.Spoken != "Claude" {
+			t.Errorf("row = %+v, want the name the CEO used kept", row)
 		}
 	})
 }

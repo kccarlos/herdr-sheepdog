@@ -103,6 +103,7 @@ func (s *Session) handleServerContent(sc *genai.LiveServerContent) {
 				s.openTurnLocked()
 				s.speaking = true
 				s.noteResponseLocked(now)
+				s.noteSpeechLocked() // unvoiced.go
 				if s.audioTiming == nil {
 					s.audioTurnSeq++
 					s.audioTiming = audiotiming.New(s.audioTurnSeq, wsproto.ServerSampleRate)
@@ -127,7 +128,9 @@ func (s *Session) handleServerContent(sc *genai.LiveServerContent) {
 			s.recap.Add(voice.RecapUser, s.inText)
 			s.inText = ""
 		}
+		unvoiced := s.noteCEOSpokeLocked(now) // unvoiced.go
 		s.mu.Unlock()
+		s.reportUnvoiced(unvoiced, true)
 		s.logTurn(s.noteInput(now))
 		if armed {
 			s.log.Log(logSource, "voice.echo_gate", "", map[string]any{"open": false, "why": "armed", "heard": t.Text})
@@ -141,6 +144,7 @@ func (s *Session) handleServerContent(sc *genai.LiveServerContent) {
 		s.openTurnLocked()
 		s.speaking = true
 		s.noteResponseLocked(s.now())
+		s.noteSpeechLocked() // unvoiced.go
 		s.play.Said(t.Text)
 		s.echo.Said(t.Text)
 		// The voice answering means the shepherd finished (Gemini

@@ -287,6 +287,16 @@ type Reply struct {
 	// labelled with the agent it acted on, not with whichever agent its
 	// words happen to name (campaign D N4).
 	ActedOn []string `json:"-"`
+	// NotVerified lists the checks the turn started that did not finish
+	// ("run_cli timed out after 8 s"), set by the brain, never the model:
+	// the voice is told that nothing they would have shown is verified,
+	// so it cannot claim a check that never ran (phone test 2026-10-04:
+	// "verified via git status" after run_cli timed out).
+	NotVerified []string `json:"-"`
+	// Agents lists the aliases the turn's tools read or acted on, first
+	// first, each once (set by the brain): the voice is given their state
+	// as of the moment the answer reaches it.
+	Agents []string `json:"-"`
 }
 
 // Promise events and statuses (state.Promise mirrors them; the brain

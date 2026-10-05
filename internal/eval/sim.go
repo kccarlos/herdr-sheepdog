@@ -78,6 +78,11 @@ type SimAgent struct {
 	Answer string `json:"answer,omitempty"`
 	// AnswerDelayMS is how long the investigation takes (default 3000).
 	AnswerDelayMS int `json:"answer_delay_ms,omitempty"`
+	// CLIHangs makes run_cli and investigations about this agent never
+	// answer (until the caller gives up): the slow brain's tool timeout
+	// (phone test 2026-10-04, "codex timed out" eleven times). Answer is
+	// then ignored.
+	CLIHangs bool `json:"cli_hangs,omitempty"`
 }
 
 // SimEvent changes a worker's screen and state when its trigger fires.

@@ -507,7 +507,7 @@ func toolResultFrom(rep brain.Reply, caps prose.EarCaps) voice.ToolResult {
 	if overflow != "" {
 		detail = strings.TrimSpace(detail + " " + overflow)
 	}
-	res := voice.ToolResult{Spoken: spoken, Detail: detail, Clarify: rep.Clarify, Pending: rep.Pending, Scheduling: voice.UrgencyIdle}
+	res := voice.ToolResult{Spoken: spoken, Detail: detail, Clarify: rep.Clarify, Pending: rep.Pending, Scheduling: voice.UrgencyIdle, NotVerified: rep.NotVerified, Agents: rep.Agents}
 	for _, o := range rep.Options {
 		if o = strings.TrimSpace(prose.Spoken(o, 1)); o != "" {
 			res.Options = append(res.Options, o)

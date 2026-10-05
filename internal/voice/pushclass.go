@@ -27,6 +27,16 @@ const (
 	TagPushID           = "push_id"
 )
 
+// Push tags that carry facts into a briefing (gemini/briefing.go).
+const (
+	// TagNotVerified: []string, the slow brain's checks that did not
+	// finish (brain.Reply.NotVerified).
+	TagNotVerified = "not_verified"
+	// TagAgents: []string, the aliases an answer is about
+	// (brain.Reply.Agents).
+	TagAgents = "agents"
+)
+
 // PushOwed reports whether tags mark a line the shepherd is owed or must
 // hear now: an answer to their utterance, a kept or due promise, a
 // decision they must take, or the stop reply.

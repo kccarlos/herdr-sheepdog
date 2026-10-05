@@ -1,0 +1,46 @@
+{
+ "scenarios": [
+  {
+   "id": "facts-contradiction-linecount",
+   "category": "facts",
+   "from_sim": "phone-contradiction-linecount",
+   "note": "Tier-2 form of phone-contradiction-linecount (phone test 2026-10-04, item 1 of the overnight plan).",
+   "seed": 410
+  },
+  {
+   "id": "facts-history-first",
+   "category": "facts",
+   "from_sim": "phone-history-first",
+   "note": "Tier-2 form of phone-history-first (phone test 2026-10-04, item 1 of the overnight plan).",
+   "seed": 411
+  },
+  {
+   "id": "facts-stale-conclusion-zh",
+   "category": "facts",
+   "from_sim": "phone-stale-conclusion-zh",
+   "note": "Tier-2 form of phone-stale-conclusion-zh (phone test 2026-10-04, item 1 of the overnight plan).",
+   "seed": 412
+  },
+  {
+   "id": "facts-ambiguous-rewind",
+   "category": "facts",
+   "from_sim": "phone-ambiguous-rewind",
+   "note": "Tier-2 form of phone-ambiguous-rewind (phone test 2026-10-04, item 1 of the overnight plan).",
+   "seed": 413
+  },
+  {
+   "id": "facts-zh-simplified",
+   "category": "facts",
+   "from_sim": "phone-zh-simplified",
+   "note": "Tier-2 form of phone-zh-simplified (phone test 2026-10-04, item 1 of the overnight plan).",
+   "seed": 414
+  },
+  {
+   "id": "facts-timeout-not-verified",
+   "category": "facts",
+   "from_sim": "phone-timeout-not-verified",
+   "note": "Tier-2 form of phone-timeout-not-verified (phone test 2026-10-04, item 1 of the overnight plan).",
+   "seed": 415
+  }
+ ]
+}

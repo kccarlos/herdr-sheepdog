@@ -14,6 +14,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
+	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
 
 // Starting a new agent by voice (docs/roles.md "Starting an agent"): the
@@ -63,8 +64,11 @@ var (
 	// its prompt before the command line is typed.
 	spawnShellWait = 5 * time.Second
 	// spawnReadyWait is how long herdr may take to report the new agent
-	// before the brain is told it is not ready (the watch goes on).
-	spawnReadyWait = 60 * time.Second
+	// before the brain and the CEO are told it has not started, with the
+	// pane's last lines (the watch goes on). herdr sees a starting Claude
+	// or Codex within seconds, even at its trust question; a command
+	// line a shell prompt ate never starts (2026-10-04).
+	spawnReadyWait = 20 * time.Second
 	// spawnFirstWait bounds the whole wait, from the start, for the
 	// agent to be recognised and sit idle (its trust question answered)
 	// before the first instruction goes; past it the instruction is
@@ -169,7 +173,7 @@ func (s *Supervisor) spawn(ctx context.Context, req brain.SpawnRequest) (string,
 	if s.track() {
 		go func() {
 			defer s.replies.Done()
-			s.followSpawn(pane.PaneID, req.Kind, req.Text)
+			s.followSpawn(pane.PaneID, req.Kind, req.Text, dir.Name)
 		}()
 	}
 	echo := "Starting a new " + state.KindWord(req.Kind) + " in " + dir.Name + "."
@@ -426,7 +430,7 @@ func (s *Supervisor) waitShell(ctx context.Context, paneID string) {
 // that the agent is not ready and the instruction is held, and the watch
 // goes on until spawnFirstWait or the pane closes. What the screen means
 // is the brain's to read.
-func (s *Supervisor) followSpawn(paneID, kind, text string) {
+func (s *Supervisor) followSpawn(paneID, kind, text, dirName string) {
 	ctx := s.life
 	start := time.Now()
 	ready := start.Add(spawnReadyWait)
@@ -439,6 +443,10 @@ func (s *Supervisor) followSpawn(paneID, kind, text string) {
 			if !seen {
 				seen = true
 				s.log.Log(logSource, "supervisor.spawn_ready", paneID, map[string]any{"kind": kind, "state": string(row.State), "agent": aliasOr(row.Alias), "waited_s": int(time.Since(start).Seconds())})
+				if late {
+					// The CEO was told it had not started: correct it.
+					s.pushTagged(paneID, fmt.Sprintf("The new %s%s is running now, %d s after its command was typed (herdr sees it as %s).", state.KindWord(kind), inDir(dirName), int(time.Since(start).Seconds()), row.State), voice.UrgencyIdle, map[string]any{"from": "daemon", "kind": "spawn check"})
+				}
 				if text == "" {
 					return
 				}
@@ -481,6 +489,9 @@ func (s *Supervisor) followSpawn(paneID, kind, text string) {
 				line += fmt.Sprintf("; its first instruction is held until it is ready (waiting up to %d minutes)", int(spawnFirstWait.Minutes()))
 			}
 			s.tellBrain(line + ". The last lines of its pane:\n" + tail)
+			// The CEO asked for it and must not think it is running: a
+			// daemon fact for the voice, with what the pane shows.
+			s.pushTagged("", spawnNotStartedLine(kind, dirName, tail), voice.UrgencyIdle, map[string]any{"from": "daemon", "kind": "spawn check"})
 			lastCheck = now
 		case !seen && late && now.Sub(lastCheck) >= spawnGoneCheck:
 			// herdr reports no agent, so only the pane says whether it
@@ -534,3 +545,25 @@ func (s *Supervisor) tellBrain(line string) {
 		s.brain.Daemon(line)
 	}
 }
+
+// spawnNotStartedLine is the daemon's fact for the CEO about a new agent
+// herdr does not see: what was started where, and the pane's last
+// lines, for the voice to retell.
+func spawnNotStartedLine(kind, dirName, tail string) string {
+	lines := strings.Split(strings.TrimSpace(tail), "\n")
+	if len(lines) > spawnTellLines {
+		lines = lines[len(lines)-spawnTellLines:]
+	}
+	return fmt.Sprintf("The new %s%s has not started: %d s after its command was typed, herdr does not see it running. The last lines of its pane: %s", state.KindWord(kind), inDir(dirName), int(spawnReadyWait.Seconds()), strings.Join(lines, " / "))
+}
+
+// inDir is " in <dir>", or "" without a directory name.
+func inDir(dirName string) string {
+	if dirName == "" {
+		return ""
+	}
+	return " in " + dirName
+}
+
+// spawnTellLines is how many pane lines the CEO's fact quotes.
+const spawnTellLines = 5

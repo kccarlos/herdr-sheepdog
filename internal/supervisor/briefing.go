@@ -18,10 +18,9 @@ const (
 	// more, the rest is a count (blocked first, so a question is never
 	// hidden).
 	briefingListMax = 3
-	// briefingResultMaxAge is how long "it last …" is worth repeating.
+	// briefingResultMaxAge is how long "it finished work N ago" is
+	// worth repeating.
 	briefingResultMaxAge = 30 * time.Minute
-	// briefingResultMaxWords trims the last result inside the sentence.
-	briefingResultMaxWords = 12
 	// briefingCacheMaxAge bounds how stale the age-dependent wording
 	// ("it last …") can get between state changes.
 	briefingCacheMaxAge = time.Minute
@@ -170,8 +169,8 @@ func describeAgent(a state.Agent, now time.Time) string {
 		}
 		return alias + " is working on something"
 	case herdr.StateIdle, herdr.StateDone:
-		if r := recentResult(a, now); r != "" {
-			return alias + " is idle; it last " + r
+		if r := recentFinish(a, now); r != "" {
+			return alias + " is idle; " + r
 		}
 		return alias + " is idle"
 	default:
@@ -179,23 +178,23 @@ func describeAgent(a state.Agent, now time.Time) string {
 	}
 }
 
-// recentResult returns the trimmed last result when it is fresh enough
-// to be worth saying, else "". The result is the announcement the
-// shepherd heard about the finish, so it usually opens with the agent's
-// own name; that comes off here, since the clause already says it ("auth
-// is idle; it last finished the rerun you asked for").
-func recentResult(a state.Agent, now time.Time) string {
-	if a.LastResult == nil || a.LastResult.Spoken == "" || now.Sub(a.LastResult.At) > briefingResultMaxAge {
+// recentFinish says when the agent last finished work, while that is
+// recent enough to be worth saying, else "". Only the daemon's fact (the
+// time) goes into the sentence: the finish's announcement is a model's
+// prose, and spliced into this template and cut to a word count it read
+// as a garbled clause ("claude is idle; it last reports that because
+// all previous work (including the bug fixes and the, and codex is
+// idle", phone test 2026-10-04 16:21Z). The announcement itself reaches
+// the brain whole in the agent's record (brainhost.go LastResult).
+func recentFinish(a state.Agent, now time.Time) string {
+	if a.LastResult == nil || a.LastResult.At.IsZero() || now.Sub(a.LastResult.At) > briefingResultMaxAge {
 		return ""
 	}
-	spoken := strings.TrimRight(a.LastResult.Spoken, ".!?")
-	for _, name := range []string{state.Say(a), a.Alias} {
-		if name != "" && len(spoken) > len(name) && spoken[len(name)] == ' ' && strings.EqualFold(spoken[:len(name)], name) {
-			spoken = lowerFirst(strings.TrimSpace(spoken[len(name):]))
-			break
-		}
+	d := now.Sub(a.LastResult.At)
+	if d < time.Minute {
+		return "it finished work under a minute ago"
 	}
-	return trimWords(spoken, briefingResultMaxWords)
+	return "it finished work " + spokenAge(d) + " ago"
 }
 
 // describeRest tallies the agents that were not listed: "the other two
@@ -252,15 +251,6 @@ func pendingTrailer(agents []state.Agent, pending state.PendingAction, sentence 
 		return name + " is waiting for your answer."
 	}
 	return name + " is waiting for your answer on " + pending.Question + "."
-}
-
-// trimWords keeps the first n words of s.
-func trimWords(s string, n int) string {
-	words := strings.Fields(s)
-	if len(words) <= n {
-		return strings.Join(words, " ")
-	}
-	return strings.Join(words[:n], " ")
 }
 
 // shortTask trims an instruction to something sayable inside a sentence.

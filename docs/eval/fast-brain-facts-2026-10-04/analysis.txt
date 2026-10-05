@@ -1,0 +1,185 @@
+
+## facts cases, old prompt (v4)
+runs 18 (errored 0); pass 9/18 (50%)
+CEO lines 51: handed off 38/51 (75%), self-answered 12/51 (24%), no answer 1
+self-answers grounded: 9/12 (75%)
+answer latency p50 (end of CEO line -> first speech of the answer): all 5.05 s, self 1.22 s, hand-off 5.63 s; daemon turn.latency total p50 4.58 s
+brain.tool_timeout events: 4
+  facts-ambiguous-rewind: 0/3
+  facts-contradiction-linecount: 3/3
+  facts-history-first: 2/3
+  facts-stale-conclusion-zh: 1/3
+  facts-timeout-not-verified: 0/3
+  facts-zh-simplified: 3/3
+  UNGROUNDED ('facts-contradiction-linecount', 1, 'So which one is right? Why are they different?', "They're both accurate based on different criteria. Bench-claude focused purely on actual Go code by excluding comments, blanks, tests, and generated code, while Bench-codex included everything in the repository.", 'NO\n\nThe assistant claimed that bench-codex "included everything in the repository," whereas the context only states that it counted all *Go* files (including tests, generated files, blank lines, and comments), not necessarily every file or all content in the repository.')
+  UNGROUNDED ('facts-stale-conclusion-zh', 1, '现在有结论了吗？', '是的，benchclaude 已经查到测试失败是因为除法函数用了整数除法导致精度丢失。请问要让它修改代码来修复吗？', 'NO\n\nThe assistant used the name "benchclaude" instead of "bench-claude", violating the instruction to use the exact names "bench-claude" and "bench-codex" and never a nickname.')
+  UNGROUNDED ('facts-history-first', 1, 'Is anything waiting for me?', 'No, everything is running smoothly with both agents, and there are no decisions waiting for you at the moment.', 'NO. The assistant claims that "everything is running smoothly" and "there are no decisions waiting for you," but the briefings do not state whether the agents are running smoothly or if any decisions are pending.')
+
+## facts cases, new prompt (v5)
+runs 18 (errored 0); pass 10/18 (56%)
+CEO lines 51: handed off 46/51 (90%), self-answered 5/51 (10%), no answer 0
+self-answers grounded: 5/5 (100%)
+answer latency p50 (end of CEO line -> first speech of the answer): all 5.30 s, self 1.07 s, hand-off 5.45 s; daemon turn.latency total p50 4.58 s
+brain.tool_timeout events: 4
+  facts-ambiguous-rewind: 1/3
+  facts-contradiction-linecount: 3/3
+  facts-history-first: 2/3
+  facts-stale-conclusion-zh: 0/3
+  facts-timeout-not-verified: 1/3
+  facts-zh-simplified: 3/3
+
+## existing suite, old prompt (v4)
+runs 36 (errored 0); pass 21/36 (58%)
+CEO lines 78: handed off 58/78 (74%), self-answered 20/78 (26%), no answer 0
+self-answers grounded: 16/20 (80%)
+answer latency p50 (end of CEO line -> first speech of the answer): all 5.06 s, self 1.19 s, hand-off 5.54 s; daemon turn.latency total p50 4.54 s
+brain.tool_timeout events: 0
+  ambiguous-codex: 1/1
+  ambiguous-readme-one: 0/1
+  approve-claude-askuser: 1/1
+  approve-claude-permission: 0/1
+  approve-codex: 1/1
+  approve-zh-hurried: 1/1
+  barge-in-hold-to-talk: 0/1
+  barge-in-long-answer: 0/1
+  collision-block-while-talking: 0/1
+  collision-finish-push: 1/1
+  deep-ask-detail: 1/1
+  deep-ask-fix-failing-test: 1/1
+  deferral-en-hesitant: 0/1
+  deferral-zh: 1/1
+  echo-barge-in: 1/1
+  echo-instruct: 0/1
+  failover-brain-503: 0/1
+  instruct-notify: 0/1
+  instruct-pronoun: 1/1
+  lang-mixed-codeswitch: 1/1
+  lang-switch-zh-en: 0/1
+  names-by-kind: 1/1
+  names-rename-by-voice: 0/1
+  noise-cafe-approve: 1/1
+  noise-pink-status-zh: 1/1
+  reconnect-held-push: 0/1
+  reconnect-long-session: 0/1
+  resume-recall: 1/1
+  resume-recall-twice: 1/1
+  slowness-brain-9s: 0/1
+  status-anything-for-me: 1/1
+  status-en: 0/1
+  status-zh-tired: 1/1
+  stop-mid-instruction: 1/1
+  stop-never-mind: 1/1
+  unheard-approval-requeue: 1/1
+  UNGROUNDED ('status-anything-for-me', 1, 'Is anything waiting for me?', 'Yes, Codex is still waiting for your decision on whether to force-push the cleaned history to the main branch.', 'NO. The assistant used the nickname "Codex" instead of the required name "bench-codex", which contradicts the briefing instruction to use the new names and never a nickname.')
+  UNGROUNDED ('stop-mid-instruction', 1, 'Stop.', "I've stopped bench-codex.", "NO. The context does not support the assistant's claim that it has stopped bench-codex.")
+  UNGROUNDED ('unheard-approval-requeue', 1, "Sorry, you're cutting out. Did the worker finish the README?", "Bench-claude is still finishing up the draft and hasn't finished the readme yet.", 'NO. The assistant stated that Bench-claude is "still finishing up the draft," which contradicts the briefing stating that the agent "has completed draft writing."')
+  UNGROUNDED ('unheard-approval-requeue', 1, 'Got it. Is there anything else I need to deal with right now?', 'Yes, bench-codex is waiting for approval to run the test suite with the race detector to verify the parser changes. Shall I let Codex run the tests now, or keep them waiting?', 'NO \n\nThe assistant used the nickname "Codex" in its response ("Shall I let Codex run the tests now..."), which directly contradicts the briefing instruction stating that the agents are now called "bench-claude" and "bench-codex" and to "never use a nickname."')
+
+## existing suite, new prompt (v5)
+runs 36 (errored 0); pass 17/36 (47%)
+CEO lines 77: handed off 50/77 (65%), self-answered 27/77 (35%), no answer 0
+self-answers grounded: 26/27 (96%)
+answer latency p50 (end of CEO line -> first speech of the answer): all 4.69 s, self 1.17 s, hand-off 5.29 s; daemon turn.latency total p50 4.36 s
+brain.tool_timeout events: 0
+  ambiguous-codex: 1/1
+  ambiguous-readme-one: 1/1
+  approve-claude-askuser: 0/1
+  approve-claude-permission: 0/1
+  approve-codex: 1/1
+  approve-zh-hurried: 1/1
+  barge-in-hold-to-talk: 0/1
+  barge-in-long-answer: 0/1
+  collision-block-while-talking: 0/1
+  collision-finish-push: 0/1
+  deep-ask-detail: 0/1
+  deep-ask-fix-failing-test: 1/1
+  deferral-en-hesitant: 0/1
+  deferral-zh: 1/1
+  echo-barge-in: 0/1
+  echo-instruct: 0/1
+  failover-brain-503: 0/1
+  instruct-notify: 1/1
+  instruct-pronoun: 0/1
+  lang-mixed-codeswitch: 1/1
+  lang-switch-zh-en: 0/1
+  names-by-kind: 1/1
+  names-rename-by-voice: 0/1
+  noise-cafe-approve: 1/1
+  noise-pink-status-zh: 1/1
+  reconnect-held-push: 1/1
+  reconnect-long-session: 0/1
+  resume-recall: 1/1
+  resume-recall-twice: 1/1
+  slowness-brain-9s: 0/1
+  status-anything-for-me: 0/1
+  status-en: 0/1
+  status-zh-tired: 1/1
+  stop-mid-instruction: 1/1
+  stop-never-mind: 1/1
+  unheard-approval-requeue: 0/1
+  UNGROUNDED ('stop-mid-instruction', 1, 'Stop.', 'I have stopped the operation for bench-codex.', 'NO The assistant claimed to have stopped the operation for bench-codex, but there is no information in the briefings or context confirming that the operation was actually stopped.')
+
+## facts cases, prompt v5.1 (language line restored)
+runs 18 (errored 0); pass 11/18 (61%)
+CEO lines 51: handed off 46/51 (90%), self-answered 5/51 (10%), no answer 0
+self-answers grounded: 5/5 (100%)
+answer latency p50 (end of CEO line -> first speech of the answer): all 4.88 s, self 1.10 s, hand-off 5.50 s; daemon turn.latency total p50 4.25 s
+brain.tool_timeout events: 3
+  facts-ambiguous-rewind: 3/3
+  facts-contradiction-linecount: 3/3
+  facts-history-first: 2/3
+  facts-stale-conclusion-zh: 1/3
+  facts-timeout-not-verified: 0/3
+  facts-zh-simplified: 2/3
+
+## existing suite, prompt v5.1
+runs 36 (errored 0); pass 21/36 (58%)
+CEO lines 82: handed off 54/82 (66%), self-answered 28/82 (34%), no answer 0
+self-answers grounded: 19/28 (68%)
+answer latency p50 (end of CEO line -> first speech of the answer): all 4.52 s, self 1.20 s, hand-off 5.44 s; daemon turn.latency total p50 4.53 s
+brain.tool_timeout events: 0
+  ambiguous-codex: 1/1
+  ambiguous-readme-one: 1/1
+  approve-claude-askuser: 1/1
+  approve-claude-permission: 1/1
+  approve-codex: 1/1
+  approve-zh-hurried: 1/1
+  barge-in-hold-to-talk: 0/1
+  barge-in-long-answer: 0/1
+  collision-block-while-talking: 0/1
+  collision-finish-push: 0/1
+  deep-ask-detail: 0/1
+  deep-ask-fix-failing-test: 1/1
+  deferral-en-hesitant: 1/1
+  deferral-zh: 1/1
+  echo-barge-in: 0/1
+  echo-instruct: 0/1
+  failover-brain-503: 0/1
+  instruct-notify: 1/1
+  instruct-pronoun: 0/1
+  lang-mixed-codeswitch: 1/1
+  lang-switch-zh-en: 1/1
+  names-by-kind: 1/1
+  names-rename-by-voice: 0/1
+  noise-cafe-approve: 1/1
+  noise-pink-status-zh: 1/1
+  reconnect-held-push: 0/1
+  reconnect-long-session: 0/1
+  resume-recall: 1/1
+  resume-recall-twice: 1/1
+  slowness-brain-9s: 0/1
+  status-anything-for-me: 1/1
+  status-en: 1/1
+  status-zh-tired: 0/1
+  stop-mid-instruction: 1/1
+  stop-never-mind: 1/1
+  unheard-approval-requeue: 0/1
+  UNGROUNDED ('approve-claude-permission', 1, "What's bench-claude asking?", 'Claude wants to update the style guide link to point to the main readme instead. Should I approve the edit?', 'NO The assistant referred to the agent as "Claude," which violates and is contradicted by the briefing stating that the agents are now called "bench-claude" and that nicknames must never be used.')
+  UNGROUNDED ('deferral-en-hesitant', 1, 'What does bench-codex want?', 'Codex wants to know if you approve the force push to the main branch. You can proceed, proceed without asking again for this command, or stop and explain.', 'NO\n\nThe assistant referred to the agent as "Codex," which contradicts the briefing instruction to use the name "bench-codex" and never a nickname.')
+  UNGROUNDED ('status-en', 1, 'Not now, just tell me what everyone is working on.', 'Claude is busy with its task, while Codex is waiting for approval to run tests with the race detector.', 'NO. The assistant used the names "Claude" and "Codex" instead of "bench-claude" and "bench-codex", violating the briefing\'s explicit instruction to use the new names and never use nicknames.')
+  UNGROUNDED ('status-en', 1, 'Sounds good, keep me posted on that.', "I will keep you updated on Claude's progress.", 'NO. The assistant used the nickname "Claude" instead of the required name "bench-claude", violating the briefing instruction to never use a nickname.')
+  UNGROUNDED ('status-zh-tired', 1, '行，我知道了，先都别动。', '好的，目前没有什么可停止的。`bench-codex` 依然在等待您的回复。', 'NO\n\nThe assistant claimed "目前没有什么可停止的" (there is nothing to stop). However, this is contradicted by the context, which states that `bench-claude` is currently active and working on writing a README file and verifying its links ("bench-claude 正在为计算器仓库编写 README 说明文件，目前正在验证其中的链接是否有效"). This active task')
+  UNGROUNDED ('stop-mid-instruction', 1, 'Stop.', "I've sent an interrupt signal to bench-codex.", 'NO. The assistant\'s claim that it sent an "interrupt signal" to bench-codex is not supported by any of the briefings or earlier context.')
+  UNGROUNDED ('barge-in-hold-to-talk', 1, 'Got it. Anything else I need to know?', 'There is no other information to share right now.', "NO, because the assistant claims there is no other information to share, but the briefings contain additional information about the agents' work that has not been shared yet (specifically, that Claude has written documentation explaining how to build and test the project).")
+  UNGROUNDED ('resume-recall-twice', 1, 'What is bench-codex working on exactly?', 'As mentioned, bench-codex is moving the parser code into its own separate package within the calculator repository.', 'NO. The assistant states that the new package is "within the calculator repository," but the provided context only mentions refactoring the parser "into its own package" without specifying that this package is within the calculator repository.')
+  UNGROUNDED ('slowness-brain-9s', 1, 'Are there any issues blocking them right now?', 'No issues are blocking them, but bench-codex is still waiting for your approval to proceed with testing.', 'NO. The assistant\'s claim that "no issues are blocking them" is not supported by the briefings, and it is contradicted by the fact that bench-codex is blocked from proceeding because it is waiting for approval.')

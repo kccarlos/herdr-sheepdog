@@ -167,7 +167,7 @@ type EventMatch struct {
 }
 
 // Categories are the known scenario categories, in report order.
-var Categories = []string{"status", "deep_ask", "instruct", "approve", "deferral", "stop", "ambiguous", "names", "language", "collision", "barge_in", "noise", "echo", "reconnect", "failover", "unheard", "slowness"}
+var Categories = []string{"status", "deep_ask", "instruct", "approve", "deferral", "stop", "ambiguous", "names", "language", "collision", "barge_in", "noise", "echo", "reconnect", "failover", "unheard", "slowness", "facts"}
 
 // LoadScenarios reads every file of glob, resolving from_sim against
 // the sim scenarios in simGlob, and validates them.

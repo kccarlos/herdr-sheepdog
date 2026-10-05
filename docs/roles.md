@@ -75,6 +75,15 @@ prompt and Gemini's speech-to-text `CustomVocabulary` at every
 ("The agents are now called: README Claude, sheepdog Claude. …",
 `supervisor.names`, debounced 2 s), so its list is never stale.
 
+A computed spoken name stays once the CEO has heard it (a line meant
+for their ear carried it) or said it: it is pinned on the row
+(`state.PinSpoken`, `supervisor.name_pinned`) and kept like a name the
+CEO gave, so a later session title or a second agent of the same kind
+no longer renames it; the newcomer takes the next free form (phone test
+2026-10-04: an auto-title renamed an agent the CEO knew while
+briefings used the old name). Briefings to the fast brain name the
+agent by its spoken name.
+
 Renaming by voice ("call that one docs") is the brain's `note` tool
 with `agent` and `name`: herdr `agent.rename` when the herdr client can
 (a refusal is logged as `supervisor.rename_error`; the roster still
@@ -131,14 +140,21 @@ Rails (authorisation and runaways, not judgement):
 - only a model name (letters, digits, `.`, `_`, `:`, `-`) reaches the
   shell.
 
+herdr's `pane.split` and `workspace.create` take an environment but no
+command, so the agent is typed at the new shell's prompt; the pane gets
+`DISABLE_AUTO_UPDATE=true` so oh-my-zsh cannot ask to update and eat
+the first keystrokes (it ate the "c" of "claude" on 2026-10-04).
+
 A rail refusal is a `brain.rail_blocked` and `supervisor.spawn_refused
 {reason}`; a start logs `supervisor.spawn {dir, kind, model, pane}`,
 then `supervisor.spawn_ready` when herdr reports the agent and
 `supervisor.spawn_instruction` when the first instruction went. An
-agent herdr has not recognised after 60 s logs
-`supervisor.spawn_not_ready {still_waiting}` and the brain gets a
+agent herdr has not recognised after 20 s logs
+`supervisor.spawn_not_ready {still_waiting}`; the brain gets a
 transcript line saying so, with the pane's last lines (often the
-first-run question); the watch goes on to the ten-minute bound or until
+first-run question, or a shell that never ran the command), and the CEO
+a daemon fact with the same lines through the voice (and, should herdr
+see it later, a second fact that it is running now); the watch goes on to the ten-minute bound or until
 the pane closes, and the brain is told whether the held instruction
 went or was dropped.
 
