@@ -24,6 +24,9 @@ func TestExplainExchanges(t *testing.T) {
 			{AtMS: 4000, Type: "voice.tool_result", Payload: map[string]any{"name": "to_supervisor", "spoken": "Four sentences.", "detail": "More detail.", "options": []any{"重构", "先不管"}}},
 			{AtMS: 6000, Type: "voice.push", Payload: map[string]any{"text": "A push.", "urgency": "when_idle"}},
 			{AtMS: 7000, Type: "voice.push", Payload: map[string]any{"text": "Current focus, for follow-ups (context only).", "focus": "True", "urgency": "silent"}},
+			// Asked during question 1, answered after question 2 began.
+			{AtMS: 8000, Type: "voice.tool_call", Payload: map[string]any{"id": "c2", "name": "to_supervisor"}},
+			{AtMS: 20500, Type: "voice.tool_result", Payload: map[string]any{"id": "c2", "name": "to_supervisor", "spoken": "Late answer."}},
 		},
 		Bot: []voiceclient.BotUtterance{
 			{StartMS: 5000, Heard: "Two sentences."},
@@ -35,7 +38,7 @@ func TestExplainExchanges(t *testing.T) {
 	if len(ex) != 2 {
 		t.Fatalf("%d exchanges, want 2 (the barge-in is not a question)", len(ex))
 	}
-	if !ex[0].Consulted || ex[0].Orchestrator != "Four sentences. More detail. Options: 重构; 先不管. A push." || ex[0].Voice != "Two sentences. Late." || ex[0].Kind != "explain" {
+	if !ex[0].Consulted || ex[0].Orchestrator != "Four sentences. More detail. Options: 重构; 先不管. A push. Late answer." || ex[0].Voice != "Two sentences. Late." || ex[0].Kind != "explain" {
 		t.Fatalf("exchange 1 = %+v", ex[0])
 	}
 	if ex[1].Consulted || ex[1].Orchestrator != "" || ex[1].Voice != "Rephr" || ex[1].Kind != "more" || ex[1].Turn != 2 {

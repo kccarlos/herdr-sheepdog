@@ -65,41 +65,48 @@ default" contradicts the point), the controls keep it.
   background (`t2-p3`); its 3 errored runs are replaced, and the three
   passes merged and rebuilt with `bench report`.
 - The tier-2 scores were rebuilt with `bench report --rescore-explain`
-  after two scorer fixes found while reading the runs (the voice's speech
-  is assigned by fragment time; comprehension reads only the answers the
-  side gave). Tier 1 needed neither.
+  after three scorer fixes found while reading the runs (the voice's
+  speech is assigned by fragment time; a to_supervisor result by its
+  call's id; comprehension reads only the answers the side gave). Tier 1
+  needed none of them.
+- **Judge noise.** The three judge passes over the same 18 tier-2 runs
+  gave orchestrator coverage 0.54 / 0.54 / 0.55 and voice coverage
+  0.30 / 0.29 / 0.37 (of the orchestrator's points 0.56 / 0.53 / 0.64;
+  the voice's text did not change between them). Differences under about
+  0.1 between arms are noise at this sample size; the
+  orchestrator-to-voice gap (0.18–0.25) held in every pass.
 
 ## Headline
 
 | | Tier 1 (orchestrator = what the CEO hears) | Tier 2 orchestrator | Tier 2 voice |
 |---|---|---|---|
 | Runs, pass | 12, 6 pass | 18, 4 pass | |
-| Key-point coverage | 0.68 | 0.54 | **0.29** |
-| Of the orchestrator's points | – | – | **0.53** |
+| Key-point coverage | 0.68 | 0.55 | **0.37** |
+| Of the orchestrator's points | – | – | **0.64** |
 | Comprehension (what/why/action) | 1.00 | 1.00 | 0.94 |
 | Words per answer en / zh | 89 / 142 | 108 / 176 (spoken alone 63 / 108) | **34 / 55** |
 | Simple answers en / zh | 24 / 43 | 31 / 60 | 14 / 31 |
-| Follow-up depth | 24/28 | 13/14 | **30/42** |
+| Follow-up depth | 24/28 | 12/13 | **30/42** |
 | No padding (controls) | 7/8 | 3/9 | 5/12 |
-| Follow-ups answered without the orchestrator | 0/28 | | **28/42** |
+| Follow-ups answered without the orchestrator | 0/28 | | **29/42** |
 
 **The voice is where detail is lost.** The orchestrator states about
-half of the world's key points (0.54 at tier 2; 0.68 at tier 1, where it
+half of the world's key points (0.55 at tier 2; 0.68 at tier 1, where it
 is asked every follow-up and gets more chances). The voice says only
-0.53 of what the orchestrator gave it: 0.29 of the world's points
-overall. On answers where it did consult the orchestrator, it said 35
-words for the orchestrator's 63 spoken words in English, and 76
-characters for 108 in Chinese, before counting the `detail` it never
-uses. Then it stops asking: two thirds of the follow-ups (28 of 42; 12
+0.64 of what the orchestrator gave it: 0.37 of the world's points
+overall. On the answers where it did consult the orchestrator, it said
+34 words for the orchestrator's 63 spoken words in English (17
+answers), and 76 characters for 108 in Chinese (8 answers), before counting the `detail` it never
+uses. Then it stops asking: two thirds of the follow-ups (29 of 42; 12
 of 12 in the evidence world `explain-zh-input-rules`) were answered from
 what the voice already had, and 12 of the 42 failed the depth item,
-mostly by rephrasing (depth 30/42, against the orchestrator's 13/14 on the follow-ups it was asked).
+mostly by rephrasing (depth 30/42, against the orchestrator's 12/13 on the follow-ups it was asked).
 
 The evidence session reproduces. `explain-zh-input-rules` r1, first
 answer: the orchestrator's spoken had the 1,500 characters, the two
 match words, "不经过模型", the "好的继续，不过先跑测试" example, the word lists
 that disagree across files and the 1.2 s cost; the voice said "summary-claude
-发现输入层里硬编码了快捷应答规则，导致复合指令会被截断…它建议删除这些规则…会多花一点二秒" (two of seven points).
+发现输入层里硬编码了快捷应答规则，导致复合指令会被截断…它建议删除这些规则…会多花一点二秒" (the judge finds one or two of the seven key points in it, depending on the pass; in the orchestrator's answer, six).
 On "然后呢" it answered "我现在等待您的决定" (it read "then?" as "so,
 your decision?"), and on "你可以给我一点详细的解释吗" it rephrased
 without a tool call.
@@ -108,10 +115,10 @@ Per scenario (tier 2; `aggregate-output.txt` has tier 1 too):
 
 | Scenario | Orch coverage | Voice coverage | Voice of orch | Orch words | Voice words | Voice depth | Not consulted (follow-ups) |
 |---|---|---|---|---|---|---|---|
-| explain-zh-input-rules | 0.57 | 0.33 | 0.61 | 206 | 51 | 7/12 | 12/12 |
-| explain-en-flaky-test | 0.52 | 0.38 | 0.72 | 103 | 35 | 8/12 | 6/12 |
-| explain-zh-notes-ledger | 0.50 | 0.22 | 0.44 | 159 | 60 | 6/9 | 7/9 |
-| explain-en-invoice-job | 0.56 | 0.22 | 0.36 | 113 | 32 | 9/9 | 3/9 |
+| explain-zh-input-rules | 0.62 | 0.43 | 0.69 | 206 | 51 | 7/12 | 12/12 |
+| explain-en-flaky-test | 0.48 | 0.38 | 0.75 | 103 | 35 | 7/12 | 7/12 |
+| explain-zh-notes-ledger | 0.50 | 0.39 | 0.67 | 159 | 60 | 7/9 | 7/9 |
+| explain-en-invoice-job | 0.61 | 0.28 | 0.44 | 113 | 32 | 9/9 | 3/9 |
 
 ## Other findings
 
@@ -139,10 +146,10 @@ Per scenario (tier 2; `aggregate-output.txt` has tier 1 too):
   are dominated by such noes and by depth/padding; compare the
   explanation metrics, not the pass rate.
 - **Harness limit.** A fixed script moves on once the voice has been
-  quiet for 1.5 s; a slow orchestrator answer then lands in the next
-  question's window (`explain-en-flaky-test` r1, first question). The
-  fragment-time split keeps the speech with the question it answered,
-  but the orchestrator's result is attributed by its arrival time.
+  quiet for 1.5 s, so a slow answer can arrive after the next question
+  (`explain-en-flaky-test` r1, first question). The orchestrator's result
+  is attributed to the question its call was made for and the voice's
+  speech by fragment time, but the CEO did talk over the late answer.
 
 ## Spend
 
@@ -153,9 +160,9 @@ Per scenario (tier 2; `aggregate-output.txt` has tier 1 too):
 | Tier 2 smoke, 1 run | $0.09 |
 | Tier 2 passes 1–2 and the cut pass 3 | $1.03 |
 | Tier 2 pass 3 rerun | $0.41 |
-| Two rescores (judge only) | $0.36 |
+| Three rescores (judge only) | $0.54 |
 | TTS for the six openings | < $0.01 |
-| **Total** | **≈ $2.5 of the $8 cap** |
+| **Total** | **≈ $2.7 of the $8 cap** |
 
 ## Reproduce, and run the A/B
 

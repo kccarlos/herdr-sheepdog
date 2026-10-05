@@ -740,8 +740,25 @@ func explainExchanges(spec *eval.ExplainSpec, lines []UserLine, rec voiceclient.
 			*dst = strings.TrimSpace(*dst + " " + s)
 		}
 	}
+	// A to_supervisor result belongs to the question its call was made
+	// for (a slow answer can arrive after the next question started).
+	callAt := map[string]int{}
+	for _, ev := range rec.Events {
+		if ev.Type == "voice.tool_call" {
+			if id, _ := ev.Payload["id"].(string); id != "" {
+				callAt[id] = at(ev.AtMS)
+			}
+		}
+	}
 	for _, ev := range rec.Events {
 		i := at(ev.AtMS)
+		if ev.Type == "voice.tool_result" {
+			if id, _ := ev.Payload["id"].(string); id != "" {
+				if j, ok := callAt[id]; ok {
+					i = j
+				}
+			}
+		}
 		if i < 0 {
 			continue
 		}

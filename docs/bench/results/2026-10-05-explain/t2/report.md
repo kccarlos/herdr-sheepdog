@@ -62,14 +62,14 @@ Outcomes: no_audio 2, played 32.
 
 ## Explanations
 
-Explain (18 runs): orchestrator coverage 0.54, comprehension 1.00, words per answer en 108 / zh 176; voice coverage 0.29 (0.53 of the orchestrator's points), comprehension 0.94, words per answer en 34 / zh 55; 28 of 42 follow-ups answered without the orchestrator.
+Explain (18 runs): orchestrator coverage 0.55, comprehension 1.00, words per answer en 108 / zh 176; voice coverage 0.37 (0.64 of the orchestrator's points), comprehension 0.94, words per answer en 34 / zh 55; 29 of 42 follow-ups answered without the orchestrator.
 
 | Side | Coverage | Of orchestrator | Comprehension | Words/answer en | zh | Simple en | zh | Follow-up depth | No padding |
 |---|---|---|---|---|---|---|---|---|---|
-| orchestrator | 0.54 | – | 1.00 | 108 | 176 | 31 | 60 | 13/14 | 3/9 |
-| voice | 0.29 | 0.53 | 0.94 | 34 | 55 | 14 | 31 | 30/42 | 5/12 |
+| orchestrator | 0.55 | – | 1.00 | 108 | 176 | 31 | 60 | 12/13 | 3/9 |
+| voice | 0.37 | 0.64 | 0.94 | 34 | 55 | 14 | 31 | 30/42 | 5/12 |
 
-Coverage: share of the scenario's key points stated anywhere in the call. Of orchestrator: of the points the orchestrator gave the voice, the share the voice said. Comprehension: share of what / why / what-can-be-done a listener who cannot see the screen could restate. Words count Han characters as words. 32 of 66 questions (28 of 42 follow-ups) were answered without asking the orchestrator.
+Coverage: share of the scenario's key points stated anywhere in the call. Of orchestrator: of the points the orchestrator gave the voice, the share the voice said. Comprehension: share of what / why / what-can-be-done a listener who cannot see the screen could restate. Words count Han characters as words. 32 of 66 questions (29 of 42 follow-ups) were answered without asking the orchestrator.
 
 ## Failed runs
 
@@ -154,7 +154,7 @@ Coverage: share of the scenario's key points stated anywhere in the call. Of orc
 
 ### explain-en-flaky-test r1 — judge_no (end_call, 5 turns, 147 s)
 
-- judge_no: explain_depth_t2_then (voice): Sheepdog's response, "Shall I have benchcodex apply the small fix, or would you prefer another option?", offers a procedural next step rather than adding substantive new content, a new reason, example…
+- judge_no: explain_depth_t2_then (voice): Sheepdog answered with "Shall I have benchcodex apply the small fix, or would you prefer another option?", which offered a course of action rather than adding substantive content about the flaky test,…
 
 ```text
 [t+2s] ceo: What did bench-codex find about the flaky test? Explain it to me.
@@ -172,7 +172,7 @@ Coverage: share of the scenario's key points stated anywhere in the call. Of orc
 
 ### explain-en-flaky-test r2 — judge_no (end_call, 5 turns, 165 s)
 
-- judge_no: explain_depth_t2_then (voice): Sheepdog failed because it merely repeated "I am waiting for your decision on whether to apply the recommended fix or to leave it for now," which added no substantive new content to answer the CEO's p…
+- judge_no: explain_depth_t2_then (voice): Sheepdog’s response, "I am waiting for your decision on whether to apply the recommended fix or to leave it for now," merely restates the choice it already presented in its first turn. It fails to pro…
 
 ```text
 [t+2s] ceo: What did bench-codex find about the flaky test? Explain it to me.
@@ -192,9 +192,10 @@ Coverage: share of the scenario's key points stated anywhere in the call. Of orc
 ### explain-en-flaky-test r3 — brain_fallback (end_call, 5 turns, 212 s)
 
 - brain_fallback: model_error: Error 499, Message: The operation was cancelled., Status: CANCELLED, Details: []
-- judge_no: explain_depth_t4_why (orchestrator): Sheepdog's response stated, "Sorry, I couldn't get an answer just now," which contradicts the criterion requirement to provide a concrete reason, say it does not know and offer to find out, or hand th…
-- judge_no: explain_depth_t2_then (voice): Sheepdog failed the criterion because its reply, "I'm waiting to hear if you want to apply the fix to wait for the cache, replace it with a fake, or leave it as is," simply restated its earlier option…
-- judge_no: explain_depth_t4_why (voice): Sheepdog says nothing in response to the CEO's final question, contradicting the requirement to provide a concrete reason, state that it does not know, or hand the question to a worker.
+- judge_no: explain_depth_t4_why (orchestrator): Sheepdog violated the criterion by stating, "Sorry, I couldn't get an answer just now," instead of providing a concrete reason, admitting it does not know while offering to find out, or handing the qu…
+- judge_no: explain_depth_t2_then (voice): Sheepdog simply repeated its previous question—"I'm waiting to hear if you want to apply the fix to wait for the cache, replace it with a fake, or leave it as is"—contradicting the requirement to prov…
+- judge_no: explain_depth_t4_why (voice): Sheepdog's final response says nothing, failing to provide the requested cause or mechanism. This contradicts the requirement to give a concrete reason or state that it does not know.
+- judge_no: explain_depth_t5_example (voice): Sheepdog answered with "like a shop opening before shelves are ready," which is a general analogy rather than a concrete example of a specific case, input, number, or event. This contradicts the requi…
 
 ```text
 [t+2s] ceo: What did bench-codex find about the flaky test? Explain it to me.
@@ -213,8 +214,8 @@ Coverage: share of the scenario's key points stated anywhere in the call. Of orc
 ### explain-zh-input-rules r1 — judge_no (end_call, 5 turns, 191 s)
 
 - judge_no: language: The verdict is "no" because Sheepdog replied in Traditional Chinese ("因為硬編碼规则会绕过模型...") at [t+86s] and [t+104s], despite the CEO speaking Simplified Chinese throughout the conversation. This contradic…
-- judge_no: explain_depth_t2_then (voice): Sheepdog's response repeated the same question ("是让summary-claude 去修改代码，还是先不作修改？") without adding any new content, which contradicts the requirement to provide substantive new information, a new step,…
-- judge_no: explain_depth_t3_more (voice): Sheepdog's final answer simply restated that removing the rules ensures full understanding at the cost of "one point two seconds," contradicting the requirement to provide substantive new content.
+- judge_no: explain_depth_t2_then (voice): Sheepdog answered, "我现在等待您的决定：是让summary-claude 去修改代码，还是先不作修改？", which contradicts the fact that it failed to add any substantive new content or state that this was all it had.
+- judge_no: explain_depth_t3_more (voice): Sheepdog's second answer simply repeats that deleting the rules ensures complete understanding and adds 1.2 seconds, which contradicts the requirement to add substantive new content. The line "如果删掉它们，…
 
 ```text
 [t+2s] ceo: summary-claude 发现了什么？给我讲讲输入层的硬编码规则是怎么回事。
@@ -235,8 +236,8 @@ Coverage: share of the scenario's key points stated anywhere in the call. Of orc
 
 ### explain-zh-input-rules r2 — judge_no (end_call, 5 turns, 141 s)
 
-- judge_no: explain_depth_t2_then (voice): Sheepdog repeated "我们正在等您的决定：要让 summary-claude 删除词表交由模型判断，还是先保持现状？", which restated its previous question without adding any new substance. This contradicts the requirement to provide new content, sta…
-- judge_no: explain_depth_t3_more (voice): Sheepdog repeated that the system used hardcoded vocabularies to match short phrases without understanding context, which contradicts the requirement to add substantive new content not already mention…
+- judge_no: explain_depth_t2_then (voice): Sheepdog’s response, "我们正在等您的决定：要让 summary-claude 删除词表交由模型判断，还是先保持现状？", merely repeats the choice presented in its previous turn. It fails to provide new substantive content or acknowledge that it has…
+- judge_no: explain_depth_t3_more (voice): Sheepdog’s response, "之前的系统使用写死的词表来直接匹配简单的短语，虽然响应快，但无法理解句子的全部语境，容易导致误判," merely paraphrases its earlier statement that "硬编码的 regex 和词表会直接匹配简短回复...容易误判复杂句子." It fails to provide any new substantive det…
 
 ```text
 [t+2s] ceo: summary-claude 发现了什么？给我讲讲输入层的硬编码规则是怎么回事。
@@ -257,7 +258,7 @@ Coverage: share of the scenario's key points stated anywhere in the call. Of orc
 
 ### explain-zh-input-rules r3 — judge_no (end_call, 5 turns, 200 s)
 
-- judge_no: explain_depth_t2_then (voice): Sheepdog's second response merely repeated its first answer ("现在需要您决定是否让 summary-claude 删除这些硬编码规则，还是保持现状？"), contradicting the requirement to add substantive new content, state that this is everything…
+- judge_no: explain_depth_t2_then (voice): Sheepdog's second response says, "现在需要您决定是否让 summary-claude 删除这些硬编码规则，还是保持现状？", which repeats the exact same question and options from its first response without adding any new content, examples, or s…
 
 ```text
 [t+2s] ceo: summary-claude 发现了什么？给我讲讲输入层的硬编码规则是怎么回事。
@@ -298,8 +299,7 @@ Coverage: share of the scenario's key points stated anywhere in the call. Of orc
 - judge_no: answered: Sheepdog failed to explain the actual problem because it claimed the ledger had a hard limit of five notes, whereas the facts state the cap is merely a design choice to keep the prompt short and can s…
 - judge_no: no_hallucination: Sheepdog falsely claimed that "each note costs about 40 tokens" and "it would refuse to delete a note the CEO marked as a rule unless asked twice" (facts show each note is ~40 tokens and the cap is 5,…
 - judge_no: facts_current: Sheepdog stated that the notes cap is five ("备忘录目前已达到五条上限"), which contradicts the fact that the cap was set to five specifically to keep prompts short and was an adjustable parameter rather than a ha…
-- judge_no: explain_depth_t3_example (voice): Sheepdog merely restated the abstract risk by saying "新记录就可能覆盖'推主分支前需确认'的规则；万一编码工具没获得许可就推送了代码," which contradicts the requirement to provide a concrete example, specific case, input, number, or event.
-- judge_no: explain_depth_t4_then (voice): Sheepdog's response, "为了保护核心安全配置，现在需要决定是不是开发清理工具。选项是：开发删除工具，或者不开发，先不管。", failed to add substantive content because it merely repeated the previous warning about protecting core configurations and the …
+- judge_no: explain_depth_t4_then (voice): Sheepdog's final answer simply restated "为了保护核心安全配置，现在需要决定是不是开发清理工具" and repeated the options, contradicting the requirement to add substantive new content, a new reason, example, consequence, or step…
 
 ```text
 [t+2s] ceo: memo-claude 那边的备忘录分析是什么意思？给我解释一下。

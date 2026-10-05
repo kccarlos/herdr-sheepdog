@@ -32,3 +32,17 @@ for name,runs in (('tier1',runs_t1()),('tier2',runs_t2())):
     for x in r.get('failures',[]):
       d=x['detail'].split(':')[0]; c[(x['type'], d.split(' (')[0] if not d.startswith('explain') else d.split('_t')[0]+(' (voice)' if '(voice)' in d else ' (orch)'))]+=1
   print(c.most_common())
+# Tier 2: the orchestrator's spoken text alone vs what the voice said, per
+# substantive answer the orchestrator was consulted on (Han characters
+# count as words).
+import re
+def nwords(s): return len(re.findall(r"[一-鿿]|[A-Za-z0-9']+", s or ''))
+acc=collections.defaultdict(lambda: [[],[]])
+for r in runs_t2():
+  e=r.get('explain')
+  if not e: continue
+  for x in e['exchanges']:
+    if x['kind']!='simple' and x.get('orchestrator_spoken'):
+      a=acc[e['language']]; a[0].append(nwords(x['orchestrator_spoken'])); a[1].append(nwords(x.get('voice')))
+for lang,(sp,vo) in sorted(acc.items()):
+  print(f"tier2 {lang}: orchestrator spoken {m(sp):.0f} words/answer, voice {m(vo):.0f} on the same {len(sp)} answers")
