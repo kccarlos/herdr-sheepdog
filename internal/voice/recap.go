@@ -214,7 +214,7 @@ func RecapLines(entries []RecapEntry) string {
 	for _, e := range entries {
 		switch e.Role {
 		case RecapUser:
-			b.WriteString("Shepherd: ")
+			b.WriteString("User: ")
 		case RecapAssistant:
 			if e.Cut {
 				fmt.Fprintf(&b, "You (cut off after %.0f s): ", float64(e.CutAfterMs)/1000)

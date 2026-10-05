@@ -427,17 +427,17 @@ func (s *Supervisor) railInputLocked(p state.PendingAction, keys []string) (*she
 	now := s.cfg.Now()
 	switch {
 	case in == nil:
-		return nil, fmt.Sprintf("the shepherd has said nothing that could answer %s's prompt", alias)
+		return nil, fmt.Sprintf("the user has said nothing that could answer %s's prompt", alias)
 	case in.at.Before(s.promptSinceLocked(p)):
-		return nil, fmt.Sprintf("the shepherd has said nothing since %s's prompt appeared", alias)
+		return nil, fmt.Sprintf("the user has said nothing since %s's prompt appeared", alias)
 	case now.Sub(in.at) > s.cfg.AuthoriseWindow:
-		return nil, fmt.Sprintf("the shepherd's last words were %d s ago, past supervisor.authorise_window_s (%d s)", int(now.Sub(in.at).Seconds()), int(s.cfg.AuthoriseWindow.Seconds()))
+		return nil, fmt.Sprintf("the user's last words were %d s ago, past supervisor.authorise_window_s (%d s)", int(now.Sub(in.at).Seconds()), int(s.cfg.AuthoriseWindow.Seconds()))
 	case in.used:
-		return nil, "the shepherd's last words already answered a prompt"
+		return nil, "the user's last words already answered a prompt"
 	case strings.TrimSpace(in.text) == "":
-		return nil, "the shepherd's last words were empty"
+		return nil, "the user's last words were empty"
 	case negativeInput(in.text) && approves(p, keys):
-		return nil, fmt.Sprintf("the shepherd said %q, which cannot approve %s's prompt", strings.TrimSpace(in.text), alias)
+		return nil, fmt.Sprintf("the user said %q, which cannot approve %s's prompt", strings.TrimSpace(in.text), alias)
 	}
 	return in, ""
 }
@@ -569,9 +569,9 @@ func (s *Supervisor) AnswerTap(ctx context.Context, id string, option int) (voic
 	if !sent {
 		return res, ErrNotSent
 	}
-	s.push(p.PaneID, fmt.Sprintf("The shepherd tapped %s on %s's question.", strings.TrimRight(o.Label, "."), alias), voice.UrgencySilent)
+	s.push(p.PaneID, fmt.Sprintf("The user tapped %s on %s's question.", strings.TrimRight(o.Label, "."), alias), voice.UrgencySilent)
 	if s.brain != nil {
-		s.brain.Daemon(fmt.Sprintf("the shepherd tapped %q on %s's question; %s", o.Label, alias, lowerFirst(res.Spoken)))
+		s.brain.Daemon(fmt.Sprintf("the user tapped %q on %s's question; %s", o.Label, alias, lowerFirst(res.Spoken)))
 	}
 	return res, nil
 }

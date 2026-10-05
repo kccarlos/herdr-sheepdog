@@ -55,7 +55,7 @@ const (
 
 // briefingLabel opens every briefing: provenance, the way Claude Code
 // labels a message relayed from another agent.
-const briefingLabel = "Not the CEO speaking. Facts for you from the sheepdog system; you decide whether, when and how to tell the CEO, in your own words."
+const briefingLabel = "Not the user speaking. Facts for you from the orchestrator or the daemon; you decide whether, when and how to tell the user, in your own words."
 
 // briefingKeep is how many briefings the ledger remembers for relations
 // and for re-sending after a resume.
@@ -114,7 +114,7 @@ func briefingKind(tags map[string]any, u voice.Urgency) string {
 	case tags[voice.TagAnswersUtterance] != nil:
 		return "answer"
 	case tags["answers_job"] != nil:
-		return "result of an investigation the slow brain started"
+		return "result of an investigation the orchestrator started"
 	case tags["stop"] == true:
 		return "stop result"
 	case u == voice.UrgencySilent:
@@ -133,7 +133,7 @@ func briefingFrom(tags map[string]any) string {
 	case voice.IsFocus(tags), tags["stop"] == true:
 		return "daemon"
 	case tags[voice.TagAnswersUtterance] != nil, tags["answers_job"] != nil, tags["event_id"] != nil:
-		return "slow brain"
+		return "orchestrator"
 	default:
 		return "supervisor"
 	}
@@ -177,10 +177,10 @@ func (s *Session) newBriefingLocked(text string, u voice.Urgency, tags map[strin
 	s.addAnswerFactsLocked(p, tags)
 	if words, _ := tags["answers_text"].(string); words != "" {
 		asked, _ := tags["asked_at"].(string)
-		p["answers"] = fmt.Sprintf("the CEO's words at %s: %q", asked, words)
+		p["answers"] = fmt.Sprintf("the user's words at %s: %q", asked, words)
 	}
 	if tags["needs_user"] == true {
-		p["decision"] = "the CEO's own decision; only their words can answer it"
+		p["decision"] = "the user's own decision; only their words can answer it"
 	}
 	if r.spoken && tags["event_id"] != nil && s.cfg.DecisionsNow != nil {
 		if d := s.cfg.DecisionsNow(); d != "" {
@@ -188,7 +188,7 @@ func (s *Session) newBriefingLocked(text string, u voice.Urgency, tags map[strin
 		}
 	}
 	if tags["due_promise"] == true {
-		p["promised"] = "the CEO asked to be told this"
+		p["promised"] = "the user asked to be told this"
 	}
 	if rel := s.relationsLocked(r); len(rel) > 0 {
 		p["relation"] = rel
@@ -249,7 +249,7 @@ func (s *Session) noteCutLocked(rep voice.PlaybackReport) string {
 		return ""
 	}
 	heard := strings.TrimSpace(rep.Heard)
-	who := "the CEO cut you off"
+	who := "the user cut you off"
 	if s.brief.flushBy == "push" && rep.At.Sub(s.brief.flushAt) < 3*time.Second {
 		who = "the daemon cut you off to make way for an urgent briefing"
 	}
@@ -341,7 +341,7 @@ func sendBriefing(c Conn, item pushItem, r briefRec) error {
 }
 
 // answerLabel opens a to_supervisor result: what it is and whose.
-const answerLabel = "The slow brain's answer to your to_supervisor call, not the CEO speaking: facts for you to tell the CEO in your own words."
+const answerLabel = "The orchestrator's answer to your to_supervisor call, not the user speaking: facts for you to tell the user in your own words."
 
 // answerBriefing is a tool result in the briefing shape: the time, who
 // answers, how old the answer is (answeredAt: when the slow brain
@@ -352,7 +352,7 @@ func (s *Session) answerBriefing(call voice.ToolCall, res voice.ToolResult, answ
 	if answeredAt.IsZero() || answeredAt.After(now) {
 		answeredAt = now
 	}
-	resp := map[string]any{"about_this": answerLabel, "at": clock(now), "from": "slow brain", "age": ageLine(now.Sub(answeredAt))}
+	resp := map[string]any{"about_this": answerLabel, "at": clock(now), "from": "orchestrator", "age": ageLine(now.Sub(answeredAt))}
 	tags := map[string]any{}
 	if len(res.NotVerified) > 0 {
 		tags[voice.TagNotVerified] = res.NotVerified
@@ -367,14 +367,14 @@ func (s *Session) answerBriefing(call voice.ToolCall, res voice.ToolResult, answ
 	}
 	s.mu.Unlock()
 	if call.Name == voice.ToolStop {
-		resp["about_this"] = "The daemon's result for your stop call: facts for you to tell the CEO."
+		resp["about_this"] = "The daemon's result for your stop call: facts for you to tell the user."
 		resp["from"] = "daemon"
 	}
 	if res.Spoken != "" {
 		resp["facts"] = res.Spoken
 	}
 	if res.Pending {
-		resp["about_this"] = "The slow brain is still working on your to_supervisor call; its answer will arrive later as a briefing on its own. Say nothing more about it unless the CEO asks."
+		resp["about_this"] = "The orchestrator is still working on your to_supervisor call; its answer will arrive later as a briefing on its own. Say nothing more about it unless the user asks."
 	}
 	return resp
 }
@@ -415,7 +415,7 @@ func (s *Session) agentNow(alias string) (name, state string, ok bool) {
 }
 
 // notVerifiedLabel opens the not_verified fact.
-const notVerifiedLabel = "these checks by the slow brain did not finish, so nothing they would have shown is verified: "
+const notVerifiedLabel = "these checks by the orchestrator did not finish, so nothing they would have shown is verified: "
 
 // addAnswerFactsLocked adds the facts an answer's tags carry: the
 // slow brain's checks that did not finish, and the state now of the

@@ -211,19 +211,19 @@ func (s *Supervisor) wordsRailLocked(what, spent string) string {
 	now := s.cfg.Now()
 	switch {
 	case in == nil:
-		return "the CEO has said nothing that asks for " + what
+		return "the user has said nothing that asks for " + what
 	case in.kind == InputTap:
-		return "the CEO's last input was a tap on a question, not a request for " + what
+		return "the user's last input was a tap on a question, not a request for " + what
 	case in.used:
-		return "the CEO's last words already answered a prompt or " + spent + "; " + what + " needs words of their own"
+		return "the user's last words already answered a prompt or " + spent + "; " + what + " needs words of their own"
 	case now.Sub(in.at) > s.cfg.AuthoriseWindow:
-		return fmt.Sprintf("the CEO's last words were %d s ago, past supervisor.authorise_window_s (%d s)", int(now.Sub(in.at).Seconds()), int(s.cfg.AuthoriseWindow.Seconds()))
+		return fmt.Sprintf("the user's last words were %d s ago, past supervisor.authorise_window_s (%d s)", int(now.Sub(in.at).Seconds()), int(s.cfg.AuthoriseWindow.Seconds()))
 	case strings.TrimSpace(in.text) == "":
-		return "the CEO's last words were empty"
+		return "the user's last words were empty"
 	case fillerOnly(in.text):
-		return fmt.Sprintf("the CEO only said %q, which asks for nothing", strings.TrimSpace(in.text))
+		return fmt.Sprintf("the user only said %q, which asks for nothing", strings.TrimSpace(in.text))
 	case negativeInput(in.text):
-		return fmt.Sprintf("the CEO said %q, which does not ask for %s", strings.TrimSpace(in.text), what)
+		return fmt.Sprintf("the user said %q, which does not ask for %s", strings.TrimSpace(in.text), what)
 	}
 	return ""
 }
@@ -341,13 +341,13 @@ func resolveSpawnDir(want string, dirs []spawnDir, roots []string) (spawnDir, st
 	case 1:
 		return hits[0], "", nil
 	case 0:
-		return spawnDir{}, "unknown dir", fmt.Errorf("no project called %q; the projects are %s; ask the CEO which one", want, dirNames(dirs))
+		return spawnDir{}, "unknown dir", fmt.Errorf("no project called %q; the projects are %s; ask the user which one", want, dirNames(dirs))
 	default:
 		var paths []string
 		for _, d := range hits {
 			paths = append(paths, d.Path)
 		}
-		return spawnDir{}, "ambiguous dir", fmt.Errorf("%q matches several directories: %s; ask the CEO which one", want, strings.Join(paths, ", "))
+		return spawnDir{}, "ambiguous dir", fmt.Errorf("%q matches several directories: %s; ask the user which one", want, strings.Join(paths, ", "))
 	}
 }
 

@@ -86,7 +86,7 @@ func TestCloseAgentByVoice(t *testing.T) {
 func TestCloseNeedsTheCEOsWords(t *testing.T) {
 	h := closeWorld(t, braintest.NewModel())
 	_, err := h.sup.closeAgent(context.Background(), brain.CloseRequest{PaneID: "w2:p1"})
-	if err == nil || !strings.Contains(err.Error(), "the CEO has said nothing that asks for closing an agent") {
+	if err == nil || !strings.Contains(err.Error(), "the user has said nothing that asks for closing an agent") {
 		t.Fatalf("close without words = %v", err)
 	}
 	if n := len(h.srv.RequestsFor("pane.close")); n != 0 {

@@ -50,7 +50,7 @@ func (s *Session) noteSpeechLocked() { s.brief.watch = nil }
 // noteCEOSpokeLocked closes the watch when the CEO starts speaking.
 // Caller holds s.mu.
 func (s *Session) noteCEOSpokeLocked(now time.Time) *unvoicedReport {
-	return s.closeWatchLocked("the CEO spoke at " + clock(now))
+	return s.closeWatchLocked("the user spoke at " + clock(now))
 }
 
 // unvoicedReport is one briefing found unvoiced.
@@ -70,7 +70,7 @@ func (s *Session) closeWatchLocked(before string) *unvoicedReport {
 	if w == nil {
 		return nil
 	}
-	fact := fmt.Sprintf("briefing %s (%s, sent at %s) was not voiced: you said nothing after it before %s, so the CEO has not heard it", w.rec.id, w.rec.kind, clock(w.rec.at), before)
+	fact := fmt.Sprintf("briefing %s (%s, sent at %s) was not voiced: you said nothing after it before %s, so the user has not heard it", w.rec.id, w.rec.kind, clock(w.rec.at), before)
 	s.brief.unvoiced = append(s.brief.unvoiced, fact)
 	if len(s.brief.unvoiced) > unvoicedKeep {
 		s.brief.unvoiced = s.brief.unvoiced[len(s.brief.unvoiced)-unvoicedKeep:]

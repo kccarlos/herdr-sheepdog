@@ -128,7 +128,7 @@ func TestAgentRecordsForTheAgentInFocus(t *testing.T) {
 		{Alias: "bench-codex", State: "working"},
 	}
 	got := agentRecords(agents, "Okay, okay. Just tell me if it needs anything from me.", "bench-claude", clock)
-	for _, want := range []string{"the CEO's words name no agent; the one in focus is", "- bench-claude: done since 08:22:10", `last result: "finished the README; two broken links need a decision"`} {
+	for _, want := range []string{"the user's words name no agent; the one in focus is", "- bench-claude: done since 08:22:10", `last result: "finished the README; two broken links need a decision"`} {
 		if !strings.Contains(got, want) {
 			t.Errorf("record lacks %q:\n%s", want, got)
 		}

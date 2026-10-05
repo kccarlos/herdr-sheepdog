@@ -224,7 +224,7 @@ func (s *Supervisor) menuOnScreen(ctx context.Context, row state.Agent) (voice.T
 	fact += ", with the options " + strings.Join(labels, ", ") + "; nothing was typed."
 	stale := declined && sameQuestion(prompt.Phrase(), mark.question)
 	if stale {
-		fact += fmt.Sprintf(" It is the menu the CEO declined %d s ago, still on screen after the decline was sent: it may be a stale picture that has not redrawn, and herdr reports %s %s, not blocked.", int(since.Seconds()), alias, row.State)
+		fact += fmt.Sprintf(" It is the menu the user declined %d s ago, still on screen after the decline was sent: it may be a stale picture that has not redrawn, and herdr reports %s %s, not blocked.", int(since.Seconds()), alias, row.State)
 	}
 	s.log.Log(logSource, "supervisor.instruction_blocked_by_menu", row.PaneID, map[string]any{
 		"agent": aliasOr(row.Alias), "state": string(row.State), "question": prompt.Question, "options": labels, "after_decline": stale,

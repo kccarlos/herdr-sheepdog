@@ -22,7 +22,7 @@ func TestSeedRecapFromGPTLiveIsSentSilently(t *testing.T) {
 	})
 	m := c.waitSent(t, "carried recap", isContent("taken over this voice conversation"))
 	text := m.content.Turns[0].Parts[0].Text
-	if !strings.Contains(text, "Shepherd: why did the auth tests fail?\nYou: Two tests time out on the token refresh.") {
+	if !strings.Contains(text, "User: why did the auth tests fail?\nYou: Two tests time out on the token refresh.") {
 		t.Errorf("recap = %q", text)
 	}
 	if *m.content.TurnComplete {

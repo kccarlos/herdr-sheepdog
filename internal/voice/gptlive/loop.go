@@ -379,7 +379,7 @@ func (s *Session) deliverPush(lc *liveConn, item pushItem) {
 		ev = appendEvent{Type: evThinkingAppend, Content: clip(item.text)}
 	case voice.UrgencyInterrupt:
 		s.interrupt("push")
-		ev = appendEvent{Type: evInstructionsAppend, Content: clip("Stop what you are saying and tell the shepherd this now, briefly, in your own words: " + item.text)}
+		ev = appendEvent{Type: evInstructionsAppend, Content: clip("Stop what you are saying and tell the user this now, briefly, in your own words: " + item.text)}
 	default:
 		ev = appendEvent{Type: evCommentaryAppend, Content: clip(item.text)}
 	}

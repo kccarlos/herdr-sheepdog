@@ -31,13 +31,13 @@ const (
 // provider (voice.Switcher).
 const switchPrefix = "[system context, not spoken by the user] You have just taken over this voice conversation from another voice model. " +
 	"This is the recent conversation, oldest first, only so you can follow up on it. " +
-	"Do not answer it, read it out or mention it; carry on and wait for the shepherd.\n"
+	"Do not answer it, read it out or mention it; carry on and wait for the user.\n"
 
 // reseedPrefix introduces the recap to the model: context only, never
 // something to answer or read out.
 const reseedPrefix = "[system context, not spoken by the user] The voice connection dropped and came back without its history. " +
 	"This is the recent conversation, oldest first, only so you can follow up on it. " +
-	"Do not answer it, read it out or mention it; carry on and wait for the shepherd.\n"
+	"Do not answer it, read it out or mention it; carry on and wait for the user.\n"
 
 // flushRecapLocked moves the shepherd's pending words and the voice's
 // reply so far into the recap. Caller holds s.mu.

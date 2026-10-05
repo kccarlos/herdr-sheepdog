@@ -562,7 +562,7 @@ func (b *Brain) Echo(heard string) {
 			r.Retract(m.Seq)
 		}
 	}
-	b.ingest(Message{Role: RoleUser, Kind: KindSystem, Content: fmt.Sprintf("Echo ignored: the microphone picked up the assistant's own speech and it was transcribed as %q. The CEO did not say it.", heard)}, 0)
+	b.ingest(Message{Role: RoleUser, Kind: KindSystem, Content: fmt.Sprintf("Echo ignored: the microphone picked up the assistant's own speech and it was transcribed as %q. The user did not say it.", heard)}, 0)
 }
 
 // Said ingests a fragment of the assistant's speech (voice.transcript.out).
@@ -762,7 +762,7 @@ func (b *Brain) Reset(ctx context.Context, via string) (string, error) {
 // (a summary needs no chain of thought) and short: the engine caps the
 // result at summaryMaxTokens (docs/iteration-2.md WP5).
 func (b *Brain) summarize(ctx context.Context, text string) (string, error) {
-	prompt := "Summarise the following supervisor transcript in at most 10 short lines (under 300 words) for your own later reference: what the CEO asked and decided, what each agent was told, did, asked and answered, and anything still open. Keep aliases; drop paths, hashes and ids.\n\n" + text
+	prompt := "Summarise the following supervisor transcript in at most 10 short lines (under 300 words) for your own later reference: what the user asked and decided, what each agent was told, did, asked and answered, and anything still open. Keep aliases; drop paths, hashes and ids.\n\n" + text
 	resp, err := b.generateSummary(ctx, []*genai.Content{{Role: genai.RoleUser, Parts: []*genai.Part{{Text: prompt}}}}, &genai.GenerateContentConfig{ThinkingConfig: thinkingOff()})
 	if err != nil {
 		return "", err

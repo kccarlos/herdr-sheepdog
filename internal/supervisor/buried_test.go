@@ -98,7 +98,7 @@ func TestPromptNotRemindedWhenHeard(t *testing.T) {
 			t.Errorf("reminders = %d", n)
 		}
 	})
-	t.Run("the CEO spoke first", func(t *testing.T) {
+	t.Run("the user spoke first", func(t *testing.T) {
 		h := setup(t)
 		h.hear("What does it want to run?")
 		h.clock.Advance(time.Second)
@@ -158,7 +158,7 @@ func TestUtteranceRequestSaysThePromptIsUnheard(t *testing.T) {
 	h.say("Anything else going on?")
 	calls := m.Calls()
 	text := calls[len(calls)-1].Text()
-	want := "auth's prompt is still open and the CEO has likely not heard it: "
+	want := "auth's prompt is still open and the user has likely not heard it: "
 	if !strings.Contains(text, want) || !strings.Contains(text, "another line was spoken right after it") {
 		t.Fatalf("request lacks the open-prompt fact:\n%s", text)
 	}
@@ -168,6 +168,6 @@ func TestUtteranceRequestSaysThePromptIsUnheard(t *testing.T) {
 	calls = m.Calls()
 	text = calls[len(calls)-1].Text()
 	if last := text[strings.LastIndex(text, `utterance="And docs?"`):]; strings.Contains(last, "likely not heard") {
-		t.Errorf("fact repeated after the CEO spoke:\n%s", text)
+		t.Errorf("fact repeated after the user spoke:\n%s", text)
 	}
 }

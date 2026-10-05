@@ -199,7 +199,7 @@ func (s *Supervisor) revivePrompt(ctx context.Context, paneID, source string) (p
 		return state.PendingAction{}, false, ""
 	}
 	if !blocked && !s.wordsAboutMenuLocked(prompt, row) {
-		return state.PendingAction{}, false, fmt.Sprintf("%s is showing a menu, but the shepherd's last words are not about it", aliasOr(state.Say(row)))
+		return state.PendingAction{}, false, fmt.Sprintf("%s is showing a menu, but the user's last words are not about it", aliasOr(state.Say(row)))
 	}
 	p = s.newAnswerPrompt(paneID, prompt, aliasOr(state.Say(row)), row.StateSince)
 	s.setPending(p)

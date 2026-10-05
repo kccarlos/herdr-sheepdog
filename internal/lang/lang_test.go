@@ -49,11 +49,11 @@ func TestLine(t *testing.T) {
 	}{
 		{nil, ""},
 		{[]string{"nope"}, ""},
-		{[]string{"en"}, "The shepherd's language setting, in order of preference: English. Answer in the language they use."},
-		{[]string{"zh-Hans", "en"}, "The shepherd's language setting, in order of preference: Chinese (Simplified) 简体中文, English. Answer in the language they use; write Chinese in Simplified characters."},
-		{[]string{"zh-Hant"}, "The shepherd's language setting, in order of preference: Chinese (Traditional) 繁體中文. Answer in the language they use; write Chinese in Traditional characters."},
-		{[]string{"zh-Hant", "zh-Hans"}, "The shepherd's language setting, in order of preference: Chinese (Traditional) 繁體中文, Chinese (Simplified) 简体中文. Answer in the language they use; write Chinese in Traditional characters unless they ask for Simplified."},
-		{[]string{"ja", "pt-BR"}, "The shepherd's language setting, in order of preference: Japanese (日本語), Portuguese (Brazil) Português (Brasil). Answer in the language they use."},
+		{[]string{"en"}, "The user's language setting, in order of preference: English. Answer in the language they use."},
+		{[]string{"zh-Hans", "en"}, "The user's language setting, in order of preference: Chinese (Simplified) 简体中文, English. Answer in the language they use; write Chinese in Simplified characters."},
+		{[]string{"zh-Hant"}, "The user's language setting, in order of preference: Chinese (Traditional) 繁體中文. Answer in the language they use; write Chinese in Traditional characters."},
+		{[]string{"zh-Hant", "zh-Hans"}, "The user's language setting, in order of preference: Chinese (Traditional) 繁體中文, Chinese (Simplified) 简体中文. Answer in the language they use; write Chinese in Traditional characters unless they ask for Simplified."},
+		{[]string{"ja", "pt-BR"}, "The user's language setting, in order of preference: Japanese (日本語), Portuguese (Brazil) Português (Brasil). Answer in the language they use."},
 	}
 	for _, c := range cases {
 		if got := Line(c.codes); got != c.want {

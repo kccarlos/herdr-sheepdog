@@ -179,7 +179,7 @@ func TestModelOrderVoiceLineMidStep(t *testing.T) {
 		t.Errorf("modelOrder = %s, want %s", got, want)
 	}
 	chat := render(t, msgs)
-	if got, want := chatShape(chat), `user("[18:16:43] CEO said: \"Um, I wa") assistant+call_00_Bk tool@call_00_Bk user("[18:16:43] Assistant said: \"On")`; got != want {
+	if got, want := chatShape(chat), `user("[18:16:43] User said: \"Um, I w") assistant+call_00_Bk tool@call_00_Bk user("[18:16:43] Assistant said: \"On")`; got != want {
 		t.Errorf("request = %s\nwant      %s", got, want)
 	}
 	if last := chat[len(chat)-1].Content; !strings.Contains(last, "Pushed to the assistant") || !strings.Contains(last, "(stop)") {

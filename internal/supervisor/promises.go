@@ -68,7 +68,7 @@ func (s *Supervisor) openPromiseFor(paneID, event string) (state.Promise, bool) 
 func duplicatePromiseErr(old state.Promise, turn int) error {
 	msg := fmt.Sprintf("already promised at %s: %q is still open, nothing new was recorded", old.CreatedAt.Format("15:04:05"), old.Text)
 	if old.CreatedTurn != 0 && old.CreatedTurn != turn {
-		msg += fmt.Sprintf("; it was made in turn %d, and whether that turn's reply told the CEO is in your transcript", old.CreatedTurn)
+		msg += fmt.Sprintf("; it was made in turn %d, and whether that turn's reply told the user is in your transcript", old.CreatedTurn)
 	}
 	return errors.New(msg)
 }

@@ -198,11 +198,11 @@ func (s *Supervisor) openPromptFact(start time.Time) string {
 	if !ok {
 		return ""
 	}
-	why := "another line was spoken right after it, before the CEO said anything"
+	why := "another line was spoken right after it, before the user said anything"
 	if reason == "unheard" {
-		why = "the voice judged that it did not reach the CEO"
+		why = "the voice judged that it did not reach the user"
 	}
-	return fmt.Sprintf("%s's prompt is still open and the CEO has likely not heard it: %q (%s). Their words may not be about it.", s.sayOf(p.PaneID), p.SpokenSummary, why)
+	return fmt.Sprintf("%s's prompt is still open and the user has likely not heard it: %q (%s). Their words may not be about it.", s.sayOf(p.PaneID), p.SpokenSummary, why)
 }
 
 // remindBuriedPrompt re-announces, once, an open prompt the CEO has
