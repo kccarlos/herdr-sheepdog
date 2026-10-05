@@ -1,0 +1,344 @@
+
+## vertex: 65/120 (54%)
+### by category
+| ambiguous | 3/6 (50%) |
+| approve | 10/12 (83%) |
+| barge_in | 1/6 (17%) |
+| collision | 5/6 (83%) |
+| deep_ask | 3/6 (50%) |
+| deferral | 4/6 (67%) |
+| echo | 0/6 (0%) |
+| facts | 9/18 (50%) |
+| instruct | 3/6 (50%) |
+| language | 4/6 (67%) |
+| names | 4/6 (67%) |
+| noise | 4/6 (67%) |
+| reconnect | 5/12 (42%) |
+| status | 4/9 (44%) |
+| stop | 5/6 (83%) |
+| unheard | 1/3 (33%) |
+### by scenario
+| ambiguous-codex | ambiguous | 1/3 |
+| ambiguous-readme-one | ambiguous | 2/3 |
+| approve-claude-askuser | approve | 3/3 |
+| approve-claude-permission | approve | 2/3 |
+| approve-codex | approve | 3/3 |
+| approve-zh-hurried | approve | 2/3 |
+| barge-in-hold-to-talk | barge_in | 0/3 |
+| barge-in-long-answer | barge_in | 1/3 |
+| collision-block-while-talking | collision | 3/3 |
+| collision-finish-push | collision | 2/3 |
+| deep-ask-detail | deep_ask | 0/3 |
+| deep-ask-fix-failing-test | deep_ask | 3/3 |
+| deferral-en-hesitant | deferral | 1/3 |
+| deferral-zh | deferral | 3/3 |
+| echo-barge-in | echo | 0/3 |
+| echo-instruct | echo | 0/3 |
+| facts-ambiguous-rewind | facts | 2/3 |
+| facts-contradiction-linecount | facts | 3/3 |
+| facts-history-first | facts | 1/3 |
+| facts-stale-conclusion-zh | facts | 2/3 |
+| facts-timeout-not-verified | facts | 0/3 |
+| facts-zh-simplified | facts | 1/3 |
+| instruct-notify | instruct | 1/3 |
+| instruct-pronoun | instruct | 2/3 |
+| lang-mixed-codeswitch | language | 3/3 |
+| lang-switch-zh-en | language | 1/3 |
+| names-by-kind | names | 3/3 |
+| names-rename-by-voice | names | 1/3 |
+| noise-cafe-approve | noise | 3/3 |
+| noise-pink-status-zh | noise | 1/3 |
+| reconnect-held-push | reconnect | 0/3 |
+| reconnect-long-session | reconnect | 3/3 |
+| resume-recall | reconnect | 2/3 |
+| resume-recall-twice | reconnect | 0/3 |
+| status-anything-for-me | status | 2/3 |
+| status-en | status | 1/3 |
+| status-zh-tired | status | 1/3 |
+| stop-mid-instruction | stop | 3/3 |
+| stop-never-mind | stop | 2/3 |
+| unheard-approval-requeue | unheard | 1/3 |
+### failure primary labels {'wrong_agent': 1, 'unintended_action': 5, 'judge_no': 43, 'brain_fallback': 2, 'timeout': 3, 'check': 1}
+### failure labels (all) {'wrong_agent': 1, 'judge_no': 94, 'unintended_action': 5, 'silence': 10, 'brain_fallback': 4, 'timeout': 3, 'max_turns': 2, 'check': 3}
+### turn.latency total p50 4.54s p90 8.76s (n=179); first_audio p50 0.66s p90 0.79s
+### answers>=2s 325, gaps>=3s 13 (4.0%) sizes [7.1, 6.8, 7.1, 7.2, 6.8, 7.1, 6.8, 6.9, 7.1, 7.3, 6.8, 6.9, 6.8]; median realtime_ratio 1.03
+### CEO lines 272, voice heard none 0
+### resume-recall-twice t2-r1b fail: resumes gen1 1734->2130 (1.23); handle_dropped ['resumed_twice']; reseeded [(7, 999)]
+### resume-recall t2-r1b fail: resumes gen1 1568->1790 (1.14); handle_dropped []; reseeded []
+### resume-recall-twice t2-r2 fail: resumes gen1 1758->2087 (1.19); handle_dropped ['resumed_twice']; reseeded [(7, 970)]
+### resume-recall t2-r2 pass: resumes gen1 1732->2092 (1.21); handle_dropped []; reseeded []
+### resume-recall-twice t2-r3 fail: resumes gen1 1710->2295 (1.34); handle_dropped []; reseeded []
+### resume-recall t2-r3 pass: resumes gen1 1750->2147 (1.23); handle_dropped []; reseeded []
+### brain.fallback events 7
+
+## aistudio: 25/40 (62%)
+### by category
+| ambiguous | 2/2 (100%) |
+| approve | 3/4 (75%) |
+| barge_in | 0/2 (0%) |
+| collision | 1/2 (50%) |
+| deep_ask | 1/2 (50%) |
+| deferral | 1/2 (50%) |
+| echo | 0/2 (0%) |
+| facts | 6/6 (100%) |
+| instruct | 2/2 (100%) |
+| language | 1/2 (50%) |
+| names | 1/2 (50%) |
+| noise | 2/2 (100%) |
+| reconnect | 1/4 (25%) |
+| status | 3/3 (100%) |
+| stop | 1/2 (50%) |
+| unheard | 0/1 (0%) |
+### by scenario
+| ambiguous-codex | ambiguous | 1/1 |
+| ambiguous-readme-one | ambiguous | 1/1 |
+| approve-claude-askuser | approve | 1/1 |
+| approve-claude-permission | approve | 0/1 |
+| approve-codex | approve | 1/1 |
+| approve-zh-hurried | approve | 1/1 |
+| barge-in-hold-to-talk | barge_in | 0/1 |
+| barge-in-long-answer | barge_in | 0/1 |
+| collision-block-while-talking | collision | 1/1 |
+| collision-finish-push | collision | 0/1 |
+| deep-ask-detail | deep_ask | 0/1 |
+| deep-ask-fix-failing-test | deep_ask | 1/1 |
+| deferral-en-hesitant | deferral | 1/1 |
+| deferral-zh | deferral | 0/1 |
+| echo-barge-in | echo | 0/1 |
+| echo-instruct | echo | 0/1 |
+| facts-ambiguous-rewind | facts | 1/1 |
+| facts-contradiction-linecount | facts | 1/1 |
+| facts-history-first | facts | 1/1 |
+| facts-stale-conclusion-zh | facts | 1/1 |
+| facts-timeout-not-verified | facts | 1/1 |
+| facts-zh-simplified | facts | 1/1 |
+| instruct-notify | instruct | 1/1 |
+| instruct-pronoun | instruct | 1/1 |
+| lang-mixed-codeswitch | language | 0/1 |
+| lang-switch-zh-en | language | 1/1 |
+| names-by-kind | names | 1/1 |
+| names-rename-by-voice | names | 0/1 |
+| noise-cafe-approve | noise | 1/1 |
+| noise-pink-status-zh | noise | 1/1 |
+| reconnect-held-push | reconnect | 0/1 |
+| reconnect-long-session | reconnect | 1/1 |
+| resume-recall | reconnect | 0/1 |
+| resume-recall-twice | reconnect | 0/1 |
+| status-anything-for-me | status | 1/1 |
+| status-en | status | 1/1 |
+| status-zh-tired | status | 1/1 |
+| stop-mid-instruction | stop | 0/1 |
+| stop-never-mind | stop | 1/1 |
+| unheard-approval-requeue | unheard | 0/1 |
+### failure primary labels {'judge_no': 10, 'unintended_action': 2, 'check': 3}
+### failure labels (all) {'judge_no': 27, 'max_turns': 1, 'unintended_action': 2, 'silence': 3, 'check': 7}
+### turn.latency total p50 5.38s p90 12.86s (n=68); first_audio p50 0.93s p90 1.23s
+### answers>=2s 109, gaps>=3s 0 (0.0%) sizes []; median realtime_ratio 4.38
+### CEO lines 91, voice heard none 0
+### resume-recall-twice t2-aistudio fail: resumes ; handle_dropped []; reseeded []
+### resume-recall t2-aistudio fail: resumes ; handle_dropped []; reseeded []
+### brain.fallback events 0
+
+## vertex-r1: 20/40 (50%)
+### by category
+| ambiguous | 1/2 (50%) |
+| approve | 4/4 (100%) |
+| barge_in | 0/2 (0%) |
+| collision | 1/2 (50%) |
+| deep_ask | 1/2 (50%) |
+| deferral | 1/2 (50%) |
+| echo | 0/2 (0%) |
+| facts | 3/6 (50%) |
+| instruct | 2/2 (100%) |
+| language | 1/2 (50%) |
+| names | 1/2 (50%) |
+| noise | 2/2 (100%) |
+| reconnect | 1/4 (25%) |
+| status | 0/3 (0%) |
+| stop | 2/2 (100%) |
+| unheard | 0/1 (0%) |
+### by scenario
+| ambiguous-codex | ambiguous | 0/1 |
+| ambiguous-readme-one | ambiguous | 1/1 |
+| approve-claude-askuser | approve | 1/1 |
+| approve-claude-permission | approve | 1/1 |
+| approve-codex | approve | 1/1 |
+| approve-zh-hurried | approve | 1/1 |
+| barge-in-hold-to-talk | barge_in | 0/1 |
+| barge-in-long-answer | barge_in | 0/1 |
+| collision-block-while-talking | collision | 1/1 |
+| collision-finish-push | collision | 0/1 |
+| deep-ask-detail | deep_ask | 0/1 |
+| deep-ask-fix-failing-test | deep_ask | 1/1 |
+| deferral-en-hesitant | deferral | 0/1 |
+| deferral-zh | deferral | 1/1 |
+| echo-barge-in | echo | 0/1 |
+| echo-instruct | echo | 0/1 |
+| facts-ambiguous-rewind | facts | 0/1 |
+| facts-contradiction-linecount | facts | 1/1 |
+| facts-history-first | facts | 0/1 |
+| facts-stale-conclusion-zh | facts | 1/1 |
+| facts-timeout-not-verified | facts | 0/1 |
+| facts-zh-simplified | facts | 1/1 |
+| instruct-notify | instruct | 1/1 |
+| instruct-pronoun | instruct | 1/1 |
+| lang-mixed-codeswitch | language | 1/1 |
+| lang-switch-zh-en | language | 0/1 |
+| names-by-kind | names | 1/1 |
+| names-rename-by-voice | names | 0/1 |
+| noise-cafe-approve | noise | 1/1 |
+| noise-pink-status-zh | noise | 1/1 |
+| reconnect-held-push | reconnect | 0/1 |
+| reconnect-long-session | reconnect | 1/1 |
+| resume-recall | reconnect | 0/1 |
+| resume-recall-twice | reconnect | 0/1 |
+| status-anything-for-me | status | 0/1 |
+| status-en | status | 0/1 |
+| status-zh-tired | status | 0/1 |
+| stop-mid-instruction | stop | 1/1 |
+| stop-never-mind | stop | 1/1 |
+| unheard-approval-requeue | unheard | 0/1 |
+### failure primary labels {'wrong_agent': 1, 'unintended_action': 2, 'judge_no': 14, 'brain_fallback': 1, 'timeout': 2}
+### failure labels (all) {'wrong_agent': 1, 'judge_no': 39, 'unintended_action': 2, 'silence': 3, 'brain_fallback': 3, 'timeout': 2, 'max_turns': 1, 'check': 1}
+### turn.latency total p50 4.62s p90 10.51s (n=62); first_audio p50 0.64s p90 0.77s
+### answers>=2s 111, gaps>=3s 1 (0.9%) sizes [7.1]; median realtime_ratio 1.03
+### CEO lines 92, voice heard none 0
+### resume-recall-twice t2-r1b fail: resumes gen1 1734->2130 (1.23); handle_dropped ['resumed_twice']; reseeded [(7, 999)]
+### resume-recall t2-r1b fail: resumes gen1 1568->1790 (1.14); handle_dropped []; reseeded []
+### brain.fallback events 5
+
+## vertex-r2: 20/40 (50%)
+### by category
+| ambiguous | 1/2 (50%) |
+| approve | 2/4 (50%) |
+| barge_in | 0/2 (0%) |
+| collision | 2/2 (100%) |
+| deep_ask | 1/2 (50%) |
+| deferral | 1/2 (50%) |
+| echo | 0/2 (0%) |
+| facts | 2/6 (33%) |
+| instruct | 1/2 (50%) |
+| language | 2/2 (100%) |
+| names | 2/2 (100%) |
+| noise | 1/2 (50%) |
+| reconnect | 2/4 (50%) |
+| status | 1/3 (33%) |
+| stop | 2/2 (100%) |
+| unheard | 0/1 (0%) |
+### by scenario
+| ambiguous-codex | ambiguous | 1/1 |
+| ambiguous-readme-one | ambiguous | 0/1 |
+| approve-claude-askuser | approve | 1/1 |
+| approve-claude-permission | approve | 0/1 |
+| approve-codex | approve | 1/1 |
+| approve-zh-hurried | approve | 0/1 |
+| barge-in-hold-to-talk | barge_in | 0/1 |
+| barge-in-long-answer | barge_in | 0/1 |
+| collision-block-while-talking | collision | 1/1 |
+| collision-finish-push | collision | 1/1 |
+| deep-ask-detail | deep_ask | 0/1 |
+| deep-ask-fix-failing-test | deep_ask | 1/1 |
+| deferral-en-hesitant | deferral | 0/1 |
+| deferral-zh | deferral | 1/1 |
+| echo-barge-in | echo | 0/1 |
+| echo-instruct | echo | 0/1 |
+| facts-ambiguous-rewind | facts | 1/1 |
+| facts-contradiction-linecount | facts | 1/1 |
+| facts-history-first | facts | 0/1 |
+| facts-stale-conclusion-zh | facts | 0/1 |
+| facts-timeout-not-verified | facts | 0/1 |
+| facts-zh-simplified | facts | 0/1 |
+| instruct-notify | instruct | 0/1 |
+| instruct-pronoun | instruct | 1/1 |
+| lang-mixed-codeswitch | language | 1/1 |
+| lang-switch-zh-en | language | 1/1 |
+| names-by-kind | names | 1/1 |
+| names-rename-by-voice | names | 1/1 |
+| noise-cafe-approve | noise | 1/1 |
+| noise-pink-status-zh | noise | 0/1 |
+| reconnect-held-push | reconnect | 0/1 |
+| reconnect-long-session | reconnect | 1/1 |
+| resume-recall | reconnect | 1/1 |
+| resume-recall-twice | reconnect | 0/1 |
+| status-anything-for-me | status | 1/1 |
+| status-en | status | 0/1 |
+| status-zh-tired | status | 0/1 |
+| stop-mid-instruction | stop | 1/1 |
+| stop-never-mind | stop | 1/1 |
+| unheard-approval-requeue | unheard | 0/1 |
+### failure primary labels {'judge_no': 16, 'unintended_action': 2, 'brain_fallback': 1, 'timeout': 1}
+### failure labels (all) {'judge_no': 34, 'silence': 5, 'unintended_action': 2, 'brain_fallback': 1, 'max_turns': 1, 'timeout': 1}
+### turn.latency total p50 4.70s p90 8.01s (n=59); first_audio p50 0.66s p90 0.83s
+### answers>=2s 108, gaps>=3s 7 (6.5%) sizes [6.8, 7.1, 7.2, 6.8, 7.1, 6.8, 6.9]; median realtime_ratio 1.03
+### CEO lines 89, voice heard none 0
+### resume-recall-twice t2-r2 fail: resumes gen1 1758->2087 (1.19); handle_dropped ['resumed_twice']; reseeded [(7, 970)]
+### resume-recall t2-r2 pass: resumes gen1 1732->2092 (1.21); handle_dropped []; reseeded []
+### brain.fallback events 2
+
+## vertex-r3: 25/40 (62%)
+### by category
+| ambiguous | 1/2 (50%) |
+| approve | 4/4 (100%) |
+| barge_in | 1/2 (50%) |
+| collision | 2/2 (100%) |
+| deep_ask | 1/2 (50%) |
+| deferral | 2/2 (100%) |
+| echo | 0/2 (0%) |
+| facts | 4/6 (67%) |
+| instruct | 0/2 (0%) |
+| language | 1/2 (50%) |
+| names | 1/2 (50%) |
+| noise | 1/2 (50%) |
+| reconnect | 2/4 (50%) |
+| status | 3/3 (100%) |
+| stop | 1/2 (50%) |
+| unheard | 1/1 (100%) |
+### by scenario
+| ambiguous-codex | ambiguous | 0/1 |
+| ambiguous-readme-one | ambiguous | 1/1 |
+| approve-claude-askuser | approve | 1/1 |
+| approve-claude-permission | approve | 1/1 |
+| approve-codex | approve | 1/1 |
+| approve-zh-hurried | approve | 1/1 |
+| barge-in-hold-to-talk | barge_in | 0/1 |
+| barge-in-long-answer | barge_in | 1/1 |
+| collision-block-while-talking | collision | 1/1 |
+| collision-finish-push | collision | 1/1 |
+| deep-ask-detail | deep_ask | 0/1 |
+| deep-ask-fix-failing-test | deep_ask | 1/1 |
+| deferral-en-hesitant | deferral | 1/1 |
+| deferral-zh | deferral | 1/1 |
+| echo-barge-in | echo | 0/1 |
+| echo-instruct | echo | 0/1 |
+| facts-ambiguous-rewind | facts | 1/1 |
+| facts-contradiction-linecount | facts | 1/1 |
+| facts-history-first | facts | 1/1 |
+| facts-stale-conclusion-zh | facts | 1/1 |
+| facts-timeout-not-verified | facts | 0/1 |
+| facts-zh-simplified | facts | 0/1 |
+| instruct-notify | instruct | 0/1 |
+| instruct-pronoun | instruct | 0/1 |
+| lang-mixed-codeswitch | language | 1/1 |
+| lang-switch-zh-en | language | 0/1 |
+| names-by-kind | names | 1/1 |
+| names-rename-by-voice | names | 0/1 |
+| noise-cafe-approve | noise | 1/1 |
+| noise-pink-status-zh | noise | 0/1 |
+| reconnect-held-push | reconnect | 0/1 |
+| reconnect-long-session | reconnect | 1/1 |
+| resume-recall | reconnect | 1/1 |
+| resume-recall-twice | reconnect | 0/1 |
+| status-anything-for-me | status | 1/1 |
+| status-en | status | 1/1 |
+| status-zh-tired | status | 1/1 |
+| stop-mid-instruction | stop | 1/1 |
+| stop-never-mind | stop | 0/1 |
+| unheard-approval-requeue | unheard | 1/1 |
+### failure primary labels {'judge_no': 13, 'unintended_action': 1, 'check': 1}
+### failure labels (all) {'judge_no': 21, 'unintended_action': 1, 'silence': 2, 'check': 2}
+### turn.latency total p50 4.31s p90 7.35s (n=58); first_audio p50 0.66s p90 0.76s
+### answers>=2s 106, gaps>=3s 5 (4.7%) sizes [7.1, 7.3, 6.8, 6.9, 6.8]; median realtime_ratio 1.03
+### CEO lines 91, voice heard none 0
+### resume-recall-twice t2-r3 fail: resumes gen1 1710->2295 (1.34); handle_dropped []; reseeded []
+### resume-recall t2-r3 pass: resumes gen1 1750->2147 (1.23); handle_dropped []; reseeded []
+### brain.fallback events 0
