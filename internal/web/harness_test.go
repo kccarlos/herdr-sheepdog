@@ -214,6 +214,9 @@ type harnessOpts struct {
 	// Deps.MinProtocol (the /ws protocol handshake).
 	handshakeTimeout time.Duration
 	minProtocol      int
+	// screenInterval and screenMinGap set Deps.ScreenInterval and
+	// Deps.ScreenMinGap (the agent window over /ws).
+	screenInterval, screenMinGap time.Duration
 }
 
 func newHarness(t *testing.T, o harnessOpts) *harness {
@@ -269,7 +272,7 @@ func newHarness(t *testing.T, o harnessOpts) *harness {
 	injector := inject.NewInjector(store, h, sup, log, nil)
 	deps := Deps{Log: log, Store: store, Supervisor: sup, Injector: injector, Router: &inject.Router{}, Version: "test", Heartbeat: 200 * time.Millisecond, OutQueue: 8, DevTestdataDir: o.devTestdata, DevBrainDir: o.devBrain, StatsInterval: o.statsInterval,
 		SystemPrompt: func() string { return "You are the voice. Aliases: auth." }, Aliases: []string{"auth"}, ReloadPrompts: o.reloadPrompts, Brain: b, BrainOffReason: "--brain=off", BrainProviders: providers, Token: o.token, VoiceContext: vctx, RouterContext: routerCtx, Push: o.push,
-		HandshakeTimeout: o.handshakeTimeout, MinProtocol: o.minProtocol}
+		HandshakeTimeout: o.handshakeTimeout, MinProtocol: o.minProtocol, ScreenInterval: o.screenInterval, ScreenMinGap: o.screenMinGap}
 	var sw *voice.Switcher
 	var session2 *fakeSession
 	if session != nil {
