@@ -80,6 +80,23 @@ What is in:
   The catalog is Gemini Live's official language table intersected
   with OpenAI's published speech-language list (GPT-Live publishes no
   list of its own); 简体中文 and 繁體中文 are separate entries.
+- **Baseline information fixes** (#146, items from
+  [`eval/baseline-2026-10-05.md`](eval/baseline-2026-10-05.md); no new
+  judgment in code, no new action rails): a decision-open fact on every
+  announcement for both brains (`decision_open` in the briefing,
+  "Decisions open right now" in the announce turn); task title,
+  instruction and last activity in the briefing's `agent_state`; the
+  worker's newest report in full in the slow brain's agent record;
+  prompt v5.2 and RULES.md (technical terms stay English in Chinese, "not
+  yet / 先不要 / 等一下" is a deferral, a question is never an
+  instruction); tolerant `options` decode and one same-provider retry on
+  a 499 (`brain.retry`); and the #139 gap closed: a reconnect from any
+  connection opened by a resume presents no handle. Interleaved tier 2
+  ×2 on 14 affected scenarios: pass 14/28 → 13/28 (flat, judge noise),
+  announcements ending in a question with nothing open 2/15 → 0/15,
+  `esc` on a deferral 1 → 0, "race detector" kept in English in Chinese
+  answers; results in
+  [`bench/results/2026-10-05-info5/`](bench/results/2026-10-05-info5/).
 - **Brain:** stateful agent over a transcript window with providers
   `gemini`, `vertex` and `deepseek` and a runtime model switch; the ear
   contract (`spoken` / `ask` / `detail`); push judgment under the
