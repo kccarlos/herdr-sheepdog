@@ -364,8 +364,8 @@ func (s Scenario) validate() error {
 			return fmt.Errorf("behavior.resume: after_turn, after_turns or after_beats, each >= 1")
 		}
 		for _, b := range r.AfterBeats {
-			if b > len(s.Agenda) {
-				return fmt.Errorf("behavior.resume.after_beats %d: the agenda has %d beats", b, len(s.Agenda))
+			if b > len(s.Agenda) || strings.TrimSpace(s.Agenda[b-1]) == "<wait>" {
+				return fmt.Errorf("behavior.resume.after_beats %d: not a spoken beat of the agenda", b)
 			}
 		}
 	}

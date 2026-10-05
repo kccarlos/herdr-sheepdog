@@ -18,10 +18,8 @@
         "Tell web-claude to also check the mobile layout of the checkout page.",
         "[From here on speak Mandarin Chinese for the rest of the call.] Ask how the tests-codex run went.",
         "Ask why that test fails.",
-        "Ask for more detail on the cause.",
         "Ask what sheepdog told you earlier about infra-codex — the earlier one, the command you approved.",
         "<wait>",
-        "Ask what infra-codex's plan says.",
         "Ask what the two of you discussed first in this call.",
         "Ask whether anything else is waiting for you, then say that's all for now."
       ],
@@ -98,7 +96,7 @@
           "screen": "wd-standup-web-mobile.txt"
         },
         {
-          "after_beat": 12,
+          "after_beat": 11,
           "delay_ms": 2000,
           "agent": "api-codex",
           "state": "done",
@@ -218,12 +216,12 @@
           ],
           "coherence": [
             {
-              "beat": 12,
+              "beat": 11,
               "answer": "infra-codex wanted to run a read-only terraform plan for moving the staging database to the new VPC, and the CEO approved it",
               "after_resume": true
             },
             {
-              "beat": 15,
+              "beat": 13,
               "answer": "the first thing was what everyone was up to (the status of the six workers), then which ones needed the CEO"
             }
           ]
@@ -249,7 +247,6 @@
         "Ask who finished in the last few minutes.",
         "\"What did the earlier one say, the first one you told me finished?\" [say it with 'the earlier one'; do not name the worker]",
         "<wait>",
-        "Ask how many workers are still busy, roughly.",
         "Ask what perf-codex found, and why it matters.",
         "Say that's all, thanks."
       ],
@@ -527,7 +524,6 @@
         "Ask what fix-claude actually wants to do and why.",
         "Approve fix-claude's command.",
         "Ask why the checkout tickets spiked this week. [an explanation]",
-        "Ask for more detail.",
         "Ask what you decided about release-codex earlier.",
         "<wait>",
         "Ask what's left that needs you, then say thanks, that's it."
@@ -584,7 +580,7 @@
           "screen": "wd-adv-metrics-done.txt"
         },
         {
-          "after_beat": 12,
+          "after_beat": 11,
           "delay_ms": 2000,
           "agent": "deps-codex",
           "state": "blocked",
@@ -705,7 +701,7 @@
           ],
           "coherence": [
             {
-              "beat": 12,
+              "beat": 11,
               "answer": "the CEO said no to release-codex's force push and had it open a pull request instead",
               "after_resume": true
             }
@@ -1112,8 +1108,7 @@
         "[From here on speak Mandarin Chinese for the rest of the call.] Ask whether the flaky test fix worked.",
         "Ask why the bill went up, in one or two sentences, in Chinese.",
         "<wait>",
-        "Ask what the first thing you asked about today was, and how it ended.",
-        "Say that's enough for today."
+        "Ask what the first thing you asked about today was, and how it ended. Then say that's enough for today."
       ],
       "agents": [
         {
@@ -1286,9 +1281,8 @@
         "Ask what deploy-codex wants to run and whether it is safe.",
         "Approve deploy-codex's command.",
         "<wait>",
-        "[Switch to Mandarin Chinese for the next three items.] Ask what's new since last time.",
+        "[Switch to Mandarin Chinese for the next two items.] Ask what's new since last time.",
         "Ask (in Chinese) why perf-claude's numbers matter.",
-        "Ask (in Chinese) who is still working.",
         "[Back to English from here.] Ask about the decision you put off earlier — the one you said not now to.",
         "Answer it: tell pricing-claude to go with the first option.",
         "<wait>",
@@ -1400,7 +1394,7 @@
           "screen": "wd-long-bugs-done.txt"
         },
         {
-          "after_beat": 15,
+          "after_beat": 14,
           "delay_ms": 2500,
           "agent": "infra-codex",
           "state": "done",
@@ -1497,7 +1491,7 @@
               "why": "deploy-codex is the only worker with a pending command and the CEO named it"
             },
             {
-              "beat": 13,
+              "beat": 12,
               "needed": false,
               "why": "the CEO just recalled pricing-claude's question and named the first option"
             }
@@ -1508,12 +1502,12 @@
           ],
           "coherence": [
             {
-              "beat": 12,
+              "beat": 11,
               "answer": "pricing-claude's question: whether orders of exactly $50.00 get free shipping",
               "after_resume": true
             },
             {
-              "beat": 18,
+              "beat": 17,
               "answer": "the first thing was the status of the workers, then pricing-claude's free-shipping question (put off)",
               "after_resume": true
             }
