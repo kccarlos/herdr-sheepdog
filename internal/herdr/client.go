@@ -200,7 +200,7 @@ func (c *Client) CreateWorkspace(ctx context.Context, cwd, label string) (PaneIn
 	var res struct {
 		Root PaneInfo `json:"root_pane"`
 	}
-	params := map[string]any{"cwd": cwd, "focus": false}
+	params := map[string]any{"cwd": cwd, "focus": false, "env": PaneEnv}
 	if label != "" {
 		params["label"] = label
 	}
@@ -208,6 +208,13 @@ func (c *Client) CreateWorkspace(ctx context.Context, cwd, label string) (PaneIn
 	c.log("herdr.workspace_create", res.Root.PaneID, map[string]any{"cwd": cwd, "label": label, "error": errString(err)})
 	return res.Root, err
 }
+
+// PaneEnv is set in the shell of every pane the daemon opens for a new
+// agent (workspace.create, pane.split take an env map; neither takes a
+// command, so the agent is still typed at the shell prompt). It keeps
+// oh-my-zsh from asking to update at shell start: on 2026-10-04 that
+// prompt ate the "c" of "claude" on a voice spawn.
+var PaneEnv = map[string]string{"DISABLE_AUTO_UPDATE": "true"}
 
 // SplitPane splits paneID to the right, unfocused, with a new shell in
 // cwd (`pane.split`), and returns the new pane. The pane to split goes
@@ -219,7 +226,7 @@ func (c *Client) SplitPane(ctx context.Context, paneID, cwd string) (PaneInfo, e
 	var res struct {
 		Pane PaneInfo `json:"pane"`
 	}
-	err := c.Call(ctx, "pane.split", map[string]any{"target_pane_id": paneID, "direction": "right", "cwd": cwd, "focus": false}, &res)
+	err := c.Call(ctx, "pane.split", map[string]any{"target_pane_id": paneID, "direction": "right", "cwd": cwd, "focus": false, "env": PaneEnv}, &res)
 	c.log("herdr.pane_split", paneID, map[string]any{"cwd": cwd, "pane": res.Pane.PaneID, "error": errString(err)})
 	return res.Pane, err
 }

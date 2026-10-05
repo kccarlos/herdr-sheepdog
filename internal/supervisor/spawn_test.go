@@ -405,6 +405,17 @@ func TestSpawnNotReadyKeepsWaitingAndTellsTheBrain(t *testing.T) {
 	if n := w.log.count("supervisor.spawn_instruction_dropped"); n != 0 {
 		t.Fatalf("the instruction was dropped at the not-ready mark")
 	}
+	// The CEO is told too, through the voice: a daemon fact with the
+	// pane's last lines (2026-10-04, a shell prompt ate the "c" of
+	// "claude" and nobody heard that the agent never started).
+	waitFor(t, func() bool {
+		for _, p := range w.pusher.all() {
+			if strings.Contains(p.Text, "The new Claude in bench has not started") && strings.Contains(p.Text, "trust this folder") {
+				return true
+			}
+		}
+		return false
+	}, "the CEO's spawn fact")
 
 	// The brain's next turn has the fact and the screen.
 	w.say("怎么样了?")
