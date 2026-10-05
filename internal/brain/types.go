@@ -565,6 +565,13 @@ func (p PendingPrompt) SelectedBy(keys []string) bool {
 	return false
 }
 
+// LanguageHost is a Host that knows the shepherd's language setting:
+// LanguageLine is internal/lang's sentence about it, "" when none is set.
+// Optional, so test hosts need not implement it.
+type LanguageHost interface {
+	LanguageLine() string
+}
+
 // Host is what the brain needs from the supervisor: the roster and the
 // ledger, the read tools, and the actions (which go through the
 // supervisor's existing herdr paths and pending-action bookkeeping).

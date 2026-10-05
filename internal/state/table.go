@@ -288,6 +288,10 @@ type Session struct {
 	// Chattiness is the push policy chosen at runtime (quiet | normal |
 	// chatty); empty means "use the configured initial value".
 	Chattiness string `json:"chattiness,omitempty"`
+	// Languages is the shepherd's language preference (BCP-47 codes from
+	// internal/lang's catalog, most preferred first), set at runtime by
+	// PUT /api/settings; empty means none set. Both brains are told it.
+	Languages []string `json:"languages,omitempty"`
 	// BrainProvider and BrainModel are the supervisor brain's provider
 	// and model chosen at runtime (the /debug picker, PUT
 	// /api/brain/model); empty means "use the configured brain.provider
@@ -369,6 +373,7 @@ func (t Table) clone() Table {
 		out.PendingAction = &p
 	}
 	out.Session.Notes = append([]Note(nil), t.Session.Notes...)
+	out.Session.Languages = append([]string(nil), t.Session.Languages...)
 	out.Session.Promises = make([]Promise, len(t.Session.Promises))
 	for i, p := range t.Session.Promises {
 		out.Session.Promises[i] = p.clone()

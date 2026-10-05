@@ -94,7 +94,7 @@ cfg := &genai.LiveConnectConfig{
     ResponseModalities: []genai.Modality{genai.ModalityAudio}, // TEXT is rejected by gemini-3.8-live
     SpeechConfig: &genai.SpeechConfig{
         VoiceConfig: &genai.VoiceConfig{PrebuiltVoiceConfig: &genai.PrebuiltVoiceConfig{VoiceName: "Puck"}},
-        // LanguageCode: "en-US", // optional
+        // LanguageCode: "en-US", // optional; not for native-audio models (below)
     },
     SystemInstruction: &genai.Content{Parts: []*genai.Part{{Text: systemPrompt}}},
     Tools:             sheepdogTools(), // §5
@@ -459,6 +459,22 @@ does not necessarily change what the native-audio model itself hears. So do
 both: put aliases in `CustomVocabulary` **and** in the system prompt (plan
 §3.7 fallback). Effectiveness on real speech was not measured (no mic in the
 smoke test) — verify in WP2's `voice-test`.
+
+### Language settings — **not set, on purpose** (checked 2026-10-05)
+
+The Live guide (https://ai.google.dev/gemini-api/docs/live-guide,
+"Supported languages") says: "Native audio output models automatically
+choose the appropriate language and don't support explicitly setting the
+language code", and the transcription language "is inferred from the
+model's response". So `SpeechConfig.LanguageCode` is left unset (it would
+at best do nothing on gemini-3.8-live, at worst pin one language and
+break the shepherd's Chinese/English switching — gemini-live-2.5 native
+audio already lost Chinese words, docs/research/live-pauses-2026-10-04.md),
+and so is `AudioTranscriptionConfig.LanguageCodes`. The shepherd's
+language setting reaches the model as information instead: the last line
+of the system instruction and a silent line on change
+(docs/design/language-preference.md). The same page's table lists 99
+languages, Chinese as `zh-Hans` and `zh-Hant`.
 
 ## 8. Audio formats
 

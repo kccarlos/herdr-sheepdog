@@ -70,6 +70,16 @@ What is in:
   binary): phone-test cases 9/18 → 11/18, hand-off 75 % → 90 %, rewind
   prompts on an ambiguous "it" 4 → 0, existing suite 21/36 → 21/36;
   self-answer ≈ 1.2 s vs hand-off ≈ 5.5 s.
+- **Language preference** (#142, [`design/language-preference.md`](design/language-preference.md)):
+  the shepherd's languages, most preferred first, are a runtime setting
+  (`PUT /api/settings {"languages": [...]}`, the iOS app's Settings ▸
+  Languages; state file `session.languages`). Both brains are told it as
+  information: a `## Language` section in the slow brain's state block,
+  the last line of the voice's system instruction (Gemini Live and
+  GPT-Live), and a silent line to a running voice session on change.
+  The catalog is Gemini Live's official language table intersected
+  with OpenAI's published speech-language list (GPT-Live publishes no
+  list of its own); 简体中文 and 繁體中文 are separate entries.
 - **Brain:** stateful agent over a transcript window with providers
   `gemini`, `vertex` and `deepseek` and a runtime model switch; the ear
   contract (`spoken` / `ask` / `detail`); push judgment under the

@@ -140,7 +140,7 @@ export function eventSummary(ev) {
       parts.push(p.text);
       break;
     case type.startsWith('supervisor.'):
-      parts.push(p.error, p.text, p.reason, p.chattiness ? `chattiness ${p.chattiness}` : '');
+      parts.push(p.error, p.text, p.reason, p.chattiness ? `chattiness ${p.chattiness}` : '', !p.text && Array.isArray(p.languages) ? `languages ${p.languages.join(', ') || 'none'}` : '');
       break;
     default:
       parts.push(JSON.stringify(p).slice(0, 120));

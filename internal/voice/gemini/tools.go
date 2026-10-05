@@ -54,7 +54,7 @@ func TextToolDeclarations() []*genai.Tool {
 }
 
 // systemPrompt renders the voice system prompt with the dog's name and
-// the aliases.
+// the aliases, and the shepherd's language setting as its last line.
 func systemPrompt(cfg Config) (string, error) {
 	vars := prompts.AssistantVars(cfg.Name, cfg.names())
 	if cfg.SystemPrompt != "" {
@@ -62,10 +62,10 @@ func systemPrompt(cfg Config) (string, error) {
 		for k, v := range vars {
 			text = strings.ReplaceAll(text, "{"+k+"}", v)
 		}
-		return text, nil
+		return prompts.WithLanguage(text, cfg.language()), nil
 	}
 	text, _ := cfg.Prompts.Render(prompts.Assistant, vars)
-	return text, nil
+	return prompts.WithLanguage(text, cfg.language()), nil
 }
 
 // liveConfig builds the LiveConnectConfig for one connection (plan §6).

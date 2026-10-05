@@ -536,6 +536,52 @@ func TestSettingsEndpoint(t *testing.T) {
 	}
 }
 
+// TestSettingsLanguages: GET lists no languages and the catalog; a PUT
+// with only languages sets them (normalised) and keeps the chattiness, a
+// chattiness-only PUT keeps them, an unknown code is a 400 that changes
+// nothing, and /api/state shows them in settings and the session.
+func TestSettingsLanguages(t *testing.T) {
+	h := newHarness(t, harnessOpts{})
+	var got SettingsResponse
+	if code := h.getJSON("/api/settings", &got); code != http.StatusOK {
+		t.Fatalf("GET = %d", code)
+	}
+	if got.Languages == nil || len(got.Languages) != 0 || len(got.LanguageOptions) < 3 || got.LanguageOptions[1].Code != "zh-Hans" || got.LanguageOptions[2].Native != "繁體中文" || len(got.LanguageOptions[0].Providers) != 2 {
+		t.Fatalf("GET body = %+v", got)
+	}
+	put := func(body string) (int, SettingsResponse) {
+		t.Helper()
+		req, err := http.NewRequest(http.MethodPut, h.http.URL+"/api/settings", strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		var out SettingsResponse
+		_ = json.NewDecoder(resp.Body).Decode(&out)
+		return resp.StatusCode, out
+	}
+	if code, out := put(`{"chattiness":"chatty"}`); code != http.StatusOK || out.Chattiness != "chatty" {
+		t.Fatalf("PUT chatty = %d %+v", code, out)
+	}
+	if code, out := put(`{"languages":["zh-hant","en"]}`); code != http.StatusOK || strings.Join(out.Languages, ",") != "zh-Hant,en" || out.Chattiness != "chatty" {
+		t.Fatalf("PUT languages = %d %+v", code, out)
+	}
+	if code, out := put(`{"chattiness":"quiet"}`); code != http.StatusOK || strings.Join(out.Languages, ",") != "zh-Hant,en" {
+		t.Fatalf("PUT quiet = %d %+v", code, out)
+	}
+	if code, _ := put(`{"languages":["en","xx"]}`); code != http.StatusBadRequest {
+		t.Fatalf("PUT unknown = %d", code)
+	}
+	var st StateResponse
+	if code := h.getJSON("/api/state", &st); code != http.StatusOK || st.Settings == nil || strings.Join(st.Settings.Languages, ",") != "zh-Hant,en" || strings.Join(st.Session.Languages, ",") != "zh-Hant,en" {
+		t.Fatalf("state = %d %+v", code, st.Settings)
+	}
+}
+
 // GET /api/voice/system_prompt lists the agents' current spoken names
 // (Deps.Names) rather than the static start-up alias list, and falls
 // back to the aliases while no agent has a spoken name.
