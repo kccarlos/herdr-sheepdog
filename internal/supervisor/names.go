@@ -258,8 +258,9 @@ func (s *Supervisor) spokenWasToMention(a state.Agent) string {
 }
 
 // noteNamesSaid records which agents' names a line meant for the CEO's
-// ear carries: a spoken push as it went to the voice, a reply, the
-// voice's own final output transcript. The names checked are each row's
+// ear carries — a spoken push as it went to the voice, a reply, the
+// voice's own final output transcript — or the CEO's own final words
+// carry, and pins those names (state.PinSpoken). The names checked are each row's
 // current and previous spoken name, longest first, each matched as whole
 // words where no longer name already matched ("Claude" is not said by
 // "bench Claude 2").
@@ -307,6 +308,11 @@ func (s *Supervisor) noteNamesSaid(text string) {
 		n.said[h] = true
 	}
 	n.mu.Unlock()
+	// A name the CEO has heard or said stays: a later session title or
+	// a new agent of the same kind no longer renames it (state.PinSpoken).
+	if panes, err := s.store.PinSpoken(hits); err == nil && len(panes) > 0 {
+		s.log.Log(logSource, "supervisor.name_pinned", "", map[string]any{"panes": panes, "names": hits})
+	}
 }
 
 // wordEdge reports whether position i of b is outside the text or not

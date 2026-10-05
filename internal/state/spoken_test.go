@@ -47,7 +47,11 @@ func TestSpokenNames(t *testing.T) {
 		{"pinned alias is a CEO name", []Agent{pinned(ag("p1", "codex", "auth", ""), "auth"), ag("p2", "codex", "web", "")},
 			map[string]string{"p1": "auth", "p2": "Codex"}},
 		{"CEO name equal to a computed one", []Agent{named(ag("p1", "codex", "x", ""), "Claude"), ag("p2", "claude", "y", "")},
-			map[string]string{"p1": "Claude", "p2": "Claude 2"}},
+			map[string]string{"p1": "Claude", "p2": "y Claude"}},
+		{"pinned name stays when a second of its kind arrives", []Agent{pinned(ag("p1", "claude", "s", "README"), "Claude"), ag("p2", "claude", "s", "docs pass")},
+			map[string]string{"p1": "Claude", "p2": "s Claude"}},
+		{"pinned title name stays when the title changes", []Agent{pinned(ag("p1", "claude", "s", "项目总结和核心功能"), "README Claude"), ag("p2", "claude", "s", "docs pass")},
+			map[string]string{"p1": "README Claude", "p2": "Claude"}},
 		{"agy and unknown kinds", []Agent{ag("p1", "agy", "x", ""), ag("p2", "pi", "x", "")},
 			map[string]string{"p1": "Antigravity", "p2": "Pi"}},
 		{"chinese title capped by runes", []Agent{ag("p1", "claude", "s", "修复语音延迟修复语音延迟修复语音延迟修复语音延迟修复语音延迟修复语音延迟修复语音延迟"), ag("p2", "claude", "s", "")},
@@ -204,4 +208,10 @@ func TestHerdrName(t *testing.T) {
 			t.Errorf("HerdrName(%q) = %q, %v; want %q, %v", c.in, got, ok, c.want, c.ok)
 		}
 	}
+}
+
+// pinned marks a row's spoken name as heard by the CEO.
+func pinned(a Agent, spoken string) Agent {
+	a.Spoken, a.SpokenPinned = spoken, true
+	return a
 }

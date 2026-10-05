@@ -554,6 +554,9 @@ func (s *Supervisor) OnVoiceEvent(ev voice.Event) {
 		}
 		if e.Dir == voice.DirIn {
 			s.heard(e.Text, e.Final)
+			if e.Final {
+				s.noteNamesSaid(e.Text) // names.go: a name the CEO used stays
+			}
 		} else {
 			s.voiceSpoke(e.Text)
 			if e.Final {

@@ -33,6 +33,11 @@ type Agent struct {
 	Spoken          string    `json:"spoken,omitempty"`
 	SpokenWas       string    `json:"spoken_was,omitempty"`
 	SpokenChangedAt time.Time `json:"spoken_changed_at,omitzero"`
+	// SpokenPinned keeps Spoken once the CEO has heard or said it
+	// (PinSpoken): a later session title or a new agent of the same kind
+	// no longer renames it (phone test 2026-10-04: an auto-title renamed
+	// an agent the CEO knew as "herdr sheepdog Claude").
+	SpokenPinned bool `json:"spoken_pinned,omitempty"`
 
 	State herdr.State `json:"state"`
 	// StateSince changes only when State changes.
