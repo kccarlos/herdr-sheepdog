@@ -14,7 +14,7 @@ after this page.
 
 ## Where main is
 
-`main` = `2d906d2` (#131, plus later PRs up to #141; the dual-brain voice layer landed in #122 and is the adopted design since the CEO's phone test of 2026-10-04). The v1 plan, the 2026-09-18 redesign and
+`main` = `2d906d2` (#131, plus later PRs up to #146; the dual-brain voice layer landed in #122 and is the adopted design since the CEO's phone test of 2026-10-04). The v1 plan, the 2026-09-18 redesign and
 iteration 2's phase-1 work packages (WP1–WP5, WP8, WP9;
 [`iteration-2.md`](iteration-2.md)) are merged.
 

@@ -37,6 +37,9 @@ func (s *Supervisor) openDecisions() []string {
 		}
 		out = append(out, name+" is waiting at a prompt for the CEO's answer")
 	}
+	// No supervisor lock here: the voice session calls this under its
+	// own. An answer clears the pending prompt and marks the block
+	// answered at once (answerKeys), so both reads are current.
 	if hasPending && pending.Kind == state.PendingAnswerPrompt {
 		for _, row := range rows {
 			if row.PaneID == pending.PaneID {
