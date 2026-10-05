@@ -241,6 +241,72 @@
       "dur_ms": 3200
     },
     {
+      "scenario": "facts-contradiction-linecount",
+      "text": "How many lines of Go does the shop repo have, according to bench-claude?",
+      "lang": "en",
+      "voice": "Kore",
+      "source": "gemini",
+      "model": "gemini-2.5-flash-tts",
+      "cache_key": "3dcce5c05e8593a99e29442b",
+      "sha256": "0d81c26040cdd972a1b149fc7779272776f345995147244274d507d1f9c85276",
+      "dur_ms": 4450
+    },
+    {
+      "scenario": "facts-history-first",
+      "text": "What is bench-codex doing?",
+      "lang": "en",
+      "voice": "Aoede",
+      "source": "gemini",
+      "model": "gemini-2.5-flash-tts",
+      "cache_key": "d47df2057209f4478b750b3d",
+      "sha256": "0c039105eb7076a98f8700587edf57d3e20b367f159379ab3a066a028eba87ab",
+      "dur_ms": 2170
+    },
+    {
+      "scenario": "facts-stale-conclusion-zh",
+      "text": "让 bench-claude 查一下 calc 的测试为什么失败。",
+      "lang": "zh",
+      "voice": "Charon",
+      "source": "gemini",
+      "model": "gemini-2.5-flash-tts",
+      "cache_key": "b7b0a7b00bf321d81015302a",
+      "sha256": "9434711d6afe700d7b200fa6b027adf3232004581459a04b20751c8ca01ff996",
+      "dur_ms": 3810
+    },
+    {
+      "scenario": "facts-ambiguous-rewind",
+      "text": "What did bench-claude and bench-codex just finish?",
+      "lang": "en",
+      "voice": "Puck",
+      "source": "gemini",
+      "model": "gemini-2.5-flash-tts",
+      "cache_key": "1ffe275b3967520c2ba425ff",
+      "sha256": "6bda603a895eb17312e0b92c0c78e3c34a7758c33ae1a026c03f731663066170",
+      "dur_ms": 3130
+    },
+    {
+      "scenario": "facts-zh-simplified",
+      "text": "现在大家都在忙什么？",
+      "lang": "zh",
+      "voice": "Aoede",
+      "source": "gemini",
+      "model": "gemini-2.5-flash-tts",
+      "cache_key": "3ba6147928769a4ac4543634",
+      "sha256": "111b5ccef058440679f43feb1db32dc39047fccfd6b2bc0d3659d29e4ba74f40",
+      "dur_ms": 2130
+    },
+    {
+      "scenario": "facts-timeout-not-verified",
+      "text": "Has bench-codex committed its changes? Check git status.",
+      "lang": "en",
+      "voice": "Charon",
+      "source": "gemini",
+      "model": "gemini-2.5-flash-tts",
+      "cache_key": "9caa83014621149f2ad67032",
+      "sha256": "127479ae9c907909ff48a8a0331f2be0a61f816b5c114b0c01806ce17e49c14e",
+      "dur_ms": 4130
+    },
+    {
       "scenario": "reconnect-held-push",
       "text": "Let me know when bench-claude is done.",
       "lang": "en",

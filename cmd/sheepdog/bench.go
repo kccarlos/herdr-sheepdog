@@ -346,6 +346,7 @@ func runBenchRun(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	saveAudio := fs.String("save-audio", "", "also write each run's mic and bot audio as WAV here (outside the repo)")
 	brainProvider := fs.String("brain-provider", "", "scratch daemons' brain provider (default deepseek; the fault scenarios need deepseek)")
 	brainModel := fs.String("brain-model", "", "scratch daemons' brain model (default deepseek-flash)")
+	promptsDir := fs.String("prompts-dir", "", "scratch daemons' prompts.dir: override prompt files (e.g. an older assistant.md for an A/B arm); empty uses the config's")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -379,6 +380,9 @@ func runBenchRun(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	if !ok {
 		return 1
 	}
+	if *promptsDir != "" {
+		cfg.Prompts.Dir = *promptsDir
+	}
 	scs, err := loadBenchScenarios(*scen, *sims, *filter)
 	if err != nil {
 		fprintf(stderr, "sheepdog bench run: %v\n", err)
@@ -394,6 +398,9 @@ func runBenchRun(ctx context.Context, args []string, stdout, stderr io.Writer) i
 		"voice": cfg.Gemini.Model + " (backend " + cfg.Gemini.Backend + ")", "brain": orDefaultStr(*brainProvider, "deepseek") + " " + orDefaultStr(*brainModel, "deepseek-flash") + " (failover: vertex)",
 		"tts": syn.ID(), "simulated CEO": *simuser + " " + orDefaultStr(*simuserModel, eval.DefaultJudgeModel), "judge": *judge + " " + orDefaultStr(*judgeModel, eval.DefaultJudgeModel),
 		"ports": *portsFlag, "parallel": fmt.Sprint(len(ports)), "budget_usd": fmt.Sprint(*budget), "scenarios": *scen + filterNote(*filter),
+	}
+	if *promptsDir != "" {
+		setup["prompts_dir"] = *promptsDir
 	}
 	if m, err := bench.LoadManifest(*manifest); err == nil {
 		if probs := m.Check(scs); len(probs) > 0 {

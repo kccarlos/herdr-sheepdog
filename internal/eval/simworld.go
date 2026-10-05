@@ -417,7 +417,9 @@ func WorldFacts(ws WorldState) string {
 	var b strings.Builder
 	for _, a := range ws.Agents {
 		fmt.Fprintf(&b, "Worker %s (%s), now %s.\n", a.Alias, ws.Kinds[a.Alias], ws.States[a.Alias])
-		if a.Answer != "" {
+		if a.CLIHangs {
+			fmt.Fprintf(&b, "  run_cli and investigations of %s never answer: they time out, so nothing they would show was checked.\n", a.Alias)
+		} else if a.Answer != "" {
 			fmt.Fprintf(&b, "  What an investigation of %s finds: %s\n", a.Alias, a.Answer)
 		}
 		b.WriteString("  Screen at the start (last lines):\n")
@@ -625,7 +627,7 @@ type simQuerier struct{ w *simWorld }
 func (q *simQuerier) answerFor(workspace string) (SimAgent, bool) {
 	for _, a := range q.w.sc.Agents {
 		if workspace == "ws-"+a.Alias || strings.HasSuffix(workspace, "/"+a.Alias) || workspace == a.Alias {
-			return a, a.Answer != ""
+			return a, a.Answer != "" || a.CLIHangs
 		}
 	}
 	// The workspace is the pane's cwd, which the mock does not report:
@@ -633,17 +635,21 @@ func (q *simQuerier) answerFor(workspace string) (SimAgent, bool) {
 	var hit SimAgent
 	n := 0
 	for _, a := range q.w.sc.Agents {
-		if a.Answer != "" {
+		if a.Answer != "" || a.CLIHangs {
 			hit, n = a, n+1
 		}
 	}
 	return hit, n == 1
 }
 
-func (q *simQuerier) Query(_ context.Context, workspace, _ string) (string, error) {
+func (q *simQuerier) Query(ctx context.Context, workspace, _ string) (string, error) {
 	a, ok := q.answerFor(workspace)
 	if !ok {
 		return "", brain.ErrNoCLI
+	}
+	if a.CLIHangs {
+		<-ctx.Done()
+		return "", ctx.Err()
 	}
 	return a.Answer, nil
 }
@@ -652,6 +658,10 @@ func (q *simQuerier) Investigate(ctx context.Context, iq supervisor.Investigatio
 	a, ok := q.answerFor(iq.Workspace)
 	if !ok {
 		return supervisor.InvestigationResult{}, brain.ErrNoCLI
+	}
+	if a.CLIHangs {
+		<-ctx.Done()
+		return supervisor.InvestigationResult{}, ctx.Err()
 	}
 	d := time.Duration(a.AnswerDelayMS) * time.Millisecond
 	if d == 0 {

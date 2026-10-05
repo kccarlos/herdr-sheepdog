@@ -1,0 +1,18 @@
+╭──────────────────────────────────────────────────────╮
+│ >_ OpenAI Codex (v0.154.0)                           │
+│                                                      │
+│ model:     gpt-5.6-luna max   /model to change       │
+│ directory: ~/bench/calc                              │
+╰──────────────────────────────────────────────────────╯
+
+› Refactor the parser into its own package and keep the tests green.
+
+• Moved parse.go and parse_test.go into ./parser and updated the imports in main.go.
+
+• go test ./... passes: ok example.com/calc 0.004s, ok example.com/calc/parser 0.003s.
+  The refactor is done.
+
+
+› Ask Codex to do anything
+
+  gpt-5.6-luna max · ~/bench/calc
