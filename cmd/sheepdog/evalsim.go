@@ -73,6 +73,7 @@ type evalSimOpts struct {
 	uttTimeout                                       time.Duration
 	repeat, parallel                                 int
 	budget                                           float64
+	personas                                         string
 }
 
 func parseEvalSimFlags(args []string, stderr io.Writer) (evalSimOpts, int, bool) {
@@ -102,10 +103,15 @@ func parseEvalSimFlags(args []string, stderr io.Writer) (evalSimOpts, int, bool)
 	fs.IntVar(&o.repeat, "repeat", 1, "runs per scenario")
 	fs.IntVar(&o.parallel, "parallel", 1, "conversations at once")
 	fs.Float64Var(&o.budget, "budget-usd", 0, "estimated spend limit")
+	fs.StringVar(&o.personas, "personas", "", "simulated-user personas rotated by repeat: rotate, or a list of terse, rambling, zh, impatient, vague (default: each scenario's own)")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return o, 0, false
 		}
+		return o, 2, false
+	}
+	if _, err := eval.ParsePersonas(o.personas); err != nil {
+		fprintf(stderr, "sheepdog eval sim: --personas: %v\n", err)
 		return o, 2, false
 	}
 	if o.repeat < 1 || o.parallel < 1 || o.budget < 0 {
@@ -235,6 +241,7 @@ func simSetup(o evalSimOpts, opts eval.SimOptions) map[string]string {
 		"parallel":           fmt.Sprint(o.parallel),
 		"budget_usd":         fmt.Sprint(o.budget),
 		"scenarios":          o.files + filterNote(o.filter),
+		"personas":           orDefaultStr(o.personas, "each scenario's own"),
 		"utterance_timeout":  opts.BrainConfig.UtteranceTimeout.String() + " (0s = the brain default, " + brain.DefaultUtteranceTimeout.String() + ")",
 	}
 	if line, err := bench.PromptsArm(o.promptsDir); err == nil && line != "" {
@@ -342,7 +349,8 @@ func evalSimOptions(o evalSimOpts, cfg config.Config, log logging.Logger) (eval.
 		}
 	}
 	bcfg.Prompts = prompts.NewLoader(promptsDir, log)
-	opts := eval.SimOptions{BrainConfig: bcfg, FixtureDir: o.fixtures, EventsDir: o.events}
+	personas, _ := eval.ParsePersonas(o.personas)
+	opts := eval.SimOptions{BrainConfig: bcfg, FixtureDir: o.fixtures, EventsDir: o.events, Personas: personas}
 	if o.events != "" {
 		opts.EventsDir = filepath.Clean(o.events)
 	}

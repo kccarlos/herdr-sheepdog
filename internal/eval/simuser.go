@@ -23,6 +23,11 @@ type SimTurn struct {
 	GoalMet bool
 	// WaitSeconds is how long a wait is willing to last.
 	WaitSeconds int
+	// Beat and Tag, with an agenda: the beat this turn carries out (0:
+	// none) and, for a line that does not move on, answer or again
+	// (SimLine.Beat, SimLine.Tag).
+	Beat int
+	Tag  string
 }
 
 // SimTurn kinds.
@@ -90,9 +95,22 @@ func (u *LLMSimUser) Next(ctx context.Context, sc SimScenario, convo []SimLine) 
 	if p := strings.TrimSpace(sc.Persona); p != "" {
 		persona = "\nMore about you and this call: " + p + "\n"
 	}
+	system := fmt.Sprintf(simUserSystem, sc.Goal, persona, lang)
+	tools := simUserTools
+	var next, stuck int
+	if len(sc.Agenda) > 0 {
+		var t SimTurn
+		var done bool
+		next, stuck, t, done = agendaState(sc, convo)
+		if done {
+			return t, nil
+		}
+		system = fmt.Sprintf(simUserAgendaSystem, sc.Goal, persona, lang, agendaList(sc.Agenda, next, stuck))
+		tools = simUserAgendaTools
+	}
 	cfg := &genai.GenerateContentConfig{
-		SystemInstruction: genai.NewContentFromText(fmt.Sprintf(simUserSystem, sc.Goal, persona, lang), genai.RoleUser),
-		Tools:             simUserTools,
+		SystemInstruction: genai.NewContentFromText(system, genai.RoleUser),
+		Tools:             tools,
 		Temperature:       genai.Ptr[float32](0.7),
 	}
 	var last error
@@ -102,11 +120,113 @@ func (u *LLMSimUser) Next(ctx context.Context, sc SimScenario, convo []SimLine) 
 			return SimTurn{}, fmt.Errorf("simulated user: %w", err)
 		}
 		if t, ok := simTurnOf(resp); ok {
+			if len(sc.Agenda) > 0 {
+				t = agendaTurn(t, next, stuck)
+			}
 			return t, nil
 		}
 		last = fmt.Errorf("simulated user: empty turn")
 	}
 	return SimTurn{}, last
+}
+
+const simUserAgendaSystem = `You are role-playing a busy CEO talking by voice (on a phone, eyes off the screen) to "sheepdog", your voice assistant that supervises AI coding agents ("workers") running in terminal panes. You cannot see any screen; you only hear what sheepdog says. This is a long call during a working day.
+
+WHAT THIS CALL IS ABOUT: %s
+%s
+How to talk:
+- One spoken utterance per turn, the way people talk on the phone. No stage directions, no quotes, no "CEO:" prefix, no emoji.
+- Speak %s unless your agenda or speaking style says otherwise.
+- Do not invent facts about the workers; ask sheepdog. Only count something as done when sheepdog said so.
+- Never ask sheepdog to stop, approve, decline or change anything your agenda does not say. If sheepdog asks permission for something your agenda does not cover, say no.
+
+YOUR AGENDA, one item per turn, in order:
+%s
+Each turn, do the item marked NOW: say it in your own words and in your speaking style (quoted words may be said nearly as written; notes in brackets are for you only, never say them). When the item is a decision (approve, not now, stop, decline), give exactly that decision.
+Two exceptions, which do not move the agenda on:
+- Sheepdog just asked you something that needs your answer (which one, yes or no, a choice): answer it, and start that line with [ANSWER].
+- Sheepdog did not answer your previous item at all, or you could not follow the answer: repeat or rephrase it, and start that line with [AGAIN]. At most twice per item; then move on.
+If sheepdog said it is checking and will tell you, you may call wait_for_sheepdog once instead of talking. The call ends by itself after the last item; do not say goodbye early.`
+
+// simUserAgendaTools: an agenda call has no end_call (it ends when the
+// beats run out), only the wait.
+var simUserAgendaTools = []*genai.Tool{{FunctionDeclarations: simUserTools[0].FunctionDeclarations[1:]}}
+
+// AgendaOpening is the opening turn: beat 1 when the scenario has an
+// agenda.
+func AgendaOpening(sc SimScenario) SimTurn {
+	t := SimTurn{Kind: TurnSay, Text: sc.Opening}
+	if len(sc.Agenda) > 0 {
+		t.Beat = 1
+	}
+	return t
+}
+
+// agendaState reads where the call is in the agenda: next is the beat
+// due (1-based), stuck how many lines since the last beat did not move
+// on. When the agenda is done, or the beat due is a wait, the turn is
+// decided here (decided true) without the model.
+func agendaState(sc SimScenario, convo []SimLine) (next, stuck int, t SimTurn, decided bool) {
+	done := 0
+	for _, l := range convo {
+		if l.Beat > done {
+			done = l.Beat
+			stuck = 0
+		} else if l.Who == "ceo" && l.Beat == 0 {
+			stuck++
+		}
+	}
+	next = done + 1
+	if next > len(sc.Agenda) {
+		return next, stuck, SimTurn{Kind: TurnEnd, Reason: "agenda done"}, true
+	}
+	if strings.TrimSpace(sc.Agenda[next-1]) == "<wait>" {
+		return next, stuck, SimTurn{Kind: TurnWait, WaitSeconds: 30, Beat: next}, true
+	}
+	return next, stuck, SimTurn{}, false
+}
+
+// agendaList renders the agenda for the prompt, the beat due marked.
+func agendaList(agenda []string, next, stuck int) string {
+	var b strings.Builder
+	for i, a := range agenda {
+		n := i + 1
+		mark := "   "
+		switch {
+		case n < next:
+			mark = "(done)"
+		case n == next:
+			mark = ">> NOW"
+		}
+		if strings.TrimSpace(a) == "<wait>" {
+			a = "[stay quiet and let sheepdog report]"
+		}
+		fmt.Fprintf(&b, "%s %d. %s\n", mark, n, a)
+	}
+	if stuck >= 2 {
+		b.WriteString("You have already spent two lines without moving on: do the NOW item this turn, no [ANSWER] or [AGAIN].\n")
+	}
+	return b.String()
+}
+
+// agendaTurn tags the model's turn: a line marked [ANSWER] or [AGAIN]
+// does not move on (unless stuck), any other line carries out beat next.
+func agendaTurn(t SimTurn, next, stuck int) SimTurn {
+	if t.Kind != TurnSay {
+		return t
+	}
+	for _, tag := range []string{"answer", "again"} {
+		marker := "[" + strings.ToUpper(tag) + "]"
+		if i := strings.Index(strings.ToUpper(t.Text), marker); i >= 0 {
+			t.Text = strings.TrimSpace(t.Text[:i] + t.Text[i+len(marker):])
+			if stuck < 2 {
+				t.Tag = tag
+				return t
+			}
+		}
+	}
+	t.Beat = next
+	return t
 }
 
 // simUserContents renders the conversation from the CEO's side: their own
@@ -179,6 +299,17 @@ type ScriptedSimUser struct{}
 
 // Next implements SimUser.
 func (ScriptedSimUser) Next(_ context.Context, sc SimScenario, convo []SimLine) (SimTurn, error) {
+	if len(sc.Agenda) > 0 && len(sc.Script) == 0 {
+		// Offline: each beat said as written.
+		next, _, t, decided := agendaState(sc, convo)
+		if decided {
+			if t.Kind == TurnWait {
+				t.WaitSeconds = 5
+			}
+			return t, nil
+		}
+		return SimTurn{Kind: TurnSay, Text: sc.Agenda[next-1], Beat: next}, nil
+	}
 	n := 0
 	for _, l := range convo {
 		if l.Who == "ceo" || (l.Who == "system" && l.Text == simWaitMarker) {

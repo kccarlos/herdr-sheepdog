@@ -45,6 +45,9 @@ type RunOptions struct {
 	// WAV (keep it outside the repository).
 	SaveAudio string
 	Log       io.Writer
+	// Personas are the simulated-user personas rotated by repeat
+	// (eval.PersonaFor); empty keeps each scenario's own.
+	Personas []string
 }
 
 // UserLine is one thing the simulated CEO said.
@@ -87,6 +90,8 @@ type Run struct {
 	Scenario    string         `json:"scenario"`
 	Category    string         `json:"category"`
 	Repeat      int            `json:"repeat"`
+	Persona     string         `json:"persona,omitempty"`
+	HeldOut     bool           `json:"held_out,omitempty"`
 	Port        int            `json:"port"`
 	Status      eval.RunStatus `json:"status"`
 	Failures    []eval.Failure `json:"failures,omitempty"`
@@ -160,7 +165,12 @@ type runner struct {
 // RunScenario runs sc once on port (repeat is the run's index).
 func RunScenario(ctx context.Context, sc Scenario, repeat, port int, o RunOptions) Run {
 	t0 := time.Now()
-	run := Run{Scenario: sc.ID, Category: sc.Category, Repeat: repeat, Port: port}
+	persona := eval.PersonaFor(o.Personas, sc.ID, repeat)
+	if sc.Fixed {
+		persona = "" // a fixed script's exact words are the point
+	}
+	sc.SimScenario = eval.WithPersona(sc.SimScenario, persona)
+	run := Run{Scenario: sc.ID, Category: sc.Category, Repeat: repeat, Persona: persona, HeldOut: sc.Workday != nil && sc.Workday.HeldOut, Port: port}
 	meter := NewSpendMeter(o.Config.Gemini.Model)
 	r := &runner{sc: sc, o: o, rng: rand.New(rand.NewSource(sc.Seed + int64(repeat)*7919 + 1)), meter: meter, run: &run}
 	fail := func(t eval.FailureType, format string, args ...any) {
@@ -359,7 +369,7 @@ func (r *runner) converse(ctx context.Context) {
 		}
 		var t eval.SimTurn
 		if run.Turns == 0 && sc.Opening != "" {
-			t = eval.SimTurn{Kind: eval.TurnSay, Text: sc.Opening}
+			t = eval.AgendaOpening(sc.SimScenario)
 		} else {
 			uctx, cancel := context.WithDeadline(ctx, deadline)
 			var err error
@@ -387,7 +397,7 @@ func (r *runner) converse(ctx context.Context) {
 				run.EndReason = eval.EndMaxTurns
 				return
 			}
-			r.convo = append(r.convo, eval.SimLine{AtMS: r.since(), Who: "system", Text: eval.SimWaitMarker})
+			r.convo = append(r.convo, eval.SimLine{AtMS: r.since(), Who: "system", Text: eval.SimWaitMarker, Beat: t.Beat})
 			d := clampDur(time.Duration(t.WaitSeconds)*time.Second, 5*time.Second, silence-silent)
 			r.answering = true
 			got := r.hear(ctx, 2*time.Second, d, true)
@@ -415,6 +425,7 @@ func (r *runner) converse(ctx context.Context) {
 				run.Failures = append(run.Failures, eval.Failure{Type: eval.FailError, Detail: "speech: " + eval.FirstLine(err.Error())})
 				return
 			}
+			r.tagLast(t.Beat, t.Tag)
 			// The answer: the first words within 25 s (a brain turn can
 			// take that long), then until quiet.
 			r.answering = true
@@ -423,16 +434,26 @@ func (r *runner) converse(ctx context.Context) {
 				r.hear(ctx, 1500*time.Millisecond, 20*time.Second, false)
 			}
 			r.answering = false
-			r.w.AfterTurn(run.Turns)
+			r.w.AfterTurnBeat(run.Turns, t.Beat)
 			if rc := sc.Behavior.Reconnect; rc != nil && rc.AfterTurn == run.Turns {
 				r.reconnect(ctx, rc)
 			}
-			if sc.Behavior.Resume.At(run.Turns) {
+			if sc.Behavior.Resume.At(run.Turns) || sc.Behavior.Resume.AtBeat(t.Beat) {
 				r.resume(ctx)
 			}
 		default:
 			run.EndReason, run.EndDetail = eval.EndError, "unknown turn kind "+t.Kind
 			run.Failures = append(run.Failures, eval.Failure{Type: eval.FailError, Detail: run.EndDetail})
+			return
+		}
+	}
+}
+
+// tagLast marks the CEO's latest line with its agenda beat and tag.
+func (r *runner) tagLast(beat int, tag string) {
+	for i := len(r.convo) - 1; i >= 0; i-- {
+		if r.convo[i].Who == "ceo" {
+			r.convo[i].Beat, r.convo[i].Tag = beat, tag
 			return
 		}
 	}

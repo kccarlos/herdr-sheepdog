@@ -116,6 +116,24 @@ type Reconnect struct {
 type Resume struct {
 	AfterTurn  int   `json:"after_turn,omitempty"`
 	AfterTurns []int `json:"after_turns,omitempty"`
+	// AfterBeats recycles after the answer to the CEO line that carried
+	// out each of these agenda beats (workday scenarios, whose turn count
+	// moves with the persona's answers and repeats).
+	AfterBeats []int `json:"after_beats,omitempty"`
+}
+
+// AtBeat reports whether the connection is recycled after agenda beat
+// beat (0: a line that carried out none).
+func (r *Resume) AtBeat(beat int) bool {
+	if r == nil || beat <= 0 {
+		return false
+	}
+	for _, b := range r.AfterBeats {
+		if b == beat {
+			return true
+		}
+	}
+	return false
 }
 
 // At reports whether the connection is recycled after turn.
@@ -167,7 +185,7 @@ type EventMatch struct {
 }
 
 // Categories are the known scenario categories, in report order.
-var Categories = []string{"status", "deep_ask", "instruct", "approve", "deferral", "stop", "ambiguous", "names", "language", "collision", "barge_in", "noise", "echo", "reconnect", "failover", "unheard", "slowness", "facts", "explain"}
+var Categories = []string{"status", "deep_ask", "instruct", "approve", "deferral", "stop", "ambiguous", "names", "language", "collision", "barge_in", "noise", "echo", "reconnect", "failover", "unheard", "slowness", "facts", "explain", "workday"}
 
 // LoadScenarios reads every file of glob, resolving from_sim against
 // the sim scenarios in simGlob, and validates them.
@@ -253,6 +271,15 @@ func merge(base, over eval.SimScenario) eval.SimScenario {
 	if len(over.Script) > 0 {
 		out.Script, out.Fixed = over.Script, over.Fixed
 	}
+	if len(over.Agenda) > 0 {
+		out.Agenda = over.Agenda
+	}
+	if over.OpeningZH != "" {
+		out.OpeningZH = over.OpeningZH
+	}
+	if over.Workday != nil {
+		out.Workday = over.Workday
+	}
 	if len(over.Agents) > 0 {
 		out.Agents = over.Agents
 	}
@@ -329,12 +356,17 @@ func (s Scenario) validate() error {
 		return fmt.Errorf("behavior.reconnect: after_turn >= 1 and away_ms > 0")
 	}
 	if r := b.Resume; r != nil {
-		ok := r.AfterTurn >= 1 || (r.AfterTurn == 0 && len(r.AfterTurns) > 0)
-		for _, t := range r.AfterTurns {
+		ok := r.AfterTurn >= 1 || (r.AfterTurn == 0 && len(r.AfterTurns)+len(r.AfterBeats) > 0)
+		for _, t := range append(append([]int(nil), r.AfterTurns...), r.AfterBeats...) {
 			ok = ok && t >= 1
 		}
 		if !ok {
-			return fmt.Errorf("behavior.resume: after_turn or after_turns, each >= 1")
+			return fmt.Errorf("behavior.resume: after_turn, after_turns or after_beats, each >= 1")
+		}
+		for _, b := range r.AfterBeats {
+			if b > len(s.Agenda) {
+				return fmt.Errorf("behavior.resume.after_beats %d: the agenda has %d beats", b, len(s.Agenda))
+			}
 		}
 	}
 	for _, m := range append(append([]EventMatch(nil), s.Voice.Events...), s.Voice.Absent...) {

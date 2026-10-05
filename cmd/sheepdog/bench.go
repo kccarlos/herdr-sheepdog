@@ -351,10 +351,16 @@ func runBenchRun(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	brainProvider := fs.String("brain-provider", "", "scratch daemons' brain provider (default deepseek; the fault scenarios need deepseek)")
 	brainModel := fs.String("brain-model", "", "scratch daemons' brain model (default deepseek-flash)")
 	promptsDir := fs.String("prompts-dir", "", "scratch daemons' prompts.dir: override prompt files for an A/B arm (assistant.md, USER.md, svp/SOUL.md, svp/RULES.md; files left out stay embedded); empty uses the config's")
+	personasFlag := fs.String("personas", "", "simulated-user personas rotated by repeat: rotate, or a list of terse, rambling, zh, impatient, vague (default: each scenario's own)")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
 		}
+		return 2
+	}
+	personas, err := eval.ParsePersonas(*personasFlag)
+	if err != nil {
+		fprintf(stderr, "sheepdog bench run: --personas: %v\n", err)
 		return 2
 	}
 	if *tier != 2 {
@@ -410,7 +416,7 @@ func runBenchRun(ctx context.Context, args []string, stdout, stderr io.Writer) i
 		"tier":  "2 (synthetic speech -> phone emulator -> scratch daemon: real voice model, real brain, mock herdr scripted from the eval sim worlds)",
 		"voice": cfg.Gemini.Model + " (backend " + cfg.Gemini.Backend + ")", "brain": orDefaultStr(*brainProvider, "deepseek") + " " + orDefaultStr(*brainModel, "deepseek-flash") + " (failover: vertex)",
 		"tts": syn.ID(), "simulated CEO": *simuser + " " + orDefaultStr(*simuserModel, eval.DefaultJudgeModel), "judge": *judge + " " + orDefaultStr(*judgeModel, eval.DefaultJudgeModel),
-		"ports": *portsFlag, "parallel": fmt.Sprint(len(ports)), "budget_usd": fmt.Sprint(*budget), "scenarios": *scen + filterNote(*filter),
+		"ports": *portsFlag, "parallel": fmt.Sprint(len(ports)), "personas": orDefaultStr(*personasFlag, "each scenario's own"), "budget_usd": fmt.Sprint(*budget), "scenarios": *scen + filterNote(*filter),
 	}
 	if promptsLine != "" {
 		setup["prompts_dir"] = promptsLine
@@ -427,7 +433,7 @@ func runBenchRun(ctx context.Context, args []string, stdout, stderr io.Writer) i
 		fprintf(stderr, "sheepdog bench run: %v\n", err)
 		return 1
 	}
-	ropts := bench.RunOptions{Config: cfg, Scratch: dir, FixtureDir: *fixtures, Synth: syn, Out: *out, SaveAudio: *saveAudio, BrainProvider: *brainProvider, BrainModel: *brainModel}
+	ropts := bench.RunOptions{Config: cfg, Scratch: dir, FixtureDir: *fixtures, Synth: syn, Out: *out, SaveAudio: *saveAudio, BrainProvider: *brainProvider, BrainModel: *brainModel, Personas: personas}
 	sem := make(chan struct{}, 4) // one limit for every judge and simulated-CEO call (#94)
 	backend := func(kind, model string) (brain.Model, string, error) {
 		m, id, err := eval.NewBackend(eval.BackendOptions{Kind: kind, Model: model, VertexAPIKey: cfg.Gemini.Vertex.APIKey, VertexProject: cfg.Gemini.Vertex.Project}, nil)

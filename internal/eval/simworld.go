@@ -68,6 +68,12 @@ type SimLine struct {
 	// payload (the prompt text, the keys).
 	Kind   string `json:"kind,omitempty"`
 	Detail string `json:"detail,omitempty"`
+	// Beat is the agenda beat a CEO line (or a scripted wait) carries
+	// out (1-based; 0 for a line that does not move the agenda on), and
+	// Tag why such a line was said: answer (to sheepdog's question) or
+	// again (the CEO repeats or rephrases: user effort).
+	Beat int    `json:"beat,omitempty"`
+	Tag  string `json:"tag,omitempty"`
 }
 
 // simWorldOptions are what a world is built from.
@@ -327,10 +333,11 @@ func (w *simWorld) interrupted(alias string) {
 	})
 }
 
-// afterTurn fires the events cued on the CEO's nth utterance.
-func (w *simWorld) afterTurn(n int) {
+// afterTurn fires the events cued on the CEO's nth utterance, and on
+// the agenda beat that utterance carried out (0: none).
+func (w *simWorld) afterTurn(n, beat int) {
 	for i, e := range w.sc.Events {
-		if e.AfterTurn == n {
+		if e.AfterTurn == n || (beat > 0 && e.AfterBeat == beat) {
 			i, e := i, e
 			w.schedule(time.Duration(e.DelayMS)*time.Millisecond, func() { w.apply(context.Background(), i, e, e.Agent) })
 		}

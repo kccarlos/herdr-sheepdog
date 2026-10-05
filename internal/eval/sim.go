@@ -47,6 +47,20 @@ type SimScenario struct {
 	// for a scenario where the exact words are the point ("Stop.", "Oh,
 	// never mind."). The judge still grades it.
 	Fixed bool `json:"fixed,omitempty"`
+	// Agenda, instead of a script, is what the CEO does turn by turn,
+	// one beat per turn (workday sessions): the LLM simulated user says
+	// each beat in its own words and the run's persona, may answer a
+	// question or repeat itself without moving on, and ends the call when
+	// the beats run out. "<wait>" waits for sheepdog. With an opening,
+	// the opening is beat 1.
+	Agenda []string `json:"agenda,omitempty"`
+	// OpeningZH is the opening a Mandarin-only persona says instead.
+	OpeningZH string `json:"opening_zh,omitempty"`
+	// Workday is a workday session's metadata and ground truth
+	// (workday.go): held-out flag, the narrative clock, and the news,
+	// claims, end state, clarification, safety and coherence truths the
+	// named judge items are rendered from.
+	Workday *Workday `json:"workday,omitempty"`
 	// Agents are the workers, in roster order.
 	Agents []SimAgent `json:"agents"`
 	// Events change a worker on cue.
@@ -89,13 +103,18 @@ type SimAgent struct {
 }
 
 // SimEvent changes a worker's screen and state when its trigger fires.
-// Exactly one trigger: AtMS, AfterTurn, OnPromptTo, OnKeysTo or
-// OnInterruptTo.
+// Exactly one trigger: AtMS, AfterTurn, AfterBeat, OnPromptTo, OnKeysTo
+// or OnInterruptTo.
 type SimEvent struct {
 	// AtMS fires this long after the conversation starts.
 	AtMS int `json:"at_ms,omitempty"`
 	// AfterTurn fires after the CEO's Nth utterance was answered.
 	AfterTurn int `json:"after_turn,omitempty"`
+	// AfterBeat fires after the answer to the CEO line that carried out
+	// agenda beat N (workday scenarios: the turn count drifts with the
+	// persona's answers and repeats, the beat does not). Put a "<wait>"
+	// beat after it for news that lands while the CEO is quiet.
+	AfterBeat int `json:"after_beat,omitempty"`
 	// OnPromptTo fires when sheepdog sends a prompt to this agent (whose
 	// text matches PromptMatches, a case-insensitive regexp, when set).
 	OnPromptTo    string `json:"on_prompt_to,omitempty"`
@@ -196,6 +215,9 @@ func LoadSimFile(path string) ([]SimScenario, error) {
 		f.Scenarios[i].screenDir = filepath.Join(filepath.Dir(path), "screens")
 	}
 	for _, s := range f.Scenarios {
+		if s.Fixed && len(s.Agenda) > 0 {
+			return nil, fmt.Errorf("%s: scenario %q is fixed and has an agenda (an agenda is for the LLM simulated user)", path, s.ID)
+		}
 		if s.Fixed && len(s.Script) == 0 {
 			return nil, fmt.Errorf("%s: scenario %q is fixed but has no script", path, s.ID)
 		}
@@ -238,7 +260,7 @@ func (s SimScenario) validate() error {
 	known := func(alias string) bool { return alias == "" || aliases[alias] }
 	for i, e := range s.Events {
 		n := 0
-		for _, set := range []bool{e.AtMS > 0, e.AfterTurn > 0, e.OnPromptTo != "", e.OnKeysTo != "", e.OnInterruptTo != ""} {
+		for _, set := range []bool{e.AtMS > 0, e.AfterTurn > 0, e.AfterBeat > 0, e.OnPromptTo != "", e.OnKeysTo != "", e.OnInterruptTo != ""} {
 			if set {
 				n++
 			}
@@ -255,6 +277,9 @@ func (s SimScenario) validate() error {
 		}
 		if !validState(e.State) {
 			return fmt.Errorf("event %d: state %q", i, e.State)
+		}
+		if e.AfterBeat > 0 && (e.AfterBeat > len(s.Agenda) || strings.TrimSpace(s.Agenda[e.AfterBeat-1]) == "<wait>") {
+			return fmt.Errorf("event %d: after_beat %d is not a spoken beat of the agenda", i, e.AfterBeat)
 		}
 		if e.PromptMatches != "" {
 			if _, err := regexp.Compile("(?i)" + e.PromptMatches); err != nil {
@@ -285,6 +310,11 @@ func (s SimScenario) validate() error {
 	for _, k := range s.Expect.Skip {
 		if _, ok := defaultRubric[k]; !ok {
 			return fmt.Errorf("expect.skip %q is not a default rubric item", k)
+		}
+	}
+	if s.Workday != nil {
+		if err := s.Workday.validate(s); err != nil {
+			return err
 		}
 	}
 	if s.Explain != nil {
@@ -399,5 +429,6 @@ func rubricFor(s SimScenario) (names, criteria []string) {
 		names = append(names, fmt.Sprintf("rubric_%d", i+1))
 		criteria = append(criteria, c)
 	}
-	return names, criteria
+	wn, wc := workdayRubric(s)
+	return append(names, wn...), append(criteria, wc...)
 }
