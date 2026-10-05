@@ -86,6 +86,20 @@ func AssistantVars(name string, aliases []string) map[string]string {
 	return map[string]string{"name": name, "aliases": list}
 }
 
+// WithLanguage appends the shepherd's language setting (internal/lang's
+// line) to a rendered voice prompt as its last paragraph, or returns the
+// prompt unchanged when the line is empty (nothing set): the prompt's
+// own language sentence then stands as it did before the setting. Done
+// in code rather than by a placeholder so an override of assistant.md
+// gets it too.
+func WithLanguage(prompt, line string) string {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return prompt
+	}
+	return strings.TrimRight(prompt, "\n") + "\n\n" + line
+}
+
 // substitute replaces every {key} in s with vars[key] and trims.
 func substitute(s string, vars map[string]string) string {
 	for k, v := range vars {

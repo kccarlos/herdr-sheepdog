@@ -2,8 +2,10 @@ package supervisor
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
+	"github.com/kccarlos/herdr-sheepdog/internal/lang"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 )
 
@@ -81,28 +83,71 @@ func (l Chattiness) allows(k pushKind) bool {
 }
 
 // Settings is the runtime-changeable part of the supervisor's behaviour.
+//
+// As an update (SetSettings) a zero field means "unchanged": an empty
+// Chattiness keeps the level, a nil Languages keeps the preference (a
+// non-nil empty one clears it), so a client can change one setting
+// without knowing the other.
 type Settings struct {
-	Chattiness Chattiness `json:"chattiness"`
+	Chattiness Chattiness `json:"chattiness,omitempty"`
+	// Languages is the shepherd's language preference, most preferred
+	// first (internal/lang codes). Information for both brains: the
+	// slow brain's state block and the voice's system instruction say
+	// it, and a change reaches a running voice session as silent context.
+	Languages []string `json:"languages"`
 }
 
 // Settings returns the current runtime settings.
 func (s *Supervisor) Settings() Settings {
-	return Settings{Chattiness: s.chattiness()}
+	return Settings{Chattiness: s.chattiness(), Languages: s.Languages()}
 }
 
-// SetSettings applies new runtime settings: the level is validated,
-// persisted in the state file's session (so a restart keeps it) and
-// logged as supervisor.settings.
+// SetSettings applies new runtime settings: each given field is
+// validated, persisted in the state file's session (so a restart keeps
+// it) and logged as supervisor.settings. A changed language preference
+// is also pushed to the voice as silent context (languages.go).
 func (s *Supervisor) SetSettings(in Settings) error {
-	level, err := ParseChattiness(string(in.Chattiness))
-	if err != nil {
+	var level Chattiness
+	if in.Chattiness != "" {
+		l, err := ParseChattiness(string(in.Chattiness))
+		if err != nil {
+			return err
+		}
+		level = l
+	}
+	var langs []string
+	if in.Languages != nil {
+		l, err := lang.Normalize(in.Languages)
+		if err != nil {
+			return fmt.Errorf("supervisor: %w", err)
+		}
+		langs = l
+	}
+	oldLevel, oldLangs := s.chattiness(), s.Languages()
+	if level == "" && in.Languages == nil {
+		return nil
+	}
+	if err := s.store.UpdateSession(func(ss *state.Session) {
+		if level != "" {
+			ss.Chattiness = string(level)
+		}
+		if in.Languages != nil {
+			ss.Languages = langs
+		}
+	}); err != nil {
 		return err
 	}
-	old := s.chattiness()
-	if err := s.store.UpdateSession(func(ss *state.Session) { ss.Chattiness = string(level) }); err != nil {
-		return err
+	p := map[string]any{}
+	if level != "" {
+		p["chattiness"], p["previous"] = string(level), string(oldLevel)
 	}
-	s.log.Log(logSource, "supervisor.settings", "", map[string]any{"chattiness": string(level), "previous": string(old)})
+	if in.Languages != nil {
+		p["languages"], p["previous_languages"] = langs, oldLangs
+	}
+	s.log.Log(logSource, "supervisor.settings", "", p)
+	if in.Languages != nil && !slices.Equal(langs, oldLangs) {
+		s.pushLanguages(langs)
+	}
 	return nil
 }
 

@@ -120,9 +120,10 @@ const (
 )
 
 // dynamicSections renders the roster, the ledger excerpt (with the open
-// promises), the investigations and the time — the state block, which
-// the loop sends after the window (withState), time last.
-func dynamicSections(agents []AgentInfo, notes []string, promises []PromiseInfo, investigations []InvestigationInfo, now time.Time) []PromptSection {
+// promises), the investigations, the shepherd's language setting (when
+// set: language is lang.Line's sentence) and the time — the state block,
+// which the loop sends after the window (withState), time last.
+func dynamicSections(agents []AgentInfo, notes []string, promises []PromiseInfo, investigations []InvestigationInfo, language string, now time.Time) []PromptSection {
 	roster := renderRoster(agents, now)
 	invs := renderInvestigations(investigations, now)
 	clock := "## Now\n\n" + now.Format("Mon 2006-01-02 15:04:05 MST")
@@ -133,12 +134,17 @@ func dynamicSections(agents []AgentInfo, notes []string, promises []PromiseInfo,
 			break
 		}
 	}
-	return []PromptSection{
+	secs := []PromptSection{
 		{Name: "roster", Source: SourceDynamic, Text: roster},
 		{Name: "ledger", Source: SourceDynamic, Text: ledger},
 		{Name: "investigations", Source: SourceDynamic, Text: invs},
-		{Name: "time", Source: SourceDynamic, Text: clock},
 	}
+	if language != "" {
+		// The shepherd's own setting (iOS Settings ▸ Languages): `spoken`
+		// is retold by the voice, which has the same line.
+		secs = append(secs, PromptSection{Name: "language", Source: SourceDynamic, Text: "## Language\n\n" + language})
+	}
+	return append(secs, PromptSection{Name: "time", Source: SourceDynamic, Text: clock})
 }
 
 // renderInvestigations is the Investigations section: the jobs running

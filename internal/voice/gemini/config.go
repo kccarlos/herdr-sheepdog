@@ -40,6 +40,13 @@ type Config struct {
 	// computed when the briefing reaches the model (docs/design/
 	// dual-brain.md, prompt v5). ok is false for an unknown alias.
 	AgentNow func(alias string) (name, state string, ok bool)
+	// Language, when set, returns the shepherd's language setting as one
+	// line of information (internal/lang.Line; "" when none is set). It
+	// is appended to the system prompt at every (re)connect, so the next
+	// session has it; a running one learns a change from the
+	// supervisor's silent line (Live reads its system instruction only
+	// at setup).
+	Language func() string
 	// Name is what the dog calls itself (config voice.name, default
 	// "Sheepdog"), substituted into the system prompt as {name}.
 	Name string
@@ -204,4 +211,12 @@ func (c Config) names() []string {
 		}
 	}
 	return c.Aliases
+}
+
+// language is the language line of one connection ("" when unset).
+func (c Config) language() string {
+	if c.Language == nil {
+		return ""
+	}
+	return c.Language()
 }

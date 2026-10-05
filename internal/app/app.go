@@ -368,6 +368,9 @@ func (a *App) wire() error {
 		// Every briefing about an agent names it by its spoken name and
 		// says its state as of delivery (information, prompt v5).
 		AgentNow: sup.AgentNow,
+		// The shepherd's language setting (PUT /api/settings), read at
+		// every (re)connect; a change mid-session goes as silent context.
+		Language: sup.LanguageLine,
 		Name:     cfg.Voice.Name,
 		Handler:  sup.Handler(),
 		Prompts:  a.prompts,
@@ -503,6 +506,10 @@ func (a *App) voiceProviders(gcfg gemini.Config, handler voice.ToolHandler) []vo
 	if o.Available {
 		router := &inject.Router{}
 		name, aliases, names, pl := cfg.Voice.Name, gcfg.Aliases, gcfg.Names, a.prompts
+		language := gcfg.Language
+		if language == nil {
+			language = func() string { return "" }
+		}
 		ocfg := gptlive.Config{
 			APIKey: oc.APIKey, Model: oc.Model, Voice: oc.Voice,
 			IdleClose: time.Duration(oc.IdleCloseS) * time.Second,
@@ -519,7 +526,7 @@ func (a *App) voiceProviders(gcfg gemini.Config, handler voice.ToolHandler) []vo
 					}
 				}
 				text, _ := pl.Render(prompts.AssistantGPTLive, prompts.AssistantVars(name, list))
-				return text, nil
+				return prompts.WithLanguage(text, language()), nil
 			},
 		}
 		o.New = func() (voice.Session, error) { return gptlive.New(ocfg, a.log) }

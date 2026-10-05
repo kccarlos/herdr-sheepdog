@@ -646,11 +646,15 @@ func (b *Brain) sections() []PromptSection {
 	var notes []string
 	var promises []PromiseInfo
 	var investigations []InvestigationInfo
+	var language string
 	if host != nil {
 		agents, notes, promises, investigations = host.Agents(), host.Notes(), host.Promises(), host.Investigations()
+		if lh, ok := host.(LanguageHost); ok {
+			language = lh.LanguageLine()
+		}
 	}
 	secs := append(append([]PromptSection(nil), stableSections(b.cfg.Prompts)...), userSection(b.cfg.Prompts, mergeUserVars(agents, userVars)))
-	return append(secs, dynamicSections(agents, notes, promises, investigations, b.cfg.Now())...)
+	return append(secs, dynamicSections(agents, notes, promises, investigations, language, b.cfg.Now())...)
 }
 
 // stateNow renders the state block from the Host as it is now: the loop

@@ -11,6 +11,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/ctxcap"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/inject"
+	"github.com/kccarlos/herdr-sheepdog/internal/lang"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 	"github.com/kccarlos/herdr-sheepdog/internal/supervisor"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
@@ -44,13 +45,24 @@ type StateResponse struct {
 type SettingsResponse struct {
 	Chattiness supervisor.Chattiness   `json:"chattiness"`
 	Levels     []supervisor.Chattiness `json:"levels"`
+	// Languages is the shepherd's language preference, most preferred
+	// first (codes from LanguageOptions); [] when none is set.
+	Languages []string `json:"languages"`
+	// LanguageOptions is the catalog a client offers (internal/lang):
+	// languages both voice providers support, each with the providers.
+	LanguageOptions []lang.Language `json:"language_options"`
 }
 
 func (s *Server) settings() *SettingsResponse {
 	if s.deps.Supervisor == nil {
 		return nil
 	}
-	return &SettingsResponse{Chattiness: s.deps.Supervisor.Settings().Chattiness, Levels: supervisor.Levels}
+	cur := s.deps.Supervisor.Settings()
+	langs := cur.Languages
+	if langs == nil {
+		langs = []string{}
+	}
+	return &SettingsResponse{Chattiness: cur.Chattiness, Levels: supervisor.Levels, Languages: langs, LanguageOptions: lang.Catalog}
 }
 
 func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
@@ -62,8 +74,9 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, st)
 }
 
-// handlePutSettings changes the runtime settings ({"chattiness": …});
-// the supervisor validates, persists and logs the change.
+// handlePutSettings changes the runtime settings ({"chattiness": …},
+// {"languages": [...]}, or both; a field left out is unchanged); the
+// supervisor validates, persists and logs the change.
 func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	if s.deps.Supervisor == nil {
 		writeError(w, http.StatusServiceUnavailable, "no supervisor")

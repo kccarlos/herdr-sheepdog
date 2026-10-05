@@ -76,6 +76,10 @@ func (h brainHost) Resolve(name string) (brain.AgentInfo, bool) {
 	return h.info(row, pending, has), true
 }
 
+// LanguageLine implements brain.LanguageHost: the shepherd's language
+// setting for the state block.
+func (h brainHost) LanguageLine() string { return h.s.LanguageLine() }
+
 // Notes implements brain.Host.
 func (h brainHost) Notes() []string {
 	notes := h.s.store.Snapshot().Session.Notes
