@@ -48,9 +48,9 @@ func TestSpokenNames(t *testing.T) {
 			map[string]string{"p1": "auth", "p2": "Codex"}},
 		{"CEO name equal to a computed one", []Agent{named(ag("p1", "codex", "x", ""), "Claude"), ag("p2", "claude", "y", "")},
 			map[string]string{"p1": "Claude", "p2": "y Claude"}},
-		{"pinned name stays when a second of its kind arrives", []Agent{pinned(ag("p1", "claude", "s", "README"), "Claude"), ag("p2", "claude", "s", "docs pass")},
+		{"pinned name stays when a second of its kind arrives", []Agent{heard(ag("p1", "claude", "s", "README"), "Claude"), ag("p2", "claude", "s", "docs pass")},
 			map[string]string{"p1": "Claude", "p2": "s Claude"}},
-		{"pinned title name stays when the title changes", []Agent{pinned(ag("p1", "claude", "s", "项目总结和核心功能"), "README Claude"), ag("p2", "claude", "s", "docs pass")},
+		{"pinned title name stays when the title changes", []Agent{heard(ag("p1", "claude", "s", "项目总结和核心功能"), "README Claude"), ag("p2", "claude", "s", "docs pass")},
 			map[string]string{"p1": "README Claude", "p2": "Claude"}},
 		{"agy and unknown kinds", []Agent{ag("p1", "agy", "x", ""), ag("p2", "pi", "x", "")},
 			map[string]string{"p1": "Antigravity", "p2": "Pi"}},
@@ -210,8 +210,8 @@ func TestHerdrName(t *testing.T) {
 	}
 }
 
-// pinned marks a row's spoken name as heard by the CEO.
-func pinned(a Agent, spoken string) Agent {
+// heard marks a row's spoken name as heard by the CEO (SpokenPinned).
+func heard(a Agent, spoken string) Agent {
 	a.Spoken, a.SpokenPinned = spoken, true
 	return a
 }

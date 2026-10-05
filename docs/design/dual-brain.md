@@ -119,7 +119,7 @@ cannot see rather than a prohibition.
 | | Fast brain: Gemini Live | Slow brain: the existing brain |
 |---|---|---|
 | Owns | The conversation: when to speak, what, how; turn-taking, register, language | What the CEO wants, which agent, what to do, investigations |
-| Answers itself | Follow-ups about what it just said ("what does that mean", "say again"); small talk; when to speak and how | Every question about an agent (v4), every decision, every action |
+| Answers itself | Its own last line again or more plainly, what a word means, small talk (v5); when to speak and how | Everything else: anything new about an agent, comparisons, "why", history, doubt (v5), every decision, every action |
 | Asks | When it did not catch the words | When the words are ambiguous |
 | Actions | None | All, behind the rails |
 | Knows | Briefings (facts with time and provenance), its own conversation | Transcript, screens, sessions, ledger, journal |
@@ -176,11 +176,37 @@ standalone client, text input, 7 sessions, < $0.30):
  "briefing": "b-7", "at": "23:04:31", "from": "slow brain", "kind": "answer",
  "agent": "bench-codex", "answers": "the CEO's words at 23:04:20: \"how is codex doing\"",
  "facts": "bench-codex finished; 41 of 42 tests pass, one fails in the cart module.",
+ "age": "written 45 s before it reached you; things may have moved on since",
+ "agent_state": "as this reached you: idle, ready for input, for 1 min; it last finished work 1 min ago",
  "decision": "the CEO's own decision; only their words can answer it",
  "relation": ["newer than b-3 (23:01:05) about bench-codex; where they differ, this one holds",
               "at 23:04:02 the CEO cut you off after 2.1 s of 6.4 s; they heard only: \"bench-codex wants to\""]}
 ```
 
+- `agent` is the agent's spoken name (the alias stays on the push's
+  tags for the logs) and `agent_state` its state from the table when
+  the briefing reaches the model; `age` says how long the facts waited
+  (the push queue holds lines while the CEO talks or no phone listens).
+  The fast brain has no clock: without these a briefing read minutes
+  later passed for the present (phone test 2026-10-04: "still
+  analysing" about an agent that had finished). Re-sent briefings get
+  both recomputed.
+- An answer (a `to_supervisor` result or a late answer) also carries
+  `agents_now` (the state of the agents its tools read or acted on)
+  and, when a slow-brain check timed out, `not_verified` ("these checks
+  … did not finish, so nothing they would have shown is verified:
+  run_cli about bench-codex timed out after 8 s"; `brain.Reply.
+  NotVerified`). The `facts` are never edited.
+- **Unvoiced briefings.** A spoken briefing after which the model
+  produced no speech (audio or output transcript) before the CEO next
+  spoke or the next spoken briefing went out is logged
+  `voice.briefing_unvoiced`; the fast brain gets the fact silently
+  ("briefing b-31 (news, sent at 15:52:00) was not voiced: you said
+  nothing after it before the CEO spoke at 15:52:22, so the CEO has not
+  heard it"), again in the relation of its next answer or spoken
+  briefing, and the slow brain hears "the CEO did not hear: …". Nothing
+  is re-queued and no words are compared: whether to say it is the
+  fast brain's call (phone test: b-31, b-69, b-75 never voiced).
 - `from`: `slow brain` (its line), `daemon` (a code sentence: brain
   timeout, pane closed, reminder, focus, names, stop result), or the
   tag's own value.
@@ -244,6 +270,24 @@ seen in a transcript, not a judge's taste:
   must come with the call. Follow-ups about what it just said stay its
   own.
 
+- v5 (2026-10-04 night, after the phone test; item 1 of the overnight
+  plan): **grounding first** — every statement about an agent or its
+  work must come from a briefing; when none carries it or two disagree,
+  hand off instead of explaining. The voice answers only three things
+  itself: its own last line again or more plainly, what a word means,
+  small talk. Anything new, comparisons ("which is right"), "why",
+  history ("what did we discuss first") and doubt go to the slow brain.
+  While waiting it says what is being done, never content or status
+  (v4's "say what you already know while it works" licence is gone:
+  the phone test's stale and invented answers came through it). An
+  unclear target agent is asked about before handing on; the CEO's
+  exact words go in `text`, its own reading only in `reading`. Replies
+  follow the CEO's language and script (Simplified vs Traditional).
+  The phone-test failures behind it: an invented reason for 85k vs
+  110k lines, a wrong "what did we discuss first", "rewind it"
+  paraphrased into one agent, Traditional characters for a Simplified
+  speaker. A/B in `docs/eval/fast-brain-facts-2026-10-04.md`.
+
 This is the one place the experiment walked back the CEO's starting
 direction ("answers simple status questions from its briefings"): the
 data say the fast brain cannot judge freshness, which is the N2 failure
@@ -252,7 +296,8 @@ framing (a fact about what it cannot see, plus permission to talk while
 waiting) and the channel (answers come back as labelled facts, so no
 "On it." and no relay of its own lines).
 
-Every measurement in the results doc uses v4 unless marked otherwise.
+Every measurement in the dual-brain results doc uses v4 unless marked
+otherwise; the v5 A/B is in its own results doc.
 
 ### The harness: rails and labelled facts
 
@@ -276,7 +321,11 @@ Kept as **rails** (stop a runaway or an unauthorised action):
 Added as **information** (a fact a model cannot see): briefing
 provenance/time/relation, delivery cuts, resent briefings, the no-fresh-
 words fact, the voice's reading for the brain, the echo-timing fact for
-the brain.
+the brain; since v5: briefing age and the agent's state at delivery,
+`not_verified` checks, unvoiced briefings, the roster's "finished work
+N min ago" (no model prose spliced into it), spoken names kept once the
+CEO heard or said them, and a new agent herdr does not see after 20 s
+reported to both brains with its pane's last lines.
 
 ### Removed patches (ablation groups)
 
