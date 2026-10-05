@@ -100,7 +100,7 @@ func (s *Supervisor) spokenAbout(id string) []string {
 // Facts).
 func (s *Supervisor) announceFacts(a announcement) func() brain.EventFacts {
 	return func() brain.EventFacts {
-		return brain.EventFacts{Spoken: s.spokenAbout(a.eventID), Prompt: s.promptState(a), Language: s.ceoLanguage()}
+		return brain.EventFacts{Spoken: s.spokenAbout(a.eventID), Prompt: s.promptState(a), Language: s.ceoLanguage(), Decisions: s.decisionsLine()}
 	}
 }
 

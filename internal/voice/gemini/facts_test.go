@@ -134,3 +134,34 @@ func TestUnvoicedBriefingIsReported(t *testing.T) {
 		t.Errorf("a voiced briefing was reported unvoiced: %v", p)
 	}
 }
+
+// TestAnnouncementCarriesDecisionOpen: a spoken announcement (a push
+// tagged with its worker event) says whether a decision is open as it
+// reaches the model; a silent line and a push of no event do not.
+func TestAnnouncementCarriesDecisionOpen(t *testing.T) {
+	c := newFakeConn("c1")
+	cfg := briefingConfig()
+	cfg.DecisionsNow = func() string { return "none: as this reached you, no agent is waiting for the CEO's answer" }
+	h := newHarness(t, cfg, &fakeDialer{results: []func() (Conn, error){ok(c)}})
+	if err := h.s.PushTagged("bench-claude added the changelog entry.", voice.UrgencyIdle, map[string]any{"agent": "bench-claude", "event_id": "evt-1"}); err != nil {
+		t.Fatal(err)
+	}
+	r := c.waitSent(t, "announcement", isBriefing("changelog entry")).tool.FunctionResponses[0].Response
+	if d, _ := r["decision_open"].(string); !strings.HasPrefix(d, "none:") {
+		t.Errorf("decision_open = %v", r["decision_open"])
+	}
+	c.serve(outputTranscriptMsg("bench-claude added the changelog entry."))
+	c.serve(turnCompleteMsg())
+	if err := h.s.PushTagged("names line", voice.UrgencySilent, map[string]any{"event_id": "evt-2"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.s.PushTagged("a reminder", voice.UrgencyIdle, nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"names line", "a reminder"} {
+		r := c.waitSent(t, want, isBriefing(want)).tool.FunctionResponses[0].Response
+		if _, has := r["decision_open"]; has {
+			t.Errorf("%s: decision_open = %v, want none", want, r["decision_open"])
+		}
+	}
+}

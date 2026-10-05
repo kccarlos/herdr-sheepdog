@@ -182,6 +182,11 @@ func (s *Session) newBriefingLocked(text string, u voice.Urgency, tags map[strin
 	if tags["needs_user"] == true {
 		p["decision"] = "the CEO's own decision; only their words can answer it"
 	}
+	if r.spoken && tags["event_id"] != nil && s.cfg.DecisionsNow != nil {
+		if d := s.cfg.DecisionsNow(); d != "" {
+			p["decision_open"] = d
+		}
+	}
 	if tags["due_promise"] == true {
 		p["promised"] = "the CEO asked to be told this"
 	}
@@ -321,6 +326,9 @@ func (s *Session) resentPayload(r briefRec, note string) map[string]any {
 		if _, st, ok := s.agentNow(r.about); ok {
 			p["agent_state"] = st
 		}
+	}
+	if _, had := p["decision_open"]; had && s.cfg.DecisionsNow != nil {
+		p["decision_open"] = s.cfg.DecisionsNow()
 	}
 	return p
 }

@@ -203,6 +203,12 @@ type EventFacts struct {
 	// line buried it, or the voice judged it unheard) before these words
 	// (docs/bench/tier3-2026-10-03.md #9): the fact, as a sentence.
 	OpenPrompt string
+	// Decisions is set on an announce turn: which agents are waiting
+	// for the CEO's answer right now, as a sentence ("Decisions open
+	// right now: none. …"), from the supervisor's pending prompt and the
+	// blocked panes (baseline 2026-10-05 cluster 3: a finish announced
+	// with an invented "Shall I …?"). A fact; RULES.md says what follows.
+	Decisions string
 }
 
 // The values of EventFacts.Language.

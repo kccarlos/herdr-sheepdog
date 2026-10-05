@@ -413,6 +413,9 @@ func eventRequestText(req Request) string {
 	if line := promptStateLine(req.facts.Prompt); line != "" {
 		b.WriteString(line + "\n")
 	}
+	if req.facts.Decisions != "" {
+		b.WriteString(req.facts.Decisions + "\n")
+	}
 	if line := languageLine(req.facts.Language); line != "" {
 		b.WriteString(line + "\n")
 	}
@@ -507,6 +510,9 @@ func factsUpdate(before, now EventFacts) string {
 	}
 	if now.Language != before.Language && now.Language != "" {
 		parts = append(parts, "the CEO's last words are now in "+now.Language)
+	}
+	if now.Decisions != before.Decisions && now.Decisions != "" {
+		parts = append(parts, strings.TrimSuffix(lowerFirstRune(now.Decisions), "."))
 	}
 	if now.Prompt != before.Prompt {
 		if line := promptStateLine(now.Prompt); line != "" {
