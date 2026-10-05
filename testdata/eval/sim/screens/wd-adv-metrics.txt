@@ -1,0 +1,15 @@
+ ▐▛███▛█   Claude Code v2.1.288
+▝▜██████▀  Opus 5 (1M context) · Claude Max
+  ▝▝ ▝▝    ~/work/analytics
+
+
+❯ Chart checkout conversion by platform for the last 14 days.
+
+⏺ Query ran: 14 days, 3 platforms
+
+✻ Drawing the chart… (2m 02s (esc to interrupt)
+
+────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ accept edits on · ? for shortcuts

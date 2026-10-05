@@ -1,0 +1,14 @@
+ ▐▛███▛█   Claude Code v2.1.288
+▝▜██████▀  Opus 5 (1M context) · Claude Max
+  ▝▝ ▝▝    ~/work/mail
+
+
+❯ Move the order-confirmation emails to the new template.
+
+⏺ The order-confirmation email uses the new template now. Previews rendered for
+  Gmail, Outlook and Apple Mail; all look right. Nothing needs a decision.
+
+────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ accept edits on · ? for shortcuts

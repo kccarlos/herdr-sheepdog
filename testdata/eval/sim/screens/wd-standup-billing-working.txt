@@ -1,0 +1,18 @@
+ ▐▛███▛█   Claude Code v2.1.288
+▝▜██████▀  Opus 5 (1M context) · Claude Max
+  ▝▝ ▝▝    ~/work/billing
+
+
+❯ Fix the invoice rounding bug (totals off by a cent on multi-line invoices).
+
+⏺ Read(invoice/total.go)
+  ⎿  Read 96 lines
+
+⏺ Found it: each line is rounded before summing.
+
+✻ Writing a failing test… (1m 15s (esc to interrupt)
+
+────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ accept edits on · ? for shortcuts

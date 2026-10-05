@@ -1,0 +1,14 @@
+ ▐▛███▛█   Claude Code v2.1.288
+▝▜██████▀  Opus 5 (1M context) · Claude Max
+  ▝▝ ▝▝    ~/work/shop-web
+
+
+❯ Replace the old date picker with the new one on the returns form.
+
+⏺ Installed @shop/datepicker 3.2.0; the returns form uses it and the 12 component
+  tests pass. Nothing needs a decision.
+
+────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ accept edits on · ? for shortcuts

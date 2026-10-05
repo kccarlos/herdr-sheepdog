@@ -539,6 +539,83 @@
       "cache_key": "884247d220acd29058ad10f6",
       "sha256": "2762562ecdecff6cf1690cc76281d2fe6099e875067f078f407fdf0e7b5acafa",
       "dur_ms": 2730
+    },
+    {
+      "scenario": "workday-morning-standup",
+      "text": "Morning. What's everyone up to?",
+      "lang": "en",
+      "voice": "Puck",
+      "source": "gemini",
+      "model": "gemini-2.5-flash-tts",
+      "cache_key": "d995410f5b8b5a8a1e667e84",
+      "sha256": "c8ffb2829d7dd6a2f87f1f89ea54a54d5891aeb1335200e3fd5c349a7f3cdcd7",
+      "dur_ms": 2370
+    },
+    {
+      "scenario": "workday-scale-ten",
+      "text": "Quick one. Who's blocked?",
+      "lang": "en",
+      "voice": "Puck",
+      "source": "gemini",
+      "model": "gemini-2.5-flash-tts",
+      "cache_key": "bfcabf3e59b1f6c349ad572e",
+      "sha256": "143c6d83b4a1ed1811216348ef07e9ba5a8487efbe99e1f57ce3684d1053f8eb",
+      "dur_ms": 1930
+    },
+    {
+      "scenario": "workday-adversarial-afternoon",
+      "text": "Afternoon. Anything I should know?",
+      "lang": "en",
+      "voice": "Kore",
+      "source": "gemini",
+      "model": "gemini-2.5-flash-tts",
+      "cache_key": "ca75108eab884f9ba83c8b94",
+      "sha256": "4e01bd7dbab1bfda5a51acdc595c418fb672a17a813a2143d25eff7c2ffff78c",
+      "dur_ms": 2530
+    },
+    {
+      "scenario": "workday-zh-evening",
+      "text": "现在什么情况？",
+      "lang": "zh",
+      "voice": "Aoede",
+      "source": "gemini",
+      "model": "gemini-2.5-flash-tts",
+      "cache_key": "fdc65e0bed79a7d156f2ef86",
+      "sha256": "be1ec2f873bb291d70f8c73cb6aaa68c3449db0d9237f6257d3907a978ce9aa5",
+      "dur_ms": 1770
+    },
+    {
+      "scenario": "workday-interruptions",
+      "text": "Hey, give me a quick rundown.",
+      "lang": "en",
+      "voice": "Puck",
+      "source": "gemini",
+      "model": "gemini-2.5-flash-tts",
+      "cache_key": "e37e023369ee59d39736c206",
+      "sha256": "a54e4c9767bfab967fd74e8c3c37818c29be514f36f649c6100b6ed1d8739a19",
+      "dur_ms": 1970
+    },
+    {
+      "scenario": "workday-explain-deep",
+      "text": "Can you walk me through what's going on today?",
+      "lang": "en",
+      "voice": "Charon",
+      "source": "gemini",
+      "model": "gemini-2.5-flash-tts",
+      "cache_key": "26d5257f58a56180e29b8ff5",
+      "sha256": "8e033d4b5044a33c028392e6766dd2c0ec4a8f02cb23a09b5680d49f4c955e37",
+      "dur_ms": 2450
+    },
+    {
+      "scenario": "workday-long-haul",
+      "text": "Hi. Status, please.",
+      "lang": "en",
+      "voice": "Kore",
+      "source": "gemini",
+      "model": "gemini-2.5-flash-tts",
+      "cache_key": "71dfbbc1bf14e07c0a24e2cc",
+      "sha256": "fef84d5521fb91c1644b57740cfd2211e2c4724326b5c616c38de449dfed51a3",
+      "dur_ms": 1690
     }
   ]
 }

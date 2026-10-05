@@ -1,0 +1,16 @@
+ ▐▛███▛█   Claude Code v2.1.288
+▝▜██████▀  Opus 5 (1M context) · Claude Max
+  ▝▝ ▝▝    ~/work/search
+
+
+❯ Tune the search ranking for product titles.
+
+⏺ Read(ranking/score.go)
+  ⎿  Read 210 lines
+
+✻ Running the relevance eval… (5m 12s (esc to interrupt)
+
+────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ accept edits on · ? for shortcuts

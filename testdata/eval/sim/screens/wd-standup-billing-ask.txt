@@ -1,0 +1,22 @@
+ ▐▛███▛█   Claude Code v2.1.288
+▝▜██████▀  Opus 5 (1M context) · Claude Max
+  ▝▝ ▝▝    ~/work/billing
+
+
+❯ Fix the invoice rounding bug (totals off by a cent on multi-line invoices).
+
+⏺ The fix depends on a rounding rule, and the two choices give different totals on 3% of invoices.
+────────────────────────────────────────────────────────────────────────────────────────
+ ☐ Rounding
+
+How should invoice totals be rounded?
+
+❯ 1. Round once at the end, half up
+     Sum exact line amounts, then round the total. Matches the accountant's spreadsheet.
+  2. Round each line, banker's rounding
+     Keeps each printed line exact; totals can differ by a cent from the spreadsheet.
+  3. Type something.
+────────────────────────────────────────────────────────────────────────────────────────
+  4. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc to cancel

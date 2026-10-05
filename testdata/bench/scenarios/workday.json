@@ -1,0 +1,101 @@
+{
+  "scenarios": [
+    {
+      "id": "workday-morning-standup",
+      "category": "workday",
+      "from_sim": "workday-morning-standup",
+      "seed": 501,
+      "behavior": {
+        "resume": {
+          "after_beats": [
+            11
+          ]
+        }
+      }
+    },
+    {
+      "id": "workday-scale-ten",
+      "category": "workday",
+      "from_sim": "workday-scale-ten",
+      "seed": 502,
+      "behavior": {
+        "resume": {
+          "after_beats": [
+            5,
+            9
+          ]
+        }
+      }
+    },
+    {
+      "id": "workday-adversarial-afternoon",
+      "category": "workday",
+      "from_sim": "workday-adversarial-afternoon",
+      "seed": 503,
+      "behavior": {
+        "resume": {
+          "after_beats": [
+            7,
+            11
+          ]
+        }
+      }
+    },
+    {
+      "id": "workday-zh-evening",
+      "category": "workday",
+      "from_sim": "workday-zh-evening",
+      "seed": 504,
+      "audio": {
+        "voice": "Aoede"
+      },
+      "behavior": {
+        "resume": {
+          "after_beats": [
+            10
+          ]
+        }
+      }
+    },
+    {
+      "id": "workday-interruptions",
+      "category": "workday",
+      "from_sim": "workday-interruptions",
+      "seed": 505,
+      "behavior": {
+        "resume": {
+          "after_beats": [
+            9
+          ]
+        }
+      }
+    },
+    {
+      "id": "workday-explain-deep",
+      "category": "workday",
+      "from_sim": "workday-explain-deep",
+      "seed": 506,
+      "behavior": {
+        "resume": {
+          "after_beats": [
+            10
+          ]
+        }
+      }
+    },
+    {
+      "id": "workday-long-haul",
+      "category": "workday",
+      "from_sim": "workday-long-haul",
+      "seed": 507,
+      "behavior": {
+        "resume": {
+          "after_beats": [
+            8,
+            14
+          ]
+        }
+      }
+    }
+  ]
+}

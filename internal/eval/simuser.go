@@ -107,6 +107,11 @@ func (u *LLMSimUser) Next(ctx context.Context, sc SimScenario, convo []SimLine) 
 		}
 		system = fmt.Sprintf(simUserAgendaSystem, sc.Goal, persona, lang, agendaList(sc.Agenda, next, stuck))
 		tools = simUserAgendaTools
+		if waitedSinceSpoke(convo) {
+			// Already waited since the CEO last spoke: talk now (a
+			// second wait only runs the silence cap down).
+			tools = nil
+		}
 	}
 	cfg := &genai.GenerateContentConfig{
 		SystemInstruction: genai.NewContentFromText(system, genai.RoleUser),
@@ -184,6 +189,20 @@ func agendaState(sc SimScenario, convo []SimLine) (next, stuck int, t SimTurn, d
 		return next, stuck, SimTurn{Kind: TurnWait, WaitSeconds: 30, Beat: next}, true
 	}
 	return next, stuck, SimTurn{}, false
+}
+
+// waitedSinceSpoke reports whether the CEO already waited (a wait
+// marker) since their last line.
+func waitedSinceSpoke(convo []SimLine) bool {
+	for i := len(convo) - 1; i >= 0; i-- {
+		switch {
+		case convo[i].Who == "ceo":
+			return false
+		case convo[i].Who == "system" && convo[i].Text == simWaitMarker:
+			return true
+		}
+	}
+	return false
 }
 
 // agendaList renders the agenda for the prompt, the beat due marked.

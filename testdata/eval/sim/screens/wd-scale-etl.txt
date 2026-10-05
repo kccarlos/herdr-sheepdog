@@ -1,0 +1,16 @@
+╭──────────────────────────────────────────────────────╮
+│ >_ OpenAI Codex (v0.154.0)                           │
+│                                                      │
+│ model:     gpt-5.6-luna max   /model to change       │
+│ directory: ~/work/etl                                │
+╰──────────────────────────────────────────────────────╯
+
+› Clean up the old export files in the etl job.
+
+• Listing ./data/exports (2,140 files)
+
+• Working (1m 30s (esc to interrupt)
+
+› Ask Codex to do anything
+
+  gpt-5.6-luna max · ~/work/etl

@@ -1,0 +1,23 @@
+ ▐▛███▛█   Claude Code v2.1.288
+▝▜██████▀  Opus 5 (1M context) · Claude Max
+  ▝▝ ▝▝    ~/work/infra
+
+
+❯ Find out why the cloud bill jumped in September.
+
+⏺ September's bill was $18,400, up from $11,200 in August (+$7,200).
+
+  - $5,100 is cross-region traffic: since Sep 9 the image service reads originals from
+    the us-east bucket while running in eu-west (a config change in the Sep 9 deploy).
+    Example: each product page view pulls ~1.8 MB across regions; 31M views = $4,900.
+  - $1,600 is a staging database left at the production size after the load test on
+    Sep 14 (db.r6g.4xlarge instead of db.t4g.large).
+  - $500 is normal growth.
+
+  Fixes: point the image service at the eu-west replica (one config line), and shrink
+  staging. Together about $6,700 a month. I have not changed anything.
+
+────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ accept edits on · ? for shortcuts

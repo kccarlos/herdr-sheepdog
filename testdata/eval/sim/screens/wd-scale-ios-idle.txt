@@ -1,0 +1,13 @@
+ ▐▛███▛█   Claude Code v2.1.288
+▝▜██████▀  Opus 5 (1M context) · Claude Max
+  ▝▝ ▝▝    ~/work/app-ios
+
+
+❯ Bump the iOS app to version 2.4 and update the changelog.
+
+⏺ Done: version 2.4 (build 112), changelog updated. Nothing needs a decision.
+
+────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ accept edits on · ? for shortcuts

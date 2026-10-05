@@ -1,0 +1,16 @@
+╭──────────────────────────────────────────────────────╮
+│ >_ OpenAI Codex (v0.154.0)                           │
+│                                                      │
+│ model:     gpt-5.6-luna max   /model to change       │
+│ directory: ~/work/shop                               │
+╰──────────────────────────────────────────────────────╯
+
+› Run the end-to-end checkout tests against staging.
+
+• Running 38 end-to-end tests
+
+• Working (3m 30s (esc to interrupt)
+
+› Ask Codex to do anything
+
+  gpt-5.6-luna max · ~/work/shop

@@ -1,0 +1,17 @@
+ ▐▛███▛█   Claude Code v2.1.288
+▝▜██████▀  Opus 5 (1M context) · Claude Max
+  ▝▝ ▝▝    ~/work/shop
+
+
+❯ Update the README's setup section for the new Postgres 17 requirement.
+
+⏺ Update(README.md)
+  ⎿  Updated 22 lines
+
+⏺ The README's setup section now says Postgres 17 and shows the new docker compose
+  command. Nothing needs a decision.
+
+────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ accept edits on · ? for shortcuts
