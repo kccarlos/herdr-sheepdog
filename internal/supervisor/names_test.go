@@ -374,7 +374,7 @@ func TestOldNameOnlyWhenTheCEOHeardIt(t *testing.T) {
 	t.Run("said by the CEO", func(t *testing.T) {
 		h := newHarness(t, withTitleFixtures(t))
 		h.claudeIn("w1:p1", readmeSession, herdr.StateWorking)
-		h.sup.OnVoiceEvent(voice.EventTranscript{Dir: voice.DirIn, Text: "what is Claude doing", Final: true})
+		h.sup.OnVoiceEvent(voice.EventTranscript{Dir: voice.DirIn, Text: "what is Claude doing"})
 		h.claudeIn("w2:p1", docsSession, herdr.StateWorking)
 		if row, _ := h.store.Get("w1:p1"); row.Spoken != "Claude" {
 			t.Errorf("row = %+v, want the name the CEO used kept", row)

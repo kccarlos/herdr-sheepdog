@@ -428,10 +428,19 @@ func TestSpawnNotReadyKeepsWaitingAndTellsTheBrain(t *testing.T) {
 		t.Errorf("the brain was not told:\n%s", text)
 	}
 
-	// Recognised, the trust question answered, idle: the instruction goes.
+	// Recognised, the trust question answered, idle: the instruction
+	// goes, and the CEO, told it had not started, hears that it runs.
 	w.srv.SetScreen("w20:p1", "❯ ")
 	w.detect("w20:p1", "", herdr.StateIdle)
 	waitFor(t, func() bool { return len(w.promptRequests()) == 1 }, "the held first instruction")
+	waitFor(t, func() bool {
+		for _, p := range w.pusher.all() {
+			if strings.Contains(p.Text, "The new Claude in bench is running now") {
+				return true
+			}
+		}
+		return false
+	}, "the CEO's correction")
 	if got := w.promptRequests()[0]; got[0] != "w20:p1" || !strings.HasPrefix(got[1], "explain this project") {
 		t.Errorf("first instruction = %v", got)
 	}

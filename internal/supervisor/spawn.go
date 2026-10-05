@@ -443,6 +443,10 @@ func (s *Supervisor) followSpawn(paneID, kind, text, dirName string) {
 			if !seen {
 				seen = true
 				s.log.Log(logSource, "supervisor.spawn_ready", paneID, map[string]any{"kind": kind, "state": string(row.State), "agent": aliasOr(row.Alias), "waited_s": int(time.Since(start).Seconds())})
+				if late {
+					// The CEO was told it had not started: correct it.
+					s.pushTagged(paneID, fmt.Sprintf("The new %s%s is running now, %d s after its command was typed (herdr sees it as %s).", state.KindWord(kind), inDir(dirName), int(time.Since(start).Seconds()), row.State), voice.UrgencyIdle, map[string]any{"from": "daemon", "kind": "spawn check"})
+				}
 				if text == "" {
 					return
 				}
@@ -550,11 +554,15 @@ func spawnNotStartedLine(kind, dirName, tail string) string {
 	if len(lines) > spawnTellLines {
 		lines = lines[len(lines)-spawnTellLines:]
 	}
-	where := ""
-	if dirName != "" {
-		where = " in " + dirName
+	return fmt.Sprintf("The new %s%s has not started: %d s after its command was typed, herdr does not see it running. The last lines of its pane: %s", state.KindWord(kind), inDir(dirName), int(spawnReadyWait.Seconds()), strings.Join(lines, " / "))
+}
+
+// inDir is " in <dir>", or "" without a directory name.
+func inDir(dirName string) string {
+	if dirName == "" {
+		return ""
 	}
-	return fmt.Sprintf("The new %s%s has not started: %d s after its command was typed, herdr does not see it running. The last lines of its pane: %s", state.KindWord(kind), where, int(spawnReadyWait.Seconds()), strings.Join(lines, " / "))
+	return " in " + dirName
 }
 
 // spawnTellLines is how many pane lines the CEO's fact quotes.

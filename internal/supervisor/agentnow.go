@@ -51,7 +51,7 @@ func agentState(a state.Agent, now time.Time) string {
 	if a.LastResult != nil && !a.LastResult.At.IsZero() {
 		st += fmt.Sprintf("; it last finished work %s ago", spokenAge(now.Sub(a.LastResult.At)))
 	} else if a.State == herdr.StateIdle || a.State == herdr.StateDone {
-		st += "; no finished work recorded since the supervisor started"
+		st += "; no finished work recorded"
 	}
 	return "as this reached you: " + st
 }

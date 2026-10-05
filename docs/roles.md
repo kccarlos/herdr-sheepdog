@@ -153,7 +153,8 @@ agent herdr has not recognised after 20 s logs
 `supervisor.spawn_not_ready {still_waiting}`; the brain gets a
 transcript line saying so, with the pane's last lines (often the
 first-run question, or a shell that never ran the command), and the CEO
-a daemon fact with the same lines through the voice; the watch goes on to the ten-minute bound or until
+a daemon fact with the same lines through the voice (and, should herdr
+see it later, a second fact that it is running now); the watch goes on to the ten-minute bound or until
 the pane closes, and the brain is told whether the held instruction
 went or was dropped.
 

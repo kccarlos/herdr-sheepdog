@@ -204,9 +204,15 @@ standalone client, text input, 7 sessions, < $0.30):
   ("briefing b-31 (news, sent at 15:52:00) was not voiced: you said
   nothing after it before the CEO spoke at 15:52:22, so the CEO has not
   heard it"), again in the relation of its next answer or spoken
-  briefing, and the slow brain hears "the CEO did not hear: …". Nothing
-  is re-queued and no words are compared: whether to say it is the
-  fast brain's call (phone test: b-31, b-69, b-75 never voiced).
+  briefing, and the slow brain hears "the CEO did not hear: …". No words are compared and the
+  voice layer re-queues nothing: whether to say it is the fast brain's
+  call (phone test: b-31, b-69, b-75 never voiced). One existing path
+  does follow: an unvoiced announcement of an open prompt counts as
+  unheard for the supervisor's buried-prompt reminder
+  (`supervisor.prompt_reminded`, "Still waiting for your answer: …" at
+  the next quiet moment), which had been unreachable on Gemini since
+  ablation G3 removed the heard watch (rail: a decision only the CEO can
+  take is not left unheard).
 - `from`: `slow brain` (its line), `daemon` (a code sentence: brain
   timeout, pane closed, reminder, focus, names, stop result), or the
   tag's own value.

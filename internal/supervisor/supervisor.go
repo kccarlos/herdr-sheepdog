@@ -554,9 +554,9 @@ func (s *Supervisor) OnVoiceEvent(ev voice.Event) {
 		}
 		if e.Dir == voice.DirIn {
 			s.heard(e.Text, e.Final)
-			if e.Final {
-				s.noteNamesSaid(e.Text) // names.go: a name the CEO used stays
-			}
+			// names.go: a name the CEO used stays. Every fragment, since
+			// Gemini rarely marks its input transcription final.
+			s.noteNamesSaid(e.Text)
 		} else {
 			s.voiceSpoke(e.Text)
 			if e.Final {
