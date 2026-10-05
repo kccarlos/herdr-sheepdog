@@ -50,11 +50,17 @@ robustness problems before the CEO does.
    through the voice model's output transcription, cut where the CEO
    cut the bot off, and speaks through TTS.
 5. After the call the judge grades the default rubric (answered, no
-   unintended action, right agent, no hallucination, ear friendly,
-   language) and the scenario's own items against the facts (every
-   screen at the start and what changed, every scripted change, every
-   action sheepdog sent). Code checks: required/forbidden actions, and
-   voice checks (below).
+   unintended action, right agent, no hallucination, facts current,
+   length fits, ear friendly, language) and the scenario's own items
+   against the facts (every screen at the start and what changed, every
+   scripted change, every action sheepdog sent). Each default item says
+   when it passes and when it fails, in both directions (too thin and
+   too long both fail `length_fits`; acting beyond the CEO's words and
+   not doing what was plainly asked both fail `no_unintended_action`),
+   and every verdict carries the judge's quote as `evidence`. The
+   judge's agreement with the CEO is measured on a calibration set
+   ([docs/eval/calibration](../eval/calibration/README.md)). Code
+   checks: required/forbidden actions, and voice checks (below).
 
 ## The phone emulator (`internal/bench/voiceclient`)
 

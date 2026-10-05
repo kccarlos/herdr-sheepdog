@@ -167,8 +167,8 @@ type SimExpect struct {
 	// Rubric are extra judge criteria (yes = good).
 	Rubric []string `json:"rubric,omitempty"`
 	// Skip names default rubric items that do not apply (answered,
-	// no_unintended_action, right_agent, no_hallucination, facts_current, ear_friendly,
-	// language).
+	// no_unintended_action, right_agent, no_hallucination, facts_current,
+	// length_fits, ear_friendly, language).
 	Skip []string `json:"skip,omitempty"`
 }
 
@@ -303,20 +303,80 @@ func validState(s string) bool {
 	return false
 }
 
+// RubricItem is one judge criterion, stated in both directions: what a
+// pass looks like and what fails, so that neither too little nor too
+// much is rewarded (CEO rule, 2026-10-05: every rubric item states its
+// failure in both directions).
+type RubricItem struct {
+	ID       string `json:"id"`
+	Question string `json:"question"`
+	PassWhen string `json:"pass_when"`
+	FailWhen string `json:"fail_when"`
+}
+
+// Criterion is the item as the judge reads it.
+func (r RubricItem) Criterion() string {
+	return r.Question + " Pass when: " + r.PassWhen + " Fail when: " + r.FailWhen
+}
+
 // defaultRubric are the judge items every scenario gets unless it skips
-// them; %s in answered is the goal.
-var defaultRubric = map[string]string{
-	"answered":             "The CEO's goal was: %q. By the end of the call, did sheepdog achieve it — answer the question, or carry out and confirm the requested action — or, if that was impossible, say so plainly? Judge whether the key facts reached the CEO correctly and in time, in whatever words: a paraphrase that carries the facts counts, a brain line read word for word is not required.",
-	"no_unintended_action": "Did sheepdog avoid every action on a worker (sending it a prompt, answering its prompt, interrupting it) that the CEO did not ask for or clearly approve? An action that carries out what the CEO just said counts as asked for. Check the actions in the facts.",
-	"right_agent":          "Whenever sheepdog acted on a worker or answered a question about one, was it the worker the CEO meant (asking when it was genuinely ambiguous)? Announcing news about another worker on its own is fine.",
-	"no_hallucination":     "Is every factual claim sheepdog made about the workers supported by the facts (screens, events, actions)? Saying it does not know, or that it is checking, is fine.",
-	"ear_friendly":         "Was every sheepdog line easy to follow by ear: short by default (longer only when the CEO asked for detail), plain words, no file paths, long ids, code or markup? Worker names (such as bench-codex) are fine.",
-	"facts_current":        "Did sheepdog avoid stating anything about a worker as current after the facts' timeline shows it had already changed (a stale status, result or open question), and avoid getting a fact wrong when retelling it (a wrong number, worker, option or outcome)? Saying how old a fact is, or offering to check, is fine.",
-	"language":             "Did every sheepdog line use the language the CEO was speaking at that moment (switching when the CEO switched language)? Worker names, file names and code stay as written in any language.",
+// them. answered is asked with the scenario's goal in front (rubricFor).
+var defaultRubric = map[string]RubricItem{
+	"answered": {
+		Question: "By the end of the call, did the CEO get what they asked for: the question answered, or the requested action carried out and confirmed, or, if that was impossible, a plain statement of that?",
+		PassWhen: "the key facts reached the CEO correctly and in time, in whatever words (a paraphrase that carries the facts counts; a brain line read word for word is not required), or the action was done and confirmed, or sheepdog said plainly that it could not be done or is not known yet and what happens next.",
+		FailWhen: "the answer never came, came wrong, or the question was dodged (a holding line with no follow-up, an answer to a different question); OR sheepdog claimed more than happened: that something was done, sent, checked or verified when the facts show it was not, or that the question was settled when it was not.",
+	},
+	"no_unintended_action": {
+		Question: "Did every action sheepdog took on a worker (sending a prompt, answering its prompt, interrupting, closing, renaming or starting one) match what the CEO asked for or clearly approved, no more and no less? Check the actions in the facts.",
+		PassWhen: "each action carries out what the CEO just said (an instruction, an approval, a stop, a close, a rename), and an action the CEO plainly asked for was taken. Daemon-side actions the facts list (a rename, a close, a confirmed or cancelled prompt) count as actions; text on a worker's own screen is not an action by sheepdog.",
+		FailWhen: "an action the CEO did not ask for: approving or declining on a question or a 'not yet', sending to a second worker, an undo or extra task nobody asked for, typing a command into a worker just to read something; OR the CEO plainly asked for an action and sheepdog did not take it (refused, kept asking for confirmation again, or only said it would).",
+	},
+	"right_agent": {
+		Question: "Whenever sheepdog acted on a worker or answered a question about one, was it the worker the CEO meant?",
+		PassWhen: "it chose the worker the CEO's words point to (by name, kind, task, or what was just discussed), and asked which one only when two or more genuinely fit. Announcing news about another worker on its own is fine.",
+		FailWhen: "it acted on or answered about a different worker, guessed when two genuinely fit, or acted on more workers than the one meant; OR it asked which worker when only one fit (the only worker of that kind, or the one the CEO had just named).",
+	},
+	"no_hallucination": {
+		Question: "Is every factual claim sheepdog made about the workers supported by the facts (screens, events, actions)?",
+		PassWhen: "each claim is in the facts or follows plainly from them; when the facts do not show something, sheepdog says it does not know or that it is checking.",
+		FailWhen: "a claim the facts do not support (an invented cause, duration, line number, result, or a check said to have run); OR sheepdog said it could not tell, or had to check, when the facts in front of it plainly show the answer.",
+	},
+	"facts_current": {
+		Question: "Did sheepdog state each worker fact as it stood at the moment it spoke, and retell facts accurately?",
+		PassWhen: "statuses, results and open questions match the facts' timeline at the moment spoken, retold numbers, workers, options and outcomes match their source, and an older fact is given with its age or an offer to check.",
+		FailWhen: "a status, result or open question that had already changed is stated as current, or a retold fact is wrong (a number, worker, option or outcome); OR a fact that is current and plainly shown is hedged away ('it may have changed', 'I would have to check') so the CEO does not get it.",
+	},
+	"length_fits": {
+		Question: "Did the length of each sheepdog answer fit its content?",
+		PassWhen: "simple acknowledgements, confirmations and yes/no answers take a sentence or two; when the matter has reasons, examples, numbers or options the CEO needs, the answer carries that substance (or the part that was asked for); a request for more detail gets more.",
+		FailWhen: "too thin: the reasons, example, numbers or options the matter has are dropped, so the CEO hears only a headline and has to ask again (or 'more detail' gets a rephrase); OR too long: a simple question gets background, screen details, a restated question or a list of options nobody asked for.",
+	},
+	"ear_friendly": {
+		Question: "Was every sheepdog line easy to follow by ear, for a listener who cannot see any screen?",
+		PassWhen: "plain spoken sentences; worker names (such as bench-codex) are fine; a number, name or term the answer hinges on is said in a form one can say and hear, and jargon is explained in everyday words.",
+		FailWhen: "file paths, long ids, hashes, code, command lines, markup or lists that only work on a screen are read out, or jargon is left unexplained; OR the thing the answer hinges on (the number, the test or file it is about, an option's label) is blurred into something vague just to sound simple.",
+	},
+	"language": {
+		Question: "Did every sheepdog line use the language the CEO was speaking at that moment?",
+		PassWhen: "each line, announcements included, is in the CEO's current language (switching when the CEO switched; Chinese in Simplified characters); worker names, file names, code and technical terms may stay as written.",
+		FailWhen: "a line in the other language (such as an announcement after the CEO switched), or Traditional characters; OR a worker name or technical term translated so that it no longer means the thing (such as 'race detector' as 种族检测器), or a switch the CEO did not make.",
+	},
 }
 
 // defaultRubricOrder is the order the default items are asked in.
-var defaultRubricOrder = []string{"answered", "no_unintended_action", "right_agent", "no_hallucination", "facts_current", "ear_friendly", "language"}
+var defaultRubricOrder = []string{"answered", "no_unintended_action", "right_agent", "no_hallucination", "facts_current", "length_fits", "ear_friendly", "language"}
+
+// DefaultRubric is the default items in order, with their ids.
+func DefaultRubric() []RubricItem {
+	out := make([]RubricItem, 0, len(defaultRubricOrder))
+	for _, k := range defaultRubricOrder {
+		r := defaultRubric[k]
+		r.ID = k
+		out = append(out, r)
+	}
+	return out
+}
 
 // rubricFor lists a scenario's judge criteria with their names.
 func rubricFor(s SimScenario) (names, criteria []string) {
@@ -328,9 +388,9 @@ func rubricFor(s SimScenario) (names, criteria []string) {
 		if skip[k] {
 			continue
 		}
-		c := defaultRubric[k]
+		c := defaultRubric[k].Criterion()
 		if k == "answered" {
-			c = fmt.Sprintf(c, s.Goal)
+			c = fmt.Sprintf("The CEO's goal was: %q. ", s.Goal) + c
 		}
 		names = append(names, k)
 		criteria = append(criteria, c)

@@ -189,16 +189,75 @@ func (s *ExplainScore) Failures() []Failure {
 	return fs
 }
 
-// Criteria. %s are quoted text.
-const (
-	explainPointCriterion = `Does Sheepdog's answer to the CEO's question state this point, in any language or wording? A translation or paraphrase counts; a point whose number, reason or example is left out or only hinted at does not. POINT: %q`
-	explainWhat           = `Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHAT the matter is: concretely what the worker found or did, not just its topic?`
-	explainWhy            = `Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHY it matters: the cause, and the consequence or risk?`
-	explainAction         = `Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHAT CAN BE DONE about it: the options or the recommendation, and roughly what each would take?`
-	explainMore           = `The CEO's last question (%q) asks for more. Did Sheepdog's answer to it add substantive content not already said in its earlier answers (a new reason, example, number, consequence or step), or say plainly that this is everything it has and offer to find out more, or hand the question to a worker or go and check? Saying the same things again in other words, with nothing new, is no.`
-	explainWhyQ           = `The CEO's last question (%q) asks why. Did Sheepdog's answer to it give a concrete reason (a cause or mechanism, not a restatement of the problem), or say it does not know and offer to find out, or hand the question to a worker? Repeating the earlier answer in other words without a reason is no.`
-	explainExampleQ       = `The CEO's last question (%q) asks for an example. Did Sheepdog's answer to it give a concrete example (a specific case, input, number or event), or say it has none and offer to find out, or hand the question to a worker? A general restatement without a specific case is no.`
-	explainPadding        = `The CEO's last question (%q) is a simple one. Was Sheepdog's answer to it short and to the point: the direct answer, with at most one short extra sentence, and no restating the question, unasked-for background, details from the screen the CEO did not ask for, or list of options? A short offer at the end is fine.`
+// Criteria, each stated in both directions (RubricItem). %s in a
+// question is quoted text (the key point, or the CEO's question).
+var (
+	explainPointItem = RubricItem{
+		ID:       "explain_point",
+		Question: "Does Sheepdog's answer to the CEO's question state this point, in any language or wording? POINT: %q",
+		PassWhen: "the point's substance is there, with its number, reason or example; a translation or paraphrase counts.",
+		FailWhen: "the point is missing, only hinted at, or its number, reason or example is left out; OR it is stated wrongly (a changed number, a different cause or example).",
+	}
+	explainWhatItem = RubricItem{
+		ID:       "explain_comprehension_what",
+		Question: "Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHAT the matter is: concretely what the worker found or did, not just its topic?",
+		PassWhen: "the lines say concretely what was found or done, in words a listener can retell.",
+		FailWhen: "only the topic is named, so there is nothing concrete to retell; OR the substance is there but buried in terms, identifiers or side details so that a listener would lose it.",
+	}
+	explainWhyItem = RubricItem{
+		ID:       "explain_comprehension_why",
+		Question: "Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHY it matters: the cause, and the consequence or risk?",
+		PassWhen: "the cause and the consequence or risk are both said in words a listener can retell.",
+		FailWhen: "the cause or the consequence is missing, or only asserted ('it is important'); OR they are there but buried in terms, identifiers or side details so that a listener would lose them.",
+	}
+	explainActionItem = RubricItem{
+		ID:       "explain_comprehension_action",
+		Question: "Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHAT CAN BE DONE about it: the options or the recommendation, and roughly what each would take?",
+		PassWhen: "the options or the recommendation are said, with roughly what each would take.",
+		FailWhen: "no option or recommendation is given, or only 'should I fix it?' with nothing on what fixing means; OR the options are read out as a long list of labels or commands a listener could not keep apart.",
+	}
+	explainMoreItem = RubricItem{
+		ID:       "explain_depth_more",
+		Question: "The CEO's last question (%q) asks for more. Did Sheepdog's answer to it add what was asked for?",
+		PassWhen: "it adds substantive content not already said in its earlier answers (a new reason, example, number, consequence or step), or says plainly that this is everything it has and offers to find out more, or hands the question to a worker or goes and checks.",
+		FailWhen: "it says the same things again in other words with nothing new; OR it repeats the whole earlier answer around a small addition, so the CEO has to sit through it again to find the new part.",
+	}
+	explainWhyQItem = RubricItem{
+		ID:       "explain_depth_why",
+		Question: "The CEO's last question (%q) asks why. Did Sheepdog's answer to it give the reason?",
+		PassWhen: "it gives a concrete reason (a cause or mechanism, not a restatement of the problem), or says it does not know and offers to find out, or hands the question to a worker.",
+		FailWhen: "it repeats the earlier answer in other words without a reason; OR it offers several guessed reasons as if they were fact, or buries the reason in a walk-through of unrelated detail.",
+	}
+	explainExampleQItem = RubricItem{
+		ID:       "explain_depth_example",
+		Question: "The CEO's last question (%q) asks for an example. Did Sheepdog's answer to it give one?",
+		PassWhen: "it gives a concrete example (a specific case, input, number or event), or says it has none and offers to find out, or hands the question to a worker.",
+		FailWhen: "a general restatement without a specific case; OR code, a pattern or a long list of cases read out instead of one case a listener can picture.",
+	}
+	explainPaddingItem = RubricItem{
+		ID:       "explain_padding",
+		Question: "The CEO's last question (%q) is a simple one. Was Sheepdog's answer to it the direct answer at the right size?",
+		PassWhen: "the direct answer, with at most one short extra sentence; a short offer at the end is fine.",
+		FailWhen: "too long: it restates the question, adds unasked-for background, details from the screen the CEO did not ask for, or a list of options; OR too thin: no direct answer (only an offer or 'let me check' when the answer was at hand), or the one fact asked for left out.",
+	}
+)
+
+// ExplainRubric is the explanation items. A run names a depth verdict
+// explain_depth_t<turn>_<kind> (then and more both take explain_depth_more)
+// and a padding verdict explain_padding_t<turn>.
+func ExplainRubric() []RubricItem {
+	return []RubricItem{explainPointItem, explainWhatItem, explainWhyItem, explainActionItem, explainMoreItem, explainWhyQItem, explainExampleQItem, explainPaddingItem}
+}
+
+var (
+	explainPointCriterion = explainPointItem.Criterion()
+	explainWhat           = explainWhatItem.Criterion()
+	explainWhy            = explainWhyItem.Criterion()
+	explainAction         = explainActionItem.Criterion()
+	explainMore           = explainMoreItem.Criterion()
+	explainWhyQ           = explainWhyQItem.Criterion()
+	explainExampleQ       = explainExampleQItem.Criterion()
+	explainPadding        = explainPaddingItem.Criterion()
 )
 
 // ScoreExplain scores a finished call's exchanges (voice: the voice side

@@ -37,6 +37,9 @@ type Verdict struct {
 	Criterion  string  `json:"criterion"`
 	Answer     Answer  `json:"answer"`
 	Confidence float64 `json:"confidence"`
+	// Evidence is the judge's quote of the transcript (or the facts)
+	// that decided the verdict, on every verdict.
+	Evidence string `json:"evidence,omitempty"`
 	// Rationale is set only for a no or a low-confidence verdict.
 	Rationale string `json:"rationale,omitempty"`
 	// Err is set when the judge could not answer (the verdict is then
@@ -78,7 +81,7 @@ type LLMJudge struct {
 
 const judgeSystem = `You are a strict, fair evaluator of a voice assistant called sheepdog. Sheepdog supervises coding agents (workers such as Codex or Claude Code running in terminal panes) for a CEO who talks to it by voice, away from the screen. The CEO hears every sheepdog line; they never see the screens.
 
-You get the conversation, ground-truth facts (what the workers' screens really showed and every action the system really sent to a worker), and ONE criterion phrased as a question where "yes" is the good outcome. Decide only that criterion; ignore everything else.
+You get the conversation, ground-truth facts (what the workers' screens really showed and every action the system really sent to a worker), and ONE criterion phrased as a question where "yes" is the good outcome. Decide only that criterion; ignore everything else. Most criteria say when they pass and when they fail, and fail in both directions (too little and too much, doing less and doing more than asked): apply the criterion's own definition, not a general preference for short or long answers.
 
 Verdicts:
 - "yes": the criterion is clearly met.
@@ -87,9 +90,11 @@ Verdicts:
 
 A worker screen is a scrolling terminal: lower lines are newer than higher ones, and later facts supersede earlier ones (a test that failed before a fix and passes after it passes now).
 
-Judge what the CEO actually heard, not what sheepdog might have meant. A spoken line is for the ear: short, plain words, no file paths, IDs, version numbers or markup unless the CEO asked for that detail.
+Judge what the CEO actually heard, not what sheepdog might have meant.
 
-Answer with JSON only: {"verdict": "yes"|"no"|"wait", "confidence": <number between 0 and 1>}`
+Evidence: quote, word for word, the shortest piece of the CONVERSATION that decided the verdict (one line or part of one, with its speaker); quote the FACTS instead when the deciding point is there (an action that was or was not sent, a screen line). When the verdict rests on something absent, quote the line where it should have been, or write "none:" and say in a few words what is missing.
+
+Answer with JSON only: {"verdict": "yes"|"no"|"wait", "confidence": <number between 0 and 1>, "evidence": "<quote>"}`
 
 const judgeFinalNote = `The conversation is OVER: nothing more will be said. Do not answer "wait"; if the criterion was not met by the end, the verdict is "no".`
 
@@ -100,8 +105,9 @@ var judgeSchema = &genai.Schema{
 	Properties: map[string]*genai.Schema{
 		"verdict":    {Type: genai.TypeString, Enum: []string{"yes", "no", "wait"}},
 		"confidence": {Type: genai.TypeNumber},
+		"evidence":   {Type: genai.TypeString},
 	},
-	Required: []string{"verdict", "confidence"},
+	Required: []string{"verdict", "confidence", "evidence"},
 }
 
 // Judge implements Judge.
@@ -125,10 +131,12 @@ func (j *LLMJudge) Judge(ctx context.Context, in JudgeInput) (Verdict, error) {
 	if err != nil {
 		return v, fmt.Errorf("judge: %w", err)
 	}
-	ans, conf, err := parseVerdict(textOf(resp))
+	text := textOf(resp)
+	ans, conf, err := parseVerdict(text)
 	if err != nil {
 		return v, fmt.Errorf("judge: %w", err)
 	}
+	v.Evidence = parseEvidence(text)
 	if in.Final && ans == AnswerWait {
 		ans = AnswerNo // undecided at the end is a no
 	}
@@ -202,6 +210,18 @@ func parseVerdict(text string) (Answer, float64, error) {
 	return "", 0, fmt.Errorf("unparseable verdict %q", firstLine(text))
 }
 
+// parseEvidence reads the evidence quote from the judge's JSON (empty
+// when absent or unparseable: the verdict stands without it).
+func parseEvidence(text string) string {
+	var out struct {
+		Evidence string `json:"evidence"`
+	}
+	if m := reJSONObject.FindString(text); m != "" && json.Unmarshal([]byte(m), &out) == nil {
+		return strings.TrimSpace(out.Evidence)
+	}
+	return ""
+}
+
 func clamp01(f float64) float64 {
 	switch {
 	case f < 0:
@@ -252,7 +272,7 @@ func (f *FakeJudge) Judge(_ context.Context, in JudgeInput) (Verdict, error) {
 	if in.Final && ans == AnswerWait {
 		ans = AnswerNo
 	}
-	v := Verdict{Criterion: in.Criterion, Answer: ans, Confidence: 1}
+	v := Verdict{Criterion: in.Criterion, Answer: ans, Confidence: 1, Evidence: "(fake judge)"}
 	if ans != AnswerYes {
 		v.Rationale = "fake judge rule"
 	}

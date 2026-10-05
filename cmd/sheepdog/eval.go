@@ -23,6 +23,7 @@ func printEvalUsage(w io.Writer) {
 	fprintln(w, "       sheepdog eval extract [flags]   (cases from an event-log window)")
 	fprintln(w, "       sheepdog eval expand [flags]    (paraphrase and noise variants)")
 	fprintln(w, "       sheepdog eval sim [flags]       (simulated-user conversations, judged)")
+	fprintln(w, "       sheepdog eval calib CMD [flags] (judge calibration set: judge, agreement)")
 	fprintln(w, "")
 	fprintln(w, "Runs the conversation eval sets under testdata/eval and prints a pass/fail table.")
 	fprintln(w, "Offline by default: assistant cases are only validated (no model; a case that")
@@ -123,6 +124,8 @@ func runEval(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 			return runEvalExpand(args[1:], stderr)
 		case "sim":
 			return runEvalSim(ctx, args[1:], stdout, stderr)
+		case "calib":
+			return runEvalCalib(ctx, args[1:], stdout, stderr)
 		}
 	}
 	o, code, run := parseEvalFlags(args, stderr)

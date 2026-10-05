@@ -178,3 +178,43 @@ func TestPatientRetriesTransient(t *testing.T) {
 		t.Fatalf("a 400 was retried: calls %d", len(m.Calls()))
 	}
 }
+
+// Every verdict carries the judge's quote as evidence.
+func TestLLMJudgeEvidence(t *testing.T) {
+	m := braintest.NewModel(braintest.Step{Text: `{"verdict":"yes","confidence":0.9,"evidence":"Sheepdog: The clamp test fails."}`})
+	v, err := (&LLMJudge{Model: m, ModelID: "j"}).Judge(context.Background(), JudgeInput{Criterion: "c", Transcript: "t", Final: true})
+	if err != nil || v.Evidence != "Sheepdog: The clamp test fails." {
+		t.Fatalf("verdict %+v err %v", v, err)
+	}
+	if !strings.Contains(m.Calls()[0].System(), "Evidence: quote") {
+		t.Errorf("system prompt does not ask for evidence")
+	}
+	if got := parseEvidence(`yes`); got != "" {
+		t.Errorf("parseEvidence(bare) = %q", got)
+	}
+}
+
+// Every rubric item states its failure in both directions (CEO rule,
+// 2026-10-05), and no item tells the judge "short by default".
+func TestRubricTwoSided(t *testing.T) {
+	items := append(DefaultRubric(), ExplainRubric()...)
+	seen := map[string]bool{}
+	for _, r := range items {
+		if r.ID == "" || seen[r.ID] {
+			t.Errorf("rubric id %q empty or repeated", r.ID)
+		}
+		seen[r.ID] = true
+		if r.Question == "" || r.PassWhen == "" || !strings.Contains(r.FailWhen, "; OR ") {
+			t.Errorf("%s: want a question, pass_when and a two-sided fail_when (\"…; OR …\"), got %+v", r.ID, r)
+		}
+		if strings.Contains(r.PassWhen+r.FailWhen, "%") {
+			t.Errorf("%s: pass/fail text must not contain %% (criteria are format strings)", r.ID)
+		}
+		if strings.Contains(strings.ToLower(r.Criterion()), "short by default") {
+			t.Errorf("%s still says short by default", r.ID)
+		}
+	}
+	if !seen["length_fits"] {
+		t.Error("no length_fits item")
+	}
+}
