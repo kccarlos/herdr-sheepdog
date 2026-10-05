@@ -346,7 +346,7 @@ func runBenchRun(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	saveAudio := fs.String("save-audio", "", "also write each run's mic and bot audio as WAV here (outside the repo)")
 	brainProvider := fs.String("brain-provider", "", "scratch daemons' brain provider (default deepseek; the fault scenarios need deepseek)")
 	brainModel := fs.String("brain-model", "", "scratch daemons' brain model (default deepseek-flash)")
-	promptsDir := fs.String("prompts-dir", "", "scratch daemons' prompts.dir: override prompt files (e.g. an older assistant.md for an A/B arm); empty uses the config's")
+	promptsDir := fs.String("prompts-dir", "", "scratch daemons' prompts.dir: override prompt files for an A/B arm (assistant.md, USER.md, svp/SOUL.md, svp/RULES.md; files left out stay embedded); empty uses the config's")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -380,7 +380,16 @@ func runBenchRun(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	if !ok {
 		return 1
 	}
+	promptsLine := ""
 	if *promptsDir != "" {
+		// An A/B arm: every prompt file there (svp/ included) must be
+		// taken, or the arm would silently run the embedded prompts.
+		line, err := bench.PromptsArm(*promptsDir)
+		if err != nil {
+			fprintf(stderr, "sheepdog bench run: %v\n", err)
+			return 1
+		}
+		promptsLine = line
 		cfg.Prompts.Dir = *promptsDir
 	}
 	scs, err := loadBenchScenarios(*scen, *sims, *filter)
@@ -399,8 +408,8 @@ func runBenchRun(ctx context.Context, args []string, stdout, stderr io.Writer) i
 		"tts": syn.ID(), "simulated CEO": *simuser + " " + orDefaultStr(*simuserModel, eval.DefaultJudgeModel), "judge": *judge + " " + orDefaultStr(*judgeModel, eval.DefaultJudgeModel),
 		"ports": *portsFlag, "parallel": fmt.Sprint(len(ports)), "budget_usd": fmt.Sprint(*budget), "scenarios": *scen + filterNote(*filter),
 	}
-	if *promptsDir != "" {
-		setup["prompts_dir"] = *promptsDir
+	if promptsLine != "" {
+		setup["prompts_dir"] = promptsLine
 	}
 	if m, err := bench.LoadManifest(*manifest); err == nil {
 		if probs := m.Check(scs); len(probs) > 0 {

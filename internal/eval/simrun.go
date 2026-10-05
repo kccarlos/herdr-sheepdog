@@ -96,6 +96,9 @@ type SimRun struct {
 	// Extended is set when the judge said wait at end_call and the
 	// harness kept listening for the answer.
 	Extended bool `json:"extended,omitempty"`
+	// Explain is the explanation scores of a scenario with an explain
+	// block (orchestrator side only: tier 1 has no voice model).
+	Explain *ExplainScore `json:"explain,omitempty"`
 }
 
 // RunSim runs one scenario once (repeat is the run's index, for the
@@ -161,6 +164,7 @@ func RunSim(ctx context.Context, sc SimScenario, o SimOptions, repeat int) SimRu
 	silence := time.Duration(float64(caps.SilenceSeconds) * float64(time.Second) * scale)
 	minWait := time.Duration(float64(5*time.Second) * scale)
 	var convo []SimLine
+	var exchanges []ExplainExchange
 	convo = append(convo, w.push.drain()...)
 	silent := time.Duration(0)
 	waits := 0
@@ -220,8 +224,12 @@ loop:
 				break loop
 			}
 			run.Turns++
-			convo = append(convo, SimLine{AtMS: w.since(), Who: "ceo", Text: t.Text})
+			at := w.since()
+			convo = append(convo, SimLine{AtMS: at, Who: "ceo", Text: t.Text})
 			res, serr := w.say(ctx, t.Text)
+			if sc.Explain != nil {
+				exchanges = append(exchanges, ExplainExchange{Turn: run.Turns, AtMS: at, Kind: sc.Explain.Kind(run.Turns), Question: t.Text, Consulted: true, Orchestrator: JoinOrchestrator(res.Spoken, res.Detail, res.Options)})
+			}
 			reply := strings.TrimSpace(res.Spoken)
 			if len(res.Options) > 0 {
 				reply = strings.TrimSpace(reply + " Options: " + strings.Join(res.Options, "; ") + ".")
@@ -297,6 +305,10 @@ loop:
 		run.Verdicts[i].Name = names[i]
 	}
 	run.Failures = append(run.Failures, simFailures(sc, run, timeouts)...)
+	if sc.Explain != nil {
+		run.Explain = ScoreExplain(ctx, judge, sc.Explain, sc.Language, withPushes(exchanges, convo), false)
+		run.Failures = append(run.Failures, run.Explain.Failures()...)
+	}
 	return finish()
 }
 
@@ -448,6 +460,23 @@ func minDur(a, b time.Duration) time.Duration {
 		return a
 	}
 	return b
+}
+
+// withPushes adds each push to the orchestrator's text of the question
+// it followed (tier 1: a push is the orchestrator's own line).
+func withPushes(ex []ExplainExchange, convo []SimLine) []ExplainExchange {
+	for _, l := range convo {
+		if l.Who != "push" {
+			continue
+		}
+		for i := len(ex) - 1; i >= 0; i-- {
+			if l.AtMS >= ex[i].AtMS {
+				ex[i].Orchestrator = strings.TrimSpace(ex[i].Orchestrator + " " + l.Text)
+				break
+			}
+		}
+	}
+	return ex
 }
 
 // renderSim is the conversation as the CEO lived it, for the judge.

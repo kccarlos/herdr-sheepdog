@@ -112,6 +112,9 @@ type Run struct {
 	Spend      Spend                      `json:"spend"`
 	CostUSD    float64                    `json:"cost_usd_estimate"`
 	Extended   bool                       `json:"extended,omitempty"`
+	// Explain is the explanation scores of a scenario with an explain
+	// block: the orchestrator's text and the voice's speech separately.
+	Explain *eval.ExplainScore `json:"explain,omitempty"`
 	// Excerpt is a compact event timeline for the report.
 	Excerpt []string `json:"excerpt,omitempty"`
 }
@@ -147,6 +150,7 @@ type runner struct {
 	answering bool
 
 	eventFails []eval.Failure // the scenario's voice event checks
+	exchanges  []eval.ExplainExchange
 
 	fireMu sync.Mutex
 	fireAt time.Time // the collision's event landed
@@ -306,6 +310,10 @@ func RunScenario(ctx context.Context, sc Scenario, repeat, port int, o RunOption
 		run.Verdicts = append(run.Verdicts, eval.NamedVerdict{Name: names[i], Verdict: v})
 	}
 	run.Failures = append(run.Failures, r.failures()...)
+	if sc.Explain != nil {
+		run.Explain = eval.ScoreExplain(ctx, judge, sc.Explain, sc.Language, r.exchanges, true)
+		run.Failures = append(run.Failures, run.Explain.Failures()...)
+	}
 	return finish()
 }
 
@@ -697,8 +705,72 @@ func (r *runner) collect(rec voiceclient.Recording, proxy *FaultProxy) {
 		run.Proxy = &ProxyStats{Requests: req, Failed: failed}
 	}
 	run.Excerpt = excerpt(rec)
+	if r.sc.Explain != nil {
+		r.exchanges = explainExchanges(r.sc.Explain, r.lines, rec)
+	}
 	r.eventFails = voiceEventChecks(r.sc, rec.Events)
 	r.writeEvents(rec)
+}
+
+// explainExchanges splits the call at the CEO's lines: for each, the
+// orchestrator's text (every to_supervisor result's spoken and detail,
+// and the daemon's pushes) and what the voice said, until the next line.
+func explainExchanges(spec *eval.ExplainSpec, lines []UserLine, rec voiceclient.Recording) []eval.ExplainExchange {
+	var ex []eval.ExplainExchange
+	turn := 0
+	var bounds []int64
+	for _, l := range lines {
+		if l.BargeIn || l.Collision {
+			continue // not a scripted question
+		}
+		turn++
+		ex = append(ex, eval.ExplainExchange{Turn: turn, AtMS: l.AtMS, Kind: spec.Kind(turn), Question: l.Said})
+		bounds = append(bounds, l.AtMS)
+	}
+	at := func(ms int64) int {
+		for i := len(bounds) - 1; i >= 0; i-- {
+			if ms >= bounds[i] {
+				return i
+			}
+		}
+		return -1
+	}
+	add := func(dst *string, s string) {
+		if s = strings.TrimSpace(s); s != "" {
+			*dst = strings.TrimSpace(*dst + " " + s)
+		}
+	}
+	for _, ev := range rec.Events {
+		i := at(ev.AtMS)
+		if i < 0 {
+			continue
+		}
+		switch ev.Type {
+		case "voice.tool_result":
+			if n, _ := ev.Payload["name"].(string); n != "" && n != "to_supervisor" {
+				continue
+			}
+			spoken, _ := ev.Payload["spoken"].(string)
+			detail, _ := ev.Payload["detail"].(string)
+			var opts []string
+			if os, ok := ev.Payload["options"].([]any); ok {
+				for _, o := range os {
+					opts = append(opts, fmt.Sprint(o))
+				}
+			}
+			ex[i].Consulted = true
+			add(&ex[i].Orchestrator, eval.JoinOrchestrator(spoken, detail, opts))
+		case "voice.push":
+			text, _ := ev.Payload["text"].(string)
+			add(&ex[i].Orchestrator, text)
+		}
+	}
+	for _, u := range rec.Bot {
+		if i := at(u.StartMS); i >= 0 {
+			add(&ex[i].Voice, u.Heard)
+		}
+	}
+	return ex
 }
 
 // failures labels a finished run with the shared taxonomy.

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/app"
+	"github.com/kccarlos/herdr-sheepdog/internal/bench"
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
 	"github.com/kccarlos/herdr-sheepdog/internal/config"
 	"github.com/kccarlos/herdr-sheepdog/internal/eval"
@@ -224,7 +225,7 @@ func simSetup(o evalSimOpts, opts eval.SimOptions) map[string]string {
 		}
 		return s
 	}
-	return map[string]string{
+	setup := map[string]string{
 		"mode":               "live",
 		"brain":              opts.BrainConfig.Provider + " " + or(opts.BrainConfig.Model, brain.DefaultModel),
 		"simulated user":     or(o.simuser, eval.BackendVertex) + " " + or(o.simuserModel, eval.DefaultJudgeModel),
@@ -235,6 +236,10 @@ func simSetup(o evalSimOpts, opts eval.SimOptions) map[string]string {
 		"scenarios":          o.files + filterNote(o.filter),
 		"utterance_timeout":  opts.BrainConfig.UtteranceTimeout.String() + " (0s = the brain default, " + brain.DefaultUtteranceTimeout.String() + ")",
 	}
+	if line, err := bench.PromptsArm(o.promptsDir); err == nil && line != "" {
+		setup["prompts_dir"] = line
+	}
+	return setup
 }
 
 // fallbackModels picks the brain's extra providers out of models (every
@@ -327,6 +332,13 @@ func evalSimOptions(o evalSimOpts, cfg config.Config, log logging.Logger) (eval.
 	promptsDir := o.promptsDir
 	if promptsDir == "" {
 		promptsDir = cfg.Prompts.Dir
+	}
+	if o.promptsDir != "" {
+		// An A/B arm: refuse a directory whose files would be rejected
+		// (the embedded prompts would run instead).
+		if _, err := bench.PromptsArm(o.promptsDir); err != nil {
+			return eval.SimOptions{}, err
+		}
 	}
 	bcfg.Prompts = prompts.NewLoader(promptsDir, log)
 	opts := eval.SimOptions{BrainConfig: bcfg, FixtureDir: o.fixtures, EventsDir: o.events}

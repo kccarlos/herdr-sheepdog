@@ -189,7 +189,9 @@ type CampaignReport struct {
 	Total    CaseStats         `json:"total"`
 	Spend    []MeterLine       `json:"spend"`
 	SpendUSD float64           `json:"spend_usd_estimate"`
-	Runs     []SimRun          `json:"runs"`
+	// Explain aggregates the explanation scores (explain scenarios).
+	Explain *ExplainSummary `json:"explain,omitempty"`
+	Runs    []SimRun        `json:"runs"`
 }
 
 // NewCampaignReport assembles the report of runs.
@@ -199,7 +201,11 @@ func NewCampaignReport(started time.Time, setup map[string]string, repeat int, r
 		recs[i] = r.Record()
 	}
 	stats, total := Aggregate(recs)
-	return CampaignReport{Started: started, Finished: time.Now(), Setup: setup, Repeat: repeat, Stats: stats, Total: total, Spend: meter.Lines(), SpendUSD: meter.Total(), Runs: runs}
+	var ex []*ExplainScore
+	for _, r := range runs {
+		ex = append(ex, r.Explain)
+	}
+	return CampaignReport{Started: started, Finished: time.Now(), Setup: setup, Repeat: repeat, Stats: stats, Total: total, Spend: meter.Lines(), SpendUSD: meter.Total(), Explain: SummarizeExplain(ex), Runs: runs}
 }
 
 // WriteJSON writes the report to path.
@@ -275,6 +281,7 @@ func (c CampaignReport) WriteMarkdown(w io.Writer, maxFailures int) {
 			p("| %s | %d | %d | %.0f%% |\n", n, v[0], v[1], 100*float64(v[0])/float64(v[1]))
 		}
 	}
+	c.Explain.WriteMarkdown(w)
 	p("\n## Spend (estimate at list prices)\n\n| Role | Model | Calls | In | Out | Reasoning | $ |\n|---|---|---|---|---|---|---|\n")
 	for _, l := range c.Spend {
 		p("| %s | %s | %d | %d | %d | %d | %.3f |\n", l.Role, l.Model, l.Usage.Calls, l.Usage.In, l.Usage.Out, l.Usage.Reasoning, l.CostUSD)

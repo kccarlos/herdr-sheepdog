@@ -28,7 +28,9 @@ type Report struct {
 	Outcomes   map[string]int   `json:"latency_outcomes"`
 	Voice      VoiceSummary     `json:"voice"`
 	Spend      Spend            `json:"spend"`
-	Runs       []RunSummary     `json:"runs"`
+	// Explain aggregates the explanation scores (explain scenarios).
+	Explain *eval.ExplainSummary `json:"explain,omitempty"`
+	Runs    []RunSummary         `json:"runs"`
 }
 
 // RunSummary is a run's line in the report (the full record is under
@@ -180,6 +182,11 @@ func NewReport(started time.Time, setup map[string]string, repeat int, runs []Ru
 		v.WERByNoise[k] /= float64(nCond[k])
 	}
 	rep.Voice = v
+	var ex []*eval.ExplainScore
+	for _, r := range runs {
+		ex = append(ex, r.Explain)
+	}
+	rep.Explain = eval.SummarizeExplain(ex)
 	for _, r := range runs {
 		s := RunSummary{Scenario: r.Scenario, Category: r.Category, Repeat: r.Repeat, Status: r.Status, Primary: string(eval.Primary(r.Failures)), Failures: r.Failures, EndReason: r.EndReason, Turns: r.Turns, DurationS: float64(r.DurationMS) / 1000, CostUSD: r.CostUSD, Failovers: len(r.Failovers), MeanWER: r.Voice.MeanWER}
 		if r.Status == eval.RunFail || r.Status == eval.RunError {
@@ -288,6 +295,7 @@ func (rep Report) WriteMarkdown(w io.Writer, maxFailures int) {
 	_, _ = fmt.Fprintf(w, "- Pushes: unheard %d, re-queued %d, deferred %d, held (no listener) %d. Brain failovers %d.\n", v.Unheard, v.Requeued, v.Deferred, v.Held, v.Failovers)
 	_, _ = fmt.Fprintf(w, "- Bot utterances that read a bracketed marker aloud (\"[system event, …]\"): %d; with audio but no transcript: %d.\n", v.MarkupSpoken, v.EmptyBot)
 	_, _ = fmt.Fprintf(w, "- CEO lines rendered by: %s.\n", fmtCounts(v.TTSSources))
+	rep.Explain.WriteMarkdown(w)
 	_, _ = fmt.Fprintf(w, "\n## Failed runs\n\n")
 	n := 0
 	for _, r := range rep.Runs {
