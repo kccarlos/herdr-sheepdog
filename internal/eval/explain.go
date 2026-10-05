@@ -108,6 +108,10 @@ type ExplainExchange struct {
 	// order: each to_supervisor result's spoken and detail (and
 	// options), and its pushes.
 	Orchestrator string `json:"orchestrator,omitempty"`
+	// Spoken is the spoken part of the orchestrator's text alone (its
+	// detail is background for the voice, not a line to say): what the
+	// orchestrator's padding is judged on.
+	Spoken string `json:"orchestrator_spoken,omitempty"`
 	// Consulted: the voice asked the orchestrator about this question
 	// (always at tier 1).
 	Consulted bool `json:"consulted"`
@@ -266,7 +270,11 @@ func ScoreExplain(ctx context.Context, j Judge, spec *ExplainSpec, lang string, 
 			if e.Kind == ExplainKindSimple {
 				name = fmt.Sprintf("explain_padding_t%d", e.Turn)
 			}
-			jobs = append(jobs, job{in: JudgeInput{Criterion: fmt.Sprintf(crit, e.Question), Transcript: renderExchanges(ex[:i+1], sd.text), Final: true}, side: sd.out, name: name, point: -1})
+			text := sd.text
+			if e.Kind == ExplainKindSimple && sd.name == "orchestrator" {
+				text = func(e ExplainExchange) string { return orDefault(e.Spoken, e.Orchestrator) }
+			}
+			jobs = append(jobs, job{in: JudgeInput{Criterion: fmt.Sprintf(crit, e.Question), Transcript: renderExchanges(ex[:i+1], text), Final: true}, side: sd.out, name: name, point: -1})
 		}
 		if spec.substantive() {
 			all := renderExchanges(ex, sd.text)

@@ -228,7 +228,7 @@ loop:
 			convo = append(convo, SimLine{AtMS: at, Who: "ceo", Text: t.Text})
 			res, serr := w.say(ctx, t.Text)
 			if sc.Explain != nil {
-				exchanges = append(exchanges, ExplainExchange{Turn: run.Turns, AtMS: at, Kind: sc.Explain.Kind(run.Turns), Question: t.Text, Consulted: true, Orchestrator: JoinOrchestrator(res.Spoken, res.Detail, res.Options)})
+				exchanges = append(exchanges, ExplainExchange{Turn: run.Turns, AtMS: at, Kind: sc.Explain.Kind(run.Turns), Question: t.Text, Consulted: true, Orchestrator: JoinOrchestrator(res.Spoken, res.Detail, res.Options), Spoken: strings.TrimSpace(res.Spoken)})
 			}
 			reply := strings.TrimSpace(res.Spoken)
 			if len(res.Options) > 0 {
@@ -472,6 +472,7 @@ func withPushes(ex []ExplainExchange, convo []SimLine) []ExplainExchange {
 		for i := len(ex) - 1; i >= 0; i-- {
 			if l.AtMS >= ex[i].AtMS {
 				ex[i].Orchestrator = strings.TrimSpace(ex[i].Orchestrator + " " + l.Text)
+				ex[i].Spoken = strings.TrimSpace(ex[i].Spoken + " " + l.Text)
 				break
 			}
 		}

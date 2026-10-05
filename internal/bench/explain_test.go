@@ -22,7 +22,8 @@ func TestExplainExchanges(t *testing.T) {
 		Events: []voiceclient.Event{
 			{AtMS: 500, Type: "voice.push", Payload: map[string]any{"text": "connect announcement"}},
 			{AtMS: 4000, Type: "voice.tool_result", Payload: map[string]any{"name": "to_supervisor", "spoken": "Four sentences.", "detail": "More detail.", "options": []any{"重构", "先不管"}}},
-			{AtMS: 6000, Type: "voice.push", Payload: map[string]any{"text": "A push."}},
+			{AtMS: 6000, Type: "voice.push", Payload: map[string]any{"text": "A push.", "urgency": "when_idle"}},
+			{AtMS: 7000, Type: "voice.push", Payload: map[string]any{"text": "Current focus, for follow-ups (context only).", "focus": "True", "urgency": "silent"}},
 		},
 		Bot: []voiceclient.BotUtterance{{StartMS: 5000, Heard: "Two sentences."}, {StartMS: 21000, Heard: "Rephrased."}},
 	}

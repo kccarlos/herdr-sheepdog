@@ -760,9 +760,14 @@ func explainExchanges(spec *eval.ExplainSpec, lines []UserLine, rec voiceclient.
 			}
 			ex[i].Consulted = true
 			add(&ex[i].Orchestrator, eval.JoinOrchestrator(spoken, detail, opts))
+			add(&ex[i].Spoken, spoken)
 		case "voice.push":
+			if strings.EqualFold(fmt.Sprint(ev.Payload["focus"]), "true") || ev.Payload["urgency"] == "silent" {
+				continue // context for the voice (focus, names), not a line to say
+			}
 			text, _ := ev.Payload["text"].(string)
 			add(&ex[i].Orchestrator, text)
+			add(&ex[i].Spoken, text)
 		}
 	}
 	for _, u := range rec.Bot {
