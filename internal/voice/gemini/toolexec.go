@@ -60,7 +60,8 @@ func (s *Session) execTool(ctx context.Context, gen int, call voice.ToolCall, tu
 	}
 	started := s.now()
 	res, err := handler(ctx, call)
-	handlerMS := s.now().Sub(started).Milliseconds()
+	answeredAt := s.now()
+	handlerMS := answeredAt.Sub(started).Milliseconds()
 	if ctx.Err() != nil {
 		s.log.Log(logSource, "voice.tool_result", "", map[string]any{"id": call.ID, "name": call.Name, "cancelled": true})
 		s.emit(voice.EventToolResult{Call: call, Err: ctx.Err(), Cancelled: true})
@@ -100,7 +101,7 @@ func (s *Session) execTool(ctx context.Context, gen int, call voice.ToolCall, tu
 	}
 	resp := map[string]any{"spoken": res.Spoken}
 	if s.useBriefings() {
-		resp = s.answerBriefing(call, res)
+		resp = s.answerBriefing(call, res, answeredAt)
 	}
 	if res.Clarify {
 		resp["clarify"] = true
@@ -247,6 +248,12 @@ func answerLine(call voice.ToolCall, res voice.ToolResult) (string, map[string]a
 	}
 	if call.ID != "" {
 		tags[ctxcap.TagCallID] = call.ID
+	}
+	if len(res.NotVerified) > 0 {
+		tags[voice.TagNotVerified] = res.NotVerified
+	}
+	if len(res.Agents) > 0 {
+		tags[voice.TagAgents] = res.Agents
 	}
 	return line, tags
 }

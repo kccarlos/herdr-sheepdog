@@ -42,6 +42,10 @@ type turn struct {
 	acted      []string        // spoken echoes of actions sent
 	actedOn    []string        // the panes those actions went to, each once
 	prompted   map[string]bool // pane + instruction already typed this turn (execTool)
+	// notVerified: the tool calls that timed out (Reply.NotVerified);
+	// consulted: the aliases the tools named (Reply.Agents).
+	notVerified []string
+	consulted   []string
 	// prior is the answer an event turn wrote before it learned a line
 	// about its event had gone out meanwhile (recheck): the turn asks
 	// once more with that fact; should the second step fail, prior is
@@ -298,6 +302,7 @@ func (b *Brain) run(ctx context.Context, t *turn) (Reply, error) {
 			}
 			b.ingest(t.reply(answer, raw), t.n)
 			reply.Turn, reply.Acted, reply.ActedOn = t.n, len(t.acted) > 0, t.actedOn
+			reply.NotVerified, reply.Agents = t.notVerified, t.consulted
 			if b.recheck(t, step, reply) {
 				continue
 			}
@@ -372,6 +377,10 @@ func (b *Brain) execCalls(ctx context.Context, t *turn, resp *genai.GenerateCont
 		dur := b.cfg.Now().Sub(t0).Milliseconds()
 		if limit > 0 {
 			b.log.Log(logSource, "brain.tool_timeout", "", map[string]any{"id": id, "name": fc.Name, "timeout_ms": limit.Milliseconds(), "agent": out.agent, "turn": t.n})
+			t.notVerified = append(t.notVerified, notVerifiedLine(fc.Name, out.agent, limit))
+		}
+		if out.agent != "" && !slices.Contains(t.consulted, out.agent) {
+			t.consulted = append(t.consulted, out.agent)
 		}
 		if out.railBlocked != "" {
 			b.log.Log(logSource, "brain.rail_blocked", "", map[string]any{"id": id, "agent": out.agent, "keys": keysArg(fc.Args["keys"]), "trigger": string(t.req.Trigger), "reason": out.railBlocked, "turn": t.n})
@@ -465,6 +474,7 @@ func (b *Brain) fail(t *turn, reason string, cause error) (Reply, error) {
 		b.ingest(Message{Role: RoleAssistant, Kind: KindReply, Content: mustJSON(reply)}, t.n)
 		b.logTurn(t, false)
 		reply.Turn, reply.Acted, reply.ActedOn = t.n, true, t.actedOn
+		reply.NotVerified, reply.Agents = t.notVerified, t.consulted
 		return reply, nil
 	}
 	b.logTurn(t, true)
@@ -778,4 +788,14 @@ func thinkingLevel(s string) genai.ThinkingLevel {
 func mustJSON(v any) string {
 	b, _ := json.Marshal(v)
 	return string(b)
+}
+
+// notVerifiedLine is one Reply.NotVerified entry: the tool, the agent it
+// was about and the timeout that expired.
+func notVerifiedLine(tool, agent string, limit time.Duration) string {
+	line := tool + " timed out after " + seconds(limit)
+	if agent != "" {
+		line = tool + " about " + agent + " timed out after " + seconds(limit)
+	}
+	return line
 }

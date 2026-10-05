@@ -31,6 +31,14 @@ func toolTimeoutCase(t *testing.T, h *harness, name string) {
 	if rep.Spoken != "Auth is not responding." {
 		t.Errorf("reply = %+v", rep)
 	}
+	// The timeout reaches the voice as a fact beside the answer
+	// (Reply.NotVerified), and the agent as one the answer is about.
+	if len(rep.NotVerified) != 1 || !strings.Contains(rep.NotVerified[0], name+" about auth timed out after 1 s") {
+		t.Errorf("NotVerified = %v", rep.NotVerified)
+	}
+	if len(rep.Agents) != 1 || rep.Agents[0] != "auth" {
+		t.Errorf("Agents = %v", rep.Agents)
+	}
 	if d := time.Since(t0); d > 2500*time.Millisecond {
 		t.Errorf("turn took %v", d)
 	}

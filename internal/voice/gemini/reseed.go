@@ -146,7 +146,7 @@ func (s *Session) reseedBriefings(conn Conn) {
 	s.mu.Unlock()
 	for _, r := range recs {
 		rr := r
-		rr.payload = resentPayload(r, "re-sent because the voice connection restarted without its history; first sent at "+clock(r.at)+"; a newer briefing supersedes it")
+		rr.payload = s.resentPayload(r, "re-sent because the voice connection restarted without its history; first sent at "+clock(r.at)+"; a newer briefing supersedes it")
 		s.sendMu.Lock()
 		err := conn.SendToolResponse(briefingResponse(rr, voice.UrgencySilent))
 		s.sendMu.Unlock()

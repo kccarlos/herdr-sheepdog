@@ -95,6 +95,13 @@ type ToolResult struct {
 	// never sent to the model: the session puts it on the voice.playback
 	// {state: started} that follows (turn.latency's first audio).
 	UtteranceID string
+	// NotVerified lists the slow brain's checks that did not finish
+	// (brain.Reply.NotVerified); the voice is told nothing they would
+	// have shown is verified.
+	NotVerified []string
+	// Agents are the aliases the answer's tools read or acted on
+	// (brain.Reply.Agents): the voice gets their state at delivery.
+	Agents []string
 }
 
 // ToolHandler executes one tool call. ctx is cancelled when the model

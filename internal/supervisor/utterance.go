@@ -465,6 +465,16 @@ func (s *Supervisor) deliverLate(turnCtx context.Context, u *inflightUtterance, 
 	if u.callID != "" {
 		tags[tagCallID] = u.callID
 	}
+	if out.ok {
+		// Facts the voice cannot see: checks that did not finish, and
+		// the agents the answer is about (their state at delivery).
+		if len(out.res.NotVerified) > 0 {
+			tags[voice.TagNotVerified] = out.res.NotVerified
+		}
+		if len(out.res.Agents) > 0 {
+			tags[voice.TagAgents] = out.res.Agents
+		}
+	}
 	s.pushTagged(paneID, line, urgency, tags)
 	if out.ok && !stale {
 		// A stale reply is context, not what is being discussed: it

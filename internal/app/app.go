@@ -364,10 +364,13 @@ func (a *App) wire() error {
 		Aliases: a.aliases(),
 		// The running agents' spoken names, read at every (re)connect
 		// (docs/roles.md "Agent names").
-		Names:   sup.SpokenNames,
-		Name:    cfg.Voice.Name,
-		Handler: sup.Handler(),
-		Prompts: a.prompts,
+		Names: sup.SpokenNames,
+		// Every briefing about an agent names it by its spoken name and
+		// says its state as of delivery (information, prompt v5).
+		AgentNow: sup.AgentNow,
+		Name:     cfg.Voice.Name,
+		Handler:  sup.Handler(),
+		Prompts:  a.prompts,
 
 		StallAfter:       time.Duration(cfg.Gemini.StallAfterS) * time.Second,
 		StartSensitivity: cfg.Gemini.StartSensitivity,

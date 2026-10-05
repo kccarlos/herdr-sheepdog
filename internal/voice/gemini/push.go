@@ -375,11 +375,16 @@ func (s *Session) doPush(ctx context.Context, item pushItem) {
 	}
 	turnComplete := item.urgency != voice.UrgencySilent
 	var brief briefRec
+	var unvoiced *unvoicedReport
 	if s.useBriefings() {
 		s.mu.Lock()
-		brief = s.newBriefingLocked(item.text, item.urgency, item.tags)
+		if turnComplete {
+			unvoiced = s.nextBriefingLocked()
+		}
+		brief = s.newBriefingLocked(item.text, item.urgency, item.tags, item.at)
 		s.mu.Unlock()
 	}
+	s.reportUnvoiced(unvoiced, false)
 	err := s.sendOn(gen, func(c Conn) error {
 		if s.useBriefings() {
 			return sendBriefing(c, item, brief)
@@ -428,6 +433,9 @@ func (s *Session) doPush(ctx context.Context, item pushItem) {
 		s.openTurnLocked()
 		if s.turn != nil {
 			s.turn.pushesSpoken++
+		}
+		if brief.id != "" {
+			s.watchVoicedLocked(brief, item.text, item.tags) // unvoiced.go
 		}
 	}
 	now := s.now()
