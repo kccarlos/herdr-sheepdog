@@ -1,8 +1,8 @@
 # Status (2026-10-05)
 
-## Polish batch B (PR #36, unreleased)
+## Polish batch B (PR #36, in 0.1.4 (48))
 
-On `main` after merge, not yet in a TestFlight build: connection chip words
+In TestFlight 0.1.4 (48): connection chip words
 (Connecting on the first connect, Reconnecting after a drop, Offline, Token
 refused, spinner while in flight; a quiet `/events` stream counts as open once
 the daemon answers 200), one agent window for the strip and the Flock cards,
@@ -14,9 +14,11 @@ are the "before" for chip, Flock, Health and Settings).
 
 ## Distribution
 
-TestFlight build **0.1.3 (35)**, internal group **Me**. Xcode Cloud built it
-from tag `v0.1.3` (`5b9b97f`, PR #34) with the **TestFlight** workflow; it
-adds Settings ▸ Languages (#33) to 0.1.2 (29) (the agent window, #31).
+TestFlight build **0.1.4 (48)**, internal group **Me** (processed, IN_BETA_TESTING).
+Xcode Cloud built it from tag `v0.1.4` (`b90c38d`, PR #38) with the **TestFlight**
+workflow, the first signed archive with the widget extension; it exported with
+no signing change. It adds the UI polish (#36) and the Live Activity widget,
+App Intents and earbud remote (#37) to 0.1.3 (35) (Settings ▸ Languages, #33).
 No GitHub Actions run anything here (Xcode Cloud
 only, see [`xcode-cloud.md`](xcode-cloud.md)).
 The App Store Connect record is **"Sheepdog for herdr"**. For setup,
