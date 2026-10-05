@@ -14,6 +14,7 @@ built from tag `v0.1.3` (`5b9b97f`, #34).
 | Team | KECHENG AN, Team ID `GV776BZVA8`, Apple ID thisiskecheng@gmail.com (`DEVELOPMENT_TEAM` in `project.yml`) |
 | App bundle ID | `com.github.kccarlos.herdr-sheepdog-ios` |
 | Framework bundle ID | `com.github.kccarlos.herdr-sheepdog-ios.kit` (embedded, not registered separately) |
+| Widget extension bundle ID | `com.github.kccarlos.herdr-sheepdog-ios.widgets` (`SheepdogWidgets`: the Live Activity and the Talk control). Registered on the team with `asc` on 2026-10-05 (resource `3TB5FGDCW7`), no capabilities. No App Group: nothing is shared through one |
 | App Store Connect record | "Sheepdog for herdr" (the name "Sheepdog" was taken), App ID 6817155887, SKU `herdr-sheepdog-ios` |
 | Product and scheme | `Sheepdog` (shared; Test runs `SheepdogKitTests` and `SheepdogUITests`, Archive uses Release) |
 | Version | `MARKETING_VERSION` in `project.yml` (now `0.1.3`) |
@@ -80,7 +81,19 @@ Sensitive Notifications** were enabled by hand on the App ID
 `com.github.kccarlos.herdr-sheepdog-ios`
 (<https://developer.apple.com/account/resources/identifiers/list>), and the
 next build shipped. Any new capability needs the same step before the
-first archive that uses it. On the daemon side, you need an APNs auth key
+first archive that uses it.
+
+**The widget extension** (`SheepdogWidgets`, since #37) is embedded in the
+app and signed with its own App ID,
+`com.github.kccarlos.herdr-sheepdog-ios.widgets`, registered ahead of time
+with `asc bundle-ids create` so the archive's automatic signing only has to
+make profiles. It has no entitlements: Live Activities need only
+`NSSupportsLiveActivities` in the app's Info.plist, and its App Intents run
+in the app's process. The PR workflow builds for the simulator, which does
+not sign, so the first tag archive after #37 is the first real check of
+this. If an App Group is ever added, create the group first on
+developer.apple.com (Identifiers ▸ App Groups ▸ +; the App Store Connect
+API cannot create one), then tick it on both App IDs. On the daemon side, you need an APNs auth key
 (`.p8`) for team `GV776BZVA8` (herdr-sheepdog `docs/push.md`).
 
 **Export compliance.** `ITSAppUsesNonExemptEncryption` is `NO` in the app's

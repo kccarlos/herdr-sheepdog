@@ -23,6 +23,8 @@ struct ConversationView: View {
 
     @State private var atBottom = true
     @State private var lastSeenID: String?
+    /// The "N updates" rows the shepherd opened, by their id.
+    @State private var openGroups: Set<String> = []
 
     private var hasContent: Bool {
         rows.contains { if case .day = $0 { return false } else { return true } }
@@ -41,15 +43,31 @@ struct ConversationView: View {
                         EmptyConversation(voiceName: voiceName)
                             .padding(.top, 28)
                     }
-                    ForEach(rows) { row in
+                    // Runs of the daemon's pushes and notices fold into one
+                    // "N updates" row; what was said stays in the open.
+                    ForEach(ConversationTimeline.grouped(rows, keepVisible: pointerIDs)) { display in
                         Group {
-                            if pointerIDs.contains(row.id) {
-                                QuestionPointer(row: row)
-                            } else {
-                                RowView(row: row, voiceName: voiceName, activePendingID: activePendingID)
+                            switch display {
+                            case let .row(row):
+                                if pointerIDs.contains(row.id) {
+                                    QuestionPointer(row: row)
+                                } else {
+                                    RowView(row: row, voiceName: voiceName, activePendingID: activePendingID)
+                                }
+                            case let .updates(id, members):
+                                UpdatesGroup(
+                                    rows: members,
+                                    isOpen: openGroups.contains(id),
+                                    voiceName: voiceName,
+                                    activePendingID: activePendingID
+                                ) {
+                                    withAnimation(.easeInOut(duration: 0.2)) {
+                                        if openGroups.contains(id) { openGroups.remove(id) } else { openGroups.insert(id) }
+                                    }
+                                }
                             }
                         }
-                            .id(row.id)
+                            .id(display.id)
                     }
                     Color.clear
                         .frame(height: 1)
@@ -138,7 +156,10 @@ struct ConversationView: View {
     /// Loads the older page and puts the row that was at the top back at
     /// the top, so the conversation does not jump under the thumb.
     private func loadKeepingPosition(_ proxy: ScrollViewProxy) async {
-        let anchor = rows.first { if case .day = $0 { return false } else { return true } }?.id
+        // A display row's id: the first update of a folded run is not on
+        // screen under its own id.
+        let anchor = ConversationTimeline.grouped(rows, keepVisible: pointerIDs)
+            .first { if case .row(.day) = $0 { return false } else { return true } }?.id
         await loadOlder()
         if let anchor {
             proxy.scrollTo(anchor, anchor: .top)
@@ -204,6 +225,69 @@ struct RowView: View {
             BrainReplyCard(reply: reply, compact: compact, voiceName: voiceName)
         case let .held(push):
             HeldPushCard(push: push)
+        }
+    }
+}
+
+/// Consecutive pushes and notices folded into one quiet row: "3 updates"
+/// and the newest one's words; a tap lists them all.
+struct UpdatesGroup: View {
+    let rows: [TimelineRow]
+    let isOpen: Bool
+    let voiceName: String
+    let activePendingID: String?
+    let toggle: () -> Void
+
+    private var title: String { ConversationTimeline.updatesTitle(rows.count) }
+    private var latest: String { rows.last.map(ConversationTimeline.updateText) ?? "" }
+
+    var body: some View {
+        VStack(spacing: 8) {
+            Button(action: toggle) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Image(systemName: "bell.badge")
+                        .font(.footnote)
+                        .foregroundStyle(Theme.idle)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(title)
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        if !isOpen, !latest.isEmpty {
+                            Text(latest)
+                                .font(.footnote)
+                                .foregroundStyle(.tertiary)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                        }
+                    }
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.down")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                        .rotationEffect(.degrees(isOpen ? 180 : 0))
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .strokeBorder(Color(.separator), lineWidth: 0.5)
+                )
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(isOpen ? title : "\(title). Latest: \(latest)")
+            .accessibilityHint(isOpen ? "Hides them" : "Shows them all")
+            .accessibilityAddTraits(.isButton)
+            .accessibilityIdentifier("conversation.updates")
+
+            if isOpen {
+                ForEach(rows) { row in
+                    RowView(row: row, voiceName: voiceName, activePendingID: activePendingID)
+                }
+                .transition(.opacity)
+            }
         }
     }
 }

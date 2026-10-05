@@ -31,9 +31,23 @@ struct SheepdogApp: App {
 
     var body: some Scene {
         WindowGroup {
-            MainView()
-                .environmentObject(model)
-                .onAppear { PushCoordinator.shared.model = model }
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-sheepdogLiveActivityGallery") {
+                LiveActivityGallery()
+            } else {
+                mainView
+            }
+            #else
+            mainView
+            #endif
         }
+    }
+
+    private var mainView: some View {
+        MainView()
+            .environmentObject(model)
+            .onAppear { PushCoordinator.shared.model = model }
+            // sheepdog://talk, sheepdog://agent/<pane id> (AppRoute).
+            .onOpenURL { url in model.open(url: url) }
     }
 }

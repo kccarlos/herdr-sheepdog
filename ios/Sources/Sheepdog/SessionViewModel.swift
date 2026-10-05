@@ -221,6 +221,8 @@ final class SessionViewModel: ObservableObject {
     private var client: DaemonClient
     private var socket: VoiceSocket
     private let audio = AudioEngine()
+    /// The Live Activity and the earbud remote (`AwayControls.swift`).
+    let away = AwayControls()
     private var reducer = ConversationReducer()
     private var history = ConversationHistory()
     /// The brain's replies and held pushes, which the history does not carry.
@@ -265,6 +267,7 @@ final class SessionViewModel: ObservableObject {
         }
         #endif
         wire()
+        away.onRoute = { [weak self] route in self?.handle(route: route) }
         // The last conversation, at once: before the network, or without it.
         loadCache()
         conversationChanged(save: false)
@@ -273,6 +276,11 @@ final class SessionViewModel: ObservableObject {
     /// Called once from the first `onAppear`: an unconfigured app opens
     /// Settings instead of showing a Connect button that cannot work.
     func start() {
+        // Siri, the Action Button and the Live Activity's buttons reach the
+        // session from here on; a route that came first (a cold launch from
+        // "Talk to Sheepdog") runs now.
+        SheepdogIntentBridge.install { [weak self] url in self?.open(url: url) }
+        syncAway()
         if !isConfigured || !settings.hasBeenConfigured {
             showSettings = true
         } else {
@@ -811,6 +819,59 @@ final class SessionViewModel: ObservableObject {
         if handshake != core.connection.handshake { handshake = core.connection.handshake }
         let next = core.sessionState
         if next != state { state = next }
+        syncAway()
+    }
+
+    // MARK: - Away from the screen
+
+    /// The Live Activity and the earbud remote follow the session: there
+    /// while a voice session is wanted, gone the moment it ends.
+    private func syncAway() {
+        #if DEBUG
+        if let demo = DebugLaunch.demoLiveActivity {
+            away.sync(VoiceActivityState.make(state: demo, muted: demo == .muted, waiting: 2, voiceName: voiceName), voiceName: voiceName)
+            return
+        }
+        #endif
+        let activityState = wantsConnection
+            ? VoiceActivityState.make(
+                state: state,
+                muted: isMuted,
+                waiting: flock.waitingCount,
+                voiceName: voiceName,
+                suspendedInBackground: core.suspension.backgroundSuspended
+            )
+            : nil
+        away.sync(activityState, voiceName: voiceName)
+    }
+
+    /// A `sheepdog://` link, or an App Intent speaking one.
+    func open(url: URL) {
+        guard let route = AppRoute(url: url) else {
+            SheepdogLog.session.info("ignored link \(url.absoluteString, privacy: .public)")
+            return
+        }
+        handle(route: route)
+    }
+
+    func handle(route: AppRoute) {
+        for action in route.actions(wantsConnection: wantsConnection, muted: isMuted) {
+            switch action {
+            case .showConversation:
+                pane = .conversation
+            case .connect:
+                connect()
+            case .toggleMute:
+                toggleMute()
+            case .stop:
+                stop()
+            case .disconnect:
+                disconnect()
+            case let .openAgent(id):
+                // What a tap on an agent's notification does.
+                PushCoordinator.shared.focus(paneID: id)
+            }
+        }
     }
 
     // MARK: - Events and state
@@ -1019,7 +1080,10 @@ final class SessionViewModel: ObservableObject {
         if DebugLaunch.demoMarkdown { all.append(DebugLaunch.markdownAgent) }
         #endif
         let sorted = Flock.sorted(all)
-        if sorted != agents { agents = sorted }
+        if sorted != agents {
+            agents = sorted
+            syncAway()
+        }
         pendingAction = state.pendingAction
         applyApproval(approvalFlow.present(state.pendingAction))
         brain = state.brain

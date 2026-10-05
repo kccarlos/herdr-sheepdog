@@ -50,8 +50,17 @@ targets:
     platform: iOS
     sources:
       - path: Sources/Sheepdog
+      # The Live Activity's attributes and the App Intents, shared with
+      # SheepdogWidgets (the widget renders, the app runs the intents).
+      - path: Sources/SheepdogActivity
+      # The widget's views, for the DEBUG Live Activity gallery
+      # (LiveActivityGallery.swift); the @main bundle stays extension-only.
+      - path: Sources/SheepdogWidgets/VoiceSessionLiveActivity.swift
     dependencies:
       - target: SheepdogKit
+      # Embedded in PlugIns/: the Live Activity, Dynamic Island and the
+      # "Talk to Sheepdog" control.
+      - target: SheepdogWidgets
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.github.kccarlos.herdr-sheepdog-ios
@@ -89,6 +98,15 @@ targets:
         UILaunchScreen: {}
         UIBackgroundModes:
           - audio
+        # The voice session's Live Activity (SheepdogWidgets). Started and
+        # updated locally; no push updates, so no push-type entitlement.
+        NSSupportsLiveActivities: true
+        # sheepdog://talk starts the voice session, sheepdog://agent/<pane id>
+        # opens that agent (SheepdogKit AppRoute).
+        CFBundleURLTypes:
+          - CFBundleURLName: com.github.kccarlos.herdr-sheepdog-ios
+            CFBundleURLSchemes:
+              - sheepdog
         NSMicrophoneUsageDescription: >-
           Sheepdog uses the microphone so you can talk to your flock of coding
           agents. Audio goes only to the sheepdog daemon you point the app at.
@@ -115,6 +133,36 @@ targets:
         # sandbox or production, from the configuration (above); read by
         # PushCoordinator when it registers the device token with the daemon.
         SheepdogPushEnvironment: $(SHEEPDOG_PUSH_ENVIRONMENT)
+
+  # The widget extension: the voice session's Live Activity (lock screen
+  # and Dynamic Island) and, on iOS 18+, the "Talk to Sheepdog" control.
+  # It renders only; its buttons are App Intents the system runs in the
+  # app's process. No App Group: nothing is shared through a container
+  # (ActivityKit carries the content state). Its bundle ID is registered on
+  # team GV776BZVA8 with no capabilities (docs/xcode-cloud.md).
+  SheepdogWidgets:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: Sources/SheepdogWidgets
+      - path: Sources/SheepdogActivity
+    info:
+      path: Sources/SheepdogWidgets/Info.plist
+      properties:
+        # An extension's versions must match the app's or App Store
+        # validation rejects the upload; XcodeGen would write 1.0/1.
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        # Required on every embedded appex (validation error 90360).
+        CFBundleDisplayName: Sheepdog
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.github.kccarlos.herdr-sheepdog-ios.widgets
+        PRODUCT_NAME: SheepdogWidgets
+        TARGETED_DEVICE_FAMILY: "1"
+        SKIP_INSTALL: YES
 
   SheepdogUITests:
     type: bundle.ui-testing
@@ -157,6 +205,7 @@ schemes:
       targets:
         Sheepdog: all
         SheepdogKit: all
+        SheepdogWidgets: all
     run:
       config: Debug
     test:

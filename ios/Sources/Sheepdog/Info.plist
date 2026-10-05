@@ -18,6 +18,17 @@
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
 	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.github.kccarlos.herdr-sheepdog-ios</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>sheepdog</string>
+			</array>
+		</dict>
+	</array>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
@@ -33,6 +44,8 @@
 	<string>Sheepdog talks to the sheepdog daemon running on your Mac, over your local network or Tailscale.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Sheepdog uses the microphone so you can talk to your flock of coding agents. Audio goes only to the sheepdog daemon you point the app at.</string>
+	<key>NSSupportsLiveActivities</key>
+	<true/>
 	<key>SheepdogPushEnvironment</key>
 	<string>$(SHEEPDOG_PUSH_ENVIRONMENT)</string>
 	<key>UIBackgroundModes</key>

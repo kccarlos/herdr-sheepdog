@@ -127,7 +127,16 @@ final class WalkthroughUITests: XCTestCase {
         // The newest push about docs (the fixture daemon's history may hold
         // older pushes about other agents).
         let push = app.descendants(matching: .any).matching(identifier: "bubble.push").matching(NSPredicate(format: "label CONTAINS 'docs'")).firstMatch
-        XCTAssertTrue(push.waitForExistence(timeout: 20), "a push belongs in the conversation as a system card")
+        // Back-to-back pushes fold into one "N updates" row: open the newest.
+        let groups = app.descendants(matching: .any).matching(identifier: "conversation.updates")
+        let deadline = Date().addingTimeInterval(20)
+        while !push.exists, Date() < deadline {
+            if groups.count > 0, groups.element(boundBy: groups.count - 1).label.contains("docs") {
+                groups.element(boundBy: groups.count - 1).tap()
+            }
+            _ = push.waitForExistence(timeout: 1)
+        }
+        XCTAssertTrue(push.waitForExistence(timeout: 2), "a push belongs in the conversation as a system card")
         shot(app, "06-push")
 
         // 8. Point it at a port with nothing behind it: a plain sentence,

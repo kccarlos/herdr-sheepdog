@@ -20,6 +20,12 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
         MainActor.assumeIsolated { PushCoordinator.shared.didFailToRegister(error) }
     }
+
+    /// Swiped away from the app switcher: take the Live Activity and the
+    /// Now Playing entry with it (the next launch ends any it missed).
+    func applicationWillTerminate(_ application: UIApplication) {
+        MainActor.assumeIsolated { PushCoordinator.shared.model?.away.tearDown() }
+    }
 }
 
 /// Phone notifications: asks for permission after the first successful

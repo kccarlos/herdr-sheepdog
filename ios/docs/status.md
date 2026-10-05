@@ -32,6 +32,20 @@ The CEO checked these on 2026-10-01 and 2026-10-02 with TestFlight build
   `language_options`; 简体中文 and 繁體中文 are separate); each change is
   `PUT /api/settings {"languages": [...]}` and both brains are told
   (daemon #142). In 0.1.3 (35); unit tests and a simulator build only so far, not tried on the phone.
+- **Away from the screen (#37, not in TestFlight yet):** the voice
+  session's Live Activity on the lock screen and in the Dynamic Island
+  (listening / speaking / muted / thinking / paused, agents waiting for
+  an answer, Mute and End buttons), the earbud remote (play/pause toggles
+  mute, next track is Stop, Now Playing shows the session), "Talk to
+  Sheepdog" (Siri, Shortcuts, the Action Button, an iOS 18 Control Center
+  control), `sheepdog://talk` and `sheepdog://agent/<pane id>`, and runs
+  of daemon pushes and notices folded into one "N updates" row. Unit
+  tests and simulator builds only. A headless simulator neither locks nor
+  draws the Dynamic Island, and `simctl openurl` stops at the system's
+  "Open in Sheepdog?" prompt, so the activity's views were checked in the
+  in-app gallery (below), not on a real lock screen. Whether AirPods send
+  play/pause to the app during a `.voiceChat` session is the main thing
+  to try on the phone.
 - **AirPods and audio route changes.** This includes AirPods going in or
   out mid-session and whether the needs-you chime reaches them.
 - **AskUserQuestion with several questions** in one prompt.
@@ -58,7 +72,7 @@ xcodegen generate
 xcodebuild -scheme Sheepdog -destination 'platform=iOS Simulator,name=iPhone 17 Pro' build test
 ```
 
-The unit suite (`SheepdogKitTests`) has 400 tests. `LiveDaemonTests` and
+The unit suite (`SheepdogKitTests`) has 431 tests. `LiveDaemonTests` and
 every UI test skip themselves when no daemon answers on `127.0.0.1:7799`,
 so Xcode Cloud stays green without a daemon.
 
@@ -114,6 +128,16 @@ cannot produce.
 | ![](screenshots/review-light-agent-screen.png) | ![](screenshots/review-dark-agent-screen.png) | Agent window: an agent's live terminal from its Flock card, wide lines scrolling sideways, with the key bar and prompt field. |
 | ![](screenshots/review-light-agent-screen-confirm.png) | ![](screenshots/review-dark-agent-screen-confirm.png) | Ctrl-C (and Esc) ask before they are sent. |
 | ![](screenshots/review-light-agent-screen-sent.png) | ![](screenshots/review-dark-agent-screen-sent.png) | A prompt sent from the window, echoed on the (mock) screen. |
+
+The Live Activity, drawn in the DEBUG gallery (`-sheepdogLiveActivityGallery`):
+the widget's own lock-screen view (listening with two agents waiting,
+speaking, muted, stale), and its Dynamic Island pieces inside a stand-in
+island shape. `-sheepdogDemoLiveActivity listening|speaking|muted` starts a
+real activity with no session.
+
+| Light | Dark |
+|---|---|
+| ![](screenshots/live-activity-light.png) | ![](screenshots/live-activity-dark.png) |
 
 At the largest accessibility text size (AX5):
 
