@@ -37,3 +37,30 @@ func TestAgentState(t *testing.T) {
 		}
 	}
 }
+
+// TestAgentStateTaskFacts: the roster line a briefing carries quotes the
+// worker's task title and the instruction it is on (without the
+// sign-off), and says its last activity on record; an idle agent's old
+// instruction is left out.
+func TestAgentStateTaskFacts(t *testing.T) {
+	now := time.Date(2026, 10, 5, 9, 0, 0, 0, time.UTC)
+	a := state.Agent{State: herdr.StateWorking, StateSince: now.Add(-time.Minute), Title: "README for calc",
+		CurrentTask: withSignOff("Write a README for the calc repo: what it does, how to build, how to run the tests."),
+		Journal:     []state.JournalEntry{{At: now.Add(-3 * time.Minute), Event: "done", LastAssistant: "Fixed Add()."}}}
+	got := agentState(a, now)
+	for _, w := range []string{`task title "README for calc"`, `instruction it is on "Write a README for the calc repo: what it does, how to build, how to run the tests."`, "last activity on record: done 3 min ago"} {
+		if !strings.Contains(got, w) {
+			t.Errorf("agentState = %q, want %q", got, w)
+		}
+	}
+	if strings.Contains(got, SignOff) {
+		t.Errorf("agentState carries the sign-off: %q", got)
+	}
+	a.State = herdr.StateIdle
+	if got := agentState(a, now); strings.Contains(got, "instruction it is on") {
+		t.Errorf("idle agentState = %q, want no current instruction", got)
+	}
+	if got := agentState(state.Agent{State: herdr.StateWorking}, now); strings.Contains(got, "task title") || strings.Contains(got, "last activity") {
+		t.Errorf("bare agentState = %q", got)
+	}
+}
