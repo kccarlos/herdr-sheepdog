@@ -418,7 +418,7 @@ func WorldFacts(ws WorldState) string {
 	for _, a := range ws.Agents {
 		fmt.Fprintf(&b, "Worker %s (%s), now %s.\n", a.Alias, ws.Kinds[a.Alias], ws.States[a.Alias])
 		if a.CLIHangs {
-			fmt.Fprintf(&b, "  run_cli and investigations of %s never answer: they time out, so nothing they would show was checked.\n", a.Alias)
+			fmt.Fprintf(&b, "  run_cli and investigations of %s start but never finish: they time out or run on without a result, so nothing they would show was verified. Saying a check was started or is running is true; saying it was checked or verified is not.\n", a.Alias)
 		} else if a.Answer != "" {
 			fmt.Fprintf(&b, "  What an investigation of %s finds: %s\n", a.Alias, a.Answer)
 		}
