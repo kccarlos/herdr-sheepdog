@@ -120,6 +120,10 @@ type Run struct {
 	// Explain is the explanation scores of a scenario with an explain
 	// block: the orchestrator's text and the voice's speech separately.
 	Explain *eval.ExplainScore `json:"explain,omitempty"`
+	// Orchestrator are the content items asked of the orchestrator's own
+	// text (bench report --rescore-orchestrator; orchestrator.go): the
+	// voice side's are Verdicts.
+	Orchestrator []eval.NamedVerdict `json:"orchestrator_verdicts,omitempty"`
 	// Excerpt is a compact event timeline for the report.
 	Excerpt []string `json:"excerpt,omitempty"`
 }

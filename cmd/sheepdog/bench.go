@@ -513,10 +513,11 @@ func runBenchReport(ctx context.Context, args []string, stdout, stderr io.Writer
 	out := fs.String("out", "", "write report.json and report.md here (default: --from)")
 	scen := fs.String("scenarios", defaultBenchScenarios, "scenario files")
 	sims := fs.String("sim", defaultBenchSims, "eval sim files (from_sim)")
+	rescoreOrch := fs.Bool("rescore-orchestrator", false, "ask the workday runs' content items (answered, news, said_vs_done, coherence) of the orchestrator's own text too (judge calls only; rewrites runs/*.json)")
 	rescore := fs.Bool("rescore-explain", false, "score the explain scenarios' runs again from their records and events (judge calls only; rewrites runs/*.json)")
-	judgeModel := fs.String("judge-model", "", "with --rescore-explain: judge model (default "+eval.DefaultJudgeModel+")")
-	configPath := fs.String("config", "", "with --rescore-explain: config file")
-	envFile := fs.String("env-file", "", "with --rescore-explain: load KEY=VALUE lines first")
+	judgeModel := fs.String("judge-model", "", "with --rescore-explain or --rescore-orchestrator: judge model (default "+eval.DefaultJudgeModel+")")
+	configPath := fs.String("config", "", "with --rescore-explain or --rescore-orchestrator: config file")
+	envFile := fs.String("env-file", "", "with --rescore-explain or --rescore-orchestrator: load KEY=VALUE lines first")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -540,8 +541,8 @@ func runBenchReport(ctx context.Context, args []string, stdout, stderr io.Writer
 		fprintf(stderr, "sheepdog bench report: %v\n", err)
 		return 1
 	}
-	if *rescore {
-		if code := rescoreExplain(ctx, *from, runs, scs, *configPath, *envFile, *judgeModel, stderr); code != 0 {
+	if *rescore || *rescoreOrch {
+		if code := rescoreRuns(ctx, *from, runs, scs, *configPath, *envFile, *judgeModel, *rescore, *rescoreOrch, stderr); code != 0 {
 			return code
 		}
 	}
@@ -587,9 +588,11 @@ func runBenchReport(ctx context.Context, args []string, stdout, stderr io.Writer
 	return 0
 }
 
-// rescoreExplain scores the explain runs again with the Vertex judge and
-// rewrites their records; the report is then rebuilt from them.
-func rescoreExplain(ctx context.Context, dir string, runs []bench.Run, scs []bench.Scenario, configPath, envFile, judgeModel string, stderr io.Writer) int {
+// rescoreRuns scores the explain runs again (explain) and asks the
+// workday runs' content items of the orchestrator's text (orch) with the
+// Vertex judge, and rewrites their records; the report is then rebuilt
+// from them.
+func rescoreRuns(ctx context.Context, dir string, runs []bench.Run, scs []bench.Scenario, configPath, envFile, judgeModel string, explain, orch bool, stderr io.Writer) int {
 	if code, ok := loadServeEnvFile(envFile, stderr); !ok || code != 0 {
 		return 1
 	}
@@ -614,7 +617,7 @@ func rescoreExplain(ctx context.Context, dir string, runs []bench.Run, scs []ben
 	for i := range runs {
 		r := &runs[i]
 		sc, ok := byID[r.Scenario]
-		if !ok || sc.Explain == nil {
+		if !ok || !((explain && sc.Explain != nil) || (orch && sc.Workday != nil)) {
 			continue
 		}
 		evs, err := bench.LoadEvents(filepath.Join(dir, "events", fmt.Sprintf("%s.r%d.jsonl", r.Scenario, r.Repeat)))
@@ -622,7 +625,15 @@ func rescoreExplain(ctx context.Context, dir string, runs []bench.Run, scs []ben
 			fprintf(stderr, "sheepdog bench report: %s r%d: %v\n", r.Scenario, r.Repeat, err)
 			continue
 		}
-		bench.RescoreExplain(ctx, judge, sc, r, evs)
+		if explain && sc.Explain != nil {
+			bench.RescoreExplain(ctx, judge, sc, r, evs)
+		}
+		if orch && sc.Workday != nil {
+			if err := bench.RescoreOrchestrator(ctx, judge, sc, r, evs); err != nil {
+				fprintf(stderr, "sheepdog bench report: orchestrator: %v\n", err)
+				continue
+			}
+		}
 		b, _ := json.MarshalIndent(r, "", "  ")
 		if err := os.WriteFile(filepath.Join(dir, "runs", fmt.Sprintf("%s.r%d.json", r.Scenario, r.Repeat)), b, 0o644); err != nil {
 			fprintf(stderr, "sheepdog bench report: %v\n", err)
@@ -630,6 +641,6 @@ func rescoreExplain(ctx context.Context, dir string, runs []bench.Run, scs []ben
 		}
 		n++
 	}
-	fprintf(stderr, "rescored %d explain runs, judge ≈ $%.3f\n", n, meter.Total())
+	fprintf(stderr, "rescored %d runs, judge ≈ $%.3f\n", n, meter.Total())
 	return 0
 }
