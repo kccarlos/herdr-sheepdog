@@ -192,7 +192,7 @@ func workdayRubric(s SimScenario) (names, criteria []string) {
 // dimension it is a diagnostic of (Understood, Done, Low effort, Safe).
 func WorkdayGroup(item string) string {
 	switch {
-	case strings.HasPrefix(item, WorkdayNewsItem+"_"), strings.HasPrefix(item, WorkdayCoherenceItem+"_"), item == "answered", item == "no_hallucination", item == "facts_current", item == "ear_friendly", item == "language", strings.HasPrefix(item, "rubric_"):
+	case strings.HasPrefix(item, WorkdayNewsItem+"_"), strings.HasPrefix(item, WorkdayCoherenceItem+"_"), item == "answered", item == "no_hallucination", item == "facts_current", item == "ear_friendly", item == "length_fits", item == "language", strings.HasPrefix(item, "rubric_"):
 		return "understood"
 	case item == WorkdayEndStateItem, item == WorkdayClaimItem:
 		return "done"

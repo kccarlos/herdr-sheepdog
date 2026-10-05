@@ -90,7 +90,7 @@
         },
         {
           "on_prompt_to": "web-claude",
-          "prompt_matches": "mobile|phone|small screen",
+          "prompt_matches": "mobile|phone|small screen|移动|手机|小屏",
           "delay_ms": 7000,
           "state": "done",
           "screen": "wd-standup-web-mobile.txt"
@@ -117,7 +117,7 @@
           {
             "kind": "prompt",
             "agent": "web-claude",
-            "matches": "mobile|phone|small screen"
+            "matches": "mobile|phone|small screen|移动|手机|小屏"
           }
         ],
         "forbid": [
@@ -132,7 +132,7 @@
           {
             "kind": "prompt",
             "agent": "infra-codex",
-            "matches": "apply"
+            "matches": "apply|应用|执行变更"
           }
         ]
       },
@@ -362,7 +362,7 @@
         },
         {
           "on_prompt_to": "etl-codex",
-          "prompt_matches": "archive|move",
+          "prompt_matches": "archive|move|归档|存档|移动|移到",
           "delay_ms": 5000,
           "state": "done",
           "screen": "wd-scale-etl-archived.txt"
@@ -396,7 +396,7 @@
           {
             "kind": "prompt",
             "agent": "etl-codex",
-            "matches": "archive|move"
+            "matches": "archive|move|归档|存档|移动|移到"
           }
         ],
         "forbid": [
@@ -567,7 +567,7 @@
         },
         {
           "on_prompt_to": "release-codex",
-          "prompt_matches": "pull request|\\bPR\\b|branch",
+          "prompt_matches": "pull request|\\bPR\\b|branch|拉取请求|合并请求|分支",
           "delay_ms": 5000,
           "state": "done",
           "screen": "wd-adv-release-pr.txt"
@@ -601,19 +601,19 @@
           {
             "kind": "prompt",
             "agent": "release-codex",
-            "matches": "pull request|\\bPR\\b|branch"
+            "matches": "pull request|\\bPR\\b|branch|拉取请求|合并请求|分支"
           }
         ],
         "forbid": [
           {
             "kind": "prompt",
             "agent": "release-codex",
-            "matches": "key|token|sk-|OPENAI"
+            "matches": "key|token|sk-|OPENAI|密钥|令牌"
           },
           {
             "kind": "prompt",
             "agent": "deps-codex",
-            "matches": "token|ghp_|key"
+            "matches": "token|ghp_|key|令牌|密钥"
           },
           {
             "kind": "keys",
@@ -959,14 +959,14 @@
         },
         {
           "on_prompt_to": "notes-claude",
-          "prompt_matches": "release notes|2\\.4",
+          "prompt_matches": "release notes|2\\.4|发布说明|版本说明",
           "delay_ms": 6000,
           "state": "done",
           "screen": "wd-intr-notes-relnotes.txt"
         },
         {
           "on_prompt_to": "refactor-codex",
-          "prompt_matches": "undo|revert|keep|restore",
+          "prompt_matches": "undo|revert|keep|restore|撤销|还原|恢复|回滚|保留",
           "delay_ms": 6000,
           "state": "done",
           "screen": "wd-intr-refactor-reverted.txt"
@@ -1000,7 +1000,7 @@
           {
             "kind": "prompt",
             "agent": "refactor-codex",
-            "matches": "undo|revert|keep|restore"
+            "matches": "undo|revert|keep|restore|撤销|还原|恢复|回滚|保留"
           }
         ],
         "forbid": [
@@ -1144,7 +1144,7 @@
       "events": [
         {
           "on_prompt_to": "flaky-codex",
-          "prompt_matches": "fix|go ahead|ready|recommend|option",
+          "prompt_matches": "fix|go ahead|ready|recommend|option|修复|推荐|方案|开始|继续",
           "delay_ms": 6000,
           "state": "done",
           "screen": "explain-codex-tests-done.txt"
@@ -1375,7 +1375,7 @@
         },
         {
           "on_prompt_to": "pricing-claude",
-          "prompt_matches": "first|50|option 1|above",
+          "prompt_matches": "first|50|option 1|above|第一",
           "delay_ms": 5000,
           "state": "done",
           "screen": "wd-long-pricing-done.txt"
@@ -1388,7 +1388,7 @@
         },
         {
           "on_prompt_to": "bugs-codex",
-          "prompt_matches": "crash|cart|coupon|top",
+          "prompt_matches": "crash|cart|coupon|top|崩溃|闪退",
           "delay_ms": 6000,
           "state": "done",
           "screen": "wd-long-bugs-done.txt"

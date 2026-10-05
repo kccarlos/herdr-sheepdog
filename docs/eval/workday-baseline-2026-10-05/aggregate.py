@@ -19,7 +19,7 @@ HELD_OUT = {"workday-adversarial-afternoon", "workday-explain-deep"}
 
 
 def group(item):
-    if item.startswith(("news_", "coherence_", "rubric_")) or item in ("answered", "no_hallucination", "facts_current", "ear_friendly", "language"):
+    if item.startswith(("news_", "coherence_", "rubric_")) or item in ("answered", "no_hallucination", "facts_current", "ear_friendly", "length_fits", "language"):
         return "understood"
     if item in ("end_state", "said_vs_done"):
         return "done"
