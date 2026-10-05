@@ -534,6 +534,33 @@ control messages; the daemon resamples for GPT-Live (which runs at
 Every comparison is constant-time (`crypto/subtle.ConstantTimeCompare`);
 there is no rate limiting or lockout on a wrong token.
 
+## Settings
+
+`GET /api/settings` (token-protected; also the `settings` field of
+`GET /api/state`) →
+`{"chattiness":"normal","levels":["quiet","normal","chatty"],"languages":["zh-Hans","en"],"language_options":[{"code":"en","name":"English","native":"English","providers":["gemini","openai"]},{"code":"zh-Hans","name":"Chinese (Simplified)","native":"简体中文","providers":["gemini","openai"]},…]}`.
+
+- `languages` is the shepherd's language preference, most preferred
+  first (`[]` when none is set). `language_options` is the catalog a
+  client offers, in display order (English, 简体中文, 繁體中文, then
+  alphabetical); `providers` lists the voice providers that support each
+  entry (today every entry is supported by both;
+  [`design/language-preference.md`](design/language-preference.md)).
+- `PUT /api/settings` takes either field or both; a field left out is
+  unchanged (`{"chattiness":"quiet"}` keeps the languages,
+  `{"languages":["zh-Hans","en"]}` keeps the level, `{"languages":[]}`
+  clears the preference). Codes match case-insensitively and come back
+  in catalog spelling, duplicates dropped. It answers with the GET shape;
+  `400 {"error":…}` for an unknown level or language code (nothing is
+  changed). The choice is kept in the state file (`session.chattiness`,
+  `session.languages`) and logged as `supervisor.settings`.
+- A changed language preference is information for both brains: the
+  slow brain's state block gets it on its next call, the running voice
+  session gets it at once as silent context (`supervisor.languages`,
+  then a `voice.push`), and every new voice session has it as the last
+  line of its system instruction (`voice.system_prompt` carries
+  `language`). Nothing in the daemon picks a language for the models.
+
 ## History and resume
 
 Added so a client that was away (a phone asleep, a browser tab

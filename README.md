@@ -154,6 +154,14 @@ contract is [`docs/roles.md`](docs/roles.md).
   `POST /api/prompts/reload` ([`docs/roles.md`](docs/roles.md) "Prompt
   files").
 
+### Which language?
+
+Pick your languages, most preferred first, in the iOS app's Settings ▸
+Languages (or `PUT /api/settings {"languages": ["zh-Hans", "en"]}`).
+简体中文 and 繁體中文 are separate entries. Both brains are told the
+setting and answer in the language you use, in your script; the choice
+survives a restart.
+
 ### How chatty is it?
 
 Pick the level from the `/debug` header (or
