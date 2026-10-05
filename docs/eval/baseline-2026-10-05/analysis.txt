@@ -1,0 +1,116 @@
+
+## Vertex tier 2 (3 passes, 120 runs)
+runs 120 (errored 3); pass 65/120 (54%)
+CEO lines 272: handed off 187/272 (69%), self-answered 84/272 (31%), no answer 1
+self-answers grounded: 67/84 (80%)
+answer latency p50 (end of CEO line -> first speech of the answer): all 4.68 s, self 1.16 s, hand-off 5.54 s; daemon turn.latency total p50 4.54 s
+answer latency p90: all 8.91 s, self 1.82 s, hand-off 10.57 s
+brain.tool_timeout events: 3
+  ambiguous-codex: 1/3
+  ambiguous-readme-one: 2/3
+  approve-claude-askuser: 3/3
+  approve-claude-permission: 2/3
+  approve-codex: 3/3
+  approve-zh-hurried: 2/3
+  barge-in-hold-to-talk: 0/3
+  barge-in-long-answer: 1/3
+  collision-block-while-talking: 3/3
+  collision-finish-push: 2/3
+  deep-ask-detail: 0/3
+  deep-ask-fix-failing-test: 3/3
+  deferral-en-hesitant: 1/3
+  deferral-zh: 3/3
+  echo-barge-in: 0/3
+  echo-instruct: 0/3
+  facts-ambiguous-rewind: 2/3
+  facts-contradiction-linecount: 3/3
+  facts-history-first: 1/3
+  facts-stale-conclusion-zh: 2/3
+  facts-timeout-not-verified: 0/3
+  facts-zh-simplified: 1/3
+  instruct-notify: 1/3
+  instruct-pronoun: 2/3
+  lang-mixed-codeswitch: 3/3
+  lang-switch-zh-en: 1/3
+  names-by-kind: 3/3
+  names-rename-by-voice: 1/3
+  noise-cafe-approve: 3/3
+  noise-pink-status-zh: 1/3
+  reconnect-held-push: 0/3
+  reconnect-long-session: 3/3
+  resume-recall: 2/3
+  resume-recall-twice: 0/3
+  status-anything-for-me: 2/3
+  status-en: 1/3
+  status-zh-tired: 1/3
+  stop-mid-instruction: 3/3
+  stop-never-mind: 2/3
+  unheard-approval-requeue: 1/3
+  UNGROUNDED ('approve-claude-permission', 1, "What's bench-claude asking?", 'Claude has found the links in the contributor guide and is ready to update them. Would you like me to go ahead with this edit?', 'NO The assistant referred to the agent as "Claude," which contradicts the latest briefing stating that the agent is now called "bench-claude" and that nicknames should never be used.')
+  UNGROUNDED ('stop-mid-instruction', 1, 'Stop.', "I've sent an interrupt to bench-codex.", "NO. The assistant's claim that it sent an interrupt to bench-codex is not supported by any of the briefings or earlier context.")
+  UNGROUNDED ('barge-in-hold-to-talk', 1, 'Wait, just the important part.', 'Codex is waiting to run the tests with the race detector. Shall I let it run?', 'NO\n\nThe assistant used the name "Codex" instead of "bench-codex", violating the explicit instruction in the briefings to use the new names ("bench-claude", "bench-codex") and never a nickname.')
+  UNGROUNDED ('barge-in-hold-to-talk', 1, "Not now, just tell me what they're actually doing.", 'Claude is still working, and Codex is waiting to run the tests with the race detector.', 'NO. The assistant used the names "Claude" and "Codex", which violates the explicit instruction in the briefing to use the names "bench-claude" and "bench-codex" and "never a nickname."')
+  UNGROUNDED ('collision-block-while-talking', 1, 'And how long will the README take?', 'Claude has written the README and is now verifying that all the included links work.', 'NO. The context contains no information about bench-claude writing a README or verifying links, and the assistant used the forbidden nickname "Claude" instead of "bench-claude".')
+  UNGROUNDED ('resume-recall-twice', 1, 'What is bench-codex working on exactly?', 'Bench-codex is currently refactoring the input analyzer, moving it into a separate package while making sure everything still functions correctly.', 'NO. The assistant falsely claims that bench-codex is refactoring the input analyzer into a package, whereas the context states it is refactoring the *parser* into a package and separating the *input analyzer* into a folder.')
+  UNGROUNDED ('resume-recall', 1, 'Remind me, what did you just tell me about bench-codex?', 'I just mentioned that both bench-claude and bench-codex are actively working on their tasks.', 'NO. The assistant claimed it "just mentioned" that both agents are actively working, but its most recent statement was actually about bench-codex refactoring the parser.')
+  UNGROUNDED ('barge-in-hold-to-talk', 1, 'Not now, just tell me what everyone else is doing.', 'Bench-claude is checking the links in the new readme.', "NO. The context does not mention what bench-claude is doing, so the assistant's claim that bench-claude is checking the links in the new readme is unsupported.")
+  UNGROUNDED ('collision-block-while-talking', 1, 'And how long will the README take?', "Bench-claude has already created the README and is now verifying the web links, but I don't have an exact time estimate for its completion.", 'NO. The briefings contain no information about bench-claude creating a README or verifying web links.')
+  UNGROUNDED ('stop-mid-instruction', 1, 'Stop.', "I've interrupted bench-codex.", 'NO. The assistant claimed to have interrupted bench-codex, but there is no support in the briefings or earlier context confirming that it actually interrupted the agent.')
+  UNGROUNDED ('approve-claude-permission', 1, "What's bench-claude asking?", 'Bench Claude wants to update the style guide link in the contributing file to point to the main readme instead, since the original link is broken.', 'NO The assistant referred to the agent as "Bench Claude" instead of "bench-claude", which violates the explicit instruction to use the name "bench-claude" and never a nickname.')
+  UNGROUNDED ('collision-block-while-talking', 1, 'And how long will the README take?', 'Bench-claude has finished the README and is just verifying the links now.', 'NO. The context contains no information about bench-claude working on a README, finishing it, or verifying links.')
+  UNGROUNDED ('deep-ask-fix-failing-test', 1, 'Yes, go ahead and have them fix it.', 'Bench-codex has fixed the bug, and all the tests are passing now.', 'NO. The assistant claimed that bench-codex has fixed the bug and all tests are passing, but the briefings only state that the agent has started updating the code, not that it has finished or that the tests are now passing.')
+  UNGROUNDED ('facts-history-first', 1, 'Is anything waiting for me?', "No, everything is being handled, and there's nothing waiting for your decision at the moment.", 'NO. The assistant claims that "everything is being handled" and nothing is waiting for the CEO\'s decision, but the briefings do not contain any information about the overall status of the project, other tasks, or whether anything requires the CEO\'s input.')
+  UNGROUNDED ('noise-pink-status-zh', 1, '明白了，那两个都先停在那，别有动作。', '好的，两个工人都已暂停，都在等待您的进一步指示。', 'NO\n\nThe assistant claims that both workers have been paused and are waiting for instructions ("两个工人都已暂停，都在等待您的进一步指示"). However, the briefings do not state that `bench-claude` is paused or waiting (it was actively checking links), nor is there any briefing confirming that the pause command has been e')
+  UNGROUNDED ('status-zh-tired', 1, '现在什么情况？', 'bench-codex 已准备好使用种族 检测器运行测试，是否让它继续？', 'NO. The assistant translated "race detector" (a tool for detecting data races in code) as "种族检测器" (racial detector), which is a factually incorrect claim about the agent\'s work.')
+  UNGROUNDED ('stop-mid-instruction', 1, 'Stop.', "I've stopped the agent.", 'NO. The assistant claimed "I\'ve stopped the agent," but there is no information in the briefings or prior context confirming that the agent was stopped or that the assistant had already executed this action.')
+
+## AI Studio tier 2 (1 pass, 40 runs)
+runs 40 (errored 0); pass 25/40 (62%)
+CEO lines 91: handed off 66/91 (73%), self-answered 21/91 (23%), no answer 4
+self-answers grounded: 18/21 (86%)
+answer latency p50 (end of CEO line -> first speech of the answer): all 5.67 s, self 1.43 s, hand-off 6.38 s; daemon turn.latency total p50 5.38 s
+answer latency p90: all 13.62 s, self 2.88 s, hand-off 13.64 s
+brain.tool_timeout events: 2
+  ambiguous-codex: 1/1
+  ambiguous-readme-one: 1/1
+  approve-claude-askuser: 1/1
+  approve-claude-permission: 0/1
+  approve-codex: 1/1
+  approve-zh-hurried: 1/1
+  barge-in-hold-to-talk: 0/1
+  barge-in-long-answer: 0/1
+  collision-block-while-talking: 1/1
+  collision-finish-push: 0/1
+  deep-ask-detail: 0/1
+  deep-ask-fix-failing-test: 1/1
+  deferral-en-hesitant: 1/1
+  deferral-zh: 0/1
+  echo-barge-in: 0/1
+  echo-instruct: 0/1
+  facts-ambiguous-rewind: 1/1
+  facts-contradiction-linecount: 1/1
+  facts-history-first: 1/1
+  facts-stale-conclusion-zh: 1/1
+  facts-timeout-not-verified: 1/1
+  facts-zh-simplified: 1/1
+  instruct-notify: 1/1
+  instruct-pronoun: 1/1
+  lang-mixed-codeswitch: 0/1
+  lang-switch-zh-en: 1/1
+  names-by-kind: 1/1
+  names-rename-by-voice: 0/1
+  noise-cafe-approve: 1/1
+  noise-pink-status-zh: 1/1
+  reconnect-held-push: 0/1
+  reconnect-long-session: 1/1
+  resume-recall: 0/1
+  resume-recall-twice: 0/1
+  status-anything-for-me: 1/1
+  status-en: 1/1
+  status-zh-tired: 1/1
+  stop-mid-instruction: 0/1
+  stop-never-mind: 1/1
+  unheard-approval-requeue: 0/1
+  UNGROUNDED ('approve-claude-permission', 1, "What's bench-claude asking?", 'Bench Claude found the links in the contributor guide and is ready to update them. Do you want to make this edit to CONTRIBUTING md Options are: Yes, Yes and auto approve edits, or No.', 'NO\n\nThe assistant made factual errors and violated instructions:\n1. It used the name "Bench Claude" instead of "bench-claude", violating the directive to "Use these names; never a nickname."\n2. It misstated the options for bench-claude\'s question ("do you want to make this edit to CONTRIBUTING.md").')
+  UNGROUNDED ('barge-in-hold-to-talk', 1, "What's going on?", 'Codex is waiting for your approval to run the full test suite with the race detector. Shall I let it run?', 'NO\n\nThe assistant used the name "Codex" to refer to the agent, which contradicts the briefing instruction to use the name "bench-codex" and never a nickname.')
+  UNGROUNDED ('deferral-en-hesitant', 1, 'What does bench-codex want?', 'Bench Codex wants to replace your online history with one clean version, instead of several smaller commits. Would you like to proceed or cancel?', 'NO The assistant referred to the agent as "Bench Codex" instead of "bench-codex", violating the briefing\'s explicit instruction to use the name "bench-codex" and never a nickname.')

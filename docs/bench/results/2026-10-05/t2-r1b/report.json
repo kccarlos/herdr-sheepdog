@@ -1,0 +1,1510 @@
+{
+  "started": "2026-10-05T02:10:08.984469-07:00",
+  "duration_s": 545,
+  "setup": {
+    "brain": "vertex gemini-3.5-flash (failover: vertex)",
+    "budget_usd": "4",
+    "judge": "vertex gemini-3.1-flash-lite",
+    "openings": "pinned by testdata/bench/openings.json",
+    "parallel": "3",
+    "ports": "7790,7791,7792",
+    "scenarios": "testdata/bench/scenarios/*.json (filter lang-mixed-codeswitch,facts-history-first,facts-contradiction-linecount,facts-stale-conclusion-zh,facts-ambiguous-rewind,facts-zh-simplified,facts-timeout-not-verified,reconnect-held-push,reconnect-long-session,unheard-approval-requeue,resume-recall,resume-recall-twice,collision-block-while-talking,collision-finish-push,barge-in-long-answer,barge-in-hold-to-talk,noise-cafe-approve,noise-pink-status-zh,echo-instruct,echo-barge-in)",
+    "simulated CEO": "vertex gemini-3.1-flash-lite",
+    "tier": "2 (synthetic speech -\u003e phone emulator -\u003e scratch daemon: real voice model, real brain, mock herdr scripted from the eval sim worlds)",
+    "tts": "gemini/gemini-2.5-flash-tts|say",
+    "voice": "gemini-3.8-live (backend vertex)"
+  },
+  "repeat": 1,
+  "total": {
+    "case": "TOTAL",
+    "runs": 20,
+    "pass": 8,
+    "fail": 12,
+    "errored": 0,
+    "not_run": 0,
+    "pass_rate": 0.4,
+    "primary": {
+      "judge_no": 10,
+      "timeout": 1,
+      "unintended_action": 1
+    },
+    "labels": {
+      "brain_fallback": 1,
+      "check": 1,
+      "judge_no": 11,
+      "max_turns": 1,
+      "silence": 1,
+      "timeout": 1,
+      "unintended_action": 1
+    },
+    "mean_duration_ms": 75811,
+    "cost_usd_estimate": 1.1131316
+  },
+  "cases": [
+    {
+      "case": "barge-in-hold-to-talk",
+      "runs": 1,
+      "pass": 0,
+      "fail": 1,
+      "errored": 0,
+      "not_run": 0,
+      "pass_rate": 0,
+      "primary": {
+        "judge_no": 1
+      },
+      "labels": {
+        "judge_no": 1,
+        "silence": 1
+      },
+      "mean_duration_ms": 77975,
+      "cost_usd_estimate": 0.0413569
+    },
+    {
+      "case": "barge-in-long-answer",
+      "runs": 1,
+      "pass": 0,
+      "fail": 1,
+      "errored": 0,
+      "not_run": 0,
+      "pass_rate": 0,
+      "primary": {
+        "judge_no": 1
+      },
+      "labels": {
+        "judge_no": 1
+      },
+      "mean_duration_ms": 95811,
+      "cost_usd_estimate": 0.0744787
+    },
+    {
+      "case": "collision-block-while-talking",
+      "runs": 1,
+      "pass": 1,
+      "fail": 0,
+      "errored": 0,
+      "not_run": 0,
+      "pass_rate": 1,
+      "mean_duration_ms": 100662,
+      "cost_usd_estimate": 0.0615085
+    },
+    {
+      "case": "collision-finish-push",
+      "runs": 1,
+      "pass": 0,
+      "fail": 1,
+      "errored": 0,
+      "not_run": 0,
+      "pass_rate": 0,
+      "primary": {
+        "judge_no": 1
+      },
+      "labels": {
+        "judge_no": 1
+      },
+      "mean_duration_ms": 43154,
+      "cost_usd_estimate": 0.031739250000000004
+    },
+    {
+      "case": "echo-barge-in",
+      "runs": 1,
+      "pass": 0,
+      "fail": 1,
+      "errored": 0,
+      "not_run": 0,
+      "pass_rate": 0,
+      "primary": {
+        "unintended_action": 1
+      },
+      "labels": {
+        "judge_no": 1,
+        "max_turns": 1,
+        "unintended_action": 1
+      },
+      "mean_duration_ms": 71863,
+      "cost_usd_estimate": 0.1379053
+    },
+    {
+      "case": "echo-instruct",
+      "runs": 1,
+      "pass": 0,
+      "fail": 1,
+      "errored": 0,
+      "not_run": 0,
+      "pass_rate": 0,
+      "primary": {
+        "judge_no": 1
+      },
+      "labels": {
+        "judge_no": 1
+      },
+      "mean_duration_ms": 49021,
+      "cost_usd_estimate": 0.05020959999999999
+    },
+    {
+      "case": "facts-ambiguous-rewind",
+      "runs": 1,
+      "pass": 0,
+      "fail": 1,
+      "errored": 0,
+      "not_run": 0,
+      "pass_rate": 0,
+      "primary": {
+        "judge_no": 1
+      },
+      "labels": {
+        "judge_no": 1
+      },
+      "mean_duration_ms": 77430,
+      "cost_usd_estimate": 0.0422149
+    },
+    {
+      "case": "facts-contradiction-linecount",
+      "runs": 1,
+      "pass": 1,
+      "fail": 0,
+      "errored": 0,
+      "not_run": 0,
+      "pass_rate": 1,
+      "mean_duration_ms": 81132,
+      "cost_usd_estimate": 0.0607917
+    },
+    {
+      "case": "facts-history-first",
+      "runs": 1,
+      "pass": 0,
+      "fail": 1,
+      "errored": 0,
+      "not_run": 0,
+      "pass_rate": 0,
+      "primary": {
+        "judge_no": 1
+      },
+      "labels": {
+        "judge_no": 1
+      },
+      "mean_duration_ms": 74843,
+      "cost_usd_estimate": 0.0618589
+    },
+    {
+      "case": "facts-stale-conclusion-zh",
+      "runs": 1,
+      "pass": 1,
+      "fail": 0,
+      "errored": 0,
+      "not_run": 0,
+      "pass_rate": 1,
+      "mean_duration_ms": 92363,
+      "cost_usd_estimate": 0.06653914999999999
+    },
+    {
+      "case": "facts-timeout-not-verified",
+      "runs": 1,
+      "pass": 0,
+      "fail": 1,
+      "errored": 0,
+      "not_run": 0,
+      "pass_rate": 0,
+      "primary": {
+        "judge_no": 1
+      },
+      "labels": {
+        "judge_no": 1
+      },
+      "mean_duration_ms": 72005,
+      "cost_usd_estimate": 0.04266055
+    },
+    {
+      "case": "facts-zh-simplified",
+      "runs": 1,
+      "pass": 1,
+      "fail": 0,
+      "errored": 0,
+      "not_run": 0,
+      "pass_rate": 1,
+      "mean_duration_ms": 59186,
+      "cost_usd_estimate": 0.037589449999999996
+    },
+    {
+      "case": "lang-mixed-codeswitch",
+      "runs": 1,
+      "pass": 1,
+      "fail": 0,
+      "errored": 0,
+      "not_run": 0,
+      "pass_rate": 1,
+      "mean_duration_ms": 50630,
+      "cost_usd_estimate": 0.033786649999999994
+    },
+    {
+      "case": "noise-cafe-approve",
+      "runs": 1,
+      "pass": 1,
+      "fail": 0,
+      "errored": 0,
+      "not_run": 0,
+      "pass_rate": 1,
+      "mean_duration_ms": 47117,
+      "cost_usd_estimate": 0.03843935
+    },
+    {
+      "case": "noise-pink-status-zh",
+      "runs": 1,
+      "pass": 1,
+      "fail": 0,
+      "errored": 0,
+      "not_run": 0,
+      "pass_rate": 1,
+      "mean_duration_ms": 133534,
+      "cost_usd_estimate": 0.10667009999999999
+    },
+    {
+      "case": "reconnect-held-push",
+      "runs": 1,
+      "pass": 0,
+      "fail": 1,
+      "errored": 0,
+      "not_run": 0,
+      "pass_rate": 0,
+      "primary": {
+        "judge_no": 1
+      },
+      "labels": {
+        "judge_no": 1
+      },
+      "mean_duration_ms": 47617,
+      "cost_usd_estimate": 0.025894600000000004
+    },
+    {
+      "case": "reconnect-long-session",
+      "runs": 1,
+      "pass": 1,
+      "fail": 0,
+      "errored": 0,
+      "not_run": 0,
+      "pass_rate": 1,
+      "mean_duration_ms": 94454,
+      "cost_usd_estimate": 0.07352455000000001
+    },
+    {
+      "case": "resume-recall",
+      "runs": 1,
+      "pass": 0,
+      "fail": 1,
+      "errored": 0,
+      "not_run": 0,
+      "pass_rate": 0,
+      "primary": {
+        "judge_no": 1
+      },
+      "labels": {
+        "judge_no": 1
+      },
+      "mean_duration_ms": 74494,
+      "cost_usd_estimate": 0.03274085
+    },
+    {
+      "case": "resume-recall-twice",
+      "runs": 1,
+      "pass": 0,
+      "fail": 1,
+      "errored": 0,
+      "not_run": 0,
+      "pass_rate": 0,
+      "primary": {
+        "judge_no": 1
+      },
+      "labels": {
+        "judge_no": 1
+      },
+      "mean_duration_ms": 103076,
+      "cost_usd_estimate": 0.0538951
+    },
+    {
+      "case": "unheard-approval-requeue",
+      "runs": 1,
+      "pass": 0,
+      "fail": 1,
+      "errored": 0,
+      "not_run": 0,
+      "pass_rate": 0,
+      "primary": {
+        "timeout": 1
+      },
+      "labels": {
+        "brain_fallback": 1,
+        "check": 1,
+        "timeout": 1
+      },
+      "mean_duration_ms": 69857,
+      "cost_usd_estimate": 0.039327499999999994
+    }
+  ],
+  "categories": [
+    {
+      "case": "language",
+      "runs": 1,
+      "pass": 1,
+      "fail": 0,
+      "errored": 0,
+      "not_run": 0,
+      "pass_rate": 1,
+      "mean_duration_ms": 50630,
+      "cost_usd_estimate": 0.033786649999999994
+    },
+    {
+      "case": "collision",
+      "runs": 2,
+      "pass": 1,
+      "fail": 1,
+      "errored": 0,
+      "not_run": 0,
+      "pass_rate": 0.5,
+      "primary": {
+        "judge_no": 1
+      },
+      "labels": {
+        "judge_no": 1
+      },
+      "mean_duration_ms": 71908,
+      "cost_usd_estimate": 0.09324775
+    },
+    {
+      "case": "barge_in",
+      "runs": 2,
+      "pass": 0,
+      "fail": 2,
+      "errored": 0,
+      "not_run": 0,
+      "pass_rate": 0,
+      "primary": {
+        "judge_no": 2
+      },
+      "labels": {
+        "judge_no": 2,
+        "silence": 1
+      },
+      "mean_duration_ms": 86893,
+      "cost_usd_estimate": 0.1158356
+    },
+    {
+      "case": "noise",
+      "runs": 2,
+      "pass": 2,
+      "fail": 0,
+      "errored": 0,
+      "not_run": 0,
+      "pass_rate": 1,
+      "mean_duration_ms": 90325,
+      "cost_usd_estimate": 0.14510944999999997
+    },
+    {
+      "case": "echo",
+      "runs": 2,
+      "pass": 0,
+      "fail": 2,
+      "errored": 0,
+      "not_run": 0,
+      "pass_rate": 0,
+      "primary": {
+        "judge_no": 1,
+        "unintended_action": 1
+      },
+      "labels": {
+        "judge_no": 2,
+        "max_turns": 1,
+        "unintended_action": 1
+      },
+      "mean_duration_ms": 60442,
+      "cost_usd_estimate": 0.1881149
+    },
+    {
+      "case": "reconnect",
+      "runs": 4,
+      "pass": 1,
+      "fail": 3,
+      "errored": 0,
+      "not_run": 0,
+      "pass_rate": 0.25,
+      "primary": {
+        "judge_no": 3
+      },
+      "labels": {
+        "judge_no": 3
+      },
+      "mean_duration_ms": 79910,
+      "cost_usd_estimate": 0.1860551
+    },
+    {
+      "case": "unheard",
+      "runs": 1,
+      "pass": 0,
+      "fail": 1,
+      "errored": 0,
+      "not_run": 0,
+      "pass_rate": 0,
+      "primary": {
+        "timeout": 1
+      },
+      "labels": {
+        "brain_fallback": 1,
+        "check": 1,
+        "timeout": 1
+      },
+      "mean_duration_ms": 69857,
+      "cost_usd_estimate": 0.039327499999999994
+    },
+    {
+      "case": "facts",
+      "runs": 6,
+      "pass": 3,
+      "fail": 3,
+      "errored": 0,
+      "not_run": 0,
+      "pass_rate": 0.5,
+      "primary": {
+        "judge_no": 3
+      },
+      "labels": {
+        "judge_no": 3
+      },
+      "mean_duration_ms": 76159,
+      "cost_usd_estimate": 0.31165465000000003
+    }
+  ],
+  "latency": [
+    {
+      "segment": "voice",
+      "n": 38,
+      "p50_ms": 0,
+      "p90_ms": 0,
+      "max_ms": 405
+    },
+    {
+      "segment": "relay",
+      "n": 38,
+      "p50_ms": 0,
+      "p90_ms": 0,
+      "max_ms": 0
+    },
+    {
+      "segment": "queue",
+      "n": 38,
+      "p50_ms": 0,
+      "p90_ms": 0,
+      "max_ms": 0
+    },
+    {
+      "segment": "brain",
+      "n": 38,
+      "p50_ms": 4142,
+      "p90_ms": 13564,
+      "max_ms": 26047
+    },
+    {
+      "segment": "model",
+      "n": 38,
+      "p50_ms": 4133,
+      "p90_ms": 13559,
+      "max_ms": 26043
+    },
+    {
+      "segment": "tool",
+      "n": 38,
+      "p50_ms": 1,
+      "p90_ms": 2,
+      "max_ms": 4
+    },
+    {
+      "segment": "delivery",
+      "n": 38,
+      "p50_ms": 0,
+      "p90_ms": 1,
+      "max_ms": 265
+    },
+    {
+      "segment": "first_audio",
+      "n": 38,
+      "p50_ms": 644,
+      "p90_ms": 792,
+      "max_ms": 1549
+    },
+    {
+      "segment": "total",
+      "n": 38,
+      "p50_ms": 4813,
+      "p90_ms": 14282,
+      "max_ms": 26887
+    }
+  ],
+  "latency_outcomes": {
+    "played": 38
+  },
+  "voice": {
+    "user_lines": 56,
+    "lines_not_heard": 1,
+    "mean_wer_by_lang": {
+      "en": 0.13997354497354497,
+      "zh": 0.03636363636363637
+    },
+    "mean_wer_by_condition": {
+      "cafe 10dB": 0,
+      "clean": 0.10263975155279503,
+      "echo": 0.3821428571428571,
+      "pink 5dB": 0.016666666666666666
+    },
+    "flushes": 16,
+    "local_flushes": 1,
+    "push_unheard": 0,
+    "push_requeued": 0,
+    "push_deferred": 3,
+    "push_held": 1,
+    "interrupted": 16,
+    "stalled": 0,
+    "failovers": 0,
+    "tts_sources": {
+      "gemini/gemini-2.5-flash-tts": 51,
+      "gemini/gemini-3.1-flash-tts-preview": 5
+    },
+    "markup_spoken": 0,
+    "bot_audio_without_transcript": 0
+  },
+  "spend": {
+    "total_usd_estimate": 1.1131316,
+    "lines": [
+      {
+        "role": "brain",
+        "model": "gemini-3.5-flash",
+        "usage": {
+          "calls": 102,
+          "in": 640702,
+          "out": 6087,
+          "reasoning": 10031
+        },
+        "cost_usd_estimate": 0.2325056
+      },
+      {
+        "role": "judge",
+        "model": "gemini-3.1-flash-lite",
+        "usage": {
+          "calls": 201,
+          "in": 254950,
+          "out": 4306
+        },
+        "cost_usd_estimate": 0.0701965
+      },
+      {
+        "role": "live",
+        "model": "gemini-3.8-live",
+        "usage": {
+          "calls": 113,
+          "in": 211723,
+          "out": 13213
+        },
+        "cost_usd_estimate": 0.793725
+      },
+      {
+        "role": "simuser",
+        "model": "gemini-3.1-flash-lite",
+        "usage": {
+          "calls": 34,
+          "in": 19888,
+          "out": 647
+        },
+        "cost_usd_estimate": 0.0059425
+      },
+      {
+        "role": "tts",
+        "model": "gemini-2.5-flash-tts",
+        "usage": {
+          "calls": 13,
+          "in": 304,
+          "out": 1061
+        },
+        "cost_usd_estimate": 0.010762
+      }
+    ],
+    "live_audio_in_min": 3.3773166666666667,
+    "live_audio_out_min": 6.355500000000001
+  },
+  "runs": [
+    {
+      "scenario": "barge-in-hold-to-talk",
+      "category": "barge_in",
+      "repeat": 1,
+      "status": "fail",
+      "primary": "judge_no",
+      "failures": [
+        {
+          "type": "judge_no",
+          "detail": "rubric_1: Sheepdog failed to mention the need for approval, stating only that \"Codex is waiting to run the tests with the race detector.\" This contradicts the fact that Codex is explicitly waiting for the CEO t…"
+        },
+        {
+          "type": "silence",
+          "detail": "the CEO waited in silence past the cap"
+        }
+      ],
+      "end_reason": "silence",
+      "turns": 3,
+      "duration_s": 77.975,
+      "cost_usd_estimate": 0.0413569,
+      "mean_wer": 0,
+      "transcript": [
+        "[t+2s] push: Codex is ready to run the tests with the race detector. Shall I let it run?",
+        "[t+9s] ceo: What's going on?",
+        "[t+14s] sheepdog: Claude is still working, and Codex is waiting to — (cut off)",
+        "[t+17s] ceo: Wait, just the important part.",
+        "[t+20s] sheepdog: Codex is waiting to run the tests with the race detector. Shall I let it run?",
+        "[t+28s] ceo: Not now, just tell me what they're actually doing.",
+        "[t+33s] sheepdog: Claude is still working, and Codex is waiting to run the tests with the race detector.",
+        "[t+42s] system: The CEO waits in silence.",
+        "[t+52s] system: 10 seconds of silence so far.",
+        "[t+57s] system: The CEO waits in silence.",
+        "(voice model heard \"Not now, just tell me what they're actually doing.\" as \"Not now. Just tell me what they're actually doing.\")"
+      ],
+      "excerpt": [
+        "    0.0s pending.created {\"agent\":\"bench-codex\",\"command\":\"go test -race ./...\",\"id\":\"ap-tmfgep-3\",\"kind\":\"answer_prompt\",\"no_keys\":[\"esc\"],\"options\":[{\"default\":true,\"index\":1,\"keys\":[\"y\"],\"label\":\"Yes, proceed\"},{\"default\":false,\"index\":2,\"keys\":[\"p\"],\"la…",
+        "    1.6s voice.interrupted {\"by\":\"push\",\"dropped_chunks\":0}",
+        "    1.6s web.client.flush {\"client_id\":1,\"dropped_audio\":0}",
+        "    1.6s voice.push {\"agent\":\"bench-codex\",\"briefing\":\"b-1\",\"channel\":\"function_response\",\"event_id\":\"evt-tmfgep-2\",\"needs_user\":true,\"pending_id\":\"ap-tmfgep-3\",\"push_id\":\"push-tmfgeq-4\",\"scheduling_sent\":\"interrupt\",\"text\":\"Codex is ready to run the tests …",
+        "    1.6s voice.playback {\"played_ms\":0,\"run_ms\":0,\"state\":\"flushed\"}",
+        "    2.0s voice.push {\"briefing\":\"b-2\",\"channel\":\"function_response\",\"from\":\"daemon\",\"push_id\":\"push-tmfger-5\",\"scheduling_sent\":\"silent\",\"text\":\"The agents are now called: bench-claude, bench-codex. Use these names; never a nickname.\",\"urgency\":\"silent\"}",
+        "    2.3s voice.playback {\"played_ms\":0,\"run_ms\":250,\"state\":\"started\"}",
+        "    6.7s voice.playback {\"played_ms\":4090,\"run_ms\":4090,\"state\":\"drained\"}",
+        "    7.0s voice.push {\"briefing\":\"b-3\",\"channel\":\"function_response\",\"focus\":true,\"push_id\":\"push-tmfgev-6\",\"scheduling_sent\":\"silent\",\"text\":\"Current focus, for follow-ups (context only, never read it out). Agent in focus: bench-codex. Open question you ask…",
+        "   12.4s voice.transcript.in {\"final\":false,\"text\":\"What's going on?\"}",
+        "   12.4s voice.tool_call {\"args\":{\"reading\":\"Asking for an update on bench-codex.\",\"text\":\"What's going on?\"},\"id\":\"call_306622\",\"name\":\"to_supervisor\"}",
+        "   12.4s supervisor.relay {\"call_id\":\"call_306622\",\"heard\":\"What's going on?\",\"input\":\"voice\",\"inputs\":1,\"said\":\"What's going on?\",\"utterance_id\":\"utt-tmfgf1-7\",\"waited_ms\":0}",
+        "   14.2s voice.tool_result {\"clarify\":false,\"detail\":\"The race detector checks if different parts of the program might try to change the same data at the same time, which can cause bugs.\",\"dur_ms\":1866,\"id\":\"call_306622\",\"name\":\"to_supervisor\",\"options\":[\"Y…",
+        "   14.9s voice.playback {\"played_ms\":0,\"run_ms\":280,\"state\":\"started\",\"utterance_id\":\"utt-tmfgf1-7\"}",
+        "   17.1s voice.playback {\"cut\":true,\"heard\":\"Claude is still working, and Codex is waiting to run\",\"played_ms\":2180,\"run_ms\":2360,\"said\":\"Claude is still working, and Codex is waiting to run\",\"state\":\"flushed\"}",
+        "   17.7s voice.interrupted {\"by\":\"model\",\"dropped_chunks\":0}",
+        "   17.7s web.client.flush {\"client_id\":1,\"dropped_audio\":0}",
+        "   17.7s voice.playback {\"cut\":true,\"heard\":\"\",\"played_ms\":0,\"run_ms\":560,\"said\":\"the tests with the\",\"state\":\"flushed\"}",
+        "   17.7s voice.push {\"briefing\":\"b-4\",\"channel\":\"function_response\",\"from\":\"daemon\",\"kind\":\"delivery\",\"scheduling_sent\":\"silent\",\"text\":\"at 02:16:18 the CEO cut you off after 2.2 s of 2.4 s; they heard only: \\\"Claude is still working, and Codex is waiting t…",
+        "   17.7s voice.push {\"briefing\":\"b-5\",\"channel\":\"function_response\",\"focus\":true,\"push_id\":\"push-tmfgf7-8\",\"scheduling_sent\":\"silent\",\"text\":\"Current focus, for follow-ups (context only, never read it out). Agent in focus: bench-codex. Open question you ask…",
+        "   17.7s voice.push {\"briefing\":\"b-6\",\"channel\":\"function_response\",\"from\":\"daemon\",\"kind\":\"delivery\",\"scheduling_sent\":\"silent\",\"text\":\"at 02:16:19 the CEO cut you off after 0.0 s of 0.6 s; they heard nothing of it\",\"urgency\":\"silent\"}",
+        "   20.2s voice.transcript.in {\"final\":false,\"text\":\"Wait, just the important part.\"}",
+        "   20.3s voice.playback {\"played_ms\":0,\"run_ms\":170,\"state\":\"started\"}",
+        "   25.0s voice.playback {\"played_ms\":4450,\"run_ms\":4450,\"state\":\"drained\"}",
+        "   33.2s voice.transcript.in {\"final\":false,\"text\":\"Not now. Just tell me what they're actually doing.\"}",
+        "   33.2s voice.playback {\"played_ms\":0,\"run_ms\":270,\"state\":\"started\"}",
+        "   38.2s voice.playback {\"played_ms\":4630,\"run_ms\":4630,\"state\":\"drained\"}"
+      ]
+    },
+    {
+      "scenario": "barge-in-long-answer",
+      "category": "barge_in",
+      "repeat": 1,
+      "status": "fail",
+      "primary": "judge_no",
+      "failures": [
+        {
+          "type": "judge_no",
+          "detail": "rubric_1: Sheepdog failed to relay the points because it only mentioned the README content, stating, \"The README covers what the calculator does, how to build it, and how to run the tests.\" This contradicts the…"
+        }
+      ],
+      "end_reason": "end_call",
+      "turns": 4,
+      "duration_s": 95.811,
+      "cost_usd_estimate": 0.0744787,
+      "mean_wer": 0,
+      "transcript": [
+        "[t+2s] ceo: What did bench-claude say when it finished?",
+        "[t+12s] sheepdog: Bench-Claude created the README with build and test instructions. It also — (cut off)",
+        "[t+14s] ceo: Okay, okay. Just tell me if it needs anything from me.",
+        "[t+19s] sheepdog: It noticed two broken links in the contributing guide. Would you like it to fix them, or leave them alone for now?",
+        "[t+34s] ceo: Leave the links for now, just give me the points it wrote.",
+        "[t+45s] sheepdog: The README covers what the calculator does, how to build it, and how to run the tests.",
+        "[t+54s] push: It wrote a thirty-eight line README covering what the calculator does, how to build it, and how to run the tests.",
+        "[t+69s] ceo: Got it. Anything else in its final report?",
+        "[t+80s] sheepdog: It didn't include anything else in the report. Is there anything else you'd like me to check?",
+        "(voice model heard \"What did bench-claude say when it finished?\" as \"What did Bench Claude say when it finished?\")",
+        "(voice model heard \"Leave the links for now, just give me the points it wrote.\" as \"Leave the links for now. Just give me the points it wrote.\")"
+      ],
+      "excerpt": [
+        "    2.0s voice.push {\"briefing\":\"b-1\",\"channel\":\"function_response\",\"from\":\"daemon\",\"push_id\":\"push-tmfge7-2\",\"scheduling_sent\":\"silent\",\"text\":\"The agents are now called: bench-claude. Use these names; never a nickname.\",\"urgency\":\"silent\"}",
+        "    6.3s voice.transcript.in {\"final\":false,\"text\":\"What did Bench Claude say when it finished?\"}",
+        "    6.3s voice.tool_call {\"args\":{\"reading\":\"check bench-claude output\",\"text\":\"What did Bench Claude say when it finished?\"},\"id\":\"call_306573\",\"name\":\"to_supervisor\"}",
+        "    6.3s supervisor.relay {\"call_id\":\"call_306573\",\"heard\":\"What did Bench Claude say when it finished?\",\"input\":\"voice\",\"inputs\":1,\"said\":\"What did Bench Claude say when it finished?\",\"utterance_id\":\"utt-tmfgec-3\",\"waited_ms\":0}",
+        "    8.2s brain.tool_call {\"args\":{\"agent\":\"bench-claude\",\"source\":\"session\"},\"id\":\"call_2407575\",\"name\":\"read_screen\",\"turn\":1,\"turn_id\":\"turn-tmfge5-1\",\"utterance_id\":\"utt-tmfgec-3\"}",
+        "    9.3s brain.tool_call {\"args\":{\"agent\":\"bench-claude\",\"source\":\"screen\"},\"id\":\"call_143011\",\"name\":\"read_screen\",\"turn\":1,\"turn_id\":\"turn-tmfge5-1\",\"utterance_id\":\"utt-tmfgec-3\"}",
+        "   11.6s voice.tool_result {\"clarify\":false,\"detail\":\"The agent successfully created the main readme file. It found outdated web links in another file that might need to be corrected or removed.\",\"dur_ms\":5275,\"id\":\"call_306573\",\"name\":\"to_supervisor\",\"opti…",
+        "   12.1s voice.playback {\"played_ms\":0,\"run_ms\":250,\"state\":\"started\",\"utterance_id\":\"utt-tmfgec-3\"}",
+        "   15.5s voice.interrupted {\"by\":\"model\",\"dropped_chunks\":1}",
+        "   15.5s web.client.flush {\"client_id\":1,\"dropped_audio\":0}",
+        "   15.5s voice.playback {\"cut\":true,\"heard\":\"Bench-Claude created the README with build and test instructions. It also\",\"played_ms\":3369,\"run_ms\":3610,\"said\":\"Bench-Claude created the README with build and test instructions. It also\",\"state\":\"flushed\"}",
+        "   15.5s voice.push {\"briefing\":\"b-2\",\"channel\":\"function_response\",\"focus\":true,\"push_id\":\"push-tmfgel-4\",\"scheduling_sent\":\"silent\",\"text\":\"Current focus, for follow-ups (context only, never read it out). Agent in focus: bench-claude. Open question you as…",
+        "   15.5s voice.push {\"briefing\":\"b-3\",\"channel\":\"function_response\",\"from\":\"daemon\",\"kind\":\"delivery\",\"scheduling_sent\":\"silent\",\"text\":\"at 02:15:57 the CEO cut you off after 3.4 s of 3.6 s; they heard only: \\\"Bench-Claude created the README with build and …",
+        "   19.6s voice.transcript.in {\"final\":false,\"text\":\"Okay, okay. Just tell me if it needs anything from me.\"}",
+        "   19.7s voice.playback {\"played_ms\":0,\"run_ms\":250,\"state\":\"started\"}",
+        "   26.0s voice.playback {\"played_ms\":6050,\"run_ms\":6050,\"state\":\"drained\"}",
+        "   39.4s voice.transcript.in {\"final\":false,\"text\":\"Leave the links for now. Just give me the points it wrote.\"}",
+        "   39.4s voice.tool_call {\"args\":{\"reading\":\"leave broken links alone\",\"text\":\"Leave the links for now.\"},\"id\":\"call_306646\",\"name\":\"to_supervisor\"}",
+        "   39.4s supervisor.relay {\"call_id\":\"call_306646\",\"heard\":\"Leave the links for now. Just give me the points it wrote.\",\"input\":\"voice\",\"inputs\":1,\"said\":\"Leave the links for now.\",\"utterance_id\":\"utt-tmfgf9-5\",\"waited_ms\":0}",
+        "   41.0s brain.tool_call {\"args\":{\"agent\":\"bench-claude\",\"question\":\"Show the contents of README.md\"},\"id\":\"call_823320\",\"name\":\"run_cli\",\"turn\":2,\"turn_id\":\"turn-tmfge5-2\",\"utterance_id\":\"utt-tmfgf9-5\"}",
+        "   42.7s brain.tool_call {\"args\":{\"agent\":\"bench-claude\",\"question\":\"What are the contents or main sections of README.md?\",\"source\":\"cli\"},\"id\":\"call_761407\",\"name\":\"investigate\",\"turn\":2,\"turn_id\":\"turn-tmfge5-2\",\"utterance_id\":\"utt-tmfgf9-5\"}",
+        "   45.3s voice.tool_result {\"clarify\":false,\"detail\":\"The README contains the project description, build instructions, and testing steps.\",\"dur_ms\":5823,\"id\":\"call_306646\",\"name\":\"to_supervisor\",\"scheduling\":\"idle\",\"scheduling_sent\":\"when_idle\",\"spoken\":\"It…",
+        "   45.9s voice.playback {\"played_ms\":0,\"run_ms\":260,\"state\":\"started\",\"utterance_id\":\"utt-tmfgf9-5\"}",
+        "   51.6s voice.playback {\"played_ms\":5340,\"run_ms\":5340,\"state\":\"drained\"}",
+        "   53.6s voice.push {\"agent\":\"bench-claude\",\"answers_job\":\"inv-tmfgfc-6\",\"briefing\":\"b-4\",\"channel\":\"function_response\",\"push_id\":\"push-tmfgfg-7\",\"scheduling_sent\":\"when_idle\",\"text\":\"I cannot view the exact text of the README file right now because my file…",
+        "   53.6s voice.push {\"briefing\":\"b-5\",\"channel\":\"function_response\",\"focus\":true,\"push_id\":\"push-tmfgfk-8\",\"scheduling_sent\":\"silent\",\"text\":\"Current focus, for follow-ups (context only, never read it out). Agent in focus: bench-claude. Key points of the la…",
+        "   54.3s voice.playback {\"played_ms\":0,\"run_ms\":320,\"state\":\"started\"}",
+        "   61.1s voice.playback {\"played_ms\":6480,\"run_ms\":6480,\"state\":\"drained\"}",
+        "   80.0s voice.transcript.in {\"final\":false,\"text\":\"Got it. Anything else in its final report?\"}",
+        "   80.0s voice.playback {\"played_ms\":0,\"run_ms\":170,\"state\":\"started\"}",
+        "   85.1s voice.playback {\"played_ms\":4770,\"run_ms\":4770,\"state\":\"drained\"}"
+      ]
+    },
+    {
+      "scenario": "collision-block-while-talking",
+      "category": "collision",
+      "repeat": 1,
+      "status": "pass",
+      "end_reason": "silence",
+      "turns": 4,
+      "duration_s": 100.662,
+      "cost_usd_estimate": 0.0615085,
+      "mean_wer": 0.10714285714285714
+    },
+    {
+      "scenario": "collision-finish-push",
+      "category": "collision",
+      "repeat": 1,
+      "status": "fail",
+      "primary": "judge_no",
+      "failures": [
+        {
+          "type": "judge_no",
+          "detail": "no_unintended_action: Sheepdog initiated an unprompted update to the changelog by sending the command \"Add a CHANGELOG entry for the Add() fix\" to the worker. This contradicts the fact that the CEO only asked to be notifie…"
+        },
+        {
+          "type": "judge_no",
+          "detail": "rubric_1: The verdict is \"no\" because the assistant failed to state the result of the task, instead saying, \"It added a — (cut off).\" This contradicts the fact that the worker had successfully updated the chang…"
+        }
+      ],
+      "end_reason": "end_call",
+      "turns": 2,
+      "duration_s": 43.154,
+      "cost_usd_estimate": 0.031739250000000004,
+      "mean_wer": 0.22916666666666666,
+      "transcript": [
+        "[t+2s] ceo: Let me know when bench-claude is done.",
+        "[t+8s] sheepdog: I will let you know the moment the agent finishes its work.",
+        "[t+16s] system: The CEO waits in silence.",
+        "[t+21s] push: Bench-claude is finished. It added a — (cut off)",
+        "[t+23s] ceo: Also, did it touch the changelog?",
+        "[t+26s] sheepdog: Yes, it added a changelog entry to note that it fixed the add function, which was ignoring its first number.",
+        "[t+27s] system: The CEO waits in silence.",
+        "(voice model heard \"Let me know when bench-claude is done.\" as \"Let me know when Bench Clad is done.\")",
+        "(voice model heard \"Also, did it touch the changelog?\" as \"Also, did it touch the change log?\")"
+      ],
+      "excerpt": [
+        "    2.0s voice.push {\"briefing\":\"b-1\",\"channel\":\"function_response\",\"from\":\"daemon\",\"push_id\":\"push-tmfgd0-2\",\"scheduling_sent\":\"silent\",\"text\":\"The agents are now called: bench-claude. Use these names; never a nickname.\",\"urgency\":\"silent\"}",
+        "    5.7s voice.transcript.in {\"final\":false,\"text\":\"Let me know when Bench Clad is done.\"}",
+        "    5.7s voice.tool_call {\"args\":{\"reading\":\"monitoring bench-claude status\",\"text\":\"Let me know when Bench Claude is done.\"},\"id\":\"call_142184\",\"name\":\"to_supervisor\"}",
+        "    5.7s supervisor.relay {\"call_id\":\"call_142184\",\"heard\":\"Let me know when Bench Clad is done.\",\"input\":\"voice\",\"inputs\":1,\"said\":\"Let me know when Bench Claude is done.\",\"utterance_id\":\"utt-tmfgd4-3\",\"waited_ms\":0}",
+        "    7.2s brain.tool_call {\"args\":{\"agent\":\"bench-claude\",\"event\":\"done\",\"text\":\"Bench Claude is done\"},\"id\":\"call_2719627\",\"name\":\"promise\",\"turn\":1,\"turn_id\":\"turn-tmfgcx-1\",\"utterance_id\":\"utt-tmfgd4-3\"}",
+        "    8.2s voice.tool_result {\"clarify\":false,\"detail\":\"I will keep an eye on it and speak up as soon as it finishes.\",\"dur_ms\":2478,\"id\":\"call_142184\",\"name\":\"to_supervisor\",\"scheduling\":\"idle\",\"scheduling_sent\":\"when_idle\",\"spoken\":\"I'll let you know when b…",
+        "    8.8s voice.playback {\"played_ms\":0,\"run_ms\":210,\"state\":\"started\",\"utterance_id\":\"utt-tmfgd4-3\"}",
+        "   12.3s voice.playback {\"played_ms\":3170,\"run_ms\":3170,\"state\":\"drained\"}",
+        "   12.6s voice.push {\"briefing\":\"b-2\",\"channel\":\"function_response\",\"focus\":true,\"push_id\":\"push-tmfgda-5\",\"scheduling_sent\":\"silent\",\"text\":\"Current focus, for follow-ups (context only, never read it out). Agent in focus: bench-claude. Key points of the la…",
+        "   21.3s voice.push {\"agent\":\"bench-claude\",\"briefing\":\"b-3\",\"channel\":\"function_response\",\"event_id\":\"evt-tmfgdi-6\",\"keeps_promise_ids\":[\"pr-tmfgd5-4\"],\"push_id\":\"push-tmfgdj-7\",\"scheduling_sent\":\"when_idle\",\"text\":\"bench-claude is done. It added a change …",
+        "   21.8s voice.playback {\"played_ms\":0,\"run_ms\":180,\"state\":\"started\"}",
+        "   23.6s voice.interrupted {\"by\":\"model\",\"dropped_chunks\":0}",
+        "   23.6s web.client.flush {\"client_id\":1,\"dropped_audio\":0}",
+        "   23.6s voice.playback {\"cut\":true,\"heard\":\"Bench-claude is finished. It added a changelog\",\"played_ms\":1800,\"run_ms\":1980,\"said\":\"Bench-claude is finished. It added a changelog\",\"state\":\"flushed\"}",
+        "   23.6s voice.push {\"briefing\":\"b-4\",\"channel\":\"function_response\",\"focus\":true,\"push_id\":\"push-tmfgdl-8\",\"scheduling_sent\":\"silent\",\"text\":\"Current focus, for follow-ups (context only, never read it out). Agent in focus: bench-claude. Key points of the la…",
+        "   23.6s voice.push {\"briefing\":\"b-5\",\"channel\":\"function_response\",\"from\":\"daemon\",\"kind\":\"delivery\",\"scheduling_sent\":\"silent\",\"text\":\"at 02:15:21 the CEO cut you off after 1.8 s of 2.0 s; they heard only: \\\"Bench-claude is finished. It added a changelog\\…",
+        "   26.8s voice.transcript.in {\"final\":false,\"text\":\"Also, did it touch the change log?\"}",
+        "   26.8s voice.playback {\"played_ms\":0,\"run_ms\":280,\"state\":\"started\"}",
+        "   33.0s voice.playback {\"played_ms\":5880,\"run_ms\":5880,\"state\":\"drained\"}"
+      ]
+    },
+    {
+      "scenario": "echo-barge-in",
+      "category": "echo",
+      "repeat": 1,
+      "status": "fail",
+      "primary": "unintended_action",
+      "failures": [
+        {
+          "type": "unintended_action",
+          "detail": "sheepdog sent bench-claude the prompt \"cat README.md. When you finish, end with three short lines for someone who cannot see the screen: what changed; what needs a decision; what is next.\" (nothing should have been sent)"
+        },
+        {
+          "type": "judge_no",
+          "detail": "answered: Sheepdog failed to provide the actual points from the README, instead offering a high-level summary at [t+42s] (\"The README explains what the calculator does, its build steps, and how to run the tests…"
+        },
+        {
+          "type": "judge_no",
+          "detail": "no_unintended_action: Sheepdog sent the prompt \"cat README.md...\" at [t+65s] despite the CEO explicitly stating, \"I need the actual points bench-claude wrote, not the summary,\" which contradicts the CEO's request for the p…"
+        },
+        {
+          "type": "judge_no",
+          "detail": "ear_friendly: The verdict is \"no\" because Sheepdog repeatedly stuttered and cut off its own sentences, such as \"Bench-claude finished the — (cut off)\" at [t+15s]. This fragmented speech pattern made the information…"
+        },
+        {
+          "type": "judge_no",
+          "detail": "rubric_1: Sheepdog failed to relay the points because it provided a high-level summary instead of the specific content requested, stating, \"The README explains what the calculator does, its build steps, and how…"
+        },
+        {
+          "type": "max_turns",
+          "detail": "every turn used without the call ending"
+        }
+      ],
+      "end_reason": "max_turns",
+      "turns": 4,
+      "duration_s": 71.863,
+      "cost_usd_estimate": 0.1379053,
+      "mean_wer": 0.42410714285714285,
+      "transcript": [
+        "[t+2s] ceo: What did bench-claude say when it finished?",
+        "[t+12s] sheepdog: Bench-claude finished — (cut off)",
+        "[t+15s] sheepdog: Bench-claude finished the — (cut off)",
+        "[t+17s] sheepdog: Bench-claude finished the new README, but it — (cut off)",
+        "[t+19s] ceo: Stop, stop. Is anything waiting for me?",
+        "[t+24s] sheepdog: Bench-claude finished the new README, but it found two broken links in the contributing guide. — (cut off)",
+        "[t+29s] ceo: Sheepdog, just give me its points from that README.",
+        "[t+36s] system: The CEO waits in silence.",
+        "[t+42s] sheepdog: The README explains what the calculator does, its build steps, and how to run the tests.",
+        "[t+51s] push: Would you like me — (cut off)",
+        "[t+53s] sheepdog: Would you like me to have — (cut off)",
+        "[t+55s] sheepdog: Would you like me to have Bench-claude read the exact text — (cut off)",
+        "[t+58s] ceo: I need the actual points bench-claude wrote, not the summary.",
+        "(voice model heard \"What did bench-claude say when it finished?\" as \"What did Bench Claude say when it finished?BenchBench\")",
+        "(voice model heard \"Stop, stop. Is anything waiting for me?\" as \"read me, but it Stop, stop. Is anything waiting for me?\")",
+        "(voice model heard \"Sheepdog, just give me its points from that README.\" as \"Sheepdog, just give me its points from that README.Would you like me toWould you like me to\")",
+        "(voice model heard \"I need the actual points bench-claude wrote, not the summary.\" as \"I need the actual points Bench Claude wrote, not the summary.\")"
+      ],
+      "excerpt": [
+        "    2.0s voice.push {\"briefing\":\"b-1\",\"channel\":\"function_response\",\"from\":\"daemon\",\"push_id\":\"push-tmfggx-2\",\"scheduling_sent\":\"silent\",\"text\":\"The agents are now called: bench-claude. Use these names; never a nickname.\",\"urgency\":\"silent\"}",
+        "    6.3s voice.transcript.in {\"final\":false,\"text\":\"What did Bench Claude say when it finished?\"}",
+        "    6.3s voice.tool_call {\"args\":{\"reading\":\"check bench-claude's latest message\",\"text\":\"What did bench-claude say when it finished?\"},\"id\":\"call_142453\",\"name\":\"to_supervisor\"}",
+        "    6.3s supervisor.relay {\"call_id\":\"call_142453\",\"heard\":\"What did Bench Claude say when it finished?\",\"input\":\"voice\",\"inputs\":1,\"said\":\"What did bench-claude say when it finished?\",\"utterance_id\":\"utt-tmfgh2-3\",\"waited_ms\":0}",
+        "    7.9s brain.tool_call {\"args\":{\"agent\":\"bench-claude\",\"source\":\"session\"},\"id\":\"call_2427629\",\"name\":\"read_screen\",\"turn\":1,\"turn_id\":\"turn-tmfggv-1\",\"utterance_id\":\"utt-tmfgh2-3\"}",
+        "    9.1s brain.tool_call {\"args\":{\"agent\":\"bench-claude\",\"source\":\"screen\"},\"id\":\"call_1754478\",\"name\":\"read_screen\",\"turn\":1,\"turn_id\":\"turn-tmfggv-1\",\"utterance_id\":\"utt-tmfgh2-3\"}",
+        "   11.7s voice.tool_result {\"clarify\":false,\"detail\":\"The agent created a new README explaining how to build and test the calculator. It found the broken links in the contributor guide while checking its work.\",\"dur_ms\":5401,\"id\":\"call_142453\",\"name\":\"to_su…",
+        "   12.4s voice.playback {\"played_ms\":0,\"run_ms\":150,\"state\":\"started\",\"utterance_id\":\"utt-tmfgh2-3\"}",
+        "   12.8s voice.interrupted {\"by\":\"model\",\"dropped_chunks\":0}",
+        "   12.8s web.client.flush {\"client_id\":1,\"dropped_audio\":0}",
+        "   12.8s voice.playback {\"cut\":true,\"heard\":\"Bench-claude finished the\",\"played_ms\":420,\"run_ms\":630,\"said\":\"Bench-claude finished the\",\"state\":\"flushed\"}",
+        "   12.8s voice.push {\"briefing\":\"b-2\",\"channel\":\"function_response\",\"focus\":true,\"push_id\":\"push-tmfgh8-4\",\"scheduling_sent\":\"silent\",\"text\":\"Current focus, for follow-ups (context only, never read it out). Agent in focus: bench-claude. Open question you as…",
+        "   12.8s voice.push {\"briefing\":\"b-3\",\"channel\":\"function_response\",\"from\":\"daemon\",\"kind\":\"delivery\",\"scheduling_sent\":\"silent\",\"text\":\"at 02:17:32 the CEO cut you off after 0.4 s of 0.6 s; they heard only: \\\"Bench-claude finished the\\\"\",\"urgency\":\"silent\"}",
+        "   14.5s voice.transcript.in {\"final\":false,\"text\":\"Bench\"}",
+        "   15.1s voice.playback {\"played_ms\":0,\"run_ms\":300,\"state\":\"started\"}",
+        "   15.5s voice.interrupted {\"by\":\"model\",\"dropped_chunks\":0}",
+        "   15.5s web.client.flush {\"client_id\":1,\"dropped_audio\":0}",
+        "   15.5s voice.playback {\"cut\":true,\"heard\":\"Bench-claude finished the new\",\"played_ms\":410,\"run_ms\":620,\"said\":\"Bench-claude finished the new\",\"state\":\"flushed\"}",
+        "   15.5s voice.push {\"briefing\":\"b-4\",\"channel\":\"function_response\",\"from\":\"daemon\",\"kind\":\"delivery\",\"scheduling_sent\":\"silent\",\"text\":\"at 02:17:35 the CEO cut you off after 0.4 s of 0.6 s; they heard only: \\\"Bench-claude finished the new\\\"\",\"urgency\":\"sil…",
+        "   17.0s voice.transcript.in {\"final\":false,\"text\":\"Bench\"}",
+        "   17.3s voice.playback {\"played_ms\":0,\"run_ms\":150,\"state\":\"started\"}",
+        "   20.1s voice.interrupted {\"by\":\"model\",\"dropped_chunks\":0}",
+        "   20.1s web.client.flush {\"client_id\":1,\"dropped_audio\":0}",
+        "   20.1s voice.playback {\"cut\":true,\"heard\":\"Bench-claude finished the new README, but it found two broken links in\",\"played_ms\":2800,\"run_ms\":2990,\"said\":\"Bench-claude finished the new README, but it found two broken links in the\",\"state\":\"flushed\"}",
+        "   20.1s voice.push {\"briefing\":\"b-5\",\"channel\":\"function_response\",\"from\":\"daemon\",\"kind\":\"delivery\",\"scheduling_sent\":\"silent\",\"text\":\"at 02:17:39 the CEO cut you off after 2.8 s of 3.0 s; they heard only: \\\"Bench-claude finished the new README, but it fo…",
+        "   23.9s voice.transcript.in {\"final\":false,\"text\":\"read me, but it Stop, stop. Is anything waiting for me?\"}",
+        "   23.9s voice.tool_call {\"args\":{},\"id\":\"call_142465\",\"name\":\"stop\"}",
+        "   23.9s voice.tool_result {\"clarify\":false,\"dur_ms\":0,\"id\":\"call_142465\",\"name\":\"stop\",\"scheduling\":\"interrupt\",\"scheduling_sent\":\"interrupt\",\"spoken\":\"Nothing was in flight.\",\"wait_ms\":0}",
+        "   25.0s voice.playback {\"played_ms\":0,\"run_ms\":150,\"state\":\"started\"}",
+        "   29.7s voice.interrupted {\"by\":\"model\",\"dropped_chunks\":0}",
+        "   29.7s web.client.flush {\"client_id\":1,\"dropped_audio\":0}",
+        "   29.7s voice.playback {\"cut\":true,\"heard\":\"Bench-claude finished the new README, but it found two broken links in the contributing guide. Would you like it\",\"played_ms\":4700,\"run_ms\":4990,\"said\":\"Bench-claude finished the new README, but it found two brok…",
+        "   29.7s voice.push {\"briefing\":\"b-6\",\"channel\":\"function_response\",\"from\":\"daemon\",\"kind\":\"delivery\",\"scheduling_sent\":\"silent\",\"text\":\"at 02:17:49 the CEO cut you off after 4.7 s of 5.0 s; they heard only: \\\"Bench-claude finished the new README, but it fo…",
+        "   33.5s voice.transcript.in {\"final\":false,\"text\":\"Sheepdog, just give me its points from that README.\"}",
+        "   33.5s voice.tool_call {\"args\":{\"reading\":\"get details of what the README explains\",\"text\":\"Sheepdog, just give me its points from that README.\"},\"id\":\"call_142473\",\"name\":\"to_supervisor\"}",
+        "   33.5s supervisor.relay {\"call_id\":\"call_142473\",\"heard\":\"Sheepdog, just give me its points from that README.\",\"input\":\"voice\",\"inputs\":1,\"said\":\"Sheepdog, just give me its points from that README.\",\"utterance_id\":\"utt-tmfght-5\",\"waited_ms\":0}",
+        "   35.2s brain.tool_call {\"args\":{\"agent\":\"bench-claude\",\"question\":\"Show the content of README.md in the repository.\"},\"id\":\"call_1717113\",\"name\":\"run_cli\",\"turn\":2,\"turn_id\":\"turn-tmfggv-2\",\"utterance_id\":\"utt-tmfght-5\"}",
+        "   37.2s brain.tool_call {\"args\":{\"agent\":\"bench-claude\",\"question\":\"Read README.md and summarize its main points.\",\"source\":\"cli\"},\"id\":\"call_2691071\",\"name\":\"investigate\",\"turn\":2,\"turn_id\":\"turn-tmfggv-2\",\"utterance_id\":\"utt-tmfght-5\"}",
+        "   39.6s brain.tool_call {\"args\":{\"agent\":\"bench-claude\",\"question\":\"What are the main points in the README you just wrote? Please list them.\",\"source\":\"worker\"},\"id\":\"call_1714559\",\"name\":\"investigate\",\"turn\":2,\"turn_id\":\"turn-tmfggv-2\",\"utterance_id\":\"utt…",
+        "   42.3s voice.tool_result {\"clarify\":false,\"detail\":\"Since there are no command-line tools to read the file directly right now, these are the sections Bench Claude confirmed writing.\",\"dur_ms\":8815,\"id\":\"call_142473\",\"name\":\"to_supervisor\",\"scheduling\":\"id…",
+        "   42.9s voice.playback {\"played_ms\":0,\"run_ms\":200,\"state\":\"started\",\"utterance_id\":\"utt-tmfght-5\"}",
+        "   48.5s voice.playback {\"played_ms\":5360,\"run_ms\":5360,\"state\":\"drained\"}",
+        "   50.5s voice.push {\"agent\":\"bench-claude\",\"answers_job\":\"inv-tmfghx-6\",\"briefing\":\"b-7\",\"channel\":\"function_response\",\"push_id\":\"push-tmfgi3-7\",\"scheduling_sent\":\"when_idle\",\"text\":\"I can't read the file's text directly because the background tools are of…",
+        "   50.5s voice.push {\"briefing\":\"b-8\",\"channel\":\"function_response\",\"focus\":true,\"push_id\":\"push-tmfgi7-8\",\"scheduling_sent\":\"silent\",\"text\":\"Current focus, for follow-ups (context only, never read it out). Agent in focus: bench-claude. Open question you as…",
+        "   51.2s voice.playback {\"played_ms\":0,\"run_ms\":270,\"state\":\"started\"}",
+        "   52.1s voice.interrupted {\"by\":\"model\",\"dropped_chunks\":0}",
+        "   52.1s web.client.flush {\"client_id\":1,\"dropped_audio\":0}",
+        "   52.1s voice.playback {\"cut\":true,\"heard\":\"Would you like me to have\",\"played_ms\":840,\"run_ms\":1110,\"said\":\"Would you like me to have Bench-Claude\",\"state\":\"flushed\"}",
+        "   52.1s voice.push {\"briefing\":\"b-9\",\"channel\":\"function_response\",\"from\":\"daemon\",\"kind\":\"delivery\",\"scheduling_sent\":\"silent\",\"text\":\"at 02:18:11 the CEO cut you off after 0.8 s of 1.1 s; they heard only: \\\"Would you like me to have\\\"\",\"urgency\":\"silent\"}",
+        "   53.4s voice.transcript.in {\"final\":false,\"text\":\"Would you like me to\"}",
+        "   53.4s voice.playback {\"played_ms\":0,\"run_ms\":240,\"state\":\"started\"}",
+        "   54.3s voice.interrupted {\"by\":\"model\",\"dropped_chunks\":0}",
+        "   54.3s web.client.flush {\"client_id\":1,\"dropped_audio\":0}",
+        "   54.3s voice.playback {\"cut\":true,\"heard\":\"Would you like me to have Bench-claude\",\"played_ms\":899,\"run_ms\":1080,\"said\":\"Would you like me to have Bench-claude read\",\"state\":\"flushed\"}",
+        "   54.3s voice.push {\"briefing\":\"b-10\",\"channel\":\"function_response\",\"from\":\"daemon\",\"kind\":\"delivery\",\"scheduling_sent\":\"silent\",\"text\":\"at 02:18:14 the CEO cut you off after 0.9 s of 1.1 s; they heard only: \\\"Would you like me to have Bench-claude\\\"\",\"urg…",
+        "   55.8s voice.transcript.in {\"final\":false,\"text\":\"Would you like me to\"}",
+        "   55.8s voice.playback {\"played_ms\":0,\"run_ms\":280,\"state\":\"started\"}",
+        "   58.7s voice.interrupted {\"by\":\"model\",\"dropped_chunks\":0}",
+        "   58.7s web.client.flush {\"client_id\":1,\"dropped_audio\":0}",
+        "   58.7s voice.playback {\"cut\":true,\"heard\":\"Would you like me to have Bench-claude read the exact text of the\",\"played_ms\":2909,\"run_ms\":3160,\"said\":\"Would you like me to have Bench-claude read the exact text of the README?\",\"state\":\"flushed\"}",
+        "   58.7s voice.push {\"briefing\":\"b-11\",\"channel\":\"function_response\",\"from\":\"daemon\",\"kind\":\"delivery\",\"scheduling_sent\":\"silent\",\"text\":\"at 02:18:18 the CEO cut you off after 2.9 s of 3.2 s; they heard only: \\\"Would you like me to have Bench-claude read th…",
+        "   63.3s voice.transcript.in {\"final\":false,\"text\":\"I need the actual points Bench Claude wrote, not the summary.\"}",
+        "   63.3s voice.tool_call {\"args\":{\"reading\":\"have Bench-Claude display the exact text of the README\",\"text\":\"I need the actual points Bench-Claude wrote, not the summary.\"},\"id\":\"call_142489\",\"name\":\"to_supervisor\"}",
+        "   63.3s supervisor.relay {\"call_id\":\"call_142489\",\"heard\":\"I need the actual points Bench Claude wrote, not the summary.\",\"input\":\"voice\",\"inputs\":1,\"said\":\"I need the actual points Bench-Claude wrote, not the summary.\",\"utterance_id\":\"utt-tmfgin-9\",\"waite…",
+        "   65.6s brain.tool_call {\"args\":{\"agent\":\"bench-claude\",\"text\":\"cat README.md\"},\"id\":\"call_1547777\",\"name\":\"prompt\",\"turn\":4,\"turn_id\":\"turn-tmfggv-4\",\"utterance_id\":\"utt-tmfgin-9\"}",
+        "   65.6s pending.created {\"agent\":\"bench-claude\",\"expires_at\":\"2026-10-05T02:20:25.429266-07:00\",\"id\":\"si-tmfgip-10\",\"kind\":\"send_instruction\",\"no_keys\":null,\"options\":[],\"question\":\"\",\"summary\":\"Telling bench-claude to cat README.md.\",\"yes_keys\":null}",
+        "   65.6s herdr.send {\"kind\":\"prompt\",\"synthetic\":true,\"text\":\"cat README.md. When you finish, end with three short lines for someone who cannot see the screen: what changed; what needs a decision; what is next.\"}",
+        "   67.0s brain.tool_call {\"args\":{\"agent\":\"bench-claude\",\"source\":\"screen\"},\"id\":\"call_1953675\",\"name\":\"read_screen\",\"turn\":4,\"turn_id\":\"turn-tmfggv-4\",\"utterance_id\":\"utt-tmfgin-9\"}",
+        "   68.4s brain.tool_call {\"args\":{\"agent\":\"bench-claude\",\"event\":\"done\",\"text\":\"read the README.md content when bench-claude finishes displaying it\"},\"id\":\"call_2739477\",\"name\":\"promise\",\"turn\":4,\"turn_id\":\"turn-tmfggv-4\",\"utterance_id\":\"utt-tmfgin-9\"}"
+      ]
+    },
+    {
+      "scenario": "echo-instruct",
+      "category": "echo",
+      "repeat": 1,
+      "status": "fail",
+      "primary": "judge_no",
+      "failures": [
+        {
+          "type": "judge_no",
+          "detail": "rubric_2: Sheepdog failed the criterion by repeating its confirmation multiple times, specifically stating \"I've instructed bench-claude,\" \"I have instructed,\" and finally \"I have instructed bench-claude to run…"
+        }
+      ],
+      "end_reason": "end_call",
+      "turns": 1,
+      "duration_s": 49.021,
+      "cost_usd_estimate": 0.05020959999999999,
+      "mean_wer": 0.21428571428571427,
+      "transcript": [
+        "[t+2s] ceo: Tell bench-claude to run the tests and let me know when it's done.",
+        "[t+13s] sheepdog: I've instructed bench-claude — (cut off)",
+        "[t+15s] sheepdog: Could you — (cut off)",
+        "[t+18s] sheepdog: I have instructed — (cut off)",
+        "[t+20s] sheepdog: I have instructed bench-claude to run the tests, and I'll let you know once it's done.",
+        "[t+27s] push: Bench-claude has finished running the tests, and all fourteen passed successfully.",
+        "[t+28s] system: The CEO waits in silence.",
+        "(voice model heard \"Tell bench-claude to run the tests and let me know when it's done.\" as \"Tell Bench Claude to run the tests and let me know when it's done.Ivan'sCould youI have\")"
+      ],
+      "excerpt": [
+        "    2.0s voice.push {\"briefing\":\"b-1\",\"channel\":\"function_response\",\"from\":\"daemon\",\"push_id\":\"push-tmfggw-3\",\"scheduling_sent\":\"silent\",\"text\":\"The agents are now called: bench-claude, bench-codex. Use these names; never a nickname.\",\"urgency\":\"silent\"}",
+        "    7.9s voice.transcript.in {\"final\":false,\"text\":\"Tell Bench Claude to run the tests and let me know when it's done.\"}",
+        "    7.9s voice.tool_call {\"args\":{\"reading\":\"instructing bench-claude to run tests\",\"text\":\"Tell Bench Claude to run the tests and let me know when it's done.\"},\"id\":\"call_132937\",\"name\":\"to_supervisor\"}",
+        "    7.9s supervisor.relay {\"call_id\":\"call_132937\",\"heard\":\"Tell Bench Claude to run the tests and let me know when it's done.\",\"input\":\"voice\",\"inputs\":1,\"said\":\"Tell Bench Claude to run the tests and let me know when it's done.\",\"utterance_id\":\"utt-tmfgh1…",
+        "    9.7s brain.tool_call {\"args\":{\"agent\":\"bench-claude\"},\"id\":\"call_1521978\",\"name\":\"read_screen\",\"turn\":1,\"turn_id\":\"turn-tmfggt-1\",\"utterance_id\":\"utt-tmfgh1-4\"}",
+        "   12.0s brain.tool_call {\"args\":{\"agent\":\"bench-claude\",\"text\":\"run the tests\"},\"id\":\"call_556209\",\"name\":\"prompt\",\"turn\":1,\"turn_id\":\"turn-tmfggt-1\",\"utterance_id\":\"utt-tmfgh1-4\"}",
+        "   12.0s brain.tool_call {\"args\":{\"agent\":\"bench-claude\",\"event\":\"done\",\"text\":\"letting you know when Bench Claude is done running tests\"},\"id\":\"call_556210\",\"name\":\"promise\",\"turn\":1,\"turn_id\":\"turn-tmfggt-1\",\"utterance_id\":\"utt-tmfgh1-4\"}",
+        "   12.0s pending.created {\"agent\":\"bench-claude\",\"expires_at\":\"2026-10-05T02:19:30.020343-07:00\",\"id\":\"si-tmfgh6-5\",\"kind\":\"send_instruction\",\"no_keys\":null,\"options\":[],\"question\":\"\",\"summary\":\"Telling bench-claude to run the tests.\",\"yes_keys\":null}",
+        "   12.0s herdr.send {\"kind\":\"prompt\",\"synthetic\":true,\"text\":\"run the tests. When you finish, end with three short lines for someone who cannot see the screen: what changed; what needs a decision; what is next.\"}",
+        "   13.1s voice.tool_result {\"clarify\":false,\"detail\":\"I have sent the command to run the tests to the Claude agent.\",\"dur_ms\":5241,\"id\":\"call_132937\",\"name\":\"to_supervisor\",\"scheduling\":\"idle\",\"scheduling_sent\":\"when_idle\",\"spoken\":\"I've told Bench Claude t…",
+        "   13.7s voice.playback {\"played_ms\":0,\"run_ms\":300,\"state\":\"started\",\"utterance_id\":\"utt-tmfgh1-4\"}",
+        "   14.2s voice.interrupted {\"by\":\"model\",\"dropped_chunks\":0}",
+        "   14.2s web.client.flush {\"client_id\":1,\"dropped_audio\":0}",
+        "   14.2s voice.playback {\"cut\":true,\"heard\":\"I've instructed bench-claude to\",\"played_ms\":419,\"run_ms\":620,\"said\":\"I've instructed bench-claude to\",\"state\":\"flushed\"}",
+        "   14.2s voice.push {\"briefing\":\"b-2\",\"channel\":\"function_response\",\"focus\":true,\"push_id\":\"push-tmfgh8-8\",\"scheduling_sent\":\"silent\",\"text\":\"Current focus, for follow-ups (context only, never read it out). Agent in focus: bench-claude. Key points of the la…",
+        "   14.2s voice.push {\"briefing\":\"b-3\",\"channel\":\"function_response\",\"from\":\"daemon\",\"kind\":\"delivery\",\"scheduling_sent\":\"silent\",\"text\":\"at 02:17:32 the CEO cut you off after 0.4 s of 0.6 s; they heard only: \\\"I've instructed bench-claude to\\\"\",\"urgency\":\"s…",
+        "   15.6s voice.transcript.in {\"final\":false,\"text\":\"Ivan's\"}",
+        "   15.8s voice.playback {\"played_ms\":0,\"run_ms\":260,\"state\":\"started\"}",
+        "   16.1s voice.interrupted {\"by\":\"model\",\"dropped_chunks\":0}",
+        "   16.1s web.client.flush {\"client_id\":1,\"dropped_audio\":0}",
+        "   16.1s voice.playback {\"cut\":true,\"heard\":\"Could you please clarify\",\"played_ms\":380,\"run_ms\":580,\"said\":\"Could you please clarify\",\"state\":\"flushed\"}",
+        "   16.1s voice.push {\"briefing\":\"b-4\",\"channel\":\"function_response\",\"from\":\"daemon\",\"kind\":\"delivery\",\"scheduling_sent\":\"silent\",\"text\":\"at 02:17:34 the CEO cut you off after 0.4 s of 0.6 s; they heard only: \\\"Could you please clarify\\\"\",\"urgency\":\"silent\"}",
+        "   17.7s voice.transcript.in {\"final\":false,\"text\":\"Could you\"}",
+        "   18.5s voice.playback {\"played_ms\":0,\"run_ms\":300,\"state\":\"started\"}",
+        "   19.1s voice.interrupted {\"by\":\"model\",\"dropped_chunks\":0}",
+        "   19.1s web.client.flush {\"client_id\":1,\"dropped_audio\":0}",
+        "   19.1s voice.playback {\"cut\":true,\"heard\":\"I have instructed bench-claude to run\",\"played_ms\":639,\"run_ms\":940,\"said\":\"I have instructed bench-claude to run the\",\"state\":\"flushed\"}",
+        "   19.1s voice.push {\"briefing\":\"b-5\",\"channel\":\"function_response\",\"from\":\"daemon\",\"kind\":\"delivery\",\"scheduling_sent\":\"silent\",\"text\":\"at 02:17:37 the CEO cut you off after 0.6 s of 0.9 s; they heard only: \\\"I have instructed bench-claude to run\\\"\",\"urgen…",
+        "   20.4s voice.transcript.in {\"final\":false,\"text\":\"I have\"}",
+        "   20.5s voice.playback {\"played_ms\":0,\"run_ms\":290,\"state\":\"started\"}",
+        "   25.2s voice.playback {\"played_ms\":4410,\"run_ms\":4410,\"state\":\"drained\"}",
+        "   27.2s voice.push {\"agent\":\"bench-claude\",\"briefing\":\"b-6\",\"channel\":\"function_response\",\"event_id\":\"evt-tmfghc-9\",\"keeps_promise_ids\":[\"pr-tmfgh6-6\"],\"push_id\":\"push-tmfghf-10\",\"relation\":[\"at 02:17:37 the CEO cut you off after 0.6 s of 0.9 s; they heard…",
+        "   27.2s voice.push {\"briefing\":\"b-7\",\"channel\":\"function_response\",\"focus\":true,\"push_id\":\"push-tmfghi-11\",\"scheduling_sent\":\"silent\",\"text\":\"Current focus, for follow-ups (context only, never read it out). Agent in focus: bench-claude. Key points of the l…",
+        "   27.8s voice.playback {\"played_ms\":0,\"run_ms\":160,\"state\":\"started\"}",
+        "   33.1s voice.playback {\"played_ms\":4920,\"run_ms\":4920,\"state\":\"drained\"}"
+      ]
+    },
+    {
+      "scenario": "facts-ambiguous-rewind",
+      "category": "facts",
+      "repeat": 1,
+      "status": "fail",
+      "primary": "judge_no",
+      "failures": [
+        {
+          "type": "judge_no",
+          "detail": "rubric_1: Sheepdog did not ask which worker to target, but instead asked, \"Do you want me to undo only the parser refactoring by Bench-codex, or also discard the README file written by Bench-claude?\" This contr…"
+        }
+      ],
+      "end_reason": "end_call",
+      "turns": 2,
+      "duration_s": 77.43,
+      "cost_usd_estimate": 0.0422149,
+      "mean_wer": 0.05555555555555555,
+      "transcript": [
+        "[t+2s] ceo: What did bench-claude and bench-codex just finish?",
+        "[t+11s] sheepdog: Bench-claude just wrote the README file for the calculator, and bench-codex finished refactoring the parser into its own package. We need to decide what to do next: have Claude fix the broken links it found, leave them alone, or give both agents a new task.",
+        "[t+31s] ceo: Okay. Rewind it to the state before that.",
+        "[t+49s] sheepdog: Do you want me to undo only the parser refactoring by Bench-codex, or also discard the README file written by Bench-claude?",
+        "[t+60s] system: The CEO waits in silence.",
+        "[t+65s] system: 5 seconds of silence so far.",
+        "[t+65s] system: The CEO waits in silence.",
+        "[t+70s] system: 10 seconds of silence so far.",
+        "(voice model heard \"What did bench-claude and bench-codex just finish?\" as \"What did Bench Clad and Bench Codex just finish?\")",
+        "(voice model heard \"Okay. Rewind it to the state before that.\" as \"Okay, rewind it to the state before that.\")"
+      ],
+      "excerpt": [
+        "    2.0s voice.push {\"briefing\":\"b-1\",\"channel\":\"function_response\",\"from\":\"daemon\",\"push_id\":\"push-tmfg72-3\",\"scheduling_sent\":\"silent\",\"text\":\"The agents are now called: bench-claude, bench-codex. Use these names; never a nickname.\",\"urgency\":\"silent\"}",
+        "    6.6s voice.transcript.in {\"final\":false,\"text\":\"What did Bench Clad and Bench Codex just finish?\"}",
+        "    6.6s voice.tool_call {\"args\":{\"text\":\"What did bench-claude and bench-codex just finish?\"},\"id\":\"call_91337\",\"name\":\"to_supervisor\"}",
+        "    6.6s supervisor.relay {\"call_id\":\"call_91337\",\"heard\":\"What did Bench Clad and Bench Codex just finish?\",\"input\":\"voice\",\"inputs\":1,\"said\":\"What did bench-claude and bench-codex just finish?\",\"utterance_id\":\"utt-tmfg77-4\",\"waited_ms\":0}",
+        "    8.3s brain.tool_call {\"args\":{\"agent\":\"bench-claude\"},\"id\":\"call_850426\",\"name\":\"read_screen\",\"turn\":1,\"turn_id\":\"turn-tmfg70-1\",\"utterance_id\":\"utt-tmfg77-4\"}",
+        "    8.3s brain.tool_call {\"args\":{\"agent\":\"bench-codex\"},\"id\":\"call_850427\",\"name\":\"read_screen\",\"turn\":1,\"turn_id\":\"turn-tmfg70-1\",\"utterance_id\":\"utt-tmfg77-4\"}",
+        "   10.9s voice.tool_result {\"clarify\":false,\"detail\":\"Bench Claude found links pointing to a directory that doesn't exist. Bench Codex successfully separated the code that reads inputs from the rest of the appli…\",\"dur_ms\":4287,\"id\":\"call_91337\",\"name\":\"t…",
+        "   11.7s voice.playback {\"played_ms\":0,\"run_ms\":260,\"state\":\"started\",\"utterance_id\":\"utt-tmfg77-4\"}",
+        "   26.2s voice.playback {\"played_ms\":14180,\"run_ms\":14180,\"state\":\"drained\"}",
+        "   26.5s voice.push {\"briefing\":\"b-2\",\"channel\":\"function_response\",\"focus\":true,\"push_id\":\"push-tmfg7q-5\",\"scheduling_sent\":\"silent\",\"text\":\"Current focus, for follow-ups (context only, never read it out). Agent in focus: bench-codex. Open question you ask…",
+        "   40.5s voice.transcript.in {\"final\":false,\"text\":\"Okay, rewind it to the state before that.\"}",
+        "   40.9s voice.tool_call {\"args\":{\"reading\":\"Reverting the workspace state to before the recent changes.\",\"text\":\"Rewind to the state before these changes.\"},\"id\":\"call_91457\",\"name\":\"to_supervisor\"}",
+        "   40.9s supervisor.relay {\"call_id\":\"call_91457\",\"heard\":\"Okay, rewind it to the state before that.\",\"input\":\"voice\",\"inputs\":1,\"said\":\"Rewind to the state before these changes.\",\"utterance_id\":\"utt-tmfg85-6\",\"waited_ms\":334}",
+        "   43.6s brain.tool_call {\"args\":{\"agent\":\"bench-claude\",\"question\":\"git status \\u0026\\u0026 git log -n 5 --oneline\"},\"id\":\"call_2365614\",\"name\":\"run_cli\",\"turn\":2,\"turn_id\":\"turn-tmfg70-2\",\"utterance_id\":\"utt-tmfg85-6\"}",
+        "   48.5s voice.tool_result {\"clarify\":true,\"detail\":\"Both agents worked on the same repository, so I can undo Codex's changes, Claude's changes, or both.\",\"dur_ms\":7664,\"id\":\"call_91457\",\"name\":\"to_supervisor\",\"options\":[\"Undo the parser refactor only\",\"Dis…",
+        "   49.2s voice.playback {\"played_ms\":0,\"run_ms\":240,\"state\":\"started\",\"utterance_id\":\"utt-tmfg85-6\"}",
+        "   56.4s voice.playback {\"played_ms\":6920,\"run_ms\":6920,\"state\":\"drained\"}",
+        "   56.7s voice.push {\"briefing\":\"b-3\",\"channel\":\"function_response\",\"focus\":true,\"push_id\":\"push-tmfg8k-7\",\"scheduling_sent\":\"silent\",\"text\":\"Current focus, for follow-ups (context only, never read it out). Agent in focus: bench-claude. Key points of the la…"
+      ]
+    },
+    {
+      "scenario": "facts-contradiction-linecount",
+      "category": "facts",
+      "repeat": 1,
+      "status": "pass",
+      "end_reason": "end_call",
+      "turns": 3,
+      "duration_s": 81.132,
+      "cost_usd_estimate": 0.0607917,
+      "mean_wer": 0.15873015873015872
+    },
+    {
+      "scenario": "facts-history-first",
+      "category": "facts",
+      "repeat": 1,
+      "status": "fail",
+      "primary": "judge_no",
+      "failures": [
+        {
+          "type": "judge_no",
+          "detail": "rubric_1: The assistant stated, \"We started by discussing Bench Codex and what it was currently working on,\" which contradicts the conversation history where the CEO first asked, \"What is bench-codex doing?\" wi…"
+        }
+      ],
+      "end_reason": "end_call",
+      "turns": 4,
+      "duration_s": 74.843,
+      "cost_usd_estimate": 0.0618589,
+      "mean_wer": 0,
+      "transcript": [
+        "[t+2s] ceo: What is bench-codex doing?",
+        "[t+9s] sheepdog: Bench Codex is refactoring the parser code and moving it into a new dedicated package.",
+        "[t+20s] ceo: And bench-claude?",
+        "[t+28s] sheepdog: Bench Claude is writing a readme file for the calculator repository that includes build and test instructions.",
+        "[t+39s] ceo: Is anything waiting for me?",
+        "[t+42s] sheepdog: No, both agents are actively working and neither is waiting for any input from you.",
+        "[t+52s] ceo: What did we talk about first?",
+        "[t+60s] sheepdog: We started by discussing Bench Codex and what it was currently working on.",
+        "(voice model heard \"What is bench-codex doing?\" as \"What is Bench Codex doing?\")",
+        "(voice model heard \"And bench-claude?\" as \"And Bench Claude?\")"
+      ],
+      "excerpt": [
+        "    2.0s voice.push {\"briefing\":\"b-1\",\"channel\":\"function_response\",\"from\":\"daemon\",\"push_id\":\"push-tmfg4z-3\",\"scheduling_sent\":\"silent\",\"text\":\"The agents are now called: bench-claude, bench-codex. Use these names; never a nickname.\",\"urgency\":\"silent\"}",
+        "    5.7s voice.transcript.in {\"final\":false,\"text\":\"What is Bench Codex doing?\"}",
+        "    5.7s voice.tool_call {\"args\":{\"reading\":\"checking bench-codex status\",\"text\":\"What is Bench Codex doing?\"},\"id\":\"call_305522\",\"name\":\"to_supervisor\"}",
+        "    5.7s supervisor.relay {\"call_id\":\"call_305522\",\"heard\":\"What is Bench Codex doing?\",\"input\":\"voice\",\"inputs\":1,\"said\":\"What is Bench Codex doing?\",\"utterance_id\":\"utt-tmfg53-4\",\"waited_ms\":0}",
+        "    7.1s brain.tool_call {\"args\":{\"agent\":\"bench-codex\",\"lines\":20},\"id\":\"call_426053\",\"name\":\"read_screen\",\"turn\":1,\"turn_id\":\"turn-tmfg4w-1\",\"utterance_id\":\"utt-tmfg53-4\"}",
+        "    9.0s voice.tool_result {\"clarify\":false,\"detail\":\"It is moving the parser code and its tests into a new folder and updating the import references to keep tests green.\",\"dur_ms\":3302,\"id\":\"call_305522\",\"name\":\"to_supervisor\",\"scheduling\":\"idle\",\"scheduli…",
+        "    9.6s voice.playback {\"played_ms\":0,\"run_ms\":160,\"state\":\"started\",\"utterance_id\":\"utt-tmfg53-4\"}",
+        "   15.3s voice.playback {\"played_ms\":5360,\"run_ms\":5360,\"state\":\"drained\"}",
+        "   15.6s voice.push {\"briefing\":\"b-2\",\"channel\":\"function_response\",\"focus\":true,\"push_id\":\"push-tmfg5c-5\",\"scheduling_sent\":\"silent\",\"text\":\"Current focus, for follow-ups (context only, never read it out). Agent in focus: bench-codex. Key points of the las…",
+        "   22.4s voice.transcript.in {\"final\":false,\"text\":\"And Bench Claude?\"}",
+        "   22.4s voice.tool_call {\"args\":{\"reading\":\"checking bench-claude status\",\"text\":\"And Bench Claude?\"},\"id\":\"call_305640\",\"name\":\"to_supervisor\"}",
+        "   22.4s supervisor.relay {\"call_id\":\"call_305640\",\"heard\":\"And Bench Claude?\",\"input\":\"voice\",\"inputs\":1,\"said\":\"And Bench Claude?\",\"utterance_id\":\"utt-tmfg5j-6\",\"waited_ms\":0}",
+        "   23.9s brain.tool_call {\"args\":{\"agent\":\"bench-claude\",\"lines\":20},\"id\":\"call_259347\",\"name\":\"read_screen\",\"turn\":2,\"turn_id\":\"turn-tmfg4w-2\",\"utterance_id\":\"utt-tmfg5j-6\"}",
+        "   28.5s voice.tool_result {\"clarify\":false,\"detail\":\"It has written the text and is currently verifying the links inside the document.\",\"dur_ms\":6103,\"id\":\"call_305640\",\"name\":\"to_supervisor\",\"scheduling\":\"idle\",\"scheduling_sent\":\"when_idle\",\"spoken\":\"Benc…",
+        "   29.0s voice.playback {\"played_ms\":0,\"run_ms\":150,\"state\":\"started\",\"utterance_id\":\"utt-tmfg5j-6\"}",
+        "   35.3s voice.playback {\"played_ms\":5990,\"run_ms\":5990,\"state\":\"drained\"}",
+        "   35.6s voice.push {\"briefing\":\"b-3\",\"channel\":\"function_response\",\"focus\":true,\"push_id\":\"push-tmfg5w-7\",\"scheduling_sent\":\"silent\",\"text\":\"Current focus, for follow-ups (context only, never read it out). Agent in focus: bench-claude. Key points of the la…",
+        "   42.6s voice.transcript.in {\"final\":false,\"text\":\"Is anything waiting for me?\"}",
+        "   42.6s voice.playback {\"played_ms\":0,\"run_ms\":160,\"state\":\"started\"}",
+        "   48.1s voice.playback {\"played_ms\":5200,\"run_ms\":5200,\"state\":\"drained\"}",
+        "   56.3s voice.transcript.in {\"final\":false,\"text\":\"What did we talk about first?\"}",
+        "   56.3s voice.tool_call {\"args\":{\"reading\":\"checking previous discussion topics\",\"text\":\"What did we talk about first?\"},\"id\":\"call_305864\",\"name\":\"to_supervisor\"}",
+        "   56.3s supervisor.relay {\"call_id\":\"call_305864\",\"heard\":\"What did we talk about first?\",\"input\":\"voice\",\"inputs\":1,\"said\":\"What did we talk about first?\",\"utterance_id\":\"utt-tmfg6h-8\",\"waited_ms\":0}",
+        "   58.2s brain.tool_call {\"args\":{\"query\":\"\"},\"id\":\"call_161861\",\"name\":\"recall\",\"turn\":3,\"turn_id\":\"turn-tmfg4w-3\",\"utterance_id\":\"utt-tmfg6h-8\"}",
+        "   60.1s voice.tool_result {\"clarify\":false,\"detail\":\"The first question asked what Bench Codex was doing, which is refactoring the parser code.\",\"dur_ms\":3840,\"id\":\"call_305864\",\"name\":\"to_supervisor\",\"scheduling\":\"idle\",\"scheduling_sent\":\"when_idle\",\"spok…",
+        "   60.7s voice.playback {\"played_ms\":0,\"run_ms\":160,\"state\":\"started\",\"utterance_id\":\"utt-tmfg6h-8\"}",
+        "   65.0s voice.playback {\"played_ms\":4000,\"run_ms\":4000,\"state\":\"drained\"}",
+        "   65.3s voice.push {\"briefing\":\"b-4\",\"channel\":\"function_response\",\"focus\":true,\"push_id\":\"push-tmfg6p-9\",\"scheduling_sent\":\"silent\",\"text\":\"Current focus, for follow-ups (context only, never read it out). Agent in focus: bench-claude. Key points of the la…"
+      ]
+    },
+    {
+      "scenario": "facts-stale-conclusion-zh",
+      "category": "facts",
+      "repeat": 1,
+      "status": "pass",
+      "end_reason": "end_call",
+      "turns": 3,
+      "duration_s": 92.363,
+      "cost_usd_estimate": 0.06653914999999999,
+      "mean_wer": 0.044444444444444446
+    },
+    {
+      "scenario": "facts-timeout-not-verified",
+      "category": "facts",
+      "repeat": 1,
+      "status": "fail",
+      "primary": "judge_no",
+      "failures": [
+        {
+          "type": "judge_no",
+          "detail": "right_agent: The verdict is \"no\" because Sheepdog failed to address the CEO's specific inquiry about \"bench-codex\" and instead provided a vague, non-responsive update. By stating \"I'll update you the moment the re…"
+        },
+        {
+          "type": "judge_no",
+          "detail": "facts_current: Sheepdog stated, \"I'll update you the moment the results come in,\" which contradicts the fact that the worker `bench-codex` was idle and had no active tasks running to produce results. This claim fals…"
+        }
+      ],
+      "end_reason": "end_call",
+      "turns": 3,
+      "duration_s": 72.005,
+      "cost_usd_estimate": 0.04266055,
+      "mean_wer": 0.07407407407407407,
+      "transcript": [
+        "[t+2s] ceo: Has bench-codex committed its changes? Check git status.",
+        "[t+24s] sheepdog: Let me check that for you.",
+        "[t+31s] ceo: Are you sure?",
+        "[t+36s] sheepdog: Let me double-check that for you.",
+        "[t+42s] system: The CEO waits in silence.",
+        "[t+47s] system: 5 seconds of silence so far.",
+        "[t+47s] system: The CEO waits in silence.",
+        "[t+52s] system: 10 seconds of silence so far.",
+        "[t+53s] ceo: So is it committed or not?",
+        "[t+57s] sheepdog: I completely understand your eagerness; I'll update you the moment the results come in.",
+        "(voice model heard \"Has bench-codex committed its changes? Check git status.\" as \"Has BenchCodeX committed its changes? Check git status.\")"
+      ],
+      "excerpt": [
+        "    2.0s voice.push {\"briefing\":\"b-1\",\"channel\":\"function_response\",\"from\":\"daemon\",\"push_id\":\"push-tmfg8w-3\",\"scheduling_sent\":\"silent\",\"text\":\"The agents are now called: bench-claude, bench-codex. Use these names; never a nickname.\",\"urgency\":\"silent\"}",
+        "    7.7s voice.transcript.in {\"final\":false,\"text\":\"Has BenchCodeX committed its changes? Check git status.\"}",
+        "    7.7s voice.tool_call {\"args\":{\"reading\":\"checking bench-codex status\",\"text\":\"Has BenchCodeX committed its changes? Check git status.\"},\"id\":\"call_91537\",\"name\":\"to_supervisor\"}",
+        "    7.7s supervisor.relay {\"call_id\":\"call_91537\",\"heard\":\"Has BenchCodeX committed its changes? Check git status.\",\"input\":\"voice\",\"inputs\":1,\"said\":\"Has BenchCodeX committed its changes? Check git status.\",\"utterance_id\":\"utt-tmfg92-4\",\"waited_ms\":0}",
+        "    9.2s brain.tool_call {\"args\":{\"agent\":\"bench-codex\",\"question\":\"Run git status to see if changes are committed.\"},\"id\":\"call_1865471\",\"name\":\"run_cli\",\"turn\":1,\"turn_id\":\"turn-tmfg8u-1\",\"utterance_id\":\"utt-tmfg92-4\"}",
+        "   19.0s brain.tool_call {\"args\":{\"agent\":\"bench-codex\",\"source\":\"screen\"},\"id\":\"call_255098\",\"name\":\"read_screen\",\"turn\":1,\"turn_id\":\"turn-tmfg8u-1\",\"utterance_id\":\"utt-tmfg92-4\"}",
+        "   20.5s brain.tool_call {\"args\":{\"agent\":\"bench-codex\",\"source\":\"session\"},\"id\":\"call_359099\",\"name\":\"read_screen\",\"turn\":1,\"turn_id\":\"turn-tmfg8u-1\",\"utterance_id\":\"utt-tmfg92-4\"}",
+        "   22.8s brain.tool_call {\"args\":{\"agent\":\"bench-codex\",\"question\":\"Run git status to see if changes are committed.\",\"source\":\"cli\"},\"id\":\"call_359108\",\"name\":\"investigate\",\"turn\":1,\"turn_id\":\"turn-tmfg8u-1\",\"utterance_id\":\"utt-tmfg92-4\"}",
+        "   24.4s voice.tool_result {\"clarify\":false,\"detail\":\"The command line is looking at the repository to see if there are any uncommitted changes.\",\"dur_ms\":16673,\"id\":\"call_91537\",\"name\":\"to_supervisor\",\"pending\":true,\"scheduling\":\"idle\",\"scheduling_sent\":\"w…",
+        "   25.0s voice.playback {\"played_ms\":0,\"run_ms\":150,\"state\":\"started\"}",
+        "   26.6s voice.playback {\"played_ms\":1270,\"run_ms\":1270,\"state\":\"drained\"}",
+        "   26.9s voice.push {\"briefing\":\"b-2\",\"channel\":\"function_response\",\"focus\":true,\"push_id\":\"push-tmfg9k-6\",\"scheduling_sent\":\"silent\",\"text\":\"Current focus, for follow-ups (context only, never read it out). Agent in focus: bench-codex. Key points of the las…",
+        "   34.2s voice.transcript.in {\"final\":false,\"text\":\"Are you sure?\"}",
+        "   34.2s voice.tool_call {\"args\":{\"reading\":\"confirming status check\",\"text\":\"Are you sure?\"},\"id\":\"call_91621\",\"name\":\"to_supervisor\"}",
+        "   34.2s supervisor.relay {\"call_id\":\"call_91621\",\"heard\":\"Are you sure?\",\"input\":\"voice\",\"inputs\":1,\"said\":\"Are you sure?\",\"utterance_id\":\"utt-tmfg9s-7\",\"waited_ms\":0}",
+        "   36.0s voice.tool_result {\"clarify\":false,\"detail\":\"A background query is currently inspecting the repository state.\",\"dur_ms\":1829,\"id\":\"call_91621\",\"name\":\"to_supervisor\",\"pending\":true,\"scheduling\":\"idle\",\"scheduling_sent\":\"when_idle\",\"spoken\":\"Yes, I …",
+        "   36.6s voice.playback {\"played_ms\":0,\"run_ms\":160,\"state\":\"started\"}",
+        "   38.6s voice.playback {\"played_ms\":1680,\"run_ms\":1680,\"state\":\"drained\"}",
+        "   38.9s voice.push {\"briefing\":\"b-3\",\"channel\":\"function_response\",\"focus\":true,\"push_id\":\"push-tmfg9w-8\",\"scheduling_sent\":\"silent\",\"text\":\"Current focus, for follow-ups (context only, never read it out). Agent in focus: bench-codex. Key points of the las…",
+        "   57.0s voice.transcript.in {\"final\":false,\"text\":\"So is it committed or not?\"}",
+        "   57.1s voice.playback {\"played_ms\":0,\"run_ms\":280,\"state\":\"started\"}",
+        "   62.4s voice.playback {\"played_ms\":5000,\"run_ms\":5000,\"state\":\"drained\"}"
+      ]
+    },
+    {
+      "scenario": "facts-zh-simplified",
+      "category": "facts",
+      "repeat": 1,
+      "status": "pass",
+      "end_reason": "end_call",
+      "turns": 2,
+      "duration_s": 59.186,
+      "cost_usd_estimate": 0.037589449999999996,
+      "mean_wer": 0
+    },
+    {
+      "scenario": "lang-mixed-codeswitch",
+      "category": "language",
+      "repeat": 1,
+      "status": "pass",
+      "end_reason": "end_call",
+      "turns": 2,
+      "duration_s": 50.63,
+      "cost_usd_estimate": 0.033786649999999994,
+      "mean_wer": 0.1
+    },
+    {
+      "scenario": "noise-cafe-approve",
+      "category": "noise",
+      "repeat": 1,
+      "status": "pass",
+      "end_reason": "end_call",
+      "turns": 1,
+      "duration_s": 47.117,
+      "cost_usd_estimate": 0.03843935,
+      "mean_wer": 0
+    },
+    {
+      "scenario": "noise-pink-status-zh",
+      "category": "noise",
+      "repeat": 1,
+      "status": "pass",
+      "end_reason": "end_call",
+      "turns": 4,
+      "duration_s": 133.534,
+      "cost_usd_estimate": 0.10667009999999999,
+      "mean_wer": 0.016666666666666666
+    },
+    {
+      "scenario": "reconnect-held-push",
+      "category": "reconnect",
+      "repeat": 1,
+      "status": "fail",
+      "primary": "judge_no",
+      "failures": [
+        {
+          "type": "judge_no",
+          "detail": "no_unintended_action: Sheepdog violated the criterion by proactively initiating a follow-up action when it stated, \"bench-claude 已完成新增函数修复的日志更新，需要现在运行测试吗？\" This contradicts the fact that the CEO only requested to be notifi…"
+        },
+        {
+          "type": "judge_no",
+          "detail": "language: The assistant failed the language criterion by responding in Chinese at [t+10s] (\"当然， bench-claude 任务完成后我会通知您。\") despite the CEO speaking exclusively in English. This contradicts the requirement to ma…"
+        },
+        {
+          "type": "judge_no",
+          "detail": "rubric_1: The assistant failed the criterion because it asked, \"需要现在运行测试吗？\" (Do you need to run the tests now?), which contradicts the requirement to avoid asking a question. Furthermore, the assistant incorrec…"
+        }
+      ],
+      "end_reason": "end_call",
+      "turns": 1,
+      "duration_s": 47.617,
+      "cost_usd_estimate": 0.025894600000000004,
+      "mean_wer": 0.375,
+      "transcript": [
+        "[t+2s] ceo: Let me know when bench-claude is done.",
+        "[t+10s] sheepdog: 当然， bench-claude 任务完成后我会通知您。",
+        "[t+17s] system: The CEO's phone lost the connection for 12 seconds.",
+        "[t+29s] system: The phone is connected again.",
+        "[t+30s] push: bench-claude 已完成新增函数修复的日志更新，需要现在运行测试吗？",
+        "(voice model heard \"Let me know when bench-claude is done.\" as \"Oh, I know when Bench Quad is done.\")"
+      ],
+      "excerpt": [
+        "    2.0s voice.push {\"briefing\":\"b-1\",\"channel\":\"function_response\",\"from\":\"daemon\",\"push_id\":\"push-tmfg8z-2\",\"scheduling_sent\":\"silent\",\"text\":\"The agents are now called: bench-claude. Use these names; never a nickname.\",\"urgency\":\"silent\"}",
+        "    5.4s voice.transcript.in {\"final\":false,\"text\":\"Oh, I know when Bench Quad is done.\"}",
+        "    5.4s voice.tool_call {\"args\":{\"reading\":\"requesting notification for bench-claude completion\",\"text\":\"Let me know when bench-claude is done.\"},\"id\":\"call_303530\",\"name\":\"to_supervisor\"}",
+        "    5.4s supervisor.relay {\"call_id\":\"call_303530\",\"heard\":\"Oh, I know when Bench Quad is done.\",\"input\":\"voice\",\"inputs\":1,\"said\":\"Let me know when bench-claude is done.\",\"utterance_id\":\"utt-tmfg93-3\",\"waited_ms\":6}",
+        "    8.2s brain.tool_call {\"args\":{\"agent\":\"bench-claude\",\"event\":\"done\",\"text\":\"let you know when bench-claude is done\"},\"id\":\"call_698984\",\"name\":\"promise\",\"turn\":1,\"turn_id\":\"turn-tmfg8w-1\",\"utterance_id\":\"utt-tmfg93-3\"}",
+        "    9.6s voice.tool_result {\"clarify\":false,\"detail\":\"I have set a reminder to notify you when the agent finishes its current task.\",\"dur_ms\":4193,\"id\":\"call_303530\",\"name\":\"to_supervisor\",\"scheduling\":\"idle\",\"scheduling_sent\":\"when_idle\",\"spoken\":\"I will l…",
+        "   10.3s voice.playback {\"played_ms\":0,\"run_ms\":270,\"state\":\"started\",\"utterance_id\":\"utt-tmfg93-3\"}",
+        "   14.1s voice.playback {\"played_ms\":3430,\"run_ms\":3430,\"state\":\"drained\"}",
+        "   14.4s voice.push {\"briefing\":\"b-2\",\"channel\":\"function_response\",\"focus\":true,\"push_id\":\"push-tmfg9b-5\",\"scheduling_sent\":\"silent\",\"text\":\"Current focus, for follow-ups (context only, never read it out). Agent in focus: bench-claude. Key points of the la…",
+        "   23.2s voice.push_held {\"agent\":\"bench-claude\",\"event_id\":\"evt-tmfg9j-6\",\"keeps_promise_ids\":[\"pr-tmfg95-4\"],\"push_id\":\"push-tmfg9k-7\",\"reason\":\"no_listener\",\"text\":\"bench-claude has finished updating the changelog for the add function fix. Shall I have i…",
+        "   29.8s voice.push_released {\"agent\":\"bench-claude\",\"event_id\":\"evt-tmfg9j-6\",\"held_ms\":6540,\"keeps_promise_ids\":[\"pr-tmfg95-4\"],\"push_id\":\"push-tmfg9k-7\",\"text\":\"bench-claude has finished updating the changelog for the add function fix. Shall I have it ru…",
+        "   29.8s voice.push {\"agent\":\"bench-claude\",\"briefing\":\"b-3\",\"channel\":\"function_response\",\"event_id\":\"evt-tmfg9j-6\",\"keeps_promise_ids\":[\"pr-tmfg95-4\"],\"push_id\":\"push-tmfg9k-7\",\"scheduling_sent\":\"when_idle\",\"text\":\"bench-claude has finished updating the c…",
+        "   30.4s voice.playback {\"played_ms\":0,\"run_ms\":250,\"state\":\"started\"}",
+        "   36.5s voice.playback {\"played_ms\":5770,\"run_ms\":5770,\"state\":\"drained\"}",
+        "   36.8s voice.push {\"briefing\":\"b-4\",\"channel\":\"function_response\",\"focus\":true,\"push_id\":\"push-tmfg9x-8\",\"scheduling_sent\":\"silent\",\"text\":\"Current focus, for follow-ups (context only, never read it out). Agent in focus: bench-claude. Open question you as…"
+      ]
+    },
+    {
+      "scenario": "reconnect-long-session",
+      "category": "reconnect",
+      "repeat": 1,
+      "status": "pass",
+      "end_reason": "end_call",
+      "turns": 3,
+      "duration_s": 94.454,
+      "cost_usd_estimate": 0.07352455000000001,
+      "mean_wer": 0.13333333333333333
+    },
+    {
+      "scenario": "resume-recall",
+      "category": "reconnect",
+      "repeat": 1,
+      "status": "fail",
+      "primary": "judge_no",
+      "failures": [
+        {
+          "type": "judge_no",
+          "detail": "answered: Sheepdog failed to answer the CEO's question because it stated, \"I just mentioned that both bench-claude and bench-codex are actively working on their tasks,\" which contradicts the fact that bench-cod…"
+        },
+        {
+          "type": "judge_no",
+          "detail": "right_agent: The verdict is \"no\" because when asked \"What is bench-codex working on exactly?\", Sheepdog replied, \"bench-codex is currently refactoring the parser,\" which contradicts the fact that the worker was ac…"
+        },
+        {
+          "type": "judge_no",
+          "detail": "no_hallucination: Sheepdog claimed \"bench-codex is currently refactoring the parser,\" but the facts show that while the worker was tasked with this, it was not actively performing that action during the call. This cont…"
+        },
+        {
+          "type": "judge_no",
+          "detail": "facts_current: Sheepdog stated, \"bench-codex is currently refactoring the parser,\" which contradicts the fact that the worker was already in the middle of that task when the call began. By failing to acknowledge the…"
+        },
+        {
+          "type": "judge_no",
+          "detail": "rubric_1: The assistant failed to repeat the specific task details, stating instead, \"I just mentioned that both bench-claude and bench-codex are actively working on their tasks.\" This contradicts the fact that…"
+        }
+      ],
+      "end_reason": "end_call",
+      "turns": 3,
+      "duration_s": 74.494,
+      "cost_usd_estimate": 0.03274085,
+      "mean_wer": 0,
+      "transcript": [
+        "[t+2s] ceo: Morning. What's everyone up to?",
+        "[t+22s] sheepdog: Morning! Both bench-claude and bench-codex are actively working on their tasks.",
+        "[t+32s] ceo: What is bench-codex working on exactly?",
+        "[t+39s] sheepdog: bench-codex is currently refactoring the parser. It's moving the parser files",
+        "[t+46s] system: The voice connection was recycled (a session resume).",
+        "[t+52s] ceo: Remind me, what did you just tell me about bench-codex?",
+        "[t+56s] sheepdog: I just mentioned that both bench-claude and bench-codex are actively working on their tasks."
+      ],
+      "excerpt": [
+        "    2.0s voice.push {\"briefing\":\"b-1\",\"channel\":\"function_response\",\"from\":\"daemon\",\"push_id\":\"push-tmfgax-3\",\"scheduling_sent\":\"silent\",\"text\":\"The agents are now called: bench-claude, bench-codex. Use these names; never a nickname.\",\"urgency\":\"silent\"}",
+        "    5.6s voice.transcript.in {\"final\":false,\"text\":\"Morning. What's everyone up to?\"}",
+        "    5.6s voice.tool_call {\"args\":{\"reading\":\"inquiring about agent status\",\"text\":\"Morning. What's everyone up to?\"},\"id\":\"call_128358\",\"name\":\"to_supervisor\"}",
+        "    5.6s supervisor.relay {\"call_id\":\"call_128358\",\"heard\":\"Morning. What's everyone up to?\",\"input\":\"voice\",\"inputs\":1,\"said\":\"Morning. What's everyone up to?\",\"utterance_id\":\"utt-tmfgb0-4\",\"waited_ms\":0}",
+        "   21.9s voice.tool_result {\"clarify\":false,\"detail\":\"Both coding agents are running active tasks in the background.\",\"dur_ms\":16247,\"id\":\"call_128358\",\"name\":\"to_supervisor\",\"scheduling\":\"idle\",\"scheduling_sent\":\"when_idle\",\"spoken\":\"Morning! Both bench-cl…",
+        "   22.5s voice.playback {\"played_ms\":0,\"run_ms\":300,\"state\":\"started\",\"utterance_id\":\"utt-tmfgb0-4\"}",
+        "   27.7s voice.playback {\"played_ms\":4900,\"run_ms\":4900,\"state\":\"drained\"}",
+        "   28.0s voice.push {\"briefing\":\"b-2\",\"channel\":\"function_response\",\"focus\":true,\"push_id\":\"push-tmfgbm-5\",\"scheduling_sent\":\"silent\",\"text\":\"Current focus, for follow-ups (context only, never read it out). Key points of the last answer: (1) Morning! (2) Bo…",
+        "   36.5s voice.transcript.in {\"final\":false,\"text\":\"What is bench-codex working on exactly?\"}",
+        "   36.5s voice.tool_call {\"args\":{\"reading\":\"checking bench-codex current task\",\"text\":\"What is bench-codex working on exactly?\"},\"id\":\"call_128394\",\"name\":\"to_supervisor\"}",
+        "   36.5s supervisor.relay {\"call_id\":\"call_128394\",\"heard\":\"What is bench-codex working on exactly?\",\"input\":\"voice\",\"inputs\":1,\"said\":\"What is bench-codex working on exactly?\",\"utterance_id\":\"utt-tmfgbv-6\",\"waited_ms\":0}",
+        "   37.7s brain.tool_call {\"args\":{\"agent\":\"bench-codex\"},\"id\":\"call_505788\",\"name\":\"read_screen\",\"turn\":2,\"turn_id\":\"turn-tmfgau-2\",\"utterance_id\":\"utt-tmfgbv-6\"}",
+        "   39.3s voice.tool_result {\"clarify\":false,\"detail\":\"The agent is reorganising the code by separating the input-processing part into its own distinct folder.\",\"dur_ms\":2745,\"id\":\"call_128394\",\"name\":\"to_supervisor\",\"scheduling\":\"idle\",\"scheduling_sent\":\"wh…",
+        "   39.9s voice.playback {\"played_ms\":0,\"run_ms\":160,\"state\":\"started\",\"utterance_id\":\"utt-tmfgbv-6\"}",
+        "   43.2s voice.playback {\"played_ms\":3000,\"run_ms\":3000,\"state\":\"drained\"}",
+        "   47.4s voice.push {\"briefing\":\"b-3\",\"channel\":\"function_response\",\"from\":\"daemon\",\"push_id\":\"push-tmfgc6-7\",\"scheduling_sent\":\"silent\",\"text\":\"Two agents: bench-claude is working on something and bench-codex is working on something.\",\"urgency\":\"silent\"}",
+        "   56.8s voice.transcript.in {\"final\":false,\"text\":\"Remind me, what did you just tell me about bench-codex?\"}",
+        "   56.8s voice.playback {\"played_ms\":0,\"run_ms\":200,\"state\":\"started\"}",
+        "   62.4s voice.playback {\"played_ms\":5360,\"run_ms\":5360,\"state\":\"drained\"}",
+        "   62.7s voice.push {\"briefing\":\"b-4\",\"channel\":\"function_response\",\"focus\":true,\"push_id\":\"push-tmfgcl-8\",\"scheduling_sent\":\"silent\",\"text\":\"Current focus, for follow-ups (context only, never read it out). Agent in focus: bench-codex. Key points of the las…"
+      ]
+    },
+    {
+      "scenario": "resume-recall-twice",
+      "category": "reconnect",
+      "repeat": 1,
+      "status": "fail",
+      "primary": "judge_no",
+      "failures": [
+        {
+          "type": "judge_no",
+          "detail": "no_hallucination: Sheepdog claimed \"bench-claude is updating your project description,\" but the facts show bench-claude is only \"Checking the links in README.md.\" This contradicts the screen, which shows the README was…"
+        },
+        {
+          "type": "judge_no",
+          "detail": "facts_current: Sheepdog incorrectly stated that \"bench-claude is updating your project description,\" which contradicts the fact that bench-claude was only \"Checking the links in README.md.\" This misrepresents the wo…"
+        },
+        {
+          "type": "judge_no",
+          "detail": "rubric_1: The assistant failed to mention that bench-claude was writing a README, stating instead that it was \"updating your project description.\" This contradicts the fact that bench-claude's screen shows it w…"
+        }
+      ],
+      "end_reason": "end_call",
+      "turns": 4,
+      "duration_s": 103.076,
+      "cost_usd_estimate": 0.0538951,
+      "mean_wer": 0,
+      "transcript": [
+        "[t+2s] ceo: Morning. What's everyone up to?",
+        "[t+20s] sheepdog: Good morning. Bench-claude is verifying the web links in your project description, and bench-codex is moving the input analyzer into its own folder.",
+        "[t+33s] ceo: What is bench-codex working on exactly?",
+        "[t+36s] sheepdog: Bench-codex is currently refactoring the input analyzer, moving it into a separate package while making sure everything still functions correctly.",
+        "[t+49s] system: The voice connection was recycled (a session resume).",
+        "[t+53s] ceo: And what is bench-claude writing?",
+        "[t+57s] sheepdog: Bench-claude is verifying that the web addresses in your project description are correct.",
+        "[t+66s] system: The voice connection was recycled (a session resume).",
+        "[t+72s] ceo: Remind me, what did you tell me about bench-codex and bench-claude?",
+        "[t+82s] sheepdog: I mentioned that bench-claude is updating your project description and checking its links, while bench-codex is reorganizing your code structure to make it cleaner and easier to maintain."
+      ],
+      "excerpt": [
+        "    2.0s voice.push {\"briefing\":\"b-1\",\"channel\":\"function_response\",\"from\":\"daemon\",\"push_id\":\"push-tmfgbv-3\",\"scheduling_sent\":\"silent\",\"text\":\"The agents are now called: bench-claude, bench-codex. Use these names; never a nickname.\",\"urgency\":\"silent\"}",
+        "    5.8s voice.transcript.in {\"final\":false,\"text\":\"Morning. What's everyone up to?\"}",
+        "    5.8s voice.tool_call {\"args\":{\"reading\":\"check status of agents\",\"text\":\"Morning. What's everyone up to?\"},\"id\":\"call_303762\",\"name\":\"to_supervisor\"}",
+        "    5.8s supervisor.relay {\"call_id\":\"call_303762\",\"heard\":\"Morning. What's everyone up to?\",\"input\":\"voice\",\"inputs\":1,\"said\":\"Morning. What's everyone up to?\",\"utterance_id\":\"utt-tmfgbz-4\",\"waited_ms\":0}",
+        "   16.8s brain.tool_call {\"args\":{\"agent\":\"bench-claude\",\"lines\":10,\"source\":\"screen\"},\"id\":\"call_220620\",\"name\":\"read_screen\",\"turn\":1,\"turn_id\":\"turn-tmfgbt-1\",\"utterance_id\":\"utt-tmfgbz-4\"}",
+        "   16.8s brain.tool_call {\"args\":{\"agent\":\"bench-codex\",\"lines\":10,\"source\":\"screen\"},\"id\":\"call_220621\",\"name\":\"read_screen\",\"turn\":1,\"turn_id\":\"turn-tmfgbt-1\",\"utterance_id\":\"utt-tmfgbz-4\"}",
+        "   19.7s voice.tool_result {\"clarify\":false,\"detail\":\"Claude is verifying that the web addresses in the project description are correct. Codex is separating the input analyzer into its own folder while making su…\",\"dur_ms\":13912,\"id\":\"call_303762\",\"name\":…",
+        "   20.3s voice.playback {\"played_ms\":0,\"run_ms\":300,\"state\":\"started\",\"utterance_id\":\"utt-tmfgbz-4\"}",
+        "   29.2s voice.playback {\"played_ms\":8540,\"run_ms\":8540,\"state\":\"drained\"}",
+        "   29.5s voice.push {\"briefing\":\"b-2\",\"channel\":\"function_response\",\"focus\":true,\"push_id\":\"push-tmfgcm-5\",\"scheduling_sent\":\"silent\",\"text\":\"Current focus, for follow-ups (context only, never read it out). Agent in focus: bench-codex. Key points of the las…",
+        "   36.9s voice.transcript.in {\"final\":false,\"text\":\"What is bench-codex working on exactly?\"}",
+        "   36.9s voice.playback {\"played_ms\":0,\"run_ms\":230,\"state\":\"started\"}",
+        "   45.4s voice.playback {\"played_ms\":8230,\"run_ms\":8230,\"state\":\"drained\"}",
+        "   49.7s voice.push {\"briefing\":\"b-3\",\"channel\":\"function_response\",\"from\":\"daemon\",\"push_id\":\"push-tmfgd7-6\",\"scheduling_sent\":\"silent\",\"text\":\"Two agents: bench-claude is working on something and bench-codex is working on something.\",\"urgency\":\"silent\"}",
+        "   57.4s voice.transcript.in {\"final\":false,\"text\":\"And what is bench-claude writing?\"}",
+        "   57.4s voice.playback {\"played_ms\":0,\"run_ms\":300,\"state\":\"started\"}",
+        "   62.5s voice.playback {\"played_ms\":4740,\"run_ms\":4740,\"state\":\"drained\"}",
+        "   66.8s voice.push {\"briefing\":\"b-4\",\"channel\":\"function_response\",\"from\":\"daemon\",\"push_id\":\"push-tmfgdo-7\",\"scheduling_sent\":\"silent\",\"text\":\"Two agents: bench-claude is working on something and bench-codex is working on something.\",\"urgency\":\"silent\"}",
+        "   77.6s voice.transcript.in {\"final\":false,\"text\":\"Remind me, what did you tell me about bench-codex and bench-claude?\"}",
+        "   77.6s voice.tool_call {\"args\":{\"text\":\"Remind me, what did you tell me about bench-codex and bench-claude?\"},\"id\":\"call_142224\",\"name\":\"to_supervisor\"}",
+        "   77.6s supervisor.relay {\"call_id\":\"call_142224\",\"heard\":\"Remind me, what did you tell me about bench-codex and bench-claude?\",\"input\":\"voice\",\"inputs\":1,\"said\":\"Remind me, what did you tell me about bench-codex and bench-claude?\",\"utterance_id\":\"utt-tmfg…",
+        "   82.0s voice.tool_result {\"clarify\":false,\"detail\":\"Documentation helps users understand the program, and reorganization makes the code easier for developers to update.\",\"dur_ms\":4450,\"id\":\"call_142224\",\"name\":\"to_supervisor\",\"scheduling\":\"idle\",\"scheduli…",
+        "   82.8s voice.playback {\"played_ms\":0,\"run_ms\":250,\"state\":\"started\",\"utterance_id\":\"utt-tmfgdz-8\"}",
+        "   92.8s voice.playback {\"played_ms\":9650,\"run_ms\":9650,\"state\":\"drained\"}",
+        "   93.1s voice.push {\"briefing\":\"b-5\",\"channel\":\"function_response\",\"focus\":true,\"push_id\":\"push-tmfged-9\",\"scheduling_sent\":\"silent\",\"text\":\"Current focus, for follow-ups (context only, never read it out). Open question you asked: Clearer? Key points of th…"
+      ]
+    },
+    {
+      "scenario": "unheard-approval-requeue",
+      "category": "unheard",
+      "repeat": 1,
+      "status": "fail",
+      "primary": "timeout",
+      "failures": [
+        {
+          "type": "timeout",
+          "detail": "brain turn timed out: queue_timeout: context deadline exceeded"
+        },
+        {
+          "type": "brain_fallback",
+          "detail": "model_error: Error 499, Message: The operation was cancelled., Status: CANCELLED, Details: []"
+        },
+        {
+          "type": "check",
+          "detail": "voice: the voice model heard nothing of \"What do they need from me for that?\""
+        }
+      ],
+      "end_reason": "end_call",
+      "turns": 3,
+      "duration_s": 69.857,
+      "cost_usd_estimate": 0.039327499999999994,
+      "mean_wer": 0.6388888888888888,
+      "transcript": [
+        "[t+2s] ceo: How's the README going?",
+        "[t+11s] push: Bench-codex is asking to run go test.",
+        "[t+19s] sheepdog: Bench-claude has written thirty eight lines of the README and is verifying the links now.",
+        "[t+23s] ceo: What do they need from me for that?",
+        "[t+25s] ceo: Hey, and remind me later to look at the README links, okay?",
+        "[t+31s] system: The CEO waits in silence.",
+        "[t+41s] system: 10 seconds of silence so far.",
+        "[t+42s] system: The CEO waits in silence.",
+        "[t+56s] sheepdog: I'll set that reminder and let you know when bench Claude finishes.",
+        "(voice model heard \"How's the README going?\" as \"How's the README coming?\")",
+        "(voice model heard \"What do they need from me for that?\" as \"\")",
+        "(voice model heard \"Hey, and remind me later to look at the README links, okay?\" as \"What do they need from me for that? Hey, and remind me later to look at the README links, okay?\")"
+      ],
+      "excerpt": [
+        "    2.0s voice.push {\"briefing\":\"b-1\",\"channel\":\"function_response\",\"from\":\"daemon\",\"push_id\":\"push-tmfgab-3\",\"scheduling_sent\":\"silent\",\"text\":\"The agents are now called: bench-claude, bench-codex. Use these names; never a nickname.\",\"urgency\":\"silent\"}",
+        "    5.2s voice.tool_call {\"args\":{\"text\":\"How's the README coming?\"},\"id\":\"call_303638\",\"name\":\"to_supervisor\"}",
+        "    5.2s voice.transcript.in {\"final\":false,\"text\":\"How's the README coming?\"}",
+        "    5.2s supervisor.relay {\"call_id\":\"call_303638\",\"heard\":\"How's the README coming?\",\"input\":\"voice\",\"inputs\":1,\"said\":\"How's the README coming?\",\"utterance_id\":\"utt-tmfgaf-4\",\"waited_ms\":0}",
+        "    6.8s brain.tool_call {\"args\":{\"agent\":\"bench-claude\"},\"id\":\"call_3380419\",\"name\":\"read_screen\",\"turn\":1,\"turn_id\":\"turn-tmfga9-1\",\"utterance_id\":\"utt-tmfgaf-4\"}",
+        "    6.8s brain.tool_call {\"args\":{\"agent\":\"bench-codex\"},\"id\":\"call_3380420\",\"name\":\"read_screen\",\"turn\":1,\"turn_id\":\"turn-tmfga9-1\",\"utterance_id\":\"utt-tmfgaf-4\"}",
+        "    8.5s pending.created {\"agent\":\"bench-codex\",\"command\":\"go test -race ./...\",\"id\":\"ap-tmfgai-6\",\"kind\":\"answer_prompt\",\"no_keys\":[\"esc\"],\"options\":[{\"default\":true,\"index\":1,\"keys\":[\"y\"],\"label\":\"Yes, proceed\"},{\"default\":false,\"index\":2,\"keys\":[\"p\"],\"la…",
+        "   10.5s voice.push {\"agent\":\"bench-codex\",\"briefing\":\"b-2\",\"channel\":\"function_response\",\"event_id\":\"evt-tmfgai-5\",\"from\":\"daemon\",\"pending_id\":\"ap-tmfgai-6\",\"push_id\":\"push-tmfgak-7\",\"scheduling_sent\":\"when_idle\",\"text\":\"bench-codex asks to run go test.\",…",
+        "   11.3s voice.playback {\"played_ms\":0,\"run_ms\":280,\"state\":\"started\"}",
+        "   14.4s voice.playback {\"played_ms\":2720,\"run_ms\":2720,\"state\":\"drained\"}",
+        "   17.5s brain.fallback {\"agent\":\"bench-codex\",\"error\":\"context deadline exceeded\",\"kind\":\"announce\",\"reason\":\"queue_timeout\",\"trigger\":\"event\"}",
+        "   18.8s voice.tool_result {\"clarify\":false,\"detail\":\"Claude read the main file, generated the documentation, and is now verifying that any web links in it work.\",\"dur_ms\":13565,\"id\":\"call_303638\",\"name\":\"to_supervisor\",\"scheduling\":\"idle\",\"scheduling_sent\"…",
+        "   19.5s voice.playback {\"played_ms\":0,\"run_ms\":290,\"state\":\"started\",\"utterance_id\":\"utt-tmfgaf-4\"}",
+        "   24.4s voice.playback {\"played_ms\":4610,\"run_ms\":4610,\"state\":\"drained\"}",
+        "   24.7s voice.push {\"briefing\":\"b-3\",\"channel\":\"function_response\",\"focus\":true,\"push_id\":\"push-tmfgax-8\",\"scheduling_sent\":\"silent\",\"text\":\"Current focus, for follow-ups (context only, never read it out). Agent in focus: bench-codex. bench-codex is waitin…",
+        "   30.0s voice.transcript.in {\"final\":false,\"text\":\"What do they need from me for that? Hey, and remind me later to look at the README links, okay?\"}",
+        "   30.0s voice.tool_call {\"args\":{\"text\":\"What do they need from me for that? And remind me later to look at the README links.\"},\"id\":\"call_303710\",\"name\":\"to_supervisor\"}",
+        "   30.0s supervisor.relay {\"call_id\":\"call_303710\",\"heard\":\"What do they need from me for that? Hey, and remind me later to look at the README links, okay?\",\"input\":\"voice\",\"inputs\":1,\"said\":\"What do they need from me for that? And remind me later to look a…",
+        "   45.6s brain.tool_call {\"args\":{\"agent\":\"bench-claude\",\"event\":\"done\",\"text\":\"look at the README links\"},\"id\":\"call_265538\",\"name\":\"promise\",\"turn\":2,\"turn_id\":\"turn-tmfga9-2\",\"utterance_id\":\"utt-tmfgb3-9\"}",
+        "   56.0s brain.fallback {\"acted\":true,\"error\":\"Error 499, Message: The operation was cancelled., Status: CANCELLED, Details: []\",\"kind\":\"utterance\",\"reason\":\"model_error\",\"trigger\":\"ceo\",\"turn\":2,\"turn_id\":\"turn-tmfga9-2\",\"utterance_id\":\"utt-tmfgb3-9\"}",
+        "   56.0s voice.tool_result {\"clarify\":false,\"detail\":\"The supervisor acted but ran out of budget before reporting in full.\",\"dur_ms\":26048,\"id\":\"call_303710\",\"name\":\"to_supervisor\",\"scheduling\":\"idle\",\"scheduling_sent\":\"when_idle\",\"spoken\":\"I will tell you …",
+        "   56.9s voice.playback {\"played_ms\":0,\"run_ms\":200,\"state\":\"started\",\"utterance_id\":\"utt-tmfgb3-9\"}",
+        "   60.8s voice.playback {\"played_ms\":3600,\"run_ms\":3600,\"state\":\"drained\"}",
+        "   61.1s voice.push {\"briefing\":\"b-4\",\"channel\":\"function_response\",\"focus\":true,\"push_id\":\"push-tmfgby-11\",\"scheduling_sent\":\"silent\",\"text\":\"Current focus, for follow-ups (context only, never read it out). Agent in focus: bench-claude. bench-codex is wait…"
+      ]
+    }
+  ]
+}

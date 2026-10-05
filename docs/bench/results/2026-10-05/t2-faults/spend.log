@@ -1,0 +1,2 @@
+02:20:24 [1/2] slowness-brain-9s r1 (:7790): fail (end_call, timeout) 2 turns 70s ≈ $0.031, total ≈ $0.03
+02:20:26 [2/2] failover-brain-503 r1 (:7791): fail (end_call, judge_no) 3 turns 72s ≈ $0.065, total ≈ $0.10
