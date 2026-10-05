@@ -29,17 +29,31 @@ import (
 // connection (reseed.go). Logged voice.handle_dropped {reason:
 // resumed_twice, handle_generation, generation}. A rail on what Live
 // keeps, not a judgment.
+//
+// The same holds before the resumed connection has issued a handle of
+// its own: the session then still holds the generation-0 handle it
+// resumed with, and presenting it again restores the first session as
+// it was at that handle, without anything said on the resumed
+// connection (baseline 2026-10-05, resume-recall-twice r3: a second
+// recycle 14 s after the first re-presented the same handle, no
+// re-seed). So a reconnect from a live connection that was itself
+// opened by a resume (resumeGen >= 1) never presents a handle, whatever
+// generation the held handle has: a connection opened by a resume never
+// yields a resumable path for its successor. The cost: an idle drop of
+// a resumed connection with nothing said on it is re-seeded rather than
+// resumed.
 
 // reasonResumedTwice is the voice.handle_dropped and voice.reseeded
 // reason when a handle from a resumed connection is left out.
 const reasonResumedTwice = "resumed_twice"
 
-// freshInsteadLocked drops a handle issued by a resumed connection, so
+// freshInsteadLocked drops a handle issued by a resumed connection, or
+// any handle while the live connection was itself opened by a resume, so
 // the dial that follows opens a fresh session, and returns the
 // voice.handle_dropped payload (nil when the handle is kept or there is
 // none). Caller holds s.mu.
 func (s *Session) freshInsteadLocked() map[string]any {
-	if s.handle == "" || s.handleGen < 1 {
+	if s.handle == "" || (s.handleGen < 1 && s.resumeGen < 1) {
 		return nil
 	}
 	p := map[string]any{"reason": reasonResumedTwice, "handle": handleTail(s.handle), "handle_generation": s.handleGen, "generation": s.resumeGen}
