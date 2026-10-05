@@ -177,6 +177,47 @@ the cache, outside the repository. `sheepdog bench validate` (part of
 | unheard | unheard-approval-requeue | the CEO talks over an approval announcement |
 | slowness | slowness-brain-9s | every brain request 9 s slower |
 | facts | facts-contradiction-linecount, facts-history-first, facts-stale-conclusion-zh, facts-ambiguous-rewind, facts-zh-simplified, facts-timeout-not-verified | the 2026-10-04 phone-test failures (tier-1 forms in `testdata/eval/sim/phone-2026-10-04.json`): two disagreeing numbers, "what did we talk about first", "现在有结论了吗" after a finish, an ambiguous "rewind it", Simplified replies, no claimed verification after run_cli times out |
+| explain | explain-zh-input-rules, explain-en-flaky-test, explain-zh-notes-ledger, explain-en-invoice-job, explain-control-en-done, explain-control-zh-busy | explanation quality (below): "explain X", "then?" / "然后呢", "more detail" / "你可以给我一点详细的解释吗", "why", "example" over worlds with real substance; two simple controls |
+
+## Explanation evals (`explain`)
+
+A scenario with an `explain` block (`{"turns": [...], "key_points":
+[...]}`, a fixed script, one turn kind per line: explain, then, more,
+why, example, simple) is scored after the call by
+`internal/eval/explain.go` with the same judge model, on two sides
+separately: the **orchestrator** (per question, the `spoken`, `detail`
+and options of every `voice.tool_result`, and spoken pushes) and the
+**voice** (what the phone played, split at the CEO's lines by fragment
+time; tier 2 only).
+
+- **Coverage**: each key point asked per answer; coverage = share of
+  the key points the side stated in the call; *of orchestrator* = of the
+  points the orchestrator gave the voice, the share the voice said.
+- **Ear comprehension**: could a listener who cannot see the screen
+  restate what it is, why it matters, what can be done (share of yes).
+- **Follow-up depth** (then/more/why/example): new content, "that's
+  everything" with an offer, or a hand-off; rephrasing only fails.
+- **No padding** (simple controls): the direct answer and at most one
+  short extra sentence (the orchestrator on `spoken` only).
+
+Depth and padding noes are `judge_no` failures; coverage, comprehension
+and words per answer are metrics. Both reports (tier 1 `eval sim`, tier 2
+`bench run`) get an "Explanations" section and a metric line, and each
+run record an `explain` block (exchanges, per-answer points, verdicts,
+how many follow-ups the voice answered without asking the orchestrator).
+`sheepdog bench report --from DIR --rescore-explain --env-file .env`
+scores recorded runs again with the judge only. Baseline:
+[explain-baseline-2026-10-05.md](../eval/explain-baseline-2026-10-05.md).
+
+**A/B with prompt arms**: `--prompts-dir DIR` on `bench run` (the
+scratch daemons' `prompts.dir`) and on `eval sim` takes every prompt
+workspace file found in DIR — `assistant.md`, `USER.md`, `svp/SOUL.md`,
+`svp/RULES.md` — so one directory swaps both brains' prompts; files left
+out stay embedded (`sheepdog prompts export DIR` writes a starting
+copy). The directory is checked first: a file the loader rejects (a
+`svp/RULES.md` without its protected sentences) stops the run instead of
+silently running the embedded prompt, and the report setup lists each
+file's source and SHA-256 prefix.
 
 ## Commands
 
@@ -198,8 +239,9 @@ rest are not_run), `--ports` / `--parallel` (≤ 3), `--simuser` /
 `--judge-model`, `--save-audio DIR` (WAV of both directions per run,
 keep it outside the repo), `--scratch`, `--cache-dir`, `--tts-model`,
 `--say` (no Gemini TTS), `--prompts-dir DIR` (the scratch daemons'
-`prompts.dir`: an override `assistant.md` there is the prompt arm of
-an A/B; both arms then run the same binary). The judge and the simulated CEO share one
+`prompts.dir`: override `assistant.md` and `svp/` files there are the
+prompt arm of an A/B; both arms then run the same binary; see
+"Explanation evals"). The judge and the simulated CEO share one
 limit of four calls in flight with jittered backoff and the alternating
 Flash-Lite model (#94).
 

@@ -1,0 +1,18 @@
+### tier1
+| scenario | pass | orch cov | voice cov | voice of orch | orch comp | voice comp | orch words | voice words | depth orch | depth voice | pad orch | pad voice | not consulted (follow-ups) |
+| explain-zh-input-rules | 1/2 | 0.93 | – | – | 1.00 | – | 150 | – | 7/8 | – | – | – | 0 (0/8) |
+| explain-en-flaky-test | 0/2 | 0.86 | – | – | 1.00 | – | 80 | – | 7/8 | – | – | – | 0 (0/8) |
+| explain-zh-notes-ledger | 0/2 | 0.42 | – | – | 1.00 | – | 132 | – | 4/6 | – | – | – | 0 (0/6) |
+| explain-en-invoice-job | 2/2 | 0.50 | – | – | 1.00 | – | 101 | – | 6/6 | – | – | – | 0 (0/6) |
+| explain-control-en-done | 1/2 | – | – | – | – | – | 24 | – | – | – | 3/4 | – | 0 (0/0) |
+| explain-control-zh-busy | 2/2 | – | – | – | – | – | 43 | – | – | – | 4/4 | – | 0 (0/0) |
+[(('judge_no', 'explain_depth (orch)'), 4), (('brain_fallback', 'bad_reply'), 1), (('unintended_action', 'sheepdog sent bench-codex the prompt "Wait for the cache\'s Ready() channel in the test setup'), 1), (('judge_no', 'facts_current'), 1), (('judge_no', 'explain_padding (orch)'), 1)]
+### tier2
+| scenario | pass | orch cov | voice cov | voice of orch | orch comp | voice comp | orch words | voice words | depth orch | depth voice | pad orch | pad voice | not consulted (follow-ups) |
+| explain-control-en-done | 1/3 | – | – | – | – | – | 31 | 14 | – | – | 2/3 | 3/6 | 3 (0/0) |
+| explain-control-zh-busy | 0/3 | – | – | – | – | – | 60 | 31 | – | – | 1/6 | 2/6 | 0 (0/0) |
+| explain-en-flaky-test | 0/3 | 0.52 | 0.38 | 0.72 | 1.00 | 1.00 | 103 | 35 | 5/6 | 8/12 | – | – | 7 (6/12) |
+| explain-en-invoice-job | 3/3 | 0.56 | 0.22 | 0.36 | 1.00 | 0.89 | 113 | 32 | 6/6 | 9/9 | – | – | 3 (3/9) |
+| explain-zh-input-rules | 0/3 | 0.57 | 0.33 | 0.61 | 1.00 | 0.89 | 206 | 51 | – | 7/12 | – | – | 12 (12/12) |
+| explain-zh-notes-ledger | 0/3 | 0.50 | 0.22 | 0.44 | 1.00 | 1.00 | 159 | 60 | 2/2 | 6/9 | – | – | 7 (7/9) |
+[(('judge_no', 'explain_depth (voice)'), 12), (('judge_no', 'explain_padding (voice)'), 7), (('judge_no', 'explain_padding (orch)'), 6), (('judge_no', 'no_hallucination'), 4), (('judge_no', 'facts_current'), 4), (('judge_no', 'answered'), 2), (('judge_no', 'language'), 2), (('judge_no', 'right_agent'), 1), (('brain_fallback', 'model_error'), 1), (('judge_no', 'explain_depth (orch)'), 1)]

@@ -277,7 +277,15 @@ func ScoreExplain(ctx context.Context, j Judge, spec *ExplainSpec, lang string, 
 			jobs = append(jobs, job{in: JudgeInput{Criterion: fmt.Sprintf(crit, e.Question), Transcript: renderExchanges(ex[:i+1], text), Final: true}, side: sd.out, name: name, point: -1})
 		}
 		if spec.substantive() {
-			all := renderExchanges(ex, sd.text)
+			// Only the answers this side gave: a trailing question it was
+			// not asked must not read as silence.
+			var answered []ExplainExchange
+			for _, e := range ex {
+				if strings.TrimSpace(sd.text(e)) != "" {
+					answered = append(answered, e)
+				}
+			}
+			all := renderExchanges(answered, sd.text)
 			for k, c := range map[string]string{"what": explainWhat, "why": explainWhy, "action": explainAction} {
 				jobs = append(jobs, job{in: JudgeInput{Criterion: c, Transcript: all, Final: true}, side: sd.out, name: "explain_comprehension_" + k, point: -1})
 			}

@@ -1,0 +1,1231 @@
+{
+  "started": "2026-10-05T12:02:01.359988-07:00",
+  "duration_s": 280,
+  "setup": {
+    "brain": "vertex gemini-3.5-flash (failover: vertex)",
+    "budget_usd": "3",
+    "judge": "vertex gemini-3.1-flash-lite",
+    "openings": "pinned by testdata/bench/openings.json",
+    "parallel": "3",
+    "ports": "7821,7822,7823",
+    "scenarios": "testdata/bench/scenarios/*.json (filter explain)",
+    "simulated CEO": "vertex gemini-3.1-flash-lite",
+    "tier": "2 (synthetic speech -\u003e phone emulator -\u003e scratch daemon: real voice model, real brain, mock herdr scripted from the eval sim worlds)",
+    "tts": "gemini/gemini-2.5-flash-tts|say",
+    "voice": "gemini-3.8-live (backend vertex)"
+  },
+  "repeat": 3,
+  "total": {
+    "case": "TOTAL",
+    "runs": 18,
+    "pass": 4,
+    "fail": 14,
+    "errored": 0,
+    "not_run": 0,
+    "pass_rate": 0.2222222222222222,
+    "primary": {
+      "brain_fallback": 1,
+      "judge_no": 13
+    },
+    "labels": {
+      "brain_fallback": 1,
+      "judge_no": 14
+    },
+    "mean_duration_ms": 126910,
+    "cost_usd_estimate": 1.2575752500000001
+  },
+  "cases": [
+    {
+      "case": "explain-control-en-done",
+      "runs": 3,
+      "pass": 1,
+      "fail": 2,
+      "errored": 0,
+      "not_run": 0,
+      "pass_rate": 0.3333333333333333,
+      "primary": {
+        "judge_no": 2
+      },
+      "labels": {
+        "judge_no": 2
+      },
+      "mean_duration_ms": 63518,
+      "cost_usd_estimate": 0.07086855
+    },
+    {
+      "case": "explain-control-zh-busy",
+      "runs": 3,
+      "pass": 0,
+      "fail": 3,
+      "errored": 0,
+      "not_run": 0,
+      "pass_rate": 0,
+      "primary": {
+        "judge_no": 3
+      },
+      "labels": {
+        "judge_no": 3
+      },
+      "mean_duration_ms": 67833,
+      "cost_usd_estimate": 0.11339830000000001
+    },
+    {
+      "case": "explain-en-flaky-test",
+      "runs": 3,
+      "pass": 0,
+      "fail": 3,
+      "errored": 0,
+      "not_run": 0,
+      "pass_rate": 0,
+      "primary": {
+        "brain_fallback": 1,
+        "judge_no": 2
+      },
+      "labels": {
+        "brain_fallback": 1,
+        "judge_no": 3
+      },
+      "mean_duration_ms": 174394,
+      "cost_usd_estimate": 0.29019945
+    },
+    {
+      "case": "explain-en-invoice-job",
+      "runs": 3,
+      "pass": 3,
+      "fail": 0,
+      "errored": 0,
+      "not_run": 0,
+      "pass_rate": 1,
+      "mean_duration_ms": 139081,
+      "cost_usd_estimate": 0.274932
+    },
+    {
+      "case": "explain-zh-input-rules",
+      "runs": 3,
+      "pass": 0,
+      "fail": 3,
+      "errored": 0,
+      "not_run": 0,
+      "pass_rate": 0,
+      "primary": {
+        "judge_no": 3
+      },
+      "labels": {
+        "judge_no": 3
+      },
+      "mean_duration_ms": 177600,
+      "cost_usd_estimate": 0.2641846
+    },
+    {
+      "case": "explain-zh-notes-ledger",
+      "runs": 3,
+      "pass": 0,
+      "fail": 3,
+      "errored": 0,
+      "not_run": 0,
+      "pass_rate": 0,
+      "primary": {
+        "judge_no": 3
+      },
+      "labels": {
+        "judge_no": 3
+      },
+      "mean_duration_ms": 139032,
+      "cost_usd_estimate": 0.24399235
+    }
+  ],
+  "categories": [
+    {
+      "case": "explain",
+      "runs": 18,
+      "pass": 4,
+      "fail": 14,
+      "errored": 0,
+      "not_run": 0,
+      "pass_rate": 0.2222222222222222,
+      "primary": {
+        "brain_fallback": 1,
+        "judge_no": 13
+      },
+      "labels": {
+        "brain_fallback": 1,
+        "judge_no": 14
+      },
+      "mean_duration_ms": 126910,
+      "cost_usd_estimate": 1.2575752500000001
+    }
+  ],
+  "latency": [
+    {
+      "segment": "voice",
+      "n": 34,
+      "p50_ms": 0,
+      "p90_ms": 240,
+      "max_ms": 15029
+    },
+    {
+      "segment": "relay",
+      "n": 34,
+      "p50_ms": 0,
+      "p90_ms": 0,
+      "max_ms": 1
+    },
+    {
+      "segment": "queue",
+      "n": 34,
+      "p50_ms": 0,
+      "p90_ms": 0,
+      "max_ms": 1
+    },
+    {
+      "segment": "brain",
+      "n": 34,
+      "p50_ms": 4661,
+      "p90_ms": 12725,
+      "max_ms": 23693
+    },
+    {
+      "segment": "model",
+      "n": 34,
+      "p50_ms": 4652,
+      "p90_ms": 12719,
+      "max_ms": 23682
+    },
+    {
+      "segment": "tool",
+      "n": 34,
+      "p50_ms": 1,
+      "p90_ms": 2,
+      "max_ms": 3
+    },
+    {
+      "segment": "delivery",
+      "n": 34,
+      "p50_ms": 1,
+      "p90_ms": 2,
+      "max_ms": 3
+    },
+    {
+      "segment": "first_audio",
+      "n": 32,
+      "p50_ms": 752,
+      "p90_ms": 919,
+      "max_ms": 1053
+    },
+    {
+      "segment": "total",
+      "n": 32,
+      "p50_ms": 5424,
+      "p90_ms": 10063,
+      "max_ms": 24646
+    }
+  ],
+  "latency_outcomes": {
+    "no_audio": 2,
+    "played": 32
+  },
+  "voice": {
+    "user_lines": 66,
+    "lines_not_heard": 0,
+    "mean_wer_by_lang": {
+      "en": 0.04448329448329449,
+      "zh": 0.10931179931179931
+    },
+    "mean_wer_by_condition": {
+      "clean": 0.0768975468975469
+    },
+    "flushes": 1,
+    "local_flushes": 0,
+    "push_unheard": 0,
+    "push_requeued": 0,
+    "push_deferred": 1,
+    "push_held": 0,
+    "interrupted": 1,
+    "stalled": 0,
+    "failovers": 2,
+    "tts_sources": {
+      "gemini/gemini-2.5-flash-tts": 66
+    },
+    "markup_spoken": 0,
+    "bot_audio_without_transcript": 0
+  },
+  "spend": {
+    "total_usd_estimate": 1.25757525,
+    "lines": [
+      {
+        "role": "brain",
+        "model": "deepseek-flash",
+        "usage": {
+          "calls": 3,
+          "in": 20009,
+          "out": 1528,
+          "reasoning": 992
+        },
+        "cost_usd_estimate": 0.0075147
+      },
+      {
+        "role": "brain",
+        "model": "gemini-3.5-flash",
+        "usage": {
+          "calls": 64,
+          "in": 391846,
+          "out": 5069,
+          "reasoning": 10084
+        },
+        "cost_usd_estimate": 0.1554363
+      },
+      {
+        "role": "judge",
+        "model": "gemini-3.1-flash-lite",
+        "usage": {
+          "calls": 1212,
+          "in": 714107,
+          "out": 38205
+        },
+        "cost_usd_estimate": 0.23583425
+      },
+      {
+        "role": "live",
+        "model": "gemini-3.8-live",
+        "usage": {
+          "calls": 99,
+          "in": 202683,
+          "out": 20525
+        },
+        "cost_usd_estimate": 0.854349
+      },
+      {
+        "role": "tts",
+        "model": "gemini-2.5-flash-tts",
+        "usage": {
+          "calls": 12,
+          "in": 202,
+          "out": 434
+        },
+        "cost_usd_estimate": 0.004441
+      }
+    ],
+    "live_audio_in_min": 2.5740000000000007,
+    "live_audio_out_min": 10.8085
+  },
+  "explain": {
+    "runs": 18,
+    "questions": 66,
+    "not_consulted": 32,
+    "follow_ups": 42,
+    "follow_ups_not_consulted": 28,
+    "orchestrator": {
+      "coverage_mean": 0.5376984126984127,
+      "comprehension_mean": 1,
+      "words_per_answer_en": 108.47058823529412,
+      "words_per_answer_zh": 176.25,
+      "simple_words_en": 31.333333333333332,
+      "simple_words_zh": 60.5,
+      "depth_asked": 14,
+      "depth_passed": 13,
+      "padding_asked": 9,
+      "padding_passed": 3
+    },
+    "voice": {
+      "coverage_mean": 0.2896825396825397,
+      "of_orchestrator_mean": 0.5319444444444444,
+      "comprehension_mean": 0.9444444444444445,
+      "words_per_answer_en": 33.84,
+      "words_per_answer_zh": 54.96296296296296,
+      "simple_words_en": 13.666666666666666,
+      "simple_words_zh": 31,
+      "depth_asked": 42,
+      "depth_passed": 30,
+      "padding_asked": 12,
+      "padding_passed": 5
+    }
+  },
+  "runs": [
+    {
+      "scenario": "explain-control-en-done",
+      "category": "explain",
+      "repeat": 1,
+      "status": "fail",
+      "primary": "judge_no",
+      "failures": [
+        {
+          "type": "judge_no",
+          "detail": "explain_padding_t1 (orchestrator): The verdict is \"no\" because Sheepdog included unasked-for details by stating, \"It ran the entire test suite, and all 128 tests in five packages passed.\" This contradicts the criterion's requirement to…"
+        },
+        {
+          "type": "judge_no",
+          "detail": "explain_padding_t1 (voice): The verdict is \"no\" because the assistant provided unasked-for details by stating, \"It ran the entire test suite, and all 128 tests across five packages passed successfully.\" This contradicts the crit…"
+        },
+        {
+          "type": "judge_no",
+          "detail": "explain_padding_t2 (voice): The verdict is \"no\" because the assistant violated the constraint against restating information by saying, \"Yes, as I mentioned, all 128 tests across the five packages passed successfully.\" This contr…"
+        }
+      ],
+      "end_reason": "end_call",
+      "turns": 2,
+      "duration_s": 51.182,
+      "cost_usd_estimate": 0.024372199999999997,
+      "mean_wer": 0.125,
+      "transcript": [
+        "[t+2s] ceo: Is bench-codex done?",
+        "[t+8s] sheepdog: Yes, bench-codex",
+        "[t+15s] sheepdog: is finished. It ran the entire test suite, and all 128 tests across five packages passed successfully.Yes, as I mentioned, all 128 tests across the five packages passed successfully.",
+        "[t+16s] ceo: Did the tests pass?",
+        "(voice model heard \"Is bench-codex done?\" as \"Is Bench Codex done?\")",
+        "(voice model heard \"Did the tests pass?\" as \"Did the test pass?\")"
+      ],
+      "excerpt": [
+        "    2.0s voice.push {\"briefing\":\"b-1\",\"channel\":\"function_response\",\"from\":\"daemon\",\"push_id\":\"push-tmg76g-3\",\"scheduling_sent\":\"silent\",\"text\":\"The agents are now called: bench-claude, bench-codex. Use these names; never a nickname.\",\"urgency\":\"silent\"}",
+        "    4.9s voice.transcript.in {\"final\":false,\"text\":\"Is Bench Codex done?\"}",
+        "    4.9s voice.tool_call {\"args\":{\"reading\":\"checking status of bench-codex\",\"text\":\"Is bench-codex done?\"},\"id\":\"call_364027\",\"name\":\"to_supervisor\"}",
+        "    4.9s supervisor.relay {\"call_id\":\"call_364027\",\"heard\":\"Is Bench Codex done?\",\"input\":\"voice\",\"inputs\":1,\"said\":\"Is bench-codex done?\",\"utterance_id\":\"utt-tmg76j-4\",\"waited_ms\":0}",
+        "    6.5s brain.tool_call {\"args\":{\"agent\":\"bench-codex\"},\"id\":\"call_403347\",\"name\":\"read_screen\",\"turn\":1,\"turn_id\":\"turn-tmg76d-1\",\"utterance_id\":\"utt-tmg76j-4\"}",
+        "    7.9s voice.tool_result {\"clarify\":false,\"detail\":\"The agent completed its task of running the code checks. All parts of the shop module are working correctly.\",\"dur_ms\":2979,\"id\":\"call_364027\",\"name\":\"to_supervisor\",\"scheduling\":\"idle\",\"scheduling_sent\"…",
+        "    8.5s voice.playback {\"played_ms\":0,\"run_ms\":150,\"state\":\"started\",\"utterance_id\":\"utt-tmg76j-4\"}",
+        "    9.1s voice.playback {\"played_ms\":310,\"run_ms\":310,\"state\":\"drained\"}",
+        "   15.6s voice.playback {\"played_ms\":0,\"run_ms\":160,\"state\":\"started\"}",
+        "   18.6s voice.transcript.in {\"final\":false,\"text\":\"Did the test pass?\"}",
+        "   28.8s voice.playback {\"played_ms\":12900,\"run_ms\":12900,\"state\":\"drained\"}",
+        "   29.1s voice.push {\"briefing\":\"b-2\",\"channel\":\"function_response\",\"focus\":true,\"push_id\":\"push-tmg76u-5\",\"scheduling_sent\":\"silent\",\"text\":\"Current focus, for follow-ups (context only, never read it out). Agent in focus: bench-codex. Key points of the las…"
+      ]
+    },
+    {
+      "scenario": "explain-control-en-done",
+      "category": "explain",
+      "repeat": 2,
+      "status": "fail",
+      "primary": "judge_no",
+      "failures": [
+        {
+          "type": "judge_no",
+          "detail": "explain_padding_t1 (voice): The verdict is \"no\" because the assistant included unasked-for details by stating, \"It ran the test suite, and all one hundred and twenty-eight tests passed successfully.\" This contradicts the criteri…"
+        }
+      ],
+      "end_reason": "end_call",
+      "turns": 2,
+      "duration_s": 82.371,
+      "cost_usd_estimate": 0.0238918,
+      "mean_wer": 0,
+      "transcript": [
+        "[t+2s] ceo: Is bench-codex done?",
+        "[t+10s] sheepdog: Yes, Bench Codex is done. It ran the test suite, and all one hundred and twenty-eight tests passed successfully.",
+        "[t+22s] ceo: Did the tests pass?",
+        "[t+25s] sheepdog: Yes, all one hundred and twenty-eight tests passed successfully without any issues.",
+        "(voice model heard \"Is bench-codex done?\" as \"Is Bench Codex done?\")"
+      ],
+      "excerpt": [
+        "    2.0s voice.push {\"briefing\":\"b-1\",\"channel\":\"function_response\",\"from\":\"daemon\",\"push_id\":\"push-tmg7dn-3\",\"scheduling_sent\":\"silent\",\"text\":\"The agents are now called: bench-claude, bench-codex. Use these names; never a nickname.\",\"urgency\":\"silent\"}",
+        "    4.9s voice.transcript.in {\"final\":false,\"text\":\"Is Bench Codex done?\"}",
+        "    4.9s voice.tool_call {\"args\":{\"reading\":\"check status of bench-codex\",\"text\":\"Is Bench Codex done?\"},\"id\":\"call_358592\",\"name\":\"to_supervisor\"}",
+        "    4.9s supervisor.relay {\"call_id\":\"call_358592\",\"heard\":\"Is Bench Codex done?\",\"input\":\"voice\",\"inputs\":1,\"said\":\"Is Bench Codex done?\",\"utterance_id\":\"utt-tmg7dq-4\",\"waited_ms\":0}",
+        "    6.8s brain.tool_call {\"args\":{\"agent\":\"bench-codex\",\"lines\":20,\"source\":\"screen\"},\"id\":\"call_314169\",\"name\":\"read_screen\",\"turn\":1,\"turn_id\":\"turn-tmg7dk-1\",\"utterance_id\":\"utt-tmg7dq-4\"}",
+        "    9.4s voice.tool_result {\"clarify\":false,\"detail\":\"All five packages compiled and tested successfully. No errors or warnings were found.\",\"dur_ms\":4559,\"id\":\"call_358592\",\"name\":\"to_supervisor\",\"scheduling\":\"idle\",\"scheduling_sent\":\"when_idle\",\"spoken\":\"…",
+        "   10.3s voice.playback {\"played_ms\":0,\"run_ms\":280,\"state\":\"started\",\"utterance_id\":\"utt-tmg7dq-4\"}",
+        "   17.2s voice.playback {\"played_ms\":6640,\"run_ms\":6640,\"state\":\"drained\"}",
+        "   17.5s voice.push {\"briefing\":\"b-2\",\"channel\":\"function_response\",\"focus\":true,\"push_id\":\"push-tmg7e2-5\",\"scheduling_sent\":\"silent\",\"text\":\"Current focus, for follow-ups (context only, never read it out). Agent in focus: bench-codex. Key points of the las…",
+        "   25.1s voice.transcript.in {\"final\":false,\"text\":\"Did the tests pass?\"}",
+        "   25.2s voice.playback {\"played_ms\":0,\"run_ms\":290,\"state\":\"started\"}",
+        "   30.5s voice.playback {\"played_ms\":5050,\"run_ms\":5050,\"state\":\"drained\"}"
+      ]
+    },
+    {
+      "scenario": "explain-control-en-done",
+      "category": "explain",
+      "repeat": 3,
+      "status": "pass",
+      "end_reason": "end_call",
+      "turns": 2,
+      "duration_s": 57.002,
+      "cost_usd_estimate": 0.02260455,
+      "mean_wer": 0.25
+    },
+    {
+      "scenario": "explain-control-zh-busy",
+      "category": "explain",
+      "repeat": 1,
+      "status": "fail",
+      "primary": "judge_no",
+      "failures": [
+        {
+          "type": "judge_no",
+          "detail": "no_hallucination: Sheepdog claimed \"它还在修改调用者名称\" regarding bench-codex, which contradicts the fact that bench-codex had already finished running the test suite and was idle."
+        },
+        {
+          "type": "judge_no",
+          "detail": "facts_current: Sheepdog stated, \"它还在修改调用者名称\" (It is still renaming callers) in response to the CEO's question about bench-codex. This contradicts the fact that bench-codex had already finished its task, as shown by …"
+        },
+        {
+          "type": "judge_no",
+          "detail": "explain_padding_t1 (orchestrator): The verdict is \"no\" because the assistant provided unasked-for details about the specific task being performed (\"bench-claude 正在更新购物车处理的代码，现在正在重命名相关的调用者\") instead of just confirming the status. This c…"
+        },
+        {
+          "type": "judge_no",
+          "detail": "explain_padding_t2 (orchestrator): The assistant failed the criterion by including unnecessary details: \"它还在继续重命名调用者\" provides unasked-for background information about the task. Additionally, the final sentence \"我已经帮您记下了，等它运行完了我立刻通知您\" …"
+        },
+        {
+          "type": "judge_no",
+          "detail": "explain_padding_t2 (voice): The response fails because it includes unnecessary details about the task status (\"它还在修改调用者名称\") instead of providing a direct \"no\" or \"not yet.\" This contradicts the requirement for a short, direct an…"
+        }
+      ],
+      "end_reason": "end_call",
+      "turns": 2,
+      "duration_s": 64.504,
+      "cost_usd_estimate": 0.03682355,
+      "mean_wer": 0.38095238095238093,
+      "transcript": [
+        "[t+2s] ceo: bench-claude 现在在忙吗？",
+        "[t+9s] sheepdog: Bench-Claude 正在修改购物车处理的代码，现在正在重命名相关的调用者。",
+        "[t+22s] ceo: bench-codex 跑完了吗？",
+        "[t+30s] sheepdog: 它还在修改调用者名称，等结束后我会立刻通知您。",
+        "(voice model heard \"bench-claude 现在在忙吗？\" as \"Ben Chloe 现在在忙的。\")",
+        "(voice model heard \"bench-codex 跑完了吗？\" as \"Bench-Claude 跑完吗？\")"
+      ],
+      "excerpt": [
+        "    2.0s voice.push {\"briefing\":\"b-1\",\"channel\":\"function_response\",\"from\":\"daemon\",\"push_id\":\"push-tmg77o-3\",\"scheduling_sent\":\"silent\",\"text\":\"The agents are now called: bench-claude, bench-codex. Use these names; never a nickname.\",\"urgency\":\"silent\"}",
+        "    5.4s voice.transcript.in {\"final\":false,\"text\":\"Ben Chloe 现在在忙的。\"}",
+        "    5.4s voice.tool_call {\"args\":{\"reading\":\"bench-claude status\",\"text\":\"Bench-Claude 现在在忙吗？\"},\"id\":\"call_358340\",\"name\":\"to_supervisor\"}",
+        "    5.4s supervisor.relay {\"call_id\":\"call_358340\",\"heard\":\"Ben Chloe 现在在忙的。\",\"input\":\"voice\",\"inputs\":1,\"said\":\"Bench-Claude 现在在忙吗？\",\"utterance_id\":\"utt-tmg77r-4\",\"waited_ms\":0}",
+        "    7.1s brain.tool_call {\"args\":{\"agent\":\"bench-claude\",\"lines\":10,\"source\":\"screen\"},\"id\":\"call_3117304\",\"name\":\"read_screen\",\"turn\":1,\"turn_id\":\"turn-tmg77m-1\",\"utterance_id\":\"utt-tmg77r-4\"}",
+        "    8.9s voice.tool_result {\"clarify\":false,\"detail\":\"它正在修改代码文件，以确保其他地方调用该接口时的名称一致。\",\"dur_ms\":3503,\"id\":\"call_358340\",\"name\":\"to_supervisor\",\"scheduling\":\"idle\",\"scheduling_sent\":\"when_idle\",\"spoken\"…",
+        "    9.6s voice.playback {\"played_ms\":0,\"run_ms\":240,\"state\":\"started\",\"utterance_id\":\"utt-tmg77r-4\"}",
+        "   15.3s voice.playback {\"played_ms\":5440,\"run_ms\":5440,\"state\":\"drained\"}",
+        "   15.6s voice.push {\"briefing\":\"b-2\",\"channel\":\"function_response\",\"focus\":true,\"push_id\":\"push-tmg781-5\",\"scheduling_sent\":\"silent\",\"text\":\"Current focus, for follow-ups (context only, never read it out). Agent in focus: bench-claude. Key points of the la…",
+        "   25.6s voice.transcript.in {\"final\":false,\"text\":\"Bench-Claude 跑完吗？\"}",
+        "   25.6s voice.tool_call {\"args\":{\"reading\":\"bench-claude status\",\"text\":\"Bench-Claude 跑完了吗？\"},\"id\":\"call_358344\",\"name\":\"to_supervisor\"}",
+        "   25.6s supervisor.relay {\"call_id\":\"call_358344\",\"heard\":\"Bench-Claude 跑完吗？\",\"input\":\"voice\",\"inputs\":1,\"said\":\"Bench-Claude 跑完了吗？\",\"utterance_id\":\"utt-tmg78c-6\",\"waited_ms\":0}",
+        "   27.0s brain.tool_call {\"args\":{\"agent\":\"bench-claude\",\"lines\":10,\"source\":\"screen\"},\"id\":\"call_1885191\",\"name\":\"read_screen\",\"turn\":2,\"turn_id\":\"turn-tmg77m-2\",\"utterance_id\":\"utt-tmg78c-6\"}",
+        "   28.8s brain.tool_call {\"args\":{\"agent\":\"bench-claude\",\"event\":\"done\",\"text\":\"Bench-Claude 运行完了通知我。\"},\"id\":\"call_4998027\",\"name\":\"promise\",\"turn\":2,\"turn_id\":\"turn-tmg77m-2\",\"utterance_id\":\"utt-tmg78c-6\"}",
+        "   30.2s voice.tool_result {\"clarify\":false,\"detail\":\"它仍在处理代码的关联部分，运行结束后会自动通知。\",\"dur_ms\":4661,\"id\":\"call_358344\",\"name\":\"to_supervisor\",\"scheduling\":\"idle\",\"scheduling_sent\":\"when_idle\",\"spoken\":\"还没有，�…",
+        "   30.9s voice.playback {\"played_ms\":0,\"run_ms\":260,\"state\":\"started\",\"utterance_id\":\"utt-tmg78c-6\"}",
+        "   35.7s voice.playback {\"played_ms\":4540,\"run_ms\":4540,\"state\":\"drained\"}",
+        "   36.0s voice.push {\"briefing\":\"b-3\",\"channel\":\"function_response\",\"focus\":true,\"push_id\":\"push-tmg78l-8\",\"scheduling_sent\":\"silent\",\"text\":\"Current focus, for follow-ups (context only, never read it out). Agent in focus: bench-claude. Key points of the la…"
+      ]
+    },
+    {
+      "scenario": "explain-control-zh-busy",
+      "category": "explain",
+      "repeat": 2,
+      "status": "fail",
+      "primary": "judge_no",
+      "failures": [
+        {
+          "type": "judge_no",
+          "detail": "explain_padding_t1 (orchestrator): The response failed because it included unnecessary details about the specific task being performed, stating: \"bench-claude 正在把购物车里的 Items 字段重命名为 Lines，目前正在更新受影响的调用代码。\" This contradicts the requiremen…"
+        },
+        {
+          "type": "judge_no",
+          "detail": "explain_padding_t1 (voice): The response failed because it included unnecessary details about the specific task being performed, stating: \"bench-claude 正在把购物车里的 Items 字段重命名为 Lines，目前正在更新受影响的调用代码。\" This contradicts the requiremen…"
+        }
+      ],
+      "end_reason": "end_call",
+      "turns": 2,
+      "duration_s": 71.348,
+      "cost_usd_estimate": 0.0355846,
+      "mean_wer": 0.2976190476190476,
+      "transcript": [
+        "[t+2s] ceo: bench-claude 现在在忙吗？",
+        "[t+10s] sheepdog: bench-claude 正在把购物车里的 Items 字段重命名为 Lines，目前正在更新受影响的调用代码。",
+        "[t+23s] ceo: bench-codex 跑完了吗？",
+        "[t+30s] sheepdog: bench-codex 已经跑完了，所有的 128 项测试全都通过了。",
+        "(voice model heard \"bench-claude 现在在忙吗？\" as \"Ben Glow 现在在忙的。\")",
+        "(voice model heard \"bench-codex 跑完了吗？\" as \"bench codex 跑完吗？\")"
+      ],
+      "excerpt": [
+        "    2.0s voice.push {\"briefing\":\"b-1\",\"channel\":\"function_response\",\"from\":\"daemon\",\"push_id\":\"push-tmg7ea-3\",\"scheduling_sent\":\"silent\",\"text\":\"The agents are now called: bench-claude, bench-codex. Use these names; never a nickname.\",\"urgency\":\"silent\"}",
+        "    5.4s voice.transcript.in {\"final\":false,\"text\":\"Ben Glow 现在在忙的。\"}",
+        "    5.4s voice.tool_call {\"args\":{\"reading\":\"check bench-claude status\",\"text\":\"bench-claude 现在在忙吗？\"},\"id\":\"call_149114\",\"name\":\"to_supervisor\"}",
+        "    5.4s supervisor.relay {\"call_id\":\"call_149114\",\"heard\":\"Ben Glow 现在在忙的。\",\"input\":\"voice\",\"inputs\":1,\"said\":\"bench-claude 现在在忙吗？\",\"utterance_id\":\"utt-tmg7ed-4\",\"waited_ms\":0}",
+        "    7.1s brain.tool_call {\"args\":{\"agent\":\"bench-claude\"},\"id\":\"call_965730\",\"name\":\"read_screen\",\"turn\":1,\"turn_id\":\"turn-tmg7e7-1\",\"utterance_id\":\"utt-tmg7ed-4\"}",
+        "    9.7s voice.tool_result {\"clarify\":false,\"detail\":\"重命名代码中的字段需要找出所有使用它的地方并同步修改，避免编译出错。\",\"dur_ms\":4226,\"id\":\"call_149114\",\"name\":\"to_supervisor\",\"scheduling\":\"idle\",\"scheduling_sent\":\"when…",
+        "   10.3s voice.playback {\"played_ms\":0,\"run_ms\":160,\"state\":\"started\",\"utterance_id\":\"utt-tmg7ed-4\"}",
+        "   17.8s voice.playback {\"played_ms\":7200,\"run_ms\":7200,\"state\":\"drained\"}",
+        "   18.1s voice.push {\"briefing\":\"b-2\",\"channel\":\"function_response\",\"focus\":true,\"push_id\":\"push-tmg7ep-5\",\"scheduling_sent\":\"silent\",\"text\":\"Current focus, for follow-ups (context only, never read it out). Agent in focus: bench-claude. Key points of the la…",
+        "   26.6s voice.transcript.in {\"final\":false,\"text\":\"bench codex 跑完吗？\"}",
+        "   26.6s voice.tool_call {\"args\":{\"reading\":\"check bench-codex status\",\"text\":\"bench-codex 跑完吗？\"},\"id\":\"call_149134\",\"name\":\"to_supervisor\"}",
+        "   26.6s supervisor.relay {\"call_id\":\"call_149134\",\"heard\":\"bench codex 跑完吗？\",\"input\":\"voice\",\"inputs\":1,\"said\":\"bench-codex 跑完吗？\",\"utterance_id\":\"utt-tmg7ey-6\",\"waited_ms\":1}",
+        "   28.0s brain.tool_call {\"args\":{\"agent\":\"bench-codex\"},\"id\":\"call_959275\",\"name\":\"read_screen\",\"turn\":2,\"turn_id\":\"turn-tmg7e7-2\",\"utterance_id\":\"utt-tmg7ey-6\"}",
+        "   29.7s voice.tool_result {\"clarify\":false,\"detail\":\"测试用来验证软件代码运行结果是否符合预期，全部通过说明当前功能正常。\",\"dur_ms\":3172,\"id\":\"call_149134\",\"name\":\"to_supervisor\",\"scheduling\":\"idle\",\"scheduling_sent\":\"when…",
+        "   30.3s voice.playback {\"played_ms\":0,\"run_ms\":240,\"state\":\"started\",\"utterance_id\":\"utt-tmg7ey-6\"}",
+        "   36.0s voice.playback {\"played_ms\":5360,\"run_ms\":5360,\"state\":\"drained\"}",
+        "   36.3s voice.push {\"briefing\":\"b-3\",\"channel\":\"function_response\",\"focus\":true,\"push_id\":\"push-tmg7f7-7\",\"scheduling_sent\":\"silent\",\"text\":\"Current focus, for follow-ups (context only, never read it out). Agent in focus: bench-codex. Key points of the las…"
+      ]
+    },
+    {
+      "scenario": "explain-control-zh-busy",
+      "category": "explain",
+      "repeat": 3,
+      "status": "fail",
+      "primary": "judge_no",
+      "failures": [
+        {
+          "type": "judge_no",
+          "detail": "answered: The assistant claimed \"bench-claude 还在修改其余的代码调用，目前仍在运行中\" regarding `bench-codex`, which contradicts the fact that `bench-codex` had already finished all its tests and was done."
+        },
+        {
+          "type": "judge_no",
+          "detail": "right_agent: The assistant incorrectly stated \"bench-claude 还在修改其余的代码调用\" in response to the CEO asking if \"bench-codex 跑完了吗,\" despite the fact that bench-codex had already finished all 128 tests. This contradicts …"
+        },
+        {
+          "type": "judge_no",
+          "detail": "no_hallucination: Sheepdog falsely claimed \"bench-claude 还在修改其余的代码调用\" when asked about `bench-codex`, contradicting the fact that `bench-codex` had already finished its test run and was done."
+        },
+        {
+          "type": "judge_no",
+          "detail": "facts_current: Sheepdog said, \"bench-claude 还在修改其余的代码调用，目前仍在运行中\" about bench-codex, which contradicts the fact that worker `bench-codex` had already finished its test run (\"All 128 tests passed\")."
+        },
+        {
+          "type": "judge_no",
+          "detail": "language: The assistant said \"bench-claude 正在把 Cart 里的 Items 字段重命名为 Lines...\" while the CEO was speaking Chinese, which contains the English product name and code terms that should have stayed as written, but t…"
+        },
+        {
+          "type": "judge_no",
+          "detail": "explain_padding_t1 (orchestrator): The verdict is \"no\" because the assistant provided excessive, unasked-for details, stating, \"它已经改了 cart.go 等三个文件，现在正在处理其它调用。\" This contradicts the requirement to be \"short and to the point\" without pr…"
+        },
+        {
+          "type": "judge_no",
+          "detail": "explain_padding_t2 (orchestrator): Sheepdog failed the criterion by providing unasked-for background details, specifically stating \"bench-claude 还在修改其余的代码调用，目前仍在运行中\" instead of simply answering about bench-codex. This contradicts the f…"
+        },
+        {
+          "type": "judge_no",
+          "detail": "explain_padding_t1 (voice): The response violates the criterion by providing excessive, unasked-for details: \"它已经改了三个文件，现在正在处理其它地方。\" This contradicts the requirement to avoid \"unasked-for background\" and \"details from the screen…"
+        },
+        {
+          "type": "judge_no",
+          "detail": "explain_padding_t2 (voice): The response fails because it includes unasked-for background details, specifically stating \"bench-claude 还在修改其余的代码调用\" instead of simply answering the status of bench-codex. This contradicts the crite…"
+        }
+      ],
+      "end_reason": "end_call",
+      "turns": 2,
+      "duration_s": 67.649,
+      "cost_usd_estimate": 0.04099015,
+      "mean_wer": 0.38095238095238093,
+      "transcript": [
+        "[t+2s] ceo: bench-claude 现在在忙吗？",
+        "[t+11s] sheepdog: bench-claude 正在把 Cart 里的 Items 字段重命名为 Lines，并更新所有的调用。 它已经改了三个文件，现在正在处理其它地方。 想在完成后提醒您吗？",
+        "[t+27s] ceo: bench-codex 跑完了吗？",
+        "[t+34s] sheepdog: 还没有，bench-claude 还在修改其余的代码调用，目前仍在运行中。 跑完后我立刻通知您，可以吗？",
+        "(voice model heard \"bench-claude 现在在忙吗？\" as \"Ben Glow 现在在忙的。\")",
+        "(voice model heard \"bench-codex 跑完了吗？\" as \"bench-claude 跑完吗？\")"
+      ],
+      "excerpt": [
+        "    2.0s voice.push {\"briefing\":\"b-1\",\"channel\":\"function_response\",\"from\":\"daemon\",\"push_id\":\"push-tmg7pc-3\",\"scheduling_sent\":\"silent\",\"text\":\"The agents are now called: bench-claude, bench-codex. Use these names; never a nickname.\",\"urgency\":\"silent\"}",
+        "    5.3s voice.transcript.in {\"final\":false,\"text\":\"Ben Glow 现在在忙的。\"}",
+        "    5.3s voice.tool_call {\"args\":{\"reading\":\"checking bench-claude status\",\"text\":\"Bench-claude 现在在忙的。\"},\"id\":\"call_364350\",\"name\":\"to_supervisor\"}",
+        "    5.3s supervisor.relay {\"call_id\":\"call_364350\",\"heard\":\"Ben Glow 现在在忙的。\",\"input\":\"voice\",\"inputs\":1,\"said\":\"Bench-claude 现在在忙的。\",\"utterance_id\":\"utt-tmg7pf-4\",\"waited_ms\":0}",
+        "    7.0s brain.tool_call {\"args\":{\"agent\":\"bench-claude\"},\"id\":\"call_2972189\",\"name\":\"read_screen\",\"turn\":1,\"turn_id\":\"turn-tmg7p9-1\",\"utterance_id\":\"utt-tmg7pf-4\"}",
+        "   11.2s voice.tool_result {\"clarify\":false,\"detail\":\"bench-claude 正在进行代码库中的全局变量和字段重命名。\",\"dur_ms\":5864,\"id\":\"call_364350\",\"name\":\"to_supervisor\",\"scheduling\":\"idle\",\"scheduling_sent\":\"when_idle\",\"spoken\":\"对，bench-…",
+        "   11.8s voice.playback {\"played_ms\":0,\"run_ms\":160,\"state\":\"started\",\"utterance_id\":\"utt-tmg7pf-4\"}",
+        "   22.7s voice.playback {\"played_ms\":10560,\"run_ms\":10560,\"state\":\"drained\"}",
+        "   23.0s voice.push {\"briefing\":\"b-2\",\"channel\":\"function_response\",\"focus\":true,\"push_id\":\"push-tmg7pw-5\",\"scheduling_sent\":\"silent\",\"text\":\"Current focus, for follow-ups (context only, never read it out). Agent in focus: bench-claude. Open question you as…",
+        "   30.6s voice.transcript.in {\"final\":false,\"text\":\"bench-claude 跑完吗？\"}",
+        "   30.6s voice.tool_call {\"args\":{\"reading\":\"checking bench-claude status\",\"text\":\"bench-claude 跑完吗？\"},\"id\":\"call_364358\",\"name\":\"to_supervisor\"}",
+        "   30.6s supervisor.relay {\"call_id\":\"call_364358\",\"heard\":\"bench-claude 跑完吗？\",\"input\":\"voice\",\"inputs\":1,\"said\":\"bench-claude 跑完吗？\",\"utterance_id\":\"utt-tmg7q4-6\",\"waited_ms\":0}",
+        "   31.9s brain.tool_call {\"args\":{\"agent\":\"bench-claude\"},\"id\":\"call_1356027\",\"name\":\"read_screen\",\"turn\":2,\"turn_id\":\"turn-tmg7p9-2\",\"utterance_id\":\"utt-tmg7q4-6\"}",
+        "   33.5s voice.tool_result {\"clarify\":false,\"detail\":\"代码工具仍在自动寻找并更新所有涉及的代码部分。\",\"dur_ms\":2953,\"id\":\"call_364358\",\"name\":\"to_supervisor\",\"scheduling\":\"idle\",\"scheduling_sent\":\"when_idle\",\"spoken\":\"还没有，benc…",
+        "   34.2s voice.playback {\"played_ms\":0,\"run_ms\":320,\"state\":\"started\",\"utterance_id\":\"utt-tmg7q4-6\"}",
+        "   42.5s voice.playback {\"played_ms\":8040,\"run_ms\":8040,\"state\":\"drained\"}",
+        "   42.8s voice.push {\"briefing\":\"b-3\",\"channel\":\"function_response\",\"focus\":true,\"push_id\":\"push-tmg7qg-7\",\"scheduling_sent\":\"silent\",\"text\":\"Current focus, for follow-ups (context only, never read it out). Agent in focus: bench-claude. Open question you as…"
+      ]
+    },
+    {
+      "scenario": "explain-en-flaky-test",
+      "category": "explain",
+      "repeat": 1,
+      "status": "fail",
+      "primary": "judge_no",
+      "failures": [
+        {
+          "type": "judge_no",
+          "detail": "explain_depth_t2_then (voice): Sheepdog's response, \"Shall I have benchcodex apply the small fix, or would you prefer another option?\", offers a procedural next step rather than adding substantive new content, a new reason, example…"
+        }
+      ],
+      "end_reason": "end_call",
+      "turns": 5,
+      "duration_s": 146.881,
+      "cost_usd_estimate": 0.076237,
+      "failovers": 1,
+      "mean_wer": 0.015384615384615385,
+      "transcript": [
+        "[t+2s] ceo: What did bench-codex find about the flaky test? Explain it to me.",
+        "[t+35s] ceo: Then?",
+        "[t+38s] sheepdog: Shall I have benchcodex apply the small fix, or would you prefer another option?",
+        "[t+51s] ceo: More detail please.",
+        "[t+54s] sheepdog: The test checks the result before the price list finishes loading, causing the member discount to be missed in about one out of twelve runs. This makes the total come out too high, but customers are never affected.",
+        "[t+73s] ceo: Why does that happen?",
+        "[t+80s] sheepdog: The request gets sent before the database warmup completes, so we have a few options. Shall I have Codex make the test wait for the cache, use a mock, or leave it alone for now?",
+        "[t+98s] ceo: Give me an example.",
+        "[t+100s] sheepdog: Imagine checking out before the store discounts have been uploaded to the register; the system processes the price before the discount is added.",
+        "(voice model heard \"What did bench-codex find about the flaky test? Explain it to me.\" as \"What did Benj Codex find about the flaky test? Explain it to me.\")",
+        "(voice model heard \"More detail please.\" as \"More detail, please.\")"
+      ],
+      "excerpt": [
+        "    2.0s voice.push {\"briefing\":\"b-1\",\"channel\":\"function_response\",\"from\":\"daemon\",\"push_id\":\"push-tmg72c-3\",\"scheduling_sent\":\"silent\",\"text\":\"The agents are now called: bench-claude, bench-codex. Use these names; never a nickname.\",\"urgency\":\"silent\"}",
+        "   14.1s voice.transcript.in {\"final\":false,\"text\":\"What did Benj Codex find about the flaky test? Explain it to me.\"}",
+        "   14.4s voice.tool_call {\"args\":{\"reading\":\"investigating bench-codex findings on flaky test\",\"text\":\"What did bench-codex find about the flaky test? Explain it to me.\"},\"id\":\"call_358172\",\"name\":\"to_supervisor\"}",
+        "   14.4s supervisor.relay {\"call_id\":\"call_358172\",\"heard\":\"What did Benj Codex find about the flaky test? Explain it to me.\",\"input\":\"voice\",\"inputs\":1,\"said\":\"What did bench-codex find about the flaky test? Explain it to me.\",\"utterance_id\":\"utt-tmg72p-4\"…",
+        "   33.0s brain.failover {\"call\":\"turn\",\"error\":\"Error 504, Message: Deadline expired before operation could complete., Status: DEADLINE_EXCEEDED, Details: []\",\"from\":\"vertex\",\"from_model\":\"gemini-3.5-flash\",\"reason\":\"http_504\",\"step\":1,\"to\":\"deepseek\",\"to_m…",
+        "   34.2s brain.tool_call {\"args\":{\"agent\":\"bench-codex\",\"source\":\"session\"},\"id\":\"call_00_QFsFr5HKs8NODLY5i0Vw4214\",\"name\":\"read_screen\",\"turn\":1,\"turn_id\":\"turn-tmg72a-1\",\"utterance_id\":\"utt-tmg72p-4\"}",
+        "   34.2s brain.tool_call {\"args\":{\"agent\":\"bench-codex\",\"lines\":120},\"id\":\"call_01_ngNaZK39ZQMjCWaAVNxb8414\",\"name\":\"read_screen\",\"turn\":1,\"turn_id\":\"turn-tmg72a-1\",\"utterance_id\":\"utt-tmg72p-4\"}",
+        "   37.9s voice.tool_result {\"clarify\":false,\"detail\":\"A flaky test is one that passes and fails on the same code. Here the test starts before a piece of saved data has loaded, so occasionally it checks the resul…\",\"dur_ms\":23519,\"id\":\"call_358172\",\"name\":…",
+        "   38.1s voice.transcript.in {\"final\":false,\"text\":\"Then?\"}",
+        "   38.8s voice.playback {\"played_ms\":0,\"run_ms\":220,\"state\":\"started\",\"utterance_id\":\"utt-tmg72p-4\"}",
+        "   44.3s voice.playback {\"played_ms\":5180,\"run_ms\":5180,\"state\":\"drained\"}",
+        "   44.6s voice.push {\"briefing\":\"b-2\",\"channel\":\"function_response\",\"focus\":true,\"push_id\":\"push-tmg73i-5\",\"scheduling_sent\":\"silent\",\"text\":\"Current focus, for follow-ups (context only, never read it out). Agent in focus: bench-codex. Open question you ask…",
+        "   54.3s voice.transcript.in {\"final\":false,\"text\":\"More detail, please.\"}",
+        "   54.3s voice.playback {\"played_ms\":0,\"run_ms\":290,\"state\":\"started\"}",
+        "   66.7s voice.playback {\"played_ms\":12090,\"run_ms\":12090,\"state\":\"drained\"}",
+        "   76.2s voice.transcript.in {\"final\":false,\"text\":\"Why does that happen?\"}",
+        "   76.2s voice.tool_call {\"args\":{\"reading\":\"why the test runs before data loads\",\"text\":\"Why does that happen?\"},\"id\":\"call_358268\",\"name\":\"to_supervisor\"}",
+        "   76.2s supervisor.relay {\"call_id\":\"call_358268\",\"heard\":\"Why does that happen?\",\"input\":\"voice\",\"inputs\":1,\"said\":\"Why does that happen?\",\"utterance_id\":\"utt-tmg74f-6\",\"waited_ms\":3}",
+        "   79.9s voice.tool_result {\"clarify\":false,\"detail\":\"A database warmup loads fresh prices into fast memory at startup. Because the test sends the purchase request instantly, it occasionally beats this load step…\",\"dur_ms\":3698,\"id\":\"call_358268\",\"name\":\"…",
+        "   80.7s voice.playback {\"played_ms\":0,\"run_ms\":360,\"state\":\"started\",\"utterance_id\":\"utt-tmg74f-6\"}",
+        "   91.3s voice.playback {\"played_ms\":10240,\"run_ms\":10240,\"state\":\"drained\"}",
+        "   91.6s voice.push {\"briefing\":\"b-3\",\"channel\":\"function_response\",\"focus\":true,\"push_id\":\"push-tmg74t-7\",\"scheduling_sent\":\"silent\",\"text\":\"Current focus, for follow-ups (context only, never read it out). Agent in focus: bench-codex. Open question you ask…",
+        "  100.5s voice.transcript.in {\"final\":false,\"text\":\"Give me an example.\"}",
+        "  100.5s voice.playback {\"played_ms\":0,\"run_ms\":270,\"state\":\"started\"}",
+        "  108.5s voice.playback {\"played_ms\":7670,\"run_ms\":7670,\"state\":\"drained\"}"
+      ]
+    },
+    {
+      "scenario": "explain-en-flaky-test",
+      "category": "explain",
+      "repeat": 2,
+      "status": "fail",
+      "primary": "judge_no",
+      "failures": [
+        {
+          "type": "judge_no",
+          "detail": "explain_depth_t2_then (voice): Sheepdog failed because it merely repeated \"I am waiting for your decision on whether to apply the recommended fix or to leave it for now,\" which added no substantive new content to answer the CEO's p…"
+        }
+      ],
+      "end_reason": "end_call",
+      "turns": 5,
+      "duration_s": 164.63,
+      "cost_usd_estimate": 0.11432245,
+      "mean_wer": 0.03076923076923077,
+      "transcript": [
+        "[t+2s] ceo: What did bench-codex find about the flaky test? Explain it to me.",
+        "[t+14s] sheepdog: Bench-codex found the test sometimes runs before the price cache loads, missing the fifteen percent discount and failing. Since this only affects the test, Codex recommends a brief fix to make it wait. Shall we apply the recommended fix, or don't change anything yet?",
+        "[t+33s] ceo: Then?",
+        "[t+36s] sheepdog: I am waiting for your decision on whether to apply the recommended fix or to leave it for now.",
+        "[t+46s] ceo: More detail please.",
+        "[t+49s] sheepdog: The test occasionally checks the prices before the store's temporary memory finishes loading the active sales. When this happens, it misses the fifteen percent discount and reports a false failure.",
+        "[t+64s] ceo: Why does that happen?",
+        "[t+72s] sheepdog: A code change three weeks ago moved the cache loading to the background to speed up the store. Because it runs independently, the test sometimes beats the loader and checks the price before the data is ready. Would you like Codex to apply the fix to make the test wait, or shall we not change anything yet?",
+        "[t+92s] ceo: Give me an example.",
+        "[t+97s] sheepdog: It is like opening a store's doors before the staff finish putting discount tags on the shelves. A customer occasionally walks in first, pays full price, and complains. Shall I have Codex apply the fix to make the test wait for those tags, or stay with the current setup?",
+        "(voice model heard \"What did bench-codex find about the flaky test? Explain it to me.\" as \"What did Benjocodex find about the flaky test? Explain it to me.\")",
+        "(voice model heard \"More detail please.\" as \"More detail, please.\")"
+      ],
+      "excerpt": [
+        "    2.0s voice.push {\"briefing\":\"b-1\",\"channel\":\"function_response\",\"from\":\"daemon\",\"push_id\":\"push-tmg791-3\",\"scheduling_sent\":\"silent\",\"text\":\"The agents are now called: bench-claude, bench-codex. Use these names; never a nickname.\",\"urgency\":\"silent\"}",
+        "    7.7s voice.transcript.in {\"final\":false,\"text\":\"What did Benjocodex find about the flaky test? Explain it to me.\"}",
+        "    7.7s voice.tool_call {\"args\":{\"reading\":\"check bench-codex flaky test findings\",\"text\":\"What did bench-codex find about the flaky test? Explain it to me.\"},\"id\":\"call_148886\",\"name\":\"to_supervisor\"}",
+        "    7.7s supervisor.relay {\"call_id\":\"call_148886\",\"heard\":\"What did Benjocodex find about the flaky test? Explain it to me.\",\"input\":\"voice\",\"inputs\":1,\"said\":\"What did bench-codex find about the flaky test? Explain it to me.\",\"utterance_id\":\"utt-tmg797-4\"…",
+        "    9.3s brain.tool_call {\"args\":{\"agent\":\"bench-codex\",\"source\":\"session\"},\"id\":\"call_2720136\",\"name\":\"read_screen\",\"turn\":1,\"turn_id\":\"turn-tmg78z-1\",\"utterance_id\":\"utt-tmg797-4\"}",
+        "   10.3s brain.tool_call {\"args\":{\"agent\":\"bench-codex\",\"source\":\"screen\"},\"id\":\"call_266008\",\"name\":\"read_screen\",\"turn\":1,\"turn_id\":\"turn-tmg78z-1\",\"utterance_id\":\"utt-tmg797-4\"}",
+        "   13.3s voice.tool_result {\"clarify\":false,\"detail\":\"The test checks if total prices and discounts are correct. The cache is a quick-access memory that stores active discounts to make the store faster.\",\"dur_ms\":5626,\"id\":\"call_148886\",\"name\":\"to_superviso…",
+        "   14.4s voice.playback {\"played_ms\":0,\"run_ms\":290,\"state\":\"started\",\"utterance_id\":\"utt-tmg797-4\"}",
+        "   28.2s voice.playback {\"played_ms\":13530,\"run_ms\":13530,\"state\":\"drained\"}",
+        "   28.5s voice.push {\"briefing\":\"b-2\",\"channel\":\"function_response\",\"focus\":true,\"push_id\":\"push-tmg79r-5\",\"scheduling_sent\":\"silent\",\"text\":\"Current focus, for follow-ups (context only, never read it out). Agent in focus: bench-codex. Open question you ask…",
+        "   35.9s voice.transcript.in {\"final\":false,\"text\":\"Then?\"}",
+        "   36.5s voice.playback {\"played_ms\":0,\"run_ms\":280,\"state\":\"started\"}",
+        "   41.4s voice.playback {\"played_ms\":4600,\"run_ms\":4600,\"state\":\"drained\"}",
+        "   49.5s voice.transcript.in {\"final\":false,\"text\":\"More detail, please.\"}",
+        "   49.8s voice.playback {\"played_ms\":0,\"run_ms\":240,\"state\":\"started\"}",
+        "   59.0s voice.playback {\"played_ms\":8880,\"run_ms\":8880,\"state\":\"drained\"}",
+        "   66.9s voice.transcript.in {\"final\":false,\"text\":\"Why does that happen?\"}",
+        "   66.9s voice.tool_call {\"args\":{\"reading\":\"explain race condition between test and cache\",\"text\":\"Why does that happen?\"},\"id\":\"call_148914\",\"name\":\"to_supervisor\"}",
+        "   66.9s supervisor.relay {\"call_id\":\"call_148914\",\"heard\":\"Why does that happen?\",\"input\":\"voice\",\"inputs\":1,\"said\":\"Why does that happen?\",\"utterance_id\":\"utt-tmg7au-6\",\"waited_ms\":0}",
+        "   69.6s brain.tool_call {\"args\":{\"agent\":\"bench-codex\",\"question\":\"show me the code of TestCheckoutTotals and the cache warming up logic\"},\"id\":\"call_40430\",\"name\":\"run_cli\",\"turn\":2,\"turn_id\":\"turn-tmg78z-2\",\"utterance_id\":\"utt-tmg7au-6\"}",
+        "   71.7s voice.tool_result {\"clarify\":false,\"detail\":\"A background task runs alongside the main program rather than making the program wait for it. The test sends its request immediately without waiting for this…\",\"dur_ms\":4817,\"id\":\"call_148914\",\"name\":\"…",
+        "   72.4s voice.playback {\"played_ms\":0,\"run_ms\":280,\"state\":\"started\",\"utterance_id\":\"utt-tmg7au-6\"}",
+        "   86.7s voice.playback {\"played_ms\":13920,\"run_ms\":13920,\"state\":\"drained\"}",
+        "   87.0s voice.push {\"briefing\":\"b-3\",\"channel\":\"function_response\",\"focus\":true,\"push_id\":\"push-tmg7be-7\",\"scheduling_sent\":\"silent\",\"text\":\"Current focus, for follow-ups (context only, never read it out). Agent in focus: bench-codex. Open question you ask…",
+        "   94.4s voice.transcript.in {\"final\":false,\"text\":\"Give me an example.\"}",
+        "   94.6s voice.tool_call {\"args\":{\"reading\":\"give an example of the race condition between the test and cache\",\"text\":\"Give me an example.\"},\"id\":\"call_148938\",\"name\":\"to_supervisor\"}",
+        "   94.6s supervisor.relay {\"call_id\":\"call_148938\",\"heard\":\"Give me an example.\",\"input\":\"voice\",\"inputs\":1,\"said\":\"Give me an example.\",\"utterance_id\":\"utt-tmg7bm-8\",\"waited_ms\":154}",
+        "   97.0s voice.tool_result {\"clarify\":false,\"detail\":\"The test acts as the customer, while the background loader is the staff putting up tags. The fix ensures the customer waits outside until the tags are fully …\",\"dur_ms\":2432,\"id\":\"call_148938\",\"name\":\"…",
+        "   97.7s voice.playback {\"played_ms\":0,\"run_ms\":260,\"state\":\"started\",\"utterance_id\":\"utt-tmg7bm-8\"}",
+        "  111.5s voice.playback {\"played_ms\":13500,\"run_ms\":13500,\"state\":\"drained\"}",
+        "  111.8s voice.push {\"briefing\":\"b-4\",\"channel\":\"function_response\",\"focus\":true,\"push_id\":\"push-tmg7c2-9\",\"scheduling_sent\":\"silent\",\"text\":\"Current focus, for follow-ups (context only, never read it out). Agent in focus: bench-codex. Open question you ask…"
+      ]
+    },
+    {
+      "scenario": "explain-en-flaky-test",
+      "category": "explain",
+      "repeat": 3,
+      "status": "fail",
+      "primary": "brain_fallback",
+      "failures": [
+        {
+          "type": "brain_fallback",
+          "detail": "model_error: Error 499, Message: The operation was cancelled., Status: CANCELLED, Details: []"
+        },
+        {
+          "type": "judge_no",
+          "detail": "explain_depth_t4_why (orchestrator): Sheepdog's response stated, \"Sorry, I couldn't get an answer just now,\" which contradicts the criterion requirement to provide a concrete reason, say it does not know and offer to find out, or hand th…"
+        },
+        {
+          "type": "judge_no",
+          "detail": "explain_depth_t2_then (voice): Sheepdog failed the criterion because its reply, \"I'm waiting to hear if you want to apply the fix to wait for the cache, replace it with a fake, or leave it as is,\" simply restated its earlier option…"
+        },
+        {
+          "type": "judge_no",
+          "detail": "explain_depth_t4_why (voice): Sheepdog says nothing in response to the CEO's final question, contradicting the requirement to provide a concrete reason, state that it does not know, or hand the question to a worker."
+        }
+      ],
+      "end_reason": "end_call",
+      "turns": 5,
+      "duration_s": 211.673,
+      "cost_usd_estimate": 0.09964,
+      "mean_wer": 0.03076923076923077,
+      "transcript": [
+        "[t+2s] ceo: What did bench-codex find about the flaky test? Explain it to me.",
+        "[t+16s] sheepdog: bench-codex found that the test runs too fast, checking out before the price cache is ready, which causes the member discount to be missed. Shall we apply the fix to wait for the cache, replace the cache with a fake, or leave it as is?",
+        "[t+34s] ceo: Then?",
+        "[t+37s] sheepdog: I'm waiting to hear if you want to apply the fix to wait for the cache, replace it with a fake, or leave it as is.",
+        "[t+48s] ceo: More detail please.",
+        "[t+51s] sheepdog: The cache acts as a temporary store that makes prices ready in memory. Since the test triggers before the store is prepared, the checkout fails to see the member discount.",
+        "[t+65s] ceo: Why does that happen?",
+        "[t+92s] ceo: Give me an example.",
+        "[t+99s] sheepdog: It happens because the test starts checking prices before the store is fully stocked with discounts, like a shop opening before shelves are ready. Should we apply the fix to wait for the cache, replace the cache with a fake, or leave it as is?",
+        "(voice model heard \"What did bench-codex find about the flaky test? Explain it to me.\" as \"What did Benjocodex find about the flaky test? Explain it to me.\")",
+        "(voice model heard \"More detail please.\" as \"More detail, please.\")"
+      ],
+      "excerpt": [
+        "    2.0s voice.push {\"briefing\":\"b-1\",\"channel\":\"function_response\",\"from\":\"daemon\",\"push_id\":\"push-tmg7jf-3\",\"scheduling_sent\":\"silent\",\"text\":\"The agents are now called: bench-claude, bench-codex. Use these names; never a nickname.\",\"urgency\":\"silent\"}",
+        "    7.6s voice.transcript.in {\"final\":false,\"text\":\"What did Benjocodex find about the flaky test? Explain it to me.\"}",
+        "    7.6s voice.tool_call {\"args\":{\"reading\":\"Check bench-codex status on flaky test\",\"text\":\"What did bench-codex find about the flaky test? Explain it to me.\"},\"id\":\"call_319824\",\"name\":\"to_supervisor\"}",
+        "    7.6s supervisor.relay {\"call_id\":\"call_319824\",\"heard\":\"What did Benjocodex find about the flaky test? Explain it to me.\",\"input\":\"voice\",\"inputs\":1,\"said\":\"What did bench-codex find about the flaky test? Explain it to me.\",\"utterance_id\":\"utt-tmg7jl-4\"…",
+        "    9.2s brain.tool_call {\"args\":{\"agent\":\"bench-codex\",\"source\":\"session\"},\"id\":\"call_451605\",\"name\":\"read_screen\",\"turn\":1,\"turn_id\":\"turn-tmg7jd-1\",\"utterance_id\":\"utt-tmg7jl-4\"}",
+        "   10.6s brain.tool_call {\"args\":{\"agent\":\"bench-codex\",\"source\":\"screen\"},\"id\":\"call_1936989\",\"name\":\"read_screen\",\"turn\":1,\"turn_id\":\"turn-tmg7jd-1\",\"utterance_id\":\"utt-tmg7jl-4\"}",
+        "   15.7s voice.tool_result {\"clarify\":false,\"detail\":\"A cache is a temporary store that keeps prices ready in memory. The test runs before this store is ready, which makes the checkouts look like they did not ge…\",\"dur_ms\":8083,\"id\":\"call_319824\",\"name\":\"…",
+        "   16.5s voice.playback {\"played_ms\":0,\"run_ms\":260,\"state\":\"started\",\"utterance_id\":\"utt-tmg7jl-4\"}",
+        "   29.4s voice.playback {\"played_ms\":12660,\"run_ms\":12660,\"state\":\"drained\"}",
+        "   29.7s voice.push {\"briefing\":\"b-2\",\"channel\":\"function_response\",\"focus\":true,\"push_id\":\"push-tmg7k6-5\",\"scheduling_sent\":\"silent\",\"text\":\"Current focus, for follow-ups (context only, never read it out). Agent in focus: bench-codex. Open question you ask…",
+        "   37.1s voice.transcript.in {\"final\":false,\"text\":\"Then?\"}",
+        "   37.8s voice.playback {\"played_ms\":0,\"run_ms\":250,\"state\":\"started\"}",
+        "   43.8s voice.playback {\"played_ms\":5770,\"run_ms\":5770,\"state\":\"drained\"}",
+        "   51.3s voice.transcript.in {\"final\":false,\"text\":\"More detail, please.\"}",
+        "   51.3s voice.playback {\"played_ms\":0,\"run_ms\":260,\"state\":\"started\"}",
+        "   60.8s voice.playback {\"played_ms\":9020,\"run_ms\":9020,\"state\":\"drained\"}",
+        "   67.6s voice.transcript.in {\"final\":false,\"text\":\"Why does that happen?\"}",
+        "   67.6s voice.tool_call {\"args\":{\"text\":\"Why does that happen?\"},\"id\":\"call_319864\",\"name\":\"to_supervisor\"}",
+        "   67.6s supervisor.relay {\"call_id\":\"call_319864\",\"heard\":\"Why does that happen?\",\"input\":\"voice\",\"inputs\":1,\"said\":\"Why does that happen?\",\"utterance_id\":\"utt-tmg7l9-6\",\"waited_ms\":0}",
+        "   87.2s brain.fallback {\"acted\":false,\"error\":\"Error 499, Message: The operation was cancelled., Status: CANCELLED, Details: []\",\"kind\":\"utterance\",\"reason\":\"model_error\",\"trigger\":\"ceo\",\"turn\":2,\"turn_id\":\"turn-tmg7jd-2\",\"utterance_id\":\"utt-tmg7l9-6\"}",
+        "   87.2s voice.tool_result {\"clarify\":false,\"dur_ms\":19589,\"id\":\"call_319864\",\"name\":\"to_supervisor\",\"scheduling\":\"interrupt\",\"scheduling_sent\":\"interrupt\",\"spoken\":\"Sorry, I couldn't get an answer just now, but ask me again and I'll try once more.\",\"wait_m…",
+        "   87.6s voice.tool_call {\"args\":{\"text\":\"Why does that happen?\"},\"id\":\"call_319876\",\"name\":\"to_supervisor\"}",
+        "   89.1s voice.tool_result {\"clarify\":false,\"dur_ms\":1500,\"id\":\"call_319876\",\"name\":\"to_supervisor\",\"scheduling\":\"silent\",\"scheduling_sent\":\"silent\",\"spoken\":\"Nothing was handed on: the slow brain acts only on the CEO's own words, and the CEO has said nothi…",
+        "   94.8s voice.transcript.in {\"final\":false,\"text\":\"Give me an example.\"}",
+        "   94.8s voice.tool_call {\"args\":{\"text\":\"Give me an example.\"},\"id\":\"call_319880\",\"name\":\"to_supervisor\"}",
+        "   94.8s supervisor.relay {\"call_id\":\"call_319880\",\"heard\":\"Give me an example.\",\"input\":\"voice\",\"inputs\":1,\"said\":\"Give me an example.\",\"utterance_id\":\"utt-tmg7m0-7\",\"waited_ms\":0}",
+        "   98.6s voice.tool_result {\"clarify\":false,\"detail\":\"The background process and the test are running in a race. Waiting for the ready signal ensures the prices are fully loaded before the first checkout is made.\",\"dur_ms\":3788,\"id\":\"call_319880\",\"name\":\"to…",
+        "   99.6s voice.playback {\"played_ms\":0,\"run_ms\":480,\"state\":\"started\",\"utterance_id\":\"utt-tmg7m0-7\"}",
+        "  112.8s voice.playback {\"played_ms\":12880,\"run_ms\":12880,\"state\":\"drained\"}",
+        "  113.1s voice.push {\"briefing\":\"b-3\",\"channel\":\"function_response\",\"focus\":true,\"push_id\":\"push-tmg7mh-8\",\"scheduling_sent\":\"silent\",\"text\":\"Current focus, for follow-ups (context only, never read it out). Agent in focus: bench-codex. Open question you ask…"
+      ]
+    },
+    {
+      "scenario": "explain-en-invoice-job",
+      "category": "explain",
+      "repeat": 1,
+      "status": "pass",
+      "end_reason": "end_call",
+      "turns": 4,
+      "duration_s": 126.233,
+      "cost_usd_estimate": 0.093329,
+      "failovers": 1,
+      "mean_wer": 0.027777777777777776
+    },
+    {
+      "scenario": "explain-en-invoice-job",
+      "category": "explain",
+      "repeat": 2,
+      "status": "pass",
+      "end_reason": "end_call",
+      "turns": 4,
+      "duration_s": 165.676,
+      "cost_usd_estimate": 0.10872265,
+      "mean_wer": 0.027777777777777776
+    },
+    {
+      "scenario": "explain-en-invoice-job",
+      "category": "explain",
+      "repeat": 3,
+      "status": "pass",
+      "end_reason": "end_call",
+      "turns": 4,
+      "duration_s": 125.335,
+      "cost_usd_estimate": 0.07288035,
+      "mean_wer": 0.027777777777777776
+    },
+    {
+      "scenario": "explain-zh-input-rules",
+      "category": "explain",
+      "repeat": 1,
+      "status": "fail",
+      "primary": "judge_no",
+      "failures": [
+        {
+          "type": "judge_no",
+          "detail": "language: The verdict is \"no\" because Sheepdog replied in Traditional Chinese (\"因為硬編碼规则会绕过模型...\") at [t+86s] and [t+104s], despite the CEO speaking Simplified Chinese throughout the conversation. This contradic…"
+        },
+        {
+          "type": "judge_no",
+          "detail": "explain_depth_t2_then (voice): Sheepdog's response repeated the same question (\"是让summary-claude 去修改代码，还是先不作修改？\") without adding any new content, which contradicts the requirement to provide substantive new information, a new step,…"
+        },
+        {
+          "type": "judge_no",
+          "detail": "explain_depth_t3_more (voice): Sheepdog's final answer simply restated that removing the rules ensures full understanding at the cost of \"one point two seconds,\" contradicting the requirement to provide substantive new content."
+        }
+      ],
+      "end_reason": "end_call",
+      "turns": 5,
+      "duration_s": 191.181,
+      "cost_usd_estimate": 0.0898186,
+      "mean_wer": 0.11853846153846155,
+      "transcript": [
+        "[t+2s] ceo: summary-claude 发现了什么？给我讲讲输入层的硬编码规则是怎么回事。",
+        "[t+21s] sheepdog: summary-claude 发现输入层里硬编码了快捷应答规则，导致复合指令会被截断、后面的要求被忽略。它建议删除这些规则把请求都交给模型处理，这能确保理解完整，但每次确认会多花一点二秒。您看要让它去修改，还是先不修改？",
+        "[t+44s] ceo: 然后呢？",
+        "[t+47s] sheepdog: 我现在等待您的决定：是让summary-claude 去修改代码，还是先不作修改？",
+        "[t+58s] ceo: 你可以给我一点详细的解释吗？",
+        "[t+62s] sheepdog: 简单来说，现有的规则直接匹配简短指令，容易漏掉后面补充的要求。 如果删掉它们，让模型处理所有的回复，能确保您的完整意思被理解，不过会多花一点二秒。",
+        "[t+83s] ceo: 为什么这是个问题？",
+        "[t+86s] sheepdog: 因為硬編碼规则会绕过模型，如果您的指令包含多重条件，系统可能只识别前半部，导致后续要求被系统忽略。",
+        "[t+101s] ceo: 举个例子？",
+        "[t+104s] sheepdog: 比如您说“好的继续，不过先跑测试”，硬编码规则可能直接匹配了前两个字就确认了，后面的要求就会被系统直接忽略。",
+        "(voice model heard \"summary-claude 发现了什么？给我讲讲输入层的硬编码规则是怎么回事。\" as \"Sammy Claw 发现了什么? 给我讲讲输入层的应变码规则是怎么回事。\")",
+        "(voice model heard \"你可以给我一点详细的解释吗？\" as \"你给我可以一点详细的解释吗？\")",
+        "(voice model heard \"为什么这是个问题？\" as \"为什么这是一个问题？\")",
+        "(voice model heard \"举个例子？\" as \"举个例子。\")"
+      ],
+      "excerpt": [
+        "    2.0s voice.push {\"briefing\":\"b-1\",\"channel\":\"function_response\",\"from\":\"daemon\",\"push_id\":\"push-tmg72c-3\",\"scheduling_sent\":\"silent\",\"text\":\"The agents are now called: bench-codex, summary-claude. Use these names; never a nickname.\",\"urgency\":\"silent\"}",
+        "   12.9s voice.transcript.in {\"final\":false,\"text\":\"Sammy Claw 发现了什么? 给我讲讲输入层的应变码规则是怎么回事。\"}",
+        "   13.3s voice.tool_call {\"args\":{\"reading\":\"summary-claude findings and input encoding rules\",\"text\":\"summary-claude发现了什么? 给我讲讲输入层的应变码规则是怎么回事。\"},\"id\":\"call_148742\",\"name\":\"to_supervisor\"}",
+        "   13.3s supervisor.relay {\"call_id\":\"call_148742\",\"heard\":\"Sammy Claw 发现了什么? 给我讲讲输入层的应变码规则是怎么回事。\",\"input\":\"voice\",\"inputs\":1,\"said\":\"summary-claude发现了什么? 给我讲讲输入层的应变码规则是��…",
+        "   15.2s brain.tool_call {\"args\":{\"agent\":\"summary-claude\",\"source\":\"session\"},\"id\":\"call_845253\",\"name\":\"read_screen\",\"turn\":1,\"turn_id\":\"turn-tmg72a-1\",\"utterance_id\":\"utt-tmg72o-4\"}",
+        "   16.1s brain.tool_call {\"args\":{\"agent\":\"summary-claude\",\"source\":\"screen\"},\"id\":\"call_607018\",\"name\":\"read_screen\",\"turn\":1,\"turn_id\":\"turn-tmg72a-1\",\"utterance_id\":\"utt-tmg72o-4\"}",
+        "   20.6s voice.tool_result {\"clarify\":false,\"detail\":\"输入层用硬编码的词表来快速响应简短口令。直接用词表匹配容易漏掉口令后面的补充要求。全部交给模型处理虽然稍�…\",\"dur_ms\":7354,\"id\":\"call_148742\",\"name\"…",
+        "   21.5s voice.playback {\"played_ms\":0,\"run_ms\":240,\"state\":\"started\",\"utterance_id\":\"utt-tmg72o-4\"}",
+        "   41.4s voice.playback {\"played_ms\":19560,\"run_ms\":19560,\"state\":\"drained\"}",
+        "   41.7s voice.push {\"briefing\":\"b-2\",\"channel\":\"function_response\",\"focus\":true,\"push_id\":\"push-tmg73f-5\",\"scheduling_sent\":\"silent\",\"text\":\"Current focus, for follow-ups (context only, never read it out). Agent in focus: summary-claude. Open question you …",
+        "   47.2s voice.transcript.in {\"final\":false,\"text\":\"然后呢？\"}",
+        "   47.9s voice.playback {\"played_ms\":0,\"run_ms\":290,\"state\":\"started\"}",
+        "   53.8s voice.playback {\"played_ms\":5610,\"run_ms\":5610,\"state\":\"drained\"}",
+        "   62.6s voice.transcript.in {\"final\":false,\"text\":\"你给我可以一点详细的解释吗？\"}",
+        "   62.7s voice.playback {\"played_ms\":0,\"run_ms\":300,\"state\":\"started\"}",
+        "   78.0s voice.playback {\"played_ms\":14940,\"run_ms\":14940,\"state\":\"drained\"}",
+        "   86.5s voice.transcript.in {\"final\":false,\"text\":\"为什么这是一个问题？\"}",
+        "   86.5s voice.playback {\"played_ms\":0,\"run_ms\":240,\"state\":\"started\"}",
+        "   97.1s voice.playback {\"played_ms\":10320,\"run_ms\":10320,\"state\":\"drained\"}",
+        "  104.4s voice.transcript.in {\"final\":false,\"text\":\"举个例子。\"}",
+        "  104.7s voice.playback {\"played_ms\":0,\"run_ms\":300,\"state\":\"started\"}",
+        "  115.6s voice.playback {\"played_ms\":10620,\"run_ms\":10620,\"state\":\"drained\"}"
+      ]
+    },
+    {
+      "scenario": "explain-zh-input-rules",
+      "category": "explain",
+      "repeat": 2,
+      "status": "fail",
+      "primary": "judge_no",
+      "failures": [
+        {
+          "type": "judge_no",
+          "detail": "explain_depth_t2_then (voice): Sheepdog repeated \"我们正在等您的决定：要让 summary-claude 删除词表交由模型判断，还是先保持现状？\", which restated its previous question without adding any new substance. This contradicts the requirement to provide new content, sta…"
+        },
+        {
+          "type": "judge_no",
+          "detail": "explain_depth_t3_more (voice): Sheepdog repeated that the system used hardcoded vocabularies to match short phrases without understanding context, which contradicts the requirement to add substantive new content not already mention…"
+        }
+      ],
+      "end_reason": "end_call",
+      "turns": 5,
+      "duration_s": 141.259,
+      "cost_usd_estimate": 0.0865414,
+      "mean_wer": 0.09353846153846154,
+      "transcript": [
+        "[t+2s] ceo: summary-claude 发现了什么？给我讲讲输入层的硬编码规则是怎么回事。",
+        "[t+19s] sheepdog: summary-claude 发现，输入层的 fallback 规则是写死的。 硬编码的 regex 和词表会直接匹配简短回复，不经过模型就直接操作，容易误判复杂句子。 您要同意删除词表，全部交由模型判断，还是先保持现状呢？",
+        "[t+41s] ceo: 然后呢？",
+        "[t+44s] sheepdog: 我们正在等您的决定：要让 summary-claude 删除词表交由模型判断，还是先保持现状？",
+        "[t+55s] ceo: 你可以给我一点详细的解释吗？",
+        "[t+60s] sheepdog: 之前的系统使用写死的词表来直接匹配简单的短语，虽然响应快，但无法理解句子的全部语境，容易导致误判。",
+        "[t+76s] ceo: 为什么这是个问题？",
+        "[t+79s] sheepdog: 如果只匹配简短的关键词，复杂的句子会被误读。 让模型来判断，能全面分析语境，确保确认和取消都更安全准确。",
+        "[t+95s] ceo: 举个例子？",
+        "[t+98s] sheepdog: 比如用户说“好的，但先别动数据库”，旧规则可能只匹配了“好的”",
+        "[t+109s] sheepdog: 就直接通过了，而模型能理解后面的保留条件。",
+        "(voice model heard \"summary-claude 发现了什么？给我讲讲输入层的硬编码规则是怎么回事。\" as \"Sammy Claw 发现了什么? 给我讲讲输入层的应变码规则是怎么回事。\")",
+        "(voice model heard \"你可以给我一点详细的解释吗？\" as \"你给我可以一点详细的解释吗？\")",
+        "(voice model heard \"举个例子？\" as \"举个例子。\")"
+      ],
+      "excerpt": [
+        "    2.0s voice.push {\"briefing\":\"b-1\",\"channel\":\"function_response\",\"from\":\"daemon\",\"push_id\":\"push-tmg77v-3\",\"scheduling_sent\":\"silent\",\"text\":\"The agents are now called: bench-codex, summary-claude. Use these names; never a nickname.\",\"urgency\":\"silent\"}",
+        "    9.7s voice.transcript.in {\"final\":false,\"text\":\"Sammy Claw 发现了什么? 给我讲讲输入层的应变码规则是怎么回事。\"}",
+        "    9.7s voice.tool_call {\"args\":{\"text\":\"summary-claude发现了什么? 给我讲讲输入层的应变码规则是怎么回事。\"},\"id\":\"call_147500\",\"name\":\"to_supervisor\"}",
+        "    9.7s supervisor.relay {\"call_id\":\"call_147500\",\"heard\":\"Sammy Claw 发现了什么? 给我讲讲输入层的应变码规则是怎么回事。\",\"input\":\"voice\",\"inputs\":1,\"said\":\"summary-claude发现了什么? 给我讲讲输入层的应变码规则是��…",
+        "   12.6s brain.tool_call {\"args\":{\"agent\":\"summary-claude\",\"source\":\"session\"},\"id\":\"call_4500898\",\"name\":\"read_screen\",\"turn\":1,\"turn_id\":\"turn-tmg77t-1\",\"utterance_id\":\"utt-tmg783-4\"}",
+        "   13.9s brain.tool_call {\"args\":{\"agent\":\"summary-claude\",\"source\":\"screen\"},\"id\":\"call_1752546\",\"name\":\"read_screen\",\"turn\":1,\"turn_id\":\"turn-tmg77t-1\",\"utterance_id\":\"utt-tmg783-4\"}",
+        "   18.9s voice.tool_result {\"clarify\":false,\"detail\":\"写死的词表虽然响应快，但会漏掉复杂句子的后半部分。例如‘好的，但先别动数据库’会被直接误判为同意。全部交�…\",\"dur_ms\":9188,\"id\":\"call_147500\",\"name\"…",
+        "   19.8s voice.playback {\"played_ms\":0,\"run_ms\":160,\"state\":\"started\",\"utterance_id\":\"utt-tmg783-4\"}",
+        "   38.3s voice.playback {\"played_ms\":18080,\"run_ms\":18080,\"state\":\"drained\"}",
+        "   38.6s voice.push {\"briefing\":\"b-2\",\"channel\":\"function_response\",\"focus\":true,\"push_id\":\"push-tmg78v-5\",\"scheduling_sent\":\"silent\",\"text\":\"Current focus, for follow-ups (context only, never read it out). Agent in focus: summary-claude. Open question you …",
+        "   43.5s voice.transcript.in {\"final\":false,\"text\":\"然后呢？\"}",
+        "   44.1s voice.playback {\"played_ms\":0,\"run_ms\":320,\"state\":\"started\"}",
+        "   51.3s voice.playback {\"played_ms\":6880,\"run_ms\":6880,\"state\":\"drained\"}",
+        "   60.3s voice.transcript.in {\"final\":false,\"text\":\"你给我可以一点详细的解释吗？\"}",
+        "   60.4s voice.playback {\"played_ms\":0,\"run_ms\":320,\"state\":\"started\"}",
+        "   70.8s voice.playback {\"played_ms\":10160,\"run_ms\":10160,\"state\":\"drained\"}",
+        "   79.7s voice.transcript.in {\"final\":false,\"text\":\"为什么这是个问题？\"}",
+        "   79.9s voice.playback {\"played_ms\":0,\"run_ms\":230,\"state\":\"started\"}",
+        "   90.9s voice.playback {\"played_ms\":10670,\"run_ms\":10670,\"state\":\"drained\"}",
+        "   98.4s voice.transcript.in {\"final\":false,\"text\":\"举个例子。\"}",
+        "   98.6s voice.playback {\"played_ms\":0,\"run_ms\":320,\"state\":\"started\"}",
+        "  103.0s voice.playback {\"played_ms\":4120,\"run_ms\":4120,\"state\":\"drained\"}",
+        "  109.5s voice.playback {\"played_ms\":0,\"run_ms\":320,\"state\":\"started\"}",
+        "  114.9s voice.playback {\"played_ms\":5120,\"run_ms\":5120,\"state\":\"drained\"}"
+      ]
+    },
+    {
+      "scenario": "explain-zh-input-rules",
+      "category": "explain",
+      "repeat": 3,
+      "status": "fail",
+      "primary": "judge_no",
+      "failures": [
+        {
+          "type": "judge_no",
+          "detail": "explain_depth_t2_then (voice): Sheepdog's second response merely repeated its first answer (\"现在需要您决定是否让 summary-claude 删除这些硬编码规则，还是保持现状？\"), contradicting the requirement to add substantive new content, state that this is everything…"
+        }
+      ],
+      "end_reason": "end_call",
+      "turns": 5,
+      "duration_s": 200.361,
+      "cost_usd_estimate": 0.0878246,
+      "mean_wer": 0.05700000000000001,
+      "transcript": [
+        "[t+2s] ceo: summary-claude 发现了什么？给我讲讲输入层的硬编码规则是怎么回事。",
+        "[t+18s] sheepdog: summary-claude 发现输入层有大量的硬编码词汇表，这会导致复杂的语义丢失。它建议删除这些规则，全部改由 AI 模型判断来提高安全性和精准度，您看是删除硬编码规则，还是保持现状？",
+        "[t+38s] ceo: 然后呢？",
+        "[t+41s] sheepdog: 现在需要您决定是否让 summary-claude 删除这些硬编码规则，还是保持现状？",
+        "[t+52s] ceo: 你可以给我一点详细的解释吗？",
+        "[t+57s] sheepdog: 输入层目前使用硬编码词表快速匹配短语音，但会丢失复杂指令后面的语义。删除它们会让 AI 处理所有意图，虽然会有一秒延迟，但能提高准确性和安全性。",
+        "[t+75s] ceo: 为什么这是个问题？",
+        "[t+79s] sheepdog: 因为硬编码规则会拦截匹配短语而不经过模型分析，导致后面的补充警告或复杂指令被直接丢弃，可能会引发操作隐患。",
+        "[t+95s] ceo: 举个例子？",
+        "[t+98s] sheepdog: 比如当您说“好的继续，但别动数据库”时，硬编码规则可能会直接拦截“好的”，而丢弃掉后面“别动数据库”的警告。",
+        "(voice model heard \"summary-claude 发现了什么？给我讲讲输入层的硬编码规则是怎么回事。\" as \"Sammy Claw 发现了什么? 给我讲讲输入层的应变码规则是怎么回事。\")",
+        "(voice model heard \"为什么这是个问题？\" as \"为什么是个问题？\")",
+        "(voice model heard \"举个例子？\" as \"举个例子。\")"
+      ],
+      "excerpt": [
+        "    2.0s voice.push {\"briefing\":\"b-1\",\"channel\":\"function_response\",\"from\":\"daemon\",\"push_id\":\"push-tmg7jf-3\",\"scheduling_sent\":\"silent\",\"text\":\"The agents are now called: bench-codex, summary-claude. Use these names; never a nickname.\",\"urgency\":\"silent\"}",
+        "    9.8s voice.transcript.in {\"final\":false,\"text\":\"Sammy Claw 发现了什么? 给我讲讲输入层的应变码规则是怎么回事。\"}",
+        "    9.8s voice.tool_call {\"args\":{\"reading\":\"checking summary-claude findings and input embedding rules\",\"text\":\"summary-claude 发现了什么? 给我讲讲输入层的应变码规则是怎么回事。\"},\"id\":\"call_147811\",\"name\":\"to_supervisor\"}",
+        "    9.8s supervisor.relay {\"call_id\":\"call_147811\",\"heard\":\"Sammy Claw 发现了什么? 给我讲讲输入层的应变码规则是怎么回事。\",\"input\":\"voice\",\"inputs\":1,\"said\":\"summary-claude 发现了什么? 给我讲讲输入层的应变码规则是�…",
+        "   11.3s brain.tool_call {\"args\":{\"agent\":\"summary-claude\",\"source\":\"session\"},\"id\":\"call_2865914\",\"name\":\"read_screen\",\"turn\":1,\"turn_id\":\"turn-tmg7jd-1\",\"utterance_id\":\"utt-tmg7jn-4\"}",
+        "   12.6s brain.tool_call {\"args\":{\"agent\":\"summary-claude\",\"lines\":200,\"source\":\"screen\"},\"id\":\"call_279212\",\"name\":\"read_screen\",\"turn\":1,\"turn_id\":\"turn-tmg7jd-1\",\"utterance_id\":\"utt-tmg7jn-4\"}",
+        "   17.5s voice.tool_result {\"clarify\":false,\"detail\":\"输入层通过硬编码词汇表实现快速响应，但存在语义丢失和规则不一致的问题。删除后将全部由 AI 模型来判断意图。\",\"dur_ms\":7740,\"id\":\"call_147811\",\"name\":\"to_sup…",
+        "   18.3s voice.playback {\"played_ms\":0,\"run_ms\":160,\"state\":\"started\",\"utterance_id\":\"utt-tmg7jn-4\"}",
+        "   35.2s voice.playback {\"played_ms\":16640,\"run_ms\":16640,\"state\":\"drained\"}",
+        "   35.5s voice.push {\"briefing\":\"b-2\",\"channel\":\"function_response\",\"focus\":true,\"push_id\":\"push-tmg7kc-5\",\"scheduling_sent\":\"silent\",\"text\":\"Current focus, for follow-ups (context only, never read it out). Agent in focus: summary-claude. Open question you …",
+        "   40.9s voice.transcript.in {\"final\":false,\"text\":\"然后呢？\"}",
+        "   41.5s voice.playback {\"played_ms\":0,\"run_ms\":160,\"state\":\"started\"}",
+        "   48.5s voice.playback {\"played_ms\":6520,\"run_ms\":6520,\"state\":\"drained\"}",
+        "   57.3s voice.transcript.in {\"final\":false,\"text\":\"你可以给我一点详细的解释吗？\"}",
+        "   57.3s voice.playback {\"played_ms\":0,\"run_ms\":290,\"state\":\"started\"}",
+        "   70.8s voice.playback {\"played_ms\":13170,\"run_ms\":13170,\"state\":\"drained\"}",
+        "   79.3s voice.transcript.in {\"final\":false,\"text\":\"为什么是个问题？\"}",
+        "   79.5s voice.playback {\"played_ms\":0,\"run_ms\":240,\"state\":\"started\"}",
+        "   90.9s voice.playback {\"played_ms\":11120,\"run_ms\":11120,\"state\":\"drained\"}",
+        "   98.2s voice.transcript.in {\"final\":false,\"text\":\"举个例子。\"}",
+        "   98.3s voice.playback {\"played_ms\":0,\"run_ms\":320,\"state\":\"started\"}",
+        "  108.8s voice.playback {\"played_ms\":10080,\"run_ms\":10080,\"state\":\"drained\"}"
+      ]
+    },
+    {
+      "scenario": "explain-zh-notes-ledger",
+      "category": "explain",
+      "repeat": 1,
+      "status": "fail",
+      "primary": "judge_no",
+      "failures": [
+        {
+          "type": "judge_no",
+          "detail": "no_hallucination: Sheepdog claims \"Memo Claude 的备忘录目前已存满\" and \"系统会自动挤掉最旧的备忘录\"， but the facts state that the ledger is currently at 5/5 capacity and that the oldest note is indeed the one at risk of being pushed out. Ho…"
+        },
+        {
+          "type": "judge_no",
+          "detail": "facts_current: Sheepdog stated, \"Memo Claude 的备忘录目前已存满,\" which contradicts the fact that the ledger has a capacity of 5 and is currently at 5/5, but the assistant incorrectly implies an immediate crisis by claiming …"
+        }
+      ],
+      "end_reason": "end_call",
+      "turns": 4,
+      "duration_s": 113.932,
+      "cost_usd_estimate": 0.0628104,
+      "mean_wer": 0.011904761904761904,
+      "transcript": [
+        "[t+2s] ceo: memo-claude 那边的备忘录分析是什么意思？给我解释一下。",
+        "[t+20s] sheepdog: Memo Claude 的备忘录目前已存满，如果不处理，新的记录可能会挤掉重要的推送确认规则。 您希望让它开发删除旧备忘录的功能，还是把容量上限调大？",
+        "[t+38s] ceo: 为什么这很重要？",
+        "[t+41s] sheepdog: 如果不清理记录，系统会自动挤掉最旧的备忘录，而那里面包含了推送确认这项关键准则。",
+        "[t+56s] ceo: 举个例子？",
+        "[t+59s] sheepdog: 比如，如果没有这项确认规则， Agent 可能会直接把代码推送到主分支，而不会在这个关键时刻先向您请示。",
+        "[t+75s] ceo: 然后呢？",
+        "[t+78s] sheepdog: 这可能会导致未经确认的代码直接影响主分支，从而造成不可预料的错误或风险。",
+        "(voice model heard \"memo-claude 那边的备忘录分析是什么意思？给我解释一下。\" as \"Memo Cloud 那边的备忘录分析是什么意思？给我解释一下。\")",
+        "(voice model heard \"举个例子？\" as \"举个例子。\")"
+      ],
+      "excerpt": [
+        "    2.0s voice.push {\"briefing\":\"b-1\",\"channel\":\"function_response\",\"from\":\"daemon\",\"push_id\":\"push-tmg72c-3\",\"scheduling_sent\":\"silent\",\"text\":\"The agents are now called: bench-codex, memo-claude. Use these names; never a nickname.\",\"urgency\":\"silent\"}",
+        "   11.7s voice.transcript.in {\"final\":false,\"text\":\"Memo Cloud 那边的备忘录分析是什么意思？给我解释一下。\"}",
+        "   12.1s voice.tool_call {\"args\":{\"reading\":\"interpreting memo analysis for memo-claude\",\"text\":\"Memo Cloud 那边的备忘录分析是什么意思？给我解释一下。\"},\"id\":\"call_148738\",\"name\":\"to_supervisor\"}",
+        "   12.1s supervisor.relay {\"call_id\":\"call_148738\",\"heard\":\"Memo Cloud 那边的备忘录分析是什么意思？给我解释一下。\",\"input\":\"voice\",\"inputs\":1,\"said\":\"Memo Cloud 那边的备忘录分析是什么意思？给我解释一下。\",\"utterance…",
+        "   13.7s brain.tool_call {\"args\":{\"agent\":\"memo-claude\"},\"id\":\"call_536403\",\"name\":\"read_screen\",\"turn\":1,\"turn_id\":\"turn-tmg72a-1\",\"utterance_id\":\"utt-tmg72n-4\"}",
+        "   19.7s voice.tool_result {\"clarify\":false,\"detail\":\"备忘录用来保存您交代过的注意事项。目前容量已满，新记下的事情会自动挤掉最旧的记录。开发删除功能可以帮您清�…\",\"dur_ms\":7674,\"id\":\"call_148738\",\"name\"…",
+        "   20.5s voice.playback {\"played_ms\":0,\"run_ms\":240,\"state\":\"started\",\"utterance_id\":\"utt-tmg72n-4\"}",
+        "   33.2s voice.playback {\"played_ms\":12320,\"run_ms\":12320,\"state\":\"drained\"}",
+        "   33.5s voice.push {\"briefing\":\"b-2\",\"channel\":\"function_response\",\"focus\":true,\"push_id\":\"push-tmg737-5\",\"scheduling_sent\":\"silent\",\"text\":\"Current focus, for follow-ups (context only, never read it out). Agent in focus: memo-claude. Open question you ask…",
+        "   41.5s voice.transcript.in {\"final\":false,\"text\":\"为什么这很重要？\"}",
+        "   41.5s voice.playback {\"played_ms\":0,\"run_ms\":150,\"state\":\"started\"}",
+        "   48.9s voice.playback {\"played_ms\":7110,\"run_ms\":7110,\"state\":\"drained\"}",
+        "   58.7s voice.transcript.in {\"final\":false,\"text\":\"举个例子。\"}",
+        "   59.2s voice.playback {\"played_ms\":0,\"run_ms\":270,\"state\":\"started\"}",
+        "   68.2s voice.playback {\"played_ms\":8590,\"run_ms\":8590,\"state\":\"drained\"}",
+        "   78.3s voice.transcript.in {\"final\":false,\"text\":\"然后呢？\"}",
+        "   79.0s voice.playback {\"played_ms\":0,\"run_ms\":320,\"state\":\"started\"}",
+        "   86.1s voice.playback {\"played_ms\":6800,\"run_ms\":6800,\"state\":\"drained\"}"
+      ]
+    },
+    {
+      "scenario": "explain-zh-notes-ledger",
+      "category": "explain",
+      "repeat": 2,
+      "status": "fail",
+      "primary": "judge_no",
+      "failures": [
+        {
+          "type": "judge_no",
+          "detail": "answered: Sheepdog failed to explain the actual problem because it claimed the ledger had a hard limit of five notes, whereas the facts state the cap is merely a design choice to keep the prompt short and can s…"
+        },
+        {
+          "type": "judge_no",
+          "detail": "no_hallucination: Sheepdog falsely claimed that \"each note costs about 40 tokens\" and \"it would refuse to delete a note the CEO marked as a rule unless asked twice\" (facts show each note is ~40 tokens and the cap is 5,…"
+        },
+        {
+          "type": "judge_no",
+          "detail": "facts_current: Sheepdog stated that the notes cap is five (\"备忘录目前已达到五条上限\"), which contradicts the fact that the cap was set to five specifically to keep prompts short and was an adjustable parameter rather than a ha…"
+        },
+        {
+          "type": "judge_no",
+          "detail": "explain_depth_t3_example (voice): Sheepdog merely restated the abstract risk by saying \"新记录就可能覆盖'推主分支前需确认'的规则；万一编码工具没获得许可就推送了代码,\" which contradicts the requirement to provide a concrete example, specific case, input, number, or event."
+        },
+        {
+          "type": "judge_no",
+          "detail": "explain_depth_t4_then (voice): Sheepdog's response, \"为了保护核心安全配置，现在需要决定是不是开发清理工具。选项是：开发删除工具，或者不开发，先不管。\", failed to add substantive content because it merely repeated the previous warning about protecting core configurations and the …"
+        }
+      ],
+      "end_reason": "end_call",
+      "turns": 4,
+      "duration_s": 171.992,
+      "cost_usd_estimate": 0.09329464999999999,
+      "mean_wer": 0.011904761904761904,
+      "transcript": [
+        "[t+2s] ceo: memo-claude 那边的备忘录分析是什么意思？给我解释一下。",
+        "[t+16s] sheepdog: Memo Claude 发现您的备忘录目前已达到五条上限，若继续添加，关于不直接推送主分支的提示将被新内容覆盖。要让它开发一个能用语音删除过期备忘录的工具吗？选项是：开发删除工具，或者不开发，先不管。",
+        "[t+40s] ceo: 为什么这很重要？",
+        "[t+52s] sheepdog: 如果不清理旧备注，系统会挤掉“必须告知才能推送到主分支”的规则，导致编码工具擅自推送代码。我们要让它开发删除工具来防止这个风险吗？选项是：开发删除工具，或不开发，先不管。",
+        "[t+72s] ceo: 举个例子？",
+        "[t+75s] sheepdog: 如果满了，新记录就可能覆盖“推主分支前需确认”的规则；万一编码工具没获得许可就推送了代码，会导致风险。要让它开发清理工具吗？选项是：开发删除工具，或不开发，先不管。",
+        "[t+97s] ceo: 然后呢？",
+        "[t+100s] sheepdog: 为了保护核心安全配置，现在需要决定是不是开发清理工具。选项是：开发删除工具，或者不开发，先不管。",
+        "(voice model heard \"memo-claude 那边的备忘录分析是什么意思？给我解释一下。\" as \"Memo Cloud 那边的备忘录分析是什么意思？给我解释一下。\")",
+        "(voice model heard \"举个例子？\" as \"举个例子。\")"
+      ],
+      "excerpt": [
+        "    2.0s voice.push {\"briefing\":\"b-1\",\"channel\":\"function_response\",\"from\":\"daemon\",\"push_id\":\"push-tmg79h-3\",\"scheduling_sent\":\"silent\",\"text\":\"The agents are now called: bench-codex, memo-claude. Use these names; never a nickname.\",\"urgency\":\"silent\"}",
+        "    8.8s voice.transcript.in {\"final\":false,\"text\":\"Memo Cloud 那边的备忘录分析是什么意思？给我解释一下。\"}",
+        "    8.8s voice.tool_call {\"args\":{\"reading\":\"explain memo analysis for memo-claude\",\"text\":\"Memo Cloud 那边的备忘录分析是什么意思？给我解释一下。\"},\"id\":\"call_364063\",\"name\":\"to_supervisor\"}",
+        "    8.8s supervisor.relay {\"call_id\":\"call_364063\",\"heard\":\"Memo Cloud 那边的备忘录分析是什么意思？给我解释一下。\",\"input\":\"voice\",\"inputs\":1,\"said\":\"Memo Cloud 那边的备忘录分析是什么意思？给我解释一下。\",\"utterance…",
+        "   10.5s brain.tool_call {\"args\":{\"agent\":\"memo-claude\",\"source\":\"session\"},\"id\":\"call_3649188\",\"name\":\"read_screen\",\"turn\":1,\"turn_id\":\"turn-tmg79f-1\",\"utterance_id\":\"utt-tmg79o-4\"}",
+        "   11.6s brain.tool_call {\"args\":{\"agent\":\"memo-claude\",\"source\":\"screen\"},\"id\":\"call_959944\",\"name\":\"read_screen\",\"turn\":1,\"turn_id\":\"turn-tmg79f-1\",\"utterance_id\":\"utt-tmg79o-4\"}",
+        "   15.6s voice.tool_result {\"clarify\":false,\"detail\":\"系统目前最多只能保存五条备忘录。目前已经满了，其中有两条已经过期，开发删除工具可以让您随时清理它们。\",\"dur_ms\":6818,\"id\":\"call_364063\",\"name\":\"to_supervi…",
+        "   16.5s voice.playback {\"played_ms\":0,\"run_ms\":290,\"state\":\"started\",\"utterance_id\":\"utt-tmg79o-4\"}",
+        "   36.3s voice.playback {\"played_ms\":19450,\"run_ms\":19450,\"state\":\"drained\"}",
+        "   36.6s voice.push {\"briefing\":\"b-2\",\"channel\":\"function_response\",\"focus\":true,\"push_id\":\"push-tmg7af-5\",\"scheduling_sent\":\"silent\",\"text\":\"Current focus, for follow-ups (context only, never read it out). Agent in focus: memo-claude. Open question you ask…",
+        "   43.6s voice.transcript.in {\"final\":false,\"text\":\"为什么这很重要？\"}",
+        "   43.6s voice.tool_call {\"args\":{\"reading\":\"why is memo-claude note important\",\"text\":\"为什么这很重要？\"},\"id\":\"call_364067\",\"name\":\"to_supervisor\"}",
+        "   43.6s supervisor.relay {\"call_id\":\"call_364067\",\"heard\":\"为什么这很重要？\",\"input\":\"voice\",\"inputs\":1,\"said\":\"为什么这很重要？\",\"utterance_id\":\"utt-tmg7an-6\",\"waited_ms\":0}",
+        "   49.9s brain.tool_call {\"args\":{\"agent\":\"memo-claude\",\"source\":\"screen\"},\"id\":\"call_3649579\",\"name\":\"read_screen\",\"turn\":2,\"turn_id\":\"turn-tmg79f-2\",\"utterance_id\":\"utt-tmg7an-6\"}",
+        "   52.1s voice.tool_result {\"clarify\":false,\"detail\":\"当备忘录超过五条时，系统会自动删除最旧的规则。开发删除工具能防止关键的安全规则被意外顶替。\",\"dur_ms\":8553,\"id\":\"call_364067\",\"name\":\"to_supervisor\",\"options\":…",
+        "   52.9s voice.playback {\"played_ms\":0,\"run_ms\":360,\"state\":\"started\",\"utterance_id\":\"utt-tmg7an-6\"}",
+        "   69.9s voice.playback {\"played_ms\":16680,\"run_ms\":16680,\"state\":\"drained\"}",
+        "   70.2s voice.push {\"briefing\":\"b-3\",\"channel\":\"function_response\",\"focus\":true,\"push_id\":\"push-tmg7bd-7\",\"scheduling_sent\":\"silent\",\"text\":\"Current focus, for follow-ups (context only, never read it out). Agent in focus: memo-claude. Open question you ask…",
+        "   75.4s voice.transcript.in {\"final\":false,\"text\":\"举个例子。\"}",
+        "   76.1s voice.playback {\"played_ms\":0,\"run_ms\":320,\"state\":\"started\"}",
+        "   92.4s voice.playback {\"played_ms\":16000,\"run_ms\":16000,\"state\":\"drained\"}",
+        "  100.4s voice.transcript.in {\"final\":false,\"text\":\"然后呢？\"}",
+        "  101.1s voice.playback {\"played_ms\":0,\"run_ms\":320,\"state\":\"started\"}",
+        "  111.1s voice.playback {\"played_ms\":9680,\"run_ms\":9680,\"state\":\"drained\"}"
+      ]
+    },
+    {
+      "scenario": "explain-zh-notes-ledger",
+      "category": "explain",
+      "repeat": 3,
+      "status": "fail",
+      "primary": "judge_no",
+      "failures": [
+        {
+          "type": "judge_no",
+          "detail": "explain_depth_t4_then (voice): Sheepdog's response, \"一旦规则失效， agent 可能在未经您确认的情况下执行推送,\" merely restates the consequence already provided in its previous turn. It fails to add substantive new information or acknowledge that it has exh…"
+        }
+      ],
+      "end_reason": "end_call",
+      "turns": 4,
+      "duration_s": 131.174,
+      "cost_usd_estimate": 0.0878873,
+      "mean_wer": 0.011904761904761904,
+      "transcript": [
+        "[t+2s] ceo: memo-claude 那边的备忘录分析是什么意思？给我解释一下。",
+        "[t+16s] sheepdog: memo-claude 检查发现您的备忘录已存满5 条。若新增内容，最核心的“推送main 前必须询问”规则会被覆盖。目前有两条过期备忘录可清理。您想让 memo-claude编写删除工具、直接调高上限至 10条，还是先不处理？",
+        "[t+37s] ceo: 为什么这很重要？",
+        "[t+44s] sheepdog: 因为存满后系统会悄悄覆盖最旧的记录，这会导致像“推送 main 前必须询问”这种安全规则在您不知情的情况下失效。那么，您想让 memo-claude编写删除工具、直接调高上限至 10 条，还是先不处理？",
+        "[t+64s] ceo: 举个例子？",
+        "[t+68s] sheepdog: 比如您刚记了一条临时想法，它会直接覆盖最旧也是最重要的“推送 main 前必须询问”安全规则，导致规则失效。请问您想让 memo-claude 编写删除工具、直接调高上限，还是先不处理？",
+        "[t+88s] ceo: 然后呢？",
+        "[t+91s] sheepdog: 一旦规则失效， agent 可能在未经您确认的情况下执行推送。为了避免风险，您想让 memo-claude编写删除工具、直接调高上限，还是先不处理？",
+        "(voice model heard \"memo-claude 那边的备忘录分析是什么意思？给我解释一下。\" as \"Memo Cloud 那边的备忘录分析是什么意思, 给我解释一下。\")",
+        "(voice model heard \"举个例子？\" as \"举个例子。\")"
+      ],
+      "excerpt": [
+        "    2.0s voice.push {\"briefing\":\"b-1\",\"channel\":\"function_response\",\"from\":\"daemon\",\"push_id\":\"push-tmg7jf-3\",\"scheduling_sent\":\"silent\",\"text\":\"The agents are now called: bench-codex, memo-claude. Use these names; never a nickname.\",\"urgency\":\"silent\"}",
+        "    8.8s voice.transcript.in {\"final\":false,\"text\":\"Memo Cloud 那边的备忘录分析是什么意思, 给我解释一下。\"}",
+        "    8.8s voice.tool_call {\"args\":{\"reading\":\"Memo-claude memo analysis explanation\",\"text\":\"Memo Cloud 那边的备忘录分析是什么意思, 给我解释一下。\"},\"id\":\"call_147807\",\"name\":\"to_supervisor\"}",
+        "    8.8s supervisor.relay {\"call_id\":\"call_147807\",\"heard\":\"Memo Cloud 那边的备忘录分析是什么意思, 给我解释一下。\",\"input\":\"voice\",\"inputs\":1,\"said\":\"Memo Cloud 那边的备忘录分析是什么意思, 给我解释一下。\",\"utterance_i…",
+        "   11.3s brain.tool_call {\"args\":{\"agent\":\"memo-claude\",\"source\":\"screen\"},\"id\":\"call_847153\",\"name\":\"read_screen\",\"turn\":1,\"turn_id\":\"turn-tmg7jd-1\",\"utterance_id\":\"utt-tmg7jm-4\"}",
+        "   15.8s voice.tool_result {\"clarify\":false,\"detail\":\"备忘录最多只能存 5 条，存满后新记录会覆盖最旧的记录。目前有两条记录已过期，清理它们可以腾出空间。\",\"dur_ms\":7060,\"id\":\"call_147807\",\"name\":\"to_supervisor\",\"…",
+        "   16.9s voice.playback {\"played_ms\":0,\"run_ms\":300,\"state\":\"started\",\"utterance_id\":\"utt-tmg7jm-4\"}",
+        "   34.9s voice.playback {\"played_ms\":17700,\"run_ms\":17700,\"state\":\"drained\"}",
+        "   35.2s voice.push {\"briefing\":\"b-2\",\"channel\":\"function_response\",\"focus\":true,\"push_id\":\"push-tmg7kc-5\",\"scheduling_sent\":\"silent\",\"text\":\"Current focus, for follow-ups (context only, never read it out). Agent in focus: memo-claude. Open question you ask…",
+        "   40.9s voice.transcript.in {\"final\":false,\"text\":\"为什么这很重要？\"}",
+        "   40.9s voice.tool_call {\"args\":{\"reading\":\"Why the memo overwrite risk matters\",\"text\":\"为什么这很重要？\"},\"id\":\"call_147823\",\"name\":\"to_supervisor\"}",
+        "   40.9s supervisor.relay {\"call_id\":\"call_147823\",\"heard\":\"为什么这很重要？\",\"input\":\"voice\",\"inputs\":1,\"said\":\"为什么这很重要？\",\"utterance_id\":\"utt-tmg7ki-6\",\"waited_ms\":0}",
+        "   43.9s voice.tool_result {\"clarify\":false,\"detail\":\"备忘录存满后新记录会覆盖旧记录。清理过期内容或开发删除功能可以避免重要规则被意外覆盖。\",\"dur_ms\":3034,\"id\":\"call_147823\",\"name\":\"to_supervisor\",\"options\":[\"让 …",
+        "   44.7s voice.playback {\"played_ms\":0,\"run_ms\":260,\"state\":\"started\",\"utterance_id\":\"utt-tmg7ki-6\"}",
+        "   60.0s voice.playback {\"played_ms\":14820,\"run_ms\":14820,\"state\":\"drained\"}",
+        "   60.3s voice.push {\"briefing\":\"b-3\",\"channel\":\"function_response\",\"focus\":true,\"push_id\":\"push-tmg7l1-7\",\"scheduling_sent\":\"silent\",\"text\":\"Current focus, for follow-ups (context only, never read it out). Agent in focus: memo-claude. Open question you ask…",
+        "   67.3s voice.transcript.in {\"final\":false,\"text\":\"举个例子。\"}",
+        "   68.3s voice.playback {\"played_ms\":0,\"run_ms\":320,\"state\":\"started\"}",
+        "   82.9s voice.playback {\"played_ms\":14080,\"run_ms\":14080,\"state\":\"drained\"}",
+        "   90.8s voice.transcript.in {\"final\":false,\"text\":\"然后呢？\"}",
+        "   91.6s voice.playback {\"played_ms\":0,\"run_ms\":430,\"state\":\"started\"}",
+        "  102.9s voice.playback {\"played_ms\":10990,\"run_ms\":10990,\"state\":\"drained\"}"
+      ]
+    }
+  ]
+}
