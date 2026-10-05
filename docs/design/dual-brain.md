@@ -116,6 +116,11 @@ cannot see rather than a prohibition.
 
 ### Roles
 
+Since v6 (unified roles, below) everything a model reads calls the fast
+brain *the voice* and the slow brain *the orchestrator*: two parts of one
+orchestration agent that operates the user's herdr. This doc keeps the
+older names.
+
 | | Fast brain: Gemini Live | Slow brain: the existing brain |
 |---|---|---|
 | Owns | The conversation: when to speak, what, how; turn-taking, register, language | What the CEO wants, which agent, what to do, investigations |
@@ -137,8 +142,8 @@ not a new tool (the CEO's "keep the voice link simple").
 
 A call with no new CEO words runs no brain turn (the rail: only the CEO's
 words authorise one); the fast brain gets a silent fact instead —
-"Nothing was handed on: the slow brain acts only on the CEO's own words …
-Their last words, at 23:04:10, were …".
+"Nothing was handed on: the orchestrator acts only on the user's own words …
+Their last words, at 23:04:10, were …" (wording since unified roles).
 
 ### Slow → fast: the briefing channel
 
@@ -172,15 +177,15 @@ standalone client, text input, 7 sessions, < $0.30):
 **Payload.** Self-contained, because Live's memory is short and lossy:
 
 ```json
-{"about_this": "Not the CEO speaking. Facts for you from the sheepdog system; you decide whether, when and how to tell the CEO, in your own words.",
- "briefing": "b-7", "at": "23:04:31", "from": "slow brain", "kind": "answer",
- "agent": "bench-codex", "answers": "the CEO's words at 23:04:20: \"how is codex doing\"",
+{"about_this": "Not the user speaking. Facts for you from the orchestrator or the daemon; you decide whether, when and how to tell the user, in your own words.",
+ "briefing": "b-7", "at": "23:04:31", "from": "orchestrator", "kind": "answer",
+ "agent": "bench-codex", "answers": "the user's words at 23:04:20: \"how is codex doing\"",
  "facts": "bench-codex finished; 41 of 42 tests pass, one fails in the cart module.",
  "age": "written 45 s before it reached you; things may have moved on since",
  "agent_state": "as this reached you: idle, ready for input, for 1 min; it last finished work 1 min ago",
- "decision": "the CEO's own decision; only their words can answer it",
+ "decision": "the user's own decision; only their words can answer it",
  "relation": ["newer than b-3 (23:01:05) about bench-codex; where they differ, this one holds",
-              "at 23:04:02 the CEO cut you off after 2.1 s of 6.4 s; they heard only: \"bench-codex wants to\""]}
+              "at 23:04:02 the user cut you off after 2.1 s of 6.4 s; they heard only: \"bench-codex wants to\""]}
 ```
 
 - `agent` is the agent's spoken name (the alias stays on the push's
@@ -326,6 +331,35 @@ waiting) and the channel (answers come back as labelled facts, so no
   "read me what it wrote" relays the worker's own report (now in full in
   the agent record) instead of prompting the worker to print a file;
   same English-terms rule.
+
+- v6, unified roles (2026-10-05, branch `feat/unified-roles`, item 2 of
+  "Next: unified roles, explaining in detail, explanation evals" in
+  `docs/handover-2026-10-04.md`): a reframing plus a length change, not
+  a behaviour rewrite. Every model now reads one framing: one
+  orchestration agent that operates the user's herdr (a short
+  explanation of herdr: panes, workspaces, tabs, agent states), with two
+  parts, the voice and the orchestrator; the person is "the user" in
+  every prompt and model-facing code string (briefings say `from:
+  orchestrator`); the shepherd, flock, dog, chief-of-staff and
+  thinking-half metaphors are gone. Length: "one or two sentences unless
+  they ask for more" became "fit the content": short for a simple
+  acknowledgement, the full substance when a briefing has it, never
+  compressing the orchestrator's text. The phone test of 2026-10-05
+  behind it: the orchestrator's `spoken` had four sentences with
+  reasons and examples, the voice said two, and on "你可以给我一点详细的解释吗"
+  it only rephrased. So "more detail" / "详细" / "then?" joins the
+  voice's own answers, bounded by grounding: it says what the newest
+  briefing holds that it has not said, else hands on; rephrasing alone
+  is not more detail. This is not v4's licence to answer status from
+  briefings (the N2 risk): new facts about an agent still come only
+  from the orchestrator. The orchestrator's own short-by-default bias
+  went too (RULES.md For the ear, Intent, Answer contract; the
+  code-built investigation and announce requests had "at most two
+  short sentences"). Arms for the A/B: A = main's prompts
+  (`docs/eval/prompt-arms/a/`), B = these (the default), C = B plus an
+  "about 80% of the way to ASD-STE100" speech style, with the prompts
+  worded that way (`docs/eval/prompt-arms/c/`); run with
+  `--prompts-dir`.
 
 Every measurement in the dual-brain results doc uses v4 unless marked
 otherwise; the v5 A/B is in its own results doc.
