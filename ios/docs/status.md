@@ -1,10 +1,11 @@
-# Status (2026-10-03)
+# Status (2026-10-05)
 
 ## Distribution
 
-TestFlight build **0.1.1 (20)**, internal group **Me**. Xcode Cloud built it
-from tag `v0.1.1` (`df7267f`, PR #29) with the **TestFlight** workflow.
-`main` is at `d54ef56` (#31, the agent window, after the build); no GitHub Actions run anything here (Xcode Cloud
+TestFlight build **0.1.3 (35)**, internal group **Me**. Xcode Cloud built it
+from tag `v0.1.3` (`5b9b97f`, PR #34) with the **TestFlight** workflow; it
+adds Settings ▸ Languages (#33) to 0.1.2 (29) (the agent window, #31).
+No GitHub Actions run anything here (Xcode Cloud
 only, see [`xcode-cloud.md`](xcode-cloud.md)).
 The App Store Connect record is **"Sheepdog for herdr"**. For setup,
 workflows and troubleshooting, see [`xcode-cloud.md`](xcode-cloud.md).
@@ -25,12 +26,12 @@ The CEO checked these on 2026-10-01 and 2026-10-02 with TestFlight build
   handshake and the Protocol row against the user's own daemon (the
   handshake itself is checked by `LiveHandshakeTests` against a fixture
   daemon), the Models screen, the running-only flock and Markdown.
-- **The agent window (#31, on `main`, not in 0.1.1 (20)):** a live terminal and key bar per agent from its Flock card, over the daemon's `/api/agents/{pane}/screen` and `.../input`. Only simulator and fixture-daemon tests so far; no TestFlight build carries it.
+- **The agent window (#31, since 0.1.2 (29)):** a live terminal and key bar per agent from its Flock card, over the daemon's `/api/agents/{pane}/screen` and `.../input`.
 - **Settings ▸ Languages (#33):** pick the languages you speak, most
   preferred first, from the daemon's catalog (`GET /api/settings`
   `language_options`; 简体中文 and 繁體中文 are separate); each change is
   `PUT /api/settings {"languages": [...]}` and both brains are told
-  (daemon #142). Unit tests and a simulator build only so far.
+  (daemon #142). In 0.1.3 (35); unit tests and a simulator build only so far, not tried on the phone.
 - **AirPods and audio route changes.** This includes AirPods going in or
   out mid-session and whether the needs-you chime reaches them.
 - **AskUserQuestion with several questions** in one prompt.

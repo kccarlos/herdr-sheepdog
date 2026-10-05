@@ -6,8 +6,8 @@ Apple's Xcode Cloud builds and tests every pull request and every push to
 `main`, and a `v*` tag archives the app and puts it in TestFlight. Xcode
 Cloud minutes are included in the Apple Developer Program.
 
-The latest build in TestFlight is **0.1.1 (20)** (internal group **Me**),
-built from tag `v0.1.1` (`df7267f`, #29).
+The latest build in TestFlight is **0.1.3 (35)** (internal group **Me**),
+built from tag `v0.1.3` (`5b9b97f`, #34).
 
 | | |
 |---|---|
@@ -16,8 +16,8 @@ built from tag `v0.1.1` (`df7267f`, #29).
 | Framework bundle ID | `com.github.kccarlos.herdr-sheepdog-ios.kit` (embedded, not registered separately) |
 | App Store Connect record | "Sheepdog for herdr" (the name "Sheepdog" was taken), App ID 6817155887, SKU `herdr-sheepdog-ios` |
 | Product and scheme | `Sheepdog` (shared; Test runs `SheepdogKitTests` and `SheepdogUITests`, Archive uses Release) |
-| Version | `MARKETING_VERSION` in `project.yml` (now `0.1.1`) |
-| Build number | Xcode Cloud's own, `CI_BUILD_NUMBER`. The latest in TestFlight is `0.1.1 (20)`, from tag `v0.1.1` (`df7267f`) |
+| Version | `MARKETING_VERSION` in `project.yml` (now `0.1.3`) |
+| Build number | Xcode Cloud's own, `CI_BUILD_NUMBER`. The latest in TestFlight is `0.1.3 (35)`, from tag `v0.1.3` (`5b9b97f`) |
 | TestFlight internal group | **Me** (tester: thisiskecheng@gmail.com). The Beta App Review contact is not saved; it only matters for external testing, which is not used |
 
 Bundle IDs may contain letters, digits, hyphens and periods (Apple's
