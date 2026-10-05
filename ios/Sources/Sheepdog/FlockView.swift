@@ -27,11 +27,7 @@ struct FlockView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 12) {
-                    if flock.isEmpty {
-                        EmptyFlock()
-                            .padding(.top, 12)
-                            .padding(.horizontal, -16)
-                    } else if flock.running.isEmpty {
+                    if flock.running.isEmpty {
                         Text("No agent is running right now.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)

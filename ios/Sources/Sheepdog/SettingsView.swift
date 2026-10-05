@@ -1,202 +1,82 @@
 import SheepdogKit
 import SwiftUI
 
-/// Where the daemon lives, what the token is, and one button that proves
-/// both. The token goes to the keychain; nothing else is a secret.
+/// The screens Settings can show. The root is a shallow menu; every screen
+/// applies a change at once (there is no Save or Cancel), the way iOS's own
+/// Settings does.
+enum SettingsPage: Hashable {
+    case daemon, voice, models, languages, notifications, diagnostics, about
+}
+
+/// Settings: a short list of sections, each one screen deep.
 struct SettingsView: View {
     @EnvironmentObject private var model: SessionViewModel
     /// Passed explicitly (not read off `model.meter` inside the body):
     /// an `@EnvironmentObject`'s own `@Published` changes are what
     /// re-renders a view, and a nested object's changes do not propagate
-    /// through it, so About's live numbers need their own subscription.
+    /// through it, so Diagnostics' live numbers need their own subscription.
     @ObservedObject var meter: VoiceMeter
     @Environment(\.dismiss) private var dismiss
 
+    /// The daemon's address and token as typed. They are written once the
+    /// field is left (return, back, Done): a reconnect per keystroke would
+    /// be worse than none.
     @State private var address = ""
     @State private var token = ""
-    @State private var keepListening = true
-    @State private var probing = false
-    @State private var probe: SessionViewModel.Probe?
-    @State private var confirmClear = false
-    @FocusState private var addressFocused: Bool
-    @State private var path: [SettingsRoute] = []
-
-    private var firstRun: Bool { !model.settings.hasBeenConfigured }
+    @State private var path: [SettingsPage] = []
+    /// No daemon saved yet: Settings opens on the Daemon screen and cannot
+    /// be closed until an address is in.
+    @State private var firstRun = false
 
     var body: some View {
         NavigationStack(path: $path) {
-            Form {
-                if firstRun {
-                    Section {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("Point the app at your daemon")
-                                .font(.headline)
-                            Text("Run `sheepdog serve` on your Mac with `web.bind` set to your LAN or Tailscale address and `web.token` set to a secret. The daemon's banner prints a `lan url` line — the host and port from that line go below.")
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                        }
-                        .padding(.vertical, 2)
+            List {
+                Section {
+                    NavigationLink(value: SettingsPage.daemon) {
+                        MenuRow(title: "Daemon", symbol: "desktopcomputer", value: model.isConfigured ? model.endpointDisplay : "Not set")
                     }
+                    .accessibilityIdentifier("settings.daemon")
                 }
 
                 Section {
-                    LabeledContent("Address") {
-                        TextField("e.g. 192.168.1.20:7777", text: $address)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            .keyboardType(.URL)
-                            .multilineTextAlignment(.trailing)
-                            .focused($addressFocused)
-                            .submitLabel(.next)
-                            .accessibilityIdentifier("settings.address")
-                    }
-                    LabeledContent("Token") {
-                        SecureField("web.token, if it has one", text: $token)
-                            // Not a website password: this stops iOS offering
-                            // to save it to the user's passwords every time
-                            // Settings is closed.
-                            .textContentType(.oneTimeCode)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            .multilineTextAlignment(.trailing)
-                            .accessibilityIdentifier("settings.token")
-                    }
-                    // Right under the fields, so the keyboard does not cover it.
-                    Button {
-                        runProbe()
-                    } label: {
-                        HStack {
-                            Text("Test connection")
-                            Spacer()
-                            if probing { ProgressView() }
-                        }
-                    }
-                    .accessibilityIdentifier("settings.test")
-                    .disabled(address.trimmingCharacters(in: .whitespaces).isEmpty || probing)
-
-                    if let probe {
-                        VStack(alignment: .leading, spacing: 5) {
-                            Label(probe.title, systemImage: probe.ok ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-                                .font(.subheadline.weight(.medium))
-                                .foregroundStyle(probe.ok ? Theme.done : Color(.systemRed))
-                            ForEach(probe.lines, id: \.self) { line in
-                                Text(line)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        .padding(.vertical, 2)
-                        .accessibilityIdentifier("settings.probe.result")
-                    }
-                } header: {
-                    Text("Daemon")
-                } footer: {
-                    Text("Plain HTTP, no TLS — keep this to a network you trust (your LAN, or Tailscale). The token is kept in the keychain.")
-                }
-
-                Section {
-                    NavigationLink(value: SettingsRoute.models) {
-                        LabeledContent("Models") {
-                            Text(model.modelsSummary)
-                                .lineLimit(1)
-                        }
+                    row("Voice", "waveform", .voice, id: "settings.voice")
+                    NavigationLink(value: SettingsPage.models) {
+                        MenuRow(title: "Models", symbol: "cpu", value: model.modelsSummary)
                     }
                     .accessibilityIdentifier("settings.models")
-                } footer: {
-                    Text("The voice \(model.voiceName) talks with and the brain behind it. Changes there apply at once.")
-                }
-
-                Section {
-                    NavigationLink(value: SettingsRoute.languages) {
-                        LabeledContent("Languages") {
-                            Text(model.daemonSettings?.languagesSummary ?? "—")
-                                .lineLimit(1)
-                        }
+                    NavigationLink(value: SettingsPage.languages) {
+                        MenuRow(title: "Languages", symbol: "globe", value: model.daemonSettings?.languagesSummary ?? "—")
                     }
                     .accessibilityIdentifier("settings.languages")
-                } footer: {
-                    Text("The languages you speak, most preferred first. \(model.voiceName) and the brain answer in the one you use, in your script.")
-                }
-
-                microphoneSection
-
-                Section {
-                    Toggle("Keep listening with the screen locked", isOn: $keepListening)
-                } footer: {
-                    Text("On: the session keeps running with the screen locked or in another app, so you can keep talking. Off: leaving the app pauses the microphone and \(model.voiceName)'s voice and tells the daemon you're muted (a per-minute voice session stops billing); both come back when you return.")
+                    row("Notifications", "bell", .notifications, id: "settings.notifications")
                 }
 
                 Section {
-                    Button("Clear conversation on this phone", role: .destructive) {
-                        confirmClear = true
-                    }
-                    .accessibilityIdentifier("settings.clearConversation")
-                    .confirmationDialog("Clear the conversation on this phone?", isPresented: $confirmClear, titleVisibility: .visible) {
-                        Button("Clear conversation", role: .destructive) { model.clearConversation() }
-                    } message: {
-                        Text("The daemon keeps its own record, so the latest conversation comes back the next time the app reaches it.")
-                    }
-                } header: {
-                    Text("Conversation")
-                } footer: {
-                    Text("The app keeps the last \(ConversationHistory.cacheCapacity) messages for each daemon so it opens on your conversation straight away, even offline. No token is stored with them.")
+                    row("Diagnostics", "stethoscope", .diagnostics, id: "settings.diagnostics")
+                    row("About", "info.circle", .about, id: "settings.about")
                 }
-
-                Section("About") {
-                    LabeledContent("App", value: Bundle.appVersion)
-                    LabeledContent("Daemon", value: model.daemonVersion ?? "not connected")
-                    LabeledContent("Voice name", value: model.voiceName)
-                    EchoCancellationRow(status: meter.metrics.voiceProcessing, running: meter.metrics.hardwareSampleRate > 0)
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("Audio")
-                            .font(.subheadline)
-                        Text("16 kHz out / 24 kHz in, PCM16 mono")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Text(meter.metrics.summary)
-                            .font(.caption.monospaced())
-                            .foregroundStyle(.secondary)
-                        Text(meter.metrics.jitterSummary)
-                            .font(.caption.monospaced())
-                            .foregroundStyle(.secondary)
-                        Text(meter.metrics.stretchSummary)
-                            .font(.caption.monospaced())
-                            .foregroundStyle(.secondary)
-                            .accessibilityIdentifier("about.stretch")
-                        if meter.metrics.hardwareSampleRate > 0 {
-                            Text("Microphone hardware: \(Int(meter.metrics.hardwareSampleRate)) Hz")
-                                .font(.caption.monospaced())
-                                .foregroundStyle(.secondary)
-                            Text("Output: \(meter.metrics.outputRoute.isEmpty ? "—" : meter.metrics.outputRoute) · played \(meter.metrics.playedChunks)/\(meter.metrics.scheduledChunks) chunks")
-                                .font(.caption.monospaced())
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .padding(.vertical, 2)
-                }
-
-                diagnosticsSection
             }
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
-            .navigationDestination(for: SettingsRoute.self) { route in
-                switch route {
+            .navigationDestination(for: SettingsPage.self) { page in
+                switch page {
+                case .daemon:
+                    DaemonSettingsView(address: $address, token: $token, firstRun: firstRun, commit: commitDaemon, done: done)
+                case .voice: VoiceSettingsView()
                 case .models: ModelsView()
                 case .languages: LanguagesView()
+                case .notifications: NotificationsView()
+                case .diagnostics: DiagnosticsView(meter: meter)
+                case .about: AboutView()
                 }
             }
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                        .disabled(firstRun && !model.isConfigured)
-                }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") { save() }
-                        .accessibilityIdentifier("settings.save")
-                        .disabled(DaemonEndpoint(text: address) == nil)
+                    Button("Done", action: done)
+                        .accessibilityIdentifier("settings.done")
+                        .disabled(firstRun && !model.isConfigured && DaemonEndpoint(text: address) == nil)
                 }
             }
-            .scrollDismissesKeyboard(.interactively)
             .onAppear(perform: load)
             .task {
                 await model.loadVoiceProviders()
@@ -207,109 +87,50 @@ struct SettingsView: View {
                 model.refreshMicrophoneMode()
             }
         }
+        .interactiveDismissDisabled(firstRun && !model.isConfigured)
+        .onDisappear { commitDaemon() }
     }
 
-    // MARK: - Microphone
-
-    private var microphoneSection: some View {
-        Section {
-            Button {
-                model.showMicrophoneModes()
-            } label: {
-                LabeledContent("Microphone mode") {
-                    HStack(spacing: 4) {
-                        Text(model.microphoneMode.label)
-                        Image(systemName: "chevron.right")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.tertiary)
-                    }
-                }
-            }
-            .foregroundStyle(Color(.label))
-            .accessibilityIdentifier("settings.microphoneMode")
-
-            Toggle("Hold to talk", isOn: Binding(
-                get: { model.talkMode == .holdToTalk },
-                set: { model.setTalkMode($0 ? .holdToTalk : .openMic) }
-            ))
-            .accessibilityIdentifier("settings.holdToTalk")
-        } header: {
-            Text("Microphone")
-        } footer: {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(model.microphoneMode.advice + (model.preferredMicrophoneMode != model.microphoneMode ? " (Chosen: \(model.preferredMicrophoneMode.label) — it applies while the microphone is running.)" : ""))
-                Text(model.talkMode == .holdToTalk
-                    ? "Hold to talk is on: hold the orb while you speak, let go to send. Nothing is sent otherwise."
-                    : "Off: just talk. \(model.voiceName) listens all the time and ignores the room; the mic button only mutes.")
-            }
+    private func row(_ title: String, _ symbol: String, _ page: SettingsPage, id: String) -> some View {
+        NavigationLink(value: page) {
+            Label(title, systemImage: symbol)
         }
-    }
-
-    // MARK: - Diagnostics
-
-    private var diagnosticsSection: some View {
-        let d = meter.gateDiagnostics
-        return Section {
-            LabeledContent("Input level", value: CaptureGate.Diagnostics.format(dBFS: d.levelDBFS))
-                .accessibilityIdentifier("settings.diag.level")
-            LabeledContent("Noise floor", value: CaptureGate.Diagnostics.format(dBFS: d.floorDBFS))
-                .accessibilityIdentifier("settings.diag.floor")
-            if let margin = d.marginDB {
-                LabeledContent("Opens at", value: String(format: "floor + %.0f dB", margin))
-            }
-            LabeledContent("Gate", value: gateWord(d))
-                .accessibilityIdentifier("settings.diag.gate")
-            LabeledContent("Opens", value: "\(d.opens) · \(d.spuriousOpens) spurious")
-                .accessibilityIdentifier("settings.diag.opens")
-            LabeledContent("Microphone signal", value: micSignalWord)
-                .accessibilityIdentifier("settings.diag.signal")
-        } header: {
-            Text("Voice detection")
-        } footer: {
-            Text("Sheepdog sends audio only while the gate is open: when your voice is clearly above the room's noise floor (speech band, 300–3 400 Hz). A spurious open is one too short to be speech — a door, a cough.")
-        }
-    }
-
-    private func gateWord(_ d: CaptureGate.Diagnostics) -> String {
-        guard model.state.capturing || model.state == .muted else { return "—" }
-        if model.isMuted { return "Muted" }
-        if let manual = d.manual { return manual ? "Open (holding)" : "Closed (hold to talk)" }
-        return d.isOpen ? "Open — sending" : "Closed — room noise"
-    }
-
-    private var micSignalWord: String {
-        if !model.state.capturing { return "—" }
-        return model.noMicSignal ? "None — digital silence" : "OK"
+        .accessibilityIdentifier(id)
     }
 
     private func load() {
-        // Health's "Change in Settings ›" opens straight on Models.
-        if let route = model.settingsRoute {
-            path = [route]
-            model.settingsRoute = nil
-        }
+        guard address.isEmpty, token.isEmpty, path.isEmpty else { return }
         address = model.settings.address
         token = model.settings.token
-        keepListening = model.settings.keepListeningWhenLocked
-        if address.isEmpty { addressFocused = true }
-    }
-
-    private func runProbe() {
-        probing = true
-        probe = nil
-        Task {
-            let result = await model.probe(address: address, token: token)
-            probe = result
-            probing = false
+        firstRun = !model.settings.hasBeenConfigured
+        // Health's "Change in Settings" opens straight on Models; the first
+        // run opens on the Daemon screen.
+        if let route = model.settingsRoute {
+            path = [route == .models ? .models : .languages]
+            model.settingsRoute = nil
+        } else if firstRun {
+            path = [.daemon]
         }
     }
 
-    private func save() {
-        model.settings.address = address.trimmingCharacters(in: .whitespacesAndNewlines)
-        model.settings.token = token.trimmingCharacters(in: .whitespacesAndNewlines)
-        model.settings.keepListeningWhenLocked = keepListening
+    /// Writes the address and token when they are valid and different, and
+    /// repoints the app at them.
+    private func commitDaemon() {
+        let trimmedAddress = address.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedToken = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedAddress.isEmpty, DaemonEndpoint(text: trimmedAddress) != nil else { return }
+        let changed = model.settings.address != trimmedAddress
+            || model.settings.token != trimmedToken
+            || !model.settings.hasBeenConfigured
+        guard changed else { return }
+        model.settings.address = trimmedAddress
+        model.settings.token = trimmedToken
         model.settings.hasBeenConfigured = true
         model.endpointChanged()
+    }
+
+    private func done() {
+        commitDaemon()
         dismiss()
     }
 }
@@ -351,5 +172,32 @@ struct EchoCancellationRow: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("about.echo")
+    }
+}
+
+/// A menu row: icon and title, with a one-line summary beside it, or under
+/// it at the accessibility sizes where side by side leaves no room.
+private struct MenuRow: View {
+    let title: String
+    let symbol: String
+    let value: String
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    var body: some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 2) {
+                Label(title, systemImage: symbol)
+                Text(value)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+        } else {
+            LabeledContent {
+                Text(value).lineLimit(1)
+            } label: {
+                Label(title, systemImage: symbol)
+            }
+        }
     }
 }

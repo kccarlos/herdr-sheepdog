@@ -4,8 +4,7 @@ import SwiftUI
 /// Settings ▸ Models: which model the dog talks with (the voice provider)
 /// and which one thinks for it (the brain). Pushed from Settings rather
 /// than living in its form, because every choice here applies at once on
-/// the daemon — Settings' Save and Cancel are for the address and the
-/// token only, and Cancel could never undo a provider switch.
+/// the daemon.
 struct ModelsView: View {
     @EnvironmentObject private var model: SessionViewModel
 
@@ -13,7 +12,6 @@ struct ModelsView: View {
         Form {
             voiceSection
             brainSection
-            NotificationsSection(push: PushCoordinator.shared)
         }
         .navigationTitle("Models")
         .navigationBarTitleDisplayMode(.inline)

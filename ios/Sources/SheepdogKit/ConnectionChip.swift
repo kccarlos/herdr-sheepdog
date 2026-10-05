@@ -9,7 +9,10 @@ import Foundation
 public struct ConnectionChip: Equatable, Sendable {
     public enum Status: Equatable, Sendable {
         case notConnected
+        /// The first attempt of this session, before anything has dropped.
         case connecting
+        /// A connection dropped and is coming back.
+        case reconnecting
         case connected
         case offline
         case tokenRefused
@@ -33,7 +36,8 @@ public struct ConnectionChip: Equatable, Sendable {
     public var word: String {
         switch status {
         case .notConnected: return "Not connected"
-        case .connecting: return "Reconnecting…"
+        case .connecting: return "Connecting…"
+        case .reconnecting: return "Reconnecting…"
         case .connected: return "Connected"
         case .offline: return "Offline"
         case .tokenRefused: return "Token refused"
@@ -44,11 +48,14 @@ public struct ConnectionChip: Equatable, Sendable {
     public var tint: Tint {
         switch status {
         case .connected: return .green
-        case .connecting: return .amber
+        case .connecting, .reconnecting: return .amber
         case .offline, .tokenRefused, .updateNeeded: return .red
         case .notConnected: return .grey
         }
     }
+
+    /// A spinner belongs next to the word: something is in flight.
+    public var isBusy: Bool { status == .connecting || status == .reconnecting }
 
     /// The signals the status is derived from.
     public struct Inputs: Equatable, Sendable {
@@ -63,8 +70,12 @@ public struct ConnectionChip: Equatable, Sendable {
         public var tokenRefused: Bool
         /// The protocol handshake ended in a mismatch.
         public var updateNeeded: Bool
+        /// A socket or the event stream dropped since the session started,
+        /// so whatever is in flight now is a retry, not a first connect.
+        public var dropped: Bool
 
-        public init(socket: SocketLife = .idle, events: SocketLife = .idle, failed: Bool = false, tokenRefused: Bool = false, updateNeeded: Bool = false) {
+        public init(socket: SocketLife = .idle, events: SocketLife = .idle, failed: Bool = false, tokenRefused: Bool = false, updateNeeded: Bool = false, dropped: Bool = false) {
+            self.dropped = dropped
             self.socket = socket
             self.events = events
             self.failed = failed
@@ -85,7 +96,8 @@ public struct ConnectionChip: Equatable, Sendable {
             status = .offline
         } else if inputs.socket == .connecting || inputs.socket == .reconnecting
             || inputs.events == .connecting || inputs.events == .reconnecting {
-            status = .connecting
+            let retrying = inputs.dropped || inputs.socket == .reconnecting || inputs.events == .reconnecting
+            status = retrying ? .reconnecting : .connecting
         } else if inputs.socket == .open, inputs.events == .open {
             status = .connected
         } else {

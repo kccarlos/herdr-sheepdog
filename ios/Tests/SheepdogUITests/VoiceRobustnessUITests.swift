@@ -55,27 +55,28 @@ final class VoiceRobustnessUITests: XCTestCase {
         sleep(1)
         shot(app, "34-settings-models")
         tapWhenReady(app.navigationBars["Models"].buttons.firstMatch, "Back to Settings")
+        tapWhenReady(app.buttons["settings.voice"], "Settings ▸ Voice")
         let micMode = app.buttons["settings.microphoneMode"]
-        for _ in 0 ..< 4 where !(micMode.exists && micMode.isHittable) {
-            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.7))
-                .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)))
-        }
         XCTAssertTrue(micMode.waitForExistence(timeout: 5))
         sleep(1)
         shot(app, "22-settings-voice-microphone")
+        tapWhenReady(app.navigationBars["Voice"].buttons.firstMatch, "Back to Settings")
 
-        // The diagnostics, at the bottom.
+        // Diagnostics: the voice detection numbers.
+        tapWhenReady(app.buttons["settings.diagnostics"], "Settings ▸ Diagnostics")
         for _ in 0 ..< 4 { app.swipeUp() }
         XCTAssertTrue(app.descendants(matching: .any)["settings.diag.gate"].waitForExistence(timeout: 5))
         sleep(1)
         shot(app, "23-settings-voice-detection")
+        tapWhenReady(app.navigationBars["Diagnostics"].buttons.firstMatch, "Back to Settings")
 
-        // Hold to talk on.
+        // Hold to talk on. It applies at once; Done only closes the sheet.
+        tapWhenReady(app.buttons["settings.voice"], "Settings ▸ Voice")
         let hold = app.switches["settings.holdToTalk"]
-        for _ in 0 ..< 8 where !(hold.exists && hold.isHittable) { app.swipeDown() }
         XCTAssertTrue(hold.waitForExistence(timeout: 5))
         hold.switches.firstMatch.tap()
-        tapWhenReady(app.buttons["Cancel"], "Cancel")
+        tapWhenReady(app.navigationBars["Voice"].buttons.firstMatch, "Back to Settings")
+        tapWhenReady(app.buttons["settings.done"], "Done")
         XCTAssertTrue(app.staticTexts["Hold the orb to talk"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["controls.mute"].isHittable, "no mute in hold-to-talk")
         shot(app, "24-hold-to-talk")
@@ -86,10 +87,12 @@ final class VoiceRobustnessUITests: XCTestCase {
 
         // Back to open mic for the next run.
         tapWhenReady(app.buttons["toolbar.settings"], "Settings")
+        tapWhenReady(app.buttons["settings.voice"], "Settings ▸ Voice")
         let hold2 = app.switches["settings.holdToTalk"]
-        for _ in 0 ..< 6 where !(hold2.exists && hold2.isHittable) { app.swipeUp() }
+        XCTAssertTrue(hold2.waitForExistence(timeout: 5))
         hold2.switches.firstMatch.tap()
-        tapWhenReady(app.buttons["Cancel"], "Cancel")
+        tapWhenReady(app.navigationBars["Voice"].buttons.firstMatch, "Back to Settings")
+        tapWhenReady(app.buttons["settings.done"], "Done")
 
         // The connection sheet names the voice provider.
         tapWhenReady(app.buttons["chip.connection"], "the connection chip")

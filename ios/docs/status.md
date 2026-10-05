@@ -1,5 +1,17 @@
 # Status (2026-10-05)
 
+## Polish batch B (PR #36, unreleased)
+
+On `main` after merge, not yet in a TestFlight build: connection chip words
+(Connecting on the first connect, Reconnecting after a drop, Offline, Token
+refused, spinner while in flight; a quiet `/events` stream counts as open once
+the daemon answers 200), one agent window for the strip and the Flock cards,
+Health behind the chip and under Settings ▸ Diagnostics, empty and error
+states as `ContentUnavailableView`, Reduce Motion on the orb, and a shallow
+Settings menu with no Save or Cancel. Simulator only so far. Screenshots:
+`docs/screenshots/polish-{light,dark,xxxl}-*.png` (the older `review-*` ones
+are the "before" for chip, Flock, Health and Settings).
+
 ## Distribution
 
 TestFlight build **0.1.3 (35)**, internal group **Me**. Xcode Cloud built it
@@ -69,10 +81,10 @@ The CEO checked these on 2026-10-01 and 2026-10-02 with TestFlight build
 
 ```sh
 xcodegen generate
-xcodebuild -scheme Sheepdog -destination 'platform=iOS Simulator,name=iPhone 17 Pro' build test
+xcodebuild -scheme Sheepdog -destination 'platform=iOS Simulator,name=iPhone 17' build test
 ```
 
-The unit suite (`SheepdogKitTests`) has 431 tests. `LiveDaemonTests` and
+The unit suite (`SheepdogKitTests`) has 437 tests. `LiveDaemonTests` and
 every UI test skip themselves when no daemon answers on `127.0.0.1:7799`,
 so Xcode Cloud stays green without a daemon.
 
@@ -90,7 +102,7 @@ SHEEPDOG_DATA_DIR=/tmp/sheepdog-ios-token SHEEPDOG_STATE_PATH=/tmp/sheepdog-ios-
 
 cd ../herdr-sheepdog-ios
 xcrun simctl privacy <udid> grant microphone com.github.kccarlos.herdr-sheepdog-ios
-xcodebuild -scheme SheepdogUITests -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test
+xcodebuild -scheme SheepdogUITests -destination 'platform=iOS Simulator,name=iPhone 17' test
 ```
 
 - `HistoryApprovalUITests` expects a restart divider, so restart the 7799
@@ -107,7 +119,7 @@ xcodebuild -scheme SheepdogUITests -destination 'platform=iOS Simulator,name=iPh
 
 ## Screenshots
 
-These come from the simulator (iPhone 17 Pro, iOS 27) against a fixture
+These come from the simulator (iPhone 17, iOS 27) against a fixture
 daemon. The launch flags `-sheepdogFakeVoice`, `-sheepdogFakeProviders` and
 the DEBUG-only `-sheepdogDemoMarkdown` stand in for things a fixture daemon
 cannot produce.
@@ -138,6 +150,18 @@ real activity with no session.
 | Light | Dark |
 |---|---|
 | ![](screenshots/live-activity-light.png) | ![](screenshots/live-activity-dark.png) |
+
+Batch B (`polish-*`, light and dark; `polish-xxxl-*` at the largest size):
+
+| Light | Dark | What |
+|---|---|---|
+| ![](screenshots/polish-light-conversation-strip.png) | ![](screenshots/polish-dark-conversation-strip.png) | Chip, two panes, strip: tap a chip for the agent window. |
+| ![](screenshots/polish-light-agent-window.png) | ![](screenshots/polish-dark-agent-window.png) | Agent window: state, kind, workspace and the open question in its header. |
+| ![](screenshots/polish-light-chip-popover.png) | ![](screenshots/polish-dark-chip-popover.png) | The chip's popover, with Health. |
+| ![](screenshots/polish-light-health.png) | ![](screenshots/polish-dark-health.png) | Health, pushed from the popover. |
+| ![](screenshots/polish-light-settings-menu.png) | ![](screenshots/polish-dark-settings-menu.png) | Settings as a shallow menu. |
+| ![](screenshots/polish-light-flock-empty.png) | ![](screenshots/polish-dark-flock-empty.png) | No agents: one action. |
+| ![](screenshots/polish-light-flock-unreachable.png) | ![](screenshots/polish-dark-flock-unreachable.png) | Daemon unreachable: Offline chip, one action. |
 
 At the largest accessibility text size (AX5):
 

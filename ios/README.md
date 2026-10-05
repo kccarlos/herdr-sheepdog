@@ -41,7 +41,8 @@ PCM16 mono, 16 kHz up, 24 kHz down, plus a few JSON control frames.
    that line (for example `192.168.1.20:7777`, with no scheme) and the
    token, then tap **Test connection**. It calls `GET /api/hello` and, when a
    token is set, `GET /api/state`, so a wrong token is reported as a wrong
-   token. Save, then tap the orb to connect.
+   token. Tap **Done** (changes apply as you leave the screen), then tap the
+   orb to connect.
 4. **Allow the microphone and notifications** when iOS asks. The app asks
    for notifications after the first successful connection. The daemon
    needs an APNs key to send them (`docs/push.md` in the daemon repository).
@@ -63,11 +64,12 @@ Tailscale.
   notification arrives even if the app is closed. You can answer an
   approval from it with **Approve** or **Decline** (both need the
   passcode). Tapping it opens that agent's Flock card.
-- **Conversation / Flock / Health.** The conversation includes its history
+- **Conversation / Flock.** The conversation includes its history
   from the daemon and is cached on the phone. Flock lists the running
   agents (the others are folded into "Not running (N)") and shows an amber
-  count of the agents waiting on you. Health shows the daemon, voice, brain
-  and recent problems. Tasks, questions and replies render markdown.
+  count of the agents waiting on you. Tapping an agent in the strip opens
+  its window. Health (daemon, voice, brain, recent problems) is behind the
+  connection chip and under Settings ▸ Diagnostics. Tasks, questions and replies render markdown.
 - **Settings ▸ Models.** Choose the voice provider and the brain's provider
   and model. Changes apply on the daemon at once.
 - **Typing.** Use "Type instead" when you cannot talk. ⋯ ▸ **New

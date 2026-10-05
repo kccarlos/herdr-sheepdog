@@ -14,6 +14,9 @@ final class ReviewScreenshotsUITests: XCTestCase {
     private var host: String { "127.0.0.1:" + (environment["SHEEPDOG_FIXTURE_PUSH_PORT"] ?? "7797") }
     private var daemon: String { "http://\(host)" }
     private let panes = ["p-auth", "p-busy", "p-old", "p-idle"]
+    /// File-name prefix before the appearance: `review` for the UI/UX
+    /// review's screens, `polish` for batch B's.
+    private var shotPrefix = "review"
 
     override func setUpWithError() throws {
         continueAfterFailure = false
@@ -41,6 +44,78 @@ final class ReviewScreenshotsUITests: XCTestCase {
         _ = app.textFields["settings.address"].waitForExistence(timeout: 10)
         sleep(2)
         shot(app, "first-run")
+    }
+
+    /// Batch B: the connection chip and its popover, one agent window, the
+    /// shallow Settings menu and the Flock pane's empty and error states.
+    func testPolishScreens() throws {
+        shotPrefix = "polish"
+        let app = XCUIApplication()
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogAddress", host, "-sheepdogFakeVoice", "-sheepdogFakeProviders"]
+        app.launch()
+        tapWhenReady(app.buttons["controls.orb"], "the orb")
+        app.tap()
+        if app.buttons["controls.coachMark.dismiss"].waitForExistence(timeout: 5) { app.buttons["controls.coachMark.dismiss"].tap() }
+        clearBanner(app, wait: 6)
+        selectPane(app, "flock")
+        XCTAssertTrue(app.buttons["flock.empty.refresh"].waitForExistence(timeout: 10), "no agents: one action")
+        sleep(1)
+        shot(app, "flock-empty")
+
+        post("/api/inject/blocked", ["pane_id": "p-busy", "alias": "api", "kind": "codex", "screen": "Working…"])
+        post("/api/inject/state", ["pane_id": "p-busy", "state": "working"])
+        post("/api/inject/blocked", ["pane_id": "p-idle", "alias": "web", "kind": "claude", "screen": "Idle"])
+        post("/api/inject/state", ["pane_id": "p-idle", "state": "idle"])
+        post("/api/inject/utterance", ["text": "how is auth doing"])
+        post("/api/inject/blocked", ["pane_id": "p-auth", "alias": "auth", "kind": "codex", "screen": Self.longApproval])
+        selectPane(app, "conversation")
+        XCTAssertTrue(app.otherElements["approval.card"].waitForExistence(timeout: 15))
+        sleep(3)
+        clearBanner(app)
+        shot(app, "conversation-strip")
+
+        // The strip opens the agent window; its header has the question.
+        tapWhenReady(app.buttons["agent.chip.auth"], "the auth chip")
+        XCTAssertTrue(app.descendants(matching: .any)["agentScreen.question"].waitForExistence(timeout: 10))
+        sleep(2)
+        shot(app, "agent-window")
+        tapWhenReady(app.navigationBars.buttons.firstMatch, "Back")
+
+        // The chip's popover, with Health in it.
+        tapWhenReady(app.buttons["chip.connection"], "the connection chip")
+        XCTAssertTrue(app.buttons["chip.address"].exists || app.descendants(matching: .any)["chip.address"].waitForExistence(timeout: 10))
+        sleep(2)
+        shot(app, "chip-popover")
+        // At the largest text sizes the row sits below the fold.
+        for _ in 0 ..< 4 where !app.buttons["chip.health"].isHittable { app.swipeUp() }
+        XCTAssertTrue(app.buttons["chip.health"].waitForExistence(timeout: 10))
+        tapWhenReady(app.buttons["chip.health"], "Health")
+        XCTAssertTrue(app.descendants(matching: .any)["health.version"].waitForExistence(timeout: 10))
+        sleep(2)
+        shot(app, "health")
+        tapWhenReady(app.navigationBars["Health"].buttons.firstMatch, "Back")
+        tapWhenReady(app.buttons["Done"], "Done")
+
+        tapWhenReady(app.buttons["toolbar.settings"], "Settings")
+        XCTAssertTrue(app.buttons["settings.daemon"].waitForExistence(timeout: 10))
+        sleep(2)
+        shot(app, "settings-menu")
+        for _ in 0 ..< 4 where !app.buttons["settings.about"].isHittable { app.swipeUp() }
+        XCTAssertTrue(app.buttons["settings.about"].waitForExistence(timeout: 5), "About is on the menu")
+        for _ in 0 ..< 4 { app.swipeDown() }
+        tapWhenReady(app.buttons["settings.done"], "Done")
+        sleep(1)
+
+        // A daemon nobody answers: Offline on the chip, one action.
+        let dead = XCUIApplication()
+        dead.terminate()
+        dead.launchArguments = ["-sheepdogResetState", "-sheepdogAddress", "127.0.0.1:7791"]
+        dead.launch()
+        tapWhenReady(dead.buttons["controls.orb"], "the orb")
+        selectPane(dead, "flock")
+        XCTAssertTrue(dead.buttons["flock.unreachable.retry"].waitForExistence(timeout: 20))
+        sleep(1)
+        shot(dead, "flock-unreachable")
     }
 
     func testTheReviewedScreens() throws {
@@ -101,8 +176,9 @@ final class ReviewScreenshotsUITests: XCTestCase {
         tapWhenReady(app.buttons["approval.option.1"], "Yes, proceed")
         sleep(5)
 
-        // Health: models read-only, grouped problems.
-        selectPane(app, "health")
+        // Health: models read-only, grouped problems (connection chip > Health).
+        tapWhenReady(app.buttons["chip.connection"], "the connection chip")
+        tapWhenReady(app.buttons["chip.health"], "Health")
         XCTAssertTrue(app.descendants(matching: .any)["health.version"].waitForExistence(timeout: 10))
         sleep(1)
         shot(app, "health")
@@ -117,13 +193,13 @@ final class ReviewScreenshotsUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["models.brainProvider"].waitForExistence(timeout: 10))
         sleep(2)
         shot(app, "models")
-        let modelsList = app.collectionViews.firstMatch
-        modelsList.swipeUp()
-        sleep(1)
-        shot(app, "models-notifications")
         backSwipe(app)
         sleep(1)
         shot(app, "settings")
+        tapWhenReady(app.buttons["settings.notifications"], "Settings ▸ Notifications")
+        XCTAssertTrue(app.descendants(matching: .any)["push.phone"].waitForExistence(timeout: 10))
+        sleep(2)
+        shot(app, "models-notifications")
     }
 
     /// A Codex approval with the kind of command and options the review
@@ -208,10 +284,10 @@ final class ReviewScreenshotsUITests: XCTestCase {
     private func shot(_ app: XCUIApplication, _ name: String) {
         let screenshot = app.screenshot()
         let attachment = XCTAttachment(screenshot: screenshot)
-        attachment.name = "\(prefix)-\(name)"
+        attachment.name = "\(shotPrefix)-\(prefix)-\(name)"
         attachment.lifetime = .keepAlways
         add(attachment)
         guard let directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
-        try? screenshot.pngRepresentation.write(to: directory.appendingPathComponent("review-\(prefix)-\(name).png"))
+        try? screenshot.pngRepresentation.write(to: directory.appendingPathComponent("\(shotPrefix)-\(prefix)-\(name).png"))
     }
 }

@@ -27,18 +27,41 @@ final class ConnectionChipTests: XCTestCase {
         XCTAssertEqual(chip.tint, .green)
     }
 
-    func testEitherSideConnectingOrReconnectingReadsAsReconnecting() {
+    func testTheFirstConnectReadsAsConnectingWithASpinner() {
         let combos: [(State, State)] = [
-            (.connecting, .idle), (.idle, .connecting),
-            (.reconnecting, .open), (.open, .reconnecting),
-            (.connecting, .connecting), (.reconnecting, .reconnecting),
+            (.connecting, .idle), (.idle, .connecting), (.open, .connecting), (.connecting, .connecting),
         ]
         for (socket, events) in combos {
             let chip = ConnectionChip(.init(socket: socket, events: events))
             XCTAssertEqual(chip.status, .connecting, "socket \(socket) events \(events)")
+            XCTAssertEqual(chip.word, "Connecting…")
+            XCTAssertEqual(chip.tint, .amber)
+            XCTAssertTrue(chip.isBusy)
+        }
+    }
+
+    func testADropReadsAsReconnectingEvenWhenTheRetryIsConnectingAgain() {
+        let combos: [(State, State)] = [
+            (.reconnecting, .open), (.open, .reconnecting), (.reconnecting, .reconnecting),
+            // The retry loops re-send "connecting" after a drop.
+            (.open, .connecting), (.connecting, .connecting),
+        ]
+        for (socket, events) in combos {
+            let chip = ConnectionChip(.init(socket: socket, events: events, dropped: true))
+            XCTAssertEqual(chip.status, .reconnecting, "socket \(socket) events \(events)")
             XCTAssertEqual(chip.word, "Reconnecting…")
             XCTAssertEqual(chip.tint, .amber)
+            XCTAssertTrue(chip.isBusy)
         }
+        XCTAssertEqual(ConnectionChip(.init(socket: .reconnecting, events: .open)).status, .reconnecting, "a socket in back-off is a retry on its own")
+    }
+
+    func testOnlyTheInFlightStatesAreBusy() {
+        XCTAssertFalse(ConnectionChip(.init()).isBusy)
+        XCTAssertFalse(ConnectionChip(.init(updateNeeded: true)).isBusy)
+        XCTAssertFalse(ConnectionChip(.init(failed: true)).isBusy)
+        XCTAssertFalse(ConnectionChip(.init(tokenRefused: true)).isBusy)
+        XCTAssertFalse(ConnectionChip(.init(socket: .open, events: .open)).isBusy)
     }
 
     func testSocketOpenWithEventsStillIdleIsNotYetConnected() {
@@ -81,8 +104,11 @@ final class ConnectionChipTests: XCTestCase {
         for socket in states {
             for events in states {
                 let chip = ConnectionChip(.init(socket: socket, events: events))
-                let anyReconnecting = [socket, events].contains(.connecting) || [socket, events].contains(.reconnecting)
+                let anyReconnecting = [socket, events].contains(.reconnecting)
+                let anyConnecting = [socket, events].contains(.connecting)
                 if anyReconnecting {
+                    XCTAssertEqual(chip.status, .reconnecting, "socket \(socket) events \(events)")
+                } else if anyConnecting {
                     XCTAssertEqual(chip.status, .connecting, "socket \(socket) events \(events)")
                 } else if socket == .open, events == .open {
                     XCTAssertEqual(chip.status, .connected, "socket \(socket) events \(events)")

@@ -31,6 +31,9 @@ public struct SessionCore: Equatable, Sendable {
         /// A connection attempt ended in a failure that will not retry by
         /// itself; cleared on the next attempt or once the socket opens.
         public var failed = false
+        /// Something dropped since Connect: the chip says "Reconnecting"
+        /// (not "Connecting") from then until the next Connect or End.
+        public var dropped = false
         /// The daemon refused the token.
         public var tokenRefused = false
         /// The `/ws` protocol handshake (`ProtocolHandshake`), as the socket
@@ -152,7 +155,8 @@ public struct SessionCore: Equatable, Sendable {
             events: connection.events,
             failed: connection.failed,
             tokenRefused: connection.tokenRefused,
-            updateNeeded: connection.handshake.isMismatch
+            updateNeeded: connection.handshake.isMismatch,
+            dropped: connection.dropped
         ))
     }
 
@@ -198,6 +202,7 @@ public struct SessionCore: Equatable, Sendable {
             // The `/events` stream does not exist until the probe passes.
             connection.events = .idle
             connection.failed = false
+            connection.dropped = false
             connection.tokenRefused = false
             connection.handshake = .idle
             connection.reconnect.reset()
@@ -239,6 +244,7 @@ public struct SessionCore: Equatable, Sendable {
             // A stream task cancelled by End or a failure can still report
             // from its `catch`; without a session the stream is idle.
             connection.events = connection.wantsConnection ? life : .idle
+            if life == .reconnecting, connection.wantsConnection { connection.dropped = true }
 
         case .socketOpened:
             connection.socket = .open
@@ -257,6 +263,7 @@ public struct SessionCore: Equatable, Sendable {
             effects.append(.stopAudio)
             quietSpeaking()
             if retrying {
+                connection.dropped = true
                 connection.reconnect.connectionLost(at: t)
             } else {
                 connection.wantsConnection = false
@@ -483,6 +490,7 @@ public struct SessionCore: Equatable, Sendable {
         connection.socket = .idle
         connection.events = .idle
         connection.failed = false
+        connection.dropped = false
         connection.tokenRefused = false
         connection.handshake = .idle
         resetSession()

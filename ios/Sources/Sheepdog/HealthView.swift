@@ -1,7 +1,8 @@
 import SheepdogKit
 import SwiftUI
 
-/// The Health pane: what the Mac's `/debug` page used to be needed for.
+/// Health: what the Mac's `/debug` page used to be needed for. Pushed from
+/// the connection chip's popover and from Settings > Diagnostics.
 /// The daemon (version, uptime, address), the voice and the brain with
 /// their pickers, chattiness, the audio path (echo cancellation, playback)
 /// and the recent problems in plain words, each with its raw JSON behind a
@@ -9,6 +10,9 @@ import SwiftUI
 struct HealthView: View {
     @EnvironmentObject private var model: SessionViewModel
     @ObservedObject var meter: VoiceMeter
+    /// "Change in Settings": where Models lives from here. Nil hides the
+    /// row (Settings already has the Models screen one tap away).
+    var changeModels: (() -> Void)?
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
@@ -20,6 +24,8 @@ struct HealthView: View {
             problemsSection
         }
         .listStyle(.insetGrouped)
+        .navigationTitle("Health")
+        .navigationBarTitleDisplayMode(.inline)
         .refreshable { await model.loadHealth() }
         .task { await model.loadHealth() }
         .accessibilityIdentifier("health.list")
@@ -58,20 +64,22 @@ struct HealthView: View {
                 LabeledContent("GPT-Live billed", value: Self.billed(billed))
                     .accessibilityIdentifier("health.billed")
             }
-            Button {
-                model.openModels()
-            } label: {
-                HStack {
-                    Text("Change in Settings")
-                    Spacer()
-                    Image(systemName: "chevron.right")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(.tertiary)
+            if let changeModels {
+                Button {
+                    changeModels()
+                } label: {
+                    HStack {
+                        Text("Change in Settings")
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(.tertiary)
+                    }
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
                 }
-                .frame(minHeight: 44)
-                .contentShape(Rectangle())
+                .accessibilityIdentifier("health.changeModels")
             }
-            .accessibilityIdentifier("health.changeModels")
         } header: {
             Text("Voice and brain")
         } footer: {

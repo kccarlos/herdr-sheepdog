@@ -219,6 +219,7 @@ struct HoldToTalkOrb: View {
     let onRelease: () -> Void
 
     @GestureState private var pressed = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         OrbGlyph(state: holding ? .listening : state, level: holding ? level : 0, size: 56)
@@ -228,7 +229,7 @@ struct HoldToTalkOrb: View {
                     .scaleEffect(holding ? 1.12 : 1)
             )
             .scaleEffect(holding ? 1.08 : 1)
-            .animation(.spring(duration: 0.2), value: holding)
+            .animation(reduceMotion ? nil : .spring(duration: 0.2), value: holding)
             .contentShape(Circle())
             .gesture(
                 DragGesture(minimumDistance: 0)
@@ -266,18 +267,24 @@ struct OrbGlyph: View {
     private var showsStopBadge: Bool { state == .thinking || state == .stalled || state == .speaking }
     private var showsSpinner: Bool { state == .thinking || state == .stalled }
 
-    private var ringScale: CGFloat {
-        guard state == .listening else { return 1 }
-        return 1 + CGFloat(min(1, sqrt(max(0, level)) * 1.6)) * 0.22
+    /// How loud the voice is, 0...1, while listening.
+    private var loudness: CGFloat {
+        guard state == .listening else { return 0 }
+        return CGFloat(min(1, sqrt(max(0, level)) * 1.6))
     }
+
+    /// The halo grows with the voice; under Reduce Motion it stays put and
+    /// only gets denser instead.
+    private var ringScale: CGFloat { reduceMotion ? 1 : 1 + loudness * 0.22 }
+    private var haloOpacity: Double { 0.12 + (reduceMotion ? Double(loudness) * 0.18 : 0) }
 
     var body: some View {
         ZStack {
             Circle()
-                .fill(tint.opacity(0.12))
+                .fill(tint.opacity(haloOpacity))
                 .frame(width: size, height: size)
                 .scaleEffect(ringScale)
-                .animation(.easeOut(duration: 0.12), value: ringScale)
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: ringScale)
 
             Circle()
                 .strokeBorder(tint.opacity(0.35), lineWidth: max(1.5, size / 64))

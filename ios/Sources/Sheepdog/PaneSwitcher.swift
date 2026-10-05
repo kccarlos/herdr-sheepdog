@@ -4,20 +4,18 @@ import SwiftUI
 enum MainPane: String, CaseIterable, Identifiable {
     case conversation = "Conversation"
     case flock = "Flock"
-    case health = "Health"
     var id: String { rawValue }
 }
 
-/// Conversation / Flock / Health. A segmented look, but built from buttons
+/// Conversation / Flock. A segmented look, but built from buttons
 /// so the Flock pane can carry an amber badge for the agents waiting on you
 /// (a segmented `Picker` draws its segments itself, in one colour); at the
-/// accessibility text sizes, where three segments no longer fit, a menu.
+/// accessibility text sizes, where the segments no longer fit, a menu. Health
+/// is not a pane: it lives behind the connection chip and in Settings.
 struct PaneSwitcher: View {
     @Binding var pane: MainPane
     /// Agents waiting on the shepherd (blocked): the amber badge.
     let waiting: Int
-    /// Recent errors on the daemon: the Health badge.
-    let errors: Int
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
@@ -95,8 +93,6 @@ struct PaneSwitcher: View {
             switch option {
             case .flock where waiting > 0:
                 Badge(count: waiting, fill: Theme.blocked, text: Theme.onBlocked)
-            case .health where errors > 0:
-                Badge(count: errors, fill: Color(.systemRed), text: .white)
             default:
                 EmptyView()
             }
@@ -107,13 +103,12 @@ struct PaneSwitcher: View {
         switch option {
         case .conversation: return "Conversation"
         case .flock: return waiting == 0 ? "Flock" : "Flock, \(waiting) waiting on you"
-        case .health: return errors == 0 ? "Health" : "Health, \(errors) \(errors == 1 ? "error" : "errors")"
         }
     }
 }
 
 /// A small count in a capsule.
-private struct Badge: View {
+struct Badge: View {
     let count: Int
     let fill: Color
     let text: Color

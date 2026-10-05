@@ -7,16 +7,13 @@ import SwiftUI
 /// reach.
 struct MainView: View {
     @EnvironmentObject private var model: SessionViewModel
-    @State private var selectedAgent: Agent?
     @State private var started = false
     @State private var confirmNewConversation = false
     @State private var typing = false
     @Environment(\.scenePhase) private var scenePhase
 
-    /// Errors in the last 15 minutes, so a glance at the switch says
-    /// whether something went wrong.
-    private var recentErrors: Int {
-        model.health.problems(since: Date().addingTimeInterval(-15 * 60)).filter { $0.severity == .error }.count
+    private var paneState: FlockPaneState {
+        FlockPaneState.resolve(chip: model.connectionChip.status, hasAgents: !model.flock.isEmpty)
     }
 
     var body: some View {
@@ -33,23 +30,14 @@ struct MainView: View {
                         .transition(.move(edge: .top).combined(with: .opacity))
                 }
 
-                PaneSwitcher(pane: $model.pane, waiting: model.flock.waitingCount, errors: recentErrors)
+                PaneSwitcher(pane: $model.pane, waiting: model.flock.waitingCount)
                     .padding(.horizontal, 16)
                     .padding(.bottom, 8)
 
-                if model.pane == .conversation {
-                    AgentStrip(agents: model.flock.running, pending: model.pendingAction) { agent in
-                        selectedAgent = agent
-                    }
-                    .dynamicTypeSize(...DynamicTypeSize.accessibility1)
-                    .padding(.bottom, 10)
-                    // Two `.sheet` modifiers on the same view fight each other in
-                    // SwiftUI and only the last one presents, so the agent sheet
-                    // hangs off the strip and Settings off the navigation stack.
-                    .sheet(item: $selectedAgent) { agent in
-                        AgentSheet(agent: agent, question: model.pendingQuestion(for: agent))
-                            .environmentObject(model)
-                    }
+                if model.pane == .conversation, !model.flock.running.isEmpty || paneState == .empty {
+                    AgentStrip(agents: model.flock.running, pending: model.pendingAction)
+                        .dynamicTypeSize(...DynamicTypeSize.accessibility1)
+                        .padding(.bottom, 10)
                 }
 
                 Divider()
@@ -67,12 +55,12 @@ struct MainView: View {
                             loadOlder: { await model.loadOlder() },
                             followToken: model.typedSent
                         )
+                    case .flock where paneState != .content:
+                        FlockUnavailableView(state: paneState)
                     case .flock:
                         FlockView(flock: model.flock, approval: model.approval, focusedPaneID: $model.focusedAgentPaneID) { index in
                             model.answer(option: index)
                         }
-                    case .health:
-                        HealthView(meter: model.meter)
                     }
                 }
                 .frame(maxHeight: .infinity)
@@ -158,7 +146,7 @@ struct MainView: View {
                 if let agent = model.flock.all.first(where: { $0.paneID == route.paneID }) {
                     AgentScreenView(agent: agent)
                 } else {
-                    ContentUnavailableView("That agent is gone", systemImage: "terminal", description: Text("Its pane closed or herdr no longer reports it."))
+                    AgentGoneView()
                 }
             }
             .toolbar {

@@ -500,7 +500,11 @@ public final class DaemonClient: @unchecked Sendable {
     /// `GET /events` as an async stream. Reconnecting is the caller's job;
     /// pass the last event id back as `since` so nothing is missed — the
     /// daemon replays what came after it, across restarts.
-    public func events(since: UInt64 = 0) -> AsyncThrowingStream<SSEParser.Output, Error> {
+    ///
+    /// `onOpen` runs once the daemon has answered 200, before any event: a
+    /// quiet stream (only `: keepalive` comments, which the parser drops) is
+    /// up, and the connection chip must not call it "Connecting".
+    public func events(since: UInt64 = 0, onOpen: (@Sendable () -> Void)? = nil) -> AsyncThrowingStream<SSEParser.Output, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
@@ -509,6 +513,7 @@ public final class DaemonClient: @unchecked Sendable {
                     if let http = response as? HTTPURLResponse, http.statusCode == 401 {
                         throw DaemonError.unauthorized(endpoint: self.endpoint.display)
                     }
+                    onOpen?()
                     var parser = SSEParser(lastSeq: since)
                     // Not `bytes.lines`: Foundation's AsyncLineSequence drops
                     // empty lines, and an empty line is exactly what ends one

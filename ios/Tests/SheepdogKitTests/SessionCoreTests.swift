@@ -111,6 +111,45 @@ final class SessionCoreTests: XCTestCase {
         XCTAssertEqual(core.sessionState, .disconnected)
     }
 
+    // MARK: - The chip's words: Connecting first, Reconnecting after a drop
+
+    func testTheChipSaysConnectingUntilSomethingDropsThenReconnecting() {
+        var core = SessionCore()
+        _ = core.apply(.connectTapped, now: at(0))
+        XCTAssertEqual(core.connectionChip.word, "Connecting…")
+        _ = core.apply(.probeSucceeded(micGranted: true), now: at(0.1))
+        _ = core.apply(.socketOpened, now: at(0.2))
+        // The socket is up but /events has not said anything yet: still the
+        // first connect, not a retry.
+        XCTAssertEqual(core.connectionChip.word, "Connecting…")
+        _ = core.apply(.eventsChanged(.open), now: at(0.3))
+        XCTAssertEqual(core.connectionChip.word, "Connected")
+
+        _ = core.apply(.socketClosed(reason: "connection lost", willRetry: true), now: at(10))
+        XCTAssertEqual(core.connectionChip.word, "Reconnecting…")
+        // The events loop re-sends .connecting on every pass; that is still a retry.
+        _ = core.apply(.eventsChanged(.connecting), now: at(11))
+        XCTAssertEqual(core.connectionChip.word, "Reconnecting…")
+        _ = core.apply(.socketOpened, now: at(12))
+        _ = core.apply(.eventsChanged(.connecting), now: at(12))
+        XCTAssertEqual(core.connectionChip.word, "Reconnecting…", "the events stream is not back yet")
+        _ = core.apply(.eventsChanged(.open), now: at(13))
+        XCTAssertEqual(core.connectionChip.word, "Connected")
+
+        // A new Connect starts from "Connecting" again.
+        _ = core.apply(.endTapped, now: at(20))
+        _ = core.apply(.connectTapped, now: at(21))
+        XCTAssertEqual(core.connectionChip.word, "Connecting…")
+    }
+
+    func testAStreamDropAloneReadsAsReconnecting() {
+        var core = connected()
+        _ = core.apply(.eventsChanged(.reconnecting), now: at(5))
+        XCTAssertEqual(core.connectionChip.word, "Reconnecting…")
+        _ = core.apply(.eventsChanged(.connecting), now: at(7))
+        XCTAssertEqual(core.connectionChip.word, "Reconnecting…")
+    }
+
     // MARK: - Rule: reconnect keeps retrying (quiet 30 s, one banner, on)
 
     func testADaemonRestartReconnectsQuietlyThenOneBannerThenKeepsGoing() {

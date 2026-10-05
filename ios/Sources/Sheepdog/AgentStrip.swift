@@ -2,12 +2,12 @@ import SheepdogKit
 import SwiftUI
 
 /// The flock, one chip per agent: alias, a state dot, and the pending
-/// question or the last result underneath.
+/// question or the last result underneath. Tapping one opens its agent
+/// window.
 struct AgentStrip: View {
     let agents: [Agent]
     /// The open question, if any: a blocked agent's chip names what it needs.
     let pending: PendingAction?
-    let onSelect: (Agent) -> Void
 
     var body: some View {
         if agents.isEmpty {
@@ -16,9 +16,8 @@ struct AgentStrip: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 10) {
                     ForEach(agents) { agent in
-                        Button {
-                            onSelect(agent)
-                        } label: {
+                        // The same agent window a Flock card opens.
+                        NavigationLink(value: AgentWindowRoute(paneID: agent.paneID)) {
                             AgentChip(agent: agent, subtitle: agent.chipSubtitle(pending: pending))
                         }
                         .buttonStyle(.plain)
@@ -75,7 +74,7 @@ struct AgentChip: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(agent.alias), \(Theme.word(for: agent.state))")
         .accessibilityValue(subtitle ?? "")
-        .accessibilityHint("Shows what this agent is doing")
+        .accessibilityHint("Opens this agent's window")
         .accessibilityAddTraits(.isButton)
     }
 }
@@ -97,83 +96,5 @@ struct EmptyFlock: View {
                 .fill(Color(.secondarySystemBackground))
         )
         .padding(.horizontal, 16)
-    }
-}
-
-/// The sheet behind a chip: everything the daemon knows about one agent.
-struct AgentSheet: View {
-    let agent: Agent
-    let question: String?
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            List {
-                Section {
-                    LabeledContent("State") {
-                        HStack(spacing: 6) {
-                            Circle().fill(Theme.color(for: agent.state)).frame(width: 9, height: 9)
-                            Text(Theme.word(for: agent.state))
-                        }
-                    }
-                    if let since = agent.stateSince {
-                        LabeledContent("Since", value: since.formatted(date: .omitted, time: .shortened))
-                    }
-                    if let kind = agent.kind, !kind.isEmpty {
-                        LabeledContent("Kind", value: kind)
-                    }
-                    if let workspace = agent.workspaceLabel, !workspace.isEmpty {
-                        LabeledContent("Workspace", value: workspace)
-                    }
-                }
-
-                Section {
-                    NavigationLink {
-                        AgentScreenView(agent: agent)
-                    } label: {
-                        Label("Open window", systemImage: "terminal")
-                    }
-                    .accessibilityIdentifier("agentSheet.window")
-                }
-
-                if let question = question ?? (agent.lastBlock?.answered == true ? nil : agent.lastBlock?.question), !question.isEmpty {
-                    Section("Waiting on you") {
-                        MarkdownText(question)
-                    }
-                }
-
-                if let task = agent.currentTask, !task.isEmpty {
-                    Section("Current task") { MarkdownText(task) }
-                }
-                if let result = agent.lastResult?.spoken, !result.isEmpty {
-                    Section("Last result") {
-                        Text(result)
-                        if let detail = agent.lastResult?.detail, !detail.isEmpty {
-                            Text(detail)
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                } else if let last = agent.lastTask, !last.isEmpty {
-                    Section("Last task") { MarkdownText(last) }
-                }
-                if let entry = agent.lastWorkerMessage, let message = entry.lastAssistant {
-                    Section("\(agent.alias) wrote") {
-                        MarkdownText(message)
-                            .font(.callout)
-                            .textSelection(.enabled)
-                    }
-                }
-            }
-            .navigationTitle(agent.alias)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
-                }
-            }
-        }
-        .presentationDetents([.medium, .large])
-        .presentationDragIndicator(.visible)
     }
 }

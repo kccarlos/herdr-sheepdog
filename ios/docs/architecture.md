@@ -7,7 +7,7 @@ microphone lives in `SheepdogKit`. The app target is SwiftUI views and
 ```
 ┌──────────────────────────── Sheepdog (app target) ────────────────────────────┐
 │  MainView ── PaneSwitcher ── AgentStrip ── ConversationView / FlockView /      │
-│              HealthView ── PinnedApprovalCard ── TypeBar ── VoiceBarView       │
+│              PinnedApprovalCard ── TypeBar ── VoiceBarView       │
 │  SettingsView ── ModelsView                  PushCoordinator (APNs)            │
 │        │                                                                      │
 │  SessionViewModel (@MainActor): adapts SessionCore, runs its effects          │
@@ -186,7 +186,7 @@ ordinary notice item, deduplicated by event id and `reset_id`.
 ## Main screen panes
 
 `PaneSwitcher` switches the middle of the screen between Conversation,
-Flock and Health. It is built from buttons, so Flock can carry an amber
+Flock. It is built from buttons, so Flock can carry an amber
 badge with the number of blocked agents, and it turns into a menu at the
 accessibility text sizes. The voice bar stays in place.
 
@@ -233,7 +233,9 @@ accessibility text sizes. The voice bar stays in place.
   instead) opens `TypeBar`. Sending goes through
   `POST /api/inject/utterance`, and the words and the answer arrive in the
   conversation the usual way.
-- **Health** (`HealthView`, `DaemonHealth`). It shows the daemon's
+- **Health** (`HealthView`, `DaemonHealth`), pushed from the connection
+  chip's popover and from Settings ▸ Diagnostics; its error count is the
+  red badge on the chip. It shows the daemon's
   connection, address, version and uptime (from the newest `daemon.start`),
   plus the voice and brain read-only with "Change in Settings ›", which
   opens Settings ▸ Models. It also shows GPT-Live's billed time, chattiness
@@ -246,7 +248,8 @@ accessibility text sizes. The voice bar stays in place.
 
 ## Settings ▸ Models
 
-`ModelsView` takes effect at once, outside Settings' Save/Cancel:
+`ModelsView` takes effect at once, like every Settings screen (there is
+no Save or Cancel):
 
 - **Voice.** `GET /api/voice/providers` lists the providers, and
   `PUT /api/voice/provider` switches between them. Unavailable providers
@@ -432,7 +435,8 @@ into a push-to-talk button and hides Mute.
 
 The **connection chip** (`ConnectionChip`) reflects only the daemon
 connection (the `/ws` socket, the `/events` stream and the token), never
-the voice state. It shows green "Connected", amber "Reconnecting…", red
+the voice state. It shows green "Connected", amber "Connecting…" (the first attempt) or
+"Reconnecting…" (after a drop; a spinner replaces the dot), red
 "Offline" or "Token refused", or grey "Not connected". Tapping it opens the
 address, a timed round trip, the daemon's version, the voice provider and
 model, the brain, and Reconnect / Open Settings.
@@ -499,3 +503,21 @@ callbacks, `AVAudioConverter` input blocks, `AVAudioPlayerNode` completion
 handlers) is not `Sendable`-clean. The design is still safe: the Kit types
 are value types, the view models and the audio engine are `@MainActor`, and
 the one real-time boundary is the explicit buffer copy in the tap.
+
+## Settings
+
+`SettingsView` is a shallow menu: Daemon, Voice, Models, Languages,
+Notifications, Diagnostics, About, each one screen (`SettingsScreens.swift`,
+`ModelsView`, `LanguagesView`). Nothing needs saving. Switches write when
+flipped; the daemon address and token are written, and the app repointed,
+when you leave the Daemon screen or tap Done. The first run opens on the
+Daemon screen and cannot be closed until an address is in.
+
+## Empty and error states
+
+`FlockPaneState` (SheepdogKit, tested) decides what an empty Flock pane
+says from the connection chip: connecting, reconnecting, no agents, not
+connected, daemon unreachable, token refused, update needed. `StateViews`
+shows each as a `ContentUnavailableView` with one action. Agents already on
+screen are never hidden by a connection problem. The orb's halo and the hold
+spring honour Reduce Motion.

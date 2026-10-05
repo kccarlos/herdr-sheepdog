@@ -41,7 +41,7 @@ final class WalkthroughUITests: XCTestCase {
         // 1. First launch: no address saved, so Settings opens itself.
         let address = app.textFields["settings.address"]
         XCTAssertTrue(address.waitForExistence(timeout: 10), "first launch should open Settings")
-        XCTAssertFalse(app.buttons["Cancel"].isEnabled, "there is nothing to go back to yet")
+        XCTAssertFalse(app.buttons["settings.done"].isEnabled, "there is nothing to close Settings on yet")
         shot(app, "01-first-launch-settings")
 
         // 2. Type the daemon's address and prove it.
@@ -54,9 +54,10 @@ final class WalkthroughUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Audio: 16000 Hz in / 24000 Hz out, pcm16le mono"].exists)
         shot(app, "02-settings-test-connection")
 
-        // 3. Save: the main screen with an empty flock.
-        tapWhenReady(app.buttons["settings.save"], "Save")
-        XCTAssertTrue(app.staticTexts["No agents in the flock yet — start one in herdr."].waitForExistence(timeout: 10))
+        // 3. Done (there is no Save: the address applies as you leave the
+        //    screen): the main screen, not connected yet.
+        tapWhenReady(app.buttons["settings.done"], "Done")
+        XCTAssertTrue(app.buttons["controls.orb"].waitForExistence(timeout: 10))
         // The daemon's history (if this one has any) now fills the
         // conversation; a fresh data dir leaves it empty.
         shot(app, "03-main-empty")
@@ -71,6 +72,7 @@ final class WalkthroughUITests: XCTestCase {
         tapWhenReady(app.buttons["controls.orb"], "Connect")
         XCTAssertTrue(app.staticTexts["Voice is off on the daemon"].waitForExistence(timeout: 15), "the orb must be honest about --voice=off")
         shot(app, "16-voicebar-connected-voice-off")
+        XCTAssertTrue(app.staticTexts["No agents in the flock yet — start one in herdr."].waitForExistence(timeout: 10), "connected, with an empty flock")
 
         // The chip's own sheet: address, round trip, daemon/voice info,
         // Reconnect and Open Settings.
@@ -106,16 +108,17 @@ final class WalkthroughUITests: XCTestCase {
         XCTAssertTrue(answered.label.contains("auth"), "got \(answered.label)")
         shot(app, "04-main-agents-conversation")
 
-        // 6. The chip's sheet.
+        // 6. The strip opens the agent window (the same one a Flock card
+        //    opens): state, kind, workspace and the open question up top.
         tapWhenReady(chip, "the auth chip")
         if !app.navigationBars["auth"].waitForExistence(timeout: 10) {
-            shot(app, "debug-agent-sheet")
-            XCTFail("tapping a chip should open its sheet")
+            shot(app, "debug-agent-window")
+            XCTFail("tapping a chip should open the agent window")
         }
-        XCTAssertTrue(app.staticTexts["Waiting on you"].waitForExistence(timeout: 5), "the sheet should show the question")
-        XCTAssertTrue(app.staticTexts["State"].exists)
-        shot(app, "05-agent-sheet")
-        tapWhenReady(app.buttons["Done"], "Done")
+        XCTAssertTrue(app.descendants(matching: .any)["agentScreen.state"].waitForExistence(timeout: 5), "the window should show the state")
+        XCTAssertTrue(app.descendants(matching: .any)["agentScreen.question"].waitForExistence(timeout: 5), "the window should show the open question")
+        shot(app, "05-agent-window")
+        tapWhenReady(app.navigationBars["auth"].buttons.firstMatch, "Back")
 
         // 7. A push: something the daemon decided to say on its own. It is a
         //    system card in the conversation (and a haptic on a device).
@@ -143,13 +146,14 @@ final class WalkthroughUITests: XCTestCase {
         //    not a raw error.
         tapWhenReady(app.buttons["controls.end"], "Disconnect")
         tapWhenReady(app.buttons["toolbar.settings"], "the settings button")
+        tapWhenReady(app.buttons["settings.daemon"], "Settings ▸ Daemon")
         let field = app.textFields["settings.address"]
         XCTAssertTrue(field.waitForExistence(timeout: 10))
         field.tap()
         field.press(forDuration: 1.1)
         if app.menuItems["Select All"].waitForExistence(timeout: 3) { app.menuItems["Select All"].tap() }
         field.typeText("127.0.0.1:7791")
-        tapWhenReady(app.buttons["settings.save"], "Save")
+        closeSettings(app)
         tapWhenReady(app.buttons["controls.orb"], "Connect")
         XCTAssertTrue(app.staticTexts["Can't reach the daemon at 127.0.0.1:7791 — is it running?"].waitForExistence(timeout: 20))
         shot(app, "07-error-banner")
@@ -191,7 +195,7 @@ final class WalkthroughUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Token accepted."].waitForExistence(timeout: 15))
         XCTAssertTrue(app.staticTexts["Auth: token required"].exists)
         shot(app, "09-settings-token-accepted")
-        tapWhenReady(app.buttons["settings.save"], "Save")
+        tapWhenReady(app.buttons["settings.done"], "Done")
         dismissPasswordPrompt(app)
         if !app.buttons["controls.orb"].isHittable {
             shot(app, "debug-after-token-save")
@@ -204,6 +208,15 @@ final class WalkthroughUITests: XCTestCase {
     }
 
     // MARK: - Helpers
+
+    /// Leaves Settings from the Daemon screen: back to the menu (which
+    /// applies the address), then Done.
+    private func closeSettings(_ app: XCUIApplication) {
+        if !app.buttons["settings.done"].isHittable {
+            tapWhenReady(app.navigationBars["Daemon"].buttons.firstMatch, "Back to Settings")
+        }
+        tapWhenReady(app.buttons["settings.done"], "Done")
+    }
 
     /// A sheet that is still animating away leaves the button underneath in
     /// the hierarchy but not hittable, and XCUITest happily taps nothing.

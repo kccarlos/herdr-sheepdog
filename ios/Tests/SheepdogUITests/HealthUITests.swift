@@ -1,6 +1,6 @@
 import XCTest
 
-/// The Health pane against the fixture daemon (`--brain=fake --voice=off`):
+/// Health (from the connection chip's popover) against the fixture daemon (`--brain=fake --voice=off`):
 /// version, uptime, the brain picker from `GET /api/brain/models`, and
 /// chattiness changed through `PUT /api/settings` and read back from the
 /// daemon. Not in CI.
@@ -14,13 +14,16 @@ final class HealthUITests: XCTestCase {
         }
     }
 
-    func testHealthPaneShowsTheDaemonAndChangesChattiness() throws {
+    func testHealthFromTheChipShowsTheDaemonAndChangesChattiness() throws {
         let app = XCUIApplication()
         app.launchArguments = ["-sheepdogResetState", "-sheepdogAddress", Fixture.host]
         app.launch()
         tapWhenReady(app.buttons["controls.orb"], "the orb")
 
-        tapWhenReady(app.buttons["main.pane.health"], "the Health pane")
+        // Health is not a pane any more: connection chip > Health.
+        XCTAssertFalse(app.buttons["main.pane.health"].exists, "Health left the pane switcher")
+        tapWhenReady(app.buttons["chip.connection"], "the connection chip")
+        tapWhenReady(app.buttons["chip.health"], "Health in the chip's popover")
 
         XCTAssertTrue(element(app, "health.version").waitForExistence(timeout: 10))
         let uptime = element(app, "health.uptime")

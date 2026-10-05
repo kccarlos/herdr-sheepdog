@@ -1,7 +1,7 @@
 import SheepdogKit
 import SwiftUI
 
-/// Pushed from a Flock card or the strip's agent sheet: what an agent's
+/// Pushed from a Flock card or the agent strip: what an agent's
 /// navigation route carries. Only the pane id, so the window always shows
 /// the agent's current row.
 struct AgentWindowRoute: Hashable {
@@ -57,7 +57,43 @@ struct AgentScreenView: View {
 
     // MARK: - Header
 
+    /// The agent as the flock lists it now (the row the window was opened
+    /// from is a snapshot).
+    private var live: Agent { model.flock.all.first { $0.paneID == agent.paneID } ?? agent }
+
+    /// What it is waiting on: the open approval, else its last unanswered
+    /// question.
+    private var question: String? {
+        let text = model.pendingQuestion(for: live) ?? (live.lastBlock?.answered == true ? nil : live.lastBlock?.question)
+        return text?.trimmedOrNil
+    }
+
     private var header: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            headerStatus
+            if let workspace = live.workspaceLabel?.trimmedOrNil {
+                Label(workspace, systemImage: "folder")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .accessibilityIdentifier("agentScreen.workspace")
+            }
+            if let question {
+                Label(question, systemImage: "hand.raised.fill")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(Theme.blockedText)
+                    .lineLimit(3)
+                    .accessibilityIdentifier("agentScreen.question")
+            }
+        }
+        .dynamicTypeSize(...DynamicTypeSize.accessibility1)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+    }
+
+    private var headerStatus: some View {
         HStack(spacing: 8) {
             Circle().fill(Theme.color(for: state)).frame(width: 10, height: 10)
             TimelineView(.periodic(from: .now, by: 30)) { context in
@@ -87,9 +123,6 @@ struct AgentScreenView: View {
                 .accessibilityIdentifier("agentScreen.latest")
             }
         }
-        .dynamicTypeSize(...DynamicTypeSize.accessibility1)
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
     }
 
     // MARK: - Terminal

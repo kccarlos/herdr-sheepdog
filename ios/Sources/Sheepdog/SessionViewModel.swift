@@ -889,7 +889,13 @@ final class SessionViewModel: ObservableObject {
                 }
                 self.send(.eventsChanged(.connecting))
                 do {
-                    for try await output in self.client.events(since: self.resumeID) {
+                    let stream = self.client.events(since: self.resumeID, onOpen: { [weak self] in
+                        Task { @MainActor in
+                            guard let self, self.core.connection.events != .open else { return }
+                            self.send(.eventsChanged(.open))
+                        }
+                    })
+                    for try await output in stream {
                         if Task.isCancelled { return }
                         if self.core.connection.events != .open {
                             self.send(.eventsChanged(.open))
