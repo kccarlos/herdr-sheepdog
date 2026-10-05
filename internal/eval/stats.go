@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/kccarlos/herdr-sheepdog/internal/northstar"
 )
 
 // Repeat runs and their statistics (after pipecat's evals suite): a live
@@ -191,7 +193,10 @@ type CampaignReport struct {
 	SpendUSD float64           `json:"spend_usd_estimate"`
 	// Explain aggregates the explanation scores (explain scenarios).
 	Explain *ExplainSummary `json:"explain,omitempty"`
-	Runs    []SimRun        `json:"runs"`
+	// NorthStar is the north-star block (internal/northstar), set by the
+	// caller that knows the scenarios and the event logs.
+	NorthStar *northstar.Block `json:"north_star,omitempty"`
+	Runs      []SimRun         `json:"runs"`
 }
 
 // NewCampaignReport assembles the report of runs.
@@ -242,6 +247,7 @@ func (c CampaignReport) WriteMarkdown(w io.Writer, maxFailures int) {
 		}
 		p("\n")
 	}
+	c.NorthStar.WriteMarkdown(w)
 	p("## Pass rate per scenario\n\nPass rate = pass / (pass + fail); errored and not-run runs are excluded and never count as a pass.\n\n")
 	p("| Scenario | Runs | Pass | Fail | Err | Not run | Pass rate | Primary failures | Mean s | Cost $ |\n|---|---|---|---|---|---|---|---|---|---|\n")
 	for _, s := range append(append([]CaseStats(nil), c.Stats...), c.Total) {

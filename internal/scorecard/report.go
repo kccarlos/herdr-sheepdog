@@ -10,6 +10,7 @@ import (
 
 	"github.com/kccarlos/herdr-sheepdog/internal/earmetrics"
 	"github.com/kccarlos/herdr-sheepdog/internal/eventlog"
+	"github.com/kccarlos/herdr-sheepdog/internal/northstar"
 )
 
 // Report is every docs/iteration-2.md scorecard metric computed over one
@@ -29,6 +30,9 @@ type Report struct {
 	Comprehension int               `json:"comprehension_follow_ups"`
 	Duplicate     DuplicateReport   `json:"duplicate_speech"`
 	Resume        ResumeReport      `json:"resume_retention"`
+	// NorthStar is the north-star block over the slice's items
+	// (internal/northstar).
+	NorthStar *northstar.SessionBlock `json:"north_star,omitempty"`
 }
 
 // Analyze computes every metric over events, labelling the result label.
@@ -47,6 +51,7 @@ func Analyze(label string, events []eventlog.Event) Report {
 	r.Comprehension = computeComprehension(events)
 	r.Duplicate = computeDuplicateSpeech(events)
 	r.Resume = computeResumeRetention(events)
+	r.NorthStar = computeNorthStar(label, events)
 	return r
 }
 
@@ -81,6 +86,7 @@ func writeMarkdownSection(b *strings.Builder, r Report) {
 		fmt.Fprintf(b, ", %s to %s", r.From.Format(time.RFC3339), r.To.Format(time.RFC3339))
 	}
 	b.WriteString("\n\n")
+	r.NorthStar.WriteMarkdown(b)
 
 	b.WriteString("### Latency\n\n")
 	b.WriteString("| metric | n | mean | median | p90 |\n|---|---|---|---|---|\n")

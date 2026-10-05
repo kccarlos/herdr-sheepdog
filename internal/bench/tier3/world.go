@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/eval"
+	"github.com/kccarlos/herdr-sheepdog/internal/northstar"
 )
 
 // Options configure tier-3 runs.
@@ -83,6 +84,9 @@ type Record struct {
 	// the call's audio side.
 	VoiceMode bool      `json:"voice_mode,omitempty"`
 	Voice     *VoiceRun `json:"voice,omitempty"`
+	// EndState are the scenario's end-state checks against the world
+	// after the call (Expect.EndState).
+	EndState []northstar.EndCheck `json:"end_state,omitempty"`
 }
 
 // worker is a started worker.
@@ -136,6 +140,14 @@ func randHex(n int) string {
 	b := make([]byte, n)
 	_, _ = rand.Read(b)
 	return hex.EncodeToString(b)
+}
+
+// repoOf is a scenario worker's repo clone ("" when unknown).
+func (w *world) repoOf(worker string) string {
+	if wk := w.byName[worker]; wk != nil {
+		return wk.repo
+	}
+	return ""
 }
 
 // daemonAlias is the daemon's alias for a scenario worker.

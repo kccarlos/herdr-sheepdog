@@ -186,6 +186,7 @@ func runEvalSim(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	eval.WriteSimTable(stdout, runs)
 	if o.out != "" {
 		rep := eval.NewCampaignReport(started, simSetup(o, opts), o.repeat, runs, meter)
+		rep.NorthStar = eval.NorthStarBlock(runs, eval.NorthStarOptions{Tier: "1", Scenarios: scenarios, EventsDir: opts.EventsDir})
 		if err := writeSimReports(o.out, rep); err != nil {
 			fprintf(stderr, "sheepdog eval sim: %v\n", err)
 			return 1
