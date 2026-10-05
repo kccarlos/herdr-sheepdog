@@ -303,9 +303,12 @@ function renderVoice(v, st) {
   $('daemon-info').textContent = `v${st.version || '?'} · herdr=${st.herdr}${brain} · voice_connected=${st.session && st.session.voice_connected}`;
 }
 
-// renderSettings keeps the header's chattiness switch in step with the
-// daemon (the level can also change through PUT /api/settings elsewhere).
+// renderSettings keeps the header's chattiness switch and language
+// readout in step with the daemon (both can also change through PUT
+// /api/settings elsewhere, e.g. the iOS app's Settings).
 function renderSettings(settings) {
+  const langs = settings && Array.isArray(settings.languages) ? settings.languages : null;
+  if (langs) $('languages').textContent = `languages: ${langs.length ? langs.join(', ') : 'none set'}`;
   const sel = $('chattiness');
   if (!settings || !settings.chattiness || document.activeElement === sel) return;
   if (sel.value !== settings.chattiness) sel.value = settings.chattiness;

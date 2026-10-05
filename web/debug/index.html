@@ -27,6 +27,7 @@
       <option value="chatty">chatty</option>
     </select>
   </label>
+  <span class="indicator muted" id="languages" title="the shepherd's language setting, most preferred first (set in the iOS app's Settings or PUT /api/settings {&quot;languages&quot;: [...]}); both brains are told it">languages: none set</span>
   <span class="indicator model-control hidden" id="model-control" title="the supervisor brain's provider and model: switched for the next turn, kept across restarts (session.brain_provider / brain_model in the state file)">model
     <select id="model-provider" title="the provider; a greyed-out one has no key (see its tooltip)"></select>
     <select id="model-select" title="the brain's model for the next turn"></select>

@@ -149,7 +149,7 @@ func Normalize(codes []string) ([]string, error) {
 // said before the setting existed). Unknown codes are skipped.
 //
 // Example: "The shepherd's language setting, in order of preference:
-// Chinese (Simplified, 简体中文), English. Answer in the language they
+// Chinese (Simplified) 简体中文, English. Answer in the language they
 // use; write Chinese in Simplified characters."
 func Line(codes []string) string {
 	var names []string
@@ -181,14 +181,16 @@ func Line(codes []string) string {
 }
 
 // label is how Line names a language: the English name with the native
-// one beside it when it differs ("Chinese (Simplified, 简体中文)",
-// "Japanese (日本語)", "English").
+// one beside it when it differs ("Japanese (日本語)", "English"; after a
+// name that has its own brackets, just a space: "Chinese (Simplified)
+// 简体中文").
 func label(l Language) string {
-	if l.Native == l.Name || l.Native == "" {
+	switch {
+	case l.Native == l.Name || l.Native == "":
 		return l.Name
+	case strings.HasSuffix(l.Name, ")"):
+		return l.Name + " " + l.Native
+	default:
+		return l.Name + " (" + l.Native + ")"
 	}
-	if i := strings.Index(l.Name, " ("); i > 0 && strings.HasSuffix(l.Name, ")") {
-		return l.Name[:len(l.Name)-1] + ", " + l.Native + ")"
-	}
-	return l.Name + " (" + l.Native + ")"
 }
