@@ -381,10 +381,15 @@ func union(pp [][]int) []int {
 }
 
 // renderExchanges is a judge transcript of exchanges, with this side's
-// text as Sheepdog's answers.
+// text as Sheepdog's answers. On the orchestrator side a question it was
+// never asked is left out (except the last one), so its answers read as
+// one conversation.
 func renderExchanges(ex []ExplainExchange, text func(ExplainExchange) string) string {
 	var b strings.Builder
-	for _, e := range ex {
+	for i, e := range ex {
+		if i < len(ex)-1 && !e.Consulted && strings.TrimSpace(e.Orchestrator) == "" && strings.TrimSpace(text(e)) == "" {
+			continue
+		}
 		b.WriteString("CEO: " + e.Question + "\n")
 		b.WriteString("Sheepdog: " + orDefault(strings.TrimSpace(text(e)), "(says nothing)") + "\n")
 	}

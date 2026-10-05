@@ -25,16 +25,20 @@ func TestExplainExchanges(t *testing.T) {
 			{AtMS: 6000, Type: "voice.push", Payload: map[string]any{"text": "A push.", "urgency": "when_idle"}},
 			{AtMS: 7000, Type: "voice.push", Payload: map[string]any{"text": "Current focus, for follow-ups (context only).", "focus": "True", "urgency": "silent"}},
 		},
-		Bot: []voiceclient.BotUtterance{{StartMS: 5000, Heard: "Two sentences."}, {StartMS: 21000, Heard: "Rephrased."}},
+		Bot: []voiceclient.BotUtterance{
+			{StartMS: 5000, Heard: "Two sentences."},
+			// Runs on past the next question; flushed after "Rephr".
+			{StartMS: 15000, Text: "Late. Rephrased.", Heard: "Late. Rephr", Fragments: []voiceclient.Fragment{{AtMS: 15000, Text: "Late."}, {AtMS: 21000, Text: " Rephrased."}}},
+		},
 	}
 	ex := explainExchanges(spec, lines, rec)
 	if len(ex) != 2 {
 		t.Fatalf("%d exchanges, want 2 (the barge-in is not a question)", len(ex))
 	}
-	if !ex[0].Consulted || ex[0].Orchestrator != "Four sentences. More detail. Options: 重构; 先不管. A push." || ex[0].Voice != "Two sentences." || ex[0].Kind != "explain" {
+	if !ex[0].Consulted || ex[0].Orchestrator != "Four sentences. More detail. Options: 重构; 先不管. A push." || ex[0].Voice != "Two sentences. Late." || ex[0].Kind != "explain" {
 		t.Fatalf("exchange 1 = %+v", ex[0])
 	}
-	if ex[1].Consulted || ex[1].Orchestrator != "" || ex[1].Voice != "Rephrased." || ex[1].Kind != "more" || ex[1].Turn != 2 {
+	if ex[1].Consulted || ex[1].Orchestrator != "" || ex[1].Voice != "Rephr" || ex[1].Kind != "more" || ex[1].Turn != 2 {
 		t.Fatalf("exchange 2 = %+v", ex[1])
 	}
 }
@@ -78,5 +82,21 @@ func TestPromptsDirCoversSVP(t *testing.T) {
 	}
 	if _, err := PromptsArm(t.TempDir()); err == nil {
 		t.Fatal("an empty prompts dir should be refused")
+	}
+}
+
+// A rescore replaces the run's explanation failures and keeps the rest.
+func TestRescoreExplainReplacesItsFailures(t *testing.T) {
+	sc := Scenario{SimScenario: eval.SimScenario{ID: "x", Explain: &eval.ExplainSpec{Turns: []string{"simple"}}}}
+	r := &Run{Scenario: "x", Status: eval.RunFail, EndReason: eval.EndCall,
+		User: []UserLine{{AtMS: 0, Said: "Is it done?"}},
+		Bot:  []voiceclient.BotUtterance{{StartMS: 100, Heard: "Yes."}},
+		Failures: []eval.Failure{
+			{Type: eval.FailJudgeNo, Detail: "explain_padding_t1 (voice): old"},
+			{Type: eval.FailJudgeNo, Detail: "answered: kept"},
+		}}
+	RescoreExplain(t.Context(), &eval.FakeJudge{}, sc, r, nil)
+	if len(r.Failures) != 1 || r.Failures[0].Detail != "answered: kept" || r.Explain == nil || r.Explain.Voice.PaddingPassed != 1 {
+		t.Fatalf("failures %+v explain %+v", r.Failures, r.Explain)
 	}
 }

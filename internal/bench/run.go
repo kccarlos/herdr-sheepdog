@@ -770,9 +770,33 @@ func explainExchanges(spec *eval.ExplainSpec, lines []UserLine, rec voiceclient.
 			add(&ex[i].Spoken, text)
 		}
 	}
+	// The voice's speech by fragment time: one utterance can run on into
+	// the next question (a stalled answer the CEO talked over). Only what
+	// was heard counts (a flushed utterance is cut at its heard part).
 	for _, u := range rec.Bot {
-		if i := at(u.StartMS); i >= 0 {
-			add(&ex[i].Voice, u.Heard)
+		if len(u.Fragments) == 0 {
+			if i := at(u.StartMS); i >= 0 {
+				add(&ex[i].Voice, u.Heard)
+			}
+			continue
+		}
+		left := len([]rune(u.Heard))
+		parts := make([]strings.Builder, len(ex))
+		for _, f := range u.Fragments {
+			if left <= 0 {
+				break
+			}
+			r := []rune(f.Text)
+			if len(r) > left {
+				r = r[:left]
+			}
+			left -= len(r)
+			if i := at(f.AtMS); i >= 0 {
+				parts[i].WriteString(string(r))
+			}
+		}
+		for i := range parts {
+			add(&ex[i].Voice, parts[i].String())
 		}
 	}
 	return ex
@@ -1007,4 +1031,46 @@ func sortRuns(runs []Run) {
 		}
 		return runs[i].Repeat < runs[j].Repeat
 	})
+}
+
+// RescoreExplain scores an explain scenario's recorded run again (the
+// run record's lines and bot utterances, and the events the campaign
+// wrote): a new judge or a changed scorer without paying for the call
+// again. The run's explanation failures are replaced and its status
+// recomputed.
+func RescoreExplain(ctx context.Context, j eval.Judge, sc Scenario, r *Run, events []voiceclient.Event) {
+	if sc.Explain == nil || r.Status == eval.RunNotRun || r.EndReason == eval.EndError {
+		return
+	}
+	ex := explainExchanges(sc.Explain, r.User, voiceclient.Recording{Events: events, Bot: r.Bot})
+	var kept []eval.Failure
+	for _, f := range r.Failures {
+		if strings.HasPrefix(f.Detail, "explain_") || strings.HasPrefix(f.Detail, "judge explain_") {
+			continue
+		}
+		kept = append(kept, f)
+	}
+	r.Explain = eval.ScoreExplain(ctx, j, sc.Explain, sc.Language, ex, true)
+	r.Failures = append(kept, r.Explain.Failures()...)
+	r.Status = eval.StatusOf(r.Failures)
+}
+
+// LoadEvents reads a run's events file (events/<id>.r<n>.jsonl).
+func LoadEvents(path string) ([]voiceclient.Event, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var out []voiceclient.Event
+	for _, line := range strings.Split(string(b), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var ev voiceclient.Event
+		if err := json.Unmarshal([]byte(line), &ev); err != nil {
+			return nil, err
+		}
+		out = append(out, ev)
+	}
+	return out, nil
 }
