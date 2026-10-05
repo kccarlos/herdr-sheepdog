@@ -47,10 +47,10 @@ func readyClient(t *testing.T, h *harness) (*wsClient, []string) {
 	return c, c.expect(wsproto.TypeBotReady).Features
 }
 
-// expectNone fails if a message of typ arrives within d: it waits d,
+// expectNoScreen fails if a screen frame arrives within d: it waits d,
 // then pings and reads up to the pong (a read deadline would close the
 // connection).
-func (c *wsClient) expectNone(typ string, d time.Duration) {
+func (c *wsClient) expectNoScreen(d time.Duration) {
 	c.t.Helper()
 	time.Sleep(d)
 	c.send(wsproto.Ping())
@@ -59,8 +59,8 @@ func (c *wsClient) expectNone(typ string, d time.Duration) {
 		if err != nil {
 			c.t.Fatalf("waiting for pong: %v", err)
 		}
-		if m.Type == typ {
-			c.t.Fatalf("unexpected %s: %+v", typ, m)
+		if m.Type == wsproto.TypeScreen {
+			c.t.Fatalf("unexpected screen frame: %+v", m.Screen)
 		}
 		if m.Type == wsproto.TypePong {
 			return
@@ -68,8 +68,9 @@ func (c *wsClient) expectNone(typ string, d time.Duration) {
 	}
 }
 
-// injectScreen changes a tracked fake pane's screen.
-func injectScreen(t *testing.T, h *harness, pane, screen string) {
+// injectScreen changes the tracked fake:1 pane's screen.
+func injectScreen(t *testing.T, h *harness, screen string) {
+	const pane = "fake:1"
 	t.Helper()
 	if code, body := h.postJSON("/api/inject/screen", map[string]any{"pane_id": pane, "screen": screen}, nil); code != http.StatusOK {
 		t.Fatalf("inject screen = %d %s", code, body)
@@ -104,9 +105,9 @@ func TestWSScreenStream(t *testing.T) {
 	}
 
 	// Unchanged: several reads, no frame.
-	c.expectNone(wsproto.TypeScreen, 250*time.Millisecond)
+	c.expectNoScreen(250 * time.Millisecond)
 
-	injectScreen(t, h, "fake:1", "line three")
+	injectScreen(t, h, "line three")
 	m = c.expect(wsproto.TypeScreen)
 	if m.Screen.Text != "line three" || m.Screen.Hash == s.Hash {
 		t.Fatalf("changed screen = %+v", m.Screen)
@@ -117,8 +118,8 @@ func TestWSScreenStream(t *testing.T) {
 	if end["reason"] != "unsubscribe" || end["pane"] != "fake:1" || end["frames"] != float64(2) {
 		t.Fatalf("end = %v", end)
 	}
-	injectScreen(t, h, "fake:1", "line four")
-	c.expectNone(wsproto.TypeScreen, 200*time.Millisecond)
+	injectScreen(t, h, "line four")
+	c.expectNoScreen(200 * time.Millisecond)
 	if !subsequence(h.types(), []string{"web.screen.subscribe", "web.screen.end"}) {
 		t.Fatalf("events = %v", h.types())
 	}
@@ -210,8 +211,8 @@ func TestWSScreenOnePerClientAndDisconnect(t *testing.T) {
 		t.Fatalf("screen = %+v", m.Screen)
 	}
 	// Only fake:2 is read from now on.
-	injectScreen(t, h, "fake:1", "one changed")
-	c.expectNone(wsproto.TypeScreen, 150*time.Millisecond)
+	injectScreen(t, h, "one changed")
+	c.expectNoScreen(150 * time.Millisecond)
 
 	_ = c.conn.CloseNow()
 	if end := waitScreenEnd(t, h, 2); end["reason"] != "disconnect" || end["pane"] != "fake:2" {
@@ -230,6 +231,6 @@ func TestWSScreenNotInheritedByReplacement(t *testing.T) {
 	if end := waitScreenEnd(t, h, 1); end["reason"] != "closed" {
 		t.Fatalf("end = %v", end)
 	}
-	injectScreen(t, h, "fake:1", "changed")
-	b.expectNone(wsproto.TypeScreen, 150*time.Millisecond)
+	injectScreen(t, h, "changed")
+	b.expectNoScreen(150 * time.Millisecond)
 }
