@@ -43,8 +43,9 @@ webhook autoscaler rather than CREMA (CREMA is an always-on polling service,
    *down* while a job is active, so no running job is killed. The scheduler
    repairs missed webhooks in both directions.
 
-A cold start (0 → N instances, image import) takes about 1–2 minutes before
-the first job starts.
+A cold start (0 → N instances, image import) takes 2–4 minutes before the
+first job starts; jobs that queue while instances are up start at once. A
+warm floor (`scale 1`) would remove the wait for $0.20/hour.
 
 ## Security notes
 
