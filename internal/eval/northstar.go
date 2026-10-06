@@ -81,6 +81,7 @@ func NorthStarRun(r SimRun, sc *SimScenario, evs []northstar.Event, o NorthStarO
 		nr.Verdicts = append(nr.Verdicts, northstar.Verdict{Name: v.Name, Answer: verdictAnswer(v.Verdict)})
 	}
 	nr.Verdicts = append(nr.Verdicts, ExplainVerdicts(r.Explain)...)
+	nr.Segments = SegmentsNorthStar(r.Segments)
 	for _, f := range r.Failures {
 		nr.Failures = append(nr.Failures, northstar.Failure{Type: string(f.Type), Detail: f.Detail})
 	}
@@ -186,6 +187,20 @@ func NorthStarRuns(runs []SimRun, o NorthStarOptions) []northstar.Run {
 			evs, _ = northstar.ReadEvents(filepath.Join(o.EventsDir, fmt.Sprintf("%s.r%d.jsonl", r.Scenario, r.Repeat)))
 		}
 		out = append(out, NorthStarRun(r, byID[r.Scenario], evs, o))
+	}
+	return out
+}
+
+// SegmentsNorthStar are a record's segment verdicts as the north-star
+// checks read them.
+func SegmentsNorthStar(segs []SegmentResult) []northstar.SegmentVerdicts {
+	var out []northstar.SegmentVerdicts
+	for _, s := range segs {
+		sv := northstar.SegmentVerdicts{Beat: s.Beat, Kind: s.Kind}
+		for _, v := range s.Verdicts {
+			sv.Verdicts = append(sv.Verdicts, northstar.Verdict{Name: v.Name, Answer: verdictAnswer(v.Verdict)})
+		}
+		out = append(out, sv)
 	}
 	return out
 }

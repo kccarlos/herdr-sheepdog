@@ -36,6 +36,9 @@ type SegmentInput struct {
 	Earlier string
 	// Segment is the part of the conversation to score.
 	Segment string
+	// Span names the segment's time span in the call ("t+12s up to
+	// t+30s"); empty when the segment is the whole input.
+	Span string
 	// Facts is the ground truth (the whole call's).
 	Facts string
 }
@@ -49,7 +52,7 @@ const segmentSystem = `You are a strict, fair evaluator of a voice assistant cal
 
 You get one SEGMENT of a conversation (usually one request of the CEO and everything said until their next request, or announcements sheepdog made on its own), sometimes the EARLIER conversation for context, ground-truth facts (what the workers' screens really showed and every action the system really sent to a worker, with times), and SEVERAL criteria, each with an id and phrased as a question where "yes" is the good outcome.
 
-Score only the SEGMENT. The earlier conversation is there so you can resolve references ("the earlier one", "what did we discuss first") and know what was already said; never charge a flaw in an earlier line to this segment. Judge each sheepdog line against the facts as they stood at the time it was spoken (facts carry times; a worker screen is a scrolling terminal, lower lines are newer, and later facts supersede earlier ones). Only actions sent during the segment's time span belong to the segment.
+Score only the SEGMENT. The earlier conversation is there so you can resolve references ("the earlier one", "what did we discuss first") and know what was already said; never charge a flaw in an earlier line to this segment. Judge each sheepdog line against the facts as they stood at the time it was spoken (facts carry times; a worker screen is a scrolling terminal, lower lines are newer, and later facts supersede earlier ones). Only actions sent during the segment's time span belong to the segment: an action before or after it (even one that looks unrequested) is scored in its own segment, never here; and when the segment asks for an action, look for it in the facts within the span.
 
 Decide each criterion on its own, as if it were the only one asked. Charge each flaw only to the criterion that names it (an action nobody asked for belongs to the action criterion, a wrong or invented fact to the fact criteria, an unclear word to the listening criterion), and do not fail a criterion for a flaw it does not name. Most criteria say when they pass and when they fail, and fail in both directions (too little and too much, doing less and doing more than asked): apply the criterion's own definition, not a general preference for short or long answers.
 
@@ -88,7 +91,11 @@ func segmentPrompt(in SegmentInput) string {
 		b.WriteString(e)
 		b.WriteString("\n\n")
 	}
-	b.WriteString("SEGMENT TO SCORE:\n")
+	if in.Span != "" {
+		fmt.Fprintf(&b, "SEGMENT TO SCORE (%s; an action in the facts outside this span belongs to another segment and is not scored here):\n", in.Span)
+	} else {
+		b.WriteString("SEGMENT TO SCORE:\n")
+	}
 	b.WriteString(strings.TrimSpace(in.Segment))
 	b.WriteString("\n\n")
 	if f := strings.TrimSpace(in.Facts); f != "" {
@@ -119,11 +126,21 @@ func (j *LLMJudge) JudgeSegment(ctx context.Context, in SegmentInput) ([]Verdict
 		ResponseSchema:    segmentSchema,
 		Temperature:       genai.Ptr[float32](0),
 	}
-	resp, err := j.Model.Generate(ctx, j.ModelID, []*genai.Content{genai.NewContentFromText(segmentPrompt(in), genai.RoleUser)}, cfg)
-	if err != nil {
-		return nil, fmt.Errorf("judge: %w", err)
+	prompt := segmentPrompt(in)
+	var perr error
+	// An answer that leaves out an id (or is not JSON) is asked once more.
+	for range 2 {
+		resp, err := j.Model.Generate(ctx, j.ModelID, []*genai.Content{genai.NewContentFromText(prompt, genai.RoleUser)}, cfg)
+		if err != nil {
+			return nil, fmt.Errorf("judge: %w", err)
+		}
+		vs, err := parseSegmentVerdicts(textOf(resp), in.Criteria)
+		if err == nil {
+			return vs, nil
+		}
+		perr = err
 	}
-	return parseSegmentVerdicts(textOf(resp), in.Criteria)
+	return nil, perr
 }
 
 func parseSegmentVerdicts(text string, criteria []SegmentCriterion) ([]Verdict, error) {
@@ -269,6 +286,16 @@ func SplitSegments(convo []SimLine) []Segment {
 	return out
 }
 
+// segmentSpan is the segment's time span: from its first line up to the
+// next segment's first line (or the end of the call).
+func segmentSpan(convo []SimLine, seg Segment) string {
+	from := fmt.Sprintf("from t+%ds", convo[seg.Start].AtMS/1000)
+	if seg.End < len(convo) {
+		return from + fmt.Sprintf(" up to (not including) t+%ds", convo[seg.End].AtMS/1000)
+	}
+	return from + " to the end of the call"
+}
+
 // segmentHeard reports whether sheepdog said anything in the segment.
 func segmentHeard(lines []SimLine) bool {
 	for _, l := range lines {
@@ -389,7 +416,7 @@ func JudgeSegments(ctx context.Context, j Judge, s SimScenario, convo []SimLine,
 			for k, v := range vs {
 				out[i].Verdicts = append(out[i].Verdicts, NamedVerdict{Name: in.Criteria[k].ID, Verdict: v})
 			}
-		}(i, SegmentInput{Criteria: crit, Earlier: renderSim(convo[:seg.Start]), Segment: renderSim(lines), Facts: facts})
+		}(i, SegmentInput{Criteria: crit, Earlier: renderSim(convo[:seg.Start]), Segment: renderSim(lines), Span: segmentSpan(convo, seg), Facts: facts})
 	}
 	wg.Wait()
 	if err := errors.Join(errs...); err != nil {

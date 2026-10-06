@@ -43,6 +43,30 @@ func RejudgeSim(ctx context.Context, j Judge, sc SimScenario, run *SimRun, fixtu
 	return nil
 }
 
+// RejudgeSimSegments scores a recorded tier-1 workday run per segment
+// (JudgeSegments) and replaces its segment verdicts; the run-level
+// verdicts and the status are untouched. Facts as in RejudgeSim.
+func RejudgeSimSegments(ctx context.Context, j Judge, sc SimScenario, run *SimRun, fixtureDir string) error {
+	if sc.Workday == nil || run.EndReason == EndError || len(run.Verdicts) == 0 || len(run.Transcript) == 0 {
+		return nil
+	}
+	sc = WithPersona(sc, run.Persona)
+	facts := run.Facts
+	if facts == "" {
+		f, err := ReplayFacts(sc, *run, fixtureDir)
+		if err != nil {
+			return err
+		}
+		facts = f
+	}
+	segs, err := JudgeSegments(ctx, j, sc, run.Transcript, facts, 4)
+	if err != nil {
+		return fmt.Errorf("%s r%d: %w", run.Scenario, run.Repeat, err)
+	}
+	run.Segments = segs
+	return nil
+}
+
 // RejudgedFailures is fs with the failures of the old verdicts (judge
 // no, judge errors) replaced by those of vs.
 func RejudgedFailures(fs []Failure, vs []NamedVerdict) []Failure {

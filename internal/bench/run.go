@@ -111,15 +111,20 @@ type Run struct {
 	Facts      string                     `json:"facts,omitempty"`
 	// Judge is the judge model of Verdicts when they were given again
 	// (sheepdog bench rejudge).
-	Judge     string           `json:"judge,omitempty"`
-	Latency   []map[string]any `json:"latency,omitempty"`
-	Voice     VoiceStats       `json:"voice"`
-	Failovers []string         `json:"failovers,omitempty"`
-	Fallbacks []string         `json:"fallbacks,omitempty"`
-	Proxy     *ProxyStats      `json:"proxy,omitempty"`
-	Spend     Spend            `json:"spend"`
-	CostUSD   float64          `json:"cost_usd_estimate"`
-	Extended  bool             `json:"extended,omitempty"`
+	Judge string `json:"judge,omitempty"`
+	// Segments are the segment judge's verdicts (workday scenarios,
+	// eval.JudgeSegments); SegmentJudge is their judge model when given by
+	// sheepdog bench rejudge.
+	Segments     []eval.SegmentResult `json:"segments,omitempty"`
+	SegmentJudge string               `json:"segment_judge,omitempty"`
+	Latency      []map[string]any     `json:"latency,omitempty"`
+	Voice        VoiceStats           `json:"voice"`
+	Failovers    []string             `json:"failovers,omitempty"`
+	Fallbacks    []string             `json:"fallbacks,omitempty"`
+	Proxy        *ProxyStats          `json:"proxy,omitempty"`
+	Spend        Spend                `json:"spend"`
+	CostUSD      float64              `json:"cost_usd_estimate"`
+	Extended     bool                 `json:"extended,omitempty"`
 	// Explain is the explanation scores of a scenario with an explain
 	// block: the orchestrator's text and the voice's speech separately.
 	Explain *eval.ExplainScore `json:"explain,omitempty"`
@@ -327,6 +332,12 @@ func RunScenario(ctx context.Context, sc Scenario, repeat, port int, o RunOption
 		run.Verdicts = append(run.Verdicts, eval.NamedVerdict{Name: names[i], Verdict: v})
 	}
 	run.Failures = append(run.Failures, r.failures()...)
+	if sc.Workday != nil {
+		// Measurement only: a failed segment call leaves them out.
+		if segs, err := eval.JudgeSegments(ctx, judge, sc.SimScenario, r.convo, facts, 4); err == nil {
+			run.Segments = segs
+		}
+	}
 	if sc.Explain != nil {
 		run.Explain = eval.ScoreExplain(ctx, judge, sc.Explain, sc.Language, r.exchanges, true)
 		run.Failures = append(run.Failures, run.Explain.Failures()...)
@@ -1120,6 +1131,21 @@ func Rejudge(ctx context.Context, j eval.Judge, sc Scenario, r *Run) error {
 	r.Verdicts = out
 	r.Failures = eval.RejudgedFailures(r.Failures, out)
 	r.Status = eval.StatusOf(r.Failures)
+	return nil
+}
+
+// RejudgeSegments scores a recorded workday run per segment
+// (eval.JudgeSegments) and replaces its segment verdicts; the run-level
+// verdicts and the status are untouched.
+func RejudgeSegments(ctx context.Context, j eval.Judge, sc Scenario, r *Run) error {
+	if sc.Workday == nil || r.Status == eval.RunNotRun || r.EndReason == eval.EndError || r.Facts == "" || len(r.Transcript) == 0 {
+		return nil
+	}
+	segs, err := eval.JudgeSegments(ctx, j, eval.WithPersona(sc.SimScenario, r.Persona), r.Transcript, r.Facts, 4)
+	if err != nil {
+		return fmt.Errorf("%s r%d: %w", r.Scenario, r.Repeat, err)
+	}
+	r.Segments = segs
 	return nil
 }
 

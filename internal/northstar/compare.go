@@ -62,6 +62,17 @@ func Compare(a, b []Run) *Comparison {
 	rate("Done", ba.Done, bb.Done)
 	rate("Low effort", ba.LowEffort, bb.LowEffort)
 	rate("Safe", ba.Safe, bb.Safe)
+	if ba.Segment != nil || bb.Segment != nil {
+		d := Diff{Metric: "Understood (segments, cluster bootstrap)"}
+		if ba.Segment != nil && bb.Segment != nil && ba.Segment.Understood.N > 0 && bb.Segment.Understood.N > 0 {
+			sa, sb := ba.Segment, bb.Segment
+			d.A, d.B = clusterShort(sa.Understood), clusterShort(sb.Understood)
+			d.D = sb.Understood.CI.Est - sa.Understood.CI.Est
+			d.Lo, d.Hi = ClusterBootstrapDiff(sa.und[0], sa.und[1], sb.und[0], sb.und[1])
+			d.OK = true
+		}
+		c.Diffs = append(c.Diffs, d)
+	}
 	means("Turns to goal", goalTurns(ba), goalTurns(bb), "")
 	means("Time to goal", goalTimes(ba), goalTimes(bb), " s")
 	rate("Unmatched claims (heard)", ba.Claims.Unmatched, bb.Claims.Unmatched)

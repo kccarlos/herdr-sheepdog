@@ -164,7 +164,10 @@ type Run struct {
 	// EndMS is when the call ended (the last line or event).
 	EndMS    int64     `json:"end_ms"`
 	Verdicts []Verdict `json:"verdicts,omitempty"`
-	Failures []Failure `json:"failures,omitempty"`
+	// Segments are the segment judge's verdicts (eval.JudgeSegments),
+	// when the run was judged per segment.
+	Segments []SegmentVerdicts `json:"segments,omitempty"`
+	Failures []Failure         `json:"failures,omitempty"`
 	// EndState are the declared end-state checks' outcomes (tier 3).
 	EndState []EndCheck `json:"end_state,omitempty"`
 	// ExpectsActions: the scenario requires actions on the workers, so
