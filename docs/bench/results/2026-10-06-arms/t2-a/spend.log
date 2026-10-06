@@ -1,0 +1,12 @@
+14:55:53 [1/12] workday-morning-standup r1 (:7871): fail (end_call, missing_function_call) 15 turns 507s ≈ $0.393, total ≈ $0.39
+15:01:09 [2/12] workday-scale-ten r1 (:7871): pass (end_call, ) 12 turns 315s ≈ $0.508, total ≈ $0.90
+15:15:24 [3/12] workday-zh-evening r1 (:7871): fail (end_call, brain_fallback) 17 turns 854s ≈ $0.712, total ≈ $1.61
+15:22:10 [4/12] workday-interruptions r1 (:7871): pass (end_call, ) 12 turns 406s ≈ $0.597, total ≈ $2.21
+15:29:32 [5/12] workday-explain-deep r1 (:7871): fail (end_call, check) 14 turns 441s ≈ $0.438, total ≈ $2.65
+15:38:11 [6/12] workday-long-haul r1 (:7871): fail (end_call, missing_function_call) 15 turns 519s ≈ $0.390, total ≈ $3.04
+15:46:25 [7/12] workday-morning-standup r2 (:7871): fail (end_call, check) 17 turns 493s ≈ $0.595, total ≈ $3.63
+15:53:03 [8/12] workday-scale-ten r2 (:7871): fail (end_call, unintended_action) 12 turns 398s ≈ $0.646, total ≈ $4.28
+16:00:17 [9/12] workday-zh-evening r2 (:7871): fail (end_call, check) 13 turns 434s ≈ $0.609, total ≈ $4.89
+16:06:45 [10/12] workday-interruptions r2 (:7871): pass (end_call, ) 12 turns 387s ≈ $0.575, total ≈ $5.46
+16:17:16 [11/12] workday-explain-deep r2 (:7871): fail (end_call, check) 15 turns 630s ≈ $0.854, total ≈ $6.32
+16:25:47 [12/12] workday-long-haul r2 (:7871): pass (end_call, ) 16 turns 511s ≈ $0.762, total ≈ $7.08
