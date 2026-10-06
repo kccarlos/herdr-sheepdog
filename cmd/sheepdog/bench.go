@@ -346,7 +346,7 @@ func runBenchRun(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	portsFlag := fs.String("ports", "7790,7791,7792", "scratch daemon ports (one parallel worker each)")
 	parallel := fs.Int("parallel", 3, "conversations at once (at most the number of ports)")
 	fixtures := fs.String("fixtures", "testdata/herdr", "screen fixtures")
-	simuser := fs.String("simuser", eval.BackendVertex, "simulated CEO backend: vertex, ollama or fake (the scripts)")
+	simuser := fs.String("simuser", eval.BackendVertex, "simulated CEO backend: vertex, deepseek, ollama or fake (the scripts)")
 	simuserModel := fs.String("simuser-model", "", "simulated CEO model (default "+eval.DefaultVertexModel+")")
 	judge := fs.String("judge", "", "judge backend: claude (default; SHEEPDOG_JUDGE overrides), vertex, ollama or fake")
 	judgeModel := fs.String("judge-model", "", "judge model (default sonnet for claude, "+eval.DefaultVertexModel+" for vertex)")

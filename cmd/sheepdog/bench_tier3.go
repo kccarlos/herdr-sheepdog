@@ -45,7 +45,7 @@ func printBenchTier3Usage(w io.Writer) {
 	fprintln(w, "  --brain-model ID      the daemon's brain.model (default gemini-3.8-flash)")
 	fprintln(w, "  --claude-model ID     Claude worker model (default haiku)")
 	fprintln(w, "  --codex-model ID      Codex worker model (default gpt-6-luna); effort --codex-effort (low)")
-	fprintln(w, "  --simuser KIND        vertex (default), ollama or fake (the scenario script)")
+	fprintln(w, "  --simuser KIND        vertex (default), deepseek, ollama or fake (the scenario script)")
 	fprintln(w, judgeHelp)
 	fprintln(w, "  --judge-model ID      judge model (default sonnet for claude, "+eval.DefaultVertexModel+" for vertex;")
 	fprintln(w, "                        with --judge vertex it is the simulated user's model too)")

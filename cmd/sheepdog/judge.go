@@ -64,7 +64,7 @@ type judgeVertex struct{ key, project, ollamaURL string }
 // sem for vertex and ollama, on claudeJudgeSem for the Claude judge. A
 // fake backend returns a nil model.
 func newJudgeModel(kind, model string, v judgeVertex, sem chan struct{}, log logging.Logger) (brain.Model, string, error) {
-	m, id, err := eval.NewBackend(eval.BackendOptions{Kind: kind, Model: model, VertexAPIKey: v.key, VertexProject: v.project, OllamaURL: v.ollamaURL}, log)
+	m, id, err := eval.NewBackend(eval.BackendOptions{Kind: kind, Model: model, VertexAPIKey: v.key, VertexProject: v.project, OllamaURL: v.ollamaURL, DeepSeekAPIKey: os.Getenv("DEEPSEEK_API_KEY")}, log)
 	if err != nil || m == nil {
 		return m, id, err
 	}

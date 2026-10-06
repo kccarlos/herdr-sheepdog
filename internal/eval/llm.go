@@ -27,8 +27,12 @@ import (
 const (
 	BackendVertex = "vertex"
 	BackendOllama = "ollama"
-	BackendFake   = "fake"
-	BackendNone   = "none"
+	// BackendDeepSeek is DeepSeek over the OpenAI-compatible adapter
+	// (DEEPSEEK_API_KEY), thinking off: the simulated user's fallback
+	// while Vertex is unavailable.
+	BackendDeepSeek = "deepseek"
+	BackendFake     = "fake"
+	BackendNone     = "none"
 )
 
 // DefaultJudgeKind is the judge backend when neither --judge nor
@@ -52,17 +56,22 @@ const AltJudgeModel = "gemini-3.5-flash-lite"
 const (
 	DefaultOllamaModel = "gemma4:latest"
 	DefaultOllamaURL   = "http://localhost:11434/v1"
+	// DefaultDeepSeekModel is the deepseek backend's model.
+	DefaultDeepSeekModel = "deepseek-flash"
 )
 
 // BackendOptions selects and configures one text model backend.
 type BackendOptions struct {
-	Kind  string // vertex | ollama | fake
+	Kind  string // vertex | deepseek | ollama | claude | fake
 	Model string // model id; empty takes the backend's default
 	// VertexAPIKey and VertexProject are the [gemini.vertex] credentials
 	// (VERTEX_API_KEY / VERTEX_PROJECT); never logged.
 	VertexAPIKey, VertexProject string
 	// OllamaURL is the OpenAI-compatible root of the Ollama server.
 	OllamaURL string
+	// DeepSeekAPIKey is DEEPSEEK_API_KEY for the deepseek backend; never
+	// logged.
+	DeepSeekAPIKey string
 }
 
 // NewBackend returns the model for o and the model id to pass to it.
@@ -81,12 +90,19 @@ func NewBackend(o BackendOptions, log logging.Logger) (brain.Model, string, erro
 			return nil, "", err
 		}
 		return m, orDefault(o.Model, DefaultOllamaModel), nil
+	case BackendDeepSeek:
+		off := false
+		m, err := brain.NewOpenAICompatModel(brain.OpenAICompatConfig{Provider: "deepseek", BaseURL: brain.DeepSeekBaseURL, APIKey: o.DeepSeekAPIKey, Thinking: &off, Log: log})
+		if err != nil {
+			return nil, "", err
+		}
+		return m, orDefault(o.Model, DefaultDeepSeekModel), nil
 	case BackendClaude:
 		return &ClaudeCLI{}, orDefault(o.Model, DefaultClaudeModel), nil
 	case BackendFake:
 		return nil, BackendFake, nil
 	}
-	return nil, "", fmt.Errorf("unknown backend %q (claude, vertex, ollama or fake)", o.Kind)
+	return nil, "", fmt.Errorf("unknown backend %q (claude, vertex, deepseek, ollama or fake)", o.Kind)
 }
 
 // Usage is the token count of one role's calls to one model.
