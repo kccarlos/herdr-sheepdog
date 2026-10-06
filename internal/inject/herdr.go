@@ -223,6 +223,15 @@ func (h *Herdr) SendInput(ctx context.Context, paneID, text string, keys ...stri
 	return sp.SendInput(ctx, paneID, text, keys...)
 }
 
+// ProcessInfo implements supervisor.Spawner.
+func (h *Herdr) ProcessInfo(ctx context.Context, paneID string) (herdr.ProcessInfo, error) {
+	sp, err := h.spawner()
+	if err != nil {
+		return herdr.ProcessInfo{}, err
+	}
+	return sp.ProcessInfo(ctx, paneID)
+}
+
 // Interrupt implements supervisor.Herdr.
 func (h *Herdr) Interrupt(ctx context.Context, paneID string) error {
 	return h.SendKeys(ctx, paneID, "ctrl+c")

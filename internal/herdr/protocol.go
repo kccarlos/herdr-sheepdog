@@ -199,3 +199,36 @@ type ReadResult struct {
 func (r ReadResult) Lines() []string {
 	return splitLines(r.Text)
 }
+
+// ProcessInfo is the `pane.process_info` result.
+type ProcessInfo struct {
+	PaneID                 string        `json:"pane_id"`
+	ShellPID               uint32        `json:"shell_pid,omitempty"`
+	ForegroundProcessGroup uint32        `json:"foreground_process_group_id,omitempty"`
+	TTY                    string        `json:"tty,omitempty"`
+	ForegroundProcesses    []ProcessItem `json:"foreground_processes,omitempty"`
+}
+
+// ProcessItem is one foreground process of a pane.
+type ProcessItem struct {
+	PID  uint32   `json:"pid"`
+	Name string   `json:"name"`
+	Argv []string `json:"argv,omitempty"`
+}
+
+// ShellForeground reports whether the pane's shell itself is the foreground
+// process: its process group owns the terminal and it is listed among the
+// foreground processes. This is herdr's own CLI predicate
+// (src/cli/agent.rs, process_info_shows_shell_initialization); false while
+// a child (an rc-file update check, a started program) holds the terminal.
+func (p ProcessInfo) ShellForeground() bool {
+	if p.ShellPID == 0 || p.ForegroundProcessGroup != p.ShellPID {
+		return false
+	}
+	for _, f := range p.ForegroundProcesses {
+		if f.PID == p.ShellPID {
+			return true
+		}
+	}
+	return false
+}

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -22,6 +23,18 @@ type spawnWorld struct {
 	*harness
 	root  string // the project root, symlinks resolved
 	bench string // root/bench
+	// fgBusy, while it returns true, makes pane.process_info report a
+	// child (not the shell) in the foreground.
+	fgBusy func() bool
+}
+
+func shellInfo(busy func() bool) map[string]any {
+	if busy != nil && busy() {
+		return map[string]any{"pane_id": "w20:p1", "shell_pid": 100, "foreground_process_group_id": 200,
+			"foreground_processes": []map[string]any{{"pid": 200, "name": "git"}}}
+	}
+	return map[string]any{"pane_id": "w20:p1", "shell_pid": 100, "foreground_process_group_id": 100,
+		"foreground_processes": []map[string]any{{"pid": 100, "name": "zsh"}}}
 }
 
 func newSpawnWorld(t *testing.T) *spawnWorld {
@@ -33,9 +46,9 @@ func newSpawnWorld(t *testing.T) *spawnWorld {
 // or a brain harness).
 func newSpawnWorldWith(t *testing.T, mk func(*testing.T, ...func(*Config)) *harness) *spawnWorld {
 	t.Helper()
-	oldPoll, oldShell := spawnPoll, spawnShellWait
-	spawnPoll, spawnShellWait = 5*time.Millisecond, 50*time.Millisecond
-	t.Cleanup(func() { spawnPoll, spawnShellWait = oldPoll, oldShell })
+	oldPoll, oldShell, oldSettle := spawnPoll, spawnShellWait, spawnShellSettle
+	spawnPoll, spawnShellWait, spawnShellSettle = 5*time.Millisecond, 50*time.Millisecond, 0
+	t.Cleanup(func() { spawnPoll, spawnShellWait, spawnShellSettle = oldPoll, oldShell, oldSettle })
 	root, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -64,6 +77,9 @@ func newSpawnWorldWith(t *testing.T, mk func(*testing.T, ...func(*Config)) *harn
 	})
 	h.srv.Handle("pane.split", func(p json.RawMessage) (any, error) {
 		return map[string]any{"type": "pane_info", "pane": newPane(p)}, nil
+	})
+	h.srv.Handle("pane.process_info", func(p json.RawMessage) (any, error) {
+		return map[string]any{"type": "pane_process_info", "process_info": shellInfo(w.fgBusy)}, nil
 	})
 	h.srv.Handle("pane.send_input", func(json.RawMessage) (any, error) { return map[string]any{"type": "ok"}, nil })
 	return w
@@ -465,5 +481,39 @@ func TestSpawnNotReadyEndsWhenThePaneCloses(t *testing.T) {
 	waitFor(t, func() bool { return w.log.count("supervisor.spawn_instruction_dropped") == 1 }, "supervisor.spawn_instruction_dropped")
 	if p := w.log.ofType("supervisor.spawn_instruction_dropped")[0].Payload.(map[string]any); p["reason"] != "the pane closed" {
 		t.Errorf("dropped = %v", p)
+	}
+}
+
+// The command line is held back while a child (an rc-file update check)
+// holds the pane's foreground, and typed once the shell is back.
+func TestSpawnWaitsForShellForeground(t *testing.T) {
+	w := newSpawnWorld(t)
+	w.hear("open a Claude in bench")
+	var calls int
+	var mu sync.Mutex
+	w.fgBusy = func() bool { mu.Lock(); defer mu.Unlock(); calls++; return calls <= 3 }
+	if _, err := w.spawn(brain.SpawnRequest{Kind: brain.SpawnClaude, Dir: "app"}); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if calls < 4 {
+		t.Errorf("process_info polled %d times, want >= 4", calls)
+	}
+	if n := len(w.srv.RequestsFor("pane.send_input")); n != 1 {
+		t.Errorf("send_input requests = %d, want 1", n)
+	}
+}
+
+// A shell that never becomes foreground is typed into after the timeout.
+func TestSpawnShellTimeoutTypesAnyway(t *testing.T) {
+	w := newSpawnWorld(t)
+	w.hear("open a Claude in bench")
+	w.fgBusy = func() bool { return true }
+	if _, err := w.spawn(brain.SpawnRequest{Kind: brain.SpawnClaude, Dir: "app"}); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(w.srv.RequestsFor("pane.send_input")); n != 1 {
+		t.Errorf("send_input requests = %d, want 1", n)
 	}
 }

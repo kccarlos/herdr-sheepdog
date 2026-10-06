@@ -234,6 +234,26 @@ func (s *Server) CloseSubscriptions() {
 	}
 }
 
+// EmitEventsLost ends every subscription the way herdr >= 0.9.2 does for a
+// subscriber that fell behind: an error response with code events_lost,
+// then the connection closes.
+func (s *Server) EmitEventsLost() {
+	s.mu.Lock()
+	conns := make([]*subConn, 0, len(s.subs))
+	for c := range s.subs {
+		conns = append(conns, c)
+	}
+	s.subs = map[*subConn]struct{}{}
+	s.mu.Unlock()
+	line := []byte(`{"id":"","error":{"code":"events_lost","message":"subscriber fell behind"}}` + "\n")
+	for _, c := range conns {
+		c.mu.Lock()
+		_, _ = c.conn.Write(line)
+		c.mu.Unlock()
+		_ = c.conn.Close()
+	}
+}
+
 // EmitStatus updates the table and broadcasts a pane.agent_status_changed
 // event exactly as herdr formats it.
 func (s *Server) EmitStatus(paneID string, st herdr.State) {
