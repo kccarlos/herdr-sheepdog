@@ -8,12 +8,13 @@ on:
 permissions:
   contents: write
 
+# Self-hosted Cloud Run runner by default; CI_RUNNER=ubuntu-latest switches back (infra/ci-runners).
 jobs:
   # Ubuntu only: macOS runners bill at 10x. The darwin binary is released
   # unsigned here and signed + notarized afterwards on a Mac with
   # `make release-sign TAG=<tag>` (docs/signing.md).
   release:
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'cloudrun' }}
     steps:
       - uses: actions/checkout@v7
         with:

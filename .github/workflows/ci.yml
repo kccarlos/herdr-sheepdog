@@ -12,9 +12,11 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# Jobs run on self-hosted runners on Cloud Run worker pools (infra/ci-runners).
+# Switch back to GitHub-hosted: gh variable set CI_RUNNER --body ubuntu-latest
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'cloudrun' }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -25,7 +27,7 @@ jobs:
       - run: go test -race ./...
 
   lint:
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'cloudrun' }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -38,7 +40,7 @@ jobs:
 
   eval:
     # Offline brain eval: fake model, no network, no API keys (make eval).
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'cloudrun' }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -49,7 +51,7 @@ jobs:
 
   policy:
     # Xcode/iOS work runs only on Xcode Cloud; macOS runners are too expensive.
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'cloudrun' }}
     steps:
       - uses: actions/checkout@v7
       - name: No macOS runners or Xcode builds in workflows
@@ -61,7 +63,7 @@ jobs:
           fi
 
   web:
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'cloudrun' }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
@@ -70,7 +72,7 @@ jobs:
       - run: node --test 'web/voice/*.test.mjs' 'web/debug/*.test.mjs'
 
   cross:
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_RUNNER || 'cloudrun' }}
     strategy:
       matrix:
         include:
