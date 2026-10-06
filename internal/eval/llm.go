@@ -31,6 +31,9 @@ const (
 	BackendNone   = "none"
 )
 
+// DefaultJudgeKind is the judge backend when --judge is not given.
+const DefaultJudgeKind = BackendVertex
+
 // DefaultJudgeModel is the Vertex model the judge and the simulated user
 // call. Checked live 2026-10-02 at location global with the project's API
 // key: gemini-3.1-flash-lite and gemini-3.5-flash-lite both answer
@@ -74,10 +77,12 @@ func NewBackend(o BackendOptions, log logging.Logger) (brain.Model, string, erro
 			return nil, "", err
 		}
 		return m, orDefault(o.Model, DefaultOllamaModel), nil
+	case BackendClaude:
+		return &ClaudeCLI{}, orDefault(o.Model, DefaultClaudeModel), nil
 	case BackendFake:
 		return nil, BackendFake, nil
 	}
-	return nil, "", fmt.Errorf("unknown backend %q (vertex, ollama or fake)", o.Kind)
+	return nil, "", fmt.Errorf("unknown backend %q (claude, vertex, ollama or fake)", o.Kind)
 }
 
 // Usage is the token count of one role's calls to one model.
@@ -107,12 +112,17 @@ type Price struct{ In, Out float64 }
 // UnknownPrice (deliberately high, so an unpriced model never reads as
 // free). Ollama is local.
 var Prices = map[string]Price{
-	"gemini-3.1-flash-lite": {In: 0.25, Out: 1.50},
-	"gemini-3.5-flash-lite": {In: 0.25, Out: 1.50},
-	"gemini-3.5-flash":      {In: 0.30, Out: 2.50},
-	"gemini-3.8-flash":      {In: 0.50, Out: 3.00},
-	"deepseek-flash":        {In: 0.30, Out: 0.60},
-	"deepseek-chat":         {In: 0.30, Out: 0.60},
+	"gemini-3.1-flash-lite":  {In: 0.25, Out: 1.50},
+	"gemini-3.5-flash-lite":  {In: 0.25, Out: 1.50},
+	"gemini-3.5-flash":       {In: 0.30, Out: 2.50},
+	"gemini-3.8-flash":       {In: 0.50, Out: 3.00},
+	"gemini-3.1-pro-preview": {In: 2.00, Out: 12.00},
+	// The Claude judge runs through the Claude Code CLI on the user's
+	// subscription: no API spend (its list-price equivalent is in
+	// docs/eval/calibration/README.md).
+	DefaultClaudeModel: {},
+	"deepseek-flash":   {In: 0.30, Out: 0.60},
+	"deepseek-chat":    {In: 0.30, Out: 0.60},
 	// The voice bench (internal/bench): Gemini TTS on Vertex, and the
 	// Live model's session tokens (voice.usage), priced at the native
 	// audio rates on the high side (audio in, audio out) since the log
@@ -318,6 +328,9 @@ func (p *patient) Generate(ctx context.Context, model string, contents []*genai.
 // transient reports whether err is worth retrying: a rate limit, an
 // overloaded or unavailable server, a server-side deadline.
 func transient(err error) bool {
+	if errors.Is(err, ErrClaudeUsageLimit) {
+		return false
+	}
 	if isRateLimited(err) {
 		return true
 	}

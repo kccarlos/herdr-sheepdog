@@ -77,11 +77,15 @@ type LLMJudge struct {
 	// ExplainBelow is the confidence under which a yes also gets a
 	// rationale (default 0.7).
 	ExplainBelow float64
+	// NoRationale skips the second, rationale call: a no carries its
+	// evidence quote as the rationale instead. Halves the calls of a
+	// slow or metered judge (the Claude CLI judge, calibration runs).
+	NoRationale bool
 }
 
 const judgeSystem = `You are a strict, fair evaluator of a voice assistant called sheepdog. Sheepdog supervises coding agents (workers such as Codex or Claude Code running in terminal panes) for a CEO who talks to it by voice, away from the screen. The CEO hears every sheepdog line; they never see the screens.
 
-You get the conversation, ground-truth facts (what the workers' screens really showed and every action the system really sent to a worker), and ONE criterion phrased as a question where "yes" is the good outcome. Decide only that criterion; ignore everything else. Most criteria say when they pass and when they fail, and fail in both directions (too little and too much, doing less and doing more than asked): apply the criterion's own definition, not a general preference for short or long answers.
+You get the conversation, ground-truth facts (what the workers' screens really showed and every action the system really sent to a worker), and ONE criterion phrased as a question where "yes" is the good outcome. Decide only that criterion; ignore everything else. Other criteria are asked separately: charge each flaw only to the criterion that names it (an action nobody asked for belongs to the action criterion, a wrong or invented fact to the fact criteria, an unclear word to the listening criterion), and do not fail this criterion for a flaw it does not name. Most criteria say when they pass and when they fail, and fail in both directions (too little and too much, doing less and doing more than asked): apply the criterion's own definition, not a general preference for short or long answers.
 
 Verdicts:
 - "yes": the criterion is clearly met.
@@ -145,7 +149,12 @@ func (j *LLMJudge) Judge(ctx context.Context, in JudgeInput) (Verdict, error) {
 	if below == 0 {
 		below = 0.7
 	}
-	if ans == AnswerNo || conf < below {
+	switch {
+	case j.NoRationale:
+		if ans == AnswerNo {
+			v.Rationale = v.Evidence
+		}
+	case ans == AnswerNo || conf < below:
 		v.Rationale = j.explain(ctx, user, v)
 	}
 	return v, nil

@@ -232,13 +232,13 @@ var (
 		ID:       "explain_depth_example",
 		Question: "The CEO's last question (%q) asks for an example. Did Sheepdog's answer to it give one?",
 		PassWhen: "it gives a concrete example (a specific case, input, number or event), or says it has none and offers to find out, or hands the question to a worker.",
-		FailWhen: "a general restatement without a specific case; OR code, a pattern or a long list of cases read out instead of one case a listener can picture.",
+		FailWhen: "a general restatement without a specific case, or an analogy in place of a real case from the matter at hand; OR code, a pattern or a long list of cases read out instead of one case a listener can picture.",
 	}
 	explainPaddingItem = RubricItem{
 		ID:       "explain_padding",
 		Question: "The CEO's last question (%q) is a simple one. Was Sheepdog's answer to it the direct answer at the right size?",
-		PassWhen: "the direct answer, with at most one short extra sentence; a short offer at the end is fine.",
-		FailWhen: "too long: it restates the question, adds unasked-for background, details from the screen the CEO did not ask for, or a list of options; OR too thin: no direct answer (only an offer or 'let me check' when the answer was at hand), or the one fact asked for left out.",
+		PassWhen: "the direct answer, naming the item it is about ('the README task is done', not just 'done'), with at most one short extra sentence; a short offer at the end is fine.",
+		FailWhen: "too long: it restates the question, adds unasked-for background, details from the screen the CEO did not ask for, or a list of options; OR too thin: no direct answer (only an offer or 'let me check' when the answer was at hand), or the one fact asked for left out, or a bare 'done' / 'yes' that does not say what it is about.",
 	}
 )
 

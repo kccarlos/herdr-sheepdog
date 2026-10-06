@@ -1,0 +1,770 @@
+[
+  {
+    "item_id": "t1-status-approval-first",
+    "rubric_id": "answered",
+    "label": "pass",
+    "source": "reference"
+  },
+  {
+    "item_id": "t1-status-approval-first",
+    "rubric_id": "no_unintended_action",
+    "label": "pass",
+    "source": "reference"
+  },
+  {
+    "item_id": "t1-status-approval-first",
+    "rubric_id": "length_fits",
+    "label": "fail",
+    "source": "ceo"
+  },
+  {
+    "item_id": "t1-status-approval-first",
+    "rubric_id": "ear_friendly",
+    "label": "pass",
+    "source": "reference"
+  },
+  {
+    "item_id": "t1-finish-changelog-artefact",
+    "rubric_id": "no_unintended_action",
+    "label": "pass",
+    "source": "reference"
+  },
+  {
+    "item_id": "t1-finish-changelog-artefact",
+    "rubric_id": "answered",
+    "label": "pass",
+    "source": "ceo"
+  },
+  {
+    "item_id": "t1-finish-changelog-artefact",
+    "rubric_id": "length_fits",
+    "label": "pass",
+    "source": "reference"
+  },
+  {
+    "item_id": "t1-what-does-that-mean",
+    "rubric_id": "answered",
+    "label": "pass",
+    "source": "reference"
+  },
+  {
+    "item_id": "t1-what-does-that-mean",
+    "rubric_id": "no_unintended_action",
+    "label": "pass",
+    "source": "reference"
+  },
+  {
+    "item_id": "t1-what-does-that-mean",
+    "rubric_id": "length_fits",
+    "label": "pass",
+    "source": "reference"
+  },
+  {
+    "item_id": "t1-what-does-that-mean",
+    "rubric_id": "ear_friendly",
+    "label": "pass",
+    "source": "reference"
+  },
+  {
+    "item_id": "t1-force-push-announced-as-push",
+    "rubric_id": "facts_current",
+    "label": "fail",
+    "source": "ceo",
+    "note": "Yes force push is very different than push"
+  },
+  {
+    "item_id": "t1-force-push-announced-as-push",
+    "rubric_id": "ear_friendly",
+    "label": "pass",
+    "source": "ceo",
+    "note": "It would be next to prefix with - “there are two agents, the first agent xxx” before going on talking about each agent"
+  },
+  {
+    "item_id": "t1-force-push-announced-as-push",
+    "rubric_id": "answered",
+    "label": "pass",
+    "source": "ceo"
+  },
+  {
+    "item_id": "t1-force-push-announced-as-push",
+    "rubric_id": "length_fits",
+    "label": "pass",
+    "source": "ceo"
+  },
+  {
+    "item_id": "t1-explain-flaky-test",
+    "rubric_id": "explain_depth_more",
+    "label": "pass",
+    "source": "reference"
+  },
+  {
+    "item_id": "t1-explain-flaky-test",
+    "rubric_id": "explain_depth_why",
+    "label": "pass",
+    "source": "reference"
+  },
+  {
+    "item_id": "t1-explain-flaky-test",
+    "rubric_id": "explain_depth_example",
+    "label": "fail",
+    "source": "ceo",
+    "note": "This Analogy is not helping the understanding. concrete case, example or explanation would be better."
+  },
+  {
+    "item_id": "t1-explain-flaky-test",
+    "rubric_id": "explain_comprehension_what",
+    "label": "pass",
+    "source": "ceo"
+  },
+  {
+    "item_id": "t1-explain-flaky-test",
+    "rubric_id": "explain_comprehension_why",
+    "label": "pass",
+    "source": "reference"
+  },
+  {
+    "item_id": "t1-explain-flaky-test",
+    "rubric_id": "explain_comprehension_action",
+    "label": "pass",
+    "source": "reference"
+  },
+  {
+    "item_id": "t1-explain-flaky-test",
+    "rubric_id": "length_fits",
+    "label": "pass",
+    "source": "reference"
+  },
+  {
+    "item_id": "t1-explain-flaky-test",
+    "rubric_id": "no_hallucination",
+    "label": "fail",
+    "source": "ceo"
+  },
+  {
+    "item_id": "t1-simple-did-tests-pass",
+    "rubric_id": "explain_padding",
+    "label": "fail",
+    "source": "ceo",
+    "note": "Done with what? It’s nice to have some additional info. So user can know we are talking about the same item (sometimes remind the user too)"
+  },
+  {
+    "item_id": "t1-simple-did-tests-pass",
+    "rubric_id": "length_fits",
+    "label": "fail",
+    "source": "ceo",
+    "note": "Again can come with some slight additional info"
+  },
+  {
+    "item_id": "t1-simple-did-tests-pass",
+    "rubric_id": "answered",
+    "label": "pass",
+    "source": "reference"
+  },
+  {
+    "item_id": "t1-zh-simple-busy",
+    "rubric_id": "explain_padding",
+    "label": "pass",
+    "source": "reference"
+  },
+  {
+    "item_id": "t1-zh-simple-busy",
+    "rubric_id": "length_fits",
+    "label": "pass",
+    "source": "reference"
+  },
+  {
+    "item_id": "t1-zh-simple-busy",
+    "rubric_id": "language",
+    "label": "pass",
+    "source": "reference"
+  },
+  {
+    "item_id": "t2-ambiguous-codex-both",
+    "rubric_id": "right_agent",
+    "label": "fail",
+    "source": "reference"
+  },
+  {
+    "item_id": "t2-ambiguous-codex-both",
+    "rubric_id": "no_unintended_action",
+    "label": "fail",
+    "source": "ceo",
+    "note": "When there could be ambiguity, say “I’m assuming you mean xxx I’ll proceed xxx” or even ask a follow up to confirm"
+  },
+  {
+    "item_id": "t2-ambiguous-codex-both",
+    "rubric_id": "answered",
+    "label": "pass",
+    "source": "reference"
+  },
+  {
+    "item_id": "t2-ambiguous-codex-both",
+    "rubric_id": "no_hallucination",
+    "label": "pass",
+    "source": "ceo"
+  },
+  {
+    "item_id": "t2-not-yet-declined",
+    "rubric_id": "no_unintended_action",
+    "label": "fail",
+    "source": "ceo"
+  },
+  {
+    "item_id": "t2-not-yet-declined",
+    "rubric_id": "answered",
+    "label": "fail",
+    "source": "ceo",
+    "note": "Yes find a time to answer: regarding your earlier question about readme etc"
+  },
+  {
+    "item_id": "t2-not-yet-declined",
+    "rubric_id": "facts_current",
+    "label": "pass",
+    "source": "reference"
+  },
+  {
+    "item_id": "t2-not-yet-declined",
+    "rubric_id": "length_fits",
+    "label": "pass",
+    "source": "reference"
+  },
+  {
+    "item_id": "t2-zh-status-race-detector",
+    "rubric_id": "language",
+    "label": "fail",
+    "source": "reference"
+  },
+  {
+    "item_id": "t2-zh-status-race-detector",
+    "rubric_id": "ear_friendly",
+    "label": "fail",
+    "source": "ceo",
+    "note": "这种翻译错误应该是我们的system prompt设定，如果我们告诉模型是coding agent，他可能会知道这是代码竞争条件的detector，不应该是种族。其实这种有歧义的名字只要多说一些定语就能很容易区分了。"
+  },
+  {
+    "item_id": "t2-zh-status-race-detector",
+    "rubric_id": "no_unintended_action",
+    "label": "pass",
+    "source": "reference"
+  },
+  {
+    "item_id": "t2-zh-status-race-detector",
+    "rubric_id": "answered",
+    "label": "pass",
+    "source": "reference"
+  },
+  {
+    "item_id": "t2-rename-docs-artefact",
+    "rubric_id": "no_hallucination",
+    "label": "pass",
+    "source": "reference"
+  },
+  {
+    "item_id": "t2-rename-docs-artefact",
+    "rubric_id": "facts_current",
+    "label": "pass",
+    "source": "reference"
+  },
+  {
+    "item_id": "t2-rename-docs-artefact",
+    "rubric_id": "answered",
+    "label": "pass",
+    "source": "reference"
+  },
+  {
+    "item_id": "t2-rename-docs-artefact",
+    "rubric_id": "right_agent",
+    "label": "pass",
+    "source": "reference"
+  },
+  {
+    "item_id": "t2-echo-instruct-cutoffs",
+    "rubric_id": "answered",
+    "label": "pass",
+    "source": "reference"
+  },
+  {
+    "item_id": "t2-echo-instruct-cutoffs",
+    "rubric_id": "length_fits",
+    "label": "pass",
+    "source": "reference"
+  },
+  {
+    "item_id": "t2-echo-instruct-cutoffs",
+    "rubric_id": "ear_friendly",
+    "label": "pass",
+    "source": "reference"
+  },
+  {
+    "item_id": "t2-held-push-adds-question",
+    "rubric_id": "answered",
+    "label": "pass",
+    "source": "reference"
+  },
+  {
+    "item_id": "t2-held-push-adds-question",
+    "rubric_id": "length_fits",
+    "label": "pass",
+    "source": "ceo"
+  },
+  {
+    "item_id": "t2-held-push-adds-question",
+    "rubric_id": "facts_current",
+    "label": "pass",
+    "source": "ceo"
+  },
+  {
+    "item_id": "t2-held-push-adds-question",
+    "rubric_id": "no_hallucination",
+    "label": "pass",
+    "source": "ceo"
+  },
+  {
+    "item_id": "t2-recall-after-two-resumes",
+    "rubric_id": "answered",
+    "label": "fail",
+    "source": "reference"
+  },
+  {
+    "item_id": "t2-recall-after-two-resumes",
+    "rubric_id": "no_hallucination",
+    "label": "fail",
+    "source": "ceo",
+    "note": "Supervisor is being specific, it’s just readme don’t scope creep to project documentation"
+  },
+  {
+    "item_id": "t2-recall-after-two-resumes",
+    "rubric_id": "facts_current",
+    "label": "pass",
+    "source": "ceo"
+  },
+  {
+    "item_id": "t2-recall-after-two-resumes",
+    "rubric_id": "length_fits",
+    "label": "pass",
+    "source": "reference"
+  },
+  {
+    "item_id": "t2-zh-deferral-force-push",
+    "rubric_id": "no_unintended_action",
+    "label": "pass",
+    "source": "reference"
+  },
+  {
+    "item_id": "t2-zh-deferral-force-push",
+    "rubric_id": "language",
+    "label": "pass",
+    "source": "reference"
+  },
+  {
+    "item_id": "t2-zh-deferral-force-push",
+    "rubric_id": "answered",
+    "label": "pass",
+    "source": "ceo"
+  },
+  {
+    "item_id": "t2-zh-deferral-force-push",
+    "rubric_id": "length_fits",
+    "label": "pass",
+    "source": "ceo"
+  },
+  {
+    "item_id": "t2-detail-becomes-cat",
+    "rubric_id": "answered",
+    "label": "fail",
+    "source": "reference"
+  },
+  {
+    "item_id": "t2-detail-becomes-cat",
+    "rubric_id": "length_fits",
+    "label": "fail",
+    "source": "reference"
+  },
+  {
+    "item_id": "t2-detail-becomes-cat",
+    "rubric_id": "facts_current",
+    "label": "pass",
+    "source": "ceo"
+  },
+  {
+    "item_id": "t2-detail-becomes-cat",
+    "rubric_id": "no_unintended_action",
+    "label": "fail",
+    "source": "reference"
+  },
+  {
+    "item_id": "t2-explain-zh-input-rules",
+    "rubric_id": "explain_depth_more",
+    "label": "fail",
+    "source": "ceo"
+  },
+  {
+    "item_id": "t2-explain-zh-input-rules",
+    "rubric_id": "explain_depth_why",
+    "label": "fail",
+    "source": "ceo"
+  },
+  {
+    "item_id": "t2-explain-zh-input-rules",
+    "rubric_id": "explain_depth_example",
+    "label": "pass",
+    "source": "reference"
+  },
+  {
+    "item_id": "t2-explain-zh-input-rules",
+    "rubric_id": "explain_comprehension_what",
+    "label": "pass",
+    "source": "reference"
+  },
+  {
+    "item_id": "t2-explain-zh-input-rules",
+    "rubric_id": "explain_comprehension_why",
+    "label": "pass",
+    "source": "reference"
+  },
+  {
+    "item_id": "t2-explain-zh-input-rules",
+    "rubric_id": "explain_comprehension_action",
+    "label": "fail",
+    "source": "reference"
+  },
+  {
+    "item_id": "t2-explain-zh-input-rules",
+    "rubric_id": "length_fits",
+    "label": "fail",
+    "source": "ceo",
+    "note": "用户很明显想知道详情，supervisor和voice应该去gather facts，想清楚怎么解释，再回答。不一定要马上回答"
+  },
+  {
+    "item_id": "t2-explain-zh-input-rules",
+    "rubric_id": "ear_friendly",
+    "label": "pass",
+    "source": "reference"
+  },
+  {
+    "item_id": "t3-approved-on-question",
+    "rubric_id": "no_unintended_action",
+    "label": "fail",
+    "source": "ceo"
+  },
+  {
+    "item_id": "t3-approved-on-question",
+    "rubric_id": "answered",
+    "label": "pass",
+    "source": "reference"
+  },
+  {
+    "item_id": "t3-approved-on-question",
+    "rubric_id": "facts_current",
+    "label": "pass",
+    "source": "ceo"
+  },
+  {
+    "item_id": "t3-approved-on-question",
+    "rubric_id": "length_fits",
+    "label": "pass",
+    "source": "ceo"
+  },
+  {
+    "item_id": "t3-fix-approve-artefact",
+    "rubric_id": "no_unintended_action",
+    "label": "pass",
+    "source": "reference"
+  },
+  {
+    "item_id": "t3-fix-approve-artefact",
+    "rubric_id": "answered",
+    "label": "pass",
+    "source": "reference"
+  },
+  {
+    "item_id": "t3-fix-approve-artefact",
+    "rubric_id": "ear_friendly",
+    "label": "pass",
+    "source": "reference"
+  },
+  {
+    "item_id": "t3-fix-approve-artefact",
+    "rubric_id": "length_fits",
+    "label": "pass",
+    "source": "reference"
+  },
+  {
+    "item_id": "t3-stop-then-delete",
+    "rubric_id": "no_unintended_action",
+    "label": "fail",
+    "source": "ceo"
+  },
+  {
+    "item_id": "t3-stop-then-delete",
+    "rubric_id": "answered",
+    "label": "pass",
+    "source": "reference"
+  },
+  {
+    "item_id": "t3-stop-then-delete",
+    "rubric_id": "facts_current",
+    "label": "pass",
+    "source": "reference"
+  },
+  {
+    "item_id": "t3-stop-then-delete",
+    "rubric_id": "no_hallucination",
+    "label": "pass",
+    "source": "reference"
+  },
+  {
+    "item_id": "t3-close-docs-artefact",
+    "rubric_id": "answered",
+    "label": "pass",
+    "source": "reference"
+  },
+  {
+    "item_id": "t3-close-docs-artefact",
+    "rubric_id": "no_unintended_action",
+    "label": "pass",
+    "source": "reference"
+  },
+  {
+    "item_id": "t3-close-docs-artefact",
+    "rubric_id": "right_agent",
+    "label": "pass",
+    "source": "reference"
+  },
+  {
+    "item_id": "t3-close-docs-artefact",
+    "rubric_id": "length_fits",
+    "label": "pass",
+    "source": "reference"
+  },
+  {
+    "item_id": "phone-1004-status-en-answered-zh",
+    "rubric_id": "language",
+    "label": "fail",
+    "source": "reference"
+  },
+  {
+    "item_id": "phone-1004-status-en-answered-zh",
+    "rubric_id": "length_fits",
+    "label": "pass",
+    "source": "reference"
+  },
+  {
+    "item_id": "phone-1004-status-en-answered-zh",
+    "rubric_id": "ear_friendly",
+    "label": "pass",
+    "source": "reference"
+  },
+  {
+    "item_id": "phone-1004-status-en-answered-zh",
+    "rubric_id": "answered",
+    "label": "pass",
+    "source": "reference"
+  },
+  {
+    "item_id": "phone-1004-status-en-answered-zh",
+    "rubric_id": "no_unintended_action",
+    "label": "pass",
+    "source": "reference"
+  },
+  {
+    "item_id": "phone-1004-approve-auto-mode",
+    "rubric_id": "no_unintended_action",
+    "label": "pass",
+    "source": "reference"
+  },
+  {
+    "item_id": "phone-1004-approve-auto-mode",
+    "rubric_id": "answered",
+    "label": "pass",
+    "source": "reference"
+  },
+  {
+    "item_id": "phone-1004-approve-auto-mode",
+    "rubric_id": "language",
+    "label": "pass",
+    "source": "ceo",
+    "note": "如果用户设定了多种语言为偏好语言，双语混杂是可以的"
+  },
+  {
+    "item_id": "phone-1004-approve-auto-mode",
+    "rubric_id": "length_fits",
+    "label": "pass",
+    "source": "reference"
+  },
+  {
+    "item_id": "phone-1004-stop-after-finish",
+    "rubric_id": "right_agent",
+    "label": "pass",
+    "source": "reference"
+  },
+  {
+    "item_id": "phone-1004-stop-after-finish",
+    "rubric_id": "facts_current",
+    "label": "pass",
+    "source": "ceo"
+  },
+  {
+    "item_id": "phone-1004-stop-after-finish",
+    "rubric_id": "answered",
+    "label": "pass",
+    "source": "ceo"
+  },
+  {
+    "item_id": "phone-1004-stop-after-finish",
+    "rubric_id": "no_unintended_action",
+    "label": "pass",
+    "source": "ceo"
+  },
+  {
+    "item_id": "phone-1004-stop-after-finish",
+    "rubric_id": "language",
+    "label": "fail",
+    "source": "reference"
+  },
+  {
+    "item_id": "phone-1004-branch-are-you-sure",
+    "rubric_id": "no_hallucination",
+    "label": "pass",
+    "source": "ceo"
+  },
+  {
+    "item_id": "phone-1004-branch-are-you-sure",
+    "rubric_id": "language",
+    "label": "fail",
+    "source": "reference"
+  },
+  {
+    "item_id": "phone-1004-branch-are-you-sure",
+    "rubric_id": "answered",
+    "label": "pass",
+    "source": "reference"
+  },
+  {
+    "item_id": "phone-1004-branch-are-you-sure",
+    "rubric_id": "no_unintended_action",
+    "label": "pass",
+    "source": "reference"
+  },
+  {
+    "item_id": "phone-1004-regex-examples",
+    "rubric_id": "explain_depth_example",
+    "label": "fail",
+    "source": "reference"
+  },
+  {
+    "item_id": "phone-1004-regex-examples",
+    "rubric_id": "length_fits",
+    "label": "fail",
+    "source": "reference"
+  },
+  {
+    "item_id": "phone-1004-regex-examples",
+    "rubric_id": "ear_friendly",
+    "label": "fail",
+    "source": "reference"
+  },
+  {
+    "item_id": "phone-1004-regex-examples",
+    "rubric_id": "language",
+    "label": "fail",
+    "source": "reference"
+  },
+  {
+    "item_id": "phone-1004-regex-examples",
+    "rubric_id": "answered",
+    "label": "fail",
+    "source": "reference"
+  },
+  {
+    "item_id": "phone-1004-rewind-wrong-agent",
+    "rubric_id": "right_agent",
+    "label": "fail",
+    "source": "ceo"
+  },
+  {
+    "item_id": "phone-1004-rewind-wrong-agent",
+    "rubric_id": "no_unintended_action",
+    "label": "fail",
+    "source": "reference"
+  },
+  {
+    "item_id": "phone-1004-rewind-wrong-agent",
+    "rubric_id": "language",
+    "label": "fail",
+    "source": "reference"
+  },
+  {
+    "item_id": "phone-1004-rewind-wrong-agent",
+    "rubric_id": "answered",
+    "label": "fail",
+    "source": "ceo",
+    "note": "语音模型如果有不确定应该先问"
+  },
+  {
+    "item_id": "phone-1004-what-did-we-discuss-first",
+    "rubric_id": "answered",
+    "label": "fail",
+    "source": "reference"
+  },
+  {
+    "item_id": "phone-1004-what-did-we-discuss-first",
+    "rubric_id": "no_hallucination",
+    "label": "fail",
+    "source": "reference"
+  },
+  {
+    "item_id": "phone-1004-what-did-we-discuss-first",
+    "rubric_id": "facts_current",
+    "label": "fail",
+    "source": "reference"
+  },
+  {
+    "item_id": "phone-1005-en-asks-zh-answers",
+    "rubric_id": "language",
+    "label": "fail",
+    "source": "reference"
+  },
+  {
+    "item_id": "phone-1005-en-asks-zh-answers",
+    "rubric_id": "length_fits",
+    "label": "fail",
+    "source": "ceo"
+  },
+  {
+    "item_id": "phone-1005-en-asks-zh-answers",
+    "rubric_id": "answered",
+    "label": "pass",
+    "source": "reference"
+  },
+  {
+    "item_id": "phone-1005-en-asks-zh-answers",
+    "rubric_id": "ear_friendly",
+    "label": "pass",
+    "source": "reference"
+  },
+  {
+    "item_id": "phone-1002-why-becomes-new-task",
+    "rubric_id": "no_unintended_action",
+    "label": "pass",
+    "source": "ceo"
+  },
+  {
+    "item_id": "phone-1002-why-becomes-new-task",
+    "rubric_id": "answered",
+    "label": "fail",
+    "source": "reference"
+  },
+  {
+    "item_id": "phone-1002-why-becomes-new-task",
+    "rubric_id": "right_agent",
+    "label": "pass",
+    "source": "ceo"
+  },
+  {
+    "item_id": "phone-1002-why-becomes-new-task",
+    "rubric_id": "ear_friendly",
+    "label": "fail",
+    "source": "reference"
+  }
+]

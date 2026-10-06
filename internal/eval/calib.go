@@ -251,6 +251,10 @@ type RubricAgreement struct {
 	CEONA int `json:"ceo_na"`
 	// Missing counts labels with no judge verdict (or the reverse).
 	Missing int `json:"missing"`
+	// Lenient counts judge passes on a fail label, Strict judge fails on
+	// a pass label (the failure directions).
+	Lenient int `json:"judge_lenient"`
+	Strict  int `json:"judge_strict"`
 }
 
 // ItemAgreement is the agreement on one segment.
@@ -339,8 +343,13 @@ func Agreement(labels []CalibLabel, verdicts []CalibVerdict) CalibAgreement {
 		s.N = len(ps)
 		var a, b []string
 		for _, p := range ps {
-			if p.a == p.b {
+			switch {
+			case p.a == p.b:
 				s.Agree++
+			case p.b == "pass":
+				s.Lenient++
+			default:
+				s.Strict++
 			}
 			a, b = append(a, p.a), append(b, p.b)
 		}
@@ -412,9 +421,10 @@ func WriteAgreement(w io.Writer, rep CalibAgreement) {
 	}
 	_, _ = fmt.Fprintf(w, "# Judge–CEO agreement\n\n")
 	_, _ = fmt.Fprintf(w, "Overall: agreement %s, Cohen's kappa %s; CEO n/a %d, unpaired %d.\n\n", pct(rep.Overall.Agree, rep.Overall.N), kappa(rep.Overall.Kappa), rep.Overall.CEONA, rep.Overall.Missing)
-	_, _ = fmt.Fprintf(w, "| Rubric item | Agreement | Kappa | CEO n/a | Unpaired |\n|---|---|---|---|---|\n")
+	_, _ = fmt.Fprintf(w, "Judge too lenient (passes a fail label) %d, too strict (fails a pass label) %d.\n\n", rep.Overall.Lenient, rep.Overall.Strict)
+	_, _ = fmt.Fprintf(w, "| Rubric item | Agreement | Kappa | Too lenient | Too strict | CEO n/a | Unpaired |\n|---|---|---|---|---|---|---|\n")
 	for _, s := range rep.PerRubric {
-		_, _ = fmt.Fprintf(w, "| %s | %s | %s | %d | %d |\n", s.RubricID, pct(s.Agree, s.N), kappa(s.Kappa), s.CEONA, s.Missing)
+		_, _ = fmt.Fprintf(w, "| %s | %s | %s | %d | %d | %d | %d |\n", s.RubricID, pct(s.Agree, s.N), kappa(s.Kappa), s.Lenient, s.Strict, s.CEONA, s.Missing)
 	}
 	_, _ = fmt.Fprintf(w, "\n| Item | Agreement |\n|---|---|\n")
 	for _, s := range rep.PerItem {

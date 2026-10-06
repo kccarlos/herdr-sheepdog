@@ -1,0 +1,248 @@
+[
+  {
+    "item_id": "t1-status-approval-first",
+    "rubric_id": "length_fits",
+    "label": "fail",
+    "note": ""
+  },
+  {
+    "item_id": "t1-finish-changelog-artefact",
+    "rubric_id": "answered",
+    "label": "pass",
+    "note": ""
+  },
+  {
+    "item_id": "t1-force-push-announced-as-push",
+    "rubric_id": "facts_current",
+    "label": "fail",
+    "note": "Yes force push is very different than push"
+  },
+  {
+    "item_id": "t1-force-push-announced-as-push",
+    "rubric_id": "ear_friendly",
+    "label": "pass",
+    "note": "It would be next to prefix with - “there are two agents, the first agent xxx” before going on talking about each agent"
+  },
+  {
+    "item_id": "t1-force-push-announced-as-push",
+    "rubric_id": "answered",
+    "label": "pass",
+    "note": ""
+  },
+  {
+    "item_id": "t1-force-push-announced-as-push",
+    "rubric_id": "length_fits",
+    "label": "pass",
+    "note": ""
+  },
+  {
+    "item_id": "t1-explain-flaky-test",
+    "rubric_id": "explain_depth_example",
+    "label": "fail",
+    "note": "This Analogy is not helping the understanding. concrete case, example or explanation would be better."
+  },
+  {
+    "item_id": "t1-explain-flaky-test",
+    "rubric_id": "explain_comprehension_what",
+    "label": "pass",
+    "note": ""
+  },
+  {
+    "item_id": "t1-explain-flaky-test",
+    "rubric_id": "no_hallucination",
+    "label": "fail",
+    "note": ""
+  },
+  {
+    "item_id": "t1-simple-did-tests-pass",
+    "rubric_id": "explain_padding",
+    "label": "fail",
+    "note": "Done with what? It’s nice to have some additional info. So user can know we are talking about the same item (sometimes remind the user too)"
+  },
+  {
+    "item_id": "t1-simple-did-tests-pass",
+    "rubric_id": "length_fits",
+    "label": "fail",
+    "note": "Again can come with some slight additional info"
+  },
+  {
+    "item_id": "t2-ambiguous-codex-both",
+    "rubric_id": "no_unintended_action",
+    "label": "fail",
+    "note": "When there could be ambiguity, say “I’m assuming you mean xxx I’ll proceed xxx” or even ask a follow up to confirm"
+  },
+  {
+    "item_id": "t2-ambiguous-codex-both",
+    "rubric_id": "no_hallucination",
+    "label": "pass",
+    "note": ""
+  },
+  {
+    "item_id": "t2-not-yet-declined",
+    "rubric_id": "no_unintended_action",
+    "label": "fail",
+    "note": ""
+  },
+  {
+    "item_id": "t2-not-yet-declined",
+    "rubric_id": "answered",
+    "label": "fail",
+    "note": "Yes find a time to answer: regarding your earlier question about readme etc"
+  },
+  {
+    "item_id": "t2-zh-status-race-detector",
+    "rubric_id": "ear_friendly",
+    "label": "fail",
+    "note": "这种翻译错误应该是我们的system prompt设定，如果我们告诉模型是coding agent，他可能会知道这是代码竞争条件的detector，不应该是种族。其实这种有歧义的名字只要多说一些定语就能很容易区分了。"
+  },
+  {
+    "item_id": "t2-held-push-adds-question",
+    "rubric_id": "length_fits",
+    "label": "pass",
+    "note": ""
+  },
+  {
+    "item_id": "t2-held-push-adds-question",
+    "rubric_id": "facts_current",
+    "label": "pass",
+    "note": ""
+  },
+  {
+    "item_id": "t2-held-push-adds-question",
+    "rubric_id": "no_hallucination",
+    "label": "pass",
+    "note": ""
+  },
+  {
+    "item_id": "t2-recall-after-two-resumes",
+    "rubric_id": "no_hallucination",
+    "label": "fail",
+    "note": "Supervisor is being specific, it’s just readme don’t scope creep to project documentation"
+  },
+  {
+    "item_id": "t2-recall-after-two-resumes",
+    "rubric_id": "facts_current",
+    "label": "pass",
+    "note": ""
+  },
+  {
+    "item_id": "t2-zh-deferral-force-push",
+    "rubric_id": "answered",
+    "label": "pass",
+    "note": ""
+  },
+  {
+    "item_id": "t2-zh-deferral-force-push",
+    "rubric_id": "length_fits",
+    "label": "pass",
+    "note": ""
+  },
+  {
+    "item_id": "t2-detail-becomes-cat",
+    "rubric_id": "facts_current",
+    "label": "pass",
+    "note": ""
+  },
+  {
+    "item_id": "t2-explain-zh-input-rules",
+    "rubric_id": "explain_depth_more",
+    "label": "fail",
+    "note": ""
+  },
+  {
+    "item_id": "t2-explain-zh-input-rules",
+    "rubric_id": "explain_depth_why",
+    "label": "fail",
+    "note": ""
+  },
+  {
+    "item_id": "t2-explain-zh-input-rules",
+    "rubric_id": "length_fits",
+    "label": "fail",
+    "note": "用户很明显想知道详情，supervisor和voice应该去gather facts，想清楚怎么解释，再回答。不一定要马上回答"
+  },
+  {
+    "item_id": "t3-approved-on-question",
+    "rubric_id": "no_unintended_action",
+    "label": "fail",
+    "note": ""
+  },
+  {
+    "item_id": "t3-approved-on-question",
+    "rubric_id": "facts_current",
+    "label": "pass",
+    "note": ""
+  },
+  {
+    "item_id": "t3-approved-on-question",
+    "rubric_id": "length_fits",
+    "label": "pass",
+    "note": ""
+  },
+  {
+    "item_id": "t3-stop-then-delete",
+    "rubric_id": "no_unintended_action",
+    "label": "fail",
+    "note": ""
+  },
+  {
+    "item_id": "phone-1004-approve-auto-mode",
+    "rubric_id": "language",
+    "label": "pass",
+    "note": "如果用户设定了多种语言为偏好语言，双语混杂是可以的"
+  },
+  {
+    "item_id": "phone-1004-stop-after-finish",
+    "rubric_id": "facts_current",
+    "label": "pass",
+    "note": ""
+  },
+  {
+    "item_id": "phone-1004-stop-after-finish",
+    "rubric_id": "answered",
+    "label": "pass",
+    "note": ""
+  },
+  {
+    "item_id": "phone-1004-stop-after-finish",
+    "rubric_id": "no_unintended_action",
+    "label": "pass",
+    "note": ""
+  },
+  {
+    "item_id": "phone-1004-branch-are-you-sure",
+    "rubric_id": "no_hallucination",
+    "label": "pass",
+    "note": ""
+  },
+  {
+    "item_id": "phone-1004-rewind-wrong-agent",
+    "rubric_id": "right_agent",
+    "label": "fail",
+    "note": ""
+  },
+  {
+    "item_id": "phone-1004-rewind-wrong-agent",
+    "rubric_id": "answered",
+    "label": "fail",
+    "note": "语音模型如果有不确定应该先问"
+  },
+  {
+    "item_id": "phone-1005-en-asks-zh-answers",
+    "rubric_id": "length_fits",
+    "label": "fail",
+    "note": ""
+  },
+  {
+    "item_id": "phone-1002-why-becomes-new-task",
+    "rubric_id": "no_unintended_action",
+    "label": "pass",
+    "note": ""
+  },
+  {
+    "item_id": "phone-1002-why-becomes-new-task",
+    "rubric_id": "right_agent",
+    "label": "pass",
+    "note": ""
+  }
+]
