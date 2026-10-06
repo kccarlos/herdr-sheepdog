@@ -1,0 +1,22 @@
+ ▐▛███▛█   Claude Code v2.1.288
+▝▜██████▀  Opus 5 (1M context) · Claude Max
+  ▝▝ ▝▝    ~/work/shop
+
+
+❯ Implement the new shipping price table.
+
+⏺ The table is in. One rule is unclear: what happens to orders exactly at the free-shipping threshold.
+────────────────────────────────────────────────────────────────────────────────────────
+ ☐ Free shipping
+
+Orders of exactly $50.00: free shipping or not?
+
+❯ 1. Free at $50.00 and above
+     Matches the marketing copy ("free shipping from $50").
+  2. Free only above $50.00
+     Matches the old code; about 2% of orders sit exactly at $50.
+  3. Type something.
+────────────────────────────────────────────────────────────────────────────────────────
+  4. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc to cancel

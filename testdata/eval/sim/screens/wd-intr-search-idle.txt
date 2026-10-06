@@ -1,0 +1,14 @@
+ ▐▛███▛█   Claude Code v2.1.288
+▝▜██████▀  Opus 5 (1M context) · Claude Max
+  ▝▝ ▝▝    ~/work/search
+
+
+❯ Add typo tolerance to product search.
+
+⏺ Done: typo tolerance (one edit distance) for queries over 4 letters; relevance eval
+  up from 0.71 to 0.76. Nothing needs a decision.
+
+────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ accept edits on · ? for shortcuts

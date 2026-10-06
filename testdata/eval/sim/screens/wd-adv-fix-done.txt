@@ -1,0 +1,16 @@
+ ▐▛███▛█   Claude Code v2.1.288
+▝▜██████▀  Opus 5 (1M context) · Claude Max
+  ▝▝ ▝▝    ~/work/app-ios
+
+
+❯ Fix the coupon field that clears on iPhone when the keyboard closes.
+
+⏺ Ran CouponFieldTests: 6 of 6 pass on iPhone 15 and SE simulators.
+
+⏺ Fixed: the coupon field keeps its code when the keyboard closes. Ready for a 2.3.2
+  build. Nothing else needs a decision.
+
+────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ accept edits on · ? for shortcuts

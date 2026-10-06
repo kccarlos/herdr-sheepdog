@@ -1,0 +1,14 @@
+ ▐▛███▛█   Claude Code v2.1.288
+▝▜██████▀  Opus 5 (1M context) · Claude Max
+  ▝▝ ▝▝    ~/work/analytics
+
+
+❯ Chart checkout conversion by platform for the last 14 days.
+
+⏺ Conversion on iOS fell from 3.1% to 2.2% after Monday; Android and web are flat.
+  The drop lines up with the iOS 2.3.1 release. Chart saved to reports/conversion.png.
+
+────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ accept edits on · ? for shortcuts

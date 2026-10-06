@@ -1,0 +1,24 @@
+╭──────────────────────────────────────────────────────╮
+│ >_ OpenAI Codex (v0.154.0)                           │
+│                                                      │
+│ model:     gpt-5.6-luna max   /model to change       │
+│ directory: ~/work/shop                               │
+╰──────────────────────────────────────────────────────╯
+
+› Prepare the 2.4 release on staging.
+
+• The image is built and tested. Next: roll it out to staging (production is not touched).
+
+  Would you like to run the following command?
+
+  Environment: local
+
+  Reason: Deploy shop:2.4.0-rc1 to the staging cluster.
+
+  $ kubectl --context staging set image deploy/shop shop=shop:2.4.0-rc1
+
+› 1. Yes, proceed (y)
+  2. Yes, and don't ask again for commands that start with `kubectl --context staging set image deploy/shop shop=shop:2.4.0-rc1` (p)
+  3. No, and tell Codex what to do differently (esc)
+
+  Press enter to confirm or esc to cancel

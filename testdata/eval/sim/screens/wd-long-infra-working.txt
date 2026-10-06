@@ -1,0 +1,16 @@
+╭──────────────────────────────────────────────────────╮
+│ >_ OpenAI Codex (v0.154.0)                           │
+│                                                      │
+│ model:     gpt-5.6-luna max   /model to change       │
+│ directory: ~/work/infra                              │
+╰──────────────────────────────────────────────────────╯
+
+› Rotate the TLS certificates on the load balancers.
+
+• Requested new certificates for shop.example.com
+
+• Working (2m 00s (esc to interrupt)
+
+› Ask Codex to do anything
+
+  gpt-5.6-luna max · ~/work/infra

@@ -1,0 +1,14 @@
+ ▐▛███▛█   Claude Code v2.1.288
+▝▜██████▀  Opus 5 (1M context) · Claude Max
+  ▝▝ ▝▝    ~/work/infra
+
+
+❯ Check the nightly backup job.
+
+⏺ The nightly backup finished at 03:12: 48 GB, verified restore of a sample table.
+  Nothing needs a decision.
+
+────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ accept edits on · ? for shortcuts

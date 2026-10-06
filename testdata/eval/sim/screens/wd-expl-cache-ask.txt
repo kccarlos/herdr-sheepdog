@@ -1,0 +1,22 @@
+ ▐▛███▛█   Claude Code v2.1.288
+▝▜██████▀  Opus 5 (1M context) · Claude Max
+  ▝▝ ▝▝    ~/work/shop
+
+
+❯ Propose how to cache product pages.
+
+⏺ Two designs work; they trade cost against freshness.
+────────────────────────────────────────────────────────────────────────────────────────
+ ☐ Cache design
+
+Which product page cache should I build?
+
+❯ 1. CDN edge cache, 5-minute TTL
+     About $300/month; prices can be up to 5 minutes stale after a change.
+  2. Redis cache with purge on change
+     About $900/month and 2 days of work; always fresh.
+  3. Type something.
+────────────────────────────────────────────────────────────────────────────────────────
+  4. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc to cancel

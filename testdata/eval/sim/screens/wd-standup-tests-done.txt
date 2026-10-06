@@ -1,0 +1,21 @@
+╭──────────────────────────────────────────────────────╮
+│ >_ OpenAI Codex (v0.154.0)                           │
+│                                                      │
+│ model:     gpt-5.6-luna max   /model to change       │
+│ directory: ~/work/shop                               │
+╰──────────────────────────────────────────────────────╯
+
+› Run the full test suite on main and tell me what fails.
+
+• Ran go test ./... (412 tests)
+  └ --- FAIL: TestRefundWindow (0.00s)
+        refund_test.go:31: refund allowed = false, want true
+
+• 411 of 412 tests pass. TestRefundWindow fails: it builds its dates with time.Now()
+  in the machine's local time zone, so between midnight and 1 a.m. UTC the 'yesterday'
+  order falls outside the 30-day window. The refund code is correct; the test is not.
+  Fix: build the dates in UTC (two lines). I have not changed anything.
+
+› Ask Codex to do anything
+
+  gpt-5.6-luna max · ~/work/shop

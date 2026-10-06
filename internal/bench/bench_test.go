@@ -41,8 +41,8 @@ func TestDatasetLoads(t *testing.T) {
 		if s.Opening == "" {
 			t.Errorf("%s: no opening (the first line is pinned)", s.ID)
 		}
-		if len(s.Script) == 0 {
-			t.Errorf("%s: no script for the offline scripted CEO", s.ID)
+		if len(s.Script) == 0 && len(s.Agenda) == 0 {
+			t.Errorf("%s: no script or agenda for the offline scripted CEO", s.ID)
 		}
 	}
 	m, err := LoadManifest("../../testdata/bench/openings.json")

@@ -1,0 +1,15 @@
+╭──────────────────────────────────────────────────────╮
+│ >_ OpenAI Codex (v0.154.0)                           │
+│                                                      │
+│ model:     gpt-5.6-luna max   /model to change       │
+│ directory: ~/work/app-ios                            │
+╰──────────────────────────────────────────────────────╯
+
+› Look at the top crash.
+
+• CartView force-unwraps coupon.code; an empty coupon from the 2.3.1 coupon field change
+  is nil. Fixed with a guard and a test. Ready for a 2.3.2 build.
+
+› Ask Codex to do anything
+
+  gpt-5.6-luna max · ~/work/app-ios

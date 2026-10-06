@@ -140,9 +140,13 @@ func (w *World) since() int64 { return time.Since(w.start).Milliseconds() }
 
 // AfterTurn fires the cues waiting on the CEO's nth utterance (call it
 // once the answer to that utterance has been heard).
-func (w *World) AfterTurn(n int) {
+func (w *World) AfterTurn(n int) { w.AfterTurnBeat(n, 0) }
+
+// AfterTurnBeat is AfterTurn that also fires the cues waiting on the
+// agenda beat the utterance carried out (0: none).
+func (w *World) AfterTurnBeat(n, beat int) {
 	for i, e := range w.sc.Events {
-		if e.AfterTurn == n {
+		if e.AfterTurn == n || (beat > 0 && e.AfterBeat == beat) {
 			i, e := i, e
 			w.schedule(time.Duration(e.DelayMS)*time.Millisecond, func() { w.apply(i, e, e.Agent) })
 		}

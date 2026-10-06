@@ -1,0 +1,14 @@
+ ▐▛███▛█   Claude Code v2.1.288
+▝▜██████▀  Opus 5 (1M context) · Claude Max
+  ▝▝ ▝▝    ~/work/shop-web
+
+
+❯ Fix the accessibility issues from the audit.
+
+⏺ All 14 audit issues fixed; axe reports 0 violations on the 6 key pages. Nothing needs a
+  decision.
+
+────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ accept edits on · ? for shortcuts

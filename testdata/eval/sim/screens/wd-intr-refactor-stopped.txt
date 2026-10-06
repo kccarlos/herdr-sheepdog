@@ -1,0 +1,20 @@
+╭──────────────────────────────────────────────────────╮
+│ >_ OpenAI Codex (v0.154.0)                           │
+│                                                      │
+│ model:     gpt-5.6-luna max   /model to change       │
+│ directory: ~/work/shop                               │
+╰──────────────────────────────────────────────────────╯
+
+› Refactor the order service: split OrderService into reader and writer.
+
+• Split OrderService into OrderReader and OrderWriter
+• Renamed GetOrder -> ReadOrder in 17 of 41 files
+
+■ Conversation interrupted - tell the model what to do differently.
+
+  Uncommitted: 17 files changed. The build is broken until the rename is finished or
+  reverted.
+
+› Ask Codex to do anything
+
+  gpt-5.6-luna max · ~/work/shop

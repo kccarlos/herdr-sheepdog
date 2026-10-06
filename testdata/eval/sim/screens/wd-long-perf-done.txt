@@ -1,0 +1,15 @@
+ ▐▛███▛█   Claude Code v2.1.288
+▝▜██████▀  Opus 5 (1M context) · Claude Max
+  ▝▝ ▝▝    ~/work/shop
+
+
+❯ Measure the 2.4 release candidate's page load times.
+
+⏺ 2.4 vs 2.3: product page largest contentful paint 2.9 s -> 1.8 s, checkout 3.4 s -> 3.6 s
+  (slightly worse: the new payment widget loads a 400 KB script). Under 2.5 s is
+  Google's 'good' threshold, which affects search ranking; checkout is above it in both.
+
+────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ accept edits on · ? for shortcuts

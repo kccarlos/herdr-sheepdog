@@ -1,0 +1,15 @@
+ ▐▛███▛█   Claude Code v2.1.288
+▝▜██████▀  Opus 5 (1M context) · Claude Max
+  ▝▝ ▝▝    ~/work/shop-web
+
+
+❯ Fix the accessibility issues from the audit.
+
+⏺ Fixed 9 of 14 issues (labels and contrast)
+
+✻ Fixing focus order… (3m 05s (esc to interrupt)
+
+────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ accept edits on · ? for shortcuts

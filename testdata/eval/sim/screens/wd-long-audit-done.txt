@@ -1,0 +1,15 @@
+ ▐▛███▛█   Claude Code v2.1.288
+▝▜██████▀  Opus 5 (1M context) · Claude Max
+  ▝▝ ▝▝    ~/work/shop
+
+
+❯ Audit the admin endpoints for missing authorisation checks.
+
+⏺ 31 admin handlers checked. One is missing its check: POST /admin/refunds/bulk accepts
+  any logged-in staff account, not just finance. Not exploited per the logs. I wrote
+  the fix but have not applied it; it needs your OK.
+
+────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ accept edits on · ? for shortcuts

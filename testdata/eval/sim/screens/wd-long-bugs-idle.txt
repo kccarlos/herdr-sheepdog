@@ -1,0 +1,19 @@
+╭──────────────────────────────────────────────────────╮
+│ >_ OpenAI Codex (v0.154.0)                           │
+│                                                      │
+│ model:     gpt-5.6-luna max   /model to change       │
+│ directory: ~/work/app-ios                            │
+╰──────────────────────────────────────────────────────╯
+
+› List the top crashes in the iOS app this week.
+
+• Top crashes (7 days):
+  1. CartView force-unwrap on empty coupon: 412 crashes, 2.3.1 only
+  2. ImageCache out of memory on iPad: 96 crashes
+  3. Login keychain timeout: 31 crashes
+
+• Nothing changed yet.
+
+› Ask Codex to do anything
+
+  gpt-5.6-luna max · ~/work/app-ios

@@ -55,6 +55,9 @@ type SimOptions struct {
 	// TimeScale multiplies scripted delays, waits and the silence cap
 	// (default 1; offline 0.02).
 	TimeScale float64
+	// Personas are the simulated-user personas to rotate through by
+	// repeat (persona.go); empty keeps each scenario's own.
+	Personas []string
 }
 
 // NamedVerdict is a rubric item's verdict.
@@ -67,6 +70,8 @@ type NamedVerdict struct {
 type SimRun struct {
 	Scenario  string    `json:"scenario"`
 	Repeat    int       `json:"repeat"`
+	Persona   string    `json:"persona,omitempty"`
+	HeldOut   bool      `json:"held_out,omitempty"`
 	Status    RunStatus `json:"status"`
 	Failures  []Failure `json:"failures,omitempty"`
 	EndReason string    `json:"end_reason"`
@@ -106,9 +111,14 @@ type SimRun struct {
 // record carries and campaign merges.
 func RunSim(ctx context.Context, sc SimScenario, o SimOptions, repeat int) SimRun {
 	t0 := time.Now()
+	persona := PersonaFor(o.Personas, sc.ID, repeat)
+	if sc.Fixed {
+		persona = "" // a fixed script's exact words are the point
+	}
+	sc = WithPersona(sc, persona)
 	caps := sc.Caps.withDefaults()
 	meter := NewMeter()
-	run := SimRun{Scenario: sc.ID, Repeat: repeat}
+	run := SimRun{Scenario: sc.ID, Repeat: repeat, Persona: persona, HeldOut: sc.Workday != nil && sc.Workday.HeldOut}
 	finish := func() SimRun {
 		run.DurationMS = time.Since(t0).Milliseconds()
 		run.Usage, run.CostUSD = meter.Lines(), meter.Total()
@@ -177,7 +187,7 @@ loop:
 		}
 		var t SimTurn
 		if run.Turns == 0 && sc.Opening != "" {
-			t = SimTurn{Kind: TurnSay, Text: sc.Opening}
+			t = AgendaOpening(sc)
 		} else {
 			uctx, cancel := context.WithDeadline(ctx, deadline)
 			t, err = user.Next(uctx, sc, convo)
@@ -204,7 +214,7 @@ loop:
 				run.EndReason = EndMaxTurns
 				break loop
 			}
-			convo = append(convo, SimLine{AtMS: w.since(), Who: "system", Text: simWaitMarker})
+			convo = append(convo, SimLine{AtMS: w.since(), Who: "system", Text: simWaitMarker, Beat: t.Beat})
 			d := clampDur(time.Duration(float64(t.WaitSeconds)*float64(time.Second)*scale), minWait, silence-silent)
 			got := waitPushes(w, d, settle, deadline)
 			if len(got) == 0 {
@@ -225,7 +235,7 @@ loop:
 			}
 			run.Turns++
 			at := w.since()
-			convo = append(convo, SimLine{AtMS: at, Who: "ceo", Text: t.Text})
+			convo = append(convo, SimLine{AtMS: at, Who: "ceo", Text: t.Text, Beat: t.Beat, Tag: t.Tag})
 			res, serr := w.say(ctx, t.Text)
 			if sc.Explain != nil {
 				exchanges = append(exchanges, ExplainExchange{Turn: run.Turns, AtMS: at, Kind: sc.Explain.Kind(run.Turns), Question: t.Text, Consulted: true, Orchestrator: JoinOrchestrator(res.Spoken, res.Detail, res.Options), Spoken: strings.TrimSpace(res.Spoken)})
@@ -240,7 +250,7 @@ loop:
 				w.rec.mu.Unlock()
 			}
 			got := append(w.push.drain(), SimLine{AtMS: w.since(), Who: "sheepdog", Text: reply})
-			w.afterTurn(run.Turns)
+			w.afterTurn(run.Turns, t.Beat)
 			got = append(got, waitPushes(w, settle, settle, deadline)...)
 			sortLines(got)
 			convo = append(convo, got...)

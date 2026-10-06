@@ -351,10 +351,16 @@ func runBenchRun(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	brainProvider := fs.String("brain-provider", "", "scratch daemons' brain provider (default deepseek; the fault scenarios need deepseek)")
 	brainModel := fs.String("brain-model", "", "scratch daemons' brain model (default deepseek-flash)")
 	promptsDir := fs.String("prompts-dir", "", "scratch daemons' prompts.dir: override prompt files for an A/B arm (assistant.md, USER.md, svp/SOUL.md, svp/RULES.md; files left out stay embedded); empty uses the config's")
+	personasFlag := fs.String("personas", "", "simulated-user personas rotated by repeat: rotate, or a list of terse, rambling, zh, impatient, vague (default: each scenario's own)")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
 		}
+		return 2
+	}
+	personas, err := eval.ParsePersonas(*personasFlag)
+	if err != nil {
+		fprintf(stderr, "sheepdog bench run: --personas: %v\n", err)
 		return 2
 	}
 	if *tier != 2 {
@@ -410,7 +416,7 @@ func runBenchRun(ctx context.Context, args []string, stdout, stderr io.Writer) i
 		"tier":  "2 (synthetic speech -> phone emulator -> scratch daemon: real voice model, real brain, mock herdr scripted from the eval sim worlds)",
 		"voice": cfg.Gemini.Model + " (backend " + cfg.Gemini.Backend + ")", "brain": orDefaultStr(*brainProvider, "deepseek") + " " + orDefaultStr(*brainModel, "deepseek-flash") + " (failover: vertex)",
 		"tts": syn.ID(), "simulated CEO": *simuser + " " + orDefaultStr(*simuserModel, eval.DefaultJudgeModel), "judge": *judge + " " + orDefaultStr(*judgeModel, eval.DefaultJudgeModel),
-		"ports": *portsFlag, "parallel": fmt.Sprint(len(ports)), "budget_usd": fmt.Sprint(*budget), "scenarios": *scen + filterNote(*filter),
+		"ports": *portsFlag, "parallel": fmt.Sprint(len(ports)), "personas": orDefaultStr(*personasFlag, "each scenario's own"), "budget_usd": fmt.Sprint(*budget), "scenarios": *scen + filterNote(*filter),
 	}
 	if promptsLine != "" {
 		setup["prompts_dir"] = promptsLine
@@ -427,7 +433,7 @@ func runBenchRun(ctx context.Context, args []string, stdout, stderr io.Writer) i
 		fprintf(stderr, "sheepdog bench run: %v\n", err)
 		return 1
 	}
-	ropts := bench.RunOptions{Config: cfg, Scratch: dir, FixtureDir: *fixtures, Synth: syn, Out: *out, SaveAudio: *saveAudio, BrainProvider: *brainProvider, BrainModel: *brainModel}
+	ropts := bench.RunOptions{Config: cfg, Scratch: dir, FixtureDir: *fixtures, Synth: syn, Out: *out, SaveAudio: *saveAudio, BrainProvider: *brainProvider, BrainModel: *brainModel, Personas: personas}
 	sem := make(chan struct{}, 4) // one limit for every judge and simulated-CEO call (#94)
 	backend := func(kind, model string) (brain.Model, string, error) {
 		m, id, err := eval.NewBackend(eval.BackendOptions{Kind: kind, Model: model, VertexAPIKey: cfg.Gemini.Vertex.APIKey, VertexProject: cfg.Gemini.Vertex.Project}, nil)
@@ -507,10 +513,11 @@ func runBenchReport(ctx context.Context, args []string, stdout, stderr io.Writer
 	out := fs.String("out", "", "write report.json and report.md here (default: --from)")
 	scen := fs.String("scenarios", defaultBenchScenarios, "scenario files")
 	sims := fs.String("sim", defaultBenchSims, "eval sim files (from_sim)")
+	rescoreOrch := fs.Bool("rescore-orchestrator", false, "ask the workday runs' content items (answered, news, said_vs_done, coherence) of the orchestrator's own text too (judge calls only; rewrites runs/*.json)")
 	rescore := fs.Bool("rescore-explain", false, "score the explain scenarios' runs again from their records and events (judge calls only; rewrites runs/*.json)")
-	judgeModel := fs.String("judge-model", "", "with --rescore-explain: judge model (default "+eval.DefaultJudgeModel+")")
-	configPath := fs.String("config", "", "with --rescore-explain: config file")
-	envFile := fs.String("env-file", "", "with --rescore-explain: load KEY=VALUE lines first")
+	judgeModel := fs.String("judge-model", "", "with --rescore-explain or --rescore-orchestrator: judge model (default "+eval.DefaultJudgeModel+")")
+	configPath := fs.String("config", "", "with --rescore-explain or --rescore-orchestrator: config file")
+	envFile := fs.String("env-file", "", "with --rescore-explain or --rescore-orchestrator: load KEY=VALUE lines first")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -534,8 +541,8 @@ func runBenchReport(ctx context.Context, args []string, stdout, stderr io.Writer
 		fprintf(stderr, "sheepdog bench report: %v\n", err)
 		return 1
 	}
-	if *rescore {
-		if code := rescoreExplain(ctx, *from, runs, scs, *configPath, *envFile, *judgeModel, stderr); code != 0 {
+	if *rescore || *rescoreOrch {
+		if code := rescoreRuns(ctx, *from, runs, scs, *configPath, *envFile, *judgeModel, *rescore, *rescoreOrch, stderr); code != 0 {
 			return code
 		}
 	}
@@ -581,9 +588,11 @@ func runBenchReport(ctx context.Context, args []string, stdout, stderr io.Writer
 	return 0
 }
 
-// rescoreExplain scores the explain runs again with the Vertex judge and
-// rewrites their records; the report is then rebuilt from them.
-func rescoreExplain(ctx context.Context, dir string, runs []bench.Run, scs []bench.Scenario, configPath, envFile, judgeModel string, stderr io.Writer) int {
+// rescoreRuns scores the explain runs again (explain) and asks the
+// workday runs' content items of the orchestrator's text (orch) with the
+// Vertex judge, and rewrites their records; the report is then rebuilt
+// from them.
+func rescoreRuns(ctx context.Context, dir string, runs []bench.Run, scs []bench.Scenario, configPath, envFile, judgeModel string, explain, orch bool, stderr io.Writer) int {
 	if code, ok := loadServeEnvFile(envFile, stderr); !ok || code != 0 {
 		return 1
 	}
@@ -608,7 +617,8 @@ func rescoreExplain(ctx context.Context, dir string, runs []bench.Run, scs []ben
 	for i := range runs {
 		r := &runs[i]
 		sc, ok := byID[r.Scenario]
-		if !ok || sc.Explain == nil {
+		wantExplain, wantOrch := explain && sc.Explain != nil, orch && sc.Workday != nil
+		if !ok || (!wantExplain && !wantOrch) {
 			continue
 		}
 		evs, err := bench.LoadEvents(filepath.Join(dir, "events", fmt.Sprintf("%s.r%d.jsonl", r.Scenario, r.Repeat)))
@@ -616,7 +626,15 @@ func rescoreExplain(ctx context.Context, dir string, runs []bench.Run, scs []ben
 			fprintf(stderr, "sheepdog bench report: %s r%d: %v\n", r.Scenario, r.Repeat, err)
 			continue
 		}
-		bench.RescoreExplain(ctx, judge, sc, r, evs)
+		if wantExplain {
+			bench.RescoreExplain(ctx, judge, sc, r, evs)
+		}
+		if wantOrch {
+			if err := bench.RescoreOrchestrator(ctx, judge, sc, r, evs); err != nil {
+				fprintf(stderr, "sheepdog bench report: orchestrator: %v\n", err)
+				continue
+			}
+		}
 		b, _ := json.MarshalIndent(r, "", "  ")
 		if err := os.WriteFile(filepath.Join(dir, "runs", fmt.Sprintf("%s.r%d.json", r.Scenario, r.Repeat)), b, 0o644); err != nil {
 			fprintf(stderr, "sheepdog bench report: %v\n", err)
@@ -624,6 +642,6 @@ func rescoreExplain(ctx context.Context, dir string, runs []bench.Run, scs []ben
 		}
 		n++
 	}
-	fprintf(stderr, "rescored %d explain runs, judge ≈ $%.3f\n", n, meter.Total())
+	fprintf(stderr, "rescored %d runs, judge ≈ $%.3f\n", n, meter.Total())
 	return 0
 }

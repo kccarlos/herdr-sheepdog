@@ -207,8 +207,8 @@ func TestSimScenarioFilesOffline(t *testing.T) {
 		}
 		for _, sc := range scs {
 			n++
-			if len(sc.Script) == 0 {
-				t.Errorf("%s: no script for the offline run", sc.ID)
+			if len(sc.Script) == 0 && len(sc.Agenda) == 0 {
+				t.Errorf("%s: no script or agenda for the offline run", sc.ID)
 			}
 			run := RunSim(context.Background(), sc, SimOptions{Offline: true, FixtureDir: "../../testdata/herdr"}, 1)
 			if run.Status != RunPass {

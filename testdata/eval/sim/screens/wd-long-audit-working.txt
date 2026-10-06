@@ -1,0 +1,15 @@
+ ▐▛███▛█   Claude Code v2.1.288
+▝▜██████▀  Opus 5 (1M context) · Claude Max
+  ▝▝ ▝▝    ~/work/shop
+
+
+❯ Audit the admin endpoints for missing authorisation checks.
+
+⏺ Checked 22 of 31 admin handlers
+
+✻ Reading internal/admin/refunds.go… (4m 45s (esc to interrupt)
+
+────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ accept edits on · ? for shortcuts
