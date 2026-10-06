@@ -617,7 +617,8 @@ func rescoreRuns(ctx context.Context, dir string, runs []bench.Run, scs []bench.
 	for i := range runs {
 		r := &runs[i]
 		sc, ok := byID[r.Scenario]
-		if !ok || !((explain && sc.Explain != nil) || (orch && sc.Workday != nil)) {
+		wantExplain, wantOrch := explain && sc.Explain != nil, orch && sc.Workday != nil
+		if !ok || (!wantExplain && !wantOrch) {
 			continue
 		}
 		evs, err := bench.LoadEvents(filepath.Join(dir, "events", fmt.Sprintf("%s.r%d.jsonl", r.Scenario, r.Repeat)))
@@ -625,10 +626,10 @@ func rescoreRuns(ctx context.Context, dir string, runs []bench.Run, scs []bench.
 			fprintf(stderr, "sheepdog bench report: %s r%d: %v\n", r.Scenario, r.Repeat, err)
 			continue
 		}
-		if explain && sc.Explain != nil {
+		if wantExplain {
 			bench.RescoreExplain(ctx, judge, sc, r, evs)
 		}
-		if orch && sc.Workday != nil {
+		if wantOrch {
 			if err := bench.RescoreOrchestrator(ctx, judge, sc, r, evs); err != nil {
 				fprintf(stderr, "sheepdog bench report: orchestrator: %v\n", err)
 				continue
