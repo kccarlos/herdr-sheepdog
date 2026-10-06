@@ -35,6 +35,8 @@ func printEvalCalibUsage(w io.Writer) {
 	fprintln(w, "  --config PATH         config file")
 	fprintln(w, "  --env-file PATH       load KEY=VALUE lines into the environment first")
 	fprintln(w, "  --parallel N          judge calls in flight (default 4)")
+	fprintln(w, "  --segment             one call per item scoring all its rubric ids, as segment")
+	fprintln(w, "                        judging asks a workday segment (default: one call per pair)")
 }
 
 // runEvalCalib implements `sheepdog eval calib`.
@@ -58,6 +60,7 @@ func runEvalCalib(ctx context.Context, args []string, stdout, stderr io.Writer) 
 	configPath := fs.String("config", "", "config file")
 	envFile := fs.String("env-file", "", "env file")
 	parallel := fs.Int("parallel", 4, "judge calls in flight")
+	segment := fs.Bool("segment", false, "one call per item scoring all its rubric ids (segment judging)")
 	if err := fs.Parse(args[1:]); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -115,11 +118,22 @@ func runEvalCalib(ctx context.Context, args []string, stdout, stderr io.Writer) 
 			j = lj
 		}
 		t0 := time.Now()
-		verdicts := eval.JudgeCalib(ctx, j, f, *parallel, func(done, total int) {
+		progress := func(done, total int) {
 			if done%20 == 0 || done == total {
 				fprintf(stderr, "[%d/%d]\n", done, total)
 			}
-		})
+		}
+		var verdicts []eval.CalibVerdict
+		if *segment {
+			sj, ok := j.(eval.SegmentJudge)
+			if !ok {
+				fprintln(stderr, "sheepdog eval calib judge: this judge cannot score segments")
+				return 1
+			}
+			verdicts = eval.JudgeCalibSegments(ctx, sj, f, *parallel, progress)
+		} else {
+			verdicts = eval.JudgeCalib(ctx, j, f, *parallel, progress)
+		}
 		fh, err := os.Create(*out)
 		if err != nil {
 			fprintf(stderr, "sheepdog eval calib: %v\n", err)
