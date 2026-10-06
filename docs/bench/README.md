@@ -315,7 +315,7 @@ each defined once in `testdata/eval/sim/workday.json` (tier 1) and
 wrapped by `from_sim` in `testdata/bench/scenarios/workday.json` (tier 2:
 seed, forced resumes, voice). Each stands for 15–30 minutes of a working
 day (`workday.sim_minutes`; the cues run compressed, a tier-1 run takes
-about 3 minutes and a tier-2 run about 10) over 4–10 workers, with the
+about 2.5 minutes and a tier-2 run about 8) over 4–10 workers, with the
 CEO interleaving status, explanations, "more detail", "why",
 approvals, deferrals, instructions, interruptions and a language switch.
 
@@ -378,8 +378,9 @@ sheepdog bench run --tier 2 --env-file .env --brain-provider vertex --brain-mode
   --filter workday --repeat 3 --personas rotate --ports 7861,7862,7863 --budget-usd 18 --out /tmp/wd-t2
 ```
 
-A tier-2 workday run costs about $0.8–1.1 at the list-price estimate
-(the Live session's context dominates), a tier-1 run about $0.12.
+A tier-2 workday run costs about $0.55 at the list-price estimate
+(the Live session's context dominates), a tier-1 run about $0.14.
+Baseline: [workday-baseline-2026-10-05.md](../eval/workday-baseline-2026-10-05.md).
 
 ## Commands
 
