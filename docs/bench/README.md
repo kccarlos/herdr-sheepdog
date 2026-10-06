@@ -100,9 +100,9 @@ ground truth over two runs, `length_fits` 0.70–1.00; Flash-Lite 0.65 /
   asks every judge item of a finished tier-2 campaign (`runs/`) or
   tier-1 result (`report.json`) again with the current rubric and judge,
   rewrites the records (copy the raw results first), and marks each run
-  with the judge model so an interrupted rejudge resumes;
-  `--orchestrator` also asks the workday content items of the
-  orchestrator's text. Then `bench report --from DIR` (tier 2) and `bench
+  with the judge model (`"judge": "sonnet"`, or `"sonnet+orchestrator"`
+  once `--orchestrator` has also asked the workday content items of the
+  orchestrator's text) so an interrupted rejudge resumes. Then `bench report --from DIR` (tier 2) and `bench
   northstar` as usual. Tier-1 records keep the judge's facts from
   2026-10-06 on; older ones get them rebuilt from the scenario and the
   recorded timeline (`eval.ReplayFacts`: the end screens are replayed,

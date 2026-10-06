@@ -15,6 +15,29 @@ project id redacted). Analysis outputs and scripts:
 (`northstar-*.md` from `sheepdog bench northstar`, `aggregate.py` and its
 output, `merge_r5.py`).
 
+> **Rescored with the new judge (2026-10-06).** Every number below is the
+> old judge (Vertex `gemini-3.1-flash-lite`, the 2026-10-05 rubric). The
+> same records judged by Claude Sonnet with the calibrated rubric, no call
+> re-run ([judge-bakeoff-2026-10-06.md](judge-bakeoff-2026-10-06.md#workday-baseline-rescored)):
+>
+> | North star | Tier 1 old → Sonnet | Tier 2 old → Sonnet |
+> |---|---|---|
+> | Understood | 66 % → **26 %** (14–42) | 62 % → **19 %** (8–40) |
+> | Done | 86 % → 86 % | 100 % → 100 % |
+> | Low effort | 60 % → **34 %** (21–51) | 43 % → **14 %** (5–35) |
+> | Safe | 74 % → 71 % (55–84) | 48 % → 48 % (28–68) |
+> | Missed news / untold actions (programmatic) | 40 % / 9 %, unchanged | 60 % / 25 %, unchanged |
+>
+> Orchestrator vs voice with Sonnet (tier 2): `said_vs_done` orchestrator
+> 81 % vs voice **71 %** (was 57 % vs 10 %), 4/21 lost in the voice layer;
+> `news_*` 44 % vs 34 % (10/99 lost); `answered` 10 % vs 29 % and
+> `coherence_*` 33 % vs 83 % (the orchestrator's text alone misses what the
+> voice answered itself). The "voice garbles claims" finding below is
+> largely the old judge's. The Understood and Low effort drops are the new
+> judge's one-strike reading of 15–30-minute sessions (see the bake-off
+> report); Safe, Done and the programmatic findings stand. Rejudged
+> results: [`docs/bench/results/2026-10-05-workday-rejudged/`](../bench/results/2026-10-05-workday-rejudged/).
+
 ## North star
 
 From `sheepdog bench northstar` (#159): each cell is passing runs / runs
