@@ -21,7 +21,7 @@ BILLING_ACCOUNT=${BILLING_ACCOUNT:-01418B-3B7F00-64DA3D}
 REPO=${REPO:-kccarlos/herdr-sheepdog}
 POOL=${POOL:-gh-runners}
 SERVICE=${SERVICE:-ci-autoscaler}
-MAX_RUNNERS=${MAX_RUNNERS:-4}
+MAX_RUNNERS=${MAX_RUNNERS:-3}
 RUNNER_CPU=${RUNNER_CPU:-4}
 RUNNER_MEMORY=${RUNNER_MEMORY:-8Gi}
 BUDGET=${BUDGET:-20}
@@ -162,7 +162,7 @@ scheduler() {
 
 budget() {
   local num; num=$(gcloud projects describe "$PROJECT" --format='value(projectNumber)')
-  gcloud billing budgets create --billing-account="$BILLING_ACCOUNT" --display-name="$PROJECT monthly" \
+  gcloud billing budgets create --billing-project="$PROJECT" --billing-account="$BILLING_ACCOUNT" --display-name="$PROJECT monthly" \
     --budget-amount="${BUDGET}USD" --filter-projects="projects/$num" \
     --threshold-rule=percent=0.5 --threshold-rule=percent=0.9 --threshold-rule=percent=1.0
 }

@@ -241,7 +241,9 @@ make release-sign TAG=v0.1.0   # sign and notarize a release's darwin binary (do
 
 ### CI/CD
 
-GitHub Actions runs Linux jobs only (`ubuntu-latest`): vet, test, lint, web
+GitHub Actions runs Linux jobs only, on self-hosted runners in Cloud Run
+worker pools ([infra/ci-runners](infra/ci-runners/README.md); repo variable
+`CI_RUNNER=ubuntu-latest` switches back to GitHub-hosted): vet, test, lint, web
 tests, the offline eval, the policy guard and the cross-compile on every PR, and the
 Ubuntu release on `v*` tags. Anything Xcode- or iOS-related (build, test,
 archive, TestFlight) runs only on Xcode Cloud, never on GitHub Actions,

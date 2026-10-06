@@ -35,7 +35,7 @@ POOL = os.environ["WORKER_POOL"]  # projects/P/locations/R/workerPools/N
 RUNNER_SA = os.environ["RUNNER_SA"]
 SCHEDULER_SA = os.environ["SCHEDULER_SA"]
 AUDIENCE = os.getenv("AUDIENCE", "")  # this service's URL, set after the first deploy
-MAX_RUNNERS = int(os.getenv("MAX_RUNNERS", "4"))
+MAX_RUNNERS = int(os.getenv("MAX_RUNNERS", "3"))
 LABEL = os.getenv("RUNNER_LABEL", "cloudrun")
 RUNNER_PREFIX = "cloudrun-"
 

@@ -19,9 +19,12 @@ iteration 2's phase-1 work packages (WP1–WP5, WP8, WP9;
 [`iteration-2.md`](iteration-2.md)) are merged.
 
 **CI and releases.** Both repos are private. CI (`.github/workflows/ci.yml`:
-vet, race tests, lint, web tests, cross builds) runs on Ubuntu; GitHub
-Actions was blocked by billing from 2026-09-27 and has run green again
-since #79. The release workflow is Ubuntu-only; the darwin binary is
+vet, race tests, lint, web tests, eval, cross builds) runs on Linux. GitHub-hosted
+minutes ran out again on 2026-10-05, so since #162 every job runs on
+self-hosted ephemeral runners in a Cloud Run worker pool (GCP project
+`herdr-sheepdog-ci`, scaled 0–3 by a webhook, about $0.07 per CI run on
+trial credit; [`infra/ci-runners`](../infra/ci-runners/README.md)); the repo
+variable `CI_RUNNER=ubuntu-latest` switches back. The release workflow is Ubuntu-only; the darwin binary is
 signed and notarized locally with `make release-sign`
 ([`signing.md`](signing.md)). Nothing runs on macOS runners. The iOS
 companion app (`herdr-sheepdog-ios`) is built and shipped by Xcode Cloud,
