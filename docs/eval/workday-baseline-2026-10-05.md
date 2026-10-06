@@ -15,6 +15,67 @@ project id redacted). Analysis outputs and scripts:
 (`northstar-*.md` from `sheepdog bench northstar`, `aggregate.py` and its
 output, `merge_r5.py`).
 
+> **Segment-level north star (2026-10-06, #170).** The same records,
+> judged again per segment by Claude Sonnet. Each agenda beat and its
+> answers is one segment, plus the announcements before the first beat,
+> and each segment gets one judge call scoring the items that apply to
+> it. Understood is now the share of request segments whose `answered`
+> and `length_fits` are yes. The 95 % CI is a cluster bootstrap over runs.
+> The run-level verdicts were kept unchanged (`bench rejudge
+> --skip-run-level`), so the run-level rates below are the continuity
+> numbers. Method:
+> [bench/README.md](../bench/README.md#the-judge) ("Segment-level
+> judging"); calibration on the 126-pair set: kappa 0.69–0.77 (mean 0.74)
+> vs 0.72 for one call per pair
+> ([calibration/README.md](calibration/README.md#segment-judging-on-the-calibration-set-2026-10-06)).
+>
+> | North star | Tier 1 (35 runs) | Tier 2 (21 runs) | Tier 2 − tier 1 [95 % CI] |
+> |---|---|---|---|
+> | **Understood, segments** | **344/416, 83 %** (79–87) | **182/250, 73 %** (68–77) | **−10 pp (−16 to −4)** |
+> | Understood, run level (Sonnet, one verdict per session) | 9/35, 26 % (14–42) | 4/21, 19 % (8–40) | −7 pp (−27 to +17) |
+> | Every request segment understood (runs) | 6/35, 17 % (8–33) | 0/21, 0 % (0–15) | |
+> | Safe, segments (judge only: `no_unintended_action`, `right_agent`) | 487/497, 98 % (97–99) | 268/290, 92 % (88–96) | |
+> | Done / Low effort / Safe (run level, unchanged) | 86 % / 34 % / 71 % | 100 % / 14 % / 48 % | |
+>
+> Per item, segment yes rate, tier 1 / tier 2: `answered` 92 / 77 %,
+> `length_fits` 88 / 84 %, `no_hallucination` 88 / 84 %, `facts_current`
+> 94 / 90 %, `ear_friendly` 98 / 100 %, `language` 98 / 97 %,
+> `no_unintended_action` 98 / 97 %, `right_agent` 99 / 94 %, `clarify_*`
+> 92 / 90 %, `coherence_*` 88 / 80 %.
+>
+> How to read it:
+>
+> - **The run-level collapse was the one-strike reading.** At run level,
+>   Sonnet passed 26 % of tier-1 sessions. Per segment, it passes 83 % of
+>   the requests. The segment verdicts reproduce the strict reading
+>   (17 % of runs with every request understood), so the two views agree.
+>   The difference is what one verdict per 15-minute session measures.
+> - **The voice layer's loss is now visible.** Run-level Understood could
+>   not separate the tiers (CI −27 to +17). Per segment, tier 2 is 10 pp
+>   lower with a CI clear of zero. The loss comes mostly from `answered`
+>   (92 → 77 %) and `right_agent` (99 → 94 %). The voice's listening items
+>   stay at the ceiling.
+> - **Spread** ([segments-output.md](workday-baseline-2026-10-05/segments-output.md),
+>   `segments.py`). By scenario, tier 1 ranges from 75 % (scale-ten) to
+>   92 % (zh-evening) and tier 2 from 64 % (explain-deep, held out) to
+>   82 %. By persona, tier 1 ranges from 75 % (rambling) to 90 % (zh);
+>   tier 2 is lowest for impatient (66 %).
+> - **Property of the method.** A segment ends when the next beat starts.
+>   An answer that only arrives after the CEO moved on, or after they
+>   repeated themselves, is a no for the earlier segment. News, said vs
+>   done, end state and safety stay run-level judge items.
+> - **Rerun noise.** A first full tier-1 pass (lost to a power cut before
+>   it was saved) gave 84 %, against this pass's 83 %.
+>
+> Files: [`northstar-t1-segments.md`](workday-baseline-2026-10-05/northstar-t1-segments.md),
+> [`northstar-t2-segments.md`](workday-baseline-2026-10-05/northstar-t2-segments.md),
+> [`northstar-t1-vs-t2-segments.md`](workday-baseline-2026-10-05/northstar-t1-vs-t2-segments.md);
+> segment verdicts in `docs/bench/results/2026-10-05-workday-rejudged/`
+> (`t1/report.json`, `t2/runs.tar.gz`, `"segments"` in each run).
+> Judge usage: 497 + 290 calls (one per segment), $0 API. The
+> rejudge took roughly three quarters of one 5-hour Max window, a little
+> over 1 % of a window per run, and paused once at 20 % left.
+
 > **Rescored with the new judge (2026-10-06).** Every number below is the
 > old judge (Vertex `gemini-3.1-flash-lite`, the 2026-10-05 rubric). The
 > same records judged by Claude Sonnet with the calibrated rubric, no call
