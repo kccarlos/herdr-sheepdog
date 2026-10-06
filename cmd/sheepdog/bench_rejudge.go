@@ -34,6 +34,9 @@ func printBenchRejudgeUsage(w io.Writer) {
 	fprintln(w, judgeHelp)
 	fprintln(w, "  --judge-model ID      judge model (default sonnet for claude, "+eval.DefaultVertexModel+" for vertex)")
 	fprintln(w, "  --orchestrator        tier 2: also ask the workday content items of the orchestrator's text")
+	fprintln(w, "  --segments            judge workday runs per segment too: one call per agenda beat")
+	fprintln(w, "                        scoring the items that apply to it (default true)")
+	fprintln(w, "  --skip-run-level      keep the run-level verdicts as they are; only the segments")
 	fprintln(w, "  --scenarios GLOB      tier-2 scenario files (default "+defaultBenchScenarios+")")
 	fprintln(w, "  --sim GLOB            eval sim scenario files (default "+defaultBenchSims+")")
 	fprintln(w, "  --fixtures PATH       screen fixtures (default testdata/herdr)")
@@ -49,6 +52,8 @@ func runBenchRejudge(ctx context.Context, args []string, stdout, stderr io.Write
 	judgeKind := fs.String("judge", "", "judge backend")
 	judgeModel := fs.String("judge-model", "", "judge model")
 	orch := fs.Bool("orchestrator", false, "tier 2: also the orchestrator's content items")
+	segments := fs.Bool("segments", true, "workday runs: also judge per segment")
+	skipRun := fs.Bool("skip-run-level", false, "keep the run-level verdicts")
 	scen := fs.String("scenarios", defaultBenchScenarios, "scenario files")
 	sims := fs.String("sim", defaultBenchSims, "eval sim files")
 	fixtures := fs.String("fixtures", "testdata/herdr", "screen fixtures")
@@ -90,9 +95,9 @@ func runBenchRejudge(ctx context.Context, args []string, stdout, stderr io.Write
 	t0 := time.Now()
 	var code int
 	if files, _ := filepath.Glob(filepath.Join(*from, "runs", "*.json")); len(files) > 0 {
-		code = rejudgeTier2(ctx, *from, judge, id, *orch, *scen, *sims, *filter, stderr)
+		code = rejudgeTier2(ctx, *from, judge, id, rejudgeWhat{orch: *orch, segments: *segments, skipRun: *skipRun}, *scen, *sims, *filter, stderr)
 	} else {
-		code = rejudgeTier1(ctx, *from, judge, id, *sims, *fixtures, *filter, stderr)
+		code = rejudgeTier1(ctx, *from, judge, id, rejudgeWhat{segments: *segments, skipRun: *skipRun}, *sims, *fixtures, *filter, stderr)
 	}
 	fprintf(stdout, "judge %s %s: %s, %d calls\n", jk, id, time.Since(t0).Round(time.Second), callsOf(meter))
 	eval.WriteSpend(stdout, meter)
@@ -107,7 +112,12 @@ func callsOf(m *eval.Meter) int {
 	return n
 }
 
-func rejudgeTier2(ctx context.Context, dir string, judge eval.Judge, id string, orch bool, scen, sims, filter string, stderr io.Writer) int {
+// rejudgeWhat says which verdicts a rejudge gives again.
+type rejudgeWhat struct {
+	orch, segments, skipRun bool
+}
+
+func rejudgeTier2(ctx context.Context, dir string, judge eval.Judge, id string, what rejudgeWhat, scen, sims, filter string, stderr io.Writer) int {
 	runs, err := bench.LoadRuns(dir)
 	if err != nil {
 		fprintf(stderr, "sheepdog bench rejudge: %v\n", err)
@@ -132,9 +142,10 @@ func rejudgeTier2(ctx context.Context, dir string, judge eval.Judge, id string, 
 		// The marker: id once the verdicts are rejudged, id+"+orchestrator"
 		// once the orchestrator's items are too.
 		orchID := id + "+orchestrator"
-		needMain := r.Judge != id && r.Judge != orchID
-		needOrch := orch && sc.Workday != nil && r.Judge != orchID
-		if !needMain && !needOrch {
+		needMain := !what.skipRun && r.Judge != id && r.Judge != orchID
+		needOrch := what.orch && sc.Workday != nil && r.Judge != orchID
+		needSeg := what.segments && sc.Workday != nil && r.SegmentJudge != id
+		if !needMain && !needOrch && !needSeg {
 			continue
 		}
 		if needMain {
@@ -162,6 +173,17 @@ func rejudgeTier2(ctx context.Context, dir string, judge eval.Judge, id string, 
 				r.Judge = orchID
 			}
 		}
+		if needSeg {
+			if err := bench.RejudgeSegments(ctx, judge, sc, r); err != nil {
+				fprintf(stderr, "sheepdog bench rejudge: segments: %v\n", err)
+				if errors.Is(err, eval.ErrClaudeUsageLimit) || isUsageLimitText(err) {
+					return 1
+				}
+				failed++
+				continue
+			}
+			r.SegmentJudge = id
+		}
 		b, _ := json.MarshalIndent(r, "", "  ")
 		if err := os.WriteFile(filepath.Join(dir, "runs", fmt.Sprintf("%s.r%d.json", r.Scenario, r.Repeat)), b, 0o644); err != nil {
 			fprintf(stderr, "sheepdog bench rejudge: %v\n", err)
@@ -176,7 +198,7 @@ func rejudgeTier2(ctx context.Context, dir string, judge eval.Judge, id string, 
 	return 0
 }
 
-func rejudgeTier1(ctx context.Context, dir string, judge eval.Judge, id, sims, fixtures, filter string, stderr io.Writer) int {
+func rejudgeTier1(ctx context.Context, dir string, judge eval.Judge, id string, what rejudgeWhat, sims, fixtures, filter string, stderr io.Writer) int {
 	path := filepath.Join(dir, "report.json")
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -213,21 +235,46 @@ func rejudgeTier1(ctx context.Context, dir string, judge eval.Judge, id, sims, f
 	for i := range rep.Runs {
 		r := &rep.Runs[i]
 		sc, ok := byID[r.Scenario]
-		if !ok || r.Judge == id || !contains(r.Scenario, filter) {
+		if !ok || !contains(r.Scenario, filter) {
 			continue
 		}
-		if err := eval.RejudgeSim(ctx, judge, sc, r, fixtures); err != nil {
+		needMain := !what.skipRun && r.Judge != id
+		needSeg := what.segments && sc.Workday != nil && r.SegmentJudge != id
+		if !needMain && !needSeg {
+			continue
+		}
+		stop := func(err error) bool {
 			fprintf(stderr, "sheepdog bench rejudge: %v\n", err)
 			if errors.Is(err, eval.ErrClaudeUsageLimit) || isUsageLimitText(err) {
 				_ = write()
-				return 1
+				return true
 			}
 			failed++
-			continue
+			return false
 		}
-		r.Judge = id
-		if rep.Setup != nil {
-			rep.Setup["judge (rejudged)"] = id
+		if needMain {
+			if err := eval.RejudgeSim(ctx, judge, sc, r, fixtures); err != nil {
+				if stop(err) {
+					return 1
+				}
+				continue
+			}
+			r.Judge = id
+			if rep.Setup != nil {
+				rep.Setup["judge (rejudged)"] = id
+			}
+		}
+		if needSeg {
+			if err := eval.RejudgeSimSegments(ctx, judge, sc, r, fixtures); err != nil {
+				if stop(fmt.Errorf("segments: %w", err)) {
+					return 1
+				}
+				continue
+			}
+			r.SegmentJudge = id
+			if rep.Setup != nil {
+				rep.Setup["segment judge"] = id
+			}
 		}
 		if err := write(); err != nil {
 			fprintf(stderr, "sheepdog bench rejudge: %v\n", err)

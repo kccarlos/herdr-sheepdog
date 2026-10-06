@@ -104,6 +104,9 @@ type Block struct {
 	Done       Rate `json:"done"`
 	LowEffort  Rate `json:"low_effort"`
 	Safe       Rate `json:"safe"`
+	// Segment is the segment-level view (nil when no run was judged per
+	// segment).
+	Segment *SegmentBlock `json:"segment,omitempty"`
 	// TurnsToGoal and TimeToGoalS are over the runs that reached the goal.
 	TurnsToGoal Mean `json:"turns_to_goal"`
 	TimeToGoalS Mean `json:"time_to_goal_s"`
@@ -251,6 +254,7 @@ func Summarize(tier string, runs []Run) *Block {
 	}
 	b.Understood, b.Done, b.LowEffort, b.Safe = NewRate(und[0], und[1]), NewRate(done[0], done[1]), NewRate(low[0], low[1]), NewRate(safe[0], safe[1])
 	b.TurnsToGoal, b.TimeToGoalS = NewMean(turnsToGoal), NewMean(timeToGoal)
+	b.Segment = SummarizeSegments(runs)
 	b.Claims.finish()
 	if orch != nil {
 		orch.finish()
@@ -334,6 +338,10 @@ func (b *Block) WriteMarkdown(w io.Writer) {
 	}
 	if len(b.Notes) > 0 {
 		p("\n")
+	}
+	if b.Segment != nil {
+		p("\n")
+		b.Segment.WriteMarkdown(w)
 	}
 	p("\n### Programmatic checks (diagnostics)\n\n")
 	if b.Records == 0 {

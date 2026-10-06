@@ -89,9 +89,14 @@ type SimRun struct {
 	// Facts is the ground truth the judge got (so the run can be judged
 	// again later; absent before 2026-10-06). Judge is the judge model
 	// of Verdicts when they were given again (sheepdog bench rejudge).
-	Facts     string   `json:"facts,omitempty"`
-	Judge     string   `json:"judge,omitempty"`
-	Fallbacks []string `json:"fallbacks,omitempty"`
+	Facts string `json:"facts,omitempty"`
+	Judge string `json:"judge,omitempty"`
+	// Segments are the segment judge's verdicts (workday scenarios: one
+	// call per agenda beat, JudgeSegments); SegmentJudge is their judge
+	// model when given by sheepdog bench rejudge.
+	Segments     []SegmentResult `json:"segments,omitempty"`
+	SegmentJudge string          `json:"segment_judge,omitempty"`
+	Fallbacks    []string        `json:"fallbacks,omitempty"`
 	// Failovers counts the brain's failovers to another provider
 	// (brain.failover events), listed in FailoverEvents; AnsweredBy is
 	// the provider of the last answered brain step and StepsByProvider
@@ -321,6 +326,13 @@ loop:
 		run.Verdicts[i].Name = names[i]
 	}
 	run.Failures = append(run.Failures, simFailures(sc, run, timeouts)...)
+	if sc.Workday != nil {
+		// Segment verdicts are measurement only: a failed segment call
+		// leaves them out (bench rejudge can add them later).
+		if segs, err := JudgeSegments(ctx, judge, sc, convo, facts, 4); err == nil {
+			run.Segments = segs
+		}
+	}
 	if sc.Explain != nil {
 		run.Explain = ScoreExplain(ctx, judge, sc.Explain, sc.Language, withPushes(exchanges, convo), false)
 		run.Failures = append(run.Failures, run.Explain.Failures()...)

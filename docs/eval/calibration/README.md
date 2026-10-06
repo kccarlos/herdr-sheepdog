@@ -168,3 +168,29 @@ call is skipped (a no carries its evidence quote). Cost per 126 pairs:
 about 520 k input and 50 k output tokens, 3 min 45 s at three processes,
 about 2 % of the Max plan's 5-hour window, $0 API (about $2.7 at list
 price). `--judge vertex` keeps Flash-Lite (about $0.06–0.16 per 126 pairs).
+
+## Segment judging on the calibration set (2026-10-06)
+
+Segment-level judging asks one call per transcript segment that scores
+every item that applies (docs/bench/README.md, "Segment-level judging").
+The calibration items are segment-sized, so the same 126 pairs measure
+it: `sheepdog eval calib judge --segment` asks one call per item (30
+calls) scoring all its rubric ids, and `calib agree --labels truth.json`
+compares as before. Results in `bakeoff/seg-sonnet-{a,b,c,d}.json` and
+`agree-seg-sonnet-*.md` (final segment prompt):
+
+| Run | Agreement | Kappa | `answered` kappa | `length_fits` kappa | Too lenient / too strict |
+|---|---|---|---|---|---|
+| a | 86 % | 0.69 | 0.58 | 0.67 | 6 / 12 |
+| b | 90 % | 0.77 | 0.75 | 0.77 | 5 / 8 |
+| c | 87 % | 0.72 | 0.65 | 0.88 | 6 / 10 |
+| d | 89 % | 0.76 | 0.75 | 0.89 | 5 / 9 |
+
+Mean kappa 0.74 (0.69–0.77), against 0.72 / 0.72 for one call per pair
+(r3 above); two earlier runs on the first segment prompt (before it named
+the segment's time span) gave 0.71 and 0.74. One call per item instead of
+one per pair: 30 calls, 1 min 30 s, about 1 % of a 5-hour window. It errs
+mostly strict, as one call per pair did (8–12 strict vs 5–6 lenient of
+126). Run d's
+first try lost one 8-item answer that left ids out; the judge now asks
+again once when an id is missing.

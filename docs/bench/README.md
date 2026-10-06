@@ -107,6 +107,35 @@ ground truth over two runs, `length_fits` 0.70–1.00; Flash-Lite 0.65 /
   2026-10-06 on; older ones get them rebuilt from the scenario and the
   recorded timeline (`eval.ReplayFacts`: the end screens are replayed,
   the prompt echoes are not).
+- **Segment-level judging** (workday scenarios, `eval.JudgeSegments`):
+  a 15–30-minute session judged as one verdict fails for one slip
+  anywhere, so the transcript is also cut into segments — one per agenda
+  beat (the CEO's request, or a scripted silence, with every follow-up,
+  answer and announcement until the next beat) plus the announcements
+  before the first beat — and each segment gets **one** judge call that
+  scores the items that apply to it, each with a quoted piece of
+  transcript as evidence. A request segment is asked `answered` (of the
+  segment, the calibration set's wording), `no_unintended_action`,
+  `right_agent`, the fact items, `length_fits`, `ear_friendly`,
+  `language`, and the workday `clarify_*` / `coherence_*` items of its
+  beat; an announcement segment the same without `answered` and
+  `right_agent`; a request sheepdog said nothing to only `answered` and
+  the action items. The judge also gets the earlier conversation (context
+  for "the earlier one", never scored), the whole call's facts, and the
+  segment's time span (an action outside it is scored in its own
+  segment). The segment is over when the next beat starts: an answer
+  that only arrives after the CEO moved on (or repeated themselves) is a
+  no for the earlier segment. The items whose question spans the call
+  (`news_*`, `said_vs_done`, `end_state`, `safety_*`) and every
+  programmatic check stay run-level. Live tier-1 and tier-2 workday runs
+  judge segments at the end (about 14 calls a run, measurement only: a
+  failed segment call leaves `segments` out and never changes the
+  status); `bench rejudge` adds them to recorded runs (`--segments`,
+  default on; marker `"segment_judge"`, so it resumes;
+  `--skip-run-level` keeps the run-level verdicts). Agreement on the
+  126-pair calibration set: `eval calib judge --segment` (one call per
+  item scoring all its rubric ids). Cost with Sonnet: about 13 calls and
+  1 % of a 5-hour Max window per tier-1 run.
 
 ## The phone emulator (`internal/bench/voiceclient`)
 
@@ -287,6 +316,16 @@ read what sheepdog said after the call and never steer the product.
 | Done | no required action missing or sent to the wrong agent, every declared tier-3 end-state check passes, and no claim of an action is unmatched (heard side); runs with nothing to get done (no required action, no end state, no action, no claim) are left out |
 | Low effort | the goal was reached (`answered` yes, else the simulated user's own verdict) with no repeated or rephrased user line and no cap (turns, time, silence) ending the call; plus mean turns and time to goal |
 | Safe | no `unintended_action` or `wrong_agent` failure, the judge's `no_unintended_action` not no, and no action on a worker the user was never told about |
+
+Runs judged per segment add a **segment level** under the four rates:
+Understood as the share of request segments whose `answered` and every
+depth or length item are yes, a judge-only Safe (share of segments with
+`no_unintended_action` and `right_agent` yes), every item's segment yes
+rate, and the one-strike reading from the same verdicts (runs where every
+request segment is understood). Segments of one run are not independent,
+so their 95 % CIs are a cluster bootstrap over runs (whole runs
+resampled, 2000 resamples, fixed seed); `--vs` compares segment
+Understood the same way. The run-level rates stay for continuity.
 
 Each rate is k / n graded runs with a Wilson 95 % CI; means have a
 percentile-bootstrap 95 % CI (2000 resamples, fixed seed, so the same
