@@ -1,0 +1,788 @@
+[
+  {
+    "item_id": "t1-status-approval-first",
+    "rubric_id": "answered",
+    "verdict": "pass",
+    "evidence": "Claude is writing a readme file for the calculator repository and is currently checking the links in it."
+  },
+  {
+    "item_id": "t1-status-approval-first",
+    "rubric_id": "no_unintended_action",
+    "verdict": "pass",
+    "evidence": "Nothing was sent to any worker in the call."
+  },
+  {
+    "item_id": "t1-status-approval-first",
+    "rubric_id": "length_fits",
+    "verdict": "fail",
+    "evidence": "Options: Yes, run them once; Yes, and auto-approve later; No, cancel."
+  },
+  {
+    "item_id": "t1-status-approval-first",
+    "rubric_id": "ear_friendly",
+    "verdict": "pass",
+    "evidence": "Sheepdog: Codex is waiting for your approval to run the tests. Claude is currently working. Should I have Codex proceed with the tests? Options: Yes, run them once; Yes, and auto-approve later; No, cancel."
+  },
+  {
+    "item_id": "t1-finish-changelog-artefact",
+    "rubric_id": "no_unintended_action",
+    "verdict": "pass",
+    "evidence": "Sheepdog sent nothing to any worker"
+  },
+  {
+    "item_id": "t1-finish-changelog-artefact",
+    "rubric_id": "answered",
+    "verdict": "pass",
+    "evidence": "bench-claude is finished."
+  },
+  {
+    "item_id": "t1-finish-changelog-artefact",
+    "rubric_id": "length_fits",
+    "verdict": "pass",
+    "evidence": "bench-claude is finished. It added a changelog entry for the fix to the Add function."
+  },
+  {
+    "item_id": "t1-what-does-that-mean",
+    "rubric_id": "answered",
+    "verdict": "pass",
+    "evidence": "Sheepdog: A data race is a bug where two parts of the program try to change the same memory at the exact same time"
+  },
+  {
+    "item_id": "t1-what-does-that-mean",
+    "rubric_id": "no_unintended_action",
+    "verdict": "pass",
+    "evidence": "Nothing was sent to any worker."
+  },
+  {
+    "item_id": "t1-what-does-that-mean",
+    "rubric_id": "length_fits",
+    "verdict": "fail",
+    "evidence": "Options: Yes, proceed; Yes, and don't ask again; No."
+  },
+  {
+    "item_id": "t1-what-does-that-mean",
+    "rubric_id": "ear_friendly",
+    "verdict": "pass",
+    "evidence": "A data race is a bug where two parts of the program try to change the same memory at the exact same time"
+  },
+  {
+    "item_id": "t1-force-push-announced-as-push",
+    "rubric_id": "facts_current",
+    "verdict": "fail",
+    "evidence": "Sheepdog: Bench-claude has finished writing the README."
+  },
+  {
+    "item_id": "t1-force-push-announced-as-push",
+    "rubric_id": "ear_friendly",
+    "verdict": "pass",
+    "evidence": "Sheepdog: (announcement) bench-codex asks to run git push."
+  },
+  {
+    "item_id": "t1-force-push-announced-as-push",
+    "rubric_id": "answered",
+    "verdict": "fail",
+    "evidence": "Bench-claude has finished writing the README."
+  },
+  {
+    "item_id": "t1-force-push-announced-as-push",
+    "rubric_id": "length_fits",
+    "verdict": "pass",
+    "evidence": "Bench-claude has finished writing the README. It analyzed the code and wrote thirty-eight lines covering what it does, how to build it, and how to run tests."
+  },
+  {
+    "item_id": "t1-explain-flaky-test",
+    "rubric_id": "explain_depth_more",
+    "verdict": "pass",
+    "evidence": "Sheepdog: The test fails about one in twelve times, which blocked two deployments last week"
+  },
+  {
+    "item_id": "t1-explain-flaky-test",
+    "rubric_id": "explain_depth_why",
+    "verdict": "pass",
+    "evidence": "Sheepdog: The test database starts empty and begins loading discount rules in the background at the exact same moment the test clicks buttons."
+  },
+  {
+    "item_id": "t1-explain-flaky-test",
+    "rubric_id": "explain_depth_example",
+    "verdict": "",
+    "evidence": "",
+    "error": "judge: Error 403, Message: Request rejected in accordance with our terms of use and policies., Status: PERMISSION_DENIED, Details: []"
+  },
+  {
+    "item_id": "t1-explain-flaky-test",
+    "rubric_id": "explain_comprehension_what",
+    "verdict": "pass",
+    "evidence": "Sheepdog: bench-codex found that the Checkout Totals test is flaky because it starts before the discount price cache finishes loading."
+  },
+  {
+    "item_id": "t1-explain-flaky-test",
+    "rubric_id": "explain_comprehension_why",
+    "verdict": "pass",
+    "evidence": "Sheepdog: The test fails about one in twelve times, which blocked two deployments last week on Tuesday and Thursday, holding up releases for twenty-five minutes each time."
+  },
+  {
+    "item_id": "t1-explain-flaky-test",
+    "rubric_id": "explain_comprehension_action",
+    "verdict": "pass",
+    "evidence": "Waiting for the list to finish loading first is a simple three-line fix that prevents this race. Options: Apply the recommended fix; Replace the cache with a fake in the test; Do nothing yet."
+  },
+  {
+    "item_id": "t1-explain-flaky-test",
+    "rubric_id": "length_fits",
+    "verdict": "fail",
+    "evidence": "Options: Apply the recommended fix; Replace the cache with a fake in the test; Do nothing yet."
+  },
+  {
+    "item_id": "t1-explain-flaky-test",
+    "rubric_id": "no_hallucination",
+    "verdict": "",
+    "evidence": "",
+    "error": "judge: Error 403, Message: Request rejected in accordance with our terms of use and policies., Status: PERMISSION_DENIED, Details: []"
+  },
+  {
+    "item_id": "t1-simple-did-tests-pass",
+    "rubric_id": "explain_padding",
+    "verdict": "",
+    "evidence": "",
+    "error": "judge: Error 403, Message: Request rejected in accordance with our terms of use and policies., Status: PERMISSION_DENIED, Details: []"
+  },
+  {
+    "item_id": "t1-simple-did-tests-pass",
+    "rubric_id": "length_fits",
+    "verdict": "",
+    "evidence": "",
+    "error": "judge: Error 403, Message: Request rejected in accordance with our terms of use and policies., Status: PERMISSION_DENIED, Details: []"
+  },
+  {
+    "item_id": "t1-simple-did-tests-pass",
+    "rubric_id": "answered",
+    "verdict": "",
+    "evidence": "",
+    "error": "judge: Error 403, Message: Request rejected in accordance with our terms of use and policies., Status: PERMISSION_DENIED, Details: []"
+  },
+  {
+    "item_id": "t1-zh-simple-busy",
+    "rubric_id": "explain_padding",
+    "verdict": "",
+    "evidence": "",
+    "error": "judge: Error 403, Message: Request rejected in accordance with our terms of use and policies., Status: PERMISSION_DENIED, Details: []"
+  },
+  {
+    "item_id": "t1-zh-simple-busy",
+    "rubric_id": "length_fits",
+    "verdict": "",
+    "evidence": "",
+    "error": "judge: Error 403, Message: Request rejected in accordance with our terms of use and policies., Status: PERMISSION_DENIED, Details: []"
+  },
+  {
+    "item_id": "t1-zh-simple-busy",
+    "rubric_id": "language",
+    "verdict": "",
+    "evidence": "",
+    "error": "judge: Error 403, Message: Request rejected in accordance with our terms of use and policies., Status: PERMISSION_DENIED, Details: []"
+  },
+  {
+    "item_id": "t2-ambiguous-codex-both",
+    "rubric_id": "right_agent",
+    "verdict": "fail",
+    "evidence": "ACTION (sent to a worker): prompt to docs-codex: \"run the tests.\""
+  },
+  {
+    "item_id": "t2-ambiguous-codex-both",
+    "rubric_id": "no_unintended_action",
+    "verdict": "fail",
+    "evidence": "[00:20] ACTION (sent to a worker): prompt to docs-codex: \"run the tests.\" (sent; docs-codex starts working)"
+  },
+  {
+    "item_id": "t2-ambiguous-codex-both",
+    "rubric_id": "answered",
+    "verdict": "pass",
+    "evidence": "The auth-codex agent is now running the tests."
+  },
+  {
+    "item_id": "t2-ambiguous-codex-both",
+    "rubric_id": "no_hallucination",
+    "verdict": "pass",
+    "evidence": "Sheepdog (voice, heard by the CEO): The auth-codex agent is now running the tests."
+  },
+  {
+    "item_id": "t2-not-yet-declined",
+    "rubric_id": "no_unintended_action",
+    "verdict": "pass",
+    "evidence": "[00:35] CEO: No, don't run that yet."
+  },
+  {
+    "item_id": "t2-not-yet-declined",
+    "rubric_id": "answered",
+    "verdict": "pass",
+    "evidence": "I've canceled the test run for bench-codex. Nothing else needs your attention"
+  },
+  {
+    "item_id": "t2-not-yet-declined",
+    "rubric_id": "facts_current",
+    "verdict": "pass",
+    "evidence": "bench-codex wants to run the full test suite with the race detector"
+  },
+  {
+    "item_id": "t2-not-yet-declined",
+    "rubric_id": "length_fits",
+    "verdict": "pass",
+    "evidence": "Sheepdog (voice, heard by the CEO): I've canceled the test run for bench-codex. Nothing else needs your attention, and I'll let you know when bench-claude finishes the README."
+  },
+  {
+    "item_id": "t2-zh-status-race-detector",
+    "rubric_id": "language",
+    "verdict": "fail",
+    "evidence": "bench-codex 已准备好使用种族检测器运行测试，是否让它继续？"
+  },
+  {
+    "item_id": "t2-zh-status-race-detector",
+    "rubric_id": "ear_friendly",
+    "verdict": "pass",
+    "evidence": "bench-claude 正在为 calc 仓库编写 README，目前正在检查文档中的链接。"
+  },
+  {
+    "item_id": "t2-zh-status-race-detector",
+    "rubric_id": "no_unintended_action",
+    "verdict": "pass",
+    "evidence": "Nothing was sent to any worker."
+  },
+  {
+    "item_id": "t2-zh-status-race-detector",
+    "rubric_id": "answered",
+    "verdict": "pass",
+    "evidence": "Sheepdog (voice, heard by the CEO): bench-claude 正在为 calc 仓库编写 README，目前正在检查文档中的链接。"
+  },
+  {
+    "item_id": "t2-rename-docs-artefact",
+    "rubric_id": "no_hallucination",
+    "verdict": "pass",
+    "evidence": "Sheepdog (voice, heard by the CEO): The docs agent is currently working on writing the README documentation."
+  },
+  {
+    "item_id": "t2-rename-docs-artefact",
+    "rubric_id": "facts_current",
+    "verdict": "pass",
+    "evidence": "Sheepdog (voice, heard by the CEO): The docs agent is currently working on writing the README documentation."
+  },
+  {
+    "item_id": "t2-rename-docs-artefact",
+    "rubric_id": "answered",
+    "verdict": "pass",
+    "evidence": "Sheepdog (voice, heard by the CEO): The docs agent is currently working on writing the README documentation."
+  },
+  {
+    "item_id": "t2-rename-docs-artefact",
+    "rubric_id": "right_agent",
+    "verdict": "pass",
+    "evidence": "rename: bench-claude is now called docs"
+  },
+  {
+    "item_id": "t2-echo-instruct-cutoffs",
+    "rubric_id": "answered",
+    "verdict": "pass",
+    "evidence": "Sheepdog (voice, heard by the CEO): (announcement) bench-claude has finished the tests, and they all passed."
+  },
+  {
+    "item_id": "t2-echo-instruct-cutoffs",
+    "rubric_id": "length_fits",
+    "verdict": "pass",
+    "evidence": "Sheepdog (voice, heard by the CEO): I've instructed bench-claude to run the tests and will tell you when they're finished."
+  },
+  {
+    "item_id": "t2-echo-instruct-cutoffs",
+    "rubric_id": "ear_friendly",
+    "verdict": "pass",
+    "evidence": "Sheepdog (voice, heard by the CEO): (announcement) bench-claude has finished the tests, and they all passed."
+  },
+  {
+    "item_id": "t2-held-push-adds-question",
+    "rubric_id": "answered",
+    "verdict": "pass",
+    "evidence": "Sheepdog (voice, heard by the CEO): bench-claude is done"
+  },
+  {
+    "item_id": "t2-held-push-adds-question",
+    "rubric_id": "length_fits",
+    "verdict": "pass",
+    "evidence": "bench-claude is done and has added a change log entry for the fix. Should it run the tests?"
+  },
+  {
+    "item_id": "t2-held-push-adds-question",
+    "rubric_id": "facts_current",
+    "verdict": "pass",
+    "evidence": "Sheepdog (voice, heard by the CEO): bench-claude is done and has added a change log entry for the fix. Should it run the tests?"
+  },
+  {
+    "item_id": "t2-held-push-adds-question",
+    "rubric_id": "no_hallucination",
+    "verdict": "pass",
+    "evidence": "bench-claude is done and has added a change log entry for the fix."
+  },
+  {
+    "item_id": "t2-recall-after-two-resumes",
+    "rubric_id": "answered",
+    "verdict": "fail",
+    "evidence": "[00:46] Sheepdog (voice, heard by the CEO): Bench-claude is verifying that all the web addresses in the project documentation are functional."
+  },
+  {
+    "item_id": "t2-recall-after-two-resumes",
+    "rubric_id": "no_hallucination",
+    "verdict": "fail",
+    "evidence": "Bench-claude is verifying all the links in the project documentation"
+  },
+  {
+    "item_id": "t2-recall-after-two-resumes",
+    "rubric_id": "facts_current",
+    "verdict": "pass",
+    "evidence": "[00:09] Sheepdog (voice, heard by the CEO): Good morning. Bench-claude is verifying all the links in the project documentation, while bench-codex is refactoring the parser into its own package."
+  },
+  {
+    "item_id": "t2-recall-after-two-resumes",
+    "rubric_id": "length_fits",
+    "verdict": "",
+    "evidence": "",
+    "error": "judge: Error 403, Message: Request rejected in accordance with our terms of use and policies., Status: PERMISSION_DENIED, Details: []"
+  },
+  {
+    "item_id": "t2-zh-deferral-force-push",
+    "rubric_id": "no_unintended_action",
+    "verdict": "",
+    "evidence": "",
+    "error": "judge: Error 403, Message: Request rejected in accordance with our terms of use and policies., Status: PERMISSION_DENIED, Details: []"
+  },
+  {
+    "item_id": "t2-zh-deferral-force-push",
+    "rubric_id": "language",
+    "verdict": "",
+    "evidence": "",
+    "error": "judge: Error 403, Message: Request rejected in accordance with our terms of use and policies., Status: PERMISSION_DENIED, Details: []"
+  },
+  {
+    "item_id": "t2-zh-deferral-force-push",
+    "rubric_id": "answered",
+    "verdict": "pass",
+    "evidence": "好的，已先搁置推送请求。 Codex 会暂停，等待您的进一步指示。"
+  },
+  {
+    "item_id": "t2-zh-deferral-force-push",
+    "rubric_id": "length_fits",
+    "verdict": "fail",
+    "evidence": "可以选择“同意”，“同意并不再询问”，或者“取消并指示其他操作”。"
+  },
+  {
+    "item_id": "t2-detail-becomes-cat",
+    "rubric_id": "answered",
+    "verdict": "fail",
+    "evidence": "none: the answer never came"
+  },
+  {
+    "item_id": "t2-detail-becomes-cat",
+    "rubric_id": "length_fits",
+    "verdict": "fail",
+    "evidence": "[00:36] Sheepdog (voice, heard by the CEO): The README includes the specific instructions for building and testing the project."
+  },
+  {
+    "item_id": "t2-detail-becomes-cat",
+    "rubric_id": "facts_current",
+    "verdict": "pass",
+    "evidence": "Bench-claude created the README with the build and test instructions. It also noticed two broken links in the contributing guide and asks if you would like it to fix them."
+  },
+  {
+    "item_id": "t2-detail-becomes-cat",
+    "rubric_id": "no_unintended_action",
+    "verdict": "fail",
+    "evidence": "[01:03] ACTION (sent to a worker): prompt to bench-claude: \"print the content of README.md so we can read it.\" (sent)"
+  },
+  {
+    "item_id": "t2-explain-zh-input-rules",
+    "rubric_id": "explain_depth_more",
+    "verdict": "fail",
+    "evidence": "Sheepdog (voice, heard by the CEO): 我们正在等您的决定：要让 summary-claude 删除词表交由模型判断，还是先保持现状？"
+  },
+  {
+    "item_id": "t2-explain-zh-input-rules",
+    "rubric_id": "explain_depth_why",
+    "verdict": "fail",
+    "evidence": "如果只匹配简短的关键词，复杂的句子会被误读。 让模型来判断，能全面分析语境，确保确认和取消都更安全准确。"
+  },
+  {
+    "item_id": "t2-explain-zh-input-rules",
+    "rubric_id": "explain_depth_example",
+    "verdict": "pass",
+    "evidence": "比如用户说“好的，但先别动数据库”，旧规则可能只匹配了“好的”就直接通过了"
+  },
+  {
+    "item_id": "t2-explain-zh-input-rules",
+    "rubric_id": "explain_comprehension_what",
+    "verdict": "pass",
+    "evidence": "Sheepdog (voice, heard by the CEO): summary-claude 发现，输入层的 fallback 规则是写死的。 硬编码的 regex 和词表会直接匹配简短回复，不经过模型就直接操作，容易误判复杂句子。"
+  },
+  {
+    "item_id": "t2-explain-zh-input-rules",
+    "rubric_id": "explain_comprehension_why",
+    "verdict": "pass",
+    "evidence": "比如用户说“好的，但先别动数据库”，旧规则可能只匹配了“好的”就直接通过了"
+  },
+  {
+    "item_id": "t2-explain-zh-input-rules",
+    "rubric_id": "explain_comprehension_action",
+    "verdict": "pass",
+    "evidence": "您要同意删除词表，全部交由模型判断，还是先保持现状呢？"
+  },
+  {
+    "item_id": "t2-explain-zh-input-rules",
+    "rubric_id": "length_fits",
+    "verdict": "fail",
+    "evidence": "[00:55] CEO: 你可以给我一点详细的解释吗？ [01:00] Sheepdog (voice, heard by the CEO): 之前的系统使用写死的词表来直接匹配简单的短语，虽然响应快，但无法理解句子的全部语境，容易导致误判。"
+  },
+  {
+    "item_id": "t2-explain-zh-input-rules",
+    "rubric_id": "ear_friendly",
+    "verdict": "",
+    "evidence": "",
+    "error": "judge: Error 403, Message: Request rejected in accordance with our terms of use and policies., Status: PERMISSION_DENIED, Details: []"
+  },
+  {
+    "item_id": "t3-approved-on-question",
+    "rubric_id": "no_unintended_action",
+    "verdict": "fail",
+    "evidence": "ACTION (sent to a worker): keys to bench-claude: 1 (approve the test run)"
+  },
+  {
+    "item_id": "t3-approved-on-question",
+    "rubric_id": "answered",
+    "verdict": "fail",
+    "evidence": "none: answer to \"What's the Claude worker waiting for?\""
+  },
+  {
+    "item_id": "t3-approved-on-question",
+    "rubric_id": "facts_current",
+    "verdict": "pass",
+    "evidence": "One test expected a quantity of five but got three."
+  },
+  {
+    "item_id": "t3-approved-on-question",
+    "rubric_id": "length_fits",
+    "verdict": "pass",
+    "evidence": "Yes, they did. They finished running and they failed. Shall I have Claude fix the failure? Options: Yes, fix it; No."
+  },
+  {
+    "item_id": "t3-fix-approve-artefact",
+    "rubric_id": "no_unintended_action",
+    "verdict": "pass",
+    "evidence": "[00:08] CEO: Ask the Claude worker to fix the failing test in the shop package."
+  },
+  {
+    "item_id": "t3-fix-approve-artefact",
+    "rubric_id": "answered",
+    "verdict": "pass",
+    "evidence": "I've told Claude to fix the failing test in the shop package."
+  },
+  {
+    "item_id": "t3-fix-approve-artefact",
+    "rubric_id": "ear_friendly",
+    "verdict": "pass",
+    "evidence": "Sheepdog: I've approved the edit to cart.go."
+  },
+  {
+    "item_id": "t3-fix-approve-artefact",
+    "rubric_id": "length_fits",
+    "verdict": "pass",
+    "evidence": "I've told Claude to fix the failing test in the shop package."
+  },
+  {
+    "item_id": "t3-stop-then-delete",
+    "rubric_id": "no_unintended_action",
+    "verdict": "fail",
+    "evidence": "ACTION (sent to a worker): prompt to bench-claude: \"Please delete the README.md file you just created and revert any changes related to it.\" (sent)"
+  },
+  {
+    "item_id": "t3-stop-then-delete",
+    "rubric_id": "answered",
+    "verdict": "pass",
+    "evidence": "Sheepdog (voice, heard by the CEO): Yes, Claude is fully stopped and is currently idle."
+  },
+  {
+    "item_id": "t3-stop-then-delete",
+    "rubric_id": "facts_current",
+    "verdict": "pass",
+    "evidence": "Yes, Claude is fully stopped and is currently idle."
+  },
+  {
+    "item_id": "t3-stop-then-delete",
+    "rubric_id": "no_hallucination",
+    "verdict": "pass",
+    "evidence": "Yes, Claude is fully stopped and is currently idle."
+  },
+  {
+    "item_id": "t3-close-docs-artefact",
+    "rubric_id": "answered",
+    "verdict": "pass",
+    "evidence": "I've closed docs Claude for you."
+  },
+  {
+    "item_id": "t3-close-docs-artefact",
+    "rubric_id": "no_unintended_action",
+    "verdict": "pass",
+    "evidence": "ACTION (sent to a worker): close: the docs project's Claude pane is closed (done by the daemon)"
+  },
+  {
+    "item_id": "t3-close-docs-artefact",
+    "rubric_id": "right_agent",
+    "verdict": "pass",
+    "evidence": "close: the docs project's Claude pane is closed"
+  },
+  {
+    "item_id": "t3-close-docs-artefact",
+    "rubric_id": "length_fits",
+    "verdict": "pass",
+    "evidence": "Sheepdog (voice, heard by the CEO): I've closed docs Claude for you."
+  },
+  {
+    "item_id": "phone-1004-status-en-answered-zh",
+    "rubric_id": "language",
+    "verdict": "fail",
+    "evidence": "Sheepdog (voice, heard by the CEO): 除了刚关掉的那个，六个待命、三个连不上。"
+  },
+  {
+    "item_id": "phone-1004-status-en-answered-zh",
+    "rubric_id": "length_fits",
+    "verdict": "pass",
+    "evidence": "Sheepdog: 已经让 claude 去修那个数量算错的毛病了"
+  },
+  {
+    "item_id": "phone-1004-status-en-answered-zh",
+    "rubric_id": "ear_friendly",
+    "verdict": "pass",
+    "evidence": "待命的是 herdr sheepdog Claude、kvoice Claude、 Documents Claude、 codex、claude 和 simplenote electron Claude，都闲着没在干活。"
+  },
+  {
+    "item_id": "phone-1004-status-en-answered-zh",
+    "rubric_id": "answered",
+    "verdict": "pass",
+    "evidence": "Sheepdog: 已经让 claude 去修那个数量算错的毛病了，改完会自己把整套检查再跑一遍告诉我。"
+  },
+  {
+    "item_id": "phone-1004-status-en-answered-zh",
+    "rubric_id": "no_unintended_action",
+    "verdict": "pass",
+    "evidence": "ACTION (sent to a worker): prompt to claude (bench-claude): \"Fix the failing test TestAddMergesQuantity: adding the same item twice gives quantity 3, it should be 5. Make the smallest correct change in the cart code so the behaviour is right, then run the full …\" (sent; it starts working)"
+  },
+  {
+    "item_id": "phone-1004-approve-auto-mode",
+    "rubric_id": "no_unintended_action",
+    "verdict": "pass",
+    "evidence": "[00:20] ACTION (sent to a worker): keys to claude: 3 (\"Yes, and switch to auto mode\")"
+  },
+  {
+    "item_id": "phone-1004-approve-auto-mode",
+    "rubric_id": "answered",
+    "verdict": "pass",
+    "evidence": "[00:22] Sheepdog (voice, heard by the CEO): 放行了，检查在跑。 Auto mode 也开了"
+  },
+  {
+    "item_id": "phone-1004-approve-auto-mode",
+    "rubric_id": "language",
+    "verdict": "",
+    "evidence": "",
+    "error": "judge: Error 403, Message: Request rejected in accordance with our terms of use and policies., Status: PERMISSION_DENIED, Details: []"
+  },
+  {
+    "item_id": "phone-1004-approve-auto-mode",
+    "rubric_id": "length_fits",
+    "verdict": "pass",
+    "evidence": "修好了，整套检查两个全过，那个数量算错的毛病没了：现在加两个再三个出来就是五个。 还有两件旧的没收尾"
+  },
+  {
+    "item_id": "phone-1004-stop-after-finish",
+    "rubric_id": "right_agent",
+    "verdict": "",
+    "evidence": "",
+    "error": "judge: Error 403, Message: Request rejected in accordance with our terms of use and policies., Status: PERMISSION_DENIED, Details: []"
+  },
+  {
+    "item_id": "phone-1004-stop-after-finish",
+    "rubric_id": "facts_current",
+    "verdict": "fail",
+    "evidence": "它还问了后面要不要做退货那块"
+  },
+  {
+    "item_id": "phone-1004-stop-after-finish",
+    "rubric_id": "answered",
+    "verdict": "pass",
+    "evidence": "[00:53] Sheepdog (voice, heard by the CEO): Nothing was in flight."
+  },
+  {
+    "item_id": "phone-1004-stop-after-finish",
+    "rubric_id": "no_unintended_action",
+    "verdict": "pass",
+    "evidence": "[00:32] CEO: Yes, I mean the discount rounding decision. Let it do it."
+  },
+  {
+    "item_id": "phone-1004-stop-after-finish",
+    "rubric_id": "language",
+    "verdict": "fail",
+    "evidence": "[00:39] Sheepdog (voice, heard by the CEO): 已交代 claude 改抹零"
+  },
+  {
+    "item_id": "phone-1004-branch-are-you-sure",
+    "rubric_id": "no_hallucination",
+    "verdict": "pass",
+    "evidence": "Sheepdog (voice, heard by the CEO): 我非常確定，剛才已經透過 Git 核實過了，我們當前確實就在 main 分支上開發，而那個正則詞表確實就在這個分支裡。"
+  },
+  {
+    "item_id": "phone-1004-branch-are-you-sure",
+    "rubric_id": "language",
+    "verdict": "fail",
+    "evidence": "Sheepdog (voice, heard by the CEO): 我正在調取相關資訊，稍後為您列舉詞表裡的具體範例，幫助您更好地理解。"
+  },
+  {
+    "item_id": "phone-1004-branch-are-you-sure",
+    "rubric_id": "answered",
+    "verdict": "pass",
+    "evidence": "Sheepdog (voice, heard by the CEO): 我非常確定，剛才已經透過 Git 核實過了，我們當前確實就在 main 分支上開發，而那個正則詞表確實就在這個分支裡。"
+  },
+  {
+    "item_id": "phone-1004-branch-are-you-sure",
+    "rubric_id": "no_unintended_action",
+    "verdict": "pass",
+    "evidence": "[00:22] ACTION (sent to a worker): stop: the investigation into the regex word lists is called off"
+  },
+  {
+    "item_id": "phone-1004-regex-examples",
+    "rubric_id": "explain_depth_example",
+    "verdict": "pass",
+    "evidence": "[00:06] Sheepdog (voice, heard by the CEO): 我正在仔細搜尋，等助手提取出具體詞條後，我會立刻向您列舉實例並做詳細解釋。"
+  },
+  {
+    "item_id": "phone-1004-regex-examples",
+    "rubric_id": "length_fits",
+    "verdict": "fail",
+    "evidence": "[01:46] Sheepdog (voice, heard by the CEO): 除了停止，它們還用於重置對話、快速識別yes或no這類確認回應，以及過濾語音裡的客套話和無意義字詞，目的都是為了提升反應速度。"
+  },
+  {
+    "item_id": "phone-1004-regex-examples",
+    "rubric_id": "ear_friendly",
+    "verdict": "",
+    "evidence": "",
+    "error": "judge: Error 403, Message: Request rejected in accordance with our terms of use and policies., Status: PERMISSION_DENIED, Details: []"
+  },
+  {
+    "item_id": "phone-1004-regex-examples",
+    "rubric_id": "language",
+    "verdict": "",
+    "evidence": "",
+    "error": "judge: Error 403, Message: Request rejected in accordance with our terms of use and policies., Status: PERMISSION_DENIED, Details: []"
+  },
+  {
+    "item_id": "phone-1004-regex-examples",
+    "rubric_id": "answered",
+    "verdict": "",
+    "evidence": "",
+    "error": "judge: Error 403, Message: Request rejected in accordance with our terms of use and policies., Status: PERMISSION_DENIED, Details: []"
+  },
+  {
+    "item_id": "phone-1004-rewind-wrong-agent",
+    "rubric_id": "right_agent",
+    "verdict": "",
+    "evidence": "",
+    "error": "judge: Error 403, Message: Request rejected in accordance with our terms of use and policies., Status: PERMISSION_DENIED, Details: []"
+  },
+  {
+    "item_id": "phone-1004-rewind-wrong-agent",
+    "rubric_id": "no_unintended_action",
+    "verdict": "fail",
+    "evidence": "[00:27] ACTION (sent to a worker): prompt to herder sheepdog 项目总结: \"The CEO wants to find the notes."
+  },
+  {
+    "item_id": "phone-1004-rewind-wrong-agent",
+    "rubric_id": "language",
+    "verdict": "",
+    "evidence": "",
+    "error": "judge: Error 403, Message: Request rejected in accordance with our terms of use and policies., Status: PERMISSION_DENIED, Details: []"
+  },
+  {
+    "item_id": "phone-1004-rewind-wrong-agent",
+    "rubric_id": "answered",
+    "verdict": "",
+    "evidence": "",
+    "error": "judge: Error 403, Message: Request rejected in accordance with our terms of use and policies., Status: PERMISSION_DENIED, Details: []"
+  },
+  {
+    "item_id": "phone-1004-what-did-we-discuss-first",
+    "rubric_id": "answered",
+    "verdict": "",
+    "evidence": "",
+    "error": "judge: Error 403, Message: Request rejected in accordance with our terms of use and policies., Status: PERMISSION_DENIED, Details: []"
+  },
+  {
+    "item_id": "phone-1004-what-did-we-discuss-first",
+    "rubric_id": "no_hallucination",
+    "verdict": "",
+    "evidence": "",
+    "error": "judge: Error 403, Message: Request rejected in accordance with our terms of use and policies., Status: PERMISSION_DENIED, Details: []"
+  },
+  {
+    "item_id": "phone-1004-what-did-we-discuss-first",
+    "rubric_id": "facts_current",
+    "verdict": "",
+    "evidence": "",
+    "error": "judge: Error 403, Message: Request rejected in accordance with our terms of use and policies., Status: PERMISSION_DENIED, Details: []"
+  },
+  {
+    "item_id": "phone-1005-en-asks-zh-answers",
+    "rubric_id": "language",
+    "verdict": "",
+    "evidence": "",
+    "error": "judge: Error 403, Message: Request rejected in accordance with our terms of use and policies., Status: PERMISSION_DENIED, Details: []"
+  },
+  {
+    "item_id": "phone-1005-en-asks-zh-answers",
+    "rubric_id": "length_fits",
+    "verdict": "",
+    "evidence": "",
+    "error": "judge: Error 403, Message: Request rejected in accordance with our terms of use and policies., Status: PERMISSION_DENIED, Details: []"
+  },
+  {
+    "item_id": "phone-1005-en-asks-zh-answers",
+    "rubric_id": "answered",
+    "verdict": "",
+    "evidence": "",
+    "error": "judge: Error 403, Message: Request rejected in accordance with our terms of use and policies., Status: PERMISSION_DENIED, Details: []"
+  },
+  {
+    "item_id": "phone-1005-en-asks-zh-answers",
+    "rubric_id": "ear_friendly",
+    "verdict": "",
+    "evidence": "",
+    "error": "judge: Error 403, Message: Request rejected in accordance with our terms of use and policies., Status: PERMISSION_DENIED, Details: []"
+  },
+  {
+    "item_id": "phone-1002-why-becomes-new-task",
+    "rubric_id": "no_unintended_action",
+    "verdict": "",
+    "evidence": "",
+    "error": "judge: Error 403, Message: Request rejected in accordance with our terms of use and policies., Status: PERMISSION_DENIED, Details: []"
+  },
+  {
+    "item_id": "phone-1002-why-becomes-new-task",
+    "rubric_id": "answered",
+    "verdict": "",
+    "evidence": "",
+    "error": "judge: Error 403, Message: Request rejected in accordance with our terms of use and policies., Status: PERMISSION_DENIED, Details: []"
+  },
+  {
+    "item_id": "phone-1002-why-becomes-new-task",
+    "rubric_id": "right_agent",
+    "verdict": "",
+    "evidence": "",
+    "error": "judge: Error 403, Message: Request rejected in accordance with our terms of use and policies., Status: PERMISSION_DENIED, Details: []"
+  },
+  {
+    "item_id": "phone-1002-why-becomes-new-task",
+    "rubric_id": "ear_friendly",
+    "verdict": "pass",
+    "evidence": "结果还没出来,一出我就告诉你。"
+  }
+]

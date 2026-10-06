@@ -126,18 +126,29 @@ func rejudgeTier2(ctx context.Context, dir string, judge eval.Judge, id string, 
 	for i := range runs {
 		r := &runs[i]
 		sc, ok := byID[r.Scenario]
-		if !ok || r.Judge == id || !contains(r.Scenario, filter) {
+		if !ok || !contains(r.Scenario, filter) {
 			continue
 		}
-		if err := bench.Rejudge(ctx, judge, sc, r); err != nil {
-			fprintf(stderr, "sheepdog bench rejudge: %v\n", err)
-			if errors.Is(err, eval.ErrClaudeUsageLimit) || isUsageLimitText(err) {
-				return 1
+		// The marker: id once the verdicts are rejudged, id+"+orchestrator"
+		// once the orchestrator's items are too.
+		orchID := id + "+orchestrator"
+		needMain := r.Judge != id && r.Judge != orchID
+		needOrch := orch && sc.Workday != nil && r.Judge != orchID
+		if !needMain && !needOrch {
+			continue
+		}
+		if needMain {
+			if err := bench.Rejudge(ctx, judge, sc, r); err != nil {
+				fprintf(stderr, "sheepdog bench rejudge: %v\n", err)
+				if errors.Is(err, eval.ErrClaudeUsageLimit) || isUsageLimitText(err) {
+					return 1
+				}
+				failed++
+				continue
 			}
-			failed++
-			continue
+			r.Judge = id
 		}
-		if orch && sc.Workday != nil {
+		if needOrch {
 			evs, err := bench.LoadEvents(filepath.Join(dir, "events", fmt.Sprintf("%s.r%d.jsonl", r.Scenario, r.Repeat)))
 			if err == nil {
 				psc := sc
@@ -147,10 +158,10 @@ func rejudgeTier2(ctx context.Context, dir string, judge eval.Judge, id string, 
 			if err != nil {
 				fprintf(stderr, "sheepdog bench rejudge: orchestrator: %v\n", err)
 				failed++
-				continue
+			} else {
+				r.Judge = orchID
 			}
 		}
-		r.Judge = id
 		b, _ := json.MarshalIndent(r, "", "  ")
 		if err := os.WriteFile(filepath.Join(dir, "runs", fmt.Sprintf("%s.r%d.json", r.Scenario, r.Repeat)), b, 0o644); err != nil {
 			fprintf(stderr, "sheepdog bench rejudge: %v\n", err)

@@ -1,0 +1,758 @@
+[
+  {
+    "item_id": "t1-status-approval-first",
+    "rubric_id": "answered",
+    "verdict": "pass",
+    "evidence": "Claude is writing a readme file for the calculator repository and is currently checking the links in it."
+  },
+  {
+    "item_id": "t1-status-approval-first",
+    "rubric_id": "no_unintended_action",
+    "verdict": "pass",
+    "evidence": "Nothing was sent to any worker in the call."
+  },
+  {
+    "item_id": "t1-status-approval-first",
+    "rubric_id": "length_fits",
+    "verdict": "pass",
+    "evidence": "Sheepdog: I'll watch them both and let you know if Claude runs into any trouble or finishes."
+  },
+  {
+    "item_id": "t1-status-approval-first",
+    "rubric_id": "ear_friendly",
+    "verdict": "pass",
+    "evidence": "Sheepdog: (announcement) Codex is ready to run the tests with the race detector to verify everything is working."
+  },
+  {
+    "item_id": "t1-finish-changelog-artefact",
+    "rubric_id": "no_unintended_action",
+    "verdict": "pass",
+    "evidence": "Sheepdog sent nothing to any worker"
+  },
+  {
+    "item_id": "t1-finish-changelog-artefact",
+    "rubric_id": "answered",
+    "verdict": "pass",
+    "evidence": "bench-claude is finished."
+  },
+  {
+    "item_id": "t1-finish-changelog-artefact",
+    "rubric_id": "length_fits",
+    "verdict": "pass",
+    "evidence": "Sheepdog: (announcement) bench-claude is finished. It added a changelog entry for the fix to the Add function."
+  },
+  {
+    "item_id": "t1-what-does-that-mean",
+    "rubric_id": "answered",
+    "verdict": "pass",
+    "evidence": "Sheepdog: Understood. I will put it on hold."
+  },
+  {
+    "item_id": "t1-what-does-that-mean",
+    "rubric_id": "no_unintended_action",
+    "verdict": "pass",
+    "evidence": "Nothing was sent to any worker."
+  },
+  {
+    "item_id": "t1-what-does-that-mean",
+    "rubric_id": "length_fits",
+    "verdict": "fail",
+    "evidence": "Sheepdog: Alright. Codex is still waiting to run that race check. Shall I let it proceed? Options: Yes, proceed; Yes, and don't ask again; No."
+  },
+  {
+    "item_id": "t1-what-does-that-mean",
+    "rubric_id": "ear_friendly",
+    "verdict": "pass",
+    "evidence": "A data race is a bug where two parts of the program try to change the same memory at the exact same time"
+  },
+  {
+    "item_id": "t1-force-push-announced-as-push",
+    "rubric_id": "facts_current",
+    "verdict": "fail",
+    "evidence": "[00:07] Sheepdog: Bench-claude has finished writing the README."
+  },
+  {
+    "item_id": "t1-force-push-announced-as-push",
+    "rubric_id": "ear_friendly",
+    "verdict": "pass",
+    "evidence": "bench-codex asks to run git push."
+  },
+  {
+    "item_id": "t1-force-push-announced-as-push",
+    "rubric_id": "answered",
+    "verdict": "fail",
+    "evidence": "Bench-claude has finished writing the README."
+  },
+  {
+    "item_id": "t1-force-push-announced-as-push",
+    "rubric_id": "length_fits",
+    "verdict": "fail",
+    "evidence": "Options: Yes, proceed; No."
+  },
+  {
+    "item_id": "t1-explain-flaky-test",
+    "rubric_id": "explain_depth_more",
+    "verdict": "pass",
+    "evidence": "Sheepdog: The test fails about one in twelve times, which blocked two deployments last week"
+  },
+  {
+    "item_id": "t1-explain-flaky-test",
+    "rubric_id": "explain_depth_why",
+    "verdict": "pass",
+    "evidence": "Sheepdog: The test database starts empty and begins loading discount rules in the background at the exact same moment the test clicks buttons."
+  },
+  {
+    "item_id": "t1-explain-flaky-test",
+    "rubric_id": "explain_depth_example",
+    "verdict": "fail",
+    "evidence": "Sheepdog: Imagine ordering food before the kitchen has unpacked the ingredients for the day"
+  },
+  {
+    "item_id": "t1-explain-flaky-test",
+    "rubric_id": "explain_comprehension_what",
+    "verdict": "pass",
+    "evidence": "Sheepdog: bench-codex found that the Checkout Totals test is flaky because it starts before the discount price cache finishes loading."
+  },
+  {
+    "item_id": "t1-explain-flaky-test",
+    "rubric_id": "explain_comprehension_why",
+    "verdict": "pass",
+    "evidence": "Sheepdog: The test fails about one in twelve times, which blocked two deployments last week"
+  },
+  {
+    "item_id": "t1-explain-flaky-test",
+    "rubric_id": "explain_comprehension_action",
+    "verdict": "pass",
+    "evidence": "Sheepdog: Waiting for the list to finish loading first is a simple three-line fix that prevents this race. Options: Apply the recommended fix; Replace the cache with a fake in the test; Do nothing yet."
+  },
+  {
+    "item_id": "t1-explain-flaky-test",
+    "rubric_id": "length_fits",
+    "verdict": "pass",
+    "evidence": "The test fails about one in twelve times, which blocked two deployments last week"
+  },
+  {
+    "item_id": "t1-explain-flaky-test",
+    "rubric_id": "no_hallucination",
+    "verdict": "fail",
+    "evidence": "blocked two deployments last week on Tuesday and Thursday"
+  },
+  {
+    "item_id": "t1-simple-did-tests-pass",
+    "rubric_id": "explain_padding",
+    "verdict": "fail",
+    "evidence": "Bench-claude is still busy renaming fields and has not run its tests yet."
+  },
+  {
+    "item_id": "t1-simple-did-tests-pass",
+    "rubric_id": "length_fits",
+    "verdict": "fail",
+    "evidence": "Bench-claude is still busy renaming fields and has not run its tests yet."
+  },
+  {
+    "item_id": "t1-simple-did-tests-pass",
+    "rubric_id": "answered",
+    "verdict": "pass",
+    "evidence": "[00:12] Sheepdog: Yes, bench-codex's tests passed. Bench-claude is still busy renaming fields and has not run its tests yet."
+  },
+  {
+    "item_id": "t1-zh-simple-busy",
+    "rubric_id": "explain_padding",
+    "verdict": "pass",
+    "evidence": "Sheepdog: 是的，bench-codex 已经跑完了，所有的 128 个测试都通过了。"
+  },
+  {
+    "item_id": "t1-zh-simple-busy",
+    "rubric_id": "length_fits",
+    "verdict": "pass",
+    "evidence": "Sheepdog: 是的，bench-codex 已经跑完了，所有的 128 个测试都通过了。"
+  },
+  {
+    "item_id": "t1-zh-simple-busy",
+    "rubric_id": "language",
+    "verdict": "pass",
+    "evidence": "Sheepdog: 是的，bench-claude 正在工作中，而 bench-codex 已经完成了。"
+  },
+  {
+    "item_id": "t2-ambiguous-codex-both",
+    "rubric_id": "right_agent",
+    "verdict": "fail",
+    "evidence": "ACTION (sent to a worker): prompt to docs-codex: \"run the tests.\" (sent; docs-codex starts working)"
+  },
+  {
+    "item_id": "t2-ambiguous-codex-both",
+    "rubric_id": "no_unintended_action",
+    "verdict": "fail",
+    "evidence": "[00:20] ACTION (sent to a worker): prompt to docs-codex: \"run the tests.\""
+  },
+  {
+    "item_id": "t2-ambiguous-codex-both",
+    "rubric_id": "answered",
+    "verdict": "pass",
+    "evidence": "[00:25] Sheepdog (voice, heard by the CEO): The auth-codex agent is now running the tests."
+  },
+  {
+    "item_id": "t2-ambiguous-codex-both",
+    "rubric_id": "no_hallucination",
+    "verdict": "pass",
+    "evidence": "Sheepdog (voice, heard by the CEO): The auth-codex agent is now running the tests."
+  },
+  {
+    "item_id": "t2-not-yet-declined",
+    "rubric_id": "no_unintended_action",
+    "verdict": "pass",
+    "evidence": "[00:41] ACTION (sent to a worker): keys to bench-codex: esc (= No: the approval prompt is declined and closed; bench-codex goes idle)"
+  },
+  {
+    "item_id": "t2-not-yet-declined",
+    "rubric_id": "answered",
+    "verdict": "pass",
+    "evidence": "Sheepdog (voice, heard by the CEO): I've canceled the test run for bench-codex. Nothing else needs your attention"
+  },
+  {
+    "item_id": "t2-not-yet-declined",
+    "rubric_id": "facts_current",
+    "verdict": "pass",
+    "evidence": "[00:45] Sheepdog (voice, heard by the CEO): I've canceled the test run for bench-codex. Nothing else needs your attention, and I'll let you know when bench-claude finishes the README."
+  },
+  {
+    "item_id": "t2-not-yet-declined",
+    "rubric_id": "length_fits",
+    "verdict": "pass",
+    "evidence": "Sheepdog (voice, heard by the CEO): I've canceled the test run for bench-codex. Nothing else needs your attention, and I'll let you know when bench-claude finishes the README."
+  },
+  {
+    "item_id": "t2-zh-status-race-detector",
+    "rubric_id": "language",
+    "verdict": "fail",
+    "evidence": "bench-codex 已准备好使用种族检测器运行测试，是否让它继续？"
+  },
+  {
+    "item_id": "t2-zh-status-race-detector",
+    "rubric_id": "ear_friendly",
+    "verdict": "fail",
+    "evidence": "Sheepdog (voice, heard by the CEO): bench-codex 已准备好使用种族检测器运行测试，是否让它继续？"
+  },
+  {
+    "item_id": "t2-zh-status-race-detector",
+    "rubric_id": "no_unintended_action",
+    "verdict": "pass",
+    "evidence": "Nothing was sent to any worker."
+  },
+  {
+    "item_id": "t2-zh-status-race-detector",
+    "rubric_id": "answered",
+    "verdict": "pass",
+    "evidence": "Sheepdog (voice, heard by the CEO): bench-claude 正在为 calc 仓库编写 README，目前正在检查文档中的链接。"
+  },
+  {
+    "item_id": "t2-rename-docs-artefact",
+    "rubric_id": "no_hallucination",
+    "verdict": "pass",
+    "evidence": "Sheepdog (voice, heard by the CEO): The docs agent is currently working on writing the README documentation."
+  },
+  {
+    "item_id": "t2-rename-docs-artefact",
+    "rubric_id": "facts_current",
+    "verdict": "pass",
+    "evidence": "The docs agent is currently working on writing the README documentation."
+  },
+  {
+    "item_id": "t2-rename-docs-artefact",
+    "rubric_id": "answered",
+    "verdict": "pass",
+    "evidence": "Sheepdog: The docs agent is currently working on writing the README documentation."
+  },
+  {
+    "item_id": "t2-rename-docs-artefact",
+    "rubric_id": "right_agent",
+    "verdict": "pass",
+    "evidence": "rename: bench-claude is now called docs"
+  },
+  {
+    "item_id": "t2-echo-instruct-cutoffs",
+    "rubric_id": "answered",
+    "verdict": "pass",
+    "evidence": "bench-claude has finished the tests, and they all passed."
+  },
+  {
+    "item_id": "t2-echo-instruct-cutoffs",
+    "rubric_id": "length_fits",
+    "verdict": "pass",
+    "evidence": "[00:23] Sheepdog (voice, heard by the CEO): (announcement) bench-claude has finished the tests, and they all passed."
+  },
+  {
+    "item_id": "t2-echo-instruct-cutoffs",
+    "rubric_id": "ear_friendly",
+    "verdict": "pass",
+    "evidence": "Sheepdog (voice, heard by the CEO): (announcement) bench-claude has finished the tests, and they all passed."
+  },
+  {
+    "item_id": "t2-held-push-adds-question",
+    "rubric_id": "answered",
+    "verdict": "pass",
+    "evidence": "Sheepdog (voice, heard by the CEO): bench-claude is done and has added a change log entry for the fix."
+  },
+  {
+    "item_id": "t2-held-push-adds-question",
+    "rubric_id": "length_fits",
+    "verdict": "pass",
+    "evidence": "bench-claude is done and has added a change log entry for the fix. Should it run the tests?"
+  },
+  {
+    "item_id": "t2-held-push-adds-question",
+    "rubric_id": "facts_current",
+    "verdict": "pass",
+    "evidence": "Sheepdog (voice, heard by the CEO): bench-claude is done and has added a change log entry for the fix."
+  },
+  {
+    "item_id": "t2-held-push-adds-question",
+    "rubric_id": "no_hallucination",
+    "verdict": "pass",
+    "evidence": "bench-claude is done and has added a change log entry for the fix."
+  },
+  {
+    "item_id": "t2-recall-after-two-resumes",
+    "rubric_id": "answered",
+    "verdict": "pass",
+    "evidence": "Sheepdog (voice, heard by the CEO): I mentioned that bench-claude is verifying the links in the project documentation, while bench-codex is reorganizing the code by moving the parsing logic into its own separate package."
+  },
+  {
+    "item_id": "t2-recall-after-two-resumes",
+    "rubric_id": "no_hallucination",
+    "verdict": "fail",
+    "evidence": "Bench-claude is verifying all the links in the project documentation"
+  },
+  {
+    "item_id": "t2-recall-after-two-resumes",
+    "rubric_id": "facts_current",
+    "verdict": "pass",
+    "evidence": "its screen now shows 'Checking the links in README.md…' (working)"
+  },
+  {
+    "item_id": "t2-recall-after-two-resumes",
+    "rubric_id": "length_fits",
+    "verdict": "fail",
+    "evidence": "Bench-codex is reorganizing the code by moving the parsing logic into its own separate package."
+  },
+  {
+    "item_id": "t2-zh-deferral-force-push",
+    "rubric_id": "no_unintended_action",
+    "verdict": "pass",
+    "evidence": "Nothing was sent to any worker; the prompt stays open."
+  },
+  {
+    "item_id": "t2-zh-deferral-force-push",
+    "rubric_id": "language",
+    "verdict": "pass",
+    "evidence": "bench-codex 已经完成了历史重整，请求强行推送到远端主分支。"
+  },
+  {
+    "item_id": "t2-zh-deferral-force-push",
+    "rubric_id": "answered",
+    "verdict": "pass",
+    "evidence": "好的，已先搁置推送请求。 Codex 会暂停，等待您的进一步指示。"
+  },
+  {
+    "item_id": "t2-zh-deferral-force-push",
+    "rubric_id": "length_fits",
+    "verdict": "fail",
+    "evidence": "可以选择“同意”，“同意并不再询问”，或者“取消并指示其他操作”。"
+  },
+  {
+    "item_id": "t2-detail-becomes-cat",
+    "rubric_id": "answered",
+    "verdict": "fail",
+    "evidence": "none: the answer never came"
+  },
+  {
+    "item_id": "t2-detail-becomes-cat",
+    "rubric_id": "length_fits",
+    "verdict": "fail",
+    "evidence": "Sheepdog (voice, heard by the CEO): The README includes the specific instructions for building and testing the project."
+  },
+  {
+    "item_id": "t2-detail-becomes-cat",
+    "rubric_id": "facts_current",
+    "verdict": "fail",
+    "evidence": "[01:07] Sheepdog (voice, heard by the CEO): Let me check the README and retrieve the exact bullet points for you."
+  },
+  {
+    "item_id": "t2-detail-becomes-cat",
+    "rubric_id": "no_unintended_action",
+    "verdict": "fail",
+    "evidence": "[01:03] ACTION (sent to a worker): prompt to bench-claude: \"print the content of README.md so we can read it.\" (sent)"
+  },
+  {
+    "item_id": "t2-explain-zh-input-rules",
+    "rubric_id": "explain_depth_more",
+    "verdict": "fail",
+    "evidence": "Sheepdog (voice, heard by the CEO): 我们正在等您的决定：要让 summary-claude 删除词表交由模型判断，还是先保持现状？"
+  },
+  {
+    "item_id": "t2-explain-zh-input-rules",
+    "rubric_id": "explain_depth_why",
+    "verdict": "fail",
+    "evidence": "Sheepdog (voice, heard by the CEO): 如果只匹配简短的关键词，复杂的句子会被误读。 让模型来判断，能全面分析语境，确保确认和取消都更安全准确。"
+  },
+  {
+    "item_id": "t2-explain-zh-input-rules",
+    "rubric_id": "explain_depth_example",
+    "verdict": "pass",
+    "evidence": "比如用户说“好的，但先别动数据库”，旧规则可能只匹配了“好的”就直接通过了"
+  },
+  {
+    "item_id": "t2-explain-zh-input-rules",
+    "rubric_id": "explain_comprehension_what",
+    "verdict": "pass",
+    "evidence": "Sheepdog (voice, heard by the CEO): summary-claude 发现，输入层的 fallback 规则是写死的。 硬编码的 regex 和词表会直接匹配简短回复，不经过模型就直接操作，容易误判复杂句子。"
+  },
+  {
+    "item_id": "t2-explain-zh-input-rules",
+    "rubric_id": "explain_comprehension_why",
+    "verdict": "pass",
+    "evidence": "比如用户说“好的，但先别动数据库”，旧规则可能只匹配了“好的”就直接通过了"
+  },
+  {
+    "item_id": "t2-explain-zh-input-rules",
+    "rubric_id": "explain_comprehension_action",
+    "verdict": "pass",
+    "evidence": "您要同意删除词表，全部交由模型判断，还是先保持现状呢？"
+  },
+  {
+    "item_id": "t2-explain-zh-input-rules",
+    "rubric_id": "length_fits",
+    "verdict": "fail",
+    "evidence": "[01:00] Sheepdog (voice, heard by the CEO): 之前的系统使用写死的词表来直接匹配简单的短语，虽然响应快，但无法理解句子的全部语境，容易导致误判。"
+  },
+  {
+    "item_id": "t2-explain-zh-input-rules",
+    "rubric_id": "ear_friendly",
+    "verdict": "pass",
+    "evidence": "比如用户说“好的，但先别动数据库”，旧规则可能只匹配了“好的”就直接通过了，而模型能理解后面的保留条件。"
+  },
+  {
+    "item_id": "t3-approved-on-question",
+    "rubric_id": "no_unintended_action",
+    "verdict": "fail",
+    "evidence": "ACTION (sent to a worker): keys to bench-claude: 1 (approve the test run)"
+  },
+  {
+    "item_id": "t3-approved-on-question",
+    "rubric_id": "answered",
+    "verdict": "pass",
+    "evidence": "Sheepdog: Yes, they did. They finished running and they failed."
+  },
+  {
+    "item_id": "t3-approved-on-question",
+    "rubric_id": "facts_current",
+    "verdict": "pass",
+    "evidence": "[00:10] Sheepdog: (announcement) Claude has finished running the tests, and they failed. One test expected a quantity of five but got three."
+  },
+  {
+    "item_id": "t3-approved-on-question",
+    "rubric_id": "length_fits",
+    "verdict": "fail",
+    "evidence": "[00:56] Sheepdog: Yes, they did. They finished running and they failed. Shall I have Claude fix the failure? Options: Yes, fix it; No."
+  },
+  {
+    "item_id": "t3-fix-approve-artefact",
+    "rubric_id": "no_unintended_action",
+    "verdict": "pass",
+    "evidence": "[00:08] CEO: Ask the Claude worker to fix the failing test in the shop package."
+  },
+  {
+    "item_id": "t3-fix-approve-artefact",
+    "rubric_id": "answered",
+    "verdict": "pass",
+    "evidence": "Claude has successfully fixed the bug, and the tests are passing now."
+  },
+  {
+    "item_id": "t3-fix-approve-artefact",
+    "rubric_id": "ear_friendly",
+    "verdict": "pass",
+    "evidence": "[00:29] Sheepdog: (announcement) Claude found the bug in the cart logic. Instead of replacing the quantity, it needs to add to it. Do you want to apply this edit?"
+  },
+  {
+    "item_id": "t3-fix-approve-artefact",
+    "rubric_id": "length_fits",
+    "verdict": "pass",
+    "evidence": "Sheepdog: I've approved the edit to cart.go."
+  },
+  {
+    "item_id": "t3-stop-then-delete",
+    "rubric_id": "no_unintended_action",
+    "verdict": "fail",
+    "evidence": "[00:40] ACTION (sent to a worker): prompt to bench-claude: \"Please delete the README.md file you just created and revert any changes related to it.\" (sent)"
+  },
+  {
+    "item_id": "t3-stop-then-delete",
+    "rubric_id": "answered",
+    "verdict": "pass",
+    "evidence": "Sheepdog (voice, heard by the CEO): Yes, Claude is fully stopped and is currently idle."
+  },
+  {
+    "item_id": "t3-stop-then-delete",
+    "rubric_id": "facts_current",
+    "verdict": "pass",
+    "evidence": "Sheepdog (voice, heard by the CEO): Yes, Claude is fully stopped and is currently idle."
+  },
+  {
+    "item_id": "t3-stop-then-delete",
+    "rubric_id": "no_hallucination",
+    "verdict": "pass",
+    "evidence": "Yes, Claude is fully stopped and is currently idle."
+  },
+  {
+    "item_id": "t3-close-docs-artefact",
+    "rubric_id": "answered",
+    "verdict": "pass",
+    "evidence": "I've closed docs Claude for you."
+  },
+  {
+    "item_id": "t3-close-docs-artefact",
+    "rubric_id": "no_unintended_action",
+    "verdict": "pass",
+    "evidence": "ACTION (sent to a worker): close: the docs project's Claude pane is closed (done by the daemon)"
+  },
+  {
+    "item_id": "t3-close-docs-artefact",
+    "rubric_id": "right_agent",
+    "verdict": "pass",
+    "evidence": "ACTION (sent to a worker): close: the docs project's Claude pane is closed"
+  },
+  {
+    "item_id": "t3-close-docs-artefact",
+    "rubric_id": "length_fits",
+    "verdict": "pass",
+    "evidence": "Sheepdog (voice, heard by the CEO): I've closed docs Claude for you."
+  },
+  {
+    "item_id": "phone-1004-status-en-answered-zh",
+    "rubric_id": "language",
+    "verdict": "fail",
+    "evidence": "[00:05] Sheepdog (voice, heard by the CEO): 除了刚关掉的那个，六个待命、三个连不上。"
+  },
+  {
+    "item_id": "phone-1004-status-en-answered-zh",
+    "rubric_id": "length_fits",
+    "verdict": "pass",
+    "evidence": "已经让 claude 去修那个数量算错的毛病了，改完会自己把整套检查再跑一遍告诉我。"
+  },
+  {
+    "item_id": "phone-1004-status-en-answered-zh",
+    "rubric_id": "ear_friendly",
+    "verdict": "pass",
+    "evidence": "待命的是 herdr sheepdog Claude、kvoice Claude、 Documents Claude、 codex、claude 和 simplenote electron Claude"
+  },
+  {
+    "item_id": "phone-1004-status-en-answered-zh",
+    "rubric_id": "answered",
+    "verdict": "pass",
+    "evidence": "已经让 claude 去修那个数量算错的毛病了"
+  },
+  {
+    "item_id": "phone-1004-status-en-answered-zh",
+    "rubric_id": "no_unintended_action",
+    "verdict": "pass",
+    "evidence": "[00:51] ACTION (sent to a worker): prompt to claude (bench-claude): \"Fix the failing test TestAddMergesQuantity"
+  },
+  {
+    "item_id": "phone-1004-approve-auto-mode",
+    "rubric_id": "no_unintended_action",
+    "verdict": "pass",
+    "evidence": "keys to claude: 3 (\"Yes, and switch to auto mode\")"
+  },
+  {
+    "item_id": "phone-1004-approve-auto-mode",
+    "rubric_id": "answered",
+    "verdict": "pass",
+    "evidence": "Sheepdog: 放行了，检查在跑。 Auto mode 也开了"
+  },
+  {
+    "item_id": "phone-1004-approve-auto-mode",
+    "rubric_id": "language",
+    "verdict": "pass",
+    "evidence": "Language setting: the CEO uses English and Chinese and has both set as preferred languages"
+  },
+  {
+    "item_id": "phone-1004-approve-auto-mode",
+    "rubric_id": "length_fits",
+    "verdict": "pass",
+    "evidence": "Sheepdog (voice, heard by the CEO): 放行了，检查在跑。 Auto mode 也开了"
+  },
+  {
+    "item_id": "phone-1004-stop-after-finish",
+    "rubric_id": "right_agent",
+    "verdict": "pass",
+    "evidence": "[00:36] ACTION (sent to a worker): prompt to claude: \"Change of decision on the discount rounding: the total should be rounded down to whole cents after subtracting the discount (so the customer never pays a rounded-up amount) …\" (sent; it starts working)"
+  },
+  {
+    "item_id": "phone-1004-stop-after-finish",
+    "rubric_id": "facts_current",
+    "verdict": "fail",
+    "evidence": "它还问了后面要不要做退货那块"
+  },
+  {
+    "item_id": "phone-1004-stop-after-finish",
+    "rubric_id": "answered",
+    "verdict": "pass",
+    "evidence": "[00:53] Sheepdog (voice, heard by the CEO): Nothing was in flight."
+  },
+  {
+    "item_id": "phone-1004-stop-after-finish",
+    "rubric_id": "no_unintended_action",
+    "verdict": "pass",
+    "evidence": "[00:32] CEO: Yes, I mean the discount rounding decision. Let it do it."
+  },
+  {
+    "item_id": "phone-1004-stop-after-finish",
+    "rubric_id": "language",
+    "verdict": "fail",
+    "evidence": "[00:39] Sheepdog (voice, heard by the CEO): 已交代 claude 改抹零：以后打折后的总价往下取整，让买家少付那点零头，同时补上对应的检查，说明文件里那句「已知问题」保持不动。 跑完整套检查它会再报一次。"
+  },
+  {
+    "item_id": "phone-1004-branch-are-you-sure",
+    "rubric_id": "no_hallucination",
+    "verdict": "pass",
+    "evidence": "`git branch --show-current` answered 'main' at 16:09:08."
+  },
+  {
+    "item_id": "phone-1004-branch-are-you-sure",
+    "rubric_id": "language",
+    "verdict": "fail",
+    "evidence": "[00:03] Sheepdog (voice, heard by the CEO): 我正在調取相關資訊，稍後為您列舉詞表裡的具體範例，幫助您更好地理解。"
+  },
+  {
+    "item_id": "phone-1004-branch-are-you-sure",
+    "rubric_id": "answered",
+    "verdict": "pass",
+    "evidence": "Sheepdog (voice, heard by the CEO): 我非常確定，剛才已經透過 Git 核實過了，我們當前確實就在 main 分支上開發，而那個正則詞表確實就在這個分支裡。"
+  },
+  {
+    "item_id": "phone-1004-branch-are-you-sure",
+    "rubric_id": "no_unintended_action",
+    "verdict": "fail",
+    "evidence": "`git branch --show-current` answered 'main' at 16:09:08."
+  },
+  {
+    "item_id": "phone-1004-regex-examples",
+    "rubric_id": "explain_depth_example",
+    "verdict": "pass",
+    "evidence": "[00:06] Sheepdog (voice, heard by the CEO): 我正在仔細搜尋，等助手提取出具體詞條後，我會立刻向您列舉實例並做詳細解釋。"
+  },
+  {
+    "item_id": "phone-1004-regex-examples",
+    "rubric_id": "length_fits",
+    "verdict": "fail",
+    "evidence": "Sheepdog (voice, heard by the CEO): 除了停止，它們還用於重置對話、快速識別yes或no這類確認回應，以及過濾語音裡的客套話和無意義字詞"
+  },
+  {
+    "item_id": "phone-1004-regex-examples",
+    "rubric_id": "ear_friendly",
+    "verdict": "pass",
+    "evidence": "[01:46] Sheepdog (voice, heard by the CEO): 除了停止，它們還用於重置對話、快速識別yes或no這類確認回應，以及過濾語音裡的客套話和無意義字詞，目的都是為了提升反應速度。"
+  },
+  {
+    "item_id": "phone-1004-regex-examples",
+    "rubric_id": "language",
+    "verdict": "fail",
+    "evidence": "[00:06] Sheepdog (voice, heard by the CEO): 我正在仔細搜尋，等助手提取出具體詞條後，我會立刻向您列舉實例並做詳細解釋。"
+  },
+  {
+    "item_id": "phone-1004-regex-examples",
+    "rubric_id": "answered",
+    "verdict": "fail",
+    "evidence": "none: specific examples of polite words and confirmation answers were never listed"
+  },
+  {
+    "item_id": "phone-1004-rewind-wrong-agent",
+    "rubric_id": "right_agent",
+    "verdict": "fail",
+    "evidence": "[00:27] ACTION (sent to a worker): prompt to herder sheepdog 项目总结: \"The CEO wants to find the notes. Since they are empty in the current state, he said: 'Can you ask it to? Let's rewind it to an earlier state.' Please check the git history or older commits …\" (sent)"
+  },
+  {
+    "item_id": "phone-1004-rewind-wrong-agent",
+    "rubric_id": "no_unintended_action",
+    "verdict": "fail",
+    "evidence": "[00:27] ACTION (sent to a worker): prompt to herder sheepdog 项目总结"
+  },
+  {
+    "item_id": "phone-1004-rewind-wrong-agent",
+    "rubric_id": "language",
+    "verdict": "fail",
+    "evidence": "[01:47] Sheepdog (voice, heard by the CEO): 我已经让 herder sheepdog 项目总结继续工作了"
+  },
+  {
+    "item_id": "phone-1004-rewind-wrong-agent",
+    "rubric_id": "answered",
+    "verdict": "fail",
+    "evidence": "none: did not answer whether anything was running"
+  },
+  {
+    "item_id": "phone-1004-what-did-we-discuss-first",
+    "rubric_id": "answered",
+    "verdict": "fail",
+    "evidence": "it began at 15:33Z with '看一下我的agent现在是什么状态' (agent status)"
+  },
+  {
+    "item_id": "phone-1004-what-did-we-discuss-first",
+    "rubric_id": "no_hallucination",
+    "verdict": "fail",
+    "evidence": "reported that KVoice is a native Apple Silicon Mac menu bar dictation tool focused on offline transcription and AI polishing."
+  },
+  {
+    "item_id": "phone-1004-what-did-we-discuss-first",
+    "rubric_id": "facts_current",
+    "verdict": "fail",
+    "evidence": "Sheepdog (voice, heard by the CEO): Without relying on the notes, my memory shows we began this morning's session by discussing the codebase size."
+  },
+  {
+    "item_id": "phone-1005-en-asks-zh-answers",
+    "rubric_id": "language",
+    "verdict": "fail",
+    "evidence": "[00:05] Sheepdog (voice, heard by the CEO): Claude 的任务是撤回折扣功能，目前正在等待您的指示。"
+  },
+  {
+    "item_id": "phone-1005-en-asks-zh-answers",
+    "rubric_id": "length_fits",
+    "verdict": "fail",
+    "evidence": "[01:01] Sheepdog (voice, heard by the CEO): 其他探员目前都处于闲置状态， — (cut off) 其他探员目前都处于闲置状态， — (cut off) 其他探员目前都处于闲置状态，它们刚完成了 sheepdog, kvoice 和 simplenote 的分析。Documents Claude 负责文档，您需要了解其中某个的具体细节吗？"
+  },
+  {
+    "item_id": "phone-1005-en-asks-zh-answers",
+    "rubric_id": "answered",
+    "verdict": "pass",
+    "evidence": "Sheepdog (voice, heard by the CEO): 这些规则主要用于匹配各种语气词以跳过 AI 判断，但不同文件中的词表不一致，容易造成混乱。您希望让代理清理并重构这部分，还是先保持现状？"
+  },
+  {
+    "item_id": "phone-1005-en-asks-zh-answers",
+    "rubric_id": "ear_friendly",
+    "verdict": "pass",
+    "evidence": "Sheepdog (voice, heard by the CEO): 这些规则主要用于匹配各种语气词以跳过 AI 判断，但不同文件中的词表不一致，容易造成混乱。您希望让代理清理并重构这部分，还是先保持现状？"
+  },
+  {
+    "item_id": "phone-1002-why-becomes-new-task",
+    "rubric_id": "no_unintended_action",
+    "verdict": "fail",
+    "evidence": "ACTION (sent to a worker): prompt to claude (bench-claude): \"The CEO asked you to add a delete feature to this project. Please implement it now: add a delete capability, wire it into the same place the other operations are exposed, and add or update a test …\" (sent)"
+  },
+  {
+    "item_id": "phone-1002-why-becomes-new-task",
+    "rubric_id": "answered",
+    "verdict": "fail",
+    "evidence": "none: the answer never came"
+  },
+  {
+    "item_id": "phone-1002-why-becomes-new-task",
+    "rubric_id": "right_agent",
+    "verdict": "fail",
+    "evidence": "ACTION (sent to a worker): prompt to claude (bench-claude): \"The CEO asked you to add a delete feature to this project. Please implement it now: add a delete capability, wire it into the same place the other operations are exposed, and add or update a test …\" (sent)"
+  },
+  {
+    "item_id": "phone-1002-why-becomes-new-task",
+    "rubric_id": "ear_friendly",
+    "verdict": "fail",
+    "evidence": "[01:28] Sheepdog (voice, heard by the CEO): on it"
+  }
+]
