@@ -43,7 +43,7 @@ func printEvalSimUsage(w io.Writer) {
 	fprintln(w, "  --model ID            live brain model (default brain.model)")
 	fprintln(w, "  --utterance-timeout D an experiment: override brain.utterance_timeout_s for this")
 	fprintln(w, "                        run (e.g. 25s), to measure what the timeout costs")
-	fprintln(w, "  --simuser KIND        vertex (default with --live), ollama or fake")
+	fprintln(w, "  --simuser KIND        vertex (default with --live), deepseek, ollama or fake")
 	fprintln(w, "  --simuser-model ID    simulated user model (default "+eval.DefaultVertexModel+")")
 	fprintln(w, judgeHelp)
 	fprintln(w, "  --judge-model ID      judge model (default sonnet for claude, "+eval.DefaultVertexModel+" for vertex)")
