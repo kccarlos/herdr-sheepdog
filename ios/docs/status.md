@@ -1,6 +1,6 @@
 # Status (2026-10-05)
 
-## Agent window over /ws (unreleased)
+## Agent window over /ws (in 0.1.5 (57))
 
 The agent window streams its screen over the existing `/ws` connection
 when the daemon lists the `screen` feature (daemon #151): one
@@ -10,8 +10,8 @@ every 1.5 s as before with an older daemon or while the socket is down.
 Kit tests: `AgentScreenStreamTests`; `AgentScreenUITests.testTheWindowStreamsOverTheSocket`
 connects with the orb, opens a window, sees new output arrive and checks the
 daemon logged the subscribe and the unsubscribe (passed on the iPhone 17
-simulator against a `--herdr=mock` scratch daemon with daemon #151). Not yet
-in TestFlight.
+simulator against a `--herdr=mock` scratch daemon with daemon #151). In
+TestFlight 0.1.5 (57).
 
 ## Polish batch B (PR #36, in 0.1.4 (48))
 
@@ -27,8 +27,9 @@ are the "before" for chip, Flock, Health and Settings).
 
 ## Distribution
 
-TestFlight build **0.1.4 (48)**, internal group **Me** (processed, IN_BETA_TESTING).
-Xcode Cloud built it from tag `v0.1.4` (`b90c38d`, PR #38) with the **TestFlight**
+TestFlight build **0.1.5 (57)**, internal group **Me** (VALID, IN_BETA_TESTING),
+from tag `v0.1.5` (`b414dda`, PR #41): the agent window streams over /ws (#40).
+Before it, **0.1.4 (48)**: Xcode Cloud built it from tag `v0.1.4` (`b90c38d`, PR #38) with the **TestFlight**
 workflow, the first signed archive with the widget extension; it exported with
 no signing change. It adds the UI polish (#36) and the Live Activity widget,
 App Intents and earbud remote (#37) to 0.1.3 (35) (Settings ▸ Languages, #33).
