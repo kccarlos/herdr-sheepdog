@@ -44,9 +44,9 @@ func printEvalSimUsage(w io.Writer) {
 	fprintln(w, "  --utterance-timeout D an experiment: override brain.utterance_timeout_s for this")
 	fprintln(w, "                        run (e.g. 25s), to measure what the timeout costs")
 	fprintln(w, "  --simuser KIND        vertex (default with --live), ollama or fake")
-	fprintln(w, "  --simuser-model ID    simulated user model (default "+eval.DefaultJudgeModel+")")
-	fprintln(w, "  --judge KIND          vertex (default with --live), ollama or fake")
-	fprintln(w, "  --judge-model ID      judge model (default "+eval.DefaultJudgeModel+")")
+	fprintln(w, "  --simuser-model ID    simulated user model (default "+eval.DefaultVertexModel+")")
+	fprintln(w, judgeHelp)
+	fprintln(w, "  --judge-model ID      judge model (default sonnet for claude, "+eval.DefaultVertexModel+" for vertex)")
 	fprintln(w, "  --ollama-url URL      Ollama OpenAI-compatible root (default "+eval.DefaultOllamaURL+")")
 	fprintln(w, "  --repeat N            run every scenario N times (default 1); pass rates exclude")
 	fprintln(w, "                        errored and not-run runs")
@@ -232,11 +232,12 @@ func simSetup(o evalSimOpts, opts eval.SimOptions) map[string]string {
 		}
 		return s
 	}
+	jk, jmod := judgeChoice(o.judge, o.judgeModel)
 	setup := map[string]string{
 		"mode":               "live",
 		"brain":              opts.BrainConfig.Provider + " " + or(opts.BrainConfig.Model, brain.DefaultModel),
-		"simulated user":     or(o.simuser, eval.BackendVertex) + " " + or(o.simuserModel, eval.DefaultJudgeModel),
-		"judge":              or(o.judge, eval.BackendVertex) + " " + or(o.judgeModel, eval.DefaultJudgeModel),
+		"simulated user":     or(o.simuser, eval.BackendVertex) + " " + or(o.simuserModel, eval.DefaultVertexModel),
+		"judge":              jk + " " + judgeModelID(jk, jmod),
 		"failover providers": providerList(opts.Fallbacks),
 		"parallel":           fmt.Sprint(o.parallel),
 		"budget_usd":         fmt.Sprint(o.budget),
@@ -383,14 +384,8 @@ func evalSimOptions(o evalSimOpts, cfg config.Config, log logging.Logger) (eval.
 	// One limit for every judge and simulated-user call of the campaign:
 	// a burst of parallel judge calls got 429s from Vertex Flash-Lite.
 	sem := make(chan struct{}, 4)
-	backend := func(kind, model string) (brain.Model, string, error) {
-		if kind == "" {
-			kind = eval.BackendVertex
-		}
-		m, id, err := eval.NewBackend(eval.BackendOptions{Kind: kind, Model: model, VertexAPIKey: cfg.Gemini.Vertex.APIKey, VertexProject: cfg.Gemini.Vertex.Project, OllamaURL: o.ollamaURL}, log)
-		return eval.Patient(m, sem, 8, altFor(kind, id)), id, err
-	}
-	um, uid, err := backend(o.simuser, o.simuserModel)
+	vx := judgeVertex{cfg.Gemini.Vertex.APIKey, cfg.Gemini.Vertex.Project, o.ollamaURL}
+	um, uid, err := newJudgeModel(orStr(o.simuser, eval.BackendVertex), o.simuserModel, vx, sem, log)
 	if err != nil {
 		return opts, fmt.Errorf("simulated user: %w", err)
 	}
@@ -399,14 +394,13 @@ func evalSimOptions(o evalSimOpts, cfg config.Config, log logging.Logger) (eval.
 			return &eval.LLMSimUser{Model: eval.Metered(um, meter, "simuser"), ModelID: uid}
 		}
 	}
-	jm, jid, err := backend(o.judge, o.judgeModel)
+	jk, jmod := judgeChoice(o.judge, o.judgeModel)
+	jm, jid, err := newJudgeModel(jk, jmod, vx, sem, log)
 	if err != nil {
 		return opts, fmt.Errorf("judge: %w", err)
 	}
 	if jm != nil {
-		opts.NewJudge = func(meter *eval.Meter) eval.Judge {
-			return &eval.LLMJudge{Model: eval.Metered(jm, meter, "judge"), ModelID: jid}
-		}
+		opts.NewJudge = func(meter *eval.Meter) eval.Judge { return newLLMJudge(jm, jid, jk, meter) }
 	}
 	return opts, nil
 }

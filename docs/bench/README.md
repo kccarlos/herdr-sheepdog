@@ -13,7 +13,7 @@ robustness problems before the CEO does.
 ## How a tier-2 run works
 
 ```text
- LLM CEO (Vertex flash-lite)          judge (Vertex flash-lite, after the call)
+ LLM CEO (Vertex flash-lite)          judge (Claude Sonnet via claude -p, after the call)
    │ text                 ▲ heard text                     ▲ transcript as heard + facts
    ▼                      │                                │
  Gemini TTS (Vertex) ──► phone emulator ──/ws──► scratch daemon (in process, :7790-7792)
@@ -61,6 +61,52 @@ robustness problems before the CEO does.
    judge's agreement with the CEO is measured on a calibration set
    ([docs/eval/calibration](../eval/calibration/README.md)). Code
    checks: required/forbidden actions, and voice checks (below).
+
+## The judge
+
+Since 2026-10-06 the judge of every layer (tier 1 `eval sim`, tier 2
+`bench run`, tier 3, `bench report --rescore-explain` /
+`--rescore-orchestrator`, `bench rejudge`, `eval calib judge`, `eval
+--live`) is **Claude Sonnet through the Claude Code CLI**: it won the
+bake-off on the 126-pair calibration set (kappa 0.72 against the CEO's
+ground truth over two runs, `length_fits` 0.70–1.00; Flash-Lite 0.65 /
+0.63; [judge-bakeoff-2026-10-06.md](../eval/judge-bakeoff-2026-10-06.md)).
+
+- **How it is called** (`internal/eval/claudecli.go`): one process per
+  criterion, `claude -p --model sonnet --output-format json
+  --json-schema <verdict schema> --system-prompt <judge prompt> --tools ""
+  --strict-mcp-config --setting-sources "" --no-session-persistence
+  --disable-slash-commands`, the conversation, facts and criterion on
+  stdin, in an empty temporary directory (no CLAUDE.md, no MCP servers,
+  no hooks). It runs on the signed-in Claude subscription: the child's
+  environment has no `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN`, so it
+  never bills the API. At most three judge processes run at once per
+  command; a usage-limit answer stops the command (`bench rejudge`
+  resumes where it stopped). No rationale call: a no carries its
+  evidence quote as the rationale.
+- **Cost**: $0 API. Usage of the Max plan's 5-hour window: about 2 % for
+  the 126 calibration pairs (520 k input tokens, 3 min 45 s), about a
+  third of the window for a full tier-1 workday campaign (685 calls,
+  8.7 M input tokens, 25 min). List-price equivalent about $2.7 and
+  $35. Check `codexbar usage --provider claude` before a big campaign
+  and pace it; a weekly limit applies too.
+- **Choosing the judge**: `--judge claude|vertex|ollama|fake` and
+  `--judge-model ID` on every command above; `SHEEPDOG_JUDGE=vertex` (or
+  `vertex:gemini-3.5-flash`, `claude:opus`) sets the default for all of
+  them. `--judge vertex` is Flash-Lite (`gemini-3.1-flash-lite`, about
+  $0.03 per tier-1 run), still selectable. The simulated CEO/user stays
+  on Vertex Flash-Lite either way.
+- **Rejudging without rerunning**: `sheepdog bench rejudge --from DIR`
+  asks every judge item of a finished tier-2 campaign (`runs/`) or
+  tier-1 result (`report.json`) again with the current rubric and judge,
+  rewrites the records (copy the raw results first), and marks each run
+  with the judge model (`"judge": "sonnet"`, or `"sonnet+orchestrator"`
+  once `--orchestrator` has also asked the workday content items of the
+  orchestrator's text) so an interrupted rejudge resumes. Then `bench report --from DIR` (tier 2) and `bench
+  northstar` as usual. Tier-1 records keep the judge's facts from
+  2026-10-06 on; older ones get them rebuilt from the scenario and the
+  recorded timeline (`eval.ReplayFacts`: the end screens are replayed,
+  the prompt echoes are not).
 
 ## The phone emulator (`internal/bench/voiceclient`)
 
@@ -401,15 +447,16 @@ sheepdog bench northstar --from /tmp/arm-a --vs /tmp/arm-b
 `bench run` flags: `--scenarios`, `--filter` (ids or categories),
 `--repeat`, `--budget-usd` (no new run once the estimate reaches it; the
 rest are not_run), `--ports` / `--parallel` (≤ 3), `--simuser` /
-`--judge` (`vertex`, `ollama`, `fake`) with `--simuser-model` /
-`--judge-model`, `--save-audio DIR` (WAV of both directions per run,
+`--judge` (`claude` default, `vertex`, `ollama`, `fake`; see "The
+judge") with `--simuser-model` / `--judge-model`, `--save-audio DIR` (WAV of both directions per run,
 keep it outside the repo), `--scratch`, `--cache-dir`, `--tts-model`,
 `--say` (no Gemini TTS), `--prompts-dir DIR` (the scratch daemons'
 `prompts.dir`: override `assistant.md` and `svp/` files there are the
 prompt arm of an A/B; both arms then run the same binary; see
-"Explanation evals"). The judge and the simulated CEO share one
-limit of four calls in flight with jittered backoff and the alternating
-Flash-Lite model (#94).
+"Explanation evals"). The simulated CEO (and a `--judge vertex` judge)
+share one limit of four calls in flight with jittered backoff and the
+alternating Flash-Lite model (#94); the Claude judge has its own limit
+of three processes.
 
 Output: `report.md`, `report.json`, `spend.log` (one line per finished
 run with the running total), `runs/<id>.r<n>.json` (the full record:

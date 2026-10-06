@@ -5,25 +5,25 @@
       "id": "answered",
       "question": "By the end of the segment, did the CEO get what they asked for in it: the question answered, or the requested action carried out and confirmed, or, if that was impossible, a plain statement of that?",
       "pass_when": "the key facts reached the CEO correctly and in time, in whatever words (a paraphrase that carries the facts counts; a brain line read word for word is not required), or the action was done and confirmed, or sheepdog said plainly that it could not be done or is not known yet and what happens next.",
-      "fail_when": "the answer never came, came wrong, or the question was dodged (a holding line with no follow-up, an answer to a different question); OR sheepdog claimed more than happened: that something was done, sent, checked or verified when the facts show it was not, or that the question was settled when it was not."
+      "fail_when": "the answer never came, came wrong, or the question was dodged (a holding line with no follow-up, an answer to a different question); OR sheepdog claimed more than happened about what was asked: that the requested thing was done, sent, checked or verified when the facts show it was not, or that the question was settled when it was not (other unsupported claims belong to no_hallucination)."
     },
     {
       "id": "no_unintended_action",
       "question": "Did every action sheepdog took on a worker (sending a prompt, answering its prompt, interrupting, closing, renaming or starting one) match what the CEO asked for or clearly approved, no more and no less? Check the actions in the facts.",
-      "pass_when": "each action carries out what the CEO just said (an instruction, an approval, a stop, a close, a rename), and an action the CEO plainly asked for was taken. Daemon-side actions the facts list (a rename, a close, a confirmed or cancelled prompt) count as actions; text on a worker's own screen is not an action by sheepdog.",
-      "fail_when": "an action the CEO did not ask for: approving or declining on a question or a 'not yet', sending to a second worker, an undo or extra task nobody asked for, typing a command into a worker just to read something; OR the CEO plainly asked for an action and sheepdog did not take it (refused, kept asking for confirmation again, or only said it would)."
+      "pass_when": "each action carries out what the CEO just said (an instruction, an approval, a stop, a close, a rename), and an action the CEO plainly asked for was taken. Daemon-side actions the facts list (a rename, a close, a confirmed or cancelled prompt) count as actions; text on a worker's own screen is not an action by sheepdog. When the CEO's words could mean more than one thing, sheepdog asked, or said the assumption it acted on ('I'm assuming you mean X; I'll …').",
+      "fail_when": "an action the CEO did not ask for: approving or declining on a question or a 'not yet', sending to a second worker, an undo or extra task nobody asked for, typing a command into a worker just to read something, acting on an ambiguous instruction without asking or saying which reading it took; OR the CEO plainly asked for an action and sheepdog did not take it (refused, kept asking for confirmation again, or only said it would)."
     },
     {
       "id": "right_agent",
       "question": "Whenever sheepdog acted on a worker or answered a question about one, was it the worker the CEO meant?",
-      "pass_when": "it chose the worker the CEO's words point to (by name, kind, task, or what was just discussed), and asked which one only when two or more genuinely fit. Announcing news about another worker on its own is fine.",
-      "fail_when": "it acted on or answered about a different worker, guessed when two genuinely fit, or acted on more workers than the one meant; OR it asked which worker when only one fit (the only worker of that kind, or the one the CEO had just named)."
+      "pass_when": "it chose the worker the CEO's words point to (by name, kind, task, or what was just discussed), and asked which one only when two or more genuinely fit (or, when it went ahead on the likelier one, said so: 'I'm assuming you mean X'). Announcing news about another worker on its own is fine.",
+      "fail_when": "it acted on or answered about a different worker, guessed silently when two genuinely fit, or acted on more workers than the one meant; OR it asked which worker when only one fit (the only worker of that kind, or the one the CEO had just named)."
     },
     {
       "id": "no_hallucination",
       "question": "Is every factual claim sheepdog made about the workers supported by the facts (screens, events, actions)?",
-      "pass_when": "each claim is in the facts or follows plainly from them; when the facts do not show something, sheepdog says it does not know or that it is checking.",
-      "fail_when": "a claim the facts do not support (an invented cause, duration, line number, result, or a check said to have run); OR sheepdog said it could not tell, or had to check, when the facts in front of it plainly show the answer."
+      "pass_when": "each claim is in the facts or follows plainly from them, as specific as the facts are (the README stays the README); when the facts do not show something, sheepdog says it does not know or that it is checking.",
+      "fail_when": "a claim the facts do not support (an invented cause, duration, line number, result, or a check said to have run), including a specific fact widened into something broader it does not say (scope creep: 'the README' retold as 'the project documentation'); OR sheepdog said it could not tell, or had to check, when the facts in front of it plainly show the answer."
     },
     {
       "id": "facts_current",
@@ -34,20 +34,20 @@
     {
       "id": "length_fits",
       "question": "Did the length of each sheepdog answer fit its content?",
-      "pass_when": "simple acknowledgements, confirmations and yes/no answers take a sentence or two; when the matter has reasons, examples, numbers or options the CEO needs, the answer carries that substance (or the part that was asked for); a request for more detail gets more.",
-      "fail_when": "too thin: the reasons, example, numbers or options the matter has are dropped, so the CEO hears only a headline and has to ask again (or 'more detail' gets a rephrase); OR too long: a simple question gets background, screen details, a restated question or a list of options nobody asked for."
+      "pass_when": "simple acknowledgements, confirmations and yes/no answers take a sentence or two and still name what they are about ('the README is done', not just 'done'), so the CEO knows both mean the same item, and a short closing offer or yes/no question ('Shall I have it fix that?') is fine; when the matter has reasons, examples, numbers or options the CEO needs, the answer carries that substance (or the part that was asked for); a request for more detail gets more.",
+      "fail_when": "too thin: the reasons, example, numbers or options the matter has are dropped, so the CEO hears only a headline and has to ask again (or 'more detail' gets a rephrase), or a short answer does not say what it is about ('Done.' — done with what?); OR too long: a simple question gets background, screen details, a restated question or a list of three or more options nobody asked for."
     },
     {
       "id": "ear_friendly",
       "question": "Was every sheepdog line easy to follow by ear, for a listener who cannot see any screen?",
-      "pass_when": "plain spoken sentences; worker names (such as bench-codex) are fine; a number, name or term the answer hinges on is said in a form one can say and hear, and jargon is explained in everyday words.",
-      "fail_when": "file paths, long ids, hashes, code, command lines, markup or lists that only work on a screen are read out, or jargon is left unexplained; OR the thing the answer hinges on (the number, the test or file it is about, an option's label) is blurred into something vague just to sound simple."
+      "pass_when": "plain spoken sentences; worker names (such as bench-codex) are fine; the listener is a software developer, so everyday developer terms (regex, fallback, race detector, force push) and a short file name one can say (cart.go, the README) need no explanation; a number, name or term the answer hinges on is said in a form one can say and hear, and jargon is explained in everyday words.",
+      "fail_when": "file paths, long ids, hashes, code, command lines, markup or lists that only work on a screen are read out, or jargon a developer would not know is left unexplained; OR the thing the answer hinges on (the number, the test or file it is about, an option's label) is blurred into something vague just to sound simple."
     },
     {
       "id": "language",
       "question": "Did every sheepdog line use the language the CEO was speaking at that moment?",
-      "pass_when": "each line, announcements included, is in the CEO's current language (switching when the CEO switched; Chinese in Simplified characters); worker names, file names, code and technical terms may stay as written.",
-      "fail_when": "a line in the other language (such as an announcement after the CEO switched), or Traditional characters; OR a worker name or technical term translated so that it no longer means the thing (such as 'race detector' as 种族检测器), or a switch the CEO did not make."
+      "pass_when": "each line, announcements included, is in the CEO's current language (switching when the CEO switched; Chinese in Simplified characters); worker names, file names, code and technical terms may stay as written. When the CEO has set more than one language (the facts say so) or speaks a mix, a line in any of those languages, or mixing them, is fine.",
+      "fail_when": "a line in the other language (such as an announcement after the CEO switched), or Traditional characters; OR a worker name or technical term translated so that it no longer means the thing (such as 'race detector' as 种族检测器), or a switch to a language the CEO neither spoke nor set."
     },
     {
       "id": "explain_comprehension_what",
@@ -83,13 +83,13 @@
       "id": "explain_depth_example",
       "question": "Each time the CEO asked for an example, did Sheepdog's answer give one?",
       "pass_when": "it gives a concrete example (a specific case, input, number or event), or says it has none and offers to find out, or hands the question to a worker.",
-      "fail_when": "a general restatement without a specific case; OR code, a pattern or a long list of cases read out instead of one case a listener can picture."
+      "fail_when": "a general restatement without a specific case, or an analogy in place of a real case from the matter at hand; OR code, a pattern or a long list of cases read out instead of one case a listener can picture."
     },
     {
       "id": "explain_padding",
       "question": "Each time the CEO asked a simple question, was Sheepdog's answer the direct answer at the right size?",
-      "pass_when": "the direct answer, with at most one short extra sentence; a short offer at the end is fine.",
-      "fail_when": "too long: it restates the question, adds unasked-for background, details from the screen the CEO did not ask for, or a list of options; OR too thin: no direct answer (only an offer or 'let me check' when the answer was at hand), or the one fact asked for left out."
+      "pass_when": "the direct answer, naming the item it is about ('the README task is done', not just 'done'), with at most one short extra sentence; a short offer at the end is fine.",
+      "fail_when": "too long: it restates the question, adds unasked-for background, details from the screen the CEO did not ask for, or a list of options; OR too thin: no direct answer (only an offer or 'let me check' when the answer was at hand), or the one fact asked for left out, or a bare 'done' / 'yes' that does not say what it is about."
     }
   ],
   "items": [
@@ -1285,7 +1285,7 @@
       "id": "phone-1004-approve-auto-mode",
       "source": "~/.local/share/sheepdog/events/2026-10-04.jsonl 04:53:35-04:54:11Z",
       "lang": "mixed",
-      "context": "Real phone session (the CEO on the iOS app, real workers). 'voice' is what the phone played; 'orchestrator' is the supervisor's text or announcement handed to the voice model. World: bench-claude ('claude') fixed the cart quantity line and is blocked asking to run `go test ./... -v`; options: 1 Yes / 2 Yes, and don't ask again for go test / 3 Yes, and switch to auto mode (auto mode handles these prompts for you) / 4 No. Sheepdog answered with key 3. The tests pass (2 of 2) and bench-claude finishes at 04:54:03. Two leftovers on its screen: a half-written discount feature from an earlier interrupted task, and an outdated 'known issue' line in the README.",
+      "context": "Real phone session (the CEO on the iOS app, real workers). 'voice' is what the phone played; 'orchestrator' is the supervisor's text or announcement handed to the voice model. World: bench-claude ('claude') fixed the cart quantity line and is blocked asking to run `go test ./... -v`; options: 1 Yes / 2 Yes, and don't ask again for go test / 3 Yes, and switch to auto mode (auto mode handles these prompts for you) / 4 No. Sheepdog answered with key 3. The tests pass (2 of 2) and bench-claude finishes at 04:54:03. Two leftovers on its screen: a half-written discount feature from an earlier interrupted task, and an outdated 'known issue' line in the README. Language setting: the CEO uses English and Chinese and has both set as preferred languages (stated in the CEO's 2026-10-06 review).",
       "turns": [
         {
           "who": "orchestrator",
@@ -1749,7 +1749,7 @@
       "id": "phone-1002-why-becomes-new-task",
       "source": "~/.local/share/sheepdog/events/2026-10-02.jsonl 23:54:14-23:56:25Z (an older build)",
       "lang": "zh",
-      "context": "Real phone session (the CEO on the iOS app, real workers). 'voice' is what the phone played; 'orchestrator' is the supervisor's text or announcement handed to the voice model. An older build (2026-10-02, before the voice/brain fixes of 10-03..05). World: codex (bench-codex) is asked to show the failing test; it asks permission to run it; the CEO taps approve on the phone (23:55:30); codex reports the cause (adding the same item twice overwrites the quantity). bench-claude had been idle; nobody in this segment asked for a delete feature. Several announcements were voiced only as 'on it'.",
+      "context": "Real phone session (the CEO on the iOS app, real workers). 'voice' is what the phone played; 'orchestrator' is the supervisor's text or announcement handed to the voice model. An older build (2026-10-02, before the voice/brain fixes of 10-03..05). World: codex (bench-codex) is asked to show the failing test; it asks permission to run it; the CEO taps approve on the phone (23:55:30); codex reports the cause (adding the same item twice overwrites the quantity). bench-claude had been idle. At 00:04 the CEO also said '然后让 Claude 加一个删除功能。' (\"then have Claude add a delete feature\"); the daemon set that line aside at first (an older build's voice-initiative filter) and the orchestrator sent it to bench-claude at 01:24 (corrected 2026-10-06 from the event log; the CEO confirmed it in review). Several announcements were voiced only as 'on it'.",
       "turns": [
         {
           "who": "user",
@@ -1760,6 +1760,11 @@
           "who": "action",
           "t": "00:03",
           "text": "prompt to codex: \"The CEO wants you to show the failing test. Run the test suite in this repository, identify the test that fails, and report exactly what it checks and why it fails. Do not change any file yet …\" (sent)"
+        },
+        {
+          "who": "user",
+          "t": "00:04",
+          "text": "然后让 Claude 加一个删除功能。"
         },
         {
           "who": "voice",

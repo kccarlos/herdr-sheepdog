@@ -81,3 +81,17 @@ delete feature. The event log shows the CEO's speech at 23:54:18 as
 (`supervisor.voice_initiative_ignored`), and the brain sent it 80 s later. The
 reference therefore passes `no_unintended_action` and `right_agent` there. If
 the CEO did not say that line, both become fail.
+
+## CEO review result (2026-10-06)
+
+The CEO agreed with these reference labels on 27 of the 31 disagreements
+and on all 10 spot checks, and with the judge on 4. The four overturned
+pairs: `t1-simple-did-tests-pass` `length_fits` and `explain_padding` are
+fail (a short answer must name what it is about: "done with what?"),
+`t2-recall-after-two-resumes` `no_hallucination` is fail ("the project
+documentation" widens "README.md": scope creep, so the "accurate
+paraphrase" reading above does not hold for it), and
+`phone-1004-approve-auto-mode` `language` is pass (mixing languages is
+fine when several are set). The phone-1002 context note above was wrong:
+the CEO confirmed the delete-feature line, and the item now carries it.
+Ground truth: `truth.json`.

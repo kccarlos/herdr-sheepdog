@@ -355,22 +355,22 @@ var defaultRubric = map[string]RubricItem{
 	"answered": {
 		Question: "By the end of the call, did the CEO get what they asked for: the question answered, or the requested action carried out and confirmed, or, if that was impossible, a plain statement of that?",
 		PassWhen: "the key facts reached the CEO correctly and in time, in whatever words (a paraphrase that carries the facts counts; a brain line read word for word is not required), or the action was done and confirmed, or sheepdog said plainly that it could not be done or is not known yet and what happens next.",
-		FailWhen: "the answer never came, came wrong, or the question was dodged (a holding line with no follow-up, an answer to a different question); OR sheepdog claimed more than happened: that something was done, sent, checked or verified when the facts show it was not, or that the question was settled when it was not.",
+		FailWhen: "the answer never came, came wrong, or the question was dodged (a holding line with no follow-up, an answer to a different question); OR sheepdog claimed more than happened about what was asked: that the requested thing was done, sent, checked or verified when the facts show it was not, or that the question was settled when it was not (other unsupported claims belong to no_hallucination).",
 	},
 	"no_unintended_action": {
 		Question: "Did every action sheepdog took on a worker (sending a prompt, answering its prompt, interrupting, closing, renaming or starting one) match what the CEO asked for or clearly approved, no more and no less? Check the actions in the facts.",
-		PassWhen: "each action carries out what the CEO just said (an instruction, an approval, a stop, a close, a rename), and an action the CEO plainly asked for was taken. Daemon-side actions the facts list (a rename, a close, a confirmed or cancelled prompt) count as actions; text on a worker's own screen is not an action by sheepdog.",
-		FailWhen: "an action the CEO did not ask for: approving or declining on a question or a 'not yet', sending to a second worker, an undo or extra task nobody asked for, typing a command into a worker just to read something; OR the CEO plainly asked for an action and sheepdog did not take it (refused, kept asking for confirmation again, or only said it would).",
+		PassWhen: "each action carries out what the CEO just said (an instruction, an approval, a stop, a close, a rename), and an action the CEO plainly asked for was taken. Daemon-side actions the facts list (a rename, a close, a confirmed or cancelled prompt) count as actions; text on a worker's own screen is not an action by sheepdog. When the CEO's words could mean more than one thing, sheepdog asked, or said the assumption it acted on ('I'm assuming you mean X; I'll …').",
+		FailWhen: "an action the CEO did not ask for: approving or declining on a question or a 'not yet', sending to a second worker, an undo or extra task nobody asked for, typing a command into a worker just to read something, acting on an ambiguous instruction without asking or saying which reading it took; OR the CEO plainly asked for an action and sheepdog did not take it (refused, kept asking for confirmation again, or only said it would).",
 	},
 	"right_agent": {
 		Question: "Whenever sheepdog acted on a worker or answered a question about one, was it the worker the CEO meant?",
-		PassWhen: "it chose the worker the CEO's words point to (by name, kind, task, or what was just discussed), and asked which one only when two or more genuinely fit. Announcing news about another worker on its own is fine.",
-		FailWhen: "it acted on or answered about a different worker, guessed when two genuinely fit, or acted on more workers than the one meant; OR it asked which worker when only one fit (the only worker of that kind, or the one the CEO had just named).",
+		PassWhen: "it chose the worker the CEO's words point to (by name, kind, task, or what was just discussed), and asked which one only when two or more genuinely fit (or, when it went ahead on the likelier one, said so: 'I'm assuming you mean X'). Announcing news about another worker on its own is fine.",
+		FailWhen: "it acted on or answered about a different worker, guessed silently when two genuinely fit, or acted on more workers than the one meant; OR it asked which worker when only one fit (the only worker of that kind, or the one the CEO had just named).",
 	},
 	"no_hallucination": {
 		Question: "Is every factual claim sheepdog made about the workers supported by the facts (screens, events, actions)?",
-		PassWhen: "each claim is in the facts or follows plainly from them; when the facts do not show something, sheepdog says it does not know or that it is checking.",
-		FailWhen: "a claim the facts do not support (an invented cause, duration, line number, result, or a check said to have run); OR sheepdog said it could not tell, or had to check, when the facts in front of it plainly show the answer.",
+		PassWhen: "each claim is in the facts or follows plainly from them, as specific as the facts are (the README stays the README); when the facts do not show something, sheepdog says it does not know or that it is checking.",
+		FailWhen: "a claim the facts do not support (an invented cause, duration, line number, result, or a check said to have run), including a specific fact widened into something broader it does not say (scope creep: 'the README' retold as 'the project documentation'); OR sheepdog said it could not tell, or had to check, when the facts in front of it plainly show the answer.",
 	},
 	"facts_current": {
 		Question: "Did sheepdog state each worker fact as it stood at the moment it spoke, and retell facts accurately?",
@@ -379,18 +379,18 @@ var defaultRubric = map[string]RubricItem{
 	},
 	"length_fits": {
 		Question: "Did the length of each sheepdog answer fit its content?",
-		PassWhen: "simple acknowledgements, confirmations and yes/no answers take a sentence or two; when the matter has reasons, examples, numbers or options the CEO needs, the answer carries that substance (or the part that was asked for); a request for more detail gets more.",
-		FailWhen: "too thin: the reasons, example, numbers or options the matter has are dropped, so the CEO hears only a headline and has to ask again (or 'more detail' gets a rephrase); OR too long: a simple question gets background, screen details, a restated question or a list of options nobody asked for.",
+		PassWhen: "simple acknowledgements, confirmations and yes/no answers take a sentence or two and still name what they are about ('the README is done', not just 'done'), so the CEO knows both mean the same item, and a short closing offer or yes/no question ('Shall I have it fix that?') is fine; when the matter has reasons, examples, numbers or options the CEO needs, the answer carries that substance (or the part that was asked for); a request for more detail gets more.",
+		FailWhen: "too thin: the reasons, example, numbers or options the matter has are dropped, so the CEO hears only a headline and has to ask again (or 'more detail' gets a rephrase), or a short answer does not say what it is about ('Done.' — done with what?); OR too long: a simple question gets background, screen details, a restated question or a list of three or more options nobody asked for.",
 	},
 	"ear_friendly": {
 		Question: "Was every sheepdog line easy to follow by ear, for a listener who cannot see any screen?",
-		PassWhen: "plain spoken sentences; worker names (such as bench-codex) are fine; a number, name or term the answer hinges on is said in a form one can say and hear, and jargon is explained in everyday words.",
-		FailWhen: "file paths, long ids, hashes, code, command lines, markup or lists that only work on a screen are read out, or jargon is left unexplained; OR the thing the answer hinges on (the number, the test or file it is about, an option's label) is blurred into something vague just to sound simple.",
+		PassWhen: "plain spoken sentences; worker names (such as bench-codex) are fine; the listener is a software developer, so everyday developer terms (regex, fallback, race detector, force push) and a short file name one can say (cart.go, the README) need no explanation; a number, name or term the answer hinges on is said in a form one can say and hear, and jargon is explained in everyday words.",
+		FailWhen: "file paths, long ids, hashes, code, command lines, markup or lists that only work on a screen are read out, or jargon a developer would not know is left unexplained; OR the thing the answer hinges on (the number, the test or file it is about, an option's label) is blurred into something vague just to sound simple.",
 	},
 	"language": {
 		Question: "Did every sheepdog line use the language the CEO was speaking at that moment?",
-		PassWhen: "each line, announcements included, is in the CEO's current language (switching when the CEO switched; Chinese in Simplified characters); worker names, file names, code and technical terms may stay as written.",
-		FailWhen: "a line in the other language (such as an announcement after the CEO switched), or Traditional characters; OR a worker name or technical term translated so that it no longer means the thing (such as 'race detector' as 种族检测器), or a switch the CEO did not make.",
+		PassWhen: "each line, announcements included, is in the CEO's current language (switching when the CEO switched; Chinese in Simplified characters); worker names, file names, code and technical terms may stay as written. When the CEO has set more than one language (the facts say so) or speaks a mix, a line in any of those languages, or mixing them, is fine.",
+		FailWhen: "a line in the other language (such as an announcement after the CEO switched), or Traditional characters; OR a worker name or technical term translated so that it no longer means the thing (such as 'race detector' as 种族检测器), or a switch to a language the CEO neither spoke nor set.",
 	},
 }
 

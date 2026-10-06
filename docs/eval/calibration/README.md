@@ -11,7 +11,10 @@ trusts their numbers.
 |---|---|
 | `items.json` | 30 transcript segments to label. Each has `id`, `source` (file and time range), `lang`, `context` (world facts, what the orchestrator knew, known judge artefacts), `turns` (`user` / `voice` / `orchestrator` / `action` / `event` with `mm:ss` times) and `rubric_ids`. The top-level `rubric` is the production rubric, each item with `question`, `pass_when` and `fail_when`. |
 | `judge.json` | The judge's verdicts on every (item, rubric id) pair: `item_id`, `rubric_id`, `verdict` (`pass` / `fail`), `evidence` (the judge's quote). Vertex `gemini-3.1-flash-lite`, the production judge model and prompt; 126 verdicts, 171 calls, about $0.07. |
-| `labels.json` | The CEO's labels, once given: `[{"item_id","rubric_id","label":"pass|fail|na","note"}]`. |
+| `reference.json`, `reference-summary.md`, `review.json` | The Opus reference labels of all 126 pairs (#161) and the 41 pairs the CEO reviewed. |
+| `labels-ceo.json` | The CEO's 41 review labels (2026-10-06): `[{"item_id","rubric_id","label":"pass|fail|na","note"}]`. |
+| `truth.json` | **Ground truth** for all 126 pairs: the CEO's label where reviewed (`"source": "ceo"`, 41), else the reference label (`"source": "reference"`, 85). The CEO agreed with the reference on 27/31 disagreements and 10/10 spot checks. 84 pass, 42 fail, no n/a. Use it as `--labels`. |
+| `bakeoff/` | The 2026-10-06 judge bake-off: every candidate's verdicts (`r1-*`, `r2-*`, `r3-*`, `raw-facts-sonnet.json`) and `agree-*.md` for the final round. |
 
 Mix: tier 1 (7), tier 2 (10), tier 3 (4), real phone sessions from
 2026-10-02, -04 and -05 (9). English, Chinese and mixed. Passes and
@@ -27,8 +30,9 @@ failure. Each one's context says so.
 sheepdog eval calib check --items docs/eval/calibration/2026-10-05/items.json
 sheepdog eval calib rubric        # the rubric block, from the code (items.json must match it; a test checks)
 sheepdog eval calib judge --items docs/eval/calibration/2026-10-05/items.json \
-  --out docs/eval/calibration/2026-10-05/judge.json --env-file .env
-sheepdog eval calib agree --labels labels.json --judge-file docs/eval/calibration/2026-10-05/judge.json [--json]
+  --out /tmp/judge.json                    # Claude Sonnet via `claude -p` (default)
+sheepdog eval calib judge … --judge vertex --judge-model gemini-3.1-flash-lite --env-file .env
+sheepdog eval calib agree --labels docs/eval/calibration/2026-10-05/truth.json --judge-file docs/eval/calibration/2026-10-05/judge.json [--json]
 ```
 
 `agree` prints agreement and Cohen's kappa overall and per rubric item,
@@ -42,7 +46,7 @@ read their per-item kappa as anecdotal.
 
 ## How the judge sees an item
 
-It gets one call per rubric item (temperature 0, a final verdict, no
+It gets one call per rubric item (temperature 0 on Vertex; the Claude CLI has no temperature setting; a final verdict, no
 "wait"). The item's `context` goes in as FACTS and its turns as the
 CONVERSATION. When the segment has voice turns, the voice is what the
 CEO heard and the orchestrator's text is marked as not heard. Without
@@ -106,3 +110,61 @@ both directions.
   fail every item asked. `t2-ambiguous-codex-both` fails
   `no_hallucination` and `answered` along with `right_agent`. Watch for
   this in the agreement numbers.
+
+## Ground truth and the judge bake-off (2026-10-06)
+
+Queue item 1 of the night of 2026-10-06 (docs/handover-2026-10-04.md).
+Full write-up with every number: [judge-bakeoff-2026-10-06.md](../judge-bakeoff-2026-10-06.md).
+
+**Ground truth** is `truth.json` (above). The CEO's review overturned the
+reference on four pairs: `t1-simple-did-tests-pass` `length_fits` and
+`explain_padding` (a bare "done" must say done with what),
+`t2-recall-after-two-resumes` `no_hallucination` ("the project
+documentation" for the README is scope creep, not a fair paraphrase), and
+`phone-1004-approve-auto-mode` `language` (mixing is fine when several
+languages are set). The reference's "judge too strict on paraphrase"
+reading in reference-summary.md is therefore partly wrong.
+
+**Rubric changes** (ids kept, both directions kept; `items.json`'s rubric
+block regenerated from the code):
+
+- From the CEO's notes: `language` passes a mix when the CEO has set
+  several languages or speaks a mix; `length_fits` and `explain_padding`
+  fail a short answer that does not name what it is about; `no_hallucination`
+  fails a specific fact widened into something broader (scope creep);
+  `no_unintended_action` and `right_agent` pass an ambiguous instruction
+  only when sheepdog asked or said its assumption ("I'm assuming you mean
+  X"); `explain_depth_example` fails an analogy in place of a real case.
+- From the disagreements of the first round (tuned on this set; there is
+  no held-out calibration set yet): the judge's system prompt charges each
+  flaw only to the item that names it (the halo effect); `answered` fails
+  on over-claiming only about what was asked; `ear_friendly` treats the
+  listener as a developer (regex, race detector, a short file name need no
+  explanation); `length_fits` allows a short closing offer or yes/no
+  question, and only a list of three or more options counts as too long.
+- Item fixes: `phone-1002-why-becomes-new-task` now has the CEO's line
+  "然后让 Claude 加一个删除功能。" (the event log has it; the CEO confirmed),
+  and `phone-1004-approve-auto-mode`'s context says both languages are set.
+
+**Result** (final rubric, 126 pairs vs `truth.json`): Claude Sonnet via
+the CLI, two runs: agreement 87 % / 87 %, kappa **0.72 / 0.72**,
+`length_fits` kappa **1.00 / 0.70**. Flash-Lite 84 %, kappa 0.65,
+`length_fits` 0.63 (it was 0.45 / 0.14 against the reference before the
+rubric work). Gemini 3.1 Pro (preview) 0.69 on the first-round rubric with
+`length_fits` 0.42, about $1.1–1.8 per 126 pairs. Gemini 3.5 Flash could
+not be measured: Vertex started answering every call with 403 "Request
+rejected in accordance with our terms of use and policies" midway through
+the bake-off. Only Sonnet met the target (kappa ≥ 0.7 overall, ≥ 0.6 on
+`length_fits`) and it is now the default judge.
+
+**The CLI judge.** `--judge claude` (the default) runs one
+`claude -p --model sonnet --output-format json --json-schema … --system-prompt …
+--tools "" --strict-mcp-config --setting-sources "" --no-session-persistence`
+process per call, in an empty temporary directory, prompt on stdin, on the
+signed-in Claude subscription (ANTHROPIC_API_KEY is removed from its
+environment, so it never bills the API). No temperature control: a rerun
+moves pairs (the two final runs each agree with the truth on 110 of 126, but differ from each other on 14, mostly close calls; read single-run per-item numbers with that in mind). The rationale
+call is skipped (a no carries its evidence quote). Cost per 126 pairs:
+about 520 k input and 50 k output tokens, 3 min 45 s at three processes,
+about 2 % of the Max plan's 5-hour window, $0 API (about $2.7 at list
+price). `--judge vertex` keeps Flash-Lite (about $0.06–0.16 per 126 pairs).
