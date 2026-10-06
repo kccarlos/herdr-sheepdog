@@ -31,14 +31,18 @@ const (
 	BackendNone   = "none"
 )
 
-// DefaultJudgeKind is the judge backend when --judge is not given.
-const DefaultJudgeKind = BackendVertex
+// DefaultJudgeKind is the judge backend when neither --judge nor
+// SHEEPDOG_JUDGE says otherwise: Claude Sonnet through the Claude Code
+// CLI (claudecli.go), the winner of the 2026-10-06 bake-off
+// (docs/eval/calibration/README.md). Flash-Lite stays selectable with
+// --judge vertex.
+const DefaultJudgeKind = BackendClaude
 
-// DefaultJudgeModel is the Vertex model the judge and the simulated user
-// call. Checked live 2026-10-02 at location global with the project's API
+// DefaultVertexModel is the Vertex model the simulated user (and a
+// --judge vertex judge) calls. Checked live 2026-10-02 at location global with the project's API
 // key: gemini-3.1-flash-lite and gemini-3.5-flash-lite both answer
 // generateContent; gemini-3.8-flash-lite and the -preview ids are 404.
-const DefaultJudgeModel = "gemini-3.1-flash-lite"
+const DefaultVertexModel = "gemini-3.1-flash-lite"
 
 // AltJudgeModel is the Flash-Lite id the judge's and the simulated
 // user's retries alternate with on Vertex (a separate rate-limit bucket).
@@ -70,7 +74,7 @@ func NewBackend(o BackendOptions, log logging.Logger) (brain.Model, string, erro
 		if err != nil {
 			return nil, "", err
 		}
-		return m, orDefault(o.Model, DefaultJudgeModel), nil
+		return m, orDefault(o.Model, DefaultVertexModel), nil
 	case BackendOllama:
 		m, err := brain.NewOpenAICompatModel(brain.OpenAICompatConfig{Provider: "ollama", BaseURL: orDefault(o.OllamaURL, DefaultOllamaURL), APIKey: "ollama", Log: log})
 		if err != nil {

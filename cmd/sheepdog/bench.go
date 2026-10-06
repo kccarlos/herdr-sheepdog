@@ -16,13 +16,12 @@ import (
 
 	"github.com/kccarlos/herdr-sheepdog/internal/bench"
 	"github.com/kccarlos/herdr-sheepdog/internal/bench/speech"
-	"github.com/kccarlos/herdr-sheepdog/internal/brain"
 	"github.com/kccarlos/herdr-sheepdog/internal/config"
 	"github.com/kccarlos/herdr-sheepdog/internal/eval"
 )
 
 func printBenchUsage(w io.Writer) {
-	fprintln(w, "usage: sheepdog bench <calibrate|run|render|validate|report|northstar> [flags]")
+	fprintln(w, "usage: sheepdog bench <calibrate|run|render|validate|report|rejudge|northstar> [flags]")
 	fprintln(w, "")
 	fprintln(w, "The voice benchmark (docs/bench/README.md): synthetic speech (Gemini TTS on")
 	fprintln(w, "Vertex) from a phone emulator into scratch daemons on ports 7790-7792 with the")
@@ -36,6 +35,8 @@ func printBenchUsage(w io.Writer) {
 	fprintln(w, "  render     pre-render the scenarios' opening lines and write the manifest")
 	fprintln(w, "  validate   check the scenario files offline")
 	fprintln(w, "  report     rebuild report.json / report.md from a campaign's runs/")
+	fprintln(w, "  rejudge    ask a finished campaign's judge items again with another judge")
+	fprintln(w, "             (tier 1 or 2; no conversation is run again)")
 	fprintln(w, "  northstar  the north-star block and programmatic checks of a result")
 	fprintln(w, "             directory (tier 1, 2 or 3), or A vs B with --vs (offline)")
 	fprintln(w, "")
@@ -58,6 +59,8 @@ func runBench(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 		return runBenchValidate(ctx, args[1:], stdout, stderr)
 	case "report":
 		return runBenchReport(ctx, args[1:], stdout, stderr)
+	case "rejudge":
+		return runBenchRejudge(ctx, args[1:], stdout, stderr)
 	case "northstar":
 		return runBenchNorthStar(ctx, args[1:], stdout, stderr)
 	case "-h", "--help", "help":
@@ -344,9 +347,9 @@ func runBenchRun(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	parallel := fs.Int("parallel", 3, "conversations at once (at most the number of ports)")
 	fixtures := fs.String("fixtures", "testdata/herdr", "screen fixtures")
 	simuser := fs.String("simuser", eval.BackendVertex, "simulated CEO backend: vertex, ollama or fake (the scripts)")
-	simuserModel := fs.String("simuser-model", "", "simulated CEO model (default "+eval.DefaultJudgeModel+")")
-	judge := fs.String("judge", eval.BackendVertex, "judge backend: vertex, ollama or fake")
-	judgeModel := fs.String("judge-model", "", "judge model (default "+eval.DefaultJudgeModel+")")
+	simuserModel := fs.String("simuser-model", "", "simulated CEO model (default "+eval.DefaultVertexModel+")")
+	judge := fs.String("judge", "", "judge backend: claude (default; SHEEPDOG_JUDGE overrides), vertex, ollama or fake")
+	judgeModel := fs.String("judge-model", "", "judge model (default sonnet for claude, "+eval.DefaultVertexModel+" for vertex)")
 	saveAudio := fs.String("save-audio", "", "also write each run's mic and bot audio as WAV here (outside the repo)")
 	brainProvider := fs.String("brain-provider", "", "scratch daemons' brain provider (default deepseek; the fault scenarios need deepseek)")
 	brainModel := fs.String("brain-model", "", "scratch daemons' brain model (default deepseek-flash)")
@@ -412,10 +415,11 @@ func runBenchRun(ctx context.Context, args []string, stdout, stderr io.Writer) i
 		fprintf(stderr, "sheepdog bench run: %v\n", err)
 		return 1
 	}
+	jk, jmod := judgeChoice(*judge, *judgeModel)
 	setup := map[string]string{
 		"tier":  "2 (synthetic speech -> phone emulator -> scratch daemon: real voice model, real brain, mock herdr scripted from the eval sim worlds)",
 		"voice": cfg.Gemini.Model + " (backend " + cfg.Gemini.Backend + ")", "brain": orDefaultStr(*brainProvider, "deepseek") + " " + orDefaultStr(*brainModel, "deepseek-flash") + " (failover: vertex)",
-		"tts": syn.ID(), "simulated CEO": *simuser + " " + orDefaultStr(*simuserModel, eval.DefaultJudgeModel), "judge": *judge + " " + orDefaultStr(*judgeModel, eval.DefaultJudgeModel),
+		"tts": syn.ID(), "simulated CEO": *simuser + " " + orDefaultStr(*simuserModel, eval.DefaultVertexModel), "judge": jk + " " + judgeModelID(jk, jmod),
 		"ports": *portsFlag, "parallel": fmt.Sprint(len(ports)), "personas": orDefaultStr(*personasFlag, "each scenario's own"), "budget_usd": fmt.Sprint(*budget), "scenarios": *scen + filterNote(*filter),
 	}
 	if promptsLine != "" {
@@ -435,12 +439,9 @@ func runBenchRun(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	}
 	ropts := bench.RunOptions{Config: cfg, Scratch: dir, FixtureDir: *fixtures, Synth: syn, Out: *out, SaveAudio: *saveAudio, BrainProvider: *brainProvider, BrainModel: *brainModel, Personas: personas}
 	sem := make(chan struct{}, 4) // one limit for every judge and simulated-CEO call (#94)
-	backend := func(kind, model string) (brain.Model, string, error) {
-		m, id, err := eval.NewBackend(eval.BackendOptions{Kind: kind, Model: model, VertexAPIKey: cfg.Gemini.Vertex.APIKey, VertexProject: cfg.Gemini.Vertex.Project}, nil)
-		return eval.Patient(m, sem, 8, altFor(kind, id)), id, err
-	}
+	vx := judgeVertex{key: cfg.Gemini.Vertex.APIKey, project: cfg.Gemini.Vertex.Project}
 	if *simuser != eval.BackendFake {
-		um, uid, err := backend(*simuser, *simuserModel)
+		um, uid, err := newJudgeModel(*simuser, *simuserModel, vx, sem, nil)
 		if err != nil {
 			fprintf(stderr, "sheepdog bench run: simulated CEO: %v\n", err)
 			return 1
@@ -449,15 +450,13 @@ func runBenchRun(ctx context.Context, args []string, stdout, stderr io.Writer) i
 			return &eval.LLMSimUser{Model: eval.Metered(um, m, "simuser"), ModelID: uid}
 		}
 	}
-	if *judge != eval.BackendFake {
-		jm, jid, err := backend(*judge, *judgeModel)
+	if jk != eval.BackendFake {
+		jm, jid, err := newJudgeModel(jk, jmod, vx, sem, nil)
 		if err != nil {
 			fprintf(stderr, "sheepdog bench run: judge: %v\n", err)
 			return 1
 		}
-		ropts.NewJudge = func(m *eval.Meter) eval.Judge {
-			return &eval.LLMJudge{Model: eval.Metered(jm, m, "judge"), ModelID: jid}
-		}
+		ropts.NewJudge = func(m *eval.Meter) eval.Judge { return newLLMJudge(jm, jid, jk, m) }
 	}
 	if err := os.MkdirAll(*out, 0o755); err != nil {
 		fprintf(stderr, "sheepdog bench run: %v\n", err)
@@ -515,7 +514,8 @@ func runBenchReport(ctx context.Context, args []string, stdout, stderr io.Writer
 	sims := fs.String("sim", defaultBenchSims, "eval sim files (from_sim)")
 	rescoreOrch := fs.Bool("rescore-orchestrator", false, "ask the workday runs' content items (answered, news, said_vs_done, coherence) of the orchestrator's own text too (judge calls only; rewrites runs/*.json)")
 	rescore := fs.Bool("rescore-explain", false, "score the explain scenarios' runs again from their records and events (judge calls only; rewrites runs/*.json)")
-	judgeModel := fs.String("judge-model", "", "with --rescore-explain or --rescore-orchestrator: judge model (default "+eval.DefaultJudgeModel+")")
+	judgeKind := fs.String("judge", "", "with --rescore-explain or --rescore-orchestrator: judge backend (default claude; SHEEPDOG_JUDGE overrides)")
+	judgeModel := fs.String("judge-model", "", "with --rescore-explain or --rescore-orchestrator: judge model (default sonnet for claude, "+eval.DefaultVertexModel+" for vertex)")
 	configPath := fs.String("config", "", "with --rescore-explain or --rescore-orchestrator: config file")
 	envFile := fs.String("env-file", "", "with --rescore-explain or --rescore-orchestrator: load KEY=VALUE lines first")
 	if err := fs.Parse(args); err != nil {
@@ -542,7 +542,7 @@ func runBenchReport(ctx context.Context, args []string, stdout, stderr io.Writer
 		return 1
 	}
 	if *rescore || *rescoreOrch {
-		if code := rescoreRuns(ctx, *from, runs, scs, *configPath, *envFile, *judgeModel, *rescore, *rescoreOrch, stderr); code != 0 {
+		if code := rescoreRuns(ctx, *from, runs, scs, *configPath, *envFile, *judgeKind, *judgeModel, *rescore, *rescoreOrch, stderr); code != 0 {
 			return code
 		}
 	}
@@ -592,7 +592,7 @@ func runBenchReport(ctx context.Context, args []string, stdout, stderr io.Writer
 // workday runs' content items of the orchestrator's text (orch) with the
 // Vertex judge, and rewrites their records; the report is then rebuilt
 // from them.
-func rescoreRuns(ctx context.Context, dir string, runs []bench.Run, scs []bench.Scenario, configPath, envFile, judgeModel string, explain, orch bool, stderr io.Writer) int {
+func rescoreRuns(ctx context.Context, dir string, runs []bench.Run, scs []bench.Scenario, configPath, envFile, judgeKind, judgeModel string, explain, orch bool, stderr io.Writer) int {
 	if code, ok := loadServeEnvFile(envFile, stderr); !ok || code != 0 {
 		return 1
 	}
@@ -601,18 +601,22 @@ func rescoreRuns(ctx context.Context, dir string, runs []bench.Run, scs []bench.
 		fprintf(stderr, "sheepdog bench report: %v\n", err)
 		return 1
 	}
-	m, id, err := eval.NewBackend(eval.BackendOptions{Kind: eval.BackendVertex, Model: judgeModel, VertexAPIKey: cfg.Gemini.Vertex.APIKey, VertexProject: cfg.Gemini.Vertex.Project}, nil)
+	jk, jmod := judgeChoice(judgeKind, judgeModel)
+	sem := make(chan struct{}, 4)
+	m, id, err := newJudgeModel(jk, jmod, judgeVertex{key: cfg.Gemini.Vertex.APIKey, project: cfg.Gemini.Vertex.Project}, sem, nil)
+	if err == nil && m == nil {
+		err = fmt.Errorf("judge %q cannot rescore", jk)
+	}
 	if err != nil {
 		fprintf(stderr, "sheepdog bench report: judge: %v\n", err)
 		return 1
 	}
-	sem := make(chan struct{}, 4)
 	byID := map[string]bench.Scenario{}
 	for _, s := range scs {
 		byID[s.ID] = s
 	}
 	meter := eval.NewMeter()
-	judge := &eval.LLMJudge{Model: eval.Metered(eval.Patient(m, sem, 8, altFor(eval.BackendVertex, id)), meter, "judge"), ModelID: id}
+	judge := newLLMJudge(m, id, jk, meter)
 	n := 0
 	for i := range runs {
 		r := &runs[i]

@@ -109,14 +109,17 @@ type Run struct {
 	Timeline   []eval.SimLine             `json:"timeline,omitempty"`
 	Verdicts   []eval.NamedVerdict        `json:"verdicts,omitempty"`
 	Facts      string                     `json:"facts,omitempty"`
-	Latency    []map[string]any           `json:"latency,omitempty"`
-	Voice      VoiceStats                 `json:"voice"`
-	Failovers  []string                   `json:"failovers,omitempty"`
-	Fallbacks  []string                   `json:"fallbacks,omitempty"`
-	Proxy      *ProxyStats                `json:"proxy,omitempty"`
-	Spend      Spend                      `json:"spend"`
-	CostUSD    float64                    `json:"cost_usd_estimate"`
-	Extended   bool                       `json:"extended,omitempty"`
+	// Judge is the judge model of Verdicts when they were given again
+	// (sheepdog bench rejudge).
+	Judge     string           `json:"judge,omitempty"`
+	Latency   []map[string]any `json:"latency,omitempty"`
+	Voice     VoiceStats       `json:"voice"`
+	Failovers []string         `json:"failovers,omitempty"`
+	Fallbacks []string         `json:"fallbacks,omitempty"`
+	Proxy     *ProxyStats      `json:"proxy,omitempty"`
+	Spend     Spend            `json:"spend"`
+	CostUSD   float64          `json:"cost_usd_estimate"`
+	Extended  bool             `json:"extended,omitempty"`
 	// Explain is the explanation scores of a scenario with an explain
 	// block: the orchestrator's text and the voice's speech separately.
 	Explain *eval.ExplainScore `json:"explain,omitempty"`
@@ -1095,6 +1098,29 @@ func RescoreExplain(ctx context.Context, j eval.Judge, sc Scenario, r *Run, even
 	r.Explain = eval.ScoreExplain(ctx, j, sc.Explain, sc.Language, ex, true)
 	r.Failures = append(kept, r.Explain.Failures()...)
 	r.Status = eval.StatusOf(r.Failures)
+}
+
+// Rejudge asks a recorded run's judge items again (the scenario's
+// criteria as the code states them now, the recorded transcript and
+// facts) and replaces its verdicts, the failures they produced and its
+// status. Runs without facts (errored, not run) are left alone.
+func Rejudge(ctx context.Context, j eval.Judge, sc Scenario, r *Run) error {
+	if r.Status == eval.RunNotRun || r.EndReason == eval.EndError || r.Facts == "" || len(r.Verdicts) == 0 {
+		return nil
+	}
+	names, criteria := eval.RubricFor(eval.WithPersona(sc.SimScenario, r.Persona))
+	vs := eval.JudgeAll(ctx, j, criteria, eval.RenderTranscript(r.Transcript), r.Facts, true)
+	out := make([]eval.NamedVerdict, len(vs))
+	for i, v := range vs {
+		if v.Err != "" {
+			return fmt.Errorf("%s r%d %s: %s", r.Scenario, r.Repeat, names[i], v.Err)
+		}
+		out[i] = eval.NamedVerdict{Name: names[i], Verdict: v}
+	}
+	r.Verdicts = out
+	r.Failures = eval.RejudgedFailures(r.Failures, out)
+	r.Status = eval.StatusOf(r.Failures)
+	return nil
 }
 
 // LoadEvents reads a run's events file (events/<id>.r<n>.jsonl).

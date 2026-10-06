@@ -29,8 +29,8 @@ func printEvalCalibUsage(w io.Writer) {
 	fprintln(w, "docs/eval/calibration/README.md.")
 	fprintln(w, "")
 	fprintln(w, "judge flags:")
-	fprintln(w, "  --judge KIND          "+eval.DefaultJudgeKind+" (default), claude, vertex, ollama or fake")
-	fprintln(w, "  --judge-model ID      judge model (default "+eval.DefaultJudgeModel+")")
+	fprintln(w, judgeHelp)
+	fprintln(w, "  --judge-model ID      judge model (default sonnet for claude, "+eval.DefaultVertexModel+" for vertex)")
 	fprintln(w, "  --ollama-url URL      Ollama OpenAI-compatible root")
 	fprintln(w, "  --config PATH         config file")
 	fprintln(w, "  --env-file PATH       load KEY=VALUE lines into the environment first")
@@ -100,17 +100,19 @@ func runEvalCalib(ctx context.Context, args []string, stdout, stderr io.Writer) 
 			fprintf(stderr, "sheepdog: %v\n", err)
 			return 1
 		}
-		kind := orStr(*judge, eval.DefaultJudgeKind)
+		kind, model := judgeChoice(*judge, *judgeModel)
 		var j eval.Judge = &eval.FakeJudge{}
 		meter := eval.NewMeter()
 		if kind != eval.BackendFake {
-			m, id, err := eval.NewBackend(eval.BackendOptions{Kind: kind, Model: *judgeModel, VertexAPIKey: cfg.Gemini.Vertex.APIKey, VertexProject: cfg.Gemini.Vertex.Project, OllamaURL: *ollamaURL}, logging.NopLogger{})
+			m, id, err := newJudgeModel(kind, model, judgeVertex{cfg.Gemini.Vertex.APIKey, cfg.Gemini.Vertex.Project, *ollamaURL}, make(chan struct{}, *parallel), logging.NopLogger{})
 			if err != nil {
 				fprintf(stderr, "sheepdog eval calib: judge: %v\n", err)
 				return 1
 			}
-			sem := make(chan struct{}, *parallel)
-			j = &eval.LLMJudge{Model: eval.Metered(eval.Patient(m, sem, 8, altFor(kind, id)), meter, "judge"), ModelID: id, NoRationale: true}
+			// No rationale call: judge.json keeps only verdict and evidence.
+			lj := newLLMJudge(m, id, kind, meter)
+			lj.NoRationale = true
+			j = lj
 		}
 		t0 := time.Now()
 		verdicts := eval.JudgeCalib(ctx, j, f, *parallel, func(done, total int) {

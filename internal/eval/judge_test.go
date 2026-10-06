@@ -73,7 +73,7 @@ func TestLLMJudgeRationaleOnlyForNoOrUnsure(t *testing.T) {
 func TestLLMJudgeMetered(t *testing.T) {
 	meter := NewMeter()
 	m := braintest.NewModel(braintest.Step{Text: `{"verdict":"yes","confidence":1}`, Usage: [2]int32{1000, 10}})
-	j := &LLMJudge{Model: Metered(m, meter, "judge"), ModelID: DefaultJudgeModel}
+	j := &LLMJudge{Model: Metered(m, meter, "judge"), ModelID: DefaultVertexModel}
 	if _, err := j.Judge(context.Background(), JudgeInput{Criterion: "c", Transcript: "t"}); err != nil {
 		t.Fatal(err)
 	}

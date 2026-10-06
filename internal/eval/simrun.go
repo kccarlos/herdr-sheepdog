@@ -86,7 +86,12 @@ type SimRun struct {
 	Actions     []SimLine      `json:"actions,omitempty"`
 	Timeline    []SimLine      `json:"timeline,omitempty"`
 	Verdicts    []NamedVerdict `json:"verdicts,omitempty"`
-	Fallbacks   []string       `json:"fallbacks,omitempty"`
+	// Facts is the ground truth the judge got (so the run can be judged
+	// again later; absent before 2026-10-06). Judge is the judge model
+	// of Verdicts when they were given again (sheepdog bench rejudge).
+	Facts     string   `json:"facts,omitempty"`
+	Judge     string   `json:"judge,omitempty"`
+	Fallbacks []string `json:"fallbacks,omitempty"`
 	// Failovers counts the brain's failovers to another provider
 	// (brain.failover events), listed in FailoverEvents; AnsweredBy is
 	// the provider of the last answered brain step and StepsByProvider
@@ -279,6 +284,7 @@ loop:
 	convo = append(convo, w.push.drain()...)
 	sortLines(convo)
 	facts := w.facts(initial)
+	run.Facts = facts
 	run.Transcript = convo
 	run.Actions = w.rec.actions()
 	w.mu.Lock()

@@ -15,7 +15,6 @@ import (
 
 	"github.com/kccarlos/herdr-sheepdog/internal/bench/speech"
 	"github.com/kccarlos/herdr-sheepdog/internal/bench/tier3"
-	"github.com/kccarlos/herdr-sheepdog/internal/brain"
 	"github.com/kccarlos/herdr-sheepdog/internal/config"
 	"github.com/kccarlos/herdr-sheepdog/internal/eval"
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
@@ -47,8 +46,9 @@ func printBenchTier3Usage(w io.Writer) {
 	fprintln(w, "  --claude-model ID     Claude worker model (default haiku)")
 	fprintln(w, "  --codex-model ID      Codex worker model (default gpt-6-luna); effort --codex-effort (low)")
 	fprintln(w, "  --simuser KIND        vertex (default), ollama or fake (the scenario script)")
-	fprintln(w, "  --judge KIND          vertex (default), ollama or fake")
-	fprintln(w, "  --judge-model ID      judge and simulated-user model (default "+eval.DefaultJudgeModel+")")
+	fprintln(w, judgeHelp)
+	fprintln(w, "  --judge-model ID      judge model (default sonnet for claude, "+eval.DefaultVertexModel+" for vertex;")
+	fprintln(w, "                        with --judge vertex it is the simulated user's model too)")
 	fprintln(w, "  --out DIR             write report.json and report.md under DIR")
 	fprintln(w, "  --events DIR          write each run's full daemon event log under DIR")
 	fprintln(w, "  --keep                keep each run's scratch directory")
@@ -97,7 +97,7 @@ func runBenchTier3(ctx context.Context, args []string, stdout, stderr io.Writer)
 	codexModel := fs.String("codex-model", "gpt-6-luna", "Codex worker model")
 	codexEffort := fs.String("codex-effort", "low", "Codex reasoning effort")
 	simuser := fs.String("simuser", eval.BackendVertex, "simulated user backend")
-	judgeKind := fs.String("judge", eval.BackendVertex, "judge backend")
+	judgeKind := fs.String("judge", "", "judge backend")
 	judgeModel := fs.String("judge-model", "", "judge model")
 	out := fs.String("out", "", "report directory")
 	events := fs.String("events", "", "event log directory")
@@ -172,15 +172,16 @@ func runBenchTier3(ctx context.Context, args []string, stdout, stderr io.Writer)
 		ttsID = syn.ID()
 	}
 	sem := make(chan struct{}, 4)
-	backend := func(kind string) (brain.Model, string, error) {
-		m, id, err := eval.NewBackend(eval.BackendOptions{Kind: kind, Model: *judgeModel, VertexAPIKey: key, VertexProject: project}, logging.NopLogger{})
-		if err != nil || m == nil {
-			return m, id, err
-		}
-		return eval.Patient(m, sem, 8, altFor(kind, id)), id, nil
+	jk, jmod := judgeChoice(*judgeKind, *judgeModel)
+	// The simulated user takes --judge-model only when it runs on the
+	// judge's backend (a Claude model id means nothing on Vertex).
+	umod := ""
+	if *simuser == jk {
+		umod = jmod
 	}
+	vx := judgeVertex{key: key, project: project}
 	if *simuser != "fake" {
-		um, uid, err := backend(*simuser)
+		um, uid, err := newJudgeModel(*simuser, umod, vx, sem, logging.NopLogger{})
 		if err != nil {
 			fprintf(stderr, "sheepdog bench run: simulated user: %v\n", err)
 			return 1
@@ -189,15 +190,13 @@ func runBenchTier3(ctx context.Context, args []string, stdout, stderr io.Writer)
 			return &eval.LLMSimUser{Model: eval.Metered(um, m, "simuser"), ModelID: uid}
 		}
 	}
-	if *judgeKind != "fake" {
-		jm, jid, err := backend(*judgeKind)
+	if jk != "fake" {
+		jm, jid, err := newJudgeModel(jk, jmod, vx, sem, logging.NopLogger{})
 		if err != nil {
 			fprintf(stderr, "sheepdog bench run: judge: %v\n", err)
 			return 1
 		}
-		o.NewJudge = func(m *eval.Meter) eval.Judge {
-			return &eval.LLMJudge{Model: eval.Metered(jm, m, "judge"), ModelID: jid}
-		}
+		o.NewJudge = func(m *eval.Meter) eval.Judge { return newLLMJudge(jm, jid, jk, m) }
 	}
 
 	started := time.Now()
@@ -220,8 +219,8 @@ func runBenchTier3(ctx context.Context, args []string, stdout, stderr io.Writer)
 			"mode":           "tier 3 (real herdr session, real workers, scratch daemon --voice=off --heard-echo; the CEO types)",
 			"brain":          "gemini (vertex) " + orStr(*brainModel, "gemini-3.8-flash"),
 			"workers":        "claude " + *claudeModel + "; codex " + *codexModel + " (" + *codexEffort + ")",
-			"simulated user": *simuser + " " + orStr(*judgeModel, eval.DefaultJudgeModel),
-			"judge":          *judgeKind + " " + orStr(*judgeModel, eval.DefaultJudgeModel),
+			"simulated user": *simuser + " " + judgeModelID(*simuser, umod),
+			"judge":          jk + " " + judgeModelID(jk, jmod),
 			"parallel":       fmt.Sprint(*parallel),
 			"scenarios":      *files + filterNote(*filter),
 		}

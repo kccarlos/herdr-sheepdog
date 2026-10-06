@@ -109,17 +109,24 @@ func lastLines(s string, n int) string {
 	return strings.Join(lines, "\n")
 }
 
-// Without Vertex credentials, --live keeps working with no judge (the
+// Without its backend (no claude CLI on PATH; no Vertex credentials for
+// SHEEPDOG_JUDGE=vertex), --live keeps working with no judge (the
 // wording checks stay the code's) instead of failing on the default.
-func TestEvalLiveDefaultJudgeFallsBackWithoutVertex(t *testing.T) {
+func TestEvalLiveDefaultJudgeFallsBackWithoutBackend(t *testing.T) {
 	var cfg config.Config
 	cfg.Gemini.APIKeys = []string{"k"}
+	t.Setenv("PATH", t.TempDir())
+	t.Setenv("SHEEPDOG_JUDGE", "")
 	m, err := evalLiveModels(evalOpts{live: true}, cfg, logging.NopLogger{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if m.judge != nil || m.judgeNote == "" {
 		t.Fatalf("judge %v note %q", m.judge, m.judgeNote)
+	}
+	t.Setenv("SHEEPDOG_JUDGE", "vertex")
+	if m, err := evalLiveModels(evalOpts{live: true}, cfg, logging.NopLogger{}); err != nil || m.judge != nil || m.judgeNote == "" {
+		t.Fatalf("vertex default without credentials: judge %v note %q err %v", m.judge, m.judgeNote, err)
 	}
 	if _, err := evalLiveModels(evalOpts{live: true, judge: "vertex"}, cfg, logging.NopLogger{}); err == nil {
 		t.Fatal("an explicit --judge vertex without credentials must fail")

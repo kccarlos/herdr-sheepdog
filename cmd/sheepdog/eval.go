@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -50,8 +51,9 @@ func printEvalUsage(w io.Writer) {
 	fprintln(w, "                        vertex or deepseek")
 	fprintln(w, "  --model ID            live brain model (default brain.model)")
 	fprintln(w, "  --judge KIND          LLM judge for the wording checks and judge criteria:")
-	fprintln(w, "                        vertex (default with --live), ollama, fake or none")
-	fprintln(w, "  --judge-model ID      judge model (default "+eval.DefaultJudgeModel+" on vertex,")
+	fprintln(w, "                        claude (default with --live; SHEEPDOG_JUDGE overrides), vertex,")
+	fprintln(w, "                        ollama, fake or none")
+	fprintln(w, "  --judge-model ID      judge model (default sonnet on claude, "+eval.DefaultVertexModel+" on vertex,")
 	fprintln(w, "                        "+eval.DefaultOllamaModel+" on ollama)")
 	fprintln(w, "  --ollama-url URL      Ollama OpenAI-compatible root (default "+eval.DefaultOllamaURL+")")
 	fprintln(w, "  --repeat N            live: run each case N times; per-case pass rates (errored")
@@ -240,18 +242,18 @@ func evalLiveModels(o evalOpts, cfg config.Config, log logging.Logger) (*evalMod
 		}
 		out.model = m
 	}
-	kind := o.judge
-	if kind == "" {
-		kind = eval.BackendVertex
-		if app.VertexBrainMissing(cfg.Gemini.Vertex) != "" {
-			// The default judge needs Vertex credentials; without them the
-			// wording checks stay the code's (as before the judge existed)
-			// rather than failing a run that asked for no judge.
-			out.judgeNote = "no Vertex credentials for the default judge (" + app.VertexBrainMissing(cfg.Gemini.Vertex) + "): wording checks use the code's substring and word lists; pass --judge to choose one"
+	kind, model := judgeChoice(o.judge, o.judgeModel)
+	if o.judge == "" {
+		// The default judge needs its backend (the claude CLI, or Vertex
+		// credentials); without it the wording checks stay the code's (as
+		// before the judge existed) rather than failing a run that asked
+		// for no judge.
+		if miss := judgeMissing(kind, cfg); miss != "" {
+			out.judgeNote = "the default judge is unavailable (" + miss + "): wording checks use the code's substring and word lists; pass --judge to choose one"
 			kind = eval.BackendNone
 		}
 	}
-	j, err := evalJudge(kind, o.judgeModel, o.ollamaURL, cfg, log, out.meter)
+	j, err := evalJudge(kind, model, o.ollamaURL, cfg, log, out.meter)
 	if err != nil {
 		return nil, fmt.Errorf("judge: %w", err)
 	}
@@ -267,11 +269,24 @@ func evalJudge(kind, model, ollamaURL string, cfg config.Config, log logging.Log
 	case eval.BackendFake:
 		return &eval.FakeJudge{}, nil
 	}
-	m, id, err := eval.NewBackend(eval.BackendOptions{Kind: kind, Model: model, VertexAPIKey: cfg.Gemini.Vertex.APIKey, VertexProject: cfg.Gemini.Vertex.Project, OllamaURL: ollamaURL}, log)
+	jm, id, err := newJudgeModel(kind, model, judgeVertex{cfg.Gemini.Vertex.APIKey, cfg.Gemini.Vertex.Project, ollamaURL}, make(chan struct{}, 4), log)
 	if err != nil {
 		return nil, err
 	}
-	return &eval.LLMJudge{Model: eval.Metered(eval.Patient(m, make(chan struct{}, 4), 8, altFor(kind, id)), meter, "judge"), ModelID: id}, nil
+	return newLLMJudge(jm, id, kind, meter), nil
+}
+
+// judgeMissing says why a judge backend cannot run here ("" when it can).
+func judgeMissing(kind string, cfg config.Config) string {
+	switch kind {
+	case eval.BackendClaude:
+		if _, err := exec.LookPath("claude"); err != nil {
+			return "no claude CLI on PATH"
+		}
+	case eval.BackendVertex:
+		return app.VertexBrainMissing(cfg.Gemini.Vertex)
+	}
+	return ""
 }
 
 // runEvalSet loads and runs one set: its SVP files through the brain,
@@ -370,7 +385,7 @@ func filterSVP(cases []eval.SVPCase, substr string) []eval.SVPCase {
 // altFor is the alternate model a judge's retries use (Vertex Flash-Lite
 // only).
 func altFor(kind, id string) string {
-	if kind == eval.BackendVertex && id == eval.DefaultJudgeModel {
+	if kind == eval.BackendVertex && id == eval.DefaultVertexModel {
 		return eval.AltJudgeModel
 	}
 	return ""
