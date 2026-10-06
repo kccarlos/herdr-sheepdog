@@ -215,6 +215,27 @@ func TestWatcherReconnectsAfterServerDropsSubscriptions(t *testing.T) {
 	}
 }
 
+// events_lost ends the subscription: it is logged distinctly, and the
+// snapshot is re-read on reconnect without waiting for the ticker (an hour
+// here), so a transition missed in the gap is not lost.
+func TestWatcherEventsLostResyncsAtOnce(t *testing.T) {
+	srv := herdrtest.New(t)
+	srv.SetAgent(codexAgent())
+	w, log, _ := startWatcher(t, srv, time.Hour, 1)
+	ch := w.Transitions()
+	expectTransition(t, ch, "", herdr.StateIdle)
+
+	srv.EmitEventsLost()
+	srv.SetStatus("w5:p1", herdr.StateDone) // changed while the subscription was down
+	tr := expectTransition(t, ch, herdr.StateIdle, herdr.StateDone)
+	if tr.Source != "snapshot" {
+		t.Errorf("source = %q, want snapshot", tr.Source)
+	}
+	if log.count("herdr.events_lost") < 1 {
+		t.Errorf("herdr.events_lost entries = %d, want >= 1", log.count("herdr.events_lost"))
+	}
+}
+
 func TestWatcherFleetDiscoveryAndClose(t *testing.T) {
 	srv := herdrtest.New(t)
 	srv.SetWorkspace(herdr.WorkspaceInfo{WorkspaceID: "w4", Label: "kvoice"})

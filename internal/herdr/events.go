@@ -2,6 +2,7 @@ package herdr
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -191,9 +192,13 @@ func (c *Client) subscribeLoop(ctx context.Context, name, paneID string, subs []
 		attempts int
 	)
 	for {
-		err := c.subscribeOnce(ctx, subs, handle)
+		err := c.subscribeOnce(ctx, subs, handle, attempts > 0)
 		if ctx.Err() != nil {
 			return
+		}
+		var he *Error
+		if errors.As(err, &he) && he.Code == "events_lost" {
+			c.log("herdr.events_lost", paneID, map[string]any{"subscription": name, "message": he.Message})
 		}
 		if errors.Is(err, ErrPaneNotFound) {
 			c.log("herdr.subscribe_end", paneID, map[string]any{"subscription": name, "error": err.Error()})
@@ -225,7 +230,7 @@ func (c *Client) backoff() Backoff {
 // subscribeOnce opens one connection, sends events.subscribe, waits for the
 // ack and then hands every event line to handle. It returns nil only when
 // ctx is cancelled; any other return is a dropped connection or an error.
-func (c *Client) subscribeOnce(ctx context.Context, subs []subscription, handle func([]byte, time.Time)) error {
+func (c *Client) subscribeOnce(ctx context.Context, subs []subscription, handle func([]byte, time.Time), resubscribe bool) error {
 	dialCtx, cancel := context.WithTimeout(ctx, c.timeout())
 	conn, err := dial(dialCtx, c.Socket)
 	cancel()
@@ -262,6 +267,9 @@ func (c *Client) subscribeOnce(ctx context.Context, subs []subscription, handle 
 		return ack.Error
 	}
 	_ = conn.SetReadDeadline(time.Time{})
+	if resubscribe {
+		c.signalResync()
+	}
 
 	for {
 		line, err := readLine(r)
@@ -274,6 +282,14 @@ func (c *Client) subscribeOnce(ctx context.Context, subs []subscription, handle 
 				return fmt.Errorf("read: %w", err)
 			}
 			return fmt.Errorf("connection closed: %w", err)
+		}
+		// Since herdr 0.9.2 a subscriber that fell behind gets an error
+		// envelope and the connection is closed.
+		if bytes.Contains(line, []byte(`"error"`)) {
+			var env response
+			if json.Unmarshal(line, &env) == nil && env.Error != nil {
+				return env.Error
+			}
 		}
 		handle(line, time.Now())
 	}

@@ -290,6 +290,29 @@ on `pane_agent_detected` and dropped on `released:true`/`pane_closed`/
 `workspace_closed`. Alternatively use the plugin hook channel (§8), which *is*
 fleet-wide. Reconcile both with the 30 s `session.snapshot` diff.
 
+### `events_lost` and resubscribe (herdr >= 0.9.2)
+
+A subscriber that falls behind gets an error response with code `events_lost`
+on the stream and the connection is closed. `Client.subscribeOnce` recognises
+an error envelope on the stream and returns it; `subscribeLoop` logs it as
+`herdr.events_lost` and reconnects with backoff. After every successful
+resubscribe the client signals `Client.Resync()` and the Watcher runs
+`refreshSnapshot` at once (a per-pane status subscription emits no initial
+event, so a change during the gap is only found by the snapshot). Verified
+against the fake herdr (`herdrtest.EmitEventsLost`).
+
+### `pane.process_info`
+
+`{"method":"pane.process_info","params":{"pane_id":"w1:p1"}}` returns
+`process_info {shell_pid, foreground_process_group_id, tty, foreground_processes[{pid,name,argv}]}`.
+The shell is ready for typing when its process group is the foreground group
+and it is listed among `foreground_processes` (`ProcessInfo.ShellForeground`,
+the predicate herdr's own `agent start` uses). Spawn waits for this plus first
+output, then settles 200 ms, before typing the agent command; after 5 s it
+types anyway and logs `supervisor.spawn_shell_timeout`. Checked live in a
+named session: a fresh pane reports the shell in the foreground; while `sleep`
+runs it does not.
+
 ### `events.wait` (one-shot)
 
 ```json

@@ -10,6 +10,7 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -40,6 +41,33 @@ type Client struct {
 	ReconnectBackoff Backoff
 
 	seq atomic.Uint64
+
+	resyncMu sync.Mutex
+	resync   chan struct{}
+}
+
+// Resync returns a channel that receives (coalesced, capacity one) after a
+// subscription is re-established following a drop or an events_lost end:
+// events may have been missed in the gap, so the Watcher re-reads
+// session.snapshot at once.
+func (c *Client) Resync() <-chan struct{} {
+	return c.resyncChan()
+}
+
+func (c *Client) resyncChan() chan struct{} {
+	c.resyncMu.Lock()
+	defer c.resyncMu.Unlock()
+	if c.resync == nil {
+		c.resync = make(chan struct{}, 1)
+	}
+	return c.resync
+}
+
+func (c *Client) signalResync() {
+	select {
+	case c.resyncChan() <- struct{}{}:
+	default:
+	}
 }
 
 // NewClient returns a client for the socket at path with default timeout.
@@ -332,4 +360,14 @@ func errString(err error) string {
 		return ""
 	}
 	return err.Error()
+}
+
+// ProcessInfo returns the pane's shell and foreground processes
+// (`pane.process_info`).
+func (c *Client) ProcessInfo(ctx context.Context, paneID string) (ProcessInfo, error) {
+	var res struct {
+		ProcessInfo ProcessInfo `json:"process_info"`
+	}
+	err := c.Call(ctx, "pane.process_info", map[string]any{"pane_id": paneID}, &res)
+	return res.ProcessInfo, err
 }

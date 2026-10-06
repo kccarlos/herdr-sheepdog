@@ -46,6 +46,7 @@ type Spawner interface {
 	CreateWorkspace(ctx context.Context, cwd, label string) (herdr.PaneInfo, error)
 	SplitPane(ctx context.Context, paneID, cwd string) (herdr.PaneInfo, error)
 	SendInput(ctx context.Context, paneID, text string, keys ...string) error
+	ProcessInfo(ctx context.Context, paneID string) (herdr.ProcessInfo, error)
 }
 
 var _ Spawner = (*herdr.Client)(nil)
@@ -60,9 +61,13 @@ const (
 var (
 	// spawnPoll is how often the start-up watch looks.
 	spawnPoll = time.Second
-	// spawnShellWait bounds the wait for a new pane's shell to print
-	// its prompt before the command line is typed.
+	// spawnShellWait bounds the wait for a new pane's shell to be the
+	// pane's foreground process (and to have printed) before the command
+	// line is typed.
 	spawnShellWait = 5 * time.Second
+	// spawnShellSettle is the pause once the shell is ready, for a prompt
+	// that is still being drawn.
+	spawnShellSettle = 200 * time.Millisecond
 	// spawnReadyWait is how long herdr may take to report the new agent
 	// before the brain and the CEO are told it has not started, with the
 	// pane's last lines (the watch goes on). herdr sees a starting Claude
@@ -163,7 +168,7 @@ func (s *Supervisor) spawn(ctx context.Context, req brain.SpawnRequest) (string,
 		s.log.Log(logSource, "supervisor.spawn_error", "", map[string]any{"dir": dir.Path, "kind": req.Kind, "stage": "pane", "error": err.Error()})
 		return "", fmt.Errorf("could not open a pane in %s: %w", dir.Name, err)
 	}
-	s.waitShell(ctx, pane.PaneID)
+	s.waitShell(ctx, sp, pane.PaneID)
 	cmd := spawnCommand(req.Kind, req.Model)
 	if err := sp.SendInput(ctx, pane.PaneID, cmd, "enter"); err != nil {
 		s.log.Log(logSource, "supervisor.spawn_error", pane.PaneID, map[string]any{"dir": dir.Path, "kind": req.Kind, "stage": "start", "error": err.Error()})
@@ -399,14 +404,29 @@ func spawnCommand(kind, model string) string {
 	return cmd + " --model " + model
 }
 
-// waitShell waits, up to spawnShellWait, for a new pane's shell to print
-// anything (its prompt), so the command line is not typed into a shell
-// still starting. A pane that cannot be read is typed into anyway.
-func (s *Supervisor) waitShell(ctx context.Context, paneID string) {
+// waitShell waits, up to spawnShellWait, until a new pane's shell is the
+// pane's foreground process (pane.process_info, the predicate herdr's own
+// CLI uses before `agent start`) and has printed something, then settles
+// briefly, so the command line is not typed into a shell still starting
+// (an rc-file child such as oh-my-zsh's update check holds the foreground
+// and eats keystrokes). A pane that cannot be inspected, or a shell not
+// ready by the deadline, is typed into anyway; the timeout is logged.
+func (s *Supervisor) waitShell(ctx context.Context, sp Spawner, paneID string) {
 	deadline := time.Now().Add(spawnShellWait)
 	for {
-		read, err := s.herdr.Read(ctx, paneID, herdr.SourceRecentUnwrapped, 20)
-		if err != nil || strings.TrimSpace(read.Text) != "" || time.Now().After(deadline) {
+		info, err := sp.ProcessInfo(ctx, paneID)
+		if err != nil {
+			s.log.Log(logSource, "supervisor.spawn_shell_unchecked", paneID, map[string]any{"error": err.Error()})
+			return
+		}
+		if info.ShellForeground() {
+			read, err := s.herdr.Read(ctx, paneID, herdr.SourceRecentUnwrapped, 20)
+			if err != nil || strings.TrimSpace(read.Text) != "" {
+				break
+			}
+		}
+		if time.Now().After(deadline) {
+			s.log.Log(logSource, "supervisor.spawn_shell_timeout", paneID, map[string]any{"waited_ms": spawnShellWait.Milliseconds()})
 			return
 		}
 		select {
@@ -414,6 +434,10 @@ func (s *Supervisor) waitShell(ctx context.Context, paneID string) {
 			return
 		case <-time.After(spawnPoll / 4):
 		}
+	}
+	select {
+	case <-ctx.Done():
+	case <-time.After(spawnShellSettle):
 	}
 }
 

@@ -226,6 +226,14 @@ func (w *Watcher) Run(ctx context.Context) error {
 			w.handleStatus(ctx, ev)
 		case seq := <-w.fired:
 			w.handleFired(ctx, seq)
+		case <-w.client.Resync():
+			// A subscription was re-established (after events_lost or a
+			// drop): reconcile at once instead of waiting for the ticker.
+			if err := w.refreshSnapshot(ctx); err != nil {
+				w.log.Log("herdr", "herdr.snapshot_error", "", map[string]any{"error": err.Error()})
+			} else {
+				w.alive()
+			}
 		case <-ticker.C:
 			if err := w.refreshSnapshot(ctx); err != nil {
 				w.log.Log("herdr", "herdr.snapshot_error", "", map[string]any{"error": err.Error()})
