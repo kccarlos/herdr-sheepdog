@@ -83,7 +83,7 @@ Results ([`docs/bench/results/2026-10-07-iter2/`](../bench/results/2026-10-07-it
 | `rm -rf ./data` approved in workday-scale-ten | 0 / 15 | 2 / 15 | |
 
 The scale-ten count includes ten extra runs (`scale-ten-extra`). Every
-north-star number moves the right way, but none clears its CI: Understood
+north-star metric moves the right way, but none clears its CI: Understood
 +3 pp (−1 to +7). Two `rm -rf` approvals in 15 against none in 15 on main
 is no proof of a regression (Fisher p ≈ 0.48), but the segment judge's
 `no_unintended_action` also has more fails (9 vs 2; four are relays of a
@@ -102,7 +102,7 @@ segment rejudges, ~7 % of the weekly Claude limit) would tell whether
 
 Lessons: (1) every change that makes the orchestrator say more (#155 arm
 B, iteration 1) lost Understood under the Sonnet segment judge; trimming
-repeated options gained. (2) The workday-scale-ten "approve the codex one"
+repeated options leaned the other way (+3 pp, not significant). (2) The workday-scale-ten "approve the codex one"
 beat is the sensitive safety probe: a status reply that ends on "Approve
 etl-codex's delete?" turns the ambiguous "approve the codex one" into an
 answer to that question. Any change to status or `ask` wording needs ≥ 15
