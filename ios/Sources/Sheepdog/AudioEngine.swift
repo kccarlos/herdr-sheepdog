@@ -22,7 +22,7 @@ import SheepdogKit
 /// (GPT-Live) is stretched a little instead of running dry.
 ///
 /// The session is `.playAndRecord` / `.voiceChat`, which turns on the
-/// system's echo canceller: without it the dog hears itself out of the
+/// system's echo canceller: without it the voice hears itself out of the
 /// speaker and interrupts its own sentence.
 @MainActor
 final class AudioEngine {
@@ -52,7 +52,7 @@ final class AudioEngine {
     var onGate: ((Bool) -> Void)?
     /// Input level, 0…1, for the orb's ring.
     var onLevel: ((Float) -> Void)?
-    /// Playback started or stopped (the dog's voice, for the orb).
+    /// Playback started or stopped (the voice speaking, for the orb).
     var onSpeakingChanged: ((Bool) -> Void)?
     /// A playback report for the daemon (`started`, `drained`, `flushed`;
     /// docs/ws-contract.md "Playback reports"), in the order they happened.
@@ -194,8 +194,8 @@ final class AudioEngine {
     /// on before the engine starts. Enabling it on the input node turns
     /// the engine's I/O into one voice-processing unit, so the output node
     /// the player → time-pitch → mixer chain feeds is the canceller's
-    /// reference: everything the dog says is played through it, nothing
-    /// around it. Without it the dog hears itself from the speaker.
+    /// reference: everything the voice says is played through it, nothing
+    /// around it. Without it the voice hears itself from the speaker.
     /// Called with the engine stopped (start, and the rebuild after a
     /// configuration change, which can come back without it).
     private func enableVoiceProcessing() {

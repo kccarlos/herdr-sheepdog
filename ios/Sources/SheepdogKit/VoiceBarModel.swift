@@ -1,6 +1,6 @@
 import Foundation
 
-/// How the microphone reaches the dog.
+/// How the microphone reaches the voice.
 public enum TalkMode: String, Equatable, Sendable, CaseIterable {
     /// Always listening; the detector decides what is speech. Mute is the
     /// only mic control.
@@ -25,7 +25,7 @@ public struct VoiceBarModel: Equatable, Sendable {
         /// Resume audio iOS paused and would not resume by itself.
         case resume
         /// Hold-to-talk: press and hold opens the gate, release closes it.
-        /// Pressing while the dog talks also stops it (barge-in).
+        /// Pressing while the voice talks also stops it (barge-in).
         case holdToTalk
         case none
     }
@@ -117,12 +117,12 @@ public struct VoiceBarModel: Equatable, Sendable {
         muted ? "Unmute microphone" : "Mute microphone"
     }
 
-    /// The first-run coach mark, shown the first time the dog is listening.
+    /// The first-run coach mark, shown the first time the voice is listening.
     public static func coachMark(voiceName: String) -> String {
         "Just talk — \(voiceName) is listening. Tap the mic only to mute."
     }
 
-    /// Whether the microphone is open and the dog can hear (the coach mark
+    /// Whether the microphone is open and the voice can hear (the coach mark
     /// waits for this).
     public static func isListening(_ state: SessionState) -> Bool {
         state == .listening || state == .silent

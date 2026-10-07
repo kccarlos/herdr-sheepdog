@@ -9,11 +9,11 @@ import Foundation
 /// two merge instead of showing twice.
 public struct ConversationItem: Codable, Equatable, Identifiable, Sendable {
     public enum Kind: String, Codable, Sendable {
-        /// What the shepherd said (right-hand bubble).
+        /// What the user said (right-hand bubble).
         case shepherd
-        /// What the dog said (left-hand bubble).
+        /// What the voice said (left-hand bubble).
         case dog
-        /// Something the dog decided to say unprompted.
+        /// Something the voice decided to say unprompted.
         case push
         /// A worker's approval prompt, with how it was resolved.
         case approval
@@ -42,7 +42,7 @@ public struct ConversationItem: Codable, Equatable, Identifiable, Sendable {
     public var ts: Date
     public var kind: Kind
     public var text: String
-    /// How the shepherd spoke (`voice` | `typed`), or how an approval was
+    /// How the user spoke (`voice` | `typed`), or how an approval was
     /// answered (`tap` | `fast_path` | `brain` | `confirm`).
     public var via: String?
     public var agent: String?

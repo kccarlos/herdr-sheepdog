@@ -3,7 +3,7 @@ import MediaPlayer
 import SheepdogKit
 import SwiftUI
 
-/// Everything that lets the shepherd run the voice session away from the
+/// Everything that lets the user run the voice session away from the
 /// screen: the Live Activity (lock screen and Dynamic Island) and the
 /// earbud remote with its Now Playing entry. Both follow one
 /// `VoiceActivityState` (SheepdogKit), live exactly as long as the voice
@@ -46,7 +46,7 @@ final class VoiceLiveActivity {
     private var content: Content?
     private var refreshTask: Task<Void, Never>?
     private var watchTask: Task<Void, Never>?
-    /// The shepherd swiped the banner away during this session: leave it
+    /// The user swiped the banner away during this session: leave it
     /// gone until the next one.
     private var dismissedByUser = false
 
@@ -107,7 +107,7 @@ final class VoiceLiveActivity {
         Task { await ending.end(last, dismissalPolicy: .immediate) }
     }
 
-    /// The system ends an activity on its own (the shepherd swiped it
+    /// The system ends an activity on its own (the user swiped it
     /// away, or the eight-hour limit): forget it.
     private func watch(_ watched: Activity<VoiceSessionAttributes>) {
         watchTask = Task { [weak self] in

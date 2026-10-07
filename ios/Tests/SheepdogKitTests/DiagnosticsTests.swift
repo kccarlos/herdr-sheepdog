@@ -2,9 +2,9 @@ import XCTest
 @testable import SheepdogKit
 
 /// The Health pane's model: the problem lines in plain words from the
-/// daemon's payloads (as `internal/brain`, `internal/voice`,
+/// daemon's payloads (as `internal/orchestrator`, `internal/voice`,
 /// `internal/supervisor` and `internal/web` log them), uptime, GPT-Live's
-/// billed seconds, and the brain-model and settings calls.
+/// billed seconds, and the orchestrator-model and settings calls.
 final class DiagnosticsTests: XCTestCase {
     private func event(_ id: UInt64, _ type: String, _ payload: [String: JSONValue]) -> DaemonEvent {
         DaemonEvent(seq: id, ts: Date(timeIntervalSince1970: TimeInterval(id)), source: "x", type: type, payload: payload)
@@ -18,12 +18,12 @@ final class DiagnosticsTests: XCTestCase {
 
     func testEveryProblemTypeReadsAsOneLine() {
         var p = line("brain.fallback", ["reason": .string("timeout"), "kind": .string("utterance"), "trigger": .string("ceo"), "turn": .number(4), "acted": .bool(false), "error": .string("context deadline exceeded\nmore")])
-        XCTAssertEqual(p?.title, "Brain fell back: timeout")
+        XCTAssertEqual(p?.title, "Orchestrator fell back: timeout")
         XCTAssertEqual(p?.detail, "context deadline exceeded")
         XCTAssertEqual(p?.severity, .error)
 
         p = line("brain.rate_limited", ["model": .string("gemini-3.5-flash"), "key_index": .number(1), "keys": .number(4), "retry_after_ms": .number(31_000)])
-        XCTAssertEqual(p?.title, "Brain rate-limited (gemini-3.5-flash)")
+        XCTAssertEqual(p?.title, "Orchestrator rate-limited (gemini-3.5-flash)")
         XCTAssertEqual(p?.detail, "key 2 of 4 · retry in 31.0 s")
 
         p = line("voice.connect_error", ["key_index": .number(0), "resumed": .bool(false), "dur_ms": .number(812), "error": .string("websocket: bad handshake")])
@@ -39,7 +39,7 @@ final class DiagnosticsTests: XCTestCase {
         XCTAssertEqual(p?.title, "Push dropped — nobody listened for 5 min")
 
         p = line("supervisor.echo_dropped", ["heard": .string("No change since I last checked"), "said": .string("No change since I last checked.")])
-        XCTAssertEqual(p?.title, "Echo dropped — the dog heard itself")
+        XCTAssertEqual(p?.title, "Echo dropped — the voice heard itself")
         XCTAssertEqual(p?.detail, "heard “No change since I last checked”")
 
         p = line("web.audio_unheard", ["bytes": .number(96_000), "provider": .string("gemini")])
@@ -91,7 +91,7 @@ final class DiagnosticsTests: XCTestCase {
         XCTAssertNil(health.billedSeconds, "a restarted daemon bills from zero")
     }
 
-    // MARK: - Brain models and settings
+    // MARK: - Orchestrator models and settings
 
     /// Captured from the fixture daemon (`--brain=fake`) at `0be70e6`.
     private let brainModelsJSON = """
@@ -111,7 +111,7 @@ final class DiagnosticsTests: XCTestCase {
     }
 
     func testSwitchingProviderPicksFromTheNewCatalogNeverTheOldModel() throws {
-        // GET /api/brain/models?provider=deepseek while the brain runs on
+        // GET /api/brain/models?provider=deepseek while the orchestrator runs on
         // Gemini: provider/model are still the current ones, models are
         // DeepSeek's, and none is "recommended" (a gemini/gemma notion).
         let json = #"{"provider":"gemini","providers":[],"model":"gemini-3.5-flash","models_provider":"deepseek","models":[{"name":"deepseek-chat"},{"name":"deepseek-reasoner"}],"stale":false}"#
@@ -120,7 +120,7 @@ final class DiagnosticsTests: XCTestCase {
         XCTAssertEqual(catalog.defaultModelForSwitch, "deepseek-chat", "but a switch takes the new provider's model")
 
         let empty = try DaemonClient.decoder.decode(BrainModels.self, from: Data(#"{"provider":"gemini","providers":[],"model":"gemini-3.5-flash","models_provider":"deepseek","models":[]}"#.utf8))
-        XCTAssertNil(empty.defaultModelForSwitch, "no catalog: leave the brain alone")
+        XCTAssertNil(empty.defaultModelForSwitch, "no catalog: leave the orchestrator alone")
         let failed = try DaemonClient.decoder.decode(BrainModels.self, from: Data(#"{"provider":"gemini","providers":[],"model":"x","models_provider":"deepseek","models":[{"name":"deepseek-chat"}],"error":"401 from DeepSeek"}"#.utf8))
         XCTAssertNil(failed.defaultModelForSwitch, "a list that could not be fetched is not trusted")
         let gemini = try DaemonClient.decoder.decode(BrainModels.self, from: Data(brainModelsJSON.utf8))

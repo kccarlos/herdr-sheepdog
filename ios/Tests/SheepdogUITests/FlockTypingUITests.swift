@@ -1,6 +1,6 @@
 import XCTest
 
-/// The Flock pane and typed input, against the fixture daemon
+/// The Agents pane and typed input, against the fixture daemon
 /// (`--brain=fake --herdr=mock --voice=off`): an injected worker question
 /// answered from its agent card, and a typed utterance answered by the
 /// daemon's text router. Not in CI.
@@ -40,8 +40,8 @@ final class FlockTypingUITests: XCTestCase {
         ])
         XCTAssertTrue(app.otherElements["approval.card"].waitForExistence(timeout: 15), "the pinned card first")
 
-        // The Flock pane: the agent's card, with the question on it.
-        tapWhenReady(app.buttons["main.pane.flock"], "the Flock pane")
+        // The Agents pane: the agent's card, with the question on it.
+        tapWhenReady(app.buttons["main.pane.flock"], "the Agents pane")
         XCTAssertTrue(element(app, "flock.agent.deploy").waitForExistence(timeout: 10), "the deploy card")
         XCTAssertTrue(element(app, "flock.agent.deploy.state").exists, "state and how long")
         XCTAssertTrue(app.otherElements["approval.card"].waitForExistence(timeout: 5), "the question sits on its agent's card")
@@ -64,7 +64,7 @@ final class FlockTypingUITests: XCTestCase {
 
         // The daemon's text router answers; both land from /events.
         let said = app.descendants(matching: .any).matching(NSPredicate(format: "label ENDSWITH %@", "what is deploy doing")).firstMatch
-        XCTAssertTrue(said.waitForExistence(timeout: 15), "the typed words show as the shepherd's")
+        XCTAssertTrue(said.waitForExistence(timeout: 15), "the typed words show as the user's")
         XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "bubble.sheepdog").firstMatch.waitForExistence(timeout: 15), "and the dog answers")
         sleep(1)
         shot(app, "31-typed-answered")

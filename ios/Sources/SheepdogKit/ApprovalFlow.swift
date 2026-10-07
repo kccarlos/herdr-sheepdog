@@ -1,7 +1,7 @@
 import Foundation
 
 /// The approval card pinned above the controls: which question it shows and
-/// where the shepherd's tap is.
+/// where the user's tap is.
 ///
 /// ```
 /// shown ──tap──▶ sending ──200──▶ answered (then dismissed)
@@ -87,7 +87,7 @@ public struct ApprovalFlow: Equatable, Sendable {
         return .appeared
     }
 
-    /// The shepherd tapped an option. Returns the option to send, or nil
+    /// The user tapped an option. Returns the option to send, or nil
     /// when the tap must be ignored (a double tap, a settled card).
     public mutating func tap(index: Int) -> PendingOption? {
         guard var card, card.acceptsTaps,

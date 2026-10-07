@@ -1,14 +1,14 @@
 import Foundation
 
-/// What the brain told the voice, and the pushes waiting for a listener —
+/// What the orchestrator told the voice, and the pushes waiting for a listener —
 /// the two things `GET /api/conversation` does not carry and the `/ws`
 /// transcript cannot show, folded from `/events` (and from
 /// `GET /api/events` after a relaunch).
 ///
-/// * **Brain replies.** An utterance the voice relays with
+/// * **Orchestrator replies.** An utterance the voice relays with
 ///   `to_supervisor` comes back as `voice.tool_result {spoken, detail?,
 ///   options?, clarify, pending?}` — the headline the voice reads, the plain
-///   explanation it reads only when asked, and the choices. The brain's
+///   explanation it reads only when asked, and the choices. The orchestrator's
 ///   `ask` is not separate on the wire: the daemon folds it into `spoken`
 ///   as the last sentence (`supervisor.toolResultFrom`). A reply that did
 ///   not land in time is `pending` (the answer follows as a push).
@@ -26,13 +26,13 @@ public struct BrainActivity: Equatable, Sendable {
         /// The event id.
         public var id: Int64
         public var ts: Date
-        /// What the voice was told to say (the brain's `ask` included).
+        /// What the voice was told to say (the orchestrator's `ask` included).
         public var spoken: String
         /// The plain explanation behind the headline, when there is one.
         public var detail: String?
-        /// The choices the brain offered.
+        /// The choices the orchestrator offered.
         public var options: [String]
-        /// The brain asks the shepherd to say more.
+        /// The orchestrator asks the user to say more.
         public var clarify: Bool
         /// Not the answer yet: it follows as a push.
         public var pending: Bool
@@ -54,7 +54,7 @@ public struct BrainActivity: Equatable, Sendable {
             self.raw = raw
         }
 
-        /// The reply already shows as the dog's bubble with the same id
+        /// The reply already shows as the voice's bubble with the same id
         /// (the text router's answer): only its detail and options add
         /// anything.
         public var isAlsoADogItem: Bool {

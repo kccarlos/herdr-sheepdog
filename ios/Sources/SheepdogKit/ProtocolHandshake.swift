@@ -140,7 +140,7 @@ extension ProtocolHandshake.State {
         }
     }
 
-    /// What to tell the shepherd about a mismatch, or nil.
+    /// What to tell the user about a mismatch, or nil.
     public var mismatchMessage: String? {
         switch self {
         case let .appTooOld(text): return text

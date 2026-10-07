@@ -37,7 +37,7 @@ final class LiveHandshakeTests: XCTestCase {
         } else {
             XCTAssertEqual(socket.handshake.state, .legacy, "a daemon from before the handshake is protocol 1")
         }
-        XCTAssertEqual(errors, [], "nothing to show the shepherd")
+        XCTAssertEqual(errors, [], "nothing to show the user")
         XCTAssertEqual(socket.life, .open)
     }
 }

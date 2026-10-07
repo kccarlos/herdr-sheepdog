@@ -23,7 +23,7 @@ extension Agent.State {
     }
 }
 
-/// The flock as the screen shows it: the running agents in the order that
+/// The agents as the screen shows it: the running agents in the order that
 /// matters (blocked, working, then idle and done; by alias within each),
 /// and the rest folded away. A blocked agent is always running, so it can
 /// never be folded.
@@ -40,7 +40,7 @@ public struct Flock: Equatable, Sendable {
     /// Every agent, running ones first, in display order.
     public var all: [Agent] { running + notRunning }
 
-    /// Agents waiting on the shepherd: what the Flock tab's badge counts.
+    /// Agents waiting on the user: what the Agents pane tab's badge counts.
     public var waitingCount: Int { running.filter { $0.state == .blocked }.count }
 
     public var isEmpty: Bool { running.isEmpty && notRunning.isEmpty }

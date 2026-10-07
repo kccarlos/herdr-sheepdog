@@ -1,7 +1,7 @@
 import SheepdogKit
 import SwiftUI
 
-/// The conversation: the shepherd on the right, the dog on the left, the
+/// The conversation: the user on the right, the voice on the left, the
 /// daemon's pushes and approvals as full-width cards, and quiet dividers
 /// for days and restarts. The history loaded from the daemon (or the
 /// cache) sits above this session's live bubbles; pulling down at the top
@@ -17,13 +17,13 @@ struct ConversationView: View {
     /// pinned on the approval card (`QuestionFocus`).
     var pointerIDs: Set<String> = []
     var loadOlder: () async -> Void = {}
-    /// Changes when the shepherd typed something: follow the conversation
+    /// Changes when the user typed something: follow the conversation
     /// to its end even if it was scrolled up (the keyboard shrinks it).
     var followToken = 0
 
     @State private var atBottom = true
     @State private var lastSeenID: String?
-    /// The "N updates" rows the shepherd opened, by their id.
+    /// The "N updates" rows the user opened, by their id.
     @State private var openGroups: Set<String> = []
 
     private var hasContent: Bool {
@@ -292,9 +292,9 @@ struct UpdatesGroup: View {
     }
 }
 
-/// What the brain told the voice to say (`to_supervisor`'s result): the
+/// What the orchestrator told the voice to say (`to_supervisor`'s result): the
 /// headline, and behind a tap the plain explanation the voice reads only
-/// when asked, the choices, and the raw payload. Compact under the dog's
+/// when asked, the choices, and the raw payload. Compact under the voice's
 /// own bubble when that bubble already says the words.
 struct BrainReplyCard: View {
     let reply: BrainActivity.Reply
@@ -308,7 +308,7 @@ struct BrainReplyCard: View {
             if !compact {
                 HStack(spacing: 6) {
                     Image(systemName: "brain")
-                    Text("Brain → \(voiceName)")
+                    Text("Orchestrator → \(voiceName)")
                     if reply.clarify { tag("asks you to say more") }
                 }
                 .font(.caption.weight(.semibold))
@@ -372,7 +372,7 @@ struct BrainReplyCard: View {
     }
 }
 
-/// The choices a brain reply offered, as quiet chips.
+/// The choices an orchestrator reply offered, as quiet chips.
 struct FlowOptions: View {
     let options: [String]
 
@@ -569,7 +569,7 @@ struct BubbleView: View {
     }
 }
 
-/// The shepherd on the right in the accent colour, the dog on the left.
+/// The user on the right in the accent colour, the voice on the left.
 struct SpeechBubble: View {
     let text: String
     let isShepherd: Bool

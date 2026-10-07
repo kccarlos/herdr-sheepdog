@@ -116,7 +116,7 @@ revoked mid-session.
 `GET /events` is the app's second input. It carries agent state changes
 (which trigger a debounced refetch of `/api/state`), pushes,
 `voice.tool_call` / `voice.tool_result` (the orb's *thinking* state, with a
-30 s timeout), brain replies, held pushes and `pending.*`.
+30 s timeout), orchestrator replies, held pushes and `pending.*`.
 
 Every event that is a conversation item in its own right (a typed
 utterance, a reply without a voice model, a push, an approval and its
@@ -170,13 +170,13 @@ answered by voice. `expired`, `cancelled`, `replaced`, or a state refresh
 without the question dismisses it. `/api/state`'s `pending_action` is the
 source of truth (refreshed every 5 s and on every `pending.*` event), and
 the event is the fast path. The POST to `/api/pending/answer` sends the
-option's 1-based `index`. On the Flock pane the card sits on its agent's
+option's 1-based `index`. On the Agents pane the card sits on its agent's
 card instead of above the voice bar.
 
 ## New conversation
 
 ⋯ ▸ New conversation calls `POST /api/conversation/reset {"via":"app"}`.
-This resets only the supervisor's and the voice model's short-term context
+This resets only the orchestrator's and the voice model's short-term context
 and keeps the scrollback. *Settings ▸ Clear conversation on this phone*
 drops the local copy instead. A 404 hides the menu item, and the app learns
 this separately for each daemon. The app adds no optimistic divider: the
@@ -186,11 +186,11 @@ ordinary notice item, deduplicated by event id and `reset_id`.
 ## Main screen panes
 
 `PaneSwitcher` switches the middle of the screen between Conversation,
-Flock. It is built from buttons, so Flock can carry an amber
+Agents. It is built from buttons, so Agents can carry an amber
 badge with the number of blocked agents, and it turns into a menu at the
 accessibility text sizes. The voice bar stays in place.
 
-- **Flock** (`Flock`, `FlockView`). Only running agents are listed (idle,
+- **Agents** (`Flock`, `FlockView`). Only running agents are listed (idle,
   working, blocked, done): blocked first, then working, then idle and
   done. Unknown and exited agents fold into a closed "Not running (N)"
   group. Each card shows the agent's state and how long it has been in it,
@@ -199,7 +199,7 @@ accessibility text sizes. The voice bar stays in place.
   tapped). The agent strip above the conversation shows the same running
   agents.
 - **Agent window** (`AgentScreenView`, `AgentScreenModel`, `AgentKey`).
-  "Open window" on a Flock card (a `NavigationLink` to
+  "Open window" on a Agents card (a `NavigationLink` to
   `AgentWindowRoute` on the main `NavigationStack`), or in the sheet behind
   a strip chip, pushes the agent's live terminal. When the daemon's
   `bot-ready` lists the `screen` feature, the window streams over `/ws`
@@ -231,9 +231,9 @@ accessibility text sizes. The voice bar stays in place.
   polling; a `404 {"error":"no such agent"}` is an untracked pane.
   `DaemonClient.agentPath` percent-escapes the pane id (`%12` → `%2512`,
   `/` → `%2F`). The daemon never serves panes it does not track.
-- **Brain replies and held pushes** (`BrainActivity`). `voice.tool_result`
-  for `to_supervisor` shows as a "Brain → Sheepdog" card. With
-  `--voice=off`, only a detail/options footer appears under the dog's
+- **Orchestrator replies and held pushes** (`BrainActivity`). `voice.tool_result`
+  for `to_supervisor` shows as an "Orchestrator → Sheepdog" card. With
+  `--voice=off`, only a detail/options footer appears under the voice's
   bubble. `voice.push_held` shows as a "Waiting for a listener" card, which
   goes away on release and is struck through on drop. After a relaunch,
   these are backfilled from `GET /api/events?type=…`.
@@ -245,13 +245,13 @@ accessibility text sizes. The voice bar stays in place.
   chip's popover and from Settings ▸ Diagnostics; its error count is the
   red badge on the chip. It shows the daemon's
   connection, address, version and uptime (from the newest `daemon.start`),
-  plus the voice and brain read-only with "Change in Settings ›", which
+  plus the voice and orchestrator read-only with "Change in Settings ›", which
   opens Settings ▸ Models. It also shows GPT-Live's billed time, chattiness
   (`GET/PUT /api/settings`), this phone's audio path, and recent problems
   from `GET /api/events?type=…`: errors only, repeats grouped as ×N, and
   the raw event behind a tap.
 - **Markdown** (`MarkdownRenderer`). Tasks, questions, the worker's last
-  message and brain replies support inline bold, italic, code and links,
+  message and orchestrator replies support inline bold, italic, code and links,
   lists, and monospaced fenced code. Headings render as bold body text.
 
 ## Settings ▸ Models
@@ -264,7 +264,7 @@ no Save or Cancel):
   are disabled with the daemon's reason. GPT-Live is marked "Billed per
   minute". A 404 hides the section, and the provider fields on hello, state
   and `/ws` `status` are optional, so older daemons still work.
-- **Brain.** `GET /api/brain/models` provides the provider and model
+- **Orchestrator.** `GET /api/brain/models` provides the provider and model
   pickers, and `PUT /api/brain/model` switches. A new provider takes its
   first recommended model. The current model is always offered.
 - **Notifications.** This phone's registration and the daemon's
@@ -286,7 +286,7 @@ The `APPROVAL` category has **Approve** (the first "Yes…" option, otherwise
 option 1) and **Decline** (the first "No…" option). Both require the
 passcode, because the daemon token is a when-unlocked keychain item. If an
 answer fails or is stale, a notification remains that opens the app when
-tapped. Tapping any notification opens that agent's Flock card. Nothing is
+tapped. Tapping any notification opens that agent's Agents card. Nothing is
 shown in the foreground while the session is live. The payload format is
 described in the daemon's `docs/push.md`.
 
@@ -431,7 +431,7 @@ orb says "No microphone" (`SessionState.noMicrophone`).
 `VoiceBarView` is one full-width row containing the mic (mute) button, the
 orb, the status line, Type and End (✕). Each control has a fixed slot, and
 the bar's height depends only on the text size. `VoiceBarModel` decides
-what the orb's tap does (Connect when disconnected, Stop while the dog is
+what the orb's tap does (Connect when disconnected, Stop while the voice is
 thinking or speaking, otherwise nothing) and what the bar says: "Tap the
 orb to connect", "Listening — just talk", "Muted — tap to unmute", "Hold
 the orb to talk". While the mic is live, the mic button shows the input
@@ -447,7 +447,7 @@ the voice state. It shows green "Connected", amber "Connecting…" (the first at
 "Reconnecting…" (after a drop; a spinner replaces the dot), red
 "Offline" or "Token refused", or grey "Not connected". Tapping it opens the
 address, a timed round trip, the daemon's version, the voice provider and
-model, the brain, and Reconnect / Open Settings.
+model, the orchestrator, and Reconnect / Open Settings.
 
 A new question with options plays a distinct haptic pattern and a short
 chime through the audio session (`Haptics`).
@@ -499,7 +499,7 @@ availability and audio paused by iOS. It is resolved through one ordered
 list of rules, most urgent first. The views render only this value, so the
 orb, the status line and the buttons cannot disagree. *Speaking* is held
 for 800 ms across playback gaps (`SpeakingHold`), and a flush or Stop drops
-it at once. Mute is not an orb state while the dog is speaking or thinking.
+it at once. Mute is not an orb state while the voice is speaking or thinking.
 Instead the orb wears a small red mic badge. `capturing` is derived from
 the same value: the microphone runs only in states where something can
 hear it.
@@ -523,7 +523,7 @@ Daemon screen and cannot be closed until an address is in.
 
 ## Empty and error states
 
-`FlockPaneState` (SheepdogKit, tested) decides what an empty Flock pane
+`FlockPaneState` (SheepdogKit, tested) decides what an empty Agents pane
 says from the connection chip: connecting, reconnecting, no agents, not
 connected, daemon unreachable, token refused, update needed. `StateViews`
 shows each as a `ContentUnavailableView` with one action. Agents already on

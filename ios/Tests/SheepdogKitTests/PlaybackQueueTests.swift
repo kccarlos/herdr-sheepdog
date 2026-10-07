@@ -348,7 +348,7 @@ final class PlaybackQueueAdaptiveTests: XCTestCase {
         sim.arrive(80, atMilliseconds: 20)
         XCTAssertEqual(sim.queue.phase, .playing)
         // Playhead ends at 0.18 s. Say nothing for 5 s — an ordinary pause
-        // between the dog's sentences, not a network stall.
+        // between the voice's sentences, not a network stall.
         sim.idle(toMilliseconds: 5_160)
         XCTAssertEqual(sim.queue.phase, .idle)
         XCTAssertEqual(sim.queue.underruns, 0, "a long, ordinary silence between utterances must never count as an underrun")

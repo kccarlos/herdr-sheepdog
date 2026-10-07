@@ -19,7 +19,7 @@ public enum SessionState: String, Equatable, Sendable, CaseIterable {
     case stalled
     /// The dog is talking.
     case speaking
-    /// A tool call is in flight; the dog is working something out.
+    /// A tool call is in flight; the voice is working something out.
     case thinking
     /// The microphone could not be used: permission denied, or it would
     /// not start (another app holding it). The dog can still talk.
@@ -96,7 +96,7 @@ public enum SessionState: String, Equatable, Sendable, CaseIterable {
     }
 
     /// Whether the orb wears the small red slashed-mic badge: the mic is
-    /// muted while the orb shows something other than "Muted" — the dog
+    /// muted while the orb shows something other than "Muted" — the voice
     /// talking or thinking, which outrank mute. The mute button stays the
     /// source of truth; this only keeps the orb honest about it.
     public static func showsMuteBadge(_ state: SessionState, muted: Bool) -> Bool {
@@ -153,7 +153,7 @@ public enum SessionState: String, Equatable, Sendable, CaseIterable {
 /// Hysteresis on "speaking": once audio has played, the orb keeps saying
 /// so for `holdSeconds` across a playback gap, so a brief underrun (or the
 /// pause between two chunks of one reply) never flips the orb to whatever
-/// ranks below speaking — "Muted", when the user muted while the dog
+/// ranks below speaking — "Muted", when the user muted while the voice
 /// talked. A flush or Stop is not a gap: `reset` drops the hold at once.
 public struct SpeakingHold: Equatable, Sendable {
     public static let defaultHold: TimeInterval = 0.8

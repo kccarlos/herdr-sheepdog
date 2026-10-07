@@ -79,7 +79,7 @@ public struct SessionCore: Equatable, Sendable {
         /// The microphone was denied or would not start this session: the
         /// orb says "No microphone" instead of pretending to listen.
         public var unavailable = false
-        /// The app's speech detector is open — it hears the shepherd — as
+        /// The app's speech detector is open — it hears the user — as
         /// last told to the daemon (`{"type":"speaking"}`). Opens with the
         /// gate on speech (or a hold), closes with it, and is never open
         /// while muted or without a running microphone.
@@ -325,7 +325,7 @@ public struct SessionCore: Equatable, Sendable {
                 derive = false
                 break
             }
-            // Talking over the dog stops it.
+            // Talking over the voice stops it.
             let state = sessionState
             if playback.speaking || state == .speaking || state == .thinking || state == .stalled {
                 stop(&effects)
@@ -576,7 +576,7 @@ public struct SessionCore: Equatable, Sendable {
         effects.append(.haptic(.tap))
     }
 
-    /// The Stop button (and a hold that talks over the dog): silence now,
+    /// The Stop button (and a hold that talks over the voice): silence now,
     /// and ask the daemon to cancel. It answers with a `flush`.
     private mutating func stop(_ effects: inout [SessionEffect]) {
         effects.append(contentsOf: [.flushPlayback, .flushTranscript, .send(.cancel)])
@@ -608,7 +608,7 @@ public struct SessionCore: Equatable, Sendable {
     }
 
     /// The engine runs whenever the voice session is up — muted or not,
-    /// since it also plays what the dog says. Mute only gates capture. The
+    /// since it also plays what the voice says. Mute only gates capture. The
     /// caller skips the effect when the engine already runs.
     private func startAudioIfNeeded(_ effects: inout [SessionEffect]) {
         guard AudioLifecycle.engineShouldRun(socketOpen: connection.socket == .open, voice: voice.status, suspended: suspension.backgroundSuspended) else { return }

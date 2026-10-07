@@ -43,7 +43,7 @@
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Sheepdog talks to the sheepdog daemon running on your Mac, over your local network or Tailscale.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Sheepdog uses the microphone so you can talk to your flock of coding agents. Audio goes only to the sheepdog daemon you point the app at.</string>
+	<string>Sheepdog uses the microphone so you can talk to your coding agents. Audio goes only to the sheepdog daemon you point the app at.</string>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
 	<key>SheepdogPushEnvironment</key>

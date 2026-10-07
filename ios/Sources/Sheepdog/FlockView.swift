@@ -1,9 +1,9 @@
 import SheepdogKit
 import SwiftUI
 
-/// The Flock pane: one card per agent with everything the daemon knows
+/// The Agents pane: one card per agent with everything the daemon knows
 /// about it — state and how long, the task, the question it is waiting on
-/// (answerable right here), the last result as the shepherd heard it, and
+/// (answerable right here), the last result as the user heard it, and
 /// what the worker itself last wrote. Mirrors `/api/state`'s agents (the
 /// same list as `/api/agents`), refreshed over `/events`.
 struct FlockView: View {

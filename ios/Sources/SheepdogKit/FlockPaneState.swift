@@ -1,6 +1,6 @@
 import Foundation
 
-/// What the Flock pane shows when it has nothing to list, and why. Pure, so
+/// What the Agents pane shows when it has nothing to list, and why. Pure, so
 /// the rule is unit-tested: an empty list means different things depending
 /// on whether the daemon is reachable.
 ///

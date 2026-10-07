@@ -1,7 +1,7 @@
 import SheepdogKit
 import SwiftUI
 
-/// The flock, one chip per agent: alias, a state dot, and the pending
+/// The agents: one chip per agent: alias, a state dot, and the pending
 /// question or the last result underneath. Tapping one opens its agent
 /// window.
 struct AgentStrip: View {
@@ -16,7 +16,7 @@ struct AgentStrip: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 10) {
                     ForEach(agents) { agent in
-                        // The same agent window a Flock card opens.
+                        // The same agent window an Agents card opens.
                         NavigationLink(value: AgentWindowRoute(paneID: agent.paneID)) {
                             AgentChip(agent: agent, subtitle: agent.chipSubtitle(pending: pending))
                         }
@@ -84,7 +84,7 @@ struct EmptyFlock: View {
         HStack(spacing: 10) {
             Image(systemName: "pawprint")
                 .foregroundStyle(.secondary)
-            Text("No agents in the flock yet — start one in herdr.")
+            Text("No agents yet — start one in herdr.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
             Spacer(minLength: 0)

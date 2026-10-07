@@ -144,7 +144,7 @@ extension Bundle {
 }
 
 /// Settings ▸ About: whether the system echo canceller can hear what the
-/// dog plays on the current route — the thing to check when the dog
+/// voice plays on the current route — the thing to check when the voice
 /// answers itself from the speaker.
 struct EchoCancellationRow: View {
     let status: VoiceProcessingStatus

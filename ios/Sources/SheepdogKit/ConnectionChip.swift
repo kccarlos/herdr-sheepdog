@@ -3,7 +3,7 @@ import Foundation
 /// What the top-left chip shows: the health of the connection to the
 /// daemon itself — the `/ws` socket, the `/events` stream, and whether the
 /// token was accepted — never the *voice* state. Those are different
-/// questions ("is the phone talking to the Mac at all" vs. "can the dog
+/// questions ("is the phone talking to the Mac at all" vs. "can the voice
 /// hear me right now"), and conflating them is what made the old dot read
 /// grey (disconnected-looking) while happily connected and just quiet.
 public struct ConnectionChip: Equatable, Sendable {

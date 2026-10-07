@@ -1,8 +1,8 @@
 import SheepdogKit
 import SwiftUI
 
-/// Settings ▸ Models: which model the dog talks with (the voice provider)
-/// and which one thinks for it (the brain). Pushed from Settings rather
+/// Settings ▸ Models: which model the voice talks with (the voice provider)
+/// and which one thinks for it (the orchestrator). Pushed from Settings rather
 /// than living in its form, because every choice here applies at once on
 /// the daemon.
 struct ModelsView: View {
@@ -95,14 +95,14 @@ struct ModelsView: View {
         guard let list = model.voiceProviders, !list.providers.isEmpty else {
             return "This daemon offers one voice; there is nothing to switch."
         }
-        var text = "Which model \(model.voiceName) talks with. The daemon switches the live session at once; the conversation and the flock carry over."
+        var text = "Which model \(model.voiceName) talks with. The daemon switches the live session at once; the conversation and your agents carry over."
         if list.providers.contains(where: { $0.billedPerMinute }) {
             text += " GPT-Live is billed per minute of open session, whether anyone is talking or not — End the session when you are done."
         }
         return text
     }
 
-    // MARK: - Brain
+    // MARK: - Orchestrator
 
     @ViewBuilder
     private var brainSection: some View {
@@ -118,7 +118,7 @@ struct ModelsView: View {
                             if let first = catalog.defaultModelForSwitch {
                                 model.selectBrain(provider: provider, model: first)
                             } else {
-                                model.brainError = "No model list for \(provider)" + (catalog.error.map { ": \($0)" } ?? "") + " — the brain was left as it is."
+                                model.brainError = "No model list for \(provider)" + (catalog.error.map { ": \($0)" } ?? "") + " — the orchestrator was left as it is."
                             }
                         }
                     }
@@ -144,7 +144,7 @@ struct ModelsView: View {
                     Text("Model list not fresh: \(error)").font(.caption).foregroundStyle(.secondary)
                 }
             } else if let brain = model.brain?.display {
-                LabeledContent("Brain", value: brain)
+                LabeledContent("Orchestrator", value: brain)
             } else {
                 Text("Loading…").foregroundStyle(.secondary)
             }
@@ -155,9 +155,9 @@ struct ModelsView: View {
                 Text(error).font(.caption).foregroundStyle(Color(.systemRed))
             }
         } header: {
-            Text("Brain")
+            Text("Orchestrator")
         } footer: {
-            Text("The model that decides what \(model.voiceName) says and does. Takes effect on the brain's next turn; the daemon keeps the choice across restarts.")
+            Text("The model that decides what \(model.voiceName) says and does. Takes effect on the orchestrator's next turn; the daemon keeps the choice across restarts.")
         }
     }
 }

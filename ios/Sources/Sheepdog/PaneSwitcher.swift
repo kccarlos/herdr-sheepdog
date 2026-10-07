@@ -3,18 +3,18 @@ import SwiftUI
 /// The three panes of the main screen.
 enum MainPane: String, CaseIterable, Identifiable {
     case conversation = "Conversation"
-    case flock = "Flock"
+    case flock = "Agents"
     var id: String { rawValue }
 }
 
 /// Conversation / Flock. A segmented look, but built from buttons
-/// so the Flock pane can carry an amber badge for the agents waiting on you
+/// so the Agents pane can carry an amber badge for the agents waiting on you
 /// (a segmented `Picker` draws its segments itself, in one colour); at the
 /// accessibility text sizes, where the segments no longer fit, a menu. Health
 /// is not a pane: it lives behind the connection chip and in Settings.
 struct PaneSwitcher: View {
     @Binding var pane: MainPane
-    /// Agents waiting on the shepherd (blocked): the amber badge.
+    /// Agents waiting on the user (blocked): the amber badge.
     let waiting: Int
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -53,7 +53,7 @@ struct PaneSwitcher: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel(accessibilityLabel(for: option))
                 .accessibilityAddTraits(pane == option ? .isSelected : [])
-                .accessibilityIdentifier("main.pane.\(option.rawValue.lowercased())")
+                .accessibilityIdentifier("main.pane.\(option)")
             }
         }
         .padding(3)
@@ -68,7 +68,7 @@ struct PaneSwitcher: View {
                 } label: {
                     Text(accessibilityLabel(for: option))
                 }
-                .accessibilityIdentifier("main.pane.\(option.rawValue.lowercased())")
+                .accessibilityIdentifier("main.pane.\(option)")
             }
         } label: {
             HStack(spacing: 8) {
@@ -102,7 +102,7 @@ struct PaneSwitcher: View {
     private func accessibilityLabel(for option: MainPane) -> String {
         switch option {
         case .conversation: return "Conversation"
-        case .flock: return waiting == 0 ? "Flock" : "Flock, \(waiting) waiting on you"
+        case .flock: return waiting == 0 ? "Agents" : "Agents, \(waiting) waiting on you"
         }
     }
 }

@@ -2,7 +2,7 @@ import Foundation
 
 /// One blocked agent, shown once. While a question is pinned on the
 /// approval card, the conversation's own copies of it — the approval item,
-/// the push that announced it, and the dog's sentence restating it — fold
+/// the push that announced it, and the voice's sentence restating it — fold
 /// to a one-line pointer to the card, so a single question no longer fills
 /// the screen four times over (review B1). Pure: the rows go back to full
 /// size the moment the card settles.
@@ -21,7 +21,7 @@ public enum QuestionFocus {
         }
 
         // Where the question starts: its approval item, else (history not
-        // synced yet) after the shepherd last spoke.
+        // synced yet) after the user last spoke.
         let approvalIndex = rows.lastIndex { row in
             if case let .item(item) = row { return item.kind == .approval && item.pendingID == pending.id }
             return false
@@ -59,7 +59,7 @@ public enum QuestionFocus {
                         foldedDog = true
                     }
                 case .shepherd:
-                    // The shepherd answered or moved on: what follows is a
+                    // The user answered or moved on: what follows is a
                     // new exchange.
                     if index > (approvalIndex ?? start) { return ids }
                 default:

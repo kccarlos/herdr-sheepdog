@@ -8,7 +8,7 @@ import XCTest
 ///     xcodebuild … test -only-testing:SheepdogUITests/AgentScreenUITests \
 ///       TEST_RUNNER_SHEEPDOG_SHOTS=light TEST_RUNNER_SHEEPDOG_FIXTURE_PUSH_PORT=7797
 ///
-/// Opens an agent from its Flock card, checks the screen text arrives,
+/// Opens an agent from its Agents card, checks the screen text arrives,
 /// sends Enter and a prompt, confirms Ctrl-C asks first, and saves
 /// `review-<prefix>-agent-screen*.png` to the runner's Documents. Not in CI.
 final class AgentScreenUITests: XCTestCase {

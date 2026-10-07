@@ -8,17 +8,17 @@
 # Sheepdog for iOS
 
 A phone front end for the [herdr-sheepdog](https://github.com/kccarlos/herdr-sheepdog)
-daemon: talk to **Sheepdog**, the dog, and watch and answer the **flock** of
-coding agents it is herding, from anywhere on your own network.
+daemon: talk to **Sheepdog**, the voice, and watch and answer your **agents**, the
+coding agents it works with, from anywhere on your own network.
 
 The daemon owns the model session. This app is the microphone, the speaker
 and the screen. It speaks the daemon's `/ws` protocol the way the browser
 page at `/voice` does (`docs/ws-contract.md` in the daemon repository):
 PCM16 mono, 16 kHz up, 24 kHz down, plus a few JSON control frames.
 
-| The conversation | An approval | The flock | Settings ▸ Models |
+| The conversation | An approval | Agents | Settings ▸ Models |
 |---|---|---|---|
-| ![Conversation and voice bar](docs/screenshots/review-light-voicebar-live.png) | ![Approval card](docs/screenshots/review-light-conversation-approval.png) | ![Flock pane](docs/screenshots/review-light-flock.png) | ![Models](docs/screenshots/review-light-models.png) |
+| ![Conversation and voice bar](docs/screenshots/review-light-voicebar-live.png) | ![Approval card](docs/screenshots/review-light-conversation-approval.png) | ![Agents pane](docs/screenshots/review-light-flock.png) | ![Models](docs/screenshots/review-light-models.png) |
 
 ## Quick start
 
@@ -53,9 +53,9 @@ Tailscale.
 
 ## What it does
 
-- **Voice.** You hold a conversation with the dog. A voice-activity
+- **Voice.** You hold a conversation with the voice. A voice-activity
   detector sends audio only while you are speaking, echo cancellation stops
-  the dog from hearing itself, and playback adapts to bursty audio. Mute
+  the voice from hearing itself, and playback adapts to bursty audio. Mute
   turns off only the microphone. **Hold to talk** is an option.
 - **Approvals.** When a worker stops at a prompt, a card shows who is
   asking, the command and one button per option. You can tap an answer or
@@ -63,14 +63,14 @@ Tailscale.
 - **Notifications.** When an agent needs you, a time-sensitive APNs
   notification arrives even if the app is closed. You can answer an
   approval from it with **Approve** or **Decline** (both need the
-  passcode). Tapping it opens that agent's Flock card.
-- **Conversation / Flock.** The conversation includes its history
-  from the daemon and is cached on the phone. Flock lists the running
+  passcode). Tapping it opens that agent's Agents card.
+- **Conversation / Agents.** The conversation includes its history
+  from the daemon and is cached on the phone. Agents lists the running
   agents (the others are folded into "Not running (N)") and shows an amber
   count of the agents waiting on you. Tapping an agent in the strip opens
-  its window. Health (daemon, voice, brain, recent problems) is behind the
+  its window. Health (daemon, voice, orchestrator, recent problems) is behind the
   connection chip and under Settings ▸ Diagnostics. Tasks, questions and replies render markdown.
-- **Settings ▸ Models.** Choose the voice provider and the brain's provider
+- **Settings ▸ Models.** Choose the voice provider and the orchestrator's provider
   and model. Changes apply on the daemon at once.
 - **Typing.** Use "Type instead" when you cannot talk. ⋯ ▸ **New
   conversation** resets the short-term context without losing the

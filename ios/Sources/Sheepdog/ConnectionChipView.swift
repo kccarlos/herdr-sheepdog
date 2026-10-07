@@ -120,7 +120,7 @@ private struct ConnectionDetailView: View {
                             .accessibilityIdentifier("chip.voiceProvider")
                     }
                     if let brain = model.brain?.display {
-                        LabeledContent("Brain", value: brain)
+                        LabeledContent("Orchestrator", value: brain)
                             .accessibilityIdentifier("chip.brain")
                     }
                 }

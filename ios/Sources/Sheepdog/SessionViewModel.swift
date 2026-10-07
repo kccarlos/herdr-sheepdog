@@ -57,7 +57,7 @@ final class SessionViewModel: ObservableObject {
     var flock: Flock { Flock(agents) }
     /// Which pane the main screen shows; a notification tap switches it.
     @Published var pane: MainPane = .conversation
-    /// The agent the Flock pane should scroll to (a notification tap).
+    /// The agent the Agents pane should scroll to (a notification tap).
     @Published var focusedAgentPaneID: String?
     @Published private(set) var pendingAction: PendingAction?
     /// Four sources feed `resolvedVoiceProvider`; each tells the audio
@@ -85,7 +85,7 @@ final class SessionViewModel: ObservableObject {
     @Published private(set) var agentScreenPush: AgentScreenPush?
     /// The agent window over `/ws`: one subscription for the app.
     private var screenStream = AgentScreenStream()
-    /// The supervisor's model, from `/api/state`'s `brain`, when the
+    /// The orchestrator's model, from `/api/state`'s `brain`, when the
     /// daemon reports one.
     @Published private(set) var brain: BrainInfo?
     /// Whether the ⋯ menu offers "New conversation" — learned from the
@@ -105,12 +105,12 @@ final class SessionViewModel: ObservableObject {
     /// Uptime, GPT-Live's billed seconds and the recent problems.
     @Published private(set) var health = DaemonHealth()
     @Published private(set) var loadingHealth = false
-    /// The brain's catalog and choice; nil until loaded, and on a daemon
+    /// The orchestrator's catalog and choice; nil until loaded, and on a daemon
     /// without the route.
     @Published private(set) var brainModels: BrainModels?
     @Published private(set) var switchingBrain = false
     @Published var brainError: String?
-    /// The push chattiness; nil until loaded, and without a supervisor.
+    /// The push chattiness; nil until loaded, and without an orchestrator.
     @Published private(set) var daemonSettings: DaemonSettings?
     @Published var settingsError: String?
 
@@ -157,7 +157,7 @@ final class SessionViewModel: ObservableObject {
         showSettings = true
     }
 
-    /// "Gemini · gemini-3.5-flash": the brain as the catalog names it, else
+    /// "Gemini · gemini-3.5-flash": the orchestrator as the catalog names it, else
     /// as `/api/state` reports it.
     var brainDisplay: String? {
         if let models = brainModels, !models.model.isEmpty {
@@ -230,7 +230,7 @@ final class SessionViewModel: ObservableObject {
     let away = AwayControls()
     private var reducer = ConversationReducer()
     private var history = ConversationHistory()
-    /// The brain's replies and held pushes, which the history does not carry.
+    /// The orchestrator's replies and held pushes, which the history does not carry.
     private var activity = BrainActivity()
     /// `approval` (the one thing the views read) is derived from this on
     /// every mutation — a single `didSet`, not a copy hand-written at each
@@ -433,7 +433,7 @@ final class SessionViewModel: ObservableObject {
         send(.talkModeChanged(mode))
     }
 
-    /// The orb went down in hold-to-talk. Talking over the dog stops it.
+    /// The orb went down in hold-to-talk. Talking over the voice stops it.
     func pressToTalk() {
         let wasHolding = core.mic.holding
         send(.holdBegan)
@@ -453,7 +453,7 @@ final class SessionViewModel: ObservableObject {
 
     // MARK: - Coach mark and the microphone-mode tip
 
-    /// Once per install, the first time the dog is actually listening:
+    /// Once per install, the first time the voice is actually listening:
     /// "just talk". After that (the next time), the Voice Isolation tip.
     private func offerListeningHints() {
         guard core.mic.talkMode == .openMic, VoiceBarModel.isListening(state), core.connection.wantsConnection else { return }
@@ -603,7 +603,7 @@ final class SessionViewModel: ObservableObject {
             self?.send(.playbackChanged(speaking: speaking))
         }
         // What the player did, straight to the daemon (like the frames):
-        // "speaking" on the daemon means the shepherd still hears it.
+        // "speaking" on the daemon means the user still hears it.
         audio.onPlaybackReport = { [weak self] report in
             self?.socket.send(report.message)
         }
@@ -1144,7 +1144,7 @@ final class SessionViewModel: ObservableObject {
         }
     }
 
-    /// The brain's recent replies and the held pushes from the daemon's
+    /// The orchestrator's recent replies and the held pushes from the daemon's
     /// current run (`GET /api/events`, prefix-filtered), for what the
     /// stream did not bring this time: a relaunch, or events before the
     /// stream's resume point. Quiet on failure — the stream still folds
@@ -1237,7 +1237,7 @@ final class SessionViewModel: ObservableObject {
         }
     }
 
-    /// The brain picker: provider and model for the brain's next turn.
+    /// The orchestrator picker: provider and model for the orchestrator's next turn.
     func selectBrain(provider: String?, model: String) {
         guard !switchingBrain else { return }
         switchingBrain = true
@@ -1262,7 +1262,7 @@ final class SessionViewModel: ObservableObject {
             daemonSettings = try await client.settings()
             settingsError = nil
         } catch let error as DaemonError {
-            // No supervisor is a 503: hide the control, say why.
+            // No orchestrator is a 503: hide the control, say why.
             daemonSettings = nil
             settingsError = error.message
         } catch {
@@ -1313,7 +1313,7 @@ final class SessionViewModel: ObservableObject {
 
     /// The text field under the conversation: says `text` as if spoken,
     /// through `POST /api/inject/utterance`, which records it as typed
-    /// shepherd input (the rail takes it like a transcript). The
+    /// user input (the rail takes it like a transcript). The
     /// conversation shows it from `/events` (or the next history sync when
     /// not connected). Returns true when the daemon took it.
     func sendTyped(_ text: String) async -> Bool {
@@ -1382,7 +1382,7 @@ final class SessionViewModel: ObservableObject {
 
     /// The ⋯ menu's "New conversation", after the confirmation dialog.
     /// Unlike `clearConversation()` this keeps the scrollback — it only
-    /// resets the supervisor's and the voice model's short-term context on
+    /// resets the orchestrator's and the voice model's short-term context on
     /// the daemon, which then logs a `subkind: reset` notice we pick up
     /// the normal way (live, from `/events`, or from the next history
     /// sync), the same as any other notice.
@@ -1476,7 +1476,7 @@ final class SessionViewModel: ObservableObject {
         }
     }
 
-    /// The shepherd tapped an option on the approval card.
+    /// The user tapped an option on the approval card.
     func answer(option index: Int) {
         guard let pendingID = approvalFlow.card?.pending.id, let option = approvalFlow.tap(index: index) else { return }
         Haptics.tap()
@@ -1632,7 +1632,7 @@ extension SessionViewModel.Banner {
         case .microphoneDenied:
             self.init(tone: .warning, message: AudioEngine.Failure.microphoneDenied.errorDescription ?? "", hint: nil, retryTitle: nil)
         case let .microphoneFailed(message):
-            self.init(tone: .warning, message: message, hint: "Status and what the dog says still work without it.", retryTitle: nil)
+            self.init(tone: .warning, message: message, hint: "Status and what the voice says still work without it.", retryTitle: nil)
         case let .daemonSaid(text):
             self.init(tone: .warning, message: "The daemon said: \(text)", hint: nil, retryTitle: nil)
         case let .protocolMismatch(text):

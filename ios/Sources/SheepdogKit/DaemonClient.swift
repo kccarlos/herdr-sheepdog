@@ -232,7 +232,7 @@ public final class DaemonClient: @unchecked Sendable {
     }
 
     /// `POST /api/pending/answer {id, option}` — answers the open question
-    /// with the option the shepherd tapped (its 1-based `index`). Returns
+    /// with the option the user tapped (its 1-based `index`). Returns
     /// the daemon's `spoken` line ("Told auth Yes, proceed."). A question
     /// that is no longer open throws `.pendingGone`.
     public func answerPending(id: String, option: Int) async throws -> String {
@@ -339,8 +339,8 @@ public final class DaemonClient: @unchecked Sendable {
         return events
     }
 
-    /// `POST /api/inject/utterance {"text": …}` — what the shepherd typed,
-    /// as if spoken. The daemon records it as typed shepherd input first
+    /// `POST /api/inject/utterance {"text": …}` — what the user typed,
+    /// as if spoken. The daemon records it as typed user input first
     /// (so the one rail accepts it like a transcript), then hands it to the
     /// voice session, or with `--voice=off` to its text router, which
     /// answers in the reply. A text nothing can route is a 422 with the
@@ -361,24 +361,24 @@ public final class DaemonClient: @unchecked Sendable {
         }
     }
 
-    /// `GET /api/brain/models[?provider=]` — the brain's model catalog and
+    /// `GET /api/brain/models[?provider=]` — the orchestrator's model catalog and
     /// current choice. `nil` on a daemon without the route (404); a daemon
-    /// whose brain is off answers 503 with the reason, thrown as
+    /// whose orchestrator is off answers 503 with the reason, thrown as
     /// `.rejected`.
     public func brainModels(provider: String? = nil) async throws -> BrainModels? {
         var query: [URLQueryItem] = []
         if let provider, !provider.isEmpty { query.append(URLQueryItem(name: "provider", value: provider)) }
-        return try await sendJSON(BrainModels.self, path: "/api/brain/models", query: query, what: "the brain's model list")
+        return try await sendJSON(BrainModels.self, path: "/api/brain/models", query: query, what: "the orchestrator's model list")
     }
 
-    /// `PUT /api/brain/model {"provider", "model"}` — switches the brain
+    /// `PUT /api/brain/model {"provider", "model"}` — switches the orchestrator
     /// for its next turn; the daemon keeps the choice across restarts.
     public func setBrainModel(provider: String?, model: String) async throws -> BrainModels {
         var body: [String: String] = ["model": model]
         if let provider, !provider.isEmpty { body["provider"] = provider }
         let data = try JSONSerialization.data(withJSONObject: body)
-        guard let models = try await sendJSON(BrainModels.self, path: "/api/brain/model", method: "PUT", body: data, what: "the brain model reply") else {
-            throw DaemonError.rejected(status: 404, message: "this daemon cannot switch the brain's model")
+        guard let models = try await sendJSON(BrainModels.self, path: "/api/brain/model", method: "PUT", body: data, what: "the orchestrator model reply") else {
+            throw DaemonError.rejected(status: 404, message: "this daemon cannot switch the orchestrator's model")
         }
         return models
     }

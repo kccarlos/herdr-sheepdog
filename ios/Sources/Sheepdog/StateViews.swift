@@ -1,7 +1,7 @@
 import SheepdogKit
 import SwiftUI
 
-/// The Flock pane with nothing to list: one `ContentUnavailableView` per
+/// The Agents pane with nothing to list: one `ContentUnavailableView` per
 /// reason, each with the one action that helps.
 struct FlockUnavailableView: View {
     let state: FlockPaneState
@@ -73,7 +73,7 @@ struct FlockUnavailableView: View {
     }
 }
 
-/// An agent window whose agent is no longer in the flock.
+/// An agent window whose agent is no longer listed.
 struct AgentGoneView: View {
     @Environment(\.dismiss) private var dismiss
 
@@ -83,7 +83,7 @@ struct AgentGoneView: View {
         } description: {
             Text("Its pane closed or herdr no longer reports it.")
         } actions: {
-            Button("Back to the flock") { dismiss() }
+            Button("Back to the agents") { dismiss() }
                 .accessibilityIdentifier("agentGone.back")
         }
     }

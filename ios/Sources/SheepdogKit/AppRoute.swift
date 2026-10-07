@@ -8,9 +8,9 @@ import Foundation
 /// one parser and one router.
 ///
 /// - `sheepdog://talk` — open the app and start the voice session
-/// - `sheepdog://agent/<pane id>` — open that agent's Flock card
+/// - `sheepdog://agent/<pane id>` — open that agent's Agents card
 /// - `sheepdog://mute?on=true|false`, `sheepdog://mute` (toggle)
-/// - `sheepdog://stop` — the Stop button: silence the dog now
+/// - `sheepdog://stop` — the Stop button: silence the voice now
 /// - `sheepdog://end` — end the voice session
 public enum AppRoute: Equatable, Sendable {
     case talk
@@ -93,7 +93,7 @@ public enum AppRoute: Equatable, Sendable {
     public func actions(wantsConnection: Bool, muted: Bool) -> [Action] {
         switch self {
         case .talk:
-            // "Talk to Sheepdog" means the shepherd wants to be heard: start
+            // "Talk to Sheepdog" means the user wants to be heard: start
             // the session, or unmute the one that runs.
             if !wantsConnection { return [.showConversation, .connect] }
             return muted ? [.showConversation, .toggleMute] : [.showConversation]

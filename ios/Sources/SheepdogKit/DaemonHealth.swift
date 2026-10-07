@@ -21,7 +21,7 @@ public struct DaemonHealth: Equatable, Sendable {
         public var ts: Date
         public var type: String
         public var severity: Severity
-        /// "Brain fell back: timeout".
+        /// "Orchestrator fell back: timeout".
         public var title: String
         /// One line of detail, or nil.
         public var detail: String?
@@ -146,11 +146,11 @@ public struct DaemonHealth: Equatable, Sendable {
         switch event.type {
         case "brain.fallback":
             severity = .error
-            title = "Brain fell back: \(text("reason") ?? "unknown reason")"
+            title = "Orchestrator fell back: \(text("reason") ?? "unknown reason")"
             detail = firstLine(text("error")) ?? text("kind").map { "during an \($0) turn" }
         case "brain.rate_limited":
             severity = .warning
-            title = "Brain rate-limited" + (text("model").map { " (\($0))" } ?? "")
+            title = "Orchestrator rate-limited" + (text("model").map { " (\($0))" } ?? "")
             var parts: [String] = []
             if let key = event.int("key_index"), let keys = event.int("keys") { parts.append("key \(key + 1) of \(keys)") }
             if let wait = event.int("retry_after_ms"), wait > 0 { parts.append("retry in \(seconds(wait))") }
@@ -169,7 +169,7 @@ public struct DaemonHealth: Equatable, Sendable {
             detail = text("text")
         case "supervisor.echo_dropped":
             severity = .info
-            title = "Echo dropped — the dog heard itself"
+            title = "Echo dropped — the voice heard itself"
             detail = text("heard").map { "heard “\($0)”" }
         case "web.audio_unheard":
             severity = .warning
@@ -198,7 +198,7 @@ public struct DaemonHealth: Equatable, Sendable {
     }
 }
 
-/// `GET /api/brain/models` and `PUT /api/brain/model`: the brain's current
+/// `GET /api/brain/models` and `PUT /api/brain/model`: the orchestrator's current
 /// provider and model, the providers to choose from, and the model catalog
 /// of `modelsProvider`. A discovery failure is not an HTTP error: `error`
 /// says why the list is not fresh.
@@ -215,7 +215,7 @@ public struct BrainModels: Codable, Equatable, Sendable {
     public struct Model: Codable, Equatable, Identifiable, Sendable {
         public var name: String
         public var displayName: String?
-        /// A plausible brain model (a text model of a known family).
+        /// A plausible orchestrator model (a text model of a known family).
         public var recommended: Bool?
 
         public var id: String { name }
@@ -244,7 +244,7 @@ public struct BrainModels: Codable, Equatable, Sendable {
     /// Never the current model, which belongs to the provider being left
     /// (the reply's `provider`/`model` are still the current ones), and
     /// nil when the catalog is empty or could not be fetched — the caller
-    /// then leaves the brain alone rather than send a name the new
+    /// then leaves the orchestrator alone rather than send a name the new
     /// provider does not have.
     public var defaultModelForSwitch: String? {
         guard error?.isEmpty ?? true else { return nil }
@@ -263,7 +263,7 @@ public struct BrainModels: Codable, Equatable, Sendable {
 }
 
 /// `GET/PUT /api/settings`: the push chattiness and its levels, and the
-/// shepherd's language preference with the catalog to pick from (both
+/// user's language preference with the catalog to pick from (both
 /// `nil` from a daemon older than the language setting).
 public struct DaemonSettings: Codable, Equatable, Sendable {
     public var chattiness: String

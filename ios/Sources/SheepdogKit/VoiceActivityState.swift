@@ -19,7 +19,7 @@ public struct VoiceActivityState: Equatable, Sendable {
         case speaking
         /// A tool call is out, or the model has not answered yet.
         case thinking
-        /// The microphone is off; the dog can still talk.
+        /// The microphone is off; the voice can still talk.
         case muted
         /// Nothing can be heard right now: iOS paused the audio, there is
         /// no microphone, or the daemon has no voice session.
@@ -31,7 +31,7 @@ public struct VoiceActivityState: Equatable, Sendable {
     /// thinking outrank muted, and the activity still has to label its
     /// Mute button right.
     public var muted: Bool
-    /// Agents waiting on the shepherd (`Flock.waitingCount`).
+    /// Agents waiting on the user (`Flock.waitingCount`).
     public var waiting: Int
     /// The headline: "Listening", "Speaking", "Muted", "Reconnecting…".
     public var title: String

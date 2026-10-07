@@ -3,7 +3,7 @@ import CoreHaptics
 import UIKit
 
 /// The moments worth feeling: a session opening, something that needs a
-/// decision (and its answer landing), and stopping the dog mid-sentence.
+/// decision (and its answer landing), and stopping the voice mid-sentence.
 @MainActor
 enum Haptics {
     static func connected() {
@@ -11,7 +11,7 @@ enum Haptics {
     }
 
     /// A push arrived. Light whatever its urgency: the "needs you" cue
-    /// belongs to a new question with options, not to how loud the brain
+    /// belongs to a new question with options, not to how loud the orchestrator
     /// wanted a push to be (review A3).
     static func push() {
         UIImpactFeedbackGenerator(style: .light).impactOccurred()

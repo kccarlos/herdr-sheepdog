@@ -1,7 +1,7 @@
 import SheepdogKit
 import SwiftUI
 
-/// One screen: the flock across the top, the conversation (or the Flock
+/// One screen: the agents across the top, the conversation (or the Agents pane
 /// pane) in the middle, an optional text field, a status line and the
 /// compact voice bar (Mute, orb, End) at the bottom — everything in thumb
 /// reach.
@@ -65,7 +65,7 @@ struct MainView: View {
                 }
                 .frame(maxHeight: .infinity)
 
-                // On the Flock pane the question sits on its agent's card.
+                // On the Agents pane the question sits on its agent's card.
                 if model.pane != .flock, let card = model.approval {
                     PinnedApprovalCard(card: card) { index in
                         model.answer(option: index)
@@ -163,7 +163,7 @@ struct MainView: View {
                             }
                             .accessibilityIdentifier("toolbar.newConversation")
                         }
-                        // The orb stops the dog while it talks; this is the
+                        // The orb stops the voice while it talks; this is the
                         // same Stop, reachable whatever the orb is doing.
                         Button {
                             model.stop()
@@ -202,7 +202,7 @@ struct MainView: View {
                 Button("Start fresh") { model.startNewConversation() }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("Sheepdog and the brain forget this conversation; your agents, open questions and 'tell me when…' reminders stay.")
+                Text("Sheepdog and the orchestrator forget this conversation; your agents, open questions and 'tell me when…' reminders stay.")
             }
             .sheet(isPresented: $model.showSettings) {
                 SettingsView(meter: model.meter)
@@ -341,7 +341,7 @@ struct BannerView: View {
 
 /// Type instead of talking: one line to the daemon, as if spoken
 /// (`POST /api/inject/utterance`). What was typed shows up in the
-/// conversation like anything else the shepherd said.
+/// conversation like anything else the user said.
 struct TypeBar: View {
     let voiceName: String
     let sending: Bool

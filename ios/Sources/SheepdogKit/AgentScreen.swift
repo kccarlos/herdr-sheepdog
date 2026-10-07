@@ -37,7 +37,7 @@ public struct AgentScreen: Codable, Equatable, Sendable {
         self.unchanged = unchanged
     }
 
-    /// The name the shepherd hears, falling back to the alias.
+    /// The name the user hears, falling back to the alias.
     public var displayName: String {
         if let s = spoken?.trimmed, !s.isEmpty { return s }
         return alias

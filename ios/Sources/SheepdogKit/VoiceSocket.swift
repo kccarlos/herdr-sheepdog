@@ -58,7 +58,7 @@ public final class VoiceSocket {
     /// What the caller wants the daemon to believe on every (re)connection.
     public var muted = false
     public var gateClosed = false
-    /// The app's speech detector is open (it hears the shepherd).
+    /// The app's speech detector is open (it hears the user).
     public var speaking = false
     /// Counters copied onto the `ping`.
     public var gatedFrames = 0

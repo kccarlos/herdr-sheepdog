@@ -1,7 +1,7 @@
 import XCTest
 
 /// Health (from the connection chip's popover) against the fixture daemon (`--brain=fake --voice=off`):
-/// version, uptime, the brain picker from `GET /api/brain/models`, and
+/// version, uptime, the orchestrator picker from `GET /api/brain/models`, and
 /// chattiness changed through `PUT /api/settings` and read back from the
 /// daemon. Not in CI.
 final class HealthUITests: XCTestCase {
@@ -57,7 +57,7 @@ final class HealthUITests: XCTestCase {
         shot(app, "33-health-problems")
 
         // "Change in Settings ›" opens Settings straight on Models, where
-        // the brain picker from /api/brain/models now lives.
+        // the orchestrator picker from /api/brain/models now lives.
         list.swipeDown()
         list.swipeDown()
         let change = app.buttons["health.changeModels"]

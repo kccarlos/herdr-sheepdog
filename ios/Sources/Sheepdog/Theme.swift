@@ -23,7 +23,7 @@ enum Theme {
     static let done = Color("Done")
     static let idle = Color("Idle")
     static let unknown = Color("Unknown")
-    /// The orb's "thinking" purple, which is the brain's colour too.
+    /// The orb's "thinking" purple, which is the orchestrator's colour too.
     static let thinking = Color("Thinking")
 
     /// The state's colour for words ("Blocked · 4 min").

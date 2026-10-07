@@ -118,7 +118,7 @@ struct DaemonSettingsView: View {
     }
 }
 
-/// Settings > Voice: how you talk to the dog.
+/// Settings > Voice: how you talk to the voice.
 struct VoiceSettingsView: View {
     @EnvironmentObject private var model: SessionViewModel
     @State private var keepListening = true

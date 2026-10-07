@@ -1,7 +1,7 @@
 import SheepdogKit
 import SwiftUI
 
-/// Pushed from a Flock card or the agent strip: what an agent's
+/// Pushed from an Agents card or the agent strip: what an agent's
 /// navigation route carries. Only the pane id, so the window always shows
 /// the agent's current row.
 struct AgentWindowRoute: Hashable {
@@ -65,7 +65,7 @@ struct AgentScreenView: View {
 
     // MARK: - Header
 
-    /// The agent as the flock lists it now (the row the window was opened
+    /// The agent as the app lists it now (the row the window was opened
     /// from is a snapshot).
     private var live: Agent { model.flock.all.first { $0.paneID == agent.paneID } ?? agent }
 

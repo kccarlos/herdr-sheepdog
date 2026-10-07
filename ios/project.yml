@@ -108,7 +108,7 @@ targets:
             CFBundleURLSchemes:
               - sheepdog
         NSMicrophoneUsageDescription: >-
-          Sheepdog uses the microphone so you can talk to your flock of coding
+          Sheepdog uses the microphone so you can talk to your coding
           agents. Audio goes only to the sheepdog daemon you point the app at.
         NSLocalNetworkUsageDescription: >-
           Sheepdog talks to the sheepdog daemon running on your Mac, over your

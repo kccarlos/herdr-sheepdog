@@ -23,7 +23,7 @@ public struct Hello: Codable, Equatable, Sendable {
 
     public var name: String
     public var version: String
-    /// What the dog calls itself (the daemon's `voice.name`).
+    /// What the voice calls itself (the daemon's `voice.name`).
     public var voiceName: String?
     /// `"token"` or `"none"`.
     public var auth: String
@@ -64,7 +64,7 @@ public struct Hello: Codable, Equatable, Sendable {
     }
 }
 
-/// One agent of the flock, from `GET /api/state` (the same list as
+/// One agent, from `GET /api/state` (the same list as
 /// `GET /api/agents`).
 ///
 /// A lenient mirror of the daemon's `state.Agent`: only the fields the app
@@ -74,7 +74,7 @@ public struct Agent: Codable, Equatable, Identifiable, Sendable {
     public struct Block: Codable, Equatable, Sendable {
         public var question: String?
         public var seenAt: Date?
-        /// The question was answered (by tap, voice or the brain).
+        /// The question was answered (by tap, voice or the orchestrator).
         public var answered: Bool?
 
         enum CodingKeys: String, CodingKey {
@@ -89,8 +89,8 @@ public struct Agent: Codable, Equatable, Identifiable, Sendable {
         }
     }
 
-    /// `state.Result`: what the agent last finished, as the shepherd heard
-    /// it — the announcement (`spoken`) and the brain's detail for it.
+    /// `state.Result`: what the agent last finished, as the user heard
+    /// it — the announcement (`spoken`) and the orchestrator's detail for it.
     public struct Result: Codable, Equatable, Sendable {
         public var spoken: String?
         public var detail: String?
@@ -159,7 +159,7 @@ public struct Agent: Codable, Equatable, Identifiable, Sendable {
     public var journal: [JournalEntry]?
     /// Injected by the debug page rather than seen through herdr.
     public var synthetic: Bool?
-    /// The name the shepherd hears (the daemon's spoken name); older
+    /// The name the user hears (the daemon's spoken name); older
     /// daemons omit it.
     public var spoken: String?
 
@@ -365,7 +365,7 @@ public struct PendingAction: Codable, Equatable, Sendable {
         command = try c.decodeIfPresent(String.self, forKey: .command)
     }
 
-    /// A worker's approval prompt the shepherd can answer by tap.
+    /// A worker's approval prompt the user can answer by tap.
     public var isAnswerPrompt: Bool { kind == "answer_prompt" && !(options ?? []).isEmpty }
 
     /// What the card says, in plain words.
@@ -388,7 +388,7 @@ public struct PendingAction: Codable, Equatable, Sendable {
     }
 }
 
-/// The supervisor's model, from `/api/state`'s `brain`, when the daemon
+/// The orchestrator's model, from `/api/state`'s `brain`, when the daemon
 /// sends one. Optional throughout: an older daemon simply omits the key.
 public struct BrainInfo: Codable, Equatable, Sendable {
     public var provider: String?
@@ -406,7 +406,7 @@ public struct BrainInfo: Codable, Equatable, Sendable {
     }
 }
 
-/// `POST /api/conversation/reset {"via": "app"}` — forgets the supervisor's
+/// `POST /api/conversation/reset {"via": "app"}` — forgets the orchestrator's
 /// and the voice model's short-term conversation; the roster, open
 /// approvals, promises and notes, and the scrollback itself, are kept (see
 /// docs/architecture.md "New conversation"). `DaemonClient.resetConversation`
@@ -497,7 +497,7 @@ public struct DaemonState: Codable, Equatable, Sendable {
     public var voice: VoiceInfo
     public var herdr: String?
     public var version: String?
-    /// The supervisor's current model, when the daemon reports one.
+    /// The orchestrator's current model, when the daemon reports one.
     public var brain: BrainInfo?
     /// The live voice session's provider and model, when the daemon can
     /// switch provider (`GET /api/voice/providers`).

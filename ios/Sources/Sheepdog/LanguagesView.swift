@@ -2,7 +2,7 @@ import SheepdogKit
 import SwiftUI
 
 /// Settings ▸ Languages: the languages you speak, most preferred first.
-/// The daemon tells both brains (the voice and the supervisor) so they
+/// The daemon tells both the voice and the orchestrator so they
 /// answer in the language you use, in your script — 简体中文 and 繁體中文
 /// are separate entries. The list comes from the daemon: languages both
 /// voice providers support.
@@ -60,7 +60,7 @@ struct LanguagesView: View {
             Text("Your languages")
         } footer: {
             VStack(alignment: .leading, spacing: 6) {
-                Text("Most preferred first. Both brains are told, and answer in the language you use, in its script. Tap Edit to reorder or remove.")
+                Text("Most preferred first. The voice and the orchestrator are both told, and answer in the language you use, in its script. Tap Edit to reorder or remove.")
                 if let error = model.settingsError {
                     Text(error).foregroundStyle(Color(.systemRed))
                 }

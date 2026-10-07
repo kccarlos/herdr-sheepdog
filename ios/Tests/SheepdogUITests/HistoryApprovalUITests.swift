@@ -25,7 +25,7 @@ final class HistoryApprovalUITests: XCTestCase {
     }
 
     /// Runs even if the test fails partway through: `WalkthroughUITests`
-    /// needs a genuinely empty flock for its first screenshot, and this
+    /// needs a genuinely empty agent list for its first screenshot, and this
     /// test injects `p-billing` and never resolves it away (an approved
     /// answer_prompt still leaves the pane blocked on the daemon side).
     /// Removing it only defensively at the *next* run's start, as before,

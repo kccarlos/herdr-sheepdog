@@ -34,7 +34,7 @@ final class WalkthroughUITests: XCTestCase {
 
     func testWalkthrough() throws {
         // A previous run may have left a synthetic pane behind; the empty
-        // flock has to be genuinely empty for the first screenshot.
+        // The agent list has to be genuinely empty for the first screenshot.
         for pane in ["w1:p1", "w1:p2"] { _ = post("/api/inject/remove", ["pane_id": pane]) }
         let app = launch()
 
@@ -72,7 +72,7 @@ final class WalkthroughUITests: XCTestCase {
         tapWhenReady(app.buttons["controls.orb"], "Connect")
         XCTAssertTrue(app.staticTexts["Voice is off on the daemon"].waitForExistence(timeout: 15), "the orb must be honest about --voice=off")
         shot(app, "16-voicebar-connected-voice-off")
-        XCTAssertTrue(app.staticTexts["No agents in the flock yet — start one in herdr."].waitForExistence(timeout: 10), "connected, with an empty flock")
+        XCTAssertTrue(app.staticTexts["No agents yet — start one in herdr."].waitForExistence(timeout: 10), "connected, with no agents")
 
         // The chip's own sheet: address, round trip, daemon/voice info,
         // Reconnect and Open Settings.
@@ -99,7 +99,7 @@ final class WalkthroughUITests: XCTestCase {
         // Each bubble is one accessibility element, read as a sentence.
         guard let said = bubble(app, "bubble.shepherd") else {
             shot(app, "debug-before-utterance")
-            return XCTFail("the shepherd's words belong in the conversation")
+            return XCTFail("the user's words belong in the conversation")
         }
         XCTAssertTrue(said.label.hasSuffix("what's going on"), "got \(said.label)")
         guard let answered = bubble(app, "bubble.sheepdog") else {
@@ -108,7 +108,7 @@ final class WalkthroughUITests: XCTestCase {
         XCTAssertTrue(answered.label.contains("auth"), "got \(answered.label)")
         shot(app, "04-main-agents-conversation")
 
-        // 6. The strip opens the agent window (the same one a Flock card
+        // 6. The strip opens the agent window (the same one an Agents card
         //    opens): state, kind, workspace and the open question up top.
         tapWhenReady(chip, "the auth chip")
         if !app.navigationBars["auth"].waitForExistence(timeout: 10) {
@@ -125,7 +125,7 @@ final class WalkthroughUITests: XCTestCase {
         try inject("/api/inject/blocked", ["pane_id": "w1:p2", "alias": "docs", "kind": "claude", "screen": Fixtures.claudePermission])
         XCTAssertTrue(app.buttons["agent.chip.docs"].waitForExistence(timeout: 15))
         // Its pane closing is a push the daemon always makes (the code
-        // sentence, not a judgement the fake brain can dedupe away).
+        // sentence, not a judgement the fake orchestrator can dedupe away).
         try inject("/api/inject/remove", ["pane_id": "w1:p2"])
         // The newest push about docs (the fixture daemon's history may hold
         // older pushes about other agents).
@@ -248,7 +248,7 @@ final class WalkthroughUITests: XCTestCase {
     /// both — and by identifier, because a `.any` query over a growing
     /// conversation times out.
     /// `.firstMatch`, not the exact-one subscript: a push identifier can
-    /// legitimately match more than one bubble (e.g. the supervisor's own
+    /// legitimately match more than one bubble (e.g. the orchestrator's own
     /// "dropping the earlier question" notice alongside the one this step
     /// is looking for), and either reads fine for what the caller checks.
     private func bubble(_ app: XCUIApplication, _ identifier: String, timeout: TimeInterval = 15) -> XCUIElement? {

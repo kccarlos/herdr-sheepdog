@@ -1,7 +1,7 @@
 import XCTest
 @testable import SheepdogKit
 
-/// The flock as the daemon really sends it (`state.Agent`), the brain's
+/// The agents as the daemon really sends it (`state.Agent`), the orchestrator's
 /// replies and held pushes (`BrainActivity`), where they land in the
 /// timeline, and the two new client calls.
 final class FlockAndBrainTests: XCTestCase {
@@ -67,7 +67,7 @@ final class FlockAndBrainTests: XCTestCase {
         XCTAssertNil(Agent(paneID: "p", alias: "a", state: .idle).timeInState(at: since))
     }
 
-    // MARK: - Brain replies
+    // MARK: - Orchestrator replies
 
     func testAVoiceReplyKeepsItsDetailAndOptions() {
         var activity = BrainActivity()
@@ -153,7 +153,7 @@ final class FlockAndBrainTests: XCTestCase {
             XCTAssertFalse(compact)
             XCTAssertEqual(reply.detail, "Nothing moved.")
         } else {
-            XCTFail("expected the brain card")
+            XCTFail("expected the orchestrator card")
         }
     }
 

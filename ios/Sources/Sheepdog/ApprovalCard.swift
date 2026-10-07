@@ -5,7 +5,7 @@ import SwiftUI
 /// is: who is asking, what, the command, and one button per option.
 struct ApprovalCardView: View {
     let card: ApprovalFlow.Card
-    /// On an agent's Flock card, which already draws the frame: no second
+    /// On an agent's Agents card, which already draws the frame: no second
     /// border, background or shadow (review B11).
     var embedded = false
     let answer: (Int) -> Void

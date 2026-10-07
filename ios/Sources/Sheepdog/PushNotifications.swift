@@ -33,7 +33,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
 /// token to the daemon (`POST /api/push/register`) and keeps it there
 /// across token and address changes, answers Approve / Decline from the
 /// notification through `POST /api/pending/answer`, and opens the agent's
-/// Flock card on a tap. While the session is live in the foreground the
+/// Agents card on a tap. While the session is live in the foreground the
 /// banner is suppressed — the app already shows the card.
 @MainActor
 final class PushCoordinator: NSObject, ObservableObject, UNUserNotificationCenterDelegate {
@@ -238,7 +238,7 @@ final class PushCoordinator: NSObject, ObservableObject, UNUserNotificationCente
         guard let answer = PushActions.answer(actionIdentifier: action, payload: payload) else {
             if action == PushActions.approve || action == PushActions.decline {
                 // Nothing that action can mean for this prompt: let the
-                // shepherd answer it on the card.
+                // user answer it on the card.
                 await notifyOpenInstead(payload, reason: "Open Sheepdog to answer this one.")
             } else if action != UNNotificationDismissActionIdentifier {
                 focus(paneID: payload.paneID)
@@ -278,7 +278,7 @@ final class PushCoordinator: NSObject, ObservableObject, UNUserNotificationCente
         try? await center.add(request)
     }
 
-    /// A tap on a notification: the app on that agent's Flock card.
+    /// A tap on a notification: the app on that agent's Agents card.
     func focus(paneID: String) {
         pendingFocus = paneID.isEmpty ? nil : paneID
         applyPendingFocus()

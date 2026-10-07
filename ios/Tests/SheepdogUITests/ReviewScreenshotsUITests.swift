@@ -47,7 +47,7 @@ final class ReviewScreenshotsUITests: XCTestCase {
     }
 
     /// Batch B: the connection chip and its popover, one agent window, the
-    /// shallow Settings menu and the Flock pane's empty and error states.
+    /// shallow Settings menu and the Agents pane's empty and error states.
     func testPolishScreens() throws {
         shotPrefix = "polish"
         let app = XCUIApplication()
@@ -119,7 +119,7 @@ final class ReviewScreenshotsUITests: XCTestCase {
     }
 
     func testTheReviewedScreens() throws {
-        // A flock with one of each: working, idle, not running.
+        // Agents, one of each state: working, idle, not running.
         post("/api/inject/blocked", ["pane_id": "p-busy", "alias": "api", "kind": "codex", "screen": "Working…"])
         post("/api/inject/state", ["pane_id": "p-busy", "state": "working"])
         post("/api/inject/blocked", ["pane_id": "p-idle", "alias": "web", "kind": "claude", "screen": "Idle"])
@@ -155,7 +155,7 @@ final class ReviewScreenshotsUITests: XCTestCase {
         clearBanner(app)
         shot(app, "conversation-approval")
 
-        // The Flock pane: running agents, blocked first, the rest folded.
+        // The Agents pane: running agents, blocked first, the rest folded.
         selectPane(app, "flock")
         sleep(1)
         shot(app, "flock")

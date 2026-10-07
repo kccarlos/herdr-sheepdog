@@ -1,6 +1,6 @@
 import Foundation
 
-/// The markdown the workers and the brain write, made readable on a phone
+/// The markdown the workers and the orchestrator write, made readable on a phone
 /// without letting it take over the layout: inline styles (bold, italic,
 /// `code`, links) through Foundation's `AttributedString(markdown:)`, and a
 /// small block pass on top — paragraphs, bullet and numbered lists, fenced

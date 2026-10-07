@@ -23,7 +23,7 @@ final class VoiceRobustnessUITests: XCTestCase {
         app.launchArguments = ["-sheepdogResetState", "-sheepdogAddress", Fixture.host, "-sheepdogFakeVoice", "-sheepdogFakeProviders", "-sheepdogResetHints"]
         app.launch()
 
-        // Connect: the first time the dog listens, the coach mark.
+        // Connect: the first time the voice listens, the coach mark.
         tapWhenReady(app.buttons["controls.orb"], "the orb")
         XCTAssertTrue(app.staticTexts["Listening — just talk"].waitForExistence(timeout: 15), "the status line says what to do")
         XCTAssertTrue(app.descendants(matching: .any)["controls.coachMark"].waitForExistence(timeout: 5), "first run shows the coach mark")

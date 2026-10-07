@@ -49,7 +49,7 @@ final class TimelineGroupingTests: XCTestCase {
     func testQuestionsApprovalsAndBoundariesBreakARun() {
         let rows: [TimelineRow] = [
             .item(item(1, .push)),
-            .item(item(2, .push, "Should I deploy?", urgency: "interrupt")), // needs the shepherd
+            .item(item(2, .push, "Should I deploy?", urgency: "interrupt")), // needs the user
             .item(item(3, .push)),
             .item(item(4, .approval)),
             .item(item(5, .push)),
@@ -93,7 +93,7 @@ final class TimelineGroupingTests: XCTestCase {
         let history = [item(1, .shepherd), item(2, .push), item(3, .push), item(4, .dog)]
         let rows = ConversationTimeline.rows(history: history, live: [], calendar: Calendar(identifier: .gregorian))
         let grouped = ConversationTimeline.grouped(rows)
-        XCTAssertEqual(grouped.count, 4) // day, shepherd, 2 updates, dog
+        XCTAssertEqual(grouped.count, 4) // day, user, 2 updates, dog
         XCTAssertEqual(shape(grouped).last, "item.4")
     }
 

@@ -3,7 +3,7 @@ import SwiftUI
 
 /// Health: what the Mac's `/debug` page used to be needed for. Pushed from
 /// the connection chip's popover and from Settings > Diagnostics.
-/// The daemon (version, uptime, address), the voice and the brain with
+/// The daemon (version, uptime, address), the voice and the orchestrator with
 /// their pickers, chattiness, the audio path (echo cancellation, playback)
 /// and the recent problems in plain words, each with its raw JSON behind a
 /// tap.
@@ -56,7 +56,7 @@ struct HealthView: View {
             LabeledContent("Status", value: model.state.title)
             LabeledContent("Voice", value: model.voiceProviderDisplay ?? "—")
                 .accessibilityIdentifier("health.voiceModel")
-            LabeledContent("Brain", value: model.brainDisplay ?? "—")
+            LabeledContent("Orchestrator", value: model.brainDisplay ?? "—")
                 .accessibilityIdentifier("health.brainModel")
             // Every stats line carries the field once the daemon can switch
             // voice (0 with Gemini): only worth a row when something billed.
@@ -81,7 +81,7 @@ struct HealthView: View {
                 .accessibilityIdentifier("health.changeModels")
             }
         } header: {
-            Text("Voice and brain")
+            Text("Voice and orchestrator")
         } footer: {
             if model.health.billedSeconds != nil {
                 Text("GPT-Live bills every second a session is open, this daemon run so far.")
@@ -129,7 +129,7 @@ struct HealthView: View {
             } header: {
                 Text("Pushes")
             } footer: {
-                Text("Quiet: only what needs you. Normal: also finishes of agents you dealt with recently. Chatty: everything the brain wants to say.")
+                Text("Quiet: only what needs you. Normal: also finishes of agents you dealt with recently. Chatty: everything the orchestrator wants to say.")
             }
         }
     }

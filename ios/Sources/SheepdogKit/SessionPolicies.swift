@@ -120,7 +120,7 @@ public struct MuteSync: Equatable, Sendable {
 ///
 /// The engine does capture *and* playback, so it runs whenever the voice
 /// session is up — muted or not. Mute only gates capture (no frames
-/// leave); the dog can always be heard. The engine is stopped while the
+/// leave); the voice can always be heard. The engine is stopped while the
 /// app is paused in the background (Settings ▸ Keep listening with the
 /// screen locked, off).
 public enum AudioLifecycle {

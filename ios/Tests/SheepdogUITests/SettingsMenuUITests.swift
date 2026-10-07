@@ -1,6 +1,6 @@
 import XCTest
 
-/// Settings as a shallow menu that applies changes at once, and the Flock
+/// Settings as a shallow menu that applies changes at once, and the Agents pane
 /// pane's error state. The first needs no daemon beyond a saved address; the
 /// second points the app at a port nothing listens on.
 final class SettingsMenuUITests: XCTestCase {
@@ -40,12 +40,12 @@ final class SettingsMenuUITests: XCTestCase {
         XCTAssertTrue(app.buttons["settings.health"].waitForExistence(timeout: 5))
     }
 
-    func testAnUnreachableDaemonOffersOneActionInTheFlockPane() throws {
+    func testAnUnreachableDaemonOffersOneActionInTheAgentsPane() throws {
         let app = XCUIApplication()
         app.launchArguments = ["-sheepdogResetState", "-sheepdogAddress", "127.0.0.1:7791"]
         app.launch()
         tapWhenReady(app.buttons["controls.orb"], "the orb")
-        tapWhenReady(app.buttons["main.pane.flock"], "the Flock pane")
+        tapWhenReady(app.buttons["main.pane.flock"], "the Agents pane")
         XCTAssertTrue(app.buttons["flock.unreachable.retry"].waitForExistence(timeout: 20), "Daemon unreachable offers Try again")
         XCTAssertTrue(app.staticTexts["Daemon unreachable"].exists)
         XCTAssertFalse(app.buttons["main.pane.health"].exists, "Health is not a pane")

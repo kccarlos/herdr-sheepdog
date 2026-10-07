@@ -9,11 +9,11 @@ public enum TimelineRow: Identifiable, Equatable, Sendable {
     case day(Date)
     /// A notice item: "Sheepdog restarted · 5:42 PM".
     case divider(ConversationItem, title: String)
-    /// A shepherd, dog, push or approval item.
+    /// A user, dog, push or approval item.
     case item(ConversationItem)
     /// A bubble of this session that has no server id (yet).
     case live(ConversationReducer.Bubble)
-    /// What the brain told the voice. `compact` when the dog's bubble just
+    /// What the orchestrator told the voice. `compact` when the voice's bubble just
     /// above already says the words (a daemon without a voice): only the
     /// detail and options are left to show.
     case brain(BrainActivity.Reply, compact: Bool)
@@ -106,7 +106,7 @@ public enum ConversationTimeline {
         return out
     }
 
-    /// Puts the brain's replies and the held pushes in place: a reply the
+    /// Puts the orchestrator's replies and the held pushes in place: a reply the
     /// dog's bubble already says goes right under that bubble (and only
     /// when it has a detail or options to add), everything else by time,
     /// after rows of the same moment.
@@ -168,7 +168,7 @@ public enum ConversationTimeline {
 
 /// A row as the conversation screen draws it: a timeline row, or a run of
 /// the daemon's pushes and notices folded into one "N updates" row that
-/// opens on a tap. What the shepherd and the dog said is never folded.
+/// opens on a tap. What the user and the voice said is never folded.
 public enum ConversationDisplayRow: Identifiable, Equatable, Sendable {
     case row(TimelineRow)
     /// Two or more consecutive pushes / notices, oldest first. The id is
@@ -189,9 +189,9 @@ extension ConversationTimeline {
     public static let minimumGroup = 2
 
     /// Folds every run of consecutive daemon updates — pushes that are
-    /// news (not a question that needs the shepherd), local or daemon
+    /// news (not a question that needs the user), local or daemon
     /// notices and their dividers — into one `.updates` row. Speech, the
-    /// approvals, the brain's replies, held pushes, day dividers and the
+    /// approvals, the orchestrator's replies, held pushes, day dividers and the
     /// restart / new-conversation dividers break a run and stay visible, and so does any row in `keepVisible` (the
     /// rows folded to a pointer at the pinned question).
     public static func grouped(_ rows: [TimelineRow], keepVisible: Set<String> = []) -> [ConversationDisplayRow] {

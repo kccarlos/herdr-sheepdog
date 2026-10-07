@@ -6,7 +6,7 @@ import SwiftUI
 /// control sits in a fixed slot so a hidden one never shifts the others,
 /// and the bar's height depends only on the text size, never on the state
 /// (a bottom area that grows and shrinks with the state thrashes the
-/// conversation's scroll tracking). Stopping the dog lives on the orb
+/// conversation's scroll tracking). Stopping the voice lives on the orb
 /// itself (`VoiceBarModel.orbAction`).
 ///
 /// The mic button is never a bare microphone that invites "press to talk":

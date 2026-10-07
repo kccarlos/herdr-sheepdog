@@ -53,7 +53,7 @@ final class ApprovalFlowTests: XCTestCase {
         _ = flow.tap(index: 1)
         flow.failed(pendingID: "ap-1", message: "Can't reach the daemon")
         XCTAssertEqual(flow.card?.phase, .open(error: "Can't reach the daemon"))
-        XCTAssertNotNil(flow.tap(index: 1), "and the shepherd can try again")
+        XCTAssertNotNil(flow.tap(index: 1), "and the user can try again")
     }
 
     func testResolvedElsewhereByVoice() throws {

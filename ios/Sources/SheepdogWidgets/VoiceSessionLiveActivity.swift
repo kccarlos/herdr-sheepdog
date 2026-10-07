@@ -4,7 +4,7 @@ import SwiftUI
 import WidgetKit
 
 /// The voice session on the lock screen and in the Dynamic Island: what
-/// the dog is doing (listening, speaking, muted…), how many agents are
+/// the voice is doing (listening, speaking, muted…), how many agents are
 /// waiting for an answer, and Mute / End. The words, VoiceOver labels
 /// included, come ready-made in the content state
 /// (SheepdogKit `VoiceActivityState`); this file only draws them.
@@ -176,7 +176,7 @@ struct WaitingBadge: View {
 }
 
 /// The symbol and colour for each phase. The app's amber "blocked" colour
-/// marks agents waiting on the shepherd here too.
+/// marks agents waiting on the user here too.
 struct PhaseLook {
     let symbol: String
     let tint: Color

@@ -34,7 +34,7 @@ final class ReviewPolishTests: XCTestCase {
         XCTAssertEqual(ids, ["item.3", "item.4", "item.5"], "the approval, its push, and only the first dog line after it")
     }
 
-    func testNothingFoldsWithoutAnOpenQuestionOrAfterTheShepherdSpeaks() {
+    func testNothingFoldsWithoutAnOpenQuestionOrAfterTheUserSpeaks() {
         let rows: [TimelineRow] = [
             item(3, .approval, "Would you like to run git push?", agent: "auth", pendingID: "ap-1"),
             item(4, .shepherd, "wait, what's auth pushing?"),
@@ -47,7 +47,7 @@ final class ReviewPolishTests: XCTestCase {
         XCTAssertEqual(QuestionFocus.pointerRowIDs(rows: rows, pending: notAPrompt), [])
     }
 
-    func testBeforeHistorySyncsLiveBubblesAfterTheShepherdFold() {
+    func testBeforeHistorySyncsLiveBubblesAfterTheUserFold() {
         let rows: [TimelineRow] = [
             .live(.init(id: 1, speaker: .shepherd, text: "anything new?", isFinal: true, at: at(1))),
             .live(.init(id: 2, speaker: .system, kind: .push(needsUser: true), text: "auth asks to run git push.", isFinal: true, at: at(2))),

@@ -3,7 +3,7 @@ import Foundation
 // Phone notifications (APNs). The daemon side is herdr-sheepdog's
 // `docs/push.md`: the app registers its device token with
 // `POST /api/push/register`, and the daemon sends an alert when an agent
-// needs the shepherd, with the approval's options in the payload so the
+// needs the user, with the approval's options in the payload so the
 // notification's Approve / Decline can answer it through the same
 // `POST /api/pending/answer` the approval card uses.
 
