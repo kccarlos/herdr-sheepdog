@@ -1,0 +1,6 @@
+a0: scored runs 29, substantive 21, coverage 0.77, comprehension 0.98, follow-up depth 57/74, no padding 5/16
+a: scored runs 19, substantive 13, coverage 0.84, comprehension 0.97, follow-up depth 33/46, no padding 3/12
+b: scored runs 29, substantive 21, coverage 0.87, comprehension 1.00, follow-up depth 51/74, no padding 2/16
+coverage b - a0: +0.10 (95 % CI -0.06 to +0.24)
+coverage a0 - a: -0.07 (95 % CI -0.19 to +0.04)
+coverage b - a: +0.03 (95 % CI -0.10 to +0.15)

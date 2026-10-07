@@ -33,7 +33,7 @@ scripts and `bench northstar --vs` outputs under
 [`prompt-arms-2026-10-06/`](prompt-arms-2026-10-06/)):
 
 - tier 1, four arms: workday ×5 (35 runs, ~420 request segments per arm),
-  safety ×8 (80 runs), facts ×5 (30 runs), explain 18–19 of 30 graded.
+  safety ×8 (80 runs), facts ×5 (30 runs), explain 18–19 of 30 graded, plus 9 top-up runs for A0 and B on 2026-10-07.
 - tier 2, arms A/B/C: workday ×2 (12 runs, ~150 request segments per arm;
   non-adversarial scenarios only, no Google model sees adversarial text).
 
@@ -102,16 +102,29 @@ rejudged. Done, Low effort and the programmatic checks are code, not judge.
 
 ## Explanations (tier 1, explain cases, judged live by Sonnet)
 
+First night (18–19 graded runs per arm):
+
 | Arm | Coverage (orchestrator) | Comprehension | Words/answer en / zh | Simple en / zh | Follow-up depth | No padding |
 |---|---|---|---|---|---|---|
 | A0 | 0.81 | 0.97 | 154 / 212 | 39 / 50 | 35/46 | 5/12 |
 | A | 0.84 | 0.97 | 160 / 180 | 34 / 56 | 33/46 | 3/12 |
-| B | **0.92** | **1.00** | 208 / 273 | 55 / 61 | 30/46 | 2/12 |
+| B | 0.92 | 1.00 | 208 / 273 | 55 / 61 | 30/46 | 2/12 |
 
-18–19 graded runs per arm (the other 12 were stopped by the Claude window
-the first night and are not rerun yet). B states more of the key points but
-is about 35 % longer, pads simple answers more (2/12 vs 5/12 without
-padding) and adds less on follow-ups. Note: the explain reports'
+With the top-up runs of 2026-10-07 for A0 and B (9 more graded each; the
+last 3 per arm were stopped at the Claude session floor; A not topped up),
+[`explain_merge.py`](prompt-arms-2026-10-06/explain_merge.py) over all
+graded runs ([output](prompt-arms-2026-10-06/explain-merged.txt)):
+
+| Arm | Graded runs (substantive) | Coverage | Comprehension | Follow-up depth | No padding (controls) |
+|---|---|---|---|---|---|
+| A0 | 29 (21) | 0.77 | 0.98 | 57/74 | 5/16 |
+| A | 19 (13) | 0.84 | 0.97 | 33/46 | 3/12 |
+| B | 29 (21) | 0.87 | 1.00 | 51/74 | 2/16 |
+
+Coverage B − A0 = +0.10 (bootstrap 95 % CI −0.06 to +0.24): the first
+night's gap shrinks and is no longer clear. B is about 35 % longer, pads
+the simple control answers more (2/16 vs 5/16 without padding) and adds
+less on follow-ups (69 % vs 77 %). Note: the explain reports'
 said-vs-done check counts narrated past events ("4,100 invoices never went
 out") as unmatched "declined"/"sent" claims; that is a check artefact,
 filed for queue item 3.
@@ -145,7 +158,8 @@ regression and keeps the principle.
 - **B** loses on the comparison metric, segment Understood (tier 1 −5 pp
   with the CI below zero against both A0 and A; tier 2 −11 pp, CI spans
   0). Its real gains are diagnostics under the north star: missed news
-  −10 pp (CI −18 to −2) and explanation coverage 0.92 vs 0.81. Not merged.
+  −10 pp (CI −18 to −2) and, less clearly, explanation coverage (0.87 vs
+  0.77, CI −0.06 to +0.24). Not merged.
 - **A** = A0 within noise: no reason to merge #155's code with old wording.
 - **C** is out (rm -rf approvals).
 
