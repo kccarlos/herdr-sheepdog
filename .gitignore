@@ -32,7 +32,8 @@ go.work.sum
 # .vscode/
 
 # Claude Code project state
-.claude/
+.claude/*
+!.claude/settings.json
 
 # macOS
 .DS_Store
