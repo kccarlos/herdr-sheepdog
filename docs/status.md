@@ -1,4 +1,4 @@
-# Status — 2026-10-04
+# Status — 2026-10-07
 
 Living handoff note: what is on `main`, what is verified how, and what is
 open. Update it whenever a PR lands or a live check is done; it is what a
@@ -14,7 +14,7 @@ after this page.
 
 ## Where main is
 
-`main` = `2d906d2` (#131, plus later PRs up to #146; the dual-brain voice layer landed in #122 and is the adopted design since the CEO's phone test of 2026-10-04). The v1 plan, the 2026-09-18 redesign and
+`main` = `5506d97` (#186; the dual-brain voice layer landed in #122 and is the adopted design since the CEO's phone test of 2026-10-04; unified roles, roles only, in #185). The v1 plan, the 2026-09-18 redesign and
 iteration 2's phase-1 work packages (WP1–WP5, WP8, WP9;
 [`iteration-2.md`](iteration-2.md)) are merged.
 
@@ -130,6 +130,17 @@ What is in:
   on a transition, reads ≥ 250 ms apart; "Agent window over /ws"), the `/ws` protocol version and `client-ready` / `bot-ready` handshake
   ([`ws-contract.md`](ws-contract.md)), APNs notifications for the iOS
   app ([`push.md`](push.md)).
+- **Unified roles, v6-r** (#185, [`design/dual-brain.md`](design/dual-brain.md),
+  [`eval/roles-arms-2026-10-07.md`](eval/roles-arms-2026-10-07.md)): every
+  model reads one framing, one orchestration agent operating the user's
+  herdr with a voice and an orchestrator; "the user" in every prompt and
+  model-facing string; prompt length rules unchanged (short by default).
+  Default chattiness is `chatty` (#178).
+- **Evals:** every experiment so far, with its decision, is indexed in
+  [`eval/README.md`](eval/README.md); read it before proposing an eval or
+  a prompt change. Current tier-1 workday baseline at `chatty`
+  (Sonnet segment judge): segment Understood 92 % on the pre-#185 main,
+  89 % for the roles-only prompts (difference not significant).
 - **Measurement:** `sheepdog eval` (offline L0 corpus), `sheepdog eval
   sim` (a simulated CEO plus an LLM judge; `--live` for the real brain),
   `sheepdog scorecard`, `sheepdog audio-e2e`, and `sheepdog bench` (tier-2
