@@ -168,7 +168,7 @@ type Brain struct {
 	readTools []*genai.Tool // the read-only surface (event turns)
 
 	lock  turnLock
-	after sync.WaitGroup // after-turn work in flight
+	after afterWork // after-turn work in flight
 	// inFlight counts Turn calls in flight; Close waits for them after
 	// setting closed (under mu), so a turn never runs into a closed
 	// transcript and no Add on after races Close's Wait.
@@ -772,4 +772,36 @@ func (b *Brain) summarize(ctx context.Context, text string) (string, error) {
 		return "", errors.New("brain: empty summary")
 	}
 	return out, nil
+}
+
+// afterWork counts after-turn work in flight. Unlike sync.WaitGroup, Add
+// may run concurrently with Wait at a zero counter (Turn finishing while
+// Quiesce is called), so the counter lives under a mutex with a cond.
+type afterWork struct {
+	mu   sync.Mutex
+	cond *sync.Cond
+	n    int
+}
+
+func (a *afterWork) Add(d int) {
+	a.mu.Lock()
+	a.n += d
+	if a.n <= 0 && a.cond != nil {
+		a.cond.Broadcast()
+	}
+	a.mu.Unlock()
+}
+
+func (a *afterWork) Done() { a.Add(-1) }
+
+// Wait blocks until the counter is zero.
+func (a *afterWork) Wait() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.cond == nil {
+		a.cond = sync.NewCond(&a.mu)
+	}
+	for a.n > 0 {
+		a.cond.Wait()
+	}
 }
