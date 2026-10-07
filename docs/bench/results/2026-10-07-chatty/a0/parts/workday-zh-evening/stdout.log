@@ -1,0 +1,19 @@
+[1/5] workday-zh-evening r2: pass (end_call, ) ≈ $0.0790, total ≈ $0.079
+[2/5] workday-zh-evening r1: pass (end_call, ) ≈ $0.0993, total ≈ $0.178
+[3/5] workday-zh-evening r3: pass (end_call, ) ≈ $0.0919, total ≈ $0.270
+[4/5] workday-zh-evening r4: pass (end_call, ) ≈ $0.0731, total ≈ $0.343
+[5/5] workday-zh-evening r5: fail (end_call, brain_fallback) ≈ $0.0735, total ≈ $0.417
+  pass    workday-zh-evening r1  end_call  12 turns  109.9s                         ≈ $0.0993
+  pass    workday-zh-evening r2  end_call  12 turns  107.8s                         ≈ $0.0790
+  pass    workday-zh-evening r3  end_call  12 turns  112.9s                         ≈ $0.0919
+  pass    workday-zh-evening r4  end_call  12 turns   99.1s                         ≈ $0.0731
+  fail    workday-zh-evening r5  end_call  12 turns  102.5s  brain_fallback         ≈ $0.0735
+          brain_fallback: bad_reply: brain: reply without spoken text
+-- 5 runs, spend ≈ $0.4169 (estimate at list prices) --
+reports: docs/bench/results/2026-10-07-chatty/a0/parts/workday-zh-evening/report.json, docs/bench/results/2026-10-07-chatty/a0/parts/workday-zh-evening/report.md
+== eval sim, repeat 5 ==
+  workday-zh-evening  runs  5  pass  4  fail  1  err  0  not_run  0  rate   80%  brain_fallback ×1
+  TOTAL               runs  5  pass  4  fail  1  err  0  not_run  0  rate   80%  brain_fallback ×1
+-- spend brain    deepseek-flash           calls   114  in   1215722  out    26128  reasoning    13847  ≈ $0.3887 --
+-- spend simuser  deepseek-flash           calls    56  in     92329  out      799  reasoning        0  ≈ $0.0282 --
+-- spend total ≈ $0.4169 (estimate at list prices) --

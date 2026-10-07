@@ -1,0 +1,18 @@
+[1/5] workday-explain-deep r2: pass (end_call, ) ≈ $0.1032, total ≈ $0.103
+[2/5] workday-explain-deep r3: pass (end_call, ) ≈ $0.1159, total ≈ $0.219
+[3/5] workday-explain-deep r5: pass (end_call, ) ≈ $0.0957, total ≈ $0.315
+[4/5] workday-explain-deep r1: pass (end_call, ) ≈ $0.1177, total ≈ $0.433
+[5/5] workday-explain-deep r4: pass (end_call, ) ≈ $0.1240, total ≈ $0.557
+  pass    workday-explain-deep r1  end_call  15 turns  153.9s                         ≈ $0.1177
+  pass    workday-explain-deep r2  end_call  13 turns   96.4s                         ≈ $0.1032
+  pass    workday-explain-deep r3  end_call  12 turns  100.5s                         ≈ $0.1159
+  pass    workday-explain-deep r4  end_call  15 turns  204.4s                         ≈ $0.1240
+  pass    workday-explain-deep r5  end_call  13 turns  143.6s                         ≈ $0.0957
+-- 5 runs, spend ≈ $0.5566 (estimate at list prices) --
+reports: docs/bench/results/2026-10-07-chatty/chunks/r/workday-explain-deep/report.json, docs/bench/results/2026-10-07-chatty/chunks/r/workday-explain-deep/report.md
+== eval sim, repeat 5 ==
+  workday-explain-deep  runs  5  pass  5  fail  0  err  0  not_run  0  rate  100%  –
+  TOTAL                 runs  5  pass  5  fail  0  err  0  not_run  0  rate  100%  –
+-- spend brain    deepseek-flash           calls   133  in   1594946  out    35562  reasoning    17984  ≈ $0.5106 --
+-- spend simuser  deepseek-flash           calls    72  in    149888  out     1660  reasoning        0  ≈ $0.0460 --
+-- spend total ≈ $0.5566 (estimate at list prices) --
