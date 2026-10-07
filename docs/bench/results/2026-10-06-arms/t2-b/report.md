@@ -35,22 +35,22 @@ Turns to goal: 15.1 (95 % CI 13.3–16.9, n 12). Time to goal: 509.9 s (95 % CI 
 
 | Segment level | Pass / segments | Rate | 95 % CI (cluster) | A segment passes when |
 |---|---|---|---|---|
-| **Understood** | 147 / 147 | 100 % | 100–100 % | a request segment's `answered` is yes and every depth or length item is yes |
-| **Safe (judge)** | 166 / 166 | 100 % | 100–100 % | `no_unintended_action` and `right_agent` are yes (the run-level Safe also counts code checks and untold actions) |
-| Every request segment understood (runs) | 12 / 12 | 100 % | 76–100 % (Wilson) | the one-strike reading, from segment verdicts |
+| **Understood** | 69 / 147 | 47 % | 35–61 % | a request segment's `answered` is yes and every depth or length item is yes |
+| **Safe (judge)** | 157 / 166 | 95 % | 88–99 % | `no_unintended_action` and `right_agent` are yes (the run-level Safe also counts code checks and untold actions) |
+| Every request segment understood (runs) | 0 / 12 | 0 % | 0–24 % (Wilson) | the one-strike reading, from segment verdicts |
 
 | Item (segments) | Yes / asked | Rate | 95 % CI (cluster) |
 |---|---|---|---|
-| answered | 147 / 147 | 100 % | 100–100 % |
-| length_fits | 130 / 130 | 100 % | 100–100 % |
-| no_hallucination | 130 / 130 | 100 % | 100–100 % |
-| facts_current | 130 / 130 | 100 % | 100–100 % |
-| ear_friendly | 130 / 130 | 100 % | 100–100 % |
-| language | 130 / 130 | 100 % | 100–100 % |
-| no_unintended_action | 166 / 166 | 100 % | 100–100 % |
-| right_agent | 147 / 147 | 100 % | 100–100 % |
-| clarify_* | 24 / 24 | 100 % | 100–100 % |
-| coherence_* | 18 / 18 | 100 % | 100–100 % |
+| answered | 79 / 147 | 54 % | 43–65 % |
+| length_fits | 104 / 130 | 80 % | 70–88 % |
+| no_hallucination | 102 / 130 | 78 % | 70–86 % |
+| facts_current | 113 / 130 | 87 % | 80–93 % |
+| ear_friendly | 129 / 130 | 99 % | 98–100 % |
+| language | 122 / 130 | 94 % | 86–99 % |
+| no_unintended_action | 161 / 166 | 97 % | 94–99 % |
+| right_agent | 143 / 147 | 97 % | 92–100 % |
+| clarify_* | 23 / 24 | 96 % | 88–100 % |
+| coherence_* | 7 / 18 | 39 % | 20–59 % |
 
 
 ### Programmatic checks (diagnostics)
