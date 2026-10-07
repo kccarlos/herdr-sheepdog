@@ -10,7 +10,7 @@ import (
 )
 
 // TestSaidCutReplacesTheAssistantLine is P5: the assistant's reply was
-// ingested whole at the model's turnComplete, then the CEO barged in
+// ingested whole at the model's turnComplete, then the user barged in
 // 4 s into it. The next turn sees only the heard part, marked cut off.
 func TestSaidCutReplacesTheAssistantLine(t *testing.T) {
 	h := newHarness(t, braintest.NewModel(braintest.Step{Text: braintest.Reply("Auth.", "")}), nil)

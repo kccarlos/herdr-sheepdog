@@ -74,7 +74,7 @@ binary version.
   | `provider` | `status.provider` and the runtime voice switch (*Voice provider*) | when a voice is configured |
   | `history` | `/events` resume, `/api/conversation`, reset, answer by tap (*History and resume*) | always |
   | `push` | APNs registration ([`push.md`](push.md)) | when the daemon has a push service |
-  | `models` | the brain model picker (`/api/brain/models`) | when the brain is on |
+  | `models` | the orchestrator model picker (`/api/brain/models`) | when the orchestrator is on |
   | `screen` | the agent window over `/ws` (*Agent window over /ws*) | when the daemon has a supervisor (always, in practice) |
 
   A new optional part of the contract is a new feature, not a new
@@ -98,7 +98,7 @@ binary version.
   gets an `error` it can show as is, then `status` `closed` with reason
   `protocol_too_old`, then a close with WebSocket code **4001** and a
   short reason; it sees no `bot-ready`. It should not reconnect in a
-  loop: it tells the shepherd to update the app. A refused client never
+  loop: it tells the user to update the app. A refused client never
   replaces the client already attached.
 
   ```json
@@ -108,7 +108,7 @@ binary version.
 
 - **Too new.** A client that needs a newer daemon than the one it got (a
   `bot-ready` `protocol` below the client's own minimum) closes and tells
-  the shepherd to update the daemon.
+  the user to update the daemon.
 - **An older daemon** has no handshake: it answers `client-ready` with
   `{"type":"error","message":"wsproto: unknown type \"client-ready\""}`
   and never sends `bot-ready`. A client takes that error (or 2 s without
@@ -144,10 +144,10 @@ scheduling each frame at "now".
 |--------------------------------------|-----------------------------------------------------------------------------------------------------------|
 | `{"type":"mute","on":true\|false}`   | Mute state changed. See *Mute semantics*.                                                                 |
 | `{"type":"silence","on":true\|false}` | The client's silence gate closed (`on:true`, no binary frames follow) or reopened (`on:false`). See *Silence gate*. |
-| `{"type":"speaking","on":true\|false}` | The client's own speech detector opened (`on:true`, it hears the shepherd) or closed. Optional; see *Client speech detector*. |
+| `{"type":"speaking","on":true\|false}` | The client's own speech detector opened (`on:true`, it hears the user) or closed. Optional; see *Client speech detector*. |
 | `{"type":"playback","state":"started\|drained\|flushed","played_ms":N}` | The client's player started, drained or flushed. See *Playback reports*. `played_ms` is required for `drained` and `flushed` (optional, taken as 0, for `started`). |
 | `{"type":"cancel"}`                  | The "stop" button. The daemon stops current playback (it will send `flush`) and runs the `stop` tool (the stop procedure) in the supervisor. Equivalent to the user saying "stop". |
-| `{"type":"text","text":"…"}`         | Simulate an utterance: the text is fed to the voice session as if the user had spoken it (`/debug` and the `/voice` text box use this). It is recorded as a typed shepherd input, which the one rail accepts like a transcript (docs/roles.md "The one rail"). Without a voice session (`--voice=off`) the daemon echoes it as an `in` transcript and answers through its text router with one `out` transcript (a text routed to `cancel` yields `flush` then the `out`), or with an `error` when the text cannot be routed. |
+| `{"type":"text","text":"…"}`         | Simulate an utterance: the text is fed to the voice session as if the user had spoken it (`/debug` and the `/voice` text box use this). It is recorded as a typed user input, which the one rail accepts like a transcript (docs/roles.md "The one rail"). Without a voice session (`--voice=off`) the daemon echoes it as an `in` transcript and answers through its text router with one `out` transcript (a text routed to `cancel` yields `flush` then the `out`), or with an `error` when the text cannot be routed. |
 | `{"type":"screen-subscribe","pane_id":"…","lines":N?}` | Show me this agent's window; `screen` frames follow. Replaces the client's previous subscription. See *Agent window over /ws*. |
 | `{"type":"screen-unsubscribe"}`      | Stop the window's `screen` frames. |
 | `{"type":"ping","gated_frames":N?,"peak":N?,"underruns":N?,"drains":N?,"buffer_ms":N?,"rate":F?,"stretched_ms":N?,"audio_state":S?,"aec":S?}` | Liveness probe; the daemon answers `pong`. Clients should send one every 5–30 s; `/voice` sends one every 5 s (the `web.client.stats` interval) and waits for the pong before the next. The optional counters (frames withheld by the silence gate so far; last input peak in Int16 LSB; the playback jitter buffer's underrun and drain counts and the audio buffered right now in ms; the time-stretch's current playback rate and the total wall-clock ms played at a rate other than 1.0 — see "Playback jitter buffer" below; the page's AudioContext state, `running`/`suspended`/`interrupted`/`closed` — a context that is not running plays nothing and stops updating the counters; `aec`, the microphone's echo cancellation as the browser reports it in `track.getSettings().echoCancellation`: `"true"`, `"false"`, or `"unknown"` when the browser does not say — other values are ignored; `/voice` also shows "Use headphones or the app: this browser's echo cancellation is off" when it is `false`, or `unknown` on a mobile browser) are copied into every following `web.client.stats` event until the next ping, with `playback_age_ms` (how old that sample is; absent before the first ping with `buffer_ms`), `audio_state` and `aec`. A value repeated across stats lines with a growing `playback_age_ms` is one old sample, not a stalled player. The event also carries `send_wait_max_ms`/`send_wait_p95_ms` (how long a recent audio frame waited in the daemon's per-client send queue; near 0 in normal operation), and with Gemini Live the echo gate's `echo_armed`, `echo_withheld_frames`, `echo_released_frames`, `echo_opens` (docs/research/echo-2026-10-03.md: once this client's echo has shown itself, microphone audio the playing reply explains is held back). |
@@ -250,7 +250,7 @@ nor `silence` transitions; the gate resumes its own bookkeeping on unmute.
 
 Added for docs/research/voice-frameworks-2026-09-24.md P4/P5 (WP-B,
 WP-C, WP-D). The daemon only knows what it *sent*; Gemini generates
-~4× real time, so the model's turn is over seconds before the shepherd
+~4× real time, so the model's turn is over seconds before the user
 has heard it. The client therefore reports what its player does:
 
 ```json
@@ -283,7 +283,7 @@ has heard it. The client therefore reports what its player does:
 
 What the daemon does with them:
 
-- **"Speaking" means the shepherd is still hearing it.** The voice
+- **"Speaking" means the user is still hearing it.** The voice
   session counts as speaking while the model generates **or** the
   client plays: from `started` until `drained` (+ 300 ms, a gap hold)
   or `flushed`; audio sent that the client has not started yet counts
@@ -300,12 +300,12 @@ What the daemon does with them:
   started arriving (audio_ms delivered minus wall time), with no
   jitter-buffer allowance. The session treats a client as reporting
   once it has sent one `playback` message.
-- **The brain hears what the shepherd heard.** Each `flushed` whose
+- **The orchestrator hears what the user heard.** Each `flushed` whose
   `played_ms` is short of the run (by more than 150 ms) maps
   `played_ms` onto the run's output transcript — each transcript
   fragment is placed at the number of audio bytes sent when it arrived,
   and the fragment straddling the cut contributes a proportional share
-  of its words — and the brain's `Assistant said` line for that speech
+  of its words — and the orchestrator's `Assistant said` line for that speech
   becomes `Assistant said (cut off after N s): "…heard part…"`. GPT-Live
   uses the same byte-count method rather than the `start_ms`/`end_ms` on
   its output transcript: the daemon drops silent output audio before it
@@ -315,18 +315,18 @@ What the daemon does with them:
   (`run_ms`: audio the daemon sent in that run; a cut adds `cut`,
   `heard`, `said`).
 - Not done (TODO): telling the voice model silently which part was
-  heard ("the shepherd heard only: …"). A context push right after a
-  barge-in lands while the shepherd is talking, where Gemini's turn
+  heard ("the user heard only: …"). A context push right after a
+  barge-in lands while the user is talking, where Gemini's turn
   handling is most fragile, and it cannot be verified offline.
 
 ## Client speech detector
 
-Push timing needs to know when the shepherd is talking; the input
+Push timing needs to know when the user is talking; the input
 transcript arrives late (the daemon's own rule is "an input transcript
-within 1.5 s"), so a push can start just as the shepherd does.
+within 1.5 s"), so a push can start just as the user does.
 
 - A client with its own voice-activity detector sends
-  `{"type":"speaking","on":true}` when it opens on the shepherd's
+  `{"type":"speaking","on":true}` when it opens on the user's
   speech and `{"type":"speaking","on":false}` when it closes. Once a
   client has sent one `speaking` message, `speaking` is
   **authoritative** for that connection.
@@ -342,7 +342,7 @@ within 1.5 s"), so a push can start just as the shepherd does.
   them. The transcript rule stays in force alongside (whichever holds
   longer): after `silence on:true` the daemon still streams 1 s of
   comfort noise before `audioStreamEnd`, so the model's own turn for
-  the shepherd is still open for a moment.
+  the user is still open for a moment.
 - Logged as `web.client.speaking {client_id, on}` (`speaking`
   messages; gate transitions stay `web.client.silence`).
 
@@ -455,13 +455,13 @@ reliably removes is the *click* — an underrun is a faded pause.
   turn's `voice.audio_timing` has its length). A pending `flush` is not
   replayed.
 - **Pushes wait for a listener.** While no client is attached, the voice
-  session holds every spoken push (idle or interrupt) — a brain reply that
+  session holds every spoken push (idle or interrupt) — an orchestrator reply that
   came after the page closed, an announce, a kept promise — instead of
   making the model say it to nobody: `voice.push_held {text, urgency,
   reason: no_listener, push_id, …}` once per push, then `voice.push_released
   {…, held_ms}` and the usual `voice.push` when a client attaches, where
   it goes out under the usual urgency rules (after the model's turn, never
-  over the shepherd). A push held 5 minutes is dropped
+  over the user). A push held 5 minutes is dropped
   (`voice.push_dropped {reason: no_listener, age_ms}`). Silent pushes are
   context and are never held. Both providers log `voice.client {attached}`
   when the attach state changes; an open GPT-Live session is not kept open
@@ -539,7 +539,7 @@ control messages; the daemon resamples for GPT-Live (which runs at
   `web.client.stats` carries `voice_billed_seconds` and
   `voice_session_open`). The first words after a standby are buffered
   (about 0.5 s of pre-roll plus the ~0.6–0.9 s the session takes to
-  open) and replayed, so nothing the shepherd says is lost; a client
+  open) and replayed, so nothing the user says is lost; a client
   needs no special handling beyond showing `standby` as "ready".
   Disconnecting, muting or letting the silence gate close all let the
   idle timer run.
@@ -553,7 +553,7 @@ there is no rate limiting or lockout on a wrong token.
 `GET /api/state`) →
 `{"chattiness":"normal","levels":["quiet","normal","chatty"],"languages":["zh-Hans","en"],"language_options":[{"code":"en","name":"English","native":"English","providers":["gemini","openai"]},{"code":"zh-Hans","name":"Chinese (Simplified)","native":"简体中文","providers":["gemini","openai"]},…]}`.
 
-- `languages` is the shepherd's language preference, most preferred
+- `languages` is the user's language preference, most preferred
   first (`[]` when none is set). `language_options` is the catalog a
   client offers, in display order (English, 简体中文, 繁體中文, then
   alphabetical); `providers` lists the voice providers that support each
@@ -567,8 +567,8 @@ there is no rate limiting or lockout on a wrong token.
   `400 {"error":…}` for an unknown level or language code (nothing is
   changed). The choice is kept in the state file (`session.chattiness`,
   `session.languages`) and logged as `supervisor.settings`.
-- A changed language preference is information for both brains: the
-  slow brain's state block gets it on its next call, the running voice
+- A changed language preference is information for the voice and the orchestrator: the
+  orchestrator's state block gets it on its next call, the running voice
   session gets it at once as silent context (`supervisor.languages`,
   then a `voice.push`), and every new voice session has it as the last
   line of its system instruction (`voice.system_prompt` carries
@@ -601,11 +601,11 @@ answer a question by tap. All three need the token under "Auth".
   `next_before` as the next `before` to page back, until it is `null`.
   Each item is `{id, ts, kind, text, via?, agent?, urgency?, pending_id?,
   options?, answered?, answer?, resolution?}` with `kind`:
-  - `shepherd` — what the shepherd said (voice transcript fragments
+  - `shepherd` — what the user said (voice transcript fragments
     merged per turn, `via: "voice"`) or typed (`via: "typed"`);
-  - `dog` — what the dog said (output transcript merged per turn, or the
+  - `dog` — what the voice said (output transcript merged per turn, or the
     spoken reply with `--voice=off`);
-  - `push` — a push the dog spoke (never a silent one), with `urgency`
+  - `push` — a push the voice spoke (never a silent one), with `urgency`
     and the `agent` it is about;
   - `approval` — a worker's approval prompt: `text` its summary,
     `agent`, `pending_id`, `options` `[{index, label, keys, default}]`,
@@ -619,7 +619,7 @@ answer a question by tap. All three need the token under "Auth".
   `id` is the first event's id, so items sort and page with the SSE
   stream's ids.
 - **New conversation.** `POST /api/conversation/reset {"via":"app"|
-  "debug"|"voice_page"}` resets the brain's transcript window (a fresh
+  "debug"|"voice_page"}` resets the orchestrator's transcript window (a fresh
   segment; the compaction summary is gone) and the voice model's own
   session (Gemini: a fresh reconnect with no resumption handle;
   GPT-Live: an open billed session closes now, no recap, and reopens
@@ -631,20 +631,20 @@ answer a question by tap. All three need the token under "Auth".
   both carry it), and adds the `notice`/`reset` item above to
   `GET /api/conversation`. The same reset is reachable by a bare voice
   phrase ("start over", "new conversation", "start from scratch", "reset
-  the conversation", "clear the conversation"): the dog asks "Start a
+  the conversation", "clear the conversation"): the voice asks "Start a
   new conversation? Say \"yes, start over\" to confirm.", and only the
   exact confirm phrase ("yes, start over" / "confirm reset"), from real
-  shepherd input, within 20 s, carries it out — a bare "yes" keeps its
+  user input, within 20 s, carries it out — a bare "yes" keeps its
   ordinary approval-prompt meaning, and the fresh session then says one
   short line ("Fresh start. What's next?").
 - **Approve by tap.** `GET /api/state`'s `pending_action` (and the
   `pending.created` event) carries `agent`, `summary`, `question`,
   `command` and `options: [{index, label, keys, default}]`.
   `POST /api/pending/answer {"id": "<pending id>", "option": <index>}`
-  answers it: the tap is recorded as a shepherd input and passes the same
+  answers it: the tap is recorded as a user input and passes the same
   rail as a spoken answer (docs/roles.md "The one rail"), the option's
   keys go to the worker, and the answer is `{"ok": true, "spoken":
-  "Told auth Yes."}`; the voice is told silently ("The shepherd tapped
+  "Told auth Yes."}`; the voice is told silently ("The user tapped
   Yes on auth's question"). A question that is no longer open (answered,
   replaced, or expired and gone from the screen) is `409
   {"error":"that question is no longer open"}`; an option the question
@@ -659,7 +659,7 @@ the daemon tracks (the rows of `GET /api/agents`); any other pane id is
 reachable. A pane id with `:` or `%` is path-escaped as usual.
 
 - **`GET /api/agents/{pane_id}/screen?lines=N&hash=H`** — the agent's
-  current screen: the same herdr read the brain's `read_screen` uses
+  current screen: the same herdr read the orchestrator's `read_screen` uses
   (`pane.read`, source `recent-unwrapped`, ANSI stripped; no model is
   involved). `lines` defaults to 120 and is capped at 500. The answer is
 
@@ -678,7 +678,7 @@ reachable. A pane id with `:` or `%` is path-escaped as usual.
   route stays for older daemons and for one-off reads, where polling
   every 1–2 s is the intended use. A read herdr refuses is `502`. Reading a window does not
   make the agent the conversation's subject: looking is not talking.
-- **`POST /api/agents/{pane_id}/input`** — the CEO operating the window
+- **`POST /api/agents/{pane_id}/input`** — the user operating the window
   himself. Exactly one of:
   - `{"text": "…", "submit": true}` — a prompt, sent as one submission
     (`agent.prompt`, text + Enter; `submit` defaults to true, `false` is
@@ -690,19 +690,19 @@ reachable. A pane id with `:` or `%` is path-escaped as usual.
     `400`), sent as one `pane.send_keys`.
 
   The answer is `{"ok": true, "kind": "prompt"|"keys"|"answer", "spoken":
-  "…"}`. The authority is the CEO's own tap, so this does not pass the
-  brain's approval rail (docs/roles.md "The one rail"); instead every
+  "…"}`. The authority is the user's own tap, so this does not pass the
+  orchestrator's approval rail (docs/roles.md "The one rail"); instead every
   input is logged as `web.agent_input {kind, len}` (a prompt's length,
-  never its text) or `{kind, keys}`, and the brain is told in a
-  transcript line ("the CEO typed a prompt in Auth fix's window: …", "the
-  CEO pressed esc in Auth fix's window") so its picture stays right. When
+  never its text) or `{kind, keys}`, and the orchestrator is told in a
+  transcript line ("the user typed a prompt in Auth fix's window: …", "the
+  User pressed esc in Auth fix's window") so its picture stays right. When
   the keys select one option of the open approval question for that
   agent (the option's own keys or the digit it is listed under), they answer
   it through the tap path (`POST /api/pending/answer`'s
   code): `kind` is `answer`, the pending action is confirmed and cleared
-  (`pending.confirmed {via: "tap"}`), and the voice and brain hear it the
+  (`pending.confirmed {via: "tap"}`), and the voice and orchestrator hear it the
   way they hear a tap. `enter` (and every other key) goes to the pane
-  as it is: the CEO may have moved the cursor with `up`/`down`, so the
+  as it is: the user may have moved the cursor with `up`/`down`, so the
   recorded default is not necessarily what it selects; the transition
   off `blocked` closes the question. A herdr send that fails is `502`.
 
@@ -750,7 +750,7 @@ frame at once and then whenever the window changes.
   so the daemon reads the subscribed window itself, the same `pane.read` the route does: every
   **1 s**, and sooner when the event log shows the watcher's debounced
   `herdr.transition` or a `herdr.send` for that pane (a state change,
-  or input the CEO, the brain or a tap sent it). **Rate cap:** two
+  or input the user, the orchestrator or a tap sent it). **Rate cap:** two
   reads are never less than **250 ms** apart, so at most four frames a
   second and usually one. With one `/ws` client and one subscription
   per client, the daemon reads at most one window this way, however
@@ -769,7 +769,7 @@ frame at once and then whenever the window changes.
 
 Not part of `/ws`: the iOS app registers its APNs device token over
 `POST /api/push/register` and the daemon sends system notifications for
-events that need the shepherd, whether or not a `/ws` client is attached.
+events that need the user, whether or not a `/ws` client is attached.
 The contract (routes, payload, when an alert is sent) is in
 [`push.md`](push.md).
 

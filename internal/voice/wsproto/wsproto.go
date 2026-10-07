@@ -62,8 +62,8 @@ const (
 	// FeaturePush: APNs registration (docs/push.md); absent when the
 	// daemon has no push service.
 	FeaturePush = "push"
-	// FeatureModels: the brain model picker (GET /api/brain/models, PUT
-	// /api/brain/model); absent when the brain is off.
+	// FeatureModels: the orchestrator model picker (GET /api/brain/models, PUT
+	// /api/brain/model); absent when the orchestrator is off.
 	FeatureModels = "models"
 	// FeatureScreen: the agent window over /ws (screen-subscribe,
 	// screen-unsubscribe, screen, screen-error; "Agent window over /ws");
@@ -251,7 +251,7 @@ func Mute(on bool) Message { return Message{Type: TypeMute, On: &on} }
 func Silence(on bool) Message { return Message{Type: TypeSilence, On: &on} }
 
 // Speaking builds a client→server speech-detector message: on means the
-// client hears the shepherd speaking. See docs/ws-contract.md, "Client
+// client hears the user speaking. See docs/ws-contract.md, "Client
 // speech detector".
 func Speaking(on bool) Message { return Message{Type: TypeSpeaking, On: &on} }
 

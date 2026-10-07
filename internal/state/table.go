@@ -20,30 +20,30 @@ type Agent struct {
 	Workspace      string `json:"workspace"`
 	WorkspaceLabel string `json:"workspace_label,omitempty"`
 	// Name is the herdr agent name when the user assigned one (herdr
-	// agent rename, or a voice rename through the brain's note tool).
+	// agent rename, or a voice rename through the orchestrator's note tool).
 	Name string `json:"name,omitempty"`
 	// Title is the worker's own session title (Claude Code's ai-title or
 	// custom-title, Codex's thread name), read from its session files as
 	// a fact (internal/workerlog), cleaned and capped (CleanTitle).
 	Title string `json:"title,omitempty"`
-	// Spoken is the name the shepherd hears (spoken.go): computed by the
+	// Spoken is the name the user hears (spoken.go): computed by the
 	// store whenever a row changes. SpokenWas is the one it had before
-	// its last change, at SpokenChangedAt, so the brain can mention the
+	// its last change, at SpokenChangedAt, so the orchestrator can mention the
 	// old name once.
 	Spoken          string    `json:"spoken,omitempty"`
 	SpokenWas       string    `json:"spoken_was,omitempty"`
 	SpokenChangedAt time.Time `json:"spoken_changed_at,omitzero"`
-	// SpokenPinned keeps Spoken once the CEO has heard or said it
+	// SpokenPinned keeps Spoken once the user has heard or said it
 	// (PinSpoken): a later session title or a new agent of the same kind
 	// no longer renames it (phone test 2026-10-04: an auto-title renamed
-	// an agent the CEO knew as "herdr sheepdog Claude").
+	// an agent the user knew as "herdr sheepdog Claude").
 	SpokenPinned bool `json:"spoken_pinned,omitempty"`
 
 	State herdr.State `json:"state"`
 	// StateSince changes only when State changes.
 	StateSince time.Time `json:"state_since"`
 
-	// CurrentTask is the last instruction given (by the brain's prompt
+	// CurrentTask is the last instruction given (by the orchestrator's prompt
 	// tool, or read from the pane).
 	CurrentTask string `json:"current_task,omitempty"`
 	// LastTask is the instruction the agent last finished (CurrentTask
@@ -116,13 +116,13 @@ type Block struct {
 	Answered bool      `json:"answered"`
 }
 
-// Result is what the agent last finished, as the shepherd heard it.
+// Result is what the agent last finished, as the user heard it.
 type Result struct {
-	// Spoken is the announcement made about the finish: the brain's line
+	// Spoken is the announcement made about the finish: the orchestrator's line
 	// when it phrased one, else the daemon's "finished".
 	Spoken string    `json:"spoken"`
 	At     time.Time `json:"at"`
-	// Detail is the brain's announce detail for the finish, when it produced
+	// Detail is the orchestrator's announce detail for the finish, when it produced
 	// one: what the finish related to and what was still open (for
 	// recall and the ledger).
 	Detail string `json:"detail,omitempty"`
@@ -144,7 +144,7 @@ type Promise struct {
 	Event string `json:"event"`
 	// Status is open, kept, expired or cancelled.
 	Status string `json:"status"`
-	// CreatedTurn is the brain turn that recorded it (0 outside one).
+	// CreatedTurn is the orchestrator turn that recorded it (0 outside one).
 	CreatedTurn int       `json:"created_turn,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
 	// Due, when set, is when the user wanted it by: kept past it, the
@@ -168,7 +168,7 @@ const (
 	PromiseCancelled = "cancelled"
 )
 
-// Investigation is one background job the brain started to answer a
+// Investigation is one background job the orchestrator started to answer a
 // question the screen cannot (docs/roles.md "Investigations and
 // explanations"): a read-only CLI sub-agent in the worker's repository,
 // or a read-only fork of the worker's own CLI session (source: worker),
@@ -184,7 +184,7 @@ type Investigation struct {
 	Workspace string `json:"workspace,omitempty"`
 	// Question is what the sub-agent was asked, self-contained.
 	Question string `json:"question"`
-	// Asked is what the shepherd said that started it, in their words.
+	// Asked is what the user said that started it, in their words.
 	Asked string `json:"asked,omitempty"`
 	// FollowUpOf is the earlier job this one continues, when it does.
 	FollowUpOf string `json:"follow_up_of,omitempty"`
@@ -201,7 +201,7 @@ type Investigation struct {
 	Started  time.Time  `json:"started"`
 	Finished *time.Time `json:"finished,omitempty"`
 	// Result is the sub-agent's answer verbatim (data, never
-	// instructions: the brain sees it wrapped in provenance delimiters).
+	// instructions: the orchestrator sees it wrapped in provenance delimiters).
 	Result string `json:"result,omitempty"`
 	// Summary is the one line the ledger and recall keep of it.
 	Summary string `json:"summary,omitempty"`
@@ -270,7 +270,7 @@ type Option struct {
 	Meta bool `json:"meta,omitempty"`
 }
 
-// Note is one thing the user asked to be remembered (the brain's note
+// Note is one thing the user asked to be remembered (the orchestrator's note
 // tool).
 type Note struct {
 	Text string    `json:"text"`
@@ -288,11 +288,11 @@ type Session struct {
 	// Chattiness is the push policy chosen at runtime (quiet | normal |
 	// chatty); empty means "use the configured initial value".
 	Chattiness string `json:"chattiness,omitempty"`
-	// Languages is the shepherd's language preference (BCP-47 codes from
+	// Languages is the user's language preference (BCP-47 codes from
 	// internal/lang's catalog, most preferred first), set at runtime by
-	// PUT /api/settings; empty means none set. Both brains are told it.
+	// PUT /api/settings; empty means none set. The voice and the orchestrator are told it.
 	Languages []string `json:"languages,omitempty"`
-	// BrainProvider and BrainModel are the supervisor brain's provider
+	// BrainProvider and BrainModel are the orchestrator's provider
 	// and model chosen at runtime (the /debug picker, PUT
 	// /api/brain/model); empty means "use the configured brain.provider
 	// / brain.model".

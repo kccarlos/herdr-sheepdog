@@ -7,7 +7,7 @@ import (
 )
 
 // Run C, H7 (5/5 Vertex runs of bench-unknown-fact): asked "Did
-// bench-claude push its changes yet?", the brain said it had not, from a
+// bench-claude push its changes yet?", the orchestrator said it had not, from a
 // screen that says nothing about pushing. The utterance request now
 // carries what the daemon has on record for the agent the words name,
 // with times, and says outright when there is no journal entry.
@@ -50,7 +50,7 @@ func TestRequestTextCarriesTheRecord(t *testing.T) {
 }
 
 // The record also finds an agent by its spoken name or its session
-// title, the names the CEO actually says.
+// title, the names the user actually says.
 func TestAgentRecordsBySpokenNameAndTitle(t *testing.T) {
 	now := time.Date(2026, 10, 3, 6, 20, 0, 0, time.UTC)
 	clock := func() time.Time { return now }
@@ -73,9 +73,9 @@ func TestAgentRecordsBySpokenNameAndTitle(t *testing.T) {
 }
 
 // Tier-2 bench 2026-10-03 #6: "Let me know when bench-claude is done."
-// reached the brain as "Oh, I know when Bench Squad is done." and the
-// brain invented a rename. The request now states that no agent has the
-// heard name, with the closest names, so the brain can ask.
+// reached the orchestrator as "Oh, I know when Bench Squad is done." and the
+// orchestrator invented a rename. The request now states that no agent has the
+// heard name, with the closest names, so the orchestrator can ask.
 func TestUnmatchedHeardName(t *testing.T) {
 	clock := func() time.Time { return time.Date(2026, 10, 3, 6, 20, 0, 0, time.UTC) }
 	agents := []AgentInfo{
@@ -117,7 +117,7 @@ func TestUnmatchedHeardName(t *testing.T) {
 
 // The #113 echo runs (barge-in-long-answer r3): "Just tell me if it needs
 // anything from me" names no agent, so the request carried no record of
-// the worker that had finished, and the brain said "Nothing yet". Words
+// the worker that had finished, and the orchestrator said "Nothing yet". Words
 // that point at one agent without naming it get the record of the agent
 // in focus; words about everyone still get none.
 func TestAgentRecordsForTheAgentInFocus(t *testing.T) {

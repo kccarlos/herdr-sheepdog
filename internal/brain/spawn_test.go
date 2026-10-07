@@ -59,7 +59,7 @@ func TestPromptToolSpawnArgumentErrors(t *testing.T) {
 	}
 }
 
-// The daemon's rail refusing a spawn (no recent words of the CEO's, the
+// The daemon's rail refusing a spawn (no recent words of the user's, the
 // rate cap) is a brain.rail_blocked, like a refused send_keys.
 func TestPromptToolSpawnRailBlocked(t *testing.T) {
 	h := newHarness(t, braintest.NewModel(

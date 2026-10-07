@@ -318,7 +318,7 @@ func TestDelegationRelaysUtteranceAndAnswersWithCommentary(t *testing.T) {
 	})
 }
 
-// A pending result (the brain's reply comes later as a push, see
+// A pending result (the orchestrator's reply comes later as a push, see
 // brain.reply_wait_s) must not tell the model there is nothing to add.
 func TestPendingDelegationResultDoesNotSayNothingToAdd(t *testing.T) {
 	cfg := testConfig()
@@ -366,7 +366,7 @@ func TestIdleCloseBillsAndStaysArmedForTheNextUtterance(t *testing.T) {
 }
 
 // TestIdleCloseWaitsForSpeechInProgress: loud frames without a
-// transcript yet (the shepherd's first words) hold the idle close off
+// transcript yet (the user's first words) hold the idle close off
 // (seen live: the close fired 0.7 s into an utterance and lost it).
 func TestIdleCloseWaitsForSpeechInProgress(t *testing.T) {
 	cfg := testConfig()
@@ -393,7 +393,7 @@ func TestIdleCloseWaitsForSpeechInProgress(t *testing.T) {
 	}
 }
 
-// TestIdleCloseCountsMutedTimeAsIdle: the shepherd talks, then mutes
+// TestIdleCloseCountsMutedTimeAsIdle: the user talks, then mutes
 // (the push-to-talk rhythm of 2026-09-23); with nothing playing and no
 // push pending, the muted time counts toward IdleClose at once — the
 // loud frames sent just before the mute do not hold the session open as
@@ -420,7 +420,7 @@ func TestIdleCloseCountsMutedTimeAsIdle(t *testing.T) {
 	}
 }
 
-// TestIdleCloseWaitsForADelegationWhileMuted: a muted shepherd waiting
+// TestIdleCloseWaitsForADelegationWhileMuted: a muted user waiting
 // for an answer (delegation in flight) keeps the session: closing it
 // would leave the answer queued until they unmute.
 func TestIdleCloseWaitsForADelegationWhileMuted(t *testing.T) {

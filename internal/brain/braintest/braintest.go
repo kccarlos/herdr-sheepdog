@@ -1,5 +1,5 @@
 // Package braintest holds test doubles for internal/brain shared by the
-// brain's own tests, the supervisor scenarios and the brain-test command:
+// orchestrator's own tests, the supervisor scenarios and the brain-test command:
 // a scripted Model that returns canned responses in order and records what
 // it was asked, and an in-memory Host.
 package braintest
@@ -67,7 +67,7 @@ func (c Call) IsEvent() bool {
 	return false
 }
 
-// System returns the prompt as the brain assembles it: the system
+// System returns the prompt as the orchestrator assembles it: the system
 // instruction text, then the state block (roster, ledger,
 // investigations, time), which travels as the last user content since
 // docs/iteration-2.md WP5 (State returns it alone).
@@ -121,7 +121,7 @@ type Step struct {
 // Model is a scripted brain.Model. Responses are consumed in order; when
 // the script runs out, Default answers (a plain JSON reply when nil).
 // EventDefault, when set, answers every event turn (announce) without
-// consuming the script, so a scripted CEO turn is not thrown off by the
+// consuming the script, so a scripted user turn is not thrown off by the
 // announce turn a block or finish triggers. Delay, when set, is waited
 // before every response (a dev knob: `sheepdog serve --brain=fake` with
 // SHEEPDOG_FAKE_BRAIN_DELAY_MS, to watch turns overlap).
@@ -675,7 +675,7 @@ var (
 	reLastTask = regexp.MustCompile(`(?m)^- ([^:\n]+): last task "((?:[^"\\]|\\.)*)"`)
 	reCEOSaid  = regexp.MustCompile(`User said: "((?:[^"\\]|\\.)*)"`)
 	// The shapes an utterance takes for the reflex's own intent split
-	// (the real brain decides this with a model; this is a stand-in).
+	// (the real orchestrator decides this with a model; this is a stand-in).
 	reNoteWords = regexp.MustCompile(`(?i)^(?:please\s+)?(?:remember|note|keep in mind|don'?t forget)\b`)
 	// reExplainWords is a question the screen is unlikely to answer: the
 	// reflex starts a background investigation for it.
@@ -698,7 +698,7 @@ var (
 	reBriefingLine = regexp.MustCompile(`(?m)^Status as the daemon has it: (.*)$`)
 )
 
-// utteranceKind is the reflex's stand-in for the brain's intent
+// utteranceKind is the reflex's stand-in for the orchestrator's intent
 // decision on a verbatim utterance: a note, a status question, an
 // explanation to investigate, an instruction, or something to look up.
 func utteranceKind(question string) string {
@@ -719,7 +719,7 @@ func utteranceKind(question string) string {
 }
 
 // Reflex returns a Model that answers from what it sees instead of a
-// script, so a whole daemon can run the brain loop without a network:
+// script, so a whole daemon can run the orchestrator loop without a network:
 // `sheepdog serve --brain=fake`. It sorts an utterance itself
 // (utteranceKind: a note, a status question, an explanation to
 // investigate, an instruction — "propose" — or a question — "ask"). An
@@ -794,7 +794,7 @@ func reflex(call Call) (*genai.GenerateContentResponse, error) {
 		}
 		if !forced && !calledSinceEvent(call, brain.ToolRecall) {
 			// A finish: look at the record for the agent first (what the
-			// CEO asked of it), then announce.
+			// user asked of it), then announce.
 			return Response(Step{Calls: []*genai.FunctionCall{FC(brain.ToolRecall, map[string]any{"query": unquote(ev[2])})}, Usage: usage}), nil
 		}
 		return Response(Step{Text: eventReply(call, text, m), Usage: usage}), nil
@@ -805,7 +805,7 @@ func reflex(call Call) (*genai.GenerateContentResponse, error) {
 	req := reRequest.FindStringSubmatch(text[reqs[len(reqs)-1][0]:])
 	kind, question, agent := req[1], unquote(req[2]), unquote(req[3])
 	if question == "" {
-		// The assistant passed no text: the CEO's own words are the
+		// The assistant passed no text: the user's own words are the
 		// request (a bare "let me know when it's done").
 		question = lastCEOUtterance(call)
 	}
@@ -1210,7 +1210,7 @@ func replyFromResult(fr *genai.FunctionResponse) string {
 }
 
 // lastRequest returns the newest request's kind and question in the
-// call (the CEO's own words when the request carried no text).
+// call (the user's own words when the request carried no text).
 func lastRequest(call Call) (kind, question string) {
 	for _, c := range call.Contents {
 		for _, p := range c.Parts {
@@ -1237,7 +1237,7 @@ func briefingLine(text string) string {
 	return "Nothing is running."
 }
 
-// lastCEOUtterance returns the newest "CEO said" line in the call.
+// lastCEOUtterance returns the newest "user said" line in the call.
 func lastCEOUtterance(call Call) string {
 	out := ""
 	for _, c := range call.Contents {

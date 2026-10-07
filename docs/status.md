@@ -7,14 +7,14 @@ code map is [`architecture.md`](architecture.md), every option is in
 [`../CONFIG.md`](../CONFIG.md), and the PR-by-PR history is
 `CHANGELOG.md`.
 
-For agents picking up the work: the working handover, with the CEO's
+For agents picking up the work: the working handover, with the user's
 principles, the latest test results, the decisions waiting and the next
 work queue, is [`handover-2026-10-04.md`](handover-2026-10-04.md). Read it
 after this page.
 
 ## Where main is
 
-`main` = `5506d97` (#186; the dual-brain voice layer landed in #122 and is the adopted design since the CEO's phone test of 2026-10-04; unified roles, roles only, in #185). The v1 plan, the 2026-09-18 redesign and
+`main` = `5506d97` (#186; the dual-brain voice layer landed in #122 and is the adopted design since the user's phone test of 2026-10-04; unified roles, roles only, in #185). The v1 plan, the 2026-09-18 redesign and
 iteration 2's phase-1 work packages (WP1–WP5, WP8, WP9;
 [`iteration-2.md`](iteration-2.md)) are merged.
 
@@ -45,39 +45,39 @@ What is in:
   reconnect; a fresh Gemini session after 30 min away or 2 h of age;
   the recap follows a provider switch; GPT-Live input paced at real time;
   GPT-Live keeps the heard watch (unheard pushes re-queued or reported to
-  the brain, #101).
+  the orchestrator, #101).
 - **Dual-brain voice layer** (#122, [`design/dual-brain.md`](design/dual-brain.md),
   [`eval/dual-brain-2026-10-04.md`](eval/dual-brain-2026-10-04.md)): Gemini
-  Live is the fast brain and owns the conversation; the slow brain owns
+  Live is the voice and owns the conversation; the orchestrator owns
   actions behind the rails. Everything the daemon tells it (answers, worker
   news, focus and names lines, cut-off facts) arrives as a **briefing**, a
   function response, never a user turn; `to_supervisor` answers use the
   same shape and wait up to `brain.reply_wait_s` (default 30, above the
   25 s utterance budget). The Gemini heard watch and re-queue, the
   self-relay and rescue guards and the echo text guard were removed: the
-  phone's playback report becomes a cut-off fact for the fast brain, words
-  that began over the voice's own line a timing fact for the slow brain.
-- **Fast brain toward facts** (#141, prompt v5.1,
+  phone's playback report becomes a cut-off fact for the voice, words
+  that began over the voice's own line a timing fact for the orchestrator.
+- **Fast orchestrator toward facts** (#141, prompt v5.1,
   [`eval/fast-brain-facts-2026-10-04.md`](eval/fast-brain-facts-2026-10-04.md)):
   grounding first; the voice answers only its own last line, word
   meanings and small talk, and hands off anything new, comparisons,
   "why", history and doubt; asks when the agent is unclear. Every
   briefing carries its age at delivery and the agent's spoken name and
-  state; slow-brain tool timeouts reach it as `not_verified`; a spoken
-  briefing that drew no speech is reported to both brains
+  state; orchestrator tool timeouts reach it as `not_verified`; a spoken
+  briefing that drew no speech is reported to the voice and the orchestrator
   (`voice.briefing_unvoiced`); the roster says "finished work N min
-  ago" instead of splicing a report; a spoken name the CEO heard or said
+  ago" instead of splicing a report; a spoken name the user heard or said
   is pinned (`supervisor.name_pinned`); a new agent herdr does not see
-  after 20 s is reported to the CEO with its pane's last lines, and new
+  after 20 s is reported to the user with its pane's last lines, and new
   panes get `DISABLE_AUTO_UPDATE=true`. Tier-2 A/B (prompt only, same
   binary): phone-test cases 9/18 → 11/18, hand-off 75 % → 90 %, rewind
   prompts on an ambiguous "it" 4 → 0, existing suite 21/36 → 21/36;
   self-answer ≈ 1.2 s vs hand-off ≈ 5.5 s.
 - **Language preference** (#142, [`design/language-preference.md`](design/language-preference.md)):
-  the shepherd's languages, most preferred first, are a runtime setting
+  the user's languages, most preferred first, are a runtime setting
   (`PUT /api/settings {"languages": [...]}`, the iOS app's Settings ▸
-  Languages; state file `session.languages`). Both brains are told it as
-  information: a `## Language` section in the slow brain's state block,
+  Languages; state file `session.languages`). The voice and the orchestrator are told it as
+  information: a `## Language` section in the orchestrator's state block,
   the last line of the voice's system instruction (Gemini Live and
   GPT-Live), and a silent line to a running voice session on change.
   The catalog is Gemini Live's official language table intersected
@@ -86,10 +86,10 @@ What is in:
 - **Baseline information fixes** (#146, items from
   [`eval/baseline-2026-10-05.md`](eval/baseline-2026-10-05.md); no new
   judgment in code, no new action rails): a decision-open fact on every
-  announcement for both brains (`decision_open` in the briefing,
+  announcement for the voice and the orchestrator (`decision_open` in the briefing,
   "Decisions open right now" in the announce turn); task title,
   instruction and last activity in the briefing's `agent_state`; the
-  worker's newest report in full in the slow brain's agent record;
+  worker's newest report in full in the orchestrator's agent record;
   prompt v5.2 and RULES.md (technical terms stay English in Chinese, "not
   yet / 先不要 / 等一下" is a deferral, a question is never an
   instruction); tolerant `options` decode and one same-provider retry on
@@ -100,7 +100,7 @@ What is in:
   `esc` on a deferral 1 → 0, "race detector" kept in English in Chinese
   answers; results in
   [`bench/results/2026-10-05-info5/`](bench/results/2026-10-05-info5/).
-- **Brain:** stateful agent over a transcript window with providers
+- **Orchestrator:** stateful agent over a transcript window with providers
   `gemini`, `vertex` and `deepseek` and a runtime model switch; the ear
   contract (`spoken` / `ask` / `detail`); push judgment under the
   chattiness ceiling; promises; background investigations, including
@@ -110,15 +110,15 @@ What is in:
   budget, and one-step provider failover on 429 / 5xx / timeout with a
   spoken notice after three in a row (fake-model tests only; `eval sim
   --fallback-provider` can now exercise it live, not yet run).
-- **Supervisor:** every utterance runs on the shepherd's recorded words;
+- **Supervisor:** every utterance runs on the user's recorded words;
   the one rail in code (`supervisor.authorise_window_s`); the stop
-  procedure, acknowledged by a code sentence with no brain turn;
+  procedure, acknowledged by a code sentence with no orchestrator turn;
   replies handed back as the call's own result within `brain.reply_wait_s` (default 30 s), later as a briefing; "New conversation".
-- **Current focus:** after a brain reply the voice gets one silent line
+- **Current focus:** after an orchestrator reply the voice gets one silent line
   (agent in focus, open question, key points) so it resolves "it" and
   answers follow-ups ([`timelines.md`](timelines.md); #101).
 - **Names:** every agent has a pane id, an alias and a spoken name (from
-  its project, kind and session title; a CEO-given name wins), which the
+  its project, kind and session title; a user-given name wins), which the
   voice also gets in its vocabulary; "call that one docs" renames by voice
   ([`roles.md`](roles.md) "Agent names").
 - **Surfaces:** `/voice`, `/debug` (Swimlane, Conversation, Supervisor,
@@ -142,10 +142,10 @@ What is in:
   (Sonnet segment judge): segment Understood 92 % on the pre-#185 main,
   89 % for the roles-only prompts (difference not significant).
 - **Measurement:** `sheepdog eval` (offline L0 corpus), `sheepdog eval
-  sim` (a simulated CEO plus an LLM judge; `--live` for the real brain),
+  sim` (a simulated CEO plus an LLM judge; `--live` for the real orchestrator),
   `sheepdog scorecard`, `sheepdog audio-e2e`, and `sheepdog bench` (tier-2
   voice benchmark, [`bench/README.md`](bench/README.md)).
-- **Observability:** `turn_id` / `utterance_id` on events, `turn.latency` per CEO utterance (scorecard "Turn latency"), the observe-only daemon watchdog (`daemon.heartbeat_missed` / `_ok`); [`architecture.md`](architecture.md) "Observers".
+- **Observability:** `turn_id` / `utterance_id` on events, `turn.latency` per user utterance (scorecard "Turn latency"), the observe-only daemon watchdog (`daemon.heartbeat_missed` / `_ok`); [`architecture.md`](architecture.md) "Observers".
 
 ## Verified live
 
@@ -208,31 +208,31 @@ What is in:
 
 ## Open
 
-- **Next work (agreed, not started; see the handover's queue):** fast-brain
+- **Next work (agreed, not started; see the handover's queue):** voice
   prompt toward facts (hand off anything new, comparative or historical;
   ask when unsure), briefings carrying their age and a finished flag, tool
   timeouts reported as not verified, unvoiced briefings reported to the
-  fast brain, the roster formatter, stable agent names, reliable spawn
-  launch; then a **language preference in Settings** fed into both brains'
+  voice, the roster formatter, stable agent names, reliable spawn
+  launch; then a **language preference in Settings** fed into the voice and the orchestrator'
   prompts. Prompt and information changes only, no judgment in code.
-- **Brain failover is broken in practice:** DeepSeek returns 402
+- **Orchestrator failover is broken in practice:** DeepSeek returns 402
   Insufficient Balance (since 2026-10-03), so a Vertex timeout ends in the
-  fallback line. The CEO is to top it up or pick another fallback. The live
-  brain is Vertex `gemini-3.5-flash`; `gemini-3.8-flash` on Vertex has
+  fallback line. The user is to top it up or pick another fallback. The live
+  orchestrator is Vertex `gemini-3.5-flash`; `gemini-3.8-flash` on Vertex has
   bursts of 20-50 s steps and 504s.
-- **Gemini Live loses context on the second and later resumes** (a handle from a resumed connection keeps only that connection's content; first resume lossless; [`research/live-resume-context-2026-10-04.md`](research/live-resume-context-2026-10-04.md)). Worked around (CEO option 1, #139): the daemon never resumes a resumed session; the reconnect after one opens a fresh session re-seeded from the recap and the recent briefings (`voice.handle_dropped {reason: resumed_twice}`). Bench `resume-recall-twice` (two recycles, a turn between): both facts recalled 5/5 with the rail, 2/3 without. `voice.resume_context` and the scorecard's resume-retention line (now with a "fresh instead of a 2nd resume" count) track it; `cmd/livecanary -arm chain` is the platform canary (still 0/8: the platform is unchanged).
+- **Gemini Live loses context on the second and later resumes** (a handle from a resumed connection keeps only that connection's content; first resume lossless; [`research/live-resume-context-2026-10-04.md`](research/live-resume-context-2026-10-04.md)). Worked around (user option 1, #139): the daemon never resumes a resumed session; the reconnect after one opens a fresh session re-seeded from the recap and the recent briefings (`voice.handle_dropped {reason: resumed_twice}`). Bench `resume-recall-twice` (two recycles, a turn between): both facts recalled 5/5 with the rail, 2/3 without. `voice.resume_context` and the scorecard's resume-retention line (now with a "fresh instead of a 2nd resume" count) track it; `cmd/livecanary -arm chain` is the platform canary (still 0/8: the platform is unchanged).
 - **Gemini Live mid-answer pauses** (~7 s, Vertex `gemini-3.8-live` only,
   [`research/live-pauses-2026-10-04.md`](research/live-pauses-2026-10-04.md)):
   trial `gemini.backend=aistudio` pending.
-- **Pending decision (CEO testing first): should every pending approval
-  notify the phone?** Today the APNs notification follows the brain's
-  announce decision, so a block the brain skips sends no notification.
+- **Pending decision (user testing first): should every pending approval
+  notify the phone?** Today the APNs notification follows the orchestrator's
+  announce decision, so a block the orchestrator skips sends no notification.
   The alternative notifies for every pending answer-prompt action
-  regardless of the brain; it is a one-line change in
+  regardless of the orchestrator; it is a one-line change in
   `internal/supervisor/notify.go`.
-- **Later options:** a brain-written compaction as the reseed source
+- **Later options:** a orchestrator-written compaction as the reseed source
   instead of the verbatim recap (needs a good prompt); a "current focus"
-  silent context from brain to voice after each brain turn (agent in
+  silent context from orchestrator to voice after each orchestrator turn (agent in
   focus, open question, key points), now that the bench fixes have landed.
 - **A stop does not drop a queued instruction:** a single Ctrl-C to a
   busy Claude Code pane interrupts the running turn but the queued prompt

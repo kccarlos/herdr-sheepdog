@@ -47,7 +47,7 @@ type ResumeDay struct {
 	// content (docs/research/live-resume-context-2026-10-04.md).
 	// FreshAfterResume counts the reconnects that opened a fresh session
 	// instead of resuming a resumed one (voice.handle_dropped reason
-	// resumed_twice, the CEO's option 1): re-seeded, not resumed, so not
+	// resumed_twice, the user's option 1): re-seeded, not resumed, so not
 	// rows here.
 	FreshAfterResume int     `json:"fresh_after_resume"`
 	FirstN           int     `json:"first_n"`

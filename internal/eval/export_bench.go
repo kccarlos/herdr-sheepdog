@@ -27,7 +27,7 @@ func JudgeAll(ctx context.Context, j Judge, criteria []string, transcript, facts
 // scenario's expectations.
 func ActionFailures(exp SimExpect, acts []SimLine) []Failure { return actionFailures(exp, acts) }
 
-// RenderTranscript is a conversation as the CEO lived it, for the judge.
+// RenderTranscript is a conversation as the user lived it, for the judge.
 func RenderTranscript(convo []SimLine) string { return renderSim(convo) }
 
 // StatusOf derives a run's status from its failures.

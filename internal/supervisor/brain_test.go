@@ -15,7 +15,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
 
-// withBrain attaches a brain over the scripted model to the harness.
+// withBrain attaches an orchestrator over the scripted model to the harness.
 func withBrain(t *testing.T, m *braintest.Model, log *recLog, dir string) func(*Config) {
 	t.Helper()
 	b, err := brain.New(brain.Config{DataDir: dir, RunID: "t"}, m, log)
@@ -26,7 +26,7 @@ func withBrain(t *testing.T, m *braintest.Model, log *recLog, dir string) func(*
 	return func(c *Config) { c.Brain = b }
 }
 
-// newBrainHarness builds a harness with the brain attached (the log and
+// newBrainHarness builds a harness with the orchestrator attached (the log and
 // dir are shared so withBrain can be a Config option).
 func newBrainHarness(t *testing.T, m *braintest.Model, opts ...func(*Config)) *harness {
 	t.Helper()
@@ -39,7 +39,7 @@ func newBrainHarness(t *testing.T, m *braintest.Model, opts ...func(*Config)) *h
 		m.EventDefault = braintest.NothingToAdd()
 	}
 	h := newHarness(t, append([]func(*Config){withBrain(t, m, log, dir), func(c *Config) { c.DataDir = dir }}, opts...)...)
-	h.log = log // the brain logs there; the supervisor's own logger is the harness one
+	h.log = log // the orchestrator logs there; the supervisor's own logger is the harness one
 	h.sup.log = log
 	h.client.Log = log
 	return h
@@ -78,7 +78,7 @@ func TestBrainAnswersAskWithTools(t *testing.T) {
 	}
 }
 
-// A brain that cannot answer leaves the daemon with one honest line and
+// A orchestrator that cannot answer leaves the daemon with one honest line and
 // nothing else: no second model phrases anything, no roster answers a
 // question that may not have been about status, and an instruction is
 // never sent on a guess (docs/roles.md "Hot paths that stay code").
@@ -106,7 +106,7 @@ func TestBrainFallbackSaysSoAndSendsNothing(t *testing.T) {
 	}
 }
 
-// An instruction the brain sends with its prompt tool is echoed, becomes
+// An instruction the orchestrator sends with its prompt tool is echoed, becomes
 // the in-flight send_instruction and can still be stopped (the stop
 // procedure's interrupt phase).
 func TestBrainProposeSendsPromptAndCancelInterrupts(t *testing.T) {
@@ -119,7 +119,7 @@ func TestBrainProposeSendsPromptAndCancelInterrupts(t *testing.T) {
 	h.addAgent("w6:p1", "docs", "claude", herdr.StateIdle)
 	res := h.say("tell auth to rerun the flaky test")
 	// An utterance is not classified, so its reply is idle unless the
-	// shepherd must act (the old propose tool always interrupted).
+	// user must act (the old propose tool always interrupted).
 	if res.Spoken != "Telling auth to rerun the flaky test. Sent." || res.Scheduling != voice.UrgencyIdle {
 		t.Errorf("result = %+v", res)
 	}
@@ -162,7 +162,7 @@ func TestBrainSendKeysPassesTheRail(t *testing.T) {
 	if _, has := h.pending(); !has {
 		t.Fatal("no pending prompt")
 	}
-	// Not a bare answer (that is the fast path's): the brain answers it.
+	// Not a bare answer (that is the fast path's): the orchestrator answers it.
 	res := h.say("tell auth yes go ahead")
 	if res.Spoken != "Told auth yes." {
 		t.Errorf("result = %+v", res)
@@ -176,7 +176,7 @@ func TestBrainSendKeysPassesTheRail(t *testing.T) {
 	if h.log.count("pending.confirmed") != 1 || h.log.count("brain.rail_blocked") != 0 {
 		t.Errorf("confirmed=%d rail_blocked=%d", h.log.count("pending.confirmed"), h.log.count("brain.rail_blocked"))
 	}
-	// Call 0 was the block's announce event turn; the CEO turn is 1–2.
+	// Call 0 was the block's announce event turn; the user turn is 1–2.
 	if sys := m.Calls()[1].System(); !strings.Contains(sys, "WAITING FOR AN ANSWER (asked ") || !strings.Contains(sys, "ago): would you like to run the following command") || !strings.Contains(sys, `"Yes, proceed" -> keys [y]`) {
 		t.Errorf("roster lacks the prompt:\n%s", sys)
 	}
@@ -228,7 +228,7 @@ func TestBrainSendKeysBlockedByTheRail(t *testing.T) {
 // the one slot), a later send_keys revives it from the screen and the
 // rail's normal checks apply to what is actually there
 // (docs/history/issues-2026-09-18.md "an expired approval prompt can never
-// be approved"). Here it is dropped while the brain's turn runs.
+// be approved"). Here it is dropped while the orchestrator's turn runs.
 func TestBrainSendKeysRevivesADroppedPrompt(t *testing.T) {
 	var h *harness
 	m := braintest.NewModel(
@@ -312,7 +312,7 @@ func TestBrainInterruptSuppressesFinished(t *testing.T) {
 	}
 }
 
-// run_cli is the only way to the CLI query tool now: the brain asks,
+// run_cli is the only way to the CLI query tool now: the orchestrator asks,
 // the supervisor runs it in the agent's workspace and wraps the output
 // as worker data.
 func TestBrainRunCLIUsesTheQuerier(t *testing.T) {
@@ -334,7 +334,7 @@ func TestBrainRunCLIUsesTheQuerier(t *testing.T) {
 	if out := m.Calls()[1].Text(); !strings.Contains(out, "agent=auth source=cli") || !strings.Contains(out, "QUERY:why did the login test fail?") {
 		t.Errorf("the CLI output did not reach the brain:\n%s", out)
 	}
-	// With no CLI tool the brain is told so rather than left waiting.
+	// With no CLI tool the orchestrator is told so rather than left waiting.
 	h.sup.querier = nil
 	m.Add(braintest.Step{Calls: []*genai.FunctionCall{braintest.FC(brain.ToolRunCLI, map[string]any{"agent": "auth", "question": "why?"})}})
 	m.Add(braintest.Step{Text: braintest.Reply("I cannot look into the repository here.", "")})
@@ -372,7 +372,7 @@ func TestBrainIngestsSupervisorEvents(t *testing.T) {
 	}
 }
 
-// Without a brain the transcript hooks are no-ops and a request gets the
+// Without an orchestrator the transcript hooks are no-ops and a request gets the
 // roster sentence with no detail.
 func TestNoBrainIsInert(t *testing.T) {
 	h := newHarness(t)
@@ -402,7 +402,7 @@ func TestToolResultFromReply(t *testing.T) {
 }
 
 // The ear contract (docs/iteration-2.md WP1): the 2026-09-24 line the
-// shepherd heard (101 words, dashes, two PR numbers), said twice over so it
+// user heard (101 words, dashes, two PR numbers), said twice over so it
 // is a runaway, is cut at the runaway cap, the ask is heard last, and the
 // overflow lands in detail after the plain explanation.
 func TestToolResultFromEarContract(t *testing.T) {
@@ -435,9 +435,9 @@ func TestToolResultFromEarContract(t *testing.T) {
 	}
 }
 
-// Campaign D N7 (bench-pronoun-followup r5): the brain typed "Also add a
+// Campaign D N7 (bench-pronoun-followup r5): the orchestrator typed "Also add a
 // changelog entry for this change." into bench-claude twice in one turn.
-// The second identical instruction is not sent; the brain gets the fact.
+// The second identical instruction is not sent; the orchestrator gets the fact.
 func TestSameInstructionTwiceInATurnIsSentOnce(t *testing.T) {
 	text := "Also add a changelog entry for this change."
 	m := braintest.NewModel(
@@ -461,7 +461,7 @@ func TestSameInstructionTwiceInATurnIsSentOnce(t *testing.T) {
 }
 
 // The #113 echo runs (barge-in-long-answer r3): after an answer about
-// docs, "Just tell me if it needs anything from me" reaches the brain
+// docs, "Just tell me if it needs anything from me" reaches the orchestrator
 // with docs' record — finished, and what it last did — though the words
 // name no agent.
 func TestUtteranceAboutItCarriesTheFocusRecord(t *testing.T) {

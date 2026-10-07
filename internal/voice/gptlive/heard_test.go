@@ -87,10 +87,10 @@ func TestGPTLiveParaphrasedPushIsHeard(t *testing.T) {
 	}
 }
 
-// TestGPTLiveUnheardNeedsYouPushIsRequeued: the shepherd starts talking
+// TestGPTLiveUnheardNeedsYouPushIsRequeued: the user starts talking
 // just after an approval line went out, and the model answers them
 // instead (run 2, 00:48:38): the line is judged unheard (user_turn),
-// reported, and re-queued once at idle after the shepherd's turn and its
+// reported, and re-queued once at idle after the user's turn and its
 // reply.
 func TestGPTLiveUnheardNeedsYouPushIsRequeued(t *testing.T) {
 	shortSettle(t)
@@ -132,7 +132,7 @@ func TestGPTLiveUnheardNeedsYouPushIsRequeued(t *testing.T) {
 }
 
 // TestGPTLiveUnheardNewsGoesToTheSupervisor: plain news nobody owes a
-// hearing of is reported (the supervisor tells the brain) and not
+// hearing of is reported (the supervisor tells the orchestrator) and not
 // re-queued; an approval the open check says is answered is dropped.
 func TestGPTLiveUnheardNewsGoesToTheSupervisor(t *testing.T) {
 	shortSettle(t)

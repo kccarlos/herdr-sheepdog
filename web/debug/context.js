@@ -1,4 +1,4 @@
-// Context tab of /debug: the logic behind the two panes (the brain's
+// Context tab of /debug: the logic behind the two panes (the orchestrator's
 // exact request on the left, the voice model's reconstructed context on
 // the right; docs/architecture.md "Context capture"). Pure functions over
 // the /api/context/* responses, so node --test covers them; the DOM lives
@@ -12,14 +12,14 @@ export const CLASSES = [
   { id: 'system', label: 'system / prompt' },
   { id: 'tools', label: 'tool declarations' },
   { id: 'meta', label: 'request settings' },
-  { id: 'shepherd', label: 'shepherd' },
+  { id: 'shepherd', label: 'user' },
   { id: 'audio', label: 'audio (no transcript)' },
   { id: 'voice', label: 'voice said' },
-  { id: 'request', label: 'request to the brain' },
-  { id: 'brain', label: 'brain' },
+  { id: 'request', label: 'request to the orchestrator' },
+  { id: 'brain', label: 'orchestrator' },
   { id: 'tool_call', label: 'tool call' },
   { id: 'tool_result', label: 'tool result' },
-  { id: 'worker', label: 'worker / flock' },
+  { id: 'worker', label: 'worker' },
   { id: 'untrusted', label: 'worker output (untrusted)' },
   { id: 'push', label: 'push' },
   { id: 'compaction', label: 'compaction summary' },
@@ -34,7 +34,7 @@ export function classOf(cls) {
   return `cx-${CLASS_IDS.has(cls) ? cls : 'meta'}`;
 }
 
-/** The brain's collapsible groups, in order; system and tools start closed. */
+/** The orchestrator's collapsible groups, in order; system and tools start closed. */
 const BRAIN_GROUPS = [
   { id: 'system', label: 'system instruction', collapsed: true },
   { id: 'tools', label: 'tool declarations', collapsed: true },
@@ -58,7 +58,7 @@ export function diffState(key, diff) {
 /**
  * The rendering model of one pane: its sections grouped into collapsible
  * blocks, each section with its css class, diff state and tokens, the
- * pieces the diff says are gone, and the totals. `pane` is 'brain' or
+ * pieces the diff says are gone, and the totals. `pane` is 'orchestrator' or
  * 'voice'; `resp` the API response.
  */
 export function paneModel(pane, resp) {
@@ -83,7 +83,7 @@ export function paneModel(pane, resp) {
       key: s.key, label: s.label, cls: s.class, css: classOf(s.class), text: s.text || '', tokens: s.tokens || 0,
       links: s.links || [], path: s.path || '', raw: s.raw, role: s.role || '', pruned: !!s.pruned, current: !!s.current,
       seq: s.seq || 0, diff: diffState(s.key, diff),
-      // A voice system prompt or tool list starts closed, like the brain's.
+      // A voice system prompt or tool list starts closed, like the orchestrator's.
       collapsed: pane === 'voice' && (s.class === 'system' || s.class === 'tools'),
     };
     g.sections.push(item);
@@ -101,7 +101,7 @@ export function rawText(resp) {
 }
 
 /**
- * The budget line of the brain pane: the request's estimated tokens
+ * The budget line of the orchestrator pane: the request's estimated tokens
  * against brain.window_tokens (which bounds the transcript window only:
  * the system prompt and tools come on top, so the messages are compared).
  */
@@ -135,14 +135,14 @@ export function counterparts(links, otherIndex) {
 }
 
 /**
- * The scrubber's points: every brain step and voice turn of the
- * timeline, in time order (a brain step before a voice turn at the same
+ * The scrubber's points: every orchestrator step and voice turn of the
+ * timeline, in time order (an orchestrator step before a voice turn at the same
  * instant), each {pane, id, ts, label}.
  */
 export function interleave(timeline) {
   const pts = [];
   for (const s of (timeline && timeline.brain) || []) {
-    pts.push({ pane: 'brain', id: s.step, ts: s.ts, t: Date.parse(s.ts), label: `brain step ${s.step} · turn ${s.turn}.${s.turn_step} ${s.kind}` });
+    pts.push({ pane: 'brain', id: s.step, ts: s.ts, t: Date.parse(s.ts), label: `orchestrator step ${s.step} · turn ${s.turn}.${s.turn_step} ${s.kind}` });
   }
   for (const v of (timeline && timeline.voice) || []) {
     pts.push({ pane: 'voice', id: v.turn, ts: v.ts, t: Date.parse(v.ts), label: `voice turn ${v.turn} · ${v.label}` });
@@ -152,7 +152,7 @@ export function interleave(timeline) {
 }
 
 /**
- * What each pane shows at scrubber position i: the newest brain step and
+ * What each pane shows at scrubber position i: the newest orchestrator step and
  * the newest voice turn at or before it (0 when there is none yet).
  */
 export function pointsAt(points, i) {

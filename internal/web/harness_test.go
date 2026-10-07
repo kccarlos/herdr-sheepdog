@@ -173,9 +173,9 @@ type harness struct {
 	session2 *fakeSession
 	sw       *voice.Switcher
 	watcher  *fakeWatcher
-	// model is the brain's scripted model when harnessOpts.brain is set.
+	// model is the orchestrator's scripted model when harnessOpts.brain is set.
 	model *braintest.Model
-	// brain is the brain when harnessOpts.brain is set.
+	// orchestrator is the orchestrator when harnessOpts.brain is set.
 	brain  *brain.Brain
 	cancel context.CancelFunc
 }
@@ -191,7 +191,7 @@ type harnessOpts struct {
 	// reloadPrompts backs POST /api/prompts/reload; nil leaves it unset
 	// (503).
 	reloadPrompts func() []prompts.File
-	// brain attaches a brain over the reflex fake model (--brain=fake)
+	// orchestrator attaches an orchestrator over the reflex fake model (--brain=fake)
 	// to the supervisor and the server; providers, when set, registers
 	// a second reflex provider "deepseek" (Catalog2) and lists gemini,
 	// deepseek and an unavailable "openai" through Deps.BrainProviders.

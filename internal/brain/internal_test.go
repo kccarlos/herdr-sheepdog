@@ -42,7 +42,7 @@ func payload(e logging.Line) map[string]any {
 	return m
 }
 
-// The turn lock hands over to CEO waiters first, survives a cancelled
+// The turn lock hands over to user waiters first, survives a cancelled
 // waiter, and keeps at most one event waiter per key: a newer event turn
 // about the same agent replaces the queued one, which gets ErrCoalesced.
 func TestTurnLock(t *testing.T) {

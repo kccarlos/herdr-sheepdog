@@ -29,7 +29,7 @@ import (
 func printBrainTestUsage(w io.Writer) {
 	fprintln(w, "usage: sheepdog brain-test --question \"Q\" [flags]")
 	fprintln(w, "")
-	fprintln(w, "Runs one supervisor-brain utterance turn — the shepherd's words, relayed through")
+	fprintln(w, "Runs one orchestrator utterance turn — the user's words, relayed through")
 	fprintln(w, "to_supervisor exactly as the daemon does — against a mock herdr with one")
 	fprintln(w, "agent whose screen is a testdata/herdr fixture, and prints the reply as JSON.")
 	fprintln(w, "Every event (brain.turn, brain.step, brain.tool_call/tool_result, herdr.read,")
@@ -38,7 +38,7 @@ func printBrainTestUsage(w io.Writer) {
 	fprintln(w, "flags:")
 	fprintln(w, "  --config PATH       config file (default ~/.config/sheepdog/config.toml)")
 	fprintln(w, "  --env-file PATH     load KEY=VALUE lines into the environment first")
-	fprintln(w, "  --question TEXT     the shepherd's words, verbatim (the brain decides what they are)")
+	fprintln(w, "  --question TEXT     the user's words, verbatim (the orchestrator decides what they are)")
 	fprintln(w, "  --kind KIND         accepted and ignored (every request is an utterance now)")
 	fprintln(w, "  --agent ALIAS       accepted and ignored (an utterance carries no agent hint)")
 	fprintln(w, "  --alias NAME        the mock agent's alias (default auth)")
@@ -47,10 +47,10 @@ func printBrainTestUsage(w io.Writer) {
 	fprintln(w, "                      the supervisor's block chain first)")
 	fprintln(w, "  --fixture NAME      screen fixture under testdata/herdr, or a path (default")
 	fprintln(w, "                      codex-after-approval.screen.txt)")
-	fprintln(w, "  --transcript PATH   a brain transcript (JSONL) to seed the run with")
-	fprintln(w, "  --say TEXT          a CEO utterance heard before the request (repeatable)")
-	fprintln(w, "  --provider ID       brain provider: gemini | deepseek | vertex (default config brain.provider)")
-	fprintln(w, "  --model NAME        brain model (default config brain.model)")
+	fprintln(w, "  --transcript PATH   an orchestrator transcript (JSONL) to seed the run with")
+	fprintln(w, "  --say TEXT          a user utterance heard before the request (repeatable)")
+	fprintln(w, "  --provider ID       orchestrator provider: gemini | deepseek | vertex (default config brain.provider)")
+	fprintln(w, "  --model NAME        orchestrator model (default config brain.model)")
 	fprintln(w, "  --thinking LEVEL    Gemini thinking level: minimal | low | medium | high (default low;")
 	fprintln(w, "                      DeepSeek's thinking comes from [deepseek])")
 	fprintln(w, "  --prompts-dir PATH  prompt override directory (default config prompts.dir)")
@@ -89,9 +89,9 @@ func parseBrainTestFlags(args []string, stderr io.Writer) (brainTestOpts, int, b
 	fs.StringVar(&o.st, "state", "idle", "mock agent state")
 	fs.StringVar(&o.fixture, "fixture", "codex-after-approval.screen.txt", "screen fixture")
 	fs.StringVar(&o.transcript, "transcript", "", "transcript to seed")
-	fs.Var(&o.say, "say", "CEO utterance (repeatable)")
-	fs.StringVar(&o.provider, "provider", "", "brain provider")
-	fs.StringVar(&o.model, "model", "", "brain model")
+	fs.Var(&o.say, "say", "user utterance (repeatable)")
+	fs.StringVar(&o.provider, "provider", "", "orchestrator provider")
+	fs.StringVar(&o.model, "model", "", "orchestrator model")
 	fs.StringVar(&o.thinking, "thinking", "", "thinking level")
 	fs.StringVar(&o.promptsDir, "prompts-dir", "", "prompt override directory (default config prompts.dir)")
 	fs.DurationVar(&o.timeout, "timeout", 0, "turn budget")
@@ -209,7 +209,7 @@ func runBrainTest(ctx context.Context, args []string, stdout, stderr io.Writer) 
 
 	start := time.Now()
 	// Typed, as far as the one rail is concerned: the question is the
-	// shepherd's own words, and it reaches the brain exactly as said.
+	// user's own words, and it reaches the orchestrator exactly as said.
 	sup.ShepherdInput(supervisor.InputTyped, o.question)
 	res, err := sup.ToSupervisor(ctx, o.question)
 	b.Quiesce()
@@ -276,7 +276,7 @@ func brainTestModel(o brainTestOpts, cfg config.Config, log logging.Logger) (bra
 }
 
 // brainTestSupervisor builds a supervisor over a mock herdr and a fresh
-// state table under dir, with b as its brain.
+// state table under dir, with b as its orchestrator.
 func brainTestSupervisor(dir, alias string, b *brain.Brain, log logging.Logger, stderr io.Writer) (*supervisor.Supervisor, *inject.Herdr, error) {
 	store, err := state.Open(filepath.Join(dir, "state.json"), state.Options{Aliases: map[string]string{brainTestPane: alias}, Warn: stderr})
 	if err != nil {

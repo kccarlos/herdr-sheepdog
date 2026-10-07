@@ -7,7 +7,7 @@ import (
 )
 
 // The roster says how long a prompt has waited (docs/history/bench-2026-10-03.md
-// #8): past the fast-path minute the CEO's words reach the brain, which
+// #8): past the fast-path minute the user's words reach the orchestrator, which
 // weighs that fact itself.
 func TestRosterSaysHowLongAPromptWaited(t *testing.T) {
 	now := time.Date(2026, 10, 3, 0, 3, 13, 0, time.UTC)

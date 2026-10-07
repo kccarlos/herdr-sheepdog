@@ -18,7 +18,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
 
-// promiseModel scripts one CEO turn that sends an instruction and
+// promiseModel scripts one user turn that sends an instruction and
 // records a promise (the combined "run the tests and let me know when
 // it's done"), and answers announce turns that keep a promise with one
 // line (idle, the promise's id) and the others with nothing to add.
@@ -39,7 +39,7 @@ func promiseModel() *braintest.Model {
 	return m
 }
 
-// combined has the shepherd say the combined utterance and checks the
+// combined has the user say the combined utterance and checks the
 // promise was recorded.
 func combined(h *harness) state.Promise {
 	h.t.Helper()
@@ -54,8 +54,8 @@ func combined(h *harness) state.Promise {
 	return open[0]
 }
 
-// A CEO turn records the promise through the promise tool: persisted in
-// the state file, logged, in the brain's transcript, and the instruction
+// A user turn records the promise through the promise tool: persisted in
+// the state file, logged, in the orchestrator's transcript, and the instruction
 // went in the same turn.
 func TestPromiseCreatedFromCEOTurn(t *testing.T) {
 	h := newBrainHarness(t, promiseModel())
@@ -93,7 +93,7 @@ func TestPromiseCreatedFromCEOTurn(t *testing.T) {
 }
 
 // The promise is kept at the finish whatever the chattiness level: the
-// brain's announce line (D9-scrubbed) is the one line spoken for the
+// orchestrator's announce line (D9-scrubbed) is the one line spoken for the
 // finish — the template sentence is not spoken as well — at idle
 // urgency, marked kept, logged.
 func TestPromiseKeptAtEveryLevel(t *testing.T) {
@@ -131,7 +131,7 @@ func TestPromiseKeptAtEveryLevel(t *testing.T) {
 			if len(d) != 1 || payload(d[0])["urgency_requested"] != "idle" || payload(d[0])["urgency_applied"] != "idle" || payload(d[0])["reason"] != "brain" || payload(d[0])["ceiling"] != string(level) || payload(d[0])["spoken"] != want {
 				t.Errorf("push_decision = %v", d)
 			}
-			// The promise was already kept when the brain saw it, with
+			// The promise was already kept when the orchestrator saw it, with
 			// its id in the request.
 			calls := m.Calls()
 			if text := calls[len(calls)-1].Text(); !strings.Contains(text, `Promise (kept): "let me know when it's done", when auth finishes`) || !strings.Contains(text, "- "+p.ID+`: "let me know when it's done" (when auth finishes)`) {
@@ -166,7 +166,7 @@ func TestPromiseKeptAtEveryLevel(t *testing.T) {
 	}
 }
 
-// Without a brain (or when its announce turn fails) the template
+// Without an orchestrator (or when its announce turn fails) the template
 // sentence is spoken with "As you asked:", still at every level.
 func TestPromiseKeptByTemplateWithoutBrain(t *testing.T) {
 	h := newHarness(t, func(c *Config) { c.Chattiness = string(Quiet) })
@@ -181,7 +181,7 @@ func TestPromiseKeptByTemplateWithoutBrain(t *testing.T) {
 	if kept := h.log.ofType("promise.kept"); len(kept) != 1 || payload(kept[0])["via"] != "template" {
 		t.Errorf("promise.kept = %v", kept)
 	}
-	// A brain that falls back on the announce turn: same line.
+	// A orchestrator that falls back on the announce turn: same line.
 	m := braintest.NewModel()
 	m.EventDefault = &braintest.Step{Err: braintest.ErrBoom}
 	h = newBrainHarness(t, m, func(c *Config) { c.Chattiness = string(Quiet) })
@@ -271,7 +271,7 @@ func TestPromiseSurvivesRestart(t *testing.T) {
 	p := combined(h)
 	h.transition("w5:p1", herdr.StateIdle, herdr.StateWorking)
 
-	// A new supervisor and brain over the same state file.
+	// A new supervisor and orchestrator over the same state file.
 	store, err := state.Open(filepath.Join(h.dir, "state.json"), state.Options{Aliases: map[string]string{"w5:p1": "auth"}})
 	if err != nil {
 		t.Fatal(err)
@@ -569,7 +569,7 @@ func TestStartupPromiseStillKeptAtItsEvent(t *testing.T) {
 }
 
 // The carried-over promise is left out of the briefing trailer (the
-// startup announcement already said it) but still listed in the brain's
+// startup announcement already said it) but still listed in the orchestrator's
 // ledger section, noted "(from an earlier run)".
 func TestCarriedOverPromiseInLedgerNotBriefing(t *testing.T) {
 	h := newHarness(t)
@@ -603,7 +603,7 @@ func TestCarriedOverPromiseInLedgerNotBriefing(t *testing.T) {
 	}
 }
 
-// A promise the brain repeats is not recorded twice: the tool's error is
+// A promise the orchestrator repeats is not recorded twice: the tool's error is
 // the fact that it is already open and in which turn it was made
 // (tier-2 bench 2026-10-03, collision-finish-push: "Noted. I'll tell
 // you…" confirmations counted as unprompted). A promise for another

@@ -26,13 +26,13 @@ const (
 
 // SimOptions configure simulated runs.
 type SimOptions struct {
-	// BrainConfig is the brain's configuration (the daemon's own, from
-	// app.BrainConfig, so timeouts and steps are what the CEO gets).
+	// BrainConfig is the orchestrator's configuration (the daemon's own, from
+	// app.BrainConfig, so timeouts and steps are what the user gets).
 	BrainConfig brain.Config
-	// NewBrainModel returns the brain's model for one run; nil runs the
+	// NewBrainModel returns the orchestrator's model for one run; nil runs the
 	// scripted fake (offline).
 	NewBrainModel func() brain.Model
-	// Fallbacks are more providers registered on the brain next to
+	// Fallbacks are more providers registered on the orchestrator next to
 	// BrainConfig.Provider (id to model), so its failover is exercised:
 	// a 429/5xx/timeout on the primary retries the step on the next one.
 	Fallbacks map[string]brain.Model
@@ -47,9 +47,9 @@ type SimOptions struct {
 	// Settle is how long to wait after a reply for pushes it set off
 	// (default 1.5 s).
 	Settle time.Duration
-	// Offline marks a harness check (the scripted brain): what reached
+	// Offline marks a harness check (the scripted orchestrator): what reached
 	// the workers and the judge's items are not graded, since a scripted
-	// brain decides nothing; a run passes when the conversation ran.
+	// orchestrator decides nothing; a run passes when the conversation ran.
 	// Scripted delays, waits and the silence cap shrink by TimeScale.
 	Offline bool
 	// TimeScale multiplies scripted delays, waits and the silence cap
@@ -97,9 +97,9 @@ type SimRun struct {
 	Segments     []SegmentResult `json:"segments,omitempty"`
 	SegmentJudge string          `json:"segment_judge,omitempty"`
 	Fallbacks    []string        `json:"fallbacks,omitempty"`
-	// Failovers counts the brain's failovers to another provider
+	// Failovers counts the orchestrator's failovers to another provider
 	// (brain.failover events), listed in FailoverEvents; AnsweredBy is
-	// the provider of the last answered brain step and StepsByProvider
+	// the provider of the last answered orchestrator step and StepsByProvider
 	// how many steps each provider answered.
 	Failovers       int            `json:"failovers"`
 	FailoverEvents  []string       `json:"failover_events,omitempty"`
@@ -274,7 +274,7 @@ loop:
 		}
 	}
 
-	// Wait = continue: the CEO hung up while the answer was still on its
+	// Wait = continue: the user hung up while the answer was still on its
 	// way ("I'm checking"); listen once more for it before the final
 	// judgement, within the time cap.
 	names, criteria := rubricFor(sc)
@@ -340,7 +340,7 @@ loop:
 	return finish()
 }
 
-// simFailures labels a finished run: the brain's fallbacks, the code
+// simFailures labels a finished run: the orchestrator's fallbacks, the code
 // checks on what reached the workers, the judge's verdicts, and — when
 // the run failed anyway — the cap that ended it.
 func simFailures(sc SimScenario, run SimRun, timeouts int) []Failure {
@@ -508,7 +508,7 @@ func withPushes(ex []ExplainExchange, convo []SimLine) []ExplainExchange {
 	return ex
 }
 
-// renderSim is the conversation as the CEO lived it, for the judge.
+// renderSim is the conversation as the user lived it, for the judge.
 func renderSim(convo []SimLine) string {
 	var b strings.Builder
 	for _, l := range convo {

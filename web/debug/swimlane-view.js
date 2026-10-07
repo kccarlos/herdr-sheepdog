@@ -215,7 +215,7 @@ export class SwimlaneView {
       head.appendChild(el('span', 'chev', open ? '▾' : '▸'));
       head.appendChild(el('span', 'sw-lane-badge', LANES.find((l) => l.id === r.lane).label));
       if (r.parentKey) {
-        // Nested under an inner (brain.*) call: "↳ brain read_screen".
+        // Nested under an inner (brain.*) call: "↳ orchestrator read_screen".
         const n = el('span', 'sw-nest', `↳ ${r.parent ? r.parent.title.replace(/^⚙ /, '') : 'call'}`);
         n.title = `ran inside ${r.parent ? r.parent.title : r.parentKey}`;
         head.appendChild(n);

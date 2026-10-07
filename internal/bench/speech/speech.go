@@ -1,4 +1,4 @@
-// Package speech renders the simulated CEO's words as 16 kHz PCM16 mono,
+// Package speech renders the simulated user's words as 16 kHz PCM16 mono,
 // the /ws input format: Gemini TTS on Vertex AI (several voices, English
 // and Chinese, a speaking style per utterance), macOS `say` as the
 // offline fallback, and a cache keyed by everything that shapes the
@@ -112,7 +112,7 @@ func ValidStyle(s string) bool {
 	return ok
 }
 
-// Gemini is Gemini TTS over a genai GenerateContent model (the brain's
+// Gemini is Gemini TTS over a genai GenerateContent model (the orchestrator's
 // Vertex client: brain.NewVertexModel).
 type Gemini struct {
 	Model   brain.Model

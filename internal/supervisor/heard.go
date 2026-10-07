@@ -6,16 +6,16 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
 )
 
-// What the shepherd had heard when they began speaking
+// What the user had heard when they began speaking
 // (docs/eval/eval-campaign-2026-10-03.md H6). In j4-finish-finding the
-// shepherd said "Yes, let me know when it's done." to the brain's offer;
+// user said "Yes, let me know when it's done." to the orchestrator's offer;
 // a second later a finish line asking "Want it to fix those two links?"
-// went out, and the brain took the yes as the answer to that newer
+// went out, and the orchestrator took the yes as the answer to that newer
 // question and sent the worker a fix. No rule here decides what the
-// words answer: the brain's utterance request carries when the words
+// words answer: the orchestrator's utterance request carries when the words
 // began, the last line the voice was given before that and the lines it
 // was given since (with the voice layer's not-heard verdicts), and the
-// brain binds the words or asks.
+// orchestrator binds the words or asks.
 
 // maxSentPushes bounds the remembered spoken pushes.
 const maxSentPushes = 8
@@ -30,7 +30,7 @@ func (s *Supervisor) recordSentLocked(text string) {
 }
 
 // markUnheard records the voice layer's verdict that the newest sent
-// push with text did not reach the shepherd.
+// push with text did not reach the user.
 func (s *Supervisor) markUnheard(text string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -43,7 +43,7 @@ func (s *Supervisor) markUnheard(text string) {
 	}
 }
 
-// heardFacts is what the shepherd had heard when words that began at
+// heardFacts is what the user had heard when words that began at
 // start reached the daemon: the last spoken push sent before start and
 // those sent since. Nil when start is unknown.
 func (s *Supervisor) heardFacts(start time.Time) *brain.HeardFacts {

@@ -2,7 +2,7 @@
 // running daemon over HTTP: it registers the workers as synthetic panes
 // of the daemon's mock herdr (/api/inject/pane), follows /events for what
 // sheepdog sends them (herdr.send: prompts, keys, ctrl+c) and plays the
-// scenario's cues (at a time, after the CEO's nth utterance, on a
+// scenario's cues (at a time, after the user's nth utterance, on a
 // prompt, keys or an interrupt) through /api/inject/state and
 // /api/inject/screen, exactly as the in-process text sim's world does
 // (internal/eval simworld.go). It keeps the ground truth the judge reads
@@ -37,7 +37,7 @@ type Options struct {
 	// screens/ directory).
 	FixtureDir string
 	// OnFire, when set, is told when a scripted event lands (index into
-	// the scenario's events), e.g. to make the simulated CEO talk over
+	// the scenario's events), e.g. to make the simulated user talk over
 	// the push it sets off.
 	OnFire func(i int, e eval.SimEvent)
 	// Clock0 is the time base of the world's timeline (default: Start).
@@ -125,7 +125,7 @@ func (w *World) Start(ctx context.Context) error {
 }
 
 // Arm starts the timed cues (at_ms, counted from now): call it when the
-// conversation starts, after the phone heard what the flock said on
+// conversation starts, after the phone heard what the workers said on
 // connect, as the text sim starts them with the conversation.
 func (w *World) Arm() {
 	for i, e := range w.sc.Events {
@@ -138,7 +138,7 @@ func (w *World) Arm() {
 
 func (w *World) since() int64 { return time.Since(w.start).Milliseconds() }
 
-// AfterTurn fires the cues waiting on the CEO's nth utterance (call it
+// AfterTurn fires the cues waiting on the user's nth utterance (call it
 // once the answer to that utterance has been heard).
 func (w *World) AfterTurn(n int) { w.AfterTurnBeat(n, 0) }
 

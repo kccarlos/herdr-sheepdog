@@ -106,7 +106,7 @@ func TestSaidVsDoneMatchedEarlier(t *testing.T) {
 	}
 }
 
-// The phone test of 2026-10-04: run_cli timed out, the brain then read
+// The phone test of 2026-10-04: run_cli timed out, the orchestrator then read
 // the screen and said the tests pass.
 func TestVerifiedAfterTimeoutIsUnmatched(t *testing.T) {
 	r := Run{

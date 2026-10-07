@@ -12,7 +12,7 @@ import (
 // can appear.
 var reComprehension = regexp.MustCompile(`(?i)what does that mean|what do you mean|what is that|say again|repeat|explain|i don[’']t understand|什么意思|再说一遍`)
 
-// computeComprehension counts shepherd utterances (voice.tool_call
+// computeComprehension counts user utterances (voice.tool_call
 // to_supervisor texts) that read as a comprehension follow-up.
 func computeComprehension(events []eventlog.Event) int {
 	n := 0

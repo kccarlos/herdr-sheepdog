@@ -13,12 +13,12 @@ import (
 // announcement of a finish with no prompt on screen ended "Shall I have
 // it run the tests?" (reconnect-held-push, 2 of 3 runs), opening a
 // decision nobody had. The daemon knows whether any agent is waiting
-// for the CEO's answer (the supervisor's pending answer_prompt, a pane
-// blocked at an unanswered question), so both brains are told, as a
+// for the user's answer (the supervisor's pending answer_prompt, a pane
+// blocked at an unanswered question), so the voice and the orchestrator are told, as a
 // fact, at the moment they write or voice an announcement. What to do
 // with it is theirs (RULES.md "Announcing", the voice prompt).
 
-// openDecisions lists the agents waiting for the CEO's answer right now,
+// openDecisions lists the agents waiting for the user's answer right now,
 // by spoken name, with the question when the supervisor recorded one.
 func (s *Supervisor) openDecisions() []string {
 	rows := s.store.List()
@@ -67,7 +67,7 @@ func clipRunes(s string, n int) string {
 
 // DecisionsNow is the voice layer's decision-open fact for an
 // announcement briefing (gemini.Config.DecisionsNow), as it reaches the
-// model: "none: …" when no agent is waiting for the CEO's answer.
+// model: "none: …" when no agent is waiting for the user's answer.
 func (s *Supervisor) DecisionsNow() string {
 	open := s.openDecisions()
 	if len(open) == 0 {

@@ -378,7 +378,7 @@ Barge-in sequence observed (client content sent while the model was counting):
   the first connect. The server then sends `sessionResumptionUpdate` messages;
   keep the **latest `NewHandle` where `Resumable == true`**. Handles are UUIDs
   (`"8149f0e4-9364-4fd5-89ca-255fb6b3c9cc"`). **Corrected 2026-10-04:** the
-  server sends a new handle after every completed turn (the CEO's experiment,
+  server sends a new handle after every completed turn (the user's experiment,
   2026-10-03: one per turn, each with the prompt size at issue growing turn by
   turn), not only after setup. The first SDK run here saw one after setup and
   none later, and this note said so; that was wrong. The daemon logs every
@@ -394,7 +394,7 @@ Barge-in sequence observed (client content sent while the model was counting):
   client can replay buffered audio frames sent after the last handle; not
   needed for v1 (a few hundred ms of audio lost on reconnect is acceptable).
 - What is lost: a clean resume with the latest handle loses nothing up to
-  that handle (the CEO's experiment, 2026-10-03). Lost are anything the model
+  that handle (the user's experiment, 2026-10-03). Lost are anything the model
   was generating at the moment of the drop (`resumable:false` updates mark such
   moments), any in-flight tool calls, and **silent context sent after the last
   handle** (pushes with `turnComplete: false`: names, focus, briefings), since
@@ -414,7 +414,7 @@ Barge-in sequence observed (client content sent while the model was counting):
   issued loses everything it inherited, whatever `transparent` or the wait.
   Reusing the generation-0 handle (no turn on the resumed connection, so no
   new handle) is still lossless. **The daemon therefore never resumes a
-  resumed session** (CEO decision, option 1): every accepted handle carries
+  resumed session** (user decision, option 1): every accepted handle carries
   the generation of the connection that issued it, and a reconnect of any
   kind presents only a generation-0 handle; otherwise it opens a fresh
   session, re-seeded from the recap (conversation, focus) and the recent
@@ -468,9 +468,9 @@ choose the appropriate language and don't support explicitly setting the
 language code", and the transcription language "is inferred from the
 model's response". So `SpeechConfig.LanguageCode` is left unset (it would
 at best do nothing on gemini-3.8-live, at worst pin one language and
-break the shepherd's Chinese/English switching — gemini-live-2.5 native
+break the user's Chinese/English switching — gemini-live-2.5 native
 audio already lost Chinese words, docs/research/live-pauses-2026-10-04.md),
-and so is `AudioTranscriptionConfig.LanguageCodes`. The shepherd's
+and so is `AudioTranscriptionConfig.LanguageCodes`. The user's
 language setting reaches the model as information instead: the last line
 of the system instruction and a silent line on change
 (docs/design/language-preference.md). The same page's table lists 99
@@ -706,4 +706,4 @@ call at send time (after the `turnDone`/`ToolResponseWait` wait, so
 `Speaking()` is current), since a NON_BLOCKING tool result is sent on
 its own schedule. Both log `voice.push_deferred` once. The `stop()` tool
 result is checked by name and never downgraded — Ctrl-C-equivalent, the
-shepherd is owed it immediately.
+user is owed it immediately.

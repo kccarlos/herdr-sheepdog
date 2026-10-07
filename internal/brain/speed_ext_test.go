@@ -12,7 +12,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/brain/braintest"
 )
 
-// compatHarness is a harness whose brain runs on the DeepSeek adapter
+// compatHarness is a harness whose orchestrator runs on the DeepSeek adapter
 // over srv (thinking on, reasoning effort low, as configured by default).
 func compatHarness(t *testing.T, srv *compatServer) *harness {
 	t.Helper()
@@ -30,7 +30,7 @@ func announce(h *harness) (Reply, error) {
 
 // An event turn is sent with thinking disabled and no reasoning effort
 // whatever deepseek.thinking says, and carries no reasoning_content; a
-// CEO turn keeps the configured thinking (docs/iteration-2.md WP5).
+// user turn keeps the configured thinking (docs/iteration-2.md WP5).
 func TestThinkingOffForEventTurnsDeepSeek(t *testing.T) {
 	srv := newCompatServer(t,
 		toolCalls("Look at the screen first.", [3]string{"call_a", ToolReadScreen, `{"agent":"auth"}`}),
@@ -66,7 +66,7 @@ func TestThinkingOffForEventTurnsDeepSeek(t *testing.T) {
 	}
 }
 
-// On Gemini an event turn asks for the minimal thinking level, a CEO
+// On Gemini an event turn asks for the minimal thinking level, a user
 // turn for the configured one.
 func TestThinkingOffForEventTurnsGemini(t *testing.T) {
 	model := braintest.NewModel(braintest.Step{Text: braintest.Reply("Auth is working.", "")})

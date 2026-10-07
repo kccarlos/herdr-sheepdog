@@ -16,7 +16,7 @@ import (
 const fourGlitches = "It listed seven glitches, starting with the mic button that stays red after a call. The listening banner flickers when it reconnects. The haptic buzz fires twice on a push. Hold-to-talk drops your first word, and three smaller ones follow."
 
 // One high runaway cap for every spoken line (bench #13): a reply to the
-// shepherd's own words and a finish announcement are both heard whole
+// user's own words and a finish announcement are both heard whole
 // unless they run away; detail is never cut, only scrubbed; what a
 // runaway cut moves to the end of detail.
 func TestUtteranceAndAnnounceShareTheRunawayCap(t *testing.T) {

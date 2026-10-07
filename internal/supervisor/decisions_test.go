@@ -10,7 +10,7 @@ import (
 )
 
 // The announce turn of a finish is told whether any decision is open
-// (baseline 2026-10-05 cluster 3): none when nothing waits for the CEO.
+// (baseline 2026-10-05 cluster 3): none when nothing waits for the user.
 func TestAnnounceSaysNoDecisionOpen(t *testing.T) {
 	m := braintest.NewModel()
 	m.EventDefault = announceReply("Auth finished.", "idle", "", "", false)

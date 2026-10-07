@@ -8,13 +8,13 @@ import (
 
 // Heard detection (docs/history/bench-2026-10-03.md #17, #18, #19). A push that
 // was sent is not a push that was heard. In run 2 (2026-10-03) a kept
-// promise went out at 00:48:38.760 just as the CEO spoke again
+// promise went out at 00:48:38.760 just as the user spoke again
 // (transcript.in 0.5 s later): the model answered them and never voiced
 // the line. At 00:48:12 an interrupting approval cut a spoken answer
 // after its first phrase. At 00:50:54 a line with options was read as
 // the question and the options alone, its body skipped. Each spoken
 // push is now watched from its send until its speech is over and judged
-// by what reached the shepherd: the model's output transcript since the
+// by what reached the user: the model's output transcript since the
 // push, cut to what the client played when it flushed. A push whose
 // text that covers less than HeardMinCoverage is unheard.
 
@@ -30,7 +30,7 @@ const heardTimeout = 45 * time.Second
 // Reasons a push was not heard (voice.push_unheard).
 const (
 	UnheardInterruptedByPush = "interrupted_by_push" // another push cut it
-	UnheardUserTurn          = "user_turn"           // the shepherd spoke before it was heard
+	UnheardUserTurn          = "user_turn"           // the user spoke before it was heard
 	UnheardBodySkipped       = "body_skipped"        // voiced, but not most of it
 	UnheardNotVoiced         = "not_voiced"          // the model never said it
 	UnheardConnectionLost    = "connection_lost"     // the connection went before it was said
@@ -41,7 +41,7 @@ type UnheardPush struct {
 	Text string
 	Tags map[string]any
 	// Coverage is the share of the push's text that reached the
-	// shepherd; Heard is that part as the output transcript has it.
+	// user; Heard is that part as the output transcript has it.
 	Coverage float64
 	Heard    string
 	Reason   string
@@ -78,7 +78,7 @@ type pushWatch struct {
 	said     strings.Builder
 	voiced   bool // the model said something since the push
 	turnDone bool // and then completed its turn
-	userTurn bool // the shepherd spoke after the push
+	userTurn bool // the user spoke after the push
 	cutBy    string
 }
 
@@ -87,7 +87,7 @@ type pushWatch struct {
 // on the verdicts it returns after unlocking.
 type HeardTracker struct {
 	// Coverage, when set, judges how much of a push (its text and tags)
-	// reached the shepherd in said, in place of PushCoverage's
+	// reached the user in said, in place of PushCoverage's
 	// word-for-word token pairs: GPT-Live voices pushes in its own words
 	// and judges by key terms (KeyTermCoverage).
 	Coverage func(text string, tags map[string]any, said string) float64
@@ -129,7 +129,7 @@ func (h *HeardTracker) Said(text string) {
 	}
 }
 
-// UserInput records the shepherd speaking (an input transcript).
+// UserInput records the user speaking (an input transcript).
 func (h *HeardTracker) UserInput() {
 	if h.cur != nil {
 		h.cur.userTurn = true
@@ -237,7 +237,7 @@ func (h *HeardTracker) Reset() { *h = HeardTracker{Coverage: h.Coverage} }
 // was not heard: it is never re-queued again.
 const TagRequeued = "requeued"
 
-// OwedTags reports whether tags alone mark a line the shepherd is owed a
+// OwedTags reports whether tags alone mark a line the user is owed a
 // hearing of: a decision they must take (needs_user) or a kept or due
 // promise. An answer to their question is owed as well, unless stale
 // (Requeue.Owed).
@@ -286,7 +286,7 @@ func (h *HeardTracker) expire(now time.Time) []UnheardPush {
 	return out
 }
 
-// judge appends w to out when what reached the shepherd (said) covers
+// judge appends w to out when what reached the user (said) covers
 // too little of it.
 func (h *HeardTracker) judge(out []UnheardPush, w *pushWatch, said, reason string) []UnheardPush {
 	said = strings.TrimSpace(said)
@@ -402,13 +402,13 @@ func coverageTokens(text string) []string {
 }
 
 // Re-queue timing (docs/bench/tier2-2026-10-03.md #5). In
-// collision-finish-push r1 the CEO talked over a finish push; it was cut
+// collision-finish-push r1 the user talked over a finish push; it was cut
 // and judged unheard (user_turn) at 30.3 s, and re-queued at 33.0 s — the
 // moment the client's speech detector had closed and its 300 ms release
-// run out — while the CEO's input transcript (33.4 s) and the voice's
+// run out — while the user's input transcript (33.4 s) and the voice's
 // reply to it were still to come. The re-sent push was cut again and the
-// CEO heard "ignoring its first argument.". An owed line now goes back
-// only once all of the CEO's turn is over: the client's detector closed
+// user heard "ignoring its first argument.". An owed line now goes back
+// only once all of the user's turn is over: the client's detector closed
 // for RequeueSettle, the speech it heard transcribed, and the voice's
 // reply to that transcript finished (its playback end is the sessions'
 // own requeueSettle check).
@@ -423,12 +423,12 @@ const (
 	// with nothing to transcribe.
 	RequeueTranscriptWait = 4 * time.Second
 	// RequeueReplyWait bounds the wait for the voice's reply to the
-	// CEO's last words: a turn that never comes must not hold the line
+	// user's last words: a turn that never comes must not hold the line
 	// forever.
 	RequeueReplyWait = 10 * time.Second
 )
 
-// RequeueFacts is what a session knows of the CEO's turn when it
+// RequeueFacts is what a session knows of the user's turn when it
 // considers releasing an owed unheard line.
 type RequeueFacts struct {
 	// LastInput is the last input transcript fragment; ReplyDoneAt the
@@ -441,7 +441,7 @@ type RequeueFacts struct {
 }
 
 // RequeueHold reports why an owed line must still wait ("" when it need
-// not): the CEO is speaking, stopped less than RequeueSettle ago, said
+// not): the user is speaking, stopped less than RequeueSettle ago, said
 // something not transcribed yet, or the voice has not answered their
 // last words.
 func RequeueHold(now time.Time, f RequeueFacts) string {

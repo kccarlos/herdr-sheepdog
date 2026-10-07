@@ -8,7 +8,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
 
-// "New conversation" (docs/roles.md): resets the brain's transcript
+// "New conversation" (docs/roles.md): resets the orchestrator's transcript
 // window and the voice model's session, so both start from scratch. The
 // roster and its ledger, open approval prompts, promises, notes, running
 // investigations and the event log itself are untouched — they never
@@ -23,7 +23,7 @@ import (
 // Two triggers reach the same ResetConversation: POST
 // /api/conversation/reset (web/conversation.go), and the bare voice
 // phrase handled here — a two-step confirm, since this is destructive to
-// the conversation so far and the shepherd may have said the trigger
+// the conversation so far and the user may have said the trigger
 // words in passing.
 
 // resetConfirmWindow is how long a "start a new conversation?" question
@@ -68,7 +68,7 @@ func (s *Supervisor) ConversationStartedAt() time.Time {
 	return s.conversationStartedAt
 }
 
-// ResetConversation is "New conversation": it empties the brain's
+// ResetConversation is "New conversation": it empties the orchestrator's
 // transcript window (a fresh segment; the compaction summary is gone)
 // and drops the voice session's own memory (Gemini: a fresh reconnect
 // with no resumption handle; GPT-Live: the billed session, if open,
@@ -76,10 +76,10 @@ func (s *Supervisor) ConversationStartedAt() time.Time {
 // promises, notes, investigations, pending prompts and the event log are
 // untouched. via names the trigger ("app" | "debug" | "voice_page" |
 // "voice") for the conversation.reset event and the API response; id
-// also names the brain's fresh transcript segment when there is a
-// brain. Logs conversation.reset {via, reset_id, at}.
+// also names the orchestrator's fresh transcript segment when there is a
+// orchestrator. Logs conversation.reset {via, reset_id, at}.
 func (s *Supervisor) ResetConversation(ctx context.Context, via string) (id string, at time.Time, err error) {
-	// A shepherd turn still running from before the reset (awaitReply's
+	// A user turn still running from before the reset (awaitReply's
 	// detached path) must not deliver its reply as a push into the fresh
 	// conversation: mark it dropped, exactly like the daemon shutting
 	// down. This runs first, and not under s.mu below, because
@@ -108,7 +108,7 @@ func (s *Supervisor) ResetConversation(ctx context.Context, via string) (id stri
 	// An utterance from before the reset is not relayed into the new
 	// conversation (relay.go).
 	s.disarmRelayLocked()
-	// No shepherd input recorded before the reset may authorise a
+	// No user input recorded before the reset may authorise a
 	// to_supervisor call in the new one (claimInput): bumping the relay
 	// counters to the current inputSeq makes every existing input look
 	// already used, so only a genuinely new one (a higher seq) passes.
@@ -122,10 +122,10 @@ func (s *Supervisor) ResetConversation(ctx context.Context, via string) (id stri
 
 // resetConfirmFastPath is the voice bare-phrase trigger (docs/roles.md
 // "Triggers" (b)): a code fast path, like bareStop — no model. Called
-// from ToSupervisor with the shepherd's already-validated input text
-// (claimInput ran first, so only real shepherd input reaches here — "the
-// only shepherd input can confirm" requirement). ok is false for
-// anything else, which falls through to the brain turn as an ordinary
+// from ToSupervisor with the user's already-validated input text
+// (claimInput ran first, so only real user input reaches here — "the
+// only user input can confirm" requirement). ok is false for
+// anything else, which falls through to the orchestrator turn as an ordinary
 // utterance.
 func (s *Supervisor) resetConfirmFastPath(ctx context.Context, text string) (voice.ToolResult, bool) {
 	word := BareWord(text)
@@ -159,7 +159,7 @@ func (s *Supervisor) resetConfirmFastPath(ctx context.Context, text string) (voi
 
 // performReset runs ResetConversation and speaks the fresh-start line
 // (docs/roles.md "Triggers" (b)), or a gentle apology on failure —
-// either way this is a fast path's result, not a brain turn's.
+// either way this is a fast path's result, not an orchestrator turn's.
 func (s *Supervisor) performReset(ctx context.Context, via string) (voice.ToolResult, bool) {
 	if _, _, err := s.ResetConversation(ctx, via); err != nil {
 		s.log.Log(logSource, "supervisor.reset_error", "", map[string]any{"error": err.Error(), "via": via})

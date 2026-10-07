@@ -35,7 +35,7 @@ type pushItem struct {
 // that keep INTERRUPT scheduling even while the model is speaking: a due
 // promise, a decision on a block whose pending action this event
 // created (docs/roles.md "Pushes"), or the stop button's reply (tag
-// stop, as GPT-Live has it): the shepherd asked for silence, so what
+// stop, as GPT-Live has it): the user asked for silence, so what
 // was playing is cut regardless.
 func exempt(tags map[string]any) bool {
 	return tags["due_promise"] == true || tags["needs_user"] == true || tags["stop"] == true
@@ -46,7 +46,7 @@ func exempt(tags map[string]any) bool {
 // UrgencyIdle additionally waits for the model's turn to complete and
 // for PushGap since the previous spoken push. Which push goes next is
 // pickPush's arbitration (voice/pushclass.go): the first ready line the
-// shepherd is owed or must hear now, else the oldest other line — not
+// user is owed or must hear now, else the oldest other line — not
 // merely the head of the queue.
 //
 // waitState means "block until the next state change"; a positive
@@ -102,11 +102,11 @@ type pushPick struct {
 // heldPushTTL is how long a spoken push waits for a listener before it is
 // dropped (voice.push_dropped {reason: "no_listener"}): the same five
 // minutes GPT-Live's standby queue waits (gptlive Config.PushTTL's
-// default), so both providers treat an absent shepherd alike.
+// default), so both providers treat an absent user alike.
 const heldPushTTL = 5 * time.Minute
 
 // pickPush chooses the push to send now and removes it from the queue
-// (voice/pushclass.go has the arbitration): among the lines the shepherd
+// (voice/pushclass.go has the arbitration): among the lines the user
 // is owed or must hear now (class 0), the first ready one; failing
 // that, the oldest other line, if it is ready. A line never overtakes an
 // earlier one that answers the same utterance.
@@ -114,7 +114,7 @@ const heldPushTTL = 5 * time.Minute
 // Per item, as before for the head: an INTERRUPT push is downgraded to
 // WHEN_IDLE, in place and once, while the model is speaking and no tag
 // exempts it (docs/roles.md "Pushes": nothing interrupts the model
-// mid-sentence except the shepherd); a spoken push is held while no /ws
+// mid-sentence except the user); a spoken push is held while no /ws
 // client is attached, so the model does not speak it to nobody
 // (2026-09-24 18:22:04: a 12 s answer spoken with the page closed) —
 // the invariant "a spoken push is heard or recorded as unheard", which
@@ -316,7 +316,7 @@ func (s *Session) pushReadyLocked(item pushItem, now time.Time) (wait time.Durat
 // user-role client turn, even while a spoken push was being generated.
 // 11 of 135 spoken pushes stopped mid-sentence for 3–24 s and their
 // tail came back only at the next turn, glued to the reply to the
-// CEO; 6 of the 11 had the names line or the current-focus line sent
+// user; 6 of the 11 had the names line or the current-focus line sent
 // while they were spoken (15 % of the 41 pushes a silent line landed
 // in, 5 % of the other 94). Context is not urgent, so it now waits
 // until no output is being generated and the client is not playing.

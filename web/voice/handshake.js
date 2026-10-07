@@ -42,7 +42,7 @@ export class Handshake {
    * Feed one control message. Returns {consumed, close, message}:
    * consumed — the page should not handle it further (an old daemon's
    * "unknown type client-ready" error is not a problem to show); close —
-   * stop and do not reconnect; message — words for the shepherd.
+   * stop and do not reconnect; message — words for the user.
    */
   onMessage(m) {
     if (!m || typeof m !== 'object') return { consumed: false };

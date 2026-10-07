@@ -5,7 +5,7 @@ import "strings"
 // Diff says how a point's context differs from the previous point's in
 // the same pane, by section key.
 type Diff struct {
-	// Prev is the previous point (a brain step or a voice turn), 0 when
+	// Prev is the previous point (an orchestrator step or a voice turn), 0 when
 	// there is none.
 	Prev int `json:"prev"`
 	// Added are the keys new at this point; Changed the keys whose text

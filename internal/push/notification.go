@@ -4,8 +4,8 @@ package push
 const (
 	KindApproval = "approval" // a pending answer-prompt action the app can answer
 	KindBlocked  = "blocked"  // an agent waiting at something with no answerable options
-	KindDone     = "done"     // a finish the shepherd asked to hear about
-	KindIdle     = "idle"     // an idle the shepherd asked to hear about
+	KindDone     = "done"     // a finish the user asked to hear about
+	KindIdle     = "idle"     // an idle the user asked to hear about
 )
 
 // The aps.category values (the app registers matching
@@ -22,7 +22,7 @@ type Option struct {
 	Label string `json:"label"`
 }
 
-// Notification is one event the shepherd should hear about.
+// Notification is one event the user should hear about.
 type Notification struct {
 	// EventID is the supervisor's worker event id ("" when none was
 	// minted); PendingID the answer_prompt action the event created.
@@ -36,10 +36,10 @@ type Notification struct {
 	Text string
 	// Options are the pending prompt's choices (approval only).
 	Options []Option
-	// NeedsYou marks a decision or action the shepherd must take: it is
+	// NeedsYou marks a decision or action the user must take: it is
 	// sent time-sensitive. Otherwise (a kept promise) the alert is
 	// active. Both go at priority 10: a kept promise is something the
-	// CEO asked to hear about, so it must not wait for power batching.
+	// user asked to hear about, so it must not wait for power batching.
 	NeedsYou bool
 }
 

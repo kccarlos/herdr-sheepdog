@@ -31,7 +31,7 @@ const compatResponseBytes = 4 << 20
 // OpenAICompatConfig configures an OpenAICompatModel.
 type OpenAICompatConfig struct {
 	// Provider is the id the adapter answers to: Message.Provider on
-	// what it produces, the key of the brain's provider map
+	// what it produces, the key of the orchestrator's provider map
 	// (ProviderDeepSeek).
 	Provider string
 	// BaseURL is the API root; /chat/completions and /models are
@@ -124,7 +124,7 @@ func (e *APIError) Error() string {
 	return fmt.Sprintf("%s: HTTP %d: %s", e.Provider, e.Status, e.Message)
 }
 
-// The request and response shapes (the subset the brain uses; see
+// The request and response shapes (the subset the orchestrator uses; see
 // api-docs.deepseek.com/api/create-chat-completion).
 type (
 	chatRequest struct {
@@ -455,7 +455,7 @@ func systemText(c *genai.Content) string {
 	return b.String()
 }
 
-// toolsOf renders the brain's function declarations as OpenAI tools,
+// toolsOf renders the orchestrator's function declarations as OpenAI tools,
 // their parameters as JSON Schema (schemaOf).
 func toolsOf(tools []*genai.Tool) []chatTool {
 	var out []chatTool

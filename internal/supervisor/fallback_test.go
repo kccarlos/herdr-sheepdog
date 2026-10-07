@@ -11,8 +11,8 @@ import (
 )
 
 // TestFallbackAfterStatusNeverClaimsNoChange is 2026-09-24 18:16:39:
-// the shepherd heard a status answer, then asked "Um, I want to know the
-// detail of the glitches"; the brain errored and the daemon said "No
+// the user heard a status answer, then asked "Um, I want to know the
+// detail of the glitches"; the orchestrator errored and the daemon said "No
 // change since I last checked: Four agents: …" — an answer to a question
 // nobody asked. The fallback now says it could not answer, whatever was
 // delivered before.

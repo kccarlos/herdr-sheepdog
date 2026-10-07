@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// POST /api/conversation/reset resets the brain and the voice session,
+// POST /api/conversation/reset resets the orchestrator and the voice session,
 // answers {"ok":true,"reset_id":"…","at":"…"}, logs conversation.reset
 // (so the SSE stream carries it) and GET /api/conversation shows the
 // "New conversation" divider afterwards.

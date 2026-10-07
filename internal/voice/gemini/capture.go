@@ -87,7 +87,7 @@ func (c *recConn) SendRealtimeInput(in genai.LiveRealtimeInput) error {
 	case in.AudioStreamEnd:
 		c.rec.AudioEnd()
 	case in.Text != "":
-		c.rec.Item(ctxcap.VoiceItem{Kind: ctxcap.VKindUserText, Class: ctxcap.ClassShepherd, Role: "user", Label: "shepherd typed (realtime text)", Text: in.Text,
+		c.rec.Item(ctxcap.VoiceItem{Kind: ctxcap.VKindUserText, Class: ctxcap.ClassShepherd, Role: "user", Label: "user typed (realtime text)", Text: in.Text,
 			Raw: ctxcap.Raw(map[string]any{"realtimeInput": map[string]any{"text": in.Text}})})
 	}
 	return nil
@@ -164,7 +164,7 @@ func (c *recConn) observe(msg *genai.LiveServerMessage) {
 		}
 	}
 	if cc := msg.ToolCallCancellation; cc != nil {
-		c.rec.Marker("tool calls cancelled", "The model cancelled "+strings.Join(cc.IDs, ", ")+" (the shepherd barged in).", ctxcap.Raw(map[string]any{"toolCallCancellation": cc}))
+		c.rec.Marker("tool calls cancelled", "The model cancelled "+strings.Join(cc.IDs, ", ")+" (the user barged in).", ctxcap.Raw(map[string]any{"toolCallCancellation": cc}))
 	}
 	if sc := msg.ServerContent; sc != nil {
 		if t := sc.InputTranscription; t != nil && (t.Text != "" || t.Finished) {

@@ -1,10 +1,10 @@
-// Package lang is the shepherd's language preference: the catalog of
+// Package lang is the user's language preference: the catalog of
 // languages the settings offer and the one line of information both
 // brains get about the choice (docs/design/language-preference.md).
 //
 // It is information, not judgment: the daemon never decides which
 // language an utterance is in or which one to answer in. It tells the
-// models what the shepherd set, and the models choose.
+// models what the user set, and the models choose.
 package lang
 
 import (
@@ -144,11 +144,11 @@ func Normalize(codes []string) ([]string, error) {
 	return out, nil
 }
 
-// Line is the information both brains get about the preference, one
+// Line is the information the voice and the orchestrator get about the preference, one
 // sentence pair; "" when nothing is set (the prompts then say what they
 // said before the setting existed). Unknown codes are skipped.
 //
-// Example: "The shepherd's language setting, in order of preference:
+// Example: "The user's language setting, in order of preference:
 // Chinese (Simplified) 简体中文, English. Answer in the language they
 // use; write Chinese in Simplified characters."
 func Line(codes []string) string {

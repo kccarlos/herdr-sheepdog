@@ -8,14 +8,14 @@ import (
 
 // The daemon relays an utterance the voice left unanswered
 // (docs/roles.md "One decision-maker"). On 2026-09-24 00:16:55 the
-// shepherd asked "What's the progress of a Discord Copilot so far?"; the
+// user asked "What's the progress of a Discord Copilot so far?"; the
 // voice model neither called a tool nor said anything (voice.turn
 // {responded: false, tool_calls: 0}), and the question was lost — the
 // lost-utterance rate of the baseline scorecard. The daemon recorded the
 // words itself, so it does not need the voice to relay them: when an
-// input of the shepherd's speech is followed, for relayUnansweredAfter,
+// input of the user's speech is followed, for relayUnansweredAfter,
 // by neither a tool call nor any speech of the voice's own, it runs
-// through the same path as a relay (fast paths, then one brain turn) and
+// through the same path as a relay (fast paths, then one orchestrator turn) and
 // the reply is pushed, as a late reply is (deliverLate) — the voice
 // never asked, so there is no tool result to return it in.
 //
@@ -29,11 +29,11 @@ import (
 //
 // An acknowledgement used to be judged in code (ackCues, #108/#114: a
 // short "On it." or "I'll check" with no tool call relayed the words
-// anyway). The fast brain now owns that judgment (docs/design/dual-brain.md):
+// anyway). The voice now owns that judgment (docs/design/dual-brain.md):
 // what it said is its answer. The watch still relays words the voice
 // met with no speech and no tool call at all, a lost utterance.
 
-// relayUnansweredAfter is how long an input of the shepherd's speech may
+// relayUnansweredAfter is how long an input of the user's speech may
 // go with no tool call and no speech of the voice's own before the
 // daemon relays it (docs/iteration-2.md's lost-utterance metric counts
 // 5 s; the voice's own tool call arrives within a second when it comes).
@@ -74,7 +74,7 @@ func (s *Supervisor) disarmRelayLocked() {
 	s.relay.gen++
 }
 
-// toolCalled records that the voice called a tool: whatever the shepherd
+// toolCalled records that the voice called a tool: whatever the user
 // said was taken up, so the daemon does not relay it.
 func (s *Supervisor) toolCalled() {
 	s.mu.Lock()
@@ -112,7 +112,7 @@ func (s *Supervisor) relayUnanswered(gen uint64) {
 	last := s.lastInputLocked()
 	if last != nil && last.answered && silentAnswer(last, playback) {
 		// The voice's "answer" played for under silentAnswerMs: it said
-		// nothing the shepherd could hear (inputs.go, voiceSpoke).
+		// nothing the user could hear (inputs.go, voiceSpoke).
 		last.answered = false
 		s.log.Log(logSource, "supervisor.silent_answer", "", map[string]any{"text": last.text, "run_ms": playback.RunMs})
 	}
@@ -129,7 +129,7 @@ func (s *Supervisor) relayUnanswered(gen uint64) {
 	}
 	c := s.claimRunLocked(run)
 	// Gemini never marks its input transcription final, so the input may
-	// still be open: close it, or words the shepherd adds now would be
+	// still be open: close it, or words the user adds now would be
 	// folded into this relay (heard's trailing-fragment case) and reach
 	// nobody.
 	c.in.open = false

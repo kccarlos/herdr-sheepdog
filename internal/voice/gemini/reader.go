@@ -147,7 +147,7 @@ func (s *Session) handleServerContent(sc *genai.LiveServerContent) {
 		s.noteSpeechLocked() // unvoiced.go
 		s.play.Said(t.Text)
 		s.echo.Said(t.Text)
-		// The voice answering means the shepherd finished (Gemini
+		// The voice answering means the user finished (Gemini
 		// rarely marks its input transcription final).
 		s.recap.Add(voice.RecapUser, s.inText)
 		s.inText = ""

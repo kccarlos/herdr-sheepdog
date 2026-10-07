@@ -68,7 +68,7 @@ func (m *SpendMeter) TTS(c speech.Clip) {
 }
 
 // Live adds a recording's voice-model usage (voice.usage events) and
-// brain steps (brain.step events), and its audio minutes.
+// orchestrator steps (brain.step events), and its audio minutes.
 func (m *SpendMeter) Live(evs []voiceclient.Event) {
 	for _, ev := range evs {
 		switch ev.Type {

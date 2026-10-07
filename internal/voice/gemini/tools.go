@@ -53,8 +53,8 @@ func TextToolDeclarations() []*genai.Tool {
 	return []*genai.Tool{{FunctionDeclarations: decls}}
 }
 
-// systemPrompt renders the voice system prompt with the dog's name and
-// the aliases, and the shepherd's language setting as its last line.
+// systemPrompt renders the voice system prompt with the voice's name and
+// the aliases, and the user's language setting as its last line.
 func systemPrompt(cfg Config) (string, error) {
 	vars := prompts.AssistantVars(cfg.Name, cfg.names())
 	if cfg.SystemPrompt != "" {
@@ -124,8 +124,8 @@ func scheduling(u voice.Urgency) genai.FunctionResponseScheduling {
 	}
 }
 
-// The push markers: a user-role turn that starts with one is the brain's
-// (or the daemon's) words, never the shepherd's (notes §4;
+// The push markers: a user-role turn that starts with one is the orchestrator's
+// (or the daemon's) words, never the user's (notes §4;
 // prompts/assistant.md explains both).
 const (
 	pushEventMarker   = "[system event, not spoken by the user]"
@@ -142,7 +142,7 @@ const (
 // 3 of 17 spoken pushes began with the marker; as its own part, 0 of 19;
 // a non-word marker ("»", the prompt rewritten for it) also read none
 // (0 of 16), but the voice then
-// relayed four pushes back as the shepherd's words.
+// relayed four pushes back as the user's words.
 func pushTurn(text string, u voice.Urgency) []*genai.Content {
 	marker := pushEventMarker
 	if u == voice.UrgencySilent {

@@ -17,9 +17,9 @@ import (
 // already has, so no model decides *what* to stop: the phases below are
 // resolved in order, the first that applies is carried out, and the
 // daemon's own sentence says what was stopped at once — no model turn
-// stands between the stop and its acknowledgement (a brain turn here
+// stands between the stop and its acknowledgement (an orchestrator turn here
 // once held the reply 5.3 s behind a Vertex 504, 2026-10-02). What was
-// stopped goes into the brain's transcript as a context line, so later
+// stopped goes into the orchestrator's transcript as a context line, so later
 // questions know about it. Event turns (announce) are not cancelled by a
 // stop.
 
@@ -34,9 +34,9 @@ const (
 
 // The phases, as logged in supervisor.stopped.
 const (
-	// stopPhaseDropCall: the relayed words had not reached the brain.
+	// stopPhaseDropCall: the relayed words had not reached the orchestrator.
 	stopPhaseDropCall = "drop_call"
-	// stopPhaseCancelTurn: a brain CEO turn was in flight; its context
+	// stopPhaseCancelTurn: an orchestrator user turn was in flight; its context
 	// is cancelled, so its write tools never execute.
 	stopPhaseCancelTurn = "cancel_turn"
 	// stopPhaseInvestigation: a background look the withdrawn request
@@ -47,7 +47,7 @@ const (
 	// the cancel window, so it gets a Ctrl-C.
 	stopPhaseInterrupt = "interrupt"
 	// stopPhasePromptOpen: an agent is waiting at a prompt, which stop
-	// leaves open — stop is not "no", the CEO still decides.
+	// leaves open — stop is not "no", the user still decides.
 	stopPhasePromptOpen = "prompt_open"
 	// stopPhaseNone: nothing was in flight.
 	stopPhaseNone = "none"
@@ -57,7 +57,7 @@ const (
 type stopOutcome struct {
 	phase string
 	// what is the sentence fragment naming what was stopped, for the
-	// log, the brain's transcript line and the code sentence.
+	// log, the orchestrator's transcript line and the code sentence.
 	what   string
 	paneID string
 	alias  string
@@ -73,7 +73,7 @@ type stopOutcome struct {
 // Stop runs the stop procedure and says what it stopped. trigger is one
 // of the StopTrigger constants.
 func (s *Supervisor) Stop(ctx context.Context, trigger string) (voice.ToolResult, error) {
-	// Whatever the shepherd just said is not relayed by the daemon after
+	// Whatever the user just said is not relayed by the daemon after
 	// a stop (relay.go): the stop tool, the app's stop button and the
 	// bare word all come through here.
 	s.toolCalled()
@@ -100,12 +100,12 @@ func (s *Supervisor) Stop(ctx context.Context, trigger string) (voice.ToolResult
 // the daemon to relay what followed the stop word.
 const stopRestWindow = 10 * time.Second
 
-// relayStopRest hands the brain what the shepherd said after the stop
+// relayStopRest hands the orchestrator what the user said after the stop
 // word. The #113 echo runs: "Stop. Stop. Is anything waiting for me?"
 // went to the voice's stop() tool, the answer was "Nothing was in
 // flight.", and the question was never answered — stop() carries no
 // text, and the tool call kept the daemon from relaying the words. The
-// stop has run by now (and the brain has its context line); the rest of
+// stop has run by now (and the orchestrator has its context line); the rest of
 // the words go through the same path as a relay, and the reply is pushed
 // as a late reply is. Words that only repeat the stop ("Stop, stop
 // everything") leave nothing to relay.
@@ -237,7 +237,7 @@ func (s *Supervisor) resolveStop(ctx context.Context) stopOutcome {
 
 // stopInvestigation cancels the running background look a stop applies
 // to: the one about the agent the withdrawn request named, else — when
-// nothing was in flight — the most recent one. A look the shepherd did
+// nothing was in flight — the most recent one. A look the user did
 // not just withdraw a request about is left alone unless it is the only
 // thing to stop.
 func (s *Supervisor) stopInvestigation(withdrawn stopOutcome) (stopOutcome, bool) {
@@ -274,12 +274,12 @@ func (s *Supervisor) investigationAbout(text string) (string, bool) {
 	return "", false
 }
 
-// queuedLine is the fact the brain gets after a stop interrupted an agent
+// queuedLine is the fact the orchestrator gets after a stop interrupted an agent
 // that had an instruction queued (tier-3 bench 2026-10-03 #8): Claude
 // Code folds a message typed into a busy session into its running turn,
 // and Ctrl-C stops both but leaves the request in its conversation, so
 // the next instruction may revive it. Nothing is sent to the worker:
-// whether to tell it to drop the request is the CEO's call.
+// whether to tell it to drop the request is the user's call.
 func queuedLine(out stopOutcome) string {
 	return fmt.Sprintf("the instruction %q was typed into %s's running turn before the interrupt, so it may still be in %s's history and come back with its next instruction; nothing was sent to drop it", out.queued, out.alias, out.alias)
 }

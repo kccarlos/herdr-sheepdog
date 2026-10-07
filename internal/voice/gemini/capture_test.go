@@ -46,7 +46,7 @@ func section(p ctxcap.VoicePoint, label string) (ctxcap.Section, string) {
 }
 
 // The voice context log of a Gemini session, through a fake connection:
-// the fresh session's instructions and tools, the shepherd's audio with
+// the fresh session's instructions and tools, the user's audio with
 // what the model heard, the to_supervisor call and its response (linked
 // by the call id, the utterance claimed by it), a push with its link
 // tags, and a reset that starts a new context.
@@ -83,7 +83,7 @@ func TestVoiceContextCapture(t *testing.T) {
 	if err := p.CheckCoverage(); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"session open (fresh)", "system instructions", "tool declarations", "shepherd (audio + transcript)", "tool call to_supervisor", "voice said", "tool response to_supervisor (when_idle)", "push (client content, turn complete)"}
+	want := []string{"session open (fresh)", "system instructions", "tool declarations", "user (audio + transcript)", "tool call to_supervisor", "voice said", "tool response to_supervisor (when_idle)", "push (client content, turn complete)"}
 	if got := labels(p); strings.Join(got, "|") != strings.Join(want, "|") {
 		t.Fatalf("items = %q\nwant    %q", got, want)
 	}
@@ -93,7 +93,7 @@ func TestVoiceContextCapture(t *testing.T) {
 	if _, text := section(p, "tool declarations"); !strings.Contains(text, "to_supervisor(reading, text) [non_blocking]") || !strings.Contains(text, "stop()") {
 		t.Errorf("tools = %q", text)
 	}
-	if s, text := section(p, "shepherd"); !strings.Contains(text, "🎤 audio 0.3 s") || !strings.Contains(text, `heard: "what is auth doing?"`) || strings.Join(s.Links, ",") != "call:fc-1" {
+	if s, text := section(p, "user"); !strings.Contains(text, "🎤 audio 0.3 s") || !strings.Contains(text, `heard: "what is auth doing?"`) || strings.Join(s.Links, ",") != "call:fc-1" {
 		t.Errorf("utterance = %+v %q", s.Links, text)
 	}
 	for _, label := range []string{"tool call to_supervisor", "tool response"} {

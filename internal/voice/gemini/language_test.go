@@ -8,7 +8,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
 
-// The shepherd's language setting ends the system instruction of every
+// The user's language setting ends the system instruction of every
 // connection (read at each connect, so the next session has a change)
 // and is on the voice.system_prompt event; with none set the prompt is
 // exactly what it was before the setting.

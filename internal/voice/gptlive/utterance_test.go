@@ -75,7 +75,7 @@ func TestLateDelegationTakesTheSettledUtterance(t *testing.T) {
 }
 
 // TestTurnCompleteWaitsForTheShepherdsUtterance: the model's speech
-// ending while the shepherd talks must not emit EventTurnComplete (it
+// ending while the user talks must not emit EventTurnComplete (it
 // closes the supervisor's voice input mid-utterance); it follows when
 // the utterance settles, before the final fragment.
 func TestTurnCompleteWaitsForTheShepherdsUtterance(t *testing.T) {

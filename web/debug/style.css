@@ -5,7 +5,7 @@
   /* swimlane: one hue per lane (You = the web client's colour, the rest match their sources), a push accent, the latency ramp */
   --lane-you: #c05621; --lane-voice: #b7791f; --lane-sup: #2f855a; --lane-herdr: #2b6cb0; --push: #d53f8c;
   --lat-ok: #2f855a; --lat-warn: #d69e2e; --lat-slow: #c53030;
-  /* supervisor tab: the SVP shares the Supervisor lane's hue; the meter's prompt sources and message kinds */
+  /* supervisor tab: the orchestrator shares the Supervisor lane's hue; the meter's prompt sources and message kinds */
   --svp: #2f855a; --svp-bg: #e6f4ea;
   --src-embedded: #805ad5; --src-override: #c05621; --src-dynamic: #b7791f;
   --k-ceo: #2b6cb0; --k-assistant: #a0aec0; --k-push: #d53f8c; --k-worker: #718096; --k-note: #d69e2e; --k-request: #b7791f;
@@ -429,7 +429,7 @@ td.task, td.block, td.result { max-width: 18em; overflow: hidden; text-overflow:
 }
 
 /* -------------------------------------------------------------- context */
-/* Two panes (the brain's exact request, the voice model's reconstructed
+/* Two panes (the orchestrator's exact request, the voice model's reconstructed
    context) over one colour per section class, shared by both panes and
    matching the other tabs' hues; a gutter per piece with its colour,
    name and tokens; linked pieces lit across the panes. */

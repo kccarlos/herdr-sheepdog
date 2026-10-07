@@ -9,9 +9,9 @@ import (
 	"time"
 )
 
-// FaultProxy sits between a scratch daemon and the brain's DeepSeek API
+// FaultProxy sits between a scratch daemon and the orchestrator's DeepSeek API
 // (deepseek.base_url): it fails the first requests with a server error
-// (the brain's failover to its next provider) and can delay every
+// (the orchestrator's failover to its next provider) and can delay every
 // request (a slow provider). Everything else is forwarded unchanged.
 type FaultProxy struct {
 	URL string

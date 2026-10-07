@@ -12,7 +12,7 @@ import (
 // AgentNow is the voice layer's view of one agent as a briefing reaches
 // it (gemini.Config.AgentNow): its spoken name and its state from the
 // table, with how long it has been so and when it last finished work.
-// Information, not judgement: the fast brain has no clock and cannot
+// Information, not judgement: the voice has no clock and cannot
 // see the screens, so a briefing read minutes later could otherwise
 // pass for the present (phone test 2026-10-04: "still analysing" about
 // an agent that had finished, or had not started). ok is false for an

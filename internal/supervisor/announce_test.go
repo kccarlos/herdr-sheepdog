@@ -45,7 +45,7 @@ func doneAuth(h *harness) {
 }
 
 // doneSentence is the daemon's own sentence for a finish: with the
-// template LLM gone, nothing but the brain phrases anything more.
+// template LLM gone, nothing but the orchestrator phrases anything more.
 const doneSentence = "auth finished."
 
 // decisions returns the brain.push_decision payloads.
@@ -57,8 +57,8 @@ func (h *harness) decisions() []map[string]any {
 	return out
 }
 
-// The brain's line replaces the template sentence: one push for the
-// finish, at the urgency the brain asked for, its detail on
+// The orchestrator's line replaces the template sentence: one push for the
+// finish, at the urgency the orchestrator asked for, its detail on
 // last_result.detail for the ledger and recall, one push_decision.
 func TestAnnounceReplacesTemplate(t *testing.T) {
 	m := braintest.NewModel()
@@ -102,7 +102,7 @@ func TestAnnounceReplacesTemplate(t *testing.T) {
 }
 
 // skip: nothing is spoken, the decision is logged; silent: a context
-// push only (no subject change, not in the brain's transcript as a
+// push only (no subject change, not in the orchestrator's transcript as a
 // spoken push).
 func TestAnnounceSkipAndSilent(t *testing.T) {
 	m := braintest.NewModel()
@@ -149,8 +149,8 @@ func TestAnnounceSkipAndSilent(t *testing.T) {
 	}
 }
 
-// The ceiling table: what each level does with what the brain asked
-// for, for a finish the CEO dealt with (involved), one they did not
+// The ceiling table: what each level does with what the orchestrator asked
+// for, for a finish the user dealt with (involved), one they did not
 // (other), a kept promise and an addition to a question.
 func TestApplyCeilingTable(t *testing.T) {
 	type tc struct {
@@ -165,14 +165,14 @@ func TestApplyCeilingTable(t *testing.T) {
 		// skip and silent pass at every level.
 		{Quiet, pushDoneInvolved, "skip", ceilingInput{}, "skip", "brain"},
 		{Chatty, pushDoneOther, "silent", ceilingInput{}, "silent", "brain"},
-		// quiet: no finish is spoken, whatever the brain asked.
+		// quiet: no finish is spoken, whatever the orchestrator asked.
 		{Quiet, pushDoneInvolved, "idle", ceilingInput{}, "skip", "ceiling"},
 		{Quiet, pushDoneInvolved, "interrupt", ceilingInput{needsUser: true}, "skip", "ceiling"},
 		// normal: the recent_minutes rule.
 		{Normal, pushDoneInvolved, "idle", ceilingInput{}, "idle", "brain"},
 		{Normal, pushDoneOther, "idle", ceilingInput{}, "skip", "ceiling"},
 		{Normal, pushDoneOther, "interrupt", ceilingInput{needsUser: true}, "skip", "ceiling"},
-		// chatty: anything the brain says, but interrupt only for a decision.
+		// chatty: anything the orchestrator says, but interrupt only for a decision.
 		{Chatty, pushDoneOther, "idle", ceilingInput{}, "idle", "brain"},
 		{Chatty, pushDoneOther, "interrupt", ceilingInput{}, "idle", "ceiling"},
 		{Chatty, pushDoneOther, "interrupt", ceilingInput{needsUser: true}, "interrupt", "brain"},
@@ -186,13 +186,13 @@ func TestApplyCeilingTable(t *testing.T) {
 		{Normal, pushDoneOther, "interrupt", ceilingInput{kept: true, duePassed: true}, "interrupt", "brain"},
 		{Normal, pushDoneOther, "interrupt", ceilingInput{kept: true, needsUser: true}, "interrupt", "brain"},
 		{Chatty, pushPromiseOnly, "idle", ceilingInput{kept: true}, "idle", "brain"},
-		// The finish of the CEO's own instruction is owed like a promise.
+		// The finish of the user's own instruction is owed like a promise.
 		{Quiet, pushDoneInvolved, "idle", ceilingInput{owed: true}, "idle", "brain"},
 		{Normal, pushDoneOther, "idle", ceilingInput{owed: true}, "idle", "brain"},
 		{Normal, pushDoneOther, "skip", ceilingInput{owed: true}, "skip", "brain"},
 		{Quiet, pushDoneOther, "interrupt", ceilingInput{owed: true}, "idle", "ceiling"},
 		// a question is spoken at every level; interrupt only for a
-		// decision the shepherd must take.
+		// decision the user must take.
 		{Quiet, pushQuestion, "idle", ceilingInput{}, "idle", "brain"},
 		{Quiet, pushQuestion, "interrupt", ceilingInput{needsUser: true}, "interrupt", "brain"},
 		{Quiet, pushBlockedInfo, "idle", ceilingInput{}, "skip", "ceiling"},
@@ -209,9 +209,9 @@ func TestApplyCeilingTable(t *testing.T) {
 	}
 }
 
-// The ceiling in the running supervisor: the brain asks for interrupt
+// The ceiling in the running supervisor: the orchestrator asks for interrupt
 // on a finish and gets idle (push_decision reason ceiling); at normal a
-// finish of an agent the CEO never dealt with is skipped without a
+// finish of an agent the user never dealt with is skipped without a
 // model call (push_quiet as before); at quiet even a kept promise stays
 // idle unless it is due.
 func TestAnnounceCeilingApplied(t *testing.T) {
@@ -245,8 +245,8 @@ func TestAnnounceCeilingApplied(t *testing.T) {
 	if pq := h.log.ofType("supervisor.push_quiet"); len(pq) != 1 || payload(pq[0])["chattiness"] != "normal" || payload(pq[0])["text"] != "docs finished." {
 		t.Errorf("push_quiet = %v", pq)
 	}
-	// quiet, a kept promise: spoken at idle although the brain asked to
-	// interrupt; due → interrupt whatever the brain asked.
+	// quiet, a kept promise: spoken at idle although the orchestrator asked to
+	// interrupt; due → interrupt whatever the orchestrator asked.
 	if err := h.sup.SetSettings(Settings{Chattiness: Quiet}); err != nil {
 		t.Fatal(err)
 	}
@@ -288,7 +288,7 @@ func TestAnnounceCeilingApplied(t *testing.T) {
 	}
 }
 
-// The brain may not silence a promise: a skip while a promise is kept
+// The orchestrator may not silence a promise: a skip while a promise is kept
 // speaks the template's "As you asked" line, still one line.
 func TestAnnounceSkipCannotSilencePromise(t *testing.T) {
 	m := braintest.NewModel()
@@ -323,7 +323,7 @@ func slowAnnounce(h **harness, took time.Duration, rep *braintest.Step) *brainte
 }
 
 // The ear contract applies to announcements too (iteration 2 WP1): the
-// brain's finish line has its dash-joined clauses split and no PR number,
+// orchestrator's finish line has its dash-joined clauses split and no PR number,
 // its ask is heard last, and nothing short of a runaway (bench #13, one
 // high cap for every line) is cut.
 func TestAnnounceLineIsCappedForTheEar(t *testing.T) {
@@ -344,13 +344,13 @@ func TestAnnounceLineIsCappedForTheEar(t *testing.T) {
 	}
 }
 
-// A finish waits for the brain's line (iteration 2 WP2; eval
-// finish-line-needs-user-spoken): at 2026-09-24 00:52:37 the shepherd
-// heard "discoursecopilot-claude has finished its task." and the brain's
+// A finish waits for the orchestrator's line (iteration 2 WP2; eval
+// finish-line-needs-user-spoken): at 2026-09-24 00:52:37 the user
+// heard "discoursecopilot-claude has finished its task." and the orchestrator's
 // line with the finding and a question for them, 4.5 s later, was
-// dropped. Now the finish is not spoken at AnnounceWait: the brain's line
+// dropped. Now the finish is not spoken at AnnounceWait: the orchestrator's line
 // is spoken alone whenever its turn answers, for any finish the level
-// speaks — nobody's in particular, the shepherd's own instruction, a kept
+// speaks — nobody's in particular, the user's own instruction, a kept
 // promise (at every level) — with no push_late and the wait logged.
 func TestFinishWaitsForTheBrainsLine(t *testing.T) {
 	line := "Version 2.1.0 is finished and pushed to main. Shall I have it push the tag now, or wait until you've had a look?"
@@ -401,7 +401,7 @@ func TestFinishWaitsForTheBrainsLine(t *testing.T) {
 }
 
 // A finish whose turn times out speaks the code sentence once, after the
-// turn's own budget, never before it; an owed finish (the shepherd's own
+// turn's own budget, never before it; an owed finish (the user's own
 // instruction, a kept promise) says in the same sentence that its
 // findings could not be had.
 func TestFinishTimeoutSpeaksTheCodeSentenceOnce(t *testing.T) {
@@ -464,7 +464,7 @@ func TestFinishTimeoutSpeaksTheCodeSentenceOnce(t *testing.T) {
 }
 
 // A late line about a block: the parsed prompt is spoken at AnnounceWait;
-// a late line that says the shepherd must act is added once at idle —
+// a late line that says the user must act is added once at idle —
 // also for a block that created no pending action (widened from "open
 // prompt only"); a late line without needs_user is dropped; a late line
 // about a prompt answered meanwhile is dropped as stale.
@@ -497,7 +497,7 @@ func TestAnnounceLateBlockLines(t *testing.T) {
 				return braintest.Response(*announceReply(needs, "interrupt", "", "", c.needsUser)), nil
 			}}
 			// The "yes" is said from inside the event turn, which holds the
-			// brain's turn lock: its call must not wait for its own turn.
+			// orchestrator's turn lock: its call must not wait for its own turn.
 			h = newBrainHarness(t, m, func(cfg *Config) { cfg.AnnounceWait = 30 * time.Millisecond; cfg.ReplyWait = 20 * time.Millisecond })
 			h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
 			pusher := h.pusher
@@ -538,7 +538,7 @@ func TestAnnounceLateBlockLines(t *testing.T) {
 }
 
 // At quiet a finish nobody is owed is not spoken, so nothing waits for
-// the brain: no model call, no push, the transition returns at once.
+// the orchestrator: no model call, no push, the transition returns at once.
 func TestQuietFinishDoesNotWait(t *testing.T) {
 	var h *harness
 	m := braintest.NewModel()
@@ -562,7 +562,7 @@ func TestQuietFinishDoesNotWait(t *testing.T) {
 	}
 }
 
-// "<alias> started on …" for the brain's own prompt is silent context:
+// "<alias> started on …" for the orchestrator's own prompt is silent context:
 // the tool result already said it was sent (the duplicate speech of
 // 2026-09-24 00:13:02). An instruction picked up long after it went out
 // is news and spoken at chatty as before; a worker started from the
@@ -667,11 +667,11 @@ func TestAnnounceFallsBackToTheCodeSentence(t *testing.T) {
 	}
 }
 
-// A block waits for the brain like a finish does and speaks one line:
-// the brain's when it lands in time, the parsed prompt's sentence when
+// A block waits for the orchestrator like a finish does and speaks one line:
+// the orchestrator's when it lands in time, the parsed prompt's sentence when
 // it does not. A line about a prompt that was answered meanwhile is
 // dropped (brain.push_stale), which is what made the assistant tell the
-// CEO to approve a prompt already gone (2026-09-18).
+// user to approve a prompt already gone (2026-09-18).
 func TestAnnounceBlockOneLineAndStale(t *testing.T) {
 	m := braintest.NewModel()
 	// The ear contract: the decision is the reply's ask, heard last.
@@ -696,7 +696,7 @@ func TestAnnounceBlockOneLineAndStale(t *testing.T) {
 	if len(d) != 1 || d[0]["urgency_applied"] != "interrupt" || d[0]["needs_user"] != true || d[0]["template"] == "" {
 		t.Errorf("push_decision = %v", d)
 	}
-	// The question answered before the brain spoke: nothing is said
+	// The question answered before the orchestrator spoke: nothing is said
 	// about a prompt that is gone.
 	m.EventDefault = &braintest.Step{Fn: func(call braintest.Call) (*genai.GenerateContentResponse, error) {
 		h.say("yes")
@@ -717,13 +717,13 @@ func TestAnnounceBlockOneLineAndStale(t *testing.T) {
 
 // Quiet speaks a question but never enriches a finish (no model call);
 // normal does not run a turn for a finish it would not announce; chatty
-// announces and lets the brain phrase it.
+// announces and lets the orchestrator phrase it.
 func TestAnnounceFollowsChattiness(t *testing.T) {
 	m := braintest.NewModel()
 	m.EventDefault = announceReply("Docs finished the readme you asked for.", "idle", "", "the readme", false)
 	h := newBrainHarness(t, m, func(c *Config) { c.Chattiness = string(Quiet) })
 	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
-	// A question is spoken at every level, so the brain phrases it.
+	// A question is spoken at every level, so the orchestrator phrases it.
 	h.block("w5:p1", "codex-approval-prompt.screen.txt")
 	if got := h.pushTexts(); len(got) != 1 || got[0] != "Docs finished the readme you asked for." {
 		t.Fatalf("pushes = %v", got)
@@ -754,8 +754,8 @@ func TestAnnounceFollowsChattiness(t *testing.T) {
 	}
 }
 
-// A CEO turn queued while an announce turn runs: the announce turn
-// yields, the template is spoken, and the CEO turn runs next.
+// A user turn queued while an announce turn runs: the announce turn
+// yields, the template is spoken, and the user turn runs next.
 func TestAnnounceYieldsToCEO(t *testing.T) {
 	release := make(chan struct{})
 	m := braintest.NewModel()
@@ -773,7 +773,7 @@ func TestAnnounceYieldsToCEO(t *testing.T) {
 		return braintest.Response(*announceReply("Auth finished the rerun.", "idle", "", "", false)), nil
 	}}
 	m.Default = &braintest.Step{Text: braintest.Reply("Auth is done.", "")}
-	// ReplyWait -1: the shepherd's turn waits behind the announce turn,
+	// ReplyWait -1: the user's turn waits behind the announce turn,
 	// and its reply must be the tool result however long that takes.
 	h := newBrainHarness(t, m, func(c *Config) { c.AnnounceWait = -1; c.ReplyWait = -1 })
 	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
@@ -822,13 +822,13 @@ func TestAnnounceYieldsToCEO(t *testing.T) {
 	}
 }
 
-// Two finishes of the same agent queued behind a busy brain: the older
+// Two finishes of the same agent queued behind a busy orchestrator: the older
 // announce turn is coalesced into the newer and speaks its template.
 func TestAnnounceCoalesces(t *testing.T) {
 	release := make(chan struct{})
 	m := braintest.NewModel(braintest.Step{Block: release, Text: braintest.Reply("Docs is done.", "")})
 	m.EventDefault = announceReply("Auth finished. The tests pass now.", "idle", "", "", false)
-	// ReplyWait -1: the shepherd's turn is held on purpose; its reply is
+	// ReplyWait -1: the user's turn is held on purpose; its reply is
 	// the tool result, not a later push.
 	h := newBrainHarness(t, m, func(c *Config) { c.AnnounceWait = -1; c.Chattiness = string(Chatty); c.ReplyWait = -1 })
 	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
@@ -904,7 +904,7 @@ func TestAnnounceTurnCannotAct(t *testing.T) {
 
 // A working/idle promise is kept through an announce turn too (one
 // line; the sentence itself is never announced), and by the template
-// when the brain skips. done -> idle ("idle again") is the non-finish
+// when the orchestrator skips. done -> idle ("idle again") is the non-finish
 // path this exercises; working -> idle is a finish (TestFinishEdges)
 // and goes through onDone instead.
 func TestAnnouncePromiseOnlyEvents(t *testing.T) {
@@ -940,7 +940,7 @@ func TestAnnouncePromiseOnlyEvents(t *testing.T) {
 }
 
 // TestKeptPromiseOnAStaleBlockIsLoggedDropped: docs/timelines.md C20 —
-// a promise kept by a block whose prompt was answered while the brain
+// a promise kept by a block whose prompt was answered while the orchestrator
 // wrote about it is marked kept, and its line is dropped with the stale
 // block. The drop is logged (voice.push_dropped {reason: stale_block})
 // instead of vanishing.
@@ -995,11 +995,11 @@ func TestKeptPromiseLineIsTaggedOwed(t *testing.T) {
 }
 
 // An owed line is never suppressed by chattiness (tier-2 bench
-// 2026-10-03 #6: the finish the CEO asked about was skipped by the
+// 2026-10-03 #6: the finish the user asked about was skipped by the
 // ceiling, brain.push_decision {"via":"ceiling","urgency_applied":"skip"},
 // supervisor.push_quiet). A kept promise was already spoken at every
-// level; the finish of the CEO's own instruction now is too — at quiet,
-// and at normal past the recent window — with the brain's line, or with
+// level; the finish of the user's own instruction now is too — at quiet,
+// and at normal past the recent window — with the orchestrator's line, or with
 // the code sentence when the turn fails.
 func TestOwedFinishBypassesCeiling(t *testing.T) {
 	for _, level := range []Chattiness{Quiet, Normal} {
@@ -1025,7 +1025,7 @@ func TestOwedFinishBypassesCeiling(t *testing.T) {
 			}
 		})
 	}
-	// Without a brain the code sentence is the owed line, at quiet too.
+	// Without an orchestrator the code sentence is the owed line, at quiet too.
 	h := newHarness(t, func(c *Config) { c.Chattiness = string(Quiet) })
 	h.addAgent("w5:p1", "auth", "codex", herdr.StateIdle)
 	h.send("w5:p1", "run the tests")

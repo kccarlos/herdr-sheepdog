@@ -12,18 +12,18 @@ import (
 )
 
 // Closing an agent by voice (docs/roles.md "Closing an agent"): the
-// brain's interrupt tool with close true. Which agent the CEO meant is
-// the brain's judgement; the daemon holds the rails, which are about
+// orchestrator's interrupt tool with close true. Which agent the user meant is
+// the orchestrator's judgement; the daemon holds the rails, which are about
 // authority only:
 //
-//   - the CEO's own recent words must be behind it, not yet spent on
+//   - the user's own recent words must be behind it, not yet spent on
 //     another write (wordsRailLocked, the spawn rail's reading; one input
 //     closes one agent);
 //   - an agent the daemon protects — the pane the daemon itself runs in,
 //     and any agent working in one of Config.ProtectedDirs (the daemon's
-//     own directory, where the CEO's orchestrator session works) — is
-//     closed only when the brain says the CEO named that very agent
-//     (protected_ok); otherwise the brain is told why, to ask.
+//     own directory, where the user's orchestrator session works) — is
+//     closed only when the orchestrator says the user named that very agent
+//     (protected_ok); otherwise the orchestrator is told why, to ask.
 //
 // The pane is closed with herdr's pane.close; herdr's pane_closed then
 // reaches the roster like any agent that exits.

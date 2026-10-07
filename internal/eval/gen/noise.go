@@ -10,7 +10,7 @@ import (
 )
 
 // The noise operations: what the voice models' speech recognition did to
-// the shepherd's words in the logged sessions.
+// the user's words in the logged sessions.
 const (
 	// OpDrop drops one word ("tell the sheepdog claude that…" heard
 	// without "the").

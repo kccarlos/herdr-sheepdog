@@ -302,7 +302,7 @@ test('a GPT-Live → Gemini policy switch, then a 7.9x burst and end of stream, 
     p.setPolicy(PLAYBACK_POLICY.gemini); // voice.provider_changed → status.provider
     burst(p, 0.76, 6, 0.071, null); // "On it."
     drain(p, 3);
-    for (let i = 0; i < blocksFor(1.5); i++) p.render(block); // the brain thinks (18:21:16.6 → 18:21:18.6)
+    for (let i = 0; i < blocksFor(1.5); i++) p.render(block); // the orchestrator thinks (18:21:16.6 → 18:21:18.6)
     const drainsBefore = p.stats.drains;
     const underrunsBefore = p.stats.underruns;
     burst(p, 7.92, 26, 0.998, midway); // the answer

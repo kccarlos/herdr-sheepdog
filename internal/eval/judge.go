@@ -55,7 +55,7 @@ type JudgeInput struct {
 	// Criterion is a yes/no question about the conversation, phrased so
 	// that yes is the good outcome.
 	Criterion string
-	// Transcript is the conversation as the CEO experienced it: what
+	// Transcript is the conversation as the user experienced it: what
 	// they said and what they heard, oldest first.
 	Transcript string
 	// Facts is the ground truth the judge may check claims against (the

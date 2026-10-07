@@ -307,7 +307,7 @@ func (s *VoiceSession) Audio(n, rate int) {
 		return
 	}
 	l.mu.Unlock()
-	it := VoiceItem{Kind: VKindAudio, Class: ClassAudio, Role: "user", Label: "shepherd audio", open: true, samples: int64(n / 2), rate: rate}
+	it := VoiceItem{Kind: VKindAudio, Class: ClassAudio, Role: "user", Label: "user audio", open: true, samples: int64(n / 2), rate: rate}
 	it.AudioMS = it.samples * 1000 / int64(rate)
 	it.Text = audioText(&it)
 	s.add(it, false)
@@ -362,13 +362,13 @@ func (s *VoiceSession) Heard(text string, final bool) {
 		l.mu.Unlock()
 		if text != "" {
 			// A transcript without audio before it still opens a turn.
-			s.addTurn(VoiceItem{Kind: VKindAudio, Class: ClassShepherd, Role: "user", Label: "shepherd (transcript only)", Heard: text, Text: "🎤 heard: " + fmt.Sprintf("%q", strings.TrimSpace(text)), heardDone: final, open: !final}, false, true)
+			s.addTurn(VoiceItem{Kind: VKindAudio, Class: ClassShepherd, Role: "user", Label: "user (transcript only)", Heard: text, Text: "🎤 heard: " + fmt.Sprintf("%q", strings.TrimSpace(text)), heardDone: final, open: !final}, false, true)
 		}
 		return
 	}
 	first := target.Heard == ""
 	target.Heard += text
-	target.Class, target.Label = ClassShepherd, "shepherd (audio + transcript)"
+	target.Class, target.Label = ClassShepherd, "user (audio + transcript)"
 	if target.rate == 0 {
 		target.Text = "🎤 heard: " + fmt.Sprintf("%q", strings.TrimSpace(target.Heard))
 	} else {

@@ -166,7 +166,7 @@ func TestInjectBlockedChainAndConfirm(t *testing.T) {
 		t.Fatalf("empty text = %d", code)
 	}
 
-	// working, then done with the "after" screen: with no brain the
+	// working, then done with the "after" screen: with no orchestrator the
 	// daemon speaks its own code sentence, and the record keeps that the
 	// agent finished.
 	code, body = h.postJSON("/api/inject/state", map[string]any{"pane_id": "fake:1", "state": "working"}, &res)
@@ -245,12 +245,12 @@ func TestInjectScreenEndpoint(t *testing.T) {
 }
 
 func TestPendingCancelAndProposeStop(t *testing.T) {
-	// With a brain (the reflex fake): an instruction is the brain's
+	// With an orchestrator (the reflex fake): an instruction is the orchestrator's
 	// call, so the propose half of this chain needs one.
 	h := newHarness(t, harnessOpts{brain: true})
 	h.postJSON("/api/inject/blocked", map[string]any{"pane_id": "fake:1", "alias": "auth", "screen": codexScreen(t)}, nil)
 	// The Cancel button runs the stop tool. Stop is not "no": a worker's
-	// question is left open for the shepherd to answer.
+	// question is left open for the user to answer.
 	var tr ToolResponse
 	code, body := h.postJSON("/api/pending/cancel", map[string]any{}, &tr)
 	if code != http.StatusOK || tr.Tool != supervisor.ToolStop || !strings.Contains(tr.Spoken, "still waiting for your answer") {

@@ -25,16 +25,16 @@ import (
 type RunOptions struct {
 	// Config is the daemon configuration the scratch daemons start from.
 	Config config.Config
-	// BrainProvider and BrainModel pick the scratch daemons' brain
+	// BrainProvider and BrainModel pick the scratch daemons' orchestrator
 	// (default deepseek, deepseek-flash; DaemonOptions).
 	BrainProvider, BrainModel string
 	// Scratch is where each run's daemon directory goes.
 	Scratch string
 	// FixtureDir is testdata/herdr.
 	FixtureDir string
-	// Synth renders the CEO's lines.
+	// Synth renders the user's lines.
 	Synth speech.Synth
-	// NewSimUser and NewJudge build the simulated CEO and the judge for
+	// NewSimUser and NewJudge build the simulated user and the judge for
 	// one run, metering on m (nil: the scenario's script and the fake
 	// judge).
 	NewSimUser func(m *eval.Meter) eval.SimUser
@@ -50,7 +50,7 @@ type RunOptions struct {
 	Personas []string
 }
 
-// UserLine is one thing the simulated CEO said.
+// UserLine is one thing the simulated user said.
 type UserLine struct {
 	AtMS  int64  `json:"at_ms"`
 	Said  string `json:"said"`
@@ -100,7 +100,7 @@ type Run struct {
 	GoalMetSelf *bool          `json:"goal_met_self,omitempty"`
 	Turns       int            `json:"turns"`
 	DurationMS  int64          `json:"duration_ms"`
-	// Transcript is the call as the CEO lived it: what they said and
+	// Transcript is the call as the user lived it: what they said and
 	// what they heard (cut where they cut the bot off).
 	Transcript []eval.SimLine             `json:"transcript"`
 	User       []UserLine                 `json:"user_lines"`
@@ -162,8 +162,8 @@ type runner struct {
 	lines  []UserLine
 	voice  string
 	bargeN int
-	// answering: hear is listening for the answer to the CEO (the only
-	// time the CEO's barge-in habit applies; not the connect settle).
+	// answering: hear is listening for the answer to the user (the only
+	// time the user's barge-in habit applies; not the connect settle).
 	answering bool
 
 	eventFails []eval.Failure // the scenario's voice event checks
@@ -301,7 +301,7 @@ func RunScenario(ctx context.Context, sc Scenario, repeat, port int, o RunOption
 
 	r.converse(ctx)
 
-	// Wait = continue: the CEO hung up while the answer was on its way.
+	// Wait = continue: the user hung up while the answer was on its way.
 	names, criteria := eval.RubricFor(sc.SimScenario)
 	caps := capsOf(sc)
 	deadline := t0.Add(time.Duration(caps.MaxSeconds) * time.Second)
@@ -368,13 +368,13 @@ func capsOf(sc Scenario) eval.SimCaps {
 
 func (r *runner) since() int64 { return r.c.SinceMS() }
 
-// converse is the call: the opening, then the simulated CEO's turns.
+// converse is the call: the opening, then the simulated user's turns.
 func (r *runner) converse(ctx context.Context) {
 	run, sc := r.run, r.sc
 	caps := capsOf(sc)
 	deadline := time.Now().Add(time.Duration(caps.MaxSeconds) * time.Second)
 	silence := time.Duration(caps.SilenceSeconds) * time.Second
-	// The phone connects to a flock already running: hear what it says
+	// The phone connects to a workers already running: hear what it says
 	// first (the initial blocks' announcements).
 	r.hear(ctx, 2500*time.Millisecond, 25*time.Second, false)
 	r.w.Arm()
@@ -444,7 +444,7 @@ func (r *runner) converse(ctx context.Context) {
 				return
 			}
 			r.tagLast(t.Beat, t.Tag)
-			// The answer: the first words within 25 s (a brain turn can
+			// The answer: the first words within 25 s (an orchestrator turn can
 			// take that long), then until quiet.
 			r.answering = true
 			if got := r.hear(ctx, 1500*time.Millisecond, 25*time.Second, true); got > 0 {
@@ -467,7 +467,7 @@ func (r *runner) converse(ctx context.Context) {
 	}
 }
 
-// tagLast marks the CEO's latest line with its agenda beat and tag.
+// tagLast marks the user's latest line with its agenda beat and tag.
 func (r *runner) tagLast(beat int, tag string) {
 	for i := len(r.convo) - 1; i >= 0; i-- {
 		if r.convo[i].Who == "ceo" {
@@ -538,7 +538,7 @@ func (r *runner) say(ctx context.Context, text string, barge, collision bool) er
 
 // hear collects the bot's finished utterances into the conversation
 // until it has been quiet for quiet (with at least one utterance when
-// needAny), or max passes; meanwhile it plays the CEO's barge-in and
+// needAny), or max passes; meanwhile it plays the user's barge-in and
 // collision habits. It returns how many utterances it heard.
 func (r *runner) hear(ctx context.Context, quiet, max time.Duration, needAny bool) int {
 	end := time.Now().Add(max)
@@ -615,7 +615,7 @@ func (r *runner) maybeCollide(ctx context.Context) {
 	_ = r.say(ctx, col.Line, false, true)
 }
 
-// addBot appends a bot utterance as the CEO heard it.
+// addBot appends a bot utterance as the user heard it.
 func (r *runner) addBot(u voiceclient.BotUtterance) {
 	text := strings.TrimSpace(u.Heard)
 	if text == "" {
@@ -634,7 +634,7 @@ func (r *runner) addBot(u voiceclient.BotUtterance) {
 // reconnect: the phone goes away (screen locked, tunnel) and comes back.
 func (r *runner) reconnect(ctx context.Context, rc *Reconnect) {
 	r.c.Detach()
-	r.convo = append(r.convo, eval.SimLine{AtMS: r.since(), Who: "system", Text: fmt.Sprintf("The CEO's phone lost the connection for %d seconds.", rc.AwayMS/1000)})
+	r.convo = append(r.convo, eval.SimLine{AtMS: r.since(), Who: "system", Text: fmt.Sprintf("The user's phone lost the connection for %d seconds.", rc.AwayMS/1000)})
 	select {
 	case <-time.After(time.Duration(rc.AwayMS) * time.Millisecond):
 	case <-ctx.Done():
@@ -671,7 +671,7 @@ func (r *runner) collect(rec voiceclient.Recording, proxy *FaultProxy) {
 	r.meter.Live(rec.Events)
 	r.meter.Audio(AudioMS(rec))
 	run.Bot = rec.Bot
-	// What the voice model heard of each CEO line: the input transcript
+	// What the voice model heard of each user line: the input transcript
 	// between it and the next line.
 	for i := range r.lines {
 		from := r.lines[i].AtMS
@@ -751,7 +751,7 @@ func (r *runner) collect(rec voiceclient.Recording, proxy *FaultProxy) {
 	r.writeEvents(rec)
 }
 
-// explainExchanges splits the call at the CEO's lines: for each, the
+// explainExchanges splits the call at the user's lines: for each, the
 // orchestrator's text (every to_supervisor result's spoken and detail,
 // and the daemon's pushes) and what the voice said, until the next line.
 func explainExchanges(spec *eval.ExplainSpec, lines []UserLine, rec voiceclient.Recording) []eval.ExplainExchange {
@@ -827,7 +827,7 @@ func explainExchanges(spec *eval.ExplainSpec, lines []UserLine, rec voiceclient.
 		}
 	}
 	// The voice's speech by fragment time: one utterance can run on into
-	// the next question (a stalled answer the CEO talked over). Only what
+	// the next question (a stalled answer the user talked over). Only what
 	// was heard counts (a flushed utterance is cut at its heard part).
 	for _, u := range rec.Bot {
 		if len(u.Fragments) == 0 {
@@ -865,9 +865,9 @@ func (r *runner) failures() []eval.Failure {
 	for _, fb := range run.Fallbacks {
 		switch {
 		case eval.IsRateLimited(fb):
-			fs = append(fs, eval.Failure{Type: eval.FailError, Detail: "brain rate limited: " + fb})
+			fs = append(fs, eval.Failure{Type: eval.FailError, Detail: "orchestrator rate limited: " + fb})
 		case eval.IsTimeoutText(fb) || strings.HasPrefix(fb, "timeout"):
-			fs = append(fs, eval.Failure{Type: eval.FailTimeout, Detail: "brain turn timed out: " + fb})
+			fs = append(fs, eval.Failure{Type: eval.FailTimeout, Detail: "orchestrator turn timed out: " + fb})
 		default:
 			fs = append(fs, eval.Failure{Type: eval.FailBrainFallback, Detail: fb})
 		}
@@ -888,7 +888,7 @@ func (r *runner) failures() []eval.Failure {
 		case eval.EndMaxTime:
 			fs = append(fs, eval.Failure{Type: eval.FailTimeout, Detail: "the conversation hit its time cap"})
 		case eval.EndSilence:
-			fs = append(fs, eval.Failure{Type: eval.FailSilence, Detail: "the CEO waited in silence past the cap"})
+			fs = append(fs, eval.Failure{Type: eval.FailSilence, Detail: "the user waited in silence past the cap"})
 		case eval.EndMaxTurns:
 			fs = append(fs, eval.Failure{Type: eval.FailMaxTurns, Detail: "every turn used without the call ending"})
 		}
@@ -896,7 +896,7 @@ func (r *runner) failures() []eval.Failure {
 	return fs
 }
 
-// voiceChecks are the voice-layer checks: a CEO line the voice model did
+// voiceChecks are the voice-layer checks: a user line the voice model did
 // not hear at all, the opening's expected words, and the scenario's
 // event expectations.
 func voiceChecks(sc Scenario, run Run) []eval.Failure {

@@ -46,7 +46,7 @@ export const DIVIDERS = {
   'voice.disconnected': (p) => ({ label: 'disconnected', detail: p.error || '', cls: 'lost' }),
   'voice.closed': (p) => ({ label: 'session closed', detail: p.reason || '', cls: 'lost' }),
   'voice.goaway': (p) => ({ label: 'GoAway', detail: `${fmtMs(p.time_left_ms)} left`, cls: 'recycle' }),
-  // "New conversation" (docs/roles.md): the brain's transcript window
+  // "New conversation" (docs/roles.md): the orchestrator's transcript window
   // and the voice session both started fresh; conversation.reset is the
   // event both the SSE-fed live views and GET /api/conversation key off
   // (internal/web/conversation.go renders the same divider server-side).
@@ -75,7 +75,7 @@ export function argSummary(args, max = 60) {
   return parts.join(', ');
 }
 
-/** Renders "provider/model" ("model" alone when the event carries no provider, as older brain events do). */
+/** Renders "provider/model" ("model" alone when the event carries no provider, as older orchestrator events do). */
 export function withProvider(provider, model) {
   if (!model) return provider || '';
   return provider ? `${provider}/${model}` : model;
@@ -94,10 +94,10 @@ export function eventSummary(ev) {
       parts.push(p.before_tokens != null || p.after_tokens != null ? `${p.before_tokens ?? '?'} → ${p.after_tokens ?? '?'} tokens` : '', p.dropped != null ? `${p.dropped} dropped` : '', p.reason);
       break;
     case type === 'brain.push_decision':
-      parts.push(`${p.urgency_requested || 'no brain line'} → ${p.urgency_applied || '?'}`, p.reason, p.ceiling ? `ceiling ${p.ceiling}` : '', p.via ? `via ${p.via}` : '', p.late ? 'late' : '', `${p.agent || ''} ${p.event || ''}`.trim(), p.spoken || p.template);
+      parts.push(`${p.urgency_requested || 'no orchestrator line'} → ${p.urgency_applied || '?'}`, p.reason, p.ceiling ? `ceiling ${p.ceiling}` : '', p.via ? `via ${p.via}` : '', p.late ? 'late' : '', `${p.agent || ''} ${p.event || ''}`.trim(), p.spoken || p.template);
       break;
     case type === 'brain.yielded':
-      parts.push(p.turn != null ? `turn ${p.turn}` : '', p.step != null ? `before step ${p.step}` : '', p.agent ? `${p.agent} ${p.event || ''}`.trim() : '', p.ceo_waiting ? `${p.ceo_waiting} shepherd turn${p.ceo_waiting === 1 ? '' : 's'} waiting` : '');
+      parts.push(p.turn != null ? `turn ${p.turn}` : '', p.step != null ? `before step ${p.step}` : '', p.agent ? `${p.agent} ${p.event || ''}`.trim() : '', p.ceo_waiting ? `${p.ceo_waiting} user turn${p.ceo_waiting === 1 ? '' : 's'} waiting` : '');
       break;
     case type === 'brain.event_coalesced':
       parts.push(p.agent ? `${p.agent} ${p.event || ''}`.trim() : '', 'replaced the queued turn');

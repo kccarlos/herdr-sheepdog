@@ -46,7 +46,7 @@ func payload(e logging.Line) map[string]any {
 	return m
 }
 
-// harness bundles a brain over the scripted model and the fake host.
+// harness bundles an orchestrator over the scripted model and the fake host.
 type harness struct {
 	t     *testing.T
 	brain *Brain
@@ -56,7 +56,7 @@ type harness struct {
 	dir   string
 }
 
-// newHarness builds a brain with one agent "auth" (pane w5:p1, working)
+// newHarness builds an orchestrator with one agent "auth" (pane w5:p1, working)
 // and one "docs" (w6:p1, idle), the codex approval screen on auth.
 func newHarness(t *testing.T, model *braintest.Model, tweak func(*Config)) *harness {
 	t.Helper()

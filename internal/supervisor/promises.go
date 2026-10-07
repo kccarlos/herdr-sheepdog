@@ -11,7 +11,7 @@ import (
 )
 
 // Promised work (docs/roles.md "Promises"): "tell me when it's done" is
-// recorded by the brain's promise tool (brainHost.Promise → createPromise),
+// recorded by the orchestrator's promise tool (brainHost.Promise → createPromise),
 // persisted in the state file's session so a restart keeps it, and kept
 // at the matching worker event by the announcement (announce.go) with a
 // line that bypasses the chattiness ceiling — a promise is the user's
@@ -19,7 +19,7 @@ import (
 // other ways out.
 
 // createPromise records an open promise for paneID and logs
-// promise.created. turn is the brain turn that made it (0 outside one).
+// promise.created. turn is the orchestrator turn that made it (0 outside one).
 func (s *Supervisor) createPromise(paneID string, req brain.PromiseRequest) (state.Promise, error) {
 	row, ok := s.store.Get(paneID)
 	if !ok {
@@ -28,9 +28,9 @@ func (s *Supervisor) createPromise(paneID string, req brain.PromiseRequest) (sta
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if old, dup := s.openPromiseFor(paneID, req.Event); dup {
-		// The brain is repeating a promise it already made: the fact goes
+		// The orchestrator is repeating a promise it already made: the fact goes
 		// back as the tool's error, and nothing new is recorded, so the
-		// finish is not kept twice and the brain need not confirm again.
+		// finish is not kept twice and the orchestrator need not confirm again.
 		s.log.Log(logSource, "promise.duplicate", paneID, map[string]any{"id": old.ID, "text": req.Text, "event": req.Event, "turn": req.Turn})
 		return state.Promise{}, duplicatePromiseErr(old, req.Turn)
 	}
@@ -63,7 +63,7 @@ func (s *Supervisor) openPromiseFor(paneID, event string) (state.Promise, bool) 
 // already open (tier-2 bench 2026-10-03, collision-finish-push: the
 // judge counted "Noted. I'll tell you…" confirmations as unprompted): the
 // fact that it is recorded, since when, and in which earlier turn (the
-// brain's transcript shows whether that turn's reply told the CEO; the
+// orchestrator's transcript shows whether that turn's reply told the user; the
 // daemon does not claim it did).
 func duplicatePromiseErr(old state.Promise, turn int) error {
 	msg := fmt.Sprintf("already promised at %s: %q is still open, nothing new was recorded", old.CreatedAt.Format("15:04:05"), old.Text)
@@ -103,7 +103,7 @@ func (s *Supervisor) openPromises() []state.Promise {
 }
 
 // resolvePromise moves promise id to status (kept, expired, cancelled),
-// tells the brain, and returns the updated record; ok is false when it
+// tells the orchestrator, and returns the updated record; ok is false when it
 // is not open any more. Caller holds s.mu.
 func (s *Supervisor) resolvePromise(id, status string) (state.Promise, bool) {
 	var out state.Promise
@@ -152,7 +152,7 @@ func promiseMatches(p state.Promise, paneID string, events ...string) bool {
 // onDone instead, which keeps an "idle" promise as part of its own
 // announce call). When any matches, the event is announced with
 // sentence as a promise-only announcement — one line through the
-// brain, or "As you asked: <sentence>" — at every chattiness level.
+// orchestrator, or "As you asked: <sentence>" — at every chattiness level.
 // Blocks and finishes keep their promises inside their own announce
 // call.
 func (s *Supervisor) keepPromises(ctx context.Context, row state.Agent, event, sentence string) {
@@ -165,7 +165,7 @@ func (s *Supervisor) keepPromises(ctx context.Context, row state.Agent, event, s
 }
 
 // keepMatching marks every open promise of paneID that waits for any of
-// events as kept (the brain sees the record before the announce turn)
+// events as kept (the orchestrator sees the record before the announce turn)
 // and returns them, oldest first. Marking first means nothing is said
 // twice.
 func (s *Supervisor) keepMatching(paneID string, events ...string) []state.Promise {
@@ -209,7 +209,7 @@ func (s *Supervisor) ExpirePromises() {
 }
 
 // restorePromises puts the open promises of an earlier run into the
-// brain's transcript (which is per run) so they have a card and recall
+// orchestrator's transcript (which is per run) so they have a card and recall
 // finds them. Called once from New.
 func (s *Supervisor) restorePromises() {
 	if s.brain == nil {
@@ -220,7 +220,7 @@ func (s *Supervisor) restorePromises() {
 	}
 }
 
-// promiseInfo converts a record for the brain.
+// promiseInfo converts a record for the orchestrator.
 func promiseInfo(p state.Promise) brain.PromiseInfo {
 	return brain.PromiseInfo{ID: p.ID, Text: p.Text, Agent: p.Alias, Event: p.Event, Status: p.Status, CreatedTurn: p.CreatedTurn, CreatedAt: p.CreatedAt, Due: p.Due, CarriedOver: p.CarriedOver}
 }
@@ -228,7 +228,7 @@ func promiseInfo(p state.Promise) brain.PromiseInfo {
 // promiseTrailer is the briefing's reminder of open promises: "You asked
 // me to tell you when auth finishes." (cache-only: no model). A promise
 // carried over from an earlier run was already announced once at
-// startup, so it is left out here (announceStartupPromises); the brain
+// startup, so it is left out here (announceStartupPromises); the orchestrator
 // still sees it in the ledger section, noted "(from an earlier run)".
 func promiseTrailer(open []state.Promise) string {
 	seen := map[string]bool{}
@@ -253,8 +253,8 @@ func promiseTrailer(open []state.Promise) string {
 // announceStartupPromises speaks, once per daemon run, the open promises
 // an earlier run left behind (docs/history/roles-status.md,
 // docs/history/issues-2026-09-18.md "Smaller items"): this run's transcript has
-// no memory of making them, so the brain's announce turns cannot be
-// trusted to bring them up, and the shepherd is still owed an answer.
+// no memory of making them, so the orchestrator's announce turns cannot be
+// trusted to bring them up, and the user is still owed an answer.
 // Called once, the first time SetVoiceConnected(true) fires (a live
 // connect, or at once for --voice=off). No model is involved: the
 // sentence is composed in code, like every other fallback the daemon can

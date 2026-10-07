@@ -13,36 +13,36 @@ import (
 )
 
 // Push judgment (docs/roles.md "Pushes"): on a worker's block or finish
-// the brain — when one is attached — runs one announce event turn with
+// the orchestrator — when one is attached — runs one announce event turn with
 // the daemon's own sentence, the pane read already taken, the promises
 // the event keeps and its transcript, and decides *whether* the voice
 // says anything (skip, silent) and *how urgently* (idle, interrupt); the
 // voice still decides the moment (the push queue). Code keeps the
-// ceiling the brain cannot lift: the chattiness level (with owed lines —
-// a kept promise, the finish of the shepherd's own instruction — the
+// ceiling the orchestrator cannot lift: the chattiness level (with owed lines —
+// a kept promise, the finish of the user's own instruction — the
 // exception) and interrupt only for a due promise or a decision the
-// shepherd must take.
+// user must take.
 //
 // One line per event, and when it is spoken depends on the event
-// (iteration 2 WP2, the 2026-09-24 scorecard: 48 of 61 brain lines were
+// (iteration 2 WP2, the 2026-09-24 scorecard: 48 of 61 orchestrator lines were
 // dropped for lateness, 30 of them needs_user):
-//   - A finish is not urgent: it waits for the brain's announce turn up to
+//   - A finish is not urgent: it waits for the orchestrator's announce turn up to
 //     the turn's own budget (brain.announce_turn_timeout_s, or
-//     brain.announce_timeout_s when the shepherd is owed the line) and
-//     speaks the brain's line alone. Only when the turn fails, times out,
+//     brain.announce_timeout_s when the user is owed the line) and
+//     speaks the orchestrator's line alone. Only when the turn fails, times out,
 //     yields or is coalesced is the code sentence spoken — once, then; an
-//     owed finish (a kept promise, the shepherd's own instruction) that got
+//     owed finish (a kept promise, the user's own instruction) that got
 //     no line says so in the same sentence.
 //   - A block is urgent: the code sentence (the parsed prompt) is spoken
-//     at Config.AnnounceWait unless the brain's line lands first. A line
+//     at Config.AnnounceWait unless the orchestrator's line lands first. A line
 //     that lands later is dropped (brain.push_late) unless it says the
-//     shepherd must act (needs_user) — spoken once, at idle — or it is the
+//     user must act (needs_user) — spoken once, at idle — or it is the
 //     finding of an owed finish that also asked (announceFinishAsking).
 //     A line about a prompt that is no longer open is dropped
 //     (brain.push_stale on time, push_decision reason stale when late).
 
 // announcement is one worker event the supervisor announces: the code
-// sentence and what the brain gets.
+// sentence and what the orchestrator gets.
 type announcement struct {
 	row state.Agent
 	// kind is the policy class of the sentence (pushDoneInvolved,
@@ -58,8 +58,8 @@ type announcement struct {
 	// alsoBlocked: the finish left a prompt on screen
 	// (announceFinishAsking), so an open "blocked" promise is kept too.
 	alsoBlocked bool
-	// owed: the finish ends an instruction the shepherd gave this run
-	// (runningShepherdTask). Like a kept promise it makes the brain's
+	// owed: the finish ends an instruction the user gave this run
+	// (runningShepherdTask). Like a kept promise it makes the orchestrator's
 	// line worth waiting for: the code sentence says "here's what it
 	// found" and the line is added whenever it lands.
 	owed bool
@@ -78,7 +78,7 @@ type announcement struct {
 	// eventID is the worker event's id (links.go), set by announce: the
 	// turn's request and every push about the event carry it.
 	eventID string
-	// wait is how the event waited for the brain's line, set by announce
+	// wait is how the event waited for the orchestrator's line, set by announce
 	// for brain.push_decision: waitTurn (a finish, the turn's own budget),
 	// waitAnnounce (a block, Config.AnnounceWait), "" (no turn ran).
 	wait string
@@ -86,7 +86,7 @@ type announcement struct {
 	waited time.Duration
 }
 
-// The two ways an announcement waits for the brain (brain.push_decision
+// The two ways an announcement waits for the orchestrator (brain.push_decision
 // "wait").
 const (
 	waitTurn     = "turn"
@@ -95,7 +95,7 @@ const (
 
 // urgent reports whether the event must be heard at once — a block, or a
 // finish that left a prompt open (announceFinishAsking) — rather than
-// waiting for the brain's line: only a prompt cannot wait.
+// waiting for the orchestrator's line: only a prompt cannot wait.
 func (a announcement) urgent() bool {
 	return a.event == brain.PromiseEventBlocked || a.pending != ""
 }
@@ -107,8 +107,8 @@ type turnResult struct {
 }
 
 // announce keeps the promises the event fulfils and speaks the one line
-// the event gets: for a finish, the brain's line when its turn answers, or
-// the code sentence when it cannot; for a block, the brain's line when it
+// the event gets: for a finish, the orchestrator's line when its turn answers, or
+// the code sentence when it cannot; for a block, the orchestrator's line when it
 // lands within Config.AnnounceWait, else the code sentence.
 func (s *Supervisor) announce(ctx context.Context, a announcement) {
 	a.eventID = s.eventIDOf(a.row.PaneID)
@@ -126,7 +126,7 @@ func (s *Supervisor) announce(ctx context.Context, a announcement) {
 		return
 	}
 	if ceilingForbidsAll(level, a, kept) {
-		// Nothing the brain could say would be spoken: no model call.
+		// Nothing the orchestrator could say would be spoken: no model call.
 		s.logDecision(a, level, decision{via: "ceiling", requested: "", applied: brain.UrgencySkip, reason: "ceiling"}, brain.Reply{}, kept, false)
 		s.recordFinish(a, doneResult)
 		if a.kind != pushPromiseOnly {
@@ -146,7 +146,7 @@ func (s *Supervisor) announce(ctx context.Context, a announcement) {
 		res <- turnResult{rep: rep, err: err}
 	}()
 	if !a.urgent() {
-		// A finish is news, not an alarm: the brain's line (what it
+		// A finish is news, not an alarm: the orchestrator's line (what it
 		// found) is worth the seconds its turn takes, and the turn's own
 		// budget bounds the wait (brain.Turn never outlives it).
 		r := <-res
@@ -168,7 +168,7 @@ func (s *Supervisor) announce(ctx context.Context, a announcement) {
 		a.waited = s.cfg.Now().Sub(start)
 		s.applyResult(a, kept, level, r)
 	case <-timer:
-		// The shepherd hears the prompt now; the line the brain is still
+		// The user hears the prompt now; the line the orchestrator is still
 		// writing is an addition at most.
 		a.waited = s.cfg.AnnounceWait
 		s.codePath(a, kept, level, "wait")
@@ -176,21 +176,21 @@ func (s *Supervisor) announce(ctx context.Context, a announcement) {
 	}
 }
 
-// owedFinish reports whether a is a finish the shepherd is waiting on:
+// owedFinish reports whether a is a finish the user is waiting on:
 // it keeps a promise or ends their own instruction.
 func owedFinish(a announcement, kept []state.Promise) bool {
 	return a.event == brain.PromiseEventDone && (len(kept) > 0 || a.owed)
 }
 
-// noFindingSentence is the code sentence of an owed finish whose brain
-// line never came (the turn timed out): the shepherd is waiting
+// noFindingSentence is the code sentence of an owed finish whose orchestrator
+// line never came (the turn timed out): the user is waiting
 // for what it found, so the sentence says it could not be had and how to
 // get it.
 func noFindingSentence(a announcement) string {
 	return aliasOr(state.Say(a.row)) + " finished, but I couldn't get its findings in time. Ask me and I'll read its screen."
 }
 
-// applyResult turns the brain's answer (or failure) into the event's one
+// applyResult turns the orchestrator's answer (or failure) into the event's one
 // push and its logs.
 func (s *Supervisor) applyResult(a announcement, kept []state.Promise, level Chattiness, r turnResult) {
 	if r.err != nil {
@@ -200,7 +200,7 @@ func (s *Supervisor) applyResult(a announcement, kept []state.Promise, level Cha
 	rep := r.rep
 	spoken, overflow := earLine(rep)
 	if !s.pendingStillOpen(a) {
-		// The prompt was answered or went away while the brain wrote
+		// The prompt was answered or went away while the orchestrator wrote
 		// about it: whatever it says now is about something gone.
 		s.logDecision(a, level, decision{via: "brain", requested: rep.Urgency, applied: brain.UrgencySkip, reason: "stale"}, rep, kept, true)
 		s.log.Log(logSource, "brain.push_stale", a.row.PaneID, map[string]any{"turn": rep.Turn, "pending": a.pending, "spoken": spoken})
@@ -217,7 +217,7 @@ func (s *Supervisor) applyResult(a announcement, kept []state.Promise, level Cha
 	}
 	requested := requestedUrgency(rep.Urgency, spoken)
 	if len(kept) > 0 && (requested == brain.UrgencySkip || requested == brain.UrgencySilent) {
-		// The brain may not silence a promise: the code sentence keeps it.
+		// The orchestrator may not silence a promise: the code sentence keeps it.
 		s.logDecision(a, level, decision{via: "template", requested: requested, applied: brain.UrgencySkip, reason: "promise"}, rep, kept, true)
 		s.codePath(a, kept, level, "promise")
 		return
@@ -226,7 +226,7 @@ func (s *Supervisor) applyResult(a announcement, kept []state.Promise, level Cha
 	d := applyCeiling(level, a.kind, requested, ceilingInput{kept: len(kept) > 0, owed: a.owed, duePassed: duePassed, needsUser: rep.NeedsUser})
 	d.via = "brain"
 	s.logDecision(a, level, d, rep, kept, true)
-	// Whatever the ceiling does with it, the brain's line is what the
+	// Whatever the ceiling does with it, the orchestrator's line is what the
 	// record keeps of the finish.
 	s.recordFinish(a, spoken)
 	s.recordAnnounceDetail(a, rep, overflow)
@@ -268,7 +268,7 @@ func announceTags(u voice.Urgency, duePassed, needsUser bool, pending string) ma
 }
 
 // keptTags adds keeps_promise_ids — the promises a line keeps — to
-// tags: a kept promise is owed to the shepherd, so the voice push queue
+// tags: a kept promise is owed to the user, so the voice push queue
 // lets it pass plain idle news (voice/pushclass.go, docs/timelines.md
 // C29). tags is returned as is when nothing is kept.
 func keptTags(tags map[string]any, kept []state.Promise) map[string]any {
@@ -292,13 +292,13 @@ func promiseIDs(ps []state.Promise) []string {
 	return ids
 }
 
-// dropLate handles the brain's line arriving after the code sentence of
+// dropLate handles the orchestrator's line arriving after the code sentence of
 // an urgent event (a block, or a finish that asks) was spoken. As a rule
 // it is not a second line about the same event (brain.push_late); it is
 // added, once, at idle when
-//   - it says the shepherd must act (needs_user), whatever the event, and
+//   - it says the user must act (needs_user), whatever the event, and
 //     the prompt it is about is still open; or
-//   - the event is a finish the shepherd is owed (a kept promise, their
+//   - the event is a finish the user is owed (a kept promise, their
 //     own instruction) that also asked, so this line is the finding, or
 //     the line relates the finish to a request of theirs (relates_to),
 //     which the code could not know.
@@ -324,10 +324,10 @@ func (s *Supervisor) dropLate(a announcement, kept []state.Promise, level Chatti
 	switch {
 	case spoken == "" || !open || !audible:
 	case rep.NeedsUser:
-		// A decision the shepherd must take is never lost to lateness.
+		// A decision the user must take is never lost to lateness.
 		add, reason = true, "needs_user"
 	case (owedFinish(a, kept) || related) && (len(kept) > 0 || requested != brain.UrgencySkip):
-		// The finding the shepherd is waiting for. The brain may skip an
+		// The finding the user is waiting for. The orchestrator may skip an
 		// unpromised finish (they already heard it), never a promise.
 		add, reason = true, "owed"
 	}
@@ -386,7 +386,7 @@ func (s *Supervisor) pendingStillOpen(a announcement) bool {
 // prompt for a block, "<alias> finished." for a finish — when the level
 // allows it, or as "As you asked: <sentence>" for every kept promise at
 // every level (idle, or interrupt past a due time). It is the fallback
-// whenever the brain is off, late on a block, or could not answer. An
+// whenever the orchestrator is off, late on a block, or could not answer. An
 // owed finish whose turn timed out says in the same sentence that its
 // findings could not be had in time (not after a yield or coalesce: a
 // newer turn about the same agent is about to speak; nor after a model
@@ -408,7 +408,7 @@ func (s *Supervisor) codePath(a announcement, kept []state.Promise, level Chatti
 		switch {
 		case a.kind == pushPromiseOnly:
 		case a.owed:
-			// The shepherd's own instruction ended: owed like a promise,
+			// The user's own instruction ended: owed like a promise,
 			// so no chattiness level silences it.
 			s.notify(a, kept, sentence)
 			s.pushTagged(a.row.PaneID, sentence, voice.UrgencyIdle, a.tags(fromDaemon(nil)))
@@ -431,7 +431,7 @@ func (s *Supervisor) codePath(a announcement, kept []state.Promise, level Chatti
 
 // fromDaemon marks a push as the daemon's own sentence (the briefing's
 // provenance, voice/gemini/briefing.go): a code sentence, not the slow
-// brain's line.
+// orchestrator's line.
 func fromDaemon(tags map[string]any) map[string]any {
 	out := make(map[string]any, len(tags)+1)
 	for k, v := range tags {
@@ -444,7 +444,7 @@ func fromDaemon(tags map[string]any) map[string]any {
 // recordAnnounceDetail stores an announce turn's detail alongside the
 // finish it phrased (for the ledger and recall), followed by overflow:
 // whatever the ear cap cut from the spoken line (earLine), so nothing
-// the brain wrote is lost.
+// the orchestrator wrote is lost.
 func (s *Supervisor) recordAnnounceDetail(a announcement, rep brain.Reply, overflow string) {
 	if a.event != brain.PromiseEventDone {
 		return
@@ -455,8 +455,8 @@ func (s *Supervisor) recordAnnounceDetail(a announcement, rep brain.Reply, overf
 }
 
 // recordFinish stores what was announced about a finish as the agent's
-// last result (docs/roles.md: "last_result is the brain's finish line");
-// with no line — the brain was off, late or silent — the record says
+// last result (docs/roles.md: "last_result is the orchestrator's finish line");
+// with no line — the orchestrator was off, late or silent — the record says
 // only that the agent finished.
 func (s *Supervisor) recordFinish(a announcement, spoken string) {
 	if a.event != brain.PromiseEventDone {
@@ -470,11 +470,11 @@ func (s *Supervisor) recordFinish(a announcement, spoken string) {
 
 // decision is one push judgment as logged (brain.push_decision).
 type decision struct {
-	via       string // brain | template | ceiling (skipped before any turn)
-	requested string // what the brain asked for ("" on the template path)
+	via       string // orchestrator | template | ceiling (skipped before any turn)
+	requested string // what the orchestrator asked for ("" on the template path)
 	applied   string // what was done: interrupt, idle, silent, skip
-	reason    string // brain, ceiling, promise, promise_due, stale, late, owed, needs_user, wait, timeout, fallback, yielded, coalesced
-	late      bool   // the template was spoken before the brain answered
+	reason    string // orchestrator, ceiling, promise, promise_due, stale, late, owed, needs_user, wait, timeout, fallback, yielded, coalesced
+	late      bool   // the template was spoken before the orchestrator answered
 	err       error
 }
 
@@ -482,8 +482,8 @@ type decision struct {
 func (s *Supervisor) logDecision(a announcement, level Chattiness, d decision, rep brain.Reply, kept []state.Promise, withSpoken bool) {
 	payload := map[string]any{"via": d.via, "urgency_requested": d.requested, "urgency_applied": d.applied, "ceiling": string(level), "reason": d.reason, "agent": aliasOr(a.row.Alias), "event": a.event, "template": a.sentence, "late": d.late}
 	if a.wait != "" {
-		// How the event waited for the brain's line and for how long: the
-		// scorecard tells "brain line after the wait" (via brain) from
+		// How the event waited for the orchestrator's line and for how long: the
+		// scorecard tells "orchestrator line after the wait" (via orchestrator) from
 		// "code sentence after the turn failed" (via template).
 		payload["wait"] = a.wait
 		payload["waited_ms"] = a.waited.Milliseconds()
@@ -513,19 +513,19 @@ func (s *Supervisor) logDecision(a announcement, level Chattiness, d decision, r
 // ceilingInput is what the ceiling weighs besides the level and kind.
 type ceilingInput struct {
 	kept      bool // the announcement keeps a promise
-	owed      bool // the finish ends the shepherd's own instruction
+	owed      bool // the finish ends the user's own instruction
 	duePassed bool // a kept promise is past its due time
-	needsUser bool // the brain says the CEO must decide or act
+	needsUser bool // the orchestrator says the user must decide or act
 }
 
-// applyCeiling caps what the brain asked for under the chattiness level:
+// applyCeiling caps what the orchestrator asked for under the chattiness level:
 // skip and silent pass as asked (context is not speech); a kept promise
 // is spoken at every level, at idle, or interrupt when its due time
-// passed or the brain says the CEO must act; the finish of the CEO's own
+// passed or the orchestrator says the user must act; the finish of the user's own
 // instruction (owed) is spoken at every level too; otherwise the level's
 // policy table decides whether the line is spoken at all (normal keeps
 // the recent_minutes rule for finishes), and interrupt is allowed only
-// for a decision the CEO must take.
+// for a decision the user must take.
 func applyCeiling(level Chattiness, kind pushKind, requested string, in ceilingInput) decision {
 	switch requested {
 	case brain.UrgencySkip, brain.UrgencySilent:
@@ -559,13 +559,13 @@ func applyCeiling(level Chattiness, kind pushKind, requested string, in ceilingI
 
 // ceilingForbidsAll reports that the level would silence every audible
 // line about a: nothing is owed (no promise kept, not the finish of the
-// shepherd's own instruction) and the sentence's class is not spoken at
+// user's own instruction) and the sentence's class is not spoken at
 // this level. An owed line is never suppressed by chattiness.
 func ceilingForbidsAll(level Chattiness, a announcement, kept []state.Promise) bool {
 	return len(kept) == 0 && !a.owed && !level.allows(a.kind)
 }
 
-// requestedUrgency normalises the brain's urgency: an unknown or empty
+// requestedUrgency normalises the orchestrator's urgency: an unknown or empty
 // value is idle with a line and skip without one; silent without a line
 // is skip.
 func requestedUrgency(urgency, spoken string) string {
@@ -607,7 +607,7 @@ func (s *Supervisor) duePassed(kept []state.Promise) bool {
 	return false
 }
 
-// recordDetail stores the brain's detail on the row's last_result.
+// recordDetail stores the orchestrator's detail on the row's last_result.
 func (s *Supervisor) recordDetail(paneID, detail string) {
 	_, err := s.store.Update(paneID, func(a *state.Agent) {
 		if a.LastResult != nil {

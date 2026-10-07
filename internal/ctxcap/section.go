@@ -1,14 +1,14 @@
 // Package ctxcap captures what each model is given, for the /debug
-// Context tab: the brain's exact request at every model call (BrainLog)
+// Context tab: the orchestrator's exact request at every model call (BrainLog)
 // and, for the voice model, a reconstruction of everything the daemon
 // sent it (VoiceLog). Both are rendered the same way: the raw text as the
 // model receives it, cut into labelled Sections that cover it end to end,
 // with the provider-native body alongside, and a Diff against the
-// previous point. Link ids on the sections tie one piece in the brain's
+// previous point. Link ids on the sections tie one piece in the orchestrator's
 // request to its counterpart in the voice context (docs/architecture.md
 // "Context capture").
 //
-// The package depends on nothing else in the daemon, so the brain, the
+// The package depends on nothing else in the daemon, so the orchestrator, the
 // voice providers and the web server can all import it.
 package ctxcap
 
@@ -24,11 +24,11 @@ const (
 	ClassSystem     = "system"      // the system prompt / instructions
 	ClassTools      = "tools"       // tool declarations
 	ClassMeta       = "meta"        // request-level settings (model, tool choice, thinking)
-	ClassShepherd   = "shepherd"    // what the shepherd said (utterances, notes)
+	ClassShepherd   = "shepherd"    // what the user said (utterances, notes)
 	ClassVoice      = "voice"       // what the voice model said
-	ClassBrain      = "brain"       // the brain's own replies and promises
-	ClassRequest    = "request"     // a turn's request to the brain
-	ClassWorker     = "worker"      // worker events and screens (flock output)
+	ClassBrain      = "brain"       // the orchestrator's own replies and promises
+	ClassRequest    = "request"     // a turn's request to the orchestrator
+	ClassWorker     = "worker"      // worker events and screens (workers output)
 	ClassUntrusted  = "untrusted"   // worker output inside the provenance delimiters
 	ClassToolCall   = "tool_call"   // a function call a model made
 	ClassToolResult = "tool_result" // a function result sent back
@@ -45,11 +45,11 @@ const (
 // where the previous ended, and the last ends at len(Text).
 type Section struct {
 	// Key identifies the piece across points (the diff): "prompt:roster",
-	// "tool:read_screen", "seq:12" (a brain transcript message; "seq:12#2"
+	// "tool:read_screen", "seq:12" (an orchestrator transcript message; "seq:12#2"
 	// for the second piece of one), "v:37" (a voice item).
 	Key string `json:"key"`
-	// Label names the piece for the gutter ("roster", "shepherd
-	// utterance", "brain tool result").
+	// Label names the piece for the gutter ("roster", "user
+	// utterance", "orchestrator tool result").
 	Label string `json:"label"`
 	// Class is its colour (the Class constants).
 	Class string `json:"class"`
@@ -64,7 +64,7 @@ type Section struct {
 	Path string `json:"path,omitempty"`
 	// Role is the message role the piece is sent under, when one.
 	Role string `json:"role,omitempty"`
-	// Seq is the brain transcript message the piece renders (0: none).
+	// Seq is the orchestrator transcript message the piece renders (0: none).
 	Seq int `json:"seq,omitempty"`
 	// Links are the ids shared with the other pane ("call:…", "push:…",
 	// "evt:…").
@@ -77,7 +77,7 @@ type Section struct {
 	// sliced), not stored.
 	Text string `json:"text,omitempty"`
 	// Raw is the piece's own JSON, when it has one of its own (a voice
-	// item's outbound message); a brain piece's raw JSON is found in the
+	// item's outbound message); an orchestrator piece's raw JSON is found in the
 	// body by Path.
 	Raw json.RawMessage `json:"raw,omitempty"`
 }
@@ -91,7 +91,7 @@ type Snapshot struct {
 }
 
 // EstimateTokens is the rough token count of text (4 characters per
-// token), the same estimate the brain's window uses.
+// token), the same estimate the orchestrator's window uses.
 func EstimateTokens(text string) int {
 	return (len(text) + 3) / 4
 }

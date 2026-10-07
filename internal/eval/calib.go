@@ -12,9 +12,9 @@ import (
 	"sync"
 )
 
-// Judge calibration (Evals first, step 1): transcript segments the CEO
+// Judge calibration (Evals first, step 1): transcript segments the user
 // labels by hand, the judge's verdicts on the same segments, and their
-// agreement per rubric item. The judge sees what the CEO sees: the
+// agreement per rubric item. The judge sees what the user sees: the
 // item's context as facts and its turns as the conversation (not the full
 // worker screens a live run gives it).
 
@@ -40,8 +40,8 @@ type CalibItem struct {
 
 // CalibTurn is one line of the segment.
 type CalibTurn struct {
-	// Who is user, voice (the speech the CEO heard), orchestrator (the
-	// supervisor's text; what the CEO heard when the segment has no
+	// Who is user, voice (the speech the user heard), orchestrator (the
+	// supervisor's text; what the user heard when the segment has no
 	// voice turns), action (sent to a worker, with its outcome) or event
 	// (a worker change, an announcement trigger, a reconnect).
 	Who  string `json:"who"`
@@ -58,7 +58,7 @@ type CalibVerdict struct {
 	Error    string `json:"error,omitempty"`
 }
 
-// CalibLabel is one CEO label in labels.json.
+// CalibLabel is one user label in labels.json.
 type CalibLabel struct {
 	ItemID   string `json:"item_id"`
 	RubricID string `json:"rubric_id"`
@@ -67,7 +67,7 @@ type CalibLabel struct {
 }
 
 // calibQuestions rephrase the items whose production question quotes one
-// CEO line, for a whole segment.
+// user line, for a whole segment.
 var calibQuestions = map[string]string{
 	"answered":              "By the end of the segment, did the CEO get what they asked for in it: the question answered, or the requested action carried out and confirmed, or, if that was impossible, a plain statement of that?",
 	"explain_depth_more":    "Each time the CEO asked for more (\"then?\", \"more detail\"), did Sheepdog's answer add what was asked for?",
@@ -148,9 +148,9 @@ func (f CalibFile) validate() error {
 }
 
 // Transcript renders the item's turns for the judge. With voice turns
-// the voice is what the CEO heard and the orchestrator's text is marked
+// the voice is what the user heard and the orchestrator's text is marked
 // as not heard; without them (tier 1) the orchestrator's text is what
-// the CEO heard.
+// the user heard.
 func (it CalibItem) Transcript() string {
 	hasVoice := false
 	for _, t := range it.Turns {
@@ -237,7 +237,7 @@ func JudgeCalib(ctx context.Context, j Judge, f CalibFile, parallel int, progres
 	return out
 }
 
-// RubricAgreement is the judge–CEO agreement on one rubric item.
+// RubricAgreement is the judge–user agreement on one rubric item.
 type RubricAgreement struct {
 	RubricID string `json:"rubric_id"`
 	// N is the pairs where both said pass or fail; Agree how many match.
@@ -247,7 +247,7 @@ type RubricAgreement struct {
 	// pairs, or both raters gave one label only and agree on it).
 	Kappa *float64 `json:"kappa,omitempty"`
 	// CEONA counts labels of na where the judge gave a verdict: the item
-	// was asked of a segment where the CEO thinks it does not apply.
+	// was asked of a segment where the user thinks it does not apply.
 	CEONA int `json:"ceo_na"`
 	// Missing counts labels with no judge verdict (or the reverse).
 	Missing int `json:"missing"`
@@ -264,7 +264,7 @@ type ItemAgreement struct {
 	Agree  int    `json:"agree"`
 }
 
-// Disagreement is one pair where the CEO and the judge differ.
+// Disagreement is one pair where the user and the judge differ.
 type Disagreement struct {
 	ItemID   string `json:"item_id"`
 	RubricID string `json:"rubric_id"`
@@ -282,9 +282,9 @@ type CalibAgreement struct {
 	Disagreements []Disagreement    `json:"disagreements"`
 }
 
-// Agreement compares the CEO's labels with the judge's verdicts. Pairs
+// Agreement compares the user's labels with the judge's verdicts. Pairs
 // where either side says na are left out of agreement and kappa (an na
-// from the CEO is counted per item as CEONA; the judge never says na).
+// from the user is counted per item as CEONA; the judge never says na).
 func Agreement(labels []CalibLabel, verdicts []CalibVerdict) CalibAgreement {
 	key := func(i, r string) string { return i + "\x00" + r }
 	jv := map[string]CalibVerdict{}

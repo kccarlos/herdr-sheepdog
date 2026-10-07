@@ -25,7 +25,7 @@ func inputRow(kind string) string {
 // a real CLI removes the overlay once it is answered
 // (testdata/herdr/codex-declined-esc.screen.txt). Campaign D N6: the sims
 // kept the numbered menu above the new input line, so the menu guard
-// still saw it and refused the CEO's follow-up instruction.
+// still saw it and refused the user's follow-up instruction.
 func withoutPrompt(screen string) string {
 	lines := strings.Split(strings.TrimRight(screen, "\n"), "\n")
 	for len(lines) > 0 {

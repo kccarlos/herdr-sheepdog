@@ -1,5 +1,5 @@
 // Package gen expands the eval corpus offline (docs/iteration-2.md WP0b):
-// paraphrases of the shepherd's utterance per product job, and the
+// paraphrases of the user's utterance per product job, and the
 // transcript noise the voice models' speech recognition produces. Both
 // are checked-in tables and a seeded generator — no model call — so the
 // expanded set is reproducible and free.
@@ -12,7 +12,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/eval"
 )
 
-// Paraphrases are ways the shepherd says each job's utterance, taken from
+// Paraphrases are ways the user says each job's utterance, taken from
 // the 2026-09-18…24 sessions where one exists and otherwise written in
 // the same register: hesitations ("um", "so, uh"), half sentences, and
 // the trailing tags speech recognition leaves on. English only:

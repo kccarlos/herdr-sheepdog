@@ -38,7 +38,7 @@ func (s *Session) onDelegation(lc *liveConn, id string, offsetMS int64) {
 			return
 		}
 		if text == "" {
-			// Nothing the shepherd said is left to relay (a stop already
+			// Nothing the user said is left to relay (a stop already
 			// took it, or the transcript never came): tell the model so it
 			// does not wait for a result.
 			s.log.Log(logSource, "voice.delegation_empty", "", map[string]any{"id": id})
@@ -149,7 +149,7 @@ func (s *Session) runTool(ctx context.Context, lc *liveConn, delegationID string
 		}
 		switch {
 		case spoken == "" && res.Pending:
-			// The brain is still working: its reply comes later as a push
+			// The orchestrator is still working: its reply comes later as a push
 			// (brain.reply_wait_s). Say nothing that would contradict it.
 			s.appendFor(lc, delegationID, evThinkingAppend, "The answer will come on its own; say nothing more for now.")
 		case spoken == "":

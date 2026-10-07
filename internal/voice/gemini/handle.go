@@ -9,14 +9,14 @@ import (
 // completed turn, and a resume continues from the context the handle was
 // issued at: a clean resume loses nothing up to it, but silent context
 // sent after it (a names line, a focus line, a briefing: pushes that
-// complete no turn) is not in the resumed context (the CEO's experiment,
+// complete no turn) is not in the resumed context (the user's experiment,
 // 2026-10-03). So the session keeps the silent pushes sent since the
 // last accepted handle and, on a resume, sends them again. Every handle
 // update is logged (voice.handle_update) with the prompt size at issue,
 // so a context shrink in the log can be matched to the handle it came
 // from.
 
-// Never resume a resumed session (CEO decision, docs/handover-2026-10-04.md;
+// Never resume a resumed session (user decision, docs/handover-2026-10-04.md;
 // docs/research/live-resume-context-2026-10-04.md). A handle issued by a
 // connection that was itself opened by a resume restores only what was
 // said on that connection, not the context it inherited (canary chain

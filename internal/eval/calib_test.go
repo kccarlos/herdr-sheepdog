@@ -11,7 +11,7 @@ import (
 const calibItems = "../../docs/eval/calibration/2026-10-05/items.json"
 
 // The calibration set loads, and its rubric is the production rubric
-// (CalibRubric), so the CEO labels exactly what the judge is asked.
+// (CalibRubric), so the user labels exactly what the judge is asked.
 func TestCalibItemsMatchRubric(t *testing.T) {
 	f, err := LoadCalibFile(calibItems)
 	if err != nil {

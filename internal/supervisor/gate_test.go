@@ -18,14 +18,14 @@ func (h *harness) played() {
 }
 
 // The 2026-10-02 23:54:18 sequence (docs/history/bench-2026-10-03.md #10): the
-// shepherd's instruction arrives while a late reply is queued; the voice
+// user's instruction arrives while a late reply is queued; the voice
 // relays the instruction before that reply is sent to it. The call is
-// the shepherd's, so it is accepted; the voice relaying the reply's own
+// the user's, so it is accepted; the voice relaying the reply's own
 // question back afterwards is refused as a self-relay.
 func TestQueuedPushDoesNotHideTheShepherdsWords(t *testing.T) {
 	h := newHarness(t)
 	h.addAgent("w5:p1", "auth", "codex", herdr.StateIdle)
-	// 18.277: the shepherd speaks (Gemini never marks it final).
+	// 18.277: the user speaks (Gemini never marks it final).
 	h.sup.OnVoiceEvent(voice.EventTranscript{Dir: voice.DirIn, Text: "然后让 Claude 加一个删除功能。"})
 	// 18.746: the voice's own "on it".
 	h.clock.Advance(470 * time.Millisecond)
@@ -47,8 +47,8 @@ func TestQueuedPushDoesNotHideTheShepherdsWords(t *testing.T) {
 	// 21.9: the reply is sent to the model and spoken.
 	h.clock.Advance(2500 * time.Millisecond)
 	h.played()
-	// 22.924: the voice relays the reply's question back: no new CEO
-	// words, so no brain turn; the voice is told so as a silent fact.
+	// 22.924: the voice relays the reply's question back: no new user
+	// words, so no orchestrator turn; the voice is told so as a silent fact.
 	h.clock.Advance(time.Second)
 	res := h.relay("要它跑完直接动手修吗?")
 	if n := h.log.count("supervisor.voice_initiative_ignored"); n != 1 {
@@ -59,7 +59,7 @@ func TestQueuedPushDoesNotHideTheShepherdsWords(t *testing.T) {
 	}
 }
 
-// A briefing sent between the shepherd's words and the voice's relay of
+// A briefing sent between the user's words and the voice's relay of
 // them no longer hides those words (dual-brain ablation G2): the call
 // claims them, with no fuzzy rescue needed; a second call with no new
 // words is the voice's own.

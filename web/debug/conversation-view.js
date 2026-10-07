@@ -1,5 +1,5 @@
 // Conversation tab of /debug: renders the items produced by conversation.js
-// as a chat transcript (shepherd bubbles right, the dog left, tool calls and
+// as a chat transcript (user bubbles right, the voice left, tool calls and
 // supervisor pushes as collapsible rows between them, session dividers).
 // Vanilla DOM, no framework (decision D11).
 import { Grouper } from './conversation.js';
@@ -9,11 +9,11 @@ import { el, fmtTime, jsonPre, Openable, Follow } from './dom.js';
 const MAX_ITEMS = 1500;
 const STALL_MS = 10000;
 
-// What the dog calls itself (config voice.name), for its own bubbles;
+// What the voice calls itself (config voice.name), for its own bubbles;
 // setDogName is called with /api/state's voice.name.
 let dogName = 'Sheepdog';
 
-/** Sets the label used for the dog's bubbles (no-op for an empty name). */
+/** Sets the label used for the voice's bubbles (no-op for an empty name). */
 export function setDogName(name) {
   if (name) dogName = name;
 }
@@ -141,7 +141,7 @@ export class ConversationView {
   renderMessage(it, who) {
     const wrap = el('div', `msg ${who}${it.final ? '' : ' partial'}${it.synthetic ? ' synthetic' : ''}`);
     const bubble = el('div', 'bubble');
-    bubble.appendChild(el('span', 'who', who === 'user' ? 'shepherd' : dogName));
+    bubble.appendChild(el('span', 'who', who === 'user' ? 'user' : dogName));
     bubble.appendChild(el('span', 'text', it.text + (it.final ? '' : ' …')));
     wrap.appendChild(bubble);
     const meta = el('div', 'meta');
@@ -269,7 +269,7 @@ export class ConversationView {
       // Asked to interrupt, sent when idle: the model was mid-sentence
       // (docs/roles.md "Pushes").
       if (it.deferred) h.appendChild(el('span', 'badge deferred', 'deferred: model was speaking'));
-      // The answer to a look the shepherd was told was coming.
+      // The answer to a look the user was told was coming.
       if (it.answersJob) h.appendChild(el('span', 'badge', `answers ${it.answersJob}`));
       h.appendChild(el('span', silent ? 'text one-line' : 'text', it.text));
       h.appendChild(el('span', 'meta', ` · ${fmtTime(it.ts)}${it.nested.length ? ` · ${it.nested.length} event${it.nested.length > 1 ? 's' : ''}` : ''}`));

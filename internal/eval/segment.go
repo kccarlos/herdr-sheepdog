@@ -15,7 +15,7 @@ import (
 // call per transcript segment scoring all items, each with a quoted piece
 // of transcript as evidence). A workday session is 13–18 agenda beats
 // over 15–30 minutes; one verdict over the whole session fails it for one
-// slip anywhere. A segment is one agenda beat — the CEO's request (or a
+// slip anywhere. A segment is one agenda beat — the user's request (or a
 // scripted silence) with every line until the next beat: follow-ups,
 // sheepdog's answers and the announcements that land in it — plus the
 // announcements before the first beat. Each segment gets one call that
@@ -207,7 +207,7 @@ func (f *FakeJudge) JudgeSegment(ctx context.Context, in SegmentInput) ([]Verdic
 
 // Segment kinds.
 const (
-	// SegmentRequest has at least one CEO line.
+	// SegmentRequest has at least one user line.
 	SegmentRequest = "request"
 	// SegmentAnnouncement has only sheepdog's own lines (before the first
 	// beat, or in a scripted silence).
@@ -222,11 +222,11 @@ type Segment struct {
 }
 
 // SplitSegments cuts a conversation into segments at each line that
-// carries an agenda beat (a CEO line or a scripted silence); the lines
+// carries an agenda beat (a user line or a scripted silence); the lines
 // before the first beat are a segment of their own (beat 0). A
-// conversation without beats is cut at each CEO line that is not an
+// conversation without beats is cut at each user line that is not an
 // answer to sheepdog's question. A segment where sheepdog said nothing
-// and the CEO said nothing is dropped.
+// and the user said nothing is dropped.
 func SplitSegments(convo []SimLine) []Segment {
 	hasBeats := false
 	for _, l := range convo {

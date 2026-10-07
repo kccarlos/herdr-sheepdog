@@ -24,7 +24,7 @@ var (
 	// ErrClosed is returned by a turn after Close.
 	ErrClosed = errors.New("brain: closed")
 	// ErrYielded (wrapped in ErrFallback) is returned by an event turn
-	// that stopped before a model call because a CEO turn was waiting
+	// that stopped before a model call because a user turn was waiting
 	// for the lock; the supervisor speaks its code sentence instead.
 	ErrYielded = errors.New("brain: yielded to a CEO turn")
 	// ErrCoalesced (wrapped in ErrFallback) is returned by a queued
@@ -39,9 +39,9 @@ var (
 // Kind of a turn: what the assistant asked for.
 type Kind string
 
-// The turn kinds. Utterance is the CEO turn of D1-revised: the voice
-// relays what the CEO said verbatim and the brain decides what it is
-// (docs/roles.md "One decision-maker"). (The older classified CEO
+// The turn kinds. Utterance is the user turn of D1-revised: the voice
+// relays what the user said verbatim and the orchestrator decides what it is
+// (docs/roles.md "One decision-maker"). (The older classified user
 // turns, ask and propose, are gone; their request lines still appear in
 // transcripts written before, and /debug still reads them.)
 // Announce is the event turn the supervisor runs on a worker's block or
@@ -49,8 +49,8 @@ type Kind string
 // turn, kind stop, is gone too: the daemon acknowledges a stop with its
 // own sentence and records it as a context line, Brain.Daemon.)
 const (
-	// KindUtterance carries the CEO's words verbatim in Question, with
-	// no agent hint: the brain resolves intent, target and action.
+	// KindUtterance carries the user's words verbatim in Question, with
+	// no agent hint: the orchestrator resolves intent, target and action.
 	KindUtterance Kind = "utterance"
 	// KindAnnounce decides what the assistant says about a worker event
 	// and how urgently: the one line for that event, which replaces the
@@ -59,9 +59,9 @@ const (
 	// skip. The chattiness ceiling is applied by the supervisor.
 	KindAnnounce Kind = "announce"
 	// KindInvestigation delivers a finished investigation: the job's
-	// question, the shepherd's own words and the sub-agent's answer come
+	// question, the user's own words and the sub-agent's answer come
 	// back as an event turn that composes the explanation (docs/roles.md
-	// "Investigations and explanations"). Read tools only; the shepherd
+	// "Investigations and explanations"). Read tools only; the user
 	// is expecting it, so its line is pushed at the next pause.
 	KindInvestigation Kind = "investigation"
 )
@@ -83,7 +83,7 @@ const (
 	UrgencySkip      = "skip"
 )
 
-// Trigger of a turn: a CEO utterance (a voice tool call) or an event.
+// Trigger of a turn: a user utterance (a voice tool call) or an event.
 type Trigger string
 
 // The triggers. Only CEO-triggered turns may pass the send_keys rail.
@@ -92,38 +92,38 @@ const (
 	TriggerEvent Trigger = "event"
 )
 
-// Request is one turn's request: the shepherd's relayed words or a
+// Request is one turn's request: the user's relayed words or a
 // worker event.
 type Request struct {
 	// Kind defaults to KindUtterance.
 	Kind Kind
 	// Trigger defaults to TriggerCEO.
 	Trigger Trigger
-	// Question is the CEO's words verbatim (utterance).
+	// Question is the user's words verbatim (utterance).
 	Question string
 	// VoiceReading is the voice model's own short reading of Question
-	// (the fast brain's hint), shown to the brain as reference only.
+	// (the voice's hint), shown to the orchestrator as reference only.
 	VoiceReading string
-	// DaemonNote is a fact the daemon adds to the CEO's words (that they
+	// DaemonNote is a fact the daemon adds to the user's words (that they
 	// began while the voice's own line was still playing).
 	DaemonNote string
-	// Agent is the alias hint, set only when the CEO said a name (never
-	// for an utterance: the brain resolves the target itself); for an
+	// Agent is the alias hint, set only when the user said a name (never
+	// for an utterance: the orchestrator resolves the target itself); for an
 	// event turn, the alias the event is about.
 	Agent string
 	// Briefing is the supervisor's roster sentence (composeBriefing) for
-	// a CEO turn, so a status question needs no tool call.
+	// a user turn, so a status question needs no tool call.
 	Briefing string
 	// RosterUnchangedFor is set (a KindUtterance turn only) when Briefing
 	// is byte-identical to the one last delivered, within
-	// supervisor.repeat_window_s: requestText adds a note so the brain
+	// supervisor.repeat_window_s: requestText adds a note so the orchestrator
 	// can say "no change since I last checked" itself rather than
 	// repeat the roster (docs/history/issues-2026-09-18.md "Smaller items").
 	RosterUnchangedFor time.Duration
 	// Event is the worker event of an event turn (done, blocked).
 	Event string
 	// Template is the sentence the daemon speaks for the event when the
-	// brain does not answer in time: what the brain's Spoken replaces.
+	// orchestrator does not answer in time: what the orchestrator's Spoken replaces.
 	Template string
 	// Result is a finished investigation's answer, put in the window
 	// wrapped as worker output by a KindInvestigation turn.
@@ -133,13 +133,13 @@ type Request struct {
 	// tool result) so the turn need not read again.
 	Screen string
 	// Promises are the promises this event keeps (already marked kept by
-	// the supervisor): the CEO asked to be told, so Spoken says so.
+	// the supervisor): the user asked to be told, so Spoken says so.
 	Promises []PromiseInfo
-	// Owed marks an announce turn the shepherd is waiting on: the event
-	// keeps a promise or finishes an instruction the shepherd gave this
+	// Owed marks an announce turn the user is waiting on: the event
+	// keeps a promise or finishes an instruction the user gave this
 	// run. It gets Config.AnnounceTimeout instead of AnnounceTurnTimeout:
-	// the finish waits for the brain's line, so that line (not a code
-	// sentence first) is what the shepherd hears.
+	// the finish waits for the orchestrator's line, so that line (not a code
+	// sentence first) is what the user hears.
 	Owed bool
 	// AlsoAsking is set on a finish whose screen ends at a prompt the
 	// agent showed after its turn (Claude Code's "teach auto mode…?"):
@@ -147,10 +147,10 @@ type Request struct {
 	// question both.
 	AlsoAsking string
 	// Investigation is the finished job a KindInvestigation turn
-	// delivers: its question, the CEO's own words, the sub-agent's
+	// delivers: its question, the user's own words, the sub-agent's
 	// answer and what it follows up on.
 	Investigation *InvestigationInfo
-	// UtteranceID names the CEO utterance an utterance turn answers
+	// UtteranceID names the user utterance an utterance turn answers
 	// (the supervisor mints it at the relay): every event of the turn
 	// carries it (trace.go).
 	UtteranceID string
@@ -162,9 +162,9 @@ type Request struct {
 	// Context tab): "call:<id>" for the voice tool call that relayed an
 	// utterance, "evt:<id>" for the worker event an announce is about.
 	Link string
-	// Facts, when set, is what the daemon knows now and the brain cannot
+	// Facts, when set, is what the daemon knows now and the orchestrator cannot
 	// see: about the event of an announce turn (docs/history/bench-2026-10-03.md
-	// #15b), or, on an utterance turn, what the CEO had heard when they
+	// #15b), or, on an utterance turn, what the user had heard when they
 	// began speaking (Heard): called when the turn starts, after the turn lock — the
 	// template line may have gone out while the turn was queued — and
 	// again before each later step, when a change is put in the window.
@@ -179,32 +179,32 @@ type Request struct {
 }
 
 // EventFacts is what has happened to an announced event outside the
-// brain's turn.
+// orchestrator's turn.
 type EventFacts struct {
 	// Spoken are the lines already said about this event, word for word
 	// and in order (the daemon's template sentence spoken at
-	// brain.announce_wait_s while the brain was still writing, say).
+	// brain.announce_wait_s while the orchestrator was still writing, say).
 	Spoken []string
 	// Prompt is the state of the approval prompt a block created:
 	// PromptWaiting, PromptAnswered or PromptGone; "" when none.
 	Prompt string
-	// Heard is set on an utterance turn: when the CEO began saying the
+	// Heard is set on an utterance turn: when the user began saying the
 	// words and the spoken lines the voice was given around then
 	// (docs/eval/eval-campaign-2026-10-03.md H6: a "yes" to one question was
-	// taken as the answer to a question pushed after the CEO spoke).
+	// taken as the answer to a question pushed after the user spoke).
 	Heard *HeardFacts
-	// Language is the language of the CEO's last words, LanguageChinese
+	// Language is the language of the user's last words, LanguageChinese
 	// or LanguageEnglish; "" when they have said nothing yet. A fact for
 	// the model to follow, not a rule (run C, H4: a short Chinese "yes"
 	// after an English announcement was answered in English).
 	Language string
 	// OpenPrompt is set on an utterance turn when a worker's prompt is
-	// open and the CEO has likely not heard its announcement (another
+	// open and the user has likely not heard its announcement (another
 	// line buried it, or the voice judged it unheard) before these words
 	// (docs/bench/tier3-2026-10-03.md #9): the fact, as a sentence.
 	OpenPrompt string
 	// Decisions is set on an announce turn: which agents are waiting
-	// for the CEO's answer right now, as a sentence ("Decisions open
+	// for the user's answer right now, as a sentence ("Decisions open
 	// right now: none. …"), from the supervisor's pending prompt and the
 	// blocked panes (baseline 2026-10-05 cluster 3: a finish announced
 	// with an invented "Shall I …?"). A fact; RULES.md says what follows.
@@ -217,7 +217,7 @@ const (
 	LanguageEnglish = "English"
 )
 
-// HeardFacts is what the CEO had and had not heard when they began
+// HeardFacts is what the user had and had not heard when they began
 // speaking.
 type HeardFacts struct {
 	// SpokeAt is when their first words of this utterance reached the
@@ -225,7 +225,7 @@ type HeardFacts struct {
 	SpokeAt time.Time
 	// Before is the last spoken line the voice was given before SpokeAt
 	// (nil when none is remembered); After are the lines it was given
-	// since, which the CEO had not heard when they began.
+	// since, which the user had not heard when they began.
 	Before *PushedLine
 	After  []PushedLine
 }
@@ -236,7 +236,7 @@ type PushedLine struct {
 	// At is when the voice was given it (sent, not queued).
 	At time.Time
 	// Unheard is set when the voice layer judged it did not reach the
-	// CEO (voice.push_unheard).
+	// user (voice.push_unheard).
 	Unheard bool
 }
 
@@ -248,14 +248,14 @@ const (
 )
 
 // Reply is the answer contract (docs/roles.md): what the assistant says,
-// what it may use for follow-ups, and whether the CEO must act.
+// what it may use for follow-ups, and whether the user must act.
 //
 // The ear contract: Spoken is the headline (short by default, longer when
-// the CEO asked for detail, no dashes; the supervisor cuts only a runaway,
+// the user asked for detail, no dashes; the supervisor cuts only a runaway,
 // at prose.EarRunaway, and moves the overflow into Detail); Ask is the one question when
-// there is a decision only the CEO can make, read as the last sentence;
+// there is a decision only the user can make, read as the last sentence;
 // Detail is the plain explanation of every term the headline used, in
-// everyday words, which the voice reads when the CEO asks "what does
+// everyday words, which the voice reads when the user asks "what does
 // that mean". An old-shape reply without Ask still parses.
 type Reply struct {
 	Spoken    string     `json:"spoken"`
@@ -264,12 +264,12 @@ type Reply struct {
 	NeedsUser bool       `json:"needs_user"`
 	Options   OptionList `json:"options,omitempty"`
 	Clarify   bool       `json:"clarify"`
-	// Pending marks an answer that is not the final one: the brain said
+	// Pending marks an answer that is not the final one: the orchestrator said
 	// how long it will take and the result follows on its own (the
 	// investigations work of docs/roles.md). Plumbed through to the
 	// voice's tool result; nothing produces it yet.
 	Pending bool `json:"pending,omitempty"`
-	// RelatesTo names the CEO's request the event fulfils, when an
+	// RelatesTo names the user's request the event fulfils, when an
 	// announce turn found one ("the rerun you asked for").
 	RelatesTo string `json:"relates_to,omitempty"`
 	// Urgency is what an announce turn asks for: interrupt, idle, silent
@@ -280,34 +280,34 @@ type Reply struct {
 	// announce turn's Spoken keeps (informational: the supervisor keeps
 	// every matching promise regardless).
 	KeepsPromiseIDs []string `json:"keeps_promise_ids,omitempty"`
-	// Turn is the turn that produced the reply, filled in by the brain
+	// Turn is the turn that produced the reply, filled in by the orchestrator
 	// and never by the model: the supervisor names it when it drops a
 	// line that came too late (brain.push_late).
 	Turn int `json:"-"`
-	// Acted is set by the brain, never the model, when the turn sent
+	// Acted is set by the orchestrator, never the model, when the turn sent
 	// something to a worker or recorded something (prompt, send_keys,
 	// interrupt, investigate, promise, note): the supervisor keeps a late
 	// utterance reply that acted as silent context rather than dropping it
 	// (internal/supervisor/utterance.go).
 	Acted bool `json:"-"`
 	// ActedOn lists the panes the turn's actions went to, first first,
-	// each once (set by the brain, never the model): a late reply is
+	// each once (set by the orchestrator, never the model): a late reply is
 	// labelled with the agent it acted on, not with whichever agent its
 	// words happen to name (campaign D N4).
 	ActedOn []string `json:"-"`
 	// NotVerified lists the checks the turn started that did not finish
-	// ("run_cli timed out after 8 s"), set by the brain, never the model:
+	// ("run_cli timed out after 8 s"), set by the orchestrator, never the model:
 	// the voice is told that nothing they would have shown is verified,
 	// so it cannot claim a check that never ran (phone test 2026-10-04:
 	// "verified via git status" after run_cli timed out).
 	NotVerified []string `json:"-"`
 	// Agents lists the aliases the turn's tools read or acted on, first
-	// first, each once (set by the brain): the voice is given their state
+	// first, each once (set by the orchestrator): the voice is given their state
 	// as of the moment the answer reaches it.
 	Agents []string `json:"-"`
 }
 
-// Promise events and statuses (state.Promise mirrors them; the brain
+// Promise events and statuses (state.Promise mirrors them; the orchestrator
 // sees promises only through the Host).
 const (
 	PromiseEventDone      = "done"
@@ -326,22 +326,22 @@ var PromiseEvents = []string{PromiseEventDone, PromiseEventBlocked, PromiseEvent
 
 // PromiseRequest is what the promise tool asks the Host to record.
 type PromiseRequest struct {
-	// Text is what the CEO asked to be told, in their words.
+	// Text is what the user asked to be told, in their words.
 	Text string
 	// Event is the condition (one of PromiseEvents).
 	Event string
-	// Due, when set, is when the CEO wants it by (now when they asked to
+	// Due, when set, is when the user wants it by (now when they asked to
 	// be interrupted at once); kept past it, the push interrupts.
 	Due *time.Time
-	// Turn is the brain turn making the promise.
+	// Turn is the orchestrator turn making the promise.
 	Turn int
 }
 
 // PromiseInfo is one promised piece of work as the Host records it: the
-// CEO's words, the agent and worker event it waits for, and its status.
+// user's words, the agent and worker event it waits for, and its status.
 type PromiseInfo struct {
 	ID string `json:"id"`
-	// Text is what the CEO asked to be told, in their words.
+	// Text is what the user asked to be told, in their words.
 	Text string `json:"text"`
 	// Agent is the alias the promise is about.
 	Agent string `json:"agent"`
@@ -351,7 +351,7 @@ type PromiseInfo struct {
 	Status      string    `json:"status"`
 	CreatedTurn int       `json:"created_turn,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
-	// Due, when set, is when the CEO wanted it by: a promise kept past
+	// Due, when set, is when the user wanted it by: a promise kept past
 	// it interrupts.
 	Due *time.Time `json:"due,omitempty"`
 	// CarriedOver marks a promise made before the daemon's current run,
@@ -361,7 +361,7 @@ type PromiseInfo struct {
 	CarriedOver bool `json:"carried_over,omitempty"`
 }
 
-// Investigation statuses (state.Investigation mirrors them; the brain
+// Investigation statuses (state.Investigation mirrors them; the orchestrator
 // sees jobs only through the Host).
 const (
 	InvestigationRunning   = "running"
@@ -388,16 +388,16 @@ type InvestigationRequest struct {
 	// Question is what the sub-agent is asked, self-contained (it has
 	// not heard this conversation).
 	Question string
-	// FollowUpOf is the id of the job to continue, when the CEO is
+	// FollowUpOf is the id of the job to continue, when the user is
 	// digging deeper into an answer they already had.
 	FollowUpOf string
 	// Source is who is asked: InvestigationSourceCLI ("" too) or
 	// InvestigationSourceWorker.
 	Source string
-	// Asked is what the CEO said that started it, in their words (the
+	// Asked is what the user said that started it, in their words (the
 	// delivery turn says what they wanted, not what the tool asked).
 	Asked string
-	// Turn is the brain turn that started it.
+	// Turn is the orchestrator turn that started it.
 	Turn int
 }
 
@@ -416,7 +416,7 @@ type InvestigationStart struct {
 type InvestigationInfo struct {
 	ID    string `json:"id"`
 	Agent string `json:"agent"`
-	// Question is what the sub-agent was asked; Asked what the CEO said.
+	// Question is what the sub-agent was asked; Asked what the user said.
 	Question string `json:"question"`
 	Asked    string `json:"asked,omitempty"`
 	// FollowUpOf is the earlier job this one continues.
@@ -444,10 +444,10 @@ type InvestigationInfo struct {
 type AgentInfo struct {
 	PaneID string
 	Alias  string
-	// Spoken is the name the shepherd hears and says (docs/roles.md
-	// "Agent names"): the brain speaks it verbatim, while tool calls
+	// Spoken is the name the user hears and says (docs/roles.md
+	// "Agent names"): the orchestrator speaks it verbatim, while tool calls
 	// take the alias. SpokenWas is its previous spoken name while the
-	// change is recent, so the brain mentions the old name once. Title
+	// change is recent, so the orchestrator mentions the old name once. Title
 	// is the worker's own session title, a fact.
 	Spoken    string
 	SpokenWas string
@@ -467,7 +467,7 @@ type AgentInfo struct {
 	// LastBlock is the question the agent last asked (with whether it
 	// was answered).
 	LastBlock string
-	// LastInteraction is when the CEO last dealt with the agent.
+	// LastInteraction is when the user last dealt with the agent.
 	LastInteraction time.Time
 	// Pending is the supervisor's answer_prompt for this pane, when one is
 	// waiting: the only prompt send_keys may answer.
@@ -493,7 +493,7 @@ type SessionRead struct {
 }
 
 // JournalEntry is one work journal entry (state.JournalEntry): capped
-// and D9-scrubbed by the supervisor before the brain sees it.
+// and D9-scrubbed by the supervisor before the orchestrator sees it.
 type JournalEntry struct {
 	At time.Time
 	// Event is done, idle or blocked.
@@ -514,7 +514,7 @@ type PendingPrompt struct {
 	Question string
 	// AskedAt is when the prompt was announced (the pending action's
 	// creation): the roster says how long it has waited, a fact the
-	// brain weighs when the CEO's words may or may not answer it
+	// orchestrator weighs when the user's words may or may not answer it
 	// (docs/history/bench-2026-10-03.md #8).
 	AskedAt time.Time
 	Options []Option
@@ -527,7 +527,7 @@ type Option struct {
 	Label string
 	Keys  []string
 	// Meta marks an entry that is not an answer (Claude Code's "Type
-	// something." free-text box): the roster says so, so the brain knows
+	// something." free-text box): the roster says so, so the orchestrator knows
 	// it exists for a free-text answer and never offers it as a choice
 	// (docs/eval/eval-campaign-2026-10-03.md H2).
 	Meta bool
@@ -573,28 +573,28 @@ func (p PendingPrompt) SelectedBy(keys []string) bool {
 	return false
 }
 
-// LanguageHost is a Host that knows the shepherd's language setting:
+// LanguageHost is a Host that knows the user's language setting:
 // LanguageLine is internal/lang's sentence about it, "" when none is set.
 // Optional, so test hosts need not implement it.
 type LanguageHost interface {
 	LanguageLine() string
 }
 
-// Host is what the brain needs from the supervisor: the roster and the
+// Host is what the orchestrator needs from the supervisor: the roster and the
 // ledger, the read tools, and the actions (which go through the
 // supervisor's existing herdr paths and pending-action bookkeeping).
-// Agents are addressed by pane id here; the brain resolves aliases.
+// Agents are addressed by pane id here; the orchestrator resolves aliases.
 type Host interface {
 	// Agents returns the roster.
 	Agents() []AgentInfo
 	// Resolve maps an alias (exact, slug, or unambiguous prefix) to a row.
 	Resolve(name string) (AgentInfo, bool)
-	// Notes returns the CEO's notes, oldest first.
+	// Notes returns the user's notes, oldest first.
 	Notes() []string
-	// Note records something the CEO wants remembered ("don't touch the
+	// Note records something the user wants remembered ("don't touch the
 	// migrations today"); it returns the spoken echo.
 	Note(text string) (string, error)
-	// Rename gives the pane's agent the name the CEO chose ("call that
+	// Rename gives the pane's agent the name the user chose ("call that
 	// one docs", the note tool with agent and name): herdr agent rename
 	// and the roster. It returns the spoken echo.
 	Rename(ctx context.Context, paneID, name string) (string, error)
@@ -626,10 +626,10 @@ type Host interface {
 	// Interrupt sends Ctrl-C and drops the pane's pending action; it
 	// returns the spoken echo.
 	Interrupt(ctx context.Context, paneID string) (string, error)
-	// Promise records promised work: tell the CEO req.Text when the
+	// Promise records promised work: tell the user req.Text when the
 	// pane's next event of kind req.Event happens (docs/roles.md
 	// "Promises"). It returns the record (with its id) and is only
-	// called in CEO turns.
+	// called in user turns.
 	Promise(ctx context.Context, paneID string, req PromiseRequest) (PromiseInfo, error)
 	// Promises returns every promise of the session, open ones first.
 	Promises() []PromiseInfo

@@ -12,13 +12,13 @@ import (
 )
 
 // The briefing channel (docs/design/dual-brain.md): everything the
-// daemon and the slow brain tell the voice model — answers, worker
+// daemon and the orchestrator tell the voice model — answers, worker
 // news, context — reaches it as a function response, never as a
 // user-role turn. Gemini Live has no mid-session system role; a
 // clientContent turn is, on the wire, the user speaking, and the voice
-// took pushes for requests ("On it.", a push relayed back as the CEO's
+// took pushes for requests ("On it.", a push relayed back as the user's
 // words). A function response is a tool's result: the model knows it is
-// not the CEO, and its scheduling (WHEN_IDLE, INTERRUPT, SILENT) is the
+// not the user, and its scheduling (WHEN_IDLE, INTERRUPT, SILENT) is the
 // one Live offers.
 //
 // The function response answers a call the model never made: an id the
@@ -35,8 +35,8 @@ import (
 //
 // Each briefing is self-contained, because Live's memory is short and
 // lossy: who it comes from, the time, what it is, and how it relates to
-// earlier briefings (answers the CEO's words of 12:03:10; updates b-4
-// about the same agent; the 2nd briefing about the same prompt; the CEO
+// earlier briefings (answers the user's words of 12:03:10; updates b-4
+// about the same agent; the 2nd briefing about the same prompt; the user
 // cut off the previous line after 2 s). Facts, not a script: the voice
 // decides whether, when and how to say it.
 
@@ -66,7 +66,7 @@ type briefRec struct {
 	id string
 	at time.Time
 	// factsAt is when the facts were written (the push was queued): a
-	// push may wait in the queue while the CEO talks or no phone
+	// push may wait in the queue while the user talks or no phone
 	// listens, so it can reach the model well after it was true.
 	factsAt time.Time
 	urgency voice.Urgency
@@ -86,11 +86,11 @@ type briefLedger struct {
 	// handleAt is when the last resumable handle arrived: briefings sent
 	// after it are not in the context a resume restores.
 	handleAt time.Time
-	// cut is the CEO's last barge-in over a spoken line, told in the
+	// cut is the user's last barge-in over a spoken line, told in the
 	// next briefing when the silent one has not gone yet.
 	cut string
 	// flushBy and flushAt are who last flushed the output (interrupt:
-	// "model" when Live heard the CEO, "push" when the daemon made way
+	// "model" when Live heard the user, "push" when the daemon made way
 	// for an urgent briefing) and when.
 	flushBy string
 	flushAt time.Time
@@ -202,7 +202,7 @@ func (s *Session) newBriefingLocked(text string, u voice.Urgency, tags map[strin
 }
 
 // relationsLocked says how r relates to earlier briefings: the same
-// prompt again, a newer word about the same agent, the CEO's last cut.
+// prompt again, a newer word about the same agent, the user's last cut.
 // Facts only; the voice decides what they mean.
 func (s *Session) relationsLocked(r briefRec) []string {
 	var out []string
@@ -240,7 +240,7 @@ func (s *Session) relationsLocked(r briefRec) []string {
 	return out
 }
 
-// noteCutLocked records that the CEO cut off a spoken line (a flushed
+// noteCutLocked records that the user cut off a spoken line (a flushed
 // playback run): how much of it played and what they heard. It goes
 // out as a silent briefing at once and is repeated on the next spoken
 // one. Caller holds s.mu.
@@ -344,7 +344,7 @@ func sendBriefing(c Conn, item pushItem, r briefRec) error {
 const answerLabel = "The orchestrator's answer to your to_supervisor call, not the user speaking: facts for you to tell the user in your own words."
 
 // answerBriefing is a tool result in the briefing shape: the time, who
-// answers, how old the answer is (answeredAt: when the slow brain
+// answers, how old the answer is (answeredAt: when the orchestrator
 // returned it), and the facts in place of a line to read. detail,
 // options, clarify and pending are added by the caller as before.
 func (s *Session) answerBriefing(call voice.ToolCall, res voice.ToolResult, answeredAt time.Time) map[string]any {
@@ -418,7 +418,7 @@ func (s *Session) agentNow(alias string) (name, state string, ok bool) {
 const notVerifiedLabel = "these checks by the orchestrator did not finish, so nothing they would have shown is verified: "
 
 // addAnswerFactsLocked adds the facts an answer's tags carry: the
-// slow brain's checks that did not finish, and the state now of the
+// orchestrator's checks that did not finish, and the state now of the
 // agents the answer is about. Caller holds s.mu (agentNow takes no
 // session lock).
 func (s *Session) addAnswerFactsLocked(p map[string]any, tags map[string]any) {

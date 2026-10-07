@@ -1,6 +1,6 @@
 // Package app assembles the sheepdog daemon (`sheepdog serve`): config →
 // event log → state store → herdr client + Watcher (or the mock herdr of
-// internal/inject) → brain → supervisor → voice session (Gemini
+// internal/inject) → orchestrator → supervisor → voice session (Gemini
 // Live, or a no-op pusher with --voice=off) → web server.
 //
 // Build wires everything without starting anything; Listen binds the web

@@ -13,7 +13,7 @@ import (
 // asking. Codex, Claude Code and agy all draw the same shape — a
 // question, sometimes the command it is about, then two or more numbered
 // options, one of them carrying the cursor — so one parser covers the
-// flock. Everything on the screen is data: an option's text becomes a
+// workers. Everything on the screen is data: an option's text becomes a
 // label and a keystroke, never anything else (the provenance rule).
 
 // promptTailLines is how much of the screen's end a prompt may occupy;
@@ -78,8 +78,8 @@ type Option struct {
 	// Meta marks an option that is not an answer to the question: Claude
 	// Code's AskUserQuestion draws "Type something." (free text) next to
 	// the real choices. It stays in Prompt.Options, so its keys remain
-	// allowed for the brain's send_keys (it can give a free-text answer
-	// the CEO dictated), but it is never shown on the phone card, read as
+	// allowed for the orchestrator's send_keys (it can give a free-text answer
+	// the user dictated), but it is never shown on the phone card, read as
 	// a spoken choice or mapped by the fast yes/no path: use
 	// Prompt.Answers for those. "Chat about this" is not an option at all
 	// (see isChatOption): it is dropped.
@@ -213,16 +213,16 @@ func (p Prompt) Phrase() string {
 }
 
 // Summary is the sentence the daemon speaks about the prompt when the
-// brain does not phrase one (docs/roles.md "Pushes").
+// orchestrator does not phrase one (docs/roles.md "Pushes").
 func (p Prompt) Summary(alias string) string { return p.SummaryIn(alias, false) }
 
 // SummaryIn is Summary in Chinese when zh is set: the language of the
-// shepherd's last words (docs/eval/eval-campaign-2026-10-03.md H4). A
+// user's last words (docs/eval/eval-campaign-2026-10-03.md H4). A
 // question that is itself Chinese is quoted as it is; any other question
 // is not: the Chinese line only names the agent and that it needs a
 // decision, since quoting "Do you want to proceed?" verbatim put an
 // English sentence into every Chinese approval (tier-3 bench 2026-10-03,
-// finding 6). The brain's line, when it comes, phrases the question.
+// finding 6). The orchestrator's line, when it comes, phrases the question.
 func (p Prompt) SummaryIn(alias string, zh bool) string {
 	cmd := spokenCommand(p.Command)
 	switch {
@@ -522,7 +522,7 @@ func tailLines(text string, n int) []string {
 // first flag, path, quote, operator or assignment and at most
 // promptCommandWords of them. The raw rest is screen syntax: spoken, it
 // came out as "-race./...." (docs/eval/eval-campaign-2026-10-03.md H3). The
-// full command stays on the pending action for the brain and the pages.
+// full command stays on the pending action for the orchestrator and the pages.
 func spokenCommand(cmd string) string {
 	var out []string
 	for _, w := range strings.Fields(cmd) {

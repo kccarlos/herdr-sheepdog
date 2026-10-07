@@ -7,7 +7,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/config"
 )
 
-// The vertex brain provider needs the [gemini.vertex] key and project,
+// The vertex orchestrator provider needs the [gemini.vertex] key and project,
 // whatever gemini.backend says; the picker names the missing variable.
 func TestBrainVertexProvider(t *testing.T) {
 	find := func(cfg config.Config) (avail bool, reason string) {

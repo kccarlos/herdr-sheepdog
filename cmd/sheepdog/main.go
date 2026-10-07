@@ -89,7 +89,7 @@ func printUsage(w io.Writer) {
 	fprintln(w, "  config        show|init: inspect or scaffold config.toml")
 	fprintln(w, "  herdr watch   print debounced agent state transitions, persist the table")
 	fprintln(w, "  voice-test    stream a WAV through a Gemini Live session with echo tools")
-	fprintln(w, "  brain-test    run one supervisor-brain turn against a mock herdr and a fixture")
+	fprintln(w, "  brain-test    run one orchestrator turn against a mock herdr and a fixture")
 	fprintln(w, "  prompts       export|show: inspect or scaffold the prompt override directory")
 	fprintln(w, "  eval          run the conversation eval sets (--set NAME|all [--live]); extract, expand")
 	fprintln(w, "  scorecard     print docs/iteration-2.md's scorecard metrics over the event log")

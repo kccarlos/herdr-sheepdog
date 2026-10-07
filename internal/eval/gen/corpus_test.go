@@ -20,7 +20,7 @@ func updating() bool { return os.Getenv("SHEEPDOG_CORPUS_UPDATE") == "1" }
 // TestExtractedCorpus regenerates testdata/eval/extracted/ from the real
 // event logs when asked (SHEEPDOG_CORPUS_UPDATE=1 and
 // SHEEPDOG_EVENTS_DIR=<data_dir>/events, and SHEEPDOG_CORPUS_REDACT for
-// personal names a worker's screen showed); the logs are the shepherd's
+// personal names a worker's screen showed); the logs are the user's
 // own and not in the repository, so otherwise it is skipped.
 func TestExtractedCorpus(t *testing.T) {
 	dir := os.Getenv("SHEEPDOG_EVENTS_DIR")

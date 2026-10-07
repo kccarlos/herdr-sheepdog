@@ -50,7 +50,7 @@ func (c *fakeClock) Add(d time.Duration) {
 	c.mu.Unlock()
 }
 
-// notices collects what the brain asked to be told to the CEO.
+// notices collects what the orchestrator asked to be told to the user.
 type notices struct {
 	ch chan string
 }
@@ -168,7 +168,7 @@ func TestFailoverOncePerTurn(t *testing.T) {
 }
 
 // Three consecutive failovers away from the selected provider within
-// 10 min: the CEO is told once; not again within 30 min; again after.
+// 10 min: the user is told once; not again within 30 min; again after.
 // A success on the selected provider ends the streak.
 func TestFailoverNotice(t *testing.T) {
 	clock := &fakeClock{now: time.Date(2026, 10, 2, 1, 1, 0, 0, time.UTC)}

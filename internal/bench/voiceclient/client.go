@@ -7,7 +7,7 @@
 // daemon's heard-detection depends on, supports barge-in, a background
 // noise bed and a leaking speaker echo, and records everything: every
 // /ws frame, the /events stream, the audio both ways and the bot's
-// utterances with the part the shepherd actually heard.
+// utterances with the part the user actually heard.
 //
 // The voice bench (internal/bench) drives it with synthetic speech; a
 // tier-3 harness against real herdr workers reuses it unchanged.
@@ -57,9 +57,9 @@ type Options struct {
 	// microphone (a phone without a perfect echo canceller).
 	Echo *Echo
 	// LocalBargeIn makes the client stop playing and report flushed the
-	// moment the shepherd starts talking over the bot (and drop the rest
+	// moment the user starts talking over the bot (and drop the rest
 	// of that bot turn until the daemon's own flush, or until the
-	// shepherd stops). Off, the bot keeps playing until the daemon
+	// user stops). Off, the bot keeps playing until the daemon
 	// flushes.
 	LocalBargeIn bool
 	// NoSpeaking leaves out the speaking messages (the daemon then reads
@@ -111,7 +111,7 @@ type Client struct {
 	attached  bool
 	statusCh  chan string
 	// dropUntilFlush: after a local barge-in, the rest of the bot's turn
-	// is dropped until the daemon's flush (or the shepherd stops).
+	// is dropped until the daemon's flush (or the user stops).
 	dropUntilFlush bool
 	cur            *BotUtterance
 	lastPush       time.Time
@@ -464,7 +464,7 @@ func (c *Client) micLoop() {
 		}
 		out := c.mic.push(frame, voicePeak)
 		if c.dropUntilFlush && !c.mic.speaking && len(c.speech) == 0 {
-			c.dropUntilFlush = false // the shepherd stopped and no flush came: play again
+			c.dropUntilFlush = false // the user stopped and no flush came: play again
 		}
 		c.mu.Unlock()
 		for _, m := range out.msgs {
@@ -531,7 +531,7 @@ func (c *Client) WaitConnected(ctx context.Context, timeout time.Duration) error
 	}
 }
 
-// Say streams samples (16 kHz, clean speech) as the shepherd's words and
+// Say streams samples (16 kHz, clean speech) as the user's words and
 // blocks until the last frame went out (the clip's length, at real
 // time). label names it in the recording. Talking over the bot is a
 // barge-in: with LocalBargeIn the player stops at once and reports
@@ -717,7 +717,7 @@ func (c *Client) WaitQuiet(ctx context.Context, quiet, max time.Duration) bool {
 }
 
 // InTranscriptSince is the input transcript (what the voice model heard
-// the shepherd say) from atMS on.
+// the user say) from atMS on.
 func (c *Client) InTranscriptSince(atMS int64) string {
 	c.mu.Lock()
 	defer c.mu.Unlock()

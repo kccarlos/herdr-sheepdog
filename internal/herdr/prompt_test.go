@@ -26,7 +26,7 @@ type wantOption struct {
 }
 
 // TestParsePrompt runs the parser over every captured prompt: the six
-// layouts the flock draws (Codex's command approval and trust dialog,
+// layouts the workers draws (Codex's command approval and trust dialog,
 // Claude Code's permission prompt and AskUserQuestion widget, agy's
 // command and edit prompts) plus the git prompt seen live on 2026-09-18.
 func TestParsePrompt(t *testing.T) {

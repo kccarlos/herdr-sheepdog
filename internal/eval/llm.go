@@ -19,7 +19,7 @@ import (
 // The judge and the simulated user are plain text models: a
 // GenerateContent call, the brain.Model surface. Three backends serve
 // them: Gemini Flash-Lite on Vertex AI (the default for live runs: cheap,
-// and the same client the brain's vertex provider uses), a local Ollama
+// and the same client the orchestrator's vertex provider uses), a local Ollama
 // server (small runs; slow with many parallel sessions), and a scripted
 // fake (offline, tests, CI).
 
@@ -158,7 +158,7 @@ var Prices = map[string]Price{
 // UnknownPrice is what a model missing from Prices is charged at.
 var UnknownPrice = Price{In: 2.00, Out: 10.00}
 
-// braintestFakeModel is the scripted brain's model id offline.
+// braintestFakeModel is the scripted orchestrator's model id offline.
 const braintestFakeModel = "fake-reflex"
 
 // Cost is u's estimated price at model's list price.
@@ -170,7 +170,7 @@ func Cost(model string, u Usage) float64 {
 	return (float64(u.In)*p.In + float64(u.Out+u.Reasoning)*p.Out) / 1e6
 }
 
-// Meter counts tokens per role ("brain", "judge", "simuser") and model.
+// Meter counts tokens per role ("orchestrator", "judge", "simuser") and model.
 // Safe for concurrent use.
 type Meter struct {
 	mu sync.Mutex
@@ -246,8 +246,8 @@ type metered struct {
 }
 
 // Metered wraps m so every call's tokens land on meter under role. Do
-// not wrap the brain's own model: the loop needs DeepSeek's
-// MessageModel, which a wrapper hides (the brain's tokens are counted
+// not wrap the orchestrator's own model: the loop needs DeepSeek's
+// MessageModel, which a wrapper hides (the orchestrator's tokens are counted
 // from its brain.step events instead).
 func Metered(m brain.Model, meter *Meter, role string) brain.Model {
 	if m == nil || meter == nil {
@@ -285,7 +285,7 @@ func textOf(resp *genai.GenerateContentResponse) string {
 var errNoModel = errors.New("eval: no model configured")
 
 // patient is a brain.Model for the judge and the simulated user (never
-// the brain, whose no-retry policy is part of what is evaluated): at most
+// the orchestrator, whose no-retry policy is part of what is evaluated): at most
 // cap(sem) calls in flight, and a rate limit or a transient server error
 // is retried with jittered exponential backoff (capped at 30 s). With an
 // alternate model id, retries alternate between the two: Vertex rate

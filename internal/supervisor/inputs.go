@@ -12,34 +12,34 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
 
-// The one rail reads the shepherd's real input (docs/roles.md "The one
+// The one rail reads the user's real input (docs/roles.md "The one
 // rail"), and so does everything else: the words an utterance runs on
 // are the ones the daemon recorded, never the voice model's
 // to_supervisor argument (docs/roles.md "One decision-maker"). The
 // argument is only what the model chose to relay: on 2026-09-23 it
-// relayed a push back as if the shepherd had said it, called
-// to_supervisor {text: "yes"} on its own while the shepherd's microphone
+// relayed a push back as if the user had said it, called
+// to_supervisor {text: "yes"} on its own while the user's microphone
 // was muted, relayed only the tail of a sentence ("sometimes") and
 // turned a transcript of "16" into "What does it say?". So the daemon
-// records what the shepherd actually said, typed or tapped — the voice's
+// records what the user actually said, typed or tapped — the voice's
 // input transcription, typed text, a tap on the pending question — and
 //
 //   - a to_supervisor call claims every input since the previous
 //     accepted call and the last spoken push (claimInput): their words,
 //     joined, are the utterance; the argument is logged beside them as
 //     a hint (supervisor.relay {heard, said});
-//   - a to_supervisor call with no shepherd input newer than both the
+//   - a to_supervisor call with no user input newer than both the
 //     previous accepted call and the last spoken push is the model's own
-//     initiative: no fast path, no brain turn, nothing said
+//     initiative: no fast path, no orchestrator turn, nothing said
 //     (supervisor.voice_initiative_ignored). This is the one guard left
 //     of three: a push relayed back (the old echo guard) can no longer
-//     reach the brain as the shepherd's words, since the words are the
+//     reach the orchestrator as the user's words, since the words are the
 //     recorded ones, but a call with nothing recorded behind it must
 //     still do nothing — it is what the rail stands on. "Spoken" means
 //     sent to the voice model (EventPush), not queued (markPushed). The
-//     ignored call gets a silent fact back (the CEO said nothing new,
-//     with their last words), so the fast brain knows nothing was done;
-//   - answering a worker's approval prompt (the brain's send_keys, the
+//     ignored call gets a silent fact back (the user said nothing new,
+//     with their last words), so the voice knows nothing was done;
+//   - answering a worker's approval prompt (the orchestrator's send_keys, the
 //     bare-answer fast path, a tap) needs an input that arrived after the
 //     prompt appeared and within supervisor.authorise_window_s, whose own
 //     text — not the tool argument — plainly answers it: never empty, and
@@ -48,15 +48,15 @@ import (
 // A muted client sends no audio, so no transcript arrives and nothing can
 // be authorised by voice while it is muted.
 
-// InputKind is where a shepherd input came from.
+// InputKind is where a user input came from.
 type InputKind string
 
-// The shepherd's inputs.
+// The user's inputs.
 const (
 	// InputVoice is the voice model's input transcription of the
-	// shepherd's speech, fragments merged per user turn.
+	// user's speech, fragments merged per user turn.
 	InputVoice InputKind = "voice"
-	// InputTyped is text the shepherd typed (/api/inject/utterance, the
+	// InputTyped is text the user typed (/api/inject/utterance, the
 	// /voice text box; the only input with --voice=off).
 	InputTyped InputKind = "typed"
 	// InputTap is a tap on one option of the pending question
@@ -64,7 +64,7 @@ const (
 	InputTap InputKind = "tap"
 )
 
-// shepherdInput is one thing the shepherd said, typed or tapped.
+// shepherdInput is one thing the user said, typed or tapped.
 type shepherdInput struct {
 	seq  uint64
 	kind InputKind
@@ -95,7 +95,7 @@ type shepherdInput struct {
 }
 
 // inputGraceDefault is how long a to_supervisor call with no fresh
-// shepherd input waits for one before it is the voice model's own
+// user input waits for one before it is the voice model's own
 // initiative. The two are not ordered: the input transcription reaches
 // the ledger on the event pump (internal/app), the tool call reaches
 // ToSupervisor on the voice session's own goroutine, and Gemini's input
@@ -111,11 +111,11 @@ type claim struct {
 	text string
 	n    int
 	// id names the utterance these words are (utterance_id on every
-	// event of it: the relay, the brain turn, the reply push). The relay
+	// event of it: the relay, the orchestrator turn, the reply push). The relay
 	// mints it as it claims the words.
 	id string
 	// start is when the first of these words reached the daemon (the
-	// first input's arrival): what the shepherd had heard by then is
+	// first input's arrival): what the user had heard by then is
 	// what the words can answer (heard.go).
 	start time.Time
 	// ins are the claimed inputs, oldest first (the echo guard reads
@@ -123,7 +123,7 @@ type claim struct {
 	ins []*shepherdInput
 	// reading is the voice's own short reading of the words (the
 	// to_supervisor call's optional "reading" argument): a hint for the
-	// brain, labelled as the voice's, never the CEO's words.
+	// orchestrator, labelled as the voice's, never the user's words.
 	reading string
 }
 
@@ -142,7 +142,7 @@ var ErrNoSuchOption = errors.New("no such option")
 // worker; the question stays open.
 var ErrNotSent = errors.New("the answer could not be sent")
 
-// ShepherdInput records something the shepherd typed (or, for tests and
+// ShepherdInput records something the user typed (or, for tests and
 // the tap path, any other kind): the web layer calls it before a typed
 // utterance reaches the voice model or the text router.
 func (s *Supervisor) ShepherdInput(kind InputKind, text string) {
@@ -156,7 +156,7 @@ func (s *Supervisor) ShepherdInput(kind InputKind, text string) {
 	s.addInputLocked(&shepherdInput{kind: kind, text: text})
 }
 
-// heard records a fragment of the shepherd's speech (voice.transcript.in):
+// heard records a fragment of the user's speech (voice.transcript.in):
 // fragments accumulate into one input until the turn closes (final, the
 // model speaking, turn complete, or a relay claiming it).
 func (s *Supervisor) heard(text string, final bool) {
@@ -199,14 +199,14 @@ func (s *Supervisor) heard(text string, final bool) {
 
 // voiceSpoke records the voice's own speech (voice.transcript.out): it
 // ends the voice input being collected, and — unless it is a push being
-// spoken — it is the voice answering the shepherd's last words itself,
+// spoken — it is the voice answering the user's last words itself,
 // so they are neither glued onto the next relay nor relayed by the
 // daemon (relay.go).
 //
 // An output that is not speech is no answer (docs/history/bench-2026-10-03.md
 // #11): on 2026-10-02 23:55:05 and 23:55:13 Gemini's whole output was
 // the transcript "<no speech detected>" with 0.2 ms of audio, and the
-// shepherd's "结果。" / "你说。" counted as answered, so nobody relayed
+// user's "结果。" / "你说。" counted as answered, so nobody relayed
 // them. A run whose transcript, angle-bracket placeholders removed, has
 // no letter or digit is ignored here; a run the client played for less
 // than silentAnswerMs is caught when the relay watch fires (the
@@ -235,7 +235,7 @@ func (s *Supervisor) voiceSpoke(text string) {
 }
 
 // silentAnswerMs is the least audio, in milliseconds of playback, an
-// output of the voice must have had to count as answering the shepherd.
+// output of the voice must have had to count as answering the user.
 const silentAnswerMs = 50
 
 // noSpeech reports whether the voice's output transcript says nothing:
@@ -313,7 +313,7 @@ func (s *Supervisor) lastInputLocked() *shepherdInput {
 // markPushed records that a spoken push was just sent to the voice model
 // (OnVoiceEvent's EventPush): an input older than it cannot carry a later
 // to_supervisor call. It runs on delivery, not when the push was queued:
-// on 2026-10-02 23:54:18 the shepherd said "然后让 Claude 加一个删除功能。"
+// on 2026-10-02 23:54:18 the user said "然后让 Claude 加一个删除功能。"
 // (transcript.in 18.277), a late reply was queued at 19.220 and moved
 // the gate, the voice relayed the words at 19.414 — refused at 20.9 as
 // its own initiative — and the push only went to the model at 21.9.
@@ -327,13 +327,13 @@ func (s *Supervisor) markPushed(text string) {
 	s.mu.Unlock()
 }
 
-// claimInput is the to_supervisor gate: every shepherd input newer than
+// claimInput is the to_supervisor gate: every user input newer than
 // the previous accepted call, waiting up to inputGrace for one (see
 // inputGraceDefault). ok is false when none arrived: the call is the
-// voice model's own, and no CEO words authorise a brain turn. A spoken
+// voice model's own, and no user words authorise an orchestrator turn. A spoken
 // push no longer moves the floor (dual-brain ablation G2): briefings go
-// as function responses, which the voice does not mistake for the CEO,
-// so words the CEO said before a briefing still count, and the fuzzy
+// as function responses, which the voice does not mistake for the user,
+// so words the user said before a briefing still count, and the fuzzy
 // rescue of words a push had hidden (rescueInput) is gone with it.
 func (s *Supervisor) claimInput(ctx context.Context) (claim, bool) {
 	var deadline <-chan time.Time
@@ -365,7 +365,7 @@ func (s *Supervisor) claimInput(ctx context.Context) (claim, bool) {
 }
 
 // freshRunLocked is the run of unclaimed inputs newer than floor, oldest
-// first, ending with the newest input: what the shepherd said since the
+// first, ending with the newest input: what the user said since the
 // daemon last acted on their words. A mid-sentence pause splits one
 // sentence into two inputs (GPT-Live closes an input at every pause,
 // 2026-09-23 23:53:26), so the run takes both; it stops at an input the
@@ -406,7 +406,7 @@ func (s *Supervisor) claimRunLocked(run []*shepherdInput) claim {
 
 // promptSinceLocked is when p's prompt appeared: its pending action's
 // creation, or earlier when the same prompt was recorded before and this
-// pending action is a revival (the shepherd's "yes" to a prompt whose
+// pending action is a revival (the user's "yes" to a prompt whose
 // pending expired arrives before the revival it causes). Caller holds
 // s.mu.
 func (s *Supervisor) promptSinceLocked(p state.PendingAction) time.Time {
@@ -416,7 +416,7 @@ func (s *Supervisor) promptSinceLocked(p state.PendingAction) time.Time {
 	return p.CreatedAt
 }
 
-// railInputLocked is the one rail's reading of the shepherd for keys
+// railInputLocked is the one rail's reading of the user for keys
 // that answer p: the newest input, which must have arrived after the
 // prompt appeared and within Config.AuthoriseWindow, not already have
 // answered a prompt, be non-empty, and — when the keys approve — not be
@@ -442,11 +442,11 @@ func (s *Supervisor) railInputLocked(p state.PendingAction, keys []string) (*she
 	return in, ""
 }
 
-// Whether the shepherd's words decline, put off or question a prompt is
-// the brain's to decide (RULES.md: "not now" puts it off; a no option is
+// Whether the user's words decline, put off or question a prompt is
+// the orchestrator's to decide (RULES.md: "not now" puts it off; a no option is
 // not a pause). The deferral, decline and question word lists that held
 // a decline back (#108, #114) were removed in dual-brain ablation G4: the
-// rail keeps only that the keys answer fresh words of the shepherd's own
+// rail keeps only that the keys answer fresh words of the user's own
 // and that a "no" never approves.
 
 // declines reports whether keys select p's no answer or an option whose
@@ -486,7 +486,7 @@ func fillerOnly(text string) bool {
 // negativeWords open a "no"-class input: "no", "don't …", "stop", "cancel".
 var negativeWords = map[string]bool{"no": true, "nope": true, "nah": true, "don't": true, "dont": true, "do not": true, "stop": true, "cancel": true, "never": true, "deny": true, "decline": true, "reject": true, "wait": true, "hold": true, "negative": true}
 
-// negativeInput reports whether the shepherd's words are a "no": the
+// negativeInput reports whether the user's words are a "no": the
 // whole input is one of mapAnswer's no words, or it opens with one.
 func negativeInput(text string) bool {
 	a := normalizeAnswer(text)
@@ -521,14 +521,14 @@ func approves(p state.PendingAction, keys []string) bool {
 }
 
 // railBlockedLocked logs a refusal of the code paths (fast path, tap)
-// the way the brain logs its own. Caller holds s.mu.
+// the way the orchestrator logs its own. Caller holds s.mu.
 func (s *Supervisor) railBlockedLocked(p state.PendingAction, keys []string, via, reason string) {
 	s.log.Log(logSource, "brain.rail_blocked", p.PaneID, map[string]any{"agent": s.aliasOf(p.PaneID), "keys": keys, "trigger": via, "reason": reason, "id": p.ID})
 }
 
-// AnswerTap answers the open question with the option the shepherd
+// AnswerTap answers the open question with the option the user
 // tapped (POST /api/pending/answer): option is 1-based, as in
-// PendingOptions. The tap is recorded as a shepherd input first, so it
+// PendingOptions. The tap is recorded as a user input first, so it
 // passes the same rail as a spoken answer; the keys go through the same
 // executor (the post-answer poll included), and the voice gets a silent
 // line saying what was tapped. id must name the open question, which

@@ -340,7 +340,7 @@ for WP8c:
   context on the default model would trip 0.50 on the first turn)
   [inferred; neither limit was hit in the spike].
 - The run is bounded by `brain.investigate_max_s` like any
-  investigation; it uses the shepherd's own Claude/Codex usage, never
+  investigation; it uses the user's own Claude/Codex usage, never
   Gemini quota.
 
 ### Consequence
@@ -415,7 +415,7 @@ Runner notes:
   output (§2b).
 - Expect **15–20 s** per call with default reasoning settings and
   **$0.03–0.45** per Claude call; the plan's 60 s timeout is adequate, and
-  the brain turn that reads the output adds its own latency on top.
+  the orchestrator turn that reads the output adds its own latency on top.
 
 ## 4. Deviations from sheepdog-v1-plan.md
 
@@ -435,7 +435,7 @@ Runner notes:
   `on-request|never` on the interactive CLI).
 - **Latency assumption:** a trivial question took ~17 s on both tools with
   the user's default (max-effort / Opus) settings, hence the low-effort
-  and Haiku defaults above and an immediate "checking" from the brain.
+  and Haiku defaults above and an immediate "checking" from the orchestrator.
 - **New requirement:** scrub `HERDR_*` env vars before spawning either CLI
   (their herdr integration hooks would otherwise report a session for the
   inherited pane).

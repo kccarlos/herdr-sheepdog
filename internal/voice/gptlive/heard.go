@@ -13,13 +13,13 @@ import (
 // since it was sent (voice.KeyTermCoverage), not word for word as on
 // Gemini. The verdicts take the same path as Gemini's: logged
 // voice.push_unheard and emitted as voice.EventPushUnheard (the
-// supervisor tells the brain); a line the shepherd is owed a hearing of
+// supervisor tells the orchestrator); a line the user is owed a hearing of
 // (needs_user, a kept or due promise, or a question the supervisor's
 // open check says is still open) goes back in the queue once, at idle,
-// after the shepherd's turn and its reply, or is dropped if no longer
+// after the user's turn and its reply, or is dropped if no longer
 // open.
 
-// requeueSettle is how long a re-queued line waits after the shepherd's
+// requeueSettle is how long a re-queued line waits after the user's
 // last words and after the client last stopped playing (a var for
 // tests).
 var requeueSettle = 2 * time.Second
@@ -83,11 +83,11 @@ func (s *Session) settleHeard(now time.Time) {
 }
 
 // releaseRequeue puts the owed unheard lines back in the push queue, at
-// idle, once the shepherd's turn and the voice's reply are over: nothing
-// generating or playing, no delegation in flight, the shepherd not
+// idle, once the user's turn and the voice's reply are over: nothing
+// generating or playing, no delegation in flight, the user not
 // speaking, requeueSettle since they last spoke and since playback
 // ended, and voice.RequeueHold clear (the client's detector settled, the
-// reply to the shepherd's last words over). A line voice.Requeue says
+// reply to the user's last words over). A line voice.Requeue says
 // is no longer needed is dropped (voice.push_dropped with its reason); a
 // stale answer also goes to the supervisor as unheard
 // (EventPushUnheard, Requeue false).

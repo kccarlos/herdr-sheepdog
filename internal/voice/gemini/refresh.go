@@ -21,8 +21,8 @@ import (
 //     refreshMaxAge,
 //
 // at the next quiet moment: the model is not generating, the client is
-// not playing, the shepherd is not speaking, no tool call or reply is
-// in flight and no question is waiting for the shepherd (the
+// not playing, the user is not speaking, no tool call or reply is
+// in flight and no question is waiting for the user (the
 // supervisor's open check). Logged voice.session_refreshed {reason,
 // age_s}. These are runaway guards on the session's lifetime, not
 // tuning, so they are constants. Since a GoAway on a resumed connection
@@ -36,7 +36,7 @@ const (
 	// question to be answered: a prompt can stay open for hours.
 	refreshOpenMax = 10 * time.Minute
 	// owedReplyWait bounds how long a to_supervisor call answered
-	// "pending" counts as still owed its reply (the brain's utterance
+	// "pending" counts as still owed its reply (the orchestrator's utterance
 	// budget is 25 s, plus a 3 s final grace).
 	owedReplyWait = 35 * time.Second
 	// refreshEvery is how often a due refresh looks for a quiet moment.
@@ -56,7 +56,7 @@ type refreshRequest struct {
 }
 
 // SetOpenCheck installs the supervisor's open check (voice.OpenCheck):
-// asked with nil tags whether a question waits for the shepherd (a due
+// asked with nil tags whether a question waits for the user (a due
 // refresh then holds off), and with a push's tags whether what it is
 // about is still open.
 func (s *Session) SetOpenCheck(f voice.OpenCheck) {
@@ -109,7 +109,7 @@ func (s *Session) markRefreshLocked(now time.Time, reason string) {
 }
 
 // quietLocked reports whether nothing is in flight that a fresh
-// connection would cut: generation, playback, the shepherd's speech, a
+// connection would cut: generation, playback, the user's speech, a
 // tool call, or a reply the voice was told follows. Caller holds s.mu.
 func (s *Session) quietLocked(now time.Time) bool {
 	if s.conn == nil || s.status != voice.StatusConnected || s.turnOpen || s.speakingLocked(now) {

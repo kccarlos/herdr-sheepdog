@@ -55,12 +55,12 @@ lint:
 	golangci-lint run
 
 # Conversation eval sets (testdata/eval): offline — the assistant cases
-# are only validated, every SVP case (svp, regressions, extracted,
-# expanded) runs through the brain with a scripted fake model
+# are only validated, every orchestrator case (svp, regressions, extracted,
+# expanded) runs through the orchestrator with a scripted fake model
 # (internal/eval), and the phrasing checks are listed as skipped. The L0
 # gate of docs/iteration-2.md; see docs/roles.md "The L0 eval corpus".
 # `eval sim` runs every simulated-user scenario (testdata/eval/sim) on the
-# real supervisor with the scripted brain and user: a harness check of the
+# real supervisor with the scripted orchestrator and user: a harness check of the
 # scenario files (the live campaign is `eval sim --live`, docs/iteration-2.md).
 # `bench validate` checks the voice bench's scenarios and openings manifest
 # (testdata/bench, docs/bench/README.md) without any model.

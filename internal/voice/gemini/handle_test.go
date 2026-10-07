@@ -10,7 +10,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
 
-// The CEO's Gemini Live experiment (2026-10-03): the server sends a new
+// The user's Gemini Live experiment (2026-10-03): the server sends a new
 // handle after every completed turn, a resume continues from the context
 // at that handle, and silent context sent after it is lost. So: every
 // handle update is logged with the prompt size at issue, and on a resume

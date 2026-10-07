@@ -18,21 +18,21 @@ type File struct {
 }
 
 // Scenario is one voice-bench conversation: an eval sim scenario (the
-// CEO's goal, persona and opening; the scripted workers; the rubric and
+// user's goal, persona and opening; the scripted workers; the rubric and
 // the action checks), either inline or taken from the sim's files by id
 // (FromSim) with any field here overriding it, plus how it sounds and how
-// the simulated CEO behaves on the phone.
+// the simulated user behaves on the phone.
 type Scenario struct {
 	eval.SimScenario
 	// Category groups the scenarios in the report (status, approve, …).
 	Category string `json:"category"`
 	// FromSim names a scenario of testdata/eval/sim to start from.
 	FromSim string `json:"from_sim,omitempty"`
-	// Audio is how the CEO sounds.
+	// Audio is how the user sounds.
 	Audio Audio `json:"audio,omitempty"`
-	// Behavior is how the CEO behaves on the call.
+	// Behavior is how the user behaves on the call.
 	Behavior Behavior `json:"behavior,omitempty"`
-	// Faults are injected into the scratch daemon's brain provider.
+	// Faults are injected into the scratch daemon's orchestrator provider.
 	Faults Faults `json:"faults,omitempty"`
 	// Voice are voice-layer checks on the daemon's events.
 	Voice VoiceExpect `json:"voice_expect,omitempty"`
@@ -61,7 +61,7 @@ type Audio struct {
 	Gate string `json:"gate,omitempty"`
 }
 
-// Behavior are the simulated CEO's phone habits.
+// Behavior are the simulated user's phone habits.
 type Behavior struct {
 	// ThinkMS is the pause before each reply, [min, max] (default
 	// [500, 2000]).
@@ -77,7 +77,7 @@ type Behavior struct {
 }
 
 // BargeIn: with probability Prob per answer, once a bot utterance has
-// played AfterMS ([min, max]), the CEO starts talking over it — Line, or
+// played AfterMS ([min, max]), the user starts talking over it — Line, or
 // the simulated user's next line. Local makes the phone cut its own
 // playback at once (the iOS hold-to-talk press; open-mic leaves it to
 // the voice model).
@@ -91,21 +91,21 @@ type BargeIn struct {
 }
 
 // Collision: OffsetMS after scripted event Event lands (its push is on
-// the way), the CEO says Line.
+// the way), the user says Line.
 type Collision struct {
 	Event    int    `json:"event"`
 	OffsetMS int    `json:"offset_ms"`
 	Line     string `json:"line"`
 }
 
-// Reconnect: after the answer to the CEO's AfterTurn-th utterance, the
+// Reconnect: after the answer to the user's AfterTurn-th utterance, the
 // phone detaches for AwayMS (pushes are held meanwhile), then comes back.
 type Reconnect struct {
 	AfterTurn int `json:"after_turn"`
 	AwayMS    int `json:"away_ms"`
 }
 
-// Resume: after the answer to the CEO's AfterTurn-th utterance (and
+// Resume: after the answer to the user's AfterTurn-th utterance (and
 // after each of AfterTurns) the daemon's voice connection is recycled
 // (the GoAway path: a new connection resumed from the latest handle, the
 // old one closed; on a connection that was itself resumed the daemon
@@ -116,7 +116,7 @@ type Reconnect struct {
 type Resume struct {
 	AfterTurn  int   `json:"after_turn,omitempty"`
 	AfterTurns []int `json:"after_turns,omitempty"`
-	// AfterBeats recycles after the answer to the CEO line that carried
+	// AfterBeats recycles after the answer to the user line that carried
 	// out each of these agenda beats (workday scenarios, whose turn count
 	// moves with the persona's answers and repeats).
 	AfterBeats []int `json:"after_beats,omitempty"`
@@ -309,7 +309,7 @@ func (s Scenario) validate() error {
 		return err
 	}
 	if len(s.Notes) > 0 || len(s.Transcript) > 0 {
-		return fmt.Errorf("notes and transcript seed the in-process brain; a scratch daemon has no way to take them")
+		return fmt.Errorf("notes and transcript seed the in-process orchestrator; a scratch daemon has no way to take them")
 	}
 	if !knownCategory(s.Category) {
 		return fmt.Errorf("category %q: want one of %s", s.Category, strings.Join(Categories, ", "))

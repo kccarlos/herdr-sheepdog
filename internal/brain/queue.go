@@ -18,7 +18,7 @@ type waiter struct {
 }
 
 // turnLock serialises turns with two priorities: when the lock is
-// released, a waiting CEO turn is handed it before any waiting event turn,
+// released, a waiting user turn is handed it before any waiting event turn,
 // in arrival order within a priority. At most one event turn waits per
 // key: a newer one replaces the queued one, which fails with
 // ErrCoalesced.
@@ -30,7 +30,7 @@ type turnLock struct {
 }
 
 // acquire blocks until the lock is handed over or ctx ends. key is the
-// coalescing key of an event turn (ignored for a CEO turn). replaced
+// coalescing key of an event turn (ignored for a user turn). replaced
 // reports that a queued event turn with the same key was dropped for
 // this one; ErrCoalesced means this turn was dropped the same way.
 func (l *turnLock) acquire(ctx context.Context, ceo bool, key string) (replaced bool, err error) {
@@ -102,7 +102,7 @@ func (l *turnLock) remove(w *waiter) bool {
 	return false
 }
 
-// release hands the lock to the next waiter (CEO first) or frees it.
+// release hands the lock to the next waiter (user first) or frees it.
 func (l *turnLock) release() {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -120,7 +120,7 @@ func (l *turnLock) release() {
 	}
 }
 
-// ceoWaiting reports how many CEO turns are queued: an event turn checks
+// ceoWaiting reports how many user turns are queued: an event turn checks
 // it before every model call and yields when it is not zero.
 func (l *turnLock) ceoWaiting() int {
 	l.mu.Lock()
@@ -133,7 +133,7 @@ type turnStartKey struct{}
 
 // WithTurnStart returns ctx carrying f: a turn run under ctx calls f
 // once, the moment it is handed the turn lock — never while it waits.
-// The supervisor coalesces back-to-back shepherd utterances only while
+// The supervisor coalesces back-to-back user utterances only while
 // the earlier one's turn is still queued (docs/roles.md "One
 // decision-maker"); a turn in progress is never cut, so it must know
 // exactly when the turn started.

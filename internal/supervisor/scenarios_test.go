@@ -29,9 +29,9 @@ func twoAgents(t *testing.T, opts ...func(*Config)) *harness {
 }
 
 // Scenario 1: "what's going on" is answered with one sentence from the
-// table — with no brain, the roster sentence itself — and no model call;
+// table — with no orchestrator, the roster sentence itself — and no model call;
 // the roster is served from cache in well under 5 ms (every request to
-// the brain carries it).
+// the orchestrator carries it).
 func TestScenario1BriefingNoModelCall(t *testing.T) {
 	h := twoAgents(t)
 	res := h.say("what's going on")
@@ -151,7 +151,7 @@ func TestScenario3ConfirmSendsKeys(t *testing.T) {
 	if !row.LastBlock.Answered {
 		t.Error("last_block not marked answered")
 	}
-	// A second "yes" finds nothing to answer: no keys, and with no brain
+	// A second "yes" finds nothing to answer: no keys, and with no orchestrator
 	// the roster is the whole answer.
 	if res := h.say("yes"); !strings.HasSuffix(res.Spoken, noBrainTrailer) {
 		t.Errorf("second yes = %q", res.Spoken)
@@ -161,10 +161,10 @@ func TestScenario3ConfirmSendsKeys(t *testing.T) {
 	}
 }
 
-// The shepherd's bare answer maps onto the prompt's keys (the fast path:
+// The user's bare answer maps onto the prompt's keys (the fast path:
 // yes and no words, an option by number or ordinal, an option's exact
 // label). Anything looser ("don't ask again", "accept edits") is the
-// brain's to resolve, so with no brain it sends nothing.
+// orchestrator's to resolve, so with no orchestrator it sends nothing.
 func TestConfirmAnswerMapping(t *testing.T) {
 	cases := []struct {
 		screen, answer, keys, spoken string
@@ -207,7 +207,7 @@ func TestConfirmAnswerMapping(t *testing.T) {
 	}
 }
 
-// Scenario 4: an instruction is echoed and sent immediately (the brain's
+// Scenario 4: an instruction is echoed and sent immediately (the orchestrator's
 // prompt tool and the fallback both come through sendInstruction).
 func TestScenario4InstructionSendsAndEchoes(t *testing.T) {
 	h := twoAgents(t)
@@ -428,8 +428,8 @@ func TestPromptEndsWhenThePaneLeavesIt(t *testing.T) {
 }
 
 // The bare-answer fast path applies only within fastAnswerWindow of the
-// announcement; a "yes" minutes later goes to the brain with the prompt
-// and how long it has waited in the roster, and the brain decides (here
+// announcement; a "yes" minutes later goes to the orchestrator with the prompt
+// and how long it has waited in the roster, and the orchestrator decides (here
 // it answers through the rail).
 func TestLateBareYesGoesToTheBrain(t *testing.T) {
 	m := braintest.NewModel(
@@ -452,7 +452,7 @@ func TestLateBareYesGoesToTheBrain(t *testing.T) {
 	if len(m.Calls()) != calls+2 {
 		t.Fatalf("model calls = %d, want the utterance turn's two", len(m.Calls())-calls)
 	}
-	// The brain renders the age on its own clock (the real one here).
+	// The orchestrator renders the age on its own clock (the real one here).
 	if req := m.Calls()[calls].System(); !strings.Contains(req, "WAITING FOR AN ANSWER (asked ") {
 		t.Errorf("the brain was not told how long the prompt waited:\n%s", req)
 	}
@@ -535,7 +535,7 @@ func TestAgentExitPushesInterrupt(t *testing.T) {
 // widget (a description line under each option) went blocked, but the
 // parser saw no prompt — supervisor.blocked_no_question — so send_keys
 // was refused as "has no pending approval prompt now". The blocked
-// chain must record the question and the brain's send_keys ["1"] must
+// chain must record the question and the orchestrator's send_keys ["1"] must
 // pass. In the widget the number key selects at once, no Enter (checked
 // against Claude Code 2.1.287).
 func TestAskUserQuestionBlockCreatesPendingAndSendKeysPasses(t *testing.T) {
@@ -701,7 +701,7 @@ func TestInstructionSendError(t *testing.T) {
 	}
 }
 
-// The brain's note tool (brainHost.Note) writes the note file and the
+// The orchestrator's note tool (brainHost.Note) writes the note file and the
 // session.
 func TestNoteWritesFileAndSession(t *testing.T) {
 	h := newHarness(t)
@@ -827,7 +827,7 @@ func TestConcurrentToolsAndTransitions(t *testing.T) {
 
 // "Type something." (bench #2) is not an answer: the phone card, the push
 // buttons, the by-number mapping and the label match never offer it, while
-// the rail still accepts its key so the brain can type a dictated answer.
+// the rail still accepts its key so the orchestrator can type a dictated answer.
 func TestAskUserQuestionMetaOptionIsRailOnly(t *testing.T) {
 	h := newHarness(t)
 	h.addAgent("w5:p1", "w5", "claude", herdr.StateWorking)

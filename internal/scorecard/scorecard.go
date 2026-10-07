@@ -1,6 +1,6 @@
 // Package scorecard computes docs/iteration-2.md's "Scorecard metrics"
 // from a recorded event log: latency (time to first word, time to
-// answer, brain turn duration and prompt tokens), the ear-metrics
+// answer, orchestrator turn duration and prompt tokens), the ear-metrics
 // quality of every spoken line (internal/earmetrics), repeat-ask rate,
 // lost-utterance rate, the brain-line drop rate, Ctrl-C sends, "what does
 // that mean"-class follow-ups and duplicate speech. It is read-only and

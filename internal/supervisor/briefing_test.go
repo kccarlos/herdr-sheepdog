@@ -32,7 +32,7 @@ func TestComposeBriefingShapes(t *testing.T) {
 	doneStale.LastResult = stale
 	doneLong := agent("w5:p1", "api", herdr.StateDone)
 	doneLong.LastResult = long
-	// The brain's own line never goes into the sentence, only the time.
+	// The orchestrator's own line never goes into the sentence, only the time.
 	brainLine := agent("w7:p1", "auth", herdr.StateIdle)
 	brainLine.LastResult = &state.Result{Spoken: "Auth finished the rerun you asked for.", At: now}
 	pending := state.PendingAction{Kind: state.PendingAnswerPrompt, PaneID: "w2:p1", Question: "whether it can create claude.txt"}
@@ -110,7 +110,7 @@ func TestBriefingReflectsResultsAndAges(t *testing.T) {
 
 // TestBriefingRepeatNoteWithBrain covers supervisor.repeat_window_s
 // (docs/history/issues-2026-09-18.md "Smaller items"): an identical roster
-// delivered again within the window gets a context note the brain can
+// delivered again within the window gets a context note the orchestrator can
 // act on ("no change since I last checked") and a
 // supervisor.briefing_repeat log with the age; a worker transition, or
 // falling outside the window, clears it again.
@@ -180,7 +180,7 @@ func TestBriefingRepeatNoteWithBrain(t *testing.T) {
 }
 
 // TestNoBrainRepeatFallback covers the code fallback's own "no change"
-// prefix, used when there is no brain to hand the note to: present
+// prefix, used when there is no orchestrator to hand the note to: present
 // within supervisor.repeat_window_s, and cleared by a transition even
 // though the next question is unrelated to it (proving the reset drives
 // this, not a coincidence of wording).
@@ -203,7 +203,7 @@ func TestNoBrainRepeatFallback(t *testing.T) {
 // TestRosterNeverSplicesAWorkerReport: phone test 2026-10-04 16:21Z, the
 // roster read "claude is idle; it last reports that because all
 // previous work (including the bug fixes and the, and codex is idle":
-// the brain's announcement, cut to twelve words inside the template.
+// the orchestrator's announcement, cut to twelve words inside the template.
 func TestRosterNeverSplicesAWorkerReport(t *testing.T) {
 	now := t0.Add(10 * time.Minute)
 	c := agent("w1:p1", "claude", herdr.StateIdle)

@@ -13,22 +13,22 @@ import (
 )
 
 // One decision-maker (docs/roles.md): the voice hands over whatever the
-// CEO said and decides nothing. The words every path below runs on are
+// user said and decides nothing. The words every path below runs on are
 // the ones the daemon recorded (inputs.go's claimInput) — the voice's
 // input transcription, typed text or a tap — never the voice model's
 // to_supervisor argument, which paraphrased, invented and cut
 // sentences short (2026-09-23/24); the argument is a hint, logged
 // beside them. Two deterministic fast paths run here, in code, before
 // any model — a bare stop, and a bare answer to the one open prompt —
-// and everything else is one brain turn over the words, which resolves
-// what they are and acts. With no brain the daemon answers from the
-// roster and sends nothing: judging what words mean is the brain's
+// and everything else is one orchestrator turn over the words, which resolves
+// what they are and acts. With no orchestrator the daemon answers from the
+// roster and sends nothing: judging what words mean is the orchestrator's
 // work, and there is no second model for it.
 
 // inflightUtterance is the one to_supervisor call being handled, under
-// s.mu: what the CEO said, how to cancel the turn it is (or is about to
-// be) in, and whether the brain already has it. The stop procedure's
-// first two phases are this slot. It stays installed until the brain's
+// s.mu: what the user said, how to cancel the turn it is (or is about to
+// be) in, and whether the orchestrator already has it. The stop procedure's
+// first two phases are this slot. It stays installed until the orchestrator's
 // turn is over, which may be long after the tool call returned a pending
 // result (Config.ReplyWait), so a stop can still cancel that turn.
 type inflightUtterance struct {
@@ -42,20 +42,20 @@ type inflightUtterance struct {
 	// id names the utterance on brain.reply_* and on its late push
 	// (voice.push {answers_utterance}).
 	id string
-	// start is when the shepherd began saying these words (claim.start;
-	// the earlier one when two utterances coalesce): the brain is told
+	// start is when the user began saying these words (claim.start;
+	// the earlier one when two utterances coalesce): the orchestrator is told
 	// what they had heard by then (heard.go).
 	start time.Time
 	// callID is the voice's tool call id that relayed the words: the
-	// brain request and the late push carry it (links.go).
+	// orchestrator request and the late push carry it (links.go).
 	callID string
 	// reading is the voice's own reading of the words (claim.reading).
 	reading string
 	// echoNote says the words began while the voice's line was still
-	// playing (echoNote): a fact for the brain.
+	// playing (echoNote): a fact for the orchestrator.
 	echoNote string
 	// accepted is s.acceptedSeq once this call was accepted: when it has
-	// moved by the time a late reply lands, the shepherd asked for
+	// moved by the time a late reply lands, the user asked for
 	// something else meanwhile and the reply is stale.
 	accepted uint64
 	// detached is set when the tool call gave up waiting and returned a
@@ -68,7 +68,7 @@ type inflightUtterance struct {
 	finished chan struct{}
 
 	// prev is the utterance whose slot this one took over, until
-	// coalesce looked at it. started is set (by the brain's turn lock,
+	// coalesce looked at it. started is set (by the orchestrator's turn lock,
 	// brain.WithTurnStart) once this turn is running; coalesced once a
 	// newer utterance took its words over while it was still queued, so
 	// it delivers nothing. merged counts the utterances in text. All
@@ -80,7 +80,7 @@ type inflightUtterance struct {
 }
 
 // utteranceOutcome is what one utterance turn produced. ok is false
-// when there was no brain, or it could not answer, and the daemon must
+// when there was no orchestrator, or it could not answer, and the daemon must
 // speak for itself.
 type utteranceOutcome struct {
 	res voice.ToolResult
@@ -88,7 +88,7 @@ type utteranceOutcome struct {
 	// acted: the turn sent something to a worker or recorded something
 	// (brain.Reply.Acted).
 	acted bool
-	// needsUser: the reply says the shepherd must decide or act.
+	// needsUser: the reply says the user must decide or act.
 	needsUser bool
 	// actedOn: the panes the turn's actions went to (brain.Reply.ActedOn).
 	actedOn []string
@@ -121,10 +121,10 @@ func withCallID(ctx context.Context, id string) context.Context {
 }
 
 // UtteranceOf is the words an utterance runs on (docs/roles.md "One
-// decision-maker"): what the daemon recorded the shepherd saying, typing
+// decision-maker"): what the daemon recorded the user saying, typing
 // or tapping (heard), and the voice model's to_supervisor argument
 // (said) only when nothing was recorded — fallback is true then. The
-// eval harness uses it to put the same words in front of the brain as
+// eval harness uses it to put the same words in front of the orchestrator as
 // the daemon does.
 func UtteranceOf(heard, said string) (text string, fallback bool) {
 	if h := strings.TrimSpace(heard); h != "" {
@@ -134,22 +134,22 @@ func UtteranceOf(heard, said string) (text string, fallback bool) {
 }
 
 // ToSupervisor handles the voice's relay tool. said is the model's
-// argument; the utterance is what the shepherd said (UtteranceOf).
+// argument; the utterance is what the user said (UtteranceOf).
 func (s *Supervisor) ToSupervisor(ctx context.Context, said string) (voice.ToolResult, error) {
 	return s.ToSupervisorRead(ctx, said, "")
 }
 
 // ToSupervisorRead is ToSupervisor with the voice's own short reading
 // of the words (the call's optional "reading" argument), which reaches
-// the brain labelled as the fast brain's hint, never as the CEO's words.
+// the orchestrator labelled as the voice's hint, never as the user's words.
 func (s *Supervisor) ToSupervisorRead(ctx context.Context, said, reading string) (voice.ToolResult, error) {
 	said = strings.TrimSpace(said)
 	c, fresh := s.claimInput(ctx)
 	if !fresh {
-		// Nothing the shepherd said, typed or tapped since the previous
+		// Nothing the user said, typed or tapped since the previous
 		// relay: the call is the voice model's own (2026-09-23: "yes"
-		// right after a push, with the mic muted). No brain turn runs,
-		// since only the CEO's words authorise one (the rail). The voice
+		// right after a push, with the mic muted). No orchestrator turn runs,
+		// since only the user's words authorise one (the rail). The voice
 		// is told so as a fact, silently, instead of a code guess at
 		// whether it relayed a briefing back (selfRelay, removed in
 		// dual-brain ablation G2).
@@ -158,7 +158,7 @@ func (s *Supervisor) ToSupervisorRead(ctx context.Context, said, reading string)
 	}
 	text, fallback := UtteranceOf(c.text, said)
 	payload := map[string]any{"heard": c.text, "said": said, "inputs": c.n, "input": string(c.in.kind), "utterance_id": c.id}
-	// waited_ms: from the shepherd's last words (the input's last
+	// waited_ms: from the user's last words (the input's last
 	// fragment) to this relay — the voice model's share of the wait
 	// (turn.latency's voice_ms).
 	if !c.in.at.IsZero() {
@@ -193,7 +193,7 @@ func (s *Supervisor) ToSupervisorRead(ctx context.Context, said, reading string)
 }
 
 // noFreshWordsFact is the silent result of a to_supervisor call with no
-// new words of the CEO's: what happened, for the voice to know.
+// new words of the user's: what happened, for the voice to know.
 func (s *Supervisor) noFreshWordsFact() string {
 	s.mu.Lock()
 	in := s.lastInputLocked()
@@ -205,8 +205,8 @@ func (s *Supervisor) noFreshWordsFact() string {
 	return fact
 }
 
-// handleUtterance runs the shepherd's claimed words: the fast paths,
-// then one brain turn. A relay (daemon false) returns the reply as the
+// handleUtterance runs the user's claimed words: the fast paths,
+// then one orchestrator turn. A relay (daemon false) returns the reply as the
 // tool result, waiting up to Config.ReplyWait for it; the daemon's own
 // relay of an unanswered utterance (relay.go) has no tool call to answer,
 // so its turn's reply is always pushed (deliverLate), and only a fast
@@ -224,7 +224,7 @@ func (s *Supervisor) handleUtterance(ctx context.Context, c claim, callID string
 	}
 	// The "New conversation" bare-phrase trigger and its confirm
 	// (docs/roles.md "Triggers" (b)): a fast path, like the stop word
-	// above — no model, and only this claimed shepherd input can ask or
+	// above — no model, and only this claimed user input can ask or
 	// confirm it.
 	if res, ok := s.resetConfirmFastPath(ctx, text); ok {
 		return res
@@ -233,7 +233,7 @@ func (s *Supervisor) handleUtterance(ctx context.Context, c claim, callID string
 	// The turn is detached from the tool call unless it is synchronous:
 	// the voice cancels a handler's context as soon as the handler
 	// returns, and the turn may outlive it. Like an investigation job it
-	// runs on its own context, bounded by the brain's own turn timeout;
+	// runs on its own context, bounded by the orchestrator's own turn timeout;
 	// the stop procedure cancels it through the slot, and shutdown
 	// through s.life.
 	parent := s.life
@@ -247,7 +247,7 @@ func (s *Supervisor) handleUtterance(ctx context.Context, c claim, callID string
 	u.echoNote = note
 	s.mu.Unlock()
 	if s.cfg.bareAnswers || s.brain == nil {
-		// With a brain, the brain reads every answer (dual-brain
+		// With an orchestrator, the orchestrator reads every answer (dual-brain
 		// ablation G4); the bare-answer fast path is left for a
 		// brain-less daemon (--brain=off), where nothing else could,
 		// and for the test harness (Config.bareAnswers).
@@ -276,7 +276,7 @@ func (s *Supervisor) handleUtterance(ctx context.Context, c claim, callID string
 }
 
 // coalesce merges the utterance u took the slot from into u when that
-// one's brain turn is still queued behind another turn (docs/roles.md
+// one's orchestrator turn is still queued behind another turn (docs/roles.md
 // "One decision-maker"): two back-to-back sentences ("Okay, I closed
 // the UC summary Codex agent." / "Check the remaining.", 2026-09-24
 // 00:41) are one request, and two turns answered them over each other.
@@ -311,7 +311,7 @@ func (s *Supervisor) coalesce(u *inflightUtterance) {
 // Past it the call returns a silent pending result at once — the voice
 // said "on it" as it called the tool, and a second acknowledgement would
 // only repeat it — and the reply is pushed when it lands (deliverLate).
-// A voice that drops the call meanwhile (the shepherd barged in) gets
+// A voice that drops the call meanwhile (the user barged in) gets
 // the same treatment: its result would be discarded, so the reply goes
 // the late way too.
 func (s *Supervisor) awaitReply(ctx, turnCtx context.Context, u *inflightUtterance) voice.ToolResult {
@@ -389,7 +389,7 @@ func (s *Supervisor) awaitReply(ctx, turnCtx context.Context, u *inflightUtteran
 
 // inlineResult turns a finished turn into the tool result: dropped when
 // the stop procedure (or the voice) cancelled it, the reply when there
-// is one, else the fallback (the roster with no brain, else the line
+// is one, else the fallback (the roster with no orchestrator, else the line
 // that says it could not answer).
 func (s *Supervisor) inlineResult(turnCtx context.Context, u *inflightUtterance, out utteranceOutcome) voice.ToolResult {
 	if s.utteranceCoalesced(u) {
@@ -397,7 +397,7 @@ func (s *Supervisor) inlineResult(turnCtx context.Context, u *inflightUtterance,
 	}
 	if s.utteranceDropped(u) || turnCtx.Err() != nil {
 		// Stopped, or the voice cancelled the call: the stop procedure
-		// speaks, and the brain's reply is discarded.
+		// speaks, and the orchestrator's reply is discarded.
 		return droppedResult()
 	}
 	if out.ok {
@@ -412,8 +412,8 @@ func (s *Supervisor) inlineResult(turnCtx context.Context, u *inflightUtterance,
 
 // deliverLate pushes the reply of a turn that outlived its tool call,
 // tagged answers_utterance, and ends its slot. A stopped turn delivers
-// nothing. A reply is stale once the shepherd's next request was
-// accepted (acceptedSeq moved): the shepherd has moved on, so a turn
+// nothing. A reply is stale once the user's next request was
+// accepted (acceptedSeq moved): the user has moved on, so a turn
 // that did nothing is dropped, and one that acted is pushed silent — the
 // voice must still know what was done, but it is no longer the answer to
 // what is being discussed. Otherwise the reply is spoken at the next
@@ -443,7 +443,7 @@ func (s *Supervisor) deliverLate(turnCtx context.Context, u *inflightUtterance, 
 	if out.ok {
 		paneID, line = s.lateLine(out.res, u.text, out.actedOn)
 		if out.needsUser && s.answerPromptOpen() {
-			// The shepherd must decide on an open prompt: the reply may
+			// The user must decide on an open prompt: the reply may
 			// ask for the floor, but it is not tagged needs_user — that
 			// exception is a decision on a block the push itself brings
 			// (announce.go's announceTags), so the voice still waits out
@@ -514,10 +514,10 @@ func (s *Supervisor) lateLine(res voice.ToolResult, asked string, actedOn []stri
 
 // subjectOf is the one agent a reply is about: the one agent the turn
 // acted on, else the one it names, else — when it names none — the one
-// the shepherd's words named. Several means no single subject. Campaign D
-// N4: the brain told bench-codex to fix its bug and the reply mentioned
+// the user's words named. Several means no single subject. Campaign D
+// N4: the orchestrator told bench-codex to fix its bug and the reply mentioned
 // only bench-claude ("we still have bench-claude going in the
-// background"), so the CEO heard "About bench-claude: Sent. It is fixing
+// background"), so the user heard "About bench-claude: Sent. It is fixing
 // the adding step now".
 func (s *Supervisor) subjectOf(spoken, asked string, actedOn []string) (state.Agent, bool) {
 	if len(actedOn) > 1 {
@@ -544,7 +544,7 @@ func (s *Supervisor) subjectOf(spoken, asked string, actedOn []string) (state.Ag
 }
 
 // answerPromptOpen reports whether a worker's approval prompt is waiting
-// for the shepherd.
+// for the user.
 func (s *Supervisor) answerPromptOpen() bool {
 	p, has := s.store.Pending()
 	return has && p.Kind == state.PendingAnswerPrompt
@@ -563,7 +563,7 @@ func (s *Supervisor) beginUtterance(parent context.Context, text, callID, id str
 	u.accepted = s.acceptedSeq
 	u.prev = s.utterance
 	// A second utterance while one is in flight takes the slot over: the
-	// older turn is left to finish (the brain's turn lock serialises them
+	// older turn is left to finish (the orchestrator's turn lock serialises them
 	// anyway) unless it is still queued, when coalesce merges the two.
 	s.utterance = u
 	s.mu.Unlock()
@@ -628,8 +628,8 @@ func droppedResult() voice.ToolResult {
 	return voice.ToolResult{Spoken: "Dropped: you said stop.", Scheduling: voice.UrgencySilent}
 }
 
-// utteranceTurn runs one brain turn over the CEO's words. ok is false
-// when there was no brain, or it could not answer, and the daemon must
+// utteranceTurn runs one orchestrator turn over the user's words. ok is false
+// when there was no orchestrator, or it could not answer, and the daemon must
 // speak for itself; a turn the stop procedure cancelled never returns
 // ok, and the caller checks utteranceDropped rather than falling through.
 func (s *Supervisor) utteranceTurn(ctx context.Context, u *inflightUtterance) utteranceOutcome {
@@ -641,28 +641,28 @@ func (s *Supervisor) utteranceTurn(ctx context.Context, u *inflightUtterance) ut
 	s.mu.Unlock()
 	// The roster sentence travels with the request, so a status question
 	// costs no tool call (D1-revised); the pending prompt with its
-	// option keys and the open promises are in the brain's own roster
+	// option keys and the open promises are in the orchestrator's own roster
 	// and ledger sections.
 	brief, _ := s.briefingText()
 	req := brain.Request{Kind: brain.KindUtterance, Trigger: brain.TriggerCEO, Question: text, VoiceReading: reading, DaemonNote: echo, Briefing: brief, Link: callLink(u.callID), UtteranceID: u.id}
 	// The agent the conversation is on, for words that say "it" (the
-	// brain's agentRecords).
+	// orchestrator's agentRecords).
 	s.mu.Lock()
 	subject := s.lastSubject
 	s.mu.Unlock()
 	if row, ok := s.store.Get(subject); ok {
 		req.Focus = row.Alias
 	}
-	// What the shepherd had heard when they began: evaluated when the
+	// What the user had heard when they began: evaluated when the
 	// turn starts, since it may queue behind an announce turn whose
 	// line goes out meanwhile (heard.go).
 	req.Facts = func() brain.EventFacts {
 		return brain.EventFacts{Heard: s.heardFacts(start), Language: s.ceoLanguage(), OpenPrompt: s.openPromptFact(start)}
 	}
 	// supervisor.repeat_window_s: an identical roster delivered again
-	// inside the window is noise over voice, so the brain gets a note it
+	// inside the window is noise over voice, so the orchestrator gets a note it
 	// can act on ("no change since I last checked") instead of the
-	// shepherd hearing the same sentence twice. Delivered means answered:
+	// user hearing the same sentence twice. Delivered means answered:
 	// the mark is set below, after a reply, never for a failed turn.
 	if age, repeat := s.briefingRepeat(brief); repeat {
 		req.RosterUnchangedFor = age
@@ -693,18 +693,18 @@ func (s *Supervisor) utteranceTurn(ctx context.Context, u *inflightUtterance) ut
 // The bare fast-path words (docs/roles.md "One decision-maker"). *Bare*
 // means the whole utterance, so "don't stop the tests" never matches a
 // stop and "yes please run it" never answers a prompt — only these exact
-// (normalised) phrasings do, including the shepherd's polite ones.
+// (normalised) phrasings do, including the user's polite ones.
 //
 // BareStopWords is exported so every bare-stop check in the daemon reads
 // the same list: internal/inject's Router (GPT-Live's Classify path)
 // used to keep its own regex, which disagreed with this one on "abort"
 // and "halt" (audit B8) — the same word stopped GPT-Live outright but
-// only became an ordinary brain turn on Gemini.
+// only became an ordinary orchestrator turn on Gemini.
 var (
 	//
 	// "never mind" is not one (docs/iteration-2.md J6, eval case
 	// never-mind-is-not-stop): it is ordinary speech that goes to the
-	// brain, which decides whether it withdraws anything. As a stop word
+	// orchestrator, which decides whether it withdraws anything. As a stop word
 	// it sent Ctrl-C to a worker that had just been given a task.
 	BareStopWords = map[string]bool{"stop": true, "stop stop": true, "wait": true, "cancel": true, "abort": true, "halt": true, "no no": true, "hold on": true}
 	bareYesWords  = map[string]bool{
@@ -745,12 +745,12 @@ func BareWord(text string) string {
 // bareStop reports whether the whole utterance is one of the stop words.
 func bareStop(text string) bool { return BareStopWords[BareWord(text)] }
 
-// fastAnswer is the bare-answer fast path: the shepherd's whole
+// fastAnswer is the bare-answer fast path: the user's whole
 // utterance (what was heard, typed or tapped — never the tool argument)
 // answers the one open answer_prompt, so the keys go straight to the
 // pane without a model, when the one rail's reading of in, the newest
 // input, allows it (inputs.go). ok is false for anything else, which
-// goes to the brain.
+// goes to the orchestrator.
 func (s *Supervisor) fastAnswer(ctx context.Context, in *shepherdInput, text string) (voice.ToolResult, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -765,7 +765,7 @@ func (s *Supervisor) fastAnswer(ctx context.Context, in *shepherdInput, text str
 	}
 	if age := s.cfg.Now().Sub(p.CreatedAt); age > fastAnswerWindow {
 		// Minutes after the announcement a bare "yes" may be about
-		// something else the shepherd heard since: the brain gets the
+		// something else the user heard since: the orchestrator gets the
 		// words, with the prompt and how long it has waited in its
 		// roster, and decides (docs/history/bench-2026-10-03.md #8).
 		s.log.Log(logSource, "supervisor.fast_path_skipped", p.PaneID, map[string]any{"reason": "prompt_old", "age_s": int(age.Seconds()), "text": text, "id": p.ID})
@@ -826,13 +826,13 @@ func bareAnswer(p state.PendingAction, text string) (keys []string, label string
 
 // fastAnswerWindow is how long after a prompt was announced (its pending
 // action created) a bare answer still goes straight to its keys. Not a
-// knob: past it the brain decides, so a longer or shorter window changes
+// knob: past it the orchestrator decides, so a longer or shorter window changes
 // only how often a model call is spent on a bare word.
 const fastAnswerWindow = 60 * time.Second
 
 // hasListener reports whether a line spoken now can be heard (Listener);
 // true for a Pusher that cannot tell. Invariant it serves in awaitReply:
-// a reply the shepherd is owed is heard, or held until someone can hear
+// a reply the user is owed is heard, or held until someone can hear
 // it, never spoken into an empty room. The page can leave between the
 // tool call and its result, so this cannot be made unrepresentable; it
 // is checked when the result would be returned.
@@ -845,16 +845,16 @@ func (s *Supervisor) hasListener() bool {
 
 // Possible echo. On 2026-09-24 18:23:50 the iOS speaker played "No
 // change, all four are idle…", the mic picked it up and Gemini
-// transcribed "new change" as the shepherd's words; on speakerphone the
+// transcribed "new change" as the user's words; on speakerphone the
 // bot's own speech came back often (docs/bench/tier2-2026-10-03.md #3).
 // The client may have no echo cancellation and the voice model reports
 // only text, so the daemon cannot tell the two apart for sure, and it no
 // longer tries to decide (dual-brain, #122): an input that began while
 // the voice was speaking (or the client still playing it) or within
 // echoWindow of the end of its playback carries what was played then
-// (saidBefore), and handleUtterance hands both to the brain as a fact
-// (echoNote, logged as supervisor.echo_possible). The brain judges
-// whether it was the CEO; words that were the line coming back
+// (saidBefore), and handleUtterance hands both to the orchestrator as a fact
+// (echoNote, logged as supervisor.echo_possible). The orchestrator judges
+// whether it was the user; words that were the line coming back
 // authorise nothing.
 
 // echoWindow is how long after the voice's last output a new input may
@@ -981,7 +981,7 @@ const echoTail = 300 * time.Millisecond
 // opened (onset, zero when the client reports none) after the voice had
 // stopped and the client had finished playing it, echoTail allowed: an
 // echo begins while the speaker plays, so words begun after it are the
-// shepherd's — even when they repeat the voice ("fix those two links"
+// user's — even when they repeat the voice ("fix those two links"
 // to "Shall I fix those two links?"). Caller holds s.mu.
 func (s *Supervisor) spokeAfterPlaybackLocked(now time.Time, playback voice.PlaybackReport, onset time.Time) bool {
 	if onset.IsZero() || s.echo.speaking || s.echo.said == "" {
@@ -1027,7 +1027,7 @@ func (s *Supervisor) currentEchoLocked(now time.Time, playback voice.PlaybackRep
 		switch playback.State {
 		case voice.PlaybackStarted:
 			if now.Sub(s.echo.at) <= echoPlayingMax {
-				return said // the shepherd is still hearing it
+				return said // the user is still hearing it
 			}
 		case voice.PlaybackDrained, voice.PlaybackFlushed:
 			if playback.At.After(anchor) {
@@ -1050,12 +1050,12 @@ func (s *Supervisor) lastPlayback() voice.PlaybackReport {
 	return voice.PlaybackReport{}
 }
 
-// echoNote is the fact the brain gets instead of the old echo text
+// echoNote is the fact the orchestrator gets instead of the old echo text
 // guard (dual-brain ablation G6): which of c's words began while the
 // phone was still playing the voice's own line, or within echoWindow of
 // its end, and what that line was. Timing is physics; whether the words
-// are the CEO or the line coming back through the speaker is the
-// brain's to judge. "" when none did.
+// are the user or the line coming back through the speaker is the
+// orchestrator's to judge. "" when none did.
 func echoNote(c claim) string {
 	ins := c.ins
 	if len(ins) == 0 && c.in != nil {

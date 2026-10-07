@@ -75,12 +75,12 @@ func gain(s []int16, db float64) []int16 {
 }
 
 // echoScene is one reply played by a reporting client with an open mic
-// gate: the bot's speech, its echo, optionally the shepherd's speech.
+// gate: the bot's speech, its echo, optionally the user's speech.
 type echoScene struct {
 	replyMs  int
 	echoDB   float64 // 0: no echo
 	delayMs  int
-	ceoAtMs  int // shepherd starts this long after playback starts (-1: never)
+	ceoAtMs  int // user starts this long after playback starts (-1: never)
 	ceoMs    int
 	ceoAmp   float64
 	floorAmp float64
@@ -357,7 +357,7 @@ func TestEchoGateBargeInAtTheStartOfAReply(t *testing.T) {
 }
 
 // sweep plays one 5 s reply (seed) with the echo at echoDB (0: none)
-// and the shepherd from ceoAt ms (-1: never); it returns the barge-in
+// and the user from ceoAt ms (-1: never); it returns the barge-in
 // latency, where the first released frame starts relative to the words,
 // and the frames forwarded before the words began.
 func sweep(echoDB float64, ceoAt int, seed int64) (lat, onsetMiss int, leaked int) {
@@ -410,7 +410,7 @@ func sweep(echoDB float64, ceoAt int, seed int64) (lat, onsetMiss int, leaked in
 }
 
 // TestEchoGateSweep runs many replies and shepherds (seeds), the
-// shepherd starting with the reply, early in it and late: every
+// user starting with the reply, early in it and late: every
 // barge-in gets through with its first words, and echo alone stays out.
 func TestEchoGateSweep(t *testing.T) {
 	for _, db := range []float64{0, -16, -40} {
@@ -439,7 +439,7 @@ func TestEchoGateSweep(t *testing.T) {
 			echoOnlyLeak += lk
 		}
 		t.Logf("echo %v dB: barge-ins late or clipped %d/45, mean latency %d ms, max %d; echo-only frames forwarded %d over 15 replies", db, bad, lats/45, maxLat, echoOnlyLeak)
-		// The hardest case, the shepherd starting with the reply itself
+		// The hardest case, the user starting with the reply itself
 		// on an armed gate, may wait for the comparison to cover the
 		// echo's delay: a few late ones, none lost.
 		if missed > 0 || bad > 3 {
@@ -464,8 +464,8 @@ func TestEchoGateArmsOnTheFirstEcho(t *testing.T) {
 }
 
 // TestEchoGateStaysUnarmedWithoutEcho: a client whose echo canceller
-// works sends the shepherd's speech over replies, never their echo; the
-// gate must not arm on it (it would then hold the shepherd back).
+// works sends the user's speech over replies, never their echo; the
+// gate must not arm on it (it would then hold the user back).
 func TestEchoGateStaysUnarmedWithoutEcho(t *testing.T) {
 	armed := 0
 	for seed := int64(1); seed <= 30; seed++ {
@@ -552,7 +552,7 @@ func TestEchoGateArmsOnSelfInterruptions(t *testing.T) {
 		g.StreamEnd(at.Add(micAfter + 800*time.Millisecond))
 		return armed
 	}
-	// The shepherd talking over a reply a second in: no sign of echo.
+	// The user talking over a reply a second in: no sign of echo.
 	if reply(t0, time.Second) || reply(t0.Add(5*time.Second), 1200*time.Millisecond) || g.armed {
 		t.Fatal("armed on barge-ins")
 	}

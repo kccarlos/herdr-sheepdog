@@ -90,7 +90,7 @@ func TestPendingAnswerByTap(t *testing.T) {
 	}
 }
 
-// A typed utterance through the text router is a shepherd input: the
+// A typed utterance through the text router is a user input: the
 // bare "yes" answers; a to_supervisor call with nothing typed does not.
 func TestTypedUtteranceIsAShepherdInput(t *testing.T) {
 	h := newHarness(t, harnessOpts{})

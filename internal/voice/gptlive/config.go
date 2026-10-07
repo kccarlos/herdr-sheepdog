@@ -83,7 +83,7 @@ type Config struct {
 	// (default 200).
 	VoicedPeak int
 	// NoiseRun is how long a run of loud microphone frames may hold off
-	// the idle close (the shepherd may be mid-sentence before a
+	// the idle close (the user may be mid-sentence before a
 	// transcript arrives); a longer run is room noise (default 8 s).
 	NoiseRun time.Duration
 	// StartTimeout bounds dial + session.started (default 15 s).

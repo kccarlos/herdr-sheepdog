@@ -27,7 +27,7 @@ func vsection(p ctxcap.VoicePoint, label string) (ctxcap.Section, string) {
 }
 
 // The voice context log of a GPT-Live session, through a fake socket:
-// session.start (instructions, the delegation setting), the shepherd's
+// session.start (instructions, the delegation setting), the user's
 // audio with what the model heard, the delegation and the client's
 // answer to it (linked by the delegation id, the utterance claimed by
 // it), a push with its link tags, and a reset whose next session starts
@@ -69,18 +69,18 @@ func TestVoiceContextCapture(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := strings.Join(vlabels(p), "|")
-	for _, want := range []string{"session open (fresh)", "system instructions", "tool declarations", "shepherd (audio + transcript)", "delegation to client", "delegation result (commentary)", "push (commentary)"} {
+	for _, want := range []string{"session open (fresh)", "system instructions", "tool declarations", "user (audio + transcript)", "delegation to client", "delegation result (commentary)", "push (commentary)"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("no %q in %s", want, got)
 		}
 	}
-	if !strings.HasPrefix(got, "session open (fresh)|system instructions|tool declarations|shepherd") {
+	if !strings.HasPrefix(got, "session open (fresh)|system instructions|tool declarations|user") {
 		t.Errorf("order: %s", got)
 	}
 	if _, text := vsection(p, "system instructions"); !strings.Contains(text, "be brief") {
 		t.Errorf("instructions = %q", text)
 	}
-	if s, text := vsection(p, "shepherd"); strings.Join(s.Links, ",") != "call:item_1" || !strings.Contains(text, "What's going on?") || !strings.Contains(text, "🎤 audio") {
+	if s, text := vsection(p, "user"); strings.Join(s.Links, ",") != "call:item_1" || !strings.Contains(text, "What's going on?") || !strings.Contains(text, "🎤 audio") {
 		t.Errorf("utterance = %v %q", s.Links, text)
 	}
 	for _, label := range []string{"delegation to client", "delegation result"} {

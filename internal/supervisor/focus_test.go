@@ -35,7 +35,7 @@ func replyJSON(r brain.Reply) string {
 	return string(b)
 }
 
-// After a brain reply the voice gets one silent line with the agent in
+// After an orchestrator reply the voice gets one silent line with the agent in
 // focus (its spoken name), the open question with its options and the
 // answer's key points — once its turn is over, and only when the line
 // changed.

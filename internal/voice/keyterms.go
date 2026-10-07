@@ -10,11 +10,11 @@ import (
 // push from session.commentary.append in its own words, so PushCoverage's
 // word-for-word token pairs would call almost every line unheard (why #89
 // left GPT-Live unwatched). What must survive a paraphrase are the key
-// terms the shepherd acts on: the agents named, the numbers, and the
+// terms the user acts on: the agents named, the numbers, and the
 // option labels of a choice. KeyTermCoverage is the share of those terms
 // the voice said; a line with none (plain news) is judged on its content
 // words instead, leniently. It answers one question only — did the line
-// reach the shepherd at all — and HeardMinCoverage is still the bar.
+// reach the user at all — and HeardMinCoverage is still the bar.
 
 // KeyTermCoverage is the share of push's key terms that said carries:
 //   - every name of names (the agents' spoken names and aliases) push

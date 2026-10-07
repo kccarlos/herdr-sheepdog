@@ -17,10 +17,10 @@ orchestration agent that operates the user's herdr, with two parts.
 
 | Name | What it is | In code |
 |---|---|---|
-| **User** | The person, by voice. Owns intent and decisions. | `ceo_*` message kinds, "CEO" and "shepherd" in comments and identifiers (legacy; model-facing strings say "the user") |
+| **User** | The person, by voice. Owns intent and decisions. | `ceo_*` message kinds, and "CEO" and "shepherd" in some identifiers (legacy; see [`glossary.md`](glossary.md)) |
 | **The orchestration agent** | The one agent the user talks to, operating their herdr. It has two parts that are one character to the user. `{name}` (config `voice.name`, default "Sheepdog") is its spoken name. | |
-| — its **voice** | Talks with the user and owns the conversation; Gemini Live (two tools: `to_supervisor(text)` and `stop()`) or GPT-Live (client delegation, mapped onto the same two calls; `docs/gpt-live-notes.md`). | `internal/voice`, "assistant", "fast brain" |
-| — its **orchestrator** | Reads screens, investigates, decides, remembers and acts behind the rails. One stateful agent with tools. | `internal/brain`, "SVP", "supervisor brain", "slow brain" |
+| — its **voice** | Talks with the user and owns the conversation; Gemini Live (two tools: `to_supervisor(text)` and `stop()`) or GPT-Live (client delegation, mapped onto the same two calls; `docs/gpt-live-notes.md`). | `internal/voice`, "assistant" (legacy: "fast brain") |
+| — its **orchestrator** | Reads screens, investigates, decides, remembers and acts behind the rails. One stateful agent with tools. | `internal/brain` (legacy: "SVP", "supervisor brain", "slow brain") |
 | **Workers** | The coding agents in herdr panes (Claude Code, Codex, agy), grouped in workspaces and tabs; herdr reports each one's state (working, idle, blocked on an approval prompt). They change code under their own approval prompts. | `internal/herdr` |
 | **Investigations** | Read-only sub-agents the orchestrator starts for questions the screen cannot answer (`codex exec` / `claude -p` in the worker's repo). | `internal/cli` |
 
@@ -28,7 +28,8 @@ Model-facing text (prompts, briefings, facts, tool descriptions) says
 *the user*, *the voice*, *the orchestrator*; the product and binary are
 still called Sheepdog. Internal identifiers keep their names. "CEO",
 "shepherd", "SVP", "brain" and "assistant" in older docs and code mean
-user, user, orchestrator, orchestrator and voice.
+user, user, orchestrator, orchestrator and voice. [`glossary.md`](glossary.md)
+lists every former name.
 
 ### Agent names
 
@@ -37,7 +38,7 @@ Every agent has three names:
 | Layer | Example | Who uses it |
 |---|---|---|
 | **Machine id** | `w5:p1` (the herdr pane id) | Code, the app, the API. Never spoken. |
-| **Alias** | `herdr-sheepdog-claude-2` | Unique and stable (workspace label + herdr name or kind, `-N` on a clash, or pinned in the config `[aliases]`). The brain's tool calls. |
+| **Alias** | `herdr-sheepdog-claude-2` | Unique and stable (workspace label + herdr name or kind, `-N` on a clash, or pinned in the config `[aliases]`). The orchestrator's tool calls. |
 | **Spoken name** | "README Claude" | What the user hears and says. |
 
 The daemon computes the spoken name (`internal/state` `SpokenNames`,
@@ -49,7 +50,7 @@ title and kind ("README Claude"); else project, kind and a number
 ("sheepdog Claude 2"). Only up to three plain words of the title go into
 the name: paths, file names and code identifiers are dropped
 ("shop/cart.go Cart type" gives "Cart type Claude"), and a title with no
-plain word left falls back to the number. A name the CEO gave always wins, verbatim: the
+plain word left falls back to the number. A name the user gave always wins, verbatim: the
 herdr agent name (herdr `agent rename`, or a voice rename) or an alias
 pinned in the config (or by the /debug inject page). Kinds are said as words
 (`agy` is "Antigravity").
@@ -60,7 +61,7 @@ transition (`internal/workerlog` `Title`): Claude Code's
 JSONL; Codex's last `thread_name` for the session id in
 `~/.codex/session_index.jsonl` (the rollout file does not carry it).
 
-The brain's roster shows the spoken name beside the alias (`- alias
+The orchestrator's roster shows the spoken name beside the alias (`- alias
 (kind), say "README Claude" (just renamed from "Claude"), session
 "…": state`); the old name is shown only when the user was told it
 before (a spoken push, a reply or the voice's own words carried it).
@@ -79,16 +80,16 @@ prompt and Gemini's speech-to-text `CustomVocabulary` at every
 ("The agents are now called: README Claude, sheepdog Claude. …",
 `supervisor.names`, debounced 2 s), so its list is never stale.
 
-A computed spoken name stays once the CEO has heard it (a line meant
+A computed spoken name stays once the user has heard it (a line meant
 for their ear carried it) or said it: it is pinned on the row
 (`state.PinSpoken`, `supervisor.name_pinned`) and kept like a name the
-CEO gave, so a later session title or a second agent of the same kind
+User gave, so a later session title or a second agent of the same kind
 no longer renames it; the newcomer takes the next free form (phone test
-2026-10-04: an auto-title renamed an agent the CEO knew while
-briefings used the old name). Briefings to the fast brain name the
+2026-10-04: an auto-title renamed an agent the user knew while
+briefings used the old name). Briefings to the voice name the
 agent by its spoken name.
 
-Renaming by voice ("call that one docs") is the brain's `note` tool
+Renaming by voice ("call that one docs") is the orchestrator's `note` tool
 with `agent` and `name`: herdr `agent.rename` when the herdr client can
 (a refusal is logged as `supervisor.rename_error`; the roster still
 takes the name) and the row's name in the state table
@@ -98,20 +99,20 @@ refused.
 ### Starting an agent
 
 "Open a new Claude in sheepdog-bench and have it run the tests"
-(让 brain 去某个目录新开一个 claude session) is the brain's `prompt`
+(让 orchestrator 去某个目录新开一个 claude session) is the orchestrator's `prompt`
 tool with `new_agent_dir` (a project name as the user said it, or a
 path), `new_agent_kind` (`claude`, the default, or `codex`) and, only
 when asked for, `new_agent_model` (for a cheap Claude, `haiku`); `text`
 is then the new agent's first instruction. No tool was added. Codex is
-on a free plan: the tool description has the brain start one only when
+on a free plan: the tool description has the orchestrator start one only when
 the user asks for Codex by name.
 
-Which project the user meant is the brain's judgement. The daemon
+Which project the user meant is the orchestrator's judgement. The daemon
 gives it the facts at the moment it needs them: a name that matches no
 candidate, or several, is refused with the list of candidates (every
 existing herdr workspace's directory, then every immediate
 subdirectory of a `supervisor.project_roots` directory, hidden ones
-left out), and the brain asks. A name matches a candidate's base name,
+left out), and the orchestrator asks. A name matches a candidate's base name,
 case and punctuation aside.
 
 The daemon (`internal/supervisor` `spawn.go`) then opens a new herdr
@@ -154,34 +155,34 @@ A rail refusal is a `brain.rail_blocked` and `supervisor.spawn_refused
 then `supervisor.spawn_ready` when herdr reports the agent and
 `supervisor.spawn_instruction` when the first instruction went. An
 agent herdr has not recognised after 20 s logs
-`supervisor.spawn_not_ready {still_waiting}`; the brain gets a
+`supervisor.spawn_not_ready {still_waiting}`; the orchestrator gets a
 transcript line saying so, with the pane's last lines (often the
-first-run question, or a shell that never ran the command), and the CEO
+first-run question, or a shell that never ran the command), and the user
 a daemon fact with the same lines through the voice (and, should herdr
 see it later, a second fact that it is running now); the watch goes on to the ten-minute bound or until
-the pane closes, and the brain is told whether the held instruction
+the pane closes, and the orchestrator is told whether the held instruction
 went or was dropped.
 
 ### Closing an agent
 
 "把 kvoice Claude 关掉吧" (close that agent, end its session) is the
-brain's `interrupt` tool with `close: true`; no tool was added. Plain
+orchestrator's `interrupt` tool with `close: true`; no tool was added. Plain
 `interrupt` still sends Ctrl-C to stop a task; `close` ends the agent:
 the daemon (`internal/supervisor` `close.go`) closes its pane with
 herdr's `pane.close` (a workspace's last pane closes the workspace), and
 herdr's `pane_closed` takes it off the roster like any agent that exits.
-Which agent the user meant is the brain's judgement; the tool
+Which agent the user meant is the orchestrator's judgement; the tool
 description has it ask when that is unclear.
 
 Rails (authority, not judgement):
 - the user's own recent, unused words, read exactly as for a new
   agent; a close marks them used, so one input closes one agent;
-- the agent working in the daemon's own directory (where the CEO's
+- the agent working in the daemon's own directory (where the user's
   orchestrator session runs; `supervisor.Config.ProtectedDirs`, set to
   the daemon's working directory) and the pane the daemon itself runs in
-  (`HERDR_PANE_ID`) are refused unless the brain passes `protected_ok`,
+  (`HERDR_PANE_ID`) are refused unless the orchestrator passes `protected_ok`,
   which the description reserves for the user naming that very
-  agent. The refusal tells the brain why, so it can ask.
+  agent. The refusal tells the orchestrator why, so it can ask.
 
 A refusal logs `brain.rail_blocked` and `supervisor.close_refused
 {reason}`; a close logs `supervisor.close {agent, spoken, kind, cwd,
@@ -202,11 +203,11 @@ chief of staff; that metaphor is gone from everything a model reads.)
 
 ## One owner of actions (D1-revised; dual-brain)
 
-D1 now reads: one owner of actions, the slow brain behind the rails; the fast brain (the voice model) owns the conversation: when to speak, what, how, in which language, and small talk and follow-ups about what it just said (docs/design/dual-brain.md). The briefings it speaks from reach it as function responses, never as user turns.
+D1 now reads: one owner of actions, the orchestrator behind the rails; the voice (the voice model) owns the conversation: when to speak, what, how, in which language, and small talk and follow-ups about what it just said (docs/design/dual-brain.md). The briefings it speaks from reach it as function responses, never as user turns.
 
 The voice does not classify intent and does not execute. Everything the
-user says that is not small talk goes to the brain (`to_supervisor`).
-**The words the brain gets are the user's recorded input** — the
+user says that is not small talk goes to the orchestrator (`to_supervisor`).
+**The words the orchestrator gets are the user's recorded input** — the
 voice's input transcription of every utterance since the daemon last
 acted on the user's words (a sentence split by a pause is one
 utterance), typed text, or a tap — never the voice model's
@@ -215,18 +216,18 @@ utterance), typed text, or a tap — never the voice model's
 nothing was recorded and the argument is all there is). The voice
 model paraphrased, invented ("16" relayed as "What does it say?") and
 cut sentences short ("sometimes") when its argument was the utterance.
-The brain resolves what it is — a status question, a question to
+The orchestrator resolves what it is — a status question, a question to
 investigate, an instruction, an answer to a worker's prompt, a promise,
-a note — from the transcript, and acts. The voice speaks what the brain
+a note — from the transcript, and acts. The voice speaks what the orchestrator
 returns, answers a first follow-up from the reply's `detail` and
 `options` without going back, and judges the *moment* for anything the
-brain brings unprompted.
+orchestrator brings unprompted.
 
 An utterance the voice leaves unanswered — no tool call and no word of
 its own for 4 s after the last fragment — is relayed by the daemon
 itself (`supervisor.relay_by_daemon {text, waited_ms}`) and its reply
 pushed; the voice speaking a push is not an answer. Two utterances back
-to back, the second arriving while the first's brain turn is still
+to back, the second arriving while the first's orchestrator turn is still
 queued, are one turn over both texts (`supervisor.utterance_coalesced
 {n}`); a turn already running is never cut, and its reply is stale if
 it lands after the next request was taken up.
@@ -236,7 +237,7 @@ Code fast paths (deterministic, no model): a bare "yes" / "no" /
 user's verbatim word, so the rail is satisfied); a bare "stop" /
 "wait" / "cancel" / "abort" / "halt" / "hold on" / "no no" → the stop
 procedure. *Bare* means the whole utterance. "Never mind" is not a stop
-word: it goes to the brain like any utterance.
+word: it goes to the orchestrator like any utterance.
 
 ## The voice — do / don't
 
@@ -253,7 +254,7 @@ Never: adds a follow-up question of its own; states anything about the
 workers no briefing carried; acts on an agent; answers a worker's
 prompt; reads paths, hashes or ids aloud; treats "never mind" as stop.
 
-## The brain — do / don't
+## The orchestrator — do / don't
 
 Does:
 - Keeps one transcript per daemon run: every user utterance and
@@ -286,15 +287,15 @@ Does:
     and announce requests ask for `spoken` "as complete as the finding
     needs" / "as long as its news needs", in short plain sentences.
   - `ask` is the one question, when only the user can decide (or
-    the next move the brain would take); the voice hears it last.
+    the next move the orchestrator would take); the voice hears it last.
   - `detail` is the plain explanation: one everyday sentence per term
     the headline used, for a listener who is not a programmer, no
     numbers or ids. The voice reads it for "what does that mean"; it is
     not a place for extra facts.
-  - Asked again ("what does that mean?" a second time), the brain picks
+  - Asked again ("what does that mean?" a second time), the orchestrator picks
     the one concept, explains it in fewer words than before, and asks
     "Clearer?".
-  - Code caps the headline on every brain line bound for the voice
+  - Code caps the headline on every orchestrator line bound for the voice
     (`prose.EarLine` / `EarLineWith`): announcements, finishes and
     investigation deliveries, and replies to the user's own words
     alike, at one runaway cap (`prose.EarSeconds`, about 44 s of estimated
@@ -331,18 +332,18 @@ left, since every utterance now runs on the recorded input, and a push
 relayed back can no longer pass for the user's words. Enforced in
 the executor, not by prose; the voice has no tool that can answer a
 prompt at all. Everything else — instructions, Ctrl-C, questions — is
-the brain's call.
+the orchestrator's call.
 
 The app's agent window (docs/ws-contract.md "Agent window: screen and
-input") is outside the rail on purpose: there the CEO types or presses
+input") is outside the rail on purpose: there the user types or presses
 keys in the worker's window himself, so his tap is the authority. It is
-logged (`web.agent_input`) and told to the brain, and keys that select
+logged (`web.agent_input`) and told to the orchestrator, and keys that select
 an option of the open question go through the tap path above.
 
 ## Stop
 
 A procedure in code, resolved from what is in flight: drop a call not
-yet handed over → cancel the brain's in-flight user turn (write
+yet handed over → cancel the orchestrator's in-flight user turn (write
 tools run under its context and never execute) → cancel the running
 investigation the withdrawn request was about, or, with nothing in
 flight, the most recent one → Ctrl-C a worker that
@@ -350,22 +351,22 @@ received an instruction within `supervisor.cancel_window_s` (30 s) →
 leave an open worker prompt open (stop is not "no"). The daemon's own
 sentence acknowledges it at once — no model turn stands between the stop
 and its reply — and what
-was stopped goes into the brain's transcript as a context line, so a
+was stopped goes into the orchestrator's transcript as a context line, so a
 later question knows about it. The interrupt phase says only "Sent an
 interrupt to <alias>.": Ctrl-C does not guarantee a queued instruction
 was dropped. Undoing a
 worker's edits is an instruction to the worker, not a stop. The stop
 words are "stop", "wait", "cancel", "abort", "halt", "hold on" and "no
 no" (`supervisor.BareStopWords`, the voice's `stop` tool); "never mind"
-is not one: it is ordinary speech the brain reads. Event turns
+is not one: it is ordinary speech the orchestrator reads. Event turns
 are not cancelled by stop. Logged as `supervisor.stopped {phase, what,
 trigger}` (`stop_tool` or the bare-word fast path).
 
 ## Pushes
 
 One line per worker event, and only a prompt is urgent. **A finish
-waits for the brain's line**: nothing is said at `brain.announce_wait_s`;
-the brain's line (what it found) is spoken alone whenever the announce
+waits for the orchestrator's line**: nothing is said at `brain.announce_wait_s`;
+the orchestrator's line (what it found) is spoken alone whenever the announce
 turn answers, within the turn's own budget (`brain.announce_turn_timeout_s`,
 or `brain.announce_timeout_s` when the user is owed it — it keeps a
 promise or ends an instruction they gave this run). Only when the turn
@@ -373,14 +374,14 @@ fails, times out, yields or is coalesced is the code sentence ("auth
 finished") spoken, once, then; an owed finish whose turn timed out says
 in that sentence that its findings could not be had. **A block stays
 fast**: the parsed prompt is spoken at `brain.announce_wait_s` unless the
-brain's line lands first. A brain line that lands after the code
+orchestrator's line lands first. A orchestrator line that lands after the code
 sentence is dropped (`brain.push_late`), with one rule and one
 exception, each at most one added line at idle: a line that says the
 user must decide or act (`needs_user`) is always spoken, whatever
 the event, unless the prompt it is about is gone; and the finding of an
 owed finish that also asked (below) or a line that relates it to one of
 their requests (`relates_to`) is added too. "<alias> started on …" for
-an instruction the brain sent within `supervisor.cancel_window_s` is
+an instruction the orchestrator sent within `supervisor.cancel_window_s` is
 silent context (the tool result already said it was sent); one picked
 up later is spoken at `chatty`. A finish that leaves a prompt on screen
 (Claude Code's post-turn "teach auto mode…?"; not agy, which reports done
@@ -394,23 +395,23 @@ not merely until the model finished generating it (docs/ws-contract.md
 save a due promise, a decision on a *new* block, or the stop button's
 reply. A spoken push also waits while the client's own speech detector
 hears the user, and the push gap runs from the end of playback. When
-a reply is cut off (a barge-in, stop, an interrupting push), the brain's
+a reply is cut off (a barge-in, stop, an interrupting push), the orchestrator's
 "Assistant said" line keeps only the words that played, marked "cut off
 after N s". An addition to a block is
 dropped once the block is resolved. The chattiness level is a ceiling
 code keeps: `quiet` — questions, exits, kept promises and the finish of
 the user's own instruction; `normal` — plus finishes of agents the
 user dealt with within `supervisor.recent_minutes`; `chatty` —
-everything the brain wants to say. Owed lines (a kept promise, the
+everything the orchestrator wants to say. Owed lines (a kept promise, the
 finish of the user's own instruction) are spoken at every level.
 
 ## Investigations and explanations
 
 The user cannot see the screen, so "explain what happened" is a
-first-class request. The brain answers from the cheapest layer that
+first-class request. The orchestrator answers from the cheapest layer that
 works: the last reply's `detail` (the voice does this itself), a screen
 read, `recall`, then an investigation. An investigation is a background
-job (`investigate(agent, question)`): the brain acknowledges within the
+job (`investigate(agent, question)`): the orchestrator acknowledges within the
 utterance turn's budget ("reading the diff, about half a minute", `pending: true`),
 the job runs the read-only CLI agent in the worker's repository — or,
 with `source: worker`, forks the worker's own CLI session (read-only,
@@ -418,7 +419,7 @@ never touching the pane) and asks there, so it answers from what the
 worker actually saw and tried — with no time limit beyond a sanity
 ceiling, and its result comes back as an event turn that pushes
 the explanation at the next pause, tagged to the request. Follow-ups
-resume the same CLI session (the harness persists it); the brain keeps
+resume the same CLI session (the harness persists it); the orchestrator keeps
 an investigation ledger `recall` can search. One live investigation per
 agent; stop cancels it.
 
@@ -433,7 +434,7 @@ scrubbed), the instruction it was on (≤ 200), the files it edited (base
 names, ≤ 10) and its tool counts. The finish's announce turn hears that
 message first, labelled as what the worker wrote, then the screen; the
 ledger shows each agent's last three entries in one short line each;
-`recall` searches them all. Every instruction the brain sends through
+`recall` searches them all. Every instruction the orchestrator sends through
 `prompt` gets a fixed trailer from the supervisor, never the model —
 "When you finish, end with three short lines for someone who cannot see
 the screen: what changed; what needs a decision; what is next." — so
@@ -444,14 +445,14 @@ keeps no transcript the daemon can read (`worker.session_missing`).
 
 ## New conversation
 
-"New conversation" resets the brain's transcript window (a fresh
+"New conversation" resets the orchestrator's transcript window (a fresh
 segment; the compaction summary is gone — nothing said before the reset
 is in the next prompt) and the voice model's own session (Gemini: drop
 the resumption handle and reconnect fresh; GPT-Live: close the billed
 session if one is open, no recap, and reopen later on the next speech
 or push). **Kept**, because none of it ever lived in the window or the
 voice session's memory: the agent roster and its ledger, open approval
-prompts, promises and notes (still in the fresh brain's ledger section),
+prompts, promises and notes (still in the fresh orchestrator's ledger section),
 running investigations, the event log on disk, and the conversation
 history API's older items (a `notice`/`reset` divider is added, not a
 truncation). Two triggers reach the same reset: `POST
@@ -470,14 +471,14 @@ start. What's next?").
 
 Debounce, dedup and TTL timers; the chattiness ceiling; the rail; the
 stop procedure; the bare yes/no fast path; the code fallback sentences
-when the brain is down; `composeBriefing` (the roster line in every
-brain request). No template LLM: the brain is the only model that
+when the orchestrator is down; `composeBriefing` (the roster line in every
+orchestrator request). No template LLM: the orchestrator is the only model that
 phrases, and when it is unavailable the daemon speaks the code sentences.
 
 ## The L0 eval corpus
 
 `sheepdog eval --set all` (`make eval`) is the offline gate of
-docs/iteration-2.md: every case below runs through the brain with a
+docs/iteration-2.md: every case below runs through the orchestrator with a
 scripted fake model, so it checks what code decides — tools called,
 `must_not_call`, the rail, `no_tool`, `prompt_must_not_contain` — and
 lists the phrasing checks it skipped (`spoken_max_words`,
@@ -497,7 +498,7 @@ expand`: the job's paraphrases and seeded speech-recognition noise of the
 regressions and one extracted case per job, regenerated with
 `SHEEPDOG_CORPUS_UPDATE=1 go test ./internal/eval/gen`; a test fails if it
 drifts). The log cannot give everything: `herdr.read` logs no text, so a
-screen is at most the first 1 KB of the brain's last `read_screen`;
+screen is at most the first 1 KB of the orchestrator's last `read_screen`;
 aliases come from the supervisor's events (`herdr.transition` carries
 none); the roster sentence is not logged.
 
@@ -507,8 +508,8 @@ none); the roster sentence is not logged.
 |---|---|
 | `prompts/assistant.md` | The voice's whole system prompt on Gemini Live: persona, hearing, the two tools, reading a reply, follow-ups from `detail`, pushes (≤ 400 words; re-billed every turn). |
 | `prompts/assistant-gptlive.md` | The same for GPT-Live, whose client delegation replaces the two tools. |
-| `prompts/svp/SOUL.md` | The brain's role and manner: who it serves, its bias to execution, the copilot manner. |
-| `prompts/svp/RULES.md` | The brain's tool guidance, one `## ` section per stable-prompt piece (tools, intent, record, promises, announcing, the one rail, fallback, for the ear, explaining, the answer contract). |
+| `prompts/svp/SOUL.md` | The orchestrator's role and manner: who it serves, its bias to execution, the copilot manner. |
+| `prompts/svp/RULES.md` | The orchestrator's tool guidance, one `## ` section per stable-prompt piece (tools, intent, record, promises, announcing, the one rail, fallback, for the ear, explaining, the answer contract). |
 | `prompts/USER.md` | The user's profile: `{aliases}`, `{chattiness}`, `{tz}`, free text. |
 
 Overrides in `~/.config/sheepdog/prompts/` (config `prompts.dir`), re-read

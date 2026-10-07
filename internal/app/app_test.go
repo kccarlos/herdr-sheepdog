@@ -86,7 +86,7 @@ func TestBuildValidation(t *testing.T) {
 	}
 	_ = lanApp.elog.Close()
 	// A Gemini key without a network: Build succeeds (nothing connects),
-	// and the brain is attached with its transcript under the data dir.
+	// and the orchestrator is attached with its transcript under the data dir.
 	gem := cfg
 	gem.Gemini.APIKeys = []string{"k"}
 	a, err := Build(gem, Options{Voice: VoiceGemini, Herdr: HerdrMock})
@@ -118,7 +118,7 @@ func TestBuildValidation(t *testing.T) {
 		_ = a.elog.Close()
 	}
 	// --brain=fake needs no key: the reflex model is attached and the
-	// brain endpoints answer.
+	// orchestrator endpoints answer.
 	a, err = Build(cfg, Options{Voice: VoiceOff, Herdr: HerdrMock, Brain: BrainFake})
 	if err != nil {
 		t.Fatalf("fake: %v", err)

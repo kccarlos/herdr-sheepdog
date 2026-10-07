@@ -187,7 +187,7 @@ func (s *Store) Apply(t herdr.Transition) (Agent, bool, error) {
 
 // herdrSpelling reports whether reported is how herdr spells name
 // (HerdrName): a voice rename to "kvoice explainer" comes back from herdr
-// as "kvoice-explainer", and the spoken form the CEO gave is kept.
+// as "kvoice-explainer", and the spoken form the user gave is kept.
 func herdrSpelling(name, reported string) bool {
 	h, ok := HerdrName(name)
 	return ok && name != "" && h == reported
@@ -244,8 +244,8 @@ func (s *Store) SetAlias(paneID, alias string) error {
 	return s.persist()
 }
 
-// SetName records a name the CEO gave the agent (a voice rename through
-// the brain; herdr agent rename arrives through Apply). It wins over the
+// SetName records a name the user gave the agent (a voice rename through
+// the orchestrator; herdr agent rename arrives through Apply). It wins over the
 // computed spoken name; a derived alias follows it ("sheepdog-docs").
 // An empty name, or one another running agent is already called, is an
 // error.

@@ -14,7 +14,7 @@ type Notifier interface {
 }
 
 // notify hands the phone the line an announcement speaks, when the event
-// needs the shepherd: a block (with or without an answerable prompt) or a
+// needs the user: a block (with or without an answerable prompt) or a
 // promise they asked for. Plain finishes and status chatter are the
 // voice's alone. It is called at each place an announcement's line is
 // decided (codePath, applyResult, dropLate) — before the chattiness gate

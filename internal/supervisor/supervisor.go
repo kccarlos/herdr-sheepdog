@@ -52,7 +52,7 @@ type TagPusher interface {
 }
 
 // Querier is the read-only CLI query tool of plan §3.5 (WP4). workspace
-// is the agent's working directory; the result is raw text the brain
+// is the agent's working directory; the result is raw text the orchestrator
 // reads through its run_cli tool. nil means there is no such tool.
 type Querier interface {
 	Query(ctx context.Context, workspace, question string) (string, error)
@@ -60,10 +60,10 @@ type Querier interface {
 
 // Config tunes the Supervisor; zero values take the defaults.
 // DefaultReplyWait is brain.reply_wait_s's default: above the utterance
-// budget (25 s) plus the final answer-only grace (3 s), so the brain's
+// budget (25 s) plus the final answer-only grace (3 s), so the orchestrator's
 // answer is the to_supervisor call's own result. The 2026-10-03 A/B
 // (docs/research/reply-as-function-response-2026-10-03.md) measured it
-// against the old 2 s: no answer relayed back as the shepherd's words
+// against the old 2 s: no answer relayed back as the user's words
 // (7 of 147 before), no Chinese answer lost (6 of 36 before), pass rate
 // and latency unchanged.
 const DefaultReplyWait = 30 * time.Second
@@ -120,19 +120,19 @@ type Config struct {
 	// sub-agent session stays resumable; a follow-up past it starts cold
 	// with the previous answer prepended (default 1 h).
 	InvestigateSessionTTL time.Duration
-	// AnnounceWait is how long a block waits for the brain's announce turn
+	// AnnounceWait is how long a block waits for the orchestrator's announce turn
 	// before the daemon's own code sentence (the parsed prompt) is spoken
-	// (default 2 s, brain.announce_wait_s). Past it the brain's line is
-	// dropped unless it says the shepherd must act (docs/roles.md
+	// (default 2 s, brain.announce_wait_s). Past it the orchestrator's line is
+	// dropped unless it says the user must act (docs/roles.md
 	// "Pushes"). A finish does not use it: a finish is not urgent and
 	// waits for the turn's own budget. Negative waits for the turn's own
 	// timeout on a block too.
 	AnnounceWait time.Duration
-	// ReplyWait is how long a to_supervisor call waits for the brain's
+	// ReplyWait is how long a to_supervisor call waits for the orchestrator's
 	// reply before it returns a silent pending result and the reply is
 	// pushed when it lands (default DefaultReplyWait, brain.reply_wait_s;
 	// utterance.go). Above the utterance budget, the reply is the tool
-	// result (Gemini: the late function response) unless the shepherd
+	// result (Gemini: the late function response) unless the user
 	// barges in, the connection goes or the page leaves, which push it
 	// (docs/research/reply-as-function-response-2026-10-03.md). Negative
 	// waits for the whole turn under the call's own context, so a barge-in
@@ -141,11 +141,11 @@ type Config struct {
 	// RepeatWindow is how long an unchanged roster sentence counts as
 	// "already reported" (default 60 s, supervisor.repeat_window_s,
 	// docs/history/issues-2026-09-18.md "Smaller items"): a status question
-	// inside it gets a context note the brain can use to say "no change
+	// inside it gets a context note the orchestrator can use to say "no change
 	// since I last checked" instead of repeating the roster; with no
-	// brain, the code fallback sentence itself is prefixed that way.
+	// orchestrator, the code fallback sentence itself is prefixed that way.
 	RepeatWindow time.Duration
-	// AuthoriseWindow is how recent a shepherd input must be to authorise
+	// AuthoriseWindow is how recent a user input must be to authorise
 	// answering a worker's approval prompt (default 30 s,
 	// supervisor.authorise_window_s, docs/roles.md "The one rail";
 	// inputs.go).
@@ -155,8 +155,8 @@ type Config struct {
 	// candidates, and any directory inside one is allowed.
 	ProjectRoots []string
 	// ProtectedDirs are directories whose agents are closed only when
-	// the brain says the CEO named that very agent (close.go): the
-	// daemon's own working directory, where the CEO's orchestrator
+	// the orchestrator says the user named that very agent (close.go): the
+	// daemon's own working directory, where the user's orchestrator
 	// session works.
 	ProtectedDirs []string
 	// OwnPane is the herdr pane the daemon itself runs in (its
@@ -167,7 +167,7 @@ type Config struct {
 	// sends nothing. New attaches the Supervisor as its Host.
 	Brain *brain.Brain
 	// Notifier, when set, gets one phone notification per announced
-	// event that needs the shepherd (a block, an approval prompt, a kept
+	// event that needs the user (a block, an approval prompt, a kept
 	// promise; notify.go), whether or not a voice client is attached.
 	Notifier Notifier
 	// Now overrides the clock (tests).
@@ -178,22 +178,22 @@ type Config struct {
 
 	chattiness Chattiness // parsed Chattiness
 
-	// inputGrace is how long a to_supervisor call with no fresh shepherd
+	// inputGrace is how long a to_supervisor call with no fresh user
 	// input waits for one (default inputGraceDefault; negative does not
 	// wait). Not a knob: only tests change it (inputs.go).
 	inputGrace time.Duration
-	// relayAfter is how long a shepherd utterance may go unanswered
+	// relayAfter is how long a user utterance may go unanswered
 	// before the daemon relays it itself (default relayUnansweredAfter;
 	// negative never relays). Not a knob: only tests change it
 	// (relay.go).
 	relayAfter time.Duration
 	// bareAnswers turns the old bare-answer fast path back on with a
-	// brain (a bare "yes"/"no"/"option two" sent as keys without it).
+	// orchestrator (a bare "yes"/"no"/"option two" sent as keys without it).
 	// Only the test harness sets it: since dual-brain ablation G4 a
-	// daemon with a brain leaves every reading of the shepherd's words
-	// to the brain; a brain-less one keeps the fast path.
+	// daemon with an orchestrator leaves every reading of the user's words
+	// to the orchestrator; a brain-less one keeps the fast path.
 	bareAnswers bool
-	// interruptCheck is how long the brain's interrupt waits for the
+	// interruptCheck is how long the orchestrator's interrupt waits for the
 	// pane to leave working after each Ctrl-C (default
 	// interruptCheckDefault). Not a knob: only tests change it
 	// (brainhost.go, Interrupt).
@@ -291,19 +291,19 @@ type Supervisor struct {
 	mentioned     map[string]time.Time // pane -> when a spoken briefing last named it
 	lastPrompt    map[string]string    // pane -> signature of the last answer_prompt built for it (reprompt.go)
 	utterance     *inflightUtterance   // the to_supervisor call in flight (stop.go phases 1 and 2)
-	// declined is the last prompt the shepherd declined per pane, for
+	// declined is the last prompt the user declined per pane, for
 	// the menu guard (tools.go, menuOnScreen).
 	declined map[string]declineMark
 	// eventIDs is each pane's latest worker event id (links.go): the
 	// announce turn and pushes about that event carry it, so the Context
-	// tab links them to the brain's worker_event message.
+	// tab links them to the orchestrator's worker_event message.
 	eventIDs map[string]string
 	// eventLines are the spoken lines pushed about each worker event,
 	// recent ones only (eventlines.go): the announce turn's facts and the
 	// anti-loop cap.
 	eventLines map[string][]eventLine
 	// answeredPrompt is the id of each pane's last answer_prompt the
-	// shepherd answered (answerKeys): the announce facts tell "answered"
+	// user answered (answerKeys): the announce facts tell "answered"
 	// from "the agent left it" (eventlines.go).
 	answeredPrompt map[string]string
 	// investigating is the one running background job per pane
@@ -322,14 +322,14 @@ type Supervisor struct {
 	// first time SetVoiceConnected(true) fires.
 	startupAnnounced bool
 	// lastBriefingText / lastBriefingAt are the roster sentence last
-	// delivered to the shepherd in a KindUtterance request, and when
+	// delivered to the user in a KindUtterance request, and when
 	// (briefing.go's briefingRepeat, supervisor.repeat_window_s); reset
 	// on any worker transition, pending change, promise change or
 	// investigation event (invalidateBriefing and its callers).
 	lastBriefingText string
 	lastBriefingAt   time.Time
 
-	// inputs is what the shepherd actually said, typed or tapped, newest
+	// inputs is what the user actually said, typed or tapped, newest
 	// last (inputs.go): the one rail reads these, never the voice model's
 	// tool argument.
 	inputs []*shepherdInput
@@ -344,30 +344,30 @@ type Supervisor struct {
 	pushSeq    uint64
 	lastPush   string
 	// sentPushes are the last few spoken pushes sent to the voice model,
-	// oldest first: what the shepherd had or had not heard when an
+	// oldest first: what the user had or had not heard when an
 	// utterance began (heard.go).
 	sentPushes []brain.PushedLine
-	// promptHeard is whether the CEO has likely heard the open prompt's
+	// promptHeard is whether the user has likely heard the open prompt's
 	// announcement (buried.go).
 	promptHeard promptHearing
-	// acceptedSeq counts the shepherd's requests the daemon took up: every
+	// acceptedSeq counts the user's requests the daemon took up: every
 	// to_supervisor call claimInput accepted, and every tap. A late
 	// utterance reply is stale once it moved on (utterance.go). Unlike
 	// relayedSeq it never moves for transcript fragments that trail the
 	// same relay.
 	acceptedSeq uint64
-	// replies tracks every background goroutine that may call the brain
+	// replies tracks every background goroutine that may call the orchestrator
 	// after the call that started it returned: detached utterance turns
 	// and their late delivery (utterance.go), the daemon's own relay
 	// (relay.go) and investigation jobs with their delivery turn
-	// (investigate.go). shutdown waits for it, so the brain is never
+	// (investigate.go). shutdown waits for it, so the orchestrator is never
 	// closed under a turn; a test waits on it for a late reply to land.
 	// Add only through track (or under s.mu with shut false).
 	replies sync.WaitGroup
 	// shut is set, under s.mu, once shutdown began: nothing new is
 	// tracked in replies after it.
 	shut bool
-	// life is cancelled by shutdown: the parent of every detached brain
+	// life is cancelled by shutdown: the parent of every detached orchestrator
 	// turn, so none holds the daemon's drain for its full budget.
 	life    context.Context
 	endLife context.CancelFunc
@@ -402,8 +402,8 @@ type Supervisor struct {
 // is treated as "interrupted", not "finished".
 const interruptGrace = 15 * time.Second
 
-// New wires a Supervisor. store and h are required; brain (Config.Brain),
-// querier, pusher and log may be nil (nil brain = code sentences only,
+// New wires a Supervisor. store and h are required; orchestrator (Config.Brain),
+// querier, pusher and log may be nil (nil orchestrator = code sentences only,
 // nil pusher = no voice session, nil log discards).
 func New(store *state.Store, h Herdr, querier Querier, pusher Pusher, log logging.Logger, cfg Config) (*Supervisor, error) {
 	if store == nil || h == nil {
@@ -430,15 +430,15 @@ func New(store *state.Store, h Herdr, querier Querier, pusher Pusher, log loggin
 	s.restoreInvestigations()
 	if s.brain != nil {
 		s.brain.SetHost(brainHost{s})
-		// The brain's notices about itself (a provider failing over and
-		// over) are spoken like any daemon line, in the CEO's language.
+		// The orchestrator's notices about itself (a provider failing over and
+		// over) are spoken like any daemon line, in the user's language.
 		s.brain.SetNotifier(func(n brain.Notice) { s.push("", s.noticeText(n), voice.UrgencyIdle) })
 		s.restorePromises()
 	}
 	return s, nil
 }
 
-// Brain returns the attached brain, or nil.
+// Brain returns the attached orchestrator, or nil.
 func (s *Supervisor) Brain() *brain.Brain { return s.brain }
 
 // Run drives pending-action and promise expiry, and the reprompt
@@ -469,22 +469,22 @@ func (s *Supervisor) Run(ctx context.Context) {
 }
 
 // shutdown ends the supervisor's background work and waits for it. The
-// invariant it protects: no goroutine of the supervisor calls the brain
-// once Run has returned, because the daemon closes the brain right
+// invariant it protects: no goroutine of the supervisor calls the orchestrator
+// once Run has returned, because the daemon closes the orchestrator right
 // after (app.go), and a turn racing Brain.Close is a data race on the
-// brain's after-turn WaitGroup (CI, PR #63). In order:
+// orchestrator's after-turn WaitGroup (CI, PR #63). In order:
 //   - nothing new is tracked, and no unanswered utterance is relayed
 //     into a daemon going down;
 //   - every detached turn's context ends (life), so a delivery turn
 //     returns at once instead of after its full budget;
 //   - the sub-agent of a running investigation dies with the daemon, so
 //     nothing is left claiming an agent's one live slot;
-//   - a shepherd turn still running past its tool call is dropped: its
+//   - a user turn still running past its tool call is dropped: its
 //     reply would have nobody to reach (utterance.go);
 //   - then it waits for all of them (replies).
 //
 // Safe to call more than once (Run calls it; test harnesses call it in
-// cleanup, before the brain closes).
+// cleanup, before the orchestrator closes).
 func (s *Supervisor) shutdown() {
 	s.mu.Lock()
 	s.shut = true
@@ -533,8 +533,8 @@ func (s *Supervisor) SetVoiceConnected(connected bool) {
 // OnVoiceEvent feeds voice session events: connection status maintains
 // session.voice_connected, a resumed connection gets the briefing pushed
 // silently so the model re-learns the situation (plan §6), the
-// transcripts (the CEO's verbatim words, what the assistant said) go into
-// the shepherd-input ledger (inputs.go) and the brain's transcript, and
+// transcripts (the user's verbatim words, what the assistant said) go into
+// the shepherd-input ledger (inputs.go) and the orchestrator's transcript, and
 // tool calls, spoken pushes and the voice's own speech drive the
 // unanswered-utterance watch (relay.go).
 func (s *Supervisor) OnVoiceEvent(ev voice.Event) {
@@ -546,7 +546,7 @@ func (s *Supervisor) OnVoiceEvent(ev voice.Event) {
 	case voice.EventTranscript:
 		if e.Cut != nil {
 			// Not new speech: the client cut the last spoken run short,
-			// and the brain should remember only what was heard.
+			// and the orchestrator should remember only what was heard.
 			if s.brain != nil {
 				s.brain.SaidCut(e.Text, e.Cut.Full, e.Cut.HeardMs)
 			}
@@ -554,13 +554,13 @@ func (s *Supervisor) OnVoiceEvent(ev voice.Event) {
 		}
 		if e.Dir == voice.DirIn {
 			s.heard(e.Text, e.Final)
-			// names.go: a name the CEO used stays. Every fragment, since
+			// names.go: a name the user used stays. Every fragment, since
 			// Gemini rarely marks its input transcription final.
 			s.noteNamesSaid(e.Text)
 		} else {
 			s.voiceSpoke(e.Text)
 			if e.Final {
-				s.noteNamesSaid(e.Text) // names.go: what the CEO was told
+				s.noteNamesSaid(e.Text) // names.go: what the user was told
 			}
 		}
 		if s.brain != nil {
@@ -593,10 +593,10 @@ func (s *Supervisor) OnVoiceEvent(ev voice.Event) {
 			// speaks.
 			s.pushSpoken(true)
 			s.markPushed(e.Text)
-			s.noteNamesSaid(e.Text) // names.go: what the CEO was told
+			s.noteNamesSaid(e.Text) // names.go: what the user was told
 		}
 	case voice.EventInterrupted:
-		// The shepherd barged in on whatever was playing, a push
+		// The user barged in on whatever was playing, a push
 		// included: what the voice says next answers them.
 		s.pushSpoken(false)
 		s.voiceStopped()

@@ -53,8 +53,8 @@ func TestAgeLine(t *testing.T) {
 	}
 }
 
-// TestAnswerSaysNotVerified: a slow-brain check that timed out reaches
-// the fast brain as its own fact, beside the facts (which are not
+// TestAnswerSaysNotVerified: a orchestrator check that timed out reaches
+// the voice as its own fact, beside the facts (which are not
 // edited), with the state of the agents the answer is about.
 func TestAnswerSaysNotVerified(t *testing.T) {
 	c := newFakeConn("c1")
@@ -84,8 +84,8 @@ func TestAnswerSaysNotVerified(t *testing.T) {
 }
 
 // TestUnvoicedBriefingIsReported: a spoken briefing the model never
-// spoke after, before the CEO next talked, is logged, told to the fast
-// brain silently, carried in its next answer, and reported to the
+// spoke after, before the user next talked, is logged, told to the fast
+// orchestrator silently, carried in its next answer, and reported to the
 // supervisor as not heard. One the model spoke after is not.
 func TestUnvoicedBriefingIsReported(t *testing.T) {
 	c := newFakeConn("c1")
@@ -98,7 +98,7 @@ func TestUnvoicedBriefingIsReported(t *testing.T) {
 		t.Fatal(err)
 	}
 	c.waitSent(t, "briefing", isBriefing("Claude finished"))
-	// The model completes a turn without a word, then the CEO talks.
+	// The model completes a turn without a word, then the user talks.
 	c.serve(turnCompleteMsg())
 	c.serve(inputTranscriptMsg("现在有结论了吗？", true))
 	h.waitEvent("unheard", func(ev voice.Event) bool {

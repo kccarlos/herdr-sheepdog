@@ -112,7 +112,7 @@ var (
 	reWinPath = regexp.MustCompile(`\b[A-Za-z]:\\[^\s"']+`)
 	rePaneID  = regexp.MustCompile(`\bw\d+:[pt]\d+\b`)
 	// reIssue matches a PR or issue number ("#49", "PR #49", "PR 49"):
-	// the shepherd hears it and cannot use it.
+	// the user hears it and cannot use it.
 	reIssue  = regexp.MustCompile(`(?i)(?:\b(?:PR|pull request|issue)\s*#?\s*\d+\b|#\d+\b)`)
 	reSpaces = regexp.MustCompile(`[ \t]+`)
 	// reOrphan is punctuation left standing alone after a scrub ("the

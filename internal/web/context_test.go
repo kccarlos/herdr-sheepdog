@@ -8,7 +8,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/ctxcap"
 )
 
-// Without a brain or a voice context log the context endpoints say so;
+// Without an orchestrator or a voice context log the context endpoints say so;
 // the timeline still answers, with the reasons.
 func TestContextEndpointsOff(t *testing.T) {
 	h := newHarness(t, harnessOpts{})
@@ -46,10 +46,10 @@ func hasLabel(labels []string, prefix string) bool {
 	return false
 }
 
-// The brain and voice context endpoints over the fake brain and the text
+// The orchestrator and voice context endpoints over the fake orchestrator and the text
 // router, and the links between the panes for one round trip: a worker
 // event, its announce turn and push, then a typed utterance relayed by
-// the router, its request and reply in the brain, its tool call and
+// the router, its request and reply in the orchestrator, its tool call and
 // response on the voice side.
 func TestContextEndpointsRoundTrip(t *testing.T) {
 	h := newHarness(t, harnessOpts{brain: true, voiceCtx: true})
@@ -128,12 +128,12 @@ func TestContextEndpointsRoundTrip(t *testing.T) {
 		link   string
 		labels []string
 	}{
-		{vl, call, []string{"shepherd typed", "tool call to_supervisor", "tool response to_supervisor"}},
-		{bl, call, []string{"current request", "brain tool call", "brain tool result"}},
+		{vl, call, []string{"user typed", "tool call to_supervisor", "tool response to_supervisor"}},
+		{bl, call, []string{"current request", "orchestrator tool call", "orchestrator tool result"}},
 		{vl, push, []string{"push ("}},
 		{bl, push, []string{"push"}},
 		{vl, evt, []string{"push ("}},
-		{bl, evt, []string{"worker event", "request", "brain reply"}},
+		{bl, evt, []string{"worker event", "request", "orchestrator reply"}},
 	}
 	for _, c := range checks {
 		for _, want := range c.labels {
@@ -147,7 +147,7 @@ func TestContextEndpointsRoundTrip(t *testing.T) {
 	h.postJSON("/api/inject/utterance", map[string]any{"text": "and now?"}, &tr)
 	h.srv.deps.Brain.Quiesce()
 	h.getJSON("/api/context/brain", &b)
-	if !hasLabel(linksOf(b.Sections)[call], "brain reply") {
+	if !hasLabel(linksOf(b.Sections)[call], "orchestrator reply") {
 		t.Errorf("%s: no brain reply in the next turn's window: %v", call, linksOf(b.Sections)[call])
 	}
 

@@ -1,6 +1,6 @@
 // Package eval implements `sheepdog eval` (docs/roles.md, phase 1b): a
 // conversation eval set for the assistant prompt (prompts/assistant.md)
-// and the supervisor brain (internal/brain), built from the CEO's real
+// and the orchestrator (internal/brain), built from the user's real
 // voice sessions (generalised) plus the plan's §10 scenarios.
 //
 // The hand-written sets are testdata/eval/assistant.jsonl (one JSON
@@ -9,7 +9,7 @@
 // logged failures (regressions*.jsonl), cases extracted from the event
 // log (extracted/, Extract) and generated variants (expanded*.jsonl,
 // internal/eval/gen). Offline (the default) validates the files and runs
-// every SVP case through the brain with a scripted fake model, so the
+// every orchestrator case through the orchestrator with a scripted fake model, so the
 // harness (the rail, provenance wrapping, tool calls) is exercised without
 // any network call; the checks about phrasing and judgement are live only
 // and reported as skipped, and a case that carries its logged behaviour is
@@ -68,7 +68,7 @@ type CaseSource struct {
 	Day     string `json:"day"`
 	TS      string `json:"ts"`
 	EventID int64  `json:"event_id"`
-	// Heard is what the transcript recorded the shepherd saying, when
+	// Heard is what the transcript recorded the user saying, when
 	// it differs from what the voice relayed (the relay is the request's
 	// question): the GPT-Live partial relay of 2026-09-23 23:53:26.
 	Heard string `json:"heard,omitempty"`
@@ -110,7 +110,7 @@ type AssistantCase struct {
 	Utterance string `json:"utterance"`
 	// Context is prior transcript lines, oldest first. A line starting
 	// "Dog: " is the assistant's own prior turn (model role); anything
-	// else — including a CEO utterance verbatim, or a push with its
+	// else — including a user utterance verbatim, or a push with its
 	// "[system event, not spoken by the user] " / "[system context, not
 	// spoken by the user] " prefix (internal/voice/gemini's pushTurn
 	// sends the prefix and the text as two parts of one turn) — is a
@@ -157,8 +157,8 @@ type SVPAgent struct {
 	Session string `json:"session,omitempty"`
 }
 
-// SVPRequest is the request the brain receives: an utterance, the
-// shepherd's words verbatim, and the brain decides what they are. Agent
+// SVPRequest is the request the orchestrator receives: an utterance, the
+// user's words verbatim, and the orchestrator decides what they are. Agent
 // is an optional alias hint the live daemon never sends; the cases
 // converted from the removed ask/propose kinds keep theirs, so they test
 // the same loop behaviour as before.
@@ -175,7 +175,7 @@ type SVPRequest struct {
 	Briefing string `json:"briefing,omitempty"`
 	// Event, Template, Owed and Screen are an announce turn's
 	// (brain.Request): the worker event (done, blocked, idle), the code
-	// sentence the brain's line replaces, whether the shepherd is waiting
+	// sentence the orchestrator's line replaces, whether the user is waiting
 	// on it, and the screen the supervisor read for it (inline text).
 	Event    string `json:"event,omitempty"`
 	Template string `json:"template,omitempty"`
@@ -183,7 +183,7 @@ type SVPRequest struct {
 	Screen   string `json:"screen,omitempty"`
 }
 
-// ObservedCall is one tool call the logged brain made (brain.tool_call),
+// ObservedCall is one tool call the logged orchestrator made (brain.tool_call),
 // or, for a stop the voice carried out, the interrupt it amounted to.
 type ObservedCall struct {
 	Name string         `json:"name"`
@@ -199,7 +199,7 @@ type SVPObserved struct {
 	Urgency   string         `json:"urgency,omitempty"`
 }
 
-// SVPExpect is what one SVP case requires.
+// SVPExpect is what one orchestrator case requires.
 type SVPExpect struct {
 	// ToolsUsedAnyOf: at least one of these tool names must have been
 	// called, when non-empty (live: any brain.tool_call; offline: the
@@ -212,7 +212,7 @@ type SVPExpect struct {
 	// many sentences, when positive (live only): a finding is the gist in
 	// two sentences plus an offer (RULES.md answer contract).
 	SpokenMaxSentences int `json:"spoken_max_sentences,omitempty"`
-	// RequestContains: the brain's first model call must contain each of
+	// RequestContains: the orchestrator's first model call must contain each of
 	// these substrings — a fact the daemon has to supply, whatever the
 	// model then makes of it (run C H7: the "no journal entry" record).
 	// Checked offline, where the scripted model keeps what it was sent;
@@ -227,12 +227,12 @@ type SVPExpect struct {
 	// status question is answered from the roster and ledger already in
 	// the prompt (docs/roles.md "One decision-maker").
 	NoTool bool `json:"no_tool,omitempty"`
-	// PromptMustNotContain: no prompt the brain sends a worker may
-	// contain any of these substrings — e.g. "[" for text the brain
+	// PromptMustNotContain: no prompt the orchestrator sends a worker may
+	// contain any of these substrings — e.g. "[" for text the orchestrator
 	// invented to fill a partial relay (regression
 	// partial-relay-no-fabrication, 2026-09-23 23:53:26).
 	PromptMustNotContain []string `json:"prompt_must_not_contain,omitempty"`
-	// QuestionIsHeard requires the brain to be asked what the shepherd
+	// QuestionIsHeard requires the orchestrator to be asked what the user
 	// said (the case's source.heard), not the voice model's relay of it
 	// (request.question): the daemon runs every utterance on its
 	// recorded input (docs/iteration-2.md WP3, regression
@@ -246,11 +246,11 @@ type SVPExpect struct {
 	SpokenNoJargon bool `json:"spoken_no_jargon,omitempty"`
 	// FirstSentenceContainsAnyOf: the spoken reply's first sentence must
 	// contain one of these, case-insensitive (live only; J1 "the item
-	// that needs the shepherd comes first").
+	// that needs the user comes first").
 	FirstSentenceContainsAnyOf []string `json:"first_sentence_contains_any_of,omitempty"`
 	// NotStopWord requires the request's words not to be a bare stop
 	// word (supervisor.BareStopWords, which internal/inject's Router for
-	// GPT-Live reads too): a bare stop word never reaches the brain, the
+	// GPT-Live reads too): a bare stop word never reaches the orchestrator, the
 	// daemon runs the stop procedure, Ctrl-C included. Checked offline
 	// and live, since it is code, not judgement (regression
 	// never-mind-is-not-stop, iteration 2 WP1).
@@ -259,7 +259,7 @@ type SVPExpect struct {
 	// only: the fake model cannot judge it).
 	NeedsUser *bool `json:"needs_user,omitempty"`
 	// ReadSource requires a read_screen call with this source ("session":
-	// the brain read the worker's own session record for a detail
+	// the orchestrator read the worker's own session record for a detail
 	// question, docs/history/dive-deep.md WP8a) that completed. Checked offline,
 	// where the scripted call is derived from it and the check is that
 	// the Host served the read, and against the logged baseline.
@@ -273,7 +273,7 @@ type SVPExpect struct {
 	// (docs/history/bench-2026-10-03.md #15a).
 	AskEmpty bool `json:"ask_empty,omitempty"`
 	// ReplyLanguage is "en" or "zh" (live only): spoken and ask are in the
-	// language the CEO last used, which for "en" means no CJK characters at
+	// language the user last used, which for "en" means no CJK characters at
 	// all and for "zh" that spoken has some (#14).
 	ReplyLanguage string `json:"reply_language,omitempty"`
 	// Judge are extra yes/no criteria for the LLM judge (live with a
@@ -287,8 +287,8 @@ type SVPExpect struct {
 type SVPCase struct {
 	Meta
 	ID string `json:"id"`
-	// Transcript is prior transcript lines, oldest first: "CEO: …", "Dog:
-	// …", or "PUSH <alias>: …"; anything else is treated as a CEO
+	// Transcript is prior transcript lines, oldest first: "user: …", "Dog:
+	// …", or "PUSH <alias>: …"; anything else is treated as a user
 	// utterance.
 	Transcript []string `json:"transcript,omitempty"`
 	// ScreenFixture is the primary agent's screen: a file name under
@@ -303,7 +303,7 @@ type SVPCase struct {
 	// utterance names no agent and there is no "auth").
 	RosterOnly bool        `json:"roster_only,omitempty"`
 	Pending    *SVPPending `json:"pending,omitempty"`
-	// Notes seeds the Host's CEO notes (recall/USER.md ledger cases).
+	// Notes seeds the Host's user notes (recall/USER.md ledger cases).
 	Notes    []string     `json:"notes,omitempty"`
 	Request  SVPRequest   `json:"request"`
 	Expect   SVPExpect    `json:"expect"`

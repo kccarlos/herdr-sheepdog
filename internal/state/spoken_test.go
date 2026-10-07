@@ -120,7 +120,7 @@ func TestStoreSpokenNameChanges(t *testing.T) {
 	if b.Spoken != "sheepdog Claude" || Say(b) != "sheepdog Claude" {
 		t.Fatalf("an exited agent keeps its last name: %+v", b)
 	}
-	// A CEO rename wins and the derived alias follows it.
+	// A user rename wins and the derived alias follows it.
 	if err := s.SetName("p1", "docs"); err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +142,7 @@ func TestStoreSpokenNameChanges(t *testing.T) {
 // TestSpokenNamesFromRealTitles: the session titles two Claudes in one
 // project really had in the tier-3 bench (finding 5: the names were
 // "shop/cart.go Cart type Claude" and "TODO.md tasks Claude", and the
-// brain fell back to "the first Claude"). Paths, file names and code
+// orchestrator fell back to "the first Claude"). Paths, file names and code
 // identifiers are dropped from the spoken name.
 func TestSpokenNamesFromRealTitles(t *testing.T) {
 	b, err := os.ReadFile(filepath.Join("..", "..", "testdata", "herdr", "claude-session-titles.tier3.tsv"))
@@ -210,7 +210,7 @@ func TestHerdrName(t *testing.T) {
 	}
 }
 
-// heard marks a row's spoken name as heard by the CEO (SpokenPinned).
+// heard marks a row's spoken name as heard by the user (SpokenPinned).
 func heard(a Agent, spoken string) Agent {
 	a.Spoken, a.SpokenPinned = spoken, true
 	return a

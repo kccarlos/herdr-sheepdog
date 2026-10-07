@@ -11,9 +11,9 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/brain/braintest"
 )
 
-// "把 kvoice Claude 关掉吧" (the CEO's phone session, 2026-10-04) is the
+// "把 kvoice Claude 关掉吧" (the user's phone session, 2026-10-04) is the
 // interrupt tool with close true: a close through the Host, never a
-// Ctrl-C; protected_ok goes along as the brain gave it.
+// Ctrl-C; protected_ok goes along as the orchestrator gave it.
 func TestInterruptToolCloses(t *testing.T) {
 	h := newHarness(t, braintest.NewModel(
 		braintest.Step{Calls: []*genai.FunctionCall{braintest.FC(ToolInterrupt, map[string]any{"agent": "auth", "close": true})}},
@@ -30,7 +30,7 @@ func TestInterruptToolCloses(t *testing.T) {
 	}
 }
 
-// A close the daemon's rail refuses (no unused words of the CEO's, a
+// A close the daemon's rail refuses (no unused words of the user's, a
 // protected agent) is a brain.rail_blocked the model reads.
 func TestInterruptToolCloseRailBlocked(t *testing.T) {
 	h := newHarness(t, braintest.NewModel(

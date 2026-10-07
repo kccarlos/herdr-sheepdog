@@ -70,7 +70,7 @@ func (c *recConn) start(e startEvent) {
 	cfg := e.Session
 	c.rec.Epoch("session open (fresh)", fmt.Sprintf("session.start on %s: every GPT-Live session starts a new context; what it knows of the conversation is the input items below.", cfg.Model), ctxcap.Raw(e))
 	c.rec.Instructions(cfg.Instructions, ctxcap.Raw(map[string]any{"instructions": cfg.Instructions}))
-	c.rec.Tools("delegation: "+cfg.Delegation.Type+" (no function declarations: the model delegates a request to the client, which relays the shepherd's words to the supervisor)\n", ctxcap.Raw(map[string]any{"delegation": cfg.Delegation}))
+	c.rec.Tools("delegation: "+cfg.Delegation.Type+" (no function declarations: the model delegates a request to the client, which relays the user's words to the supervisor)\n", ctxcap.Raw(map[string]any{"delegation": cfg.Delegation}))
 	for i, it := range cfg.Input {
 		var text []string
 		for _, p := range it.Content {
@@ -146,7 +146,7 @@ func (c *recConn) observe(data []byte) {
 		link := ctxcap.CallLink(ev.Delegation.ID)
 		c.rec.Claim(link)
 		c.rec.Item(ctxcap.VoiceItem{Kind: ctxcap.VKindToolCall, Class: ctxcap.ClassToolCall, Role: "model", Label: "delegation to " + ev.Delegation.Target,
-			Text: "→ delegation " + ev.Delegation.ID + " (the client relays what the shepherd said to the supervisor)", Links: []string{link}, Raw: json.RawMessage(data)})
+			Text: "→ delegation " + ev.Delegation.ID + " (the client relays what the user said to the supervisor)", Links: []string{link}, Raw: json.RawMessage(data)})
 	case evSessionClosed:
 		c.rec.Marker("session closed", "session.closed ("+ev.Reason+").", json.RawMessage(data))
 	}

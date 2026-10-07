@@ -117,7 +117,7 @@ test('interleave and pointsAt: the scrubber orders both panes by time and shows 
     ],
     voice: [
       { turn: 1, label: 'session open', ts: '2026-09-23T10:00:00.000Z' },
-      { turn: 2, label: 'shepherd', ts: '2026-09-23T10:00:03.000Z' },
+      { turn: 2, label: 'user', ts: '2026-09-23T10:00:03.000Z' },
       { turn: 3, label: 'tool response', ts: '2026-09-23T10:00:04.000Z' },
     ],
   };

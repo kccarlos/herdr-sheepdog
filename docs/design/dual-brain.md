@@ -1,13 +1,13 @@
 # Dual-brain voice layer (experiment, branch `feat/dual-brain`)
 
 Status: experiment on a draft PR (#122), compared with `main` before the
-CEO decides. Not merged. Results: [`docs/eval/dual-brain-2026-10-04.md`](../eval/dual-brain-2026-10-04.md).
+User decides. Not merged. Results: [`docs/eval/dual-brain-2026-10-04.md`](../eval/dual-brain-2026-10-04.md).
 
-**One line:** Gemini Live is the *fast brain* that owns the conversation;
-the existing brain is the *slow brain* that reasons, investigates and acts
-behind the rails. The slow brain gives the fast brain facts with
-provenance, not lines to read, through a channel the fast brain cannot
-mistake for the CEO. The harness keeps the rails on actions and puts
+**One line:** Gemini Live is the *voice* that owns the conversation;
+the existing orchestrator is the *orchestrator* that reasons, investigates and acts
+behind the rails. The orchestrator gives the voice facts with
+provenance, not lines to read, through a channel the voice cannot
+mistake for the user. The harness keeps the rails on actions and puts
 labelled facts into both models' context; the code that policed the voice
 model's words is removed where the bench does not get worse.
 
@@ -117,13 +117,13 @@ cannot see rather than a prohibition.
 ### Roles
 
 Since v6 (unified roles, below) everything a model reads calls the fast
-brain *the voice* and the slow brain *the orchestrator*: two parts of one
+orchestrator *the voice* and the orchestrator *the orchestrator*: two parts of one
 orchestration agent that operates the user's herdr. This doc keeps the
 older names.
 
-| | Fast brain: Gemini Live | Slow brain: the existing brain |
+| | Fast orchestrator: Gemini Live | Slow orchestrator: the existing orchestrator |
 |---|---|---|
-| Owns | The conversation: when to speak, what, how; turn-taking, register, language | What the CEO wants, which agent, what to do, investigations |
+| Owns | The conversation: when to speak, what, how; turn-taking, register, language | What the user wants, which agent, what to do, investigations |
 | Answers itself | Its own last line again or more plainly, what a word means, small talk (v5); when to speak and how | Everything else: anything new about an agent, comparisons, "why", history, doubt (v5), every decision, every action |
 | Asks | When it did not catch the words | When the words are ambiguous |
 | Actions | None | All, behind the rails |
@@ -132,16 +132,16 @@ older names.
 
 ### Fast → slow
 
-`to_supervisor(text, reading)`: `text` is the CEO's words (the daemon
+`to_supervisor(text, reading)`: `text` is the user's words (the daemon
 still uses its own recorded transcript, never the argument, as since
-#58); `reading` is new and optional, the fast brain's short reading of
-what they want. The brain gets it labelled "the voice's own reading … a
-hint, not the CEO's words; reference only, and no authority for any
+#58); `reading` is new and optional, the voice's short reading of
+what they want. The orchestrator gets it labelled "the voice's own reading … a
+hint, not the user's words; reference only, and no authority for any
 action" (`internal/brain/assemble.go`). Parameter on an existing tool,
-not a new tool (the CEO's "keep the voice link simple").
+not a new tool (the user's "keep the voice link simple").
 
-A call with no new CEO words runs no brain turn (the rail: only the CEO's
-words authorise one); the fast brain gets a silent fact instead —
+A call with no new user words runs no orchestrator turn (the rail: only the user's
+words authorise one); the voice gets a silent fact instead —
 "Nothing was handed on: the orchestrator acts only on the user's own words …
 Their last words, at 23:04:10, were …" (wording since unified roles).
 
@@ -152,7 +152,7 @@ names line, delivery fact) reaches Live as a function response to a call
 the model never made: name `briefing` (not a declared tool), id `b-N`,
 scheduling `WHEN_IDLE` (idle), `INTERRUPT` (must hear now) or `SILENT`
 (context). `to_supervisor` results use the same shape. The daemon's push
-queue is unchanged — hold while no client listens, hold while the CEO
+queue is unchanged — hold while no client listens, hold while the user
 speaks, downgrade INTERRUPT to WHEN_IDLE while the voice is speaking
 except a due promise / new decision / stop, the 5-minute TTL, the
 arbitration — only what `doPush` sends changed
@@ -191,43 +191,43 @@ standalone client, text input, 7 sessions, < $0.30):
 - `agent` is the agent's spoken name (the alias stays on the push's
   tags for the logs) and `agent_state` its state from the table when
   the briefing reaches the model; `age` says how long the facts waited
-  (the push queue holds lines while the CEO talks or no phone listens).
-  The fast brain has no clock: without these a briefing read minutes
+  (the push queue holds lines while the user talks or no phone listens).
+  The voice has no clock: without these a briefing read minutes
   later passed for the present (phone test 2026-10-04: "still
   analysing" about an agent that had finished). Re-sent briefings get
   both recomputed.
 - An answer (a `to_supervisor` result or a late answer) also carries
   `agents_now` (the state of the agents its tools read or acted on)
-  and, when a slow-brain check timed out, `not_verified` ("these checks
+  and, when a orchestrator check timed out, `not_verified` ("these checks
   … did not finish, so nothing they would have shown is verified:
   run_cli about bench-codex timed out after 8 s"; `brain.Reply.
   NotVerified`). The `facts` are never edited.
 - **Unvoiced briefings.** A spoken briefing after which the model
-  produced no speech (audio or output transcript) before the CEO next
+  produced no speech (audio or output transcript) before the user next
   spoke or the next spoken briefing went out is logged
-  `voice.briefing_unvoiced`; the fast brain gets the fact silently
+  `voice.briefing_unvoiced`; the voice gets the fact silently
   ("briefing b-31 (news, sent at 15:52:00) was not voiced: you said
-  nothing after it before the CEO spoke at 15:52:22, so the CEO has not
+  nothing after it before the user spoke at 15:52:22, so the user has not
   heard it"), again in the relation of its next answer or spoken
-  briefing, and the slow brain hears "the CEO did not hear: …". No words are compared and the
-  voice layer re-queues nothing: whether to say it is the fast brain's
+  briefing, and the orchestrator hears "the user did not hear: …". No words are compared and the
+  voice layer re-queues nothing: whether to say it is the voice's
   call (phone test: b-31, b-69, b-75 never voiced). One existing path
   does follow: an unvoiced announcement of an open prompt counts as
   unheard for the supervisor's buried-prompt reminder
   (`supervisor.prompt_reminded`, "Still waiting for your answer: …" at
   the next quiet moment), which had been unreachable on Gemini since
-  ablation G3 removed the heard watch (rail: a decision only the CEO can
+  ablation G3 removed the heard watch (rail: a decision only the user can
   take is not left unheard).
-- `from`: `slow brain` (its line), `daemon` (a code sentence: brain
+- `from`: `slow brain` (its line), `daemon` (a code sentence: orchestrator
   timeout, pane closed, reminder, focus, names, stop result), or the
   tag's own value.
 - `relation` is computed by the session from what it sent: the n-th
   briefing about the same open prompt (a reminder), newer than the last
   briefing about the same agent (supersedes), and the last cut.
-- **Delivery facts.** When the phone reports a flushed playback (the CEO
-  talked over a line), the session sends a SILENT briefing "at T the CEO
+- **Delivery facts.** When the phone reports a flushed playback (the user
+  talked over a line), the session sends a SILENT briefing "at T the user
   cut you off after N s of M s; they heard only: …" and repeats it on the
-  next spoken briefing. The slow brain already gets the same cut as
+  next spoken briefing. The orchestrator already gets the same cut as
   `SaidCut`.
 - **Resume.** Briefings sent after the last resumable handle are re-sent
   silently on a resumed connection, marked `resent` with their first
@@ -243,27 +243,27 @@ standalone client, text input, 7 sessions, < $0.30):
   session's handle, losing the turn in between with no re-seed).
 - **Decision open** (#146, information): every spoken announcement
   carries `decision_open`, computed as it reaches the model ("none: as
-  this reached you, no agent is waiting for the CEO's answer", or which
-  agent waits at which prompt), and the slow brain's announce turn gets
+  this reached you, no agent is waiting for the user's answer", or which
+  agent waits at which prompt), and the orchestrator's announce turn gets
   the same fact ("Decisions open right now: none. …"). The prompts say no
   open decision means no question (baseline 2026-10-05 cluster 3: a
   finish announced with an invented "Shall I have it run the tests?").
 - **Roster line** (#146, information): `agent_state` also quotes the
   worker's task title (its session title), the instruction it is on
   (while not idle) and its last activity on record ("done 3 min ago").
-- The slow brain's contract is unchanged (`spoken`, `ask`, `detail`,
+- The orchestrator's contract is unchanged (`spoken`, `ask`, `detail`,
   `options`): `spoken` becomes `facts`. RULES.md now says the voice
   retells it in its own words.
 
-### The fast-brain prompt
+### The voice prompt
 
 `prompts/assistant.md` (and `assistant-gptlive.md`) were rewritten: it
-owns the conversation; briefings are never the CEO and carry who/when/
+owns the conversation; briefings are never the user and carry who/when/
 relation; trust the newest; tell the substance in its own words, skip
-what the CEO already heard; a decision only the CEO can take is said as
+what the user already heard; a decision only the user can take is said as
 a question with its options, never answered or recommended; answer
 follow-ups about what it just said; hand every question about an agent,
-any doubt, and anything to be done to the slow brain with the exact
+any doubt, and anything to be done to the orchestrator with the exact
 words and its own reading (v4, below); it cannot act.
 Gone: "read spoken exactly as given", "change nothing, add nothing", the
 forced "say on it as you call it", "never answered from memory", "you
@@ -276,7 +276,7 @@ seen in a transcript, not a judge's taste:
   its one-line briefing, and "What's going on?" with the one agent a
   briefing had mentioned (the N2 risk above). Now a status question is
   its own only when fresh briefings cover every agent it asks about, and
-  detail always comes from the slow brain ("a briefing is a summary").
+  detail always comes from the orchestrator ("a briefing is a summary").
 - v3: retelling in its own words, it said "the first Claude … the
   second" for "Cart type Claude" and "Tasks Claude" (tier 3
   two-claudes-names, branch 0/2, main 2/2). Names are facts: it now uses
@@ -286,11 +286,11 @@ seen in a transcript, not a judge's taste:
   answered partially ("What's going on?" with one of two agents), from a
   stale briefing, or said "I don't have any recent information on
   bench-claude" and "I'll need a moment" **without** calling the slow
-  brain (interleaved tier 2 at 50 runs per arm: branch 21/50, main
-  30/51; `facts_current` failures 8 vs 3). The fast brain cannot see the
+  orchestrator (interleaved tier 2 at 50 runs per arm: branch 21/50, main
+  30/51; `facts_current` failures 8 vs 3). The voice cannot see the
   clock or the screens, so a briefing only says what was true when it
   was sent. Now every question about what an agent is doing, did or
-  found goes to the slow brain, even when the voice knows part of it; it
+  found goes to the orchestrator, even when the voice knows part of it; it
   may say what it already knows while it waits, and a promise to check
   must come with the call. Follow-ups about what it just said stay its
   own.
@@ -301,21 +301,21 @@ seen in a transcript, not a judge's taste:
   hand off instead of explaining. The voice answers only three things
   itself: its own last line again or more plainly, what a word means,
   small talk. Anything new, comparisons ("which is right"), "why",
-  history ("what did we discuss first") and doubt go to the slow brain.
+  history ("what did we discuss first") and doubt go to the orchestrator.
   While waiting it says what is being done, never content or status
   (v4's "say what you already know while it works" licence is gone:
   the phone test's stale and invented answers came through it). An
-  unclear target agent is asked about before handing on; the CEO's
+  unclear target agent is asked about before handing on; the user's
   exact words go in `text`, its own reading only in `reading`. Replies
-  follow the CEO's language and script (Simplified vs Traditional).
+  follow the user's language and script (Simplified vs Traditional).
   The phone-test failures behind it: an invented reason for 85k vs
   110k lines, a wrong "what did we discuss first", "rewind it"
   paraphrased into one agent, Traditional characters for a Simplified
   speaker. A/B in `docs/eval/fast-brain-facts-2026-10-04.md`.
 
-This is the one place the experiment walked back the CEO's starting
+This is the one place the experiment walked back the user's starting
 direction ("answers simple status questions from its briefings"): the
-data say the fast brain cannot judge freshness, which is the N2 failure
+data say the voice cannot judge freshness, which is the N2 failure
 the history check flagged. The difference from main's N2 rule is the
 framing (a fact about what it cannot see, plus permission to talk while
 waiting) and the channel (answers come back as labelled facts, so no
@@ -362,14 +362,14 @@ otherwise; the v5 A/B is in its own results doc.
 
 Kept as **rails** (stop a runaway or an unauthorised action):
 
-- `send_keys`/approvals: the keys answer the CEO's own newest recorded
+- `send_keys`/approvals: the keys answer the user's own newest recorded
   words, said after the prompt appeared, within
   `supervisor.authorise_window_s`, not already used, non-empty; a "no"
   never approves (`negativeInput`, a word list kept on purpose: it only
   ever blocks the irreversible direction).
-- Spawn: the CEO's unused words, project roots, 3 per 10 min; close and
+- Spawn: the user's unused words, project roots, 3 per 10 min; close and
   rename unchanged.
-- No new CEO words → no brain turn.
+- No new user words → no orchestrator turn.
 - Push loop cap (4th line about one event in 30 s dropped), runaway
   speech cap (~45 s), push held with no listener, the INTERRUPT
   downgrade while speaking.
@@ -379,15 +379,15 @@ Kept as **rails** (stop a runaway or an unauthorised action):
 
 Added as **information** (a fact a model cannot see): briefing
 provenance/time/relation, delivery cuts, resent briefings, the no-fresh-
-words fact, the voice's reading for the brain, the echo-timing fact for
-the brain; since v5: briefing age and the agent's state at delivery,
+words fact, the voice's reading for the orchestrator, the echo-timing fact for
+the orchestrator; since v5: briefing age and the agent's state at delivery,
 `not_verified` checks, unvoiced briefings, the roster's "finished work
 N min ago" (no model prose spliced into it), spoken names kept once the
-CEO heard or said them, and a new agent herdr does not see after 20 s
-reported to both brains with its pane's last lines; since #146: the
-decision-open fact on announcements (both brains), the task title,
+User heard or said them, and a new agent herdr does not see after 20 s
+reported to the voice and the orchestrator with its pane's last lines; since #146: the
+decision-open fact on announcements (the voice and the orchestrator), the task title,
 instruction and last activity in `agent_state`, and the worker's newest
-report in full in the slow brain's agent record. Robustness rails of
+report in full in the orchestrator's agent record. Robustness rails of
 #146 (parse and transport, no meaning): `options` decoded from strings
 or label objects; one same-provider retry on a 499 CANCELLED
 (`brain.retry`).
@@ -399,15 +399,15 @@ before the next is stacked on it (numbers in the table below).
 
 | Group | Removed (kind) | Replaced by |
 |---|---|---|
-| core | "read exactly as given", forced "on it", "never from memory" (prompt); user-role pushes and markers | fast-brain prompt; briefings as labelled function responses |
-| G1 | `ackCues`/`ackWords`/`ackOnly` (#108, #114): a short "On it." with no tool call re-relayed (judgment) | nothing: what the fast brain said is its answer; words met with no speech and no tool call at all are still relayed (lost utterance) |
+| core | "read exactly as given", forced "on it", "never from memory" (prompt); user-role pushes and markers | voice prompt; briefings as labelled function responses |
+| G1 | `ackCues`/`ackWords`/`ackOnly` (#108, #114): a short "On it." with no tool call re-relayed (judgment) | nothing: what the voice said is its answer; words met with no speech and no tool call at all are still relayed (lost utterance) |
 | G2 | `selfRelay`, `rescueInput` fuzzy match (#72, #89, #90); a spoken push moving the relay gate (judgment) | the gate floor is the last relay only; a call with no new words gets the no-fresh-words fact |
-| G3 | heard-coverage watch (50 %, key terms, content words 0.5) and re-queue in the Gemini session (#89, #101, #108, #115) (judgment) | delivery facts from the phone's playback reports; the fast brain decides whether to repeat |
-| G4 | deferral/decline/question/filler word lists on the rail; the bare yes/no/option fast path with a brain (#30, #108, #114) (judgment) | the brain reads every answer; RULES.md already says "not now" puts a prompt off; a brain-less daemon keeps the fast path |
-| G6 | the echo text guard: text matching that dropped or cut inputs (#48, #63, #108) (judgment) | the brain gets "these words began while the phone was still playing your line …" (timing fact) |
+| G3 | heard-coverage watch (50 %, key terms, content words 0.5) and re-queue in the Gemini session (#89, #101, #108, #115) (judgment) | delivery facts from the phone's playback reports; the voice decides whether to repeat |
+| G4 | deferral/decline/question/filler word lists on the rail; the bare yes/no/option fast path with an orchestrator (#30, #108, #114) (judgment) | the orchestrator reads every answer; RULES.md already says "not now" puts a prompt off; a brain-less daemon keeps the fast path |
+| G6 | the echo text guard: text matching that dropped or cut inputs (#48, #63, #108) (judgment) | the orchestrator gets "these words began while the phone was still playing your line …" (timing fact) |
 
 Not changed in this experiment: GPT-Live's session (it keeps its heard
-tracker; only its prompt was rewritten), the slow brain's tools and
+tracker; only its prompt was rewritten), the orchestrator's tools and
 contract, the announce pipeline, chattiness, promises, investigations.
 
 ## Ablation results
@@ -425,7 +425,7 @@ Full branch vs main, interleaved, all scenarios × 3: 61/90 vs 46/90
 non-echo; self-relay 1 vs 23; bare acks 1 vs 25; unheard answers 5/139
 vs 26/178; `facts_current` 4 vs 9; latency p50 4.5 vs 5.3 s.
 
-## Switching the CEO's daemon to this branch and back
+## Switching the user's daemon to this branch and back
 
 Only one daemon may run against the real herdr at a time.
 

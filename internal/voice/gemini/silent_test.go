@@ -19,7 +19,7 @@ const (
 // the approval push went out at 1378 ms, the voice started on it, and
 // the names line went out at 3380 ms, while it was still speaking. The
 // voice stopped after "detector, and it's", the client drained, and the
-// rest came back only after the CEO's Chinese, glued to the next reply.
+// rest came back only after the user's Chinese, glued to the next reply.
 // The names line now waits for the voice's turn to complete and for the
 // client to finish playing it.
 func TestSilentContextWaitsForTheVoiceToBeQuiet(t *testing.T) {

@@ -72,7 +72,7 @@ queued output and tells the client to flush.
   replayed) or for a spoken push while a client is attached. It closes
   after `voice.openai.idle_close_s` without an input transcript, voiced
   model audio, a delegation or push in flight — but not while loud
-  frames suggest the shepherd has just started a sentence (for up to
+  frames suggest the user has just started a sentence (for up to
   8 s; a longer loud run is room noise). An idle close with loud frames
   still coming disarms the audio trigger until the gate closes, a quiet
   second passes, the client unmutes or reconnects, so a noisy room does
@@ -80,7 +80,7 @@ queued output and tells the client to flush.
 - **Speaking.** Voiced output (peak ≥ 200) or an output transcript within
   800 ms. Silent output chunks are dropped, except 1.2 s after voiced
   audio so pauses inside a reply survive. The end of speech emits
-  `EventTurnComplete` — deferred to the end of the shepherd's utterance
+  `EventTurnComplete` — deferred to the end of the user's utterance
   if they are talking, since it closes the supervisor's voice input.
 - **Utterances.** Input fragments are forwarded as they come; 700 ms
   after the last one the utterance is closed with an empty final
@@ -94,9 +94,9 @@ queued output and tells the client to flush.
   silent result → thinking. If the session closed meanwhile, the result
   becomes a push.
 - **Pushes.** Idle → `commentary.append` (null id) once the model is not
-  speaking, the shepherd is not talking and `PushGap` passed; interrupt
+  speaking, the user is not talking and `PushGap` passed; interrupt
   → local flush + `instructions.append("Stop what you are saying and
-  tell the shepherd this now …")`, downgraded to idle while the model
+  tell the user this now …")`, downgraded to idle while the model
   speaks unless tagged `due_promise` / `needs_user` / `stop` (the Gemini
   rule, docs/roles.md "Pushes"); silent → `thinking.append`, or kept for
   the next session's history while closed. A spoken push that no client
@@ -136,6 +136,6 @@ queued output and tells the client to flush.
   the ear than Gemini's verbatim reading of the shell command.
 - Latency, end of speech → first reply audio: 1.4–2.2 s (the first
   "on it" / "checking"), about the same as Gemini (0.9–1.5 s to the
-  first audio with the fake brain).
+  first audio with the fake orchestrator).
 - Session setup costs ~0.5–0.9 s; with the pre-roll replay the first
   words were never lost in the runs.

@@ -42,9 +42,9 @@ func ctrlCStopsAfter(h *harness, pane string, n int32) *atomic.Int32 {
 	return &sent
 }
 
-// Campaign D N5: the CEO said stop, the brain's interrupt sent one Ctrl-C
+// Campaign D N5: the user said stop, the orchestrator's interrupt sent one Ctrl-C
 // to Claude busy with a queued instruction, the result "Interrupted
-// Claude." went back at once, and the CEO heard "I stopped Claude" while
+// Claude." went back at once, and the user heard "I stopped Claude" while
 // it carried on working. Now the interrupt checks: a second Ctrl-C when
 // the first did not take, and a result that says which happened.
 func TestBrainInterruptChecksTheStop(t *testing.T) {

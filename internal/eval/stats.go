@@ -35,7 +35,7 @@ func (r SimRun) Record() RunRecord {
 	return RunRecord{Case: r.Scenario, Repeat: r.Repeat, Status: r.Status, Failures: r.Failures, DurationMS: r.DurationMS, CostUSD: r.CostUSD}
 }
 
-// Record is an SVP or assistant result's RunRecord (repeat is the run's
+// Record is an orchestrator or assistant result's RunRecord (repeat is the run's
 // index).
 func (r Result) Record(repeat int) RunRecord {
 	return RunRecord{Case: r.ID, Repeat: repeat, Status: r.RunStatus(), Failures: r.Failures, DurationMS: r.Duration.Milliseconds()}
@@ -320,7 +320,7 @@ func (c CampaignReport) WriteMarkdown(w io.Writer, maxFailures int) {
 	}
 }
 
-// failoverSection is the markdown table of the brain's failovers: per
+// failoverSection is the markdown table of the orchestrator's failovers: per
 // scenario, the runs that failed over, their failover count and which
 // provider answered how many runs.
 func (c CampaignReport) failoverSection() string {
@@ -395,7 +395,7 @@ func countsString(m map[FailureType]int) string {
 
 func mdEscape(s string) string { return strings.ReplaceAll(s, "|", "\\|") }
 
-// WriteStatsTable prints per-case statistics for repeated SVP or
+// WriteStatsTable prints per-case statistics for repeated orchestrator or
 // assistant runs.
 func WriteStatsTable(w io.Writer, title string, recs []RunRecord) {
 	stats, total := Aggregate(recs)

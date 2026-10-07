@@ -12,8 +12,8 @@ import (
 // pushes carry the event id, links.go) for two things:
 //
 //   - the facts of the event's announce turn (announceFacts): when the
-//     template sentence went out at brain.announce_wait_s while the brain
-//     was still writing, or while its turn was queued, the brain is told
+//     template sentence went out at brain.announce_wait_s while the orchestrator
+//     was still writing, or while its turn was queued, the orchestrator is told
 //     that and the exact words, and whether the prompt is still waiting,
 //     answered or gone — so it can decide to skip, add or correct
 //     instead of announcing the event as news a second time;
@@ -21,7 +21,7 @@ import (
 //     event within eventLineWindow is dropped.
 //
 // "Spoken" here is handed to the voice to speak (queued); whether the
-// CEO heard it is the voice layer's to report.
+// user heard it is the voice layer's to report.
 
 // eventLineWindow is the anti-loop window, and eventLineMax the lines
 // one event may get inside it.
@@ -44,12 +44,12 @@ type eventLine struct {
 // never turns into a loop of speech. Each path that speaks about an event
 // is bounded on its own (one template, at most one late line, one
 // reprompt per new prompt), but nothing bounds them together, and a
-// line repeated over and over is the one failure the CEO cannot stop
+// line repeated over and over is the one failure the user cannot stop
 // short of muting. The architecture cannot rule it out because the
 // pushes come from independent timelines (announce, late lines, the
 // reconciler); so past eventLineMax lines in eventLineWindow the next is
 // dropped (supervisor.push_loop_dropped). Not a judgement of what to
-// say: the brain decides that with the facts above.
+// say: the orchestrator decides that with the facts above.
 func (s *Supervisor) noteEventLine(paneID, text string, tags map[string]any) bool {
 	id, _ := tags[tagEventID].(string)
 	if id == "" {
@@ -107,7 +107,7 @@ func (s *Supervisor) announceFacts(a announcement) func() brain.EventFacts {
 // promptState is the real state of the prompt a block created: still
 // open (its pending action, or — when another pane's question took the
 // one slot — the pane still blocked at an unanswered question), answered
-// by the CEO, or gone (the pane left it, or moved on to another
+// by the user, or gone (the pane left it, or moved on to another
 // prompt); "" when the event created none.
 func (s *Supervisor) promptState(a announcement) string {
 	if a.pending == "" {
@@ -125,7 +125,7 @@ func (s *Supervisor) promptState(a announcement) string {
 	case answered:
 		return brain.PromptAnswered
 	case !ok || row.LastBlock == nil || row.LastBlock.Answered:
-		// Left without the shepherd's answer (Store.Apply marks a block
+		// Left without the user's answer (Store.Apply marks a block
 		// answered when the pane leaves it).
 		return brain.PromptGone
 	case has && p.PaneID == a.row.PaneID:

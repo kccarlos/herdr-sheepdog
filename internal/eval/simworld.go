@@ -20,8 +20,8 @@ import (
 )
 
 // simWorld is one conversation's daemon, in process: the real supervisor
-// and brain over a mock herdr whose panes are the scenario's workers, a
-// pusher that delivers announcements to the simulated CEO, and a
+// and orchestrator over a mock herdr whose panes are the scenario's workers, a
+// pusher that delivers announcements to the simulated user, and a
 // recorder of every event. Everything lives under a temp directory; no
 // port is opened and the real data dir is never touched.
 type simWorld struct {
@@ -68,10 +68,10 @@ type SimLine struct {
 	// payload (the prompt text, the keys).
 	Kind   string `json:"kind,omitempty"`
 	Detail string `json:"detail,omitempty"`
-	// Beat is the agenda beat a CEO line (or a scripted wait) carries
+	// Beat is the agenda beat a user line (or a scripted wait) carries
 	// out (1-based; 0 for a line that does not move the agenda on), and
 	// Tag why such a line was said: answer (to sheepdog's question) or
-	// again (the CEO repeats or rephrases: user effort).
+	// again (the user repeats or rephrases: user effort).
 	Beat int    `json:"beat,omitempty"`
 	Tag  string `json:"tag,omitempty"`
 }
@@ -80,7 +80,7 @@ type SimLine struct {
 type simWorldOptions struct {
 	brainCfg brain.Config
 	model    brain.Model
-	// fallbacks are more providers registered on the brain (id to
+	// fallbacks are more providers registered on the orchestrator (id to
 	// model), the targets of its failover.
 	fallbacks  map[string]brain.Model
 	fixtureDir string
@@ -178,8 +178,8 @@ func newSimWorld(ctx context.Context, sc SimScenario, o simWorldOptions) (*simWo
 	if len(sc.Transcript) > 0 {
 		seedTranscript(b, sc.Transcript)
 	}
-	// Let the announce turns of the initial blocks settle before the CEO
-	// speaks, as on a phone that connects to a flock already running.
+	// Let the announce turns of the initial blocks settle before the user
+	// speaks, as on a phone that connects to a workers already running.
 	b.Quiesce()
 	for i, e := range sc.Events {
 		if e.AtMS > 0 {
@@ -238,7 +238,7 @@ func (w *simWorld) apply(ctx context.Context, i int, e SimEvent, target string) 
 
 // startWorking makes a prompted idle or finished worker busy, as a real
 // one is a moment after it gets a prompt (herdr reports working). On its
-// own goroutine: Prompt runs inside a brain tool call.
+// own goroutine: Prompt runs inside an orchestrator tool call.
 func (w *simWorld) startWorking(alias string) {
 	w.mu.Lock()
 	st, screen := w.states[alias], w.screens[alias]
@@ -317,7 +317,7 @@ func (w *simWorld) answered(alias string, keys []string) {
 // interrupted is a worker's default reaction to a Ctrl-C no scenario
 // event handles: a working worker stops its turn and comes back to its
 // input line, as a real one does, so the interrupt can be seen to take
-// (the brain's interrupt checks it, campaign D N5).
+// (the orchestrator's interrupt checks it, campaign D N5).
 func (w *simWorld) interrupted(alias string) {
 	w.mu.Lock()
 	st, kind := w.states[alias], w.kinds[alias]
@@ -333,7 +333,7 @@ func (w *simWorld) interrupted(alias string) {
 	})
 }
 
-// afterTurn fires the events cued on the CEO's nth utterance, and on
+// afterTurn fires the events cued on the user's nth utterance, and on
 // the agenda beat that utterance carried out (0: none).
 func (w *simWorld) afterTurn(n, beat int) {
 	for i, e := range w.sc.Events {
@@ -355,9 +355,9 @@ func (w *simWorld) schedule(d time.Duration, fn func()) *time.Timer {
 	return t
 }
 
-// say is one CEO utterance: recorded as the shepherd's own input (so the
+// say is one user utterance: recorded as the user's own input (so the
 // one rail and the claim gate see it), relayed like the voice model's
-// to_supervisor call, and answered with the reply the CEO hears.
+// to_supervisor call, and answered with the reply the user hears.
 func (w *simWorld) say(ctx context.Context, text string) (voice.ToolResult, error) {
 	w.sup.ShepherdInput(supervisor.InputTyped, text)
 	w.sup.OnVoiceEvent(voice.EventToolCall{Call: voice.ToolCall{Name: "to_supervisor"}})
@@ -372,7 +372,7 @@ func (w *simWorld) say(ctx context.Context, text string) (voice.ToolResult, erro
 }
 
 // close ends the supervisor's background work first (Run's shutdown
-// waits for every turn), then the brain, then removes the temp dir.
+// waits for every turn), then the orchestrator, then removes the temp dir.
 func (w *simWorld) close() {
 	w.mu.Lock()
 	w.closed = true
@@ -584,7 +584,7 @@ func (w *simWorld) alias(paneID string) string {
 	return w.aliasOf[paneID]
 }
 
-// simPusher delivers the supervisor's pushes to the CEO. A spoken push is
+// simPusher delivers the supervisor's pushes to the user. A spoken push is
 // also reported back as the voice would (sent, spoken, turn complete) on
 // its own goroutine: Push may be called with supervisor locks held.
 type simPusher struct {
@@ -601,7 +601,7 @@ func (p *simPusher) PushTagged(text string, u voice.Urgency, _ map[string]any) e
 	line := SimLine{AtMS: p.w.since(), Who: "push", Text: strings.TrimSpace(text)}
 	select {
 	case p.ch <- line:
-	default: // a runaway: the CEO would not have heard 64 queued lines either
+	default: // a runaway: the user would not have heard 64 queued lines either
 	}
 	go func() {
 		p.w.sup.OnVoiceEvent(voice.EventPush{Text: text, Urgency: u})
@@ -611,7 +611,7 @@ func (p *simPusher) PushTagged(text string, u voice.Urgency, _ map[string]any) e
 	return nil
 }
 
-// HasListener implements supervisor.Listener: the CEO is always there.
+// HasListener implements supervisor.Listener: the user is always there.
 func (p *simPusher) HasListener() bool { return true }
 
 // drain returns the pushes that arrived so far.
@@ -683,7 +683,7 @@ func (q *simQuerier) Investigate(ctx context.Context, iq supervisor.Investigatio
 }
 
 // simRecorder is the run's logger: it keeps the actions sent to workers
-// and the brain's turn outcomes, meters the brain's tokens, and forwards
+// and the orchestrator's turn outcomes, meters the orchestrator's tokens, and forwards
 // every event to the run's sink.
 type simRecorder struct {
 	w     *simWorld
@@ -696,8 +696,8 @@ type simRecorder struct {
 	toolCalls []string
 	fallbacks []string
 	timeouts  int
-	// failovers lists the brain's failovers ("vertex to deepseek
-	// (http_504)"); steps counts the answered brain steps per provider;
+	// failovers lists the orchestrator's failovers ("vertex to deepseek
+	// (http_504)"); steps counts the answered orchestrator steps per provider;
 	// answeredBy is the provider of the last answered step.
 	failovers  []string
 	steps      map[string]int

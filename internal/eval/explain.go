@@ -17,11 +17,11 @@ import (
 // consequences, options). After the call, the judge model scores two
 // sides separately so a report shows where detail is lost:
 //
-//   - the orchestrator: the slow brain's text for each question (the
+//   - the orchestrator: the orchestrator's text for each question (the
 //     spoken and detail of every to_supervisor result, and its pushes);
 //   - the voice: what the voice model actually said (tier 2 only; at
 //     tier 1 there is no voice model and the orchestrator's text is
-//     what the CEO gets).
+//     what the user gets).
 //
 // Items: coverage (which key points each side stated, one yes/no call
 // per point and answer), ear comprehension (could a listener who cannot
@@ -80,7 +80,7 @@ func (e *ExplainSpec) substantive() bool {
 	return false
 }
 
-// Kind is the kind of the CEO's turn-th line (1-based); "" past the
+// Kind is the kind of the user's turn-th line (1-based); "" past the
 // script.
 func (e *ExplainSpec) Kind(turn int) string {
 	if e == nil || turn < 1 || turn > len(e.Turns) {
@@ -97,7 +97,7 @@ func isFollowUp(kind string) bool {
 	return false
 }
 
-// ExplainExchange is one CEO question and what came back before the
+// ExplainExchange is one user question and what came back before the
 // next one.
 type ExplainExchange struct {
 	Turn     int    `json:"turn"`
@@ -190,7 +190,7 @@ func (s *ExplainScore) Failures() []Failure {
 }
 
 // Criteria, each stated in both directions (RubricItem). %s in a
-// question is quoted text (the key point, or the CEO's question).
+// question is quoted text (the key point, or the user's question).
 var (
 	explainPointItem = RubricItem{
 		ID:       "explain_point",

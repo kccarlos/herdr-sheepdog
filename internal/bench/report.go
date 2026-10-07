@@ -81,7 +81,7 @@ type VoiceSummary struct {
 	Interrupted  int                `json:"interrupted"`
 	Stalled      int                `json:"stalled"`
 	Failovers    int                `json:"failovers"`
-	// TTSSources counts the CEO lines by what rendered them (gemini
+	// TTSSources counts the user lines by what rendered them (gemini
 	// model or say).
 	TTSSources map[string]int `json:"tts_sources"`
 	// MarkupSpoken counts bot utterances whose heard text carries a
@@ -296,12 +296,12 @@ func (rep Report) WriteMarkdown(w io.Writer, maxFailures int) {
 		_, _ = fmt.Fprintf(w, "\nOutcomes: %s.\n", strings.Join(o, ", "))
 	}
 	v := rep.Voice
-	_, _ = fmt.Fprintf(w, "\n## Voice layer\n\n- CEO lines: %d, of which the voice model heard nothing of %d.\n", v.Lines, v.NotHeard)
+	_, _ = fmt.Fprintf(w, "\n## Voice layer\n\n- user lines: %d, of which the voice model heard nothing of %d.\n", v.Lines, v.NotHeard)
 	_, _ = fmt.Fprintf(w, "- Mean WER of what the voice model heard: %s; by condition: %s.\n", fmtMap(v.WERByLang), fmtMap(v.WERByNoise))
 	_, _ = fmt.Fprintf(w, "- Daemon flushes %d, phone barge-in cuts %d, interrupted %d, stalled %d.\n", v.Flushes, v.LocalFlushes, v.Interrupted, v.Stalled)
-	_, _ = fmt.Fprintf(w, "- Pushes: unheard %d, re-queued %d, deferred %d, held (no listener) %d. Brain failovers %d.\n", v.Unheard, v.Requeued, v.Deferred, v.Held, v.Failovers)
+	_, _ = fmt.Fprintf(w, "- Pushes: unheard %d, re-queued %d, deferred %d, held (no listener) %d. Orchestrator failovers %d.\n", v.Unheard, v.Requeued, v.Deferred, v.Held, v.Failovers)
 	_, _ = fmt.Fprintf(w, "- Bot utterances that read a bracketed marker aloud (\"[system event, …]\"): %d; with audio but no transcript: %d.\n", v.MarkupSpoken, v.EmptyBot)
-	_, _ = fmt.Fprintf(w, "- CEO lines rendered by: %s.\n", fmtCounts(v.TTSSources))
+	_, _ = fmt.Fprintf(w, "- user lines rendered by: %s.\n", fmtCounts(v.TTSSources))
 	rep.Explain.WriteMarkdown(w)
 	_, _ = fmt.Fprintf(w, "\n## Failed runs\n\n")
 	n := 0

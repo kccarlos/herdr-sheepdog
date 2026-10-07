@@ -13,8 +13,8 @@ import (
 // when it is read back (readEvents). Seq is a process-local monotonic counter
 // (not written to disk).
 //
-// TurnID and UtteranceID tie the events of one brain turn and of one CEO
-// utterance together (voice relay → brain turn → reply push → playback),
+// TurnID and UtteranceID tie the events of one orchestrator turn and of one user
+// utterance together (voice relay → orchestrator turn → reply push → playback),
 // so a reader groups them by id instead of guessing by time. Like DurMS
 // they are lifted from the payload (payload.turn_id, payload.utterance_id,
 // when strings), so an emitter sets them by adding the key to the payload

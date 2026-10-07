@@ -8,7 +8,7 @@ import (
 // GeminiLive resolves the [gemini] backend into the Live connection
 // fields of gemini.Config: the AI Studio key pool, or on backend "vertex"
 // the one Vertex key with its project and location. missing names what is
-// unset when the Live voice cannot run ("" when it can). The brain keeps
+// unset when the Live voice cannot run ("" when it can). The orchestrator keeps
 // using the AI Studio pool either way.
 func GeminiLive(g config.Gemini) (keys []string, vertex *gemini.Vertex, missing string) {
 	if g.Backend != "vertex" {

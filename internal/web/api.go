@@ -25,8 +25,8 @@ type StateResponse struct {
 	Session       state.Session     `json:"session"`
 	Voice         VoiceInfo         `json:"voice"`
 	Settings      *SettingsResponse `json:"settings,omitempty"`
-	// Brain is the supervisor brain's provider and current model; omitted
-	// when the brain is off.
+	// Brain is the orchestrator's provider and current model; omitted
+	// when the orchestrator is off.
 	Brain   *BrainInfo `json:"brain,omitempty"`
 	Herdr   string     `json:"herdr"`
 	Version string     `json:"version"`
@@ -45,7 +45,7 @@ type StateResponse struct {
 type SettingsResponse struct {
 	Chattiness supervisor.Chattiness   `json:"chattiness"`
 	Levels     []supervisor.Chattiness `json:"levels"`
-	// Languages is the shepherd's language preference, most preferred
+	// Languages is the user's language preference, most preferred
 	// first (codes from LanguageOptions); [] when none is set.
 	Languages []string `json:"languages"`
 	// LanguageOptions is the catalog a client offers (internal/lang):
@@ -97,7 +97,7 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 // VoiceInfo is the daemon's view of the voice side.
 type VoiceInfo struct {
 	Mode string `json:"mode"` // gemini | off
-	// Name is what the dog calls itself (config voice.name), so the
+	// Name is what the voice calls itself (config voice.name), so the
 	// /debug views can label its side of the conversation.
 	Name            string `json:"name,omitempty"`
 	Status          string `json:"status"`
@@ -167,8 +167,8 @@ type pendingAnswerRequest struct {
 }
 
 // handlePendingAnswer answers the open question with the option the
-// shepherd tapped: {"id", "option"} (1-based, the index /api/state and
-// pending.created list). It is a shepherd input like a spoken answer and
+// user tapped: {"id", "option"} (1-based, the index /api/state and
+// pending.created list). It is a user input like a spoken answer and
 // passes the same rail; a question that is no longer open is 409, keys
 // that could not be sent 502.
 func (s *Server) handlePendingAnswer(w http.ResponseWriter, r *http.Request) {
@@ -505,7 +505,7 @@ func (s *Server) handleUtterance(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, toolResponse(call, res, "text_router"))
 }
 
-// typed records text as something the shepherd typed, before it reaches
+// typed records text as something the user typed, before it reaches
 // the voice model or the text router: the one rail reads these inputs,
 // never the tool argument the model relays (docs/roles.md "The one
 // rail").
@@ -528,7 +528,7 @@ func (s *Server) routeUtterance(ctx context.Context, text string) (voice.ToolCal
 	s.log.Log(logSource, "web.utterance", "", map[string]any{"text": text, "via": "text_router"})
 	s.typed(text)
 	rc := s.deps.RouterContext
-	rc.Item(ctxcap.VoiceItem{Kind: ctxcap.VKindUserText, Class: ctxcap.ClassShepherd, Role: "user", Label: "shepherd typed", Text: text})
+	rc.Item(ctxcap.VoiceItem{Kind: ctxcap.VKindUserText, Class: ctxcap.ClassShepherd, Role: "user", Label: "user typed", Text: text})
 	call, ok := s.deps.Router.Route(text)
 	if !ok {
 		s.log.Log(logSource, "web.utterance_unrouted", "", map[string]any{"text": text})

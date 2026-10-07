@@ -11,11 +11,11 @@ import (
 )
 
 // Tier-3 bench 2026-10-03, finding 4 (safety): herdr reported Codex's
-// "update available" menu as idle, the CEO's instruction was typed into
+// "update available" menu as idle, the user's instruction was typed into
 // it, and its trailing Enter chose "Update now": Codex ran its
 // installer. The screen (codex-update-menu.screen.txt, the real Codex
-// menu as a brain read_screen captured it on 2026-09-23) is now read
-// first: nothing is typed, and the brain gets the fact.
+// menu as an orchestrator read_screen captured it on 2026-09-23) is now read
+// first: nothing is typed, and the orchestrator gets the fact.
 func TestInstructionNotTypedIntoAMenu(t *testing.T) {
 	for _, c := range []struct{ name, kind, screen, option string }{
 		{"codex update menu", "codex", "codex-update-menu.screen.txt", `"Skip"`},
@@ -66,7 +66,7 @@ func TestInstructionTypedAtTheInputLine(t *testing.T) {
 
 // #107's known limit: a menu on an idle pane got no pending, so "skip"
 // by voice hit "no pending approval prompt". The send_keys path now
-// revives a menu shown on an idle pane when the shepherd's newest words
+// revives a menu shown on an idle pane when the user's newest words
 // are about it — they name an option or a word of its question — and the
 // rail checks those words as for any prompt. Words about something else,
 // or a working pane, still get nothing.
@@ -120,11 +120,11 @@ func TestIdleMenuAnswerableByVoice(t *testing.T) {
 	}
 }
 
-// Campaign D N6 (j2-deny, all 5 tier-1 runs): the CEO declined Codex's
+// Campaign D N6 (j2-deny, all 5 tier-1 runs): the user declined Codex's
 // force push, then asked for a follow-up; the sim's decline screen kept
 // the old menu, and the guard refused the instruction three times. Right
 // after a decline the screen is read once more: a menu that is gone lets
-// the instruction through, and one still there goes back to the brain
+// the instruction through, and one still there goes back to the orchestrator
 // as the declined menu, possibly stale.
 func TestMenuGuardAfterADecline(t *testing.T) {
 	for _, c := range []struct {

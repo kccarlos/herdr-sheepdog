@@ -10,11 +10,11 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
 
-// Current focus, brain → voice (docs/history/bench-2026-10-03.md "Kept as
+// Current focus, orchestrator → voice (docs/history/bench-2026-10-03.md "Kept as
 // options / backlog"). The voice model hears only what it says and what
-// it is pushed; the brain's turn knows which agent the conversation is
+// it is pushed; the orchestrator's turn knows which agent the conversation is
 // about, which question is open and what the answer's detail held. After
-// a brain turn produced a line for the shepherd the daemon tells the
+// an orchestrator turn produced a line for the user the daemon tells the
 // voice those facts in one silent context line, so it can resolve "it"
 // and "that one" and answer a simple follow-up ("what were the options
 // again?") without a round trip. No extra model call: the facts come
@@ -33,9 +33,9 @@ const focusMaxRunes = 500
 // focusPointRunes bounds one key point.
 const focusPointRunes = 160
 
-// focusFacts is what one brain reply says about the conversation's
+// focusFacts is what one orchestrator reply says about the conversation's
 // focus: the agent it is about (paneID, "" to find it from the words),
-// the reply as the shepherd heard it, its detail, its ask and options.
+// the reply as the user heard it, its detail, its ask and options.
 type focusFacts struct {
 	paneID  string
 	spoken  string
@@ -51,7 +51,7 @@ type focusState struct {
 	want string // the line waiting for the voice's turn to end
 }
 
-// focusFromReply is the focus of a brain reply bound for the voice: the
+// focusFromReply is the focus of an orchestrator reply bound for the voice: the
 // spoken line as earLine/toolResultFrom made it and the D9-scrubbed
 // detail, ask and options.
 func focusFromReply(paneID, spoken string, rep brain.Reply) focusFacts {
@@ -64,8 +64,8 @@ func focusFromReply(paneID, spoken string, rep brain.Reply) focusFacts {
 	return f
 }
 
-// noteFocus composes the focus line of a reply the shepherd was given
-// (asked: the shepherd's words it answers, "" for an event) and keeps it
+// noteFocus composes the focus line of a reply the user was given
+// (asked: the user's words it answers, "" for an event) and keeps it
 // for the end of the voice's turn.
 func (s *Supervisor) noteFocus(f focusFacts, asked string) {
 	if strings.TrimSpace(f.spoken) == "" {
@@ -127,8 +127,8 @@ func (s *Supervisor) focusLine(f focusFacts, asked string) string {
 
 // focusAgent is the agent the reply is about: the event's own agent,
 // else the one agent the reply names (spoken name or alias), else the
-// one the shepherd's words named, else the conversation's current
-// subject (the agent the brain last read or acted on).
+// one the user's words named, else the conversation's current
+// subject (the agent the orchestrator last read or acted on).
 func (s *Supervisor) focusAgent(f focusFacts, asked string) (state.Agent, bool) {
 	if f.paneID != "" {
 		return s.store.Get(f.paneID)
@@ -160,7 +160,7 @@ func (s *Supervisor) focusAgent(f focusFacts, asked string) (state.Agent, bool) 
 	return s.store.Get(subject)
 }
 
-// openQuestion names what waits for the shepherd: the question the reply
+// openQuestion names what waits for the user: the question the reply
 // asked, with its options, and the worker's approval prompt that is
 // open, with its answer options (never the free-text entry).
 func (s *Supervisor) openQuestion(f focusFacts) string {

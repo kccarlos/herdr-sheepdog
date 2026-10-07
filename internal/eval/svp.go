@@ -28,7 +28,7 @@ type recorder struct {
 	args    []map[string]any // parallel to calls
 	results map[string]bool  // tool name -> completed without error (at least once)
 	rail    int
-	// meter, when set, gets the brain's tokens from its brain.step
+	// meter, when set, gets the orchestrator's tokens from its brain.step
 	// events under model.
 	meter *Meter
 	model string
@@ -123,7 +123,7 @@ func (r *recorder) names() []string {
 	return out
 }
 
-// RunSVPOffline runs cases through the brain with a scripted fake model:
+// RunSVPOffline runs cases through the orchestrator with a scripted fake model:
 // no network, so this is a check of the harness (the rail, the provenance
 // wrapping, roster/transcript plumbing), not of model judgement.
 func RunSVPOffline(ctx context.Context, cases []SVPCase, fixtureDir string) []Result {
@@ -134,19 +134,19 @@ func RunSVPOffline(ctx context.Context, cases []SVPCase, fixtureDir string) []Re
 	return out
 }
 
-// RunSVPLive runs cases through the brain with a real model. Cases after
+// RunSVPLive runs cases through the orchestrator with a real model. Cases after
 // a rate-limited call are reported as skipped rather than retried (the
 // Gemini free tier needs a cool-down, not a hot loop).
 func RunSVPLive(ctx context.Context, cases []SVPCase, fixtureDir string, model brain.Model, modelName string) []Result {
 	return RunSVPLiveWith(ctx, cases, fixtureDir, SVPLive{Model: model, ModelName: modelName})
 }
 
-// SVPLive configures a live SVP run.
+// SVPLive configures a live orchestrator run.
 type SVPLive struct {
 	Model     brain.Model
 	ModelName string
-	// Provider is the brain provider id of Model (gemini, vertex,
-	// deepseek); empty is the brain's default. DeepSeek needs it so the
+	// Provider is the orchestrator provider id of Model (gemini, vertex,
+	// deepseek); empty is the orchestrator's default. DeepSeek needs it so the
 	// loop replays its reasoning content.
 	Provider string
 	// Judge, when set, decides the wording checks (spoken_contains_any_of,
@@ -154,7 +154,7 @@ type SVPLive struct {
 	// own judge criteria; nil keeps the code checks (substring and word
 	// lists) and skips the criteria.
 	Judge Judge
-	// Meter, when set, counts the brain's tokens.
+	// Meter, when set, counts the orchestrator's tokens.
 	Meter *Meter
 }
 
@@ -198,7 +198,7 @@ func runSVPCase(ctx context.Context, c SVPCase, fixtureDir string, run svpRun) R
 	// MaxSteps 3 caps a live case at up to 3 model calls (docs/roles.md
 	// D9-adjacent cost discipline: the Gemini free tier's quota is
 	// limited, keep eval runs small). The utterance budget is left to the
-	// brain's default (brain.DefaultUtteranceTimeout), so a live case gets
+	// orchestrator's default (brain.DefaultUtteranceTimeout), so a live case gets
 	// the same budget the daemon does.
 	cfg := brain.Config{MaxSteps: 3, ThinkingLevel: "low"}
 	if modelName != "" {
@@ -257,7 +257,7 @@ func runSVPCase(ctx context.Context, c SVPCase, fixtureDir string, run svpRun) R
 		reasons = append(reasons, why...)
 	}
 	if fb, ok := got["fallback"]; ok && !offline {
-		// Live, a turn that fell back gave the shepherd the daemon's code
+		// Live, a turn that fell back gave the user the daemon's code
 		// sentence, not an answer: say why first (a timeout reads very
 		// differently from a wrong answer in the failure taxonomy).
 		reasons = append([]string{fmt.Sprintf("%s: %v", reasonFallback, fb)}, reasons...)
@@ -308,7 +308,7 @@ func requestReasons(c SVPCase, m brain.Model) []string {
 }
 
 // stopWordReasons checks Expect.NotStopWord against the daemon's own
-// bare-stop list: words on it never reach the brain.
+// bare-stop list: words on it never reach the orchestrator.
 func stopWordReasons(c SVPCase) []string {
 	if !c.Expect.NotStopWord || !supervisor.BareStopWords[supervisor.BareWord(c.Request.Question)] {
 		return nil
@@ -316,8 +316,8 @@ func stopWordReasons(c SVPCase) []string {
 	return []string{fmt.Sprintf("%q is a bare stop word: the daemon would run the stop procedure (Ctrl-C a recent instruction) before any brain turn", c.Request.Question)}
 }
 
-// askedOf is the question the daemon puts in front of the brain for c:
-// what the shepherd was heard saying (source.heard), when the case
+// askedOf is the question the daemon puts in front of the orchestrator for c:
+// what the user was heard saying (source.heard), when the case
 // records it, else the relay — the same choice the supervisor makes
 // (supervisor.UtteranceOf).
 func askedOf(c SVPCase) string {
@@ -328,8 +328,8 @@ func askedOf(c SVPCase) string {
 	return q
 }
 
-// heardReasons checks Expect.QuestionIsHeard: the brain was asked asked,
-// which must be the shepherd's recorded words.
+// heardReasons checks Expect.QuestionIsHeard: the orchestrator was asked asked,
+// which must be the user's recorded words.
 func heardReasons(c SVPCase, asked string) []string {
 	if !c.Expect.QuestionIsHeard || c.Source == nil || c.Source.Heard == "" || asked == c.Source.Heard {
 		return nil
@@ -362,7 +362,7 @@ func baselineOf(c SVPCase) baseline {
 		reply.NeedsUser = *c.Observed.NeedsUser
 	}
 	fails, _ := gradeSVP(c.Expect, rec, reply, false)
-	// The logged brain was asked the relay itself.
+	// The logged orchestrator was asked the relay itself.
 	fails = append(fails, heardReasons(c, c.Request.Question)...)
 	return judgeBaseline(fails, c.BaselineFails)
 }
@@ -577,7 +577,7 @@ func containsAnyFold(s string, subs []string) bool {
 // counts a spoken line's length.
 func wordCount(s string) int { return len(strings.Fields(s)) }
 
-// jargonTerms is a small stand-in list of words the shepherd's ear should
+// jargonTerms is a small stand-in list of words the user's ear should
 // not have to parse (docs/iteration-2.md WP1: no PR numbers, ms,
 // versions, unfamiliar terms).
 //
@@ -726,9 +726,9 @@ func toPendingPrompt(p *SVPPending) *brain.PendingPrompt {
 	return &brain.PendingPrompt{ID: "eval-pending", Question: p.Question, Options: opts, YesKeys: p.YesKeys, NoKeys: p.NoKeys}
 }
 
-// seedTranscript ingests prior transcript lines: "CEO: …" and "Dog: …"
+// seedTranscript ingests prior transcript lines: "user: …" and "Dog: …"
 // give the matching message kind; "PUSH <alias>: …" a worker push;
-// anything else is treated as a CEO utterance.
+// anything else is treated as a user utterance.
 func seedTranscript(b *brain.Brain, lines []string) {
 	var msgs []brain.Message
 	for _, line := range lines {
@@ -780,7 +780,7 @@ func scriptFor(c SVPCase, alias string) *braintest.Model {
 	case c.Expect.RailBlocked || (containsStr(c.Expect.MustNotCall, brain.ToolSendKeys) && !hasPending(c)):
 		// No positive expectation: the case exists to test the rail, so
 		// script the attempt the rail must refuse. With a prompt open the
-		// rail would rightly let a CEO turn answer it, so there "must not
+		// rail would rightly let a user turn answer it, so there "must not
 		// send keys" is the model's judgement (a status question is not
 		// an approval): live only, nothing to script.
 		tool = brain.ToolSendKeys

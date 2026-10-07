@@ -38,7 +38,7 @@ func printServeUsage(w io.Writer) {
 	fprintln(w, "                    file or voice.provider; gemini/openai force it for this run;")
 	fprintln(w, "                    off logs pushes as skipped)")
 	fprintln(w, "  --herdr MODE      socket | mock (default socket; mock needs no running herdr)")
-	fprintln(w, "  --cli MODE        on | off (default on; off takes the brain's run_cli tool")
+	fprintln(w, "  --cli MODE        on | off (default on; off takes the orchestrator's run_cli tool")
 	fprintln(w, "                    away, so it answers from the screen alone)")
 	fprintln(w, "  --brain MODE      on | off | fake (default on; the one model that decides and")
 	fprintln(w, "                    phrases, needs a Gemini key and config brain.enabled; off")
@@ -52,7 +52,7 @@ func printServeUsage(w io.Writer) {
 	fprintln(w, "                    can use a fixture as its microphone (config: web.dev)")
 	fprintln(w, "  --heard-echo      with --voice=off: report every spoken push and text-router")
 	fprintln(w, "                    answer back as heard, as a voice session would (harnesses")
-	fprintln(w, "                    that stand in for the shepherd, e.g. sheepdog bench run)")
+	fprintln(w, "                    that stand in for the user, e.g. sheepdog bench run)")
 }
 
 // serveOpts are the parsed flags.
@@ -73,7 +73,7 @@ func parseServeFlags(args []string, stderr io.Writer) (serveOpts, int, bool) {
 	fs.StringVar(&o.voice, "voice", app.VoiceOn, "voice mode")
 	fs.StringVar(&o.herdr, "herdr", app.HerdrSocket, "herdr mode")
 	fs.StringVar(&o.cli, "cli", app.CLIOn, "cli query tool mode")
-	fs.StringVar(&o.brain, "brain", app.BrainOn, "supervisor brain mode")
+	fs.StringVar(&o.brain, "brain", app.BrainOn, "orchestrator mode")
 	fs.StringVar(&o.dataDir, "data-dir", "", "data directory")
 	fs.BoolVar(&o.verbose, "verbose", false, "echo events to stderr")
 	fs.BoolVar(&o.dev, "dev", false, "developer routes")
@@ -146,7 +146,7 @@ func runServe(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 		return 1
 	}
 	fprintf(stderr, "sheepdog serve %s: %s\n", version, cfg)
-	fprintf(stdout, "sheepdog %s listening on %s (voice=%s herdr=%s cli=%s brain=%s)\n", version, a.URL(), a.VoiceProvider(), o.herdr, o.cli, a.BrainMode())
+	fprintf(stdout, "sheepdog %s listening on %s (voice=%s herdr=%s cli=%s orchestrator=%s)\n", version, a.URL(), a.VoiceProvider(), o.herdr, o.cli, a.BrainMode())
 	if !cfg.Web.IsLoopback() {
 		// web.bind is not loopback: print every non-loopback IPv4 of the
 		// host, so the operator can read the LAN or Tailscale URL off the
@@ -161,8 +161,8 @@ func runServe(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 	fprintf(stdout, "  events      %s/events\n", a.URL())
 
 	// SIGHUP re-reads the prompt override directory (docs/roles.md
-	// "Prompt files") so the CEO's prompt edits take effect without a
-	// restart: the brain picks it up on its next turn, the voice session
+	// "Prompt files") so the user's prompt edits take effect without a
+	// restart: the orchestrator picks it up on its next turn, the voice session
 	// on its next (re)connect. Separate from the INT/TERM context so a
 	// HUP never triggers shutdown.
 	hup := make(chan os.Signal, 1)

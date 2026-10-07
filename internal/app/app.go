@@ -48,7 +48,7 @@ const (
 	CLIOff      = "off"
 	BrainOn     = "on"
 	BrainOff    = "off"
-	// BrainFake runs the brain loop over braintest.Reflex, a model that
+	// BrainFake runs the orchestrator loop over braintest.Reflex, a model that
 	// answers from what it sees (a question → read the screen, an
 	// instruction → prompt)
 	// without any network call: a developer mode for the /debug
@@ -69,13 +69,13 @@ type Options struct {
 	Voice string
 	// Herdr is HerdrSocket (default) or HerdrMock.
 	Herdr string
-	// CLI is CLIOn (default) or CLIOff (`--cli=off` takes the brain's
+	// CLI is CLIOn (default) or CLIOff (`--cli=off` takes the orchestrator's
 	// run_cli tool away; it then answers from the screen alone).
 	CLI string
 	// Brain is BrainOn (default), BrainOff (`--brain=off`: the daemon
 	// speaks its code sentences and sends nothing) or BrainFake (the
 	// reflex fake model, dev only). On needs config brain.enabled and a
-	// Gemini key; without a key the brain is silently off.
+	// Gemini key; without a key the orchestrator is silently off.
 	Brain string
 	// Port overrides config web.port when > 0; 0 with an empty config
 	// port picks a free port (tests).
@@ -104,7 +104,7 @@ type Options struct {
 	// router answer back to the supervisor as a voice session would
 	// (sent, spoken in full, turn complete), so the heard bookkeeping —
 	// what a "yes" answers, the relay gate — works without a voice
-	// model. For harnesses that stand in for the shepherd (`sheepdog
+	// model. For harnesses that stand in for the user (`sheepdog
 	// bench run --tier 3`); `serve --heard-echo`.
 	HeardEcho bool
 }
@@ -150,8 +150,8 @@ type App struct {
 	wref     *watcherRef   // nil in mock mode
 	sup      *supervisor.Supervisor
 	brain    *brain.Brain // nil when off
-	brainOff string       // why the brain is off (web.Deps.BrainOffReason)
-	// brainProviders lists the brain's providers for the picker,
+	brainOff string       // why the orchestrator is off (web.Deps.BrainOffReason)
+	// brainProviders lists the orchestrator's providers for the picker,
 	// unavailable ones with the reason (web.Deps.BrainProviders).
 	brainProviders []web.ProviderInfo
 	voice          voice.Session // nil when off
@@ -252,7 +252,7 @@ func (a *App) wire() error {
 	// session's tool handler); the pusher is filled in below. The querier
 	// (WP4) is detected and built in Run, after daemon.start is logged, so
 	// cli.detected never races ahead of it; a nil *lazyQuerier still
-	// satisfies supervisor.Querier so the brain's run_cli can route to it
+	// satisfies supervisor.Querier so the orchestrator's run_cli can route to it
 	// once ready.
 	pusher := &lazyPusher{}
 	lazyQ := &lazyQuerier{}
@@ -371,7 +371,7 @@ func (a *App) wire() error {
 		// Every spoken announcement says whether a decision is open
 		// as it reaches the model (information).
 		DecisionsNow: sup.DecisionsNow,
-		// The shepherd's language setting (PUT /api/settings), read at
+		// The user's language setting (PUT /api/settings), read at
 		// every (re)connect; a change mid-session goes as silent context.
 		Language: sup.LanguageLine,
 		Name:     cfg.Voice.Name,
@@ -446,7 +446,7 @@ func (a *App) wire() error {
 		if deps.DevTestdataDir == "" {
 			deps.DevTestdataDir = config.DefaultDevTestdataDir
 		}
-		// The sample brain transcript sits next to the audio fixtures
+		// The sample orchestrator transcript sits next to the audio fixtures
 		// (testdata/brain/), for the Supervisor tab's console handle.
 		deps.DevBrainDir = filepath.Join(filepath.Dir(deps.DevTestdataDir), "brain")
 	}
@@ -576,7 +576,7 @@ func (a *App) VoiceProvider() string {
 	return a.voiceSwitch.Provider()
 }
 
-// buildBrain builds the supervisor brain with the [brain] config
+// buildBrain builds the orchestrator with the [brain] config
 // (BrainConfig) and a transcript under the data dir, over every provider
 // that has a key: gemini (the key pool), deepseek ([deepseek]) and
 // vertex ([gemini.vertex]),
@@ -608,7 +608,7 @@ func buildBrain(cfg config.Config, pl *prompts.Loader, log logging.Logger) (*bra
 	return b, nil
 }
 
-// BrainModels builds the brain's Model of every provider the config
+// BrainModels builds the orchestrator's Model of every provider the config
 // has a key for (shared with `sheepdog brain-test`): gemini over the
 // key pool, deepseek over the OpenAI-compatible adapter, vertex over
 // the Gemini adapter on Vertex AI (VertexBrainMissing). An empty map
@@ -640,11 +640,11 @@ func BrainModels(cfg config.Config, log logging.Logger) (map[string]brain.Model,
 	return models, nil
 }
 
-// VertexBrainMissing names the variable the vertex brain provider lacks
+// VertexBrainMissing names the variable the vertex orchestrator provider lacks
 // ("" when it has both). It reuses the voice's [gemini.vertex] key and
-// project but not gemini.backend (the brain may run on Vertex while the
+// project but not gemini.backend (the orchestrator may run on Vertex while the
 // voice stays on AI Studio, or the other way round) nor gemini.vertex.
-// location (the brain is always at global: brain.VertexLocation).
+// location (the orchestrator is always at global: brain.VertexLocation).
 func VertexBrainMissing(v config.GeminiVertex) string {
 	switch {
 	case v.APIKey == "":
@@ -691,7 +691,7 @@ func BrainConfig(cfg config.Config) brain.Config {
 	}
 }
 
-// BrainMode reports the effective brain mode: BrainOn, BrainFake, or
+// BrainMode reports the effective orchestrator mode: BrainOn, BrainFake, or
 // BrainOff (with a.brainOff saying why).
 func (a *App) BrainMode() string {
 	switch {
@@ -704,7 +704,7 @@ func (a *App) BrainMode() string {
 	}
 }
 
-// BrainModel reports the brain's current model ("" when it is off): the
+// BrainModel reports the orchestrator's current model ("" when it is off): the
 // configured brain.model until a runtime switch. BrainProvider likewise
 // for the provider.
 func (a *App) BrainModel() string {
@@ -714,7 +714,7 @@ func (a *App) BrainModel() string {
 	return a.brain.Model()
 }
 
-// BrainProvider reports the brain's current provider ("" when it is
+// BrainProvider reports the orchestrator's current provider ("" when it is
 // off).
 func (a *App) BrainProvider() string {
 	if a.brain == nil {
@@ -751,18 +751,18 @@ func (a *App) restoreBrainModel() {
 }
 
 // ReloadPrompts rescans the prompt override directory (SIGHUP, POST
-// /api/prompts/reload). The brain and the voice session share this
-// Loader, so both pick up the change: the brain on its next turn, the
+// /api/prompts/reload). The orchestrator and the voice session share this
+// Loader, so both pick up the change: the orchestrator on its next turn, the
 // voice session on its next (re)connect. Callers log prompts.reloaded
 // themselves (the "via" differs: sighup vs api).
 func (a *App) ReloadPrompts() []prompts.File { return a.prompts.Reload() }
 
 // buildQuerier detects codex/claude on PATH (logging cli.detected) and, if
-// either is found, builds the Runner that backs the brain's run_cli and
+// either is found, builds the Runner that backs the orchestrator's run_cli and
 // investigations. Called
 // from Run, once, right after daemon.start. Neither found returns
 // (nil, nil): the deep path is simply unavailable, per plan §3.5 ("if
-// absent, the brain simply has no run_cli tool).
+// absent, the orchestrator simply has no run_cli tool).
 func (a *App) buildQuerier() (*cli.Runner, error) {
 	cfg := cli.Config{
 		Prefer:          a.cfg.CLI.Prefer,
@@ -905,7 +905,7 @@ func (a *App) Run(ctx context.Context) (err error) {
 		a.push.LogStartup()
 	}
 	// Logged here, not in wire(), so it never precedes daemon.start (the
-	// Loader itself is built in wire(), since the brain and the voice
+	// Loader itself is built in wire(), since the orchestrator and the voice
 	// session need it before Run).
 	a.log.Log("daemon", "prompts.loaded", "", map[string]any{"dir": a.cfg.Prompts.Dir, "files": a.prompts.Files()})
 	if a.queryLazy != nil {
@@ -1003,7 +1003,7 @@ func (a *App) observers() []observe.Handler {
 }
 
 // watchdogProbes are the read-only accessors the watchdog polls; a
-// component the daemon runs without (no brain, --voice=off,
+// component the daemon runs without (no orchestrator, --voice=off,
 // --herdr=mock) has none.
 func (a *App) watchdogProbes() observe.Probes {
 	var p observe.Probes
@@ -1301,7 +1301,7 @@ func errString(err error) string {
 }
 
 // ownDir is the daemon's working directory, whose agents are closed only
-// when the CEO named them (supervisor.Config.ProtectedDirs): the CEO's
+// when the user named them (supervisor.Config.ProtectedDirs): the user's
 // orchestrator session works there.
 func ownDir() []string {
 	if wd, err := os.Getwd(); err == nil {

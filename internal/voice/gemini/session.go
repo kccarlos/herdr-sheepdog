@@ -119,7 +119,7 @@ type Session struct {
 	// echo holds the microphone back while the client plays the model's
 	// audio, dropping what the reply explains (voice/echogate.go).
 	echo voice.EchoGate
-	// recap is the recent conversation (recap.go): what the shepherd
+	// recap is the recent conversation (recap.go): what the user
 	// said (inText until it is flushed), what the voice said (outText),
 	// cut to what was heard, and the spoken pushes. A connection that
 	// comes back without its resumption handle is seeded with it.
@@ -487,7 +487,7 @@ func (s *Session) forwardAudio(pcm16 []byte) error {
 }
 
 // logEchoVerdict logs the echo gate arming (the client's echo showed
-// itself) or letting the shepherd through while the reply played
+// itself) or letting the user through while the reply played
 // (voice.echo_gate).
 func (s *Session) logEchoVerdict(v *voice.EchoVerdict, why string) {
 	if v == nil {
@@ -755,7 +755,7 @@ func (s *Session) speakingLocked(now time.Time) bool {
 // (docs/ws-contract.md "Playback reports"): it logs voice.playback,
 // wakes the push queue (a drained reply may release a push), and when a
 // flushed run was cut short emits the heard part as a cut transcript
-// for the brain.
+// for the orchestrator.
 func (s *Session) ClientPlayback(state string, playedMs int) {
 	s.mu.Lock()
 	now := s.now()
@@ -772,7 +772,7 @@ func (s *Session) ClientPlayback(state string, playedMs int) {
 	}
 	s.mu.Unlock()
 	if cutFact != "" {
-		// The voice cannot see the phone: tell it what the CEO heard
+		// The voice cannot see the phone: tell it what the user heard
 		// of the line they talked over (a fact, not a re-queue).
 		_ = s.PushTagged(cutFact, voice.UrgencySilent, map[string]any{"kind": "delivery", "from": "daemon"})
 	}
@@ -792,7 +792,7 @@ func (s *Session) LastPlayback() voice.PlaybackReport {
 
 // LastSpeechOnset is when the client's speech detector last opened (ok
 // false when it never reported one): the echo guard tells the
-// shepherd's answer, begun after the voice stopped playing, from its
+// user's answer, begun after the voice stopped playing, from its
 // echo, begun while it played.
 func (s *Session) LastSpeechOnset() (time.Time, bool) {
 	s.mu.Lock()

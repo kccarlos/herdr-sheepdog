@@ -8,8 +8,8 @@ import (
 )
 
 // The ear cap (docs/history/bench-2026-10-03.md #13): the harness does not judge
-// how much a spoken line should say, the brain's prompt does (short by
-// default, longer when the shepherd asks for detail). The code only stops
+// how much a spoken line should say, the orchestrator's prompt does (short by
+// default, longer when the user asks for detail). The code only stops
 // a runaway: one high cap for every spoken line, about 45 seconds of
 // speech, measured by estimated speaking time so Chinese and English
 // (and mixed text) are treated alike.
@@ -340,7 +340,7 @@ func joinSentences(parts ...string) string {
 
 // Chinese reports whether s holds Chinese characters: the one language
 // test the daemon makes, for the few code sentences it speaks without
-// the brain (zh or en, matched to the shepherd's last words).
+// the orchestrator (zh or en, matched to the user's last words).
 func Chinese(s string) bool {
 	for _, r := range s {
 		if unicode.Is(unicode.Han, r) {

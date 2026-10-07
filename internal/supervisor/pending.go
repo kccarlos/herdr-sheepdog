@@ -177,12 +177,12 @@ func (s *Supervisor) ExpirePending() {
 // what was dropped: the pane may already be asking something else.
 //
 // A menu on a pane herdr does not report blocked (Codex's update menu
-// shows on an idle pane; tools.go's menuOnScreen tells the brain about
-// it) is revived too, but only when the shepherd's newest words are
+// shows on an idle pane; tools.go's menuOnScreen tells the orchestrator about
+// it) is revived too, but only when the user's newest words are
 // about it (wordsAboutMenuLocked): they name one of its options or words
 // of its question. The rail then checks those words as for any prompt.
 // Caller holds s.mu; ok is false when the pane is gone or working, its
-// screen does not parse as a prompt, or — not blocked — the shepherd's
+// screen does not parse as a prompt, or — not blocked — the user's
 // words are not about the menu (why says so).
 func (s *Supervisor) revivePrompt(ctx context.Context, paneID, source string) (p state.PendingAction, ok bool, why string) {
 	row, found := s.store.Get(paneID)
@@ -207,11 +207,11 @@ func (s *Supervisor) revivePrompt(ctx context.Context, paneID, source string) (p
 	return p, true, ""
 }
 
-// menuStopWords are words too common to tie the shepherd's words to a
+// menuStopWords are words too common to tie the user's words to a
 // menu.
 var menuStopWords = map[string]bool{"the": true, "and": true, "for": true, "you": true, "your": true, "this": true, "that": true, "with": true, "now": true, "what": true, "want": true, "would": true, "like": true, "tell": true, "can": true, "please": true, "it's": true, "its": true}
 
-// wordsAboutMenuLocked reports whether the shepherd's newest words are
+// wordsAboutMenuLocked reports whether the user's newest words are
 // about prompt, a menu on row's idle pane: they share a word (three
 // letters or more, not the agent's own name or a common word) with one
 // of its answer options or its question, or pick an option by number.
@@ -396,7 +396,7 @@ func answerOptions(p state.PendingAction) []state.Option {
 }
 
 // replacedLine is the spoken line for a question that displaces another
-// pane's: in the shepherd's language, like the summary it carries (no
+// pane's: in the user's language, like the summary it carries (no
 // "。." seam, docs/eval/eval-campaign-2026-10-03.md H1/H4).
 func replacedLine(oldAlias, summary string, zh bool) string {
 	if zh {

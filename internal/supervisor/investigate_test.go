@@ -66,7 +66,7 @@ func (f *fakeInvestigator) all() []InvestigationQuery {
 // these tests.
 const investigateAnswer = "The clamp test asserts the wrong bound, so the rerun failed the same way."
 
-// newInvestigationHarness is a brain harness whose delivery turn answers
+// newInvestigationHarness is an orchestrator harness whose delivery turn answers
 // with investigateAnswer and whose CLI sub-agent is fake.
 func newInvestigationHarness(t *testing.T, f *fakeInvestigator, opts ...func(*Config)) *harness {
 	t.Helper()
@@ -90,7 +90,7 @@ func mustReply(r brain.Reply) string {
 	return string(b)
 }
 
-// start runs the investigate tool the way the brain's Host does.
+// start runs the investigate tool the way the orchestrator's Host does.
 func start(t *testing.T, h *harness, question, followUpOf, asked string) brain.InvestigationStart {
 	t.Helper()
 	s, err := h.sup.startInvestigation(context.Background(), "w5:p1", brain.InvestigationRequest{Question: question, FollowUpOf: followUpOf, Asked: asked, Turn: 1})
@@ -254,7 +254,7 @@ func TestInvestigationFollowUpResumesSession(t *testing.T) {
 
 // TestShutdownWaitsForInvestigationDelivery: a job that finished just
 // before the daemon stops is composing its answer (the delivery turn);
-// shutdown ends that turn and waits for it, so the brain the daemon
+// shutdown ends that turn and waits for it, so the orchestrator the daemon
 // closes next has no turn running (the race CI caught on PR #63), and
 // nothing is pushed into a voice that is going down.
 func TestShutdownWaitsForInvestigationDelivery(t *testing.T) {
@@ -359,7 +359,7 @@ func TestStopCancelsInvestigation(t *testing.T) {
 	}
 }
 
-// TestInvestigationWithoutBrain: with the brain off the daemon still
+// TestInvestigationWithoutBrain: with the orchestrator off the daemon still
 // says the look is done and keeps the answer in the ledger.
 func TestInvestigationWithoutBrain(t *testing.T) {
 	f := &fakeInvestigator{answer: "It ran out of disk."}
@@ -380,7 +380,7 @@ func TestInvestigationWithoutBrain(t *testing.T) {
 	}
 }
 
-// TestInvestigationNeedsAQueryTool: with no CLI tool the brain is told
+// TestInvestigationNeedsAQueryTool: with no CLI tool the orchestrator is told
 // so rather than left waiting.
 func TestInvestigationNeedsAQueryTool(t *testing.T) {
 	h := newHarness(t)
@@ -392,11 +392,11 @@ func TestInvestigationNeedsAQueryTool(t *testing.T) {
 
 // P2-10 (docs/eval/eval-campaign-2026-10-03.md run C, deepseek,
 // detail-what-exactly r5): "The look into bench-claude did not get
-// through" gave no reason, and the brain then had the worker read its
-// README out itself. The cause is now a fact on the record (the brain's
+// through" gave no reason, and the orchestrator then had the worker read its
+// README out itself. The cause is now a fact on the record (the orchestrator's
 // Investigations section) and a short honest reason in the spoken line,
-// in the shepherd's language. No CLI helper is the exception (campaign D
-// N8): that line was jargon to the CEO, so the brain gets the fact and
+// in the user's language. No CLI helper is the exception (campaign D
+// N8): that line was jargon to the user, so the orchestrator gets the fact and
 // phrases what it means.
 func TestInvestigationFailureSaysWhy(t *testing.T) {
 	cases := []struct {

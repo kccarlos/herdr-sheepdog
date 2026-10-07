@@ -11,7 +11,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
 )
 
-// SimTurn is what the simulated CEO does next.
+// SimTurn is what the simulated user does next.
 type SimTurn struct {
 	// Kind is say, wait (stay quiet until sheepdog reports back) or end
 	// (end_call).
@@ -37,7 +37,7 @@ const (
 	TurnEnd  = "end"
 )
 
-// SimUser plays the CEO.
+// SimUser plays the user.
 type SimUser interface {
 	Next(ctx context.Context, sc SimScenario, convo []SimLine) (SimTurn, error)
 }
@@ -108,7 +108,7 @@ func (u *LLMSimUser) Next(ctx context.Context, sc SimScenario, convo []SimLine) 
 		system = fmt.Sprintf(simUserAgendaSystem, sc.Goal, persona, lang, agendaList(sc.Agenda, next, stuck))
 		tools = simUserAgendaTools
 		if waitedSinceSpoke(convo) {
-			// Already waited since the CEO last spoke: talk now (a
+			// Already waited since the user last spoke: talk now (a
 			// second wait only runs the silence cap down).
 			tools = nil
 		}
@@ -191,7 +191,7 @@ func agendaState(sc SimScenario, convo []SimLine) (next, stuck int, t SimTurn, d
 	return next, stuck, SimTurn{}, false
 }
 
-// waitedSinceSpoke reports whether the CEO already waited (a wait
+// waitedSinceSpoke reports whether the user already waited (a wait
 // marker) since their last line.
 func waitedSinceSpoke(convo []SimLine) bool {
 	for i := len(convo) - 1; i >= 0; i-- {
@@ -248,7 +248,7 @@ func agendaTurn(t SimTurn, next, stuck int) SimTurn {
 	return t
 }
 
-// simUserContents renders the conversation from the CEO's side: their own
+// simUserContents renders the conversation from the user's side: their own
 // lines are the model's turns, sheepdog's are the user's.
 func simUserContents(convo []SimLine) []*genai.Content {
 	var out []*genai.Content

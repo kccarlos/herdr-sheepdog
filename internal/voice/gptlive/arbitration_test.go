@@ -29,7 +29,7 @@ func queue(s *Session, text string, tags map[string]any) {
 }
 
 // TestGPTLiveOwedPushOvertakesIdleNews: docs/timelines.md C29 on
-// GPT-Live — the answer to the shepherd's utterance queued behind idle
+// GPT-Live — the answer to the user's utterance queued behind idle
 // news goes first once the voice stops speaking.
 func TestGPTLiveOwedPushOvertakesIdleNews(t *testing.T) {
 	s, now := pickSession(t)

@@ -82,12 +82,12 @@ func (b *Brain) Turn(ctx context.Context, req Request) (Reply, error) {
 		return Reply{}, fmt.Errorf("%w: %w", ErrFallback, ErrNoHost)
 	}
 	// An utterance may turn out to be an instruction, so it gets the
-	// longer budget: the brain decides what it is (docs/roles.md "One
+	// longer budget: the orchestrator decides what it is (docs/roles.md "One
 	// decision-maker").
 	timeout := b.cfg.UtteranceTimeout
 	switch {
 	case req.Kind == KindInvestigation:
-		// The answer the CEO is owed, composed from a result that took
+		// The answer the user is owed, composed from a result that took
 		// minutes to get: it gets the longer budget, not the announce
 		// turn's, which exists to beat the code sentence.
 		timeout = b.cfg.UtteranceTimeout
@@ -95,7 +95,7 @@ func (b *Brain) Turn(ctx context.Context, req Request) (Reply, error) {
 	case req.Kind.IsEvent():
 		timeout = b.cfg.AnnounceTurnTimeout
 		if req.Owed || len(req.Promises) > 0 {
-			// The shepherd is owed this line (docs/roles.md "Pushes"):
+			// The user is owed this line (docs/roles.md "Pushes"):
 			// it gets the longer budget.
 			timeout = b.cfg.AnnounceTimeout
 		}
@@ -110,7 +110,7 @@ func (b *Brain) Turn(ctx context.Context, req Request) (Reply, error) {
 	key := ""
 	if req.Trigger == TriggerEvent {
 		// Event turns about the same agent coalesce — but a delivery
-		// turn is not a worker event: an answer the CEO waited minutes
+		// turn is not a worker event: an answer the user waited minutes
 		// for must not be dropped because the same agent printed a line
 		// meanwhile, so it coalesces only with a newer delivery.
 		key = req.Agent
@@ -149,7 +149,7 @@ func (b *Brain) run(ctx context.Context, t *turn) (Reply, error) {
 	b.turns++
 	t.n = b.turns
 	if t.req.Trigger == TriggerCEO {
-		// Whatever the CEO said before this tool call is the utterance
+		// Whatever the user said before this tool call is the utterance
 		// that caused it, final or not.
 		b.flushInLocked()
 	}
@@ -198,8 +198,8 @@ func (b *Brain) run(ctx context.Context, t *turn) (Reply, error) {
 			return b.fail(t, reasonFor(err), err)
 		}
 		if t.req.Trigger == TriggerEvent {
-			// The CEO comes first: an event turn gives way before its
-			// next model call when a CEO turn is waiting for the lock
+			// The user comes first: an event turn gives way before its
+			// next model call when a user turn is waiting for the lock
 			// (the step in flight is never cut short; a turn that
 			// answered in the step before returns its answer).
 			if n := b.lock.ceoWaiting(); n > 0 {
@@ -423,7 +423,7 @@ func (b *Brain) execCalls(ctx context.Context, t *turn, resp *genai.GenerateCont
 // the template had already carried. The update goes in the window and
 // one more answer-only step runs; whether to skip, add or correct is the
 // model's (docs/timelines.md, "announce wait"). Once per turn, never past MaxSteps,
-// never for a CEO turn, never for a line that would not be spoken.
+// never for a user turn, never for a line that would not be spoken.
 func (b *Brain) recheck(t *turn, step int, reply Reply) bool {
 	if t.prior != nil || t.req.Trigger != TriggerEvent || t.req.Facts == nil || step >= b.cfg.MaxSteps {
 		return false
@@ -454,7 +454,7 @@ func (b *Brain) fail(t *turn, reason string, cause error) (Reply, error) {
 	if t.prior != nil {
 		// The recheck step did not answer. The first answer was written
 		// as if nothing had been said, so it is no answer to the event as
-		// it stands — except on an owed event (a kept promise, the CEO's
+		// it stands — except on an owed event (a kept promise, the user's
 		// own request), where it is the finding they are waiting for and
 		// stands as it would have without the recheck. Otherwise the turn
 		// falls back like any other: the line already spoken carried the
@@ -498,7 +498,7 @@ func (b *Brain) logTurn(t *turn, fallback bool) {
 
 // afterTurn prunes, hands the lock over, then compacts. The summary call
 // runs without the turn lock (it took up to 14 s in the logs, and the
-// CEO's next utterance queued behind it): the engine discards a summary
+// user's next utterance queued behind it): the engine discards a summary
 // whose messages changed meanwhile (ErrCompactionStale), and at most one
 // compaction runs at a time — the next turn's after-work retries.
 func (b *Brain) afterTurn(t *turn) {
@@ -758,7 +758,7 @@ func reasonFor(err error) string {
 // thought: thinking off whatever is configured — Gemini's minimal level,
 // DeepSeek's thinking disabled (buildRequest reads the minimal level so)
 // — which the captures priced at ~470 reasoning tokens, ~2.3 s, per step
-// (docs/iteration-2.md WP5). A CEO turn keeps the configured level.
+// (docs/iteration-2.md WP5). A user turn keeps the configured level.
 func turnThinking(trigger Trigger, level string) *genai.ThinkingConfig {
 	if trigger == TriggerEvent {
 		return thinkingOff()

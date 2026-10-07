@@ -25,9 +25,9 @@ func speak(h *harness, fragments []string) {
 }
 
 // The echo text guard (#48, #63, #108) is gone (dual-brain ablation G6):
-// the words reach the brain with the fact that they began just after the
-// voice's own line played, and what that line was; the brain judges
-// whether they are the CEO.
+// the words reach the orchestrator with the fact that they began just after the
+// voice's own line played, and what that line was; the orchestrator judges
+// whether they are the user.
 func TestWordsAfterTheVoiceLineCarryTheEchoFact(t *testing.T) {
 	m := braintest.NewModel(braintest.Step{Text: braintest.Reply("Still no change.", "")})
 	h := newBrainHarness(t, m)

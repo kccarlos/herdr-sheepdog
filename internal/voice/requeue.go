@@ -6,42 +6,42 @@ import (
 )
 
 // Owed unheard lines, shared by the providers' sessions. A spoken push
-// judged unheard (heard.go) that the shepherd is owed a hearing of waits
+// judged unheard (heard.go) that the user is owed a hearing of waits
 // here for a quiet moment (RequeueHold and the session's own checks),
 // then goes back in the push queue once — or is dropped, when what the
 // line was for has already happened.
 //
 // Campaign D (docs/eval/campaign-d-2026-10-03.md N3): of the 15
-// unheard pushes that were not re-queued, 13 answered the shepherd's own
+// unheard pushes that were not re-queued, 13 answered the user's own
 // question (answers_utterance). The voice had said "On it." or
 // "Checking." in their place, or the line was cut, and the answer was
 // lost for good. An answer is now owed too, unless by the time it would
 // go back it is stale: a newer answer went out since it was sent (to the
-// same question, or to a newer one), or the shepherd has since handed
+// same question, or to a newer one), or the user has since handed
 // the voice new words (to_supervisor, or stop). A stale answer is not
-// re-queued; the brain gets the unheard fact instead (EventPushUnheard
+// re-queued; the orchestrator gets the unheard fact instead (EventPushUnheard
 // with Requeue false), as for any other unheard line.
 //
 // #111's collision-finish-push runs (2 of 6, and 4 of 6 in its two
-// arms together): the CEO talked over a kept-promise finish line ("…is
+// arms together): the user talked over a kept-promise finish line ("…is
 // done. It added the changelog note…"), asked "did it touch the
 // changelog?", and the voice answered from the part it had voiced ("Yes,
 // it added the changelog note about the fix…"). The re-queued line then
 // replayed the same news. A line whose content has reached the
-// shepherd since — in what the voice said after the verdict, the voice's
+// user since — in what the voice said after the verdict, the voice's
 // own replies and later pushes alike — is now dropped
 // (voice.push_dropped {reason: already_heard}).
 
 // Reasons an owed line is dropped instead of going back in the queue
 // (voice.push_dropped).
 const (
-	DropAlreadyHeard = "already_heard"  // its content reached the shepherd since
+	DropAlreadyHeard = "already_heard"  // its content reached the user since
 	DropSuperseded   = "superseded"     // an answer: a newer answer went out since
-	DropAskedSince   = "asked_since"    // an answer: the shepherd has handed on new words since
+	DropAskedSince   = "asked_since"    // an answer: the user has handed on new words since
 	DropNoLongerOpen = "no_longer_open" // the supervisor says it is no longer open
 )
 
-// maxAsks bounds the shepherd's recent hand-offs a Requeue remembers;
+// maxAsks bounds the user's recent hand-offs a Requeue remembers;
 // maxSaidSince bounds what it keeps of the voice's words per line.
 const (
 	maxAsks      = 16
@@ -54,7 +54,7 @@ const (
 type Requeue struct {
 	lines []owedLine
 	// lastAnswer is when the last spoken push answering an utterance was
-	// sent; asks are the shepherd's words the voice handed on since.
+	// sent; asks are the user's words the voice handed on since.
 	lastAnswer time.Time
 	asks       []handOff
 }
@@ -78,12 +78,12 @@ type Release struct {
 	Drop string
 	// Tell: the line is dropped without having been heard; the session
 	// emits EventPushUnheard (Requeue false) so the supervisor tells the
-	// brain.
+	// orchestrator.
 	Tell bool
 }
 
 // Owed reports whether an unheard push goes back in the queue: never a
-// re-queue itself; an answer to the shepherd's question unless it is
+// re-queue itself; an answer to the user's question unless it is
 // already stale; otherwise a decision they must take, a kept or due
 // promise, or a line the supervisor's open check says is still open
 // (open: the session asks the check outside its lock).
@@ -128,7 +128,7 @@ func (r *Requeue) Pushed(now time.Time, tags map[string]any) {
 	}
 }
 
-// Asked records the voice handing on the shepherd's words (to_supervisor
+// Asked records the voice handing on the user's words (to_supervisor
 // with their text, stop with none).
 func (r *Requeue) Asked(now time.Time, text string) {
 	r.asks = append(r.asks, handOff{at: now, text: text})
@@ -141,8 +141,8 @@ func (r *Requeue) Asked(now time.Time, text string) {
 func (r *Requeue) Reset() { *r = Requeue{} }
 
 // Take empties the waiting lines and says what to do with each: an
-// answer when stale (superseded, asked_since; the brain is told); any
-// line whose content has reached the shepherd since (already_heard);
+// answer when stale (superseded, asked_since; the orchestrator is told); any
+// line whose content has reached the user since (already_heard);
 // otherwise back in the queue — after the session has
 // asked the supervisor's open check where OpenCheckDecides
 // (no_longer_open), outside its lock.
@@ -151,10 +151,10 @@ func (r *Requeue) Take() []Release {
 	for i := range r.lines {
 		l := &r.lines[i]
 		rel := Release{Push: l.push}
-		// A stale answer first: the brain is told, and it can see in its
+		// A stale answer first: the orchestrator is told, and it can see in its
 		// transcript whether the voice retold it since (campaign D
 		// barge-in-long-answer: a later answer's words covered an earlier
-		// one the CEO had cut off).
+		// one the user had cut off).
 		if PushUtterance(l.push.Tags) != "" {
 			rel.Drop = r.stale(l.push)
 			rel.Tell = rel.Drop != ""
@@ -169,10 +169,10 @@ func (r *Requeue) Take() []Release {
 }
 
 // stale says why an answer would no longer be news ("" when it would):
-// a newer answer went out after it was sent, or the shepherd handed on
+// a newer answer went out after it was sent, or the user handed on
 // new words after it was sent. The voice relaying the push's own text
 // back (supervisor.self_relay, campaign D lang-mixed-codeswitch r1) is
-// not the shepherd's words.
+// not the user's words.
 func (r *Requeue) stale(v UnheardPush) string {
 	if v.SentAt.IsZero() {
 		return ""
@@ -183,7 +183,7 @@ func (r *Requeue) stale(v UnheardPush) string {
 	// The words the answer answers: the last hand-off before it was sent.
 	// The voice calling again with exactly those words after the answer
 	// came (seen with the answer as a late function response: "On it.",
-	// the same question again, the body never read) is not the shepherd
+	// the same question again, the body never read) is not the user
 	// asking something new.
 	var asked string
 	for _, a := range r.asks {
@@ -206,7 +206,7 @@ func (r *Requeue) stale(v UnheardPush) string {
 	return ""
 }
 
-// alreadyHeard reports whether a line's content reached the shepherd:
+// alreadyHeard reports whether a line's content reached the user:
 // what they heard of it plus what the voice said after the verdict
 // covers at least HeardMinCoverage of its content words
 // (ContentCoverage), and the words said since added to it. Content

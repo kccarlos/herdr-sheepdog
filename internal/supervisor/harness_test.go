@@ -197,7 +197,7 @@ func newHarness(t *testing.T, opts ...func(*Config)) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// inputGrace off: a relay with no shepherd input is refused at once
+	// inputGrace off: a relay with no user input is refused at once
 	// rather than after waiting for a transcript that will not come.
 	// relayAfter off: a heard utterance nobody relays stays unrelayed
 	// unless a test turns the daemon's relay on (relay_test.go).
@@ -213,7 +213,7 @@ func newHarness(t *testing.T, opts ...func(*Config)) *harness {
 	}
 	h.sup.SetVoiceConnected(true)
 	// The daemon's shutdown order: the supervisor's background turns end
-	// before the brain closes (withBrain's cleanup, registered earlier,
+	// before the orchestrator closes (withBrain's cleanup, registered earlier,
 	// runs later).
 	t.Cleanup(h.sup.shutdown)
 	return h
@@ -294,14 +294,14 @@ func (h *harness) call(name string, args map[string]any) voice.ToolResult {
 }
 
 // roster is the roster sentence every request carries and a status
-// question with no brain is answered with (composeBriefing, served from
+// question with no orchestrator is answered with (composeBriefing, served from
 // the cache).
 func (h *harness) roster() string {
 	text, _ := h.sup.briefingText()
 	return text
 }
 
-// send is what the brain's prompt tool does: an instruction typed into
+// send is what the orchestrator's prompt tool does: an instruction typed into
 // the pane, with the send_instruction pending action around it (the
 // template path used to reach this through propose).
 func (h *harness) send(pane, text string) voice.ToolResult {
@@ -314,7 +314,7 @@ func (h *harness) send(pane, text string) voice.ToolResult {
 	return res
 }
 
-// say is the shepherd saying text: the voice's input transcription of
+// say is the user saying text: the voice's input transcription of
 // it, then the voice model relaying it verbatim through to_supervisor
 // (fast paths included).
 func (h *harness) say(text string) voice.ToolResult {
@@ -323,14 +323,14 @@ func (h *harness) say(text string) voice.ToolResult {
 	return h.relay(text)
 }
 
-// hear is the voice's input transcription of the shepherd saying text,
+// hear is the voice's input transcription of the user saying text,
 // with nothing relayed yet.
 func (h *harness) hear(text string) {
 	h.sup.OnVoiceEvent(voice.EventTranscript{Dir: voice.DirIn, Text: text, Final: true})
 }
 
 // relay is the voice model calling to_supervisor with text, whether or
-// not the shepherd said anything.
+// not the user said anything.
 func (h *harness) relay(text string) voice.ToolResult {
 	h.t.Helper()
 	return h.call(ToolToSupervisor, map[string]any{"text": text})
@@ -343,7 +343,7 @@ func payload(e logging.Line) map[string]any {
 }
 
 // noFreshWords reports whether res is the silent fact a to_supervisor
-// call with no new CEO words gets (no brain turn ran).
+// call with no new user words gets (no orchestrator turn ran).
 func noFreshWords(res voice.ToolResult) bool {
 	return res.Scheduling == voice.UrgencySilent && strings.HasPrefix(res.Spoken, "Nothing was handed on")
 }

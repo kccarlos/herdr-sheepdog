@@ -12,8 +12,8 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
 
-// The brain's failover notice reaches the CEO as a spoken daemon push
-// (SetNotifier wired in New) and lands in the brain's transcript: three
+// The orchestrator's failover notice reaches the user as a spoken daemon push
+// (SetNotifier wired in New) and lands in the orchestrator's transcript: three
 // turns in a row fail over from the selected provider, one line is said.
 func TestBrainFailoverNoticeIsSpoken(t *testing.T) {
 	primary := braintest.NewModel()
@@ -33,7 +33,7 @@ func TestBrainFailoverNoticeIsSpoken(t *testing.T) {
 			t.Fatalf("turn %d result = %+v", i, res)
 		}
 	}
-	b.Quiesce() // the notice goes out as the brain's after-turn work
+	b.Quiesce() // the notice goes out as the orchestrator's after-turn work
 	const want = "My usual model is having trouble; a backup is answering for now."
 	var spoken []voice.EventPush
 	for _, p := range h.pusher.all() {
@@ -58,9 +58,9 @@ func TestBrainFailoverNoticeIsSpoken(t *testing.T) {
 	}
 }
 
-// The notice names no vendor and follows the CEO's language (tier-2
+// The notice names no vendor and follows the user's language (tier-2
 // bench 2026-10-03 #7: "DeepSeek is failing; using Vertex for now." made
-// the simulated CEO ask about "the Vertex worker").
+// the simulated user ask about "the Vertex worker").
 func TestBrainFailoverNoticeInChinese(t *testing.T) {
 	primary := braintest.NewModel()
 	primary.Default = &braintest.Step{Err: genai.APIError{Code: 503, Message: "high demand", Status: "UNAVAILABLE"}}

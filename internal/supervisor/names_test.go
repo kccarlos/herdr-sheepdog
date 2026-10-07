@@ -70,12 +70,12 @@ func TestSpokenNamesFromTitlesReachRosterAndVoice(t *testing.T) {
 		t.Fatalf("row = %+v", row)
 	}
 
-	// The CEO hears that name (a spoken push as it reaches the voice).
+	// The user hears that name (a spoken push as it reaches the voice).
 	h.sup.OnVoiceEvent(voice.EventPush{Text: "Claude is working on the README.", Urgency: voice.UrgencyIdle})
 
 	// A second Claude in the same project: the first keeps the name the
-	// CEO heard (pinned; phone test 2026-10-04, an auto-title renamed an
-	// agent the CEO knew), and the newcomer takes the next free form.
+	// user heard (pinned; phone test 2026-10-04, an auto-title renamed an
+	// agent the user knew), and the newcomer takes the next free form.
 	h.claudeIn("w2:p1", docsSession, herdr.StateWorking)
 	lines := h.namesLines()
 	if len(lines) != 2 || !strings.Contains(lines[1], "Claude, sheepdog Claude") {
@@ -113,7 +113,7 @@ func TestSpokenNamesFromTitlesReachRosterAndVoice(t *testing.T) {
 		t.Errorf("names lines after the second exited = %q", lines)
 	}
 
-	// The CEO's words resolve by spoken name and by title.
+	// The user's words resolve by spoken name and by title.
 	rows := h.store.List()
 	if r, ok := findAlias(rows, "Claude"); !ok || r.PaneID != "w1:p1" {
 		t.Errorf("findAlias(Claude) = %v, %v", r.PaneID, ok)
@@ -123,7 +123,7 @@ func TestSpokenNamesFromTitlesReachRosterAndVoice(t *testing.T) {
 	}
 }
 
-// "Call that one docs": the brain's note tool with agent and name
+// "Call that one docs": the orchestrator's note tool with agent and name
 // renames through herdr and the roster, and the voice hears the new
 // name.
 func TestRenameThroughNoteTool(t *testing.T) {
@@ -152,7 +152,7 @@ func TestRenameThroughNoteTool(t *testing.T) {
 	if row.Name != "docs" || row.Spoken != "docs" || row.SpokenWas != "docs pass Claude" {
 		t.Errorf("row after rename = %+v", row)
 	}
-	// The other Claude is the only one of its kind without a CEO name.
+	// The other Claude is the only one of its kind without a user name.
 	if other, _ := h.store.Get("w1:p1"); other.Spoken != "Claude" {
 		t.Errorf("other row = %+v", other)
 	}
@@ -190,10 +190,10 @@ func TestRenameEdgeCases(t *testing.T) {
 // herdrNameRule is herdr 0.9.3's agent.rename check, for a mock herdr.
 var herdrNameRule = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,31}$`)
 
-// The CEO's phone session, 2026-10-04 05:00:43: "kvoice explainer" went
+// The user's phone session, 2026-10-04 05:00:43: "kvoice explainer" went
 // to herdr as typed, herdr refused it (invalid_agent_name) and the
 // daemon still logged supervisor.rename and said it was done. herdr now
-// gets its own spelling, the CEO's spoken form stays, and herdr echoing
+// gets its own spelling, the user's spoken form stays, and herdr echoing
 // its spelling back does not replace the spoken form.
 func TestRenameSendsHerdrSafeNameAndKeepsSpokenForm(t *testing.T) {
 	h := newHarness(t, withTitleFixtures(t))
@@ -239,7 +239,7 @@ func TestRenameSendsHerdrSafeNameAndKeepsSpokenForm(t *testing.T) {
 }
 
 // A name herdr refuses, or cannot carry at all, is reported as such: the
-// echo the brain reads says herdr kept its old label, and the log says
+// echo the orchestrator reads says herdr kept its old label, and the log says
 // refused, never a plain success.
 func TestRenameReportsHerdrRefusal(t *testing.T) {
 	h := newHarness(t, withTitleFixtures(t))
@@ -265,7 +265,7 @@ func TestRenameReportsHerdrRefusal(t *testing.T) {
 	}
 }
 
-// A CEO name in Chinese starts the briefing's trailer intact (the first
+// A user name in Chinese starts the briefing's trailer intact (the first
 // rune upper-cased, never a cut byte).
 func TestPendingTrailerKeepsRunes(t *testing.T) {
 	agents := []state.Agent{{PaneID: "w1:p1", Alias: "x-claude", Name: "文档", Spoken: "文档", State: herdr.StateBlocked}}
@@ -333,9 +333,9 @@ func TestHerdrRenameIsNameOnly(t *testing.T) {
 	}
 }
 
-// Tier-3 bench 2026-10-03, finding 5: on a fresh call the brain said
-// "previously bench Claude" about a name the CEO had never heard. The
-// roster gives the brain an old name only when it went out to the CEO
+// Tier-3 bench 2026-10-03, finding 5: on a fresh call the orchestrator said
+// "previously bench Claude" about a name the user had never heard. The
+// roster gives the orchestrator an old name only when it went out to the user
 // before.
 func TestOldNameOnlyWhenTheCEOHeardIt(t *testing.T) {
 	spokenWas := func(h *harness) string {
@@ -358,7 +358,7 @@ func TestOldNameOnlyWhenTheCEOHeardIt(t *testing.T) {
 		}
 	})
 	t.Run("said in a reply", func(t *testing.T) {
-		// Heard by the CEO, the name is pinned: it never changes, so
+		// Heard by the user, the name is pinned: it never changes, so
 		// there is no old name to mention.
 		h := newHarness(t, withTitleFixtures(t))
 		h.claudeIn("w1:p1", readmeSession, herdr.StateWorking)

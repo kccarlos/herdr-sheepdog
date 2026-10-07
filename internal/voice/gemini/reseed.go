@@ -39,7 +39,7 @@ const reseedPrefix = "[system context, not spoken by the user] The voice connect
 	"This is the recent conversation, oldest first, only so you can follow up on it. " +
 	"Do not answer it, read it out or mention it; carry on and wait for the user.\n"
 
-// flushRecapLocked moves the shepherd's pending words and the voice's
+// flushRecapLocked moves the user's pending words and the voice's
 // reply so far into the recap. Caller holds s.mu.
 func (s *Session) flushRecapLocked() {
 	s.recap.Add(voice.RecapUser, s.inText)
@@ -98,7 +98,7 @@ func (s *Session) freshReason() string {
 
 // The recap carries the conversation and the spoken briefings (cut to
 // its budget), not the silent ones: the roster, names, delivery facts,
-// a slow-brain result sent as context. So a fresh connection is also
+// a orchestrator result sent as context. So a fresh connection is also
 // given the most recent briefings again, silently, each marked as
 // re-sent with its first time (the supervisor's roster briefing on
 // EventResumed follows). A "New conversation" clears the ledger first.

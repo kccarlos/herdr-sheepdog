@@ -5,6 +5,6 @@
 // sentences, no paths, hashes, URLs or pane ids — whatever the model
 // produced).
 //
-// Nothing here calls a model: the brain (internal/brain) is the only
+// Nothing here calls a model: the orchestrator (internal/brain) is the only
 // component that does.
 package prose

@@ -90,9 +90,9 @@ func (l Chattiness) allows(k pushKind) bool {
 // without knowing the other.
 type Settings struct {
 	Chattiness Chattiness `json:"chattiness,omitempty"`
-	// Languages is the shepherd's language preference, most preferred
-	// first (internal/lang codes). Information for both brains: the
-	// slow brain's state block and the voice's system instruction say
+	// Languages is the user's language preference, most preferred
+	// first (internal/lang codes). Information for the voice and the orchestrator: the
+	// orchestrator's state block and the voice's system instruction say
 	// it, and a change reaches a running voice session as silent context.
 	Languages []string `json:"languages"`
 }

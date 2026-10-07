@@ -81,7 +81,7 @@ type ContextResponse struct {
 	Now             time.Time             `json:"now"`
 }
 
-// brainOrUnavailable answers 503 with the reason when no brain is
+// brainOrUnavailable answers 503 with the reason when no orchestrator is
 // attached.
 func (s *Server) brainOrUnavailable(w http.ResponseWriter) (*brain.Brain, bool) {
 	if s.deps.Brain != nil {
@@ -91,7 +91,7 @@ func (s *Server) brainOrUnavailable(w http.ResponseWriter) (*brain.Brain, bool) 
 	if reason == "" {
 		reason = "not configured"
 	}
-	writeError(w, http.StatusServiceUnavailable, "the supervisor brain is off ("+reason+")")
+	writeError(w, http.StatusServiceUnavailable, "the orchestrator is off ("+reason+")")
 	return nil, false
 }
 
@@ -177,7 +177,7 @@ func (s *Server) handleBrainSystemPrompt(w http.ResponseWriter, r *http.Request)
 }
 
 // ProviderInfo is one model provider the picker may offer: registered
-// with the brain (Available) or not, with the reason ("no
+// with the orchestrator (Available) or not, with the reason ("no
 // DEEPSEEK_API_KEY") so /debug can list it greyed out rather than hide
 // it.
 type ProviderInfo struct {
@@ -201,7 +201,7 @@ func ProviderLabel(id string) string {
 
 // providers lists the providers for the API: Deps.BrainProviders when
 // the daemon set it (it knows why a provider is missing), else every
-// provider registered with the brain, available.
+// provider registered with the orchestrator, available.
 func (s *Server) providers(b *brain.Brain) []ProviderInfo {
 	if len(s.deps.BrainProviders) > 0 {
 		return append([]ProviderInfo(nil), s.deps.BrainProviders...)
@@ -227,8 +227,8 @@ func (s *Server) providerReason(b *brain.Brain, provider string) string {
 	return "unknown provider (registered: " + strings.Join(b.Providers(), ", ") + ")"
 }
 
-// BrainInfo is the brain field of GET /api/state: the provider and the
-// model the next turn runs on (omitted when the brain is off).
+// BrainInfo is the orchestrator field of GET /api/state: the provider and the
+// model the next turn runs on (omitted when the orchestrator is off).
 type BrainInfo struct {
 	Provider string `json:"provider"`
 	Model    string `json:"model"`
@@ -295,7 +295,7 @@ func (s *Server) handleBrainModels(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.brainModelsResponse(b, b.Models(ctx, provider, refresh)))
 }
 
-// registered reports whether provider is one the brain can run on.
+// registered reports whether provider is one the orchestrator can run on.
 func registered(b *brain.Brain, provider string) bool {
 	for _, id := range b.Providers() {
 		if id == provider {
@@ -312,7 +312,7 @@ type SetBrainModelRequest struct {
 	Model    string `json:"model"`
 }
 
-// handleSetBrainModel switches the brain's provider and model for the
+// handleSetBrainModel switches the orchestrator's provider and model for the
 // next turn and keeps the choice in the state file
 // (session.brain_provider, session.brain_model), so a restart uses it
 // over the configured brain.provider / brain.model. A provider that is
