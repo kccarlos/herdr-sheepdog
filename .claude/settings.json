@@ -20,7 +20,14 @@
       "Bash(/tmp/sheepdog:*)",
       "Bash(./sheepdog:*)",
       "Bash(claude -p:*)",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(cd:*)",
+      "Bash(git rev-parse:*)",
+      "Bash(git remote -v)",
+      "Bash(git branch:*)",
+      "Bash(ls:*)",
+      "Bash(cat:*)",
+      "Bash(jq:*)"
     ]
   },
   "enabledPlugins": {
