@@ -1,0 +1,18 @@
+[1/5] workday-morning-standup r2: pass (end_call, ) ≈ $0.0910, total ≈ $0.091
+[2/5] workday-morning-standup r3: pass (end_call, ) ≈ $0.0972, total ≈ $0.188
+[3/5] workday-morning-standup r1: pass (end_call, ) ≈ $0.1110, total ≈ $0.299
+[4/5] workday-morning-standup r4: pass (end_call, ) ≈ $0.0988, total ≈ $0.398
+[5/5] workday-morning-standup r5: pass (end_call, ) ≈ $0.1204, total ≈ $0.518
+  pass    workday-morning-standup r1  end_call  12 turns   86.9s                         ≈ $0.1110
+  pass    workday-morning-standup r2  end_call  12 turns   76.3s                         ≈ $0.0910
+  pass    workday-morning-standup r3  end_call  12 turns   77.8s                         ≈ $0.0972
+  pass    workday-morning-standup r4  end_call  12 turns   77.8s                         ≈ $0.0988
+  pass    workday-morning-standup r5  end_call  14 turns   91.9s                         ≈ $0.1204
+-- 5 runs, spend ≈ $0.5184 (estimate at list prices) --
+reports: docs/bench/results/2026-10-07-chatty/a0/parts/workday-morning-standup/report.json, docs/bench/results/2026-10-07-chatty/a0/parts/workday-morning-standup/report.md
+== eval sim, repeat 5 ==
+  workday-morning-standup  runs  5  pass  5  fail  0  err  0  not_run  0  rate  100%  –
+  TOTAL                    runs  5  pass  5  fail  0  err  0  not_run  0  rate  100%  –
+-- spend brain    deepseek-flash           calls   131  in   1541760  out    27819  reasoning    12754  ≈ $0.4869 --
+-- spend simuser  deepseek-flash           calls    57  in    102872  out     1057  reasoning        0  ≈ $0.0315 --
+-- spend total ≈ $0.5184 (estimate at list prices) --

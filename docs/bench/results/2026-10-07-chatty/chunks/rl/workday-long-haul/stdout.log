@@ -1,0 +1,20 @@
+[1/5] workday-long-haul r4: pass (end_call, ) ≈ $0.1281, total ≈ $0.128
+[2/5] workday-long-haul r3: pass (end_call, ) ≈ $0.1304, total ≈ $0.258
+[3/5] workday-long-haul r5: pass (end_call, ) ≈ $0.1420, total ≈ $0.400
+[4/5] workday-long-haul r2: pass (end_call, ) ≈ $0.1244, total ≈ $0.525
+[5/5] workday-long-haul r1: fail (end_call, brain_fallback) ≈ $0.1144, total ≈ $0.639
+  fail    workday-long-haul r1  end_call  14 turns  157.3s  brain_fallback         ≈ $0.1144
+          brain_fallback: yielded: brain: yielded to a CEO turn
+          missing_function_call: no prompt to bugs-codex
+  pass    workday-long-haul r2  end_call  14 turns  154.9s                         ≈ $0.1244
+  pass    workday-long-haul r3  end_call  15 turns  133.5s                         ≈ $0.1304
+  pass    workday-long-haul r4  end_call  14 turns  124.2s                         ≈ $0.1281
+  pass    workday-long-haul r5  end_call  14 turns  139.7s                         ≈ $0.1420
+-- 5 runs, spend ≈ $0.6393 (estimate at list prices) --
+reports: docs/bench/results/2026-10-07-chatty/chunks/rl/workday-long-haul/report.json, docs/bench/results/2026-10-07-chatty/chunks/rl/workday-long-haul/report.md
+== eval sim, repeat 5 ==
+  workday-long-haul  runs  5  pass  4  fail  1  err  0  not_run  0  rate   80%  brain_fallback ×1
+  TOTAL              runs  5  pass  4  fail  1  err  0  not_run  0  rate   80%  brain_fallback ×1
+-- spend brain    deepseek-flash           calls   147  in   1891286  out    34940  reasoning    16954  ≈ $0.5985 --
+-- spend simuser  deepseek-flash           calls    67  in    133754  out     1036  reasoning        0  ≈ $0.0407 --
+-- spend total ≈ $0.6393 (estimate at list prices) --

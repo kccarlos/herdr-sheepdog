@@ -1,0 +1,18 @@
+[1/5] workday-long-haul r4: pass (end_call, ) ≈ $0.1305, total ≈ $0.130
+[2/5] workday-long-haul r3: pass (end_call, ) ≈ $0.1336, total ≈ $0.264
+[3/5] workday-long-haul r1: pass (end_call, ) ≈ $0.1405, total ≈ $0.405
+[4/5] workday-long-haul r2: pass (end_call, ) ≈ $0.1446, total ≈ $0.549
+[5/5] workday-long-haul r5: pass (end_call, ) ≈ $0.1557, total ≈ $0.705
+  pass    workday-long-haul r1  end_call  14 turns  134.8s                         ≈ $0.1405
+  pass    workday-long-haul r2  end_call  17 turns  147.5s                         ≈ $0.1446
+  pass    workday-long-haul r3  end_call  14 turns  123.2s                         ≈ $0.1336
+  pass    workday-long-haul r4  end_call  14 turns  120.7s                         ≈ $0.1305
+  pass    workday-long-haul r5  end_call  14 turns  147.9s                         ≈ $0.1557
+-- 5 runs, spend ≈ $0.7049 (estimate at list prices) --
+reports: docs/bench/results/2026-10-07-chatty/chunks/r/workday-long-haul/report.json, docs/bench/results/2026-10-07-chatty/chunks/r/workday-long-haul/report.md
+== eval sim, repeat 5 ==
+  workday-long-haul  runs  5  pass  5  fail  0  err  0  not_run  0  rate  100%  –
+  TOTAL              runs  5  pass  5  fail  0  err  0  not_run  0  rate  100%  –
+-- spend brain    deepseek-flash           calls   163  in   2108437  out    37670  reasoning    19788  ≈ $0.6670 --
+-- spend simuser  deepseek-flash           calls    68  in    124375  out      968  reasoning        0  ≈ $0.0379 --
+-- spend total ≈ $0.7049 (estimate at list prices) --

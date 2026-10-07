@@ -1,0 +1,19 @@
+[1/5] workday-interruptions r4: pass (end_call, ) ≈ $0.0885, total ≈ $0.088
+[2/5] workday-interruptions r5: pass (end_call, ) ≈ $0.0819, total ≈ $0.170
+[3/5] workday-interruptions r2: pass (end_call, ) ≈ $0.0770, total ≈ $0.247
+[4/5] workday-interruptions r1: fail (end_call, brain_fallback) ≈ $0.0987, total ≈ $0.346
+[5/5] workday-interruptions r3: pass (end_call, ) ≈ $0.0879, total ≈ $0.434
+  fail    workday-interruptions r1  end_call  12 turns   86.8s  brain_fallback         ≈ $0.0987
+          brain_fallback: bad_reply: brain: reply without spoken text
+  pass    workday-interruptions r2  end_call  12 turns   81.8s                         ≈ $0.0770
+  pass    workday-interruptions r3  end_call  12 turns  103.0s                         ≈ $0.0879
+  pass    workday-interruptions r4  end_call  11 turns   74.7s                         ≈ $0.0885
+  pass    workday-interruptions r5  end_call  12 turns   78.1s                         ≈ $0.0819
+-- 5 runs, spend ≈ $0.4339 (estimate at list prices) --
+reports: docs/bench/results/2026-10-07-chatty/chunks/rl/workday-interruptions/report.json, docs/bench/results/2026-10-07-chatty/chunks/rl/workday-interruptions/report.md
+== eval sim, repeat 5 ==
+  workday-interruptions  runs  5  pass  4  fail  1  err  0  not_run  0  rate   80%  brain_fallback ×1
+  TOTAL                  runs  5  pass  4  fail  1  err  0  not_run  0  rate   80%  brain_fallback ×1
+-- spend brain    deepseek-flash           calls   120  in   1270299  out    27765  reasoning    14016  ≈ $0.4062 --
+-- spend simuser  deepseek-flash           calls    55  in     90618  out      964  reasoning        0  ≈ $0.0278 --
+-- spend total ≈ $0.4339 (estimate at list prices) --

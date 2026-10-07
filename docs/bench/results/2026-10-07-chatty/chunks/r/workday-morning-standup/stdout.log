@@ -1,0 +1,20 @@
+[1/5] workday-morning-standup r3: pass (end_call, ) ≈ $0.0852, total ≈ $0.085
+[2/5] workday-morning-standup r1: pass (end_call, ) ≈ $0.1160, total ≈ $0.201
+[3/5] workday-morning-standup r4: pass (end_call, ) ≈ $0.1186, total ≈ $0.320
+[4/5] workday-morning-standup r2: pass (end_call, ) ≈ $0.0911, total ≈ $0.411
+[5/5] workday-morning-standup r5: fail (end_call, brain_fallback) ≈ $0.1147, total ≈ $0.526
+  pass    workday-morning-standup r1  end_call  13 turns   88.2s                         ≈ $0.1160
+  pass    workday-morning-standup r2  end_call  12 turns  105.7s                         ≈ $0.0911
+  pass    workday-morning-standup r3  end_call  12 turns   71.6s                         ≈ $0.0852
+  pass    workday-morning-standup r4  end_call  13 turns   92.4s                         ≈ $0.1186
+  fail    workday-morning-standup r5  end_call  14 turns  170.7s  brain_fallback         ≈ $0.1147
+          brain_fallback: bad_reply: brain: reply without spoken text
+          unintended_action: sheepdog sent infra-codex the prompt "The plan looks good. Go ahead and apply it, moving the staging database to the new VPC. Tell me when it is done and what changed. When you finish, end with three …
+-- 5 runs, spend ≈ $0.5256 (estimate at list prices) --
+reports: docs/bench/results/2026-10-07-chatty/chunks/r/workday-morning-standup/report.json, docs/bench/results/2026-10-07-chatty/chunks/r/workday-morning-standup/report.md
+== eval sim, repeat 5 ==
+  workday-morning-standup  runs  5  pass  4  fail  1  err  0  not_run  0  rate   80%  brain_fallback ×1
+  TOTAL                    runs  5  pass  4  fail  1  err  0  not_run  0  rate   80%  brain_fallback ×1
+-- spend brain    deepseek-flash           calls   134  in   1555415  out    28414  reasoning    14514  ≈ $0.4924 --
+-- spend simuser  deepseek-flash           calls    61  in    108466  out     1055  reasoning        0  ≈ $0.0332 --
+-- spend total ≈ $0.5256 (estimate at list prices) --
