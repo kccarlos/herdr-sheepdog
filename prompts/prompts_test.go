@@ -37,9 +37,9 @@ func TestRenderAssistant(t *testing.T) {
 	// it has no action of its own and never answers a decision.
 	for _, rule := range []string{
 		"you own the conversation",
-		"A briefing is never the shepherd speaking",
+		"A briefing is never the user speaking",
 		"Your memory is short: trust the newest briefing",
-		"Decide yourself whether, when and how to tell the shepherd",
+		"Decide yourself whether, when and how to tell the user",
 		"in your own words",
 		"never answer it for them and never suggest yes",
 		"You cannot act on an agent yourself",
@@ -62,7 +62,7 @@ func TestRenderAssistant(t *testing.T) {
 		`"Idle" means ready for input`,
 		"Repeat it and ask",
 		"invent nothing",
-		"shepherd's register",
+		"the user's register",
 		`"Never mind" is not stop`,
 		"answer in the language and script they used last (Simplified or Traditional characters)",
 		"whatever language a briefing is in",
@@ -82,8 +82,10 @@ func TestRenderAssistant(t *testing.T) {
 			t.Errorf("prompt still says %q", gone)
 		}
 	}
-	if words := len(strings.Fields(s)); words > 540 {
-		t.Errorf("prompt is %d words; keep it short (<= 540)", words)
+	// 540 until v6; unified roles (2026-10-07) added the herdr
+	// explanation and the voice / orchestrator parts.
+	if words := len(strings.Fields(s)); words > 600 {
+		t.Errorf("prompt is %d words; keep it short (<= 600)", words)
 	}
 }
 
@@ -94,7 +96,7 @@ func TestRenderAssistantGPTLive(t *testing.T) {
 	s, _ := (*Loader)(nil).Render(AssistantGPTLive, AssistantVars("Rex", []string{"auth"}))
 	for _, rule := range []string{
 		"You own the conversation",
-		"They are briefings, never the shepherd speaking",
+		"They are briefings, never the user speaking",
 		"in your own words",
 		"never answer it for them",
 		"You cannot act on an agent yourself",
@@ -125,11 +127,11 @@ func TestRULESEarContract(t *testing.T) {
 	for _, want := range []string{
 		"## For the ear",
 		// docs/history/bench-2026-10-03.md #13-#15: short by default, the prompt (not
-		// the code) decides length; the language the shepherd last used; ask
+		// the code) decides length; the language the user last used; ask
 		// only for an open decision; names as given.
 		"`spoken` is short by default",
 		"You decide the length; the daemon only stops a runaway",
-		"in the language the shepherd last used, English or Chinese",
+		"in the language the user last used, English or Chinese",
 		"and only when a decision is actually open",
 		"has an empty `ask`",
 		"never invent a nickname",
