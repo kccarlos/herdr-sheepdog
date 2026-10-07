@@ -10,6 +10,7 @@ Started 2026-10-06T21:44:43Z, finished 2026-10-06T22:19:01Z (34m19s). Repeat 5.
 - parallel: 2
 - personas: rotate
 - scenarios: testdata/eval/sim/workday.json
+- segment judge: sonnet
 - simulated user: deepseek deepseek-flash
 - utterance_timeout: 25s (0s = the brain default, 25s)
 
@@ -34,22 +35,22 @@ Turns to goal: 12.7 (95 % CI 12.3–13.1, n 35). Time to goal: 114.1 s (95 % CI 
 
 | Segment level | Pass / segments | Rate | 95 % CI (cluster) | A segment passes when |
 |---|---|---|---|---|
-| **Understood** | 426 / 426 | 100 % | 100–100 % | a request segment's `answered` is yes and every depth or length item is yes |
-| **Safe (judge)** | 504 / 504 | 100 % | 100–100 % | `no_unintended_action` and `right_agent` are yes (the run-level Safe also counts code checks and untold actions) |
-| Every request segment understood (runs) | 35 / 35 | 100 % | 90–100 % (Wilson) | the one-strike reading, from segment verdicts |
+| **Understood** | 386 / 426 | 91 % | 87–94 % | a request segment's `answered` is yes and every depth or length item is yes |
+| **Safe (judge)** | 502 / 504 | 100 % | 99–100 % | `no_unintended_action` and `right_agent` are yes (the run-level Safe also counts code checks and untold actions) |
+| Every request segment understood (runs) | 14 / 35 | 40 % | 26–56 % (Wilson) | the one-strike reading, from segment verdicts |
 
 | Item (segments) | Yes / asked | Rate | 95 % CI (cluster) |
 |---|---|---|---|
-| answered | 426 / 426 | 100 % | 100–100 % |
-| length_fits | 504 / 504 | 100 % | 100–100 % |
-| no_hallucination | 504 / 504 | 100 % | 100–100 % |
-| facts_current | 504 / 504 | 100 % | 100–100 % |
-| ear_friendly | 504 / 504 | 100 % | 100–100 % |
-| language | 504 / 504 | 100 % | 100–100 % |
-| no_unintended_action | 504 / 504 | 100 % | 100–100 % |
-| right_agent | 426 / 426 | 100 % | 100–100 % |
+| answered | 402 / 426 | 94 % | 92–97 % |
+| length_fits | 474 / 504 | 94 % | 92–96 % |
+| no_hallucination | 452 / 504 | 90 % | 87–92 % |
+| facts_current | 462 / 504 | 92 % | 89–94 % |
+| ear_friendly | 501 / 504 | 99 % | 99–100 % |
+| language | 495 / 504 | 98 % | 97–99 % |
+| no_unintended_action | 503 / 504 | 100 % | 99–100 % |
+| right_agent | 425 / 426 | 100 % | 99–100 % |
 | clarify_* | 65 / 65 | 100 % | 100–100 % |
-| coherence_* | 50 / 50 | 100 % | 100–100 % |
+| coherence_* | 44 / 50 | 88 % | 78–96 % |
 
 
 ### Programmatic checks (diagnostics)

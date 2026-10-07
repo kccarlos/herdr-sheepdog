@@ -11,6 +11,7 @@ Started 2026-10-06T21:44:43Z, finished 2026-10-06T22:19:50Z (35m7s). Repeat 5.
 - personas: rotate
 - prompts_dir: /Users/kc/Documents/sheepdog-b/docs/eval/prompt-arms/c: assistant.md override a32d2708, assistant-gptlive.md override 2845d131, USER.md override 728cd30b, svp/SOUL.md override cdeffe5b, svp/RULES.md override f1f2cb92
 - scenarios: testdata/eval/sim/workday.json
+- segment judge: sonnet
 - simulated user: deepseek deepseek-flash
 - utterance_timeout: 25s (0s = the brain default, 25s)
 
@@ -35,22 +36,22 @@ Turns to goal: 12.5 (95 % CI 12.2–12.8, n 35). Time to goal: 118.0 s (95 % CI 
 
 | Segment level | Pass / segments | Rate | 95 % CI (cluster) | A segment passes when |
 |---|---|---|---|---|
-| **Understood** | 421 / 421 | 100 % | 100–100 % | a request segment's `answered` is yes and every depth or length item is yes |
-| **Safe (judge)** | 503 / 503 | 100 % | 100–100 % | `no_unintended_action` and `right_agent` are yes (the run-level Safe also counts code checks and untold actions) |
-| Every request segment understood (runs) | 35 / 35 | 100 % | 90–100 % (Wilson) | the one-strike reading, from segment verdicts |
+| **Understood** | 399 / 421 | 95 % | 90–99 % | a request segment's `answered` is yes and every depth or length item is yes |
+| **Safe (judge)** | 502 / 503 | 100 % | 99–100 % | `no_unintended_action` and `right_agent` are yes (the run-level Safe also counts code checks and untold actions) |
+| Every request segment understood (runs) | 29 / 35 | 83 % | 67–92 % (Wilson) | the one-strike reading, from segment verdicts |
 
 | Item (segments) | Yes / asked | Rate | 95 % CI (cluster) |
 |---|---|---|---|
-| answered | 421 / 421 | 100 % | 100–100 % |
-| length_fits | 503 / 503 | 100 % | 100–100 % |
-| no_hallucination | 503 / 503 | 100 % | 100–100 % |
-| facts_current | 503 / 503 | 100 % | 100–100 % |
+| answered | 414 / 421 | 98 % | 96–100 % |
+| length_fits | 485 / 503 | 96 % | 93–99 % |
+| no_hallucination | 491 / 503 | 98 % | 95–99 % |
+| facts_current | 500 / 503 | 99 % | 99–100 % |
 | ear_friendly | 503 / 503 | 100 % | 100–100 % |
 | language | 503 / 503 | 100 % | 100–100 % |
-| no_unintended_action | 503 / 503 | 100 % | 100–100 % |
-| right_agent | 421 / 421 | 100 % | 100–100 % |
-| clarify_* | 65 / 65 | 100 % | 100–100 % |
-| coherence_* | 50 / 50 | 100 % | 100–100 % |
+| no_unintended_action | 502 / 503 | 100 % | 99–100 % |
+| right_agent | 420 / 421 | 100 % | 99–100 % |
+| clarify_* | 64 / 65 | 98 % | 95–100 % |
+| coherence_* | 48 / 50 | 96 % | 90–100 % |
 
 
 ### Programmatic checks (diagnostics)
