@@ -431,7 +431,7 @@ func TestSpawnNotReadyKeepsWaitingAndTellsTheBrain(t *testing.T) {
 			}
 		}
 		return false
-	}, "the CEO's spawn fact")
+	}, "the user's spawn fact")
 
 	// The brain's next turn has the fact and the screen.
 	w.say("怎么样了?")
@@ -456,7 +456,7 @@ func TestSpawnNotReadyKeepsWaitingAndTellsTheBrain(t *testing.T) {
 			}
 		}
 		return false
-	}, "the CEO's correction")
+	}, "the user's correction")
 	if got := w.promptRequests()[0]; got[0] != "w20:p1" || !strings.HasPrefix(got[1], "explain this project") {
 		t.Errorf("first instruction = %v", got)
 	}

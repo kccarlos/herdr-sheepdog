@@ -28,9 +28,9 @@ func (s *Supervisor) LanguageLine() string { return lang.Line(s.Languages()) }
 func (s *Supervisor) pushLanguages(langs []string) {
 	line := lang.Line(langs)
 	if line == "" {
-		line = "The shepherd cleared their language setting."
+		line = "The user cleared their language setting."
 	} else {
-		line = "The shepherd changed their language setting just now. " + line
+		line = "The user changed their language setting just now. " + line
 	}
 	s.log.Log(logSource, "supervisor.languages", "", map[string]any{"languages": langs, "text": line})
 	s.push("", line, voice.UrgencySilent)

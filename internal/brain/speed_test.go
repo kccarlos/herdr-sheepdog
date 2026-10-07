@@ -126,8 +126,9 @@ func TestAnnouncePromptBudget(t *testing.T) {
 	}
 	// +50 for the voice's reading hint (dual-brain); +125 for the
 	// decision-open, deferral, English-terms and report rules (baseline
-	// 2026-10-05 information fixes).
-	if EstimateTokens(static+state) > 4875 {
+	// 2026-10-05 information fixes); +100 for unified roles (SOUL.md's
+	// herdr explanation, RULES.md's fit-the-content length rule).
+	if EstimateTokens(static+state) > 4975 {
 		t.Errorf("system + state = %d tokens", EstimateTokens(static+state))
 	}
 }

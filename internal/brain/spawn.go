@@ -66,7 +66,7 @@ func (b *Brain) spawn(ctx context.Context, arg func(string) string) toolOutcome 
 	}
 	req := SpawnRequest{Dir: arg("new_agent_dir"), Kind: strings.ToLower(arg("new_agent_kind")), Model: arg("new_agent_model"), Text: arg("text")}
 	if req.Dir == "" {
-		return toolOutcome{err: errors.New("prompt: new_agent_dir is required to start a new agent; ask the CEO which project")}
+		return toolOutcome{err: errors.New("prompt: new_agent_dir is required to start a new agent; ask the user which project")}
 	}
 	if req.Kind == "" {
 		req.Kind = SpawnClaude

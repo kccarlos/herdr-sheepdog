@@ -58,7 +58,7 @@ func (s *Supervisor) closeAgent(ctx context.Context, req brain.CloseRequest) (st
 		return refuse("no herdr closer", errors.New("closing an agent is not available here"))
 	}
 	if why := s.protectedWhy(row); why != "" && !req.ProtectedOK {
-		return refuse("protected", fmt.Errorf("%w: %s %s; close it only if the CEO named this very agent: ask them, then call again with protected_ok", brain.ErrNotPermitted, name, why))
+		return refuse("protected", fmt.Errorf("%w: %s %s; close it only if the user named this very agent: ask them, then call again with protected_ok", brain.ErrNotPermitted, name, why))
 	}
 	s.mu.Lock()
 	reason := s.wordsRailLocked("closing an agent", "started or closed an agent")
@@ -100,7 +100,7 @@ func (s *Supervisor) protectedWhy(row state.Agent) string {
 			p = filepath.Clean(d)
 		}
 		if row.Cwd != "" && cwd == p {
-			return "works in sheepdog's own directory, where the CEO's own session supervising sheepdog usually runs"
+			return "works in sheepdog's own directory, where the user's own session supervising sheepdog usually runs"
 		}
 	}
 	return ""

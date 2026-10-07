@@ -116,6 +116,11 @@ cannot see rather than a prohibition.
 
 ### Roles
 
+Since v6 (unified roles, below) everything a model reads calls the fast
+brain *the voice* and the slow brain *the orchestrator*: two parts of one
+orchestration agent that operates the user's herdr. This doc keeps the
+older names.
+
 | | Fast brain: Gemini Live | Slow brain: the existing brain |
 |---|---|---|
 | Owns | The conversation: when to speak, what, how; turn-taking, register, language | What the CEO wants, which agent, what to do, investigations |
@@ -137,8 +142,8 @@ not a new tool (the CEO's "keep the voice link simple").
 
 A call with no new CEO words runs no brain turn (the rail: only the CEO's
 words authorise one); the fast brain gets a silent fact instead —
-"Nothing was handed on: the slow brain acts only on the CEO's own words …
-Their last words, at 23:04:10, were …".
+"Nothing was handed on: the orchestrator acts only on the user's own words …
+Their last words, at 23:04:10, were …" (wording since unified roles).
 
 ### Slow → fast: the briefing channel
 
@@ -172,15 +177,15 @@ standalone client, text input, 7 sessions, < $0.30):
 **Payload.** Self-contained, because Live's memory is short and lossy:
 
 ```json
-{"about_this": "Not the CEO speaking. Facts for you from the sheepdog system; you decide whether, when and how to tell the CEO, in your own words.",
- "briefing": "b-7", "at": "23:04:31", "from": "slow brain", "kind": "answer",
- "agent": "bench-codex", "answers": "the CEO's words at 23:04:20: \"how is codex doing\"",
+{"about_this": "Not the user speaking. Facts for you from the orchestrator or the daemon; you decide whether, when and how to tell the user, in your own words.",
+ "briefing": "b-7", "at": "23:04:31", "from": "orchestrator", "kind": "answer",
+ "agent": "bench-codex", "answers": "the user's words at 23:04:20: \"how is codex doing\"",
  "facts": "bench-codex finished; 41 of 42 tests pass, one fails in the cart module.",
  "age": "written 45 s before it reached you; things may have moved on since",
  "agent_state": "as this reached you: idle, ready for input, for 1 min; it last finished work 1 min ago",
- "decision": "the CEO's own decision; only their words can answer it",
+ "decision": "the user's own decision; only their words can answer it",
  "relation": ["newer than b-3 (23:01:05) about bench-codex; where they differ, this one holds",
-              "at 23:04:02 the CEO cut you off after 2.1 s of 6.4 s; they heard only: \"bench-codex wants to\""]}
+              "at 23:04:02 the user cut you off after 2.1 s of 6.4 s; they heard only: \"bench-codex wants to\""]}
 ```
 
 - `agent` is the agent's spoken name (the alias stays on the push's
@@ -326,6 +331,29 @@ waiting) and the channel (answers come back as labelled facts, so no
   "read me what it wrote" relays the worker's own report (now in full in
   the agent record) instead of prompting the worker to print a file;
   same English-terms rule.
+
+- v6, unified roles (2026-10-05, #155): a reframing, not a behaviour
+  rewrite. Every model now reads one framing: one orchestration agent
+  that operates the user's herdr (a short explanation of herdr: panes,
+  workspaces, tabs, agent states), with two parts, the voice and the
+  orchestrator; the person is "the user" in every prompt and
+  model-facing code string (briefings say `from: orchestrator`); the
+  shepherd, flock, dog, chief-of-staff and thinking-half metaphors are
+  gone. #155 also made length "fit the content" (the full substance
+  when a briefing has it; "more detail" / "详细" / "then?" answered by
+  the voice from the newest briefing). That version was arm B of step 4
+  and lost segment Understood (−5 pp, CI −9 to −0;
+  `docs/eval/prompt-arms-2026-10-06.md`), so #155 was not merged.
+- v6-r, roles only (2026-10-07, what main runs): v6's framing and "the
+  user" wording with v5's prompt length rules ("one or two sentences
+  unless they ask for more"; RULES.md's `spoken` short by default);
+  the code-built investigation and announce requests keep #155's
+  wording ("as complete as the finding needs" instead of "at most two
+  short sentences"). Measured as arm r at chattiness `chatty`: segment
+  Understood 89 % vs main's 92 % (−3 pp, CI −8 to +1, not
+  significant), merged for the single framing
+  (`docs/eval/roles-arms-2026-10-07.md`; prompt snapshot in
+  `docs/eval/prompt-arms/r/`).
 
 Every measurement in the dual-brain results doc uses v4 unless marked
 otherwise; the v5 A/B is in its own results doc.

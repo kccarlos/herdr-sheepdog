@@ -616,8 +616,8 @@ func TestDuplicatePromiseIsAFact(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.clock.Advance(20 * time.Second)
-	_, err = h.sup.createPromise("w5:p1", brain.PromiseRequest{Text: "let the CEO know when auth finishes", Event: brain.PromiseEventDone, Turn: 5})
-	want := `already promised at ` + first.CreatedAt.Format("15:04:05") + `: "tell me when auth is done" is still open, nothing new was recorded; it was made in turn 3, and whether that turn's reply told the CEO is in your transcript`
+	_, err = h.sup.createPromise("w5:p1", brain.PromiseRequest{Text: "let the user know when auth finishes", Event: brain.PromiseEventDone, Turn: 5})
+	want := `already promised at ` + first.CreatedAt.Format("15:04:05") + `: "tell me when auth is done" is still open, nothing new was recorded; it was made in turn 3, and whether that turn's reply told the user is in your transcript`
 	if err == nil || err.Error() != want {
 		t.Fatalf("duplicate: err = %v\nwant %s", err, want)
 	}

@@ -205,7 +205,7 @@ func TestEventTurnTimeout(t *testing.T) {
 	if fb["reason"] != "timeout" || fb["kind"] != "announce" || fb["trigger"] != "event" {
 		t.Errorf("fallback = %v", fb)
 	}
-	if text := h.model.Calls()[0].Text(); !strings.Contains(text, "Event from the supervisor (announce): agent=\"auth\" event=\"done\" template=\"auth finished.\"\nPromises this event keeps (the CEO asked to be told; your line says so, with the result):\n- pr-1: \"tell me\" (when auth finishes)\nNothing has been said about this yet.") {
+	if text := h.model.Calls()[0].Text(); !strings.Contains(text, "Event from the supervisor (announce): agent=\"auth\" event=\"done\" template=\"auth finished.\"\nPromises this event keeps (the user asked to be told; your line says so, with the result):\n- pr-1: \"tell me\" (when auth finishes)\nNothing has been said about this yet.") {
 		t.Errorf("request = %s", text)
 	}
 	if step := payload(h.log.ofType("brain.step")[0]); step["prompt_tokens_est"] == nil {

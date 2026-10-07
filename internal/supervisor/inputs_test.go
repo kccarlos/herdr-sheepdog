@@ -283,7 +283,7 @@ func TestTapAnswersThePendingQuestion(t *testing.T) {
 		t.Errorf("pending.confirmed = %v", ev)
 	}
 	last := h.pusher.last(t)
-	if last.Urgency != voice.UrgencySilent || !strings.Contains(last.Text, "The shepherd tapped") || !strings.Contains(last.Text, "auth's question") {
+	if last.Urgency != voice.UrgencySilent || !strings.Contains(last.Text, "The user tapped") || !strings.Contains(last.Text, "auth's question") {
 		t.Errorf("last push = %+v", last)
 	}
 	// The same id again: the question is gone.

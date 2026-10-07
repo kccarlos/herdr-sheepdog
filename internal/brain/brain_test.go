@@ -79,7 +79,7 @@ func TestReadScreenThenAnswer(t *testing.T) {
 		t.Fatalf("model calls = %d", len(calls))
 	}
 	first := calls[0].Text()
-	utter, req := strings.Index(first, `CEO said: "why did that one fail?"`), strings.Index(first, "Request from the assistant (utterance)")
+	utter, req := strings.Index(first, `User said: "why did that one fail?"`), strings.Index(first, "Request from the assistant (utterance)")
 	if utter < 0 || req < 0 || utter > req {
 		t.Errorf("utterance must precede the request:\n%s", first)
 	}
@@ -449,7 +449,7 @@ func TestCompaction(t *testing.T) {
 			if !strings.Contains(call.Text(), "Summarise") || !strings.Contains(call.Text(), "ceo_utterance") {
 				return nil, fmt.Errorf("summary call did not get the old messages: %s", call.Text())
 			}
-			return braintest.Response(braintest.Step{Text: "The CEO asked about auth many times; auth was working."}), nil
+			return braintest.Response(braintest.Step{Text: "The user asked about auth many times; auth was working."}), nil
 		}},
 		braintest.Step{Text: braintest.Reply("Fine again.", "")},
 	)
@@ -475,7 +475,7 @@ func TestCompaction(t *testing.T) {
 		t.Errorf("brain.compaction = %v", p)
 	}
 	msgs := h.brain.Transcript().Messages()
-	if last := msgs[len(msgs)-1]; last.Kind != KindCompaction || !strings.Contains(last.Content, "The CEO asked") {
+	if last := msgs[len(msgs)-1]; last.Kind != KindCompaction || !strings.Contains(last.Content, "The user asked") {
 		t.Errorf("transcript lacks the summary: %+v", last)
 	}
 	if _, err := h.ask("and now?", "auth"); err != nil {
@@ -749,7 +749,7 @@ func TestSystemPromptSections(t *testing.T) {
 		t.Errorf("sections = %v", names)
 	}
 	sys := h.model.Calls()[0].System()
-	for _, want := range []string{"You are the brain of Sheepdog", "## Tools", "## The one rail", "## Answer contract", "## Agents", "WAITING FOR AN ANSWER: whether it can create hello.txt", `1 "Yes, proceed" -> keys [enter]`, "## Ledger", "keep the migrations", "## Now", "## About the shepherd"} {
+	for _, want := range []string{"You are the orchestrator, one of the two parts", "## Tools", "## The one rail", "## Answer contract", "## Agents", "WAITING FOR AN ANSWER: whether it can create hello.txt", `1 "Yes, proceed" -> keys [enter]`, "## Ledger", "keep the migrations", "## Now", "## About the user"} {
 		if !strings.Contains(sys, want) {
 			t.Errorf("system prompt lacks %q", want)
 		}

@@ -44,7 +44,7 @@ func TestToSupervisorRunsUtteranceTurn(t *testing.T) {
 	text := calls[0].Text()
 	for _, want := range []string{
 		`Request from the assistant (utterance): utterance="what's going on"`,
-		"agent=(none: the CEO did not say a name)",
+		"agent=(none: the user did not say a name)",
 		"Status as the daemon has it: ",
 		"relayed verbatim",
 	} {
@@ -305,7 +305,7 @@ func TestPushRelayedBackNeverReachesTheBrain(t *testing.T) {
 		t.Fatalf("%d model calls, want one", len(calls)-before)
 	}
 	if text := calls[len(calls)-1].Text(); !strings.Contains(text, `utterance="what did it say?"`) || strings.Contains(text, `utterance="auth asks`) {
-		t.Errorf("the brain was not asked the shepherd's words:\n%s", text)
+		t.Errorf("the brain was not asked the user's words:\n%s", text)
 	}
 }
 
@@ -559,7 +559,7 @@ func TestStopRepliesWithoutWaitingForTheBrain(t *testing.T) {
 	assertStopped(t, h, stopPhaseInterrupt, StopTriggerTool)
 	found := false
 	for _, msg := range h.sup.Brain().Transcript().Messages() {
-		if msg.Kind == brain.KindSystem && msg.Content == "the CEO said stop: an interrupt (Ctrl-C) was sent to auth" {
+		if msg.Kind == brain.KindSystem && msg.Content == "the user said stop: an interrupt (Ctrl-C) was sent to auth" {
 			found = true
 		}
 	}

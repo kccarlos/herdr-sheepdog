@@ -164,7 +164,7 @@ func TestBrainEndpointsWithFakeBrain(t *testing.T) {
 	}
 
 	var sp PromptInfo
-	if code := h.getJSON("/api/brain/system_prompt", &sp); code != http.StatusOK || len(sp.Sections) != 16 || !strings.Contains(sp.Sections[0].Text, "the brain of Sheepdog") || !strings.Contains(sp.Text, "## Agents") || !strings.Contains(sp.Text, "auth") {
+	if code := h.getJSON("/api/brain/system_prompt", &sp); code != http.StatusOK || len(sp.Sections) != 16 || !strings.Contains(sp.Sections[0].Text, "You are the orchestrator") || !strings.Contains(sp.Text, "## Agents") || !strings.Contains(sp.Text, "auth") {
 		t.Errorf("/api/brain/system_prompt = %d %+v", code, sp)
 	}
 

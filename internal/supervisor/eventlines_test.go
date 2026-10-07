@@ -43,7 +43,7 @@ func TestQueuedAnnounceIsToldTheTemplateWasSpoken(t *testing.T) {
 		h.sup.mu.Lock()
 		defer h.sup.mu.Unlock()
 		return h.sup.utterance != nil && h.sup.utterance.started
-	}, "the CEO turn to run")
+	}, "the user turn to run")
 
 	done := make(chan struct{})
 	go func() {
@@ -60,13 +60,13 @@ func TestQueuedAnnounceIsToldTheTemplateWasSpoken(t *testing.T) {
 	if req == "" {
 		t.Fatal("no announce turn ran")
 	}
-	if !strings.Contains(req, "Already said to the CEO about this event, word for word: "+fmt.Sprintf("%q", template)) {
+	if !strings.Contains(req, "Already said to the user about this event, word for word: "+fmt.Sprintf("%q", template)) {
 		t.Errorf("the request does not carry the spoken template %q:\n%s", template, req)
 	}
 	if strings.Contains(req, "Nothing has been said about this yet.") {
 		t.Errorf("the request still claims nothing was said:\n%s", req)
 	}
-	if !strings.Contains(req, "The agent's prompt is still open, waiting for the CEO's answer.") {
+	if !strings.Contains(req, "The agent's prompt is still open, waiting for the user's answer.") {
 		t.Errorf("the request lacks the prompt's state:\n%s", req)
 	}
 }

@@ -111,7 +111,7 @@ func TestUtteranceRequestStatesTheCEOsLanguage(t *testing.T) {
 	if len(calls) == 0 {
 		t.Fatal("no brain turn")
 	}
-	if text := calls[0].Text(); !strings.Contains(text, "The CEO's last words were in Chinese.") {
+	if text := calls[0].Text(); !strings.Contains(text, "The user's last words were in Chinese.") {
 		t.Errorf("request lacks the language fact:\n%s", text)
 	}
 }

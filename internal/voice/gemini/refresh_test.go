@@ -69,7 +69,7 @@ func TestSessionRefreshedAfterTwoHours(t *testing.T) {
 	if age, _ := p[0]["age_s"].(int); age < int(refreshMaxAge.Seconds()) {
 		t.Errorf("age_s = %v, want >= %v", p[0]["age_s"], refreshMaxAge.Seconds())
 	}
-	seed := c2.waitSent(t, "reseed", isContent("Shepherd: and docs?"))
+	seed := c2.waitSent(t, "reseed", isContent("User: and docs?"))
 	text := seed.content.Turns[0].Parts[0].Text
 	if strings.Contains(text, "On it") {
 		t.Errorf("the reseed kept a bare acknowledgement:\n%s", text)

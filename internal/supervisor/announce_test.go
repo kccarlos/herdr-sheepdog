@@ -62,7 +62,7 @@ func (h *harness) decisions() []map[string]any {
 // last_result.detail for the ledger and recall, one push_decision.
 func TestAnnounceReplacesTemplate(t *testing.T) {
 	m := braintest.NewModel()
-	m.EventDefault = announceReply("Auth finished the rerun you asked for. The same test, TestLoginRateLimit, still fails.", "idle", "The CEO asked for a rerun after the first failure; see /tmp/x.log.", "the rerun", false)
+	m.EventDefault = announceReply("Auth finished the rerun you asked for. The same test, TestLoginRateLimit, still fails.", "idle", "The user asked for a rerun after the first failure; see /tmp/x.log.", "the rerun", false)
 	h := newBrainHarness(t, m)
 	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
 	h.sup.touch("w5:p1")
@@ -72,7 +72,7 @@ func TestAnnounceReplacesTemplate(t *testing.T) {
 		t.Fatalf("pushes = %+v", got)
 	}
 	row, _ := h.store.Get("w5:p1")
-	if row.LastResult == nil || row.LastResult.Detail != "The CEO asked for a rerun after the first failure; see a file" {
+	if row.LastResult == nil || row.LastResult.Detail != "The user asked for a rerun after the first failure; see a file" {
 		t.Errorf("last_result = %+v", row.LastResult)
 	}
 	turns := h.log.ofType("brain.turn")
@@ -106,7 +106,7 @@ func TestAnnounceReplacesTemplate(t *testing.T) {
 // spoken push).
 func TestAnnounceSkipAndSilent(t *testing.T) {
 	m := braintest.NewModel()
-	m.EventDefault = announceReply("", "skip", "The CEO just heard this from the assistant.", "", false)
+	m.EventDefault = announceReply("", "skip", "The user just heard this from the assistant.", "", false)
 	h := newBrainHarness(t, m)
 	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
 	h.sup.touch("w5:p1")
@@ -132,11 +132,11 @@ func TestAnnounceSkipAndSilent(t *testing.T) {
 		t.Errorf("push_decision = %v", d)
 	}
 	// silent: context for the assistant, not speech.
-	m.EventDefault = announceReply("Auth is done. The CEO has not asked about it.", "silent", "", "", false)
+	m.EventDefault = announceReply("Auth is done. The user has not asked about it.", "silent", "", "", false)
 	h.transition("w5:p1", herdr.StateDone, herdr.StateWorking)
 	doneAuth(h)
 	got := h.pusher.all()
-	if len(got) != 1 || got[0].Urgency != voice.UrgencySilent || got[0].Text != "Auth is done. The CEO has not asked about it." {
+	if len(got) != 1 || got[0].Urgency != voice.UrgencySilent || got[0].Text != "Auth is done. The user has not asked about it." {
 		t.Fatalf("pushes = %+v", got)
 	}
 	if d := h.decisions(); len(d) != 3 || d[2]["urgency_applied"] != "silent" {
@@ -361,7 +361,7 @@ func TestFinishWaitsForTheBrainsLine(t *testing.T) {
 		want  string
 	}{
 		{"nobody's, chatty", Chatty, func(*harness) {}, line},
-		{"the shepherd's instruction, normal", Normal, func(h *harness) {
+		{"the user's instruction, normal", Normal, func(h *harness) {
 			now := h.sup.cfg.Now()
 			if _, err := h.store.Update("w5:p1", func(a *state.Agent) { a.CurrentTask, a.LastInteraction = "cut the release", &now }); err != nil {
 				t.Fatal(err)

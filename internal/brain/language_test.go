@@ -19,7 +19,7 @@ func (h *langHost) LanguageLine() string { return h.line }
 // with no setting, or a host that does not know it, there is none.
 func TestLanguageInStateBlock(t *testing.T) {
 	agents, notes, promises, invs := fullFlock()
-	line := "The shepherd's language setting, in order of preference: Chinese (Simplified) 简体中文. Answer in the language they use; write Chinese in Simplified characters."
+	line := "The user's language setting, in order of preference: Chinese (Simplified) 简体中文. Answer in the language they use; write Chinese in Simplified characters."
 	b := &Brain{cfg: Config{Now: func() time.Time { return speedNow }}.withDefaults(), log: nopLog{}, tools: toolDeclarations(false)}
 	b.host = &langHost{stubHost: stubHost{agents: agents, notes: notes, promises: promises, invs: invs}, line: line}
 	sys, _, state := b.systemPrompt()

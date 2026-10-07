@@ -22,7 +22,7 @@ func (s *Supervisor) onPushUnheard(e voice.EventPushUnheard) {
 	if e.Requeue || s.brain == nil || e.Push.Text == "" {
 		return
 	}
-	line := fmt.Sprintf("the CEO did not hear: %q", e.Push.Text)
+	line := fmt.Sprintf("the user did not hear: %q", e.Push.Text)
 	if e.Push.Heard != "" {
 		line += fmt.Sprintf(" (only %q reached them)", e.Push.Heard)
 	}

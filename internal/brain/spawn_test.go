@@ -66,7 +66,7 @@ func TestPromptToolSpawnRailBlocked(t *testing.T) {
 		braintest.Step{Calls: []*genai.FunctionCall{braintest.FC(ToolPrompt, map[string]any{"new_agent_dir": "app"})}},
 		braintest.Step{Text: braintest.Reply("I can't start one now.", "")},
 	), nil)
-	h.host.SpawnErr = fmt.Errorf("%w: the CEO has said nothing that asks for a new agent", ErrNotPermitted)
+	h.host.SpawnErr = fmt.Errorf("%w: the user has said nothing that asks for a new agent", ErrNotPermitted)
 	if _, err := h.ask("start a claude in app", ""); err != nil {
 		t.Fatal(err)
 	}
