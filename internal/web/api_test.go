@@ -499,7 +499,7 @@ func TestSettingsEndpoint(t *testing.T) {
 	if code := h.getJSON("/api/settings", &got); code != http.StatusOK {
 		t.Fatalf("GET = %d", code)
 	}
-	if got.Chattiness != "normal" || len(got.Levels) != 3 || got.Levels[0] != "quiet" || got.Levels[2] != "chatty" {
+	if got.Chattiness != "chatty" || len(got.Levels) != 3 || got.Levels[0] != "quiet" || got.Levels[2] != "chatty" {
 		t.Fatalf("GET body = %+v", got)
 	}
 	put := func(body string) (int, SettingsResponse) {

@@ -36,7 +36,7 @@ func TestLanguageSettingRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := h.sup.Settings()
-	if strings.Join(got.Languages, ",") != "zh-Hans,en" || got.Chattiness != Normal {
+	if strings.Join(got.Languages, ",") != "zh-Hans,en" || got.Chattiness != Chatty {
 		t.Fatalf("Settings() = %+v", got)
 	}
 	if strings.Join(h.store.Snapshot().Session.Languages, ",") != "zh-Hans,en" || h.store.Snapshot().Session.Chattiness != "" {

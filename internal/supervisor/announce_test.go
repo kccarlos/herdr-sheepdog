@@ -80,7 +80,7 @@ func TestAnnounceReplacesTemplate(t *testing.T) {
 		t.Errorf("brain.turn = %v", turns)
 	}
 	d := h.decisions()
-	if len(d) != 1 || d[0]["via"] != "brain" || d[0]["urgency_requested"] != "idle" || d[0]["urgency_applied"] != "idle" || d[0]["reason"] != "brain" || d[0]["ceiling"] != "normal" || d[0]["relates_to"] != "the rerun" || d[0]["template"] != doneSentence || d[0]["late"] != false {
+	if len(d) != 1 || d[0]["via"] != "brain" || d[0]["urgency_requested"] != "idle" || d[0]["urgency_applied"] != "idle" || d[0]["reason"] != "brain" || d[0]["ceiling"] != "chatty" || d[0]["relates_to"] != "the rerun" || d[0]["template"] != doneSentence || d[0]["late"] != false {
 		t.Errorf("push_decision = %v", d)
 	}
 	// The model saw the template and the screen the supervisor read; it
