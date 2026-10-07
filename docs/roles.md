@@ -241,15 +241,11 @@ word: it goes to the brain like any utterance.
 ## The voice — do / don't
 
 Does (since dual-brain and unified roles; `prompts/assistant.md`): owns
-the conversation; tells the substance of a briefing in its own words,
-complete, with length fitting the content (short for a simple
-acknowledgement; the reasons, examples, numbers and what can be done
-when a briefing carries them, never compressing the orchestrator's
-text); answers itself only its own last line again or more plainly,
-what a word means, small talk, and "more detail" / "详细" / "then?"
-from what the newest briefing holds that it has not said yet
-(rephrasing alone is not more detail; otherwise it hands on); hands
-everything else to the orchestrator with `to_supervisor`; says a
+the conversation; tells the substance of a briefing in its own words
+(which agent, the outcome, the numbers, what is still open), one or two
+sentences unless the user asks for more; answers itself only its own
+last line again or more plainly, what a word means, and small talk;
+hands everything else to the orchestrator with `to_supervisor`; says a
 decision only the user can take as a choice and waits; hears and
 repeats back when unsure.
 
@@ -278,13 +274,17 @@ Does:
 - Answers for the ear: `{spoken, ask?, detail, needs_user, options?,
   pending?}` (`prompts/svp/RULES.md` "For the ear", "Explaining",
   "Answer contract").
-  - `spoken` fits the content (since unified roles, 2026-10-05): a
-    sentence or two for a plain status, the full substance (reasons, an
-    example, numbers, what can be done) for a finding or a report, and
-    what was not heard yet on "more detail"; short plain sentences, one
-    idea per sentence, no dashes or semicolons, the outcome first (done,
-    broken, needs you, still going), the task in the user's words,
-    no PR numbers, ms values, hashes, file or component names.
+  - `spoken` is short by default: one or two short sentences, longer
+    only when the user asked for detail; one idea per sentence, no
+    dashes or semicolons, the outcome first (done, broken, needs you,
+    still going), the task in the user's words, no PR numbers, ms
+    values, hashes, file or component names. The prompts kept these
+    length rules under unified roles (arm r; #155's "fit the content"
+    variant cost understanding in step 4, see
+    docs/eval/prompt-arms-2026-10-06.md and
+    docs/eval/roles-arms-2026-10-07.md); the code-built investigation
+    and announce requests ask for `spoken` "as complete as the finding
+    needs" / "as long as its news needs", in short plain sentences.
   - `ask` is the one question, when only the user can decide (or
     the next move the brain would take); the voice hears it last.
   - `detail` is the plain explanation: one everyday sentence per term
@@ -299,8 +299,8 @@ Does:
     investigation deliveries, and replies to the user's own words
     alike, at one runaway cap (`prose.EarSeconds`, about 44 s of estimated
     speech: ~110 English words or ~200 CJK characters; a guard, not the
-    style rule, which the orchestrator's prompt sets: length fits the
-    content; docs/history/bench-2026-10-03.md #13, docs/history/dive-deep.md WP8b). Dash- and semicolon-joined
+    style rule, which the orchestrator's prompt sets: short by
+    default; docs/history/bench-2026-10-03.md #13, docs/history/dive-deep.md WP8b). Dash- and semicolon-joined
     clauses become sentences, PR numbers and hashes are scrubbed,
     the ask is appended last (with an ask, a question in the headline
     moves out), and whatever was cut is appended to `detail` (for an

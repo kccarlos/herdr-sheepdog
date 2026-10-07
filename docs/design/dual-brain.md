@@ -332,34 +332,28 @@ waiting) and the channel (answers come back as labelled facts, so no
   the agent record) instead of prompting the worker to print a file;
   same English-terms rule.
 
-- v6, unified roles (2026-10-05, branch `feat/unified-roles`, item 2 of
-  "Next: unified roles, explaining in detail, explanation evals" in
-  `docs/handover-2026-10-04.md`): a reframing plus a length change, not
-  a behaviour rewrite. Every model now reads one framing: one
-  orchestration agent that operates the user's herdr (a short
-  explanation of herdr: panes, workspaces, tabs, agent states), with two
-  parts, the voice and the orchestrator; the person is "the user" in
-  every prompt and model-facing code string (briefings say `from:
-  orchestrator`); the shepherd, flock, dog, chief-of-staff and
-  thinking-half metaphors are gone. Length: "one or two sentences unless
-  they ask for more" became "fit the content": short for a simple
-  acknowledgement, the full substance when a briefing has it, never
-  compressing the orchestrator's text. The phone test of 2026-10-05
-  behind it: the orchestrator's `spoken` had four sentences with
-  reasons and examples, the voice said two, and on "你可以给我一点详细的解释吗"
-  it only rephrased. So "more detail" / "详细" / "then?" joins the
-  voice's own answers, bounded by grounding: it says what the newest
-  briefing holds that it has not said, else hands on; rephrasing alone
-  is not more detail. This is not v4's licence to answer status from
-  briefings (the N2 risk): new facts about an agent still come only
-  from the orchestrator. The orchestrator's own short-by-default bias
-  went too (RULES.md For the ear, Intent, Answer contract; the
-  code-built investigation and announce requests had "at most two
-  short sentences"). Arms for the A/B: A = main's prompts
-  (`docs/eval/prompt-arms/a/`), B = these (the default), C = B plus an
-  "about 80% of the way to ASD-STE100" speech style, with the prompts
-  worded that way (`docs/eval/prompt-arms/c/`); run with
-  `--prompts-dir`.
+- v6, unified roles (2026-10-05, #155): a reframing, not a behaviour
+  rewrite. Every model now reads one framing: one orchestration agent
+  that operates the user's herdr (a short explanation of herdr: panes,
+  workspaces, tabs, agent states), with two parts, the voice and the
+  orchestrator; the person is "the user" in every prompt and
+  model-facing code string (briefings say `from: orchestrator`); the
+  shepherd, flock, dog, chief-of-staff and thinking-half metaphors are
+  gone. #155 also made length "fit the content" (the full substance
+  when a briefing has it; "more detail" / "详细" / "then?" answered by
+  the voice from the newest briefing). That version was arm B of step 4
+  and lost segment Understood (−5 pp, CI −9 to −0;
+  `docs/eval/prompt-arms-2026-10-06.md`), so #155 was not merged.
+- v6-r, roles only (2026-10-07, what main runs): v6's framing and "the
+  user" wording with v5's prompt length rules ("one or two sentences
+  unless they ask for more"; RULES.md's `spoken` short by default);
+  the code-built investigation and announce requests keep #155's
+  wording ("as complete as the finding needs" instead of "at most two
+  short sentences"). Measured as arm r at chattiness `chatty`: segment
+  Understood 89 % vs main's 92 % (−3 pp, CI −8 to +1, not
+  significant), merged for the single framing
+  (`docs/eval/roles-arms-2026-10-07.md`; prompt snapshot in
+  `docs/eval/prompt-arms/r/`).
 
 Every measurement in the dual-brain results doc uses v4 unless marked
 otherwise; the v5 A/B is in its own results doc.
