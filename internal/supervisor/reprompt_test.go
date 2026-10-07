@@ -149,7 +149,7 @@ func TestReconcileRaisesForAnsweredBlockedWithPrompt(t *testing.T) {
 }
 
 // TestReconcileSkipsOpenPending: a pane blocked with a real, still-open
-// question (last_block.answered is false) is left alone — the shepherd
+// question (last_block.answered is false) is left alone — the user
 // has not answered it yet, so there is nothing new to say.
 func TestReconcileSkipsOpenPending(t *testing.T) {
 	h := twoAgents(t)
@@ -168,7 +168,7 @@ func TestReconcileSkipsOpenPending(t *testing.T) {
 }
 
 // TestReconcileNeverRaisesSamePromptTwice: after the reconciler raises a
-// prompt and the shepherd answers it, a later sweep over the same
+// prompt and the user answers it, a later sweep over the same
 // (unmoved) screen must not raise it again.
 func TestReconcileNeverRaisesSamePromptTwice(t *testing.T) {
 	h := twoAgents(t)

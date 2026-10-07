@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// baseline101 is the line the shepherd heard on 2026-09-24
+// baseline101 is the line the user heard on 2026-09-24
 // (docs/history/scorecard-baseline-2026-09-24.md): 101 words, three em dashes,
 // two PR numbers.
 const baseline101Once = "Both landed: the Context tab is merged as daemon #49 — a new /debug tab beside Supervisor showing the brain's exact request and the voice model's context side by side, linked, with a scrubber and diffs against the previous step — and the first app refactor went in as #12, dead code out and duplicated state merged, behaviour unchanged with 245 tests green. It's asking whether to carry on with the next two in parallel — the daemon's dead-code and docs cleanup then removing the legacy tool surface, and the app's testable SessionCore — and I'd say yes."
@@ -184,7 +184,7 @@ func TestSpeechSeconds(t *testing.T) {
 }
 
 // Real Chinese pushes from the bench logs (2026-10-02 23:51-23:59,
-// 2026-10-03 00:46-00:53): the brain's spoken and ask, which the join used
+// 2026-10-03 00:46-00:53): the orchestrator's spoken and ask, which the join used
 // to turn into "...。. 要不要...？?".
 func TestEarChineseBenchPushes(t *testing.T) {
 	cases := []struct{ name, spoken, ask, want string }{

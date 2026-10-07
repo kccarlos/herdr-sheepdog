@@ -11,9 +11,9 @@ import (
 )
 
 // TestUnheardPushReachesTheBrainAsAFact is docs/history/bench-2026-10-03.md
-// #17/#18: a push the CEO did not hear (run 2, 00:48:12: an approval cut
+// #17/#18: a push the user did not hear (run 2, 00:48:12: an approval cut
 // the answer after its first phrase) becomes a transcript line the
-// brain sees on its next turn, with the part that was heard; it decides
+// orchestrator sees on its next turn, with the part that was heard; it decides
 // whether to mention it. A line the voice re-queued is not reported.
 func TestUnheardPushReachesTheBrainAsAFact(t *testing.T) {
 	m := braintest.NewModel(braintest.Step{Text: braintest.Reply("Claude added a delete operation.", "")})
@@ -40,10 +40,10 @@ func TestUnheardPushReachesTheBrainAsAFact(t *testing.T) {
 
 // TestOpenCheckFollowsThePendingPrompt: the voice layer's open check
 // says a block's announcement is still open while its prompt is the
-// pending one, and not once the CEO answered it; a kept promise is
+// pending one, and not once the user answered it; a kept promise is
 // always owed.
 func TestOpenCheckFollowsThePendingPrompt(t *testing.T) {
-	m := braintest.NewModel() // event ids come with the brain
+	m := braintest.NewModel() // event ids come with the orchestrator
 	m.EventDefault = withAsk(announceReply("Auth wants to write hello.txt.", "interrupt", "", "", true), "Approve?")
 	h := newBrainHarness(t, m)
 	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
@@ -75,7 +75,7 @@ func TestOpenCheckFollowsThePendingPrompt(t *testing.T) {
 }
 
 // TestOpenCheckIgnoresAnInstructionAwaitingConfirmation: only a worker's
-// prompt counts as a question waiting for the CEO (CEO, 2026-10-03); an
+// prompt counts as a question waiting for the user (user, 2026-10-03); an
 // instruction awaiting confirmation does not hold a session refresh.
 func TestOpenCheckIgnoresAnInstructionAwaitingConfirmation(t *testing.T) {
 	h := newHarness(t)

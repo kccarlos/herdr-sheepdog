@@ -9,7 +9,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/eval"
 )
 
-// TestOrchestratorTranscript: the CEO's lines and the orchestrator's
+// TestOrchestratorTranscript: the user's lines and the orchestrator's
 // answers and spoken pushes in time order, silent context left out.
 func TestOrchestratorTranscript(t *testing.T) {
 	r := Run{Transcript: []eval.SimLine{{AtMS: 100, Who: "ceo", Text: "status?"}, {AtMS: 900, Who: "sheepdog", Text: "voice words"}}}

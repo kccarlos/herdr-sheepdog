@@ -13,7 +13,7 @@ import (
 // NorthStarRuns turns tier-3 records into the north-star checks' input:
 // the conversation as eval sim reads it, each run's event log from
 // eventsDir (wall-clock ts, aligned on the first send or relayed utterance), and
-// the end-state checks' outcomes. voice: the CEO spoke (--voice), so the
+// the end-state checks' outcomes. voice: the user spoke (--voice), so the
 // user heard the voice model.
 func NorthStarRuns(recs []Record, scs []Scenario, eventsDir string, voice bool) []northstar.Run {
 	byID := map[string]eval.SimScenario{}

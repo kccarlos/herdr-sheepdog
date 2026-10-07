@@ -91,11 +91,11 @@ type ToolResult struct {
 	Clarify    bool
 	Pending    bool
 	Scheduling Urgency
-	// UtteranceID names the CEO utterance a spoken result answers. It is
+	// UtteranceID names the user utterance a spoken result answers. It is
 	// never sent to the model: the session puts it on the voice.playback
 	// {state: started} that follows (turn.latency's first audio).
 	UtteranceID string
-	// NotVerified lists the slow brain's checks that did not finish
+	// NotVerified lists the orchestrator's checks that did not finish
 	// (brain.Reply.NotVerified); the voice is told nothing they would
 	// have shown is verified.
 	NotVerified []string
@@ -111,9 +111,9 @@ type ToolHandler func(ctx context.Context, call ToolCall) (ToolResult, error)
 
 // OpenCheck is the supervisor's answer to "is it still open?", which
 // the voice layer cannot see for itself. Asked with nil tags: is a
-// question waiting for the shepherd (a pending approval or decision)?
+// question waiting for the user (a pending approval or decision)?
 // Asked with a push's tags: is what that line is about — the prompt it
-// announced, the promise it keeps — still owed to the shepherd?
+// announced, the promise it keeps — still owed to the user?
 type OpenCheck func(tags map[string]any) bool
 
 // PushBacklogger is implemented by sessions with a push queue: how many
@@ -144,7 +144,7 @@ type Session interface {
 	Push(text string, u Urgency) error
 
 	// Speaking reports whether the model's speech is still reaching the
-	// shepherd: true from the first output fragment (audio or an output
+	// user: true from the first output fragment (audio or an output
 	// transcript) of a turn until the /ws client has finished playing
 	// it — its playback report drained (plus PlaybackGapHold) or
 	// flushed, or without playback reports a timing guess (audio sent
@@ -152,7 +152,7 @@ type Session interface {
 	// turn end is not enough: Gemini generates ~4× real time, so its
 	// turnComplete arrives while the reply is still playing. Nothing
 	// interrupts the model mid-sentence
-	// except the shepherd (docs/roles.md "Pushes"): an implementation
+	// except the user (docs/roles.md "Pushes"): an implementation
 	// downgrades INTERRUPT scheduling to WHEN_IDLE while this is true,
 	// with a due promise or a decision on a brand new block the only
 	// exceptions. A session with no live model (--voice=off) reports

@@ -26,7 +26,7 @@ const (
 	DefaultDeepSeekModel = "deepseek-flash"
 	// failoverStreakWindow and failoverStreakNotice: this many
 	// consecutive failovers away from the selected provider within the
-	// window, and the CEO is told once.
+	// window, and the user is told once.
 	failoverStreakWindow = 10 * time.Minute
 	failoverStreakNotice = 3
 	// failoverNoticeEvery bounds the notice to one per this long.
@@ -63,8 +63,8 @@ var (
 // quota is the scarcest); providers not listed follow, sorted.
 var failoverOrder = []string{ProviderVertex, ProviderDeepSeek, ProviderGemini}
 
-// Notice is something the brain tells the CEO about itself, in both
-// languages the daemon speaks: the notifier picks the one the CEO last
+// Notice is something the orchestrator tells the user about itself, in both
+// languages the daemon speaks: the notifier picks the one the user last
 // spoke (supervisor.ceoLanguage).
 type Notice struct {
 	English string
@@ -73,9 +73,9 @@ type Notice struct {
 
 // failoverNotice is the line for a failing streak. It names no vendor
 // (tier-2 bench 2026-10-03 #7: "DeepSeek is failing; using Vertex for
-// now." made the simulated CEO ask about "the Vertex worker"): which
+// now." made the simulated user ask about "the Vertex worker"): which
 // model answers is the daemon's business, that answers may differ is
-// the CEO's.
+// the user's.
 var failoverNotice = Notice{
 	English: "My usual model is having trouble; a backup is answering for now.",
 	Chinese: "我平时用的模型出了点问题，现在先由备用模型回答。",
@@ -88,7 +88,7 @@ type failoverState struct {
 	// times of its consecutive failovers, newest last.
 	from string
 	at   []time.Time
-	// noticed is when the CEO was last told.
+	// noticed is when the user was last told.
 	noticed time.Time
 }
 
@@ -315,7 +315,7 @@ func (b *Brain) failoverSucceeded(provider string) {
 // went). A failover away from a provider that is not the selected one
 // (the selection changed during the turn) does not count. After
 // failoverStreakNotice consecutive ones within failoverStreakWindow the
-// CEO is told once, at most every failoverNoticeEvery.
+// user is told once, at most every failoverNoticeEvery.
 func (b *Brain) noteFailover(from, to string) {
 	b.mu.Lock()
 	now := b.cfg.Now()
@@ -354,9 +354,9 @@ func (b *Brain) noteFailover(from, to string) {
 	}()
 }
 
-// SetNotifier sets how the brain tells the CEO something about itself
+// SetNotifier sets how the orchestrator tells the user something about itself
 // (a provider failing over and over): the daemon's spoken push, in the
-// CEO's language. nil turns notices off.
+// user's language. nil turns notices off.
 func (b *Brain) SetNotifier(f func(n Notice)) {
 	b.mu.Lock()
 	b.notify = f

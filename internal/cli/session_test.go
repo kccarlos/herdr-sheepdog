@@ -115,7 +115,7 @@ func TestCodexSessionSurvivesTheOutputCap(t *testing.T) {
 }
 
 // TestRunSlotAndTimeout proves a background investigation does not lock
-// the brain out of a short lookup in the same repository, and that its
+// the orchestrator out of a short lookup in the same repository, and that its
 // own timeout is what bounds it.
 func TestRunSlotAndTimeout(t *testing.T) {
 	bin := fakeBinPath(t)

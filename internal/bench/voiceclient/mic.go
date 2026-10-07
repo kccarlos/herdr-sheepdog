@@ -27,7 +27,7 @@ const (
 	// GateWeb is the /voice page's peak gate (docs/ws-contract.md
 	// "Silence gate"): below 8 LSB for 300 ms closes it, the next louder
 	// frame reopens it with 100 ms of pre-roll; speaking follows a
-	// separate detector on the shepherd's speech.
+	// separate detector on the user's speech.
 	GateWeb = "web"
 	// GateOff sends every frame.
 	GateOff = "off"
@@ -52,7 +52,7 @@ type micOut struct {
 }
 
 // mic is the capture pipeline in front of /ws. The detector runs on the
-// shepherd's speech plus the echo that leaks past the phone's echo
+// user's speech plus the echo that leaks past the phone's echo
 // canceller, not on the room's steady noise (the app's detector adapts
 // its floor to that). Not safe for concurrent use.
 type mic struct {

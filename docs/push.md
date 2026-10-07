@@ -1,7 +1,7 @@
 # Phone notifications (APNs)
 
 The daemon sends a system notification to the iOS companion app when an
-agent needs the shepherd, even when the app is closed. This is the
+agent needs the user, even when the app is closed. This is the
 contract between the daemon and the app; the code is `internal/push`
 (sender, device registry), the hook is `internal/supervisor/notify.go`,
 and the HTTP routes are `internal/web/push.go`.
@@ -43,7 +43,7 @@ stored lowercased in `<data_dir>/push_devices.json` (mode 600).
 
 ## When a notification is sent
 
-Once per worker event that needs the shepherd, at the place the
+Once per worker event that needs the user, at the place the
 supervisor decides an announcement's line (`codePath`, `applyResult`,
 `dropLate` in `announce.go`, plus the block whose screen could not be
 read):
@@ -51,19 +51,19 @@ read):
 - a **blocked** agent: an approval prompt (`kind: approval`, with the
   pending action's options) or a block with nothing answerable
   (`kind: blocked`);
-- a **kept promise** the shepherd asked for ("tell me when auth
+- a **kept promise** the user asked for ("tell me when auth
   finishes"): `kind` is the promise's event (`done`, `idle`, …).
 
 Plain finishes, starts, status chatter and silent context are never
 sent. The notification goes out whether or not a voice client is
 attached and regardless of the chattiness level (a block is spoken at
 every level anyway); the app suppresses the banner itself while it is in
-the foreground. When the brain's line about an event is skipped as stale
-(the prompt was answered meanwhile) or the brain decides to say nothing,
+the foreground. When the orchestrator's line about an event is skipped as stale
+(the prompt was answered meanwhile) or the orchestrator decides to say nothing,
 nothing is sent either: the phone hears exactly what the voice would.
 
 Dedupe: the sender remembers the last 512 event ids (or pending ids when
-no event id was minted) and sends each once, so a late brain line about
+no event id was minted) and sends each once, so a late orchestrator line about
 an event already notified is not sent again.
 
 ## Payload
@@ -102,7 +102,7 @@ an event already notified is not sent again.
   without it iOS delivers them as `active`.
 - `sheepdog.pending_id` and `sheepdog.options` are present only for an
   approval; `sheepdog.event_id` when the supervisor minted one (with the
-  brain on).
+  orchestrator on).
 
 Headers: `apns-push-type: alert`, `apns-topic: <topic>`,
 `apns-priority: 10` for every alert (a kept promise was asked for, so it is not left to power batching),

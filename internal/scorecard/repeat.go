@@ -9,7 +9,7 @@ import (
 )
 
 // repeatWindow is how close together two utterances have to be to count
-// as the shepherd re-asking the same thing (docs/iteration-2.md
+// as the user re-asking the same thing (docs/iteration-2.md
 // "repeat-ask rate (same intent re-asked within 60 s)").
 const repeatWindow = 60 * time.Second
 

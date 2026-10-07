@@ -64,8 +64,8 @@ type EventStatus struct {
 //
 // With Cut set it is not a fragment but a correction (Dir is DirOut,
 // Final true): the client flushed a spoken run before playing all of it,
-// and Text is the part the shepherd actually heard (possibly empty).
-// Consumers that show captions skip it; the brain replaces its
+// and Text is the part the user actually heard (possibly empty).
+// Consumers that show captions skip it; the orchestrator replaces its
 // "Assistant said" line for the run with it.
 type EventTranscript struct {
 	Dir   Direction
@@ -115,10 +115,10 @@ type EventResumed struct {
 
 // EventPushUnheard is emitted when a spoken push was judged not heard
 // (heard.go, voice.push_unheard). Requeue is set when the session puts
-// it back in its own queue, once, to be spoken after the shepherd's turn
-// and its reply (a decision the shepherd must take, a kept promise);
+// it back in its own queue, once, to be spoken after the user's turn
+// and its reply (a decision the user must take, a kept promise);
 // otherwise nothing more happens to it in the voice layer, and the
-// supervisor tells the brain.
+// supervisor tells the orchestrator.
 type EventPushUnheard struct {
 	Push    UnheardPush
 	Requeue bool

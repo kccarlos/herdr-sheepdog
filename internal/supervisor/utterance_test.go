@@ -26,7 +26,7 @@ func blockedAuth(t *testing.T, h *harness) {
 }
 
 // (1) to_supervisor runs one utterance turn: the request carries the
-// verbatim words, no agent hint and the roster sentence, so the brain
+// verbatim words, no agent hint and the roster sentence, so the orchestrator
 // can answer a status question without a tool call.
 func TestToSupervisorRunsUtteranceTurn(t *testing.T) {
 	m := braintest.NewModel(braintest.Step{Text: braintest.Reply("auth is working on the tests.", "From the roster.")})
@@ -82,7 +82,7 @@ func TestFastPathBareYesSendsKeys(t *testing.T) {
 	if h.log.count("supervisor.fast_path") != 1 {
 		t.Error("no supervisor.fast_path event")
 	}
-	// The brain saw the shepherd's word and what the daemon did with it.
+	// The orchestrator saw the user's word and what the daemon did with it.
 	var seen string
 	for _, msg := range h.sup.brain.Transcript().Messages() {
 		if msg.Kind == brain.KindSystem {
@@ -96,7 +96,7 @@ func TestFastPathBareYesSendsKeys(t *testing.T) {
 
 // The GPT-Live order of events (audio-e2e, 2026-09-23): the model's
 // speech ends (turn complete, which closes the voice input) just after
-// the shepherd's "Yes" fragment arrived, and the utterance's end then
+// the user's "Yes" fragment arrived, and the utterance's end then
 // comes as an empty final fragment. The empty fragment must not become
 // an input of its own: it made the newest input "" and the fast path
 // silently refused the yes.
@@ -116,7 +116,7 @@ func TestEmptyFinalFragmentIsNotAnInput(t *testing.T) {
 	}
 }
 
-// (3) Everything the fast path does not claim goes to the brain: "yes"
+// (3) Everything the fast path does not claim goes to the orchestrator: "yes"
 // with nothing pending, a "yes" with more words, and an option label.
 func TestFastPathBoundaries(t *testing.T) {
 	t.Run("no pending prompt", func(t *testing.T) {
@@ -173,7 +173,7 @@ func TestFastPathBoundaries(t *testing.T) {
 	})
 }
 
-// (3c) The fast path knows the shepherd's polite phrasings, not just a
+// (3c) The fast path knows the user's polite phrasings, not just a
 // terse "yes": each of these, said whole, answers the one open prompt
 // with no model call.
 func TestFastPathPoliteYesPhrases(t *testing.T) {
@@ -254,7 +254,7 @@ func TestFastPathOptionPhrases(t *testing.T) {
 // (3f) A phrase with extra content is not a bare answer, however it
 // starts: "yes but only the tests" is a hedge, not an approval, and
 // "don't approve it yet" is not the bare "don't" — both go to the
-// brain, which the fast path never claims for them.
+// orchestrator, which the fast path never claims for them.
 func TestFastPathRejectsPhrasesWithExtraContent(t *testing.T) {
 	for _, text := range []string{"yes but only the tests", "don't approve it yet"} {
 		t.Run(text, func(t *testing.T) {
@@ -277,9 +277,9 @@ func TestFastPathRejectsPhrasesWithExtraContent(t *testing.T) {
 }
 
 // (3b) The voice relaying a push back through to_supervisor never
-// reaches the brain as the CEO's words (docs/history/issues-2026-09-18.md Bug 2):
+// reaches the orchestrator as the user's words (docs/history/issues-2026-09-18.md Bug 2):
 // with nothing said since the push it is the model's own initiative, and
-// with something said, the brain gets what was said, not the push.
+// with something said, the orchestrator gets what was said, not the push.
 func TestPushRelayedBackNeverReachesTheBrain(t *testing.T) {
 	m := braintest.NewModel(braintest.Step{Text: braintest.Reply("It asked to run git status.", "")})
 	h := newBrainHarness(t, m)
@@ -309,7 +309,7 @@ func TestPushRelayedBackNeverReachesTheBrain(t *testing.T) {
 	}
 }
 
-// (3c) A bare short answer said after a push reaches the brain like
+// (3c) A bare short answer said after a push reaches the orchestrator like
 // anything else, however the push's own words overlap it (audit B1).
 func TestBareAnswerAfterAPushReachesTheBrain(t *testing.T) {
 	m := braintest.NewModel(braintest.Step{Text: braintest.Reply("heard your no.", "")})
@@ -356,7 +356,7 @@ func TestStopToolRunsTheProcedure(t *testing.T) {
 // "abort" and "halt" are bare stop words here exactly as they are on
 // internal/inject's Router (GPT-Live's Classify path): both now read
 // supervisor.BareStopWords, so the same word can no longer stop one
-// voice provider and become an ordinary brain turn on the other (audit
+// voice provider and become an ordinary orchestrator turn on the other (audit
 // B8 — the router used to carry its own regex with these two words that
 // this package's list lacked).
 func TestBareStopWordsAgreeWithTheRouter(t *testing.T) {
@@ -378,8 +378,8 @@ func TestBareStopWordsAgreeWithTheRouter(t *testing.T) {
 
 // "Never mind" is ordinary speech, not a stop word (docs/iteration-2.md
 // J6, eval case never-mind-is-not-stop): on 2026-09-24 00:13:18 it sent
-// Ctrl-C to a worker 16 s after the brain gave it a task. It goes to the
-// brain like any utterance; the stop procedure does not run and nothing
+// Ctrl-C to a worker 16 s after the orchestrator gave it a task. It goes to the
+// orchestrator like any utterance; the stop procedure does not run and nothing
 // is interrupted.
 func TestNeverMindIsNotStop(t *testing.T) {
 	for _, word := range []string{"never mind", "Never mind.", "nevermind", "Oh, never mind."} {
@@ -457,7 +457,7 @@ func TestStopInterruptsARecentInstruction(t *testing.T) {
 	}
 }
 
-// (7) Phases 1 and 2: a stop while the words are with the brain cancels
+// (7) Phases 1 and 2: a stop while the words are with the orchestrator cancels
 // the turn, and — the regression that matters — the words must not then
 // fall through to the template path and be sent after all.
 func TestStopCancelsTheBrainTurnAndSendsNothing(t *testing.T) {
@@ -524,9 +524,9 @@ func TestStopAfterTheTurnActedInterrupts(t *testing.T) {
 	}
 }
 
-// (7c) The stop acknowledgement never waits for the brain: on
+// (7c) The stop acknowledgement never waits for the orchestrator: on
 // 2026-10-02 a Vertex 504 held "Stopped: …" 5.3 s behind the Ctrl-C,
-// because a brain turn sat between the stop and its reply. With a model
+// because an orchestrator turn sat between the stop and its reply. With a model
 // that would block forever, stop answers at once with the code sentence,
 // records what was stopped as a context line, and calls no model.
 func TestStopRepliesWithoutWaitingForTheBrain(t *testing.T) {
@@ -570,7 +570,7 @@ func TestStopRepliesWithoutWaitingForTheBrain(t *testing.T) {
 
 // (7c) A second utterance while one is in flight must not push the
 // first one's words to be answered from the roster: the older turn
-// keeps the brain, and nothing is sent twice.
+// keeps the orchestrator, and nothing is sent twice.
 func TestSecondUtteranceDoesNotDisplaceTheFirst(t *testing.T) {
 	release := make(chan struct{})
 	m := braintest.NewModel(braintest.Step{Block: release, Text: braintest.Reply("auth is working.", "")})
@@ -597,7 +597,7 @@ func TestSecondUtteranceDoesNotDisplaceTheFirst(t *testing.T) {
 	}
 }
 
-// (8) With the brain off the stop procedure speaks its own sentence.
+// (8) With the orchestrator off the stop procedure speaks its own sentence.
 func TestStopSentenceWithoutBrain(t *testing.T) {
 	h := newHarness(t)
 	if res := h.call(ToolStop, nil); res.Spoken != "Nothing was in flight." {
@@ -610,8 +610,8 @@ func TestStopSentenceWithoutBrain(t *testing.T) {
 	}
 }
 
-// (9) With the brain off the daemon answers from the roster and sends
-// nothing: judging what the words mean is the brain's work, and there
+// (9) With the orchestrator off the daemon answers from the roster and sends
+// nothing: judging what the words mean is the orchestrator's work, and there
 // is no second model to guess with.
 func TestUtteranceWithoutABrainReportsStatus(t *testing.T) {
 	h := newHarness(t)
@@ -647,7 +647,7 @@ func agentRow(t *testing.T, h *harness, pane string) state.Agent {
 	return row
 }
 
-// (10) The brain's note tool writes through the supervisor's notes
+// (10) The orchestrator's note tool writes through the supervisor's notes
 // store, and the note is in the ledger of the next turn.
 func TestBrainNoteToolRecordsANote(t *testing.T) {
 	m := braintest.NewModel(
@@ -680,7 +680,7 @@ func TestBrainNoteToolRecordsANote(t *testing.T) {
 	}
 }
 
-// (11) pending travels from the brain's reply to the voice's tool
+// (11) pending travels from the orchestrator's reply to the voice's tool
 // result.
 func TestPendingIsPlumbedThrough(t *testing.T) {
 	m := braintest.NewModel(braintest.Step{Text: `{"spoken": "Reading the diff, about half a minute.", "detail": "", "needs_user": false, "clarify": false, "pending": true}`})
@@ -742,7 +742,7 @@ func waitFor(t *testing.T, cond func() bool, what string) {
 
 // Tier-3 bench 2026-10-03 #8: an instruction typed into a busy Claude
 // Code is folded into its running turn; the stop's Ctrl-C stops both,
-// but the request stays in the worker's history. The brain gets that as
+// but the request stays in the worker's history. The orchestrator gets that as
 // a fact (a context line); nothing is sent to the worker to drop it. An
 // instruction that started the agent's turn itself gets no such line.
 func TestStopAfterAQueuedInstructionTellsTheBrain(t *testing.T) {
@@ -798,7 +798,7 @@ func TestStopAfterAQueuedInstructionTellsTheBrain(t *testing.T) {
 // The #113 echo runs (echo-barge-in r2): "Stop. Stop. Is anything waiting
 // for me?" went to the voice's stop() tool, the answer was "Nothing was
 // in flight.", and the question was dropped. The stop still runs at once;
-// what followed the stop words then goes to the brain, and its reply is
+// what followed the stop words then goes to the orchestrator, and its reply is
 // pushed.
 func TestStopToolAlsoRelaysTheRestOfTheWords(t *testing.T) {
 	m := braintest.NewModel(braintest.Step{Text: braintest.Reply("Nothing is waiting for you; auth is still working.", "")})

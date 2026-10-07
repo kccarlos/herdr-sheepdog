@@ -1,35 +1,35 @@
-// Supervisor tab logic for /debug: turns the brain's transcript
+// Supervisor tab logic for /debug: turns the orchestrator's transcript
 // (GET /api/brain/transcript), its context window (GET /api/brain/context)
 // and the brain.* events into the items the tab renders, and the context
 // into the prompt-budget meter's segments. Pure functions, no DOM,
 // unit-tested with `make test-web` (decision D10: the tab is a viewer of
-// the brain's own store; nothing here talks to the daemon).
+// the orchestrator's own store; nothing here talks to the daemon).
 //
 // Item kinds (every message item carries `seq`, `ts`, `turn`, `inWindow`,
 // `tokens` and `raw`, the API message for its JSON collapsible):
-//   turn         a thin header before the first message of a brain turn,
+//   turn         a thin header before the first message of an orchestrator turn,
 //                with the matching brain.turn / brain.fallback data
 //   marker       the window boundary: everything before it is on disk
 //                only (compacted away or never in the window)
-//   ceo          the shepherd's verbatim words (ceo_utterance)
+//   ceo          the user's verbatim words (ceo_utterance)
 //   assistant    what the assistant said (assistant_said)
 //   push         a push the supervisor sent, with its urgency
 //   worker       a herdr transition ("auth: working → done")
-//   request      the request as the SVP received it (utterance; ask /
+//   request      the request as the orchestrator received it (utterance; ask /
 //                propose / stop in transcripts from before they were removed)
 //                (or a nudge: "Time is up", "That was not the JSON")
 //   tool         brain_tool_call paired with its brain_tool_result by id
-//   reply        the SVP's answer-contract reply (parsed when it is JSON)
+//   reply        the orchestrator's answer-contract reply (parsed when it is JSON)
 //   compaction   a compaction_summary with the compaction's numbers
-//   note         a note the shepherd asked to be remembered
+//   note         a note the user asked to be remembered
 //   promise      a promise record (made by the promise tool, or kept /
 //                expired / cancelled by the supervisor), with the status
 //                the promise.* events report since
 //   screen       the pane read the supervisor handed an event turn
 //                (event_screen), pruned like a tool result
-//   brainEvent   a small line for a brain.* event that has no message of
+//   brainEvent   a small line for an brain.* event that has no message of
 //                its own: a push judgment that spoke nothing (skip), an
-//                event turn that yielded to a shepherd turn, a queued event
+//                event turn that yielded to a user turn, a queued event
 //                turn a newer one replaced (placed by timestamp)
 //   other        any kind this file does not know yet
 // A push item carries `decision` (the brain.push_decision that produced
@@ -38,7 +38,7 @@ import { argSummary } from './grouping.js';
 
 /** The transcript kinds (internal/brain MessageKind) and their meter group. */
 export const KIND_GROUPS = {
-  ceo_utterance: { id: 'ceo', label: 'shepherd' },
+  ceo_utterance: { id: 'ceo', label: 'user' },
   assistant_said: { id: 'assistant', label: 'assistant' },
   push: { id: 'push', label: 'pushes' },
   worker_event: { id: 'worker', label: 'worker events' },
@@ -46,7 +46,7 @@ export const KIND_GROUPS = {
   request: { id: 'request', label: 'requests' },
   brain_tool_call: { id: 'tool', label: 'tool calls' },
   brain_tool_result: { id: 'result', label: 'tool results' },
-  reply: { id: 'reply', label: 'SVP replies' },
+  reply: { id: 'reply', label: 'orchestrator replies' },
   compaction_summary: { id: 'compaction', label: 'summaries' },
   promise: { id: 'promise', label: 'promises' },
   event_screen: { id: 'result', label: 'tool results' },
@@ -364,7 +364,7 @@ export function buildTranscriptView(messages, context, turns, opts = {}) {
       if (paired) items.splice(items.indexOf(paired), 0, marker); else items.push(marker);
       markerDone = true;
     }
-    // A thin header where a brain turn starts.
+    // A thin header where an orchestrator turn starts.
     if (m.turn && m.turn !== lastTurn) {
       lastTurn = m.turn;
       const info = log.turn(m.turn);
@@ -498,10 +498,10 @@ export function meterSegments(context) {
   };
 }
 
-/** The "Brain off" state from a 503 body: the reason in the parentheses when there is one. */
+/** The "Orchestrator off" state from a 503 body: the reason in the parentheses when there is one. */
 export function offState(status, body) {
   if (status !== 503) return null;
-  const msg = body && body.error ? String(body.error) : 'the supervisor brain is off';
+  const msg = body && body.error ? String(body.error) : 'the orchestrator is off';
   const m = /\(([^)]+)\)\s*$/.exec(msg);
   return { off: true, reason: m ? m[1] : msg, message: msg };
 }

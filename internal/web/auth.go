@@ -64,7 +64,7 @@ func constEqual(a, b string) bool {
 type HelloResponse struct {
 	Name    string `json:"name"`
 	Version string `json:"version"`
-	// VoiceName is the dog's own name (config voice.name).
+	// VoiceName is the voice's own name (config voice.name).
 	VoiceName string `json:"voice_name,omitempty"`
 	// Auth is "token" (present a bearer token; see CONFIG.md "web.token")
 	// or "none".

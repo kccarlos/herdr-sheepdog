@@ -33,7 +33,7 @@ func (s *Supervisor) HandleTransition(ctx context.Context, t herdr.Transition) {
 		// A name-only update (herdr's own rename, found by the
 		// snapshot diff): the row has the new name and the voice gets
 		// the names line; it is not a state change, so nothing is
-		// announced, journalled or told to the brain as a worker event.
+		// announced, journalled or told to the orchestrator as a worker event.
 		if state.Say(prev) != state.Say(row) {
 			// A voice rename comes back from herdr on the next
 			// snapshot with the name the row already has: no event.
@@ -113,7 +113,7 @@ func (s *Supervisor) HandleTransition(ctx context.Context, t herdr.Transition) {
 		s.dropPendingFor(t.PaneID, "finished", state.PendingSendInstruction)
 		s.mu.Unlock()
 		// Read before finishTask moves the task to last_task: was the
-		// agent running an instruction the shepherd gave this run?
+		// agent running an instruction the user gave this run?
 		instructed := s.runningShepherdTask(row)
 		if from != herdr.StateDone && from != "" {
 			// The journal entry comes before the announce turn (onDone),
@@ -170,9 +170,9 @@ func (s *Supervisor) startedInstruction(paneID string, from herdr.State) (starte
 }
 
 // pushStarted pushes "<alias> started on …" under the chatty level
-// (docs/roles.md "Pushes"). When the brain's own prompt went out just now
+// (docs/roles.md "Pushes"). When the orchestrator's own prompt went out just now
 // the push is silent, context only: the tool result already told the
-// shepherd it was sent, and "started on" as well was the duplicate
+// user it was sent, and "started on" as well was the duplicate
 // speech of 2026-09-24 00:13:02. An instruction picked up long after it
 // was sent (the worker was busy) is news, spoken at idle as before.
 func (s *Supervisor) pushStarted(paneID, text string, justSent bool) {
@@ -201,13 +201,13 @@ func (s *Supervisor) finishTask(paneID string) {
 }
 
 // onDone reads the pane of a finished agent and hands "<alias> finished."
-// to announce: the finish waits for the brain's line, which replaces it
+// to announce: the finish waits for the orchestrator's line, which replaces it
 // unless the turn fails, and whichever is spoken becomes last_result. It is
 // spoken when the chattiness level allows it for this agent (every finish
 // at chatty; at normal only agents the user dealt with within
 // RecentWindow; never at quiet), with the finish's open promises kept in
 // the same line. instructed is set when the agent was running an
-// instruction the shepherd gave this run (runningShepherdTask): the
+// instruction the user gave this run (runningShepherdTask): the
 // finish is then owed to them like a promise (announce.go).
 //
 // A screen that ends at a prompt is one of two things. agy reports done
@@ -275,13 +275,13 @@ func (s *Supervisor) announceFinishAsking(ctx context.Context, row state.Agent, 
 }
 
 // runningShepherdTask reports whether row's current task is an
-// instruction the shepherd sent this run (sendInstruction sets the task
+// instruction the user sent this run (sendInstruction sets the task
 // and the interaction time together).
 func (s *Supervisor) runningShepherdTask(row state.Agent) bool {
 	return row.CurrentTask != "" && row.LastInteraction != nil && !row.LastInteraction.Before(s.startedAt)
 }
 
-// doneResult is what the record keeps of a finish the brain did not
+// doneResult is what the record keeps of a finish the orchestrator did not
 // phrase (state.Result.Spoken completes "it last …").
 const doneResult = "finished"
 
@@ -320,7 +320,7 @@ func (s *Supervisor) onBlocked(ctx context.Context, row state.Agent) {
 // question and — when the screen really is an approval prompt — creates
 // the pending action whose keys the fast path and the rail answer.
 // announce then keeps the block's promises and speaks the one line the
-// block gets: the brain's, or the parsed prompt's own sentence.
+// block gets: the orchestrator's, or the parsed prompt's own sentence.
 func (s *Supervisor) announceBlock(ctx context.Context, row state.Agent, screen string) {
 	alias := aliasOr(state.Say(row))
 	prompt, ok := herdr.ParsePrompt(screen)
@@ -355,7 +355,7 @@ func (s *Supervisor) recentlyInterrupted(paneID string) bool {
 
 // recordBlock stores the question on the row's last_block; answered is
 // set for a block with nothing to answer, so the roster does not claim
-// the agent is waiting on the shepherd.
+// the agent is waiting on the user.
 func (s *Supervisor) recordBlock(paneID, question string, answered bool) {
 	_, err := s.store.Update(paneID, func(a *state.Agent) {
 		if a.LastBlock == nil {

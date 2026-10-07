@@ -22,7 +22,7 @@ func extractFixtureCases(t *testing.T, opt ExtractOptions) []SVPCase {
 
 // The synthetic day covers what extraction reconstructs: the roster with
 // aliases from the supervisor's events, an open approval prompt (and not
-// a send_instruction record), the screen from the brain's own read, the
+// a send_instruction record), the screen from the orchestrator's own read, the
 // merged transcript, a partial relay, the logged baseline and the
 // provenance; the voice's stop call is not a case.
 func TestExtract(t *testing.T) {

@@ -26,7 +26,7 @@ var update = flag.Bool("update", false, "rewrite testdata/brain/sample-run.jsonl
 // console handle (sheepdogDebug.loadTranscript) read.
 const sampleRunPath = "../../testdata/brain/sample-run.jsonl"
 
-// TestSampleRunFixture drives a realistic run through the brain — a seed
+// TestSampleRunFixture drives a realistic run through the orchestrator — a seed
 // conversation, an ask that reads a screen, an ask that runs the CLI, a
 // propose whose send_keys the rail blocks, filler until the window
 // compacts, a note and a recall — over a fixed clock and a scripted model,
@@ -108,7 +108,7 @@ func TestSampleRunFixture(t *testing.T) {
 	ask("why did that one fail?", "")
 	b.Said("Clamp uses a greater-than where it needs greater-or-equal, so the upper bound comes back one too high.", true)
 
-	// Turn 3: auth blocks on a prompt; the CEO says yes; the model sends
+	// Turn 3: auth blocks on a prompt; the user says yes; the model sends
 	// a key that is not one of the prompt's options, and the rail refuses.
 	host.SetScreen("w5:p1", fixture(t, "codex-approval-prompt.screen.txt"))
 	host.SetPending("w5:p1", &PendingPrompt{ID: "ap-7", Question: "whether it can delete the fixtures directory",

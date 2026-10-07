@@ -130,7 +130,7 @@ func TestAnswerIsBriefingShaped(t *testing.T) {
 }
 
 // TestCutFactSaysWhoCut: a flush the daemon made for an urgent briefing
-// is not reported as the CEO cutting the voice off.
+// is not reported as the user cutting the voice off.
 func TestCutFactSaysWhoCut(t *testing.T) {
 	s, err := newSession(Config{APIKeys: []string{"k"}}, &recLogger{}, &fakeDialer{})
 	if err != nil {

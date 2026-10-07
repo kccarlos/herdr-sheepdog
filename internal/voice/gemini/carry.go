@@ -2,7 +2,7 @@ package gemini
 
 import "github.com/kccarlos/herdr-sheepdog/internal/voice"
 
-// RecapEntries is the recent conversation (the shepherd's pending words
+// RecapEntries is the recent conversation (the user's pending words
 // and the reply so far included), for a provider switch to carry over
 // (voice.Switcher).
 func (s *Session) RecapEntries() []voice.RecapEntry {

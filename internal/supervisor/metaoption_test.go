@@ -10,8 +10,8 @@ import (
 )
 
 // docs/eval/eval-campaign-2026-10-03.md H2 (bench-askuser-meta-options):
-// Claude Code's "Type something." reached the brain as an ordinary
-// option, and it was offered as a choice. The brain now sees it flagged
+// Claude Code's "Type something." reached the orchestrator as an ordinary
+// option, and it was offered as a choice. The orchestrator now sees it flagged
 // as a free-text entry; the phone card still leaves it out.
 func TestMetaOptionReachesTheBrainFlagged(t *testing.T) {
 	m := braintest.NewModel(braintest.Step{Text: braintest.Reply("It asks whether to proceed.", "")})

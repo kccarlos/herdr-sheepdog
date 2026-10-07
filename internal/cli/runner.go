@@ -75,7 +75,7 @@ type Query struct {
 	Timeout time.Duration
 	// Slot names the one-at-a-time slot; "" uses Workspace. A background
 	// investigation passes its own, so a minutes-long job does not lock
-	// the brain out of a short run_cli lookup in the same repository.
+	// the orchestrator out of a short run_cli lookup in the same repository.
 	Slot string
 }
 
@@ -102,7 +102,7 @@ func NewRunner(cfg Config, det Detection) (*Runner, error) {
 }
 
 // Query implements supervisor.Querier: it picks the backend per cfg.Prefer
-// and returns its raw output (the brain's run_cli tool).
+// and returns its raw output (the orchestrator's run_cli tool).
 func (r *Runner) Query(ctx context.Context, workspace, question string) (string, error) {
 	res, err := r.Run(ctx, Query{Workspace: workspace, Question: question})
 	if err != nil {

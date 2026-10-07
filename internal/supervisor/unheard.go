@@ -9,13 +9,13 @@ import (
 )
 
 // Unheard pushes (docs/history/bench-2026-10-03.md #17, #18, #19). The voice
-// layer judges whether each spoken push reached the CEO (voice/heard.go)
+// layer judges whether each spoken push reached the user (voice/heard.go)
 // and re-queues, once, the lines they are owed a hearing of. Every other
-// unheard line is a fact the brain cannot see: it becomes a transcript
-// context line, and the brain decides on its next turn whether to
+// unheard line is a fact the orchestrator cannot see: it becomes a transcript
+// context line, and the orchestrator decides on its next turn whether to
 // mention it. No model call is made here.
 
-// onPushUnheard records a push the CEO did not hear in the brain's
+// onPushUnheard records a push the user did not hear in the orchestrator's
 // transcript, unless the voice layer re-queued it.
 func (s *Supervisor) onPushUnheard(e voice.EventPushUnheard) {
 	s.markUnheard(e.Push.Text) // heard.go
@@ -30,7 +30,7 @@ func (s *Supervisor) onPushUnheard(e voice.EventPushUnheard) {
 }
 
 // OpenCheck is the voice layer's voice.OpenCheck. With nil tags: is a
-// worker's prompt waiting for the CEO (a pending answer_prompt; an
+// worker's prompt waiting for the user (a pending answer_prompt; an
 // instruction awaiting confirmation does not hold a session refresh)?
 // With a push's tags: is what it is about still owed to them — a kept
 // or due promise, or the prompt its worker event raised, still the

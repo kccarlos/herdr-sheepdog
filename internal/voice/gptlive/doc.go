@@ -2,7 +2,7 @@
 // (model gpt-live-1) over the primary Live WebSocket
 // (wss://api.openai.com/v1/live/sessions), in client delegation mode:
 // the voice model hands work to the daemon with session.delegation.created
-// and the daemon's supervisor (the brain) answers it. See
+// and the daemon's supervisor (the orchestrator) answers it. See
 // docs/gpt-live-notes.md for the wire protocol as verified live.
 //
 // GPT-Live is billed per second of session, idle or not, so unlike the

@@ -13,7 +13,7 @@ func answerPush(text, utt string, sentMs int) UnheardPush {
 	return UnheardPush{Text: text, Tags: map[string]any{TagAnswersUtterance: utt, TagPushID: "push-" + utt}, Reason: UnheardBodySkipped, SentAt: rqAt(sentMs)}
 }
 
-// TestRequeueOwesAnswers is campaign D N3: an answer to the CEO's
+// TestRequeueOwesAnswers is campaign D N3: an answer to the user's
 // question is owed like a decision or a kept promise; a re-queue never
 // is; a plain news line only when the open check says so.
 func TestRequeueOwesAnswers(t *testing.T) {
@@ -40,10 +40,10 @@ func TestRequeueOwesAnswers(t *testing.T) {
 }
 
 // TestRequeueStaleAnswer: an answer is stale when a newer answer went
-// out after it was sent, or the CEO handed on new words (to_supervisor,
+// out after it was sent, or the user handed on new words (to_supervisor,
 // stop) after it was sent; the voice relaying the answer's own text
 // back (lang-mixed-codeswitch r1, supervisor.self_relay) is not new
-// words. A stale answer is dropped and the brain told; a fresh one goes
+// words. A stale answer is dropped and the orchestrator told; a fresh one goes
 // back in the queue.
 func TestRequeueStaleAnswer(t *testing.T) {
 	const ans = "Bench Codex 说 test 还没过。 TestAdd 失败了，加 2 和 3 得到的是 3，不是 5。 要让它把这个 bug 修掉吗？"
@@ -100,7 +100,7 @@ func TestRequeueStaleAnswer(t *testing.T) {
 	}
 }
 
-// TestRequeueStaleOnlyForAnswers: a decision or a kept promise the CEO
+// TestRequeueStaleOnlyForAnswers: a decision or a kept promise the user
 // talked over is still owed after they ask something else (#108's
 // collision case); only answers go stale.
 func TestRequeueStaleOnlyForAnswers(t *testing.T) {
@@ -116,7 +116,7 @@ func TestRequeueStaleOnlyForAnswers(t *testing.T) {
 
 // TestRequeueAlreadyHeard replays the re-queued lines of the bench logs
 // (#111's collision-finish-push arms, campaign D, unheard-approval-requeue
-// and collision-block-while-talking): what the CEO heard of the line,
+// and collision-block-while-talking): what the user heard of the line,
 // then everything the voice said until the re-queue. A line whose
 // content the voice retold since is dropped; one it did not is re-queued.
 func TestRequeueAlreadyHeard(t *testing.T) {
@@ -195,9 +195,9 @@ func TestRequeueSaidAcrossAdds(t *testing.T) {
 }
 
 // TestRequeueStaleBeforeAlreadyHeard is the fix arm's
-// barge-in-long-answer r1: the CEO cut an answer off, asked something
+// barge-in-long-answer r1: the user cut an answer off, asked something
 // else, and a later answer repeated its words. The cut answer is stale
-// (the brain is told), not "already heard".
+// (the orchestrator is told), not "already heard".
 func TestRequeueStaleBeforeAlreadyHeard(t *testing.T) {
 	var r Requeue
 	v := answerPush("It wrote the README you asked for, covering what the project does. It also spotted two broken links in the contributing guide.", "utt-3", 11904)

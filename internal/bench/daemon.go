@@ -1,9 +1,9 @@
 // Package bench is the voice benchmark (tier 2, `sheepdog bench`):
 // synthetic speech (internal/bench/speech) from a phone emulator
 // (internal/bench/voiceclient) into a scratch daemon with the real voice
-// model and the real brain over a mock herdr whose workers follow the
+// model and the real orchestrator over a mock herdr whose workers follow the
 // eval sim's scripted worlds (internal/bench/world); an LLM plays the
-// CEO, hearing the bot through the voice model's output transcription,
+// user, hearing the bot through the voice model's output transcription,
 // and the eval judge grades the call (docs/bench/README.md).
 package bench
 
@@ -24,12 +24,12 @@ import (
 )
 
 // DefaultPorts are the scratch daemons' ports (one per parallel worker);
-// never the CEO's own daemon (7777).
+// never the user's own daemon (7777).
 var DefaultPorts = []int{7790, 7791, 7792}
 
 // DaemonOptions configure one scratch daemon.
 type DaemonOptions struct {
-	// Config is the base configuration (the CEO's file and .env: the
+	// Config is the base configuration (the user's file and .env: the
 	// Vertex and DeepSeek credentials, gemini.backend); everything that
 	// could touch the real daemon is overridden below.
 	Config config.Config
@@ -40,10 +40,10 @@ type DaemonOptions struct {
 	Voice string
 	// Brain is app.BrainOn (default) or app.BrainOff (calibration).
 	Brain string
-	// BrainProvider and BrainModel pick the brain (default deepseek,
+	// BrainProvider and BrainModel pick the orchestrator (default deepseek,
 	// deepseek-flash).
 	BrainProvider, BrainModel string
-	// DeepSeekBaseURL, when set, sends the DeepSeek brain through this
+	// DeepSeekBaseURL, when set, sends the DeepSeek orchestrator through this
 	// root (the fault proxy).
 	DeepSeekBaseURL string
 	// Querier answers run_cli and investigations (the scenario's
@@ -64,7 +64,7 @@ type Daemon struct {
 
 // ScratchConfig is o.Config made safe for a scratch daemon: loopback
 // only, no token, its own data dir and state file, no phone
-// notifications, the bench's brain.
+// notifications, the bench's orchestrator.
 func ScratchConfig(o DaemonOptions) config.Config {
 	cfg := o.Config
 	cfg.DataDir = filepath.Join(o.Dir, "data")
@@ -73,11 +73,11 @@ func ScratchConfig(o DaemonOptions) config.Config {
 	cfg.Web.Port = o.Port
 	cfg.Web.Token = ""
 	cfg.Web.Dev = false
-	cfg.Push.APNs.KeyPath = "" // never APNs the CEO's phone
+	cfg.Push.APNs.KeyPath = "" // never APNs the user's phone
 	cfg.Herdr.Socket = filepath.Join(o.Dir, "no-herdr.sock")
 	if cfg.Gemini.Backend == "vertex" {
 		// The voice runs on Vertex; the AI Studio key pool would only
-		// register the free-tier gemini brain provider as a failover
+		// register the free-tier gemini orchestrator provider as a failover
 		// target (the eval sim leaves it out unless asked, too).
 		cfg.Gemini.APIKeys = nil
 	}
@@ -97,7 +97,7 @@ func ScratchConfig(o DaemonOptions) config.Config {
 // until it answers /api/hello.
 func StartDaemon(ctx context.Context, o DaemonOptions) (*Daemon, error) {
 	if o.Port == 7777 {
-		return nil, errors.New("bench: port 7777 is the CEO's daemon")
+		return nil, errors.New("bench: port 7777 is the user's daemon")
 	}
 	if err := os.MkdirAll(o.Dir, 0o755); err != nil {
 		return nil, err

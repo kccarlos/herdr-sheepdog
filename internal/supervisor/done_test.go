@@ -13,8 +13,8 @@ import (
 )
 
 // TestDonePushIsTheCodeSentence runs the captured "after" screens
-// through a finish with no brain attached: the pane tail is read (200
-// lines) so the brain would have it, the daemon speaks its own sentence
+// through a finish with no orchestrator attached: the pane tail is read (200
+// lines) so the orchestrator would have it, the daemon speaks its own sentence
 // and the record keeps that the agent finished — no model phrases
 // anything (docs/roles.md "Hot paths that stay code").
 func TestDonePushIsTheCodeSentence(t *testing.T) {
@@ -153,10 +153,10 @@ func TestFinishWithATrailingPromptAnnouncesBoth(t *testing.T) {
 	}
 }
 
-// With the brain attached the one announce turn is told the finish also
+// With the orchestrator attached the one announce turn is told the finish also
 // asks, and its line — the finding, then the question as the reply's ask,
 // heard last — is the event's one push, tagged as a decision the
-// shepherd must take.
+// user must take.
 func TestFinishWithATrailingPromptBrainLineCoversBoth(t *testing.T) {
 	headline := "Auth found only the phone was connected, so the flips were taps. It's also asking whether to teach auto mode about your environment."
 	ask := "Yes or not now?"

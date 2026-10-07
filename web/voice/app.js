@@ -169,7 +169,7 @@ function setPlaybackPolicy(provider) {
 
 function onPlaybackMessage(m) {
   if (m.type === 'playback') {
-    // The daemon keeps "the dog is speaking" true until the reply has
+    // The daemon keeps "the voice is speaking" true until the reply has
     // actually played, and trims a cut-off reply to what was heard
     // (docs/ws-contract.md "Playback reports").
     send({ type: 'playback', state: m.state, played_ms: m.playedMs });
@@ -376,7 +376,7 @@ function openWS() {
       // Another client (a second tab, the phone) took the session over.
       // Reconnecting would take it back, and that client would do the
       // same, in a loop (docs/timelines.md C14): stop, as the iOS app
-      // does, and let the shepherd press Connect to take it back.
+      // does, and let the user press Connect to take it back.
       disconnect();
       showError('Another client took over the voice session. Press Connect to take it back.');
       return;
@@ -579,13 +579,13 @@ function stop() {
 }
 
 // resetConversation is the "New conversation" button: it resets the
-// brain's transcript window and the voice session's memory
+// orchestrator's transcript window and the voice session's memory
 // (docs/roles.md) through POST /api/conversation/reset {via:
 // "voice_page"}; a confirm() guards it since it clears the shown
 // conversation (the agents, promises, notes and pending prompts are
 // unaffected).
 async function resetConversation() {
-  if (!confirm('Start a new conversation? This clears the shepherd/dog conversation so far; the agents, promises, notes and pending prompts are kept.')) return;
+  if (!confirm('Start a new conversation? This clears the conversation so far; the agents, promises, notes and pending prompts are kept.')) return;
   const btn = $('btn-new-conversation');
   const result = $('new-conversation-result');
   btn.disabled = true;
@@ -714,7 +714,7 @@ function renderTranscript() {
     line.className = `line ${t.dir}${t.final ? '' : ' partial'}`;
     const dir = document.createElement('span');
     dir.className = 'dir';
-    dir.textContent = t.dir === 'in' ? 'you' : 'dog';
+    dir.textContent = t.dir === 'in' ? 'you' : 'voice';
     const text = document.createElement('span');
     text.className = 'text';
     text.textContent = t.text + (t.final ? '' : ' …');

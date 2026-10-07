@@ -10,7 +10,7 @@ import (
 )
 
 // A late answer as the function response (brain.reply_wait_s above the
-// utterance budget): the call stays open while the brain works, so the
+// utterance budget): the call stays open while the orchestrator works, so the
 // paths around it must not lose the answer.
 
 // lateHandler blocks until gate closes, then answers like the
@@ -27,7 +27,7 @@ func lateHandler(gate <-chan struct{}) voice.ToolHandler {
 }
 
 // docs/timelines.md C23: the connection the call came on dies while the
-// brain works. The function response cannot go on the new connection,
+// orchestrator works. The function response cannot go on the new connection,
 // so the answer goes through the push queue instead of being dropped.
 func TestLateAnswerOnDeadConnectionIsPushed(t *testing.T) {
 	c1, c2 := newFakeConn("c1"), newFakeConn("c2")
@@ -59,7 +59,7 @@ func TestLateAnswerOnDeadConnectionIsPushed(t *testing.T) {
 	}
 }
 
-// A result that lands while the shepherd is speaking waits until they
+// A result that lands while the user is speaking waits until they
 // stop, as a push does (speakingUntilLocked).
 func TestLateAnswerHeldWhileShepherdSpeaks(t *testing.T) {
 	c := newFakeConn("c1")

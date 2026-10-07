@@ -160,8 +160,8 @@ func TestVoiceLog(t *testing.T) {
 	}
 	want := []string{
 		"session open (fresh)=fresh ", "system instructions=be brief ",
-		`shepherd (audio + transcript)=🎤 audio 0.5 s — heard: "hello there" call:1`,
-		"shepherd audio=🎤 audio 0.1 s ", "tool call=→ x call:1", "voice said=Sure, checking. ", "tool response=← ok call:1",
+		`user (audio + transcript)=🎤 audio 0.5 s — heard: "hello there" call:1`,
+		"user audio=🎤 audio 0.1 s ", "tool call=→ x call:1", "voice said=Sure, checking. ", "tool response=← ok call:1",
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Errorf("items:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))

@@ -7,10 +7,10 @@ import (
 	"strings"
 )
 
-// Simulated-user personas: how the CEO talks, selectable per run
+// Simulated-user personas: how the user talks, selectable per run
 // (`--personas` on `eval sim` and `bench run`), independent of the
 // scenario. A persona changes the words, never the content: the agenda's
-// beats (or the goal) stay what the CEO wants. The zh persona speaks only
+// beats (or the goal) stay what the user wants. The zh persona speaks only
 // Mandarin and ignores a scenario's language switch.
 
 // Persona is one speaking style.
@@ -75,7 +75,7 @@ func PersonaFor(list []string, id string, repeat int) string {
 
 // WithPersona returns sc spoken in persona name (unchanged for "" or a
 // fixed script, whose exact words are the point). The scenario's own
-// persona text stays (it says what this CEO does); the style is added.
+// persona text stays (it says what this user does); the style is added.
 // A persona with its own language replaces the scenario's, and the
 // opening (said verbatim) is replaced by OpeningZH when the scenario has
 // one, else dropped so the simulated user says the first line.

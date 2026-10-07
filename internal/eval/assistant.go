@@ -167,7 +167,7 @@ func quoteOrEmpty(s string) string {
 
 // buildAssistantContents renders context lines and the final utterance as
 // model contents: a "Dog: " line is the model's own prior turn; anything
-// else (a CEO utterance, or a push with its bracketed prefix exactly as
+// else (a user utterance, or a push with its bracketed prefix exactly as
 // internal/voice/gemini's pushTurn renders it) is a user turn.
 func buildAssistantContents(context []string, utterance string) []*genai.Content {
 	out := make([]*genai.Content, 0, len(context)+1)

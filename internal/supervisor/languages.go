@@ -5,9 +5,9 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
 
-// Languages returns the shepherd's language preference (internal/lang
+// Languages returns the user's language preference (internal/lang
 // codes, most preferred first), nil when none is set. The voice reads it
-// at every (re)connect for its system instruction; the brain's host
+// at every (re)connect for its system instruction; the orchestrator's host
 // reads it for the state block.
 func (s *Supervisor) Languages() []string {
 	langs := s.store.Snapshot().Session.Languages
@@ -17,7 +17,7 @@ func (s *Supervisor) Languages() []string {
 	return langs
 }
 
-// LanguageLine is the preference as the one line both brains get ("" when
+// LanguageLine is the preference as the one line the voice and the orchestrator get ("" when
 // none is set): information, never a rule about which language to use.
 func (s *Supervisor) LanguageLine() string { return lang.Line(s.Languages()) }
 

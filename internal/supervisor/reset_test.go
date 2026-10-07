@@ -44,7 +44,7 @@ func TestResetPhraseThenConfirmResets(t *testing.T) {
 }
 
 // A plain "yes" never confirms the reset — with no open worker prompt it
-// falls through to the brain (or, with none, the roster fallback) like
+// falls through to the orchestrator (or, with none, the roster fallback) like
 // any other utterance, and no reset happens.
 func TestResetPhrasePlainYesDoesNotConfirm(t *testing.T) {
 	h := newHarness(t)
@@ -87,7 +87,7 @@ func TestResetConfirmationExpires(t *testing.T) {
 	}
 }
 
-// Only a real shepherd input can confirm: a to_supervisor relay with
+// Only a real user input can confirm: a to_supervisor relay with
 // nothing fresh behind it (the voice model's own initiative) neither
 // asks nor confirms.
 func TestResetPhraseNeedsShepherdInput(t *testing.T) {
@@ -101,7 +101,7 @@ func TestResetPhraseNeedsShepherdInput(t *testing.T) {
 	}
 }
 
-// ResetConversation (the API path) resets with no brain attached: it
+// ResetConversation (the API path) resets with no orchestrator attached: it
 // still drops the voice session's memory, logs conversation.reset and
 // moves conversation_started_at.
 func TestResetConversationAPIPathNoBrain(t *testing.T) {
@@ -149,7 +149,7 @@ func TestResetDisarmsTheDaemonRelay(t *testing.T) {
 	}
 }
 
-// A shepherd turn still detached from its tool call (awaitReply, past
+// A user turn still detached from its tool call (awaitReply, past
 // Config.ReplyWait) when "New conversation" happens must not deliver its
 // reply as a push into the fresh conversation — it is marked dropped
 // exactly like a stop would (audit "Reset leftovers").
@@ -185,7 +185,7 @@ func TestResetDropsADetachedUtteranceReply(t *testing.T) {
 	}
 }
 
-// No shepherd input recorded before a reset may authorise a
+// No user input recorded before a reset may authorise a
 // to_supervisor call in the fresh conversation: the voice relaying an
 // old, unclaimed input's words on its own initiative after the reset
 // gets nothing, exactly as it would with no input behind it at all
@@ -209,7 +209,7 @@ func TestResetPreventsPreResetInputFromAuthorising(t *testing.T) {
 	}
 }
 
-// A brain's ResetConversation runs Brain.Reset and reports its id.
+// A orchestrator's ResetConversation runs Brain.Reset and reports its id.
 func TestResetConversationWithBrainUsesBrainID(t *testing.T) {
 	h := newBrainHarness(t, braintest.NewModel())
 	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)

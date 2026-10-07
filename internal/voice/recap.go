@@ -38,7 +38,7 @@ func (r *Recap) Focus() string { return r.focus }
 
 // Recap roles.
 const (
-	RecapUser       = "user"       // the shepherd
+	RecapUser       = "user"       // the user
 	RecapAssistant  = "assistant"  // the voice itself
 	RecapSupervisor = "supervisor" // a spoken push the voice was given
 )
@@ -51,7 +51,7 @@ type RecapEntry struct {
 	Role string
 	Text string
 	// CutAfterMs, on an assistant entry, says the client cut its speech
-	// off after this long: Text is only the part the shepherd heard.
+	// off after this long: Text is only the part the user heard.
 	CutAfterMs int
 	Cut        bool
 }
@@ -60,9 +60,9 @@ type RecapEntry struct {
 // is what would only teach a fresh model the wrong habit
 // (docs/history/bench-2026-10-03.md #9): a bare acknowledgement of the voice's
 // own ("On it.", "checking", "好的") and its "<no speech detected>"
-// placeholder, and a shepherd entry that only repeats the line the
+// placeholder, and a user entry that only repeats the line the
 // voice was just given or said (its own speech heard back, or a push's
-// question relayed as if the shepherd had asked it). Run 1's 18-hour
+// question relayed as if the user had asked it). Run 1's 18-hour
 // session had relayed 17 of 17 Chinese push questions with "on it".
 func (r *Recap) Add(role, text string) {
 	text = strings.TrimSpace(text)
@@ -101,10 +101,10 @@ func BareAck(text string) bool {
 	return recapAckWords[recapNorm(text)]
 }
 
-// repeatsRecent reports whether a shepherd entry only repeats one of
+// repeatsRecent reports whether a user entry only repeats one of
 // the last few lines the voice was given or said. A short answer that
 // happens to echo the question ("fix it", "允许它运行") is the
-// shepherd's own: only a repeat of at least selfRelayMin letters counts.
+// user's own: only a repeat of at least selfRelayMin letters counts.
 func (r *Recap) repeatsRecent(text string) bool {
 	n := recapNorm(text)
 	if len([]rune(n)) < selfRelayMin {
@@ -124,7 +124,7 @@ func (r *Recap) repeatsRecent(text string) bool {
 	return false
 }
 
-// selfRelayMin is the shortest shepherd entry (letters and digits)
+// selfRelayMin is the shortest user entry (letters and digits)
 // taken as a repeat of the voice's own line.
 const selfRelayMin = 8
 
@@ -141,7 +141,7 @@ func recapNorm(text string) string {
 
 // Cut replaces the newest assistant entry that full (everything the cut
 // run said) contains with heard, the part the client played: the recap
-// then says what the shepherd actually heard, as the brain's "Assistant
+// then says what the user actually heard, as the orchestrator's "Assistant
 // said (cut off after N s)" does. It reports whether an entry matched.
 func (r *Recap) Cut(full, heard string, heardMs int) bool {
 	full = strings.TrimSpace(full)
@@ -206,7 +206,7 @@ func (r *Recap) Recent(budget int) []RecapEntry {
 	return out
 }
 
-// RecapLines renders entries as "Shepherd: …" / "You: …" /
+// RecapLines renders entries as "User: …" / "You: …" /
 // "Supervisor update: …" lines for a model told about its own earlier
 // conversation.
 func RecapLines(entries []RecapEntry) string {

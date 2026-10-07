@@ -18,7 +18,7 @@ type CtrlCSend struct {
 	PaneID         string
 	PrecededByStop bool
 	// TriggerText is the nearest preceding to_supervisor relay or
-	// transcript fragment: what the shepherd was saying when this
+	// transcript fragment: what the user was saying when this
 	// happened.
 	TriggerText string
 }

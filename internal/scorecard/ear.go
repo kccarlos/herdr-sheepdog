@@ -8,16 +8,16 @@ import (
 // EarReport is the ear-metrics half of the scorecard (docs/iteration-2.md
 // "words, sentences, dashes/semicolons, technical tokens ... and
 // unfamiliar terms per spoken line"): the quality of what was actually
-// said, and separately of what the brain wrote but never got spoken.
+// said, and separately of what the orchestrator wrote but never got spoken.
 type EarReport struct {
-	// Spoken is earmetrics.Aggregate over every line the shepherd
+	// Spoken is earmetrics.Aggregate over every line the user
 	// actually heard: voice.tool_result.spoken and voice.push.text with
 	// urgency != "silent".
 	Spoken earmetrics.Summary
 	// DroppedBrainLines is earmetrics.Aggregate over brain.push_late
-	// lines with added:false (docs/architecture.md: "a brain line that
+	// lines with added:false (docs/architecture.md: "an orchestrator line that
 	// arrived after the code sentence was spoken and was dropped") whose
-	// spoken text is non-empty — the words the shepherd never heard.
+	// spoken text is non-empty — the words the user never heard.
 	DroppedBrainLines earmetrics.Summary
 }
 

@@ -12,9 +12,9 @@ import (
 )
 
 // Worker history (docs/roles.md "Worker history", docs/iteration-2.md
-// WP4). The brain used to know a worker only by its screen — tool output,
+// WP4). The orchestrator used to know a worker only by its screen — tool output,
 // paths, progress bars — so its lines relayed the worker's working notes
-// (the 2026-09-24 baseline: about two jargon terms per brain line; "why
+// (the 2026-09-24 baseline: about two jargon terms per orchestrator line; "why
 // don't you just tell me the findings if it's finished", 00:00:18). The
 // worker already writes for a human in its own session transcript, and
 // herdr reports where that is (agent_session). On every finish or block
@@ -24,7 +24,7 @@ import (
 // them all.
 
 // The journal entry caps: small enough that the entry can sit in the
-// state file and the brain's prompt as is.
+// state file and the orchestrator's prompt as is.
 const (
 	journalAssistantRunes   = 600
 	journalInstructionRunes = 200
@@ -37,9 +37,9 @@ const (
 var journalRetry = 300 * time.Millisecond
 
 // SignOff is the trailer the supervisor appends to every instruction the
-// brain sends through its prompt tool (never the model: brainHost.Prompt),
+// orchestrator sends through its prompt tool (never the model: brainHost.Prompt),
 // so the worker's last message — the journal's last_assistant — ends with
-// what the shepherd needs to hear. It is not the shepherd's words: the
+// what the user needs to hear. It is not the user's words: the
 // pending action's summary, the "started on …" push, the current task
 // and the journal all use the instruction without it (withoutSignOff).
 const SignOff = "When you finish, end with three short lines for someone who cannot see the screen: what changed; what needs a decision; what is next."
@@ -179,7 +179,7 @@ func scrubLines(text string) string {
 	return strings.Join(out, "\n")
 }
 
-// journalInfo converts the row's journal for the brain.
+// journalInfo converts the row's journal for the orchestrator.
 func journalInfo(journal []state.JournalEntry) []brain.JournalEntry {
 	if len(journal) == 0 {
 		return nil

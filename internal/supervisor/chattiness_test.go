@@ -41,7 +41,7 @@ func (h *harness) pushTexts() []string {
 // compares the pushes: questions and exits always; informational blocks,
 // replacement phrasing and finishes of agents the user dealt with at
 // normal; every finish at chatty, and "started on" there as silent
-// context (the brain's own prompt went out just now); "idle again" never.
+// context (the orchestrator's own prompt went out just now); "idle again" never.
 func TestChattinessLevels(t *testing.T) {
 	const (
 		authQ    = `auth asks to run printf.`
@@ -56,7 +56,7 @@ func TestChattinessLevels(t *testing.T) {
 		exit  = "auth has exited while it was busy."
 	)
 	// vps's finish of the instruction sent in step 5 is owed to the
-	// shepherd, so even quiet speaks it (announce.go: an owed line is
+	// user, so even quiet speaks it (announce.go: an owed line is
 	// never suppressed by chattiness).
 	want := map[Chattiness][]string{
 		Quiet:  {authQ, docsQ, vpsDone, trust, exit},
@@ -121,7 +121,7 @@ func TestChattinessLevels(t *testing.T) {
 
 // TestNormalDoneWindow: at normal a finish is announced only when the user
 // dealt with the agent within RecentWindow; a spoken briefing counts, the
-// silent periodic one does not. The finish of the shepherd's own
+// silent periodic one does not. The finish of the user's own
 // instruction is owed, whatever the window (TestOwedFinishBypassesCeiling).
 func TestNormalDoneWindow(t *testing.T) {
 	h := threeAgents(t, func(c *Config) { c.Chattiness = string(Normal) })

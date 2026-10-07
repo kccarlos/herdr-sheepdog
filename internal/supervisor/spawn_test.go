@@ -43,7 +43,7 @@ func newSpawnWorld(t *testing.T) *spawnWorld {
 }
 
 // newSpawnWorldWith builds the world on a harness from mk (newHarness,
-// or a brain harness).
+// or an orchestrator harness).
 func newSpawnWorldWith(t *testing.T, mk func(*testing.T, ...func(*Config)) *harness) *spawnWorld {
 	t.Helper()
 	oldPoll, oldShell, oldSettle := spawnPoll, spawnShellWait, spawnShellSettle
@@ -107,7 +107,7 @@ func (w *spawnWorld) detect(pane string, from, to herdr.State) {
 	w.sup.HandleTransition(context.Background(), herdr.Transition{PaneID: pane, From: from, To: to, At: w.clock.Now(), Agent: "claude", WorkspaceID: "w20", WorkspaceLabel: "bench", Cwd: w.bench})
 }
 
-// The whole start: the CEO asks, a workspace opens in the project, the
+// The whole start: the user asks, a workspace opens in the project, the
 // CLI's command line is typed into its shell, the trust question is a
 // normal block, and the first instruction goes only once the agent sits
 // idle.
@@ -178,7 +178,7 @@ func TestSpawnReusesExistingWorkspace(t *testing.T) {
 	}
 }
 
-// The CEO's phone session, 2026-10-03 22:24:11: "在 Sheepdog Bench 开一个
+// The user's phone session, 2026-10-03 22:24:11: "在 Sheepdog Bench 开一个
 // 新的 Claude" split wP:p1 (the bench workspace's pane) but the new pane
 // came back as wM:p3, in the kvoice workspace, and the agent was named
 // "kvoice Claude 2". herdr's pane.split reads the pane to split from
@@ -231,7 +231,7 @@ func TestSpawnSplitLandsInTheProjectsWorkspace(t *testing.T) {
 	}
 }
 
-// Authorisation, not judgement: no words of the CEO's, words too old, a
+// Authorisation, not judgement: no words of the user's, words too old, a
 // tap on a question, a "no" or a filler start nothing.
 func TestSpawnRailNeedsTheCEOsRecentWords(t *testing.T) {
 	cases := []struct {
@@ -315,7 +315,7 @@ func TestSpawnRefusesPathsOutsideProjectRoots(t *testing.T) {
 	}
 }
 
-// The candidates are a fact the brain reads when a name does not
+// The candidates are a fact the orchestrator reads when a name does not
 // resolve: the workspaces' directories and the roots' subdirectories,
 // hidden ones left out.
 func TestSpawnUnknownDirListsCandidates(t *testing.T) {
@@ -341,7 +341,7 @@ func TestSpawnUnknownDirListsCandidates(t *testing.T) {
 }
 
 // One input starts one agent: the second spawn on the same words is
-// refused until the CEO says something new.
+// refused until the user says something new.
 func TestSpawnConsumesTheWords(t *testing.T) {
 	w := newSpawnWorld(t)
 	w.hear("open two claudes in app")
@@ -396,9 +396,9 @@ func TestSpawnRefusesModelThatIsNotAName(t *testing.T) {
 	}
 }
 
-// The CEO's phone session, 2026-10-04 04:58:57: a new Claude in kvoice
+// The user's phone session, 2026-10-04 04:58:57: a new Claude in kvoice
 // was not recognised by herdr within 60 s and supervisor.spawn_not_ready
-// dropped its first instruction. Now the brain is told the agent is not
+// dropped its first instruction. Now the orchestrator is told the agent is not
 // ready, with its pane's last lines (here Claude's folder-trust
 // question), the watch goes on, and the instruction goes once the agent
 // is recognised and idle.
@@ -421,7 +421,7 @@ func TestSpawnNotReadyKeepsWaitingAndTellsTheBrain(t *testing.T) {
 	if n := w.log.count("supervisor.spawn_instruction_dropped"); n != 0 {
 		t.Fatalf("the instruction was dropped at the not-ready mark")
 	}
-	// The CEO is told too, through the voice: a daemon fact with the
+	// The user is told too, through the voice: a daemon fact with the
 	// pane's last lines (2026-10-04, a shell prompt ate the "c" of
 	// "claude" and nobody heard that the agent never started).
 	waitFor(t, func() bool {
@@ -433,7 +433,7 @@ func TestSpawnNotReadyKeepsWaitingAndTellsTheBrain(t *testing.T) {
 		return false
 	}, "the user's spawn fact")
 
-	// The brain's next turn has the fact and the screen.
+	// The orchestrator's next turn has the fact and the screen.
 	w.say("怎么样了?")
 	calls := m.Calls()
 	if len(calls) == 0 {
@@ -445,7 +445,7 @@ func TestSpawnNotReadyKeepsWaitingAndTellsTheBrain(t *testing.T) {
 	}
 
 	// Recognised, the trust question answered, idle: the instruction
-	// goes, and the CEO, told it had not started, hears that it runs.
+	// goes, and the user, told it had not started, hears that it runs.
 	w.srv.SetScreen("w20:p1", "❯ ")
 	w.detect("w20:p1", "", herdr.StateIdle)
 	waitFor(t, func() bool { return len(w.promptRequests()) == 1 }, "the held first instruction")
@@ -463,7 +463,7 @@ func TestSpawnNotReadyKeepsWaitingAndTellsTheBrain(t *testing.T) {
 }
 
 // A not-ready agent whose pane closes ends the watch: the instruction is
-// dropped as "the pane closed" (in the phone session the CEO closed the
+// dropped as "the pane closed" (in the phone session the user closed the
 // pane by hand at 05:00:28), not kept for ten minutes.
 func TestSpawnNotReadyEndsWhenThePaneCloses(t *testing.T) {
 	oldReady, oldGone := spawnReadyWait, spawnGoneCheck

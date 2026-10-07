@@ -40,7 +40,7 @@ type Fragment struct {
 const (
 	EndDrained    = "drained"     // the player played it to the end
 	EndFlushed    = "flushed"     // the daemon flushed it (barge-in, cancel, an interrupting push)
-	EndLocalFlush = "local_flush" // the client cut it (the shepherd started talking)
+	EndLocalFlush = "local_flush" // the client cut it (the user started talking)
 	EndDetached   = "detached"    // the client disconnected
 	EndNoAudio    = "no_audio"    // a transcript that never came with audio
 )
@@ -55,7 +55,7 @@ type BotUtterance struct {
 	EndMS       int64      `json:"end_ms"`
 	End         string     `json:"end"`
 	Fragments   []Fragment `json:"fragments,omitempty"`
-	// Text is the whole output transcript; Heard the part the shepherd
+	// Text is the whole output transcript; Heard the part the user
 	// heard (all of it when drained; cut at PlayedMS on a flush).
 	Text     string `json:"text"`
 	Heard    string `json:"heard"`
@@ -67,12 +67,12 @@ type BotUtterance struct {
 	PushID string `json:"push_id,omitempty"`
 }
 
-// UserUtterance is one thing the simulated shepherd said.
+// UserUtterance is one thing the simulated user said.
 type UserUtterance struct {
 	Label   string `json:"label"`
 	StartMS int64  `json:"start_ms"`
 	EndMS   int64  `json:"end_ms"`
-	// BargeIn: the bot was playing when the shepherd started.
+	// BargeIn: the bot was playing when the user started.
 	BargeIn bool `json:"barge_in,omitempty"`
 }
 

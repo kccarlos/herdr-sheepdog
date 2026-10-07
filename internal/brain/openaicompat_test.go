@@ -181,7 +181,7 @@ func TestOpenAICompatConfig(t *testing.T) {
 }
 
 // The request the adapter sends for a window: the system message, the
-// brain's tools as JSON Schema (the golden tools file), user lines
+// orchestrator's tools as JSON Schema (the golden tools file), user lines
 // merged, an own two-call step replayed from Raw (ids included, its
 // second Raw-less message skipped; its reasoning_content dropped, the
 // step belonging to an earlier turn — docs/iteration-2.md WP5), tool
@@ -393,7 +393,7 @@ func TestOpenAICompatGenerateContents(t *testing.T) {
 	}
 }
 
-// The brain loop over the adapter: a two-call step is executed as two
+// The orchestrator loop over the adapter: a two-call step is executed as two
 // tools with the API's ids, recorded as calls-then-results, and the
 // next request replays one assistant message (reasoning_content and
 // both tool_calls) followed by two tool messages with matching ids and
@@ -675,7 +675,7 @@ func TestMessageProviderRoundTrip(t *testing.T) {
 
 // TestVoiceLineDuringToolCall is the failure of 2026-09-24 18:16:43
 // through the real path: the voice speaks its filler ("On it.") while
-// the brain's read_screen runs, Brain.Said ingests it between the call
+// the orchestrator's read_screen runs, Brain.Said ingests it between the call
 // and its result, and the next request must still put the tool message
 // right after the assistant's tool_calls (DeepSeek answered HTTP 400
 // otherwise, and every later turn failed on the same window). The line

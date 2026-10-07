@@ -13,7 +13,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 )
 
-// closeWorld is a brain harness with kvoice Claude (w2:p1) and an agent
+// closeWorld is an orchestrator harness with kvoice Claude (w2:p1) and an agent
 // in the daemon's own directory (w1:p1), and a herdr that closes panes.
 func closeWorld(t *testing.T, m *braintest.Model) *harness {
 	t.Helper()
@@ -45,9 +45,9 @@ func closeCall(agent string, extra map[string]any) braintest.Step {
 	return braintest.Step{Calls: []*genai.FunctionCall{braintest.FC(brain.ToolInterrupt, args)}}
 }
 
-// "把 kvoice Claude 关掉吧" (the CEO's phone session, 2026-10-04): the brain
+// "把 kvoice Claude 关掉吧" (the user's phone session, 2026-10-04): the orchestrator
 // closes that agent with the interrupt tool's close; herdr's pane.close
-// gets its pane, supervisor.close is logged, and the CEO's words are
+// gets its pane, supervisor.close is logged, and the user's words are
 // spent: a second close in the same breath is refused.
 func TestCloseAgentByVoice(t *testing.T) {
 	m := braintest.NewModel(
@@ -80,8 +80,8 @@ func TestCloseAgentByVoice(t *testing.T) {
 	}
 }
 
-// No words of the CEO's behind it (an event turn cannot call it at all;
-// a CEO turn with nothing said, e.g. the voice relaying on its own)
+// No words of the user's behind it (an event turn cannot call it at all;
+// a user turn with nothing said, e.g. the voice relaying on its own)
 // closes nothing.
 func TestCloseNeedsTheCEOsWords(t *testing.T) {
 	h := closeWorld(t, braintest.NewModel())
@@ -94,9 +94,9 @@ func TestCloseNeedsTheCEOsWords(t *testing.T) {
 	}
 }
 
-// The agent working in the daemon's own directory (where the CEO's
-// orchestrator session runs) is refused unless the brain says the CEO
-// named it, with the reason for the brain to ask; with protected_ok it
+// The agent working in the daemon's own directory (where the user's
+// orchestrator session runs) is refused unless the orchestrator says the user
+// named it, with the reason for the orchestrator to ask; with protected_ok it
 // closes.
 func TestCloseProtectsTheOrchestratorsPane(t *testing.T) {
 	h := closeWorld(t, braintest.NewModel())
@@ -108,7 +108,7 @@ func TestCloseProtectsTheOrchestratorsPane(t *testing.T) {
 	if ev := h.log.ofType("supervisor.close_refused"); len(ev) != 1 || ev[0].Payload.(map[string]any)["reason"] != "protected" {
 		t.Fatalf("close_refused = %+v", ev)
 	}
-	// The refusal did not spend the words: the CEO's confirmation does.
+	// The refusal did not spend the words: the user's confirmation does.
 	h.hear("对，就是 sheepdog Claude，关掉")
 	if _, err := h.sup.closeAgent(context.Background(), brain.CloseRequest{PaneID: "w1:p1", ProtectedOK: true}); err != nil {
 		t.Fatal(err)

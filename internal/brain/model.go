@@ -17,7 +17,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
 )
 
-// Model is the one model call the brain makes, in Gemini's terms:
+// Model is the one model call the orchestrator makes, in Gemini's terms:
 // *GenaiModel implements it over the Gemini API, *OpenAICompatModel
 // translates it for an OpenAI-compatible endpoint, and tests inject a
 // scripted fake (braintest). The compaction summary and the eval harness
@@ -41,7 +41,7 @@ type MessageModel interface {
 	GenerateMessages(ctx context.Context, model string, msgs []Message, cfg *genai.GenerateContentConfig) (resp *genai.GenerateContentResponse, raw json.RawMessage, err error)
 }
 
-// Provider ids: the key of the brain's provider map, the first half of
+// Provider ids: the key of the orchestrator's provider map, the first half of
 // the /debug picker's choice, and Message.Provider on what a model
 // produced.
 const (
@@ -67,7 +67,7 @@ type ModelInfo struct {
 	// Methods are the generation methods the provider lists for the
 	// model; only models supporting generateContent are listed at all.
 	Methods []string `json:"methods,omitempty"`
-	// Recommended marks a plausible brain model: a text model of the
+	// Recommended marks a plausible orchestrator model: a text model of the
 	// gemini / gemma families that is not a speech, image, video, music,
 	// embedding, robotics or live variant. Whether it supports function
 	// calling is not discoverable from the list: a bad pick surfaces as a
@@ -94,7 +94,7 @@ var ErrNoCatalog = errors.New("brain: the model has no catalog")
 // API's maximum), so a catalog fetch is one request.
 const catalogPageSize = 1000
 
-// notRecommended marks the model families the brain cannot use: speech,
+// notRecommended marks the model families the orchestrator cannot use: speech,
 // image, video and music generation, transcription, embeddings, robotics,
 // computer use and the Live API.
 var notRecommended = regexp.MustCompile(`tts|image|transcribe|lyria|robotics|computer-use|omni|antigravity|deep-research|live|embedding|banana`)
@@ -136,7 +136,7 @@ func NewGenaiModel(keys []string, log logging.Logger) (*GenaiModel, error) {
 	}}, nil
 }
 
-// VertexLocation is where the brain calls Gemini on Vertex AI: always
+// VertexLocation is where the orchestrator calls Gemini on Vertex AI: always
 // the global endpoint, whatever gemini.vertex.location says. Checked live
 // 2026-10-01 with the API key: the text models (gemini-3.8-flash,
 // gemini-3.5-flash, gemini-3.5-flash-lite) answer at global and are "not
@@ -146,7 +146,7 @@ func NewGenaiModel(keys []string, log logging.Logger) (*GenaiModel, error) {
 const VertexLocation = "global"
 
 // VertexBaseURL is the host of VertexLocation. Set explicitly: the SDK's
-// own choice for an API key is the same today, but the brain must not
+// own choice for an API key is the same today, but the orchestrator must not
 // follow gemini.vertex.location.
 const VertexBaseURL = "https://aiplatform.googleapis.com/"
 
@@ -305,7 +305,7 @@ func catalogFromModels(raw []*genai.Model) []ModelInfo {
 	return out
 }
 
-// recommended reports whether name looks like a text model the brain can
+// recommended reports whether name looks like a text model the orchestrator can
 // run (ModelInfo.Recommended).
 func recommended(name string) bool {
 	return (strings.HasPrefix(name, "gemini-") || strings.HasPrefix(name, "gemma-")) && !notRecommended.MatchString(name)

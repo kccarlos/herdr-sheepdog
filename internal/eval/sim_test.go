@@ -39,7 +39,7 @@ func fixScenario() SimScenario {
 	}
 }
 
-// fixBrain is a scripted brain: it answers the question from the screen,
+// fixBrain is a scripted orchestrator: it answers the question from the screen,
 // then on the instruction prompts bench-codex.
 func fixBrain() brain.Model {
 	m := braintest.NewModel(
@@ -192,7 +192,7 @@ func TestLoadSimFileValidates(t *testing.T) {
 }
 
 // Every scenario file loads, every screen resolves, and every scenario
-// runs end to end on the real supervisor with the scripted brain and
+// runs end to end on the real supervisor with the scripted orchestrator and
 // user (the offline harness check `make eval` also runs).
 func TestSimScenarioFilesOffline(t *testing.T) {
 	files, err := filepath.Glob("../../testdata/eval/sim/*.json")

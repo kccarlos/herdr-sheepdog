@@ -137,9 +137,9 @@ func TestNoPlaybackReportsFallsBackToTimingGuess(t *testing.T) {
 	}
 }
 
-// TestBargeInCutsTheTranscript is P5: the shepherd barges in 4 s into a
+// TestBargeInCutsTheTranscript is P5: the user barges in 4 s into a
 // 10 s reply; the client flushes having played 4 s, and the session
-// emits a cut transcript with the words heard (for the brain's
+// emits a cut transcript with the words heard (for the orchestrator's
 // "Assistant said (cut off…)" line) and logs voice.playback with cut.
 func TestBargeInCutsTheTranscript(t *testing.T) {
 	c := newFakeConn("c1")

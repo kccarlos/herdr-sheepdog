@@ -26,7 +26,7 @@ type DaemonOptions struct {
 	Dir string
 	// Socket is the bench herdr session's API socket.
 	Socket string
-	// EnvFile is loaded by the daemon (--env-file): the brain's keys.
+	// EnvFile is loaded by the daemon (--env-file): the orchestrator's keys.
 	EnvFile string
 	// BrainModel is brain.model (default gemini-3.8-flash, the daemon's
 	// own setting on this machine).
@@ -36,9 +36,9 @@ type DaemonOptions struct {
 	// router and --heard-echo.
 	Voice bool
 	// ProjectRoots is supervisor.project_roots for the scratch daemon:
-	// where the brain may start a new agent by voice. It defaults to the
+	// where the orchestrator may start a new agent by voice. It defaults to the
 	// run's own repos directory, never the config default (~/Documents),
-	// so a bench brain can never start an agent in the CEO's real projects.
+	// so a bench orchestrator can never start an agent in the user's real projects.
 	ProjectRoots string
 	// Log receives the daemon's stderr.
 	Log io.Writer
@@ -56,7 +56,7 @@ type Daemon struct {
 }
 
 // configTOML is the scratch daemon's whole config: nothing is read from
-// ~/.config/sheepdog (no APNs, no aliases, no LAN bind). The brain is
+// ~/.config/sheepdog (no APNs, no aliases, no LAN bind). The orchestrator is
 // the user's daemon's model on Vertex (its primary there is the AI
 // Studio key, whose small quota the bench leaves alone); investigations
 // use Claude (Haiku), never the scarce Codex quota.
@@ -168,7 +168,7 @@ func serveArgs(o DaemonOptions, cfgPath, data string) []string {
 func (d *Daemon) BaseURL() string { return d.url("") }
 
 // daemonEnvKeys are the env-file keys the scratch daemon gets: the
-// Vertex brain and the DeepSeek failover. GEMINI_API_KEY (the AI Studio
+// Vertex orchestrator and the DeepSeek failover. GEMINI_API_KEY (the AI Studio
 // free tier, a small quota the user's own daemon needs) and the voice
 // keys stay out.
 var daemonEnvKeys = map[string]bool{"VERTEX_API_KEY": true, "VERTEX_PROJECT": true, "VERTEX_LOCATION": true, "DEEPSEEK_API_KEY": true}
@@ -276,7 +276,7 @@ type Reply struct {
 	Tool    string   `json:"tool"`
 }
 
-// Say sends the CEO's words through the text router.
+// Say sends the user's words through the text router.
 func (d *Daemon) Say(ctx context.Context, text string) (Reply, error) {
 	var r Reply
 	err := d.post(ctx, "/api/inject/utterance", map[string]string{"text": text}, &r)

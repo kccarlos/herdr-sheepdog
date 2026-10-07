@@ -10,10 +10,10 @@ import (
 )
 
 // Simulated-user scenarios (`sheepdog eval sim`, after pipecat's
-// evals/simulation): an LLM plays the CEO with a goal and talks to the
-// real supervisor and brain in text (the voice model is not in the loop:
-// the CEO's words reach the supervisor as typed input, and what the
-// supervisor answers or pushes is what the CEO hears). The workers are a
+// evals/simulation): an LLM plays the user with a goal and talks to the
+// real supervisor and orchestrator in text (the voice model is not in the loop:
+// the user's words reach the supervisor as typed input, and what the
+// supervisor answers or pushes is what the user hears). The workers are a
 // mock herdr with scripted screens that change on cue. The simulated user
 // ends the call with its end_call tool, or a cap ends it; the judge — not
 // the simulated user — then decides each rubric item.
@@ -29,25 +29,25 @@ type SimScenario struct {
 	// Note says where the scenario comes from (a bench issue, a v1
 	// acceptance job).
 	Note string `json:"note,omitempty"`
-	// Goal is what the simulated CEO wants out of the call, in their
+	// Goal is what the simulated user wants out of the call, in their
 	// words; the judge's "answered" item is graded against it.
 	Goal string `json:"goal"`
 	// Persona adds instructions for the simulated user (how they talk,
 	// what they say when asked, a language switch mid-call).
 	Persona string `json:"persona,omitempty"`
-	// Language is the language the CEO starts in: en (default) or zh.
+	// Language is the language the user starts in: en (default) or zh.
 	Language string `json:"language,omitempty"`
-	// Opening, when set, is the CEO's first utterance verbatim (a
+	// Opening, when set, is the user's first utterance verbatim (a
 	// deterministic start); the simulated user takes over from turn 2.
 	Opening string `json:"opening,omitempty"`
-	// Script is the CEO's lines for the scripted (fake) simulated user,
+	// Script is the user's lines for the scripted (fake) simulated user,
 	// offline: one per turn, then end_call. "<wait>" waits for sheepdog.
 	Script []string `json:"script,omitempty"`
 	// Fixed plays Script live too, instead of the LLM simulated user:
 	// for a scenario where the exact words are the point ("Stop.", "Oh,
 	// never mind."). The judge still grades it.
 	Fixed bool `json:"fixed,omitempty"`
-	// Agenda, instead of a script, is what the CEO does turn by turn,
+	// Agenda, instead of a script, is what the user does turn by turn,
 	// one beat per turn (workday sessions): the LLM simulated user says
 	// each beat in its own words and the run's persona, may answer a
 	// question or repeat itself without moving on, and ends the call when
@@ -65,10 +65,10 @@ type SimScenario struct {
 	Agents []SimAgent `json:"agents"`
 	// Events change a worker on cue.
 	Events []SimEvent `json:"events,omitempty"`
-	// Notes seed the CEO notes (USER.md ledger).
+	// Notes seed the user notes (USER.md ledger).
 	Notes []string `json:"notes,omitempty"`
-	// Transcript seeds the brain with earlier conversation ("CEO: …",
-	// "Dog: …", "PUSH <alias>: …"), as in the SVP cases.
+	// Transcript seeds the orchestrator with earlier conversation ("user: …",
+	// "Dog: …", "PUSH <alias>: …"), as in the orchestrator cases.
 	Transcript []string  `json:"transcript,omitempty"`
 	Caps       SimCaps   `json:"caps,omitempty"`
 	Expect     SimExpect `json:"expect"`
@@ -96,7 +96,7 @@ type SimAgent struct {
 	// AnswerDelayMS is how long the investigation takes (default 3000).
 	AnswerDelayMS int `json:"answer_delay_ms,omitempty"`
 	// CLIHangs makes run_cli and investigations about this agent never
-	// answer (until the caller gives up): the slow brain's tool timeout
+	// answer (until the caller gives up): the orchestrator's tool timeout
 	// (phone test 2026-10-04, "codex timed out" eleven times). Answer is
 	// then ignored.
 	CLIHangs bool `json:"cli_hangs,omitempty"`
@@ -108,12 +108,12 @@ type SimAgent struct {
 type SimEvent struct {
 	// AtMS fires this long after the conversation starts.
 	AtMS int `json:"at_ms,omitempty"`
-	// AfterTurn fires after the CEO's Nth utterance was answered.
+	// AfterTurn fires after the user's Nth utterance was answered.
 	AfterTurn int `json:"after_turn,omitempty"`
-	// AfterBeat fires after the answer to the CEO line that carried out
+	// AfterBeat fires after the answer to the user line that carried out
 	// agenda beat N (workday scenarios: the turn count drifts with the
 	// persona's answers and repeats, the beat does not). Put a "<wait>"
-	// beat after it for news that lands while the CEO is quiet.
+	// beat after it for news that lands while the user is quiet.
 	AfterBeat int `json:"after_beat,omitempty"`
 	// OnPromptTo fires when sheepdog sends a prompt to this agent (whose
 	// text matches PromptMatches, a case-insensitive regexp, when set).
@@ -140,11 +140,11 @@ type SimEvent struct {
 
 // SimCaps bound one conversation (zero takes the default).
 type SimCaps struct {
-	// MaxTurns is the most CEO utterances (default 6).
+	// MaxTurns is the most user utterances (default 6).
 	MaxTurns int `json:"max_turns,omitempty"`
 	// MaxSeconds is the total wall time (default 180).
 	MaxSeconds int `json:"max_seconds,omitempty"`
-	// SilenceSeconds is how long the CEO waits in silence for sheepdog
+	// SilenceSeconds is how long the user waits in silence for sheepdog
 	// to report back before giving up (default 40).
 	SilenceSeconds int `json:"silence_seconds,omitempty"`
 }
@@ -335,7 +335,7 @@ func validState(s string) bool {
 
 // RubricItem is one judge criterion, stated in both directions: what a
 // pass looks like and what fails, so that neither too little nor too
-// much is rewarded (CEO rule, 2026-10-05: every rubric item states its
+// much is rewarded (user rule, 2026-10-05: every rubric item states its
 // failure in both directions).
 type RubricItem struct {
 	ID       string `json:"id"`

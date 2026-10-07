@@ -18,7 +18,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/bench/voiceclient"
 )
 
-// CalibrationPhrases are CEO lines the calibration renders, per language.
+// CalibrationPhrases are user lines the calibration renders, per language.
 var CalibrationPhrases = map[string][]string{
 	"en": {
 		"What's the codex one doing right now?",
@@ -132,7 +132,7 @@ type CalibrationOptions struct {
 	// Synth renders the gemini clips, Say the fallback ones.
 	Synth, Say speech.Synth
 	Plan       []CalibrationItem
-	// SamplesDir gets 10 sample clips and their transcripts for the CEO.
+	// SamplesDir gets 10 sample clips and their transcripts for the user.
 	SamplesDir string
 	Log        io.Writer
 	// Gate and GateStartsOpen are the emulator's capture gate.
@@ -140,7 +140,7 @@ type CalibrationOptions struct {
 	GateStartsOpen bool
 }
 
-// Calibrate streams every clip into a scratch daemon (voice on, brain
+// Calibrate streams every clip into a scratch daemon (voice on, orchestrator
 // off) and scores the voice model's input transcript against the text.
 func Calibrate(ctx context.Context, o CalibrationOptions) (CalibrationReport, error) {
 	rep := CalibrationReport{Started: time.Now()}

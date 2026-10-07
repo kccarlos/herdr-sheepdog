@@ -23,7 +23,7 @@ type ContextEngine interface {
 	Assemble(budget int) Assembly
 	// Compact shrinks the window when it exceeds budget (estimated
 	// tokens); ok is false when nothing was done. The default engine
-	// summarises the oldest half with one model call. The brain calls
+	// summarises the oldest half with one model call. The orchestrator calls
 	// it without the turn lock (a turn, Ingest, Retract or Reset may run
 	// meanwhile), so an engine must be safe for that and must not splice
 	// a summary over messages that changed while it was written
@@ -84,7 +84,7 @@ type Resettable interface {
 
 // Retracter is the optional part of a ContextEngine that takes one
 // message back out of the window (Brain.Echo: words transcribed as the
-// CEO's that were the assistant's own speech). The default engine
+// user's that were the assistant's own speech). The default engine
 // implements it; an engine that does not keeps the message, and the
 // note Brain.Echo adds after it still says it was an echo.
 type Retracter interface {
@@ -308,7 +308,7 @@ func (e *DefaultEngine) Compact(ctx context.Context, budget int) (Compaction, bo
 		return Compaction{}, false, err
 	}
 	summary = capSummary(summary)
-	// The summary call ran without the brain's turn lock: whatever
+	// The summary call ran without the orchestrator's turn lock: whatever
 	// changed the summarised prefix meanwhile (Retract, Reset, another
 	// compaction) wins, and the summary is dropped before it reaches the
 	// transcript. Checked again after recording, which runs outside the

@@ -13,7 +13,7 @@ import (
 // "Not yet"): herdr reports a pane's status only on change, so a worker
 // that answers one approval prompt and is already showing the next
 // within herdr's own poll window never leaves `blocked` — there is no
-// transition for the shepherd to hear about. Two mechanisms close the
+// transition for the user to hear about. Two mechanisms close the
 // gap, both ending the same way: a synthetic blocked -> blocked
 // herdr.Transition through the normal HandleTransition path, so the new
 // prompt gets a pending action and a push exactly like a real block
@@ -41,9 +41,9 @@ const defaultRepromptPollInterval = time.Second
 
 // startReprompt launches the post-answer poll for paneID in the
 // background. answerKeys calls it right after keys went to a blocked
-// pane, whichever path sent them (the brain's send_keys, the bare-answer
+// pane, whichever path sent them (the orchestrator's send_keys, the bare-answer
 // fast path, or a tap). Detached from the caller's context, which ends
-// long before the poll should (a web request, a brain turn, a voice tool
+// long before the poll should (a web request, an orchestrator turn, a voice tool
 // call).
 func (s *Supervisor) startReprompt(paneID string) {
 	if s.cfg.RepromptPoll <= 0 {

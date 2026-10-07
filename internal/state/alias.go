@@ -36,7 +36,7 @@ const herdrNameMax = 32
 // "kvoice-explainer". ok is false when nothing usable is left (a name in
 // Chinese only, or one that starts with a digit): herdr cannot carry it
 // and keeps its own label. A mechanical spelling, not a reading of the
-// name: the spoken form stays the CEO's.
+// name: the spoken form stays the user's.
 func HerdrName(name string) (string, bool) {
 	h := Slug(name)
 	if len(h) > herdrNameMax {

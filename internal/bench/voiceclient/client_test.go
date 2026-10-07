@@ -150,7 +150,7 @@ func TestClientHandshakePlaybackAndBargeIn(t *testing.T) {
 		t.Fatalf("playback reports = %+v", pb)
 	}
 
-	// The shepherd speaks: speaking on, ~10 frames, speaking off.
+	// The user speaks: speaking on, ~10 frames, speaking off.
 	speech := make([]int16, InRate*4/10)
 	for i := range speech {
 		speech[i] = 4000
@@ -170,7 +170,7 @@ func TestClientHandshakePlaybackAndBargeIn(t *testing.T) {
 		t.Fatalf("%d audio frames sent for 400 ms of speech", bin)
 	}
 
-	// Barge-in: a long reply starts playing, the shepherd talks over it,
+	// Barge-in: a long reply starts playing, the user talks over it,
 	// the player flushes locally and reports what was heard.
 	f.send(wsproto.Transcript(wsproto.DirOut, "Here is a long answer that goes on and on.", false))
 	f.audio(3 * time.Second)

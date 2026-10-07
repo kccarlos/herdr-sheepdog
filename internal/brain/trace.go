@@ -9,13 +9,13 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
 )
 
-// Turn and utterance ids on the brain's events (docs/architecture.md
+// Turn and utterance ids on the orchestrator's events (docs/architecture.md
 // "Event ids"). Every event a turn logs carries its number as payload
 // "turn" (brain.step, brain.tool_call, brain.tool_result, brain.yielded,
 // brain.fallback, brain.turn, brain.compaction, brain.transcript,
-// context.step, brain.failover, brain.tool_timeout), so one decorator on the brain's logger stamps them all:
+// context.step, brain.failover, brain.tool_timeout), so one decorator on the orchestrator's logger stamps them all:
 // it adds turn_id — a string unique across daemon runs, which the event
-// log lifts to the line's top level — and the utterance_id of the CEO
+// log lifts to the line's top level — and the utterance_id of the user
 // utterance the turn answers (Request.UtteranceID), with no change to
 // any Log call. brain.turn_started marks the moment the turn lock was
 // taken: its queue_ms is the wait for it, and it carries the worker
@@ -40,10 +40,10 @@ type turnTrace struct {
 	budget    time.Duration
 }
 
-// traceLog is the brain's logger decorator.
+// traceLog is the orchestrator's logger decorator.
 type traceLog struct {
 	inner logging.Logger
-	// run tags this brain's turn ids: turn numbers restart at 1 with
+	// run tags this orchestrator's turn ids: turn numbers restart at 1 with
 	// every daemon run.
 	run string
 

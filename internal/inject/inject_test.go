@@ -299,7 +299,7 @@ func TestRouter(t *testing.T) {
 	}{
 		// The router classifies nothing any more: the words go over
 		// verbatim, exactly as the voice model would relay them, and
-		// the supervisor's own fast paths and brain decide what they
+		// the supervisor's own fast paths and orchestrator decide what they
 		// are. Only a bare stop word is routed, and only as a shortcut.
 		{"yes", voice.ToolToSupervisor, "yes"},
 		{"Yes, go ahead.", voice.ToolToSupervisor, "Yes, go ahead."},
@@ -310,7 +310,7 @@ func TestRouter(t *testing.T) {
 		// audit B8: "abort" and "halt" used to be in the router's own
 		// stop regex but not in the supervisor's bareStopWords, so the
 		// same word stopped GPT-Live (routed here) but became an
-		// ordinary brain turn relayed through to_supervisor on Gemini.
+		// ordinary orchestrator turn relayed through to_supervisor on Gemini.
 		// Both now read supervisor.BareStopWords.
 		{"abort", voice.ToolStop, ""},
 		{"Halt.", voice.ToolStop, ""},

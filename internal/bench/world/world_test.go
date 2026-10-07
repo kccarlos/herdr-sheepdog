@@ -19,7 +19,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/supervisor"
 )
 
-// daemon runs a real daemon in process: mock herdr, no voice, no brain.
+// daemon runs a real daemon in process: mock herdr, no voice, no orchestrator.
 func daemon(t *testing.T) string {
 	t.Helper()
 	for _, k := range []string{"GEMINI_API_KEY", "GEMINI_API_KEY_1", "GEMINI_API_KEY_2", "GEMINI_API_KEY_3", "DEEPSEEK_API_KEY", "OPENAI_API_KEY", "VERTEX_API_KEY"} {
@@ -105,7 +105,7 @@ func TestWorldDrivesTheDaemon(t *testing.T) {
 		t.Fatalf("agents after start: %+v", got)
 	}
 
-	// The CEO taps an answer: the daemon sends keys, the world sees the
+	// The user taps an answer: the daemon sends keys, the world sees the
 	// herdr.send and moves the worker on, as a real one would.
 	var st struct {
 		PendingAction *struct {

@@ -10,34 +10,34 @@ type FailureType string
 // The labels, most severe first (Primary picks the first that applies).
 const (
 	// FailError: the harness could not run the case properly (the
-	// simulated user's or the judge's model failed, the brain's provider
+	// simulated user's or the judge's model failed, the orchestrator's provider
 	// rate-limited us, a fixture is broken). The run counts as errored
 	// and is left out of the pass rate.
 	FailError FailureType = "error"
 	// FailNotRun: the run never started (the spend budget ran out, the
 	// campaign was cancelled). Never a pass; left out of the pass rate.
 	FailNotRun FailureType = "not_run"
-	// FailTimeout: a brain turn ran out of time and the daemon answered
+	// FailTimeout: an orchestrator turn ran out of time and the daemon answered
 	// with its fallback sentence, or the conversation hit its time cap.
 	FailTimeout FailureType = "timeout"
-	// FailBrainFallback: a brain turn failed for another reason (a model
+	// FailBrainFallback: an orchestrator turn failed for another reason (a model
 	// error that is not a rate limit) and the daemon fell back.
 	FailBrainFallback FailureType = "brain_fallback"
 	// FailUnintendedAction: sheepdog did something to a worker the
 	// scenario forbids (or anything, where nothing was allowed).
 	FailUnintendedAction FailureType = "unintended_action"
 	// FailWrongAgent: an action went to a worker other than the one the
-	// CEO meant.
+	// user meant.
 	FailWrongAgent FailureType = "wrong_agent"
 	// FailMissingCall: an action the scenario requires never happened
-	// (SVP: none of the expected tools was called).
+	// (orchestrator: none of the expected tools was called).
 	FailMissingCall FailureType = "missing_function_call"
 	// FailJudgeNo: the judge said no on a rubric item.
 	FailJudgeNo FailureType = "judge_no"
 	// FailCheck: a code check on the reply failed (word or sentence
 	// count, reply language, needs_user, urgency, the rail).
 	FailCheck FailureType = "check"
-	// FailSilence: the CEO waited in silence past the cap.
+	// FailSilence: the user waited in silence past the cap.
 	FailSilence FailureType = "silence"
 	// FailMaxTurns: the conversation used every turn without ending.
 	FailMaxTurns FailureType = "max_turns"

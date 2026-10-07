@@ -9,7 +9,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
 
-// converse plays one exchange on c: the shepherd's question (never
+// converse plays one exchange on c: the user's question (never
 // marked final, as Gemini sends it), the voice's answer, turnComplete.
 func converse(t *testing.T, h *harness, c *fakeConn, heard, said string) {
 	t.Helper()
@@ -23,7 +23,7 @@ func converse(t *testing.T, h *harness, c *fakeConn, heard, said string) {
 // a 1011 drops the resumption handle (68 of 77 resumes came back
 // resumed:false on 2026-09-23..25), and the fresh connection used to
 // get back only the silent briefing. It is now seeded first, silently
-// (no turn complete), with the recent conversation — the shepherd's
+// (no turn complete), with the recent conversation — the user's
 // words, the voice's answer and the spoken push — and the briefing the
 // supervisor pushes on EventResumed follows it. voice.reseeded says so.
 func TestReconnectAfter1011ReseedsTheConversation(t *testing.T) {

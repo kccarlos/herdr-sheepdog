@@ -11,26 +11,26 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/supervisor"
 )
 
-// GET /api/conversation: the conversation between the shepherd and the
-// dog, rebuilt server-side from the event log across day files and
+// GET /api/conversation: the conversation between the user and the
+// voice, rebuilt server-side from the event log across day files and
 // restarts (docs/ws-contract.md "History and resume"), newest last and
 // paged backwards by event id. The merging rules are
 // web/debug/conversation.js's, for the kinds a chat view shows:
 //
-//	shepherd  voice.transcript.in fragments merged per user turn (via
+//	user  voice.transcript.in fragments merged per user turn (via
 //	          voice), or typed text: voice.text, web.utterance other than
 //	          via=voice (that one is followed by voice.text) — via typed
-//	dog       voice.transcript.out fragments merged per model turn, or a
+//	voice       voice.transcript.out fragments merged per model turn, or a
 //	          tool result spoken without a voice model (voice.tool_result
 //	          with a via other than voice)
 //	push      voice.push that is not silent (the skipped pushes of
-//	          --voice=off included: they are what the dog would say)
+//	          --voice=off included: they are what the voice would say)
 //	approval  pending.created of an answer_prompt, with its resolution
 //	          (pending.confirmed / expired / cancelled / replaced)
 //	notice    daemon.start and the voice session's reconnects, as dividers
 //
 // A fragment run is closed by the other side speaking, a tool call, a
-// push, a voice turn boundary, an interruption (dog) or a divider.
+// push, a voice turn boundary, an interruption (voice) or a divider.
 
 // ConversationItem is one entry of GET /api/conversation. ID is the
 // event id of its first event (what ?before= pages by), TS its time.
@@ -43,8 +43,8 @@ type ConversationItem struct {
 	// reconnects/closes).
 	Subkind string `json:"subkind,omitempty"`
 	Text    string `json:"text"`
-	// Via is how the shepherd spoke (voice | typed) or how an approval
-	// was answered (tap | fast_path | brain; confirm in logs from before
+	// Via is how the user spoke (voice | typed) or how an approval
+	// was answered (tap | fast_path | orchestrator; confirm in logs from before
 	// the confirm tool was removed).
 	Via     string `json:"via,omitempty"`
 	Agent   string `json:"agent,omitempty"`
@@ -361,7 +361,7 @@ type conversationResetRequest struct {
 // conversationResetVias are the accepted "via" values.
 var conversationResetVias = map[string]bool{"app": true, "debug": true, "voice_page": true}
 
-// handleConversationReset resets the brain's transcript window and the
+// handleConversationReset resets the orchestrator's transcript window and the
 // voice session's memory ("New conversation", docs/roles.md): body
 // {"via":"app"|"debug"|"voice_page"} → {"ok":true,"reset_id":"…",
 // "at":"…"}. Logs conversation.reset (supervisor.ResetConversation);

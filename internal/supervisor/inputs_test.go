@@ -15,9 +15,9 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
 
-// The one rail reads the shepherd's real input (inputs.go): these tests
+// The one rail reads the user's real input (inputs.go): these tests
 // drive the voice model's to_supervisor call (relay) apart from what the
-// shepherd said (hear), typed or tapped.
+// user said (hear), typed or tapped.
 
 // A relayed "yes" with no transcript behind it is the voice model's own
 // initiative: nothing is sent and nothing is said.
@@ -40,7 +40,7 @@ func TestRelayWithoutShepherdInputIsIgnored(t *testing.T) {
 	}
 }
 
-// The shepherd's transcript "yes" authorises the fast path.
+// The user's transcript "yes" authorises the fast path.
 func TestTranscriptYesAuthorisesTheFastPath(t *testing.T) {
 	h := newHarness(t)
 	blockedAuth(t, h)
@@ -58,8 +58,8 @@ func TestTranscriptYesAuthorisesTheFastPath(t *testing.T) {
 }
 
 // Fragments of one user turn accumulate into one input, and the fast
-// path maps what the shepherd said, not the tool argument: the model
-// relaying "yes" for a shepherd who said "yes please run it" is not a
+// path maps what the user said, not the tool argument: the model
+// relaying "yes" for a user who said "yes please run it" is not a
 // bare answer.
 func TestFastPathReadsTheTranscriptNotTheToolArgument(t *testing.T) {
 	h := newHarness(t)
@@ -118,7 +118,7 @@ func TestInputPastTheAuthoriseWindowIsRefused(t *testing.T) {
 	}
 }
 
-// Typed text is a shepherd input (--voice=off, or the /voice text box).
+// Typed text is a user input (--voice=off, or the /voice text box).
 func TestTypedYesAuthorises(t *testing.T) {
 	h := newHarness(t)
 	blockedAuth(t, h)
@@ -145,9 +145,9 @@ func TestOneYesAnswersOnePrompt(t *testing.T) {
 	}
 }
 
-// The brain's send_keys runs on the shepherd's input: a "no"-class input
+// The orchestrator's send_keys runs on the user's input: a "no"-class input
 // never authorises a yes key, whatever the model relayed. (A bare "no"
-// never reaches the brain: the fast path declines with it; nor does a
+// never reaches the orchestrator: the fast path declines with it; nor does a
 // bare "stop", which is the stop procedure — see
 // TestHeardStopIsAStopWhateverTheRelay.)
 func TestNoInputCannotAuthoriseYesKeys(t *testing.T) {
@@ -190,7 +190,7 @@ func TestNoInputCanDecline(t *testing.T) {
 }
 
 // A muted client sends no audio, so no transcript arrives: nothing the
-// voice model relays can answer a prompt, by fast path or by the brain.
+// voice model relays can answer a prompt, by fast path or by the orchestrator.
 func TestMutedClientAuthorisesNothing(t *testing.T) {
 	m := braintest.NewModel(
 		braintest.Step{Calls: []*genai.FunctionCall{braintest.FC(brain.ToolSendKeys, map[string]any{"agent": "auth", "keys": []any{"y"}})}},
@@ -213,9 +213,9 @@ func TestMutedClientAuthorisesNothing(t *testing.T) {
 	}
 }
 
-// The regression of 2026-09-23 00:52: the shepherd muted at 00:52:16
+// The regression of 2026-09-23 00:52: the user muted at 00:52:16
 // after a question; the block was pushed, the voice model relayed the
-// push back, then the brain's late line was pushed and the model said
+// push back, then the orchestrator's late line was pushed and the model said
 // "yes" to it on its own. Nothing reaches the pane: nothing was said
 // since each push, so the relay gate (voice_initiative_ignored) stops
 // all three relays.
@@ -260,7 +260,7 @@ func TestRelayWaitsForATrailingTranscript(t *testing.T) {
 	}
 }
 
-// A tap is a shepherd input: its option's keys go through the same
+// A tap is a user input: its option's keys go through the same
 // executor, logged pending.confirmed {via: tap, option}, and the voice
 // hears about it silently.
 func TestTapAnswersThePendingQuestion(t *testing.T) {
@@ -325,7 +325,7 @@ func TestTrailingFragmentIsNotFreshInput(t *testing.T) {
 	if n := h.log.count("supervisor.voice_initiative_ignored"); n != 1 {
 		t.Errorf("voice_initiative_ignored = %d, want 1", n)
 	}
-	// The next user turn (after the dog spoke) is fresh again.
+	// The next user turn (after the voice spoke) is fresh again.
 	h.sup.OnVoiceEvent(voice.EventTranscript{Dir: voice.DirOut, Text: "Auth is working."})
 	h.hear("thanks")
 	h.relay("thanks")
@@ -386,7 +386,7 @@ func TestYesWithinTheFastWindowAuthorises(t *testing.T) {
 // The regression of 2026-09-23 06:30: send_keys revived auth's prompt
 // (it had never been recorded this run, though the pane had been
 // blocked at it for a while) and the rail measured "the prompt
-// appeared" from the revival itself, so the shepherd's "yes, please" —
+// appeared" from the revival itself, so the user's "yes, please" —
 // said before the revival, after the pane actually went blocked — read
 // as too old. newAnswerPrompt now keeps the pane's row.StateSince (the
 // real blocked-since time) for a prompt recorded for the first time

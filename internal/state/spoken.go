@@ -12,12 +12,12 @@ import (
 
 // Agent names have three layers (docs/roles.md "Agent names"): the pane
 // id, which code, the app and the API use and nobody ever hears; the
-// alias, unique and stable, which the brain's tool calls use; and the
-// spoken name, computed here, which is what the shepherd hears and says.
+// alias, unique and stable, which the orchestrator's tool calls use; and the
+// spoken name, computed here, which is what the user hears and says.
 // The spoken name is the shortest form that is unique among the running
 // agents:
 //
-//  1. a name the CEO gave (herdr agent rename, a voice rename, a config
+//  1. a name the user gave (herdr agent rename, a voice rename, a config
 //     or API alias) always wins, verbatim;
 //  2. the kind alone ("Claude") when it is the only one of its kind;
 //  3. project and kind ("sheepdog Claude") when it is the only one of
@@ -26,14 +26,14 @@ import (
 //     project has several of a kind;
 //  5. project, kind and a number ("sheepdog Claude 2").
 //
-// A computed name the CEO has heard or said is pinned (PinSpoken) and
-// kept like a CEO name from then on: rules 2-5 no longer move it.
+// A computed name the user has heard or said is pinned (PinSpoken) and
+// kept like a user name from then on: rules 2-5 no longer move it.
 //
 // Exited agents (state unknown) take no part: they keep the name they
 // last had.
 
 // maxTitleWords caps the session title inside a spoken name; the roster
-// carries the whole (clipped) title, and the brain picks a word or two
+// carries the whole (clipped) title, and the orchestrator picks a word or two
 // of a long one when it speaks.
 const maxTitleWords = 3
 
@@ -49,8 +49,8 @@ func running(a Agent) bool {
 	return false
 }
 
-// CEOName is the name the CEO gave the agent, or "": the herdr agent
-// name (herdr agent rename, or a voice rename through the brain), else
+// CEOName is the name the user gave the agent, or "": the herdr agent
+// name (herdr agent rename, or a voice rename through the orchestrator), else
 // an alias pinned in the config or through the API.
 func CEOName(a Agent) string {
 	if n := strings.TrimSpace(a.Name); n != "" {
@@ -118,7 +118,7 @@ const maxTitleNameRunes = 32
 // "the" at the end, at most maxTitleNameRunes. Tier-3 bench 2026-10-03,
 // finding 5: Claude Code titles name files ("shop/cart.go Cart type",
 // "TODO.md tasks"), and the names built from them verbatim were ones
-// the brain would not say. "" when no plain word is left: the agent is
+// the orchestrator would not say. "" when no plain word is left: the agent is
 // then numbered (project, kind, number).
 func titleWords(title string) string {
 	var f []string
@@ -202,7 +202,7 @@ func SpokenNames(agents []Agent) map[string]string {
 		}
 		byKind[k] = append(byKind[k], a)
 	}
-	// Names already given (CEO names, pinned names) are not handed out
+	// Names already given (user names, pinned names) are not handed out
 	// again: a newcomer skips to the next, longer form.
 	taken := map[string]bool{}
 	for _, n := range out {
@@ -256,7 +256,7 @@ func SpokenNames(agents []Agent) map[string]string {
 		}
 	}
 
-	// Whatever still collides (two CEO names alike, a CEO name equal to
+	// Whatever still collides (two user names alike, a user name equal to
 	// a computed one) gets a number, the first in pane order keeping it;
 	// CEO-given and pinned names go first, so they keep theirs.
 	kept := func(a Agent) bool { return CEOName(a) != "" || (a.SpokenPinned && a.Spoken != "") }
@@ -293,9 +293,9 @@ func SpokenNames(agents []Agent) map[string]string {
 
 // refreshSpokenLocked recomputes every row's spoken name. A running
 // agent whose name changed keeps the old one in SpokenWas, stamped with
-// SpokenChangedAt, so the roster can tell the brain to mention it once.
+// SpokenChangedAt, so the roster can tell the orchestrator to mention it once.
 // An agent that is not running keeps the name it last had (none when it
-// never ran: Say falls back to its CEO name or alias). Caller holds s.mu.
+// never ran: Say falls back to its user name or alias). Caller holds s.mu.
 func (s *Store) refreshSpokenLocked() {
 	list := make([]Agent, 0, len(s.table.Agents))
 	for _, a := range s.table.Agents {
@@ -315,7 +315,7 @@ func (s *Store) refreshSpokenLocked() {
 }
 
 // Say is how the agent is named aloud: its spoken name, else the name
-// the CEO gave it, else its alias ("" when it has none).
+// the user gave it, else its alias ("" when it has none).
 func Say(a Agent) string {
 	if a.Spoken != "" {
 		return a.Spoken
@@ -327,7 +327,7 @@ func Say(a Agent) string {
 }
 
 // PinSpoken pins the current spoken name of every running agent whose
-// name (case-insensitive) is in names: the CEO heard or said it, so it
+// name (case-insensitive) is in names: the user heard or said it, so it
 // stays (SpokenNames). It returns the panes newly pinned.
 func (s *Store) PinSpoken(names []string) ([]string, error) {
 	if len(names) == 0 {

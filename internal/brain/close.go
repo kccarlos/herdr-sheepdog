@@ -7,17 +7,17 @@ import (
 
 // Closing an agent (docs/roles.md "Closing an agent"): the interrupt
 // tool with close true ends the agent by closing its herdr pane, instead
-// of sending Ctrl-C. Which agent the CEO meant is the brain's judgement
-// (it asks when unsure); the daemon holds the rails: the CEO's own
+// of sending Ctrl-C. Which agent the user meant is the orchestrator's judgement
+// (it asks when unsure); the daemon holds the rails: the user's own
 // unused words behind it, and the agent running in the daemon's own
-// directory (the CEO's orchestrator, most likely) only when the brain
-// says the CEO named that very agent (protected_ok).
+// directory (the user's orchestrator, most likely) only when the orchestrator
+// says the user named that very agent (protected_ok).
 
-// CloseRequest is one agent the brain asked to close.
+// CloseRequest is one agent the orchestrator asked to close.
 type CloseRequest struct {
 	// PaneID is the agent's pane.
 	PaneID string
-	// ProtectedOK is the brain saying the CEO named this very agent, for
+	// ProtectedOK is the orchestrator saying the user named this very agent, for
 	// an agent the daemon protects.
 	ProtectedOK bool
 }

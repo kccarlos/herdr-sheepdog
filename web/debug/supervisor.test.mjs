@@ -181,8 +181,8 @@ test('meter segments: prompt sections by source, window by kind, pruned stubs; t
 });
 
 test('brain-off state and the empty transcript', () => {
-  assert.deepEqual(offState(503, { error: 'the supervisor brain is off (--brain=off)' }), { off: true, reason: '--brain=off', message: 'the supervisor brain is off (--brain=off)' });
-  assert.equal(offState(503, { error: 'the supervisor brain is off (no Gemini key)' }).reason, 'no Gemini key');
+  assert.deepEqual(offState(503, { error: 'the orchestrator is off (--brain=off)' }), { off: true, reason: '--brain=off', message: 'the orchestrator is off (--brain=off)' });
+  assert.equal(offState(503, { error: 'the orchestrator is off (no Gemini key)' }).reason, 'no Gemini key');
   assert.equal(offState(200, {}), null);
   assert.deepEqual(buildTranscriptView([], null, new TurnLog()), []);
   assert.deepEqual(buildTranscriptView([], { window: [], estimated_tokens: 0, window_tokens: 10 }, new TurnLog()), []);

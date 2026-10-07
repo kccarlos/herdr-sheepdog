@@ -11,7 +11,7 @@ import (
 )
 
 // Orchestrator vs voice (workday scenarios): the run's judge items grade
-// what the CEO heard (the voice model's speech). The same items asked of
+// what the user heard (the voice model's speech). The same items asked of
 // the orchestrator's own text — every to_supervisor answer (spoken,
 // detail, options) and every push it handed the voice — show what the
 // voice layer lost or added: an item the orchestrator passes and the
@@ -25,7 +25,7 @@ func orchestratorItem(name string) bool {
 }
 
 // OrchestratorTranscript is the call as the orchestrator told it: the
-// CEO's lines (as said) and, in time order, the orchestrator's answers
+// user's lines (as said) and, in time order, the orchestrator's answers
 // and spoken pushes (silent context pushes left out).
 func OrchestratorTranscript(r Run, events []voiceclient.Event) []eval.SimLine {
 	var lines []eval.SimLine

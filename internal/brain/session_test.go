@@ -13,7 +13,7 @@ import (
 
 // sevenGlitches is a worker's last message listing what it found
 // (docs/history/dive-deep.md: 2026-09-24 18:16:17, "what's the seven app
-// glitches"; synthetic, not the shepherd's transcript).
+// glitches"; synthetic, not the user's transcript).
 const sevenGlitches = `Found one small bug and seven app glitches.
 The bug: after a failed reply the app says nothing changed.
 The glitches:
@@ -129,7 +129,7 @@ func TestReadSessionMissingAndBadSource(t *testing.T) {
 }
 
 // The declaration tells the model which source is for what, in both
-// the CEO and the read-only (event) surface.
+// the user and the read-only (event) surface.
 func TestReadScreenDeclaresSource(t *testing.T) {
 	for _, readOnly := range []bool{false, true} {
 		var decl *genai.FunctionDeclaration

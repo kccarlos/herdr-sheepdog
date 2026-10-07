@@ -12,7 +12,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/brain/braintest"
 )
 
-// A CEO turn records a promise through the promise tool: the Host gets
+// A user turn records a promise through the promise tool: the Host gets
 // the record, the transcript gets a promise message in the turn, the
 // echo counts as an action, and the ledger lists it as open.
 func TestPromiseToolRecordsAPromise(t *testing.T) {
@@ -213,7 +213,7 @@ func TestEventTurnTimeout(t *testing.T) {
 	}
 }
 
-// An announce turn the shepherd is owed (a kept promise, or Owed: the
+// An announce turn the user is owed (a kept promise, or Owed: the
 // finish of their own instruction) gets AnnounceTimeout; any other event
 // turn keeps AnnounceTurnTimeout (the 23:56:27 announce timeout at 9 s).
 func TestOwedAnnounceGetsTheLongerBudget(t *testing.T) {

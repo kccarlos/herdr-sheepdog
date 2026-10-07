@@ -27,7 +27,7 @@ func printBenchTier3Usage(w io.Writer) {
 	fprintln(w, "Tier 3: the real daemon driving real coding agents in a real herdr. Every run")
 	fprintln(w, "gets its own named herdr session (never the default one), fresh clones of the")
 	fprintln(w, "bench repo, real Claude Code (Haiku) or Codex workers, and a scratch daemon")
-	fprintln(w, "(--voice=off --heard-echo) bound to that session's socket. A simulated CEO")
+	fprintln(w, "(--voice=off --heard-echo) bound to that session's socket. A simulated user")
 	fprintln(w, "talks to it in text; the judge grades the call against the real screens and")
 	fprintln(w, "what was sent to the workers. Everything is torn down after each run. Costs")
 	fprintln(w, "money and Claude subscription usage.")
@@ -41,7 +41,7 @@ func printBenchTier3Usage(w io.Writer) {
 	fprintln(w, "  --ports LIST          web ports for the scratch daemons (default 7793,7794,7795)")
 	fprintln(w, "  --root DIR            scratch directory for the runs (required)")
 	fprintln(w, "  --bench-repo PATH     toy repo cloned per workspace (default ~/Documents/sheepdog-bench)")
-	fprintln(w, "  --env-file PATH       the daemon's env file with the brain keys (default ./.env)")
+	fprintln(w, "  --env-file PATH       the daemon's env file with the orchestrator keys (default ./.env)")
 	fprintln(w, "  --brain-model ID      the daemon's brain.model (default gemini-3.8-flash)")
 	fprintln(w, "  --claude-model ID     Claude worker model (default haiku)")
 	fprintln(w, "  --codex-model ID      Codex worker model (default gpt-6-luna); effort --codex-effort (low)")
@@ -52,7 +52,7 @@ func printBenchTier3Usage(w io.Writer) {
 	fprintln(w, "  --out DIR             write report.json and report.md under DIR")
 	fprintln(w, "  --events DIR          write each run's full daemon event log under DIR")
 	fprintln(w, "  --keep                keep each run's scratch directory")
-	fprintln(w, "  --voice               the simulated CEO speaks: TTS through the tier-2 phone emulator into")
+	fprintln(w, "  --voice               the simulated user speaks: TTS through the tier-2 phone emulator into")
 	fprintln(w, "                        a daemon with the real voice model (Gemini Live on Vertex), and hears")
 	fprintln(w, "                        the bot's speech (default: text through the text router)")
 	fprintln(w, "  --tts-model ID        with --voice: Gemini TTS model (default "+speech.DefaultModel+")")
@@ -92,7 +92,7 @@ func runBenchTier3(ctx context.Context, args []string, stdout, stderr io.Writer)
 	root := fs.String("root", "", "scratch directory")
 	repo := fs.String("bench-repo", filepath.Join(home, "Documents", "sheepdog-bench"), "bench repo")
 	envFile := fs.String("env-file", ".env", "daemon env file")
-	brainModel := fs.String("brain-model", "", "brain model")
+	brainModel := fs.String("brain-model", "", "orchestrator model")
 	claudeModel := fs.String("claude-model", "haiku", "Claude worker model")
 	codexModel := fs.String("codex-model", "gpt-6-luna", "Codex worker model")
 	codexEffort := fs.String("codex-effort", "low", "Codex reasoning effort")
@@ -102,7 +102,7 @@ func runBenchTier3(ctx context.Context, args []string, stdout, stderr io.Writer)
 	out := fs.String("out", "", "report directory")
 	events := fs.String("events", "", "event log directory")
 	keep := fs.Bool("keep", false, "keep scratch directories")
-	voice := fs.Bool("voice", false, "the simulated CEO speaks through the phone emulator")
+	voice := fs.Bool("voice", false, "the simulated user speaks through the phone emulator")
 	ttsModel := fs.String("tts-model", speech.DefaultModel, "Gemini TTS model")
 	cacheDir := fs.String("cache-dir", defaultBenchCache(), "rendered speech cache")
 	sayOnly := fs.Bool("say", false, "render with macOS say only")
@@ -216,7 +216,7 @@ func runBenchTier3(ctx context.Context, args []string, stdout, stderr io.Writer)
 	eval.WriteSimTable(stdout, runs)
 	if *out != "" {
 		setup := map[string]string{
-			"mode":           "tier 3 (real herdr session, real workers, scratch daemon --voice=off --heard-echo; the CEO types)",
+			"mode":           "tier 3 (real herdr session, real workers, scratch daemon --voice=off --heard-echo; the user types)",
 			"brain":          "gemini (vertex) " + orStr(*brainModel, "gemini-3.8-flash"),
 			"workers":        "claude " + *claudeModel + "; codex " + *codexModel + " (" + *codexEffort + ")",
 			"simulated user": *simuser + " " + judgeModelID(*simuser, umod),
@@ -225,7 +225,7 @@ func runBenchTier3(ctx context.Context, args []string, stdout, stderr io.Writer)
 			"scenarios":      *files + filterNote(*filter),
 		}
 		if *voice {
-			setup["mode"] = "tier 3 voice (real herdr session, real workers, scratch daemon with the real voice model; the CEO speaks through the phone emulator)"
+			setup["mode"] = "tier 3 voice (real herdr session, real workers, scratch daemon with the real voice model; the user speaks through the phone emulator)"
 			setup["tts"] = ttsID
 		}
 		rep := eval.NewCampaignReport(started, setup, *repeat, runs, meter)

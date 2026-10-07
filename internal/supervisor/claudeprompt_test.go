@@ -12,12 +12,12 @@ import (
 )
 
 // Tier-3 bench 2026-10-03, finding 3: every Claude Code approval got two
-// pushes. The block template went out at announce_wait, the brain's
+// pushes. The block template went out at announce_wait, the orchestrator's
 // recheck was told so (the fact already in place), and it added its own
 // line every time, because the template it was shown said nothing:
 // "Claude is asking do you want to proceed." The command sat between
 // dashed rules the parser did not read. Now the template carries the
-// command, and the recheck shows the brain that it was already said, so
+// command, and the recheck shows the orchestrator that it was already said, so
 // "nothing to add" is a judgement the model can make on the facts.
 func TestClaudeBashBlockTemplateCarriesTheCommandIntoTheRecheck(t *testing.T) {
 	const template = "auth asks to run go test."

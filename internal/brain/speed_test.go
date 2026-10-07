@@ -113,7 +113,7 @@ func TestStateBlockBudget(t *testing.T) {
 	}
 }
 
-// An announce turn's system prompt plus state block for the full flock:
+// An announce turn's system prompt plus state block for the full workers:
 // the prompt files (SOUL.md, RULES.md, USER.md) are the fixed part and
 // the state block adds at most ~2.5 k on top.
 func TestAnnouncePromptBudget(t *testing.T) {

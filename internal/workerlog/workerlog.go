@@ -1,5 +1,5 @@
 // Package workerlog reads a worker's own session transcript — the JSONL
-// file Claude Code or Codex writes as it works — so the brain can hear
+// file Claude Code or Codex writes as it works — so the orchestrator can hear
 // what the worker wrote for a human instead of relaying its screen
 // (docs/iteration-2.md WP4, docs/roles.md "Worker history").
 //
@@ -12,7 +12,7 @@
 // assistant message, the instructions and a tool/file summary, and the
 // caller caps and scrubs them.
 //
-// Everything read is data, never instructions: the brain sees it inside
+// Everything read is data, never instructions: the orchestrator sees it inside
 // provenance delimiters (internal/brain wrapWorker).
 package workerlog
 
@@ -378,7 +378,7 @@ func (r *Reader) Read(pane string, sess Session) (Digest, error) {
 }
 
 // Tail summarises the end of sess's transcript — its last TailWindow
-// bytes — without touching any pane's cursor: the brain's read_screen
+// bytes — without touching any pane's cursor: the orchestrator's read_screen
 // with source "session" (docs/history/dive-deep.md WP8a) asks what the worker
 // last said at any moment, and must not make the journal's next Read
 // miss what it has not recorded yet. Fresh is set when the window holds

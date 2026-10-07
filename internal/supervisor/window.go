@@ -15,11 +15,11 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 )
 
-// The agent window: the CEO looking at an agent's terminal and operating
+// The agent window: the user looking at an agent's terminal and operating
 // it himself from the app (GET /api/agents/{pane}/screen, POST
 // /api/agents/{pane}/input; docs/ws-contract.md "Agent window"). The
 // authority for an input is his own tap, so it does not pass the one
-// rail; the brain is told what he did so its picture stays right.
+// rail; the orchestrator is told what he did so its picture stays right.
 
 // Window screen limits: the default and the cap of lines one read asks
 // for, and the most text or keys one input carries.
@@ -68,7 +68,7 @@ type Screen struct {
 }
 
 // Screen reads the tracked agent in paneID's window: the herdr read the
-// brain's read_screen makes, without making the agent the subject
+// orchestrator's read_screen makes, without making the agent the subject
 // (looking is not talking). lines <= 0 is WindowDefaultLines; it is
 // capped at WindowMaxLines.
 func (s *Supervisor) Screen(ctx context.Context, paneID string, lines int) (Screen, error) {
@@ -104,9 +104,9 @@ type WindowResult struct {
 	Spoken string
 }
 
-// WindowPrompt submits text to the tracked agent in paneID as the CEO's
+// WindowPrompt submits text to the tracked agent in paneID as the user's
 // own prompt (agent.prompt): its current task becomes the text, and the
-// brain is told. herdr.ErrAgentBlocked comes back as is (the agent is at
+// orchestrator is told. herdr.ErrAgentBlocked comes back as is (the agent is at
 // a prompt; answer that first).
 func (s *Supervisor) WindowPrompt(ctx context.Context, paneID, text string) (WindowResult, error) {
 	text = strings.TrimSpace(text)
@@ -141,7 +141,7 @@ func (s *Supervisor) WindowPrompt(ctx context.Context, paneID, text string) (Win
 // When they are exactly one option of the agent's open approval
 // question, they answer it through the tap path (AnswerTap), so the
 // pending action is confirmed and cleared the way a card tap does;
-// otherwise they go to the pane as they are and the brain is told.
+// otherwise they go to the pane as they are and the orchestrator is told.
 func (s *Supervisor) WindowKeys(ctx context.Context, paneID string, keys []string) (WindowResult, error) {
 	if len(keys) == 0 || len(keys) > WindowMaxKeys {
 		return WindowResult{}, fmt.Errorf("%w: send 1 to %d keys", ErrWindowInput, WindowMaxKeys)
@@ -183,7 +183,7 @@ func (s *Supervisor) WindowKeys(ctx context.Context, paneID string, keys []strin
 // that keys select: its pending id and 1-based index. Keys select an
 // option when they are its own keys or the digit it is listed under
 // (both TUIs take the digit even where the option's key is "y"). Enter
-// selects nothing here: the CEO may have moved the TUI's cursor with
+// selects nothing here: the user may have moved the TUI's cursor with
 // up/down since the question was recorded, so enter goes to the pane as
 // a plain key, and the transition off blocked closes the question
 // (transitions.go).

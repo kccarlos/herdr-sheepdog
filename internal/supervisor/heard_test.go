@@ -11,9 +11,9 @@ import (
 )
 
 // docs/eval/eval-campaign-2026-10-03.md H6, j4-finish-finding r2 (B-deepseek):
-// the CEO said "Yes, let me know when it's done." to the brain's offer;
+// the user said "Yes, let me know when it's done." to the orchestrator's offer;
 // a second later the finish line "Want it to fix those two links?" went
-// to the voice, and the brain took the yes for that newer question. The
+// to the voice, and the orchestrator took the yes for that newer question. The
 // utterance request now says when the words began and which lines the
 // voice was given after that.
 func TestUtteranceRequestSaysWhatTheCEOHadNotHeard(t *testing.T) {
@@ -48,7 +48,7 @@ func TestUtteranceRequestSaysWhatTheCEOHadNotHeard(t *testing.T) {
 	}
 }
 
-// With nothing given to the voice after the CEO began, the request says
+// With nothing given to the voice after the user began, the request says
 // nothing extra: the transcript's order is already right.
 func TestUtteranceRequestQuietWhenNothingNewerWasPushed(t *testing.T) {
 	m := braintest.NewModel(braintest.Step{Text: braintest.Reply("It's still checking links.", "")})

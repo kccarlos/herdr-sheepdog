@@ -49,7 +49,7 @@ func TestRecapCutKeepsWhatWasHeard(t *testing.T) {
 // session's habits — the bare "On it." / "checking" / "好的" it said
 // while relaying a push's own question, its "<no speech detected>"
 // placeholder, and the relayed question itself recorded as if the
-// shepherd had asked it.
+// user had asked it.
 func TestRecapLeavesOutAcksAndSelfRelays(t *testing.T) {
 	r := Recap{}
 	r.Add(RecapSupervisor, "测试跑完了，数量出来是三，应该是五。要我直接让 codex 把它修掉吗？")
@@ -58,7 +58,7 @@ func TestRecapLeavesOutAcksAndSelfRelays(t *testing.T) {
 	r.Add(RecapAssistant, "checking")
 	r.Add(RecapAssistant, "好的。")
 	r.Add(RecapAssistant, "<no speech detected>")
-	r.Add(RecapUser, "让 codex 修掉吗") // short: the shepherd's own answer, kept
+	r.Add(RecapUser, "让 codex 修掉吗") // short: the user's own answer, kept
 	r.Add(RecapUser, "让 codex 修。")
 	r.Add(RecapAssistant, "On it, telling codex to fix the count now.")
 	got := RecapLines(r.Recent(1000))

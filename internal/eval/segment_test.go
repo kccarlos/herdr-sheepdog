@@ -36,7 +36,7 @@ func TestSplitSegments(t *testing.T) {
 			t.Fatalf("segment %d: %+v want %+v", i, got[i], want[i])
 		}
 	}
-	// Without beats: cut at each CEO line that is not an answer.
+	// Without beats: cut at each user line that is not an answer.
 	nb := []SimLine{{Who: "ceo", Text: "a"}, {Who: "sheepdog", Text: "x?"}, {Who: "ceo", Text: "y", Tag: "answer"}, {Who: "ceo", Text: "b"}}
 	if s := SplitSegments(nb); len(s) != 2 || s[0].End != 3 || s[1].Beat != 2 {
 		t.Fatalf("no beats: %+v", s)

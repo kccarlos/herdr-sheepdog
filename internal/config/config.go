@@ -3,7 +3,7 @@
 // Configuration is read from ~/.config/sheepdog/config.toml when the file
 // exists, then overridden by SHEEPDOG_* environment variables (and, for the
 // Gemini key pool, GEMINI_API_KEY*). Only the keys needed by the herdr
-// client, state table, voice session, brain, CLI query tool and
+// client, state table, voice session, orchestrator, CLI query tool and
 // supervisor are defined so far, plus the web server port; later work
 // packages add their own sections here.
 //
@@ -67,18 +67,18 @@ type Prompts struct {
 	Dir string `toml:"dir"`
 }
 
-// Brain configures the supervisor brain (plan D7-revised, docs/roles.md):
-// the stateful agent that answers the shepherd's relayed words and the
+// Brain configures the orchestrator (plan D7-revised, docs/roles.md):
+// the stateful agent that answers the user's relayed words and the
 // workers' events with tools over a function-calling model (Gemini or DeepSeek, switchable at runtime),
 // keeping one transcript per daemon run under <data_dir>/brain/. When
 // it errors or runs out of budget the supervisor falls back to the
 // daemon's own code sentence.
 type Brain struct {
-	// Enabled turns the brain on (default true). `serve --brain=off`
+	// Enabled turns the orchestrator on (default true). `serve --brain=off`
 	// overrides it; it is also silently off when the initial provider
 	// has no key.
 	Enabled bool `toml:"enabled"`
-	// Provider is the provider the brain starts on: gemini (the Gemini
+	// Provider is the provider the orchestrator starts on: gemini (the Gemini
 	// key pool), deepseek ([deepseek]) or vertex (Gemini on Vertex AI
 	// with the [gemini.vertex] key and project, always at location
 	// global); the initial value only, like Model (default gemini).
@@ -89,7 +89,7 @@ type Brain struct {
 	// MaxSteps bounds the model calls in one turn (default 6); beyond it
 	// the turn falls back to the code sentence.
 	MaxSteps int `toml:"max_steps"`
-	// UtteranceTimeoutS bounds one utterance turn (the shepherd's relayed
+	// UtteranceTimeoutS bounds one utterance turn (the user's relayed
 	// words) and an investigation delivery turn, including tool calls
 	// (default 12; formerly propose_timeout_s, still accepted).
 	UtteranceTimeoutS int `toml:"utterance_timeout_s"`
@@ -112,21 +112,21 @@ type Brain struct {
 	FinalGraceS int `toml:"final_grace_s"`
 	// AnnounceTurnTimeoutS bounds an event turn (the announce turn on a
 	// block or finish); on expiry the template sentence is spoken instead.
-	// A finish waits this long (plus final_grace_s) for the brain's line
+	// A finish waits this long (plus final_grace_s) for the orchestrator's line
 	// before anything is said (default 6; formerly enrich_timeout_s, still
 	// accepted).
 	AnnounceTurnTimeoutS int `toml:"announce_turn_timeout_s"`
-	// AnnounceTimeoutS bounds an announce turn the shepherd is owed: one
+	// AnnounceTimeoutS bounds an announce turn the user is owed: one
 	// that keeps a promise or reports the finish of an instruction they
-	// gave; such a finish waits this long for the brain's line
+	// gave; such a finish waits this long for the orchestrator's line
 	// (default 15).
 	AnnounceTimeoutS int `toml:"announce_timeout_s"`
-	// AnnounceWaitS is how long a block waits for the brain's announce
+	// AnnounceWaitS is how long a block waits for the orchestrator's announce
 	// turn before the parsed prompt is spoken; a late line follows only
-	// when it says the shepherd must act (default 2). A finish does not
+	// when it says the user must act (default 2). A finish does not
 	// use it: it waits for the turn's own budget (docs/roles.md "Pushes").
 	AnnounceWaitS int `toml:"announce_wait_s"`
-	// ReplyWaitS is how long a to_supervisor call waits for the brain's
+	// ReplyWaitS is how long a to_supervisor call waits for the orchestrator's
 	// reply before it returns a silent pending result and the reply is
 	// pushed when it lands (0: default 30, above the utterance budget, so
 	// the reply is the call's own result; negative: wait for the whole
@@ -145,9 +145,9 @@ type Brain struct {
 // BrainProviders are the accepted values of brain.provider.
 var BrainProviders = []string{"gemini", "deepseek", "vertex"}
 
-// DeepSeek configures the second supervisor-brain provider: DeepSeek's
+// DeepSeek configures the second orchestrator provider: DeepSeek's
 // OpenAI-compatible chat completions API, paid per token. Registered
-// with the brain when APIKey is set; selectable at runtime from the
+// with the orchestrator when APIKey is set; selectable at runtime from the
 // /debug model picker whatever brain.provider says.
 type DeepSeek struct {
 	// APIKey authenticates requests (env DEEPSEEK_API_KEY). Never logged.
@@ -196,7 +196,7 @@ type Supervisor struct {
 	// since I last checked" note instead of the roster repeated in full
 	// (docs/history/issues-2026-09-18.md "Smaller items"; default 60).
 	RepeatWindowS int `toml:"repeat_window_s"`
-	// AuthoriseWindowS is how recent the shepherd's own words (a voice
+	// AuthoriseWindowS is how recent the user's own words (a voice
 	// transcript, typed text or a tap) must be to authorise answering a
 	// worker's approval prompt (docs/roles.md "The one rail"; default 30).
 	AuthoriseWindowS int `toml:"authorise_window_s"`
@@ -207,9 +207,9 @@ type Supervisor struct {
 	ProjectRoots []string `toml:"project_roots"`
 }
 
-// Voice is the dog's spoken half, as the operator meets it.
+// Voice is the voice's spoken half, as the operator meets it.
 type Voice struct {
-	// Name is what the dog calls itself, substituted into
+	// Name is what the voice calls itself, substituted into
 	// prompts/assistant.md as {name} (default "Sheepdog").
 	Name string `toml:"name"`
 	// Provider is the voice model the daemon starts on: "gemini" (Gemini
@@ -226,7 +226,7 @@ type Voice struct {
 // of open session, so the daemon closes it when idle).
 type VoiceOpenAI struct {
 	// APIKey authenticates GPT-Live (env OPENAI_API_KEY). Never logged.
-	// The voice only: the brain never uses it.
+	// The voice only: the orchestrator never uses it.
 	APIKey string `toml:"api_key"`
 	// Model is the Live model (default gpt-live-1).
 	Model string `toml:"model"`
@@ -250,7 +250,7 @@ var ChattinessLevels = []string{"quiet", "normal", "chatty"}
 // DefaultChattiness is the built-in supervisor.chattiness.
 const DefaultChattiness = "chatty"
 
-// DefaultVoiceName is the built-in voice.name: what the dog calls
+// DefaultVoiceName is the built-in voice.name: what the voice calls
 // itself (docs/roles.md "Names").
 const DefaultVoiceName = "Sheepdog"
 
@@ -266,7 +266,7 @@ func validChattiness(v string) bool {
 
 // CLI configures the read-only CLI query tool (plan §3.5, WP4): codex
 // and/or claude, invoked non-interactively and read-only to answer
-// questions the brain cannot answer from a screen alone, and to run a
+// questions the orchestrator cannot answer from a screen alone, and to run a
 // background investigation in a worker's repository. CodexCmd and
 // ClaudeCmd are argv templates ({question}, {cwd}, {model} and
 // {reasoning} are substituted), the *ResumeCmd ones take {session} too;
@@ -369,7 +369,7 @@ type Gemini struct {
 	// "Discord") at the default.
 	StartSensitivity string `toml:"start_sensitivity"`
 	EndSensitivity   string `toml:"end_sensitivity"`
-	// BriefingChannel is how the daemon's and the brain's words reach the
+	// BriefingChannel is how the daemon's and the orchestrator's words reach the
 	// Live model (docs/design/dual-brain.md): "function_response" (the
 	// default; a function response labelled with provenance) or
 	// "user_turn" (the older marked user-role client turn, the A/B

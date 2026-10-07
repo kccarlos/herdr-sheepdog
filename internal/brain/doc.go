@@ -1,5 +1,5 @@
-// Package brain is the supervisor brain, the SVP of docs/roles.md (plan
-// D7-revised): a stateful agent that answers the shepherd's relayed
+// Package orchestrator is the orchestrator, the orchestrator of docs/roles.md (plan
+// D7-revised): a stateful agent that answers the user's relayed
 // utterances and the supervisor's event requests by reasoning with tools
 // over a function-calling model,
 // instead of the stateless one-shot calls that lost the conversational
@@ -8,7 +8,7 @@
 // # Turn
 //
 // Brain.Turn runs one turn: the request is appended to the
-// transcript after the CEO's verbatim words, the context window is
+// transcript after the user's verbatim words, the context window is
 // assembled into model contents, and the loop calls the Model; every
 // function call it returns is executed (read_screen — the pane, or with
 // source session the worker's own session record, docs/history/dive-deep.md
@@ -23,11 +23,11 @@
 // nothing is sent twice.
 //
 // Turns are serialised by a single writer with two priorities: a turn
-// triggered by a CEO utterance runs before one triggered by an event, and
+// triggered by a user utterance runs before one triggered by an event, and
 // a turn in progress is never interleaved. An event turn also gives way:
-// before each model call it checks for a waiting CEO turn and, when there
+// before each model call it checks for a waiting user turn and, when there
 // is one, stops with ErrYielded (brain.yielded, a fallback turn) so the
-// CEO turn runs next; the step in flight is never cut short. At most one
+// user turn runs next; the step in flight is never cut short. At most one
 // event turn waits per agent: a newer event about the same agent replaces
 // the queued one (brain.event_coalesced; the old turn fails with
 // ErrCoalesced before it starts).
@@ -36,33 +36,33 @@
 //
 // The supervisor runs one KindAnnounce turn on a worker event (docs/roles.md
 // "Pushes"): the request carries the code sentence the daemon speaks when
-// the brain does not answer in time, the pane read as a KindEventScreen
+// the orchestrator does not answer in time, the pane read as a KindEventScreen
 // message instead of reading again, and the promises the event keeps. The reply
 // adds Urgency — interrupt, idle, silent or skip — and KeepsPromiseIDs to
-// the answer contract; an empty Spoken is a skip. The brain decides
+// the answer contract; an empty Spoken is a skip. The orchestrator decides
 // whether and how urgently; the supervisor applies the chattiness
 // ceiling and decides nothing about the moment (the push queue does).
 // Announce turns are TriggerEvent, bounded by Config.AnnounceTurnTimeout
-// (Config.AnnounceTimeout when the shepherd is owed the line: it keeps a
+// (Config.AnnounceTimeout when the user is owed the line: it keeps a
 // promise, or Request.Owed),
 // declared only the read tools (the executor refuses prompt, send_keys,
 // interrupt, promise and investigate in any event turn), sent with
 // thinking off whatever is configured (docs/iteration-2.md WP5:
-// turnThinking), and yield to a waiting CEO turn.
+// turnThinking), and yield to a waiting user turn.
 //
 // A KindInvestigation turn is the other event turn: it delivers a
 // finished background job (the investigate tool, docs/roles.md
 // "Investigations and explanations"). Its request carries the job's
-// question, the CEO's own words and the sub-agent's answer wrapped as
+// question, the user's own words and the sub-agent's answer wrapped as
 // worker output, and its reply is the explanation the supervisor pushes
 // at the next pause. It takes the utterance budget rather than the
-// announce one — the answer is what the CEO has been waiting for, not a
+// announce one — the answer is what the user has been waiting for, not a
 // line racing a code sentence — and it coalesces only with a newer
 // delivery about the same agent, never with a worker event.
 //
 // # Promises
 //
-// "Tell me when it's done" is promised work: in a CEO turn the model
+// "Tell me when it's done" is promised work: in a user turn the model
 // calls promise(agent, text, event) and the Host records it (the
 // supervisor keeps it in the state file and pushes it at the matching
 // event whatever the chattiness level). The transcript gets a
@@ -73,7 +73,7 @@
 // # The one rail
 //
 // send_keys answers a worker's approval prompt, which is bypassing its
-// gate. The executor permits it only when the turn was triggered by a CEO
+// gate. The executor permits it only when the turn was triggered by a user
 // utterance, the supervisor has a pending answer_prompt for that pane, and
 // every key belongs to that prompt's option set; the Host re-checks the
 // pending action atomically at send time. Anything else is refused with an
@@ -84,9 +84,9 @@
 // # Transcript and context engine
 //
 // One Transcript per daemon run is appended to <data_dir>/brain/<run-id>.jsonl,
-// one JSON Message per line, complete: CEO utterances and assistant replies
+// one JSON Message per line, complete: User utterances and assistant replies
 // (from the voice transcript events), pushes, worker state changes, notes,
-// requests, the brain's own tool calls and results, replies and compaction
+// requests, the orchestrator's own tool calls and results, replies and compaction
 // summaries. The ContextEngine decides what of it the model sees: the
 // default engine keeps an in-memory window, holds a bulky tool result's
 // last 4 KB only (the transcript keeps it whole), prunes it to a

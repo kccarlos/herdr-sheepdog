@@ -7,7 +7,7 @@ import (
 
 // TurnLatencyReport is the per-utterance latency breakdown
 // (turn.latency, internal/observe/latency.go): each segment's
-// distribution over the CEO utterances of the slice, and how they ended.
+// distribution over the user utterances of the slice, and how they ended.
 type TurnLatencyReport struct {
 	// Source is "events" when the log carries turn.latency lines (the
 	// daemon emitted them), "replay" when they were rebuilt here from
@@ -17,7 +17,7 @@ type TurnLatencyReport struct {
 	N        int            `json:"n"`
 	Outcomes map[string]int `json:"outcomes"`
 	// Segments, keyed by the turn.latency field (total_ms, voice_ms,
-	// relay_ms, queue_ms, brain_ms, step_ms — every brain step pooled —,
+	// relay_ms, queue_ms, brain_ms, step_ms — every orchestrator step pooled —,
 	// model_ms, tool_ms, delivery_ms, push_queue_ms, first_audio_ms).
 	Segments map[string]Stats `json:"segments"`
 }

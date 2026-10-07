@@ -25,22 +25,22 @@ import (
 func printEvalSimUsage(w io.Writer) {
 	fprintln(w, "usage: sheepdog eval sim [flags]")
 	fprintln(w, "")
-	fprintln(w, "Simulated-user conversations (testdata/eval/sim/*.json): an LLM plays the CEO")
-	fprintln(w, "with a goal and talks, in text, to the real supervisor and brain over a mock")
+	fprintln(w, "Simulated-user conversations (testdata/eval/sim/*.json): an LLM plays the user")
+	fprintln(w, "with a goal and talks, in text, to the real supervisor and orchestrator over a mock")
 	fprintln(w, "herdr whose workers change on cue; it hangs up with end_call, or a cap (turns,")
 	fprintln(w, "time, silence) ends the call. The judge, not the simulated user, then decides")
-	fprintln(w, "each rubric item. Offline by default: the scripted brain, the scenario's own")
+	fprintln(w, "each rubric item. Offline by default: the scripted orchestrator, the scenario's own")
 	fprintln(w, "script lines and a fake judge (a check of the harness and the scenario files).")
 	fprintln(w, "")
 	fprintln(w, "flags:")
-	fprintln(w, "  --live                real brain, simulated user and judge (costs money)")
-	fprintln(w, "  --provider ID         live brain provider: vertex or deepseek (gemini, the AI")
+	fprintln(w, "  --live                real orchestrator, simulated user and judge (costs money)")
+	fprintln(w, "  --provider ID         live orchestrator provider: vertex or deepseek (gemini, the AI")
 	fprintln(w, "                        Studio free tier, only with --allow-ai-studio)")
-	fprintln(w, "  --fallback-provider ID second brain provider the failover can retry a step on:")
+	fprintln(w, "  --fallback-provider ID second orchestrator provider the failover can retry a step on:")
 	fprintln(w, "                        vertex, deepseek, gemini (needs --allow-ai-studio) or none.")
 	fprintln(w, "                        Default: every provider with credentials, as the daemon")
 	fprintln(w, "                        registers them (gemini only with --allow-ai-studio)")
-	fprintln(w, "  --model ID            live brain model (default brain.model)")
+	fprintln(w, "  --model ID            live orchestrator model (default brain.model)")
 	fprintln(w, "  --utterance-timeout D an experiment: override brain.utterance_timeout_s for this")
 	fprintln(w, "                        run (e.g. 25s), to measure what the timeout costs")
 	fprintln(w, "  --simuser KIND        vertex (default with --live), deepseek, ollama or fake")
@@ -82,10 +82,10 @@ func parseEvalSimFlags(args []string, stderr io.Writer) (evalSimOpts, int, bool)
 	fs.Usage = func() { printEvalSimUsage(stderr) }
 	var o evalSimOpts
 	fs.BoolVar(&o.live, "live", false, "real models")
-	fs.BoolVar(&o.allowAIStudio, "allow-ai-studio", false, "allow the gemini (AI Studio) brain provider")
-	fs.StringVar(&o.provider, "provider", "", "live brain provider")
+	fs.BoolVar(&o.allowAIStudio, "allow-ai-studio", false, "allow the gemini (AI Studio) orchestrator provider")
+	fs.StringVar(&o.provider, "provider", "", "live orchestrator provider")
 	fs.StringVar(&o.fallback, "fallback-provider", "", "failover provider (vertex, deepseek, gemini, none)")
-	fs.StringVar(&o.model, "model", "", "live brain model")
+	fs.StringVar(&o.model, "model", "", "live orchestrator model")
 	fs.StringVar(&o.simuser, "simuser", "", "simulated user backend")
 	fs.StringVar(&o.simuserModel, "simuser-model", "", "simulated user model")
 	fs.StringVar(&o.judge, "judge", "", "judge backend")
@@ -99,7 +99,7 @@ func parseEvalSimFlags(args []string, stderr io.Writer) (evalSimOpts, int, bool)
 	fs.StringVar(&o.envFile, "env-file", "", "env file")
 	fs.StringVar(&o.promptsDir, "prompts-dir", "", "prompt override directory")
 	fs.StringVar(&o.out, "out", "", "report directory")
-	fs.DurationVar(&o.uttTimeout, "utterance-timeout", 0, "override the brain's utterance timeout")
+	fs.DurationVar(&o.uttTimeout, "utterance-timeout", 0, "override the orchestrator's utterance timeout")
 	fs.IntVar(&o.repeat, "repeat", 1, "runs per scenario")
 	fs.IntVar(&o.parallel, "parallel", 1, "conversations at once")
 	fs.Float64Var(&o.budget, "budget-usd", 0, "estimated spend limit")
@@ -224,7 +224,7 @@ func runEvalSim(ctx context.Context, args []string, stdout, stderr io.Writer) in
 // simSetup records what a campaign ran on, for its report.
 func simSetup(o evalSimOpts, opts eval.SimOptions) map[string]string {
 	if !o.live {
-		return map[string]string{"mode": "offline (scripted brain, scripted user, fake judge)"}
+		return map[string]string{"mode": "offline (scripted orchestrator, scripted user, fake judge)"}
 	}
 	or := func(s, def string) string {
 		if s == "" {
@@ -243,7 +243,7 @@ func simSetup(o evalSimOpts, opts eval.SimOptions) map[string]string {
 		"budget_usd":         fmt.Sprint(o.budget),
 		"scenarios":          o.files + filterNote(o.filter),
 		"personas":           orDefaultStr(o.personas, "each scenario's own"),
-		"utterance_timeout":  opts.BrainConfig.UtteranceTimeout.String() + " (0s = the brain default, " + brain.DefaultUtteranceTimeout.String() + ")",
+		"utterance_timeout":  opts.BrainConfig.UtteranceTimeout.String() + " (0s = the orchestrator default, " + brain.DefaultUtteranceTimeout.String() + ")",
 	}
 	if line, err := bench.PromptsArm(o.promptsDir); err == nil && line != "" {
 		setup["prompts_dir"] = line
@@ -251,7 +251,7 @@ func simSetup(o evalSimOpts, opts eval.SimOptions) map[string]string {
 	return setup
 }
 
-// fallbackModels picks the brain's extra providers out of models (every
+// fallbackModels picks the orchestrator's extra providers out of models (every
 // provider with credentials): the one --fallback-provider names, none
 // for "none", else all but the primary, like the daemon registers them
 // (gemini, the AI Studio free tier, only with --allow-ai-studio).
@@ -335,7 +335,7 @@ func loadSimScenarios(glob, filter string) ([]eval.SimScenario, error) {
 }
 
 // evalSimOptions builds the run options: offline fakes, or the live
-// brain, simulated user and judge.
+// orchestrator, simulated user and judge.
 func evalSimOptions(o evalSimOpts, cfg config.Config, log logging.Logger) (eval.SimOptions, error) {
 	bcfg := app.BrainConfig(cfg)
 	promptsDir := o.promptsDir

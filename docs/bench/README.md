@@ -4,24 +4,24 @@
 > indexes every experiment run so far (question, method, result,
 > decision, report and raw results) and the standing lessons.
 
-An end-to-end benchmark of the way the CEO actually uses sheepdog: by
+An end-to-end benchmark of the way the user actually uses sheepdog: by
 voice, from the phone, eyes off the screen. Its job is to find
-robustness problems before the CEO does.
+robustness problems before the user does.
 
 | Tier | What talks to what | Where |
 |---|---|---|
-| 1 | an LLM CEO types to the real supervisor and brain (no voice model) over the eval sim's scripted mock herdr | `sheepdog eval sim`, `internal/eval` |
-| 2 | **synthetic speech → phone emulator → scratch daemon with the real voice model (Gemini Live on Vertex) and the real brain (DeepSeek, failover to Vertex) → mock herdr scripted from the same sim worlds** | `sheepdog bench`, `internal/bench` (this page) |
-| 3 | the real daemon against real herdr workers (Claude Code, Codex); the CEO types by default, or with `--voice` speaks through the same phone emulator | `sheepdog bench run --tier 3`, `internal/bench/tier3` |
+| 1 | an LLM user types to the real supervisor and orchestrator (no voice model) over the eval sim's scripted mock herdr | `sheepdog eval sim`, `internal/eval` |
+| 2 | **synthetic speech → phone emulator → scratch daemon with the real voice model (Gemini Live on Vertex) and the real orchestrator (DeepSeek, failover to Vertex) → mock herdr scripted from the same sim worlds** | `sheepdog bench`, `internal/bench` (this page) |
+| 3 | the real daemon against real herdr workers (Claude Code, Codex); the user types by default, or with `--voice` speaks through the same phone emulator | `sheepdog bench run --tier 3`, `internal/bench/tier3` |
 
 ## How a tier-2 run works
 
 ```text
- LLM CEO (Vertex flash-lite)          judge (Claude Sonnet via claude -p, after the call)
+ LLM user (Vertex flash-lite)          judge (Claude Sonnet via claude -p, after the call)
    │ text                 ▲ heard text                     ▲ transcript as heard + facts
    ▼                      │                                │
  Gemini TTS (Vertex) ──► phone emulator ──/ws──► scratch daemon (in process, :7790-7792)
-   voice, style,          iOS capture gate,        Gemini Live ◄─► supervisor ◄─► brain
+   voice, style,          iOS capture gate,        Gemini Live ◄─► supervisor ◄─► orch.
    disfluencies           jitter buffer,                              │        (DeepSeek ─► fault proxy)
                           playback reports,                           ▼
                           noise bed, echo                     mock herdr panes ◄── world driver
@@ -31,9 +31,9 @@ robustness problems before the CEO does.
 1. A scratch daemon starts **in process** on its worker's port (7790,
    7791 or 7792 — never 7777) with its own data directory and state
    file under the scratch directory, loopback only, no token, no APNs
-   key (it can never notify the CEO's phone), the AI Studio key pool
-   dropped (the free-tier brain provider is never a failover target),
-   voice on (Gemini Live, `gemini.backend` from the CEO's config), brain
+   key (it can never notify the user's phone), the AI Studio key pool
+   dropped (the free-tier orchestrator provider is never a failover target),
+   voice on (Gemini Live, `gemini.backend` from the user's config), orchestrator
    `deepseek-flash` with the Vertex provider registered for failover,
    and `--cli=off` semantics: run_cli and investigations answer from the
    scenario's scripted findings (`app.Options.Querier`), never from a
@@ -46,12 +46,12 @@ robustness problems before the CEO does.
    `/api/inject/state` and `/api/inject/screen` with the text sim's
    semantics (a prompted idle worker goes busy, an answered prompt
    moves on, an interrupt cancels what a prompt set in motion, timed
-   cues and cues after the CEO's nth utterance).
-4. The phone first hears whatever the flock says on connect (the
+   cues and cues after the user's nth utterance).
+4. The phone first hears whatever the workers say on connect (the
    initial blocks' announcements), then the timed cues start and the
-   CEO says the scenario's **pinned opening line**; from turn two the
-   LLM CEO talks (or the scenario's fixed script). It hears the bot only
-   through the voice model's output transcription, cut where the CEO
+   User says the scenario's **pinned opening line**; from turn two the
+   LLM user talks (or the scenario's fixed script). It hears the bot only
+   through the voice model's output transcription, cut where the user
    cut the bot off, and speaks through TTS.
 5. After the call the judge grades the default rubric (answered, no
    unintended action, right agent, no hallucination, facts current,
@@ -59,10 +59,10 @@ robustness problems before the CEO does.
    against the facts (every screen at the start and what changed, every
    scripted change, every action sheepdog sent). Each default item says
    when it passes and when it fails, in both directions (too thin and
-   too long both fail `length_fits`; acting beyond the CEO's words and
+   too long both fail `length_fits`; acting beyond the user's words and
    not doing what was plainly asked both fail `no_unintended_action`),
    and every verdict carries the judge's quote as `evidence`. The
-   judge's agreement with the CEO is measured on a calibration set
+   judge's agreement with the user is measured on a calibration set
    ([docs/eval/calibration](../eval/calibration/README.md)). Code
    checks: required/forbidden actions, and voice checks (below).
 
@@ -72,7 +72,7 @@ Since 2026-10-06 the judge of every layer (tier 1 `eval sim`, tier 2
 `bench run`, tier 3, `bench report --rescore-explain` /
 `--rescore-orchestrator`, `bench rejudge`, `eval calib judge`, `eval
 --live`) is **Claude Sonnet through the Claude Code CLI**: it won the
-bake-off on the 126-pair calibration set (kappa 0.72 against the CEO's
+bake-off on the 126-pair calibration set (kappa 0.72 against the user's
 ground truth over two runs, `length_fits` 0.70–1.00; Flash-Lite 0.65 /
 0.63; [judge-bakeoff-2026-10-06.md](../eval/judge-bakeoff-2026-10-06.md)).
 
@@ -98,7 +98,7 @@ ground truth over two runs, `length_fits` 0.70–1.00; Flash-Lite 0.65 /
   `--judge-model ID` on every command above; `SHEEPDOG_JUDGE=vertex` (or
   `vertex:gemini-3.5-flash`, `claude:opus`) sets the default for all of
   them. `--judge vertex` is Flash-Lite (`gemini-3.1-flash-lite`, about
-  $0.03 per tier-1 run), still selectable. The simulated CEO/user stays
+  $0.03 per tier-1 run), still selectable. The simulated user stays
   on Vertex Flash-Lite either way.
 - **Rejudging without rerunning**: `sheepdog bench rejudge --from DIR`
   asks every judge item of a finished tier-2 campaign (`runs/`) or
@@ -114,7 +114,7 @@ ground truth over two runs, `length_fits` 0.70–1.00; Flash-Lite 0.65 /
 - **Segment-level judging** (workday scenarios, `eval.JudgeSegments`):
   a 15–30-minute session judged as one verdict fails for one slip
   anywhere, so the transcript is also cut into segments — one per agenda
-  beat (the CEO's request, or a scripted silence, with every follow-up,
+  beat (the user's request, or a scripted silence, with every follow-up,
   answer and announcement until the next beat) plus the announcements
   before the first beat — and each segment gets **one** judge call that
   scores the items that apply to it, each with a quoted piece of
@@ -128,7 +128,7 @@ ground truth over two runs, `length_fits` 0.70–1.00; Flash-Lite 0.65 /
   for "the earlier one", never scored), the whole call's facts, and the
   segment's time span (an action outside it is scored in its own
   segment). The segment is over when the next beat starts: an answer
-  that only arrives after the CEO moved on (or repeated themselves) is a
+  that only arrives after the user moved on (or repeated themselves) is a
   no for the earlier segment. The items whose question spans the call
   (`news_*`, `said_vs_done`, `end_state`, `safety_*`) and every
   programmatic check stay run-level. Live tier-1 and tier-2 workday runs
@@ -156,7 +156,7 @@ A Go client that behaves like the iOS app on `/ws`
   280 ms, sends the attack plus 100 ms of pre-roll, closes after 400 ms
   unvoiced; `silence` and `speaking` move with it; no binary frame after
   `silence on`. `web`: the `/voice` page's peak gate. The detector hears
-  the CEO's speech plus the echo, not the steady room noise (the app's
+  the user's speech plus the echo, not the steady room noise (the app's
   detector adapts its floor to that) — an idealised detector.
 - **Player**: the contract's jitter buffer in stream time (150 ms start
   target, start anyway after target + 250 ms, 300 ms underrun window,
@@ -184,7 +184,7 @@ err = c.WaitConnected(ctx, 30*time.Second)
 err = c.Say(ctx, "status please", samples16k)    // blocks for the clip's length; SayAsync does not
 u, ok := c.NextUtterance(ctx, 15*time.Second)    // u.Text, u.Heard, u.PlayedMS, u.End, u.Push
 c.WaitQuiet(ctx, 1500*time.Millisecond, 20*time.Second)
-heard := c.InTranscriptSince(atMS)               // what the voice model heard the CEO say
+heard := c.InTranscriptSince(atMS)               // what the voice model heard the user say
 c.Detach(); err = c.Reattach(ctx)
 rec := c.Close()                                 // voiceclient.Recording
 ```
@@ -217,13 +217,13 @@ opening).
 
 Each scenario is an eval sim scenario — inline, or taken from
 `testdata/eval/sim` by id (`from_sim`) with any field overriding it —
-plus how the CEO sounds and behaves:
+plus how the user sounds and behaves:
 
 | Field | Meaning |
 |---|---|
 | `id`, `category`, `note` | name, report group, why it exists |
 | `from_sim` | start from this sim scenario (agents, events, goal, persona, opening, script, caps, expect) |
-| `goal`, `persona`, `language`, `opening`, `script`, `fixed`, `agents`, `events`, `caps`, `expect` | as in the sim (`internal/eval/sim.go`); `notes` and `transcript` are refused (they seed an in-process brain) |
+| `goal`, `persona`, `language`, `opening`, `script`, `fixed`, `agents`, `events`, `caps`, `expect` | as in the sim (`internal/eval/sim.go`); `notes` and `transcript` are refused (they seed an in-process orchestrator) |
 | `audio.voice` / `style` / `disfluency` | TTS voice (default: picked by the id), style, filler/restart probability |
 | `audio.noise` | `{"name","kind","snr_db"}` room bed |
 | `audio.echo` | `{"delay_ms","gain_db"}` speaker leak |
@@ -254,14 +254,14 @@ the cache, outside the repository. `sheepdog bench validate` (part of
 | ambiguous | ambiguous-codex, ambiguous-readme-one | two codex workers; "that one, the… the README one" |
 | names | names-rename-by-voice, names-by-kind | rename by voice (#98); a worker called by its kind |
 | language | lang-switch-zh-en, lang-mixed-codeswitch | switch mid-call; Mandarin with English terms |
-| collision | collision-block-while-talking, collision-finish-push | the CEO talks just as a push arrives |
+| collision | collision-block-while-talking, collision-finish-push | the user talks just as a push arrives |
 | barge_in | barge-in-long-answer, barge-in-hold-to-talk | open-mic barge-in; local cut (hold-to-talk) |
 | noise | noise-cafe-approve, noise-pink-status-zh | cafe 10 dB; pink 5 dB |
 | echo | echo-instruct, echo-barge-in | speaker leak, alone and with barge-in |
 | reconnect | reconnect-held-push, reconnect-long-session | a push lands while the phone is away; a longer call with a drop |
-| failover | failover-brain-503 | the primary brain provider answers 503 |
-| unheard | unheard-approval-requeue | the CEO talks over an approval announcement |
-| slowness | slowness-brain-9s | every brain request 9 s slower |
+| failover | failover-brain-503 | the primary orchestrator provider answers 503 |
+| unheard | unheard-approval-requeue | the user talks over an approval announcement |
+| slowness | slowness-brain-9s | every orchestrator request 9 s slower |
 | facts | facts-contradiction-linecount, facts-history-first, facts-stale-conclusion-zh, facts-ambiguous-rewind, facts-zh-simplified, facts-timeout-not-verified | the 2026-10-04 phone-test failures (tier-1 forms in `testdata/eval/sim/phone-2026-10-04.json`): two disagreeing numbers, "what did we talk about first", "现在有结论了吗" after a finish, an ambiguous "rewind it", Simplified replies, no claimed verification after run_cli times out |
 | workday | workday-morning-standup, workday-scale-ten, workday-adversarial-afternoon (held out), workday-zh-evening, workday-interruptions, workday-explain-deep (held out), workday-long-haul | long sessions measuring many things at once (below) |
 | explain | explain-zh-input-rules, explain-en-flaky-test, explain-zh-notes-ledger, explain-en-invoice-job, explain-control-en-done, explain-control-zh-busy | explanation quality (below): "explain X", "then?" / "然后呢", "more detail" / "你可以给我一点详细的解释吗", "why", "example" over worlds with real substance; two simple controls |
@@ -274,7 +274,7 @@ why, example, simple) is scored after the call by
 `internal/eval/explain.go` with the same judge model, on two sides
 separately: the **orchestrator** (per question, the `spoken`, `detail`
 and options of every `voice.tool_result`, and spoken pushes) and the
-**voice** (what the phone played, split at the CEO's lines by fragment
+**voice** (what the phone played, split at the user's lines by fragment
 time; tier 2 only).
 
 - **Coverage**: each key point asked per answer; coverage = share of
@@ -299,7 +299,7 @@ scores recorded runs again with the judge only. Baseline:
 **A/B with prompt arms**: `--prompts-dir DIR` on `bench run` (the
 scratch daemons' `prompts.dir`) and on `eval sim` takes every prompt
 workspace file found in DIR — `assistant.md`, `USER.md`, `svp/SOUL.md`,
-`svp/RULES.md` — so one directory swaps both brains' prompts; files left
+`svp/RULES.md` — so one directory swaps the voice and the orchestrator' prompts; files left
 out stay embedded (`sheepdog prompts export DIR` writes a starting
 copy). The directory is checked first: a file the loader rejects (a
 `svp/RULES.md` without its protected sentences) stops the run instead of
@@ -405,7 +405,7 @@ wrapped by `from_sim` in `testdata/bench/scenarios/workday.json` (tier 2:
 seed, forced resumes, voice). Each stands for 15–30 minutes of a working
 day (`workday.sim_minutes`; the cues run compressed, a tier-1 run takes
 about 2.5 minutes and a tier-2 run about 8) over 4–10 workers, with the
-CEO interleaving status, explanations, "more detail", "why",
+User interleaving status, explanations, "more detail", "why",
 approvals, deferrals, instructions, interruptions and a language switch.
 
 | Scenario | Workers | What it adds | Resumes (tier 2) |
@@ -423,12 +423,12 @@ approvals, deferrals, instructions, interruptions and a language switch.
 carry `held_out`). Never read their transcripts to tune a prompt or a
 rule; they only measure. Report them separately from the other five.
 
-**The CEO's side is an agenda** (`agenda`, one beat per turn; `"<wait>"`
+**The user's side is an agenda** (`agenda`, one beat per turn; `"<wait>"`
 stays quiet so news can land unasked). The LLM simulated user says each
 beat in its own words and the run's persona; a line it starts with
 `[ANSWER]` (answering sheepdog's question) or `[AGAIN]` (repeating or
 rephrasing: user effort) does not move the agenda on, and after two such
-lines it must move on. Each CEO line in the record carries its `beat` and
+lines it must move on. Each user line in the record carries its `beat` and
 `tag`. The call ends when the beats run out (no `end_call`). Offline, the
 scripted user says each beat as written. Cues can wait on a beat
 (`after_beat`, which fires after the answer to that beat, so it does not
@@ -440,7 +440,7 @@ stating its failure in both directions:
 
 | Item | Truth | North-star group |
 |---|---|---|
-| `news_<id>` | a finish, block or result; `proactive` ones land while the CEO is quiet and must be told unasked or at the next answer (missed news) | Understood |
+| `news_<id>` | a finish, block or result; `proactive` ones land while the user is quiet and must be told unasked or at the next answer (missed news) | Understood |
 | `said_vs_done` | claims with their truth value, plus every "sent / approved / stopped / done" claim checked against the actions | Done |
 | `end_state` | what must hold in the world at the end (actions and timeline, not the transcript); `expect.actions` / `forbid` are the code checks for the same | Done |
 | `clarify_<n>` | a beat where a question is needed (genuinely ambiguous) or not (clear) | Low effort |
@@ -496,14 +496,14 @@ keep it outside the repo), `--scratch`, `--cache-dir`, `--tts-model`,
 `--say` (no Gemini TTS), `--prompts-dir DIR` (the scratch daemons'
 `prompts.dir`: override `assistant.md` and `svp/` files there are the
 prompt arm of an A/B; both arms then run the same binary; see
-"Explanation evals"). The simulated CEO (and a `--judge vertex` judge)
+"Explanation evals"). The simulated user (and a `--judge vertex` judge)
 share one limit of four calls in flight with jittered backoff and the
 alternating Flash-Lite model (#94); the Claude judge has its own limit
 of three processes.
 
 Output: `report.md`, `report.json`, `spend.log` (one line per finished
 run with the running total), `runs/<id>.r<n>.json` (the full record:
-transcript as heard, CEO lines with what the voice model heard and its
+transcript as heard, user lines with what the voice model heard and its
 WER, bot utterances, actions, verdicts, latency, voice counters,
 failovers, an event excerpt) and `events/<id>.r<n>.jsonl`.
 
@@ -511,27 +511,27 @@ failovers, an event excerpt) and `events/<id>.r<n>.jsonl`.
 
 - **Taxonomy**: the eval's labels (#94) unchanged, so tier 1 and tier 2
   count the same way. Voice-layer problems are `check` with a `voice:`
-  detail: a CEO line the voice model heard nothing of, an opening heard
+  detail: a user line the voice model heard nothing of, an opening heard
   without its key words, an expected event missing (e.g. no
   `voice.push_held` while the phone was away) or an unexpected one.
 - **Latency**: the daemon's `turn.latency` events (#93) per segment
-  (voice, relay, queue, brain, model, tool, delivery, push queue, first
+  (voice, relay, queue, orchestrator, model, tool, delivery, push queue, first
   audio, total), p50/p90/max over every turn.
 - **Voice layer**: WER of what the voice model heard per language and
   acoustic condition, daemon flushes, phone cuts, interrupted and
-  stalled turns, pushes unheard / re-queued / deferred / held, brain
+  stalled turns, pushes unheard / re-queued / deferred / held, orchestrator
   failovers.
 - **Spend** (estimates at list prices, `eval.Prices`): TTS tokens, the
   Live session's `voice.usage` tokens (priced at the native-audio rates,
-  on the high side), brain `brain.step` tokens, judge and simulated-CEO
+  on the high side), orchestrator `brain.step` tokens, judge and simulated-user
   tokens; the Live audio minutes are reported separately.
 
 ## Tier 3 in voice (`--voice`)
 
 `sheepdog bench run --tier 3` drives the real daemon and real coding
 agents (see `docs/bench/tier3-2026-10-03.md`). By default the simulated
-CEO types to the text router and the scratch daemon runs `--voice=off
---heard-echo`. `--voice` makes the CEO a caller instead:
+User types to the text router and the scratch daemon runs `--voice=off
+--heard-echo`. `--voice` makes the user a caller instead:
 
 ```
 sheepdog bench run --tier 3 --voice --root /tmp/t3 --filter t3-smoke-status \
@@ -541,10 +541,10 @@ sheepdog bench run --tier 3 --voice --root /tmp/t3 --filter t3-smoke-status \
 - The scratch daemon runs `--voice=gemini` (Gemini Live on Vertex, the
   scratch config's `gemini.backend`), without `--heard-echo`. It still
   gets only the Vertex and DeepSeek keys from `--env-file`.
-- The CEO's lines (the opening, then the LLM simulated user's turns) are
+- The user's lines (the opening, then the LLM simulated user's turns) are
   rendered by the tier-2 TTS (`--tts-model`, `--cache-dir`, `--say`, the
   same cache) and played into `/ws` by `internal/bench/voiceclient`: the
-  real-time mic frames, the capture gate, the playback reports. The CEO
+  real-time mic frames, the capture gate, the playback reports. The user
   hears the bot through the voice model's output transcription, cut where
   it was cut off; pushes come as the bot's own speech (a real `voice.push`
   event is what tier 2 flags as `push`). The simulated user and the judge
@@ -556,7 +556,7 @@ sheepdog bench run --tier 3 --voice --root /tmp/t3 --filter t3-smoke-status \
   and are rejected at tier 3.
 - Each record gets `voice_mode` and a `voice` block (lines said and as
   heard by the voice model with WER, bot utterances, pushes, flushes,
-  the Live spend). A CEO line the voice model heard nothing of is a
+  the Live spend). A user line the voice model heard nothing of is a
   `check` failure, as in tier 2. Turn waits are longer than at tier 2 (the
   first answer within 45 s) because real workers and investigations are
   slow.
@@ -565,10 +565,10 @@ sheepdog bench run --tier 3 --voice --root /tmp/t3 --filter t3-smoke-status \
 
 ## Limits
 
-- The speech detector is idealised (it hears the CEO's clean speech and
+- The speech detector is idealised (it hears the user's clean speech and
   the echo, not the room); real-device detector misfires are tier 3's.
 - Faults are injected between the daemon and DeepSeek only: provider
-  failover and a slow brain. Gemini Live's own slowness cannot be
+  failover and a orchestrator. Gemini Live's own slowness cannot be
   injected from here (TLS WebSocket to Vertex); it is observed
   (`voice.stalled`, latency) rather than provoked.
 - One voice provider: Gemini Live. GPT-Live would need its per-minute
@@ -592,27 +592,27 @@ ships with #105.
   in #107. The command between Claude Code's dashed
   rules under "Bash command" is parsed ("Claude asks to run go test.",
   `claude-bash-prompt.screen.txt`). The two pushes per approval came from
-  the same gap: the announce recheck told the brain that the template
-  had been said, and the brain added a line because the template it saw
+  the same gap: the announce recheck told the orchestrator that the template
+  had been said, and the orchestrator added a line because the template it saw
   said nothing.
 - **Finding 4, P1, safety, Codex update menu**: fixed in
   #107. An instruction is never typed into a menu:
-  the screen is read first, and on a menu nothing is typed. The brain
+  the screen is read first, and on a menu nothing is typed. The orchestrator
   gets the fact, and `supervisor.instruction_blocked_by_menu` is logged
   (`codex-update-menu.screen.txt`).
 - **Finding 5, P2, names**: fixed in #107. Spoken
   names take at most three plain words of the session title, with no
-  paths, files or identifiers. An old name reaches the brain only if the
-  CEO heard it (`claude-session-titles.tier3.tsv`).
+  paths, files or identifiers. An old name reaches the orchestrator only if the
+  User heard it (`claude-session-titles.tier3.tsv`).
 - **Finding 6, P2, Chinese**: fixed in #107. The
   Chinese block line no longer quotes an English question
   ("Claude 请求运行 go test。" or "Claude 需要你做个决定。"). The sign-off
   join no longer leaves a "。." seam.
 
 - **#107's known limit, a menu on an idle pane**: fixed in #111. The
-  brain's rail defers to the host for any pane that is not working.
+  orchestrator's rail defers to the host for any pane that is not working.
   `revivePrompt` revives a menu shown on a pane that is not blocked, but
-  only when the CEO's newest words are about it: they name an option or a
+  only when the user's newest words are about it: they name an option or a
   word of its question, or pick one by number. So "skip" by voice answers
   Codex's update menu. Words about something else still get nothing.
 - **Findings 7, 8, 9** (failover budget, queued instruction after a stop,

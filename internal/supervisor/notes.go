@@ -13,7 +13,7 @@ import (
 const NotesFile = "notes.jsonl"
 
 // appendNote records a note in the state session and, when a data dir is
-// configured, appends it to notes.jsonl. Notes come from the brain's own
+// configured, appends it to notes.jsonl. Notes come from the orchestrator's own
 // note tool, whose result is already in the transcript, so the note is
 // not ingested a second time.
 func (s *Supervisor) appendNote(text string) error {

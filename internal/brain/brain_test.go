@@ -58,7 +58,7 @@ func TestDirectAnswer(t *testing.T) {
 	}
 }
 
-// (2) read_screen then answer: the model sees the CEO's verbatim words
+// (2) read_screen then answer: the model sees the user's verbatim words
 // before the request, the screen comes back in provenance delimiters and
 // the model's own content (thought signature) is replayed.
 func TestReadScreenThenAnswer(t *testing.T) {
@@ -245,7 +245,7 @@ func TestSendKeysBlocked(t *testing.T) {
 // rail's "has no recorded approval prompt".
 // An idle agent defers the same way: a menu on an idle pane (Codex's
 // update menu) is not reported blocked, and the Host revives it when the
-// CEO's words are about it (#107's known limit).
+// user's words are about it (#107's known limit).
 func TestSendKeysDefersToHostWhenBlockedWithNoPending(t *testing.T) {
 	for _, state := range []string{"blocked", "idle"} {
 		t.Run(state, func(t *testing.T) { sendKeysDefersToHost(t, state) })
@@ -490,7 +490,7 @@ func TestCompaction(t *testing.T) {
 	}
 }
 
-// (11) Turn serialisation: a CEO turn queued during an event turn runs
+// (11) Turn serialisation: a user turn queued during an event turn runs
 // before a queued event turn, and no turn interleaves with another.
 func TestTurnSerialisation(t *testing.T) {
 	release := make(chan struct{})
@@ -528,11 +528,11 @@ func TestTurnSerialisation(t *testing.T) {
 		_, _ = h.brain.Turn(context.Background(), Request{Kind: KindUtterance, Question: "ceo question"})
 		done("ceo")
 	}()
-	waitQueued(t, h.brain, 2) // ...the CEO turn after it
+	waitQueued(t, h.brain, 2) // ...the user turn after it
 	close(release)
 	wg.Wait()
 	h.brain.Quiesce()
-	// The service order is what the brain recorded, not the order the
+	// The service order is what the orchestrator recorded, not the order the
 	// goroutines above happened to append after Turn returned (on a slow
 	// runner "ceo" could land before "event1" there, a flake).
 	mu.Lock()
@@ -759,12 +759,12 @@ func TestSystemPromptSections(t *testing.T) {
 	}
 }
 
-// waitQueued blocks until n turns are waiting on the brain's turn lock, so
+// waitQueued blocks until n turns are waiting on the orchestrator's turn lock, so
 // the serialisation test does not depend on goroutine scheduling speed.
-// (11b) An event turn yields to a CEO turn: when a CEO turn is waiting
+// (11b) An event turn yields to a user turn: when a user turn is waiting
 // for the lock, the event turn stops before its next model call
 // (ErrYielded wrapped in ErrFallback, brain.yielded, a fallback turn)
-// and the CEO turn runs next; the step in flight is not cut short.
+// and the user turn runs next; the step in flight is not cut short.
 func TestEventTurnYieldsToCEO(t *testing.T) {
 	release := make(chan struct{})
 	m := braintest.NewModel(braintest.Step{Block: release, Calls: []*genai.FunctionCall{braintest.FC(ToolRecall, map[string]any{"query": "auth"})}})
@@ -826,7 +826,7 @@ func TestEventTurnYieldsToCEO(t *testing.T) {
 	if h.log.count("brain.tool_result") != 1 || len(h.model.Calls()) != 2 {
 		t.Errorf("tool results = %d, model calls = %d", h.log.count("brain.tool_result"), len(h.model.Calls()))
 	}
-	// Without a CEO turn waiting, the same event turn completes.
+	// Without a user turn waiting, the same event turn completes.
 	m.Add(braintest.Step{Calls: []*genai.FunctionCall{braintest.FC(ToolRecall, map[string]any{"query": "auth"})}})
 	if rep, err := h.brain.Turn(context.Background(), Request{Kind: KindAnnounce, Agent: "auth", Event: "done", Template: "auth finished."}); err != nil || rep.Spoken != "done" {
 		t.Errorf("event turn alone = %+v %v", rep, err)
@@ -835,7 +835,7 @@ func TestEventTurnYieldsToCEO(t *testing.T) {
 
 // (11c) At most one event turn waits per agent: a newer event about the
 // same agent replaces the queued one (brain.event_coalesced; the old
-// turn fails with ErrCoalesced), while events about other agents and CEO
+// turn fails with ErrCoalesced), while events about other agents and user
 // turns queue as before.
 func TestEventTurnsCoalesce(t *testing.T) {
 	release := make(chan struct{})
@@ -1102,7 +1102,7 @@ func TestReflexModel(t *testing.T) {
 
 // TestCloseEndsATurnInFlight: Close ends a turn still waiting on the
 // model and waits for it, and a turn after Close is refused — the daemon
-// closes the brain after its drain, and a turn that outlived it must not
+// closes the orchestrator after its drain, and a turn that outlived it must not
 // race the after-turn WaitGroup or write to a closed transcript (CI,
 // PR #63).
 func TestCloseEndsATurnInFlight(t *testing.T) {

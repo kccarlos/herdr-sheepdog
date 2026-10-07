@@ -5,8 +5,8 @@ import (
 )
 
 // LatencyReport is the "Latency" section of docs/iteration-2.md's
-// scorecard: how long the shepherd waits between speaking and hearing an
-// answer (J1: "first word ≤ 2 s, answer ≤ 5 s"), and how the brain itself
+// scorecard: how long the user waits between speaking and hearing an
+// answer (J1: "first word ≤ 2 s, answer ≤ 5 s"), and how the orchestrator itself
 // spends its time.
 type LatencyReport struct {
 	// AnswerLatencyMS is, per voice.tool_call(to_supervisor), the time to

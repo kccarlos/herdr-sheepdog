@@ -80,7 +80,7 @@ func (s *Session) execTool(ctx context.Context, gen int, call voice.ToolCall, tu
 		return
 	}
 	if !s.holdForShepherd(ctx, call, res) {
-		// Cancelled while the shepherd spoke: an answer still reaches
+		// Cancelled while the user spoke: an answer still reaches
 		// them, the late way (the supervisor's barge-in rule, C7).
 		s.log.Log(logSource, "voice.tool_result", "", map[string]any{"id": call.ID, "name": call.Name, "cancelled": true})
 		s.emit(voice.EventToolResult{Call: call, Err: ctx.Err(), Cancelled: true})
@@ -90,7 +90,7 @@ func (s *Session) execTool(ctx context.Context, gen int, call voice.ToolCall, tu
 	// An INTERRUPT result is downgraded to WHEN_IDLE at send time, now
 	// that turnDone (or ToolResponseWait) has settled Speaking(), while
 	// the model is speaking — except stop(), the one tool result the
-	// shepherd is always owed at once (docs/roles.md "Pushes").
+	// user is always owed at once (docs/roles.md "Pushes").
 	sched := res.Scheduling
 	deferred := sched == voice.UrgencyInterrupt && call.Name != voice.ToolStop && s.Speaking()
 	if deferred {
@@ -189,7 +189,7 @@ func (s *Session) cancelTools(ids []string) {
 	}
 }
 
-// shepherdHoldMax bounds how long a tool result waits for the shepherd
+// shepherdHoldMax bounds how long a tool result waits for the user
 // to stop speaking: past it the result goes out anyway (WHEN_IDLE lets
 // the model place it).
 const shepherdHoldMax = 10 * time.Second
@@ -197,7 +197,7 @@ const shepherdHoldMax = 10 * time.Second
 // shepherdHoldStep is how often a held result looks again.
 const shepherdHoldStep = 250 * time.Millisecond
 
-// holdForShepherd holds a spoken result while the shepherd is speaking
+// holdForShepherd holds a spoken result while the user is speaking
 // (speakingUntilLocked, the rule the push queue follows): a reply that
 // lands seconds after the call (brain.reply_wait_s) would otherwise be
 // voiced over their next sentence. stop() is never held. It reports
@@ -229,7 +229,7 @@ func (s *Session) holdForShepherd(ctx context.Context, call voice.ToolCall, res 
 	return true
 }
 
-// isAnswer reports whether res is a spoken answer to the shepherd's
+// isAnswer reports whether res is a spoken answer to the user's
 // words (not pending, not silent context, not the stop tool).
 func isAnswer(call voice.ToolCall, res voice.ToolResult) bool {
 	return call.Name == voice.ToolToSupervisor && res.Spoken != "" && !res.Pending && res.Scheduling != voice.UrgencySilent

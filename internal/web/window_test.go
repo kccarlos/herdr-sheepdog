@@ -44,7 +44,7 @@ func agentInputs(t *testing.T, h *harness) []map[string]any {
 	return out
 }
 
-// brainLines returns the brain transcript's contents.
+// brainLines returns the orchestrator transcript's contents.
 func brainLines(h *harness) []string {
 	var out []string
 	for _, m := range h.brain.Transcript().Messages() {
@@ -131,7 +131,7 @@ func TestAgentWindowNeedsToken(t *testing.T) {
 }
 
 // A typed prompt goes to the agent as one submission, becomes its task,
-// is logged by length only, and the brain hears it.
+// is logged by length only, and the orchestrator hears it.
 func TestAgentInputPrompt(t *testing.T) {
 	h := newHarness(t, harnessOpts{brain: true})
 	trackWorking(t, h, "fake:1", "auth", "ready")
@@ -178,7 +178,7 @@ func TestAgentInputPrompt(t *testing.T) {
 	}
 }
 
-// Allow-listed keys go to the pane and the brain hears them; anything
+// Allow-listed keys go to the pane and the orchestrator hears them; anything
 // off the list is refused before a byte is sent.
 func TestAgentInputKeys(t *testing.T) {
 	h := newHarness(t, harnessOpts{brain: true})
@@ -258,7 +258,7 @@ func containsSub(lines []string, sub string) bool {
 }
 
 // Enter is a plain key even while the agent's question is open (the
-// CEO may have moved the cursor with up/down, so the recorded default is
+// user may have moved the cursor with up/down, so the recorded default is
 // not what it selects); keys in another agent's window leave the
 // question alone too.
 func TestAgentInputEnterIsAPlainKey(t *testing.T) {

@@ -15,7 +15,7 @@
 //     rebuilt from the log across days and restarts, newest last, paged
 //     backwards by event id (conversation.go).
 //   - POST /api/pending/answer {id, option}: answer the open question by
-//     tap, a shepherd input through the one rail.
+//     tap, a user input through the one rail.
 //   - POST /api/pending/cancel, POST /api/inject/{blocked,done,state,
 //     screen,remove,utterance}: the debug page's controls, all routed
 //     through the same supervisor paths real events take

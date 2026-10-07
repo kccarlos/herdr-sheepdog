@@ -131,7 +131,7 @@ func TestLateLineKeepsAliasAndOptions(t *testing.T) {
 	}
 }
 
-// A late reply that says the shepherd must decide on an open prompt asks
+// A late reply that says the user must decide on an open prompt asks
 // for the floor, but without the needs_user tag: it is an addition to a
 // block already spoken, so the voice still finishes its own sentence.
 func TestLateNeedsUserOnOpenPromptInterrupts(t *testing.T) {
@@ -212,7 +212,7 @@ func TestStopCancelsDetachedTurn(t *testing.T) {
 	}
 }
 
-// The shepherd asked something else before the reply landed: a turn that
+// The user asked something else before the reply landed: a turn that
 // did nothing is dropped (brain.reply_stale), the newer one answered.
 func TestStaleReplyWithoutActionIsDropped(t *testing.T) {
 	release := make(chan struct{})
@@ -226,7 +226,7 @@ func TestStaleReplyWithoutActionIsDropped(t *testing.T) {
 
 	assertPending(t, h.say("how is auth doing"))
 	first := payload(h.log.ofType("brain.reply_pending")[0])["id"]
-	// The newer request queues behind the first on the brain's turn lock,
+	// The newer request queues behind the first on the orchestrator's turn lock,
 	// so it too is pending.
 	assertPending(t, h.say("what about docs"))
 	close(release)
@@ -313,7 +313,7 @@ func TestNegativeReplyWaitIsSynchronous(t *testing.T) {
 	}
 }
 
-// A brain that fails after the wait falls back to the line that says
+// A orchestrator that fails after the wait falls back to the line that says
 // so, pushed rather than returned.
 func TestLateBrainErrorPushesFallback(t *testing.T) {
 	release := make(chan struct{})
@@ -336,7 +336,7 @@ func TestLateBrainErrorPushesFallback(t *testing.T) {
 }
 
 // One utterance id from the relay to the reply push: supervisor.relay
-// mints it, the brain turn, brain.reply_pending and brain.reply_delivered
+// mints it, the orchestrator turn, brain.reply_pending and brain.reply_delivered
 // carry it, and so does the push (tag utterance_id, which the event log
 // lifts to the line's top level).
 func TestUtteranceIDFromRelayToPush(t *testing.T) {
@@ -377,7 +377,7 @@ func TestUtteranceIDFromRelayToPush(t *testing.T) {
 	}
 }
 
-// Campaign D N4 (deep-ask-fix-failing-test r1): the brain told
+// Campaign D N4 (deep-ask-fix-failing-test r1): the orchestrator told
 // bench-codex to fix its bug, and the late reply named only bench-claude
 // ("…and we still have bench-claude going in the background"), so it went
 // out as "About bench-claude: Sent. It is fixing the adding step now…".
@@ -409,9 +409,9 @@ func TestLateReplyLabelledWithTheAgentActedOn(t *testing.T) {
 }
 
 // With a long wait (brain.reply_wait_s above the utterance budget) the
-// first call is still open when the shepherd asks something else. Its
+// first call is still open when the user asks something else. Its
 // reply is stale when it lands: it is not returned as the first call's
-// result (the voice would speak an answer to a question the shepherd
+// result (the voice would speak an answer to a question the user
 // moved on from) but goes the late way, where a turn that did nothing is
 // dropped.
 func TestLongWaitStaleReplyIsNotInline(t *testing.T) {

@@ -27,9 +27,9 @@ func announceRequest(m *braintest.Model) string {
 
 // 2026-10-03 00:50:48 (docs/history/bench-2026-10-03.md #15): bench-claude's
 // block spoke its template ("bench-claude is asking do you want to
-// proceed.") at announce_wait while the brain had not answered, and the
-// brain, told "Nothing has been said about this yet", announced the
-// same prompt again. Here the announce turn is queued behind a CEO turn,
+// proceed.") at announce_wait while the orchestrator had not answered, and the
+// orchestrator, told "Nothing has been said about this yet", announced the
+// same prompt again. Here the announce turn is queued behind a user turn,
 // so the template goes out before it starts: its request says so, word
 // for word, with the prompt's real state.
 func TestQueuedAnnounceIsToldTheTemplateWasSpoken(t *testing.T) {
@@ -123,7 +123,7 @@ func TestPromptStateFact(t *testing.T) {
 	if got := h.sup.promptState(a); got != brain.PromptGone {
 		t.Errorf("left: %q", got)
 	}
-	// Answered by the shepherd.
+	// Answered by the user.
 	h.block("w5:p1", "codex-approval-prompt.screen.txt")
 	p2, _ := h.pending()
 	if p2.PaneID != "w5:p1" {
@@ -174,7 +174,7 @@ func TestFourthLineAboutOneEventIsDropped(t *testing.T) {
 // started blocked): the announce turn answered in one slow step, so the
 // template went out at announce_wait while that step ran and the "already
 // spoken" fact, read only before a later step, never reached it. Its line
-// — the same block as news, needs_user — was added late: the CEO heard
+// — the same block as news, needs_user — was added late: the user heard
 // the block twice within 2–6 s. Now the turn is asked once more with the
 // fact, and the model's skip is final: one line.
 func TestOneStepAnnounceIsToldTheTemplateWentOutBeforeItsLineCounts(t *testing.T) {

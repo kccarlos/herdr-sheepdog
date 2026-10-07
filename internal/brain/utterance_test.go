@@ -11,7 +11,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/brain/braintest"
 )
 
-// (1) An utterance turn is a CEO turn over the verbatim words: the full
+// (1) An utterance turn is a user turn over the verbatim words: the full
 // tool surface, no agent hint, and the roster sentence in the request.
 func TestUtteranceTurnIsACEOTurn(t *testing.T) {
 	m := braintest.NewModel(
@@ -69,7 +69,7 @@ func TestNoteTool(t *testing.T) {
 }
 
 // (4) A write tool refuses to run once the turn's context is cancelled
-// (the shepherd said stop between the model answering and its calls).
+// (the user said stop between the model answering and its calls).
 func TestActionToolRefusesAfterCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	m := braintest.NewModel(braintest.Step{Fn: func(braintest.Call) (*genai.GenerateContentResponse, error) {

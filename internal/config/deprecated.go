@@ -22,7 +22,7 @@ var renamedBrainKeys = []struct {
 // droppedBrainKeys are [brain] keys that no longer do anything: an old
 // file or environment that still sets one loads, with a note.
 var droppedBrainKeys = []struct{ key, env, why string }{
-	{"ask_timeout_s", "SHEEPDOG_BRAIN_ASK_TIMEOUT_S", "the ask turn is gone; utterance_timeout_s bounds every shepherd turn"},
+	{"ask_timeout_s", "SHEEPDOG_BRAIN_ASK_TIMEOUT_S", "the ask turn is gone; utterance_timeout_s bounds every user turn"},
 }
 
 // Deprecations lists the deprecated config keys and environment

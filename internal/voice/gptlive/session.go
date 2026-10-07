@@ -64,7 +64,7 @@ type Session struct {
 	armed      bool
 	quietSince time.Time
 	// lastLoud / loudSince bound the current run of loud microphone
-	// frames: the shepherd may be mid-sentence before any transcript
+	// frames: the user may be mid-sentence before any transcript
 	// arrives, so the idle close waits for it (unless the "speech" has
 	// gone on too long to be anything but room noise).
 	lastLoud  time.Time
@@ -89,10 +89,10 @@ type Session struct {
 	// kept briefly for a delegation that arrives after it settled.
 	settledText string
 	settledAt   time.Time
-	// turnDoneOwed: the model's speech ended while the shepherd was
+	// turnDoneOwed: the model's speech ended while the user was
 	// talking; EventTurnComplete is emitted when the utterance settles
 	// (it closes the supervisor's voice input, which must not split the
-	// shepherd's words).
+	// user's words).
 	turnDoneOwed bool
 	inText       string // the current input utterance (recap)
 	outText      string // the current reply (recap)
@@ -382,7 +382,7 @@ func (s *Session) speakingOrPlayingLocked(now time.Time) bool {
 // ClientPlayback applies a /ws client playback report
 // (docs/ws-contract.md "Playback reports"): it logs voice.playback and,
 // when a flushed run was cut short, emits the heard part as a cut
-// transcript for the brain. The push pump reads the new state on its
+// transcript for the orchestrator. The push pump reads the new state on its
 // next tick.
 func (s *Session) ClientPlayback(state string, playedMs int) {
 	s.mu.Lock()

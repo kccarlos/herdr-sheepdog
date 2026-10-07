@@ -272,7 +272,7 @@ func (h *hub) onVoiceEvent(ev voice.Event) {
 		h.mu.Unlock()
 	case voice.EventTranscript:
 		if e.Cut != nil {
-			return // a correction for the brain, not a caption
+			return // a correction for the orchestrator, not a caption
 		}
 		h.send(wsproto.Transcript(e.Dir.String(), e.Text, e.Final))
 	case voice.EventError:

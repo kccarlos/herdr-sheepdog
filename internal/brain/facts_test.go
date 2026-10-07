@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// An announce request states what the daemon knows and the brain cannot
+// An announce request states what the daemon knows and the orchestrator cannot
 // see (docs/history/bench-2026-10-03.md #15b): the lines already spoken about the
 // event and the prompt's real state.
 func TestEventRequestCarriesTheFacts(t *testing.T) {
@@ -32,8 +32,8 @@ func TestEventRequestCarriesTheFacts(t *testing.T) {
 	}
 }
 
-// The CEO's language is a fact in every request kind that phrases a line
-// (run C, H4), and absent when the CEO has said nothing yet.
+// The user's language is a fact in every request kind that phrases a line
+// (run C, H4), and absent when the user has said nothing yet.
 func TestRequestsStateTheCEOsLanguage(t *testing.T) {
 	const want = "The user's last words were in Chinese."
 	for name, req := range map[string]Request{

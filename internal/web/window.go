@@ -55,7 +55,7 @@ type agentInputRequest struct {
 	Keys   []string `json:"keys"`
 }
 
-// handleAgentInput is the CEO operating a tracked agent's window: a
+// handleAgentInput is the user operating a tracked agent's window: a
 // prompt or allow-listed keys, logged as web.agent_input (a prompt's
 // length, never its text). It does not pass the one rail: the tap is his.
 func (s *Server) handleAgentInput(w http.ResponseWriter, r *http.Request) {

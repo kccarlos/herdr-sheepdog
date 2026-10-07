@@ -1,7 +1,7 @@
-// Context tab of /debug: the brain's exact request (left) and the voice
+// Context tab of /debug: the orchestrator's exact request (left) and the voice
 // model's reconstructed context (right), side by side, as each model
 // receives it, coloured by section, linked across the panes, with a
-// scrubber over every brain step and voice turn and a diff against the
+// scrubber over every orchestrator step and voice turn and a diff against the
 // previous point. The logic is context.js; this file only builds DOM.
 // Vanilla DOM, no framework (decision D11). Nothing is fetched or
 // rendered while the tab is hidden: context.step events only mark it
@@ -11,7 +11,7 @@ import { fmtTokens } from './supervisor.js';
 import { el, fmtTime } from './dom.js';
 
 const PANES = {
-  brain: { title: 'Brain (supervisor)', param: 'step', url: '/api/context/brain' },
+  brain: { title: 'Orchestrator', param: 'step', url: '/api/context/brain' },
   voice: { title: 'Voice model (assistant)', param: 'turn', url: '/api/context/voice' },
 };
 
@@ -57,14 +57,14 @@ export class ContextView {
   build() {
     const bar = el('div', 'toolbar cx-toolbar');
     this.prevBtn = el('button', 'icon', '◀');
-    this.prevBtn.title = 'the previous brain step or voice turn';
+    this.prevBtn.title = 'the previous orchestrator step or voice turn';
     this.nextBtn = el('button', 'icon', '▶');
-    this.nextBtn.title = 'the next brain step or voice turn';
+    this.nextBtn.title = 'the next orchestrator step or voice turn';
     this.slider = el('input', 'cx-slider');
     this.slider.type = 'range';
     this.slider.min = '0';
     this.slider.max = '0';
-    this.slider.title = 'every brain step (model call) and voice turn, in time order';
+    this.slider.title = 'every orchestrator step (model call) and voice turn, in time order';
     const liveLbl = el('label', 'cx-live');
     this.liveBox = el('input');
     this.liveBox.type = 'checkbox';
@@ -248,7 +248,7 @@ export class ContextView {
     this.prevBtn.disabled = this.pos <= 0;
     this.nextBtn.disabled = this.pos >= n - 1;
     const p = this.points[this.pos];
-    this.pointLabel.textContent = p ? `${this.pos + 1}/${n} · ${fmtTime(p.ts)} · ${p.label}` : 'no brain step or voice turn yet';
+    this.pointLabel.textContent = p ? `${this.pos + 1}/${n} · ${fmtTime(p.ts)} · ${p.label}` : 'no orchestrator step or voice turn yet';
     // One tick per point, coloured by pane.
     const frag = document.createDocumentFragment();
     this.points.forEach((pt, i) => {

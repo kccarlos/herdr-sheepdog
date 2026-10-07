@@ -104,7 +104,7 @@ export class Grouper {
           deferred, answersJob: p.answers_job || '', nested: this.loose.splice(0), expandable: true,
         });
         // An investigation's answer: link it to the acknowledgement the
-        // shepherd heard when the job started, and that card back to it.
+        // user heard when the job started, and that card back to it.
         if (item.answersJob) {
           const ack = this.lastOf((x) => x.kind === 'tool' && x.job === item.answersJob);
           if (ack) {
@@ -242,7 +242,7 @@ export class Grouper {
     }
   }
 
-  /** Files a supervisor-side event under the innermost open call (an inner brain call, else the voice call), or the loose list. */
+  /** Files a supervisor-side event under the innermost open call (an inner orchestrator call, else the voice call), or the loose list. */
   nest(ev, inner = true) {
     if (inner) {
       for (const pairer of this.inner.values()) {

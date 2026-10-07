@@ -32,7 +32,7 @@ func withWorkerLog(dir string) func(*Config) {
 }
 
 // claudeTurn writes one Claude Code turn — the instruction (as the
-// brain sent it, with the sign-off), an edit, the final message — to a
+// orchestrator sent it, with the sign-off), an edit, the final message — to a
 // transcript file and points the pane's row at it.
 func claudeTurn(t *testing.T, h *harness, pane, final string) {
 	t.Helper()
@@ -54,7 +54,7 @@ func claudeTurn(t *testing.T, h *harness, pane, final string) {
 
 // A finish appends a journal entry from the worker's own transcript, and
 // the announce turn hears what the worker wrote before its screen
-// (docs/iteration-2.md WP4: the brain relayed working notes because the
+// (docs/iteration-2.md WP4: the orchestrator relayed working notes because the
 // screen was all it had).
 func TestDoneJournalsAndTheAnnounceHearsTheWorkerFirst(t *testing.T) {
 	m := braintest.NewModel()
@@ -173,8 +173,8 @@ func TestJournalInTheLedgerAndRecall(t *testing.T) {
 	}
 }
 
-// Every instruction the brain sends carries the sign-off; nothing the
-// shepherd hears or the roster keeps does.
+// Every instruction the orchestrator sends carries the sign-off; nothing the
+// user hears or the roster keeps does.
 func TestPromptCarriesTheSignOff(t *testing.T) {
 	m := braintest.NewModel(
 		braintest.Step{Calls: []*genai.FunctionCall{braintest.FC(brain.ToolPrompt, map[string]any{"agent": "auth", "text": "Run the tests"})}},

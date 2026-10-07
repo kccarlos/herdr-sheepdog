@@ -22,8 +22,8 @@ import (
 )
 
 // Investigations (docs/roles.md "Investigations and explanations"): the
-// shepherd cannot see the screen, so "why did that fail" is a first-class
-// request the screen often cannot answer. The brain's investigate tool
+// user cannot see the screen, so "why did that fail" is a first-class
+// request the screen often cannot answer. The orchestrator's investigate tool
 // starts a background job here and returns at once with its id and a
 // rough estimate; the job runs the read-only CLI sub-agent in the
 // worker's repository with no time limit beyond Config.InvestigateMax,
@@ -64,7 +64,7 @@ const investigateSummaryRunes = 200
 // what it was about.
 type liveInvestigation struct {
 	id, paneID, alias string
-	// asked is what the shepherd said that started it (the stop
+	// asked is what the user said that started it (the stop
 	// procedure matches the withdrawn request against it).
 	asked   string
 	started time.Time
@@ -127,8 +127,8 @@ type Investigator interface {
 }
 
 // startInvestigation starts a background job about paneID and returns
-// its id and estimate at once (the brain's investigate tool). ctx is the
-// brain turn's: it bounds the roster lookup only, never the job, which
+// its id and estimate at once (the orchestrator's investigate tool). ctx is the
+// orchestrator turn's: it bounds the roster lookup only, never the job, which
 // runs on its own ceiling and outlives the turn.
 func (s *Supervisor) startInvestigation(ctx context.Context, paneID string, req brain.InvestigationRequest) (brain.InvestigationStart, error) {
 	if s.investigator == nil {
@@ -178,7 +178,7 @@ func (s *Supervisor) startInvestigation(ctx context.Context, paneID string, req 
 		"question": inv.Question, "follow_up_of": inv.FollowUpOf, "resumed": plan.session != "", "forked": plan.fork,
 	})
 	// An investigation event resets the "delivered" mark of
-	// supervisor.repeat_window_s too: what the shepherd was last told
+	// supervisor.repeat_window_s too: what the user was last told
 	// has moved on, even though the roster's own wording has not.
 	s.invalidateBriefing()
 	if !s.track() {
@@ -223,7 +223,7 @@ func (p investigationPlan) jobSession() string {
 // continues the earlier job's source and resumes its session while it
 // is still resumable (the fork, for a worker job); otherwise the
 // question carries that job's answer so a cold start has what the
-// shepherd already heard, and a worker job forks the worker again.
+// user already heard, and a worker job forks the worker again.
 func (s *Supervisor) planInvestigation(row state.Agent, req brain.InvestigationRequest, question string) (investigationPlan, error) {
 	source, err := investigationSource(req.Source)
 	if err != nil {
@@ -362,7 +362,7 @@ func (s *Supervisor) resumable(inv state.Investigation) bool {
 
 // runInvestigation runs one job and delivers what it found. It never
 // holds s.mu across the run: the job takes minutes and everything else
-// (a shepherd turn, a worker event, a stop) must keep working.
+// (a user turn, a worker event, a stop) must keep working.
 func (s *Supervisor) runInvestigation(ctx context.Context, live *liveInvestigation, inv state.Investigation, q InvestigationQuery) {
 	defer live.cancel()
 	res, err := s.investigator.Investigate(ctx, q)
@@ -380,7 +380,7 @@ func (s *Supervisor) runInvestigation(ctx context.Context, live *liveInvestigati
 	dur := now.Sub(inv.Started)
 	if err != nil {
 		cause := investigationCause(err, s.cfg.InvestigateMax)
-		// The record (the brain's Investigations section and recall)
+		// The record (the orchestrator's Investigations section and recall)
 		// says why in plain words first; the raw error follows, clipped.
 		inv.Status, inv.Err, inv.Finished = state.InvestigationError, cause.fact+" ("+prose.TruncateRunes(oneLineErr(err), 120)+")", &now
 		s.saveInvestigation(inv)
@@ -392,9 +392,9 @@ func (s *Supervisor) runInvestigation(ctx context.Context, live *liveInvestigati
 		line := cause.line(s.sayPane(inv.PaneID, inv.Alias), zh)
 		if cause.name == "no_cli" && s.brain != nil {
 			// Campaign D N8: "could not run: no command-line helper is
-			// set up on this machine" was read to the CEO as is, and a
-			// worker was then told to print its README. The brain gets
-			// the fact and says what it means for the CEO.
+			// set up on this machine" was read to the user as is, and a
+			// worker was then told to print its README. The orchestrator gets
+			// the fact and says what it means for the user.
 			s.deliverInvestigation(inv, line)
 			return
 		}
@@ -419,8 +419,8 @@ func (s *Supervisor) runInvestigation(ctx context.Context, live *liveInvestigati
 }
 
 // deliverInvestigation runs the delivery event turn and pushes its line
-// at the next pause (docs/roles.md: the shepherd is expecting it, so it
-// never interrupts). With no brain, or one that could not answer, the
+// at the next pause (docs/roles.md: the user is expecting it, so it
+// never interrupts). With no orchestrator, or one that could not answer, the
 // daemon says fallback (for a finished look: it is done, and the answer
 // is in the ledger). A look that failed carries its cause in inv.Err.
 func (s *Supervisor) deliverInvestigation(inv state.Investigation, fallback string) {
@@ -436,10 +436,10 @@ func (s *Supervisor) deliverInvestigation(inv state.Investigation, fallback stri
 		Facts: func() brain.EventFacts { return brain.EventFacts{Language: s.ceoLanguage()} },
 	}
 	// The turn runs under s.life: shutdown ends it and waits for this
-	// goroutine (replies) before the brain closes.
+	// goroutine (replies) before the orchestrator closes.
 	rep, err := s.brain.Turn(s.life, req)
 	if errors.Is(err, brain.ErrYielded) {
-		// The shepherd spoke while the answer was being composed: an
+		// The user spoke while the answer was being composed: an
 		// event turn gives way, but this one is the answer they are
 		// waiting for, so ask once more behind their turn.
 		rep, err = s.brain.Turn(s.life, req)
@@ -455,7 +455,7 @@ func (s *Supervisor) deliverInvestigation(inv state.Investigation, fallback stri
 	}
 	// The finding is heard once, like any line: the ear caps apply and
 	// the ask is the last sentence (prose.EarLine). What the cap cut
-	// stays in the brain's own transcript, where a follow-up and recall
+	// stays in the orchestrator's own transcript, where a follow-up and recall
 	// find it.
 	spoken, _ := earLine(rep)
 	if spoken == "" {
@@ -469,7 +469,7 @@ func (s *Supervisor) deliverInvestigation(inv state.Investigation, fallback stri
 // pushInvestigation speaks one line about a job, tagged with the job it
 // answers (voice.push {answers_job}, which the Conversation view links
 // to the acknowledgement). It waits for a pause and is not gated by the
-// chattiness ceiling: the shepherd asked for this answer.
+// chattiness ceiling: the user asked for this answer.
 func (s *Supervisor) pushInvestigation(inv state.Investigation, text string) {
 	s.pushTagged(inv.PaneID, text, voice.UrgencyIdle, map[string]any{"answers_job": inv.ID})
 }
@@ -641,7 +641,7 @@ func investigationSummary(result string) string {
 	return prose.TruncateRunes(strings.TrimSpace(line), investigateSummaryRunes)
 }
 
-// investigationInfo converts a record for the brain.
+// investigationInfo converts a record for the orchestrator.
 func investigationInfo(inv state.Investigation, resumable bool) brain.InvestigationInfo {
 	return brain.InvestigationInfo{
 		ID: inv.ID, Agent: inv.Alias, Question: inv.Question, Asked: inv.Asked, FollowUpOf: inv.FollowUpOf,
@@ -651,9 +651,9 @@ func investigationInfo(inv state.Investigation, resumable bool) brain.Investigat
 }
 
 // failCause is why an investigation failed (docs/eval/eval-campaign-2026-10-03.md
-// P2-10: "did not get through" said nothing, and the brain then had the
+// P2-10: "did not get through" said nothing, and the orchestrator then had the
 // worker read its README out itself): a name for the log, a fact for
-// the brain's record and a short honest reason for the ear.
+// the orchestrator's record and a short honest reason for the ear.
 type failCause struct {
 	name string
 	fact string
@@ -689,7 +689,7 @@ func investigationCause(err error, limit time.Duration) failCause {
 	}
 }
 
-// line is the spoken failure for alias, in the shepherd's language.
+// line is the spoken failure for alias, in the user's language.
 func (c failCause) line(alias string, zh bool) string {
 	if zh {
 		return "查看 " + alias + " 的情况" + c.zh

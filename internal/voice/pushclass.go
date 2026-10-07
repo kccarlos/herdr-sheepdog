@@ -7,7 +7,7 @@ package voice
 // 2026-09-24: voice.push_timeout at 00:24:11 and 16:21:42, an idle head
 // stalling). The queue now picks the first *eligible* push by class:
 //
-//   - class 0: what the shepherd is owed or must hear now — a push
+//   - class 0: what the user is owed or must hear now — a push
 //     requested at INTERRUPT (even when downgraded to WHEN_IDLE while the
 //     voice speaks), an answer to their utterance (answers_utterance), a
 //     kept promise (keeps_promise_ids, due_promise), a decision they must
@@ -18,7 +18,7 @@ package voice
 //
 // Two lines that answer the same utterance are never reordered. The
 // queue does not coalesce (it never did); coalescing per agent happens
-// upstream, in the brain's event queue.
+// upstream, in the orchestrator's event queue.
 
 // Push tags the arbitration reads.
 const (
@@ -29,7 +29,7 @@ const (
 
 // Push tags that carry facts into a briefing (gemini/briefing.go).
 const (
-	// TagNotVerified: []string, the slow brain's checks that did not
+	// TagNotVerified: []string, the orchestrator's checks that did not
 	// finish (brain.Reply.NotVerified).
 	TagNotVerified = "not_verified"
 	// TagAgents: []string, the aliases an answer is about
@@ -37,7 +37,7 @@ const (
 	TagAgents = "agents"
 )
 
-// PushOwed reports whether tags mark a line the shepherd is owed or must
+// PushOwed reports whether tags mark a line the user is owed or must
 // hear now: an answer to their utterance, a kept or due promise, a
 // decision they must take, or the stop reply.
 func PushOwed(tags map[string]any) bool {
@@ -65,7 +65,7 @@ func PushUtterance(tags map[string]any) string {
 	return id
 }
 
-// TagUtteranceID is the push tag naming the CEO utterance a reply push
+// TagUtteranceID is the push tag naming the user utterance a reply push
 // answers, for the event log's utterance_id (docs/architecture.md "Event
 // ids").
 const TagUtteranceID = "utterance_id"

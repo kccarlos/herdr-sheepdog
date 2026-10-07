@@ -187,7 +187,7 @@ func DayFiles(dir string, from, to time.Time) ([]string, error) {
 //
 // What the log does not carry is left out (docs/roles.md "The L0 eval
 // corpus" lists it): herdr.read logs only a byte count, so a screen is at
-// most the first 1 KB of the brain's own last read_screen result, and an
+// most the first 1 KB of the orchestrator's own last read_screen result, and an
 // agent it never read shows "(screen not in the event log)"; aliases are
 // learned from the supervisor's events, which name them beside the pane
 // id; the roster sentence (Briefing) is not logged.
@@ -264,7 +264,7 @@ type openPending struct {
 }
 
 type tline struct {
-	role string // CEO, Dog, PUSH
+	role string // user, Dog, PUSH
 	who  string // alias for a push
 	text string
 	last time.Time
@@ -371,7 +371,7 @@ func (x *extractor) apply(i int) {
 	case "pending.created":
 		if ev.str("kind") != "answer_prompt" {
 			// A send_instruction pending is the record of an instruction
-			// the brain sent, not a prompt waiting on the shepherd.
+			// the orchestrator sent, not a prompt waiting on the user.
 			return
 		}
 		x.pendings[ev.str("id")] = &openPending{pane: ev.PaneID, p: pendingFrom(ev.p)}
@@ -451,7 +451,7 @@ func (x *extractor) flush(seg **tline) {
 }
 
 func (x *extractor) closeSegments() {
-	// The shepherd spoke before the voice answered: flush in first.
+	// The user spoke before the voice answered: flush in first.
 	x.flush(&x.in)
 	x.flush(&x.out)
 }
@@ -573,8 +573,8 @@ func (x *extractor) utteranceCase(i int, day string, n int) (SVPCase, bool) {
 	}
 	if c.Source.Heard != "" && isPartialRelay(relay, c.Source.Heard) {
 		// The voice relayed only the tail of what was said: whatever the
-		// brain sends must not fill the gap with invented text
-		// (regression partial-relay-no-fabrication), and the brain must
+		// orchestrator sends must not fill the gap with invented text
+		// (regression partial-relay-no-fabrication), and the orchestrator must
 		// be asked what was heard, not the tail (WP3).
 		c.Expect.PromptMustNotContain = []string{"["}
 		c.Expect.QuestionIsHeard = true
@@ -583,7 +583,7 @@ func (x *extractor) utteranceCase(i int, day string, n int) (SVPCase, bool) {
 	return c, true
 }
 
-// lastHeard is the newest CEO transcript line, or "".
+// lastHeard is the newest user transcript line, or "".
 func (x *extractor) lastHeard() string {
 	for j := len(x.lines) - 1; j >= 0 && j >= len(x.lines)-3; j-- {
 		if x.lines[j].role == "CEO" {
@@ -635,7 +635,7 @@ func (x *extractor) announceCase(i int, day string, n int) SVPCase {
 			c.Request.Owed = true
 		}
 	}
-	// An event turn is read-only: whatever the event says, the brain
+	// An event turn is read-only: whatever the event says, the orchestrator
 	// sends nothing to a worker (docs/roles.md "The one rail").
 	c.Expect.MustNotCall = []string{brain.ToolPrompt, brain.ToolSendKeys, brain.ToolInterrupt}
 	c.Request.Template, c.Observed = x.observeAnnounce(i, alias, event)
@@ -643,7 +643,7 @@ func (x *extractor) announceCase(i int, day string, n int) SVPCase {
 }
 
 // observeUtterance collects what the logged system did for the utterance
-// at events[i]: the brain turn that answered it (the first utterance
+// at events[i]: the orchestrator turn that answered it (the first utterance
 // turn after it, before the next relay), its tool calls, and what the
 // voice then said.
 func (x *extractor) observeUtterance(i int) *SVPObserved {
@@ -660,7 +660,7 @@ func (x *extractor) observeUtterance(i int) *SVPObserved {
 		}
 	}
 	if end < 0 {
-		// No brain turn: a fast path, the echo guard, or a fallback
+		// No orchestrator turn: a fast path, the echo guard, or a fallback
 		// answered it; the baseline is unknown rather than "did nothing".
 		return nil
 	}
@@ -712,8 +712,8 @@ func (x *extractor) spokenAfter(i int) string {
 }
 
 // observeAnnounce finds the supervisor's decision on the event at
-// events[i]: the template sentence, and the brain's line (a
-// push_decision via brain, or a push_late that was dropped).
+// events[i]: the template sentence, and the orchestrator's line (a
+// push_decision via orchestrator, or a push_late that was dropped).
 func (x *extractor) observeAnnounce(i int, alias, event string) (string, *SVPObserved) {
 	ev := x.events[i]
 	template := alias + " finished."

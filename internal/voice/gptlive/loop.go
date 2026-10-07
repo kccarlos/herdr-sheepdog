@@ -62,7 +62,7 @@ func (s *Session) keepAlive(now time.Time) {
 
 // settle ends the input utterance SettleWait after its last fragment:
 // EventTranscript{DirIn, "", Final} (the supervisor's input and the
-// brain's transcript close on it), the recap gets the utterance, and a
+// orchestrator's transcript close on it), the recap gets the utterance, and a
 // bare stop word nobody delegated runs stop.
 func (s *Session) settle(now time.Time) {
 	s.mu.Lock()
@@ -125,7 +125,7 @@ func (s *Session) speechEnd(now time.Time) {
 	timing := s.finishAudioTimingLocked()
 	owed := s.inputOpen
 	if owed {
-		// The shepherd is talking: closing the turn now would close their
+		// The user is talking: closing the turn now would close their
 		// input mid-utterance; settle emits it.
 		s.turnDoneOwed = true
 	}
@@ -155,7 +155,7 @@ func (s *Session) idleCheck(now time.Time) {
 	talking := !s.lastLoud.IsZero() && now.Sub(s.lastLoud) < 1500*time.Millisecond && now.Sub(s.loudSince) < s.cfg.NoiseRun
 	if s.muted {
 		// A muted client sends no frames: whatever it said before the
-		// mute is not a sentence in progress, so a muted shepherd with
+		// mute is not a sentence in progress, so a muted user with
 		// nothing playing and no push pending is idle (a delegation in
 		// flight still holds the session for its answer).
 		talking = false
@@ -185,7 +185,7 @@ func exempt(tags map[string]any) bool {
 }
 
 // pumpPushes delivers at most one queued push per tick, chosen by the
-// arbitration in voice/pushclass.go: the first ready line the shepherd
+// arbitration in voice/pushclass.go: the first ready line the user
 // is owed or must hear now, else the oldest other line — not merely the
 // head of the queue (docs/timelines.md C29). A spoken push waits (up to
 // PushTTL) while no client is attached, whether a session is open or
@@ -240,7 +240,7 @@ type pushPick struct {
 }
 
 // pickPushLocked chooses the push to send now and removes it from the
-// queue: among the lines the shepherd is owed or must hear now (class
+// queue: among the lines the user is owed or must hear now (class
 // 0, voice/pushclass.go), the first ready one; failing that, the oldest
 // other line, if it is ready; never one that would pass an earlier line
 // answering the same utterance. Caller holds s.mu.
@@ -279,7 +279,7 @@ func (s *Session) pickPushLocked(now time.Time) pushPick {
 	// Speaking includes the client still playing the reply, and the gap
 	// runs from the real end of speech (the client's drained).
 	speaking := s.speakingOrPlayingLocked(now)
-	shepherd := s.inputOpen || s.vad.Hold(now) > 0 // never over the shepherd
+	shepherd := s.inputOpen || s.vad.Hold(now) > 0 // never over the user
 	last := s.lastSpoken
 	if ended := s.play.EndedAt(now); ended.After(last) {
 		last = ended

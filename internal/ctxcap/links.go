@@ -3,7 +3,7 @@ package ctxcap
 // Link ids are "<kind>:<id>": call:<voice tool call id>, push:<push id>,
 // evt:<worker event id>. The supervisor mints push and event ids and
 // puts them on a push's tags; the voice providers turn the tags into the
-// push item's links (LinksFromTags), and the brain's messages carry the
+// push item's links (LinksFromTags), and the orchestrator's messages carry the
 // same strings (brain.Message.Link).
 
 // The push tags that carry link ids.

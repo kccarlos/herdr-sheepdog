@@ -9,15 +9,15 @@ import (
 
 // Unvoiced briefings (phone test 2026-10-04: b-31 "Claude finished",
 // b-69 and b-75 were sent WHEN_IDLE or INTERRUPT and never said; the
-// CEO asked "有结论了吗" 22 s later and was told it was still working).
+// user asked "有结论了吗" 22 s later and was told it was still working).
 //
 // What the daemon can observe is physical, not semantic: after a spoken
 // briefing reached the model, did the model produce any speech (audio
-// or output transcript) before the CEO next spoke or the next spoken
+// or output transcript) before the user next spoke or the next spoken
 // briefing went out? When it did not, the briefing was not voiced, and
-// the fast brain is told so as a silent fact — the same shape as a cut
-// line — and the slow brain hears that the CEO did not hear it. Whether
-// to say it now, later or never is the fast brain's call; nothing is
+// the voice is told so as a silent fact — the same shape as a cut
+// line — and the orchestrator hears that the user did not hear it. Whether
+// to say it now, later or never is the voice's call; nothing is
 // re-queued and nothing is judged from the words.
 
 // unvoicedKeep bounds the facts carried to the next spoken briefing.
@@ -47,7 +47,7 @@ func (s *Session) nextBriefingLocked() *unvoicedReport {
 // drew speech. Caller holds s.mu.
 func (s *Session) noteSpeechLocked() { s.brief.watch = nil }
 
-// noteCEOSpokeLocked closes the watch when the CEO starts speaking.
+// noteCEOSpokeLocked closes the watch when the user starts speaking.
 // Caller holds s.mu.
 func (s *Session) noteCEOSpokeLocked(now time.Time) *unvoicedReport {
 	return s.closeWatchLocked("the user spoke at " + clock(now))
@@ -79,7 +79,7 @@ func (s *Session) closeWatchLocked(before string) *unvoicedReport {
 }
 
 // reportUnvoiced logs an unvoiced briefing and tells the supervisor
-// (which tells the slow brain); with silent, the fast brain gets the
+// (which tells the orchestrator); with silent, the voice gets the
 // fact at once as a silent briefing (otherwise the next briefing's
 // relation carries it). Call without s.mu.
 func (s *Session) reportUnvoiced(rep *unvoicedReport, silent bool) {
@@ -94,7 +94,7 @@ func (s *Session) reportUnvoiced(rep *unvoicedReport, silent bool) {
 }
 
 // pendingDeliveryFactsLocked hands out, once, the delivery facts the
-// fast brain should see with its next answer: the unvoiced briefings
+// voice should see with its next answer: the unvoiced briefings
 // and the last cut not yet repeated. Caller holds s.mu.
 func (s *Session) pendingDeliveryFactsLocked() []string {
 	out := append([]string(nil), s.brief.unvoiced...)

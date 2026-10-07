@@ -25,7 +25,7 @@ func contentIndex(c *fakeConn, want string) int {
 }
 
 // TestOwedPushOvertakesIdleNews is docs/timelines.md C29: an answer to
-// the shepherd's utterance queued behind an idle line that is waiting
+// the user's utterance queued behind an idle line that is waiting
 // for the model's turn to end is spoken first once the turn ends, and
 // the overtaking is logged (voice.push_overtook). Before the fix the
 // queue looked at its head only (log 2026-09-24: voice.push_timeout at

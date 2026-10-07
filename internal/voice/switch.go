@@ -248,7 +248,7 @@ func (sw *Switcher) SetProvider(id, via string) error {
 }
 
 // carryRecap gives the new session the old one's recent conversation
-// (its filtered Recap: the shepherd's words, the voice's replies cut to
+// (its filtered Recap: the user's words, the voice's replies cut to
 // what was heard, the spoken pushes), so a provider switch does not
 // start the new voice with no idea what was just said. Gemini sends it
 // at once as silent context on its live connection; GPT-Live keeps it

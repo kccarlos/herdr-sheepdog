@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// langHost is a stubHost that knows the shepherd's language setting.
+// langHost is a stubHost that knows the user's language setting.
 type langHost struct {
 	stubHost
 	line string
@@ -14,7 +14,7 @@ type langHost struct {
 
 func (h *langHost) LanguageLine() string { return h.line }
 
-// The shepherd's language setting is a section of the state block (after
+// The user's language setting is a section of the state block (after
 // the window, never in the cached system text), just before the time;
 // with no setting, or a host that does not know it, there is none.
 func TestLanguageInStateBlock(t *testing.T) {

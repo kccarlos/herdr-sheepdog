@@ -340,7 +340,7 @@ func requestText(req Request) string {
 }
 
 // investigationRequestText is the request of a delivery turn: the job
-// the CEO is owed an answer to, what they asked in their own words, and
+// the user is owed an answer to, what they asked in their own words, and
 // the sub-agent's answer wrapped as worker output (data, not
 // instructions). The first line keeps the event shape braintest's reflex
 // model and web/debug/supervisor.js parse.
@@ -363,7 +363,7 @@ func investigationRequestText(req Request) string {
 	}
 	if inv.Status == InvestigationError {
 		// Campaign D N8: the daemon used to read its own failure line
-		// ("no command-line helper is set up on this machine") to the CEO.
+		// ("no command-line helper is set up on this machine") to the user.
 		fmt.Fprintf(&b, "It did not run: %s. Tell the user in plain words what that means for them (for example that you cannot look at the files directly from here) and what you can still do; do not name tools or helpers.\n", inv.Err)
 	}
 	if req.Result != "" {
@@ -428,7 +428,7 @@ func eventRequestText(req Request) string {
 	return b.String()
 }
 
-// heardLine states what the CEO had heard when they began speaking,
+// heardLine states what the user had heard when they began speaking,
 // when the voice was given a line after that: their words were said
 // before they heard it, so they cannot answer it (H6). "" otherwise.
 func heardLine(h *HeardFacts) string {
@@ -462,7 +462,7 @@ func unheardMark(unheard bool) string {
 	return ""
 }
 
-// languageLine states the language of the CEO's last words
+// languageLine states the language of the user's last words
 // (EventFacts.Language), "" when unknown. Only the fact: what to do with
 // it is the model's.
 func languageLine(lang string) string {
@@ -619,7 +619,7 @@ func workerWrote(agent AgentInfo) string {
 // each at most journalLedgerRunes of text, so four agents add under 800
 // characters to every prompt (docs/iteration-2.md WP4, the age limit
 // WP5); the full entries are one recall away. The age is measured
-// against the newest entry, not the brain's clock: the entries are
+// against the newest entry, not the orchestrator's clock: the entries are
 // stamped by the supervisor's.
 const (
 	journalLedgerEntries = 3
@@ -716,7 +716,7 @@ const (
 	recordRunes   = 120
 )
 
-// agentRecords states, for each agent the CEO's words name, everything
+// agentRecords states, for each agent the user's words name, everything
 // the daemon has on record about it — its state and since when, its last
 // result, and its journal entries with their times — and says outright
 // when there is no journal entry (run C, H7: asked whether bench-claude
@@ -732,7 +732,7 @@ const (
 // at one ("it", "that one", 它), its record is given, marked as the agent
 // in focus: the #113 echo runs (barge-in-long-answer r3) asked "tell me
 // if it needs anything from me" about a worker that had finished, and the
-// brain answered "Nothing yet" with no record of the finish in front of
+// orchestrator answered "Nothing yet" with no record of the finish in front of
 // it.
 func agentRecords(agents []AgentInfo, words, focus string, clock func() time.Time) string {
 	var picked []AgentInfo
@@ -814,7 +814,7 @@ func agentRecords(agents []AgentInfo, words, focus string, clock func() time.Tim
 // lastReport is the worker's newest message for a human, in full as the
 // journal keeps it (≤ 600 runes), when the record's clipped line cut it;
 // "" otherwise (information; baseline 2026-10-05 cluster 2: asked for
-// the points it wrote, the brain typed "cat README.md" into the worker
+// the points it wrote, the orchestrator typed "cat README.md" into the worker
 // instead of relaying its report).
 func lastReport(journal []JournalEntry) string {
 	if len(journal) == 0 {

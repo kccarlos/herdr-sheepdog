@@ -20,14 +20,14 @@ import (
 // names whenever they change (a silent context line, so its alias list
 // is never stale), serves them to the voice sessions for the system
 // prompt and the speech-to-text vocabulary, and renames an agent when
-// the CEO asks (the brain's note tool with agent and name).
+// the user asks (the orchestrator's note tool with agent and name).
 
 // namesDebounce is how long the names line waits for the roster to
 // settle (the start-up snapshot reports every pane at once) before it
 // is pushed. A var so tests can make it synchronous.
 var namesDebounce = 2 * time.Second
 
-// spokenWasWindow is how long the roster keeps telling the brain an
+// spokenWasWindow is how long the roster keeps telling the orchestrator an
 // agent's old name after its spoken name changed.
 const spokenWasWindow = 10 * time.Minute
 
@@ -47,7 +47,7 @@ type namesState struct {
 	want  string      // the line waiting for the debounce
 	timer *time.Timer // the pending debounce, nil when none
 	// said holds the spoken names (lower-cased) that went out in a
-	// line meant for the CEO's ear (noteNamesSaid).
+	// line meant for the user's ear (noteNamesSaid).
 	said map[string]bool
 }
 
@@ -143,11 +143,11 @@ func (s *Supervisor) stopNames() {
 	n.mu.Unlock()
 }
 
-// rename gives the agent the name the CEO chose: the state table keeps
+// rename gives the agent the name the user chose: the state table keeps
 // the spoken form ("kvoice explainer"), and herdr gets the spelling its
 // agent names allow (state.HerdrName: "kvoice-explainer") when the
 // herdr client can rename. It returns the spoken echo, which says so
-// when herdr refused or could not take the name: the CEO and the brain
+// when herdr refused or could not take the name: the user and the orchestrator
 // hear what happened, not a success that did not (2026-10-04 05:00:43,
 // "kvoice explainer" was refused by herdr while the daemon reported the
 // rename done).
@@ -238,10 +238,10 @@ func recentSpokenWas(a state.Agent, now time.Time) string {
 	return a.SpokenWas
 }
 
-// spokenWasToMention is the old name the roster tells the brain about:
-// recentSpokenWas, and only when the CEO was actually told that name
-// before. Tier-3 bench 2026-10-03, finding 5: on a fresh call the brain
-// said "previously bench Claude" about a name the CEO had never heard
+// spokenWasToMention is the old name the roster tells the orchestrator about:
+// recentSpokenWas, and only when the user was actually told that name
+// before. Tier-3 bench 2026-10-03, finding 5: on a fresh call the orchestrator
+// said "previously bench Claude" about a name the user had never heard
 // (the rename happened before the call).
 func (s *Supervisor) spokenWasToMention(a state.Agent) string {
 	was := recentSpokenWas(a, s.cfg.Now())
@@ -257,9 +257,9 @@ func (s *Supervisor) spokenWasToMention(a state.Agent) string {
 	return was
 }
 
-// noteNamesSaid records which agents' names a line meant for the CEO's
+// noteNamesSaid records which agents' names a line meant for the user's
 // ear carries — a spoken push as it went to the voice, a reply, the
-// voice's own final output transcript — or the CEO's own final words
+// voice's own final output transcript — or the user's own final words
 // carry, and pins those names (state.PinSpoken). The names checked are each row's
 // current and previous spoken name, longest first, each matched as whole
 // words where no longer name already matched ("Claude" is not said by
@@ -308,7 +308,7 @@ func (s *Supervisor) noteNamesSaid(text string) {
 		n.said[h] = true
 	}
 	n.mu.Unlock()
-	// A name the CEO has heard or said stays: a later session title or
+	// A name the user has heard or said stays: a later session title or
 	// a new agent of the same kind no longer renames it (state.PinSpoken).
 	if panes, err := s.store.PinSpoken(hits); err == nil && len(panes) > 0 {
 		s.log.Log(logSource, "supervisor.name_pinned", "", map[string]any{"panes": panes, "names": hits})

@@ -43,7 +43,7 @@ func TestBrainTestFlagsAndValidation(t *testing.T) {
 }
 
 // The fake model runs the whole chain without a network: mock herdr,
-// screen fixture, brain turn, events on stderr, reply on stdout.
+// screen fixture, orchestrator turn, events on stderr, reply on stdout.
 func TestBrainTestFakeEndToEnd(t *testing.T) {
 	noKeys(t)
 	t.Setenv("SHEEPDOG_DATA_DIR", t.TempDir())

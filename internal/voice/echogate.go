@@ -11,7 +11,7 @@ import (
 // EchoGate keeps the voice's own speech, leaking from the phone's speaker
 // back into its microphone, from reaching the voice model
 // (docs/research/echo-2026-10-03.md). Gemini Live's activity detection
-// takes that echo for the shepherd: it cuts the reply off, transcribes
+// takes that echo for the user: it cuts the reply off, transcribes
 // it and answers itself (docs/bench/tier2-2026-10-03.md finding 3).
 //
 // While the client reports that it plays the model's audio (playback
@@ -20,7 +20,7 @@ import (
 // 10 ms of microphone audio against the envelope of the reply's audio,
 // over a range of delays. A window the reply explains (the envelopes
 // move together and nothing is left over above the echo's level) is
-// echo and is dropped; anything else — the shepherd talking over the
+// echo and is dropped; anything else — the user talking over the
 // reply, with or without echo under it — is released at once, held
 // frames first so the model hears the start of the words, and the gate
 // stays open until the client's silence gate closes. The decision is
@@ -29,7 +29,7 @@ import (
 //
 // When unsure it lets audio through: a missed echo costs one self
 // interruption (what happens without the gate), a missed barge-in a
-// shepherd who cannot stop the voice. Clients that never send playback
+// user who cannot stop the voice. Clients that never send playback
 // reports are not gated. Not safe for concurrent use: the session calls
 // it under its own lock.
 type EchoGate struct {
@@ -84,8 +84,8 @@ type EchoGate struct {
 // EchoGateStats counts what the gate did (voice stats, bench).
 type EchoGateStats struct {
 	Withheld int // frames dropped as echo
-	Released int // held frames released on a shepherd verdict
-	Opens    int // shepherd verdicts while the reply played
+	Released int // held frames released on a user verdict
+	Opens    int // user verdicts while the reply played
 	Armed    bool
 }
 
@@ -125,7 +125,7 @@ const (
 	echoMinBlocks    = 24
 	echoWindowBlocks = 32
 	// echoHoldFrames bounds the frames held while undecided or echo
-	// (960 ms): what a shepherd verdict releases ahead of the words.
+	// (960 ms): what a user verdict releases ahead of the words.
 	echoHoldFrames = 24
 	// echoExitFrames: consecutive echo verdicts that close an open gate
 	// again while the reply still plays (960 ms).
@@ -134,7 +134,7 @@ const (
 	// audio is let through (640 ms, all of it still held).
 	echoUnsureFrames = 16
 	// echoUsualLag: the echo delays to rule out before the first verdict
-	// that a window is the shepherd's.
+	// that a window is the user's.
 	echoUsualLag = 400 * time.Millisecond
 	// echoCorr is the envelope correlation at or above which the reply
 	// may explain the window; echoResidual the share of the window's
@@ -239,7 +239,7 @@ func (g *EchoGate) Stats() EchoGateStats { return g.stats }
 // EchoVerdict is one decision the gate made, for the session's log.
 type EchoVerdict struct {
 	State    EchoState
-	Open     bool    // the shepherd: frames released
+	Open     bool    // the user: frames released
 	Armed    bool    // the client's echo showed itself: the gate holds from now on
 	Corr     float64 // best envelope correlation
 	Residual float64 // share of energy the reply leaves unexplained
@@ -398,7 +398,7 @@ func (g *EchoGate) settle() ([][]byte, *EchoVerdict) {
 	return out, &v
 }
 
-// open releases the held frames on a shepherd verdict.
+// open releases the held frames on a user verdict.
 func (g *EchoGate) open() [][]byte {
 	out := make([][]byte, 0, len(g.held))
 	for _, h := range g.held {
@@ -504,7 +504,7 @@ func (g *EchoGate) judge() EchoVerdict {
 		return EchoVerdict{State: EchoShepherd, Corr: -1, Residual: 1}
 	}
 	// Only what the current reply can explain: the microphone before it
-	// began (the shepherd, the room, an older reply's tail) is not
+	// began (the user, the room, an older reply's tail) is not
 	// judged against the silence between replies.
 	start := g.runStart.Add(-echoBlock10ms)
 	need := echoMinBlocks
@@ -609,7 +609,7 @@ func (g *EchoGate) Said(text string) {
 	}
 }
 
-// Heard takes what the model heard the shepherd say so far this turn
+// Heard takes what the model heard the user say so far this turn
 // (its input transcript) and arms the gate when it is the reply's own
 // words heard while the reply played or just after: the speaker's echo
 // reached the model. That is how a leaking client usually shows itself
@@ -634,7 +634,7 @@ func (g *EchoGate) Heard(now time.Time, heard string) bool {
 // EchoText reports whether heard is (mostly) the words of said, in
 // their order: at least two of its word pairs (Han characters count as
 // words), and half of them, appear in said. Pairs, not words: the
-// shepherd's own sentence often shares words with the reply that
+// user's own sentence often shares words with the reply that
 // answers it, rarely their run.
 func EchoText(heard, said string) bool {
 	h, sd := echoTokens(heard), echoTokens(said)
@@ -685,7 +685,7 @@ func echoTokens(s string) []string {
 // windows. Speech that shares the reply's rhythm matches it somewhere
 // among a hundred delays now and then; an echo stays put. (Once armed,
 // the delay may wander as the client's player underruns; the echo's
-// level then keeps the shepherd apart.)
+// level then keeps the user apart.)
 func (g *EchoGate) firstSteady(lagMs int, full bool) bool {
 	if d := lagMs - g.firstLag; full && g.firstN > 0 && d >= -30 && d <= 30 {
 		g.firstN++
@@ -715,14 +715,14 @@ func (g *EchoGate) learn(c float64, lagMs int) {
 
 // covered: the whole window, shifted by the echo's delay, lies within
 // the current reply. A window that still holds the moment before the
-// reply's echo arrived is not judged the shepherd's: the echo's attack
+// reply's echo arrived is not judged the user's: the echo's attack
 // against the quiet before it matches the reply poorly.
 func (g *EchoGate) covered(first, start time.Time) bool {
 	return !first.Add(-g.lagNeeded()).Before(start)
 }
 
 // lagNeeded is how far back the comparison must reach before a window
-// may be called the shepherd's: past the echo's known delay, or past
+// may be called the user's: past the echo's known delay, or past
 // the delays usual on a phone when none is known yet.
 func (g *EchoGate) lagNeeded() time.Duration {
 	if g.coupling > 0 {

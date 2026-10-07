@@ -10,7 +10,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/brain/braintest"
 )
 
-// The roster gives the brain each agent's spoken name next to its alias,
+// The roster gives the orchestrator each agent's spoken name next to its alias,
 // the old name right after a change, and the worker's session title.
 func TestRosterCarriesSpokenNames(t *testing.T) {
 	h := newHarness(t, braintest.NewModel(braintest.Step{Text: braintest.Reply("README Claude is working.", "")}), nil)

@@ -18,7 +18,7 @@ import (
 func printEvalExtractUsage(w io.Writer) {
 	fprintln(w, "usage: sheepdog eval extract [--day YYYY-MM-DD] [--from T] [--to T] [flags]")
 	fprintln(w, "")
-	fprintln(w, "Turns a window of the event log into SVP eval cases (JSONL): one utterance case")
+	fprintln(w, "Turns a window of the event log into orchestrator eval cases (JSONL): one utterance case")
 	fprintln(w, "per to_supervisor relay and one announce case per worker block or finish, each")
 	fprintln(w, "with the transcript, roster, pending prompts and screens the log carries, the")
 	fprintln(w, "logged behaviour as its baseline, and its source {day, ts, event_id}. Secrets and")
@@ -127,16 +127,16 @@ func parseWindowTime(s, day string) (time.Time, error) {
 func printEvalExpandUsage(w io.Writer) {
 	fprintln(w, "usage: sheepdog eval expand --in cases.jsonl[,more.jsonl] --out expanded.jsonl [flags]")
 	fprintln(w, "")
-	fprintln(w, "Writes generated variants of SVP (and, with --assistant-in, assistant) cases:")
+	fprintln(w, "Writes generated variants of orchestrator (and, with --assistant-in, assistant) cases:")
 	fprintln(w, "paraphrases of the utterance from the checked-in table for the case's job, and")
 	fprintln(w, "seeded speech-recognition noise (a dropped word, a homophone, a truncation to the")
 	fprintln(w, "last words, a stray token). Deterministic for a given --seed; no model call.")
 	fprintln(w, "")
 	fprintln(w, "flags:")
-	fprintln(w, "  --in FILES             SVP seed files, comma-separated (every utterance case)")
-	fprintln(w, "  --pick FILES           more SVP seed files, of which --per-job cases per job")
+	fprintln(w, "  --in FILES             orchestrator seed files, comma-separated (every utterance case)")
+	fprintln(w, "  --pick FILES           more orchestrator seed files, of which --per-job cases per job")
 	fprintln(w, "  --per-job N            cases per job taken from --pick (default 1)")
-	fprintln(w, "  --out PATH             SVP output file (default stdout)")
+	fprintln(w, "  --out PATH             orchestrator output file (default stdout)")
 	fprintln(w, "  --assistant-in FILES   assistant seed files, comma-separated")
 	fprintln(w, "  --assistant-out PATH   assistant output file")
 	fprintln(w, "  --paraphrase           add the job's paraphrases")
@@ -161,10 +161,10 @@ func runEvalExpand(args []string, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	fs.Usage = func() { printEvalExpandUsage(stderr) }
 	var f expandFlags
-	fs.StringVar(&f.in, "in", "", "SVP seed files")
-	fs.StringVar(&f.pick, "pick", "", "SVP files to pick seeds from")
+	fs.StringVar(&f.in, "in", "", "orchestrator seed files")
+	fs.StringVar(&f.pick, "pick", "", "orchestrator files to pick seeds from")
 	fs.IntVar(&f.perJob, "per-job", 1, "cases per job from --pick")
-	fs.StringVar(&f.out, "out", "", "SVP output file")
+	fs.StringVar(&f.out, "out", "", "orchestrator output file")
 	fs.StringVar(&f.assistantIn, "assistant-in", "", "assistant seed files")
 	fs.StringVar(&f.assistantOut, "assistant-out", "", "assistant output file")
 	fs.BoolVar(&f.opt.Paraphrase, "paraphrase", false, "add paraphrases")
@@ -198,7 +198,7 @@ func runEvalExpand(args []string, stderr io.Writer) int {
 			fprintf(stderr, "sheepdog eval expand: %v\n", err)
 			return 1
 		}
-		fprintf(stderr, "sheepdog eval expand: %d SVP cases from %d seeds\n", len(cases), len(seeds))
+		fprintf(stderr, "sheepdog eval expand: %d orchestrator cases from %d seeds\n", len(cases), len(seeds))
 	}
 	if f.assistantIn != "" {
 		var aseeds []eval.AssistantCase

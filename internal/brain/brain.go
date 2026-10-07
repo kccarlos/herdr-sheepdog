@@ -25,7 +25,7 @@ const logSource = "brain"
 const (
 	DefaultModel    = "gemini-3.5-flash"
 	DefaultMaxSteps = 6
-	// DefaultUtteranceTimeout bounds a CEO utterance turn including its
+	// DefaultUtteranceTimeout bounds a user utterance turn including its
 	// tools (it may turn out to be an instruction) and an investigation
 	// delivery turn. 25 s since the 2026-10-03 eval campaign: at 12 s,
 	// 45/130 Vertex gemini-3.8-flash runs had a turn time out; at 25 s
@@ -36,10 +36,10 @@ const (
 	// DefaultAnnounceTurnTimeout bounds an event turn (announce): on
 	// expiry the supervisor speaks its code sentence instead.
 	DefaultAnnounceTurnTimeout = 6 * time.Second
-	// DefaultAnnounceTimeout bounds an announce turn the shepherd is owed
-	// (Request.Owed: it keeps a promise or reports on the shepherd's own
+	// DefaultAnnounceTimeout bounds an announce turn the user is owed
+	// (Request.Owed: it keeps a promise or reports on the user's own
 	// request): the code sentence has already said "here's what it
-	// found", so the brain's line is worth waiting longer for.
+	// found", so the orchestrator's line is worth waiting longer for.
 	DefaultAnnounceTimeout = 15 * time.Second
 	// DefaultWindowTokens and DefaultPruneAfterTurns were 24000 and 3
 	// until docs/iteration-2.md WP5 halved the window: prompts averaged
@@ -72,7 +72,7 @@ type Config struct {
 	MaxSteps int
 	// UtteranceTimeout bounds an utterance turn including its tools (it
 	// may be an instruction) and an investigation delivery turn;
-	// AnnounceTurnTimeout bounds an event turn; AnnounceTimeout bounds an announce turn the shepherd is owed
+	// AnnounceTurnTimeout bounds an event turn; AnnounceTimeout bounds an announce turn the user is owed
 	// (Request.Owed, or one that keeps a promise).
 	UtteranceTimeout, AnnounceTurnTimeout, AnnounceTimeout time.Duration
 	// WindowTokens is the estimated window size that triggers compaction.
@@ -154,7 +154,7 @@ func (c Config) withDefaults() Config {
 	return c
 }
 
-// Brain is the SVP (see the package doc). Safe for concurrent use: turns
+// Brain is the orchestrator (see the package doc). Safe for concurrent use: turns
 // are serialised by the turn lock; ingestion may happen at any time.
 type Brain struct {
 	cfg        Config
@@ -164,7 +164,7 @@ type Brain struct {
 	// requests is the Context tab's log of every model call's request.
 	requests  *ctxcap.BrainLog
 	engine    ContextEngine
-	tools     []*genai.Tool // the full surface (CEO turns)
+	tools     []*genai.Tool // the full surface (user turns)
 	readTools []*genai.Tool // the read-only surface (event turns)
 
 	lock  turnLock
@@ -205,7 +205,7 @@ type Brain struct {
 	// (New, SetModel): the model a failover to that provider runs.
 	lastModel map[string]string
 	// failover is the streak of failovers away from the selected
-	// provider; notify tells the CEO about it (SetNotifier).
+	// provider; notify tells the user about it (SetNotifier).
 	failover failoverState
 	notify   func(n Notice)
 
@@ -283,7 +283,7 @@ func (b *Brain) SetHost(h Host) {
 	b.mu.Unlock()
 }
 
-// SetUserVars sets USER.md's {chattiness}/{tz} placeholders; the brain has
+// SetUserVars sets USER.md's {chattiness}/{tz} placeholders; the orchestrator has
 // no view of the supervisor's runtime settings on its own. {aliases} is
 // always derived fresh from the roster, so it need not be included. Safe
 // to call at any time, including before SetHost.
@@ -424,7 +424,7 @@ func (b *Brain) Engine() ContextEngine { return b.engine }
 // Config returns the effective configuration (defaults applied).
 func (b *Brain) Config() Config { return b.cfg }
 
-// Queued returns how many turns wait for the turn lock, CEO turns and
+// Queued returns how many turns wait for the turn lock, user turns and
 // event turns separately.
 func (b *Brain) Queued() (ceo, event int) {
 	b.lock.mu.Lock()
@@ -482,7 +482,7 @@ func (b *Brain) TranscriptPath() string {
 
 // Close refuses new turns (ErrClosed), ends the ones in flight and
 // after-turn work, waits for them and closes the transcript. The
-// supervisor joins its own turns before the daemon closes the brain;
+// supervisor joins its own turns before the daemon closes the orchestrator;
 // this makes a late one (past the daemon's drain) safe as well.
 func (b *Brain) Close() error {
 	b.mu.Lock()
@@ -514,7 +514,7 @@ func (b *Brain) ingest(m Message, turn int) {
 	b.engine.Ingest(m, turn)
 }
 
-// Heard ingests a fragment of the CEO's speech (voice.transcript.in);
+// Heard ingests a fragment of the user's speech (voice.transcript.in);
 // fragments accumulate until final.
 func (b *Brain) Heard(text string, final bool) {
 	b.mu.Lock()
@@ -527,12 +527,12 @@ func (b *Brain) Heard(text string, final bool) {
 	}
 }
 
-// Echo records that heard, transcribed as the CEO's words, was the
+// Echo records that heard, transcribed as the user's words, was the
 // assistant's own speech picked up by the microphone (the supervisor's
 // echo guard dropped it). The words must not reach a later turn as
-// something the CEO said, so they leave the window: still pending (the
+// something the user said, so they leave the window: still pending (the
 // input transcription is often never marked final), or already ingested
-// as CEO utterances since the last request (the voice saying
+// as user utterances since the last request (the voice saying
 // "Checking." flushes them before its tool call). The transcript on
 // disk keeps what was heard, and a system note after it says it was an
 // echo, so the record stays complete and honest.
@@ -566,8 +566,8 @@ func (b *Brain) Echo(heard string) {
 }
 
 // Said ingests a fragment of the assistant's speech (voice.transcript.out).
-// The CEO's pending fragments are flushed first: the assistant answering
-// means the CEO finished.
+// The user's pending fragments are flushed first: the assistant answering
+// means the user finished.
 func (b *Brain) Said(text string, final bool) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -580,7 +580,7 @@ func (b *Brain) Said(text string, final bool) {
 	}
 }
 
-// SaidCut records that the assistant's speech was cut off before the CEO
+// SaidCut records that the assistant's speech was cut off before the user
 // heard all of it (voice.EventTranscript with Cut): heard is the part
 // that played, full everything the cut run said, heardMs how long it
 // played. Gemini generates ~4× real time, so the run's full text was
@@ -589,7 +589,7 @@ func (b *Brain) Said(text string, final bool) {
 // text the run contains — leave the window (Retracter, as Brain.Echo
 // does) and one line with what was heard takes their place, rendered
 // "Assistant said (cut off after N s)". The transcript on disk keeps
-// both, and a brain turn that ran between the two saw the full text.
+// both, and an orchestrator turn that ran between the two saw the full text.
 func (b *Brain) SaidCut(heard, full string, heardMs int) {
 	full = strings.TrimSpace(full)
 	b.mu.Lock()
@@ -602,9 +602,9 @@ func (b *Brain) SaidCut(heard, full string, heardMs int) {
 		b.outBuf = nil
 	}
 	if r, ok := b.engine.(Retracter); ok && full != "" {
-		// Unlike Echo this walks past requests: a brain turn may have
+		// Unlike Echo this walks past requests: an orchestrator turn may have
 		// run on the full line already, but from here on the window
-		// should say what the CEO actually heard.
+		// should say what the user actually heard.
 		msgs := b.transcript.Messages()
 		for i, looked := len(msgs)-1, 0; i >= 0 && looked < 16; i, looked = i-1, looked+1 {
 			m := msgs[i]
@@ -686,7 +686,7 @@ func (b *Brain) WorkerEventLinked(alias, from, to string, closed bool, link stri
 
 // PromiseEvent ingests a promise's record outside a turn: a promise
 // kept, expired or cancelled by the supervisor, or an open promise
-// carried over from an earlier run (the brain's transcript is per run,
+// carried over from an earlier run (the orchestrator's transcript is per run,
 // the promise is not).
 func (b *Brain) PromiseEvent(p PromiseInfo) {
 	if p.ID == "" {
@@ -696,7 +696,7 @@ func (b *Brain) PromiseEvent(p PromiseInfo) {
 	b.ingest(Message{Role: RoleUser, Kind: KindPromise, Content: promiseLine(p), Agent: p.Agent, Promise: &cp}, 0)
 }
 
-// Noted ingests a note the CEO asked to be remembered.
+// Noted ingests a note the user asked to be remembered.
 func (b *Brain) Noted(text string) {
 	if text == "" {
 		return
@@ -711,7 +711,7 @@ func (b *Brain) Seed(msgs []Message) {
 	}
 }
 
-// Reset is the brain's half of "New conversation" (docs/roles.md): the
+// Reset is the orchestrator's half of "New conversation" (docs/roles.md): the
 // context window is emptied — a fresh transcript segment starts (the
 // on-disk file so far is left alone, just no longer appended to) and the
 // compaction summary is gone — so the next turn's prompt carries none of

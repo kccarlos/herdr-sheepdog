@@ -8,7 +8,7 @@ import (
 )
 
 // TestPushHeldWhileNoClientAndReleasedOnAttach replays 2026-09-24
-// 18:22:04: the brain's late reply was pushed (when_idle) 10 s after the
+// 18:22:04: the orchestrator's late reply was pushed (when_idle) 10 s after the
 // page closed, and Gemini spoke 12 s of audio to nobody. With no /ws
 // client attached a spoken push is held — not sent to the model — and
 // goes out, at its urgency, when a client attaches; silent context is

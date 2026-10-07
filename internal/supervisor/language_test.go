@@ -12,7 +12,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
 
-// docs/eval/eval-campaign-2026-10-03.md H4: after the shepherd spoke Chinese,
+// docs/eval/eval-campaign-2026-10-03.md H4: after the user spoke Chinese,
 // the daemon's own code sentences were English (j2-approve-zh,
 // j1-status-zh). The block template and a tapped answer follow the
 // language of their last words.
@@ -77,8 +77,8 @@ func TestReplacedLineLanguage(t *testing.T) {
 	}
 }
 
-// Run C, vertex, j2-approve-zh r1: the brain's send_keys confirmation was
-// English after the shepherd said "可以，让它跑吧。", and when the turn
+// Run C, vertex, j2-approve-zh r1: the orchestrator's send_keys confirmation was
+// English after the user said "可以，让它跑吧。", and when the turn
 // timed out after sending, that tool result was what they heard.
 func TestBrainToolConfirmationFollowsTheShepherdsLanguage(t *testing.T) {
 	h := newHarness(t)
@@ -96,10 +96,10 @@ func TestBrainToolConfirmationFollowsTheShepherdsLanguage(t *testing.T) {
 	}
 }
 
-// Run C, deepseek, j2-approve-zh r1: the only line before the CEO's
-// "可以，让它跑吧。" was the English block announcement, and the brain
+// Run C, deepseek, j2-approve-zh r1: the only line before the user's
+// "可以，让它跑吧。" was the English block announcement, and the orchestrator
 // followed the English context. The request now states the language of
-// the CEO's last words as a fact (what to do with it stays the model's).
+// the user's last words as a fact (what to do with it stays the model's).
 func TestUtteranceRequestStatesTheCEOsLanguage(t *testing.T) {
 	m := braintest.NewModel(braintest.Step{Text: braintest.Reply("已让 auth 继续。", "")})
 	h := newBrainHarness(t, m)
@@ -116,7 +116,7 @@ func TestUtteranceRequestStatesTheCEOsLanguage(t *testing.T) {
 	}
 }
 
-// The fact follows the CEO's words, and is absent before they spoke.
+// The fact follows the user's words, and is absent before they spoke.
 func TestCEOLanguageFact(t *testing.T) {
 	h := newHarness(t)
 	if got := h.sup.ceoLanguage(); got != "" {

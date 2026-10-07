@@ -2,10 +2,10 @@ package app
 
 import "github.com/kccarlos/herdr-sheepdog/internal/brain"
 
-// Brain returns the attached brain, or nil when it is off.
+// Brain returns the attached orchestrator, or nil when it is off.
 func (a *App) Brain() *brain.Brain { return a.brain }
 
-// BrainOffReason says why the brain is off ("" when it is on).
+// BrainOffReason says why the orchestrator is off ("" when it is on).
 func (a *App) BrainOffReason() string { return a.brainOff }
 
 // QuerierLazy reports whether the supervisor got the lazy CLI querier

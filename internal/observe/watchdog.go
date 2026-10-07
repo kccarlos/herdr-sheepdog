@@ -14,7 +14,7 @@ import (
 // The daemon watchdog (docs/architecture.md "Watchdog"). Every Tick it
 // checks that the daemon's long-lived parts are alive:
 //
-//	brain       the turn holding the turn lock has not run far past its
+//	orchestrator       the turn holding the turn lock has not run far past its
 //	            budget (a hung provider call the timeout did not end)
 //	push_queue  no push waits far longer than normal while a listener is
 //	            attached (a push held for want of one is normal, and its
@@ -36,7 +36,7 @@ const (
 	brainOverrun = 30 * time.Second
 	// pushStall is how long a push may wait with a listener attached:
 	// the normal wait is the model's turn (TurnTimeout, 20 s), the
-	// shepherd's speech and the push gap.
+	// user's speech and the push gap.
 	pushStall = 90 * time.Second
 	// herdrPingTimeout bounds the socket ping.
 	herdrPingTimeout = 3 * time.Second
@@ -228,7 +228,7 @@ func (w *Watchdog) checkVoice(time.Time) miss {
 	if !w.voiceStalled {
 		return miss{}
 	}
-	return miss{since: w.voiceSince, detail: "voice.stalled: the model has not responded to the shepherd's turn"}
+	return miss{since: w.voiceSince, detail: "voice.stalled: the model has not responded to the user's turn"}
 }
 
 // report logs the first miss of an incident and its recovery.

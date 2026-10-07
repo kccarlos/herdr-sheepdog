@@ -12,9 +12,9 @@ import (
 
 // Claude Code 2.1.288's folder trust dialog has no numbers (tier-3 bench
 // 2026-10-03, finding 1): it used to be read as a block with no question,
-// no pending was created, and the rail refused the brain's correct
+// no pending was created, and the rail refused the orchestrator's correct
 // ["down", "enter"] ("bench-claude has no pending approval prompt now").
-// Now the unnumbered menu is a prompt: the CEO's "yes" lets the brain's
+// Now the unnumbered menu is a prompt: the user's "yes" lets the orchestrator's
 // navigation keys through the rail.
 func TestTrustDialogAnsweredByBrainKeys(t *testing.T) {
 	m := braintest.NewModel(

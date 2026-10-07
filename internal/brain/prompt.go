@@ -46,8 +46,8 @@ func stableSections(pl *prompts.Loader) []PromptSection {
 	return out
 }
 
-// userSection renders USER.md (the CEO's profile: aliases, chattiness,
-// timezone, and anything the CEO added by hand) with vars, which
+// userSection renders USER.md (the user's profile: aliases, chattiness,
+// timezone, and anything the user added by hand) with vars, which
 // SetUserVars sets and aliases (always freshly derived from the roster)
 // extends.
 func userSection(pl *prompts.Loader, vars map[string]string) PromptSection {
@@ -120,7 +120,7 @@ const (
 )
 
 // dynamicSections renders the roster, the ledger excerpt (with the open
-// promises), the investigations, the shepherd's language setting (when
+// promises), the investigations, the user's language setting (when
 // set: language is lang.Line's sentence) and the time — the state block,
 // which the loop sends after the window (withState), time last.
 func dynamicSections(agents []AgentInfo, notes []string, promises []PromiseInfo, investigations []InvestigationInfo, language string, now time.Time) []PromptSection {
@@ -140,7 +140,7 @@ func dynamicSections(agents []AgentInfo, notes []string, promises []PromiseInfo,
 		{Name: "investigations", Source: SourceDynamic, Text: invs},
 	}
 	if language != "" {
-		// The shepherd's own setting (iOS Settings ▸ Languages): `spoken`
+		// The user's own setting (iOS Settings ▸ Languages): `spoken`
 		// is retold by the voice, which has the same line.
 		secs = append(secs, PromptSection{Name: "language", Source: SourceDynamic, Text: "## Language\n\n" + language})
 	}

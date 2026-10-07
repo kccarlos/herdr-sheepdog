@@ -14,14 +14,14 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/eval"
 )
 
-// VoiceOptions turn tier 3's simulated CEO from a typist into a caller:
+// VoiceOptions turn tier 3's simulated user from a typist into a caller:
 // the lines are rendered to speech and played into the daemon's /ws
 // through the tier-2 phone emulator (internal/bench/voiceclient), and the
-// CEO hears the bot through the voice model's output transcription. The
+// user hears the bot through the voice model's output transcription. The
 // scratch daemon then runs with the real voice model (Gemini Live on
 // Vertex) instead of --voice=off.
 type VoiceOptions struct {
-	// Synth renders the CEO's lines.
+	// Synth renders the user's lines.
 	Synth speech.Synth
 	// LiveModel prices the Live session (default gemini-3.8-live).
 	LiveModel string
@@ -29,7 +29,7 @@ type VoiceOptions struct {
 	Dial func(ctx context.Context, o voiceclient.Options) (*voiceclient.Client, error)
 }
 
-// VoiceRun is what only a voice call has: what the CEO said and what the
+// VoiceRun is what only a voice call has: what the user said and what the
 // voice model made of it, what the bot said, the audio-side counters.
 type VoiceRun struct {
 	TTS          string                     `json:"tts"`
@@ -43,13 +43,13 @@ type VoiceRun struct {
 	Spend        bench.Spend                `json:"spend"`
 }
 
-// call is the CEO's side of the line: the text router or the phone. Run
+// call is the user's side of the line: the text router or the phone. Run
 // drives either through it.
 type call interface {
 	// arrive lets the announcements of what the daemon found at start
-	// come in, as on a phone that connects to a flock already running.
+	// come in, as on a phone that connects to a workers already running.
 	arrive(ctx context.Context) []eval.SimLine
-	// say speaks (or types) a line and returns the CEO's own line and
+	// say speaks (or types) a line and returns the user's own line and
 	// what came back, and whether the daemon answered at all. first is
 	// the opening.
 	say(ctx context.Context, text string, first bool, rec *Record) (lines []eval.SimLine, answered bool, err error)
@@ -117,7 +117,7 @@ type voiceCall struct {
 	voice  string
 	lines  []bench.UserLine
 	bargeN int
-	// answering: the CEO's barge-in habit applies only while listening
+	// answering: the user's barge-in habit applies only while listening
 	// for the answer to a line.
 	answering bool
 	// off maps the phone's clock to the run's (the call's start).
@@ -198,7 +198,7 @@ func (v *voiceCall) say(ctx context.Context, text string, first bool, _ *Record)
 	if err := v.speak(ctx, text, false, &lines); err != nil {
 		return lines, false, fmt.Errorf("speech: %s", firstLine(err.Error()))
 	}
-	// The answer: the first words within 45 s (a brain turn with real
+	// The answer: the first words within 45 s (an orchestrator turn with real
 	// workers can take that long), then until quiet.
 	v.answering = true
 	defer func() { v.answering = false }()
@@ -235,7 +235,7 @@ func (v *voiceCall) think() {
 }
 
 // speak renders text and plays it (async for a barge-in: the bot may
-// still be talking). The CEO's line, as spoken, is added to lines.
+// still be talking). The user's line, as spoken, is added to lines.
 func (v *voiceCall) speak(ctx context.Context, text string, barge bool, lines *[]eval.SimLine) error {
 	lang := v.sc.Language
 	han := strings.ContainsFunc(text, func(r rune) bool { return r >= 0x4e00 && r <= 0x9fff })
@@ -286,7 +286,7 @@ func (v *voiceCall) speak(ctx context.Context, text string, barge bool, lines *[
 
 // hear collects the bot's finished utterances until it has been quiet
 // for quiet (with at least one when needAny) or max passes, playing the
-// CEO's barge-in habit meanwhile.
+// user's barge-in habit meanwhile.
 func (v *voiceCall) hear(ctx context.Context, quiet, max time.Duration, needAny bool) []eval.SimLine {
 	end := time.Now().Add(max)
 	hard := end.Add(30 * time.Second) // never walk away mid-sentence, within reason
@@ -353,7 +353,7 @@ func (v *voiceCall) bargeIn(ctx context.Context, p *bargePlan) []eval.SimLine {
 	return lines
 }
 
-// botLine is a bot utterance as the CEO heard it.
+// botLine is a bot utterance as the user heard it.
 func (v *voiceCall) botLine(u voiceclient.BotUtterance) (eval.SimLine, bool) {
 	text := strings.TrimSpace(u.Heard)
 	if text == "" {

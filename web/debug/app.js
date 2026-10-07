@@ -1,7 +1,7 @@
 // sheepdog /debug: a viewer of the event log plus the fake-injection
 // controls (plan §3.8, decision D10). Vanilla JS module, no build step.
 // Tabs: Swimlane (swimlane-view.js), Conversation (conversation-view.js),
-// Supervisor (supervisor-view.js over the brain's transcript API), Events
+// Supervisor (supervisor-view.js over the orchestrator's transcript API), Events
 // (the raw list), State.
 import { ConversationView, setDogName } from './conversation-view.js';
 import { SwimlaneView } from './swimlane-view.js';
@@ -118,7 +118,7 @@ function renderEvent(ev) {
 function onEvent(ev, encoded) {
   events.count++;
   // The backfill and the SSE replay overlap; the grouper's dedupe says
-  // whether this line is new, so the brain views count it once.
+  // whether this line is new, so the orchestrator views count it once.
   const fresh = conversation.add(ev, encoded);
   swimlane.add(ev, encoded);
   if (fresh) onBrainEvent(ev);
@@ -299,7 +299,7 @@ function renderVoice(v, st) {
   text += v.client_connected ? ' · browser attached' : ' · no browser';
   $('voice-indicator').classList.toggle('stalled', !!v.stalled);
   $('voice-text').textContent = text;
-  const brain = st.brain && st.brain.model ? ` · brain=${st.brain.provider ? `${st.brain.provider}/` : ''}${st.brain.model}` : '';
+  const brain = st.brain && st.brain.model ? ` · orchestrator=${st.brain.provider ? `${st.brain.provider}/` : ''}${st.brain.model}` : '';
   $('daemon-info').textContent = `v${st.version || '?'} · herdr=${st.herdr}${brain} · voice_connected=${st.session && st.session.voice_connected}`;
 }
 
@@ -330,7 +330,7 @@ function setupSettings() {
   });
 }
 
-// "New conversation" (docs/roles.md): resets the brain's transcript
+// "New conversation" (docs/roles.md): resets the orchestrator's transcript
 // window and the voice session's memory. A confirm() guards it since it
 // is destructive to the shown conversation so far (the roster, promises,
 // notes and pending prompts are unaffected either way).
@@ -338,7 +338,7 @@ function setupNewConversation() {
   const btn = $('new-conversation');
   const result = $('new-conversation-result');
   btn.addEventListener('click', async () => {
-    if (!confirm('Start a new conversation? This clears the shepherd/dog conversation so far; the agents, promises, notes and pending prompts are kept.')) return;
+    if (!confirm('Start a new conversation? This clears the conversation so far; the agents, promises, notes and pending prompts are kept.')) return;
     btn.disabled = true;
     result.textContent = '…';
     try {
@@ -352,7 +352,7 @@ function setupNewConversation() {
   });
 }
 
-// ---- the brain's model picker: the providers and the options come
+// ---- the orchestrator's model picker: the providers and the options come
 // from GET /api/brain/models (once at start, on ↻ with ?refresh=1, and
 // with ?provider= when the provider select changes, which only
 // repopulates the model select — the switch happens when a model is
@@ -360,7 +360,7 @@ function setupNewConversation() {
 // /api/state (polled, and refreshed on a brain.model_changed event), so
 // a switch made elsewhere shows up without rebuilding the list under
 // the mouse. An unavailable provider (no key) is listed greyed out with
-// the reason in its tooltip. Hidden while the brain is off (503).
+// the reason in its tooltip. Hidden while the orchestrator is off (503).
 const modelState = { current: '', provider: '', providers: [], viewProvider: '', models: [], error: '', stale: false, showAll: false, off: true };
 
 function renderModelControl() {
@@ -409,7 +409,7 @@ function renderModelControl() {
     o.textContent = m.unknown ? `${m.name} (?)` : m.name;
     const bits = [m.display_name || m.name];
     if (m.input_token_limit) bits.push(`in ${m.input_token_limit.toLocaleString()}`);
-    if (!m.recommended && !m.unknown) bits.push('not a text model the brain is known to run');
+    if (!m.recommended && !m.unknown) bits.push('not a text model the orchestrator is known to run');
     o.title = bits.join(' · ');
     sel.appendChild(o);
   }
@@ -727,7 +727,7 @@ function setupConversation() {
 
 // ------------------------------------------------------------ supervisor
 
-// The Supervisor tab reads the brain's own store (GET /api/brain/…), not
+// The Supervisor tab reads the orchestrator's own store (GET /api/brain/…), not
 // the event log (D10: one source of truth for the transcript); the
 // brain.transcript event only says "fetch again". Context (the window)
 // is re-fetched after any brain.* event, a little later than brain.turn
@@ -1025,7 +1025,7 @@ async function boot() {
 boot();
 
 // Console handle: feed extra log lines into the conversation view (e.g.
-// paste a voice-test run), inspect its items, or load a brain transcript
+// paste a voice-test run), inspect its items, or load an orchestrator transcript
 // (a JSONL url such as /testdata/brain/sample-run.jsonl in --dev mode,
 // JSONL text, or an array of messages) into the Supervisor tab.
 window.sheepdogDebug = {

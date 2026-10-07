@@ -12,7 +12,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/prompts"
 )
 
-// The call is split at the CEO's lines: the orchestrator's results and
+// The call is split at the user's lines: the orchestrator's results and
 // pushes and the voice's speech go to the question they followed; a
 // question with no to_supervisor result was not consulted.
 func TestExplainExchanges(t *testing.T) {
@@ -47,8 +47,8 @@ func TestExplainExchanges(t *testing.T) {
 }
 
 // --prompts-dir reaches the scratch daemon's config, and the Loader over
-// it takes the slow brain's svp/ files as well as the voice prompt, so an
-// A/B arm can swap both brains' prompts.
+// it takes the orchestrator's svp/ files as well as the voice prompt, so an
+// A/B arm can swap the voice and the orchestrator' prompts.
 func TestPromptsDirCoversSVP(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, "svp"), 0o755); err != nil {

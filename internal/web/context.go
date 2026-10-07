@@ -11,7 +11,7 @@ import (
 )
 
 // The Context tab's API (docs/architecture.md "Context capture"): the
-// brain's exact request at a step, the voice model's reconstructed
+// orchestrator's exact request at a step, the voice model's reconstructed
 // context at a turn, and the timeline of both. The tab follows live on
 // the context.step event.
 
@@ -42,13 +42,13 @@ type VoiceContextResponse struct {
 	Diff     ctxcap.Diff      `json:"diff"`
 }
 
-// TimelineResponse is the body of GET /api/context/timeline: every brain
+// TimelineResponse is the body of GET /api/context/timeline: every orchestrator
 // step and voice turn held, oldest first, for the scrubber to interleave
 // by time.
 type TimelineResponse struct {
 	Brain []ctxcap.BrainStep `json:"brain"`
 	Voice []ctxcap.VoiceTurn `json:"voice"`
-	// WindowTokens is the brain's budget (brain.window_tokens).
+	// WindowTokens is the orchestrator's budget (brain.window_tokens).
 	WindowTokens int `json:"window_tokens"`
 	// BrainOff / VoiceOff say why a pane has nothing (empty when on).
 	BrainOff string `json:"brain_off,omitempty"`
@@ -79,7 +79,7 @@ func tokensByClass(secs []ctxcap.Section) map[string]int {
 	return out
 }
 
-// handleContextBrain answers the brain's request at ?step= (default the
+// handleContextBrain answers the orchestrator's request at ?step= (default the
 // latest), with its diff against the step before it.
 func (s *Server) handleContextBrain(w http.ResponseWriter, r *http.Request) {
 	b, ok := s.brainOrUnavailable(w)
@@ -93,7 +93,7 @@ func (s *Server) handleContextBrain(w http.ResponseWriter, r *http.Request) {
 	}
 	cur, prev, hasPrev, err := b.Requests().Get(n)
 	if errors.Is(err, ctxcap.ErrNoStep) {
-		writeError(w, http.StatusNotFound, "no such step (the brain has made no model call yet, or it is older than the last "+strconv.Itoa(ctxcap.BrainSteps)+")")
+		writeError(w, http.StatusNotFound, "no such step (the orchestrator has made no model call yet, or it is older than the last "+strconv.Itoa(ctxcap.BrainSteps)+")")
 		return
 	}
 	secs := cur.WithTexts()
@@ -135,7 +135,7 @@ func (s *Server) handleContextVoice(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleContextTimeline answers the brain steps and voice turns held.
+// handleContextTimeline answers the orchestrator steps and voice turns held.
 func (s *Server) handleContextTimeline(w http.ResponseWriter, r *http.Request) {
 	resp := TimelineResponse{Brain: []ctxcap.BrainStep{}, Voice: []ctxcap.VoiceTurn{}}
 	if b := s.deps.Brain; b != nil {

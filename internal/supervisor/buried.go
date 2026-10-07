@@ -9,11 +9,11 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
 
-// A prompt the CEO has likely not heard (tier-3 bench 2026-10-03 #9,
+// A prompt the user has likely not heard (tier-3 bench 2026-10-03 #9,
 // t3-codex-report): Codex's approval push ("Codex asks to run go test.")
-// was followed four seconds later by the reply to the CEO's previous
+// was followed four seconds later by the reply to the user's previous
 // words, written before the block ("I told Codex to rerun the shop
-// tests…"). The CEO waited; the prompt stayed open for more than three
+// tests…"). The user waited; the prompt stayed open for more than three
 // minutes and nothing raised it again. The voice layer re-queues a line
 // it judged unheard once (voice/gemini/heard.go), but a line that was
 // heard and then buried under another, or one whose re-queue was cut
@@ -22,25 +22,25 @@ import (
 // The daemon tracks the announcement of the open answer_prompt: when it
 // was handed to the voice, and whether another line followed it (a push,
 // or the voice speaking on its own after the announcement's turn) or the
-// voice layer judged it unheard, all before the CEO said anything. Such
+// voice layer judged it unheard, all before the user said anything. Such
 // a prompt is
 //   - re-announced once, at the next quiet moment (promptRemindQuiet with
-//     no line, no CEO words and no turn in flight), at idle, tagged with
+//     no line, no user words and no turn in flight), at idle, tagged with
 //     its event so the voice drops it if the prompt closed meanwhile
 //     (supervisor.prompt_reminded);
-//   - stated as a fact on the brain's next utterance request
-//     (EventFacts.OpenPrompt): what the CEO says next may not answer it.
-// No judgement is made here about what the CEO meant.
+//   - stated as a fact on the orchestrator's next utterance request
+//     (EventFacts.OpenPrompt): what the user says next may not answer it.
+// No judgement is made here about what the user meant.
 
 // promptRemindQuiet is how long nothing has been said, by either side,
 // before a buried prompt is re-announced.
 var promptRemindQuiet = 8 * time.Second
 
-// promptHearing is what the daemon knows about whether the CEO heard the
+// promptHearing is what the daemon knows about whether the user heard the
 // open prompt's announcement (under s.mu).
 type promptHearing struct {
 	// pendingID is the answer_prompt it is about; lines are the spoken
-	// texts pushed about it (the code sentence, the brain's line, the
+	// texts pushed about it (the code sentence, the orchestrator's line, the
 	// reminder).
 	pendingID string
 	lines     map[string]bool
@@ -48,14 +48,14 @@ type promptHearing struct {
 	// set once the voice's turn that spoke it completed.
 	sentAt time.Time
 	done   bool
-	// buriedAt is when another line followed it before the CEO spoke;
+	// buriedAt is when another line followed it before the user spoke;
 	// unheardAt when the voice layer judged it unheard.
 	buriedAt  time.Time
 	unheardAt time.Time
 	// reminded is set once the reminder was pushed (once per prompt).
 	reminded bool
 	// quietSince is when anything was last said: a line sent, the voice
-	// speaking, the CEO speaking.
+	// speaking, the user speaking.
 	quietSince time.Time
 }
 
@@ -99,7 +99,7 @@ func (s *Supervisor) promptPushedLocked(text string) {
 }
 
 // promptBuriedLocked marks the prompt's announcement as followed by
-// another line, unless the CEO spoke since it went out. Caller holds
+// another line, unless the user spoke since it went out. Caller holds
 // s.mu.
 func (s *Supervisor) promptBuriedLocked(now time.Time) {
 	h := &s.promptHeard
@@ -134,7 +134,7 @@ func (s *Supervisor) promptVoiceSpokeLocked(pushSpeaking bool) {
 }
 
 // promptUnheardLocked records the voice layer's verdict that text did
-// not reach the CEO. Caller holds s.mu.
+// not reach the user. Caller holds s.mu.
 func (s *Supervisor) promptUnheardLocked(text string) {
 	h := &s.promptHeard
 	if h.lines[text] && !h.sentAt.IsZero() && h.unheardAt.IsZero() {
@@ -142,20 +142,20 @@ func (s *Supervisor) promptUnheardLocked(text string) {
 	}
 }
 
-// promptCEOSpokeLocked records the CEO's words: the moment is not quiet.
+// promptCEOSpokeLocked records the user's words: the moment is not quiet.
 // Caller holds s.mu.
 func (s *Supervisor) promptCEOSpokeLocked() { s.promptHeard.quietSince = s.cfg.Now() }
 
-// ceoSpokeSinceLocked reports whether the CEO's newest input came at or
+// ceoSpokeSinceLocked reports whether the user's newest input came at or
 // after t. Caller holds s.mu.
 func (s *Supervisor) ceoSpokeSinceLocked(t time.Time) bool {
 	in := s.lastInputLocked()
 	return in != nil && !in.at.Before(t)
 }
 
-// unheardPromptLocked returns the open prompt and why the CEO has likely
+// unheardPromptLocked returns the open prompt and why the user has likely
 // not heard it, as of at: its announcement was buried or judged unheard
-// before at, and the CEO said nothing between the announcement and that.
+// before at, and the user said nothing between the announcement and that.
 // ok is false otherwise. Caller holds s.mu.
 func (s *Supervisor) unheardPromptLocked(at time.Time) (p state.PendingAction, reason string, ok bool) {
 	h := s.promptHeard
@@ -177,7 +177,7 @@ func (s *Supervisor) unheardPromptLocked(at time.Time) (p state.PendingAction, r
 			break
 		}
 		if in.at.Before(at) {
-			// The CEO spoke after the announcement and before at: they
+			// The user spoke after the announcement and before at: they
 			// have had their say about it already.
 			return state.PendingAction{}, "", false
 		}
@@ -185,7 +185,7 @@ func (s *Supervisor) unheardPromptLocked(at time.Time) (p state.PendingAction, r
 	return p, reason, true
 }
 
-// openPromptFact is the brain's fact about a prompt the CEO has likely
+// openPromptFact is the orchestrator's fact about a prompt the user has likely
 // not heard when words that began at start reached the daemon; "" when
 // there is none.
 func (s *Supervisor) openPromptFact(start time.Time) string {
@@ -205,7 +205,7 @@ func (s *Supervisor) openPromptFact(start time.Time) string {
 	return fmt.Sprintf("%s's prompt is still open and the user has likely not heard it: %q (%s). Their words may not be about it.", s.sayOf(p.PaneID), p.SpokenSummary, why)
 }
 
-// remindBuriedPrompt re-announces, once, an open prompt the CEO has
+// remindBuriedPrompt re-announces, once, an open prompt the user has
 // likely not heard, when the conversation has been quiet for
 // promptRemindQuiet and no turn is in flight. Run calls it every tick.
 func (s *Supervisor) remindBuriedPrompt() {
@@ -238,7 +238,7 @@ func (s *Supervisor) remindBuriedPrompt() {
 	s.pushTagged(p.PaneID, text, voice.UrgencyIdle, tags)
 }
 
-// reminderLine is the re-announcement of an open prompt, in the CEO's
+// reminderLine is the re-announcement of an open prompt, in the user's
 // language.
 func reminderLine(summary string, zh bool) string {
 	if zh {

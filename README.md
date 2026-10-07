@@ -11,9 +11,10 @@ A voice supervisor for a herdr agent fleet: ask what is happening, get
 told proactively when an agent is blocked, answer its question, give new
 instructions, and interrupt — without touching a keyboard. The voice is
 Gemini Live (Google AI Studio or Vertex AI) or GPT-Live, switchable at
-runtime; behind it a stateful supervisor brain (Gemini, Gemini on Vertex
+runtime; behind it a stateful orchestrator (Gemini, Gemini on Vertex
 AI, or DeepSeek) reads the agents' screens and acts on them.
 
+- [`docs/glossary.md`](docs/glossary.md) — the terms (user, voice, orchestrator, workers) and the former names
 - [`docs/roles.md`](docs/roles.md) — the design contract
 - [`docs/architecture.md`](docs/architecture.md) — the code map
 - [`docs/status.md`](docs/status.md) — what is done, verified and open
@@ -41,10 +42,10 @@ cp .env.example .env     # fill in GEMINI_API_KEY at least
 ```
 
 `sheepdog serve` loads `./.env` on its own. The keys it understands:
-`GEMINI_API_KEY` (voice and the default brain; `GEMINI_API_KEY_1`…`_9`
+`GEMINI_API_KEY` (voice and the default orchestrator; `GEMINI_API_KEY_1`…`_9`
 form a pool), `VERTEX_API_KEY` + `VERTEX_PROJECT` (Gemini on Vertex AI:
-the voice with `gemini.backend = "vertex"`, and the brain provider
-`vertex`), `DEEPSEEK_API_KEY` (brain provider `deepseek`) and
+the voice with `gemini.backend = "vertex"`, and the orchestrator provider
+`vertex`), `DEEPSEEK_API_KEY` (orchestrator provider `deepseek`) and
 `OPENAI_API_KEY` (GPT-Live, voice only). `sheepdog config show` prints
 the effective config with secrets redacted.
 
@@ -59,7 +60,7 @@ sheepdog serve
 The daemon subscribes to herdr's socket itself; nothing is installed on
 herdr's side. Open **http://127.0.0.1:7777/voice** (or your `web.port`)
 and hit Connect; **/debug** shows what the daemon, the voice and the
-brain are doing.
+orchestrator are doing.
 
 ## Connect the phone
 
@@ -80,7 +81,7 @@ or `100.x.x.x` (Tailscale) one.
 - **iOS app** ("Sheepdog for herdr", repo `herdr-sheepdog-ios`,
   TestFlight internal testing): type the host:port from the `lan url`
   line and the token into its Settings. It speaks the same `/ws` contract
-  (with its protocol handshake) as `/voice`, shows the flock with answerable prompts, a window onto each agent's screen with input (`/api/agents/{pane}/screen`, `.../input`), and gets a
+  (with its protocol handshake) as `/voice`, shows the workers with answerable prompts, a window onto each agent's screen with input (`/api/agents/{pane}/screen`, `.../input`), and gets a
   notification when an agent needs you once `[push.apns]` is configured
   ([`docs/push.md`](docs/push.md)).
 - **Browser:** open `<lan url>/voice`; the page asks for the token once
@@ -94,13 +95,13 @@ Tailscale), never the open internet. See
 
 | Command | What it does |
 |---|---|
-| `sheepdog serve` | The daemon: herdr watcher, supervisor, brain, voice session, web server (`/voice`, `/debug`, `/ws`, `/events`, `/api/*`). |
+| `sheepdog serve` | The daemon: herdr watcher, supervisor, orchestrator, voice session, web server (`/voice`, `/debug`, `/ws`, `/events`, `/api/*`). |
 | `sheepdog config show` \| `init` | Print the effective config (redacted) \| scaffold `config.toml`. |
 | `sheepdog herdr watch` | Print debounced agent state transitions as JSONL; `--once` prints the persisted state table. |
 | `sheepdog voice-test` | Stream a WAV (or `--text`) through a Gemini Live session with echo tools; no daemon needed. |
-| `sheepdog brain-test` | Run one brain turn against a mock herdr and a screen fixture (`--question`, `--say`, `--provider`; `--fake` needs no network). |
+| `sheepdog brain-test` | Run one orchestrator turn against a mock herdr and a screen fixture (`--question`, `--say`, `--provider`; `--fake` needs no network). |
 | `sheepdog prompts export` \| `show` | Seed `prompts.dir` from the embedded prompts \| print one file's effective text and source. |
-| `sheepdog eval` | The conversation eval sets (`--set assistant\|svp\|regressions\|extracted\|expanded\|all`); offline by default, `--live` calls the model. `eval extract` / `eval expand` build cases from the event log. `eval sim` runs simulated-CEO conversations graded by an LLM judge (`--live`, `--repeat`, `--fallback-provider`; [`docs/eval/eval-campaign-2026-10-03.md`](docs/eval/eval-campaign-2026-10-03.md)). |
+| `sheepdog eval` | The conversation eval sets (`--set assistant\|svp\|regressions\|extracted\|expanded\|all`); offline by default, `--live` calls the model. `eval extract` / `eval expand` build cases from the event log. `eval sim` runs simulated-user conversations graded by an LLM judge (`--live`, `--repeat`, `--fallback-provider`; [`docs/eval/eval-campaign-2026-10-03.md`](docs/eval/eval-campaign-2026-10-03.md)). |
 | `sheepdog scorecard` | Ear and latency metrics over the event log ([`docs/iteration-2.md`](docs/iteration-2.md) "Scorecard metrics"). |
 | `sheepdog bench` \| `bench validate` | The tier-2 voice benchmark: synthetic speech through a phone emulator into scratch daemons ([`docs/bench/README.md`](docs/bench/README.md), results in [`docs/bench/tier2-2026-10-03.md`](docs/bench/tier2-2026-10-03.md)). |
 | `sheepdog audio-e2e` | Speak scripted scenarios (macOS `say` + noise) into a running daemon's `/ws` ([`docs/history/audio-e2e-results.md`](docs/history/audio-e2e-results.md)). |
@@ -110,9 +111,9 @@ Useful `serve` flags:
 
 ```sh
 sheepdog serve --voice=off --herdr=mock --dev              # no voice, no herdr: drive it from /debug
-sheepdog serve --brain=fake --voice=off --herdr=mock --dev # the brain loop over a scripted model, no key
+sheepdog serve --brain=fake --voice=off --herdr=mock --dev # the orchestrator loop over a scripted model, no key
 sheepdog serve --voice=openai                              # start on GPT-Live (on | gemini | openai | off)
-sheepdog serve --brain=off                                 # no brain: code sentences only, nothing sent to a worker
+sheepdog serve --brain=off                                 # no orchestrator: code sentences only, nothing sent to a worker
 sheepdog serve --cli=off                                   # no read-only CLI lookups
 sheepdog serve --verbose --port 8080                       # echo every event to stderr
 ```
@@ -120,21 +121,21 @@ sheepdog serve --verbose --port 8080                       # echo every event to
 `--config`, `--env-file` (default `./.env`) and `--data-dir` point it at
 other files.
 
-`/debug` has six tabs: **Swimlane** (every hop between shepherd, voice,
-brain and flock with its latency), **Conversation** (the voice session
-as a chat), **Supervisor** (the brain's transcript and prompt budget),
+`/debug` has six tabs: **Swimlane** (every hop between user, voice,
+orchestrator and workers with its latency), **Conversation** (the voice session
+as a chat), **Supervisor** (the orchestrator's transcript and prompt budget),
 **Context** (each model's exact or reconstructed context, step by step;
 [`docs/architecture.md`](docs/architecture.md) "Context capture"),
 **Events** (the live event log) and **State** (the state table, the
-pending action, fake-event injection). Its header switches the brain
+pending action, fake-event injection). Its header switches the orchestrator
 provider and model, the voice provider and the chattiness level at
 runtime. **New conversation** (on `/debug` and `/voice`, or saying
-"start over" and confirming) resets the brain's transcript and the voice
+"start over" and confirming) resets the orchestrator's transcript and the voice
 model's memory but keeps the roster, promises and open prompts.
 
 ## How it behaves
 
-The voice relays what you say to the brain; the brain answers, acts on
+The voice relays what you say to the orchestrator; the orchestrator answers, acts on
 the workers (`prompt`, `send_keys`, `interrupt`), starts background
 read-only **investigations** for questions a screen cannot answer, and
 decides what is worth telling you when a worker blocks or finishes. The
@@ -158,7 +159,7 @@ contract is [`docs/roles.md`](docs/roles.md).
 
 Pick your languages, most preferred first, in the iOS app's Settings ▸
 Languages (or `PUT /api/settings {"languages": ["zh-Hans", "en"]}`).
-简体中文 and 繁體中文 are separate entries. Both brains are told the
+简体中文 and 繁體中文 are separate entries. The voice and the orchestrator are told the
 setting and answer in the language you use, in your script; the choice
 survives a restart.
 
@@ -175,14 +176,14 @@ and `supervisor.chattiness` (default `normal`) is the initial value.
 | `chatty` | `normal`, plus every finish and "started on …" when an instruction you sent is picked up. |
 
 The level is a ceiling, not the sentence: for every block or finish the
-brain decides whether to say anything and how, and the level caps it.
+orchestrator decides whether to say anything and how, and the level caps it.
 A block is spoken within `brain.announce_wait_s`; a finish waits for the
-brain's line with what the agent found ([`docs/roles.md`](docs/roles.md)
+orchestrator's line with what the agent found ([`docs/roles.md`](docs/roles.md)
 "Pushes").
 
 ## ⚠️ Worker agents must not run fully auto-approve
 
-The brain sends an instruction to a worker right after echoing it back —
+The orchestrator sends an instruction to a worker right after echoing it back —
 there is no confirmation step. The worker's own approval prompts are the
 only safety gate between "the operator said something" and "code
 changed". Before pointing sheepdog at a pane, check the agent was *not*

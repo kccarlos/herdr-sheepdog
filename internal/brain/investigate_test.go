@@ -23,7 +23,7 @@ func ledger(id, agent, question, summary string, started time.Time) Investigatio
 	}
 }
 
-// An explanation the screen cannot answer: the brain starts a background
+// An explanation the screen cannot answer: the orchestrator starts a background
 // job and acknowledges with pending true, the answer following later.
 func TestInvestigateStartsAJobAndAnswersPending(t *testing.T) {
 	h := newHarness(t, braintest.NewModel(
@@ -86,7 +86,7 @@ func TestInvestigateRefusedOnAReadOnlyTurn(t *testing.T) {
 }
 
 // The delivery turn: the job's answer arrives as an event turn with the
-// question, the CEO's words and the result wrapped as worker output.
+// question, the user's words and the result wrapped as worker output.
 func TestInvestigationDeliveryTurn(t *testing.T) {
 	h := newHarness(t, braintest.NewModel(
 		braintest.Step{Text: `{"spoken": "The clamp test asserts the wrong bound, so the rerun failed the same way. Shall I have auth fix it?", "detail": "From the look.", "urgency": "idle"}`},
@@ -166,7 +166,7 @@ func TestInvestigationsPromptSectionAndRecall(t *testing.T) {
 }
 
 // A delivery turn coalesces only with a newer delivery: a worker event
-// about the same agent must not drop the answer the CEO is waiting for.
+// about the same agent must not drop the answer the user is waiting for.
 func TestInvestigationDeliveryDoesNotCoalesceWithAnnounce(t *testing.T) {
 	release := make(chan struct{})
 	h := newHarness(t, braintest.NewModel(

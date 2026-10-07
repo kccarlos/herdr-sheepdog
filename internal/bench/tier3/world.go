@@ -28,7 +28,7 @@ type Options struct {
 	// BenchRepo is the toy repo cloned per workspace
 	// (/Users/kc/Documents/sheepdog-bench).
 	BenchRepo string
-	// EnvFile is the daemon's --env-file (the brain's keys).
+	// EnvFile is the daemon's --env-file (the orchestrator's keys).
 	EnvFile string
 	// BrainModel is the daemon's brain.model.
 	BrainModel string
@@ -53,7 +53,7 @@ type Options struct {
 	Keep bool
 	// Settle is how long to listen for pushes after a reply (default 4 s).
 	Settle time.Duration
-	// Voice, when set, makes the simulated CEO a caller: speech through
+	// Voice, when set, makes the simulated user a caller: speech through
 	// the tier-2 phone emulator into a scratch daemon with the real voice
 	// model. Nil is the text router (the default).
 	Voice *VoiceOptions
@@ -80,7 +80,7 @@ type Record struct {
 	Aliases map[string]string `json:"aliases,omitempty"`
 	// SetupMS is how long the setup took before the call.
 	SetupMS int64 `json:"setup_ms"`
-	// VoiceMode is set when the CEO spoke (Options.Voice); Voice then has
+	// VoiceMode is set when the user spoke (Options.Voice); Voice then has
 	// the call's audio side.
 	VoiceMode bool      `json:"voice_mode,omitempty"`
 	Voice     *VoiceRun `json:"voice,omitempty"`

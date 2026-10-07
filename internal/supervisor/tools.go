@@ -13,7 +13,7 @@ import (
 )
 
 // The voice's two tools (docs/roles.md "One decision-maker"):
-// to_supervisor carries the CEO's words verbatim, stop runs the stop
+// to_supervisor carries the user's words verbatim, stop runs the stop
 // procedure. Nothing else is declared to the voice model.
 const (
 	ToolToSupervisor = voice.ToolToSupervisor
@@ -53,10 +53,10 @@ func (s *Supervisor) workspaceDir(ctx context.Context, row state.Agent) string {
 
 // noBrain is everything the daemon can say without one: the roster
 // sentence composeBriefing already keeps, and why that is all. Nothing
-// is sent to a worker — instructions are the brain's judgment
+// is sent to a worker — instructions are the orchestrator's judgment
 // (docs/roles.md "One decision-maker"). Within supervisor.repeat_window_s
 // of an identical roster, the sentence is prefixed "No change since I
-// last checked: …" — there is no brain here to add a note to instead,
+// last checked: …" — there is no orchestrator here to add a note to instead,
 // and the roster is the whole answer, so it is delivered by saying it.
 func (s *Supervisor) noBrain() voice.ToolResult {
 	text, panes := s.briefingText()
@@ -71,10 +71,10 @@ func (s *Supervisor) noBrain() voice.ToolResult {
 }
 
 // noBrainTrailer says why the roster is the whole answer.
-const noBrainTrailer = "The brain is off, so I can only report status."
+const noBrainTrailer = "The orchestrator is off, so I can only report status."
 
-// fallback is what an utterance gets when its brain turn produced no
-// answer: noBrain when there is no brain at all, else brainFailedLine.
+// fallback is what an utterance gets when its orchestrator turn produced no
+// answer: noBrain when there is no orchestrator at all, else brainFailedLine.
 func (s *Supervisor) fallback() voice.ToolResult {
 	if s.brain == nil {
 		return s.noBrain()
@@ -82,13 +82,13 @@ func (s *Supervisor) fallback() voice.ToolResult {
 	return voice.ToolResult{Spoken: brainFailedLine, Scheduling: voice.UrgencyInterrupt}
 }
 
-// brainFailedLine is the whole answer when the brain errored or timed
+// brainFailedLine is the whole answer when the orchestrator errored or timed
 // out on an utterance. The code cannot tell what the words asked for —
-// that is the brain's work — so it does not answer a question it may not
+// that is the orchestrator's work — so it does not answer a question it may not
 // have been asked: no roster, no "no change" (2026-09-24 18:16:43, "I
 // want to know the detail of the glitches" got "No change since I last
-// checked: Four agents: …"), no "the brain is off" (the shepherd then
-// asked "do you mean the brain is off?"). One short sentence for the ear
+// checked: Four agents: …"), no "the orchestrator is off" (the user then
+// asked "do you mean the orchestrator is off?"). One short sentence for the ear
 // (prose.EarLine's caps) that says so and offers the retry. The offer is
 // no yes/no question on purpose: a bare "yes" answers an open worker
 // prompt on the fast path, so "Shall I try again?" could approve one.
@@ -176,18 +176,18 @@ var ErrMenuOnScreen = errors.New("menu on screen")
 // cursor on one of two or more options at the end of the screen. Then
 // nothing is typed. On a pane herdr reports blocked the menu becomes the
 // pending question (as reportBlocked does after agent_blocked); on any
-// other pane the fact goes back to the brain, which decides what to tell
-// the CEO (supervisor.instruction_blocked_by_menu). A screen that cannot
+// other pane the fact goes back to the orchestrator, which decides what to tell
+// the user (supervisor.instruction_blocked_by_menu). A screen that cannot
 // be read does not stop the instruction: herdr's own agent_blocked
 // refusal still stands behind it.
 //
-// Campaign D N6: right after the shepherd declined a prompt, the old menu
+// Campaign D N6: right after the user declined a prompt, the old menu
 // may still be drawn (the tier-1 sim kept it; a real CLI may not have
 // redrawn yet), and the guard refused the follow-up instruction 20 times
 // in 7 of 130 runs. So within declineRecheckWindow of a decline on the
 // pane the screen is read once more after declineRecheckDelay; if the
 // menu is gone the instruction goes, and if the declined menu is still
-// there the brain is told exactly that — it may be a stale picture —
+// there the orchestrator is told exactly that — it may be a stale picture —
 // instead of a bare "showing a menu".
 func (s *Supervisor) menuOnScreen(ctx context.Context, row state.Agent) (voice.ToolResult, error, bool) {
 	prompt, ok := s.menuOf(ctx, row.PaneID)
@@ -232,7 +232,7 @@ func (s *Supervisor) menuOnScreen(ctx context.Context, row state.Agent) (voice.T
 	return voice.ToolResult{Spoken: fact, Scheduling: voice.UrgencyInterrupt}, ErrMenuOnScreen, true
 }
 
-// declineMark is a prompt the shepherd declined: when, and its question
+// declineMark is a prompt the user declined: when, and its question
 // (the pending action's, herdr.Prompt.Phrase).
 type declineMark struct {
 	at       time.Time

@@ -86,7 +86,7 @@ func TestAnnounceNotRecheckedWithoutANewLine(t *testing.T) {
 // running out on a slow provider) is a fallback for an event nobody is
 // owed: the first answer was written as if nothing had been said, and
 // the spoken line already carried the event. On an owed event the first
-// answer is the finding the CEO waits for, and stands.
+// answer is the finding the user waits for, and stands.
 func TestFailedRecheck(t *testing.T) {
 	t.Run("block: model error falls back", func(t *testing.T) {
 		m := braintest.NewModel(braintest.Step{Text: recheckLine}, braintest.Step{Err: errors.New("503 unavailable")})

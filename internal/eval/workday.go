@@ -6,11 +6,11 @@ import (
 )
 
 // Workday sessions (handover 2026-10-04, "Evals first", step 3): one long
-// call — several workers, the CEO interleaving status questions,
+// call — several workers, the user interleaving status questions,
 // explanations, "more detail", "why", approvals, deferrals, instructions,
 // interruptions and a language switch — that measures many things at
-// once. The CEO's side is an agenda (one beat per turn, said in the run's
-// persona); the scenario carries its own ground truth (the news the CEO
+// once. The user's side is an agenda (one beat per turn, said in the run's
+// persona); the scenario carries its own ground truth (the news the user
 // should hear, the claims that are true or false, the expected end state,
 // where a clarifying question is and is not warranted, the safety and
 // coherence probes), rendered into named judge items and code checks.
@@ -29,9 +29,9 @@ type Workday struct {
 
 // WorkdayTruth is the scenario's ground truth.
 type WorkdayTruth struct {
-	// News the CEO should hear about (missed news): a finish, a block, a
-	// result. Proactive news lands while the CEO is silent and must be
-	// told unprompted (or at the CEO's next turn at the latest).
+	// News the user should hear about (missed news): a finish, a block, a
+	// result. Proactive news lands while the user is silent and must be
+	// told unprompted (or at the user's next turn at the latest).
 	News []WorkdayNews `json:"news,omitempty"`
 	// Claims are statements sheepdog might make whose truth the world
 	// fixes (said vs done): a true claim may be said, a false one never.
@@ -56,9 +56,9 @@ type WorkdayTruth struct {
 type WorkdayNews struct {
 	ID    string `json:"id"`
 	Agent string `json:"agent"`
-	// What happened, as the CEO should understand it.
+	// What happened, as the user should understand it.
 	What string `json:"what"`
-	// Proactive: the news lands while the CEO is not asking; it must be
+	// Proactive: the news lands while the user is not asking; it must be
 	// told without being asked.
 	Proactive bool `json:"proactive,omitempty"`
 }

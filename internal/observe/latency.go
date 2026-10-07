@@ -9,9 +9,9 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
 )
 
-// The latency breakdown of one CEO utterance (Pipecat's
+// The latency breakdown of one user utterance (Pipecat's
 // LatencyBreakdown; docs/architecture.md "turn.latency"). The wait from
-// the shepherd's last word to the first audio of the answer is cut into
+// the user's last word to the first audio of the answer is cut into
 // consecutive segments, each measured from the events that bound it:
 //
 //	voice_ms        last words → the voice's to_supervisor call (voice.tool_call)
@@ -27,10 +27,10 @@ import (
 //	                (voice.playback {state: started})
 //
 // total_ms is last words → first audio. Segments that do not apply (no
-// brain turn for a fast path, no push for an inline reply) are left out.
+// orchestrator turn for a fast path, no push for an inline reply) are left out.
 // Events are matched by utterance_id and turn_id; a log from before the
 // ids falls back to the call id (voice.tool_call ↔ supervisor.relay ↔
-// voice.tool_result / brain.reply_pending), the brain turn number, and
+// voice.tool_result / brain.reply_pending), the orchestrator turn number, and
 // time (the first utterance step after the relay). The voice session
 // tags the playback start that follows a reply with its utterance_id; an
 // untagged start (an older log) goes to the reply waiting longest.
@@ -75,7 +75,7 @@ type Breakdown struct {
 	// "push" ("" when it never did).
 	Reply   string `json:"reply,omitempty"`
 	Outcome string `json:"outcome"`
-	// Stale: the shepherd had moved on when the reply landed.
+	// Stale: the user had moved on when the reply landed.
 	Stale bool `json:"stale,omitempty"`
 
 	TotalMS      *int64  `json:"total_ms,omitempty"`
@@ -111,7 +111,7 @@ type record struct {
 	turnKey       string
 	turnID        string
 
-	end        time.Time // the shepherd's last words (zero: unknown)
+	end        time.Time // the user's last words (zero: unknown)
 	toolCallAt time.Time
 	relayAt    time.Time
 	relayWait  time.Duration // the daemon's own relay: its unanswered wait

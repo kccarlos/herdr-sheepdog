@@ -16,18 +16,18 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/supervisor"
 )
 
-// The brain endpoints answer 503 with the reason when no brain is
+// The orchestrator endpoints answer 503 with the reason when no orchestrator is
 // attached (the Supervisor tab's "Brain off" state).
 func TestBrainEndpointsOff(t *testing.T) {
 	h := newHarness(t, harnessOpts{})
 	for _, path := range []string{"/api/brain/transcript", "/api/brain/context", "/api/brain/system_prompt", "/api/brain/models"} {
 		var body map[string]string
-		if code := h.getJSON(path, &body); code != http.StatusServiceUnavailable || !strings.Contains(body["error"], "brain is off (--brain=off)") {
+		if code := h.getJSON(path, &body); code != http.StatusServiceUnavailable || !strings.Contains(body["error"], "orchestrator is off (--brain=off)") {
 			t.Errorf("%s = %d %v", path, code, body)
 		}
 	}
 	var body map[string]string
-	if code, _ := h.putModel(map[string]any{"provider": "gemini", "model": "gemini-3.8-flash"}, &body); code != http.StatusServiceUnavailable || !strings.Contains(body["error"], "brain is off") {
+	if code, _ := h.putModel(map[string]any{"provider": "gemini", "model": "gemini-3.8-flash"}, &body); code != http.StatusServiceUnavailable || !strings.Contains(body["error"], "orchestrator is off") {
 		t.Errorf("PUT /api/brain/model = %d %v", code, body)
 	}
 	var st StateResponse
@@ -36,7 +36,7 @@ func TestBrainEndpointsOff(t *testing.T) {
 	}
 }
 
-// With a brain (the reflex fake model) the inject chain feeds the
+// With an orchestrator (the reflex fake model) the inject chain feeds the
 // transcript, an ask runs a real turn, and the three endpoints report it:
 // the transcript with seqs (incrementally), the window with a pruned
 // stub after the next turn, and the prompt sections with their source.
@@ -145,7 +145,7 @@ func TestBrainEndpointsWithFakeBrain(t *testing.T) {
 	}
 
 	// A promise relayed through the text router ("let me know when …":
-	// the brain reads it as promised work and records it) is served with
+	// the orchestrator reads it as promised work and records it) is served with
 	// its record.
 	if code, body := h.postJSON("/api/inject/utterance", map[string]any{"text": "let me know when auth is done"}, &tr); code != http.StatusOK || tr.Tool != supervisor.ToolToSupervisor || tr.Spoken != "I will tell you when auth finishes." {
 		t.Fatalf("promise utterance = %d %s (%+v)", code, body, tr)
@@ -187,7 +187,7 @@ func TestBrainEndpointsWithFakeBrain(t *testing.T) {
 // The model picker's endpoints: GET lists the discovered catalog with the
 // current model (recommended first; ?refresh=1 fetches again; a failed
 // fetch keeps the last list and reports the error, never a 5xx), PUT
-// switches the brain's model (validated; gemini is the only provider;
+// switches the orchestrator's model (validated; gemini is the only provider;
 // a well-formed name the catalog does not list is accepted), persists
 // it in the state file's session and logs brain.model_changed; /api/state
 // and /api/brain/context report the live model.

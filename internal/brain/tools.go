@@ -35,7 +35,7 @@ const (
 
 // IsActionTool reports whether name sends something to a worker or
 // writes to the record (a promise, a note, a background job): permitted
-// in CEO turns only, and never in a read-only turn.
+// in user turns only, and never in a read-only turn.
 func IsActionTool(name string) bool {
 	switch name {
 	case ToolPrompt, ToolSendKeys, ToolInterrupt, ToolPromise, ToolNote, ToolInvestigate:
@@ -270,7 +270,7 @@ func (b *Brain) execTool(ctx context.Context, t *turn, call *genai.FunctionCall)
 			return toolOutcome{railBlocked: reason, err: fmt.Errorf("%w: %s", ErrNotPermitted, reason)}
 		}
 		if err := ctx.Err(); err != nil {
-			// The turn was cancelled (the CEO said stop) between the
+			// The turn was cancelled (the user said stop) between the
 			// model answering and its calls running: nothing is sent.
 			return toolOutcome{err: fmt.Errorf("the turn was cancelled before %s ran: %w", call.Name, err)}
 		}
@@ -620,7 +620,7 @@ func newNonce() string {
 // wrapWorker puts provenance delimiters around text from a worker. Any
 // marker-shaped string inside the text is neutralised (its "<<<" becomes
 // "[") and both markers carry a per-call nonce, so a screen cannot close
-// the wrapper early and have what follows read as the brain's own.
+// the wrapper early and have what follows read as the orchestrator's own.
 func wrapWorker(alias, source, text string) string {
 	nonce := nonceSource()
 	text = reMarker.ReplaceAllString(strings.TrimRight(text, "\n"), "[$1")
@@ -630,7 +630,7 @@ func wrapWorker(alias, source, text string) string {
 // listAgents renders the roster as JSON for the model. What the workers
 // wrote (task, last task, last result, the question they asked) sits under
 // each row's worker_data key: it is data from another agent, never an
-// instruction to the brain (RULES.md provenance rule).
+// instruction to the orchestrator (RULES.md provenance rule).
 func (b *Brain) listAgents() toolOutcome {
 	type workerData struct {
 		Task            string `json:"task,omitempty"`

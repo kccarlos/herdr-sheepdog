@@ -23,7 +23,7 @@ const types = (rows) => rows.map((r) => (r.kind === 'card' ? r.type : r.kind));
 test('lanes and helpers', () => {
   assert.deepEqual(LANES.map((l) => l.id), ['you', 'voice', 'sup', 'herdr']);
   // The names of docs/roles.md; the ids behind them do not change.
-  assert.deepEqual(LANES.map((l) => l.label), ['Shepherd', 'Voice', 'Brain', 'Flock / CLI']);
+  assert.deepEqual(LANES.map((l) => l.label), ['User', 'Voice', 'Orchestrator', 'Workers / CLI']);
   assert.equal(latencyLevel(null), null);
   assert.equal(latencyLevel(200), 'ok');
   assert.equal(latencyLevel(1500), 'warn');
@@ -120,7 +120,7 @@ test('chain grouping: a user turn owns its call, the nested work, the result and
     ev('voice.tool_result', { id: 'c1', name: 'briefing', spoken: 'One agent working.', scheduling: 'interrupt', dur_ms: 0 }, 1),
     ev('voice.transcript.out', { text: 'One agent working.', final: false }, 600),
     ev('voice.turn', { turn: 1, end: 'complete', responded: true, input_to_response_ms: 1001, tool_calls: 1, dur_ms: 1600 }, 300),
-    // A herdr story with no tool call: transition → read → brain step → pending → push → speech.
+    // A herdr story with no tool call: transition → read → orchestrator step → pending → push → speech.
     ev('herdr.state', { state: 'blocked', agent: 'agy', source: 'http' }, 4000, 'herdr', 'wA:p1'),
     ev('herdr.transition', { from: 'done', to: 'blocked', agent: 'agy', workspace_label: 'auth', name: 'one', source: 'http' }, 3000, 'herdr', 'wA:p1'),
     ev('herdr.read', { source: 'recent_unwrapped', lines: 80, dur_ms: 1 }, 3, 'herdr', 'wA:p1'),
@@ -412,7 +412,7 @@ test('brain.* inside a voice.tool_call ask: generic pairing, nested under the as
   assert.equal(askResult.arrowOut.level, 'slow');
   assert.equal(c[0].arrowOut.label, 'typed · ⏱ 10.4 s');
   assert.equal(c[0].arrowOut.level, 'slow');
-  // A brain call with no voice call open joins the loose chain and pairs by id anyway.
+  // A orchestrator call with no voice call open joins the loose chain and pairs by id anyway.
   const { rows: r2 } = buildRows([
     ev('brain.tool_call', { id: 'x1', name: 'list_agents', args: {} }, 1, 'brain'),
     ev('brain.tool_result', { id: 'x1', name: 'list_agents', dur_ms: 1, result: '2 agents' }, 1, 'brain'),
@@ -446,7 +446,7 @@ test('e2e fixture, scenarios 2–5: the expected arrow sequence', () => {
   const seq = cards(rows).filter((r) => r.arrowOut).map((r) => `${r.arrowOut.from}>${r.arrowOut.to} ${r.arrowOut.label}`);
   assert.deepEqual(seq, [
     // scenario 2: proactive block (agy) → push → spoken; then the snapshot tick clears it
-    // (the fixture's llm.call events predate the brain and render as plain cards, no arrow)
+    // (the fixture's llm.call events predate the orchestrator and render as plain cards, no arrow)
     'herdr>sup done → blocked',
     'sup>herdr recent_unwrapped · 80 lines',
     'sup>voice push · idle',
@@ -526,7 +526,7 @@ test('push judgment: brain.push_decision rides on the voice.push it produced; a 
   const pushes = c.filter((r) => r.type === 'voice.push');
   assert.equal(pushes.length, 2);
   assert.deepEqual(pushes[0].decision, { via: 'brain', requested: 'interrupt', applied: 'idle', reason: 'ceiling', ceiling: 'normal', late: false });
-  assert.equal(pushes[0].title, 'push · idle · brain asked interrupt (ceiling)');
+  assert.equal(pushes[0].title, 'push · idle · orchestrator asked interrupt (ceiling)');
   assert.ok(pushes[0].cls.includes('decided'));
   assert.deepEqual(pushes[1].decision.via, 'template');
   assert.equal(pushes[1].title, 'push · idle · template (timeout)');
@@ -535,8 +535,8 @@ test('push judgment: brain.push_decision rides on the voice.push it produced; a 
   assert.equal(decisions[0].title, 'push judgment');
   assert.equal(decisions[1].summary, 'skip → skip · brain · ceiling normal · via brain · done · docs finished: wrote the readme.');
   assert.ok(decisions[0].summary.includes('via brain · done ·'));
-  assert.equal(c.find((r) => r.type === 'brain.yielded').title, 'yielded to a shepherd turn');
-  assert.equal(c.find((r) => r.type === 'brain.yielded').summary, 'turn 4 · before step 2 · auth done · 1 shepherd turn waiting');
+  assert.equal(c.find((r) => r.type === 'brain.yielded').title, 'yielded to a user turn');
+  assert.equal(c.find((r) => r.type === 'brain.yielded').summary, 'turn 4 · before step 2 · auth done · 1 user turn waiting');
   assert.equal(c.find((r) => r.type === 'brain.event_coalesced').summary, 'auth done · replaced the queued turn');
   const switches = c.filter((r) => r.type === 'brain.model_changed');
   assert.equal(switches[0].title, 'model switched');
@@ -548,7 +548,7 @@ test('push judgment: brain.push_decision rides on the voice.push it produced; a 
   assert.equal(steps[0].arrow.label, 'announce · fake-reflex · 5 ms', 'a step without a provider shows the model alone');
 });
 
-test('investigation events are Flock / CLI cards with their duration', () => {
+test('investigation events are Workers / CLI cards with their duration', () => {
   const { rows } = buildRows([
     ev('investigation.started', { id: 'inv-1', agent: 'auth', source: 'cli', backend: 'codex', question: 'why did the tests fail?' }, 100, 'supervisor', 'p1'),
     ev('cli.run', { backend: 'codex', dur_ms: 2900, exit: 0, session: true, resumed: false }, 2900, 'cli'),

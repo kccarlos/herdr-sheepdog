@@ -105,7 +105,7 @@ func writeMarkdownSection(b *strings.Builder, r Report) {
 	b.WriteString("| pool | n | mean words | median words | p90 words | share > 30 words | share with dash | share ending closed | mean jargon/line |\n")
 	b.WriteString("|---|---|---|---|---|---|---|---|---|\n")
 	writeEarRow(b, "spoken (tool_result + push)", r.Ear.Spoken)
-	writeEarRow(b, "brain lines dropped (push_late, added:false)", r.Ear.DroppedBrainLines)
+	writeEarRow(b, "orchestrator lines dropped (push_late, added:false)", r.Ear.DroppedBrainLines)
 	b.WriteString("\n")
 
 	fmt.Fprintf(b, "### Repeat-ask rate\n\n%d / %d utterances (%.1f%%)\n\n", r.RepeatAsk.Repeats, r.RepeatAsk.Total, r.RepeatAsk.Rate*100)
@@ -174,7 +174,7 @@ func genCell(n int, r float64) string {
 }
 
 func writeTurnLatency(b *strings.Builder, r TurnLatencyReport) {
-	fmt.Fprintf(b, "### Turn latency\n\n%d CEO utterances (turn.latency, %s)", r.N, r.Source)
+	fmt.Fprintf(b, "### Turn latency\n\n%d user utterances (turn.latency, %s)", r.N, r.Source)
 	if len(r.Outcomes) > 0 {
 		b.WriteString(":")
 		for i, o := range sortedKeys(r.Outcomes) {

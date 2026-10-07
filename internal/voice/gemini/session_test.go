@@ -207,7 +207,7 @@ func TestAudioStreamEndSendsComfortNoiseFirst(t *testing.T) {
 }
 
 // TestGateReopenCancelsComfortTail: a client frame during the tail (the
-// gate reopened: the shepherd kept talking) stops it, and no
+// gate reopened: the user kept talking) stops it, and no
 // audioStreamEnd follows.
 func TestGateReopenCancelsComfortTail(t *testing.T) {
 	c := newFakeConn("c1")
@@ -366,7 +366,7 @@ func TestToolResultDeferredWhileSpeaking(t *testing.T) {
 }
 
 // TestStopToolStaysInterruptWhileSpeaking: stop() is the one tool result
-// the shepherd is always owed at once (docs/roles.md "Pushes"), so it
+// the user is always owed at once (docs/roles.md "Pushes"), so it
 // keeps INTERRUPT scheduling even while the model is speaking.
 func TestStopToolStaysInterruptWhileSpeaking(t *testing.T) {
 	c := newFakeConn("c1")
@@ -575,7 +575,7 @@ func TestAudioTimingLoggedPerTurn(t *testing.T) {
 // TestPushInterruptDeferredWhileSpeaking: an untagged INTERRUPT push
 // asked for while the model is speaking is deferred to WHEN_IDLE
 // (docs/roles.md "Pushes": nothing interrupts the model mid-sentence
-// except the shepherd) — it waits like any idle push and is not the
+// except the user) — it waits like any idle push and is not the
 // local flush an immediate interrupt would be.
 func TestPushInterruptDeferredWhileSpeaking(t *testing.T) {
 	c := newFakeConn("c1")
@@ -691,7 +691,7 @@ func TestPushNotWhileUserSpeaking(t *testing.T) {
 		t.Fatalf("push sent while user speaking: %s", describe(c.sentMsgs()))
 	}
 	// The interrupt overtakes the idle line queued before it
-	// (docs/timelines.md C29), once the shepherd has stopped.
+	// (docs/timelines.md C29), once the user has stopped.
 	c.waitSent(t, "interrupt push after speech hold", isContent("auth crashed"))
 	if el := time.Since(start); el < 180*time.Millisecond {
 		t.Errorf("push went out after %v, want >= 200ms speech hold", el)
@@ -1327,7 +1327,7 @@ func TestPushTimeoutsRecycle(t *testing.T) {
 	}
 }
 
-// TestSystemPromptName substitutes the dog's own name (config
+// TestSystemPromptName substitutes the voice's own name (config
 // voice.name) and the aliases into the voice prompt, for the embedded
 // default and for a SystemPrompt override alike.
 func TestSystemPromptName(t *testing.T) {

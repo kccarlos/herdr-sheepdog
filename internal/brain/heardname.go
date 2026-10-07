@@ -7,14 +7,14 @@ import (
 	"unicode"
 )
 
-// A name the CEO said that matches no agent (docs/bench/tier2-2026-10-03.md
-// #6). "Let me know when bench-claude is done." reached the brain as
+// A name the user said that matches no agent (docs/bench/tier2-2026-10-03.md
+// #6). "Let me know when bench-claude is done." reached the orchestrator as
 // "Oh, I know when Bench Squad is done." (also "Bench Quad", "Bench
 // Clad", "Bench Clear", "Bench Claw"); with no agent named, the request
-// carried no record, and the brain invented a rename ("Bench Squad is
+// carried no record, and the orchestrator invented a rename ("Bench Squad is
 // the agent you just renamed") instead of registering the promise or
 // asking. The daemon only states the fact — no agent has that name, and
-// which names are closest — and the brain decides whether to ask or to
+// which names are closest — and the orchestrator decides whether to ask or to
 // take the closest.
 
 // maxClosestNames bounds the names an unmatched-name line lists.

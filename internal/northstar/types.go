@@ -19,7 +19,7 @@
 // records into a Run.
 package northstar
 
-// Side is who produced a line of speech: the orchestrator (the brain's
+// Side is who produced a line of speech: the orchestrator (the orchestrator's
 // spoken text: tool results and pushes) or the voice model (what the phone
 // played). At tier 1 there is no voice model and the user hears the
 // orchestrator.
@@ -79,7 +79,7 @@ type Action struct {
 	Outcome string     `json:"outcome"`
 	// Answer is yes or no for keys that answered a prompt, when known.
 	Answer string `json:"answer,omitempty"`
-	// Tool is the brain tool behind a check (run_cli, investigate,
+	// Tool is the orchestrator tool behind a check (run_cli, investigate,
 	// read_screen).
 	Tool string `json:"tool,omitempty"`
 }

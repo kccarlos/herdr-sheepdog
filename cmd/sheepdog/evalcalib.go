@@ -21,7 +21,7 @@ func printEvalCalibUsage(w io.Writer) {
 	fprintln(w, "       sheepdog eval calib judge --items FILE --out FILE [flags]")
 	fprintln(w, "       sheepdog eval calib agree --labels FILE --judge-file FILE [--json]")
 	fprintln(w, "")
-	fprintln(w, "Judge calibration: transcript segments the CEO labels pass/fail/na per rubric")
+	fprintln(w, "Judge calibration: transcript segments the user labels pass/fail/na per rubric")
 	fprintln(w, "item (items.json), the judge's verdicts on the same segments (judge.json, one")
 	fprintln(w, "call per item and rubric id, with the judge's quoted evidence), and their")
 	fprintln(w, "agreement per rubric item and per segment with Cohen's kappa. The judge sees")

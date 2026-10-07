@@ -33,7 +33,7 @@ const logSource = "web"
 
 // Supervisor is what the web layer needs from the supervisor: the tool
 // handler (cancel goes through it like every other tool), the runtime
-// settings behind /api/settings, the shepherd's typed inputs the one rail
+// settings behind /api/settings, the user's typed inputs the one rail
 // reads (docs/roles.md "The one rail") and the tap behind
 // POST /api/pending/answer.
 type Supervisor interface {
@@ -93,13 +93,13 @@ type Deps struct {
 	// Brain backs GET /api/brain/{transcript,context,system_prompt,models}
 	// and PUT /api/brain/model (the runtime provider/model switch,
 	// persisted in Store's session.brain_provider / brain_model); nil
-	// means the brain is off and those answer 503 with BrainOffReason
+	// means the orchestrator is off and those answer 503 with BrainOffReason
 	// ("--brain=off", "brain.enabled=false", "no Gemini key").
 	Brain          *brain.Brain
 	BrainOffReason string
 	// BrainProviders lists the providers the picker offers, available
 	// or not (with the reason: "no DEEPSEEK_API_KEY"); nil lists the
-	// brain's registered providers, all available.
+	// orchestrator's registered providers, all available.
 	BrainProviders []ProviderInfo
 	// HerdrMode and VoiceMode are reported by /api/state ("socket"|"mock",
 	// "gemini"|"off").
@@ -118,7 +118,7 @@ type Deps struct {
 	// answers it in place of Aliases (the static start-up list) whenever
 	// it returns any.
 	Names func() []string
-	// VoiceName is the dog's own name (config voice.name), served on
+	// VoiceName is the voice's own name (config voice.name), served on
 	// /api/state so the pages can label its side of the conversation.
 	VoiceName string
 	Version   string
@@ -131,7 +131,7 @@ type Deps struct {
 	// default) registers no route: this is a developer feature.
 	DevTestdataDir string
 	// DevBrainDir, when set with DevTestdataDir, serves GET
-	// /testdata/brain/<name>.jsonl from that directory: the sample brain
+	// /testdata/brain/<name>.jsonl from that directory: the sample orchestrator
 	// transcripts the /debug Supervisor tab's console handle loads.
 	DevBrainDir string
 

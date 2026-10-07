@@ -56,7 +56,7 @@ func (h brainHost) info(a state.Agent, pending state.PendingAction, has bool) br
 	if has && pending.Kind == state.PendingAnswerPrompt && pending.PaneID == a.PaneID {
 		p := &brain.PendingPrompt{ID: pending.ID, Question: pending.Question, AskedAt: pending.CreatedAt, YesKeys: pending.YesKeys, NoKeys: pending.NoKeys}
 		for _, o := range pending.Options {
-			// Meta goes along as a fact: the brain must know the
+			// Meta goes along as a fact: the orchestrator must know the
 			// free-text entry is not an answer (the phone card and
 			// the yes/no mapping never offer it).
 			p.Options = append(p.Options, brain.Option{Label: o.Label, Keys: o.Keys, Meta: o.Meta})
@@ -76,7 +76,7 @@ func (h brainHost) Resolve(name string) (brain.AgentInfo, bool) {
 	return h.info(row, pending, has), true
 }
 
-// LanguageLine implements brain.LanguageHost: the shepherd's language
+// LanguageLine implements brain.LanguageHost: the user's language
 // setting for the state block.
 func (h brainHost) LanguageLine() string { return h.s.LanguageLine() }
 
@@ -91,7 +91,7 @@ func (h brainHost) Notes() []string {
 }
 
 // Note implements brain.Host: the session's notes and notes.jsonl. The
-// brain's tool result already carries the note into the transcript.
+// orchestrator's tool result already carries the note into the transcript.
 func (h brainHost) Note(text string) (string, error) {
 	if err := h.s.appendNote(text); err != nil {
 		h.s.log.Log(logSource, "supervisor.note_error", "", map[string]any{"error": err.Error(), "via": "brain"})
@@ -220,7 +220,7 @@ func (h brainHost) Prompt(ctx context.Context, paneID, text string) (string, err
 }
 
 // AnswerPrompt implements brain.Host: the rail's atomic re-check under
-// the supervisor's lock — the shepherd's own recorded input must
+// the supervisor's lock — the user's own recorded input must
 // authorise these keys (inputs.go) — reviving the pending action from the screen
 // first when none is recorded but the pane is still blocked
 // (docs/history/issues-2026-09-18.md "an expired approval prompt can never be
@@ -252,14 +252,14 @@ func (h brainHost) AnswerPrompt(ctx context.Context, paneID string, keys []strin
 	if !selectedBy(p, keys) {
 		return "", fmt.Errorf("%w: keys %v mix more than one option", brain.ErrNotPermitted, keys)
 	}
-	// The one rail reads the shepherd's own recorded words, never what the
+	// The one rail reads the user's own recorded words, never what the
 	// model says they were (inputs.go).
 	in, reason := s.railInputLocked(p, keys)
 	if reason != "" {
 		return "", fmt.Errorf("%w: %s", brain.ErrNotPermitted, reason)
 	}
-	// A tool result: a fact for the brain, which phrases the reply.
-	// In the shepherd's language, like the fast path and taps: when the
+	// A tool result: a fact for the orchestrator, which phrases the reply.
+	// In the user's language, like the fast path and taps: when the
 	// turn times out after sending, this result is what they hear
 	// (docs/eval/eval-campaign-2026-10-03.md run C, H4).
 	alias, zh := s.sayOf(paneID), s.ceoChineseLocked()
@@ -338,8 +338,8 @@ func keysLabel(p state.PendingAction, keys []string) string {
 // checked. Campaign D N5 (tier 3, t3-stop-queued-instruction): Claude Code
 // was busy with an instruction queued behind its turn, one Ctrl-C left it
 // working (it most likely cleared the queued message), and the result
-// "Interrupted Claude." let the brain tell the CEO it had stopped. The
-// CEO asked for a stop, so finishing it is not a judgement: when the pane
+// "Interrupted Claude." let the orchestrator tell the user it had stopped. The
+// user asked for a stop, so finishing it is not a judgement: when the pane
 // still works after interruptCheck and its screen still shows a running
 // turn, a second Ctrl-C goes out. The result says what happened — stopped,
 // stopped after the second, or still working after two — and a stop that
@@ -493,14 +493,14 @@ func (h brainHost) Promises() []brain.PromiseInfo {
 	return out
 }
 
-// toolResultFrom enforces the ear contract and D9 on a brain reply: the
+// toolResultFrom enforces the ear contract and D9 on an orchestrator reply: the
 // headline cut to caps (prose.EarRunaway for every line: a runaway guard
 // of about 45 s of speech, the prompt decides the length; no dashes, PR
 // numbers or hashes),
 // the ask appended as the last
 // sentence, whatever the cap cut moved to the end of detail (nothing the
-// brain wrote is lost, it is just not read aloud), detail and options
-// scrubbed; it interrupts only when the CEO must act. An utterance is
+// orchestrator wrote is lost, it is just not read aloud), detail and options
+// scrubbed; it interrupts only when the user must act. An utterance is
 // not classified, so it cannot claim an echo's urgency; the voice reads
 // the result after its own "on it" either way (the tool is
 // NON_BLOCKING).
@@ -523,9 +523,9 @@ func toolResultFrom(rep brain.Reply, caps prose.EarCaps) voice.ToolResult {
 	return res
 }
 
-// earLine is a brain reply's line for the ear: the headline cut to the
+// earLine is an orchestrator reply's line for the ear: the headline cut to the
 // ear caps, then the reply's ask as the last sentence (prose.EarLine),
-// terminated; overflow is what the cap cut. Every brain line bound for
+// terminated; overflow is what the cap cut. Every orchestrator line bound for
 // the voice goes through it: replies, announcements and deliveries.
 func earLine(rep brain.Reply) (spoken, overflow string) {
 	spoken, overflow = prose.EarLine(rep.Spoken, rep.Ask)

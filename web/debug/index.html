@@ -27,19 +27,19 @@
       <option value="chatty">chatty</option>
     </select>
   </label>
-  <span class="indicator muted" id="languages" title="the shepherd's language setting, most preferred first (set in the iOS app's Settings or PUT /api/settings {&quot;languages&quot;: [...]}); both brains are told it">languages: none set</span>
-  <span class="indicator model-control hidden" id="model-control" title="the supervisor brain's provider and model: switched for the next turn, kept across restarts (session.brain_provider / brain_model in the state file)">model
+  <span class="indicator muted" id="languages" title="the user's language setting, most preferred first (set in the iOS app's Settings or PUT /api/settings {&quot;languages&quot;: [...]}); the voice and the orchestrator are told it">languages: none set</span>
+  <span class="indicator model-control hidden" id="model-control" title="the orchestrator's provider and model: switched for the next turn, kept across restarts (session.brain_provider / brain_model in the state file)">model
     <select id="model-provider" title="the provider; a greyed-out one has no key (see its tooltip)"></select>
-    <select id="model-select" title="the brain's model for the next turn"></select>
+    <select id="model-select" title="the orchestrator's model for the next turn"></select>
     <button id="model-refresh" class="icon" title="fetch the model list again">↻</button>
-    <label class="small" title="list every model the provider serves generateContent for, not only the text models the brain can plausibly run"><input type="checkbox" id="model-all"> all</label>
+    <label class="small" title="list every model the provider serves generateContent for, not only the text models the orchestrator can plausibly run"><input type="checkbox" id="model-all"> all</label>
     <span class="muted small" id="model-note"></span>
   </span>
   <span class="indicator model-control hidden" id="voice-control" title="the voice model behind /ws: switching closes the current voice session and opens the new provider on the next need; kept across restarts (session.voice_provider in the state file)">voice
     <select id="voice-provider" title="the voice provider; a greyed-out one has no key (see its tooltip)"></select>
     <span class="muted small" id="voice-note"></span>
   </span>
-  <button id="new-conversation" class="danger small" title="reset the brain's transcript and the voice session's memory; the agents, promises, notes and pending prompts are kept">New conversation</button>
+  <button id="new-conversation" class="danger small" title="reset the orchestrator's transcript and the voice session's memory; the agents, promises, notes and pending prompts are kept">New conversation</button>
   <span id="new-conversation-result" class="muted small"></span>
   <a href="/voice">voice page</a>
 </header>
@@ -58,7 +58,7 @@
   <button data-tab="swimlane">Swimlane</button>
   <button data-tab="conversation">Conversation</button>
   <button data-tab="supervisor">Supervisor</button>
-  <button data-tab="context" title="the brain's exact request and the voice model's context, side by side, linked">Context</button>
+  <button data-tab="context" title="the orchestrator's exact request and the voice model's context, side by side, linked">Context</button>
   <button data-tab="events">Events</button>
   <button data-tab="state">State</button>
 </nav>
@@ -108,7 +108,7 @@
   </section>
 
   <section id="tab-supervisor" class="tab hidden">
-    <div id="svp-meter" class="svp-meter" title="the prompt-budget meter: what the SVP's next model call carries"></div>
+    <div id="svp-meter" class="svp-meter" title="the prompt-budget meter: what the orchestrator's next model call carries"></div>
     <div class="toolbar">
       <button id="svp-expand">Expand all</button>
       <button id="svp-collapse">Collapse all</button>

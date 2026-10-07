@@ -23,7 +23,7 @@ func corpusFiles(t *testing.T) []string {
 }
 
 // TestRunCorpusOffline is the L0 gate over the whole corpus: every
-// regression, extracted and expanded case runs through the brain with the
+// regression, extracted and expanded case runs through the orchestrator with the
 // scripted model, and a regression that pins its baseline must still
 // catch the logged failure. The corpus must stay fast enough to run on
 // every change (docs/iteration-2.md: hundreds of cases, free).
@@ -169,7 +169,7 @@ func TestUrgencyNotSkipCoversEmptyLine(t *testing.T) {
 }
 
 // not_stop_word checks the daemon's bare-stop list, offline: "never
-// mind" reaches the brain (iteration 2 WP1, regression
+// mind" reaches the orchestrator (iteration 2 WP1, regression
 // never-mind-is-not-stop), a real stop word never does.
 func TestNotStopWord(t *testing.T) {
 	for q, fails := range map[string]bool{"Never mind.": false, "never mind": false, "Oh, never mind.": false, "Stop.": true, "hold on": true} {
@@ -185,7 +185,7 @@ func TestNotStopWord(t *testing.T) {
 
 // ask_empty and reply_language are live-only checks: skipped offline, and
 // live they fail an ask on a plain status line and a Chinese reply after
-// the shepherd switched to English (bench #14, #15a).
+// the user switched to English (bench #14, #15a).
 func TestGradeAskEmptyAndReplyLanguage(t *testing.T) {
 	en := SVPExpect{AskEmpty: true, ReplyLanguage: "en"}
 	reasons, skipped := gradeSVP(en, newRecorder(), brain.Reply{Spoken: "好的", Ask: "要不要？"}, true)

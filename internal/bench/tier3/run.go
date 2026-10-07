@@ -120,7 +120,7 @@ func Run(ctx context.Context, sc Scenario, o Options, repeat int) (rec Record) {
 		defer vc.close()
 	}
 	// Let the announcements of what the daemon found at start arrive, as
-	// on a phone that connects to a flock already running.
+	// on a phone that connects to a workers already running.
 	convo := cl.arrive(ctx)
 	if vc, ok := cl.(*voiceCall); ok {
 		vc.convo = func() []eval.SimLine { return convo }
@@ -301,7 +301,7 @@ loop:
 
 var rateLimited = regexp.MustCompile(`(?i)429|rate.?limit|resource.?exhausted`)
 
-// failures labels a finished run as eval sim does: the brain's
+// failures labels a finished run as eval sim does: the orchestrator's
 // fallbacks, the action expectations, the code checks, the verdicts and
 // — when it failed anyway — the cap that ended it.
 func failures(exp eval.SimExpect, rec Record, checks []eval.Failure) []eval.Failure {
@@ -328,7 +328,7 @@ func failures(exp eval.SimExpect, rec Record, checks []eval.Failure) []eval.Fail
 		case eval.EndMaxTime:
 			fs = append(fs, eval.Failure{Type: eval.FailTimeout, Detail: "the conversation hit its time cap"})
 		case eval.EndSilence:
-			fs = append(fs, eval.Failure{Type: eval.FailSilence, Detail: "the CEO waited in silence past the cap"})
+			fs = append(fs, eval.Failure{Type: eval.FailSilence, Detail: "the user waited in silence past the cap"})
 		case eval.EndMaxTurns:
 			fs = append(fs, eval.Failure{Type: eval.FailMaxTurns, Detail: "every turn used without the call ending"})
 		}

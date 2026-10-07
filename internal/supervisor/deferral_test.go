@@ -11,9 +11,9 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 )
 
-// Whether words decline, put off or question a prompt is the brain's
+// Whether words decline, put off or question a prompt is the orchestrator's
 // judgment (dual-brain ablation G4): the rail no longer reads deferral,
-// question or filler words. It still needs fresh words of the shepherd's
+// question or filler words. It still needs fresh words of the user's
 // own, and a "no" still never approves.
 func TestRailLeavesTheReadingToTheBrain(t *testing.T) {
 	cases := []struct {
@@ -51,7 +51,7 @@ func TestRailLeavesTheReadingToTheBrain(t *testing.T) {
 	}
 }
 
-// A bare "no" is no longer answered in code: the brain gets the words
+// A bare "no" is no longer answered in code: the orchestrator gets the words
 // (the bare-answer fast path was removed in ablation G4).
 func TestBareAnswerGoesToTheBrain(t *testing.T) {
 	m := braintest.NewModel(braintest.Step{Text: braintest.Reply("Which one do you mean?", "")})

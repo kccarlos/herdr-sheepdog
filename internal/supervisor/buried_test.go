@@ -31,8 +31,8 @@ func (h *harness) lastPushText() string {
 const staleReply = "I told auth to rerun the shop tests, and it is on it now."
 
 // Tier-3 bench 2026-10-03 #9 (t3-codex-report): Codex's approval push
-// was followed four seconds later by the stale reply to the CEO's
-// previous words; the CEO waited, the prompt stayed open for three
+// was followed four seconds later by the stale reply to the user's
+// previous words; the user waited, the prompt stayed open for three
 // minutes and nothing raised it again. Now a prompt buried that way is
 // re-announced once, at the next quiet moment, tagged with its event.
 func TestBuriedPromptIsRemindedOnce(t *testing.T) {
@@ -78,7 +78,7 @@ func TestBuriedPromptIsRemindedOnce(t *testing.T) {
 	}
 }
 
-// No reminder when the CEO spoke after the announcement (they had their
+// No reminder when the user spoke after the announcement (they had their
 // say), when nothing followed it, or once the prompt was answered.
 func TestPromptNotRemindedWhenHeard(t *testing.T) {
 	setup := func(t *testing.T) *harness {
@@ -137,8 +137,8 @@ func TestUnheardPromptIsReminded(t *testing.T) {
 	}
 }
 
-// The brain's next utterance request carries the fact that the prompt is
-// open and likely unheard; a request after the CEO heard it does not.
+// The orchestrator's next utterance request carries the fact that the prompt is
+// open and likely unheard; a request after the user heard it does not.
 func TestUtteranceRequestSaysThePromptIsUnheard(t *testing.T) {
 	m := braintest.NewModel()
 	m.EventDefault = announceReply("Auth wants to run a command.", "idle", "", "", true)

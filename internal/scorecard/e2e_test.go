@@ -8,7 +8,7 @@ import (
 
 // TestAnalyzeOverRealE2EFixture is the one non-synthetic test the WP0a
 // brief asks for: run Analyze over a real recorded fixture and confirm it
-// never crashes or errors, even though the fixture (from before the brain
+// never crashes or errors, even though the fixture (from before the orchestrator
 // package existed: it logs "llm.call", not "brain.*", and carries no
 // event ids at all) is a good example of the schema drift
 // docs/architecture.md warns about. Per the brief, this test is skipped

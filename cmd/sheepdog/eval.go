@@ -28,8 +28,8 @@ func printEvalUsage(w io.Writer) {
 	fprintln(w, "")
 	fprintln(w, "Runs the conversation eval sets under testdata/eval and prints a pass/fail table.")
 	fprintln(w, "Offline by default: assistant cases are only validated (no model; a case that")
-	fprintln(w, "carries its logged baseline is graded against it), SVP cases run through the")
-	fprintln(w, "brain with a scripted fake model (a check of the harness — the rail, provenance")
+	fprintln(w, "carries its logged baseline is graded against it), orchestrator cases run through the")
+	fprintln(w, "orchestrator with a scripted fake model (a check of the harness — the rail, provenance")
 	fprintln(w, "wrapping, tool calls — not of model judgement); the checks about phrasing are")
 	fprintln(w, "live only and listed as skipped. --live calls gemini-3.5-flash in plain text")
 	fprintln(w, "mode (never Live audio).")
@@ -47,9 +47,9 @@ func printEvalUsage(w io.Writer) {
 	fprintln(w, "  --config PATH         config file (default ~/.config/sheepdog/config.toml)")
 	fprintln(w, "  --env-file PATH       load KEY=VALUE lines into the environment first")
 	fprintln(w, "  --prompts-dir PATH    prompt override directory (default config prompts.dir)")
-	fprintln(w, "  --provider ID         live brain provider: gemini (AI Studio keys, the default),")
+	fprintln(w, "  --provider ID         live orchestrator provider: gemini (AI Studio keys, the default),")
 	fprintln(w, "                        vertex or deepseek")
-	fprintln(w, "  --model ID            live brain model (default brain.model)")
+	fprintln(w, "  --model ID            live orchestrator model (default brain.model)")
 	fprintln(w, "  --judge KIND          LLM judge for the wording checks and judge criteria:")
 	fprintln(w, "                        claude (default with --live; SHEEPDOG_JUDGE overrides), vertex,")
 	fprintln(w, "                        ollama, fake or none")
@@ -93,8 +93,8 @@ func parseEvalFlags(args []string, stderr io.Writer) (evalOpts, int, bool) {
 	fs.StringVar(&o.configPath, "config", "", "config file")
 	fs.StringVar(&o.envFile, "env-file", "", "env file")
 	fs.StringVar(&o.promptsDir, "prompts-dir", "", "prompt override directory")
-	fs.StringVar(&o.provider, "provider", "", "live brain provider: gemini, vertex or deepseek")
-	fs.StringVar(&o.model, "model", "", "live brain model")
+	fs.StringVar(&o.provider, "provider", "", "live orchestrator provider: gemini, vertex or deepseek")
+	fs.StringVar(&o.model, "model", "", "live orchestrator model")
 	fs.StringVar(&o.judge, "judge", "", "LLM judge: vertex, ollama, fake or none")
 	fs.StringVar(&o.judgeModel, "judge-model", "", "judge model id")
 	fs.StringVar(&o.ollamaURL, "ollama-url", "", "Ollama OpenAI-compatible root")
@@ -198,7 +198,7 @@ func runEval(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// evalModels is the live run's models (nil: offline): the brain's, the
+// evalModels is the live run's models (nil: offline): the orchestrator's, the
 // assistant set's (AI Studio Gemini keys; nil without them) and the
 // judge (nil: none).
 type evalModels struct {
@@ -289,7 +289,7 @@ func judgeMissing(kind string, cfg config.Config) string {
 	return ""
 }
 
-// runEvalSet loads and runs one set: its SVP files through the brain,
+// runEvalSet loads and runs one set: its orchestrator files through the orchestrator,
 // its assistant files through the voice prompt.
 func runEvalSet(ctx context.Context, o evalOpts, set string, pl *prompts.Loader, models *evalModels) ([]eval.Result, error) {
 	spec := evalSets[set]

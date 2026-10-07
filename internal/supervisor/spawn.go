@@ -18,12 +18,12 @@ import (
 )
 
 // Starting a new agent by voice (docs/roles.md "Starting an agent"): the
-// brain's prompt tool with new_agent_dir. The judgement — which project
-// the CEO meant, which kind, whether to ask — is the brain's; the daemon
+// orchestrator's prompt tool with new_agent_dir. The judgement — which project
+// the user meant, which kind, whether to ask — is the orchestrator's; the daemon
 // gives it the candidate directories when a name does not resolve, and
 // holds the rails, which are about authorisation and runaways only:
 //
-//   - the CEO's own recent words must be behind it, not yet spent on
+//   - the user's own recent words must be behind it, not yet spent on
 //     another write (spawnRailLocked, the same fresh-input reading as the
 //     approval rail; one input starts one agent);
 //   - the directory must resolve, symlinks followed, inside a project
@@ -33,8 +33,8 @@ import (
 //
 // The agent is started by typing its command line into a new pane's
 // shell (herdr's agent.start needs a name, and a name the daemon chose
-// would be heard as the CEO's own: state.CEOName); herdr detects it like
-// any agent the CEO starts by hand, so it reaches the roster with a
+// would be heard as the user's own: state.CEOName); herdr detects it like
+// any agent the user starts by hand, so it reaches the roster with a
 // spoken name and its first-run trust question becomes a normal pending
 // question. The first instruction, when there is one, follows once the
 // agent sits idle at its prompt.
@@ -69,7 +69,7 @@ var (
 	// that is still being drawn.
 	spawnShellSettle = 200 * time.Millisecond
 	// spawnReadyWait is how long herdr may take to report the new agent
-	// before the brain and the CEO are told it has not started, with the
+	// before the orchestrator and the user are told it has not started, with the
 	// pane's last lines (the watch goes on). herdr sees a starting Claude
 	// or Codex within seconds, even at its trust question; a command
 	// line a shell prompt ate never starts (2026-10-04).
@@ -77,7 +77,7 @@ var (
 	// spawnFirstWait bounds the whole wait, from the start, for the
 	// agent to be recognised and sit idle (its trust question answered)
 	// before the first instruction goes; past it the instruction is
-	// dropped, logged and the brain told.
+	// dropped, logged and the orchestrator told.
 	spawnFirstWait = 10 * time.Minute
 	// spawnGoneCheck is how often a new agent herdr has not recognised
 	// is checked for a closed pane.
@@ -85,7 +85,7 @@ var (
 )
 
 // spawnScreenLines is how many of a not-ready agent's last pane lines
-// the brain is given.
+// the orchestrator is given.
 const spawnScreenLines = 15
 
 // spawnModel is the model names the command line accepts: letters,
@@ -94,7 +94,7 @@ var spawnModel = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$`)
 
 // spawnDir is one directory a new agent may start in.
 type spawnDir struct {
-	Name string // its base name: what the CEO says
+	Name string // its base name: what the user says
 	Path string // absolute, symlinks resolved
 	// Pane is a pane of an existing workspace in this directory ("" when
 	// none): the new agent's pane is split from it.
@@ -184,26 +184,26 @@ func (s *Supervisor) spawn(ctx context.Context, req brain.SpawnRequest) (string,
 	echo := "Starting a new " + state.KindWord(req.Kind) + " in " + dir.Name + "."
 	if req.Text != "" {
 		// Not "told it": the instruction is held (2026-10-03 live check,
-		// the brain said "and told it to run the tests" before the trust
+		// the orchestrator said "and told it to run the tests" before the trust
 		// question was even answered).
 		echo += " It has not been told anything yet: the instruction goes to it once it is ready."
 	}
 	return echo, nil
 }
 
-// spawnRailLocked is the authorisation rail of a new agent: the CEO's
+// spawnRailLocked is the authorisation rail of a new agent: the user's
 // newest input — said or typed, never a tap on a question — arrived
 // within supervisor.authorise_window_s, has words, is not a "no" or
 // only a filler, and has not already authorised a write (an answer to a
 // prompt, a new agent, a close: each marks the words used). It does not
-// read what the words ask for: that is the brain's judgement. Caller
+// read what the words ask for: that is the orchestrator's judgement. Caller
 // holds s.mu.
 func (s *Supervisor) spawnRailLocked() string {
 	return s.wordsRailLocked("a new agent", "started an agent")
 }
 
 // wordsRailLocked is spawnRailLocked's reading for any write that needs
-// words of the CEO's own: what names the write ("a new agent", "closing
+// words of the user's own: what names the write ("a new agent", "closing
 // an agent"), spent what the words may already have done. Caller holds
 // s.mu.
 func (s *Supervisor) wordsRailLocked(what, spent string) string {
@@ -283,12 +283,12 @@ func (s *Supervisor) spawnDirs(snap herdr.Snapshot) []spawnDir {
 	return out
 }
 
-// resolveSpawnDir turns what the brain passed into one allowed
+// resolveSpawnDir turns what the orchestrator passed into one allowed
 // directory. A path (absolute or ~/…) must resolve, symlinks followed,
 // to a directory inside a project root or to an existing workspace's
 // directory itself. A name matches a candidate's base name (case and
 // punctuation aside) when exactly one does. Otherwise the error lists
-// the candidates, for the brain to ask the CEO.
+// the candidates, for the orchestrator to ask the user.
 func resolveSpawnDir(want string, dirs []spawnDir, roots []string) (spawnDir, string, error) {
 	want = strings.TrimSpace(want)
 	if strings.HasPrefix(want, "~") {
@@ -351,7 +351,7 @@ func resolveSpawnDir(want string, dirs []spawnDir, roots []string) (spawnDir, st
 	}
 }
 
-// dirNames lists the candidates' names for an error the brain reads.
+// dirNames lists the candidates' names for an error the orchestrator reads.
 func dirNames(dirs []spawnDir) string {
 	if len(dirs) == 0 {
 		return "none (no workspace is open and supervisor.project_roots has no subdirectories)"
@@ -443,17 +443,17 @@ func (s *Supervisor) waitShell(ctx context.Context, sp Spawner, paneID string) {
 
 // followSpawn watches a new agent start: it waits for the watcher to put
 // it in the roster, then — when there is a first instruction — for it to
-// sit idle at its prompt (its trust question answered by the CEO through
+// sit idle at its prompt (its trust question answered by the user through
 // the normal pending path), and sends the instruction through the
 // instruction send path (sendInstruction's menu guard included).
 //
 // An agent herdr has not recognised after spawnReadyWait is not given up
-// on (the CEO's phone session, 2026-10-04 04:59:57: the kvoice Claude
+// on (the user's phone session, 2026-10-04 04:59:57: the kvoice Claude
 // was dropped after 60 s with its instruction, most likely still at its
-// first-run question): the brain is told, with the pane's last lines,
+// first-run question): the orchestrator is told, with the pane's last lines,
 // that the agent is not ready and the instruction is held, and the watch
 // goes on until spawnFirstWait or the pane closes. What the screen means
-// is the brain's to read.
+// is the orchestrator's to read.
 func (s *Supervisor) followSpawn(paneID, kind, text, dirName string) {
 	ctx := s.life
 	start := time.Now()
@@ -468,7 +468,7 @@ func (s *Supervisor) followSpawn(paneID, kind, text, dirName string) {
 				seen = true
 				s.log.Log(logSource, "supervisor.spawn_ready", paneID, map[string]any{"kind": kind, "state": string(row.State), "agent": aliasOr(row.Alias), "waited_s": int(time.Since(start).Seconds())})
 				if late {
-					// The CEO was told it had not started: correct it.
+					// The user was told it had not started: correct it.
 					s.pushTagged(paneID, fmt.Sprintf("The new %s%s is running now, %d s after its command was typed (herdr sees it as %s).", state.KindWord(kind), inDir(dirName), int(time.Since(start).Seconds()), row.State), voice.UrgencyIdle, map[string]any{"from": "daemon", "kind": "spawn check"})
 				}
 				if text == "" {
@@ -513,7 +513,7 @@ func (s *Supervisor) followSpawn(paneID, kind, text, dirName string) {
 				line += fmt.Sprintf("; its first instruction is held until it is ready (waiting up to %d minutes)", int(spawnFirstWait.Minutes()))
 			}
 			s.tellBrain(line + ". The last lines of its pane:\n" + tail)
-			// The CEO asked for it and must not think it is running: a
+			// The user asked for it and must not think it is running: a
 			// daemon fact for the voice, with what the pane shows.
 			s.pushTagged("", spawnNotStartedLine(kind, dirName, tail), voice.UrgencyIdle, map[string]any{"from": "daemon", "kind": "spawn check"})
 			lastCheck = now
@@ -562,7 +562,7 @@ func (s *Supervisor) spawnGone(paneID, kind, text string) {
 	s.tellBrain(line)
 }
 
-// tellBrain puts a fact the daemon saw into the brain's transcript, for
+// tellBrain puts a fact the daemon saw into the orchestrator's transcript, for
 // its next turn (no turn is started).
 func (s *Supervisor) tellBrain(line string) {
 	if s.brain != nil {
@@ -570,7 +570,7 @@ func (s *Supervisor) tellBrain(line string) {
 	}
 }
 
-// spawnNotStartedLine is the daemon's fact for the CEO about a new agent
+// spawnNotStartedLine is the daemon's fact for the user about a new agent
 // herdr does not see: what was started where, and the pane's last
 // lines, for the voice to retell.
 func spawnNotStartedLine(kind, dirName, tail string) string {
@@ -589,5 +589,5 @@ func inDir(dirName string) string {
 	return " in " + dirName
 }
 
-// spawnTellLines is how many pane lines the CEO's fact quotes.
+// spawnTellLines is how many pane lines the user's fact quotes.
 const spawnTellLines = 5

@@ -65,13 +65,13 @@ func (s *Supervisor) invalidateBriefingLocked() {
 }
 
 // briefingRepeat reports how long ago text was last delivered to the
-// shepherd (markBriefingDelivered), when that was within
+// user (markBriefingDelivered), when that was within
 // Config.RepeatWindow (supervisor.repeat_window_s). It only reads: a
-// roster counts as delivered once the shepherd heard an answer, never
+// roster counts as delivered once the user heard an answer, never
 // because a request carried it — a turn that failed delivered nothing,
 // and its fallback must not then claim "no change since I last checked"
 // (2026-09-24 18:16:43: said three times in reply to questions about
-// details, after the brain had errored).
+// details, after the orchestrator had errored).
 func (s *Supervisor) briefingRepeat(text string) (time.Duration, bool) {
 	now := s.cfg.Now()
 	s.mu.Lock()
@@ -82,9 +82,9 @@ func (s *Supervisor) briefingRepeat(text string) (time.Duration, bool) {
 	return now.Sub(s.lastBriefingAt), true
 }
 
-// markBriefingDelivered records text as the roster the shepherd last
-// heard an answer about: after a brain reply, or the roster sentence
-// itself when there is no brain.
+// markBriefingDelivered records text as the roster the user last
+// heard an answer about: after an orchestrator reply, or the roster sentence
+// itself when there is no orchestrator.
 func (s *Supervisor) markBriefingDelivered(text string) {
 	now := s.cfg.Now()
 	s.mu.Lock()
@@ -185,7 +185,7 @@ func describeAgent(a state.Agent, now time.Time) string {
 // as a garbled clause ("claude is idle; it last reports that because
 // all previous work (including the bug fixes and the, and codex is
 // idle", phone test 2026-10-04 16:21Z). The announcement itself reaches
-// the brain whole in the agent's record (brainhost.go LastResult).
+// the orchestrator whole in the agent's record (brainhost.go LastResult).
 func recentFinish(a state.Agent, now time.Time) string {
 	if a.LastResult == nil || a.LastResult.At.IsZero() || now.Sub(a.LastResult.At) > briefingResultMaxAge {
 		return ""

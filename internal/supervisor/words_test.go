@@ -10,7 +10,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
 
-// The shepherd's words (docs/iteration-2.md WP3): every utterance runs
+// The user's words (docs/iteration-2.md WP3): every utterance runs
 // on what the daemon recorded, not on the voice model's argument; an
 // utterance the voice leaves unanswered is relayed by the daemon; and
 // back-to-back utterances queued behind a running turn are one turn.
@@ -22,7 +22,7 @@ func relayAfter(d time.Duration) func(*Config) {
 }
 
 // lastCall is the newest model call's text, for assertions on the
-// words the brain was asked about.
+// words the orchestrator was asked about.
 func lastCall(t *testing.T, m *braintest.Model) string {
 	t.Helper()
 	calls := m.Calls()
@@ -32,8 +32,8 @@ func lastCall(t *testing.T, m *braintest.Model) string {
 	return calls[len(calls)-1].Text()
 }
 
-// Gemini shape: the transcript is the shepherd's sentence, the tool
-// argument the model's paraphrase of it; the brain gets the sentence, and
+// Gemini shape: the transcript is the user's sentence, the tool
+// argument the model's paraphrase of it; the orchestrator gets the sentence, and
 // the argument is logged beside it.
 func TestBrainHearsTheRecordedWordsNotTheArgument(t *testing.T) {
 	m := braintest.NewModel(braintest.Step{Text: braintest.Reply("It is halfway.", "")})
@@ -57,7 +57,7 @@ func TestBrainHearsTheRecordedWordsNotTheArgument(t *testing.T) {
 
 // GPT-Live shape (2026-09-23 23:53:26): a pause mid-sentence closes the
 // input (settle's empty final), so the sentence is two inputs; the
-// relay carried only the tail ("sometimes"). The brain gets the whole
+// relay carried only the tail ("sometimes"). The orchestrator gets the whole
 // sentence.
 func TestSplitSentenceRunsWhole(t *testing.T) {
 	m := braintest.NewModel(braintest.Step{Text: braintest.Reply("I'll tell it.", "")})
@@ -120,7 +120,7 @@ func TestEmptyRecordedInputFallsBackToTheArgument(t *testing.T) {
 	}
 }
 
-// A bare stop the shepherd said is a stop, whatever the voice relayed.
+// A bare stop the user said is a stop, whatever the voice relayed.
 func TestHeardStopIsAStopWhateverTheRelay(t *testing.T) {
 	h := newHarness(t)
 	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
@@ -314,7 +314,7 @@ func TestWordsAfterTheDaemonRelayAreFresh(t *testing.T) {
 	}
 }
 
-// A barge-in ends a push: what the voice says next answers the shepherd.
+// A barge-in ends a push: what the voice says next answers the user.
 func TestBargeInEndsThePushWindow(t *testing.T) {
 	h := newHarness(t, relayAfter(40*time.Millisecond))
 	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)

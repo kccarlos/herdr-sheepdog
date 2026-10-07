@@ -143,7 +143,7 @@ func TestSVPLiveWordingChecksJudged(t *testing.T) {
 	}
 }
 
-// The brain's tokens are counted from its brain.step events.
+// The orchestrator's tokens are counted from its brain.step events.
 func TestSVPLiveMetersBrainTokens(t *testing.T) {
 	meter := NewMeter()
 	c := SVPCase{ID: "m", ScreenFixture: "codex-after-approval.screen.txt", Request: SVPRequest{Question: "status?", Agent: "auth"}}
@@ -194,7 +194,7 @@ func TestLLMJudgeEvidence(t *testing.T) {
 	}
 }
 
-// Every rubric item states its failure in both directions (CEO rule,
+// Every rubric item states its failure in both directions (user rule,
 // 2026-10-05), and no item tells the judge "short by default".
 func TestRubricTwoSided(t *testing.T) {
 	items := append(DefaultRubric(), ExplainRubric()...)

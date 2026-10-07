@@ -41,18 +41,18 @@ type Config struct {
 	// dual-brain.md, prompt v5). ok is false for an unknown alias.
 	AgentNow func(alias string) (name, state string, ok bool)
 	// DecisionsNow, when set, says whether any agent is waiting for the
-	// CEO's answer as a briefing reaches the model ("none: …" or "yes:
+	// user's answer as a briefing reaches the model ("none: …" or "yes:
 	// …"); it goes on every spoken announcement as decision_open
 	// (information; baseline 2026-10-05 cluster 3).
 	DecisionsNow func() string
-	// Language, when set, returns the shepherd's language setting as one
+	// Language, when set, returns the user's language setting as one
 	// line of information (internal/lang.Line; "" when none is set). It
 	// is appended to the system prompt at every (re)connect, so the next
 	// session has it; a running one learns a change from the
 	// supervisor's silent line (Live reads its system instruction only
 	// at setup).
 	Language func() string
-	// Name is what the dog calls itself (config voice.name, default
+	// Name is what the voice calls itself (config voice.name, default
 	// "Sheepdog"), substituted into the system prompt as {name}.
 	Name string
 	// SystemPrompt overrides prompts/assistant.md (and any override of

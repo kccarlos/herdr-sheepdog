@@ -8,10 +8,10 @@ import (
 // Playback truth (docs/ws-contract.md "Playback reports"): the /ws client
 // reports when its player starts, drains and flushes, and how much of the
 // spoken run it actually played. The sessions use that to keep "the
-// model is speaking" true until the shepherd has heard the end of the
+// model is speaking" true until the user has heard the end of the
 // reply (Gemini generates ~4× real time, so its turnComplete arrives
 // seconds before the speech ends), to measure the push gap from the real
-// end of speech, and to tell the brain which part of a cut-off reply was
+// end of speech, and to tell the orchestrator which part of a cut-off reply was
 // heard. A client that never reports (an old page, voice-test) gets a
 // timing guess instead: audio delivered minus wall time since it began.
 
@@ -31,7 +31,7 @@ const (
 	// said ended (a lost message, a client gone quiet): it stops counting
 	// as playing this long after the estimated end of the audio sent.
 	PlaybackReportSlack = 5 * time.Second
-	// ClientSpeechRelease is how long the shepherd still counts as
+	// ClientSpeechRelease is how long the user still counts as
 	// speaking after the client's speech detector closed.
 	ClientSpeechRelease = 300 * time.Millisecond
 	// ClientSpeechTrust bounds how long an open client speech detector
@@ -56,7 +56,7 @@ const outBytesPerMs = 48
 // TranscriptCut marks an EventTranscript that corrects the model's
 // preceding output speech: the client flushed a spoken run before
 // playing all of it (a barge-in, the stop button, an interrupting push).
-// The event's Text is the part the shepherd heard (possibly empty).
+// The event's Text is the part the user heard (possibly empty).
 type TranscriptCut struct {
 	// HeardMs is how much of the run the client played.
 	HeardMs int
@@ -391,7 +391,7 @@ func (c *ClientSpeech) Set(now time.Time, on bool) {
 }
 
 // Onset is when the client's detector last opened (ok false when it
-// never reported): when the shepherd — or the speaker's echo — last
+// never reported): when the user — or the speaker's echo — last
 // began to sound.
 func (c *ClientSpeech) Onset() (time.Time, bool) {
 	if !c.known || c.since.IsZero() {
@@ -403,7 +403,7 @@ func (c *ClientSpeech) Onset() (time.Time, bool) {
 // Reset forgets the client's detector (the client went away).
 func (c *ClientSpeech) Reset() { *c = ClientSpeech{} }
 
-// Hold is how long pushes should still wait for the shepherd according
+// Hold is how long pushes should still wait for the user according
 // to the client's detector: while it is open (up to ClientSpeechTrust
 // since it opened) and ClientSpeechRelease after it closed; 0 when it
 // says nothing. Callers combine it with their transcript-based rule,

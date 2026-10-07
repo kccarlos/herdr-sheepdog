@@ -109,13 +109,13 @@ func TestCaptureGemini(t *testing.T) {
 
 	// Labels: the prompt sections, the tools, every message kind.
 	for _, want := range []string{"request settings", "role (SOUL.md)", "USER.md", "roster", "ledger", "investigations", "time", "tool read_screen", "tool send_keys",
-		"worker event", "push", "shepherd utterance", "current request", "brain tool call", "brain tool result", "worker output (untrusted)"} {
+		"worker event", "push", "user utterance", "current request", "orchestrator tool call", "orchestrator tool result", "worker output (untrusted)"} {
 		if len(sectionsWith(last.Snapshot, want)) == 0 {
 			t.Errorf("no %q section in step 2", want)
 		}
 	}
 	// Links.
-	checks := map[string]string{"shepherd utterance": "call:c1", "current request": "call:c1", "push": "push:p1", "worker event": "evt:e1", "brain tool call": "call:c1", "brain tool result": "call:c1"}
+	checks := map[string]string{"user utterance": "call:c1", "current request": "call:c1", "push": "push:p1", "worker event": "evt:e1", "orchestrator tool call": "call:c1", "orchestrator tool result": "call:c1"}
 	for label, link := range checks {
 		secs := sectionsWith(last.Snapshot, label)
 		if len(secs) == 0 || !hasLink(secs[0], link) {

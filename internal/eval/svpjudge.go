@@ -80,7 +80,7 @@ const (
 	reasonFallback   = "the turn fell back (no brain reply)"
 )
 
-// svpTranscript renders the case's conversation as the CEO lived it.
+// svpTranscript renders the case's conversation as the user lived it.
 func svpTranscript(c SVPCase, req brain.Request, reply brain.Reply) string {
 	var b strings.Builder
 	for _, line := range c.Transcript {
@@ -113,7 +113,7 @@ func svpTranscript(c SVPCase, req brain.Request, reply brain.Reply) string {
 }
 
 // svpFacts is the ground truth for the judge: each agent's screen
-// (clipped) and the tools the brain called.
+// (clipped) and the tools the orchestrator called.
 func svpFacts(host *braintest.Host, rec *recorder) string {
 	var b strings.Builder
 	for _, a := range host.Agents() {
@@ -145,7 +145,7 @@ func lastLines(s string, n int) []string {
 	return lines
 }
 
-// classifySVP labels an SVP result's failure reasons with the taxonomy.
+// classifySVP labels an orchestrator result's failure reasons with the taxonomy.
 func classifySVP(reasons []string, err error) []Failure {
 	var fs []Failure
 	if err != nil {

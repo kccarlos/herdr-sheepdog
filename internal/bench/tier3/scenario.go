@@ -3,7 +3,7 @@
 // Each run gets its own named herdr session (never the default one), a
 // throwaway clone of the bench repo per workspace, real Claude Code or
 // Codex workers started in its panes, and a scratch daemon bound to that
-// session's socket. The simulated CEO of internal/eval talks to the
+// session's socket. The simulated user of internal/eval talks to the
 // daemon in text (POST /api/inject/utterance, the text router standing in
 // for the voice model; `serve --heard-echo` reports what it says back as
 // heard), hears its pushes (voice.push events), and the judge of
@@ -49,14 +49,14 @@ type Scenario struct {
 	Caps   eval.SimCaps `json:"caps,omitempty"`
 	// Workers are the real agents, in start order.
 	Workers []Worker `json:"workers"`
-	// Audio and Behavior are how the CEO sounds and acts in --voice mode
+	// Audio and Behavior are how the user sounds and acts in --voice mode
 	// (tier 2's types: voice, style, disfluency, noise, echo, gate; think
 	// time and barge-in). Collision and reconnect are not supported on a
-	// real flock. Text mode ignores both.
+	// real workers. Text mode ignores both.
 	Audio    bench.Audio    `json:"audio,omitempty"`
 	Behavior bench.Behavior `json:"behavior,omitempty"`
 	// Setup runs before the call, in order (prompts typed straight into
-	// a worker, as the CEO would have at the terminal earlier).
+	// a worker, as the user would have at the terminal earlier).
 	Setup  []Step `json:"setup,omitempty"`
 	Expect Expect `json:"expect"`
 }

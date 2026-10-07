@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-// BrainSteps is how many brain steps the log keeps in memory (and loads
+// BrainSteps is how many orchestrator steps the log keeps in memory (and loads
 // back from the previous run at startup).
 const BrainSteps = 200
 
@@ -30,7 +30,7 @@ type Usage struct {
 	CachedTokens     int `json:"cached_tokens,omitempty"`
 }
 
-// BrainStep is one model call of the brain: the exact request, rendered
+// BrainStep is one model call of the orchestrator: the exact request, rendered
 // and mapped, with the turn it belongs to.
 type BrainStep struct {
 	// Step numbers every model call of the daemon's runs, 1-based and
@@ -40,7 +40,7 @@ type BrainStep struct {
 	// transcript segment (it changes on a "New conversation").
 	Run     string `json:"run"`
 	Segment string `json:"segment"`
-	// Turn is the brain turn, TurnStep the model call within it.
+	// Turn is the orchestrator turn, TurnStep the model call within it.
 	Turn     int       `json:"turn"`
 	TurnStep int       `json:"turn_step"`
 	Kind     string    `json:"kind"`
@@ -73,7 +73,7 @@ func (s BrainStep) Meta() BrainStep {
 	return s
 }
 
-// BrainLog keeps the brain's last BrainSteps requests in memory and
+// BrainLog keeps the orchestrator's last BrainSteps requests in memory and
 // appends every one to its run's requests file. Safe for concurrent use.
 type BrainLog struct {
 	mu     sync.Mutex

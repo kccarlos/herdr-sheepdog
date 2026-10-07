@@ -44,7 +44,7 @@ func (s *toneSynth) Synthesize(_ context.Context, r speech.Request) (speech.Clip
 }
 
 // fakePhoneDaemon speaks the /ws and /events sides of the daemon: when
-// the shepherd stops speaking it "hears" heard and answers with reply.
+// the user stops speaking it "hears" heard and answers with reply.
 type fakePhoneDaemon struct {
 	srv    *httptest.Server
 	heard  string
@@ -154,7 +154,7 @@ func TestVoiceCallSpeaksAndHears(t *testing.T) {
 	if vc.off < 4000 {
 		t.Fatalf("clock offset %d ms, want about 5000 (the call started before the phone dialled)", vc.off)
 	}
-	// The push of the flock already running.
+	// The push of the workers already running.
 	arrived := vc.arrive(ctx)
 	if len(arrived) != 1 || !strings.Contains(arrived[0].Text, "tests finished") {
 		t.Fatalf("arrive = %+v", arrived)

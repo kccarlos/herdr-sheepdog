@@ -94,8 +94,8 @@ func TestNotifyKeptPromise(t *testing.T) {
 	}
 }
 
-// With the brain, the notification carries its line and the event id
-// (the sender's dedupe key); a brain that skips a finish sends nothing.
+// With the orchestrator, the notification carries its line and the event id
+// (the sender's dedupe key); an orchestrator that skips a finish sends nothing.
 func TestNotifyBrainLineCarriesEventID(t *testing.T) {
 	fn := &fakeNotifier{}
 	m := braintest.NewModel()

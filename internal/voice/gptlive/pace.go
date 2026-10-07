@@ -13,7 +13,7 @@ import (
 // exactly while the model replies — so the daemon fills the gap with
 // silence. It used to send one Tick of silence only when two Ticks had
 // passed since the last send, so the input timeline advanced at ≤ 0.5×
-// real time while the shepherd listened. The pacer instead counts the
+// real time while the user listened. The pacer instead counts the
 // audio sent on a connection against the wall clock since its first
 // send, and keepAlive pays the difference (the debt) in silence.
 const (
@@ -55,7 +55,7 @@ type inputPacer struct {
 // captured in the past (the pre-roll and the frames buffered while the
 // session opened): it moves the anchor back by its duration, so it is
 // neither lead nor debt — counted as lead, it held the keep-alive off
-// for 1–2 s right after the shepherd's first utterance, when the model
+// for 1–2 s right after the user's first utterance, when the model
 // starts its reply.
 func (p *inputPacer) add(now time.Time, n int, src audioSrc) {
 	p.mu.Lock()

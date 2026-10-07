@@ -34,7 +34,7 @@ func ms(p *int64) int64 {
 	return *p
 }
 
-// A slow reply, with ids: every segment from the shepherd's last words
+// A slow reply, with ids: every segment from the user's last words
 // to the push's first audio.
 func TestBreakdownPushPathWithIDs(t *testing.T) {
 	tr := NewTracker()

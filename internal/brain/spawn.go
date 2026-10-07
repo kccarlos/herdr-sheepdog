@@ -10,8 +10,8 @@ import (
 // Starting a new agent (docs/roles.md "Starting an agent"): the prompt
 // tool with new_agent_dir starts a Claude Code or Codex worker in a
 // project directory instead of instructing a running one, with text, when
-// given, as its first instruction. Which directory the CEO meant is the
-// brain's judgement; the daemon only resolves a name against the
+// given, as its first instruction. Which directory the user meant is the
+// orchestrator's judgement; the daemon only resolves a name against the
 // directories it allows and refuses the rest with the candidates listed.
 
 // Spawn kinds: the agent CLIs a new agent may be.
@@ -23,7 +23,7 @@ const (
 // SpawnKinds are the accepted new_agent_kind values.
 var SpawnKinds = []string{SpawnClaude, SpawnCodex}
 
-// SpawnRequest is one new agent the brain asked for.
+// SpawnRequest is one new agent the orchestrator asked for.
 type SpawnRequest struct {
 	// Dir is the project directory: a name ("sheepdog-bench") or a path.
 	Dir string
@@ -40,7 +40,7 @@ type SpawnRequest struct {
 type Spawner interface {
 	// Spawn starts the agent and returns at once with the spoken echo;
 	// the first instruction follows once the agent is ready. A refusal
-	// by the rail (no recent words of the CEO's, the rate cap) wraps
+	// by the rail (no recent words of the user's, the rate cap) wraps
 	// ErrNotPermitted.
 	Spawn(ctx context.Context, req SpawnRequest) (string, error)
 }

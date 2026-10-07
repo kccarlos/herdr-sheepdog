@@ -81,7 +81,7 @@ func renderRequest(impl Model, provider, model string, secs []PromptSection, add
 // Links: a request carries the one it was made with (Message.Link: the
 // voice's tool call, or the worker event an announce turn is about);
 // the turn's tool calls, results, screens, promises and reply take their
-// turn's; a shepherd utterance ingested outside a turn takes the call
+// turn's; a user utterance ingested outside a turn takes the call
 // link of the next request, the tool call that relayed it; pushes and
 // worker events carry their own.
 func annotate(msgs []Message, turn int) []ctxcap.Section {
@@ -138,7 +138,7 @@ func annotate(msgs []Message, turn int) []ctxcap.Section {
 			sec.Links = []string{link}
 		}
 		if prunable(m) && m.Content == stubFor(m) {
-			sec.Pruned, sec.Class, sec.Label = true, ctxcap.ClassPruned, "pruned stub ("+strings.TrimPrefix(sec.Label, "brain ")+")"
+			sec.Pruned, sec.Class, sec.Label = true, ctxcap.ClassPruned, "pruned stub ("+strings.TrimPrefix(sec.Label, "orchestrator ")+")"
 		}
 		out[i] = sec
 	}
@@ -149,7 +149,7 @@ func annotate(msgs []Message, turn int) []ctxcap.Section {
 func kindLabel(k MessageKind) (string, string) {
 	switch k {
 	case KindCEOUtterance:
-		return "shepherd utterance", ctxcap.ClassShepherd
+		return "user utterance", ctxcap.ClassShepherd
 	case KindAssistantSaid:
 		return "voice said", ctxcap.ClassVoice
 	case KindPush:
@@ -161,11 +161,11 @@ func kindLabel(k MessageKind) (string, string) {
 	case KindRequest:
 		return "request", ctxcap.ClassRequest
 	case KindToolCall:
-		return "brain tool call", ctxcap.ClassToolCall
+		return "orchestrator tool call", ctxcap.ClassToolCall
 	case KindToolResult:
-		return "brain tool result", ctxcap.ClassToolResult
+		return "orchestrator tool result", ctxcap.ClassToolResult
 	case KindReply:
-		return "brain reply", ctxcap.ClassBrain
+		return "orchestrator reply", ctxcap.ClassBrain
 	case KindCompaction:
 		return "compaction summary", ctxcap.ClassCompaction
 	case KindPromise:

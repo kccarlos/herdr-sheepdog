@@ -26,7 +26,7 @@ type MessageKind string
 
 // The message kinds.
 const (
-	// KindCEOUtterance is what the CEO said (voice.transcript.in).
+	// KindCEOUtterance is what the user said (voice.transcript.in).
 	KindCEOUtterance MessageKind = "ceo_utterance"
 	// KindAssistantSaid is what the assistant said (voice.transcript.out),
 	// merged per turn.
@@ -35,7 +35,7 @@ const (
 	KindPush MessageKind = "push"
 	// KindWorkerEvent is a herdr transition.
 	KindWorkerEvent MessageKind = "worker_event"
-	// KindNote is a note the CEO asked to be remembered.
+	// KindNote is a note the user asked to be remembered.
 	KindNote MessageKind = "note"
 	// KindRequest is the request as received (utterance, stop or event;
 	// transcripts from before hold ask / propose ones too).
@@ -50,7 +50,7 @@ const (
 	// window.
 	KindCompaction MessageKind = "compaction_summary"
 	// KindPromise is a promise's record: made by the promise tool in a
-	// CEO turn, then kept, expired or cancelled by the supervisor (one
+	// user turn, then kept, expired or cancelled by the supervisor (one
 	// message per transition; Promise carries the status).
 	KindPromise MessageKind = "promise"
 	// KindEventScreen is the pane read the supervisor took for the event
@@ -83,7 +83,7 @@ type Message struct {
 	Content string      `json:"content,omitempty"`
 	// Agent is the alias the message is about, when one.
 	Agent string `json:"agent,omitempty"`
-	// Turn is the brain turn that produced the message; 0 for ingested
+	// Turn is the orchestrator turn that produced the message; 0 for ingested
 	// context.
 	Turn     int       `json:"turn,omitempty"`
 	ToolCall *ToolCall `json:"tool_call,omitempty"`
@@ -115,7 +115,7 @@ type Message struct {
 	Link string `json:"link,omitempty"`
 	// Cut marks a KindAssistantSaid message whose speech the client cut
 	// off (a barge-in, the stop button, an interrupting push): Content
-	// is only the part the CEO heard, and CutAfterMs how much of the
+	// is only the part the user heard, and CutAfterMs how much of the
 	// speech played. See Brain.SaidCut.
 	Cut        bool `json:"cut,omitempty"`
 	CutAfterMs int  `json:"cut_after_ms,omitempty"`
@@ -156,7 +156,7 @@ type Transcript struct {
 	err   error
 	onErr func(error)
 	// onAppend, when set, receives every appended message after the
-	// lock is released (the brain logs brain.transcript from it).
+	// lock is released (the orchestrator logs brain.transcript from it).
 	onAppend func(Message)
 }
 
@@ -180,7 +180,7 @@ func OpenTranscript(path string, onErr func(error)) (*Transcript, error) {
 
 // OnAppend sets the hook that receives every appended message (with its
 // Seq), called outside the transcript lock. Not safe to call
-// concurrently with Append; the brain sets it once at construction.
+// concurrently with Append; the orchestrator sets it once at construction.
 func (t *Transcript) OnAppend(fn func(Message)) { t.onAppend = fn }
 
 // Append records m (Tokens is filled in when zero, Seq always) and

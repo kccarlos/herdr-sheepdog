@@ -1,5 +1,5 @@
 // Package earmetrics measures how a single spoken line reads to a
-// shepherd who is listening, not reading: length, cadence, technical
+// user who is listening, not reading: length, cadence, technical
 // noise and jargon that `internal/prose`'s D9 scrubber (Spoken) does not
 // already strip. It is pure (no I/O, no clock) so `internal/scorecard`
 // and tests can call it over any text, live or recorded.

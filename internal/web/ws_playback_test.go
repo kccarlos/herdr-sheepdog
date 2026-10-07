@@ -72,7 +72,7 @@ func TestWSSilenceGateIsTheSpeechDetector(t *testing.T) {
 }
 
 // TestWSCutTranscriptReachesTheBrainNotThePage: a cut transcript (the
-// client flushed a reply part-way) corrects the brain's "Assistant said"
+// client flushed a reply part-way) corrects the orchestrator's "Assistant said"
 // line and is not shown to the page as a caption.
 func TestWSCutTranscriptReachesTheBrainNotThePage(t *testing.T) {
 	h := newHarness(t, harnessOpts{voice: true, brain: true})
