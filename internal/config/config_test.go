@@ -350,7 +350,7 @@ func TestSupervisorConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Supervisor.Chattiness != "normal" || cfg.Supervisor.RecentMinutes != 30 {
+	if cfg.Supervisor.Chattiness != "chatty" || cfg.Supervisor.RecentMinutes != 30 {
 		t.Errorf("supervisor defaults = %+v", cfg.Supervisor)
 	}
 	dir := t.TempDir()

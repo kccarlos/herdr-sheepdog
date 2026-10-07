@@ -248,7 +248,7 @@ var GeminiSensitivities = []string{"low", "high", "default"}
 var ChattinessLevels = []string{"quiet", "normal", "chatty"}
 
 // DefaultChattiness is the built-in supervisor.chattiness.
-const DefaultChattiness = "normal"
+const DefaultChattiness = "chatty"
 
 // DefaultVoiceName is the built-in voice.name: what the dog calls
 // itself (docs/roles.md "Names").

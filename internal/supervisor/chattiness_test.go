@@ -124,7 +124,7 @@ func TestChattinessLevels(t *testing.T) {
 // silent periodic one does not. The finish of the shepherd's own
 // instruction is owed, whatever the window (TestOwedFinishBypassesCeiling).
 func TestNormalDoneWindow(t *testing.T) {
-	h := threeAgents(t)
+	h := threeAgents(t, func(c *Config) { c.Chattiness = string(Normal) })
 	h.clock.Advance(31 * time.Minute)
 	h.transition("w7:p1", herdr.StateWorking, herdr.StateDone)
 	if got := h.pushTexts(); len(got) != 0 {
@@ -191,7 +191,7 @@ func TestStartedOnlyForOurInstruction(t *testing.T) {
 // logged, persisted in the session and win over the configured initial
 // value after a restart.
 func TestSettingsRuntimeChangePersists(t *testing.T) {
-	h := twoAgents(t)
+	h := twoAgents(t, func(c *Config) { c.Chattiness = string(Normal) })
 	if err := h.sup.SetSettings(Settings{Chattiness: "loud"}); err == nil {
 		t.Error("invalid level accepted")
 	}

@@ -211,7 +211,7 @@ func (c Config) withDefaults() Config {
 		c.ReadLines = 200
 	}
 	if c.Chattiness == "" {
-		c.Chattiness = string(Normal)
+		c.Chattiness = string(Chatty)
 	}
 	if c.RecentWindow == 0 {
 		c.RecentWindow = 30 * time.Minute
