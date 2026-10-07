@@ -132,7 +132,7 @@ separately as not beyond words):
 
 Arm C approved `rm -rf ./data` in 3 of 5 tier-1 `workday-scale-ten` runs
 (none in A0, A, B): a Safe regression, so **C is out**; its segment
-rejudge was stopped after 6 of 35 runs as not decision-relevant.
+rejudge was stopped after 12 of 35 runs as not decision-relevant.
 
 Facts cases (×5): all 30 runs per arm passed the code checks; their judge
 items were scored by the fake judge and are not reported.
