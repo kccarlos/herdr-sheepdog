@@ -1,5 +1,9 @@
 # Voice bench (`sheepdog bench`)
 
+> **Read this before proposing an eval or a prompt change:** [docs/eval/README.md](../eval/README.md)
+> indexes every experiment run so far (question, method, result,
+> decision, report and raw results) and the standing lessons.
+
 An end-to-end benchmark of the way the CEO actually uses sheepdog: by
 voice, from the phone, eyes off the screen. Its job is to find
 robustness problems before the CEO does.
