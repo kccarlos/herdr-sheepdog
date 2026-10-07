@@ -27,7 +27,17 @@
       "Bash(git branch:*)",
       "Bash(ls:*)",
       "Bash(cat:*)",
-      "Bash(jq:*)"
+      "Bash(jq:*)",
+      "Bash(python3:*)",
+      "Bash(git rebase:*)",
+      "Bash(git merge:*)",
+      "Bash(git diff:*)",
+      "Bash(git show:*)",
+      "Bash(make:*)",
+      "Bash(sleep:*)",
+      "Bash(mkdir:*)",
+      "Bash(cp:*)",
+      "Bash(go vet:*)"
     ]
   },
   "enabledPlugins": {
