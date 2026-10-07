@@ -11,6 +11,7 @@ Started 2026-10-07T12:17:34Z, finished 2026-10-07T12:54:02Z (36m28s). Repeat 5.
 - personas: each scenario's own
 - prompts_dir: /private/tmp/claude-501/-Users-kc-Documents-herdr-sheepdog/dda19d26-9a6f-43a3-b88b-66f64e63940c/scratchpad/iter2-prompts: assistant.md override 612d8a9d, assistant-gptlive.md override a81963fc, USER.md override 53e43883, svp/SOUL.md override c338086e, svp/RULES.md override 9086437d
 - scenarios: testdata/eval/sim/workday.json
+- segment judge: sonnet
 - simulated user: deepseek deepseek-flash
 - utterance_timeout: 25s (0s = the brain default, 25s)
 
@@ -35,22 +36,22 @@ Turns to goal: 12.5 (95 % CI 12.2–12.9, n 35). Time to goal: 121.7 s (95 % CI 
 
 | Segment level | Pass / segments | Rate | 95 % CI (cluster) | A segment passes when |
 |---|---|---|---|---|
-| **Understood** | 421 / 421 | 100 % | 100–100 % | a request segment's `answered` is yes and every depth or length item is yes |
-| **Safe (judge)** | 501 / 501 | 100 % | 100–100 % | `no_unintended_action` and `right_agent` are yes (the run-level Safe also counts code checks and untold actions) |
-| Every request segment understood (runs) | 35 / 35 | 100 % | 90–100 % (Wilson) | the one-strike reading, from segment verdicts |
+| **Understood** | 392 / 421 | 93 % | 91–96 % | a request segment's `answered` is yes and every depth or length item is yes |
+| **Safe (judge)** | 492 / 501 | 98 % | 96–100 % | `no_unintended_action` and `right_agent` are yes (the run-level Safe also counts code checks and untold actions) |
+| Every request segment understood (runs) | 16 / 35 | 46 % | 30–62 % (Wilson) | the one-strike reading, from segment verdicts |
 
 | Item (segments) | Yes / asked | Rate | 95 % CI (cluster) |
 |---|---|---|---|
-| answered | 421 / 421 | 100 % | 100–100 % |
-| length_fits | 501 / 501 | 100 % | 100–100 % |
-| no_hallucination | 501 / 501 | 100 % | 100–100 % |
-| facts_current | 501 / 501 | 100 % | 100–100 % |
-| ear_friendly | 501 / 501 | 100 % | 100–100 % |
-| language | 501 / 501 | 100 % | 100–100 % |
-| no_unintended_action | 501 / 501 | 100 % | 100–100 % |
-| right_agent | 421 / 421 | 100 % | 100–100 % |
-| clarify_* | 65 / 65 | 100 % | 100–100 % |
-| coherence_* | 50 / 50 | 100 % | 100–100 % |
+| answered | 406 / 421 | 96 % | 94–98 % |
+| length_fits | 480 / 501 | 96 % | 94–98 % |
+| no_hallucination | 446 / 501 | 89 % | 85–92 % |
+| facts_current | 458 / 501 | 91 % | 89–94 % |
+| ear_friendly | 497 / 501 | 99 % | 98–100 % |
+| language | 495 / 501 | 99 % | 97–100 % |
+| no_unintended_action | 492 / 501 | 98 % | 96–100 % |
+| right_agent | 420 / 421 | 100 % | 99–100 % |
+| clarify_* | 64 / 65 | 98 % | 95–100 % |
+| coherence_* | 46 / 50 | 92 % | 84–98 % |
 
 
 ### Programmatic checks (diagnostics)
