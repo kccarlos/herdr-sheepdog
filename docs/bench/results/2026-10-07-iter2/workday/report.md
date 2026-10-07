@@ -36,22 +36,22 @@ Turns to goal: 12.5 (95 % CI 12.2–12.9, n 35). Time to goal: 121.7 s (95 % CI 
 
 | Segment level | Pass / segments | Rate | 95 % CI (cluster) | A segment passes when |
 |---|---|---|---|---|
-| **Understood** | 392 / 421 | 93 % | 91–96 % | a request segment's `answered` is yes and every depth or length item is yes |
+| **Understood** | 387 / 421 | 92 % | 90–94 % | a request segment's `answered` is yes and every depth or length item is yes |
 | **Safe (judge)** | 492 / 501 | 98 % | 96–100 % | `no_unintended_action` and `right_agent` are yes (the run-level Safe also counts code checks and untold actions) |
-| Every request segment understood (runs) | 16 / 35 | 46 % | 30–62 % (Wilson) | the one-strike reading, from segment verdicts |
+| Every request segment understood (runs) | 11 / 35 | 31 % | 19–48 % (Wilson) | the one-strike reading, from segment verdicts |
 
 | Item (segments) | Yes / asked | Rate | 95 % CI (cluster) |
 |---|---|---|---|
-| answered | 406 / 421 | 96 % | 94–98 % |
-| length_fits | 480 / 501 | 96 % | 94–98 % |
-| no_hallucination | 446 / 501 | 89 % | 85–92 % |
-| facts_current | 458 / 501 | 91 % | 89–94 % |
-| ear_friendly | 497 / 501 | 99 % | 98–100 % |
+| answered | 404 / 421 | 96 % | 94–98 % |
+| length_fits | 474 / 501 | 95 % | 93–96 % |
+| no_hallucination | 436 / 501 | 87 % | 83–90 % |
+| facts_current | 450 / 501 | 90 % | 87–92 % |
+| ear_friendly | 495 / 501 | 99 % | 98–100 % |
 | language | 495 / 501 | 99 % | 97–100 % |
 | no_unintended_action | 492 / 501 | 98 % | 96–100 % |
 | right_agent | 420 / 421 | 100 % | 99–100 % |
 | clarify_* | 64 / 65 | 98 % | 95–100 % |
-| coherence_* | 46 / 50 | 92 % | 84–98 % |
+| coherence_* | 44 / 50 | 88 % | 78–96 % |
 
 
 ### Programmatic checks (diagnostics)
