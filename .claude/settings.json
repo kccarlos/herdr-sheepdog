@@ -5,7 +5,22 @@
       "Bash(git clone:*)",
       "Bash(git remote add:*)",
       "Bash(git fetch:*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(gh auth setup-git:*)",
+      "Bash(gh auth status:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git checkout:*)",
+      "Bash(git switch:*)",
+      "Bash(git status:*)",
+      "Bash(git log:*)",
+      "Bash(go build:*)",
+      "Bash(go test:*)",
+      "Bash(go run:*)",
+      "Bash(/tmp/sheepdog:*)",
+      "Bash(./sheepdog:*)",
+      "Bash(claude -p:*)",
+      "Bash(curl:*)"
     ]
   },
   "enabledPlugins": {
