@@ -17,7 +17,7 @@ built from tag `v0.1.5` (`b414dda`, #41).
 | Widget extension bundle ID | `com.github.kccarlos.herdr-sheepdog-ios.widgets` (`SheepdogWidgets`: the Live Activity and the Talk control). Registered on the team with `asc` on 2026-10-05 (resource `3TB5FGDCW7`), no capabilities. No App Group: nothing is shared through one |
 | App Store Connect record | "Sheepdog for herdr" (the name "Sheepdog" was taken), App ID 6817155887, SKU `herdr-sheepdog-ios` |
 | Product and scheme | `Sheepdog` (shared; Test runs `SheepdogKitTests` and `SheepdogUITests`, Archive uses Release) |
-| Version | `MARKETING_VERSION` in `project.yml` (now `0.1.6`) |
+| Version | `MARKETING_VERSION` in `project.yml` (now `0.1.7`) |
 | Build number | Xcode Cloud's own, `CI_BUILD_NUMBER`. The latest in TestFlight is `0.1.5 (57)`, from tag `v0.1.5` (`b414dda`) |
 | TestFlight internal group | **Me** (tester: thisiskecheng@gmail.com). The Beta App Review contact is not saved; it only matters for external testing, which is not used |
 
