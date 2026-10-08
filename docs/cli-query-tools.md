@@ -336,9 +336,35 @@ for WP8c:
 - The Claude fork runs without `--model`, on the user's default model:
   Haiku's 200 k window cannot hold a long day's session, and the fork
   should reason with the worker's own model family. `--max-budget-usd`
-  is raised to 2.00 for the fork (notional on a subscription; a large
-  context on the default model would trip 0.50 on the first turn)
-  [inferred; neither limit was hit in the spike].
+  is raised to 10.00 for the fork (notional on a subscription). It was
+  2.00 until 2026-10-08, when a fork of a 13 h worker session failed
+  as `cli: claude: exit 1: ` after 20 s [verified]: the fork's own
+  session file showed one turn with `cache_creation_input_tokens`
+  360 414, `cache_read_input_tokens` 0 (the cold write inferred above)
+  and a finished answer, and its cost state put the turn at about
+  $2.8–3.0 (the session's cumulative cost rose from ≈ 536.4 to
+  539.24). claude checks the cap after a turn, so it dropped that answer
+  and exited 1 with stderr empty and, on stdout, `{"subtype":
+  "error_max_budget_usd", "is_error": true, "errors": ["Reached
+  maximum budget ($2.00)"]}` and no `result` (reproduced with
+  `--max-budget-usd 0.01` on a copy of the session, claude 2.1.293).
+  The same fork run again while the cache was warm (cache read 354 k)
+  cost a few cents. $10 covers a cold turn on a full 1 M window plus a
+  few tool rounds; the time limit bounds the run as well.
+- On a non-zero exit sheepdog parses claude's JSON stdout and puts
+  `subtype`, `errors`, `api_error_status` and `result` into the error
+  (`investigation.error`, `cli.run`), so a run that stopped at its cap
+  reads `cli: claude: exit 1: error_max_budget_usd: Reached maximum
+  budget ($10.00)`; `cli.ErrBudget` matches it.
+- A fork that still stops at its cap falls back once to a plain look
+  (`investigation.fallback`): the question goes to the ordinary
+  read-only sub-agent in the worker's repository (§3, `cli.prefer`),
+  with the reason and the path of the worker's transcript, to be
+  searched with Grep, never written (checked: the Haiku sub-agent's
+  Grep reads a file outside its cwd under `--permission-mode dontAsk`).
+  Its session becomes the job's, so a follow-up resumes the sub-agent,
+  never the worker. If that fails too, the orchestrator gets the
+  failure with its reason and tells the user.
 - The run is bounded by `brain.investigate_max_s` like any
   investigation; it uses the user's own Claude/Codex usage, never
   Gemini quota.

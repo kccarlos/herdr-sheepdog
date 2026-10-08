@@ -27,7 +27,7 @@ func TestForkArgv(t *testing.T) {
 			"--resume", "worker-1", "--fork-session",
 			"--tools", "Read,Grep,Glob,WebSearch", "--allowedTools", "Read,Grep,Glob,WebSearch",
 			"--strict-mcp-config", "--permission-mode", "dontAsk", "--permission-prompts", "none",
-			"--output-format", "json", "--max-budget-usd", "2.00"}},
+			"--output-format", "json", "--max-budget-usd", "10.00"}},
 		{Codex, "FAKE_CODEX_JSONL", []string{bin, "exec", "fork", "worker-1", "why did you skip the migration?",
 			"-c", "sandbox_mode=read-only", "-c", "model_reasoning_effort=low",
 			"--skip-git-repo-check", "--json"}},

@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"google.golang.org/genai"
+
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
 	"github.com/kccarlos/herdr-sheepdog/internal/brain/braintest"
 	"github.com/kccarlos/herdr-sheepdog/internal/supervisor"
@@ -349,5 +351,29 @@ func TestBrainModelsNoCache(t *testing.T) {
 	var got BrainModelsResponse
 	if code := h.getJSON("/api/brain/models", &got); code != http.StatusOK || got.Error != "no network" || got.Stale || len(got.Models) != 0 || got.Models == nil || got.Model != brain.DefaultModel || got.FetchedAt != nil {
 		t.Errorf("GET = %d %+v", code, got)
+	}
+}
+
+// A provider the orchestrator routes around because it refused the
+// credentials (brain.provider_down) is listed with Down and DownUntil,
+// still available: selecting it retries it.
+func TestBrainProviderDown(t *testing.T) {
+	h := newHarness(t, harnessOpts{brain: true, providers: true})
+	h.model.Add(braintest.Step{Err: genai.APIError{Code: 403, Message: "Request rejected", Status: "PERMISSION_DENIED"}})
+	if _, err := h.brain.Turn(context.Background(), brain.Request{Kind: brain.KindUtterance, Trigger: brain.TriggerCEO, Question: "how is auth?"}); err != nil {
+		t.Fatalf("turn: %v", err)
+	}
+	var got BrainModelsResponse
+	if code := h.getJSON("/api/brain/models", &got); code != http.StatusOK {
+		t.Fatalf("GET = %d", code)
+	}
+	for _, p := range got.Providers {
+		down := p.Down != "" && p.DownUntil != nil
+		if want := p.ID == "gemini"; down != want {
+			t.Errorf("provider %s: down = %q until %v", p.ID, p.Down, p.DownUntil)
+		}
+		if p.ID == "gemini" && (!p.Available || !strings.Contains(p.Down, "PERMISSION_DENIED")) {
+			t.Errorf("gemini = %+v", p)
+		}
 	}
 }

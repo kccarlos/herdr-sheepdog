@@ -360,7 +360,8 @@ function setupNewConversation() {
 // /api/state (polled, and refreshed on a brain.model_changed event), so
 // a switch made elsewhere shows up without rebuilding the list under
 // the mouse. An unavailable provider (no key) is listed greyed out with
-// the reason in its tooltip. Hidden while the orchestrator is off (503).
+// the reason in its tooltip; one the orchestrator routes around because
+// it refused the credentials is marked "(down)" with the error. Hidden while the orchestrator is off (503).
 const modelState = { current: '', provider: '', providers: [], viewProvider: '', models: [], error: '', stale: false, showAll: false, off: true };
 
 function renderModelControl() {
@@ -374,9 +375,11 @@ function renderModelControl() {
     for (const p of listed) {
       const o = document.createElement('option');
       o.value = p.id;
-      o.textContent = p.id;
+      o.textContent = p.down ? `${p.id} (down)` : p.id;
       o.disabled = !p.available;
-      o.title = p.available ? (p.label || p.id) : `${p.label || p.id}: ${p.reason || 'not configured'}`;
+      o.title = !p.available ? `${p.label || p.id}: ${p.reason || 'not configured'}`
+        : p.down ? `${p.label || p.id}: skipped until ${p.down_until ? new Date(p.down_until).toLocaleTimeString() : 'later'} (${p.down}); select it to retry now`
+          : (p.label || p.id);
       psel.appendChild(o);
     }
     psel.value = modelState.viewProvider || modelState.provider;

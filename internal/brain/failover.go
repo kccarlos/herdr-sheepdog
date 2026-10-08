@@ -55,6 +55,16 @@ var (
 	// 25 s utterance turn's first step keeps 20 s, above every step
 	// measured).
 	failoverHealthyAttempt = 8 * time.Second
+	// providerDownFor is how long a provider that refused the daemon's
+	// credentials (401, 403) is left out of failover and routed around
+	// (brain.provider_down). 2026-10-08 00:16: DeepSeek timed out, the
+	// step failed over to Vertex, whose project was blocked ("403
+	// PERMISSION_DENIED: Request rejected in accordance with our terms of
+	// use"), and the turn fell back although the Gemini key pool would
+	// have answered. Such a refusal does not clear within seconds; half
+	// an hour keeps every turn in between off it, and selecting the
+	// provider again (SetModel) retries it at once.
+	providerDownFor = 30 * time.Minute
 )
 
 // failoverOrder is the order candidates are tried in after the failing
@@ -81,6 +91,13 @@ var failoverNotice = Notice{
 	Chinese: "我平时用的模型出了点问题，现在先由备用模型回答。",
 }
 
+// providerDown is one provider left out of failover until Until, with
+// the error that put it there (Brain.down).
+type providerDown struct {
+	Until  time.Time
+	Reason string
+}
+
 // failoverState is the run's record of failovers away from the selected
 // provider (under Brain.mu).
 type failoverState struct {
@@ -103,6 +120,9 @@ func failoverReason(ctx context.Context, err error) (string, bool) {
 	if errors.Is(err, ErrAllKeysRateLimited) || isRateLimited(err) {
 		return "rate_limited", true
 	}
+	if code := refusedCode(err); code != 0 {
+		return fmt.Sprintf("http_%d", code), true
+	}
 	var api genai.APIError
 	if errors.As(err, &api) && api.Code >= 500 {
 		return fmt.Sprintf("http_%d", api.Code), true
@@ -116,6 +136,56 @@ func failoverReason(ctx context.Context, err error) (string, bool) {
 		return "timeout", true
 	}
 	return "", false
+}
+
+// refusedCode is 401 or 403 when err is the provider refusing the
+// daemon's credentials or project (UNAUTHENTICATED, PERMISSION_DENIED):
+// the same request fails the same way until someone fixes the account,
+// so the provider is marked down (markDown) and the next one is tried.
+// 0 otherwise.
+func refusedCode(err error) int {
+	var api genai.APIError
+	if errors.As(err, &api) && (api.Code == 401 || api.Code == 403) {
+		return api.Code
+	}
+	var compat *APIError
+	if errors.As(err, &compat) && (compat.Status == 401 || compat.Status == 403) {
+		return compat.Status
+	}
+	return 0
+}
+
+// markDown leaves provider out of failover, and routes turns around it
+// when it is the selected one, for providerDownFor (brain.provider_down).
+func (b *Brain) markDown(provider, model string, err error) {
+	b.mu.Lock()
+	until := b.cfg.Now().Add(providerDownFor)
+	if b.down == nil {
+		b.down = map[string]providerDown{}
+	}
+	b.down[provider] = providerDown{Until: until, Reason: oneLine(err.Error())}
+	b.mu.Unlock()
+	b.log.Log(logSource, "brain.provider_down", "", map[string]any{
+		"provider": provider, "model": model, "error": err.Error(), "until": until.UTC().Format(time.RFC3339), "for_s": int(providerDownFor.Seconds()),
+	})
+}
+
+// isDownLocked reports whether provider is marked down now (b.mu held).
+func (b *Brain) isDownLocked(provider string) bool {
+	d, ok := b.down[provider]
+	return ok && b.cfg.Now().Before(d.Until)
+}
+
+// ProviderDown reports whether provider is marked down (it refused the
+// daemon's credentials), why and until when, for the model picker.
+func (b *Brain) ProviderDown(provider string) (reason string, until time.Time, down bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if !b.isDownLocked(provider) {
+		return "", time.Time{}, false
+	}
+	d := b.down[provider]
+	return d.Reason, d.Until, true
 }
 
 // isCancelled499 reports a request the model's server cancelled (HTTP
@@ -133,20 +203,22 @@ func isCancelled499(err error) bool {
 }
 
 // failoverTarget picks the provider and model a failed step is retried
-// on: the first registered provider other than from, in failoverOrder.
-// ok is false when there is none.
-func (b *Brain) failoverTarget(from, fromModel string) (provider, model string, impl Model, ok bool) {
+// on: the first registered provider other than from and the ones in
+// tried, and not marked down, in failoverOrder. ok is false when there
+// is none.
+func (b *Brain) failoverTarget(from, fromModel string, tried ...string) (provider, model string, impl Model, ok bool) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	skip := func(id string) bool { return id == from || contains(tried, id) || b.isDownLocked(id) }
 	var cands []string
 	for _, id := range failoverOrder {
-		if _, reg := b.models[id]; reg && id != from {
+		if _, reg := b.models[id]; reg && !skip(id) {
 			cands = append(cands, id)
 		}
 	}
 	var rest []string
 	for id := range b.models {
-		if id != from && !contains(failoverOrder, id) {
+		if !skip(id) && !contains(failoverOrder, id) {
 			rest = append(rest, id)
 		}
 	}
@@ -205,13 +277,16 @@ func (b *Brain) onFailingStreak(provider string) bool {
 // generateStep is one model call of the turn with failover: the turn's
 // provider first, then — once per turn, on a failoverReason error — the
 // failover target, which stays the turn's provider for its remaining
-// steps. When a target exists, the first attempt leaves failoverReserve
-// of the turn's deadline for the retry (firstAttempt).
+// steps. A provider that refuses the credentials (401, 403) is marked
+// down and the next candidate is tried as well, at any attempt: a
+// refusal is not a slow or busy provider, and the turn's deadline still
+// bounds the chain. When a target exists, the first attempt leaves
+// failoverReserve of the turn's deadline for the retry (firstAttempt).
 func (b *Brain) generateStep(ctx context.Context, t *turn, step int, msgs []Message, cfg *genai.GenerateContentConfig) (*genai.GenerateContentResponse, json.RawMessage, error) {
 	actx := ctx
 	if !t.failedOver {
 		var cancel context.CancelFunc
-		actx, cancel = b.firstAttempt(ctx, t.provider, t.model)
+		actx, cancel = b.firstAttempt(ctx, t.provider, t.model, t.tried...)
 		defer cancel()
 	}
 	resp, raw, err := b.generate(actx, t, msgs, cfg)
@@ -225,29 +300,60 @@ func (b *Brain) generateStep(ctx context.Context, t *turn, step int, msgs []Mess
 		})
 		resp, raw, err = b.generate(actx, t, msgs, cfg)
 	}
-	if err == nil {
-		b.failoverSucceeded(t.provider)
-		return resp, raw, nil
+	for {
+		if err == nil {
+			b.failoverSucceeded(t.provider)
+			return resp, raw, nil
+		}
+		reason, ok := failoverReason(ctx, err)
+		if !ok {
+			return nil, nil, err
+		}
+		refused := refusedCode(err) != 0
+		if refused {
+			b.markDown(t.provider, t.model, err)
+		}
+		if t.failedOver && !refused {
+			return nil, nil, err
+		}
+		t.tried = append(t.tried, t.provider)
+		to, model, impl, ok := b.failoverTarget(t.provider, t.model, t.tried...)
+		if !ok {
+			return nil, nil, err
+		}
+		from, fromModel := t.provider, t.model
+		b.log.Log(logSource, "brain.failover", "", map[string]any{
+			"from": from, "from_model": fromModel, "to": to, "to_model": model, "reason": reason, "error": err.Error(),
+			"turn": t.n, "step": step, "call": "turn",
+		})
+		t.provider, t.model, t.impl, t.failedOver = to, model, impl, true
+		b.noteFailover(from, to)
+		resp, raw, err = b.generate(ctx, t, msgs, cfg)
 	}
-	if t.failedOver {
-		return nil, nil, err
-	}
-	reason, ok := failoverReason(ctx, err)
-	if !ok {
-		return nil, nil, err
+}
+
+// routeAroundDown moves a turn whose selected provider is marked down
+// onto the failover target before its first step (brain.failover
+// {reason: provider_down}), so every turn in the down window does not
+// first pay for the refusal. The turn may still fail over once more.
+func (b *Brain) routeAroundDown(t *turn) {
+	b.mu.Lock()
+	down := b.isDownLocked(t.provider)
+	b.mu.Unlock()
+	if !down {
+		return
 	}
 	to, model, impl, ok := b.failoverTarget(t.provider, t.model)
 	if !ok {
-		return nil, nil, err
+		return
 	}
 	from, fromModel := t.provider, t.model
 	b.log.Log(logSource, "brain.failover", "", map[string]any{
-		"from": from, "from_model": fromModel, "to": to, "to_model": model, "reason": reason, "error": err.Error(),
-		"turn": t.n, "step": step, "call": "turn",
+		"from": from, "from_model": fromModel, "to": to, "to_model": model, "reason": "provider_down", "turn": t.n, "step": 0, "call": "turn",
 	})
-	t.provider, t.model, t.impl, t.failedOver = to, model, impl, true
+	t.tried = append(t.tried, from)
+	t.provider, t.model, t.impl = to, model, impl
 	b.noteFailover(from, to)
-	return b.generate(ctx, t, msgs, cfg)
 }
 
 // firstAttempt is the context of a call's first attempt on provider:
@@ -256,7 +362,7 @@ func (b *Brain) generateStep(ctx context.Context, t *turn, step int, msgs []Mess
 // while provider is on a failing streak, failoverHealthyAttempt otherwise
 // — so a provider that hangs until it answers 504 leaves the retry a
 // real budget; else ctx itself.
-func (b *Brain) firstAttempt(ctx context.Context, provider, model string) (context.Context, context.CancelFunc) {
+func (b *Brain) firstAttempt(ctx context.Context, provider, model string, tried ...string) (context.Context, context.CancelFunc) {
 	dl, ok := ctx.Deadline()
 	if !ok {
 		return ctx, func() {}
@@ -268,37 +374,61 @@ func (b *Brain) firstAttempt(ctx context.Context, provider, model string) (conte
 	if time.Until(dl)-failoverReserve < least {
 		return ctx, func() {}
 	}
-	if _, _, _, ok := b.failoverTarget(provider, model); !ok {
+	if _, _, _, ok := b.failoverTarget(provider, model, tried...); !ok {
 		return ctx, func() {}
 	}
 	return context.WithDeadline(ctx, dl.Add(-failoverReserve))
 }
 
 // generateSummary is the compaction's summary call with the same
-// failover as a turn's step: the selected provider first, then once
-// the failover target (logged as brain.failover {call: compaction}).
+// failover as a turn's step: the selected provider first (its target
+// when it is marked down), then once the failover target (logged as
+// brain.failover {call: compaction}); a refusal (401, 403) marks the
+// provider down and moves on to the next candidate.
 func (b *Brain) generateSummary(ctx context.Context, contents []*genai.Content, cfg *genai.GenerateContentConfig) (*genai.GenerateContentResponse, error) {
 	provider, model, impl := b.current()
-	actx, cancel := b.firstAttempt(ctx, provider, model)
+	var tried []string
+	b.mu.Lock()
+	down := b.isDownLocked(provider)
+	b.mu.Unlock()
+	if down {
+		if to, toModel, toImpl, ok := b.failoverTarget(provider, model); ok {
+			tried = append(tried, provider)
+			provider, model, impl = to, toModel, toImpl
+		}
+	}
+	actx, cancel := b.firstAttempt(ctx, provider, model, tried...)
 	defer cancel()
 	resp, err := impl.Generate(actx, model, contents, cfg)
-	if err == nil {
-		b.failoverSucceeded(provider)
-		return resp, nil
+	failedOver := false
+	for {
+		if err == nil {
+			b.failoverSucceeded(provider)
+			return resp, nil
+		}
+		reason, ok := failoverReason(ctx, err)
+		if !ok {
+			return nil, err
+		}
+		refused := refusedCode(err) != 0
+		if refused {
+			b.markDown(provider, model, err)
+		}
+		if failedOver && !refused {
+			return nil, err
+		}
+		tried = append(tried, provider)
+		to, toModel, toImpl, ok := b.failoverTarget(provider, model, tried...)
+		if !ok {
+			return nil, err
+		}
+		b.log.Log(logSource, "brain.failover", "", map[string]any{
+			"from": provider, "from_model": model, "to": to, "to_model": toModel, "reason": reason, "error": err.Error(), "call": "compaction",
+		})
+		b.noteFailover(provider, to)
+		provider, model, impl, failedOver = to, toModel, toImpl, true
+		resp, err = impl.Generate(ctx, model, contents, cfg)
 	}
-	reason, ok := failoverReason(ctx, err)
-	if !ok {
-		return nil, err
-	}
-	to, toModel, toImpl, ok := b.failoverTarget(provider, model)
-	if !ok {
-		return nil, err
-	}
-	b.log.Log(logSource, "brain.failover", "", map[string]any{
-		"from": provider, "from_model": model, "to": to, "to_model": toModel, "reason": reason, "error": err.Error(), "call": "compaction",
-	})
-	b.noteFailover(provider, to)
-	return toImpl.Generate(ctx, toModel, contents, cfg)
 }
 
 // failoverSucceeded ends the failing streak when the selected provider

@@ -208,6 +208,9 @@ type Brain struct {
 	// provider; notify tells the user about it (SetNotifier).
 	failover failoverState
 	notify   func(n Notice)
+	// down are the providers that refused the daemon's credentials,
+	// left out of failover until their time (markDown).
+	down map[string]providerDown
 
 	// catalogs are the cached model lists, one per provider (catalog.go).
 	catalogs catalogCaches
@@ -398,6 +401,9 @@ func (b *Brain) SetModel(provider, name, via string) error {
 	}
 	b.curProvider, b.curModel = provider, name
 	b.lastModel[provider] = name
+	// Selecting a provider is the way to retry one marked down (the
+	// account was fixed): it is tried again from the next turn.
+	delete(b.down, provider)
 	b.mu.Unlock()
 	b.log.Log(logSource, "brain.model_changed", "", map[string]any{"from_provider": fromProvider, "from": from, "provider": provider, "to": name, "via": via})
 	b.ingest(Message{Role: RoleSystem, Kind: KindSystem, Content: fmt.Sprintf("model switched from %s/%s to %s/%s", fromProvider, from, provider, name)}, 0)

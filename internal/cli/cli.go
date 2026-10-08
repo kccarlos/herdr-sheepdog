@@ -33,17 +33,42 @@ var (
 	// ErrTimedOut is wrapped by the error of a run killed at its time
 	// limit.
 	ErrTimedOut = errors.New("timed out")
+	// ErrBudget matches a run claude stopped at its --max-budget-usd
+	// (subtype error_max_budget_usd).
+	ErrBudget = errors.New("cli: the run reached its cost cap")
 )
 
-// ExitError is a run whose process exited non-zero.
+// ExitError is a run whose process exited non-zero, or (Code 0) one
+// whose output reported an error.
 type ExitError struct {
 	Backend Backend
 	Code    int
 	Stderr  string
+	// Subtype and Reported are what the backend's JSON output said went
+	// wrong (claude: subtype, errors, result): claude exits 1 with an
+	// empty stderr when it stops at its budget, so without them the
+	// error read "cli: claude: exit 1: " (2026-10-08 00:17).
+	Subtype  string
+	Reported string
 }
 
 func (e *ExitError) Error() string {
-	return fmt.Sprintf("cli: %s: exit %d: %s", e.Backend, e.Code, e.Stderr)
+	why := e.Stderr
+	switch {
+	case why == "":
+		why = e.Reported
+	case e.Reported != "":
+		why = e.Reported + "; stderr: " + why
+	}
+	if e.Code == 0 {
+		return fmt.Sprintf("cli: %s reported an error: %s", e.Backend, why)
+	}
+	return fmt.Sprintf("cli: %s: exit %d: %s", e.Backend, e.Code, why)
+}
+
+// Is matches ErrBudget for a run stopped at its cost cap.
+func (e *ExitError) Is(target error) bool {
+	return target == ErrBudget && e.Subtype == "error_max_budget_usd"
 }
 
 // ExitCode is the process's exit code.
@@ -125,7 +150,16 @@ var (
 // The claude fork has no --model: it continues the worker's
 // conversation, which a long day makes larger than Haiku's window, so it
 // runs on the user's default model; its budget cap is raised for the
-// same reason (the first turn pays for the whole context). A follow-up
+// same reason: the first turn pays for the whole context, and with the
+// fork's reduced tool list the prompt-cache prefix is not the worker's,
+// so it is a cold cache write. Measured 2026-10-08 on a 13 h worker
+// session (360 k tokens): the first turn cost about $2.8–3.0 (notional, on
+// a subscription), past the old $2.00 cap, and claude, which checks the
+// cap after a turn, threw away the finished answer and exited 1
+// (error_max_budget_usd). $10 covers a cold turn on a full 1 M window
+// plus a few tool rounds; it is a runaway guard, the time limit
+// (brain.investigate_max_s) bounds the run as well, and a fork that
+// still hits it falls back to a plain look (supervisor). A follow-up
 // resumes the fork's own id through the resume templates above.
 var (
 	defaultClaudeForkCmd = []string{
@@ -137,7 +171,7 @@ var (
 		"--permission-mode", "dontAsk",
 		"--permission-prompts", "none",
 		"--output-format", "json",
-		"--max-budget-usd", "2.00",
+		"--max-budget-usd", "10.00",
 	}
 	defaultCodexForkCmd = []string{
 		"codex", "exec", "fork", "{session}", "{question}",

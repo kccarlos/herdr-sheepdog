@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
+	"github.com/kccarlos/herdr-sheepdog/internal/cli"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 	"github.com/kccarlos/herdr-sheepdog/internal/workerlog"
@@ -235,5 +236,74 @@ func TestInvestigationSourceValidation(t *testing.T) {
 	}
 	if n := len(f.all()); n != 1 {
 		t.Errorf("runs = %d, want only the first", n)
+	}
+}
+
+// forkBudgetInvestigator fails every fork at its cost cap, as claude did
+// on 2026-10-08 00:17 for a 360 k token worker session, and answers the
+// plain runs through the fake.
+type forkBudgetInvestigator struct{ *fakeInvestigator }
+
+func (f forkBudgetInvestigator) Investigate(ctx context.Context, q InvestigationQuery) (InvestigationResult, error) {
+	if q.Fork {
+		f.fakeInvestigator.mu.Lock()
+		f.fakeInvestigator.queries = append(f.fakeInvestigator.queries, q)
+		f.fakeInvestigator.mu.Unlock()
+		return InvestigationResult{}, &cli.ExitError{Backend: cli.Claude, Code: 1, Subtype: "error_max_budget_usd", Reported: "error_max_budget_usd: Reached maximum budget ($10.00)"}
+	}
+	return f.fakeInvestigator.Investigate(ctx, q)
+}
+
+// A fork stopped at its cost cap is asked once more the plain way: a
+// read-only sub-agent in the repository, pointed at the worker's
+// transcript, never a fork or a resume of the worker; the record says
+// it came from the repository, and the answer is delivered as usual.
+func TestWorkerForkOverBudgetFallsBackToPlainLook(t *testing.T) {
+	f := &fakeInvestigator{answer: "It asked how to handle guideline 1.2.", session: forkSession, backend: "claude"}
+	h, dir := newWorkerInvestigationHarness(t, f)
+	h.sup.investigator = forkBudgetInvestigator{f}
+
+	job, err := startWorker(h, "what did you ask the user about 1.2?", "")
+	if err != nil {
+		t.Fatalf("startInvestigation: %v", err)
+	}
+	waitFor(t, func() bool { return len(h.log.ofType("investigation.done")) == 1 }, "the fallback to finish")
+	qs := f.all()
+	if len(qs) != 2 || !qs[0].Fork {
+		t.Fatalf("queries = %+v", qs)
+	}
+	plain := qs[1]
+	transcript := filepath.Join(dir, "projects", "-work-w5-p1", workerClaudeSession+".jsonl")
+	if plain.Fork || plain.Session != "" || plain.Backend != "" || plain.Slot != "investigation:w5:p1" ||
+		!strings.HasPrefix(plain.Question, "what did you ask the user about 1.2?") || !strings.Contains(plain.Question, transcript) ||
+		!strings.Contains(plain.Question, "Reached maximum budget") || !strings.Contains(plain.Question, "never write to it") {
+		t.Errorf("fallback query = %+v", plain)
+	}
+	fb := h.log.ofType("investigation.fallback")
+	if len(fb) != 1 || payload(fb[0])["reason"] != "budget" || payload(fb[0])["to"] != state.InvestigationSourceCLI {
+		t.Errorf("investigation.fallback = %v", fb)
+	}
+	inv, _ := h.sup.investigation(job.Job)
+	if inv.Status != state.InvestigationDone || inv.Source != state.InvestigationSourceCLI || inv.SessionID != forkSession || inv.Result != "It asked how to handle guideline 1.2." {
+		t.Errorf("record = %+v", inv)
+	}
+	if h.log.count("investigation.error") != 0 {
+		t.Error("investigation.error logged")
+	}
+}
+
+// When the fallback fails too, the failure carries its own reason.
+func TestWorkerForkFallbackFailsWithReason(t *testing.T) {
+	f := &fakeInvestigator{err: &cli.ExitError{Backend: cli.Codex, Code: 1, Reported: "stream disconnected"}}
+	h, _ := newWorkerInvestigationHarness(t, f)
+	h.sup.investigator = forkBudgetInvestigator{f}
+	job, err := startWorker(h, "what did you ask the user?", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, func() bool { return len(h.log.ofType("investigation.error")) == 1 }, "the failure")
+	inv, _ := h.sup.investigation(job.Job)
+	if !strings.Contains(inv.Err, "stream disconnected") || len(f.all()) != 2 {
+		t.Errorf("record err = %q, queries = %d", inv.Err, len(f.all()))
 	}
 }
