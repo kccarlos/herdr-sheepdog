@@ -356,6 +356,13 @@ type Supervisor struct {
 	// relayedSeq it never moves for transcript fragments that trail the
 	// same relay.
 	acceptedSeq uint64
+	// lastOutcome is what became of the newest utterance turn that
+	// delivered (answered or fell back), and voiceSpokeAt when the voice
+	// last said something of its own (not a push): a re-relay right
+	// after either is told what happened, or retries a failed turn
+	// (rerelay.go).
+	lastOutcome  *relayOutcome
+	voiceSpokeAt time.Time
 	// replies tracks every background goroutine that may call the orchestrator
 	// after the call that started it returned: detached utterance turns
 	// and their late delivery (utterance.go), the daemon's own relay

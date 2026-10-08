@@ -74,12 +74,27 @@ func (s *Supervisor) noBrain() voice.ToolResult {
 const noBrainTrailer = "The orchestrator is off, so I can only report status."
 
 // fallback is what an utterance gets when its orchestrator turn produced no
-// answer: noBrain when there is no orchestrator at all, else brainFailedLine.
-func (s *Supervisor) fallback() voice.ToolResult {
+// answer: noBrain when there is no orchestrator at all, else
+// brainFailedLine, with the facts behind it in the detail (never read
+// aloud): why it failed (err, in plain words), that the user has heard
+// nothing yet, and what a re-relay does (rerelay.go).
+func (s *Supervisor) fallback(out utteranceOutcome) voice.ToolResult {
 	if s.brain == nil {
 		return s.noBrain()
 	}
-	return voice.ToolResult{Spoken: brainFailedLine, Scheduling: voice.UrgencyInterrupt}
+	return voice.ToolResult{Spoken: brainFailedLine, Detail: brainFailedDetail(out), Scheduling: voice.UrgencyInterrupt}
+}
+
+// brainFailedDetail is the fallback's facts for the voice: why the turn
+// failed, that the user has heard nothing yet, and what calling again
+// does (2026-10-08 03:05:00: given only brainFailedLine, the voice said
+// nothing and called again, and the call was ignored).
+func brainFailedDetail(out utteranceOutcome) string {
+	d := fmt.Sprintf("The orchestrator's turn on the user's words failed: %s. The user has heard nothing about it yet. ", failureReason(out.err))
+	if out.acted {
+		return d + "It had already acted, so it is not run again; it runs on the user's next words."
+	}
+	return d + "Nothing was done. Calling to_supervisor again, with no new words from the user, retries their words once."
 }
 
 // brainFailedLine is the whole answer when the orchestrator errored or timed
@@ -92,7 +107,13 @@ func (s *Supervisor) fallback() voice.ToolResult {
 // (prose.EarLine's caps) that says so and offers the retry. The offer is
 // no yes/no question on purpose: a bare "yes" answers an open worker
 // prompt on the fast path, so "Shall I try again?" could approve one.
-const brainFailedLine = "Sorry, I couldn't get an answer just now, but ask me again and I'll try once more."
+//
+// The retry offer is addressed to the user ("if you say it again"), not
+// phrased as an imperative the voice could take for itself: on
+// 2026-10-08 03:05:00 "…but ask me again and I'll try once more." in the
+// result's facts was followed by the voice calling to_supervisor again
+// instead of speaking (rerelay.go).
+const brainFailedLine = "Sorry, I couldn't get an answer just now. If you say it again, I'll try once more."
 
 // markMentioned records that the panes were just spoken about: the
 // normal level announces their finish for RecentWindow afterwards.

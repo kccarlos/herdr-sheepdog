@@ -329,7 +329,11 @@ such input since the previous call and the last push is the voice
 model's own initiative and does nothing
 (`supervisor.voice_initiative_ignored`): that is the one relay guard
 left, since every utterance now runs on the recorded input, and a push
-relayed back can no longer pass for the user's words. Enforced in
+relayed back can no longer pass for the user's words. One exception
+stands on the same recorded input: right after the orchestrator's turn
+on the user's newest words fell back without acting, such a call
+retries those words once (`supervisor.relay {retry_of}`, 2026-10-08
+03:04:58), since they are still the user's own, unanswered. Enforced in
 the executor, not by prose; the voice has no tool that can answer a
 prompt at all. Everything else — instructions, Ctrl-C, questions — is
 the orchestrator's call.

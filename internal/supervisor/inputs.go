@@ -88,6 +88,9 @@ type shepherdInput struct {
 	// is what the voice said since.
 	answeredAt   time.Time
 	answeredWith string
+	// retried is set once a re-relay retried the turn that failed on
+	// these words (claimRetry, rerelay.go): once per input.
+	retried bool
 	// saidBefore is what the voice was saying, or had said within
 	// echoWindow, when this voice input began: what it may be an echo of
 	// (echoOf, utterance.go). Empty for anything else.
@@ -125,6 +128,11 @@ type claim struct {
 	// to_supervisor call's optional "reading" argument): a hint for the
 	// orchestrator, labelled as the voice's, never the user's words.
 	reading string
+	// retryOf is the utterance whose failed turn these same words are
+	// retried for (claimRetry, rerelay.go), with retryReason the plain
+	// reason it failed; empty for a fresh claim.
+	retryOf     string
+	retryReason string
 }
 
 // maxInputs bounds the remembered inputs.
@@ -224,6 +232,7 @@ func (s *Supervisor) voiceSpoke(text string) {
 	if strings.TrimSpace(text) == "" || s.relay.pushSpeaking || noSpeech(s.echo.said) {
 		return
 	}
+	s.voiceSpokeAt = s.cfg.Now() // rerelay.go
 	last := s.lastInputLocked()
 	if last == nil {
 		return

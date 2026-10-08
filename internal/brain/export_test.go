@@ -39,3 +39,6 @@ func SetFailoverReserve(reserve, minAttempt, healthyAttempt time.Duration) func(
 	failoverReserve, failoverMinAttempt, failoverHealthyAttempt = reserve, minAttempt, healthyAttempt
 	return func() { failoverReserve, failoverMinAttempt, failoverHealthyAttempt = r, m, h }
 }
+
+// IsTransportError exposes isTransportError to the external tests.
+var IsTransportError = isTransportError
