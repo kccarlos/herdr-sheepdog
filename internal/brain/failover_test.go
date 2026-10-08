@@ -2,10 +2,16 @@ package brain_test
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
+	"io"
+	"net"
+	"net/url"
+	"os"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -557,5 +563,129 @@ func TestRefusedAlone(t *testing.T) {
 	}
 	if h.log.count("brain.failover") != 0 {
 		t.Error("brain.failover without a second provider")
+	}
+}
+
+// errReset is the error DeepSeek's endpoint gave on 2026-10-08
+// 03:04:59, 20 ms into an utterance turn, built with the real chain the
+// HTTP client returns (openaicompat wraps it with %w).
+var errReset = fmt.Errorf("deepseek: %w", &url.Error{Op: "Post", URL: "https://api.deepseek.com/chat/completions",
+	Err: &net.OpError{Op: "read", Net: "tcp", Err: &os.SyscallError{Syscall: "read", Err: syscall.ECONNRESET}}})
+
+// 2026-10-08 03:04:59: a connection reset fell straight back to the
+// fallback line. Now a transport error is retried once on the same
+// provider and the reply comes from the retry: brain.retry {reason:
+// transport}, no failover, no fallback.
+func TestRetryOnceOnTransportError(t *testing.T) {
+	for name, cause := range map[string]error{
+		"reset":       errReset,
+		"eof":         fmt.Errorf("deepseek: %w", &url.Error{Op: "Post", URL: "https://x", Err: io.EOF}),
+		"broken pipe": fmt.Errorf("deepseek: %w", &net.OpError{Op: "write", Net: "tcp", Err: &os.SyscallError{Syscall: "write", Err: syscall.EPIPE}}),
+		"dial":        fmt.Errorf("deepseek: %w", &url.Error{Op: "Post", URL: "https://x", Err: &net.OpError{Op: "dial", Net: "tcp", Err: &os.SyscallError{Syscall: "connect", Err: syscall.ECONNREFUSED}}}),
+		"tls":         fmt.Errorf("deepseek: %w", &url.Error{Op: "Post", URL: "https://x", Err: tls.RecordHeaderError{Msg: "first record does not look like a TLS handshake"}}),
+		"body read":   fmt.Errorf("deepseek: read response: %w", io.ErrUnexpectedEOF),
+	} {
+		t.Run(name, func(t *testing.T) {
+			m := braintest.NewModel()
+			m.Add(braintest.Step{Err: cause})
+			m.Default = &braintest.Step{Text: braintest.Reply("Fork it only if you must.", "")}
+			h := newHarness(t, m, func(c *Config) { c.Provider, c.Model = ProviderDeepSeek, DefaultDeepSeekModel })
+			other := answering("from gemini")
+			_ = h.brain.AddProvider(ProviderGemini, other)
+			rep, err := h.ask("is there a better way than forking?", "")
+			if err != nil {
+				t.Fatalf("turn fell back: %v", err)
+			}
+			if rep.Spoken != "Fork it only if you must." {
+				t.Errorf("reply = %+v", rep)
+			}
+			if n := len(m.Calls()); n != 2 {
+				t.Errorf("deepseek calls = %d, want 2", n)
+			}
+			if len(other.Calls()) != 0 || h.log.count("brain.failover") != 0 || h.log.count("brain.fallback") != 0 {
+				t.Error("failed over or fell back on one transport error")
+			}
+			ev := h.log.ofType("brain.retry")
+			if len(ev) != 1 || payload(ev[0])["reason"] != "transport" || payload(ev[0])["provider"] != ProviderDeepSeek {
+				t.Errorf("brain.retry = %v", ev)
+			}
+		})
+	}
+}
+
+// A transport error that repeats on the retry fails over like a
+// timeout: brain.retry, then brain.failover {reason: transport}, and
+// the other provider answers.
+func TestTransportErrorFailsOverAfterRetry(t *testing.T) {
+	h := newHarness(t, failing(errReset), func(c *Config) { c.Provider, c.Model = ProviderDeepSeek, DefaultDeepSeekModel })
+	other := answering("Fork it only if you must.")
+	_ = h.brain.AddProvider(ProviderGemini, other)
+	rep, err := h.ask("is there a better way than forking?", "")
+	if err != nil {
+		t.Fatalf("turn fell back: %v", err)
+	}
+	if rep.Spoken != "Fork it only if you must." {
+		t.Errorf("reply = %+v", rep)
+	}
+	if h.log.count("brain.retry") != 1 {
+		t.Errorf("brain.retry = %d, want 1", h.log.count("brain.retry"))
+	}
+	ev := h.log.ofType("brain.failover")
+	if len(ev) != 1 || payload(ev[0])["reason"] != "transport" || payload(ev[0])["to"] != ProviderGemini {
+		t.Errorf("brain.failover = %v", ev)
+	}
+}
+
+// With nowhere to fail over to, a repeated transport error falls back
+// with reason transport, after one retry.
+func TestTransportErrorAloneFallsBack(t *testing.T) {
+	h := newHarness(t, failing(errReset), func(c *Config) { c.Provider, c.Model = ProviderDeepSeek, DefaultDeepSeekModel })
+	if _, err := h.ask("is there a better way than forking?", ""); !errors.Is(err, ErrFallback) {
+		t.Fatalf("err = %v, want ErrFallback", err)
+	}
+	if h.log.count("brain.retry") != 1 {
+		t.Errorf("brain.retry = %d, want 1", h.log.count("brain.retry"))
+	}
+	ev := h.log.ofType("brain.fallback")
+	if len(ev) != 1 || payload(ev[0])["reason"] != "transport" {
+		t.Errorf("brain.fallback = %v", ev)
+	}
+}
+
+// Not a transport error: an HTTP status, a client error, the turn's own
+// cancellation or deadline.
+func TestTransportErrorClassification(t *testing.T) {
+	for name, err := range map[string]error{
+		"400":       genai.APIError{Code: 400, Message: "bad request"},
+		"compat":    fmt.Errorf("deepseek: %w", &APIError{Provider: "deepseek", Status: 400}),
+		"cancelled": fmt.Errorf("deepseek: %w", &url.Error{Op: "Post", URL: "https://x", Err: context.Canceled}),
+		"deadline":  fmt.Errorf("deepseek: %w", &url.Error{Op: "Post", URL: "https://x", Err: context.DeadlineExceeded}),
+	} {
+		if IsTransportError(err) {
+			t.Errorf("%s: classified as transport: %v", name, err)
+		}
+	}
+	if !IsTransportError(errReset) {
+		t.Errorf("reset not classified as transport")
+	}
+}
+
+// FailureReason names what broke in plain words, never the vendor or
+// the raw error.
+func TestFailureReason(t *testing.T) {
+	for _, c := range []struct {
+		err  error
+		want string
+	}{
+		{errReset, "the connection to the orchestrator's model broke"},
+		{context.DeadlineExceeded, "the orchestrator's model did not answer in time"},
+		{err504, "the orchestrator's model had a server error"},
+		{err403, "the orchestrator's model refused the daemon's credentials"},
+		{errors.New("bad reply"), "the orchestrator's model returned an error"},
+		{fmt.Errorf("%w: q", ErrAllKeysRateLimited), "the orchestrator's model is rate-limited"},
+	} {
+		if got := FailureReason(fmt.Errorf("%w (model_error): %w", ErrFallback, c.err)); got != c.want {
+			t.Errorf("FailureReason(%v) = %q, want %q", c.err, got, c.want)
+		}
 	}
 }

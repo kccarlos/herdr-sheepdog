@@ -752,6 +752,8 @@ func reasonFor(err error) string {
 		return "cancelled"
 	case errors.Is(err, ErrAllKeysRateLimited):
 		return "rate_limited"
+	case isTransportError(err):
+		return "transport"
 	default:
 		return "model_error"
 	}

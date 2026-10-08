@@ -54,6 +54,10 @@ type inflightUtterance struct {
 	// echoNote says the words began while the voice's line was still
 	// playing (echoNote): a fact for the orchestrator.
 	echoNote string
+	// ins are the user's inputs these words came from (claim.ins, both
+	// utterances' when two coalesce): what a failed turn leaves
+	// unanswered, for a re-relay to retry (rerelay.go).
+	ins []*shepherdInput
 	// accepted is s.acceptedSeq once this call was accepted: when it has
 	// moved by the time a late reply lands, the user asked for
 	// something else meanwhile and the reply is stale.
@@ -95,6 +99,9 @@ type utteranceOutcome struct {
 	// focus is what the reply says about the conversation's focus
 	// (focus.go), for the voice once it has spoken the reply.
 	focus focusFacts
+	// err is why the turn gave no answer (the orchestrator's error),
+	// for the fallback's facts; nil when it answered or there is none.
+	err error
 }
 
 // replyPendingDetail is the silent pending result's detail: context for
@@ -145,6 +152,11 @@ func (s *Supervisor) ToSupervisor(ctx context.Context, said string) (voice.ToolR
 func (s *Supervisor) ToSupervisorRead(ctx context.Context, said, reading string) (voice.ToolResult, error) {
 	said = strings.TrimSpace(said)
 	c, fresh := s.claimInput(ctx)
+	if !fresh && ctx.Err() == nil {
+		// Not when the voice already dropped the call: a retry turn
+		// would run detached for nobody (rerelay.go).
+		c, fresh = s.claimRetry()
+	}
 	if !fresh {
 		// Nothing the user said, typed or tapped since the previous
 		// relay: the call is the voice model's own (2026-09-23: "yes"
@@ -158,6 +170,10 @@ func (s *Supervisor) ToSupervisorRead(ctx context.Context, said, reading string)
 	}
 	text, fallback := UtteranceOf(c.text, said)
 	payload := map[string]any{"heard": c.text, "said": said, "inputs": c.n, "input": string(c.in.kind), "utterance_id": c.id}
+	if c.retryOf != "" {
+		payload["retry_of"] = c.retryOf
+		payload["retry_reason"] = c.retryReason
+	}
 	// waited_ms: from the user's last words (the input's last
 	// fragment) to this relay — the voice model's share of the wait
 	// (turn.latency's voice_ms).
@@ -190,19 +206,6 @@ func (s *Supervisor) ToSupervisorRead(ctx context.Context, said, reading string)
 		res.UtteranceID = c.id
 	}
 	return res, nil
-}
-
-// noFreshWordsFact is the silent result of a to_supervisor call with no
-// new words of the user's: what happened, for the voice to know.
-func (s *Supervisor) noFreshWordsFact() string {
-	s.mu.Lock()
-	in := s.lastInputLocked()
-	s.mu.Unlock()
-	fact := "Nothing was handed on: the orchestrator acts only on the user's own words, and the user has said nothing new since your last call."
-	if in != nil && strings.TrimSpace(in.text) != "" {
-		fact += fmt.Sprintf(" Their last words, at %s, were %q.", in.at.Format("15:04:05"), strings.TrimSpace(in.text))
-	}
-	return fact
 }
 
 // handleUtterance runs the user's claimed words: the fast paths,
@@ -245,6 +248,7 @@ func (s *Supervisor) handleUtterance(ctx context.Context, c claim, callID string
 	u.start = c.start
 	u.reading = c.reading
 	u.echoNote = note
+	u.ins = c.ins
 	s.mu.Unlock()
 	if s.cfg.bareAnswers || s.brain == nil {
 		// With an orchestrator, the orchestrator reads every answer (dual-brain
@@ -294,6 +298,7 @@ func (s *Supervisor) coalesce(u *inflightUtterance) {
 	}
 	p.coalesced = true
 	u.text = p.text + " " + u.text
+	u.ins = append(append([]*shepherdInput(nil), p.ins...), u.ins...)
 	u.merged = p.merged + 1
 	if !p.start.IsZero() && (u.start.IsZero() || p.start.Before(u.start)) {
 		u.start = p.start
@@ -400,6 +405,7 @@ func (s *Supervisor) inlineResult(turnCtx context.Context, u *inflightUtterance,
 		// speaks, and the orchestrator's reply is discarded.
 		return droppedResult()
 	}
+	s.noteOutcome(u, out) // rerelay.go
 	if out.ok {
 		// A reply that named an agent counts as dealing with it, like a
 		// spoken briefing does (the normal level's chattiness rule).
@@ -407,7 +413,7 @@ func (s *Supervisor) inlineResult(turnCtx context.Context, u *inflightUtterance,
 		s.noteFocus(out.focus, u.text)
 		return out.res
 	}
-	return s.fallback()
+	return s.fallback(out)
 }
 
 // deliverLate pushes the reply of a turn that outlived its tool call,
@@ -438,6 +444,9 @@ func (s *Supervisor) deliverLate(turnCtx context.Context, u *inflightUtterance, 
 			return
 		}
 	}
+	if !stale {
+		s.noteOutcome(u, out) // rerelay.go
+	}
 	var paneID, line string
 	urgency := voice.UrgencyIdle
 	if out.ok {
@@ -451,7 +460,7 @@ func (s *Supervisor) deliverLate(turnCtx context.Context, u *inflightUtterance, 
 			urgency = voice.UrgencyInterrupt
 		}
 	} else {
-		line = s.fallback().Spoken
+		line = s.fallback(out).Spoken
 	}
 	if stale {
 		urgency = voice.UrgencySilent
@@ -680,7 +689,7 @@ func (s *Supervisor) utteranceTurn(ctx context.Context, u *inflightUtterance) ut
 	})
 	rep, err := s.brain.Turn(started, req)
 	if err != nil {
-		return utteranceOutcome{}
+		return utteranceOutcome{err: err}
 	}
 	res := toolResultFrom(rep, prose.EarRunaway)
 	if res.Spoken == "" {

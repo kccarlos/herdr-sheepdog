@@ -2,20 +2,24 @@ package brain
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	"google.golang.org/genai"
 )
 
 // Provider failover (pipecat's ServiceSwitcherStrategyFailover): when a
-// model call fails with a rate limit, a server error or a timeout, the
-// step is retried once on the next registered provider. The transcript
+// model call fails with a rate limit, a server error, a timeout or a
+// broken connection (after one retry on the same provider), the step is
+// retried once on the next registered provider. The transcript
 // is provider-neutral and sameOrigin gates what provider-native data is
 // replayed, so the other provider can take the window as it is. The
 // switch lasts for the rest of the turn only; the selected provider
@@ -111,7 +115,9 @@ type failoverState struct {
 
 // failoverReason classifies a model-call error as worth retrying on
 // another provider: a rate limit, a 5xx (504 DEADLINE_EXCEEDED
-// included) or a transport timeout. Never when the turn itself is over
+// included), a transport timeout or another transport error (a broken
+// connection, isTransportError; generateStep retries that once on the
+// same provider first). Never when the turn itself is over
 // (ctx ended): that is the turn's own timeout or cancellation.
 func failoverReason(ctx context.Context, err error) (string, bool) {
 	if err == nil || ctx.Err() != nil {
@@ -135,7 +141,55 @@ func failoverReason(ctx context.Context, err error) (string, bool) {
 	if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &nerr) && nerr.Timeout()) {
 		return "timeout", true
 	}
+	if isTransportError(err) {
+		return "transport", true
+	}
 	return "", false
+}
+
+// isTransportError reports a request that broke on the wire before any
+// answer came back: a connection reset, a closed or broken connection
+// (EOF, broken pipe), a failed dial, DNS lookup or TLS handshake, or a
+// response body cut off mid-read. 2026-10-08 03:04:59: DeepSeek's
+// "read tcp …: read: connection reset by peer" 20 ms into an utterance
+// turn fell straight back to "Sorry, I couldn't get an answer just now"
+// although the next request would most likely have gone through. Such
+// an error says nothing about the provider's answer, so the step is
+// retried once on the same provider (a fresh connection), then fails
+// over like a timeout (generateStep). Timeouts are classified before
+// this (failoverReason), and an HTTP status is never one.
+func isTransportError(err error) bool {
+	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	var api genai.APIError
+	var compat *APIError
+	if errors.As(err, &api) || errors.As(err, &compat) {
+		return false
+	}
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, syscall.ECONNRESET) ||
+		errors.Is(err, syscall.ECONNABORTED) || errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, syscall.EPIPE) ||
+		errors.Is(err, net.ErrClosed) {
+		return true
+	}
+	var nerr net.Error
+	if errors.As(err, &nerr) && !nerr.Timeout() {
+		// *url.Error, *net.OpError, *net.DNSError: whatever the HTTP
+		// client returns when the request never got an answer.
+		return true
+	}
+	var rec tls.RecordHeaderError
+	if errors.As(err, &rec) {
+		return true
+	}
+	// Errors that lost their chain (a provider SDK formatting with %v).
+	msg := strings.ToLower(err.Error())
+	for _, s := range []string{"connection reset", "broken pipe", "unexpected eof", "connection refused", "tls handshake", "use of closed network connection"} {
+		if strings.Contains(msg, s) {
+			return true
+		}
+	}
+	return false
 }
 
 // refusedCode is 401 or 403 when err is the provider refusing the
@@ -200,6 +254,21 @@ func isCancelled499(err error) bool {
 	}
 	var compat *APIError
 	return errors.As(err, &compat) && compat.Status == 499
+}
+
+// retryReason is why a failed call is retried once on the same
+// provider (brain.retry reason): cancelled_499 or transport; "" when it
+// is not.
+func retryReason(err error) string {
+	switch {
+	case err == nil:
+		return ""
+	case isCancelled499(err):
+		return "cancelled_499"
+	case isTransportError(err):
+		return "transport"
+	}
+	return ""
 }
 
 // failoverTarget picks the provider and model a failed step is retried
@@ -290,13 +359,14 @@ func (b *Brain) generateStep(ctx context.Context, t *turn, step int, msgs []Mess
 		defer cancel()
 	}
 	resp, raw, err := b.generate(actx, t, msgs, cfg)
-	if err != nil && !t.retried && isCancelled499(err) && ctx.Err() == nil && actx.Err() == nil {
+	if reason := retryReason(err); reason != "" && !t.retried && ctx.Err() == nil && actx.Err() == nil {
 		// One retry on the same provider, within the attempt's budget
-		// (rail / robustness): a 499 is a dropped request, not an
-		// answer, and the next try usually works.
+		// (rail / robustness): a 499 or a broken connection is a
+		// dropped request, not an answer, and the next try usually
+		// works. A transport error that repeats then fails over below.
 		t.retried = true
 		b.log.Log(logSource, "brain.retry", "", map[string]any{
-			"provider": t.provider, "model": t.model, "reason": "cancelled_499", "error": err.Error(), "turn": t.n, "step": step,
+			"provider": t.provider, "model": t.model, "reason": reason, "error": err.Error(), "turn": t.n, "step": step,
 		})
 		resp, raw, err = b.generate(actx, t, msgs, cfg)
 	}
@@ -491,4 +561,31 @@ func (b *Brain) SetNotifier(f func(n Notice)) {
 	b.mu.Lock()
 	b.notify = f
 	b.mu.Unlock()
+}
+
+// FailureReason is a turn's failure in plain words, for the voice to
+// tell the user (the supervisor's fallback facts): what broke, never the
+// vendor, the endpoint or the raw error.
+func FailureReason(err error) string {
+	var api genai.APIError
+	var compat *APIError
+	switch {
+	case err == nil:
+		return ""
+	case errors.Is(err, ErrAllKeysRateLimited) || isRateLimited(err):
+		return "the orchestrator's model is rate-limited"
+	case refusedCode(err) != 0:
+		return "the orchestrator's model refused the daemon's credentials"
+	case isTransportError(err):
+		return "the connection to the orchestrator's model broke"
+	case errors.Is(err, context.DeadlineExceeded):
+		return "the orchestrator's model did not answer in time"
+	case (errors.As(err, &api) && api.Code >= 500) || (errors.As(err, &compat) && compat.Status >= 500):
+		return "the orchestrator's model had a server error"
+	}
+	var nerr net.Error
+	if errors.As(err, &nerr) && nerr.Timeout() {
+		return "the orchestrator's model did not answer in time"
+	}
+	return "the orchestrator's model returned an error"
 }
