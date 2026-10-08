@@ -565,7 +565,7 @@ func TestAudioTimingLoggedPerTurn(t *testing.T) {
 	if p["bytes"] != 3840 {
 		t.Fatalf("bytes = %v, want 3840", p["bytes"])
 	}
-	for _, k := range []string{"turn", "audio_ms", "wall_ms", "max_gap_ms", "p95_gap_ms"} {
+	for _, k := range []string{"turn", "audio_ms", "wall_ms", "max_gap_ms", "p95_gap_ms", "max_late_ms", "lead_at_max_gap_ms"} {
 		if _, ok := p[k]; !ok {
 			t.Errorf("missing %s in %v", k, p)
 		}

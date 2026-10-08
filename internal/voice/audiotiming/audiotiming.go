@@ -6,14 +6,24 @@
 // in bursts with gaps the prebuffer cannot cover).
 //
 // A Tracker follows one model "turn" (one continuous run of output audio,
-// from the first chunk to the provider going quiet again). For each chunk
-// after the first it computes how far behind a real-time schedule the
-// chunk's arrival fell — the schedule being "the turn's first chunk
-// arrived at time T; if playback started then, chunk i is due at T plus
-// the audio duration already delivered". A chunk that arrives after its
-// due time is starving whatever is consuming the audio in real time; the
-// gap is that lateness, in ms. Gaps of 0 mean the provider is keeping
-// ahead of real time (typical: TTS renders faster than it plays).
+// from the first chunk to the provider going quiet again) and reports two
+// different things about it:
+//
+//   - the **gap**: the wall-clock wait between two consecutive chunks.
+//     max_gap_ms is the longest the provider went silent in the middle of
+//     the turn, whatever audio was already banked.
+//   - the **lateness**: how far behind a real-time schedule a chunk fell —
+//     the schedule being "the turn's first chunk arrived at time T; if
+//     playback started then, chunk i is due at T plus the audio duration
+//     already delivered". A late chunk starves a player that started on
+//     the first chunk with no buffer; 0 means the provider kept ahead.
+//
+// Until 2026-10-08 the lateness was reported as max_gap_ms. A provider
+// that front-loads its audio (Gemini, often 2–4× real time) can then go
+// silent for seconds with a lateness of 0: the turn of 00:48:47Z paused
+// 5.1 s between chunks and logged max_gap_ms 0. Both are logged now, with
+// the lead (audio delivered minus wall time) at the longest gap, which
+// says whether that gap could be heard at all.
 package audiotiming
 
 import (
@@ -36,8 +46,17 @@ type Tracker struct {
 	chunks     int
 	bytes      int
 	audioMs    float64
-	maxGapMs   float64
-	gaps       []float64
+
+	gaps     []float64 // inter-arrival wall gaps, ms
+	maxGapMs float64
+	maxGapAt float64 // ms since start when the longest gap ended
+	// leadAtMaxGap is the audio delivered before the longest gap minus
+	// the wall time elapsed when it ended: how much a real-time player
+	// started on the first chunk still had buffered (negative: it ran dry).
+	leadAtMaxGap float64
+	lates        []float64 // lateness against the real-time schedule, ms
+	maxLateMs    float64
+	minLeadMs    float64
 }
 
 // New starts tracking turn id. sampleRate is the samples/sec of the PCM16
@@ -48,20 +67,28 @@ func New(turn int, sampleRate int) *Tracker {
 }
 
 // Chunk records one chunk of n bytes arriving at wall-clock time now.
-// Returns the gap (ms) this chunk fell behind the real-time schedule (0
-// for the first chunk, which defines the schedule's origin).
+// Returns the gap (ms) since the previous chunk (0 for the first).
 func (t *Tracker) Chunk(now time.Time, n int) float64 {
 	var gap float64
 	if t.chunks == 0 {
 		t.start = now
 	} else {
-		schedule := t.start.Add(msToDuration(t.audioMs))
-		if now.After(schedule) {
-			gap = float64(now.Sub(schedule)) / float64(time.Millisecond)
-		}
+		gap = math.Max(0, ms(now.Sub(t.last)))
+		elapsed := ms(now.Sub(t.start))
+		lead := t.audioMs - elapsed
+		late := math.Max(0, -lead)
 		t.gaps = append(t.gaps, gap)
+		t.lates = append(t.lates, late)
 		if gap > t.maxGapMs {
 			t.maxGapMs = gap
+			t.maxGapAt = elapsed
+			t.leadAtMaxGap = lead
+		}
+		if late > t.maxLateMs {
+			t.maxLateMs = late
+		}
+		if t.chunks == 1 || lead < t.minLeadMs {
+			t.minLeadMs = lead
 		}
 	}
 	t.chunks++
@@ -73,9 +100,7 @@ func (t *Tracker) Chunk(now time.Time, n int) float64 {
 	return gap
 }
 
-func msToDuration(ms float64) time.Duration {
-	return time.Duration(ms * float64(time.Millisecond))
-}
+func ms(d time.Duration) float64 { return float64(d) / float64(time.Millisecond) }
 
 // Finish returns the voice.audio_timing payload for the turn, or nil if
 // no chunk was ever recorded.
@@ -83,15 +108,22 @@ func (t *Tracker) Finish() map[string]any {
 	if t.chunks == 0 {
 		return nil
 	}
-	wallMs := float64(t.last.Sub(t.start)) / float64(time.Millisecond)
+	wallMs := ms(t.last.Sub(t.start))
 	payload := map[string]any{
-		"turn":       t.turn,
-		"chunks":     t.chunks,
-		"bytes":      t.bytes,
-		"audio_ms":   round1(t.audioMs),
-		"wall_ms":    round1(wallMs),
-		"max_gap_ms": round1(t.maxGapMs),
-		"p95_gap_ms": round1(percentile95(t.gaps)),
+		"turn":        t.turn,
+		"chunks":      t.chunks,
+		"bytes":       t.bytes,
+		"audio_ms":    round1(t.audioMs),
+		"wall_ms":     round1(wallMs),
+		"max_gap_ms":  round1(t.maxGapMs),
+		"p95_gap_ms":  round1(percentile95(t.gaps)),
+		"max_late_ms": round1(t.maxLateMs),
+		"p95_late_ms": round1(percentile95(t.lates)),
+	}
+	if t.chunks > 1 {
+		payload["max_gap_at_ms"] = round1(t.maxGapAt)
+		payload["lead_at_max_gap_ms"] = round1(t.leadAtMaxGap)
+		payload["min_lead_ms"] = round1(t.minLeadMs)
 	}
 	if wallMs > 0 {
 		payload["realtime_ratio"] = round2(t.audioMs / wallMs)
@@ -101,13 +133,13 @@ func (t *Tracker) Finish() map[string]any {
 
 // percentile95 uses the nearest-rank method; an empty slice (a turn of
 // exactly one chunk) yields 0.
-func percentile95(gaps []float64) float64 {
-	n := len(gaps)
+func percentile95(v []float64) float64 {
+	n := len(v)
 	if n == 0 {
 		return 0
 	}
 	sorted := make([]float64, n)
-	copy(sorted, gaps)
+	copy(sorted, v)
 	sort.Float64s(sorted)
 	idx := int(math.Ceil(0.95*float64(n))) - 1
 	if idx < 0 {

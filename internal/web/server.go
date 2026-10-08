@@ -17,6 +17,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
 	"github.com/kccarlos/herdr-sheepdog/internal/ctxcap"
 	"github.com/kccarlos/herdr-sheepdog/internal/eventlog"
+	"github.com/kccarlos/herdr-sheepdog/internal/feedback"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/inject"
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
@@ -187,6 +188,9 @@ type Server struct {
 	log  logging.Logger
 	mux  *http.ServeMux
 	hub  *hub
+	// audio records the voice's output chunks for user.feedback
+	// snapshots (POST /api/feedback).
+	audio *feedback.AudioLog
 
 	// closing is closed by Serve on shutdown so long-lived handlers (SSE)
 	// end before http.Server.Shutdown waits for them.
@@ -243,7 +247,7 @@ func New(deps Deps) (*Server, error) {
 	if deps.Logger == nil {
 		deps.Logger = deps.Log
 	}
-	s := &Server{deps: deps, log: deps.Logger, mux: http.NewServeMux(), closing: make(chan struct{})}
+	s := &Server{deps: deps, log: deps.Logger, mux: http.NewServeMux(), closing: make(chan struct{}), audio: feedback.NewAudioLog()}
 	s.hub = newHub(s)
 	if err := s.routes(); err != nil {
 		return nil, err
@@ -304,6 +308,7 @@ func (s *Server) routes() error {
 	s.mux.HandleFunc("POST /api/push/register", s.authFunc(s.handlePushRegister, false))
 	s.mux.HandleFunc("DELETE /api/push/register", s.authFunc(s.handlePushUnregister, false))
 	s.mux.HandleFunc("GET /api/push/status", s.authFunc(s.handlePushStatus, false))
+	s.mux.HandleFunc("POST /api/feedback", s.authFunc(s.handleFeedback, false))
 	if s.deps.DevTestdataDir != "" {
 		s.mux.HandleFunc("GET /testdata/{name}", func(w http.ResponseWriter, r *http.Request) {
 			s.serveFixture(w, r, s.deps.DevTestdataDir, ".wav", "audio/wav")
