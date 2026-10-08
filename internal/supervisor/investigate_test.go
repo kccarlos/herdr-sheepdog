@@ -411,9 +411,11 @@ func TestInvestigationFailureSaysWhy(t *testing.T) {
 		{"binary missing", fmt.Errorf("cli: codex: %w", &exec.Error{Name: "codex", Err: exec.ErrNotFound}), false, investigateAnswer, "no command-line helper"},
 		{"timed out", fmt.Errorf("cli: codex: %w after 10m0s", cli.ErrTimedOut), false, "The look into auth ran out of time; ask me to try again.", "it ran out of time (the limit is"},
 		{"busy", cli.ErrBusy, false, "The look into auth could not start: another look at the same project was still running. Ask me again in a moment.", "another look"},
-		{"exit code", &cli.ExitError{Backend: cli.Codex, Code: 2, Stderr: "boom"}, false, "The look into auth failed: the helper stopped with an error. Ask me to try again.", "exit code 2"},
+		{"exit code", &cli.ExitError{Backend: cli.Codex, Code: 2, Stderr: "boom"}, false, investigateAnswer, "exit code 2"},
+		{"reported, exit 0", &cli.ExitError{Backend: cli.Claude, Reported: "error_during_execution: API Error: 529 Overloaded"}, false, investigateAnswer, "the helper reported an error (cli: claude reported an error: error_during_execution"},
+		{"cost cap", &cli.ExitError{Backend: cli.Claude, Code: 1, Subtype: "error_max_budget_usd", Reported: "error_max_budget_usd: Reached maximum budget ($0.50)"}, false, investigateAnswer, "it stopped at its cost cap before it could answer, so asking the same way again fails the same way (cli: claude: exit 1: error_max_budget_usd: Reached maximum budget ($0.50))"},
 		{"refused", fmt.Errorf("%w: not in this workspace", brain.ErrNotPermitted), false, "The look into auth was refused; ask me if you want it another way.", "it was refused"},
-		{"other, in Chinese", errors.New("claude reported an error: overloaded"), true, "查看 auth 的情况失败了；需要的话让我再试一次。", "it failed: claude reported an error"},
+		{"other, in Chinese", errors.New("claude reported an error: overloaded"), true, investigateAnswer, "it failed: claude reported an error"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -432,7 +434,7 @@ func TestInvestigationFailureSaysWhy(t *testing.T) {
 				t.Errorf("record err = %q, want it to say %q", inv.Err, c.fact)
 			}
 			if c.spoken == investigateAnswer {
-				if text := lastCall(t, m); !strings.Contains(text, "It did not run: no command-line helper") || !strings.Contains(text, "do not name tools or helpers") {
+				if text := lastCall(t, m); !strings.Contains(text, "It did not get an answer: "+inv.Err) || !strings.Contains(text, "do not name tools or helpers") {
 					t.Errorf("the brain did not get the fact:\n%s", text)
 				}
 			}

@@ -267,13 +267,24 @@ func (r *Runner) finish(result *Result, exec execResult, backend Backend, timeou
 		return fmt.Errorf("cli: %s: %w after %s", backend, ErrTimedOut, timeout)
 	}
 	if exec.Exit != 0 {
-		return &ExitError{Backend: backend, Code: exec.Exit, Stderr: strings.TrimSpace(exec.Stderr)}
+		xe := &ExitError{Backend: backend, Code: exec.Exit, Stderr: strings.TrimSpace(exec.Stderr)}
+		if backend == Claude {
+			if parsed, ok := parseClaudeResult(exec.Stdout); ok {
+				xe.Subtype, xe.Reported = parsed.Subtype, parsed.reported()
+				result.NumTurns, result.DurationMS, result.TotalCostUSD = parsed.NumTurns, parsed.DurationMS, parsed.TotalCostUSD
+			}
+		}
+		if xe.Stderr == "" && xe.Reported == "" {
+			// Neither said why: the end of stdout is all there is.
+			xe.Reported = elideRunes(strings.TrimSpace(exec.Stdout), 300)
+		}
+		return xe
 	}
 	switch backend {
 	case Claude:
 		if parsed, ok := parseClaudeResult(exec.Stdout); ok {
 			if parsed.IsError {
-				return fmt.Errorf("cli: claude reported an error: %s", strings.TrimSpace(parsed.Result))
+				return &ExitError{Backend: backend, Subtype: parsed.Subtype, Reported: parsed.reported()}
 			}
 			result.Raw = strings.TrimSpace(parsed.Result)
 			result.NumTurns = parsed.NumTurns

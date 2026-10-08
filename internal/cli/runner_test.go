@@ -425,3 +425,60 @@ func TestQueryUnavailable(t *testing.T) {
 		t.Errorf("err = %v, want ErrUnavailable", err)
 	}
 }
+
+// budgetJSON is claude 2.1.293's stdout for a fork stopped at its
+// --max-budget-usd (2026-10-08, trimmed): exit 1, stderr empty, no
+// result field.
+const budgetJSON = `{"type":"result","subtype":"error_max_budget_usd","is_error":true,"num_turns":2,"total_cost_usd":536.44,"session_id":"44f1f415-fae0-4764-a9f2-d5fae6a9e517","terminal_reason":"budget_exhausted","errors":["Reached maximum budget ($2.00)"]}`
+
+// TestRunnerClaudeExitCarriesReportedReason: 2026-10-08 00:17 a fork
+// failed as "cli: claude: exit 1: " because claude said why only in its
+// JSON stdout. The error now carries the subtype and errors, matches
+// ErrBudget, and the cost is still logged.
+func TestRunnerClaudeExitCarriesReportedReason(t *testing.T) {
+	bin := fakeBinPath(t)
+	log := &recLog{}
+	cfg := Config{ClaudeBin: bin, ClaudeCmd: []string{bin, "{question}"}, Log: log}
+	r := newTestRunner(t, cfg, Detection{Claude: true})
+
+	t.Setenv("FAKE_EXIT", "1")
+	t.Setenv("FAKE_STDOUT", budgetJSON)
+	_, err := r.RunBackend(context.Background(), Claude, t.TempDir(), "why")
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if want := "cli: claude: exit 1: error_max_budget_usd: Reached maximum budget ($2.00)"; err.Error() != want {
+		t.Errorf("err = %q, want %q", err, want)
+	}
+	if !errors.Is(err, ErrBudget) {
+		t.Error("errors.Is(err, ErrBudget) = false")
+	}
+	var exit *ExitError
+	if !errors.As(err, &exit) || exit.ExitCode() != 1 {
+		t.Errorf("not an ExitError with code 1: %#v", err)
+	}
+	if p := log.ofType("cli.run")[0].Payload.(map[string]any); p["total_cost_usd"] != 536.44 || p["error"] != err.Error() {
+		t.Errorf("cli.run = %v", p)
+	}
+
+	// Another reported error is not the budget; is_error with exit 0
+	// says why too (it used to print an empty result).
+	t.Setenv("FAKE_STDOUT", `{"type":"result","subtype":"error_during_execution","is_error":true,"errors":["API Error: 529 Overloaded"]}`)
+	_, err = r.RunBackend(context.Background(), Claude, t.TempDir(), "why")
+	if err == nil || errors.Is(err, ErrBudget) || !strings.Contains(err.Error(), "error_during_execution: API Error: 529 Overloaded") {
+		t.Errorf("during execution: %v", err)
+	}
+	t.Setenv("FAKE_EXIT", "0")
+	_, err = r.RunBackend(context.Background(), Claude, t.TempDir(), "why")
+	if err == nil || err.Error() != "cli: claude reported an error: error_during_execution: API Error: 529 Overloaded" {
+		t.Errorf("exit 0, is_error: %v", err)
+	}
+
+	// Neither stderr nor JSON: the start of stdout stands in.
+	t.Setenv("FAKE_EXIT", "1")
+	t.Setenv("FAKE_STDOUT", "Credit balance is too low")
+	_, err = r.RunBackend(context.Background(), Claude, t.TempDir(), "why")
+	if err == nil || !strings.HasSuffix(err.Error(), "exit 1: Credit balance is too low") {
+		t.Errorf("plain stdout: %v", err)
+	}
+}

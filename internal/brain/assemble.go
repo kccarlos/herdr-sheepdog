@@ -364,7 +364,10 @@ func investigationRequestText(req Request) string {
 	if inv.Status == InvestigationError {
 		// Campaign D N8: the daemon used to read its own failure line
 		// ("no command-line helper is set up on this machine") to the user.
-		fmt.Fprintf(&b, "It did not run: %s. Tell the user in plain words what that means for them (for example that you cannot look at the files directly from here) and what you can still do; do not name tools or helpers.\n", inv.Err)
+		// 2026-10-08: a fork stopped at its cost cap reached the user as
+		// "the helper stopped with an error, ask me to try again"; the
+		// orchestrator now gets that failure too, with its reason.
+		fmt.Fprintf(&b, "It did not get an answer: %s. Tell the user in plain words what that means for them (for example that you cannot look at the files directly from here, or that asking the same way again would fail the same way) and what you can still do; do not name tools or helpers.\n", inv.Err)
 	}
 	if req.Result != "" {
 		b.WriteString("What it found:\n")

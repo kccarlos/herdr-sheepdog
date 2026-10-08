@@ -28,6 +28,8 @@
 #                            FAKE_CODEX_JSONL), reports this session id
 #                            the way the real backend does, so a
 #                            follow-up can resume it
+#   FAKE_STDOUT              when set, print exactly this to stdout
+#                            and exit FAKE_EXIT (claude's error JSON)
 #   FAKE_CODEX_JSONL          when set, print `codex exec --json` JSONL:
 #                            thread.started, an agent_message item with
 #                            the answer, and turn.completed
@@ -47,6 +49,11 @@ fi
 
 if [ -n "$FAKE_SLEEP" ]; then
   sleep "$FAKE_SLEEP"
+fi
+
+if [ -n "$FAKE_STDOUT" ]; then
+  printf '%s\n' "$FAKE_STDOUT"
+  exit "${FAKE_EXIT:-0}"
 fi
 
 if [ -n "$FAKE_BIG" ] && [ -z "$FAKE_CODEX_JSONL" ]; then

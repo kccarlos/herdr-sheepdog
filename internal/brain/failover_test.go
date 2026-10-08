@@ -439,3 +439,123 @@ func TestRetry499OncePerTurn(t *testing.T) {
 		t.Errorf("brain.retry = %d, want 1", n)
 	}
 }
+
+// err403 is what Vertex answered on 2026-10-08 00:16 while its project
+// was blocked.
+var err403 = genai.APIError{Code: 403, Message: "Request rejected in accordance with our terms of use and policies.", Status: "PERMISSION_DENIED"}
+
+// 2026-10-08 00:16: DeepSeek (selected) timed out, the step failed over
+// to Vertex, which refused with 403, and the turn fell back although the
+// Gemini key pool was registered and working. Now the refusal marks
+// Vertex down and the step goes on to Gemini; the turns after it skip
+// Vertex until the window passes, and then it is tried again.
+func TestFailoverPastRefusedProvider(t *testing.T) {
+	clock := &fakeClock{now: time.Date(2026, 10, 8, 0, 16, 0, 0, time.UTC)}
+	primary := braintest.NewModel(braintest.Step{Err: context.DeadlineExceeded}, braintest.Step{Err: err504}, braintest.Step{Err: err504})
+	h := newHarness(t, primary, func(c *Config) { c.Provider, c.Model, c.Now = ProviderDeepSeek, DefaultDeepSeekModel, clock.Now })
+	vx := failing(err403)
+	gm := answering("Forumind is waiting on your answer.")
+	_ = h.brain.AddProvider(ProviderVertex, vx)
+	_ = h.brain.AddProvider(ProviderGemini, gm)
+
+	rep, err := h.ask("what is forumind asking?", "auth")
+	if err != nil {
+		t.Fatalf("turn fell back: %v", err)
+	}
+	if rep.Spoken != "Forumind is waiting on your answer." {
+		t.Errorf("reply = %+v", rep)
+	}
+	if len(vx.Calls()) != 1 || len(gm.Calls()) != 1 {
+		t.Errorf("vertex calls = %d, gemini calls = %d", len(vx.Calls()), len(gm.Calls()))
+	}
+	ev := h.log.ofType("brain.failover")
+	if len(ev) != 2 || payload(ev[0])["to"] != ProviderVertex || payload(ev[1])["from"] != ProviderVertex ||
+		payload(ev[1])["to"] != ProviderGemini || payload(ev[1])["reason"] != "http_403" {
+		t.Errorf("brain.failover = %v", ev)
+	}
+	down := h.log.ofType("brain.provider_down")
+	if len(down) != 1 || payload(down[0])["provider"] != ProviderVertex || !strings.Contains(fmt.Sprint(payload(down[0])["error"]), "PERMISSION_DENIED") {
+		t.Errorf("brain.provider_down = %v", down)
+	}
+	if reason, _, ok := h.brain.ProviderDown(ProviderVertex); !ok || !strings.Contains(reason, "PERMISSION_DENIED") {
+		t.Errorf("ProviderDown(vertex) = %q, %v", reason, ok)
+	}
+	if h.brain.Provider() != ProviderDeepSeek {
+		t.Errorf("selection changed to %s", h.brain.Provider())
+	}
+
+	// Within the window Vertex is skipped: DeepSeek fails over straight
+	// to Gemini.
+	clock.Add(10 * time.Minute)
+	if _, err := h.ask("and now?", "auth"); err != nil {
+		t.Fatal(err)
+	}
+	if len(vx.Calls()) != 1 || len(gm.Calls()) != 2 {
+		t.Errorf("in the window: vertex calls = %d, gemini calls = %d", len(vx.Calls()), len(gm.Calls()))
+	}
+
+	// After it Vertex is tried again (and refuses again).
+	clock.Add(25 * time.Minute)
+	if _, err := h.ask("and now?", "auth"); err != nil {
+		t.Fatal(err)
+	}
+	if len(vx.Calls()) != 2 || len(gm.Calls()) != 3 {
+		t.Errorf("after the window: vertex calls = %d, gemini calls = %d", len(vx.Calls()), len(gm.Calls()))
+	}
+	if n := h.log.count("brain.provider_down"); n != 2 {
+		t.Errorf("brain.provider_down count = %d, want 2", n)
+	}
+}
+
+// A selected provider that refuses is routed around for the window: the
+// turn after the refusal starts on the target without calling it, and
+// selecting it again retries it at once.
+func TestSelectedProviderDown(t *testing.T) {
+	clock := &fakeClock{now: time.Date(2026, 10, 8, 0, 16, 0, 0, time.UTC)}
+	vx := failing(err403)
+	h := newHarness(t, vx, func(c *Config) { c.Provider, c.Model, c.Now = ProviderVertex, "gemini-3.5-flash", clock.Now })
+	gm := answering("Fine.")
+	_ = h.brain.AddProvider(ProviderGemini, gm)
+
+	for i := 0; i < 2; i++ {
+		if _, err := h.ask("how is auth?", "auth"); err != nil {
+			t.Fatalf("turn %d fell back: %v", i, err)
+		}
+		clock.Add(time.Minute)
+	}
+	if n := len(vx.Calls()); n != 1 {
+		t.Errorf("vertex calls = %d, want 1 (the second turn routes around it)", n)
+	}
+	if calls := gm.Calls(); len(calls) != 2 || calls[1].Model != "gemini-3.5-flash" {
+		t.Errorf("gemini calls = %+v", calls)
+	}
+	ev := h.log.ofType("brain.failover")
+	if len(ev) != 2 || payload(ev[1])["reason"] != "provider_down" {
+		t.Errorf("brain.failover = %v", ev)
+	}
+
+	if err := h.brain.SetModel(ProviderVertex, "gemini-3.8-flash", "test"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, ok := h.brain.ProviderDown(ProviderVertex); ok {
+		t.Error("still down after it was selected again")
+	}
+	if _, err := h.ask("how is auth?", "auth"); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(vx.Calls()); n != 2 {
+		t.Errorf("vertex calls after reselecting = %d, want 2", n)
+	}
+}
+
+// A 401/403 with no other provider falls back as before, and a 400 is
+// still not a refusal.
+func TestRefusedAlone(t *testing.T) {
+	h := newHarness(t, failing(err403), nil)
+	if _, err := h.ask("how is auth?", "auth"); !errors.Is(err, ErrFallback) {
+		t.Fatalf("err = %v, want ErrFallback", err)
+	}
+	if h.log.count("brain.failover") != 0 {
+		t.Error("brain.failover without a second provider")
+	}
+}

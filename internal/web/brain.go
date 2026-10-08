@@ -185,6 +185,12 @@ type ProviderInfo struct {
 	Label     string `json:"label"`
 	Available bool   `json:"available"`
 	Reason    string `json:"reason,omitempty"`
+	// Down is set while the orchestrator routes around the provider
+	// because it refused the daemon's credentials (brain.provider_down):
+	// the error, and DownUntil when it is tried again. It stays
+	// selectable; selecting it retries it at once.
+	Down      string     `json:"down,omitempty"`
+	DownUntil *time.Time `json:"down_until,omitempty"`
 }
 
 // providerLabels are the display names of the known provider ids; an
@@ -201,14 +207,22 @@ func ProviderLabel(id string) string {
 
 // providers lists the providers for the API: Deps.BrainProviders when
 // the daemon set it (it knows why a provider is missing), else every
-// provider registered with the orchestrator, available.
+// provider registered with the orchestrator, available; each with Down
+// while the orchestrator routes around it.
 func (s *Server) providers(b *brain.Brain) []ProviderInfo {
-	if len(s.deps.BrainProviders) > 0 {
-		return append([]ProviderInfo(nil), s.deps.BrainProviders...)
-	}
 	var out []ProviderInfo
-	for _, id := range b.Providers() {
-		out = append(out, ProviderInfo{ID: id, Label: ProviderLabel(id), Available: true})
+	if len(s.deps.BrainProviders) > 0 {
+		out = append([]ProviderInfo(nil), s.deps.BrainProviders...)
+	} else {
+		for _, id := range b.Providers() {
+			out = append(out, ProviderInfo{ID: id, Label: ProviderLabel(id), Available: true})
+		}
+	}
+	for i := range out {
+		if reason, until, down := b.ProviderDown(out[i].ID); down {
+			u := until.UTC()
+			out[i].Down, out[i].DownUntil = reason, &u
+		}
 	}
 	return out
 }

@@ -193,7 +193,7 @@ func (s *Supervisor) startInvestigation(ctx context.Context, paneID string, req 
 			Workspace: inv.Workspace, Question: inv.Question, Session: plan.session,
 			Backend: plan.backend, Fork: plan.fork,
 			Timeout: s.cfg.InvestigateMax, Slot: "investigation:" + inv.PaneID,
-		})
+		}, plan.transcript)
 	}()
 	return brain.InvestigationStart{Job: inv.ID, ETASeconds: int(s.investigateETA(backend).Seconds())}, nil
 }
@@ -206,6 +206,10 @@ type investigationPlan struct {
 	// session it forks.
 	session string
 	fork    bool
+	// transcript is the worker's session file a fork reads (source
+	// worker): the fallback when the fork cannot run points a plain
+	// read-only sub-agent at it.
+	transcript string
 }
 
 // jobSession is the session the record starts with: a resumed session
@@ -253,11 +257,11 @@ func (s *Supervisor) planInvestigation(row state.Agent, req brain.InvestigationR
 		p.question = fmt.Sprintf("Earlier you were asked: %s\nYou answered:\n%s\n\nNow: %s", prev.Question, prev.Result, question)
 	}
 	if p.source == state.InvestigationSourceWorker {
-		backend, session, err := s.workerFork(row)
+		backend, session, transcript, err := s.workerFork(row)
 		if err != nil {
 			return investigationPlan{}, err
 		}
-		p.backend, p.session, p.fork = backend, session, true
+		p.backend, p.session, p.fork, p.transcript = backend, session, true, transcript
 	}
 	return p, nil
 }
@@ -308,15 +312,16 @@ var sessionUUID = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]
 // backend that keeps it and the id its fork takes. A session sheepdog
 // cannot find is refused with the worker.session_missing reason, for the
 // model to read, pointing it at the default source.
-func (s *Supervisor) workerFork(row state.Agent) (backend, session string, err error) {
+func (s *Supervisor) workerFork(row state.Agent) (backend, session, transcript string, err error) {
 	alias := aliasOr(row.Alias)
 	refuse := func(why string) error {
 		return fmt.Errorf("cannot ask %s itself: %s; investigate without source asks a read-only agent in its repository instead", alias, why)
 	}
 	sess := workerSession(row)
-	if _, err := s.cfg.WorkerLog.Locate(sess); err != nil {
+	transcript, err = s.cfg.WorkerLog.Locate(sess)
+	if err != nil {
 		reason := workerlog.Reason(err)
-		return "", "", refuse(reason + " (" + sessionMissingWhy[reason] + ")")
+		return "", "", "", refuse(reason + " (" + sessionMissingWhy[reason] + ")")
 	}
 	backend = workerBackend(sess)
 	session = sess.Value
@@ -327,12 +332,12 @@ func (s *Supervisor) workerFork(row state.Agent) (backend, session string, err e
 		session = stem[max(0, len(stem)-36):]
 	}
 	if !sessionUUID.MatchString(session) {
-		return "", "", refuse(workerlog.ReasonNotFound + " (its session id is not one the " + backend + " CLI can resume)")
+		return "", "", "", refuse(workerlog.ReasonNotFound + " (its session id is not one the " + backend + " CLI can resume)")
 	}
 	if c, ok := s.investigator.(backendChecker); ok && !c.HasBackend(backend) {
-		return "", "", refuse("the " + backend + " CLI that keeps its session is not installed here")
+		return "", "", "", refuse("the " + backend + " CLI that keeps its session is not installed here")
 	}
-	return backend, session, nil
+	return backend, session, transcript, nil
 }
 
 // workerBackend names the CLI that keeps a worker's session, from the
@@ -363,9 +368,29 @@ func (s *Supervisor) resumable(inv state.Investigation) bool {
 // runInvestigation runs one job and delivers what it found. It never
 // holds s.mu across the run: the job takes minutes and everything else
 // (a user turn, a worker event, a stop) must keep working.
-func (s *Supervisor) runInvestigation(ctx context.Context, live *liveInvestigation, inv state.Investigation, q InvestigationQuery) {
+func (s *Supervisor) runInvestigation(ctx context.Context, live *liveInvestigation, inv state.Investigation, q InvestigationQuery, transcript string) {
 	defer live.cancel()
 	res, err := s.investigator.Investigate(ctx, q)
+	if err != nil && q.Fork && errors.Is(err, cli.ErrBudget) && ctx.Err() == nil {
+		// The fork stopped at its cost cap: a long session's first
+		// turn pays for the whole context (2026-10-08 00:17, a 360 k
+		// token session, about $2.8–3.0 cold). Asked once more, the
+		// plain way: a read-only sub-agent in the repository, pointed
+		// at the worker's transcript (read-only, never the worker
+		// itself) — the cli source's own fallback when it has no
+		// session to resume (planInvestigation). The record then says
+		// it came from the repository.
+		fq := q
+		fq.Fork, fq.Session, fq.Backend = false, "", ""
+		fq.Question = forkFallbackQuestion(q.Question, transcript, err)
+		s.log.Log(logSource, "investigation.fallback", inv.PaneID, map[string]any{
+			"id": inv.ID, "agent": aliasOr(inv.Alias), "from": state.InvestigationSourceWorker, "to": state.InvestigationSourceCLI,
+			"reason": "budget", "error": err.Error(), "transcript": transcript != "",
+		})
+		q = fq
+		inv.Source, inv.Backend, inv.Question = state.InvestigationSourceCLI, "", fq.Question
+		res, err = s.investigator.Investigate(ctx, fq)
+	}
 	s.mu.Lock()
 	cancelled := live.cancelled
 	if s.investigating[inv.PaneID] == live {
@@ -390,11 +415,15 @@ func (s *Supervisor) runInvestigation(ctx context.Context, live *liveInvestigati
 		zh := s.ceoChineseLocked()
 		s.mu.Unlock()
 		line := cause.line(s.sayPane(inv.PaneID, inv.Alias), zh)
-		if cause.name == "no_cli" && s.brain != nil {
+		if cause.toOrchestrator && s.brain != nil {
 			// Campaign D N8: "could not run: no command-line helper is
 			// set up on this machine" was read to the user as is, and a
 			// worker was then told to print its README. The orchestrator gets
-			// the fact and says what it means for the user.
+			// the fact and says what it means for the user. The same for
+			// a helper that stopped with an error: "the helper stopped
+			// with an error, ask me to try again" (2026-10-08) said
+			// nothing, and trying again fails the same way when the
+			// reason is a cost cap or an account problem.
 			s.deliverInvestigation(inv, line)
 			return
 		}
@@ -657,6 +686,9 @@ func investigationInfo(inv state.Investigation, resumable bool) brain.Investigat
 type failCause struct {
 	name string
 	fact string
+	// toOrchestrator hands the failure to the orchestrator, which says
+	// what it means (deliverInvestigation), instead of speaking line.
+	toOrchestrator bool
 	// en and zh are the spoken reason after "The look into <alias>"
 	// and "查看 <alias> 的情况" respectively.
 	en, zh string
@@ -669,24 +701,45 @@ func investigationCause(err error, limit time.Duration) failCause {
 	var exit interface{ ExitCode() int }
 	switch {
 	case errors.Is(err, brain.ErrNoCLI), errors.Is(err, cli.ErrUnavailable), errors.Is(err, exec.ErrNotFound), errors.Is(err, fs.ErrNotExist):
-		return failCause{"no_cli", "no command-line helper (codex or claude) is available on this machine to look with",
-			" could not run: I can't look at its files directly from here.", "没能进行：我在这里没法直接查看它的文件。"}
+		return failCause{name: "no_cli", fact: "no command-line helper (codex or claude) is available on this machine to look with", toOrchestrator: true,
+			en: " could not run: I can't look at its files directly from here.", zh: "没能进行：我在这里没法直接查看它的文件。"}
 	case errors.Is(err, cli.ErrTimedOut), errors.Is(err, context.DeadlineExceeded):
-		return failCause{"timeout", "it ran out of time (the limit is " + limitText(limit) + ")",
-			" ran out of time; ask me to try again.", "超时了；需要的话让我再试一次。"}
+		return failCause{name: "timeout", fact: "it ran out of time (the limit is " + limitText(limit) + ")",
+			en: " ran out of time; ask me to try again.", zh: "超时了；需要的话让我再试一次。"}
 	case errors.Is(err, cli.ErrBusy):
-		return failCause{"busy", "another look at the same project was still running",
-			" could not start: another look at the same project was still running. Ask me again in a moment.", "没能开始：同一个项目还有另一次查看在进行。稍后再让我试。"}
+		return failCause{name: "busy", fact: "another look at the same project was still running",
+			en: " could not start: another look at the same project was still running. Ask me again in a moment.", zh: "没能开始：同一个项目还有另一次查看在进行。稍后再让我试。"}
 	case errors.Is(err, brain.ErrNotPermitted):
-		return failCause{"refused", "it was refused: " + oneLineErr(err),
-			" was refused; ask me if you want it another way.", "被拒绝了；需要的话告诉我换个方式。"}
+		return failCause{name: "refused", fact: "it was refused: " + oneLineErr(err),
+			en: " was refused; ask me if you want it another way.", zh: "被拒绝了；需要的话告诉我换个方式。"}
+	case errors.Is(err, cli.ErrBudget):
+		return failCause{name: "budget", fact: "it stopped at its cost cap before it could answer, so asking the same way again fails the same way", toOrchestrator: true,
+			en: " stopped at its cost limit before it could answer; a narrower question may fit.", zh: "在花费上限前停下了，没能回答；换个更具体的问题也许可以。"}
 	case errors.As(err, &exit):
-		return failCause{"exit", fmt.Sprintf("the helper stopped with an error (exit code %d)", exit.ExitCode()),
-			" failed: the helper stopped with an error. Ask me to try again.", "失败了：命令行助手出错退出。需要的话让我再试一次。"}
+		fact := fmt.Sprintf("the helper stopped with an error (exit code %d)", exit.ExitCode())
+		if exit.ExitCode() == 0 {
+			fact = "the helper reported an error"
+		}
+		return failCause{name: "exit", fact: fact, toOrchestrator: true,
+			en: " failed: the helper stopped with an error. Ask me to try again.", zh: "失败了：命令行助手出错退出。需要的话让我再试一次。"}
 	default:
-		return failCause{"error", "it failed: " + oneLineErr(err),
-			" failed; ask me to try again.", "失败了；需要的话让我再试一次。"}
+		return failCause{name: "error", fact: "it failed: " + oneLineErr(err), toOrchestrator: true,
+			en: " failed; ask me to try again.", zh: "失败了；需要的话让我再试一次。"}
 	}
+}
+
+// forkFallbackQuestion is what the plain sub-agent is asked when the
+// worker's own session could not answer: the question, why, and where
+// the worker's transcript is to read (read-only) when there is one.
+func forkFallbackQuestion(question, transcript string, why error) string {
+	var b strings.Builder
+	b.WriteString(question)
+	fmt.Fprintf(&b, "\n\n(The worker's own session could not be asked: %s. Answer from the repository", prose.TruncateRunes(oneLineErr(why), 160))
+	if transcript != "" {
+		fmt.Fprintf(&b, " and from the worker's session transcript, a JSONL file at %s; it is large, so search it with Grep for the part that matters instead of reading it whole, and never write to it", transcript)
+	}
+	b.WriteString(". Say which of your answer comes from the transcript and what you could not find.)")
+	return b.String()
 }
 
 // line is the spoken failure for alias, in the user's language.

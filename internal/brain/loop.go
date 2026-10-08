@@ -37,7 +37,10 @@ type turn struct {
 	failedOver bool
 	// retried is set once a step was retried on the same provider after
 	// a 499 CANCELLED (generateStep): once per turn.
-	retried  bool
+	retried bool
+	// tried are the providers this turn already left (failed over away
+	// from, or routed around as down): never picked again in the turn.
+	tried    []string
 	steps    int
 	calls    int // model calls
 	tokIn    int
@@ -155,6 +158,7 @@ func (b *Brain) run(ctx context.Context, t *turn) (Reply, error) {
 	}
 	b.mu.Unlock()
 	b.traceTurn(t)
+	b.routeAroundDown(t)
 	if t.req.Facts != nil {
 		// Now, not when the turn was asked for: it may have queued
 		// behind another turn while the template line went out.
