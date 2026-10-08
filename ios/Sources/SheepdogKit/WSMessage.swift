@@ -7,7 +7,7 @@ import Foundation
 /// every text frame is one `WSMessage`.
 ///
 /// Client → server: `client-ready`, `mute`, `silence`, `speaking`,
-/// `playback`, `cancel`, `text`, `ping`, `screen-subscribe`,
+/// `playback`, `drain`, `cancel`, `text`, `ping`, `screen-subscribe`,
 /// `screen-unsubscribe`.
 /// Server → client: `bot-ready`, `flush`, `status`, `transcript`, `error`,
 /// `pong`, `screen`, `screen-error`.
@@ -16,6 +16,8 @@ public struct WSMessage: Codable, Equatable, Sendable {
     public enum Kind: String, Codable, Sendable {
         case clientReady = "client-ready"
         case mute, silence, speaking, playback, cancel, text, ping
+        /// The player ran dry (feature `feedback`; diagnostic only).
+        case drain
         case botReady = "bot-ready"
         case flush, status, transcript, error, pong
         /// The agent window over `/ws` (feature `screen`).
@@ -93,6 +95,13 @@ public struct WSMessage: Codable, Equatable, Sendable {
     /// clock). Required for `drained` and `flushed`.
     public var state: PlaybackState?
     public var playedMs: Int?
+    /// `drain` (feature `feedback`, docs/ws-contract.md "Feedback and
+    /// drains"): when the player ran dry (RFC 3339 with milliseconds),
+    /// the run's stream ms received by then, and in `reason` how the
+    /// player noticed (`dry`, `early`). `buffer_ms` is what it believed
+    /// was still buffered and `played_ms` what it had played.
+    public var at: String?
+    public var receivedMs: Int?
     /// `ping` counters, mirrored into the daemon's `web.client.stats`.
     public var gatedFrames: Int?
     public var peak: Int?
@@ -140,6 +149,8 @@ public struct WSMessage: Codable, Equatable, Sendable {
         case `protocol`, client, daemon, features
         case minProtocol = "min_protocol"
         case playedMs = "played_ms"
+        case at
+        case receivedMs = "received_ms"
         case gatedFrames = "gated_frames"
         case bufferMs = "buffer_ms"
         case stretchedMs = "stretched_ms"
@@ -158,6 +169,8 @@ public struct WSMessage: Codable, Equatable, Sendable {
         on: Bool? = nil,
         state: PlaybackState? = nil,
         playedMs: Int? = nil,
+        at: String? = nil,
+        receivedMs: Int? = nil,
         gatedFrames: Int? = nil,
         peak: Int? = nil,
         underruns: Int? = nil,
@@ -189,6 +202,8 @@ public struct WSMessage: Codable, Equatable, Sendable {
         self.on = on
         self.state = state
         self.playedMs = playedMs
+        self.at = at
+        self.receivedMs = receivedMs
         self.gatedFrames = gatedFrames
         self.peak = peak
         self.underruns = underruns
@@ -228,6 +243,27 @@ public struct WSMessage: Codable, Equatable, Sendable {
     public static func playback(_ state: PlaybackState, playedMs: Int) -> WSMessage {
         WSMessage(type: .playback, state: state, playedMs: max(0, playedMs))
     }
+    /// The player ran dry at `at` (send only when `bot-ready` lists
+    /// `feedback`). Durations are clamped at 0.
+    public static func drain(at: Date, bufferMs: Int, playedMs: Int, receivedMs: Int, reason: String) -> WSMessage {
+        WSMessage(
+            type: .drain,
+            playedMs: max(0, playedMs),
+            at: rfc3339Milliseconds(at),
+            receivedMs: max(0, receivedMs),
+            bufferMs: max(0, bufferMs),
+            reason: reason
+        )
+    }
+
+    /// `2026-10-08T00:48:51.950Z`: what the daemon parses as RFC 3339.
+    public static func rfc3339Milliseconds(_ date: Date) -> String {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        f.timeZone = TimeZone(identifier: "UTC")
+        return f.string(from: date)
+    }
+
     public static let cancel = WSMessage(type: .cancel)
     public static func ping(
         gatedFrames: Int = 0,
@@ -319,6 +355,13 @@ public struct WSMessage: Codable, Equatable, Sendable {
                 throw WSMessageError.badValue("playback", "state")
             }
             if let playedMs, playedMs < 0 { throw WSMessageError.badValue("playback", "played_ms") }
+        case .drain:
+            if (at ?? "").isEmpty { throw WSMessageError.missingField("drain", "at") }
+            if playedMs == nil { throw WSMessageError.missingField("drain", "played_ms") }
+            if bufferMs == nil { throw WSMessageError.missingField("drain", "buffer_ms") }
+            if (playedMs ?? 0) < 0 || (bufferMs ?? 0) < 0 || (receivedMs ?? 0) < 0 {
+                throw WSMessageError.badValue("drain", "duration")
+            }
         case .text:
             if (text ?? "").isEmpty { throw WSMessageError.missingField("text", "text") }
         case .status:

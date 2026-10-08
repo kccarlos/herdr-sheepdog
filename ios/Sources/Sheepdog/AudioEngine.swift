@@ -57,6 +57,8 @@ final class AudioEngine {
     /// A playback report for the daemon (`started`, `drained`, `flushed`;
     /// docs/ws-contract.md "Playback reports"), in the order they happened.
     var onPlaybackReport: ((PlaybackQueue.Report) -> Void)?
+    /// Every time the player ran dry, for the daemon's `drain` message.
+    var onDrain: ((PlaybackQueue.DrainRecord) -> Void)?
     /// An interruption (a call, Siri) or a route change the user should see.
     var onNotice: ((String) -> Void)?
     /// The microphone stopped (true) or resumed (false) delivering signal.
@@ -419,6 +421,9 @@ final class AudioEngine {
         for report in queue.takeReports() {
             onPlaybackReport?(report)
         }
+        for drain in queue.takeDrains() {
+            onDrain?(drain)
+        }
     }
 
     /// What the `ping` says about the engine (the browser sends its
@@ -527,7 +532,7 @@ final class AudioEngine {
             player.scheduleBuffer(buffer, completionCallbackType: .dataPlayedBack) { [weak self] _ in
                 Task { @MainActor in
                     guard let self else { return }
-                    self.queue.completed(chunk.id)
+                    self.queue.completed(chunk.id, now: CFAbsoluteTimeGetCurrent())
                     self.deliverReports()
                     self.metrics.playedChunks += 1
                     self.setSpeaking(self.queue.isSpeaking)

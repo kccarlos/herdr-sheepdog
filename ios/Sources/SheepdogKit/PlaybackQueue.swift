@@ -70,6 +70,47 @@ public struct PlaybackQueue: Sendable {
         public var message: WSMessage { .playback(state, playedMs: playedMilliseconds) }
     }
 
+    /// One `drain` for the daemon (feature `feedback`, docs/ws-contract.md
+    /// "Feedback and drains"): every time the player ran dry — the end of
+    /// a reply as well as an underrun — with what it had played and
+    /// received, for diagnosing a pause the user marked.
+    public struct DrainRecord: Equatable, Sendable {
+        public enum Reason: String, Sendable {
+            /// The predicted playhead ran out of audio.
+            case dry
+            /// The player said it had finished well before the predicted
+            /// playhead (an engine restart discards scheduled buffers):
+            /// `bufferMilliseconds` never played.
+            case early
+        }
+
+        /// When, on the queue's clock (`CFAbsoluteTimeGetCurrent()` in
+        /// the app: seconds since the reference date).
+        public var at: TimeInterval
+        public var bufferMilliseconds: Int
+        public var playedMilliseconds: Int
+        public var receivedMilliseconds: Int
+        public var reason: Reason
+
+        public init(at: TimeInterval, bufferMilliseconds: Int, playedMilliseconds: Int, receivedMilliseconds: Int, reason: Reason) {
+            self.at = at
+            self.bufferMilliseconds = bufferMilliseconds
+            self.playedMilliseconds = playedMilliseconds
+            self.receivedMilliseconds = receivedMilliseconds
+            self.reason = reason
+        }
+
+        public var message: WSMessage {
+            .drain(
+                at: Date(timeIntervalSinceReferenceDate: at),
+                bufferMs: bufferMilliseconds,
+                playedMs: playedMilliseconds,
+                receivedMs: receivedMilliseconds,
+                reason: reason.rawValue
+            )
+        }
+    }
+
     /// One chunk ready to be scheduled, in arrival order.
     public struct Chunk: Equatable, Identifiable, Sendable {
         public let id: Int
@@ -143,6 +184,8 @@ public struct PlaybackQueue: Sendable {
 
     /// Reports not yet taken by the caller, oldest first.
     public private(set) var reports: [Report] = []
+    /// Drains not yet taken by the caller, oldest first.
+    public private(set) var drainRecords: [DrainRecord] = []
     /// Samples received in the current run (since the last `drained` or
     /// `flushed` report): what `played_ms` counts against.
     public private(set) var runSamples = 0
@@ -301,6 +344,13 @@ public struct PlaybackQueue: Sendable {
         return bufferAndMaybeRelease(samples, now: now)
     }
 
+    /// The drains since the last call, oldest first; empties
+    /// `drainRecords`.
+    public mutating func takeDrains() -> [DrainRecord] {
+        defer { drainRecords.removeAll() }
+        return drainRecords
+    }
+
     /// The reports since the last call, oldest first; empties `reports`.
     public mutating func takeReports() -> [Report] {
         defer { reports.removeAll() }
@@ -326,7 +376,11 @@ public struct PlaybackQueue: Sendable {
     /// adaptive target happens in `push`/`tick` against the playhead, which
     /// usually notices first. A completion for a chunk the playhead already
     /// wrote off (dropped by a predicted drain, or by `flush`) is a no-op.
-    public mutating func completed(_ id: Int) {
+    ///
+    /// `now` dates a drain the node reports before the predicted playhead
+    /// (and measures the audio that will never play); without it the
+    /// drain is dated at the prediction.
+    public mutating func completed(_ id: Int, now: TimeInterval? = nil) {
         guard live.remove(id) != nil else { return }
         if let index = scheduledLengths.index(forKey: id) {
             scheduledSamples -= scheduledLengths[index].value
@@ -340,6 +394,12 @@ public struct PlaybackQueue: Sendable {
                 // there: that is still a drain, dated at the prediction.
                 drains += 1
                 drainedAt = playheadEndsAt
+                let lost = now.flatMap { n in playheadEndsAt.map { max(0, $0 - n) * rate } } ?? 0
+                recordDrain(
+                    at: now ?? playheadEndsAt ?? 0,
+                    lostSamples: Int((lost * sampleRate).rounded()),
+                    reason: lost >= Self.earlyDrainThreshold ? .early : .dry
+                )
             }
             phase = .idle
             playheadEndsAt = nil
@@ -403,6 +463,22 @@ public struct PlaybackQueue: Sendable {
         scheduledSamples = 0
         playheadEndsAt = nil
         drainedAt = endsAt
+        recordDrain(at: endsAt, lostSamples: 0, reason: .dry)
+    }
+
+    /// How far ahead of the predicted playhead the node may report dry
+    /// before the drain counts as `early` (audio dropped) rather than the
+    /// prediction's own slack.
+    static let earlyDrainThreshold: TimeInterval = 0.1
+
+    private mutating func recordDrain(at: TimeInterval, lostSamples: Int, reason: DrainRecord.Reason) {
+        drainRecords.append(DrainRecord(
+            at: at,
+            bufferMilliseconds: milliseconds(lostSamples),
+            playedMilliseconds: milliseconds(max(0, runSamples - lostSamples)),
+            receivedMilliseconds: milliseconds(runSamples),
+            reason: reason
+        ))
     }
 
     /// Called once, right before re-entering `.buffering` from `.idle`:

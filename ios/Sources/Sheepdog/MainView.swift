@@ -64,6 +64,25 @@ struct MainView: View {
                     }
                 }
                 .frame(maxHeight: .infinity)
+                // Mark this moment for debugging ("that paused"); only
+                // with a daemon that takes marks.
+                .overlay(alignment: .topTrailing) {
+                    if model.pane == .conversation, model.feedbackSupported {
+                        FeedbackButton { tag, note, at in
+                            model.markFeedback(tag, note: note, at: at)
+                        }
+                        .padding(.top, 8)
+                        .padding(.trailing, 10)
+                    }
+                }
+                .overlay(alignment: .top) {
+                    if let notice = model.feedbackNotice {
+                        FeedbackNoticeView(text: notice)
+                            .padding(.top, 8)
+                            .transition(.move(edge: .top).combined(with: .opacity))
+                    }
+                }
+                .animation(.easeInOut(duration: 0.2), value: model.feedbackNotice)
 
                 // On the Agents pane the question sits on its agent's card.
                 if model.pane != .flock, let card = model.approval {

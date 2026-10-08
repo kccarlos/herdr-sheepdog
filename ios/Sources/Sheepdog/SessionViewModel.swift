@@ -80,6 +80,8 @@ final class SessionViewModel: ObservableObject {
     /// The `/ws` protocol handshake (`ProtocolHandshake`), for Health and
     /// the chip's sheet.
     @Published private(set) var handshake: ProtocolHandshake.State = .idle
+    /// "Noted" (or why a feedback mark did not land), shown for a moment.
+    @Published private(set) var feedbackNotice: String?
     /// The last thing the daemon pushed about the open agent window over
     /// `/ws` (`AgentScreenStream`); `seq` makes every push a change.
     @Published private(set) var agentScreenPush: AgentScreenPush?
@@ -607,6 +609,12 @@ final class SessionViewModel: ObservableObject {
         audio.onPlaybackReport = { [weak self] report in
             self?.socket.send(report.message)
         }
+        // Every dry ring, for diagnosing a marked pause: only to a daemon
+        // that takes it (an older one answers an unknown type with an error).
+        audio.onDrain = { [weak self] drain in
+            guard let self, self.feedbackSupported else { return }
+            self.socket.send(drain.message)
+        }
         audio.onMicSignal = { [weak self] noSignal in
             self?.send(.micSignal(ok: !noSignal))
         }
@@ -703,7 +711,7 @@ final class SessionViewModel: ObservableObject {
             if let event = screenStream.receive(message), let pane = screenStream.paneID {
                 agentScreenPush = AgentScreenPush(seq: (agentScreenPush?.seq ?? 0) + 1, paneID: pane, event: event)
             }
-        case .pong, .mute, .silence, .speaking, .playback, .cancel, .text, .ping, .clientReady, .botReady,
+        case .pong, .mute, .silence, .speaking, .playback, .drain, .cancel, .text, .ping, .clientReady, .botReady,
              .screenSubscribe, .screenUnsubscribe:
             break
         }
@@ -1473,6 +1481,42 @@ final class SessionViewModel: ObservableObject {
             if self.approvalFlow.card == nil, let pending = self.pendingAction, pending.id != id {
                 self.applyApproval(self.approvalFlow.present(pending))
             }
+        }
+    }
+
+    // MARK: - Feedback marks
+
+    /// The daemon takes feedback marks: `bot-ready` listed `feedback`.
+    var feedbackSupported: Bool { handshake.features.contains(FeedbackTag.feature) }
+
+    /// The user marked the moment `at` ("that paused", or another tag):
+    /// `POST /api/feedback`, then a haptic and "Noted". Works while the
+    /// voice runs; nothing about the voice session changes.
+    func markFeedback(_ tag: FeedbackTag, note: String? = nil, at: Date) {
+        let mark = FeedbackMark(tag: tag, note: note, at: at, conversationTurn: rows.last?.id)
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                if try await self.client.sendFeedback(mark) != nil {
+                    Haptics.answered()
+                    self.showFeedbackNotice("Noted")
+                } else {
+                    Haptics.answerFailed()
+                    self.showFeedbackNotice("This daemon can't take marks yet")
+                }
+            } catch {
+                Haptics.answerFailed()
+                self.showFeedbackNotice("Couldn't save the mark")
+            }
+        }
+    }
+
+    private func showFeedbackNotice(_ text: String) {
+        feedbackNotice = text
+        AccessibilityNotification.Announcement(text).post()
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 1_800_000_000)
+            if self?.feedbackNotice == text { self?.feedbackNotice = nil }
         }
     }
 
