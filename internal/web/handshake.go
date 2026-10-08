@@ -44,7 +44,7 @@ func (s *Server) features() []string {
 	if s.deps.Supervisor != nil {
 		f = append(f, wsproto.FeatureScreen)
 	}
-	return f
+	return append(f, wsproto.FeatureFeedback)
 }
 
 // startHandshake arms the legacy timer for a new client.

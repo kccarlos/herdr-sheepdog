@@ -233,6 +233,7 @@ func (h *hub) current() *client {
 // reason; what remains here is the model's own answer to audio it
 // heard before the page went away.
 func (h *hub) sendAudio(chunk []byte) {
+	seq := h.s.audio.Arrived(h.s.deps.Now(), len(chunk))
 	h.mu.Lock()
 	c := h.client
 	first := c == nil && !h.unheard
@@ -246,7 +247,7 @@ func (h *hub) sendAudio(chunk []byte) {
 	if c == nil {
 		return
 	}
-	c.enqueue(frame{binary: true, data: chunk})
+	c.enqueue(frame{binary: true, data: chunk, audioSeq: seq})
 }
 
 // send delivers a control message to the client, if any.
@@ -267,6 +268,7 @@ func (h *hub) onVoiceEvent(ev voice.Event) {
 	case voice.EventInterrupted:
 		h.flush()
 	case voice.EventTurnComplete:
+		h.s.audio.EndRun()
 		h.mu.Lock()
 		h.unheard = false // the next unheard audio is another turn
 		h.mu.Unlock()
@@ -284,6 +286,7 @@ func (h *hub) onVoiceEvent(ev voice.Event) {
 
 // flush drops queued audio and tells the client to drop its buffer.
 func (h *hub) flush() {
+	h.s.audio.EndRun()
 	c := h.current()
 	if c == nil {
 		return
@@ -376,6 +379,24 @@ func (h *hub) setPlayback(c *client, state string, playedMs int) {
 	}
 }
 
+// clientDrain logs a client drain message (docs/ws-contract.md
+// "Feedback and drains"). Diagnostic only: "speaking" and the playback
+// run stay with the playback reports. skew_ms is the daemon's receive
+// time minus the client's at: message latency plus clock offset.
+func (h *hub) clientDrain(c *client, m wsproto.Message) {
+	p := map[string]any{"client_id": c.id, "at": m.At, "buffer_ms": *m.BufferMs, "played_ms": *m.PlayedMs}
+	if m.ReceivedMs != nil {
+		p["received_ms"] = *m.ReceivedMs
+	}
+	if m.Reason != "" {
+		p["reason"] = m.Reason
+	}
+	if at, err := time.Parse(time.RFC3339Nano, m.At); err == nil {
+		p["skew_ms"] = h.s.deps.Now().Sub(at).Milliseconds()
+	}
+	h.s.log.Log(logSource, "web.client.drain", "", p)
+}
+
 // shutdown closes the client with a final status (daemon stopping).
 func (h *hub) shutdown(reason string) {
 	c := h.current()
@@ -398,6 +419,9 @@ type frame struct {
 	// measure how long an audio frame waited in the per-client queue
 	// before writeLoop sent it (web.client.stats send_wait_*).
 	at time.Time
+	// audioSeq is an audio frame's number in the server's AudioLog
+	// (0: not recorded), so writeLoop can note when it went out.
+	audioSeq uint64
 }
 
 func controlFrame(m wsproto.Message) frame {
@@ -625,6 +649,9 @@ func (c *client) writeLoop() {
 				_ = c.conn.CloseNow()
 				return
 			}
+			if f.audioSeq != 0 {
+				c.h.s.audio.Sent(f.audioSeq, c.h.s.deps.Now())
+			}
 			c.mu.Lock()
 			c.framesOut++
 			c.bytesOut += len(f.data)
@@ -752,6 +779,8 @@ func (c *client) onControl(data []byte) {
 			played = *m.PlayedMs
 		}
 		h.setPlayback(c, m.State, played)
+	case wsproto.TypeDrain:
+		h.clientDrain(c, m)
 	case wsproto.TypeScreenSubscribe:
 		lines := 0
 		if m.Lines != nil {

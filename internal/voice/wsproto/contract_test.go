@@ -70,7 +70,7 @@ func TestContractExamplesRoundTrip(t *testing.T) {
 		seen[typ] = true
 	}
 	for _, typ := range []string{
-		TypeClientReady, TypeBotReady, TypeMute, TypeSilence, TypeSpeaking, TypePlayback, TypeCancel,
+		TypeClientReady, TypeBotReady, TypeMute, TypeSilence, TypeSpeaking, TypePlayback, TypeDrain, TypeCancel,
 		TypeText, TypePing, TypeFlush, TypeStatus, TypeTranscript, TypeError, TypePong,
 		TypeScreenSubscribe, TypeScreenUnsubscribe, TypeScreen, TypeScreenError,
 	} {

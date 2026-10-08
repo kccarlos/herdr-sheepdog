@@ -9,6 +9,7 @@ package wsproto
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 )
 
 // Audio formats of the binary frames.
@@ -69,10 +70,13 @@ const (
 	// screen-unsubscribe, screen, screen-error; "Agent window over /ws");
 	// absent when the daemon has no supervisor.
 	FeatureScreen = "screen"
+	// FeatureFeedback: POST /api/feedback (the user's "that paused"
+	// marks) and the client's drain messages ("Feedback and drains").
+	FeatureFeedback = "feedback"
 )
 
 // Message types. Client→server: client-ready, mute, silence, speaking,
-// playback, cancel, text, ping, screen-subscribe, screen-unsubscribe.
+// playback, drain, cancel, text, ping, screen-subscribe, screen-unsubscribe.
 // Server→client: bot-ready, flush, status, transcript, error, pong,
 // screen, screen-error.
 const (
@@ -82,6 +86,7 @@ const (
 	TypeSilence     = "silence"
 	TypeSpeaking    = "speaking"
 	TypePlayback    = "playback"
+	TypeDrain       = "drain"
 	TypeCancel      = "cancel"
 	TypeText        = "text"
 	TypePing        = "ping"
@@ -176,6 +181,15 @@ type Message struct {
 	State    string `json:"state,omitempty"`
 	PlayedMs *int   `json:"played_ms,omitempty"`
 
+	// drain: the client's player ran dry (docs/ws-contract.md "Feedback
+	// and drains"). At is when, on the client's clock (RFC 3339 with
+	// milliseconds); PlayedMs and ReceivedMs are the run's stream ms
+	// played and received by then, BufferMs what the client believed was
+	// still buffered (0 for an ordinary dry ring: more than 0 means
+	// audio the player dropped). Reason says how the client noticed it.
+	At         string `json:"at,omitempty"`
+	ReceivedMs *int   `json:"received_ms,omitempty"`
+
 	// ping (optional client counters, mirrored into web.client.stats)
 	GatedFrames *int `json:"gated_frames,omitempty"`
 	Peak        *int `json:"peak,omitempty"`
@@ -259,6 +273,22 @@ func Speaking(on bool) Message { return Message{Type: TypeSpeaking, On: &on} }
 func Playback(state string, playedMs int) Message {
 	return Message{Type: TypePlayback, State: state, PlayedMs: &playedMs}
 }
+
+// Drain builds a client→server drain message; at is RFC 3339 and reason
+// may be empty.
+func Drain(at string, bufferMs, playedMs, receivedMs int, reason string) Message {
+	return Message{Type: TypeDrain, At: at, BufferMs: &bufferMs, PlayedMs: &playedMs, ReceivedMs: &receivedMs, Reason: reason}
+}
+
+// Drain reasons (Message.Reason on a drain message).
+const (
+	// DrainDry: the predicted playhead ran out of audio.
+	DrainDry = "dry"
+	// DrainEarly: the player said it had finished before the predicted
+	// playhead got there (iOS: an engine restart discards what was
+	// scheduled); BufferMs is the audio that never played.
+	DrainEarly = "early"
+)
 
 // Cancel builds the client→server "stop" message.
 func Cancel() Message { return Message{Type: TypeCancel} }
@@ -362,6 +392,19 @@ func (m Message) Validate() error {
 		}
 		if m.PlayedMs != nil && *m.PlayedMs < 0 {
 			return fmt.Errorf("wsproto: playback: negative \"played_ms\"")
+		}
+	case TypeDrain:
+		if m.At == "" {
+			return fmt.Errorf("wsproto: drain: missing \"at\"")
+		}
+		if _, err := time.Parse(time.RFC3339Nano, m.At); err != nil {
+			return fmt.Errorf("wsproto: drain: bad \"at\": %v", err)
+		}
+		if m.PlayedMs == nil || m.BufferMs == nil {
+			return fmt.Errorf("wsproto: drain: missing \"played_ms\" or \"buffer_ms\"")
+		}
+		if *m.PlayedMs < 0 || *m.BufferMs < 0 || (m.ReceivedMs != nil && *m.ReceivedMs < 0) {
+			return fmt.Errorf("wsproto: drain: negative duration")
 		}
 	case TypeText:
 		if m.Text == "" {

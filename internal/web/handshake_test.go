@@ -63,7 +63,7 @@ func TestHandshakeClientReady(t *testing.T) {
 	if *m.Protocol != wsproto.ProtocolVersion || *m.MinProtocol != wsproto.MinProtocolVersion || m.Daemon.Version != "test" {
 		t.Fatalf("bot-ready = %+v", m)
 	}
-	for _, f := range []string{wsproto.FeaturePlayback, wsproto.FeatureSpeaking, wsproto.FeatureSilence, wsproto.FeatureHistory, wsproto.FeatureModels} {
+	for _, f := range []string{wsproto.FeaturePlayback, wsproto.FeatureSpeaking, wsproto.FeatureSilence, wsproto.FeatureHistory, wsproto.FeatureModels, wsproto.FeatureFeedback} {
 		if !slices.Contains(m.Features, f) {
 			t.Errorf("features %v lack %s", m.Features, f)
 		}

@@ -63,7 +63,7 @@ binary version.
   it, so a client branches on a name rather than a version number:
 
   ```json
-  {"type":"bot-ready","protocol":1,"min_protocol":1,"daemon":{"version":"0.4.2"},"features":["playback","speaking","silence","provider","history","push","models","screen"]}
+  {"type":"bot-ready","protocol":1,"min_protocol":1,"daemon":{"version":"0.4.2"},"features":["playback","speaking","silence","provider","history","push","models","screen","feedback"]}
   ```
 
   | Feature | Meaning | Listed |
@@ -76,6 +76,7 @@ binary version.
   | `push` | APNs registration ([`push.md`](push.md)) | when the daemon has a push service |
   | `models` | the orchestrator model picker (`/api/brain/models`) | when the orchestrator is on |
   | `screen` | the agent window over `/ws` (*Agent window over /ws*) | when the daemon has a supervisor (always, in practice) |
+  | `feedback` | `POST /api/feedback` and the client's `drain` messages (*Feedback and drains*) | always |
 
   A new optional part of the contract is a new feature, not a new
   protocol: a client uses it only when `bot-ready` lists it, and a
@@ -146,6 +147,7 @@ scheduling each frame at "now".
 | `{"type":"silence","on":true\|false}` | The client's silence gate closed (`on:true`, no binary frames follow) or reopened (`on:false`). See *Silence gate*. |
 | `{"type":"speaking","on":true\|false}` | The client's own speech detector opened (`on:true`, it hears the user) or closed. Optional; see *Client speech detector*. |
 | `{"type":"playback","state":"started\|drained\|flushed","played_ms":N}` | The client's player started, drained or flushed. See *Playback reports*. `played_ms` is required for `drained` and `flushed` (optional, taken as 0, for `started`). |
+| `{"type":"drain","at":"…","buffer_ms":N,"played_ms":N,"received_ms":N?,"reason":"dry\|early"?}` | The client's player ran dry, for diagnosis only. Requires the `feedback` feature. See *Feedback and drains*. |
 | `{"type":"cancel"}`                  | The "stop" button. The daemon stops current playback (it will send `flush`) and runs the `stop` tool (the stop procedure) in the supervisor. Equivalent to the user saying "stop". |
 | `{"type":"text","text":"…"}`         | Simulate an utterance: the text is fed to the voice session as if the user had spoken it (`/debug` and the `/voice` text box use this). It is recorded as a typed user input, which the one rail accepts like a transcript (docs/roles.md "The one rail"). Without a voice session (`--voice=off`) the daemon echoes it as an `in` transcript and answers through its text router with one `out` transcript (a text routed to `cancel` yields `flush` then the `out`), or with an `error` when the text cannot be routed. |
 | `{"type":"screen-subscribe","pane_id":"…","lines":N?}` | Show me this agent's window; `screen` frames follow. Replaces the client's previous subscription. See *Agent window over /ws*. |
@@ -318,6 +320,67 @@ What the daemon does with them:
   heard ("the user heard only: …"). A context push right after a
   barge-in lands while the user is talking, where Gemini's turn
   handling is most fragile, and it cannot be verified offline.
+
+## Feedback and drains
+
+The user can mark a moment of the conversation from the app ("that
+paused"), and the mark has to say where the pause came from: the voice
+model stopped sending audio, the audio was late on its way to the
+phone, or the phone's player lost or ran out of audio it had. Both
+parts are behind the `feedback` feature.
+
+**`POST /api/feedback`** (auth like every `/api` route). Body:
+
+```text
+{"tag":"paused","note":"that paused","client_ts":"2026-10-08T00:49:01.250Z","conversation_turn":"b-12"}
+```
+
+- `tag` is one of `paused` (the app's one-tap default, and what an
+  empty tag means), `wrong_answer`, `too_short`, `too_long`,
+  `misheard`, `other`; anything else is `400`.
+- `note` is optional free text (the first 500 characters are kept);
+  `client_ts` is when the user tapped, RFC 3339 on the phone's clock
+  (`400` if it does not parse); `conversation_turn` optionally names
+  the conversation item on screen (the app's own id).
+- Answer: `{"ok":true,"id":"fb-…","ts":"…"}`.
+- Logged as `user.feedback {id, tag, note, server_ts, client_ts,
+  skew_ms, conversation_turn, snapshot}`. `skew_ms` is the server
+  time minus `client_ts` (request latency plus clock offset). The
+  `snapshot` is the last 30 s as the daemon saw it: the voice provider
+  and model; each run of the voice's output audio with a chunk in the
+  window, with its timing (the `voice.audio_timing` shape) and every
+  chunk's arrival, length and write to the client
+  (`[arrival ms, audio ms, written ms or -1]` from the run's start);
+  the window's transcripts, playback reports, drains, client stats,
+  pushes, tool calls and orchestrator turns (long strings cut to 200
+  characters); and the orchestrator turns still in flight.
+  `sheepdog feedback` lists the marks with a diagnosis read off it.
+
+**`drain`** (client → server). Each time the client's player runs out
+of audio — the end of every reply as well as a mid-reply underrun — it
+may send:
+
+```json
+{"type":"drain","at":"2026-10-08T00:48:51.950Z","buffer_ms":0,"played_ms":3850,"received_ms":3850,"reason":"dry"}
+{"type":"drain","at":"2026-10-08T00:48:51.950Z","buffer_ms":3900,"played_ms":3850,"received_ms":7800,"reason":"early"}
+```
+
+- `at` (required) is when it ran dry, RFC 3339 with milliseconds on
+  the client's clock; `played_ms` (required) and `received_ms` are the
+  current run's stream ms played and received by then (as in
+  *Playback reports*); `buffer_ms` (required) is what the client
+  believed it still had buffered: 0 for an ordinary dry ring, more when
+  the player finished early and that audio never played.
+- `reason`: `dry` (the predicted playhead ran out) or `early` (the
+  player said it had finished before the predicted playhead got there:
+  on iOS an audio-engine restart discards what was scheduled).
+- **Diagnostic only.** It does not count as a playback report: the
+  `started`/`drained` reports still drive "speaking", and a daemon
+  without the feature answers it with an `error`, so a client sends it
+  only when `bot-ready` lists `feedback`.
+- Logged as `web.client.drain {client_id, at, buffer_ms, played_ms,
+  received_ms, reason, skew_ms}` (`skew_ms`: the daemon's receive time
+  minus `at`).
 
 ## Client speech detector
 
