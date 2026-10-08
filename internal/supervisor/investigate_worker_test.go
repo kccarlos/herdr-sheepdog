@@ -246,9 +246,9 @@ type forkBudgetInvestigator struct{ *fakeInvestigator }
 
 func (f forkBudgetInvestigator) Investigate(ctx context.Context, q InvestigationQuery) (InvestigationResult, error) {
 	if q.Fork {
-		f.fakeInvestigator.mu.Lock()
-		f.fakeInvestigator.queries = append(f.fakeInvestigator.queries, q)
-		f.fakeInvestigator.mu.Unlock()
+		f.mu.Lock()
+		f.queries = append(f.queries, q)
+		f.mu.Unlock()
 		return InvestigationResult{}, &cli.ExitError{Backend: cli.Claude, Code: 1, Subtype: "error_max_budget_usd", Reported: "error_max_budget_usd: Reached maximum budget ($10.00)"}
 	}
 	return f.fakeInvestigator.Investigate(ctx, q)
