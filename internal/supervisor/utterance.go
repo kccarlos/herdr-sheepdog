@@ -152,8 +152,10 @@ func (s *Supervisor) ToSupervisor(ctx context.Context, said string) (voice.ToolR
 func (s *Supervisor) ToSupervisorRead(ctx context.Context, said, reading string) (voice.ToolResult, error) {
 	said = strings.TrimSpace(said)
 	c, fresh := s.claimInput(ctx)
-	if !fresh {
-		c, fresh = s.claimRetry() // rerelay.go
+	if !fresh && ctx.Err() == nil {
+		// Not when the voice already dropped the call: a retry turn
+		// would run detached for nobody (rerelay.go).
+		c, fresh = s.claimRetry()
 	}
 	if !fresh {
 		// Nothing the user said, typed or tapped since the previous
