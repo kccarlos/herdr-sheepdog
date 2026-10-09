@@ -439,13 +439,15 @@ rule; they only measure. Report them separately from the other five.
 **The user's side is an agenda** (`agenda`, one beat per turn; `"<wait>"`
 stays quiet so news can land unasked). The LLM simulated user says each
 beat in its own words and the run's persona, and **declares** what each
-line does through its `say` tool (since 2026-10-08): `item` with the
-agenda item numbers it carries out, `again` (repeating or rephrasing an
-item: user effort) or `answer` (answering sheepdog's question); silence
-is the `wait_for_sheepdog` tool, and a line that is only a bracketed
-note ("[waiting]") is a wait too, so nothing reaches the orchestrator. A
-line without a declaration is recorded as `undeclared` and does not move
-the agenda (before 2026-10-08 every untagged line was taken as the next
+line does with a tag it starts the line with (since 2026-10-08; the tag
+is stripped before the line is sent): `[ITEM n]` (or `[ITEM n,m]`) for
+the agenda items it carries out, `[AGAIN n]` (repeating or rephrasing
+an item: user effort) or `[ANSWER]` (answering sheepdog's question). Its
+own earlier lines are shown to it with their tags, and an untagged line
+is asked for once more. Silence is the `wait_for_sheepdog` tool; a line
+that is only a bracketed note ("[waiting]") or the tool's name written
+out is a wait too, so nothing reaches the orchestrator. A line still
+without a tag is recorded as `undeclared` and does not move the agenda (before 2026-10-08 every untagged line was taken as the next
 beat, which shifted all later beats). Each user line in the record
 carries its `beat`, `tag`, `decl` and `items`. Beat items (`clarify_*`,
 `coherence_*`) are scored in the segment that performed their agenda

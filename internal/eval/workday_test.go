@@ -66,13 +66,15 @@ func TestAgendaTurnDeclared(t *testing.T) {
 			t.Fatalf("%q is silence, not speech: %+v", txt, got)
 		}
 	}
-	say := braintest.Response(braintest.Step{Calls: []*genai.FunctionCall{braintest.FC("say", map[string]any{"text": "what did I ask first?", "kind": "item", "items": []any{float64(4)}})}})
-	if tt, ok := simTurnOf(say); !ok || tt.Kind != TurnSay || tt.Decl != DeclItem || len(tt.Items) != 1 || tt.Items[0] != 4 {
-		t.Fatalf("say tool: %+v", tt)
+	if tt, _ := simTurnOf(braintest.Response(braintest.Step{Text: "wait_for_sheepdog"})); tt.Kind != TurnWait {
+		t.Fatalf("the wait tool's name as text is a wait: %+v", tt)
 	}
-	quiet := braintest.Response(braintest.Step{Calls: []*genai.FunctionCall{braintest.FC("say", map[string]any{"text": "[waiting]", "kind": "item", "items": []any{}})}})
-	if tt, ok := simTurnOf(quiet); !ok || tt.Kind != TurnWait {
-		t.Fatalf("a bracketed say is a wait: %+v", tt)
+	if c := simUserContents([]SimLine{{Who: "ceo", Text: "status", Decl: DeclItem, Items: []int{2}}, {Who: "ceo", Text: "yes", Decl: DeclAnswer}}); !strings.Contains(c[1].Parts[0].Text, "[ITEM 2] status\n[ANSWER] yes") {
+		t.Fatalf("own lines keep their tags: %q", c[1].Parts[0].Text)
+	}
+	wait := braintest.Response(braintest.Step{Text: "[waiting]"})
+	if tt, ok := simTurnOf(wait); !ok || tt.Kind != TurnWait {
+		t.Fatalf("a bracketed text turn is a wait: %+v", tt)
 	}
 }
 
@@ -114,18 +116,12 @@ func TestLLMAgendaPrompt(t *testing.T) {
 	if err != nil || turn.Beat != 0 || turn.Decl != DeclUndeclared || turn.Kind != TurnSay {
 		t.Fatalf("turn %+v err %v", turn, err)
 	}
+	if !strings.Contains(m.system, "[ITEM n]") || !strings.Contains(m.system, declReminder) {
+		t.Fatalf("an untagged line is asked once more with the tag protocol:\n%s", m.system)
+	}
 	m.text = "[ITEM 2] what's the migration doing?"
 	if turn, _ = u.Next(context.Background(), sc, []SimLine{{Who: "ceo", Text: "open", Beat: 1}, {Who: "sheepdog", Text: "hello"}}); turn.Beat != 2 || turn.Text != "what's the migration doing?" {
 		t.Fatalf("declared turn %+v", turn)
-	}
-	hasSay := false
-	for _, tl := range m.tools {
-		for _, fd := range tl.FunctionDeclarations {
-			hasSay = hasSay || fd.Name == "say"
-		}
-	}
-	if !hasSay {
-		t.Fatal("agenda call lacks the say tool")
 	}
 	if !strings.Contains(m.system, ">> NOW 2. ask about the migration") || !strings.Contains(m.system, "(done) 1. open") {
 		t.Fatalf("agenda not in the prompt:\n%s", m.system)

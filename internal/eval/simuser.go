@@ -139,8 +139,8 @@ func (u *LLMSimUser) Next(ctx context.Context, sc SimScenario, convo []SimLine) 
 		if waitedSinceSpoke(convo) {
 			// Already waited since the user last spoke: talk now (a
 			// second wait only runs the silence cap down).
-			tools = simUserSayOnly
-			system += "\nYou have just waited in silence: this turn, say something (call say).\n"
+			tools = nil
+			system += "\nYou have just waited in silence: this turn, say something.\n"
 		}
 	}
 	cfg := &genai.GenerateContentConfig{
@@ -149,18 +149,32 @@ func (u *LLMSimUser) Next(ctx context.Context, sc SimScenario, convo []SimLine) 
 		Temperature:       genai.Ptr[float32](0.7),
 	}
 	var last error
-	for attempt := 0; attempt < 2; attempt++ {
+	var untagged *SimTurn
+	for attempt := 0; attempt < 3; attempt++ {
 		resp, err := u.Model.Generate(ctx, u.ModelID, simUserContents(convo), cfg)
 		if err != nil {
 			return SimTurn{}, fmt.Errorf("simulated user: %w", err)
 		}
-		if t, ok := simTurnOf(resp); ok {
-			if len(sc.Agenda) > 0 {
-				t = agendaTurn(t, next, len(sc.Agenda))
-			}
+		t, ok := simTurnOf(resp)
+		if !ok {
+			last = fmt.Errorf("simulated user: empty turn")
+			continue
+		}
+		if len(sc.Agenda) == 0 {
 			return t, nil
 		}
-		last = fmt.Errorf("simulated user: empty turn")
+		if t.Kind == TurnSay && t.Decl == "" && untagged == nil {
+			// No tag: ask once more with a reminder; a second untagged
+			// line is recorded as undeclared (never assumed to be the
+			// next item).
+			untagged = &t
+			cfg.SystemInstruction = genai.NewContentFromText(system+declReminder, genai.RoleUser)
+			continue
+		}
+		return agendaTurn(t, next, len(sc.Agenda)), nil
+	}
+	if untagged != nil {
+		return agendaTurn(*untagged, next, len(sc.Agenda)), nil
 	}
 	return SimTurn{}, last
 }
@@ -182,27 +196,20 @@ Two exceptions, which do not move the agenda on:
 - Sheepdog just asked you something that needs your answer (which one, yes or no, a choice): answer it.
 - Sheepdog did not answer your previous item at all, or you could not follow the answer: repeat or rephrase it. At most twice per item; then move on.
 
-Every turn is one tool call:
-- say: the words you speak (text, spoken words only), and what the line does (kind): "item" when it carries out agenda item(s) (items: their numbers, usually just the NOW one; list two only if one sentence really does both), "again" when it repeats or rephrases an earlier item (items: that item's number), "answer" when it answers sheepdog's question (items: empty). Declare what the line actually does, not what the agenda expected.
-- wait_for_sheepdog: stay quiet, when sheepdog said it is checking and will tell you (at most once in a row). Never put silence into words: to stay quiet, call wait_for_sheepdog.
+Start every line you speak with a tag that says what the line does (the tag is not spoken; it is how this call is scored):
+- [ITEM n] when the line carries out agenda item n (usually the NOW one; "[ITEM n,m]" only if one sentence really does both),
+- [AGAIN n] when it repeats or rephrases item n,
+- [ANSWER] when it answers sheepdog's question.
+Tag what the line actually does, not what the agenda expected. To stay quiet, call wait_for_sheepdog (when sheepdog said it is checking and will tell you, at most once in a row); never write silence as words or brackets.
 The call ends by itself after the last item; do not say goodbye early.`
 
-var simUserSayTool = &genai.FunctionDeclaration{
-	Name:        "say",
-	Description: "Speak one utterance to sheepdog and declare what it does in your agenda.",
-	Parameters: &genai.Schema{Type: genai.TypeObject, Properties: map[string]*genai.Schema{
-		"text":  {Type: genai.TypeString, Description: "The words you speak, nothing else."},
-		"kind":  {Type: genai.TypeString, Enum: []string{DeclItem, DeclAgain, DeclAnswer}, Description: "item: carries out agenda item(s); again: repeats or rephrases an earlier item; answer: answers sheepdog's question."},
-		"items": {Type: genai.TypeArray, Items: &genai.Schema{Type: genai.TypeInteger}, Description: "The agenda item numbers the line carries out (item) or repeats (again); empty for answer."},
-	}, Required: []string{"text", "kind", "items"}},
-}
-
 // simUserAgendaTools: an agenda call has no end_call (it ends when the
-// beats run out): say, with its declaration, and the wait.
-var simUserAgendaTools = []*genai.Tool{{FunctionDeclarations: []*genai.FunctionDeclaration{simUserSayTool, simUserTools[0].FunctionDeclarations[1]}}}
+// beats run out), only the wait.
+var simUserAgendaTools = []*genai.Tool{{FunctionDeclarations: simUserTools[0].FunctionDeclarations[1:]}}
 
-// simUserSayOnly: right after a wait, the user must talk.
-var simUserSayOnly = []*genai.Tool{{FunctionDeclarations: []*genai.FunctionDeclaration{simUserSayTool}}}
+// declReminder is added when a line came back without its tag; the
+// model is asked once more.
+const declReminder = "\nYour last answer had no tag. Start the line with [ITEM n], [AGAIN n] or [ANSWER].\n"
 
 // AgendaOpening is the opening turn: beat 1 when the scenario has an
 // agenda.
@@ -270,7 +277,7 @@ func agendaList(agenda []string, next, stuck int) string {
 		fmt.Fprintf(&b, "%s %d. %s\n", mark, n, a)
 	}
 	if stuck >= 2 {
-		b.WriteString("You have already spent two lines without moving on: do the NOW item this turn, no [ANSWER] or [AGAIN].\n")
+		b.WriteString("You have already spent two lines without moving on: do the NOW item this turn and tag it [ITEM n], not [ANSWER] or [AGAIN].\n")
 	}
 	return b.String()
 }
@@ -359,7 +366,9 @@ func simUserContents(convo []SimLine) []*genai.Content {
 	for _, l := range convo {
 		switch l.Who {
 		case "ceo":
-			add(genai.RoleModel, l.Text)
+			// The user's own lines carry the tag they were declared with,
+			// so the model keeps to the protocol it sees itself using.
+			add(genai.RoleModel, declTag(l)+l.Text)
 		case "sheepdog":
 			add(genai.RoleUser, "Sheepdog: "+l.Text)
 		case "push":
@@ -372,6 +381,29 @@ func simUserContents(convo []SimLine) []*genai.Content {
 		add(genai.RoleUser, "[Sheepdog says nothing.]")
 	}
 	return out
+}
+
+// declTag is the tag a declared user line was said with ("[ITEM 3] ").
+func declTag(l SimLine) string {
+	nums := func() string {
+		var p []string
+		for _, it := range l.Items {
+			p = append(p, strconv.Itoa(it))
+		}
+		return strings.Join(p, ",")
+	}
+	switch l.Decl {
+	case DeclItem:
+		return "[ITEM " + nums() + "] "
+	case DeclAgain:
+		if len(l.Items) == 0 {
+			return "[AGAIN] "
+		}
+		return "[AGAIN " + nums() + "] "
+	case DeclAnswer:
+		return "[ANSWER] "
+	}
+	return ""
 }
 
 // simTurnOf reads the model's turn: a tool call, or the text it says.
@@ -390,21 +422,6 @@ func simTurnOf(resp *genai.GenerateContentResponse) (SimTurn, bool) {
 				return SimTurn{Kind: TurnEnd, Reason: reason, GoalMet: met}, true
 			case "wait_for_sheepdog":
 				return SimTurn{Kind: TurnWait, WaitSeconds: toInt(fc.Args["seconds"])}, true
-			case "say":
-				text, _ := fc.Args["text"].(string)
-				kind, _ := fc.Args["kind"].(string)
-				t := textTurn(strings.TrimSpace(text))
-				if t.Kind != TurnSay || t.Text == "" {
-					return t, t.Kind == TurnWait
-				}
-				if t.Decl == "" {
-					t.Decl = strings.ToLower(strings.TrimSpace(kind))
-					arr, _ := fc.Args["items"].([]any)
-					for _, v := range arr {
-						t.Items = append(t.Items, toInt(v))
-					}
-				}
-				return t, true
 			}
 		}
 	}
@@ -412,7 +429,8 @@ func simTurnOf(resp *genai.GenerateContentResponse) (SimTurn, bool) {
 	switch {
 	case strings.Contains(text, "[END_CALL]"):
 		return SimTurn{Kind: TurnEnd, Reason: strings.TrimSpace(strings.ReplaceAll(text, "[END_CALL]", ""))}, true
-	case strings.Contains(text, "[WAIT]"):
+	case strings.Contains(text, "[WAIT]"), strings.EqualFold(strings.Trim(text, " .()[]`"), "wait_for_sheepdog"):
+		// The wait written out (the tool's name as text) is a wait too.
 		return SimTurn{Kind: TurnWait, WaitSeconds: 30}, true
 	}
 	text = strings.TrimPrefix(strings.TrimPrefix(text, "CEO:"), "Me:")
