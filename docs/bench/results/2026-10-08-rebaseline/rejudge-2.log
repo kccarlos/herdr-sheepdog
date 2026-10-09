@@ -1,1 +1,9 @@
 sheepdog bench rejudge: segments: workday-explain-deep r2: segment 9 (beat 14): judge: no verdict for right_agent, coherence_1
+sheepdog bench rejudge: segments: workday-long-haul r2: segment 9 (beat 9): judge: no verdict for right_agent
+rejudged workday-zh-evening r4: pass
+rejudged workday-zh-evening r5: pass
+sheepdog bench rejudge: 2 runs not rejudged (run again to retry them)
+judge claude sonnet: 3m35s, 58 calls
+-- spend judge    sonnet                   calls    58  in    780380  out    66482  reasoning        0  ≈ $0.0000 --
+-- spend total ≈ $0.0000 (estimate at list prices) --
+exit 1
