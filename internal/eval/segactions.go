@@ -70,6 +70,10 @@ func CallActions(acts []SimLine, evs []northstar.Event) []CallAction {
 						out = append(out, CallAction{AtMS: e.AtMS, Text: fmt.Sprintf("tool %s FAILED: %s", name, clipText(res, 120))})
 					}
 				}
+			case "note.created":
+				out = append(out, CallAction{AtMS: e.AtMS, Text: fmt.Sprintf("wrote itself a note (kept in its own record, nothing sent): %q", clipText(evStr(p, "text"), 140))})
+			case "promise.created":
+				out = append(out, CallAction{AtMS: e.AtMS, Text: fmt.Sprintf("recorded a promise to the CEO (nothing sent): %q", clipText(orDefault(evStr(p, "text"), evStr(p, "what")), 140))})
 			case "supervisor.rename":
 				who := alias[e.Pane]
 				if who == "" {
