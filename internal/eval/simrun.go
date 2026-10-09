@@ -1,6 +1,7 @@
 package eval
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
 	"github.com/kccarlos/herdr-sheepdog/internal/brain/braintest"
+	"github.com/kccarlos/herdr-sheepdog/internal/northstar"
 )
 
 // End reasons of a simulated conversation.
@@ -96,7 +98,11 @@ type SimRun struct {
 	// model when given by sheepdog bench rejudge.
 	Segments     []SegmentResult `json:"segments,omitempty"`
 	SegmentJudge string          `json:"segment_judge,omitempty"`
-	Fallbacks    []string        `json:"fallbacks,omitempty"`
+	// NotExercised are the workday beat items (clarify_N, coherence_N)
+	// whose agenda item no user line performed, or the judge found in no
+	// segment: not scored, neither a pass nor a fail.
+	NotExercised []string `json:"not_exercised,omitempty"`
+	Fallbacks    []string `json:"fallbacks,omitempty"`
 	// Failovers counts the orchestrator's failovers to another provider
 	// (brain.failover events), listed in FailoverEvents; AnsweredBy is
 	// the provider of the last answered orchestrator step and StepsByProvider
@@ -154,8 +160,9 @@ func RunSim(ctx context.Context, sc SimScenario, o SimOptions, repeat int) SimRu
 		judge = o.NewJudge(meter)
 	}
 
-	sink, closeSink := eventSink(o.EventsDir, sc.ID, repeat)
+	fileSink, closeSink := eventSink(o.EventsDir, sc.ID, repeat)
 	defer closeSink()
+	sink, logged := teeEvents(fileSink)
 	scale := o.TimeScale
 	if scale <= 0 {
 		scale = 1
@@ -224,7 +231,9 @@ loop:
 				run.EndReason = EndMaxTurns
 				break loop
 			}
-			convo = append(convo, SimLine{AtMS: w.since(), Who: "system", Text: simWaitMarker, Beat: t.Beat})
+			// A wait sends nothing to the orchestrator: the marker is for
+			// the simulated user and the judge only.
+			convo = append(convo, SimLine{AtMS: w.since(), Who: "system", Text: simWaitMarker, Beat: t.Beat, Decl: t.Decl, Items: t.Items})
 			d := clampDur(time.Duration(float64(t.WaitSeconds)*float64(time.Second)*scale), minWait, silence-silent)
 			got := waitPushes(w, d, settle, deadline)
 			if len(got) == 0 {
@@ -245,7 +254,7 @@ loop:
 			}
 			run.Turns++
 			at := w.since()
-			convo = append(convo, SimLine{AtMS: at, Who: "ceo", Text: t.Text, Beat: t.Beat, Tag: t.Tag})
+			convo = append(convo, SimLine{AtMS: at, Who: "ceo", Text: t.Text, Beat: t.Beat, Tag: t.Tag, Decl: t.Decl, Items: t.Items})
 			res, serr := w.say(ctx, t.Text)
 			if sc.Explain != nil {
 				exchanges = append(exchanges, ExplainExchange{Turn: run.Turns, AtMS: at, Kind: sc.Explain.Kind(run.Turns), Question: t.Text, Consulted: true, Orchestrator: JoinOrchestrator(res.Spoken, res.Detail, res.Options), Spoken: strings.TrimSpace(res.Spoken)})
@@ -260,7 +269,7 @@ loop:
 				w.rec.mu.Unlock()
 			}
 			got := append(w.push.drain(), SimLine{AtMS: w.since(), Who: "sheepdog", Text: reply})
-			w.afterTurn(run.Turns, t.Beat)
+			w.afterTurn(run.Turns, t.CueBeats())
 			got = append(got, waitPushes(w, settle, settle, deadline)...)
 			sortLines(got)
 			convo = append(convo, got...)
@@ -329,8 +338,9 @@ loop:
 	if sc.Workday != nil {
 		// Segment verdicts are measurement only: a failed segment call
 		// leaves them out (bench rejudge can add them later).
-		if segs, err := JudgeSegments(ctx, judge, sc, convo, facts, 4); err == nil {
+		if segs, err := JudgeSegments(ctx, judge, sc, convo, facts, SegmentOptions{Actions: CallActions(run.Actions, logged()), Parallel: 4}); err == nil {
 			run.Segments = segs
+			run.NotExercised = NotExercised(sc, segs)
 		}
 	}
 	if sc.Explain != nil {
@@ -528,6 +538,29 @@ func renderSim(convo []SimLine) string {
 		b.WriteString("\n")
 	}
 	return b.String()
+}
+
+// teeEvents passes each event to sink (when set) and keeps it; logged
+// returns the kept events as the north-star checks read them (the
+// segment judge's action list).
+func teeEvents(sink func(SimLogEvent)) (func(SimLogEvent), func() []northstar.Event) {
+	var mu sync.Mutex
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	return func(e SimLogEvent) {
+			if sink != nil {
+				sink(e)
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			_ = enc.Encode(e)
+		}, func() []northstar.Event {
+			mu.Lock()
+			defer mu.Unlock()
+			evs, _ := northstar.ParseEvents(bytes.NewReader(buf.Bytes()))
+			return evs
+		}
 }
 
 // eventSink opens the run's JSONL event file under dir (none when dir

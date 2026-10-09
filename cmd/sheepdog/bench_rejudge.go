@@ -15,6 +15,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/bench"
 	"github.com/kccarlos/herdr-sheepdog/internal/config"
 	"github.com/kccarlos/herdr-sheepdog/internal/eval"
+	"github.com/kccarlos/herdr-sheepdog/internal/northstar"
 )
 
 func printBenchRejudgeUsage(w io.Writer) {
@@ -37,6 +38,9 @@ func printBenchRejudgeUsage(w io.Writer) {
 	fprintln(w, "  --segments            judge workday runs per segment too: one call per agenda beat")
 	fprintln(w, "                        scoring the items that apply to it (default true)")
 	fprintln(w, "  --skip-run-level      keep the run-level verdicts as they are; only the segments")
+	fprintln(w, "  --segment-items LIST  tier 1: ask only these item families per segment (comma list:")
+	fprintln(w, "                        said_vs_done, coherence, clarify, …) and keep the other")
+	fprintln(w, "                        segment verdicts as recorded (a measurement change only)")
 	fprintln(w, "  --scenarios GLOB      tier-2 scenario files (default "+defaultBenchScenarios+")")
 	fprintln(w, "  --sim GLOB            eval sim scenario files (default "+defaultBenchSims+")")
 	fprintln(w, "  --fixtures PATH       screen fixtures (default testdata/herdr)")
@@ -54,6 +58,7 @@ func runBenchRejudge(ctx context.Context, args []string, stdout, stderr io.Write
 	orch := fs.Bool("orchestrator", false, "tier 2: also the orchestrator's content items")
 	segments := fs.Bool("segments", true, "workday runs: also judge per segment")
 	skipRun := fs.Bool("skip-run-level", false, "keep the run-level verdicts")
+	segItems := fs.String("segment-items", "", "tier 1: only these segment item families")
 	scen := fs.String("scenarios", defaultBenchScenarios, "scenario files")
 	sims := fs.String("sim", defaultBenchSims, "eval sim files")
 	fixtures := fs.String("fixtures", "testdata/herdr", "screen fixtures")
@@ -97,7 +102,7 @@ func runBenchRejudge(ctx context.Context, args []string, stdout, stderr io.Write
 	if files, _ := filepath.Glob(filepath.Join(*from, "runs", "*.json")); len(files) > 0 {
 		code = rejudgeTier2(ctx, *from, judge, id, rejudgeWhat{orch: *orch, segments: *segments, skipRun: *skipRun}, *scen, *sims, *filter, stderr)
 	} else {
-		code = rejudgeTier1(ctx, *from, judge, id, rejudgeWhat{segments: *segments, skipRun: *skipRun}, *sims, *fixtures, *filter, stderr)
+		code = rejudgeTier1(ctx, *from, judge, id, rejudgeWhat{segments: *segments, skipRun: *skipRun, only: splitList(*segItems)}, *sims, *fixtures, *filter, stderr)
 	}
 	fprintf(stdout, "judge %s %s: %s, %d calls\n", jk, id, time.Since(t0).Round(time.Second), callsOf(meter))
 	eval.WriteSpend(stdout, meter)
@@ -114,6 +119,9 @@ func callsOf(m *eval.Meter) int {
 
 // rejudgeWhat says which verdicts a rejudge gives again.
 type rejudgeWhat struct {
+	// only: tier 1, the segment item families asked again (all when
+	// empty).
+	only                    []string
 	orch, segments, skipRun bool
 }
 
@@ -144,7 +152,11 @@ func rejudgeTier2(ctx context.Context, dir string, judge eval.Judge, id string, 
 		orchID := id + "+orchestrator"
 		needMain := !what.skipRun && r.Judge != id && r.Judge != orchID
 		needOrch := what.orch && sc.Workday != nil && r.Judge != orchID
-		needSeg := what.segments && sc.Workday != nil && r.SegmentJudge != id
+		segMark := id
+		if len(what.only) > 0 {
+			segMark = id + " items=" + strings.Join(what.only, ",")
+		}
+		needSeg := what.segments && sc.Workday != nil && r.SegmentJudge != segMark
 		if !needMain && !needOrch && !needSeg {
 			continue
 		}
@@ -239,7 +251,11 @@ func rejudgeTier1(ctx context.Context, dir string, judge eval.Judge, id string, 
 			continue
 		}
 		needMain := !what.skipRun && r.Judge != id
-		needSeg := what.segments && sc.Workday != nil && r.SegmentJudge != id
+		segMark := id
+		if len(what.only) > 0 {
+			segMark = id + " items=" + strings.Join(what.only, ",")
+		}
+		needSeg := what.segments && sc.Workday != nil && r.SegmentJudge != segMark
 		if !needMain && !needSeg {
 			continue
 		}
@@ -265,15 +281,16 @@ func rejudgeTier1(ctx context.Context, dir string, judge eval.Judge, id string, 
 			}
 		}
 		if needSeg {
-			if err := eval.RejudgeSimSegments(ctx, judge, sc, r, fixtures); err != nil {
+			evs, _ := northstar.ReadEvents(filepath.Join(dir, "events", fmt.Sprintf("%s.r%d.jsonl", r.Scenario, r.Repeat)))
+			if err := eval.RejudgeSimSegments(ctx, judge, sc, r, fixtures, evs, what.only); err != nil {
 				if stop(fmt.Errorf("segments: %w", err)) {
 					return 1
 				}
 				continue
 			}
-			r.SegmentJudge = id
+			r.SegmentJudge = segMark
 			if rep.Setup != nil {
-				rep.Setup["segment judge"] = id
+				rep.Setup["segment judge"] = segMark
 			}
 		}
 		if err := write(); err != nil {

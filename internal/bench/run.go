@@ -117,14 +117,16 @@ type Run struct {
 	// sheepdog bench rejudge.
 	Segments     []eval.SegmentResult `json:"segments,omitempty"`
 	SegmentJudge string               `json:"segment_judge,omitempty"`
-	Latency      []map[string]any     `json:"latency,omitempty"`
-	Voice        VoiceStats           `json:"voice"`
-	Failovers    []string             `json:"failovers,omitempty"`
-	Fallbacks    []string             `json:"fallbacks,omitempty"`
-	Proxy        *ProxyStats          `json:"proxy,omitempty"`
-	Spend        Spend                `json:"spend"`
-	CostUSD      float64              `json:"cost_usd_estimate"`
-	Extended     bool                 `json:"extended,omitempty"`
+	// NotExercised: beat items no segment scored (eval.NotExercised).
+	NotExercised []string         `json:"not_exercised,omitempty"`
+	Latency      []map[string]any `json:"latency,omitempty"`
+	Voice        VoiceStats       `json:"voice"`
+	Failovers    []string         `json:"failovers,omitempty"`
+	Fallbacks    []string         `json:"fallbacks,omitempty"`
+	Proxy        *ProxyStats      `json:"proxy,omitempty"`
+	Spend        Spend            `json:"spend"`
+	CostUSD      float64          `json:"cost_usd_estimate"`
+	Extended     bool             `json:"extended,omitempty"`
 	// Explain is the explanation scores of a scenario with an explain
 	// block: the orchestrator's text and the voice's speech separately.
 	Explain *eval.ExplainScore `json:"explain,omitempty"`
@@ -334,8 +336,9 @@ func RunScenario(ctx context.Context, sc Scenario, repeat, port int, o RunOption
 	run.Failures = append(run.Failures, r.failures()...)
 	if sc.Workday != nil {
 		// Measurement only: a failed segment call leaves them out.
-		if segs, err := eval.JudgeSegments(ctx, judge, sc.SimScenario, r.convo, facts, 4); err == nil {
+		if segs, err := eval.JudgeSegments(ctx, judge, sc.SimScenario, r.convo, facts, eval.SegmentOptions{Actions: eval.CallActions(run.Actions, nil), Parallel: 4}); err == nil {
 			run.Segments = segs
+			run.NotExercised = eval.NotExercised(sc.SimScenario, segs)
 		}
 	}
 	if sc.Explain != nil {
@@ -415,7 +418,7 @@ func (r *runner) converse(ctx context.Context) {
 				run.EndReason = eval.EndMaxTurns
 				return
 			}
-			r.convo = append(r.convo, eval.SimLine{AtMS: r.since(), Who: "system", Text: eval.SimWaitMarker, Beat: t.Beat})
+			r.convo = append(r.convo, eval.SimLine{AtMS: r.since(), Who: "system", Text: eval.SimWaitMarker, Beat: t.Beat, Decl: t.Decl, Items: t.Items})
 			d := clampDur(time.Duration(t.WaitSeconds)*time.Second, 5*time.Second, silence-silent)
 			r.answering = true
 			got := r.hear(ctx, 2*time.Second, d, true)
@@ -443,7 +446,7 @@ func (r *runner) converse(ctx context.Context) {
 				run.Failures = append(run.Failures, eval.Failure{Type: eval.FailError, Detail: "speech: " + eval.FirstLine(err.Error())})
 				return
 			}
-			r.tagLast(t.Beat, t.Tag)
+			r.tagLast(t)
 			// The answer: the first words within 25 s (an orchestrator turn can
 			// take that long), then until quiet.
 			r.answering = true
@@ -452,7 +455,17 @@ func (r *runner) converse(ctx context.Context) {
 				r.hear(ctx, 1500*time.Millisecond, 20*time.Second, false)
 			}
 			r.answering = false
-			r.w.AfterTurnBeat(run.Turns, t.Beat)
+			cue := t.CueBeats()
+			if len(cue) == 0 {
+				r.w.AfterTurnBeat(run.Turns, 0)
+			}
+			for i, b := range cue {
+				n := run.Turns
+				if i > 0 {
+					n = -1 // the turn's own cues fire once
+				}
+				r.w.AfterTurnBeat(n, b)
+			}
 			if rc := sc.Behavior.Reconnect; rc != nil && rc.AfterTurn == run.Turns {
 				r.reconnect(ctx, rc)
 			}
@@ -467,11 +480,13 @@ func (r *runner) converse(ctx context.Context) {
 	}
 }
 
-// tagLast marks the user's latest line with its agenda beat and tag.
-func (r *runner) tagLast(beat int, tag string) {
+// tagLast marks the user's latest line with its agenda beat, tag and
+// declaration.
+func (r *runner) tagLast(t eval.SimTurn) {
 	for i := len(r.convo) - 1; i >= 0; i-- {
 		if r.convo[i].Who == "ceo" {
-			r.convo[i].Beat, r.convo[i].Tag = beat, tag
+			r.convo[i].Beat, r.convo[i].Tag = t.Beat, t.Tag
+			r.convo[i].Decl, r.convo[i].Items = t.Decl, t.Items
 			return
 		}
 	}
@@ -1141,11 +1156,13 @@ func RejudgeSegments(ctx context.Context, j eval.Judge, sc Scenario, r *Run) err
 	if sc.Workday == nil || r.Status == eval.RunNotRun || r.EndReason == eval.EndError || r.Facts == "" || len(r.Transcript) == 0 {
 		return nil
 	}
-	segs, err := eval.JudgeSegments(ctx, j, eval.WithPersona(sc.SimScenario, r.Persona), r.Transcript, r.Facts, 4)
+	sim := eval.WithPersona(sc.SimScenario, r.Persona)
+	segs, err := eval.JudgeSegments(ctx, j, sim, r.Transcript, r.Facts, eval.SegmentOptions{Actions: eval.CallActions(r.Actions, nil), Parallel: 4})
 	if err != nil {
 		return fmt.Errorf("%s r%d: %w", r.Scenario, r.Repeat, err)
 	}
 	r.Segments = segs
+	r.NotExercised = eval.NotExercised(sim, segs)
 	return nil
 }
 

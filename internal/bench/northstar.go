@@ -62,6 +62,7 @@ func NorthStarRun(r Run, sc *Scenario, evs []northstar.Event) northstar.Run {
 	}
 	nr.Verdicts = append(nr.Verdicts, eval.ExplainVerdicts(r.Explain)...)
 	nr.Segments = eval.SegmentsNorthStar(r.Segments)
+	nr.NotExercised = r.NotExercised
 	for _, f := range r.Failures {
 		nr.Failures = append(nr.Failures, northstar.Failure{Type: string(f.Type), Detail: f.Detail})
 	}
