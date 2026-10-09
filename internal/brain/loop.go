@@ -170,7 +170,11 @@ func (b *Brain) run(ctx context.Context, t *turn) (Reply, error) {
 		// from a screen that says nothing about pushing).
 		t.req.records = agentRecords(b.host.Agents(), t.req.Question, t.req.Focus, b.cfg.Now)
 	}
-	b.ingest(Message{Role: RoleUser, Kind: KindRequest, Content: requestText(t.req), Agent: t.req.Agent, Link: t.req.Link}, t.n)
+	words := ""
+	if t.req.Kind == KindUtterance && t.req.Trigger != TriggerEvent {
+		words = t.req.Question
+	}
+	b.ingest(Message{Role: RoleUser, Kind: KindRequest, Content: requestText(t.req), Words: words, Agent: t.req.Agent, Link: t.req.Link}, t.n)
 	if t.req.Kind == KindAnnounce && t.req.Agent != "" {
 		// What the worker itself wrote for a human, before its screen:
 		// the finding in its words, not its working notes
@@ -533,7 +537,7 @@ func (b *Brain) afterTurn(t *turn) {
 	default:
 		payload["before_tokens"], payload["after_tokens"], payload["dropped"] = c.BeforeTokens, c.AfterTokens, c.Dropped
 		b.mu.Lock()
-		b.lastCompaction = CompactionInfo{BeforeTokens: c.BeforeTokens, AfterTokens: c.AfterTokens, Dropped: c.Dropped, SummarySeq: c.Summary.Seq, At: b.cfg.Now()}
+		b.lastCompaction = CompactionInfo{BeforeTokens: c.BeforeTokens, AfterTokens: c.AfterTokens, Dropped: c.Dropped, SummarySeq: c.Summary.Seq, At: b.cfg.Now(), CoversTo: c.Summary.TS}
 		b.mu.Unlock()
 	}
 	b.log.Log(logSource, "brain.compaction", "", payload)
@@ -648,7 +652,9 @@ func (b *Brain) sections() []PromptSection {
 	b.mu.Lock()
 	host := b.host
 	userVars := b.userVars
+	compaction := b.lastCompaction
 	b.mu.Unlock()
+	started := b.transcript.Started()
 	var agents []AgentInfo
 	var notes []string
 	var promises []PromiseInfo
@@ -661,7 +667,8 @@ func (b *Brain) sections() []PromptSection {
 		}
 	}
 	secs := append(append([]PromptSection(nil), stableSections(b.cfg.Prompts)...), userSection(b.cfg.Prompts, mergeUserVars(agents, userVars)))
-	return append(secs, dynamicSections(agents, notes, promises, investigations, language, b.cfg.Now())...)
+	now := b.cfg.Now()
+	return append(secs, dynamicSections(agents, notes, promises, investigations, language, now, recordLine(started, compaction, now))...)
 }
 
 // stateNow renders the state block from the Host as it is now: the loop

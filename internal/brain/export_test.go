@@ -42,3 +42,9 @@ func SetFailoverReserve(reserve, minAttempt, healthyAttempt time.Duration) func(
 
 // IsTransportError exposes isTransportError to the external tests.
 var IsTransportError = isTransportError
+
+// Recall runs the recall tool and returns its result text.
+func (b *Brain) Recall(query, from string) string { return b.recall(query, from).result }
+
+// StateNow is the state block the next model call would carry.
+func (b *Brain) StateNow() string { return b.stateNow() }

@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"google.golang.org/genai"
@@ -80,6 +81,13 @@ const (
 	recallMax               = 8
 )
 
+// recall's from values: the best matches newest first, or the earliest
+// matching lines in order.
+const (
+	RecallFromBest  = "best"
+	RecallFromStart = "start"
+)
+
 // toolDeclarations is the function surface (plain GenerateContent
 // declarations; no Live-only behaviour field). readOnly is the surface
 // of an event turn: the read tools only, no actions, promise or
@@ -98,8 +106,9 @@ func toolDeclarations(readOnly bool) []*genai.Tool {
 			Parameters: obj(map[string]*genai.Schema{"agent": agent, "question": str("a self-contained question")}, []string{"agent", "question"})},
 		{Name: ToolListAgents, Description: "The roster: every agent with its state, task and pending question.",
 			Parameters: obj(map[string]*genai.Schema{}, nil)},
-		{Name: ToolRecall, Description: "Search the record: last results, last tasks, last questions, notes, promises and earlier transcript lines matching the query.",
-			Parameters: obj(map[string]*genai.Schema{"query": str("words to look for; empty for the most recent record")}, nil)},
+		{Name: ToolRecall, Description: "Search the record: last results, last tasks, last questions, notes, promises and earlier transcript lines (the user's own requests among them) matching the query, in any language. from best (the default): the best matches, newest first. from start: the earliest matching lines in the order they happened; with an empty query, the first lines of the record.",
+			Parameters: obj(map[string]*genai.Schema{"query": str("words to look for; empty for the most recent record (or, from start, the first)"),
+				"from": {Type: genai.TypeString, Enum: []string{RecallFromBest, RecallFromStart}, Description: "best (default) or start"}}, nil)},
 	}
 	if readOnly {
 		return []*genai.Tool{{FunctionDeclarations: read}}
@@ -259,7 +268,7 @@ func (b *Brain) execTool(ctx context.Context, t *turn, call *genai.FunctionCall)
 	case ToolListAgents:
 		return b.listAgents()
 	case ToolRecall:
-		return b.recall(arg("query"))
+		return b.recall(arg("query"), arg("from"))
 	}
 	if IsActionTool(call.Name) {
 		if trigger != TriggerCEO || t.req.Kind.ReadOnly() {
@@ -669,9 +678,12 @@ func (b *Brain) listAgents() toolOutcome {
 // recall searches the ledger (roster fields, work journals, notes,
 // promises, investigations) and the transcript for the query's words and
 // returns the best matching lines, newest first on ties; an empty query
-// returns the most recent record.
-func (b *Brain) recall(query string) toolOutcome {
+// returns the most recent record. from start returns the earliest
+// matching lines instead, oldest first (an empty query: the first lines
+// of the record). A cut list says how many lines matched.
+func (b *Brain) recall(query, from string) toolOutcome {
 	words := queryWords(query)
+	fromStart := from == RecallFromStart
 	type hit struct {
 		line  string
 		score int
@@ -719,48 +731,109 @@ func (b *Brain) recall(query string) toolOutcome {
 		add(inv.Started, investigationLine(inv, b.cfg.Now()))
 	}
 	for _, m := range b.transcript.Messages() {
+		line := m.Content
 		switch m.Kind {
-		case KindToolResult, KindToolCall, KindRequest, KindEventScreen, KindPromise:
+		case KindToolResult, KindToolCall, KindEventScreen, KindPromise:
 			// Promises come from the Host (current status), not from
 			// their transcript lines.
 			continue
+		case KindRequest:
+			// The user's own words, without the request's framing; a
+			// request that carries none (an event, a nudge) is the
+			// daemon talking, and its lines are recorded elsewhere.
+			if m.Words == "" {
+				continue
+			}
+			line = strconv.Quote(m.Words)
 		}
-		line := m.Content
-		if len(line) > 300 {
-			line = line[:300] + "…"
-		}
-		add(m.TS, fmt.Sprintf("[%s] %s: %s", m.TS.Format("15:04"), m.Kind, line))
+		add(m.TS, fmt.Sprintf("[%s] %s: %s", m.TS.Format("15:04"), m.Kind, clipText(line, 300)))
 	}
 	sort.SliceStable(hits, func(i, j int) bool {
+		if fromStart {
+			// Oldest first; undated lines (notes) after the dated ones.
+			if hits[i].ts.IsZero() != hits[j].ts.IsZero() {
+				return !hits[i].ts.IsZero()
+			}
+			return hits[i].ts.Before(hits[j].ts)
+		}
 		if hits[i].score != hits[j].score {
 			return hits[i].score > hits[j].score
 		}
 		return hits[i].ts.After(hits[j].ts)
 	})
+	total := len(hits)
 	if len(hits) > recallMax {
 		hits = hits[:recallMax]
 	}
-	lines := make([]string, 0, len(hits))
+	lines := make([]string, 0, len(hits)+1)
 	for _, h := range hits {
 		lines = append(lines, h.line)
 	}
 	if len(lines) == 0 {
 		return toolOutcome{result: "nothing in the record matches " + fmt.Sprintf("%q", query), summary: "recall: no match"}
 	}
-	return toolOutcome{result: strings.Join(lines, "\n"), summary: fmt.Sprintf("recall of %q, %d lines", query, len(lines))}
+	if total > len(lines) {
+		order := "the best matches, newest first"
+		if fromStart {
+			order = "the earliest, in order"
+		}
+		lines = append(lines, fmt.Sprintf("(%d of %d matching lines: %s)", len(hits), total, order))
+	}
+	return toolOutcome{result: strings.Join(lines, "\n"), summary: fmt.Sprintf("recall of %q, %d lines", query, len(hits))}
 }
 
-// queryWords splits a recall query into lower-case words of 3+ letters.
+// queryWords splits a recall query into lower-case search terms: words
+// of letters and digits (any script) of 3+ characters, and for scripts
+// written without spaces (Han, Kana, Hangul) every pair of adjacent
+// characters, or the character itself when it stands alone.
 func queryWords(q string) []string {
 	var out []string
-	for _, w := range strings.FieldsFunc(strings.ToLower(q), func(r rune) bool {
-		return (r < 'a' || r > 'z') && (r < '0' || r > '9')
-	}) {
-		if len(w) >= 3 {
+	seen := map[string]bool{}
+	emit := func(w string) {
+		if w != "" && !seen[w] {
+			seen[w] = true
 			out = append(out, w)
 		}
 	}
+	flush := func(run []rune, cjk bool) {
+		switch {
+		case len(run) == 0:
+		case !cjk:
+			if len(run) >= 3 {
+				emit(string(run))
+			}
+		case len(run) == 1:
+			emit(string(run))
+		default:
+			for i := 0; i+1 < len(run); i++ {
+				emit(string(run[i : i+2]))
+			}
+		}
+	}
+	var run []rune
+	runCJK := false
+	for _, r := range strings.ToLower(q) {
+		if !unicode.IsLetter(r) && !unicode.IsDigit(r) && !unicode.IsMark(r) {
+			flush(run, runCJK)
+			run = run[:0]
+			continue
+		}
+		c := isCJK(r)
+		if len(run) > 0 && c != runCJK {
+			flush(run, runCJK)
+			run = run[:0]
+		}
+		runCJK = c
+		run = append(run, r)
+	}
+	flush(run, runCJK)
 	return out
+}
+
+// isCJK reports whether r belongs to a script written without spaces
+// between words.
+func isCJK(r rune) bool {
+	return unicode.In(r, unicode.Han, unicode.Hiragana, unicode.Katakana, unicode.Hangul)
 }
 
 // aliases lists the roster's aliases for error messages.

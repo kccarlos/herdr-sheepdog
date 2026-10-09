@@ -121,12 +121,16 @@ const (
 
 // dynamicSections renders the roster, the ledger excerpt (with the open
 // promises), the investigations, the user's language setting (when
-// set: language is lang.Line's sentence) and the time — the state block,
+// set: language is lang.Line's sentence) and the time with where the
+// record begins (record, recordLine; may be empty) — the state block,
 // which the loop sends after the window (withState), time last.
-func dynamicSections(agents []AgentInfo, notes []string, promises []PromiseInfo, investigations []InvestigationInfo, language string, now time.Time) []PromptSection {
+func dynamicSections(agents []AgentInfo, notes []string, promises []PromiseInfo, investigations []InvestigationInfo, language string, now time.Time, record string) []PromptSection {
 	roster := renderRoster(agents, now)
 	invs := renderInvestigations(investigations, now)
 	clock := "## Now\n\n" + now.Format("Mon 2006-01-02 15:04:05 MST")
+	if record != "" {
+		clock += "\n" + record
+	}
 	var ledger string
 	for n := journalLedgerEntries; n >= 1; n-- {
 		ledger = renderLedgerN(agents, notes, promises, now, n)
@@ -145,6 +149,27 @@ func dynamicSections(agents []AgentInfo, notes []string, promises []PromiseInfo,
 		secs = append(secs, PromptSection{Name: "language", Source: SourceDynamic, Text: "## Language\n\n" + language})
 	}
 	return append(secs, PromptSection{Name: "time", Source: SourceDynamic, Text: clock})
+}
+
+// recordLine tells the model where its record begins: when this
+// conversation started, and whether the transcript it is shown is
+// complete since then or, after a compaction, holds only the summary up
+// to the time the summary covers.
+func recordLine(started time.Time, c CompactionInfo, now time.Time) string {
+	if started.IsZero() {
+		return ""
+	}
+	at := func(t time.Time) string {
+		t = t.In(now.Location())
+		if y, m, d := t.Date(); y == now.Year() && m == now.Month() && d == now.Day() {
+			return t.Format("15:04:05")
+		}
+		return t.Format("Mon 2006-01-02 15:04:05")
+	}
+	if c.At.IsZero() || c.CoversTo.IsZero() {
+		return fmt.Sprintf("Record: this conversation started at %s and the transcript above is complete since then: nothing of it is missing.", at(started))
+	}
+	return fmt.Sprintf("Record: this conversation started at %s. Up to %s the transcript above holds only the compaction summary (its first message); every line since then is complete; recall finds the earlier lines.", at(started), at(c.CoversTo))
 }
 
 // renderInvestigations is the Investigations section: the jobs running

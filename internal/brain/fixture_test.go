@@ -66,7 +66,7 @@ func TestSampleRunFixture(t *testing.T) {
 	next := func(steps ...braintest.Step) { script = append(script, steps...) }
 
 	dir := t.TempDir()
-	b, err := New(Config{DataDir: dir, RunID: "sample-run", Now: now, WindowTokens: 1250, PruneAfterTurns: 4, UtteranceTimeout: 30 * time.Second}, model, &recLog{})
+	b, err := New(Config{DataDir: dir, RunID: "sample-run", Now: now, WindowTokens: 1270, PruneAfterTurns: 4, UtteranceTimeout: 30 * time.Second}, model, &recLog{})
 	if err != nil {
 		t.Fatal(err)
 	}
