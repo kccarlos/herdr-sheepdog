@@ -1,0 +1,63 @@
+rejudged workday-adversarial-afternoon r1: pass
+rejudged workday-adversarial-afternoon r2: pass
+rejudged workday-adversarial-afternoon r3: fail
+rejudged workday-adversarial-afternoon r4: pass
+rejudged workday-adversarial-afternoon r5: pass
+rejudged workday-explain-deep r1: pass
+sheepdog bench rejudge: segments: workday-explain-deep r2: segment 9 (beat 14): judge: no verdict for right_agent, coherence_1
+rejudged workday-explain-deep r3: pass
+rejudged workday-explain-deep r4: pass
+rejudged workday-explain-deep r5: pass
+rejudged workday-interruptions r1: pass
+rejudged workday-interruptions r2: pass
+rejudged workday-interruptions r3: pass
+rejudged workday-interruptions r4: pass
+rejudged workday-interruptions r5: pass
+rejudged workday-long-haul r1: fail
+sheepdog bench rejudge: segments: workday-long-haul r2: segment 9 (beat 9): judge: no verdict for right_agent
+rejudged workday-long-haul r3: pass
+rejudged workday-long-haul r4: pass
+rejudged workday-long-haul r5: pass
+rejudged workday-morning-standup r1: pass
+rejudged workday-morning-standup r2: pass
+rejudged workday-morning-standup r3: pass
+rejudged workday-morning-standup r4: pass
+rejudged workday-morning-standup r5: pass
+rejudged workday-scale-ten r1: error
+rejudged workday-scale-ten r2: fail
+rejudged workday-scale-ten r3: fail
+rejudged workday-scale-ten r4: fail
+rejudged workday-scale-ten r5: fail
+rejudged workday-zh-evening r1: pass
+rejudged workday-zh-evening r2: pass
+rejudged workday-zh-evening r3: pass
+sheepdog bench rejudge: segments: workday-zh-evening r4: segment 1 (beat 1): judge: claude cli: signal: killed: 
+segment 2 (beat 2): judge: context canceled
+segment 4 (beat 4): judge: claude cli: signal: killed: 
+segment 5 (beat 5): judge: claude cli: signal: killed: 
+segment 6 (beat 6): judge: context canceled
+segment 7 (beat 7): judge: context canceled
+segment 8 (beat 8): judge: context canceled
+segment 9 (beat 9): judge: context canceled
+segment 10 (beat 10): judge: context canceled
+segment 11 (beat 11): judge: context canceled
+segment 12 (beat 13): judge: context canceled
+segment 13 (beat 14): judge: context canceled
+sheepdog bench rejudge: segments: workday-zh-evening r5: segment 0 (beat 0): judge: context canceled
+segment 1 (beat 1): judge: claude cli: context canceled: 
+segment 2 (beat 2): judge: claude cli: context canceled: 
+segment 3 (beat 3): judge: context canceled
+segment 4 (beat 4): judge: claude cli: context canceled: 
+segment 5 (beat 5): judge: claude cli: context canceled: 
+segment 6 (beat 6): judge: claude cli: context canceled: 
+segment 7 (beat 7): judge: context canceled
+segment 8 (beat 8): judge: context canceled
+segment 9 (beat 9): judge: claude cli: context canceled: 
+segment 10 (beat 10): judge: claude cli: context canceled: 
+segment 11 (beat 11): judge: claude cli: context canceled: 
+segment 12 (beat 13): judge: claude cli: context canceled: 
+segment 13 (beat 14): judge: claude cli: context canceled: 
+sheepdog bench rejudge: 4 runs not rejudged (run again to retry them)
+judge claude sonnet: 29m58s, 493 calls
+-- spend judge    sonnet                   calls   493  in   7073189  out   559772  reasoning        0  ≈ $0.0000 --
+-- spend total ≈ $0.0000 (estimate at list prices) --
