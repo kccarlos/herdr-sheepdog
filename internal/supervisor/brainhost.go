@@ -53,6 +53,7 @@ func (h brainHost) info(a state.Agent, pending state.PendingAction, has bool) br
 	if a.LastInteraction != nil {
 		info.LastInteraction = *a.LastInteraction
 	}
+	info.Session = h.s.sessionFacts(a)
 	if has && pending.Kind == state.PendingAnswerPrompt && pending.PaneID == a.PaneID {
 		p := &brain.PendingPrompt{ID: pending.ID, Question: pending.Question, AskedAt: pending.CreatedAt, YesKeys: pending.YesKeys, NoKeys: pending.NoKeys}
 		for _, o := range pending.Options {

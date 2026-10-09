@@ -225,6 +225,14 @@
             "description": "the id of the investigation this digs deeper into, to resume the same session",
             "type": "string"
           },
+          "mode": {
+            "description": "how the worker's session is consulted. fork (the default for source worker): a read-only copy of the whole session that remembers and can reason as the worker did; costs more the larger and colder the session. search: a read-only agent that searches the worker's transcript, cheap and size-independent, for what it said, asked or did. The Agents list shows each worker's session size, last activity and the estimated cost of each.",
+            "enum": [
+              "fork",
+              "search"
+            ],
+            "type": "string"
+          },
           "question": {
             "description": "a self-contained question",
             "type": "string"

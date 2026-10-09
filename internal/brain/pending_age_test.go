@@ -17,3 +17,14 @@ func TestRosterSaysHowLongAPromptWaited(t *testing.T) {
 		t.Errorf("roster:\n%s", got)
 	}
 }
+
+// The roster carries the investigation facts as information only.
+func TestRosterShowsSessionFacts(t *testing.T) {
+	now := time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC)
+	got := renderRoster([]AgentInfo{{Alias: "auth", Kind: "claude", State: "idle", Session: &SessionFacts{Tokens: 360_000, LastActive: now.Add(-3 * time.Hour), ForkUSD: 2.88, SearchUSD: 0.2}}}, now)
+	for _, want := range []string{"session ~360k tokens", "last active 3 h ago", "fork ~$2.88", "search ~$0.20"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("roster missing %q:\n%s", want, got)
+		}
+	}
+}

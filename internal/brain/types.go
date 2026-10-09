@@ -381,6 +381,12 @@ const (
 	InvestigationSourceWorker = "worker"
 )
 
+// Investigation modes for a worker's own session (InvestigationRequest.Mode).
+const (
+	InvestigationModeFork   = "fork"
+	InvestigationModeSearch = "search"
+)
+
 // InvestigationRequest is what the investigate tool asks the Host to
 // start: a question about an agent, optionally continuing an earlier
 // job's session.
@@ -394,6 +400,11 @@ type InvestigationRequest struct {
 	// Source is who is asked: InvestigationSourceCLI ("" too) or
 	// InvestigationSourceWorker.
 	Source string
+	// Mode picks how the worker's own session is consulted: "fork" (a
+	// read-only copy of the whole session, the default for source
+	// worker) or "search" (a read-only sub-agent that greps the worker's
+	// transcript). "" keeps Source's behaviour.
+	Mode string
 	// Asked is what the user said that started it, in their words (the
 	// delivery turn says what they wanted, not what the tool asked).
 	Asked string
@@ -476,6 +487,22 @@ type AgentInfo struct {
 	// wrote at each finish or block, read from its own transcript
 	// (docs/roles.md "Worker history").
 	Journal []JournalEntry
+	// Session is what the orchestrator needs to choose an investigation
+	// method for this worker; nil when its session cannot be consulted.
+	Session *SessionFacts
+}
+
+// SessionFacts are facts about a worker's session file, for choosing
+// between a fork and a transcript search (docs/cli-query-tools.md §2c).
+// Information only: the orchestrator decides.
+type SessionFacts struct {
+	// Tokens is the approximate size of the session's context.
+	Tokens int
+	// LastActive is when the transcript was last written.
+	LastActive time.Time
+	// ForkUSD and SearchUSD are rough cost estimates of one question by
+	// each method, given the cache state at the time of the facts.
+	ForkUSD, SearchUSD float64
 }
 
 // SessionRead is what Host.ReadSession found at the end of a worker's

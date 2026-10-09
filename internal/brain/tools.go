@@ -127,7 +127,8 @@ func toolDeclarations(readOnly bool) []*genai.Tool {
 				"due_in_minutes": {Type: genai.TypeInteger, Description: "only when the user gave a deadline or asked to be interrupted at once (0); a promise kept past its due time interrupts instead of waiting for a pause"}}, []string{"agent", "text", "event"})},
 		{Name: ToolInvestigate, Description: "Start a background look into something the screen cannot answer and that may take more than a few seconds. source cli (the default): a fresh read-only CLI agent in the agent's repository, for questions about the code itself. source worker: the worker's own session, asked through a read-only copy that remembers everything it saw and did, for why it did something, what it tried, or to explain its decision; it never touches the worker. It returns at once with a job id; the answer reaches the user on its own when the job returns, so acknowledge with pending true and say roughly how long. Phrase the question with full context: neither has heard this conversation. One live investigation per agent.",
 			Parameters: obj(map[string]*genai.Schema{"agent": agent, "question": str("a self-contained question"), "follow_up_of": str("the id of the investigation this digs deeper into, to resume the same session"),
-				"source": {Type: genai.TypeString, Enum: []string{InvestigationSourceCLI, InvestigationSourceWorker}, Description: "cli (default, the repository) or worker (the worker's own memory)"}}, []string{"agent", "question"})},
+				"source": {Type: genai.TypeString, Enum: []string{InvestigationSourceCLI, InvestigationSourceWorker}, Description: "cli (default, the repository) or worker (the worker's own memory)"},
+				"mode":   {Type: genai.TypeString, Enum: []string{InvestigationModeFork, InvestigationModeSearch}, Description: "how the worker's session is consulted. fork (the default for source worker): a read-only copy of the whole session that remembers and can reason as the worker did; costs more the larger and colder the session. search: a read-only agent that searches the worker's transcript, cheap and size-independent, for what it said, asked or did. The Agents list shows each worker's session size, last activity and the estimated cost of each."}}, []string{"agent", "question"})},
 		{Name: ToolNote, Description: "Remember something the user decided or wants kept in mind (\"remember the migrations are off limits today\", \"we are on the release branch\"). Notes are in the ledger of every later turn. Not for promised work: that is promise. With agent and name it renames that agent instead (\"call that one docs\"): the user hears it by that name from then on.",
 			Parameters: obj(map[string]*genai.Schema{"text": str("what to remember, in the user's words"), "agent": str("only to rename: the agent's alias"), "name": str("only to rename: the new name, as the user said it")}, nil)},
 	}
@@ -347,7 +348,7 @@ func (b *Brain) execTool(ctx context.Context, t *turn, call *genai.FunctionCall)
 			out.err = errors.New("investigate needs a question")
 			return out
 		}
-		start, err := b.host.Investigate(ctx, row.PaneID, InvestigationRequest{Question: q, FollowUpOf: arg("follow_up_of"), Source: arg("source"), Asked: t.req.Question, Turn: turn})
+		start, err := b.host.Investigate(ctx, row.PaneID, InvestigationRequest{Question: q, FollowUpOf: arg("follow_up_of"), Source: arg("source"), Mode: arg("mode"), Asked: t.req.Question, Turn: turn})
 		if err != nil {
 			out.err = err
 			return out

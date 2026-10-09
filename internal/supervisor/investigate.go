@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
@@ -229,9 +230,16 @@ func (p investigationPlan) jobSession() string {
 // question carries that job's answer so a cold start has what the
 // user already heard, and a worker job forks the worker again.
 func (s *Supervisor) planInvestigation(row state.Agent, req brain.InvestigationRequest, question string) (investigationPlan, error) {
+	mode, err := investigationMode(req.Mode)
+	if err != nil {
+		return investigationPlan{}, err
+	}
 	source, err := investigationSource(req.Source)
 	if err != nil {
 		return investigationPlan{}, err
+	}
+	if mode == brain.InvestigationModeFork && strings.TrimSpace(req.Source) == "" {
+		source = state.InvestigationSourceWorker
 	}
 	p := investigationPlan{source: source, question: question}
 	if req.FollowUpOf != "" {
@@ -256,6 +264,16 @@ func (s *Supervisor) planInvestigation(row state.Agent, req brain.InvestigationR
 		// before.
 		p.question = fmt.Sprintf("Earlier you were asked: %s\nYou answered:\n%s\n\nNow: %s", prev.Question, prev.Result, question)
 	}
+	if mode == brain.InvestigationModeSearch {
+		// A plain read-only sub-agent pointed at the worker's transcript:
+		// the same run as the fork's budget fallback, chosen up front.
+		transcript, err := s.workerTranscript(row)
+		if err != nil {
+			return investigationPlan{}, err
+		}
+		p.source, p.question = state.InvestigationSourceCLI, transcriptQuestion(p.question, transcript, nil)
+		return p, nil
+	}
 	if p.source == state.InvestigationSourceWorker {
 		backend, session, transcript, err := s.workerFork(row)
 		if err != nil {
@@ -264,6 +282,17 @@ func (s *Supervisor) planInvestigation(row state.Agent, req brain.InvestigationR
 		p.backend, p.session, p.fork, p.transcript = backend, session, true, transcript
 	}
 	return p, nil
+}
+
+// investigationMode normalises the tool's mode argument; "" keeps the
+// source's own behaviour.
+func investigationMode(mode string) (string, error) {
+	switch v := strings.ToLower(strings.TrimSpace(mode)); v {
+	case "", brain.InvestigationModeFork, brain.InvestigationModeSearch:
+		return v, nil
+	default:
+		return "", fmt.Errorf("investigate mode %q: want %s (a read-only copy of the worker's session) or %s (search its transcript)", mode, brain.InvestigationModeFork, brain.InvestigationModeSearch)
+	}
 }
 
 // investigationSource normalises the tool's source argument.
@@ -340,6 +369,58 @@ func (s *Supervisor) workerFork(row state.Agent) (backend, session, transcript s
 	return backend, session, transcript, nil
 }
 
+// workerTranscript locates the worker's transcript for mode search,
+// refusing like workerFork when there is none.
+func (s *Supervisor) workerTranscript(row state.Agent) (string, error) {
+	if s.cfg.WorkerLog == nil {
+		return "", fmt.Errorf("cannot search %s's session: no transcript reader on this machine; investigate without mode asks a read-only agent in its repository instead", aliasOr(row.Alias))
+	}
+	transcript, err := s.cfg.WorkerLog.Locate(workerSession(row))
+	if err != nil {
+		reason := workerlog.Reason(err)
+		return "", fmt.Errorf("cannot search %s's session: %s (%s); investigate without mode asks a read-only agent in its repository instead", aliasOr(row.Alias), reason, sessionMissingWhy[reason])
+	}
+	return transcript, nil
+}
+
+// Rough prices behind brain.SessionFacts, from the 2026-10-08 measurement
+// in docs/cli-query-tools.md §2c: a cold 360 k token fork cost about
+// $2.9 (about $8 per million tokens), a warm one a few cents to ~$0.2.
+const (
+	sessionBytesPerToken = 6   // JSONL transcript bytes per context token
+	forkColdUSDPerMTok   = 8.0 // first turn, prompt cache gone
+	forkWarmUSDPerMTok   = 0.5 // first turn, prompt cache read
+	searchUSD            = 0.2 // Haiku sub-agent, size-independent
+	promptCacheTTL       = 5 * time.Minute
+)
+
+// sessionFactsOf turns a transcript's size and last write into the facts
+// the orchestrator chooses a method by. Information only.
+func sessionFactsOf(size int64, last, now time.Time) *brain.SessionFacts {
+	tokens := int(size / sessionBytesPerToken)
+	rate := forkColdUSDPerMTok
+	if now.Sub(last) < promptCacheTTL {
+		rate = forkWarmUSDPerMTok
+	}
+	return &brain.SessionFacts{Tokens: tokens, LastActive: last, ForkUSD: float64(tokens) * rate / 1e6, SearchUSD: searchUSD}
+}
+
+// sessionFacts stats the worker's transcript; nil when it has none.
+func (s *Supervisor) sessionFacts(row state.Agent) *brain.SessionFacts {
+	if s.cfg.WorkerLog == nil || row.SessionValue == "" {
+		return nil
+	}
+	path, err := s.cfg.WorkerLog.Locate(workerSession(row))
+	if err != nil {
+		return nil
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		return nil
+	}
+	return sessionFactsOf(fi.Size(), fi.ModTime(), s.cfg.Now())
+}
+
 // workerBackend names the CLI that keeps a worker's session, from the
 // reporting integration or the pane's kind (workerlog.Locate has already
 // refused any other).
@@ -382,7 +463,7 @@ func (s *Supervisor) runInvestigation(ctx context.Context, live *liveInvestigati
 		// it came from the repository.
 		fq := q
 		fq.Fork, fq.Session, fq.Backend = false, "", ""
-		fq.Question = forkFallbackQuestion(q.Question, transcript, err)
+		fq.Question = transcriptQuestion(q.Question, transcript, err)
 		s.log.Log(logSource, "investigation.fallback", inv.PaneID, map[string]any{
 			"id": inv.ID, "agent": aliasOr(inv.Alias), "from": state.InvestigationSourceWorker, "to": state.InvestigationSourceCLI,
 			"reason": "budget", "error": err.Error(), "transcript": transcript != "",
@@ -728,13 +809,17 @@ func investigationCause(err error, limit time.Duration) failCause {
 	}
 }
 
-// forkFallbackQuestion is what the plain sub-agent is asked when the
+// transcriptQuestion is what the plain sub-agent is asked when the
 // worker's own session could not answer: the question, why, and where
 // the worker's transcript is to read (read-only) when there is one.
-func forkFallbackQuestion(question, transcript string, why error) string {
+func transcriptQuestion(question, transcript string, why error) string {
 	var b strings.Builder
 	b.WriteString(question)
-	fmt.Fprintf(&b, "\n\n(The worker's own session could not be asked: %s. Answer from the repository", prose.TruncateRunes(oneLineErr(why), 160))
+	if why != nil {
+		fmt.Fprintf(&b, "\n\n(The worker's own session could not be asked: %s. Answer from the repository", prose.TruncateRunes(oneLineErr(why), 160))
+	} else {
+		b.WriteString("\n\n(Answer from the repository")
+	}
 	if transcript != "" {
 		fmt.Fprintf(&b, " and from the worker's session transcript, a JSONL file at %s; it is large, so search it with Grep for the part that matters instead of reading it whole, and never write to it", transcript)
 	}

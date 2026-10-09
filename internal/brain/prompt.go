@@ -217,6 +217,9 @@ func renderRoster(agents []AgentInfo, now time.Time) string {
 		if !a.LastInteraction.IsZero() {
 			fmt.Fprintf(&b, "; user last dealt with it %s ago", agoCoarse(now.Sub(a.LastInteraction)))
 		}
+		if f := a.Session; f != nil {
+			fmt.Fprintf(&b, "; session ~%dk tokens, last active %s ago, investigate cost: fork ~$%.2f, search ~$%.2f", f.Tokens/1000, agoCoarse(now.Sub(f.LastActive)), f.ForkUSD, f.SearchUSD)
+		}
 		if p := a.Pending; p != nil {
 			b.WriteString("; WAITING FOR AN ANSWER")
 			if !p.AskedAt.IsZero() {

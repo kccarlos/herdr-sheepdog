@@ -307,3 +307,96 @@ func TestWorkerForkFallbackFailsWithReason(t *testing.T) {
 		t.Errorf("record err = %q, queries = %d", inv.Err, len(f.all()))
 	}
 }
+
+// mode search asks a plain read-only sub-agent about the worker's
+// transcript, no fork and no worker session in the query; mode fork is
+// source worker; no mode keeps the default; a bad mode is refused.
+func TestInvestigationModes(t *testing.T) {
+	f := &fakeInvestigator{answer: "ok", session: forkSession, backend: "claude"}
+	h, dir := newWorkerInvestigationHarness(t, f)
+	ask := func(mode string) error {
+		_, err := h.sup.startInvestigation(context.Background(), "w5:p1", brain.InvestigationRequest{Question: "what did it say?", Mode: mode, Turn: 1})
+		return err
+	}
+	if err := ask("search"); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, func() bool { return len(f.all()) == 1 }, "the search to run")
+	q := f.all()[0]
+	if q.Fork || q.Session != "" || !strings.Contains(q.Question, filepath.Join(dir, "projects", "-work-w5-p1", workerClaudeSession+".jsonl")) || !strings.Contains(q.Question, "Grep") {
+		t.Errorf("search query = %+v", q)
+	}
+	waitFor(t, func() bool { return len(h.sup.investigations()) == 1 && h.sup.investigations()[0].Status == state.InvestigationDone }, "the search to finish")
+	if inv := h.sup.investigations()[0]; inv.Source != state.InvestigationSourceCLI {
+		t.Errorf("search record source = %q, want cli", inv.Source)
+	}
+
+	if err := ask("fork"); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, func() bool { return len(f.all()) == 2 }, "the fork to run")
+	if q := f.all()[1]; !q.Fork || q.Session != workerClaudeSession {
+		t.Errorf("fork query = %+v", q)
+	}
+	waitFor(t, func() bool { return h.sup.investigations()[len(h.sup.investigations())-1].Status == state.InvestigationDone }, "the fork to finish")
+
+	if err := ask(""); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, func() bool { return len(f.all()) == 3 }, "the default to run")
+	if q := f.all()[2]; q.Fork || q.Session != "" {
+		t.Errorf("unset mode must keep the default (cli source), got %+v", q)
+	}
+	if err := ask("bogus"); err == nil || !strings.Contains(err.Error(), "want fork") {
+		t.Errorf("bad mode err = %v", err)
+	}
+}
+
+// Search needs a transcript to search: without one the error says why.
+func TestInvestigationSearchNeedsTranscript(t *testing.T) {
+	h, _ := newWorkerInvestigationHarness(t, &fakeInvestigator{})
+	setWorkerSession(t, h, "claude", "herdr:claude", herdr.SessionKindID, "11111111-1111-4111-8111-111111111111")
+	_, err := h.sup.startInvestigation(context.Background(), "w5:p1", brain.InvestigationRequest{Question: "q", Mode: "search", Turn: 1})
+	if err == nil || !strings.Contains(err.Error(), "cannot search") {
+		t.Errorf("err = %v", err)
+	}
+}
+
+// The facts: tokens from the file size, warm cache when recent, and the
+// roster shows them next to the worker.
+func TestSessionFacts(t *testing.T) {
+	now := time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC)
+	cold := sessionFactsOf(2_160_000, now.Add(-3*time.Hour), now)
+	if cold.Tokens != 360_000 || cold.ForkUSD < 2.8 || cold.ForkUSD > 2.95 || cold.SearchUSD <= 0 || cold.SearchUSD >= cold.ForkUSD {
+		t.Errorf("cold facts = %+v", cold)
+	}
+	warm := sessionFactsOf(2_160_000, now.Add(-time.Minute), now)
+	if warm.ForkUSD >= cold.ForkUSD/10 {
+		t.Errorf("warm fork %.2f should be far below cold %.2f", warm.ForkUSD, cold.ForkUSD)
+	}
+
+	h, dir := newWorkerInvestigationHarness(t, &fakeInvestigator{})
+	h.sup.cfg.Now = func() time.Time { return time.Now() }
+	path := filepath.Join(dir, "projects", "-work-w5-p1", workerClaudeSession+".jsonl")
+	if err := os.WriteFile(path, make([]byte, 60_000), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-2 * time.Hour)
+	if err := os.Chtimes(path, old, old); err != nil {
+		t.Fatal(err)
+	}
+	row, _ := h.store.Get("w5:p1")
+	f := h.sup.sessionFacts(row)
+	if f == nil || f.Tokens != 10_000 || time.Since(f.LastActive) < time.Hour {
+		t.Fatalf("facts = %+v", f)
+	}
+	info := brainHost{h.sup}.info(row, state.PendingAction{}, false)
+	if info.Session == nil {
+		t.Error("AgentInfo.Session not set")
+	}
+	setWorkerSession(t, h, "claude", "herdr:claude", herdr.SessionKindID, "")
+	row, _ = h.store.Get("w5:p1")
+	if h.sup.sessionFacts(row) != nil {
+		t.Error("no session, no facts")
+	}
+}

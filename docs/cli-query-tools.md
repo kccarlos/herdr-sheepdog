@@ -369,6 +369,23 @@ for WP8c:
   investigation; it uses the user's own Claude/Codex usage, never
   Gemini quota.
 
+### Choosing the method: facts and `mode`
+
+`investigate` takes `mode: fork|search` for a worker's own session; unset
+keeps `source`'s behaviour. `fork` is `source: worker` (a read-only copy
+of the session). `search` is the fallback above chosen up front: the
+read-only sub-agent greps the worker's transcript (record source `cli`;
+refused with a reason when the worker has no transcript). Sheepdog makes
+no choice itself: the orchestrator's Agents list shows, for each worker
+whose transcript it can find, the facts to choose by: `session ~360k
+tokens` (transcript bytes / 6), `last active 3 h ago` (the file's mtime;
+a prompt cache younger than 5 minutes makes a fork cheap), and rough
+costs `fork ~$2.88, search ~$0.20` (fork: tokens at $8 per million cold or
+$0.5 warm, from the 2026-10-08 measurement above; search: a flat $0.2).
+The $10 fork cap stays as the runaway rail. `prompts/svp/RULES.md` says
+only: search for "what did it say/ask/do", fork when the worker's own
+reasoning is needed.
+
 ### Consequence
 
 Both backends can answer from the worker's memory without writing into
