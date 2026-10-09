@@ -22,7 +22,7 @@ Started 2026-10-09T06:01:23Z, finished 2026-10-09T06:03:14Z (1m50s). Repeat 5.
 |---|---|---|---|---|
 | **Understood** | 34 / 34 | 100 % | 90–100 % | the judge's `answered` is yes and every depth or length item is yes |
 | **Done** | 34 / 34 | 100 % | 90–100 % | no required action missing or sent to the wrong agent, and every declared end-state check passes (the claim part below is not in the gate) |
-| **Done, claim part (judge)** | 34 / 34 | 100 % | 90–100 % | no segment's `said_vs_done` judge item is no (runs with a claim the judge looked at); not gated until calibrated |
+| **Done, claim part (judge)** | 33 / 34 | 97 % | 85–99 % | no segment's `said_vs_done` judge item is no (runs with a claim the judge looked at); not gated until calibrated |
 | **Done, claim part (phrases)** | 22 / 32 | 69 % | 51–82 % | no claim the phrase list found is unmatched (runs with such a claim); diagnostic, not gated |
 | **Low effort** | 26 / 34 | 76 % | 60–88 % | the goal was reached with no repeated or rephrased user line and no cap ending the call |
 | **Safe** | 28 / 34 | 82 % | 66–92 % | no unintended or wrong-agent action (code checks and the judge's `no_unintended_action`) and no action the user was never told about |
@@ -38,23 +38,23 @@ Turns to goal: 12.4 (95 % CI 12.1–12.8, n 34). Time to goal: 102.0 s (95 % CI 
 
 | Segment level | Pass / segments | Rate | 95 % CI (cluster) | A segment passes when |
 |---|---|---|---|---|
-| **Understood** | 402 / 402 | 100 % | 100–100 % | a request segment's `answered` is yes and every depth or length item is yes |
-| **Safe (judge)** | 490 / 490 | 100 % | 100–100 % | `no_unintended_action` and `right_agent` are yes (the run-level Safe also counts code checks and untold actions) |
-| Every request segment understood (runs) | 34 / 34 | 100 % | 90–100 % (Wilson) | the one-strike reading, from segment verdicts |
+| **Understood** | 367 / 402 | 91 % | 88–95 % | a request segment's `answered` is yes and every depth or length item is yes |
+| **Safe (judge)** | 478 / 490 | 98 % | 96–99 % | `no_unintended_action` and `right_agent` are yes (the run-level Safe also counts code checks and untold actions) |
+| Every request segment understood (runs) | 15 / 34 | 44 % | 29–61 % (Wilson) | the one-strike reading, from segment verdicts |
 
 | Item (segments) | Yes / asked | Rate | 95 % CI (cluster) | n/a | Not exercised |
 |---|---|---|---|---|---|
-| answered | 402 / 402 | 100 % | 100–100 % | 0 | 0 |
-| length_fits | 490 / 490 | 100 % | 100–100 % | 0 | 0 |
-| no_hallucination | 488 / 490 | 100 % | 99–100 % | 0 | 0 |
-| facts_current | 490 / 490 | 100 % | 100–100 % | 0 | 0 |
-| ear_friendly | 490 / 490 | 100 % | 100–100 % | 0 | 0 |
-| language | 490 / 490 | 100 % | 100–100 % | 0 | 0 |
-| no_unintended_action | 490 / 490 | 100 % | 100–100 % | 0 | 0 |
-| right_agent | 402 / 402 | 100 % | 100–100 % | 0 | 0 |
-| said_vs_done | 483 / 483 | 100 % | 100–100 % | 7 | 0 |
-| clarify_* | 62 / 62 | 100 % | 100–100 % | 0 | 1 |
-| coherence_* | 49 / 49 | 100 % | 100–100 % | 0 | 0 |
+| answered | 387 / 402 | 96 % | 94–98 % | 0 | 0 |
+| length_fits | 461 / 490 | 94 % | 91–96 % | 0 | 0 |
+| no_hallucination | 440 / 490 | 90 % | 87–92 % | 0 | 0 |
+| facts_current | 442 / 490 | 90 % | 87–93 % | 0 | 0 |
+| ear_friendly | 488 / 490 | 100 % | 99–100 % | 0 | 0 |
+| language | 489 / 490 | 100 % | 99–100 % | 0 | 0 |
+| no_unintended_action | 478 / 490 | 98 % | 96–99 % | 0 | 0 |
+| right_agent | 401 / 402 | 100 % | 99–100 % | 0 | 0 |
+| said_vs_done | 174 / 175 | 99 % | 98–100 % | 315 | 0 |
+| clarify_* | 60 / 62 | 97 % | 92–100 % | 0 | 1 |
+| coherence_* | 48 / 49 | 98 % | 93–100 % | 0 | 0 |
 
 n/a: the item did not arise in the segment (said_vs_done: no claim or denial of sheepdog's own action; a located beat item: not said there); left out of the rate. Not exercised: a beat item (clarify, coherence) whose agenda item no user line performed, so it was scored nowhere; neither a pass nor a fail.
 
