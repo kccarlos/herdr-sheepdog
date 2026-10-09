@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	"github.com/kccarlos/herdr-sheepdog/internal/northstar"
 )
 
 // Rejudging: asking a recorded run's judge items again with another
@@ -45,8 +47,11 @@ func RejudgeSim(ctx context.Context, j Judge, sc SimScenario, run *SimRun, fixtu
 
 // RejudgeSimSegments scores a recorded tier-1 workday run per segment
 // (JudgeSegments) and replaces its segment verdicts; the run-level
-// verdicts and the status are untouched. Facts as in RejudgeSim.
-func RejudgeSimSegments(ctx context.Context, j Judge, sc SimScenario, run *SimRun, fixtureDir string) error {
+// verdicts and the status are untouched. Facts as in RejudgeSim; evs is
+// the run's event log (the said_vs_done item's action list; nil gives
+// the record's sends only). With only, just those item families are
+// asked again and merged into the old verdicts (MergeSegments).
+func RejudgeSimSegments(ctx context.Context, j Judge, sc SimScenario, run *SimRun, fixtureDir string, evs []northstar.Event, only []string) error {
 	if sc.Workday == nil || run.EndReason == EndError || len(run.Verdicts) == 0 || len(run.Transcript) == 0 {
 		return nil
 	}
@@ -59,11 +64,15 @@ func RejudgeSimSegments(ctx context.Context, j Judge, sc SimScenario, run *SimRu
 		}
 		facts = f
 	}
-	segs, err := JudgeSegments(ctx, j, sc, run.Transcript, facts, 4)
+	segs, err := JudgeSegments(ctx, j, sc, run.Transcript, facts, SegmentOptions{Actions: CallActions(run.Actions, evs), Only: only, Parallel: 4})
 	if err != nil {
 		return fmt.Errorf("%s r%d: %w", run.Scenario, run.Repeat, err)
 	}
+	if len(only) > 0 {
+		segs = MergeSegments(run.Segments, segs, only)
+	}
 	run.Segments = segs
+	run.NotExercised = NotExercised(sc, segs)
 	return nil
 }
 

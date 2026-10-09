@@ -84,7 +84,7 @@ func Evaluate(r Run) RunOutcome {
 	// checks. The claim part is reported beside it and kept out of the
 	// gate (the phrase list read worker news, quoted text and negations
 	// as claims: docs/eval/analysis-done-2026-10-08.md).
-	if r.HasRecord && (r.ExpectsActions || len(r.EndState) > 0 || r.hasFailure("missing_function_call")) {
+	if r.HasRecord && (r.ExpectsActions || len(r.EndState) > 0 || len(o.Heard.Actions) > 0 || r.hasFailure("missing_function_call")) {
 		ok := !r.hasFailure("missing_function_call", "wrong_agent")
 		for _, c := range r.EndState {
 			if !c.Pass {
@@ -306,7 +306,7 @@ func Summarize(tier string, runs []Run) *Block {
 		b.Notes = append(b.Notes, fmt.Sprintf("%d graded runs have only a report summary (no runs/ records): Done, Low effort and the said-vs-done part of Safe are not computed for them; Understood and Safe come from their failure labels.", noRecord))
 	}
 	if d := b.Graded - noRecord - done[1]; d > 0 {
-		b.Notes = append(b.Notes, fmt.Sprintf("Done: %d runs had nothing to get done (no required action and no end-state check) and are left out.", d))
+		b.Notes = append(b.Notes, fmt.Sprintf("Done: %d runs had nothing to get done (no required action, no end-state check and no action) and are left out.", d))
 	}
 	if b.EndStateUnchecked > 0 {
 		b.Notes = append(b.Notes, fmt.Sprintf("Done: the end state was not checked in %d of %d runs (no end-state check declared, e.g. tier 1); Done there is the required actions only.", b.EndStateUnchecked, done[1]))

@@ -82,6 +82,7 @@ func NorthStarRun(r SimRun, sc *SimScenario, evs []northstar.Event, o NorthStarO
 	}
 	nr.Verdicts = append(nr.Verdicts, ExplainVerdicts(r.Explain)...)
 	nr.Segments = SegmentsNorthStar(r.Segments)
+	nr.NotExercised = r.NotExercised
 	for _, f := range r.Failures {
 		nr.Failures = append(nr.Failures, northstar.Failure{Type: string(f.Type), Detail: f.Detail})
 	}
@@ -153,6 +154,8 @@ func verdictAnswer(v Verdict) string {
 	switch {
 	case v.Err != "":
 		return "err"
+	case v.Answer == AnswerNA:
+		return "na"
 	case v.Passed():
 		return "yes"
 	}

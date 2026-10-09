@@ -181,7 +181,7 @@ func workdayRubric(s SimScenario) (names, criteria []string) {
 	for i, p := range w.Truth.Coherence {
 		resume := ""
 		if p.AfterResume {
-			resume = " This comes after the voice connection was recycled mid-call (in a voice run), so earlier context must have survived it."
+			resume = " In a voice run this comes after the voice connection was recycled mid-call, so earlier context must have survived it; a text run has no voice connection and no resume, and this note does not apply."
 		}
 		add(fmt.Sprintf("%s_%d", WorkdayCoherenceItem, i+1), fmt.Sprintf("Coherence: at the CEO's line for agenda item %d (%q) the right answer is: %s.%s Did sheepdog answer with that (in any words)? Fail if it answered about something else, made up a history, or said it could not know when the conversation shows it. Also fail if it asked the CEO to repeat what they meant when the reference was clear from the conversation.", p.Beat, s.Agenda[p.Beat-1], p.Answer, resume))
 	}

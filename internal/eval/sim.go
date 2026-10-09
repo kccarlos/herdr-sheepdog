@@ -342,6 +342,9 @@ type RubricItem struct {
 	Question string `json:"question"`
 	PassWhen string `json:"pass_when"`
 	FailWhen string `json:"fail_when"`
+	// AllowNA: the item may be answered n/a (segment judging); its
+	// wording says when.
+	AllowNA bool `json:"allow_na,omitempty"`
 }
 
 // Criterion is the item as the judge reads it.

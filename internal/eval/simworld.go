@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -74,6 +75,14 @@ type SimLine struct {
 	// again (the user repeats or rephrases: user effort).
 	Beat int    `json:"beat,omitempty"`
 	Tag  string `json:"tag,omitempty"`
+	// Decl is what the simulated user declared the line does (records
+	// from 2026-10-08 on): item (performs agenda Items), again (repeats
+	// Items), answer (answers sheepdog), wait (a scripted silence), or
+	// undeclared (the model gave no declaration). Empty in older records,
+	// whose Beat the harness inferred ("an untagged line is the next
+	// beat") and cannot be trusted.
+	Decl  string `json:"decl,omitempty"`
+	Items []int  `json:"items,omitempty"`
 }
 
 // simWorldOptions are what a world is built from.
@@ -335,9 +344,9 @@ func (w *simWorld) interrupted(alias string) {
 
 // afterTurn fires the events cued on the user's nth utterance, and on
 // the agenda beat that utterance carried out (0: none).
-func (w *simWorld) afterTurn(n, beat int) {
+func (w *simWorld) afterTurn(n int, beats []int) {
 	for i, e := range w.sc.Events {
-		if e.AfterTurn == n || (beat > 0 && e.AfterBeat == beat) {
+		if e.AfterTurn == n || (e.AfterBeat > 0 && slices.Contains(beats, e.AfterBeat)) {
 			i, e := i, e
 			w.schedule(time.Duration(e.DelayMS)*time.Millisecond, func() { w.apply(context.Background(), i, e, e.Agent) })
 		}

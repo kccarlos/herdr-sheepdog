@@ -30,6 +30,11 @@ const (
 	AnswerYes  Answer = "yes"
 	AnswerNo   Answer = "no"
 	AnswerWait Answer = "wait"
+	// AnswerNA: the criterion did not arise in the segment (no claim to
+	// check, the probe not asked there). Only a segment criterion that
+	// allows it (SegmentCriterion.AllowNA) gets it; it is neither a pass
+	// nor a fail and is left out of every rate.
+	AnswerNA Answer = "n/a"
 )
 
 // Verdict is the judge's answer on one criterion.

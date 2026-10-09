@@ -167,7 +167,10 @@ type Run struct {
 	// Segments are the segment judge's verdicts (eval.JudgeSegments),
 	// when the run was judged per segment.
 	Segments []SegmentVerdicts `json:"segments,omitempty"`
-	Failures []Failure         `json:"failures,omitempty"`
+	// NotExercised are the beat items (clarify_N, coherence_N) no
+	// segment scored: the probe never happened, so neither pass nor fail.
+	NotExercised []string  `json:"not_exercised,omitempty"`
+	Failures     []Failure `json:"failures,omitempty"`
 	// EndState are the declared end-state checks' outcomes (tier 3).
 	EndState []EndCheck `json:"end_state,omitempty"`
 	// ExpectsActions: the scenario requires actions on the workers, so

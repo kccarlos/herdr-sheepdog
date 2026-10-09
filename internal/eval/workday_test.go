@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"google.golang.org/genai"
+
+	"github.com/kccarlos/herdr-sheepdog/internal/brain/braintest"
 )
 
 // TestAgendaState: the beat due follows the highest beat carried out;
@@ -33,21 +35,44 @@ func TestAgendaState(t *testing.T) {
 	}
 }
 
-func TestAgendaTurnTags(t *testing.T) {
-	got := agendaTurn(SimTurn{Kind: TurnSay, Text: "[ANSWER] the tests one"}, 3, 0)
-	if got.Beat != 0 || got.Tag != "answer" || got.Text != "the tests one" {
+// The simulated user declares what each line does; nothing is inferred
+// from a missing tag (2026-10-08 coherence analysis, fix 1).
+func TestAgendaTurnDeclared(t *testing.T) {
+	got := agendaTurn(textTurn("[ANSWER] the tests one"), 3, 5)
+	if got.Beat != 0 || got.Tag != DeclAnswer || got.Decl != DeclAnswer || got.Text != "the tests one" {
 		t.Fatalf("answer: %+v", got)
 	}
-	got = agendaTurn(SimTurn{Kind: TurnSay, Text: "[again] what about the migration?"}, 3, 1)
-	if got.Beat != 0 || got.Tag != "again" {
+	got = agendaTurn(textTurn("[again 2] what about the migration?"), 3, 5)
+	if got.Beat != 0 || got.Tag != DeclAgain || len(got.Items) != 1 || got.Items[0] != 2 {
 		t.Fatalf("again: %+v", got)
 	}
-	got = agendaTurn(SimTurn{Kind: TurnSay, Text: "[AGAIN] still?"}, 3, 2)
-	if got.Beat != 3 || got.Tag != "" || got.Text != "still?" {
-		t.Fatalf("stuck forces the beat: %+v", got)
+	if got = agendaTurn(SimTurn{Kind: TurnSay, Text: "x", Decl: DeclItem, Items: []int{3}}, 3, 5); got.Beat != 3 {
+		t.Fatalf("item: %+v", got)
 	}
-	if got = agendaTurn(SimTurn{Kind: TurnSay, Text: "approve it"}, 5, 0); got.Beat != 5 {
-		t.Fatalf("plain line: %+v", got)
+	if got = agendaTurn(SimTurn{Kind: TurnSay, Text: "x", Decl: DeclItem, Items: []int{2}}, 3, 5); got.Beat != 0 || got.Decl != DeclAgain {
+		t.Fatalf("an item already done is a repeat: %+v", got)
+	}
+	if got = agendaTurn(SimTurn{Kind: TurnSay, Text: "x", Decl: DeclItem, Items: []int{4, 3, 9}}, 3, 5); got.Beat != 4 || len(got.Items) != 2 || len(got.CueBeats()) != 2 {
+		t.Fatalf("two items in one line (9 is not on the agenda): %+v", got)
+	}
+	if got = agendaTurn(SimTurn{Kind: TurnSay, Text: "x", Decl: DeclItem, Items: []int{5}}, 3, 5); got.Beat != 5 {
+		t.Fatalf("a skip is recorded as said: %+v", got)
+	}
+	if got = agendaTurn(SimTurn{Kind: TurnSay, Text: "approve it"}, 5, 6); got.Beat != 0 || got.Decl != DeclUndeclared {
+		t.Fatalf("an undeclared line does not move the agenda: %+v", got)
+	}
+	for _, txt := range []string{"[waiting]", "[The CEO waits in silence.]", "[stays silent]"} {
+		if got := textTurn(txt); got.Kind != TurnWait {
+			t.Fatalf("%q is silence, not speech: %+v", txt, got)
+		}
+	}
+	say := braintest.Response(braintest.Step{Calls: []*genai.FunctionCall{braintest.FC("say", map[string]any{"text": "what did I ask first?", "kind": "item", "items": []any{float64(4)}})}})
+	if tt, ok := simTurnOf(say); !ok || tt.Kind != TurnSay || tt.Decl != DeclItem || len(tt.Items) != 1 || tt.Items[0] != 4 {
+		t.Fatalf("say tool: %+v", tt)
+	}
+	quiet := braintest.Response(braintest.Step{Calls: []*genai.FunctionCall{braintest.FC("say", map[string]any{"text": "[waiting]", "kind": "item", "items": []any{}})}})
+	if tt, ok := simTurnOf(quiet); !ok || tt.Kind != TurnWait {
+		t.Fatalf("a bracketed say is a wait: %+v", tt)
 	}
 }
 
@@ -79,14 +104,28 @@ func TestScriptedAgenda(t *testing.T) {
 }
 
 // TestLLMAgendaPrompt: the agenda reaches the model with the beat due
-// marked, without end_call, and a plain answer carries the beat.
+// marked, without end_call but with say; a plain line without a
+// declaration does not move the agenda, a declared one does.
 func TestLLMAgendaPrompt(t *testing.T) {
 	m := &captureModel{text: "what's the migration doing?"}
 	u := &LLMSimUser{Model: m, ModelID: "x"}
 	sc := SimScenario{Goal: "a workday", Agenda: []string{"open", "ask about the migration", "close"}}
 	turn, err := u.Next(context.Background(), sc, []SimLine{{Who: "ceo", Text: "open", Beat: 1}, {Who: "sheepdog", Text: "hello"}})
-	if err != nil || turn.Beat != 2 || turn.Kind != TurnSay {
+	if err != nil || turn.Beat != 0 || turn.Decl != DeclUndeclared || turn.Kind != TurnSay {
 		t.Fatalf("turn %+v err %v", turn, err)
+	}
+	m.text = "[ITEM 2] what's the migration doing?"
+	if turn, _ = u.Next(context.Background(), sc, []SimLine{{Who: "ceo", Text: "open", Beat: 1}, {Who: "sheepdog", Text: "hello"}}); turn.Beat != 2 || turn.Text != "what's the migration doing?" {
+		t.Fatalf("declared turn %+v", turn)
+	}
+	hasSay := false
+	for _, tl := range m.tools {
+		for _, fd := range tl.FunctionDeclarations {
+			hasSay = hasSay || fd.Name == "say"
+		}
+	}
+	if !hasSay {
+		t.Fatal("agenda call lacks the say tool")
 	}
 	if !strings.Contains(m.system, ">> NOW 2. ask about the migration") || !strings.Contains(m.system, "(done) 1. open") {
 		t.Fatalf("agenda not in the prompt:\n%s", m.system)

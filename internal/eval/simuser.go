@@ -3,7 +3,10 @@ package eval
 import (
 	"context"
 	"fmt"
+	"regexp"
+	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
 	"google.golang.org/genai"
@@ -28,6 +31,32 @@ type SimTurn struct {
 	// (SimLine.Beat, SimLine.Tag).
 	Beat int
 	Tag  string
+	// Decl and Items, with an agenda: what the simulated user declared
+	// the turn does (SimLine.Decl: item, again, answer, wait, undeclared)
+	// and the agenda items it performs or repeats.
+	Decl  string
+	Items []int
+}
+
+// Declarations of a user line (SimLine.Decl).
+const (
+	DeclItem       = "item"
+	DeclAgain      = "again"
+	DeclAnswer     = "answer"
+	DeclWait       = "wait"
+	DeclUndeclared = "undeclared"
+)
+
+// CueBeats are the agenda items whose after_beat cues the turn fires:
+// the items it performed (the beat alone for a turn without Items).
+func (t SimTurn) CueBeats() []int {
+	if t.Decl == DeclItem && len(t.Items) > 0 {
+		return t.Items
+	}
+	if t.Beat > 0 {
+		return []int{t.Beat}
+	}
+	return nil
 }
 
 // SimTurn kinds.
@@ -110,7 +139,8 @@ func (u *LLMSimUser) Next(ctx context.Context, sc SimScenario, convo []SimLine) 
 		if waitedSinceSpoke(convo) {
 			// Already waited since the user last spoke: talk now (a
 			// second wait only runs the silence cap down).
-			tools = nil
+			tools = simUserSayOnly
+			system += "\nYou have just waited in silence: this turn, say something (call say).\n"
 		}
 	}
 	cfg := &genai.GenerateContentConfig{
@@ -126,7 +156,7 @@ func (u *LLMSimUser) Next(ctx context.Context, sc SimScenario, convo []SimLine) 
 		}
 		if t, ok := simTurnOf(resp); ok {
 			if len(sc.Agenda) > 0 {
-				t = agendaTurn(t, next, stuck)
+				t = agendaTurn(t, next, len(sc.Agenda))
 			}
 			return t, nil
 		}
@@ -149,20 +179,37 @@ YOUR AGENDA, one item per turn, in order:
 %s
 Each turn, do the item marked NOW: say it in your own words and in your speaking style (quoted words may be said nearly as written; notes in brackets are for you only, never say them). When the item is a decision (approve, not now, stop, decline), give exactly that decision.
 Two exceptions, which do not move the agenda on:
-- Sheepdog just asked you something that needs your answer (which one, yes or no, a choice): answer it, and start that line with [ANSWER].
-- Sheepdog did not answer your previous item at all, or you could not follow the answer: repeat or rephrase it, and start that line with [AGAIN]. At most twice per item; then move on.
-If sheepdog said it is checking and will tell you, you may call wait_for_sheepdog once instead of talking. The call ends by itself after the last item; do not say goodbye early.`
+- Sheepdog just asked you something that needs your answer (which one, yes or no, a choice): answer it.
+- Sheepdog did not answer your previous item at all, or you could not follow the answer: repeat or rephrase it. At most twice per item; then move on.
+
+Every turn is one tool call:
+- say: the words you speak (text, spoken words only), and what the line does (kind): "item" when it carries out agenda item(s) (items: their numbers, usually just the NOW one; list two only if one sentence really does both), "again" when it repeats or rephrases an earlier item (items: that item's number), "answer" when it answers sheepdog's question (items: empty). Declare what the line actually does, not what the agenda expected.
+- wait_for_sheepdog: stay quiet, when sheepdog said it is checking and will tell you (at most once in a row). Never put silence into words: to stay quiet, call wait_for_sheepdog.
+The call ends by itself after the last item; do not say goodbye early.`
+
+var simUserSayTool = &genai.FunctionDeclaration{
+	Name:        "say",
+	Description: "Speak one utterance to sheepdog and declare what it does in your agenda.",
+	Parameters: &genai.Schema{Type: genai.TypeObject, Properties: map[string]*genai.Schema{
+		"text":  {Type: genai.TypeString, Description: "The words you speak, nothing else."},
+		"kind":  {Type: genai.TypeString, Enum: []string{DeclItem, DeclAgain, DeclAnswer}, Description: "item: carries out agenda item(s); again: repeats or rephrases an earlier item; answer: answers sheepdog's question."},
+		"items": {Type: genai.TypeArray, Items: &genai.Schema{Type: genai.TypeInteger}, Description: "The agenda item numbers the line carries out (item) or repeats (again); empty for answer."},
+	}, Required: []string{"text", "kind", "items"}},
+}
 
 // simUserAgendaTools: an agenda call has no end_call (it ends when the
-// beats run out), only the wait.
-var simUserAgendaTools = []*genai.Tool{{FunctionDeclarations: simUserTools[0].FunctionDeclarations[1:]}}
+// beats run out): say, with its declaration, and the wait.
+var simUserAgendaTools = []*genai.Tool{{FunctionDeclarations: []*genai.FunctionDeclaration{simUserSayTool, simUserTools[0].FunctionDeclarations[1]}}}
+
+// simUserSayOnly: right after a wait, the user must talk.
+var simUserSayOnly = []*genai.Tool{{FunctionDeclarations: []*genai.FunctionDeclaration{simUserSayTool}}}
 
 // AgendaOpening is the opening turn: beat 1 when the scenario has an
 // agenda.
 func AgendaOpening(sc SimScenario) SimTurn {
 	t := SimTurn{Kind: TurnSay, Text: sc.Opening}
 	if len(sc.Agenda) > 0 {
-		t.Beat = 1
+		t.Beat, t.Decl, t.Items = 1, DeclItem, []int{1}
 	}
 	return t
 }
@@ -186,7 +233,7 @@ func agendaState(sc SimScenario, convo []SimLine) (next, stuck int, t SimTurn, d
 		return next, stuck, SimTurn{Kind: TurnEnd, Reason: "agenda done"}, true
 	}
 	if strings.TrimSpace(sc.Agenda[next-1]) == "<wait>" {
-		return next, stuck, SimTurn{Kind: TurnWait, WaitSeconds: 30, Beat: next}, true
+		return next, stuck, SimTurn{Kind: TurnWait, WaitSeconds: 30, Beat: next, Decl: DeclWait, Items: []int{next}}, true
 	}
 	return next, stuck, SimTurn{}, false
 }
@@ -228,23 +275,72 @@ func agendaList(agenda []string, next, stuck int) string {
 	return b.String()
 }
 
-// agendaTurn tags the model's turn: a line marked [ANSWER] or [AGAIN]
-// does not move on (unless stuck), any other line carries out beat next.
-func agendaTurn(t SimTurn, next, stuck int) SimTurn {
+// agendaTurn records what the simulated user declared its turn does
+// (2026-10-08: replaces "an untagged line is the next beat", which
+// shifted every later beat when a line was untagged; docs/eval/
+// analysis-coherence-2026-10-08.md). A line declared as agenda items
+// moves the agenda to the highest new one (items already done make it a
+// repeat); again and answer lines do not move it; an undeclared line is
+// recorded as such and does not move it either: nothing is assumed.
+func agendaTurn(t SimTurn, next, n int) SimTurn {
 	if t.Kind != TurnSay {
 		return t
 	}
-	for _, tag := range []string{"answer", "again"} {
-		marker := "[" + strings.ToUpper(tag) + "]"
-		if i := strings.Index(strings.ToUpper(t.Text), marker); i >= 0 {
-			t.Text = strings.TrimSpace(t.Text[:i] + t.Text[i+len(marker):])
-			if stuck < 2 {
-				t.Tag = tag
-				return t
-			}
+	var items []int
+	for _, it := range t.Items {
+		if it >= 1 && it <= n && !slices.Contains(items, it) {
+			items = append(items, it)
 		}
 	}
-	t.Beat = next
+	slices.Sort(items)
+	t.Items = items
+	switch t.Decl {
+	case DeclItem:
+		var fresh []int
+		for _, it := range items {
+			if it >= next {
+				fresh = append(fresh, it)
+			}
+		}
+		if len(fresh) == 0 {
+			t.Decl, t.Tag = DeclAgain, DeclAgain
+			return t
+		}
+		t.Items = fresh
+		t.Beat = fresh[len(fresh)-1]
+	case DeclAgain:
+		t.Tag = DeclAgain
+	case DeclAnswer:
+		t.Tag, t.Items = DeclAnswer, nil
+	default:
+		t.Decl, t.Tag, t.Items = DeclUndeclared, DeclUndeclared, nil
+	}
+	return t
+}
+
+// declMarker reads a text-only turn's declaration, for a model that
+// answers without the say tool: "[ITEM 5] …", "[ITEM 5,6] …",
+// "[AGAIN 5] …", "[ANSWER] …". A line that is nothing but a bracketed
+// note ("[waiting]", "[stays silent]") is a stage direction, not
+// speech: silence.
+var declMarker = regexp.MustCompile(`^\[(ITEM|AGAIN|ANSWER)\s*([0-9,\s]*)\]\s*`)
+
+func textTurn(text string) SimTurn {
+	if strings.HasPrefix(text, "[") && strings.HasSuffix(text, "]") && !strings.Contains(text[1:len(text)-1], "]") {
+		return SimTurn{Kind: TurnWait, WaitSeconds: 30}
+	}
+	t := SimTurn{Kind: TurnSay, Text: text}
+	m := declMarker.FindStringSubmatch(strings.ToUpper(text[:min(len(text), 40)]))
+	if m == nil {
+		return t
+	}
+	t.Text = strings.TrimSpace(text[len(m[0]):])
+	t.Decl = strings.ToLower(m[1])
+	for _, f := range strings.FieldsFunc(m[2], func(r rune) bool { return r == ',' || r == ' ' }) {
+		if v, err := strconv.Atoi(f); err == nil {
+			t.Items = append(t.Items, v)
+		}
+	}
 	return t
 }
 
@@ -294,6 +390,21 @@ func simTurnOf(resp *genai.GenerateContentResponse) (SimTurn, bool) {
 				return SimTurn{Kind: TurnEnd, Reason: reason, GoalMet: met}, true
 			case "wait_for_sheepdog":
 				return SimTurn{Kind: TurnWait, WaitSeconds: toInt(fc.Args["seconds"])}, true
+			case "say":
+				text, _ := fc.Args["text"].(string)
+				kind, _ := fc.Args["kind"].(string)
+				t := textTurn(strings.TrimSpace(text))
+				if t.Kind != TurnSay || t.Text == "" {
+					return t, t.Kind == TurnWait
+				}
+				if t.Decl == "" {
+					t.Decl = strings.ToLower(strings.TrimSpace(kind))
+					arr, _ := fc.Args["items"].([]any)
+					for _, v := range arr {
+						t.Items = append(t.Items, toInt(v))
+					}
+				}
+				return t, true
 			}
 		}
 	}
@@ -309,7 +420,11 @@ func simTurnOf(resp *genai.GenerateContentResponse) (SimTurn, bool) {
 	if text == "" {
 		return SimTurn{}, false
 	}
-	return SimTurn{Kind: TurnSay, Text: text}, true
+	t := textTurn(text)
+	if t.Kind == TurnSay && t.Text == "" {
+		return SimTurn{}, false
+	}
+	return t, true
 }
 
 // ScriptedSimUser says the scenario's Script lines in order, one per

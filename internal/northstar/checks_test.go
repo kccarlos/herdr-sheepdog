@@ -248,3 +248,35 @@ func TestSummaryOnlyRunsSayWhatIsMissing(t *testing.T) {
 		t.Errorf("markdown:\n%s", sb.String())
 	}
 }
+
+// The claim part from the segment judge: any no fails, n/a everywhere
+// (no claim) leaves it out, and neither touches Done.
+func TestClaimsJudge(t *testing.T) {
+	r := approveRun()
+	r.ExpectsActions = true
+	seg := func(a string) SegmentVerdicts {
+		return SegmentVerdicts{Kind: "request", Verdicts: []Verdict{{Name: SegmentClaimItem, Answer: a}}}
+	}
+	r.Segments = []SegmentVerdicts{seg("na"), seg("na")}
+	if o := Evaluate(r); o.ClaimsJudge != nil {
+		t.Fatalf("no claim: %v", *o.ClaimsJudge)
+	}
+	r.Segments = []SegmentVerdicts{seg("yes"), seg("na")}
+	if o := Evaluate(r); o.ClaimsJudge == nil || !*o.ClaimsJudge {
+		t.Fatal("backed claim")
+	}
+	r.Segments = []SegmentVerdicts{seg("yes"), seg("no")}
+	if o := Evaluate(r); o.ClaimsJudge == nil || *o.ClaimsJudge || o.Done == nil || !*o.Done {
+		t.Fatalf("unbacked claim: claims %v done %v", o.ClaimsJudge, o.Done)
+	}
+	b := Summarize("1", []Run{r})
+	if b.Segment == nil || b.Segment.NA != nil {
+		t.Fatalf("segment block %+v", b.Segment)
+	}
+	r.NotExercised = []string{"coherence_1"}
+	r.Segments = append(r.Segments, seg("na"))
+	b = Summarize("1", []Run{r})
+	if b.Segment.NotExercised["coherence_*"] != 1 || b.Segment.NA[SegmentClaimItem] != 1 {
+		t.Fatalf("not exercised / n/a: %+v %+v", b.Segment.NotExercised, b.Segment.NA)
+	}
+}
