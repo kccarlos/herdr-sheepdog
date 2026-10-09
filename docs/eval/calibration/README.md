@@ -194,3 +194,13 @@ mostly strict, as one call per pair did (8–12 strict vs 5–6 lenient of
 126). Run d's
 first try lost one 8-item answer that left ids out; the judge now asks
 again once when an id is missing.
+
+## Said vs done segment item (2026-10-08)
+
+`2026-10-08-said-vs-done/`: the four real said-vs-done failures from the
+2026-10-05 results as positive controls (`items.json`, `labels.json`, all
+`fail`), and the judge's verdicts under three wordings (`judge-v0.json` 3/4,
+`judge-v1.json` and `judge-v2.json` 4/4). The negative controls (the 31
+phrase-list artefacts) are judged in situ in the rejudged 2026-10-07 results.
+Report: [../measurement-fixes-2026-10-08.md](../measurement-fixes-2026-10-08.md).
+

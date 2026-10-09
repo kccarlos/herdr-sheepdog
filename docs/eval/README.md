@@ -9,7 +9,8 @@ workday sessions, north star, `bench rejudge`, `northstar --vs`). The
 default gate today: tier 1 workday ×5 (35 runs), DeepSeek `deepseek-flash`
 orchestrator and simulated user, chattiness `chatty`, Claude Sonnet segment judge,
 compared on **segment Understood** with `sheepdog bench northstar --vs`;
-merge only without a Safe regression.
+merge only without a Safe regression. Done is the required actions only;
+its claim part is reported beside it, not gated (2026-10-08).
 
 ## Standing lessons
 
@@ -59,6 +60,7 @@ merge only without a Safe regression.
 | 10-07 | Normal vs chatty filtering | Do evals at `normal` match the user's real `chatty` use? | A0 step 4 (`normal`) vs A0 chatty (cloud), tier 1 workday ×5 | missed news 34 → 19 % (−16 pp, CI −23 to −8); segment Understood +3 pp (n.s.); binaries differ by a day | default chattiness `chatty` (#178); evals at `chatty` | [harness-iteration-2026-10-07.md](harness-iteration-2026-10-07.md) · [northstar-a0-normal-vs-chatty.md](../bench/results/2026-10-07-chatty/northstar-a0-normal-vs-chatty.md) |
 | 10-07 | Haiku 5.5 as judge | Can Haiku replace Sonnet as judge? | 126 truth pairs, two Haiku passes + Sonnet control | kappa 0.62 / 0.69 (length_fits 0.44 / 0.74) vs Sonnet 0.71 | stay on Sonnet (#183) | [haiku-judge-2026-10-07.md](haiku-judge-2026-10-07.md) · [haiku-2026-10-07/](haiku-2026-10-07/) |
 | 10-07 | Roles arms r / rl (cloud) | Do unified roles cost understanding without the length change (r); does a gentle length rule help (rl)? | Claude Code cloud sessions, tier 1 workday ×5, `chatty`, Sonnet segment judge | A0 92 %, r 89 % (−3 pp, CI −8 to +1), rl 88 % (−4 pp, CI −9 to 0); missed news ~18–19 % all | r merged for the single framing (#185); rl dropped | [roles-arms-2026-10-07.md](roles-arms-2026-10-07.md) · [../bench/results/2026-10-07-chatty/](../bench/results/2026-10-07-chatty/) |
+| 10-08 | Measurement fixes: said vs done, agenda tags | Does Done measure actions, and do coherence items score the probe that happened? | Done split (actions vs claims, F2); Sonnet `said_vs_done` segment item with the action list (F1); simulated user tags each line's agenda item, silence sends nothing; rejudge of 10-07 chatty a0 / r (1,030 calls, beat items located by the judge in old records) | Done 22 → 35/35 (a0), 24 → 35/35 (r); claim part (judge) 34/35 each after recheck, 2 real misstatements the phrase list missed; controls 4/4 positives fail, 31/31 artefacts pass; coherence 80 → 98 % (a0), 86 → 94 % (r), 5 not exercised | claim part kept out of the Done gate until a full v2 pass and more positives; re-baseline with tags next | [measurement-fixes-2026-10-08.md](measurement-fixes-2026-10-08.md) · [../bench/results/2026-10-07-chatty-measure-2026-10-08/](../bench/results/2026-10-07-chatty-measure-2026-10-08/) |
 
 Older material (bench issues and dives before 2026-10-03) is in
 [../history/](../history/).
