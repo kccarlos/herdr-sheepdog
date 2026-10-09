@@ -37,8 +37,10 @@ func CallActions(acts []SimLine, evs []northstar.Event) []CallAction {
 	if len(evs) > 0 {
 		f := northstar.ReadFacts(evs)
 		for _, a := range f.Sends {
-			if a.Outcome != northstar.OutcomeOK {
-				nas = append(nas, a) // the record lists only what went
+			// The record lists what went; the log adds what failed (or
+			// everything, for a record without actions).
+			if len(acts) == 0 || a.Outcome != northstar.OutcomeOK {
+				nas = append(nas, a)
 			}
 		}
 		nas = append(nas, f.Actions...)
