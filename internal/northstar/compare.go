@@ -60,6 +60,8 @@ func Compare(a, b []Run) *Comparison {
 	}
 	rate("Understood", ba.Understood, bb.Understood)
 	rate("Done", ba.Done, bb.Done)
+	rate("Done, claim part (judge)", ba.ClaimsJudge, bb.ClaimsJudge)
+	rate("Done, claim part (phrases)", ba.ClaimsPhrases, bb.ClaimsPhrases)
 	rate("Low effort", ba.LowEffort, bb.LowEffort)
 	rate("Safe", ba.Safe, bb.Safe)
 	if ba.Segment != nil || bb.Segment != nil {

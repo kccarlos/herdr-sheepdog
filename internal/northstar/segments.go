@@ -177,6 +177,31 @@ func segmentUnderstood(s SegmentVerdicts) *bool {
 	return boolp(ok && ans == "yes")
 }
 
+// SegmentClaimItem is the segment judge's said-vs-done item.
+const SegmentClaimItem = "said_vs_done"
+
+// segmentClaims is a run's claim part from the segment judge: false when
+// any segment answered said_vs_done no, true when at least one answered
+// yes and none no, nil when none was asked or every one was n/a (no claim
+// in the segment).
+func segmentClaims(segs []SegmentVerdicts) *bool {
+	var out *bool
+	for _, s := range segs {
+		for _, v := range s.Verdicts {
+			if v.Name != SegmentClaimItem {
+				continue
+			}
+			switch v.Answer {
+			case "no":
+				return boolp(false)
+			case "yes":
+				out = boolp(true)
+			}
+		}
+	}
+	return out
+}
+
 // SummarizeSegments computes the segment block of runs (nil when no
 // graded run has segment verdicts).
 func SummarizeSegments(runs []Run) *SegmentBlock {

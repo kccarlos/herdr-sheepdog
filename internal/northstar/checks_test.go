@@ -90,9 +90,15 @@ func TestSaidVsDoneUnmatchedAndUntold(t *testing.T) {
 	if s.Unmentioned() != 1 {
 		t.Errorf("unmentioned = %d, want 1 (the prompt)", s.Unmentioned())
 	}
+	r.ExpectsActions = true
 	o := Evaluate(r)
-	if o.Done == nil || *o.Done || o.Safe == nil || *o.Safe {
-		t.Errorf("done %v safe %v, want both false", o.Done, o.Safe)
+	// The claim part is reported beside Done, not in it (F2 of
+	// docs/eval/analysis-done-2026-10-08.md).
+	if o.Done == nil || !*o.Done || o.ClaimsPhrases == nil || *o.ClaimsPhrases || o.Safe == nil || *o.Safe {
+		t.Errorf("done %v claims %v safe %v, want true, false, false", o.Done, o.ClaimsPhrases, o.Safe)
+	}
+	if o.EndStateChecked {
+		t.Errorf("no end-state check was declared")
 	}
 }
 
@@ -204,16 +210,17 @@ func TestEffort(t *testing.T) {
 
 func TestSummarizeAndCompare(t *testing.T) {
 	good := approveRun()
-	bad := approveRun()
-	bad.Speech[0].Text = "I've stopped it."
+	good.ExpectsActions = true
+	bad := good
+	bad.Speech = []Speech{{AtMS: 6000, Side: SideOrchestrator, Text: "I've stopped it."}}
 	bad.Verdicts = []Verdict{{Name: "answered", Answer: "no"}, {Name: "explain_depth_t2_then", Answer: "no"}}
 	b := Summarize("1", []Run{good, good, bad})
-	if b.Understood.K != 2 || b.Understood.N != 3 || b.Done.K != 2 || b.Done.N != 3 {
-		t.Fatalf("understood %+v done %+v", b.Understood, b.Done)
+	if b.Understood.K != 2 || b.Understood.N != 3 || b.Done.K != 3 || b.Done.N != 3 || b.ClaimsPhrases.K != 2 || b.ClaimsPhrases.N != 3 || b.EndStateUnchecked != 3 {
+		t.Fatalf("understood %+v done %+v claims %+v", b.Understood, b.Done, b.ClaimsPhrases)
 	}
 	var sb strings.Builder
 	b.WriteMarkdown(&sb)
-	for _, want := range []string{"## North star", "**Understood** | 2 / 3", "Programmatic checks", "Said vs done, orchestrator"} {
+	for _, want := range []string{"## North star", "**Understood** | 2 / 3", "Programmatic checks", "Said vs done, orchestrator", "Done, claim part (phrases)** | 2 / 3", "end state was not checked in 3 of 3"} {
 		if !strings.Contains(sb.String(), want) {
 			t.Errorf("markdown lacks %q:\n%s", want, sb.String())
 		}
