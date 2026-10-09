@@ -1,0 +1,24 @@
+[1/5] workday-scale-ten r1: error (error, error) ≈ $0.0390, total ≈ $0.039
+[2/5] workday-scale-ten r4: fail (end_call, timeout) ≈ $0.1247, total ≈ $0.164
+[3/5] workday-scale-ten r3: fail (end_call, brain_fallback) ≈ $0.1353, total ≈ $0.299
+[4/5] workday-scale-ten r2: fail (end_call, timeout) ≈ $0.1253, total ≈ $0.424
+[5/5] workday-scale-ten r5: fail (end_call, timeout) ≈ $0.1298, total ≈ $0.554
+  error   workday-scale-ten r1  error      3 turns   58.9s  error                  ≈ $0.0390
+          error: simulated user: deepseek: HTTP 502: upstream request failed
+  fail    workday-scale-ten r2  end_call  12 turns   97.4s  timeout                ≈ $0.1253
+          timeout: 1 brain turn(s) timed out and fell back
+  fail    workday-scale-ten r3  end_call  13 turns   92.4s  brain_fallback         ≈ $0.1353
+          brain_fallback: yielded: brain: yielded to a CEO turn
+  fail    workday-scale-ten r4  end_call  12 turns   91.3s  timeout                ≈ $0.1247
+          brain_fallback: yielded: brain: yielded to a CEO turn
+          timeout: 2 brain turn(s) timed out and fell back
+  fail    workday-scale-ten r5  end_call  12 turns   99.0s  timeout                ≈ $0.1298
+          timeout: 1 brain turn(s) timed out and fell back
+-- 5 runs, spend ≈ $0.5541 (estimate at list prices) --
+reports: docs/bench/results/2026-10-08-rebaseline/parts/workday-scale-ten/report.json, docs/bench/results/2026-10-08-rebaseline/parts/workday-scale-ten/report.md
+== eval sim, repeat 5 ==
+  workday-scale-ten  runs  5  pass  0  fail  4  err  1  not_run  0  rate    0%  error ×1, timeout ×3, brain_fallback ×1
+  TOTAL              runs  5  pass  0  fail  4  err  1  not_run  0  rate    0%  error ×1, timeout ×3, brain_fallback ×1
+-- spend brain    deepseek-flash           calls   140  in   1668430  out    28863  reasoning    14398  ≈ $0.5265 --
+-- spend simuser  deepseek-flash           calls    48  in     90151  out      882  reasoning        0  ≈ $0.0276 --
+-- spend total ≈ $0.5541 (estimate at list prices) --
