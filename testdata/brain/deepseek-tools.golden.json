@@ -67,12 +67,20 @@
   },
   {
     "function": {
-      "description": "Search the record: last results, last tasks, last questions, notes, promises and earlier transcript lines matching the query.",
+      "description": "Search the record: last results, last tasks, last questions, notes, promises and earlier transcript lines (the user's own requests among them) matching the query, in any language. from best (the default): the best matches, newest first. from start: the earliest matching lines in the order they happened; with an empty query, the first lines of the record.",
       "name": "recall",
       "parameters": {
         "properties": {
+          "from": {
+            "description": "best (default) or start",
+            "enum": [
+              "best",
+              "start"
+            ],
+            "type": "string"
+          },
           "query": {
-            "description": "words to look for; empty for the most recent record",
+            "description": "words to look for; empty for the most recent record (or, from start, the first)",
             "type": "string"
           }
         },

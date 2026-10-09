@@ -223,6 +223,9 @@ type CompactionInfo struct {
 	Dropped      int       `json:"dropped"`
 	SummarySeq   int       `json:"summary_seq"`
 	At           time.Time `json:"at"`
+	// CoversTo is the time of the last message the summary replaced:
+	// up to then the window holds only the summary.
+	CoversTo time.Time `json:"covers_to"`
 }
 
 // New builds a Brain over model, registered as provider cfg.Provider;

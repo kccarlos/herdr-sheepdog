@@ -83,6 +83,10 @@ type Message struct {
 	Content string      `json:"content,omitempty"`
 	// Agent is the alias the message is about, when one.
 	Agent string `json:"agent,omitempty"`
+	// Words is the user's own words, verbatim, on the KindRequest of a
+	// user utterance (Content wraps them in the request's framing);
+	// recall returns them.
+	Words string `json:"words,omitempty"`
 	// Turn is the orchestrator turn that produced the message; 0 for ingested
 	// context.
 	Turn     int       `json:"turn,omitempty"`
@@ -245,6 +249,20 @@ func (t *Transcript) Messages() []Message {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return append([]Message(nil), t.msgs...)
+}
+
+// Started returns the time of the first message (zero when empty):
+// where this conversation's record begins. A nil transcript is empty.
+func (t *Transcript) Started() time.Time {
+	if t == nil {
+		return time.Time{}
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if len(t.msgs) == 0 {
+		return time.Time{}
+	}
+	return t.msgs[0].TS
 }
 
 // Since returns a copy of every message with Seq > seq, oldest first

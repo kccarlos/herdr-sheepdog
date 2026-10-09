@@ -71,7 +71,7 @@ func busyFlock() ([]AgentInfo, []string, []PromiseInfo, []InvestigationInfo) {
 // (docs/iteration-2.md WP5: the captures had a 6 k-character ledger).
 func TestStateBlockBudgetBusy(t *testing.T) {
 	agents, notes, promises, invs := busyFlock()
-	body := joinSections(dynamicSections(agents, notes, promises, invs, "", speedNow))
+	body := joinSections(dynamicSections(agents, notes, promises, invs, "", speedNow, ""))
 	t.Logf("busy flock: %d chars\n%s", len(body), body)
 	if len(body) > stateBudgetChars {
 		t.Errorf("dynamic sections = %d chars, want <= %d", len(body), stateBudgetChars)
@@ -86,8 +86,8 @@ func TestStateBlockBudgetBusy(t *testing.T) {
 // is still there, clipped.
 func TestStateBlockBudget(t *testing.T) {
 	agents, notes, promises, invs := fullFlock()
-	state := stateText(dynamicSections(agents, notes, promises, invs, "", speedNow))
-	body := joinSections(dynamicSections(agents, notes, promises, invs, "", speedNow))
+	state := stateText(dynamicSections(agents, notes, promises, invs, "", speedNow, ""))
+	body := joinSections(dynamicSections(agents, notes, promises, invs, "", speedNow, ""))
 	t.Logf("state block: %d chars (sections %d, header %d)\n%s", len(state), len(body), len(StateHeader), state)
 	if len(body) > 2600 {
 		t.Errorf("dynamic sections = %d chars, want <= ~2.5 k (2.6 k worst case)", len(body))
@@ -119,7 +119,7 @@ func TestStateBlockBudget(t *testing.T) {
 func TestAnnouncePromptBudget(t *testing.T) {
 	agents, notes, promises, invs := fullFlock()
 	static := joinSections(append(stableSections(nil), userSection(nil, mergeUserVars(agents, nil))))
-	state := stateText(dynamicSections(agents, notes, promises, invs, "", speedNow))
+	state := stateText(dynamicSections(agents, notes, promises, invs, "", speedNow, ""))
 	t.Logf("system %d chars + state %d chars = %d chars (~%d tokens)", len(static), len(state), len(static)+len(state), EstimateTokens(static+state))
 	if len(state) > 3000 {
 		t.Errorf("state = %d chars", len(state))
