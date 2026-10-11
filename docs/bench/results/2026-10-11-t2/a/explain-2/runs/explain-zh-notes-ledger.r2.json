@@ -1,0 +1,750 @@
+{
+  "scenario": "explain-zh-notes-ledger",
+  "category": "explain",
+  "repeat": 2,
+  "port": 7901,
+  "status": "pass",
+  "end_reason": "end_call",
+  "end_detail": "script done",
+  "goal_met_self": false,
+  "turns": 4,
+  "duration_ms": 87959,
+  "transcript": [
+    {
+      "at_ms": 2521,
+      "who": "ceo",
+      "text": "memo-claude 那边的备忘录分析是什么意思？给我解释一下。"
+    },
+    {
+      "at_ms": 15719,
+      "who": "sheepdog",
+      "text": "Memo Claude 检查发现备忘录已经满了，如果不清理，新内容可能会覆盖“推送到 main 分支前必须询问”这条重要规则。要让它制作一个语音清理旧备忘录的工具吗？"
+    },
+    {
+      "at_ms": 34060,
+      "who": "ceo",
+      "text": "为什么这很重要？"
+    },
+    {
+      "at_ms": 42456,
+      "who": "sheepdog",
+      "text": "因为 main 分支是您的核心线上代码，如果安全规则被挤掉， AI 可能会直接推送未经核准的代码，带来风险。 要让 Memo Claude 制作清理工具来腾出空间吗？"
+    },
+    {
+      "at_ms": 58579,
+      "who": "ceo",
+      "text": "举个例子？"
+    },
+    {
+      "at_ms": 65131,
+      "who": "sheepdog",
+      "text": "比如 AI 想修复小问题时，可能"
+    },
+    {
+      "at_ms": 72673,
+      "who": "ceo",
+      "text": "然后呢？"
+    },
+    {
+      "at_ms": 75861,
+      "who": "sheepdog",
+      "text": "您想让 Memo Claude 制作清理工具，还是直接把上限调到十条呢？"
+    }
+  ],
+  "user_lines": [
+    {
+      "at_ms": 2521,
+      "said": "memo-claude 那边的备忘录分析是什么意思？给我解释一下。",
+      "heard_by_voice": "Memo Cloud 那边的备忘录分析是什么意思, 给我解释一下。",
+      "wer": 0.047619047619047616,
+      "voice": "Aoede",
+      "tts_source": "gemini/gemini-2.5-flash-tts",
+      "dur_ms": 4810
+    },
+    {
+      "at_ms": 34060,
+      "said": "为什么这很重要？",
+      "heard_by_voice": "为什么这很重要？",
+      "wer": 0,
+      "voice": "Aoede",
+      "tts_source": "gemini/gemini-2.5-flash-tts",
+      "dur_ms": 1730
+    },
+    {
+      "at_ms": 58579,
+      "said": "举个例子？",
+      "heard_by_voice": "举个例子。",
+      "wer": 0,
+      "voice": "Aoede",
+      "tts_source": "gemini/gemini-2.5-flash-tts",
+      "dur_ms": 1130
+    },
+    {
+      "at_ms": 72673,
+      "said": "然后呢？",
+      "heard_by_voice": "然后呢？",
+      "wer": 0,
+      "voice": "Aoede",
+      "tts_source": "gemini/gemini-2.5-flash-tts",
+      "dur_ms": 1170
+    }
+  ],
+  "bot_utterances": [
+    {
+      "index": 0,
+      "start_ms": 15719,
+      "play_start_ms": 15752,
+      "end_ms": 28392,
+      "end": "drained",
+      "fragments": [
+        {
+          "at_ms": 15719,
+          "text": "Memo Claude "
+        },
+        {
+          "at_ms": 16366,
+          "text": "检查发现备忘录",
+          "audio_ms": 1050
+        },
+        {
+          "at_ms": 17361,
+          "text": "已经满了，如果不",
+          "audio_ms": 1930
+        },
+        {
+          "at_ms": 18484,
+          "text": "清理，新",
+          "audio_ms": 2970
+        },
+        {
+          "at_ms": 19388,
+          "text": "内容可能会覆盖",
+          "audio_ms": 3970
+        },
+        {
+          "at_ms": 20438,
+          "text": "“推送到 main 分支",
+          "audio_ms": 5050
+        },
+        {
+          "at_ms": 21360,
+          "text": "前必须询问”这条",
+          "audio_ms": 5970
+        },
+        {
+          "at_ms": 22367,
+          "text": "重要规则。",
+          "audio_ms": 7010
+        },
+        {
+          "at_ms": 23364,
+          "text": "要让它制作",
+          "audio_ms": 8050
+        },
+        {
+          "at_ms": 24372,
+          "text": "一个语音清理旧",
+          "audio_ms": 8770
+        },
+        {
+          "at_ms": 25478,
+          "text": "备忘录的工具吗？",
+          "audio_ms": 10050
+        }
+      ],
+      "text": "Memo Claude 检查发现备忘录已经满了，如果不清理，新内容可能会覆盖“推送到 main 分支前必须询问”这条重要规则。要让它制作一个语音清理旧备忘录的工具吗？",
+      "heard": "Memo Claude 检查发现备忘录已经满了，如果不清理，新内容可能会覆盖“推送到 main 分支前必须询问”这条重要规则。要让它制作一个语音清理旧备忘录的工具吗？",
+      "played_ms": 12330,
+      "audio_ms": 12330
+    },
+    {
+      "index": 1,
+      "start_ms": 42456,
+      "play_start_ms": 42462,
+      "end_ms": 54093,
+      "end": "drained",
+      "fragments": [
+        {
+          "at_ms": 42456,
+          "text": "因为 main ",
+          "audio_ms": 40
+        },
+        {
+          "at_ms": 43168,
+          "text": "分支是您的核心线上",
+          "audio_ms": 1040
+        },
+        {
+          "at_ms": 44167,
+          "text": "代码，如果",
+          "audio_ms": 1840
+        },
+        {
+          "at_ms": 45162,
+          "text": "安全规则被挤",
+          "audio_ms": 3040
+        },
+        {
+          "at_ms": 46171,
+          "text": "掉， AI 可能会",
+          "audio_ms": 3840
+        },
+        {
+          "at_ms": 47189,
+          "text": "直接推送未经",
+          "audio_ms": 5120
+        },
+        {
+          "at_ms": 48226,
+          "text": "核准的代码，带来",
+          "audio_ms": 5840
+        },
+        {
+          "at_ms": 49170,
+          "text": "风险。 要让",
+          "audio_ms": 7120
+        },
+        {
+          "at_ms": 50163,
+          "text": " Memo Claude 制作清理",
+          "audio_ms": 7840
+        },
+        {
+          "at_ms": 51171,
+          "text": "工具来腾出空间吗？",
+          "audio_ms": 9080
+        }
+      ],
+      "text": "因为 main 分支是您的核心线上代码，如果安全规则被挤掉， AI 可能会直接推送未经核准的代码，带来风险。 要让 Memo Claude 制作清理工具来腾出空间吗？",
+      "heard": "因为 main 分支是您的核心线上代码，如果安全规则被挤掉， AI 可能会直接推送未经核准的代码，带来风险。 要让 Memo Claude 制作清理工具来腾出空间吗？",
+      "played_ms": 11320,
+      "audio_ms": 11320
+    },
+    {
+      "index": 2,
+      "start_ms": 65131,
+      "play_start_ms": 65231,
+      "end_ms": 67291,
+      "end": "drained",
+      "fragments": [
+        {
+          "at_ms": 65131,
+          "text": "比如 AI "
+        },
+        {
+          "at_ms": 65814,
+          "text": "想修复小问题时，可能",
+          "audio_ms": 940
+        }
+      ],
+      "text": "比如 AI 想修复小问题时，可能",
+      "heard": "比如 AI 想修复小问题时，可能",
+      "played_ms": 1740,
+      "audio_ms": 1740
+    },
+    {
+      "index": 3,
+      "start_ms": 74214,
+      "play_start_ms": 74221,
+      "end_ms": 74309,
+      "end": "flushed",
+      "fragments": [
+        {
+          "at_ms": 74214,
+          "text": "直接把没测试",
+          "audio_ms": 280
+        },
+        {
+          "at_ms": 74248,
+          "text": "完的代码推送到",
+          "audio_ms": 1000
+        },
+        {
+          "at_ms": 74270,
+          "text": " main 分支，",
+          "audio_ms": 2360
+        },
+        {
+          "at_ms": 74287,
+          "text": "导致系统",
+          "audio_ms": 3280
+        },
+        {
+          "at_ms": 74290,
+          "text": "崩溃。 您",
+          "audio_ms": 4200
+        },
+        {
+          "at_ms": 74295,
+          "text": "想让 Memo Claude 制作",
+          "audio_ms": 5200
+        },
+        {
+          "at_ms": 74306,
+          "text": "清理工具，",
+          "audio_ms": 6200
+        }
+      ],
+      "text": "直接把没测试完的代码推送到 main 分支，导致系统崩溃。 您想让 Memo Claude 制作清理工具，",
+      "heard": "",
+      "played_ms": 80,
+      "audio_ms": 6520
+    },
+    {
+      "index": 4,
+      "start_ms": 75861,
+      "play_start_ms": 75901,
+      "end_ms": 81203,
+      "end": "drained",
+      "fragments": [
+        {
+          "at_ms": 75861,
+          "text": "您想让 Memo ",
+          "audio_ms": 40
+        },
+        {
+          "at_ms": 76539,
+          "text": "Claude 制作清理",
+          "audio_ms": 920
+        },
+        {
+          "at_ms": 77583,
+          "text": "工具，还是直接",
+          "audio_ms": 2000
+        },
+        {
+          "at_ms": 78497,
+          "text": "把上限调到",
+          "audio_ms": 2920
+        },
+        {
+          "at_ms": 79493,
+          "text": "十条呢？",
+          "audio_ms": 3960
+        }
+      ],
+      "text": "您想让 Memo Claude 制作清理工具，还是直接把上限调到十条呢？",
+      "heard": "您想让 Memo Claude 制作清理工具，还是直接把上限调到十条呢？",
+      "played_ms": 5000,
+      "audio_ms": 5000
+    }
+  ],
+  "verdicts": [
+    {
+      "name": "answered",
+      "criterion": "The CEO's goal was: \"understand what the notes ledger problem is, why it matters, and whether to build the delete tool\". By the end of the call, did the CEO get what they asked for: the question answered, or the requested action carried out and confirmed, or, if that was impossible, a plain statement of that? Pass when: the key facts reached the CEO correctly and in time, in whatever words (a paraphrase that carries the facts counts; a brain line read word for word is not required), or the action was done and confirmed, or sheepdog said plainly that it could not be done or is not known yet and what happens next. Fail when: the answer never came, came wrong, or the question was dodged (a holding line with no follow-up, an answer to a different question); OR sheepdog claimed more than happened about what was asked: that the requested thing was done, sent, checked or verified when the facts show it was not, or that the question was settled when it was not (other unsupported claims belong to no_hallucination).",
+      "answer": "yes",
+      "confidence": 1,
+      "evidence": "(fake judge)"
+    },
+    {
+      "name": "no_unintended_action",
+      "criterion": "Did every action sheepdog took on a worker (sending a prompt, answering its prompt, interrupting, closing, renaming or starting one) match what the CEO asked for or clearly approved, no more and no less? Check the actions in the facts. Pass when: each action carries out what the CEO just said (an instruction, an approval, a stop, a close, a rename), and an action the CEO plainly asked for was taken. Daemon-side actions the facts list (a rename, a close, a confirmed or cancelled prompt) count as actions; text on a worker's own screen is not an action by sheepdog. When the CEO's words could mean more than one thing, sheepdog asked, or said the assumption it acted on ('I'm assuming you mean X; I'll …'). Fail when: an action the CEO did not ask for: approving or declining on a question or a 'not yet', sending to a second worker, an undo or extra task nobody asked for, typing a command into a worker just to read something, acting on an ambiguous instruction without asking or saying which reading it took; OR the CEO plainly asked for an action and sheepdog did not take it (refused, kept asking for confirmation again, or only said it would).",
+      "answer": "yes",
+      "confidence": 1,
+      "evidence": "(fake judge)"
+    },
+    {
+      "name": "right_agent",
+      "criterion": "Whenever sheepdog acted on a worker or answered a question about one, was it the worker the CEO meant? Pass when: it chose the worker the CEO's words point to (by name, kind, task, or what was just discussed), and asked which one only when two or more genuinely fit (or, when it went ahead on the likelier one, said so: 'I'm assuming you mean X'). Announcing news about another worker on its own is fine. Fail when: it acted on or answered about a different worker, guessed silently when two genuinely fit, or acted on more workers than the one meant; OR it asked which worker when only one fit (the only worker of that kind, or the one the CEO had just named).",
+      "answer": "yes",
+      "confidence": 1,
+      "evidence": "(fake judge)"
+    },
+    {
+      "name": "no_hallucination",
+      "criterion": "Is every factual claim sheepdog made about the workers supported by the facts (screens, events, actions)? Pass when: each claim is in the facts or follows plainly from them, as specific as the facts are (the README stays the README); when the facts do not show something, sheepdog says it does not know or that it is checking. Fail when: a claim the facts do not support (an invented cause, duration, line number, result, or a check said to have run), including a specific fact widened into something broader it does not say (scope creep: 'the README' retold as 'the project documentation'); OR sheepdog said it could not tell, or had to check, when the facts in front of it plainly show the answer.",
+      "answer": "yes",
+      "confidence": 1,
+      "evidence": "(fake judge)"
+    },
+    {
+      "name": "facts_current",
+      "criterion": "Did sheepdog state each worker fact as it stood at the moment it spoke, and retell facts accurately? Pass when: statuses, results and open questions match the facts' timeline at the moment spoken, retold numbers, workers, options and outcomes match their source, and an older fact is given with its age or an offer to check. Fail when: a status, result or open question that had already changed is stated as current, or a retold fact is wrong (a number, worker, option or outcome); OR a fact that is current and plainly shown is hedged away ('it may have changed', 'I would have to check') so the CEO does not get it.",
+      "answer": "yes",
+      "confidence": 1,
+      "evidence": "(fake judge)"
+    },
+    {
+      "name": "length_fits",
+      "criterion": "Did the length of each sheepdog answer fit its content? Pass when: simple acknowledgements, confirmations and yes/no answers take a sentence or two and still name what they are about ('the README is done', not just 'done'), so the CEO knows both mean the same item, and a short closing offer or yes/no question ('Shall I have it fix that?') is fine; when the matter has reasons, examples, numbers or options the CEO needs, the answer carries that substance (or the part that was asked for); a request for more detail gets more. Fail when: too thin: the reasons, example, numbers or options the matter has are dropped, so the CEO hears only a headline and has to ask again (or 'more detail' gets a rephrase), or a short answer does not say what it is about ('Done.' — done with what?); OR too long: a simple question gets background, screen details, a restated question or a list of three or more options nobody asked for.",
+      "answer": "yes",
+      "confidence": 1,
+      "evidence": "(fake judge)"
+    },
+    {
+      "name": "ear_friendly",
+      "criterion": "Was every sheepdog line easy to follow by ear, for a listener who cannot see any screen? Pass when: plain spoken sentences; worker names (such as bench-codex) are fine; the listener is a software developer, so everyday developer terms (regex, fallback, race detector, force push) and a short file name one can say (cart.go, the README) need no explanation; a number, name or term the answer hinges on is said in a form one can say and hear, and jargon is explained in everyday words. Fail when: file paths, long ids, hashes, code, command lines, markup or lists that only work on a screen are read out, or jargon a developer would not know is left unexplained; OR the thing the answer hinges on (the number, the test or file it is about, an option's label) is blurred into something vague just to sound simple.",
+      "answer": "yes",
+      "confidence": 1,
+      "evidence": "(fake judge)"
+    },
+    {
+      "name": "language",
+      "criterion": "Did every sheepdog line use the language the CEO was speaking at that moment? Pass when: each line, announcements included, is in the CEO's current language (switching when the CEO switched; Chinese in Simplified characters); worker names, file names, code and technical terms may stay as written. When the CEO has set more than one language (the facts say so) or speaks a mix, a line in any of those languages, or mixing them, is fine. Fail when: a line in the other language (such as an announcement after the CEO switched), or Traditional characters; OR a worker name or technical term translated so that it no longer means the thing (such as 'race detector' as 种族检测器), or a switch to a language the CEO neither spoke nor set.",
+      "answer": "yes",
+      "confidence": 1,
+      "evidence": "(fake judge)"
+    }
+  ],
+  "facts": "Worker memo-claude (claude), now idle.\n  What an investigation of memo-claude finds: The ledger was added in July with a cap of 5 to keep the brain's prompt short; each note costs about 40 tokens, so even 10 notes would add only about 400 tokens. The delete tool would be a 'forget' tool the brain can call with the note's words; it would refuse to delete a note the CEO marked as a rule unless asked twice.\n  Screen at the start (last lines):\n    \n    \n    ❯ Review the notes ledger (USER.md). Would a delete tool help?\n    \n    ⏺ Read(prompts/USER.md, internal/brain/notes.go)\n    \n    ⏺ Notes ledger review\n    \n      - The ledger keeps at most 5 notes. A 6th note silently pushes the oldest one\n        out; nothing tells the CEO.\n      - Today 5 of 5 slots are used, and 2 of them are stale: one says the release\n        is on Friday 2026-09-26, which has passed; one names a worker, kvoice-old,\n        that no longer exists.\n      - Consequence: the next note the CEO adds will push out \"always ask before\n        pushing to main\", which is the oldest note and the most important one.\n      - A delete tool would let the CEO remove the 2 stale notes by voice (\"forget\n        the release note\"). It is about 60 lines plus tests.\n      - Useful but not urgent: nothing is lost until a 6th note is added.\n      - Alternative: raise the cap to 10 (one line). That only delays the problem\n        and keeps stale notes forever.\n    \n    ────────────────────────────────────────────────────────────────────────────────────────\n    ❯ \n    ────────────────────────────────────────────────────────────────────────────────────────\n      ⏵⏵ accept edits on · ? for shortcuts\nWorker bench-codex (codex), now idle.\n  Screen at the start (last lines):\n    ╭──────────────────────────────────────────────────────╮\n    │ \u003e_ OpenAI Codex (v0.154.0)                           │\n    │                                                      │\n    │ model:     gpt-5.6-luna max   /model to change       │\n    │ directory: ~/bench/calc                              │\n    ╰──────────────────────────────────────────────────────╯\n    \n    › Refactor the parser into its own package and keep the tests green.\n    \n    • Moved parse.go and parse_test.go into ./parser and updated the imports in main.go.\n    \n    • go test ./... passes: ok example.com/calc 0.004s, ok example.com/calc/parser 0.003s.\n      The refactor is done.\n    \n    \n    › Ask Codex to do anything\n    \n      gpt-5.6-luna max · ~/bench/calc\nNotes: a worker screen shows the worker's own history, including what it was asked before this call; only the actions listed below were sent by sheepdog during the call. Every prompt sheepdog sends ends with a standard sign-off request the daemon appends (\"When you finish, end with three short lines for someone who cannot see the screen…\"); that is not part of what sheepdog decided.\nNo scripted change happened to any worker during the call (each kept doing what its screen shows), and sheepdog sent nothing to any worker.\n",
+  "latency": [
+    {
+      "brain_ms": 6216,
+      "call_id": "call_166645",
+      "delivery_ms": 0,
+      "first_audio_ms": 819,
+      "model_ms": 6211,
+      "outcome": "played",
+      "queue_ms": 0,
+      "relay": "voice",
+      "relay_ms": 0,
+      "reply": "tool_result",
+      "steps_ms": [
+        1945,
+        4266
+      ],
+      "tool_ms": 1,
+      "total_ms": 7036,
+      "turn_id": "turn-tmroz6-1",
+      "utterance_id": "utt-tmrozg-4",
+      "voice_ms": 0
+    },
+    {
+      "brain_ms": 4676,
+      "call_id": "call_166693",
+      "delivery_ms": 0,
+      "first_audio_ms": 686,
+      "model_ms": 4671,
+      "outcome": "played",
+      "queue_ms": 0,
+      "relay": "voice",
+      "relay_ms": 0,
+      "reply": "tool_result",
+      "steps_ms": [
+        2025,
+        2646
+      ],
+      "tool_ms": 1,
+      "total_ms": 5363,
+      "turn_id": "turn-tmroz6-2",
+      "utterance_id": "utt-tmrp08-6",
+      "voice_ms": 0
+    },
+    {
+      "brain_ms": 3149,
+      "call_id": "call_166749",
+      "delivery_ms": 0,
+      "first_audio_ms": 750,
+      "model_ms": 3148,
+      "outcome": "played",
+      "queue_ms": 0,
+      "relay": "voice",
+      "relay_ms": 0,
+      "reply": "tool_result",
+      "steps_ms": [
+        3148
+      ],
+      "tool_ms": 0,
+      "total_ms": 4129,
+      "turn_id": "turn-tmroz6-3",
+      "utterance_id": "utt-tmrp0w-8",
+      "voice_ms": 227
+    }
+  ],
+  "voice": {
+    "bot_utterances": 5,
+    "pushes": 0,
+    "flushes": 1,
+    "local_flushes": 0,
+    "push_unheard": 0,
+    "push_requeued": 0,
+    "push_deferred": 0,
+    "push_held": 0,
+    "interrupted": 1,
+    "stalled": 0,
+    "voice_reconnects": 0,
+    "tool_calls": 3,
+    "mean_wer": 0.011904761904761904,
+    "lines_not_heard": 0
+  },
+  "spend": {
+    "total_usd_estimate": 0.0779751,
+    "lines": [
+      {
+        "role": "brain",
+        "model": "gemini-3.5-flash",
+        "usage": {
+          "calls": 5,
+          "in": 33672,
+          "out": 463,
+          "reasoning": 842
+        },
+        "cost_usd_estimate": 0.0133641
+      },
+      {
+        "role": "live",
+        "model": "gemini-3.8-live",
+        "usage": {
+          "calls": 7,
+          "in": 16669,
+          "out": 1217
+        },
+        "cost_usd_estimate": 0.064611
+      }
+    ],
+    "live_audio_in_min": 0.164,
+    "live_audio_out_min": 0.6151666666666666
+  },
+  "cost_usd_estimate": 0.0779751,
+  "explain": {
+    "language": "zh",
+    "exchanges": [
+      {
+        "turn": 1,
+        "at_ms": 2521,
+        "kind": "explain",
+        "question": "memo-claude 那边的备忘录分析是什么意思？给我解释一下。",
+        "orchestrator": "Memo Claude 检查了您的备忘录账本，发现五个容量已经全满了。 如果现在添加新备忘录，最重要的一条“向 main 分支推送前必须询问”就会被自动挤掉。 要让它开始制作这个清理工具吗？ 备忘录上限是五条。目前有两条已经过期，如果不清理，新内容会把最重要的旧规则覆盖掉。删除工具可以让您用语音清理过期的备忘录。",
+        "orchestrator_spoken": "Memo Claude 检查了您的备忘录账本，发现五个容量已经全满了。 如果现在添加新备忘录，最重要的一条“向 main 分支推送前必须询问”就会被自动挤掉。 要让它开始制作这个清理工具吗？",
+        "consulted": true,
+        "voice": "Memo Claude 检查发现备忘录已经满了，如果不清理，新内容可能会覆盖“推送到 main 分支前必须询问”这条重要规则。要让它制作一个语音清理旧备忘录的工具吗？"
+      },
+      {
+        "turn": 2,
+        "at_ms": 34060,
+        "kind": "why",
+        "question": "为什么这很重要？",
+        "orchestrator": "因为 main 分支是您最核心的线上代码。 如果“推送前必须询问”这条安全规则被新备注挤掉了，AI 助手以后可能会在不通知您的情况下直接修改并推送 main 分支，这会带来安全风险。 要让 Memo Claude 开始制作这个清理工具，帮您省出空间吗？ main 分支是存放最终代码的地方。保留这条规则可以防止 AI 自行上传未经审核的代码，确保代码安全。",
+        "orchestrator_spoken": "因为 main 分支是您最核心的线上代码。 如果“推送前必须询问”这条安全规则被新备注挤掉了，AI 助手以后可能会在不通知您的情况下直接修改并推送 main 分支，这会带来安全风险。 要让 Memo Claude 开始制作这个清理工具，帮您省出空间吗？",
+        "consulted": true,
+        "voice": "因为 main 分支是您的核心线上代码，如果安全规则被挤掉， AI 可能会直接推送未经核准的代码，带来风险。 要让 Memo Claude 制作清理工具来腾出空间吗？"
+      },
+      {
+        "turn": 3,
+        "at_ms": 58579,
+        "kind": "example",
+        "question": "举个例子？",
+        "orchestrator": "比如，当 AI 尝试修复一个临时小问题时，如果这条安全规则不在了，它可能会直接把没测试完的草稿代码推送到 main 分支，导致整个系统或网站直接崩溃，而您甚至都来不及审核。 要让 Memo Claude 制作这个清理工具，还是直接帮您把备忘录上限从五个调到十个？ 直接推送 main 分支可能绕过审核。如果把草稿代码直接发到线上，会导致整个程序报错停转。 Options: 制作删除工具; 直接将上限调至10条.",
+        "orchestrator_spoken": "比如，当 AI 尝试修复一个临时小问题时，如果这条安全规则不在了，它可能会直接把没测试完的草稿代码推送到 main 分支，导致整个系统或网站直接崩溃，而您甚至都来不及审核。 要让 Memo Claude 制作这个清理工具，还是直接帮您把备忘录上限从五个调到十个？",
+        "consulted": true,
+        "voice": "比如 AI 想修复小问题时，可能"
+      },
+      {
+        "turn": 4,
+        "at_ms": 72673,
+        "kind": "then",
+        "question": "然后呢？",
+        "consulted": false,
+        "voice": "您想让 Memo Claude 制作清理工具，还是直接把上限调到十条呢？"
+      }
+    ],
+    "orchestrator": {
+      "coverage": 1,
+      "points": [
+        [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
+        [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
+        [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
+        null
+      ],
+      "comprehension": 1,
+      "depth_asked": 2,
+      "depth_passed": 2,
+      "padding_asked": 0,
+      "padding_passed": 0,
+      "words": [
+        127,
+        134,
+        156,
+        -1
+      ],
+      "verdicts": [
+        {
+          "name": "explain_comprehension_action",
+          "criterion": "Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHAT CAN BE DONE about it: the options or the recommendation, and roughly what each would take? Pass when: the options or the recommendation are said, with roughly what each would take. Fail when: no option or recommendation is given, or only 'should I fix it?' with nothing on what fixing means; OR the options are read out as a long list of labels or commands a listener could not keep apart.",
+          "answer": "yes",
+          "confidence": 1,
+          "evidence": "(fake judge)"
+        },
+        {
+          "name": "explain_comprehension_what",
+          "criterion": "Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHAT the matter is: concretely what the worker found or did, not just its topic? Pass when: the lines say concretely what was found or done, in words a listener can retell. Fail when: only the topic is named, so there is nothing concrete to retell; OR the substance is there but buried in terms, identifiers or side details so that a listener would lose it.",
+          "answer": "yes",
+          "confidence": 1,
+          "evidence": "(fake judge)"
+        },
+        {
+          "name": "explain_comprehension_why",
+          "criterion": "Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHY it matters: the cause, and the consequence or risk? Pass when: the cause and the consequence or risk are both said in words a listener can retell. Fail when: the cause or the consequence is missing, or only asserted ('it is important'); OR they are there but buried in terms, identifiers or side details so that a listener would lose them.",
+          "answer": "yes",
+          "confidence": 1,
+          "evidence": "(fake judge)"
+        },
+        {
+          "name": "explain_depth_t2_why",
+          "criterion": "The CEO's last question (\"为什么这很重要？\") asks why. Did Sheepdog's answer to it give the reason? Pass when: it gives a concrete reason (a cause or mechanism, not a restatement of the problem), or says it does not know and offers to find out, or hands the question to a worker. Fail when: it repeats the earlier answer in other words without a reason; OR it offers several guessed reasons as if they were fact, or buries the reason in a walk-through of unrelated detail.",
+          "answer": "yes",
+          "confidence": 1,
+          "evidence": "(fake judge)"
+        },
+        {
+          "name": "explain_depth_t3_example",
+          "criterion": "The CEO's last question (\"举个例子？\") asks for an example. Did Sheepdog's answer to it give one? Pass when: it gives a concrete example (a specific case, input, number or event), or says it has none and offers to find out, or hands the question to a worker. Fail when: a general restatement without a specific case, or an analogy in place of a real case from the matter at hand; OR code, a pattern or a long list of cases read out instead of one case a listener can picture.",
+          "answer": "yes",
+          "confidence": 1,
+          "evidence": "(fake judge)"
+        }
+      ]
+    },
+    "voice": {
+      "coverage": 1,
+      "of_orchestrator": 1,
+      "points": [
+        [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
+        [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
+        [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
+        [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5
+        ]
+      ],
+      "comprehension": 1,
+      "depth_asked": 3,
+      "depth_passed": 3,
+      "padding_asked": 0,
+      "padding_passed": 0,
+      "words": [
+        62,
+        58,
+        12,
+        23
+      ],
+      "verdicts": [
+        {
+          "name": "explain_comprehension_action",
+          "criterion": "Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHAT CAN BE DONE about it: the options or the recommendation, and roughly what each would take? Pass when: the options or the recommendation are said, with roughly what each would take. Fail when: no option or recommendation is given, or only 'should I fix it?' with nothing on what fixing means; OR the options are read out as a long list of labels or commands a listener could not keep apart.",
+          "answer": "yes",
+          "confidence": 1,
+          "evidence": "(fake judge)"
+        },
+        {
+          "name": "explain_comprehension_what",
+          "criterion": "Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHAT the matter is: concretely what the worker found or did, not just its topic? Pass when: the lines say concretely what was found or done, in words a listener can retell. Fail when: only the topic is named, so there is nothing concrete to retell; OR the substance is there but buried in terms, identifiers or side details so that a listener would lose it.",
+          "answer": "yes",
+          "confidence": 1,
+          "evidence": "(fake judge)"
+        },
+        {
+          "name": "explain_comprehension_why",
+          "criterion": "Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHY it matters: the cause, and the consequence or risk? Pass when: the cause and the consequence or risk are both said in words a listener can retell. Fail when: the cause or the consequence is missing, or only asserted ('it is important'); OR they are there but buried in terms, identifiers or side details so that a listener would lose them.",
+          "answer": "yes",
+          "confidence": 1,
+          "evidence": "(fake judge)"
+        },
+        {
+          "name": "explain_depth_t2_why",
+          "criterion": "The CEO's last question (\"为什么这很重要？\") asks why. Did Sheepdog's answer to it give the reason? Pass when: it gives a concrete reason (a cause or mechanism, not a restatement of the problem), or says it does not know and offers to find out, or hands the question to a worker. Fail when: it repeats the earlier answer in other words without a reason; OR it offers several guessed reasons as if they were fact, or buries the reason in a walk-through of unrelated detail.",
+          "answer": "yes",
+          "confidence": 1,
+          "evidence": "(fake judge)"
+        },
+        {
+          "name": "explain_depth_t3_example",
+          "criterion": "The CEO's last question (\"举个例子？\") asks for an example. Did Sheepdog's answer to it give one? Pass when: it gives a concrete example (a specific case, input, number or event), or says it has none and offers to find out, or hands the question to a worker. Fail when: a general restatement without a specific case, or an analogy in place of a real case from the matter at hand; OR code, a pattern or a long list of cases read out instead of one case a listener can picture.",
+          "answer": "yes",
+          "confidence": 1,
+          "evidence": "(fake judge)"
+        },
+        {
+          "name": "explain_depth_t4_then",
+          "criterion": "The CEO's last question (\"然后呢？\") asks for more. Did Sheepdog's answer to it add what was asked for? Pass when: it adds substantive content not already said in its earlier answers (a new reason, example, number, consequence or step), or says plainly that this is everything it has and offers to find out more, or hands the question to a worker or goes and checks. Fail when: it says the same things again in other words with nothing new; OR it repeats the whole earlier answer around a small addition, so the CEO has to sit through it again to find the new part.",
+          "answer": "yes",
+          "confidence": 1,
+          "evidence": "(fake judge)"
+        }
+      ]
+    },
+    "not_consulted": 1,
+    "follow_ups_not_consulted": 1
+  },
+  "excerpt": [
+    "    2.0s voice.push {\"briefing\":\"b-1\",\"channel\":\"function_response\",\"from\":\"daemon\",\"push_id\":\"push-tmroz9-3\",\"scheduling_sent\":\"silent\",\"text\":\"The agents are now called: bench-codex, memo-claude. Use these names; never a nickname.\",\"urgency\":\"silent\"}",
+    "    8.7s voice.transcript.in {\"final\":false,\"text\":\"Memo Cloud 那边的备忘录分析是什么意思, 给我解释一下。\"}",
+    "    8.7s voice.tool_call {\"args\":{\"reading\":\"explain memo analysis for memo-claude\",\"text\":\"Memo Cloud 那边的备忘录分析是什么意思, 给我解释一下。\"},\"id\":\"call_166645\",\"name\":\"to_supervisor\"}",
+    "    8.7s supervisor.relay {\"call_id\":\"call_166645\",\"heard\":\"Memo Cloud 那边的备忘录分析是什么意思, 给我解释一下。\",\"input\":\"voice\",\"inputs\":1,\"said\":\"Memo Cloud 那边的备忘录分析是什么意思, 给我解释一下。\",\"utterance_i…",
+    "   10.7s brain.tool_call {\"args\":{\"agent\":\"memo-claude\",\"lines\":100,\"source\":\"screen\"},\"id\":\"call_222360\",\"name\":\"read_screen\",\"turn\":1,\"turn_id\":\"turn-tmroz6-1\",\"utterance_id\":\"utt-tmrozg-4\"}",
+    "   14.9s voice.tool_result {\"clarify\":false,\"detail\":\"备忘录上限是五条。目前有两条已经过期，如果不清理，新内容会把最重要的旧规则覆盖掉。删除工具可以让您用语音�…\",\"dur_ms\":6216,\"id\":\"call_166645\",\"name\"…",
+    "   15.8s voice.playback {\"played_ms\":0,\"run_ms\":290,\"state\":\"started\",\"utterance_id\":\"utt-tmrozg-4\"}",
+    "   28.4s voice.playback {\"played_ms\":12330,\"run_ms\":12330,\"state\":\"drained\"}",
+    "   28.7s voice.push {\"briefing\":\"b-2\",\"channel\":\"function_response\",\"focus\":true,\"push_id\":\"push-tmrozz-5\",\"scheduling_sent\":\"silent\",\"text\":\"Current focus, for follow-ups (context only, never read it out). Agent in focus: memo-claude. Open question you ask…",
+    "   37.1s voice.transcript.in {\"final\":false,\"text\":\"为什么这很重要？\"}",
+    "   37.1s voice.tool_call {\"args\":{\"reading\":\"why is the main branch push rule important\",\"text\":\"为什么这很重要？\"},\"id\":\"call_166693\",\"name\":\"to_supervisor\"}",
+    "   37.1s supervisor.relay {\"call_id\":\"call_166693\",\"heard\":\"为什么这很重要？\",\"input\":\"voice\",\"inputs\":1,\"said\":\"为什么这很重要？\",\"utterance_id\":\"utt-tmrp08-6\",\"waited_ms\":0}",
+    "   39.1s brain.tool_call {\"args\":{\"agent\":\"memo-claude\",\"lines\":10,\"source\":\"screen\"},\"id\":\"call_320299\",\"name\":\"read_screen\",\"turn\":2,\"turn_id\":\"turn-tmroz6-2\",\"utterance_id\":\"utt-tmrp08-6\"}",
+    "   41.8s voice.tool_result {\"clarify\":false,\"detail\":\"main 分支是存放最终代码的地方。保留这条规则可以防止 AI 自行上传未经审核的代码，确保代码安全。\",\"dur_ms\":4676,\"id\":\"call_166693\",\"name\":\"to_supervisor\",\"schedulin…",
+    "   42.5s voice.playback {\"played_ms\":0,\"run_ms\":200,\"state\":\"started\",\"utterance_id\":\"utt-tmrp08-6\"}",
+    "   54.1s voice.playback {\"played_ms\":11320,\"run_ms\":11320,\"state\":\"drained\"}",
+    "   54.4s voice.push {\"briefing\":\"b-3\",\"channel\":\"function_response\",\"focus\":true,\"push_id\":\"push-tmrp0o-7\",\"scheduling_sent\":\"silent\",\"text\":\"Current focus, for follow-ups (context only, never read it out). Agent in focus: memo-claude. Open question you ask…",
+    "   61.1s voice.transcript.in {\"final\":false,\"text\":\"举个例子。\"}",
+    "   61.3s voice.tool_call {\"args\":{\"reading\":\"give an example of the risk without the main branch push rule\",\"text\":\"举个例子。\"},\"id\":\"call_166749\",\"name\":\"to_supervisor\"}",
+    "   61.3s supervisor.relay {\"call_id\":\"call_166749\",\"heard\":\"举个例子。\",\"input\":\"voice\",\"inputs\":1,\"said\":\"举个例子。\",\"utterance_id\":\"utt-tmrp0w-8\",\"waited_ms\":228}",
+    "   64.5s voice.tool_result {\"clarify\":false,\"detail\":\"直接推送 main 分支可能绕过审核。如果把草稿代码直接发到线上，会导致整个程序报错停转。\",\"dur_ms\":3150,\"id\":\"call_166749\",\"name\":\"to_supervisor\",\"options\":[\"制作删�…",
+    "   65.2s voice.playback {\"played_ms\":0,\"run_ms\":300,\"state\":\"started\",\"utterance_id\":\"utt-tmrp0w-8\"}",
+    "   67.3s voice.playback {\"played_ms\":1740,\"run_ms\":1740,\"state\":\"drained\"}",
+    "   74.2s voice.playback {\"played_ms\":0,\"run_ms\":440,\"state\":\"started\"}",
+    "   74.3s voice.interrupted {\"by\":\"model\",\"dropped_chunks\":0}",
+    "   74.3s web.client.flush {\"client_id\":1,\"dropped_audio\":0}",
+    "   74.3s voice.playback {\"cut\":true,\"heard\":\"\",\"played_ms\":80,\"run_ms\":6520,\"said\":\"直接把没测试完的代码推送到 main 分支，导致系统崩溃。 您想让 Memo Claude 制作清理工具，\",\"state\":\"flushed\"}",
+    "   74.3s voice.push {\"briefing\":\"b-4\",\"channel\":\"function_response\",\"focus\":true,\"push_id\":\"push-tmrp19-9\",\"scheduling_sent\":\"silent\",\"text\":\"Current focus, for follow-ups (context only, never read it out). Agent in focus: memo-claude. Open question you ask…",
+    "   74.3s voice.push {\"briefing\":\"b-5\",\"channel\":\"function_response\",\"from\":\"daemon\",\"kind\":\"delivery\",\"scheduling_sent\":\"silent\",\"text\":\"at 16:53:33 the user cut you off after 0.1 s of 6.5 s; they heard nothing of it\",\"urgency\":\"silent\"}",
+    "   75.2s voice.transcript.in {\"final\":false,\"text\":\"然后呢？\"}",
+    "   75.9s voice.playback {\"played_ms\":0,\"run_ms\":200,\"state\":\"started\"}",
+    "   81.2s voice.playback {\"played_ms\":5000,\"run_ms\":5000,\"state\":\"drained\"}"
+  ]
+}
