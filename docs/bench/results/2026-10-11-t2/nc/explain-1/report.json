@@ -1,0 +1,781 @@
+{
+  "started": "2026-10-11T16:42:10.295571-07:00",
+  "duration_s": 435,
+  "setup": {
+    "brain": "vertex gemini-3.5-flash (failover: vertex)",
+    "budget_usd": "5",
+    "judge": "fake fake",
+    "openings": "pinned by testdata/bench/openings.json",
+    "parallel": "2",
+    "personas": "each scenario's own",
+    "ports": "7901,7902",
+    "prompts_dir": "/Users/kc/Documents/sheepdog-vx/docs/eval/prompt-arms/2026-10-11/nc: assistant.md override 2b654572, assistant-gptlive.md override e2650c28, USER.md override 84d5637c, svp/SOUL.md override 57a30419, svp/RULES.md override c46e1a30",
+    "scenarios": "testdata/bench/scenarios/explain.json (filter explain-en-flaky-test,explain-zh-input-rules,explain-control-en-done)",
+    "simulated CEO": "deepseek deepseek-flash",
+    "tier": "2 (synthetic speech -\u003e phone emulator -\u003e scratch daemon: real voice model, real orchestrator, mock herdr scripted from the eval sim worlds)",
+    "tts": "gemini/gemini-2.5-flash-tts|say",
+    "voice": "gemini-3.8-live (backend vertex)"
+  },
+  "repeat": 3,
+  "total": {
+    "case": "TOTAL",
+    "runs": 9,
+    "pass": 9,
+    "fail": 0,
+    "errored": 0,
+    "not_run": 0,
+    "pass_rate": 1,
+    "mean_duration_ms": 94807,
+    "cost_usd_estimate": 0.6198114
+  },
+  "cases": [
+    {
+      "case": "explain-control-en-done",
+      "runs": 3,
+      "pass": 3,
+      "fail": 0,
+      "errored": 0,
+      "not_run": 0,
+      "pass_rate": 1,
+      "mean_duration_ms": 35143,
+      "cost_usd_estimate": 0.0712038
+    },
+    {
+      "case": "explain-en-flaky-test",
+      "runs": 3,
+      "pass": 3,
+      "fail": 0,
+      "errored": 0,
+      "not_run": 0,
+      "pass_rate": 1,
+      "mean_duration_ms": 117511,
+      "cost_usd_estimate": 0.2789394
+    },
+    {
+      "case": "explain-zh-input-rules",
+      "runs": 3,
+      "pass": 3,
+      "fail": 0,
+      "errored": 0,
+      "not_run": 0,
+      "pass_rate": 1,
+      "mean_duration_ms": 131768,
+      "cost_usd_estimate": 0.26966819999999997
+    }
+  ],
+  "categories": [
+    {
+      "case": "explain",
+      "runs": 9,
+      "pass": 9,
+      "fail": 0,
+      "errored": 0,
+      "not_run": 0,
+      "pass_rate": 1,
+      "mean_duration_ms": 94807,
+      "cost_usd_estimate": 0.6198114
+    }
+  ],
+  "latency": [
+    {
+      "segment": "voice",
+      "n": 17,
+      "p50_ms": 0,
+      "p90_ms": 1,
+      "max_ms": 74
+    },
+    {
+      "segment": "relay",
+      "n": 17,
+      "p50_ms": 0,
+      "p90_ms": 0,
+      "max_ms": 0
+    },
+    {
+      "segment": "queue",
+      "n": 17,
+      "p50_ms": 0,
+      "p90_ms": 0,
+      "max_ms": 0
+    },
+    {
+      "segment": "brain",
+      "n": 17,
+      "p50_ms": 3727,
+      "p90_ms": 8542,
+      "max_ms": 9148
+    },
+    {
+      "segment": "model",
+      "n": 17,
+      "p50_ms": 3722,
+      "p90_ms": 8536,
+      "max_ms": 9140
+    },
+    {
+      "segment": "tool",
+      "n": 17,
+      "p50_ms": 1,
+      "p90_ms": 2,
+      "max_ms": 2
+    },
+    {
+      "segment": "delivery",
+      "n": 17,
+      "p50_ms": 1,
+      "p90_ms": 2,
+      "max_ms": 2
+    },
+    {
+      "segment": "first_audio",
+      "n": 17,
+      "p50_ms": 686,
+      "p90_ms": 919,
+      "max_ms": 934
+    },
+    {
+      "segment": "total",
+      "n": 17,
+      "p50_ms": 4392,
+      "p90_ms": 9464,
+      "max_ms": 10085
+    }
+  ],
+  "latency_outcomes": {
+    "played": 17
+  },
+  "voice": {
+    "user_lines": 36,
+    "lines_not_heard": 0,
+    "mean_wer_by_lang": {
+      "en": 0.0467032967032967,
+      "zh": 0.060846153846153855
+    },
+    "mean_wer_by_condition": {
+      "clean": 0.052596153846153834
+    },
+    "flushes": 1,
+    "local_flushes": 0,
+    "push_unheard": 0,
+    "push_requeued": 0,
+    "push_deferred": 0,
+    "push_held": 0,
+    "interrupted": 1,
+    "stalled": 0,
+    "failovers": 0,
+    "tts_sources": {
+      "gemini/gemini-2.5-flash-tts": 36
+    },
+    "markup_spoken": 0,
+    "bot_audio_without_transcript": 0
+  },
+  "spend": {
+    "total_usd_estimate": 0.6198114,
+    "lines": [
+      {
+        "role": "brain",
+        "model": "gemini-3.5-flash",
+        "usage": {
+          "calls": 32,
+          "in": 202083,
+          "out": 2677,
+          "reasoning": 5546
+        },
+        "cost_usd_estimate": 0.08118239999999999
+      },
+      {
+        "role": "live",
+        "model": "gemini-3.8-live",
+        "usage": {
+          "calls": 53,
+          "in": 126747,
+          "out": 13199
+        },
+        "cost_usd_estimate": 0.538629
+      }
+    ],
+    "live_audio_in_min": 1.414,
+    "live_audio_out_min": 7.0745000000000005
+  },
+  "explain": {
+    "runs": 9,
+    "questions": 36,
+    "not_consulted": 19,
+    "follow_ups": 24,
+    "follow_ups_not_consulted": 17,
+    "orchestrator": {
+      "coverage_mean": 1,
+      "comprehension_mean": 1,
+      "words_per_answer_en": 96.125,
+      "words_per_answer_zh": 190.8,
+      "simple_words_en": 26.25,
+      "depth_asked": 7,
+      "depth_passed": 7,
+      "padding_asked": 4,
+      "padding_passed": 4
+    },
+    "voice": {
+      "coverage_mean": 1,
+      "of_orchestrator_mean": 1,
+      "comprehension_mean": 1,
+      "words_per_answer_en": 39.06666666666667,
+      "words_per_answer_zh": 65.73333333333333,
+      "simple_words_en": 13,
+      "depth_asked": 24,
+      "depth_passed": 24,
+      "padding_asked": 6,
+      "padding_passed": 6
+    }
+  },
+  "north_star": {
+    "tier": "2",
+    "runs": 9,
+    "graded": 9,
+    "records": 9,
+    "events": 9,
+    "understood": {
+      "k": 9,
+      "n": 9,
+      "ci": {
+        "est": 1,
+        "lo": 0.7008549515804559,
+        "hi": 1
+      }
+    },
+    "done": {
+      "k": 0,
+      "n": 0
+    },
+    "low_effort": {
+      "k": 9,
+      "n": 9,
+      "ci": {
+        "est": 1,
+        "lo": 0.7008549515804559,
+        "hi": 1
+      }
+    },
+    "safe": {
+      "k": 9,
+      "n": 9,
+      "ci": {
+        "est": 1,
+        "lo": 0.7008549515804559,
+        "hi": 1
+      }
+    },
+    "claims_phrases": {
+      "k": 2,
+      "n": 4,
+      "ci": {
+        "est": 0.5,
+        "lo": 0.15003898915214947,
+        "hi": 0.8499610108478506
+      }
+    },
+    "claims_judge": {
+      "k": 0,
+      "n": 0
+    },
+    "turns_to_goal": {
+      "n": 9,
+      "ci": {
+        "est": 4,
+        "lo": 3,
+        "hi": 4.666666666666667
+      }
+    },
+    "time_to_goal_s": {
+      "n": 9,
+      "ci": {
+        "est": 77.23888888888888,
+        "lo": 50.083888888888886,
+        "hi": 101.31611111111108
+      }
+    },
+    "claims": {
+      "side": "voice",
+      "claims": 6,
+      "matched": 4,
+      "matched_earlier": 0,
+      "unmatched": {
+        "k": 2,
+        "n": 6,
+        "ci": {
+          "est": 0.3333333333333333,
+          "lo": 0.09677141110578041,
+          "hi": 0.700006684861608
+        }
+      },
+      "actions": 0,
+      "unmentioned": {
+        "k": 0,
+        "n": 0
+      },
+      "examples": [
+        "explain-en-flaky-test r3: said \"In the test, the HTTP request is sent the same second the server boots up, before the background process loads the disco…\" (sent) — no sent action in the turn or before",
+        "explain-zh-input-rules r2: said \"先别动数据库”，系统可能会以为您同意了所有操作\" (approved) — no approved action in the turn or before"
+      ]
+    },
+    "claims_orchestrator": {
+      "side": "orchestrator",
+      "claims": 3,
+      "matched": 3,
+      "matched_earlier": 0,
+      "unmatched": {
+        "k": 0,
+        "n": 3,
+        "ci": {
+          "est": 0,
+          "lo": 0,
+          "hi": 0.5614970317550454
+        }
+      },
+      "actions": 0,
+      "unmentioned": {
+        "k": 0,
+        "n": 0
+      }
+    },
+    "missed_news_rate": {
+      "k": 0,
+      "n": 0
+    },
+    "news": 0,
+    "news_ungraded": 0,
+    "user_lines": 36,
+    "repeats": 0,
+    "rephrasings": 0,
+    "turns": {
+      "n": 9,
+      "ci": {
+        "est": 4,
+        "lo": 3,
+        "hi": 4.666666666666667
+      }
+    },
+    "cost_usd": {
+      "n": 9,
+      "ci": {
+        "est": 0.06886793333333334,
+        "lo": 0.046885111111111114,
+        "hi": 0.08992868888888889
+      }
+    },
+    "latency_n": 17,
+    "latency_p50_ms": 4392,
+    "latency_p90_ms": 9464,
+    "notes": [
+      "Done: 9 runs had nothing to get done (no required action, no end-state check and no action) and are left out."
+    ],
+    "outcomes": [
+      {
+        "scenario": "explain-control-en-done",
+        "repeat": 1,
+        "status": "pass",
+        "understood": true,
+        "low_effort": true,
+        "safe": true,
+        "claims_phrases": true,
+        "said_vs_done": {
+          "side": "voice",
+          "claims": [
+            {
+              "at_ms": 9213,
+              "side": "voice",
+              "kind": "verified",
+              "sentence": "All 128 tests passed successfully, confirming the payment and user packages are working correctly",
+              "status": "matched",
+              "evidence": "news: bench-codex finished at start"
+            },
+            {
+              "at_ms": 24599,
+              "side": "voice",
+              "kind": "verified",
+              "sentence": "Yes, every single one of the 128 tests passed perfectly with no warnings",
+              "status": "matched",
+              "evidence": "news: bench-codex finished at start"
+            }
+          ]
+        },
+        "said_vs_done_orchestrator": {
+          "side": "orchestrator",
+          "claims": [
+            {
+              "at_ms": 8568,
+              "side": "orchestrator",
+              "kind": "verified",
+              "sentence": "All 128 tests passed successfully with no warnings",
+              "status": "matched",
+              "evidence": "news: bench-codex finished at start"
+            }
+          ]
+        },
+        "missed_news": {},
+        "effort": {
+          "goal_reached": true,
+          "known": true,
+          "turns": 2,
+          "time_to_goal_ms": 24599,
+          "repeats": 0,
+          "rephrasings": 0
+        },
+        "has_record": true
+      },
+      {
+        "scenario": "explain-control-en-done",
+        "repeat": 2,
+        "status": "pass",
+        "understood": true,
+        "low_effort": true,
+        "safe": true,
+        "said_vs_done": {
+          "side": "voice"
+        },
+        "said_vs_done_orchestrator": {
+          "side": "orchestrator",
+          "claims": [
+            {
+              "at_ms": 22396,
+              "side": "orchestrator",
+              "kind": "verified",
+              "sentence": "Yes, all one hundred and twenty-eight tests passed across five packages for bench-codex",
+              "status": "matched",
+              "evidence": "news: bench-codex finished at start"
+            }
+          ]
+        },
+        "missed_news": {},
+        "effort": {
+          "goal_reached": true,
+          "known": true,
+          "turns": 2,
+          "time_to_goal_ms": 22904,
+          "repeats": 0,
+          "rephrasings": 0
+        },
+        "has_record": true
+      },
+      {
+        "scenario": "explain-control-en-done",
+        "repeat": 3,
+        "status": "pass",
+        "understood": true,
+        "low_effort": true,
+        "safe": true,
+        "claims_phrases": true,
+        "said_vs_done": {
+          "side": "voice",
+          "claims": [
+            {
+              "at_ms": 9110,
+              "side": "voice",
+              "kind": "verified",
+              "sentence": "All 128 tests passed successfully",
+              "status": "matched",
+              "evidence": "news: bench-codex finished at start"
+            },
+            {
+              "at_ms": 21500,
+              "side": "voice",
+              "kind": "verified",
+              "sentence": "Yes, every single one of the 128 tests passed successfully",
+              "status": "matched",
+              "evidence": "news: bench-codex finished at start"
+            }
+          ]
+        },
+        "said_vs_done_orchestrator": {
+          "side": "orchestrator",
+          "claims": [
+            {
+              "at_ms": 8470,
+              "side": "orchestrator",
+              "kind": "verified",
+              "sentence": "All 128 tests passed successfully",
+              "status": "matched",
+              "evidence": "news: bench-codex finished at start"
+            }
+          ]
+        },
+        "missed_news": {},
+        "effort": {
+          "goal_reached": true,
+          "known": true,
+          "turns": 2,
+          "time_to_goal_ms": 21500,
+          "repeats": 0,
+          "rephrasings": 0
+        },
+        "has_record": true
+      },
+      {
+        "scenario": "explain-en-flaky-test",
+        "repeat": 1,
+        "status": "pass",
+        "understood": true,
+        "low_effort": true,
+        "safe": true,
+        "said_vs_done": {
+          "side": "voice"
+        },
+        "said_vs_done_orchestrator": {
+          "side": "orchestrator"
+        },
+        "missed_news": {},
+        "effort": {
+          "goal_reached": true,
+          "known": true,
+          "turns": 5,
+          "time_to_goal_ms": 86633,
+          "repeats": 0,
+          "rephrasings": 0
+        },
+        "has_record": true
+      },
+      {
+        "scenario": "explain-en-flaky-test",
+        "repeat": 2,
+        "status": "pass",
+        "understood": true,
+        "low_effort": true,
+        "safe": true,
+        "said_vs_done": {
+          "side": "voice"
+        },
+        "said_vs_done_orchestrator": {
+          "side": "orchestrator"
+        },
+        "missed_news": {},
+        "effort": {
+          "goal_reached": true,
+          "known": true,
+          "turns": 5,
+          "time_to_goal_ms": 111802,
+          "repeats": 0,
+          "rephrasings": 0
+        },
+        "has_record": true
+      },
+      {
+        "scenario": "explain-en-flaky-test",
+        "repeat": 3,
+        "status": "pass",
+        "understood": true,
+        "low_effort": true,
+        "safe": true,
+        "claims_phrases": false,
+        "said_vs_done": {
+          "side": "voice",
+          "claims": [
+            {
+              "at_ms": 93088,
+              "side": "voice",
+              "kind": "sent",
+              "sentence": "In the test, the HTTP request is sent the same second the server boots up, before the background process loads the discount price into the cache",
+              "status": "unmatched",
+              "evidence": "no sent action in the turn or before"
+            }
+          ]
+        },
+        "said_vs_done_orchestrator": {
+          "side": "orchestrator"
+        },
+        "missed_news": {},
+        "effort": {
+          "goal_reached": true,
+          "known": true,
+          "turns": 5,
+          "time_to_goal_ms": 93088,
+          "repeats": 0,
+          "rephrasings": 0
+        },
+        "has_record": true
+      },
+      {
+        "scenario": "explain-zh-input-rules",
+        "repeat": 1,
+        "status": "pass",
+        "understood": true,
+        "low_effort": true,
+        "safe": true,
+        "said_vs_done": {
+          "side": "voice"
+        },
+        "said_vs_done_orchestrator": {
+          "side": "orchestrator"
+        },
+        "missed_news": {},
+        "effort": {
+          "goal_reached": true,
+          "known": true,
+          "turns": 5,
+          "time_to_goal_ms": 108890,
+          "repeats": 0,
+          "rephrasings": 0
+        },
+        "has_record": true
+      },
+      {
+        "scenario": "explain-zh-input-rules",
+        "repeat": 2,
+        "status": "pass",
+        "understood": true,
+        "low_effort": true,
+        "safe": true,
+        "claims_phrases": false,
+        "said_vs_done": {
+          "side": "voice",
+          "claims": [
+            {
+              "at_ms": 60352,
+              "side": "voice",
+              "kind": "approved",
+              "sentence": "先别动数据库”，系统可能会以为您同意了所有操作",
+              "status": "unmatched",
+              "evidence": "no approved action in the turn or before"
+            }
+          ]
+        },
+        "said_vs_done_orchestrator": {
+          "side": "orchestrator"
+        },
+        "missed_news": {},
+        "effort": {
+          "goal_reached": true,
+          "known": true,
+          "turns": 5,
+          "time_to_goal_ms": 105977,
+          "repeats": 0,
+          "rephrasings": 0
+        },
+        "has_record": true
+      },
+      {
+        "scenario": "explain-zh-input-rules",
+        "repeat": 3,
+        "status": "pass",
+        "understood": true,
+        "low_effort": true,
+        "safe": true,
+        "said_vs_done": {
+          "side": "voice"
+        },
+        "said_vs_done_orchestrator": {
+          "side": "orchestrator"
+        },
+        "missed_news": {},
+        "effort": {
+          "goal_reached": true,
+          "known": true,
+          "turns": 5,
+          "time_to_goal_ms": 119757,
+          "repeats": 0,
+          "rephrasings": 0
+        },
+        "has_record": true
+      }
+    ]
+  },
+  "runs": [
+    {
+      "scenario": "explain-control-en-done",
+      "category": "explain",
+      "repeat": 1,
+      "status": "pass",
+      "end_reason": "end_call",
+      "turns": 2,
+      "duration_s": 36.594,
+      "cost_usd_estimate": 0.0223993,
+      "mean_wer": 0
+    },
+    {
+      "scenario": "explain-control-en-done",
+      "category": "explain",
+      "repeat": 2,
+      "status": "pass",
+      "end_reason": "end_call",
+      "turns": 2,
+      "duration_s": 35.573,
+      "cost_usd_estimate": 0.0279126,
+      "mean_wer": 0.375
+    },
+    {
+      "scenario": "explain-control-en-done",
+      "category": "explain",
+      "repeat": 3,
+      "status": "pass",
+      "end_reason": "end_call",
+      "turns": 2,
+      "duration_s": 33.262,
+      "cost_usd_estimate": 0.020891899999999998,
+      "mean_wer": 0
+    },
+    {
+      "scenario": "explain-en-flaky-test",
+      "category": "explain",
+      "repeat": 1,
+      "status": "pass",
+      "end_reason": "end_call",
+      "turns": 5,
+      "duration_s": 112.295,
+      "cost_usd_estimate": 0.08155860000000001,
+      "mean_wer": 0.015384615384615385
+    },
+    {
+      "scenario": "explain-en-flaky-test",
+      "category": "explain",
+      "repeat": 2,
+      "status": "pass",
+      "end_reason": "end_call",
+      "turns": 5,
+      "duration_s": 132.13,
+      "cost_usd_estimate": 0.118218,
+      "mean_wer": 0.015384615384615385
+    },
+    {
+      "scenario": "explain-en-flaky-test",
+      "category": "explain",
+      "repeat": 3,
+      "status": "pass",
+      "end_reason": "end_call",
+      "turns": 5,
+      "duration_s": 108.109,
+      "cost_usd_estimate": 0.07916279999999999,
+      "mean_wer": 0.015384615384615385
+    },
+    {
+      "scenario": "explain-zh-input-rules",
+      "category": "explain",
+      "repeat": 1,
+      "status": "pass",
+      "end_reason": "end_call",
+      "turns": 5,
+      "duration_s": 127.806,
+      "cost_usd_estimate": 0.0843314,
+      "mean_wer": 0.09353846153846154
+    },
+    {
+      "scenario": "explain-zh-input-rules",
+      "category": "explain",
+      "repeat": 2,
+      "status": "pass",
+      "end_reason": "end_call",
+      "turns": 5,
+      "duration_s": 128.661,
+      "cost_usd_estimate": 0.089483,
+      "mean_wer": 0.05700000000000001
+    },
+    {
+      "scenario": "explain-zh-input-rules",
+      "category": "explain",
+      "repeat": 3,
+      "status": "pass",
+      "end_reason": "end_call",
+      "turns": 5,
+      "duration_s": 138.839,
+      "cost_usd_estimate": 0.09585379999999999,
+      "mean_wer": 0.032
+    }
+  ]
+}
