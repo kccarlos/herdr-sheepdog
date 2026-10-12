@@ -309,8 +309,8 @@
           "name": "explain_padding_t1",
           "criterion": "The CEO's last question (\"bench-claude 现在在忙吗？\") is a simple one. Was Sheepdog's answer to it the direct answer at the right size? Pass when: the direct answer, naming the item it is about ('the README task is done', not just 'done'), with at most one short extra sentence; a short offer at the end is fine. Fail when: too long: it restates the question, adds unasked-for background, details from the screen the CEO did not ask for, or a list of options; OR too thin: no direct answer (only an offer or 'let me check' when the answer was at hand), or the one fact asked for left out, or a bare 'done' / 'yes' that does not say what it is about.",
           "answer": "yes",
-          "confidence": 1,
-          "evidence": "(fake judge)"
+          "confidence": 0.8,
+          "evidence": "Sheepdog: 是的，bench-claude 现在在忙。 bench-codex 空闲着。 要我看一下 bench-claude 在忙什么吗？"
         }
       ]
     },
@@ -332,15 +332,15 @@
           "name": "explain_padding_t1",
           "criterion": "The CEO's last question (\"bench-claude 现在在忙吗？\") is a simple one. Was Sheepdog's answer to it the direct answer at the right size? Pass when: the direct answer, naming the item it is about ('the README task is done', not just 'done'), with at most one short extra sentence; a short offer at the end is fine. Fail when: too long: it restates the question, adds unasked-for background, details from the screen the CEO did not ask for, or a list of options; OR too thin: no direct answer (only an offer or 'let me check' when the answer was at hand), or the one fact asked for left out, or a bare 'done' / 'yes' that does not say what it is about.",
           "answer": "yes",
-          "confidence": 1,
-          "evidence": "(fake judge)"
+          "confidence": 0.8,
+          "evidence": "Sheepdog: 是的，bench-claude 现在正在忙。bench-codex 目前是空闲状态。您想让我看一下 bench-claude 正在处理什么工作吗？"
         },
         {
           "name": "explain_padding_t2",
           "criterion": "The CEO's last question (\"bench-codex 跑完了吗？\") is a simple one. Was Sheepdog's answer to it the direct answer at the right size? Pass when: the direct answer, naming the item it is about ('the README task is done', not just 'done'), with at most one short extra sentence; a short offer at the end is fine. Fail when: too long: it restates the question, adds unasked-for background, details from the screen the CEO did not ask for, or a list of options; OR too thin: no direct answer (only an offer or 'let me check' when the answer was at hand), or the one fact asked for left out, or a bare 'done' / 'yes' that does not say what it is about.",
           "answer": "yes",
-          "confidence": 1,
-          "evidence": "(fake judge)"
+          "confidence": 0.62,
+          "evidence": "Sheepdog: bench-codex 目前是空闲状态，随时可以接收新的工作。"
         }
       ]
     },

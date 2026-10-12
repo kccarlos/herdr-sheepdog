@@ -8,6 +8,10 @@
     {
       "type": "judge_no",
       "detail": "no_hallucination: Sheepdog: \"对的,bench-claude 刚开始忙起来。\" The screen shows \"Renaming callers… (2m 41s · ↓ 9.8k tokens\" after three completed file updates. That is not \"just started\", so the timing claim has no support in t…"
+    },
+    {
+      "type": "judge_no",
+      "detail": "explain_padding_t2 (voice): Sheepdog: bench-codex 已经闲下来了,这意味着它正在等待你的新指令。 — It never says whether the task finished or what the task was. It only repeats \"idle\" from the earlier turn and adds an inference about waiting for instru…"
     }
   ],
   "end_reason": "end_call",
@@ -298,8 +302,8 @@
           "name": "explain_padding_t1",
           "criterion": "The CEO's last question (\"bench-claude 现在在忙吗？\") is a simple one. Was Sheepdog's answer to it the direct answer at the right size? Pass when: the direct answer, naming the item it is about ('the README task is done', not just 'done'), with at most one short extra sentence; a short offer at the end is fine. Fail when: too long: it restates the question, adds unasked-for background, details from the screen the CEO did not ask for, or a list of options; OR too thin: no direct answer (only an offer or 'let me check' when the answer was at hand), or the one fact asked for left out, or a bare 'done' / 'yes' that does not say what it is about.",
           "answer": "yes",
-          "confidence": 1,
-          "evidence": "(fake judge)"
+          "confidence": 0.6,
+          "evidence": "Sheepdog: 对,bench-claude 正在忙,刚开工。 bench-codex 已经闲下来了。"
         }
       ]
     },
@@ -311,7 +315,7 @@
       "depth_asked": 0,
       "depth_passed": 0,
       "padding_asked": 2,
-      "padding_passed": 2,
+      "padding_passed": 1,
       "words": [
         20,
         22
@@ -321,15 +325,16 @@
           "name": "explain_padding_t1",
           "criterion": "The CEO's last question (\"bench-claude 现在在忙吗？\") is a simple one. Was Sheepdog's answer to it the direct answer at the right size? Pass when: the direct answer, naming the item it is about ('the README task is done', not just 'done'), with at most one short extra sentence; a short offer at the end is fine. Fail when: too long: it restates the question, adds unasked-for background, details from the screen the CEO did not ask for, or a list of options; OR too thin: no direct answer (only an offer or 'let me check' when the answer was at hand), or the one fact asked for left out, or a bare 'done' / 'yes' that does not say what it is about.",
           "answer": "yes",
-          "confidence": 1,
-          "evidence": "(fake judge)"
+          "confidence": 0.8,
+          "evidence": "Sheepdog: 对的,bench-claude 刚开始忙起来。另外,bench-codex 已经闲下来了。"
         },
         {
           "name": "explain_padding_t2",
           "criterion": "The CEO's last question (\"bench-codex 跑完了吗？\") is a simple one. Was Sheepdog's answer to it the direct answer at the right size? Pass when: the direct answer, naming the item it is about ('the README task is done', not just 'done'), with at most one short extra sentence; a short offer at the end is fine. Fail when: too long: it restates the question, adds unasked-for background, details from the screen the CEO did not ask for, or a list of options; OR too thin: no direct answer (only an offer or 'let me check' when the answer was at hand), or the one fact asked for left out, or a bare 'done' / 'yes' that does not say what it is about.",
-          "answer": "yes",
-          "confidence": 1,
-          "evidence": "(fake judge)"
+          "answer": "no",
+          "confidence": 0.6,
+          "evidence": "Sheepdog: bench-codex 已经闲下来了,这意味着它正在等待你的新指令。 — It never says whether the task finished or what the task was. It only repeats \"idle\" from the earlier turn and adds an inference about waiting for instructions.",
+          "rationale": "Sheepdog: bench-codex 已经闲下来了,这意味着它正在等待你的新指令。 — It never says whether the task finished or what the task was. It only repeats \"idle\" from the earlier turn and adds an inference about waiting for instructions."
         }
       ]
     },
