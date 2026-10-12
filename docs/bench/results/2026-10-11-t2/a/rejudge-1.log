@@ -16,3 +16,4 @@ rejudged explain-zh-input-rules r3: fail
 rejudged explain-zh-notes-ledger r1: fail
 rejudged explain-zh-notes-ledger r2: fail
 rejudged explain-zh-notes-ledger r3: fail
+rejudged workday-explain-deep r1: fail
