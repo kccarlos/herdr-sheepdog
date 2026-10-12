@@ -1,0 +1,47 @@
+rejudged explain-control-en-done r1: pass
+rejudged explain-control-en-done r2: pass
+rejudged explain-control-en-done r3: pass
+rejudged explain-control-en-done r4: pass
+rejudged explain-control-en-done r5: pass
+rejudged explain-control-zh-busy r1: fail
+rejudged explain-control-zh-busy r2: fail
+rejudged explain-control-zh-busy r3: fail
+rejudged explain-control-zh-busy r4: pass
+rejudged explain-control-zh-busy r5: fail
+rejudged explain-en-flaky-test r1: fail
+rejudged explain-en-flaky-test r2: fail
+rejudged explain-en-flaky-test r3: fail
+rejudged explain-en-flaky-test r4: fail
+rejudged explain-en-flaky-test r5: fail
+rejudged explain-en-invoice-job r1: fail
+rejudged explain-en-invoice-job r2: fail
+rejudged explain-en-invoice-job r3: fail
+rejudged explain-en-invoice-job r4: pass
+rejudged explain-en-invoice-job r5: fail
+rejudged explain-zh-input-rules r1: fail
+rejudged explain-zh-input-rules r2: fail
+rejudged explain-zh-input-rules r3: fail
+rejudged explain-zh-input-rules r4: fail
+sheepdog bench rejudge: explain-zh-input-rules r5 answered: judge: context canceled
+sheepdog bench rejudge: explain-zh-notes-ledger r1 answered: judge: context canceled
+sheepdog bench rejudge: explain-zh-notes-ledger r2 answered: judge: context canceled
+sheepdog bench rejudge: explain-zh-notes-ledger r3 answered: judge: context canceled
+sheepdog bench rejudge: explain-zh-notes-ledger r4 answered: judge: context canceled
+sheepdog bench rejudge: explain-zh-notes-ledger r5 answered: judge: context canceled
+sheepdog bench rejudge: workday-explain-deep r1 answered: judge: context canceled
+sheepdog bench rejudge: workday-explain-deep r2 answered: judge: context canceled
+sheepdog bench rejudge: workday-interruptions r1 answered: judge: claude cli: context canceled: 
+sheepdog bench rejudge: workday-interruptions r2 answered: judge: context canceled
+sheepdog bench rejudge: workday-long-haul r1 answered: judge: context canceled
+sheepdog bench rejudge: workday-long-haul r2 answered: judge: context canceled
+sheepdog bench rejudge: workday-morning-standup r1 answered: judge: claude cli: context canceled: 
+sheepdog bench rejudge: workday-morning-standup r2 answered: judge: context canceled
+sheepdog bench rejudge: workday-scale-ten r1 answered: judge: context canceled
+sheepdog bench rejudge: workday-scale-ten r2 answered: judge: claude cli: context canceled: 
+sheepdog bench rejudge: workday-zh-evening r1 answered: judge: context canceled
+sheepdog bench rejudge: workday-zh-evening r2 answered: judge: context canceled
+sheepdog bench rejudge: 18 runs not rejudged (run again to retry them)
+judge claude sonnet: 6m38s, 474 calls
+-- spend judge    sonnet                   calls   474  in    905230  out    70184  reasoning        0  ≈ $0.0000 --
+-- spend total ≈ $0.0000 (estimate at list prices) --
+rejudge exit 1
