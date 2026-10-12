@@ -1,0 +1,19 @@
+[1/5] workday-long-haul r1: pass (end_call, ) ≈ $0.1663, total ≈ $0.166
+[2/5] workday-long-haul r3: fail (end_call, brain_fallback) ≈ $0.1152, total ≈ $0.282
+[3/5] workday-long-haul r2: pass (end_call, ) ≈ $0.1688, total ≈ $0.450
+[4/5] workday-long-haul r4: pass (end_call, ) ≈ $0.1357, total ≈ $0.586
+[5/5] workday-long-haul r5: pass (end_call, ) ≈ $0.1522, total ≈ $0.738
+  pass    workday-long-haul r1  end_call  14 turns  112.9s                         ≈ $0.1663
+  pass    workday-long-haul r2  end_call  14 turns  134.8s                         ≈ $0.1688
+  fail    workday-long-haul r3  end_call  14 turns  116.8s  brain_fallback         ≈ $0.1152
+          brain_fallback: yielded: brain: yielded to a CEO turn
+  pass    workday-long-haul r4  end_call  14 turns  117.5s                         ≈ $0.1357
+  pass    workday-long-haul r5  end_call  15 turns  137.1s                         ≈ $0.1522
+-- 5 runs, spend ≈ $0.7383 (estimate at list prices) --
+reports: docs/bench/results/2026-10-11-t1-gemini/parts/workday-long-haul/report.json, docs/bench/results/2026-10-11-t1-gemini/parts/workday-long-haul/report.md
+== eval sim, repeat 5 ==
+  workday-long-haul  runs  5  pass  4  fail  1  err  0  not_run  0  rate   80%  brain_fallback ×1
+  TOTAL              runs  5  pass  4  fail  1  err  0  not_run  0  rate   80%  brain_fallback ×1
+-- spend brain    gemini-3.5-flash         calls   165  in   2133461  out    15429  reasoning     7957  ≈ $0.6985 --
+-- spend simuser  deepseek-flash           calls    67  in    129519  out     1504  reasoning        0  ≈ $0.0398 --
+-- spend total ≈ $0.7383 (estimate at list prices) --
