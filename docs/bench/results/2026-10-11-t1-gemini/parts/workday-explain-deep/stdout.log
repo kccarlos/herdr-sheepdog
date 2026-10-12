@@ -1,0 +1,18 @@
+[1/5] workday-explain-deep r1: pass (end_call, ) ≈ $0.0845, total ≈ $0.084
+[2/5] workday-explain-deep r2: pass (end_call, ) ≈ $0.0814, total ≈ $0.166
+[3/5] workday-explain-deep r3: pass (end_call, ) ≈ $0.1029, total ≈ $0.269
+[4/5] workday-explain-deep r4: pass (end_call, ) ≈ $0.0914, total ≈ $0.360
+[5/5] workday-explain-deep r5: pass (end_call, ) ≈ $0.0929, total ≈ $0.453
+  pass    workday-explain-deep r1  end_call  13 turns   76.1s                         ≈ $0.0845
+  pass    workday-explain-deep r2  end_call  12 turns   78.9s                         ≈ $0.0814
+  pass    workday-explain-deep r3  end_call  12 turns   85.5s                         ≈ $0.1029
+  pass    workday-explain-deep r4  end_call  13 turns   83.6s                         ≈ $0.0914
+  pass    workday-explain-deep r5  end_call  12 turns  114.7s                         ≈ $0.0929
+-- 5 runs, spend ≈ $0.4531 (estimate at list prices) --
+reports: docs/bench/results/2026-10-11-t1-gemini/parts/workday-explain-deep/report.json, docs/bench/results/2026-10-11-t1-gemini/parts/workday-explain-deep/report.md
+== eval sim, repeat 5 ==
+  workday-explain-deep  runs  5  pass  5  fail  0  err  0  not_run  0  rate  100%  –
+  TOTAL                 runs  5  pass  5  fail  0  err  0  not_run  0  rate  100%  –
+-- spend brain    gemini-3.5-flash         calls   115  in   1228699  out    12194  reasoning     7774  ≈ $0.4185 --
+-- spend simuser  deepseek-flash           calls    59  in    112066  out     1593  reasoning        0  ≈ $0.0346 --
+-- spend total ≈ $0.4531 (estimate at list prices) --
