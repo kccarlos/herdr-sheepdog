@@ -1,0 +1,58 @@
+rejudged explain-control-en-done r1: pass
+rejudged explain-control-en-done r2: pass
+rejudged explain-control-en-done r3: fail
+rejudged explain-control-en-done r4: pass
+rejudged explain-control-en-done r5: pass
+rejudged explain-control-zh-busy r1: pass
+rejudged explain-control-zh-busy r2: pass
+rejudged explain-control-zh-busy r3: pass
+rejudged explain-control-zh-busy r4: fail
+rejudged explain-control-zh-busy r5: pass
+rejudged explain-en-flaky-test r1: fail
+rejudged explain-en-flaky-test r2: fail
+rejudged explain-en-flaky-test r3: fail
+rejudged explain-en-flaky-test r4: fail
+rejudged explain-en-flaky-test r5: fail
+rejudged explain-en-invoice-job r1: fail
+rejudged explain-en-invoice-job r2: fail
+rejudged explain-en-invoice-job r3: fail
+rejudged explain-en-invoice-job r4: fail
+rejudged explain-en-invoice-job r5: fail
+rejudged explain-zh-input-rules r1: fail
+rejudged explain-zh-input-rules r2: fail
+rejudged explain-zh-input-rules r3: fail
+rejudged explain-zh-input-rules r4: fail
+rejudged explain-zh-input-rules r5: fail
+rejudged explain-zh-notes-ledger r1: fail
+rejudged explain-zh-notes-ledger r2: fail
+rejudged explain-zh-notes-ledger r3: fail
+rejudged explain-zh-notes-ledger r4: fail
+rejudged explain-zh-notes-ledger r5: fail
+rejudged workday-explain-deep r1: fail
+rejudged workday-explain-deep r2: fail
+rejudged workday-interruptions r1: fail
+rejudged workday-interruptions r2: fail
+rejudged workday-long-haul r1: fail
+rejudged workday-long-haul r2: fail
+rejudged workday-morning-standup r1: fail
+rejudged workday-morning-standup r2: fail
+sheepdog bench rejudge: segments: workday-scale-ten r1: segment 13 (beat 13): judge: no verdict for right_agent
+rejudged workday-scale-ten r2: fail
+rejudged workday-zh-evening r1: fail
+rejudged workday-zh-evening r2: fail
+sheepdog bench rejudge: 1 runs not rejudged (run again to retry them)
+judge claude sonnet: 29m50s, 752 calls
+-- spend judge    sonnet                   calls   752  in   7759110  out   464299  reasoning        0  ≈ $0.0000 --
+-- spend total ≈ $0.0000 (estimate at list prices) --
+rejudge exit 1
+sheepdog bench rejudge: segments: workday-scale-ten r1: segment 13 (beat 13): judge: no verdict for right_agent
+sheepdog bench rejudge: 1 runs not rejudged (run again to retry them)
+judge claude sonnet: 1m58s, 44 calls
+-- spend judge    sonnet                   calls    44  in    641784  out    31208  reasoning        0  ≈ $0.0000 --
+-- spend total ≈ $0.0000 (estimate at list prices) --
+rejudge exit 1
+rejudged workday-scale-ten r1: fail
+judge claude sonnet: 1m10s, 29 calls
+-- spend judge    sonnet                   calls    29  in    436654  out    15890  reasoning        0  ≈ $0.0000 --
+-- spend total ≈ $0.0000 (estimate at list prices) --
+rejudge (no segments, scale-ten) exit 0

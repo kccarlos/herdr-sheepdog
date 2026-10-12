@@ -45,3 +45,44 @@ judge claude sonnet: 6m38s, 474 calls
 -- spend judge    sonnet                   calls   474  in    905230  out    70184  reasoning        0  ≈ $0.0000 --
 -- spend total ≈ $0.0000 (estimate at list prices) --
 rejudge exit 1
+rejudged explain-zh-input-rules r5: fail
+rejudged explain-zh-notes-ledger r1: fail
+rejudged explain-zh-notes-ledger r2: fail
+rejudged explain-zh-notes-ledger r3: fail
+rejudged explain-zh-notes-ledger r4: pass
+rejudged explain-zh-notes-ledger r5: fail
+rejudged workday-explain-deep r1: fail
+rejudged workday-explain-deep r2: fail
+rejudged workday-interruptions r1: fail
+rejudged workday-interruptions r2: fail
+rejudged workday-long-haul r1: fail
+rejudged workday-long-haul r2: fail
+rejudged workday-morning-standup r1: fail
+rejudged workday-morning-standup r2: fail
+sheepdog bench rejudge: segments: workday-scale-ten r1: segment 13 (beat 13): judge: no verdict for right_agent
+sheepdog bench rejudge: segments: workday-scale-ten r2: segment 13 (beat 13): judge: no verdict for right_agent
+rejudged workday-zh-evening r1: fail
+rejudged workday-zh-evening r2: fail
+sheepdog bench rejudge: 2 runs not rejudged (run again to retry them)
+judge claude sonnet: 23m58s, 560 calls
+-- spend judge    sonnet                   calls   560  in   6742858  out   396338  reasoning        0  ≈ $0.0000 --
+-- spend total ≈ $0.0000 (estimate at list prices) --
+rejudge exit 1
+sheepdog bench rejudge: segments: workday-scale-ten r1: segment 13 (beat 13): judge: no verdict for right_agent
+rejudged workday-scale-ten r2: fail
+sheepdog bench rejudge: 1 runs not rejudged (run again to retry them)
+judge claude sonnet: 4m2s, 87 calls
+-- spend judge    sonnet                   calls    87  in   1405978  out    70448  reasoning        0  ≈ $0.0000 --
+-- spend total ≈ $0.0000 (estimate at list prices) --
+rejudge exit 1
+sheepdog bench rejudge: segments: workday-scale-ten r1: segment 13 (beat 13): judge: no verdict for right_agent
+sheepdog bench rejudge: 1 runs not rejudged (run again to retry them)
+judge claude sonnet: 1m53s, 44 calls
+-- spend judge    sonnet                   calls    44  in    685994  out    33851  reasoning        0  ≈ $0.0000 --
+-- spend total ≈ $0.0000 (estimate at list prices) --
+rejudge exit 1
+rejudged workday-scale-ten r1: fail
+judge claude sonnet: 1m6s, 29 calls
+-- spend judge    sonnet                   calls    29  in    427963  out    16401  reasoning        0  ≈ $0.0000 --
+-- spend total ≈ $0.0000 (estimate at list prices) --
+rejudge (no segments, scale-ten) exit 0
