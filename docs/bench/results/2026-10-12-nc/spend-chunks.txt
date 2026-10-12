@@ -3,3 +3,4 @@ nc explain-1 0.88
 a explain-2 0.82
 nc explain-2 0.87
 a workday-1 3.63
+nc workday-1 3.86

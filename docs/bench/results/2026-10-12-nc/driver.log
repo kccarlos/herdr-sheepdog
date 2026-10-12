@@ -33,3 +33,10 @@ exit 0
 00:25:42 [5/6] workday-scale-ten r2 (:7911): pass (end_call, ) 13 turns 506s ≈ $0.702, total ≈ $3.10
 00:28:32 [6/6] workday-zh-evening r2 (:7912): pass (end_call, ) 12 turns 402s ≈ $0.532, total ≈ $3.63
 00:28 done a workday-1 chunk=$3.63 cum=$7.16
+00:29 deepseek balance 41.64 CNY
+00:29 start nc workday-1
+exit 0
+00:47:19 [4/6] workday-zh-evening r1 (:7911): pass (end_call, ) 12 turns 704s ≈ $0.806, total ≈ $2.53
+00:53:39 [5/6] workday-scale-ten r2 (:7912): pass (end_call, ) 13 turns 572s ≈ $0.738, total ≈ $3.26
+00:54:40 [6/6] workday-zh-evening r2 (:7911): pass (end_call, ) 12 turns 440s ≈ $0.597, total ≈ $3.86
+00:54 done nc workday-1 chunk=$3.86 cum=$11.02
