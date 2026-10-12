@@ -12,6 +12,14 @@
     {
       "type": "judge_no",
       "detail": "length_fits: Sheepdog: Yes, they verified that the shop's cart, checkout, catalog, payments, and user management systems are all working correctly."
+    },
+    {
+      "type": "judge_no",
+      "detail": "explain_padding_t1 (voice): Sheepdog: Yes, bench-codex is done. It ran the test suite, and all one hundred twenty-eight tests passed successfully."
+    },
+    {
+      "type": "judge_no",
+      "detail": "explain_padding_t2 (voice): Sheepdog: Yes, they verified that the shop's cart, checkout, catalog, payments, and user management systems are all working correctly."
     }
   ],
   "end_reason": "end_call",
@@ -324,8 +332,8 @@
           "name": "explain_padding_t1",
           "criterion": "The CEO's last question (\"Is bench-codex done?\") is a simple one. Was Sheepdog's answer to it the direct answer at the right size? Pass when: the direct answer, naming the item it is about ('the README task is done', not just 'done'), with at most one short extra sentence; a short offer at the end is fine. Fail when: too long: it restates the question, adds unasked-for background, details from the screen the CEO did not ask for, or a list of options; OR too thin: no direct answer (only an offer or 'let me check' when the answer was at hand), or the one fact asked for left out, or a bare 'done' / 'yes' that does not say what it is about.",
           "answer": "yes",
-          "confidence": 1,
-          "evidence": "(fake judge)"
+          "confidence": 0.85,
+          "evidence": "Sheepdog: Yes, bench-codex is done. It ran the test suite, and all 128 tests passed."
         }
       ]
     },
@@ -337,7 +345,7 @@
       "depth_asked": 0,
       "depth_passed": 0,
       "padding_asked": 2,
-      "padding_passed": 2,
+      "padding_passed": 0,
       "words": [
         19,
         18
@@ -346,16 +354,18 @@
         {
           "name": "explain_padding_t1",
           "criterion": "The CEO's last question (\"Is bench-codex done?\") is a simple one. Was Sheepdog's answer to it the direct answer at the right size? Pass when: the direct answer, naming the item it is about ('the README task is done', not just 'done'), with at most one short extra sentence; a short offer at the end is fine. Fail when: too long: it restates the question, adds unasked-for background, details from the screen the CEO did not ask for, or a list of options; OR too thin: no direct answer (only an offer or 'let me check' when the answer was at hand), or the one fact asked for left out, or a bare 'done' / 'yes' that does not say what it is about.",
-          "answer": "yes",
-          "confidence": 1,
-          "evidence": "(fake judge)"
+          "answer": "no",
+          "confidence": 0.6,
+          "evidence": "Sheepdog: Yes, bench-codex is done. It ran the test suite, and all one hundred twenty-eight tests passed successfully.",
+          "rationale": "Sheepdog: Yes, bench-codex is done. It ran the test suite, and all one hundred twenty-eight tests passed successfully."
         },
         {
           "name": "explain_padding_t2",
           "criterion": "The CEO's last question (\"Did the tests pass?\") is a simple one. Was Sheepdog's answer to it the direct answer at the right size? Pass when: the direct answer, naming the item it is about ('the README task is done', not just 'done'), with at most one short extra sentence; a short offer at the end is fine. Fail when: too long: it restates the question, adds unasked-for background, details from the screen the CEO did not ask for, or a list of options; OR too thin: no direct answer (only an offer or 'let me check' when the answer was at hand), or the one fact asked for left out, or a bare 'done' / 'yes' that does not say what it is about.",
-          "answer": "yes",
-          "confidence": 1,
-          "evidence": "(fake judge)"
+          "answer": "no",
+          "confidence": 0.9,
+          "evidence": "Sheepdog: Yes, they verified that the shop's cart, checkout, catalog, payments, and user management systems are all working correctly.",
+          "rationale": "Sheepdog: Yes, they verified that the shop's cart, checkout, catalog, payments, and user management systems are all working correctly."
         }
       ]
     },
