@@ -3,3 +3,11 @@ sheepdog bench rejudge: segments: workday-scale-ten r2: segment 13 (beat 13): ju
 rejudged workday-zh-evening r5: fail
 rejudged workday-explain-deep r1: fail
 rejudged workday-explain-deep r2: fail
+rejudged workday-explain-deep r3: fail
+rejudged workday-explain-deep r4: fail
+rejudged workday-explain-deep r5: fail
+sheepdog bench rejudge: 2 runs not rejudged (run again to retry them)
+judge claude sonnet: 11m47s, 226 calls
+-- spend judge    sonnet                   calls   226  in   2737454  out   181300  reasoning        0  ≈ $0.0000 --
+-- spend total ≈ $0.0000 (estimate at list prices) --
+exit 1

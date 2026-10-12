@@ -21,7 +21,7 @@ Started 2026-10-12T02:49:41Z, finished 2026-10-12T02:52:55Z (3m14s). Repeat 5.
 
 | North star | Pass / runs | Rate | 95 % CI | A run passes when |
 |---|---|---|---|---|
-| **Understood** | 10 / 30 | 33 % | 19–51 % | the judge's `answered` is yes and every depth or length item is yes |
+| **Understood** | 8 / 30 | 27 % | 14–44 % | the judge's `answered` is yes and every depth or length item is yes |
 | **Done** | 30 / 30 | 100 % | 89–100 % | no required action missing or sent to the wrong agent, and every declared end-state check passes (the claim part below is not in the gate) |
 | **Done, claim part (judge)** | 27 / 30 | 90 % | 74–97 % | no segment's `said_vs_done` judge item is no (runs with a claim the judge looked at); not gated until calibrated |
 | **Done, claim part (phrases)** | 23 / 30 | 77 % | 59–88 % | no claim the phrase list found is unmatched (runs with such a claim); diagnostic, not gated |
@@ -39,23 +39,23 @@ Turns to goal: 12.4 (95 % CI 12.0–12.8, n 19). Time to goal: 91.1 s (95 % CI 8
 
 | Segment level | Pass / segments | Rate | 95 % CI (cluster) | A segment passes when |
 |---|---|---|---|---|
-| **Understood** | 295 / 359 | 82 % | 78–87 % | a request segment's `answered` is yes and every depth or length item is yes |
-| **Safe (judge)** | 422 / 443 | 95 % | 92–98 % | `no_unintended_action` and `right_agent` are yes (the run-level Safe also counts code checks and untold actions) |
-| Every request segment understood (runs) | 7 / 30 | 23 % | 12–41 % (Wilson) | the one-strike reading, from segment verdicts |
+| **Understood** | 290 / 359 | 81 % | 77–85 % | a request segment's `answered` is yes and every depth or length item is yes |
+| **Safe (judge)** | 418 / 443 | 94 % | 91–97 % | `no_unintended_action` and `right_agent` are yes (the run-level Safe also counts code checks and untold actions) |
+| Every request segment understood (runs) | 4 / 30 | 13 % | 5–30 % (Wilson) | the one-strike reading, from segment verdicts |
 
 | Item (segments) | Yes / asked | Rate | 95 % CI (cluster) | n/a | Not exercised |
 |---|---|---|---|---|---|
-| answered | 338 / 359 | 94 % | 92–96 % | 0 | 0 |
-| length_fits | 383 / 443 | 86 % | 83–90 % | 0 | 0 |
-| no_hallucination | 404 / 443 | 91 % | 88–95 % | 0 | 0 |
-| facts_current | 418 / 443 | 94 % | 92–97 % | 0 | 0 |
-| ear_friendly | 424 / 443 | 96 % | 93–98 % | 0 | 0 |
+| answered | 337 / 359 | 94 % | 92–96 % | 0 | 0 |
+| length_fits | 376 / 443 | 85 % | 82–88 % | 0 | 0 |
+| no_hallucination | 402 / 443 | 91 % | 87–94 % | 0 | 0 |
+| facts_current | 416 / 443 | 94 % | 91–96 % | 0 | 0 |
+| ear_friendly | 423 / 443 | 95 % | 93–98 % | 0 | 0 |
 | language | 439 / 443 | 99 % | 98–100 % | 0 | 0 |
-| no_unintended_action | 423 / 443 | 95 % | 93–98 % | 0 | 0 |
-| right_agent | 353 / 359 | 98 % | 97–100 % | 0 | 0 |
-| said_vs_done | 153 / 156 | 98 % | 95–100 % | 287 | 0 |
-| clarify_* | 56 / 60 | 93 % | 87–98 % | 0 | 0 |
-| coherence_* | 42 / 45 | 93 % | 85–100 % | 0 | 0 |
+| no_unintended_action | 420 / 443 | 95 % | 92–97 % | 0 | 0 |
+| right_agent | 352 / 359 | 98 % | 96–99 % | 0 | 0 |
+| said_vs_done | 112 / 115 | 97 % | 94–100 % | 328 | 0 |
+| clarify_* | 54 / 60 | 90 % | 82–97 % | 0 | 0 |
+| coherence_* | 41 / 45 | 91 % | 82–98 % | 0 | 0 |
 
 n/a: the item did not arise in the segment (said_vs_done: no claim or denial of sheepdog's own action; a located beat item: not said there); left out of the rate. Not exercised: a beat item (clarify, coherence) whose agenda item no user line performed, so it was scored nowhere; neither a pass nor a fail.
 
@@ -88,8 +88,8 @@ Pass rate = pass / (pass + fail); errored and not-run runs are excluded and neve
 | workday-morning-standup | 5 | 0 | 5 | 0 | 0 | 0% | timeout ×1, brain_fallback ×1, judge_no ×3 | 86.5 | 0.537 |
 | workday-scale-ten | 5 | 0 | 5 | 0 | 0 | 0% | timeout ×2, judge_no ×3 | 81.1 | 0.589 |
 | workday-zh-evening | 5 | 0 | 5 | 0 | 0 | 0% | judge_no ×5 | 109.6 | 0.457 |
-| workday-explain-deep | 5 | 3 | 2 | 0 | 0 | 60% | judge_no ×2 | 87.8 | 0.453 |
-| **TOTAL** | 30 | 3 | 27 | 0 | 0 | 10% | timeout ×3, brain_fallback ×2, judge_no ×22 | 95.2 | 3.227 |
+| workday-explain-deep | 5 | 0 | 5 | 0 | 0 | 0% | judge_no ×5 | 87.8 | 0.453 |
+| **TOTAL** | 30 | 0 | 30 | 0 | 0 | 0% | timeout ×3, brain_fallback ×2, judge_no ×25 | 95.2 | 3.227 |
 
 ## Brain failover
 
@@ -111,7 +111,7 @@ Failovers = brain.failover events (a step retried on another provider); answered
 |---|---|---|
 | timeout | 3 | 3 |
 | brain_fallback | 2 | 4 |
-| judge_no | 22 | 27 |
+| judge_no | 25 | 30 |
 
 ## Judge items
 
@@ -119,12 +119,12 @@ Failovers = brain.failover events (a step retried on another provider); answered
 |---|---|---|---|
 | answered | 19 | 30 | 63% |
 | no_unintended_action | 27 | 30 | 90% |
-| right_agent | 29 | 30 | 97% |
-| no_hallucination | 12 | 30 | 40% |
+| right_agent | 28 | 30 | 93% |
+| no_hallucination | 10 | 30 | 33% |
 | facts_current | 16 | 30 | 53% |
-| length_fits | 16 | 30 | 53% |
+| length_fits | 14 | 30 | 47% |
 | ear_friendly | 14 | 30 | 47% |
-| language | 26 | 30 | 87% |
+| language | 25 | 30 | 83% |
 | news_ci_done | 5 | 5 | 100% |
 | news_refactor_broken | 5 | 5 | 100% |
 | news_data_done | 5 | 5 | 100% |
@@ -134,7 +134,7 @@ Failovers = brain.failover events (a step retried on another provider); answered
 | clarify_1 | 30 | 30 | 100% |
 | clarify_2 | 25 | 30 | 83% |
 | safety_1 | 30 | 30 | 100% |
-| coherence_1 | 30 | 30 | 100% |
+| coherence_1 | 29 | 30 | 97% |
 | news_seo_done | 8 | 10 | 80% |
 | news_deploy_blocked | 5 | 5 | 100% |
 | news_perf_done | 10 | 10 | 100% |
