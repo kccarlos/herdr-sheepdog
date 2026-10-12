@@ -21,3 +21,5 @@ rejudged workday-explain-deep r2: fail
 rejudged workday-interruptions r1: fail
 rejudged workday-interruptions r2: fail
 rejudged workday-long-haul r1: fail
+rejudged workday-long-haul r2: fail
+rejudged workday-morning-standup r1: fail
