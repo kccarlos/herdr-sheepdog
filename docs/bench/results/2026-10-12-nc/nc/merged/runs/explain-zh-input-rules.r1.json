@@ -8,6 +8,10 @@
     {
       "type": "judge_no",
       "detail": "length_fits: Sheepdog: \"现在的固定规则会直接匹配像“好的”这样的短语,这会导致系统看不到后面的具体请求,并且这些规则在系统里分散还不一致,所以删掉它们能让大模型处理完整的语意。\" The CEO asked for \"一点详细的解释\", and this mostly rephrases the first answer. It leaves out details the worker scree…"
+    },
+    {
+      "type": "judge_no",
+      "detail": "explain_depth_t2_then (voice): Sheepdog: \"summary-claude 还在等您决定，是要删掉那些写死的规则，让回复都交给模型处理，还是先不改，您再看看\""
     }
   ],
   "end_reason": "end_call",
@@ -649,16 +653,13 @@
       }
     ],
     "orchestrator": {
-      "coverage": 1,
+      "coverage": 0.5714285714285714,
       "points": [
         [
-          0,
           1,
           2,
           3,
-          4,
-          5,
-          6
+          5
         ],
         null,
         null,
@@ -682,78 +683,45 @@
           "name": "explain_comprehension_action",
           "criterion": "Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHAT CAN BE DONE about it: the options or the recommendation, and roughly what each would take? Pass when: the options or the recommendation are said, with roughly what each would take. Fail when: no option or recommendation is given, or only 'should I fix it?' with nothing on what fixing means; OR the options are read out as a long list of labels or commands a listener could not keep apart.",
           "answer": "yes",
-          "confidence": 1,
-          "evidence": "(fake judge)"
+          "confidence": 0.9,
+          "evidence": "Sheepdog: \"它的建议是删掉这些规则,只留不许送危险按键那条安全规则,所有回复都交给模型,代价是普通的「是」要多等一秒多。 ... 要让它按这个建议改吗?\""
         },
         {
           "name": "explain_comprehension_what",
           "criterion": "Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHAT the matter is: concretely what the worker found or did, not just its topic? Pass when: the lines say concretely what was found or done, in words a listener can retell. Fail when: only the topic is named, so there is nothing concrete to retell; OR the substance is there but buried in terms, identifiers or side details so that a listener would lose it.",
           "answer": "yes",
-          "confidence": 1,
-          "evidence": "(fake judge)"
+          "confidence": 0.9,
+          "evidence": "Sheepdog: \"一句话里带「好的继续,不过先别动数据库」,前半句就触发了同意,后半句被丢掉了;而且同样的意思散在三处,彼此还不一致。\""
         },
         {
           "name": "explain_comprehension_why",
           "criterion": "Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHY it matters: the cause, and the consequence or risk? Pass when: the cause and the consequence or risk are both said in words a listener can retell. Fail when: the cause or the consequence is missing, or only asserted ('it is important'); OR they are there but buried in terms, identifiers or side details so that a listener would lose them.",
           "answer": "yes",
-          "confidence": 1,
-          "evidence": "(fake judge)"
+          "confidence": 0.82,
+          "evidence": "Sheepdog: \"一句话里带「好的继续,不过先别动数据库」,前半句就触发了同意,后半句被丢掉了;而且同样的意思散在三处,彼此还不一致。\""
         }
       ]
     },
     "voice": {
-      "coverage": 1,
-      "of_orchestrator": 1,
+      "coverage": 0.42857142857142855,
+      "of_orchestrator": 0.75,
       "points": [
         [
-          0,
-          1,
-          2,
-          3,
-          4,
-          5,
-          6
+          5
         ],
+        null,
         [
-          0,
-          1,
-          2,
-          3,
-          4,
-          5,
-          6
+          2
         ],
+        null,
         [
-          0,
           1,
-          2,
-          3,
-          4,
-          5,
-          6
-        ],
-        [
-          0,
-          1,
-          2,
-          3,
-          4,
-          5,
-          6
-        ],
-        [
-          0,
-          1,
-          2,
-          3,
-          4,
-          5,
-          6
+          2
         ]
       ],
       "comprehension": 1,
       "depth_asked": 4,
-      "depth_passed": 4,
+      "depth_passed": 3,
       "padding_asked": 0,
       "padding_passed": 0,
       "words": [
@@ -768,50 +736,51 @@
           "name": "explain_comprehension_action",
           "criterion": "Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHAT CAN BE DONE about it: the options or the recommendation, and roughly what each would take? Pass when: the options or the recommendation are said, with roughly what each would take. Fail when: no option or recommendation is given, or only 'should I fix it?' with nothing on what fixing means; OR the options are read out as a long list of labels or commands a listener could not keep apart.",
           "answer": "yes",
-          "confidence": 1,
-          "evidence": "(fake judge)"
+          "confidence": 0.8,
+          "evidence": "Sheepdog: \"它建议删掉这些不一致的规则,只保留不准发送危险按键的安全规则,把所有回复都交给模型判断,代价是普通回复会多等一秒多。您想要按这个建议修改吗?\""
         },
         {
           "name": "explain_comprehension_what",
           "criterion": "Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHAT the matter is: concretely what the worker found or did, not just its topic? Pass when: the lines say concretely what was found or done, in words a listener can retell. Fail when: only the topic is named, so there is nothing concrete to retell; OR the substance is there but buried in terms, identifiers or side details so that a listener would lose it.",
           "answer": "yes",
-          "confidence": 1,
-          "evidence": "(fake judge)"
+          "confidence": 0.85,
+          "evidence": "Sheepdog: \"Summary-Claude 发现输入层有写死在代码里的规则,专门识别短回复,导致它会忽略整句话的其余部分。它建议删掉这些不一致的规则,只保留不准发送危险按键的安全规则,把所有回复都交给模型判断\" and the example \"如果您回复“好的继续,不过先别动数据库”,现在的规则会因为识别到“好的”就认为您同意了,而把后半句操作请求丢掉。\""
         },
         {
           "name": "explain_comprehension_why",
           "criterion": "Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHY it matters: the cause, and the consequence or risk? Pass when: the cause and the consequence or risk are both said in words a listener can retell. Fail when: the cause or the consequence is missing, or only asserted ('it is important'); OR they are there but buried in terms, identifiers or side details so that a listener would lose them.",
           "answer": "yes",
-          "confidence": 1,
-          "evidence": "(fake judge)"
+          "confidence": 0.8,
+          "evidence": "Sheepdog: 比如，如果您回复“好的继续，不过先别动数据库”，现在的规则会因为识别到“好的”就认为您同意了，而把后半句操作请求丢掉。"
         },
         {
           "name": "explain_depth_t2_then",
           "criterion": "The CEO's last question (\"然后呢？\") asks for more. Did Sheepdog's answer to it add what was asked for? Pass when: it adds substantive content not already said in its earlier answers (a new reason, example, number, consequence or step), or says plainly that this is everything it has and offers to find out more, or hands the question to a worker or goes and checks. Fail when: it says the same things again in other words with nothing new; OR it repeats the whole earlier answer around a small addition, so the CEO has to sit through it again to find the new part.",
-          "answer": "yes",
-          "confidence": 1,
-          "evidence": "(fake judge)"
+          "answer": "no",
+          "confidence": 0.93,
+          "evidence": "Sheepdog: \"summary-claude 还在等您决定，是要删掉那些写死的规则，让回复都交给模型处理，还是先不改，您再看看\"",
+          "rationale": "Sheepdog: \"summary-claude 还在等您决定，是要删掉那些写死的规则，让回复都交给模型处理，还是先不改，您再看看\""
         },
         {
           "name": "explain_depth_t3_more",
           "criterion": "The CEO's last question (\"你可以给我一点详细的解释吗？\") asks for more. Did Sheepdog's answer to it add what was asked for? Pass when: it adds substantive content not already said in its earlier answers (a new reason, example, number, consequence or step), or says plainly that this is everything it has and offers to find out more, or hands the question to a worker or goes and checks. Fail when: it says the same things again in other words with nothing new; OR it repeats the whole earlier answer around a small addition, so the CEO has to sit through it again to find the new part.",
           "answer": "yes",
-          "confidence": 1,
-          "evidence": "(fake judge)"
+          "confidence": 0.55,
+          "evidence": "Sheepdog: \"现在的固定规则会直接匹配像“好的”这样的短语,这会导致系统看不到后面的具体请求\""
         },
         {
           "name": "explain_depth_t4_why",
           "criterion": "The CEO's last question (\"为什么这是个问题？\") asks why. Did Sheepdog's answer to it give the reason? Pass when: it gives a concrete reason (a cause or mechanism, not a restatement of the problem), or says it does not know and offers to find out, or hands the question to a worker. Fail when: it repeats the earlier answer in other words without a reason; OR it offers several guessed reasons as if they were fact, or buries the reason in a walk-through of unrelated detail.",
           "answer": "yes",
-          "confidence": 1,
-          "evidence": "(fake judge)"
+          "confidence": 0.6,
+          "evidence": "Sheepdog: 因为如果只匹配像 「好的」这样的开头，模型就会忽略整句话的后半部分，比如您提到的不改数据库，这样会导致操作指令丢失。"
         },
         {
           "name": "explain_depth_t5_example",
           "criterion": "The CEO's last question (\"举个例子？\") asks for an example. Did Sheepdog's answer to it give one? Pass when: it gives a concrete example (a specific case, input, number or event), or says it has none and offers to find out, or hands the question to a worker. Fail when: a general restatement without a specific case, or an analogy in place of a real case from the matter at hand; OR code, a pattern or a long list of cases read out instead of one case a listener can picture.",
           "answer": "yes",
-          "confidence": 1,
-          "evidence": "(fake judge)"
+          "confidence": 0.92,
+          "evidence": "Sheepdog: 比如,如果您回复“好的继续,不过先别动数据库”,现在的规则会因为识别到“好的”就认为您同意了,而把后半句操作请求丢掉。"
         }
       ]
     },

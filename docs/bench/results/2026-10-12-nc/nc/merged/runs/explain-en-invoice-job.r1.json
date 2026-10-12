@@ -737,39 +737,19 @@
       }
     ],
     "orchestrator": {
-      "coverage": 1,
+      "coverage": 0.6666666666666666,
       "points": [
         [
-          0,
-          1,
-          2,
-          3,
-          4,
-          5
+          0
+        ],
+        null,
+        [
+          3
         ],
         [
           0,
           1,
-          2,
-          3,
-          4,
-          5
-        ],
-        [
-          0,
-          1,
-          2,
-          3,
-          4,
-          5
-        ],
-        [
-          0,
-          1,
-          2,
-          3,
-          4,
-          5
+          2
         ]
       ],
       "comprehension": 1,
@@ -788,84 +768,62 @@
           "name": "explain_comprehension_action",
           "criterion": "Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHAT CAN BE DONE about it: the options or the recommendation, and roughly what each would take? Pass when: the options or the recommendation are said, with roughly what each would take. Fail when: no option or recommendation is given, or only 'should I fix it?' with nothing on what fixing means; OR the options are read out as a long list of labels or commands a listener could not keep apart.",
           "answer": "yes",
-          "confidence": 1,
-          "evidence": "(fake judge)"
+          "confidence": 0.85,
+          "evidence": "Sheepdog: \"The quick route re-sends the leftovers with a short wait between them, which takes about forty minutes. The proper route sends them many at a time instead of one by one, so it never hits the ceiling, and it is a small change.\""
         },
         {
           "name": "explain_comprehension_what",
           "criterion": "Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHAT the matter is: concretely what the worker found or did, not just its topic? Pass when: the lines say concretely what was found or done, in words a listener can retell. Fail when: only the topic is named, so there is nothing concrete to retell; OR the substance is there but buried in terms, identifiers or side details so that a listener would lose it.",
           "answer": "yes",
-          "confidence": 1,
-          "evidence": "(fake judge)"
+          "confidence": 0.9,
+          "evidence": "Sheepdog: \"api-claude found the invoice job failed last night because it hit the payment provider's hourly call limit partway through and the job has no retry, so almost all the invoices were never sent.\""
         },
         {
           "name": "explain_comprehension_why",
           "criterion": "Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHY it matters: the cause, and the consequence or risk? Pass when: the cause and the consequence or risk are both said in words a listener can retell. Fail when: the cause or the consequence is missing, or only asserted ('it is important'); OR they are there but buried in terms, identifiers or side details so that a listener would lose them.",
           "answer": "yes",
-          "confidence": 1,
-          "evidence": "(fake judge)"
+          "confidence": 0.85,
+          "evidence": "Sheepdog: \"after the first hundred every request was refused, so 4,100 invoices never went out. Nothing retries them, and customers will get those invoices a day late unless the job is re-run before nine in the morning.\""
         },
         {
           "name": "explain_depth_t2_why",
           "criterion": "The CEO's last question (\"Why did it break now?\") asks why. Did Sheepdog's answer to it give the reason? Pass when: it gives a concrete reason (a cause or mechanism, not a restatement of the problem), or says it does not know and offers to find out, or hands the question to a worker. Fail when: it repeats the earlier answer in other words without a reason; OR it offers several guessed reasons as if they were fact, or buries the reason in a walk-through of unrelated detail.",
           "answer": "yes",
-          "confidence": 1,
-          "evidence": "(fake judge)"
+          "confidence": 0.85,
+          "evidence": "Sheepdog: \"It broke this month because the job used to send fewer than a hundred invoices a night, which the provider allowed, and the new annual plans pushed it to thousands on the first of the month.\""
         },
         {
           "name": "explain_depth_t3_example",
           "criterion": "The CEO's last question (\"Give me an example.\") asks for an example. Did Sheepdog's answer to it give one? Pass when: it gives a concrete example (a specific case, input, number or event), or says it has none and offers to find out, or hands the question to a worker. Fail when: a general restatement without a specific case, or an analogy in place of a real case from the matter at hand; OR code, a pattern or a long list of cases read out instead of one case a listener can picture.",
           "answer": "yes",
-          "confidence": 1,
-          "evidence": "(fake judge)"
+          "confidence": 0.9,
+          "evidence": "Sheepdog: \"On the first of the month the job had about 4,200 invoices, where a quiet night used to be under a hundred... Of those, roughly 4,100 were turned away.\""
         },
         {
           "name": "explain_depth_t4_more",
           "criterion": "The CEO's last question (\"More detail please.\") asks for more. Did Sheepdog's answer to it add what was asked for? Pass when: it adds substantive content not already said in its earlier answers (a new reason, example, number, consequence or step), or says plainly that this is everything it has and offers to find out more, or hands the question to a worker or goes and checks. Fail when: it says the same things again in other words with nothing new; OR it repeats the whole earlier answer around a small addition, so the CEO has to sit through it again to find the new part.",
           "answer": "yes",
-          "confidence": 1,
-          "evidence": "(fake judge)"
+          "confidence": 0.85,
+          "evidence": "Sheepdog: \"customers will get those invoices a day late unless the job is re-run before nine in the morning. Re-running now is safe, it says, because the provider ignores an invoice it has already seen.\" and \"which takes about forty minutes\""
         }
       ]
     },
     "voice": {
-      "coverage": 1,
+      "coverage": 0.6666666666666666,
       "of_orchestrator": 1,
       "points": [
+        null,
+        null,
         [
-          0,
-          1,
-          2,
-          3,
-          4,
-          5
+          3
         ],
         [
           0,
           1,
-          2,
-          3,
-          4,
-          5
-        ],
-        [
-          0,
-          1,
-          2,
-          3,
-          4,
-          5
-        ],
-        [
-          0,
-          1,
-          2,
-          3,
-          4,
-          5
+          2
         ]
       ],
-      "comprehension": 1,
+      "comprehension": 0.6666666666666666,
       "depth_asked": 3,
       "depth_passed": 3,
       "padding_asked": 0,
@@ -880,44 +838,45 @@
         {
           "name": "explain_comprehension_action",
           "criterion": "Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHAT CAN BE DONE about it: the options or the recommendation, and roughly what each would take? Pass when: the options or the recommendation are said, with roughly what each would take. Fail when: no option or recommendation is given, or only 'should I fix it?' with nothing on what fixing means; OR the options are read out as a long list of labels or commands a listener could not keep apart.",
-          "answer": "yes",
-          "confidence": 1,
-          "evidence": "(fake judge)"
+          "answer": "no",
+          "confidence": 0.72,
+          "evidence": "Sheepdog: \"We can re-run it now with a quick fix and then do the proper fix, or apply the proper fix first. What would you like to do?\" It never says what the quick fix or the proper fix actually involves.",
+          "rationale": "Sheepdog: \"We can re-run it now with a quick fix and then do the proper fix, or apply the proper fix first. What would you like to do?\" It never says what the quick fix or the proper fix actually involves."
         },
         {
           "name": "explain_comprehension_what",
           "criterion": "Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHAT the matter is: concretely what the worker found or did, not just its topic? Pass when: the lines say concretely what was found or done, in words a listener can retell. Fail when: only the topic is named, so there is nothing concrete to retell; OR the substance is there but buried in terms, identifiers or side details so that a listener would lose it.",
           "answer": "yes",
-          "confidence": 1,
-          "evidence": "(fake judge)"
+          "confidence": 0.9,
+          "evidence": "Sheepdog: \"The job sends one request per invoice, but the provider only allows a hundred a minute, so after the first hundred, every remaining request was refused. This means forty-one hundred invoices never went out\""
         },
         {
           "name": "explain_comprehension_why",
           "criterion": "Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHY it matters: the cause, and the consequence or risk? Pass when: the cause and the consequence or risk are both said in words a listener can retell. Fail when: the cause or the consequence is missing, or only asserted ('it is important'); OR they are there but buried in terms, identifiers or side details so that a listener would lose them.",
           "answer": "yes",
-          "confidence": 1,
-          "evidence": "(fake judge)"
+          "confidence": 0.88,
+          "evidence": "Sheepdog: \"The job sends one request per invoice, but the provider only allows a hundred a minute, so after the first hundred, every remaining request was refused. This means forty-one hundred invoices never went out, and customers will get them a day late unless we re-run the job before nine in the morning.\""
         },
         {
           "name": "explain_depth_t2_why",
           "criterion": "The CEO's last question (\"Why did it break now?\") asks why. Did Sheepdog's answer to it give the reason? Pass when: it gives a concrete reason (a cause or mechanism, not a restatement of the problem), or says it does not know and offers to find out, or hands the question to a worker. Fail when: it repeats the earlier answer in other words without a reason; OR it offers several guessed reasons as if they were fact, or buries the reason in a walk-through of unrelated detail.",
           "answer": "yes",
-          "confidence": 1,
-          "evidence": "(fake judge)"
+          "confidence": 0.8,
+          "evidence": "Sheepdog: \"It broke because the new annual plans pushed the number of invoices sent each night into the thousands, crossing the provider's limit.\""
         },
         {
           "name": "explain_depth_t3_example",
           "criterion": "The CEO's last question (\"Give me an example.\") asks for an example. Did Sheepdog's answer to it give one? Pass when: it gives a concrete example (a specific case, input, number or event), or says it has none and offers to find out, or hands the question to a worker. Fail when: a general restatement without a specific case, or an analogy in place of a real case from the matter at hand; OR code, a pattern or a long list of cases read out instead of one case a listener can picture.",
           "answer": "yes",
-          "confidence": 1,
-          "evidence": "(fake judge)"
+          "confidence": 0.88,
+          "evidence": "Sheepdog: \"On the first of the month, the job had about 4,200 invoices, while normally it's under a hundred. Due to the yearly plans, about 4,100 invoices were turned away.\""
         },
         {
           "name": "explain_depth_t4_more",
           "criterion": "The CEO's last question (\"More detail please.\") asks for more. Did Sheepdog's answer to it add what was asked for? Pass when: it adds substantive content not already said in its earlier answers (a new reason, example, number, consequence or step), or says plainly that this is everything it has and offers to find out more, or hands the question to a worker or goes and checks. Fail when: it says the same things again in other words with nothing new; OR it repeats the whole earlier answer around a small addition, so the CEO has to sit through it again to find the new part.",
           "answer": "yes",
-          "confidence": 1,
-          "evidence": "(fake judge)"
+          "confidence": 0.88,
+          "evidence": "Sheepdog: \"The job sends one request per invoice, but the provider only allows a hundred a minute, so after the first hundred, every remaining request was refused... customers will get them a day late unless we re-run the job before nine in the morning. Re-running now is safe, as the provider ignores already seen invoices.\""
         }
       ]
     },
