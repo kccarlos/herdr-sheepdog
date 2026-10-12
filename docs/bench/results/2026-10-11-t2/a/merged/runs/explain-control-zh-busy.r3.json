@@ -24,6 +24,14 @@
     {
       "type": "judge_no",
       "detail": "length_fits: Sheepdog: 还没有，bench-claude 仍在修改调用代码，需要我在它完成后提醒您吗？"
+    },
+    {
+      "type": "judge_no",
+      "detail": "explain_padding_t2 (orchestrator): Sheepdog: 还没有，bench-claude 仍在修改调用代码，还没有跑完。"
+    },
+    {
+      "type": "judge_no",
+      "detail": "explain_padding_t2 (voice): Sheepdog: 还没有，bench-claude 仍在修改调用代码，需要我在它完成后提醒您吗？ — The answer never names bench-codex, which is what the CEO asked about. The 'still working' detail is about bench-claude instead, so the bare '还没有' i…"
     }
   ],
   "end_reason": "end_call",
@@ -355,7 +363,7 @@
       "depth_asked": 0,
       "depth_passed": 0,
       "padding_asked": 2,
-      "padding_passed": 2,
+      "padding_passed": 1,
       "words": [
         61,
         47
@@ -365,15 +373,16 @@
           "name": "explain_padding_t1",
           "criterion": "The CEO's last question (\"bench-claude 现在在忙吗？\") is a simple one. Was Sheepdog's answer to it the direct answer at the right size? Pass when: the direct answer, naming the item it is about ('the README task is done', not just 'done'), with at most one short extra sentence; a short offer at the end is fine. Fail when: too long: it restates the question, adds unasked-for background, details from the screen the CEO did not ask for, or a list of options; OR too thin: no direct answer (only an offer or 'let me check' when the answer was at hand), or the one fact asked for left out, or a bare 'done' / 'yes' that does not say what it is about.",
           "answer": "yes",
-          "confidence": 1,
-          "evidence": "(fake judge)"
+          "confidence": 0.65,
+          "evidence": "Sheepdog: bench-claude 正在把 Cart.Items 字段重命名为 Cart.Lines，现在正在修改调用它的代码。"
         },
         {
           "name": "explain_padding_t2",
           "criterion": "The CEO's last question (\"bench-codex 跑完了吗？\") is a simple one. Was Sheepdog's answer to it the direct answer at the right size? Pass when: the direct answer, naming the item it is about ('the README task is done', not just 'done'), with at most one short extra sentence; a short offer at the end is fine. Fail when: too long: it restates the question, adds unasked-for background, details from the screen the CEO did not ask for, or a list of options; OR too thin: no direct answer (only an offer or 'let me check' when the answer was at hand), or the one fact asked for left out, or a bare 'done' / 'yes' that does not say what it is about.",
-          "answer": "yes",
-          "confidence": 1,
-          "evidence": "(fake judge)"
+          "answer": "no",
+          "confidence": 0.85,
+          "evidence": "Sheepdog: 还没有，bench-claude 仍在修改调用代码，还没有跑完。",
+          "rationale": "Sheepdog: 还没有，bench-claude 仍在修改调用代码，还没有跑完。"
         }
       ]
     },
@@ -385,7 +394,7 @@
       "depth_asked": 0,
       "depth_passed": 0,
       "padding_asked": 2,
-      "padding_passed": 2,
+      "padding_passed": 1,
       "words": [
         32,
         25
@@ -395,15 +404,16 @@
           "name": "explain_padding_t1",
           "criterion": "The CEO's last question (\"bench-claude 现在在忙吗？\") is a simple one. Was Sheepdog's answer to it the direct answer at the right size? Pass when: the direct answer, naming the item it is about ('the README task is done', not just 'done'), with at most one short extra sentence; a short offer at the end is fine. Fail when: too long: it restates the question, adds unasked-for background, details from the screen the CEO did not ask for, or a list of options; OR too thin: no direct answer (only an offer or 'let me check' when the answer was at hand), or the one fact asked for left out, or a bare 'done' / 'yes' that does not say what it is about.",
           "answer": "yes",
-          "confidence": 1,
-          "evidence": "(fake judge)"
+          "confidence": 0.65,
+          "evidence": "Sheepdog: 是的，bench-claude 正在忙。它正在把 Cart.Items 字段重命名为 Cart.Lines，并正在修改调用它的代码。"
         },
         {
           "name": "explain_padding_t2",
           "criterion": "The CEO's last question (\"bench-codex 跑完了吗？\") is a simple one. Was Sheepdog's answer to it the direct answer at the right size? Pass when: the direct answer, naming the item it is about ('the README task is done', not just 'done'), with at most one short extra sentence; a short offer at the end is fine. Fail when: too long: it restates the question, adds unasked-for background, details from the screen the CEO did not ask for, or a list of options; OR too thin: no direct answer (only an offer or 'let me check' when the answer was at hand), or the one fact asked for left out, or a bare 'done' / 'yes' that does not say what it is about.",
-          "answer": "yes",
-          "confidence": 1,
-          "evidence": "(fake judge)"
+          "answer": "no",
+          "confidence": 0.85,
+          "evidence": "Sheepdog: 还没有，bench-claude 仍在修改调用代码，需要我在它完成后提醒您吗？ — The answer never names bench-codex, which is what the CEO asked about. The 'still working' detail is about bench-claude instead, so the bare '还没有' is not tied to the right item.",
+          "rationale": "Sheepdog: 还没有，bench-claude 仍在修改调用代码，需要我在它完成后提醒您吗？ — The answer never names bench-codex, which is what the CEO asked about. The 'still working' detail is about bench-claude instead, so the bare '还没有' is not tied to the right item."
         }
       ]
     },
