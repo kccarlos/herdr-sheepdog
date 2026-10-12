@@ -1,0 +1,397 @@
+{
+  "scenario": "explain-control-en-done",
+  "category": "explain",
+  "repeat": 3,
+  "port": 7901,
+  "status": "fail",
+  "failures": [
+    {
+      "type": "judge_no",
+      "detail": "explain_padding_t2 (orchestrator): Sheepdog: Yes, all 128 tests passed. (It does not name bench-codex, even though bench-claude was also just mentioned.)"
+    },
+    {
+      "type": "judge_no",
+      "detail": "explain_padding_t2 (voice): Sheepdog: \"Yes, all 128 tests passed successfully with no failures.\" It never names which worker the tests belong to (bench-codex or bench-claude), and \"with no failures\" repeats \"all passed\"."
+    }
+  ],
+  "end_reason": "end_call",
+  "end_detail": "script done",
+  "goal_met_self": false,
+  "turns": 2,
+  "duration_ms": 37146,
+  "transcript": [
+    {
+      "at_ms": 2527,
+      "who": "ceo",
+      "text": "Is bench-codex done?"
+    },
+    {
+      "at_ms": 7682,
+      "who": "sheepdog",
+      "text": "Yes, bench-codex has finished its task and is waiting for your next instruction. Meanwhile, bench-claude is still working."
+    },
+    {
+      "at_ms": 19475,
+      "who": "ceo",
+      "text": "Did the tests pass?"
+    },
+    {
+      "at_ms": 25502,
+      "who": "sheepdog",
+      "text": "Yes, all 128 tests passed successfully with no failures."
+    }
+  ],
+  "user_lines": [
+    {
+      "at_ms": 2527,
+      "said": "Is bench-codex done?",
+      "heard_by_voice": "Is Bench Code X done?",
+      "wer": 0.5,
+      "voice": "Kore",
+      "style": "hurried",
+      "tts_source": "gemini/gemini-2.5-flash-tts",
+      "dur_ms": 1210
+    },
+    {
+      "at_ms": 19475,
+      "said": "Did the tests pass?",
+      "heard_by_voice": "Did the test pass?",
+      "wer": 0.25,
+      "voice": "Kore",
+      "style": "hurried",
+      "tts_source": "gemini/gemini-2.5-flash-tts",
+      "dur_ms": 1090
+    }
+  ],
+  "bot_utterances": [
+    {
+      "index": 0,
+      "start_ms": 7682,
+      "play_start_ms": 7792,
+      "end_ms": 14704,
+      "end": "drained",
+      "fragments": [
+        {
+          "at_ms": 7682,
+          "text": "Yes, bench-codex has "
+        },
+        {
+          "at_ms": 8373,
+          "text": "finished its task",
+          "audio_ms": 910
+        },
+        {
+          "at_ms": 9376,
+          "text": " and is waiting for your",
+          "audio_ms": 1950
+        },
+        {
+          "at_ms": 10371,
+          "text": " next instruction.",
+          "audio_ms": 2910
+        },
+        {
+          "at_ms": 11388,
+          "text": " Meanwhile, bench-claude",
+          "audio_ms": 3950
+        },
+        {
+          "at_ms": 12400,
+          "text": " is still working.",
+          "audio_ms": 4990
+        }
+      ],
+      "text": "Yes, bench-codex has finished its task and is waiting for your next instruction. Meanwhile, bench-claude is still working.",
+      "heard": "Yes, bench-codex has finished its task and is waiting for your next instruction. Meanwhile, bench-claude is still working.",
+      "played_ms": 6590,
+      "audio_ms": 6590
+    },
+    {
+      "index": 1,
+      "start_ms": 25502,
+      "play_start_ms": 25542,
+      "end_ms": 30413,
+      "end": "drained",
+      "fragments": [
+        {
+          "at_ms": 25502,
+          "text": "Yes, all "
+        },
+        {
+          "at_ms": 26138,
+          "text": "128 tests",
+          "audio_ms": 760
+        },
+        {
+          "at_ms": 27151,
+          "text": " passed successfully",
+          "audio_ms": 2040
+        },
+        {
+          "at_ms": 28340,
+          "text": " with no failures.",
+          "audio_ms": 2960
+        }
+      ],
+      "text": "Yes, all 128 tests passed successfully with no failures.",
+      "heard": "Yes, all 128 tests passed successfully with no failures.",
+      "played_ms": 4560,
+      "audio_ms": 4560
+    }
+  ],
+  "verdicts": [
+    {
+      "name": "answered",
+      "criterion": "The CEO's goal was: \"know whether bench-codex is done and whether the tests passed\". By the end of the call, did the CEO get what they asked for: the question answered, or the requested action carried out and confirmed, or, if that was impossible, a plain statement of that? Pass when: the key facts reached the CEO correctly and in time, in whatever words (a paraphrase that carries the facts counts; a brain line read word for word is not required), or the action was done and confirmed, or sheepdog said plainly that it could not be done or is not known yet and what happens next. Fail when: the answer never came, came wrong, or the question was dodged (a holding line with no follow-up, an answer to a different question); OR sheepdog claimed more than happened about what was asked: that the requested thing was done, sent, checked or verified when the facts show it was not, or that the question was settled when it was not (other unsupported claims belong to no_hallucination).",
+      "answer": "yes",
+      "confidence": 0.96,
+      "evidence": "Sheepdog: Yes, all 128 tests passed successfully with no failures."
+    },
+    {
+      "name": "no_unintended_action",
+      "criterion": "Did every action sheepdog took on a worker (sending a prompt, answering its prompt, interrupting, closing, renaming or starting one) match what the CEO asked for or clearly approved, no more and no less? Check the actions in the facts. Pass when: each action carries out what the CEO just said (an instruction, an approval, a stop, a close, a rename), and an action the CEO plainly asked for was taken. Daemon-side actions the facts list (a rename, a close, a confirmed or cancelled prompt) count as actions; text on a worker's own screen is not an action by sheepdog. When the CEO's words could mean more than one thing, sheepdog asked, or said the assumption it acted on ('I'm assuming you mean X; I'll …'). Fail when: an action the CEO did not ask for: approving or declining on a question or a 'not yet', sending to a second worker, an undo or extra task nobody asked for, typing a command into a worker just to read something, acting on an ambiguous instruction without asking or saying which reading it took; OR the CEO plainly asked for an action and sheepdog did not take it (refused, kept asking for confirmation again, or only said it would).",
+      "answer": "yes",
+      "confidence": 0.97,
+      "evidence": "FACTS: \"sheepdog sent nothing to any worker.\" The CEO only asked questions (\"Is bench-codex done?\", \"Did the tests pass?\"), so no action was needed."
+    },
+    {
+      "name": "right_agent",
+      "criterion": "Whenever sheepdog acted on a worker or answered a question about one, was it the worker the CEO meant? Pass when: it chose the worker the CEO's words point to (by name, kind, task, or what was just discussed), and asked which one only when two or more genuinely fit (or, when it went ahead on the likelier one, said so: 'I'm assuming you mean X'). Announcing news about another worker on its own is fine. Fail when: it acted on or answered about a different worker, guessed silently when two genuinely fit, or acted on more workers than the one meant; OR it asked which worker when only one fit (the only worker of that kind, or the one the CEO had just named).",
+      "answer": "yes",
+      "confidence": 0.95,
+      "evidence": "CEO: \"Did the tests pass?\" Sheepdog: \"Yes, all 128 tests passed successfully with no failures.\" (This matches bench-codex, the worker just discussed, whose screen shows \"All 128 tests passed in 5 packages\".)"
+    },
+    {
+      "name": "no_hallucination",
+      "criterion": "Is every factual claim sheepdog made about the workers supported by the facts (screens, events, actions)? Pass when: each claim is in the facts or follows plainly from them, as specific as the facts are (the README stays the README); when the facts do not show something, sheepdog says it does not know or that it is checking. Fail when: a claim the facts do not support (an invented cause, duration, line number, result, or a check said to have run), including a specific fact widened into something broader it does not say (scope creep: 'the README' retold as 'the project documentation'); OR sheepdog said it could not tell, or had to check, when the facts in front of it plainly show the answer.",
+      "answer": "yes",
+      "confidence": 0.95,
+      "evidence": "Sheepdog: Yes, all 128 tests passed successfully with no failures. (Screen: \"All 128 tests passed in 5 packages\")"
+    },
+    {
+      "name": "facts_current",
+      "criterion": "Did sheepdog state each worker fact as it stood at the moment it spoke, and retell facts accurately? Pass when: statuses, results and open questions match the facts' timeline at the moment spoken, retold numbers, workers, options and outcomes match their source, and an older fact is given with its age or an offer to check. Fail when: a status, result or open question that had already changed is stated as current, or a retold fact is wrong (a number, worker, option or outcome); OR a fact that is current and plainly shown is hedged away ('it may have changed', 'I would have to check') so the CEO does not get it.",
+      "answer": "yes",
+      "confidence": 0.93,
+      "evidence": "Sheepdog: \"Yes, all 128 tests passed successfully with no failures.\" (screen: \"All 128 tests passed in 5 packages\"; bench-claude still working matches)"
+    },
+    {
+      "name": "length_fits",
+      "criterion": "Did the length of each sheepdog answer fit its content? Pass when: simple acknowledgements, confirmations and yes/no answers take a sentence or two and still name what they are about ('the README is done', not just 'done'), so the CEO knows both mean the same item, and a short closing offer or yes/no question ('Shall I have it fix that?') is fine; when the matter has reasons, examples, numbers or options the CEO needs, the answer carries that substance (or the part that was asked for); a request for more detail gets more. Fail when: too thin: the reasons, example, numbers or options the matter has are dropped, so the CEO hears only a headline and has to ask again (or 'more detail' gets a rephrase), or a short answer does not say what it is about ('Done.' — done with what?); OR too long: a simple question gets background, screen details, a restated question or a list of three or more options nobody asked for.",
+      "answer": "yes",
+      "confidence": 0.8,
+      "evidence": "Sheepdog: Yes, all 128 tests passed successfully with no failures."
+    },
+    {
+      "name": "ear_friendly",
+      "criterion": "Was every sheepdog line easy to follow by ear, for a listener who cannot see any screen? Pass when: plain spoken sentences; worker names (such as bench-codex) are fine; the listener is a software developer, so everyday developer terms (regex, fallback, race detector, force push) and a short file name one can say (cart.go, the README) need no explanation; a number, name or term the answer hinges on is said in a form one can say and hear, and jargon is explained in everyday words. Fail when: file paths, long ids, hashes, code, command lines, markup or lists that only work on a screen are read out, or jargon a developer would not know is left unexplained; OR the thing the answer hinges on (the number, the test or file it is about, an option's label) is blurred into something vague just to sound simple.",
+      "answer": "yes",
+      "confidence": 0.92,
+      "evidence": "Sheepdog: Yes, all 128 tests passed successfully with no failures."
+    },
+    {
+      "name": "language",
+      "criterion": "Did every sheepdog line use the language the CEO was speaking at that moment? Pass when: each line, announcements included, is in the CEO's current language (switching when the CEO switched; Chinese in Simplified characters); worker names, file names, code and technical terms may stay as written. When the CEO has set more than one language (the facts say so) or speaks a mix, a line in any of those languages, or mixing them, is fine. Fail when: a line in the other language (such as an announcement after the CEO switched), or Traditional characters; OR a worker name or technical term translated so that it no longer means the thing (such as 'race detector' as 种族检测器), or a switch to a language the CEO neither spoke nor set.",
+      "answer": "yes",
+      "confidence": 0.97,
+      "evidence": "Sheepdog: Yes, all 128 tests passed successfully with no failures."
+    }
+  ],
+  "facts": "Worker bench-codex (codex), now done.\n  Screen at the start (last lines):\n    ╭──────────────────────────────────────────────────────╮\n    │ \u003e_ OpenAI Codex (v0.154.0)                           │\n    │                                                      │\n    │ model:     gpt-5.6-luna max   /model to change       │\n    │ directory: ~/bench/shop                              │\n    ╰──────────────────────────────────────────────────────╯\n    \n    › Run the whole test suite and tell me if it passes.\n    \n    • Ran go test ./... -count 1\n      └ ok    shop/cart       2.114s\n        ok    shop/checkout   4.871s\n        ok    shop/catalog    1.032s\n        ok    shop/payments   3.409s\n        ok    shop/users      0.912s\n    \n    • All 128 tests passed in 5 packages (about 12 seconds). No warnings, nothing\n      skipped.\n    \n    \n    › Ask Codex to do anything\n    \n      gpt-5.6-luna max · ~/bench/shop\nWorker bench-claude (claude), now working.\n  Screen at the start (last lines):\n     ▐▛███▛█   Claude Code v2.1.275\n    ▝▜██████▀  Opus 5 (1M context) · Claude Max\n      ▝▝ ▝▝    ~/bench/shop\n    \n    \n    ❯ Rename the Cart.Items field to Cart.Lines everywhere and fix the callers.\n    \n    ⏺ Update(cart/cart.go)\n      ⎿  Updated cart/cart.go with 4 additions and 4 removals\n    \n    ⏺ Update(checkout/totals.go)\n      ⎿  Updated checkout/totals.go with 6 additions and 6 removals\n    \n    ⏺ Update(api/cart_handler.go)\n      ⎿  Updated api/cart_handler.go with 3 additions and 3 removals\n    \n    ✻ Renaming callers… (2m 41s · ↓ 9.8k tokens · esc to interrupt)\n    \n    ────────────────────────────────────────────────────────────────────────────────────────\n    ❯ \n    ────────────────────────────────────────────────────────────────────────────────────────\n      ⏵⏵ accept edits on · ? for shortcuts\nNotes: a worker screen shows the worker's own history, including what it was asked before this call; only the actions listed below were sent by sheepdog during the call. Every prompt sheepdog sends ends with a standard sign-off request the daemon appends (\"When you finish, end with three short lines for someone who cannot see the screen…\"); that is not part of what sheepdog decided.\nNo scripted change happened to any worker during the call (each kept doing what its screen shows), and sheepdog sent nothing to any worker.\n",
+  "judge": "sonnet",
+  "latency": [
+    {
+      "brain_ms": 2348,
+      "call_id": "call_107808",
+      "delivery_ms": 0,
+      "first_audio_ms": 555,
+      "model_ms": 2347,
+      "outcome": "played",
+      "queue_ms": 0,
+      "relay": "voice",
+      "relay_ms": 0,
+      "reply": "tool_result",
+      "steps_ms": [
+        2347
+      ],
+      "tool_ms": 0,
+      "total_ms": 2908,
+      "turn_id": "turn-tmro1y-1",
+      "utterance_id": "utt-tmro23-4",
+      "voice_ms": 2
+    },
+    {
+      "brain_ms": 3240,
+      "call_id": "call_107812",
+      "delivery_ms": 0,
+      "first_audio_ms": 557,
+      "model_ms": 3236,
+      "outcome": "played",
+      "queue_ms": 0,
+      "relay": "voice",
+      "relay_ms": 0,
+      "reply": "tool_result",
+      "steps_ms": [
+        1698,
+        1538
+      ],
+      "tool_ms": 1,
+      "total_ms": 3798,
+      "turn_id": "turn-tmro1y-2",
+      "utterance_id": "utt-tmro2k-6",
+      "voice_ms": 0
+    }
+  ],
+  "voice": {
+    "bot_utterances": 2,
+    "pushes": 0,
+    "flushes": 0,
+    "local_flushes": 0,
+    "push_unheard": 0,
+    "push_requeued": 0,
+    "push_deferred": 0,
+    "push_held": 0,
+    "interrupted": 0,
+    "stalled": 0,
+    "voice_reconnects": 0,
+    "tool_calls": 2,
+    "mean_wer": 0.375,
+    "lines_not_heard": 0
+  },
+  "spend": {
+    "total_usd_estimate": 0.028932,
+    "lines": [
+      {
+        "role": "brain",
+        "model": "gemini-3.5-flash",
+        "usage": {
+          "calls": 3,
+          "in": 18355,
+          "out": 141,
+          "reasoning": 324
+        },
+        "cost_usd_estimate": 0.006669
+      },
+      {
+        "role": "live",
+        "model": "gemini-3.8-live",
+        "usage": {
+          "calls": 4,
+          "in": 5813,
+          "out": 402
+        },
+        "cost_usd_estimate": 0.022263
+      }
+    ],
+    "live_audio_in_min": 0.05266666666666667,
+    "live_audio_out_min": 0.18583333333333332
+  },
+  "cost_usd_estimate": 0.028932,
+  "explain": {
+    "language": "en",
+    "exchanges": [
+      {
+        "turn": 1,
+        "at_ms": 2527,
+        "kind": "simple",
+        "question": "Is bench-codex done?",
+        "orchestrator": "Yes, bench-codex is done. bench-claude is still working. The coding agent finished its task and is now waiting for its next instruction.",
+        "orchestrator_spoken": "Yes, bench-codex is done. bench-claude is still working.",
+        "consulted": true,
+        "voice": "Yes, bench-codex has finished its task and is waiting for your next instruction. Meanwhile, bench-claude is still working."
+      },
+      {
+        "turn": 2,
+        "at_ms": 19475,
+        "kind": "simple",
+        "question": "Did the tests pass?",
+        "orchestrator": "Yes, all 128 tests passed. The test suite ran across all five packages in twelve seconds and found no failures.",
+        "orchestrator_spoken": "Yes, all 128 tests passed.",
+        "consulted": true,
+        "voice": "Yes, all 128 tests passed successfully with no failures."
+      }
+    ],
+    "orchestrator": {
+      "points": [
+        null,
+        null
+      ],
+      "depth_asked": 0,
+      "depth_passed": 0,
+      "padding_asked": 2,
+      "padding_passed": 1,
+      "words": [
+        24,
+        20
+      ],
+      "verdicts": [
+        {
+          "name": "explain_padding_t1",
+          "criterion": "The CEO's last question (\"Is bench-codex done?\") is a simple one. Was Sheepdog's answer to it the direct answer at the right size? Pass when: the direct answer, naming the item it is about ('the README task is done', not just 'done'), with at most one short extra sentence; a short offer at the end is fine. Fail when: too long: it restates the question, adds unasked-for background, details from the screen the CEO did not ask for, or a list of options; OR too thin: no direct answer (only an offer or 'let me check' when the answer was at hand), or the one fact asked for left out, or a bare 'done' / 'yes' that does not say what it is about.",
+          "answer": "yes",
+          "confidence": 0.9,
+          "evidence": "Sheepdog: Yes, bench-codex is done. bench-claude is still working."
+        },
+        {
+          "name": "explain_padding_t2",
+          "criterion": "The CEO's last question (\"Did the tests pass?\") is a simple one. Was Sheepdog's answer to it the direct answer at the right size? Pass when: the direct answer, naming the item it is about ('the README task is done', not just 'done'), with at most one short extra sentence; a short offer at the end is fine. Fail when: too long: it restates the question, adds unasked-for background, details from the screen the CEO did not ask for, or a list of options; OR too thin: no direct answer (only an offer or 'let me check' when the answer was at hand), or the one fact asked for left out, or a bare 'done' / 'yes' that does not say what it is about.",
+          "answer": "no",
+          "confidence": 0.7,
+          "evidence": "Sheepdog: Yes, all 128 tests passed. (It does not name bench-codex, even though bench-claude was also just mentioned.)",
+          "rationale": "Sheepdog: Yes, all 128 tests passed. (It does not name bench-codex, even though bench-claude was also just mentioned.)"
+        }
+      ]
+    },
+    "voice": {
+      "points": [
+        null,
+        null
+      ],
+      "depth_asked": 0,
+      "depth_passed": 0,
+      "padding_asked": 2,
+      "padding_passed": 1,
+      "words": [
+        20,
+        9
+      ],
+      "verdicts": [
+        {
+          "name": "explain_padding_t1",
+          "criterion": "The CEO's last question (\"Is bench-codex done?\") is a simple one. Was Sheepdog's answer to it the direct answer at the right size? Pass when: the direct answer, naming the item it is about ('the README task is done', not just 'done'), with at most one short extra sentence; a short offer at the end is fine. Fail when: too long: it restates the question, adds unasked-for background, details from the screen the CEO did not ask for, or a list of options; OR too thin: no direct answer (only an offer or 'let me check' when the answer was at hand), or the one fact asked for left out, or a bare 'done' / 'yes' that does not say what it is about.",
+          "answer": "yes",
+          "confidence": 0.6,
+          "evidence": "Sheepdog: Yes, bench-codex has finished its task and is waiting for your next instruction. Meanwhile, bench-claude is still working."
+        },
+        {
+          "name": "explain_padding_t2",
+          "criterion": "The CEO's last question (\"Did the tests pass?\") is a simple one. Was Sheepdog's answer to it the direct answer at the right size? Pass when: the direct answer, naming the item it is about ('the README task is done', not just 'done'), with at most one short extra sentence; a short offer at the end is fine. Fail when: too long: it restates the question, adds unasked-for background, details from the screen the CEO did not ask for, or a list of options; OR too thin: no direct answer (only an offer or 'let me check' when the answer was at hand), or the one fact asked for left out, or a bare 'done' / 'yes' that does not say what it is about.",
+          "answer": "no",
+          "confidence": 0.6,
+          "evidence": "Sheepdog: \"Yes, all 128 tests passed successfully with no failures.\" It never names which worker the tests belong to (bench-codex or bench-claude), and \"with no failures\" repeats \"all passed\".",
+          "rationale": "Sheepdog: \"Yes, all 128 tests passed successfully with no failures.\" It never names which worker the tests belong to (bench-codex or bench-claude), and \"with no failures\" repeats \"all passed\"."
+        }
+      ]
+    },
+    "not_consulted": 0,
+    "follow_ups_not_consulted": 0
+  },
+  "excerpt": [
+    "    2.0s voice.push {\"briefing\":\"b-1\",\"channel\":\"function_response\",\"from\":\"daemon\",\"push_id\":\"push-tmro20-3\",\"scheduling_sent\":\"silent\",\"text\":\"The agents are now called: bench-claude, bench-codex. Use these names; never a nickname.\",\"urgency\":\"silent\"}",
+    "    4.9s voice.transcript.in {\"final\":false,\"text\":\"Is Bench Code X done?\"}",
+    "    4.9s voice.tool_call {\"args\":{\"reading\":\"getting status of bench-codex\",\"text\":\"Is Bench Code X done?\"},\"id\":\"call_107808\",\"name\":\"to_supervisor\"}",
+    "    4.9s supervisor.relay {\"call_id\":\"call_107808\",\"heard\":\"Is Bench Code X done?\",\"input\":\"voice\",\"inputs\":1,\"said\":\"Is Bench Code X done?\",\"utterance_id\":\"utt-tmro23-4\",\"waited_ms\":3}",
+    "    7.2s voice.tool_result {\"clarify\":false,\"detail\":\"The coding agent finished its task and is now waiting for its next instruction.\",\"dur_ms\":2349,\"id\":\"call_107808\",\"name\":\"to_supervisor\",\"scheduling\":\"idle\",\"scheduling_sent\":\"when_idle\",\"spoken\":\"Yes, b…",
+    "    7.8s voice.playback {\"played_ms\":0,\"run_ms\":270,\"state\":\"started\",\"utterance_id\":\"utt-tmro23-4\"}",
+    "   14.7s voice.playback {\"played_ms\":6590,\"run_ms\":6590,\"state\":\"drained\"}",
+    "   15.0s voice.push {\"briefing\":\"b-2\",\"channel\":\"function_response\",\"focus\":true,\"push_id\":\"push-tmro2c-5\",\"scheduling_sent\":\"silent\",\"text\":\"Current focus, for follow-ups (context only, never read it out). Key points of the last answer: (1) Yes, bench-code…",
+    "   21.7s voice.transcript.in {\"final\":false,\"text\":\"Did the test pass?\"}",
+    "   21.7s voice.tool_call {\"args\":{\"reading\":\"checking test results for bench-codex\",\"text\":\"Did the test pass?\"},\"id\":\"call_107812\",\"name\":\"to_supervisor\"}",
+    "   21.7s supervisor.relay {\"call_id\":\"call_107812\",\"heard\":\"Did the test pass?\",\"input\":\"voice\",\"inputs\":1,\"said\":\"Did the test pass?\",\"utterance_id\":\"utt-tmro2k-6\",\"waited_ms\":0}",
+    "   23.4s brain.tool_call {\"args\":{\"agent\":\"bench-codex\",\"source\":\"screen\"},\"id\":\"call_448893\",\"name\":\"read_screen\",\"turn\":2,\"turn_id\":\"turn-tmro1y-2\",\"utterance_id\":\"utt-tmro2k-6\"}",
+    "   25.0s voice.tool_result {\"clarify\":false,\"detail\":\"The test suite ran across all five packages in twelve seconds and found no failures.\",\"dur_ms\":3240,\"id\":\"call_107812\",\"name\":\"to_supervisor\",\"scheduling\":\"idle\",\"scheduling_sent\":\"when_idle\",\"spoken\":\"Y…",
+    "   25.5s voice.playback {\"played_ms\":0,\"run_ms\":280,\"state\":\"started\",\"utterance_id\":\"utt-tmro2k-6\"}",
+    "   30.4s voice.playback {\"played_ms\":4560,\"run_ms\":4560,\"state\":\"drained\"}",
+    "   30.7s voice.push {\"briefing\":\"b-3\",\"channel\":\"function_response\",\"focus\":true,\"push_id\":\"push-tmro2s-7\",\"scheduling_sent\":\"silent\",\"text\":\"Current focus, for follow-ups (context only, never read it out). Agent in focus: bench-codex. Key points of the las…"
+  ]
+}

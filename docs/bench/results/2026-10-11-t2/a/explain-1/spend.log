@@ -1,0 +1,9 @@
+16:28:12 [1/9] explain-en-flaky-test r1 (:7901): pass (end_call, ) 5 turns 92s ≈ $0.069, total ≈ $0.07
+16:28:29 [2/9] explain-zh-input-rules r1 (:7902): pass (end_call, ) 5 turns 108s ≈ $0.067, total ≈ $0.14
+16:28:49 [3/9] explain-control-en-done r1 (:7901): pass (end_call, ) 2 turns 36s ≈ $0.029, total ≈ $0.16
+16:30:22 [4/9] explain-zh-input-rules r2 (:7902): pass (end_call, ) 5 turns 113s ≈ $0.072, total ≈ $0.24
+16:30:28 [5/9] explain-en-flaky-test r2 (:7901): pass (end_call, ) 5 turns 99s ≈ $0.071, total ≈ $0.31
+16:31:00 [6/9] explain-control-en-done r2 (:7902): pass (end_call, ) 2 turns 38s ≈ $0.029, total ≈ $0.34
+16:32:21 [7/9] explain-zh-input-rules r3 (:7901): pass (end_call, ) 5 turns 113s ≈ $0.069, total ≈ $0.41
+16:32:32 [8/9] explain-en-flaky-test r3 (:7902): pass (end_call, ) 5 turns 91s ≈ $0.074, total ≈ $0.48
+16:32:59 [9/9] explain-control-en-done r3 (:7901): pass (end_call, ) 2 turns 37s ≈ $0.029, total ≈ $0.51

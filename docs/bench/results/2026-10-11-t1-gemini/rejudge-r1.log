@@ -1,0 +1,30 @@
+rejudged workday-interruptions r1: fail
+sheepdog bench rejudge: segments: workday-interruptions r2: segment 4 (beat 5): judge: no verdict for right_agent
+rejudged workday-interruptions r3: fail
+rejudged workday-interruptions r4: fail
+rejudged workday-interruptions r5: fail
+rejudged workday-long-haul r1: fail
+rejudged workday-long-haul r2: fail
+rejudged workday-long-haul r3: fail
+rejudged workday-long-haul r4: fail
+rejudged workday-long-haul r5: fail
+rejudged workday-morning-standup r1: fail
+rejudged workday-morning-standup r2: fail
+rejudged workday-morning-standup r3: fail
+rejudged workday-morning-standup r4: fail
+rejudged workday-morning-standup r5: fail
+sheepdog bench rejudge: workday-scale-ten r1 answered: judge: context canceled
+sheepdog bench rejudge: workday-scale-ten r2 answered: judge: claude cli: context canceled: 
+sheepdog bench rejudge: workday-scale-ten r3 answered: judge: claude cli: context canceled: 
+sheepdog bench rejudge: workday-scale-ten r4 answered: judge: claude cli: context canceled: 
+sheepdog bench rejudge: workday-scale-ten r5 answered: judge: claude cli: context canceled: 
+sheepdog bench rejudge: workday-zh-evening r1 answered: judge: claude cli: context canceled: 
+sheepdog bench rejudge: workday-zh-evening r2 answered: judge: claude cli: context canceled: 
+sheepdog bench rejudge: workday-zh-evening r3 answered: judge: claude cli: context canceled: 
+sheepdog bench rejudge: workday-zh-evening r4 answered: judge: context canceled
+sheepdog bench rejudge: workday-zh-evening r5 answered: judge: context canceled
+sheepdog bench rejudge: 11 runs not rejudged (run again to retry them)
+judge claude sonnet: 28m0s, 725 calls
+-- spend judge    sonnet                   calls   725  in   7183862  out   418060  reasoning        0  ≈ $0.0000 --
+-- spend total ≈ $0.0000 (estimate at list prices) --
+exit 124

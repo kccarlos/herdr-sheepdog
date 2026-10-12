@@ -1,0 +1,9 @@
+16:51:58 [1/9] explain-zh-notes-ledger r1 (:7902): pass (end_call, ) 4 turns 90s ≈ $0.060, total ≈ $0.06
+16:52:18 [2/9] explain-en-invoice-job r1 (:7901): pass (end_call, ) 4 turns 110s ≈ $0.095, total ≈ $0.15
+16:52:41 [3/9] explain-control-zh-busy r1 (:7902): pass (end_call, ) 2 turns 42s ≈ $0.033, total ≈ $0.19
+16:53:46 [4/9] explain-zh-notes-ledger r2 (:7901): pass (end_call, ) 4 turns 88s ≈ $0.078, total ≈ $0.27
+16:54:21 [5/9] explain-en-invoice-job r2 (:7902): pass (end_call, ) 4 turns 100s ≈ $0.078, total ≈ $0.34
+16:54:38 [6/9] explain-control-zh-busy r2 (:7901): pass (end_call, ) 2 turns 51s ≈ $0.037, total ≈ $0.38
+16:55:57 [7/9] explain-zh-notes-ledger r3 (:7902): pass (end_call, ) 4 turns 96s ≈ $0.054, total ≈ $0.43
+16:56:04 [8/9] explain-en-invoice-job r3 (:7901): pass (end_call, ) 4 turns 85s ≈ $0.092, total ≈ $0.53
+16:56:44 [9/9] explain-control-zh-busy r3 (:7902): pass (end_call, ) 2 turns 47s ≈ $0.034, total ≈ $0.56

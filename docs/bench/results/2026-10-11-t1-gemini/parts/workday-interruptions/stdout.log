@@ -1,0 +1,18 @@
+[1/5] workday-interruptions r3: pass (end_call, ) ≈ $0.0761, total ≈ $0.076
+[2/5] workday-interruptions r2: pass (end_call, ) ≈ $0.0882, total ≈ $0.164
+[3/5] workday-interruptions r1: pass (end_call, ) ≈ $0.1059, total ≈ $0.270
+[4/5] workday-interruptions r4: pass (end_call, ) ≈ $0.0880, total ≈ $0.358
+[5/5] workday-interruptions r5: pass (end_call, ) ≈ $0.0951, total ≈ $0.453
+  pass    workday-interruptions r1  end_call  12 turns   94.5s                         ≈ $0.1059
+  pass    workday-interruptions r2  end_call  13 turns   92.4s                         ≈ $0.0882
+  pass    workday-interruptions r3  end_call  11 turns   74.2s                         ≈ $0.0761
+  pass    workday-interruptions r4  end_call  12 turns   65.9s                         ≈ $0.0880
+  pass    workday-interruptions r5  end_call  11 turns   86.6s                         ≈ $0.0951
+-- 5 runs, spend ≈ $0.4533 (estimate at list prices) --
+reports: docs/bench/results/2026-10-11-t1-gemini/parts/workday-interruptions/report.json, docs/bench/results/2026-10-11-t1-gemini/parts/workday-interruptions/report.md
+== eval sim, repeat 5 ==
+  workday-interruptions  runs  5  pass  5  fail  0  err  0  not_run  0  rate  100%  –
+  TOTAL                  runs  5  pass  5  fail  0  err  0  not_run  0  rate  100%  –
+-- spend brain    gemini-3.5-flash         calls   124  in   1234376  out     8954  reasoning    13234  ≈ $0.4258 --
+-- spend simuser  deepseek-flash           calls    56  in     89246  out     1187  reasoning        0  ≈ $0.0275 --
+-- spend total ≈ $0.4533 (estimate at list prices) --
