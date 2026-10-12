@@ -5,3 +5,4 @@ a explain-2 0.56
 rl explain-2 0.45
 nc explain-2 0.50
 a workday-1 4.19
+rl workday-1 3.52
