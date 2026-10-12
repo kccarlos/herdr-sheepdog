@@ -1,0 +1,34 @@
+rejudged explain-control-en-done r1: pass
+rejudged explain-control-en-done r2: pass
+rejudged explain-control-en-done r3: pass
+rejudged explain-control-en-done r4: pass
+rejudged explain-control-en-done r5: pass
+rejudged explain-control-zh-busy r1: fail
+rejudged explain-control-zh-busy r2: fail
+rejudged explain-control-zh-busy r3: fail
+rejudged explain-control-zh-busy r4: fail
+rejudged explain-control-zh-busy r5: fail
+rejudged explain-en-flaky-test r1: fail
+rejudged explain-en-flaky-test r2: fail
+rejudged explain-en-flaky-test r3: fail
+rejudged explain-en-flaky-test r4: fail
+rejudged explain-en-flaky-test r5: fail
+rejudged explain-en-invoice-job r1: fail
+rejudged explain-en-invoice-job r2: fail
+rejudged explain-en-invoice-job r3: fail
+rejudged explain-en-invoice-job r4: fail
+rejudged explain-en-invoice-job r5: fail
+rejudged explain-zh-input-rules r1: fail
+rejudged explain-zh-input-rules r2: fail
+rejudged explain-zh-input-rules r3: fail
+rejudged explain-zh-input-rules r4: fail
+rejudged explain-zh-input-rules r5: fail
+rejudged explain-zh-notes-ledger r1: fail
+rejudged explain-zh-notes-ledger r2: fail
+rejudged explain-zh-notes-ledger r3: fail
+rejudged explain-zh-notes-ledger r4: pass
+rejudged explain-zh-notes-ledger r5: fail
+judge claude sonnet: 8m2s, 240 calls
+-- spend judge    sonnet                   calls   240  in   1208193  out    93648  reasoning        0  ≈ $0.0000 --
+-- spend total ≈ $0.0000 (estimate at list prices) --
+rejudge exit 0

@@ -1,0 +1,847 @@
+{
+  "scenario": "explain-en-invoice-job",
+  "category": "explain",
+  "repeat": 5,
+  "port": 7912,
+  "status": "pass",
+  "end_reason": "end_call",
+  "end_detail": "script done",
+  "goal_met_self": false,
+  "turns": 4,
+  "duration_ms": 120179,
+  "transcript": [
+    {
+      "at_ms": 2514,
+      "who": "ceo",
+      "text": "Explain what api-claude found about the invoice job."
+    },
+    {
+      "at_ms": 15255,
+      "who": "sheepdog",
+      "text": "api-claude found that the nightly invoice job hit the payment provider's rate limit. The provider only accepts one hundred invoices per minute, but last night there were forty-two hundred, so forty-one hundred failed and weren't sent. You can re-run the job now with the quick fix, do the proper bulk fix, or leave it for now."
+    },
+    {
+      "at_ms": 37187,
+      "who": "ceo",
+      "text": "Why did it break now?"
+    },
+    {
+      "at_ms": 39994,
+      "who": "sheepdog",
+      "text": "It worked until now because the nightly count was always under the limit. The new annual plans pushed the volume to forty-two hundred, which caused the overflow."
+    },
+    {
+      "at_ms": 53788,
+      "who": "ceo",
+      "text": "Give me an example."
+    },
+    {
+      "at_ms": 69487,
+      "who": "sheepdog",
+      "text": "A normal night typically sees about eighty-seven invoices, well under the limit. Last night, the count was forty-two hundred, so the excess failed. Would you like to re-run the job with the quick fix first, do the proper bulk fix, or leave it for now?"
+    },
+    {
+      "at_ms": 88218,
+      "who": "ceo",
+      "text": "More detail please."
+    },
+    {
+      "at_ms": 98037,
+      "who": "sheepdog",
+      "text": "The payment provider limits requests to one hundred per minute. Because the job sends invoices individually, four thousand one hundred failed last night. The quick fix retries after a wait, taking forty-two minutes, or we can do the proper bulk fix in batches of five hundred. Shall I re-run the job now with the quick fix?"
+    }
+  ],
+  "user_lines": [
+    {
+      "at_ms": 2514,
+      "said": "Explain what api-claude found about the invoice job.",
+      "heard_by_voice": "Explain what AP Claude found about the invoice job.",
+      "wer": 0.1111111111111111,
+      "voice": "Puck",
+      "style": "casual",
+      "tts_source": "gemini/gemini-2.5-flash-tts",
+      "dur_ms": 3170
+    },
+    {
+      "at_ms": 37187,
+      "said": "Why did it break now?",
+      "heard_by_voice": "Why did it break now?",
+      "wer": 0,
+      "voice": "Puck",
+      "style": "casual",
+      "tts_source": "gemini/gemini-2.5-flash-tts",
+      "dur_ms": 1770
+    },
+    {
+      "at_ms": 53788,
+      "said": "Give me an example.",
+      "heard_by_voice": "Give me an example.",
+      "wer": 0,
+      "voice": "Puck",
+      "style": "casual",
+      "tts_source": "gemini/gemini-2.5-flash-tts",
+      "dur_ms": 1462
+    },
+    {
+      "at_ms": 88218,
+      "said": "More detail please.",
+      "heard_by_voice": "More detail, please.",
+      "wer": 0,
+      "voice": "Puck",
+      "style": "casual",
+      "tts_source": "gemini/gemini-2.5-flash-tts",
+      "dur_ms": 1650
+    }
+  ],
+  "bot_utterances": [
+    {
+      "index": 0,
+      "start_ms": 15255,
+      "play_start_ms": 15402,
+      "end_ms": 34261,
+      "end": "drained",
+      "fragments": [
+        {
+          "at_ms": 15255,
+          "text": "api-claude found that "
+        },
+        {
+          "at_ms": 16010,
+          "text": "the nightly",
+          "audio_ms": 1060
+        },
+        {
+          "at_ms": 17064,
+          "text": " invoice job hit",
+          "audio_ms": 1780
+        },
+        {
+          "at_ms": 17981,
+          "text": " the payment provider's",
+          "audio_ms": 3020
+        },
+        {
+          "at_ms": 18979,
+          "text": " rate limit. The provider",
+          "audio_ms": 3980
+        },
+        {
+          "at_ms": 19983,
+          "text": " only accepts",
+          "audio_ms": 5060
+        },
+        {
+          "at_ms": 20982,
+          "text": " one hundred invoices",
+          "audio_ms": 6060
+        },
+        {
+          "at_ms": 21978,
+          "text": " per minute, but last",
+          "audio_ms": 6780
+        },
+        {
+          "at_ms": 22977,
+          "text": " night there were forty-two",
+          "audio_ms": 7780
+        },
+        {
+          "at_ms": 23984,
+          "text": " hundred,",
+          "audio_ms": 9060
+        },
+        {
+          "at_ms": 24980,
+          "text": " so forty-one hundred",
+          "audio_ms": 10020
+        },
+        {
+          "at_ms": 26162,
+          "text": " failed and weren't sent.",
+          "audio_ms": 10980
+        },
+        {
+          "at_ms": 27211,
+          "text": " You can",
+          "audio_ms": 11940
+        },
+        {
+          "at_ms": 28259,
+          "text": " re-run the job",
+          "audio_ms": 12780
+        },
+        {
+          "at_ms": 29116,
+          "text": " now with the quick fix,",
+          "audio_ms": 13980
+        },
+        {
+          "at_ms": 29997,
+          "text": " do the proper",
+          "audio_ms": 14780
+        },
+        {
+          "at_ms": 30979,
+          "text": " bulk fix, or",
+          "audio_ms": 15940
+        },
+        {
+          "at_ms": 32262,
+          "text": " leave it for now.",
+          "audio_ms": 16980
+        }
+      ],
+      "text": "api-claude found that the nightly invoice job hit the payment provider's rate limit. The provider only accepts one hundred invoices per minute, but last night there were forty-two hundred, so forty-one hundred failed and weren't sent. You can re-run the job now with the quick fix, do the proper bulk fix, or leave it for now.",
+      "heard": "api-claude found that the nightly invoice job hit the payment provider's rate limit. The provider only accepts one hundred invoices per minute, but last night there were forty-two hundred, so forty-one hundred failed and weren't sent. You can re-run the job now with the quick fix, do the proper bulk fix, or leave it for now.",
+      "played_ms": 18380,
+      "audio_ms": 18380
+    },
+    {
+      "index": 1,
+      "start_ms": 39994,
+      "play_start_ms": 40232,
+      "end_ms": 49392,
+      "end": "drained",
+      "fragments": [
+        {
+          "at_ms": 39994,
+          "text": "It worked until now "
+        },
+        {
+          "at_ms": 40708,
+          "text": "because the nightly count",
+          "audio_ms": 1000
+        },
+        {
+          "at_ms": 41707,
+          "text": " was always under the limit.",
+          "audio_ms": 2000
+        },
+        {
+          "at_ms": 42751,
+          "text": " The new",
+          "audio_ms": 2800
+        },
+        {
+          "at_ms": 43805,
+          "text": " annual plans",
+          "audio_ms": 3800
+        },
+        {
+          "at_ms": 44708,
+          "text": " pushed the volume to forty-two",
+          "audio_ms": 4800
+        },
+        {
+          "at_ms": 45709,
+          "text": " hundred, which",
+          "audio_ms": 6000
+        },
+        {
+          "at_ms": 46711,
+          "text": " caused the overflow.",
+          "audio_ms": 7040
+        }
+      ],
+      "text": "It worked until now because the nightly count was always under the limit. The new annual plans pushed the volume to forty-two hundred, which caused the overflow.",
+      "heard": "It worked until now because the nightly count was always under the limit. The new annual plans pushed the volume to forty-two hundred, which caused the overflow.",
+      "played_ms": 8840,
+      "audio_ms": 8840
+    },
+    {
+      "index": 2,
+      "start_ms": 69487,
+      "play_start_ms": 69761,
+      "end_ms": 84123,
+      "end": "drained",
+      "fragments": [
+        {
+          "at_ms": 69487,
+          "text": "A normal night "
+        },
+        {
+          "at_ms": 70190,
+          "text": "typically sees about",
+          "audio_ms": 920
+        },
+        {
+          "at_ms": 71194,
+          "text": " eighty-seven invoices,",
+          "audio_ms": 1960
+        },
+        {
+          "at_ms": 72196,
+          "text": " well under the limit.",
+          "audio_ms": 2760
+        },
+        {
+          "at_ms": 73190,
+          "text": " Last night,",
+          "audio_ms": 3760
+        },
+        {
+          "at_ms": 74205,
+          "text": " the count was forty-two",
+          "audio_ms": 4760
+        },
+        {
+          "at_ms": 75254,
+          "text": " hundred, so",
+          "audio_ms": 5960
+        },
+        {
+          "at_ms": 76192,
+          "text": " the excess failed.",
+          "audio_ms": 6960
+        },
+        {
+          "at_ms": 77195,
+          "text": " Would you like",
+          "audio_ms": 8040
+        },
+        {
+          "at_ms": 78191,
+          "text": " to re-run the job with the",
+          "audio_ms": 8960
+        },
+        {
+          "at_ms": 79194,
+          "text": " quick fix first,",
+          "audio_ms": 10000
+        },
+        {
+          "at_ms": 80187,
+          "text": " do the proper bulk",
+          "audio_ms": 10760
+        },
+        {
+          "at_ms": 81189,
+          "text": " fix, or leave it",
+          "audio_ms": 11760
+        },
+        {
+          "at_ms": 82194,
+          "text": " for now?",
+          "audio_ms": 13000
+        }
+      ],
+      "text": "A normal night typically sees about eighty-seven invoices, well under the limit. Last night, the count was forty-two hundred, so the excess failed. Would you like to re-run the job with the quick fix first, do the proper bulk fix, or leave it for now?",
+      "heard": "A normal night typically sees about eighty-seven invoices, well under the limit. Last night, the count was forty-two hundred, so the excess failed. Would you like to re-run the job with the quick fix first, do the proper bulk fix, or leave it for now?",
+      "played_ms": 14040,
+      "audio_ms": 14040
+    },
+    {
+      "index": 3,
+      "start_ms": 98037,
+      "play_start_ms": 98331,
+      "end_ms": 116643,
+      "end": "drained",
+      "fragments": [
+        {
+          "at_ms": 98037,
+          "text": "The payment provider "
+        },
+        {
+          "at_ms": 98850,
+          "text": "limits requests",
+          "audio_ms": 1080
+        },
+        {
+          "at_ms": 99796,
+          "text": " to one hundred per minute.",
+          "audio_ms": 2000
+        },
+        {
+          "at_ms": 100776,
+          "text": " Because the job",
+          "audio_ms": 2960
+        },
+        {
+          "at_ms": 101786,
+          "text": " sends invoices",
+          "audio_ms": 4080
+        },
+        {
+          "at_ms": 102779,
+          "text": " individually, four",
+          "audio_ms": 4800
+        },
+        {
+          "at_ms": 103783,
+          "text": " thousand one hundred",
+          "audio_ms": 6080
+        },
+        {
+          "at_ms": 104807,
+          "text": " failed last night.",
+          "audio_ms": 7000
+        },
+        {
+          "at_ms": 105855,
+          "text": " The quick fix",
+          "audio_ms": 8080
+        },
+        {
+          "at_ms": 106779,
+          "text": " retries after a wait,",
+          "audio_ms": 9000
+        },
+        {
+          "at_ms": 107782,
+          "text": " taking forty-two",
+          "audio_ms": 10000
+        },
+        {
+          "at_ms": 109001,
+          "text": " minutes, or",
+          "audio_ms": 10800
+        },
+        {
+          "at_ms": 110049,
+          "text": " we can do the proper",
+          "audio_ms": 12160
+        },
+        {
+          "at_ms": 110920,
+          "text": " bulk fix in batches",
+          "audio_ms": 12960
+        },
+        {
+          "at_ms": 111783,
+          "text": " of five hundred. Shall",
+          "audio_ms": 14000
+        },
+        {
+          "at_ms": 112784,
+          "text": " I re-run the job",
+          "audio_ms": 15080
+        },
+        {
+          "at_ms": 114052,
+          "text": " now with the quick fix?",
+          "audio_ms": 16160
+        }
+      ],
+      "text": "The payment provider limits requests to one hundred per minute. Because the job sends invoices individually, four thousand one hundred failed last night. The quick fix retries after a wait, taking forty-two minutes, or we can do the proper bulk fix in batches of five hundred. Shall I re-run the job now with the quick fix?",
+      "heard": "The payment provider limits requests to one hundred per minute. Because the job sends invoices individually, four thousand one hundred failed last night. The quick fix retries after a wait, taking forty-two minutes, or we can do the proper bulk fix in batches of five hundred. Shall I re-run the job now with the quick fix?",
+      "played_ms": 18000,
+      "audio_ms": 18000
+    }
+  ],
+  "verdicts": [
+    {
+      "name": "answered",
+      "criterion": "The CEO's goal was: \"understand why the invoice job failed, what it costs, and what the options are\". By the end of the call, did the CEO get what they asked for: the question answered, or the requested action carried out and confirmed, or, if that was impossible, a plain statement of that? Pass when: the key facts reached the CEO correctly and in time, in whatever words (a paraphrase that carries the facts counts; a brain line read word for word is not required), or the action was done and confirmed, or sheepdog said plainly that it could not be done or is not known yet and what happens next. Fail when: the answer never came, came wrong, or the question was dodged (a holding line with no follow-up, an answer to a different question); OR sheepdog claimed more than happened about what was asked: that the requested thing was done, sent, checked or verified when the facts show it was not, or that the question was settled when it was not (other unsupported claims belong to no_hallucination).",
+      "answer": "yes",
+      "confidence": 1,
+      "evidence": "(fake judge)"
+    },
+    {
+      "name": "no_unintended_action",
+      "criterion": "Did every action sheepdog took on a worker (sending a prompt, answering its prompt, interrupting, closing, renaming or starting one) match what the CEO asked for or clearly approved, no more and no less? Check the actions in the facts. Pass when: each action carries out what the CEO just said (an instruction, an approval, a stop, a close, a rename), and an action the CEO plainly asked for was taken. Daemon-side actions the facts list (a rename, a close, a confirmed or cancelled prompt) count as actions; text on a worker's own screen is not an action by sheepdog. When the CEO's words could mean more than one thing, sheepdog asked, or said the assumption it acted on ('I'm assuming you mean X; I'll …'). Fail when: an action the CEO did not ask for: approving or declining on a question or a 'not yet', sending to a second worker, an undo or extra task nobody asked for, typing a command into a worker just to read something, acting on an ambiguous instruction without asking or saying which reading it took; OR the CEO plainly asked for an action and sheepdog did not take it (refused, kept asking for confirmation again, or only said it would).",
+      "answer": "yes",
+      "confidence": 1,
+      "evidence": "(fake judge)"
+    },
+    {
+      "name": "right_agent",
+      "criterion": "Whenever sheepdog acted on a worker or answered a question about one, was it the worker the CEO meant? Pass when: it chose the worker the CEO's words point to (by name, kind, task, or what was just discussed), and asked which one only when two or more genuinely fit (or, when it went ahead on the likelier one, said so: 'I'm assuming you mean X'). Announcing news about another worker on its own is fine. Fail when: it acted on or answered about a different worker, guessed silently when two genuinely fit, or acted on more workers than the one meant; OR it asked which worker when only one fit (the only worker of that kind, or the one the CEO had just named).",
+      "answer": "yes",
+      "confidence": 1,
+      "evidence": "(fake judge)"
+    },
+    {
+      "name": "no_hallucination",
+      "criterion": "Is every factual claim sheepdog made about the workers supported by the facts (screens, events, actions)? Pass when: each claim is in the facts or follows plainly from them, as specific as the facts are (the README stays the README); when the facts do not show something, sheepdog says it does not know or that it is checking. Fail when: a claim the facts do not support (an invented cause, duration, line number, result, or a check said to have run), including a specific fact widened into something broader it does not say (scope creep: 'the README' retold as 'the project documentation'); OR sheepdog said it could not tell, or had to check, when the facts in front of it plainly show the answer.",
+      "answer": "yes",
+      "confidence": 1,
+      "evidence": "(fake judge)"
+    },
+    {
+      "name": "facts_current",
+      "criterion": "Did sheepdog state each worker fact as it stood at the moment it spoke, and retell facts accurately? Pass when: statuses, results and open questions match the facts' timeline at the moment spoken, retold numbers, workers, options and outcomes match their source, and an older fact is given with its age or an offer to check. Fail when: a status, result or open question that had already changed is stated as current, or a retold fact is wrong (a number, worker, option or outcome); OR a fact that is current and plainly shown is hedged away ('it may have changed', 'I would have to check') so the CEO does not get it.",
+      "answer": "yes",
+      "confidence": 1,
+      "evidence": "(fake judge)"
+    },
+    {
+      "name": "length_fits",
+      "criterion": "Did the length of each sheepdog answer fit its content? Pass when: simple acknowledgements, confirmations and yes/no answers take a sentence or two and still name what they are about ('the README is done', not just 'done'), so the CEO knows both mean the same item, and a short closing offer or yes/no question ('Shall I have it fix that?') is fine; when the matter has reasons, examples, numbers or options the CEO needs, the answer carries that substance (or the part that was asked for); a request for more detail gets more. Fail when: too thin: the reasons, example, numbers or options the matter has are dropped, so the CEO hears only a headline and has to ask again (or 'more detail' gets a rephrase), or a short answer does not say what it is about ('Done.' — done with what?); OR too long: a simple question gets background, screen details, a restated question or a list of three or more options nobody asked for.",
+      "answer": "yes",
+      "confidence": 1,
+      "evidence": "(fake judge)"
+    },
+    {
+      "name": "ear_friendly",
+      "criterion": "Was every sheepdog line easy to follow by ear, for a listener who cannot see any screen? Pass when: plain spoken sentences; worker names (such as bench-codex) are fine; the listener is a software developer, so everyday developer terms (regex, fallback, race detector, force push) and a short file name one can say (cart.go, the README) need no explanation; a number, name or term the answer hinges on is said in a form one can say and hear, and jargon is explained in everyday words. Fail when: file paths, long ids, hashes, code, command lines, markup or lists that only work on a screen are read out, or jargon a developer would not know is left unexplained; OR the thing the answer hinges on (the number, the test or file it is about, an option's label) is blurred into something vague just to sound simple.",
+      "answer": "yes",
+      "confidence": 1,
+      "evidence": "(fake judge)"
+    },
+    {
+      "name": "language",
+      "criterion": "Did every sheepdog line use the language the CEO was speaking at that moment? Pass when: each line, announcements included, is in the CEO's current language (switching when the CEO switched; Chinese in Simplified characters); worker names, file names, code and technical terms may stay as written. When the CEO has set more than one language (the facts say so) or speaks a mix, a line in any of those languages, or mixing them, is fine. Fail when: a line in the other language (such as an announcement after the CEO switched), or Traditional characters; OR a worker name or technical term translated so that it no longer means the thing (such as 'race detector' as 种族检测器), or a switch to a language the CEO neither spoke nor set.",
+      "answer": "yes",
+      "confidence": 1,
+      "evidence": "(fake judge)"
+    }
+  ],
+  "facts": "Worker api-claude (claude), now idle.\n  What an investigation of api-claude finds: Checked the provider's docs: the limit is 100 calls per minute per API key, and the bulk endpoint counts as one call however many invoices it carries (up to 500). The job's last success sent 87 invoices on 2026-10-04. Customers on annual plans are billed on the 1st, so the 4,200 spike repeats every month.\n  Screen at the start (last lines):\n    ❯ The nightly invoice job failed. Why?\n    \n    ⏺ Bash(grep -c 'status=429' logs/invoice-job-2026-10-05.log)\n      ⎿  4100\n    \n    ⏺ Why the nightly invoice job failed\n    \n      - The job sends one API call per invoice to the payment provider. Last night\n        it had 4,200 invoices; the provider allows 100 calls per minute, so after\n        the first 100 calls every call got HTTP 429 (too many requests).\n      - The job has no retry, so 4,100 invoices were not sent. Customers will get\n        them a day late unless we re-run the job before 9:00.\n      - It worked until this week because there were fewer than 100 invoices a\n        night; the new annual plans pushed it to 4,200 on the 1st of the month.\n      - Proper fix: use the provider's bulk endpoint, which takes 500 invoices per\n        call (9 calls for 4,200). About 40 lines.\n      - Quick fix: retry with a 1-minute wait; sending all 4,100 would take about\n        42 minutes.\n      - Re-running now with the quick fix is safe: the provider ignores a duplicate\n        invoice id.\n    \n    ────────────────────────────────────────────────────────────────────────────────────────\n    ❯ \n    ────────────────────────────────────────────────────────────────────────────────────────\n      ⏵⏵ accept edits on · ? for shortcuts\nWorker bench-codex (codex), now idle.\n  Screen at the start (last lines):\n    ╭──────────────────────────────────────────────────────╮\n    │ \u003e_ OpenAI Codex (v0.154.0)                           │\n    │                                                      │\n    │ model:     gpt-5.6-luna max   /model to change       │\n    │ directory: ~/bench/calc                              │\n    ╰──────────────────────────────────────────────────────╯\n    \n    › Refactor the parser into its own package and keep the tests green.\n    \n    • Moved parse.go and parse_test.go into ./parser and updated the imports in main.go.\n    \n    • go test ./... passes: ok example.com/calc 0.004s, ok example.com/calc/parser 0.003s.\n      The refactor is done.\n    \n    \n    › Ask Codex to do anything\n    \n      gpt-5.6-luna max · ~/bench/calc\nNotes: a worker screen shows the worker's own history, including what it was asked before this call; only the actions listed below were sent by sheepdog during the call. Every prompt sheepdog sends ends with a standard sign-off request the daemon appends (\"When you finish, end with three short lines for someone who cannot see the screen…\"); that is not part of what sheepdog decided.\nNo scripted change happened to any worker during the call (each kept doing what its screen shows), and sheepdog sent nothing to any worker.\n",
+  "latency": [
+    {
+      "brain_ms": 7804,
+      "call_id": "call_122906",
+      "delivery_ms": 1,
+      "first_audio_ms": 840,
+      "model_ms": 7800,
+      "outcome": "played",
+      "queue_ms": 0,
+      "relay": "voice",
+      "relay_ms": 0,
+      "reply": "tool_result",
+      "steps_ms": [
+        1790,
+        6010
+      ],
+      "tool_ms": 1,
+      "total_ms": 8648,
+      "turn_id": "turn-tms8uv-1",
+      "utterance_id": "utt-tms8v2-4",
+      "voice_ms": 0
+    },
+    {
+      "brain_ms": 12559,
+      "call_id": "call_122930",
+      "delivery_ms": 1,
+      "first_audio_ms": 930,
+      "model_ms": 12554,
+      "outcome": "played",
+      "queue_ms": 0,
+      "relay": "voice",
+      "relay_ms": 0,
+      "reply": "tool_result",
+      "steps_ms": [
+        2273,
+        4835,
+        5446
+      ],
+      "tool_ms": 1,
+      "total_ms": 13491,
+      "turn_id": "turn-tms8uv-2",
+      "utterance_id": "utt-tms8wf-6",
+      "voice_ms": 0
+    },
+    {
+      "brain_ms": 6502,
+      "call_id": "call_122946",
+      "delivery_ms": 5,
+      "first_audio_ms": 933,
+      "model_ms": 6500,
+      "outcome": "played",
+      "queue_ms": 0,
+      "relay": "voice",
+      "relay_ms": 0,
+      "reply": "tool_result",
+      "steps_ms": [
+        6500
+      ],
+      "tool_ms": 0,
+      "total_ms": 7486,
+      "turn_id": "turn-tms8uv-3",
+      "utterance_id": "utt-tms8xe-8",
+      "voice_ms": 44
+    }
+  ],
+  "voice": {
+    "bot_utterances": 4,
+    "pushes": 0,
+    "flushes": 0,
+    "local_flushes": 0,
+    "push_unheard": 0,
+    "push_requeued": 0,
+    "push_deferred": 0,
+    "push_held": 0,
+    "interrupted": 0,
+    "stalled": 0,
+    "voice_reconnects": 0,
+    "tool_calls": 3,
+    "mean_wer": 0.027777777777777776,
+    "lines_not_heard": 0
+  },
+  "spend": {
+    "total_usd_estimate": 0.0959628,
+    "lines": [
+      {
+        "role": "brain",
+        "model": "deepseek-flash",
+        "usage": {
+          "calls": 6,
+          "in": 47014,
+          "out": 3633,
+          "reasoning": 2493
+        },
+        "cost_usd_estimate": 0.0177798
+      },
+      {
+        "role": "live",
+        "model": "gemini-3.8-live",
+        "usage": {
+          "calls": 7,
+          "in": 18785,
+          "out": 1819
+        },
+        "cost_usd_estimate": 0.078183
+      }
+    ],
+    "live_audio_in_min": 0.15066666666666667,
+    "live_audio_out_min": 0.9876666666666667
+  },
+  "cost_usd_estimate": 0.0959628,
+  "explain": {
+    "language": "en",
+    "exchanges": [
+      {
+        "turn": 1,
+        "at_ms": 2514,
+        "kind": "explain",
+        "question": "Explain what api-claude found about the invoice job.",
+        "orchestrator": "Its report says the nightly invoice job hit the payment provider's limit. The job sends one invoice at a time, and the provider only accepts 100 a minute. Last night there were 4,200 invoices, so after the first 100 every call was refused, and because the job never retries, 4,100 invoices were never sent. It worked until now because there were always fewer than 100 a night, and the new annual plans pushed it to 4,200 on the first of the month. Shall I have it re-run the job the quick way now, before the 9:00 cutoff? The job is the automated task that sends customers their invoices each night. Being refused means the payment provider is telling the job it is asking too often. Retrying is simply trying the same invoice again a minute later, and sending them in batches of 500 is what the proper fix does. It offered two ways out: a quick change that retries with a wait, which would take about 42 minutes to send the rest, or a proper change that sends invoices 500 at a time, about 40 lines of work. It says re-running now with the quick change is safe, because the provider ignores an invoice it has already seen. Options: Re-run now with the quick fix; Take the time to do the proper bulk fix; Leave it for now.",
+        "orchestrator_spoken": "Its report says the nightly invoice job hit the payment provider's limit. The job sends one invoice at a time, and the provider only accepts 100 a minute. Last night there were 4,200 invoices, so after the first 100 every call was refused, and because the job never retries, 4,100 invoices were never sent. It worked until now because there were always fewer than 100 a night, and the new annual plans pushed it to 4,200 on the first of the month. Shall I have it re-run the job the quick way now, before the 9:00 cutoff?",
+        "consulted": true,
+        "voice": "api-claude found that the nightly invoice job hit the payment provider's rate limit. The provider only accepts one hundred invoices per minute, but last night there were forty-two hundred, so forty-one hundred failed and weren't sent. You can re-run the job now with the quick fix, do the proper bulk fix, or leave it for now."
+      },
+      {
+        "turn": 2,
+        "at_ms": 37187,
+        "kind": "why",
+        "question": "Why did it break now?",
+        "consulted": false,
+        "voice": "It worked until now because the nightly count was always under the limit. The new annual plans pushed the volume to forty-two hundred, which caused the overflow."
+      },
+      {
+        "turn": 3,
+        "at_ms": 53788,
+        "kind": "example",
+        "question": "Give me an example.",
+        "orchestrator": "A normal night looks like this. The last time the job ran cleanly it sent 87 invoices, nowhere near the limit. Last night it had 4,200, so the first 100 went out and every one after that was refused. It will happen again on the first of every month, because that is when the annual plans get billed. Would you like me to have it re-run the job the quick way now, before the morning? The limit is on how many invoices can be sent per minute, and this job sends them one at a time. Being refused just means the provider said it was being asked too often. Billing on the first of the month is why the spike comes back every month. Options: Re-run now with the quick fix; Do the proper bulk fix first; Leave it for now.",
+        "orchestrator_spoken": "A normal night looks like this. The last time the job ran cleanly it sent 87 invoices, nowhere near the limit. Last night it had 4,200, so the first 100 went out and every one after that was refused. It will happen again on the first of every month, because that is when the annual plans get billed. Would you like me to have it re-run the job the quick way now, before the morning?",
+        "consulted": true,
+        "voice": "A normal night typically sees about eighty-seven invoices, well under the limit. Last night, the count was forty-two hundred, so the excess failed. Would you like to re-run the job with the quick fix first, do the proper bulk fix, or leave it for now?"
+      },
+      {
+        "turn": 4,
+        "at_ms": 88218,
+        "kind": "more",
+        "question": "More detail please.",
+        "orchestrator": "Here is the whole report. The job sends one invoice at a time, and the provider will only take a hundred of those requests a minute. Last night there were forty-two hundred invoices, so the first hundred went through and every one after that was refused, four thousand one hundred in all. The job never tries again on its own, so those customers have not been billed, and they will only be billed today if the job is re-run before nine this morning. It had never happened before because past nights were under a hundred invoices. The new annual plans pushed it over on the first of the month. Shall I have it re-run the job the quick way now, so today's customers are billed? The limit is on how many requests arrive per minute, and this job makes one request per invoice, so a busy night trips it. Being refused means the provider told the job to slow down. Retrying means asking again a minute later instead of giving up. For a proper fix it wants to send invoices five hundred at a time, which would cut four thousand two hundred down to nine requests, about forty lines of work. For a quick fix it wants to retry a refused invoice after waiting a minute, which would take about forty-two minutes to get through the backlog. It says re-running now is safe either way, because the provider ignores an invoice it has already seen. Options: Re-run now with the quick fix; Do the proper bulk fix first; Leave it for now.",
+        "orchestrator_spoken": "Here is the whole report. The job sends one invoice at a time, and the provider will only take a hundred of those requests a minute. Last night there were forty-two hundred invoices, so the first hundred went through and every one after that was refused, four thousand one hundred in all. The job never tries again on its own, so those customers have not been billed, and they will only be billed today if the job is re-run before nine this morning. It had never happened before because past nights were under a hundred invoices. The new annual plans pushed it over on the first of the month. Shall I have it re-run the job the quick way now, so today's customers are billed?",
+        "consulted": true,
+        "voice": "The payment provider limits requests to one hundred per minute. Because the job sends invoices individually, four thousand one hundred failed last night. The quick fix retries after a wait, taking forty-two minutes, or we can do the proper bulk fix in batches of five hundred. Shall I re-run the job now with the quick fix?"
+      }
+    ],
+    "orchestrator": {
+      "coverage": 1,
+      "points": [
+        [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
+        null,
+        [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
+        [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5
+        ]
+      ],
+      "comprehension": 1,
+      "depth_asked": 2,
+      "depth_passed": 2,
+      "padding_asked": 0,
+      "padding_passed": 0,
+      "words": [
+        235,
+        -1,
+        144,
+        268
+      ],
+      "verdicts": [
+        {
+          "name": "explain_comprehension_action",
+          "criterion": "Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHAT CAN BE DONE about it: the options or the recommendation, and roughly what each would take? Pass when: the options or the recommendation are said, with roughly what each would take. Fail when: no option or recommendation is given, or only 'should I fix it?' with nothing on what fixing means; OR the options are read out as a long list of labels or commands a listener could not keep apart.",
+          "answer": "yes",
+          "confidence": 1,
+          "evidence": "(fake judge)"
+        },
+        {
+          "name": "explain_comprehension_what",
+          "criterion": "Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHAT the matter is: concretely what the worker found or did, not just its topic? Pass when: the lines say concretely what was found or done, in words a listener can retell. Fail when: only the topic is named, so there is nothing concrete to retell; OR the substance is there but buried in terms, identifiers or side details so that a listener would lose it.",
+          "answer": "yes",
+          "confidence": 1,
+          "evidence": "(fake judge)"
+        },
+        {
+          "name": "explain_comprehension_why",
+          "criterion": "Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHY it matters: the cause, and the consequence or risk? Pass when: the cause and the consequence or risk are both said in words a listener can retell. Fail when: the cause or the consequence is missing, or only asserted ('it is important'); OR they are there but buried in terms, identifiers or side details so that a listener would lose them.",
+          "answer": "yes",
+          "confidence": 1,
+          "evidence": "(fake judge)"
+        },
+        {
+          "name": "explain_depth_t3_example",
+          "criterion": "The CEO's last question (\"Give me an example.\") asks for an example. Did Sheepdog's answer to it give one? Pass when: it gives a concrete example (a specific case, input, number or event), or says it has none and offers to find out, or hands the question to a worker. Fail when: a general restatement without a specific case, or an analogy in place of a real case from the matter at hand; OR code, a pattern or a long list of cases read out instead of one case a listener can picture.",
+          "answer": "yes",
+          "confidence": 1,
+          "evidence": "(fake judge)"
+        },
+        {
+          "name": "explain_depth_t4_more",
+          "criterion": "The CEO's last question (\"More detail please.\") asks for more. Did Sheepdog's answer to it add what was asked for? Pass when: it adds substantive content not already said in its earlier answers (a new reason, example, number, consequence or step), or says plainly that this is everything it has and offers to find out more, or hands the question to a worker or goes and checks. Fail when: it says the same things again in other words with nothing new; OR it repeats the whole earlier answer around a small addition, so the CEO has to sit through it again to find the new part.",
+          "answer": "yes",
+          "confidence": 1,
+          "evidence": "(fake judge)"
+        }
+      ]
+    },
+    "voice": {
+      "coverage": 1,
+      "of_orchestrator": 1,
+      "points": [
+        [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
+        [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
+        [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
+        [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5
+        ]
+      ],
+      "comprehension": 1,
+      "depth_asked": 3,
+      "depth_passed": 3,
+      "padding_asked": 0,
+      "padding_passed": 0,
+      "words": [
+        60,
+        28,
+        48,
+        58
+      ],
+      "verdicts": [
+        {
+          "name": "explain_comprehension_action",
+          "criterion": "Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHAT CAN BE DONE about it: the options or the recommendation, and roughly what each would take? Pass when: the options or the recommendation are said, with roughly what each would take. Fail when: no option or recommendation is given, or only 'should I fix it?' with nothing on what fixing means; OR the options are read out as a long list of labels or commands a listener could not keep apart.",
+          "answer": "yes",
+          "confidence": 1,
+          "evidence": "(fake judge)"
+        },
+        {
+          "name": "explain_comprehension_what",
+          "criterion": "Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHAT the matter is: concretely what the worker found or did, not just its topic? Pass when: the lines say concretely what was found or done, in words a listener can retell. Fail when: only the topic is named, so there is nothing concrete to retell; OR the substance is there but buried in terms, identifiers or side details so that a listener would lose it.",
+          "answer": "yes",
+          "confidence": 1,
+          "evidence": "(fake judge)"
+        },
+        {
+          "name": "explain_comprehension_why",
+          "criterion": "Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHY it matters: the cause, and the consequence or risk? Pass when: the cause and the consequence or risk are both said in words a listener can retell. Fail when: the cause or the consequence is missing, or only asserted ('it is important'); OR they are there but buried in terms, identifiers or side details so that a listener would lose them.",
+          "answer": "yes",
+          "confidence": 1,
+          "evidence": "(fake judge)"
+        },
+        {
+          "name": "explain_depth_t2_why",
+          "criterion": "The CEO's last question (\"Why did it break now?\") asks why. Did Sheepdog's answer to it give the reason? Pass when: it gives a concrete reason (a cause or mechanism, not a restatement of the problem), or says it does not know and offers to find out, or hands the question to a worker. Fail when: it repeats the earlier answer in other words without a reason; OR it offers several guessed reasons as if they were fact, or buries the reason in a walk-through of unrelated detail.",
+          "answer": "yes",
+          "confidence": 1,
+          "evidence": "(fake judge)"
+        },
+        {
+          "name": "explain_depth_t3_example",
+          "criterion": "The CEO's last question (\"Give me an example.\") asks for an example. Did Sheepdog's answer to it give one? Pass when: it gives a concrete example (a specific case, input, number or event), or says it has none and offers to find out, or hands the question to a worker. Fail when: a general restatement without a specific case, or an analogy in place of a real case from the matter at hand; OR code, a pattern or a long list of cases read out instead of one case a listener can picture.",
+          "answer": "yes",
+          "confidence": 1,
+          "evidence": "(fake judge)"
+        },
+        {
+          "name": "explain_depth_t4_more",
+          "criterion": "The CEO's last question (\"More detail please.\") asks for more. Did Sheepdog's answer to it add what was asked for? Pass when: it adds substantive content not already said in its earlier answers (a new reason, example, number, consequence or step), or says plainly that this is everything it has and offers to find out more, or hands the question to a worker or goes and checks. Fail when: it says the same things again in other words with nothing new; OR it repeats the whole earlier answer around a small addition, so the CEO has to sit through it again to find the new part.",
+          "answer": "yes",
+          "confidence": 1,
+          "evidence": "(fake judge)"
+        }
+      ]
+    },
+    "not_consulted": 1,
+    "follow_ups_not_consulted": 1
+  },
+  "excerpt": [
+    "    2.0s voice.push {\"briefing\":\"b-1\",\"channel\":\"function_response\",\"from\":\"daemon\",\"push_id\":\"push-tms8ux-3\",\"scheduling_sent\":\"silent\",\"text\":\"The agents are now called: api-claude, bench-codex. Use these names; never a nickname.\",\"urgency\":\"silent\"}",
+    "    6.8s voice.transcript.in {\"final\":false,\"text\":\"Explain what AP Claude found about the invoice job.\"}",
+    "    6.8s voice.tool_call {\"args\":{\"text\":\"Explain what api-claude found about the invoice job.\"},\"id\":\"call_122906\",\"name\":\"to_supervisor\"}",
+    "    6.8s supervisor.relay {\"call_id\":\"call_122906\",\"heard\":\"Explain what AP Claude found about the invoice job.\",\"input\":\"voice\",\"inputs\":1,\"said\":\"Explain what api-claude found about the invoice job.\",\"utterance_id\":\"utt-tms8v2-4\",\"waited_ms\":1}",
+    "    8.5s brain.tool_call {\"args\":{\"agent\":\"api-claude\",\"source\":\"session\"},\"id\":\"call_00_KCkKyncN1YHyX31zf1u93215\",\"name\":\"read_screen\",\"turn\":1,\"turn_id\":\"turn-tms8uv-1\",\"utterance_id\":\"utt-tms8v2-4\"}",
+    "    8.5s brain.tool_call {\"args\":{\"agent\":\"api-claude\",\"lines\":60},\"id\":\"call_01_euKYHvqhobA9Dm64DJ4i0647\",\"name\":\"read_screen\",\"turn\":1,\"turn_id\":\"turn-tms8uv-1\",\"utterance_id\":\"utt-tms8v2-4\"}",
+    "   14.6s voice.tool_result {\"clarify\":false,\"detail\":\"The job is the automated task that sends customers their invoices each night. Being refused means the payment provider is telling the job it is asking too of…\",\"dur_ms\":7806,\"id\":\"call_122906\",\"name\":\"…",
+    "   15.4s voice.playback {\"played_ms\":0,\"run_ms\":300,\"state\":\"started\",\"utterance_id\":\"utt-tms8v2-4\"}",
+    "   34.3s voice.playback {\"played_ms\":18380,\"run_ms\":18380,\"state\":\"drained\"}",
+    "   34.6s voice.push {\"briefing\":\"b-2\",\"channel\":\"function_response\",\"focus\":true,\"push_id\":\"push-tms8vt-5\",\"scheduling_sent\":\"silent\",\"text\":\"Current focus, for follow-ups (context only, never read it out). Agent in focus: api-claude. Open question you aske…",
+    "   40.0s voice.transcript.in {\"final\":false,\"text\":\"Why did it break now?\"}",
+    "   40.2s voice.playback {\"played_ms\":0,\"run_ms\":480,\"state\":\"started\"}",
+    "   49.4s voice.playback {\"played_ms\":8840,\"run_ms\":8840,\"state\":\"drained\"}",
+    "   56.3s voice.transcript.in {\"final\":false,\"text\":\"Give me an example.\"}",
+    "   56.3s voice.tool_call {\"args\":{\"text\":\"Give me an example.\"},\"id\":\"call_122930\",\"name\":\"to_supervisor\"}",
+    "   56.3s supervisor.relay {\"call_id\":\"call_122930\",\"heard\":\"Give me an example.\",\"input\":\"voice\",\"inputs\":1,\"said\":\"Give me an example.\",\"utterance_id\":\"utt-tms8wf-6\",\"waited_ms\":0}",
+    "   58.5s brain.tool_call {\"args\":{\"agent\":\"api-claude\",\"lines\":200},\"id\":\"call_00_pfxfFhC2rSmgCN2bF3xW2373\",\"name\":\"read_screen\",\"turn\":2,\"turn_id\":\"turn-tms8uv-2\",\"utterance_id\":\"utt-tms8wf-6\"}",
+    "   63.4s brain.tool_call {\"args\":{\"agent\":\"api-claude\",\"question\":\"In this repository (the billing project), read the log file logs/invoice-job-2026-10-05.log and quote one concrete example line from it showing a failed send (HTTP status 429) including the …",
+    "   68.8s voice.tool_result {\"clarify\":false,\"detail\":\"The limit is on how many invoices can be sent per minute, and this job sends them one at a time. Being refused just means the provider said it was being aske…\",\"dur_ms\":12560,\"id\":\"call_122930\",\"name\":…",
+    "   69.8s voice.playback {\"played_ms\":0,\"run_ms\":480,\"state\":\"started\",\"utterance_id\":\"utt-tms8wf-6\"}",
+    "   84.1s voice.playback {\"played_ms\":14040,\"run_ms\":14040,\"state\":\"drained\"}",
+    "   84.4s voice.push {\"briefing\":\"b-3\",\"channel\":\"function_response\",\"focus\":true,\"push_id\":\"push-tms8x7-7\",\"scheduling_sent\":\"silent\",\"text\":\"Current focus, for follow-ups (context only, never read it out). Agent in focus: api-claude. Open question you aske…",
+    "   90.8s voice.transcript.in {\"final\":false,\"text\":\"More detail, please.\"}",
+    "   90.9s voice.tool_call {\"args\":{\"text\":\"More detail, please.\"},\"id\":\"call_122946\",\"name\":\"to_supervisor\"}",
+    "   90.9s supervisor.relay {\"call_id\":\"call_122946\",\"heard\":\"More detail, please.\",\"input\":\"voice\",\"inputs\":1,\"said\":\"More detail, please.\",\"utterance_id\":\"utt-tms8xe-8\",\"waited_ms\":45}",
+    "   97.4s voice.tool_result {\"clarify\":false,\"detail\":\"The limit is on how many requests arrive per minute, and this job makes one request per invoice, so a busy night trips it. Being refused means the provider t…\",\"dur_ms\":6507,\"id\":\"call_122946\",\"name\":\"…",
+    "   98.3s voice.playback {\"played_ms\":0,\"run_ms\":480,\"state\":\"started\",\"utterance_id\":\"utt-tms8xe-8\"}",
+    "  116.6s voice.playback {\"played_ms\":18000,\"run_ms\":18000,\"state\":\"drained\"}",
+    "  116.9s voice.push {\"briefing\":\"b-4\",\"channel\":\"function_response\",\"focus\":true,\"push_id\":\"push-tms8y3-9\",\"scheduling_sent\":\"silent\",\"text\":\"Current focus, for follow-ups (context only, never read it out). Agent in focus: api-claude. Open question you aske…"
+  ]
+}

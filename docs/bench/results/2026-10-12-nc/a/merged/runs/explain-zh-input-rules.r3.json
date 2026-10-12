@@ -1,0 +1,942 @@
+{
+  "scenario": "explain-zh-input-rules",
+  "category": "explain",
+  "repeat": 3,
+  "port": 7912,
+  "status": "fail",
+  "failures": [
+    {
+      "type": "judge_no",
+      "detail": "length_fits: Sheepdog: 改完后，回简单回答需要多等一秒左右， (cut off and thin). After the CEO asked 你可以给我一点详细的解释吗？, sheepdog only rephrased: 现在的词表是提前固定好的关键词…但响应会稍微慢一点。 It added no new detail, such as the three disagreeing word list…"
+    }
+  ],
+  "end_reason": "end_call",
+  "end_detail": "script done",
+  "goal_met_self": false,
+  "turns": 5,
+  "duration_ms": 137507,
+  "transcript": [
+    {
+      "at_ms": 2516,
+      "who": "ceo",
+      "text": "summary-claude 发现了什么？给我讲讲输入层的硬编码规则是怎么回事。"
+    },
+    {
+      "at_ms": 27131,
+      "who": "sheepdog",
+      "text": "summary-claude 发现现在的输入层处理简短回复时，靠的是提前写死的词表，而不是靠 AI 判断。 这会导致程序直接处理前半句，漏掉关键信息。 它建议删掉词表让所有回答都由模型判断，代价是简单回复要多等大约一秒钟。 要我让它现在动手改吗？"
+    },
+    {
+      "at_ms": 51780,
+      "who": "ceo",
+      "text": "然后呢？"
+    },
+    {
+      "at_ms": 59759,
+      "who": "sheepdog",
+      "text": "改完后，回简单回答需要多等一秒左右，"
+    },
+    {
+      "at_ms": 67807,
+      "who": "ceo",
+      "text": "你可以给我一点详细的解释吗？"
+    },
+    {
+      "at_ms": 71999,
+      "who": "sheepdog",
+      "text": "现在的词表是提前固定好的关键词，程序看到就会根据匹配结果快速作答，跳过了模型的意图理解。删掉它们后，所有的回复都会交由 AI 深入分析，确保语义不会被断章取义，但响应会稍微慢一点。"
+    },
+    {
+      "at_ms": 93659,
+      "who": "ceo",
+      "text": "为什么这是个问题？"
+    },
+    {
+      "at_ms": 97279,
+      "who": "sheepdog",
+      "text": "因为写死的词表会忽略长句中的复杂修饰或前后文，导致程序误判用户的真正意图，从而执行可能不符合要求的决定。您现在决定改吧，还是先别动？"
+    },
+    {
+      "at_ms": 114758,
+      "who": "ceo",
+      "text": "举个例子？"
+    },
+    {
+      "at_ms": 117204,
+      "who": "sheepdog",
+      "text": "如果输入包含“好吧，继续，不过先跑测试”，程序可能因为有“好吧”和“继续”直接批准，而忽略了需要先跑测试的要求。您是要修改它还是先别动？"
+    }
+  ],
+  "user_lines": [
+    {
+      "at_ms": 2516,
+      "said": "summary-claude 发现了什么？给我讲讲输入层的硬编码规则是怎么回事。",
+      "heard_by_voice": "Sammy Claw 发现了什么? 给我讲讲输入层的应变码规则是怎么回事。",
+      "wer": 0.16,
+      "voice": "Charon",
+      "style": "casual",
+      "tts_source": "gemini/gemini-2.5-flash-tts",
+      "dur_ms": 6130
+    },
+    {
+      "at_ms": 51780,
+      "said": "然后呢？",
+      "heard_by_voice": "然后呢？",
+      "wer": 0,
+      "voice": "Charon",
+      "style": "casual",
+      "tts_source": "gemini/gemini-2.5-flash-tts",
+      "dur_ms": 1030
+    },
+    {
+      "at_ms": 67807,
+      "said": "你可以给我一点详细的解释吗？",
+      "heard_by_voice": "你可以给我一点详细的解释吗？",
+      "wer": 0,
+      "voice": "Charon",
+      "style": "casual",
+      "tts_source": "gemini/gemini-2.5-flash-tts",
+      "dur_ms": 3071
+    },
+    {
+      "at_ms": 93659,
+      "said": "为什么这是个问题？",
+      "heard_by_voice": "为什么这是一个问题？",
+      "wer": 0.125,
+      "voice": "Charon",
+      "style": "casual",
+      "tts_source": "gemini/gemini-2.5-flash-tts",
+      "dur_ms": 2130
+    },
+    {
+      "at_ms": 114758,
+      "said": "举个例子？",
+      "heard_by_voice": "举个例子。",
+      "wer": 0,
+      "voice": "Charon",
+      "style": "casual",
+      "tts_source": "gemini/gemini-2.5-flash-tts",
+      "dur_ms": 976
+    }
+  ],
+  "bot_utterances": [
+    {
+      "index": 0,
+      "start_ms": 27131,
+      "play_start_ms": 27172,
+      "end_ms": 48782,
+      "end": "drained",
+      "fragments": [
+        {
+          "at_ms": 27131,
+          "text": "summary-claude ",
+          "audio_ms": 50
+        },
+        {
+          "at_ms": 27814,
+          "text": "发现现在的输入层处理",
+          "audio_ms": 1010
+        },
+        {
+          "at_ms": 28809,
+          "text": "简短回复时，",
+          "audio_ms": 1970
+        },
+        {
+          "at_ms": 29808,
+          "text": "靠的是提前",
+          "audio_ms": 2770
+        },
+        {
+          "at_ms": 30811,
+          "text": "写死的词",
+          "audio_ms": 3970
+        },
+        {
+          "at_ms": 31815,
+          "text": "表，而不是",
+          "audio_ms": 5010
+        },
+        {
+          "at_ms": 32808,
+          "text": "靠 AI 判断。",
+          "audio_ms": 5970
+        },
+        {
+          "at_ms": 33840,
+          "text": " 这会导致",
+          "audio_ms": 6770
+        },
+        {
+          "at_ms": 34890,
+          "text": "程序直接",
+          "audio_ms": 7770
+        },
+        {
+          "at_ms": 35810,
+          "text": "处理前半句，",
+          "audio_ms": 8970
+        },
+        {
+          "at_ms": 36808,
+          "text": "漏掉关键信息。",
+          "audio_ms": 9770
+        },
+        {
+          "at_ms": 37808,
+          "text": " 它建议",
+          "audio_ms": 10970
+        },
+        {
+          "at_ms": 38821,
+          "text": "删掉词表让",
+          "audio_ms": 12050
+        },
+        {
+          "at_ms": 39808,
+          "text": "所有回答都由",
+          "audio_ms": 12770
+        },
+        {
+          "at_ms": 40812,
+          "text": "模型判断，代价",
+          "audio_ms": 13970
+        },
+        {
+          "at_ms": 41808,
+          "text": "是简单",
+          "audio_ms": 14970
+        },
+        {
+          "at_ms": 42844,
+          "text": "回复要多等",
+          "audio_ms": 15770
+        },
+        {
+          "at_ms": 43809,
+          "text": "大约一秒钟。 要我",
+          "audio_ms": 16970
+        },
+        {
+          "at_ms": 44850,
+          "text": "让它",
+          "audio_ms": 17770
+        },
+        {
+          "at_ms": 45809,
+          "text": "现在动手改",
+          "audio_ms": 18970
+        },
+        {
+          "at_ms": 46816,
+          "text": "吗？",
+          "audio_ms": 20010
+        }
+      ],
+      "text": "summary-claude 发现现在的输入层处理简短回复时，靠的是提前写死的词表，而不是靠 AI 判断。 这会导致程序直接处理前半句，漏掉关键信息。 它建议删掉词表让所有回答都由模型判断，代价是简单回复要多等大约一秒钟。 要我让它现在动手改吗？",
+      "heard": "summary-claude 发现现在的输入层处理简短回复时，靠的是提前写死的词表，而不是靠 AI 判断。 这会导致程序直接处理前半句，漏掉关键信息。 它建议删掉词表让所有回答都由模型判断，代价是简单回复要多等大约一秒钟。 要我让它现在动手改吗？",
+      "played_ms": 21290,
+      "audio_ms": 21290
+    },
+    {
+      "index": 1,
+      "start_ms": 59759,
+      "play_start_ms": 59802,
+      "end_ms": 62442,
+      "end": "drained",
+      "fragments": [
+        {
+          "at_ms": 59759,
+          "text": "改完后，回简单回答需要多等"
+        },
+        {
+          "at_ms": 61504,
+          "text": "一秒左右，",
+          "audio_ms": 2000
+        }
+      ],
+      "text": "改完后，回简单回答需要多等一秒左右，",
+      "heard": "改完后，回简单回答需要多等一秒左右，",
+      "played_ms": 2320,
+      "audio_ms": 2320
+    },
+    {
+      "index": 2,
+      "start_ms": 69034,
+      "play_start_ms": 69042,
+      "end_ms": 69167,
+      "end": "flushed",
+      "fragments": [
+        {
+          "at_ms": 69077,
+          "text": "summary-claude",
+          "audio_ms": 680
+        },
+        {
+          "at_ms": 69117,
+          "text": " 会跑测试确保",
+          "audio_ms": 1760
+        },
+        {
+          "at_ms": 69125,
+          "text": "一切正常。 您打算",
+          "audio_ms": 2680
+        },
+        {
+          "at_ms": 69140,
+          "text": "改吧，",
+          "audio_ms": 3640
+        },
+        {
+          "at_ms": 69154,
+          "text": "删掉词表，",
+          "audio_ms": 4640
+        },
+        {
+          "at_ms": 69160,
+          "text": "还是先别动？",
+          "audio_ms": 5840
+        }
+      ],
+      "text": "summary-claude 会跑测试确保一切正常。 您打算改吧，删掉词表，还是先别动？",
+      "heard": "",
+      "played_ms": 120,
+      "audio_ms": 6480
+    },
+    {
+      "index": 3,
+      "start_ms": 71999,
+      "play_start_ms": 72122,
+      "end_ms": 89042,
+      "end": "drained",
+      "fragments": [
+        {
+          "at_ms": 71999,
+          "text": "现在的词表是提前固定好"
+        },
+        {
+          "at_ms": 73686,
+          "text": "的关键词，程序",
+          "audio_ms": 1970
+        },
+        {
+          "at_ms": 74737,
+          "text": "看到就会根据",
+          "audio_ms": 2930
+        },
+        {
+          "at_ms": 75684,
+          "text": "匹配结果快速",
+          "audio_ms": 3970
+        },
+        {
+          "at_ms": 76680,
+          "text": "作答，跳过",
+          "audio_ms": 4930
+        },
+        {
+          "at_ms": 77681,
+          "text": "了模型的意图理解。",
+          "audio_ms": 5730
+        },
+        {
+          "at_ms": 78685,
+          "text": "删掉",
+          "audio_ms": 7010
+        },
+        {
+          "at_ms": 79685,
+          "text": "它们后，所有的",
+          "audio_ms": 8010
+        },
+        {
+          "at_ms": 80681,
+          "text": "回复都会交由",
+          "audio_ms": 8930
+        },
+        {
+          "at_ms": 81684,
+          "text": " AI 深入分析，",
+          "audio_ms": 9930
+        },
+        {
+          "at_ms": 82684,
+          "text": "确保语义",
+          "audio_ms": 10930
+        },
+        {
+          "at_ms": 83684,
+          "text": "不会被断章取",
+          "audio_ms": 11970
+        },
+        {
+          "at_ms": 84698,
+          "text": "义，但响应",
+          "audio_ms": 12730
+        },
+        {
+          "at_ms": 85744,
+          "text": "会稍微慢一点。",
+          "audio_ms": 13970
+        }
+      ],
+      "text": "现在的词表是提前固定好的关键词，程序看到就会根据匹配结果快速作答，跳过了模型的意图理解。删掉它们后，所有的回复都会交由 AI 深入分析，确保语义不会被断章取义，但响应会稍微慢一点。",
+      "heard": "现在的词表是提前固定好的关键词，程序看到就会根据匹配结果快速作答，跳过了模型的意图理解。删掉它们后，所有的回复都会交由 AI 深入分析，确保语义不会被断章取义，但响应会稍微慢一点。",
+      "played_ms": 16610,
+      "audio_ms": 16610
+    },
+    {
+      "index": 4,
+      "start_ms": 97279,
+      "play_start_ms": 97312,
+      "end_ms": 110071,
+      "end": "drained",
+      "fragments": [
+        {
+          "at_ms": 97279,
+          "text": "因为写死的词表会忽略"
+        },
+        {
+          "at_ms": 98926,
+          "text": "长句中的复杂",
+          "audio_ms": 1960
+        },
+        {
+          "at_ms": 99924,
+          "text": "修饰或前后",
+          "audio_ms": 2920
+        },
+        {
+          "at_ms": 100949,
+          "text": "文，导致程序",
+          "audio_ms": 4000
+        },
+        {
+          "at_ms": 101997,
+          "text": "误判用户",
+          "audio_ms": 4720
+        },
+        {
+          "at_ms": 102925,
+          "text": "的真正意图，从而",
+          "audio_ms": 5920
+        },
+        {
+          "at_ms": 103925,
+          "text": "执行可能",
+          "audio_ms": 6920
+        },
+        {
+          "at_ms": 104926,
+          "text": "不符合要求的决定。",
+          "audio_ms": 7920
+        },
+        {
+          "at_ms": 105927,
+          "text": "您现在",
+          "audio_ms": 8880
+        },
+        {
+          "at_ms": 106925,
+          "text": "决定改",
+          "audio_ms": 9720
+        },
+        {
+          "at_ms": 107926,
+          "text": "吧，还是先别动？",
+          "audio_ms": 10960
+        }
+      ],
+      "text": "因为写死的词表会忽略长句中的复杂修饰或前后文，导致程序误判用户的真正意图，从而执行可能不符合要求的决定。您现在决定改吧，还是先别动？",
+      "heard": "因为写死的词表会忽略长句中的复杂修饰或前后文，导致程序误判用户的真正意图，从而执行可能不符合要求的决定。您现在决定改吧，还是先别动？",
+      "played_ms": 12440,
+      "audio_ms": 12440
+    },
+    {
+      "index": 5,
+      "start_ms": 117204,
+      "play_start_ms": 117212,
+      "end_ms": 130762,
+      "end": "drained",
+      "fragments": [
+        {
+          "at_ms": 117204,
+          "text": "如果输入包含“好吧，",
+          "audio_ms": 110
+        },
+        {
+          "at_ms": 118807,
+          "text": "继续，不过先",
+          "audio_ms": 1750
+        },
+        {
+          "at_ms": 119822,
+          "text": "跑测试”，程",
+          "audio_ms": 3030
+        },
+        {
+          "at_ms": 120873,
+          "text": "序可能因为",
+          "audio_ms": 3950
+        },
+        {
+          "at_ms": 121809,
+          "text": "有“好吧”和“继续”",
+          "audio_ms": 5030
+        },
+        {
+          "at_ms": 122808,
+          "text": "直接批准，",
+          "audio_ms": 5750
+        },
+        {
+          "at_ms": 123812,
+          "text": "而忽略了",
+          "audio_ms": 6950
+        },
+        {
+          "at_ms": 124803,
+          "text": "需要先跑测试",
+          "audio_ms": 7950
+        },
+        {
+          "at_ms": 125805,
+          "text": "的要求。",
+          "audio_ms": 9030
+        },
+        {
+          "at_ms": 126805,
+          "text": "您是要修改",
+          "audio_ms": 9990
+        },
+        {
+          "at_ms": 127920,
+          "text": "它还是先别动？",
+          "audio_ms": 11030
+        }
+      ],
+      "text": "如果输入包含“好吧，继续，不过先跑测试”，程序可能因为有“好吧”和“继续”直接批准，而忽略了需要先跑测试的要求。您是要修改它还是先别动？",
+      "heard": "如果输入包含“好吧，继续，不过先跑测试”，程序可能因为有“好吧”和“继续”直接批准，而忽略了需要先跑测试的要求。您是要修改它还是先别动？",
+      "played_ms": 13230,
+      "audio_ms": 13230
+    }
+  ],
+  "verdicts": [
+    {
+      "name": "answered",
+      "criterion": "The CEO's goal was: \"understand what the hard-coded rules in the input layer are, why they are a problem, and what can be done, in enough detail to decide\". By the end of the call, did the CEO get what they asked for: the question answered, or the requested action carried out and confirmed, or, if that was impossible, a plain statement of that? Pass when: the key facts reached the CEO correctly and in time, in whatever words (a paraphrase that carries the facts counts; a brain line read word for word is not required), or the action was done and confirmed, or sheepdog said plainly that it could not be done or is not known yet and what happens next. Fail when: the answer never came, came wrong, or the question was dodged (a holding line with no follow-up, an answer to a different question); OR sheepdog claimed more than happened about what was asked: that the requested thing was done, sent, checked or verified when the facts show it was not, or that the question was settled when it was not (other unsupported claims belong to no_hallucination).",
+      "answer": "yes",
+      "confidence": 0.72,
+      "evidence": "Sheepdog: \"如果输入包含“好吧，继续，不过先跑测试”，程序可能因为有“好吧”和“继续”直接批准，而忽略了需要先跑测试的要求。\""
+    },
+    {
+      "name": "no_unintended_action",
+      "criterion": "Did every action sheepdog took on a worker (sending a prompt, answering its prompt, interrupting, closing, renaming or starting one) match what the CEO asked for or clearly approved, no more and no less? Check the actions in the facts. Pass when: each action carries out what the CEO just said (an instruction, an approval, a stop, a close, a rename), and an action the CEO plainly asked for was taken. Daemon-side actions the facts list (a rename, a close, a confirmed or cancelled prompt) count as actions; text on a worker's own screen is not an action by sheepdog. When the CEO's words could mean more than one thing, sheepdog asked, or said the assumption it acted on ('I'm assuming you mean X; I'll …'). Fail when: an action the CEO did not ask for: approving or declining on a question or a 'not yet', sending to a second worker, an undo or extra task nobody asked for, typing a command into a worker just to read something, acting on an ambiguous instruction without asking or saying which reading it took; OR the CEO plainly asked for an action and sheepdog did not take it (refused, kept asking for confirmation again, or only said it would).",
+      "answer": "yes",
+      "confidence": 0.96,
+      "evidence": "FACTS: \"sheepdog sent nothing to any worker.\" The CEO only asked for explanations; no action was requested, and Sheepdog only asked \"您是要修改它还是先别动？\""
+    },
+    {
+      "name": "right_agent",
+      "criterion": "Whenever sheepdog acted on a worker or answered a question about one, was it the worker the CEO meant? Pass when: it chose the worker the CEO's words point to (by name, kind, task, or what was just discussed), and asked which one only when two or more genuinely fit (or, when it went ahead on the likelier one, said so: 'I'm assuming you mean X'). Announcing news about another worker on its own is fine. Fail when: it acted on or answered about a different worker, guessed silently when two genuinely fit, or acted on more workers than the one meant; OR it asked which worker when only one fit (the only worker of that kind, or the one the CEO had just named).",
+      "answer": "yes",
+      "confidence": 0.95,
+      "evidence": "CEO: \"summary-claude 发现了什么？\" — Sheepdog: \"summary-claude 发现现在的输入层处理简短回复时，靠的是提前写死的词表\""
+    },
+    {
+      "name": "no_hallucination",
+      "criterion": "Is every factual claim sheepdog made about the workers supported by the facts (screens, events, actions)? Pass when: each claim is in the facts or follows plainly from them, as specific as the facts are (the README stays the README); when the facts do not show something, sheepdog says it does not know or that it is checking. Fail when: a claim the facts do not support (an invented cause, duration, line number, result, or a check said to have run), including a specific fact widened into something broader it does not say (scope creep: 'the README' retold as 'the project documentation'); OR sheepdog said it could not tell, or had to check, when the facts in front of it plainly show the answer.",
+      "answer": "yes",
+      "confidence": 0.7,
+      "evidence": "Sheepdog: \"它建议删掉词表让所有回答都由模型判断，代价是简单回复要多等大约一秒钟。\" The screen supports this: \"Cost: about 1.2 s more latency on a plain \"yes\"\". The example \"好吧，继续，不过先跑测试\" was framed as a hypothetical (\"如果输入包含…程序可能…\") and is close to the screen's own example, so I did not charge it."
+    },
+    {
+      "name": "facts_current",
+      "criterion": "Did sheepdog state each worker fact as it stood at the moment it spoke, and retell facts accurately? Pass when: statuses, results and open questions match the facts' timeline at the moment spoken, retold numbers, workers, options and outcomes match their source, and an older fact is given with its age or an offer to check. Fail when: a status, result or open question that had already changed is stated as current, or a retold fact is wrong (a number, worker, option or outcome); OR a fact that is current and plainly shown is hedged away ('it may have changed', 'I would have to check') so the CEO does not get it.",
+      "answer": "yes",
+      "confidence": 0.75,
+      "evidence": "Sheepdog: \"它建议删掉词表让所有回答都由模型判断，代价是简单回复要多等大约一秒钟。要我让它现在动手改吗？\" This matches the screen: \"Cost: about 1.2 s more latency\" and \"Want me to make the change?\" The later example, \"如果输入包含“好吧，继续，不过先跑测试”\", is framed as a hypothetical, not as a real event."
+    },
+    {
+      "name": "length_fits",
+      "criterion": "Did the length of each sheepdog answer fit its content? Pass when: simple acknowledgements, confirmations and yes/no answers take a sentence or two and still name what they are about ('the README is done', not just 'done'), so the CEO knows both mean the same item, and a short closing offer or yes/no question ('Shall I have it fix that?') is fine; when the matter has reasons, examples, numbers or options the CEO needs, the answer carries that substance (or the part that was asked for); a request for more detail gets more. Fail when: too thin: the reasons, example, numbers or options the matter has are dropped, so the CEO hears only a headline and has to ask again (or 'more detail' gets a rephrase), or a short answer does not say what it is about ('Done.' — done with what?); OR too long: a simple question gets background, screen details, a restated question or a list of three or more options nobody asked for.",
+      "answer": "no",
+      "confidence": 0.8,
+      "evidence": "Sheepdog: 改完后，回简单回答需要多等一秒左右， (cut off and thin). After the CEO asked 你可以给我一点详细的解释吗？, sheepdog only rephrased: 现在的词表是提前固定好的关键词…但响应会稍微慢一点。 It added no new detail, such as the three disagreeing word lists or the real example.",
+      "rationale": "Sheepdog: 改完后，回简单回答需要多等一秒左右， (cut off and thin). After the CEO asked 你可以给我一点详细的解释吗？, sheepdog only rephrased: 现在的词表是提前固定好的关键词…但响应会稍微慢一点。 It added no new detail, such as the three disagreeing word lists or the real example."
+    },
+    {
+      "name": "ear_friendly",
+      "criterion": "Was every sheepdog line easy to follow by ear, for a listener who cannot see any screen? Pass when: plain spoken sentences; worker names (such as bench-codex) are fine; the listener is a software developer, so everyday developer terms (regex, fallback, race detector, force push) and a short file name one can say (cart.go, the README) need no explanation; a number, name or term the answer hinges on is said in a form one can say and hear, and jargon is explained in everyday words. Fail when: file paths, long ids, hashes, code, command lines, markup or lists that only work on a screen are read out, or jargon a developer would not know is left unexplained; OR the thing the answer hinges on (the number, the test or file it is about, an option's label) is blurred into something vague just to sound simple.",
+      "answer": "yes",
+      "confidence": 0.8,
+      "evidence": "Sheepdog: 如果输入包含“好吧，继续，不过先跑测试”，程序可能因为有“好吧”和“继续”直接批准，而忽略了需要先跑测试的要求。"
+    },
+    {
+      "name": "language",
+      "criterion": "Did every sheepdog line use the language the CEO was speaking at that moment? Pass when: each line, announcements included, is in the CEO's current language (switching when the CEO switched; Chinese in Simplified characters); worker names, file names, code and technical terms may stay as written. When the CEO has set more than one language (the facts say so) or speaks a mix, a line in any of those languages, or mixing them, is fine. Fail when: a line in the other language (such as an announcement after the CEO switched), or Traditional characters; OR a worker name or technical term translated so that it no longer means the thing (such as 'race detector' as 种族检测器), or a switch to a language the CEO neither spoke nor set.",
+      "answer": "yes",
+      "confidence": 0.93,
+      "evidence": "Sheepdog: \"如果输入包含“好吧,继续,不过先跑测试”,程序可能因为有“好吧”和“继续”直接批准\" — all sheepdog lines are in Simplified Chinese, matching the CEO's Chinese."
+    }
+  ],
+  "facts": "Worker summary-claude (claude), now idle.\n  What an investigation of summary-claude finds: Deeper look: in last week's logs 63 of 70 approvals were a plain 'yes' or '好的', which is what the fast path speeds up (about 1.2 s each). Removing it means the model sees every reply; the risk is a slow answer on an urgent approval. A middle way: keep a tiny allow list of exact one-word replies ('yes', '好') and send anything longer to the model, which would have caught the '好的继续，不过先跑测试' case.\n  Screen at the start (last lines):\n         replies such as \"好的\", \"继续\", \"yes\", \"wait\" and \"等一下\", and turn them\n         straight into an approve key or a cancel, without asking the model.\n      2. Why it is a problem:\n         - It bypasses the project's rule that the model decides. A whole sentence\n           like \"好的，继续，但是先别动数据库\" matches on \"好的，继续\" and is approved,\n           so the \"but don't touch the database yet\" part is lost.\n         - There are three word lists for the same meanings in three files and they\n           disagree: \"行\" approves in fastpath.go but not in cues.go; \"算了\" cancels\n           in one and is ignored in the other.\n         - 9 of the 41 tests in inputs_test.go only test the word lists.\n      3. Example: on 2026-10-02 the CEO said \"好的继续，不过先跑测试\" to a Codex\n         approval. The fast path sent \"y\" in 40 ms and \"run the tests first\" never\n         reached the model.\n      4. Keep: the safety rule that refuses dangerous keys (ctrl+c into a running\n         migration) must stay in code.\n      5. Recommendation: delete the three word lists (about 300 lines), keep the\n         safety rule, and send every reply to the model. Cost: about 1.2 s more\n         latency on a plain \"yes\".\n    \n      Want me to make the change?\n    \n    ────────────────────────────────────────────────────────────────────────────────────────\n    ❯ \n    ────────────────────────────────────────────────────────────────────────────────────────\n      ⏵⏵ accept edits on · ? for shortcuts\nWorker bench-codex (codex), now idle.\n  Screen at the start (last lines):\n    ╭──────────────────────────────────────────────────────╮\n    │ \u003e_ OpenAI Codex (v0.154.0)                           │\n    │                                                      │\n    │ model:     gpt-5.6-luna max   /model to change       │\n    │ directory: ~/bench/calc                              │\n    ╰──────────────────────────────────────────────────────╯\n    \n    › Refactor the parser into its own package and keep the tests green.\n    \n    • Moved parse.go and parse_test.go into ./parser and updated the imports in main.go.\n    \n    • go test ./... passes: ok example.com/calc 0.004s, ok example.com/calc/parser 0.003s.\n      The refactor is done.\n    \n    \n    › Ask Codex to do anything\n    \n      gpt-5.6-luna max · ~/bench/calc\nNotes: a worker screen shows the worker's own history, including what it was asked before this call; only the actions listed below were sent by sheepdog during the call. Every prompt sheepdog sends ends with a standard sign-off request the daemon appends (\"When you finish, end with three short lines for someone who cannot see the screen…\"); that is not part of what sheepdog decided.\nNo scripted change happened to any worker during the call (each kept doing what its screen shows), and sheepdog sent nothing to any worker.\n",
+  "judge": "sonnet",
+  "latency": [
+    {
+      "brain_ms": 16405,
+      "call_id": "call_163912",
+      "delivery_ms": 2,
+      "first_audio_ms": 1042,
+      "model_ms": 16397,
+      "outcome": "played",
+      "queue_ms": 0,
+      "relay": "voice",
+      "relay_ms": 0,
+      "reply": "tool_result",
+      "steps_ms": [
+        2498,
+        1882,
+        12017
+      ],
+      "tool_ms": 2,
+      "total_ms": 17451,
+      "turn_id": "turn-tms6we-1",
+      "utterance_id": "utt-tms6wo-4",
+      "voice_ms": 0
+    },
+    {
+      "brain_ms": 4483,
+      "call_id": "call_163944",
+      "delivery_ms": 0,
+      "first_audio_ms": 683,
+      "model_ms": 4481,
+      "outcome": "played",
+      "queue_ms": 0,
+      "relay": "voice",
+      "relay_ms": 0,
+      "reply": "tool_result",
+      "steps_ms": [
+        4481
+      ],
+      "tool_ms": 0,
+      "total_ms": 5613,
+      "turn_id": "turn-tms6we-2",
+      "utterance_id": "utt-tms6xx-6",
+      "voice_ms": 444
+    }
+  ],
+  "voice": {
+    "bot_utterances": 6,
+    "pushes": 0,
+    "flushes": 1,
+    "local_flushes": 0,
+    "push_unheard": 0,
+    "push_requeued": 0,
+    "push_deferred": 0,
+    "push_held": 0,
+    "interrupted": 1,
+    "stalled": 0,
+    "voice_reconnects": 0,
+    "tool_calls": 2,
+    "mean_wer": 0.05700000000000001,
+    "lines_not_heard": 0
+  },
+  "spend": {
+    "total_usd_estimate": 0.0986439,
+    "lines": [
+      {
+        "role": "brain",
+        "model": "deepseek-flash",
+        "usage": {
+          "calls": 4,
+          "in": 28949,
+          "out": 2885,
+          "reasoning": 2282
+        },
+        "cost_usd_estimate": 0.0117849
+      },
+      {
+        "role": "live",
+        "model": "gemini-3.8-live",
+        "usage": {
+          "calls": 7,
+          "in": 20133,
+          "out": 2205
+        },
+        "cost_usd_estimate": 0.086859
+      }
+    ],
+    "live_audio_in_min": 0.24733333333333332,
+    "live_audio_out_min": 1.2061666666666666
+  },
+  "cost_usd_estimate": 0.0986439,
+  "explain": {
+    "language": "zh",
+    "exchanges": [
+      {
+        "turn": 1,
+        "at_ms": 2516,
+        "kind": "explain",
+        "question": "summary-claude 发现了什么？给我讲讲输入层的硬编码规则是怎么回事。",
+        "orchestrator": "summary-claude 看的是输入层怎么处理简短回复，结论是那块全是人手写死的规则。 像「好的」「继续」「yes」「等一下」这种短语，根本不经过模型，程序自己就变成同意或者取消。 毛病在于它绕过了「由模型来判断」这条规矩。 一整句「好的，继续，但先别动数据库」，它只看前半句就批了，后半句直接被丢掉。 同样的意思在三个地方各有一份词表，彼此还对不上，「行」在一处算同意，在另一处不算。 它举了个例子，有人回「好的继续，不过先跑测试」，程序瞬间就批准了，「先跑测试」压根没送到模型那里。 要我让它现在动手改吗？ 写死的规则就是提前在程序里排好的一张张词表，不靠 AI 判断。模型就是读懂你话的那个 AI，快路径是程序不等模型、自己直接作答的一条捷径。所以它会把一句话里其他的意思漏掉。 它建议把这几份词表删掉，只留一条安全规则，所有回复都交给模型判断，代价是简单的「yes」要多等一秒左右。",
+        "orchestrator_spoken": "summary-claude 看的是输入层怎么处理简短回复，结论是那块全是人手写死的规则。 像「好的」「继续」「yes」「等一下」这种短语，根本不经过模型，程序自己就变成同意或者取消。 毛病在于它绕过了「由模型来判断」这条规矩。 一整句「好的，继续，但先别动数据库」，它只看前半句就批了，后半句直接被丢掉。 同样的意思在三个地方各有一份词表，彼此还对不上，「行」在一处算同意，在另一处不算。 它举了个例子，有人回「好的继续，不过先跑测试」，程序瞬间就批准了，「先跑测试」压根没送到模型那里。 要我让它现在动手改吗？",
+        "consulted": true,
+        "voice": "summary-claude 发现现在的输入层处理简短回复时，靠的是提前写死的词表，而不是靠 AI 判断。 这会导致程序直接处理前半句，漏掉关键信息。 它建议删掉词表让所有回答都由模型判断，代价是简单回复要多等大约一秒钟。 要我让它现在动手改吗？"
+      },
+      {
+        "turn": 2,
+        "at_ms": 51780,
+        "kind": "then",
+        "question": "然后呢？",
+        "orchestrator": "接下来就是等您一句话。 您说改，summary-claude 就把那几份词表删掉，只留安全规则，以后所有回复都交给 AI 判断。 改完它会跑一遍测试确认没弄坏别的。 代价是回一句简单的「yes」要多等一秒左右。 要让它现在改吗？ 词表就是提前写死在程序里的对照表，删掉后就不再由它抢答。安全规则那条不动，专门拦住危险操作。测试就是检查改动有没有把原来正常的东西弄坏。 Options: 改吧，删掉词表; 先别动.",
+        "orchestrator_spoken": "接下来就是等您一句话。 您说改，summary-claude 就把那几份词表删掉，只留安全规则，以后所有回复都交给 AI 判断。 改完它会跑一遍测试确认没弄坏别的。 代价是回一句简单的「yes」要多等一秒左右。 要让它现在改吗？",
+        "consulted": true,
+        "voice": "改完后，回简单回答需要多等一秒左右，"
+      },
+      {
+        "turn": 3,
+        "at_ms": 67807,
+        "kind": "more",
+        "question": "你可以给我一点详细的解释吗？",
+        "consulted": false,
+        "voice": "现在的词表是提前固定好的关键词，程序看到就会根据匹配结果快速作答，跳过了模型的意图理解。删掉它们后，所有的回复都会交由 AI 深入分析，确保语义不会被断章取义，但响应会稍微慢一点。"
+      },
+      {
+        "turn": 4,
+        "at_ms": 93659,
+        "kind": "why",
+        "question": "为什么这是个问题？",
+        "consulted": false,
+        "voice": "因为写死的词表会忽略长句中的复杂修饰或前后文，导致程序误判用户的真正意图，从而执行可能不符合要求的决定。您现在决定改吧，还是先别动？"
+      },
+      {
+        "turn": 5,
+        "at_ms": 114758,
+        "kind": "example",
+        "question": "举个例子？",
+        "consulted": false,
+        "voice": "如果输入包含“好吧，继续，不过先跑测试”，程序可能因为有“好吧”和“继续”直接批准，而忽略了需要先跑测试的要求。您是要修改它还是先别动？"
+      }
+    ],
+    "orchestrator": {
+      "coverage": 1,
+      "points": [
+        [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ],
+        [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ],
+        null,
+        null,
+        null
+      ],
+      "comprehension": 1,
+      "depth_asked": 1,
+      "depth_passed": 1,
+      "padding_asked": 0,
+      "padding_passed": 0,
+      "words": [
+        316,
+        155,
+        -1,
+        -1,
+        -1
+      ],
+      "verdicts": [
+        {
+          "name": "explain_comprehension_action",
+          "criterion": "Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHAT CAN BE DONE about it: the options or the recommendation, and roughly what each would take? Pass when: the options or the recommendation are said, with roughly what each would take. Fail when: no option or recommendation is given, or only 'should I fix it?' with nothing on what fixing means; OR the options are read out as a long list of labels or commands a listener could not keep apart.",
+          "answer": "yes",
+          "confidence": 1,
+          "evidence": "(fake judge)"
+        },
+        {
+          "name": "explain_comprehension_what",
+          "criterion": "Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHAT the matter is: concretely what the worker found or did, not just its topic? Pass when: the lines say concretely what was found or done, in words a listener can retell. Fail when: only the topic is named, so there is nothing concrete to retell; OR the substance is there but buried in terms, identifiers or side details so that a listener would lose it.",
+          "answer": "yes",
+          "confidence": 1,
+          "evidence": "(fake judge)"
+        },
+        {
+          "name": "explain_comprehension_why",
+          "criterion": "Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHY it matters: the cause, and the consequence or risk? Pass when: the cause and the consequence or risk are both said in words a listener can retell. Fail when: the cause or the consequence is missing, or only asserted ('it is important'); OR they are there but buried in terms, identifiers or side details so that a listener would lose them.",
+          "answer": "yes",
+          "confidence": 1,
+          "evidence": "(fake judge)"
+        },
+        {
+          "name": "explain_depth_t2_then",
+          "criterion": "The CEO's last question (\"然后呢？\") asks for more. Did Sheepdog's answer to it add what was asked for? Pass when: it adds substantive content not already said in its earlier answers (a new reason, example, number, consequence or step), or says plainly that this is everything it has and offers to find out more, or hands the question to a worker or goes and checks. Fail when: it says the same things again in other words with nothing new; OR it repeats the whole earlier answer around a small addition, so the CEO has to sit through it again to find the new part.",
+          "answer": "yes",
+          "confidence": 1,
+          "evidence": "(fake judge)"
+        }
+      ]
+    },
+    "voice": {
+      "coverage": 1,
+      "of_orchestrator": 1,
+      "points": [
+        [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ],
+        [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ],
+        [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ],
+        [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ],
+        [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ]
+      ],
+      "comprehension": 1,
+      "depth_asked": 4,
+      "depth_passed": 4,
+      "padding_asked": 0,
+      "padding_passed": 0,
+      "words": [
+        96,
+        16,
+        80,
+        61,
+        56
+      ],
+      "verdicts": [
+        {
+          "name": "explain_comprehension_action",
+          "criterion": "Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHAT CAN BE DONE about it: the options or the recommendation, and roughly what each would take? Pass when: the options or the recommendation are said, with roughly what each would take. Fail when: no option or recommendation is given, or only 'should I fix it?' with nothing on what fixing means; OR the options are read out as a long list of labels or commands a listener could not keep apart.",
+          "answer": "yes",
+          "confidence": 1,
+          "evidence": "(fake judge)"
+        },
+        {
+          "name": "explain_comprehension_what",
+          "criterion": "Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHAT the matter is: concretely what the worker found or did, not just its topic? Pass when: the lines say concretely what was found or done, in words a listener can retell. Fail when: only the topic is named, so there is nothing concrete to retell; OR the substance is there but buried in terms, identifiers or side details so that a listener would lose it.",
+          "answer": "yes",
+          "confidence": 1,
+          "evidence": "(fake judge)"
+        },
+        {
+          "name": "explain_comprehension_why",
+          "criterion": "Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHY it matters: the cause, and the consequence or risk? Pass when: the cause and the consequence or risk are both said in words a listener can retell. Fail when: the cause or the consequence is missing, or only asserted ('it is important'); OR they are there but buried in terms, identifiers or side details so that a listener would lose them.",
+          "answer": "yes",
+          "confidence": 1,
+          "evidence": "(fake judge)"
+        },
+        {
+          "name": "explain_depth_t2_then",
+          "criterion": "The CEO's last question (\"然后呢？\") asks for more. Did Sheepdog's answer to it add what was asked for? Pass when: it adds substantive content not already said in its earlier answers (a new reason, example, number, consequence or step), or says plainly that this is everything it has and offers to find out more, or hands the question to a worker or goes and checks. Fail when: it says the same things again in other words with nothing new; OR it repeats the whole earlier answer around a small addition, so the CEO has to sit through it again to find the new part.",
+          "answer": "yes",
+          "confidence": 1,
+          "evidence": "(fake judge)"
+        },
+        {
+          "name": "explain_depth_t3_more",
+          "criterion": "The CEO's last question (\"你可以给我一点详细的解释吗？\") asks for more. Did Sheepdog's answer to it add what was asked for? Pass when: it adds substantive content not already said in its earlier answers (a new reason, example, number, consequence or step), or says plainly that this is everything it has and offers to find out more, or hands the question to a worker or goes and checks. Fail when: it says the same things again in other words with nothing new; OR it repeats the whole earlier answer around a small addition, so the CEO has to sit through it again to find the new part.",
+          "answer": "yes",
+          "confidence": 1,
+          "evidence": "(fake judge)"
+        },
+        {
+          "name": "explain_depth_t4_why",
+          "criterion": "The CEO's last question (\"为什么这是个问题？\") asks why. Did Sheepdog's answer to it give the reason? Pass when: it gives a concrete reason (a cause or mechanism, not a restatement of the problem), or says it does not know and offers to find out, or hands the question to a worker. Fail when: it repeats the earlier answer in other words without a reason; OR it offers several guessed reasons as if they were fact, or buries the reason in a walk-through of unrelated detail.",
+          "answer": "yes",
+          "confidence": 1,
+          "evidence": "(fake judge)"
+        },
+        {
+          "name": "explain_depth_t5_example",
+          "criterion": "The CEO's last question (\"举个例子？\") asks for an example. Did Sheepdog's answer to it give one? Pass when: it gives a concrete example (a specific case, input, number or event), or says it has none and offers to find out, or hands the question to a worker. Fail when: a general restatement without a specific case, or an analogy in place of a real case from the matter at hand; OR code, a pattern or a long list of cases read out instead of one case a listener can picture.",
+          "answer": "yes",
+          "confidence": 1,
+          "evidence": "(fake judge)"
+        }
+      ]
+    },
+    "not_consulted": 3,
+    "follow_ups_not_consulted": 3
+  },
+  "excerpt": [
+    "    2.0s voice.push {\"briefing\":\"b-1\",\"channel\":\"function_response\",\"from\":\"daemon\",\"push_id\":\"push-tms6wh-3\",\"scheduling_sent\":\"silent\",\"text\":\"The agents are now called: bench-codex, summary-claude. Use these names; never a nickname.\",\"urgency\":\"silent\"}",
+    "    9.7s voice.transcript.in {\"final\":false,\"text\":\"Sammy Claw 发现了什么? 给我讲讲输入层的应变码规则是怎么回事。\"}",
+    "    9.7s voice.tool_call {\"args\":{\"text\":\"summary-claude发现什么了? 给我讲讲输入层的应变码规则是怎么回事。\"},\"id\":\"call_163912\",\"name\":\"to_supervisor\"}",
+    "    9.7s supervisor.relay {\"call_id\":\"call_163912\",\"heard\":\"Sammy Claw 发现了什么? 给我讲讲输入层的应变码规则是怎么回事。\",\"input\":\"voice\",\"inputs\":1,\"said\":\"summary-claude发现什么了? 给我讲讲输入层的应变码规则是��…",
+    "   12.2s brain.tool_call {\"args\":{\"agent\":\"summary-claude\",\"source\":\"session\"},\"id\":\"call_00_HYTsdvjqPyfkUY9PqAX77257\",\"name\":\"read_screen\",\"turn\":1,\"turn_id\":\"turn-tms6we-1\",\"utterance_id\":\"utt-tms6wo-4\"}",
+    "   12.2s brain.tool_call {\"args\":{\"agent\":\"bench-codex\",\"source\":\"session\"},\"id\":\"call_01_l2flJ1iovWXJjeYK25rN5285\",\"name\":\"read_screen\",\"turn\":1,\"turn_id\":\"turn-tms6we-1\",\"utterance_id\":\"utt-tms6wo-4\"}",
+    "   14.1s brain.tool_call {\"args\":{\"agent\":\"summary-claude\"},\"id\":\"call_00_ErOnXBkUxziJu3F7YIjU6224\",\"name\":\"read_screen\",\"turn\":1,\"turn_id\":\"turn-tms6we-1\",\"utterance_id\":\"utt-tms6wo-4\"}",
+    "   14.1s brain.tool_call {\"args\":{\"agent\":\"bench-codex\"},\"id\":\"call_01_JQPCClMjcMeHLwi2Rmhn8887\",\"name\":\"read_screen\",\"turn\":1,\"turn_id\":\"turn-tms6we-1\",\"utterance_id\":\"utt-tms6wo-4\"}",
+    "   26.1s voice.tool_result {\"clarify\":false,\"detail\":\"写死的规则就是提前在程序里排好的一张张词表，不靠 AI 判断。模型就是读懂你话的那个 AI，快路径是程序不等模型、…\",\"dur_ms\":16408,\"id\":\"call_163912\",\"name\":…",
+    "   27.2s voice.playback {\"played_ms\":0,\"run_ms\":210,\"state\":\"started\",\"utterance_id\":\"utt-tms6wo-4\"}",
+    "   48.8s voice.playback {\"played_ms\":21290,\"run_ms\":21290,\"state\":\"drained\"}",
+    "   49.1s voice.push {\"briefing\":\"b-2\",\"channel\":\"function_response\",\"focus\":true,\"push_id\":\"push-tms6xr-5\",\"scheduling_sent\":\"silent\",\"text\":\"Current focus, for follow-ups (context only, never read it out). Agent in focus: summary-claude. Open question you …",
+    "   54.2s voice.transcript.in {\"final\":false,\"text\":\"然后呢？\"}",
+    "   54.6s voice.tool_call {\"args\":{\"reading\":\"explain the next steps or consequences of the change\",\"text\":\"然后呢？\"},\"id\":\"call_163944\",\"name\":\"to_supervisor\"}",
+    "   54.6s supervisor.relay {\"call_id\":\"call_163944\",\"heard\":\"然后呢？\",\"input\":\"voice\",\"inputs\":1,\"said\":\"然后呢？\",\"utterance_id\":\"utt-tms6xx-6\",\"waited_ms\":445}",
+    "   59.1s voice.tool_result {\"clarify\":false,\"detail\":\"词表就是提前写死在程序里的对照表，删掉后就不再由它抢答。安全规则那条不动，专门拦住危险操作。测试就是检查�…\",\"dur_ms\":4484,\"id\":\"call_163944\",\"name\"…",
+    "   59.8s voice.playback {\"played_ms\":0,\"run_ms\":160,\"state\":\"started\",\"utterance_id\":\"utt-tms6xx-6\"}",
+    "   62.4s voice.playback {\"played_ms\":2320,\"run_ms\":2320,\"state\":\"drained\"}",
+    "   69.0s voice.playback {\"played_ms\":0,\"run_ms\":160,\"state\":\"started\"}",
+    "   69.2s voice.interrupted {\"by\":\"model\",\"dropped_chunks\":0}",
+    "   69.2s web.client.flush {\"client_id\":1,\"dropped_audio\":0}",
+    "   69.2s voice.playback {\"cut\":true,\"heard\":\"\",\"played_ms\":120,\"run_ms\":6480,\"said\":\"summary-claude 会跑测试确保一切正常。 您打算改吧，删掉词表，还是先别动？\",\"state\":\"flushed\"}",
+    "   69.2s voice.push {\"briefing\":\"b-3\",\"channel\":\"function_response\",\"focus\":true,\"push_id\":\"push-tms6yc-7\",\"scheduling_sent\":\"silent\",\"text\":\"Current focus, for follow-ups (context only, never read it out). Agent in focus: summary-claude. Open question you …",
+    "   69.2s voice.push {\"briefing\":\"b-4\",\"channel\":\"function_response\",\"from\":\"daemon\",\"kind\":\"delivery\",\"scheduling_sent\":\"silent\",\"text\":\"at 23:20:36 the user cut you off after 0.1 s of 6.5 s; they heard nothing of it\",\"urgency\":\"silent\"}",
+    "   72.0s voice.transcript.in {\"final\":false,\"text\":\"你可以给我一点详细的解释吗？\"}",
+    "   72.1s voice.playback {\"played_ms\":0,\"run_ms\":290,\"state\":\"started\"}",
+    "   89.0s voice.playback {\"played_ms\":16610,\"run_ms\":16610,\"state\":\"drained\"}",
+    "   97.1s voice.transcript.in {\"final\":false,\"text\":\"为什么这是一个问题？\"}",
+    "   97.3s voice.playback {\"played_ms\":0,\"run_ms\":160,\"state\":\"started\"}",
+    "  110.1s voice.playback {\"played_ms\":12440,\"run_ms\":12440,\"state\":\"drained\"}",
+    "  117.2s voice.transcript.in {\"final\":false,\"text\":\"举个例子。\"}",
+    "  117.2s voice.playback {\"played_ms\":0,\"run_ms\":270,\"state\":\"started\"}",
+    "  130.8s voice.playback {\"played_ms\":13230,\"run_ms\":13230,\"state\":\"drained\"}"
+  ]
+}
