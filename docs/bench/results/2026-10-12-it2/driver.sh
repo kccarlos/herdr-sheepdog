@@ -9,7 +9,13 @@ CAP=${CAP:-20}
 cum=0; last=4
 [ -e $R/spend-chunks.txt ] && cum=$(awk '{s+=$3} END{print s+0}' $R/spend-chunks.txt)
 for k in 1 2 3; do
- if python3 -c "import sys;sys.exit(0 if $cum+2*$last>$CAP else 1)"; then echo "cap: cum=$cum last=$last"; break; fi
+ unset IDS
+ if python3 -c "import sys;sys.exit(0 if $cum+2*$last>$CAP else 1)"; then
+  # Not enough for both arms on all six: the four scenarios with approvals, both arms.
+  if python3 -c "import sys;sys.exit(0 if $cum+2*$last*4/6>$CAP else 1)"; then echo "cap: cum=$cum last=$last"; break; fi
+  export IDS=workday-morning-standup,workday-scale-ten,workday-zh-evening,workday-long-haul
+  echo "pair r$k on four scenarios: $IDS"
+ fi
  for arm in fix main; do
   [ -e $REPO/STOP ] && { echo "STOP file"; exit 0; }
   [ -e $R/$arm/r$k/report.json ] && continue

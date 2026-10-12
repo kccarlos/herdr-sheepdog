@@ -11,7 +11,7 @@ ARM=$1; K=$2
 REPO=${REPO:?}; CFG=${CFG:?}
 case $ARM in fix) BIN=${BIN_FIX:?};; main) BIN=${BIN_MAIN:?};; esac
 case $K in 1) P=terse,rambling,zh,impatient,vague;; 2) P=rambling,zh,impatient,vague,terse;; 3) P=zh,impatient,vague,terse,rambling;; esac
-IDS=workday-morning-standup,workday-scale-ten,workday-zh-evening,workday-interruptions,workday-explain-deep,workday-long-haul
+IDS=${IDS:-workday-morning-standup,workday-scale-ten,workday-zh-evening,workday-interruptions,workday-explain-deep,workday-long-haul}
 OUT=$REPO/docs/bench/results/2026-10-12-it2/$ARM/r$K
 mkdir -p "$OUT"
 cd $REPO
