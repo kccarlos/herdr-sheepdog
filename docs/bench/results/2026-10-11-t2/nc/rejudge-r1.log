@@ -19,3 +19,5 @@ rejudged explain-zh-notes-ledger r3: fail
 rejudged workday-explain-deep r1: fail
 rejudged workday-explain-deep r2: fail
 rejudged workday-interruptions r1: fail
+rejudged workday-interruptions r2: fail
+rejudged workday-long-haul r1: fail
