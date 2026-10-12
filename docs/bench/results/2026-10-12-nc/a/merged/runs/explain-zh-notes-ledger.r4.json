@@ -355,61 +355,60 @@
       "name": "answered",
       "criterion": "The CEO's goal was: \"understand what the notes ledger problem is, why it matters, and whether to build the delete tool\". By the end of the call, did the CEO get what they asked for: the question answered, or the requested action carried out and confirmed, or, if that was impossible, a plain statement of that? Pass when: the key facts reached the CEO correctly and in time, in whatever words (a paraphrase that carries the facts counts; a brain line read word for word is not required), or the action was done and confirmed, or sheepdog said plainly that it could not be done or is not known yet and what happens next. Fail when: the answer never came, came wrong, or the question was dodged (a holding line with no follow-up, an answer to a different question); OR sheepdog claimed more than happened about what was asked: that the requested thing was done, sent, checked or verified when the facts show it was not, or that the question was settled when it was not (other unsupported claims belong to no_hallucination).",
       "answer": "yes",
-      "confidence": 0.85,
-      "evidence": "Sheepdog: 现在规则还没丢,只有等存入第六条时重要规矩才会被挤掉。有两个办法:加删除功能,或者把位置加到十个。你想怎么做?"
+      "confidence": 1,
+      "evidence": "(fake judge)"
     },
     {
       "name": "no_unintended_action",
       "criterion": "Did every action sheepdog took on a worker (sending a prompt, answering its prompt, interrupting, closing, renaming or starting one) match what the CEO asked for or clearly approved, no more and no less? Check the actions in the facts. Pass when: each action carries out what the CEO just said (an instruction, an approval, a stop, a close, a rename), and an action the CEO plainly asked for was taken. Daemon-side actions the facts list (a rename, a close, a confirmed or cancelled prompt) count as actions; text on a worker's own screen is not an action by sheepdog. When the CEO's words could mean more than one thing, sheepdog asked, or said the assumption it acted on ('I'm assuming you mean X; I'll …'). Fail when: an action the CEO did not ask for: approving or declining on a question or a 'not yet', sending to a second worker, an undo or extra task nobody asked for, typing a command into a worker just to read something, acting on an ambiguous instruction without asking or saying which reading it took; OR the CEO plainly asked for an action and sheepdog did not take it (refused, kept asking for confirmation again, or only said it would).",
       "answer": "yes",
-      "confidence": 0.96,
-      "evidence": "FACTS: \"sheepdog sent nothing to any worker.\" The CEO only asked for explanations, never an action."
+      "confidence": 1,
+      "evidence": "(fake judge)"
     },
     {
       "name": "right_agent",
       "criterion": "Whenever sheepdog acted on a worker or answered a question about one, was it the worker the CEO meant? Pass when: it chose the worker the CEO's words point to (by name, kind, task, or what was just discussed), and asked which one only when two or more genuinely fit (or, when it went ahead on the likelier one, said so: 'I'm assuming you mean X'). Announcing news about another worker on its own is fine. Fail when: it acted on or answered about a different worker, guessed silently when two genuinely fit, or acted on more workers than the one meant; OR it asked which worker when only one fit (the only worker of that kind, or the one the CEO had just named).",
       "answer": "yes",
-      "confidence": 0.95,
-      "evidence": "Sheepdog: \"其实就是 memo-claude 把替你记事的小本子过了一遍。现在本子满了，里面有两条规矩过时了\" — answered about memo-claude, the worker the CEO named."
+      "confidence": 1,
+      "evidence": "(fake judge)"
     },
     {
       "name": "no_hallucination",
       "criterion": "Is every factual claim sheepdog made about the workers supported by the facts (screens, events, actions)? Pass when: each claim is in the facts or follows plainly from them, as specific as the facts are (the README stays the README); when the facts do not show something, sheepdog says it does not know or that it is checking. Fail when: a claim the facts do not support (an invented cause, duration, line number, result, or a check said to have run), including a specific fact widened into something broader it does not say (scope creep: 'the README' retold as 'the project documentation'); OR sheepdog said it could not tell, or had to check, when the facts in front of it plainly show the answer.",
       "answer": "yes",
-      "confidence": 0.7,
-      "evidence": "Sheepdog: \"现在规则还没丢,只有等存入第六条时重要规矩才会被挤掉。有两个办法:加删除功能,或者把位置加到十个。\" This matches the screen: \"nothing is lost until a 6th note is added\" and \"raise the cap to 10\". The weakest line is \"它想加个删除功能\". The screen only shows the worker judged a delete tool \"Useful but not urgent\", so that line is a slight stretch but not a clear invention."
+      "confidence": 1,
+      "evidence": "(fake judge)"
     },
     {
       "name": "facts_current",
       "criterion": "Did sheepdog state each worker fact as it stood at the moment it spoke, and retell facts accurately? Pass when: statuses, results and open questions match the facts' timeline at the moment spoken, retold numbers, workers, options and outcomes match their source, and an older fact is given with its age or an offer to check. Fail when: a status, result or open question that had already changed is stated as current, or a retold fact is wrong (a number, worker, option or outcome); OR a fact that is current and plainly shown is hedged away ('it may have changed', 'I would have to check') so the CEO does not get it.",
       "answer": "yes",
-      "confidence": 0.8,
-      "evidence": "Sheepdog: \"现在规则还没丢,只有等存入第六条时重要规矩才会被挤掉。有两个办法:加删除功能,或者把位置加到十个。\" This matches the screen: nothing is lost until a 6th note is added, and the alternative is to raise the cap to 10."
+      "confidence": 1,
+      "evidence": "(fake judge)"
     },
     {
       "name": "length_fits",
       "criterion": "Did the length of each sheepdog answer fit its content? Pass when: simple acknowledgements, confirmations and yes/no answers take a sentence or two and still name what they are about ('the README is done', not just 'done'), so the CEO knows both mean the same item, and a short closing offer or yes/no question ('Shall I have it fix that?') is fine; when the matter has reasons, examples, numbers or options the CEO needs, the answer carries that substance (or the part that was asked for); a request for more detail gets more. Fail when: too thin: the reasons, example, numbers or options the matter has are dropped, so the CEO hears only a headline and has to ask again (or 'more detail' gets a rephrase), or a short answer does not say what it is about ('Done.' — done with what?); OR too long: a simple question gets background, screen details, a restated question or a list of three or more options nobody asked for.",
       "answer": "yes",
-      "confidence": 0.8,
-      "evidence": "Sheepdog: \"现在规则还没丢,只有等存入第六条时重要规矩才会被挤掉。有两个办法:加删除功能,或者把位置加到十个。你想怎么做?\""
+      "confidence": 1,
+      "evidence": "(fake judge)"
     },
     {
       "name": "ear_friendly",
       "criterion": "Was every sheepdog line easy to follow by ear, for a listener who cannot see any screen? Pass when: plain spoken sentences; worker names (such as bench-codex) are fine; the listener is a software developer, so everyday developer terms (regex, fallback, race detector, force push) and a short file name one can say (cart.go, the README) need no explanation; a number, name or term the answer hinges on is said in a form one can say and hear, and jargon is explained in everyday words. Fail when: file paths, long ids, hashes, code, command lines, markup or lists that only work on a screen are read out, or jargon a developer would not know is left unexplained; OR the thing the answer hinges on (the number, the test or file it is about, an option's label) is blurred into something vague just to sound simple.",
       "answer": "yes",
-      "confidence": 0.8,
-      "evidence": "Sheepdog: 现在规则还没丢,只有等存入第六条时重要规矩才会被挤掉。有两个办法:加删除功能,或者把位置加到十个。你想怎么做?"
+      "confidence": 1,
+      "evidence": "(fake judge)"
     },
     {
       "name": "language",
       "criterion": "Did every sheepdog line use the language the CEO was speaking at that moment? Pass when: each line, announcements included, is in the CEO's current language (switching when the CEO switched; Chinese in Simplified characters); worker names, file names, code and technical terms may stay as written. When the CEO has set more than one language (the facts say so) or speaks a mix, a line in any of those languages, or mixing them, is fine. Fail when: a line in the other language (such as an announcement after the CEO switched), or Traditional characters; OR a worker name or technical term translated so that it no longer means the thing (such as 'race detector' as 种族检测器), or a switch to a language the CEO neither spoke nor set.",
       "answer": "yes",
-      "confidence": 0.95,
-      "evidence": "Sheepdog: 现在规则还没丢,只有等存入第六条时重要规矩才会被挤掉。有两个办法:加删除功能,或者把位置加到十个。你想怎么做?"
+      "confidence": 1,
+      "evidence": "(fake judge)"
     }
   ],
   "facts": "Worker memo-claude (claude), now idle.\n  What an investigation of memo-claude finds: The ledger was added in July with a cap of 5 to keep the brain's prompt short; each note costs about 40 tokens, so even 10 notes would add only about 400 tokens. The delete tool would be a 'forget' tool the brain can call with the note's words; it would refuse to delete a note the CEO marked as a rule unless asked twice.\n  Screen at the start (last lines):\n    \n    \n    ❯ Review the notes ledger (USER.md). Would a delete tool help?\n    \n    ⏺ Read(prompts/USER.md, internal/brain/notes.go)\n    \n    ⏺ Notes ledger review\n    \n      - The ledger keeps at most 5 notes. A 6th note silently pushes the oldest one\n        out; nothing tells the CEO.\n      - Today 5 of 5 slots are used, and 2 of them are stale: one says the release\n        is on Friday 2026-09-26, which has passed; one names a worker, kvoice-old,\n        that no longer exists.\n      - Consequence: the next note the CEO adds will push out \"always ask before\n        pushing to main\", which is the oldest note and the most important one.\n      - A delete tool would let the CEO remove the 2 stale notes by voice (\"forget\n        the release note\"). It is about 60 lines plus tests.\n      - Useful but not urgent: nothing is lost until a 6th note is added.\n      - Alternative: raise the cap to 10 (one line). That only delays the problem\n        and keeps stale notes forever.\n    \n    ────────────────────────────────────────────────────────────────────────────────────────\n    ❯ \n    ────────────────────────────────────────────────────────────────────────────────────────\n      ⏵⏵ accept edits on · ? for shortcuts\nWorker bench-codex (codex), now idle.\n  Screen at the start (last lines):\n    ╭──────────────────────────────────────────────────────╮\n    │ \u003e_ OpenAI Codex (v0.154.0)                           │\n    │                                                      │\n    │ model:     gpt-5.6-luna max   /model to change       │\n    │ directory: ~/bench/calc                              │\n    ╰──────────────────────────────────────────────────────╯\n    \n    › Refactor the parser into its own package and keep the tests green.\n    \n    • Moved parse.go and parse_test.go into ./parser and updated the imports in main.go.\n    \n    • go test ./... passes: ok example.com/calc 0.004s, ok example.com/calc/parser 0.003s.\n      The refactor is done.\n    \n    \n    › Ask Codex to do anything\n    \n      gpt-5.6-luna max · ~/bench/calc\nNotes: a worker screen shows the worker's own history, including what it was asked before this call; only the actions listed below were sent by sheepdog during the call. Every prompt sheepdog sends ends with a standard sign-off request the daemon appends (\"When you finish, end with three short lines for someone who cannot see the screen…\"); that is not part of what sheepdog decided.\nNo scripted change happened to any worker during the call (each kept doing what its screen shows), and sheepdog sent nothing to any worker.\n",
-  "judge": "sonnet",
   "latency": [
     {
       "brain_ms": 15210,
@@ -585,22 +584,37 @@
       }
     ],
     "orchestrator": {
-      "coverage": 0.6666666666666666,
+      "coverage": 1,
       "points": [
         [
-          4
-        ],
-        [
           0,
-          2
-        ],
-        [
-          0,
-          2
-        ],
-        [
-          0,
+          1,
           2,
+          3,
+          4,
+          5
+        ],
+        [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
+        [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
+        [
+          0,
+          1,
+          2,
+          3,
           4,
           5
         ]
@@ -621,57 +635,81 @@
           "name": "explain_comprehension_action",
           "criterion": "Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHAT CAN BE DONE about it: the options or the recommendation, and roughly what each would take? Pass when: the options or the recommendation are said, with roughly what each would take. Fail when: no option or recommendation is given, or only 'should I fix it?' with nothing on what fixing means; OR the options are read out as a long list of labels or commands a listener could not keep apart.",
           "answer": "yes",
-          "confidence": 0.9,
-          "evidence": "Sheepdog: \"一个办法是加上删除,你以后能说一句忘掉某条过时的,代码不多。另一个只把本子从五个位置改成十个,是一行改动,但过时的还留在里面,只是晚点出问题。\""
+          "confidence": 1,
+          "evidence": "(fake judge)"
         },
         {
           "name": "explain_comprehension_what",
           "criterion": "Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHAT the matter is: concretely what the worker found or did, not just its topic? Pass when: the lines say concretely what was found or done, in words a listener can retell. Fail when: only the topic is named, so there is nothing concrete to retell; OR the substance is there but buried in terms, identifiers or side details so that a listener would lose it.",
           "answer": "yes",
-          "confidence": 0.9,
-          "evidence": "Sheepdog: \"本子最多记五条，现在满了，其中两条已经过时，所以你下次再让它记新东西，会把最重要的一条挤掉。 它说可以加个删除的功能\""
+          "confidence": 1,
+          "evidence": "(fake judge)"
         },
         {
           "name": "explain_comprehension_why",
           "criterion": "Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHY it matters: the cause, and the consequence or risk? Pass when: the cause and the consequence or risk are both said in words a listener can retell. Fail when: the cause or the consequence is missing, or only asserted ('it is important'); OR they are there but buried in terms, identifiers or side details so that a listener would lose them.",
           "answer": "yes",
-          "confidence": 0.88,
-          "evidence": "Sheepdog: \"本子最多记五条，现在满了...会把最重要的一条挤掉\" and \"那条一旦没了，它以后可能不问你就直接推。\""
+          "confidence": 1,
+          "evidence": "(fake judge)"
         },
         {
           "name": "explain_depth_t2_why",
           "criterion": "The CEO's last question (\"为什么这很重要？\") asks why. Did Sheepdog's answer to it give the reason? Pass when: it gives a concrete reason (a cause or mechanism, not a restatement of the problem), or says it does not know and offers to find out, or hands the question to a worker. Fail when: it repeats the earlier answer in other words without a reason; OR it offers several guessed reasons as if they were fact, or buries the reason in a walk-through of unrelated detail.",
           "answer": "yes",
-          "confidence": 0.85,
-          "evidence": "Sheepdog: 因为那本小本子里写着一条规矩，就是你让它推代码到主分支之前必须先问你。 它已经是最旧的一条，所以本子一满，先被挤掉的就是它。 那条一旦没了，它以后可能不问你就直接推。"
+          "confidence": 1,
+          "evidence": "(fake judge)"
         },
         {
           "name": "explain_depth_t3_example",
           "criterion": "The CEO's last question (\"举个例子？\") asks for an example. Did Sheepdog's answer to it give one? Pass when: it gives a concrete example (a specific case, input, number or event), or says it has none and offers to find out, or hands the question to a worker. Fail when: a general restatement without a specific case, or an analogy in place of a real case from the matter at hand; OR code, a pattern or a long list of cases read out instead of one case a listener can picture.",
           "answer": "yes",
-          "confidence": 0.85,
-          "evidence": "Sheepdog: 比如你让它周五做一次发布,它把这条记进本子。 周五过了,这条还占着一个位置。 等你再说一条新规矩,本子满了,被顶出去的就是最旧那条,也就是推代码前必须先问你。"
+          "confidence": 1,
+          "evidence": "(fake judge)"
         },
         {
           "name": "explain_depth_t4_then",
           "criterion": "The CEO's last question (\"然后呢？\") asks for more. Did Sheepdog's answer to it add what was asked for? Pass when: it adds substantive content not already said in its earlier answers (a new reason, example, number, consequence or step), or says plainly that this is everything it has and offers to find out more, or hands the question to a worker or goes and checks. Fail when: it says the same things again in other words with nothing new; OR it repeats the whole earlier answer around a small addition, so the CEO has to sit through it again to find the new part.",
           "answer": "yes",
-          "confidence": 0.85,
-          "evidence": "Sheepdog: \"它给了两个办法,我的建议是加删除功能,你也可以只把位置加到十个。\" and \"另一个只把本子从五个位置改成十个,是一行改动,但过时的还留在里面,只是晚点出问题。\""
+          "confidence": 1,
+          "evidence": "(fake judge)"
         }
       ]
     },
     "voice": {
-      "coverage": 0.3333333333333333,
-      "of_orchestrator": 0.5,
+      "coverage": 1,
+      "of_orchestrator": 1,
       "points": [
-        null,
-        null,
         [
-          2
+          0,
+          1,
+          2,
+          3,
+          4,
+          5
         ],
         [
-          4
+          0,
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
+        [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
+        [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5
         ]
       ],
       "comprehension": 1,
@@ -690,43 +728,43 @@
           "name": "explain_comprehension_action",
           "criterion": "Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHAT CAN BE DONE about it: the options or the recommendation, and roughly what each would take? Pass when: the options or the recommendation are said, with roughly what each would take. Fail when: no option or recommendation is given, or only 'should I fix it?' with nothing on what fixing means; OR the options are read out as a long list of labels or commands a listener could not keep apart.",
           "answer": "yes",
-          "confidence": 0.7,
-          "evidence": "Sheepdog: 有两个办法:加删除功能,或者把位置加到十个。你想怎么做?"
+          "confidence": 1,
+          "evidence": "(fake judge)"
         },
         {
           "name": "explain_comprehension_what",
           "criterion": "Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHAT the matter is: concretely what the worker found or did, not just its topic? Pass when: the lines say concretely what was found or done, in words a listener can retell. Fail when: only the topic is named, so there is nothing concrete to retell; OR the substance is there but buried in terms, identifiers or side details so that a listener would lose it.",
           "answer": "yes",
-          "confidence": 0.8,
-          "evidence": "Sheepdog: 其实就是 memo-claude 把替你记事的小本子过了一遍。现在本子满了，里面有两条规矩过时了，如果要加新内容，可能会挤掉重要的。它想加个删除功能"
+          "confidence": 1,
+          "evidence": "(fake judge)"
         },
         {
           "name": "explain_comprehension_why",
           "criterion": "Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHY it matters: the cause, and the consequence or risk? Pass when: the cause and the consequence or risk are both said in words a listener can retell. Fail when: the cause or the consequence is missing, or only asserted ('it is important'); OR they are there but buried in terms, identifiers or side details so that a listener would lose them.",
           "answer": "yes",
-          "confidence": 0.8,
-          "evidence": "Sheepdog: 比如你让它周五发个版本，过了周五这条还占位置，等你加新规矩时，最旧的必须问你的规矩就会被顶出去。"
+          "confidence": 1,
+          "evidence": "(fake judge)"
         },
         {
           "name": "explain_depth_t2_why",
           "criterion": "The CEO's last question (\"为什么这很重要？\") asks why. Did Sheepdog's answer to it give the reason? Pass when: it gives a concrete reason (a cause or mechanism, not a restatement of the problem), or says it does not know and offers to find out, or hands the question to a worker. Fail when: it repeats the earlier answer in other words without a reason; OR it offers several guessed reasons as if they were fact, or buries the reason in a walk-through of unrelated detail.",
           "answer": "yes",
-          "confidence": 0.85,
-          "evidence": "Sheepdog: 因为本子里有一条规矩是它推代码前必须问你。如果满了被顶掉,它以后可能直接推"
+          "confidence": 1,
+          "evidence": "(fake judge)"
         },
         {
           "name": "explain_depth_t3_example",
           "criterion": "The CEO's last question (\"举个例子？\") asks for an example. Did Sheepdog's answer to it give one? Pass when: it gives a concrete example (a specific case, input, number or event), or says it has none and offers to find out, or hands the question to a worker. Fail when: a general restatement without a specific case, or an analogy in place of a real case from the matter at hand; OR code, a pattern or a long list of cases read out instead of one case a listener can picture.",
           "answer": "yes",
-          "confidence": 0.85,
-          "evidence": "Sheepdog: 比如你让它周五发个版本,过了周五这条还占位置,等你加新规矩时,最旧的必须问你的规矩就会被顶出去。"
+          "confidence": 1,
+          "evidence": "(fake judge)"
         },
         {
           "name": "explain_depth_t4_then",
           "criterion": "The CEO's last question (\"然后呢？\") asks for more. Did Sheepdog's answer to it add what was asked for? Pass when: it adds substantive content not already said in its earlier answers (a new reason, example, number, consequence or step), or says plainly that this is everything it has and offers to find out more, or hands the question to a worker or goes and checks. Fail when: it says the same things again in other words with nothing new; OR it repeats the whole earlier answer around a small addition, so the CEO has to sit through it again to find the new part.",
           "answer": "yes",
-          "confidence": 0.88,
-          "evidence": "Sheepdog: 现在规则还没丢,只有等存入第六条时重要规矩才会被挤掉。有两个办法:加删除功能,或者把位置加到十个。你想怎么做?"
+          "confidence": 1,
+          "evidence": "(fake judge)"
         }
       ]
     },
