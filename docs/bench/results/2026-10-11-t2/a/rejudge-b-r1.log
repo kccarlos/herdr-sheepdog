@@ -1,2 +1,4 @@
 sheepdog bench rejudge: segments: workday-explain-deep r2: segment 13 (beat 14): judge: no verdict for right_agent
 sheepdog bench rejudge: segments: workday-interruptions r2: segment 4 (beat 5): judge: no verdict for right_agent
+rejudged workday-morning-standup r1: fail
+sheepdog bench rejudge: segments: workday-scale-ten r2: segment 13 (beat 13): judge: no verdict for right_agent
