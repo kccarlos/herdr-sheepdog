@@ -54,3 +54,4 @@ exit 0
 01:50:09 [5/6] workday-long-haul r2 (:7911): pass (end_call, ) 16 turns 570s ≈ $0.746, total ≈ $3.83
 01:51:12 [6/6] workday-explain-deep r2 (:7912): pass (end_call, ) 12 turns 641s ≈ $0.856, total ≈ $4.68
 01:51 done nc workday-2 chunk=$4.68 cum=$19.77
+ALLDONE cum=19.77

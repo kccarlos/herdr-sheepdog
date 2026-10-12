@@ -9,3 +9,5 @@ Arms (`docs/eval/prompt-arms/2026-10-11`): `a` = main prompts (identical to `she
 ## Progress
 
 Updated as chunks finish (see `spend-chunks.txt`).
+
+**tier-2 runs done** (2026-10-12 01:51): all 8 chunks finished, 42 runs per arm (explain 6 x5, workday 6 x2). Vertex bench-meter total ≈ $19.77 (a $9.48, nc $10.29). DeepSeek balance after the runs: 39.34 CNY. Scratch daemons on :7911/:7912 are stopped; the ports are free. Next: Sonnet segment rejudge and comparison on this branch.
