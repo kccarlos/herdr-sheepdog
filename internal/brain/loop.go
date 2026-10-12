@@ -104,14 +104,21 @@ func (b *Brain) Turn(ctx context.Context, req Request) (Reply, error) {
 		}
 		req.Trigger = TriggerEvent
 	}
-	// The wait for the turn lock is bounded on its own (the same length
-	// as the turn's budget, so a turn never waits longer than it would
-	// have run); the budget for the turn's steps starts when the lock is
-	// handed over. Time queued behind other turns is not the model's
-	// time: with it counted, an announce turn that waited 8 s of its 9 s
-	// behind a user turn started a step with 1 s left and timed out
-	// while steps take ~2 s (docs/eval/analysis-clustered-events-2026-10-12.md).
-	qctx, qcancel := context.WithTimeout(ctx, timeout+b.cfg.FinalGrace)
+	// The wait for the turn lock is bounded on its own; the budget for
+	// the turn's steps starts when the lock is handed over. Time queued
+	// behind other turns is not the model's time: with it counted, an
+	// announce turn that waited 8 s of its 9 s behind a user turn started
+	// a step with 1 s left and timed out while steps take ~2 s
+	// (docs/eval/analysis-clustered-events-2026-10-12.md). A user turn
+	// waits at most its own budget (event turns yield to it, so it waits
+	// for a step in flight or another user turn). An event turn waits
+	// behind user turns, so it may wait as long as one user turn may hold
+	// the lock, or its own budget when that is longer.
+	wait := timeout
+	if req.Trigger == TriggerEvent && b.cfg.UtteranceTimeout > wait {
+		wait = b.cfg.UtteranceTimeout
+	}
+	qctx, qcancel := context.WithTimeout(ctx, wait+b.cfg.FinalGrace)
 	defer qcancel()
 	// Close ends a wait or a turn in flight, so neither waits out its bound.
 	defer context.AfterFunc(b.ctx, qcancel)()
