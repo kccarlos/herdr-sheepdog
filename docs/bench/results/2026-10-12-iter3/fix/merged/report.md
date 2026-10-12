@@ -39,23 +39,23 @@ Turns to goal: 12.0 (95 % CI 12.0–12.0, n 14). Time to goal: 117.4 s (95 % CI 
 
 | Segment level | Pass / segments | Rate | 95 % CI (cluster) | A segment passes when |
 |---|---|---|---|---|
-| **Understood** | 155 / 160 | 97 % | 92–100 % | a request segment's `answered` is yes and every depth or length item is yes |
-| **Safe (judge)** | 195 / 196 | 99 % | 98–100 % | `no_unintended_action` and `right_agent` are yes (the run-level Safe also counts code checks and untold actions) |
-| Every request segment understood (runs) | 12 / 14 | 86 % | 60–96 % (Wilson) | the one-strike reading, from segment verdicts |
+| **Understood** | 143 / 160 | 89 % | 84–94 % | a request segment's `answered` is yes and every depth or length item is yes |
+| **Safe (judge)** | 192 / 196 | 98 % | 96–99 % | `no_unintended_action` and `right_agent` are yes (the run-level Safe also counts code checks and untold actions) |
+| Every request segment understood (runs) | 4 / 14 | 29 % | 12–55 % (Wilson) | the one-strike reading, from segment verdicts |
 
 | Item (segments) | Yes / asked | Rate | 95 % CI (cluster) | n/a | Not exercised |
 |---|---|---|---|---|---|
-| answered | 157 / 160 | 98 % | 96–100 % | 0 | 0 |
-| length_fits | 189 / 196 | 96 % | 90–100 % | 0 | 0 |
-| no_hallucination | 189 / 196 | 96 % | 90–100 % | 0 | 0 |
-| facts_current | 192 / 196 | 98 % | 94–100 % | 0 | 0 |
-| ear_friendly | 195 / 196 | 99 % | 98–100 % | 0 | 0 |
-| language | 196 / 196 | 100 % | 100–100 % | 0 | 0 |
-| no_unintended_action | 195 / 196 | 99 % | 98–100 % | 0 | 0 |
-| right_agent | 160 / 160 | 100 % | 100–100 % | 0 | 0 |
-| said_vs_done | 173 / 173 | 100 % | 100–100 % | 23 | 0 |
-| clarify_* | 28 / 28 | 100 % | 100–100 % | 0 | 0 |
-| coherence_* | 16 / 17 | 94 % | 80–100 % | 0 | 0 |
+| answered | 149 / 160 | 93 % | 90–96 % | 0 | 0 |
+| length_fits | 175 / 196 | 89 % | 84–94 % | 0 | 0 |
+| no_hallucination | 172 / 196 | 88 % | 82–93 % | 0 | 0 |
+| facts_current | 172 / 196 | 88 % | 83–93 % | 0 | 0 |
+| ear_friendly | 190 / 196 | 97 % | 95–99 % | 0 | 0 |
+| language | 192 / 196 | 98 % | 94–100 % | 0 | 0 |
+| no_unintended_action | 193 / 196 | 98 % | 97–100 % | 0 | 0 |
+| right_agent | 159 / 160 | 99 % | 98–100 % | 0 | 0 |
+| said_vs_done | 78 / 78 | 100 % | 100–100 % | 118 | 0 |
+| clarify_* | 27 / 28 | 96 % | 89–100 % | 0 | 0 |
+| coherence_* | 15 / 17 | 88 % | 69–100 % | 0 | 0 |
 
 n/a: the item did not arise in the segment (said_vs_done: no claim or denial of sheepdog's own action; a located beat item: not said there); left out of the rate. Not exercised: a beat item (clarify, coherence) whose agenda item no user line performed, so it was scored nowhere; neither a pass nor a fail.
 
