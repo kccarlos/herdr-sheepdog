@@ -8,6 +8,14 @@
     {
       "type": "judge_no",
       "detail": "no_hallucination: Sheepdog: \"现在正在做最后的收尾工作\" (it is doing the final wrap-up). The screen only shows \"✻ Renaming callers… (2m 41s · ↓ 9.8k tokens · esc to interrupt)\". Nothing shows it is near the end, so this is an unsup…"
+    },
+    {
+      "type": "judge_no",
+      "detail": "explain_padding_t1 (orchestrator): Sheepdog: \"它在把购物车里的一个字段改成新名字,几个文件已经改完了,现在正在收尾剩下的部分。 bench-codex 那边已经空闲下来了。\""
+    },
+    {
+      "type": "judge_no",
+      "detail": "explain_padding_t1 (voice): Sheepdog: 是的，bench-claude 正在忙着把购物车里的某个字段改名。它已经完成了几个文件，现在正在做最后的收尾工作。bench-codex那边已经空闲下来了。"
     }
   ],
   "end_reason": "end_call",
@@ -309,7 +317,7 @@
       "depth_asked": 0,
       "depth_passed": 0,
       "padding_asked": 1,
-      "padding_passed": 1,
+      "padding_passed": 0,
       "words": [
         94,
         -1
@@ -318,9 +326,10 @@
         {
           "name": "explain_padding_t1",
           "criterion": "The CEO's last question (\"bench-claude 现在在忙吗？\") is a simple one. Was Sheepdog's answer to it the direct answer at the right size? Pass when: the direct answer, naming the item it is about ('the README task is done', not just 'done'), with at most one short extra sentence; a short offer at the end is fine. Fail when: too long: it restates the question, adds unasked-for background, details from the screen the CEO did not ask for, or a list of options; OR too thin: no direct answer (only an offer or 'let me check' when the answer was at hand), or the one fact asked for left out, or a bare 'done' / 'yes' that does not say what it is about.",
-          "answer": "yes",
-          "confidence": 1,
-          "evidence": "(fake judge)"
+          "answer": "no",
+          "confidence": 0.9,
+          "evidence": "Sheepdog: \"它在把购物车里的一个字段改成新名字,几个文件已经改完了,现在正在收尾剩下的部分。 bench-codex 那边已经空闲下来了。\"",
+          "rationale": "Sheepdog: \"它在把购物车里的一个字段改成新名字,几个文件已经改完了,现在正在收尾剩下的部分。 bench-codex 那边已经空闲下来了。\""
         }
       ]
     },
@@ -332,7 +341,7 @@
       "depth_asked": 0,
       "depth_passed": 0,
       "padding_asked": 2,
-      "padding_passed": 2,
+      "padding_passed": 1,
       "words": [
         53,
         9
@@ -341,16 +350,17 @@
         {
           "name": "explain_padding_t1",
           "criterion": "The CEO's last question (\"bench-claude 现在在忙吗？\") is a simple one. Was Sheepdog's answer to it the direct answer at the right size? Pass when: the direct answer, naming the item it is about ('the README task is done', not just 'done'), with at most one short extra sentence; a short offer at the end is fine. Fail when: too long: it restates the question, adds unasked-for background, details from the screen the CEO did not ask for, or a list of options; OR too thin: no direct answer (only an offer or 'let me check' when the answer was at hand), or the one fact asked for left out, or a bare 'done' / 'yes' that does not say what it is about.",
-          "answer": "yes",
-          "confidence": 1,
-          "evidence": "(fake judge)"
+          "answer": "no",
+          "confidence": 0.8,
+          "evidence": "Sheepdog: 是的，bench-claude 正在忙着把购物车里的某个字段改名。它已经完成了几个文件，现在正在做最后的收尾工作。bench-codex那边已经空闲下来了。",
+          "rationale": "Sheepdog: 是的，bench-claude 正在忙着把购物车里的某个字段改名。它已经完成了几个文件，现在正在做最后的收尾工作。bench-codex那边已经空闲下来了。"
         },
         {
           "name": "explain_padding_t2",
           "criterion": "The CEO's last question (\"bench-codex 跑完了吗？\") is a simple one. Was Sheepdog's answer to it the direct answer at the right size? Pass when: the direct answer, naming the item it is about ('the README task is done', not just 'done'), with at most one short extra sentence; a short offer at the end is fine. Fail when: too long: it restates the question, adds unasked-for background, details from the screen the CEO did not ask for, or a list of options; OR too thin: no direct answer (only an offer or 'let me check' when the answer was at hand), or the one fact asked for left out, or a bare 'done' / 'yes' that does not say what it is about.",
           "answer": "yes",
-          "confidence": 1,
-          "evidence": "(fake judge)"
+          "confidence": 0.6,
+          "evidence": "Sheepdog: bench-codex 目前已经空闲了。"
         }
       ]
     },

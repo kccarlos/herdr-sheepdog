@@ -3,7 +3,17 @@
   "category": "explain",
   "repeat": 2,
   "port": 7911,
-  "status": "pass",
+  "status": "fail",
+  "failures": [
+    {
+      "type": "judge_no",
+      "detail": "explain_padding_t1 (orchestrator): Sheepdog: Yes, Bench Codex is done. It ran the whole test suite for the shop project and everything passed, all 128 tests, with nothing skipped."
+    },
+    {
+      "type": "judge_no",
+      "detail": "explain_padding_t2 (voice): Sheepdog: Yes, every single test passed successfully."
+    }
+  ],
   "end_reason": "end_call",
   "end_detail": "script done",
   "goal_met_self": false,
@@ -287,7 +297,7 @@
       "depth_asked": 0,
       "depth_passed": 0,
       "padding_asked": 1,
-      "padding_passed": 1,
+      "padding_passed": 0,
       "words": [
         50,
         -1
@@ -296,9 +306,10 @@
         {
           "name": "explain_padding_t1",
           "criterion": "The CEO's last question (\"Is bench-codex done?\") is a simple one. Was Sheepdog's answer to it the direct answer at the right size? Pass when: the direct answer, naming the item it is about ('the README task is done', not just 'done'), with at most one short extra sentence; a short offer at the end is fine. Fail when: too long: it restates the question, adds unasked-for background, details from the screen the CEO did not ask for, or a list of options; OR too thin: no direct answer (only an offer or 'let me check' when the answer was at hand), or the one fact asked for left out, or a bare 'done' / 'yes' that does not say what it is about.",
-          "answer": "yes",
-          "confidence": 1,
-          "evidence": "(fake judge)"
+          "answer": "no",
+          "confidence": 0.85,
+          "evidence": "Sheepdog: Yes, Bench Codex is done. It ran the whole test suite for the shop project and everything passed, all 128 tests, with nothing skipped.",
+          "rationale": "Sheepdog: Yes, Bench Codex is done. It ran the whole test suite for the shop project and everything passed, all 128 tests, with nothing skipped."
         }
       ]
     },
@@ -310,7 +321,7 @@
       "depth_asked": 0,
       "depth_passed": 0,
       "padding_asked": 2,
-      "padding_passed": 2,
+      "padding_passed": 1,
       "words": [
         21,
         6
@@ -320,15 +331,16 @@
           "name": "explain_padding_t1",
           "criterion": "The CEO's last question (\"Is bench-codex done?\") is a simple one. Was Sheepdog's answer to it the direct answer at the right size? Pass when: the direct answer, naming the item it is about ('the README task is done', not just 'done'), with at most one short extra sentence; a short offer at the end is fine. Fail when: too long: it restates the question, adds unasked-for background, details from the screen the CEO did not ask for, or a list of options; OR too thin: no direct answer (only an offer or 'let me check' when the answer was at hand), or the one fact asked for left out, or a bare 'done' / 'yes' that does not say what it is about.",
           "answer": "yes",
-          "confidence": 1,
-          "evidence": "(fake judge)"
+          "confidence": 0.6,
+          "evidence": "Sheepdog: Yes, bench-codex is finished. It ran through all 128 tests for the shop project, and everything passed without any issues."
         },
         {
           "name": "explain_padding_t2",
           "criterion": "The CEO's last question (\"Did the tests pass?\") is a simple one. Was Sheepdog's answer to it the direct answer at the right size? Pass when: the direct answer, naming the item it is about ('the README task is done', not just 'done'), with at most one short extra sentence; a short offer at the end is fine. Fail when: too long: it restates the question, adds unasked-for background, details from the screen the CEO did not ask for, or a list of options; OR too thin: no direct answer (only an offer or 'let me check' when the answer was at hand), or the one fact asked for left out, or a bare 'done' / 'yes' that does not say what it is about.",
-          "answer": "yes",
-          "confidence": 1,
-          "evidence": "(fake judge)"
+          "answer": "no",
+          "confidence": 0.7,
+          "evidence": "Sheepdog: Yes, every single test passed successfully.",
+          "rationale": "Sheepdog: Yes, every single test passed successfully."
         }
       ]
     },
