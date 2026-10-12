@@ -26,3 +26,10 @@ rejudged workday-morning-standup r1: fail
 rejudged workday-morning-standup r2: fail
 sheepdog bench rejudge: segments: workday-scale-ten r1: segment 13 (beat 13): judge: no verdict for right_agent
 sheepdog bench rejudge: segments: workday-scale-ten r2: segment 13 (beat 13): judge: no verdict for right_agent
+sheepdog bench rejudge: workday-zh-evening r1 language: judge: claude cli: signal: killed: 
+sheepdog bench rejudge: workday-zh-evening r2 answered: judge: claude cli: context canceled: 
+sheepdog bench rejudge: 4 runs not rejudged (run again to retry them)
+judge claude sonnet: 28m0s, 611 calls
+-- spend judge    sonnet                   calls   611  in   6760077  out   350796  reasoning        0  ≈ $0.0000 --
+-- spend total ≈ $0.0000 (estimate at list prices) --
+exit 124
