@@ -894,6 +894,88 @@ func TestEventTurnsCoalesce(t *testing.T) {
 	}
 }
 
+// (11d) An event turn's budget is for its own steps: time it spent
+// queued behind another turn does not count against it (scale-ten runs
+// 2026-10-07/08: announce turns queued 7.6–8.7 s of a 9 s budget behind a
+// user turn, started a ~2 s step with ~1 s left and timed out). The wait
+// itself is still bounded (queue_timeout).
+func TestQueuedEventTurnGetsItsFullBudget(t *testing.T) {
+	release := make(chan struct{})
+	step := func(ctx context.Context, _ braintest.Call) (*genai.GenerateContentResponse, error) {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(150 * time.Millisecond):
+			return braintest.Response(braintest.Step{Text: braintest.Reply("auth finished the tests", "")}), nil
+		}
+	}
+	m := braintest.NewModel(braintest.Step{Block: release, Text: braintest.Reply("first", "")}, braintest.Step{FnCtx: step})
+	h := newHarness(t, m, func(c *Config) { c.AnnounceTurnTimeout, c.FinalGrace = 300*time.Millisecond, -1 })
+	ceo := make(chan error, 1)
+	go func() {
+		_, err := h.brain.Turn(context.Background(), Request{Kind: KindUtterance, Question: "status?"})
+		ceo <- err
+	}()
+	deadline := time.Now().Add(2 * time.Second)
+	for len(h.model.Calls()) == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	type result struct {
+		rep Reply
+		err error
+	}
+	ev := make(chan result, 1)
+	go func() {
+		rep, err := h.brain.Turn(context.Background(), Request{Kind: KindAnnounce, Agent: "auth", Event: "done", Template: "auth finished."})
+		ev <- result{rep, err}
+	}()
+	waitQueued(t, h.brain, 1)
+	// Queued for 200 ms of its 300 ms budget; its step then takes 150 ms.
+	time.Sleep(200 * time.Millisecond)
+	close(release)
+	if err := <-ceo; err != nil {
+		t.Fatalf("user turn err = %v", err)
+	}
+	r := <-ev
+	if r.err != nil || r.rep.Spoken != "auth finished the tests" {
+		t.Fatalf("queued event turn = %+v %v; the queue wait ate its budget", r.rep, r.err)
+	}
+	h.brain.Quiesce()
+	var started map[string]any
+	for _, e := range h.log.ofType("brain.turn_started") {
+		if p := payload(e); p["kind"] == "announce" {
+			started = p
+		}
+	}
+	if started == nil || started["budget_ms"] != int64(300) || started["queue_ms"].(int64) < 200 {
+		t.Errorf("announce brain.turn_started = %v", started)
+	}
+	if h.log.count("brain.fallback") != 0 {
+		t.Errorf("brain.fallback = %v", h.log.ofType("brain.fallback"))
+	}
+
+	// The wait is bounded on its own: a turn still queued when its bound
+	// runs out falls back with queue_timeout and never runs.
+	block := make(chan struct{})
+	defer close(block)
+	m2 := braintest.NewModel(braintest.Step{Block: block, Text: braintest.Reply("first", "")})
+	h2 := newHarness(t, m2, func(c *Config) { c.AnnounceTurnTimeout, c.FinalGrace = 50*time.Millisecond, -1 })
+	go func() { _, _ = h2.brain.Turn(context.Background(), Request{Kind: KindUtterance, Question: "status?"}) }()
+	for len(h2.model.Calls()) == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	start := time.Now()
+	if _, err := h2.brain.Turn(context.Background(), Request{Kind: KindAnnounce, Agent: "auth", Event: "done", Template: "auth finished."}); !errors.Is(err, ErrFallback) {
+		t.Fatalf("queued past its bound: err = %v", err)
+	}
+	if d := time.Since(start); d > time.Second {
+		t.Errorf("queue wait took %s; the bound did not cut it", d)
+	}
+	if fb := h2.log.ofType("brain.fallback"); len(fb) != 1 || payload(fb[0])["reason"] != "queue_timeout" {
+		t.Errorf("brain.fallback = %v", fb)
+	}
+}
+
 func waitQueued(t *testing.T, b *Brain, n int) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)

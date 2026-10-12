@@ -28,7 +28,9 @@ import (
 // dropped for lateness, 30 of them needs_user):
 //   - A finish is not urgent: it waits for the orchestrator's announce turn up to
 //     the turn's own budget (brain.announce_turn_timeout_s, or
-//     brain.announce_timeout_s when the user is owed the line) and
+//     brain.announce_timeout_s when the user is owed the line), counted
+//     from when the turn gets the turn lock (the queue wait before it
+//     is bounded by the same length), and
 //     speaks the orchestrator's line alone. Only when the turn fails, times out,
 //     yields or is coalesced is the code sentence spoken — once, then; an
 //     owed finish (a kept promise, the user's own instruction) that got
@@ -148,7 +150,8 @@ func (s *Supervisor) announce(ctx context.Context, a announcement) {
 	if !a.urgent() {
 		// A finish is news, not an alarm: the orchestrator's line (what it
 		// found) is worth the seconds its turn takes, and the turn's own
-		// budget bounds the wait (brain.Turn never outlives it).
+		// bounds limit the wait: at most its budget queued for the turn
+		// lock, then its budget running (brain.Turn never outlives them).
 		r := <-res
 		a.wait, a.waited = waitTurn, s.cfg.Now().Sub(start)
 		if r.err != nil {
