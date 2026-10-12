@@ -2,3 +2,6 @@ sheepdog bench rejudge: segments: workday-interruptions r2: segment 4 (beat 5): 
 rejudged workday-scale-ten r1: fail
 sheepdog bench rejudge: segments: workday-scale-ten r2: segment 13 (beat 13): judge: no verdict for right_agent
 rejudged workday-scale-ten r3: fail
+rejudged workday-scale-ten r4: fail
+rejudged workday-scale-ten r5: fail
+rejudged workday-zh-evening r1: fail
