@@ -22,3 +22,5 @@ rejudged workday-interruptions r1: fail
 sheepdog bench rejudge: segments: workday-interruptions r2: segment 4 (beat 5): judge: no verdict for right_agent
 rejudged workday-long-haul r1: fail
 rejudged workday-long-haul r2: fail
+sheepdog bench rejudge: segments: workday-morning-standup r1: segment 13 (beat 13): judge: no verdict for right_agent
+rejudged workday-morning-standup r2: fail
