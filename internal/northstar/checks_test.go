@@ -184,6 +184,33 @@ func TestMissedNews(t *testing.T) {
 	}
 }
 
+// TestMissedNewsWording: finishes and results the voice model reported
+// in words the first lists lacked (2026-10-11 tier-2 runs,
+// docs/eval/analysis-voice-news-2026-10-12.md class M) are conveyed; a
+// line about another agent still is not.
+func TestMissedNewsWording(t *testing.T) {
+	agents := []Agent{{Alias: "a11y-claude", Kind: "claude"}, {Alias: "seo-codex", Kind: "codex"}, {Alias: "lint-codex", Kind: "codex"}, {Alias: "infra-claude", Kind: "claude"}}
+	for _, c := range []struct {
+		kind  NewsKind
+		agent string
+		text  string
+		want  string
+	}{
+		{NewsFinished, "a11y-claude", "A11y-claude 已經修復了全部無障礙問題，六個關鍵頁面皆已實現零違規。", NewsConveyed},
+		{NewsFinished, "seo-codex", "另外，SEO Codex 已经为新商品分类页面生成了站点地图，并已成功提交。", NewsConveyed},
+		{NewsFinished, "lint-codex", "Also, lint-codex has resolved all thirty-seven code quality warnings.", NewsConveyed},
+		{NewsFinished, "seo-codex", "ci-codex has optimized the build pipeline.", NewsMissed},
+		{NewsResult, "infra-claude", "检查显示未找到昨晚备份的记录，需要我让 infra-claude 专门搜索一下吗？", NewsConveyed},
+	} {
+		r := Run{Status: "pass", Heard: SideVoice, HasRecord: true, EndMS: 100000, Agents: agents,
+			News:   []News{{AtMS: 1000, Kind: c.kind, Agent: c.agent}},
+			Speech: []Speech{{AtMS: 2000, Side: SideVoice, Text: c.text}}}
+		if got := CheckMissedNews(r).Items[0].Outcome; got != c.want {
+			t.Errorf("%q about %s: %s, want %s", c.text, c.agent, got, c.want)
+		}
+	}
+}
+
 func TestEffort(t *testing.T) {
 	r := Run{
 		Status: "pass", Heard: SideOrchestrator, HasRecord: true, Turns: 3, EndReason: "end_call",

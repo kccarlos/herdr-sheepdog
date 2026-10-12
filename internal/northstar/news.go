@@ -41,9 +41,9 @@ func (m MissedNews) Count(o string) int {
 // newsWords are the words that carry a kind of news, in English and
 // Chinese (measurement only).
 var newsWords = map[NewsKind]*regexp.Regexp{
-	NewsFinished:    regexp.MustCompile(`(?i)\b(finish|finished|finishes|done|complete|completed|wrapped up|ready|result|results|passed|passing|fixed|added|wrote|written|created|updated|committed|idle|stopped)\b|完成|做完|好了|完了|完毕|完畢|分析完|查完|跑完|弄完|改完|写好|寫好|结束|結束|搞定|写完|寫完|改好|修好|通过|通過|加好|空闲|空閒|停下`),
+	NewsFinished:    regexp.MustCompile(`(?i)\b(finish|finished|finishes|done|complete|completed|wrapped up|ready|result|results|passed|passing|fixed|added|wrote|written|created|updated|committed|idle|stopped|resolved|optimi[sz]ed|applied|generated|submitted|reverted|rolled out|deployed)\b|修复|修復|实现|實現|生成|提交|撤销|撤銷|部署|优化|優化|解决|解決|完成|做完|好了|完了|完毕|完畢|分析完|查完|跑完|弄完|改完|写好|寫好|结束|結束|搞定|写完|寫完|改好|修好|通过|通過|加好|空闲|空閒|停下`),
 	NewsBlocked:     regexp.MustCompile(`(?i)\b(wait|waiting|waits|approval|approve|permission|asks|asking|asked|proceed|question|decide|decision|needs you|need you|blocked|prompt|trust|allow|confirm|options?|yes or no|go ahead)\b|等|批准|同意|允许|允許|确认|確認|要不要|问|問|需要你|权限|權限|是否|选择|選擇|继续吗|繼續嗎`),
-	NewsResult:      regexp.MustCompile(`(?i)\b(found|finds|result|results|finding|findings|answer|says|said|investigation|looked into|checked|turns out|because|couldn't|could not|failed)\b|发现|發現|结果|結果|查到|原因|因为|因為|看了|查了|没能|沒能|失败|失敗`),
+	NewsResult:      regexp.MustCompile(`(?i)\b(found|finds|result|results|finding|findings|answer|says|said|investigation|looked into|checked|turns out|because|couldn't|could not|failed)\b|未找到|没找到|沒找到|找到了|发现|發現|结果|結果|查到|原因|因为|因為|看了|查了|没能|沒能|失败|失敗`),
 	NewsSpawnFailed: regexp.MustCompile(`(?i)\b(couldn't|could not|can't|cannot|failed|unable|error|didn't start|did not start|not ready|refused)\b|没能|沒能|无法|無法|失败|失敗|不能|没有启动|沒有啟動|出错|出錯`),
 }
 
