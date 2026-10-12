@@ -115,20 +115,23 @@ func (s *Supervisor) HandleTransition(ctx context.Context, t herdr.Transition) {
 		// Read before finishTask moves the task to last_task: was the
 		// agent running an instruction the user gave this run?
 		instructed := s.runningShepherdTask(row)
+		finish := from == herdr.StateWorking || s.finishedAfterApproval(prev, from)
 		if from != herdr.StateDone && from != "" {
 			// The journal entry comes before the announce turn (onDone),
 			// which carries the worker's last message; done -> idle is
 			// the same finish seen again and adds none, and a pane first
 			// seen at rest has no news (its transcript is history).
-			s.recordJournal(row, string(t.To), from == herdr.StateWorking)
+			s.recordJournal(row, string(t.To), finish)
 		}
 		s.finishTask(t.PaneID)
 		// working -> done and working -> idle are both a finish: herdr
 		// reports done when the user was not looking at the pane and
 		// idle when it was focused when the agent finished
 		// (herdr/src/pane/state.rs's "seen" bit), so either edge off
-		// working means the agent just finished a turn.
-		if from == herdr.StateWorking {
+		// working means the agent just finished a turn. So is an edge
+		// off a prompt sheepdog approved, with no working reported in
+		// between (finishedAfterApproval).
+		if finish {
 			if s.recentlyInterrupted(t.PaneID) {
 				// The user's cancel sent Ctrl-C: this is the
 				// interrupted turn settling, not work finishing; a
@@ -139,13 +142,36 @@ func (s *Supervisor) HandleTransition(ctx context.Context, t herdr.Transition) {
 			}
 			return
 		}
-		// done -> idle ("idle again") and blocked -> idle are never
-		// announced as a finish, but a promise for idle (or any change)
-		// is still kept.
+		// done -> idle ("idle again") and an edge off a prompt that was
+		// declined or answered outside sheepdog are never announced as
+		// a finish, but a promise for idle (or any change) is still
+		// kept.
 		if t.To == herdr.StateIdle {
 			s.keepPromises(ctx, row, string(t.To), alias+" is idle now.")
 		}
 	}
+}
+
+// finishedAfterApproval reports whether a blocked -> done or blocked ->
+// idle edge is a finish: sheepdog answered the prompt (prev, the row
+// before this transition, has its last block answered: answerKeys sets
+// that, while Store.Apply sets it on the edge itself, after prev was
+// read) and the answer was not a decline. The worker ran what was
+// approved and stopped without herdr reporting working in between (a
+// short command inside herdr's poll window, or a status event missed
+// and recovered by the snapshot diff), so nothing else tells the user
+// it is done (docs/eval/analysis-voice-news-2026-10-12.md: 33 of 83
+// missed news items in the 2026-10-11 tier-2 runs). After a decline
+// (esc, "no") the worker idles with nothing finished, and the tool
+// result already said so.
+func (s *Supervisor) finishedAfterApproval(prev state.Agent, from herdr.State) bool {
+	if from != herdr.StateBlocked || prev.LastBlock == nil || !prev.LastBlock.Answered {
+		return false
+	}
+	s.mu.Lock()
+	mark, declined := s.declined[prev.PaneID]
+	s.mu.Unlock()
+	return !declined || mark.at.Before(prev.LastBlock.SeenAt)
 }
 
 // startedInstruction returns the spoken form of the instruction the user
