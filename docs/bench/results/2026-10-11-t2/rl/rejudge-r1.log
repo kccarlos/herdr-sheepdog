@@ -24,3 +24,15 @@ rejudged workday-long-haul r1: fail
 rejudged workday-long-haul r2: fail
 sheepdog bench rejudge: segments: workday-morning-standup r1: segment 13 (beat 13): judge: no verdict for right_agent
 rejudged workday-morning-standup r2: fail
+sheepdog bench rejudge: segments: workday-scale-ten r1: segment 13 (beat 13): judge: no verdict for right_agent
+sheepdog bench rejudge: segments: workday-scale-ten r2: segment 4 (beat 4): judge: claude cli: signal: killed: 
+segment 10 (beat 10): judge: claude cli: signal: killed: 
+segment 12 (beat 12): judge: claude cli: signal: killed: 
+segment 13 (beat 13): judge: no verdict for right_agent
+sheepdog bench rejudge: workday-zh-evening r1 answered: judge: claude cli: context canceled: 
+sheepdog bench rejudge: workday-zh-evening r2 answered: judge: claude cli: context canceled: 
+sheepdog bench rejudge: 6 runs not rejudged (run again to retry them)
+judge claude sonnet: 28m0s, 615 calls
+-- spend judge    sonnet                   calls   615  in   6592517  out   349070  reasoning        0  ≈ $0.0000 --
+-- spend total ≈ $0.0000 (estimate at list prices) --
+exit 124
