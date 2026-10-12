@@ -47,3 +47,10 @@ exit 0
 01:21:07 [5/6] workday-long-haul r2 (:7912): pass (end_call, ) 14 turns 485s ≈ $0.632, total ≈ $3.16
 01:22:12 [6/6] workday-explain-deep r2 (:7911): pass (end_call, ) 13 turns 700s ≈ $0.915, total ≈ $4.07
 01:22 done a workday-2 chunk=$4.07 cum=$15.09
+01:23 deepseek balance 40.20 CNY
+01:23 start nc workday-2
+exit 0
+01:40:38 [4/6] workday-long-haul r1 (:7911): pass (end_call, ) 14 turns 553s ≈ $0.706, total ≈ $3.08
+01:50:09 [5/6] workday-long-haul r2 (:7911): pass (end_call, ) 16 turns 570s ≈ $0.746, total ≈ $3.83
+01:51:12 [6/6] workday-explain-deep r2 (:7912): pass (end_call, ) 12 turns 641s ≈ $0.856, total ≈ $4.68
+01:51 done nc workday-2 chunk=$4.68 cum=$19.77
