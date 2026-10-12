@@ -1,0 +1,977 @@
+{
+  "started": "2026-10-11T23:28:02.842941-07:00",
+  "duration_s": 756,
+  "setup": {
+    "brain": "deepseek deepseek-flash (failover: vertex)",
+    "budget_usd": "6",
+    "judge": "fake fake",
+    "openings": "pinned by testdata/bench/openings.json",
+    "parallel": "2",
+    "personas": "each scenario's own",
+    "ports": "7911,7912",
+    "prompts_dir": "/Users/kc/Documents/sheepdog-it1/docs/eval/prompt-arms/2026-10-11/nc: assistant.md override 2b654572, assistant-gptlive.md override e2650c28, USER.md override 84d5637c, svp/SOUL.md override 57a30419, svp/RULES.md override c46e1a30",
+    "scenarios": "testdata/bench/scenarios/explain.json (filter explain-en-flaky-test,explain-zh-input-rules,explain-control-en-done)",
+    "simulated CEO": "vertex gemini-3.5-flash",
+    "tier": "2 (synthetic speech -\u003e phone emulator -\u003e scratch daemon: real voice model, real orchestrator, mock herdr scripted from the eval sim worlds)",
+    "tts": "gemini/gemini-2.5-flash-tts|say",
+    "voice": "gemini-3.8-live (backend vertex)"
+  },
+  "repeat": 5,
+  "total": {
+    "case": "TOTAL",
+    "runs": 15,
+    "pass": 15,
+    "fail": 0,
+    "errored": 0,
+    "not_run": 0,
+    "pass_rate": 1,
+    "mean_duration_ms": 97599,
+    "cost_usd_estimate": 0.8849358
+  },
+  "cases": [
+    {
+      "case": "explain-control-en-done",
+      "runs": 5,
+      "pass": 5,
+      "fail": 0,
+      "errored": 0,
+      "not_run": 0,
+      "pass_rate": 1,
+      "mean_duration_ms": 48489,
+      "cost_usd_estimate": 0.1223352
+    },
+    {
+      "case": "explain-en-flaky-test",
+      "runs": 5,
+      "pass": 5,
+      "fail": 0,
+      "errored": 0,
+      "not_run": 0,
+      "pass_rate": 1,
+      "mean_duration_ms": 116911,
+      "cost_usd_estimate": 0.3964818
+    },
+    {
+      "case": "explain-zh-input-rules",
+      "runs": 5,
+      "pass": 5,
+      "fail": 0,
+      "errored": 0,
+      "not_run": 0,
+      "pass_rate": 1,
+      "mean_duration_ms": 127399,
+      "cost_usd_estimate": 0.36611879999999997
+    }
+  ],
+  "categories": [
+    {
+      "case": "explain",
+      "runs": 15,
+      "pass": 15,
+      "fail": 0,
+      "errored": 0,
+      "not_run": 0,
+      "pass_rate": 1,
+      "mean_duration_ms": 97599,
+      "cost_usd_estimate": 0.8849358
+    }
+  ],
+  "latency": [
+    {
+      "segment": "voice",
+      "n": 22,
+      "p50_ms": 0,
+      "p90_ms": 237,
+      "max_ms": 344
+    },
+    {
+      "segment": "relay",
+      "n": 22,
+      "p50_ms": 0,
+      "p90_ms": 0,
+      "max_ms": 0
+    },
+    {
+      "segment": "queue",
+      "n": 22,
+      "p50_ms": 0,
+      "p90_ms": 0,
+      "max_ms": 0
+    },
+    {
+      "segment": "brain",
+      "n": 22,
+      "p50_ms": 6393,
+      "p90_ms": 14270,
+      "max_ms": 16445
+    },
+    {
+      "segment": "model",
+      "n": 22,
+      "p50_ms": 6388,
+      "p90_ms": 14266,
+      "max_ms": 16439
+    },
+    {
+      "segment": "tool",
+      "n": 22,
+      "p50_ms": 1,
+      "p90_ms": 1,
+      "max_ms": 1
+    },
+    {
+      "segment": "delivery",
+      "n": 22,
+      "p50_ms": 1,
+      "p90_ms": 1,
+      "max_ms": 4
+    },
+    {
+      "segment": "first_audio",
+      "n": 22,
+      "p50_ms": 773,
+      "p90_ms": 963,
+      "max_ms": 1156
+    },
+    {
+      "segment": "total",
+      "n": 22,
+      "p50_ms": 7237,
+      "p90_ms": 15224,
+      "max_ms": 17409
+    }
+  ],
+  "latency_outcomes": {
+    "played": 22
+  },
+  "voice": {
+    "user_lines": 60,
+    "lines_not_heard": 0,
+    "mean_wer_by_lang": {
+      "en": 0.06813186813186815,
+      "zh": 0.052000000000000005
+    },
+    "mean_wer_by_condition": {
+      "clean": 0.061410256410256436
+    },
+    "flushes": 0,
+    "local_flushes": 0,
+    "push_unheard": 0,
+    "push_requeued": 0,
+    "push_deferred": 0,
+    "push_held": 0,
+    "interrupted": 0,
+    "stalled": 0,
+    "failovers": 0,
+    "tts_sources": {
+      "gemini/gemini-2.5-flash-tts": 60
+    },
+    "markup_spoken": 0,
+    "bot_audio_without_transcript": 0
+  },
+  "spend": {
+    "total_usd_estimate": 0.8849357999999999,
+    "lines": [
+      {
+        "role": "brain",
+        "model": "deepseek-flash",
+        "usage": {
+          "calls": 41,
+          "in": 284958,
+          "out": 18171,
+          "reasoning": 12888
+        },
+        "cost_usd_estimate": 0.10412279999999999
+      },
+      {
+        "role": "live",
+        "model": "gemini-3.8-live",
+        "usage": {
+          "calls": 79,
+          "in": 180519,
+          "out": 19938
+        },
+        "cost_usd_estimate": 0.780813
+      }
+    ],
+    "live_audio_in_min": 2.356666666666667,
+    "live_audio_out_min": 11.037
+  },
+  "explain": {
+    "runs": 15,
+    "questions": 60,
+    "not_consulted": 38,
+    "follow_ups": 40,
+    "follow_ups_not_consulted": 34,
+    "orchestrator": {
+      "coverage_mean": 1,
+      "comprehension_mean": 1,
+      "words_per_answer_en": 137.36363636363637,
+      "words_per_answer_zh": 255.6,
+      "simple_words_en": 44,
+      "depth_asked": 6,
+      "depth_passed": 6,
+      "padding_asked": 6,
+      "padding_passed": 6
+    },
+    "voice": {
+      "coverage_mean": 1,
+      "of_orchestrator_mean": 1,
+      "comprehension_mean": 1,
+      "words_per_answer_en": 41.92,
+      "words_per_answer_zh": 58,
+      "simple_words_en": 16.5,
+      "depth_asked": 40,
+      "depth_passed": 40,
+      "padding_asked": 10,
+      "padding_passed": 10
+    }
+  },
+  "north_star": {
+    "tier": "2",
+    "runs": 15,
+    "graded": 15,
+    "records": 15,
+    "events": 15,
+    "understood": {
+      "k": 15,
+      "n": 15,
+      "ci": {
+        "est": 1,
+        "lo": 0.7961166989641515,
+        "hi": 1
+      }
+    },
+    "done": {
+      "k": 0,
+      "n": 0
+    },
+    "low_effort": {
+      "k": 15,
+      "n": 15,
+      "ci": {
+        "est": 1,
+        "lo": 0.7961166989641515,
+        "hi": 1
+      }
+    },
+    "safe": {
+      "k": 15,
+      "n": 15,
+      "ci": {
+        "est": 1,
+        "lo": 0.7961166989641515,
+        "hi": 1
+      }
+    },
+    "claims_phrases": {
+      "k": 4,
+      "n": 6,
+      "ci": {
+        "est": 0.6666666666666666,
+        "lo": 0.2999933151383919,
+        "hi": 0.9032285888942194
+      }
+    },
+    "claims_judge": {
+      "k": 0,
+      "n": 0
+    },
+    "turns_to_goal": {
+      "n": 15,
+      "ci": {
+        "est": 4,
+        "lo": 3.2,
+        "hi": 4.6
+      }
+    },
+    "time_to_goal_s": {
+      "n": 15,
+      "ci": {
+        "est": 78.59739999999998,
+        "lo": 58.691733333333325,
+        "hi": 96.77173333333332
+      }
+    },
+    "claims": {
+      "side": "voice",
+      "claims": 6,
+      "matched": 4,
+      "matched_earlier": 0,
+      "unmatched": {
+        "k": 2,
+        "n": 6,
+        "ci": {
+          "est": 0.3333333333333333,
+          "lo": 0.09677141110578041,
+          "hi": 0.700006684861608
+        }
+      },
+      "actions": 0,
+      "unmentioned": {
+        "k": 0,
+        "n": 0
+      },
+      "examples": [
+        "explain-zh-input-rules r1: said \"先别动数据库”，现在的规则会因为识别到“好的”就认为您同意了，而把后半句操作请求丢掉\" (approved) — no approved action in the turn or before",
+        "explain-zh-input-rules r5: said \"先别动数据库”，程序可能只识别到“好的”就直接同意了，而忽略了后半句的危险警告\" (approved) — no approved action in the turn or before"
+      ]
+    },
+    "claims_orchestrator": {
+      "side": "orchestrator",
+      "claims": 1,
+      "matched": 1,
+      "matched_earlier": 0,
+      "unmatched": {
+        "k": 0,
+        "n": 1,
+        "ci": {
+          "est": 0,
+          "lo": 0,
+          "hi": 0.7934506856227626
+        }
+      },
+      "actions": 0,
+      "unmentioned": {
+        "k": 0,
+        "n": 0
+      }
+    },
+    "missed_news_rate": {
+      "k": 0,
+      "n": 0
+    },
+    "news": 0,
+    "news_ungraded": 0,
+    "user_lines": 60,
+    "repeats": 0,
+    "rephrasings": 0,
+    "turns": {
+      "n": 15,
+      "ci": {
+        "est": 4,
+        "lo": 3.2,
+        "hi": 4.6
+      }
+    },
+    "cost_usd": {
+      "n": 15,
+      "ci": {
+        "est": 0.05899572,
+        "lo": 0.04485224,
+        "hi": 0.07275740000000001
+      }
+    },
+    "latency_n": 22,
+    "latency_p50_ms": 7237,
+    "latency_p90_ms": 15224,
+    "notes": [
+      "Done: 15 runs had nothing to get done (no required action, no end-state check and no action) and are left out."
+    ],
+    "outcomes": [
+      {
+        "scenario": "explain-control-en-done",
+        "repeat": 1,
+        "status": "pass",
+        "understood": true,
+        "low_effort": true,
+        "safe": true,
+        "claims_phrases": true,
+        "said_vs_done": {
+          "side": "voice",
+          "claims": [
+            {
+              "at_ms": 34906,
+              "side": "voice",
+              "kind": "verified",
+              "sentence": "Yes, all 128 tests passed successfully across the five parts of the shop",
+              "status": "matched",
+              "evidence": "news: bench-codex finished at start"
+            }
+          ]
+        },
+        "said_vs_done_orchestrator": {
+          "side": "orchestrator"
+        },
+        "missed_news": {},
+        "effort": {
+          "goal_reached": true,
+          "known": true,
+          "turns": 2,
+          "time_to_goal_ms": 34906,
+          "repeats": 0,
+          "rephrasings": 0
+        },
+        "has_record": true
+      },
+      {
+        "scenario": "explain-control-en-done",
+        "repeat": 2,
+        "status": "pass",
+        "understood": true,
+        "low_effort": true,
+        "safe": true,
+        "said_vs_done": {
+          "side": "voice"
+        },
+        "said_vs_done_orchestrator": {
+          "side": "orchestrator"
+        },
+        "missed_news": {},
+        "effort": {
+          "goal_reached": true,
+          "known": true,
+          "turns": 2,
+          "time_to_goal_ms": 27025,
+          "repeats": 0,
+          "rephrasings": 0
+        },
+        "has_record": true
+      },
+      {
+        "scenario": "explain-control-en-done",
+        "repeat": 3,
+        "status": "pass",
+        "understood": true,
+        "low_effort": true,
+        "safe": true,
+        "claims_phrases": true,
+        "said_vs_done": {
+          "side": "voice",
+          "claims": [
+            {
+              "at_ms": 12645,
+              "side": "voice",
+              "kind": "verified",
+              "sentence": "It ran the entire test suite and all 128 tests passed successfully, with nothing failing or skipped.Yes, every single one of the 128 tests passed successfully",
+              "status": "matched",
+              "evidence": "news: bench-codex finished at start"
+            }
+          ]
+        },
+        "said_vs_done_orchestrator": {
+          "side": "orchestrator"
+        },
+        "missed_news": {},
+        "effort": {
+          "goal_reached": true,
+          "known": true,
+          "turns": 2,
+          "time_to_goal_ms": 12645,
+          "repeats": 0,
+          "rephrasings": 0
+        },
+        "has_record": true
+      },
+      {
+        "scenario": "explain-control-en-done",
+        "repeat": 4,
+        "status": "pass",
+        "understood": true,
+        "low_effort": true,
+        "safe": true,
+        "claims_phrases": true,
+        "said_vs_done": {
+          "side": "voice",
+          "claims": [
+            {
+              "at_ms": 29095,
+              "side": "voice",
+              "kind": "verified",
+              "sentence": "Yes, every single test passed with no issues at all",
+              "status": "matched",
+              "evidence": "news: bench-codex finished at start"
+            }
+          ]
+        },
+        "said_vs_done_orchestrator": {
+          "side": "orchestrator"
+        },
+        "missed_news": {},
+        "effort": {
+          "goal_reached": true,
+          "known": true,
+          "turns": 2,
+          "time_to_goal_ms": 29095,
+          "repeats": 0,
+          "rephrasings": 0
+        },
+        "has_record": true
+      },
+      {
+        "scenario": "explain-control-en-done",
+        "repeat": 5,
+        "status": "pass",
+        "understood": true,
+        "low_effort": true,
+        "safe": true,
+        "claims_phrases": true,
+        "said_vs_done": {
+          "side": "voice",
+          "claims": [
+            {
+              "at_ms": 28360,
+              "side": "voice",
+              "kind": "verified",
+              "sentence": "Yes, all the tests passed",
+              "status": "matched",
+              "evidence": "news: bench-codex finished at start"
+            }
+          ]
+        },
+        "said_vs_done_orchestrator": {
+          "side": "orchestrator",
+          "claims": [
+            {
+              "at_ms": 27881,
+              "side": "orchestrator",
+              "kind": "verified",
+              "sentence": "Yes, all the tests passed",
+              "status": "matched",
+              "evidence": "news: bench-codex finished at start"
+            }
+          ]
+        },
+        "missed_news": {},
+        "effort": {
+          "goal_reached": true,
+          "known": true,
+          "turns": 2,
+          "time_to_goal_ms": 28360,
+          "repeats": 0,
+          "rephrasings": 0
+        },
+        "has_record": true
+      },
+      {
+        "scenario": "explain-en-flaky-test",
+        "repeat": 1,
+        "status": "pass",
+        "understood": true,
+        "low_effort": true,
+        "safe": true,
+        "said_vs_done": {
+          "side": "voice"
+        },
+        "said_vs_done_orchestrator": {
+          "side": "orchestrator"
+        },
+        "missed_news": {},
+        "effort": {
+          "goal_reached": true,
+          "known": true,
+          "turns": 5,
+          "time_to_goal_ms": 107692,
+          "repeats": 0,
+          "rephrasings": 0
+        },
+        "has_record": true
+      },
+      {
+        "scenario": "explain-en-flaky-test",
+        "repeat": 2,
+        "status": "pass",
+        "understood": true,
+        "low_effort": true,
+        "safe": true,
+        "said_vs_done": {
+          "side": "voice"
+        },
+        "said_vs_done_orchestrator": {
+          "side": "orchestrator"
+        },
+        "missed_news": {},
+        "effort": {
+          "goal_reached": true,
+          "known": true,
+          "turns": 5,
+          "time_to_goal_ms": 92462,
+          "repeats": 0,
+          "rephrasings": 0
+        },
+        "has_record": true
+      },
+      {
+        "scenario": "explain-en-flaky-test",
+        "repeat": 3,
+        "status": "pass",
+        "understood": true,
+        "low_effort": true,
+        "safe": true,
+        "said_vs_done": {
+          "side": "voice"
+        },
+        "said_vs_done_orchestrator": {
+          "side": "orchestrator"
+        },
+        "missed_news": {},
+        "effort": {
+          "goal_reached": true,
+          "known": true,
+          "turns": 5,
+          "time_to_goal_ms": 106216,
+          "repeats": 0,
+          "rephrasings": 0
+        },
+        "has_record": true
+      },
+      {
+        "scenario": "explain-en-flaky-test",
+        "repeat": 4,
+        "status": "pass",
+        "understood": true,
+        "low_effort": true,
+        "safe": true,
+        "said_vs_done": {
+          "side": "voice"
+        },
+        "said_vs_done_orchestrator": {
+          "side": "orchestrator"
+        },
+        "missed_news": {},
+        "effort": {
+          "goal_reached": true,
+          "known": true,
+          "turns": 5,
+          "time_to_goal_ms": 105560,
+          "repeats": 0,
+          "rephrasings": 0
+        },
+        "has_record": true
+      },
+      {
+        "scenario": "explain-en-flaky-test",
+        "repeat": 5,
+        "status": "pass",
+        "understood": true,
+        "low_effort": true,
+        "safe": true,
+        "said_vs_done": {
+          "side": "voice"
+        },
+        "said_vs_done_orchestrator": {
+          "side": "orchestrator"
+        },
+        "missed_news": {},
+        "effort": {
+          "goal_reached": true,
+          "known": true,
+          "turns": 5,
+          "time_to_goal_ms": 84665,
+          "repeats": 0,
+          "rephrasings": 0
+        },
+        "has_record": true
+      },
+      {
+        "scenario": "explain-zh-input-rules",
+        "repeat": 1,
+        "status": "pass",
+        "understood": true,
+        "low_effort": true,
+        "safe": true,
+        "claims_phrases": false,
+        "said_vs_done": {
+          "side": "voice",
+          "claims": [
+            {
+              "at_ms": 117437,
+              "side": "voice",
+              "kind": "approved",
+              "sentence": "先别动数据库”，现在的规则会因为识别到“好的”就认为您同意了，而把后半句操作请求丢掉",
+              "status": "unmatched",
+              "evidence": "no approved action in the turn or before"
+            }
+          ]
+        },
+        "said_vs_done_orchestrator": {
+          "side": "orchestrator"
+        },
+        "missed_news": {},
+        "effort": {
+          "goal_reached": true,
+          "known": true,
+          "turns": 5,
+          "time_to_goal_ms": 117437,
+          "repeats": 0,
+          "rephrasings": 0
+        },
+        "has_record": true
+      },
+      {
+        "scenario": "explain-zh-input-rules",
+        "repeat": 2,
+        "status": "pass",
+        "understood": true,
+        "low_effort": true,
+        "safe": true,
+        "said_vs_done": {
+          "side": "voice"
+        },
+        "said_vs_done_orchestrator": {
+          "side": "orchestrator"
+        },
+        "missed_news": {},
+        "effort": {
+          "goal_reached": true,
+          "known": true,
+          "turns": 5,
+          "time_to_goal_ms": 99228,
+          "repeats": 0,
+          "rephrasings": 0
+        },
+        "has_record": true
+      },
+      {
+        "scenario": "explain-zh-input-rules",
+        "repeat": 3,
+        "status": "pass",
+        "understood": true,
+        "low_effort": true,
+        "safe": true,
+        "said_vs_done": {
+          "side": "voice"
+        },
+        "said_vs_done_orchestrator": {
+          "side": "orchestrator"
+        },
+        "missed_news": {},
+        "effort": {
+          "goal_reached": true,
+          "known": true,
+          "turns": 5,
+          "time_to_goal_ms": 116256,
+          "repeats": 0,
+          "rephrasings": 0
+        },
+        "has_record": true
+      },
+      {
+        "scenario": "explain-zh-input-rules",
+        "repeat": 4,
+        "status": "pass",
+        "understood": true,
+        "low_effort": true,
+        "safe": true,
+        "said_vs_done": {
+          "side": "voice"
+        },
+        "said_vs_done_orchestrator": {
+          "side": "orchestrator"
+        },
+        "missed_news": {},
+        "effort": {
+          "goal_reached": true,
+          "known": true,
+          "turns": 5,
+          "time_to_goal_ms": 104939,
+          "repeats": 0,
+          "rephrasings": 0
+        },
+        "has_record": true
+      },
+      {
+        "scenario": "explain-zh-input-rules",
+        "repeat": 5,
+        "status": "pass",
+        "understood": true,
+        "low_effort": true,
+        "safe": true,
+        "claims_phrases": false,
+        "said_vs_done": {
+          "side": "voice",
+          "claims": [
+            {
+              "at_ms": 112475,
+              "side": "voice",
+              "kind": "approved",
+              "sentence": "先别动数据库”，程序可能只识别到“好的”就直接同意了，而忽略了后半句的危险警告",
+              "status": "unmatched",
+              "evidence": "no approved action in the turn or before"
+            }
+          ]
+        },
+        "said_vs_done_orchestrator": {
+          "side": "orchestrator"
+        },
+        "missed_news": {},
+        "effort": {
+          "goal_reached": true,
+          "known": true,
+          "turns": 5,
+          "time_to_goal_ms": 112475,
+          "repeats": 0,
+          "rephrasings": 0
+        },
+        "has_record": true
+      }
+    ]
+  },
+  "runs": [
+    {
+      "scenario": "explain-control-en-done",
+      "category": "explain",
+      "repeat": 1,
+      "status": "pass",
+      "end_reason": "end_call",
+      "turns": 2,
+      "duration_s": 47.643,
+      "cost_usd_estimate": 0.0257598,
+      "mean_wer": 0.25
+    },
+    {
+      "scenario": "explain-control-en-done",
+      "category": "explain",
+      "repeat": 2,
+      "status": "pass",
+      "end_reason": "end_call",
+      "turns": 2,
+      "duration_s": 39.411,
+      "cost_usd_estimate": 0.0218835,
+      "mean_wer": 0
+    },
+    {
+      "scenario": "explain-control-en-done",
+      "category": "explain",
+      "repeat": 3,
+      "status": "pass",
+      "end_reason": "end_call",
+      "turns": 2,
+      "duration_s": 74.096,
+      "cost_usd_estimate": 0.0224274,
+      "mean_wer": 0
+    },
+    {
+      "scenario": "explain-control-en-done",
+      "category": "explain",
+      "repeat": 4,
+      "status": "pass",
+      "end_reason": "end_call",
+      "turns": 2,
+      "duration_s": 39.828,
+      "cost_usd_estimate": 0.021239400000000002,
+      "mean_wer": 0.375
+    },
+    {
+      "scenario": "explain-control-en-done",
+      "category": "explain",
+      "repeat": 5,
+      "status": "pass",
+      "end_reason": "end_call",
+      "turns": 2,
+      "duration_s": 41.467,
+      "cost_usd_estimate": 0.0310251,
+      "mean_wer": 0.375
+    },
+    {
+      "scenario": "explain-en-flaky-test",
+      "category": "explain",
+      "repeat": 1,
+      "status": "pass",
+      "end_reason": "end_call",
+      "turns": 5,
+      "duration_s": 127.417,
+      "cost_usd_estimate": 0.11041920000000001,
+      "mean_wer": 0.015384615384615385
+    },
+    {
+      "scenario": "explain-en-flaky-test",
+      "category": "explain",
+      "repeat": 2,
+      "status": "pass",
+      "end_reason": "end_call",
+      "turns": 5,
+      "duration_s": 107.123,
+      "cost_usd_estimate": 0.060081,
+      "mean_wer": 0.015384615384615385
+    },
+    {
+      "scenario": "explain-en-flaky-test",
+      "category": "explain",
+      "repeat": 3,
+      "status": "pass",
+      "end_reason": "end_call",
+      "turns": 5,
+      "duration_s": 127.65,
+      "cost_usd_estimate": 0.08982839999999999,
+      "mean_wer": 0.015384615384615385
+    },
+    {
+      "scenario": "explain-en-flaky-test",
+      "category": "explain",
+      "repeat": 4,
+      "status": "pass",
+      "end_reason": "end_call",
+      "turns": 5,
+      "duration_s": 126.499,
+      "cost_usd_estimate": 0.0858348,
+      "mean_wer": 0.015384615384615385
+    },
+    {
+      "scenario": "explain-en-flaky-test",
+      "category": "explain",
+      "repeat": 5,
+      "status": "pass",
+      "end_reason": "end_call",
+      "turns": 5,
+      "duration_s": 95.868,
+      "cost_usd_estimate": 0.0503184,
+      "mean_wer": 0.015384615384615385
+    },
+    {
+      "scenario": "explain-zh-input-rules",
+      "category": "explain",
+      "repeat": 1,
+      "status": "pass",
+      "end_reason": "end_call",
+      "turns": 5,
+      "duration_s": 135.16,
+      "cost_usd_estimate": 0.0785877,
+      "mean_wer": 0.05700000000000001
+    },
+    {
+      "scenario": "explain-zh-input-rules",
+      "category": "explain",
+      "repeat": 2,
+      "status": "pass",
+      "end_reason": "end_call",
+      "turns": 5,
+      "duration_s": 118.336,
+      "cost_usd_estimate": 0.0710136,
+      "mean_wer": 0.05700000000000001
+    },
+    {
+      "scenario": "explain-zh-input-rules",
+      "category": "explain",
+      "repeat": 3,
+      "status": "pass",
+      "end_reason": "end_call",
+      "turns": 5,
+      "duration_s": 132.709,
+      "cost_usd_estimate": 0.08026169999999999,
+      "mean_wer": 0.032
+    },
+    {
+      "scenario": "explain-zh-input-rules",
+      "category": "explain",
+      "repeat": 4,
+      "status": "pass",
+      "end_reason": "end_call",
+      "turns": 5,
+      "duration_s": 121.481,
+      "cost_usd_estimate": 0.0729954,
+      "mean_wer": 0.05700000000000001
+    },
+    {
+      "scenario": "explain-zh-input-rules",
+      "category": "explain",
+      "repeat": 5,
+      "status": "pass",
+      "end_reason": "end_call",
+      "turns": 5,
+      "duration_s": 129.311,
+      "cost_usd_estimate": 0.0632604,
+      "mean_wer": 0.05700000000000001
+    }
+  ]
+}

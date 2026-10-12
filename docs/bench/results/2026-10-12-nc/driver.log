@@ -5,3 +5,10 @@ exit 0
 23:26:30 [14/15] explain-zh-input-rules r5 (:7911): pass (end_call, ) 5 turns 128s ≈ $0.075, total ≈ $0.93
 23:26:59 [15/15] explain-control-en-done r5 (:7912): pass (end_call, ) 2 turns 36s ≈ $0.023, total ≈ $0.96
 23:27 done a explain-1 chunk=$0.96 cum=$0.96
+23:28 deepseek balance 51.80 CNY
+23:28 start nc explain-1
+exit 0
+23:39:57 [13/15] explain-zh-input-rules r5 (:7912): pass (end_call, ) 5 turns 129s ≈ $0.063, total ≈ $0.80
+23:39:57 [14/15] explain-en-flaky-test r5 (:7911): pass (end_call, ) 5 turns 96s ≈ $0.050, total ≈ $0.85
+23:40:39 [15/15] explain-control-en-done r5 (:7912): pass (end_call, ) 2 turns 41s ≈ $0.031, total ≈ $0.88
+23:40 done nc explain-1 chunk=$0.88 cum=$1.84
