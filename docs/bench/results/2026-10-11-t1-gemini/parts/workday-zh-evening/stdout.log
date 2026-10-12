@@ -1,0 +1,18 @@
+[1/5] workday-zh-evening r3: pass (end_call, ) ≈ $0.0963, total ≈ $0.096
+[2/5] workday-zh-evening r1: pass (end_call, ) ≈ $0.0971, total ≈ $0.193
+[3/5] workday-zh-evening r2: pass (end_call, ) ≈ $0.1071, total ≈ $0.301
+[4/5] workday-zh-evening r5: pass (end_call, ) ≈ $0.0802, total ≈ $0.381
+[5/5] workday-zh-evening r4: pass (end_call, ) ≈ $0.0760, total ≈ $0.457
+  pass    workday-zh-evening r1  end_call  12 turns  115.2s                         ≈ $0.0971
+  pass    workday-zh-evening r2  end_call  12 turns  116.1s                         ≈ $0.1071
+  pass    workday-zh-evening r3  end_call  13 turns  113.9s                         ≈ $0.0963
+  pass    workday-zh-evening r4  end_call  12 turns  105.1s                         ≈ $0.0760
+  pass    workday-zh-evening r5  end_call  12 turns   97.6s                         ≈ $0.0802
+-- 5 runs, spend ≈ $0.4567 (estimate at list prices) --
+reports: docs/bench/results/2026-10-11-t1-gemini/parts/workday-zh-evening/report.json, docs/bench/results/2026-10-11-t1-gemini/parts/workday-zh-evening/report.md
+== eval sim, repeat 5 ==
+  workday-zh-evening  runs  5  pass  5  fail  0  err  0  not_run  0  rate  100%  –
+  TOTAL               runs  5  pass  5  fail  0  err  0  not_run  0  rate  100%  –
+-- spend brain    gemini-3.5-flash         calls   115  in   1233032  out    12249  reasoning     9460  ≈ $0.4242 --
+-- spend simuser  deepseek-flash           calls    56  in    105833  out     1327  reasoning        0  ≈ $0.0325 --
+-- spend total ≈ $0.4567 (estimate at list prices) --
