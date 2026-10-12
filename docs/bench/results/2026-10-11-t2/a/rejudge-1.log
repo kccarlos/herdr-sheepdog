@@ -19,3 +19,4 @@ rejudged explain-zh-notes-ledger r3: fail
 rejudged workday-explain-deep r1: fail
 sheepdog bench rejudge: segments: workday-explain-deep r2: segment 13 (beat 14): judge: no verdict for right_agent
 rejudged workday-interruptions r1: fail
+sheepdog bench rejudge: segments: workday-interruptions r2: segment 4 (beat 5): judge: no verdict for right_agent
