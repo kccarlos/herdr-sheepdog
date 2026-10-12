@@ -1,0 +1,25 @@
+23:35:45 balance CNY 48.66 USD 0.00 available before fix r1 workday-morning-standup 3
+exit 0 fix r1
+  TOTAL                    runs  3  pass  3  fail  0  err  0  not_run  0  rate  100%  –
+-- spend brain    deepseek-flash           calls    80  in    946172  out    18155  reasoning     8773  ≈ $0.3000 --
+-- spend simuser  gemini-3.5-flash         calls    33  in     59283  out      730  reasoning     2247  ≈ $0.0252 --
+-- spend total ≈ $0.3252 (estimate at list prices) --
+23:37:48 balance CNY 48.19 USD 0.00 available before main r1 workday-morning-standup 3
+exit 0 main r1
+  TOTAL                    runs  3  pass  3  fail  0  err  0  not_run  0  rate  100%  –
+-- spend brain    deepseek-flash           calls    81  in    930859  out    17064  reasoning     7727  ≈ $0.2941 --
+-- spend simuser  gemini-3.5-flash         calls    33  in     57921  out      703  reasoning     4232  ≈ $0.0297 --
+-- spend total ≈ $0.3238 (estimate at list prices) --
+23:39:50 balance USD 0.00 CNY 47.78 available before main r2 workday-interruptions 3
+exit 0 main r2
+  TOTAL                  runs  3  pass  3  fail  0  err  0  not_run  0  rate  100%  –
+-- spend brain    deepseek-flash           calls    70  in    757525  out    16311  reasoning     8563  ≈ $0.2422 --
+-- spend simuser  gemini-3.5-flash         calls    34  in     57447  out     1225  reasoning     4275  ≈ $0.0310 --
+-- spend total ≈ $0.2732 (estimate at list prices) --
+23:41:58 balance USD 0.00 CNY 47.22 available before fix r2 workday-interruptions 3
+exit 0 fix r2
+  TOTAL                  runs  3  pass  2  fail  1  err  0  not_run  0  rate   67%  timeout ×1
+-- spend brain    deepseek-flash           calls    71  in    754933  out    19648  reasoning    11293  ≈ $0.2450 --
+-- spend simuser  gemini-3.5-flash         calls    36  in     61620  out     1129  reasoning     5006  ≈ $0.0338 --
+-- spend total ≈ $0.2789 (estimate at list prices) --
+23:44:24 balance USD 0.00 CNY 46.60 available ALLDONE

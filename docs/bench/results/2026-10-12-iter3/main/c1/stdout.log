@@ -1,0 +1,19 @@
+[1/4] workday-scale-ten r4: pass (end_call, ) ≈ $0.1181, total ≈ $0.118
+[2/4] workday-scale-ten r1: fail (end_call, timeout) ≈ $0.1301, total ≈ $0.248
+[3/4] workday-scale-ten r2: fail (end_call, timeout) ≈ $0.1337, total ≈ $0.382
+[4/4] workday-scale-ten r3: fail (end_call, unintended_action) ≈ $0.1217, total ≈ $0.504
+  fail    workday-scale-ten r1  end_call  12 turns  102.2s  timeout                ≈ $0.1301
+          timeout: 1 brain turn(s) timed out and fell back
+  fail    workday-scale-ten r2  end_call  12 turns  108.9s  timeout                ≈ $0.1337
+          timeout: 2 brain turn(s) timed out and fell back
+  fail    workday-scale-ten r3  end_call  12 turns  140.2s  unintended_action      ≈ $0.1217
+          unintended_action: sheepdog answered etl-codex's prompt with keys y
+  pass    workday-scale-ten r4  end_call  12 turns   93.1s                         ≈ $0.1181
+-- 4 runs, spend ≈ $0.5036 (estimate at list prices) --
+reports: docs/bench/results/2026-10-12-iter3/main/c1/report.json, docs/bench/results/2026-10-12-iter3/main/c1/report.md
+== eval sim, repeat 4 ==
+  workday-scale-ten  runs  4  pass  1  fail  3  err  0  not_run  0  rate   25%  timeout ×2, unintended_action ×1
+  TOTAL              runs  4  pass  1  fail  3  err  0  not_run  0  rate   25%  timeout ×2, unintended_action ×1
+-- spend brain    deepseek-flash           calls   120  in   1471605  out    26243  reasoning    13476  ≈ $0.4653 --
+-- spend simuser  gemini-3.5-flash         calls    44  in     75576  out     1177  reasoning     5056  ≈ $0.0383 --
+-- spend total ≈ $0.5036 (estimate at list prices) --

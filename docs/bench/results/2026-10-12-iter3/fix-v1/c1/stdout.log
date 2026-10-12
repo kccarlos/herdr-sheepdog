@@ -1,0 +1,21 @@
+[1/4] workday-scale-ten r4: fail (end_call, brain_fallback) ≈ $0.1216, total ≈ $0.122
+[2/4] workday-scale-ten r1: pass (end_call, ) ≈ $0.1293, total ≈ $0.251
+[3/4] workday-scale-ten r3: fail (end_call, timeout) ≈ $0.1329, total ≈ $0.384
+[4/4] workday-scale-ten r2: fail (end_call, timeout) ≈ $0.1225, total ≈ $0.506
+  pass    workday-scale-ten r1  end_call  12 turns   99.0s                         ≈ $0.1293
+  fail    workday-scale-ten r2  end_call  12 turns  110.0s  timeout                ≈ $0.1225
+          brain_fallback: yielded: brain: yielded to a CEO turn
+          timeout: 2 brain turn(s) timed out and fell back
+  fail    workday-scale-ten r3  end_call  12 turns  107.3s  timeout                ≈ $0.1329
+          brain_fallback: yielded: brain: yielded to a CEO turn
+          timeout: 1 brain turn(s) timed out and fell back
+  fail    workday-scale-ten r4  end_call  12 turns   97.2s  brain_fallback         ≈ $0.1216
+          brain_fallback: yielded: brain: yielded to a CEO turn
+-- 4 runs, spend ≈ $0.5063 (estimate at list prices) --
+reports: docs/bench/results/2026-10-12-iter3/fix/c1/report.json, docs/bench/results/2026-10-12-iter3/fix/c1/report.md
+== eval sim, repeat 4 ==
+  workday-scale-ten  runs  4  pass  1  fail  3  err  0  not_run  0  rate   25%  timeout ×2, brain_fallback ×1
+  TOTAL              runs  4  pass  1  fail  3  err  0  not_run  0  rate   25%  timeout ×2, brain_fallback ×1
+-- spend brain    deepseek-flash           calls   119  in   1479423  out    27625  reasoning    15069  ≈ $0.4694 --
+-- spend simuser  gemini-3.5-flash         calls    44  in     77185  out     1099  reasoning     4369  ≈ $0.0368 --
+-- spend total ≈ $0.5063 (estimate at list prices) --
