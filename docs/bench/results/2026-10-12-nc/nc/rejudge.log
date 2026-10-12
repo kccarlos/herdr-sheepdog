@@ -33,3 +33,33 @@ judge claude sonnet: 3m44s, 240 calls
 -- spend judge    sonnet                   calls   240  in    542002  out    37949  reasoning        0  ≈ $0.0000 --
 -- spend total ≈ $0.0000 (estimate at list prices) --
 rejudge exit 1
+rejudged explain-en-invoice-job r2: fail
+rejudged explain-en-invoice-job r3: fail
+rejudged explain-en-invoice-job r4: fail
+rejudged explain-en-invoice-job r5: fail
+rejudged explain-zh-input-rules r1: fail
+rejudged explain-zh-input-rules r2: fail
+rejudged explain-zh-input-rules r3: fail
+rejudged explain-zh-input-rules r4: fail
+rejudged explain-zh-input-rules r5: fail
+rejudged explain-zh-notes-ledger r1: fail
+rejudged explain-zh-notes-ledger r2: fail
+rejudged explain-zh-notes-ledger r3: fail
+rejudged explain-zh-notes-ledger r4: fail
+rejudged explain-zh-notes-ledger r5: fail
+rejudged workday-explain-deep r1: fail
+rejudged workday-explain-deep r2: fail
+rejudged workday-interruptions r1: fail
+rejudged workday-interruptions r2: fail
+rejudged workday-long-haul r1: fail
+rejudged workday-long-haul r2: fail
+rejudged workday-morning-standup r1: fail
+rejudged workday-morning-standup r2: fail
+rejudged workday-scale-ten r1: fail
+rejudged workday-scale-ten r2: fail
+rejudged workday-zh-evening r1: fail
+rejudged workday-zh-evening r2: fail
+judge claude sonnet: 18m9s, 446 calls
+-- spend judge    sonnet                   calls   446  in   4753121  out   221780  reasoning        0  ≈ $0.0000 --
+-- spend total ≈ $0.0000 (estimate at list prices) --
+rejudge exit 0
