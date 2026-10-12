@@ -8,3 +8,4 @@ a workday-1 4.19
 rl workday-1 3.52
 nc workday-1 4.09
 a workday-2 3.64
+rl workday-2 3.67

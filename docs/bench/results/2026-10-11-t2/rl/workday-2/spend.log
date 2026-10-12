@@ -1,0 +1,6 @@
+18:49:09 [1/6] workday-explain-deep r1 (:7901): pass (end_call, ) 13 turns 356s ≈ $0.508, total ≈ $0.51
+18:51:00 [2/6] workday-interruptions r1 (:7902): pass (end_call, ) 12 turns 467s ≈ $0.750, total ≈ $1.26
+18:56:05 [3/6] workday-interruptions r2 (:7902): pass (end_call, ) 11 turns 305s ≈ $0.544, total ≈ $1.80
+18:56:35 [4/6] workday-long-haul r1 (:7901): pass (end_call, ) 14 turns 446s ≈ $0.637, total ≈ $2.44
+19:03:45 [5/6] workday-long-haul r2 (:7901): pass (end_call, ) 14 turns 429s ≈ $0.608, total ≈ $3.05
+19:05:29 [6/6] workday-explain-deep r2 (:7902): pass (end_call, ) 12 turns 563s ≈ $0.628, total ≈ $3.67
