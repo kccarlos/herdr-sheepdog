@@ -62,7 +62,7 @@ n/a: the item did not arise in the segment (said_vs_done: no claim or denial of 
 - **User effort**: 220 user lines, 2 repeats and 5 rephrasings of the line before.
 - **Turns, cost, latency**: turns per run 7.3 (95 % CI 5.7–9.0, n 30); estimated cost per run 0.3016 $ (95 % CI 0.1976–0.4079, n 30); per-turn latency p50 4371 ms, p90 9192 ms (n 119).
 
-**30 runs (12 scenarios × 3): pass 6, fail 24, errored 0, not run 0 — pass rate 20%** (errored and not-run runs excluded). 0 min wall. Estimated spend $9.05 (brain $1.022, live $7.776, simuser $0.075, tts $0.174, live audio 16.7 min in / 47.2 min out).
+**30 runs (12 scenarios × 3): pass 6, fail 24, errored 0, not run 0 — pass rate 20%** (errored and not-run runs excluded). 16 min wall. Estimated spend $9.05 (brain $1.022, live $7.776, simuser $0.075, tts $0.174, live audio 16.7 min in / 47.2 min out).
 
 ## By category
 
