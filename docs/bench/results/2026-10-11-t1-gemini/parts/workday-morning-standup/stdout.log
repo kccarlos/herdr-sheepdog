@@ -1,0 +1,21 @@
+[1/5] workday-morning-standup r2: pass (end_call, ) ≈ $0.1054, total ≈ $0.105
+[2/5] workday-morning-standup r3: pass (end_call, ) ≈ $0.1211, total ≈ $0.227
+[3/5] workday-morning-standup r1: fail (end_call, timeout) ≈ $0.1008, total ≈ $0.327
+[4/5] workday-morning-standup r4: fail (end_call, brain_fallback) ≈ $0.1032, total ≈ $0.431
+[5/5] workday-morning-standup r5: pass (end_call, ) ≈ $0.1062, total ≈ $0.537
+  fail    workday-morning-standup r1  end_call  12 turns   95.6s  timeout                ≈ $0.1008
+          brain_fallback: yielded: brain: yielded to a CEO turn
+          timeout: 1 brain turn(s) timed out and fell back
+  pass    workday-morning-standup r2  end_call  12 turns   87.2s                         ≈ $0.1054
+  pass    workday-morning-standup r3  end_call  12 turns   91.3s                         ≈ $0.1211
+  fail    workday-morning-standup r4  end_call  12 turns   73.3s  brain_fallback         ≈ $0.1032
+          brain_fallback: yielded: brain: yielded to a CEO turn
+  pass    workday-morning-standup r5  end_call  12 turns   85.4s                         ≈ $0.1062
+-- 5 runs, spend ≈ $0.5367 (estimate at list prices) --
+reports: docs/bench/results/2026-10-11-t1-gemini/parts/workday-morning-standup/report.json, docs/bench/results/2026-10-11-t1-gemini/parts/workday-morning-standup/report.md
+== eval sim, repeat 5 ==
+  workday-morning-standup  runs  5  pass  3  fail  2  err  0  not_run  0  rate   60%  timeout ×1, brain_fallback ×1
+  TOTAL                    runs  5  pass  3  fail  2  err  0  not_run  0  rate   60%  timeout ×1, brain_fallback ×1
+-- spend brain    gemini-3.5-flash         calls   137  in   1510983  out    13134  reasoning     7082  ≈ $0.5038 --
+-- spend simuser  deepseek-flash           calls    57  in    106770  out     1398  reasoning        0  ≈ $0.0329 --
+-- spend total ≈ $0.5367 (estimate at list prices) --
