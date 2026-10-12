@@ -7,3 +7,12 @@ rejudged explain-control-zh-busy r3: pass
 rejudged explain-en-flaky-test r1: fail
 rejudged explain-en-flaky-test r2: fail
 rejudged explain-en-flaky-test r3: fail
+rejudged explain-en-invoice-job r1: fail
+rejudged explain-en-invoice-job r2: fail
+rejudged explain-en-invoice-job r3: fail
+rejudged explain-zh-input-rules r1: fail
+rejudged explain-zh-input-rules r2: fail
+rejudged explain-zh-input-rules r3: fail
+rejudged explain-zh-notes-ledger r1: fail
+rejudged explain-zh-notes-ledger r2: fail
+rejudged explain-zh-notes-ledger r3: fail
