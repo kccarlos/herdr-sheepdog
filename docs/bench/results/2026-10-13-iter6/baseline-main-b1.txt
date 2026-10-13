@@ -1,0 +1,9 @@
+DETAIL   no fresh look   0/  0 =    0% (95% CI 0%-0%)
+detail answers: 42
+  no fresh look           34/42 = 81% (67%-90%)
+  any wrong fact          16/42 = 38% (25%-53%)
+  restates                24/42 = 57% (42%-71%)
+  mean new facts          1.07
+  with a look     wrong 5/8 = 62% (31%-86%); restates 3/8 = 38% (14%-69%); mean new facts 1.88
+  without a look  wrong 11/34 = 32% (19%-49%); restates 21/34 = 62% (45%-76%); mean new facts 0.88
+first explain answers: wrong 1/12 = 8% (1%-35%) mean new 5.33
