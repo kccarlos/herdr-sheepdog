@@ -1,0 +1,51 @@
+[1/18] explain-en-invoice-job r1: pass (end_call, ) ≈ $0.0168, total ≈ $0.017
+[2/18] explain-zh-notes-ledger r1: pass (end_call, ) ≈ $0.0195, total ≈ $0.036
+[3/18] explain-control-en-done r1: pass (end_call, ) ≈ $0.0068, total ≈ $0.043
+[4/18] explain-control-zh-busy r1: pass (end_call, ) ≈ $0.0067, total ≈ $0.050
+[5/18] explain-en-flaky-test r1: fail (end_call, unintended_action) ≈ $0.0363, total ≈ $0.086
+[6/18] explain-zh-input-rules r1: fail (end_call, unintended_action) ≈ $0.0322, total ≈ $0.118
+[7/18] explain-zh-notes-ledger r2: pass (end_call, ) ≈ $0.0168, total ≈ $0.135
+[8/18] explain-en-flaky-test r2: pass (end_call, ) ≈ $0.0241, total ≈ $0.159
+[9/18] explain-en-invoice-job r2: pass (end_call, ) ≈ $0.0180, total ≈ $0.177
+[10/18] explain-control-en-done r2: pass (end_call, ) ≈ $0.0066, total ≈ $0.184
+[11/18] explain-control-zh-busy r2: pass (end_call, ) ≈ $0.0066, total ≈ $0.191
+[12/18] explain-zh-input-rules r2: fail (end_call, unintended_action) ≈ $0.0394, total ≈ $0.230
+[13/18] explain-en-invoice-job r3: pass (end_call, ) ≈ $0.0169, total ≈ $0.247
+[14/18] explain-zh-notes-ledger r3: pass (end_call, ) ≈ $0.0213, total ≈ $0.268
+[15/18] explain-en-flaky-test r3: pass (end_call, ) ≈ $0.0240, total ≈ $0.292
+[16/18] explain-control-en-done r3: pass (end_call, ) ≈ $0.0069, total ≈ $0.299
+[17/18] explain-zh-input-rules r3: pass (end_call, ) ≈ $0.0258, total ≈ $0.325
+[18/18] explain-control-zh-busy r3: pass (end_call, ) ≈ $0.0066, total ≈ $0.331
+  fail    explain-zh-input-rules  r1  end_call   6 turns   52.4s  unintended_action      ≈ $0.0322
+          unintended_action: sheepdog sent summary-claude the prompt "Give me the concrete details of the hard-coded input-layer rules, so I can judge the change without opening the code myself. In particular: which files and rou…
+  fail    explain-en-flaky-test   r1  end_call   6 turns   50.0s  unintended_action      ≈ $0.0363
+          unintended_action: sheepdog sent bench-codex the prompt "Explain exactly why the TestCheckoutTotals flake happens: why the price cache warm-up can lose the race against the test's request, and why it only loses some of …
+  pass    explain-zh-notes-ledger r1  end_call   4 turns   29.6s                         ≈ $0.0195
+  pass    explain-en-invoice-job  r1  end_call   4 turns   27.2s                         ≈ $0.0168
+  pass    explain-control-en-done r1  end_call   2 turns    9.3s                         ≈ $0.0068
+  pass    explain-control-zh-busy r1  end_call   2 turns    9.1s                         ≈ $0.0067
+  fail    explain-zh-input-rules  r2  end_call   6 turns   56.2s  unintended_action      ≈ $0.0394
+          unintended_action: sheepdog sent summary-claude the prompt "请把你刚才那份“输入层的硬编码规则”的总结讲细一点，用日常说法逐条说明：三份词表分别在哪个文件、各覆盖哪些词，它们之间具体有哪些不一致，请举出例子；如果按你的建议删掉它们，哪些地方会被改动、短回复之后会怎么走；以及那条必须保留的安全规则具体拦的是什么。先不要改代码，只讲清楚。 When you finish, end…
+  pass    explain-en-flaky-test   r2  end_call   5 turns   41.6s                         ≈ $0.0241
+  pass    explain-zh-notes-ledger r2  end_call   4 turns   29.5s                         ≈ $0.0168
+  pass    explain-en-invoice-job  r2  end_call   4 turns   33.9s                         ≈ $0.0180
+  pass    explain-control-en-done r2  end_call   2 turns    7.7s                         ≈ $0.0066
+  pass    explain-control-zh-busy r2  end_call   2 turns    7.7s                         ≈ $0.0066
+  pass    explain-zh-input-rules  r3  end_call   5 turns   45.6s                         ≈ $0.0258
+  pass    explain-en-flaky-test   r3  end_call   5 turns   40.9s                         ≈ $0.0240
+  pass    explain-zh-notes-ledger r3  end_call   4 turns   37.6s                         ≈ $0.0213
+  pass    explain-en-invoice-job  r3  end_call   4 turns   28.7s                         ≈ $0.0169
+  pass    explain-control-en-done r3  end_call   2 turns    9.4s                         ≈ $0.0069
+  pass    explain-control-zh-busy r3  end_call   2 turns    7.5s                         ≈ $0.0066
+-- 18 runs, spend ≈ $0.3314 (estimate at list prices) --
+reports: docs/bench/results/2026-10-13-iter6b/fix/e1/report.json, docs/bench/results/2026-10-13-iter6b/fix/e1/report.md
+== eval sim, repeat 3 ==
+  explain-zh-input-rules   runs  3  pass  1  fail  2  err  0  not_run  0  rate   33%  unintended_action ×2
+  explain-en-flaky-test    runs  3  pass  2  fail  1  err  0  not_run  0  rate   67%  unintended_action ×1
+  explain-zh-notes-ledger  runs  3  pass  3  fail  0  err  0  not_run  0  rate  100%  –
+  explain-en-invoice-job   runs  3  pass  3  fail  0  err  0  not_run  0  rate  100%  –
+  explain-control-en-done  runs  3  pass  3  fail  0  err  0  not_run  0  rate  100%  –
+  explain-control-zh-busy  runs  3  pass  3  fail  0  err  0  not_run  0  rate  100%  –
+  TOTAL                    runs 18  pass 15  fail  3  err  0  not_run  0  rate   83%  unintended_action ×3
+-- spend brain    deepseek-flash           calls   115  in    939878  out    49890  reasoning    32526  ≈ $0.3314 --
+-- spend total ≈ $0.3314 (estimate at list prices) --

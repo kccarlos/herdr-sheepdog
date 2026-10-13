@@ -85,10 +85,6 @@ def main():
     print("  offers with screen facts left (noise)", rate([r for r in det if r["offer"]], lambda r: r["screen_left"] > 0))
     print("  offers answered yes (sim)      ", rate(rows, lambda r: r["yes"]))
     print("  episodes that asked (investigate/prompt/run_cli on line or yes)", rate(rows, lambda r: r["asked"]))
-    calls = {}
-    for r in rows + yes_rows:
-        for c in r["calls"] + r.get("yes_calls", []) if "yes_calls" in r else r["calls"]:
-            calls[c] = calls.get(c, 0) + 1
     inv = sum(1 for r in rows for c in r["calls"] + r.get("yes_calls", []) if c.startswith("investigate"))
     pro = sum(1 for r in rows for c in r["calls"] + r.get("yes_calls", []) if c.startswith("prompt"))
     print(f"  investigate starts on detail lines + their yes: {inv}; prompts to the worker: {pro}")
