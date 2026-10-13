@@ -327,6 +327,9 @@ func requestText(req Request) string {
 	if req.facts.OpenPrompt != "" {
 		s += "\n" + req.facts.OpenPrompt
 	}
+	if req.facts.OpenPrompts != "" {
+		s += "\n" + req.facts.OpenPrompts
+	}
 	if line := languageLine(req.facts.Language); line != "" {
 		s += "\n" + line
 	}

@@ -261,7 +261,7 @@ func (s *Supervisor) announceFinishAsking(ctx context.Context, row state.Agent, 
 	alias := aliasOr(state.Say(row))
 	s.log.Log(logSource, "supervisor.done_asking", row.PaneID, map[string]any{"alias": alias, "question": prompt.Phrase()})
 	s.touch(row.PaneID)
-	s.recordBlock(row.PaneID, prompt.Phrase(), false)
+	s.recordBlock(row.PaneID, prompt.Phrase(), prompt.Command, false)
 	s.mu.Lock()
 	p := s.newAnswerPrompt(row.PaneID, prompt, alias, row.StateSince)
 	s.setPending(p)
@@ -328,11 +328,11 @@ func (s *Supervisor) announceBlock(ctx context.Context, row state.Agent, screen 
 		// Blocked at something with no options to send: the user has to
 		// look. Nothing is pending, so nothing can be answered for them.
 		s.log.Log(logSource, "supervisor.blocked_no_question", row.PaneID, map[string]any{"alias": alias})
-		s.recordBlock(row.PaneID, "", true)
+		s.recordBlock(row.PaneID, "", "", true)
 		s.announce(ctx, announcement{row: row, kind: pushQuestion, event: brain.PromiseEventBlocked, sentence: alias + " is waiting at a prompt.", screen: screen})
 		return
 	}
-	s.recordBlock(row.PaneID, prompt.Phrase(), false)
+	s.recordBlock(row.PaneID, prompt.Phrase(), prompt.Command, false)
 	s.mu.Lock()
 	p := s.newAnswerPrompt(row.PaneID, prompt, alias, row.StateSince)
 	sentence := s.setPending(p)
@@ -356,12 +356,13 @@ func (s *Supervisor) recentlyInterrupted(paneID string) bool {
 // recordBlock stores the question on the row's last_block; answered is
 // set for a block with nothing to answer, so the roster does not claim
 // the agent is waiting on the user.
-func (s *Supervisor) recordBlock(paneID, question string, answered bool) {
+func (s *Supervisor) recordBlock(paneID, question, command string, answered bool) {
 	_, err := s.store.Update(paneID, func(a *state.Agent) {
 		if a.LastBlock == nil {
 			a.LastBlock = &state.Block{SeenAt: s.cfg.Now()}
 		}
 		a.LastBlock.Question = question
+		a.LastBlock.Command = command
 		a.LastBlock.Answered = answered
 	})
 	if err != nil {

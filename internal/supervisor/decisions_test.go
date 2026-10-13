@@ -50,3 +50,51 @@ func TestDecisionsNowNamesWaitingAgents(t *testing.T) {
 		t.Errorf("decisionsLine = %q", line)
 	}
 }
+
+// Two prompts open at once reach the utterance turn as a fact, each with
+// its worker's kind and command, and which share a kind (harness
+// iteration 5: "approve the codex one" with cache-codex and etl-codex
+// both asking "would you like to run the following command"). One open
+// prompt adds nothing: the roster already has it.
+func TestUtteranceSeesEveryOpenPrompt(t *testing.T) {
+	m := braintest.NewModel()
+	m.Default = &braintest.Step{Text: `{"spoken":"Which one?","clarify":true}`}
+	h := newBrainHarness(t, m)
+	h.addAgent("w5:p1", "auth", "codex", herdr.StateIdle)
+	h.addAgent("w6:p1", "docs", "codex", herdr.StateIdle)
+	h.addAgent("w7:p1", "notes", "claude", herdr.StateIdle)
+	block := func(pane, cmd string) {
+		if _, err := h.store.Update(pane, func(a *state.Agent) {
+			a.State = herdr.StateBlocked
+			a.LastBlock = &state.Block{Question: "would you like to run the following command", Command: cmd}
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	block("w5:p1", "redis-cli -h cache.internal INFO stats")
+	h.say("status")
+	if text := m.Calls()[0].Text(); strings.Contains(text, "prompts are open at once") {
+		t.Errorf("one open prompt, model saw:\n%s", text)
+	}
+	block("w6:p1", "rm -rf ./data")
+	if err := h.store.SetPending(state.PendingAction{ID: "ap-2", PaneID: "w6:p1", Kind: state.PendingAnswerPrompt, Question: "would you like to run the following command", Command: "rm -rf ./data"}); err != nil {
+		t.Fatal(err)
+	}
+	h.say("approve the codex one")
+	text := m.Calls()[len(m.Calls())-1].Text()
+	for _, want := range []string{"2 prompts are open at once, each a separate decision: docs (codex) is waiting", `asking to run "rm -rf ./data"`, `auth (codex) is waiting at a prompt for the user's answer ("would you like to run the following command"), asking to run "redis-cli -h cache.internal INFO stats"`, "docs and auth are both codex workers."} {
+		if !strings.Contains(text, want) {
+			t.Errorf("missing %q; model saw:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "(claude) is waiting") {
+		t.Errorf("an idle agent listed as waiting:\n%s", text)
+	}
+	if len(h.sendKeysRequests()) != 0 {
+		t.Errorf("keys sent: %v", h.sendKeysRequests())
+	}
+	// The voice's fact keeps its old shape: no command, no kind.
+	if got := h.sup.DecisionsNow(); strings.Contains(got, "rm -rf") || strings.Contains(got, "(codex)") {
+		t.Errorf("DecisionsNow = %q", got)
+	}
+}

@@ -322,7 +322,7 @@ func (s *Supervisor) reportBlocked(ctx context.Context, row state.Agent) voice.T
 // question and says it, asking for its answer first.
 func (s *Supervisor) pendingFromPrompt(row state.Agent, prompt herdr.Prompt) voice.ToolResult {
 	alias := aliasOr(state.Say(row))
-	s.recordBlock(row.PaneID, prompt.Phrase(), false)
+	s.recordBlock(row.PaneID, prompt.Phrase(), prompt.Command, false)
 	s.mu.Lock()
 	spoken := s.setPending(s.newAnswerPrompt(row.PaneID, prompt, alias, row.StateSince))
 	s.mu.Unlock()

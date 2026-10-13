@@ -209,6 +209,12 @@ type EventFacts struct {
 	// blocked panes (baseline 2026-10-05 cluster 3: a finish announced
 	// with an invented "Shall I …?"). A fact; RULES.md says what follows.
 	Decisions string
+	// OpenPrompts is set on an utterance turn when two or more prompts
+	// are open at once: each one with its worker's kind and command, as
+	// a sentence (harness iteration 5: "approve the codex one" with two
+	// codex workers waiting was answered for one of them by guess). A
+	// fact about the state, not a reading of the user's words.
+	OpenPrompts string
 }
 
 // The values of EventFacts.Language.

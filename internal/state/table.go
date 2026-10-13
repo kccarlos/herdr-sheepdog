@@ -111,7 +111,12 @@ const SourceInject = "inject"
 
 // Block records the last time the agent was blocked.
 type Block struct {
-	Question string    `json:"question"`
+	Question string `json:"question"`
+	// Command is the command the prompt asks to run, when it shows one
+	// (Codex's "$ rm -rf ./data" line): with two prompts open at once
+	// their questions are often the same words, and only the command
+	// tells them apart (harness iteration 5).
+	Command  string    `json:"command,omitempty"`
 	SeenAt   time.Time `json:"seen_at"`
 	Answered bool      `json:"answered"`
 }
