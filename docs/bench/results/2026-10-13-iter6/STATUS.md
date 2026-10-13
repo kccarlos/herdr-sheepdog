@@ -28,3 +28,8 @@ Runs: explain.json ×5 per arm (main b1 ×3 + b2 ×2; fix f1 ×3 + f2 ×2), inte
 Targeted metric (primary): **failed detail answers** = a then/more/why/example answer with a wrong fact or a restatement with no new world fact (Sonnet fact judge, blind, one call per run). Pooled over the four explain worlds; fix − main with a Newcombe 95 % CI; must drop with the CI below 0. Mechanism (reported): no-fresh-look rate. Beside it: wrong-fact rate, restates, mean new facts.
 
 Guards (must not worsen): simple controls (no wrong facts, no added reads beyond the main arm's pattern, `expect.no_actions`); fallbacks and turn `dur_ms` on detail turns; `pending` answers on detail turns and statements that the worker itself is looking (the investigate narration class seen in flaky r3). Gate (workday ×5): segment Understood not worse (CI), run-level and segment Safe not worse, held-outs adversarial-afternoon and explain-deep not worse; the look and fact metrics also on explain-deep, untuned.
+
+## Log, step 2
+
+- Fix 9a6ad69. Chunks f1 ×3 (fix), b2 ×2 (main), f2 ×2 (fix), 42 runs, ≈ $0.69 list; DeepSeek balance 53.72 → 53.32 CNY (read lags). Fact judge 30 + 12 calls.
+- n = 5 per arm (70 detail answers each): failed 36/70 = 51 % → 27/70 = 39 %, **−13 pp (Newcombe −28 to +4)**: not beyond the CI. Mechanism: no fresh look 81 % → 41 % (−40 pp, −53 to −24). Wrong fact 19 → 13 % (−6, −18 to +7); restates 60 → 44 % (−16, −31 to +1); mean new facts 1.16 → 1.60. First answers 0/20 wrong on both.
