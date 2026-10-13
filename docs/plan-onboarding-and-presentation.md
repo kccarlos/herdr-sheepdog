@@ -104,9 +104,11 @@ Order of the top of the README:
 6. Fresh-machine test with 2–3 people; record time to first answer and where they got stuck; fix.
 7. App demo mode / App Store; tier 3 after LiveKit.
 
-## Open questions for the CEO
+## CEO answers (2026-10-13)
 
-1. Should the iOS app get an offline scripted demo, or only connect to `sheepdog demo`?
-2. Homebrew tap name and whether to support Linux in tier 1 now.
-3. Public TestFlight link now, or wait for the App Store?
-4. Repo name for the public launch (`herdr-sheepdog` vs `sheepdog`)?
+1. iOS app: build the offline demo mode; the bar is passing App Store review.
+2. Homebrew: use the existing tap `kccarlos/homebrew-tap`.
+3. TestFlight: publish a public link once the iOS onboarding changes are in.
+4. Repo name stays `herdr-sheepdog`. Once public, CI moves back to GitHub-hosted runners (`gh variable set CI_RUNNER --body ubuntu-latest`).
+
+Order: the two product notes from the harness iteration first, then this plan.
