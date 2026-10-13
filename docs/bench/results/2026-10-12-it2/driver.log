@@ -1,0 +1,30 @@
+19:13 deepseek balance 59.30 CNY
+19:13 start fix r1
+exit 0
+19:31:08 [4/6] workday-zh-evening r1 (:7921): pass (end_call, ) 12 turns 681s ≈ $0.798, total ≈ $3.04
+19:38:27 [5/6] workday-explain-deep r1 (:7922): pass (end_call, ) 14 turns 480s ≈ $0.765, total ≈ $3.80
+19:41:34 [6/6] workday-long-haul r1 (:7921): pass (end_call, ) 14 turns 625s ≈ $0.876, total ≈ $4.68
+19:41 done fix r1 chunk=$4.68 cum=$4.68
+19:42 deepseek balance 58.44 CNY
+19:42 start main r1
+exit 0
+20:00:47 [4/6] workday-interruptions r1 (:7922): pass (end_call, ) 12 turns 631s ≈ $0.818, total ≈ $2.83
+20:06:59 [5/6] workday-explain-deep r1 (:7921): pass (end_call, ) 12 turns 434s ≈ $0.548, total ≈ $3.38
+20:11:31 [6/6] workday-long-haul r1 (:7922): pass (end_call, ) 14 turns 644s ≈ $0.777, total ≈ $4.16
+20:11 done main r1 chunk=$4.16 cum=$8.84
+20:12 deepseek balance 57.60 CNY
+20:12 start fix r2
+exit 0
+20:30:26 [4/6] workday-interruptions r1 (:7921): pass (end_call, ) 12 turns 467s ≈ $0.752, total ≈ $3.15
+20:38:17 [5/6] workday-explain-deep r1 (:7922): pass (end_call, ) 13 turns 693s ≈ $1.011, total ≈ $4.16
+20:39:28 [6/6] workday-long-haul r1 (:7921): pass (end_call, ) 14 turns 541s ≈ $0.777, total ≈ $4.93
+20:39 done fix r2 chunk=$4.93 cum=$13.77
+20:40 deepseek balance 56.46 CNY
+20:40 start main r2
+exit 0
+20:56:35 [4/6] workday-interruptions r1 (:7921): pass (end_call, ) 14 turns 446s ≈ $0.738, total ≈ $2.54
+21:04:03 [5/6] workday-explain-deep r1 (:7922): pass (end_call, ) 14 turns 656s ≈ $1.116, total ≈ $3.65
+21:04:38 [6/6] workday-long-haul r1 (:7921): pass (end_call, ) 14 turns 483s ≈ $0.679, total ≈ $4.33
+21:04 done main r2 chunk=$4.33 cum=$18.1
+cap: cum=18.1 last=4.33
+ALLDONE cum=18.1

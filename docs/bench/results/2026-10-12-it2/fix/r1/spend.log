@@ -1,0 +1,6 @@
+19:19:47 [1/6] workday-scale-ten r1 (:7921): pass (end_call, ) 13 turns 354s ≈ $0.535, total ≈ $0.53
+19:20:11 [2/6] workday-morning-standup r1 (:7922): pass (end_call, ) 12 turns 379s ≈ $0.718, total ≈ $1.25
+19:30:27 [3/6] workday-interruptions r1 (:7922): pass (end_call, ) 14 turns 616s ≈ $0.987, total ≈ $2.24
+19:31:08 [4/6] workday-zh-evening r1 (:7921): pass (end_call, ) 12 turns 681s ≈ $0.798, total ≈ $3.04
+19:38:27 [5/6] workday-explain-deep r1 (:7922): pass (end_call, ) 14 turns 480s ≈ $0.765, total ≈ $3.80
+19:41:34 [6/6] workday-long-haul r1 (:7921): pass (end_call, ) 14 turns 625s ≈ $0.876, total ≈ $4.68

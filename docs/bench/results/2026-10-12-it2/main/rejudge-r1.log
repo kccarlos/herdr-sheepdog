@@ -1,0 +1,9 @@
+rejudged workday-explain-deep r1: fail
+rejudged workday-interruptions r1: fail
+rejudged workday-long-haul r1: fail
+rejudged workday-morning-standup r1: fail
+rejudged workday-scale-ten r1: fail
+rejudged workday-zh-evening r1: fail
+judge claude sonnet: 10m47s, 254 calls
+-- spend judge    sonnet                   calls   254  in   3224720  out   192693  reasoning        0  ≈ $0.0000 --
+-- spend total ≈ $0.0000 (estimate at list prices) --

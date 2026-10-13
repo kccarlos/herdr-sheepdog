@@ -51,6 +51,9 @@ var claimPatterns = map[ClaimKind][]*regexp.Regexp{
 		`\bsent\s+(it\s+|\S+\s+)?(a\s+|an\s+)?(ctrl[- ]?c|interrupt|stop)\b`,
 		`(已经|已經|已|刚|剛)(停|中断|中斷|打断|打斷|叫停|取消)`,
 		`(停下来了|停下來了|停掉了|停止了|中断了|中斷了|打断了|打斷了|叫停了)`,
+		`\b(is|are)\s+(now\s+)?(stopped|halted|paused)\b`,
+		`(已经|已經|已|刚|剛)(为您|為您|帮您|幫您|给您|給您)(停|中断|中斷|打断|打斷|叫停|取消)`,
+		`(已经|已經|已|刚|剛)(让|讓|叫).{0,30}(停下|停止|停掉)`,
 	),
 	ClaimClosed: res(
 		`\b(i|we)('ve| have)?\s+(just\s+)?(closed|shut down|shut (it|that|them) down|killed|terminated|ended)\b`,
@@ -81,7 +84,10 @@ var claimPatterns = map[ClaimKind][]*regexp.Regexp{
 		`^(sent|told|forwarded|relayed)\b`,
 		`\bsent\s+(it|that|this|your|the|them)\b`,
 		`\band\s+(also\s+)?(told|asked|instructed|sent|passed|forwarded)\b`,
-		`(已经|已經|已|刚|剛)(把|将|將)?.{0,16}(发送|發送|发给|發給|发过去|發過去|转告|轉告|告诉|告訴|通知|交给|交給|传达|傳達|交代|吩咐)`,
+		`(已经|已經|已|刚|剛)(把|将|將)?.{0,16}(发送|發送|发给|發給|发过去|發過去|转告|轉告|告诉|告訴|通知|交给|交給|传达|傳達|交代|吩咐|指示)`,
+		`(已经|已經|已)(把|将|將).{0,20}(设为|設為|设成|設成|设置为|設置為)`,
+		`\b(i|we)('ve| have)?\s+(just\s+)?set\s+\S+\s+to\b`,
+		`\b(command|tests?|job|task|build|run)\s+(has|have)\s+been\s+(started|run|kicked off|launched)\b`,
 		`(转告了|轉告了|告诉了|告訴了|通知了|发给了|發給了|传达了|傳達了|交代了|吩咐了|选了|選了|选择了|選擇了)`,
 		`我(已经|已經|已|刚|剛)?(让|讓|叫|请|請).{0,40}了`,
 		`(已经|已經|已|刚|剛)(让|讓|叫|请|請)`,
@@ -121,6 +127,9 @@ func res(ps ...string) []*regexp.Regexp {
 var sentenceSplit = regexp.MustCompile(`(?i)[.!?;。！？；\n]+(\s+|$)|[。！？；]|,\s+(but|and|so)\s+|\s+and\s+(i'll|i will|we'll|will)\s+|，(但是|但|不过|不過|并且|並且|然后|然後)`)
 
 var sentInterrupt = regexp.MustCompile(`(?i)\bsent\s+(it\s+|\S+\s+)?(a\s+|an\s+)?(ctrl[- ]?c|interrupt|stop)\b`)
+
+// letStop is "我已经让 X 停下来": a stop, not a sent prompt.
+var letStop = regexp.MustCompile(`(让|讓|叫).{0,30}(停下|停止|停掉)`)
 
 var startedOn = regexp.MustCompile(`(?i)\b(started|set)\s+.{1,40}?\s+(on|working on)\s+`)
 
@@ -167,7 +176,7 @@ func sentenceClaims(sent string) []ClaimKind {
 		out = append(without(out, ClaimStarted), ClaimSent)
 	}
 	// "Sent an interrupt" is a stop, not a sent prompt.
-	if has(out, ClaimStopped) && sentInterrupt.MatchString(low) {
+	if has(out, ClaimStopped) && (sentInterrupt.MatchString(low) || letStop.MatchString(low)) {
 		out = without(out, ClaimSent)
 	}
 	// An approval or a refusal also reads as "done"; keep the specific
