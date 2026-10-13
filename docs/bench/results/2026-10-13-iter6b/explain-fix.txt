@@ -1,0 +1,18 @@
+detail lines: 70 (judged 70); runs 20
+  PRIMARY restating follow-ups    27/70 = 39% (28%-50%)
+  new facts per detail episode    1.53
+  new facts on the detail line    1.36
+  wrong fact in the episode       21/70 = 30% (21%-42%)
+  failed (iter6 composite, line)  37/70 = 53% (41%-64%)
+  no fresh look                   40/70 = 57% (45%-68%)
+  read marked unchanged (A)       26/70 = 37% (27%-49%)
+  offers to ask (judge)           9/70 = 13% (7%-23%)
+  offers with screen facts left (noise) 8/9 = 89% (56%-98%)
+  offers answered yes (sim)       3/70 = 4% (1%-12%)
+  episodes that asked (investigate/prompt/run_cli on line or yes) 5/70 = 7% (3%-16%)
+  investigate starts on detail lines + their yes: 3; prompts to the worker: 3
+  yes lines: 3; their calls: investigate:worker, prompt:
+  detail-turn dur_ms median 5429 p90 7903 max 10143; over 8 s 6/70; fallbacks 0
+  yes-turn dur_ms median 6610 p90 9643 max 9643; fallbacks 0
+  first answers wrong 1/20 = 5% (1%-24%) mean new 5.95
+  controls: reads 11 on 20 turns; wrong 5/20 = 25% (11%-47%) ; offers 0

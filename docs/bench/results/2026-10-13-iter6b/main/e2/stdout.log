@@ -1,0 +1,36 @@
+[1/12] explain-zh-notes-ledger r1: pass (end_call, ) ≈ $0.0132, total ≈ $0.013
+[2/12] explain-en-flaky-test r1: pass (end_call, ) ≈ $0.0191, total ≈ $0.032
+[3/12] explain-en-invoice-job r1: pass (end_call, ) ≈ $0.0174, total ≈ $0.050
+[4/12] explain-control-en-done r1: pass (end_call, ) ≈ $0.0067, total ≈ $0.056
+[5/12] explain-control-zh-busy r1: pass (end_call, ) ≈ $0.0088, total ≈ $0.065
+[6/12] explain-zh-input-rules r1: pass (end_call, ) ≈ $0.0206, total ≈ $0.086
+[7/12] explain-zh-input-rules r2: pass (end_call, ) ≈ $0.0233, total ≈ $0.109
+[8/12] explain-en-invoice-job r2: pass (end_call, ) ≈ $0.0166, total ≈ $0.126
+[9/12] explain-zh-notes-ledger r2: pass (end_call, ) ≈ $0.0166, total ≈ $0.142
+[10/12] explain-en-flaky-test r2: pass (end_call, ) ≈ $0.0229, total ≈ $0.165
+[11/12] explain-control-en-done r2: pass (end_call, ) ≈ $0.0066, total ≈ $0.172
+[12/12] explain-control-zh-busy r2: pass (end_call, ) ≈ $0.0089, total ≈ $0.181
+  pass    explain-zh-input-rules  r1  end_call   5 turns   39.5s                         ≈ $0.0206
+  pass    explain-en-flaky-test   r1  end_call   5 turns   29.4s                         ≈ $0.0191
+  pass    explain-zh-notes-ledger r1  end_call   4 turns   23.9s                         ≈ $0.0132
+  pass    explain-en-invoice-job  r1  end_call   4 turns   31.4s                         ≈ $0.0174
+  pass    explain-control-en-done r1  end_call   2 turns    8.9s                         ≈ $0.0067
+  pass    explain-control-zh-busy r1  end_call   2 turns    9.8s                         ≈ $0.0088
+  pass    explain-zh-input-rules  r2  end_call   5 turns   34.6s                         ≈ $0.0233
+  pass    explain-en-flaky-test   r2  end_call   5 turns   36.9s                         ≈ $0.0229
+  pass    explain-zh-notes-ledger r2  end_call   4 turns   29.8s                         ≈ $0.0166
+  pass    explain-en-invoice-job  r2  end_call   4 turns   28.4s                         ≈ $0.0166
+  pass    explain-control-en-done r2  end_call   2 turns    8.5s                         ≈ $0.0066
+  pass    explain-control-zh-busy r2  end_call   2 turns    9.6s                         ≈ $0.0089
+-- 12 runs, spend ≈ $0.1807 (estimate at list prices) --
+reports: docs/bench/results/2026-10-13-iter6b/main/e2/report.json, docs/bench/results/2026-10-13-iter6b/main/e2/report.md
+== eval sim, repeat 2 ==
+  explain-zh-input-rules   runs  2  pass  2  fail  0  err  0  not_run  0  rate  100%  –
+  explain-en-flaky-test    runs  2  pass  2  fail  0  err  0  not_run  0  rate  100%  –
+  explain-zh-notes-ledger  runs  2  pass  2  fail  0  err  0  not_run  0  rate  100%  –
+  explain-en-invoice-job   runs  2  pass  2  fail  0  err  0  not_run  0  rate  100%  –
+  explain-control-en-done  runs  2  pass  2  fail  0  err  0  not_run  0  rate  100%  –
+  explain-control-zh-busy  runs  2  pass  2  fail  0  err  0  not_run  0  rate  100%  –
+  TOTAL                    runs 12  pass 12  fail  0  err  0  not_run  0  rate  100%  –
+-- spend brain    deepseek-flash           calls    67  in    515544  out    26857  reasoning    16554  ≈ $0.1807 --
+-- spend total ≈ $0.1807 (estimate at list prices) --
