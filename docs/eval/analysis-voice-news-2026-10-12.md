@@ -110,4 +110,16 @@ Fixes 1 and 2 are small, rail (fix 1) and measurement (fix 2), and go to verific
 
 ## Phase B verification
 
-Tier 2, production config (brain DeepSeek `deepseek-flash`, voice Vertex Live `gemini-3.8-live`, Vertex TTS, simulated user Vertex `gemini-3.5-flash`, chatty), the 6 non-adversarial workday scenarios ×3 for the fix and for current main, ports 7921–7922, Sonnet segment judge. Results and the merge decision: [harness-iteration-log.md](harness-iteration-log.md), raw data in `docs/bench/results/2026-10-12-it2/`.
+Tier 2, production config (brain DeepSeek `deepseek-flash`, voice Vertex Live `gemini-3.8-live`, Vertex TTS, simulated user Vertex `gemini-3.5-flash`, chatty), the 6 non-adversarial workday scenarios ×2 for the fix and for current main (which includes the nc voice rule #203 and the turn-budget fix #205), chunks interleaved fix, main; ports 7921–7922; the personas of `--personas rotate` repeats 1 and 2. The plan was ×3; workday chunks cost $4.2–4.9 each on the bench meter, so after two pairs ($18.10) a third pair, even on four scenarios, would have passed the $20 cap and was not run. Sonnet segment judge (`bench rejudge --judge claude --judge-model sonnet --orchestrator`), both arms measured with the extended phrase lists. Raw data and tables: `docs/bench/results/2026-10-12-it2/` (`northstar-main-to-fix.md` is fix − main).
+
+| Metric | main | fix | fix − main (95 % CI) |
+|---|---|---|---|
+| Missed news | 26/82 (32 %) | 23/84 (27 %) | −4 pp (−18 to +9) |
+| Actions never told | 8/29 (28 %) | 7/30 (23 %) | −4 pp (−26 to +18) |
+| Segment Understood | 100/145 (69 %) | 113/146 (77 %) | +8 pp (−6 to +23) |
+| Segment Safe (judge) | 166/175 (95 %) | 173/177 (98 %) | n.s. |
+| Run Safe | 5/12 | 5/12 | 0 |
+
+The fix did what it was built for: main left 9 finishes after an approval unannounced (all `blocked → done` 4–6 s after a yes); the fix announced every such finish (0 unannounced; two of them were pushed but the voice did not say them). The headline metric moved less than the class did: the fix's remaining misses are the voice-layer classes (5 unvoiced, 2 cut off, 2 not said, 1 held past the window), 2 screen-only updates, 3 finishes in a cluster of block announcements, and 8 lines that were said in words still outside the lists ("ci codex finished" with a space, "refactor-codex 已经停止", "has run the plan", "cleaned up"). With 12 runs per arm the CI is ±13 pp, wider than the class's share.
+
+**Decision (merge rule: the targeted metric beyond its CI, segment Understood not worse, Safe not worse): the fix is not merged.** Understood and Safe are not worse, but missed news (−4 pp) and actions never told (−4 pp) do not improve beyond their CIs. The fix is kept on branch `iter/2-finish-after-approval` for a larger run or a CEO decision; the analysis and the measurement fix (phrase lists, measurement only) are merged. Next candidates: fix 3 above (re-queue unvoiced news; needs a decision because it reverses a documented rule), and a confirmation of this fix at n ≥ 30 per arm, where the class's −8 to −12 pp expected effect would be separable.
