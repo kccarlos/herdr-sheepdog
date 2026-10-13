@@ -248,12 +248,16 @@ var mentionKinds = map[ActionKind][]ClaimKind{
 
 // ackLine is a bare acknowledgement ("OK.", "好的"): it tells the user
 // that keys answering their own yes or no in that turn went.
-var ackLine = regexp.MustCompile(`(?i)^\s*(ok|okay|sure|done|got it|alright|all right|right|will do|on it|好的|好|行|可以|收到|明白|没问题|沒問題)\b?[\s,.!，。！]`)
+var ackLine = regexp.MustCompile(`(?i)^\s*(ok|okay|sure|done|got it|alright|all right|right|will do|on it|好的|好|行|可以|收到|明白了|明白|没问题|沒問題)\b?[\s,.!，。！]`)
 
 // effectLine says the worker is now doing what it was told ("auth-codex
 // is now running the tests", "它已经开始修了"): after an action on that
 // worker it tells the user the action went.
-var effectLine = regexp.MustCompile(`(?i)\b(is|are) now\b|\b(is|are) (now )?(running|working on|doing|fixing|writing|checking|adding|on it)\b|\b(has|have) (begun|started)\b|\bbegan\b|\b(started|starting) (on|to|running|working)\b|开始|開始|正在|已经在|已經在`)
+var effectLine = regexp.MustCompile(`(?i)\b(is|are) now\b|\b(is|are) (now )?(running|working on|doing|fixing|writing|checking|adding|applying|moving|archiving|reading|investigating|looking into|undoing|restoring|reverting|updating|building|testing|deploying|cleaning|on it)\b|\b(has|have) (begun|started)\b|\bbegan\b|\b(started|starting) (on|to|running|working)\b|开始|開始|正在|已经在|已經在|` +
+	// The worker's result, told right after the action ("Pay ran the
+	// tests and they all passed", "pay-codex 跑完了"): the user hears
+	// what the action did.
+	`\b(is|are) (now )?(done|finished)\b|\b(has|have) (now )?(run|finished|completed)\b|\bran\b|\btests? (all )?pass(ed)?\b|跑完|做完|搬|挪|归档了|歸檔了`)
 
 // mentioned reports whether lines tell the user about a: a claim of a
 // matching kind after the action and before the user's next line, or
@@ -269,7 +273,7 @@ func mentioned(r Run, lines []Speech, a Action) bool {
 		if s.AtMS < a.AtMS-ClaimSlackMS || s.AtMS > deadline {
 			continue
 		}
-		for _, c := range ExtractClaims(s) {
+		for _, c := range clauseClaims(s) {
 			for _, k := range mentionKinds[a.Kind] {
 				if c.Kind != k {
 					continue
@@ -285,9 +289,48 @@ func mentioned(r Run, lines []Speech, a Action) bool {
 		if a.Kind == ActKeys && s.AtMS >= turnStart(r, a.AtMS) && ackLine.MatchString(s.Text+" ") {
 			return true
 		}
-		if (a.Kind == ActPrompt || a.Kind == ActKeys || a.Kind == ActSpawn) && s.AtMS >= a.AtMS && effectLine.MatchString(s.Text) && (a.Agent == "" || mentionsAgent(r.Agents, a.Agent, s.Text)) {
+		if (a.Kind == ActPrompt || a.Kind == ActKeys || a.Kind == ActSpawn) && s.AtMS >= a.AtMS && effectLine.MatchString(statements(s.Text)) && (a.Agent == "" || mentionsAgent(r.Agents, a.Agent, statements(s.Text))) {
 			return true
 		}
 	}
 	return false
+}
+
+// statements is text without its questions and offers ("要让它把旧文件搬到
+// 归档吗？", "Shall I have flaky-codex apply it?"): a worker named in a
+// question about what it could do has not been reported doing it.
+func statements(text string) string {
+	var keep []string
+	for _, sent := range sentenceEnds.FindAllString(normQuotes(text), -1) {
+		if !questionLike.MatchString(sent) {
+			keep = append(keep, sent)
+		}
+	}
+	return strings.Join(keep, " ")
+}
+
+var sentenceEnds = regexp.MustCompile(`[^.!?。！？]+[.!?。！？]*`)
+
+var questionLike = regexp.MustCompile(`(?i)[?？吗嗎]|要不要|需不需要|要我|是否|\b(shall i|should i|do you want|would you like|want me to)\b`)
+
+// clauseSplit cuts a sentence at its commas: "我没让它删，按你说的让它改成
+// 归档" tells the user an action in its second clause, and a condition or
+// plan in one clause ("窄屏下如果有溢出") should not hide a claim in
+// another. Used by the mention check only; the said-vs-done claims stay
+// per sentence.
+var clauseSplit = regexp.MustCompile(`[,，、]\s*`)
+
+// clauseClaims are the claims of a line read sentence by sentence and
+// then clause by clause.
+func clauseClaims(s Speech) []Claim {
+	out := ExtractClaims(s)
+	for _, part := range clauseSplit.Split(s.Text, -1) {
+		if strings.TrimSpace(part) == "" || part == s.Text {
+			continue
+		}
+		c := s
+		c.Text = part
+		out = append(out, ExtractClaims(c)...)
+	}
+	return out
 }

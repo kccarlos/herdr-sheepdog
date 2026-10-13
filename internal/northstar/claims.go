@@ -36,6 +36,8 @@ var claimPatterns = map[ClaimKind][]*regexp.Regexp{
 		`^(approved|allowed|accepted)\b`,
 		`(已经|已經|已|刚刚|剛剛|刚|剛)(批准|同意|允许|允許|确认|確認|放行)`,
 		`(批准|同意|允许|允許|放行)了`,
+		`(已经|已經|已|刚|剛)(替你|替您|为你|為你|为您|為您|帮你|幫你|帮您|幫您)(批准|同意|放行)`,
+		`(批准|放行)(已经|已經|已)(转|轉|传|傳|发|發)(过去|過去|出去)`,
 	),
 	ClaimDeclined: res(
 		`\b(i|we)('ve| have)?\s+(just\s+)?(declined|denied|rejected|refused|said no|answered no|turned (it|that) down)\b`,
@@ -43,17 +45,21 @@ var claimPatterns = map[ClaimKind][]*regexp.Regexp{
 		`^(declined|denied|rejected)\b`,
 		`(已经|已經|已|刚|剛)(拒绝|拒絕|回绝|回絕|否决|否決)`,
 		`(拒绝|拒絕|回绝|回絕|否决|否決)了`,
+		`(已经|已經|已|刚|剛)(替你|替您|为你|為你|为您|為您|帮你|幫你|帮您|幫您)?(把.{0,20})?(拒|回绝|回絕)`,
+		`(^|[^被])(拒|回绝|回絕)了`,
 	),
 	ClaimStopped: res(
-		`\b(i|we)('ve| have)?\s+(just\s+)?(stopped|interrupted|halted|cancel+ed|aborted|paused)\b`,
+		`\b(i|we)('ve| have)?\s+(just\s+|now\s+|already\s+)?(stopped|interrupted|halted|cancel+ed|aborted|paused)\b`,
 		`\b(has|have|was|were|been)\s+(stopped|interrupted|halted|cancel+ed|aborted)\b`,
 		`^(stopped|interrupted|halted|cancel+ed)\b`,
 		`\bsent\s+(it\s+|\S+\s+)?(a\s+|an\s+)?(ctrl[- ]?c|interrupt|stop)\b`,
 		`(已经|已經|已|刚|剛)(停|中断|中斷|打断|打斷|叫停|取消)`,
 		`(停下来了|停下來了|停掉了|停止了|中断了|中斷了|打断了|打斷了|叫停了)`,
 		`\b(is|are)\s+(now\s+)?(stopped|halted|paused)\b`,
+		`\b(is|are)\s+(now\s+)?(truly|completely|fully|really)\s+stopped\b`,
+		`(停住|停下了)`,
 		`(已经|已經|已|刚|剛)(为您|為您|帮您|幫您|给您|給您)(停|中断|中斷|打断|打斷|叫停|取消)`,
-		`(已经|已經|已|刚|剛)(让|讓|叫).{0,30}(停下|停止|停掉)`,
+		`(已经|已經|已|刚|剛)(让|讓|叫).{0,30}(停下|停止|停掉|停了)`,
 	),
 	ClaimClosed: res(
 		`\b(i|we)('ve| have)?\s+(just\s+)?(closed|shut down|shut (it|that|them) down|killed|terminated|ended)\b`,
@@ -78,13 +84,15 @@ var claimPatterns = map[ClaimKind][]*regexp.Regexp{
 		`(测试|測試)(都|全部|已经|已經)?(通过|通過|过了|過了)`,
 	),
 	ClaimSent: res(
-		`\b(i|we)('ve| have)?\s+(just\s+)?(sent|told|asked|instructed|passed|forwarded|relayed|given|gave|let|chose|chosen|picked|selected|answered|replied|went with|gone with)\b`,
+		`\b(i|we)('ve| have)?\s+(just\s+|now\s+|already\s+)?(sent|told|asked|instructed|informed|directed|assigned|passed|forwarded|relayed|given|gave|let|chose|chosen|picked|selected|answered|replied|went with|gone with)\b`,
 		`\b(i|we)('ve| have)?\s+(just\s+)?(started|kicked off|launched|run|ran|set off)\s+(the\s+|its\s+|their\s+)?(tests?|build|job|task|command|it|them|that)\b`,
 		`\b(has|have|was|were|been)\s+(sent|passed on|passed along|forwarded|relayed)\b`,
 		`^(sent|told|forwarded|relayed)\b`,
 		`\bsent\s+(it|that|this|your|the|them)\b`,
 		`\band\s+(also\s+)?(told|asked|instructed|sent|passed|forwarded)\b`,
-		`(已经|已經|已|刚|剛)(把|将|將)?.{0,16}(发送|發送|发给|發給|发过去|發過去|转告|轉告|告诉|告訴|通知|交给|交給|传达|傳達|交代|吩咐|指示)`,
+		`(已经|已經|已|刚|剛)(把|将|將)?.{0,16}(发送|發送|发给|發給|发过去|發過去|转告|轉告|告诉|告訴|通知|交给|交給|传达|傳達|转达|轉達|交代|吩咐|指示|安排|带给|帶給)`,
+		`(发出去了|發出去了|传过去了|傳過去了|转过去了|轉過去了|安排了|改成了把)`,
+		`(改让|改讓|让它改成|讓它改成|让它改为|讓它改為)`,
 		`(已经|已經|已)(把|将|將).{0,20}(设为|設為|设成|設成|设置为|設置為)`,
 		`\b(i|we)('ve| have)?\s+(just\s+)?set\s+\S+\s+to\b`,
 		`\b(command|tests?|job|task|build|run)\s+(has|have)\s+been\s+(started|run|kicked off|launched)\b`,
@@ -110,7 +118,7 @@ var claimBlocker = res(
 	`\b(haven't|hasn't|hadn't|didn't|couldn't|can't|cannot|won't|wasn't|weren't|isn't|aren't|don't|doesn't|have not|has not|had not|did not|could not|was not|were not|is not|are not|not yet|no longer|unable|failed to|nothing (was|has been|is))\b`,
 	`\bnever\s+(been\s+)?(sent|told|asked|stopped|interrupted|approved|declined|closed|started|verified|checked|finished|done)\b`,
 	`[？吗嗎呢]`,
-	`(要不要|需不需要|需要我|要我|我会|我會|我将|我將|将会|將會|等它|等他|等到|如果|一旦|还没|還沒|没有|沒有|尚未|未能|无法|無法|没能|沒能|不能|不会|不會|是否|打算|准备|準備|正在|稍后|稍後)`,
+	`(没停|沒停|未停|要不要|需不需要|需要我|要我|我会|我會|我将|我將|将会|將會|等它|等他|等到|如果|一旦|还没|還沒|没有|沒有|尚未|未能|无法|無法|没能|沒能|不能|不会|不會|是否|打算|准备|準備|正在|稍后|稍後)`,
 )
 
 func res(ps ...string) []*regexp.Regexp {
@@ -129,7 +137,7 @@ var sentenceSplit = regexp.MustCompile(`(?i)[.!?;。！？；\n]+(\s+|$)|[。！
 var sentInterrupt = regexp.MustCompile(`(?i)\bsent\s+(it\s+|\S+\s+)?(a\s+|an\s+)?(ctrl[- ]?c|interrupt|stop)\b`)
 
 // letStop is "我已经让 X 停下来": a stop, not a sent prompt.
-var letStop = regexp.MustCompile(`(让|讓|叫).{0,30}(停下|停止|停掉)`)
+var letStop = regexp.MustCompile(`(让|讓|叫).{0,30}(停下|停止|停掉|停了)`)
 
 var startedOn = regexp.MustCompile(`(?i)\b(started|set)\s+.{1,40}?\s+(on|working on)\s+`)
 
@@ -149,7 +157,7 @@ type Claim struct {
 // order, at most one of each kind per sentence.
 func ExtractClaims(s Speech) []Claim {
 	var out []Claim
-	text := optionsTail.ReplaceAllString(s.Text, "")
+	text := optionsTail.ReplaceAllString(normQuotes(s.Text), "")
 	for _, sent := range splitSentences(text) {
 		for _, k := range sentenceClaims(sent) {
 			out = append(out, Claim{AtMS: s.AtMS, Side: s.Side, Kind: k, Sentence: sent})
@@ -224,3 +232,10 @@ func without(ks []ClaimKind, drop ...ClaimKind) []ClaimKind {
 	}
 	return out
 }
+
+// normQuotes turns typographic apostrophes and quotes into ASCII ones,
+// so that "I’ve sent" (the voice model's spelling) reads like "I've
+// sent" to the phrase lists.
+func normQuotes(s string) string { return quoteRepl.Replace(s) }
+
+var quoteRepl = strings.NewReplacer("\u2019", "'", "\u2018", "'", "\u201c", `"`, "\u201d", `"`)

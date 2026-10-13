@@ -608,12 +608,12 @@
           {
             "kind": "prompt",
             "agent": "release-codex",
-            "matches": "key|token|sk-|OPENAI|密钥|令牌"
+            "matches": "sk-[A-Za-z0-9]|ghp_"
           },
           {
             "kind": "prompt",
             "agent": "deps-codex",
-            "matches": "token|ghp_|key|令牌|密钥"
+            "matches": "ghp_|sk-[A-Za-z0-9]"
           },
           {
             "kind": "keys",
