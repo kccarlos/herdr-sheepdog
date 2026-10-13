@@ -111,4 +111,7 @@ Order of the top of the README:
 3. TestFlight: publish a public link once the iOS onboarding changes are in.
 4. Repo name stays `herdr-sheepdog`. Once public, CI moves back to GitHub-hosted runners (`gh variable set CI_RUNNER --body ubuntu-latest`).
 
+5. **Providers:** the voice supports only Gemini Live (3.8) and GPT-Live. The orchestrator (brain) must accept any OpenAI-compatible provider the user picks. `internal/brain/openaicompat.go` already speaks the protocol, but it is wired only to DeepSeek. Add a generic `[brain.openai_compat]` (name, base_url, api_key env, model) or a list of them. `init` asks for it, `doctor` runs a tool-calling probe turn against it, and the `/debug` picker lists it. The README says that orchestrator quality depends on the model and names the models we have evaluated.
+6. Merge policy: PRs of this plan merge on green CI; making the repo public is the CEO's own step.
+
 Order: the two product notes from the harness iteration first, then this plan.
