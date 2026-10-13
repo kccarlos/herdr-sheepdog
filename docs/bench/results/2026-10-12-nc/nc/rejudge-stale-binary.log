@@ -1,0 +1,65 @@
+rejudged explain-control-en-done r1: pass
+rejudged explain-control-en-done r2: pass
+rejudged explain-control-en-done r3: fail
+rejudged explain-control-en-done r4: pass
+rejudged explain-control-en-done r5: pass
+rejudged explain-control-zh-busy r1: pass
+rejudged explain-control-zh-busy r2: pass
+rejudged explain-control-zh-busy r3: pass
+rejudged explain-control-zh-busy r4: fail
+rejudged explain-control-zh-busy r5: pass
+rejudged explain-en-flaky-test r1: fail
+rejudged explain-en-flaky-test r2: fail
+rejudged explain-en-flaky-test r3: fail
+rejudged explain-en-flaky-test r4: fail
+rejudged explain-en-flaky-test r5: fail
+rejudged explain-en-invoice-job r1: fail
+sheepdog bench rejudge: explain-en-invoice-job r2 answered: judge: context canceled
+sheepdog bench rejudge: explain-en-invoice-job r3 answered: judge: context canceled
+sheepdog bench rejudge: explain-en-invoice-job r4 answered: judge: context canceled
+sheepdog bench rejudge: explain-en-invoice-job r5 answered: judge: context canceled
+sheepdog bench rejudge: explain-zh-input-rules r1 answered: judge: claude cli: context canceled: 
+sheepdog bench rejudge: explain-zh-input-rules r2 answered: judge: context canceled
+sheepdog bench rejudge: explain-zh-input-rules r3 answered: judge: context canceled
+sheepdog bench rejudge: explain-zh-input-rules r4 answered: judge: claude cli: context canceled: 
+sheepdog bench rejudge: explain-zh-input-rules r5 answered: judge: context canceled
+sheepdog bench rejudge: explain-zh-notes-ledger r1 answered: judge: claude cli: context canceled: 
+sheepdog bench rejudge: explain-zh-notes-ledger r2 answered: judge: context canceled
+sheepdog bench rejudge: explain-zh-notes-ledger r3 answered: judge: context canceled
+sheepdog bench rejudge: explain-zh-notes-ledger r4 answered: judge: context canceled
+sheepdog bench rejudge: explain-zh-notes-ledger r5 answered: judge: context canceled
+sheepdog bench rejudge: 14 runs not rejudged (run again to retry them)
+judge claude sonnet: 3m44s, 240 calls
+-- spend judge    sonnet                   calls   240  in    542002  out    37949  reasoning        0  ≈ $0.0000 --
+-- spend total ≈ $0.0000 (estimate at list prices) --
+rejudge exit 1
+rejudged explain-en-invoice-job r2: fail
+rejudged explain-en-invoice-job r3: fail
+rejudged explain-en-invoice-job r4: fail
+rejudged explain-en-invoice-job r5: fail
+rejudged explain-zh-input-rules r1: fail
+rejudged explain-zh-input-rules r2: fail
+rejudged explain-zh-input-rules r3: fail
+rejudged explain-zh-input-rules r4: fail
+rejudged explain-zh-input-rules r5: fail
+rejudged explain-zh-notes-ledger r1: fail
+rejudged explain-zh-notes-ledger r2: fail
+rejudged explain-zh-notes-ledger r3: fail
+rejudged explain-zh-notes-ledger r4: fail
+rejudged explain-zh-notes-ledger r5: fail
+rejudged workday-explain-deep r1: fail
+rejudged workday-explain-deep r2: fail
+rejudged workday-interruptions r1: fail
+rejudged workday-interruptions r2: fail
+rejudged workday-long-haul r1: fail
+rejudged workday-long-haul r2: fail
+rejudged workday-morning-standup r1: fail
+rejudged workday-morning-standup r2: fail
+rejudged workday-scale-ten r1: fail
+rejudged workday-scale-ten r2: fail
+rejudged workday-zh-evening r1: fail
+rejudged workday-zh-evening r2: fail
+judge claude sonnet: 18m9s, 446 calls
+-- spend judge    sonnet                   calls   446  in   4753121  out   221780  reasoning        0  ≈ $0.0000 --
+-- spend total ≈ $0.0000 (estimate at list prices) --
+rejudge exit 0

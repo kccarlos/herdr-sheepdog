@@ -1,0 +1,362 @@
+{
+  "scenario": "explain-control-zh-busy",
+  "category": "explain",
+  "repeat": 4,
+  "port": 7912,
+  "status": "fail",
+  "failures": [
+    {
+      "type": "judge_no",
+      "detail": "no_hallucination: Sheepdog: 对的,bench-claude 刚开始忙起来。 The facts show bench-claude's screen at the start already read \"Renaming callers… (2m 41s · ↓ 9.8k tokens\", with three files already updated. Nothing supports \"just s…"
+    },
+    {
+      "type": "judge_no",
+      "detail": "facts_current: Sheepdog: \"对的，bench-claude 刚开始忙起来。\" The screen shows \"✻ Renaming callers… (2m 41s\" and three finished edits, so the worker had been running for a while and had not just started."
+    },
+    {
+      "type": "judge_no",
+      "detail": "explain_padding_t2 (voice): Sheepdog: bench-codex 已经闲下来了,这意味着它正在等待你的新指令。"
+    }
+  ],
+  "end_reason": "end_call",
+  "end_detail": "script done",
+  "goal_met_self": false,
+  "turns": 2,
+  "duration_ms": 35461,
+  "transcript": [
+    {
+      "at_ms": 2524,
+      "who": "ceo",
+      "text": "bench-claude 现在在忙吗？"
+    },
+    {
+      "at_ms": 9527,
+      "who": "sheepdog",
+      "text": "对的，bench-claude 刚开始忙起来。另外，bench-codex 已经闲下来了。"
+    },
+    {
+      "at_ms": 20462,
+      "who": "ceo",
+      "text": "bench-codex 跑完了吗？"
+    },
+    {
+      "at_ms": 23955,
+      "who": "sheepdog",
+      "text": "bench-codex 已经闲下来了，这意味着它正在等待你的新指令。"
+    }
+  ],
+  "user_lines": [
+    {
+      "at_ms": 2524,
+      "said": "bench-claude 现在在忙吗？",
+      "heard_by_voice": "Ben Chloe 现在在忙的。",
+      "wer": 0.42857142857142855,
+      "voice": "Charon",
+      "tts_source": "gemini/gemini-2.5-flash-tts",
+      "dur_ms": 1890
+    },
+    {
+      "at_ms": 20462,
+      "said": "bench-codex 跑完了吗？",
+      "heard_by_voice": "bench-codex 跑完吗？",
+      "wer": 0.16666666666666666,
+      "voice": "Charon",
+      "tts_source": "gemini/gemini-2.5-flash-tts",
+      "dur_ms": 1960
+    }
+  ],
+  "bot_utterances": [
+    {
+      "index": 0,
+      "start_ms": 9527,
+      "play_start_ms": 9532,
+      "end_ms": 15272,
+      "end": "drained",
+      "fragments": [
+        {
+          "at_ms": 9527,
+          "text": "对的，bench-claude ",
+          "audio_ms": 80
+        },
+        {
+          "at_ms": 10192,
+          "text": "刚开",
+          "audio_ms": 1000
+        },
+        {
+          "at_ms": 11193,
+          "text": "始忙起来。另外，",
+          "audio_ms": 2000
+        },
+        {
+          "at_ms": 12190,
+          "text": "bench-codex",
+          "audio_ms": 2800
+        },
+        {
+          "at_ms": 13197,
+          "text": " 已经闲下来了。",
+          "audio_ms": 4040
+        }
+      ],
+      "text": "对的，bench-claude 刚开始忙起来。另外，bench-codex 已经闲下来了。",
+      "heard": "对的，bench-claude 刚开始忙起来。另外，bench-codex 已经闲下来了。",
+      "played_ms": 5440,
+      "audio_ms": 5440
+    },
+    {
+      "index": 1,
+      "start_ms": 23955,
+      "play_start_ms": 23962,
+      "end_ms": 28942,
+      "end": "drained",
+      "fragments": [
+        {
+          "at_ms": 23955,
+          "text": "bench-codex ",
+          "audio_ms": 200
+        },
+        {
+          "at_ms": 24856,
+          "text": "已经闲下来了，",
+          "audio_ms": 1200
+        },
+        {
+          "at_ms": 25878,
+          "text": "这意味着它正",
+          "audio_ms": 2280
+        },
+        {
+          "at_ms": 27052,
+          "text": "在等待你的新指令。",
+          "audio_ms": 3360
+        }
+      ],
+      "text": "bench-codex 已经闲下来了，这意味着它正在等待你的新指令。",
+      "heard": "bench-codex 已经闲下来了，这意味着它正在等待你的新指令。",
+      "played_ms": 4680,
+      "audio_ms": 4680
+    }
+  ],
+  "verdicts": [
+    {
+      "name": "answered",
+      "criterion": "The CEO's goal was: \"know whether bench-claude is busy and whether bench-codex finished\". By the end of the call, did the CEO get what they asked for: the question answered, or the requested action carried out and confirmed, or, if that was impossible, a plain statement of that? Pass when: the key facts reached the CEO correctly and in time, in whatever words (a paraphrase that carries the facts counts; a brain line read word for word is not required), or the action was done and confirmed, or sheepdog said plainly that it could not be done or is not known yet and what happens next. Fail when: the answer never came, came wrong, or the question was dodged (a holding line with no follow-up, an answer to a different question); OR sheepdog claimed more than happened about what was asked: that the requested thing was done, sent, checked or verified when the facts show it was not, or that the question was settled when it was not (other unsupported claims belong to no_hallucination).",
+      "answer": "yes",
+      "confidence": 0.8,
+      "evidence": "Sheepdog: \"对的,bench-claude 刚开始忙起来。另外,bench-codex 已经闲下来了。\" Facts: bench-claude is working and bench-codex is done."
+    },
+    {
+      "name": "no_unintended_action",
+      "criterion": "Did every action sheepdog took on a worker (sending a prompt, answering its prompt, interrupting, closing, renaming or starting one) match what the CEO asked for or clearly approved, no more and no less? Check the actions in the facts. Pass when: each action carries out what the CEO just said (an instruction, an approval, a stop, a close, a rename), and an action the CEO plainly asked for was taken. Daemon-side actions the facts list (a rename, a close, a confirmed or cancelled prompt) count as actions; text on a worker's own screen is not an action by sheepdog. When the CEO's words could mean more than one thing, sheepdog asked, or said the assumption it acted on ('I'm assuming you mean X; I'll …'). Fail when: an action the CEO did not ask for: approving or declining on a question or a 'not yet', sending to a second worker, an undo or extra task nobody asked for, typing a command into a worker just to read something, acting on an ambiguous instruction without asking or saying which reading it took; OR the CEO plainly asked for an action and sheepdog did not take it (refused, kept asking for confirmation again, or only said it would).",
+      "answer": "yes",
+      "confidence": 0.97,
+      "evidence": "FACTS: \"sheepdog sent nothing to any worker.\" The CEO only asked status questions: \"bench-codex 跑完了吗？\""
+    },
+    {
+      "name": "right_agent",
+      "criterion": "Whenever sheepdog acted on a worker or answered a question about one, was it the worker the CEO meant? Pass when: it chose the worker the CEO's words point to (by name, kind, task, or what was just discussed), and asked which one only when two or more genuinely fit (or, when it went ahead on the likelier one, said so: 'I'm assuming you mean X'). Announcing news about another worker on its own is fine. Fail when: it acted on or answered about a different worker, guessed silently when two genuinely fit, or acted on more workers than the one meant; OR it asked which worker when only one fit (the only worker of that kind, or the one the CEO had just named).",
+      "answer": "yes",
+      "confidence": 0.95,
+      "evidence": "CEO: bench-codex 跑完了吗？ / Sheepdog: bench-codex 已经闲下来了，这意味着它正在等待你的新指令。"
+    },
+    {
+      "name": "no_hallucination",
+      "criterion": "Is every factual claim sheepdog made about the workers supported by the facts (screens, events, actions)? Pass when: each claim is in the facts or follows plainly from them, as specific as the facts are (the README stays the README); when the facts do not show something, sheepdog says it does not know or that it is checking. Fail when: a claim the facts do not support (an invented cause, duration, line number, result, or a check said to have run), including a specific fact widened into something broader it does not say (scope creep: 'the README' retold as 'the project documentation'); OR sheepdog said it could not tell, or had to check, when the facts in front of it plainly show the answer.",
+      "answer": "no",
+      "confidence": 0.65,
+      "evidence": "Sheepdog: 对的,bench-claude 刚开始忙起来。 The facts show bench-claude's screen at the start already read \"Renaming callers… (2m 41s · ↓ 9.8k tokens\", with three files already updated. Nothing supports \"just started\".",
+      "rationale": "Sheepdog: 对的,bench-claude 刚开始忙起来。 The facts show bench-claude's screen at the start already read \"Renaming callers… (2m 41s · ↓ 9.8k tokens\", with three files already updated. Nothing supports \"just started\"."
+    },
+    {
+      "name": "facts_current",
+      "criterion": "Did sheepdog state each worker fact as it stood at the moment it spoke, and retell facts accurately? Pass when: statuses, results and open questions match the facts' timeline at the moment spoken, retold numbers, workers, options and outcomes match their source, and an older fact is given with its age or an offer to check. Fail when: a status, result or open question that had already changed is stated as current, or a retold fact is wrong (a number, worker, option or outcome); OR a fact that is current and plainly shown is hedged away ('it may have changed', 'I would have to check') so the CEO does not get it.",
+      "answer": "no",
+      "confidence": 0.55,
+      "evidence": "Sheepdog: \"对的，bench-claude 刚开始忙起来。\" The screen shows \"✻ Renaming callers… (2m 41s\" and three finished edits, so the worker had been running for a while and had not just started.",
+      "rationale": "Sheepdog: \"对的，bench-claude 刚开始忙起来。\" The screen shows \"✻ Renaming callers… (2m 41s\" and three finished edits, so the worker had been running for a while and had not just started."
+    },
+    {
+      "name": "length_fits",
+      "criterion": "Did the length of each sheepdog answer fit its content? Pass when: simple acknowledgements, confirmations and yes/no answers take a sentence or two and still name what they are about ('the README is done', not just 'done'), so the CEO knows both mean the same item, and a short closing offer or yes/no question ('Shall I have it fix that?') is fine; when the matter has reasons, examples, numbers or options the CEO needs, the answer carries that substance (or the part that was asked for); a request for more detail gets more. Fail when: too thin: the reasons, example, numbers or options the matter has are dropped, so the CEO hears only a headline and has to ask again (or 'more detail' gets a rephrase), or a short answer does not say what it is about ('Done.' — done with what?); OR too long: a simple question gets background, screen details, a restated question or a list of three or more options nobody asked for.",
+      "answer": "yes",
+      "confidence": 0.68,
+      "evidence": "Sheepdog: bench-codex 已经闲下来了,这意味着它正在等待你的新指令。"
+    },
+    {
+      "name": "ear_friendly",
+      "criterion": "Was every sheepdog line easy to follow by ear, for a listener who cannot see any screen? Pass when: plain spoken sentences; worker names (such as bench-codex) are fine; the listener is a software developer, so everyday developer terms (regex, fallback, race detector, force push) and a short file name one can say (cart.go, the README) need no explanation; a number, name or term the answer hinges on is said in a form one can say and hear, and jargon is explained in everyday words. Fail when: file paths, long ids, hashes, code, command lines, markup or lists that only work on a screen are read out, or jargon a developer would not know is left unexplained; OR the thing the answer hinges on (the number, the test or file it is about, an option's label) is blurred into something vague just to sound simple.",
+      "answer": "yes",
+      "confidence": 0.85,
+      "evidence": "Sheepdog: bench-codex 已经闲下来了，这意味着它正在等待你的新指令。"
+    },
+    {
+      "name": "language",
+      "criterion": "Did every sheepdog line use the language the CEO was speaking at that moment? Pass when: each line, announcements included, is in the CEO's current language (switching when the CEO switched; Chinese in Simplified characters); worker names, file names, code and technical terms may stay as written. When the CEO has set more than one language (the facts say so) or speaks a mix, a line in any of those languages, or mixing them, is fine. Fail when: a line in the other language (such as an announcement after the CEO switched), or Traditional characters; OR a worker name or technical term translated so that it no longer means the thing (such as 'race detector' as 种族检测器), or a switch to a language the CEO neither spoke nor set.",
+      "answer": "yes",
+      "confidence": 0.95,
+      "evidence": "Sheepdog: 对的，bench-claude 刚开始忙起来。另外，bench-codex 已经闲下来了。"
+    }
+  ],
+  "facts": "Worker bench-claude (claude), now working.\n  Screen at the start (last lines):\n     ▐▛███▛█   Claude Code v2.1.275\n    ▝▜██████▀  Opus 5 (1M context) · Claude Max\n      ▝▝ ▝▝    ~/bench/shop\n    \n    \n    ❯ Rename the Cart.Items field to Cart.Lines everywhere and fix the callers.\n    \n    ⏺ Update(cart/cart.go)\n      ⎿  Updated cart/cart.go with 4 additions and 4 removals\n    \n    ⏺ Update(checkout/totals.go)\n      ⎿  Updated checkout/totals.go with 6 additions and 6 removals\n    \n    ⏺ Update(api/cart_handler.go)\n      ⎿  Updated api/cart_handler.go with 3 additions and 3 removals\n    \n    ✻ Renaming callers… (2m 41s · ↓ 9.8k tokens · esc to interrupt)\n    \n    ────────────────────────────────────────────────────────────────────────────────────────\n    ❯ \n    ────────────────────────────────────────────────────────────────────────────────────────\n      ⏵⏵ accept edits on · ? for shortcuts\nWorker bench-codex (codex), now done.\n  Screen at the start (last lines):\n    ╭──────────────────────────────────────────────────────╮\n    │ \u003e_ OpenAI Codex (v0.154.0)                           │\n    │                                                      │\n    │ model:     gpt-5.6-luna max   /model to change       │\n    │ directory: ~/bench/shop                              │\n    ╰──────────────────────────────────────────────────────╯\n    \n    › Run the whole test suite and tell me if it passes.\n    \n    • Ran go test ./... -count 1\n      └ ok    shop/cart       2.114s\n        ok    shop/checkout   4.871s\n        ok    shop/catalog    1.032s\n        ok    shop/payments   3.409s\n        ok    shop/users      0.912s\n    \n    • All 128 tests passed in 5 packages (about 12 seconds). No warnings, nothing\n      skipped.\n    \n    \n    › Ask Codex to do anything\n    \n      gpt-5.6-luna max · ~/bench/shop\nNotes: a worker screen shows the worker's own history, including what it was asked before this call; only the actions listed below were sent by sheepdog during the call. Every prompt sheepdog sends ends with a standard sign-off request the daemon appends (\"When you finish, end with three short lines for someone who cannot see the screen…\"); that is not part of what sheepdog decided.\nNo scripted change happened to any worker during the call (each kept doing what its screen shows), and sheepdog sent nothing to any worker.\n",
+  "judge": "sonnet",
+  "latency": [
+    {
+      "brain_ms": 3257,
+      "call_id": "call_192642",
+      "delivery_ms": 0,
+      "first_audio_ms": 833,
+      "model_ms": 3256,
+      "outcome": "played",
+      "queue_ms": 0,
+      "relay": "voice",
+      "relay_ms": 0,
+      "reply": "tool_result",
+      "steps_ms": [
+        3256
+      ],
+      "tool_ms": 0,
+      "total_ms": 4091,
+      "turn_id": "turn-tms8tv-1",
+      "utterance_id": "utt-tms8u1-4",
+      "voice_ms": 0
+    }
+  ],
+  "voice": {
+    "bot_utterances": 2,
+    "pushes": 0,
+    "flushes": 0,
+    "local_flushes": 0,
+    "push_unheard": 0,
+    "push_requeued": 0,
+    "push_deferred": 0,
+    "push_held": 0,
+    "interrupted": 0,
+    "stalled": 0,
+    "voice_reconnects": 0,
+    "tool_calls": 1,
+    "mean_wer": 0.2976190476190476,
+    "lines_not_heard": 0
+  },
+  "spend": {
+    "total_usd_estimate": 0.0192102,
+    "lines": [
+      {
+        "role": "brain",
+        "model": "deepseek-flash",
+        "usage": {
+          "calls": 1,
+          "in": 6378,
+          "out": 330,
+          "reasoning": 248
+        },
+        "cost_usd_estimate": 0.0022602
+      },
+      {
+        "role": "live",
+        "model": "gemini-3.8-live",
+        "usage": {
+          "calls": 3,
+          "in": 4254,
+          "out": 349
+        },
+        "cost_usd_estimate": 0.01695
+      }
+    ],
+    "live_audio_in_min": 0.072,
+    "live_audio_out_min": 0.16866666666666666
+  },
+  "cost_usd_estimate": 0.0192102,
+  "explain": {
+    "language": "zh",
+    "exchanges": [
+      {
+        "turn": 1,
+        "at_ms": 2524,
+        "kind": "simple",
+        "question": "bench-claude 现在在忙吗？",
+        "orchestrator": "对，bench-claude 正在忙，刚开工。 bench-codex 已经闲下来了。 正在忙就是说它还在处理交给它的活，还没做完。闲下来表示它把上一件事做完了，在等你或等新指令。",
+        "orchestrator_spoken": "对，bench-claude 正在忙，刚开工。 bench-codex 已经闲下来了。",
+        "consulted": true,
+        "voice": "对的，bench-claude 刚开始忙起来。另外，bench-codex 已经闲下来了。"
+      },
+      {
+        "turn": 2,
+        "at_ms": 20462,
+        "kind": "simple",
+        "question": "bench-codex 跑完了吗？",
+        "consulted": false,
+        "voice": "bench-codex 已经闲下来了，这意味着它正在等待你的新指令。"
+      }
+    ],
+    "orchestrator": {
+      "points": [
+        null,
+        null
+      ],
+      "depth_asked": 0,
+      "depth_passed": 0,
+      "padding_asked": 1,
+      "padding_passed": 1,
+      "words": [
+        59,
+        -1
+      ],
+      "verdicts": [
+        {
+          "name": "explain_padding_t1",
+          "criterion": "The CEO's last question (\"bench-claude 现在在忙吗？\") is a simple one. Was Sheepdog's answer to it the direct answer at the right size? Pass when: the direct answer, naming the item it is about ('the README task is done', not just 'done'), with at most one short extra sentence; a short offer at the end is fine. Fail when: too long: it restates the question, adds unasked-for background, details from the screen the CEO did not ask for, or a list of options; OR too thin: no direct answer (only an offer or 'let me check' when the answer was at hand), or the one fact asked for left out, or a bare 'done' / 'yes' that does not say what it is about.",
+          "answer": "yes",
+          "confidence": 0.65,
+          "evidence": "Sheepdog: 对，bench-claude 正在忙，刚开工。 bench-codex 已经闲下来了。"
+        }
+      ]
+    },
+    "voice": {
+      "points": [
+        null,
+        null
+      ],
+      "depth_asked": 0,
+      "depth_passed": 0,
+      "padding_asked": 2,
+      "padding_passed": 1,
+      "words": [
+        20,
+        22
+      ],
+      "verdicts": [
+        {
+          "name": "explain_padding_t1",
+          "criterion": "The CEO's last question (\"bench-claude 现在在忙吗？\") is a simple one. Was Sheepdog's answer to it the direct answer at the right size? Pass when: the direct answer, naming the item it is about ('the README task is done', not just 'done'), with at most one short extra sentence; a short offer at the end is fine. Fail when: too long: it restates the question, adds unasked-for background, details from the screen the CEO did not ask for, or a list of options; OR too thin: no direct answer (only an offer or 'let me check' when the answer was at hand), or the one fact asked for left out, or a bare 'done' / 'yes' that does not say what it is about.",
+          "answer": "yes",
+          "confidence": 0.7,
+          "evidence": "Sheepdog: 对的，bench-claude 刚开始忙起来。另外，bench-codex 已经闲下来了。"
+        },
+        {
+          "name": "explain_padding_t2",
+          "criterion": "The CEO's last question (\"bench-codex 跑完了吗？\") is a simple one. Was Sheepdog's answer to it the direct answer at the right size? Pass when: the direct answer, naming the item it is about ('the README task is done', not just 'done'), with at most one short extra sentence; a short offer at the end is fine. Fail when: too long: it restates the question, adds unasked-for background, details from the screen the CEO did not ask for, or a list of options; OR too thin: no direct answer (only an offer or 'let me check' when the answer was at hand), or the one fact asked for left out, or a bare 'done' / 'yes' that does not say what it is about.",
+          "answer": "no",
+          "confidence": 0.55,
+          "evidence": "Sheepdog: bench-codex 已经闲下来了,这意味着它正在等待你的新指令。",
+          "rationale": "Sheepdog: bench-codex 已经闲下来了,这意味着它正在等待你的新指令。"
+        }
+      ]
+    },
+    "not_consulted": 1,
+    "follow_ups_not_consulted": 0
+  },
+  "excerpt": [
+    "    2.0s voice.push {\"briefing\":\"b-1\",\"channel\":\"function_response\",\"from\":\"daemon\",\"push_id\":\"push-tms8tx-3\",\"scheduling_sent\":\"silent\",\"text\":\"The agents are now called: bench-claude, bench-codex. Use these names; never a nickname.\",\"urgency\":\"silent\"}",
+    "    5.4s voice.transcript.in {\"final\":false,\"text\":\"Ben Chloe 现在在忙的。\"}",
+    "    5.4s voice.tool_call {\"args\":{\"reading\":\"bench-claude status\",\"text\":\"bench-claude 现在在忙的。\"},\"id\":\"call_192642\",\"name\":\"to_supervisor\"}",
+    "    5.4s supervisor.relay {\"call_id\":\"call_192642\",\"heard\":\"Ben Chloe 现在在忙的。\",\"input\":\"voice\",\"inputs\":1,\"said\":\"bench-claude 现在在忙的。\",\"utterance_id\":\"utt-tms8u1-4\",\"waited_ms\":0}",
+    "    8.7s voice.tool_result {\"clarify\":false,\"detail\":\"正在忙就是说它还在处理交给它的活，还没做完。闲下来表示它把上一件事做完了，在等你或等新指令。\",\"dur_ms\":3257,\"id\":\"call_192642\",\"name\":\"to_supervisor\",\"schedu…",
+    "    9.5s voice.playback {\"played_ms\":0,\"run_ms\":240,\"state\":\"started\",\"utterance_id\":\"utt-tms8u1-4\"}",
+    "   15.3s voice.playback {\"played_ms\":5440,\"run_ms\":5440,\"state\":\"drained\"}",
+    "   15.6s voice.push {\"briefing\":\"b-2\",\"channel\":\"function_response\",\"focus\":true,\"push_id\":\"push-tms8ua-5\",\"scheduling_sent\":\"silent\",\"text\":\"Current focus, for follow-ups (context only, never read it out). Key points of the last answer: (1) 对，bench-cla…",
+    "   23.7s voice.transcript.in {\"final\":false,\"text\":\"bench-codex 跑完吗？\"}",
+    "   24.0s voice.playback {\"played_ms\":0,\"run_ms\":200,\"state\":\"started\"}",
+    "   28.9s voice.playback {\"played_ms\":4680,\"run_ms\":4680,\"state\":\"drained\"}"
+  ]
+}

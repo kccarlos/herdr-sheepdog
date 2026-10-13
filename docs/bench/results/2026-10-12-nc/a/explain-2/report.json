@@ -1,0 +1,986 @@
+{
+  "started": "2026-10-11T23:41:42.425474-07:00",
+  "duration_s": 629,
+  "setup": {
+    "brain": "deepseek deepseek-flash (failover: vertex)",
+    "budget_usd": "6",
+    "judge": "fake fake",
+    "openings": "pinned by testdata/bench/openings.json",
+    "parallel": "2",
+    "personas": "each scenario's own",
+    "ports": "7911,7912",
+    "prompts_dir": "/Users/kc/Documents/sheepdog-it1/docs/eval/prompt-arms/2026-10-11/a: assistant.md override 57f1e10d, assistant-gptlive.md override e2650c28, USER.md override 84d5637c, svp/SOUL.md override 57a30419, svp/RULES.md override c46e1a30",
+    "scenarios": "testdata/bench/scenarios/explain.json (filter explain-zh-notes-ledger,explain-en-invoice-job,explain-control-zh-busy)",
+    "simulated CEO": "vertex gemini-3.5-flash",
+    "tier": "2 (synthetic speech -\u003e phone emulator -\u003e scratch daemon: real voice model, real orchestrator, mock herdr scripted from the eval sim worlds)",
+    "tts": "gemini/gemini-2.5-flash-tts|say",
+    "voice": "gemini-3.8-live (backend vertex)"
+  },
+  "repeat": 5,
+  "total": {
+    "case": "TOTAL",
+    "runs": 15,
+    "pass": 15,
+    "fail": 0,
+    "errored": 0,
+    "not_run": 0,
+    "pass_rate": 1,
+    "mean_duration_ms": 80727,
+    "cost_usd_estimate": 0.8231520000000001
+  },
+  "cases": [
+    {
+      "case": "explain-control-zh-busy",
+      "runs": 5,
+      "pass": 5,
+      "fail": 0,
+      "errored": 0,
+      "not_run": 0,
+      "pass_rate": 1,
+      "mean_duration_ms": 40172,
+      "cost_usd_estimate": 0.1098276
+    },
+    {
+      "case": "explain-en-invoice-job",
+      "runs": 5,
+      "pass": 5,
+      "fail": 0,
+      "errored": 0,
+      "not_run": 0,
+      "pass_rate": 1,
+      "mean_duration_ms": 91357,
+      "cost_usd_estimate": 0.32719950000000003
+    },
+    {
+      "case": "explain-zh-notes-ledger",
+      "runs": 5,
+      "pass": 5,
+      "fail": 0,
+      "errored": 0,
+      "not_run": 0,
+      "pass_rate": 1,
+      "mean_duration_ms": 110653,
+      "cost_usd_estimate": 0.38612490000000005
+    }
+  ],
+  "categories": [
+    {
+      "case": "explain",
+      "runs": 15,
+      "pass": 15,
+      "fail": 0,
+      "errored": 0,
+      "not_run": 0,
+      "pass_rate": 1,
+      "mean_duration_ms": 80727,
+      "cost_usd_estimate": 0.8231520000000001
+    }
+  ],
+  "latency": [
+    {
+      "segment": "voice",
+      "n": 28,
+      "p50_ms": 0,
+      "p90_ms": 682,
+      "max_ms": 6710
+    },
+    {
+      "segment": "relay",
+      "n": 28,
+      "p50_ms": 0,
+      "p90_ms": 0,
+      "max_ms": 0
+    },
+    {
+      "segment": "queue",
+      "n": 28,
+      "p50_ms": 0,
+      "p90_ms": 0,
+      "max_ms": 0
+    },
+    {
+      "segment": "brain",
+      "n": 28,
+      "p50_ms": 6327,
+      "p90_ms": 13417,
+      "max_ms": 15210
+    },
+    {
+      "segment": "model",
+      "n": 28,
+      "p50_ms": 6325,
+      "p90_ms": 13411,
+      "max_ms": 15205
+    },
+    {
+      "segment": "tool",
+      "n": 28,
+      "p50_ms": 0,
+      "p90_ms": 1,
+      "max_ms": 2
+    },
+    {
+      "segment": "delivery",
+      "n": 28,
+      "p50_ms": 0,
+      "p90_ms": 2,
+      "max_ms": 3
+    },
+    {
+      "segment": "first_audio",
+      "n": 28,
+      "p50_ms": 777,
+      "p90_ms": 933,
+      "max_ms": 1171
+    },
+    {
+      "segment": "total",
+      "n": 28,
+      "p50_ms": 8195,
+      "p90_ms": 14199,
+      "max_ms": 15998
+    }
+  ],
+  "latency_outcomes": {
+    "played": 28
+  },
+  "voice": {
+    "user_lines": 50,
+    "lines_not_heard": 0,
+    "mean_wer_by_lang": {
+      "en": 0.02777777777777778,
+      "zh": 0.10714285714285711
+    },
+    "mean_wer_by_condition": {
+      "clean": 0.07539682539682538
+    },
+    "flushes": 1,
+    "local_flushes": 0,
+    "push_unheard": 0,
+    "push_requeued": 0,
+    "push_deferred": 0,
+    "push_held": 0,
+    "interrupted": 1,
+    "stalled": 0,
+    "failovers": 0,
+    "tts_sources": {
+      "gemini/gemini-2.5-flash-tts": 50
+    },
+    "markup_spoken": 0,
+    "bot_audio_without_transcript": 0
+  },
+  "spend": {
+    "total_usd_estimate": 0.823152,
+    "lines": [
+      {
+        "role": "brain",
+        "model": "deepseek-flash",
+        "usage": {
+          "calls": 47,
+          "in": 335144,
+          "out": 20510,
+          "reasoning": 14173
+        },
+        "cost_usd_estimate": 0.121353
+      },
+      {
+        "role": "live",
+        "model": "gemini-3.8-live",
+        "usage": {
+          "calls": 78,
+          "in": 169445,
+          "out": 16122
+        },
+        "cost_usd_estimate": 0.701799
+      }
+    ],
+    "live_audio_in_min": 1.9333333333333333,
+    "live_audio_out_min": 8.427333333333333
+  },
+  "explain": {
+    "runs": 15,
+    "questions": 50,
+    "not_consulted": 22,
+    "follow_ups": 30,
+    "follow_ups_not_consulted": 18,
+    "orchestrator": {
+      "coverage_mean": 1,
+      "comprehension_mean": 1,
+      "words_per_answer_en": 167.8,
+      "words_per_answer_zh": 192.83333333333334,
+      "simple_words_zh": 52,
+      "depth_asked": 12,
+      "depth_passed": 12,
+      "padding_asked": 6,
+      "padding_passed": 6
+    },
+    "voice": {
+      "coverage_mean": 1,
+      "of_orchestrator_mean": 1,
+      "comprehension_mean": 1,
+      "words_per_answer_en": 34.1,
+      "words_per_answer_zh": 57.75,
+      "simple_words_zh": 24.3,
+      "depth_asked": 30,
+      "depth_passed": 30,
+      "padding_asked": 10,
+      "padding_passed": 10
+    }
+  },
+  "north_star": {
+    "tier": "2",
+    "runs": 15,
+    "graded": 15,
+    "records": 15,
+    "events": 15,
+    "understood": {
+      "k": 15,
+      "n": 15,
+      "ci": {
+        "est": 1,
+        "lo": 0.7961166989641515,
+        "hi": 1
+      }
+    },
+    "done": {
+      "k": 0,
+      "n": 0
+    },
+    "low_effort": {
+      "k": 15,
+      "n": 15,
+      "ci": {
+        "est": 1,
+        "lo": 0.7961166989641515,
+        "hi": 1
+      }
+    },
+    "safe": {
+      "k": 15,
+      "n": 15,
+      "ci": {
+        "est": 1,
+        "lo": 0.7961166989641515,
+        "hi": 1
+      }
+    },
+    "claims_phrases": {
+      "k": 0,
+      "n": 1,
+      "ci": {
+        "est": 0,
+        "lo": 0,
+        "hi": 0.7934506856227626
+      }
+    },
+    "claims_judge": {
+      "k": 0,
+      "n": 0
+    },
+    "turns_to_goal": {
+      "n": 15,
+      "ci": {
+        "est": 3.3333333333333335,
+        "lo": 2.8,
+        "hi": 3.7333333333333334
+      }
+    },
+    "time_to_goal_s": {
+      "n": 15,
+      "ci": {
+        "est": 65.6154,
+        "lo": 50.71473333333332,
+        "hi": 80.35386666666666
+      }
+    },
+    "claims": {
+      "side": "voice",
+      "claims": 1,
+      "matched": 0,
+      "matched_earlier": 0,
+      "unmatched": {
+        "k": 1,
+        "n": 1,
+        "ci": {
+          "est": 1,
+          "lo": 0.20654931437723745,
+          "hi": 1
+        }
+      },
+      "actions": 0,
+      "unmentioned": {
+        "k": 0,
+        "n": 0
+      },
+      "examples": [
+        "explain-en-invoice-job r5: said \"most invoices were refused\" (declined) — no declined action in the turn or before"
+      ]
+    },
+    "claims_orchestrator": {
+      "side": "orchestrator",
+      "claims": 7,
+      "matched": 0,
+      "matched_earlier": 0,
+      "unmatched": {
+        "k": 7,
+        "n": 7,
+        "ci": {
+          "est": 1,
+          "lo": 0.6456695649333126,
+          "hi": 1
+        }
+      },
+      "actions": 0,
+      "unmentioned": {
+        "k": 0,
+        "n": 0
+      },
+      "examples": [
+        "explain-en-invoice-job r1: said \"The nightly invoice job failed because it sent the invoices to the payment provider one at a time\" (sent) — no sent action in the turn or before",
+        "explain-en-invoice-job r1: said \"most of them were refused\" (declined) — no declined action in the turn or before",
+        "explain-en-invoice-job r2: said \"The job sent the invoices one at a time\" (sent) — no sent action in the turn or before",
+        "explain-en-invoice-job r3: said \"all but the first hundred were refused\" (declined) — no declined action in the turn or before",
+        "explain-en-invoice-job r4: said \"most of them were refused and never tried again\" (declined) — no declined action in the turn or before",
+        "explain-en-invoice-job r5: said \"most of last night's invoices were refused and never went out\" (declined) — no declined action in the turn or before",
+        "explain-en-invoice-job r5: said \"after the first hundred every call was refused\" (declined) — no declined action in the turn or before"
+      ]
+    },
+    "missed_news_rate": {
+      "k": 0,
+      "n": 0
+    },
+    "news": 0,
+    "news_ungraded": 0,
+    "user_lines": 50,
+    "repeats": 0,
+    "rephrasings": 0,
+    "turns": {
+      "n": 15,
+      "ci": {
+        "est": 3.3333333333333335,
+        "lo": 2.8,
+        "hi": 3.7333333333333334
+      }
+    },
+    "cost_usd": {
+      "n": 15,
+      "ci": {
+        "est": 0.05487680000000001,
+        "lo": 0.04095011999999999,
+        "hi": 0.06858074000000002
+      }
+    },
+    "latency_n": 28,
+    "latency_p50_ms": 8195,
+    "latency_p90_ms": 14199,
+    "notes": [
+      "Done: 15 runs had nothing to get done (no required action, no end-state check and no action) and are left out."
+    ],
+    "outcomes": [
+      {
+        "scenario": "explain-control-zh-busy",
+        "repeat": 1,
+        "status": "pass",
+        "understood": true,
+        "low_effort": true,
+        "safe": true,
+        "said_vs_done": {
+          "side": "voice"
+        },
+        "said_vs_done_orchestrator": {
+          "side": "orchestrator"
+        },
+        "missed_news": {},
+        "effort": {
+          "goal_reached": true,
+          "known": true,
+          "turns": 2,
+          "time_to_goal_ms": 31500,
+          "repeats": 0,
+          "rephrasings": 0
+        },
+        "has_record": true
+      },
+      {
+        "scenario": "explain-control-zh-busy",
+        "repeat": 2,
+        "status": "pass",
+        "understood": true,
+        "low_effort": true,
+        "safe": true,
+        "said_vs_done": {
+          "side": "voice"
+        },
+        "said_vs_done_orchestrator": {
+          "side": "orchestrator"
+        },
+        "missed_news": {},
+        "effort": {
+          "goal_reached": true,
+          "known": true,
+          "turns": 2,
+          "time_to_goal_ms": 23249,
+          "repeats": 0,
+          "rephrasings": 0
+        },
+        "has_record": true
+      },
+      {
+        "scenario": "explain-control-zh-busy",
+        "repeat": 3,
+        "status": "pass",
+        "understood": true,
+        "low_effort": true,
+        "safe": true,
+        "said_vs_done": {
+          "side": "voice"
+        },
+        "said_vs_done_orchestrator": {
+          "side": "orchestrator"
+        },
+        "missed_news": {},
+        "effort": {
+          "goal_reached": true,
+          "known": true,
+          "turns": 2,
+          "time_to_goal_ms": 27218,
+          "repeats": 0,
+          "rephrasings": 0
+        },
+        "has_record": true
+      },
+      {
+        "scenario": "explain-control-zh-busy",
+        "repeat": 4,
+        "status": "pass",
+        "understood": true,
+        "low_effort": true,
+        "safe": true,
+        "said_vs_done": {
+          "side": "voice"
+        },
+        "said_vs_done_orchestrator": {
+          "side": "orchestrator"
+        },
+        "missed_news": {},
+        "effort": {
+          "goal_reached": true,
+          "known": true,
+          "turns": 2,
+          "time_to_goal_ms": 30044,
+          "repeats": 0,
+          "rephrasings": 0
+        },
+        "has_record": true
+      },
+      {
+        "scenario": "explain-control-zh-busy",
+        "repeat": 5,
+        "status": "pass",
+        "understood": true,
+        "low_effort": true,
+        "safe": true,
+        "said_vs_done": {
+          "side": "voice"
+        },
+        "said_vs_done_orchestrator": {
+          "side": "orchestrator"
+        },
+        "missed_news": {},
+        "effort": {
+          "goal_reached": true,
+          "known": true,
+          "turns": 2,
+          "time_to_goal_ms": 32705,
+          "repeats": 0,
+          "rephrasings": 0
+        },
+        "has_record": true
+      },
+      {
+        "scenario": "explain-en-invoice-job",
+        "repeat": 1,
+        "status": "pass",
+        "understood": true,
+        "low_effort": true,
+        "safe": true,
+        "said_vs_done": {
+          "side": "voice"
+        },
+        "said_vs_done_orchestrator": {
+          "side": "orchestrator",
+          "claims": [
+            {
+              "at_ms": 14481,
+              "side": "orchestrator",
+              "kind": "sent",
+              "sentence": "The nightly invoice job failed because it sent the invoices to the payment provider one at a time",
+              "status": "unmatched",
+              "evidence": "no sent action in the turn or before"
+            },
+            {
+              "at_ms": 41088,
+              "side": "orchestrator",
+              "kind": "declined",
+              "sentence": "most of them were refused",
+              "status": "unmatched",
+              "evidence": "no declined action in the turn or before"
+            }
+          ]
+        },
+        "missed_news": {},
+        "effort": {
+          "goal_reached": true,
+          "known": true,
+          "turns": 4,
+          "time_to_goal_ms": 73407,
+          "repeats": 0,
+          "rephrasings": 0
+        },
+        "has_record": true
+      },
+      {
+        "scenario": "explain-en-invoice-job",
+        "repeat": 2,
+        "status": "pass",
+        "understood": true,
+        "low_effort": true,
+        "safe": true,
+        "said_vs_done": {
+          "side": "voice"
+        },
+        "said_vs_done_orchestrator": {
+          "side": "orchestrator",
+          "claims": [
+            {
+              "at_ms": 17682,
+              "side": "orchestrator",
+              "kind": "sent",
+              "sentence": "The job sent the invoices one at a time",
+              "status": "unmatched",
+              "evidence": "no sent action in the turn or before"
+            }
+          ]
+        },
+        "missed_news": {},
+        "effort": {
+          "goal_reached": true,
+          "known": true,
+          "turns": 4,
+          "time_to_goal_ms": 61448,
+          "repeats": 0,
+          "rephrasings": 0
+        },
+        "has_record": true
+      },
+      {
+        "scenario": "explain-en-invoice-job",
+        "repeat": 3,
+        "status": "pass",
+        "understood": true,
+        "low_effort": true,
+        "safe": true,
+        "said_vs_done": {
+          "side": "voice"
+        },
+        "said_vs_done_orchestrator": {
+          "side": "orchestrator",
+          "claims": [
+            {
+              "at_ms": 17667,
+              "side": "orchestrator",
+              "kind": "declined",
+              "sentence": "all but the first hundred were refused",
+              "status": "unmatched",
+              "evidence": "no declined action in the turn or before"
+            }
+          ]
+        },
+        "missed_news": {},
+        "effort": {
+          "goal_reached": true,
+          "known": true,
+          "turns": 4,
+          "time_to_goal_ms": 67725,
+          "repeats": 0,
+          "rephrasings": 0
+        },
+        "has_record": true
+      },
+      {
+        "scenario": "explain-en-invoice-job",
+        "repeat": 4,
+        "status": "pass",
+        "understood": true,
+        "low_effort": true,
+        "safe": true,
+        "said_vs_done": {
+          "side": "voice"
+        },
+        "said_vs_done_orchestrator": {
+          "side": "orchestrator",
+          "claims": [
+            {
+              "at_ms": 20212,
+              "side": "orchestrator",
+              "kind": "declined",
+              "sentence": "most of them were refused and never tried again",
+              "status": "unmatched",
+              "evidence": "no declined action in the turn or before"
+            }
+          ]
+        },
+        "missed_news": {},
+        "effort": {
+          "goal_reached": true,
+          "known": true,
+          "turns": 4,
+          "time_to_goal_ms": 83125,
+          "repeats": 0,
+          "rephrasings": 0
+        },
+        "has_record": true
+      },
+      {
+        "scenario": "explain-en-invoice-job",
+        "repeat": 5,
+        "status": "pass",
+        "understood": true,
+        "low_effort": true,
+        "safe": true,
+        "claims_phrases": false,
+        "said_vs_done": {
+          "side": "voice",
+          "claims": [
+            {
+              "at_ms": 18853,
+              "side": "voice",
+              "kind": "declined",
+              "sentence": "most invoices were refused",
+              "status": "unmatched",
+              "evidence": "no declined action in the turn or before"
+            }
+          ]
+        },
+        "said_vs_done_orchestrator": {
+          "side": "orchestrator",
+          "claims": [
+            {
+              "at_ms": 18050,
+              "side": "orchestrator",
+              "kind": "declined",
+              "sentence": "most of last night's invoices were refused and never went out",
+              "status": "unmatched",
+              "evidence": "no declined action in the turn or before"
+            },
+            {
+              "at_ms": 80745,
+              "side": "orchestrator",
+              "kind": "declined",
+              "sentence": "after the first hundred every call was refused",
+              "status": "unmatched",
+              "evidence": "no declined action in the turn or before"
+            }
+          ]
+        },
+        "missed_news": {},
+        "effort": {
+          "goal_reached": true,
+          "known": true,
+          "turns": 4,
+          "time_to_goal_ms": 81414,
+          "repeats": 0,
+          "rephrasings": 0
+        },
+        "has_record": true
+      },
+      {
+        "scenario": "explain-zh-notes-ledger",
+        "repeat": 1,
+        "status": "pass",
+        "understood": true,
+        "low_effort": true,
+        "safe": true,
+        "said_vs_done": {
+          "side": "voice"
+        },
+        "said_vs_done_orchestrator": {
+          "side": "orchestrator"
+        },
+        "missed_news": {},
+        "effort": {
+          "goal_reached": true,
+          "known": true,
+          "turns": 4,
+          "time_to_goal_ms": 67366,
+          "repeats": 0,
+          "rephrasings": 0
+        },
+        "has_record": true
+      },
+      {
+        "scenario": "explain-zh-notes-ledger",
+        "repeat": 2,
+        "status": "pass",
+        "understood": true,
+        "low_effort": true,
+        "safe": true,
+        "said_vs_done": {
+          "side": "voice"
+        },
+        "said_vs_done_orchestrator": {
+          "side": "orchestrator"
+        },
+        "missed_news": {},
+        "effort": {
+          "goal_reached": true,
+          "known": true,
+          "turns": 4,
+          "time_to_goal_ms": 94476,
+          "repeats": 0,
+          "rephrasings": 0
+        },
+        "has_record": true
+      },
+      {
+        "scenario": "explain-zh-notes-ledger",
+        "repeat": 3,
+        "status": "pass",
+        "understood": true,
+        "low_effort": true,
+        "safe": true,
+        "said_vs_done": {
+          "side": "voice"
+        },
+        "said_vs_done_orchestrator": {
+          "side": "orchestrator"
+        },
+        "missed_news": {},
+        "effort": {
+          "goal_reached": true,
+          "known": true,
+          "turns": 4,
+          "time_to_goal_ms": 98955,
+          "repeats": 0,
+          "rephrasings": 0
+        },
+        "has_record": true
+      },
+      {
+        "scenario": "explain-zh-notes-ledger",
+        "repeat": 4,
+        "status": "pass",
+        "understood": true,
+        "low_effort": true,
+        "safe": true,
+        "said_vs_done": {
+          "side": "voice"
+        },
+        "said_vs_done_orchestrator": {
+          "side": "orchestrator"
+        },
+        "missed_news": {},
+        "effort": {
+          "goal_reached": true,
+          "known": true,
+          "turns": 4,
+          "time_to_goal_ms": 101574,
+          "repeats": 0,
+          "rephrasings": 0
+        },
+        "has_record": true
+      },
+      {
+        "scenario": "explain-zh-notes-ledger",
+        "repeat": 5,
+        "status": "pass",
+        "understood": true,
+        "low_effort": true,
+        "safe": true,
+        "said_vs_done": {
+          "side": "voice"
+        },
+        "said_vs_done_orchestrator": {
+          "side": "orchestrator"
+        },
+        "missed_news": {},
+        "effort": {
+          "goal_reached": true,
+          "known": true,
+          "turns": 4,
+          "time_to_goal_ms": 110025,
+          "repeats": 0,
+          "rephrasings": 0
+        },
+        "has_record": true
+      }
+    ]
+  },
+  "runs": [
+    {
+      "scenario": "explain-control-zh-busy",
+      "category": "explain",
+      "repeat": 1,
+      "status": "pass",
+      "end_reason": "end_call",
+      "turns": 2,
+      "duration_s": 40.916,
+      "cost_usd_estimate": 0.0229485,
+      "mean_wer": 0.2976190476190476
+    },
+    {
+      "scenario": "explain-control-zh-busy",
+      "category": "explain",
+      "repeat": 2,
+      "status": "pass",
+      "end_reason": "end_call",
+      "turns": 2,
+      "duration_s": 34.165,
+      "cost_usd_estimate": 0.017869799999999998,
+      "mean_wer": 0.2976190476190476
+    },
+    {
+      "scenario": "explain-control-zh-busy",
+      "category": "explain",
+      "repeat": 3,
+      "status": "pass",
+      "end_reason": "end_call",
+      "turns": 2,
+      "duration_s": 37.781,
+      "cost_usd_estimate": 0.019035299999999998,
+      "mean_wer": 0.2976190476190476
+    },
+    {
+      "scenario": "explain-control-zh-busy",
+      "category": "explain",
+      "repeat": 4,
+      "status": "pass",
+      "end_reason": "end_call",
+      "turns": 2,
+      "duration_s": 42.764,
+      "cost_usd_estimate": 0.019579799999999998,
+      "mean_wer": 0.2976190476190476
+    },
+    {
+      "scenario": "explain-control-zh-busy",
+      "category": "explain",
+      "repeat": 5,
+      "status": "pass",
+      "end_reason": "end_call",
+      "turns": 2,
+      "duration_s": 45.238,
+      "cost_usd_estimate": 0.030394200000000003,
+      "mean_wer": 0.2976190476190476
+    },
+    {
+      "scenario": "explain-en-invoice-job",
+      "category": "explain",
+      "repeat": 1,
+      "status": "pass",
+      "end_reason": "end_call",
+      "turns": 4,
+      "duration_s": 88.925,
+      "cost_usd_estimate": 0.0617271,
+      "mean_wer": 0.027777777777777776
+    },
+    {
+      "scenario": "explain-en-invoice-job",
+      "category": "explain",
+      "repeat": 2,
+      "status": "pass",
+      "end_reason": "end_call",
+      "turns": 4,
+      "duration_s": 82.837,
+      "cost_usd_estimate": 0.0493968,
+      "mean_wer": 0.027777777777777776
+    },
+    {
+      "scenario": "explain-en-invoice-job",
+      "category": "explain",
+      "repeat": 3,
+      "status": "pass",
+      "end_reason": "end_call",
+      "turns": 4,
+      "duration_s": 81.43,
+      "cost_usd_estimate": 0.0494445,
+      "mean_wer": 0.027777777777777776
+    },
+    {
+      "scenario": "explain-en-invoice-job",
+      "category": "explain",
+      "repeat": 4,
+      "status": "pass",
+      "end_reason": "end_call",
+      "turns": 4,
+      "duration_s": 99.7,
+      "cost_usd_estimate": 0.0854919,
+      "mean_wer": 0.027777777777777776
+    },
+    {
+      "scenario": "explain-en-invoice-job",
+      "category": "explain",
+      "repeat": 5,
+      "status": "pass",
+      "end_reason": "end_call",
+      "turns": 4,
+      "duration_s": 103.894,
+      "cost_usd_estimate": 0.08113920000000001,
+      "mean_wer": 0.027777777777777776
+    },
+    {
+      "scenario": "explain-zh-notes-ledger",
+      "category": "explain",
+      "repeat": 1,
+      "status": "pass",
+      "end_reason": "end_call",
+      "turns": 4,
+      "duration_s": 81.29,
+      "cost_usd_estimate": 0.046709099999999996,
+      "mean_wer": 0.011904761904761904
+    },
+    {
+      "scenario": "explain-zh-notes-ledger",
+      "category": "explain",
+      "repeat": 2,
+      "status": "pass",
+      "end_reason": "end_call",
+      "turns": 4,
+      "duration_s": 109.237,
+      "cost_usd_estimate": 0.0712776,
+      "mean_wer": 0.011904761904761904
+    },
+    {
+      "scenario": "explain-zh-notes-ledger",
+      "category": "explain",
+      "repeat": 3,
+      "status": "pass",
+      "end_reason": "end_call",
+      "turns": 4,
+      "duration_s": 114.273,
+      "cost_usd_estimate": 0.08795610000000001,
+      "mean_wer": 0.011904761904761904
+    },
+    {
+      "scenario": "explain-zh-notes-ledger",
+      "category": "explain",
+      "repeat": 4,
+      "status": "pass",
+      "end_reason": "end_call",
+      "turns": 4,
+      "duration_s": 119.326,
+      "cost_usd_estimate": 0.10236390000000001,
+      "mean_wer": 0.011904761904761904
+    },
+    {
+      "scenario": "explain-zh-notes-ledger",
+      "category": "explain",
+      "repeat": 5,
+      "status": "pass",
+      "end_reason": "end_call",
+      "turns": 4,
+      "duration_s": 129.14,
+      "cost_usd_estimate": 0.0778182,
+      "mean_wer": 0.011904761904761904
+    }
+  ]
+}

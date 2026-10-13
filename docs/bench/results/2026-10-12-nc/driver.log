@@ -1,0 +1,57 @@
+23:15 deepseek balance 52.83 CNY
+23:15 start a explain-1
+exit 0
+23:26:23 [13/15] explain-en-flaky-test r5 (:7912): pass (end_call, ) 5 turns 119s ≈ $0.112, total ≈ $0.86
+23:26:30 [14/15] explain-zh-input-rules r5 (:7911): pass (end_call, ) 5 turns 128s ≈ $0.075, total ≈ $0.93
+23:26:59 [15/15] explain-control-en-done r5 (:7912): pass (end_call, ) 2 turns 36s ≈ $0.023, total ≈ $0.96
+23:27 done a explain-1 chunk=$0.96 cum=$0.96
+23:28 deepseek balance 51.80 CNY
+23:28 start nc explain-1
+exit 0
+23:39:57 [13/15] explain-zh-input-rules r5 (:7912): pass (end_call, ) 5 turns 129s ≈ $0.063, total ≈ $0.80
+23:39:57 [14/15] explain-en-flaky-test r5 (:7911): pass (end_call, ) 5 turns 96s ≈ $0.050, total ≈ $0.85
+23:40:39 [15/15] explain-control-en-done r5 (:7912): pass (end_call, ) 2 turns 41s ≈ $0.031, total ≈ $0.88
+23:40 done nc explain-1 chunk=$0.88 cum=$1.84
+23:41 deepseek balance 47.22 CNY
+23:41 start a explain-2
+exit 0
+23:51:25 [13/15] explain-zh-notes-ledger r5 (:7912): pass (end_call, ) 4 turns 129s ≈ $0.078, total ≈ $0.71
+23:51:30 [14/15] explain-en-invoice-job r5 (:7911): pass (end_call, ) 4 turns 104s ≈ $0.081, total ≈ $0.79
+23:52:11 [15/15] explain-control-zh-busy r5 (:7912): pass (end_call, ) 2 turns 45s ≈ $0.030, total ≈ $0.82
+23:52 done a explain-2 chunk=$0.82 cum=$2.66
+23:53 deepseek balance 45.73 CNY
+23:53 start nc explain-2
+exit 0
+00:03:02 [13/15] explain-zh-notes-ledger r5 (:7911): pass (end_call, ) 4 turns 98s ≈ $0.059, total ≈ $0.75
+00:03:43 [14/15] explain-en-invoice-job r5 (:7912): pass (end_call, ) 4 turns 120s ≈ $0.096, total ≈ $0.84
+00:03:49 [15/15] explain-control-zh-busy r5 (:7911): pass (end_call, ) 2 turns 46s ≈ $0.026, total ≈ $0.87
+00:03 done nc explain-2 chunk=$0.87 cum=$3.53
+00:04 deepseek balance 42.46 CNY
+00:04 start a workday-1
+exit 0
+00:21:49 [4/6] workday-zh-evening r1 (:7912): fail (end_call, missing_function_call) 12 turns 688s ≈ $0.728, total ≈ $2.39
+00:25:42 [5/6] workday-scale-ten r2 (:7911): pass (end_call, ) 13 turns 506s ≈ $0.702, total ≈ $3.10
+00:28:32 [6/6] workday-zh-evening r2 (:7912): pass (end_call, ) 12 turns 402s ≈ $0.532, total ≈ $3.63
+00:28 done a workday-1 chunk=$3.63 cum=$7.16
+00:29 deepseek balance 41.64 CNY
+00:29 start nc workday-1
+exit 0
+00:47:19 [4/6] workday-zh-evening r1 (:7911): pass (end_call, ) 12 turns 704s ≈ $0.806, total ≈ $2.53
+00:53:39 [5/6] workday-scale-ten r2 (:7912): pass (end_call, ) 13 turns 572s ≈ $0.738, total ≈ $3.26
+00:54:40 [6/6] workday-zh-evening r2 (:7911): pass (end_call, ) 12 turns 440s ≈ $0.597, total ≈ $3.86
+00:54 done nc workday-1 chunk=$3.86 cum=$11.02
+00:55 deepseek balance 40.91 CNY
+00:55 start a workday-2
+exit 0
+01:13:01 [4/6] workday-interruptions r2 (:7912): pass (end_call, ) 12 turns 465s ≈ $0.673, total ≈ $2.53
+01:21:07 [5/6] workday-long-haul r2 (:7912): pass (end_call, ) 14 turns 485s ≈ $0.632, total ≈ $3.16
+01:22:12 [6/6] workday-explain-deep r2 (:7911): pass (end_call, ) 13 turns 700s ≈ $0.915, total ≈ $4.07
+01:22 done a workday-2 chunk=$4.07 cum=$15.09
+01:23 deepseek balance 40.20 CNY
+01:23 start nc workday-2
+exit 0
+01:40:38 [4/6] workday-long-haul r1 (:7911): pass (end_call, ) 14 turns 553s ≈ $0.706, total ≈ $3.08
+01:50:09 [5/6] workday-long-haul r2 (:7911): pass (end_call, ) 16 turns 570s ≈ $0.746, total ≈ $3.83
+01:51:12 [6/6] workday-explain-deep r2 (:7912): pass (end_call, ) 12 turns 641s ≈ $0.856, total ≈ $4.68
+01:51 done nc workday-2 chunk=$4.68 cum=$19.77
+ALLDONE cum=19.77

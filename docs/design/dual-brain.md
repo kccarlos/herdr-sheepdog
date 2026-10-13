@@ -354,6 +354,18 @@ waiting) and the channel (answers come back as labelled facts, so no
   significant), merged for the single framing
   (`docs/eval/roles-arms-2026-10-07.md`; prompt snapshot in
   `docs/eval/prompt-arms/r/`).
+- v6-nc, never compress (2026-10-12, harness iteration 1): one
+  paragraph in `assistant.md`: never compress or shorten the
+  orchestrator's spoken text; say its substance fully in its own words
+  (reasons, examples, numbers), short only when the briefing is short.
+  Behind it: the explain evals, where the voice said well under the
+  orchestrator's key points. Tier 2 with the production DeepSeek
+  brain, 42 runs per arm: voice share of the orchestrator's points
+  0.38 → 0.50 (CI +0.01 to +0.25; 10-11 with a Gemini brain: 0.50 →
+  0.79), segment Understood +5 pp (n.s.), Safe flat. Watch: voice
+  follow-up depth −0.14 and `no_hallucination` 89 → 82 % (both n.s.).
+  Merged (`docs/eval/iteration-1-nc-2026-10-12.md`; prompt word cap
+  600 → 630); `assistant-gptlive.md` unchanged.
 
 Every measurement in the dual-brain results doc uses v4 unless marked
 otherwise; the v5 A/B is in its own results doc.

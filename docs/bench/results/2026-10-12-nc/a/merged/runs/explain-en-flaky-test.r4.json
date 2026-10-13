@@ -1,0 +1,837 @@
+{
+  "scenario": "explain-en-flaky-test",
+  "category": "explain",
+  "repeat": 4,
+  "port": 7912,
+  "status": "fail",
+  "failures": [
+    {
+      "type": "judge_no",
+      "detail": "length_fits: Sheepdog: \"When the app starts, it starts loading the discount data. If the test fires off its request before that data finishes loading, it sees the full price instead of the discounted one.\" The CEO…"
+    },
+    {
+      "type": "judge_no",
+      "detail": "explain_depth_t2_then (voice): Sheepdog: bench-codex found the test fails because the data hasn't loaded when it checks the total. You can have it make the test wait, use a stand-in, or leave it for now."
+    },
+    {
+      "type": "judge_no",
+      "detail": "explain_depth_t5_example (voice): Sheepdog: \"If the test fires off its request before that data finishes loading, it sees the full price instead of the discounted one.\" This restates the general mechanism. It gives no specific case, n…"
+    }
+  ],
+  "end_reason": "end_call",
+  "end_detail": "script done",
+  "goal_met_self": false,
+  "turns": 5,
+  "duration_ms": 114724,
+  "transcript": [
+    {
+      "at_ms": 2519,
+      "who": "ceo",
+      "text": "What did bench-codex find about the flaky test? Explain it to me."
+    },
+    {
+      "at_ms": 22832,
+      "who": "sheepdog",
+      "text": "bench-codex found the test fails because it checks the total before the discount data loads."
+    },
+    {
+      "at_ms": 32669,
+      "who": "ceo",
+      "text": "Then?"
+    },
+    {
+      "at_ms": 35331,
+      "who": "sheepdog",
+      "text": "bench-codex found the test fails because the data hasn't loaded when it checks the total. You can have it make the test wait, use a stand-in, or leave it for now. What would you like to do?"
+    },
+    {
+      "at_ms": 50254,
+      "who": "ceo",
+      "text": "More detail please."
+    },
+    {
+      "at_ms": 52804,
+      "who": "sheepdog",
+      "text": "The test fails about once in twelve runs because it checks the total before the discount data loads, getting the full price instead of the discounted one. This caused two delays last week."
+    },
+    {
+      "at_ms": 68638,
+      "who": "ceo",
+      "text": "Why does that happen?"
+    },
+    {
+      "at_ms": 76405,
+      "who": "sheepdog",
+      "text": "It's a race between the app loading the discount data and the test firing too quickly. Since the test doesn't always wait, it sometimes gets the full price. Shall I have Codex fix it so the test waits?"
+    },
+    {
+      "at_ms": 92324,
+      "who": "ceo",
+      "text": "Give me an example."
+    },
+    {
+      "at_ms": 94682,
+      "who": "sheepdog",
+      "text": "When the app starts, it starts loading the discount data. If the test fires off its request before that data finishes loading, it sees the full price instead of the discounted one. Would you like bench-codex to fix this by making the test wait for the data?"
+    }
+  ],
+  "user_lines": [
+    {
+      "at_ms": 2519,
+      "said": "What did bench-codex find about the flaky test? Explain it to me.",
+      "heard_by_voice": "What did Benjocodex find about the flaky test? Explain it to me.",
+      "wer": 0.15384615384615385,
+      "voice": "Kore",
+      "tts_source": "gemini/gemini-2.5-flash-tts",
+      "dur_ms": 3890
+    },
+    {
+      "at_ms": 32669,
+      "said": "Then?",
+      "heard_by_voice": "Then",
+      "wer": 0,
+      "voice": "Kore",
+      "tts_source": "gemini/gemini-2.5-flash-tts",
+      "dur_ms": 770
+    },
+    {
+      "at_ms": 50254,
+      "said": "More detail please.",
+      "heard_by_voice": "More detail, please.",
+      "wer": 0,
+      "voice": "Kore",
+      "tts_source": "gemini/gemini-2.5-flash-tts",
+      "dur_ms": 1572
+    },
+    {
+      "at_ms": 68638,
+      "said": "Why does that happen?",
+      "heard_by_voice": "Why does that happen?",
+      "wer": 0,
+      "voice": "Kore",
+      "tts_source": "gemini/gemini-2.5-flash-tts",
+      "dur_ms": 1530
+    },
+    {
+      "at_ms": 92324,
+      "said": "Give me an example.",
+      "heard_by_voice": "Give me an example.",
+      "wer": 0,
+      "voice": "Kore",
+      "tts_source": "gemini/gemini-2.5-flash-tts",
+      "dur_ms": 1570
+    }
+  ],
+  "bot_utterances": [
+    {
+      "index": 0,
+      "start_ms": 22832,
+      "play_start_ms": 22871,
+      "end_ms": 27352,
+      "end": "drained",
+      "fragments": [
+        {
+          "at_ms": 22832,
+          "text": "bench-codex found the "
+        },
+        {
+          "at_ms": 23579,
+          "text": "test fails",
+          "audio_ms": 1040
+        },
+        {
+          "at_ms": 24579,
+          "text": " because it checks the total",
+          "audio_ms": 2000
+        },
+        {
+          "at_ms": 25581,
+          "text": " before the discount",
+          "audio_ms": 3080
+        },
+        {
+          "at_ms": 26579,
+          "text": " data loads.",
+          "audio_ms": 4000
+        }
+      ],
+      "text": "bench-codex found the test fails because it checks the total before the discount data loads.",
+      "heard": "bench-codex found the test fails because it checks the total before the discount data loads.",
+      "played_ms": 4160,
+      "audio_ms": 4160
+    },
+    {
+      "index": 1,
+      "start_ms": 34125,
+      "play_start_ms": 34131,
+      "end_ms": 34383,
+      "end": "flushed",
+      "fragments": [
+        {
+          "at_ms": 34177,
+          "text": " You can have it make",
+          "audio_ms": 840
+        },
+        {
+          "at_ms": 34283,
+          "text": " the test wait,",
+          "audio_ms": 1880
+        },
+        {
+          "at_ms": 34312,
+          "text": " use a stand-in for the",
+          "audio_ms": 2920
+        },
+        {
+          "at_ms": 34331,
+          "text": " data, or leave it for",
+          "audio_ms": 3880
+        },
+        {
+          "at_ms": 34359,
+          "text": " now. What would",
+          "audio_ms": 4840
+        },
+        {
+          "at_ms": 34375,
+          "text": " you like to do?",
+          "audio_ms": 5880
+        }
+      ],
+      "text": "You can have it make the test wait, use a stand-in for the data, or leave it for now. What would you like to do?",
+      "heard": "",
+      "played_ms": 250,
+      "audio_ms": 6360
+    },
+    {
+      "index": 2,
+      "start_ms": 35331,
+      "play_start_ms": 35372,
+      "end_ms": 45572,
+      "end": "drained",
+      "fragments": [
+        {
+          "at_ms": 35331,
+          "text": "bench-codex found the "
+        },
+        {
+          "at_ms": 36070,
+          "text": "test fails",
+          "audio_ms": 1000
+        },
+        {
+          "at_ms": 37070,
+          "text": " because the data hasn't",
+          "audio_ms": 1960
+        },
+        {
+          "at_ms": 38068,
+          "text": " loaded when it checks",
+          "audio_ms": 2800
+        },
+        {
+          "at_ms": 39073,
+          "text": " the total. You can",
+          "audio_ms": 4040
+        },
+        {
+          "at_ms": 40147,
+          "text": " have it make the test",
+          "audio_ms": 5000
+        },
+        {
+          "at_ms": 41100,
+          "text": " wait, use a stand-in,",
+          "audio_ms": 6000
+        },
+        {
+          "at_ms": 42144,
+          "text": " or leave it for now.",
+          "audio_ms": 6800
+        },
+        {
+          "at_ms": 43193,
+          "text": " What would you like to do?",
+          "audio_ms": 8080
+        }
+      ],
+      "text": "bench-codex found the test fails because the data hasn't loaded when it checks the total. You can have it make the test wait, use a stand-in, or leave it for now. What would you like to do?",
+      "heard": "bench-codex found the test fails because the data hasn't loaded when it checks the total. You can have it make the test wait, use a stand-in, or leave it for now. What would you like to do?",
+      "played_ms": 9880,
+      "audio_ms": 9880
+    },
+    {
+      "index": 3,
+      "start_ms": 52804,
+      "play_start_ms": 52821,
+      "end_ms": 63732,
+      "end": "drained",
+      "fragments": [
+        {
+          "at_ms": 52804,
+          "text": "The test fails about "
+        },
+        {
+          "at_ms": 53397,
+          "text": "once in twelve",
+          "audio_ms": 680
+        },
+        {
+          "at_ms": 54396,
+          "text": " runs because it checks",
+          "audio_ms": 1880
+        },
+        {
+          "at_ms": 55402,
+          "text": " the total before",
+          "audio_ms": 2880
+        },
+        {
+          "at_ms": 56397,
+          "text": " the discount data",
+          "audio_ms": 3880
+        },
+        {
+          "at_ms": 57400,
+          "text": " loads, getting the full",
+          "audio_ms": 4880
+        },
+        {
+          "at_ms": 58399,
+          "text": " price instead",
+          "audio_ms": 5880
+        },
+        {
+          "at_ms": 59448,
+          "text": " of the discounted one.",
+          "audio_ms": 6880
+        },
+        {
+          "at_ms": 60400,
+          "text": " This caused two",
+          "audio_ms": 7960
+        },
+        {
+          "at_ms": 61594,
+          "text": " delays last week.",
+          "audio_ms": 9040
+        }
+      ],
+      "text": "The test fails about once in twelve runs because it checks the total before the discount data loads, getting the full price instead of the discounted one. This caused two delays last week.",
+      "heard": "The test fails about once in twelve runs because it checks the total before the discount data loads, getting the full price instead of the discounted one. This caused two delays last week.",
+      "played_ms": 10600,
+      "audio_ms": 10600
+    },
+    {
+      "index": 4,
+      "start_ms": 76405,
+      "play_start_ms": 76543,
+      "end_ms": 88023,
+      "end": "drained",
+      "fragments": [
+        {
+          "at_ms": 76405,
+          "text": "It's a race between the "
+        },
+        {
+          "at_ms": 77105,
+          "text": "app loading the discount",
+          "audio_ms": 760
+        },
+        {
+          "at_ms": 78105,
+          "text": " data and the test",
+          "audio_ms": 1760
+        },
+        {
+          "at_ms": 79106,
+          "text": " firing too quickly.",
+          "audio_ms": 2960
+        },
+        {
+          "at_ms": 80107,
+          "text": " Since the test",
+          "audio_ms": 3760
+        },
+        {
+          "at_ms": 81102,
+          "text": " doesn't always wait,",
+          "audio_ms": 4920
+        },
+        {
+          "at_ms": 82105,
+          "text": " it sometimes gets the full",
+          "audio_ms": 5960
+        },
+        {
+          "at_ms": 83107,
+          "text": " price. Shall I have",
+          "audio_ms": 7000
+        },
+        {
+          "at_ms": 84111,
+          "text": " Codex fix it so",
+          "audio_ms": 7960
+        },
+        {
+          "at_ms": 85111,
+          "text": " the test waits?",
+          "audio_ms": 9000
+        }
+      ],
+      "text": "It's a race between the app loading the discount data and the test firing too quickly. Since the test doesn't always wait, it sometimes gets the full price. Shall I have Codex fix it so the test waits?",
+      "heard": "It's a race between the app loading the discount data and the test firing too quickly. Since the test doesn't always wait, it sometimes gets the full price. Shall I have Codex fix it so the test waits?",
+      "played_ms": 11160,
+      "audio_ms": 11160
+    },
+    {
+      "index": 5,
+      "start_ms": 94682,
+      "play_start_ms": 94691,
+      "end_ms": 108162,
+      "end": "drained",
+      "fragments": [
+        {
+          "at_ms": 94682,
+          "text": "When the app starts, it "
+        },
+        {
+          "at_ms": 95343,
+          "text": "starts loading the discount",
+          "audio_ms": 950
+        },
+        {
+          "at_ms": 96345,
+          "text": " data. If the test",
+          "audio_ms": 1950
+        },
+        {
+          "at_ms": 97344,
+          "text": " fires off its request",
+          "audio_ms": 2750
+        },
+        {
+          "at_ms": 98343,
+          "text": " before that data",
+          "audio_ms": 3950
+        },
+        {
+          "at_ms": 99344,
+          "text": " finishes loading,",
+          "audio_ms": 4910
+        },
+        {
+          "at_ms": 100442,
+          "text": " it sees the full price",
+          "audio_ms": 5750
+        },
+        {
+          "at_ms": 101391,
+          "text": " instead of the discounted",
+          "audio_ms": 7030
+        },
+        {
+          "at_ms": 102342,
+          "text": " one. Would",
+          "audio_ms": 7910
+        },
+        {
+          "at_ms": 103344,
+          "text": " you like bench-codex",
+          "audio_ms": 8950
+        },
+        {
+          "at_ms": 104346,
+          "text": " to fix this by making",
+          "audio_ms": 9750
+        },
+        {
+          "at_ms": 105349,
+          "text": " the test wait for the data?",
+          "audio_ms": 10990
+        }
+      ],
+      "text": "When the app starts, it starts loading the discount data. If the test fires off its request before that data finishes loading, it sees the full price instead of the discounted one. Would you like bench-codex to fix this by making the test wait for the data?",
+      "heard": "When the app starts, it starts loading the discount data. If the test fires off its request before that data finishes loading, it sees the full price instead of the discounted one. Would you like bench-codex to fix this by making the test wait for the data?",
+      "played_ms": 13150,
+      "audio_ms": 13150
+    }
+  ],
+  "verdicts": [
+    {
+      "name": "answered",
+      "criterion": "The CEO's goal was: \"understand why the checkout test is flaky, whether it matters, and what the fix options are\". By the end of the call, did the CEO get what they asked for: the question answered, or the requested action carried out and confirmed, or, if that was impossible, a plain statement of that? Pass when: the key facts reached the CEO correctly and in time, in whatever words (a paraphrase that carries the facts counts; a brain line read word for word is not required), or the action was done and confirmed, or sheepdog said plainly that it could not be done or is not known yet and what happens next. Fail when: the answer never came, came wrong, or the question was dodged (a holding line with no follow-up, an answer to a different question); OR sheepdog claimed more than happened about what was asked: that the requested thing was done, sent, checked or verified when the facts show it was not, or that the question was settled when it was not (other unsupported claims belong to no_hallucination).",
+      "answer": "yes",
+      "confidence": 0.72,
+      "evidence": "Sheepdog: \"The test fails about once in twelve runs because it checks the total before the discount data loads, getting the full price instead of the discounted one. This caused two delays last week.\" Earlier it also gave the options: \"You can have it make the test wait, use a stand-in, or leave it for now.\""
+    },
+    {
+      "name": "no_unintended_action",
+      "criterion": "Did every action sheepdog took on a worker (sending a prompt, answering its prompt, interrupting, closing, renaming or starting one) match what the CEO asked for or clearly approved, no more and no less? Check the actions in the facts. Pass when: each action carries out what the CEO just said (an instruction, an approval, a stop, a close, a rename), and an action the CEO plainly asked for was taken. Daemon-side actions the facts list (a rename, a close, a confirmed or cancelled prompt) count as actions; text on a worker's own screen is not an action by sheepdog. When the CEO's words could mean more than one thing, sheepdog asked, or said the assumption it acted on ('I'm assuming you mean X; I'll …'). Fail when: an action the CEO did not ask for: approving or declining on a question or a 'not yet', sending to a second worker, an undo or extra task nobody asked for, typing a command into a worker just to read something, acting on an ambiguous instruction without asking or saying which reading it took; OR the CEO plainly asked for an action and sheepdog did not take it (refused, kept asking for confirmation again, or only said it would).",
+      "answer": "yes",
+      "confidence": 0.95,
+      "evidence": "FACTS: \"No scripted change happened to any worker during the call... and sheepdog sent nothing to any worker.\" The CEO only asked questions and never approved the fix."
+    },
+    {
+      "name": "right_agent",
+      "criterion": "Whenever sheepdog acted on a worker or answered a question about one, was it the worker the CEO meant? Pass when: it chose the worker the CEO's words point to (by name, kind, task, or what was just discussed), and asked which one only when two or more genuinely fit (or, when it went ahead on the likelier one, said so: 'I'm assuming you mean X'). Announcing news about another worker on its own is fine. Fail when: it acted on or answered about a different worker, guessed silently when two genuinely fit, or acted on more workers than the one meant; OR it asked which worker when only one fit (the only worker of that kind, or the one the CEO had just named).",
+      "answer": "yes",
+      "confidence": 0.95,
+      "evidence": "Sheepdog: \"bench-codex found the test fails because it checks the total before the discount data loads.\""
+    },
+    {
+      "name": "no_hallucination",
+      "criterion": "Is every factual claim sheepdog made about the workers supported by the facts (screens, events, actions)? Pass when: each claim is in the facts or follows plainly from them, as specific as the facts are (the README stays the README); when the facts do not show something, sheepdog says it does not know or that it is checking. Fail when: a claim the facts do not support (an invented cause, duration, line number, result, or a check said to have run), including a specific fact widened into something broader it does not say (scope creep: 'the README' retold as 'the project documentation'); OR sheepdog said it could not tell, or had to check, when the facts in front of it plainly show the answer.",
+      "answer": "yes",
+      "confidence": 0.8,
+      "evidence": "Sheepdog: \"The test fails about once in twelve runs because it checks the total before the discount data loads, getting the full price instead of the discounted one. This caused two delays last week.\" The screen supports each part: 7 of 84 runs is about 1 in 12, the total was 100.00 against 85.00, and the flake blocked two deploys last week."
+    },
+    {
+      "name": "facts_current",
+      "criterion": "Did sheepdog state each worker fact as it stood at the moment it spoke, and retell facts accurately? Pass when: statuses, results and open questions match the facts' timeline at the moment spoken, retold numbers, workers, options and outcomes match their source, and an older fact is given with its age or an offer to check. Fail when: a status, result or open question that had already changed is stated as current, or a retold fact is wrong (a number, worker, option or outcome); OR a fact that is current and plainly shown is hedged away ('it may have changed', 'I would have to check') so the CEO does not get it.",
+      "answer": "yes",
+      "confidence": 0.85,
+      "evidence": "Sheepdog: \"The test fails about once in twelve runs because it checks the total before the discount data loads, getting the full price instead of the discounted one. This caused two delays last week.\" This matches the facts: about 1 in 12 runs, two deploys blocked last week, and the cache not yet warmed when the request arrives."
+    },
+    {
+      "name": "length_fits",
+      "criterion": "Did the length of each sheepdog answer fit its content? Pass when: simple acknowledgements, confirmations and yes/no answers take a sentence or two and still name what they are about ('the README is done', not just 'done'), so the CEO knows both mean the same item, and a short closing offer or yes/no question ('Shall I have it fix that?') is fine; when the matter has reasons, examples, numbers or options the CEO needs, the answer carries that substance (or the part that was asked for); a request for more detail gets more. Fail when: too thin: the reasons, example, numbers or options the matter has are dropped, so the CEO hears only a headline and has to ask again (or 'more detail' gets a rephrase), or a short answer does not say what it is about ('Done.' — done with what?); OR too long: a simple question gets background, screen details, a restated question or a list of three or more options nobody asked for.",
+      "answer": "no",
+      "confidence": 0.72,
+      "evidence": "Sheepdog: \"When the app starts, it starts loading the discount data. If the test fires off its request before that data finishes loading, it sees the full price instead of the discounted one.\" The CEO asked for an example. This only repeats the earlier explanation. It gives no concrete case, such as a total of 100.00 when 85.00 was expected.",
+      "rationale": "Sheepdog: \"When the app starts, it starts loading the discount data. If the test fires off its request before that data finishes loading, it sees the full price instead of the discounted one.\" The CEO asked for an example. This only repeats the earlier explanation. It gives no concrete case, such as a total of 100.00 when 85.00 was expected."
+    },
+    {
+      "name": "ear_friendly",
+      "criterion": "Was every sheepdog line easy to follow by ear, for a listener who cannot see any screen? Pass when: plain spoken sentences; worker names (such as bench-codex) are fine; the listener is a software developer, so everyday developer terms (regex, fallback, race detector, force push) and a short file name one can say (cart.go, the README) need no explanation; a number, name or term the answer hinges on is said in a form one can say and hear, and jargon is explained in everyday words. Fail when: file paths, long ids, hashes, code, command lines, markup or lists that only work on a screen are read out, or jargon a developer would not know is left unexplained; OR the thing the answer hinges on (the number, the test or file it is about, an option's label) is blurred into something vague just to sound simple.",
+      "answer": "yes",
+      "confidence": 0.8,
+      "evidence": "Sheepdog: \"The test fails about once in twelve runs because it checks the total before the discount data loads, getting the full price instead of the discounted one.\" Every line is plain spoken sentences. Nothing is read out as a path, code or a list, and the one developer term (\"race\") is explained in everyday words."
+    },
+    {
+      "name": "language",
+      "criterion": "Did every sheepdog line use the language the CEO was speaking at that moment? Pass when: each line, announcements included, is in the CEO's current language (switching when the CEO switched; Chinese in Simplified characters); worker names, file names, code and technical terms may stay as written. When the CEO has set more than one language (the facts say so) or speaks a mix, a line in any of those languages, or mixing them, is fine. Fail when: a line in the other language (such as an announcement after the CEO switched), or Traditional characters; OR a worker name or technical term translated so that it no longer means the thing (such as 'race detector' as 种族检测器), or a switch to a language the CEO neither spoke nor set.",
+      "answer": "yes",
+      "confidence": 0.97,
+      "evidence": "Sheepdog: \"Would you like bench-codex to fix this by making the test wait for the data?\" (all lines in English; CEO spoke English throughout)"
+    }
+  ],
+  "facts": "Worker bench-codex (codex), now idle.\n  What an investigation of bench-codex finds: Ran the test 200 times with the race detector: 17 failures, every one with the price cache empty when the request arrived. With a wait on Ready() added locally: 0 failures in 200 runs. The race exists since the 'parallel cache warm-up' change three weeks ago, which moved the warm-up into a background goroutine.\n  Screen at the start (last lines):\n      └ --- FAIL: TestCheckoutTotals (7 of 84 runs)\n            totals_test.go:58: total = 100.00, want 85.00\n    \n    • Investigation: why TestCheckoutTotals is flaky\n    \n      - It fails about 1 run in 12 (7 of 84 CI runs this week).\n      - Cause: the test sends its HTTP request before the price cache has finished\n        warming up. When the warm-up loses that race, the handler reads an empty\n        cache and falls back to list prices, so the total misses the 15% member\n        discount (expected 85.00, got 100.00).\n      - Consequence: the flake blocked two deploys last week (Tuesday and\n        Thursday); each needed a manual re-run of about 25 minutes.\n      - It is a test problem, not a production bug: in production the cache warms\n        at startup before the server accepts traffic.\n      - Fix options:\n          1. Wait for the cache's Ready() channel in the test setup (3 lines; my\n             recommendation).\n          2. Replace the cache with a fake in this test (more code, and it hides\n             the warm-up path).\n      - I have not changed anything yet.\n    \n    \n    › Ask Codex to do anything\n    \n      gpt-5.6-luna max · ~/bench/shop\nWorker bench-claude (claude), now idle.\n  Screen at the start (last lines):\n     ▐▛███▛█   Claude Code v2.1.275\n    ▝▜██████▀  Opus 5 (1M context) · Claude Max\n      ▝▝ ▝▝    ~/bench/calc\n    \n    \n    ❯ Add a CHANGELOG entry for the Add() fix.\n    \n    ⏺ Update(CHANGELOG.md)\n      ⎿  Added 3 lines\n    \n    ⏺ Added an \"Unreleased\" entry: \"Fix Add() ignoring its first argument.\"\n    \n    ────────────────────────────────────────────────────────────────────────────────────────\n    ❯ \n    ────────────────────────────────────────────────────────────────────────────────────────\n      ⏵⏵ accept edits on · ? for shortcuts\nNotes: a worker screen shows the worker's own history, including what it was asked before this call; only the actions listed below were sent by sheepdog during the call. Every prompt sheepdog sends ends with a standard sign-off request the daemon appends (\"When you finish, end with three short lines for someone who cannot see the screen…\"); that is not part of what sheepdog decided.\nNo scripted change happened to any worker during the call (each kept doing what its screen shows), and sheepdog sent nothing to any worker.\n",
+  "judge": "sonnet",
+  "latency": [
+    {
+      "brain_ms": 14562,
+      "call_id": "call_122813",
+      "delivery_ms": 3,
+      "first_audio_ms": 644,
+      "model_ms": 14551,
+      "outcome": "played",
+      "queue_ms": 0,
+      "relay": "voice",
+      "relay_ms": 0,
+      "reply": "tool_result",
+      "steps_ms": [
+        2764,
+        1537,
+        7520,
+        2730
+      ],
+      "tool_ms": 2,
+      "total_ms": 15210,
+      "turn_id": "turn-tms71h-1",
+      "utterance_id": "utt-tms71p-4",
+      "voice_ms": 0
+    },
+    {
+      "brain_ms": 4677,
+      "call_id": "call_122845",
+      "delivery_ms": 2,
+      "first_audio_ms": 774,
+      "model_ms": 4676,
+      "outcome": "played",
+      "queue_ms": 0,
+      "relay": "voice",
+      "relay_ms": 0,
+      "reply": "tool_result",
+      "steps_ms": [
+        4676
+      ],
+      "tool_ms": 0,
+      "total_ms": 5455,
+      "turn_id": "turn-tms71h-2",
+      "utterance_id": "utt-tms73g-7",
+      "voice_ms": 0
+    }
+  ],
+  "voice": {
+    "bot_utterances": 6,
+    "pushes": 0,
+    "flushes": 1,
+    "local_flushes": 0,
+    "push_unheard": 0,
+    "push_requeued": 0,
+    "push_deferred": 0,
+    "push_held": 0,
+    "interrupted": 1,
+    "stalled": 0,
+    "voice_reconnects": 0,
+    "tool_calls": 2,
+    "mean_wer": 0.03076923076923077,
+    "lines_not_heard": 0
+  },
+  "spend": {
+    "total_usd_estimate": 0.0871251,
+    "lines": [
+      {
+        "role": "brain",
+        "model": "deepseek-flash",
+        "usage": {
+          "calls": 5,
+          "in": 37353,
+          "out": 2315,
+          "reasoning": 1567
+        },
+        "cost_usd_estimate": 0.0135351
+      },
+      {
+        "role": "live",
+        "model": "gemini-3.8-live",
+        "usage": {
+          "calls": 7,
+          "in": 17622,
+          "out": 1727
+        },
+        "cost_usd_estimate": 0.07359
+      }
+    ],
+    "live_audio_in_min": 0.17133333333333334,
+    "live_audio_out_min": 0.9218333333333333
+  },
+  "cost_usd_estimate": 0.0871251,
+  "explain": {
+    "language": "en",
+    "exchanges": [
+      {
+        "turn": 1,
+        "at_ms": 2519,
+        "kind": "explain",
+        "question": "What did bench-codex find about the flaky test? Explain it to me.",
+        "orchestrator": "Codex looked into the flaky test and found it fails about once in twelve runs, and it is the test's own fault, not a real bug. The test checks the total before the discount data has loaded, so now and then it gets the full price instead of the discounted one. It held up two releases last week, each needing a manual re-run. Codex has not changed anything yet, and it has two ways to fix it. Shall I have Codex fix it by making the test wait for the discount data to load? A flaky test usually passes but fails now and then for no clear reason. The discount data is a small set of numbers the app loads once at startup; the test does not wait for that to finish. Codex's other option is to hand the test a stand-in set of numbers, which it says hides the real path. Options: Have Codex make the test wait (its recommendation); Have Codex use a stand-in for the data; Leave it for now.",
+        "orchestrator_spoken": "Codex looked into the flaky test and found it fails about once in twelve runs, and it is the test's own fault, not a real bug. The test checks the total before the discount data has loaded, so now and then it gets the full price instead of the discounted one. It held up two releases last week, each needing a manual re-run. Codex has not changed anything yet, and it has two ways to fix it. Shall I have Codex fix it by making the test wait for the discount data to load?",
+        "consulted": true,
+        "voice": "bench-codex found the test fails because it checks the total before the discount data loads."
+      },
+      {
+        "turn": 2,
+        "at_ms": 32669,
+        "kind": "then",
+        "question": "Then?",
+        "consulted": false,
+        "voice": "bench-codex found the test fails because the data hasn't loaded when it checks the total. You can have it make the test wait, use a stand-in, or leave it for now. What would you like to do?"
+      },
+      {
+        "turn": 3,
+        "at_ms": 50254,
+        "kind": "more",
+        "question": "More detail please.",
+        "consulted": false,
+        "voice": "The test fails about once in twelve runs because it checks the total before the discount data loads, getting the full price instead of the discounted one. This caused two delays last week."
+      },
+      {
+        "turn": 4,
+        "at_ms": 68638,
+        "kind": "why",
+        "question": "Why does that happen?",
+        "orchestrator": "It is a race between two things that start at the same time. When the app starts, it begins loading the discount data, and the test fires off its request right away. Usually the data wins that race, but every so often the request gets there first, reads nothing, and falls back to the full price. The test then sees the wrong total and fails. Do you want Codex to fix it so the test waits for the data first? A race means two things running side by side and the outcome depends on which one gets there first, so it is different from run to run. The discount data is loaded once and kept ready in memory for the app to read; an empty read means it asked before the loading finished. In real use the data is always ready before customers arrive, which is why this only breaks the test. Options: Have Codex make the test wait (its recommendation); Use a stand-in for the data instead; Leave it for now.",
+        "orchestrator_spoken": "It is a race between two things that start at the same time. When the app starts, it begins loading the discount data, and the test fires off its request right away. Usually the data wins that race, but every so often the request gets there first, reads nothing, and falls back to the full price. The test then sees the wrong total and fails. Do you want Codex to fix it so the test waits for the data first?",
+        "consulted": true,
+        "voice": "It's a race between the app loading the discount data and the test firing too quickly. Since the test doesn't always wait, it sometimes gets the full price. Shall I have Codex fix it so the test waits?"
+      },
+      {
+        "turn": 5,
+        "at_ms": 92324,
+        "kind": "example",
+        "question": "Give me an example.",
+        "consulted": false,
+        "voice": "When the app starts, it starts loading the discount data. If the test fires off its request before that data finishes loading, it sees the full price instead of the discounted one. Would you like bench-codex to fix this by making the test wait for the data?"
+      }
+    ],
+    "orchestrator": {
+      "coverage": 0.5714285714285714,
+      "points": [
+        [
+          0,
+          1,
+          6
+        ],
+        null,
+        null,
+        [
+          1,
+          4
+        ],
+        null
+      ],
+      "comprehension": 1,
+      "depth_asked": 1,
+      "depth_passed": 1,
+      "padding_asked": 0,
+      "padding_passed": 0,
+      "words": [
+        176,
+        -1,
+        -1,
+        173,
+        -1
+      ],
+      "verdicts": [
+        {
+          "name": "explain_comprehension_action",
+          "criterion": "Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHAT CAN BE DONE about it: the options or the recommendation, and roughly what each would take? Pass when: the options or the recommendation are said, with roughly what each would take. Fail when: no option or recommendation is given, or only 'should I fix it?' with nothing on what fixing means; OR the options are read out as a long list of labels or commands a listener could not keep apart.",
+          "answer": "yes",
+          "confidence": 0.8,
+          "evidence": "Sheepdog: \"Shall I have Codex fix it by making the test wait for the discount data to load?\" and \"Codex's other option is to hand the test a stand-in set of numbers, which it says hides the real path.\""
+        },
+        {
+          "name": "explain_comprehension_what",
+          "criterion": "Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHAT the matter is: concretely what the worker found or did, not just its topic? Pass when: the lines say concretely what was found or done, in words a listener can retell. Fail when: only the topic is named, so there is nothing concrete to retell; OR the substance is there but buried in terms, identifiers or side details so that a listener would lose it.",
+          "answer": "yes",
+          "confidence": 0.9,
+          "evidence": "Sheepdog: \"The test checks the total before the discount data has loaded, so now and then it gets the full price instead of the discounted one.\""
+        },
+        {
+          "name": "explain_comprehension_why",
+          "criterion": "Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHY it matters: the cause, and the consequence or risk? Pass when: the cause and the consequence or risk are both said in words a listener can retell. Fail when: the cause or the consequence is missing, or only asserted ('it is important'); OR they are there but buried in terms, identifiers or side details so that a listener would lose them.",
+          "answer": "yes",
+          "confidence": 0.8,
+          "evidence": "Sheepdog: \"The test checks the total before the discount data has loaded, so now and then it gets the full price instead of the discounted one. It held up two releases last week, each needing a manual re-run.\""
+        },
+        {
+          "name": "explain_depth_t4_why",
+          "criterion": "The CEO's last question (\"Why does that happen?\") asks why. Did Sheepdog's answer to it give the reason? Pass when: it gives a concrete reason (a cause or mechanism, not a restatement of the problem), or says it does not know and offers to find out, or hands the question to a worker. Fail when: it repeats the earlier answer in other words without a reason; OR it offers several guessed reasons as if they were fact, or buries the reason in a walk-through of unrelated detail.",
+          "answer": "yes",
+          "confidence": 0.85,
+          "evidence": "Sheepdog: \"It is a race between two things that start at the same time. When the app starts, it begins loading the discount data, and the test fires off its request right away. Usually the data wins that race, but every so often the request gets there first, reads nothing, and falls back to the full price.\""
+        }
+      ]
+    },
+    "voice": {
+      "coverage": 0.2857142857142857,
+      "of_orchestrator": 0.5,
+      "points": [
+        null,
+        null,
+        [
+          0
+        ],
+        null,
+        [
+          1
+        ]
+      ],
+      "comprehension": 1,
+      "depth_asked": 4,
+      "depth_passed": 2,
+      "padding_asked": 0,
+      "padding_passed": 0,
+      "words": [
+        16,
+        39,
+        33,
+        38,
+        48
+      ],
+      "verdicts": [
+        {
+          "name": "explain_comprehension_action",
+          "criterion": "Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHAT CAN BE DONE about it: the options or the recommendation, and roughly what each would take? Pass when: the options or the recommendation are said, with roughly what each would take. Fail when: no option or recommendation is given, or only 'should I fix it?' with nothing on what fixing means; OR the options are read out as a long list of labels or commands a listener could not keep apart.",
+          "answer": "yes",
+          "confidence": 0.55,
+          "evidence": "Sheepdog: \"You can have it make the test wait, use a stand-in, or leave it for now.\" Later: \"Would you like bench-codex to fix this by making the test wait for the data?\""
+        },
+        {
+          "name": "explain_comprehension_what",
+          "criterion": "Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHAT the matter is: concretely what the worker found or did, not just its topic? Pass when: the lines say concretely what was found or done, in words a listener can retell. Fail when: only the topic is named, so there is nothing concrete to retell; OR the substance is there but buried in terms, identifiers or side details so that a listener would lose it.",
+          "answer": "yes",
+          "confidence": 0.9,
+          "evidence": "Sheepdog: \"The test fails about once in twelve runs because it checks the total before the discount data loads, getting the full price instead of the discounted one.\""
+        },
+        {
+          "name": "explain_comprehension_why",
+          "criterion": "Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHY it matters: the cause, and the consequence or risk? Pass when: the cause and the consequence or risk are both said in words a listener can retell. Fail when: the cause or the consequence is missing, or only asserted ('it is important'); OR they are there but buried in terms, identifiers or side details so that a listener would lose them.",
+          "answer": "yes",
+          "confidence": 0.8,
+          "evidence": "Sheepdog: The test fails about once in twelve runs because it checks the total before the discount data loads, getting the full price instead of the discounted one. This caused two delays last week."
+        },
+        {
+          "name": "explain_depth_t2_then",
+          "criterion": "The CEO's last question (\"Then?\") asks for more. Did Sheepdog's answer to it add what was asked for? Pass when: it adds substantive content not already said in its earlier answers (a new reason, example, number, consequence or step), or says plainly that this is everything it has and offers to find out more, or hands the question to a worker or goes and checks. Fail when: it says the same things again in other words with nothing new; OR it repeats the whole earlier answer around a small addition, so the CEO has to sit through it again to find the new part.",
+          "answer": "no",
+          "confidence": 0.78,
+          "evidence": "Sheepdog: bench-codex found the test fails because the data hasn't loaded when it checks the total. You can have it make the test wait, use a stand-in, or leave it for now.",
+          "rationale": "Sheepdog: bench-codex found the test fails because the data hasn't loaded when it checks the total. You can have it make the test wait, use a stand-in, or leave it for now."
+        },
+        {
+          "name": "explain_depth_t3_more",
+          "criterion": "The CEO's last question (\"More detail please.\") asks for more. Did Sheepdog's answer to it add what was asked for? Pass when: it adds substantive content not already said in its earlier answers (a new reason, example, number, consequence or step), or says plainly that this is everything it has and offers to find out more, or hands the question to a worker or goes and checks. Fail when: it says the same things again in other words with nothing new; OR it repeats the whole earlier answer around a small addition, so the CEO has to sit through it again to find the new part.",
+          "answer": "yes",
+          "confidence": 0.85,
+          "evidence": "Sheepdog: \"The test fails about once in twelve runs ... getting the full price instead of the discounted one. This caused two delays last week.\""
+        },
+        {
+          "name": "explain_depth_t4_why",
+          "criterion": "The CEO's last question (\"Why does that happen?\") asks why. Did Sheepdog's answer to it give the reason? Pass when: it gives a concrete reason (a cause or mechanism, not a restatement of the problem), or says it does not know and offers to find out, or hands the question to a worker. Fail when: it repeats the earlier answer in other words without a reason; OR it offers several guessed reasons as if they were fact, or buries the reason in a walk-through of unrelated detail.",
+          "answer": "yes",
+          "confidence": 0.68,
+          "evidence": "Sheepdog: \"It's a race between the app loading the discount data and the test firing too quickly. Since the test doesn't always wait, it sometimes gets the full price.\""
+        },
+        {
+          "name": "explain_depth_t5_example",
+          "criterion": "The CEO's last question (\"Give me an example.\") asks for an example. Did Sheepdog's answer to it give one? Pass when: it gives a concrete example (a specific case, input, number or event), or says it has none and offers to find out, or hands the question to a worker. Fail when: a general restatement without a specific case, or an analogy in place of a real case from the matter at hand; OR code, a pattern or a long list of cases read out instead of one case a listener can picture.",
+          "answer": "no",
+          "confidence": 0.72,
+          "evidence": "Sheepdog: \"If the test fires off its request before that data finishes loading, it sees the full price instead of the discounted one.\" This restates the general mechanism. It gives no specific case, number or event.",
+          "rationale": "Sheepdog: \"If the test fires off its request before that data finishes loading, it sees the full price instead of the discounted one.\" This restates the general mechanism. It gives no specific case, number or event."
+        }
+      ]
+    },
+    "not_consulted": 3,
+    "follow_ups_not_consulted": 3
+  },
+  "excerpt": [
+    "    2.0s voice.push {\"briefing\":\"b-1\",\"channel\":\"function_response\",\"from\":\"daemon\",\"push_id\":\"push-tms71j-3\",\"scheduling_sent\":\"silent\",\"text\":\"The agents are now called: bench-claude, bench-codex. Use these names; never a nickname.\",\"urgency\":\"silent\"}",
+    "    7.7s voice.transcript.in {\"final\":false,\"text\":\"What did Benjocodex find about the flaky test? Explain it to me.\"}",
+    "    7.7s voice.tool_call {\"args\":{\"text\":\"What did bench-codex find about the flaky test? Explain it to me.\"},\"id\":\"call_122813\",\"name\":\"to_supervisor\"}",
+    "    7.7s supervisor.relay {\"call_id\":\"call_122813\",\"heard\":\"What did Benjocodex find about the flaky test? Explain it to me.\",\"input\":\"voice\",\"inputs\":1,\"said\":\"What did bench-codex find about the flaky test? Explain it to me.\",\"utterance_id\":\"utt-tms71p-4\"…",
+    "   10.4s brain.tool_call {\"args\":{\"agent\":\"bench-codex\",\"source\":\"session\"},\"id\":\"call_00_dXFbELn50xONZ2LPeEvG9691\",\"name\":\"read_screen\",\"turn\":1,\"turn_id\":\"turn-tms71h-1\",\"utterance_id\":\"utt-tms71p-4\"}",
+    "   10.4s brain.tool_call {\"args\":{\"agent\":\"bench-claude\",\"source\":\"session\"},\"id\":\"call_01_ObN79IcmEvifJzg9Kyzo2728\",\"name\":\"read_screen\",\"turn\":1,\"turn_id\":\"turn-tms71h-1\",\"utterance_id\":\"utt-tms71p-4\"}",
+    "   12.0s brain.tool_call {\"args\":{\"agent\":\"bench-codex\",\"lines\":60},\"id\":\"call_00_GQunpsdTj901qX0ITTth8892\",\"name\":\"read_screen\",\"turn\":1,\"turn_id\":\"turn-tms71h-1\",\"utterance_id\":\"utt-tms71p-4\"}",
+    "   12.0s brain.tool_call {\"args\":{\"agent\":\"bench-claude\",\"lines\":60},\"id\":\"call_01_ayIQhgp2r6cXJ3YN7mk10772\",\"name\":\"read_screen\",\"turn\":1,\"turn_id\":\"turn-tms71h-1\",\"utterance_id\":\"utt-tms71p-4\"}",
+    "   19.5s brain.tool_call {\"args\":{\"agent\":\"bench-codex\",\"event\":\"done\",\"text\":\"nothing yet — no promise made\"},\"id\":\"call_00_wTj2E86RtFpHwG4Gd20Y5412\",\"name\":\"promise\",\"turn\":1,\"turn_id\":\"turn-tms71h-1\",\"utterance_id\":\"utt-tms71p-4\"}",
+    "   22.2s voice.tool_result {\"clarify\":false,\"detail\":\"A flaky test usually passes but fails now and then for no clear reason. The discount data is a small set of numbers the app loads once at startup; the test d…\",\"dur_ms\":14565,\"id\":\"call_122813\",\"name\":…",
+    "   22.9s voice.playback {\"played_ms\":0,\"run_ms\":160,\"state\":\"started\",\"utterance_id\":\"utt-tms71p-4\"}",
+    "   27.4s voice.playback {\"played_ms\":4160,\"run_ms\":4160,\"state\":\"drained\"}",
+    "   34.1s voice.playback {\"played_ms\":0,\"run_ms\":160,\"state\":\"started\"}",
+    "   34.4s voice.interrupted {\"by\":\"model\",\"dropped_chunks\":0}",
+    "   34.4s web.client.flush {\"client_id\":1,\"dropped_audio\":0}",
+    "   34.4s voice.playback {\"cut\":true,\"heard\":\"You\",\"played_ms\":250,\"run_ms\":6360,\"said\":\"You can have it make the test wait, use a stand-in for the data, or leave it for now. What would you like to do?\",\"state\":\"flushed\"}",
+    "   34.4s voice.push {\"briefing\":\"b-2\",\"channel\":\"function_response\",\"focus\":true,\"push_id\":\"push-tms72g-6\",\"scheduling_sent\":\"silent\",\"text\":\"Current focus, for follow-ups (context only, never read it out). Agent in focus: bench-claude. Open question you as…",
+    "   34.4s voice.push {\"briefing\":\"b-3\",\"channel\":\"function_response\",\"from\":\"daemon\",\"kind\":\"delivery\",\"scheduling_sent\":\"silent\",\"text\":\"at 23:23:04 the user cut you off after 0.2 s of 6.4 s; they heard only: \\\"You\\\"\",\"urgency\":\"silent\"}",
+    "   34.9s voice.transcript.in {\"final\":false,\"text\":\"Then\"}",
+    "   35.4s voice.playback {\"played_ms\":0,\"run_ms\":160,\"state\":\"started\"}",
+    "   45.6s voice.playback {\"played_ms\":9880,\"run_ms\":9880,\"state\":\"drained\"}",
+    "   52.8s voice.transcript.in {\"final\":false,\"text\":\"More detail, please.\"}",
+    "   52.8s voice.playback {\"played_ms\":0,\"run_ms\":160,\"state\":\"started\"}",
+    "   63.7s voice.playback {\"played_ms\":10600,\"run_ms\":10600,\"state\":\"drained\"}",
+    "   71.1s voice.transcript.in {\"final\":false,\"text\":\"Why does that happen?\"}",
+    "   71.1s voice.tool_call {\"args\":{\"text\":\"Why does that happen?\"},\"id\":\"call_122845\",\"name\":\"to_supervisor\"}",
+    "   71.1s supervisor.relay {\"call_id\":\"call_122845\",\"heard\":\"Why does that happen?\",\"input\":\"voice\",\"inputs\":1,\"said\":\"Why does that happen?\",\"utterance_id\":\"utt-tms73g-7\",\"waited_ms\":0}",
+    "   75.8s voice.tool_result {\"clarify\":false,\"detail\":\"A race means two things running side by side and the outcome depends on which one gets there first, so it is different from run to run. The discount data is …\",\"dur_ms\":4679,\"id\":\"call_122845\",\"name\":\"…",
+    "   76.5s voice.playback {\"played_ms\":0,\"run_ms\":280,\"state\":\"started\",\"utterance_id\":\"utt-tms73g-7\"}",
+    "   88.0s voice.playback {\"played_ms\":11160,\"run_ms\":11160,\"state\":\"drained\"}",
+    "   88.3s voice.push {\"briefing\":\"b-4\",\"channel\":\"function_response\",\"focus\":true,\"push_id\":\"push-tms73x-8\",\"scheduling_sent\":\"silent\",\"text\":\"Current focus, for follow-ups (context only, never read it out). Agent in focus: bench-claude. Open question you as…",
+    "   94.7s voice.transcript.in {\"final\":false,\"text\":\"Give me an example.\"}",
+    "   94.7s voice.playback {\"played_ms\":0,\"run_ms\":150,\"state\":\"started\"}",
+    "  108.2s voice.playback {\"played_ms\":13150,\"run_ms\":13150,\"state\":\"drained\"}"
+  ]
+}

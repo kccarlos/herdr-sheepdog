@@ -1,0 +1,15 @@
+23:54:55 [1/15] explain-zh-notes-ledger r1 (:7912): pass (end_call, ) 4 turns 101s ≈ $0.074, total ≈ $0.07
+23:55:21 [2/15] explain-en-invoice-job r1 (:7911): pass (end_call, ) 4 turns 127s ≈ $0.108, total ≈ $0.18
+23:55:35 [3/15] explain-control-zh-busy r1 (:7912): pass (end_call, ) 2 turns 40s ≈ $0.021, total ≈ $0.20
+23:57:02 [4/15] explain-zh-notes-ledger r2 (:7911): pass (end_call, ) 4 turns 100s ≈ $0.057, total ≈ $0.26
+23:57:07 [5/15] explain-en-invoice-job r2 (:7912): pass (end_call, ) 4 turns 91s ≈ $0.069, total ≈ $0.33
+23:57:39 [6/15] explain-control-zh-busy r2 (:7911): pass (end_call, ) 2 turns 37s ≈ $0.020, total ≈ $0.35
+23:58:38 [7/15] explain-zh-notes-ledger r3 (:7912): fail (end_call, brain_fallback) 4 turns 90s ≈ $0.063, total ≈ $0.41
+23:59:20 [8/15] explain-control-zh-busy r3 (:7912): pass (end_call, ) 2 turns 42s ≈ $0.021, total ≈ $0.43
+23:59:46 [9/15] explain-en-invoice-job r3 (:7911): pass (end_call, ) 4 turns 126s ≈ $0.098, total ≈ $0.53
+00:01:06 [10/15] explain-zh-notes-ledger r4 (:7912): pass (end_call, ) 4 turns 106s ≈ $0.067, total ≈ $0.60
+00:01:23 [11/15] explain-en-invoice-job r4 (:7911): pass (end_call, ) 4 turns 97s ≈ $0.074, total ≈ $0.67
+00:01:42 [12/15] explain-control-zh-busy r4 (:7912): pass (end_call, ) 2 turns 35s ≈ $0.019, total ≈ $0.69
+00:03:02 [13/15] explain-zh-notes-ledger r5 (:7911): pass (end_call, ) 4 turns 98s ≈ $0.059, total ≈ $0.75
+00:03:43 [14/15] explain-en-invoice-job r5 (:7912): pass (end_call, ) 4 turns 120s ≈ $0.096, total ≈ $0.84
+00:03:49 [15/15] explain-control-zh-busy r5 (:7911): pass (end_call, ) 2 turns 46s ≈ $0.026, total ≈ $0.87

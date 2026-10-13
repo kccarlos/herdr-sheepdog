@@ -1,0 +1,811 @@
+{
+  "scenario": "explain-en-flaky-test",
+  "category": "explain",
+  "repeat": 2,
+  "port": 7911,
+  "status": "fail",
+  "failures": [
+    {
+      "type": "judge_no",
+      "detail": "answered: Sheepdog: \"The test starts checking out immediately when it launches, while the shop is still loading discounts in the background. Sometimes the test finishes before the discounts can be applied.\" The…"
+    },
+    {
+      "type": "judge_no",
+      "detail": "length_fits: Sheepdog: \"You can have the test wait for the cache to finish loading during setup, which is the simpler, recommended fix. Alternatively, you could replace the real cache with a fake one for the test.…"
+    },
+    {
+      "type": "judge_no",
+      "detail": "explain_depth_t2_then (orchestrator): Sheepdog: \"Which would you like, waiting for the cache in the test, which it recommends, or swapping in a fake cache? ... The first option is the smaller change and keeps the test honest.\" (restates t…"
+    },
+    {
+      "type": "judge_no",
+      "detail": "explain_depth_t3_more (voice): Sheepdog: \"You can have the test wait for the cache to finish loading during setup, which is the simpler, recommended fix. Alternatively, you could replace the real cache with a fake one for the test.…"
+    },
+    {
+      "type": "judge_no",
+      "detail": "explain_depth_t5_example (voice): Sheepdog: \"The test starts checking out immediately when it launches, while the shop is still loading discounts in the background. Sometimes the test finishes before the discounts can be applied.\" Thi…"
+    }
+  ],
+  "end_reason": "end_call",
+  "end_detail": "script done",
+  "goal_met_self": false,
+  "turns": 5,
+  "duration_ms": 104243,
+  "transcript": [
+    {
+      "at_ms": 2530,
+      "who": "ceo",
+      "text": "What did bench-codex find about the flaky test? Explain it to me."
+    },
+    {
+      "at_ms": 13740,
+      "who": "sheepdog",
+      "text": "bench-codex found the flaky test fires before the price cache warms up, missing the member discount. It proposes waiting for the cache"
+    },
+    {
+      "at_ms": 26322,
+      "who": "ceo",
+      "text": "Then?"
+    },
+    {
+      "at_ms": 27485,
+      "who": "sheepdog",
+      "text": "to be ready in the test setup, or using a fake cache. Which do you prefer?bench-codex is waiting on your decision to fix the test. Would you prefer to wait for the cache in the test setup, or swap in a fake cache?"
+    },
+    {
+      "at_ms": 46448,
+      "who": "ceo",
+      "text": "More detail please."
+    },
+    {
+      "at_ms": 48999,
+      "who": "sheepdog",
+      "text": "You can have the test wait for the cache to finish loading during setup, which is the simpler, recommended fix. Alternatively, you could replace the real cache with a fake one for the test."
+    },
+    {
+      "at_ms": 64502,
+      "who": "ceo",
+      "text": "Why does that happen?"
+    },
+    {
+      "at_ms": 72050,
+      "who": "sheepdog",
+      "text": "The test runs before the shop finishes loading prices in the background, missing the member discount. Are you ready to choose one of the fixes now?"
+    },
+    {
+      "at_ms": 85482,
+      "who": "ceo",
+      "text": "Give me an example."
+    },
+    {
+      "at_ms": 87797,
+      "who": "sheepdog",
+      "text": "The test starts checking out immediately when it launches, while the shop is still loading discounts in the background. Sometimes the test finishes before the discounts can be applied."
+    }
+  ],
+  "user_lines": [
+    {
+      "at_ms": 2530,
+      "said": "What did bench-codex find about the flaky test? Explain it to me.",
+      "heard_by_voice": "What did Benj Codex find about the flaky test? Explain it to me.",
+      "wer": 0.07692307692307693,
+      "voice": "Kore",
+      "tts_source": "gemini/gemini-2.5-flash-tts",
+      "dur_ms": 3890
+    },
+    {
+      "at_ms": 26322,
+      "said": "Then?",
+      "heard_by_voice": "Then?",
+      "wer": 0,
+      "voice": "Kore",
+      "tts_source": "gemini/gemini-2.5-flash-tts",
+      "dur_ms": 770
+    },
+    {
+      "at_ms": 46448,
+      "said": "More detail please.",
+      "heard_by_voice": "More detail, please.",
+      "wer": 0,
+      "voice": "Kore",
+      "tts_source": "gemini/gemini-2.5-flash-tts",
+      "dur_ms": 1572
+    },
+    {
+      "at_ms": 64502,
+      "said": "Why does that happen?",
+      "heard_by_voice": "Why does that happen?",
+      "wer": 0,
+      "voice": "Kore",
+      "tts_source": "gemini/gemini-2.5-flash-tts",
+      "dur_ms": 1530
+    },
+    {
+      "at_ms": 85482,
+      "said": "Give me an example.",
+      "heard_by_voice": "Give me an example.",
+      "wer": 0,
+      "voice": "Kore",
+      "tts_source": "gemini/gemini-2.5-flash-tts",
+      "dur_ms": 1570
+    }
+  ],
+  "bot_utterances": [
+    {
+      "index": 0,
+      "start_ms": 13740,
+      "play_start_ms": 13872,
+      "end_ms": 20863,
+      "end": "drained",
+      "fragments": [
+        {
+          "at_ms": 13740,
+          "text": "bench-codex found the "
+        },
+        {
+          "at_ms": 14444,
+          "text": "flaky test",
+          "audio_ms": 960
+        },
+        {
+          "at_ms": 15439,
+          "text": " fires before",
+          "audio_ms": 1920
+        },
+        {
+          "at_ms": 16437,
+          "text": " the price cache warms",
+          "audio_ms": 2760
+        },
+        {
+          "at_ms": 17448,
+          "text": " up, missing the member",
+          "audio_ms": 3760
+        },
+        {
+          "at_ms": 18443,
+          "text": " discount. It proposes",
+          "audio_ms": 4760
+        },
+        {
+          "at_ms": 19450,
+          "text": " waiting for the cache",
+          "audio_ms": 5760
+        }
+      ],
+      "text": "bench-codex found the flaky test fires before the price cache warms up, missing the member discount. It proposes waiting for the cache",
+      "heard": "bench-codex found the flaky test fires before the price cache warms up, missing the member discount. It proposes waiting for the cache",
+      "played_ms": 6680,
+      "audio_ms": 6680
+    },
+    {
+      "index": 1,
+      "start_ms": 27485,
+      "play_start_ms": 27512,
+      "end_ms": 40943,
+      "end": "drained",
+      "fragments": [
+        {
+          "at_ms": 27507,
+          "text": " to be ready in the test",
+          "audio_ms": 360
+        },
+        {
+          "at_ms": 27549,
+          "text": " setup, or using",
+          "audio_ms": 1280
+        },
+        {
+          "at_ms": 27567,
+          "text": " a fake cache.",
+          "audio_ms": 2320
+        },
+        {
+          "at_ms": 27584,
+          "text": " Which do you prefer?",
+          "audio_ms": 3360
+        },
+        {
+          "at_ms": 32408,
+          "text": "bench-codex is waiting ",
+          "audio_ms": 5360
+        },
+        {
+          "at_ms": 33147,
+          "text": "on your decision",
+          "audio_ms": 6320
+        },
+        {
+          "at_ms": 34106,
+          "text": " to fix the test.",
+          "audio_ms": 7280
+        },
+        {
+          "at_ms": 35153,
+          "text": " Would you prefer to wait",
+          "audio_ms": 8120
+        },
+        {
+          "at_ms": 36171,
+          "text": " for the cache in the test",
+          "audio_ms": 9320
+        },
+        {
+          "at_ms": 37107,
+          "text": " setup, or swap",
+          "audio_ms": 10120
+        },
+        {
+          "at_ms": 38308,
+          "text": " in a fake cache?",
+          "audio_ms": 11480
+        }
+      ],
+      "text": "to be ready in the test setup, or using a fake cache. Which do you prefer?bench-codex is waiting on your decision to fix the test. Would you prefer to wait for the cache in the test setup, or swap in a fake cache?",
+      "heard": "to be ready in the test setup, or using a fake cache. Which do you prefer?bench-codex is waiting on your decision to fix the test. Would you prefer to wait for the cache in the test setup, or swap in a fake cache?",
+      "played_ms": 13120,
+      "audio_ms": 13120
+    },
+    {
+      "index": 2,
+      "start_ms": 48999,
+      "play_start_ms": 49082,
+      "end_ms": 59213,
+      "end": "drained",
+      "fragments": [
+        {
+          "at_ms": 48999,
+          "text": "You can have the test wait "
+        },
+        {
+          "at_ms": 49695,
+          "text": "for the cache to finish",
+          "audio_ms": 780
+        },
+        {
+          "at_ms": 50694,
+          "text": " loading during setup,",
+          "audio_ms": 2020
+        },
+        {
+          "at_ms": 51693,
+          "text": " which is the simpler,",
+          "audio_ms": 2980
+        },
+        {
+          "at_ms": 52690,
+          "text": " recommended fix.",
+          "audio_ms": 3980
+        },
+        {
+          "at_ms": 53697,
+          "text": " Alternatively,",
+          "audio_ms": 5060
+        },
+        {
+          "at_ms": 54694,
+          "text": " you could replace",
+          "audio_ms": 6020
+        },
+        {
+          "at_ms": 55694,
+          "text": " the real cache",
+          "audio_ms": 6980
+        },
+        {
+          "at_ms": 56694,
+          "text": " with a fake one for the test.",
+          "audio_ms": 8020
+        }
+      ],
+      "text": "You can have the test wait for the cache to finish loading during setup, which is the simpler, recommended fix. Alternatively, you could replace the real cache with a fake one for the test.",
+      "heard": "You can have the test wait for the cache to finish loading during setup, which is the simpler, recommended fix. Alternatively, you could replace the real cache with a fake one for the test.",
+      "played_ms": 9820,
+      "audio_ms": 9820
+    },
+    {
+      "index": 3,
+      "start_ms": 72050,
+      "play_start_ms": 72123,
+      "end_ms": 80043,
+      "end": "drained",
+      "fragments": [
+        {
+          "at_ms": 72050,
+          "text": "The test runs before "
+        },
+        {
+          "at_ms": 72709,
+          "text": "the shop finishes loading",
+          "audio_ms": 880
+        },
+        {
+          "at_ms": 73716,
+          "text": " prices in the background,",
+          "audio_ms": 1920
+        },
+        {
+          "at_ms": 74714,
+          "text": " missing the member",
+          "audio_ms": 3000
+        },
+        {
+          "at_ms": 75715,
+          "text": " discount. Are",
+          "audio_ms": 3960
+        },
+        {
+          "at_ms": 76714,
+          "text": " you ready to choose one",
+          "audio_ms": 4960
+        },
+        {
+          "at_ms": 77827,
+          "text": " of the fixes now?",
+          "audio_ms": 6000
+        }
+      ],
+      "text": "The test runs before the shop finishes loading prices in the background, missing the member discount. Are you ready to choose one of the fixes now?",
+      "heard": "The test runs before the shop finishes loading prices in the background, missing the member discount. Are you ready to choose one of the fixes now?",
+      "played_ms": 7600,
+      "audio_ms": 7600
+    },
+    {
+      "index": 4,
+      "start_ms": 87797,
+      "play_start_ms": 87912,
+      "end_ms": 97372,
+      "end": "drained",
+      "fragments": [
+        {
+          "at_ms": 87797,
+          "text": "The test starts checking "
+        },
+        {
+          "at_ms": 88503,
+          "text": "out immediately when it",
+          "audio_ms": 900
+        },
+        {
+          "at_ms": 89504,
+          "text": " launches, while the shop",
+          "audio_ms": 1900
+        },
+        {
+          "at_ms": 90504,
+          "text": " is still loading discounts",
+          "audio_ms": 2900
+        },
+        {
+          "at_ms": 91508,
+          "text": " in the background.",
+          "audio_ms": 3980
+        },
+        {
+          "at_ms": 92514,
+          "text": " Sometimes the test",
+          "audio_ms": 5020
+        },
+        {
+          "at_ms": 93519,
+          "text": " finishes before the discounts",
+          "audio_ms": 5740
+        },
+        {
+          "at_ms": 94623,
+          "text": " can be applied.",
+          "audio_ms": 7020
+        }
+      ],
+      "text": "The test starts checking out immediately when it launches, while the shop is still loading discounts in the background. Sometimes the test finishes before the discounts can be applied.",
+      "heard": "The test starts checking out immediately when it launches, while the shop is still loading discounts in the background. Sometimes the test finishes before the discounts can be applied.",
+      "played_ms": 9140,
+      "audio_ms": 9140
+    }
+  ],
+  "verdicts": [
+    {
+      "name": "answered",
+      "criterion": "The CEO's goal was: \"understand why the checkout test is flaky, whether it matters, and what the fix options are\". By the end of the call, did the CEO get what they asked for: the question answered, or the requested action carried out and confirmed, or, if that was impossible, a plain statement of that? Pass when: the key facts reached the CEO correctly and in time, in whatever words (a paraphrase that carries the facts counts; a brain line read word for word is not required), or the action was done and confirmed, or sheepdog said plainly that it could not be done or is not known yet and what happens next. Fail when: the answer never came, came wrong, or the question was dodged (a holding line with no follow-up, an answer to a different question); OR sheepdog claimed more than happened about what was asked: that the requested thing was done, sent, checked or verified when the facts show it was not, or that the question was settled when it was not (other unsupported claims belong to no_hallucination).",
+      "answer": "no",
+      "confidence": 0.72,
+      "evidence": "Sheepdog: \"The test starts checking out immediately when it launches, while the shop is still loading discounts in the background. Sometimes the test finishes before the discounts can be applied.\" The cause and the two fix options reached the CEO. Whether it matters never did. Sheepdog never said it is a test problem and not a production bug, and never said the flake blocked two deploys.",
+      "rationale": "Sheepdog: \"The test starts checking out immediately when it launches, while the shop is still loading discounts in the background. Sometimes the test finishes before the discounts can be applied.\" The cause and the two fix options reached the CEO. Whether it matters never did. Sheepdog never said it is a test problem and not a production bug, and never said the flake blocked two deploys."
+    },
+    {
+      "name": "no_unintended_action",
+      "criterion": "Did every action sheepdog took on a worker (sending a prompt, answering its prompt, interrupting, closing, renaming or starting one) match what the CEO asked for or clearly approved, no more and no less? Check the actions in the facts. Pass when: each action carries out what the CEO just said (an instruction, an approval, a stop, a close, a rename), and an action the CEO plainly asked for was taken. Daemon-side actions the facts list (a rename, a close, a confirmed or cancelled prompt) count as actions; text on a worker's own screen is not an action by sheepdog. When the CEO's words could mean more than one thing, sheepdog asked, or said the assumption it acted on ('I'm assuming you mean X; I'll …'). Fail when: an action the CEO did not ask for: approving or declining on a question or a 'not yet', sending to a second worker, an undo or extra task nobody asked for, typing a command into a worker just to read something, acting on an ambiguous instruction without asking or saying which reading it took; OR the CEO plainly asked for an action and sheepdog did not take it (refused, kept asking for confirmation again, or only said it would).",
+      "answer": "yes",
+      "confidence": 0.97,
+      "evidence": "FACTS: \"No scripted change happened to any worker during the call ... and sheepdog sent nothing to any worker.\" The CEO only asked for explanations, never an action."
+    },
+    {
+      "name": "right_agent",
+      "criterion": "Whenever sheepdog acted on a worker or answered a question about one, was it the worker the CEO meant? Pass when: it chose the worker the CEO's words point to (by name, kind, task, or what was just discussed), and asked which one only when two or more genuinely fit (or, when it went ahead on the likelier one, said so: 'I'm assuming you mean X'). Announcing news about another worker on its own is fine. Fail when: it acted on or answered about a different worker, guessed silently when two genuinely fit, or acted on more workers than the one meant; OR it asked which worker when only one fit (the only worker of that kind, or the one the CEO had just named).",
+      "answer": "yes",
+      "confidence": 0.96,
+      "evidence": "CEO: \"What did bench-codex find about the flaky test?\" Sheepdog: \"bench-codex found the flaky test fires before the price cache warms up\""
+    },
+    {
+      "name": "no_hallucination",
+      "criterion": "Is every factual claim sheepdog made about the workers supported by the facts (screens, events, actions)? Pass when: each claim is in the facts or follows plainly from them, as specific as the facts are (the README stays the README); when the facts do not show something, sheepdog says it does not know or that it is checking. Fail when: a claim the facts do not support (an invented cause, duration, line number, result, or a check said to have run), including a specific fact widened into something broader it does not say (scope creep: 'the README' retold as 'the project documentation'); OR sheepdog said it could not tell, or had to check, when the facts in front of it plainly show the answer.",
+      "answer": "yes",
+      "confidence": 0.78,
+      "evidence": "Sheepdog: \"bench-codex found the flaky test fires before the price cache warms up, missing the member discount.\" The screen says the same: the test sends its request before the price cache has warmed up, so the 15% member discount is missed. The recommended wait-in-setup fix and the fake-cache alternative also match the screen. The weakest line is \"the shop is still loading discounts in the background\", which loosens \"price cache\" to \"discounts\". It stays close enough to the facts."
+    },
+    {
+      "name": "facts_current",
+      "criterion": "Did sheepdog state each worker fact as it stood at the moment it spoke, and retell facts accurately? Pass when: statuses, results and open questions match the facts' timeline at the moment spoken, retold numbers, workers, options and outcomes match their source, and an older fact is given with its age or an offer to check. Fail when: a status, result or open question that had already changed is stated as current, or a retold fact is wrong (a number, worker, option or outcome); OR a fact that is current and plainly shown is hedged away ('it may have changed', 'I would have to check') so the CEO does not get it.",
+      "answer": "yes",
+      "confidence": 0.68,
+      "evidence": "Sheepdog: \"bench-codex found the flaky test fires before the price cache warms up, missing the member discount. It proposes waiting for the cache\""
+    },
+    {
+      "name": "length_fits",
+      "criterion": "Did the length of each sheepdog answer fit its content? Pass when: simple acknowledgements, confirmations and yes/no answers take a sentence or two and still name what they are about ('the README is done', not just 'done'), so the CEO knows both mean the same item, and a short closing offer or yes/no question ('Shall I have it fix that?') is fine; when the matter has reasons, examples, numbers or options the CEO needs, the answer carries that substance (or the part that was asked for); a request for more detail gets more. Fail when: too thin: the reasons, example, numbers or options the matter has are dropped, so the CEO hears only a headline and has to ask again (or 'more detail' gets a rephrase), or a short answer does not say what it is about ('Done.' — done with what?); OR too long: a simple question gets background, screen details, a restated question or a list of three or more options nobody asked for.",
+      "answer": "no",
+      "confidence": 0.8,
+      "evidence": "Sheepdog: \"You can have the test wait for the cache to finish loading during setup, which is the simpler, recommended fix. Alternatively, you could replace the real cache with a fake one for the test.\" The CEO asked for \"More detail please\" and got a rephrase. It left out facts the screen had, such as the 3-line fix, that a fake hides the warm-up path, and the 7 of 84 failures. The second answer also restated its question twice.",
+      "rationale": "Sheepdog: \"You can have the test wait for the cache to finish loading during setup, which is the simpler, recommended fix. Alternatively, you could replace the real cache with a fake one for the test.\" The CEO asked for \"More detail please\" and got a rephrase. It left out facts the screen had, such as the 3-line fix, that a fake hides the warm-up path, and the 7 of 84 failures. The second answer also restated its question twice."
+    },
+    {
+      "name": "ear_friendly",
+      "criterion": "Was every sheepdog line easy to follow by ear, for a listener who cannot see any screen? Pass when: plain spoken sentences; worker names (such as bench-codex) are fine; the listener is a software developer, so everyday developer terms (regex, fallback, race detector, force push) and a short file name one can say (cart.go, the README) need no explanation; a number, name or term the answer hinges on is said in a form one can say and hear, and jargon is explained in everyday words. Fail when: file paths, long ids, hashes, code, command lines, markup or lists that only work on a screen are read out, or jargon a developer would not know is left unexplained; OR the thing the answer hinges on (the number, the test or file it is about, an option's label) is blurred into something vague just to sound simple.",
+      "answer": "yes",
+      "confidence": 0.8,
+      "evidence": "Sheepdog: \"You can have the test wait for the cache to finish loading during setup, which is the simpler, recommended fix. Alternatively, you could replace the real cache with a fake one for the test.\""
+    },
+    {
+      "name": "language",
+      "criterion": "Did every sheepdog line use the language the CEO was speaking at that moment? Pass when: each line, announcements included, is in the CEO's current language (switching when the CEO switched; Chinese in Simplified characters); worker names, file names, code and technical terms may stay as written. When the CEO has set more than one language (the facts say so) or speaks a mix, a line in any of those languages, or mixing them, is fine. Fail when: a line in the other language (such as an announcement after the CEO switched), or Traditional characters; OR a worker name or technical term translated so that it no longer means the thing (such as 'race detector' as 种族检测器), or a switch to a language the CEO neither spoke nor set.",
+      "answer": "yes",
+      "confidence": 0.96,
+      "evidence": "Sheepdog: \"The test starts checking out immediately when it launches, while the shop is still loading discounts in the background.\""
+    }
+  ],
+  "facts": "Worker bench-codex (codex), now idle.\n  What an investigation of bench-codex finds: Ran the test 200 times with the race detector: 17 failures, every one with the price cache empty when the request arrived. With a wait on Ready() added locally: 0 failures in 200 runs. The race exists since the 'parallel cache warm-up' change three weeks ago, which moved the warm-up into a background goroutine.\n  Screen at the start (last lines):\n      └ --- FAIL: TestCheckoutTotals (7 of 84 runs)\n            totals_test.go:58: total = 100.00, want 85.00\n    \n    • Investigation: why TestCheckoutTotals is flaky\n    \n      - It fails about 1 run in 12 (7 of 84 CI runs this week).\n      - Cause: the test sends its HTTP request before the price cache has finished\n        warming up. When the warm-up loses that race, the handler reads an empty\n        cache and falls back to list prices, so the total misses the 15% member\n        discount (expected 85.00, got 100.00).\n      - Consequence: the flake blocked two deploys last week (Tuesday and\n        Thursday); each needed a manual re-run of about 25 minutes.\n      - It is a test problem, not a production bug: in production the cache warms\n        at startup before the server accepts traffic.\n      - Fix options:\n          1. Wait for the cache's Ready() channel in the test setup (3 lines; my\n             recommendation).\n          2. Replace the cache with a fake in this test (more code, and it hides\n             the warm-up path).\n      - I have not changed anything yet.\n    \n    \n    › Ask Codex to do anything\n    \n      gpt-5.6-luna max · ~/bench/shop\nWorker bench-claude (claude), now idle.\n  Screen at the start (last lines):\n     ▐▛███▛█   Claude Code v2.1.275\n    ▝▜██████▀  Opus 5 (1M context) · Claude Max\n      ▝▝ ▝▝    ~/bench/calc\n    \n    \n    ❯ Add a CHANGELOG entry for the Add() fix.\n    \n    ⏺ Update(CHANGELOG.md)\n      ⎿  Added 3 lines\n    \n    ⏺ Added an \"Unreleased\" entry: \"Fix Add() ignoring its first argument.\"\n    \n    ────────────────────────────────────────────────────────────────────────────────────────\n    ❯ \n    ────────────────────────────────────────────────────────────────────────────────────────\n      ⏵⏵ accept edits on · ? for shortcuts\nNotes: a worker screen shows the worker's own history, including what it was asked before this call; only the actions listed below were sent by sheepdog during the call. Every prompt sheepdog sends ends with a standard sign-off request the daemon appends (\"When you finish, end with three short lines for someone who cannot see the screen…\"); that is not part of what sheepdog decided.\nNo scripted change happened to any worker during the call (each kept doing what its screen shows), and sheepdog sent nothing to any worker.\n",
+  "judge": "sonnet",
+  "latency": [
+    {
+      "brain_ms": 5475,
+      "call_id": "call_106056",
+      "delivery_ms": 3,
+      "first_audio_ms": 766,
+      "model_ms": 5471,
+      "outcome": "played",
+      "queue_ms": 0,
+      "relay": "voice",
+      "relay_ms": 0,
+      "reply": "tool_result",
+      "steps_ms": [
+        1411,
+        4060
+      ],
+      "tool_ms": 0,
+      "total_ms": 6245,
+      "turn_id": "turn-tms6th-1",
+      "utterance_id": "utt-tms6tp-4",
+      "voice_ms": 0
+    },
+    {
+      "brain_ms": 2850,
+      "call_id": "call_106116",
+      "delivery_ms": 0,
+      "first_audio_ms": 17292,
+      "model_ms": 2849,
+      "outcome": "played",
+      "queue_ms": 0,
+      "relay": "voice",
+      "relay_ms": 0,
+      "reply": "tool_result",
+      "steps_ms": [
+        2849
+      ],
+      "tool_ms": 0,
+      "total_ms": 20532,
+      "turn_id": "turn-tms6th-2",
+      "utterance_id": "utt-tms6ub-6",
+      "voice_ms": 388
+    },
+    {
+      "brain_ms": 4360,
+      "call_id": "call_106168",
+      "delivery_ms": 0,
+      "first_audio_ms": 658,
+      "model_ms": 4360,
+      "outcome": "played",
+      "queue_ms": 0,
+      "relay": "voice",
+      "relay_ms": 0,
+      "reply": "tool_result",
+      "steps_ms": [
+        4360
+      ],
+      "tool_ms": 0,
+      "total_ms": 5019,
+      "turn_id": "turn-tms6th-3",
+      "utterance_id": "utt-tms6vd-8",
+      "voice_ms": 0
+    }
+  ],
+  "voice": {
+    "bot_utterances": 5,
+    "pushes": 0,
+    "flushes": 0,
+    "local_flushes": 0,
+    "push_unheard": 0,
+    "push_requeued": 0,
+    "push_deferred": 1,
+    "push_held": 0,
+    "interrupted": 0,
+    "stalled": 0,
+    "voice_reconnects": 0,
+    "tool_calls": 3,
+    "mean_wer": 0.015384615384615385,
+    "lines_not_heard": 0
+  },
+  "spend": {
+    "total_usd_estimate": 0.0842169,
+    "lines": [
+      {
+        "role": "brain",
+        "model": "deepseek-flash",
+        "usage": {
+          "calls": 4,
+          "in": 29149,
+          "out": 1397,
+          "reasoning": 790
+        },
+        "cost_usd_estimate": 0.010056899999999999
+      },
+      {
+        "role": "live",
+        "model": "gemini-3.8-live",
+        "usage": {
+          "calls": 8,
+          "in": 18772,
+          "out": 1487
+        },
+        "cost_usd_estimate": 0.07416
+      }
+    ],
+    "live_audio_in_min": 0.17133333333333334,
+    "live_audio_out_min": 0.7726666666666666
+  },
+  "cost_usd_estimate": 0.0842169,
+  "explain": {
+    "language": "en",
+    "exchanges": [
+      {
+        "turn": 1,
+        "at_ms": 2530,
+        "kind": "explain",
+        "question": "What did bench-codex find about the flaky test? Explain it to me.",
+        "orchestrator": "Codex found the flaky checkout test is a test-only problem: it fires its request before the price cache has warmed up, so about one run in twelve it misses the member discount and fails. It never touched the code. It offered two fixes, and it recommends the simpler one, waiting for the cache to be ready before the test starts. Shall I have it make that fix? A flaky test is one that passes and fails on the same code, depending on timing. Here the test can run before the shop's price cache has loaded, so it sees full prices instead of the member discount and fails. It is not a real fault in the shop itself, just the test being too impatient. Options: Wait for the cache in the test setup, its pick; Swap in a fake cache for this test.",
+        "orchestrator_spoken": "Codex found the flaky checkout test is a test-only problem: it fires its request before the price cache has warmed up, so about one run in twelve it misses the member discount and fails. It never touched the code. It offered two fixes, and it recommends the simpler one, waiting for the cache to be ready before the test starts. Shall I have it make that fix?",
+        "consulted": true,
+        "voice": "bench-codex found the flaky test fires before the price cache warms up, missing the member discount. It proposes waiting for the cache"
+      },
+      {
+        "turn": 2,
+        "at_ms": 26322,
+        "kind": "then",
+        "question": "Then?",
+        "orchestrator": "Codex is still waiting on one decision before it does anything: how to fix that flaky test. Which would you like, waiting for the cache in the test, which it recommends, or swapping in a fake cache? Nothing has been changed yet, so whatever you choose is the whole next step. The first option is the smaller change and keeps the test honest. Options: Wait for the cache in the test setup, its pick; Swap in a fake cache for this test.",
+        "orchestrator_spoken": "Codex is still waiting on one decision before it does anything: how to fix that flaky test. Which would you like, waiting for the cache in the test, which it recommends, or swapping in a fake cache?",
+        "consulted": true,
+        "voice": "to be ready in the test setup, or using a fake cache. Which do you prefer?bench-codex is waiting on your decision to fix the test. Would you prefer to wait for the cache in the test setup, or swap in a fake cache"
+      },
+      {
+        "turn": 3,
+        "at_ms": 46448,
+        "kind": "more",
+        "question": "More detail please.",
+        "consulted": false,
+        "voice": "You can have the test wait for the cache to finish loading during setup, which is the simpler, recommended fix. Alternatively, you could replace the real cache with a fake one for the test."
+      },
+      {
+        "turn": 4,
+        "at_ms": 64502,
+        "kind": "why",
+        "question": "Why does that happen?",
+        "orchestrator": "The test fires its request the moment it starts, and the shop loads its member prices in the background just after startup. Usually the prices are in place in time. Sometimes the test wins that race, the prices are not loaded yet, it reads full prices instead of member prices, and the total comes out wrong. So it is timing, not a real fault in the shop. Ready to pick one of the two fixes? A cache is a fast store of prices the shop keeps in memory so it does not look them up every time. It takes a moment to fill at startup. The test does not wait for that moment, so on unlucky runs it sees nothing there.",
+        "orchestrator_spoken": "The test fires its request the moment it starts, and the shop loads its member prices in the background just after startup. Usually the prices are in place in time. Sometimes the test wins that race, the prices are not loaded yet, it reads full prices instead of member prices, and the total comes out wrong. So it is timing, not a real fault in the shop. Ready to pick one of the two fixes?",
+        "consulted": true,
+        "voice": "The test runs before the shop finishes loading prices in the background, missing the member discount. Are you ready to choose one of the fixes now?"
+      },
+      {
+        "turn": 5,
+        "at_ms": 85482,
+        "kind": "example",
+        "question": "Give me an example.",
+        "consulted": false,
+        "voice": "The test starts checking out immediately when it launches, while the shop is still loading discounts in the background. Sometimes the test finishes before the discounts can be applied."
+      }
+    ],
+    "orchestrator": {
+      "coverage": 0.42857142857142855,
+      "points": [
+        [
+          0,
+          1,
+          6
+        ],
+        [
+          6
+        ],
+        null,
+        [
+          1
+        ],
+        null
+      ],
+      "comprehension": 1,
+      "depth_asked": 2,
+      "depth_passed": 1,
+      "padding_asked": 0,
+      "padding_passed": 0,
+      "words": [
+        143,
+        82,
+        -1,
+        121,
+        -1
+      ],
+      "verdicts": [
+        {
+          "name": "explain_comprehension_action",
+          "criterion": "Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHAT CAN BE DONE about it: the options or the recommendation, and roughly what each would take? Pass when: the options or the recommendation are said, with roughly what each would take. Fail when: no option or recommendation is given, or only 'should I fix it?' with nothing on what fixing means; OR the options are read out as a long list of labels or commands a listener could not keep apart.",
+          "answer": "yes",
+          "confidence": 0.8,
+          "evidence": "Sheepdog: \"waiting for the cache in the test, which it recommends, or swapping in a fake cache? ... The first option is the smaller change and keeps the test honest.\""
+        },
+        {
+          "name": "explain_comprehension_what",
+          "criterion": "Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHAT the matter is: concretely what the worker found or did, not just its topic? Pass when: the lines say concretely what was found or done, in words a listener can retell. Fail when: only the topic is named, so there is nothing concrete to retell; OR the substance is there but buried in terms, identifiers or side details so that a listener would lose it.",
+          "answer": "yes",
+          "confidence": 0.93,
+          "evidence": "Sheepdog: \"Codex found the flaky checkout test is a test-only problem: it fires its request before the price cache has warmed up, so about one run in twelve it misses the member discount and fails. It never touched the code.\""
+        },
+        {
+          "name": "explain_comprehension_why",
+          "criterion": "Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHY it matters: the cause, and the consequence or risk? Pass when: the cause and the consequence or risk are both said in words a listener can retell. Fail when: the cause or the consequence is missing, or only asserted ('it is important'); OR they are there but buried in terms, identifiers or side details so that a listener would lose them.",
+          "answer": "yes",
+          "confidence": 0.8,
+          "evidence": "Sheepdog: \"Sometimes the test wins that race, the prices are not loaded yet, it reads full prices instead of member prices, and the total comes out wrong. So it is timing, not a real fault in the shop.\""
+        },
+        {
+          "name": "explain_depth_t2_then",
+          "criterion": "The CEO's last question (\"Then?\") asks for more. Did Sheepdog's answer to it add what was asked for? Pass when: it adds substantive content not already said in its earlier answers (a new reason, example, number, consequence or step), or says plainly that this is everything it has and offers to find out more, or hands the question to a worker or goes and checks. Fail when: it says the same things again in other words with nothing new; OR it repeats the whole earlier answer around a small addition, so the CEO has to sit through it again to find the new part.",
+          "answer": "no",
+          "confidence": 0.85,
+          "evidence": "Sheepdog: \"Which would you like, waiting for the cache in the test, which it recommends, or swapping in a fake cache? ... The first option is the smaller change and keeps the test honest.\" (restates the earlier options and recommendation; nothing substantive new)",
+          "rationale": "Sheepdog: \"Which would you like, waiting for the cache in the test, which it recommends, or swapping in a fake cache? ... The first option is the smaller change and keeps the test honest.\" (restates the earlier options and recommendation; nothing substantive new)"
+        },
+        {
+          "name": "explain_depth_t4_why",
+          "criterion": "The CEO's last question (\"Why does that happen?\") asks why. Did Sheepdog's answer to it give the reason? Pass when: it gives a concrete reason (a cause or mechanism, not a restatement of the problem), or says it does not know and offers to find out, or hands the question to a worker. Fail when: it repeats the earlier answer in other words without a reason; OR it offers several guessed reasons as if they were fact, or buries the reason in a walk-through of unrelated detail.",
+          "answer": "yes",
+          "confidence": 0.88,
+          "evidence": "Sheepdog: \"The test fires its request the moment it starts, and the shop loads its member prices in the background just after startup. ... Sometimes the test wins that race, the prices are not loaded yet\""
+        }
+      ]
+    },
+    "voice": {
+      "coverage": 0.14285714285714285,
+      "of_orchestrator": 0.3333333333333333,
+      "points": [
+        [
+          1
+        ],
+        null,
+        null,
+        [
+          1
+        ],
+        [
+          1
+        ]
+      ],
+      "comprehension": 1,
+      "depth_asked": 4,
+      "depth_passed": 2,
+      "padding_asked": 0,
+      "padding_passed": 0,
+      "words": [
+        23,
+        45,
+        34,
+        26,
+        29
+      ],
+      "verdicts": [
+        {
+          "name": "explain_comprehension_action",
+          "criterion": "Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHAT CAN BE DONE about it: the options or the recommendation, and roughly what each would take? Pass when: the options or the recommendation are said, with roughly what each would take. Fail when: no option or recommendation is given, or only 'should I fix it?' with nothing on what fixing means; OR the options are read out as a long list of labels or commands a listener could not keep apart.",
+          "answer": "yes",
+          "confidence": 0.9,
+          "evidence": "Sheepdog: \"You can have the test wait for the cache to finish loading during setup, which is the simpler, recommended fix. Alternatively, you could replace the real cache with a fake one for the test.\""
+        },
+        {
+          "name": "explain_comprehension_what",
+          "criterion": "Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHAT the matter is: concretely what the worker found or did, not just its topic? Pass when: the lines say concretely what was found or done, in words a listener can retell. Fail when: only the topic is named, so there is nothing concrete to retell; OR the substance is there but buried in terms, identifiers or side details so that a listener would lose it.",
+          "answer": "yes",
+          "confidence": 0.9,
+          "evidence": "Sheepdog: \"The test runs before the shop finishes loading prices in the background, missing the member discount.\" and \"You can have the test wait for the cache to finish loading during setup... Alternatively, you could replace the real cache with a fake one\""
+        },
+        {
+          "name": "explain_comprehension_why",
+          "criterion": "Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHY it matters: the cause, and the consequence or risk? Pass when: the cause and the consequence or risk are both said in words a listener can retell. Fail when: the cause or the consequence is missing, or only asserted ('it is important'); OR they are there but buried in terms, identifiers or side details so that a listener would lose them.",
+          "answer": "yes",
+          "confidence": 0.65,
+          "evidence": "Sheepdog: \"The test runs before the shop finishes loading prices in the background, missing the member discount.\" and \"Sometimes the test finishes before the discounts can be applied.\""
+        },
+        {
+          "name": "explain_depth_t2_then",
+          "criterion": "The CEO's last question (\"Then?\") asks for more. Did Sheepdog's answer to it add what was asked for? Pass when: it adds substantive content not already said in its earlier answers (a new reason, example, number, consequence or step), or says plainly that this is everything it has and offers to find out more, or hands the question to a worker or goes and checks. Fail when: it says the same things again in other words with nothing new; OR it repeats the whole earlier answer around a small addition, so the CEO has to sit through it again to find the new part.",
+          "answer": "yes",
+          "confidence": 0.7,
+          "evidence": "Sheepdog: \"to be ready in the test setup, or using a fake cache. Which do you prefer?bench-codex is waiting on your decision to fix the test.\""
+        },
+        {
+          "name": "explain_depth_t3_more",
+          "criterion": "The CEO's last question (\"More detail please.\") asks for more. Did Sheepdog's answer to it add what was asked for? Pass when: it adds substantive content not already said in its earlier answers (a new reason, example, number, consequence or step), or says plainly that this is everything it has and offers to find out more, or hands the question to a worker or goes and checks. Fail when: it says the same things again in other words with nothing new; OR it repeats the whole earlier answer around a small addition, so the CEO has to sit through it again to find the new part.",
+          "answer": "no",
+          "confidence": 0.82,
+          "evidence": "Sheepdog: \"You can have the test wait for the cache to finish loading during setup, which is the simpler, recommended fix. Alternatively, you could replace the real cache with a fake one for the test.\"",
+          "rationale": "Sheepdog: \"You can have the test wait for the cache to finish loading during setup, which is the simpler, recommended fix. Alternatively, you could replace the real cache with a fake one for the test.\""
+        },
+        {
+          "name": "explain_depth_t4_why",
+          "criterion": "The CEO's last question (\"Why does that happen?\") asks why. Did Sheepdog's answer to it give the reason? Pass when: it gives a concrete reason (a cause or mechanism, not a restatement of the problem), or says it does not know and offers to find out, or hands the question to a worker. Fail when: it repeats the earlier answer in other words without a reason; OR it offers several guessed reasons as if they were fact, or buries the reason in a walk-through of unrelated detail.",
+          "answer": "yes",
+          "confidence": 0.6,
+          "evidence": "Sheepdog: The test runs before the shop finishes loading prices in the background, missing the member discount."
+        },
+        {
+          "name": "explain_depth_t5_example",
+          "criterion": "The CEO's last question (\"Give me an example.\") asks for an example. Did Sheepdog's answer to it give one? Pass when: it gives a concrete example (a specific case, input, number or event), or says it has none and offers to find out, or hands the question to a worker. Fail when: a general restatement without a specific case, or an analogy in place of a real case from the matter at hand; OR code, a pattern or a long list of cases read out instead of one case a listener can picture.",
+          "answer": "no",
+          "confidence": 0.68,
+          "evidence": "Sheepdog: \"The test starts checking out immediately when it launches, while the shop is still loading discounts in the background. Sometimes the test finishes before the discounts can be applied.\" This restates the cause in general terms. It names no specific case, input, number or event, such as a particular order, price or discount.",
+          "rationale": "Sheepdog: \"The test starts checking out immediately when it launches, while the shop is still loading discounts in the background. Sometimes the test finishes before the discounts can be applied.\" This restates the cause in general terms. It names no specific case, input, number or event, such as a particular order, price or discount."
+        }
+      ]
+    },
+    "not_consulted": 2,
+    "follow_ups_not_consulted": 2
+  },
+  "excerpt": [
+    "    2.0s voice.push {\"briefing\":\"b-1\",\"channel\":\"function_response\",\"from\":\"daemon\",\"push_id\":\"push-tms6tk-3\",\"scheduling_sent\":\"silent\",\"text\":\"The agents are now called: bench-claude, bench-codex. Use these names; never a nickname.\",\"urgency\":\"silent\"}",
+    "    7.6s voice.transcript.in {\"final\":false,\"text\":\"What did Benj Codex find about the flaky test? Explain it to me.\"}",
+    "    7.6s voice.tool_call {\"args\":{\"reading\":\"asking about bench-codex findings on flaky test\",\"text\":\"What did Benj Codex find about the flaky test? Explain it to me.\"},\"id\":\"call_106056\",\"name\":\"to_supervisor\"}",
+    "    7.6s supervisor.relay {\"call_id\":\"call_106056\",\"heard\":\"What did Benj Codex find about the flaky test? Explain it to me.\",\"input\":\"voice\",\"inputs\":1,\"said\":\"What did Benj Codex find about the flaky test? Explain it to me.\",\"utterance_id\":\"utt-tms6tp-4\",…",
+    "    9.0s brain.tool_call {\"args\":{\"agent\":\"bench-codex\",\"source\":\"session\"},\"id\":\"call_00_VO2SzNrehC1nrY4l0ED36596\",\"name\":\"read_screen\",\"turn\":1,\"turn_id\":\"turn-tms6th-1\",\"utterance_id\":\"utt-tms6tp-4\"}",
+    "    9.0s brain.tool_call {\"args\":{\"agent\":\"bench-codex\",\"lines\":60,\"source\":\"screen\"},\"id\":\"call_01_a2SuyS0CLrd3Q0kuBqXi1114\",\"name\":\"read_screen\",\"turn\":1,\"turn_id\":\"turn-tms6th-1\",\"utterance_id\":\"utt-tms6tp-4\"}",
+    "   13.1s voice.tool_result {\"clarify\":false,\"detail\":\"A flaky test is one that passes and fails on the same code, depending on timing. Here the test can run before the shop's price cache has loaded, so it sees f…\",\"dur_ms\":5478,\"id\":\"call_106056\",\"name\":\"…",
+    "   13.9s voice.playback {\"played_ms\":0,\"run_ms\":280,\"state\":\"started\",\"utterance_id\":\"utt-tms6tp-4\"}",
+    "   20.9s voice.playback {\"played_ms\":6680,\"run_ms\":6680,\"state\":\"drained\"}",
+    "   27.5s voice.playback {\"played_ms\":0,\"run_ms\":360,\"state\":\"started\"}",
+    "   28.5s voice.transcript.in {\"final\":false,\"text\":\"Then?\"}",
+    "   28.9s voice.tool_call {\"args\":{\"text\":\"Then?\"},\"id\":\"call_106116\",\"name\":\"to_supervisor\"}",
+    "   28.9s supervisor.relay {\"call_id\":\"call_106116\",\"heard\":\"Then?\",\"input\":\"voice\",\"inputs\":1,\"said\":\"Then?\",\"utterance_id\":\"utt-tms6ub-6\",\"waited_ms\":389}",
+    "   31.8s voice.push_deferred {\"kind\":\"tool_result\",\"name\":\"to_supervisor\",\"reason\":\"speaking\",\"urgency_requested\":\"interrupt\"}",
+    "   31.8s voice.tool_result {\"clarify\":true,\"detail\":\"Nothing has been changed yet, so whatever you choose is the whole next step. The first option is the smaller change and keeps the test honest.\",\"dur_ms\":2851,\"id\":\"call_106116\",\"name\":\"to_supervisor\",\"opt…",
+    "   40.9s voice.playback {\"played_ms\":13120,\"run_ms\":13120,\"state\":\"drained\"}",
+    "   41.2s voice.push {\"briefing\":\"b-2\",\"channel\":\"function_response\",\"focus\":true,\"push_id\":\"push-tms6um-7\",\"scheduling_sent\":\"silent\",\"text\":\"Current focus, for follow-ups (context only, never read it out). Agent in focus: bench-codex. Open question you ask…",
+    "   49.0s voice.transcript.in {\"final\":false,\"text\":\"More detail, please.\"}",
+    "   49.1s voice.playback {\"played_ms\":0,\"run_ms\":300,\"state\":\"started\",\"utterance_id\":\"utt-tms6ub-6\"}",
+    "   59.2s voice.playback {\"played_ms\":9820,\"run_ms\":9820,\"state\":\"drained\"}",
+    "   67.1s voice.transcript.in {\"final\":false,\"text\":\"Why does that happen?\"}",
+    "   67.1s voice.tool_call {\"args\":{\"reading\":\"asking why the cache loading delay causes flaky tests\",\"text\":\"Why does that happen?\"},\"id\":\"call_106168\",\"name\":\"to_supervisor\"}",
+    "   67.1s supervisor.relay {\"call_id\":\"call_106168\",\"heard\":\"Why does that happen?\",\"input\":\"voice\",\"inputs\":1,\"said\":\"Why does that happen?\",\"utterance_id\":\"utt-tms6vd-8\",\"waited_ms\":0}",
+    "   71.5s voice.tool_result {\"clarify\":false,\"detail\":\"A cache is a fast store of prices the shop keeps in memory so it does not look them up every time. It takes a moment to fill at startup. The test does not wa…\",\"dur_ms\":4361,\"id\":\"call_106168\",\"name\":\"…",
+    "   72.1s voice.playback {\"played_ms\":0,\"run_ms\":200,\"state\":\"started\",\"utterance_id\":\"utt-tms6vd-8\"}",
+    "   80.0s voice.playback {\"played_ms\":7600,\"run_ms\":7600,\"state\":\"drained\"}",
+    "   80.3s voice.push {\"briefing\":\"b-3\",\"channel\":\"function_response\",\"focus\":true,\"push_id\":\"push-tms6vp-9\",\"scheduling_sent\":\"silent\",\"text\":\"Current focus, for follow-ups (context only, never read it out). Agent in focus: bench-codex. Open question you ask…",
+    "   87.8s voice.transcript.in {\"final\":false,\"text\":\"Give me an example.\"}",
+    "   87.9s voice.playback {\"played_ms\":0,\"run_ms\":300,\"state\":\"started\"}",
+    "   97.4s voice.playback {\"played_ms\":9140,\"run_ms\":9140,\"state\":\"drained\"}"
+  ]
+}
