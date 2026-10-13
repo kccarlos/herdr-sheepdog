@@ -1,0 +1,6 @@
+exit 0 main w1
+  TOTAL                          runs 21  pass 18  fail  3  err  0  not_run  0  rate   86%  brain_fallback ×2, missing_function_call ×1
+-- spend brain    deepseek-flash           calls   580  in   7077951  out   141460  reasoning    72930  ≈ $2.2520 --
+-- spend simuser  deepseek-flash           calls   259  in    509237  out     6422  reasoning        0  ≈ $0.1566 --
+-- spend total ≈ $2.4086 (estimate at list prices) --
+USD 0.00 CNY 40.52 available

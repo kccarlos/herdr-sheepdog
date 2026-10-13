@@ -1,0 +1,17 @@
+Targeted metric: answered later (targets)
+all targets                            main 20/36 (56 %)  fix 36/36 (100 %)  diff +44 pp (95 % CI +27 to +60)
+  fail                                 main 8/12 (67 %)  fix 12/12 (100 %)  diff +33 pp (95 % CI +2 to +61)
+  cut                                  main 1/12 (8 %)  fix 12/12 (100 %)  diff +92 pp (95 % CI +55 to +99)
+  unvoiced                             main 11/12 (92 %)  fix 12/12 (100 %)  diff +8 pp (95 % CI -17 to +35)
+  en                                   main 12/18 (67 %)  fix 18/18 (100 %)  diff +33 pp (95 % CI +9 to +56)
+  zh                                   main 8/18 (44 %)  fix 18/18 (100 %)  diff +56 pp (95 % CI +28 to +75)
+
+Noise guard: stale follow-ups
+  dropped                              main 0/12 (0 %)  fix 2/12 (17 %)  diff +17 pp (95 % CI -10 to +45)
+  reasked                              main 1/12 (8 %)  fix 4/12 (33 %)  diff +25 pp (95 % CI -8 to +53)
+  target                               main 6/36 (17 %)  fix 15/36 (42 %)  diff +25 pp (95 % CI +4 to +43)
+controls pooled                        main 1/24 (4 %)  fix 6/24 (25 %)  diff +21 pp (95 % CI +0 to +41)
+
+Where it was first answered (user line after which), targets
+  main: {2: 20}
+  fix: {2: 36}

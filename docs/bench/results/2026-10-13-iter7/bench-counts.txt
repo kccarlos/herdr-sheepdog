@@ -1,0 +1,23 @@
+== tier1
+  a_cancelled_not_counted: 5
+  a_fallback: 31
+  a_fallback_bad_reply: 27
+  a_fallback_timeout: 4
+  files: 1386
+  utterances: 9292
+  voice: 0
+== tier2
+  a_fallback: 3
+  a_fallback_bad_reply: 2
+  a_fallback_retried_ok: 1
+  a_fallback_timeout: 1
+  b_cut_answer: 60
+  b_cut_answer_by_push: 2
+  b_cut_answer_under_half: 6
+  b_cut_other_line: 160
+  c_stale_dropped: 2
+  c_unvoiced_answer: 43
+  files: 234
+  retries: 1
+  utterances: 1074
+  voice: 234
