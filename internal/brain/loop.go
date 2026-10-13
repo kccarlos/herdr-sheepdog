@@ -335,6 +335,7 @@ func (b *Brain) run(ctx context.Context, t *turn) (Reply, error) {
 				continue
 			}
 			b.answeredEarlier(reply.AnswersEarlier)
+			b.relayedReads(t.n, reply)
 			b.logTurn(t, false)
 			return reply, nil
 		}

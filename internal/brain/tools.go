@@ -319,7 +319,7 @@ func (b *Brain) execTool(ctx context.Context, t *turn, call *genai.FunctionCall)
 		switch source := strings.ToLower(arg("source")); source {
 		case "", SourceScreen:
 		case SourceSession:
-			return b.readSession(ctx, row, out)
+			return b.readSession(ctx, t, row, out)
 		default:
 			out.err = fmt.Errorf("read_screen source %q: want %s or %s", source, SourceScreen, SourceSession)
 			return out
@@ -336,6 +336,11 @@ func (b *Brain) execTool(ctx context.Context, t *turn, call *genai.FunctionCall)
 		text = prose.TailBytes(text, maxResultBytes)
 		out.result = wrapWorker(row.Alias, "screen", text)
 		out.summary = fmt.Sprintf("screen of %s, %d lines", row.Alias, strings.Count(text, "\n")+1)
+		if note, stub := b.noteRead(turn, t.start, row.PaneID, row.Alias, SourceScreen, text); note != "" {
+			// After the end marker: the daemon's fact, not worker data.
+			out.result += "\n" + note
+			out.summary += stub
+		}
 	case ToolRunCLI:
 		q := arg("question")
 		if q == "" {
@@ -453,7 +458,7 @@ func (b *Brain) execTool(ctx context.Context, t *turn, call *genai.FunctionCall)
 // wrapped as worker output. A session that cannot be read is an error
 // the model reads (the worker.session_missing reason), pointing it back
 // at the screen.
-func (b *Brain) readSession(ctx context.Context, row AgentInfo, out toolOutcome) toolOutcome {
+func (b *Brain) readSession(ctx context.Context, t *turn, row AgentInfo, out toolOutcome) toolOutcome {
 	read, err := b.host.ReadSession(ctx, row.PaneID)
 	if err != nil {
 		out.err = fmt.Errorf("%w; read_screen with source screen still shows what it is doing now", err)
@@ -462,6 +467,12 @@ func (b *Brain) readSession(ctx context.Context, row AgentInfo, out toolOutcome)
 	text := sessionText(read)
 	out.result = wrapWorker(row.Alias, SourceSession, text)
 	out.summary = fmt.Sprintf("session of %s, last message %d chars", aliasOr(row.Alias), utf8.RuneCountInString(read.LastAssistant))
+	// Compared by its last message alone: the tool counts move while the
+	// worker's report stays the same.
+	if note, stub := b.noteRead(t.n, t.start, row.PaneID, row.Alias, SourceSession, read.LastAssistant); note != "" {
+		out.result += "\n" + note
+		out.summary += stub
+	}
 	return out
 }
 

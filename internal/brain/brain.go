@@ -197,6 +197,8 @@ type Brain struct {
 	// lastCompaction is the most recent successful compaction (zero
 	// value when none), for the Supervisor tab.
 	lastCompaction CompactionInfo
+	// reads are the agents' recent screen and session reads (reads.go).
+	reads map[readKey][]readSeen
 	// compactCancel / compactDone are the compaction in flight (nil
 	// when none): one at a time, off the turn lock (afterTurn).
 	compactCancel context.CancelFunc
@@ -760,6 +762,7 @@ func (b *Brain) Reset(ctx context.Context, via string) (string, error) {
 	b.mu.Lock()
 	b.curRunID = id
 	b.lastCompaction = CompactionInfo{}
+	b.reads = nil
 	b.mu.Unlock()
 	b.log.Log(logSource, "brain.reset", "", map[string]any{"via": via, "reset_id": id})
 	return id, nil

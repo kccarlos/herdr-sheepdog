@@ -208,3 +208,31 @@ func TestParseReplyAndHelpers(t *testing.T) {
 		t.Error("isRateLimited")
 	}
 }
+
+func TestNormalizeRead(t *testing.T) {
+	a := "  ⠋ Running tests (3m 4s · ↑ 1.2k tokens)  \n\n› █\nok 12:04:05\n"
+	b := "⠙ Running tests (3m 9s · ↑ 1.4k tokens)\n›\nok 12:05:01"
+	if normalizeRead(a) != normalizeRead(b) {
+		t.Errorf("noise-only change:\n%q\n%q", normalizeRead(a), normalizeRead(b))
+	}
+	if normalizeRead("17 failures in 200 runs") == normalizeRead("18 failures in 200 runs") {
+		t.Error("a changed count compares equal")
+	}
+}
+
+// A read is marked relayed only when its turn's answer was spoken.
+func TestRelayedReads(t *testing.T) {
+	b := &Brain{log: &recLog{}}
+	b.noteRead(1, time.Now(), "p1", "auth", SourceScreen, "done")
+	b.relayedReads(1, Reply{Spoken: "Done.", Urgency: UrgencySkip})
+	if note, _ := b.noteRead(2, time.Now(), "p1", "auth", SourceScreen, "done"); note == "" || strings.Contains(note, "answered") {
+		t.Errorf("after a skipped answer: %q", note)
+	}
+	b.relayedReads(2, Reply{Spoken: "It is done."})
+	if note, _ := b.noteRead(3, time.Now(), "p1", "auth", SourceScreen, "done"); !strings.Contains(note, "which you answered the user from") {
+		t.Errorf("after a spoken answer: %q", note)
+	}
+	if note, _ := b.noteRead(3, time.Now(), "p2", "docs", SourceScreen, "done"); note != "" {
+		t.Errorf("another agent's read: %q", note)
+	}
+}
