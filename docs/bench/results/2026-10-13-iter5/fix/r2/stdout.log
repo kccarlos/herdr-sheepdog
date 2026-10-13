@@ -1,0 +1,14 @@
+[1/3] workday-interruptions r2: pass (end_call, ) ≈ $0.0815, total ≈ $0.081
+[2/3] workday-interruptions r3: pass (end_call, ) ≈ $0.0927, total ≈ $0.174
+[3/3] workday-interruptions r1: pass (end_call, ) ≈ $0.0883, total ≈ $0.262
+  pass    workday-interruptions r1  end_call  13 turns   97.8s                         ≈ $0.0883
+  pass    workday-interruptions r2  end_call  13 turns   88.3s                         ≈ $0.0815
+  pass    workday-interruptions r3  end_call  13 turns   94.0s                         ≈ $0.0927
+-- 3 runs, spend ≈ $0.2625 (estimate at list prices) --
+reports: docs/bench/results/2026-10-13-iter5/fix/r2/report.json, docs/bench/results/2026-10-13-iter5/fix/r2/report.md
+== eval sim, repeat 3 ==
+  workday-interruptions  runs  3  pass  3  fail  0  err  0  not_run  0  rate  100%  –
+  TOTAL                  runs  3  pass  3  fail  0  err  0  not_run  0  rate  100%  –
+-- spend brain    deepseek-flash           calls    71  in    755827  out    16272  reasoning     9010  ≈ $0.2419 --
+-- spend simuser  deepseek-flash           calls    38  in     66639  out      949  reasoning        0  ≈ $0.0206 --
+-- spend total ≈ $0.2625 (estimate at list prices) --
