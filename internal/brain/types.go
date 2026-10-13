@@ -280,6 +280,12 @@ type Reply struct {
 	// announce turn's Spoken keeps (informational: the supervisor keeps
 	// every matching promise regardless).
 	KeepsPromiseIDs []string `json:"keeps_promise_ids,omitempty"`
+	// AnswersEarlier lists the ids of the state block's unanswered
+	// questions (UnansweredHost) this reply deals with: answered now, or
+	// dropped or answered since by the user's own account. The model's
+	// declaration is the only way an entry clears before its expiry; the
+	// daemon never judges whether an answer was good.
+	AnswersEarlier []string `json:"answers_earlier,omitempty"`
 	// Turn is the turn that produced the reply, filled in by the orchestrator
 	// and never by the model: the supervisor names it when it drops a
 	// line that came too late (brain.push_late).
@@ -578,6 +584,30 @@ func (p PendingPrompt) SelectedBy(keys []string) bool {
 // Optional, so test hosts need not implement it.
 type LanguageHost interface {
 	LanguageLine() string
+}
+
+// UnansweredHost is a Host that keeps the user's questions that got no
+// real answer, in the daemon's clear cases only: the orchestrator's turn
+// on them fell back, its answer was cut off by the user before most of
+// it played, or it was never voiced. Unanswered lists the open ones,
+// oldest first (expired ones gone); AnsweredEarlier clears the ones a
+// reply's answers_earlier names. Optional, so test hosts need not
+// implement it.
+type UnansweredHost interface {
+	Unanswered() []UnansweredInfo
+	AnsweredEarlier(ids []string)
+}
+
+// UnansweredInfo is one question the user got no real answer to.
+type UnansweredInfo struct {
+	// ID names it in answers_earlier (the utterance id).
+	ID string
+	// Text is the user's words; Asked is when they said them.
+	Text  string
+	Asked time.Time
+	// Why is what happened to the answer, in plain words ("your turn on
+	// it timed out").
+	Why string
 }
 
 // Host is what the orchestrator needs from the supervisor: the roster and the

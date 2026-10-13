@@ -2,20 +2,23 @@ package eval
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
 
 // A scenario's faults hit the turns they name: a failed turn falls back,
 // a cut answer reaches the user as its first words only, an unvoiced one
-// not at all.
+// not at all, and the daemon records each question as unanswered.
 func TestSimFaultsHitTheirTurns(t *testing.T) {
 	sc := fixScenario()
 	sc.Opening = ""
 	sc.Script = []string{"why did it fail?", "what is bench-claude doing?", "and the tests?", "anything else?"}
 	sc.Faults = &SimFaults{FailTurns: []int{1}, CutTurns: []int{2}, CutWords: 1, UnvoicedTurns: []int{3}}
 	sc.Caps.MaxTurns = 6
-	run := RunSim(context.Background(), sc, SimOptions{Offline: true, FixtureDir: "../../testdata/herdr"}, 1)
+	dir := t.TempDir()
+	run := RunSim(context.Background(), sc, SimOptions{Offline: true, FixtureDir: "../../testdata/herdr", EventsDir: dir}, 1)
 	if len(run.Faults) != 3 {
 		t.Fatalf("faults = %+v", run.Faults)
 	}
@@ -35,5 +38,14 @@ func TestSimFaultsHitTheirTurns(t *testing.T) {
 	}
 	if len(heard) < 4 || !strings.Contains(heard[0], "couldn't get an answer") || heard[1] != "Offline" || heard[2] != "" || heard[3] != "Offline scripted answer." {
 		t.Errorf("the user heard %q", heard)
+	}
+	b, err := os.ReadFile(filepath.Join(dir, sc.ID+".r1.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []string{`"case":"fallback"`, `"case":"cut"`, `"case":"unvoiced"`} {
+		if !strings.Contains(string(b), c) {
+			t.Errorf("no supervisor.unanswered_recorded with %s", c)
+		}
 	}
 }

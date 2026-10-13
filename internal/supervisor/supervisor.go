@@ -363,6 +363,11 @@ type Supervisor struct {
 	// (rerelay.go).
 	lastOutcome  *relayOutcome
 	voiceSpokeAt time.Time
+	// unanswered are the user's questions that got no real answer, and
+	// answeredRecs the utterances whose answers went to the voice last
+	// (unanswered.go).
+	unanswered   []unansweredQ
+	answeredRecs []askedRec
 	// replies tracks every background goroutine that may call the orchestrator
 	// after the call that started it returned: detached utterance turns
 	// and their late delivery (utterance.go), the daemon's own relay
@@ -557,6 +562,7 @@ func (s *Supervisor) OnVoiceEvent(ev voice.Event) {
 			if s.brain != nil {
 				s.brain.SaidCut(e.Text, e.Cut.Full, e.Cut.HeardMs)
 			}
+			s.onAnswerCut(e.Cut, e.Text) // unanswered.go
 			return
 		}
 		if e.Dir == voice.DirIn {

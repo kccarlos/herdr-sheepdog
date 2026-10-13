@@ -117,6 +117,7 @@ const (
 	ledgerInvestigationsDone = 2
 	invQuestionRunes         = 40
 	invSummaryRunes          = 60
+	unansweredRunes          = 80
 )
 
 // dynamicSections renders the roster, the ledger excerpt (with the open
@@ -124,7 +125,7 @@ const (
 // set: language is lang.Line's sentence) and the time with where the
 // record begins (record, recordLine; may be empty) — the state block,
 // which the loop sends after the window (withState), time last.
-func dynamicSections(agents []AgentInfo, notes []string, promises []PromiseInfo, investigations []InvestigationInfo, language string, now time.Time, record string) []PromptSection {
+func dynamicSections(agents []AgentInfo, notes []string, promises []PromiseInfo, investigations []InvestigationInfo, unanswered []UnansweredInfo, language string, now time.Time, record string) []PromptSection {
 	roster := renderRoster(agents, now)
 	invs := renderInvestigations(investigations, now)
 	clock := "## Now\n\n" + now.Format("Mon 2006-01-02 15:04:05 MST")
@@ -142,6 +143,9 @@ func dynamicSections(agents []AgentInfo, notes []string, promises []PromiseInfo,
 		{Name: "roster", Source: SourceDynamic, Text: roster},
 		{Name: "ledger", Source: SourceDynamic, Text: ledger},
 		{Name: "investigations", Source: SourceDynamic, Text: invs},
+	}
+	if len(unanswered) > 0 {
+		secs = append(secs, PromptSection{Name: "unanswered", Source: SourceDynamic, Text: renderUnanswered(unanswered, now)})
 	}
 	if language != "" {
 		// The user's own setting (iOS Settings ▸ Languages): `spoken`
@@ -170,6 +174,19 @@ func recordLine(started time.Time, c CompactionInfo, now time.Time) string {
 		return fmt.Sprintf("Record: this conversation started at %s and the transcript above is complete since then: nothing of it is missing.", at(started))
 	}
 	return fmt.Sprintf("Record: this conversation started at %s. Up to %s the transcript above holds only the compaction summary (its first message); every line since then is complete; recall finds the earlier lines.", at(started), at(c.CoversTo))
+}
+
+// renderUnanswered is the Unanswered section (only when there is one):
+// the user's questions that got no real answer, with how long ago and
+// what happened to the answer. Facts only: whether and when to come back
+// to one is the model's.
+func renderUnanswered(qs []UnansweredInfo, now time.Time) string {
+	var b strings.Builder
+	b.WriteString("## Unanswered\n\nThe user asked these and got no real answer (the daemon's record of what happened, not a judgment):\n")
+	for _, q := range qs {
+		fmt.Fprintf(&b, "- %s, %s ago: %q (%s)\n", q.ID, ago(now.Sub(q.Asked)), clipText(oneLine(q.Text), unansweredRunes), q.Why)
+	}
+	return strings.TrimRight(b.String(), "\n")
 }
 
 // renderInvestigations is the Investigations section: the jobs running
