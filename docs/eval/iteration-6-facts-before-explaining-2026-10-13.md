@@ -66,6 +66,7 @@ Gate: workday ×5 per arm (35 runs each). Code checks only, fake judge (`northst
 | Actions never told | 1/92 | 3/90 | +2 pp (−3 to +8) |
 | Unmatched claims (heard) | 13 % | 10 % | −3 pp (−10 to +5) |
 | Time to goal | 103.9 s | 108.6 s | +4.6 s (−4 to +14) |
+| Brain fallbacks | 1 (scale-ten, user turn) | 1 (zh-evening, announce turn) | |
 | Held out: adversarial-afternoon pass | 5/5 | 5/5 | |
 | Held out: explain-deep pass | 4/5 (1 error) | 5/5 | |
 | explain-deep detail beats without a fresh look (untuned) | 9/14 | 7/14 | |
@@ -80,7 +81,7 @@ The fix did what the note asked: the no-look rate halved (81 % → 41 %). The ou
 2. **The composite counts honest restatements as failures.** About half the fix's "restates, no new fact" answers are good plain explanations of a "why" from facts already given, for example why losing "推送到 main 之前先问" matters. The explain depth rubric (`explain.go`) would pass these. The metric was not changed after the fact; this is disclosed here.
 3. **n.** Run-level clustering widens the CI: the per-answer Newcombe interval was −28 to +4, the cluster bootstrap −29 to +3.
 
-Costs of the fix: detail turns take about 1.4 s longer at the median, and the p90 reaches 8.0 s, close to the 8 s fallback for screen-answerable questions (no fallbacks occurred). The simple controls drew a few more reads (10 → 14 of 20 turns).
+Costs of the fix: detail turns take about 1.4 s longer at the median, and the p90 reaches 8.0 s, close to the 8 s fallback for screen-answerable questions. No fallback occurred on an explain run. On workday each arm had one brain fallback: main on a scale-ten user turn, fix on an announce turn in zh-evening, not a detail follow-up. The simple controls drew a few more reads (10 → 14 of 20 turns).
 
 ## Decision
 
