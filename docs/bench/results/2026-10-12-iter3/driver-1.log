@@ -1,0 +1,25 @@
+23:25:03 balance USD 0.00 CNY 52.17 available before main c1 workday-scale-ten 4
+exit 0 main c1
+  TOTAL              runs  4  pass  1  fail  3  err  0  not_run  0  rate   25%  timeout ×2, unintended_action ×1
+-- spend brain    deepseek-flash           calls   120  in   1471605  out    26243  reasoning    13476  ≈ $0.4653 --
+-- spend simuser  gemini-3.5-flash         calls    44  in     75576  out     1177  reasoning     5056  ≈ $0.0383 --
+-- spend total ≈ $0.5036 (estimate at list prices) --
+23:27:24 balance USD 0.00 CNY 51.83 available before fix c2 workday-scale-ten 4
+exit 0 fix c2
+  TOTAL              runs  4  pass  3  fail  1  err  0  not_run  0  rate   75%  timeout ×1
+-- spend brain    deepseek-flash           calls   131  in   1638245  out    28439  reasoning    14461  ≈ $0.5172 --
+-- spend simuser  gemini-3.5-flash         calls    45  in     79349  out     1117  reasoning     4127  ≈ $0.0369 --
+-- spend total ≈ $0.5541 (estimate at list prices) --
+23:29:41 balance USD 0.00 CNY 51.02 available before main c2 workday-scale-ten 4
+exit 0 main c2
+  TOTAL              runs  4  pass  2  fail  2  err  0  not_run  0  rate   50%  timeout ×2
+-- spend brain    deepseek-flash           calls   134  in   1684369  out    30534  reasoning    16393  ≈ $0.5335 --
+-- spend simuser  gemini-3.5-flash         calls    46  in     82594  out     1151  reasoning     5725  ≈ $0.0420 --
+-- spend total ≈ $0.5754 (estimate at list prices) --
+23:32:01 balance CNY 50.28 USD 0.00 available before fix c3 workday-scale-ten 4
+exit 0 fix c3
+  TOTAL              runs  4  pass  3  fail  1  err  0  not_run  0  rate   75%  brain_fallback ×1
+-- spend brain    deepseek-flash           calls   125  in   1578748  out    32461  reasoning    18232  ≈ $0.5040 --
+-- spend simuser  gemini-3.5-flash         calls    44  in     78698  out     1135  reasoning     5119  ≈ $0.0392 --
+-- spend total ≈ $0.5433 (estimate at list prices) --
+23:34:11 balance USD 0.00 CNY 49.51 available ALLDONE

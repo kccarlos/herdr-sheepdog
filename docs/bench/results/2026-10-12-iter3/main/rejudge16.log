@@ -1,0 +1,13 @@
+sheepdog bench rejudge: segments: workday-scale-ten r7: segment 13 (beat 13): judge: no verdict for right_agent
+rejudged workday-scale-ten r9: fail
+sheepdog bench rejudge: segments: workday-scale-ten r10: segment 13 (beat 13): judge: no verdict for right_agent
+rejudged workday-scale-ten r11: fail
+rejudged workday-scale-ten r12: fail
+sheepdog bench rejudge: segments: workday-scale-ten r13: segment 13 (beat 13): judge: no verdict for right_agent
+rejudged workday-scale-ten r14: pass
+rejudged workday-scale-ten r15: pass
+sheepdog bench rejudge: segments: workday-scale-ten r16: segment 13 (beat 13): judge: no verdict for right_agent
+sheepdog bench rejudge: 4 runs not rejudged (run again to retry them)
+judge claude sonnet: 7m47s, 130 calls
+-- spend judge    sonnet                   calls   130  in   2250070  out   165580  reasoning        0  ≈ $0.0000 --
+-- spend total ≈ $0.0000 (estimate at list prices) --

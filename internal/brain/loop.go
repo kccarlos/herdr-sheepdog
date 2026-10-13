@@ -104,11 +104,24 @@ func (b *Brain) Turn(ctx context.Context, req Request) (Reply, error) {
 		}
 		req.Trigger = TriggerEvent
 	}
-	tctx, cancel := context.WithTimeout(ctx, timeout+b.cfg.FinalGrace)
-	defer cancel()
-	// Close ends a turn in flight, so it does not wait out the budget.
-	defer context.AfterFunc(b.ctx, cancel)()
-	start := b.cfg.Now()
+	// The wait for the turn lock is bounded on its own; the budget for
+	// the turn's steps starts when the lock is handed over. Time queued
+	// behind other turns is not the model's time: with it counted, an
+	// announce turn that waited 8 s of its 9 s behind a user turn started
+	// a step with 1 s left and timed out while steps take ~2 s
+	// (docs/eval/analysis-clustered-events-2026-10-12.md). A user turn
+	// waits at most its own budget (event turns yield to it, so it waits
+	// for a step in flight or another user turn). An event turn waits
+	// behind user turns, so it may wait as long as one user turn may hold
+	// the lock, or its own budget when that is longer.
+	wait := timeout
+	if req.Trigger == TriggerEvent && b.cfg.UtteranceTimeout > wait {
+		wait = b.cfg.UtteranceTimeout
+	}
+	qctx, qcancel := context.WithTimeout(ctx, wait+b.cfg.FinalGrace)
+	defer qcancel()
+	// Close ends a wait or a turn in flight, so neither waits out its bound.
+	defer context.AfterFunc(b.ctx, qcancel)()
 	queued := time.Now() // wall clock, for brain.turn_started's queue_ms (trace.go)
 	key := ""
 	if req.Trigger == TriggerEvent {
@@ -121,7 +134,7 @@ func (b *Brain) Turn(ctx context.Context, req Request) (Reply, error) {
 			key = string(KindInvestigation) + ":" + req.Agent
 		}
 	}
-	replaced, err := b.lock.acquire(tctx, req.Trigger == TriggerCEO, key)
+	replaced, err := b.lock.acquire(qctx, req.Trigger == TriggerCEO, key)
 	if replaced {
 		b.log.Log(logSource, "brain.event_coalesced", "", map[string]any{"agent": req.Agent, "event": req.Event, "kind": string(req.Kind)})
 	}
@@ -137,6 +150,10 @@ func (b *Brain) Turn(ctx context.Context, req Request) (Reply, error) {
 		b.log.Log(logSource, "brain.fallback", "", payload)
 		return Reply{}, fmt.Errorf("%w: waiting for the turn lock: %w", ErrFallback, err)
 	}
+	tctx, cancel := context.WithTimeout(ctx, timeout+b.cfg.FinalGrace)
+	defer cancel()
+	defer context.AfterFunc(b.ctx, cancel)()
+	start := b.cfg.Now()
 	t := &turn{req: req, start: start, soft: start.Add(timeout), queued: queued}
 	t.provider, t.model, t.impl = b.current()
 	reply, err := b.run(tctx, t)

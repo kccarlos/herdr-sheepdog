@@ -113,7 +113,9 @@ type Brain struct {
 	// AnnounceTurnTimeoutS bounds an event turn (the announce turn on a
 	// block or finish); on expiry the template sentence is spoken instead.
 	// A finish waits this long (plus final_grace_s) for the orchestrator's line
-	// before anything is said (default 6; formerly enrich_timeout_s, still
+	// before anything is said, counted from when the turn gets the turn
+	// lock; queued behind a user turn, it may first wait up to
+	// utterance_timeout_s (default 6; formerly enrich_timeout_s, still
 	// accepted).
 	AnnounceTurnTimeoutS int `toml:"announce_turn_timeout_s"`
 	// AnnounceTimeoutS bounds an announce turn the user is owed: one
