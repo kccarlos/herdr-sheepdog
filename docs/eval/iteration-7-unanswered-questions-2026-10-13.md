@@ -10,7 +10,7 @@ Harness iteration 7 (docs/handover-2026-10-04.md, "Harness iteration, from 2026-
 |---|---|---|---|---|---|
 | Tier 1 bench (1,386 runs, no voice) | 9,292 | 31 (0.3 %): 27 broken replies, 4 timeouts | n/a | n/a | 0.3 % |
 | Tier 2 bench (234 runs) | 1,074 | 2 (one more was retried and answered) | 41 (3.8 %) of 60 cut answers | 45 (4.2 %): 43 answer briefings unvoiced (38 because the user spoke first, 5 overtaken by the next briefing), 2 dropped as stale | 88 (8.2 %) |
-| Live daemon (Sep 18 – Oct 13) | 238 | 23: 15 model errors, 8 timeouts; 13 of them on Oct 2, during a Vertex 504 outage | 4 of 5 cut answers | 5: 2 dropped as stale, 2 unheard, 1 superseded | 32 (13 %; 8 % without Oct 2) |
+| Live daemon (Sep 18 – Oct 13) | 238 (days with relay events; two Sep 23 fallbacks predate them, so the rates are a little high) | 23: 15 model errors, 8 timeouts; 13 of them on Oct 2, during a Vertex 504 outage | 4 of 5 cut answers | 5: 2 dropped as stale, 2 unheard, 1 superseded | 32 (13 %; 8 % without Oct 2) |
 
 So it is not rare where a voice is involved: about one question in twelve in tier 2, and about the same live once the outage day is left out. Cases (b) and (c) are the common ones. Case (a) is rare since the queue-budget fix (#205), except on a bad provider day. Raw counts: [bench-counts.txt](../bench/results/2026-10-13-iter7/bench-counts.txt) and [live-counts.txt](../bench/results/2026-10-13-iter7/live-counts.txt).
 
@@ -75,7 +75,10 @@ Both arms answer at the first chance, the reply to the next user line. Main alre
 | Controls, under the pre-registered rubric | 0/24 | 2/24 | +8 pp |
 | Targets: answer told again (rubric) | 1/36 | 2/36 | +3 pp |
 
-The pre-registration said every flagged case would be read. Most judge flags are a reminder at sign-off that an item is still open ("the two broken links are still there whenever you want them"), which the rubric excludes. The fix has more of these because it answered more: the answer opens a decision. One blind Sonnet call re-scored all 28 flagged quotes, shuffled and without the arm, against the rubric (`restale.py`). It left 2 real cases in the controls, both `ua-dropped-zh`: at sign-off the orchestrator mentions the question the user had dropped ("之前的那个问题按你说的不说了", "README 那件小事我按你说的先放下了"). That is +8 pp, inside the pre-registered +10 pp, narrowly. It is the noise this change adds, and it is worth watching.
+The pre-registration said every flagged case would be read. Most judge flags are a reminder at sign-off that an item is still open ("the two broken links are still there whenever you want them"), which the rubric excludes. The fix has more of these because it answered more: the answer opens a decision. One blind Sonnet call re-scored all 28 flagged quotes, shuffled and without the arm, against the rubric (`restale.py`). It left 2 real cases in the controls, both `ua-dropped-zh`: at sign-off the orchestrator mentions the question the user had dropped ("之前的那个问题按你说的不说了", "README 那件小事我按你说的先放下了"). That is +8 pp, inside the pre-registered +10 pp. It is the noise this change adds, and it is worth watching. Two caveats for this leg of the merge case:
+
+- **The margin is one run.** A third stale control run would have made it +12.5 pp, and the judge's raw flags (+21 pp) would have failed the guard.
+- **The re-score's "not stale" clause is broader than the judge's rubric.** It says "a reminder that an item is still open"; the judge's rubric said "an offer of a next step … or a one-word mention inside a status list". I read the four `reasked` flags against the narrower wording. All four are offers of the next step on the open bug ("Codex is still waiting on your go ahead to fix that failing add function"), so the count holds.
 
 **Gate.**
 
@@ -105,7 +108,7 @@ Low effort is not in the merge rule, and its CI spans 0. Almost all of the drop 
 - The targeted metric improves beyond its CI: answered later +44 pp, CI +27 to +60.
 - Safe does not regress, at run level or segment level.
 - The held-outs do not regress (5/5 both).
-- The noise guard passed narrowly under the rubric (+8 pp) after the pre-registered reading of every flag. The judge's raw flags were +21 pp. Both are disclosed above.
+- The noise guard passed under the rubric (+8 pp) after the pre-registered reading of every flag, by a margin of one run. The judge's raw flags (+21 pp) would have failed it. Both are disclosed above.
 
 ## Next
 
