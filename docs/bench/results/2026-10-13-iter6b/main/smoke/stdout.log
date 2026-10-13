@@ -1,0 +1,16 @@
+[1/6] explain-zh-notes-ledger r1: pass (end_call, ) ≈ $0.0134, total ≈ $0.013
+[2/6] explain-en-flaky-test r1: pass (end_call, ) ≈ $0.0190, total ≈ $0.032
+[3/6] explain-en-invoice-job r1: pass (end_call, ) ≈ $0.0197, total ≈ $0.052
+[4/6] explain-control-en-done r1: pass (end_call, ) ≈ $0.0068, total ≈ $0.059
+[5/6] explain-zh-input-rules r1: pass (end_call, ) ≈ $0.0177, total ≈ $0.077
+[6/6] explain-control-zh-busy r1: pass (end_call, ) ≈ $0.0066, total ≈ $0.083
+  pass    explain-zh-input-rules  r1  end_call   5 turns   38.6s                         ≈ $0.0177
+  pass    explain-en-flaky-test   r1  end_call   5 turns   31.7s                         ≈ $0.0190
+  pass    explain-zh-notes-ledger r1  end_call   4 turns   26.5s                         ≈ $0.0134
+  pass    explain-en-invoice-job  r1  end_call   4 turns   32.2s                         ≈ $0.0197
+  pass    explain-control-en-done r1  end_call   2 turns    9.6s                         ≈ $0.0068
+  pass    explain-control-zh-busy r1  end_call   2 turns    9.5s                         ≈ $0.0066
+-- 6 runs, spend ≈ $0.0832 (estimate at list prices) --
+reports: docs/bench/results/2026-10-13-iter6b/main/smoke/report.json, docs/bench/results/2026-10-13-iter6b/main/smoke/report.md
+-- spend brain    deepseek-flash           calls    31  in    234805  out    12897  reasoning     8331  ≈ $0.0832 --
+-- spend total ≈ $0.0832 (estimate at list prices) --

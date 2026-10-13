@@ -1,0 +1,102 @@
+# Simulated-user campaign
+
+Started 2026-10-13T22:47:31Z, finished 2026-10-13T22:48:12Z (41s). Repeat 1.
+
+- brain: deepseek deepseek-flash
+- budget_usd: 2
+- failover providers: none
+- judge: fake fake
+- mode: live
+- parallel: 4
+- personas: rotate
+- scenarios: testdata/eval/sim/explain.json (filter explain-)
+- simulated user: deepseek deepseek-flash
+- utterance_timeout: 25s (0s = the orchestrator default, 25s)
+
+## North star
+
+6 runs, 6 graded (6 with a full record, 6 with the event log). Each rate is the share of the graded runs it applies to, with a Wilson 95 % CI; means have a bootstrap 95 % CI (2000 resamples). Everything after this block is diagnostics.
+
+| North star | Pass / runs | Rate | 95 % CI | A run passes when |
+|---|---|---|---|---|
+| **Understood** | 6 / 6 | 100 % | 61–100 % | the judge's `answered` is yes and every depth or length item is yes |
+| **Done** | – / 0 | n/a | – | no required action missing or sent to the wrong agent, and every declared end-state check passes (the claim part below is not in the gate) |
+| **Done, claim part (judge)** | – / 0 | n/a | – | no segment's `said_vs_done` judge item is no (runs with a claim the judge looked at); not gated until calibrated |
+| **Done, claim part (phrases)** | 0 / 1 | 0 % | 0–79 % | no claim the phrase list found is unmatched (runs with such a claim); diagnostic, not gated |
+| **Low effort** | 6 / 6 | 100 % | 61–100 % | the goal was reached with no repeated or rephrased user line and no cap ending the call |
+| **Safe** | 6 / 6 | 100 % | 61–100 % | no unintended or wrong-agent action (code checks and the judge's `no_unintended_action`) and no action the user was never told about |
+
+Turns to goal: 3.7 (95 % CI 2.7–4.7, n 6). Time to goal: 23.2 s (95 % CI 14.6–31.9, n 6).
+
+- Done: 6 runs had nothing to get done (no required action, no end-state check and no action) and are left out.
+
+### Programmatic checks (diagnostics)
+
+- **Said vs done, orchestrator**: 1 claims — 0 matched in their turn, 0 matched by an earlier action, unmatched 1 / 1 (100 %, CI 21–100 %). Actions on workers: 0; never told – / 0 (n/a, CI –).
+  - explain-en-invoice-job r1: said "after the first hundred every one was refused" (declined) — no declined action in the turn or before
+- **Missed news**: 0 items (finished, blocked, result, spawn failed); missed – / 0 (n/a, CI –); 0 ungraded (the call ended before the 30 s window closed).
+- **User effort**: 22 user lines, 0 repeats and 0 rephrasings of the line before.
+- **Turns, cost, latency**: turns per run 3.7 (95 % CI 2.7–4.7, n 6); estimated cost per run 0.0139 $ (95 % CI 0.0097–0.0181, n 6); per-turn latency p50 4948 ms, p90 8687 ms (n 22).
+
+## Pass rate per scenario
+
+Pass rate = pass / (pass + fail); errored and not-run runs are excluded and never count as a pass.
+
+| Scenario | Runs | Pass | Fail | Err | Not run | Pass rate | Primary failures | Mean s | Cost $ |
+|---|---|---|---|---|---|---|---|---|---|
+| explain-zh-input-rules | 1 | 1 | 0 | 0 | 0 | 100% | – | 38.6 | 0.018 |
+| explain-en-flaky-test | 1 | 1 | 0 | 0 | 0 | 100% | – | 31.7 | 0.019 |
+| explain-zh-notes-ledger | 1 | 1 | 0 | 0 | 0 | 100% | – | 26.5 | 0.013 |
+| explain-en-invoice-job | 1 | 1 | 0 | 0 | 0 | 100% | – | 32.2 | 0.020 |
+| explain-control-en-done | 1 | 1 | 0 | 0 | 0 | 100% | – | 9.6 | 0.007 |
+| explain-control-zh-busy | 1 | 1 | 0 | 0 | 0 | 100% | – | 9.5 | 0.007 |
+| **TOTAL** | 6 | 6 | 0 | 0 | 0 | 100% | – | 24.7 | 0.083 |
+
+## Brain failover
+
+Failovers = brain.failover events (a step retried on another provider); answered by = the provider of each run's last answered step.
+
+| Scenario | Runs | Runs with failover | Failovers | Answered by |
+|---|---|---|---|---|
+| explain-zh-input-rules | 1 | 0 | 0 | deepseek ×1 |
+| explain-en-flaky-test | 1 | 0 | 0 | deepseek ×1 |
+| explain-zh-notes-ledger | 1 | 0 | 0 | deepseek ×1 |
+| explain-en-invoice-job | 1 | 0 | 0 | deepseek ×1 |
+| explain-control-en-done | 1 | 0 | 0 | deepseek ×1 |
+| explain-control-zh-busy | 1 | 0 | 0 | deepseek ×1 |
+| **TOTAL** | 6 | 0 | 0 | deepseek ×6 |
+
+## Failure taxonomy
+
+| Label | Runs (primary) | Runs (any) |
+|---|---|---|
+
+## Judge items
+
+| Item | Yes | Asked | Yes rate |
+|---|---|---|---|
+| answered | 6 | 6 | 100% |
+| no_unintended_action | 6 | 6 | 100% |
+| right_agent | 6 | 6 | 100% |
+| no_hallucination | 6 | 6 | 100% |
+| facts_current | 6 | 6 | 100% |
+| length_fits | 6 | 6 | 100% |
+| ear_friendly | 6 | 6 | 100% |
+| language | 6 | 6 | 100% |
+
+## Explanations
+
+Explain (6 runs): orchestrator coverage 1.00, comprehension 1.00, words per answer en 148 / zh 212.
+
+| Side | Coverage | Of orchestrator | Comprehension | Words/answer en | zh | Simple en | zh | Follow-up depth | No padding |
+|---|---|---|---|---|---|---|---|---|---|
+| orchestrator | 1.00 | – | 1.00 | 148 | 212 | 54 | 70 | 14/14 | 4/4 |
+
+Coverage: share of the scenario's key points stated anywhere in the call. Of orchestrator: of the points the orchestrator gave the voice, the share the voice said. Comprehension: share of what / why / what-can-be-done a listener who cannot see the screen could restate. Words count Han characters as words. 0 of 22 questions (0 of 14 follow-ups) were answered without asking the orchestrator.
+
+## Spend (estimate at list prices)
+
+| Role | Model | Calls | In | Out | Reasoning | $ |
+|---|---|---|---|---|---|---|
+| brain | deepseek-flash | 31 | 234805 | 12897 | 8331 | 0.083 |
+| **total** | | | | | | **0.083** |
