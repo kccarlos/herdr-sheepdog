@@ -30,6 +30,9 @@ func TestSimFaultsHitTheirTurns(t *testing.T) {
 	if h := run.Faults[1]; h.Heard != "Offline" {
 		t.Errorf("cut heard = %q", h.Heard)
 	}
+	if got := cutPrefix("bench-codex 的测试确实有一个失败了，叫 TestAdd。", 3); got != "bench-" {
+		t.Errorf("cut of Chinese = %q", got)
+	}
 	var heard []string
 	for _, l := range run.Transcript {
 		if l.Who == "sheepdog" {

@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"google.golang.org/genai"
 
@@ -65,6 +67,17 @@ func (f *SimFaults) cutWords() int {
 		return 3
 	}
 	return f.CutWords
+}
+
+// cutPrefix is the first n words of said, or for text in Chinese
+// (no spaces between words) its first 2n characters.
+func cutPrefix(said string, n int) string {
+	if strings.IndexFunc(said, func(r rune) bool { return unicode.Is(unicode.Han, r) }) >= 0 {
+		r := []rune(said)
+		return string(r[:min(2*n, len(r))])
+	}
+	words := strings.Fields(said)
+	return strings.Join(words[:min(n, len(words))], " ")
 }
 
 // errInjected is the model error a FailTurns turn gets.
@@ -142,14 +155,14 @@ func (w *simWorld) voiceAnswer(text string, res voice.ToolResult, f fault, cutWo
 		}})
 		return ""
 	case faultCut:
-		words := strings.Fields(said)
-		n := min(cutWords, len(words))
-		heard := strings.Join(words[:n], " ")
+		heard := cutPrefix(said, cutWords)
 		w.sup.OnVoiceEvent(voice.EventTranscript{Dir: voice.DirOut, Text: said, Final: true})
 		w.sup.OnVoiceEvent(voice.EventTurnComplete{})
-		runMs := 400 * len(words)
+		// Speech time in proportion to the characters said.
+		total := utf8.RuneCountInString(said)
+		runMs := 60 * total
 		w.sup.OnVoiceEvent(voice.EventTranscript{Dir: voice.DirOut, Text: heard, Final: true, Cut: &voice.TranscriptCut{
-			UtteranceID: res.UtteranceID, HeardMs: 400 * n, RunMs: runMs, Full: said,
+			UtteranceID: res.UtteranceID, HeardMs: 60 * utf8.RuneCountInString(heard), RunMs: runMs, Full: said,
 		}})
 		return heard
 	}
