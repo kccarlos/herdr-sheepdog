@@ -1,0 +1,3 @@
+exit 0 sd-main main-a
+14:40:13 [8/9] barge-in-long-answer r3 (:7921): pass (max_turns, ) 4 turns 92s ≈ $0.068, total ≈ $0.56
+14:41:00 [9/9] barge-in-hold-to-talk r3 (:7922): pass (end_call, ) 4 turns 77s ≈ $0.080, total ≈ $0.64

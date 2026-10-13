@@ -1,0 +1,9 @@
+14:24:53 [1/9] slowness-brain-9s r1 (:7922): fail (end_call, timeout) 3 turns 105s ≈ $0.056, total ≈ $0.06
+14:25:16 [2/9] barge-in-long-answer r1 (:7921): fail (silence, unintended_action) 4 turns 128s ≈ $0.091, total ≈ $0.15
+14:26:16 [3/9] barge-in-hold-to-talk r1 (:7922): pass (max_turns, ) 4 turns 82s ≈ $0.096, total ≈ $0.24
+14:27:14 [4/9] slowness-brain-9s r2 (:7921): fail (end_call, timeout) 3 turns 117s ≈ $0.068, total ≈ $0.31
+14:27:44 [5/9] barge-in-long-answer r2 (:7922): pass (max_turns, ) 4 turns 88s ≈ $0.064, total ≈ $0.37
+14:28:37 [6/9] barge-in-hold-to-talk r2 (:7921): pass (max_turns, ) 4 turns 83s ≈ $0.087, total ≈ $0.46
+14:29:16 [7/9] slowness-brain-9s r3 (:7922): fail (end_call, timeout) 2 turns 92s ≈ $0.048, total ≈ $0.51
+14:30:07 [8/9] barge-in-long-answer r3 (:7921): pass (max_turns, ) 4 turns 89s ≈ $0.052, total ≈ $0.56
+14:30:45 [9/9] barge-in-hold-to-talk r3 (:7922): pass (end_call, ) 4 turns 88s ≈ $0.075, total ≈ $0.64

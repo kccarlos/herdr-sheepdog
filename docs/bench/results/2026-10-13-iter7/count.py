@@ -3,10 +3,10 @@
 cases of the CEO's note in event logs (bench runs and the live daemon):
 (a) the orchestrator turn on the words fell back (timeout / error), and
     no retry of the same words answered it;
-(b) the answer was cut off by the user's barge-in: a flushed playback run
-    cut short whose start was tagged with the utterance it answers, not a
-    flush for an urgent push (under_half: less than half of it played; an
-    analysis split only);
+(b) the answer was cut off by the user's barge-in: the first flushed
+    playback run cut short whose start was tagged with the utterance it
+    answers, not a flush for an urgent push; under_half (the daemon's rule):
+    the user heard less than half of the answer's text;
 (c) the answer was never voiced: an answer briefing found unvoiced, an
     answer push judged unheard and not re-queued, an answer push dropped,
     or a late reply dropped as stale without having acted.
@@ -59,10 +59,26 @@ def count_file(evs):
             continue
         r["a_fallback"] += 1
         r["a_fallback_" + str(reason)] += 1
-    # (b) cut answers: a flushed run cut short whose start was tagged
-    # with the utterance it answers (PlaybackUtterance), not a flush for
-    # an urgent push (within 3 s of voice.interrupted {by: push}).
+    # (b) cut answers: the first flushed run cut short whose start was
+    # tagged with the utterance it answers (PlaybackUtterance), not a
+    # flush for an urgent push (within 3 s of voice.interrupted {by:
+    # push}); under_half: the heard text is less than half of the answer
+    # handed to the voice (the tool result's spoken, or the answer push).
+    call_utt, answer = {}, {}
+    for e in evs:
+        t, p = e.get("type"), e.get("payload") or {}
+        if t == "supervisor.relay" and p.get("call_id"):
+            call_utt[p["call_id"]] = p.get("utterance_id")
+    for e in evs:
+        t, p = e.get("type"), e.get("payload") or {}
+        if t == "voice.tool_result" and p.get("name") == "to_supervisor" and p.get("spoken") and not p.get("pending"):
+            u = call_utt.get(p.get("id"))
+            if u:
+                answer[u] = p["spoken"]
+        elif t == "voice.push" and p.get("answers_utterance"):
+            answer[p["answers_utterance"]] = p.get("text", "")
     run_utt = None
+    seen = set()
     last_push_flush = -1e9
     for e in evs:
         t, p = e.get("type"), e.get("payload") or {}
@@ -74,14 +90,19 @@ def count_file(evs):
             if not run_utt:
                 r["b_cut_other_line"] += 1
                 continue
+            if run_utt in seen:
+                r["b_cut_answer_again"] += 1
+                continue
+            seen.add(run_utt)
             if ts(e) - last_push_flush < 3:
                 r["b_cut_answer_by_push"] += 1
                 continue
-            run, played = p.get("run_ms") or 0, p.get("played_ms") or 0
             r["b_cut_answer"] += 1
-            if run > 0 and played < 0.5 * run:
+            a = answer.get(run_utt, "")
+            if not a:
+                r["b_cut_answer_text_unknown"] += 1
+            elif len((p.get("heard") or "").strip()) < 0.5 * len(a.strip()):
                 r["b_cut_answer_under_half"] += 1
-            run_utt = None
     # (c) never voiced
     for e in evs:
         t, p = e.get("type"), e.get("payload") or {}

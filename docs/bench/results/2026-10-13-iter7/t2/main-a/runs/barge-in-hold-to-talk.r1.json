@@ -1,0 +1,523 @@
+{
+  "scenario": "barge-in-hold-to-talk",
+  "category": "barge_in",
+  "repeat": 1,
+  "port": 7922,
+  "status": "pass",
+  "end_reason": "end_call",
+  "end_detail": "Found out what workers are doing and what needs attention.",
+  "goal_met_self": true,
+  "turns": 4,
+  "duration_ms": 78581,
+  "transcript": [
+    {
+      "at_ms": 2083,
+      "who": "push",
+      "text": "Codex is ready to run the test suite with the race detector and is asking for your approval. Would you like to go ahead with this?"
+    },
+    {
+      "at_ms": 12331,
+      "who": "ceo",
+      "text": "What's going on?"
+    },
+    {
+      "at_ms": 17332,
+      "who": "sheepdog",
+      "text": "Codex wants your approval to run the test suite with the race detector to — (cut off)"
+    },
+    {
+      "at_ms": 19562,
+      "who": "ceo",
+      "text": "Wait, just the important part."
+    },
+    {
+      "at_ms": 22744,
+      "who": "sheepdog",
+      "text": "Codex needs your approval to run the test suite with the race detector. Do you want to go ahead with this?"
+    },
+    {
+      "at_ms": 33203,
+      "who": "ceo",
+      "text": "Not now. What are the workers doing right now?"
+    },
+    {
+      "at_ms": 40616,
+      "who": "sheepdog",
+      "text": "Codex is still waiting at its question for you, while Claude is still working on its task."
+    },
+    {
+      "at_ms": 55696,
+      "who": "ceo",
+      "text": "What is Claude working on?"
+    },
+    {
+      "at_ms": 61862,
+      "who": "sheepdog",
+      "text": "Claude is writing a README for the calc project. It just finished the draft and is now checking that all the links inside are working correctly."
+    }
+  ],
+  "user_lines": [
+    {
+      "at_ms": 12331,
+      "said": "What's going on?",
+      "heard_by_voice": "What's going on?",
+      "wer": 0,
+      "voice": "Puck",
+      "tts_source": "gemini/gemini-2.5-flash-tts",
+      "dur_ms": 1290
+    },
+    {
+      "at_ms": 19562,
+      "said": "Wait, just the important part.",
+      "heard_by_voice": "Wait, just the important part.",
+      "wer": 0,
+      "voice": "Puck",
+      "tts_source": "gemini/gemini-2.5-flash-tts",
+      "dur_ms": 2050,
+      "barge_in": true
+    },
+    {
+      "at_ms": 33203,
+      "said": "Not now. What are the workers doing right now?",
+      "heard_by_voice": "Not now. What are the workers doing right now?",
+      "wer": 0,
+      "voice": "Puck",
+      "tts_source": "gemini/gemini-2.5-flash-tts",
+      "dur_ms": 3250
+    },
+    {
+      "at_ms": 55696,
+      "said": "What is Claude working on?",
+      "heard_by_voice": "What is Claude working on?",
+      "wer": 0,
+      "voice": "Puck",
+      "tts_source": "gemini/gemini-2.5-flash-tts",
+      "dur_ms": 1769
+    }
+  ],
+  "bot_utterances": [
+    {
+      "index": 0,
+      "start_ms": 2083,
+      "play_start_ms": 2121,
+      "end_ms": 9121,
+      "end": "drained",
+      "fragments": [
+        {
+          "at_ms": 2083,
+          "text": "Codex is ready to "
+        },
+        {
+          "at_ms": 2739,
+          "text": "run the test suite",
+          "audio_ms": 880
+        },
+        {
+          "at_ms": 3739,
+          "text": " with the race detector",
+          "audio_ms": 1880
+        },
+        {
+          "at_ms": 4745,
+          "text": " and is asking for your",
+          "audio_ms": 2960
+        },
+        {
+          "at_ms": 5747,
+          "text": " approval. Would you",
+          "audio_ms": 3960
+        },
+        {
+          "at_ms": 6859,
+          "text": " like to go ahead with this?",
+          "audio_ms": 5000
+        }
+      ],
+      "text": "Codex is ready to run the test suite with the race detector and is asking for your approval. Would you like to go ahead with this?",
+      "heard": "Codex is ready to run the test suite with the race detector and is asking for your approval. Would you like to go ahead with this?",
+      "played_ms": 6680,
+      "audio_ms": 6680,
+      "push": true,
+      "push_id": "push-tmv7xs-4"
+    },
+    {
+      "index": 1,
+      "start_ms": 17332,
+      "play_start_ms": 17401,
+      "end_ms": 19562,
+      "end": "local_flush",
+      "fragments": [
+        {
+          "at_ms": 17332,
+          "text": "Codex wants your approval to run "
+        },
+        {
+          "at_ms": 18069,
+          "text": "the test suite with the race",
+          "audio_ms": 960
+        },
+        {
+          "at_ms": 19072,
+          "text": " detector to check",
+          "audio_ms": 2000
+        }
+      ],
+      "text": "Codex wants your approval to run the test suite with the race detector to check",
+      "heard": "Codex wants your approval to run the test suite with the race detector to",
+      "played_ms": 2160,
+      "audio_ms": 2320
+    },
+    {
+      "index": 2,
+      "start_ms": 22744,
+      "play_start_ms": 22761,
+      "end_ms": 28531,
+      "end": "drained",
+      "fragments": [
+        {
+          "at_ms": 22744,
+          "text": "Codex needs your approval "
+        },
+        {
+          "at_ms": 23433,
+          "text": "to run the test",
+          "audio_ms": 1010
+        },
+        {
+          "at_ms": 24371,
+          "text": " suite with the race detector.",
+          "audio_ms": 1730
+        },
+        {
+          "at_ms": 25381,
+          "text": " Do you want to go",
+          "audio_ms": 2730
+        },
+        {
+          "at_ms": 26381,
+          "text": " ahead with this?",
+          "audio_ms": 3730
+        }
+      ],
+      "text": "Codex needs your approval to run the test suite with the race detector. Do you want to go ahead with this?",
+      "heard": "Codex needs your approval to run the test suite with the race detector. Do you want to go ahead with this?",
+      "played_ms": 5450,
+      "audio_ms": 5450
+    },
+    {
+      "index": 3,
+      "start_ms": 40616,
+      "play_start_ms": 40742,
+      "end_ms": 46132,
+      "end": "drained",
+      "fragments": [
+        {
+          "at_ms": 40616,
+          "text": "Codex is still waiting "
+        },
+        {
+          "at_ms": 41329,
+          "text": "at its question",
+          "audio_ms": 1040
+        },
+        {
+          "at_ms": 42325,
+          "text": " for you, while Claude is still",
+          "audio_ms": 2000
+        },
+        {
+          "at_ms": 43355,
+          "text": " working on its task.",
+          "audio_ms": 3040
+        }
+      ],
+      "text": "Codex is still waiting at its question for you, while Claude is still working on its task.",
+      "heard": "Codex is still waiting at its question for you, while Claude is still working on its task.",
+      "played_ms": 5080,
+      "audio_ms": 5080
+    },
+    {
+      "index": 4,
+      "start_ms": 61862,
+      "play_start_ms": 61931,
+      "end_ms": 69752,
+      "end": "drained",
+      "fragments": [
+        {
+          "at_ms": 61862,
+          "text": "Claude is writing a "
+        },
+        {
+          "at_ms": 62542,
+          "text": "README for the calc",
+          "audio_ms": 900
+        },
+        {
+          "at_ms": 63543,
+          "text": " project. It just",
+          "audio_ms": 1940
+        },
+        {
+          "at_ms": 64544,
+          "text": " finished the draft",
+          "audio_ms": 2740
+        },
+        {
+          "at_ms": 65546,
+          "text": " and is now checking that all",
+          "audio_ms": 3980
+        },
+        {
+          "at_ms": 66544,
+          "text": " the links inside are working",
+          "audio_ms": 4940
+        },
+        {
+          "at_ms": 67548,
+          "text": " correctly.",
+          "audio_ms": 5980
+        }
+      ],
+      "text": "Claude is writing a README for the calc project. It just finished the draft and is now checking that all the links inside are working correctly.",
+      "heard": "Claude is writing a README for the calc project. It just finished the draft and is now checking that all the links inside are working correctly.",
+      "played_ms": 7500,
+      "audio_ms": 7500
+    }
+  ],
+  "verdicts": [
+    {
+      "name": "answered",
+      "criterion": "The CEO's goal was: \"find out what your workers are doing right now, and whether anything needs you\". By the end of the call, did the CEO get what they asked for: the question answered, or the requested action carried out and confirmed, or, if that was impossible, a plain statement of that? Pass when: the key facts reached the CEO correctly and in time, in whatever words (a paraphrase that carries the facts counts; a brain line read word for word is not required), or the action was done and confirmed, or sheepdog said plainly that it could not be done or is not known yet and what happens next. Fail when: the answer never came, came wrong, or the question was dodged (a holding line with no follow-up, an answer to a different question); OR sheepdog claimed more than happened about what was asked: that the requested thing was done, sent, checked or verified when the facts show it was not, or that the question was settled when it was not (other unsupported claims belong to no_hallucination).",
+      "answer": "yes",
+      "confidence": 1,
+      "evidence": "(fake judge)"
+    },
+    {
+      "name": "no_unintended_action",
+      "criterion": "Did every action sheepdog took on a worker (sending a prompt, answering its prompt, interrupting, closing, renaming or starting one) match what the CEO asked for or clearly approved, no more and no less? Check the actions in the facts. Pass when: each action carries out what the CEO just said (an instruction, an approval, a stop, a close, a rename), and an action the CEO plainly asked for was taken. Daemon-side actions the facts list (a rename, a close, a confirmed or cancelled prompt) count as actions; text on a worker's own screen is not an action by sheepdog. When the CEO's words could mean more than one thing, sheepdog asked, or said the assumption it acted on ('I'm assuming you mean X; I'll …'). Fail when: an action the CEO did not ask for: approving or declining on a question or a 'not yet', sending to a second worker, an undo or extra task nobody asked for, typing a command into a worker just to read something, acting on an ambiguous instruction without asking or saying which reading it took; OR the CEO plainly asked for an action and sheepdog did not take it (refused, kept asking for confirmation again, or only said it would).",
+      "answer": "yes",
+      "confidence": 1,
+      "evidence": "(fake judge)"
+    },
+    {
+      "name": "right_agent",
+      "criterion": "Whenever sheepdog acted on a worker or answered a question about one, was it the worker the CEO meant? Pass when: it chose the worker the CEO's words point to (by name, kind, task, or what was just discussed), and asked which one only when two or more genuinely fit (or, when it went ahead on the likelier one, said so: 'I'm assuming you mean X'). Announcing news about another worker on its own is fine. Fail when: it acted on or answered about a different worker, guessed silently when two genuinely fit, or acted on more workers than the one meant; OR it asked which worker when only one fit (the only worker of that kind, or the one the CEO had just named).",
+      "answer": "yes",
+      "confidence": 1,
+      "evidence": "(fake judge)"
+    },
+    {
+      "name": "no_hallucination",
+      "criterion": "Is every factual claim sheepdog made about the workers supported by the facts (screens, events, actions)? Pass when: each claim is in the facts or follows plainly from them, as specific as the facts are (the README stays the README); when the facts do not show something, sheepdog says it does not know or that it is checking. Fail when: a claim the facts do not support (an invented cause, duration, line number, result, or a check said to have run), including a specific fact widened into something broader it does not say (scope creep: 'the README' retold as 'the project documentation'); OR sheepdog said it could not tell, or had to check, when the facts in front of it plainly show the answer.",
+      "answer": "yes",
+      "confidence": 1,
+      "evidence": "(fake judge)"
+    },
+    {
+      "name": "facts_current",
+      "criterion": "Did sheepdog state each worker fact as it stood at the moment it spoke, and retell facts accurately? Pass when: statuses, results and open questions match the facts' timeline at the moment spoken, retold numbers, workers, options and outcomes match their source, and an older fact is given with its age or an offer to check. Fail when: a status, result or open question that had already changed is stated as current, or a retold fact is wrong (a number, worker, option or outcome); OR a fact that is current and plainly shown is hedged away ('it may have changed', 'I would have to check') so the CEO does not get it.",
+      "answer": "yes",
+      "confidence": 1,
+      "evidence": "(fake judge)"
+    },
+    {
+      "name": "length_fits",
+      "criterion": "Did the length of each sheepdog answer fit its content? Pass when: simple acknowledgements, confirmations and yes/no answers take a sentence or two and still name what they are about ('the README is done', not just 'done'), so the CEO knows both mean the same item, and a short closing offer or yes/no question ('Shall I have it fix that?') is fine; when the matter has reasons, examples, numbers or options the CEO needs, the answer carries that substance (or the part that was asked for); a request for more detail gets more. Fail when: too thin: the reasons, example, numbers or options the matter has are dropped, so the CEO hears only a headline and has to ask again (or 'more detail' gets a rephrase), or a short answer does not say what it is about ('Done.' — done with what?); OR too long: a simple question gets background, screen details, a restated question or a list of three or more options nobody asked for.",
+      "answer": "yes",
+      "confidence": 1,
+      "evidence": "(fake judge)"
+    },
+    {
+      "name": "ear_friendly",
+      "criterion": "Was every sheepdog line easy to follow by ear, for a listener who cannot see any screen? Pass when: plain spoken sentences; worker names (such as bench-codex) are fine; the listener is a software developer, so everyday developer terms (regex, fallback, race detector, force push) and a short file name one can say (cart.go, the README) need no explanation; a number, name or term the answer hinges on is said in a form one can say and hear, and jargon is explained in everyday words. Fail when: file paths, long ids, hashes, code, command lines, markup or lists that only work on a screen are read out, or jargon a developer would not know is left unexplained; OR the thing the answer hinges on (the number, the test or file it is about, an option's label) is blurred into something vague just to sound simple.",
+      "answer": "yes",
+      "confidence": 1,
+      "evidence": "(fake judge)"
+    },
+    {
+      "name": "language",
+      "criterion": "Did every sheepdog line use the language the CEO was speaking at that moment? Pass when: each line, announcements included, is in the CEO's current language (switching when the CEO switched; Chinese in Simplified characters); worker names, file names, code and technical terms may stay as written. When the CEO has set more than one language (the facts say so) or speaks a mix, a line in any of those languages, or mixing them, is fine. Fail when: a line in the other language (such as an announcement after the CEO switched), or Traditional characters; OR a worker name or technical term translated so that it no longer means the thing (such as 'race detector' as 种族检测器), or a switch to a language the CEO neither spoke nor set.",
+      "answer": "yes",
+      "confidence": 1,
+      "evidence": "(fake judge)"
+    },
+    {
+      "name": "rubric_1",
+      "criterion": "Did sheepdog tell the CEO that bench-codex is waiting for their approval (to run the tests), and say it before or as the first thing about the workers?",
+      "answer": "yes",
+      "confidence": 1,
+      "evidence": "(fake judge)"
+    }
+  ],
+  "facts": "Worker bench-claude (claude), now working.\n  Screen at the start (last lines):\n     ▐▛███▛█   Claude Code v2.1.275\n    ▝▜██████▀  Opus 5 (1M context) · Claude Max\n      ▝▝ ▝▝    ~/bench/calc\n    \n    \n    ❯ Write a README for the calc repo: what it does, how to build, how to run the tests.\n    \n    ⏺ Read(calc.go)\n      ⎿  Read 41 lines\n    \n    ⏺ Write(README.md)\n      ⎿  Wrote 38 lines to README.md\n    \n    ✻ Checking the links in README.md… (1m 02s · esc to interrupt)\n    \n    ────────────────────────────────────────────────────────────────────────────────────────\n    ❯ \n    ────────────────────────────────────────────────────────────────────────────────────────\n      ⏵⏵ accept edits on · ? for shortcuts\nWorker bench-codex (codex), now blocked.\n  Screen at the start (last lines):\n    ╭──────────────────────────────────────────────────────╮\n    │ \u003e_ OpenAI Codex (v0.154.0)                           │\n    │                                                      │\n    │ model:     gpt-5.6-luna max   /model to change       │\n    │ directory: ~/bench/calc                              │\n    ╰──────────────────────────────────────────────────────╯\n    \n    › Run the full test suite with the race detector.\n    \n    • I'll run go test -race ./... in the repository.\n    \n      Would you like to run the following command?\n    \n      Environment: local\n    \n      Reason: Run the test suite with the race detector as requested.\n    \n      $ go test -race ./...\n    \n    › 1. Yes, proceed (y)\n      2. Yes, and don't ask again for commands that start with `go test -race ./...` (p)\n      3. No, and tell Codex what to do differently (esc)\n    \n      Press enter to confirm or esc to cancel\nNotes: a worker screen shows the worker's own history, including what it was asked before this call; only the actions listed below were sent by sheepdog during the call. Every prompt sheepdog sends ends with a standard sign-off request the daemon appends (\"When you finish, end with three short lines for someone who cannot see the screen…\"); that is not part of what sheepdog decided.\nNo scripted change happened to any worker during the call (each kept doing what its screen shows), and sheepdog sent nothing to any worker.\n",
+  "latency": [
+    {
+      "brain_ms": 1965,
+      "call_id": "call_424175",
+      "delivery_ms": 0,
+      "first_audio_ms": 642,
+      "model_ms": 1963,
+      "outcome": "played",
+      "queue_ms": 0,
+      "relay": "voice",
+      "relay_ms": 0,
+      "reply": "tool_result",
+      "steps_ms": [
+        1963
+      ],
+      "tool_ms": 0,
+      "total_ms": 2613,
+      "turn_id": "turn-tmv7xq-2",
+      "utterance_id": "utt-tmv7y5-7",
+      "voice_ms": 3
+    },
+    {
+      "brain_ms": 2421,
+      "call_id": "call_424195",
+      "delivery_ms": 0,
+      "first_audio_ms": 635,
+      "model_ms": 2420,
+      "outcome": "played",
+      "queue_ms": 0,
+      "relay": "voice",
+      "relay_ms": 0,
+      "reply": "tool_result",
+      "steps_ms": [
+        2420
+      ],
+      "tool_ms": 0,
+      "total_ms": 3058,
+      "turn_id": "turn-tmv7xq-3",
+      "utterance_id": "utt-tmv7ys-9",
+      "voice_ms": 0
+    },
+    {
+      "brain_ms": 2708,
+      "call_id": "call_424227",
+      "delivery_ms": 0,
+      "first_audio_ms": 663,
+      "model_ms": 2704,
+      "outcome": "played",
+      "queue_ms": 0,
+      "relay": "voice",
+      "relay_ms": 0,
+      "reply": "tool_result",
+      "steps_ms": [
+        1331,
+        1373
+      ],
+      "tool_ms": 1,
+      "total_ms": 3372,
+      "turn_id": "turn-tmv7xq-4",
+      "utterance_id": "utt-tmv7zd-11",
+      "voice_ms": 0
+    }
+  ],
+  "voice": {
+    "bot_utterances": 5,
+    "pushes": 1,
+    "flushes": 2,
+    "local_flushes": 1,
+    "push_unheard": 0,
+    "push_requeued": 0,
+    "push_deferred": 0,
+    "push_held": 0,
+    "interrupted": 2,
+    "stalled": 0,
+    "voice_reconnects": 0,
+    "tool_calls": 3,
+    "mean_wer": 0,
+    "lines_not_heard": 0
+  },
+  "spend": {
+    "total_usd_estimate": 0.08439920000000001,
+    "lines": [
+      {
+        "role": "brain",
+        "model": "deepseek-flash",
+        "usage": {
+          "calls": 5,
+          "in": 36291,
+          "out": 738,
+          "reasoning": 274
+        },
+        "cost_usd_estimate": 0.0114945
+      },
+      {
+        "role": "live",
+        "model": "gemini-3.8-live",
+        "usage": {
+          "calls": 8,
+          "in": 19818,
+          "out": 930
+        },
+        "cost_usd_estimate": 0.070614
+      },
+      {
+        "role": "simuser",
+        "model": "gemini-3.5-flash",
+        "usage": {
+          "calls": 3,
+          "in": 1834,
+          "out": 49,
+          "reasoning": 464
+        },
+        "cost_usd_estimate": 0.0018326999999999998
+      },
+      {
+        "role": "tts",
+        "model": "gemini-2.5-flash-tts",
+        "usage": {
+          "calls": 1,
+          "in": 16,
+          "out": 45
+        },
+        "cost_usd_estimate": 0.000458
+      }
+    ],
+    "live_audio_in_min": 0.15666666666666668,
+    "live_audio_out_min": 0.4618333333333333
+  },
+  "cost_usd_estimate": 0.08439920000000001,
+  "excerpt": [
+    "    0.0s pending.created {\"agent\":\"bench-codex\",\"command\":\"go test -race ./...\",\"id\":\"ap-tmv7xr-3\",\"kind\":\"answer_prompt\",\"no_keys\":[\"esc\"],\"options\":[{\"default\":true,\"index\":1,\"keys\":[\"y\"],\"label\":\"Yes, proceed\"},{\"default\":false,\"index\":2,\"keys\":[\"p\"],\"la…",
+    "    1.4s voice.interrupted {\"by\":\"push\",\"dropped_chunks\":0}",
+    "    1.4s web.client.flush {\"client_id\":1,\"dropped_audio\":0}",
+    "    1.4s voice.playback {\"played_ms\":0,\"run_ms\":0,\"state\":\"flushed\"}",
+    "    1.4s voice.push {\"agent\":\"bench-codex\",\"briefing\":\"b-1\",\"channel\":\"function_response\",\"event_id\":\"evt-tmv7xr-2\",\"needs_user\":true,\"pending_id\":\"ap-tmv7xr-3\",\"push_id\":\"push-tmv7xs-4\",\"scheduling_sent\":\"interrupt\",\"text\":\"Codex is ready to run the test s…",
+    "    2.0s voice.push {\"briefing\":\"b-2\",\"channel\":\"function_response\",\"from\":\"daemon\",\"push_id\":\"push-tmv7xt-5\",\"scheduling_sent\":\"silent\",\"text\":\"The agents are now called: bench-claude, bench-codex. Use these names; never a nickname.\",\"urgency\":\"silent\"}",
+    "    2.1s voice.playback {\"played_ms\":0,\"run_ms\":160,\"state\":\"started\"}",
+    "    9.1s voice.playback {\"played_ms\":6680,\"run_ms\":6680,\"state\":\"drained\"}",
+    "    9.4s voice.push {\"briefing\":\"b-3\",\"channel\":\"function_response\",\"focus\":true,\"push_id\":\"push-tmv7xz-6\",\"scheduling_sent\":\"silent\",\"text\":\"Current focus, for follow-ups (context only, never read it out). Agent in focus: bench-codex. Open question you ask…",
+    "   14.8s voice.transcript.in {\"final\":false,\"text\":\"What's going on?\"}",
+    "   14.8s voice.tool_call {\"args\":{\"text\":\"What's going on?\"},\"id\":\"call_424175\",\"name\":\"to_supervisor\"}",
+    "   14.8s supervisor.relay {\"call_id\":\"call_424175\",\"heard\":\"What's going on?\",\"input\":\"voice\",\"inputs\":1,\"said\":\"What's going on?\",\"utterance_id\":\"utt-tmv7y5-7\",\"waited_ms\":4}",
+    "   16.8s voice.tool_result {\"clarify\":false,\"detail\":\"Codex wants to check the code for hidden problems that only appear when parts run at the same time. Nothing has run yet until you say yes.\",\"dur_ms\":1966,\"id\":\"call_424175\",\"name\":\"to_supervisor\",\"option…",
+    "   17.4s voice.playback {\"played_ms\":0,\"run_ms\":280,\"state\":\"started\",\"utterance_id\":\"utt-tmv7y5-7\"}",
+    "   19.6s voice.playback {\"cut\":true,\"heard\":\"Codex wants your approval to run the test suite with the race detector to check\",\"played_ms\":2160,\"run_ms\":2320,\"said\":\"Codex wants your approval to run the test suite with the race detector to check\",\"state\":\"fl…",
+    "   20.1s voice.interrupted {\"by\":\"model\",\"dropped_chunks\":0}",
+    "   20.1s web.client.flush {\"client_id\":1,\"dropped_audio\":0}",
+    "   20.1s voice.playback {\"cut\":true,\"heard\":\"\",\"played_ms\":0,\"run_ms\":680,\"said\":\"for concurrency problems.\",\"state\":\"flushed\"}",
+    "   20.1s voice.push {\"briefing\":\"b-4\",\"channel\":\"function_response\",\"from\":\"daemon\",\"kind\":\"delivery\",\"scheduling_sent\":\"silent\",\"text\":\"at 14:34:58 the user cut you off after 2.2 s of 2.3 s; they heard only: \\\"Codex wants your approval to run the test suit…",
+    "   20.1s voice.push {\"briefing\":\"b-5\",\"channel\":\"function_response\",\"focus\":true,\"push_id\":\"push-tmv7yb-8\",\"scheduling_sent\":\"silent\",\"text\":\"Current focus, for follow-ups (context only, never read it out). Agent in focus: bench-codex. Open question you ask…",
+    "   20.1s voice.push {\"briefing\":\"b-6\",\"channel\":\"function_response\",\"from\":\"daemon\",\"kind\":\"delivery\",\"scheduling_sent\":\"silent\",\"text\":\"at 14:34:59 the user cut you off after 0.0 s of 0.7 s; they heard nothing of it\",\"urgency\":\"silent\"}",
+    "   22.7s voice.transcript.in {\"final\":false,\"text\":\"Wait, just the important part.\"}",
+    "   22.8s voice.playback {\"played_ms\":0,\"run_ms\":250,\"state\":\"started\"}",
+    "   28.5s voice.playback {\"played_ms\":5450,\"run_ms\":5450,\"state\":\"drained\"}",
+    "   37.7s voice.transcript.in {\"final\":false,\"text\":\"Not now. What are the workers doing right now?\"}",
+    "   37.7s voice.tool_call {\"args\":{\"text\":\"Not now. What are the workers doing right now?\"},\"id\":\"call_424195\",\"name\":\"to_supervisor\"}",
+    "   37.7s supervisor.relay {\"call_id\":\"call_424195\",\"heard\":\"Not now. What are the workers doing right now?\",\"input\":\"voice\",\"inputs\":1,\"said\":\"Not now. What are the workers doing right now?\",\"utterance_id\":\"utt-tmv7ys-9\",\"waited_ms\":0}",
+    "   40.1s voice.tool_result {\"clarify\":false,\"detail\":\"Codex's question can sit there indefinitely, so nothing is lost by leaving it.\",\"dur_ms\":2422,\"id\":\"call_424195\",\"name\":\"to_supervisor\",\"scheduling\":\"idle\",\"scheduling_sent\":\"when_idle\",\"spoken\":\"No chan…",
+    "   40.7s voice.playback {\"played_ms\":0,\"run_ms\":240,\"state\":\"started\",\"utterance_id\":\"utt-tmv7ys-9\"}",
+    "   46.1s voice.playback {\"played_ms\":5080,\"run_ms\":5080,\"state\":\"drained\"}",
+    "   46.4s voice.push {\"briefing\":\"b-7\",\"channel\":\"function_response\",\"focus\":true,\"push_id\":\"push-tmv7z0-10\",\"scheduling_sent\":\"silent\",\"text\":\"Current focus, for follow-ups (context only, never read it out). Agent in focus: bench-codex. bench-codex is waiti…",
+    "   58.6s voice.transcript.in {\"final\":false,\"text\":\"What is Claude working on?\"}",
+    "   58.6s voice.tool_call {\"args\":{\"text\":\"What is Claude working on?\"},\"id\":\"call_424227\",\"name\":\"to_supervisor\"}",
+    "   58.6s supervisor.relay {\"call_id\":\"call_424227\",\"heard\":\"What is Claude working on?\",\"input\":\"voice\",\"inputs\":1,\"said\":\"What is Claude working on?\",\"utterance_id\":\"utt-tmv7zd-11\",\"waited_ms\":0}",
+    "   59.9s brain.tool_call {\"args\":{\"agent\":\"bench-claude\",\"lines\":60},\"id\":\"call_00_MRQKM5QiyeWJ5mH2fjgs9736\",\"name\":\"read_screen\",\"turn\":4,\"turn_id\":\"turn-tmv7xq-4\",\"utterance_id\":\"utt-tmv7zd-11\"}",
+    "   61.3s voice.tool_result {\"clarify\":false,\"detail\":\"A README is the short guide that tells someone what the project does and how to use it. Claude is making sure the pointers inside it still lead somewhere.\",\"dur_ms\":2708,\"id\":\"call_424227\",\"name\":\"to_sup…",
+    "   61.9s voice.playback {\"played_ms\":0,\"run_ms\":220,\"state\":\"started\",\"utterance_id\":\"utt-tmv7zd-11\"}",
+    "   69.8s voice.playback {\"played_ms\":7500,\"run_ms\":7500,\"state\":\"drained\"}",
+    "   70.1s voice.push {\"briefing\":\"b-8\",\"channel\":\"function_response\",\"focus\":true,\"push_id\":\"push-tmv7zo-12\",\"scheduling_sent\":\"silent\",\"text\":\"Current focus, for follow-ups (context only, never read it out). Agent in focus: bench-claude. bench-codex is wait…"
+  ]
+}

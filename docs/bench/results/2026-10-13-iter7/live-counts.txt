@@ -7,7 +7,7 @@
   a_fallback_model_error: 15
   a_fallback_timeout: 8
   b_cut_answer: 5
-  b_cut_answer_under_half: 1
+  b_cut_answer_under_half: 4
   b_cut_other_line: 20
   c_dropped_answer_superseded: 1
   c_stale_dropped: 2
