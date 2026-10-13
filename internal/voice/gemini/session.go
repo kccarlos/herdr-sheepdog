@@ -287,16 +287,25 @@ func (s *Session) Audio() <-chan []byte { return s.audio }
 // Events implements voice.Session.
 func (s *Session) Events() <-chan voice.Event { return s.events }
 
-// SetMuted implements voice.Session. Muting drops SendAudio frames; the
-// server is told the audio stream ended so its VAD does not wait.
+// SetMuted implements voice.Session. Muting drops SendAudio frames and
+// ends the stream like a gate close (endStream): a mute tapped right
+// after the last word must not leave that utterance unheard. Without the
+// echo gate's held frames and the comfort-noise tail, Live did not
+// transcribe it until the user unmuted and a later stream carried audio
+// (seen live 2026-10-13).
 func (s *Session) SetMuted(muted bool) {
 	s.mu.Lock()
 	changed := s.muted != muted
 	s.muted = muted
-	conn := s.conn
+	var held [][]byte
+	var verdict *voice.EchoVerdict
+	if changed && muted {
+		held, verdict = s.echo.StreamEnd(s.now())
+	}
 	s.mu.Unlock()
 	if changed && muted {
-		s.audioStreamEnd(conn)
+		s.logEchoVerdict(verdict, "mute")
+		s.endStream(held)
 	}
 	if changed {
 		s.log.Log(logSource, "voice.muted", "", map[string]any{"muted": muted})
@@ -329,7 +338,8 @@ func (s *Session) ClientAttached(attached bool) {
 // AudioStreamEnd tells the server the microphone stream paused (the
 // client's silence gate closed) so its VAD finalises the current utterance
 // instead of waiting for frames that will not come. The next SendAudio
-// reopens the stream. No-op while muted or disconnected.
+// reopens the stream. No-op while muted (mute ended the stream) or
+// disconnected.
 //
 // Before the stream end it streams Config.GateTail of comfort noise (a
 // ±8 LSB floor, like a real microphone's) at real-time pace: found by
@@ -343,20 +353,40 @@ func (s *Session) ClientAttached(attached bool) {
 // reopened) cancels the tail and the stream end.
 func (s *Session) AudioStreamEnd() {
 	s.mu.Lock()
+	if s.muted {
+		s.mu.Unlock()
+		return
+	}
 	held, verdict := s.echo.StreamEnd(s.now())
 	s.mu.Unlock()
 	s.logEchoVerdict(verdict, "stream_end")
-	for _, f := range held {
-		_ = s.forwardAudio(f)
-	}
+	s.endStream(held)
+}
+
+// endStream ends the microphone stream (a gate close or a mute): it
+// sends the frames the echo gate held and let through, then the
+// comfort-noise tail at real-time pace, then audioStreamEnd. It sends
+// even while muted, since the held frames and the pause belong to speech
+// from before the mute. A later client frame cancels the tail.
+func (s *Session) endStream(held [][]byte) {
 	s.mu.Lock()
-	conn, muted := s.conn, s.muted
+	conn := s.conn
+	live := s.started && s.status != voice.StatusClosed && s.ctx.Err() == nil
+	if conn == nil && live {
+		for _, f := range held {
+			s.bufferLocked(f)
+		}
+	}
 	s.tailGen++
 	gen := s.tailGen
-	live := s.started && s.status != voice.StatusClosed && s.ctx.Err() == nil
 	s.mu.Unlock()
-	if muted || conn == nil || !live {
+	if conn == nil || !live {
 		return
+	}
+	for _, f := range held {
+		if err := s.sendAudio(conn, f); err != nil {
+			return
+		}
 	}
 	tail := comfortNoise(s.cfg.GateTail)
 	if len(tail) == 0 {
@@ -389,11 +419,12 @@ func (s *Session) AudioStreamEnd() {
 }
 
 // tailCurrent reports whether the comfort-noise tail gen is still wanted
-// (no client frame, mute or newer gate close since).
+// (no client frame or newer stream end since). A mute does not cancel
+// it: the mute ends the stream with a tail of its own.
 func (s *Session) tailCurrent(gen int) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.tailGen == gen && !s.muted
+	return s.tailGen == gen
 }
 
 // comfortNoise returns d of 16 kHz PCM16 low-level noise (±8 LSB).

@@ -131,8 +131,10 @@ func TestAudioInAndMute(t *testing.T) {
 		}
 	}
 	time.Sleep(20 * time.Millisecond)
-	if n := c.count("audio"); n != 1 {
-		t.Fatalf("muted audio leaked: %d audio frames sent", n)
+	for _, m := range c.sentMsgs() {
+		if m.kind == "audio" && bytes.Equal(m.audio, []byte{9, 9}) {
+			t.Fatal("muted audio leaked")
+		}
 	}
 	h.s.SetMuted(false)
 	if err := h.s.SendAudio([]byte{5, 6}); err != nil {
@@ -149,7 +151,7 @@ func TestAudioInAndMute(t *testing.T) {
 // it) and never before a connection exists.
 func TestAudioStreamEnd(t *testing.T) {
 	c := newFakeConn("c1")
-	h := newHarness(t, Config{}, &fakeDialer{results: []func() (Conn, error){ok(c)}})
+	h := newHarness(t, Config{GateTail: -1}, &fakeDialer{results: []func() (Conn, error){ok(c)}})
 	h.s.AudioStreamEnd()
 	c.waitSent(t, "audioStreamEnd", func(m sent) bool { return m.kind == "audioEnd" })
 	h.s.SetMuted(true)
@@ -222,6 +224,65 @@ func TestGateReopenCancelsComfortTail(t *testing.T) {
 		t.Fatalf("audioStreamEnd sent %d times after the gate reopened", n)
 	}
 	if n := c.count("audio"); n > 4 {
+		t.Errorf("tail kept streaming: %d audio messages", n)
+	}
+}
+
+// TestMuteAfterSpeechSendsComfortTail: a mute tapped right after the
+// last word ends the stream like a gate close: GateTail of comfort noise
+// at real-time pace, then audioStreamEnd (seen live 2026-10-13: a bare
+// stream end on mute left the utterance untranscribed until unmute).
+func TestMuteAfterSpeechSendsComfortTail(t *testing.T) {
+	c := newFakeConn("c1")
+	h := newHarness(t, Config{GateTail: 300 * time.Millisecond}, &fakeDialer{results: []func() (Conn, error){ok(c)}})
+	if err := h.s.SendAudio([]byte{1, 2, 3, 4}); err != nil {
+		t.Fatal(err)
+	}
+	c.waitSent(t, "speech", func(m sent) bool { return m.kind == "audio" })
+	start := time.Now()
+	h.s.SetMuted(true)
+	c.waitSent(t, "audioStreamEnd on mute", func(m sent) bool { return m.kind == "audioEnd" })
+	if d := time.Since(start); d < 200*time.Millisecond {
+		t.Errorf("stream end after %v: the tail was not paced in real time", d)
+	}
+	var tail []byte
+	msgs := c.sentMsgs()
+	if len(msgs) == 0 || !bytes.Equal(msgs[0].audio, []byte{1, 2, 3, 4}) {
+		t.Fatalf("speech not sent first: %s", describe(msgs))
+	}
+	for _, m := range msgs[1:] {
+		if m.kind == "audioEnd" {
+			break
+		}
+		if m.kind == "audio" {
+			tail = append(tail, m.audio...)
+		}
+	}
+	if len(tail) != 9600 { // 300 ms of 16 kHz PCM16
+		t.Fatalf("tail %d bytes before audioStreamEnd, want 9600", len(tail))
+	}
+	if n := c.count("audioEnd"); n != 1 {
+		t.Errorf("audioEnd sent %d times, want 1", n)
+	}
+}
+
+// TestUnmuteCancelsMuteTail: unmuting during the mute's tail and talking
+// again (a client frame) stops the tail, and no audioStreamEnd follows.
+func TestUnmuteCancelsMuteTail(t *testing.T) {
+	c := newFakeConn("c1")
+	h := newHarness(t, Config{GateTail: 2 * time.Second}, &fakeDialer{results: []func() (Conn, error){ok(c)}})
+	h.s.SetMuted(true)
+	c.waitSent(t, "first tail chunk", func(m sent) bool { return m.kind == "audio" })
+	h.s.SetMuted(false)
+	if err := h.s.SendAudio([]byte{9, 9}); err != nil {
+		t.Fatal(err)
+	}
+	c.waitSent(t, "audio after unmute", func(m sent) bool { return m.kind == "audio" && bytes.Equal(m.audio, []byte{9, 9}) })
+	time.Sleep(2500 * time.Millisecond)
+	if n := c.count("audioEnd"); n != 0 {
+		t.Fatalf("audioStreamEnd sent %d times after unmute and speech", n)
+	}
+	if n := c.count("audio"); n > 5 {
 		t.Errorf("tail kept streaming: %d audio messages", n)
 	}
 }
