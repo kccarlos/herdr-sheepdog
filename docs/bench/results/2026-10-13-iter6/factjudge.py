@@ -9,10 +9,11 @@ scripted investigation answer) and the conversation, and returns per answer:
   new_facts: how many facts from the world this answer states that no earlier answer stated.
 """
 import json, sys, os, subprocess, glob
+SCREENS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../../../testdata/eval/sim/screens")
 PROMPT = """You check a voice assistant's answers for factual accuracy. The assistant reports on coding agents ("workers") to a user who cannot see their screens. Below are WORLD FACTS (everything that is true: the workers' screens and what an investigation would find) and the CONVERSATION (user lines numbered, each followed by the assistant's answer).
 
 For each numbered user line, judge the assistant's answer to it:
-- "wrong": a list of short quotes from the answer that state something about the workers or their work that the world facts contradict or do not contain: an invented or changed number, cause, observation, step taken, outcome, or claim about what a worker saw or did. An analogy or illustration clearly framed as one ("think of a coffee counter") is not a claim. General knowledge that explains a term is not a claim. Rounding that keeps the meaning ("about one in twelve") is fine; a changed value ("a quarter of an hour" for 25 minutes) is wrong. Empty list when none.
+- "wrong": a list of short quotes from the answer that state something about the workers or their work that the world facts contradict or do not contain: an invented or changed number, cause, observation, step taken, outcome, or claim about what a worker saw or did. An analogy or illustration clearly framed as one ("think of a coffee counter") is not a claim. General knowledge that explains a term is not a claim. A paraphrase, a summary or a plain inference that follows from the facts ("just started" for a task running for under three minutes) is not wrong. A hypothetical example clearly framed as made up ("say you told it…") is not a claim; an example presented as something that happened is a claim. Rounding that keeps the meaning ("about one in twelve") is fine; a changed value ("a quarter of an hour" for 25 minutes) is wrong. Empty list when none.
 - "new_facts": the number of distinct facts from the world facts that this answer states and no earlier answer in the conversation stated.
 - "restates": true when the answer mostly repeats earlier answers in other words.
 
@@ -28,6 +29,19 @@ CONVERSATION:
 %s
 >>>
 """
+def world(spec, run):
+    """The full world: every agent's whole screen and scripted investigation answer, then the
+    run's own notes (scripted changes during the call). The run's facts field shows only the
+    last lines of each screen, which made the judge flag true facts from the screen's top."""
+    out = []
+    for a in spec["agents"]:
+        out.append(f"Worker {a['alias']} ({a.get('kind', 'codex')}), state {a.get('state', '')}.")
+        if a.get("answer"): out.append("  What an investigation of it finds (a read-only look at its repository): " + a["answer"])
+        if a.get("screen"): out.append("  Its whole screen:\n" + open(os.path.join(SCREENS, a["screen"])).read())
+    f = run.get("facts", ""); i = f.find("Notes:")
+    if i >= 0: out.append(f[i:])
+    return "\n".join(out)
+
 def convo(run):
     out, n = [], 0
     for t in run["transcript"]:
@@ -38,7 +52,7 @@ def convo(run):
     return "\n".join(out), n
 
 def main():
-    specs = {s["id"] for s in json.load(open(sys.argv[1]))["scenarios"] if s.get("explain")}
+    specs = {s["id"]: s for s in json.load(open(sys.argv[1]))["scenarios"] if s.get("explain")}
     outp = sys.argv[2]
     done = set()
     if os.path.exists(outp):
@@ -49,7 +63,7 @@ def main():
             key = (rd, run["scenario"], run["repeat"])
             if run["scenario"] not in specs or key in done: continue
             c, n = convo(run)
-            p = PROMPT % (run.get("facts", ""), c)
+            p = PROMPT % (world(specs[run["scenario"]], run), c)
             res = subprocess.run(["claude", "-p", "--model", "sonnet", "--output-format", "text"], input=p, capture_output=True, text=True, timeout=300)
             txt = res.stdout.strip()
             s, e = txt.find("{"), txt.rfind("}")

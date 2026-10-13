@@ -28,6 +28,7 @@ print("detail answers:", len(det))
 print("  no fresh look          ", rate(det, lambda r: not r["look"]))
 print("  any wrong fact         ", rate(det, lambda r: r["wrong"]))
 print("  restates               ", rate(det, lambda r: r["restates"]))
+print("  FAILED (wrong, or restates with no new fact)", rate(det, lambda r: r["wrong"] or (r["restates"] and r["new"] == 0)))
 print("  mean new facts          %.2f" % (sum(r["new"] for r in det) / max(1, len(det))))
 for lab, sub in (("with a look", [r for r in det if r["look"]]), ("without a look", [r for r in det if not r["look"]])):
     print(f"  {lab:15s} wrong {rate(sub, lambda r: r['wrong'])}; restates {rate(sub, lambda r: r['restates'])}; mean new facts {sum(r['new'] for r in sub)/max(1,len(sub)):.2f}")
