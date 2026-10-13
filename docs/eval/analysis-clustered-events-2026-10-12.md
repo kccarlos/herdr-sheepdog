@@ -72,3 +72,28 @@ Each is labelled as in the iteration loop (prompt / information / rail); none pu
 The yields (finding 3) remain after fixes 1-2: 3 of 4 fix-v1 runs had one. A yield on a block whose code sentence was already spoken loses nothing the user has not heard, but `simFailures` labels it `brain_fallback` and fails the run. Whether a yield should fail a run is a measurement decision for a separate change, not this iteration. Run-level pass on scale-ten stays capped by it, so Phase B judges the fix on fallbacks per run and reports yields separately.
 
 Phase B results: docs/eval/harness-iteration-log.md (iteration 3).
+
+## Phase B: fixes 1 and 2 at tier 1
+
+Change: `internal/brain/loop.go` `Turn` (rail). The step budget starts when the turn gets the turn lock; the lock wait has its own bound: a user turn its own budget, an event turn one user turn's budget (`utterance_timeout_s` + `final_grace_s`) or its own when longer. Unit test `TestQueuedEventTurnGetsItsFullBudget` (fails on the old code).
+
+Setup: brain DeepSeek `deepseek-flash`, `--fallback-provider none`, simulated user Vertex `gemini-3.5-flash`, judge fake then `bench rejudge --judge claude --judge-model sonnet --skip-run-level`; chattiness chatty; arms built from main 871fe38 and the branch (tier 1 has no voice layer, so the later voice-prompt merge #203 does not affect it). Interleaved chunks of 4, `--parallel 4`. Raw data: `docs/bench/results/2026-10-12-iter3/` (`STATUS.md`, `*/merged`, `*/merged16`, `northstar-n8-main-vs-fix.md`, `northstar-n16-main-vs-fix.md`).
+
+**Extension disclosed:** the plan was 8 scale-ten runs per arm. At n = 8, brain fallbacks per run were 0.75 (main) vs 0.25 (fix), difference −0.50, bootstrap 95 % CI −1.13 to +0.13: not beyond the CI. The extension to 16 per arm was decided after seeing that (the index also asks for ≥ 15 scale-ten runs for a Safe claim), written in `STATUS.md` before the next chunk ran, and the rule was applied at n = 16.
+
+| workday-scale-ten, n = 16 per arm | main | fix | fix − main (95 % CI) |
+|---|---|---|---|
+| Brain fallbacks (per run) | 18 (1.12) | 6 (0.38) | −0.75 (−1.31 to −0.19) |
+| Queue-starved (`queue_timeout`, or `timeout` after ≥ 7.6 s queued) | 16 | 0 | |
+| `yielded` | 2 | 5 | +0.19 per run (−0.13 to +0.44) |
+| Provider stalls (one step ran the whole budget, queue 0) | 0 | 1 (a 28 s utterance step) | |
+| Runs with no fallback | 6 / 16 | 10 / 16 | +25 pp (−9 to +52) |
+| Finish wait for its line, p50 / p90 / max | 2.5 / 9.0 / 11.9 s | 2.4 / 9.0 / 15.2 s | |
+
+Regression set (morning-standup ×3, interruptions ×3 per arm): 0 fallbacks on main, 1 on fix (an announce step that stalled 9 s with queue 0, a provider stall).
+
+North star, all 22 runs per arm (`northstar-n16-main-vs-fix.md`, B = fix): segment Understood 86 % → 85 % (−1 pp, −7 to +5); run-level Safe 64 → 77 % (+14 pp, −13 to +38); segment Safe (judge) 301/308 → 302/308; Understood and Done 22/22 both; actions never told 15 → 9 %; missed news 14 → 18 % (+4 pp, −3 to +11); time to goal 114 s both. Four main runs (scale-ten r7, r10, r13, r16) got no Sonnet verdict for `right_agent` on beat 13 in two attempts and keep fake segment verdicts, which favours main.
+
+The yields are the remaining scale-ten failures; fix has more of them, plausibly because turns that used to die in the queue now run and can meet a later user utterance. Run-level pass on scale-ten stays capped by them (see "Not changed").
+
+Decision: merge rule met at n = 16 (brain fallbacks beyond the CI, segment Understood and Safe not worse); not met at the planned n = 8.
