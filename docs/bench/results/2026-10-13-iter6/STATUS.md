@@ -33,3 +33,4 @@ Guards (must not worsen): simple controls (no wrong facts, no added reads beyond
 
 - Fix 9a6ad69. Chunks f1 ×3 (fix), b2 ×2 (main), f2 ×2 (fix), 42 runs, ≈ $0.69 list; DeepSeek balance 53.72 → 53.32 CNY (read lags). Fact judge 30 + 12 calls.
 - n = 5 per arm (70 detail answers each): failed 36/70 = 51 % → 27/70 = 39 %, **−13 pp (Newcombe −28 to +4)**: not beyond the CI. Mechanism: no fresh look 81 % → 41 % (−40 pp, −53 to −24). Wrong fact 19 → 13 % (−6, −18 to +7); restates 60 → 44 % (−16, −31 to +1); mean new facts 1.16 → 1.60. First answers 0/20 wrong on both.
+- Workday w1 ×5 per arm stopped at the per-chunk $1.5 budget (main 17/35, fix 16/35 ran; one main explain-deep run errored). Top-up w2 ×3 per arm at `BUDGET=4`; the gate uses the first 5 finished runs per scenario (w1 first, then w2 in repeat order), fixed before w2 ran. DeepSeek balance after w1: 48.94 CNY.

@@ -11,5 +11,5 @@ out=$R/$1/$2; mkdir -p "$out"
   --simuser deepseek --simuser-model deepseek-flash --judge fake \
   --env-file /Users/kc/Documents/herdr-sheepdog/.env --config "$S/cfg.toml" \
   --files "testdata/eval/sim/$3.json" --filter "$4" \
-  --repeat "$5" --personas rotate --parallel 4 --budget-usd 1.5 --events "$out/events" --out "$out" > "$out/stdout.log" 2>&1
+  --repeat "$5" --personas rotate --parallel 4 --budget-usd ${BUDGET:-1.5} --events "$out/events" --out "$out" > "$out/stdout.log" 2>&1
 echo "exit $? $1 $2"; tail -4 "$out/stdout.log"
