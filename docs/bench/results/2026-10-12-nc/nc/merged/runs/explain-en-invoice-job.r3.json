@@ -12,10 +12,6 @@
     {
       "type": "judge_no",
       "detail": "explain_depth_t4_more (orchestrator): Sheepdog: \"Here is the whole picture as it found it. The job asks the payment provider to charge one customer at a time. Last night it had four thousand two hundred customers to charge, and the provid…"
-    },
-    {
-      "type": "judge_no",
-      "detail": "explain_depth_t4_more (voice): Sheepdog: \"The job attempts to charge invoices one by one. Last night, it tried to process forty-two hundred, but because the provider only accepts one hundred requests per minute, the first hundred w…"
     }
   ],
   "end_reason": "end_call",
@@ -715,16 +711,16 @@
           "name": "explain_depth_t3_example",
           "criterion": "The CEO's last question (\"Give me an example.\") asks for an example. Did Sheepdog's answer to it give one? Pass when: it gives a concrete example (a specific case, input, number or event), or says it has none and offers to find out, or hands the question to a worker. Fail when: a general restatement without a specific case, or an analogy in place of a real case from the matter at hand; OR code, a pattern or a long list of cases read out instead of one case a listener can picture.",
           "answer": "yes",
-          "confidence": 0.85,
-          "evidence": "Sheepdog: \"Say the job starts at midnight. The first hundred invoices go out fine, then from invoice one hundred and one onwards every single request comes back refused, and it stays that way for the next four thousand one hundred invoices.\""
+          "confidence": 0.9,
+          "evidence": "Sheepdog: \"Say the job starts at midnight. The first hundred invoices go out fine, then from invoice one hundred and one onwards every single request comes back refused\""
         },
         {
           "name": "explain_depth_t4_more",
           "criterion": "The CEO's last question (\"More detail please.\") asks for more. Did Sheepdog's answer to it add what was asked for? Pass when: it adds substantive content not already said in its earlier answers (a new reason, example, number, consequence or step), or says plainly that this is everything it has and offers to find out more, or hands the question to a worker or goes and checks. Fail when: it says the same things again in other words with nothing new; OR it repeats the whole earlier answer around a small addition, so the CEO has to sit through it again to find the new part.",
           "answer": "no",
-          "confidence": 0.6,
-          "evidence": "Sheepdog: \"Here is the whole picture as it found it. The job asks the payment provider to charge one customer at a time. Last night it had four thousand two hundred customers to charge, and the provider only accepts a hundred asks a minute...\" The answer restates the whole earlier explanation. The only new parts are small and buried in it: batches of five hundred, nine asks, and normal nights having fewer than a hundred invoices.",
-          "rationale": "Sheepdog: \"Here is the whole picture as it found it. The job asks the payment provider to charge one customer at a time. Last night it had four thousand two hundred customers to charge, and the provider only accepts a hundred asks a minute...\" The answer restates the whole earlier explanation. The only new parts are small and buried in it: batches of five hundred, nine asks, and normal nights having fewer than a hundred invoices."
+          "confidence": 0.72,
+          "evidence": "Sheepdog: \"Here is the whole picture as it found it. The job asks the payment provider to charge one customer at a time. Last night it had four thousand two hundred customers to charge, and the provider only accepts a hundred asks a minute...\" This restates the first answer. The new parts are \"five hundred invoices at a time, which is nine asks\" and \"a normal night had fewer than a hundred invoices\". They are buried inside the repeated summary.",
+          "rationale": "Sheepdog: \"Here is the whole picture as it found it. The job asks the payment provider to charge one customer at a time. Last night it had four thousand two hundred customers to charge, and the provider only accepts a hundred asks a minute...\" This restates the first answer. The new parts are \"five hundred invoices at a time, which is nine asks\" and \"a normal night had fewer than a hundred invoices\". They are buried inside the repeated summary."
         }
       ]
     },
@@ -744,7 +740,7 @@
       ],
       "comprehension": 1,
       "depth_asked": 3,
-      "depth_passed": 2,
+      "depth_passed": 3,
       "padding_asked": 0,
       "padding_passed": 0,
       "words": [
@@ -758,7 +754,7 @@
           "name": "explain_comprehension_action",
           "criterion": "Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHAT CAN BE DONE about it: the options or the recommendation, and roughly what each would take? Pass when: the options or the recommendation are said, with roughly what each would take. Fail when: no option or recommendation is given, or only 'should I fix it?' with nothing on what fixing means; OR the options are read out as a long list of labels or commands a listener could not keep apart.",
           "answer": "yes",
-          "confidence": 0.55,
+          "confidence": 0.58,
           "evidence": "Sheepdog: \"Running it again now with a retry waits a minute after each refusal to clear the backlog safely without any double charges. Would you like to re-run now with the retry, write a batch fix, or hold off?\""
         },
         {
@@ -766,14 +762,14 @@
           "criterion": "Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHAT the matter is: concretely what the worker found or did, not just its topic? Pass when: the lines say concretely what was found or done, in words a listener can retell. Fail when: only the topic is named, so there is nothing concrete to retell; OR the substance is there but buried in terms, identifiers or side details so that a listener would lose it.",
           "answer": "yes",
           "confidence": 0.9,
-          "evidence": "Sheepdog: \"api-claude hit the payment provider's limit. The job sends one request per invoice, but the provider only accepts one hundred per minute. It processed the first one hundred, and the rest were refused.\""
+          "evidence": "Sheepdog: api-claude hit the payment provider's limit. The job sends one request per invoice, but the provider only accepts one hundred per minute. It processed the first one hundred, and the rest were refused."
         },
         {
           "name": "explain_comprehension_why",
           "criterion": "Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHY it matters: the cause, and the consequence or risk? Pass when: the cause and the consequence or risk are both said in words a listener can retell. Fail when: the cause or the consequence is missing, or only asserted ('it is important'); OR they are there but buried in terms, identifiers or side details so that a listener would lose them.",
           "answer": "yes",
           "confidence": 0.85,
-          "evidence": "Sheepdog: \"because the provider only accepts one hundred requests per minute, the first hundred were processed and the rest were refused.\""
+          "evidence": "Sheepdog: \"because the provider only accepts one hundred requests per minute, the first hundred were processed and the rest were refused.\" Earlier: \"the new annual plans pushed the invoice count over the limit\" and \"the remaining four thousand one hundred invoices being turned away.\""
         },
         {
           "name": "explain_depth_t2_why",
@@ -786,16 +782,15 @@
           "name": "explain_depth_t3_example",
           "criterion": "The CEO's last question (\"Give me an example.\") asks for an example. Did Sheepdog's answer to it give one? Pass when: it gives a concrete example (a specific case, input, number or event), or says it has none and offers to find out, or hands the question to a worker. Fail when: a general restatement without a specific case, or an analogy in place of a real case from the matter at hand; OR code, a pattern or a long list of cases read out instead of one case a listener can picture.",
           "answer": "yes",
-          "confidence": 0.85,
+          "confidence": 0.9,
           "evidence": "Sheepdog: \"If the job starts at midnight, the first hundred invoices go out fine, but then every request after that is refused, resulting in the remaining four thousand one hundred invoices being turned away.\""
         },
         {
           "name": "explain_depth_t4_more",
           "criterion": "The CEO's last question (\"More detail please.\") asks for more. Did Sheepdog's answer to it add what was asked for? Pass when: it adds substantive content not already said in its earlier answers (a new reason, example, number, consequence or step), or says plainly that this is everything it has and offers to find out more, or hands the question to a worker or goes and checks. Fail when: it says the same things again in other words with nothing new; OR it repeats the whole earlier answer around a small addition, so the CEO has to sit through it again to find the new part.",
-          "answer": "no",
-          "confidence": 0.7,
-          "evidence": "Sheepdog: \"The job attempts to charge invoices one by one. Last night, it tried to process forty-two hundred, but because the provider only accepts one hundred requests per minute, the first hundred were processed and the rest were refused.\"",
-          "rationale": "Sheepdog: \"The job attempts to charge invoices one by one. Last night, it tried to process forty-two hundred, but because the provider only accepts one hundred requests per minute, the first hundred were processed and the rest were refused.\""
+          "answer": "yes",
+          "confidence": 0.6,
+          "evidence": "Sheepdog: \"Running it again now with a retry waits a minute after each refusal to clear the backlog safely without any double charges.\" This is new. Earlier answers never explained how the retry works or said there would be no double charges. The first two sentences repeat earlier content, but the new part is a full sentence and easy to find."
         }
       ]
     },

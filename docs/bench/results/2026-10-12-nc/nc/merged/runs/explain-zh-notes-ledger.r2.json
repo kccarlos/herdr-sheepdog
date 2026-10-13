@@ -19,7 +19,7 @@
     },
     {
       "type": "judge_no",
-      "detail": "explain_depth_t4_then (voice): Sheepdog: 如果不加这个功能,它可能在推送前直接行动,而你就收不到提醒,可能会有未检查的代码发出去。"
+      "detail": "explain_depth_t4_then (voice): Sheepdog: \"如果不加这个功能,它可能在推送前直接行动,而你就收不到提醒,可能会有未检查的代码发出去。\" (restates the earlier example \"导致它没提醒你直接就推送了\")"
     }
   ],
   "end_reason": "end_call",
@@ -544,21 +544,21 @@
           "criterion": "Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHAT CAN BE DONE about it: the options or the recommendation, and roughly what each would take? Pass when: the options or the recommendation are said, with roughly what each would take. Fail when: no option or recommendation is given, or only 'should I fix it?' with nothing on what fixing means; OR the options are read out as a long list of labels or commands a listener could not keep apart.",
           "answer": "yes",
           "confidence": 0.8,
-          "evidence": "Sheepdog: \"它建议加一个能删旧条目的小功能,不着急…要让它加上这个删除功能吗?\" Options: 加删除功能,顺手清掉两条没用的(我建议这个); 先不加; 只把两条没用的清掉"
+          "evidence": "Sheepdog: \"它建议加一个能删旧条目的小功能,不着急…… Options: 加删除功能,顺手清掉两条没用的(我建议这个); 先不加,什么都别动; 只把两条没用的清掉.\""
         },
         {
           "name": "explain_comprehension_what",
           "criterion": "Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHAT the matter is: concretely what the worker found or did, not just its topic? Pass when: the lines say concretely what was found or done, in words a listener can retell. Fail when: only the topic is named, so there is nothing concrete to retell; OR the substance is there but buried in terms, identifiers or side details so that a listener would lose it.",
           "answer": "yes",
           "confidence": 0.9,
-          "evidence": "Sheepdog: \"本子最多放五条，第六条一进来，最旧的一条会被悄悄挤掉... 现在五条已经满了，其中两条早就没用，再加一条，被挤掉的正好是最要紧的那条，也就是推送前一定要先问你。 它建议加一个能删旧条目的小功能\""
+          "evidence": "Sheepdog: \"本子最多放五条,第六条一进来,最旧的一条会被悄悄挤掉... 现在五条已经满了,其中两条早就没用,再加一条,被挤掉的正好是最要紧的那条,也就是推送前一定要先问你。\""
         },
         {
           "name": "explain_comprehension_why",
           "criterion": "Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHY it matters: the cause, and the consequence or risk? Pass when: the cause and the consequence or risk are both said in words a listener can retell. Fail when: the cause or the consequence is missing, or only asserted ('it is important'); OR they are there but buried in terms, identifiers or side details so that a listener would lose them.",
           "answer": "yes",
           "confidence": 0.85,
-          "evidence": "Sheepdog: \"本子最多放五条,第六条一进来,最旧的一条会被悄悄挤掉,谁也不提醒你。 现在五条已经满了……再加一条,被挤掉的正好是最要紧的那条,也就是推送前一定要先问你。\""
+          "evidence": "Sheepdog: \"本子最多放五条，第六条一进来，最旧的一条会被悄悄挤掉，谁也不提醒你。 现在五条已经满了……再加一条，被挤掉的正好是最要紧的那条，也就是推送前一定要先问你。\""
         }
       ]
     },
@@ -599,7 +599,7 @@
           "criterion": "Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHAT the matter is: concretely what the worker found or did, not just its topic? Pass when: the lines say concretely what was found or done, in words a listener can retell. Fail when: only the topic is named, so there is nothing concrete to retell; OR the substance is there but buried in terms, identifiers or side details so that a listener would lose it.",
           "answer": "yes",
           "confidence": 0.8,
-          "evidence": "Sheepdog: memo-claude 替你记事的那个小本子已经存满了五条。它建议加一个删除旧条目的功能,这样可以防止新内容挤掉最重要的事。"
+          "evidence": "Sheepdog: \"memo-claude 替你记事的那个小本子已经存满了五条。它建议加一个删除旧条目的功能,这样可以防止新内容挤掉最重要的事。\""
         },
         {
           "name": "explain_comprehension_why",
@@ -619,16 +619,16 @@
           "name": "explain_depth_t3_example",
           "criterion": "The CEO's last question (\"举个例子？\") asks for an example. Did Sheepdog's answer to it give one? Pass when: it gives a concrete example (a specific case, input, number or event), or says it has none and offers to find out, or hands the question to a worker. Fail when: a general restatement without a specific case, or an analogy in place of a real case from the matter at hand; OR code, a pattern or a long list of cases read out instead of one case a listener can picture.",
           "answer": "yes",
-          "confidence": 0.8,
-          "evidence": "Sheepdog: 如果本子满了，新加一条日常任务，推送前必须确认这个重要规则可能就会被挤掉，导致它没提醒你直接就推送了。"
+          "confidence": 0.68,
+          "evidence": "Sheepdog: 如果本子满了,新加一条日常任务,推送前必须确认这个重要规则可能就会被挤掉,导致它没提醒你直接就推送了。"
         },
         {
           "name": "explain_depth_t4_then",
           "criterion": "The CEO's last question (\"然后呢？\") asks for more. Did Sheepdog's answer to it add what was asked for? Pass when: it adds substantive content not already said in its earlier answers (a new reason, example, number, consequence or step), or says plainly that this is everything it has and offers to find out more, or hands the question to a worker or goes and checks. Fail when: it says the same things again in other words with nothing new; OR it repeats the whole earlier answer around a small addition, so the CEO has to sit through it again to find the new part.",
           "answer": "no",
-          "confidence": 0.75,
-          "evidence": "Sheepdog: 如果不加这个功能,它可能在推送前直接行动,而你就收不到提醒,可能会有未检查的代码发出去。",
-          "rationale": "Sheepdog: 如果不加这个功能,它可能在推送前直接行动,而你就收不到提醒,可能会有未检查的代码发出去。"
+          "confidence": 0.72,
+          "evidence": "Sheepdog: \"如果不加这个功能,它可能在推送前直接行动,而你就收不到提醒,可能会有未检查的代码发出去。\" (restates the earlier example \"导致它没提醒你直接就推送了\")",
+          "rationale": "Sheepdog: \"如果不加这个功能,它可能在推送前直接行动,而你就收不到提醒,可能会有未检查的代码发出去。\" (restates the earlier example \"导致它没提醒你直接就推送了\")"
         }
       ]
     },

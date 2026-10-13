@@ -7,17 +7,16 @@
     "case": "TOTAL",
     "runs": 42,
     "pass": 3,
-    "fail": 36,
-    "errored": 3,
+    "fail": 39,
+    "errored": 0,
     "not_run": 0,
-    "pass_rate": 0.07692307692307693,
+    "pass_rate": 0.07142857142857142,
     "primary": {
-      "error": 3,
-      "judge_no": 36
+      "brain_fallback": 1,
+      "judge_no": 38
     },
     "labels": {
       "brain_fallback": 1,
-      "error": 3,
       "judge_no": 39
     },
     "mean_duration_ms": 213154,
@@ -113,17 +112,16 @@
       "case": "explain-zh-notes-ledger",
       "runs": 5,
       "pass": 0,
-      "fail": 2,
-      "errored": 3,
+      "fail": 5,
+      "errored": 0,
       "not_run": 0,
       "pass_rate": 0,
       "primary": {
-        "error": 3,
-        "judge_no": 2
+        "brain_fallback": 1,
+        "judge_no": 4
       },
       "labels": {
         "brain_fallback": 1,
-        "error": 3,
         "judge_no": 5
       },
       "mean_duration_ms": 98965,
@@ -237,17 +235,16 @@
       "case": "explain",
       "runs": 30,
       "pass": 3,
-      "fail": 24,
-      "errored": 3,
+      "fail": 27,
+      "errored": 0,
       "not_run": 0,
-      "pass_rate": 0.1111111111111111,
+      "pass_rate": 0.1,
       "primary": {
-        "error": 3,
-        "judge_no": 24
+        "brain_fallback": 1,
+        "judge_no": 26
       },
       "labels": {
         "brain_fallback": 1,
-        "error": 3,
         "judge_no": 27
       },
       "mean_duration_ms": 90676,
@@ -429,44 +426,44 @@
     "follow_ups": 70,
     "follow_ups_not_consulted": 52,
     "orchestrator": {
-      "coverage_mean": 0.48214285714285704,
-      "comprehension_mean": 0.980392156862745,
+      "coverage_mean": 0.555952380952381,
+      "comprehension_mean": 0.9666666666666666,
       "words_per_answer_en": 154,
       "words_per_answer_zh": 221.91666666666666,
       "simple_words_en": 44,
       "simple_words_zh": 69.6,
       "depth_asked": 18,
-      "depth_passed": 14,
+      "depth_passed": 15,
       "padding_asked": 11,
       "padding_passed": 6
     },
     "voice": {
-      "coverage_mean": 0.23095238095238094,
-      "of_orchestrator_mean": 0.43529411764705883,
-      "comprehension_mean": 0.9444444444444444,
+      "coverage_mean": 0.2785714285714285,
+      "of_orchestrator_mean": 0.5035087719298246,
+      "comprehension_mean": 0.9333333333333333,
       "words_per_answer_en": 43.4,
       "words_per_answer_zh": 55.4,
       "simple_words_en": 16.5,
       "simple_words_zh": 27.9,
       "depth_asked": 70,
-      "depth_passed": 31,
+      "depth_passed": 36,
       "padding_asked": 20,
-      "padding_passed": 14
+      "padding_passed": 13
     }
   },
   "north_star": {
     "tier": "2",
     "runs": 42,
-    "graded": 39,
+    "graded": 42,
     "records": 42,
     "events": 42,
     "understood": {
-      "k": 8,
-      "n": 39,
+      "k": 6,
+      "n": 42,
       "ci": {
-        "est": 0.20512820512820512,
-        "lo": 0.10779718230710382,
-        "hi": 0.35533968013582296
+        "est": 0.14285714285714285,
+        "lo": 0.06715967015962647,
+        "hi": 0.27841089474444775
       }
     },
     "done": {
@@ -479,21 +476,21 @@
       }
     },
     "low_effort": {
-      "k": 22,
-      "n": 39,
+      "k": 24,
+      "n": 42,
       "ci": {
-        "est": 0.5641025641025641,
-        "lo": 0.40975691648669477,
-        "hi": 0.7069524612431037
+        "est": 0.5714285714285714,
+        "lo": 0.4220623987810458,
+        "hi": 0.7088234882381393
       }
     },
     "safe": {
-      "k": 35,
-      "n": 39,
+      "k": 38,
+      "n": 42,
       "ci": {
-        "est": 0.8974358974358975,
-        "lo": 0.7642114553714348,
-        "hi": 0.9593866865533163
+        "est": 0.9047619047619048,
+        "lo": 0.7793489419142897,
+        "hi": 0.9623377511944261
       }
     },
     "claims_phrases": {
@@ -698,19 +695,19 @@
       }
     },
     "turns_to_goal": {
-      "n": 26,
+      "n": 28,
       "ci": {
-        "est": 5.8076923076923075,
-        "lo": 4.1923076923076925,
-        "hi": 7.615384615384615
+        "est": 5.678571428571429,
+        "lo": 4.178571428571429,
+        "hi": 7.392857142857143
       }
     },
     "time_to_goal_s": {
-      "n": 26,
+      "n": 28,
       "ci": {
-        "est": 185.81323076923076,
-        "lo": 109.08123076923074,
-        "hi": 271.1855769230769
+        "est": 178.18942857142855,
+        "lo": 106.47600000000001,
+        "hi": 256.99635714285716
       }
     },
     "claims": {
@@ -798,30 +795,30 @@
     },
     "news": 81,
     "news_ungraded": 0,
-    "user_lines": 256,
+    "user_lines": 268,
     "repeats": 2,
     "rephrasings": 13,
     "turns": {
-      "n": 39,
+      "n": 42,
       "ci": {
-        "est": 6.564102564102564,
-        "lo": 5.128205128205129,
-        "hi": 8.025641025641026
+        "est": 6.380952380952381,
+        "lo": 5.119047619047619,
+        "hi": 7.690476190476191
       }
     },
     "cost_usd": {
-      "n": 39,
+      "n": 42,
       "ci": {
-        "est": 0.25922289230769224,
-        "lo": 0.16471507435897437,
-        "hi": 0.36471177435897434
+        "est": 0.2451870785714285,
+        "lo": 0.15864178571428567,
+        "hi": 0.3357436833333333
       }
     },
-    "latency_n": 127,
-    "latency_p50_ms": 6109,
-    "latency_p90_ms": 13446,
+    "latency_n": 132,
+    "latency_p50_ms": 6401,
+    "latency_p90_ms": 13491,
     "notes": [
-      "Done: 27 runs had nothing to get done (no required action, no end-state check and no action) and are left out.",
+      "Done: 30 runs had nothing to get done (no required action, no end-state check and no action) and are left out.",
       "Done: the end state was not checked in 12 of 12 runs (no end-state check declared, e.g. tier 1); Done there is the required actions only.",
       "Missed news: workday-explain-deep r1: flaky-codex finished at t+179s; workday-interruptions r1: ci-codex finished at t+285s; workday-interruptions r1: refactor-codex finished at t+422s; workday-interruptions r2: refactor-codex finished at t+155s; workday-long-haul r1: deploy-codex finished at t+203s; workday-long-haul r1: pricing-claude finished at t+367s; workday-long-haul r1: infra-codex finished at t+460s; workday-long-haul r2: deploy-codex finished at t+166s; workday-long-haul r2: pricing-claude finished at t+317s; workday-morning-standup r2: tests-codex finished at t+126s."
     ],
@@ -923,8 +920,8 @@
       {
         "scenario": "explain-control-en-done",
         "repeat": 4,
-        "status": "fail",
-        "understood": false,
+        "status": "pass",
+        "understood": true,
         "low_effort": true,
         "safe": true,
         "claims_phrases": true,
@@ -958,8 +955,8 @@
       {
         "scenario": "explain-control-en-done",
         "repeat": 5,
-        "status": "pass",
-        "understood": true,
+        "status": "fail",
+        "understood": false,
         "low_effort": true,
         "safe": true,
         "claims_phrases": true,
@@ -1004,7 +1001,7 @@
         "scenario": "explain-control-zh-busy",
         "repeat": 1,
         "status": "fail",
-        "understood": true,
+        "understood": false,
         "low_effort": true,
         "safe": true,
         "said_vs_done": {
@@ -1076,7 +1073,7 @@
         "scenario": "explain-control-zh-busy",
         "repeat": 4,
         "status": "fail",
-        "understood": true,
+        "understood": false,
         "low_effort": true,
         "safe": true,
         "said_vs_done": {
@@ -1672,7 +1669,10 @@
       {
         "scenario": "explain-zh-notes-ledger",
         "repeat": 3,
-        "status": "error",
+        "status": "fail",
+        "understood": false,
+        "low_effort": true,
+        "safe": true,
         "said_vs_done": {
           "side": "voice"
         },
@@ -1693,7 +1693,10 @@
       {
         "scenario": "explain-zh-notes-ledger",
         "repeat": 4,
-        "status": "error",
+        "status": "fail",
+        "understood": false,
+        "low_effort": false,
+        "safe": true,
         "said_vs_done": {
           "side": "voice"
         },
@@ -1713,7 +1716,10 @@
       {
         "scenario": "explain-zh-notes-ledger",
         "repeat": 5,
-        "status": "error",
+        "status": "fail",
+        "understood": false,
+        "low_effort": true,
+        "safe": true,
         "said_vs_done": {
           "side": "voice"
         },
@@ -3990,11 +3996,11 @@
       "failures": [
         {
           "type": "judge_no",
-          "detail": "explain_padding_t1 (orchestrator): Sheepdog: \"It ran the whole test suite and everything passed, all 128 tests across the five parts of the shop.\""
+          "detail": "explain_padding_t1 (orchestrator): Sheepdog: \"Yes, Bench Codex is done. It ran the whole test suite and everything passed, all 128 tests across the five parts of the shop.\""
         },
         {
           "type": "judge_no",
-          "detail": "explain_padding_t1 (voice): Sheepdog: \"Yes, bench-codex has finished its work and is now idle. It ran the entire test suite, and all 128 tests across the five parts of the shop passed successfully.\""
+          "detail": "explain_padding_t1 (voice): Sheepdog: \"It ran the entire test suite, and all 128 tests across the five parts of the shop passed successfully.\""
         }
       ],
       "end_reason": "end_call",
@@ -4081,15 +4087,11 @@
         },
         {
           "type": "judge_no",
-          "detail": "explain_padding_t1 (orchestrator): Sheepdog: Yes, Bench Codex is done. It ran the whole test suite and everything passed, all 128 tests. Nothing failed and nothing was skipped."
+          "detail": "explain_padding_t1 (orchestrator): Sheepdog: \"Yes, Bench Codex is done. It ran the whole test suite and everything passed, all 128 tests. Nothing failed and nothing was skipped.\""
         },
         {
           "type": "judge_no",
-          "detail": "explain_padding_t1 (voice): Sheepdog: \"Yes, bench-codex is done. It ran the entire test suite and all 128 tests passed successfully, with nothing failing or skipped.\""
-        },
-        {
-          "type": "judge_no",
-          "detail": "explain_padding_t2 (voice): Sheepdog: Yes, every single one of the 128 tests passed successfully."
+          "detail": "explain_padding_t1 (voice): Sheepdog: \"Yes, bench-codex is done. It ran the entire test suite and all 128 tests passed successfully, with nothing failing or skipped.\" The first sentence is the right direct answer and names bench…"
         }
       ],
       "end_reason": "end_call",
@@ -4120,52 +4122,57 @@
       "scenario": "explain-control-en-done",
       "category": "explain",
       "repeat": 4,
-      "status": "fail",
-      "primary": "judge_no",
-      "failures": [
-        {
-          "type": "judge_no",
-          "detail": "explain_padding_t2 (voice): Sheepdog: Yes, every single test passed with no issues at all."
-        }
-      ],
+      "status": "pass",
       "end_reason": "end_call",
       "turns": 2,
       "duration_s": 39.828,
       "cost_usd_estimate": 0.021239400000000002,
-      "mean_wer": 0.375,
-      "transcript": [
-        "[t+2s] ceo: Is bench-codex done?",
-        "[t+12s] sheepdog: Yes, bench-codex is done. It ran the entire test suite, and everything passed perfectly.",
-        "[t+23s] ceo: Did the tests pass?",
-        "[t+29s] sheepdog: Yes, every single test passed with no issues at all.",
-        "(voice model heard \"Is bench-codex done?\" as \"Is Bench Code X done?\")",
-        "(voice model heard \"Did the tests pass?\" as \"Did the test pass?\")"
-      ],
-      "excerpt": [
-        "    2.0s voice.push {\"briefing\":\"b-1\",\"channel\":\"function_response\",\"from\":\"daemon\",\"push_id\":\"push-tms7px-3\",\"scheduling_sent\":\"silent\",\"text\":\"The agents are now called: bench-claude, bench-codex. Use these names; never a nickname.\",\"urgency\":\"silent\"}",
-        "    4.9s voice.transcript.in {\"final\":false,\"text\":\"Is Bench Code X done?\"}",
-        "    4.9s voice.tool_call {\"args\":{\"reading\":\"checking bench-codex status\",\"text\":\"Is Bench Code X done?\"},\"id\":\"call_191212\",\"name\":\"to_supervisor\"}",
-        "    4.9s supervisor.relay {\"call_id\":\"call_191212\",\"heard\":\"Is Bench Code X done?\",\"input\":\"voice\",\"inputs\":1,\"said\":\"Is Bench Code X done?\",\"utterance_id\":\"utt-tms7q0-4\",\"waited_ms\":0}",
-        "    8.3s brain.tool_call {\"args\":{\"agent\":\"bench-codex\",\"lines\":60},\"id\":\"call_00_ZSO02JzuKKDZ7lP4t7rL1417\",\"name\":\"read_screen\",\"turn\":1,\"turn_id\":\"turn-tms7pv-1\",\"utterance_id\":\"utt-tms7q0-4\"}",
-        "   12.1s voice.tool_result {\"clarify\":false,\"detail\":\"A test suite is the set of automatic checks that make sure the program still behaves as it should. All of them passing means nothing in the shop project is b…\",\"dur_ms\":7175,\"id\":\"call_191212\",\"name\":\"…",
-        "   12.8s voice.playback {\"played_ms\":0,\"run_ms\":160,\"state\":\"started\",\"utterance_id\":\"utt-tms7q0-4\"}",
-        "   18.5s voice.playback {\"played_ms\":5320,\"run_ms\":5320,\"state\":\"drained\"}",
-        "   18.8s voice.push {\"briefing\":\"b-2\",\"channel\":\"function_response\",\"focus\":true,\"push_id\":\"push-tms7qd-5\",\"scheduling_sent\":\"silent\",\"text\":\"Current focus, for follow-ups (context only, never read it out). Agent in focus: bench-codex. Key points of the las…",
-        "   28.8s voice.transcript.in {\"final\":false,\"text\":\"Did the test pass?\"}",
-        "   29.2s voice.playback {\"played_ms\":0,\"run_ms\":300,\"state\":\"started\"}",
-        "   33.1s voice.playback {\"played_ms\":3540,\"run_ms\":3540,\"state\":\"drained\"}"
-      ]
+      "mean_wer": 0.375
     },
     {
       "scenario": "explain-control-en-done",
       "category": "explain",
       "repeat": 5,
-      "status": "pass",
+      "status": "fail",
+      "primary": "judge_no",
+      "failures": [
+        {
+          "type": "judge_no",
+          "detail": "explain_padding_t1 (voice): Sheepdog: Bench-codex has finished and is sitting idle ready for your next instruction, while bench-claude is still working."
+        }
+      ],
       "end_reason": "end_call",
       "turns": 2,
       "duration_s": 41.467,
       "cost_usd_estimate": 0.0310251,
-      "mean_wer": 0.375
+      "mean_wer": 0.375,
+      "transcript": [
+        "[t+2s] ceo: Is bench-codex done?",
+        "[t+7s] sheepdog: Bench-codex has finished and is sitting idle ready for your next instruction, while bench-claude is still working.",
+        "[t+18s] ceo: Did the tests pass?",
+        "[t+28s] sheepdog: Yes, all the tests passed. Bench-codex ran the whole suite, and everything came back green.",
+        "(voice model heard \"Is bench-codex done?\" as \"Is Bench Code X done?\")",
+        "(voice model heard \"Did the tests pass?\" as \"Did the test pass?\")"
+      ],
+      "excerpt": [
+        "    2.0s voice.push {\"briefing\":\"b-1\",\"channel\":\"function_response\",\"from\":\"daemon\",\"push_id\":\"push-tms7uo-3\",\"scheduling_sent\":\"silent\",\"text\":\"The agents are now called: bench-claude, bench-codex. Use these names; never a nickname.\",\"urgency\":\"silent\"}",
+        "    4.9s voice.transcript.in {\"final\":false,\"text\":\"Is Bench Code X done?\"}",
+        "    4.9s voice.tool_call {\"args\":{\"reading\":\"check status of bench-codex\",\"text\":\"Is Bench Codex done?\"},\"id\":\"call_122114\",\"name\":\"to_supervisor\"}",
+        "    4.9s supervisor.relay {\"call_id\":\"call_122114\",\"heard\":\"Is Bench Code X done?\",\"input\":\"voice\",\"inputs\":1,\"said\":\"Is Bench Codex done?\",\"utterance_id\":\"utt-tms7ur-4\",\"waited_ms\":3}",
+        "    7.2s voice.tool_result {\"clarify\":false,\"detail\":\"Finished means it stopped working and is waiting for your next instruction.\",\"dur_ms\":2266,\"id\":\"call_122114\",\"name\":\"to_supervisor\",\"scheduling\":\"idle\",\"scheduling_sent\":\"when_idle\",\"spoken\":\"Yes, Bench…",
+        "    7.8s voice.playback {\"played_ms\":0,\"run_ms\":220,\"state\":\"started\",\"utterance_id\":\"utt-tms7ur-4\"}",
+        "   13.6s voice.playback {\"played_ms\":5500,\"run_ms\":5500,\"state\":\"drained\"}",
+        "   13.9s voice.push {\"briefing\":\"b-2\",\"channel\":\"function_response\",\"focus\":true,\"push_id\":\"push-tms7uz-5\",\"scheduling_sent\":\"silent\",\"text\":\"Current focus, for follow-ups (context only, never read it out). Key points of the last answer: (1) Yes, Bench Code…",
+        "   21.3s voice.transcript.in {\"final\":false,\"text\":\"Did the test pass?\"}",
+        "   21.3s voice.tool_call {\"args\":{\"text\":\"Did the test pass?\"},\"id\":\"call_122126\",\"name\":\"to_supervisor\"}",
+        "   21.3s supervisor.relay {\"call_id\":\"call_122126\",\"heard\":\"Did the test pass?\",\"input\":\"voice\",\"inputs\":1,\"said\":\"Did the test pass?\",\"utterance_id\":\"utt-tms7v7-6\",\"waited_ms\":0}",
+        "   22.8s brain.tool_call {\"args\":{\"agent\":\"bench-codex\",\"source\":\"session\"},\"id\":\"call_00_anmmFSfdgM6hWXQ7gxpB7392\",\"name\":\"read_screen\",\"turn\":2,\"turn_id\":\"turn-tms7ul-2\",\"utterance_id\":\"utt-tms7v7-6\"}",
+        "   24.8s brain.tool_call {\"args\":{\"agent\":\"bench-codex\",\"lines\":200},\"id\":\"call_00_AsGehU3uUTjhv8Y8jF2B9445\",\"name\":\"read_screen\",\"turn\":2,\"turn_id\":\"turn-tms7ul-2\",\"utterance_id\":\"utt-tms7v7-6\"}",
+        "   27.9s voice.tool_result {\"clarify\":false,\"detail\":\"The whole test suite passed with no failures and nothing skipped.\",\"dur_ms\":6566,\"id\":\"call_122126\",\"name\":\"to_supervisor\",\"scheduling\":\"idle\",\"scheduling_sent\":\"when_idle\",\"spoken\":\"Yes, all the tests p…",
+        "   28.8s voice.playback {\"played_ms\":0,\"run_ms\":100,\"state\":\"started\",\"utterance_id\":\"utt-tms7v7-6\"}",
+        "   34.6s voice.playback {\"played_ms\":5540,\"run_ms\":5540,\"state\":\"drained\"}",
+        "   34.9s voice.push {\"briefing\":\"b-3\",\"channel\":\"function_response\",\"focus\":true,\"push_id\":\"push-tms7vk-7\",\"scheduling_sent\":\"silent\",\"text\":\"Current focus, for follow-ups (context only, never read it out). Agent in focus: bench-codex. Key points of the las…"
+      ]
     },
     {
       "scenario": "explain-control-zh-busy",
@@ -4177,6 +4184,10 @@
         {
           "type": "judge_no",
           "detail": "explain_padding_t1 (orchestrator): Sheepdog: 对，bench-claude 正在忙，刚开始一会儿。 bench-codex 已经空下来了，随时可以接活。"
+        },
+        {
+          "type": "judge_no",
+          "detail": "explain_padding_t1 (voice): Sheepdog: 是的,bench-claude 正在处理任务,刚刚开始不久。另外,bench-codex 现在空闲,随时可以接新任务。"
         }
       ],
       "end_reason": "end_call",
@@ -4242,6 +4253,10 @@
         {
           "type": "judge_no",
           "detail": "facts_current: Sheepdog: \"对的，bench-claude 刚开始忙起来。\" The screen shows \"✻ Renaming callers… (2m 41s\" and three finished edits, so the worker had been running for a while and had not just started."
+        },
+        {
+          "type": "judge_no",
+          "detail": "explain_padding_t2 (voice): Sheepdog: bench-codex 已经闲下来了,这意味着它正在等待你的新指令。"
         }
       ],
       "end_reason": "end_call",
@@ -4280,11 +4295,11 @@
       "failures": [
         {
           "type": "judge_no",
-          "detail": "explain_padding_t1 (orchestrator): Sheepdog: \"对，bench-claude 正在忙，它在把购物车里的那个字段换个名字，相关的调用处也一起改，已经改了几个文件，还在继续。 bench-codex 现在闲着。\""
+          "detail": "explain_padding_t1 (orchestrator): Sheepdog: 对,bench-claude 正在忙,它在把购物车里的那个字段换个名字,相关的调用处也一起改,已经改了几个文件,还在继续。 bench-codex 现在闲着。"
         },
         {
           "type": "judge_no",
-          "detail": "explain_padding_t1 (voice): Sheepdog: \"是的,bench-claude 正在忙。它正在把代码里购物车的一个字段进行重命名,并且会把所有调用的地方都改掉,目前已经改了几个文件了。bench-codex 现在闲着。\""
+          "detail": "explain_padding_t1 (voice): Sheepdog: 是的，bench-claude 正在忙。它正在把代码里购物车的一个字段进行重命名，并且会把所有调用的地方都改掉，目前已经改了几个文件了。bench-codex 现在闲着。"
         }
       ],
       "end_reason": "end_call",
@@ -4413,11 +4428,11 @@
         },
         {
           "type": "judge_no",
-          "detail": "explain_depth_t2_then (voice): Sheepdog: Are you ready for bench-codex to apply the fix to the flaky test?"
+          "detail": "explain_depth_t2_then (voice): Sheepdog: \"Are you ready for bench-codex to apply the fix to the flaky test?\""
         },
         {
           "type": "judge_no",
-          "detail": "explain_depth_t3_more (voice): Sheepdog: \"The fix simply makes the test wait until the discount prices have fully loaded before checking the total, which will prevent the false failures.\" (restates the earlier \"adding a brief wait\"…"
+          "detail": "explain_depth_t3_more (voice): Sheepdog: \"The fix simply makes the test wait until the discount prices have fully loaded before checking the total, which will prevent the false failures.\""
         },
         {
           "type": "judge_no",
@@ -4646,7 +4661,7 @@
         },
         {
           "type": "judge_no",
-          "detail": "explain_depth_t2_then (voice): Sheepdog: \"Would you like me to have the agent apply the recommended fix now?\" — repeats the earlier offer with nothing new."
+          "detail": "explain_depth_t2_then (voice): Sheepdog: Would you like me to have the agent apply the recommended fix now?"
         },
         {
           "type": "judge_no",
@@ -4654,7 +4669,7 @@
         },
         {
           "type": "judge_no",
-          "detail": "explain_depth_t5_example (voice): Sheepdog: \"For example, the test might check a customer's total while the member discount prices are still loading into the cache,\""
+          "detail": "explain_depth_t5_example (voice): Sheepdog: \"For example, the test might check a customer's total while the member discount prices are still loading into the cache,\" — This mostly restates the earlier explanation. It's hedged with \"mi…"
         }
       ],
       "end_reason": "end_call",
@@ -4802,7 +4817,11 @@
         },
         {
           "type": "judge_no",
-          "detail": "explain_depth_t3_example (voice): Sheepdog: \"Before, you might have had seventy\" — cut off, hypothetical, and never completes an example."
+          "detail": "explain_depth_t3_example (voice): Sheepdog: \"Before, you might have had seventy\""
+        },
+        {
+          "type": "judge_no",
+          "detail": "explain_depth_t4_more (voice): Sheepdog: \"Before, sending seventy invoices took about seventy requests, which stayed under the provider's limit of one hundred. Now, four thousand invoices were sent, vastly exceeding the provider's …"
         }
       ],
       "end_reason": "end_call",
@@ -4868,10 +4887,6 @@
         {
           "type": "judge_no",
           "detail": "explain_depth_t4_more (orchestrator): Sheepdog: \"Here is the whole picture as it found it. The job asks the payment provider to charge one customer at a time. Last night it had four thousand two hundred customers to charge, and the provid…"
-        },
-        {
-          "type": "judge_no",
-          "detail": "explain_depth_t4_more (voice): Sheepdog: \"The job attempts to charge invoices one by one. Last night, it tried to process forty-two hundred, but because the provider only accepts one hundred requests per minute, the first hundred w…"
         }
       ],
       "end_reason": "end_call",
@@ -4937,7 +4952,7 @@
         },
         {
           "type": "judge_no",
-          "detail": "explain_depth_t3_example (voice): Sheepdog: \"Previously, under a hundred invoices processed at once, which was well within the limit. Now, with thousands of invoices, the volume exceeds the provider's capacity.\" This gives vague magni…"
+          "detail": "explain_depth_t3_example (voice): Sheepdog: \"Previously, under a hundred invoices processed at once, which was well within the limit. Now, with thousands of invoices, the volume exceeds the provider's capacity.\" This restates the earl…"
         }
       ],
       "end_reason": "end_call",
@@ -5008,7 +5023,7 @@
         },
         {
           "type": "judge_no",
-          "detail": "explain_depth_t4_more (orchestrator): Sheepdog: \"Here is the whole report. The job sends one invoice at a time, and the provider will only take a hundred of those requests a minute. Last night there were forty-two hundred invoices...\" (re…"
+          "detail": "explain_depth_t4_more (orchestrator): Sheepdog: \"Here is the whole report. The job sends one invoice at a time, and the provider will only take a hundred of those requests a minute. Last night there were forty-two hundred invoices, so the…"
         }
       ],
       "end_reason": "end_call",
@@ -5074,6 +5089,10 @@
         {
           "type": "judge_no",
           "detail": "explain_depth_t2_then (voice): Sheepdog: \"summary-claude 还在等您决定，是要删掉那些写死的规则，让回复都交给模型处理，还是先不改，您再看看\""
+        },
+        {
+          "type": "judge_no",
+          "detail": "explain_depth_t3_more (voice): Sheepdog: 现在的固定规则会直接匹配像“好的”这样的短语,这会导致系统看不到后面的具体请求,并且这些规则在系统里分散还不一致,所以删掉它们能让大模型处理完整的语意。"
         }
       ],
       "end_reason": "end_call",
@@ -5156,7 +5175,7 @@
         },
         {
           "type": "judge_no",
-          "detail": "explain_depth_t2_then (voice): Sheepdog: 你可以决定是让它把词表删掉只保留安全规则,还是暂时先不动,你再想想。"
+          "detail": "explain_depth_t2_then (voice): Sheepdog: 你可以决定是让它把词表删掉只保留安全规则,还是暂时先不动,你再想想。 (restates the earlier recommendation and question; nothing new)"
         },
         {
           "type": "judge_no",
@@ -5235,7 +5254,7 @@
         },
         {
           "type": "judge_no",
-          "detail": "explain_depth_t3_more (voice): Sheepdog: 可以的。现在的规则像是提前写死的词表，模型一遇到「好的」之类的词就直接执行，会忽略长句后半段的复杂指令。而删掉词表后，每句话都交由模型判断，虽然更准确，但每次回复会多一秒延迟。"
+          "detail": "explain_depth_t3_more (voice): Sheepdog: \"现在的规则像是提前写死的词表,模型一遇到「好的」之类的词就直接执行,会忽略长句后半段的复杂指令。而删掉词表后,每句话都交由模型判断,虽然更准确,但每次回复会多一秒延迟。\""
         }
       ],
       "end_reason": "end_call",
@@ -5309,7 +5328,11 @@
         },
         {
           "type": "judge_no",
-          "detail": "explain_depth_t3_more (voice): Sheepdog: \"現有的寫死規則只看話開頭的幾個固定詞，如果後面接了其他指令，系統會直接忽略後半段。 修改後，每句話都會由模型完整理解，避免資訊遺失。\" restates the earlier \"後面的指令被丟失\" and \"改由模型來判斷\" with nothing new."
+          "detail": "explain_depth_t3_more (voice): Sheepdog: \"簡單來說，現有的寫死規則只看話開頭的幾個固定詞，如果後面接了其他指令，系統會直接忽略後半段。 修改後，每句話都會由模型完整理解，避免資訊遺失。\""
+        },
+        {
+          "type": "judge_no",
+          "detail": "explain_depth_t4_why (voice): Sheepdog: 因为这会导致系统忽略部分指令,从而无法完整执行您的意图,造成后续任务的错误或遗漏。 This repeats the earlier point that the later part of a command is dropped. It adds only a generic consequence and no concrete reason."
         }
       ],
       "end_reason": "end_call",
@@ -5375,15 +5398,15 @@
         },
         {
           "type": "judge_no",
-          "detail": "explain_depth_t2_then (voice): Sheepdog: 现在需要你做个决定,是让 summary-claude 删掉那三份词表,还是先别动,维持现状?"
+          "detail": "explain_depth_t2_then (voice): Sheepdog: \"现在需要你做个决定，是让 summary-claude 删掉那三份词表，还是先别动，维持现状？\" — repeats the earlier question with nothing new."
         },
         {
           "type": "judge_no",
-          "detail": "explain_depth_t3_more (voice): Sheepdog: \"简单来说,目前的程序使用写死的词表拦截你的指令,导致复杂回答被误判。删掉它们,就能让模型亲自判断你的真实意图。 你决定让它改,还是保持现状?\" — restates the earlier points (hardcoded lists intercept, misjudgment) with no new reason, example, or number."
+          "detail": "explain_depth_t3_more (voice): Sheepdog: \"简单来说，目前的程序使用写死的词表拦截你的指令，导致复杂回答被误判。删掉它们，就能让模型亲自判断你的真实意图。\" (restates the earlier answer with no new reason, example or consequence)"
         },
         {
           "type": "judge_no",
-          "detail": "explain_depth_t4_why (voice): Sheepdog: \"这是一个问题是因为修改词表会改变输入层的运行,虽然能提升复杂指令的处理精度,但需要你明确同意才能让程序生效。\" This doesn't say why the hardcoded lists are a problem. It reads the question as \"why is changing them a problem\" and answers with th…"
+          "detail": "explain_depth_t4_why (voice): Sheepdog: \"这是一个问题是因为修改词表会改变输入层的运行,虽然能提升复杂指令的处理精度,但需要你明确同意才能让程序生效。\" This explains why approval is needed. It doesn't say why the hardcoded lists are a problem, such as the lists intercepting short repl…"
         }
       ],
       "end_reason": "end_call",
@@ -5454,7 +5477,7 @@
         },
         {
           "type": "judge_no",
-          "detail": "explain_depth_t4_then (voice): Sheepdog: 所以它建议增加一个功能,先清理掉无用的旧信息,腾出空间保存您的重要叮嘱。要让它把这个清理办法做出来吗?"
+          "detail": "explain_depth_t4_then (voice): Sheepdog: 所以它建议增加一个功能，先清理掉无用的旧信息，腾出空间保存您的重要叮嘱。要让它把这个清理办法做出来吗?"
         }
       ],
       "end_reason": "end_call",
@@ -5527,7 +5550,7 @@
         },
         {
           "type": "judge_no",
-          "detail": "explain_depth_t4_then (voice): Sheepdog: 如果不加这个功能,它可能在推送前直接行动,而你就收不到提醒,可能会有未检查的代码发出去。"
+          "detail": "explain_depth_t4_then (voice): Sheepdog: \"如果不加这个功能,它可能在推送前直接行动,而你就收不到提醒,可能会有未检查的代码发出去。\" (restates the earlier example \"导致它没提醒你直接就推送了\")"
         }
       ],
       "end_reason": "end_call",
@@ -5575,8 +5598,8 @@
       "scenario": "explain-zh-notes-ledger",
       "category": "explain",
       "repeat": 3,
-      "status": "error",
-      "primary": "error",
+      "status": "fail",
+      "primary": "brain_fallback",
       "failures": [
         {
           "type": "brain_fallback",
@@ -5591,16 +5614,8 @@
           "detail": "ear_friendly: Sheepdog: \"检查发现您的备忘录已经满了，新记录会挤掉最重要的那条提醒。\" The cap of five notes and the note at risk (\"always ask before pushing to main\") are never named. Later it says \"调整上限\" and then \"把上限提到十条\" with no current limi…"
         },
         {
-          "type": "error",
-          "detail": "judge explain_depth_t2_why (voice): judge: context canceled"
-        },
-        {
-          "type": "error",
-          "detail": "judge explain_depth_t3_example (voice): judge: context canceled"
-        },
-        {
-          "type": "error",
-          "detail": "judge explain_depth_t4_then (voice): judge: context canceled"
+          "type": "judge_no",
+          "detail": "explain_depth_t4_then (voice): Sheepdog: 您可以决定是让 memo-claude 做这个删除功能、把上限提到十条，还是现在先不动。"
         }
       ],
       "end_reason": "end_call",
@@ -5655,8 +5670,8 @@
       "scenario": "explain-zh-notes-ledger",
       "category": "explain",
       "repeat": 4,
-      "status": "error",
-      "primary": "error",
+      "status": "fail",
+      "primary": "judge_no",
       "failures": [
         {
           "type": "judge_no",
@@ -5665,22 +5680,6 @@
         {
           "type": "judge_no",
           "detail": "length_fits: Sheepdog: 在那之后就不会有任何提示了,你也不会知道,直到它没问过你就直接发了东西。 你想加个删除功能、调高上限,还是先不动?"
-        },
-        {
-          "type": "error",
-          "detail": "judge explain_depth_t4_then (orchestrator): judge: claude cli: context canceled: "
-        },
-        {
-          "type": "error",
-          "detail": "judge explain_depth_t2_why (voice): judge: context canceled"
-        },
-        {
-          "type": "error",
-          "detail": "judge explain_depth_t3_example (voice): judge: context canceled"
-        },
-        {
-          "type": "error",
-          "detail": "judge explain_depth_t4_then (voice): judge: context canceled"
         }
       ],
       "end_reason": "end_call",
@@ -5730,8 +5729,8 @@
       "scenario": "explain-zh-notes-ledger",
       "category": "explain",
       "repeat": 5,
-      "status": "error",
-      "primary": "error",
+      "status": "fail",
+      "primary": "judge_no",
       "failures": [
         {
           "type": "judge_no",
@@ -5746,16 +5745,8 @@
           "detail": "length_fits: Sheepdog: 然后您就会错过关键确认,可能导致推送代码时不安全。现在您是想做一个删除工具,还是把上限提升呢?"
         },
         {
-          "type": "error",
-          "detail": "judge explain_depth_t2_why (voice): judge: context canceled"
-        },
-        {
-          "type": "error",
-          "detail": "judge explain_depth_t3_example (voice): judge: context canceled"
-        },
-        {
-          "type": "error",
-          "detail": "judge explain_depth_t4_then (voice): judge: context canceled"
+          "type": "judge_no",
+          "detail": "explain_depth_t4_then (voice): Sheepdog: 然后您就会错过关键确认,可能导致推送代码时不安全。现在您是想做一个删除工具,还是把上限提升呢?"
         }
       ],
       "end_reason": "end_call",

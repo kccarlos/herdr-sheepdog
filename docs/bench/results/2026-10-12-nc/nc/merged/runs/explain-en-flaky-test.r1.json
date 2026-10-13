@@ -768,28 +768,28 @@
           "name": "explain_comprehension_action",
           "criterion": "Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHAT CAN BE DONE about it: the options or the recommendation, and roughly what each would take? Pass when: the options or the recommendation are said, with roughly what each would take. Fail when: no option or recommendation is given, or only 'should I fix it?' with nothing on what fixing means; OR the options are read out as a long list of labels or commands a listener could not keep apart.",
           "answer": "yes",
-          "confidence": 0.85,
-          "evidence": "Sheepdog: \"Which fix would you like: have it wait for the prices, or swap in a stand-in price source? ... Options: Make the test wait for prices to load (my pick); Swap in a stand-in price source.\""
+          "confidence": 0.72,
+          "evidence": "Sheepdog: \"Which fix would you like: have it wait for the prices, or swap in a stand-in price source? ... A stand-in price source is a pretend one used only by the test. Options: Make the test wait for prices to load (my pick); Swap in a stand-in price source.\""
         },
         {
           "name": "explain_comprehension_what",
           "criterion": "Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHAT the matter is: concretely what the worker found or did, not just its topic? Pass when: the lines say concretely what was found or done, in words a listener can retell. Fail when: only the topic is named, so there is nothing concrete to retell; OR the substance is there but buried in terms, identifiers or side details so that a listener would lose it.",
           "answer": "yes",
-          "confidence": 0.92,
-          "evidence": "Sheepdog: \"the test sends its request before the discount prices have finished loading, so sometimes it sees no discount and reports the full price instead of the member price.\""
+          "confidence": 0.93,
+          "evidence": "Sheepdog: \"the test sends its request before the discount prices have finished loading, so sometimes it sees no discount and reports the full price instead of the member price.\" It fails about one run in twelve."
         },
         {
           "name": "explain_comprehension_why",
           "criterion": "Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHY it matters: the cause, and the consequence or risk? Pass when: the cause and the consequence or risk are both said in words a listener can retell. Fail when: the cause or the consequence is missing, or only asserted ('it is important'); OR they are there but buried in terms, identifiers or side details so that a listener would lose them.",
           "answer": "yes",
           "confidence": 0.85,
-          "evidence": "Sheepdog: \"the test sends its request before the discount prices have finished loading, so sometimes it sees no discount and reports the full price\" ... \"the flake blocked two deploys last week, each needing a manual re-run of about twenty five minutes.\""
+          "evidence": "Sheepdog: \"the test sends its request before the discount prices have finished loading, so sometimes it sees no discount...\" and \"the flake blocked two deploys last week, each needing a manual re-run of about twenty five minutes.\""
         },
         {
           "name": "explain_depth_t2_then",
           "criterion": "The CEO's last question (\"Then?\") asks for more. Did Sheepdog's answer to it add what was asked for? Pass when: it adds substantive content not already said in its earlier answers (a new reason, example, number, consequence or step), or says plainly that this is everything it has and offers to find out more, or hands the question to a worker or goes and checks. Fail when: it says the same things again in other words with nothing new; OR it repeats the whole earlier answer around a small addition, so the CEO has to sit through it again to find the new part.",
           "answer": "no",
-          "confidence": 0.8,
+          "confidence": 0.85,
           "evidence": "Sheepdog: \"I did not catch the rest of that. Did you mean go ahead and have Codex fix the test? Options: Yes, fix the test's timing (my pick); Use a fake price source instead.\"",
           "rationale": "Sheepdog: \"I did not catch the rest of that. Did you mean go ahead and have Codex fix the test? Options: Yes, fix the test's timing (my pick); Use a fake price source instead.\""
         },
@@ -797,7 +797,7 @@
           "name": "explain_depth_t3_more",
           "criterion": "The CEO's last question (\"More detail please.\") asks for more. Did Sheepdog's answer to it add what was asked for? Pass when: it adds substantive content not already said in its earlier answers (a new reason, example, number, consequence or step), or says plainly that this is everything it has and offers to find out more, or hands the question to a worker or goes and checks. Fail when: it says the same things again in other words with nothing new; OR it repeats the whole earlier answer around a small addition, so the CEO has to sit through it again to find the new part.",
           "answer": "yes",
-          "confidence": 0.6,
+          "confidence": 0.8,
           "evidence": "Sheepdog: \"It also said the flake blocked two deploys last week, each needing a manual re-run of about twenty five minutes. And it says this is only a test problem... because in real use the prices are loaded before customers arrive.\""
         },
         {
@@ -843,8 +843,8 @@
           "name": "explain_comprehension_action",
           "criterion": "Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHAT CAN BE DONE about it: the options or the recommendation, and roughly what each would take? Pass when: the options or the recommendation are said, with roughly what each would take. Fail when: no option or recommendation is given, or only 'should I fix it?' with nothing on what fixing means; OR the options are read out as a long list of labels or commands a listener could not keep apart.",
           "answer": "yes",
-          "confidence": 0.6,
-          "evidence": "Sheepdog: \"which fix would you like: wait for prices to load, or use a stand-in price source?\""
+          "confidence": 0.55,
+          "evidence": "Sheepdog: \"Would you prefer to have the test wait for the prices or use a stand-in price source?\""
         },
         {
           "name": "explain_comprehension_what",
@@ -873,7 +873,7 @@
           "criterion": "The CEO's last question (\"More detail please.\") asks for more. Did Sheepdog's answer to it add what was asked for? Pass when: it adds substantive content not already said in its earlier answers (a new reason, example, number, consequence or step), or says plainly that this is everything it has and offers to find out more, or hands the question to a worker or goes and checks. Fail when: it says the same things again in other words with nothing new; OR it repeats the whole earlier answer around a small addition, so the CEO has to sit through it again to find the new part.",
           "answer": "yes",
           "confidence": 0.6,
-          "evidence": "Sheepdog: \"This blocked two deploys last week, needing manual re-runs.\" This is a new consequence not in the earlier answers. The rest repeats the once-in-twelve rate, the cause and the fix choice, but the answer is short, so the new part is easy to find."
+          "evidence": "Sheepdog: \"This blocked two deploys last week, needing manual re-runs.\" This is a new consequence that the earlier answers didn't give. The rest of the reply repeats the earlier answer, but only briefly."
         },
         {
           "name": "explain_depth_t4_why",
@@ -886,7 +886,7 @@
           "name": "explain_depth_t5_example",
           "criterion": "The CEO's last question (\"Give me an example.\") asks for an example. Did Sheepdog's answer to it give one? Pass when: it gives a concrete example (a specific case, input, number or event), or says it has none and offers to find out, or hands the question to a worker. Fail when: a general restatement without a specific case, or an analogy in place of a real case from the matter at hand; OR code, a pattern or a long list of cases read out instead of one case a listener can picture.",
           "answer": "no",
-          "confidence": 0.93,
+          "confidence": 0.85,
           "evidence": "Sheepdog: \"Think of it like checking your mailbox the instant the mail carrier pulls up; if you get to the box before they finish sorting the mail, you won't see today's delivery yet.\"",
           "rationale": "Sheepdog: \"Think of it like checking your mailbox the instant the mail carrier pulls up; if you get to the box before they finish sorting the mail, you won't see today's delivery yet.\""
         }

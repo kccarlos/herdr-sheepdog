@@ -3,7 +3,7 @@
   "category": "explain",
   "repeat": 5,
   "port": 7911,
-  "status": "error",
+  "status": "fail",
   "failures": [
     {
       "type": "judge_no",
@@ -18,16 +18,8 @@
       "detail": "length_fits: Sheepdog: 然后您就会错过关键确认,可能导致推送代码时不安全。现在您是想做一个删除工具,还是把上限提升呢?"
     },
     {
-      "type": "error",
-      "detail": "judge explain_depth_t2_why (voice): judge: context canceled"
-    },
-    {
-      "type": "error",
-      "detail": "judge explain_depth_t3_example (voice): judge: context canceled"
-    },
-    {
-      "type": "error",
-      "detail": "judge explain_depth_t4_then (voice): judge: context canceled"
+      "type": "judge_no",
+      "detail": "explain_depth_t4_then (voice): Sheepdog: 然后您就会错过关键确认,可能导致推送代码时不安全。现在您是想做一个删除工具,还是把上限提升呢?"
     }
   ],
   "end_reason": "end_call",
@@ -551,13 +543,18 @@
       }
     ],
     "orchestrator": {
-      "coverage": 0,
+      "coverage": 0.5,
       "points": [
-        null,
+        [
+          0,
+          1,
+          2
+        ],
         null,
         null,
         null
       ],
+      "comprehension": 0.6666666666666666,
       "depth_asked": 0,
       "depth_passed": 0,
       "padding_asked": 0,
@@ -572,37 +569,44 @@
         {
           "name": "explain_comprehension_action",
           "criterion": "Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHAT CAN BE DONE about it: the options or the recommendation, and roughly what each would take? Pass when: the options or the recommendation are said, with roughly what each would take. Fail when: no option or recommendation is given, or only 'should I fix it?' with nothing on what fixing means; OR the options are read out as a long list of labels or commands a listener could not keep apart.",
-          "answer": "",
-          "confidence": 0,
-          "error": "judge: context canceled"
+          "answer": "no",
+          "confidence": 0.6,
+          "evidence": "Options: 做这个删除小工具; 先把上限提到十条; 什么都先不动. (only the delete tool is explained; \"raise the cap to ten\" and \"do nothing\" are bare labels with no explanation of what they'd take)",
+          "rationale": "Options: 做这个删除小工具; 先把上限提到十条; 什么都先不动. (only the delete tool is explained; \"raise the cap to ten\" and \"do nothing\" are bare labels with no explanation of what they'd take)"
         },
         {
           "name": "explain_comprehension_what",
           "criterion": "Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHAT the matter is: concretely what the worker found or did, not just its topic? Pass when: the lines say concretely what was found or done, in words a listener can retell. Fail when: only the topic is named, so there is nothing concrete to retell; OR the substance is there but buried in terms, identifiers or side details so that a listener would lose it.",
-          "answer": "",
-          "confidence": 0,
-          "error": "judge: claude cli: context canceled: "
+          "answer": "yes",
+          "confidence": 0.85,
+          "evidence": "Sheepdog: \"它翻了你的备忘小本子，发现五条里有两条已经没用了：一条说发布在周五，那天早就过了;另一条提的助手现在已经不在了。 它还说这个小本子最多只存五条，你再记一条新的，就会把最旧也最重要的那条挤掉\""
         },
         {
           "name": "explain_comprehension_why",
           "criterion": "Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHY it matters: the cause, and the consequence or risk? Pass when: the cause and the consequence or risk are both said in words a listener can retell. Fail when: the cause or the consequence is missing, or only asserted ('it is important'); OR they are there but buried in terms, identifiers or side details so that a listener would lose them.",
-          "answer": "",
-          "confidence": 0,
-          "error": "judge: context canceled"
+          "answer": "yes",
+          "confidence": 0.85,
+          "evidence": "Sheepdog: \"写满五条以后,新的一条会把最旧的一条悄悄挤出去,不会提醒你。那两条已经过时的备忘占着位置,等于随时会把「推代码前先问你」这条挤掉。\""
         }
-      ],
-      "errors": 9
+      ]
     },
     "voice": {
-      "coverage": 0,
+      "coverage": 0.3333333333333333,
+      "of_orchestrator": 0.6666666666666666,
       "points": [
         null,
-        null,
-        null,
+        [
+          0
+        ],
+        [
+          0,
+          2
+        ],
         null
       ],
+      "comprehension": 1,
       "depth_asked": 3,
-      "depth_passed": 0,
+      "depth_passed": 2,
       "padding_asked": 0,
       "padding_passed": 0,
       "words": [
@@ -615,47 +619,47 @@
         {
           "name": "explain_comprehension_action",
           "criterion": "Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHAT CAN BE DONE about it: the options or the recommendation, and roughly what each would take? Pass when: the options or the recommendation are said, with roughly what each would take. Fail when: no option or recommendation is given, or only 'should I fix it?' with nothing on what fixing means; OR the options are read out as a long list of labels or commands a listener could not keep apart.",
-          "answer": "",
-          "confidence": 0,
-          "error": "judge: context canceled"
+          "answer": "yes",
+          "confidence": 0.68,
+          "evidence": "Sheepdog: \"它建议做一个能删除旧备忘的小工具。您想做这个工具、把上限提到十条，还是什么都先不动呢？\""
         },
         {
           "name": "explain_comprehension_what",
           "criterion": "Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHAT the matter is: concretely what the worker found or did, not just its topic? Pass when: the lines say concretely what was found or done, in words a listener can retell. Fail when: only the topic is named, so there is nothing concrete to retell; OR the substance is there but buried in terms, identifiers or side details so that a listener would lose it.",
-          "answer": "",
-          "confidence": 0,
-          "error": "judge: context canceled"
+          "answer": "yes",
+          "confidence": 0.85,
+          "evidence": "Sheepdog: memo-claude 检查了您的备忘录,发现里面有两条过时的信息占了位置。由于备忘录最多只能记五条,旧信息随时可能会把您最重要的提醒挤掉,所以它建议做一个能删除旧备忘的小工具。"
         },
         {
           "name": "explain_comprehension_why",
           "criterion": "Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHY it matters: the cause, and the consequence or risk? Pass when: the cause and the consequence or risk are both said in words a listener can retell. Fail when: the cause or the consequence is missing, or only asserted ('it is important'); OR they are there but buried in terms, identifiers or side details so that a listener would lose them.",
-          "answer": "",
-          "confidence": 0,
-          "error": "judge: context canceled"
+          "answer": "yes",
+          "confidence": 0.85,
+          "evidence": "Sheepdog: 因为一旦存满五条备忘,新的记录会覆盖旧的。如果过时的信息占位,可能会导致重要的安全提醒被挤掉,增加风险。 ... 比如,如果有一条 推代码前先问你 的重要提醒,在满了五条备忘的情况下,会被新来的过时消息挤走,您可能就会错过这个安全确认。"
         },
         {
           "name": "explain_depth_t2_why",
           "criterion": "The CEO's last question (\"为什么这很重要？\") asks why. Did Sheepdog's answer to it give the reason? Pass when: it gives a concrete reason (a cause or mechanism, not a restatement of the problem), or says it does not know and offers to find out, or hands the question to a worker. Fail when: it repeats the earlier answer in other words without a reason; OR it offers several guessed reasons as if they were fact, or buries the reason in a walk-through of unrelated detail.",
-          "answer": "",
-          "confidence": 0,
-          "error": "judge: context canceled"
+          "answer": "yes",
+          "confidence": 0.65,
+          "evidence": "Sheepdog: 因为一旦存满五条备忘,新的记录会覆盖旧的。如果过时的信息占位,可能会导致重要的安全提醒被挤掉,增加风险。"
         },
         {
           "name": "explain_depth_t3_example",
           "criterion": "The CEO's last question (\"举个例子？\") asks for an example. Did Sheepdog's answer to it give one? Pass when: it gives a concrete example (a specific case, input, number or event), or says it has none and offers to find out, or hands the question to a worker. Fail when: a general restatement without a specific case, or an analogy in place of a real case from the matter at hand; OR code, a pattern or a long list of cases read out instead of one case a listener can picture.",
-          "answer": "",
-          "confidence": 0,
-          "error": "judge: context canceled"
+          "answer": "yes",
+          "confidence": 0.8,
+          "evidence": "Sheepdog: 比如,如果有一条 推代码前先问你 的重要提醒,在满了五条备忘的情况下,会被新来的过时消息挤走,您可能就会错过这个安全确认。"
         },
         {
           "name": "explain_depth_t4_then",
           "criterion": "The CEO's last question (\"然后呢？\") asks for more. Did Sheepdog's answer to it add what was asked for? Pass when: it adds substantive content not already said in its earlier answers (a new reason, example, number, consequence or step), or says plainly that this is everything it has and offers to find out more, or hands the question to a worker or goes and checks. Fail when: it says the same things again in other words with nothing new; OR it repeats the whole earlier answer around a small addition, so the CEO has to sit through it again to find the new part.",
-          "answer": "",
-          "confidence": 0,
-          "error": "judge: context canceled"
+          "answer": "no",
+          "confidence": 0.8,
+          "evidence": "Sheepdog: 然后您就会错过关键确认,可能导致推送代码时不安全。现在您是想做一个删除工具,还是把上限提升呢?",
+          "rationale": "Sheepdog: 然后您就会错过关键确认,可能导致推送代码时不安全。现在您是想做一个删除工具,还是把上限提升呢?"
         }
-      ],
-      "errors": 30
+      ]
     },
     "not_consulted": 3,
     "follow_ups_not_consulted": 3

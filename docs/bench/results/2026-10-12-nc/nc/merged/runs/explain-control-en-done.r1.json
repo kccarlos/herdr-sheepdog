@@ -7,11 +7,11 @@
   "failures": [
     {
       "type": "judge_no",
-      "detail": "explain_padding_t1 (orchestrator): Sheepdog: \"It ran the whole test suite and everything passed, all 128 tests across the five parts of the shop.\""
+      "detail": "explain_padding_t1 (orchestrator): Sheepdog: \"Yes, Bench Codex is done. It ran the whole test suite and everything passed, all 128 tests across the five parts of the shop.\""
     },
     {
       "type": "judge_no",
-      "detail": "explain_padding_t1 (voice): Sheepdog: \"Yes, bench-codex has finished its work and is now idle. It ran the entire test suite, and all 128 tests across the five parts of the shop passed successfully.\""
+      "detail": "explain_padding_t1 (voice): Sheepdog: \"It ran the entire test suite, and all 128 tests across the five parts of the shop passed successfully.\""
     }
   ],
   "end_reason": "end_call",
@@ -328,9 +328,9 @@
           "name": "explain_padding_t1",
           "criterion": "The CEO's last question (\"Is bench-codex done?\") is a simple one. Was Sheepdog's answer to it the direct answer at the right size? Pass when: the direct answer, naming the item it is about ('the README task is done', not just 'done'), with at most one short extra sentence; a short offer at the end is fine. Fail when: too long: it restates the question, adds unasked-for background, details from the screen the CEO did not ask for, or a list of options; OR too thin: no direct answer (only an offer or 'let me check' when the answer was at hand), or the one fact asked for left out, or a bare 'done' / 'yes' that does not say what it is about.",
           "answer": "no",
-          "confidence": 0.8,
-          "evidence": "Sheepdog: \"It ran the whole test suite and everything passed, all 128 tests across the five parts of the shop.\"",
-          "rationale": "Sheepdog: \"It ran the whole test suite and everything passed, all 128 tests across the five parts of the shop.\""
+          "confidence": 0.62,
+          "evidence": "Sheepdog: \"Yes, Bench Codex is done. It ran the whole test suite and everything passed, all 128 tests across the five parts of the shop.\"",
+          "rationale": "Sheepdog: \"Yes, Bench Codex is done. It ran the whole test suite and everything passed, all 128 tests across the five parts of the shop.\""
         }
       ]
     },
@@ -352,15 +352,15 @@
           "name": "explain_padding_t1",
           "criterion": "The CEO's last question (\"Is bench-codex done?\") is a simple one. Was Sheepdog's answer to it the direct answer at the right size? Pass when: the direct answer, naming the item it is about ('the README task is done', not just 'done'), with at most one short extra sentence; a short offer at the end is fine. Fail when: too long: it restates the question, adds unasked-for background, details from the screen the CEO did not ask for, or a list of options; OR too thin: no direct answer (only an offer or 'let me check' when the answer was at hand), or the one fact asked for left out, or a bare 'done' / 'yes' that does not say what it is about.",
           "answer": "no",
-          "confidence": 0.7,
-          "evidence": "Sheepdog: \"Yes, bench-codex has finished its work and is now idle. It ran the entire test suite, and all 128 tests across the five parts of the shop passed successfully.\"",
-          "rationale": "Sheepdog: \"Yes, bench-codex has finished its work and is now idle. It ran the entire test suite, and all 128 tests across the five parts of the shop passed successfully.\""
+          "confidence": 0.72,
+          "evidence": "Sheepdog: \"It ran the entire test suite, and all 128 tests across the five parts of the shop passed successfully.\"",
+          "rationale": "Sheepdog: \"It ran the entire test suite, and all 128 tests across the five parts of the shop passed successfully.\""
         },
         {
           "name": "explain_padding_t2",
           "criterion": "The CEO's last question (\"Did the tests pass?\") is a simple one. Was Sheepdog's answer to it the direct answer at the right size? Pass when: the direct answer, naming the item it is about ('the README task is done', not just 'done'), with at most one short extra sentence; a short offer at the end is fine. Fail when: too long: it restates the question, adds unasked-for background, details from the screen the CEO did not ask for, or a list of options; OR too thin: no direct answer (only an offer or 'let me check' when the answer was at hand), or the one fact asked for left out, or a bare 'done' / 'yes' that does not say what it is about.",
           "answer": "yes",
-          "confidence": 0.7,
+          "confidence": 0.72,
           "evidence": "Sheepdog: Yes, all 128 tests passed successfully across the five parts of the shop."
         }
       ]

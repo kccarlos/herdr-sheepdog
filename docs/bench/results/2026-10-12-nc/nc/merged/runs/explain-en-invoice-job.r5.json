@@ -19,7 +19,7 @@
     },
     {
       "type": "judge_no",
-      "detail": "explain_depth_t4_more (orchestrator): Sheepdog: \"Here is the whole report. The job sends one invoice at a time, and the provider will only take a hundred of those requests a minute. Last night there were forty-two hundred invoices...\" (re…"
+      "detail": "explain_depth_t4_more (orchestrator): Sheepdog: \"Here is the whole report. The job sends one invoice at a time, and the provider will only take a hundred of those requests a minute. Last night there were forty-two hundred invoices, so the…"
     }
   ],
   "end_reason": "end_call",
@@ -702,14 +702,14 @@
           "criterion": "Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHAT CAN BE DONE about it: the options or the recommendation, and roughly what each would take? Pass when: the options or the recommendation are said, with roughly what each would take. Fail when: no option or recommendation is given, or only 'should I fix it?' with nothing on what fixing means; OR the options are read out as a long list of labels or commands a listener could not keep apart.",
           "answer": "yes",
           "confidence": 0.85,
-          "evidence": "Sheepdog: \"a quick change that retries with a wait, which would take about 42 minutes to send the rest, or a proper change that sends invoices 500 at a time, about 40 lines of work.\""
+          "evidence": "Sheepdog: \"For a proper fix it wants to send invoices five hundred at a time... about forty lines of work. For a quick fix it wants to retry a refused invoice after waiting a minute, which would take about forty-two minutes to get through the backlog.\""
         },
         {
           "name": "explain_comprehension_what",
           "criterion": "Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHAT the matter is: concretely what the worker found or did, not just its topic? Pass when: the lines say concretely what was found or done, in words a listener can retell. Fail when: only the topic is named, so there is nothing concrete to retell; OR the substance is there but buried in terms, identifiers or side details so that a listener would lose it.",
           "answer": "yes",
           "confidence": 0.93,
-          "evidence": "Sheepdog: \"Its report says the nightly invoice job hit the payment provider's limit. The job sends one invoice at a time, and the provider only accepts 100 a minute. Last night there were 4,200 invoices, so after the first 100 every call was refused, and because the job never retries, 4,100 invoices were never sent.\""
+          "evidence": "Sheepdog: \"Its report says the nightly invoice job hit the payment provider's limit. The job sends one invoice at a time, and the provider only accepts 100 a minute. Last night there were 4,200 invoices, so after the first 100 every call was refused\""
         },
         {
           "name": "explain_comprehension_why",
@@ -722,16 +722,16 @@
           "name": "explain_depth_t3_example",
           "criterion": "The CEO's last question (\"Give me an example.\") asks for an example. Did Sheepdog's answer to it give one? Pass when: it gives a concrete example (a specific case, input, number or event), or says it has none and offers to find out, or hands the question to a worker. Fail when: a general restatement without a specific case, or an analogy in place of a real case from the matter at hand; OR code, a pattern or a long list of cases read out instead of one case a listener can picture.",
           "answer": "yes",
-          "confidence": 0.85,
+          "confidence": 0.88,
           "evidence": "Sheepdog: \"The last time the job ran cleanly it sent 87 invoices, nowhere near the limit. Last night it had 4,200, so the first 100 went out and every one after that was refused.\""
         },
         {
           "name": "explain_depth_t4_more",
           "criterion": "The CEO's last question (\"More detail please.\") asks for more. Did Sheepdog's answer to it add what was asked for? Pass when: it adds substantive content not already said in its earlier answers (a new reason, example, number, consequence or step), or says plainly that this is everything it has and offers to find out more, or hands the question to a worker or goes and checks. Fail when: it says the same things again in other words with nothing new; OR it repeats the whole earlier answer around a small addition, so the CEO has to sit through it again to find the new part.",
           "answer": "no",
-          "confidence": 0.72,
-          "evidence": "Sheepdog: \"Here is the whole report. The job sends one invoice at a time, and the provider will only take a hundred of those requests a minute. Last night there were forty-two hundred invoices...\" (restates the earlier answer, with only \"nine requests\" and \"those customers have not been billed\" as new)",
-          "rationale": "Sheepdog: \"Here is the whole report. The job sends one invoice at a time, and the provider will only take a hundred of those requests a minute. Last night there were forty-two hundred invoices...\" (restates the earlier answer, with only \"nine requests\" and \"those customers have not been billed\" as new)"
+          "confidence": 0.8,
+          "evidence": "Sheepdog: \"Here is the whole report. The job sends one invoice at a time, and the provider will only take a hundred of those requests a minute. Last night there were forty-two hundred invoices, so the first hundred went through and every one after that was refused\"",
+          "rationale": "Sheepdog: \"Here is the whole report. The job sends one invoice at a time, and the provider will only take a hundred of those requests a minute. Last night there were forty-two hundred invoices, so the first hundred went through and every one after that was refused\""
         }
       ]
     },
@@ -773,14 +773,14 @@
           "name": "explain_comprehension_what",
           "criterion": "Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHAT the matter is: concretely what the worker found or did, not just its topic? Pass when: the lines say concretely what was found or done, in words a listener can retell. Fail when: only the topic is named, so there is nothing concrete to retell; OR the substance is there but buried in terms, identifiers or side details so that a listener would lose it.",
           "answer": "yes",
-          "confidence": 0.85,
+          "confidence": 0.88,
           "evidence": "Sheepdog: \"api-claude found that the nightly invoice job hit the payment provider's rate limit. The provider only accepts one hundred invoices per minute, but last night there were forty-two hundred, so forty-one hundred failed and weren't sent.\""
         },
         {
           "name": "explain_comprehension_why",
           "criterion": "Imagine a listener who cannot see any screen and heard only Sheepdog's lines above. Could they restate, in their own words, WHY it matters: the cause, and the consequence or risk? Pass when: the cause and the consequence or risk are both said in words a listener can retell. Fail when: the cause or the consequence is missing, or only asserted ('it is important'); OR they are there but buried in terms, identifiers or side details so that a listener would lose them.",
           "answer": "yes",
-          "confidence": 0.85,
+          "confidence": 0.8,
           "evidence": "Sheepdog: \"The provider only accepts one hundred invoices per minute, but last night there were forty-two hundred, so forty-one hundred failed and weren't sent.\""
         },
         {
@@ -794,7 +794,7 @@
           "name": "explain_depth_t3_example",
           "criterion": "The CEO's last question (\"Give me an example.\") asks for an example. Did Sheepdog's answer to it give one? Pass when: it gives a concrete example (a specific case, input, number or event), or says it has none and offers to find out, or hands the question to a worker. Fail when: a general restatement without a specific case, or an analogy in place of a real case from the matter at hand; OR code, a pattern or a long list of cases read out instead of one case a listener can picture.",
           "answer": "yes",
-          "confidence": 0.8,
+          "confidence": 0.85,
           "evidence": "Sheepdog: \"A normal night typically sees about eighty-seven invoices, well under the limit. Last night, the count was forty-two hundred, so the excess failed.\""
         },
         {
@@ -802,7 +802,7 @@
           "criterion": "The CEO's last question (\"More detail please.\") asks for more. Did Sheepdog's answer to it add what was asked for? Pass when: it adds substantive content not already said in its earlier answers (a new reason, example, number, consequence or step), or says plainly that this is everything it has and offers to find out more, or hands the question to a worker or goes and checks. Fail when: it says the same things again in other words with nothing new; OR it repeats the whole earlier answer around a small addition, so the CEO has to sit through it again to find the new part.",
           "answer": "yes",
           "confidence": 0.8,
-          "evidence": "Sheepdog: \"Because the job sends invoices individually... The quick fix retries after a wait, taking forty-two minutes, or we can do the proper bulk fix in batches of five hundred.\""
+          "evidence": "Sheepdog: \"Because the job sends invoices individually, four thousand one hundred failed last night. The quick fix retries after a wait, taking forty-two minutes, or we can do the proper bulk fix in batches of five hundred.\""
         }
       ]
     },
