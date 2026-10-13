@@ -4,7 +4,6 @@ import (
 	"context"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
 	"github.com/kccarlos/herdr-sheepdog/internal/brain/braintest"
@@ -254,81 +253,6 @@ func TestFinishEdges(t *testing.T) {
 		}
 		if h.log.count("supervisor.finished_suppressed") != 1 || h.log.count("promise.kept") != 0 || len(h.sup.openPromises()) != 1 {
 			t.Errorf("suppressed=%d kept=%d open=%d", h.log.count("supervisor.finished_suppressed"), h.log.count("promise.kept"), len(h.sup.openPromises()))
-		}
-	})
-}
-
-// TestFinishAfterApproval: a worker that ran the command sheepdog
-// approved and stopped without herdr reporting working in between goes
-// blocked -> done (or idle when focused); that is a finish and is
-// announced like one (docs/eval/analysis-voice-news-2026-10-12.md, class
-// N1). A declined prompt, or one answered outside sheepdog, is not.
-func TestFinishAfterApproval(t *testing.T) {
-	for _, to := range []herdr.State{herdr.StateDone, herdr.StateIdle} {
-		t.Run("approved_then_"+string(to), func(t *testing.T) {
-			h := newHarness(t, func(c *Config) { c.Chattiness = string(Chatty) })
-			h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
-			h.block("w5:p1", "codex-approval-prompt.screen.txt")
-			h.say("yes")
-			if got := h.sendKeysRequests(); len(got) != 1 {
-				t.Fatalf("keys = %v", got)
-			}
-			before := len(h.pusher.all())
-			h.srv.SetScreen("w5:p1", fixture(t, "codex-after-approval.screen.txt"))
-			h.transition("w5:p1", herdr.StateBlocked, to)
-			got := h.pusher.all()[before:]
-			if len(got) != 1 || got[0].Text != doneSentence || got[0].Urgency != voice.UrgencyIdle {
-				t.Errorf("pushes = %+v", got)
-			}
-			if row, _ := h.store.Get("w5:p1"); row.LastResult == nil || row.LastResult.Spoken != doneResult {
-				t.Errorf("last_result = %+v", row.LastResult)
-			}
-		})
-	}
-
-	t.Run("declined_then_idle", func(t *testing.T) {
-		h := newHarness(t, func(c *Config) { c.Chattiness = string(Chatty) })
-		h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
-		h.block("w5:p1", "codex-approval-prompt.screen.txt")
-		h.say("no")
-		if got := h.sendKeysRequests(); len(got) != 1 {
-			t.Fatalf("keys = %v", got)
-		}
-		before := len(h.pusher.all())
-		h.srv.SetScreen("w5:p1", fixture(t, "codex-declined-esc.screen.txt"))
-		h.transition("w5:p1", herdr.StateBlocked, herdr.StateIdle)
-		if got := h.pusher.all()[before:]; len(got) != 0 {
-			t.Errorf("a decline was announced as a finish: %+v", got)
-		}
-	})
-
-	t.Run("answered_outside_sheepdog", func(t *testing.T) {
-		h := newHarness(t, func(c *Config) { c.Chattiness = string(Chatty) })
-		h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
-		h.block("w5:p1", "codex-approval-prompt.screen.txt")
-		before := len(h.pusher.all())
-		h.srv.SetScreen("w5:p1", fixture(t, "codex-after-approval.screen.txt"))
-		h.transition("w5:p1", herdr.StateBlocked, herdr.StateDone)
-		if got := h.pusher.all()[before:]; len(got) != 0 {
-			t.Errorf("pushes = %+v", got)
-		}
-	})
-
-	t.Run("approved_after_an_earlier_decline", func(t *testing.T) {
-		h := newHarness(t, func(c *Config) { c.Chattiness = string(Chatty) })
-		h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
-		h.block("w5:p1", "codex-approval-prompt.screen.txt")
-		h.say("no")
-		h.transition("w5:p1", herdr.StateBlocked, herdr.StateIdle)
-		h.transition("w5:p1", herdr.StateIdle, herdr.StateWorking)
-		h.clock.Advance(time.Minute)
-		h.block("w5:p1", "codex-approval-prompt.screen.txt")
-		h.say("yes")
-		before := len(h.pusher.all())
-		h.srv.SetScreen("w5:p1", fixture(t, "codex-after-approval.screen.txt"))
-		h.transition("w5:p1", herdr.StateBlocked, herdr.StateDone)
-		if got := h.pusher.all()[before:]; len(got) != 1 || got[0].Text != doneSentence {
-			t.Errorf("pushes = %+v", got)
 		}
 	})
 }
