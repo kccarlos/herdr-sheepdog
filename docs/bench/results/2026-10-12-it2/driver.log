@@ -21,3 +21,8 @@ exit 0
 20:39 done fix r2 chunk=$4.93 cum=$13.77
 20:40 deepseek balance 56.46 CNY
 20:40 start main r2
+exit 0
+20:56:35 [4/6] workday-interruptions r1 (:7921): pass (end_call, ) 14 turns 446s ≈ $0.738, total ≈ $2.54
+21:04:03 [5/6] workday-explain-deep r1 (:7922): pass (end_call, ) 14 turns 656s ≈ $1.116, total ≈ $3.65
+21:04:38 [6/6] workday-long-haul r1 (:7921): pass (end_call, ) 14 turns 483s ≈ $0.679, total ≈ $4.33
+21:04 done main r2 chunk=$4.33 cum=$18.1
