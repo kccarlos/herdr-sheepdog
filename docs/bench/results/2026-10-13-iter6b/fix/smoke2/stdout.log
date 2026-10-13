@@ -1,0 +1,18 @@
+[1/6] explain-zh-notes-ledger r1: pass (end_call, ) ≈ $0.0165, total ≈ $0.016
+[2/6] explain-control-en-done r1: pass (end_call, ) ≈ $0.0065, total ≈ $0.023
+[3/6] explain-zh-input-rules r1: pass (end_call, ) ≈ $0.0237, total ≈ $0.047
+[4/6] explain-en-invoice-job r1: fail (end_call, unintended_action) ≈ $0.0297, total ≈ $0.076
+[5/6] explain-control-zh-busy r1: pass (end_call, ) ≈ $0.0071, total ≈ $0.083
+[6/6] explain-en-flaky-test r1: fail (end_call, unintended_action) ≈ $0.0298, total ≈ $0.113
+  pass    explain-zh-input-rules  r1  end_call   5 turns   37.9s                         ≈ $0.0237
+  fail    explain-en-flaky-test   r1  end_call   6 turns   53.0s  unintended_action      ≈ $0.0298
+          unintended_action: sheepdog sent bench-codex the prompt "Earlier you reported that the flaky pricing test failed about seven times out of eighty-four runs last week, because the test can race the price-cache warm-up. Pl…
+  pass    explain-zh-notes-ledger r1  end_call   4 turns   28.6s                         ≈ $0.0165
+  fail    explain-en-invoice-job  r1  end_call   5 turns   44.9s  unintended_action      ≈ $0.0297
+          unintended_action: sheepdog sent api-claude the prompt "Please give a concrete example from last night's run, in plain words for a non-programmer: pick one invoice that was sent successfully and one that was refused, an…
+  pass    explain-control-en-done r1  end_call   2 turns    8.0s                         ≈ $0.0065
+  pass    explain-control-zh-busy r1  end_call   2 turns   11.3s                         ≈ $0.0071
+-- 6 runs, spend ≈ $0.1133 (estimate at list prices) --
+reports: docs/bench/results/2026-10-13-iter6b/fix/smoke2/report.json, docs/bench/results/2026-10-13-iter6b/fix/smoke2/report.md
+-- spend brain    deepseek-flash           calls    40  in    325582  out    15615  reasoning    10384  ≈ $0.1133 --
+-- spend total ≈ $0.1133 (estimate at list prices) --

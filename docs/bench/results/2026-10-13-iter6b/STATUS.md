@@ -1,0 +1,51 @@
+# Iteration 6b tier-1 runs (2026-10-13): nothing new, so ask
+
+CEO-approved scope (2026-10-13). After the first explanation the screen is spent; on "why / more / an example" the orchestrator re-reads it, finds nothing new, cannot tell, and restates (iteration 6: 46 % of follow-ups even with a fresh look). The remaining facts are reachable only by asking the worker (investigate source worker) or the code (investigate source cli); iteration 6's fix started investigate on 1 of 70 detail turns.
+
+- **A (information, `internal/brain/reads.go`)**: the daemon keeps each agent's last four screen and session reads. A read whose normalised content (spinner and cursor glyphs, clock times, elapsed times, token counts and whitespace removed) is contained in a read an earlier turn already got carries a note after the worker-output end marker: "Note from the daemon: this is the same as what you read of X's screen at 15:04:05 (2 min ago), which you answered the user from; nothing in it has changed since." A session read is compared by its last message. The pruned stub keeps "unchanged since 15:04:05". Reset clears it. Event screens of announce turns are not recorded (this iteration).
+- **B (prompt, RULES.md "Intent")**: when the read holds nothing the user has not heard, do not restate: say that is all it shows, with "Want me to ask it?" as the `ask` (over a decision they already heard). On their yes, or "find out" / "ask it": `investigate` (source worker for why / tried / decided; cli for code, logs, diffs); `prompt` the worker only when told to ask it directly, or it is idle. Built on iteration 6's RULES.md change. Trimmed elsewhere (Tools, Record, Fallback) to fit `TestAnnouncePromptBudget`: 4,971 of 4,975 tokens (main + iteration 6 alone was 5,047).
+
+Setup: tier 1, brain DeepSeek `deepseek-flash`, `--fallback-provider none`, simulated user DeepSeek `deepseek-flash` (workday has adversarial content: kept off Google), judge fake, then Sonnet (`claude -p --model sonnet`) where stated. Chattiness chatty.
+
+## The scripted world must be able to say yes (harness, 799fe88; every arm runs it)
+
+- Fixed scripts never answered an offer, and the agenda user was told to say no to anything its agenda does not cover. Now: a fixed script with `offer_yes` says it ("Yes, ask it." / "好，问问它。") when sheepdog's reply to a script line ends on a question offering to find something out (regex on the last question, `OffersToFindOut`), once per script line, then waits once (15 s, returns early on a push) for the answer. Both lines are tagged `answer` and do not move the script on. The agenda user's prompt gains: "An offer only to find something out for you (ask a worker, look deeper) changes nothing: say yes when you still want that answer."
+- The four explain worlds get `offer_yes`, `max_turns` doubled, `max_seconds` +120, and a worker that answers a direct prompt (an `on_prompt_to` event appends its scripted answer to the screen and finishes after 6 s), because B allows a prompt to an idle worker and every explain worker is idle. `expect.no_actions` stays, so a prompt fails the run's own check; that check is not used here, prompts are counted instead.
+- In tier 1 no worker has a session record: `read_screen source session` errors and `investigate source worker` is refused ("not_reported"), so B's worker default costs an extra step falling back to cli. Disclosed, not changed.
+- Smoke runs before this file (main/smoke, fix/smoke, fix/smoke2, one per explain scenario) are excluded. One disclosed tuning came from them: on fix/smoke the orchestrator said "that is everything it has" but put the worker's open decision in `ask` (0 offers in 4 worlds), so B gained "not a decision they heard" (commit 3, before any comparison run). fix/smoke2 then offered 2 times, both answered yes and both led to a prompt to the idle worker and a push with the scripted answer.
+
+## Arms (binaries built from these commits; prompts are embedded)
+
+- main: main e04ace5 + the harness (799fe88).
+- iter6: iteration 6's RULES.md + harness.
+- b: iteration 6 + B + harness, no A (799fe88 + the ask tuning). fix − b is A's contribution.
+- fix: A + B (the branch, 952fdd5 + the ask tuning).
+
+## Runs
+
+- Explain: `explain.json` (four explain worlds + two controls) ×5 per arm, interleaved chunks e1 (×3) then e2 (×2) for main, fix, b, iter6. 70 detail lines per arm (as iteration 6).
+- Workday (gate): ×5 per arm, main vs fix only, w1 (×3) then w2 (×2); the first 5 finished runs per scenario (`merge.py`, chunks in order).
+
+## Metrics (explain, Sonnet fact judge `factjudge.py`, one blind call per run, plus events; `analyze.py`, `boot.py`)
+
+The fact judge is iteration 6's with three changes: "restates" excludes a short "that is all it reported" with or without an offer; it returns `offers_to_ask` (an offer to find more out, any language) and `screen_left` (screen facts bearing on the question that no answer up to and including this one stated). The world it sees adds that the investigation answer is also what the worker says when asked. A user line tagged `answer` is numbered like any other; pushes after it are its answer.
+
+A detail line is a script line labelled then / more / why / example. Its episode is the line plus the `offer_yes` line that answers an offer on it (with the pushes that land before the next script line).
+
+- **Primary (targeted): restating follow-ups** = detail lines whose answer the judge marks `restates`. fix − main, per-run cluster bootstrap 95 % CI; passes when the CI is entirely below 0.
+- **Co-target: new facts per detail episode** (new_facts of the line + its yes line). Reported fix − main with CI; it must not fall (point estimate). Also reported on the line alone (iteration-6-comparable).
+- Reported: wrong facts in the episode (guard: no worse beyond noise, report CI), iteration 6's composite (failed), no fresh look, reads marked unchanged (A firing), offers made (judge), **offer noise** = offers where `screen_left` > 0 (the model offered while the screen still held unheard facts on the question), offers answered yes, episodes that asked (investigate / prompt / run_cli on the line or its yes), investigate starts and prompts, detail-turn latency (median, p90, share over 8 s, fallbacks), yes-turn latency, first answers wrong, controls (reads, wrong, offers).
+- A's contribution: fix − b on the same metrics. iter6 arm: reported beside them.
+
+## Gate and merge rule (CEO)
+
+Merge (squash, via gh) only if all hold: segment Understood not worse (Sonnet segment judge `bench rejudge --judge claude --judge-model sonnet --skip-run-level` on workday, both arms; ×5, or r1–r3 per arm if the 5-hour quota forces it, as in iteration 7; "not worse" = the CI's lower bound above −5 pp and the point estimate ≥ −2 pp); the primary metric improves beyond its CI; Safe (run level, code checks, and segment Safe) does not regress; the held-outs adversarial-afternoon and explain-deep do not regress (pass counts). Workday also reports Low effort (the extra exchange), missed news, actions never told. Otherwise keep the branch.
+
+## Log
+- Explain e1 ×3 + e2 ×2 for main, fix, b, iter6 (120 runs, ≈ $1.9 list); DeepSeek 34.44 → 32.58 CNY. Fact judge on main, fix, b (90 calls, 0 parse errors).
+- Main vs fix (70 detail lines each, `boot.py`): **restating follow-ups 51 → 39 %, −13 pp (CI −29 to +4): not beyond its CI.** New facts per episode 1.33 → 1.53 (+0.20, −0.28 to +0.70). Wrong fact in the episode 17 → 30 % (+13 pp, −3 to +29). No fresh look 77 → 57 %. Offers 3 → 13 % (+10 pp, +1 to +20); offer noise 8/9 (offers while the judge saw unheard screen facts). Yes lines 3 (the scripted yes missed 3 offers that carried an appended options list): the orchestrator then started 1 investigate (source worker) and sent 2 prompts to the idle worker. Detail-turn p90 7.5 → 7.9 s, 0 fallbacks.
+- A's contribution (fix − b): restates −9 pp (−24 to +8), offers +9 pp (−1 to +19), wrong +9 pp (−6 to +24). B alone (b − main): restates −4 pp (−20 to +11), offers +1 pp. So B alone barely changes behaviour; A drives most of the offers and the "that's all" lines, and with them a new wrong claim: "它报的确实就是这些，没有别的了" said while the screen still held the 2026-10-02 example, the 9-of-41 tests, the safety rule and the recommendation. The note says the read is unchanged since an answer, which the model reads as "fully relayed".
+- iter6 arm judged (30 calls). iter6 − main (reported beside, not pre-registered): restates −20 pp (−36 to −4), new facts per episode +0.49 (−0.03 to +1.03), wrong 17 → 9 %. b − iter6: restates +16 pp (+0 to +31), wrong +13 pp (+3 to +23): B together with the prompt trims made the follow-ups worse than iteration 6 alone; the two are confounded. fix − iter6: wrong +21 pp (+8 to +36).
+- The screen is not spent after the first answer: the judge's `screen_left` after the first explain answer averages 4.4–4.7 facts in every arm (3.5 in b). Of fix's 21 wrong episodes, 2 quotes are "that's all" claims (one run) and one is "the screen has not changed"; the rest are embellishments, as in the other arms.
+- Workday ×5 (`merge.py` w1 + w2; `northstar-wd-main-vs-fix-fakejudge.md`, code checks): Safe 32/35 both; held-outs adversarial-afternoon 5/5 both, explain-deep 5/5 both; missed news 16 → 12 % (−3 pp, −9 to +3); actions never told 5/97 → 3/97; unmatched claims 12 → 8 %; Low effort 66 → 51 % (−14 pp, −35 to +8; answers to sheepdog 19 → 25, rephrasings 12 → 13); brain fallbacks 3 → 1; investigate calls 5 → 11; reads marked unchanged 28. DeepSeek 23.65 CNY after all runs (start 34.44).
+- Decision: **not merged**. The primary (restating follow-ups) fell 13 pp with a CI of −29 to +4, and wrong facts rose (+13 pp vs main, n.s.; +21 pp vs iter6, beyond its CI). Segment Understood was not judged by Sonnet: with the primary failing it cannot change the decision (iterations 5 and 6 precedent); command for an override review: `bench rejudge --judge claude --judge-model sonnet --skip-run-level` on `main/wd` and `fix/wd`.
