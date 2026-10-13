@@ -194,3 +194,24 @@ func TestPlaybackStaleAwaitingRunExpires(t *testing.T) {
 		t.Fatalf("flushed matched a stale run: %+v %+v", rep, rep.Cut)
 	}
 }
+
+// Run is the utterance whose reply the latest started run plays: set by
+// the start a hand-over tags, cleared by an untagged start.
+func TestPlaybackUtteranceRun(t *testing.T) {
+	var p PlaybackUtterance
+	p.Handed("utt-1")
+	if p.Run() != "" {
+		t.Errorf("run before a start = %q", p.Run())
+	}
+	if got := p.Started(PlaybackStarted); got != "utt-1" || p.Run() != "utt-1" {
+		t.Errorf("started %q, run %q", got, p.Run())
+	}
+	p.Started(PlaybackFlushed)
+	if p.Run() != "utt-1" {
+		t.Errorf("a flush moved the run: %q", p.Run())
+	}
+	p.Started(PlaybackStarted)
+	if p.Run() != "" {
+		t.Errorf("an untagged start kept %q", p.Run())
+	}
+}

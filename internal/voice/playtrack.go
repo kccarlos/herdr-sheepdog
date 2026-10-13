@@ -64,6 +64,12 @@ type TranscriptCut struct {
 	RunMs int
 	// Full is everything the model's output transcript said in the run.
 	Full string
+	// UtteranceID is the utterance whose reply the run played (the run's
+	// start was tagged with it, PlaybackUtterance), "" for any other line.
+	UtteranceID string
+	// ByPush: the daemon flushed the run to make way for an urgent push,
+	// rather than the user talking over it.
+	ByPush bool
 }
 
 // PlaybackReport is one client playback report as the session saw it
@@ -83,7 +89,7 @@ type PlaybackReport struct {
 // session last handed to the model to speak (a reply push or a spoken
 // tool result), so turn.latency matches that start to the reply by id.
 // Not safe for concurrent use: the session calls it under its own lock.
-type PlaybackUtterance struct{ id string }
+type PlaybackUtterance struct{ id, run string }
 
 // Handed records what the model was just given to speak: an utterance's
 // reply (id), or anything else ("": the next start is not a reply).
@@ -97,6 +103,7 @@ func (p *PlaybackUtterance) Started(state string) string {
 	}
 	id := p.id
 	p.id = ""
+	p.run = id
 	return id
 }
 
@@ -107,6 +114,10 @@ func TagPayload(payload map[string]any, id string) map[string]any {
 	}
 	return payload
 }
+
+// Run is the utterance whose reply the latest started run plays ("" when
+// that run is not a reply).
+func (p *PlaybackUtterance) Run() string { return p.run }
 
 // Payload is the voice.playback event payload.
 func (r PlaybackReport) Payload() map[string]any {

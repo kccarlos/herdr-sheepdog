@@ -147,6 +147,9 @@ func TestBargeInCutsTheTranscript(t *testing.T) {
 
 	words := strings.Fields("one two three four five six seven eight nine ten")
 	speakReply(h, c, words, 1000)
+	h.s.mu.Lock()
+	h.s.playUtt.Handed("utt-9") // the reply to the user's utterance utt-9
+	h.s.mu.Unlock()
 	h.s.ClientPlayback(voice.PlaybackStarted, 0)
 	c.serve(interruptedMsg())
 	h.waitEvent("flush", isFlushEvent)
@@ -159,6 +162,11 @@ func TestBargeInCutsTheTranscript(t *testing.T) {
 	}
 	if tr.Cut.HeardMs != 4000 || tr.Cut.RunMs != 10000 || tr.Cut.Full != strings.Join(words, " ") {
 		t.Errorf("cut %+v", tr.Cut)
+	}
+	// The supervisor records the answer to utt-9 as unanswered: the run
+	// is tagged with it, and the user (not a push) cut it.
+	if tr.Cut.UtteranceID != "utt-9" || tr.Cut.ByPush {
+		t.Errorf("cut %+v, want utt-9 cut by the user", tr.Cut)
 	}
 	pb := h.log.payloads("voice.playback")
 	if len(pb) != 2 || pb[1]["cut"] != true || pb[1]["heard"] != "one two three four" || pb[1]["run_ms"] != 10000 {
