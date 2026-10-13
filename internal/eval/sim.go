@@ -47,6 +47,12 @@ type SimScenario struct {
 	// for a scenario where the exact words are the point ("Stop.", "Oh,
 	// never mind."). The judge still grades it.
 	Fixed bool `json:"fixed,omitempty"`
+	// OfferYes, with a fixed script, is what the user says when
+	// sheepdog's reply to a script line ends on an offer to find out
+	// more (ask the worker, look deeper): said once per script line,
+	// then the user waits for the answer before the next line. Both
+	// lines are tagged answer and do not move the script on.
+	OfferYes string `json:"offer_yes,omitempty"`
 	// Agenda, instead of a script, is what the user does turn by turn,
 	// one beat per turn (workday sessions): the LLM simulated user says
 	// each beat in its own words and the run's persona, may answer a

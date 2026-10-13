@@ -245,7 +245,7 @@ loop:
 			}
 			// A wait sends nothing to the orchestrator: the marker is for
 			// the simulated user and the judge only.
-			convo = append(convo, SimLine{AtMS: w.since(), Who: "system", Text: simWaitMarker, Beat: t.Beat, Decl: t.Decl, Items: t.Items})
+			convo = append(convo, SimLine{AtMS: w.since(), Who: "system", Text: simWaitMarker, Beat: t.Beat, Tag: t.Tag, Decl: t.Decl, Items: t.Items})
 			d := clampDur(time.Duration(float64(t.WaitSeconds)*float64(time.Second)*scale), minWait, silence-silent)
 			got := waitPushes(w, d, settle, deadline)
 			if len(got) == 0 {
@@ -273,7 +273,11 @@ loop:
 				run.Faults = append(run.Faults, SimFaultHit{Turn: run.Turns, Kind: string(f), Text: t.Text, Spoken: strings.TrimSpace(res.Spoken), Heard: heard})
 			}
 			if sc.Explain != nil {
-				exchanges = append(exchanges, ExplainExchange{Turn: run.Turns, AtMS: at, Kind: sc.Explain.Kind(run.Turns), Question: t.Text, Consulted: true, Orchestrator: JoinOrchestrator(res.Spoken, res.Detail, res.Options), Spoken: strings.TrimSpace(res.Spoken)})
+				kind := ""
+				if t.Tag != TagAnswer {
+					kind = sc.Explain.Kind(scriptTurn(convo))
+				}
+				exchanges = append(exchanges, ExplainExchange{Turn: run.Turns, AtMS: at, Kind: kind, Question: t.Text, Consulted: true, Orchestrator: JoinOrchestrator(res.Spoken, res.Detail, res.Options), Spoken: strings.TrimSpace(res.Spoken)})
 			}
 			reply := strings.TrimSpace(res.Spoken)
 			if len(res.Options) > 0 {
@@ -608,4 +612,16 @@ func eventSink(dir, id string, repeat int) (func(SimLogEvent), func()) {
 			defer mu.Unlock()
 			_ = f.Close()
 		}
+}
+
+// scriptTurn is the number of the user's script lines so far: user lines
+// that answer an offer (offerTurn) are not script lines.
+func scriptTurn(convo []SimLine) int {
+	n := 0
+	for _, l := range convo {
+		if l.Who == "ceo" && l.Tag != TagAnswer {
+			n++
+		}
+	}
+	return n
 }

@@ -187,7 +187,7 @@ How to talk:
 - One spoken utterance per turn, the way people talk on the phone. No stage directions, no quotes, no "CEO:" prefix, no emoji.
 - Speak %s unless your agenda or speaking style says otherwise.
 - Do not invent facts about the workers; ask sheepdog. Only count something as done when sheepdog said so.
-- Never ask sheepdog to stop, approve, decline or change anything your agenda does not say. If sheepdog asks permission for something your agenda does not cover, say no.
+- Never ask sheepdog to stop, approve, decline or change anything your agenda does not say. If sheepdog asks permission for something your agenda does not cover, say no. An offer only to find something out for you (ask a worker, look deeper) changes nothing: say yes when you still want that answer.
 
 YOUR AGENDA, one item per turn, in order:
 %s
@@ -462,8 +462,14 @@ func (ScriptedSimUser) Next(_ context.Context, sc SimScenario, convo []SimLine) 
 		}
 		return SimTurn{Kind: TurnSay, Text: sc.Agenda[next-1], Beat: next}, nil
 	}
+	if t, ok := offerTurn(sc, convo); ok {
+		return t, nil
+	}
 	n := 0
 	for _, l := range convo {
+		if l.Tag == TagAnswer {
+			continue // an answer to an offer (offerTurn) is not a script line
+		}
 		if l.Who == "ceo" || (l.Who == "system" && l.Text == simWaitMarker) {
 			n++
 		}
@@ -485,6 +491,67 @@ func (ScriptedSimUser) Next(_ context.Context, sc SimScenario, convo []SimLine) 
 		return SimTurn{Kind: TurnWait, WaitSeconds: 5}, nil
 	}
 	return SimTurn{Kind: TurnSay, Text: lines[n]}, nil
+}
+
+// TagAnswer marks a user line that answers sheepdog (SimLine.Tag).
+const TagAnswer = "answer"
+
+// offerTurn is a fixed script's answer to an offer (SimScenario.OfferYes):
+// when sheepdog's reply to the last script line ends on an offer to find
+// out more, the user says yes; after that yes, they wait once for the
+// answer to land.
+func offerTurn(sc SimScenario, convo []SimLine) (SimTurn, bool) {
+	if sc.OfferYes == "" {
+		return SimTurn{}, false
+	}
+	last := -1
+	for i, l := range convo {
+		if l.Who == "ceo" {
+			last = i
+		}
+	}
+	if last < 0 {
+		return SimTurn{}, false
+	}
+	if convo[last].Tag == TagAnswer {
+		for _, l := range convo[last+1:] {
+			if l.Who == "system" && l.Text == simWaitMarker {
+				return SimTurn{}, false
+			}
+		}
+		return SimTurn{Kind: TurnWait, WaitSeconds: 15, Tag: TagAnswer}, true
+	}
+	reply := ""
+	for _, l := range convo[last+1:] {
+		if l.Who == "sheepdog" || l.Who == "push" {
+			reply = l.Text
+		}
+	}
+	if !OffersToFindOut(reply) {
+		return SimTurn{}, false
+	}
+	return SimTurn{Kind: TurnSay, Text: sc.OfferYes, Tag: TagAnswer}, true
+}
+
+// offerEN and offerZH match an offer to find something out, in the
+// last question of a reply: "Want me to ask it?", "Shall I have it dig
+// deeper?", "要不要我问问它？".
+var (
+	offerEN = regexp.MustCompile(`(?i)\b(want|shall|should|would you like|do you want|like)\b.{0,40}\b(ask|check with|find out|dig|look (deeper|further|into)|investigate|have (it|them) (look|check|explain))`)
+	offerZH = regexp.MustCompile(`(要不要|要我|需要我|我可以|我去|我来|让我|让它|我帮你|是否)[^。！!]{0,24}(问|查|调查|挖|深入|了解)`)
+)
+
+// OffersToFindOut reports whether reply ends on a question that offers
+// to find something out (ask the worker, look deeper).
+func OffersToFindOut(reply string) bool {
+	reply = strings.TrimRight(strings.TrimSpace(reply), "\"'”’」 ")
+	end := strings.LastIndexAny(reply, "?？")
+	if end < 0 || len(reply)-end > len("？") {
+		return false // no question, or one the reply goes on past
+	}
+	start := strings.LastIndexAny(reply[:end], ".!。！？?") + 1
+	q := reply[start:end]
+	return offerEN.MatchString(q) || offerZH.MatchString(q)
 }
 
 // simWaitMarker is the system line a wait leaves in the conversation.

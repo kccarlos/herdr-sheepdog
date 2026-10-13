@@ -2,7 +2,7 @@
   "scenarios": [
     {
       "id": "explain-zh-input-rules",
-      "note": "Phone test 2026-10-05 18:02-18:05Z: the orchestrator's spoken had four sentences with reasons and an example, the voice said two; on '你可以给我一点详细的解释吗' it only rephrased. The worker's summary has the substance (numbers, reasons, an example, what to keep, a recommendation and its cost).",
+      "note": "Phone test 2026-10-05 18:02-18:05Z: the orchestrator's spoken had four sentences with reasons and an example, the voice said two; on '你可以给我一点详细的解释吗' it only rephrased. The worker's summary has the substance (numbers, reasons, an example, what to keep, a recommendation and its cost). Iteration 6b: offer_yes answers an offer to find out more, and a prompt to the worker gets its scripted answer on screen.",
       "goal": "understand what the hard-coded rules in the input layer are, why they are a problem, and what can be done, in enough detail to decide",
       "persona": "Speaks Chinese. Curious, wants the full explanation; keeps asking for more.",
       "language": "zh",
@@ -30,8 +30,8 @@
         }
       ],
       "caps": {
-        "max_turns": 5,
-        "max_seconds": 240,
+        "max_turns": 10,
+        "max_seconds": 360,
         "silence_seconds": 30
       },
       "expect": {
@@ -54,11 +54,20 @@
           "The safety rule that refuses dangerous keys should stay in code.",
           "Recommendation: delete the word lists (about 300 lines) and send every reply to the model, at a cost of about 1.2 seconds more latency on a plain yes."
         ]
-      }
+      },
+      "offer_yes": "好，问问它。",
+      "events": [
+        {
+          "on_prompt_to": "summary-claude",
+          "delay_ms": 6000,
+          "append_screen": "⏺ Deeper look: in last week's logs 63 of 70 approvals were a plain 'yes' or '好的', which is what the fast path speeds up (about 1.2 s each). Removing it means the model sees every reply; the risk is a slow answer on an urgent approval. A middle way: keep a tiny allow list of exact one-word replies ('yes', '好') and send anything longer to the model, which would have caught the '好的继续，不过先跑测试' case.",
+          "state": "done"
+        }
+      ]
     },
     {
       "id": "explain-en-flaky-test",
-      "note": "English 'explain / then / more / why / example' over a worker's investigation with a cause, numbers, a consequence and fix options.",
+      "note": "English 'explain / then / more / why / example' over a worker's investigation with a cause, numbers, a consequence and fix options. Iteration 6b: offer_yes answers an offer to find out more, and a prompt to the worker gets its scripted answer on screen.",
       "goal": "understand why the checkout test is flaky, whether it matters, and what the fix options are",
       "persona": "Speaks English. Wants the full story, asks follow-ups.",
       "opening": "What did bench-codex find about the flaky test? Explain it to me.",
@@ -85,8 +94,8 @@
         }
       ],
       "caps": {
-        "max_turns": 5,
-        "max_seconds": 240,
+        "max_turns": 10,
+        "max_seconds": 360,
         "silence_seconds": 30
       },
       "expect": {
@@ -109,11 +118,20 @@
           "Recommended fix: wait for the cache's ready signal in the test setup (about 3 lines); the alternative is a fake cache.",
           "Nothing has been changed yet."
         ]
-      }
+      },
+      "offer_yes": "Yes, ask it.",
+      "events": [
+        {
+          "on_prompt_to": "bench-codex",
+          "delay_ms": 6000,
+          "append_screen": "• Ran the test 200 times with the race detector: 17 failures, every one with the price cache empty when the request arrived. With a wait on Ready() added locally: 0 failures in 200 runs. The race exists since the 'parallel cache warm-up' change three weeks ago, which moved the warm-up into a background goroutine.",
+          "state": "done"
+        }
+      ]
     },
     {
       "id": "explain-zh-notes-ledger",
-      "note": "Chinese 'explain / why / example / then' over the notes-ledger review from the 2026-10-05 phone test (备忘录满 5 条后旧的会被挤出).",
+      "note": "Chinese 'explain / why / example / then' over the notes-ledger review from the 2026-10-05 phone test (备忘录满 5 条后旧的会被挤出). Iteration 6b: offer_yes answers an offer to find out more, and a prompt to the worker gets its scripted answer on screen.",
       "goal": "understand what the notes ledger problem is, why it matters, and whether to build the delete tool",
       "persona": "Speaks Chinese. Wants reasons and an example before deciding.",
       "language": "zh",
@@ -140,8 +158,8 @@
         }
       ],
       "caps": {
-        "max_turns": 4,
-        "max_seconds": 220,
+        "max_turns": 8,
+        "max_seconds": 340,
         "silence_seconds": 30
       },
       "expect": {
@@ -162,11 +180,20 @@
           "It is useful but not urgent: nothing is lost until a 6th note is added.",
           "The alternative is raising the cap to 10, which only delays the problem and keeps stale notes."
         ]
-      }
+      },
+      "offer_yes": "好，问问它。",
+      "events": [
+        {
+          "on_prompt_to": "memo-claude",
+          "delay_ms": 6000,
+          "append_screen": "⏺ The ledger was added in July with a cap of 5 to keep the brain's prompt short; each note costs about 40 tokens, so even 10 notes would add only about 400 tokens. The delete tool would be a 'forget' tool the brain can call with the note's words; it would refuse to delete a note the CEO marked as a rule unless asked twice.",
+          "state": "done"
+        }
+      ]
     },
     {
       "id": "explain-en-invoice-job",
-      "note": "English 'explain / why / example / more' over a failed job with numbers, a deadline, a cause and two fixes.",
+      "note": "English 'explain / why / example / more' over a failed job with numbers, a deadline, a cause and two fixes. Iteration 6b: offer_yes answers an offer to find out more, and a prompt to the worker gets its scripted answer on screen.",
       "goal": "understand why the invoice job failed, what it costs, and what the options are",
       "persona": "Speaks English. Asks why and for an example, then for more detail.",
       "opening": "Explain what api-claude found about the invoice job.",
@@ -192,8 +219,8 @@
         }
       ],
       "caps": {
-        "max_turns": 4,
-        "max_seconds": 220,
+        "max_turns": 8,
+        "max_seconds": 340,
         "silence_seconds": 30
       },
       "expect": {
@@ -214,7 +241,16 @@
           "Proper fix: the bulk endpoint takes 500 invoices per call (9 calls), about 40 lines.",
           "Quick fix: retry with a one-minute wait (about 42 minutes); re-running is safe because duplicate invoice ids are ignored."
         ]
-      }
+      },
+      "offer_yes": "Yes, ask it.",
+      "events": [
+        {
+          "on_prompt_to": "api-claude",
+          "delay_ms": 6000,
+          "append_screen": "⏺ Checked the provider's docs: the limit is 100 calls per minute per API key, and the bulk endpoint counts as one call however many invoices it carries (up to 500). The job's last success sent 87 invoices on 2026-10-04. Customers on annual plans are billed on the 1st, so the 4,200 spike repeats every month.",
+          "state": "done"
+        }
+      ]
     },
     {
       "id": "explain-control-en-done",
