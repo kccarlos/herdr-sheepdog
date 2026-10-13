@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
@@ -19,8 +20,9 @@ import (
 //     timeout, a reply that broke the answer contract), unless a retry
 //     of the same words (rerelay.go) then answered;
 //   - the answer was cut off by the user talking over it before most of
-//     it played (a cut run tagged with the utterance it answered, not a
-//     flush for an urgent push);
+//     it was said (the first cut of a run tagged with the utterance it
+//     answered, not a flush for an urgent push, with less than half of
+//     the answer's text heard);
 //   - the answer was never voiced: a late answer judged unheard and not
 //     re-queued (voice.EventPushUnheard), or dropped as stale before it
 //     was said because a newer request came first.
@@ -62,6 +64,11 @@ type askedRec struct {
 	id    string
 	text  string
 	asked time.Time
+	// answer is the spoken answer handed to the voice; cut is set once a
+	// cut of it was judged (only the first counts: the tail of the same
+	// barge-in often flushes as a second, tiny run).
+	answer string
+	cut    bool
 }
 
 // answeredKeep bounds the utterances remembered for a cut.
@@ -164,42 +171,46 @@ func (s *Supervisor) unansweredNow() []unansweredQ {
 
 // noteAnswerHanded remembers that u's answer went to the voice to say,
 // so a cut of the run that plays it can be recorded with u's words.
-func (s *Supervisor) noteAnswerHanded(u *inflightUtterance) {
+func (s *Supervisor) noteAnswerHanded(u *inflightUtterance, answer string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.answeredRecs = append(s.answeredRecs, askedRec{id: u.id, text: u.text, asked: u.start})
+	s.answeredRecs = append(s.answeredRecs, askedRec{id: u.id, text: u.text, asked: u.start, answer: answer})
 	if len(s.answeredRecs) > answeredKeep {
 		s.answeredRecs = s.answeredRecs[len(s.answeredRecs)-answeredKeep:]
 	}
 }
 
 // onAnswerCut records the answer the user cut off before most of it
-// played (voice.EventTranscript with Cut): only a run tagged with the
-// utterance it answered, cut by the user rather than flushed for a
-// push, and played for less than voice.HeardMinCoverage of its length.
+// was said (voice.EventTranscript with Cut): the first cut of a run
+// tagged with the utterance it answered, made by the user rather than a
+// flush for an urgent push, when what they heard is less than
+// voice.HeardMinCoverage of the answer's text (in characters: the voice
+// streams its audio, so the run's length when it is cut says nothing
+// about how long the answer would have been).
 func (s *Supervisor) onAnswerCut(c *voice.TranscriptCut, heard string) {
-	if c == nil || c.UtteranceID == "" || c.ByPush || c.RunMs <= 0 {
+	if c == nil || c.UtteranceID == "" || c.ByPush {
 		return
 	}
-	if float64(c.HeardMs) >= voice.HeardMinCoverage*float64(c.RunMs) {
-		return
-	}
+	heard = strings.TrimSpace(heard)
 	s.mu.Lock()
-	var rec *askedRec
+	var rec askedRec
+	found := false
 	for i := len(s.answeredRecs) - 1; i >= 0; i-- {
-		if s.answeredRecs[i].id == c.UtteranceID {
-			r := s.answeredRecs[i]
-			rec = &r
+		if r := &s.answeredRecs[i]; r.id == c.UtteranceID {
+			found = !r.cut
+			r.cut = true
+			rec = *r
 			break
 		}
 	}
 	s.mu.Unlock()
-	if rec == nil {
+	answer := utf8.RuneCountInString(rec.answer)
+	if !found || answer == 0 || float64(utf8.RuneCountInString(heard)) >= voice.HeardMinCoverage*float64(answer) {
 		return
 	}
-	why := fmt.Sprintf("the user talked over its answer after %.0f s of %.0f s", float64(c.HeardMs)/1000, float64(c.RunMs)/1000)
-	if h := strings.TrimSpace(heard); h != "" {
-		why += fmt.Sprintf("; they heard only %q", clipRunes(h, 60))
+	why := fmt.Sprintf("the user talked over its answer after %.0f s", float64(c.HeardMs)/1000)
+	if heard != "" {
+		why += fmt.Sprintf("; they heard only %q", clipRunes(heard, 60))
 	} else {
 		why += "; they heard none of it"
 	}
@@ -242,7 +253,7 @@ func (s *Supervisor) answered(u *inflightUtterance, out utteranceOutcome) {
 		s.clearUnanswered([]string{u.retryOf}, "retry")
 	}
 	if strings.TrimSpace(out.res.Spoken) != "" {
-		s.noteAnswerHanded(u)
+		s.noteAnswerHanded(u, strings.TrimSpace(out.res.Spoken))
 	}
 }
 

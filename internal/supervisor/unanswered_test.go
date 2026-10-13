@@ -166,6 +166,7 @@ func TestUnansweredExpiresAndIsCapped(t *testing.T) {
 // with what they heard. A cut near the end, an untagged run (another
 // line) or a flush for an urgent push records nothing.
 func TestCutAnswerIsRecorded(t *testing.T) {
+	// See also TestCutCountsOnceAndByText.
 	m := braintest.NewModel(braintest.Step{Text: braintest.Reply("Auth's tests failed on a timeout in the payment step.", "")})
 	m.Default = &braintest.Step{Text: braintest.Reply("ok", "")}
 	h := newBrainHarness(t, m)
@@ -177,19 +178,22 @@ func TestCutAnswerIsRecorded(t *testing.T) {
 	cut := func(c voice.TranscriptCut, heard string) {
 		h.sup.OnVoiceEvent(voice.EventTranscript{Dir: voice.DirOut, Text: heard, Final: true, Cut: &c})
 	}
-	cut(voice.TranscriptCut{UtteranceID: id, HeardMs: 3500, RunMs: 4000}, "Auth's tests failed on a timeout")
+	// A cut near the end, a run that played another line, or a flush
+	// for an urgent push: nothing.
 	cut(voice.TranscriptCut{UtteranceID: "", HeardMs: 200, RunMs: 4000}, "")
 	cut(voice.TranscriptCut{UtteranceID: id, HeardMs: 200, RunMs: 4000, ByPush: true}, "")
 	if n := len(recordedIDs(h)); n != 0 {
 		t.Fatalf("recorded %d for cuts that do not count", n)
 	}
-	cut(voice.TranscriptCut{UtteranceID: id, HeardMs: 1000, RunMs: 4000}, "Auth's tests")
+	// The run's length says nothing (the voice streams): the share of
+	// the answer's text heard does.
+	cut(voice.TranscriptCut{UtteranceID: id, HeardMs: 1000, RunMs: 1100}, "Auth's tests")
 	if ids := recordedIDs(h); len(ids) != 1 || ids[0] != id {
 		t.Fatalf("recorded = %v, want %s", ids, id)
 	}
 	h.say("and docs?")
 	text := m.Calls()[1].Text()
-	if !strings.Contains(text, `"why did auth's tests fail?" (the user talked over its answer after 1 s of 4 s; they heard only "Auth's tests")`) {
+	if !strings.Contains(text, `"why did auth's tests fail?" (the user talked over its answer after 1 s; they heard only "Auth's tests")`) {
 		t.Errorf("section:\n%s", text)
 	}
 }
@@ -245,5 +249,23 @@ func TestResetForgetsUnanswered(t *testing.T) {
 	}
 	if got := h.sup.unansweredNow(); len(got) != 0 {
 		t.Errorf("after reset: %+v", got)
+	}
+}
+
+// Only the first cut of an answer counts (the tail of the same barge-in
+// flushes as a second, tiny run), and an answer heard for at least half
+// its text is not recorded.
+func TestCutCountsOnceAndByText(t *testing.T) {
+	m := braintest.NewModel(braintest.Step{Text: braintest.Reply("Auth's tests failed on a timeout in the payment step.", "")})
+	m.Default = &braintest.Step{Text: braintest.Reply("ok", "")}
+	h := newBrainHarness(t, m)
+	id := h.say("why did auth's tests fail?").UtteranceID
+	cut := func(heard string) {
+		h.sup.OnVoiceEvent(voice.EventTranscript{Dir: voice.DirOut, Text: heard, Final: true, Cut: &voice.TranscriptCut{UtteranceID: id, HeardMs: 2000, RunMs: 2100}})
+	}
+	cut("Auth's tests failed on a timeout in the")
+	cut("")
+	if n := len(recordedIDs(h)); n != 0 {
+		t.Errorf("recorded %d: most of the answer was heard, and the tail cut is the same barge-in", n)
 	}
 }
