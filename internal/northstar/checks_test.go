@@ -352,6 +352,8 @@ func TestActionToldInOtherWords(t *testing.T) {
 		{ActInterrupt, "etl-codex", "", "etl-codex 现在停下来等你确认，要放行吗？", false},
 		{ActKeys, "etl-codex", "esc", "它以为退款被拒了。", false},
 		{ActInterrupt, "refactor-codex", "", "refactor-codex 还没停住。", false},
+		{ActKeys, "etl-codex", "esc", "etl-codex 想把旧文件搬到归档，要让它做吗？", false},
+		{ActKeys, "infra-codex", "y", "The preview ran cleanly. Do you want me to tell infra-codex to apply it?", false},
 	}
 	for _, c := range cases {
 		r := Run{

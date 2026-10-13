@@ -289,12 +289,29 @@ func mentioned(r Run, lines []Speech, a Action) bool {
 		if a.Kind == ActKeys && s.AtMS >= turnStart(r, a.AtMS) && ackLine.MatchString(s.Text+" ") {
 			return true
 		}
-		if (a.Kind == ActPrompt || a.Kind == ActKeys || a.Kind == ActSpawn) && s.AtMS >= a.AtMS && effectLine.MatchString(normQuotes(s.Text)) && (a.Agent == "" || mentionsAgent(r.Agents, a.Agent, s.Text)) {
+		if (a.Kind == ActPrompt || a.Kind == ActKeys || a.Kind == ActSpawn) && s.AtMS >= a.AtMS && effectLine.MatchString(statements(s.Text)) && (a.Agent == "" || mentionsAgent(r.Agents, a.Agent, statements(s.Text))) {
 			return true
 		}
 	}
 	return false
 }
+
+// statements is text without its questions and offers ("要让它把旧文件搬到
+// 归档吗？", "Shall I have flaky-codex apply it?"): a worker named in a
+// question about what it could do has not been reported doing it.
+func statements(text string) string {
+	var keep []string
+	for _, sent := range sentenceEnds.FindAllString(normQuotes(text), -1) {
+		if !questionLike.MatchString(sent) {
+			keep = append(keep, sent)
+		}
+	}
+	return strings.Join(keep, " ")
+}
+
+var sentenceEnds = regexp.MustCompile(`[^.!?。！？]+[.!?。！？]*`)
+
+var questionLike = regexp.MustCompile(`(?i)[?？吗嗎]|要不要|需不需要|要我|是否|\b(shall i|should i|do you want|would you like|want me to)\b`)
 
 // clauseSplit cuts a sentence at its commas: "我没让它删，按你说的让它改成
 // 归档" tells the user an action in its second clause, and a condition or
