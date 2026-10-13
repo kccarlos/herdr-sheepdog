@@ -794,6 +794,10 @@ func (s *Session) ClientPlayback(state string, playedMs int) {
 	s.echo.Playback(now, state)
 	utt := s.playUtt.Started(state)
 	if rep.Cut != nil {
+		// Which reply the cut run played, and who cut it: the supervisor
+		// records an answer the user talked over as unanswered.
+		rep.Cut.UtteranceID = s.playUtt.Run()
+		rep.Cut.ByPush = s.cutByPushLocked(now)
 		s.flushRecapLocked()
 		s.recap.Cut(rep.Cut.Full, rep.Heard, rep.Cut.HeardMs)
 	}

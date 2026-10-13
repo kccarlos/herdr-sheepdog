@@ -58,6 +58,9 @@ type inflightUtterance struct {
 	// utterances' when two coalesce): what a failed turn leaves
 	// unanswered, for a re-relay to retry (rerelay.go).
 	ins []*shepherdInput
+	// retryOf is the utterance a retry runs again (claim.retryOf): its
+	// unanswered record gives way to this one's outcome (unanswered.go).
+	retryOf string
 	// accepted is s.acceptedSeq once this call was accepted: when it has
 	// moved by the time a late reply lands, the user asked for
 	// something else meanwhile and the reply is stale.
@@ -249,6 +252,7 @@ func (s *Supervisor) handleUtterance(ctx context.Context, c claim, callID string
 	u.reading = c.reading
 	u.echoNote = note
 	u.ins = c.ins
+	u.retryOf = c.retryOf
 	s.mu.Unlock()
 	if s.cfg.bareAnswers || s.brain == nil {
 		// With an orchestrator, the orchestrator reads every answer (dual-brain
@@ -411,8 +415,10 @@ func (s *Supervisor) inlineResult(turnCtx context.Context, u *inflightUtterance,
 		// spoken briefing does (the normal level's chattiness rule).
 		s.mentionedIn(out.res.Spoken)
 		s.noteFocus(out.focus, u.text)
+		s.answered(u, out) // unanswered.go
 		return out.res
 	}
+	s.fellBack(u, out) // unanswered.go
 	return s.fallback(out)
 }
 
@@ -440,12 +446,24 @@ func (s *Supervisor) deliverLate(turnCtx context.Context, u *inflightUtterance, 
 	}
 	if stale {
 		s.log.Log(logSource, "brain.reply_stale", "", map[string]any{"id": u.id, "utterance_id": u.id, "acted": out.acted})
+		// Dropped unsaid: the user's words got no answer (unanswered.go).
+		switch {
+		case !out.ok:
+			s.fellBack(u, out)
+		case !out.acted:
+			s.recordUnanswered(u.id, u.text, u.start, whyStale, "stale")
+		}
 		if !out.ok || !out.acted {
 			return
 		}
 	}
 	if !stale {
 		s.noteOutcome(u, out) // rerelay.go
+		if out.ok {
+			s.answered(u, out) // unanswered.go
+		} else {
+			s.fellBack(u, out)
+		}
 	}
 	var paneID, line string
 	urgency := voice.UrgencyIdle

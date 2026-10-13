@@ -1,0 +1,28 @@
+[1/10] ua-fail-zh r1: fail (end_call, brain_fallback) ≈ $0.0129, total ≈ $0.013
+[2/10] ua-fail-en r1: fail (end_call, brain_fallback) ≈ $0.0150, total ≈ $0.028
+[3/10] ua-cut-en r1: pass (end_call, ) ≈ $0.0168, total ≈ $0.045
+[4/10] ua-cut-zh r1: pass (end_call, ) ≈ $0.0173, total ≈ $0.062
+[5/10] ua-dropped-en r1: fail (end_call, brain_fallback) ≈ $0.0149, total ≈ $0.077
+[6/10] ua-unvoiced-zh r1: pass (end_call, ) ≈ $0.0169, total ≈ $0.094
+[7/10] ua-unvoiced-en r1: pass (end_call, ) ≈ $0.0174, total ≈ $0.111
+[8/10] ua-dropped-zh r1: pass (end_call, ) ≈ $0.0196, total ≈ $0.131
+[9/10] ua-reasked-en r1: pass (end_call, ) ≈ $0.0199, total ≈ $0.151
+[10/10] ua-reasked-zh r1: fail (end_call, brain_fallback) ≈ $0.0206, total ≈ $0.171
+  fail    ua-fail-en     r1  end_call   4 turns   20.8s  brain_fallback         ≈ $0.0150
+          brain_fallback: model_error: eval: injected model failure (sim faults)
+  fail    ua-fail-zh     r1  end_call   4 turns   20.7s  brain_fallback         ≈ $0.0129
+          brain_fallback: model_error: eval: injected model failure (sim faults)
+  pass    ua-cut-en      r1  end_call   4 turns   21.0s                         ≈ $0.0168
+  pass    ua-cut-zh      r1  end_call   4 turns   24.2s                         ≈ $0.0173
+  pass    ua-unvoiced-en r1  end_call   4 turns   23.3s                         ≈ $0.0174
+  pass    ua-unvoiced-zh r1  end_call   4 turns   20.9s                         ≈ $0.0169
+  fail    ua-dropped-en  r1  end_call   4 turns   19.9s  brain_fallback         ≈ $0.0149
+          brain_fallback: model_error: eval: injected model failure (sim faults)
+  pass    ua-dropped-zh  r1  end_call   4 turns   23.0s                         ≈ $0.0196
+  pass    ua-reasked-en  r1  end_call   5 turns   24.7s                         ≈ $0.0199
+  fail    ua-reasked-zh  r1  end_call   5 turns   23.9s  brain_fallback         ≈ $0.0206
+          brain_fallback: model_error: eval: injected model failure (sim faults)
+-- 10 runs, spend ≈ $0.1714 (estimate at list prices) --
+reports: docs/bench/results/2026-10-13-iter7/main/smoke/report.json, docs/bench/results/2026-10-13-iter7/main/smoke/report.md
+-- spend brain    deepseek-flash           calls    73  in    527727  out    14442  reasoning     7355  ≈ $0.1714 --
+-- spend total ≈ $0.1714 (estimate at list prices) --

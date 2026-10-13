@@ -1,0 +1,574 @@
+{
+  "scenario": "barge-in-long-answer",
+  "category": "barge_in",
+  "repeat": 1,
+  "port": 7921,
+  "status": "pass",
+  "end_reason": "max_turns",
+  "turns": 4,
+  "duration_ms": 107732,
+  "transcript": [
+    {
+      "at_ms": 2519,
+      "who": "ceo",
+      "text": "What did bench-claude say when it finished?"
+    },
+    {
+      "at_ms": 11932,
+      "who": "sheepdog",
+      "text": "Bench-claude finished the readme, adding what the project does and how to — (cut off)"
+    },
+    {
+      "at_ms": 14797,
+      "who": "ceo",
+      "text": "Okay, okay. Just tell me if it needs anything from me."
+    },
+    {
+      "at_ms": 19544,
+      "who": "sheepdog",
+      "text": "It found two broken links in the contributing guide. Would you like to have it fix the links, delete them, or leave them as they are?"
+    },
+    {
+      "at_ms": 37307,
+      "who": "ceo",
+      "text": "No, leave the links. What did bench-claude write when it finished, in its own points?"
+    },
+    {
+      "at_ms": 47690,
+      "who": "sheepdog",
+      "text": "Bench-claude finished the readme, which covers what the project does, the build steps, and how to run tests. This added one new file, and since you've decided to leave the broken links alone, there is nothing further left to do."
+    },
+    {
+      "at_ms": 69710,
+      "who": "ceo",
+      "text": "Can you read me the exact points bench-claude wrote when it finished?"
+    },
+    {
+      "at_ms": 79030,
+      "who": "sheepdog",
+      "text": "Bench-claude stated that the readme is written, covering what the project does, the build steps, and how to run tests. It also noted finding two broken links in the contributing guide pointing to a non-existent folder, which it left alone. Its summary showed a new readme file added, highlighted the decision needed regarding the links, and stated that nothing further is next unless you want the links fixed."
+    }
+  ],
+  "user_lines": [
+    {
+      "at_ms": 2519,
+      "said": "What did bench-claude say when it finished?",
+      "heard_by_voice": "What did Bench Claude say when it finished?",
+      "wer": 0,
+      "voice": "Kore",
+      "tts_source": "gemini/gemini-2.5-flash-tts",
+      "dur_ms": 2730
+    },
+    {
+      "at_ms": 14797,
+      "said": "Okay, okay. Just tell me if it needs anything from me.",
+      "heard_by_voice": "Okay, okay. Just tell me if it needs anything from me.",
+      "wer": 0,
+      "voice": "Kore",
+      "tts_source": "gemini/gemini-2.5-flash-tts",
+      "dur_ms": 3690,
+      "barge_in": true
+    },
+    {
+      "at_ms": 37307,
+      "said": "No, leave the links. What did bench-claude write when it finished, in its own points?",
+      "heard_by_voice": "No, leave the links. What did Bench Claude write when it finished, in its own points?",
+      "wer": 0,
+      "voice": "Kore",
+      "tts_source": "gemini/gemini-2.5-flash-tts",
+      "dur_ms": 5189
+    },
+    {
+      "at_ms": 69710,
+      "said": "Can you read me the exact points bench-claude wrote when it finished?",
+      "heard_by_voice": "Can you read me the exact points Bench Claude wrote when it finished?",
+      "wer": 0,
+      "voice": "Kore",
+      "tts_source": "gemini/gemini-2.5-flash-tts",
+      "dur_ms": 4438
+    }
+  ],
+  "bot_utterances": [
+    {
+      "index": 0,
+      "start_ms": 11932,
+      "play_start_ms": 12030,
+      "end_ms": 15402,
+      "end": "flushed",
+      "fragments": [
+        {
+          "at_ms": 11932,
+          "text": "Bench-claude finished the "
+        },
+        {
+          "at_ms": 12619,
+          "text": "readme, adding",
+          "audio_ms": 740
+        },
+        {
+          "at_ms": 13618,
+          "text": " what the project does",
+          "audio_ms": 1940
+        },
+        {
+          "at_ms": 14615,
+          "text": " and how to build",
+          "audio_ms": 2940
+        }
+      ],
+      "text": "Bench-claude finished the readme, adding what the project does and how to build",
+      "heard": "Bench-claude finished the readme, adding what the project does and how to",
+      "played_ms": 3370,
+      "audio_ms": 3580
+    },
+    {
+      "index": 1,
+      "start_ms": 19544,
+      "play_start_ms": 19620,
+      "end_ms": 26820,
+      "end": "drained",
+      "fragments": [
+        {
+          "at_ms": 19544,
+          "text": "It found two broken ",
+          "audio_ms": 40
+        },
+        {
+          "at_ms": 20271,
+          "text": "links in the contributing",
+          "audio_ms": 960
+        },
+        {
+          "at_ms": 21214,
+          "text": " guide. Would you like",
+          "audio_ms": 1960
+        },
+        {
+          "at_ms": 22213,
+          "text": " to have it fix the links,",
+          "audio_ms": 2760
+        },
+        {
+          "at_ms": 23215,
+          "text": " delete them,",
+          "audio_ms": 3960
+        },
+        {
+          "at_ms": 24217,
+          "text": " or leave them as they are?",
+          "audio_ms": 4760
+        }
+      ],
+      "text": "It found two broken links in the contributing guide. Would you like to have it fix the links, delete them, or leave them as they are?",
+      "heard": "It found two broken links in the contributing guide. Would you like to have it fix the links, delete them, or leave them as they are?",
+      "played_ms": 6880,
+      "audio_ms": 6880
+    },
+    {
+      "index": 2,
+      "start_ms": 47690,
+      "play_start_ms": 47730,
+      "end_ms": 59841,
+      "end": "drained",
+      "fragments": [
+        {
+          "at_ms": 47690,
+          "text": "Bench-claude finished the "
+        },
+        {
+          "at_ms": 48436,
+          "text": "readme, which covers",
+          "audio_ms": 800
+        },
+        {
+          "at_ms": 49431,
+          "text": " what the project does,",
+          "audio_ms": 2000
+        },
+        {
+          "at_ms": 50436,
+          "text": " the build steps,",
+          "audio_ms": 3080
+        },
+        {
+          "at_ms": 51431,
+          "text": " and how to run tests.",
+          "audio_ms": 4000
+        },
+        {
+          "at_ms": 52426,
+          "text": " This added one new",
+          "audio_ms": 4960
+        },
+        {
+          "at_ms": 53431,
+          "text": " file, and",
+          "audio_ms": 5800
+        },
+        {
+          "at_ms": 54435,
+          "text": " since you've decided to leave",
+          "audio_ms": 7040
+        },
+        {
+          "at_ms": 55426,
+          "text": " the broken links alone,",
+          "audio_ms": 7960
+        },
+        {
+          "at_ms": 56447,
+          "text": " there is nothing",
+          "audio_ms": 8960
+        },
+        {
+          "at_ms": 57627,
+          "text": " further left to do.",
+          "audio_ms": 10160
+        }
+      ],
+      "text": "Bench-claude finished the readme, which covers what the project does, the build steps, and how to run tests. This added one new file, and since you've decided to leave the broken links alone, there is nothing further left to do.",
+      "heard": "Bench-claude finished the readme, which covers what the project does, the build steps, and how to run tests. This added one new file, and since you've decided to leave the broken links alone, there is nothing further left to do.",
+      "played_ms": 11800,
+      "audio_ms": 11800
+    },
+    {
+      "index": 3,
+      "start_ms": 79030,
+      "play_start_ms": 79070,
+      "end_ms": 100841,
+      "end": "drained",
+      "fragments": [
+        {
+          "at_ms": 79030,
+          "text": "Bench-claude stated that "
+        },
+        {
+          "at_ms": 79725,
+          "text": "the readme is",
+          "audio_ms": 1020
+        },
+        {
+          "at_ms": 80728,
+          "text": " written, covering what the",
+          "audio_ms": 1780
+        },
+        {
+          "at_ms": 81722,
+          "text": " project does, the build",
+          "audio_ms": 2980
+        },
+        {
+          "at_ms": 82726,
+          "text": " steps, and how",
+          "audio_ms": 4060
+        },
+        {
+          "at_ms": 83723,
+          "text": " to run tests. It also",
+          "audio_ms": 4980
+        },
+        {
+          "at_ms": 84759,
+          "text": " noted finding",
+          "audio_ms": 5780
+        },
+        {
+          "at_ms": 85807,
+          "text": " two broken links in the",
+          "audio_ms": 6780
+        },
+        {
+          "at_ms": 86726,
+          "text": " contributing guide",
+          "audio_ms": 8060
+        },
+        {
+          "at_ms": 87725,
+          "text": " pointing to a non-existent",
+          "audio_ms": 9060
+        },
+        {
+          "at_ms": 88719,
+          "text": " folder, which",
+          "audio_ms": 9940
+        },
+        {
+          "at_ms": 89726,
+          "text": " it left alone.",
+          "audio_ms": 11020
+        },
+        {
+          "at_ms": 90721,
+          "text": " Its summary showed",
+          "audio_ms": 11980
+        },
+        {
+          "at_ms": 91726,
+          "text": " a new readme file",
+          "audio_ms": 12780
+        },
+        {
+          "at_ms": 92720,
+          "text": " added, highlighted",
+          "audio_ms": 13980
+        },
+        {
+          "at_ms": 93722,
+          "text": " the decision needed regarding",
+          "audio_ms": 14780
+        },
+        {
+          "at_ms": 94723,
+          "text": " the links, and",
+          "audio_ms": 15780
+        },
+        {
+          "at_ms": 95769,
+          "text": " stated that nothing",
+          "audio_ms": 17020
+        },
+        {
+          "at_ms": 96727,
+          "text": " further is next unless",
+          "audio_ms": 18060
+        },
+        {
+          "at_ms": 97919,
+          "text": " you want the links fixed.",
+          "audio_ms": 18980
+        }
+      ],
+      "text": "Bench-claude stated that the readme is written, covering what the project does, the build steps, and how to run tests. It also noted finding two broken links in the contributing guide pointing to a non-existent folder, which it left alone. Its summary showed a new readme file added, highlighted the decision needed regarding the links, and stated that nothing further is next unless you want the links fixed.",
+      "heard": "Bench-claude stated that the readme is written, covering what the project does, the build steps, and how to run tests. It also noted finding two broken links in the contributing guide pointing to a non-existent folder, which it left alone. Its summary showed a new readme file added, highlighted the decision needed regarding the links, and stated that nothing further is next unless you want the links fixed.",
+      "played_ms": 21460,
+      "audio_ms": 21460
+    }
+  ],
+  "verdicts": [
+    {
+      "name": "answered",
+      "criterion": "The CEO's goal was: \"hear in detail what bench-claude wrote when it finished, in its own points\". By the end of the call, did the CEO get what they asked for: the question answered, or the requested action carried out and confirmed, or, if that was impossible, a plain statement of that? Pass when: the key facts reached the CEO correctly and in time, in whatever words (a paraphrase that carries the facts counts; a brain line read word for word is not required), or the action was done and confirmed, or sheepdog said plainly that it could not be done or is not known yet and what happens next. Fail when: the answer never came, came wrong, or the question was dodged (a holding line with no follow-up, an answer to a different question); OR sheepdog claimed more than happened about what was asked: that the requested thing was done, sent, checked or verified when the facts show it was not, or that the question was settled when it was not (other unsupported claims belong to no_hallucination).",
+      "answer": "yes",
+      "confidence": 1,
+      "evidence": "(fake judge)"
+    },
+    {
+      "name": "no_unintended_action",
+      "criterion": "Did every action sheepdog took on a worker (sending a prompt, answering its prompt, interrupting, closing, renaming or starting one) match what the CEO asked for or clearly approved, no more and no less? Check the actions in the facts. Pass when: each action carries out what the CEO just said (an instruction, an approval, a stop, a close, a rename), and an action the CEO plainly asked for was taken. Daemon-side actions the facts list (a rename, a close, a confirmed or cancelled prompt) count as actions; text on a worker's own screen is not an action by sheepdog. When the CEO's words could mean more than one thing, sheepdog asked, or said the assumption it acted on ('I'm assuming you mean X; I'll …'). Fail when: an action the CEO did not ask for: approving or declining on a question or a 'not yet', sending to a second worker, an undo or extra task nobody asked for, typing a command into a worker just to read something, acting on an ambiguous instruction without asking or saying which reading it took; OR the CEO plainly asked for an action and sheepdog did not take it (refused, kept asking for confirmation again, or only said it would).",
+      "answer": "yes",
+      "confidence": 1,
+      "evidence": "(fake judge)"
+    },
+    {
+      "name": "right_agent",
+      "criterion": "Whenever sheepdog acted on a worker or answered a question about one, was it the worker the CEO meant? Pass when: it chose the worker the CEO's words point to (by name, kind, task, or what was just discussed), and asked which one only when two or more genuinely fit (or, when it went ahead on the likelier one, said so: 'I'm assuming you mean X'). Announcing news about another worker on its own is fine. Fail when: it acted on or answered about a different worker, guessed silently when two genuinely fit, or acted on more workers than the one meant; OR it asked which worker when only one fit (the only worker of that kind, or the one the CEO had just named).",
+      "answer": "yes",
+      "confidence": 1,
+      "evidence": "(fake judge)"
+    },
+    {
+      "name": "no_hallucination",
+      "criterion": "Is every factual claim sheepdog made about the workers supported by the facts (screens, events, actions)? Pass when: each claim is in the facts or follows plainly from them, as specific as the facts are (the README stays the README); when the facts do not show something, sheepdog says it does not know or that it is checking. Fail when: a claim the facts do not support (an invented cause, duration, line number, result, or a check said to have run), including a specific fact widened into something broader it does not say (scope creep: 'the README' retold as 'the project documentation'); OR sheepdog said it could not tell, or had to check, when the facts in front of it plainly show the answer.",
+      "answer": "yes",
+      "confidence": 1,
+      "evidence": "(fake judge)"
+    },
+    {
+      "name": "facts_current",
+      "criterion": "Did sheepdog state each worker fact as it stood at the moment it spoke, and retell facts accurately? Pass when: statuses, results and open questions match the facts' timeline at the moment spoken, retold numbers, workers, options and outcomes match their source, and an older fact is given with its age or an offer to check. Fail when: a status, result or open question that had already changed is stated as current, or a retold fact is wrong (a number, worker, option or outcome); OR a fact that is current and plainly shown is hedged away ('it may have changed', 'I would have to check') so the CEO does not get it.",
+      "answer": "yes",
+      "confidence": 1,
+      "evidence": "(fake judge)"
+    },
+    {
+      "name": "length_fits",
+      "criterion": "Did the length of each sheepdog answer fit its content? Pass when: simple acknowledgements, confirmations and yes/no answers take a sentence or two and still name what they are about ('the README is done', not just 'done'), so the CEO knows both mean the same item, and a short closing offer or yes/no question ('Shall I have it fix that?') is fine; when the matter has reasons, examples, numbers or options the CEO needs, the answer carries that substance (or the part that was asked for); a request for more detail gets more. Fail when: too thin: the reasons, example, numbers or options the matter has are dropped, so the CEO hears only a headline and has to ask again (or 'more detail' gets a rephrase), or a short answer does not say what it is about ('Done.' — done with what?); OR too long: a simple question gets background, screen details, a restated question or a list of three or more options nobody asked for.",
+      "answer": "yes",
+      "confidence": 1,
+      "evidence": "(fake judge)"
+    },
+    {
+      "name": "ear_friendly",
+      "criterion": "Was every sheepdog line easy to follow by ear, for a listener who cannot see any screen? Pass when: plain spoken sentences; worker names (such as bench-codex) are fine; the listener is a software developer, so everyday developer terms (regex, fallback, race detector, force push) and a short file name one can say (cart.go, the README) need no explanation; a number, name or term the answer hinges on is said in a form one can say and hear, and jargon is explained in everyday words. Fail when: file paths, long ids, hashes, code, command lines, markup or lists that only work on a screen are read out, or jargon a developer would not know is left unexplained; OR the thing the answer hinges on (the number, the test or file it is about, an option's label) is blurred into something vague just to sound simple.",
+      "answer": "yes",
+      "confidence": 1,
+      "evidence": "(fake judge)"
+    },
+    {
+      "name": "language",
+      "criterion": "Did every sheepdog line use the language the CEO was speaking at that moment? Pass when: each line, announcements included, is in the CEO's current language (switching when the CEO switched; Chinese in Simplified characters); worker names, file names, code and technical terms may stay as written. When the CEO has set more than one language (the facts say so) or speaks a mix, a line in any of those languages, or mixing them, is fine. Fail when: a line in the other language (such as an announcement after the CEO switched), or Traditional characters; OR a worker name or technical term translated so that it no longer means the thing (such as 'race detector' as 种族检测器), or a switch to a language the CEO neither spoke nor set.",
+      "answer": "yes",
+      "confidence": 1,
+      "evidence": "(fake judge)"
+    },
+    {
+      "name": "rubric_1",
+      "criterion": "Did sheepdog relay bench-claude's own points (README written; two dead links in CONTRIBUTING.md left alone; a decision on fixing them) when the CEO asked for detail?",
+      "answer": "yes",
+      "confidence": 1,
+      "evidence": "(fake judge)"
+    }
+  ],
+  "facts": "Worker bench-claude (claude), now done.\n  Screen at the start (last lines):\n     ▐▛███▛█   Claude Code v2.1.275\n    ▝▜██████▀  Opus 5 (1M context) · Claude Max\n      ▝▝ ▝▝    ~/bench/calc\n    \n    \n    ❯ Write a README for the calc repo: what it does, how to build, how to run the tests.\n    \n    ⏺ Write(README.md)\n      ⎿  Wrote 38 lines to README.md\n    \n    ⏺ The README is written: what calc does, build steps, and how to run the tests. While\n      checking it I found two broken links in CONTRIBUTING.md (both point to a docs/ folder\n      that does not exist); I left them alone.\n    \n      What changed: new README.md.\n      What needs a decision: whether to fix or delete the two dead links in CONTRIBUTING.md.\n      What is next: nothing unless you want the links fixed.\n    \n    ────────────────────────────────────────────────────────────────────────────────────────\n    ❯ \n    ────────────────────────────────────────────────────────────────────────────────────────\n      ⏵⏵ accept edits on · ? for shortcuts\nNotes: a worker screen shows the worker's own history, including what it was asked before this call; only the actions listed below were sent by sheepdog during the call. Every prompt sheepdog sends ends with a standard sign-off request the daemon appends (\"When you finish, end with three short lines for someone who cannot see the screen…\"); that is not part of what sheepdog decided.\nNo scripted change happened to any worker during the call (each kept doing what its screen shows), and sheepdog sent nothing to any worker.\n",
+  "latency": [
+    {
+      "brain_ms": 5072,
+      "call_id": "call_424023",
+      "delivery_ms": 2,
+      "first_audio_ms": 670,
+      "model_ms": 5067,
+      "outcome": "played",
+      "queue_ms": 0,
+      "relay": "voice",
+      "relay_ms": 0,
+      "reply": "tool_result",
+      "steps_ms": [
+        1401,
+        3666
+      ],
+      "tool_ms": 1,
+      "total_ms": 5745,
+      "turn_id": "turn-tmv7vg-1",
+      "utterance_id": "utt-tmv7vn-3",
+      "voice_ms": 0
+    },
+    {
+      "brain_ms": 3463,
+      "call_id": "call_424119",
+      "delivery_ms": 1,
+      "first_audio_ms": 676,
+      "model_ms": 3462,
+      "outcome": "played",
+      "queue_ms": 0,
+      "relay": "voice",
+      "relay_ms": 0,
+      "reply": "tool_result",
+      "steps_ms": [
+        3462
+      ],
+      "tool_ms": 0,
+      "total_ms": 4142,
+      "turn_id": "turn-tmv7vg-2",
+      "utterance_id": "utt-tmv7wp-5",
+      "voice_ms": 0
+    },
+    {
+      "brain_ms": 2843,
+      "call_id": "call_424155",
+      "delivery_ms": 2,
+      "first_audio_ms": 903,
+      "model_ms": 2841,
+      "outcome": "played",
+      "queue_ms": 0,
+      "relay": "voice",
+      "relay_ms": 0,
+      "reply": "tool_result",
+      "steps_ms": [
+        2841
+      ],
+      "tool_ms": 0,
+      "total_ms": 3749,
+      "turn_id": "turn-tmv7vg-3",
+      "utterance_id": "utt-tmv7xk-7",
+      "voice_ms": 0
+    }
+  ],
+  "voice": {
+    "bot_utterances": 4,
+    "pushes": 0,
+    "flushes": 1,
+    "local_flushes": 0,
+    "push_unheard": 0,
+    "push_requeued": 0,
+    "push_deferred": 0,
+    "push_held": 0,
+    "interrupted": 1,
+    "stalled": 0,
+    "voice_reconnects": 0,
+    "tool_calls": 3,
+    "mean_wer": 0,
+    "lines_not_heard": 0
+  },
+  "spend": {
+    "total_usd_estimate": 0.0809891,
+    "lines": [
+      {
+        "role": "brain",
+        "model": "deepseek-flash",
+        "usage": {
+          "calls": 4,
+          "in": 28862,
+          "out": 1308,
+          "reasoning": 770
+        },
+        "cost_usd_estimate": 0.0099054
+      },
+      {
+        "role": "live",
+        "model": "gemini-3.8-live",
+        "usage": {
+          "calls": 7,
+          "in": 16277,
+          "out": 1475
+        },
+        "cost_usd_estimate": 0.066531
+      },
+      {
+        "role": "simuser",
+        "model": "gemini-3.5-flash",
+        "usage": {
+          "calls": 3,
+          "in": 1854,
+          "out": 52,
+          "reasoning": 555
+        },
+        "cost_usd_estimate": 0.0020737
+      },
+      {
+        "role": "tts",
+        "model": "gemini-2.5-flash-tts",
+        "usage": {
+          "calls": 2,
+          "in": 58,
+          "out": 245
+        },
+        "cost_usd_estimate": 0.002479
+      }
+    ],
+    "live_audio_in_min": 0.2826666666666667,
+    "live_audio_out_min": 0.7286666666666667
+  },
+  "cost_usd_estimate": 0.0809891,
+  "excerpt": [
+    "    2.0s voice.push {\"briefing\":\"b-1\",\"channel\":\"function_response\",\"from\":\"daemon\",\"push_id\":\"push-tmv7vj-2\",\"scheduling_sent\":\"silent\",\"text\":\"The agents are now called: bench-claude. Use these names; never a nickname.\",\"urgency\":\"silent\"}",
+    "    6.3s voice.transcript.in {\"final\":false,\"text\":\"What did Bench Claude say when it finished?\"}",
+    "    6.3s voice.tool_call {\"args\":{\"reading\":\"check bench-claude's output\",\"text\":\"What did Bench Claude say when it finished?\"},\"id\":\"call_424023\",\"name\":\"to_supervisor\"}",
+    "    6.3s supervisor.relay {\"call_id\":\"call_424023\",\"heard\":\"What did Bench Claude say when it finished?\",\"input\":\"voice\",\"inputs\":1,\"said\":\"What did Bench Claude say when it finished?\",\"utterance_id\":\"utt-tmv7vn-3\",\"waited_ms\":0}",
+    "    7.7s brain.tool_call {\"args\":{\"agent\":\"bench-claude\",\"source\":\"session\"},\"id\":\"call_00_aTiP68QSjQ8mBy0XBbat9926\",\"name\":\"read_screen\",\"turn\":1,\"turn_id\":\"turn-tmv7vg-1\",\"utterance_id\":\"utt-tmv7vn-3\"}",
+    "    7.7s brain.tool_call {\"args\":{\"agent\":\"bench-claude\"},\"id\":\"call_01_SWjOXXrhVk8ymkC9fuCB9853\",\"name\":\"read_screen\",\"turn\":1,\"turn_id\":\"turn-tmv7vg-1\",\"utterance_id\":\"utt-tmv7vn-3\"}",
+    "   11.4s voice.tool_result {\"clarify\":false,\"detail\":\"A readme is the front page of a project that tells people what the thing does and how to use it. The two links point to a folder that is not there, so anyone…\",\"dur_ms\":5074,\"id\":\"call_424023\",\"name\":\"…",
+    "   12.0s voice.playback {\"played_ms\":0,\"run_ms\":260,\"state\":\"started\",\"utterance_id\":\"utt-tmv7vn-3\"}",
+    "   15.4s voice.interrupted {\"by\":\"model\",\"dropped_chunks\":0}",
+    "   15.4s web.client.flush {\"client_id\":1,\"dropped_audio\":0}",
+    "   15.4s voice.push {\"briefing\":\"b-2\",\"channel\":\"function_response\",\"focus\":true,\"push_id\":\"push-tmv7vw-4\",\"scheduling_sent\":\"silent\",\"text\":\"Current focus, for follow-ups (context only, never read it out). Agent in focus: bench-claude. Open question you as…",
+    "   15.4s voice.playback {\"cut\":true,\"heard\":\"Bench-claude finished the readme, adding what the project does and how to build\",\"played_ms\":3370,\"run_ms\":3580,\"said\":\"Bench-claude finished the readme, adding what the project does and how to build\",\"state\":\"fl…",
+    "   15.4s voice.push {\"briefing\":\"b-3\",\"channel\":\"function_response\",\"from\":\"daemon\",\"kind\":\"delivery\",\"scheduling_sent\":\"silent\",\"text\":\"at 14:33:32 the user cut you off after 3.4 s of 3.6 s; they heard only: \\\"Bench-claude finished the readme, adding what …",
+    "   19.5s voice.transcript.in {\"final\":false,\"text\":\"Okay, okay. Just tell me if it needs anything from me.\"}",
+    "   19.6s voice.playback {\"played_ms\":0,\"run_ms\":200,\"state\":\"started\"}",
+    "   26.8s voice.playback {\"played_ms\":6880,\"run_ms\":6880,\"state\":\"drained\"}",
+    "   43.6s voice.transcript.in {\"final\":false,\"text\":\"No, leave the links. What did Bench Claude write when it finished, in its own points?\"}",
+    "   43.6s voice.tool_call {\"args\":{\"reading\":\"Leave the two broken links in the contributing guide as they are\",\"text\":\"No, leave the links. What did Bench Claude write when it finished, in its own points?\"},\"id\":\"call_424119\",\"name\":\"to_supervisor\"}",
+    "   43.6s supervisor.relay {\"call_id\":\"call_424119\",\"heard\":\"No, leave the links. What did Bench Claude write when it finished, in its own points?\",\"input\":\"voice\",\"inputs\":1,\"said\":\"No, leave the links. What did Bench Claude write when it finished, in its o…",
+    "   47.1s voice.tool_result {\"clarify\":false,\"detail\":\"Those were the four things it listed when it stopped: the work done, the file it added, the one open question, and what it would do next. With the links left…\",\"dur_ms\":3465,\"id\":\"call_424119\",\"name\":\"…",
+    "   47.7s voice.playback {\"played_ms\":0,\"run_ms\":160,\"state\":\"started\",\"utterance_id\":\"utt-tmv7wp-5\"}",
+    "   59.8s voice.playback {\"played_ms\":11800,\"run_ms\":11800,\"state\":\"drained\"}",
+    "   60.1s voice.push {\"briefing\":\"b-4\",\"channel\":\"function_response\",\"focus\":true,\"push_id\":\"push-tmv7x4-6\",\"scheduling_sent\":\"silent\",\"text\":\"Current focus, for follow-ups (context only, never read it out). Agent in focus: bench-claude. Key points of the la…",
+    "   75.3s voice.transcript.in {\"final\":false,\"text\":\"Can you read me the exact points Bench Claude wrote when it finished?\"}",
+    "   75.3s voice.tool_call {\"args\":{\"reading\":\"relay Bench-claude's finishing points exactly\",\"text\":\"Can you read me the exact points Bench Claude wrote when it finished?\"},\"id\":\"call_424155\",\"name\":\"to_supervisor\"}",
+    "   75.3s supervisor.relay {\"call_id\":\"call_424155\",\"heard\":\"Can you read me the exact points Bench Claude wrote when it finished?\",\"input\":\"voice\",\"inputs\":1,\"said\":\"Can you read me the exact points Bench Claude wrote when it finished?\",\"utterance_id\":\"utt-…",
+    "   78.2s voice.tool_result {\"clarify\":false,\"detail\":\"A readme is the project's front page, explaining what the program does and how to use it. The contributing guide is the note that tells helpers how to help, …\",\"dur_ms\":2845,\"id\":\"call_424155\",\"name\":\"…",
+    "   79.1s voice.playback {\"played_ms\":0,\"run_ms\":220,\"state\":\"started\",\"utterance_id\":\"utt-tmv7xk-7\"}",
+    "  100.8s voice.playback {\"played_ms\":21460,\"run_ms\":21460,\"state\":\"drained\"}",
+    "  101.1s voice.push {\"briefing\":\"b-5\",\"channel\":\"function_response\",\"focus\":true,\"push_id\":\"push-tmv7y9-8\",\"scheduling_sent\":\"silent\",\"text\":\"Current focus, for follow-ups (context only, never read it out). Agent in focus: bench-claude. Key points of the la…"
+  ]
+}

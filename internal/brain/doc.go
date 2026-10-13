@@ -39,7 +39,9 @@
 // the orchestrator does not answer in time, the pane read as a KindEventScreen
 // message instead of reading again, and the promises the event keeps. The reply
 // adds Urgency — interrupt, idle, silent or skip — and KeepsPromiseIDs to
-// the answer contract; an empty Spoken is a skip. The orchestrator decides
+// the answer contract; an empty Spoken is a skip. Every reply may carry
+// AnswersEarlier, the ids of the state block's unanswered questions it
+// settles (UnansweredHost). The orchestrator decides
 // whether and how urgently; the supervisor applies the chattiness
 // ceiling and decides nothing about the moment (the push queue does).
 // Announce turns are TriggerEvent, bounded by Config.AnnounceTurnTimeout

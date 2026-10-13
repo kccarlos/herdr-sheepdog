@@ -69,14 +69,26 @@ type NamedVerdict struct {
 }
 
 // SimRun is one simulated conversation's record.
+// SimFaultHit is one turn a scenario fault hit: the user's words, the
+// answer, and what the user heard of it.
+type SimFaultHit struct {
+	Turn   int    `json:"turn"`
+	Kind   string `json:"kind"`
+	Text   string `json:"text"`
+	Spoken string `json:"spoken,omitempty"`
+	Heard  string `json:"heard,omitempty"`
+}
+
 type SimRun struct {
-	Scenario  string    `json:"scenario"`
-	Repeat    int       `json:"repeat"`
-	Persona   string    `json:"persona,omitempty"`
-	HeldOut   bool      `json:"held_out,omitempty"`
-	Status    RunStatus `json:"status"`
-	Failures  []Failure `json:"failures,omitempty"`
-	EndReason string    `json:"end_reason"`
+	// Faults are the turns the scenario's faults hit (simfaults.go).
+	Faults    []SimFaultHit `json:"faults,omitempty"`
+	Scenario  string        `json:"scenario"`
+	Repeat    int           `json:"repeat"`
+	Persona   string        `json:"persona,omitempty"`
+	HeldOut   bool          `json:"held_out,omitempty"`
+	Status    RunStatus     `json:"status"`
+	Failures  []Failure     `json:"failures,omitempty"`
+	EndReason string        `json:"end_reason"`
 	// EndDetail is end_call's reason, or the error.
 	EndDetail string `json:"end_detail,omitempty"`
 	// GoalMetSelf is the simulated user's own opinion at end_call:
@@ -255,13 +267,21 @@ loop:
 			run.Turns++
 			at := w.since()
 			convo = append(convo, SimLine{AtMS: at, Who: "ceo", Text: t.Text, Beat: t.Beat, Tag: t.Tag, Decl: t.Decl, Items: t.Items})
-			res, serr := w.say(ctx, t.Text)
+			f := sc.Faults.on(run.Turns)
+			res, heard, serr := w.say(ctx, t.Text, f, sc.Faults.cutWords())
+			if f != faultNone {
+				run.Faults = append(run.Faults, SimFaultHit{Turn: run.Turns, Kind: string(f), Text: t.Text, Spoken: strings.TrimSpace(res.Spoken), Heard: heard})
+			}
 			if sc.Explain != nil {
 				exchanges = append(exchanges, ExplainExchange{Turn: run.Turns, AtMS: at, Kind: sc.Explain.Kind(run.Turns), Question: t.Text, Consulted: true, Orchestrator: JoinOrchestrator(res.Spoken, res.Detail, res.Options), Spoken: strings.TrimSpace(res.Spoken)})
 			}
 			reply := strings.TrimSpace(res.Spoken)
 			if len(res.Options) > 0 {
 				reply = strings.TrimSpace(reply + " Options: " + strings.Join(res.Options, "; ") + ".")
+			}
+			if f == faultCut || f == faultUnvoiced {
+				// The user heard only this much of it (simfaults.go).
+				reply = heard
 			}
 			if serr != nil {
 				w.rec.mu.Lock()

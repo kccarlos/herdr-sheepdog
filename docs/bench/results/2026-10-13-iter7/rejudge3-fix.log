@@ -1,0 +1,17 @@
+rejudged workday-interruptions r2: pass
+rejudged workday-interruptions r3: pass
+rejudged workday-long-haul r1: pass
+rejudged workday-long-haul r2: pass
+rejudged workday-long-haul r3: pass
+rejudged workday-morning-standup r1: pass
+rejudged workday-morning-standup r2: pass
+rejudged workday-morning-standup r3: pass
+rejudged workday-scale-ten r1: pass
+rejudged workday-scale-ten r2: pass
+rejudged workday-scale-ten r3: fail
+rejudged workday-zh-evening r1: pass
+rejudged workday-zh-evening r2: pass
+rejudged workday-zh-evening r3: fail
+judge claude sonnet: 12m18s, 212 calls
+-- spend judge    sonnet                   calls   212  in   3307615  out   273749  reasoning        0  ≈ $0.0000 --
+-- spend total ≈ $0.0000 (estimate at list prices) --

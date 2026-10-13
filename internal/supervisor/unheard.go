@@ -19,6 +19,9 @@ import (
 // transcript, unless the voice layer re-queued it.
 func (s *Supervisor) onPushUnheard(e voice.EventPushUnheard) {
 	s.markUnheard(e.Push.Text) // heard.go
+	if !e.Requeue {
+		s.onAnswerUnheard(e) // unanswered.go
+	}
 	if e.Requeue || s.brain == nil || e.Push.Text == "" {
 		return
 	}

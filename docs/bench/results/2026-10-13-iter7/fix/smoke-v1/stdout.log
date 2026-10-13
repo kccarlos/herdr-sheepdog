@@ -1,0 +1,7 @@
+[1/1] ua-fail-en r1: fail (end_call, brain_fallback) ≈ $0.0127, total ≈ $0.013
+  fail    ua-fail-en r1  end_call   4 turns   18.7s  brain_fallback         ≈ $0.0127
+          brain_fallback: model_error: eval: injected model failure (sim faults)
+-- 1 runs, spend ≈ $0.0127 (estimate at list prices) --
+reports: docs/bench/results/2026-10-13-iter7/fix/smoke/report.json, docs/bench/results/2026-10-13-iter7/fix/smoke/report.md
+-- spend brain    deepseek-flash           calls     6  in     38900  out     1179  reasoning      543  ≈ $0.0127 --
+-- spend total ≈ $0.0127 (estimate at list prices) --

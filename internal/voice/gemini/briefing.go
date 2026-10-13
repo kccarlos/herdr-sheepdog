@@ -250,7 +250,7 @@ func (s *Session) noteCutLocked(rep voice.PlaybackReport) string {
 	}
 	heard := strings.TrimSpace(rep.Heard)
 	who := "the user cut you off"
-	if s.brief.flushBy == "push" && rep.At.Sub(s.brief.flushAt) < 3*time.Second {
+	if s.cutByPushLocked(rep.At) {
 		who = "the daemon cut you off to make way for an urgent briefing"
 	}
 	fact := fmt.Sprintf("at %s %s after %.1f s of %.1f s", clock(rep.At), who, float64(rep.PlayedMs)/1000, float64(rep.RunMs)/1000)
@@ -261,6 +261,13 @@ func (s *Session) noteCutLocked(rep voice.PlaybackReport) string {
 	}
 	s.brief.cut = fact
 	return fact
+}
+
+// cutByPushLocked reports whether a run flushed at at was cut by the
+// daemon for an urgent push (within 3 s of its flush), not by the user.
+// Caller holds s.mu.
+func (s *Session) cutByPushLocked(at time.Time) bool {
+	return s.brief.flushBy == "push" && at.Sub(s.brief.flushAt) < 3*time.Second
 }
 
 // noteBriefHandleLocked records a resumable handle for the briefing re-send. Caller holds s.mu.

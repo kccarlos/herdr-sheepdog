@@ -1,0 +1,88 @@
+[1/30] ua-fail-en r1: fail (end_call, brain_fallback) ≈ $0.0103, total ≈ $0.010
+[2/30] ua-fail-zh r1: fail (end_call, brain_fallback) ≈ $0.0106, total ≈ $0.021
+[3/30] ua-cut-en r1: pass (end_call, ) ≈ $0.0164, total ≈ $0.037
+[4/30] ua-cut-zh r1: pass (end_call, ) ≈ $0.0148, total ≈ $0.052
+[5/30] ua-dropped-en r1: fail (end_call, brain_fallback) ≈ $0.0089, total ≈ $0.061
+[6/30] ua-unvoiced-en r1: pass (end_call, ) ≈ $0.0145, total ≈ $0.076
+[7/30] ua-unvoiced-zh r1: pass (end_call, ) ≈ $0.0162, total ≈ $0.092
+[8/30] ua-dropped-zh r1: pass (end_call, ) ≈ $0.0171, total ≈ $0.109
+[9/30] ua-fail-en r2: fail (end_call, brain_fallback) ≈ $0.0103, total ≈ $0.119
+[10/30] ua-reasked-zh r1: fail (end_call, brain_fallback) ≈ $0.0145, total ≈ $0.134
+[11/30] ua-reasked-en r1: pass (end_call, ) ≈ $0.0177, total ≈ $0.151
+[12/30] ua-fail-zh r2: fail (end_call, brain_fallback) ≈ $0.0095, total ≈ $0.161
+[13/30] ua-cut-en r2: pass (end_call, ) ≈ $0.0141, total ≈ $0.175
+[14/30] ua-cut-zh r2: pass (end_call, ) ≈ $0.0143, total ≈ $0.189
+[15/30] ua-unvoiced-en r2: pass (end_call, ) ≈ $0.0160, total ≈ $0.205
+[16/30] ua-unvoiced-zh r2: pass (end_call, ) ≈ $0.0145, total ≈ $0.220
+[17/30] ua-dropped-en r2: fail (end_call, brain_fallback) ≈ $0.0089, total ≈ $0.229
+[18/30] ua-dropped-zh r2: pass (end_call, ) ≈ $0.0162, total ≈ $0.245
+[19/30] ua-reasked-zh r2: fail (end_call, brain_fallback) ≈ $0.0147, total ≈ $0.259
+[20/30] ua-reasked-en r2: pass (end_call, ) ≈ $0.0172, total ≈ $0.277
+[21/30] ua-fail-en r3: fail (end_call, brain_fallback) ≈ $0.0100, total ≈ $0.287
+[22/30] ua-fail-zh r3: fail (end_call, brain_fallback) ≈ $0.0096, total ≈ $0.296
+[23/30] ua-cut-en r3: pass (end_call, ) ≈ $0.0139, total ≈ $0.310
+[24/30] ua-cut-zh r3: pass (end_call, ) ≈ $0.0148, total ≈ $0.325
+[25/30] ua-unvoiced-en r3: pass (end_call, ) ≈ $0.0166, total ≈ $0.342
+[26/30] ua-dropped-en r3: fail (end_call, brain_fallback) ≈ $0.0093, total ≈ $0.351
+[27/30] ua-unvoiced-zh r3: pass (end_call, ) ≈ $0.0142, total ≈ $0.365
+[28/30] ua-dropped-zh r3: pass (end_call, ) ≈ $0.0137, total ≈ $0.379
+[29/30] ua-reasked-en r3: pass (end_call, ) ≈ $0.0173, total ≈ $0.396
+[30/30] ua-reasked-zh r3: fail (end_call, brain_fallback) ≈ $0.0152, total ≈ $0.411
+  fail    ua-fail-en     r1  end_call   3 turns   17.6s  brain_fallback         ≈ $0.0103
+          brain_fallback: model_error: eval: injected model failure (sim faults)
+  fail    ua-fail-zh     r1  end_call   3 turns   19.0s  brain_fallback         ≈ $0.0106
+          brain_fallback: model_error: eval: injected model failure (sim faults)
+  pass    ua-cut-en      r1  end_call   3 turns   20.7s                         ≈ $0.0164
+  pass    ua-cut-zh      r1  end_call   3 turns   20.8s                         ≈ $0.0148
+  pass    ua-unvoiced-en r1  end_call   3 turns   18.3s                         ≈ $0.0145
+  pass    ua-unvoiced-zh r1  end_call   3 turns   18.3s                         ≈ $0.0162
+  fail    ua-dropped-en  r1  end_call   3 turns   12.2s  brain_fallback         ≈ $0.0089
+          brain_fallback: model_error: eval: injected model failure (sim faults)
+  pass    ua-dropped-zh  r1  end_call   3 turns   20.1s                         ≈ $0.0171
+  pass    ua-reasked-en  r1  end_call   4 turns   22.8s                         ≈ $0.0177
+  fail    ua-reasked-zh  r1  end_call   4 turns   19.4s  brain_fallback         ≈ $0.0145
+          brain_fallback: model_error: eval: injected model failure (sim faults)
+  fail    ua-fail-en     r2  end_call   3 turns   17.1s  brain_fallback         ≈ $0.0103
+          brain_fallback: model_error: eval: injected model failure (sim faults)
+  fail    ua-fail-zh     r2  end_call   3 turns   16.2s  brain_fallback         ≈ $0.0095
+          brain_fallback: model_error: eval: injected model failure (sim faults)
+  pass    ua-cut-en      r2  end_call   3 turns   17.0s                         ≈ $0.0141
+  pass    ua-cut-zh      r2  end_call   3 turns   17.8s                         ≈ $0.0143
+  pass    ua-unvoiced-en r2  end_call   3 turns   18.1s                         ≈ $0.0160
+  pass    ua-unvoiced-zh r2  end_call   3 turns   18.8s                         ≈ $0.0145
+  fail    ua-dropped-en  r2  end_call   3 turns   12.9s  brain_fallback         ≈ $0.0089
+          brain_fallback: model_error: eval: injected model failure (sim faults)
+  pass    ua-dropped-zh  r2  end_call   3 turns   18.3s                         ≈ $0.0162
+  pass    ua-reasked-en  r2  end_call   4 turns   21.3s                         ≈ $0.0172
+  fail    ua-reasked-zh  r2  end_call   4 turns   18.0s  brain_fallback         ≈ $0.0147
+          brain_fallback: model_error: eval: injected model failure (sim faults)
+  fail    ua-fail-en     r3  end_call   3 turns   15.4s  brain_fallback         ≈ $0.0100
+          brain_fallback: model_error: eval: injected model failure (sim faults)
+  fail    ua-fail-zh     r3  end_call   3 turns   14.8s  brain_fallback         ≈ $0.0096
+          brain_fallback: model_error: eval: injected model failure (sim faults)
+  pass    ua-cut-en      r3  end_call   3 turns   15.6s                         ≈ $0.0139
+  pass    ua-cut-zh      r3  end_call   3 turns   20.5s                         ≈ $0.0148
+  pass    ua-unvoiced-en r3  end_call   3 turns   18.9s                         ≈ $0.0166
+  pass    ua-unvoiced-zh r3  end_call   3 turns   18.0s                         ≈ $0.0142
+  fail    ua-dropped-en  r3  end_call   3 turns   13.8s  brain_fallback         ≈ $0.0093
+          brain_fallback: model_error: eval: injected model failure (sim faults)
+  pass    ua-dropped-zh  r3  end_call   3 turns   15.2s                         ≈ $0.0137
+  pass    ua-reasked-en  r3  end_call   4 turns   22.5s                         ≈ $0.0173
+  fail    ua-reasked-zh  r3  end_call   4 turns   21.2s  brain_fallback         ≈ $0.0152
+          brain_fallback: model_error: eval: injected model failure (sim faults)
+-- 30 runs, spend ≈ $0.4114 (estimate at list prices) --
+reports: docs/bench/results/2026-10-13-iter7/main/c2/report.json, docs/bench/results/2026-10-13-iter7/main/c2/report.md
+== eval sim, repeat 3 ==
+  ua-fail-en      runs  3  pass  0  fail  3  err  0  not_run  0  rate    0%  brain_fallback ×3
+  ua-fail-zh      runs  3  pass  0  fail  3  err  0  not_run  0  rate    0%  brain_fallback ×3
+  ua-cut-en       runs  3  pass  3  fail  0  err  0  not_run  0  rate  100%  –
+  ua-cut-zh       runs  3  pass  3  fail  0  err  0  not_run  0  rate  100%  –
+  ua-unvoiced-en  runs  3  pass  3  fail  0  err  0  not_run  0  rate  100%  –
+  ua-unvoiced-zh  runs  3  pass  3  fail  0  err  0  not_run  0  rate  100%  –
+  ua-dropped-en   runs  3  pass  0  fail  3  err  0  not_run  0  rate    0%  brain_fallback ×3
+  ua-dropped-zh   runs  3  pass  3  fail  0  err  0  not_run  0  rate  100%  –
+  ua-reasked-en   runs  3  pass  3  fail  0  err  0  not_run  0  rate  100%  –
+  ua-reasked-zh   runs  3  pass  0  fail  3  err  0  not_run  0  rate    0%  brain_fallback ×3
+  TOTAL           runs 30  pass 18  fail 12  err  0  not_run  0  rate   60%  brain_fallback ×12
+-- spend brain    deepseek-flash           calls   183  in   1254706  out    37747  reasoning    20636  ≈ $0.4114 --
+-- spend total ≈ $0.4114 (estimate at list prices) --

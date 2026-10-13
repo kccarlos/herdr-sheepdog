@@ -1,0 +1,25 @@
+exit 0 main w1
+  TOTAL                          runs 21  pass 18  fail  3  err  0  not_run  0  rate   86%  brain_fallback ×2, missing_function_call ×1
+-- spend brain    deepseek-flash           calls   580  in   7077951  out   141460  reasoning    72930  ≈ $2.2520 --
+-- spend simuser  deepseek-flash           calls   259  in    509237  out     6422  reasoning        0  ≈ $0.1566 --
+-- spend total ≈ $2.4086 (estimate at list prices) --
+USD 0.00 CNY 40.52 available
+exit 0 fix w1
+  TOTAL                          runs 21  pass 19  fail  2  err  0  not_run  0  rate   90%  brain_fallback ×1, unintended_action ×1
+-- spend brain    deepseek-flash           calls   591  in   7296131  out   142259  reasoning    73953  ≈ $2.3186 --
+-- spend simuser  deepseek-flash           calls   253  in    499627  out     6074  reasoning        0  ≈ $0.1535 --
+-- spend total ≈ $2.4721 (estimate at list prices) --
+USD 0.00 CNY 38.03 available
+exit 0 main w2
+  TOTAL                          runs 14  pass 13  fail  1  err  0  not_run  0  rate   93%  brain_fallback ×1
+-- spend brain    deepseek-flash           calls   395  in   4802405  out    98511  reasoning    51943  ≈ $1.5310 --
+-- spend simuser  deepseek-flash           calls   163  in    328244  out     4067  reasoning        0  ≈ $0.1009 --
+-- spend total ≈ $1.6319 (estimate at list prices) --
+USD 0.00 CNY 36.52 available
+exit 0 fix w2
+  TOTAL                          runs 14  pass 14  fail  0  err  0  not_run  0  rate  100%  –
+-- spend brain    deepseek-flash           calls   380  in   4599366  out    90920  reasoning    46817  ≈ $1.4625 --
+-- spend simuser  deepseek-flash           calls   163  in    316883  out     3863  reasoning        0  ≈ $0.0974 --
+-- spend total ≈ $1.5598 (estimate at list prices) --
+CNY 35.08 USD 0.00 available
+DONE

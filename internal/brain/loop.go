@@ -334,12 +334,28 @@ func (b *Brain) run(ctx context.Context, t *turn) (Reply, error) {
 			if b.recheck(t, step, reply) {
 				continue
 			}
+			b.answeredEarlier(reply.AnswersEarlier)
 			b.logTurn(t, false)
 			return reply, nil
 		}
 		b.execCalls(ctx, t, resp, raw, calls)
 	}
 	return b.fail(t, "step_budget", fmt.Errorf("brain: %d steps without an answer", b.cfg.MaxSteps))
+}
+
+// answeredEarlier hands a reply's answers_earlier to the Host, which
+// clears those unanswered questions (UnansweredHost); nothing without
+// one.
+func (b *Brain) answeredEarlier(ids []string) {
+	if len(ids) == 0 {
+		return
+	}
+	b.mu.Lock()
+	host := b.host
+	b.mu.Unlock()
+	if uh, ok := host.(UnansweredHost); ok {
+		uh.AnsweredEarlier(ids)
+	}
 }
 
 // generate is one model call of the turn: through GenerateMessages when
@@ -677,15 +693,19 @@ func (b *Brain) sections() []PromptSection {
 	var promises []PromiseInfo
 	var investigations []InvestigationInfo
 	var language string
+	var unanswered []UnansweredInfo
 	if host != nil {
 		agents, notes, promises, investigations = host.Agents(), host.Notes(), host.Promises(), host.Investigations()
 		if lh, ok := host.(LanguageHost); ok {
 			language = lh.LanguageLine()
 		}
+		if uh, ok := host.(UnansweredHost); ok {
+			unanswered = uh.Unanswered()
+		}
 	}
 	secs := append(append([]PromptSection(nil), stableSections(b.cfg.Prompts)...), userSection(b.cfg.Prompts, mergeUserVars(agents, userVars)))
 	now := b.cfg.Now()
-	return append(secs, dynamicSections(agents, notes, promises, investigations, language, now, recordLine(started, compaction, now))...)
+	return append(secs, dynamicSections(agents, notes, promises, investigations, unanswered, language, now, recordLine(started, compaction, now))...)
 }
 
 // stateNow renders the state block from the Host as it is now: the loop

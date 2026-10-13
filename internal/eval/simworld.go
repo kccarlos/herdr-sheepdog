@@ -34,10 +34,13 @@ type simWorld struct {
 
 	brain *brain.Brain
 	sup   *supervisor.Supervisor
-	mock  *inject.Herdr
-	herd  *simHerdr
-	push  *simPusher
-	rec   *simRecorder
+	// faults fails the orchestrator's model calls on a FailTurns turn
+	// (simfaults.go).
+	faults *faultSwitch
+	mock   *inject.Herdr
+	herd   *simHerdr
+	push   *simPusher
+	rec    *simRecorder
 
 	runCancel context.CancelFunc
 	runDone   chan struct{}
@@ -146,7 +149,12 @@ func newSimWorld(ctx context.Context, sc SimScenario, o simWorldOptions) (*simWo
 
 	cfg := o.brainCfg
 	cfg.DataDir = filepath.Join(dir, "brain")
-	b, err := brain.New(cfg, o.model, w.rec)
+	w.faults = &faultSwitch{}
+	model := o.model
+	if sc.Faults != nil {
+		model = withFaults(model, w.faults)
+	}
+	b, err := brain.New(cfg, model, w.rec)
 	if err != nil {
 		w.cleanupDir()
 		return nil, err
@@ -367,17 +375,18 @@ func (w *simWorld) schedule(d time.Duration, fn func()) *time.Timer {
 // say is one user utterance: recorded as the user's own input (so the
 // one rail and the claim gate see it), relayed like the voice model's
 // to_supervisor call, and answered with the reply the user hears.
-func (w *simWorld) say(ctx context.Context, text string) (voice.ToolResult, error) {
+func (w *simWorld) say(ctx context.Context, text string, f fault, cutWords int) (res voice.ToolResult, heard string, err error) {
 	w.sup.ShepherdInput(supervisor.InputTyped, text)
 	w.sup.OnVoiceEvent(voice.EventToolCall{Call: voice.ToolCall{Name: "to_supervisor"}})
-	res, err := w.sup.ToSupervisor(ctx, text)
-	if s := strings.TrimSpace(res.Spoken); s != "" {
-		// What the voice then says is the assistant's own speech, as the
-		// out transcript would report it.
-		w.sup.OnVoiceEvent(voice.EventTranscript{Dir: voice.DirOut, Text: s, Final: true})
-		w.sup.OnVoiceEvent(voice.EventTurnComplete{})
+	if f == faultFail {
+		w.faults.set(true)
 	}
-	return res, err
+	res, err = w.sup.ToSupervisor(ctx, text)
+	w.faults.set(false)
+	// What the voice then says is the assistant's own speech, as the
+	// out transcript would report it (simfaults.go: unless the run
+	// forces a cut or an unvoiced answer).
+	return res, w.voiceAnswer(text, res, f, cutWords), err
 }
 
 // close ends the supervisor's background work first (Run's shutdown

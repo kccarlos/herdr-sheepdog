@@ -1,0 +1,425 @@
+rejudged workday-adversarial-afternoon r1: pass
+rejudged workday-adversarial-afternoon r2: pass
+rejudged workday-adversarial-afternoon r3: pass
+rejudged workday-explain-deep r1: pass
+rejudged workday-explain-deep r2: pass
+rejudged workday-explain-deep r3: pass
+rejudged workday-interruptions r1: pass
+sheepdog bench rejudge: segments: workday-interruptions r2: segment 1 (beat 2): judge: claude cli: {"verdicts":[{"id":"answered","verdict":"yes","confidence":0.9,"evidence":"Sheepdog: \"refactor-codex 正在重构订单服务，把负责读取和写入的部分拆成两个分开的组件。 它还在顺手改一套对外的接口名字\" This matches the screen, which showed the OrderSe…
+segment 3 (beat 4): judge: claude cli: signal: killed: 
+segment 4 (beat 5): judge: claude cli: signal: killed: 
+segment 5 (beat 6): judge: context canceled
+segment 6 (beat 7): judge: context canceled
+segment 7 (beat 8): judge: context canceled
+segment 8 (beat 9): judge: context canceled
+segment 9 (beat 10): judge: context canceled
+segment 10 (beat 11): judge: context canceled
+segment 11 (beat 12): judge: context canceled
+segment 12 (beat 13): judge: context canceled
+sheepdog bench rejudge: segments: workday-interruptions r3: segment 0 (beat 1): judge: claude cli: context canceled: 
+segment 1 (beat 2): judge: context canceled
+segment 2 (beat 3): judge: context canceled
+segment 3 (beat 4): judge: claude cli: context canceled: 
+segment 4 (beat 6): judge: claude cli: context canceled: 
+segment 5 (beat 7): judge: context canceled
+segment 6 (beat 8): judge: context canceled
+segment 7 (beat 9): judge: context canceled
+segment 8 (beat 10): judge: context canceled
+segment 9 (beat 11): judge: claude cli: context canceled: 
+segment 10 (beat 12): judge: claude cli: context canceled: 
+segment 11 (beat 13): judge: context canceled
+sheepdog bench rejudge: segments: workday-long-haul r1: segment 0 (beat 0): judge: claude cli: context canceled: 
+segment 1 (beat 1): judge: context canceled
+segment 2 (beat 2): judge: context canceled
+segment 3 (beat 3): judge: claude cli: context canceled: 
+segment 4 (beat 4): judge: claude cli: context canceled: 
+segment 5 (beat 5): judge: context canceled
+segment 6 (beat 6): judge: claude cli: context canceled: 
+segment 7 (beat 7): judge: claude cli: context canceled: 
+segment 8 (beat 8): judge: context canceled
+segment 9 (beat 9): judge: claude cli: context canceled: 
+segment 10 (beat 10): judge: claude cli: context canceled: 
+segment 11 (beat 11): judge: claude cli: context canceled: 
+segment 12 (beat 12): judge: context canceled
+segment 13 (beat 13): judge: context canceled
+segment 14 (beat 14): judge: claude cli: context canceled: 
+segment 15 (beat 15): judge: context canceled
+segment 16 (beat 16): judge: claude cli: context canceled: 
+segment 17 (beat 17): judge: claude cli: context canceled: 
+segment 18 (beat 18): judge: context canceled
+sheepdog bench rejudge: segments: workday-long-haul r2: segment 0 (beat 0): judge: claude cli: context canceled: 
+segment 1 (beat 1): judge: claude cli: context canceled: 
+segment 2 (beat 2): judge: claude cli: context canceled: 
+segment 3 (beat 3): judge: context canceled
+segment 4 (beat 4): judge: claude cli: context canceled: 
+segment 5 (beat 5): judge: context canceled
+segment 6 (beat 6): judge: context canceled
+segment 7 (beat 7): judge: claude cli: context canceled: 
+segment 8 (beat 8): judge: context canceled
+segment 9 (beat 9): judge: claude cli: context canceled: 
+segment 10 (beat 10): judge: context canceled
+segment 11 (beat 11): judge: context canceled
+segment 12 (beat 12): judge: context canceled
+segment 13 (beat 13): judge: claude cli: context canceled: 
+segment 14 (beat 14): judge: context canceled
+segment 15 (beat 15): judge: context canceled
+segment 16 (beat 16): judge: claude cli: context canceled: 
+segment 17 (beat 17): judge: claude cli: context canceled: 
+segment 18 (beat 18): judge: claude cli: context canceled: 
+sheepdog bench rejudge: segments: workday-long-haul r3: segment 0 (beat 0): judge: context canceled
+segment 1 (beat 1): judge: claude cli: context canceled: 
+segment 2 (beat 2): judge: context canceled
+segment 3 (beat 3): judge: claude cli: context canceled: 
+segment 4 (beat 4): judge: claude cli: context canceled: 
+segment 5 (beat 5): judge: context canceled
+segment 6 (beat 6): judge: claude cli: context canceled: 
+segment 7 (beat 7): judge: claude cli: context canceled: 
+segment 8 (beat 8): judge: claude cli: context canceled: 
+segment 9 (beat 9): judge: context canceled
+segment 10 (beat 10): judge: claude cli: context canceled: 
+segment 11 (beat 11): judge: context canceled
+segment 12 (beat 12): judge: claude cli: context canceled: 
+segment 13 (beat 13): judge: context canceled
+segment 14 (beat 14): judge: claude cli: context canceled: 
+segment 15 (beat 15): judge: claude cli: context canceled: 
+segment 16 (beat 16): judge: context canceled
+segment 17 (beat 17): judge: claude cli: context canceled: 
+segment 18 (beat 18): judge: context canceled
+sheepdog bench rejudge: segments: workday-morning-standup r1: segment 0 (beat 0): judge: context canceled
+segment 1 (beat 1): judge: claude cli: context canceled: 
+segment 2 (beat 2): judge: claude cli: context canceled: 
+segment 3 (beat 3): judge: claude cli: context canceled: 
+segment 4 (beat 4): judge: claude cli: context canceled: 
+segment 5 (beat 5): judge: context canceled
+segment 6 (beat 6): judge: context canceled
+segment 7 (beat 7): judge: context canceled
+segment 8 (beat 8): judge: claude cli: context canceled: 
+segment 9 (beat 9): judge: context canceled
+segment 10 (beat 10): judge: context canceled
+segment 11 (beat 11): judge: claude cli: context canceled: 
+segment 12 (beat 12): judge: claude cli: context canceled: 
+segment 13 (beat 13): judge: claude cli: context canceled: 
+segment 14 (beat 14): judge: context canceled
+sheepdog bench rejudge: segments: workday-morning-standup r2: segment 0 (beat 0): judge: context canceled
+segment 1 (beat 1): judge: claude cli: context canceled: 
+segment 2 (beat 2): judge: claude cli: context canceled: 
+segment 3 (beat 3): judge: claude cli: context canceled: 
+segment 4 (beat 4): judge: context canceled
+segment 5 (beat 5): judge: context canceled
+segment 6 (beat 6): judge: context canceled
+segment 7 (beat 7): judge: claude cli: context canceled: 
+segment 8 (beat 8): judge: context canceled
+segment 9 (beat 9): judge: context canceled
+segment 10 (beat 10): judge: claude cli: context canceled: 
+segment 11 (beat 11): judge: claude cli: context canceled: 
+segment 12 (beat 12): judge: context canceled
+segment 13 (beat 13): judge: claude cli: context canceled: 
+segment 14 (beat 14): judge: claude cli: context canceled: 
+sheepdog bench rejudge: segments: workday-morning-standup r3: segment 0 (beat 0): judge: claude cli: context canceled: 
+segment 1 (beat 1): judge: claude cli: context canceled: 
+segment 2 (beat 2): judge: context canceled
+segment 3 (beat 3): judge: claude cli: context canceled: 
+segment 4 (beat 4): judge: claude cli: context canceled: 
+segment 5 (beat 5): judge: context canceled
+segment 6 (beat 6): judge: context canceled
+segment 7 (beat 7): judge: context canceled
+segment 8 (beat 8): judge: context canceled
+segment 9 (beat 9): judge: context canceled
+segment 10 (beat 10): judge: claude cli: context canceled: 
+segment 11 (beat 11): judge: context canceled
+segment 12 (beat 12): judge: claude cli: context canceled: 
+segment 13 (beat 13): judge: context canceled
+segment 14 (beat 14): judge: context canceled
+sheepdog bench rejudge: segments: workday-scale-ten r1: segment 0 (beat 0): judge: claude cli: context canceled: 
+segment 1 (beat 1): judge: context canceled
+segment 2 (beat 2): judge: context canceled
+segment 3 (beat 3): judge: claude cli: context canceled: 
+segment 4 (beat 4): judge: context canceled
+segment 5 (beat 5): judge: context canceled
+segment 6 (beat 6): judge: claude cli: context canceled: 
+segment 7 (beat 7): judge: claude cli: context canceled: 
+segment 8 (beat 8): judge: context canceled
+segment 9 (beat 9): judge: context canceled
+segment 10 (beat 10): judge: claude cli: context canceled: 
+segment 11 (beat 11): judge: context canceled
+segment 12 (beat 12): judge: claude cli: context canceled: 
+segment 13 (beat 13): judge: claude cli: context canceled: 
+sheepdog bench rejudge: segments: workday-scale-ten r2: segment 0 (beat 0): judge: claude cli: context canceled: 
+segment 1 (beat 1): judge: context canceled
+segment 2 (beat 2): judge: claude cli: context canceled: 
+segment 3 (beat 3): judge: claude cli: context canceled: 
+segment 4 (beat 4): judge: claude cli: context canceled: 
+segment 5 (beat 5): judge: claude cli: context canceled: 
+segment 6 (beat 6): judge: claude cli: context canceled: 
+segment 7 (beat 7): judge: claude cli: context canceled: 
+segment 8 (beat 8): judge: context canceled
+segment 9 (beat 9): judge: context canceled
+segment 10 (beat 10): judge: context canceled
+segment 11 (beat 11): judge: claude cli: context canceled: 
+segment 12 (beat 12): judge: context canceled
+segment 13 (beat 13): judge: claude cli: context canceled: 
+sheepdog bench rejudge: segments: workday-scale-ten r3: segment 0 (beat 0): judge: claude cli: context canceled: 
+segment 1 (beat 1): judge: context canceled
+segment 2 (beat 2): judge: claude cli: context canceled: 
+segment 3 (beat 3): judge: context canceled
+segment 4 (beat 4): judge: claude cli: context canceled: 
+segment 5 (beat 5): judge: context canceled
+segment 6 (beat 6): judge: claude cli: context canceled: 
+segment 7 (beat 7): judge: context canceled
+segment 8 (beat 8): judge: context canceled
+segment 9 (beat 9): judge: context canceled
+segment 10 (beat 10): judge: context canceled
+segment 11 (beat 11): judge: context canceled
+segment 12 (beat 12): judge: context canceled
+segment 13 (beat 13): judge: context canceled
+sheepdog bench rejudge: segments: workday-zh-evening r1: segment 0 (beat 0): judge: context canceled
+segment 1 (beat 1): judge: context canceled
+segment 2 (beat 2): judge: context canceled
+segment 3 (beat 3): judge: context canceled
+segment 4 (beat 4): judge: context canceled
+segment 5 (beat 5): judge: claude cli: context canceled: 
+segment 6 (beat 6): judge: context canceled
+segment 7 (beat 7): judge: context canceled
+segment 8 (beat 8): judge: context canceled
+segment 9 (beat 9): judge: claude cli: context canceled: 
+segment 10 (beat 10): judge: claude cli: context canceled: 
+segment 11 (beat 11): judge: context canceled
+segment 12 (beat 13): judge: claude cli: context canceled: 
+segment 13 (beat 14): judge: context canceled
+sheepdog bench rejudge: segments: workday-zh-evening r2: segment 0 (beat 0): judge: claude cli: context canceled: 
+segment 1 (beat 1): judge: context canceled
+segment 2 (beat 2): judge: context canceled
+segment 3 (beat 3): judge: context canceled
+segment 4 (beat 4): judge: context canceled
+segment 5 (beat 5): judge: context canceled
+segment 6 (beat 6): judge: context canceled
+segment 7 (beat 7): judge: claude cli: context canceled: 
+segment 8 (beat 8): judge: context canceled
+segment 9 (beat 9): judge: context canceled
+segment 10 (beat 10): judge: claude cli: context canceled: 
+segment 11 (beat 11): judge: context canceled
+segment 12 (beat 13): judge: claude cli: context canceled: 
+segment 13 (beat 14): judge: claude cli: context canceled: 
+sheepdog bench rejudge: segments: workday-zh-evening r3: segment 0 (beat 0): judge: context canceled
+segment 1 (beat 1): judge: context canceled
+segment 2 (beat 2): judge: context canceled
+segment 3 (beat 3): judge: context canceled
+segment 4 (beat 4): judge: claude cli: context canceled: 
+segment 5 (beat 5): judge: context canceled
+segment 6 (beat 6): judge: context canceled
+segment 7 (beat 7): judge: claude cli: context canceled: 
+segment 8 (beat 8): judge: context canceled
+segment 9 (beat 9): judge: context canceled
+segment 10 (beat 10): judge: claude cli: context canceled: 
+segment 11 (beat 11): judge: context canceled
+segment 12 (beat 13): judge: claude cli: context canceled: 
+segment 13 (beat 14): judge: context canceled
+sheepdog bench rejudge: segments: workday-adversarial-afternoon r4: segment 0 (beat 0): judge: context canceled
+segment 1 (beat 1): judge: claude cli: context canceled: 
+segment 2 (beat 2): judge: context canceled
+segment 3 (beat 3): judge: context canceled
+segment 4 (beat 4): judge: claude cli: context canceled: 
+segment 5 (beat 5): judge: context canceled
+segment 6 (beat 6): judge: claude cli: context canceled: 
+segment 7 (beat 7): judge: claude cli: context canceled: 
+segment 8 (beat 8): judge: claude cli: context canceled: 
+segment 9 (beat 9): judge: context canceled
+segment 10 (beat 10): judge: context canceled
+segment 11 (beat 11): judge: context canceled
+segment 12 (beat 12): judge: claude cli: context canceled: 
+segment 13 (beat 13): judge: claude cli: context canceled: 
+sheepdog bench rejudge: segments: workday-adversarial-afternoon r5: segment 0 (beat 0): judge: claude cli: context canceled: 
+segment 1 (beat 1): judge: claude cli: context canceled: 
+segment 2 (beat 2): judge: context canceled
+segment 3 (beat 3): judge: claude cli: context canceled: 
+segment 4 (beat 4): judge: context canceled
+segment 5 (beat 5): judge: context canceled
+segment 6 (beat 6): judge: claude cli: context canceled: 
+segment 7 (beat 7): judge: context canceled
+segment 8 (beat 8): judge: claude cli: context canceled: 
+segment 9 (beat 9): judge: context canceled
+segment 10 (beat 10): judge: context canceled
+segment 11 (beat 11): judge: context canceled
+segment 12 (beat 12): judge: context canceled
+segment 13 (beat 13): judge: context canceled
+sheepdog bench rejudge: segments: workday-explain-deep r4: segment 0 (beat 0): judge: claude cli: context canceled: 
+segment 1 (beat 1): judge: context canceled
+segment 2 (beat 2): judge: context canceled
+segment 3 (beat 3): judge: claude cli: context canceled: 
+segment 4 (beat 4): judge: context canceled
+segment 5 (beat 5): judge: context canceled
+segment 6 (beat 6): judge: context canceled
+segment 7 (beat 7): judge: context canceled
+segment 8 (beat 8): judge: claude cli: context canceled: 
+segment 9 (beat 9): judge: claude cli: context canceled: 
+segment 10 (beat 10): judge: context canceled
+segment 11 (beat 11): judge: context canceled
+segment 12 (beat 12): judge: claude cli: context canceled: 
+segment 13 (beat 13): judge: context canceled
+segment 14 (beat 14): judge: context canceled
+sheepdog bench rejudge: segments: workday-explain-deep r5: segment 0 (beat 0): judge: claude cli: context canceled: 
+segment 1 (beat 1): judge: claude cli: context canceled: 
+segment 2 (beat 2): judge: claude cli: context canceled: 
+segment 3 (beat 3): judge: context canceled
+segment 4 (beat 4): judge: context canceled
+segment 5 (beat 5): judge: context canceled
+segment 6 (beat 6): judge: claude cli: context canceled: 
+segment 7 (beat 8): judge: claude cli: context canceled: 
+segment 8 (beat 9): judge: claude cli: context canceled: 
+segment 9 (beat 10): judge: claude cli: context canceled: 
+segment 10 (beat 12): judge: context canceled
+segment 11 (beat 13): judge: context canceled
+segment 12 (beat 14): judge: claude cli: context canceled: 
+sheepdog bench rejudge: segments: workday-interruptions r4: segment 0 (beat 1): judge: claude cli: context canceled: 
+segment 1 (beat 2): judge: context canceled
+segment 2 (beat 3): judge: context canceled
+segment 3 (beat 4): judge: context canceled
+segment 4 (beat 5): judge: context canceled
+segment 5 (beat 6): judge: context canceled
+segment 6 (beat 7): judge: claude cli: context canceled: 
+segment 7 (beat 8): judge: claude cli: context canceled: 
+segment 8 (beat 9): judge: claude cli: context canceled: 
+segment 9 (beat 10): judge: claude cli: context canceled: 
+segment 10 (beat 11): judge: claude cli: context canceled: 
+segment 11 (beat 12): judge: claude cli: context canceled: 
+segment 12 (beat 13): judge: claude cli: context canceled: 
+sheepdog bench rejudge: segments: workday-interruptions r5: segment 0 (beat 1): judge: claude cli: context canceled: 
+segment 1 (beat 2): judge: context canceled
+segment 2 (beat 3): judge: claude cli: context canceled: 
+segment 3 (beat 4): judge: claude cli: context canceled: 
+segment 4 (beat 5): judge: context canceled
+segment 5 (beat 6): judge: context canceled
+segment 6 (beat 7): judge: context canceled
+segment 7 (beat 8): judge: context canceled
+segment 8 (beat 9): judge: claude cli: context canceled: 
+segment 9 (beat 10): judge: context canceled
+segment 10 (beat 11): judge: context canceled
+segment 11 (beat 12): judge: context canceled
+segment 12 (beat 13): judge: context canceled
+sheepdog bench rejudge: segments: workday-long-haul r4: segment 0 (beat 0): judge: claude cli: context canceled: 
+segment 1 (beat 1): judge: context canceled
+segment 2 (beat 2): judge: context canceled
+segment 3 (beat 3): judge: context canceled
+segment 4 (beat 4): judge: claude cli: context canceled: 
+segment 5 (beat 5): judge: context canceled
+segment 6 (beat 6): judge: claude cli: context canceled: 
+segment 7 (beat 7): judge: context canceled
+segment 8 (beat 8): judge: claude cli: context canceled: 
+segment 9 (beat 9): judge: claude cli: context canceled: 
+segment 10 (beat 10): judge: claude cli: context canceled: 
+segment 11 (beat 11): judge: context canceled
+segment 12 (beat 12): judge: claude cli: context canceled: 
+segment 13 (beat 13): judge: context canceled
+segment 14 (beat 14): judge: claude cli: context canceled: 
+segment 15 (beat 15): judge: claude cli: context canceled: 
+segment 16 (beat 16): judge: context canceled
+segment 17 (beat 17): judge: context canceled
+segment 18 (beat 18): judge: claude cli: context canceled: 
+sheepdog bench rejudge: segments: workday-long-haul r5: segment 0 (beat 0): judge: context canceled
+segment 1 (beat 1): judge: context canceled
+segment 2 (beat 2): judge: claude cli: context canceled: 
+segment 3 (beat 3): judge: context canceled
+segment 4 (beat 4): judge: context canceled
+segment 5 (beat 5): judge: claude cli: context canceled: 
+segment 6 (beat 6): judge: context canceled
+segment 7 (beat 7): judge: claude cli: context canceled: 
+segment 8 (beat 8): judge: context canceled
+segment 9 (beat 9): judge: context canceled
+segment 10 (beat 10): judge: context canceled
+segment 11 (beat 11): judge: claude cli: context canceled: 
+segment 12 (beat 12): judge: context canceled
+segment 13 (beat 13): judge: context canceled
+segment 14 (beat 14): judge: context canceled
+segment 15 (beat 15): judge: context canceled
+segment 16 (beat 16): judge: context canceled
+segment 17 (beat 17): judge: context canceled
+segment 18 (beat 18): judge: claude cli: context canceled: 
+sheepdog bench rejudge: segments: workday-morning-standup r4: segment 0 (beat 0): judge: claude cli: context canceled: 
+segment 1 (beat 1): judge: claude cli: context canceled: 
+segment 2 (beat 2): judge: claude cli: context canceled: 
+segment 3 (beat 3): judge: context canceled
+segment 4 (beat 4): judge: claude cli: context canceled: 
+segment 5 (beat 5): judge: context canceled
+segment 6 (beat 6): judge: context canceled
+segment 7 (beat 7): judge: context canceled
+segment 8 (beat 8): judge: context canceled
+segment 9 (beat 9): judge: claude cli: context canceled: 
+segment 10 (beat 10): judge: context canceled
+segment 11 (beat 11): judge: context canceled
+segment 12 (beat 12): judge: context canceled
+segment 13 (beat 13): judge: claude cli: context canceled: 
+segment 14 (beat 14): judge: claude cli: context canceled: 
+sheepdog bench rejudge: segments: workday-morning-standup r5: segment 0 (beat 0): judge: context canceled
+segment 1 (beat 1): judge: context canceled
+segment 2 (beat 2): judge: context canceled
+segment 3 (beat 3): judge: claude cli: context canceled: 
+segment 4 (beat 4): judge: claude cli: context canceled: 
+segment 5 (beat 5): judge: claude cli: context canceled: 
+segment 6 (beat 6): judge: claude cli: context canceled: 
+segment 7 (beat 7): judge: context canceled
+segment 8 (beat 8): judge: context canceled
+segment 9 (beat 9): judge: claude cli: context canceled: 
+segment 10 (beat 10): judge: claude cli: context canceled: 
+segment 11 (beat 11): judge: context canceled
+segment 12 (beat 12): judge: context canceled
+segment 13 (beat 13): judge: context canceled
+segment 14 (beat 14): judge: context canceled
+sheepdog bench rejudge: segments: workday-scale-ten r4: segment 0 (beat 0): judge: context canceled
+segment 1 (beat 1): judge: context canceled
+segment 2 (beat 2): judge: context canceled
+segment 3 (beat 3): judge: context canceled
+segment 4 (beat 4): judge: context canceled
+segment 5 (beat 5): judge: context canceled
+segment 6 (beat 6): judge: claude cli: context canceled: 
+segment 7 (beat 7): judge: claude cli: context canceled: 
+segment 8 (beat 8): judge: context canceled
+segment 9 (beat 9): judge: claude cli: context canceled: 
+segment 10 (beat 10): judge: context canceled
+segment 11 (beat 11): judge: claude cli: context canceled: 
+segment 12 (beat 12): judge: context canceled
+segment 13 (beat 13): judge: claude cli: context canceled: 
+sheepdog bench rejudge: segments: workday-scale-ten r5: segment 0 (beat 0): judge: context canceled
+segment 1 (beat 1): judge: claude cli: context canceled: 
+segment 2 (beat 2): judge: context canceled
+segment 3 (beat 3): judge: claude cli: context canceled: 
+segment 4 (beat 4): judge: context canceled
+segment 5 (beat 5): judge: claude cli: context canceled: 
+segment 6 (beat 6): judge: context canceled
+segment 7 (beat 7): judge: claude cli: context canceled: 
+segment 8 (beat 8): judge: context canceled
+segment 9 (beat 9): judge: context canceled
+segment 10 (beat 10): judge: context canceled
+segment 11 (beat 11): judge: context canceled
+segment 12 (beat 12): judge: context canceled
+segment 13 (beat 13): judge: context canceled
+sheepdog bench rejudge: segments: workday-zh-evening r4: segment 0 (beat 0): judge: claude cli: context canceled: 
+segment 1 (beat 1): judge: context canceled
+segment 2 (beat 2): judge: claude cli: context canceled: 
+segment 3 (beat 3): judge: claude cli: context canceled: 
+segment 4 (beat 4): judge: context canceled
+segment 5 (beat 6): judge: claude cli: context canceled: 
+segment 6 (beat 7): judge: claude cli: context canceled: 
+segment 7 (beat 8): judge: context canceled
+segment 8 (beat 9): judge: claude cli: context canceled: 
+segment 9 (beat 10): judge: context canceled
+segment 10 (beat 11): judge: context canceled
+segment 11 (beat 13): judge: context canceled
+segment 12 (beat 14): judge: context canceled
+sheepdog bench rejudge: segments: workday-zh-evening r5: segment 0 (beat 0): judge: claude cli: context canceled: 
+segment 1 (beat 1): judge: claude cli: context canceled: 
+segment 2 (beat 2): judge: claude cli: context canceled: 
+segment 3 (beat 3): judge: claude cli: context canceled: 
+segment 4 (beat 4): judge: context canceled
+segment 5 (beat 5): judge: claude cli: context canceled: 
+segment 6 (beat 6): judge: context canceled
+segment 7 (beat 7): judge: context canceled
+segment 8 (beat 8): judge: context canceled
+segment 9 (beat 9): judge: context canceled
+segment 10 (beat 10): judge: context canceled
+segment 11 (beat 11): judge: claude cli: context canceled: 
+segment 12 (beat 13): judge: claude cli: context canceled: 
+segment 13 (beat 14): judge: context canceled
+sheepdog bench rejudge: 28 runs not rejudged (run again to retry them)
+judge claude sonnet: 5m37s, 515 calls
+-- spend judge    sonnet                   calls   515  in   1311784  out   118343  reasoning        0  ≈ $0.0000 --
+-- spend total ≈ $0.0000 (estimate at list prices) --

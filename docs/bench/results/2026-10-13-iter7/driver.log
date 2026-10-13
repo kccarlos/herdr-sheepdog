@@ -1,0 +1,25 @@
+exit 0 main c1
+  ua-reasked-zh   runs  3  pass  0  fail  3  err  0  not_run  0  rate    0%  brain_fallback ×3
+  TOTAL           runs 30  pass 18  fail 12  err  0  not_run  0  rate   60%  brain_fallback ×12
+-- spend brain    deepseek-flash           calls   184  in   1273842  out    39459  reasoning    22280  ≈ $0.4192 --
+-- spend total ≈ $0.4192 (estimate at list prices) --
+USD 0.00 CNY 43.95 available
+exit 0 fix c1
+  ua-reasked-zh   runs  3  pass  0  fail  3  err  0  not_run  0  rate    0%  brain_fallback ×3
+  TOTAL           runs 30  pass 18  fail 12  err  0  not_run  0  rate   60%  brain_fallback ×12
+-- spend brain    deepseek-flash           calls   182  in   1276594  out    38051  reasoning    19710  ≈ $0.4176 --
+-- spend total ≈ $0.4176 (estimate at list prices) --
+USD 0.00 CNY 43.54 available
+exit 0 main c2
+  ua-reasked-zh   runs  3  pass  0  fail  3  err  0  not_run  0  rate    0%  brain_fallback ×3
+  TOTAL           runs 30  pass 18  fail 12  err  0  not_run  0  rate   60%  brain_fallback ×12
+-- spend brain    deepseek-flash           calls   183  in   1254706  out    37747  reasoning    20636  ≈ $0.4114 --
+-- spend total ≈ $0.4114 (estimate at list prices) --
+CNY 43.19 USD 0.00 available
+exit 0 fix c2
+  ua-reasked-zh   runs  3  pass  0  fail  3  err  0  not_run  0  rate    0%  brain_fallback ×3
+  TOTAL           runs 30  pass 18  fail 12  err  0  not_run  0  rate   60%  brain_fallback ×12
+-- spend brain    deepseek-flash           calls   181  in   1264717  out    38068  reasoning    19894  ≈ $0.4142 --
+-- spend total ≈ $0.4142 (estimate at list prices) --
+CNY 42.71 USD 0.00 available
+DONE

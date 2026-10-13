@@ -378,7 +378,7 @@ const stateKey = "state"
 
 // stateLabels names the state block's sections by heading, with the
 // labels they had as system prompt sections.
-var stateLabels = map[string]string{"## Agents": "roster", "## Ledger": "ledger", "## Investigations": "investigations", "## Now": "time"}
+var stateLabels = map[string]string{"## Agents": "roster", "## Ledger": "ledger", "## Investigations": "investigations", "## Unanswered": "unanswered", "## Now": "time"}
 
 // splitState cuts the state block at its "## " headings, one section
 // each (state:roster, state:ledger, …); the text before the first
