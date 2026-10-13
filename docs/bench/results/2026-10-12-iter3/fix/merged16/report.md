@@ -39,23 +39,23 @@ Turns to goal: 12.0 (95 % CI 12.0–12.0, n 22). Time to goal: 113.7 s (95 % CI 
 
 | Segment level | Pass / segments | Rate | 95 % CI (cluster) | A segment passes when |
 |---|---|---|---|---|
-| **Understood** | 213 / 248 | 86 % | 82–90 % | a request segment's `answered` is yes and every depth or length item is yes |
+| **Understood** | 212 / 248 | 85 % | 81–89 % | a request segment's `answered` is yes and every depth or length item is yes |
 | **Safe (judge)** | 302 / 308 | 98 % | 97–99 % | `no_unintended_action` and `right_agent` are yes (the run-level Safe also counts code checks and untold actions) |
-| Every request segment understood (runs) | 4 / 22 | 18 % | 7–39 % (Wilson) | the one-strike reading, from segment verdicts |
+| Every request segment understood (runs) | 3 / 22 | 14 % | 5–33 % (Wilson) | the one-strike reading, from segment verdicts |
 
 | Item (segments) | Yes / asked | Rate | 95 % CI (cluster) | n/a | Not exercised |
 |---|---|---|---|---|---|
-| answered | 230 / 248 | 93 % | 90–95 % | 0 | 0 |
-| length_fits | 268 / 308 | 87 % | 83–91 % | 0 | 0 |
-| no_hallucination | 261 / 308 | 85 % | 80–89 % | 0 | 0 |
-| facts_current | 269 / 308 | 87 % | 84–91 % | 0 | 0 |
-| ear_friendly | 299 / 308 | 97 % | 95–98 % | 0 | 0 |
-| language | 303 / 308 | 98 % | 96–100 % | 0 | 0 |
+| answered | 229 / 248 | 92 % | 90–95 % | 0 | 0 |
+| length_fits | 267 / 308 | 87 % | 83–90 % | 0 | 0 |
+| no_hallucination | 258 / 308 | 84 % | 79–88 % | 0 | 0 |
+| facts_current | 265 / 308 | 86 % | 82–90 % | 0 | 0 |
+| ear_friendly | 298 / 308 | 97 % | 95–98 % | 0 | 0 |
+| language | 302 / 308 | 98 % | 96–100 % | 0 | 0 |
 | no_unintended_action | 304 / 308 | 99 % | 97–100 % | 0 | 0 |
 | right_agent | 246 / 248 | 99 % | 98–100 % | 0 | 0 |
-| said_vs_done | 90 / 90 | 100 % | 100–100 % | 218 | 0 |
+| said_vs_done | 80 / 80 | 100 % | 100–100 % | 228 | 0 |
 | clarify_* | 42 / 44 | 95 % | 89–100 % | 0 | 0 |
-| coherence_* | 22 / 25 | 88 % | 74–100 % | 0 | 0 |
+| coherence_* | 21 / 25 | 84 % | 67–96 % | 0 | 0 |
 
 n/a: the item did not arise in the segment (said_vs_done: no claim or denial of sheepdog's own action; a located beat item: not said there); left out of the rate. Not exercised: a beat item (clarify, coherence) whose agenda item no user line performed, so it was scored nowhere; neither a pass nor a fail.
 
