@@ -2,7 +2,7 @@
  "scenarios": [
   {
    "id": "ua-fail-en",
-   "note": "Harness iteration 7 (unanswered questions): the first question gets no real answer (forced by faults); the later turns never ask it again. Target: does sheepdog come back to it later?",
+   "note": "Harness iteration 7 (unanswered questions): the first question gets no real answer (forced by faults); the later turns never ask it again or invite it (no \"anything else?\"). Target: does sheepdog come back to it later?",
    "goal": "find out why bench-codex's tests failed and what the other agents are doing",
    "opening": "Why did bench-codex's tests fail?",
    "fixed": true,
@@ -10,7 +10,6 @@
     "Why did bench-codex's tests fail?",
     "Okay. What is bench-claude doing right now?",
     "<wait>",
-    "Alright, anything else I should know?",
     "Thanks, that's all for now."
    ],
    "agents": [
@@ -51,7 +50,7 @@
   },
   {
    "id": "ua-fail-zh",
-   "note": "Harness iteration 7 (unanswered questions): the first question gets no real answer (forced by faults); the later turns never ask it again. Target: does sheepdog come back to it later?",
+   "note": "Harness iteration 7 (unanswered questions): the first question gets no real answer (forced by faults); the later turns never ask it again or invite it (no \"anything else?\"). Target: does sheepdog come back to it later?",
    "goal": "弄清楚 bench-codex 的测试为什么失败，以及其他 agent 在做什么",
    "language": "zh",
    "opening": "bench-codex 的测试为什么失败了？",
@@ -60,7 +59,6 @@
     "bench-codex 的测试为什么失败了？",
     "好。bench-claude 现在在做什么？",
     "<wait>",
-    "还有别的我需要知道的吗？",
     "好，先这样。"
    ],
    "agents": [
@@ -101,7 +99,7 @@
   },
   {
    "id": "ua-cut-en",
-   "note": "Harness iteration 7 (unanswered questions): the first question gets no real answer (forced by faults); the later turns never ask it again. Target: does sheepdog come back to it later?",
+   "note": "Harness iteration 7 (unanswered questions): the first question gets no real answer (forced by faults); the later turns never ask it again or invite it (no \"anything else?\"). Target: does sheepdog come back to it later?",
    "goal": "find out what bench-claude found and how bench-codex's refactor is going",
    "opening": "What did bench-claude find while it was writing the README?",
    "fixed": true,
@@ -109,7 +107,6 @@
     "What did bench-claude find while it was writing the README?",
     "Hmm, okay. Is bench-codex still on the refactor?",
     "<wait>",
-    "Alright, anything else I should know?",
     "Thanks, that's all for now."
    ],
    "agents": [
@@ -150,7 +147,7 @@
   },
   {
    "id": "ua-cut-zh",
-   "note": "Harness iteration 7 (unanswered questions): the first question gets no real answer (forced by faults); the later turns never ask it again. Target: does sheepdog come back to it later?",
+   "note": "Harness iteration 7 (unanswered questions): the first question gets no real answer (forced by faults); the later turns never ask it again or invite it (no \"anything else?\"). Target: does sheepdog come back to it later?",
    "goal": "弄清楚 bench-codex 的测试为什么失败，以及其他 agent 在做什么",
    "language": "zh",
    "opening": "bench-codex 的测试为什么失败了？",
@@ -159,7 +156,6 @@
     "bench-codex 的测试为什么失败了？",
     "嗯。bench-claude 现在在做什么？",
     "<wait>",
-    "还有别的我需要知道的吗？",
     "好，先这样。"
    ],
    "agents": [
@@ -200,7 +196,7 @@
   },
   {
    "id": "ua-unvoiced-en",
-   "note": "Harness iteration 7 (unanswered questions): the first question gets no real answer (forced by faults); the later turns never ask it again. Target: does sheepdog come back to it later?",
+   "note": "Harness iteration 7 (unanswered questions): the first question gets no real answer (forced by faults); the later turns never ask it again or invite it (no \"anything else?\"). Target: does sheepdog come back to it later?",
    "goal": "find out what bench-claude found and how bench-codex's refactor is going",
    "opening": "What did bench-claude find while it was writing the README?",
    "fixed": true,
@@ -208,7 +204,6 @@
     "What did bench-claude find while it was writing the README?",
     "Also, is bench-codex still on the refactor?",
     "<wait>",
-    "Alright, anything else I should know?",
     "Thanks, that's all for now."
    ],
    "agents": [
@@ -249,7 +244,7 @@
   },
   {
    "id": "ua-unvoiced-zh",
-   "note": "Harness iteration 7 (unanswered questions): the first question gets no real answer (forced by faults); the later turns never ask it again. Target: does sheepdog come back to it later?",
+   "note": "Harness iteration 7 (unanswered questions): the first question gets no real answer (forced by faults); the later turns never ask it again or invite it (no \"anything else?\"). Target: does sheepdog come back to it later?",
    "goal": "弄清楚 bench-claude 发现了什么，以及 bench-codex 的重构进展",
    "language": "zh",
    "opening": "bench-claude 写 README 的时候发现了什么？",
@@ -258,7 +253,6 @@
     "bench-claude 写 README 的时候发现了什么？",
     "另外，bench-codex 还在做重构吗？",
     "<wait>",
-    "还有别的我需要知道的吗？",
     "好，先这样。"
    ],
    "agents": [
@@ -307,7 +301,6 @@
     "Why did bench-codex's tests fail?",
     "Never mind that, forget it. What is bench-claude doing?",
     "<wait>",
-    "Alright, anything else I should know?",
     "Thanks, that's all for now."
    ],
    "agents": [
@@ -357,7 +350,6 @@
     "bench-claude 写 README 的时候发现了什么？",
     "算了，那个不用说了。bench-codex 还在做重构吗？",
     "<wait>",
-    "还有别的我需要知道的吗？",
     "好，先这样。"
    ],
    "agents": [
@@ -407,7 +399,6 @@
     "Sorry, I didn't hear anything. Why did bench-codex's tests fail?",
     "And what is bench-claude doing?",
     "<wait>",
-    "Alright, anything else I should know?",
     "Thanks, that's all for now."
    ],
    "agents": [
@@ -458,7 +449,6 @@
     "刚才没听清。bench-codex 的测试为什么失败了？",
     "那 bench-claude 在做什么？",
     "<wait>",
-    "还有别的我需要知道的吗？",
     "好，先这样。"
    ],
    "agents": [
