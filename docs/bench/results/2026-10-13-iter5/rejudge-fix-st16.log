@@ -1,0 +1,20 @@
+rejudged workday-scale-ten r1: fail
+rejudged workday-scale-ten r2: pass
+rejudged workday-scale-ten r3: fail
+rejudged workday-scale-ten r4: fail
+rejudged workday-scale-ten r5: pass
+rejudged workday-scale-ten r6: pass
+rejudged workday-scale-ten r7: fail
+rejudged workday-scale-ten r8: fail
+rejudged workday-scale-ten r9: pass
+sheepdog bench rejudge: segments: workday-scale-ten r10: segment 10 (beat 10): judge: no verdict for right_agent
+rejudged workday-scale-ten r11: pass
+rejudged workday-scale-ten r12: pass
+rejudged workday-scale-ten r13: fail
+rejudged workday-scale-ten r14: fail
+rejudged workday-scale-ten r15: fail
+rejudged workday-scale-ten r16: fail
+sheepdog bench rejudge: 1 runs not rejudged (run again to retry them)
+judge claude sonnet: 13m38s, 228 calls
+-- spend judge    sonnet                   calls   228  in   3951711  out   298664  reasoning        0  ≈ $0.0000 --
+-- spend total ≈ $0.0000 (estimate at list prices) --
