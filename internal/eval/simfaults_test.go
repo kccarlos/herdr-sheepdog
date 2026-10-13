@@ -1,0 +1,39 @@
+package eval
+
+import (
+	"context"
+	"strings"
+	"testing"
+)
+
+// A scenario's faults hit the turns they name: a failed turn falls back,
+// a cut answer reaches the user as its first words only, an unvoiced one
+// not at all.
+func TestSimFaultsHitTheirTurns(t *testing.T) {
+	sc := fixScenario()
+	sc.Opening = ""
+	sc.Script = []string{"why did it fail?", "what is bench-claude doing?", "and the tests?", "anything else?"}
+	sc.Faults = &SimFaults{FailTurns: []int{1}, CutTurns: []int{2}, CutWords: 1, UnvoicedTurns: []int{3}}
+	sc.Caps.MaxTurns = 6
+	run := RunSim(context.Background(), sc, SimOptions{Offline: true, FixtureDir: "../../testdata/herdr"}, 1)
+	if len(run.Faults) != 3 {
+		t.Fatalf("faults = %+v", run.Faults)
+	}
+	for i, want := range []string{"fail", "cut", "unvoiced"} {
+		if f := run.Faults[i]; f.Turn != i+1 || f.Kind != want {
+			t.Errorf("fault %d = %+v, want %s on turn %d", i, f, want, i+1)
+		}
+	}
+	if h := run.Faults[1]; h.Heard != "Offline" {
+		t.Errorf("cut heard = %q", h.Heard)
+	}
+	var heard []string
+	for _, l := range run.Transcript {
+		if l.Who == "sheepdog" {
+			heard = append(heard, l.Text)
+		}
+	}
+	if len(heard) < 4 || !strings.Contains(heard[0], "couldn't get an answer") || heard[1] != "Offline" || heard[2] != "" || heard[3] != "Offline scripted answer." {
+		t.Errorf("the user heard %q", heard)
+	}
+}

@@ -75,6 +75,9 @@ type SimScenario struct {
 	// Explain, when set, scores the call's explanations (explain.go):
 	// what each scripted turn asks for and the substance the world holds.
 	Explain *ExplainSpec `json:"explain,omitempty"`
+	// Faults force, on given user turns, what the orchestrator or the
+	// voice gets wrong now and then (simfaults.go).
+	Faults *SimFaults `json:"faults,omitempty"`
 
 	// screenDir is where bare screen names are looked up first: the
 	// screens/ directory next to the scenario file (LoadSimFile).
