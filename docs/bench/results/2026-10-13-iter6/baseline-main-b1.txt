@@ -1,0 +1,19 @@
+DETAIL   no fresh look   0/  0 =    0% (95% CI 0%-0%)
+detail answers: 42
+  no fresh look           34/42 = 81% (67%-90%)
+  any wrong fact          9/42 = 21% (12%-36%)
+  restates                26/42 = 62% (47%-75%)
+  mean new facts          1.00
+  with a look     wrong 2/8 = 25% (7%-59%); restates 2/8 = 25% (7%-59%); mean new facts 1.88
+  without a look  wrong 7/34 = 21% (10%-37%); restates 24/34 = 71% (54%-83%); mean new facts 0.79
+first explain answers: wrong 0/12 = 0% (0%-24%) mean new 5.83
+explain-control-zh-busy 2 1 simple LOOK ['一个没漏']
+explain-en-flaky-test 1 2 more LOOK ['a quarter of an hour or so of hand re-running']
+explain-en-flaky-test 1 3 why none ['On a quiet machine the warm-up finishes first and the test passes. On a busy one the request wins the race and the test fails.', 'Codex saw exactly that: same code, same test, different outcome depending on how loaded the machine was.']
+explain-en-flaky-test 3 3 why LOOK ['bench-codex is digging into that now', 'I have sent it back into the code to trace exactly how the cache warms up and why the test sometimes reads it too early', 'about half a minute']
+explain-en-flaky-test 3 4 example none ['since bench-codex is still tracing it']
+explain-zh-input-rules 1 1 then none ['然后跑一遍测试']
+explain-zh-input-rules 1 2 more none ['「先不要」']
+explain-zh-input-rules 1 4 example none ['它可能先看到「不行」就按了取消']
+explain-zh-input-rules 3 3 why none ['而现有的检查只测了这些词表本身对不对，并没有测你真正在意的那种整句行为', '所以问题一直没被发现']
+explain-zh-input-rules 3 4 example none ['所以它照样动了数据库', '有的地方理解成暂停，有的地方理解成取消']

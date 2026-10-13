@@ -1,0 +1,103 @@
+[1/35] workday-morning-standup r1: pass (end_call, ) ≈ $0.1197, total ≈ $0.120
+[2/35] workday-scale-ten r1: pass (end_call, ) ≈ $0.1605, total ≈ $0.280
+[3/35] workday-adversarial-afternoon r1: pass (end_call, ) ≈ $0.1217, total ≈ $0.402
+[4/35] workday-zh-evening r1: pass (end_call, ) ≈ $0.1064, total ≈ $0.508
+[5/35] workday-interruptions r1: pass (end_call, ) ≈ $0.0949, total ≈ $0.603
+[6/35] workday-explain-deep r1: pass (end_call, ) ≈ $0.1046, total ≈ $0.708
+[7/35] workday-long-haul r1: pass (end_call, ) ≈ $0.1332, total ≈ $0.841
+[8/35] workday-morning-standup r2: pass (end_call, ) ≈ $0.1205, total ≈ $0.961
+[9/35] workday-adversarial-afternoon r2: pass (end_call, ) ≈ $0.1137, total ≈ $1.075
+[10/35] workday-interruptions r2: pass (end_call, ) ≈ $0.0980, total ≈ $1.173
+[11/35] workday-zh-evening r2: pass (end_call, ) ≈ $0.0863, total ≈ $1.259
+[12/35] workday-scale-ten r2: pass (end_call, ) ≈ $0.1703, total ≈ $1.430
+[13/35] workday-morning-standup r3: pass (end_call, ) ≈ $0.1279, total ≈ $1.558
+[14/35] workday-adversarial-afternoon r3: not_run (not_run, not_run) ≈ $0.0000, total ≈ $1.558
+[15/35] workday-zh-evening r3: not_run (not_run, not_run) ≈ $0.0000, total ≈ $1.558
+[16/35] workday-interruptions r3: not_run (not_run, not_run) ≈ $0.0000, total ≈ $1.558
+[17/35] workday-explain-deep r3: not_run (not_run, not_run) ≈ $0.0000, total ≈ $1.558
+[18/35] workday-long-haul r3: not_run (not_run, not_run) ≈ $0.0000, total ≈ $1.558
+[19/35] workday-morning-standup r4: not_run (not_run, not_run) ≈ $0.0000, total ≈ $1.558
+[20/35] workday-scale-ten r4: not_run (not_run, not_run) ≈ $0.0000, total ≈ $1.558
+[21/35] workday-adversarial-afternoon r4: not_run (not_run, not_run) ≈ $0.0000, total ≈ $1.558
+[22/35] workday-zh-evening r4: not_run (not_run, not_run) ≈ $0.0000, total ≈ $1.558
+[23/35] workday-interruptions r4: not_run (not_run, not_run) ≈ $0.0000, total ≈ $1.558
+[24/35] workday-explain-deep r4: not_run (not_run, not_run) ≈ $0.0000, total ≈ $1.558
+[25/35] workday-long-haul r4: not_run (not_run, not_run) ≈ $0.0000, total ≈ $1.558
+[26/35] workday-morning-standup r5: not_run (not_run, not_run) ≈ $0.0000, total ≈ $1.558
+[27/35] workday-scale-ten r5: not_run (not_run, not_run) ≈ $0.0000, total ≈ $1.558
+[28/35] workday-adversarial-afternoon r5: not_run (not_run, not_run) ≈ $0.0000, total ≈ $1.558
+[29/35] workday-zh-evening r5: not_run (not_run, not_run) ≈ $0.0000, total ≈ $1.558
+[30/35] workday-interruptions r5: not_run (not_run, not_run) ≈ $0.0000, total ≈ $1.558
+[31/35] workday-explain-deep r5: not_run (not_run, not_run) ≈ $0.0000, total ≈ $1.558
+[32/35] workday-long-haul r5: not_run (not_run, not_run) ≈ $0.0000, total ≈ $1.558
+[33/35] workday-scale-ten r3: pass (end_call, ) ≈ $0.1478, total ≈ $1.706
+[34/35] workday-long-haul r2: pass (end_call, ) ≈ $0.1630, total ≈ $1.869
+[35/35] workday-explain-deep r2: pass (end_call, ) ≈ $0.1588, total ≈ $2.027
+  pass    workday-morning-standup       r1  end_call  12 turns  103.1s                         ≈ $0.1197
+  pass    workday-scale-ten             r1  end_call  12 turns  106.2s                         ≈ $0.1605
+  pass    workday-adversarial-afternoon r1  end_call  11 turns  111.1s                         ≈ $0.1217
+  pass    workday-zh-evening            r1  end_call  12 turns  139.2s                         ≈ $0.1064
+  pass    workday-interruptions         r1  end_call  13 turns   99.2s                         ≈ $0.0949
+  pass    workday-explain-deep          r1  end_call  12 turns  104.3s                         ≈ $0.1046
+  pass    workday-long-haul             r1  end_call  14 turns  118.5s                         ≈ $0.1332
+  pass    workday-morning-standup       r2  end_call  12 turns   92.9s                         ≈ $0.1205
+  pass    workday-scale-ten             r2  end_call  13 turns  154.0s                         ≈ $0.1703
+  pass    workday-adversarial-afternoon r2  end_call  12 turns   99.4s                         ≈ $0.1137
+  pass    workday-zh-evening            r2  end_call  12 turns  116.4s                         ≈ $0.0863
+  pass    workday-interruptions         r2  end_call  11 turns   92.4s                         ≈ $0.0980
+  pass    workday-explain-deep          r2  end_call  12 turns  189.5s                         ≈ $0.1588
+  pass    workday-long-haul             r2  end_call  14 turns  143.6s                         ≈ $0.1630
+  pass    workday-morning-standup       r3  end_call  12 turns   91.8s                         ≈ $0.1279
+  pass    workday-scale-ten             r3  end_call  13 turns  100.7s                         ≈ $0.1478
+  not_run workday-adversarial-afternoon r3  not_run    0 turns    0.0s  not_run                ≈ $0.0000
+          not_run: spend budget $1.50 reached ($1.56)
+  not_run workday-zh-evening            r3  not_run    0 turns    0.0s  not_run                ≈ $0.0000
+          not_run: spend budget $1.50 reached ($1.56)
+  not_run workday-interruptions         r3  not_run    0 turns    0.0s  not_run                ≈ $0.0000
+          not_run: spend budget $1.50 reached ($1.56)
+  not_run workday-explain-deep          r3  not_run    0 turns    0.0s  not_run                ≈ $0.0000
+          not_run: spend budget $1.50 reached ($1.56)
+  not_run workday-long-haul             r3  not_run    0 turns    0.0s  not_run                ≈ $0.0000
+          not_run: spend budget $1.50 reached ($1.56)
+  not_run workday-morning-standup       r4  not_run    0 turns    0.0s  not_run                ≈ $0.0000
+          not_run: spend budget $1.50 reached ($1.56)
+  not_run workday-scale-ten             r4  not_run    0 turns    0.0s  not_run                ≈ $0.0000
+          not_run: spend budget $1.50 reached ($1.56)
+  not_run workday-adversarial-afternoon r4  not_run    0 turns    0.0s  not_run                ≈ $0.0000
+          not_run: spend budget $1.50 reached ($1.56)
+  not_run workday-zh-evening            r4  not_run    0 turns    0.0s  not_run                ≈ $0.0000
+          not_run: spend budget $1.50 reached ($1.56)
+  not_run workday-interruptions         r4  not_run    0 turns    0.0s  not_run                ≈ $0.0000
+          not_run: spend budget $1.50 reached ($1.56)
+  not_run workday-explain-deep          r4  not_run    0 turns    0.0s  not_run                ≈ $0.0000
+          not_run: spend budget $1.50 reached ($1.56)
+  not_run workday-long-haul             r4  not_run    0 turns    0.0s  not_run                ≈ $0.0000
+          not_run: spend budget $1.50 reached ($1.56)
+  not_run workday-morning-standup       r5  not_run    0 turns    0.0s  not_run                ≈ $0.0000
+          not_run: spend budget $1.50 reached ($1.56)
+  not_run workday-scale-ten             r5  not_run    0 turns    0.0s  not_run                ≈ $0.0000
+          not_run: spend budget $1.50 reached ($1.56)
+  not_run workday-adversarial-afternoon r5  not_run    0 turns    0.0s  not_run                ≈ $0.0000
+          not_run: spend budget $1.50 reached ($1.56)
+  not_run workday-zh-evening            r5  not_run    0 turns    0.0s  not_run                ≈ $0.0000
+          not_run: spend budget $1.50 reached ($1.56)
+  not_run workday-interruptions         r5  not_run    0 turns    0.0s  not_run                ≈ $0.0000
+          not_run: spend budget $1.50 reached ($1.56)
+  not_run workday-explain-deep          r5  not_run    0 turns    0.0s  not_run                ≈ $0.0000
+          not_run: spend budget $1.50 reached ($1.56)
+  not_run workday-long-haul             r5  not_run    0 turns    0.0s  not_run                ≈ $0.0000
+          not_run: spend budget $1.50 reached ($1.56)
+-- 35 runs, spend ≈ $2.0274 (estimate at list prices) --
+reports: docs/bench/results/2026-10-13-iter6/fix/w1/report.json, docs/bench/results/2026-10-13-iter6/fix/w1/report.md
+== eval sim, repeat 5 ==
+  workday-morning-standup        runs  5  pass  3  fail  0  err  0  not_run  2  rate  100%  not_run ×2
+  workday-scale-ten              runs  5  pass  3  fail  0  err  0  not_run  2  rate  100%  not_run ×2
+  workday-adversarial-afternoon  runs  5  pass  2  fail  0  err  0  not_run  3  rate  100%  not_run ×3
+  workday-zh-evening             runs  5  pass  2  fail  0  err  0  not_run  3  rate  100%  not_run ×3
+  workday-interruptions          runs  5  pass  2  fail  0  err  0  not_run  3  rate  100%  not_run ×3
+  workday-explain-deep           runs  5  pass  2  fail  0  err  0  not_run  3  rate  100%  not_run ×3
+  workday-long-haul              runs  5  pass  2  fail  0  err  0  not_run  3  rate  100%  not_run ×3
+  TOTAL                          runs 35  pass 16  fail  0  err  0  not_run 19  rate  100%  not_run ×19
+-- spend brain    deepseek-flash           calls   474  in   5979454  out   125112  reasoning    69907  ≈ $1.9108 --
+-- spend simuser  deepseek-flash           calls   189  in    378915  out     4772  reasoning        0  ≈ $0.1165 --
+-- spend total ≈ $2.0274 (estimate at list prices) --

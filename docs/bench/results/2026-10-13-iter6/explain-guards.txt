@@ -1,0 +1,14 @@
+== main
+detail-turn tool calls: {'read_screen:session': 3, 'read_screen:screen': 3, 'investigate:': 2, 'read_screen:': 7, 'investigate:worker': 1}
+detail turns with investigate: 2 fallbacks: 0
+detail-turn dur_ms median 3887 p90 6398 max 10990 (n=70)
+control turns: 20 reads on them: 10
+worker-is-looking narration lines: 2
+   ('docs/bench/results/2026-10-13-iter6/main/b1', 'explain-en-flaky-test', 3, 'bench-codex is digging into that now. I have sent it back into the code to trace exactly how the cache warms up and why the test sometimes reads it too early, a')
+   ('docs/bench/results/2026-10-13-iter6/main/b1', 'explain-en-flaky-test', 3, 'A picture of it, not a found fact, since bench-codex is still tracing it. Think of a member buying something at a discount. The test sends off the order and the')
+== fix
+detail-turn tool calls: {'read_screen:': 18, 'read_screen:screen': 20, 'read_screen:session': 3, 'investigate:': 1, 'run_cli:': 1}
+detail turns with investigate: 1 fallbacks: 0
+detail-turn dur_ms median 5326 p90 8043 max 13327 (n=70)
+control turns: 20 reads on them: 14
+worker-is-looking narration lines: 0
