@@ -14,7 +14,7 @@ CEO rule for this iteration: merge `nc` unless segment Understood or Safe is cle
 - Safe: run level 38/42 in both arms; segments 154/162 (95 %) vs 153/162 (94 %).
 - Voice share of the orchestrator's key points **0.50 vs 0.38 (+0.13, CI +0.01 to +0.25)**: the 10-11 effect (+0.29, CI +0.01 to +0.56) replicates, smaller, with the production DeepSeek brain.
 
-`prompts/assistant.md` now carries the paragraph. `assistant-gptlive.md` (GPT-Live voice) was not changed and not measured.
+`prompts/assistant.md` now carries the paragraph (615 words; the prompt test cap moves from 600 to 630 and checks the rule). `assistant-gptlive.md` (GPT-Live voice) was not changed and not measured.
 
 ## Setup
 
