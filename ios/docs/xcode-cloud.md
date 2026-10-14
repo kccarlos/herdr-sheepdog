@@ -11,7 +11,7 @@ built from tag `v0.1.5` (`b414dda`, #41).
 
 | | |
 |---|---|
-| Team | KECHENG AN, Team ID `GV776BZVA8`, Apple ID thisiskecheng@gmail.com (`DEVELOPMENT_TEAM` in `project.yml`) |
+| Team | the Account Holder, Team ID `GV776BZVA8`, Apple ID: the Account Holder's (`DEVELOPMENT_TEAM` in `project.yml`) |
 | App bundle ID | `com.github.kccarlos.herdr-sheepdog-ios` |
 | Framework bundle ID | `com.github.kccarlos.herdr-sheepdog-ios.kit` (embedded, not registered separately) |
 | Widget extension bundle ID | `com.github.kccarlos.herdr-sheepdog-ios.widgets` (`SheepdogWidgets`: the Live Activity and the Talk control). Registered on the team with `asc` on 2026-10-05 (resource `3TB5FGDCW7`), no capabilities. No App Group: nothing is shared through one |
@@ -19,7 +19,7 @@ built from tag `v0.1.5` (`b414dda`, #41).
 | Product and scheme | `Sheepdog` (shared; Test runs `SheepdogKitTests` and `SheepdogUITests`, Archive uses Release) |
 | Version | `MARKETING_VERSION` in `project.yml` (now `0.1.7`) |
 | Build number | Xcode Cloud's own, `CI_BUILD_NUMBER`. The latest in TestFlight is `0.1.5 (57)`, from tag `v0.1.5` (`b414dda`) |
-| TestFlight internal group | **Me** (tester: thisiskecheng@gmail.com). The Beta App Review contact is not saved; it only matters for external testing, which is not used |
+| TestFlight internal group | **Me** (tester: the Account Holder). The Beta App Review contact is not saved; it only matters for external testing, which is not used |
 
 Bundle IDs may contain letters, digits, hyphens and periods (Apple's
 `CFBundleIdentifier` rule), so the hyphens from the GitHub repository name
@@ -104,7 +104,7 @@ answers by hand. If the app ever ships its own cryptography, this changes.
 
 ## 1. Connect the repository (once, in Xcode on the Mac)
 
-Signed in to Xcode with the Apple ID of team KECHENG AN (Xcode ▸ Settings ▸
+Signed in to Xcode with the Apple ID of the paid team (Xcode ▸ Settings ▸
 Accounts). Accept any pending agreement first:
 <https://developer.apple.com/account> and
 <https://appstoreconnect.apple.com/agreements> — until then Xcode Cloud
