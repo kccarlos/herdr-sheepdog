@@ -111,7 +111,7 @@ func main() {
 		log.Fatal(err)
 	}
 	defer os.RemoveAll(profile)
-	args := []string{"--headless=new", 
+	args := []string{"--headless=new",
 		"--user-data-dir=" + profile,
 		fmt.Sprintf("--remote-debugging-port=%d", *port),
 		"--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream",
