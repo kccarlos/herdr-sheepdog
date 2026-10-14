@@ -83,3 +83,79 @@ func TestStableExecutableKeepsPlainPath(t *testing.T) {
 		t.Errorf("a go-build path was accepted: %s", exe)
 	}
 }
+
+func TestServiceStartNotInstalled(t *testing.T) {
+	home, calls := fakeService(t)
+	var out, errb strings.Builder
+	code := run(context.Background(), []string{"service", "start", "--binary", "/usr/local/bin/sheepdog"}, &out, &errb)
+	if code != 0 || !strings.Contains(out.String(), "not installed, nothing started") {
+		t.Errorf("exit %d: %q %q", code, out.String(), errb.String())
+	}
+	if len(*calls) != 0 {
+		t.Errorf("ran %q", *calls)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".config", "systemd")); err == nil {
+		t.Error("start created service files")
+	}
+}
+
+func TestServiceStartInstalled(t *testing.T) {
+	_, calls := fakeService(t)
+	common := []string{"--binary", "/usr/local/bin/sheepdog"}
+	var out, errb strings.Builder
+	if code := run(context.Background(), append([]string{"service", "install"}, common...), &out, &errb); code != 0 {
+		t.Fatalf("install exit %d: %s", code, errb.String())
+	}
+	*calls = nil
+	out.Reset()
+	if code := run(context.Background(), append([]string{"service", "start"}, common...), &out, &errb); code != 0 || out.String() == "" {
+		t.Errorf("start exit %d: %q", code, out.String())
+	}
+	if len(*calls) == 0 {
+		t.Error("start asked the service manager nothing")
+	}
+}
+
+// init's last step offers the login service: yes installs it, no (or a
+// service that is there already) does not.
+func TestInitOffersService(t *testing.T) {
+	fakeKeyAPI(t)
+	noOnboardKeys(t)
+	_, calls := fakeService(t)
+	oldExe := osExecutable
+	osExecutable = func() (string, error) { return "/usr/local/bin/sheepdog", nil }
+	t.Cleanup(func() { osExecutable = oldExe })
+	// A fresh config dir per run, one service home for all three.
+	args := func() []string {
+		return []string{"--config", filepath.Join(t.TempDir(), "config.toml"), "--orchestrator", "gemini", "--skip-validate"}
+	}
+
+	code, out := runInitTest(t, initGeminiKey+"\nn\n", args()...)
+	if code != 0 || !strings.Contains(out, "Install sheepdog as a login service") || !strings.Contains(out, "skipped") {
+		t.Fatalf("decline: code %d: %s", code, out)
+	}
+	if len(*calls) != 0 {
+		t.Errorf("declined, but ran %q", *calls)
+	}
+	code, out = runInitTest(t, initGeminiKey+"\ny\n", args()...)
+	if code != 0 || len(*calls) == 0 || !strings.Contains(out, "wrote ") {
+		t.Fatalf("accept: code %d calls %q: %s", code, *calls, out)
+	}
+	*calls = nil
+	code, out = runInitTest(t, initGeminiKey+"\n", args()...)
+	if code != 0 || !strings.Contains(out, "already installed") || len(*calls) > 1 {
+		t.Errorf("already installed: code %d calls %q: %s", code, *calls, out)
+	}
+}
+
+// Non-interactive init asks nothing, the service included.
+func TestInitNonInteractiveDoesNotOfferService(t *testing.T) {
+	fakeKeyAPI(t)
+	noOnboardKeys(t)
+	t.Setenv("GEMINI_API_KEY", initGeminiKey)
+	_, calls := fakeService(t)
+	code, out := runInitTest(t, "", "--non-interactive", "--config", filepath.Join(t.TempDir(), "config.toml"))
+	if code != 0 || strings.Contains(out, "login service") || len(*calls) != 0 {
+		t.Errorf("code %d calls %q: %s", code, *calls, out)
+	}
+}
