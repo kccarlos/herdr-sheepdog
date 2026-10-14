@@ -1,11 +1,10 @@
 id = "kccarlos.sheepdog"
 name = "sheepdog — voice control for your agents"
 version = "0.1.0"
-# 0.9.5: the version whose plugin docs describe every field used here
-# (popup width/height, [[build]], HERDR_PLUGIN_*_DIR) and the one this
-# plugin was tried against. The release notes do not say when each field
-# arrived, so there is no tested older floor.
-min_herdr_version = "0.9.5"
+# 0.9.0: plugin popups with width/height arrived in 0.7.4 and startup
+# hooks in 0.7.3 (herdr CHANGELOG); 0.9.0 is the floor of the 0.9 line
+# and the plugin was linked and its actions listed on herdr 0.9.3.
+min_herdr_version = "0.9.0"
 description = "Talk to your coding agents from your phone or a browser. Runs the sheepdog daemon next to herdr: set up, pair your phone, check, logs."
 platforms = ["macos", "linux"]
 
