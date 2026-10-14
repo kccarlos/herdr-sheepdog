@@ -167,6 +167,10 @@ func runBrainTest(ctx context.Context, args []string, stdout, stderr io.Writer) 
 	bcfg.DataDir = dir
 	if o.provider != "" {
 		bcfg.Provider = o.provider
+		if c, ok := cfg.Brain.CompatProvider(o.provider); ok && o.provider != cfg.Brain.Provider {
+			// brain.model is another provider's; run the entry's own.
+			bcfg.Model = c.Model
+		}
 	}
 	if o.model != "" {
 		bcfg.Model = o.model
@@ -270,7 +274,14 @@ func brainTestModel(o brainTestOpts, cfg config.Config, log logging.Logger) (bra
 		case brain.ProviderVertex:
 			return nil, fmt.Errorf("no Vertex AI credentials (set %s or use --fake)", app.VertexBrainMissing(cfg.Gemini.Vertex))
 		}
-		return nil, fmt.Errorf("unknown provider %q (gemini, deepseek or vertex)", provider)
+		if o, ok := cfg.Brain.CompatProvider(provider); ok {
+			return nil, fmt.Errorf("no %s key (set %s or use --fake)", o.Name, o.APIKeyEnv)
+		}
+		names := []string{brain.ProviderGemini, brain.ProviderDeepSeek, brain.ProviderVertex}
+		for _, o := range cfg.Brain.OpenAICompat {
+			names = append(names, o.Name)
+		}
+		return nil, fmt.Errorf("unknown provider %q (%s)", provider, strings.Join(names, ", "))
 	}
 	return m, nil
 }

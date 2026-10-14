@@ -12,7 +12,7 @@ told proactively when an agent is blocked, answer its question, give new
 instructions, and interrupt — without touching a keyboard. The voice is
 Gemini Live (Google AI Studio or Vertex AI) or GPT-Live, switchable at
 runtime; behind it a stateful orchestrator (Gemini, Gemini on Vertex
-AI, or DeepSeek) reads the agents' screens and acts on them.
+AI, DeepSeek, or any OpenAI-compatible endpoint) reads the agents' screens and acts on them.
 
 - [`docs/glossary.md`](docs/glossary.md) — the terms (user, voice, orchestrator, workers) and the former names
 - [`docs/roles.md`](docs/roles.md) — the design contract
@@ -45,8 +45,10 @@ cp .env.example .env     # fill in GEMINI_API_KEY at least
 `GEMINI_API_KEY` (voice and the default orchestrator; `GEMINI_API_KEY_1`…`_9`
 form a pool), `VERTEX_API_KEY` + `VERTEX_PROJECT` (Gemini on Vertex AI:
 the voice with `gemini.backend = "vertex"`, and the orchestrator provider
-`vertex`), `DEEPSEEK_API_KEY` (orchestrator provider `deepseek`) and
-`OPENAI_API_KEY` (GPT-Live, voice only). `sheepdog config show` prints
+`vertex`), `DEEPSEEK_API_KEY` (orchestrator provider `deepseek`),
+`OPENAI_API_KEY` (GPT-Live, voice only), and the key of any
+OpenAI-compatible orchestrator you add as `[[brain.openai_compat]]`
+(OpenRouter, a local Ollama, Groq, …; see CONFIG.md). `sheepdog config show` prints
 the effective config with secrets redacted.
 
 ## Run

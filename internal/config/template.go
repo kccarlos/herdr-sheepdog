@@ -106,7 +106,7 @@ func Template() string {
 
 [brain]
 # enabled = %[21]t   # the stateful supervisor brain behind to_supervisor and the announcements; serve --brain=off overrides
-# provider = %[36]q   # "gemini" | "deepseek" | "vertex" (Gemini on Vertex AI with [gemini.vertex]): the provider the brain starts on; the /debug picker switches at runtime
+# provider = %[36]q   # "gemini" | "deepseek" | "vertex" (Gemini on Vertex AI with [gemini.vertex]) | the name of a [[brain.openai_compat]] entry: the provider the brain starts on; the /debug picker switches at runtime
 # model = %[22]q   # a function-calling model of that provider
 # max_steps = %[23]d   # model calls per turn before the daemon answers for itself
 # utterance_timeout_s = %[24]d   # budget of one turn over your relayed words (tools included)
@@ -120,6 +120,17 @@ func Template() string {
 # reply_wait_s = %[46]d   # 0: default; how long a request waits for the brain's reply before it comes later as a push (above the 25 s utterance budget: the reply is the call's own result); negative always waits
 # investigate_max_s = %[39]d   # sanity ceiling of a background investigation: the only limit on how long its answer may take
 # investigate_session_ttl_s = %[40]d   # how long a finished investigation's sub-agent session stays resumable for a follow-up
+
+# Any OpenAI-compatible endpoint as an extra orchestrator provider, one
+# [[brain.openai_compat]] table each (CONFIG.md). The key comes from the
+# environment variable api_key_env names, never from this file; a
+# loopback base_url (a local Ollama) needs none. Its name is a valid
+# brain.provider and shows in the /debug picker.
+# [[brain.openai_compat]]
+# name = "openrouter"
+# base_url = "https://openrouter.ai/api/v1"
+# api_key_env = "OPENROUTER_API_KEY"
+# model = "deepseek/deepseek-v3.2"
 
 [prompts]
 # dir = %[29]q   # ~/.config/sheepdog/prompts/<name> overrides the matching embedded prompt file

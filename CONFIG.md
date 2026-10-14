@@ -237,15 +237,16 @@ a stateful agent behind `to_supervisor` (one utterance turn per thing the
 user says) and the workers' announcements, that reasons with tools
 (`read_screen`, `run_cli`, `list_agents`, `recall`) and acts with
 `prompt`, `send_keys`, `interrupt` over a function-calling model — Gemini
-(the key pool), DeepSeek (`[deepseek]`) or Gemini on Vertex AI
-(`[gemini.vertex]`), switchable at runtime —
+(the key pool), DeepSeek (`[deepseek]`), Gemini on Vertex AI
+(`[gemini.vertex]`) or any OpenAI-compatible endpoint
+(`[[brain.openai_compat]]`, below), switchable at runtime —
 keeping one transcript per daemon run at `<data_dir>/brain/<run-id>.jsonl`.
 When it errors or runs out of budget, the daemon speaks its own code
 sentence (a parsed prompt, "<alias> finished.") or reports the roster. Its provider and model can be switched while the
 daemon runs, from the `/debug` header's model picker (the provider
 select lists every provider, a keyless one greyed out with the reason;
 the model select shows that provider's discovered list — Gemini's model
-list, DeepSeek's `GET /models`, Vertex's fixed list — and the switch happens when a model is
+list, DeepSeek's and every OpenAI-compatible provider's `GET /models`, Vertex's fixed list — and the switch happens when a model is
 picked) or `PUT /api/brain/model {"provider": "deepseek", "model":
 "deepseek-flash"}`: the switch takes effect at the next turn (a turn in
 flight finishes on the provider and model it started with), is logged
@@ -273,7 +274,7 @@ announce wait elapse.
 | Key | Env override | Default | Meaning |
 |---|---|---|---|
 | `brain.enabled` | `SHEEPDOG_BRAIN_ENABLED` | `true` | Route the user's words (`to_supervisor`) and the workers' events through the orchestrator (`serve --brain` overrides). |
-| `brain.provider` | `SHEEPDOG_BRAIN_PROVIDER` | `gemini` | The provider the orchestrator starts on: `gemini` (the key pool, rotating on a rate limit), `deepseek` (`[deepseek]`, one key) or `vertex` (Gemini on Vertex AI with the `[gemini.vertex]` key and project, location `global`; same model ids as `gemini`). Every provider with a key is registered regardless, so the picker can switch to the other at runtime. The initial value only: the pair picked at runtime is kept in the state file's `session.brain_provider` / `session.brain_model` and wins over this on restart. Set `brain.model` to a model of this provider (`deepseek-flash` with `deepseek`; the default `gemini-3.5-flash` is Gemini's, and a mismatch shows as a `brain.step` error at the first turn). |
+| `brain.provider` | `SHEEPDOG_BRAIN_PROVIDER` | `gemini` | The provider the orchestrator starts on: `gemini` (the key pool, rotating on a rate limit), `deepseek` (`[deepseek]`, one key), `vertex` (Gemini on Vertex AI with the `[gemini.vertex]` key and project, location `global`; same model ids as `gemini`) or the `name` of a `[[brain.openai_compat]]` entry. Every provider with a key is registered regardless, so the picker can switch to the other at runtime. The initial value only: the pair picked at runtime is kept in the state file's `session.brain_provider` / `session.brain_model` and wins over this on restart. Set `brain.model` to a model of this provider (`deepseek-flash` with `deepseek`; the default `gemini-3.5-flash` is Gemini's, and a mismatch shows as a `brain.step` error at the first turn). With an OpenAI-compatible provider and no `brain.model` in the file or the environment, the entry's own `model` is used. |
 | `brain.model` | `SHEEPDOG_BRAIN_MODEL` | `gemini-3.5-flash` | The function-calling model the orchestrator starts on, a model of `brain.provider`. The initial value only: a model picked at runtime (`/debug`, `PUT /api/brain/model`) is kept in the state file's `session.brain_model` and wins over this on restart. |
 | `brain.max_steps` | `SHEEPDOG_BRAIN_MAX_STEPS` | `6` | Model calls one turn may make (each tool round is one); beyond it the turn falls back. |
 | `brain.utterance_timeout_s` | `SHEEPDOG_BRAIN_UTTERANCE_TIMEOUT_S` | `25` | Wall-clock budget of one utterance turn — the orchestrator's turn over the user's relayed words, which may be a question or an instruction — and of an investigation's delivery turn, tool rounds included. When less than `brain.step_reserve_s` of it remains after a tool round (or at the last step) the next model call is answer-only (tools disabled, "time is up") and may run up to `brain.final_grace_s` past the budget; only then does the daemon answer for itself. 25 s since the 2026-10-03 eval campaign (at 12 s, 45 of 130 Vertex runs had a turn time out); the voice answers "pending" within ~2 s and delivers the answer as a push (`brain.reply_wait_s`), so a longer budget only delays the slowest answers. Formerly `brain.propose_timeout_s` (still accepted, see "Deprecated keys"). |
@@ -287,6 +288,55 @@ announce wait elapse.
 | `brain.reply_wait_s` | `SHEEPDOG_BRAIN_REPLY_WAIT_S` | `2` | How long a `to_supervisor` call waits for the orchestrator's reply. A reply inside the wait is the tool result, as before; past it the call returns at once with a silent `pending` result (the voice has already said "on it"; `brain.reply_pending`) and the reply is pushed at the next pause when it lands, tagged `answers_utterance` (`brain.reply_delivered`). A late reply is stale once the user's next request was accepted: dropped if the turn sent nothing (`brain.reply_stale`), pushed silently as context if it acted. A stop still cancels the turn and nothing is delivered. `0` takes the default; negative waits for the whole turn (the synchronous behaviour, which `--voice=off` and `brain-test` always use). |
 | `brain.investigate_max_s` | `SHEEPDOG_BRAIN_INVESTIGATE_MAX_S` | `600` | Sanity ceiling of one background investigation (`investigate`, docs/roles.md "Investigations and explanations") — the only limit on how long its answer may take, so a stuck job dies. What is bounded tightly is the acknowledgement, which is an ordinary orchestrator turn. A job past the ceiling is killed and logged as `investigation.error`. |
 | `brain.investigate_session_ttl_s` | `SHEEPDOG_BRAIN_INVESTIGATE_SESSION_TTL_S` | `3600` | How long a finished investigation's sub-agent session stays resumable: within it, `investigate(follow_up_of: …)` continues the same CLI session (`cli.codex_resume_cmd` / `cli.claude_resume_cmd`); past it the follow-up starts a fresh sub-agent with the previous answer prepended to the question. The ledger row itself stays either way (`session.investigations`, the last 20). |
+| `brain.openai_compat` | — (the key: the variable `api_key_env` names) | none | Extra orchestrator providers over any OpenAI-compatible chat completions endpoint, one `[[brain.openai_compat]]` table each (below). |
+
+### `[[brain.openai_compat]]`
+
+Any OpenAI-compatible chat completions endpoint can serve as an orchestrator
+provider: OpenRouter, a local Ollama (`/v1`), Groq, a self-hosted vLLM, ….
+Each table adds one provider; with its key set it is registered with the
+orchestrator, listed in the `/debug` picker (its `GET /models` fills the
+model select), selectable with `brain.provider = "<name>"`, `PUT
+/api/brain/model` and `sheepdog brain-test --provider <name>`, and it
+joins failover after the built-in providers (a failover to it runs its
+`model`). Without a key it is listed greyed out ("no OPENROUTER_API_KEY").
+`config show` prints each entry with its key as `set`/`unset`. The voice
+never uses these providers: it stays on Gemini Live or GPT-Live
+(`[voice]`).
+
+The requests are the plain OpenAI shape: `model`, `messages`, `tools`,
+`tool_choice`, bearer auth; none of DeepSeek's extensions (`thinking`,
+`reasoning_effort`, `reasoning_content` replay) is sent. The model must
+support **tool calling**: a model without it fails every turn
+(`brain.step` error) and the daemon answers for itself. How good the
+orchestrator is depends on the model; the evaluated ones are Gemini 3.5
+Flash (`gemini`/`vertex`) and `deepseek-flash` (docs/eval/README.md).
+
+```toml
+[[brain.openai_compat]]
+name = "openrouter"
+base_url = "https://openrouter.ai/api/v1"
+api_key_env = "OPENROUTER_API_KEY"   # the default for this name anyway
+model = "deepseek/deepseek-v3.2"
+
+[[brain.openai_compat]]
+name = "ollama"
+base_url = "http://localhost:11434/v1"   # loopback: no key needed
+model = "qwen3:8b"
+
+[[brain.openai_compat]]
+name = "groq"
+base_url = "https://api.groq.com/openai/v1"
+model = "openai/gpt-oss-120b"
+```
+
+| Key | Default | Meaning |
+|---|---|---|
+| `name` | required | The provider id: lowercase letters, digits, `-`, `_` (at most 32); not `gemini`, `deepseek`, `vertex` or `fake…`; unique. |
+| `label` | `name` | The display name in the `/debug` picker. |
+| `base_url` | required | The API root, `http(s)://…`; `/chat/completions` and `/models` are appended (a trailing `/` is ignored). |
+| `api_key_env` | `<NAME>_API_KEY` (`-` as `_`) | The environment variable (or `--env-file` entry) holding the key. The key itself never goes in the TOML file. Not needed when `base_url` is a loopback address (`localhost`, `127.0.0.1`, `::1`): the provider is registered without a key and sends no `Authorization` header. |
+| `model` | required | The model the provider runs by default: the initial `brain.model` when `brain.provider` names this entry and `brain.model` is not set, and the model a failover to this provider uses. |
 
 ### Deprecated keys
 

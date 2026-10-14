@@ -15,8 +15,10 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -142,10 +144,80 @@ type Brain struct {
 	// session stays resumable: a follow-up past it starts a fresh
 	// session with the previous answer prepended (default 3600).
 	InvestigateSessionTTLS int `toml:"investigate_session_ttl_s"`
+	// OpenAICompat lists extra orchestrator providers over any
+	// OpenAI-compatible chat completions endpoint (OpenRouter, a local
+	// Ollama /v1, Groq, …), one [[brain.openai_compat]] table each.
+	// Each is registered with the orchestrator when its key is set (or,
+	// for a loopback base_url, without one), selectable from the /debug
+	// picker and `brain-test --provider`, and joins failover; its name
+	// is a valid brain.provider.
+	OpenAICompat []OpenAICompat `toml:"openai_compat"`
 }
 
-// BrainProviders are the accepted values of brain.provider.
+// OpenAICompat is one [[brain.openai_compat]] provider.
+type OpenAICompat struct {
+	// Name is the provider id (lowercase letters, digits, '-' and '_';
+	// not gemini, deepseek, vertex or fake*).
+	Name string `toml:"name"`
+	// Label is the /debug picker's display name (default Name).
+	Label string `toml:"label"`
+	// BaseURL is the API root; /chat/completions and /models are
+	// appended (e.g. https://openrouter.ai/api/v1,
+	// http://localhost:11434/v1, https://api.groq.com/openai/v1).
+	BaseURL string `toml:"base_url"`
+	// APIKeyEnv names the environment variable (or env-file entry)
+	// holding the key (default the upper-cased name + "_API_KEY", '-'
+	// as '_'). The key itself is never put in the config file.
+	APIKeyEnv string `toml:"api_key_env"`
+	// Model is the model id the provider runs by default: the initial
+	// model when brain.provider names it and brain.model is not set,
+	// and the model a failover to it uses.
+	Model string `toml:"model"`
+	// APIKey is read from APIKeyEnv at load. Never logged.
+	APIKey string `toml:"-"`
+}
+
+// KeyOptional reports whether the provider may run without a key: a
+// local server on a loopback address (Ollama needs none).
+func (o OpenAICompat) KeyOptional() bool {
+	u, err := url.Parse(strings.TrimSpace(o.BaseURL))
+	if err != nil {
+		return false
+	}
+	host := u.Hostname()
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+// Usable reports whether the provider has what it needs to be
+// registered: a key, or a loopback base_url.
+func (o OpenAICompat) Usable() bool { return o.APIKey != "" || o.KeyOptional() }
+
+// CompatProvider returns the [[brain.openai_compat]] entry named name.
+func (b Brain) CompatProvider(name string) (OpenAICompat, bool) {
+	for _, o := range b.OpenAICompat {
+		if o.Name == name {
+			return o, true
+		}
+	}
+	return OpenAICompat{}, false
+}
+
+// BrainProviders are the built-in values of brain.provider; the names
+// of [[brain.openai_compat]] entries are accepted too.
 var BrainProviders = []string{"gemini", "deepseek", "vertex"}
+
+// compatNameRE is the shape of an [[brain.openai_compat]] name.
+var compatNameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,31}$`)
+
+// DefaultCompatKeyEnv is the default api_key_env of a provider named
+// name: OPENROUTER_API_KEY for openrouter, MY_GROQ_API_KEY for my-groq.
+func DefaultCompatKeyEnv(name string) string {
+	return strings.ToUpper(strings.ReplaceAll(name, "-", "_")) + "_API_KEY"
+}
 
 // DeepSeek configures the second orchestrator provider: DeepSeek's
 // OpenAI-compatible chat completions API, paid per token. Registered
@@ -577,12 +649,14 @@ func load(path string, lookup func(string) (string, bool)) (Config, error) {
 		path = DefaultPath()
 	}
 	data, err := os.ReadFile(path)
+	modelSet := false
 	switch {
 	case err == nil:
 		md, err := toml.Decode(string(data), &cfg)
 		if err != nil {
 			return Config{}, fmt.Errorf("config: parse %s: %w", path, err)
 		}
+		modelSet = md.IsDefined("brain", "model")
 		if err := applyDeprecatedKeys(&cfg, data, md); err != nil {
 			return Config{}, fmt.Errorf("config: parse %s: %w", path, err)
 		}
@@ -599,6 +673,16 @@ func load(path string, lookup func(string) (string, bool)) (Config, error) {
 	}
 	if err := applyEnv(&cfg, lookup); err != nil {
 		return Config{}, err
+	}
+	applyCompatEnv(&cfg, lookup)
+	if _, ok := lookup("SHEEPDOG_BRAIN_MODEL"); ok {
+		modelSet = true
+	}
+	if o, ok := cfg.Brain.CompatProvider(cfg.Brain.Provider); ok && !modelSet {
+		// The built-in default model is Gemini's; an OpenAI-compatible
+		// provider starts on its own model unless brain.model says
+		// otherwise.
+		cfg.Brain.Model = o.Model
 	}
 	if !validChattiness(cfg.Supervisor.Chattiness) {
 		return Config{}, fmt.Errorf("config: supervisor.chattiness=%q: want one of %s", cfg.Supervisor.Chattiness, strings.Join(ChattinessLevels, ", "))
@@ -694,13 +778,60 @@ func validateBrain(b Brain) error {
 	if b.Model == "" {
 		return errors.New("config: brain.model must not be empty")
 	}
-	if !oneOf(b.Provider, BrainProviders) {
-		return fmt.Errorf("config: brain.provider=%q: want one of %s", b.Provider, strings.Join(BrainProviders, ", "))
+	if err := validateCompat(b.OpenAICompat); err != nil {
+		return err
+	}
+	if _, ok := b.CompatProvider(b.Provider); !ok && !oneOf(b.Provider, BrainProviders) {
+		names := append([]string(nil), BrainProviders...)
+		for _, o := range b.OpenAICompat {
+			names = append(names, o.Name)
+		}
+		return fmt.Errorf("config: brain.provider=%q: want one of %s", b.Provider, strings.Join(names, ", "))
 	}
 	if b.StepReserveS < 0 {
 		return fmt.Errorf("config: brain.step_reserve_s=%d: want 0 (default) or a positive integer", b.StepReserveS)
 	}
 	return nil
+}
+
+// validateCompat checks the [[brain.openai_compat]] entries.
+func validateCompat(list []OpenAICompat) error {
+	seen := map[string]bool{}
+	for i, o := range list {
+		switch {
+		case !compatNameRE.MatchString(o.Name):
+			return fmt.Errorf("config: brain.openai_compat[%d].name=%q: want lowercase letters, digits, '-' or '_'", i, o.Name)
+		case oneOf(o.Name, BrainProviders) || strings.HasPrefix(o.Name, "fake"):
+			return fmt.Errorf("config: brain.openai_compat[%d].name=%q: reserved; pick another name", i, o.Name)
+		case seen[o.Name]:
+			return fmt.Errorf("config: brain.openai_compat[%d].name=%q: duplicate", i, o.Name)
+		}
+		seen[o.Name] = true
+		u, err := url.Parse(strings.TrimSpace(o.BaseURL))
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return fmt.Errorf("config: brain.openai_compat %q: base_url=%q: want an http(s) URL", o.Name, o.BaseURL)
+		}
+		if strings.TrimSpace(o.Model) == "" {
+			return fmt.Errorf("config: brain.openai_compat %q: model must not be empty", o.Name)
+		}
+	}
+	return nil
+}
+
+// applyCompatEnv fills each [[brain.openai_compat]] key from its
+// api_key_env (defaulted from the name).
+func applyCompatEnv(cfg *Config, lookup func(string) (string, bool)) {
+	for i := range cfg.Brain.OpenAICompat {
+		o := &cfg.Brain.OpenAICompat[i]
+		o.Name = strings.ToLower(strings.TrimSpace(o.Name))
+		o.APIKeyEnv = strings.TrimSpace(o.APIKeyEnv)
+		if o.APIKeyEnv == "" {
+			o.APIKeyEnv = DefaultCompatKeyEnv(o.Name)
+		}
+		if v, ok := lookup(o.APIKeyEnv); ok {
+			o.APIKey = strings.TrimSpace(v)
+		}
+	}
 }
 
 // applyEnv overrides cfg from SHEEPDOG_* variables. Recognised names:
@@ -1080,7 +1211,17 @@ func geminiKeysFromEnv(lookup func(string) (string, bool)) []string {
 // fields are added.
 func (c Config) String() string {
 	return fmt.Sprintf("data_dir=%s herdr.socket=%s state.path=%s state.full_fsync=%t debounce_ms=%d snapshot_interval_s=%d pending_ttl_s=%d aliases=%d gemini.model=%s gemini.voice=%s gemini.stall_after_s=%d gemini.start_sensitivity=%s gemini.end_sensitivity=%s gemini.api_keys=%d gemini.backend=%s gemini.vertex.api_key=%s gemini.vertex.project=%s gemini.vertex.location=%s voice.name=%s voice.provider=%s voice.openai.api_key=%s voice.openai.model=%s voice.openai.voice=%s voice.openai.idle_close_s=%d deepseek.api_key=%s deepseek.base_url=%s deepseek.thinking=%t deepseek.reasoning_effort=%s web.bind=%s web.port=%d web.token=%s cli.prefer=%s cli.timeout_s=%d cli.max_output_kb=%d supervisor.chattiness=%s supervisor.recent_minutes=%d supervisor.promise_ttl_s=%d supervisor.cancel_window_s=%d supervisor.reprompt_poll_s=%d supervisor.repeat_window_s=%d supervisor.authorise_window_s=%d supervisor.project_roots=%s brain.enabled=%t brain.provider=%s brain.model=%s brain.max_steps=%d brain.utterance_timeout_s=%d brain.window_tokens=%d brain.prune_after_turns=%d brain.step_reserve_s=%d brain.final_grace_s=%d brain.announce_turn_timeout_s=%d brain.announce_timeout_s=%d brain.announce_wait_s=%d brain.reply_wait_s=%d brain.investigate_max_s=%d brain.investigate_session_ttl_s=%d prompts.dir=%s push.apns.key_path=%s push.apns.key_id=%s push.apns.team_id=%s push.apns.topic=%s",
-		c.DataDir, c.Herdr.Socket, c.State.Path, c.State.FullFsync, c.DebounceMS, c.SnapshotIntervalS, c.PendingTTLS, len(c.Aliases), c.Gemini.Model, c.Gemini.Voice, c.Gemini.StallAfterS, c.Gemini.StartSensitivity, c.Gemini.EndSensitivity, len(c.Gemini.APIKeys), c.Gemini.Backend, setOrUnset(c.Gemini.Vertex.APIKey), c.Gemini.Vertex.Project, c.Gemini.Vertex.Location, c.Voice.Name, c.Voice.Provider, setOrUnset(c.Voice.OpenAI.APIKey), c.Voice.OpenAI.Model, c.Voice.OpenAI.Voice, c.Voice.OpenAI.IdleCloseS, setOrUnset(c.DeepSeek.APIKey), c.DeepSeek.BaseURL, c.DeepSeek.Thinking, c.DeepSeek.ReasoningEffort, c.Web.Bind, c.Web.Port, setOrUnset(c.Web.Token), c.CLI.Prefer, c.CLI.TimeoutS, c.CLI.MaxOutputKB, c.Supervisor.Chattiness, c.Supervisor.RecentMinutes, c.Supervisor.PromiseTTLS, c.Supervisor.CancelWindowS, c.Supervisor.RepromptPollS, c.Supervisor.RepeatWindowS, c.Supervisor.AuthoriseWindowS, strings.Join(c.Supervisor.ProjectRoots, string(filepath.ListSeparator)), c.Brain.Enabled, c.Brain.Provider, c.Brain.Model, c.Brain.MaxSteps, c.Brain.UtteranceTimeoutS, c.Brain.WindowTokens, c.Brain.PruneAfterTurns, c.Brain.StepReserveS, c.Brain.FinalGraceS, c.Brain.AnnounceTurnTimeoutS, c.Brain.AnnounceTimeoutS, c.Brain.AnnounceWaitS, c.Brain.ReplyWaitS, c.Brain.InvestigateMaxS, c.Brain.InvestigateSessionTTLS, c.Prompts.Dir, setOrUnset(c.Push.APNs.KeyPath), c.Push.APNs.KeyID, c.Push.APNs.TeamID, c.Push.APNs.Topic)
+		c.DataDir, c.Herdr.Socket, c.State.Path, c.State.FullFsync, c.DebounceMS, c.SnapshotIntervalS, c.PendingTTLS, len(c.Aliases), c.Gemini.Model, c.Gemini.Voice, c.Gemini.StallAfterS, c.Gemini.StartSensitivity, c.Gemini.EndSensitivity, len(c.Gemini.APIKeys), c.Gemini.Backend, setOrUnset(c.Gemini.Vertex.APIKey), c.Gemini.Vertex.Project, c.Gemini.Vertex.Location, c.Voice.Name, c.Voice.Provider, setOrUnset(c.Voice.OpenAI.APIKey), c.Voice.OpenAI.Model, c.Voice.OpenAI.Voice, c.Voice.OpenAI.IdleCloseS, setOrUnset(c.DeepSeek.APIKey), c.DeepSeek.BaseURL, c.DeepSeek.Thinking, c.DeepSeek.ReasoningEffort, c.Web.Bind, c.Web.Port, setOrUnset(c.Web.Token), c.CLI.Prefer, c.CLI.TimeoutS, c.CLI.MaxOutputKB, c.Supervisor.Chattiness, c.Supervisor.RecentMinutes, c.Supervisor.PromiseTTLS, c.Supervisor.CancelWindowS, c.Supervisor.RepromptPollS, c.Supervisor.RepeatWindowS, c.Supervisor.AuthoriseWindowS, strings.Join(c.Supervisor.ProjectRoots, string(filepath.ListSeparator)), c.Brain.Enabled, c.Brain.Provider, c.Brain.Model, c.Brain.MaxSteps, c.Brain.UtteranceTimeoutS, c.Brain.WindowTokens, c.Brain.PruneAfterTurns, c.Brain.StepReserveS, c.Brain.FinalGraceS, c.Brain.AnnounceTurnTimeoutS, c.Brain.AnnounceTimeoutS, c.Brain.AnnounceWaitS, c.Brain.ReplyWaitS, c.Brain.InvestigateMaxS, c.Brain.InvestigateSessionTTLS, c.Prompts.Dir, setOrUnset(c.Push.APNs.KeyPath), c.Push.APNs.KeyID, c.Push.APNs.TeamID, c.Push.APNs.Topic) + c.compatString()
+}
+
+// compatString renders the [[brain.openai_compat]] entries for String,
+// the key as set or unset.
+func (c Config) compatString() string {
+	var b strings.Builder
+	for _, o := range c.Brain.OpenAICompat {
+		fmt.Fprintf(&b, " brain.openai_compat.%s.base_url=%s brain.openai_compat.%s.model=%s brain.openai_compat.%s.api_key_env=%s brain.openai_compat.%s.api_key=%s", o.Name, o.BaseURL, o.Name, o.Model, o.Name, o.APIKeyEnv, o.Name, setOrUnset(o.APIKey))
+	}
+	return b.String()
 }
 
 // setOrUnset renders a secret's presence, never its value.

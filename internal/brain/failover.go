@@ -316,9 +316,11 @@ func (b *Brain) failoverModelLocked(provider, fromModel string) string {
 		return DefaultModel
 	case provider == ProviderDeepSeek:
 		return DefaultDeepSeekModel
-	default:
-		return fromModel
 	}
+	if d, ok := b.models[provider].(interface{ DefaultModel() string }); ok && d.DefaultModel() != "" {
+		return d.DefaultModel()
+	}
+	return fromModel
 }
 
 func contains(list []string, s string) bool {

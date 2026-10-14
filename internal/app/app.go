@@ -303,6 +303,8 @@ func (a *App) wire() error {
 		a.brainOff = "no DEEPSEEK_API_KEY"
 	case cfg.Brain.Provider == brain.ProviderVertex && VertexBrainMissing(cfg.Gemini.Vertex) != "":
 		a.brainOff = "no " + VertexBrainMissing(cfg.Gemini.Vertex)
+	case compatMissing(cfg, cfg.Brain.Provider) != "":
+		a.brainOff = "no " + compatMissing(cfg, cfg.Brain.Provider)
 	default:
 		b, err := buildBrain(cfg, a.prompts, a.log)
 		if err != nil {
@@ -578,8 +580,8 @@ func (a *App) VoiceProvider() string {
 
 // buildBrain builds the orchestrator with the [brain] config
 // (BrainConfig) and a transcript under the data dir, over every provider
-// that has a key: gemini (the key pool), deepseek ([deepseek]) and
-// vertex ([gemini.vertex]),
+// that has a key: gemini (the key pool), deepseek ([deepseek]),
+// vertex ([gemini.vertex]) and each [[brain.openai_compat]] entry,
 // starting on brain.provider. The caller has checked that the initial
 // provider has a key.
 func buildBrain(cfg config.Config, pl *prompts.Loader, log logging.Logger) (*brain.Brain, error) {
@@ -611,7 +613,9 @@ func buildBrain(cfg config.Config, pl *prompts.Loader, log logging.Logger) (*bra
 // BrainModels builds the orchestrator's Model of every provider the config
 // has a key for (shared with `sheepdog brain-test`): gemini over the
 // key pool, deepseek over the OpenAI-compatible adapter, vertex over
-// the Gemini adapter on Vertex AI (VertexBrainMissing). An empty map
+// the Gemini adapter on Vertex AI (VertexBrainMissing), and each
+// [[brain.openai_compat]] entry over the same adapter without DeepSeek's
+// extensions (a loopback one even without a key). An empty map
 // when there is no key at all.
 func BrainModels(cfg config.Config, log logging.Logger) (map[string]brain.Model, error) {
 	models := map[string]brain.Model{}
@@ -637,7 +641,28 @@ func BrainModels(cfg config.Config, log logging.Logger) (map[string]brain.Model,
 		}
 		models[brain.ProviderVertex] = m
 	}
+	for _, o := range cfg.Brain.OpenAICompat {
+		if !o.Usable() {
+			continue
+		}
+		m, err := brain.NewOpenAICompatModel(brain.OpenAICompatConfig{Provider: o.Name, BaseURL: o.BaseURL, APIKey: o.APIKey, NoKey: o.KeyOptional(), DefaultModel: o.Model, Log: log})
+		if err != nil {
+			return nil, err
+		}
+		models[o.Name] = m
+	}
 	return models, nil
+}
+
+// compatMissing names the key variable the [[brain.openai_compat]]
+// provider named provider lacks ("" when it has one, needs none, or
+// provider is not such an entry).
+func compatMissing(cfg config.Config, provider string) string {
+	o, ok := cfg.Brain.CompatProvider(provider)
+	if !ok || o.Usable() {
+		return ""
+	}
+	return o.APIKeyEnv
 }
 
 // VertexBrainMissing names the variable the vertex orchestrator provider lacks
@@ -670,7 +695,19 @@ func BrainProviders(cfg config.Config) []web.ProviderInfo {
 	if !vertex.Available {
 		vertex.Reason = "no " + VertexBrainMissing(cfg.Gemini.Vertex)
 	}
-	return []web.ProviderInfo{gemini, deepseek, vertex}
+	out := []web.ProviderInfo{gemini, deepseek, vertex}
+	for _, o := range cfg.Brain.OpenAICompat {
+		label := o.Label
+		if label == "" {
+			label = web.ProviderLabel(o.Name)
+		}
+		p := web.ProviderInfo{ID: o.Name, Label: label, Available: o.Usable()}
+		if !p.Available {
+			p.Reason = "no " + o.APIKeyEnv
+		}
+		out = append(out, p)
+	}
+	return out
 }
 
 // BrainConfig maps the [brain] config onto brain.Config (shared with
