@@ -16,6 +16,9 @@
 # - publishing: `release.draft: true` keeps a goreleaser run from making a
 #   public release by itself.
 #
+# Needs goreleaser 2.6 or newer (archives.formats). Not checked yet:
+# goreleaser was not installed when this was written.
+#
 # Check: goreleaser check   ·   dry run: goreleaser release --snapshot --clean
 version: 2
 

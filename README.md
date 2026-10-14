@@ -43,7 +43,9 @@ Three depths of commitment. Each one works on its own.
 
 - **The iOS app's demo:** "Try the demo" on the app's first screen runs
   scripted agents on the phone itself, with on-device speech. It needs no
-  daemon, no key and no network. The app is in TestFlight internal testing
+  daemon, no key and no network
+  ([herdr-sheepdog-ios#49](https://github.com/kccarlos/herdr-sheepdog-ios/pull/49)).
+  The app is in TestFlight internal testing
   for now; a public TestFlight link comes with the public release.
 
 ### Tier 1: your agents, in the browser
