@@ -346,3 +346,35 @@ func TestRunSimNoFailoverNamesPrimary(t *testing.T) {
 		t.Errorf("failovers %d, answered by %q", run.Failovers, run.AnsweredBy)
 	}
 }
+
+func TestKeysAre(t *testing.T) {
+	approve := SimEvent{OnKeysTo: "a", KeysAre: KeysApprove}
+	decline := SimEvent{OnKeysTo: "a", KeysAre: KeysDecline}
+	either := SimEvent{OnKeysTo: "a"}
+	for _, tc := range []struct {
+		keys                string
+		approve, decline, n bool
+	}{
+		{"y", true, false, true},
+		{"down enter", true, false, true},
+		{"esc", false, true, true},
+		{"escape", false, true, true},
+	} {
+		if approve.KeysHit(tc.keys) != tc.approve || decline.KeysHit(tc.keys) != tc.decline || either.KeysHit(tc.keys) != tc.n {
+			t.Errorf("%q: approve %v decline %v any %v", tc.keys, approve.KeysHit(tc.keys), decline.KeysHit(tc.keys), either.KeysHit(tc.keys))
+		}
+	}
+	base := SimScenario{ID: "x", Goal: "g", Agents: []SimAgent{{Alias: "a", Screen: "s"}}}
+	for _, e := range []SimEvent{{AtMS: 1, Agent: "a", KeysAre: KeysApprove}, {OnKeysTo: "a", KeysAre: "maybe"}} {
+		sc := base
+		sc.Events = []SimEvent{e}
+		if err := sc.validate(); err == nil {
+			t.Errorf("%+v validated", e)
+		}
+	}
+	sc := base
+	sc.Events = []SimEvent{approve}
+	if err := sc.validate(); err != nil {
+		t.Errorf("approve cue: %v", err)
+	}
+}

@@ -122,8 +122,12 @@ type SimEvent struct {
 	// text matches PromptMatches, a case-insensitive regexp, when set).
 	OnPromptTo    string `json:"on_prompt_to,omitempty"`
 	PromptMatches string `json:"prompt_matches,omitempty"`
-	// OnKeysTo fires when sheepdog answers this agent's prompt (keys).
+	// OnKeysTo fires when sheepdog answers this agent's prompt (keys);
+	// KeysAre, when set, only on an approval ("approve": any keys but a
+	// lone esc) or only on a decline ("decline": a lone esc), so a
+	// worker can go on differently either way (KeysAnswer).
 	OnKeysTo string `json:"on_keys_to,omitempty"`
+	KeysAre  string `json:"keys_are,omitempty"`
 	// OnInterruptTo fires when sheepdog interrupts this agent (ctrl+c).
 	OnInterruptTo string `json:"on_interrupt_to,omitempty"`
 	// DelayMS is how long after the trigger the change lands.
@@ -200,6 +204,29 @@ const (
 	ActionKeys      = "keys"
 	ActionInterrupt = "interrupt"
 )
+
+// SimEvent.KeysAre values.
+const (
+	KeysApprove = "approve"
+	KeysDecline = "decline"
+)
+
+// Declined reports whether keys sent to a prompt decline it (a lone esc).
+func Declined(keys []string) bool {
+	return len(keys) == 1 && (keys[0] == "esc" || keys[0] == "escape")
+}
+
+// KeysHit reports whether e, an OnKeysTo cue for the agent, fires on keys
+// (space-joined, as sent).
+func (e SimEvent) KeysHit(keys string) bool {
+	switch e.KeysAre {
+	case KeysApprove:
+		return !Declined(strings.Fields(keys))
+	case KeysDecline:
+		return Declined(strings.Fields(keys))
+	}
+	return true
+}
 
 // LoadSimFile reads and validates a scenarios file.
 func LoadSimFile(path string) ([]SimScenario, error) {
@@ -283,6 +310,15 @@ func (s SimScenario) validate() error {
 		}
 		if e.AfterBeat > 0 && (e.AfterBeat > len(s.Agenda) || strings.TrimSpace(s.Agenda[e.AfterBeat-1]) == "<wait>") {
 			return fmt.Errorf("event %d: after_beat %d is not a spoken beat of the agenda", i, e.AfterBeat)
+		}
+		switch e.KeysAre {
+		case "":
+		case KeysApprove, KeysDecline:
+			if e.OnKeysTo == "" {
+				return fmt.Errorf("event %d: keys_are without on_keys_to", i)
+			}
+		default:
+			return fmt.Errorf("event %d: keys_are %q: want approve or decline", i, e.KeysAre)
 		}
 		if e.PromptMatches != "" {
 			if _, err := regexp.Compile("(?i)" + e.PromptMatches); err != nil {

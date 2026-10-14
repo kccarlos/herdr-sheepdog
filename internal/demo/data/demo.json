@@ -1,0 +1,37 @@
+{
+  "scenarios": [
+    {
+      "id": "demo",
+      "note": "sheepdog demo (tier 0): three scripted workers in a mock herdr, so a visitor hears a finish, answers an approval and hears a failure without herdr or real agents.",
+      "goal": "try sheepdog: hear the news, answer the approval, ask what is going on",
+      "agents": [
+        {
+          "alias": "docs",
+          "kind": "claude",
+          "state": "working",
+          "screen": "docs-working.txt",
+          "answer": "docs wrote README.md for the calc repo (what it does, how to build, how to run the tests). While checking it, it found two broken links in CONTRIBUTING.md that point to a docs/ folder that does not exist; it left them alone."
+        },
+        {
+          "alias": "tests",
+          "state": "working",
+          "screen": "tests-working.txt",
+          "answer": "tests runs go test -race ./... in ~/demo/calc. If it already ran: TestCacheConcurrent fails with a data race because Cache.Get and Cache.Put use the map without a lock (cache.go lines 14 and 21); everything else passes and no code was changed."
+        },
+        {
+          "alias": "refactor",
+          "state": "working",
+          "screen": "refactor-working.txt",
+          "answer": "refactor moves the parser into its own package ./parser and updates the imports in main.go; when it finishes, go test ./... passes for both packages."
+        }
+      ],
+      "events": [
+        {"at_ms": 25000, "agent": "docs", "screen": "docs-done.txt", "state": "done"},
+        {"at_ms": 45000, "agent": "tests", "screen": "tests-approval.txt", "state": "blocked"},
+        {"on_keys_to": "tests", "keys_are": "approve", "delay_ms": 800, "screen": "tests-running.txt", "state": "working"},
+        {"on_keys_to": "tests", "keys_are": "approve", "delay_ms": 15000, "screen": "tests-fail.txt", "state": "done"},
+        {"at_ms": 80000, "agent": "refactor", "screen": "refactor-done.txt", "state": "done"}
+      ]
+    }
+  ]
+}

@@ -159,3 +159,41 @@ func TestQuerier(t *testing.T) {
 		t.Fatal("no scripted answer should refuse")
 	}
 }
+
+// keys_are: an approval fires the approve cue, a decline (esc) does not
+// and the worker goes back to its input line instead.
+func TestKeysAre(t *testing.T) {
+	base := daemon(t)
+	fixtures, _ := filepath.Abs("../../../testdata/herdr")
+	approval, err := os.ReadFile(filepath.Join(fixtures, "codex-approval-prompt.screen.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sc := eval.SimScenario{
+		ID: "t", Goal: "g",
+		Agents: []eval.SimAgent{
+			{Alias: "yes", Kind: "codex", State: "blocked", Screen: string(approval)},
+			{Alias: "no", Kind: "codex", State: "blocked", Screen: string(approval)},
+		},
+		Events: []eval.SimEvent{
+			{OnKeysTo: "yes", KeysAre: eval.KeysApprove, State: "done", AppendScreen: "• Done.", DelayMS: 100},
+			{OnKeysTo: "no", KeysAre: eval.KeysApprove, State: "done", AppendScreen: "• Done.", DelayMS: 100},
+		},
+	}
+	fired := make(chan int, 4)
+	w, err := New(sc, Options{BaseURL: base, FixtureDir: fixtures, OnFire: func(i int, _ eval.SimEvent) { fired <- i }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+	if err := w.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	w.onSend("w1:p1", map[string]any{"kind": "keys", "keys": []any{"y"}})
+	w.onSend("w2:p1", map[string]any{"kind": "keys", "keys": []any{"esc"}})
+	waitFor(t, "yes done", func() bool { return agents(t, base)["yes"].State == "done" })
+	waitFor(t, "no idle", func() bool { return agents(t, base)["no"].State == "idle" })
+	if len(fired) != 1 || <-fired != 0 {
+		t.Errorf("fired cues: %d", len(fired))
+	}
+}

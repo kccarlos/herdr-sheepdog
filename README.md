@@ -34,6 +34,14 @@ A tagged release on GitHub Releases carries
 with `checksums.txt`; the macOS binary is signed and notarized with
 `make release-sign` ([`docs/signing.md`](docs/signing.md)).
 
+To try it before setting up herdr, run `sheepdog demo` with a free
+[AI Studio key](https://aistudio.google.com/apikey) in `GEMINI_API_KEY`:
+three scripted workers (one finishes, one asks for an approval and then
+fails, one finishes later) on a scratch daemon at
+http://127.0.0.1:7778/voice, which it opens. It never touches herdr or
+real agents, and runs on its own port and data dir, so it is safe next
+to a running daemon.
+
 ## Configure
 
 ```sh
