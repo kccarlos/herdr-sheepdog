@@ -149,6 +149,10 @@ final class SessionViewModel: ObservableObject {
     }
     @Published private(set) var stateVoiceModel: String?
     @Published var showSettings = false
+    /// A `sheepdog://pair` link that arrived from outside the app (the
+    /// Camera app scanned `sheepdog pair`'s code), waiting for the user to
+    /// confirm it. Nothing is contacted or saved before they do.
+    @Published var pendingPairing: PairingLink?
     /// Where Settings opens: nil for its top, `.models` from Health's
     /// "Change in Settings ›". Consumed (reset) by SettingsView.
     @Published var settingsRoute: SettingsRoute?
@@ -289,7 +293,9 @@ final class SessionViewModel: ObservableObject {
         SheepdogIntentBridge.install { [weak self] url in self?.open(url: url) }
         syncAway()
         if !isConfigured || !settings.hasBeenConfigured {
-            showSettings = true
+            // A cold launch from the Camera app's pairing link asks about
+            // the link instead (and reopens Settings if declined).
+            if pendingPairing == nil { showSettings = true }
         } else {
             Task {
                 await refreshState(quiet: true)
@@ -868,6 +874,23 @@ final class SessionViewModel: ObservableObject {
 
     /// A `sheepdog://` link, or an App Intent speaking one.
     func open(url: URL) {
+        if let link = PairingLink(url: url) {
+            // Settings' sheet holds its own copy of the address and token
+            // and writes it back when it closes; close it first, so the
+            // pairing is not overwritten, and so the question is on top.
+            guard showSettings else {
+                pendingPairing = link
+                return
+            }
+            showSettings = false
+            Task {
+                // An alert asked for while the sheet is still sliding away
+                // is dropped.
+                try? await Task.sleep(for: .milliseconds(700))
+                pendingPairing = link
+            }
+            return
+        }
         guard let route = AppRoute(url: url) else {
             SheepdogLog.session.info("ignored link \(url.absoluteString, privacy: .public)")
             return
@@ -1615,6 +1638,61 @@ final class SessionViewModel: ObservableObject {
         } catch {
             return nil
         }
+    }
+
+    // MARK: - Pairing
+
+    /// The user declined a pairing link: an app with no daemon yet goes
+    /// back to the first-run Settings it was on.
+    func cancelPairing() {
+        pendingPairing = nil
+        reopenFirstRunSettings()
+    }
+
+    /// Back to the first-run Settings after the pairing question closed,
+    /// once the alert is gone (a sheet asked for while it closes is dropped).
+    private func reopenFirstRunSettings() {
+        guard !isConfigured || !settings.hasBeenConfigured else { return }
+        Task {
+            try? await Task.sleep(for: .milliseconds(700))
+            showSettings = true
+        }
+    }
+
+    /// The user confirmed a pairing link from outside the app: apply it the
+    /// way Settings' scanner does and say how it went in a banner.
+    func confirmPairing() {
+        guard let link = pendingPairing else { return }
+        pendingPairing = nil
+        Task {
+            let result = await resolvePairing(link)
+            guard let address = result.address else {
+                show(Banner(tone: .error, message: result.probe.title, hint: result.probe.lines.joined(separator: " ")))
+                reopenFirstRunSettings()
+                return
+            }
+            settings.address = address
+            settings.token = link.token
+            settings.hasBeenConfigured = true
+            endpointChanged()
+            let probe = await probe(address: address, token: link.token)
+            show(Banner(tone: probe.ok ? .info : .error, message: probe.ok ? "Paired with \(address)." : probe.title, hint: probe.ok ? "Tap the orb to talk." : probe.lines.joined(separator: " ")))
+        }
+    }
+
+    /// The first of a pairing link's addresses that answers `GET /api/hello`
+    /// (LAN before Tailscale); with none, a probe that says so. Shared by
+    /// Settings' scanner and links from outside the app.
+    func resolvePairing(_ link: PairingLink) async -> (address: String?, probe: Probe) {
+        let secret = link.token
+        let reachable = await link.firstReachable { address in
+            guard let endpoint = DaemonEndpoint(text: address, token: secret) else { return false }
+            return (try? await DaemonClient(endpoint: endpoint).hello()) != nil
+        }
+        if let reachable {
+            return (reachable, Probe(ok: true, title: "Reached \(reachable)", lines: []))
+        }
+        return (nil, Probe(ok: false, title: "None of the code's addresses answered.", lines: link.addresses + ["Is the phone on the same network as the Mac, or on Tailscale?"]))
     }
 
     // MARK: - Test connection (Settings)

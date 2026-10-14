@@ -37,7 +37,9 @@ PCM16 mono, 16 kHz up, 24 kHz down, plus a few JSON control frames.
    ```
 
 3. **Connect.** Run `sheepdog pair` on the Mac and tap **Scan pairing
-   code** in the app's Settings ▸ Daemon: the code holds every LAN and
+   code** in the app's Settings ▸ Daemon, or point the iPhone's Camera app
+   at it and open the `sheepdog://pair` link (the app asks "Pair with
+   <host>?" before it changes anything): the code holds every LAN and
    Tailscale address and the token, and the app keeps the first address
    that answers. To type it instead: `sheepdog serve` prints one `lan url`
    line for each non-loopback address. In the app's Settings, enter the host and port from

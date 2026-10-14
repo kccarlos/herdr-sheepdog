@@ -137,16 +137,12 @@ struct DaemonSettingsView: View {
         token = link.token
         probing = true
         probe = nil
-        let secret = link.token
         Task {
-            let reachable = await link.firstReachable { address in
-                guard let endpoint = DaemonEndpoint(text: address, token: secret) else { return false }
-                return (try? await DaemonClient(endpoint: endpoint).hello()) != nil
-            }
-            address = reachable ?? link.addresses[0]
+            let result = await model.resolvePairing(link)
+            address = result.address ?? link.addresses[0]
             probing = false
-            guard reachable != nil else {
-                probe = SessionViewModel.Probe(ok: false, title: "None of the code's addresses answered.", lines: link.addresses + ["Is the phone on the same network as the Mac, or on Tailscale?"])
+            guard result.address != nil else {
+                probe = result.probe
                 return
             }
             commit()

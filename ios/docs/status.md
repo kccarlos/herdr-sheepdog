@@ -49,6 +49,10 @@ The CEO checked these on 2026-10-01 and 2026-10-02 with TestFlight build
 
 ## Not verified on a device yet
 
+- **Pairing from the Camera app (`sheepdog://pair`):** scanning
+  `sheepdog pair`'s code with the system Camera app and confirming "Pair
+  with <host>?". Checked in the simulator (`PairingLinkUITests`) only.
+
 - **Everything new in 0.1.1 (20)** has only run in the simulator and the
   unit and fixture-daemon tests: the `client-ready` / `bot-ready`
   handshake and the Protocol row against the user's own daemon (the

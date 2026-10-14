@@ -545,6 +545,18 @@ address at once with `GET /api/hello` (three seconds each) and keeps the
 first in the code's order that answers (LAN before Tailscale), then runs
 Test connection.
 
+The same code scanned with the system Camera app opens the
+`sheepdog://pair?…` link in the app. `SessionViewModel.open(url:)` reads it
+as a `PairingLink` before `AppRoute` sees it, closes Settings if it is open
+(its fields would overwrite the result when it closes) and asks "Pair with
+<host>?" (`PairingLink.confirmation`, which lists the addresses and never
+shows the token). Nothing is contacted or saved before the user taps Pair.
+Then `resolvePairing`, which Settings' scanner shares, finds the first
+address that answers; the address and token are saved and the app
+repointed, and a banner says how it went. Declining, or a code whose
+addresses all fail, reopens the first-run Settings when no daemon is saved
+yet. `PairingLinkUITests` drives this without a daemon.
+
 ## Empty and error states
 
 `FlockPaneState` (SheepdogKit, tested) decides what an empty Agents pane

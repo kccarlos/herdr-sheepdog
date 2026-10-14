@@ -5,7 +5,7 @@ import Foundation
 /// (docs/ws-contract.md "Pairing" in the daemon repository). The base
 /// URLs come LAN first, then Tailscale; `t` is `web.token`, absent when
 /// the daemon has none.
-public struct PairingLink: Equatable {
+public struct PairingLink: Equatable, Sendable {
     /// The daemon's addresses as Settings stores them (`host:port`, no
     /// scheme), in the code's order.
     public var addresses: [String]
@@ -47,6 +47,39 @@ public struct PairingLink: Equatable {
         }
         guard !addresses.isEmpty else { return nil }
         self.init(addresses: addresses, token: token)
+    }
+
+    /// A `sheepdog://pair?…` link opened from outside the app (the system
+    /// Camera app scanning the code); nil for any other link.
+    public init?(url: URL) {
+        self.init(url.absoluteString)
+    }
+
+    /// What the app asks before it applies a link that arrived from outside
+    /// (the Camera app): nothing is contacted and nothing is saved until the
+    /// user says yes, because the link carries a token and replaces the
+    /// daemon the app talks to.
+    public struct Confirmation: Equatable, Sendable {
+        public var title: String
+        public var message: String
+    }
+
+    public func confirmation(currentAddress: String) -> Confirmation {
+        let first = addresses[0]
+        let host = first.hasPrefix("[") ? String(first.dropFirst().prefix { $0 != "]" }) : String(first.split(separator: ":").first ?? Substring(first))
+        var lines: [String] = []
+        if addresses.count > 1 {
+            lines.append("The code lists \(addresses.count) addresses; the app keeps the first that answers: \(addresses.joined(separator: ", ")).")
+        } else {
+            lines.append("Address: \(first).")
+        }
+        let current = currentAddress.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !current.isEmpty, !addresses.contains(current) {
+            lines.append("This replaces the daemon at \(current).")
+        }
+        lines.append(token.isEmpty ? "The code has no token." : "The token in the code is saved in the keychain.")
+        lines.append("Only pair with a Mac you trust.")
+        return Confirmation(title: "Pair with \(host)?", message: lines.joined(separator: " "))
     }
 
     /// `host:port` as Settings shows it (an IPv6 literal in brackets).
