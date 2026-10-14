@@ -39,6 +39,10 @@ orchestrator (a few tokens; `--no-probe` skips it), the orchestrator and
 voice providers, the web port (free, this daemon, or another program),
 the bind/token pairing, `[push.apns]` and the secret files' permissions.
 It exits 1 on any failure.
+`sheepdog pair` prints the QR code the iOS app scans: every LAN and
+Tailscale address the daemon listens on (from `web.bind`/`web.port`) and
+`web.token`, as `sheepdog://pair?u=…&u=…&t=…` (docs/ws-contract.md
+"Pairing"); on a terminal it draws the code in explicit colours, so it scans on a light or a dark theme (`--plain` and `--invert` otherwise). It needs a non-loopback bind.
 `sheepdog service install` runs the daemon as a user service (a launchd
 agent `~/Library/LaunchAgents/io.github.kccarlos.sheepdog.plist` on macOS,
 with its output in `~/Library/Logs/sheepdog/serve.log`; a systemd unit

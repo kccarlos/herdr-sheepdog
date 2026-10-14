@@ -963,6 +963,7 @@ function pickTab() {
 
 function setupTabs() {
   for (const b of document.querySelectorAll('#tabs button')) b.addEventListener('click', () => showTab(b.dataset.tab));
+  $('pair-show').addEventListener('click', showPairing);
 }
 
 // ---------------------------------------------------------------- auth
@@ -974,6 +975,37 @@ function setupTabs() {
 // boot() proceeds; a 401 shows the inline prompt and hides the tabs
 // instead of wiring up controls that would only 401 themselves).
 // Submitting POSTs /api/login and reloads the page on success.
+// showPairing fetches the addresses and shows the pairing QR code (it
+// holds the token, so it is shown only on request and never cached).
+async function showPairing() {
+  const err = $('pair-error');
+  try {
+    const { status, data: p } = await getJSON('/api/pair');
+    if (status !== 200 || p.error) {
+      err.textContent = p.error || `HTTP ${status}`;
+      err.classList.remove('hidden');
+      $('pair-body').classList.add('hidden');
+      return;
+    }
+    err.classList.add('hidden');
+    $('pair-qr').src = `/api/pair/qr.svg?ts=${Date.now()}`;
+    const ul = $('pair-addrs');
+    ul.textContent = '';
+    for (const a of p.addresses) {
+      const li = document.createElement('li');
+      li.textContent = `${a.kind}: ${a.url}`;
+      ul.appendChild(li);
+    }
+    $('pair-note').textContent = p.has_token
+      ? 'The code holds the web token: treat it like a password.'
+      : 'No web.token is set: anyone on these networks can use the daemon.';
+    $('pair-body').classList.remove('hidden');
+  } catch (e) {
+    err.textContent = `pairing: ${e.message || e}`;
+    err.classList.remove('hidden');
+  }
+}
+
 async function authGate() {
   let res;
   try {

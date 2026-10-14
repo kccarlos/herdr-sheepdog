@@ -570,6 +570,27 @@ reliably removes is the *click* — an underrun is a faded pause.
   should stop capturing and show the reason. It may retry `/ws` after a few
   seconds; a `connecting` status means the daemon is trying again.
 
+## Pairing
+
+`sheepdog pair` prints, and `/debug` (State → Pair a phone; `GET
+/api/pair/qr.svg`) shows, a QR code holding one link:
+
+```
+sheepdog://pair?u=<base URL>&u=<base URL>…&t=<token>
+```
+
+- `u` (one or more, URL-encoded): an `http://host:port` base URL of the
+  daemon — every IPv4 LAN address and then every Tailscale address
+  (100.64.0.0/10 or a `tailscale*` interface) when `web.bind` is
+  `0.0.0.0`, else the bound address itself. Loopback and link-local
+  addresses are never listed; with a loopback bind there is no code.
+- `t`: `web.token`, absent when none is set.
+
+The app tries the addresses in order with `GET /api/hello` and keeps the
+first that answers. The token is never printed beside the code, never
+logged, and `GET /api/pair` (the address list for `/debug`) leaves it
+out. Both routes need the token like the rest of `/api`.
+
 ## Auth
 
 `web.bind`/`web.token` (CONFIG.md "web.token") let the daemon be reached
