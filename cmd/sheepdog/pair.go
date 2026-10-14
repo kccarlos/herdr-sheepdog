@@ -27,6 +27,7 @@ func printPairUsage(w io.Writer) {
 	fprintln(w, "  --config PATH     config file (default ~/.config/sheepdog/config.toml)")
 	fprintln(w, "  --env-file PATH   env file (default ./.env, else ~/.config/sheepdog/.env, as serve)")
 	fprintln(w, "  --plain           no colour codes (the default when stdout is not a terminal)")
+	fprintln(w, "  --compact         fewer lines around the code, to fit a small window or popup")
 	fprintln(w, "  --invert          with --plain (or piped): for a light terminal background")
 }
 
@@ -39,6 +40,7 @@ func runPair(_ context.Context, args []string, stdout, stderr io.Writer) int {
 	envFile := fs.String("env-file", "", "env file")
 	invert := fs.Bool("invert", false, "for a light terminal")
 	plain := fs.Bool("plain", false, "no colours")
+	compact := fs.Bool("compact", false, "fewer lines around the code")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -75,6 +77,9 @@ func runPair(_ context.Context, args []string, stdout, stderr io.Writer) int {
 		fprintf(stderr, "sheepdog pair: %v\n", err)
 		return 1
 	}
+	if *compact {
+		return printPairCompact(stdout, code, addrs, cfg.Web.Token != "")
+	}
 	fprintln(stdout, "Scan this in the iOS app (Settings → Scan pairing code):")
 	fprintln(stdout, "")
 	_, _ = io.WriteString(stdout, code)
@@ -103,4 +108,20 @@ func isTerminal(w io.Writer) bool {
 	}
 	st, err := f.Stat()
 	return err == nil && st.Mode()&os.ModeCharDevice != 0
+}
+
+// printPairCompact is the code with a one-line title and
+// the addresses, one per line.
+func printPairCompact(w io.Writer, code string, addrs []pair.Address, hasToken bool) int {
+	fprintln(w, "Scan in the iOS app (Settings → Scan pairing code):")
+	_, _ = io.WriteString(w, code)
+	for _, a := range addrs {
+		fprintln(w, a.URL)
+	}
+	if hasToken {
+		fprintln(w, "The code holds the web token (not printed): treat it like a password.")
+	} else {
+		fprintln(w, "No web.token is set: anyone on these networks can use the daemon (sheepdog init sets one).")
+	}
+	return 0
 }

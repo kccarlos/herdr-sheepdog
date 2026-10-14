@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/pair"
 )
@@ -72,5 +73,48 @@ func unsetWebEnv(t *testing.T) {
 	for _, k := range []string{"SHEEPDOG_WEB_TOKEN", "SHEEPDOG_WEB_BIND", "SHEEPDOG_WEB_PORT"} {
 		t.Setenv(k, "")
 		_ = os.Unsetenv(k)
+	}
+}
+
+// The herdr plugin opens `pair --compact` in a popup of 72 columns by 42
+// rows (herdr-plugin.toml), less 2 each for the frame, and its wrapper
+// adds 2 rows (a blank line and the "press Enter" prompt). With a long
+// token and three addresses the output must still fit, the code included.
+func TestPairCompactFitsThePluginPopup(t *testing.T) {
+	old := pairAddrs
+	pairAddrs = func() ([]pair.IfaceAddr, error) {
+		return []pair.IfaceAddr{
+			{Iface: "en0", IP: net.ParseIP("192.168.100.200")},
+			{Iface: "utun4", IP: net.ParseIP("100.101.102.103")},
+			{Iface: "en1", IP: net.ParseIP("10.20.30.40")},
+		}, nil
+	}
+	t.Cleanup(func() { pairAddrs = old })
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "config.toml")
+	token := strings.Repeat("0123456789abcdef", 4)
+	if err := os.WriteFile(cfg, []byte("[web]\nbind = \"0.0.0.0\"\nport = 7777\ntoken = \""+token+"\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	unsetWebEnv(t)
+	env := filepath.Join(dir, "x.env")
+	_ = os.WriteFile(env, nil, 0o600)
+	var out, errb strings.Builder
+	if code := run(context.Background(), []string{"pair", "--compact", "--plain", "--config", cfg, "--env-file", env}, &out, &errb); code != 0 {
+		t.Fatalf("exit %d: %s", code, errb.String())
+	}
+	if strings.Contains(out.String(), token) {
+		t.Error("the token was printed")
+	}
+	lines := strings.Split(strings.TrimRight(out.String(), "\n"), "\n")
+	width := 0
+	for _, l := range lines {
+		if n := utf8.RuneCountInString(l); n > width {
+			width = n
+		}
+	}
+	t.Logf("compact pair output: %d columns x %d rows", width, len(lines))
+	if width > 70 || len(lines) > 36 {
+		t.Errorf("%d x %d does not fit the 72 x 42 popup", width, len(lines))
 	}
 }
