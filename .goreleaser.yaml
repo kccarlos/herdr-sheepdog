@@ -1,0 +1,63 @@
+# goreleaser config: DRAFT, not wired into .github/workflows/release.yml.
+#
+# It reproduces what release.yml builds today (darwin/arm64 and
+# linux/amd64 tarballs named sheepdog_<tag>_<os>_<arch>.tar.gz, plus
+# checksums.txt, version stamped through main.version/commit/date) so the
+# release job can switch to `goreleaser release` later without changing the
+# asset names that `make release-sign` and the Homebrew formula expect.
+#
+# Deliberately not here:
+# - a `brews:` section. The darwin binary is signed and notarized on the
+#   maintainer's Mac after the release (`make release-sign`, docs/signing.md),
+#   which replaces its tarball and checksums.txt, so a formula goreleaser
+#   wrote at release time would carry the unsigned tarball's sha256. The
+#   formula comes from packaging/homebrew/sheepdog.rb.tmpl, rendered after
+#   signing (packaging/homebrew/README.md).
+# - publishing: `release.draft: true` keeps a goreleaser run from making a
+#   public release by itself.
+#
+# Check: goreleaser check   ·   dry run: goreleaser release --snapshot --clean
+version: 2
+
+project_name: sheepdog
+
+builds:
+  - id: sheepdog
+    main: ./cmd/sheepdog
+    binary: sheepdog
+    env:
+      - CGO_ENABLED=0
+    goos: [darwin, linux]
+    goarch: [arm64, amd64]
+    ignore:
+      # Today's targets only: Apple silicon and x86-64 Linux.
+      - goos: darwin
+        goarch: amd64
+      - goos: linux
+        goarch: arm64
+    ldflags:
+      - -X 'main.version={{ .Tag }}' -X 'main.commit={{ .ShortCommit }}' -X 'main.date={{ .Date }}'
+
+archives:
+  - id: sheepdog
+    formats: [tar.gz]
+    # The names release.yml and scripts/release-sign.sh use: the tag keeps
+    # its leading v (sheepdog_v0.1.0_darwin_arm64.tar.gz).
+    name_template: "sheepdog_{{ .Tag }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      # The tarballs today hold only the binary.
+      - none*
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+changelog:
+  # Release notes come from scripts/changelog.sh, as in release.yml.
+  disable: true
+
+release:
+  draft: true
+  github:
+    owner: kccarlos
+    name: herdr-sheepdog

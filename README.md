@@ -7,82 +7,212 @@
 
 # herdr-sheepdog
 
-A voice supervisor for a herdr agent fleet: ask what is happening, get
-told proactively when an agent is blocked, answer its question, give new
-instructions, and interrupt — without touching a keyboard. The voice is
-Gemini Live (Google AI Studio or Vertex AI) or GPT-Live, switchable at
-runtime; behind it a stateful orchestrator (Gemini, Gemini on Vertex
-AI, DeepSeek, or any OpenAI-compatible endpoint) reads the agents' screens and acts on them.
+**Manage your coding agents by voice, away from the screen.**
 
-- [`docs/glossary.md`](docs/glossary.md) — the terms (user, voice, orchestrator, workers) and the former names
-- [`docs/roles.md`](docs/roles.md) — the design contract
-- [`docs/architecture.md`](docs/architecture.md) — the code map
-- [`docs/status.md`](docs/status.md) — what is done, verified and open
-- [`CONFIG.md`](CONFIG.md) — every config key
+<!-- TODO(demo media): a 60-90 s demo video and a short GIF go here (plan:
+docs/plan-onboarding-and-presentation.md, tier 0 "zero-install path").
+Not recorded yet; do not add placeholder media. -->
 
-## Install
+## Why
 
-Build from a checkout (requires Go; see `go.mod`):
+You run several coding agents at once (Claude Code, Codex, Antigravity…)
+in [herdr](https://github.com/herdrdev/herdr). They stop for approvals and
+finish while you are away from the desk, and you find out only when you
+come back. sheepdog watches them for you. It tells you out loud when one
+finishes, fails or needs you. You answer by voice from your phone or a
+browser: "what's going on?", "approve it", "tell auth to run the tests
+again", "stop".
 
-```sh
-git clone https://github.com/kccarlos/herdr-sheepdog.git && cd herdr-sheepdog
-make install   # builds bin/sheepdog and copies it to ~/.local/bin/
+## Quickstart
+
+Three depths of commitment. Each one works on its own.
+
+### Tier 0: try it without herdr
+
+- **`sheepdog demo`:** a scratch daemon with three scripted workers. One
+  finishes, one asks to run the test suite and then fails, one finishes
+  later. It opens its `/voice` page; press Connect and talk. It needs only
+  a free [AI Studio key](https://aistudio.google.com/apikey) in
+  `GEMINI_API_KEY`. It never touches herdr or real agents, and it runs on
+  its own port (7778) and data dir, so it is safe next to a running daemon.
+
+  ```sh
+  make install                     # or a release tarball (Tier 1)
+  GEMINI_API_KEY=… sheepdog demo
+  ```
+
+- **The iOS app's demo:** "Try the demo" on the app's first screen runs
+  scripted agents on the phone itself, with on-device speech. It needs no
+  daemon, no key and no network. The app is in TestFlight internal testing
+  for now; a public TestFlight link comes with the public release.
+
+### Tier 1: your agents, in the browser
+
+1. **Install.** Homebrew, once the repository is public and the first
+   release is tagged (the formula is prepared in
+   [`packaging/homebrew/`](packaging/homebrew/); not published yet):
+
+   ```sh
+   brew install kccarlos/tap/sheepdog      # not available yet
+   ```
+
+   Until then, build from a checkout (Go, see `go.mod`):
+
+   ```sh
+   git clone https://github.com/kccarlos/herdr-sheepdog.git && cd herdr-sheepdog
+   make install   # builds bin/sheepdog and copies it to ~/.local/bin/
+   ```
+
+   A tagged release on GitHub Releases carries
+   `sheepdog_<tag>_darwin_arm64.tar.gz` and `..._linux_amd64.tar.gz` with
+   `checksums.txt`. The macOS binary is signed and notarized
+   ([`docs/signing.md`](docs/signing.md)).
+2. **Set up.** `sheepdog init` checks herdr, asks for one key (Gemini AI
+   Studio) and validates it, and writes `~/.config/sheepdog/config.toml`
+   and `~/.config/sheepdog/.env` (both 0600). `sheepdog doctor` checks
+   every step and prints the fix for each failure in one line.
+
+   ```sh
+   sheepdog init
+   sheepdog doctor
+   ```
+
+3. **Run.** Start herdr, then the daemon, in a terminal or as a login
+   service (a launchd agent on macOS, a systemd user unit on Linux):
+
+   ```sh
+   sheepdog serve              # or:
+   sheepdog service install    # also: service status | logs [-f] | uninstall
+   ```
+
+   Open **http://127.0.0.1:7777/voice** and press Connect. **/debug** shows
+   what the daemon, the voice and the orchestrator are doing.
+
+### Tier 2: from your phone
+
+1. Give the daemon a non-loopback bind and a long token (`sheepdog init`
+   gives a new config a random token; see
+   [Connect the phone](#connect-the-phone)).
+2. Run `sheepdog pair`. It prints a QR code with every LAN and Tailscale
+   address and the token.
+3. In the iOS app ("Sheepdog for herdr",
+   [herdr-sheepdog-ios](https://github.com/kccarlos/herdr-sheepdog-ios)),
+   scan it in Settings ▸ Daemon (or with the Camera app). The app keeps the
+   first address that answers.
+
+## How it works
+
+```mermaid
+flowchart LR
+    U((You)) <-->|speech| V["Voice<br/>(Gemini Live or GPT-Live)"]
+    V <-->|"questions, briefings<br/>(daemon tools)"| O["Orchestrator<br/>(tool-calling text model)"]
+    O <-->|"read screens, prompt,<br/>send keys, interrupt"| H["herdr"]
+    H <--> W1[worker: Claude Code]
+    H <--> W2[worker: Codex]
+    H <--> W3[worker: …]
+    H -->|"state events<br/>(blocked, done)"| D{{"sheepdog daemon<br/>(watcher, rails, event log)"}}
+    D --> O
 ```
 
-A tagged release on GitHub Releases carries
-`sheepdog_<version>_darwin_arm64.tar.gz` and `..._linux_amd64.tar.gz`
-with `checksums.txt`; the macOS binary is signed and notarized with
-`make release-sign` ([`docs/signing.md`](docs/signing.md)).
+Two models split the work. The **voice** is a realtime speech model that
+talks with you and keeps the conversation going. The **orchestrator** is a
+tool-calling text model that reads the workers' screens, investigates,
+acts on them and decides what is worth telling you; the voice says it. The
+daemon in between watches herdr, keeps the event log and enforces a few
+hard rails; judgment stays with the models. Details:
+[`docs/architecture.md`](docs/architecture.md) (the code map),
+[`docs/roles.md`](docs/roles.md) (the design contract),
+[`docs/design-overview.md`](docs/design-overview.md) (the design and its
+evaluation in 2–3 pages), [`docs/glossary.md`](docs/glossary.md) (the
+terms).
 
-To try it before setting up herdr, run `sheepdog demo` with a free
-[AI Studio key](https://aistudio.google.com/apikey) in `GEMINI_API_KEY`:
-three scripted workers (one finishes, one asks for an approval and then
-fails, one finishes later) on a scratch daemon at
-http://127.0.0.1:7778/voice, which it opens. It never touches herdr or
-real agents, and runs on its own port and data dir, so it is safe next
-to a running daemon.
+- **Voice:** Gemini Live (Google AI Studio or Vertex AI) or GPT-Live,
+  switchable at runtime.
+- **Orchestrator:** Gemini (AI Studio or Vertex AI), DeepSeek, or any
+  OpenAI-compatible endpoint you add as `[[brain.openai_compat]]`
+  (OpenRouter, a local Ollama, Groq, …; [`CONFIG.md`](CONFIG.md)). How well
+  it works depends on the model. Measured so far, on the tier-1 workday
+  suite: DeepSeek `deepseek-flash` (the default in production, segment
+  Understood 91 %) and Gemini 3.5 Flash on Vertex AI (81 %)
+  ([`docs/eval/vertex-2026-10-11.md`](docs/eval/vertex-2026-10-11.md)).
+  Other providers work through the same protocol but have not been
+  evaluated.
 
-## Configure
+## Safety
 
-```sh
-sheepdog init      # checks herdr, asks for a key and validates it, writes config + secrets
-sheepdog doctor    # checks everything, one line per check with the fix
-```
+What sheepdog does on its own, and what it never does:
 
-`sheepdog init` writes `~/.config/sheepdog/config.toml` and the secret file
-`~/.config/sheepdog/.env` (both 0600). By hand instead: `sheepdog config
-init` writes the commented template and `.env.example` lists the keys.
-`sheepdog serve` loads `./.env` on its own (else `~/.config/sheepdog/.env`). The keys it understands:
-`GEMINI_API_KEY` (voice and the default orchestrator; `GEMINI_API_KEY_1`…`_9`
-form a pool), `VERTEX_API_KEY` + `VERTEX_PROJECT` (Gemini on Vertex AI:
-the voice with `gemini.backend = "vertex"`, and the orchestrator provider
-`vertex`), `DEEPSEEK_API_KEY` (orchestrator provider `deepseek`),
-`OPENAI_API_KEY` (GPT-Live, voice only), and the key of any
-OpenAI-compatible orchestrator you add as `[[brain.openai_compat]]`
-(OpenRouter, a local Ollama, Groq, …; see CONFIG.md). `sheepdog config show` prints
-the effective config with secrets redacted.
+- **Approvals need your words.** A worker's approval prompt is answered
+  only on your own recorded words (or a tap) in that turn, with a key from
+  the prompt's own options. The code enforces this rail, not a prompt.
+- **Instructions go out without a confirmation step.** The orchestrator
+  sends an instruction right after echoing it back, so the worker's own
+  approval prompts are the safety gate: never point sheepdog at an agent
+  started in a fully auto-approve mode (table below).
+- **Investigations are read-only:** background questions run a separate,
+  read-only CLI invocation ([`docs/cli-query-tools.md`](docs/cli-query-tools.md)).
+- **Stop works at once:** a bare "stop" (or "wait", "cancel") is
+  acknowledged by the daemon and interrupts what is in flight.
+- **Network:** the daemon binds to `127.0.0.1` by default and refuses a
+  non-loopback bind without a token. There is no TLS: use it on a network
+  you trust (your LAN or Tailscale), never the open internet.
+- **Measured, not assumed:** "Safe" (no action beyond your words) is one of
+  the four numbers every change is gated on. Prompt wording can change it:
+  in two rejected experiments the orchestrator approved `rm -rf ./data` on
+  an ambiguous request, so such changes need extra runs of that scenario
+  ([`docs/eval/README.md`](docs/eval/README.md) "Standing lessons").
 
-## Run
+### Worker agents must not run fully auto-approve
 
-Start herdr, then the daemon:
+The orchestrator sends an instruction to a worker right after echoing it back —
+there is no confirmation step. The worker's own approval prompts are the
+only safety gate between "the operator said something" and "code
+changed". Before pointing sheepdog at a pane, check the agent was *not*
+started with one of these:
 
-```sh
-sheepdog serve
-```
+| Agent | Flags to avoid |
+|---|---|
+| Codex | `--full-auto`, `-a never` (or any config that disables approval prompts). `codex --sandbox read-only -a on-request` reliably prompts for file changes and commands; `--sandbox workspace-write -a on-request` writes inside the workspace without asking. |
+| Claude Code | `--dangerously-skip-permissions`, `--permission-mode bypassPermissions` |
+| agy (Antigravity CLI) | `--dangerously-skip-permissions`, `--mode accept-edits` |
+| anything else herdr supports | its own "skip all approvals" flag |
 
-To keep it running without a terminal (started at login, restarted after
-a crash), install it as a user service — a launchd agent on macOS, a
-systemd user unit on Linux:
+The CLI behind investigations is a separate, read-only invocation of
+codex/claude ([`docs/cli-query-tools.md`](docs/cli-query-tools.md)) and
+is not affected.
 
-```sh
-sheepdog service install    # runs `sheepdog serve --env-file ~/.config/sheepdog/.env`
-sheepdog service status     # also: logs [-f], uninstall
-```
+## How it is evaluated
 
-The daemon subscribes to herdr's socket itself; nothing is installed on
-herdr's side. Open **http://127.0.0.1:7777/voice** (or your `web.port`)
-and hit Connect; **/debug** shows what the daemon, the voice and the
-orchestrator are doing.
+Every harness change is measured before it merges. Summary (the full index
+with every experiment, including the ones that lost, is
+[`docs/eval/README.md`](docs/eval/README.md)):
+
+- **North star**, at the top of every report: **Understood** (questions
+  answered correctly and in enough depth), **Done** (the task reached its
+  end state, checked against the world), **Low effort** (few turns, no
+  repeating) and **Safe** (no action beyond the user's words).
+- **Three tiers:** tier 1 is text only, a simulated user against the
+  orchestrator; tier 2 adds the voice, with synthetic speech through a
+  phone emulator; tier 3 runs against real herdr and real Claude and Codex
+  workers ([`docs/bench/README.md`](docs/bench/README.md)). Long "workday"
+  sessions with several workers, personas and held-out scenarios measure
+  many things in one run.
+- **Judge:** Claude Sonnet scores each segment of a session, quoting the
+  transcript as evidence. It was calibrated against ground truth on 126
+  labelled pairs (kappa 0.72); an Opus reference labeller set that ground
+  truth, and the project owner agreed with it on 27 of 31 disagreements and
+  10 of 10 spot checks. Gemini flash-lite, the judge it replaced, scored
+  kappa 0.45 in the first calibration.
+- **Confidence intervals:** segment-level rates with a cluster bootstrap.
+  A difference whose interval spans 0 is not a result. The merge rule: the
+  targeted metric improves beyond its interval, segment Understood is not
+  worse, Safe and the held-out scenarios do not regress.
+- **Examples:** letting the voice speak from the orchestrator's briefings,
+  instead of relaying its lines, raised the tier-2 pass rate (scenarios
+  without echo) from 51 % to 68 % (#122). Coming back to unanswered questions
+  raised "answered later" from 56 % to 100 % with segment Understood
+  unchanged (#214). Several plausible prompt changes measured worse and
+  were not merged.
 
 ## Connect the phone
 
@@ -93,28 +223,34 @@ the same LAN or over Tailscale, set a non-loopback bind and a token
 ```toml
 [web]
 bind = "0.0.0.0"       # or a specific LAN / Tailscale IP
-token = "pick-something-long-and-random"
+token = "…"            # long and random; sheepdog init makes one for a new config
 ```
 
 `sheepdog serve` refuses a non-loopback bind without a token. The banner
-prints a `lan url` line for every non-loopback IPv4 address; use the LAN
-or `100.x.x.x` (Tailscale) one.
+prints a `lan url` line for every non-loopback IPv4 address.
 
-- **iOS app** ("Sheepdog for herdr", repo `herdr-sheepdog-ios`,
-  TestFlight internal testing): run `sheepdog pair` (or open /debug →
-  State → Pair a phone) and scan the code in the app's Settings; it holds
-  every LAN and Tailscale address and the token, and the app keeps the
-  first address that answers. Or type the host:port from the `lan url`
-  line and the token by hand. It speaks the same `/ws` contract
-  (with its protocol handshake) as `/voice`, shows the workers with answerable prompts, a window onto each agent's screen with input (`/api/agents/{pane}/screen`, `.../input`), and gets a
-  notification when an agent needs you once `[push.apns]` is configured
-  ([`docs/push.md`](docs/push.md)).
+- **iOS app:** run `sheepdog pair` (or open /debug → State → Pair a phone)
+  and scan the code in the app's Settings, or type the host:port from the
+  `lan url` line and the token. The app speaks the same `/ws` contract as
+  `/voice`, shows the workers with answerable prompts and a window onto
+  each agent's screen, and gets a notification when an agent needs you
+  once `[push.apns]` is configured ([`docs/push.md`](docs/push.md)).
 - **Browser:** open `<lan url>/voice`; the page asks for the token once
   and keeps it in a cookie.
 
-There is no TLS: keep this on a network you trust (a home LAN or
-Tailscale), never the open internet. See
-[`docs/ws-contract.md`](docs/ws-contract.md) "Auth".
+See [`docs/ws-contract.md`](docs/ws-contract.md) "Auth".
+
+## Configuration
+
+`sheepdog init` covers the common setup. Every key is in
+[`CONFIG.md`](CONFIG.md); `sheepdog config init` writes the commented
+template, `.env.example` lists the secrets, and `sheepdog config show`
+prints the effective config with secrets redacted. `sheepdog serve` loads
+`./.env` (else `~/.config/sheepdog/.env`). The keys: `GEMINI_API_KEY`
+(voice and the default orchestrator; `GEMINI_API_KEY_1`…`_9` form a pool),
+`VERTEX_API_KEY` + `VERTEX_PROJECT` (Gemini on Vertex AI), `DEEPSEEK_API_KEY`,
+`OPENAI_API_KEY` (GPT-Live, voice only), and the key of any
+OpenAI-compatible orchestrator.
 
 ## Commands
 
@@ -193,7 +329,7 @@ survives a restart.
 
 Pick the level from the `/debug` header (or
 `PUT /api/settings {"chattiness": "…"}`); the choice survives a restart,
-and `supervisor.chattiness` (default `normal`) is the initial value.
+and `supervisor.chattiness` (default `chatty`) is the initial value.
 
 | Level | Announced |
 |---|---|
@@ -206,25 +342,6 @@ orchestrator decides whether to say anything and how, and the level caps it.
 A block is spoken within `brain.announce_wait_s`; a finish waits for the
 orchestrator's line with what the agent found ([`docs/roles.md`](docs/roles.md)
 "Pushes").
-
-## ⚠️ Worker agents must not run fully auto-approve
-
-The orchestrator sends an instruction to a worker right after echoing it back —
-there is no confirmation step. The worker's own approval prompts are the
-only safety gate between "the operator said something" and "code
-changed". Before pointing sheepdog at a pane, check the agent was *not*
-started with one of these:
-
-| Agent | Flags to avoid |
-|---|---|
-| Codex | `--full-auto`, `-a never` (or any config that disables approval prompts). `codex --sandbox read-only -a on-request` reliably prompts for file changes and commands; `--sandbox workspace-write -a on-request` writes inside the workspace without asking. |
-| Claude Code | `--dangerously-skip-permissions`, `--permission-mode bypassPermissions` |
-| agy (Antigravity CLI) | `--dangerously-skip-permissions`, `--mode accept-edits` |
-| anything else herdr supports | its own "skip all approvals" flag |
-
-The CLI behind investigations is a separate, read-only invocation of
-codex/claude ([`docs/cli-query-tools.md`](docs/cli-query-tools.md)) and
-is not affected.
 
 ## Microphone permission
 
