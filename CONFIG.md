@@ -10,7 +10,8 @@ authoritative source; this file is checked against it in
 `internal/config/doc_test.go` — a struct field without a matching entry
 here fails `go test`.
 
-`sheepdog serve --env-file PATH` (default `./.env` if present) loads
+`sheepdog serve --env-file PATH` (default `./.env` if present, else
+`~/.config/sheepdog/.env`, the secret file `sheepdog init` writes) loads
 `KEY=VALUE` lines into the process environment *before* the config file
 and its `SHEEPDOG_*` overrides are read, so any key below with an env
 override can also come from a `.env` file in a dev checkout. See
@@ -18,6 +19,26 @@ override can also come from a `.env` file in a dev checkout. See
 with secrets redacted (as counts); `sheepdog config init` writes a
 commented template of every key below to `~/.config/sheepdog/config.toml`
 (or `--path`), refusing to overwrite an existing file without `--force`.
+
+`sheepdog init` is the guided setup on top of it: it checks herdr (and says
+how to install it), asks for one key — Gemini AI Studio by default, or
+DeepSeek / any OpenAI-compatible orchestrator (`[[brain.openai_compat]]`)
+plus a Gemini key for the voice — validates each with a free model-list
+call, and writes the keys to `~/.config/sheepdog/.env` (or `--env-file`)
+and, only when there is none yet, `config.toml` (both mode 0600). A new
+config also gets a random 43-character `SHEEPDOG_WEB_TOKEN`; an existing
+token (in the file, the env file or the environment) is never changed,
+and an existing `config.toml` is never rewritten (init prints the lines to
+add). Keys are read without echo and never printed. `--non-interactive`
+takes the keys from the environment (for scripts and tests).
+`sheepdog doctor` checks the result and prints one line per check with
+its fix: herdr's socket, every configured key (live; DeepSeek's balance and
+an OpenRouter key's credit where the API shows them; AI Studio does not
+expose its quota), a one-call tool-calling probe on each OpenAI-compatible
+orchestrator (a few tokens; `--no-probe` skips it), the orchestrator and
+voice providers, the web port (free, this daemon, or another program),
+the bind/token pairing, `[push.apns]` and the secret files' permissions.
+It exits 1 on any failure.
 
 Two keys — `[aliases]` and the `[cli]` argv templates (`codex_cmd`,
 `claude_cmd`, `codex_resume_cmd`, `claude_resume_cmd`) — are TOML-only:

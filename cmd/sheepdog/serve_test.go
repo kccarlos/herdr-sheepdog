@@ -101,6 +101,37 @@ func TestLoadServeEnvFile(t *testing.T) {
 	}
 }
 
+// Without --env-file, ./.env wins; without it the config directory's
+// .env (what sheepdog init writes) is loaded.
+func TestImplicitEnvFileFallback(t *testing.T) {
+	cfgDir := t.TempDir()
+	cfgEnv := filepath.Join(cfgDir, ".env")
+	if err := os.WriteFile(cfgEnv, []byte("SHEEPDOG_ENVFILE_FALLBACK=config-dir\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old := configEnvPath
+	configEnvPath = func() string { return cfgEnv }
+	t.Cleanup(func() { configEnvPath = old; _ = os.Unsetenv("SHEEPDOG_ENVFILE_FALLBACK") })
+
+	t.Chdir(t.TempDir())
+	if got := implicitEnvFile(); got != cfgEnv {
+		t.Errorf("no ./.env: implicit = %q, want %q", got, cfgEnv)
+	}
+	var stderr bytes.Buffer
+	if code, ok := loadServeEnvFile("", &stderr); !ok || code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, stderr.String())
+	}
+	if v := os.Getenv("SHEEPDOG_ENVFILE_FALLBACK"); v != "config-dir" {
+		t.Errorf("fallback not loaded: %q", v)
+	}
+	if err := os.WriteFile(".env", []byte("X=1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := implicitEnvFile(); got != ".env" {
+		t.Errorf("with ./.env: implicit = %q", got)
+	}
+}
+
 // TestServeEnvFileLoadsAndNeverLogs proves `serve --env-file` actually
 // takes effect (a GEMINI_API_KEY only present in the file reaches
 // cfg.Gemini.APIKeys, visible as a count) and that the raw value never

@@ -30,7 +30,8 @@ func printServeUsage(w io.Writer) {
 	fprintln(w, "flags:")
 	fprintln(w, "  --config PATH     config file (default ~/.config/sheepdog/config.toml)")
 	fprintln(w, "  --env-file PATH   load KEY=VALUE lines into the environment before config is")
-	fprintln(w, "                    read (default ./.env if it exists; no error if it does not;")
+	fprintln(w, "                    read (default ./.env if it exists, else ~/.config/sheepdog/.env;")
+	fprintln(w, "                    no error if neither does;")
 	fprintln(w, "                    an explicitly given path that is missing is an error). Real")
 	fprintln(w, "                    env vars always win over the file; values are never logged.")
 	fprintln(w, "  --port N          web port (default from config: web.port / SHEEPDOG_WEB_PORT, 7777)")
@@ -87,15 +88,35 @@ func parseServeFlags(args []string, stderr io.Writer) (serveOpts, int, bool) {
 	return o, 0, true
 }
 
+// configEnvPath is the secret file `sheepdog init` writes
+// (config.DefaultEnvPath; tests point it elsewhere).
+var configEnvPath = config.DefaultEnvPath
+
+// implicitEnvFile is the env file loaded without --env-file: ./.env when
+// present, else the config directory's .env (sheepdog init), else
+// ./.env (absent: nothing is loaded).
+func implicitEnvFile() string {
+	if _, err := os.Stat(defaultEnvFile); err == nil {
+		return defaultEnvFile
+	}
+	if p := configEnvPath(); p != "" {
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	return defaultEnvFile
+}
+
 // loadServeEnvFile implements --env-file: an explicitly given path must
-// exist; the implicit default (./.env) is silently skipped when absent,
+// exist; the implicit default (./.env, else ~/.config/sheepdog/.env) is
+// silently skipped when absent,
 // since most runs (production, launchd) have no .env at all. Values are
 // loaded before config.Load so SHEEPDOG_*/GEMINI_API_KEY* from the file
 // take effect, and are never logged (see config.LoadEnvFile).
 func loadServeEnvFile(path string, stderr io.Writer) (code int, ok bool) {
 	explicit := path != ""
 	if !explicit {
-		path = defaultEnvFile
+		path = implicitEnvFile()
 	}
 	if _, err := os.Stat(path); err != nil {
 		if explicit {
