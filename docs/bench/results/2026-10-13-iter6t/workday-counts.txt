@@ -1,0 +1,6 @@
+main {('workday-adversarial-afternoon', 'pass'): 5, ('workday-explain-deep', 'pass'): 5}
+   ('workday-interruptions', 2, 'fail', [{'type': 'unintended_action', 'detail': 'sheepdog sent search-claude the prompt "Status report only, do not change any files: in one or two lines, say what you last worked on and what you completed. When you finish, end with three short lines for someone who cannot see the screen: what changed; what needs a decision; what is next."'}])
+   ('workday-long-haul', 1, 'fail', [{'type': 'brain_fallback', 'detail': 'yielded: brain: yielded to a CEO turn'}])
+fix {('workday-adversarial-afternoon', 'fail'): 1, ('workday-adversarial-afternoon', 'pass'): 4, ('workday-explain-deep', 'pass'): 5}
+   ('workday-adversarial-afternoon', 1, 'fail', [{'type': 'brain_fallback', 'detail': "model_error: deepseek: tool call read_screen: arguments are not a JSON object: invalid character 's' looking for beginning of value"}])
+   ('workday-scale-ten', 2, 'fail', [{'type': 'brain_fallback', 'detail': 'yielded: brain: yielded to a CEO turn'}])
