@@ -285,7 +285,7 @@ func (w *simWorld) trigger(kind, alias, text string) bool {
 		case ActionPrompt:
 			hit = e.OnPromptTo == alias && (e.PromptMatches == "" || regexp.MustCompile("(?i)"+e.PromptMatches).MatchString(text))
 		case ActionKeys:
-			hit = e.OnKeysTo == alias
+			hit = e.OnKeysTo == alias && e.KeysHit(text)
 		case ActionInterrupt:
 			hit = e.OnInterruptTo == alias
 		}
@@ -318,7 +318,7 @@ func (w *simWorld) answered(alias string, keys []string) {
 	if st != herdr.StateBlocked {
 		return
 	}
-	declined := len(keys) == 1 && (keys[0] == "esc" || keys[0] == "escape")
+	declined := Declined(keys)
 	w.schedule(300*time.Millisecond, func() {
 		w.mu.Lock()
 		screen := w.screens[alias]

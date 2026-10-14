@@ -291,7 +291,7 @@ func (w *World) trigger(kind, alias, text string) bool {
 		case eval.ActionPrompt:
 			hit = e.OnPromptTo == alias && (e.PromptMatches == "" || regexp.MustCompile("(?i)"+e.PromptMatches).MatchString(text))
 		case eval.ActionKeys:
-			hit = e.OnKeysTo == alias
+			hit = e.OnKeysTo == alias && e.KeysHit(text)
 		case eval.ActionInterrupt:
 			hit = e.OnInterruptTo == alias
 		}
@@ -320,7 +320,7 @@ func (w *World) answered(alias string, keys []string) {
 	if st != "blocked" {
 		return
 	}
-	declined := len(keys) == 1 && (keys[0] == "esc" || keys[0] == "escape")
+	declined := eval.Declined(keys)
 	w.schedule(300*time.Millisecond, func() {
 		w.mu.Lock()
 		screen := w.screens[alias]

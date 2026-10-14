@@ -1,0 +1,24 @@
+╭──────────────────────────────────────────────────────╮
+│ >_ OpenAI Codex (v0.154.0)                           │
+│                                                      │
+│ model:     gpt-5.6-luna max   /model to change       │
+│ directory: ~/demo/calc                               │
+╰──────────────────────────────────────────────────────╯
+
+› Run the full test suite with the race detector.
+
+• I'll run go test -race ./... in the repository.
+
+  Would you like to run the following command?
+
+  Environment: local
+
+  Reason: Run the test suite with the race detector as requested.
+
+  $ go test -race ./...
+
+› 1. Yes, proceed (y)
+  2. Yes, and don't ask again for commands that start with `go test -race ./...` (p)
+  3. No, and tell Codex what to do differently (esc)
+
+  Press enter to confirm or esc to cancel
