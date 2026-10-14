@@ -233,6 +233,13 @@ type Message struct {
 
 	// error and screen-error
 	Message string `json:"message,omitempty"`
+	// error about an account problem (docs/ws-contract.md "Account
+	// problems"): Problem is invalid_key, quota or balance, Role what it
+	// blocks (orchestrator, voice), Provider (above) the service, and Fix
+	// the one-line fix. Absent on any other error.
+	Problem string `json:"problem,omitempty"`
+	Role    string `json:"role,omitempty"`
+	Fix     string `json:"fix,omitempty"`
 
 	// screen-subscribe (PaneID, Lines), screen-error (PaneID, Ended) and
 	// screen (Screen): the agent window over /ws. Ended is set on a
@@ -324,6 +331,13 @@ func Transcript(dir, text string, final bool) Message {
 
 // Error builds a server→client non-fatal error message.
 func Error(msg string) Message { return Message{Type: TypeError, Message: msg} }
+
+// AccountError builds the error message for an account problem: the
+// plain sentence naming the service, and the problem, the role it
+// blocks, the provider and the fix as fields.
+func AccountError(msg, problem, role, provider, fix string) Message {
+	return Message{Type: TypeError, Message: msg, Problem: problem, Role: role, Provider: provider, Fix: fix}
+}
 
 // Pong builds the reply to Ping.
 func Pong() Message { return Message{Type: TypePong} }

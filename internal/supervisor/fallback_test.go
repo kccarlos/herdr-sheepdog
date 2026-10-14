@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kccarlos/herdr-sheepdog/internal/brain"
 	"github.com/kccarlos/herdr-sheepdog/internal/brain/braintest"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/prose"
@@ -88,5 +89,35 @@ func TestBrainFailedLineFitsTheEar(t *testing.T) {
 	}
 	if strings.Contains(brainFailedLine, "?") {
 		t.Errorf("%q asks a question a bare yes would answer (and could approve an open worker prompt)", brainFailedLine)
+	}
+}
+
+// TestFallbackNamesAccountProblem: the orchestrator's only provider has
+// used up its balance. "Say it again" would fail the same way, so the
+// answer names the service and the fix, fits the ear, follows the
+// user's language, and its facts tell the voice a retry will not help.
+func TestFallbackNamesAccountProblem(t *testing.T) {
+	m := braintest.NewModel()
+	m.Default = &braintest.Step{Err: &brain.APIError{Provider: brain.ProviderDeepSeek, Status: 402, Message: "Insufficient Balance"}}
+	m.EventDefault = braintest.NothingToAdd()
+	h := newBrainHarness(t, m)
+	h.addAgent("w5:p1", "auth", "codex", herdr.StateWorking)
+
+	res := h.say("what's going on")
+	if !strings.HasPrefix(res.Spoken, "Gemini says the account balance is used up") {
+		t.Fatalf("fallback = %q", res.Spoken)
+	}
+	if res.Spoken == brainFailedLine || strings.Contains(res.Spoken, "say it again") {
+		t.Errorf("fallback offers a retry: %q", res.Spoken)
+	}
+	if spoken, overflow := prose.EarLine(res.Spoken, ""); spoken != res.Spoken || overflow != "" {
+		t.Errorf("EarLine(%q) = %q, overflow %q", res.Spoken, spoken, overflow)
+	}
+	if !strings.Contains(res.Detail, "will fail the same way") {
+		t.Errorf("detail = %q", res.Detail)
+	}
+	h.clock.Advance(5 * time.Second)
+	if zh := h.say("现在什么情况？"); !strings.Contains(zh.Spoken, "余额用完了") {
+		t.Errorf("zh fallback = %q", zh.Spoken)
 	}
 }

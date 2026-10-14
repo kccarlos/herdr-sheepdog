@@ -40,7 +40,10 @@ type turn struct {
 	retried bool
 	// tried are the providers this turn already left (failed over away
 	// from, or routed around as down): never picked again in the turn.
-	tried    []string
+	tried []string
+	// alerts are the account problems this turn found first (markDown):
+	// told once, after the turn (tellAccount).
+	alerts   []AccountAlert
 	steps    int
 	calls    int // model calls
 	tokIn    int
@@ -157,6 +160,7 @@ func (b *Brain) Turn(ctx context.Context, req Request) (Reply, error) {
 	t := &turn{req: req, start: start, soft: start.Add(timeout), queued: queued}
 	t.provider, t.model, t.impl = b.current()
 	reply, err := b.run(tctx, t)
+	b.tellAccount(t, err)
 	b.after.Add(1)
 	go b.afterTurn(t)
 	return reply, err

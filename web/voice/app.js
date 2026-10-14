@@ -479,7 +479,8 @@ function onControl(m) {
       addTranscript(m.dir, m.text, !!m.final);
       break;
     case 'error':
-      showError(m.message || 'error');
+      if (m.problem) showAccountProblem(m);
+      else showError(m.message || 'error');
       break;
     case 'pong':
       state.pongMs = performance.now() - state.pingSentAt;
@@ -617,13 +618,31 @@ function sendText() {
   while (state.transcript.length > TRANSCRIPT_LINES) state.transcript.shift();
 }
 
-function showError(msg) {
+function showError(msg, ms = 12000) {
   const el = $('error');
   el.textContent = msg;
   el.classList.remove('hidden');
   clearTimeout(state.errorTimer);
-  state.errorTimer = setTimeout(hideError, 12000);
+  state.errorTimer = setTimeout(hideError, ms);
   console.warn(`[voice] ${msg}`);
+}
+
+// showAccountProblem shows an account problem (docs/ws-contract.md
+// "Account problems") with its fix, longer than a passing error. When it
+// is the voice's own provider, the voice cannot say it, so the browser
+// says it once per problem.
+function showAccountProblem(m) {
+  const fix = m.fix ? ` Fix: ${m.fix}.` : '';
+  showError(`${m.message}${fix}`, 60000);
+  const key = `${m.role}/${m.provider}/${m.problem}`;
+  state.accountSpoken = state.accountSpoken || new Set();
+  if (m.role !== 'voice' || state.accountSpoken.has(key)) return;
+  state.accountSpoken.add(key);
+  try {
+    if (window.speechSynthesis) window.speechSynthesis.speak(new SpeechSynthesisUtterance(m.message));
+  } catch (e) {
+    console.warn('[voice] speech synthesis failed', e);
+  }
 }
 
 function hideError() {

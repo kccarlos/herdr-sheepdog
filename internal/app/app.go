@@ -435,6 +435,7 @@ func (a *App) wire() error {
 		ReloadPrompts:  a.ReloadPrompts,
 		Brain:          a.brain,
 		BrainOffReason: a.brainOff,
+		Accounts:       accountsOf(a.brain),
 		BrainProviders: a.brainProviders,
 		Token:          cfg.Web.Token,
 		VoiceContext:   a.voiceCtx,
@@ -1345,4 +1346,14 @@ func ownDir() []string {
 		return []string{wd}
 	}
 	return nil
+}
+
+// accountsOf is the orchestrator's set of account problems, shared with
+// the web layer; nil without an orchestrator (the web layer then keeps
+// the voice's alone).
+func accountsOf(b *brain.Brain) *brain.AccountAlerts {
+	if b == nil {
+		return nil
+	}
+	return b.Accounts()
 }

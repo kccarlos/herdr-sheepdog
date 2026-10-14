@@ -168,6 +168,9 @@ func (h *hub) handle(w http.ResponseWriter, r *http.Request) {
 	c.firstStatus = first.data
 	c.mu.Unlock()
 	c.enqueue(first)
+	if !busy {
+		h.sendAccounts(c)
+	}
 	c.startHandshake(h.s.deps.HandshakeTimeout)
 	go c.writeLoop()
 	go c.statsLoop(h.s.deps.StatsInterval)
@@ -265,6 +268,7 @@ func (h *hub) onVoiceEvent(ev voice.Event) {
 		h.status, h.reason, h.stalled = e.Status, e.Reason, e.Stalled
 		h.mu.Unlock()
 		h.send(h.statusMsg())
+		h.voiceConnected(e)
 	case voice.EventInterrupted:
 		h.flush()
 	case voice.EventTurnComplete:
@@ -278,7 +282,7 @@ func (h *hub) onVoiceEvent(ev voice.Event) {
 		}
 		h.send(wsproto.Transcript(e.Dir.String(), e.Text, e.Final))
 	case voice.EventError:
-		if e.Err != nil {
+		if e.Err != nil && !h.voiceAccountError(e.Err) {
 			h.send(wsproto.Error(e.Err.Error()))
 		}
 	}

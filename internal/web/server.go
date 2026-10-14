@@ -98,6 +98,12 @@ type Deps struct {
 	// ("--brain=off", "brain.enabled=false", "no Gemini key").
 	Brain          *brain.Brain
 	BrainOffReason string
+	// Accounts is the daemon's set of account problems (an invalid key,
+	// a used-up quota or balance) shared with the orchestrator; the hub
+	// shows each one to the client once and again to a client that
+	// connects later, and adds the voice provider's own (accounts.go).
+	// nil gets an empty set.
+	Accounts *brain.AccountAlerts
 	// BrainProviders lists the providers the picker offers, available
 	// or not (with the reason: "no DEEPSEEK_API_KEY"); nil lists the
 	// orchestrator's registered providers, all available.
@@ -247,8 +253,12 @@ func New(deps Deps) (*Server, error) {
 	if deps.Logger == nil {
 		deps.Logger = deps.Log
 	}
+	if deps.Accounts == nil {
+		deps.Accounts = brain.NewAccountAlerts()
+	}
 	s := &Server{deps: deps, log: deps.Logger, mux: http.NewServeMux(), closing: make(chan struct{}), audio: feedback.NewAudioLog()}
 	s.hub = newHub(s)
+	deps.Accounts.Subscribe(s.hub.onAccount)
 	if err := s.routes(); err != nil {
 		return nil, err
 	}
