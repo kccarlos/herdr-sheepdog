@@ -20,6 +20,17 @@ PCM16 mono, 16 kHz up, 24 kHz down, plus a few JSON control frames.
 |---|---|---|---|
 | ![Conversation and voice bar](docs/screenshots/review-light-voicebar-live.png) | ![Approval card](docs/screenshots/review-light-conversation-approval.png) | ![Agents pane](docs/screenshots/review-light-flock.png) | ![Models](docs/screenshots/review-light-models.png) |
 
+## Try it without a Mac: the demo
+
+Tap **Try the demo** on the first screen (or in Settings). Scripted agents
+run on the phone itself: one finishes, one asks for an approval you can
+answer, one fails. The voice reads the news aloud with on-device speech,
+and you can tap a suggested question, type one, or ask it aloud where
+on-device speech recognition is available. No daemon, no network, no
+cloud model. **Leave** returns to the setup. How it works:
+[`docs/architecture.md`](docs/architecture.md#the-offline-demo); the App
+Review notes are in [`docs/app-review-notes.md`](docs/app-review-notes.md).
+
 ## Quick start
 
 1. **Install from TestFlight.** The app is internal-testing only. Ask to be

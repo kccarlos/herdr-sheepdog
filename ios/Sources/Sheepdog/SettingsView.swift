@@ -31,11 +31,33 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack(path: $path) {
             List {
-                Section {
-                    NavigationLink(value: SettingsPage.daemon) {
-                        MenuRow(title: "Daemon", symbol: "desktopcomputer", value: model.isConfigured ? model.endpointDisplay : "Not set")
+                if model.isDemo {
+                    Section {
+                        Button {
+                            dismiss()
+                            model.leaveDemo()
+                        } label: {
+                            Label("Leave the demo", systemImage: "xmark.circle")
+                        }
+                        .accessibilityIdentifier("settings.leaveDemo")
+                    } footer: {
+                        Text("You are in the demo: scripted agents on this phone, no daemon and no network. Leaving returns to your own setup.")
                     }
-                    .accessibilityIdentifier("settings.daemon")
+                } else {
+                    Section {
+                        NavigationLink(value: SettingsPage.daemon) {
+                            MenuRow(title: "Daemon", symbol: "desktopcomputer", value: model.isConfigured ? model.endpointDisplay : "Not set")
+                        }
+                        .accessibilityIdentifier("settings.daemon")
+                        Button {
+                            model.openDemo()
+                        } label: {
+                            Label("Try the demo", systemImage: "play.circle")
+                        }
+                        .accessibilityIdentifier("settings.tryDemo")
+                    } footer: {
+                        Text("The demo runs scripted agents on this phone, with no daemon and no network.")
+                    }
                 }
 
                 Section {

@@ -557,6 +557,45 @@ repointed, and a banner says how it went. Declining, or a code whose
 addresses all fail, reopens the first-run Settings when no daemon is saved
 yet. `PairingLinkUITests` drives this without a daemon.
 
+## The offline demo
+
+Settings ▸ **Try the demo** (and the same button on the first-run Daemon
+screen) shows the app on a scripted world, for App Store review and for
+anyone without a daemon. The bar is that a reviewer can try the core flow
+with no server: agents finish, one asks for an approval, one fails; the
+voice speaks; questions get answers.
+
+- **`DemoWorld` (SheepdogKit, tested):** four agents and a script on an
+  injected clock. Approve/decline change the story; `ask` answers a few
+  questions from the world as it is (status, failures, the open prompt, one
+  agent's result) and approves or declines on "approve" / "decline". It
+  logs the same events a daemon would (`pending.created`, `voice.push`,
+  `web.utterance`, `voice.tool_result`, …) and folds them through
+  `ConversationHistory`, so the conversation page and the stream agree.
+- **`DemoDaemon` + `DemoURLProtocol` (SheepdogKit, tested):** the world
+  behind the daemon's own routes and JSON (`/api/hello`, `/api/state`,
+  `/api/conversation`, `/api/events`, `/events` held open as SSE,
+  `/api/pending/answer`, `/api/inject/utterance`,
+  `/api/agents/{pane}/screen` and `/input`). `DaemonClient` reaches it on
+  a `URLSession` whose protocol class answers everything for the host
+  `demo.sheepdog.invalid`, so no request leaves the app. The agent list,
+  the approval card and the agent window are the real views.
+- **A second `SessionViewModel(demo:)`** in a full-screen cover
+  (`DemoShell`), with its own settings (a throwaway defaults suite, secrets
+  in memory) and a cache in a temporary directory. The real view model,
+  its address, token and conversation are untouched; leaving drops the demo
+  model and reopens first-run Settings if no daemon is saved. The demo
+  model skips the Live Activity, the intents and push registration.
+- **No `/ws`:** `runDemo(_:)` takes the session core's socket and audio
+  effects. The socket "opens" at once with a connected status; the
+  `DemoVoice` speaks the world's lines and answers with
+  `AVSpeechSynthesizer` (its start/stop drive the orb's speaking state) and,
+  where `SFSpeechRecognizer.supportsOnDeviceRecognition` holds and the user
+  allows it, hears questions with `requiresOnDeviceRecognition` and sends
+  them as typed questions. Otherwise the status line says to tap a
+  suggested question (the `DemoHeader` under the toolbar) or type.
+  Nothing calls a cloud model.
+
 ## Empty and error states
 
 `FlockPaneState` (SheepdogKit, tested) decides what an empty Agents pane

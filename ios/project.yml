@@ -110,6 +110,9 @@ targets:
         NSMicrophoneUsageDescription: >-
           Sheepdog uses the microphone so you can talk to your coding
           agents. Audio goes only to the sheepdog daemon you point the app at.
+        NSSpeechRecognitionUsageDescription: >-
+          In the demo, Sheepdog recognises your spoken questions on this
+          iPhone only (on-device recognition). Nothing is sent anywhere.
         NSCameraUsageDescription: >-
           Sheepdog uses the camera only to scan the pairing code that
           "sheepdog pair" shows on your Mac. Nothing is recorded.

@@ -52,3 +52,17 @@ public final class KeychainSecretStore: SecretStore {
         ]
     }
 }
+
+/// Secrets that live only as long as the process: the offline demo's
+/// settings, which must never touch the real token in the keychain.
+public final class MemorySecretStore: SecretStore {
+    private var values: [String: String] = [:]
+
+    public init() {}
+
+    public func secret(for account: String) -> String? { values[account] }
+
+    public func setSecret(_ value: String?, for account: String) {
+        values[account] = (value?.isEmpty ?? true) ? nil : value
+    }
+}

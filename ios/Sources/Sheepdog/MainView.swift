@@ -19,6 +19,10 @@ struct MainView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
+                if model.isDemo {
+                    DemoHeader()
+                        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+                }
                 if let banner = model.banner {
                     BannerView(banner: banner, retry: { model.bannerAction() }, dismiss: { model.banner = nil })
                         // Chrome stops growing at the largest non-
@@ -482,4 +486,45 @@ struct PinnedApprovalCard: View {
 private struct CardHeightKey: PreferenceKey {
     static var defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+}
+
+/// The offline demo's label, its way out, and the questions it understands
+/// (also by typing, and by voice where on-device recognition is available).
+struct DemoHeader: View {
+    @EnvironmentObject private var model: SessionViewModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Label("Demo", systemImage: "play.circle.fill")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Color.accentColor)
+                Text("Scripted agents, on this phone only")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                Button("Leave") { model.leaveDemo() }
+                    .font(.subheadline.weight(.medium))
+                    .accessibilityIdentifier("demo.leave")
+            }
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(Array(DemoWorld.suggestedQuestions.enumerated()), id: \.offset) { index, question in
+                        Button(question) { model.askDemo(question) }
+                            .font(.footnote.weight(.medium))
+                            .buttonStyle(.bordered)
+                            .buttonBorderShape(.capsule)
+                            .disabled(model.sendingTyped)
+                            .accessibilityIdentifier("demo.question.\(index)")
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(Color.accentColor.opacity(0.08))
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("demo.header")
+    }
 }

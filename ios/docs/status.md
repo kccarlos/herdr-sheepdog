@@ -49,6 +49,13 @@ The CEO checked these on 2026-10-01 and 2026-10-02 with TestFlight build
 
 ## Not verified on a device yet
 
+- **The offline demo:** simulator only (`DemoUITests`, `DemoWorldTests`,
+  `DemoDaemonTests`). Spoken questions (on-device speech recognition) are
+  untested: the simulator has no usable input, so the demo there runs on
+  the suggested questions and typing. To check on a phone: the voice reads
+  the announcements, a spoken "what failed?" is answered, mute stops
+  listening, and the voice does not hear itself.
+
 - **Pairing from the Camera app (`sheepdog://pair`):** scanning
   `sheepdog pair`'s code with the system Camera app and confirming "Pair
   with <host>?". Checked in the simulator (`PairingLinkUITests`) only.

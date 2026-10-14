@@ -36,6 +36,19 @@ struct DaemonSettingsView: View {
                 }
             }
 
+            if firstRun {
+                Section {
+                    Button {
+                        model.openDemo()
+                    } label: {
+                        Label("Try the demo", systemImage: "play.circle")
+                    }
+                    .accessibilityIdentifier("settings.firstRun.tryDemo")
+                } footer: {
+                    Text("No Mac yet? The demo shows the app with scripted agents that run on this phone: no daemon, no account, no network.")
+                }
+            }
+
             Section {
                 Button {
                     scanning = true

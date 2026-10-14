@@ -183,7 +183,10 @@ final class SessionViewModel: ObservableObject {
 
     /// The line above the voice bar: what to do, not only what is happening.
     var statusLine: String {
-        VoiceBarModel.statusLine(state: state, talkMode: talkMode, holding: holding, noSignal: noMicSignal)
+        if demo != nil, state == .noMicrophone || state == .muted {
+            return "Demo: tap a question above, or type"
+        }
+        return VoiceBarModel.statusLine(state: state, talkMode: talkMode, holding: holding, noSignal: noMicSignal)
     }
 
     /// The voice provider id, from whichever source knows it right now: the
@@ -261,11 +264,14 @@ final class SessionViewModel: ObservableObject {
     /// and the speaking hold always were.
     private var now: Date { Date(timeIntervalSinceReferenceDate: ProcessInfo.processInfo.systemUptime) }
 
-    init(settings: SettingsStore = SettingsStore(), cache: ConversationCache = .standard()) {
+    init(settings: SettingsStore = SettingsStore(), cache: ConversationCache = .standard(), demo: DemoDaemon? = nil) {
         self.settings = settings
         self.cache = cache
+        self.demo = demo
         let endpoint = settings.endpoint ?? DaemonEndpoint(host: "127.0.0.1")
-        self.client = DaemonClient(endpoint: endpoint)
+        // The demo's client answers from `DemoDaemon` inside the app and
+        // never opens a network connection.
+        self.client = demo == nil ? DaemonClient(endpoint: endpoint) : DaemonClient(endpoint: endpoint, session: DemoDaemon.session())
         self.socket = VoiceSocket(endpoint: endpoint)
         self.core = SessionCore(talkMode: settings.talkMode, keepListeningWhenLocked: settings.keepListeningWhenLocked)
         talkMode = settings.talkMode
@@ -287,6 +293,10 @@ final class SessionViewModel: ObservableObject {
     /// Called once from the first `onAppear`: an unconfigured app opens
     /// Settings instead of showing a Connect button that cannot work.
     func start() {
+        if demo != nil {
+            startDemo()
+            return
+        }
         // Siri, the Action Button and the Live Activity's buttons reach the
         // session from here on; a route that came first (a cold launch from
         // "Talk to Sheepdog") runs now.
@@ -742,6 +752,7 @@ final class SessionViewModel: ObservableObject {
     }
 
     private func run(_ effect: SessionEffect) {
+        if demo != nil, runDemo(effect) { return }
         switch effect {
         case .probe:
             Task { await openSession() }
@@ -854,6 +865,8 @@ final class SessionViewModel: ObservableObject {
     /// The Live Activity and the earbud remote follow the session: there
     /// while a voice session is wanted, gone the moment it ends.
     private func syncAway() {
+        // The Live Activity and the earbud remote belong to the real session.
+        guard demo == nil else { return }
         #if DEBUG
         if let demo = DebugLaunch.demoLiveActivity {
             away.sync(VoiceActivityState.make(state: demo, muted: demo == .muted, waiting: 2, voiceName: voiceName), voiceName: voiceName)
@@ -874,6 +887,7 @@ final class SessionViewModel: ObservableObject {
 
     /// A `sheepdog://` link, or an App Intent speaking one.
     func open(url: URL) {
+        guard demo == nil else { return }
         if let link = PairingLink(url: url) {
             // Settings' sheet holds its own copy of the address and token
             // and writes it back when it closes; close it first, so the
@@ -1638,6 +1652,138 @@ final class SessionViewModel: ObservableObject {
         } catch {
             return nil
         }
+    }
+
+    // MARK: - Offline demo
+
+    /// The scripted demo this view model runs instead of a daemon (nil for
+    /// the real app). Settings, cache and client are the demo's own, so
+    /// nothing here touches the real daemon address, token or conversation.
+    let demo: DemoDaemon?
+    var isDemo: Bool { demo != nil }
+    private var demoVoice: DemoVoice?
+    /// Asked of the real view model: show the demo (`SheepdogApp`).
+    @Published var demoActive = false
+    /// Set on the demo's view model: leave it.
+    var onLeaveDemo: () -> Void = {}
+
+    /// A view model for the offline demo: its own settings (a throwaway
+    /// defaults suite, secrets in memory), an empty cache in a temporary
+    /// directory and a fresh `DemoDaemon`.
+    static func makeDemo() -> SessionViewModel {
+        let suite = "sheepdog.demo"
+        UserDefaults().removePersistentDomain(forName: suite)
+        let store = SettingsStore(defaults: UserDefaults(suiteName: suite) ?? .standard, secrets: MemorySecretStore())
+        store.address = DemoDaemon.endpoint.display
+        store.hasBeenConfigured = true
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("SheepdogDemo-\(UUID().uuidString)", isDirectory: true)
+        return SessionViewModel(settings: store, cache: ConversationCache(directory: directory), demo: DemoDaemon())
+    }
+
+    /// The first-run screen's and Settings' "Try the demo".
+    func openDemo() {
+        guard demo == nil, !demoActive else { return }
+        guard showSettings else {
+            demoActive = true
+            return
+        }
+        showSettings = false
+        Task {
+            try? await Task.sleep(for: .milliseconds(700))
+            demoActive = true
+        }
+    }
+
+    /// The demo was closed: back to the real app, and to the first-run
+    /// Settings if no daemon is saved yet.
+    func demoClosed() {
+        demoActive = false
+        reopenFirstRunSettings()
+    }
+
+    /// Leave the demo (its header and its Settings).
+    func leaveDemo() {
+        guard let demo else { return }
+        demoVoice?.stop()
+        disconnect()
+        demo.stop()
+        onLeaveDemo()
+    }
+
+    /// One of the demo's suggested questions.
+    func askDemo(_ question: String) {
+        Task { _ = await sendTyped(question) }
+    }
+
+    private func startDemo() {
+        guard let demo else { return }
+        let voice = DemoVoice()
+        voice.onSpeaking = { [weak self] speaking in self?.send(.playbackChanged(speaking: speaking)) }
+        voice.onHeard = { [weak self] text in self?.askDemo(text) }
+        voice.onListenerFailed = { [weak self] message in self?.send(.audioStartFailed(message)) }
+        demoVoice = voice
+        demo.onLines = { [weak self] lines in
+            guard let self, self.core.connection.wantsConnection else { return }
+            for line in lines { voice.say(line.text) }
+        }
+        demo.start()
+        Task {
+            await refreshState(quiet: true)
+            await syncHistory()
+        }
+        // The demo talks from the start: no address to set, no permission
+        // needed to hear it.
+        connect()
+    }
+
+    /// The session core's effects that would touch `/ws` or the audio
+    /// engine, done on the device instead. False: run it the usual way.
+    private func runDemo(_ effect: SessionEffect) -> Bool {
+        switch effect {
+        case .probe:
+            Task {
+                do {
+                    apply(try await client.state())
+                    hello = try? await client.hello()
+                } catch {
+                    send(.probeFailed(.malformed(error.localizedDescription)))
+                    return
+                }
+                guard core.connection.wantsConnection else { return }
+                let canListen = await DemoVoice.requestListening()
+                send(.probeSucceeded(micGranted: canListen))
+            }
+        case .openSocket:
+            send(.socketOpened)
+            handle(control: WSMessage(type: .status, voice: .connected, muted: core.mic.muted))
+        case .closeSocket:
+            demoVoice?.stop()
+            send(.socketClosed(reason: "demo ended", willRetry: false))
+        case .send:
+            break
+        case .startAudio, .resumeAudio:
+            do {
+                try demoVoice?.startListening()
+                send(.audioStarted(gateClosed: true))
+            } catch {
+                send(.audioStartFailed(error.localizedDescription))
+            }
+        case .stopAudio, .suspendAudio:
+            demoVoice?.stopListening()
+        case let .setCaptureMuted(muted):
+            demoVoice?.muted = muted
+        case .setManualGate:
+            break
+        case .flushPlayback:
+            demoVoice?.stopSpeaking()
+        case .showBanner(.microphoneDenied), .showBanner(.microphoneFailed):
+            // Expected in the demo where on-device recognition is missing
+            // or declined: the status line says to tap a question or type.
+            break
+        default:
+            return false
+        }
+        return true
     }
 
     // MARK: - Pairing
