@@ -1,0 +1,44 @@
+# Homebrew formula template for kccarlos/homebrew-tap (Formula/sheepdog.rb).
+# Rendered by packaging/homebrew/render.sh after `make release-sign` has
+# replaced the darwin tarball with the signed and notarized one; the
+# placeholders are @VERSION@ (the tag without its v), @TAG@, and the two
+# sha256 sums from the release's checksums.txt.
+class Sheepdog < Formula
+  desc "Manage your coding agents by voice, away from the screen (herdr supervisor)"
+  homepage "https://github.com/kccarlos/herdr-sheepdog"
+  version "@VERSION@"
+  license "MIT"
+
+  on_macos do
+    on_arm do
+      url "https://github.com/kccarlos/herdr-sheepdog/releases/download/@TAG@/sheepdog_@TAG@_darwin_arm64.tar.gz"
+      sha256 "@SHA256_DARWIN_ARM64@"
+    end
+  end
+
+  on_linux do
+    on_intel do
+      url "https://github.com/kccarlos/herdr-sheepdog/releases/download/@TAG@/sheepdog_@TAG@_linux_amd64.tar.gz"
+      sha256 "@SHA256_LINUX_AMD64@"
+    end
+  end
+
+  def install
+    bin.install "sheepdog"
+  end
+
+  def caveats
+    <<~EOS
+      sheepdog supervises agents running in herdr (https://github.com/herdrdev/herdr).
+      Next steps:
+        sheepdog demo              # try it without herdr (needs GEMINI_API_KEY)
+        sheepdog init              # set up config and keys
+        sheepdog doctor            # check the setup
+        sheepdog service install   # run it at login
+    EOS
+  end
+
+  test do
+    assert_match version.to_s, shell_output("#{bin}/sheepdog version")
+  end
+end
