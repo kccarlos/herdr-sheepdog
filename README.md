@@ -37,11 +37,14 @@ with `checksums.txt`; the macOS binary is signed and notarized with
 ## Configure
 
 ```sh
-sheepdog config init     # writes ~/.config/sheepdog/config.toml (commented template)
-cp .env.example .env     # fill in GEMINI_API_KEY at least
+sheepdog init      # checks herdr, asks for a key and validates it, writes config + secrets
+sheepdog doctor    # checks everything, one line per check with the fix
 ```
 
-`sheepdog serve` loads `./.env` on its own. The keys it understands:
+`sheepdog init` writes `~/.config/sheepdog/config.toml` and the secret file
+`~/.config/sheepdog/.env` (both 0600). By hand instead: `sheepdog config
+init` writes the commented template and `.env.example` lists the keys.
+`sheepdog serve` loads `./.env` on its own (else `~/.config/sheepdog/.env`). The keys it understands:
 `GEMINI_API_KEY` (voice and the default orchestrator; `GEMINI_API_KEY_1`…`_9`
 form a pool), `VERTEX_API_KEY` + `VERTEX_PROJECT` (Gemini on Vertex AI:
 the voice with `gemini.backend = "vertex"`, and the orchestrator provider

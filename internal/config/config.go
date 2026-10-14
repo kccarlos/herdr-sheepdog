@@ -636,6 +636,13 @@ func DefaultPath() string {
 	return filepath.Join(home, ".config", "sheepdog", "config.toml")
 }
 
+// DefaultEnvPath returns the secret file next to the default config:
+// ~/.config/sheepdog/.env (written by `sheepdog init`, mode 0600). serve
+// loads it when there is no ./.env.
+func DefaultEnvPath() string {
+	return filepath.Join(filepath.Dir(DefaultPath()), ".env")
+}
+
 // Load reads the TOML file at path (DefaultPath() when path is empty) on top
 // of Default(), then applies SHEEPDOG_* environment overrides. A missing file
 // is not an error; a malformed one is.
