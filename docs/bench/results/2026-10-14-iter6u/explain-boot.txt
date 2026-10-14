@@ -1,0 +1,5 @@
+failed         main 50.00 fix 38.57  diff -11.43 pp (95% CI -30.12 to +8.28)
+no fresh look  main 82.86 fix 42.86  diff -40.00 pp (95% CI -53.56 to -25.65)
+wrong          main 27.14 fix 11.43  diff -15.71 pp (95% CI -29.12 to -2.94)
+restates       main 48.57 fix 40.00  diff -8.57 pp (95% CI -24.35 to +7.32)
+new facts      main 1.33 fix 1.53  diff +0.20 (95% CI -0.23 to +0.63)

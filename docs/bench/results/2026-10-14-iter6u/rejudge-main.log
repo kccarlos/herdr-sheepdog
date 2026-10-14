@@ -1,0 +1,39 @@
+rejudged workday-adversarial-afternoon r1: pass
+rejudged workday-adversarial-afternoon r2: pass
+rejudged workday-adversarial-afternoon r3: pass
+rejudged workday-explain-deep r1: pass
+rejudged workday-explain-deep r2: pass
+rejudged workday-explain-deep r3: pass
+rejudged workday-interruptions r1: pass
+rejudged workday-interruptions r2: pass
+rejudged workday-interruptions r3: pass
+rejudged workday-long-haul r1: pass
+rejudged workday-long-haul r2: pass
+rejudged workday-long-haul r3: pass
+rejudged workday-morning-standup r1: pass
+rejudged workday-morning-standup r2: pass
+rejudged workday-morning-standup r3: pass
+rejudged workday-scale-ten r1: pass
+rejudged workday-scale-ten r2: pass
+rejudged workday-scale-ten r3: fail
+rejudged workday-zh-evening r1: pass
+rejudged workday-zh-evening r2: pass
+rejudged workday-zh-evening r3: pass
+sheepdog bench rejudge: segments: workday-adversarial-afternoon r4: segment 12 (beat 13): judge: no verdict for right_agent
+rejudged workday-adversarial-afternoon r5: pass
+rejudged workday-explain-deep r4: pass
+rejudged workday-explain-deep r5: pass
+rejudged workday-interruptions r4: pass
+rejudged workday-interruptions r5: pass
+rejudged workday-long-haul r4: pass
+rejudged workday-long-haul r5: pass
+rejudged workday-morning-standup r4: pass
+rejudged workday-morning-standup r5: fail
+rejudged workday-scale-ten r4: pass
+rejudged workday-scale-ten r5: pass
+rejudged workday-zh-evening r4: pass
+rejudged workday-zh-evening r5: pass
+sheepdog bench rejudge: 1 runs not rejudged (run again to retry them)
+judge claude sonnet: 31m3s, 516 calls
+-- spend judge    sonnet                   calls   516  in   7395036  out   631175  reasoning        0  ≈ $0.0000 --
+-- spend total ≈ $0.0000 (estimate at list prices) --

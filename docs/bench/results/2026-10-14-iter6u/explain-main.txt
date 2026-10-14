@@ -1,0 +1,10 @@
+DETAIL   no fresh look   0/  0 =    0% (95% CI 0%-0%)
+detail answers: 70
+  no fresh look           58/70 = 83% (72%-90%)
+  any wrong fact          19/70 = 27% (18%-39%)
+  restates                34/70 = 49% (37%-60%)
+  FAILED (wrong, or restates with no new fact) 35/70 = 50% (39%-61%)
+  mean new facts          1.33
+  with a look     wrong 3/12 = 25% (9%-53%); restates 5/12 = 42% (19%-68%); mean new facts 2.00
+  without a look  wrong 16/58 = 28% (18%-40%); restates 29/58 = 50% (38%-62%); mean new facts 1.19
+first explain answers: wrong 2/20 = 10% (3%-30%) mean new 5.45
