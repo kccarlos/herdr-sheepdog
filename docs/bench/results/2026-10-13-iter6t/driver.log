@@ -31,3 +31,15 @@ exit 0 fix w1
 -- spend simuser  deepseek-flash           calls   250  in    510895  out     6147  reasoning        0  ≈ $0.1570 --
 -- spend total ≈ $2.6706 (estimate at list prices) --
 USD 0.00 CNY 13.77 available
+exit 0 main w2
+  TOTAL                          runs 14  pass 14  fail  0  err  0  not_run  0  rate  100%  –
+-- spend brain    deepseek-flash           calls   397  in   4919821  out    95673  reasoning    49318  ≈ $1.5629 --
+-- spend simuser  deepseek-flash           calls   170  in    341640  out     4301  reasoning        0  ≈ $0.1051 --
+-- spend total ≈ $1.6680 (estimate at list prices) --
+exit 0 fix w2
+  TOTAL                          runs 14  pass 14  fail  0  err  0  not_run  0  rate  100%  –
+-- spend brain    deepseek-flash           calls   432  in   5575342  out   112521  reasoning    60441  ≈ $1.7764 --
+-- spend simuser  deepseek-flash           calls   181  in    373678  out     5034  reasoning        0  ≈ $0.1151 --
+-- spend total ≈ $1.8915 (estimate at list prices) --
+USD 0.00 CNY 6.38 available
+DONE
