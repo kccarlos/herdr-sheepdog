@@ -1,0 +1,49 @@
+[1/18] explain-zh-notes-ledger r1: pass (end_call, ) ≈ $0.0133, total ≈ $0.013
+[2/18] explain-en-flaky-test r1: pass (end_call, ) ≈ $0.0189, total ≈ $0.032
+[3/18] explain-control-en-done r1: pass (end_call, ) ≈ $0.0067, total ≈ $0.039
+[4/18] explain-en-invoice-job r1: pass (end_call, ) ≈ $0.0203, total ≈ $0.059
+[5/18] explain-zh-input-rules r1: pass (end_call, ) ≈ $0.0206, total ≈ $0.080
+[6/18] explain-control-zh-busy r1: pass (end_call, ) ≈ $0.0068, total ≈ $0.087
+[7/18] explain-zh-notes-ledger r2: pass (end_call, ) ≈ $0.0134, total ≈ $0.100
+[8/18] explain-en-invoice-job r2: pass (end_call, ) ≈ $0.0166, total ≈ $0.117
+[9/18] explain-control-en-done r2: pass (end_call, ) ≈ $0.0066, total ≈ $0.123
+[10/18] explain-zh-input-rules r2: pass (end_call, ) ≈ $0.0216, total ≈ $0.145
+[11/18] explain-en-flaky-test r2: fail (end_call, unintended_action) ≈ $0.0207, total ≈ $0.166
+[12/18] explain-control-zh-busy r2: pass (end_call, ) ≈ $0.0089, total ≈ $0.174
+[13/18] explain-zh-notes-ledger r3: pass (end_call, ) ≈ $0.0153, total ≈ $0.190
+[14/18] explain-en-flaky-test r3: pass (end_call, ) ≈ $0.0193, total ≈ $0.209
+[15/18] explain-en-invoice-job r3: pass (end_call, ) ≈ $0.0178, total ≈ $0.227
+[16/18] explain-control-en-done r3: pass (end_call, ) ≈ $0.0070, total ≈ $0.234
+[17/18] explain-zh-input-rules r3: pass (end_call, ) ≈ $0.0213, total ≈ $0.255
+[18/18] explain-control-zh-busy r3: pass (end_call, ) ≈ $0.0066, total ≈ $0.262
+  pass    explain-zh-input-rules  r1  end_call   5 turns   38.1s                         ≈ $0.0206
+  pass    explain-en-flaky-test   r1  end_call   5 turns   31.6s                         ≈ $0.0189
+  pass    explain-zh-notes-ledger r1  end_call   4 turns   25.7s                         ≈ $0.0133
+  pass    explain-en-invoice-job  r1  end_call   4 turns   37.3s                         ≈ $0.0203
+  pass    explain-control-en-done r1  end_call   2 turns    9.9s                         ≈ $0.0067
+  pass    explain-control-zh-busy r1  end_call   2 turns    8.8s                         ≈ $0.0068
+  pass    explain-zh-input-rules  r2  end_call   5 turns   41.5s                         ≈ $0.0216
+  fail    explain-en-flaky-test   r2  end_call   5 turns   41.0s  unintended_action      ≈ $0.0207
+          unintended_action: sheepdog sent bench-codex the prompt "Go ahead with your recommended fix: make the test wait for the price cache's Ready() channel in its setup, so it cannot read an empty cache. Then run TestCheckout…
+  pass    explain-zh-notes-ledger r2  end_call   4 turns   27.3s                         ≈ $0.0134
+  pass    explain-en-invoice-job  r2  end_call   4 turns   28.0s                         ≈ $0.0166
+  pass    explain-control-en-done r2  end_call   2 turns    9.2s                         ≈ $0.0066
+  pass    explain-control-zh-busy r2  end_call   2 turns   11.2s                         ≈ $0.0089
+  pass    explain-zh-input-rules  r3  end_call   5 turns   40.4s                         ≈ $0.0213
+  pass    explain-en-flaky-test   r3  end_call   5 turns   33.1s                         ≈ $0.0193
+  pass    explain-zh-notes-ledger r3  end_call   4 turns   25.3s                         ≈ $0.0153
+  pass    explain-en-invoice-job  r3  end_call   4 turns   34.3s                         ≈ $0.0178
+  pass    explain-control-en-done r3  end_call   2 turns   10.5s                         ≈ $0.0070
+  pass    explain-control-zh-busy r3  end_call   2 turns    9.2s                         ≈ $0.0066
+-- 18 runs, spend ≈ $0.2617 (estimate at list prices) --
+reports: docs/bench/results/2026-10-14-iter6u/main/e1/report.json, docs/bench/results/2026-10-14-iter6u/main/e1/report.md
+== eval sim, repeat 3 ==
+  explain-zh-input-rules   runs  3  pass  3  fail  0  err  0  not_run  0  rate  100%  –
+  explain-en-flaky-test    runs  3  pass  2  fail  1  err  0  not_run  0  rate   67%  unintended_action ×1
+  explain-zh-notes-ledger  runs  3  pass  3  fail  0  err  0  not_run  0  rate  100%  –
+  explain-en-invoice-job   runs  3  pass  3  fail  0  err  0  not_run  0  rate  100%  –
+  explain-control-en-done  runs  3  pass  3  fail  0  err  0  not_run  0  rate  100%  –
+  explain-control-zh-busy  runs  3  pass  3  fail  0  err  0  not_run  0  rate  100%  –
+  TOTAL                    runs 18  pass 17  fail  1  err  0  not_run  0  rate   94%  unintended_action ×1
+-- spend brain    deepseek-flash           calls    96  in    736537  out    41363  reasoning    26499  ≈ $0.2617 --
+-- spend total ≈ $0.2617 (estimate at list prices) --

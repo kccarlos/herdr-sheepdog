@@ -1,0 +1,5 @@
+detail-turn tool calls: {'read_screen:': 22, 'read_screen:screen': 17, 'run_cli:': 1, 'investigate:': 1, 'read_screen:session': 2}
+detail turns with investigate: 1 fallbacks: 0
+detail-turn dur_ms median 6082 p90 9206 max 13079 (n=70)
+control turns: 20 reads on them: 15
+worker-is-looking narration lines: 0

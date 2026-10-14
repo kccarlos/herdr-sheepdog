@@ -1,0 +1,43 @@
+[1/14] workday-morning-standup r1: pass (end_call, ) ≈ $0.1069, total ≈ $0.107
+[2/14] workday-scale-ten r1: pass (end_call, ) ≈ $0.1430, total ≈ $0.250
+[3/14] workday-adversarial-afternoon r1: pass (end_call, ) ≈ $0.1153, total ≈ $0.365
+[4/14] workday-zh-evening r1: pass (end_call, ) ≈ $0.1060, total ≈ $0.471
+[5/14] workday-explain-deep r1: pass (end_call, ) ≈ $0.1083, total ≈ $0.579
+[6/14] workday-morning-standup r2: fail (end_call, brain_fallback) ≈ $0.1036, total ≈ $0.683
+[7/14] workday-interruptions r1: pass (end_call, ) ≈ $0.1050, total ≈ $0.788
+[8/14] workday-long-haul r1: pass (end_call, ) ≈ $0.1381, total ≈ $0.926
+[9/14] workday-scale-ten r2: pass (end_call, ) ≈ $0.1256, total ≈ $1.052
+[10/14] workday-interruptions r2: pass (end_call, ) ≈ $0.0793, total ≈ $1.131
+[11/14] workday-zh-evening r2: pass (end_call, ) ≈ $0.0882, total ≈ $1.219
+[12/14] workday-adversarial-afternoon r2: pass (end_call, ) ≈ $0.1264, total ≈ $1.346
+[13/14] workday-explain-deep r2: pass (end_call, ) ≈ $0.1209, total ≈ $1.467
+[14/14] workday-long-haul r2: pass (end_call, ) ≈ $0.1511, total ≈ $1.618
+  pass    workday-morning-standup       r1  end_call  12 turns  100.9s                         ≈ $0.1069
+  pass    workday-scale-ten             r1  end_call  12 turns  101.6s                         ≈ $0.1430
+  pass    workday-adversarial-afternoon r1  end_call  13 turns  109.0s                         ≈ $0.1153
+  pass    workday-zh-evening            r1  end_call  12 turns  126.9s                         ≈ $0.1060
+  pass    workday-interruptions         r1  end_call  12 turns  113.7s                         ≈ $0.1050
+  pass    workday-explain-deep          r1  end_call  12 turns  110.8s                         ≈ $0.1083
+  pass    workday-long-haul             r1  end_call  15 turns  118.6s                         ≈ $0.1381
+  fail    workday-morning-standup       r2  end_call  12 turns   86.1s  brain_fallback         ≈ $0.1036
+          brain_fallback: yielded: brain: yielded to a CEO turn
+  pass    workday-scale-ten             r2  end_call  12 turns   98.7s                         ≈ $0.1256
+  pass    workday-adversarial-afternoon r2  end_call  13 turns  113.8s                         ≈ $0.1264
+  pass    workday-zh-evening            r2  end_call  12 turns  111.1s                         ≈ $0.0882
+  pass    workday-interruptions         r2  end_call  13 turns   84.5s                         ≈ $0.0793
+  pass    workday-explain-deep          r2  end_call  14 turns  131.7s                         ≈ $0.1209
+  pass    workday-long-haul             r2  end_call  15 turns  143.4s                         ≈ $0.1511
+-- 14 runs, spend ≈ $1.6179 (estimate at list prices) --
+reports: docs/bench/results/2026-10-14-iter6u/main/w2/report.json, docs/bench/results/2026-10-14-iter6u/main/w2/report.md
+== eval sim, repeat 2 ==
+  workday-morning-standup        runs  2  pass  1  fail  1  err  0  not_run  0  rate   50%  brain_fallback ×1
+  workday-scale-ten              runs  2  pass  2  fail  0  err  0  not_run  0  rate  100%  –
+  workday-adversarial-afternoon  runs  2  pass  2  fail  0  err  0  not_run  0  rate  100%  –
+  workday-zh-evening             runs  2  pass  2  fail  0  err  0  not_run  0  rate  100%  –
+  workday-interruptions          runs  2  pass  2  fail  0  err  0  not_run  0  rate  100%  –
+  workday-explain-deep           runs  2  pass  2  fail  0  err  0  not_run  0  rate  100%  –
+  workday-long-haul              runs  2  pass  2  fail  0  err  0  not_run  0  rate  100%  –
+  TOTAL                          runs 14  pass 13  fail  1  err  0  not_run  0  rate   93%  brain_fallback ×1
+-- spend brain    deepseek-flash           calls   387  in   4758883  out    94617  reasoning    48032  ≈ $1.5133 --
+-- spend simuser  deepseek-flash           calls   168  in    340655  out     4158  reasoning        0  ≈ $0.1047 --
+-- spend total ≈ $1.6179 (estimate at list prices) --
