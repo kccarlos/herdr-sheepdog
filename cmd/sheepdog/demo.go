@@ -95,7 +95,7 @@ func runDemo(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 			fprintf(stderr, "sheepdog demo: %v\n", err)
 			return 1
 		}
-		defer os.RemoveAll(dir)
+		defer func() { _ = os.RemoveAll(dir) }()
 	}
 	sc, screens, err := demo.Scenario(dir)
 	if err != nil {
