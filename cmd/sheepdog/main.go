@@ -50,6 +50,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return runInit(ctx, args[1:], os.Stdin, stdout, stderr)
 	case "doctor":
 		return runDoctor(ctx, args[1:], stdout, stderr)
+	case "service":
+		return runService(ctx, args[1:], stdout, stderr)
 	case "herdr":
 		return runHerdr(ctx, args[1:], stdout, stderr)
 	case "voice-test":
@@ -94,6 +96,7 @@ func printUsage(w io.Writer) {
 	fprintln(w, "  init          set up: check herdr, ask for and validate a key, write config + secrets")
 	fprintln(w, "  doctor        check the setup (keys, herdr, port, token, push, voice) with fixes")
 	fprintln(w, "  serve         run the daemon (web server, supervisor, voice session)")
+	fprintln(w, "  service       install|uninstall|status|logs: run serve at login (launchd / systemd --user)")
 	fprintln(w, "  config        show|init: inspect or scaffold config.toml")
 	fprintln(w, "  herdr watch   print debounced agent state transitions, persist the table")
 	fprintln(w, "  voice-test    stream a WAV through a Gemini Live session with echo tools")
