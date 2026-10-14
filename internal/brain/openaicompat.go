@@ -39,13 +39,23 @@ type OpenAICompatConfig struct {
 	BaseURL string
 	// APIKey is the bearer token. Never logged.
 	APIKey string
+	// NoKey allows an empty APIKey (a local server such as Ollama): the
+	// requests then carry no Authorization header.
+	NoKey bool
+	// DefaultModel is the model a failover to this provider runs when
+	// the run has not used it yet (a generic provider's configured
+	// model; empty for DeepSeek, whose default the failover knows).
+	DefaultModel string
 	// Thinking, when set, is sent as DeepSeek's thinking mode field
 	// ({"type": "enabled"|"disabled"}); nil leaves the provider's
 	// default (enabled). ReasoningEffort, when set, is sent with it
 	// (one of ReasoningEfforts). A call whose config asks for the
 	// minimal thinking level (an event turn, a compaction summary:
 	// thinkingOff) is sent disabled whatever these say
-	// (docs/iteration-2.md WP5).
+	// (docs/iteration-2.md WP5). A nil Thinking (a generic
+	// OpenAI-compatible provider) sends none of DeepSeek's extensions:
+	// no thinking field, no reasoning_effort and no reasoning_content
+	// replay.
 	Thinking        *bool
 	ReasoningEffort string
 	// HTTPClient overrides http.DefaultClient (tests). No client timeout
@@ -80,7 +90,7 @@ func NewOpenAICompatModel(cfg OpenAICompatConfig) (*OpenAICompatModel, error) {
 		return nil, errors.New("brain: openai-compatible model: provider id required")
 	case strings.TrimSpace(cfg.BaseURL) == "":
 		return nil, fmt.Errorf("brain: %s: base URL required", cfg.Provider)
-	case cfg.APIKey == "":
+	case cfg.APIKey == "" && !cfg.NoKey:
 		return nil, fmt.Errorf("brain: %s: no API key configured", cfg.Provider)
 	}
 	if cfg.ReasoningEffort != "" && !validReasoningEffort(cfg.ReasoningEffort) {
@@ -108,6 +118,10 @@ func validReasoningEffort(v string) bool {
 
 // Provider returns the adapter's provider id.
 func (m *OpenAICompatModel) Provider() string { return m.cfg.Provider }
+
+// DefaultModel returns the configured default model ("" for none):
+// what a failover to this provider runs (failoverModelLocked).
+func (m *OpenAICompatModel) DefaultModel() string { return m.cfg.DefaultModel }
 
 // APIError is the endpoint's HTTP error: the status and the API's own
 // message, verbatim (a 402 "Insufficient Balance" must reach the event
@@ -263,6 +277,15 @@ func (m *OpenAICompatModel) buildRequest(model string, msgs []chatMessage, cfg *
 		}
 	}
 	thinking := m.cfg.Thinking
+	if thinking == nil {
+		// A generic endpoint: DeepSeek's fields are unknown there (a
+		// strict API rejects them), and reasoning a provider returned
+		// is not replayed.
+		for i := range req.Messages {
+			req.Messages[i].ReasoningContent = ""
+		}
+		return req
+	}
 	if cfg != nil && cfg.ThinkingConfig != nil && cfg.ThinkingConfig.ThinkingLevel == genai.ThinkingLevelMinimal {
 		off := false
 		thinking = &off
@@ -395,7 +418,9 @@ func (m *OpenAICompatModel) url(path string) string {
 // wrapped in ErrAllKeysRateLimited (one key: nothing to rotate to) and
 // logged as brain.rate_limited.
 func (m *OpenAICompatModel) do(req *http.Request, model string, out any) error {
-	req.Header.Set("Authorization", "Bearer "+m.cfg.APIKey)
+	if m.cfg.APIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+m.cfg.APIKey)
+	}
 	req.Header.Set("Accept", "application/json")
 	resp, err := m.http.Do(req)
 	if err != nil {
