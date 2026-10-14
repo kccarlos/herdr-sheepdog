@@ -13,7 +13,6 @@ import (
 	"sort"
 	"strings"
 
-
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
 	"github.com/kccarlos/herdr-sheepdog/internal/config"
 	"github.com/kccarlos/herdr-sheepdog/internal/onboard"
@@ -413,7 +412,7 @@ func newPrompter(stdin io.Reader, out io.Writer, nonInteractive bool) *prompter 
 
 func (p *prompter) line() (string, error) {
 	s, err := p.r.ReadString('\n')
-	if err != nil && !(errors.Is(err, io.EOF) && s != "") {
+	if err != nil && (!errors.Is(err, io.EOF) || s == "") {
 		if errors.Is(err, io.EOF) {
 			return "", errors.New("input ended")
 		}

@@ -24,7 +24,7 @@ const (
 
 // fakeKeyAPI accepts initGeminiKey on the Gemini model list and
 // initCompatKey on an OpenAI-compatible /models; everything else is 401.
-func fakeKeyAPI(t *testing.T) *httptest.Server {
+func fakeKeyAPI(t *testing.T) {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -47,7 +47,6 @@ func fakeKeyAPI(t *testing.T) *httptest.Server {
 		return onboard.Endpoints{GeminiBase: srv.URL, OpenAIBase: srv.URL + "/v1"}
 	}
 	t.Cleanup(func() { onboardEndpoints = old })
-	return srv
 }
 
 // noOnboardKeys clears every key variable the developer's shell may
@@ -82,7 +81,6 @@ func TestInitNonInteractiveNew(t *testing.T) {
 	fakeKeyAPI(t)
 	noOnboardKeys(t)
 	t.Setenv("GEMINI_API_KEY", initGeminiKey)
-	os.Unsetenv("SHEEPDOG_WEB_TOKEN")
 	dir := t.TempDir()
 	cfgPath, envPath := filepath.Join(dir, "cfg", "config.toml"), filepath.Join(dir, "cfg", ".env")
 	code, out := runInitTest(t, "", "--non-interactive", "--config", cfgPath)
@@ -114,7 +112,6 @@ func TestInitKeepsExistingTokenAndConfig(t *testing.T) {
 	fakeKeyAPI(t)
 	noOnboardKeys(t)
 	t.Setenv("GEMINI_API_KEY", initGeminiKey)
-	os.Unsetenv("SHEEPDOG_WEB_TOKEN")
 	dir := t.TempDir()
 	cfgPath, envPath := filepath.Join(dir, "config.toml"), filepath.Join(dir, ".env")
 	orig := "[web]\nport = 7788\n"
@@ -187,7 +184,6 @@ func TestInitInvalidKeyWritesNothing(t *testing.T) {
 func TestInitInteractiveCompat(t *testing.T) {
 	fakeKeyAPI(t)
 	noOnboardKeys(t)
-	os.Unsetenv("SHEEPDOG_WEB_TOKEN")
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.toml")
 	stdin := strings.Join([]string{"3", "openrouter", "", "vendor/model-a", "AIza-wrong", initGeminiKey, initCompatKey}, "\n") + "\n"
@@ -219,8 +215,8 @@ func TestDoctorCommand(t *testing.T) {
 	if err := os.WriteFile(envPath, []byte("GEMINI_API_KEY="+initGeminiKey+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	os.Unsetenv("GEMINI_API_KEY")
-	t.Cleanup(func() { os.Unsetenv("GEMINI_API_KEY") })
+	_ = os.Unsetenv("GEMINI_API_KEY")
+	t.Cleanup(func() { _ = os.Unsetenv("GEMINI_API_KEY") })
 	l, _ := net.Listen("tcp", "127.0.0.1:0")
 	port := l.Addr().(*net.TCPAddr).Port
 	_ = l.Close()
