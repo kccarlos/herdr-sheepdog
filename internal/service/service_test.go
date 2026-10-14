@@ -190,3 +190,82 @@ func TestLogsCommand(t *testing.T) {
 		t.Errorf("linux logs = %s %q", name, args)
 	}
 }
+
+func TestStart(t *testing.T) {
+	t.Run("not installed leaves everything alone", func(t *testing.T) {
+		f := &fakeRunner{}
+		m := Manager{Spec: spec(t, "linux"), Run: f.run}
+		installed, started, err := m.Start(context.Background())
+		if installed || started || err != nil || len(f.calls) != 0 {
+			t.Errorf("installed=%v started=%v err=%v calls=%q", installed, started, err, f.calls)
+		}
+		if _, err := os.Stat(m.Spec.UnitPath()); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("Start wrote a unit: %v", err)
+		}
+	})
+	t.Run("linux active is not touched", func(t *testing.T) {
+		s := spec(t, "linux")
+		writeUnit(t, s)
+		f := &fakeRunner{out: map[string]string{"systemctl --user is-active " + Unit: "active\n"}}
+		installed, started, err := Manager{Spec: s, Run: f.run}.Start(context.Background())
+		if !installed || started || err != nil || len(f.calls) != 1 {
+			t.Errorf("installed=%v started=%v err=%v calls=%q", installed, started, err, f.calls)
+		}
+	})
+	t.Run("linux inactive is started", func(t *testing.T) {
+		s := spec(t, "linux")
+		writeUnit(t, s)
+		f := &fakeRunner{out: map[string]string{"systemctl --user is-active " + Unit: "inactive\n"}}
+		installed, started, err := Manager{Spec: s, Run: f.run}.Start(context.Background())
+		want := "systemctl --user is-active " + Unit + "|systemctl --user start " + Unit
+		if !installed || !started || err != nil || strings.Join(f.calls, "|") != want {
+			t.Errorf("installed=%v started=%v err=%v calls=%q", installed, started, err, f.calls)
+		}
+	})
+	t.Run("linux start fails", func(t *testing.T) {
+		s := spec(t, "linux")
+		writeUnit(t, s)
+		f := &fakeRunner{fail: map[string]bool{"systemctl --user start " + Unit: true}}
+		if _, _, err := (Manager{Spec: s, Run: f.run}).Start(context.Background()); err == nil {
+			t.Error("a failed start was not reported")
+		}
+	})
+	t.Run("darwin running is not touched", func(t *testing.T) {
+		s := spec(t, "darwin")
+		writeUnit(t, s)
+		f := &fakeRunner{out: map[string]string{"launchctl print gui/501/" + Label: "state = running\n\tpid = 7\n"}}
+		_, started, err := Manager{Spec: s, Run: f.run}.Start(context.Background())
+		if started || err != nil || len(f.calls) != 1 {
+			t.Errorf("started=%v err=%v calls=%q", started, err, f.calls)
+		}
+	})
+	t.Run("darwin loaded but idle is kickstarted", func(t *testing.T) {
+		s := spec(t, "darwin")
+		writeUnit(t, s)
+		f := &fakeRunner{out: map[string]string{"launchctl print gui/501/" + Label: "state = waiting\n"}}
+		_, started, err := Manager{Spec: s, Run: f.run}.Start(context.Background())
+		if !started || err != nil || f.calls[len(f.calls)-1] != "launchctl kickstart gui/501/"+Label {
+			t.Errorf("started=%v err=%v calls=%q", started, err, f.calls)
+		}
+	})
+	t.Run("darwin not loaded is bootstrapped", func(t *testing.T) {
+		s := spec(t, "darwin")
+		writeUnit(t, s)
+		f := &fakeRunner{fail: map[string]bool{"launchctl print gui/501/" + Label: true}}
+		_, started, err := Manager{Spec: s, Run: f.run}.Start(context.Background())
+		if !started || err != nil || f.calls[len(f.calls)-1] != "launchctl bootstrap gui/501 "+s.UnitPath() {
+			t.Errorf("started=%v err=%v calls=%q", started, err, f.calls)
+		}
+	})
+}
+
+// writeUnit makes the service look installed.
+func writeUnit(t *testing.T, s Spec) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(s.UnitPath()), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(s.UnitPath(), []byte("unit"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
