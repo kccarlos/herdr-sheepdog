@@ -9,12 +9,9 @@
 
 **Walk away from your desk. Your coding agents keep working; sheepdog keeps you in the loop, in your earbuds.**
 
-<!-- TODO(demo media): assets/readme/hero.gif is not recorded yet (storyboard:
-docs/launch-kit.md). Do not add placeholder media. -->
-<p align="center"><img src="assets/readme/hero.gif" alt="Sheepdog on an iPhone: an agent needs approval, the user says approve" width="640"></p>
+<!-- TODO(hero): add assets/readme/hero.gif and the demo video link once recorded (storyboard: docs/launch-kit.md). -->
+<p align="center"><img src="assets/readme/phone.gif" alt="Sheepdog on an iPhone: an agent asks for approval, the user approves and asks what failed" width="300"></p>
 
-<!-- TODO(demo video): link the 45-60 s hero video here once it is recorded. -->
-<p align="center"><a href="#">▶ Watch the 60-second demo</a> (coming soon)</p>
 sheepdog is a voice supervisor for the coding agents you run in
 [herdr](https://github.com/herdrdev/herdr) (Claude Code, Codex, agy). You
 use it **away from your desk**: an iPhone and earbuds, lock-screen
@@ -49,9 +46,6 @@ notifications, a Live Activity while you talk, earbud remote controls.
    "Sheepdog for herdr" ([TestFlight link: TODO](#), source:
    [herdr-sheepdog-ios](https://github.com/kccarlos/herdr-sheepdog-ios)).
 
-<!-- TODO(plugin): no herdr plugin manifest in this repo yet; until it ships the
-by-hand install is in docs/guide.md. Homebrew is coming with the first release. -->
-
 **Try it without herdr:** `GEMINI_API_KEY=… sheepdog demo` runs three
 scripted agents you can talk to in the browser, and the iOS app has a demo
 mode that needs no daemon and no key. By-hand install and everything else:
@@ -64,7 +58,6 @@ mode that needs no daemon and no key. By-hand install and everything else:
     <td align="center"><img src="assets/readme/install.gif" alt="Installing as a herdr plugin" width="240"><br>Three-step install</td>
   </tr>
 </table>
-<!-- TODO(media): status.gif, phone.gif and install.gif are not recorded yet. -->
 
 ## What it sounds like
 
