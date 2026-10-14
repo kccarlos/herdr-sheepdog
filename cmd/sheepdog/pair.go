@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"io"
+	"os"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/config"
 	"github.com/kccarlos/herdr-sheepdog/internal/pair"
@@ -25,7 +26,8 @@ func printPairUsage(w io.Writer) {
 	fprintln(w, "flags:")
 	fprintln(w, "  --config PATH     config file (default ~/.config/sheepdog/config.toml)")
 	fprintln(w, "  --env-file PATH   env file (default ./.env, else ~/.config/sheepdog/.env, as serve)")
-	fprintln(w, "  --invert          dark modules on a light terminal background")
+	fprintln(w, "  --plain           no colour codes (the default when stdout is not a terminal)")
+	fprintln(w, "  --invert          with --plain (or piped): for a light terminal background")
 }
 
 // runPair implements `sheepdog pair`.
@@ -36,6 +38,7 @@ func runPair(_ context.Context, args []string, stdout, stderr io.Writer) int {
 	configPath := fs.String("config", "", "config file")
 	envFile := fs.String("env-file", "", "env file")
 	invert := fs.Bool("invert", false, "for a light terminal")
+	plain := fs.Bool("plain", false, "no colours")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -60,7 +63,14 @@ func runPair(_ context.Context, args []string, stdout, stderr io.Writer) int {
 		fprintf(stderr, "sheepdog pair: %v\n", err)
 		return 1
 	}
-	code, err := pair.Terminal(pair.URL(addrs, cfg.Web.Token), *invert)
+	link := pair.URL(addrs, cfg.Web.Token)
+	tty := isTerminal(stdout) && !*plain
+	var code string
+	if tty {
+		code, err = pair.ANSI(link)
+	} else {
+		code, err = pair.Terminal(link, *invert)
+	}
 	if err != nil {
 		fprintf(stderr, "sheepdog pair: %v\n", err)
 		return 1
@@ -69,6 +79,10 @@ func runPair(_ context.Context, args []string, stdout, stderr io.Writer) int {
 	fprintln(stdout, "")
 	_, _ = io.WriteString(stdout, code)
 	fprintln(stdout, "")
+	if !tty {
+		fprintln(stdout, "Does not scan? Try --invert (for a light background).")
+		fprintln(stdout, "")
+	}
 	fprintln(stdout, "It holds these addresses (the app uses the first that answers):")
 	for _, a := range addrs {
 		fprintf(stdout, "  %-9s %s\n", a.Kind, a.URL)
@@ -79,4 +93,14 @@ func runPair(_ context.Context, args []string, stdout, stderr io.Writer) int {
 		fprintln(stdout, "and the web token (not printed). Treat the code like a password.")
 	}
 	return 0
+}
+
+// isTerminal reports whether w is a terminal (a character device).
+func isTerminal(w io.Writer) bool {
+	f, ok := w.(*os.File)
+	if !ok {
+		return false
+	}
+	st, err := f.Stat()
+	return err == nil && st.Mode()&os.ModeCharDevice != 0
 }

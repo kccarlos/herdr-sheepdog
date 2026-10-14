@@ -95,3 +95,29 @@ func TestRenderings(t *testing.T) {
 		t.Errorf("svg = %.80s, %v", svg, err)
 	}
 }
+
+// The coloured code draws the same modules as the plain one.
+func TestANSIMatchesPlain(t *testing.T) {
+	link := URL([]Address{{"http://192.168.1.20:7777", KindLAN}}, "tok")
+	ansi, err := ANSI(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain, _ := Terminal(link, false)
+	var fromANSI, fromPlain []string
+	for _, line := range strings.Split(strings.TrimSuffix(ansi, "\n"), "\n") {
+		var row strings.Builder
+		for _, cell := range strings.Split(line, "\x1b[")[1:] {
+			if strings.HasPrefix(cell, "0m") {
+				continue
+			}
+			top, bottom := strings.HasPrefix(cell, "30;"), strings.Contains(cell, ";40m")
+			row.WriteString(map[[2]bool]string{{false, false}: "█", {true, true}: " ", {true, false}: "▄", {false, true}: "▀"}[[2]bool{top, bottom}])
+		}
+		fromANSI = append(fromANSI, row.String())
+	}
+	fromPlain = strings.Split(strings.TrimSuffix(plain, "\n"), "\n")
+	if strings.Join(fromANSI, "\n") != strings.Join(fromPlain, "\n") {
+		t.Errorf("ANSI and plain codes differ")
+	}
+}

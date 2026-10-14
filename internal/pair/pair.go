@@ -191,6 +191,39 @@ func Terminal(link string, invert bool) (string, error) {
 	return b.String(), nil
 }
 
+// ANSI renders link as a QR code with explicit colours (ANSI escape
+// codes: each "▀" draws the upper module in the text colour and the lower
+// one in the background), so it scans on a light or a dark terminal
+// alike. For a terminal only; Terminal is the plain-text fallback.
+func ANSI(link string) (string, error) {
+	q, err := qrcode.New(link, qrcode.Medium)
+	if err != nil {
+		return "", err
+	}
+	bm := q.Bitmap()
+	fg := func(dark bool) string {
+		if dark {
+			return "30"
+		}
+		return "97"
+	}
+	bg := func(dark bool) string {
+		if dark {
+			return "40"
+		}
+		return "107"
+	}
+	var b strings.Builder
+	for y := 0; y < len(bm); y += 2 {
+		for x := range bm[y] {
+			bottom := y+1 < len(bm) && bm[y+1][x]
+			b.WriteString("\x1b[" + fg(bm[y][x]) + ";" + bg(bottom) + "m▀")
+		}
+		b.WriteString("\x1b[0m\n")
+	}
+	return b.String(), nil
+}
+
 // SVG renders link as a QR code in SVG (dark modules on white).
 func SVG(link string) (string, error) {
 	q, err := qrcode.New(link, qrcode.Medium)
