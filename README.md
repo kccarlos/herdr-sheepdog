@@ -62,6 +62,15 @@ Start herdr, then the daemon:
 sheepdog serve
 ```
 
+To keep it running without a terminal (started at login, restarted after
+a crash), install it as a user service — a launchd agent on macOS, a
+systemd user unit on Linux:
+
+```sh
+sheepdog service install    # runs `sheepdog serve --env-file ~/.config/sheepdog/.env`
+sheepdog service status     # also: logs [-f], uninstall
+```
+
 The daemon subscribes to herdr's socket itself; nothing is installed on
 herdr's side. Open **http://127.0.0.1:7777/voice** (or your `web.port`)
 and hit Connect; **/debug** shows what the daemon, the voice and the

@@ -39,6 +39,14 @@ orchestrator (a few tokens; `--no-probe` skips it), the orchestrator and
 voice providers, the web port (free, this daemon, or another program),
 the bind/token pairing, `[push.apns]` and the secret files' permissions.
 It exits 1 on any failure.
+`sheepdog service install` runs the daemon as a user service (a launchd
+agent `~/Library/LaunchAgents/io.github.kccarlos.sheepdog.plist` on macOS,
+with its output in `~/Library/Logs/sheepdog/serve.log`; a systemd unit
+`~/.config/systemd/user/sheepdog.service` on Linux, output in the
+journal): `sheepdog serve --env-file ~/.config/sheepdog/.env`, plus
+`--config` when one is given, with the installing shell's `PATH`.
+`service status`, `service logs [-n N] [-f]` and `service uninstall`
+manage it; `install --dry-run` prints the unit without changing anything.
 
 Two keys — `[aliases]` and the `[cli]` argv templates (`codex_cmd`,
 `claude_cmd`, `codex_resume_cmd`, `claude_resume_cmd`) — are TOML-only:
