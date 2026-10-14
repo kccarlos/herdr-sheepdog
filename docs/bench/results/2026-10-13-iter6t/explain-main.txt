@@ -1,0 +1,34 @@
+DETAIL   no fresh look   0/  0 =    0% (95% CI 0%-0%)
+detail answers: 70
+  no fresh look           56/70 = 80% (69%-88%)
+  any wrong fact          14/70 = 20% (12%-31%)
+  restates                40/70 = 57% (45%-68%)
+  FAILED (wrong, or restates with no new fact) 37/70 = 53% (41%-64%)
+  mean new facts          1.17
+  with a look     wrong 2/14 = 14% (4%-40%); restates 5/14 = 36% (16%-61%); mean new facts 1.57
+  without a look  wrong 12/56 = 21% (13%-34%); restates 35/56 = 62% (49%-74%); mean new facts 1.07
+first explain answers: wrong 3/20 = 15% (5%-36%) mean new 5.50
+explain-control-en-done 1 0 simple LOOK ['just finished']
+explain-control-en-done 1 1 simple none ['No change since I just told you']
+explain-control-en-done 3 1 simple none ['Nothing has changed since a moment ago.']
+explain-control-zh-busy 2 0 simple none ['刚刚开始动手']
+explain-control-zh-busy 3 0 simple none ['刚刚开始动手']
+explain-en-flaky-test 2 4 example none ['so it would no longer hold things up at startup']
+explain-en-flaky-test 3 4 example none ['A quarter of an hour later the same test was re-run by hand and passed']
+explain-en-invoice-job 2 0 explain LOOK ['before nine tomorrow morning']
+explain-zh-input-rules 1 3 why none ['你说「不用现在跑，等会儿」，它可能只看到「不用」就直接否掉']
+explain-zh-input-rules 2 1 then none ['已经全讲给你了']
+explain-zh-input-rules 2 4 example none ['所以那个测试也就没跑']
+explain-zh-input-rules 3 4 example LOOK ['"等一下，先别删"碰上"等一下"这个词，它可能当成暂停，也可能在哪份表里被当成放行，全看撞上的是哪一份']
+explain-zh-notes-ledger 2 1 why none ['因为那句话是唯一一条拦着它自己动手的规矩']
+explain-zh-notes-ledger 3 3 then none ['工作量和改一个数字差不多']
+explain-control-en-done 2 1 simple none ['There is no change since I checked a moment ago.']
+explain-control-zh-busy 1 0 simple none ['刚接下一个任务']
+explain-en-flaky-test 1 0 explain LOOK ['Nothing has been changed yet, on your instruction.']
+explain-en-flaky-test 2 3 why LOOK ['On slow CI machines the request sometimes arrives first']
+explain-zh-input-rules 1 1 then none ['改完它会重跑那些测试,看有没有东西被牵动']
+explain-zh-input-rules 2 0 explain LOOK ['测试也基本只在测这些词表']
+explain-zh-input-rules 2 3 why none ['哪怕那个请求已经等了你两分多钟']
+explain-zh-input-rules 2 4 example none ['它等了两分多钟']
+explain-zh-notes-ledger 2 1 why none ['动代码之前先问你一声']
+explain-zh-notes-ledger 2 3 then none ['下一次它要推送,就直接推', '也不会丢代码']

@@ -1,0 +1,34 @@
+DETAIL   no fresh look   0/  0 =    0% (95% CI 0%-0%)
+detail answers: 70
+  no fresh look           36/70 = 51% (40%-63%)
+  any wrong fact          18/70 = 26% (17%-37%)
+  restates                34/70 = 49% (37%-60%)
+  FAILED (wrong, or restates with no new fact) 36/70 = 51% (40%-63%)
+  mean new facts          1.51
+  with a look     wrong 9/34 = 26% (15%-43%); restates 15/34 = 44% (29%-61%); mean new facts 1.68
+  without a look  wrong 9/36 = 25% (14%-41%); restates 19/36 = 53% (37%-68%); mean new facts 1.36
+first explain answers: wrong 2/20 = 10% (3%-30%) mean new 5.70
+explain-control-en-done 1 1 simple none ['nothing has changed since']
+explain-control-en-done 2 1 simple none ['bench-codex has not done anything since it reported that, a few seconds ago']
+explain-en-flaky-test 1 4 example none ["Yesterday's example: a test run checked out a basket and the till came to a hundred"]
+explain-en-invoice-job 1 3 more none ['unless it is re-run before nine tomorrow morning']
+explain-zh-input-rules 1 3 why none ['测试也大多只是在测这张词表']
+explain-zh-input-rules 2 4 example LOOK ['就上个月那一条', '结果是那个 agent 直接往下走，测试没跑']
+explain-zh-input-rules 3 1 then LOOK ['它的报告就这些了，剩下的都说了']
+explain-zh-notes-ledger 1 0 explain LOOK ['动手改东西之前一定要先问你']
+explain-zh-notes-ledger 1 1 why none ['唯一一条拦着它们乱动的规矩', '改你东西之前先问你']
+explain-zh-notes-ledger 3 1 why none ['这条备忘没了，agent 就不会再来问你，会直接推']
+explain-zh-notes-ledger 3 2 example none ['比如你今天随口说一句记住我们这周在发版分支上', '某个 agent 改完东西要推 main，它读本子时看不到这条，就直接推了，不来问你']
+explain-zh-notes-ledger 3 3 then LOOK ['agent 推完 main，本子里查不到那条规矩', '等你哪天去看，只能看到 main 上多了一堆不是你批准的改动，却说不清是怎么来的']
+explain-control-en-done 1 1 simple none ['Nothing has changed since I just said that.']
+explain-control-en-done 2 1 simple none ['Nothing has changed since I checked a moment ago.']
+explain-en-flaky-test 1 1 then LOOK ['about a quarter of an hour and a half each go']
+explain-en-flaky-test 1 3 why LOOK ['Nine times out of ten the prices are in place first']
+explain-en-flaky-test 2 0 explain LOOK ['expects 100 instead of 85']
+explain-en-flaky-test 2 1 then LOOK ['It says both fixes are small']
+explain-en-flaky-test 2 2 more none ['in the last week']
+explain-en-flaky-test 2 3 why LOOK ['expects 100 instead of 85']
+explain-en-invoice-job 1 2 example LOOK ['The same thing happens each night now']
+explain-zh-input-rules 1 2 more none ['词表是好几个人分头写的，写的时候没互相商量']
+explain-zh-input-rules 2 3 why LOOK ['丢得没有痕迹']
+explain-zh-notes-ledger 2 1 why none ['这是唯一一条保护你不出事的规则']
