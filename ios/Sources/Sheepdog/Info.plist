@@ -40,6 +40,8 @@
 		<key>NSAllowsArbitraryLoads</key>
 		<true/>
 	</dict>
+	<key>NSCameraUsageDescription</key>
+	<string>Sheepdog uses the camera only to scan the pairing code that "sheepdog pair" shows on your Mac. Nothing is recorded.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Sheepdog talks to the sheepdog daemon running on your Mac, over your local network or Tailscale.</string>
 	<key>NSMicrophoneUsageDescription</key>

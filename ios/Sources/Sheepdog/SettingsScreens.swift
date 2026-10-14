@@ -18,6 +18,7 @@ struct DaemonSettingsView: View {
 
     @State private var probing = false
     @State private var probe: SessionViewModel.Probe?
+    @State private var scanning = false
     @FocusState private var addressFocused: Bool
 
     var body: some View {
@@ -33,6 +34,18 @@ struct DaemonSettingsView: View {
                     }
                     .padding(.vertical, 2)
                 }
+            }
+
+            Section {
+                Button {
+                    scanning = true
+                } label: {
+                    Label("Scan pairing code", systemImage: "qrcode.viewfinder")
+                }
+                .accessibilityIdentifier("settings.scan")
+                .disabled(probing)
+            } footer: {
+                Text("Run `sheepdog pair` on your Mac (or open /debug ▸ State ▸ Pair a phone) and scan its code: it fills in the address and the token.")
             }
 
             Section {
@@ -103,8 +116,42 @@ struct DaemonSettingsView: View {
             }
         }
         .scrollDismissesKeyboard(.interactively)
+        .sheet(isPresented: $scanning) {
+            PairingScannerSheet { code in
+                scanning = false
+                usePairing(code)
+            }
+        }
         .onAppear { if address.isEmpty { addressFocused = true } }
         .onDisappear(perform: commit)
+    }
+
+    /// Fills the fields from a scanned pairing code: the token, and the
+    /// first of its addresses that answers (LAN before Tailscale), then
+    /// tests the connection as the button does.
+    private func usePairing(_ code: String) {
+        guard let link = PairingLink(code) else {
+            probe = SessionViewModel.Probe(ok: false, title: "That is not a sheepdog pairing code.", lines: ["Run `sheepdog pair` on your Mac and scan the code it prints."])
+            return
+        }
+        token = link.token
+        probing = true
+        probe = nil
+        let secret = link.token
+        Task {
+            let reachable = await link.firstReachable { address in
+                guard let endpoint = DaemonEndpoint(text: address, token: secret) else { return false }
+                return (try? await DaemonClient(endpoint: endpoint).hello()) != nil
+            }
+            address = reachable ?? link.addresses[0]
+            probing = false
+            guard reachable != nil else {
+                probe = SessionViewModel.Probe(ok: false, title: "None of the code's addresses answered.", lines: link.addresses + ["Is the phone on the same network as the Mac, or on Tailscale?"])
+                return
+            }
+            commit()
+            runProbe()
+        }
     }
 
     private func runProbe() {

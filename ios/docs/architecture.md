@@ -537,6 +537,14 @@ flipped; the daemon address and token are written, and the app repointed,
 when you leave the Daemon screen or tap Done. The first run opens on the
 Daemon screen and cannot be closed until an address is in.
 
+The Daemon screen can also scan the pairing code `sheepdog pair` prints
+(`PairingScanner.swift`: an `AVCaptureSession` with a QR metadata output,
+behind the camera permission). `PairingLink` (SheepdogKit, tested) reads
+`sheepdog://pair?u=…&u=…&t=…`; the screen fills in the token, tries every
+address at once with `GET /api/hello` (three seconds each) and keeps the
+first in the code's order that answers (LAN before Tailscale), then runs
+Test connection.
+
 ## Empty and error states
 
 `FlockPaneState` (SheepdogKit, tested) decides what an empty Agents pane

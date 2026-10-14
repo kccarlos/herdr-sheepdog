@@ -110,6 +110,9 @@ targets:
         NSMicrophoneUsageDescription: >-
           Sheepdog uses the microphone so you can talk to your coding
           agents. Audio goes only to the sheepdog daemon you point the app at.
+        NSCameraUsageDescription: >-
+          Sheepdog uses the camera only to scan the pairing code that
+          "sheepdog pair" shows on your Mac. Nothing is recorded.
         NSLocalNetworkUsageDescription: >-
           Sheepdog talks to the sheepdog daemon running on your Mac, over your
           local network or Tailscale.

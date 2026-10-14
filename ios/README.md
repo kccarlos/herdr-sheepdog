@@ -36,8 +36,11 @@ PCM16 mono, 16 kHz up, 24 kHz down, plus a few JSON control frames.
    token = "pick-something-long-and-random"
    ```
 
-3. **Connect.** `sheepdog serve` prints one `lan url` line for each
-   non-loopback address. In the app's Settings, enter the host and port from
+3. **Connect.** Run `sheepdog pair` on the Mac and tap **Scan pairing
+   code** in the app's Settings ▸ Daemon: the code holds every LAN and
+   Tailscale address and the token, and the app keeps the first address
+   that answers. To type it instead: `sheepdog serve` prints one `lan url`
+   line for each non-loopback address. In the app's Settings, enter the host and port from
    that line (for example `192.168.1.20:7777`, with no scheme) and the
    token, then tap **Test connection**. It calls `GET /api/hello` and, when a
    token is set, `GET /api/state`, so a wrong token is reported as a wrong
