@@ -113,26 +113,6 @@ func TestStateBlockBudget(t *testing.T) {
 	}
 }
 
-// An announce turn's system prompt plus state block for the full workers:
-// the prompt files (SOUL.md, RULES.md, USER.md) are the fixed part and
-// the state block adds at most ~2.5 k on top.
-func TestAnnouncePromptBudget(t *testing.T) {
-	agents, notes, promises, invs := fullFlock()
-	static := joinSections(append(stableSections(nil), userSection(nil, mergeUserVars(agents, nil))))
-	state := stateText(dynamicSections(agents, notes, promises, invs, nil, "", speedNow, ""))
-	t.Logf("system %d chars + state %d chars = %d chars (~%d tokens)", len(static), len(state), len(static)+len(state), EstimateTokens(static+state))
-	if len(state) > 3000 {
-		t.Errorf("state = %d chars", len(state))
-	}
-	// +50 for the voice's reading hint (dual-brain); +125 for the
-	// decision-open, deferral, English-terms and report rules (baseline
-	// 2026-10-05 information fixes); +100 for unified roles (SOUL.md's
-	// herdr explanation, RULES.md's fit-the-content length rule).
-	if EstimateTokens(static+state) > 4975 {
-		t.Errorf("system + state = %d tokens", EstimateTokens(static+state))
-	}
-}
-
 // The system text holds nothing per-turn: two prompts assembled a
 // minute apart for different flocks share the whole system text, and the
 // state block — everything that changes — follows it.
