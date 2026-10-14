@@ -228,7 +228,9 @@ func TestCaptureDiffPruneCompactReset(t *testing.T) {
 		t.Error("no pruned stub section")
 	}
 	for _, key := range d.Changed {
-		if !strings.HasPrefix(key, "prompt:") && key != "meta" {
+		// The state block is rebuilt every turn by design (its clock
+		// moves when a slow runner crosses a second), so only messages count.
+		if !strings.HasPrefix(key, "prompt:") && !strings.HasPrefix(key, "state:") && key != "meta" {
 			t.Errorf("message %s changed in place", key)
 		}
 	}
