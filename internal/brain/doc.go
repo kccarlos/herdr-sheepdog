@@ -124,7 +124,8 @@
 // brain.turn, brain.step, brain.tool_call / brain.tool_result (paired by
 // id), brain.rail_blocked (a refused send_keys, or an action tool named
 // in an event turn), brain.compaction, brain.tool_timeout,
-// brain.failover / brain.failover_notice, brain.fallback, brain.yielded,
+// brain.failover / brain.failover_notice, brain.provider_down /
+// brain.account_problem, brain.fallback, brain.yielded,
 // brain.event_coalesced, brain.system_prompt and brain.rate_limited
 // (decision D10).
 package brain

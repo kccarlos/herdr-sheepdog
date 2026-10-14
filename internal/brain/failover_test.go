@@ -680,7 +680,8 @@ func TestFailureReason(t *testing.T) {
 		{errReset, "the connection to the orchestrator's model broke"},
 		{context.DeadlineExceeded, "the orchestrator's model did not answer in time"},
 		{err504, "the orchestrator's model had a server error"},
-		{err403, "the orchestrator's model refused the daemon's credentials"},
+		{err403, "the orchestrator's model provider refused the daemon's key or credentials; the user must fix the account, a retry will not help"},
+		{err402, "the orchestrator's model provider says the account balance is used up; the user must top it up, a retry will not help"},
 		{errors.New("bad reply"), "the orchestrator's model returned an error"},
 		{fmt.Errorf("%w: q", ErrAllKeysRateLimited), "the orchestrator's model is rate-limited"},
 	} {

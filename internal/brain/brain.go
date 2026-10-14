@@ -104,6 +104,10 @@ type Config struct {
 	Prompts *prompts.Loader
 	// Now overrides the clock (tests).
 	Now func() time.Time
+	// Accounts is the daemon's set of account problems (an invalid key,
+	// a used-up quota or balance), shared with the web layer that shows
+	// them; nil gives the orchestrator a set of its own (Accounts).
+	Accounts *AccountAlerts
 }
 
 func (c Config) withDefaults() Config {
@@ -211,6 +215,9 @@ type Brain struct {
 	// down are the providers that refused the daemon's credentials,
 	// left out of failover until their time (markDown).
 	down map[string]providerDown
+	// accounts are the account problems in force (account.go); the
+	// orchestrator's are told once each (tellAccount).
+	accounts *AccountAlerts
 
 	// catalogs are the cached model lists, one per provider (catalog.go).
 	catalogs catalogCaches
@@ -243,6 +250,10 @@ func New(cfg Config, model Model, log logging.Logger) (*Brain, error) {
 	trace := newTraceLog(log)
 	log = trace
 	b := &Brain{cfg: cfg, log: log, trace: trace, models: map[string]Model{cfg.Provider: model}, curProvider: cfg.Provider, curModel: cfg.Model, lastModel: map[string]string{cfg.Provider: cfg.Model}, curRunID: cfg.RunID, tools: toolDeclarations(false), readTools: toolDeclarations(true)}
+	b.accounts = cfg.Accounts
+	if b.accounts == nil {
+		b.accounts = NewAccountAlerts()
+	}
 	b.ctx, b.stop = context.WithCancel(context.Background())
 	path := ""
 	if cfg.DataDir != "" {
@@ -408,6 +419,7 @@ func (b *Brain) SetModel(provider, name, via string) error {
 	// account was fixed): it is tried again from the next turn.
 	delete(b.down, provider)
 	b.mu.Unlock()
+	b.accounts.Clear(RoleOrchestrator, provider)
 	b.log.Log(logSource, "brain.model_changed", "", map[string]any{"from_provider": fromProvider, "from": from, "provider": provider, "to": name, "via": via})
 	b.ingest(Message{Role: RoleSystem, Kind: KindSystem, Content: fmt.Sprintf("model switched from %s/%s to %s/%s", fromProvider, from, provider, name)}, 0)
 	return nil

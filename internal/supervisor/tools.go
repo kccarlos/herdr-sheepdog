@@ -82,7 +82,24 @@ func (s *Supervisor) fallback(out utteranceOutcome) voice.ToolResult {
 	if s.brain == nil {
 		return s.noBrain()
 	}
+	if a, ok := s.brain.AccountAlertFor(out.err); ok {
+		// An invalid key, a used-up quota or balance: "say it again"
+		// would only fail the same way, so the answer is the problem and
+		// its fix, naming the service (the plain-errors rail).
+		return voice.ToolResult{Spoken: s.noticeText(a.Spoken), Detail: accountFailedDetail(out), Scheduling: voice.UrgencyInterrupt}
+	}
 	return voice.ToolResult{Spoken: brainFailedLine, Detail: brainFailedDetail(out), Scheduling: voice.UrgencyInterrupt}
+}
+
+// accountFailedDetail is the fallback's facts when the orchestrator's
+// provider has an account problem: the spoken line already names it
+// and the fix, and calling again does not help.
+func accountFailedDetail(out utteranceOutcome) string {
+	d := fmt.Sprintf("The orchestrator could not answer the user's words: %s. The line names the service and what the user can do about it. ", failureReason(out.err))
+	if out.acted {
+		return d + "It had already acted before it failed."
+	}
+	return d + "Nothing was done; calling to_supervisor again will fail the same way until the account is fixed."
 }
 
 // brainFailedDetail is the fallback's facts for the voice: why the turn

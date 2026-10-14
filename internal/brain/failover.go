@@ -100,6 +100,8 @@ var failoverNotice = Notice{
 type providerDown struct {
 	Until  time.Time
 	Reason string
+	// Problem is the account problem behind it (every mark is one).
+	Problem AccountProblem
 }
 
 // failoverState is the run's record of failovers away from the selected
@@ -136,6 +138,11 @@ func failoverReason(ctx context.Context, err error) (string, bool) {
 	var compat *APIError
 	if errors.As(err, &compat) && compat.Status >= 500 {
 		return fmt.Sprintf("http_%d", compat.Status), true
+	}
+	if p := AccountProblemOfErr(err); p != ProblemNone {
+		// A used-up balance (402) or quota: no retry on this provider
+		// helps, another one may answer.
+		return "account_" + string(p), true
 	}
 	var nerr net.Error
 	if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &nerr) && nerr.Timeout()) {
@@ -210,18 +217,104 @@ func refusedCode(err error) int {
 }
 
 // markDown leaves provider out of failover, and routes turns around it
-// when it is the selected one, for providerDownFor (brain.provider_down).
-func (b *Brain) markDown(provider, model string, err error) {
+// when it is the selected one, for providerDownFor (brain.provider_down),
+// and records the account problem p behind it (noteAccount). t is the
+// turn that found it, nil for the compaction.
+func (b *Brain) markDown(t *turn, provider, model string, p AccountProblem, err error) {
 	b.mu.Lock()
 	until := b.cfg.Now().Add(providerDownFor)
 	if b.down == nil {
 		b.down = map[string]providerDown{}
 	}
-	b.down[provider] = providerDown{Until: until, Reason: oneLine(err.Error())}
+	b.down[provider] = providerDown{Until: until, Reason: oneLine(err.Error()), Problem: p}
 	b.mu.Unlock()
 	b.log.Log(logSource, "brain.provider_down", "", map[string]any{
-		"provider": provider, "model": model, "error": err.Error(), "until": until.UTC().Format(time.RFC3339), "for_s": int(providerDownFor.Seconds()),
+		"provider": provider, "model": model, "problem": string(p), "error": err.Error(), "until": until.UTC().Format(time.RFC3339), "for_s": int(providerDownFor.Seconds()),
 	})
+	b.noteAccount(t, provider, model, p)
+}
+
+// noteAccount records account problem p of provider (an orchestrator
+// provider) in the shared set. When it is news, it is logged
+// (brain.account_problem) and told once: after the turn t (tellAccount),
+// or at once when there is no turn. Information only: what the
+// orchestrator does next is unchanged.
+func (b *Brain) noteAccount(t *turn, provider, model string, p AccountProblem) {
+	_, _, _, backup := b.failoverTarget(provider, model)
+	a := NewAccountAlert(RoleOrchestrator, provider, p, backup)
+	if !b.accounts.Report(a) {
+		return
+	}
+	b.log.Log(logSource, "brain.account_problem", "", map[string]any{
+		"provider": provider, "model": model, "problem": string(p), "backup": backup, "message": a.Message, "fix": a.Fix, "text": a.Spoken.English,
+	})
+	if t != nil {
+		t.alerts = append(t.alerts, a)
+		return
+	}
+	b.tell(a.Spoken)
+}
+
+// tellAccount tells the user the account problems turn t found first,
+// once each. Not when the turn is the user's own and failed on one:
+// the fallback answer says it instead (AccountAlertFor), so it is not
+// heard twice in a row.
+func (b *Brain) tellAccount(t *turn, err error) {
+	if len(t.alerts) == 0 {
+		return
+	}
+	if err != nil && t.req.Kind == KindUtterance && t.req.Trigger == TriggerCEO && AccountProblemOfErr(err) != ProblemNone {
+		return
+	}
+	for _, a := range t.alerts {
+		b.tell(a.Spoken)
+	}
+}
+
+// tell hands a notice to the notifier off the caller's goroutine (see
+// noteFailover).
+func (b *Brain) tell(n Notice) {
+	b.mu.Lock()
+	notify := b.notify
+	b.mu.Unlock()
+	if notify == nil {
+		return
+	}
+	b.after.Add(1)
+	go func() {
+		defer b.after.Done()
+		notify(n)
+	}()
+}
+
+// Accounts is the set of account problems in force.
+func (b *Brain) Accounts() *AccountAlerts { return b.accounts }
+
+// AccountAlertFor is the orchestrator's account problem behind err, a
+// failed turn's error: the selected provider's when one is in force,
+// else any orchestrator provider's. ok is false when err is not an
+// account problem or none is recorded.
+func (b *Brain) AccountAlertFor(err error) (AccountAlert, bool) {
+	if AccountProblemOfErr(err) == ProblemNone {
+		return AccountAlert{}, false
+	}
+	provider, _, _ := b.current()
+	if a, ok := b.accounts.Get(RoleOrchestrator, provider); ok {
+		return a, true
+	}
+	for _, a := range b.accounts.Active() {
+		if a.Role == RoleOrchestrator {
+			return a, true
+		}
+	}
+	return AccountAlert{}, false
+}
+
+// answered ends provider's account problem, if one was in force: it
+// answered, so the account was fixed and a later failure is news.
+func (b *Brain) answered(provider string) {
+	b.failoverSucceeded(provider)
+	b.accounts.Clear(RoleOrchestrator, provider)
 }
 
 // isDownLocked reports whether provider is marked down now (b.mu held).
@@ -374,16 +467,17 @@ func (b *Brain) generateStep(ctx context.Context, t *turn, step int, msgs []Mess
 	}
 	for {
 		if err == nil {
-			b.failoverSucceeded(t.provider)
+			b.answered(t.provider)
 			return resp, raw, nil
 		}
 		reason, ok := failoverReason(ctx, err)
 		if !ok {
 			return nil, nil, err
 		}
-		refused := refusedCode(err) != 0
+		problem := AccountProblemOfErr(err)
+		refused := problem != ProblemNone
 		if refused {
-			b.markDown(t.provider, t.model, err)
+			b.markDown(t, t.provider, t.model, problem, err)
 		}
 		if t.failedOver && !refused {
 			return nil, nil, err
@@ -475,16 +569,17 @@ func (b *Brain) generateSummary(ctx context.Context, contents []*genai.Content, 
 	failedOver := false
 	for {
 		if err == nil {
-			b.failoverSucceeded(provider)
+			b.answered(provider)
 			return resp, nil
 		}
 		reason, ok := failoverReason(ctx, err)
 		if !ok {
 			return nil, err
 		}
-		refused := refusedCode(err) != 0
+		problem := AccountProblemOfErr(err)
+		refused := problem != ProblemNone
 		if refused {
-			b.markDown(provider, model, err)
+			b.markDown(nil, provider, model, problem, err)
 		}
 		if failedOver && !refused {
 			return nil, err
@@ -533,8 +628,10 @@ func (b *Brain) noteFailover(from, to string) {
 	if len(f.at) > failoverStreakNotice {
 		f.at = f.at[len(f.at)-failoverStreakNotice:]
 	}
+	// A provider down on an account problem was named already
+	// (noteAccount): "having trouble" would only repeat it vaguely.
 	due := len(f.at) == failoverStreakNotice && now.Sub(f.at[0]) <= failoverStreakWindow &&
-		(f.noticed.IsZero() || now.Sub(f.noticed) >= failoverNoticeEvery) && b.notify != nil
+		(f.noticed.IsZero() || now.Sub(f.noticed) >= failoverNoticeEvery) && b.notify != nil && !b.isDownLocked(from)
 	notify, n := b.notify, len(f.at)
 	if due {
 		f.noticed = now
@@ -574,10 +671,14 @@ func FailureReason(err error) string {
 	switch {
 	case err == nil:
 		return ""
+	case AccountProblemOfErr(err) == ProblemInvalidKey:
+		return "the orchestrator's model provider refused the daemon's key or credentials; the user must fix the account, a retry will not help"
+	case AccountProblemOfErr(err) == ProblemQuota:
+		return "the orchestrator's model provider says the quota is used up; a retry will not help until it resets"
+	case AccountProblemOfErr(err) == ProblemBalance:
+		return "the orchestrator's model provider says the account balance is used up; the user must top it up, a retry will not help"
 	case errors.Is(err, ErrAllKeysRateLimited) || isRateLimited(err):
 		return "the orchestrator's model is rate-limited"
-	case refusedCode(err) != 0:
-		return "the orchestrator's model refused the daemon's credentials"
 	case isTransportError(err):
 		return "the connection to the orchestrator's model broke"
 	case errors.Is(err, context.DeadlineExceeded):

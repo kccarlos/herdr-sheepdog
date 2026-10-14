@@ -180,7 +180,7 @@ Examples (`client-ready` is under *Protocol version and handshake*):
 | `{"type":"flush"}`                                                       | **Drop the playback buffer now.** Sent when the model was interrupted (barge-in, `cancel`, an interrupting push). Audio frames received before this message must not be played; frames received after it start a new utterance. |
 | `{"type":"status","voice":"connecting\|connected\|reconnecting\|closed","muted":bool,"reason":"…"?,"stalled":true?,"provider":"gemini\|openai"?}` | Voice session state. Sent once on connect and on every change. `reason` is set for `closed` (e.g. `"replaced"`, `"shutdown"`, `"error"`); with GPT-Live, `connected` carries `reason:"standby"` while no billed session is open (it opens on the next speech or push) and no reason while one is. `muted` echoes the daemon's view of the mute state. `stalled` is present (true) while the model has not reacted to the user's last utterance for `gemini.stall_after_s`; the next status without it means the model answered or the connection was recycled. `provider` is the voice provider behind the session (absent with `--voice=off`); a provider switch sends `flush` then a fresh `status` with the new provider. |
 | `{"type":"transcript","dir":"in\|out","text":"…","final":bool}`          | Incremental transcription. `in` = what the model heard from the user, `out` = what the model is saying. Fragments of one utterance arrive in order; `final:true` closes it. Output fragments may never carry `final:true`; treat the next `in` transcript or a `flush` as the boundary. GPT-Live has no end-of-utterance event: the daemon closes an `in` utterance with an **empty** fragment (`"text":"","final":true`) once the words stop; a client appends nothing and starts a new bubble for the next `in` text. |
-| `{"type":"error","message":"…"}`                                         | A non-fatal problem the user should see (e.g. rate limited, bad control message). The connection stays open.  |
+| `{"type":"error","message":"…","problem":"…"?,"role":"…"?,"provider":"…"?,"fix":"…"?}` | A non-fatal problem the user should see (e.g. rate limited, bad control message). The connection stays open. With `problem` it is an account problem; see *Account problems*. |
 | `{"type":"pong"}`                                                        | Reply to `ping`.                                                                                                |
 | `{"type":"screen","screen":{…}}`                                         | The subscribed agent's window changed (*Agent window over /ws*).                                                 |
 | `{"type":"screen-error","pane_id":"…","message":"…","ended":true?}`      | The subscribed window could not be read; `ended` means the subscription is over.                                 |
@@ -196,8 +196,37 @@ Examples (`bot-ready` is under *Protocol version and handshake*):
 {"type":"transcript","dir":"in","text":"is auth done","final":true}
 {"type":"transcript","dir":"out","text":"Auth finished its tests.","final":false}
 {"type":"error","message":"rate limited, retrying"}
+{"type":"error","message":"DeepSeek says the balance is used up, so the orchestrator cannot use it.","problem":"balance","role":"orchestrator","provider":"deepseek","fix":"top up the account (https://platform.deepseek.com)"}
 {"type":"pong"}
 ```
+
+## Account problems
+
+When the orchestrator's or the voice's provider fails because of the
+account — an invalid key (`problem:"invalid_key"`), a used-up quota
+(`"quota"`, not a per-minute rate limit) or a used-up balance
+(`"balance"`, HTTP 402) — the daemon sends one `error` message with
+these optional fields:
+
+- `message`: a plain sentence naming the service and what it blocks;
+- `problem`: `invalid_key`, `quota` or `balance`;
+- `role`: what it blocks, `orchestrator` or `voice`;
+- `provider`: the provider id (`gemini`, `vertex`, `deepseek`, `openai`, or an
+  OpenAI-compatible provider's name);
+- `fix`: the one-line fix, which may name the key's variable and the
+  console URL.
+
+It is sent once when the problem starts, not on every retry, and again
+to each client that attaches while it lasts (after the first `status`).
+It lasts until the provider answers again (or, for the orchestrator, the
+provider is selected again in the model picker). Nothing tells the
+client that it ended; a client may hide it after a while. Show `message`
+and `fix`; an older client shows `message` alone, which is a complete
+sentence. The orchestrator's problems are also spoken once by the voice,
+in the user's language (and are the answer to the user's words while the
+orchestrator has no provider left). The voice's own problems cannot be
+spoken by the voice: `/voice` reads them aloud once with the browser's
+speech synthesis.
 
 ## Mute semantics
 

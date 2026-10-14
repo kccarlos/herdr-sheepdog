@@ -142,6 +142,7 @@ func (c *client) attachIfPending() {
 	if now := controlFrame(c.h.statusMsg()); string(now.data) != string(first) {
 		c.enqueue(now)
 	}
+	c.h.sendAccounts(c)
 }
 
 // checkProtocol refuses a client below the daemon's minimum: an error a
