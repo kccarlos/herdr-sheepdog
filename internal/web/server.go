@@ -281,6 +281,8 @@ func (s *Server) routes() error {
 	// s.authFunc. /ws and /events also accept ?token=: a browser cannot
 	// set a header on a WebSocket or EventSource request.
 	s.mux.HandleFunc("GET /api/hello", s.handleHello)
+	s.mux.HandleFunc("GET /api/pair", s.authFunc(s.handlePair, false))
+	s.mux.HandleFunc("GET /api/pair/qr.svg", s.authFunc(s.handlePairQR, false))
 	s.mux.HandleFunc("POST /api/login", s.handleLogin)
 	s.mux.HandleFunc("GET /events", s.authFunc(s.handleEvents, true))
 	s.mux.HandleFunc("GET /ws", s.authFunc(s.hub.handle, true))

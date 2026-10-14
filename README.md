@@ -101,8 +101,11 @@ prints a `lan url` line for every non-loopback IPv4 address; use the LAN
 or `100.x.x.x` (Tailscale) one.
 
 - **iOS app** ("Sheepdog for herdr", repo `herdr-sheepdog-ios`,
-  TestFlight internal testing): type the host:port from the `lan url`
-  line and the token into its Settings. It speaks the same `/ws` contract
+  TestFlight internal testing): run `sheepdog pair` (or open /debug →
+  State → Pair a phone) and scan the code in the app's Settings; it holds
+  every LAN and Tailscale address and the token, and the app keeps the
+  first address that answers. Or type the host:port from the `lan url`
+  line and the token by hand. It speaks the same `/ws` contract
   (with its protocol handshake) as `/voice`, shows the workers with answerable prompts, a window onto each agent's screen with input (`/api/agents/{pane}/screen`, `.../input`), and gets a
   notification when an agent needs you once `[push.apns]` is configured
   ([`docs/push.md`](docs/push.md)).

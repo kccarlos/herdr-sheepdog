@@ -50,6 +50,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return runInit(ctx, args[1:], os.Stdin, stdout, stderr)
 	case "doctor":
 		return runDoctor(ctx, args[1:], stdout, stderr)
+	case "pair":
+		return runPair(ctx, args[1:], stdout, stderr)
 	case "service":
 		return runService(ctx, args[1:], stdout, stderr)
 	case "demo":
@@ -98,6 +100,7 @@ func printUsage(w io.Writer) {
 	fprintln(w, "  init          set up: check herdr, ask for and validate a key, write config + secrets")
 	fprintln(w, "  doctor        check the setup (keys, herdr, port, token, push, voice) with fixes")
 	fprintln(w, "  demo          try it without herdr: scripted workers, opens /voice (needs GEMINI_API_KEY)")
+	fprintln(w, "  pair          show the QR code the iOS app scans (addresses + token)")
 	fprintln(w, "  serve         run the daemon (web server, supervisor, voice session)")
 	fprintln(w, "  service       install|uninstall|status|logs: run serve at login (launchd / systemd --user)")
 	fprintln(w, "  config        show|init: inspect or scaffold config.toml")
