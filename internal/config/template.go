@@ -142,6 +142,18 @@ func Template() string {
 # key_id = ""     # the key's 10-character id
 # team_id = ""    # the Apple Developer team id the key belongs to
 # topic = ""      # the iOS app's bundle id
+
+[log]
+# The runtime log, <data_dir>/logs/sheepdog.log (sheepdog logs). Secrets
+# are always redacted.
+# level = %[47]q   # debug | info | warn | error: which events are mirrored into it
+# max_size_mb = %[48]d   # rotate at this size
+# max_files = %[49]d   # rotated files kept (sheepdog.log.1 …)
+
+[events]
+# The event log, <data_dir>/events/YYYY-MM-DD.jsonl, holds transcripts of
+# what you said. Day files older than this are deleted at startup and daily.
+# retention_days = %[50]d   # 0 keeps them forever
 `,
 		d.DataDir, d.DebounceMS, d.SnapshotIntervalS, d.PendingTTLS,
 		d.Herdr.Socket,
@@ -166,5 +178,7 @@ func Template() string {
 		d.Supervisor.AuthoriseWindowS,
 		d.Brain.AnnounceTimeoutS,
 		d.Brain.ReplyWaitS,
+		d.Log.Level, d.Log.MaxSizeMB, d.Log.MaxFiles,
+		d.Events.RetentionDays,
 	)
 }

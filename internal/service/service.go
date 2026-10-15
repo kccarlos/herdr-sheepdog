@@ -61,11 +61,16 @@ type Spec struct {
 	UID int
 	// PATH is the PATH the daemon gets (the installing shell's).
 	PATH string
+	// StdioPath receives the daemon's stdout and stderr
+	// (daemon.StdioFile: normally empty; a crash or an error printed
+	// before the runtime log opened). The runtime log itself is the
+	// daemon's own <data_dir>/logs/sheepdog.log.
+	StdioPath string
 }
 
 // Args is the command line the service runs.
 func (s Spec) Args() []string {
-	args := []string{s.Binary, "serve", "--env-file", s.EnvFile}
+	args := []string{s.Binary, "serve", "--background", "--env-file", s.EnvFile}
 	if s.ConfigPath != "" {
 		args = append(args, "--config", s.ConfigPath)
 	}
@@ -80,9 +85,13 @@ func (s Spec) UnitPath() string {
 	return filepath.Join(s.Home, ".config", "systemd", "user", Unit)
 }
 
-// LogPath is where launchd writes the daemon's stdout and stderr (macOS;
-// on Linux the journal has them).
+// LogPath is where the service manager writes the daemon's stdout and
+// stderr: StdioPath, or (unset) the launchd agent's old
+// ~/Library/Logs/sheepdog/serve.log.
 func (s Spec) LogPath() string {
+	if s.StdioPath != "" {
+		return s.StdioPath
+	}
 	return filepath.Join(s.Home, "Library", "Logs", "sheepdog", "serve.log")
 }
 
@@ -183,12 +192,21 @@ Type=simple
 ExecStart=` + strings.Join(words, " ") + `
 WorkingDirectory=` + systemdQuote(s.Home) + `
 Environment=` + systemdQuote("PATH="+s.PATH) + `
-Restart=on-failure
+` + s.systemdOutput() + `Restart=on-failure
 RestartSec=5
 
 [Install]
 WantedBy=default.target
 `)
+}
+
+// systemdOutput sends stdout and stderr to StdioPath when it is set
+// (systemd 240+), otherwise they stay in the journal.
+func (s Spec) systemdOutput() string {
+	if s.StdioPath == "" {
+		return ""
+	}
+	return "StandardOutput=append:" + s.StdioPath + "\nStandardError=append:" + s.StdioPath + "\n"
 }
 
 // Manager installs, removes and inspects the service.
@@ -222,16 +240,16 @@ func (m Manager) Install(ctx context.Context) error {
 		return err
 	}
 	m.say("wrote %s", path)
+	if err := os.MkdirAll(filepath.Dir(m.Spec.LogPath()), 0o700); err != nil {
+		return err
+	}
 	if m.Spec.OS == "darwin" {
-		if err := os.MkdirAll(filepath.Dir(m.Spec.LogPath()), 0o755); err != nil {
-			return err
-		}
 		// bootout fails when it is not loaded: that is the normal case.
 		_, _ = m.Run(ctx, "launchctl", "bootout", m.domain()+"/"+Label)
 		if out, err := m.Run(ctx, "launchctl", "bootstrap", m.domain(), path); err != nil {
 			return fmt.Errorf("launchctl bootstrap: %v: %s", err, strings.TrimSpace(out))
 		}
-		m.say("started %s (logs: %s)", Label, m.Spec.LogPath())
+		m.say("started %s (logs: sheepdog logs)", Label)
 		return nil
 	}
 	if out, err := m.Run(ctx, "systemctl", "--user", "daemon-reload"); err != nil {
@@ -243,7 +261,7 @@ func (m Manager) Install(ctx context.Context) error {
 	if out, err := m.Run(ctx, "systemctl", "--user", "restart", Unit); err != nil {
 		return fmt.Errorf("systemctl restart: %v: %s", err, strings.TrimSpace(out))
 	}
-	m.say("started %s (logs: journalctl --user -u %s)", Unit, Unit)
+	m.say("started %s (logs: sheepdog logs)", Unit)
 	return nil
 }
 
@@ -331,6 +349,39 @@ func (m Manager) Start(ctx context.Context) (installed, started bool, err error)
 		return true, false, fmt.Errorf("systemctl start: %v: %s", err, strings.TrimSpace(out))
 	}
 	return true, true, nil
+}
+
+// Installed reports whether the unit file exists.
+func (m Manager) Installed() bool {
+	if m.Spec.check() != nil {
+		return false
+	}
+	_, err := os.Stat(m.Spec.UnitPath())
+	return err == nil
+}
+
+// Stop stops an installed service so it stays stopped: launchd's
+// KeepAlive and systemd's Restart would bring back a daemon that was
+// only signalled, so the agent is booted out (it loads again at the next
+// login or sheepdog start) and the unit stopped. installed is false (and
+// nothing is done) when there is no unit file.
+func (m Manager) Stop(ctx context.Context) (installed bool, err error) {
+	if !m.Installed() {
+		return false, nil
+	}
+	if m.Spec.OS == "darwin" {
+		if _, perr := m.Run(ctx, "launchctl", "print", m.domain()+"/"+Label); perr != nil {
+			return true, nil // not loaded: already stopped
+		}
+		if out, err := m.Run(ctx, "launchctl", "bootout", m.domain()+"/"+Label); err != nil {
+			return true, fmt.Errorf("launchctl bootout: %v: %s", err, strings.TrimSpace(out))
+		}
+		return true, nil
+	}
+	if out, err := m.Run(ctx, "systemctl", "--user", "stop", Unit); err != nil {
+		return true, fmt.Errorf("systemctl stop: %v: %s", err, strings.TrimSpace(out))
+	}
+	return true, nil
 }
 
 // launchdState picks the state, pid and last exit code out of

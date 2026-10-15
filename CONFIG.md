@@ -43,14 +43,26 @@ It exits 1 on any failure.
 Tailscale address the daemon listens on (from `web.bind`/`web.port`) and
 `web.token`, as `sheepdog://pair?u=…&u=…&t=…` (docs/ws-contract.md
 "Pairing"); on a terminal it draws the code in explicit colours, so it scans on a light or a dark theme (`--plain` and `--invert` otherwise). It needs a non-loopback bind.
-`sheepdog service install` runs the daemon as a user service (a launchd
-agent `~/Library/LaunchAgents/io.github.kccarlos.sheepdog.plist` on macOS,
-with its output in `~/Library/Logs/sheepdog/serve.log`; a systemd unit
-`~/.config/systemd/user/sheepdog.service` on Linux, output in the
-journal): `sheepdog serve --env-file ~/.config/sheepdog/.env`, plus
-`--config` when one is given, with the installing shell's `PATH`.
-`service status`, `service logs [-n N] [-f]` and `service uninstall`
-manage it; `install --dry-run` prints the unit without changing anything.
+`sheepdog start` runs the daemon in the background and `stop`, `restart`,
+`status [--json]` and `logs [-f] [-n N]` manage it, with or without the
+login service. `sheepdog service install` runs it as a user service (a
+launchd agent `~/Library/LaunchAgents/io.github.kccarlos.sheepdog.plist`
+on macOS with `KeepAlive`; a systemd unit
+`~/.config/systemd/user/sheepdog.service` on Linux with
+`Restart=on-failure`): `sheepdog serve --background --env-file
+~/.config/sheepdog/.env`, plus `--config` when one is given, with the
+installing shell's `PATH`. Without the service, `start` runs the same
+command line as a detached process. `service status` and `service
+uninstall` manage the unit; `install --dry-run` prints it without
+changing anything. One daemon runs per `data_dir`: a second `serve` or
+`start` says `sheepdog is already running (pid N, http://…)`.
+
+A config error names the file, the line and the key, and what is wrong:
+
+```
+config: /Users/me/.config/sheepdog/config.toml line 5, key supervisor.chattiness: "loud" is not valid (want one of quiet, normal, chatty)
+config: /Users/me/.config/sheepdog/config.toml line 2, key web.port: wrong type: want an integer, got a string (in quotes)
+```
 
 Two keys — `[aliases]` and the `[cli]` argv templates (`codex_cmd`,
 `claude_cmd`, `codex_resume_cmd`, `claude_resume_cmd`) — are TOML-only:
@@ -77,7 +89,9 @@ so they have no `SHEEPDOG_*` override.
 
 | Key | Env override | Default | Meaning |
 |---|---|---|---|
-| `state.path` | `SHEEPDOG_STATE_PATH` | `~/.local/share/sheepdog/state.json` | JSON file the persisted state table is written to. It does not follow a changed `data_dir`: a second (scratch) daemon must set both. |
+| `state.path` | `SHEEPDOG_STATE_PATH` | `~/.local/share/sheepdog/brain/<run>.jsonl`, `<run>.requests.jsonl` | The orchestrator's transcripts and the requests it sent to its model, one pair per daemon run: they include what you said. | `events.retention_days`, counted from the run's start and its last write. Deleted with the event log. |
+| `~/.local/share/sheepdog/notes.jsonl` | The notes the orchestrator wrote down about your agents (its `note` tool). | Until you delete it. |
+| `~/.local/share/sheepdog/state.json` | JSON file the persisted state table is written to. It does not follow a changed `data_dir`: a second (scratch) daemon must set both. |
 | `state.full_fsync` | `SHEEPDOG_STATE_FULL_FSYNC` | `false` | Turn on the hardware-durable fsync pass after a mutation (debounced to one flush per ~100ms burst, plus a final one on shutdown). Off by default: on macOS the durable path is `F_FULLFSYNC`, dramatically slower than the plain fsync used otherwise (see `internal/state`); turn it on only if the state table must survive a power loss, not just a process crash. |
 
 ## `[gemini]`
@@ -406,6 +420,50 @@ the embedded `assistant.md`, `assistant-gptlive.md`, `USER.md` and
 | Key | Env override | Default | Meaning |
 |---|---|---|---|
 | `prompts.dir` | `SHEEPDOG_PROMPTS_DIR` | `~/.config/sheepdog/prompts` | Override directory: `<dir>/<name>` (the same relative path as under `prompts/` in the repo, e.g. `assistant.md`, `svp/RULES.md`) replaces the matching embedded file when present; a missing file or directory is not an error. Re-read on `SIGHUP` and `POST /api/prompts/reload`, not just at daemon start. An override of `svp/RULES.md` that drops the rail or the provenance sentence is rejected (`prompts.override_rejected`) and the embedded file is used instead — the one rail cannot be removed by a prompt edit. `sheepdog prompts export [dir]` seeds this directory from the embedded defaults; `sheepdog prompts show <name>` prints the effective text and its source. |
+
+## `[log]`
+
+The runtime log, `<data_dir>/logs/sheepdog.log` (`sheepdog logs`): every
+line the daemon prints, each with a UTC timestamp, plus the events
+`log.level` selects as one text line each. Secrets — every key and token
+in the config and the environment, and anything shaped like one
+(`AIza…`, `sk-…`, `Bearer …`, `token=…`) — are replaced by `[REDACTED]`
+before a line is written.
+
+| Key | Env override | Default | Meaning |
+|---|---|---|---|
+| `log.level` | `SHEEPDOG_LOG_LEVEL` | `info` | Which events are mirrored into the runtime log: `debug` every event, `info` errors, warnings and the daemon's lifecycle (`daemon.*`), `warn` errors and warnings, `error` errors only. The daemon's own lines (the banner, warnings, the exit reason) are always written. `serve --verbose` additionally echoes every event to stderr as JSON. |
+| `log.max_size_mb` | *(TOML only)* | `10` | The log is rotated when it would grow past this: `sheepdog.log` becomes `sheepdog.log.1`, `.1` becomes `.2`, and so on. |
+| `log.max_files` | *(TOML only)* | `3` | Rotated files kept; the oldest is deleted. With the defaults the log takes at most 40 MB. |
+
+## `[events]`
+
+| Key | Env override | Default | Meaning |
+|---|---|---|---|
+| `events.retention_days` | `SHEEPDOG_EVENTS_RETENTION_DAYS` | `14` | Days of event log kept. The event log (`<data_dir>/events/YYYY-MM-DD.jsonl`) holds transcripts of what you said and what the voice and the orchestrator answered; so do the orchestrator's transcripts in `<data_dir>/brain/`. Day files older than this (UTC), and transcripts of runs that started and were last written before then, are deleted when the daemon starts and once a day while it runs (`events.pruned`); `0` keeps them forever. Only `YYYY-MM-DD.jsonl` files directly in `events/` and `<run id>[.requests].jsonl` files directly in `brain/` are deleted — never another file, a subdirectory or a symlink — and never under a `docs/bench`, `docs/eval` or `testdata` directory. `sheepdog dev scorecard`, `dev feedback` and `dev eval extract` read this directory, so keep a longer retention if you analyse older days. `sheepdog data clear` deletes it now. |
+
+## What sheepdog stores
+
+Everything is under two directories (and `data_dir` moves the second).
+Nothing is sent anywhere except to the model providers you configured.
+
+| Path | What it holds | Kept |
+|---|---|---|
+| `~/.config/sheepdog/config.toml` | Your settings (mode 0600 when it holds `web.token`). | Until you delete it (`sheepdog uninstall` asks). |
+| `~/.config/sheepdog/.env` | Your API keys and the web token (mode 0600). | Until you delete it. |
+| `~/.config/sheepdog/prompts/` | Your prompt overrides, if you made any (`prompts.dir`). | Until you delete it. |
+| `~/.local/share/sheepdog/events/YYYY-MM-DD.jsonl` | The event log: every event of the daemon, including **transcripts of what you said**, the voice's and the orchestrator's answers, and agent screen excerpts. | `events.retention_days` (14 days). `sheepdog data clear --events` deletes it now. |
+| `~/.local/share/sheepdog/brain/<run>.jsonl`, `<run>.requests.jsonl` | The orchestrator's transcripts and the requests it sent to its model, one pair per daemon run: they include what you said. | `events.retention_days`, counted from the run's start and its last write. Deleted with the event log. |
+| `~/.local/share/sheepdog/notes.jsonl` | The notes the orchestrator wrote down about your agents (its `note` tool). | Until you delete it. |
+| `~/.local/share/sheepdog/state.json` | The agent table, aliases, pending questions and your runtime settings (`state.path`). | Overwritten as it changes. |
+| `~/.local/share/sheepdog/push_devices.json` | The phones registered for notifications (device tokens), when push is configured. | Until a phone unregisters. |
+| `~/.local/share/sheepdog/logs/sheepdog.log` | The runtime log (`[log]`), secrets redacted. | Rotated at `log.max_size_mb`, `log.max_files` old files. |
+| `~/.local/share/sheepdog/logs/stdio.log` | What a background daemon printed outside its log: an error before the log opened, or a crash. Normally empty. | Until `sheepdog data clear --all`. |
+| `~/.local/share/sheepdog/sheepdog.pid` | The running daemon's pid, URL and version (empty when it is stopped). | While it runs. |
+
+`sheepdog data clear --events` deletes the event log, `--all` everything
+under `data_dir`; both ask first. `sheepdog uninstall` removes the
+service and asks before deleting either directory.
 
 ## `[push.apns]`
 

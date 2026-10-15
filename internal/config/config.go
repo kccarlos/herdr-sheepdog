@@ -53,6 +53,8 @@ type Config struct {
 	Brain      Brain      `toml:"brain"`
 	Prompts    Prompts    `toml:"prompts"`
 	Push       Push       `toml:"push"`
+	Log        Log        `toml:"log"`
+	Events     Events     `toml:"events"`
 
 	// deprecations are the notes about deprecated keys Load read
 	// (Deprecations, deprecated.go).
@@ -477,6 +479,30 @@ var GeminiBackends = []string{"aistudio", "vertex"}
 // GeminiBriefingChannels are the valid gemini.briefing_channel values.
 var GeminiBriefingChannels = []string{"function_response", "user_turn"}
 
+// Log configures the daemon's runtime log, <data_dir>/logs/sheepdog.log
+// (CONFIG.md "What sheepdog stores"). Secrets are always redacted.
+type Log struct {
+	// Level is debug, info (default), warn or error: which events are
+	// mirrored into the runtime log as text lines (logging.EventMirror).
+	Level string `toml:"level"`
+	// MaxSizeMB is the size at which the log is rotated (default 10).
+	MaxSizeMB int `toml:"max_size_mb"`
+	// MaxFiles is how many rotated files are kept next to it (default 3).
+	MaxFiles int `toml:"max_files"`
+}
+
+// Events configures the event log, <data_dir>/events/YYYY-MM-DD.jsonl,
+// which holds transcripts of what the user said.
+type Events struct {
+	// RetentionDays is how many days of event files the daemon keeps; older
+	// day files are deleted at startup and once a day. 0 keeps them
+	// forever. Default 14.
+	RetentionDays int `toml:"retention_days"`
+}
+
+// LogLevels are the valid log.level values.
+var LogLevels = []string{"debug", "info", "warn", "error"}
+
 // Push configures phone notifications (docs/push.md).
 type Push struct {
 	APNs APNs `toml:"apns"`
@@ -541,6 +567,8 @@ func Default() Config {
 		Supervisor:        Supervisor{Chattiness: DefaultChattiness, RecentMinutes: 30, PromiseTTLS: 7200, CancelWindowS: 30, RepromptPollS: 10, RepeatWindowS: 60, AuthoriseWindowS: 30, ProjectRoots: []string{"~/Documents"}},
 		Brain:             defaultBrain(),
 		Prompts:           Prompts{Dir: filepath.Join(home, ".config", "sheepdog", "prompts")},
+		Log:               Log{Level: "info", MaxSizeMB: 10, MaxFiles: 3},
+		Events:            Events{RetentionDays: 14},
 	}
 }
 
@@ -661,7 +689,7 @@ func load(path string, lookup func(string) (string, bool)) (Config, error) {
 	case err == nil:
 		md, err := toml.Decode(string(data), &cfg)
 		if err != nil {
-			return Config{}, fmt.Errorf("config: parse %s: %w", path, err)
+			return Config{}, parseError(path, err)
 		}
 		modelSet = md.IsDefined("brain", "model")
 		if err := applyDeprecatedKeys(&cfg, data, md); err != nil {
@@ -691,35 +719,55 @@ func load(path string, lookup func(string) (string, bool)) (Config, error) {
 		// otherwise.
 		cfg.Brain.Model = o.Model
 	}
-	if !validChattiness(cfg.Supervisor.Chattiness) {
-		return Config{}, fmt.Errorf("config: supervisor.chattiness=%q: want one of %s", cfg.Supervisor.Chattiness, strings.Join(ChattinessLevels, ", "))
-	}
-	if cfg.Supervisor.RecentMinutes <= 0 {
-		return Config{}, fmt.Errorf("config: supervisor.recent_minutes=%d: want a positive integer", cfg.Supervisor.RecentMinutes)
-	}
-	if cfg.Supervisor.PromiseTTLS <= 0 {
-		return Config{}, fmt.Errorf("config: supervisor.promise_ttl_s=%d: want a positive integer", cfg.Supervisor.PromiseTTLS)
-	}
-	if cfg.Supervisor.RepromptPollS <= 0 {
-		return Config{}, fmt.Errorf("config: supervisor.reprompt_poll_s=%d: want a positive integer", cfg.Supervisor.RepromptPollS)
-	}
-	if cfg.Supervisor.RepeatWindowS <= 0 {
-		return Config{}, fmt.Errorf("config: supervisor.repeat_window_s=%d: want a positive integer", cfg.Supervisor.RepeatWindowS)
-	}
-	if cfg.Supervisor.AuthoriseWindowS <= 0 {
-		return Config{}, fmt.Errorf("config: supervisor.authorise_window_s=%d: want a positive integer", cfg.Supervisor.AuthoriseWindowS)
-	}
 	cfg.Supervisor.ProjectRoots = expandRoots(cfg.Supervisor.ProjectRoots)
-	if err := validateBrain(cfg.Brain); err != nil {
-		return Config{}, err
-	}
-	if err := validateDeepSeek(cfg.DeepSeek); err != nil {
-		return Config{}, err
-	}
-	if err := validateVoice(cfg); err != nil {
-		return Config{}, err
+	if err := validate(cfg); err != nil {
+		return Config{}, locate(path, data, err)
 	}
 	return cfg, nil
+}
+
+// validate checks the resolved config's values.
+func validate(cfg Config) error {
+	if !validChattiness(cfg.Supervisor.Chattiness) {
+		return fmt.Errorf("config: supervisor.chattiness=%q: want one of %s", cfg.Supervisor.Chattiness, strings.Join(ChattinessLevels, ", "))
+	}
+	if cfg.Supervisor.RecentMinutes <= 0 {
+		return fmt.Errorf("config: supervisor.recent_minutes=%d: want a positive integer", cfg.Supervisor.RecentMinutes)
+	}
+	if cfg.Supervisor.PromiseTTLS <= 0 {
+		return fmt.Errorf("config: supervisor.promise_ttl_s=%d: want a positive integer", cfg.Supervisor.PromiseTTLS)
+	}
+	if cfg.Supervisor.RepromptPollS <= 0 {
+		return fmt.Errorf("config: supervisor.reprompt_poll_s=%d: want a positive integer", cfg.Supervisor.RepromptPollS)
+	}
+	if cfg.Supervisor.RepeatWindowS <= 0 {
+		return fmt.Errorf("config: supervisor.repeat_window_s=%d: want a positive integer", cfg.Supervisor.RepeatWindowS)
+	}
+	if cfg.Supervisor.AuthoriseWindowS <= 0 {
+		return fmt.Errorf("config: supervisor.authorise_window_s=%d: want a positive integer", cfg.Supervisor.AuthoriseWindowS)
+	}
+	if err := validateBrain(cfg.Brain); err != nil {
+		return err
+	}
+	if err := validateDeepSeek(cfg.DeepSeek); err != nil {
+		return err
+	}
+	if err := validateVoice(cfg); err != nil {
+		return err
+	}
+	if !oneOf(cfg.Log.Level, LogLevels) {
+		return fmt.Errorf("config: log.level=%q: want one of %s", cfg.Log.Level, strings.Join(LogLevels, ", "))
+	}
+	if cfg.Log.MaxSizeMB <= 0 {
+		return fmt.Errorf("config: log.max_size_mb=%d: want a positive number of megabytes", cfg.Log.MaxSizeMB)
+	}
+	if cfg.Log.MaxFiles < 1 {
+		return fmt.Errorf("config: log.max_files=%d: want 1 or more", cfg.Log.MaxFiles)
+	}
+	if cfg.Events.RetentionDays < 0 {
+		return fmt.Errorf("config: events.retention_days=%d: want 0 (keep forever) or a number of days", cfg.Events.RetentionDays)
+	}
+	return nil
 }
 
 // validateVoice checks [voice], [voice.openai] and the [gemini]
@@ -901,6 +949,16 @@ func applyEnv(cfg *Config, lookup func(string) (string, bool)) error {
 	}
 	if v, ok := lookup("SHEEPDOG_DATA_DIR"); ok {
 		cfg.DataDir = v
+	}
+	if v, ok := lookup("SHEEPDOG_LOG_LEVEL"); ok {
+		cfg.Log.Level = v
+	}
+	if v, ok := lookup("SHEEPDOG_EVENTS_RETENTION_DAYS"); ok {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 {
+			return fmt.Errorf("config: SHEEPDOG_EVENTS_RETENTION_DAYS=%q: want 0 (keep forever) or a number of days", v)
+		}
+		cfg.Events.RetentionDays = n
 	}
 	if v, ok := lookup("SHEEPDOG_HERDR_SOCKET"); ok {
 		cfg.Herdr.Socket = v

@@ -4,15 +4,20 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"fmt"
 	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/app"
 	"github.com/kccarlos/herdr-sheepdog/internal/config"
+	"github.com/kccarlos/herdr-sheepdog/internal/daemon"
+	"github.com/kccarlos/herdr-sheepdog/internal/eventlog"
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
+	"github.com/kccarlos/herdr-sheepdog/internal/redact"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice/gemini"
 )
 
@@ -51,6 +56,8 @@ func printServeUsage(w io.Writer) {
 	fprintln(w, "  --verbose         also print every event to stderr as JSON lines")
 	fprintln(w, "  --dev             serve testdata/audio/*.wav at /testdata/ so the voice page")
 	fprintln(w, "                    can use a fixture as its microphone (config: web.dev)")
+	fprintln(w, "  --background      run as a background daemon (what sheepdog start and the login")
+	fprintln(w, "                    service use): write only to the runtime log, not the terminal")
 	fprintln(w, "  --heard-echo      with --voice=off: report every spoken push and text-router")
 	fprintln(w, "                    answer back as heard, as a voice session would (harnesses")
 	fprintln(w, "                    that stand in for the user, e.g. sheepdog bench run)")
@@ -60,7 +67,7 @@ func printServeUsage(w io.Writer) {
 type serveOpts struct {
 	configPath, envFile, voice, herdr, cli, brain, dataDir string
 	port                                                   int
-	verbose, dev, heardEcho                                bool
+	verbose, dev, heardEcho, background                    bool
 }
 
 func parseServeFlags(args []string, stderr io.Writer) (serveOpts, int, bool) {
@@ -79,6 +86,7 @@ func parseServeFlags(args []string, stderr io.Writer) (serveOpts, int, bool) {
 	fs.BoolVar(&o.verbose, "verbose", false, "echo events to stderr")
 	fs.BoolVar(&o.dev, "dev", false, "developer routes")
 	fs.BoolVar(&o.heardEcho, "heard-echo", false, "with --voice=off, report pushes and answers back as heard")
+	fs.BoolVar(&o.background, "background", false, "background daemon: log to the runtime log only")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return o, 0, false
@@ -153,19 +161,68 @@ func runServe(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 		}
 		cfg.DataDir = o.dataDir
 	}
-	opts := app.Options{Voice: o.voice, Herdr: o.herdr, CLI: o.cli, Brain: o.brain, Port: o.port, Dev: o.dev, HeardEcho: o.heardEcho, Version: version, Stderr: stderr}
-	if o.verbose {
-		opts.Echo = logging.NewJSONLLogger(stderr)
+	opts := app.Options{Voice: o.voice, Herdr: o.herdr, CLI: o.cli, Brain: o.brain, Port: o.port, Dev: o.dev, HeardEcho: o.heardEcho, Version: version}
+	if err := app.Check(cfg, opts); err != nil {
+		fprintf(stderr, "sheepdog serve: %v\n", err)
+		return 2
 	}
+
+	// One daemon per data dir (the lock), and a clear word when the port
+	// is held by a daemon that has no lock (an older sheepdog, another
+	// --data-dir) or by another program.
+	lock, err := daemon.Acquire(cfg.DataDir)
+	if err != nil {
+		fprintf(stderr, "%v\n", err)
+		return 1
+	}
+	defer lock.Release()
+	port := cfg.Web.Port
+	if o.port > 0 {
+		port = o.port
+	}
+	if msg := portBusyMessage(ctx, cfg, port); msg != "" {
+		fprintln(stderr, msg)
+		return 1
+	}
+
+	// The runtime log: every line the daemon prints, plus the events
+	// log.level selects, secrets redacted, rotated by size.
+	rot, err := logging.OpenRotating(daemon.LogFile(cfg.DataDir), int64(cfg.Log.MaxSizeMB)<<20, cfg.Log.MaxFiles)
+	if err != nil {
+		fprintf(stderr, "sheepdog serve: runtime log: %v\n", err)
+		return 1
+	}
+	defer func() { _ = rot.Close() }()
+	logw := redact.ForConfig(cfg).Writer(rot)
+	defer logw.Flush()
+	if o.background {
+		stdout, stderr = logw, logw
+	} else {
+		stdout, stderr = io.MultiWriter(stdout, logw), io.MultiWriter(stderr, logw)
+	}
+	opts.Stderr = stderr
+	mirror := logging.Logger(logging.NewEventMirror(logw, cfg.Log.Level))
+	if o.verbose {
+		mirror = logging.Tee{mirror, logging.NewJSONLLogger(stderr)}
+	}
+	opts.Echo = mirror
+
 	a, err := app.Build(cfg, opts)
 	if err != nil {
 		fprintf(stderr, "sheepdog serve: %v\n", err)
 		return 2
 	}
 	if err := a.Listen(); err != nil {
+		if errors.Is(err, syscall.EADDRINUSE) {
+			if msg := portBusyMessage(ctx, cfg, port); msg != "" {
+				fprintln(stderr, msg)
+				return 1
+			}
+		}
 		fprintf(stderr, "sheepdog serve: %v\n", err)
 		return 1
 	}
+	_ = lock.Write(daemon.Info{PID: os.Getpid(), URL: a.URL(), Version: version, StartedAt: time.Now().UTC(), Background: o.background})
 	fprintf(stderr, "sheepdog serve %s: %s\n", version, cfg)
 	fprintf(stdout, "sheepdog %s listening on %s (voice=%s herdr=%s cli=%s orchestrator=%s)\n", version, a.URL(), a.VoiceProvider(), o.herdr, o.cli, a.BrainMode())
 	if !cfg.Web.IsLoopback() {
@@ -180,6 +237,10 @@ func runServe(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 	fprintf(stdout, "  voice page  %s/voice\n", a.URL())
 	fprintf(stdout, "  debug page  %s/debug\n", a.URL())
 	fprintf(stdout, "  events      %s/events\n", a.URL())
+	fprintf(stdout, "  log         %s\n", rot.Path())
+
+	// Event retention (events.retention_days): at startup, then daily.
+	go pruneEvents(ctx, cfg, a.Log(), stdout)
 
 	// SIGHUP re-reads the prompt override directory (docs/roles.md
 	// "Prompt files") so the user's prompt edits take effect without a
@@ -209,4 +270,48 @@ func runServe(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 		return 1
 	}
 	return 0
+}
+
+// portBusyMessage says who holds the daemon's port, or "" when it is
+// free (or port is 0: a free one is picked).
+func portBusyMessage(ctx context.Context, cfg config.Config, port int) string {
+	if port <= 0 {
+		return ""
+	}
+	switch st, h := daemon.ProbePort(ctx, cfg.Web.Bind, port); st {
+	case daemon.PortSheepdog:
+		return fmt.Sprintf("sheepdog is already running (%s, version %s; it has no pid file in %s: started by an older sheepdog or with another --data-dir)", daemon.LocalURL(cfg.Web.Bind, port), h.Version, cfg.DataDir)
+	case daemon.PortOther:
+		return fmt.Sprintf("port %d is in use by another program, so sheepdog cannot listen on %s.\nFind it with: lsof -nP -iTCP:%d -sTCP:LISTEN\nOr give sheepdog another port: set web.port in %s.", port, daemon.LocalURL(cfg.Web.Bind, port), port, config.DefaultPath())
+	}
+	return ""
+}
+
+// retentionEvery is how often the event retention runs after startup.
+var retentionEvery = 24 * time.Hour
+
+// pruneEvents deletes event day files older than events.retention_days
+// now and every retentionEvery until ctx ends; each run that deletes
+// something logs events.pruned and one line.
+func pruneEvents(ctx context.Context, cfg config.Config, log logging.Logger, out io.Writer) {
+	if cfg.Events.RetentionDays <= 0 {
+		return
+	}
+	t := time.NewTicker(retentionEvery)
+	defer t.Stop()
+	for {
+		removed, err := eventlog.Prune(cfg.DataDir, cfg.Events.RetentionDays, time.Now())
+		switch {
+		case err != nil:
+			log.Log("daemon", "daemon.retention_error", "", map[string]any{"error": err.Error()})
+		case len(removed) > 0:
+			log.Log("daemon", "events.pruned", "", map[string]any{"files": len(removed), "retention_days": cfg.Events.RetentionDays})
+			fprintf(out, "event retention: deleted %d day file(s) older than %d days\n", len(removed), cfg.Events.RetentionDays)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
 }

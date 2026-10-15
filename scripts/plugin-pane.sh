@@ -2,7 +2,7 @@
 # Pane command of the herdr plugin: runs sheepdog with the given arguments
 # inside a popup, then waits for Enter. A popup closes when its command
 # exits, which would wipe the QR code or the doctor report before it
-# could be read. Not used for `service logs -f`, which stays open itself.
+# could be read. Not used for `logs -f`, which stays open itself.
 set -eu
 
 bin=$(dirname "$0")/../bin/sheepdog

@@ -7,7 +7,6 @@ import (
 	"io"
 	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -15,6 +14,7 @@ import (
 	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/config"
+	"github.com/kccarlos/herdr-sheepdog/internal/daemon"
 	"github.com/kccarlos/herdr-sheepdog/internal/service"
 )
 
@@ -29,17 +29,17 @@ var serviceHome = os.UserHomeDir
 func printServiceUsage(w io.Writer) {
 	fprintln(w, "usage: sheepdog service install|uninstall|start|status|logs [flags]")
 	fprintln(w, "")
-	fprintln(w, "Runs `sheepdog serve --env-file ~/.config/sheepdog/.env` as a user service, so")
-	fprintln(w, "the daemon starts at login and restarts after a crash without a terminal:")
-	fprintln(w, "a launchd agent on macOS (~/Library/LaunchAgents/"+service.Label+".plist,")
-	fprintln(w, "output in ~/Library/Logs/sheepdog/serve.log), a systemd --user unit on Linux")
-	fprintln(w, "(~/.config/systemd/user/"+service.Unit+", output in the journal).")
+	fprintln(w, "Runs `sheepdog serve --background --env-file ~/.config/sheepdog/.env` as a user")
+	fprintln(w, "service, so the daemon starts at login and restarts after a crash without a")
+	fprintln(w, "terminal: a launchd agent on macOS (~/Library/LaunchAgents/"+service.Label+".plist),")
+	fprintln(w, "a systemd --user unit on Linux (~/.config/systemd/user/"+service.Unit+").")
+	fprintln(w, "sheepdog start / stop / status / logs work with or without it.")
 	fprintln(w, "")
 	fprintln(w, "  install     write the unit and start it (again, when it runs: picks up a new binary)")
 	fprintln(w, "  uninstall   stop it and remove the unit")
 	fprintln(w, "  start       start the installed service if it is not running; installs nothing")
 	fprintln(w, "  status      installed or not, and what the service manager says")
-	fprintln(w, "  logs        the daemon's last lines (-n N, -f to follow)")
+	fprintln(w, "  logs        the runtime log (same as sheepdog logs; -n N, -f to follow)")
 	fprintln(w, "")
 	fprintln(w, "flags:")
 	fprintln(w, "  --config PATH     config file passed to serve (default: serve's own default)")
@@ -140,24 +140,31 @@ func runService(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		fprintln(stdout, st)
 		return 0
 	case "logs":
-		name, cargs, err := m.LogsCommand(*lines, *follow)
-		if err != nil {
-			fprintf(stderr, "sheepdog service: %v\n", err)
-			return 1
+		la := []string{"-n", strconv.Itoa(*lines)}
+		if *follow {
+			la = append(la, "-f")
 		}
-		cmd := exec.CommandContext(ctx, name, cargs...)
-		cmd.Stdout, cmd.Stderr = stdout, stderr
-		if err := cmd.Run(); err != nil && ctx.Err() == nil {
-			fprintf(stderr, "sheepdog service: %s: %v\n", name, err)
-			return 1
+		if *configPath != "" {
+			la = append(la, "--config", *configPath)
 		}
-		return 0
+		return runLogs(ctx, la, stdout, stderr)
 	}
 	return 2
 }
 
 // serviceSpec is the service for this machine and user.
 func serviceSpec(configPath, envFile, binary string) (service.Spec, error) {
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		return service.Spec{}, err
+	}
+	return serviceSpecFor(cfg, configPath, envFile, binary)
+}
+
+// serviceSpecFor is serviceSpec for an already loaded config. It is also
+// the command line `sheepdog start` runs detached, so the service and a
+// background start run the same thing.
+func serviceSpecFor(cfg config.Config, configPath, envFile, binary string) (service.Spec, error) {
 	home, err := serviceHome()
 	if err != nil {
 		return service.Spec{}, err
@@ -181,7 +188,7 @@ func serviceSpec(configPath, envFile, binary string) (service.Spec, error) {
 			return service.Spec{}, err
 		}
 	}
-	return service.Spec{OS: runtimeGOOS, Binary: binary, EnvFile: envFile, ConfigPath: configPath, Home: home, UID: os.Getuid(), PATH: os.Getenv("PATH")}, nil
+	return service.Spec{OS: runtimeGOOS, Binary: binary, EnvFile: envFile, ConfigPath: configPath, Home: home, UID: os.Getuid(), PATH: os.Getenv("PATH"), StdioPath: daemon.StdioFile(cfg.DataDir)}, nil
 }
 
 // stableExecutable is this binary's path, made stable across upgrades:
