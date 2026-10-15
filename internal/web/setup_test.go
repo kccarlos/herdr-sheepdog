@@ -48,6 +48,9 @@ func newSetupFixture(t *testing.T, cfg config.Config, token string) *setupFixtur
 	t.Helper()
 	t.Setenv("SHEEPDOG_WEB_TOKEN", "")
 	_ = os.Unsetenv("SHEEPDOG_WEB_TOKEN")
+	if cfg.Push.Mode == "" {
+		cfg.Push.Mode = "off" // never call the deployed relay from tests
+	}
 	dir := t.TempDir()
 	f := &setupFixture{dir: dir, env: filepath.Join(dir, ".env"), restarts: make(chan string, 8), demo: &fakeDemo{}}
 	sd := &SetupDeps{
