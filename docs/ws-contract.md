@@ -608,6 +608,13 @@ loopback default) every endpoint below is open. With it set:
   set by `POST /api/login {"token": "…"}` so the token is typed once —
   `/voice` and `/debug` do this themselves, showing an inline prompt the
   first time a request answers 401.
+- `/setup` and `/api/setup/*` (the setup page, `sheepdog setup`) need no
+  token but answer only a loopback client that names a loopback host
+  (`127.0.0.1`, `::1`, `localhost`), and a request that changes something
+  only from that origin as JSON; anything else gets `403` with "The setup
+  page only opens on the computer sheepdog runs on…". The phone never
+  uses them. `POST /api/setup/login` sets the `sheepdog_token` cookie for
+  this browser, so `/voice` opened from the setup page asks for nothing.
 - Missing or wrong: `401` with a JSON body `{"error":"unauthorized"}`,
   logged as `web.unauthorized {path, remote}` (never the token itself).
   A WebSocket upgrade or an SSE stream refused this way never reaches

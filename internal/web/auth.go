@@ -27,6 +27,7 @@ func (s *Server) authFunc(h http.HandlerFunc, allowQueryToken bool) http.Handler
 			writeError(w, http.StatusUnauthorized, "unauthorized")
 			return
 		}
+		s.phones.note(r, s.deps.Now())
 		h(w, r)
 	}
 }

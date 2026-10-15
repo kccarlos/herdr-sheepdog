@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -139,4 +140,64 @@ func TestRequestRestart(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("Run did not return")
 	}
+}
+
+// TestHangingVoiceDialDoesNotBlockThePages: with no network a dial can
+// hang (a blackholed route, a DNS timeout); the pages that read the
+// voice's provider and status must answer meanwhile.
+func TestHangingVoiceDialDoesNotBlockThePages(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.Gemini.APIKeys = []string{"test-key-not-real-0123456789"}
+	cfg.Brain.Enabled = false
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mu sync.Mutex
+	var held []net.Conn
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			mu.Lock()
+			held = append(held, c) // accepted, never answered
+			mu.Unlock()
+		}
+	}()
+	t.Cleanup(func() {
+		_ = ln.Close()
+		mu.Lock()
+		for _, c := range held {
+			_ = c.Close()
+		}
+		mu.Unlock()
+	})
+	t.Setenv("GOOGLE_GEMINI_BASE_URL", "http://"+ln.Addr().String())
+
+	a, err := Build(cfg, Options{Herdr: HerdrMock, Drain: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stop := runApp(t, a)
+	time.Sleep(300 * time.Millisecond) // the dial is hanging now
+	client := &http.Client{Timeout: time.Second}
+	for _, path := range []string{"/api/state", "/api/hello"} {
+		start := time.Now()
+		resp, err := client.Get(a.URL() + path)
+		if err != nil {
+			t.Fatalf("%s while the voice dials: %v", path, err)
+		}
+		_ = resp.Body.Close()
+		if d := time.Since(start); d > 500*time.Millisecond {
+			t.Errorf("%s took %s", path, d)
+		}
+	}
+	mu.Lock()
+	for _, c := range held {
+		_ = c.Close() // let the dial fail so Run can end
+	}
+	mu.Unlock()
+	_ = stop()
 }

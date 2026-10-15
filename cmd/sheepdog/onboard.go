@@ -291,8 +291,7 @@ func initRun(ctx context.Context, o initOptions, in *prompter, out io.Writer) er
 	// The web token: only for a new config, and never over one that
 	// exists anywhere (the phone is paired with it).
 	tokenNote := ""
-	envHasToken := strings.TrimSpace(os.Getenv("SHEEPDOG_WEB_TOKEN")) != ""
-	if newConfig && !envHasToken && existing["SHEEPDOG_WEB_TOKEN"] == "" && cur.Web.Token == "" {
+	if newConfig && !onboard.HasToken(existing, cur) {
 		tok, err := onboard.NewToken()
 		if err != nil {
 			return err
@@ -302,7 +301,7 @@ func initRun(ctx context.Context, o initOptions, in *prompter, out io.Writer) er
 	}
 
 	if newConfig {
-		if err := writeInitConfig(o.configPath, orch, compat); err != nil {
+		if err := onboard.WriteConfig(o.configPath, orch, compat); err != nil {
 			return err
 		}
 		if _, err := config.Load(o.configPath); err != nil {
@@ -397,37 +396,6 @@ func initAskKey(ctx context.Context, k initKey, existing map[string]string, in *
 	return "", fmt.Errorf("%s: no valid key after 3 tries; nothing written", k.env)
 }
 
-// writeInitConfig writes the commented template with the chosen
-// orchestrator filled in.
-func writeInitConfig(path, orch string, compat *config.OpenAICompat) error {
-	t := config.Template()
-	var lines string
-	switch orch {
-	case "deepseek":
-		lines = fmt.Sprintf("provider = %q\nmodel = %q\n", brain.ProviderDeepSeek, brain.DefaultDeepSeekModel)
-	case "compat":
-		lines = fmt.Sprintf("provider = %q\n", compat.Name)
-	}
-	if lines != "" {
-		if !strings.Contains(t, "\n[brain]\n") {
-			return errors.New("config template has no [brain] table")
-		}
-		t = strings.Replace(t, "\n[brain]\n", "\n[brain]\n"+lines, 1)
-	}
-	if compat != nil {
-		t += "\n" + compatTOML(*compat)
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
-	}
-	return os.WriteFile(path, []byte(t), 0o600)
-}
-
-// compatTOML renders one [[brain.openai_compat]] table.
-func compatTOML(c config.OpenAICompat) string {
-	return fmt.Sprintf("[[brain.openai_compat]]\nname = %q\nbase_url = %q\napi_key_env = %q\nmodel = %q\n", c.Name, c.BaseURL, c.APIKeyEnv, c.Model)
-}
-
 // configHint is what to add to an existing config for the chosen
 // orchestrator ("" when it already uses it).
 func configHint(cur config.Config, orch string, compat *config.OpenAICompat) string {
@@ -439,7 +407,7 @@ func configHint(cur config.Config, orch string, compat *config.OpenAICompat) str
 	case "compat":
 		var b strings.Builder
 		if _, ok := cur.Brain.CompatProvider(compat.Name); !ok {
-			for _, l := range strings.Split(strings.TrimRight(compatTOML(*compat), "\n"), "\n") {
+			for _, l := range strings.Split(strings.TrimRight(onboard.CompatTOML(*compat), "\n"), "\n") {
 				b.WriteString("  " + l + "\n")
 			}
 		}

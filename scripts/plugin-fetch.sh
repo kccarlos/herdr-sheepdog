@@ -69,5 +69,30 @@ build_from_source() {
 	(cd "$root" && go build -o "$bin" ./cmd/sheepdog)
 }
 
+# link_cli puts `sheepdog` on the user's PATH: a symlink in ~/.local/bin
+# (SHEEPDOG_LINK_DIR for tests) to the plugin's binary. An existing file
+# that is not a symlink is never replaced; a directory missing from PATH
+# gets a warning with the line to add.
+link_cli() {
+	dir=${SHEEPDOG_LINK_DIR:-$HOME/.local/bin}
+	link=$dir/sheepdog
+	if [ -e "$link" ] && [ ! -L "$link" ]; then
+		echo "plugin-fetch: $link exists and is not a link; left it alone (run $bin directly, or remove it and reinstall)" >&2
+		return 0
+	fi
+	mkdir -p "$dir" && ln -sf "$bin" "$link" || {
+		echo "plugin-fetch: could not link $link; run $bin directly" >&2
+		return 0
+	}
+	echo "plugin-fetch: linked $link -> $bin"
+	case ":$PATH:" in
+	*":$dir:"*) ;;
+	*) echo "plugin-fetch: warning: $dir is not on your PATH; add it (e.g. echo 'export PATH=\"$dir:\$PATH\"' >> ~/.zshrc) or run $link" >&2 ;;
+	esac
+}
+
 fetch_release || build_from_source
 "$bin" version
+link_cli
+echo ""
+echo "Next: run \`sheepdog setup\` (or open the \"Set up sheepdog\" action in herdr)."

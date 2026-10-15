@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"os/exec"
 	"runtime"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/bench"
@@ -99,31 +101,12 @@ func runDemo(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		}
 		defer func() { _ = os.RemoveAll(dir) }()
 	}
-	sc, screens, err := demo.Scenario(dir)
-	if err != nil {
-		fprintf(stderr, "sheepdog demo: scenario: %v\n", err)
-		return 1
-	}
-	d, err := bench.StartDaemon(ctx, bench.DaemonOptions{
-		Config: cfg, Port: *port, Dir: dir,
-		BrainProvider: cfg.Brain.Provider, BrainModel: cfg.Brain.Model,
-		Querier: world.Querier{Agents: sc.Agents}, Log: stderr,
-	})
+	d, err := startDemo(ctx, cfg, *port, dir, stderr)
 	if err != nil {
 		fprintf(stderr, "sheepdog demo: %v\n", err)
 		return 1
 	}
 	defer d.Close()
-	w, err := world.New(sc, world.Options{BaseURL: d.URL, FixtureDir: screens})
-	if err != nil {
-		fprintf(stderr, "sheepdog demo: %v\n", err)
-		return 1
-	}
-	if err := w.Start(ctx); err != nil {
-		fprintf(stderr, "sheepdog demo: %v\n", err)
-		return 1
-	}
-	defer w.Close()
 
 	url := d.URL + "/voice"
 	fprintf(stdout, "sheepdog demo is running (orchestrator %s, data in %s).\n\n", cfg.Brain.Provider, dir)
@@ -139,14 +122,59 @@ func runDemo(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	}
 	if *startNow {
 		fprintln(stdout, "The workers are moving.")
+		d.arm()
 	} else if !waitForClient(ctx, d.URL) {
 		return 0
 	} else {
 		fprintln(stdout, "Connected: the workers are moving.")
+		d.arm()
 	}
-	w.Arm()
 	<-ctx.Done()
 	return 0
+}
+
+// demoRun is a running demo: the scratch daemon and its scripted world.
+type demoRun struct {
+	URL   string
+	d     *bench.Daemon
+	w     *world.World
+	armed sync.Once
+}
+
+// startDemo starts the demo daemon on port with its data in dir (the
+// workers wait for arm).
+func startDemo(ctx context.Context, cfg config.Config, port int, dir string, log io.Writer) (*demoRun, error) {
+	sc, screens, err := demo.Scenario(dir)
+	if err != nil {
+		return nil, fmt.Errorf("scenario: %w", err)
+	}
+	d, err := bench.StartDaemon(ctx, bench.DaemonOptions{
+		Config: cfg, Port: port, Dir: dir,
+		BrainProvider: cfg.Brain.Provider, BrainModel: cfg.Brain.Model,
+		Querier: world.Querier{Agents: sc.Agents}, Log: log,
+	})
+	if err != nil {
+		return nil, err
+	}
+	w, err := world.New(sc, world.Options{BaseURL: d.URL, FixtureDir: screens})
+	if err != nil {
+		d.Close()
+		return nil, err
+	}
+	if err := w.Start(ctx); err != nil {
+		d.Close()
+		return nil, err
+	}
+	return &demoRun{URL: d.URL, d: d, w: w}, nil
+}
+
+// arm starts the workers' timeline (once).
+func (r *demoRun) arm() { r.armed.Do(r.w.Arm) }
+
+// Close stops the world and the daemon.
+func (r *demoRun) Close() {
+	r.w.Close()
+	r.d.Close()
 }
 
 // demoKeyProblem says what the demo lacks to talk, "" when it has it:

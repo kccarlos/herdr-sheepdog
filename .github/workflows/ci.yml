@@ -25,6 +25,9 @@ jobs:
           cache: true
       - run: go vet ./...
       - run: go test -race ./...
+      # The plugin's install script: download, checksum, go fallback, the
+      # ~/.local/bin link (into a temp dir) and the next-step line.
+      - run: sh scripts/plugin-fetch_test.sh
 
   lint:
     runs-on: ${{ vars.CI_RUNNER || 'cloudrun' }}

@@ -8,6 +8,8 @@ here=$(cd "$(dirname "$0")" && pwd)
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT HUP INT TERM
 fails=0
+# Never touch the real ~/.local/bin: the script links sheepdog there.
+export SHEEPDOG_LINK_DIR="$work/linkbin"
 
 check() { # check <name> <condition exit status>
 	if [ "$2" -eq 0 ]; then echo "ok   $1"; else echo "FAIL $1"; fails=$((fails + 1)); fi
@@ -38,6 +40,25 @@ Darwin_arm64 | Linux_x86_64 | Linux_amd64)
 	check "installed binary runs" "$?"
 	case "$out" in *"sha256 verified"*) rc=0 ;; *) rc=1 ;; esac
 	check "says it verified" "$rc"
+	[ -L "$SHEEPDOG_LINK_DIR/sheepdog" ] && [ "$("$SHEEPDOG_LINK_DIR/sheepdog")" = "sheepdog fake v9.9.9" ]
+	check "links sheepdog into the bin dir" "$?"
+	case "$out" in *"is not on your PATH"*) rc=0 ;; *) rc=1 ;; esac
+	check "warns the bin dir is not on PATH" "$rc"
+	case "$out" in *'Next: run `sheepdog setup`'*) rc=0 ;; *) rc=1 ;; esac
+	check "ends with the next step" "$rc"
+	# Reinstall with the dir on PATH: no warning, the link replaced.
+	out=$(PATH="$SHEEPDOG_LINK_DIR:$PATH" SHEEPDOG_RELEASE_URL="file://$work/rel" sh "$root/scripts/plugin-fetch.sh" 2>&1) && rc=0 || rc=$?
+	case "$out" in *"is not on your PATH"*) rc=1 ;; esac
+	check "no PATH warning when it is on PATH" "$rc"
+	# A real file there is never replaced.
+	rm "$SHEEPDOG_LINK_DIR/sheepdog"
+	echo "mine" >"$SHEEPDOG_LINK_DIR/sheepdog"
+	out=$(SHEEPDOG_RELEASE_URL="file://$work/rel" sh "$root/scripts/plugin-fetch.sh" 2>&1) && rc=0 || rc=$?
+	[ "$rc" -eq 0 ] && [ "$(cat "$SHEEPDOG_LINK_DIR/sheepdog")" = "mine" ]
+	check "keeps a file that is not a link" "$?"
+	case "$out" in *"is not a link; left it alone"*) rc=0 ;; *) rc=1 ;; esac
+	check "says it left the file alone" "$rc"
+	rm -f "$SHEEPDOG_LINK_DIR/sheepdog"
 
 	# 2. tampered tarball: must fail and must not touch bin/.
 	rm -rf "${root:?}/bin"

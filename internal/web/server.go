@@ -187,6 +187,9 @@ type Deps struct {
 	// SetupNeeded, when set, reports whether the voice has no
 	// credentials yet (GET /api/state voice.setup_needed).
 	SetupNeeded func() bool
+	// Setup, when set, serves the setup page (/setup, /api/setup/*) to
+	// loopback clients (setup.go).
+	Setup *SetupDeps
 	// Restart, when set, makes the daemon reload its env file and config
 	// and rebuild itself in place (the setup page, after saving keys or
 	// changing the bind).
@@ -213,6 +216,10 @@ type Server struct {
 	// closing is closed by Serve on shutdown so long-lived handlers (SSE)
 	// end before http.Server.Shutdown waits for them.
 	closing chan struct{}
+
+	// phones remembers the last authorized request from another machine
+	// (the setup page's "Connected").
+	phones phoneTracker
 
 	mu sync.Mutex
 	ln net.Listener
@@ -333,6 +340,9 @@ func (s *Server) routes() error {
 	s.mux.HandleFunc("DELETE /api/push/register", s.authFunc(s.handlePushUnregister, false))
 	s.mux.HandleFunc("GET /api/push/status", s.authFunc(s.handlePushStatus, false))
 	s.mux.HandleFunc("POST /api/feedback", s.authFunc(s.handleFeedback, false))
+	if err := s.setupRoutes(); err != nil {
+		return err
+	}
 	if s.deps.DevTestdataDir != "" {
 		s.mux.HandleFunc("GET /testdata/{name}", func(w http.ResponseWriter, r *http.Request) {
 			s.serveFixture(w, r, s.deps.DevTestdataDir, ".wav", "audio/wav")
@@ -362,6 +372,11 @@ func (s *Server) serveFixture(w http.ResponseWriter, r *http.Request, dir, ext, 
 
 // static serves /<name> (index.html) and /<name>/* from the embedded FS.
 func (s *Server) static(name string) error {
+	return s.staticWrapped(name, func(h http.HandlerFunc) http.HandlerFunc { return h })
+}
+
+// staticWrapped is static with every request going through wrap.
+func (s *Server) staticWrapped(name string, wrap func(http.HandlerFunc) http.HandlerFunc) error {
 	sub, err := fs.Sub(static.FS, name)
 	if err != nil {
 		return fmt.Errorf("web: embedded %s: %w", name, err)
@@ -371,11 +386,11 @@ func (s *Server) static(name string) error {
 		w.Header().Set("Cache-Control", "no-cache")
 		files.ServeHTTP(w, r)
 	}
-	s.mux.HandleFunc("GET /"+name, func(w http.ResponseWriter, r *http.Request) {
+	s.mux.HandleFunc("GET /"+name, wrap(func(w http.ResponseWriter, r *http.Request) {
 		r.URL.Path = "/"
 		serve(w, r)
-	})
-	s.mux.Handle("GET /"+name+"/", http.StripPrefix("/"+name, http.HandlerFunc(serve)))
+	}))
+	s.mux.Handle("GET /"+name+"/", wrap(http.StripPrefix("/"+name, http.HandlerFunc(serve)).ServeHTTP))
 	return nil
 }
 

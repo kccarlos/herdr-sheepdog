@@ -45,14 +45,15 @@ title = "Logs"
 contexts = ["workspace"]
 command = ["sh", "scripts/plugin-open.sh", "logs"]
 
-# Interactive: asks for the key; at the end offers `sheepdog service install`.
+# Starts the daemon if needed and opens the setup page in the browser
+# (over SSH, with no display, it asks the same questions in the popup).
 [[panes]]
 id = "setup"
 title = "Set up sheepdog"
 placement = "popup"
 width = 90
 height = 30
-command = ["sh", "scripts/plugin-pane.sh", "init"]
+command = ["sh", "scripts/plugin-pane.sh", "setup"]
 
 # The QR code is 49 to 57 columns and 24 to 28 rows; --compact adds under
 # 10 rows (TestPairCompactFitsThePluginPopup).
