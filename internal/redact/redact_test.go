@@ -63,10 +63,11 @@ func TestShapesAreRedactedWithoutConfig(t *testing.T) {
 		"https://example.com/x?key=ZZZsecretZZZ123&alt=json",
 		"GEMINI_API_KEY_2=AIzaSecondKeyFakeFake0123456",
 		`{"token":"plainlongtokenvalue"}`,
+		"Incorrect API key provided: sk-FakeK****************0000. You can",
 		"-----BEGIN PRIVATE KEY-----\nMIGTAgEAMBMGByqGSM49\n-----END PRIVATE KEY-----",
 	} {
 		out := r.String(in)
-		for _, leak := range []string{"AIzaSyA123", "abcdefghijklmnop", "sk-or-v1", "ZZZsecretZZZ", "AIzaSecond", "plainlongtokenvalue", "MIGTAgEAMBMG"} {
+		for _, leak := range []string{"AIzaSyA123", "abcdefghijklmnop", "sk-or-v1", "ZZZsecretZZZ", "AIzaSecond", "plainlongtokenvalue", "MIGTAgEAMBMG", "sk-FakeK"} {
 			if strings.Contains(out, leak) {
 				t.Errorf("%q -> %q leaks %q", in, out, leak)
 			}

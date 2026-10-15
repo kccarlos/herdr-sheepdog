@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"flag"
 	"io"
@@ -20,8 +19,23 @@ var stdin io.Reader = os.Stdin
 // and so is end of input (no terminal).
 func confirm(in io.Reader, out io.Writer, question string) bool {
 	fprintf(out, "%s [y/N] ", question)
-	line, _ := bufio.NewReader(in).ReadString('\n')
-	switch strings.ToLower(strings.TrimSpace(line)) {
+	// One byte at a time, so a second prompt still gets its own line
+	// when the answers are piped in.
+	var line []byte
+	b := make([]byte, 1)
+	for {
+		n, err := in.Read(b)
+		if n == 1 {
+			if b[0] == '\n' {
+				break
+			}
+			line = append(line, b[0])
+		}
+		if err != nil {
+			break
+		}
+	}
+	switch strings.ToLower(strings.TrimSpace(string(line))) {
 	case "y", "yes":
 		return true
 	}

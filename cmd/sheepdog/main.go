@@ -65,6 +65,10 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return runOpen(ctx, args[1:], stdout, stderr)
 	case "serve":
 		return runServe(ctx, args[1:], stdout, stderr)
+	case "update":
+		return runUpdate(ctx, args[1:], stdout, stderr)
+	case "uninstall":
+		return runUninstall(ctx, args[1:], stdout, stderr)
 	case "data":
 		return runData(ctx, args[1:], stdout, stderr)
 	case "service":
@@ -159,7 +163,7 @@ func printUsage(w io.Writer) {
 	fprintln(w, "")
 	fprintln(w, "Set up:")
 	fprintln(w, "  init        set up: check herdr, ask for and validate a key, write config + secrets")
-	fprintln(w, "  doctor      check the setup (keys, herdr, port, token, push, voice), with fixes")
+	fprintln(w, "  doctor      check the setup, with fixes; --report: a redacted bundle for a bug report")
 	fprintln(w, "  pair        show the QR code the iOS app scans")
 	fprintln(w, "  demo        try it without herdr: scripted workers (needs GEMINI_API_KEY)")
 	fprintln(w, "")
@@ -173,6 +177,8 @@ func printUsage(w io.Writer) {
 	fprintln(w, "  serve       run the daemon in this terminal (Ctrl-C stops it)")
 	fprintln(w, "")
 	fprintln(w, "Manage:")
+	fprintln(w, "  update      check for a new release and print how to upgrade")
+	fprintln(w, "  uninstall   stop, remove the login service, ask before deleting config and data")
 	fprintln(w, "  service     install|uninstall|start|status|logs: run at login (launchd / systemd)")
 	fprintln(w, "  data        clear [--events|--all]: delete the event log (your transcripts) or all data")
 	fprintln(w, "  config      show|init: inspect or scaffold config.toml")
