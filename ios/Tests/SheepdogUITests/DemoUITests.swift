@@ -54,7 +54,9 @@ final class DemoUITests: XCTestCase {
 
     func testTryTheDemoFromTheFirstRun() throws {
         let app = XCUIApplication()
-        app.launchArguments = ["-sheepdogResetState"]
+        // Silent: no speech synthesis or recognition. On Xcode Cloud the
+        // simulator's audio server hangs and the app aborts starting it.
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogDemoSilent"]
         app.launch()
 
         let tryDemo = app.buttons["settings.firstRun.tryDemo"]
@@ -74,7 +76,14 @@ final class DemoUITests: XCTestCase {
         XCTAssertTrue(approve.waitForExistence(timeout: 40))
         shot("demo-approval")
         approve.tap()
-        XCTAssertTrue(app.descendants(matching: .any)["approval.answered"].waitForExistence(timeout: 10))
+        // The card shows "answered" only briefly before the demo agent moves
+        // on and its question closes: either one proves the answer landed.
+        let answered = app.descendants(matching: .any)["approval.answered"]
+        let deadline = Date().addingTimeInterval(15)
+        while !answered.exists, approve.exists, Date() < deadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.25))
+        }
+        XCTAssertTrue(answered.exists || !approve.exists, "the approval was answered")
 
         // A suggested question gets the scripted answer in the conversation.
         tapVisible(app.buttons, "main.pane.conversation")

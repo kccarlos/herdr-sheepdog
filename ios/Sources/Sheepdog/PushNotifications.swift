@@ -91,12 +91,16 @@ final class PushCoordinator: NSObject, ObservableObject, UNUserNotificationCente
     }
 
     /// The session opened: the moment the app has proved it can reach the
-    /// daemon, and so the first moment notifications mean anything. Asks
-    /// once per install.
+    /// daemon. Asks once per install, and only when this daemon can send
+    /// notifications at all (`/api/push/status` enabled): a daemon without
+    /// an APNs key from the team that signed this app can never deliver
+    /// one, so asking would promise something that cannot happen.
     func sessionConnected() {
         Task {
             await refreshAuthorization()
             guard authorization == .notDetermined, !defaults.bool(forKey: Key.asked) else { return }
+            await loadDaemonStatus()
+            guard PushPolicy.shouldAskPermission(daemon: daemonStatus) else { return }
             defaults.set(true, forKey: Key.asked)
             let granted = (try? await center.requestAuthorization(options: [.alert, .sound, .badge])) ?? false
             await refreshAuthorization()
@@ -208,7 +212,7 @@ final class PushCoordinator: NSObject, ObservableObject, UNUserNotificationCente
     var phoneLine: String {
         switch authorization {
         case .denied: return "Off in iOS Settings"
-        case .notDetermined: return "Asked after the first connection"
+        case .notDetermined: return daemonStatus?.enabled == true ? "Asked after the first connection" : "Not needed yet"
         default: break
         }
         if let error = registrationError { return error }
@@ -312,7 +316,7 @@ struct NotificationsSection: View {
         } header: {
             Text("Notifications")
         } footer: {
-            Text("When an agent needs you, the daemon sends a notification even with the app closed; approvals can be answered from it. Not shown while the app is open and connected — the card is already there.")
+            Text(PushPolicy.explanation(daemon: push.daemonStatus))
         }
         .task { await push.loadDaemonStatus() }
     }

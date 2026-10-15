@@ -20,32 +20,19 @@ struct DaemonSettingsView: View {
     @State private var probe: SessionViewModel.Probe?
     @State private var scanning = false
     @FocusState private var addressFocused: Bool
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
         Form {
             if firstRun {
-                Section {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Point the app at your daemon")
-                            .font(.headline)
-                        Text("Run `sheepdog serve` on your Mac with `web.bind` set to your LAN or Tailscale address and `web.token` set to a secret. The daemon's banner prints a `lan url` line — the host and port from that line go below.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(.vertical, 2)
-                }
-            }
-
-            if firstRun {
-                Section {
-                    Button {
-                        model.openDemo()
-                    } label: {
-                        Label("Try the demo", systemImage: "play.circle")
-                    }
-                    .accessibilityIdentifier("settings.firstRun.tryDemo")
-                } footer: {
-                    Text("No Mac yet? The demo shows the app with scripted agents that run on this phone: no daemon, no account, no network.")
+                // At the accessibility text sizes the introduction fills
+                // two screens: the demo comes first so it is not buried.
+                if dynamicTypeSize.isAccessibilitySize {
+                    demoSection
+                    introSection
+                } else {
+                    introSection
+                    demoSection
                 }
             }
 
@@ -58,7 +45,7 @@ struct DaemonSettingsView: View {
                 .accessibilityIdentifier("settings.scan")
                 .disabled(probing)
             } footer: {
-                Text("Run `sheepdog pair` on your Mac (or open /debug ▸ State ▸ Pair a phone) and scan its code: it fills in the address and the token.")
+                Text("`sheepdog setup` (step 4) or `sheepdog pair` on your computer shows the code. It fills in the address and the token.")
             }
 
             Section {
@@ -74,7 +61,7 @@ struct DaemonSettingsView: View {
                         .accessibilityIdentifier("settings.address")
                 }
                 LabeledContent("Token") {
-                    SecureField("web.token, if it has one", text: $token)
+                    SecureField("From the pairing code", text: $token)
                         // Not a website password: this stops iOS offering
                         // to save it to the user's passwords every time
                         // Settings is closed.
@@ -105,19 +92,26 @@ struct DaemonSettingsView: View {
                             .font(.subheadline.weight(.medium))
                             .foregroundStyle(probe.ok ? Theme.done : Color(.systemRed))
                         ForEach(probe.lines, id: \.self) { line in
-                            Text(line)
+                            Text(LocalizedStringKey(line))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        if let help = probe.help {
+                            Link("How to fix this", destination: help)
+                                .font(.caption.weight(.semibold))
+                                .accessibilityIdentifier("settings.probe.help")
                         }
                     }
                     .padding(.vertical, 2)
+                    .accessibilityElement(children: .contain)
                     .accessibilityIdentifier("settings.probe.result")
                 }
             } footer: {
                 Text("Plain HTTP, no TLS — keep this to a network you trust (your LAN, or Tailscale). The token is kept in the keychain. Changes apply when you leave this screen.")
             }
         }
-        .navigationTitle("Daemon")
+        .navigationTitle(firstRun ? "Welcome" : "Daemon")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if firstRun {
@@ -135,8 +129,61 @@ struct DaemonSettingsView: View {
                 usePairing(code)
             }
         }
-        .onAppear { if address.isEmpty { addressFocused = true } }
+        .onAppear {
+            // Why Settings was opened for the user: a refused token, a
+            // pairing code nothing answered.
+            if let notice = model.daemonNotice {
+                probe = notice
+                model.daemonNotice = nil
+            }
+            // No keyboard on the first run: it would cover the guidance
+            // and the demo. Later visits are for typing.
+            if address.isEmpty, !firstRun { addressFocused = true }
+        }
         .onDisappear(perform: commit)
+    }
+
+    private var introSection: some View {
+        Section {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Connect to your computer")
+                    .font(.title3.weight(.semibold))
+                    .accessibilityAddTraits(.isHeader)
+                Text(LocalizedStringKey(SetupHelp.requirement))
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Link(destination: SetupHelp.appGuideURL) {
+                    Label("How to set up sheepdog", systemImage: "arrow.up.right.square")
+                        .font(.subheadline)
+                }
+                .accessibilityIdentifier("settings.firstRun.guide")
+            }
+            .padding(.vertical, 4)
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("settings.firstRun.intro")
+        }
+    }
+
+    private var demoSection: some View {
+        Section {
+            Button {
+                model.openDemo()
+            } label: {
+                Label("Try the demo", systemImage: "play.circle.fill")
+                    .labelStyle(.titleOnly)
+                    .font(.body.weight(.semibold))
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, minHeight: 34)
+            }
+            .buttonStyle(.borderedProminent)
+            .listRowInsets(EdgeInsets())
+            .listRowBackground(Color.clear)
+            .accessibilityIdentifier("settings.firstRun.tryDemo")
+        } footer: {
+            Text("No daemon yet? The demo runs scripted agents on this phone: no computer, no account, no network.")
+        }
     }
 
     /// Fills the fields from a scanned pairing code: the token, and the
@@ -144,7 +191,7 @@ struct DaemonSettingsView: View {
     /// tests the connection as the button does.
     private func usePairing(_ code: String) {
         guard let link = PairingLink(code) else {
-            probe = SessionViewModel.Probe(ok: false, title: "That is not a sheepdog pairing code.", lines: ["Run `sheepdog pair` on your Mac and scan the code it prints."])
+            probe = SessionViewModel.Probe(ok: false, title: "That is not a sheepdog pairing code.", lines: ["Run `sheepdog pair` on your computer and scan the code it shows."])
             return
         }
         token = link.token

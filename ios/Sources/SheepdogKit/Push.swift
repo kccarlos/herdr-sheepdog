@@ -227,3 +227,24 @@ extension DaemonClient {
         }
     }
 }
+
+/// What the app may promise about notifications. Apple delivers a push
+/// only when the daemon signs it with an APNs key from the Apple team that
+/// signed this app, so a self-hosted daemon cannot reach the TestFlight or
+/// App Store build. The app asks for permission only when the daemon says it
+/// can send, and says plainly what works without push.
+public enum PushPolicy {
+    /// Ask iOS for notification permission only when the daemon can send.
+    public static func shouldAskPermission(daemon: PushStatus?) -> Bool {
+        daemon?.enabled == true
+    }
+
+    /// The footer under Settings ▸ Notifications.
+    public static func explanation(daemon: PushStatus?) -> String {
+        let always = "While the app is open and connected, approvals appear as cards and the voice tells you; during a voice session the Live Activity shows it on the Lock Screen and in the Dynamic Island."
+        if daemon?.enabled == true {
+            return "Your daemon sends a notification when an agent needs you, even with the app closed; approvals can be answered from it. " + always
+        }
+        return always + " Notifications with the app closed need your daemon to send them through Apple's push service with a push key from the Apple team that signed this app. A daemon you run yourself cannot send them to this build; build the app under your own Apple team and configure your own key (see the daemon's push docs) to get them."
+    }
+}

@@ -108,17 +108,19 @@ targets:
             CFBundleURLSchemes:
               - sheepdog
         NSMicrophoneUsageDescription: >-
-          Sheepdog uses the microphone so you can talk to your coding
-          agents. Audio goes only to the sheepdog daemon you point the app at.
+          Sheepdog uses the microphone so you can talk to your coding agents.
+          Your voice goes only to the sheepdog daemon on your own computer; in
+          the demo it stays on this iPhone.
         NSSpeechRecognitionUsageDescription: >-
           In the demo, Sheepdog recognises your spoken questions on this
           iPhone only (on-device recognition). Nothing is sent anywhere.
         NSCameraUsageDescription: >-
           Sheepdog uses the camera only to scan the pairing code that
-          "sheepdog pair" shows on your Mac. Nothing is recorded.
+          "sheepdog setup" or "sheepdog pair" shows on your computer. Nothing
+          is recorded.
         NSLocalNetworkUsageDescription: >-
-          Sheepdog talks to the sheepdog daemon running on your Mac, over your
-          local network or Tailscale.
+          Sheepdog connects to the sheepdog daemon on your own computer, over
+          your Wi-Fi or Tailscale.
         # The daemon speaks plain HTTP on a private network by design
         # (docs/ws-contract.md "Non-goals": no TLS in v1), so arbitrary loads
         # have to be allowed. Only this key: ATS ignores

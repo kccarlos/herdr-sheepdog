@@ -22,7 +22,7 @@ struct PairingScannerSheet: View {
                         QRScannerView(onCode: onCode)
                             .ignoresSafeArea(edges: .bottom)
                             .overlay(alignment: .bottom) {
-                                Text("Point at the code from `sheepdog pair`")
+                                Text("Point at the code from `sheepdog setup` or `sheepdog pair`")
                                     .font(.footnote)
                                     .padding(10)
                                     .background(.ultraThinMaterial, in: Capsule())

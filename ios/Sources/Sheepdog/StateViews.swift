@@ -25,7 +25,7 @@ struct FlockUnavailableView: View {
                 ContentUnavailableView {
                     Label("No agents yet", systemImage: "pawprint")
                 } description: {
-                    Text("Start one in herdr and it shows up here.")
+                    Text("Start a coding agent in herdr on your computer and it shows up here.")
                 } actions: {
                     Button("Refresh") { Task { _ = await model.refreshState(quiet: false) } }
                         .accessibilityIdentifier("flock.empty.refresh")
@@ -43,19 +43,24 @@ struct FlockUnavailableView: View {
                 ContentUnavailableView {
                     Label("Daemon unreachable", systemImage: "wifi.slash")
                 } description: {
-                    Text("Check that sheepdog is running on your Mac and that this phone is on the same network or Tailscale.")
+                    Text(LocalizedStringKey(SetupHelp.unreachableFix))
                 } actions: {
                     Button("Try again") { model.reconnect() }
                         .accessibilityIdentifier("flock.unreachable.retry")
+                    Link("How to fix this", destination: SetupHelp.remoteAccessURL)
+                        .accessibilityIdentifier("flock.unreachable.help")
                 }
             case .tokenRefused:
                 ContentUnavailableView {
                     Label("Token refused", systemImage: "key.slash")
                 } description: {
-                    Text("The daemon did not accept the token saved here.")
+                    Text(LocalizedStringKey(SetupHelp.tokenFix))
                 } actions: {
-                    Button("Open Settings") { model.showSettings = true }
-                        .accessibilityIdentifier("flock.tokenRefused.settings")
+                    Button("Scan the code again") {
+                        model.settingsRoute = .daemon
+                        model.showSettings = true
+                    }
+                    .accessibilityIdentifier("flock.tokenRefused.settings")
                 }
             case .updateNeeded:
                 ContentUnavailableView {

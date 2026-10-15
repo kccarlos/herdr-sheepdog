@@ -78,7 +78,7 @@ public struct PairingLink: Equatable, Sendable {
             lines.append("This replaces the daemon at \(current).")
         }
         lines.append(token.isEmpty ? "The code has no token." : "The token in the code is saved in the keychain.")
-        lines.append("Only pair with a Mac you trust.")
+        lines.append("Only pair with a computer you trust.")
         return Confirmation(title: "Pair with \(host)?", message: lines.joined(separator: " "))
     }
 

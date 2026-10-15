@@ -8,6 +8,9 @@ import SwiftUI
 enum SettingsRoute: Hashable {
     case models
     case languages
+    /// Settings ▸ Daemon, with `daemonNotice` shown: the token was turned
+    /// down, or a pairing code's addresses did not answer.
+    case daemon
 }
 
 /// Everything the main screen shows, in one place.
@@ -31,6 +34,9 @@ final class SessionViewModel: ObservableObject {
         /// What that button does: reconnect (the default) or open the
         /// system's microphone-mode panel.
         var action: Action = .retry
+        /// A page in the daemon's docs that explains the fix (same Wi-Fi,
+        /// Tailscale, pairing again), shown as a link.
+        var help: URL?
 
         enum Action: Equatable { case retry, microphoneModes }
     }
@@ -156,6 +162,11 @@ final class SessionViewModel: ObservableObject {
     /// Where Settings opens: nil for its top, `.models` from Health's
     /// "Change in Settings ›". Consumed (reset) by SettingsView.
     @Published var settingsRoute: SettingsRoute?
+    /// Why Settings ▸ Daemon was opened for the user (a refused token, a
+    /// pairing code nothing answered), shown there where the fix is. A
+    /// banner on the main screen would sit under the Settings sheet.
+    /// Consumed by DaemonSettingsView.
+    @Published var daemonNotice: Probe?
 
     /// Health's "Change in Settings ›": Settings, pushed to Models.
     func openModels() {
@@ -807,6 +818,14 @@ final class SessionViewModel: ObservableObject {
             case .micLost: Haptics.warning()
             }
         case .openSettings:
+            // Only a refused token opens Settings by itself.
+            daemonNotice = Probe(
+                ok: false,
+                title: DaemonError.unauthorized(endpoint: endpointDisplay).message,
+                lines: [SetupHelp.tokenFix],
+                help: SetupHelp.remoteAccessURL
+            )
+            settingsRoute = .daemon
             showSettings = true
         case .refreshState:
             refreshSoon()
@@ -1715,8 +1734,27 @@ final class SessionViewModel: ObservableObject {
         Task { _ = await sendTyped(question) }
     }
 
+    /// The demo without its on-device voice (`-sheepdogDemoSilent`, UI
+    /// tests only).
+    private var demoSilent: Bool {
+        #if DEBUG
+        return DebugLaunch.demoSilent
+        #else
+        return false
+        #endif
+    }
+
     private func startDemo() {
         guard let demo else { return }
+        guard !demoSilent else {
+            demo.start()
+            Task {
+                await refreshState(quiet: true)
+                await syncHistory()
+            }
+            connect()
+            return
+        }
         let voice = DemoVoice()
         voice.onSpeaking = { [weak self] speaking in self?.send(.playbackChanged(speaking: speaking)) }
         voice.onHeard = { [weak self] text in self?.askDemo(text) }
@@ -1750,7 +1788,7 @@ final class SessionViewModel: ObservableObject {
                     return
                 }
                 guard core.connection.wantsConnection else { return }
-                let canListen = await DemoVoice.requestListening()
+                let canListen = demoSilent ? false : await DemoVoice.requestListening()
                 send(.probeSucceeded(micGranted: canListen))
             }
         case .openSocket:
@@ -1813,7 +1851,9 @@ final class SessionViewModel: ObservableObject {
         Task {
             let result = await resolvePairing(link)
             guard let address = result.address else {
-                show(Banner(tone: .error, message: result.probe.title, hint: result.probe.lines.joined(separator: " ")))
+                show(Banner(tone: .error, message: result.probe.title, hint: result.probe.lines.joined(separator: " "), help: result.probe.help))
+                daemonNotice = result.probe
+                settingsRoute = .daemon
                 reopenFirstRunSettings()
                 return
             }
@@ -1838,15 +1878,17 @@ final class SessionViewModel: ObservableObject {
         if let reachable {
             return (reachable, Probe(ok: true, title: "Reached \(reachable)", lines: []))
         }
-        return (nil, Probe(ok: false, title: "None of the code's addresses answered.", lines: link.addresses + ["Is the phone on the same network as the Mac, or on Tailscale?"]))
+        return (nil, Probe(ok: false, title: "None of the code's addresses answered.", lines: link.addresses + [SetupHelp.unreachableFix], help: SetupHelp.remoteAccessURL))
     }
 
     // MARK: - Test connection (Settings)
 
-    struct Probe {
+    struct Probe: Equatable {
         var ok: Bool
         var title: String
         var lines: [String]
+        /// A page that explains the fix, for a failure.
+        var help: URL? = nil
     }
 
     /// What the "Test connection" button reports. `/api/hello` is public, so
@@ -1870,14 +1912,14 @@ final class SessionViewModel: ObservableObject {
                     _ = try await probeClient.state()
                     lines.append("Token accepted.")
                 } catch let error as DaemonError {
-                    return Probe(ok: false, title: error.message, lines: lines + [error.hint].compactMap { $0 })
+                    return Probe(ok: false, title: error.message, lines: lines + [error.hint].compactMap { $0 }, help: SetupHelp.helpURL(for: error))
                 }
             }
             return Probe(ok: true, title: "Connected to \(endpoint.display)", lines: lines)
         } catch let error as DaemonError {
-            return Probe(ok: false, title: error.message, lines: [error.hint].compactMap { $0 })
+            return Probe(ok: false, title: error.message, lines: [error.hint].compactMap { $0 }, help: SetupHelp.helpURL(for: error))
         } catch {
-            return Probe(ok: false, title: "Could not reach \(endpoint.display).", lines: [])
+            return Probe(ok: false, title: "Could not reach \(endpoint.display).", lines: [SetupHelp.unreachableFix], help: SetupHelp.remoteAccessURL)
         }
     }
 }
@@ -1887,14 +1929,14 @@ extension SessionViewModel.Banner {
     init(_ banner: SessionBanner) {
         switch banner {
         case let .connectionFailed(error):
-            self.init(tone: .error, message: error.message, hint: error.hint, retryTitle: "Try again")
+            self.init(tone: .error, message: error.message, hint: error.hint, retryTitle: "Try again", help: SetupHelp.helpURL(for: error))
         case let .stillReconnecting(error):
-            self.init(tone: .warning, message: error.message, hint: "Still trying every few seconds. Tap End to stop.", retryTitle: "Try now")
+            self.init(tone: .warning, message: error.message, hint: "Still trying every few seconds. Tap End to stop.", retryTitle: "Try now", help: SetupHelp.helpURL(for: error))
         case .replaced:
             self.init(
                 tone: .warning,
                 message: "Another client took the voice session.",
-                hint: "The daemon serves one client at a time — the browser page on your Mac, maybe.",
+                hint: "The daemon serves one client at a time — the browser page on your computer, maybe.",
                 retryTitle: "Take it back"
             )
         case .microphoneDenied:

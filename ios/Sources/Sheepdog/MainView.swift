@@ -339,18 +339,25 @@ struct BannerView: View {
                     .font(.subheadline.weight(.medium))
                     .fixedSize(horizontal: false, vertical: true)
                 if let hint = banner.hint {
-                    Text(hint)
+                    Text(LocalizedStringKey(hint))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                if let retryTitle = banner.retryTitle {
-                    Button(retryTitle, action: retry)
-                        .font(.caption.weight(.semibold))
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                        .padding(.top, 3)
+                HStack(spacing: 12) {
+                    if let retryTitle = banner.retryTitle {
+                        Button(retryTitle, action: retry)
+                            .font(.caption.weight(.semibold))
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                    }
+                    if let help = banner.help {
+                        Link("How to fix this", destination: help)
+                            .font(.caption.weight(.semibold))
+                            .accessibilityIdentifier("banner.help")
+                    }
                 }
+                .padding(.top, 3)
             }
             Spacer(minLength: 0)
             Button(action: dismiss) {
@@ -459,9 +466,14 @@ struct PinnedApprovalCard: View {
 
     /// The card's own height, measured.
     @State private var contentHeight: CGFloat = 0
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
+    /// Half the screen; a third at the accessibility text sizes, where the
+    /// header, the agent strip and the controls are tall too and a half-
+    /// screen card pushed the demo header up under the navigation bar.
     private var maxHeight: CGFloat {
-        (UIApplication.shared.connectedScenes.compactMap { ($0 as? UIWindowScene)?.screen.bounds.height }.first ?? 800) * 0.5
+        let screen = UIApplication.shared.connectedScenes.compactMap { ($0 as? UIWindowScene)?.screen.bounds.height }.first ?? 800
+        return screen * (dynamicTypeSize.isAccessibilitySize ? 0.3 : 0.5)
     }
 
     var body: some View {

@@ -43,7 +43,11 @@ final class PairingLinkUITests: XCTestCase {
         let alert = app.alerts["Pair with 127.0.0.1?"]
         XCTAssertTrue(alert.waitForExistence(timeout: 10))
         alert.buttons["Pair"].tap()
-        let banner = app.descendants(matching: .any)["banner"]
-        XCTAssertTrue(banner.waitForExistence(timeout: 15))
+        // The failure is shown where the fix is: back on the first-run
+        // Daemon screen (a banner alone would sit under that sheet).
+        let result = app.descendants(matching: .any)["settings.probe.result"]
+        XCTAssertTrue(result.waitForExistence(timeout: 20), "the unreachable code is reported on the Daemon screen")
+        XCTAssertTrue(app.staticTexts["None of the code's addresses answered."].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["settings.probe.help"].exists)
     }
 }

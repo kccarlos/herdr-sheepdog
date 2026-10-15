@@ -28,6 +28,11 @@ enum DebugLaunch {
     /// even when started with `-sheepdogAddress` (the UI tests otherwise
     /// skip it, so no system alert covers what they tap).
     static var askPush: Bool { arguments.contains("-sheepdogAskPush") }
+    /// `-sheepdogDemoSilent`: the demo without speech synthesis or speech
+    /// recognition, so no audio unit starts and no permission is asked.
+    /// For the UI tests: on Xcode Cloud's simulators the audio server hangs
+    /// and the app aborts in `AURemoteIO::Initialize` (an RPC timeout).
+    static var demoSilent: Bool { arguments.contains("-sheepdogDemoSilent") }
     /// `-sheepdogDemoMarkdown`: adds a finished agent whose task and last
     /// message are markdown, for screenshots (the fixture daemon cannot
     /// produce a worker transcript).

@@ -62,15 +62,19 @@ struct SettingsView: View {
 
                 Section {
                     row("Voice", "waveform", .voice, id: "settings.voice")
-                    NavigationLink(value: SettingsPage.models) {
-                        MenuRow(title: "Models", symbol: "cpu", value: model.modelsSummary)
+                    // Models, Languages and Notifications are the daemon's:
+                    // the demo has none to show, so it does not list them.
+                    if !model.isDemo {
+                        NavigationLink(value: SettingsPage.models) {
+                            MenuRow(title: "Models", symbol: "cpu", value: model.modelsSummary)
+                        }
+                        .accessibilityIdentifier("settings.models")
+                        NavigationLink(value: SettingsPage.languages) {
+                            MenuRow(title: "Languages", symbol: "globe", value: model.daemonSettings?.languagesSummary ?? "—")
+                        }
+                        .accessibilityIdentifier("settings.languages")
+                        row("Notifications", "bell", .notifications, id: "settings.notifications")
                     }
-                    .accessibilityIdentifier("settings.models")
-                    NavigationLink(value: SettingsPage.languages) {
-                        MenuRow(title: "Languages", symbol: "globe", value: model.daemonSettings?.languagesSummary ?? "—")
-                    }
-                    .accessibilityIdentifier("settings.languages")
-                    row("Notifications", "bell", .notifications, id: "settings.notifications")
                 }
 
                 Section {
@@ -128,7 +132,11 @@ struct SettingsView: View {
         // Health's "Change in Settings" opens straight on Models; the first
         // run opens on the Daemon screen.
         if let route = model.settingsRoute {
-            path = [route == .models ? .models : .languages]
+            switch route {
+            case .models: path = [.models]
+            case .languages: path = [.languages]
+            case .daemon: path = [.daemon]
+            }
             model.settingsRoute = nil
         } else if firstRun {
             path = [.daemon]

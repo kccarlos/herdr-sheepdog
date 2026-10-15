@@ -18,7 +18,7 @@ struct LanguagesView: View {
                 Section {
                     Text(model.settingsError ?? (model.daemonSettings == nil
                         ? "Connect to the daemon to choose your languages."
-                        : "This daemon is too old for the language setting. Update sheepdog on your Mac."))
+                        : "This daemon is too old for the language setting. Update sheepdog on your computer."))
                         .foregroundStyle(.secondary)
                         .accessibilityIdentifier("languages.unavailable")
                 }

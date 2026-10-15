@@ -118,11 +118,11 @@ public enum DaemonError: Error, Equatable, Sendable {
     public var hint: String? {
         switch self {
         case let .unreachable(_, detail):
-            return detail.isEmpty ? "Start it with `sheepdog serve`, then read the `lan url` line off its banner." : detail
+            return detail.isEmpty ? SetupHelp.unreachableFix : "\(detail) \(SetupHelp.unreachableFix)"
         case .unauthorized:
-            return "The daemon prints nothing about the token; it is the `web.token` from its config."
+            return SetupHelp.tokenFix
         case .notSheepdog:
-            return "Check the port — the daemon serves /api/hello."
+            return SetupHelp.notSheepdogFix
         case .http, .malformed, .pendingGone, .rejected:
             return nil
         }

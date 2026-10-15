@@ -193,7 +193,7 @@ public struct AgentScreenModel: Equatable, Sendable {
         error = AgentScreenModel.unsupportedMessage
     }
 
-    public static let unsupportedMessage = "This daemon doesn't have agent windows yet. Update sheepdog on your Mac."
+    public static let unsupportedMessage = "This daemon doesn't have agent windows yet. Update sheepdog on your computer."
 
     public mutating func beginSend() {
         sending = true
