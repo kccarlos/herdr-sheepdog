@@ -39,6 +39,7 @@ func printDemoUsage(w io.Writer) {
 	fprintln(w, "  --env-file PATH   env file (default ./.env, else ~/.config/sheepdog/.env, as serve)")
 	fprintln(w, "  --dir DIR         keep the demo's data here (default: a temp dir, removed at exit)")
 	fprintln(w, "  --no-open         print the URL without opening the browser")
+	fprintln(w, "  --start-now       start the workers at once, not when a client connects (for recordings)")
 }
 
 // demoOpen opens a URL in the browser (tests replace it).
@@ -60,6 +61,7 @@ func runDemo(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	envFile := fs.String("env-file", "", "env file")
 	dirFlag := fs.String("dir", "", "data dir")
 	noOpen := fs.Bool("no-open", false, "do not open the browser")
+	startNow := fs.Bool("start-now", false, "start the workers at once")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -135,10 +137,13 @@ func runDemo(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 			fprintf(stderr, "sheepdog demo: could not open the browser (%v); open %s yourself\n", err, url)
 		}
 	}
-	if !waitForClient(ctx, d.URL) {
+	if *startNow {
+		fprintln(stdout, "The workers are moving.")
+	} else if !waitForClient(ctx, d.URL) {
 		return 0
+	} else {
+		fprintln(stdout, "Connected: the workers are moving.")
 	}
-	fprintln(stdout, "Connected: the workers are moving.")
 	w.Arm()
 	<-ctx.Done()
 	return 0
