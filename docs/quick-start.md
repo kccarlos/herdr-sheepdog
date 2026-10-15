@@ -4,10 +4,18 @@ From install to your first spoken answer, about three minutes. You need
 [herdr](https://github.com/herdrdev/herdr), macOS or Linux, a browser with a
 microphone (on this computer, or over SSH: see below) and one free Gemini API
 key (the setup page links to it; [models.md](models.md) lists the
-alternatives). Getting the key from AI Studio is the slowest step. No herdr
-yet? Install it from its
-[releases page](https://github.com/herdrdev/herdr/releases) and start it with
-`herdr` first.
+alternatives). Getting the key from AI Studio is the slowest step.
+
+No herdr yet? Install it, then start it where your work lives and leave it
+running:
+
+```sh
+curl -fsSL https://herdr.dev/install.sh | sh
+herdr
+```
+
+Or `brew install herdr` instead of the curl line. Other ways (mise, Windows,
+binaries) are on [herdr's releases page](https://github.com/herdrdev/herdr/releases).
 
 ## 1. Install the plugin
 

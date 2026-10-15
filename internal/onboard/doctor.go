@@ -69,15 +69,27 @@ func Doctor(ctx context.Context, cfg config.Config, o DoctorOptions) []Result {
 	return out
 }
 
-// checkGeminiKeys checks every key of the Gemini pool; with no key it
-// fails only when something needs one.
+// geminiKeyNeeded reports whether the configured providers use the Gemini
+// key pool: the voice on Gemini AI Studio, or an enabled orchestrator on
+// gemini. A key left in the env file by an earlier setup does not count.
+func geminiKeyNeeded(cfg config.Config) bool {
+	voice := cfg.Voice.Provider == "gemini" && cfg.Gemini.Backend != "vertex"
+	brainOn := cfg.Brain.Enabled && cfg.Brain.Provider == brain.ProviderGemini
+	return voice || brainOn
+}
+
+// checkGeminiKeys checks every key of the Gemini pool, and only when a
+// configured provider needs one.
 func checkGeminiKeys(ctx context.Context, ep Endpoints, cfg config.Config) []Result {
 	keys := cfg.Gemini.APIKeys
-	if len(keys) == 0 {
-		needed := cfg.Brain.Provider == brain.ProviderGemini || (cfg.Voice.Provider == "gemini" && cfg.Gemini.Backend != "vertex")
-		if !needed {
-			return []Result{{Name: "gemini key", Status: Skip, Detail: "GEMINI_API_KEY not set (not needed by this config)"}}
+	if !geminiKeyNeeded(cfg) {
+		detail := "not needed by this config"
+		if len(keys) == 0 {
+			detail = "GEMINI_API_KEY not set (not needed by this config)"
 		}
+		return []Result{{Name: "gemini key", Status: Skip, Detail: detail}}
+	}
+	if len(keys) == 0 {
 		return []Result{CheckGeminiKey(ctx, ep, "")}
 	}
 	var out []Result

@@ -208,9 +208,13 @@ func offerService(ctx context.Context, o initOptions, in *prompter, stdout, stde
 		fprintln(stdout, "sheepdog init: the login service is already installed ("+st+")")
 		return
 	}
-	yes, err := in.yesNo("Install sheepdog as a login service now (sheepdog service install)?", true)
+	fprintln(stdout, "")
+	fprintln(stdout, "Start at login (optional): this installs a background service (a launchd agent on macOS,")
+	fprintln(stdout, "a systemd user unit on Linux) that runs sheepdog whenever you log in and restarts it if it")
+	fprintln(stdout, "crashes. It does not need admin rights. Undo it any time with: sheepdog service uninstall")
+	yes, err := in.yesNo("Install it now?", false)
 	if err != nil || !yes {
-		fprintln(stdout, "sheepdog init: skipped; later: sheepdog service install")
+		fprintln(stdout, "sheepdog init: skipped. sheepdog starts only when you run it; to start at login later: sheepdog service install")
 		return
 	}
 	if code := runService(ctx, append([]string{"install"}, extra...), stdout, stderr); code != 0 {
