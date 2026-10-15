@@ -2,7 +2,7 @@
 # The hero video's phone take: the iOS app's offline demo in the iOS
 # Simulator, driven by the iOS repo's HeroRecordingUITests while
 # `simctl io recordVideo` films it. When the test marks `push_now`, this
-# script sends billing's approval as a notification with `xcrun simctl
+# script sends codex-payments' approval as a notification with `xcrun simctl
 # push` (the payload is the daemon's own, from payload.go).
 #
 #   IOS_REPO=/path/to/herdr-sheepdog-ios WORK=/tmp/hero scripts/readme-media/hero/phone.sh
@@ -13,8 +13,10 @@
 # --herdr=mock` daemon on $FIXTURE_PORT (default 7796), with an empty
 # config and its own data dir, is the warm-up's connection (it is how the
 # app gets notification permission); it never touches herdr or a model.
-# Uses its own "Sheepdog README" simulator in light mode with a 9:41 status
-# bar. SKIP_BUILD=1 reuses the last build in $WORK/phone/dd.
+# Uses its own "Sheepdog README" simulator (SIM_NAME= another; made when
+# missing) in light mode with a 9:41 status bar. Uninstalling the app does
+# not clear the lock screen's old notifications: when a last take's
+# notification still shows there, use a new SIM_NAME. SKIP_BUILD=1 reuses the last build in $WORK/phone/dd.
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
@@ -23,7 +25,7 @@ ios=$(cd "${IOS_REPO:?set IOS_REPO to a herdr-sheepdog-ios checkout with HeroRec
 work=${WORK:?set WORK}/phone
 mkdir -p "$work"
 device_type=${DEVICE_TYPE:-iPhone 18 Pro}
-name="Sheepdog README"
+name=${SIM_NAME:-Sheepdog README}
 bundle=com.github.kccarlos.herdr-sheepdog-ios
 port=${FIXTURE_PORT:-7796}
 

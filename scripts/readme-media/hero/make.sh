@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The hero video, end to end: the phone take (phone.sh), the desk takes
 # (desk.sh), the voice lines (tts.go) and the cut (compose.py), into
-# assets/readme/hero.mp4, hero-vertical.mp4 and hero.gif.
+# assets/readme/hero.mp4 and hero-vertical.mp4 (the README GIF: ../bubbles/).
 #
 #   IOS_REPO=/path/to/herdr-sheepdog-ios scripts/readme-media/hero/make.sh
 #   STEPS="compose" WORK=<dir> scripts/readme-media/hero/make.sh   # re-cut only

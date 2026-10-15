@@ -7,7 +7,8 @@ checks are in "Before you record".
 
 ## Hero video (45–60 s, vertical 9:16)
 
-**Message:** walk away from your desk and stay in the loop, in your earbuds.
+**Message:** talk to your Herdr agents, from anywhere: hear who's stuck,
+approve with a word, ask what broke, right from your phone.
 **Look:** handheld phone footage, real lock screen, no screen mockups. Show
 the screen only while it matters; keep the desk and the street in frame.
 **Sound:** earbud-mic audio for the user's lines, the app's voice from the
@@ -46,7 +47,9 @@ Notes:
 
 ### Stills for the README
 
-Cut `assets/readme/hero.gif` (10–15 s, loops: shots 3–4) from this video.
+`assets/readme/hero.gif` is a 12 s loop of its own: the iOS app's offline
+demo on the left, the conversation as chat bubbles on the right
+(`scripts/readme-media/bubbles/`, lines in its `lines.tsv`).
 Record `status.gif` (ask "what's going on", shot 5), `phone.gif` (approve
 from the phone, shot 4) and `install.gif` (the three install steps in
 herdr, once the plugin ships). Keep each GIF under ~5 MB.
@@ -54,10 +57,10 @@ herdr, once the plugin ships). Keep each GIF under ~5 MB.
 ## Launch post for X (draft, under 280 characters)
 
 ```text
-Walk away from your desk. Your coding agents (Claude Code, Codex) keep working; sheepdog tells you in your earbuds who's blocked, you say "approve", it's done. Voice supervisor for herdr, open source. [video] github.com/kccarlos/herdr-sheepdog
+Talk to your Herdr agents. From anywhere. Hear who's stuck, approve with a word, ask what broke, right from your phone. Sheepdog is a voice supervisor for Claude Code and Codex in herdr, open source. [video] github.com/kccarlos/herdr-sheepdog
 ```
 
-(244 characters counted literally, so under 280 even before link shortening.)
+(242 characters counted literally, so under 280 even before link shortening.)
 
 ## Launch post for the herdr community (draft)
 
