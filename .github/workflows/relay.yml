@@ -1,0 +1,75 @@
+name: Relay
+
+# The push relay (relay/, a Cloudflare Worker): tests on every PR that
+# touches it; deploy on main and on demand. The Worker's own secrets
+# (APNS_KEY, APNS_KEY_ID, APNS_TEAM_ID, RELAY_SECRET) are set once with
+# `wrangler secret put` and survive deploys; this workflow needs only the
+# Cloudflare credentials, and skips the deploy without them (forks).
+
+on:
+  pull_request:
+    paths: ["relay/**", ".github/workflows/relay.yml"]
+  push:
+    branches: [main]
+    paths: ["relay/**", ".github/workflows/relay.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: relay-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ${{ vars.CI_RUNNER || 'cloudrun' }}
+    defaults:
+      run:
+        working-directory: relay
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: relay/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
+  deploy:
+    needs: test
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ${{ vars.CI_RUNNER || 'cloudrun' }}
+    steps:
+      - name: Cloudflare credentials present?
+        id: creds
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [ -n "$CLOUDFLARE_API_TOKEN" ] && [ -n "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID not set: skipping the relay deploy"
+          fi
+      - if: steps.creds.outputs.ok == 'true'
+        uses: actions/checkout@v7
+      - if: steps.creds.outputs.ok == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: relay/package-lock.json
+      - if: steps.creds.outputs.ok == 'true'
+        run: npm ci
+        working-directory: relay
+      - if: steps.creds.outputs.ok == 'true'
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: relay
+          command: deploy

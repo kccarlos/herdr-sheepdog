@@ -1,0 +1,27 @@
+# sheepdog's push relay (README.md). Secrets are set with
+# `wrangler secret put`, never written here: APNS_KEY (the .p8 file's
+# text), APNS_KEY_ID, APNS_TEAM_ID, RELAY_SECRET.
+name = "sheepdog-relay"
+main = "src/index.ts"
+compatibility_date = "2026-09-01"
+workers_dev = true
+
+[vars]
+# The iOS app's bundle id: the apns-topic, and the only bundle_id
+# /v1/register accepts. Self-hosters with their own build change it.
+APNS_TOPIC = "com.github.kccarlos.herdr-sheepdog-ios"
+
+# Cloudflare's Rate Limiting binding allows a period of 10 or 60 seconds
+# only. namespace_id is any number unique within the account.
+[[ratelimits]]
+name = "SEND_LIMITER"
+namespace_id = "7701"
+simple = { limit = 20, period = 60 }
+
+[[ratelimits]]
+name = "REGISTER_LIMITER"
+namespace_id = "7702"
+simple = { limit = 10, period = 60 }
+
+[observability]
+enabled = false
