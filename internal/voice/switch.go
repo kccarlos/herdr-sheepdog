@@ -62,6 +62,7 @@ type Switcher struct {
 	started   bool
 	closed    bool
 	switching bool
+	starting  bool
 	current   string
 	inner     Session
 	muted     bool
@@ -146,23 +147,41 @@ func (sw *Switcher) Model() string {
 // the voice cannot connect: docs/lifecycle "degraded").
 func (sw *Switcher) Start(ctx context.Context) error {
 	sw.mu.Lock()
-	defer sw.mu.Unlock()
-	if sw.closed {
+	switch {
+	case sw.closed:
+		sw.mu.Unlock()
 		return errors.New("voice: switcher closed")
-	}
-	if sw.started {
+	case sw.started:
+		sw.mu.Unlock()
 		return errors.New("voice: Start called twice")
+	case sw.starting:
+		sw.mu.Unlock()
+		return errors.New("voice: a start is already in progress")
 	}
 	p, err := sw.lookup(sw.current)
 	if err != nil {
+		sw.mu.Unlock()
 		return err
 	}
+	sw.starting = true
+	sw.mu.Unlock()
+
+	// Built and started outside the lock: a Gemini Start dials, and a
+	// dial that hangs (no network) must not block Provider, Status and
+	// the pages that read them while the daemon retries.
 	inner, err := p.New()
+	if err == nil {
+		err = inner.Start(ctx)
+	}
+	sw.mu.Lock()
+	defer sw.mu.Unlock()
+	sw.starting = false
 	if err != nil {
 		return err
 	}
-	if err := inner.Start(ctx); err != nil {
-		return err
+	if sw.closed {
+		go func() { _ = inner.Close() }()
+		return errors.New("voice: switcher closed")
 	}
 	sw.ctx, sw.started, sw.inner = ctx, true, inner
 	// Tell the first session whether a /ws client is attached — at
@@ -189,7 +208,7 @@ func (sw *Switcher) SetProvider(id, via string) error {
 		sw.mu.Unlock()
 		return errors.New("voice: switcher closed")
 	}
-	if sw.switching {
+	if sw.switching || sw.starting {
 		sw.mu.Unlock()
 		return errors.New("voice: a provider switch is already in progress")
 	}

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -14,6 +15,8 @@ import (
 	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/app"
+	"github.com/kccarlos/herdr-sheepdog/internal/config"
+	"github.com/kccarlos/herdr-sheepdog/internal/daemon"
 	"github.com/kccarlos/herdr-sheepdog/internal/web"
 )
 
@@ -192,5 +195,93 @@ func TestSetupNoDisplayUsesTheTerminal(t *testing.T) {
 	}
 	if strings.Contains(out.String(), initGeminiKey) {
 		t.Error("the key was echoed")
+	}
+}
+
+// TestSetupServiceHandOver: "Start at login" on the page makes this
+// daemon free its lock and port and install the login service (which
+// starts its own daemon); this process exits 0. When the install fails
+// it takes the lock back and carries on serving.
+func TestSetupServiceHandOver(t *testing.T) {
+	origExe := osExecutable
+	osExecutable = func() (string, error) { return "/usr/local/bin/sheepdog", nil }
+	defer func() { osExecutable = origExe }()
+	for _, fail := range []bool{false, true} {
+		dir := t.TempDir()
+		port := freePort(t)
+		dataDir := filepath.Join(dir, "data")
+		cfgPath := filepath.Join(dir, "config.toml")
+		if err := os.WriteFile(cfgPath, []byte(fmt.Sprintf("data_dir = %q\n[web]\nport = %d\n", dataDir, port)), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		installed := make(chan bool, 1)
+		orig := handOverToService
+		handOverToService = func(context.Context, config.Config, serveOpts) error {
+			_, held := daemon.Running(dataDir)
+			installed <- !held // the lock must be free when the service starts
+			if fail {
+				return errors.New("launchctl bootstrap: boom")
+			}
+			return nil
+		}
+		built := make(chan *app.App, 4)
+		serveBuilt = func(a *app.App) { built <- a }
+		ctx, cancel := context.WithCancel(context.Background())
+		var stdout, stderr syncBuffer
+		done := make(chan int, 1)
+		go func() {
+			done <- run(ctx, []string{"serve", "--config", cfgPath, "--voice", "off", "--herdr", "mock"}, &stdout, &stderr)
+		}()
+		<-built
+		base := fmt.Sprintf("http://127.0.0.1:%d", port)
+		resp, err := http.Post(base+"/api/setup/service", "application/json", strings.NewReader(`{"install":true}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if !strings.Contains(string(b), `"handoff": true`) {
+			t.Fatalf("service: %s %s", b, stderr.String())
+		}
+		select {
+		case free := <-installed:
+			if !free {
+				t.Error("the service was installed while this daemon held the lock")
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatal("no hand-over")
+		}
+		if !fail {
+			select {
+			case code := <-done:
+				if code != 0 || !strings.Contains(stdout.String(), "handed over to the login service") {
+					t.Errorf("exit %d: %s", code, stdout.String())
+				}
+			case <-time.After(10 * time.Second):
+				t.Fatal("serve did not exit after the hand-over")
+			}
+		} else {
+			select {
+			case <-built:
+			case <-time.After(10 * time.Second):
+				t.Fatal("serve did not carry on after a failed install")
+			}
+			if _, held := daemon.Running(dataDir); !held {
+				t.Error("the lock was not taken back")
+			}
+			if r, err := http.Get(base + "/api/setup/state"); err != nil || r.StatusCode != 200 {
+				t.Errorf("state after a failed hand-over: %v", err)
+			} else {
+				_ = r.Body.Close()
+			}
+			if !strings.Contains(stderr.String(), "the login service did not install (launchctl bootstrap: boom); carrying on here") {
+				t.Errorf("stderr: %s", stderr.String())
+			}
+			cancel()
+			<-done
+		}
+		cancel()
+		handOverToService = orig
+		serveBuilt = nil
 	}
 }

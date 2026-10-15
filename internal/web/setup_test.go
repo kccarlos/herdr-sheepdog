@@ -194,6 +194,9 @@ func TestSetupKeysValidateSaveAndNeverEcho(t *testing.T) {
 		b, _ := json.Marshal(ev)
 		logged.Write(b)
 	}
+	if !strings.Contains(logged.String(), "web.setup_saved") || !strings.Contains(logged.String(), "GEMINI_API_KEY") {
+		t.Fatalf("the event log does not have the save (so the check below proves nothing): %d bytes", logged.Len())
+	}
 	if strings.Contains(state, goodKey) || strings.Contains(logged.String(), goodKey) || strings.Contains(logged.String(), bad) {
 		t.Error("a key reached the state or the event log")
 	}
