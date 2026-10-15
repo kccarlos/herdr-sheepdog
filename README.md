@@ -55,7 +55,7 @@ mode that needs no daemon and no key. By-hand install and everything else:
   <tr>
     <td align="center"><img src="assets/readme/status.gif" alt="Asking what is going on" width="240"><br>What is going on?</td>
     <td align="center"><img src="assets/readme/phone.gif" alt="Approving from the phone" width="240"><br>Approve from the phone</td>
-    <td align="center"><img src="assets/readme/install.gif" alt="Installing as a herdr plugin" width="240"><br>Three-step install</td>
+    <td align="center"><img src="assets/readme/plugin.gif" alt="Pairing the phone from the herdr plugin" width="240"><br>Pair from herdr</td>
   </tr>
 </table>
 
