@@ -17,6 +17,10 @@
 # missing) in light mode with a 9:41 status bar. Uninstalling the app does
 # not clear the lock screen's old notifications: when a last take's
 # notification still shows there, use a new SIM_NAME. SKIP_BUILD=1 reuses the last build in $WORK/phone/dd.
+# KEEP_APP=1 does not uninstall the app first (notifications were allowed on
+# this simulator by LaunchRecordingUITests.testAllowNotifications).
+# UNLOCK_SETTLE=<s> waits that long after the unlock before filming (the
+# recording of the first moments after an unlock can freeze).
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
@@ -40,7 +44,7 @@ xcrun simctl status_bar "$udid" override --time 9:41 --batteryState charged --ba
 	--cellularBars 4 --wifiBars 3 --dataNetwork wifi --operatorName ""
 # A fresh install: no notification left on the lock screen from a last
 # take (the warm-up allows notifications again).
-xcrun simctl uninstall "$udid" "$bundle" 2>/dev/null || true
+[ -n "${KEEP_APP:-}" ] || xcrun simctl uninstall "$udid" "$bundle" 2>/dev/null || true
 xcrun simctl privacy "$udid" grant microphone "$bundle" 2>/dev/null || true
 xcrun simctl spawn "$udid" defaults write com.apple.keyboard.preferences DidShowContinuousPathIntroduction -bool true
 xcrun simctl spawn "$udid" defaults write com.apple.keyboard.preferences DidShowGestureKeyboardIntroduction -bool true
@@ -118,7 +122,20 @@ while kill -0 $xcb 2>/dev/null && ! grep -qE "Test Suite 'Selected tests' (passe
 		xcrun simctl io "$udid" screenshot "$work/lock1.png" >/dev/null 2>&1
 		phase=3
 	elif [ $phase = 3 ] && grep -q '^unlocked ' "$marks"; then
-		sleep 0.5
+		sleep "${UNLOCK_SETTLE:-0.5}"
+		# The recording of the first moments after an unlock can freeze (one
+		# frame, however long it runs): film a second, check that frames
+		# came, and start over when they did not. The test waits for $ready.
+		for try in 1 2 3 4 5 6; do
+			record 9
+			sleep 1.5
+			kill -INT $rec
+			wait $rec || true
+			rec=""
+			frames=$(ffprobe -v error -count_frames -select_streams v:0 -show_entries stream=nb_read_frames -of csv=p=0 "$work/rec9.mp4" 2>/dev/null || echo 0)
+			[ "${frames:-0}" -ge 15 ] && break
+			echo "the recording froze (try $try); starting it again" >&2
+		done
 		record 2
 		touch "$ready"
 		phase=4
@@ -134,9 +151,11 @@ if ! grep -q "Test Suite 'Selected tests' passed" "$work/test.log" || [ $phase !
 	echo "the UI test failed; see $work/test.log" >&2
 	exit 1
 fi
-# A recording that froze (a handful of frames) makes a useless take.
-if python3 -c "import sys; sys.exit(0 if float(sys.argv[1]) > 8 else 1)" \
-	"$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$work/rec2.mp4")"; then :; else
+# A recording that froze (a handful of frames, however long it is) makes a
+# useless take.
+if python3 -c "import sys; sys.exit(0 if float(sys.argv[1]) > 8 and int(sys.argv[2]) > 60 else 1)" \
+	"$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$work/rec2.mp4")" \
+	"$(ffprobe -v error -count_frames -select_streams v:0 -show_entries stream=nb_read_frames -of csv=p=0 "$work/rec2.mp4")"; then :; else
 	echo "the recording after the unlock froze; run again" >&2
 	exit 1
 fi
