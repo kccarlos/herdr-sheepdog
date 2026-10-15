@@ -26,7 +26,7 @@ appearance dark`, `xcrun simctl ui <udid> content_size
 accessibility-extra-extra-extra-large`). `before-*` files are `main` before
 the fixes; `light-*`, `dark-*`, `ax5-*` (the largest accessibility text
 size) and `se-*` are after. All are in
-[`screenshots/launch/`](screenshots/launch/).
+[`screenshots/launch/`](../screenshots/launch/).
 
 Error states without a daemon: "unreachable" is a closed loopback port, and
 "wrong token" is `StubDaemon`, a small HTTP server inside the UI test runner
@@ -36,7 +36,7 @@ that answers `/api/hello` like sheepdog and everything else with 401.
 
 ### 1. The first screen is a keyboard over stale instructions
 
-[`before-01-first-run.png`](screenshots/launch/before-01-first-run.png):
+[`before-01-first-run.png`](../screenshots/launch/before-01-first-run.png):
 the app opened on Settings ▸ Daemon with the keyboard already up, covering
 half the screen. The headline sat under the navigation bar. The text told
 the user to run `sheepdog serve` with `web.bind` and `web.token` set and to
@@ -54,17 +54,17 @@ your computer. Install it from the herdr plugin marketplace and run
 keyboard on the first run. The scanner footer names `sheepdog setup` (step
 4) and `sheepdog pair`. The token placeholder says "From the pairing code"
 instead of `web.token`.
-[`light-01-first-run.png`](screenshots/launch/light-01-first-run.png),
-[`dark-01-first-run.png`](screenshots/launch/dark-01-first-run.png),
-[`ax5-01-first-run.png`](screenshots/launch/ax5-01-first-run.png),
-[`se-01-first-run.png`](screenshots/launch/se-01-first-run.png).
+[`light-01-first-run.png`](../screenshots/launch/light-01-first-run.png),
+[`dark-01-first-run.png`](../screenshots/launch/dark-01-first-run.png),
+[`ax5-01-first-run.png`](../screenshots/launch/ax5-01-first-run.png),
+[`se-01-first-run.png`](../screenshots/launch/se-01-first-run.png).
 Test: `FirstRunUITests.testFirstRunSaysWhatTheAppNeedsAndOffersTheDemo`
 (the intro, the guide link, the demo button hittable without scrolling, no
 keyboard).
 
 ### 2. A pairing link that fails says nothing
 
-[`before-10-pair-unreachable.png`](screenshots/launch/before-10-pair-unreachable.png):
+[`before-10-pair-unreachable.png`](../screenshots/launch/before-10-pair-unreachable.png):
 opening a `sheepdog://pair` link whose addresses do not answer (the phone
 on another network) showed its error in a banner on the main screen, then
 reopened the first-run Settings sheet on top of it. The user saw the same
@@ -73,12 +73,12 @@ setup screen as before, with no sign that anything happened.
 **Fix.** The failure is shown on the Daemon screen, where the fix is: "None
 of the code's addresses answered.", the addresses tried, the plain fix and
 a **How to fix this** link.
-[`light-10-pair-unreachable.png`](screenshots/launch/light-10-pair-unreachable.png).
+[`light-10-pair-unreachable.png`](../screenshots/launch/light-10-pair-unreachable.png).
 Test: `PairingLinkUITests.testPairReportsAnUnreachableCode`.
 
 ### 3. A wrong token opens Settings without saying why
 
-[`before-14-token-refused.png`](screenshots/launch/before-14-token-refused.png):
+[`before-14-token-refused.png`](../screenshots/launch/before-14-token-refused.png):
 when the daemon turned the token down, the app opened the Settings menu.
 The reason was in a banner under the sheet.
 
@@ -87,12 +87,12 @@ fix: "The token changed or was mistyped. Run `sheepdog pair` on your
 computer and scan the code again.", plus **How to fix this**. The scanner
 is the first row on that screen. The Agents pane's "Token refused" state
 says the same and its button goes to the same screen.
-[`light-14-token-refused.png`](screenshots/launch/light-14-token-refused.png).
+[`light-14-token-refused.png`](../screenshots/launch/light-14-token-refused.png).
 Test: `FirstRunUITests.testWrongTokenOpensTheDaemonScreenWithTheFix`.
 
 ### 4. Notifications promised what this build cannot deliver
 
-[`before-16-notifications.png`](screenshots/launch/before-16-notifications.png):
+[`before-16-notifications.png`](../screenshots/launch/before-16-notifications.png):
 Settings ▸ Notifications said "the daemon sends a notification even with
 the app closed", and the app asked for notification permission after the
 first connection to any daemon. Apple delivers a push only when it is
@@ -108,7 +108,7 @@ phone" reads "Not needed yet", and the footer says what works (approval
 cards and the voice while the app is open and connected; the Live Activity
 on the Lock Screen and in the Dynamic Island during a voice session) and
 what needs a self-built app with your own push key.
-[`light-16-notifications.png`](screenshots/launch/light-16-notifications.png).
+[`light-16-notifications.png`](../screenshots/launch/light-16-notifications.png).
 Tests: `SetupHelpTests.testNotificationsAreAskedForOnlyWhenTheDaemonCanSend`,
 `SetupHelpTests.testNotificationCopyIsHonestWithoutPush`.
 
@@ -125,9 +125,9 @@ currently does (a) and (c).
 
 ### 5. "Can't reach the daemon" did not say what to check
 
-[`before-11-unreachable-conversation.png`](screenshots/launch/before-11-unreachable-conversation.png),
-[`before-12-unreachable-agents.png`](screenshots/launch/before-12-unreachable-agents.png),
-[`before-13-unreachable-test-connection.png`](screenshots/launch/before-13-unreachable-test-connection.png):
+[`before-11-unreachable-conversation.png`](../screenshots/launch/before-11-unreachable-conversation.png),
+[`before-12-unreachable-agents.png`](../screenshots/launch/before-12-unreachable-agents.png),
+[`before-13-unreachable-test-connection.png`](../screenshots/launch/before-13-unreachable-test-connection.png):
 the banner's hint was "Nothing is listening on that port." and Test
 connection said the same. The empty-state hint without a detail told the
 user to read the `lan url` line off `sheepdog serve`'s banner.
@@ -138,9 +138,9 @@ Wi-Fi, or on Tailscale with the same account.* The banner, the Agents
 pane and Test connection link to the daemon's `docs/remote-access.md`
 ("How to fix this"). Something that is not sheepdog on the port says to
 scan the code instead of typing.
-[`light-11-unreachable-conversation.png`](screenshots/launch/light-11-unreachable-conversation.png),
-[`light-12-unreachable-agents.png`](screenshots/launch/light-12-unreachable-agents.png),
-[`light-13-unreachable-test-connection.png`](screenshots/launch/light-13-unreachable-test-connection.png).
+[`light-11-unreachable-conversation.png`](../screenshots/launch/light-11-unreachable-conversation.png),
+[`light-12-unreachable-agents.png`](../screenshots/launch/light-12-unreachable-agents.png),
+[`light-13-unreachable-test-connection.png`](../screenshots/launch/light-13-unreachable-test-connection.png).
 Tests: `FirstRunUITests.testUnreachableDaemonSaysSameWiFiOrTailscale`,
 `FirstRunUITests.testNotSheepdogSaysCheckTheAddress`, `SetupHelpTests`.
 
@@ -165,7 +165,7 @@ reviewer who taps them finds placeholder screens.
 
 **Fix.** The demo's Settings lists Leave the demo, Voice, Diagnostics and
 About only.
-[`light-08-demo-settings.png`](screenshots/launch/light-08-demo-settings.png).
+[`light-08-demo-settings.png`](../screenshots/launch/light-08-demo-settings.png).
 Test: `FirstRunUITests.testDemoSettingsHaveNoEmptyDaemonPages`.
 
 ### 8. "Mac" in user-facing text
@@ -178,7 +178,11 @@ banner said "Mac". They now say "computer".
 
 `testTryTheDemoFromTheFirstRun` waited for the approval card's "answered"
 line, which the demo replaces within a moment as its agent moves on. The
-test now accepts either the answered line or the question closing.
+test now accepts either the answered line or the question closing. On
+Xcode Cloud the demo also aborted in `AURemoteIO::Initialize` (the
+simulator's audio server hung), so the demo UI tests launch with
+`-sheepdogDemoSilent` (debug builds only): no speech synthesis or
+recognition and no permission prompts.
 
 ### 10. The largest text size buried the demo and pushed the screen up
 
@@ -191,23 +195,23 @@ slid under the navigation bar.
 **Fix.** At the accessibility sizes the demo button comes first, its label
 wraps, and the pinned approval card scrolls inside a third of the screen
 instead of half.
-[`ax5-01-first-run.png`](screenshots/launch/ax5-01-first-run.png),
-[`ax5-05-demo-approval.png`](screenshots/launch/ax5-05-demo-approval.png),
-[`ax5-03-demo-conversation.png`](screenshots/launch/ax5-03-demo-conversation.png).
+[`ax5-01-first-run.png`](../screenshots/launch/ax5-01-first-run.png),
+[`ax5-05-demo-approval.png`](../screenshots/launch/ax5-05-demo-approval.png),
+[`ax5-03-demo-conversation.png`](../screenshots/launch/ax5-03-demo-conversation.png).
 
 ## Checked and fine
 
 - **The offline demo shows real value (4.2).** Four scripted agents,
   an approval to answer, agent windows, suggested questions with spoken
   answers, all on the device:
-  [`light-03-demo-conversation.png`](screenshots/launch/light-03-demo-conversation.png),
-  [`light-04-demo-agents.png`](screenshots/launch/light-04-demo-agents.png),
-  [`light-05-demo-approval.png`](screenshots/launch/light-05-demo-approval.png),
-  [`light-06-demo-agent-window.png`](screenshots/launch/light-06-demo-agent-window.png),
-  [`light-07-demo-answer.png`](screenshots/launch/light-07-demo-answer.png).
+  [`light-03-demo-conversation.png`](../screenshots/launch/light-03-demo-conversation.png),
+  [`light-04-demo-agents.png`](../screenshots/launch/light-04-demo-agents.png),
+  [`light-05-demo-approval.png`](../screenshots/launch/light-05-demo-approval.png),
+  [`light-06-demo-agent-window.png`](../screenshots/launch/light-06-demo-agent-window.png),
+  [`light-07-demo-answer.png`](../screenshots/launch/light-07-demo-answer.png).
 - **The pairing link asks first** ("Pair with 127.0.0.1?", Cancel returns
   to setup):
-  [`light-09-pair-confirm.png`](screenshots/launch/light-09-pair-confirm.png).
+  [`light-09-pair-confirm.png`](../screenshots/launch/light-09-pair-confirm.png).
   Tested by `PairingLinkUITests`.
 - **Camera denied** shows "Camera access is off" with the way to type the
   address instead (`PairingScanner`). **Microphone denied** shows a banner
@@ -216,8 +220,8 @@ instead of half.
 - **Dark mode.** Every status colour has a dark variant in the asset
   catalogue; the `dark-*` screenshots show no unreadable text.
 - **Live Activity.** Unchanged and local (no push needed);
-  [`screenshots/live-activity-light.png`](screenshots/live-activity-light.png),
-  [`screenshots/live-activity-dark.png`](screenshots/live-activity-dark.png).
+  [`screenshots/live-activity-light.png`](../screenshots/live-activity-light.png),
+  [`screenshots/live-activity-dark.png`](../screenshots/live-activity-dark.png).
 
 ## P2 (not fixed)
 

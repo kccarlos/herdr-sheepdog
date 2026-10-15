@@ -5,7 +5,7 @@ import XCTest
 /// (`scripts/make-fixtures.sh`) mixed with generated noise — white, pink,
 /// brown, babble (the other TTS voices at once) and keyboard clicks — at
 /// 20, 10 and 5 dB SNR. The numbers these print are the table in
-/// docs/architecture.md.
+/// docs/dev/architecture.md.
 ///
 /// Pure computation on committed fixtures: no host app, microphone or
 /// network needed.

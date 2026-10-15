@@ -7,7 +7,7 @@ import XCTest
 ///     xcodebuild … test -only-testing:SheepdogUITests/LaunchReviewScreenshotsUITests \
 ///       TEST_RUNNER_SHEEPDOG_LAUNCH_SHOTS=/path/to/dir TEST_RUNNER_SHEEPDOG_LAUNCH_PREFIX=light
 ///
-/// Not in CI: it only takes pictures. docs/launch-review.md cites the files.
+/// Not in CI: it only takes pictures. docs/dev/launch-review.md cites the files.
 final class LaunchReviewScreenshotsUITests: XCTestCase {
     private let environment = ProcessInfo.processInfo.environment
     private var directory: String { environment["SHEEPDOG_LAUNCH_SHOTS"] ?? "" }

@@ -409,7 +409,7 @@ public struct BrainInfo: Codable, Equatable, Sendable {
 /// `POST /api/conversation/reset {"via": "app"}` — forgets the orchestrator's
 /// and the voice model's short-term conversation; the roster, open
 /// approvals, promises and notes, and the scrollback itself, are kept (see
-/// docs/architecture.md "New conversation"). `DaemonClient.resetConversation`
+/// docs/dev/architecture.md "New conversation"). `DaemonClient.resetConversation`
 /// answers `nil` for a 404, the same convention as `voiceProviders()`: an
 /// older daemon simply does not have the route yet.
 public struct ConversationReset: Codable, Equatable, Sendable {

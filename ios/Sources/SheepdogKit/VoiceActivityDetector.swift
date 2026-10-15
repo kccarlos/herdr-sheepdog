@@ -4,7 +4,7 @@ import Foundation
 ///
 /// The defaults were tuned against macOS text-to-speech mixed with white,
 /// pink, brown, babble and keyboard-click noise at 20, 10 and 5 dB SNR
-/// (`VoiceActivityDetectorTests`; the table is in docs/architecture.md).
+/// (`VoiceActivityDetectorTests`; the table is in docs/dev/architecture.md).
 public struct VADTuning: Equatable, Sendable {
     /// Capture sample rate the frames arrive at.
     public var sampleRate: Double = AudioContract.captureRate

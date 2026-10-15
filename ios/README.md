@@ -7,136 +7,160 @@
 
 # Sheepdog for iOS
 
-A phone front end for the [herdr-sheepdog](https://github.com/kccarlos/herdr-sheepdog)
-daemon: talk to **Sheepdog**, the voice, and watch and answer your **agents**, the
-coding agents it works with, from anywhere on your own network.
+The iPhone app for [**sheepdog**](https://github.com/kccarlos/herdr-sheepdog).
+Sheepdog lets you manage the coding agents running in herdr on your
+computer by voice. With the app you can talk to **Sheepdog**, hear what
+your agents did, answer their approval prompts and look at their screens
+when you are away from your desk.
 
-The daemon owns the model session. This app is the microphone, the speaker
-and the screen. It speaks the daemon's `/ws` protocol the way the browser
-page at `/voice` does (`docs/ws-contract.md` in the daemon repository):
-PCM16 mono, 16 kHz up, 24 kHz down, plus a few JSON control frames.
+The app is only the microphone, the speaker and the screen. Everything else
+runs on your own computer, where the sheepdog daemon owns the models and the
+agents. There is no sheepdog server and no account.
 
-| The conversation | An approval | Agents | Settings ▸ Models |
+**Start with the main repository,
+[kccarlos/herdr-sheepdog](https://github.com/kccarlos/herdr-sheepdog).**
+Install the daemon from the herdr plugin marketplace and run
+`sheepdog setup`. Then come back here to set up the phone.
+
+| Welcome | The demo | An approval | Agents |
 |---|---|---|---|
-| ![Conversation and voice bar](docs/screenshots/review-light-voicebar-live.png) | ![Approval card](docs/screenshots/review-light-conversation-approval.png) | ![Agents pane](docs/screenshots/review-light-flock.png) | ![Models](docs/screenshots/review-light-models.png) |
+| ![First run](docs/screenshots/launch/light-01-first-run.png) | ![Demo conversation](docs/screenshots/launch/light-07-demo-answer.png) | ![Approval card](docs/screenshots/launch/light-05-demo-approval.png) | ![Agents](docs/screenshots/launch/light-04-demo-agents.png) |
 
-## Try it without a Mac: the demo
+## Get the app
 
-Tap **Try the demo** on the first screen (or in Settings). Scripted agents
-run on the phone itself: one finishes, one asks for an approval you can
-answer, one fails. The voice reads the news aloud with on-device speech,
-and you can tap a suggested question, type one, or ask it aloud where
-on-device speech recognition is available. No daemon, no network, no
-cloud model. **Leave** returns to the setup. How it works:
-[`docs/architecture.md`](docs/architecture.md#the-offline-demo); the App
-Review notes are in [`docs/app-review-notes.md`](docs/app-review-notes.md).
+- **TestFlight:** [TESTFLIGHT_LINK](https://testflight.apple.com/join/TESTFLIGHT_LINK).
+  Install Apple's TestFlight app first, then open the link. In TestFlight
+  the app is called "Sheepdog for herdr" because the name "Sheepdog" was
+  taken. The home-screen label is "Sheepdog". You need iOS 17 or newer.
+- **Build it yourself:** see [Build it yourself](#build-it-yourself) below.
 
-## Quick start
+## Try it without a computer: the demo
 
-1. **Install from TestFlight.** The app is internal-testing only. Ask to be
-   added to the TestFlight group **Me**, install **TestFlight** from the App
-   Store, and install **"Sheepdog for herdr"** from the invite. ("Sheepdog"
-   was taken on the App Store. The home-screen label is still "Sheepdog".)
-2. **Make the daemon reachable.** The daemon binds to `127.0.0.1` by
-   default, and a phone cannot reach that. On the Mac, set a bind address
-   and a token in `~/.config/sheepdog/config.toml`:
+Tap **Try the demo** on the first screen (it is also in Settings). Scripted
+agents run on the phone. One finishes, one fails and one asks for an
+approval that you can answer. The voice reads the news aloud with on-device
+speech. You can tap a suggested question, type one, or ask it aloud if the
+phone supports on-device speech recognition. The demo needs no daemon, no
+account and no network. Tap **Leave** to go back to setup.
 
-   ```toml
-   [web]
-   bind = "0.0.0.0"      # or your LAN / Tailscale address
-   token = "pick-something-long-and-random"
-   ```
+## Pair with your computer
 
-3. **Connect.** Run `sheepdog pair` on the Mac and tap **Scan pairing
-   code** in the app's Settings ▸ Daemon, or point the iPhone's Camera app
-   at it and open the `sheepdog://pair` link (the app asks "Pair with
-   <host>?" before it changes anything): the code holds every LAN and
-   Tailscale address and the token, and the app keeps the first address
-   that answers. To type it instead: `sheepdog serve` prints one `lan url`
-   line for each non-loopback address. In the app's Settings, enter the host and port from
-   that line (for example `192.168.1.20:7777`, with no scheme) and the
-   token, then tap **Test connection**. It calls `GET /api/hello` and, when a
-   token is set, `GET /api/state`, so a wrong token is reported as a wrong
-   token. Tap **Done** (changes apply as you leave the screen), then tap the
-   orb to connect.
-4. **Allow the microphone and notifications** when iOS asks. The app asks
-   for notifications after the first successful connection. The daemon
-   needs an APNs key to send them (`docs/push.md` in the daemon repository).
+1. On the computer, run `sheepdog setup`. Step 4, **Turn on phone access**,
+   shows a pairing code. You can show it again later with `sheepdog pair`.
+2. In the app, tap **Scan pairing code** on the Welcome screen or in
+   Settings > Daemon. You can also point the iPhone's Camera app at the code
+   and open the `sheepdog://pair` link. The app asks "Pair with <host>?"
+   before it changes anything. The code contains the token and every
+   address the daemon listens on, and the app keeps the first address that
+   answers.
+3. Allow the microphone when iOS asks, then tap the orb to talk.
 
-The token is stored in the keychain. There is no TLS (the daemon does not
-offer it), so use this only on a network you trust, such as your LAN or
-Tailscale.
+If the phone and the computer are on the same Wi-Fi, this is all you need.
+To use the app away from home, install Tailscale on the computer and on the
+phone and sign in to the same account on both. Then run `sheepdog pair`
+again and scan the new code
+([remote access](https://github.com/kccarlos/herdr-sheepdog/blob/main/docs/remote-access.md)).
+
+When something is wrong, the app says what to check:
+
+| The app says | What to do |
+|---|---|
+| Can't reach the daemon … is it running? | Run `sheepdog status` on the computer. Put the phone on the same Wi-Fi, or use Tailscale on both. |
+| … turned the token down | The token has changed. Run `sheepdog pair` and scan the code again. |
+| Something answered … but it isn't a sheepdog daemon | The address is wrong. Scan the code instead of typing the address. |
+| Camera access is off | Allow the camera in iOS Settings > Sheepdog, or type the address and the token. |
+
+The app stores the token in the iPhone's keychain. The connection is plain
+HTTP without TLS, so use it only on a network you trust, such as your home
+Wi-Fi or Tailscale. Never expose the daemon's port to the internet.
 
 ## What it does
 
-- **Voice.** You hold a conversation with the voice. A voice-activity
-  detector sends audio only while you are speaking, echo cancellation stops
-  the voice from hearing itself, and playback adapts to bursty audio. Mute
-  turns off only the microphone. **Hold to talk** is an option.
-- **Approvals.** When a worker stops at a prompt, a card shows who is
-  asking, the command and one button per option. You can tap an answer or
-  say it. Both go through `POST /api/pending/answer`.
-- **Notifications.** When an agent needs you, a time-sensitive APNs
-  notification arrives even if the app is closed. You can answer an
-  approval from it with **Approve** or **Decline** (both need the
-  passcode). Tapping it opens that agent's Agents card.
-- **Conversation / Agents.** The conversation includes its history
-  from the daemon and is cached on the phone. Agents lists the running
-  agents (the others are folded into "Not running (N)") and shows an amber
-  count of the agents waiting on you. Tapping an agent in the strip opens
-  its window. Health (daemon, voice, orchestrator, recent problems) is behind the
-  connection chip and under Settings ▸ Diagnostics. Tasks, questions and replies render markdown.
-- **Settings ▸ Models.** Choose the voice provider and the orchestrator's provider
-  and model. Changes apply on the daemon at once.
-- **Typing.** Use "Type instead" when you cannot talk. ⋯ ▸ **New
-  conversation** resets the short-term context without losing the
-  scrollback.
-- **Reconnects** through daemon restarts and network drops, and resumes the
-  `/events` stream from the last event it saw.
+- **Voice.** Talk to the voice. The app sends audio only while you speak,
+  and echo cancellation stops the voice from hearing itself. Mute turns off
+  only the microphone. **Hold to talk** is available as an option. Use
+  **Type instead** when you cannot talk.
+- **Approvals.** When an agent stops at a prompt, a card shows which agent
+  is asking, the command, and one button for each option. Tap an answer or
+  say it.
+- **Agents.** See which agents are working, blocked or done, and open a
+  window onto each agent's screen.
+- **Live Activity.** While a voice session runs, the Lock Screen and the
+  Dynamic Island show it, with buttons.
+- **Siri, Shortcuts and the Action Button.** "Talk to Sheepdog" starts a
+  session.
+- **Settings > Models.** Switch the voice model and the orchestrator model
+  on the daemon.
 
-What has and has not been checked on a real iPhone:
-[`docs/status.md`](docs/status.md).
+### Notifications
 
-## Build from source
+Apple delivers a push notification only when it is signed with a key that
+belongs to the Apple team that signed the app. A daemon that you run
+yourself does not have that key for the TestFlight build, so **the
+TestFlight build does not get notifications while the app is closed.** The
+app asks for notification permission only if your daemon can send
+notifications. While the app is open and connected, approvals still appear
+as cards, the voice tells you about them, and the Live Activity shows the
+session.
 
-The project has no third-party dependencies. The Xcode project is generated
-and not committed.
+To get notifications while the app is closed, build the app under your own
+Apple team (see below) and configure that team's APNs key on your daemon
+(`[push.apns]`; see the daemon's push docs).
+
+## Privacy
+
+The app collects nothing and has no server. Audio, text and agent state go
+only between the phone and your own daemon. The daemon's
+[privacy page](https://github.com/kccarlos/herdr-sheepdog/blob/main/docs/privacy.md)
+in the main repository lists what the daemon sends to the model providers
+you choose and what it stores on your computer. That page is also the
+privacy policy of this app.
+
+## Build it yourself
+
+You need a Mac with Xcode 27 (the version the project is built and tested
+with; Xcode Cloud uses the latest release),
+[XcodeGen](https://github.com/yonaskolb/XcodeGen) 2.46 or newer, and an
+Apple developer account. The project has no third-party dependencies. The
+Xcode project is generated by XcodeGen and is not committed.
 
 ```sh
-brew install xcodegen          # 2.46 or newer
+brew install xcodegen
+git clone https://github.com/kccarlos/herdr-sheepdog-ios.git && cd herdr-sheepdog-ios
 xcodegen generate
 open Sheepdog.xcodeproj
 ```
 
-`project.yml` signs automatically with team `GV776BZVA8` and bundle ID
-`com.github.kccarlos.herdr-sheepdog-ios`. To build under another team,
-change `DEVELOPMENT_TEAM` and the bundle IDs there. It requires iOS 17 or
-newer.
+**Signing with your own team.** In `project.yml`, set `DEVELOPMENT_TEAM` to
+your Team ID. Change the bundle IDs (`bundleIdPrefix` and the
+`PRODUCT_BUNDLE_IDENTIFIER` values) to IDs that you own, then run
+`xcodegen generate` again. The app uses the Push Notifications and Time
+Sensitive Notifications capabilities and a widget extension for the Live
+Activity. Automatic signing creates what they need.
+
+**Push with your own key.** In the Apple developer portal, create an APNs
+auth key (`.p8`) for your team and configure it on your daemon
+(`[push.apns]` in its config; see the daemon's push docs). Debug builds use
+the APNs sandbox and Release builds use production. The app tells the
+daemon which one applies.
+
+To run the tests on a simulator:
 
 ```sh
-xcodebuild -scheme Sheepdog -destination 'platform=iOS Simulator,name=iPhone 17 Pro' build test
+xcodebuild -scheme Sheepdog -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test
 ```
 
-The `Sheepdog` scheme runs the unit tests and the UI tests. The UI tests
-skip themselves unless a fixture daemon is running (see
-[`docs/status.md`](docs/status.md#running-the-tests)).
+Most UI tests need a fixture daemon and skip themselves when there is none
+([docs/dev/status.md](docs/dev/status.md#running-the-tests)).
 
-CI and TestFlight run on **Xcode Cloud**, not GitHub Actions. Every pull
-request and push to `main` runs the tests, and a `v*` tag sends a build to
-TestFlight. See [`docs/xcode-cloud.md`](docs/xcode-cloud.md).
+## Contributing
 
-## Layout
+Bug reports and ideas are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md).
+Report security issues as described in [SECURITY.md](SECURITY.md).
+[docs/dev/architecture.md](docs/dev/architecture.md) explains how the code
+works. Builds and TestFlight releases run on Xcode Cloud
+([docs/dev/xcode-cloud.md](docs/dev/xcode-cloud.md)).
 
-- `Sources/SheepdogKit`: everything that can be tested without hardware.
-  This covers the `/ws` mirror, the HTTP/SSE client, the voice-activity
-  detector, sample-rate conversion, playback scheduling, the session core,
-  conversation history, push payloads and markdown.
-- `Sources/Sheepdog`: the SwiftUI views, the view models, the audio engine
-  and push registration.
-- `Tests/SheepdogKitTests`: the unit suite. The TTS speech fixtures live in
-  `Tests/SheepdogKitTests/Audio` and are regenerated with
-  `scripts/make-fixtures.sh`.
-- `Tests/SheepdogUITests`: end-to-end tests against a fixture daemon.
+## License
 
-[`docs/architecture.md`](docs/architecture.md) describes how the code
-works.
+[MIT](LICENSE).

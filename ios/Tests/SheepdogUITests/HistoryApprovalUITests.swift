@@ -3,7 +3,7 @@ import XCTest
 /// History, approve-by-tap and the cache, against the same fake daemon as
 /// the walkthrough (`--brain=fake --herdr=mock --voice=off --dev --port
 /// 7799`). Expects the daemon to have some conversation and to have been
-/// restarted once (so a restart divider exists); see docs/status.md.
+/// restarted once (so a restart divider exists); see docs/dev/status.md.
 ///
 /// Screenshots go to the runner's Documents directory, like the
 /// walkthrough's.

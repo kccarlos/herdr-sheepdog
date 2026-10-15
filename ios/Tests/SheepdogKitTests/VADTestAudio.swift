@@ -4,7 +4,7 @@ import Foundation
 /// Test audio for the voice-activity detector: the TTS speech fixtures from
 /// `scripts/make-fixtures.sh`, noise generated here (deterministic, seeded),
 /// and the mixing and scoring that turn them into the numbers in the tests
-/// and in docs/architecture.md.
+/// and in docs/dev/architecture.md.
 enum VADTestAudio {
     static let rate = 16_000
     static let frame = AudioContract.frameSamples

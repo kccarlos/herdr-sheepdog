@@ -20,7 +20,7 @@ settings:
     # fails a tag build otherwise. The build number is not kept here:
     # Xcode Cloud gives every build its own (CI_BUILD_NUMBER) and uses it
     # for the uploaded build, so CURRENT_PROJECT_VERSION stays 1 for local
-    # builds. docs/xcode-cloud.md.
+    # builds. docs/dev/xcode-cloud.md.
     MARKETING_VERSION: "0.1.7"
     CURRENT_PROJECT_VERSION: "1"
     # The paid team. Automatic signing locally; Xcode Cloud
@@ -136,7 +136,7 @@ targets:
         # when the daemon offers it), which is exempt. Saying so here
         # answers App Store Connect's encryption question for every upload,
         # so TestFlight builds do not wait on "Missing Compliance".
-        # docs/xcode-cloud.md.
+        # docs/dev/xcode-cloud.md.
         ITSAppUsesNonExemptEncryption: false
         # sandbox or production, from the configuration (above); read by
         # PushCoordinator when it registers the device token with the daemon.
@@ -147,7 +147,7 @@ targets:
   # It renders only; its buttons are App Intents the system runs in the
   # app's process. No App Group: nothing is shared through a container
   # (ActivityKit carries the content state). Its bundle ID is registered on
-  # team GV776BZVA8 with no capabilities (docs/xcode-cloud.md).
+  # team GV776BZVA8 with no capabilities (docs/dev/xcode-cloud.md).
   SheepdogWidgets:
     type: app-extension
     platform: iOS
@@ -207,7 +207,7 @@ schemes:
   # Test runs the unit suite and the UI tests. Every UI test skips itself
   # when no fixture daemon answers on 127.0.0.1:7799 (always the case on
   # Xcode Cloud), so they cost a few seconds there and run for real on a
-  # Mac with the fixture daemons up (docs/status.md).
+  # Mac with the fixture daemons up (docs/dev/status.md).
   Sheepdog:
     build:
       targets:

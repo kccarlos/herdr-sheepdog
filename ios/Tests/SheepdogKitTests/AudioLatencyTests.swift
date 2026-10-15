@@ -3,7 +3,7 @@ import XCTest
 @testable import SheepdogKit
 
 /// What the conversion actually costs, measured rather than guessed, so the
-/// number in docs/architecture.md has something behind it.
+/// number in docs/dev/architecture.md has something behind it.
 final class AudioLatencyTests: XCTestCase {
     /// One tap buffer: 4 096 frames at 48 kHz ≈ 85 ms of audio.
     func testCaptureCostPerTapBuffer() throws {

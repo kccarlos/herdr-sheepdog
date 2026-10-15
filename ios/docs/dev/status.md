@@ -90,7 +90,7 @@ The CEO checked these on 2026-10-01 and 2026-10-02 with TestFlight build
 - **AskUserQuestion with several questions** in one prompt.
 - **The daemon's 2026-10-03 fixes** (voice session refresh, unheard
   pushes, spoken agent names) on the phone: see the daemon's
-  `docs/status.md`.
+  `docs/dev/status.md`.
 
 ## Known rough edges
 
@@ -153,20 +153,20 @@ cannot produce.
 
 | Light | Dark | What |
 |---|---|---|
-| ![](screenshots/review-light-first-run.png) | ![](screenshots/review-dark-first-run.png) | First run. Test connection sits right under the fields. |
-| ![](screenshots/review-light-voicebar-disconnected.png) | ![](screenshots/review-dark-voicebar-disconnected.png) | Not connected: "Tap the orb to connect". |
-| ![](screenshots/review-light-voicebar-live.png) | ![](screenshots/review-dark-voicebar-live.png) | The voice bar: mic, orb, status line, Type, End. |
-| ![](screenshots/review-light-voicebar-muted.png) | ![](screenshots/review-dark-voicebar-muted.png) | Muted. The first time, the status line explains what Mute does. |
-| ![](screenshots/review-light-conversation-approval.png) | ![](screenshots/review-dark-conversation-approval.png) | A long approval with nothing truncated. The question's other copies fold to a pointer. |
-| ![](screenshots/review-light-flock.png) | ![](screenshots/review-dark-flock.png) | Flock: blocked agents first, with the amber badge. |
-| ![](screenshots/review-light-flock-markdown.png) | ![](screenshots/review-dark-flock-markdown.png) | Markdown in a task and in a worker's message. |
-| ![](screenshots/review-light-flock-not-running.png) | ![](screenshots/review-dark-flock-not-running.png) | "Not running (1)", opened. |
-| ![](screenshots/review-light-health.png) | ![](screenshots/review-dark-health.png) | Health: voice and brain shown read-only, with "Change in Settings ›". |
-| ![](screenshots/review-light-models.png) | ![](screenshots/review-dark-models.png) | Settings ▸ Models: voice and brain. |
-| ![](screenshots/review-light-models-notifications.png) | ![](screenshots/review-dark-models-notifications.png) | Notifications: this phone, and the daemon's `GET /api/push/status`. |
-| ![](screenshots/review-light-agent-screen.png) | ![](screenshots/review-dark-agent-screen.png) | Agent window: an agent's live terminal from its Flock card, wide lines scrolling sideways, with the key bar and prompt field. |
-| ![](screenshots/review-light-agent-screen-confirm.png) | ![](screenshots/review-dark-agent-screen-confirm.png) | Ctrl-C (and Esc) ask before they are sent. |
-| ![](screenshots/review-light-agent-screen-sent.png) | ![](screenshots/review-dark-agent-screen-sent.png) | A prompt sent from the window, echoed on the (mock) screen. |
+| ![](../screenshots/review-light-first-run.png) | ![](../screenshots/review-dark-first-run.png) | First run. Test connection sits right under the fields. |
+| ![](../screenshots/review-light-voicebar-disconnected.png) | ![](../screenshots/review-dark-voicebar-disconnected.png) | Not connected: "Tap the orb to connect". |
+| ![](../screenshots/review-light-voicebar-live.png) | ![](../screenshots/review-dark-voicebar-live.png) | The voice bar: mic, orb, status line, Type, End. |
+| ![](../screenshots/review-light-voicebar-muted.png) | ![](../screenshots/review-dark-voicebar-muted.png) | Muted. The first time, the status line explains what Mute does. |
+| ![](../screenshots/review-light-conversation-approval.png) | ![](../screenshots/review-dark-conversation-approval.png) | A long approval with nothing truncated. The question's other copies fold to a pointer. |
+| ![](../screenshots/review-light-flock.png) | ![](../screenshots/review-dark-flock.png) | Flock: blocked agents first, with the amber badge. |
+| ![](../screenshots/review-light-flock-markdown.png) | ![](../screenshots/review-dark-flock-markdown.png) | Markdown in a task and in a worker's message. |
+| ![](../screenshots/review-light-flock-not-running.png) | ![](../screenshots/review-dark-flock-not-running.png) | "Not running (1)", opened. |
+| ![](../screenshots/review-light-health.png) | ![](../screenshots/review-dark-health.png) | Health: voice and brain shown read-only, with "Change in Settings ›". |
+| ![](../screenshots/review-light-models.png) | ![](../screenshots/review-dark-models.png) | Settings ▸ Models: voice and brain. |
+| ![](../screenshots/review-light-models-notifications.png) | ![](../screenshots/review-dark-models-notifications.png) | Notifications: this phone, and the daemon's `GET /api/push/status`. |
+| ![](../screenshots/review-light-agent-screen.png) | ![](../screenshots/review-dark-agent-screen.png) | Agent window: an agent's live terminal from its Flock card, wide lines scrolling sideways, with the key bar and prompt field. |
+| ![](../screenshots/review-light-agent-screen-confirm.png) | ![](../screenshots/review-dark-agent-screen-confirm.png) | Ctrl-C (and Esc) ask before they are sent. |
+| ![](../screenshots/review-light-agent-screen-sent.png) | ![](../screenshots/review-dark-agent-screen-sent.png) | A prompt sent from the window, echoed on the (mock) screen. |
 
 The Live Activity, drawn in the DEBUG gallery (`-sheepdogLiveActivityGallery`):
 the widget's own lock-screen view (listening with two agents waiting,
@@ -176,22 +176,22 @@ real activity with no session.
 
 | Light | Dark |
 |---|---|
-| ![](screenshots/live-activity-light.png) | ![](screenshots/live-activity-dark.png) |
+| ![](../screenshots/live-activity-light.png) | ![](../screenshots/live-activity-dark.png) |
 
 Batch B (`polish-*`, light and dark; `polish-xxxl-*` at the largest size):
 
 | Light | Dark | What |
 |---|---|---|
-| ![](screenshots/polish-light-conversation-strip.png) | ![](screenshots/polish-dark-conversation-strip.png) | Chip, two panes, strip: tap a chip for the agent window. |
-| ![](screenshots/polish-light-agent-window.png) | ![](screenshots/polish-dark-agent-window.png) | Agent window: state, kind, workspace and the open question in its header. |
-| ![](screenshots/polish-light-chip-popover.png) | ![](screenshots/polish-dark-chip-popover.png) | The chip's popover, with Health. |
-| ![](screenshots/polish-light-health.png) | ![](screenshots/polish-dark-health.png) | Health, pushed from the popover. |
-| ![](screenshots/polish-light-settings-menu.png) | ![](screenshots/polish-dark-settings-menu.png) | Settings as a shallow menu. |
-| ![](screenshots/polish-light-flock-empty.png) | ![](screenshots/polish-dark-flock-empty.png) | No agents: one action. |
-| ![](screenshots/polish-light-flock-unreachable.png) | ![](screenshots/polish-dark-flock-unreachable.png) | Daemon unreachable: Offline chip, one action. |
+| ![](../screenshots/polish-light-conversation-strip.png) | ![](../screenshots/polish-dark-conversation-strip.png) | Chip, two panes, strip: tap a chip for the agent window. |
+| ![](../screenshots/polish-light-agent-window.png) | ![](../screenshots/polish-dark-agent-window.png) | Agent window: state, kind, workspace and the open question in its header. |
+| ![](../screenshots/polish-light-chip-popover.png) | ![](../screenshots/polish-dark-chip-popover.png) | The chip's popover, with Health. |
+| ![](../screenshots/polish-light-health.png) | ![](../screenshots/polish-dark-health.png) | Health, pushed from the popover. |
+| ![](../screenshots/polish-light-settings-menu.png) | ![](../screenshots/polish-dark-settings-menu.png) | Settings as a shallow menu. |
+| ![](../screenshots/polish-light-flock-empty.png) | ![](../screenshots/polish-dark-flock-empty.png) | No agents: one action. |
+| ![](../screenshots/polish-light-flock-unreachable.png) | ![](../screenshots/polish-dark-flock-unreachable.png) | Daemon unreachable: Offline chip, one action. |
 
 At the largest accessibility text size (AX5):
 
 | | | | |
 |---|---|---|---|
-| ![](screenshots/review-xxxl-voicebar-live.png) | ![](screenshots/review-xxxl-conversation-approval.png) | ![](screenshots/review-xxxl-flock.png) | ![](screenshots/review-xxxl-flock-markdown.png) |
+| ![](../screenshots/review-xxxl-voicebar-live.png) | ![](../screenshots/review-xxxl-conversation-approval.png) | ![](../screenshots/review-xxxl-flock.png) | ![](../screenshots/review-xxxl-flock-markdown.png) |
