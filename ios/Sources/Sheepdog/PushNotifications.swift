@@ -56,6 +56,9 @@ final class PushCoordinator: NSObject, ObservableObject, UNUserNotificationCente
     @Published private(set) var daemonStatusError: String?
 
     private let defaults = UserDefaults.standard
+    /// The daemon's end-to-end content key, in the App Group keychain the
+    /// Notification Service Extension reads it from.
+    private let contentKeys = PushContentKeyStore()
     private let center = UNUserNotificationCenter.current()
     private var pendingFocus: String?
 
@@ -148,9 +151,13 @@ final class PushCoordinator: NSObject, ObservableObject, UNUserNotificationCente
         registrationError = "APNs refused: \(error.localizedDescription)"
     }
 
-    /// Settings were saved: the token moves from the old daemon to the new.
+    /// Settings were saved: the token moves from the old daemon to the new
+    /// (with no daemon left, the content key is removed).
     func endpointChanged(from old: DaemonEndpoint?) {
-        guard let token = deviceToken else { return }
+        guard let token = deviceToken else {
+            if SettingsStore().endpoint == nil { contentKeys.remove() }
+            return
+        }
         Task {
             if let old, old.display != SettingsStore().endpoint?.display {
                 await unregister(token: token, from: old)
@@ -160,16 +167,29 @@ final class PushCoordinator: NSObject, ObservableObject, UNUserNotificationCente
     }
 
     /// `POST /api/push/register` to the configured daemon. Idempotent on
-    /// the daemon, so it is sent on every launch with a token.
+    /// the daemon, so it is sent on every launch with a token. Its answer's
+    /// content key replaces the stored one (the same daemon answers the
+    /// same key; another daemon, its own); no daemon, or one without a
+    /// push service, leaves no key behind.
     func register() async {
-        guard let token = deviceToken, let endpoint = SettingsStore().endpoint else { return }
+        guard let endpoint = SettingsStore().endpoint else {
+            contentKeys.remove()
+            return
+        }
+        guard let token = deviceToken else { return }
         do {
-            let ok = try await DaemonClient(endpoint: endpoint).registerPush(PushRegistration(token: token, environment: Self.environment, device: UIDevice.current.name))
-            if ok {
+            let answer = try await DaemonClient(endpoint: endpoint).registerPushDevice(PushRegistration(token: token, environment: Self.environment, device: UIDevice.current.name))
+            if let answer {
+                if let key = answer.contentKey {
+                    contentKeys.store(base64: key)
+                } else {
+                    contentKeys.remove()
+                }
                 registeredWith = endpoint.display
                 defaults.set(endpoint.display, forKey: Key.registeredWith)
                 registrationError = nil
             } else {
+                contentKeys.remove()
                 registeredWith = nil
                 defaults.removeObject(forKey: Key.registeredWith)
                 registrationError = "This daemon has no notification service."
@@ -182,8 +202,11 @@ final class PushCoordinator: NSObject, ObservableObject, UNUserNotificationCente
         await loadDaemonStatus()
     }
 
+    /// Takes the token off a daemon; the content key that daemon issued
+    /// goes with it (a registration with the current daemon stores its own).
     private func unregister(token: String, from endpoint: DaemonEndpoint?) async {
         guard let endpoint else { return }
+        contentKeys.remove()
         _ = try? await DaemonClient(endpoint: endpoint).unregisterPush(token: token)
         if registeredWith == endpoint.display {
             registeredWith = nil
@@ -192,6 +215,7 @@ final class PushCoordinator: NSObject, ObservableObject, UNUserNotificationCente
     }
 
     private func forgetToken() {
+        contentKeys.remove()
         deviceToken = nil
         defaults.removeObject(forKey: Key.token)
     }
@@ -212,7 +236,7 @@ final class PushCoordinator: NSObject, ObservableObject, UNUserNotificationCente
     var phoneLine: String {
         switch authorization {
         case .denied: return "Off in iOS Settings"
-        case .notDetermined: return daemonStatus?.enabled == true ? "Asked after the first connection" : "Not needed yet"
+        case .notDetermined: return daemonStatus?.canSend == true ? "Asked after the first connection" : "Not needed yet"
         default: break
         }
         if let error = registrationError { return error }

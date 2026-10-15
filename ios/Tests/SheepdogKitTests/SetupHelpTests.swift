@@ -51,14 +51,24 @@ final class SetupHelpTests: XCTestCase {
         XCTAssertFalse(PushPolicy.shouldAskPermission(daemon: nil))
         XCTAssertFalse(PushPolicy.shouldAskPermission(daemon: PushStatus(enabled: false, reason: "push.apns not configured")))
         XCTAssertTrue(PushPolicy.shouldAskPermission(daemon: PushStatus(enabled: true, devices: 1)))
+        XCTAssertTrue(PushPolicy.shouldAskPermission(daemon: PushStatus(enabled: true, devices: 1, mode: .relay)))
+        XCTAssertTrue(PushPolicy.shouldAskPermission(daemon: PushStatus(enabled: true, devices: 1, mode: .apns)))
+        XCTAssertFalse(PushPolicy.shouldAskPermission(daemon: PushStatus(enabled: false, reason: "push.mode is off", mode: .off)))
     }
 
     func testNotificationCopyIsHonestWithoutPush() {
         let off = PushPolicy.explanation(daemon: PushStatus(enabled: false))
         XCTAssertTrue(off.contains("Live Activity"))
-        XCTAssertTrue(off.contains("your own Apple team"))
+        XCTAssertTrue(off.contains("not sending notifications now"))
+        XCTAssertTrue(off.contains("shared relay"))
+        XCTAssertTrue(off.contains("your own push key"))
         XCTAssertFalse(off.contains("even with the app closed"))
-        let on = PushPolicy.explanation(daemon: PushStatus(enabled: true, devices: 1))
-        XCTAssertTrue(on.contains("even with the app closed"))
+        let relay = PushPolicy.explanation(daemon: PushStatus(enabled: true, devices: 1, mode: .relay))
+        XCTAssertTrue(relay.contains("even with the app closed"))
+        XCTAssertTrue(relay.contains("end-to-end encrypted"))
+        XCTAssertTrue(relay.contains("never what it says"))
+        let direct = PushPolicy.explanation(daemon: PushStatus(enabled: true, devices: 1, mode: .apns))
+        XCTAssertTrue(direct.contains("your own push key"))
+        XCTAssertFalse(direct.contains("relay"))
     }
 }

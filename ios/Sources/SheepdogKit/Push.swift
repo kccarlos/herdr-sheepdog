@@ -45,17 +45,50 @@ public struct PushRegistration: Codable, Equatable, Sendable {
     }
 }
 
+/// `POST /api/push/register`'s answer: the phone's end-to-end content key
+/// (base64 of 32 bytes; the same key on every registration with the same
+/// daemon), which the Notification Service Extension decrypts relay
+/// notifications with. A daemon from before the relay answers no key.
+public struct PushRegistrationAnswer: Codable, Equatable, Sendable {
+    public var contentKey: String?
+    /// `aes-256-gcm`.
+    public var encryption: String?
+
+    public init(contentKey: String? = nil, encryption: String? = nil) {
+        self.contentKey = contentKey
+        self.encryption = encryption
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case contentKey = "content_key"
+        case encryption
+    }
+}
+
+/// How the daemon delivers notifications (`GET /api/push/status` `mode`).
+public enum PushMode: String, Codable, Equatable, Sendable {
+    /// Through the shared push relay, end-to-end encrypted (the default).
+    case relay
+    /// Straight to APNs with the user's own push key (a self-built app).
+    case apns
+    case off
+}
+
 /// `GET /api/push/status`.
 public struct PushStatus: Codable, Equatable, Sendable {
     public var enabled: Bool
     /// Why sending is off, when it is.
     public var reason: String?
     public var devices: Int
+    /// Nil from a daemon that predates the relay (it could only send
+    /// directly).
+    public var mode: PushMode?
 
-    public init(enabled: Bool, reason: String? = nil, devices: Int = 0) {
+    public init(enabled: Bool, reason: String? = nil, devices: Int = 0, mode: PushMode? = nil) {
         self.enabled = enabled
         self.reason = reason
         self.devices = devices
+        self.mode = mode
     }
 
     public init(from decoder: Decoder) throws {
@@ -63,11 +96,23 @@ public struct PushStatus: Codable, Equatable, Sendable {
         enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? false
         reason = try c.decodeIfPresent(String.self, forKey: .reason)
         devices = try c.decodeIfPresent(Int.self, forKey: .devices) ?? 0
+        mode = (try? c.decodeIfPresent(String.self, forKey: .mode)).flatMap { $0.flatMap(PushMode.init(rawValue:)) }
     }
 
-    /// One line for Settings: "On · 1 device" / "Off — push.apns not configured".
+    /// Sending works: enabled, and not in mode `off`.
+    public var canSend: Bool { enabled && mode != .off }
+
+    /// One line for Settings: "On · shared relay · 1 device" / "Off — push.apns not configured".
     public var summary: String {
-        if enabled { return "On · \(devices) \(devices == 1 ? "device" : "devices")" }
+        if canSend {
+            let via: String
+            switch mode {
+            case .relay: via = "shared relay · "
+            case .apns: via = "your push key · "
+            default: via = ""
+            }
+            return "On · \(via)\(devices) \(devices == 1 ? "device" : "devices")"
+        }
         if let reason = reason?.trimmed, !reason.isEmpty { return "Off — \(reason)" }
         return "Off"
     }
@@ -179,8 +224,24 @@ extension DaemonClient {
     /// and any other refusal.
     @discardableResult
     public func registerPush(_ registration: PushRegistration) async throws -> Bool {
+        try await registerPushDevice(registration) != nil
+    }
+
+    /// `POST /api/push/register` with its answer (the content key); nil
+    /// when the daemon has no push service (503) or predates it (404).
+    public func registerPushDevice(_ registration: PushRegistration) async throws -> PushRegistrationAnswer? {
         let request = try pushRegisterRequest(registration)
-        return try await sendPush(request)
+        let (data, response) = try await perform(request)
+        guard let http = response as? HTTPURLResponse else { throw DaemonError.malformed("no HTTP response") }
+        switch http.statusCode {
+        case 200 ..< 300:
+            return (try? JSONDecoder().decode(PushRegistrationAnswer.self, from: data)) ?? PushRegistrationAnswer()
+        case 404, 503: return nil
+        case 401: throw DaemonError.unauthorized(endpoint: endpoint.display)
+        default:
+            let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+            throw DaemonError.rejected(status: http.statusCode, message: (object?["error"] as? String) ?? "")
+        }
     }
 
     /// `DELETE /api/push/register {"token": …}`.
@@ -228,23 +289,35 @@ extension DaemonClient {
     }
 }
 
-/// What the app may promise about notifications. Apple delivers a push
-/// only when the daemon signs it with an APNs key from the Apple team that
-/// signed this app, so a self-hosted daemon cannot reach the TestFlight or
-/// App Store build. The app asks for permission only when the daemon says it
-/// can send, and says plainly what works without push.
+/// What the app may promise about notifications. The App Store build gets
+/// closed-app notifications through the shared push relay (the daemon's
+/// default, end-to-end encrypted); a self-built app can instead use the
+/// user's own push key straight to APNs. The app asks for permission only
+/// when the daemon says it can send, and says plainly what works without
+/// push.
 public enum PushPolicy {
-    /// Ask iOS for notification permission only when the daemon can send.
+    /// Ask iOS for notification permission only when the daemon can send
+    /// (mode `relay` or `apns`).
     public static func shouldAskPermission(daemon: PushStatus?) -> Bool {
-        daemon?.enabled == true
+        daemon?.canSend == true
     }
 
     /// The footer under Settings ▸ Notifications.
     public static func explanation(daemon: PushStatus?) -> String {
         let always = "While the app is open and connected, approvals appear as cards and the voice tells you; during a voice session the Live Activity shows it on the Lock Screen and in the Dynamic Island."
-        if daemon?.enabled == true {
-            return "Your daemon sends a notification when an agent needs you, even with the app closed; approvals can be answered from it. " + always
+        let options = "Two ways to get notifications with the app closed: the shared relay (the daemon's default, no account needed) carries them end-to-end encrypted, so it sees this phone's push token, when a notification is sent, its size and whether it is an approval, never what it says; or build the app yourself and give your daemon your own push key, so it talks to Apple directly."
+        guard let daemon, daemon.canSend else {
+            return always + " Your daemon is not sending notifications now. " + options
         }
-        return always + " Notifications with the app closed need your daemon to send them through Apple's push service with a push key from the Apple team that signed this app. A daemon you run yourself cannot send them to this build; build the app under your own Apple team and configure your own key (see the daemon's push docs) to get them."
+        let lead: String
+        switch daemon.mode {
+        case .relay:
+            lead = "Your daemon sends a notification when an agent needs you, even with the app closed, through the shared relay, end-to-end encrypted: the relay sees this phone's push token, when a notification is sent, its size and whether it is an approval, never what it says. Approvals can be answered from the notification."
+        case .apns:
+            lead = "Your daemon sends a notification when an agent needs you, even with the app closed, straight to Apple with your own push key. Approvals can be answered from the notification."
+        default:
+            lead = "Your daemon sends a notification when an agent needs you, even with the app closed; approvals can be answered from it."
+        }
+        return lead + " " + always
     }
 }

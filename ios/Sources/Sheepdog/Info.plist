@@ -50,6 +50,8 @@
 	<string>In the demo, Sheepdog recognises your spoken questions on this iPhone only (on-device recognition). Nothing is sent anywhere.</string>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
+	<key>SheepdogAppGroup</key>
+	<string>$(SHEEPDOG_APP_GROUP)</string>
 	<key>SheepdogPushEnvironment</key>
 	<string>$(SHEEPDOG_PUSH_ENVIRONMENT)</string>
 	<key>UIBackgroundModes</key>

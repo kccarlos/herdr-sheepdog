@@ -289,7 +289,8 @@ no Save or Cancel):
 ## Notifications (APNs)
 
 `PushCoordinator` asks for permission after the first successful
-connection. It sends the device token to the daemon with
+connection, when the daemon's `GET /api/push/status` reports it can send
+(mode `relay` or `apns`). It sends the device token to the daemon with
 `POST /api/push/register`, sends it again when the token or the daemon
 address changes, and removes it (`DELETE`) when notifications are turned
 off or the app moves to another daemon. Debug builds register as `sandbox`
@@ -298,13 +299,35 @@ and Release builds as `production`. This comes from the build setting
 matches the `aps-environment` entitlement in `project.yml`. The
 time-sensitive entitlement lets needs-you alerts break through Focus.
 
+**End-to-end encrypted relay notifications.** The register answer carries
+the phone's `content_key` (base64, 32 bytes). `PushCoordinator` stores it
+with `PushContentKeyStore` (`Sources/SheepdogPush`): one keychain item in
+the App Group's access group (`SHEEPDOG_APP_GROUP`), accessible after the
+first unlock, this device only. Each registration overwrites it (the same
+daemon answers the same key, another daemon its own); unregistering,
+moving to another daemon, notifications turned off or a daemon without
+push remove it. The relay delivers a placeholder alert with
+`mutable-content: 1` and `e2e: {c, n}`. The `SheepdogNotificationService`
+extension (CryptoKit, Security and UserNotifications only: no SheepdogKit,
+no networking) opens it with AES-GCM (`c` is the ciphertext with the
+16-byte tag appended, `n` the 12-byte nonce), then copies the plaintext's
+alert, thread id, category, `aps` and `sheepdog` dictionaries into the
+notification, so the tap and Approve / Decline code reads it exactly like a
+direct push (`PushE2E.rewrite`). With no key, a bad ciphertext or a timeout
+it shows "Sheepdog / Open the app to see the update" and no raw data. A
+push without `e2e` (the direct APNs path) passes through untouched.
+`Sources/SheepdogPush` is compiled into both SheepdogKit (for the tests)
+and the extension. The test vector in `PushE2ETests` comes from
+`scripts/push-e2e-vector.go`, which seals like the daemon's
+`internal/push.Seal`.
+
 The `APPROVAL` category has **Approve** (the first "Yes…" option, otherwise
 option 1) and **Decline** (the first "No…" option). Both require the
 passcode, because the daemon token is a when-unlocked keychain item. If an
 answer fails or is stale, a notification remains that opens the app when
 tapped. Tapping any notification opens that agent's Agents card. Nothing is
 shown in the foreground while the session is live. The payload format is
-described in the daemon's `docs/push.md`.
+described in the daemon's `docs/dev/push.md`.
 
 ## Audio
 

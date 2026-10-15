@@ -94,23 +94,33 @@ Wi-Fi or Tailscale. Never expose the daemon's port to the internet.
 
 ### Notifications
 
-Apple delivers a push notification only when it is signed with a key that
-belongs to the Apple team that signed the app. A daemon that you run
-yourself does not have that key for the TestFlight build, so **the
-TestFlight build does not get notifications while the app is closed.** The
-app asks for notification permission only if your daemon can send
-notifications. While the app is open and connected, approvals still appear
-as cards, the voice tells you about them, and the Live Activity shows the
-session.
+When an agent needs you, your daemon sends a notification even while the
+app is closed, and you can answer an approval from it. Apple delivers a
+push only when it is signed with a key of the Apple team that signed the
+app, so there are two ways:
 
-To get notifications while the app is closed, build the app under your own
-Apple team (see below) and configure that team's APNs key on your daemon
-(`[push.apns]`; see the daemon's push docs).
+- **The shared relay** (the daemon's default; no account or setup needed).
+  Your daemon encrypts each notification end to end with a key that only
+  this phone and your daemon hold, and the relay forwards it to Apple. The
+  relay sees this phone's push token, when a notification is sent, its size
+  and whether it is an approval. It never sees the text. A small extension
+  in the app decrypts the notification on the phone; if it cannot, the
+  notification only says "Open the app to see the update".
+- **Your own push key**, with an app you build yourself (see below). The
+  daemon then sends notifications to Apple directly (`[push.apns]`; see the
+  daemon's push docs).
+
+The app asks for notification permission only when your daemon reports
+that it can send them. While the app is open and connected, approvals also
+appear as cards, the voice tells you about them, and the Live Activity
+shows the session.
 
 ## Privacy
 
-The app collects nothing and has no server. Audio, text and agent state go
-only between the phone and your own daemon. The daemon's
+The app collects nothing. Audio, text and agent state go only between the
+phone and your own daemon. The one shared service is the push relay
+described under [Notifications](#notifications): it passes end-to-end
+encrypted notifications to Apple and cannot read them. The daemon's
 [privacy page](https://github.com/kccarlos/herdr-sheepdog/blob/main/docs/privacy.md)
 in the main repository lists what the daemon sends to the model providers
 you choose and what it stores on your computer. That page is also the
@@ -134,9 +144,11 @@ open Sheepdog.xcodeproj
 **Signing with your own team.** In `project.yml`, set `DEVELOPMENT_TEAM` to
 your Team ID. Change the bundle IDs (`bundleIdPrefix` and the
 `PRODUCT_BUNDLE_IDENTIFIER` values) to IDs that you own, then run
-`xcodegen generate` again. The app uses the Push Notifications and Time
-Sensitive Notifications capabilities and a widget extension for the Live
-Activity. Automatic signing creates what they need.
+`xcodegen generate` again. Set `SHEEPDOG_APP_GROUP` to an App Group ID of
+your own as well. The app uses the Push Notifications, Time Sensitive
+Notifications and App Groups capabilities, a widget extension for the Live
+Activity and a Notification Service Extension that decrypts relay
+notifications. Automatic signing creates what they need.
 
 **Push with your own key.** In the Apple developer portal, create an APNs
 auth key (`.p8`) for your team and configure it on your daemon

@@ -28,11 +28,10 @@ Limit: 4,000 characters. This draft is about 1,500.
 > The demo needs no daemon, no account and no network.
 >
 > What to know for this beta:
-> - Notifications while the app is closed need a daemon configured with
->   this app's push key, which a daemon you run yourself does not have. In
->   this build you get approval cards and spoken news while the app is open
->   and connected, plus the Live Activity. To get closed-app notifications,
->   build the app yourself under your own Apple team.
+> - Notifications while the app is closed come through a shared relay,
+>   end-to-end encrypted: the relay sees when a notification is sent and
+>   whether it is an approval, never what it says. Your daemon uses it by
+>   default; no account is needed.
 > - The connection to your daemon is plain HTTP. Use it on your home Wi-Fi
 >   or Tailscale only.
 >

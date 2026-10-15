@@ -14,7 +14,9 @@ built from tag `v0.1.5` (`b414dda`, #41).
 | Team | the Account Holder, Team ID `GV776BZVA8`, Apple ID: the Account Holder's (`DEVELOPMENT_TEAM` in `project.yml`) |
 | App bundle ID | `com.github.kccarlos.herdr-sheepdog-ios` |
 | Framework bundle ID | `com.github.kccarlos.herdr-sheepdog-ios.kit` (embedded, not registered separately) |
-| Widget extension bundle ID | `com.github.kccarlos.herdr-sheepdog-ios.widgets` (`SheepdogWidgets`: the Live Activity and the Talk control). Registered on the team with `asc` on 2026-10-05 (resource `3TB5FGDCW7`), no capabilities. No App Group: nothing is shared through one |
+| Widget extension bundle ID | `com.github.kccarlos.herdr-sheepdog-ios.widgets` (`SheepdogWidgets`: the Live Activity and the Talk control). Registered on the team with `asc` on 2026-10-05 (resource `3TB5FGDCW7`), no capabilities, no App Group |
+| Notification Service Extension bundle ID | `com.github.kccarlos.herdr-sheepdog-ios.NotificationService` (`SheepdogNotificationService`: decrypts relay notifications). Resource `JTDHJGH486`, App Groups capability |
+| App Group | `group.com.github.kccarlos.herdr-sheepdog-ios` (`SHEEPDOG_APP_GROUP`), on the app and the Notification Service Extension: the push content key's keychain access group |
 | App Store Connect record | "Sheepdog for herdr" (the name "Sheepdog" was taken), App ID 6817155887, SKU `herdr-sheepdog-ios` |
 | Product and scheme | `Sheepdog` (shared; Test runs `SheepdogKitTests` and `SheepdogUITests`, Archive uses Release) |
 | Version | `MARKETING_VERSION` in `project.yml` (now `0.1.7`) |
@@ -91,9 +93,20 @@ make profiles. It has no entitlements: Live Activities need only
 `NSSupportsLiveActivities` in the app's Info.plist, and its App Intents run
 in the app's process. The PR workflow builds for the simulator, which does
 not sign, so the first tag archive after #37 (0.1.4 (48)) was the first real check of
-this, and it signed and exported with no change. If an App Group is ever added, create the group first on
-developer.apple.com (Identifiers ▸ App Groups ▸ +; the App Store Connect
-API cannot create one), then tick it on both App IDs. On the daemon side, you need an APNs auth key
+this, and it signed and exported with no change.
+
+**The Notification Service Extension** (`SheepdogNotificationService`)
+decrypts relay notifications. Its App ID,
+`com.github.kccarlos.herdr-sheepdog-ios.NotificationService` (resource
+`JTDHJGH486`), was registered with `asc bundle-ids create` on 2026-10-15,
+and `asc bundle-ids capabilities add --capability APP_GROUPS` enabled App
+Groups on it and on the app's App ID. The App Store Connect API cannot
+create the group itself: a local `xcodebuild archive
+-allowProvisioningUpdates` with the team's account signed into Xcode
+registered `group.com.github.kccarlos.herdr-sheepdog-ios` and assigned it to
+both App IDs, and an `app-store-connect` export of that archive signed. By
+hand the same is developer.apple.com ▸ Identifiers ▸ App Groups ▸ +, then
+App Groups ▸ Configure on both App IDs. On the daemon side, you need an APNs auth key
 (`.p8`) for team `GV776BZVA8` (herdr-sheepdog `docs/push.md`).
 
 **Export compliance.** `ITSAppUsesNonExemptEncryption` is `NO` in the app's

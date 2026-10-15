@@ -40,9 +40,9 @@ in [dev/testflight-metadata.md](dev/testflight-metadata.md).
 > Real use needs the sheepdog daemon running on the user's own computer,
 > which a reviewer does not have. Without it, the app shows how to set it
 > up and offers the demo. Push notifications are sent by the user's own
-> daemon only when it is configured with this app team's APNs key, so the
-> app asks for notification permission only when the connected daemon can
-> send them. The demo never asks.
+> daemon through an end-to-end encrypted relay (no account needed), and
+> the app asks for notification permission only when the connected daemon
+> reports that it can send them. The demo never asks.
 
 ## What the app does (real use)
 
@@ -56,10 +56,17 @@ in [dev/testflight-metadata.md](dev/testflight-metadata.md).
   own API key).
 - Shows the agents the daemon supervises, their approval prompts, and each
   agent's terminal. Lets the user answer prompts by tap or voice.
-- Optional notifications: a daemon configured with this app team's APNs
-  key sends them when an agent needs the user. A self-hosted daemon
-  without that key cannot, and the app then does not ask for permission
-  and says so in Settings ▸ Notifications.
+- Optional notifications when an agent needs the user. By default the
+  user's daemon encrypts each notification end to end (AES-256-GCM, with a
+  key only the phone and the daemon hold) and sends it through a small
+  shared relay, which forwards it to Apple's push service with this app
+  team's key. No account is needed. The relay sees the device token, the
+  time, the size and whether it is an approval, never the content. The
+  app's Notification Service Extension decrypts the notification on the
+  device and shows a neutral "Open the app to see the update" when it
+  cannot. A user who builds the app themselves can configure their own
+  push key instead. When the daemon cannot send, the app does not ask for
+  permission and says so in Settings ▸ Notifications.
 
 ## Permissions and why
 
@@ -78,9 +85,13 @@ provides).
 
 ## Data
 
-- The app has no server of its own and collects nothing. Audio, text and
-  agent state go only between the phone and the user's own daemon.
-- The daemon token is kept in the keychain.
+- The app collects nothing. Audio, text and agent state go only between
+  the phone and the user's own daemon. The only shared service is the push
+  relay, which forwards end-to-end encrypted notifications to Apple and
+  stores nothing.
+- The daemon token is kept in the keychain; the notification content key
+  in the App Group keychain the Notification Service Extension reads, on
+  this device only.
 - The demo stores nothing: its settings live in a separate, throwaway
   defaults suite and memory, and its conversation in a temporary directory.
 

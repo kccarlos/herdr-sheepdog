@@ -29,6 +29,11 @@ settings:
     CODE_SIGN_STYLE: Automatic
     ENABLE_USER_SCRIPT_SANDBOXING: YES
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+    # The App Group the app and its Notification Service Extension share:
+    # its keychain access group holds the push content key the extension
+    # decrypts relay notifications with (Sources/SheepdogPush). A self-built
+    # app under another team needs its own group id here.
+    SHEEPDOG_APP_GROUP: group.com.github.kccarlos.herdr-sheepdog-ios
 
 targets:
   SheepdogKit:
@@ -36,6 +41,7 @@ targets:
     platform: iOS
     sources:
       - path: Sources/SheepdogKit
+      - path: Sources/SheepdogPush
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.github.kccarlos.herdr-sheepdog-ios.kit
@@ -61,6 +67,7 @@ targets:
       # Embedded in PlugIns/: the Live Activity, Dynamic Island and the
       # "Talk to Sheepdog" control.
       - target: SheepdogWidgets
+      - target: SheepdogNotificationService
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.github.kccarlos.herdr-sheepdog-ios
@@ -88,6 +95,10 @@ targets:
         # Lets "needs you" alerts (interruption-level time-sensitive) break
         # through Focus; without it iOS delivers them as active.
         com.apple.developer.usernotifications.time-sensitive: true
+        # Shared with the Notification Service Extension: the push content
+        # key lives in this group's keychain access group.
+        com.apple.security.application-groups:
+          - $(SHEEPDOG_APP_GROUP)
     info:
       path: Sources/Sheepdog/Info.plist
       properties:
@@ -131,9 +142,10 @@ targets:
         # against the Mac's Tailscale IP.
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
-        # Export compliance: the app uses no encryption of its own, only
-        # what iOS provides (URLSession, URLSessionWebSocketTask; HTTPS/WSS
-        # when the daemon offers it), which is exempt. Saying so here
+        # Export compliance: the app implements no encryption of its own; it
+        # uses only what iOS provides (URLSession, URLSessionWebSocketTask;
+        # HTTPS/WSS when the daemon offers it; CryptoKit's AES-GCM to open
+        # end-to-end encrypted notifications), which is exempt. Saying so here
         # answers App Store Connect's encryption question for every upload,
         # so TestFlight builds do not wait on "Missing Compliance".
         # docs/dev/xcode-cloud.md.
@@ -141,6 +153,8 @@ targets:
         # sandbox or production, from the configuration (above); read by
         # PushCoordinator when it registers the device token with the daemon.
         SheepdogPushEnvironment: $(SHEEPDOG_PUSH_ENVIRONMENT)
+        # The keychain access group of the push content key (PushContentKeyStore).
+        SheepdogAppGroup: $(SHEEPDOG_APP_GROUP)
 
   # The widget extension: the voice session's Live Activity (lock screen
   # and Dynamic Island) and, on iOS 18+, the "Talk to Sheepdog" control.
@@ -169,6 +183,40 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.github.kccarlos.herdr-sheepdog-ios.widgets
         PRODUCT_NAME: SheepdogWidgets
+        TARGETED_DEVICE_FAMILY: "1"
+        SKIP_INSTALL: YES
+
+  # Decrypts end-to-end encrypted relay notifications (the daemon's
+  # docs/dev/push.md "End-to-end encryption") with the content key the app
+  # stored in the App Group keychain, and passes direct-APNs notifications
+  # through. Kept small: CryptoKit, Security and UserNotifications only, no
+  # SheepdogKit, no networking.
+  SheepdogNotificationService:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: Sources/SheepdogNotificationService
+      - path: Sources/SheepdogPush
+    entitlements:
+      path: Sources/SheepdogNotificationService/SheepdogNotificationService.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - $(SHEEPDOG_APP_GROUP)
+    info:
+      path: Sources/SheepdogNotificationService/Info.plist
+      properties:
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundleDisplayName: Sheepdog
+        SheepdogAppGroup: $(SHEEPDOG_APP_GROUP)
+        ITSAppUsesNonExemptEncryption: false
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.usernotifications.service
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).NotificationService
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.github.kccarlos.herdr-sheepdog-ios.NotificationService
+        PRODUCT_NAME: SheepdogNotificationService
         TARGETED_DEVICE_FAMILY: "1"
         SKIP_INSTALL: YES
 
@@ -214,6 +262,7 @@ schemes:
         Sheepdog: all
         SheepdogKit: all
         SheepdogWidgets: all
+        SheepdogNotificationService: all
     run:
       config: Debug
     test:

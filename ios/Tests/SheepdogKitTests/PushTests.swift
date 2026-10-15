@@ -82,6 +82,34 @@ final class PushTests: XCTestCase {
         XCTAssertNil(missing, "an older daemon has no route")
     }
 
+    func testStatusModeDecidesWhetherItCanSend() async throws {
+        let client = StubProtocol.client()
+        StubProtocol.handler = { _ in (200, Data(#"{"enabled":true,"devices":1,"mode":"relay"}"#.utf8)) }
+        let relay = try await client.pushStatus()
+        XCTAssertEqual(relay, PushStatus(enabled: true, devices: 1, mode: .relay))
+        XCTAssertEqual(relay?.canSend, true)
+        XCTAssertEqual(relay?.summary, "On · shared relay · 1 device")
+        XCTAssertEqual(PushStatus(enabled: true, devices: 2, mode: .apns).summary, "On · your push key · 2 devices")
+        XCTAssertFalse(PushStatus(enabled: true, mode: .off).canSend)
+        StubProtocol.handler = { _ in (200, Data(#"{"enabled":true,"devices":1,"mode":"carrier-pigeon"}"#.utf8)) }
+        let unknown = try await client.pushStatus()
+        XCTAssertNil(unknown?.mode, "an unknown mode decodes as none")
+        XCTAssertEqual(unknown?.canSend, true)
+    }
+
+    func testRegisterAnswerCarriesTheContentKey() async throws {
+        let client = StubProtocol.client()
+        StubProtocol.handler = { _ in (200, Data(#"{"ok":true,"content_key":"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=","encryption":"aes-256-gcm"}"#.utf8)) }
+        let answer = try await client.registerPushDevice(PushRegistration(token: "ab", environment: .production))
+        XCTAssertEqual(answer, PushRegistrationAnswer(contentKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=", encryption: "aes-256-gcm"))
+        StubProtocol.handler = { _ in (200, Data(#"{"ok":true}"#.utf8)) }
+        let old = try await client.registerPushDevice(PushRegistration(token: "ab", environment: .production))
+        XCTAssertEqual(old, PushRegistrationAnswer(), "a daemon from before the relay answers no key")
+        StubProtocol.handler = { _ in (503, Data()) }
+        let none = try await client.registerPushDevice(PushRegistration(token: "ab", environment: .production))
+        XCTAssertNil(none)
+    }
+
     // MARK: - Payload
 
     /// The payload exactly as herdr-sheepdog's docs/push.md shows it.

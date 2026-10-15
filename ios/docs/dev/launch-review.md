@@ -112,14 +112,16 @@ what needs a self-built app with your own push key.
 Tests: `SetupHelpTests.testNotificationsAreAskedForOnlyWhenTheDaemonCanSend`,
 `SetupHelpTests.testNotificationCopyIsHonestWithoutPush`.
 
-**Decision for the CEO.** No push relay was built. The options are: (a)
-leave it as above, so public TestFlight users get no closed-app
-notifications and are told so; (b) run a small relay that holds the
-project's APNs key and forwards pushes from users' daemons, which means a
-server, an account or device-token scheme, abuse limits and a privacy
-policy change ("no sheepdog server" would no longer be true); or (c) document
-self-building as the way to get them (already in the README). The app
-currently does (a) and (c).
+**Decision (2026-10-15): option (b), the shared push relay.** The daemon
+now sends through a Cloudflare Worker relay by default (the daemon's
+`docs/dev/push.md`), end-to-end encrypted with a per-phone content key,
+and the app's Notification Service Extension decrypts the notification.
+The relay sees the device token, the timing, the size and the kind
+(approval or not), never the content. Settings ▸ Notifications explains
+the shared relay and the self-built option with your own push key, and
+the app still asks for permission only when the daemon reports push as
+enabled (mode `relay` or `apns`). Self-building (c) stays documented. Tests:
+`PushE2ETests`, `SetupHelpTests.testNotificationCopyIsHonestWithoutPush`.
 
 ## P1
 
