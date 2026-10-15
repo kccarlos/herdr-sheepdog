@@ -7,8 +7,9 @@ import XCTest
 /// `<step> <unix seconds>` lines to that file so the recording script can
 /// cut the waits out of the video.
 ///
-/// The path: "Try the demo" → the four agents → billing asks → Approve →
-/// migrate fails → "What failed?" → the answer in the conversation.
+/// The path: "Try the demo" → the four agents → claude-migration fails →
+/// codex-payments asks → Approve → "Why did the migration fail?" → the
+/// answer in the conversation.
 final class ReadmeRecordingUITests: XCTestCase {
     private var marksPath: String?
 
@@ -84,11 +85,10 @@ final class ReadmeRecordingUITests: XCTestCase {
         mark("tap_demo")
         tryDemo.tap()
         XCTAssertTrue(app.descendants(matching: .any)["demo.header"].waitForExistence(timeout: 10))
-        let started = Date()
         mark("demo_open")
 
         tapVisible(app.buttons, "main.pane.flock")
-        XCTAssertTrue(app.descendants(matching: .any)["flock.agent.docs"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.descendants(matching: .any)["flock.agent.codex-docs"].waitForExistence(timeout: 10))
         mark("agents")
 
         let approve = app.buttons["approval.option.1"]
@@ -101,11 +101,6 @@ final class ReadmeRecordingUITests: XCTestCase {
         sleep(1)
         mark("approved")
 
-        // migrate fails 26 s into the script; "What failed?" before that
-        // answers "Nothing has failed so far."
-        let wait = 27.5 - Date().timeIntervalSince(started)
-        if wait > 0 { Thread.sleep(forTimeInterval: wait) }
-        mark("migrate_failed")
         sleep(1)
 
         tapVisible(app.buttons, "main.pane.conversation")
@@ -113,7 +108,7 @@ final class ReadmeRecordingUITests: XCTestCase {
         Thread.sleep(forTimeInterval: 1.5)
         mark("tap_question")
         app.buttons["demo.question.1"].tap()
-        let answer = app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'Migration 0042'")).firstMatch
+        let answer = app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'The column already existed'")).firstMatch
         XCTAssertTrue(answer.waitForExistence(timeout: 10))
         mark("answer")
         sleep(4)

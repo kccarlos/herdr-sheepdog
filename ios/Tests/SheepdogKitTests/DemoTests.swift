@@ -14,13 +14,15 @@ final class DemoWorldTests: XCTestCase {
 
         world.advance(to: t0.addingTimeInterval(40))
         let byAlias = Dictionary(uniqueKeysWithValues: world.agents.map { ($0.alias, $0) })
-        XCTAssertEqual(byAlias["auth"]?.state, .done)
-        XCTAssertEqual(byAlias["docs"]?.state, .done)
-        XCTAssertEqual(byAlias["billing"]?.state, .blocked)
-        XCTAssertEqual(byAlias["migrate"]?.state, .idle)
-        XCTAssertTrue(byAlias["migrate"]?.lastResult?.spoken?.contains("failed") == true)
+        XCTAssertEqual(byAlias["claude-auth"]?.state, .done)
+        XCTAssertEqual(byAlias["codex-docs"]?.state, .done)
+        XCTAssertEqual(byAlias["codex-payments"]?.state, .blocked)
+        XCTAssertEqual(byAlias["claude-migration"]?.state, .idle)
+        XCTAssertTrue(byAlias["claude-migration"]?.lastResult?.spoken?.contains("failed") == true)
         XCTAssertEqual(world.pending?.isAnswerPrompt, true)
-        XCTAssertEqual(world.takeLines().count, 4, "auth, billing's question, migrate, docs")
+        XCTAssertEqual(world.takeLines().count, 4, "claude-auth, claude-migration, codex-payments' question, codex-docs")
+        XCTAssertEqual(Dictionary(uniqueKeysWithValues: world.agents.map { ($0.alias, $0.kind) }),
+                       ["claude-auth": "claude", "codex-payments": "codex", "claude-migration": "claude", "codex-docs": "codex"])
         XCTAssertNil(world.nextStepIn, "the script waits for the user")
 
         // The conversation is folded from the same events the stream carries.
@@ -29,7 +31,7 @@ final class DemoWorldTests: XCTestCase {
         XCTAssertEqual(kinds.filter { $0 == .push }.count, 5)
     }
 
-    func testApproveThenBillingFinishes() throws {
+    func testApproveThenPaymentsFinishes() throws {
         var world = DemoWorld(now: t0)
         world.advance(to: t0.addingTimeInterval(20))
         let id = try XCTUnwrap(world.pending?.id)
@@ -40,33 +42,51 @@ final class DemoWorldTests: XCTestCase {
         XCTAssertEqual(world.history.items.first { $0.pendingID == id }?.resolution, .confirmed)
 
         world.advance(to: t0.addingTimeInterval(29))
-        XCTAssertEqual(world.agents.first { $0.alias == "billing" }?.state, .done)
+        XCTAssertEqual(world.agents.first { $0.alias == "codex-payments" }?.state, .done)
     }
 
-    func testDeclineLeavesBillingIdle() throws {
+    /// The README hero's lines: after the approval, the status leaves out
+    /// the agent just approved; once it finishes, it is back in.
+    func testStatusAfterApproval() throws {
+        var world = DemoWorld(now: t0)
+        world.advance(to: t0.addingTimeInterval(17))
+        XCTAssertEqual(world.takeLines().last?.text, "codex-payments wants to run npm install p-retry. Approve?")
+        try world.answer(pendingID: XCTUnwrap(world.pending?.id), option: 1)
+        world.advance(to: t0.addingTimeInterval(20))
+        XCTAssertEqual(world.ask("What's going on?"), "claude-auth is done, claude-migration failed, codex-docs is still writing.")
+        XCTAssertEqual(world.ask("Why did the migration fail?"), "The column already existed. It rolled back, nothing changed.")
+        world.advance(to: t0.addingTimeInterval(26))
+        XCTAssertEqual(world.ask("What's going on?"), "claude-auth is done, codex-payments is done, claude-migration failed, codex-docs is still writing.")
+    }
+
+    func testDeclineLeavesPaymentsIdle() throws {
         var world = DemoWorld(now: t0)
         world.advance(to: t0.addingTimeInterval(20))
         let said = try world.answer(pendingID: XCTUnwrap(world.pending?.id), option: 2)
         XCTAssertTrue(said.hasPrefix("Declined"))
         world.advance(to: t0.addingTimeInterval(120))
-        XCTAssertEqual(world.agents.first { $0.alias == "billing" }?.state, .idle)
+        XCTAssertEqual(world.agents.first { $0.alias == "codex-payments" }?.state, .idle)
     }
 
     func testQuestions() {
         var world = DemoWorld(now: t0)
         XCTAssertEqual(world.ask("What failed?"), "Nothing has failed so far.")
+        XCTAssertEqual(world.ask("What's going on?"),
+                       "claude-auth is still fixing the login, codex-payments is adding retries, claude-migration is still migrating, codex-docs is still writing.")
         world.advance(to: t0.addingTimeInterval(30))
-        XCTAssertTrue(world.ask("What failed?").contains("users.plan"))
-        XCTAssertTrue(world.ask("What's going on?").contains("billing is waiting for your approval"))
-        XCTAssertTrue(world.ask("What is billing asking?").contains("npm install p-retry"))
-        XCTAssertTrue(world.ask("What did auth do?").contains("42"))
+        XCTAssertEqual(world.ask("What failed?"), "claude-migration failed. The column already existed. It rolled back, nothing changed.")
+        XCTAssertEqual(world.ask("Why did the migration fail?"), "The column already existed. It rolled back, nothing changed.")
+        XCTAssertTrue(world.ask("What's going on?").contains("codex-payments is waiting for your approval"))
+        XCTAssertTrue(world.ask("What is codex-payments asking?").contains("npm install p-retry"))
+        XCTAssertTrue(world.ask("What did claude-auth do?").contains("42"))
+        XCTAssertEqual(world.ask("How is codex-docs doing?"), "codex-docs is still writing the install section of the README.")
         XCTAssertTrue(world.ask("sing me a song").contains("demo"))
         // Said, not tapped: approval by words.
         XCTAssertTrue(world.ask("yes, approve it").hasPrefix("Approved"))
         XCTAssertNil(world.pending)
         let typed = world.history.items.filter { $0.kind == .shepherd }.count
-        XCTAssertEqual(typed, 7)
-        XCTAssertEqual(world.history.items.filter { $0.kind == .dog }.count, 7)
+        XCTAssertEqual(typed, 10)
+        XCTAssertEqual(world.history.items.filter { $0.kind == .dog }.count, 10)
     }
 
     /// The demo asks for speech recognition; iOS kills an app that does so
@@ -79,7 +99,7 @@ final class DemoWorldTests: XCTestCase {
     func testAgentWindow() throws {
         var world = DemoWorld(now: t0)
         world.advance(to: t0.addingTimeInterval(30))
-        let screen = try XCTUnwrap(world.screen(paneID: DemoWorld.billingPane))
+        let screen = try XCTUnwrap(world.screen(paneID: DemoWorld.paymentsPane))
         XCTAssertTrue(screen.text?.contains("npm install p-retry") == true)
         XCTAssertNil(world.screen(paneID: "nope"))
     }
@@ -114,8 +134,8 @@ final class DemoDaemonTests: XCTestCase {
         XCTAssertEqual(state.agents.count, 4)
         let pending = try XCTUnwrap(state.pendingAction)
         XCTAssertEqual(pending.options?.count, 2)
-        XCTAssertEqual(state.agents.first { $0.alias == "auth" }?.state, .done)
-        XCTAssertNotNil(state.agents.first { $0.alias == "auth" }?.lastResult?.at)
+        XCTAssertEqual(state.agents.first { $0.alias == "claude-auth" }?.state, .done)
+        XCTAssertNotNil(state.agents.first { $0.alias == "claude-auth" }?.lastResult?.at)
 
         let page = try await client.conversation()
         XCTAssertTrue(page.items.contains { $0.kind == .approval && $0.pendingID == pending.id })
@@ -128,10 +148,11 @@ final class DemoDaemonTests: XCTestCase {
         } catch DaemonError.pendingGone {}
 
         let reply = try await client.sendUtterance("What's going on?")
-        XCTAssertTrue(reply.spoken?.contains("auth is done") == true)
+        // The storyboard's exact line: the agent just approved is left out.
+        XCTAssertEqual(reply.spoken, "claude-auth is done, claude-migration failed, codex-docs is still writing.")
 
-        let screen = try await client.agentScreen(paneID: "demo-auth", hash: nil)
-        XCTAssertEqual(screen?.alias, "auth")
+        let screen = try await client.agentScreen(paneID: DemoWorld.authPane, hash: nil)
+        XCTAssertEqual(screen?.alias, "claude-auth")
 
         let events = try await client.recentEvents()
         XCTAssertTrue(events.contains { $0.type == "pending.confirmed" })

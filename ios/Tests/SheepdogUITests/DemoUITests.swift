@@ -2,7 +2,7 @@ import XCTest
 
 /// The offline demo, as an App Store reviewer would meet it: no daemon, no
 /// network. From the first-run screen, "Try the demo" shows the scripted
-/// agents; billing's approval can be answered; a suggested question gets an
+/// agents; codex-payments' approval can be answered; a suggested question gets an
 /// answer; Leave returns to the setup.
 final class DemoUITests: XCTestCase {
     override func setUpWithError() throws {
@@ -65,11 +65,11 @@ final class DemoUITests: XCTestCase {
 
         // The scripted agents, in the real Agents pane.
         tapVisible(app.buttons, "main.pane.flock")
-        for alias in ["auth", "billing", "migrate", "docs"] {
+        for alias in ["claude-auth", "codex-payments", "claude-migration", "codex-docs"] {
             XCTAssertTrue(app.descendants(matching: .any)["flock.agent.\(alias)"].waitForExistence(timeout: 10), alias)
         }
 
-        // billing asks after ~16 s; approve it on the card.
+        // codex-payments asks after ~16 s; approve it on the card.
         let approve = app.buttons["approval.option.1"]
         XCTAssertTrue(approve.waitForExistence(timeout: 40))
         shot("demo-approval")
@@ -78,9 +78,9 @@ final class DemoUITests: XCTestCase {
 
         // A suggested question gets the scripted answer in the conversation.
         tapVisible(app.buttons, "main.pane.conversation")
-        app.buttons["demo.question.0"].tap()
-        let answer = app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'auth is done'")).firstMatch
-        XCTAssertTrue(answer.waitForExistence(timeout: 10))
+        tapVisible(app.buttons, "demo.question.0")
+        let answer = app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'claude-auth is done'")).firstMatch
+        XCTAssertTrue(answer.waitForExistence(timeout: 15))
         shot("demo-conversation")
 
         app.buttons["demo.leave"].tap()

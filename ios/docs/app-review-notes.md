@@ -16,15 +16,15 @@ external TestFlight review yet. The CEO decides when to submit.
 > 1. Launch the app. The first screen is "Daemon" setup.
 > 2. Tap **Try the demo** (also in Settings ▸ Try the demo).
 > 3. The demo runs entirely on the device, with no network and no server.
->    Four scripted agents work on a sample project. One finishes, one asks
->    for approval to run a command (about 15 seconds in), one fails, and one
->    finishes later. The voice reads each announcement aloud with on-device
+>    Four scripted agents work on a sample project: claude-auth finishes,
+>    claude-migration fails, codex-payments asks for approval to run a
+>    command (about 15 seconds in), and codex-docs finishes later. The voice reads each announcement aloud with on-device
 >    speech synthesis.
 > 4. Open **Agents** to see the agent list. Tap **Yes, proceed** or **No**
->    on billing's approval card. Tap **Open window** to see an agent's
+>    on codex-payments' approval card. Tap **Open window** to see an agent's
 >    (scripted) terminal.
-> 5. Tap a suggested question under "Demo" ("What's going on?", "What
->    failed?"), type one with the keyboard button, or, where the device
+> 5. Tap a suggested question under "Demo" ("What's going on?", "Why did
+>    the migration fail?"), type one with the keyboard button, or, where the device
 >    supports on-device speech recognition, ask it aloud. The answers are
 >    scripted.
 > 6. Tap **Leave** to return to the normal setup.

@@ -21,9 +21,9 @@ public struct DemoWorld: Sendable {
     /// The questions offered as buttons, and understood when typed or said.
     public static let suggestedQuestions = [
         "What's going on?",
-        "What failed?",
-        "What is billing asking?",
-        "What did auth do?",
+        "Why did the migration fail?",
+        "What is codex-payments asking?",
+        "What did claude-auth do?",
     ]
 
     public static let greeting = "This is the demo. Four scripted agents are working on a sample project, and I'll tell you when one finishes, fails or needs you. Nothing leaves this phone."
@@ -42,25 +42,39 @@ public struct DemoWorld: Sendable {
     private var pendingCount = 0
 
     enum Step: Sendable {
-        case finishAuth, askBilling, failMigrate, finishDocs, finishBilling
+        case finishAuth, askPayments, failMigration, finishDocs, finishPayments
     }
 
-    public static let billingPane = "demo-billing"
+    public static let authPane = "demo-claude-auth"
+    public static let paymentsPane = "demo-codex-payments"
+    public static let migrationPane = "demo-claude-migration"
+    public static let docsPane = "demo-codex-docs"
+
+    /// What a working agent is doing, as the status answer says it (short,
+    /// to be read aloud) and as a question about that agent answers it.
+    private static let doing: [String: (short: String, long: String)] = [
+        authPane: ("is still fixing the login", "is still fixing the login redirect loop."),
+        paymentsPane: ("is adding retries", "is adding retries to the payment webhook."),
+        migrationPane: ("is still migrating", "is still running the database migration on the staging copy."),
+        docsPane: ("is still writing", "is still writing the install section of the README."),
+    ]
 
     public init(now: Date) {
         start = now
         self.now = now
         agents = [
-            Agent(paneID: "demo-auth", alias: "auth", kind: "claude", workspaceLabel: "shop", state: .working, stateSince: now,
-                  currentTask: "Fix the login redirect loop", spoken: "auth"),
-            Agent(paneID: Self.billingPane, alias: "billing", kind: "codex", workspaceLabel: "shop", state: .working, stateSince: now,
-                  currentTask: "Add retries to the payment webhook", spoken: "billing"),
-            Agent(paneID: "demo-migrate", alias: "migrate", kind: "claude", workspaceLabel: "shop", state: .working, stateSince: now,
-                  currentTask: "Run the database migration on the staging copy", spoken: "migrate"),
-            Agent(paneID: "demo-docs", alias: "docs", kind: "codex", workspaceLabel: "shop", state: .working, stateSince: now,
-                  currentTask: "Update the install section of the README", spoken: "docs"),
+            Agent(paneID: Self.authPane, alias: "claude-auth", kind: "claude", workspaceLabel: "shop", state: .working, stateSince: now,
+                  currentTask: "Fix the login redirect loop", spoken: "claude-auth"),
+            Agent(paneID: Self.paymentsPane, alias: "codex-payments", kind: "codex", workspaceLabel: "shop", state: .working, stateSince: now,
+                  currentTask: "Add retries to the payment webhook", spoken: "codex-payments"),
+            Agent(paneID: Self.migrationPane, alias: "claude-migration", kind: "claude", workspaceLabel: "shop", state: .working, stateSince: now,
+                  currentTask: "Run the database migration on the staging copy", spoken: "claude-migration"),
+            Agent(paneID: Self.docsPane, alias: "codex-docs", kind: "codex", workspaceLabel: "shop", state: .working, stateSince: now,
+                  currentTask: "Update the install section of the README", spoken: "codex-docs"),
         ]
-        steps = [(8, .finishAuth), (16, .askBilling), (26, .failMigrate), (36, .finishDocs)]
+        // The migration fails before the approval, so the status answer
+        // after it has news (done, failed, still writing).
+        steps = [(8, .finishAuth), (12, .failMigration), (16, .askPayments), (36, .finishDocs)]
         log(source: "daemon", type: "daemon.start", payload: [:])
         say(Self.greeting, urgency: "normal")
     }
@@ -85,51 +99,51 @@ public struct DemoWorld: Sendable {
     private mutating func run(_ step: Step) {
         switch step {
         case .finishAuth:
-            finish("demo-auth", spoken: "auth finished: the login redirect loop is fixed, and the 42 auth tests pass.",
-                   detail: "The session cookie was set on the wrong path, so every login bounced back to /login. auth moved it to /, added a regression test and ran the auth suite: 42 passed.",
+            finish(Self.authPane, spoken: "claude-auth finished: the login redirect loop is fixed, and the 42 auth tests pass.",
+                   detail: "The session cookie was set on the wrong path, so every login bounced back to /login. claude-auth moved it to /, added a regression test and ran the auth suite: 42 passed.",
                    files: ["app/session.ts", "test/login.test.ts"])
         case .finishDocs:
-            finish("demo-docs", spoken: "docs finished: the README's install section now covers Homebrew and building from source.",
-                   detail: "docs rewrote the install section with two paths, Homebrew and building from source, and checked every command in it.",
+            finish(Self.docsPane, spoken: "codex-docs finished: the README's install section now covers Homebrew and building from source.",
+                   detail: "codex-docs rewrote the install section with two paths, Homebrew and building from source, and checked every command in it.",
                    files: ["README.md"])
-        case .finishBilling:
-            finish(Self.billingPane, spoken: "billing finished: the payment webhook now retries three times with backoff, and its tests pass.",
-                   detail: "billing installed p-retry, wrapped the webhook handler in three retries with exponential backoff, and added two tests for a flaky provider.",
+        case .finishPayments:
+            finish(Self.paymentsPane, spoken: "codex-payments finished: the payment webhook now retries three times with backoff, and its tests pass.",
+                   detail: "codex-payments installed p-retry, wrapped the webhook handler in three retries with exponential backoff, and added two tests for a flaky provider.",
                    files: ["package.json", "src/webhook.ts", "test/webhook.test.ts"])
-        case .failMigrate:
-            update("demo-migrate") { agent, at in
+        case .failMigration:
+            update(Self.migrationPane) { agent, at in
                 agent.state = .idle
                 agent.stateSince = at
                 agent.lastTask = agent.currentTask
                 agent.currentTask = nil
                 agent.lastResult = Agent.Result(
-                    spoken: "migrate failed: the staging migration stopped because the column users.plan already exists.",
-                    detail: "Migration 0042 tried to add users.plan, which an earlier hotfix had already added by hand. Nothing was changed; the migration rolled back. It needs a decision: drop the column first, or mark 0042 as applied.",
+                    spoken: "claude-migration failed: the column users.plan already exists.",
+                    detail: Self.migrationWhy,
                     at: at)
             }
-            say("migrate failed: the staging migration stopped because the column users.plan already exists. Nothing was changed.", urgency: "interrupt")
-        case .askBilling:
+            say("claude-migration failed: the column users.plan already exists. Nothing was changed.", urgency: "interrupt")
+        case .askPayments:
             pendingCount += 1
             let action = PendingAction(
-                id: "demo-ap-\(pendingCount)", paneID: Self.billingPane, kind: "answer_prompt",
-                spokenSummary: "billing asks to run npm install p-retry.",
+                id: "demo-ap-\(pendingCount)", paneID: Self.paymentsPane, kind: "answer_prompt",
+                spokenSummary: "codex-payments asks to run npm install p-retry.",
                 question: "Do you want to run this command?",
                 options: [
                     PendingOption(index: 1, label: "Yes, proceed", keys: ["y"], isDefault: true),
                     PendingOption(index: 2, label: "No, and tell Codex what to do differently", keys: ["esc"]),
                 ],
-                agent: "billing",
-                summary: "billing asks to run npm install p-retry.",
+                agent: "codex-payments",
+                summary: "codex-payments asks to run npm install p-retry.",
                 command: "npm install p-retry"
             )
             pending = action
-            update(Self.billingPane) { agent, at in
+            update(Self.paymentsPane) { agent, at in
                 agent.state = .blocked
                 agent.stateSince = at
                 agent.lastBlock = Agent.Block(question: "Do you want to run npm install p-retry?", seenAt: at, answered: false)
             }
-            log(source: "supervisor", type: "pending.created", pane: Self.billingPane, payload: Self.json(action))
-            say("billing wants to run npm install p-retry, to add a retry library. Approve or decline?", urgency: "interrupt")
+            log(source: "supervisor", type: "pending.created", pane: Self.paymentsPane, payload: Self.json(action))
+            say(Self.askLine, urgency: "interrupt")
         }
     }
 
@@ -156,14 +170,14 @@ public struct DemoWorld: Sendable {
             if !approved {
                 agent.lastTask = agent.currentTask
                 agent.currentTask = nil
-                agent.lastResult = Agent.Result(spoken: "billing did not install the package and is waiting for new instructions.", at: at)
+                agent.lastResult = Agent.Result(spoken: "codex-payments did not install the package and is waiting for new instructions.", at: at)
             }
         }
         if approved {
-            steps.append((now.timeIntervalSince(start) + 8, .finishBilling))
-            return "Approved. billing is installing p-retry; I'll tell you when it's done."
+            steps.append((now.timeIntervalSince(start) + 8, .finishPayments))
+            return "Approved. codex-payments is installing p-retry. I'll tell you when it's done."
         }
-        return "Declined. billing did not install the package and is waiting for new instructions."
+        return "Declined. codex-payments did not install the package and is waiting for new instructions."
     }
 
     /// `POST /api/inject/utterance`: a question typed, tapped or said.
@@ -189,19 +203,25 @@ public struct DemoWorld: Sendable {
         if let action = pending, has("decline", "deny", "reject") || q == "no" || q.hasPrefix("no,") || q.hasPrefix("no ") {
             return (try? answer(pendingID: action.id, option: 2, via: "brain")) ?? "There is nothing to decline right now."
         }
-        if has("fail", "wrong", "error", "broke", "problem") { return failures }
-        if has("ask", "need", "wait", "approv", "billing", "blocked") { return billingStatus }
-        if has("auth", "login") { return detail(of: "demo-auth") }
-        if has("docs", "readme") { return detail(of: "demo-docs") }
-        if has("migrat", "database") { return detail(of: "demo-migrate") }
+        if has("fail", "wrong", "error", "broke", "problem") { return failures(why: has("why")) }
+        if has("ask", "need", "wait", "approv", "payment", "blocked") { return paymentsStatus }
+        if has("auth", "login") { return detail(of: Self.authPane) }
+        if has("docs", "readme") { return detail(of: Self.docsPane) }
+        if has("migrat", "database") { return detail(of: Self.migrationPane) }
         if has("going on", "status", "what's up", "everyone", "agents", "summary", "how", "what") { return status }
-        return "This demo knows a few questions, such as \"What's going on?\" or \"What failed?\". With your own sheepdog daemon you can ask anything about your agents, and tell them what to do."
+        return "This demo knows a few questions, such as \"What's going on?\" or \"Why did the migration fail?\". With your own sheepdog daemon you can ask anything about your agents, and tell them what to do."
     }
 
+    /// The spoken status: one short clause per agent, in a sentence that
+    /// reads well aloud. An agent whose question you answered in the last
+    /// 30 seconds and that is now at work on it is left out: you just heard
+    /// about it.
     private var status: String {
-        let parts = agents.map { agent -> String in
+        let parts = agents.compactMap { agent -> String? in
             switch agent.state {
-            case .working: return "\(agent.alias) is working on \(lowercasedFirst(agent.currentTask ?? "its task"))"
+            case .working:
+                if agent.lastBlock?.answered == true, let since = agent.stateSince, now.timeIntervalSince(since) < 30 { return nil }
+                return "\(agent.alias) \(Self.doing[agent.paneID]?.short ?? "is still working")"
             case .blocked: return "\(agent.alias) is waiting for your approval to run \(pending?.command ?? "a command")"
             case .done: return "\(agent.alias) is done"
             default:
@@ -209,27 +229,38 @@ public struct DemoWorld: Sendable {
                 return "\(agent.alias) is idle"
             }
         }
-        return parts.joined(separator: "; ") + "."
+        return parts.joined(separator: ", ") + "."
     }
 
-    private var failures: String {
+    /// Why the migration failed, as the voice says it.
+    static let migrationWhy = "The column already existed. It rolled back, nothing changed."
+    /// The approval, as the voice asks it (and the notification says it).
+    static let askLine = "codex-payments wants to run npm install p-retry. Approve?"
+
+    /// "Why did … fail?" gets the reason; "What failed?" also names who.
+    private func failures(why: Bool) -> String {
         let failed = agents.filter { $0.lastResult?.spoken?.contains("failed") == true }
         guard !failed.isEmpty else { return "Nothing has failed so far." }
-        return failed.compactMap { $0.lastResult?.detail ?? $0.lastResult?.spoken }.joined(separator: " ")
+        return failed.map { agent in
+            let reason = agent.lastResult?.detail ?? ""
+            return why ? reason : "\(agent.alias) failed. \(reason)"
+        }.joined(separator: " ")
     }
 
-    private var billingStatus: String {
+    private var paymentsStatus: String {
         if let action = pending {
-            return "billing wants to run \(action.command ?? "a command") to add a retry library for the payment webhook. Say approve or decline, or tap a button on the card."
+            return "codex-payments wants to run \(action.command ?? "a command"), to add a retry library to the payment webhook. Say approve or decline, or tap a button on the card."
         }
-        return detail(of: Self.billingPane)
+        return detail(of: Self.paymentsPane)
     }
 
     private func detail(of pane: String) -> String {
         guard let agent = agents.first(where: { $0.paneID == pane }) else { return "I don't know that agent." }
         switch agent.state {
-        case .working: return "\(agent.alias) is still working on \(lowercasedFirst(agent.currentTask ?? "its task"))."
-        case .blocked: return billingStatus
+        case .working:
+            if pane == Self.paymentsPane, agent.lastBlock?.answered == true { return "codex-payments is installing p-retry and adding the retries." }
+            return "\(agent.alias) \(Self.doing[pane]?.long ?? "is still working.")"
+        case .blocked: return paymentsStatus
         default: return agent.lastResult?.detail ?? agent.lastResult?.spoken ?? "\(agent.alias) is idle."
         }
     }
@@ -244,9 +275,9 @@ public struct DemoWorld: Sendable {
         switch (agent.paneID, agent.state) {
         case (_, .working):
             text += "● Reading the code…\n● Editing files…\n"
-        case (Self.billingPane, .blocked):
+        case (Self.paymentsPane, .blocked):
             text += "● I'll add p-retry for the retries.\n\nWould you like to run the following command?\n\n  $ npm install p-retry\n\n› 1. Yes, proceed (y)\n  2. No, and tell Codex what to do differently (esc)\n"
-        case ("demo-migrate", _):
+        case (Self.migrationPane, _):
             text += "$ make migrate-staging\nApplying 0042_add_user_plan…\nERROR: column \"plan\" of relation \"users\" already exists\nRolled back. No changes were made.\n"
         default:
             let files = agent.lastWorkerMessage?.filesTouched ?? []
@@ -309,11 +340,6 @@ public struct DemoWorld: Sendable {
         let event = DaemonEvent(seq: seq, ts: now, source: source, type: type, paneID: pane, payload: payload)
         events.append(event)
         _ = history.fold(event)
-    }
-
-    private func lowercasedFirst(_ s: String) -> String {
-        guard let first = s.first else { return s }
-        return first.lowercased() + s.dropFirst()
     }
 
     static func json<T: Encodable>(_ value: T) -> [String: JSONValue] {
